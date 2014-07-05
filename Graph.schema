@@ -1,0 +1,10 @@
+tstzrange(to_timestamp(service_timestamp_init/1000.0),to_timestamp(service_timestamp_end/1000.0)):Time id_machine-> order_number| onetgeo.service_order 
+tstzrange(to_timestamp(service_timestamp_init/1000.0),to_timestamp(service_timestamp_end/1000.0)):Time id_machine-> operator_number| onetgeo.service_order 
+id_service-> id_machine| onetgeo.services 
+id_service-> tstzrange(to_timestamp(timestamp_init/1000.0),to_timestamp(timestamp_end/1000.0)):Time| onetgeo.services 
+id_machine  tstzrange(to_timestamp(timestamp_init/1000.0),to_timestamp(timestamp_end/1000.0)):Time-> id_service| onetgeo.services 
+id_service-> bounding| onetgeo.services
+operator_number id_client-> id_operator| otmisnet.operators
+order_number id_client-> id_order| otmisnet.order
+id_machine-> id_client| otmisnet.machine 
+
