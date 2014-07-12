@@ -2,7 +2,6 @@
 module Main where
 
 import qualified Data.Foldable as F
-import Data.Functor.Identity
 import Data.Foldable (Foldable)
 import Data.Char ( isAlpha )
 import Data.Maybe
@@ -20,7 +19,7 @@ import System.Environment ( getArgs )
 import Text.Parsec
 import Text.Parsec.String
 import Text.Printf ( printf )
-import Debug.Trace (trace)
+import Debug.Trace 
 
 data Vertex a  = Product  { unProduct :: [a]}
               deriving(Eq,Show,Ord,Functor,Foldable)
@@ -30,42 +29,43 @@ data Edge a b = Edge (Vertex a) (Vertex a) b
 
 
 
-joinQueryFilterSet (FilterF (filters , From b _)) = " FROM " <>  filterTable filters b
-joinQueryFilterSet (FilterF (filters , Join b _ r p )) = joinQueryFilterSet p <>  " JOIN " <> filterTable filters b <>  joinPredicate (S.toList r ) b 
+--joinQueryFilterSet (FilterF (filters , From b _)) = " FROM " <>  filterTable filters b
+--joinQueryFilterSet (FilterF (filters , Join b _ r p )) = joinQueryFilterSet p <>  " JOIN " <> filterTable filters b <>  joinPredicate (S.toList r ) b 
     
+filterTable [] b =  b 
 filterTable filters b =  "(SELECT *  FROM " <> b <>  " WHERE " <> intercalate " AND " (fmap renderFilter filters)  <> ") as " <> b
-joinPredicate r b = " ON " <> intercalate " AND " ( fmap (\(t,f) ->  t <> "." <> keyValue f <> " = " <> b <> "." <> keyValue f )  r )
+joinPredicate r b = " ON " <> intercalate " AND " ( fmap (\(t,f) -> show t <> "." <> keyValue f <> " = " <> show b <> "." <> keyValue f )  r )
 
-joinQuerySet (From b _) =  " FROM " <> b 
-joinQuerySet (Join b _ r (Identity p) ) = joinQuerySet p <>  " JOIN " <> b <> joinPredicate (S.toList r) b 
+joinQuerySet (From b f  _) =  " FROM " <>  filterTable (fmap (\(k,f) -> (show b,k,f) ) f ) (show b )
+joinQuerySet (Join b f  _ r (p) ) = joinQuerySet p <>  " JOIN " <> filterTable (fmap (\(k,f) -> (show b,k,f) ) f ) (show b) <> joinPredicate (S.toList r) (show b )
 
 
-data JoinPath f b a 
-    = From b (Set a)
-    | Join b (Set a) (Set (b ,a)) (f (JoinPath f b a))
-    -- deriving(Show)
+data JoinPath b a 
+    = From  b [(a,Filter)] (Set a)
+    | Join b [(a,Filter)] (Set a) (Set (b ,a)) (JoinPath b a)
+    deriving(Eq,Ord,Show)
 
-addJoin :: (Ord b,Ord a) => b -> [a] -> JoinPath Identity b a -> JoinPath Identity b a
+addJoin :: (Ord b,Ord a) => b -> [a] -> JoinPath b a -> JoinPath b a
 addJoin tnew f p = case mapPath tnew f p of
-            Left accnew -> Join tnew (S.fromList f) (S.fromList accnew) (Identity p )
+            Left accnew -> Join tnew [] (S.fromList f) (S.fromList accnew) (p )
             Right i -> i
     where 
-        mapPath tnew f (From t s ) =  if t == tnew
-                then  (Right $ From t snew )
+        mapPath tnew f (From t fi  s ) =  if t == tnew
+                then  (Right $ From t fi snew )
                 else  (Left $ fmap (t,) $ filter ((flip S.member) s) f)
             where snew =  foldr S.insert  s f
-        mapPath tnew  f (Join t s clause (Identity p) ) = res 
+        mapPath tnew  f (Join t fi s clause (p) ) = res 
             where  res = case mapPath tnew f p  of
-                    Right pnew  -> Right $ Join t s (foldr S.insert clause ((fmap (tnew,) $ filter ((flip S.member) s) f))) (Identity pnew)
+                    Right pnew  -> Right $ Join t fi  s (foldr S.insert clause ((fmap (tnew,) $ filter ((flip S.member) s) f))) (pnew)
                     Left accnew -> if t == tnew 
-                        then Right $ Join t  (foldr S.insert  s f)  (foldr S.insert  clause accnew ) (Identity p)
+                        then Right $ Join t  fi  (foldr S.insert  s f)  (foldr S.insert  clause accnew ) (p)
                         else Left $ (fmap (t,) $ filter ((flip S.member) s) f) <> accnew
 
-joinSet :: (Ord b,Ord a) => [Path  a b] -> Maybe (JoinPath  Identity b a )
+joinSet :: (Ord b,Ord a) => [Path  a b] -> Maybe (JoinPath  b a )
 joinSet p = foldr joinPath Nothing p
 
 joinPath (DirectPath (Edge i j ll)) (Just p)  = Just $  addJoin  ll ( unProduct i <>  unProduct j)  p 
-joinPath (DirectPath (Edge i j ll)) Nothing  =  Just $ From ll (S.fromList ( unProduct i <> unProduct j))  
+joinPath (DirectPath (Edge i j ll)) Nothing  =  Just $ From ll  [] (S.fromList ( unProduct i <> unProduct j))  
 joinPath (ProductPath l  k) m = foldl (flip joinPath)  m  (l ++  [k])
 
 
@@ -78,7 +78,7 @@ data Path a b = DirectPath (Edge a b)
 
 
 data Graph a = Graph { vertices :: [Vertex a]
-                     , edges :: [(Path a String, Edge a String)] }
+                     , edges :: [(Path a Table, Edge a Table)] }
 
 instance (Show a) => Show (Graph a) where
     show g = printf "Vertices: %s\nEdges:\n%s"
@@ -94,7 +94,7 @@ data Key
     , keyType :: String 
     }deriving(Eq,Ord,Show) 
 
-edgeK :: Parser (Edge Key String)
+edgeK :: Parser (Edge Key Table)
 edgeK = do
   let valid = noneOf ('\n':" -|")
   i <- (fmap (uncurry Key . break (==':')) $ many1 valid) `sepBy1` spaces
@@ -103,19 +103,9 @@ edgeK = do
   string "|" >> spaces
   o <- many1 valid 
   spaces
-  return $ Edge (Product $ sort $ i)  (Product $ sort  $ v) o 
+  return $ Edge (Product $ sort $ i)  (Product $ sort  $ v) (Raw o) 
 
 
-edgeP :: Parser (Edge String String)
-edgeP = do
-  let valid = noneOf ('\n':" -|")
-  i <- (many1 valid) `sepBy1` spaces
-  string "->" >> spaces
-  v <- (many1 valid) `sepBy1` spaces
-  string "|" >> spaces
-  o <- many1 valid 
-  spaces
-  return $ Edge (Product $ sort i)  (Product $ sort v) o 
 
 
 
@@ -168,7 +158,7 @@ nested ::  (Path a b, Edge a b) -> [(a, [(a, [Path a b])])]
 nested (p,Edge (Product x) (Product y)  o) = fmap (,fmap (,[p]) y) x
 
 
-hashGraph  :: Ord a => Graph a -> Map a (Map a [(Path a String)])
+hashGraph  :: Ord a => Graph a -> Map a (Map a [(Path a Table)])
 hashGraph = M.map (M.fromListWith (++)) .  M.fromListWith (++)  . concat . fmap nested . edges 
 
 find norm end m = case M.lookup norm m of
@@ -179,14 +169,6 @@ queryHash :: Ord a => [a] -> Map a (Map a b) -> a  -> [Maybe b]
 queryHash filters schema  base =  map (\f-> find base f schema)  filters 
 
 
-{-
-data Table 
-    = Raw [Vertex String]  [Attribute]
-    | Filtered Table [Filter]
-    | Grouped Table (([Vertex String],[Attribute]) -> [Vertex String]) (([Vertex String],[Attribute]) -> [Attribute])
-    | Sorted Table [Vertex String -> Vertex String]
-    -- | Join  [Table]
--}
 
 
 data Aggregate a 
@@ -202,58 +184,56 @@ data Filter
    = Category (Set Int)
    | And [Filter]
    | Or [Filter]
+   deriving(Eq,Ord,Show)
    
 
 -- Pretty Print Filter
 renderFilter (table,name,Category i) = table  <> "." <> keyValue name <> " IN( " <>  intercalate "," (fmap show $ S.toList i) <> ")"
 renderFilter (table,name,And i) =  intercalate " AND "  (fmap (renderFilter . (table,name,)) i)
 
--- Expand Filter list for outside where clause
-generateSpecialized  f (From t s) =  catMaybes $ fmap (\i -> fmap (t,i,) . (flip M.lookup) f $ i ) (S.toList s)
-generateSpecialized  f (Join t s r (Identity p) ) = (catMaybes $ fmap (\ i -> fmap (t,i,). (flip M.lookup) f $ i) (S.toList s)) <> generateSpecialized f p  
 
 data FilterF a = FilterF ([(String,Key,Filter )],a)
 
 -- Label each table with filter clauses
 specializeJoin
   :: Map Key Filter
-    -> JoinPath Identity String Key
-    -> FilterF (JoinPath FilterF String Key)
-specializeJoin f (From t s) =  FilterF (catMaybes $ fmap (\i -> fmap (t,i,) . (flip M.lookup) f $ i ) (S.toList s), (From t s))
-specializeJoin f (Join t s r (Identity p) ) = FilterF (catMaybes $ fmap (\ i -> fmap (t,i,). (flip M.lookup) f $ i) (S.toList s) , Join t s r  (specializeJoin f p))
+    -> JoinPath Table Key
+    -> JoinPath Table Key
+specializeJoin f (From t fi s) =  From t (catMaybes ( fmap (\i -> fmap (i,) . (flip M.lookup) f $ i ) (S.toList s) ) <> fi) s
+specializeJoin f (Join t fi s r (p) ) =  Join t (catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList s))  <> fi ) s r  (specializeJoin f p)
 
 
 search attributes =  filter (any (\i -> any (== i) attributes) . snd ) 
 
-data Table f  
-    =  Base Key (JoinPath f String Key)
-    |  Project Key (Set String) (JoinPath f String Key)
-    |  Reduce (Set Key) (Set (Aggregate String) ) (Maybe (JoinPath f String Key)) (Table f ) 
+data Table 
+    =  Base Key (JoinPath Table Key)
+    |  Raw String
+    |  Project Key (Set String) Table
+    |  Reduce (Set Key) (Set (Aggregate String) )  Table 
+    deriving(Eq,Ord,Show)
 
 
 type HashSchema  a b = Map a (Map a [Path a b ])
 
-traceShow a = trace (show a ) a
 
 createAggregate  schema key attr  old
-    = Reduce (S.fromList key) (S.fromList attr) Nothing (addAggregate schema  key attr old ) 
+    = Reduce (S.fromList key) (S.fromList attr) (addAggregate schema  key attr old ) 
 
 addAggregate
-  :: HashSchema Key String
-     -> [Key] -> [Aggregate String] -> Table Identity -> Table Identity
+  :: HashSchema Key Table 
+     -> [Key] -> [Aggregate String] -> Table -> Table 
 addAggregate schema key attr (Base k s) =   case concat $  catMaybes $ queryHash key  schema k  of
                         [] -> Base k  s  
                         l -> Base k  (fromJust $ foldr joinPath  (Just s) l) 
-addAggregate schema key attr (Reduce j t s p) =  case concat $ concat $ fmap (\ki -> catMaybes $  queryHash key  schema ki)  (S.toList j)  of
-                        [] -> Reduce (foldr S.insert j key) (foldr S.insert t attr) s  (addAggregate schema key attr p )
-                        l -> Reduce  j t  (foldr joinPath  s l) p
+addAggregate schema key attr (Reduce j t  p) =  case concat $ concat $ fmap (\ki -> catMaybes $  queryHash key  schema ki)  (S.toList j)  of
+                        [] -> Reduce (foldr S.insert j key) (foldr S.insert t attr)  (addAggregate schema key attr p )
+                        l -> Reduce  j t  p
 
 showAggregate (Base k s) = joinQuerySet s 
-showAggregate (Reduce j t (Just s)  p) =  "REDUCE(" <> show j <> show t <> joinQuerySet s <>  " JOIN (" <>  showAggregate p <>") as ctx0 "
-showAggregate (Reduce j t Nothing  p) =  "(SELECT " <> intercalate "," (fmap (keyValue) (S.toList j)  <> fmap renderAggr (S.toList t ) )   <>  showAggregate p  <> " GROUP BY " <> intercalate "," (fmap (keyValue) (S.toList j) )  <> ") as ctx0"
+showAggregate (Reduce j t p) =  "(SELECT " <> intercalate "," (fmap (keyValue) (S.toList j)  <> fmap renderAggr (S.toList t ) )   <>  showAggregate p  <> " GROUP BY " <> intercalate "," (fmap (keyValue) (S.toList j) )  <> ") as ctx0"
 
-showJoinPath (From i j) = show i <> show j
-showJoinPath (Join j t s p ) = show j <> show t <> show s <>   runIdentity (fmap showJoinPath p)
+showJoinPath (From i _ j) = show i <> show j
+showJoinPath (Join j _ t s p ) = show j <> show t <> show s <>   showJoinPath p
 
 renderAggr (Aggregate l s )  = s  <> "(" <> intercalate "," l <> ")" 
 
@@ -262,26 +242,26 @@ reduce
      -> [Aggregate [Char]]
      -> [(Key, Filter)]
      -> Key
-     -> Map Key (Map Key [Path Key String])
+     -> Map Key (Map Key [Path Key Table])
      -> [Char]
 reduce group aggr filters base  schema = specialized 
     where 
         attributes = nub $ concat $ fmap (\(Aggregate l _) -> l) aggr
         result = queryHash (fmap fst filters <> fmap fst group <> fmap fst  (search attributes attributesTable ) ) schema base
         Just t = joinSet $ concat $ catMaybes result 
-        specialized = " SELECT " <> intercalate "," (fmap (keyValue.fst) group  <> fmap renderAggr aggr ) <> joinQueryFilterSet (specializeJoin (M.fromList filters)  t)  <> " GROUP BY " <> intercalate "," (fmap (keyValue . fst) group) 
+        specialized = " SELECT " <> intercalate "," (fmap (keyValue.fst) group  <> fmap renderAggr aggr ) <> joinQuerySet (specializeJoin (M.fromList filters)  t)  <> " GROUP BY " <> intercalate "," (fmap (keyValue . fst) group) 
 
 project
   :: [[Char]]
      -> [(Key, Filter)]
      -> Key
-     -> Map Key (Map Key [Path Key String])
+     -> Map Key (Map Key [Path Key Table])
      -> [Char]
 project attributes filters base  schema = specialized 
     where 
         result = queryHash (fmap fst filters <> fmap fst  (search attributes attributesTable ) ) schema base
         Just t = joinSet $ concat $ catMaybes result 
-        specialized = " SELECT " <> intercalate "," attributes   <> joinQueryFilterSet (specializeJoin (M.fromList filters)  t) 
+        specialized = " SELECT " <> intercalate "," attributes   <> joinQuerySet (specializeJoin (M.fromList filters)  t) 
 
 attributesTable =
     [(cat "id_service",["timerange","bounding"])
@@ -303,5 +283,5 @@ main = do
   let schema = hashGraph . warshall  $ graph 
   print $ project  ["timerange","bounding","machine_name"] [(cat "id_machine",Category (S.fromList [1,2,3]))] (cat "id_service") schema
   print $ reduce [(cat "id_operator","")] [Aggregate ["timerange"] "min"] [(cat "id_machine",Category (S.fromList [1,2,3]))] (cat "id_service") schema
-  putStrLn $ showAggregate $ createAggregate schema [cat "id_operator" ] [Aggregate ["timerange"] "MIN"] (Base (cat  "id_service") (From  "onetgeo.services" (S.singleton (cat "id_service" )) )) 
+  putStrLn $ showAggregate $ createAggregate schema [cat "id_operator" ] [Aggregate ["timerange"] "MIN"] (Base (cat  "id_service") (From  (Raw "onetgeo.services") [] (S.singleton (cat "id_service" )) )) 
 
