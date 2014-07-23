@@ -1,4 +1,3 @@
-id_machine timerange-> order_number| onetgeo.service_order 
 id_machine timerange-> operator_number| onetgeo.service_order 
 id_service-> id_machine| onetgeo.services 
 id_service-> timerange| onetgeo.services 
