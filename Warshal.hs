@@ -29,14 +29,15 @@ data Vertex a  = Product  { unProduct :: [a]}
 instance (Show a ) => Show (Vertex a) where
   show (Product i) = intercalate ","  $ fmap show i
 
-data Edge a b = Edge (Vertex a) (Vertex a) b
+data Edge a b = Edge { hedge :: (Vertex a)
+                     , tedge :: (Vertex a)
+                     , tag ::  b}
+              | ProductPath [Edge a b] [Edge a b]
             deriving(Eq,Ord,Functor,Foldable)
-
 
 instance (Show a, Show b) => Show (Edge a b) where
     show (Edge x y o) = printf "%s-> %s| %s " (show x) (show y) (show o)
-
-
+    show (ProductPath x y ) = printf "%s-> %s" (intercalate  "," $ fmap show x) (intercalate "," $ fmap show y)
 
 filterTable [] b =  show b
 filterTable filters b =  "(SELECT *  FROM " <> show b <>  " WHERE " <> intercalate " AND " (fmap renderFilter filters)  <> ") as " <> show b
@@ -54,12 +55,12 @@ data JoinPath b a
 
 data Table
     =  Base Key (JoinPath Table Key)
-    |  Raw String
+    |  Raw String String
     |  Project (Set Attribute) Table
     |  Reduce (Set Key) (Set (Aggregate Attribute) )  Table
     deriving(Eq,Ord)
 
-showTable (Raw s) = s
+showTable (Raw s t) = s <> "." <> t
 showTable (Base k p) =   joinQuerySet p
 showTable (Project s t) = "SELECT " <> intercalate ","  (fmap renderAttribute $ S.toList s)  <>  showTable t
 showTable (Reduce j t p) =  "(SELECT " <> intercalate "," (fmap (keyValue) (S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <>  showTable p  <> " GROUP BY " <> intercalate "," (fmap (keyValue) (S.toList j) )  <> ") as ctx0"
@@ -84,28 +85,26 @@ addJoin tnew f p = case mapPath tnew f p of
                         then Right $ Join t  fi  (foldr S.insert  s f)  (foldr S.insert  clause accnew ) (p)
                         else Left $ (fmap (t,) $ filter ((flip S.member) s) f) <> accnew
 
-joinSet :: (Ord b,Ord a) => [Path  a b] -> Maybe (JoinPath  b a )
+joinSet :: (Ord b,Ord a) => [Edge a b] -> Maybe (JoinPath  b a )
 joinSet p = foldr joinPath Nothing p
 
-joinPath (DirectPath (Edge i j ll)) (Just p)  = Just $  addJoin  ll ( unProduct i <>  unProduct j)  p
-joinPath (DirectPath (Edge i j ll)) Nothing  =  Just $ From ll  [] (S.fromList ( unProduct i <> unProduct j))
+joinPath ((Edge i j ll)) (Just p)  = Just $  addJoin  ll ( unProduct i <>  unProduct j)  p
+joinPath ((Edge i j ll)) Nothing  =  Just $ From ll  [] (S.fromList ( unProduct i <> unProduct j))
 joinPath (ProductPath l  k) m = foldl (flip joinPath)  m  (l <> k)
 
 
 
-data Path a b = DirectPath (Edge a b)
-            | ProductPath [Path a b] [Path a b]
-            deriving(Show, Eq,Ord,Functor,Foldable)
 
 
-
-data Graph a = Graph { vertices :: [Vertex a]
-                     , edges :: [(Path a Table, Edge a Table)] }
+data Graph a = Graph { hvertices :: [Vertex a]
+                     , tvertices :: [Vertex a]
+                     , edges :: [(Edge a Table, Edge a Table)] }
                      deriving(Eq)
 
 instance (Show a) => Show (Graph a) where
-    show g = printf "Vertices: %s\nEdges:\n%s"
-                    (unwords . map show $ vertices g)
+    show g = printf "Inputs: %s\nOutputs: %s\nEdges:\n%s"
+                    (unwords . map show $ hvertices g)
+                    (unwords . map show $ tvertices g)
                     (unlines . map showEdge $ edges g)
         where
           showVertice (Product x ) = show x
@@ -129,7 +128,7 @@ edgeK = do
   string "|" >> spaces
   o <- many1 valid
   spaces
-  return $ Edge (Product $ sort $ i)  (Product $ sort  $ v) (Raw o)
+  return $ Edge (Product $ sort $ i)  (Product $ sort  $ v) ((\(i,j)->Raw  i (tail j) ) $ break (=='.') o)
 
 
 
@@ -140,8 +139,9 @@ readGraph fp = do
   r <- parseFromFile (many1 edgeK) fp
   case r of
     Left err -> error (show err)
-    Right es -> return $ Graph { edges = fmap (\g ->(DirectPath g, g)) es
-                              , vertices = nub . concat . map flatEdge $ es }
+    Right es -> return $ Graph { edges = fmap (\g ->(g, g)) es
+                              , hvertices = nub .  map hedge $ es
+                              , tvertices = nub .  map tedge $ es  }
 
 flatEdge (Edge x y o) =  [x,y]
 
@@ -159,31 +159,65 @@ typeEquals ms k1 k2
                 Nothing -> keyValue k1 == keyValue k2
           sequal s a b =  S.member a s && S.member b s
 
-addEdge ::  Edge Key Table -> Graph Key -> Graph Key
-addEdge e@(Edge  pp pd o) g = Graph { edges = sortNub $ go nvertices (trace ("intersectss" <> show (fmap snd intersects) ) intersects ) $ go nvertices [ne]  (ne :edges g)
-                   , vertices = nvertices }
+mergeGraph :: Graph Key -> Graph Key -> Graph Key
+mergeGraph i k = Graph { hvertices = nub $ sort $ hvertices i <>  hvertices k
+                       , tvertices = nub $ sort $ tvertices i <> tvertices k
+                       , edges = go hiedges (go tiedges (edges k) ) <> go tkedges (go hkedges (edges i))
+                       }
     where
-      ne =  (DirectPath e,e)
-      intersects = filter (\(_,(Edge (Product h) (Product t)  _ ))-> intersectsOne h (unProduct pd) ||  intersectsOne t (unProduct pp) ) (edges g)
-      intersectsOne :: [Key] -> [Key] -> Bool
-      intersectsOne u p = or (fmap (\x -> elem x p) u)
-      nvertices = sort $ nub $ pd : pp : vertices g
-      nubEdges = nubBy (\(x,y)(i,j)-> y == j)
-      sortEdges = sortBy (\(x,y)(i,j)-> compare y j)
-      sortNub = nubEdges . sortEdges
-      go [] nes  es = nes <> es
-      go ves []  es = es
-      go (v:ves) nes es = go ves nees nonDup
+      linter = (S.fromList $ hvertices k) `S.intersection` (S.fromList $ tvertices i)
+      rinter = (S.fromList $ tvertices k) `S.intersection` (S.fromList $ hvertices i)
+      redges = snd
+      tiedges =  filter ((`S.member` linter) . tedge . redges) (edges i)
+      hiedges =  filter ((`S.member` linter) . hedge . redges)  (edges k)
+      tkedges =  filter ((`S.member` linter) . tedge . redges)  (edges k)
+      hkedges =  filter ((`S.member` linter) . hedge . redges)  (edges i)
+      go []  es = es
+      go nes es = go nees nonDup
          where
             nonDup = sortNub $ nees <> es
             nees =  traceShowId  $  sortNub
-                [(ProductPath (fmap fst items) [p3] ,Edge (Product (head $ fmap (edgeT . snd ) items) ) (Product d) (Raw "")) |
+                [(ProductPath (fmap fst items) [p3] ,Edge (Product (head $ fmap (edgeT . snd ) items) ) (Product d) (Raw "" "")) |
                 (p3,Edge  (Product p) (Product d) o) <- nes ,
                 items <-  replicateM (length p) es ,
                 (sort . concat $ fmap (edgeH . snd) items)  ==  p ,
                 allTheSame (==)  (fmap(edgeT . snd) items) ,
                 all (not . (==d)) (fmap(edgeT . snd) items) ]
-                <> [(ProductPath [p3] (fmap fst items) ,Edge (Product p) (Product (head $ fmap (edgeH . snd ) items) ) (Raw "") ) |
+                <> [(ProductPath [p3] (fmap fst items) ,Edge (Product p) (Product (head $ fmap (edgeH . snd ) items) ) (Raw "" "" ) ) |
+                (p3,Edge  (Product p) (Product d) o) <- nes ,
+                items <-  replicateM (length d) es ,
+                (sort . concat $ fmap (edgeT . snd) items)  ==  d ,
+                allTheSame (==)  (fmap(edgeH . snd) items) ,
+                all (not . (==p)) (fmap(edgeH . snd) items) ]
+            edgeH (Edge _ (Product k) _ ) = k
+            edgeT (Edge (Product i) _ _ ) = i
+
+nubEdges = nubBy (\(x,y)(i,j)-> y == j)
+sortEdges = sortBy (\(x,y)(i,j)-> compare y j)
+sortNub = nubEdges . sortEdges
+
+
+addEdge ::  Edge Key Table -> Graph Key -> Graph Key
+addEdge e@(Edge  pp pd o) g = Graph { edges = sortNub $ go (trace ("intersectss" <> show (fmap snd intersects) ) intersects ) $ go [ne]  (ne :edges g)
+                   , hvertices = pp : hvertices g
+                   , tvertices = pd : tvertices g }
+    where
+      ne =  (e,e)
+      intersects = filter (\(_,(Edge (Product h) (Product t)  _ ))-> intersectsOne h (unProduct pd) ||  intersectsOne t (unProduct pp) ) (edges g)
+      intersectsOne :: [Key] -> [Key] -> Bool
+      intersectsOne u p = or (fmap (\x -> elem x p) u)
+      go []  es = es
+      go nes es = go nees nonDup
+         where
+            nonDup = sortNub $ nees <> es
+            nees =  traceShowId  $  sortNub
+                [(ProductPath (fmap fst items) [p3] ,Edge (Product (head $ fmap (edgeT . snd ) items) ) (Product d) (Raw "" "")) |
+                (p3,Edge  (Product p) (Product d) o) <- nes ,
+                items <-  replicateM (length p) es ,
+                (sort . concat $ fmap (edgeH . snd) items)  ==  p ,
+                allTheSame (==)  (fmap(edgeT . snd) items) ,
+                all (not . (==d)) (fmap(edgeT . snd) items) ]
+                <> [(ProductPath [p3] (fmap fst items) ,Edge (Product p) (Product (head $ fmap (edgeH . snd ) items) ) (Raw "" "") ) |
                 (p3,Edge  (Product p) (Product d) o) <- nes ,
                 items <-  replicateM (length d) es ,
                 (sort . concat $ fmap (edgeT . snd) items)  ==  d ,
@@ -194,12 +228,13 @@ addEdge e@(Edge  pp pd o) g = Graph { edges = sortNub $ go nvertices (trace ("in
 
 
 warshall ::  Graph Key -> Graph Key
-warshall g = Graph { edges = sort $ go (vertices g) (edges g)
-                   , vertices = sort $ nub $ vertices g }
+warshall g = Graph { edges = sort $ go (nub $ sort $ hvertices g<> tvertices g) (edges g)
+                   , hvertices = sort $ nub $ hvertices g
+                   , tvertices = sort $ nub $ tvertices g }
     where
       go [] es     = es
       go (v:vs) es = go vs (nubBy (\(x,y)(i,j)-> y == j) (es
-         <> [(ProductPath (fmap fst items) [p3],Edge (Product (head $ fmap (edgeT . snd ) items) ) (Product d) (Raw "")) |
+         <> [(ProductPath (fmap fst items) [p3],Edge (Product (head $ fmap (edgeT . snd ) items) ) (Product d) (Raw "" "")) |
                 (p3,Edge  (Product p) (Product d) o) <- es ,
                 items <-  replicateM (length p) es ,
                 (sort . concat $ fmap (edgeH . snd) items)  ==  p ,
@@ -214,11 +249,11 @@ allTheSame ::  (a -> a -> Bool) ->  [a] -> Bool
 allTheSame  f xs = and $ map (f ( head xs)) (tail xs)
 
 
-nested ::  (Path a b, Edge a b) -> [(a, [(a, [Path a b])])]
+nested ::  (Edge a b, Edge a b) -> [(a, [(a, [Edge a b])])]
 nested (p,Edge (Product x) (Product y)  o) = fmap (,fmap (,[p]) y) x
 
 
-hashGraph  :: Ord a => Graph a -> Map a (Map a [(Path a Table)])
+hashGraph  :: Ord a => Graph a -> Map a (Map a [(Edge a Table)])
 hashGraph = M.map (M.fromListWith (++)) .  M.fromListWith (++)  . concat . fmap nested . edges
 
 find norm end m = case M.lookup norm m of
@@ -275,7 +310,7 @@ specializeJoin f (Join t fi s r (p) ) =  (ms1,Join t ( ff <> fi ) s r ss)
 
 
 
-type HashSchema  a b = Map a (Map a [Path a b ])
+type HashSchema  a b = Map a (Map a [Edge a b ])
 
 
 createAggregate  schema key attr  old
@@ -358,6 +393,7 @@ newtype QueryT a
 
 runQuery t s =  snd $ snd $ runState ( runQueryT t) s
 
+
 main :: IO ()
 main = do
   -- [f] <- getArgs
@@ -365,21 +401,19 @@ main = do
   print "Query"
   graph <-  readGraph f
   graph2 <-  readGraph "Graph2.schema"
-  let g2 = (addEdge (Edge (Product [cat "id_machine",cat "timerange"] )(Product [cat "order_number"]) (Raw "otmisnet.service_order") ) $ g3)
+  let g2 = (addEdge (Edge (Product [cat "id_machine",cat "timerange"] )(Product [cat "order_number"]) (Raw "otmisnet" "service_order") ) $ g3)
       g1 = warshall graph
       g3 = warshall graph2
-  --print $ vertices g1
-  --print $ vertices g2
-  print  $ vertices g1 == vertices g2
+  print  $ hvertices g1 == hvertices g2
+  print  $ tvertices g1 == tvertices g2
   print $ g1
   print $ g2
-  --print $ g3
   print $ length $ edges g1
   print $ length $ edges g2
-  --print $ length $ edges g3
+  print $ length $ edges g3
   print $ edges g1 == edges g2
   let schema = hashGraph  g1
-      baseTable= Base (cat "id_service")$  From  (Raw "onetgeo.services") [] (S.singleton (cat "id_service" ))
+      baseTable= Base (cat "id_service")$  From  (Raw "onetgeo""services") [] (S.singleton (cat "id_service" ))
   print $  runQuery
     (do
       predicate  [(cat "id_machine", Category $ S.fromList [1,2,3])]
@@ -388,5 +422,5 @@ main = do
   print $ runQuery
     (do
       predicate  [(cat "id_machine", Category $ S.fromList [1,2,3]),(cat "id_order" , Category $ S.fromList [9,8])]
-      reduce [(cat "id_operator")] [Aggregate [Metric "timerange"] "min"]
+      reduce [(cat "id_operator"),cat "id_contour"] [Aggregate [Metric "timerange"] "min"]
     ) (schema ,baseTable)

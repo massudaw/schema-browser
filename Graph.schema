@@ -1,8 +1,10 @@
 id_machine timerange-> order_number| onetgeo.service_order 
 id_machine timerange-> operator_number| onetgeo.service_order 
+id_machine timerange-> bounding| onetgeo.service_order 
 id_service-> id_machine| onetgeo.services 
 id_service-> timerange| onetgeo.services 
 id_service-> bounding| onetgeo.services
 operator_number id_client-> id_operator| otmisnet.operators
 order_number id_client-> id_order| otmisnet.order
 id_machine-> id_client| otmisnet.machine 
+bounding timerange-> id_contour| otmisnet.contour
