@@ -42,7 +42,7 @@ instance (Show a, Show b) => Show (Edge a b) where
 filterTable [] b =  show b
 filterTable filters b =  "(SELECT *  FROM " <> show b <>  " WHERE " <> intercalate " AND " (fmap renderFilter filters)  <> ") as " <> show b
 
-joinPredicate r b = " ON " <> intercalate " AND " ( fmap (\(t,f) -> show t <> "." <> keyValue f <> " = " <> show b <> "." <> keyValue f )  r )
+joinPredicate r b = " ON " <> intercalate " AND " ( fmap (\(t,f) -> (table t) <> "." <> keyValue f <> " = " <> (table b) <> "." <> keyValue f )  r )
 
 joinQuerySet (From b f  _) =  " FROM " <>  filterTable (fmap (\(k,f) -> (b,k,f) ) f ) b
 joinQuerySet (Join b f  _ r (p) ) = joinQuerySet p <>  " JOIN " <> filterTable (fmap (\(k,f) -> (b,k,f) ) f ) b <> joinPredicate (S.toList r) b
@@ -55,7 +55,7 @@ data JoinPath b a
 
 data Table
     =  Base Key (JoinPath Table Key)
-    |  Raw String String
+    |  Raw { schema :: String , table :: String}
     |  Project (Set Attribute) Table
     |  Reduce (Set Key) (Set (Aggregate Attribute) )  Table
     deriving(Eq,Ord)
@@ -291,8 +291,8 @@ data Filter
 
 
 -- Pretty Print Filter
-renderFilter (table,name,Category i) = show table  <> "." <> keyValue name <> " IN( " <>  intercalate "," (fmap show $ S.toList i) <> ")"
-renderFilter (table,name,And i) =  intercalate " AND "  (fmap (renderFilter . (table,name,)) i)
+renderFilter (Raw _ table ,name,Category i) = table <> "." <> keyValue name <> " IN( " <>  intercalate "," (fmap show $ S.toList i) <> ")"
+renderFilter (table ,name,And i) =  intercalate " AND "  (fmap (renderFilter . (table ,name,)) i)
 
 
 
