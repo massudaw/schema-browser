@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables,NoMonomorphismRestriction,DeriveFunctor,GeneralizedNewtypeDeriving,FlexibleContexts,DeriveFoldable ,TupleSections #-}
+{-# LANGUAGE ScopedTypeVariables,BangPatterns,NoMonomorphismRestriction,DeriveFunctor,GeneralizedNewtypeDeriving,FlexibleContexts,DeriveFoldable ,TupleSections #-}
 module Warshal where
 
 import qualified Data.Foldable as F
@@ -10,7 +10,7 @@ import Control.Monad
 import GHC.Exts
 import Data.Tuple
 import Control.Applicative
-import Data.List ( nubBy,nub, sort,intercalate,sortBy,isInfixOf )
+import Data.List ( nubBy,nub, sort,intercalate,sortBy,isInfixOf ,transpose)
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
@@ -23,47 +23,41 @@ import Text.Parsec.String
 import Text.Printf ( printf )
 import Debug.Trace
 
-data Vertex a  = Product  { unProduct :: [a]}
-              deriving(Eq,Ord,Functor,Foldable)
 
-instance (Show a ) => Show (Vertex a) where
-  show (Product i) = intercalate ","  $ fmap show i
+type HashSchema  a b = Map (Set a) (Map a (Path a b ))
 
-data Edge a b = Edge { hedge :: (Vertex a)
-                     , tedge :: (Vertex a)
-                     , tag ::  b}
-              | ProductPath [Edge a b] [Edge a b]
-            deriving(Eq,Ord,Functor,Foldable)
+instance (Show a, Show b) => Show (Path a b) where
+    show (Path x o y) = printf "%s-> %s| %s " (showVertex x) (showVertex y) (show o)
+    show (ComposePath x (px,i,py) y ) = printf "Compose %s-> %s-> %s\n  Path: %s| %s"
+        (showVertex x) (showVertex i) (showVertex y) (showVertex px) (showVertex py)
+    show (PathOption x ps y)
+      | otherwise = printf "Options: %s-> %s \n %s"
+        (showVertex x) (showVertex y) (intercalate "\n " $ fmap (\(l,v) ->  show l <> "." <> show v) $ zip [0..1]  (S.toList ps))
 
-instance (Show a, Show b) => Show (Edge a b) where
-    show (Edge x y o) = printf "%s-> %s| %s " (show x) (show y) (show o)
-    show (ProductPath x y ) = printf "%s-> %s" (intercalate  "," $ fmap show x) (intercalate "," $ fmap show y)
+showVertex = intercalate  "," . fmap show . S.toList
 
-data Graph a b = Graph { hvertices :: [Vertex a]
-                     , tvertices :: [Vertex a]
-                     , edges :: [Edge a b] }
+data Graph a b = Graph { hvertices :: [Set a]
+                     , tvertices :: [Set a]
+                     , edges :: Map (Set a,Set a) (Path a b) }
                      deriving(Eq)
 
 instance (Show a,Show b) => Show (Graph a b) where
     show g = printf "Inputs: %s\nOutputs: %s\nEdges:\n%s"
                     (unwords . map show $ hvertices g)
                     (unwords . map show $ tvertices g)
-                    (unlines . map showEdge $ edges g)
-        where
-          showVertice (Product x ) = show x
-          showEdge (Edge  x y p ) = printf "%s -> %s\n %s " (showVertice x) (showVertice y) (show p)
+                    (unlines . map show $ fmap snd $ M.toList $ edges g)
 
-
-{-
-
+          {-
 mergeGraph :: Graph a b -> Graph a b -> Graph a b
 mergeGraph i k = Graph { hvertices = nub $ sort $ hvertices i <>  hvertices k
                        , tvertices = nub $ sort $ tvertices i <> tvertices k
                        , edges = go hiedges (go tiedges (edges k) ) <> go tkedges (go hkedges (edges i))
                        }
     where
-      linter = (S.fromList $ hvertices k) `S.intersection` (S.fromList $ tvertices i)
-      rinter = (S.fromList $ tvertices k) `S.intersection` (S.fromList $ hvertices i)
+      kinter = ih `S.intersection` kt
+      iknter = it `S.intersection` kh
+      (kh,kt) = pbounds k
+      (ih,it) = pbounds i
       redges = snd
       tiedges =  filter ((`S.member` linter) . tedge . redges) (edges i)
       hiedges =  filter ((`S.member` linter) . hedge . redges)  (edges k)
@@ -89,78 +83,153 @@ mergeGraph i k = Graph { hvertices = nub $ sort $ hvertices i <>  hvertices k
             edgeH (Edge _ (Product k) _ ) = k
             edgeT (Edge (Product i) _ _ ) = i
 -}
-nubEdges = nubBy (\(Edge x y _)(Edge i j _)-> y == j)
-sortEdges = sortBy (\(Edge x y _)(Edge i j _)-> compare y j)
-sortNub = nubEdges . sortEdges
+
+data Path a b
+  -- Trivial Path
+  = Path  (Set a)  b  (Set a)
+  -- Path Composition And Product
+  | ComposePath (Set a) (Set (Path a b),Set a,Set (Path a b)) (Set a)
+  -- Path Options
+  | PathOption (Set a) (Set (Path a b)) (Set a)
+  deriving(Eq,Ord)
+
+pbound (Path h1 _ t1) = (h1,t1)
+pbound (ComposePath h1 _ t1) =  (h1,t1)
+pbound (PathOption h1 _ t1) =  (h1,t1)
+{-# INLINE pbound #-}
+
+psame i j = pbound i == pbound j
+
+punion i = psimplify . puniond i
+  where
+    puniond (PathOption h1 l1 t1) (PathOption h2 l2 t2) =  PathOption h1 (S.union l1 l2) t1
+    puniond (PathOption h1 l1 t1) l2 = PathOption h1 (S.insert l2 l1 ) t1
+    puniond l2 (PathOption h1 l1 t1) = PathOption h1 (S.insert l2 l1 ) t1
+    puniond i j = PathOption h (S.fromList [i,j]) t
+        where (h,t) = pbound i
+    psimplify p@(PathOption h1 l1 t1)
+      | S.size l1 == 1 = head (S.toList l1)
+      | otherwise =  p
+    psimplify p = p
+{-# INLINE punion #-}
+
+pathMap = M.fromList . edgesKeys
+
+mergeGraph g1 g2 = Graph { hvertices = hvertices g1 <> hvertices g2
+                         , tvertices = tvertices g1 <> tvertices g2
+                         , edges = M.unionWith punion (edges g1 ) (edges g2)
+                         }
 
 
-addEdge ::  (Ord a,Monoid b) => Edge a b -> Graph a b -> Graph a b
-addEdge e@(Edge  pp pd o) g = Graph { edges = sortNub $ go intersects  $ go [e]  (e:edges g)
+connected :: Ord a => Graph a b -> Graph a b -> (Set a,Set a)
+connected  i k = (S.unions [ m `S.intersection`  n |  m <- hi, n <-tk],S.unions [ m `S.intersection`  n |  m <- ti, n <-hk])
+    where hi = hvertices i
+          ti = tvertices i
+          hk = hvertices k
+          tk = tvertices k
+
+--filterConnected :: => Graph a b -> Graph a b -> ([Path a b],[Path a b])
+filterConnected i k = (filterEdges k ik i,filterEdges i ki k)
+  where (ik,ki) = connected i k
+        filterEdges k ik i = (M.filter (S.null . (`S.intersection` ik) . snd . pbound ) (edges k) ,M.filter (S.null . (`S.intersection` ik) . fst . pbound) (edges i) )
+
+addEdge :: (Ord b,Ord a) => Path a b -> Graph a b -> Graph a b
+addEdge e g = Graph { edges = go intersects  $ go (M.singleton (pbound e) e) (M.insert (pbound e) e $ edges g)
                    , hvertices = pp : hvertices g
                    , tvertices = pd : tvertices g }
     where
-      intersects = filter (\((Edge (Product h) (Product t)  _ ))-> intersectsOne h (unProduct pd) ||  intersectsOne t (unProduct pp) ) (edges g)
-      intersectsOne :: Eq a => [a] -> [a] -> Bool
-      intersectsOne u p = or (fmap (\x -> elem x p) u)
-      go :: (Ord a,Monoid b)=> [Edge a b] ->  [Edge a b] -> [Edge a b]
-      go []  es = es
-      go nes es = go nees nonDup
+      (pp,pd) = pbound e
+      intersects = pathMap $ filter ((\(h,t) -> S.null( S.intersection h pd) ||  S.null (S.intersection t pp) ).pbound) (fmap snd $ M.toList $ edges g)
+      --go :: (Ord a, Ord b)=> [(Path a b)] ->  [(Path a b)] -> [(Path a b)]
+      go nesM esM
+        | M.null nesM = esM
+        | otherwise =  go nees nonDup
          where
-            nonDup = sortNub $ nees <> es
-            nees =   sortNub
-                [Edge (Product (head $ fmap (edgeT ) items) ) (Product d) (foldr1  (<>) ((fmap tag items) <> [p3])) |
-                (Edge  (Product p) (Product d) p3) <- nes ,
-                items <-  replicateM (length p) es ,
-                (sort . concat $ fmap (edgeH ) items)  ==  p ,
-                allTheSame (==)  (fmap(edgeT ) items) ,
-                all (not . (==d)) (fmap(edgeT ) items) ]
-                <> [Edge (Product p) (Product (head $ fmap (edgeH) items) ) (foldr1 (<>) ((fmap tag items) <> [p3]))  |
-                (Edge  (Product p) (Product d) p3) <- nes ,
-                items <-  replicateM (length d) es ,
-                (sort . concat $ fmap (edgeT ) items)  ==  d ,
-                allTheSame (==)  (fmap(edgeH ) items) ,
-                all (not . (==p)) (fmap(edgeH ) items) ]
-            edgeH (Edge _ (Product k) _ ) = k
-            edgeT (Edge (Product i) _ _ ) = i
+            nonDup = M.unionWith punion nees esM
+            nees =  M.unionsWith punion $
+                 fmap pathMap [[(ComposePath d (S.singleton p3,i,S.fromList items) h )  |
+                    p3 <- nes ,
+                    let bnd = pbound p3
+                        d = fst bnd
+                        p = snd bnd,
+                    items <-  replicateM (S.size p) es ,
+                    let
+                        h = S.unions $ fmap edgeT items
+                        i = S.unions $ fmap edgeH items,
+                    i == p ,
+                    S.size h == 1 ,
+                    d /=  h ]
+                    , [(ComposePath h (S.fromList items,i,S.singleton p3) d )  |
+                    p3 <- nes ,
+                    let bnd = pbound p3
+                        p = fst bnd
+                        d = snd bnd,
+                    items <-  replicateM (S.size p) es ,
+                    let
+                        h = S.unions $ fmap edgeH items
+                        i = S.unions $ fmap edgeT items,
+                    i == p ,
+                    S.size h == 1 ,
+                    d /=  h ]]
 
-warshall ::  (Ord a,Ord b, Monoid b) => Graph a b-> Graph a b
-warshall g = Graph { edges = sort $ go (nub $ sort $ hvertices g<> tvertices g) (edges g)
-                   , hvertices = sort $ nub $ hvertices g
-                   , tvertices = sort $ nub $ tvertices g }
+             where
+                es = fmap snd $ M.toList esM
+                nes = fmap snd $ M.toList nesM
+                edgeH = fst . pbound
+                edgeT = snd . pbound
+
+
+edgesKeys = fmap (\i-> (pbound i ,i))
+
+nonOverlap items = filter (\i-> all (not . S.isProperSubsetOf  (snd $pbound $ i))  spi ) items
+  where spi = fmap (snd.pbound) items
+{-# INLINE nonOverlap #-}
+
+
+warshall :: (Ord a,Ord b) => Graph a b -> Graph a b
+warshall g = Graph { edges = go (hvertices g <> tvertices g) (edges g)
+                   , hvertices = hvertices g
+                   , tvertices = tvertices g }
     where
       go [] es     = es
-      go (v:vs) es = go vs (nub (es
-         <> [ Edge (Product (head $ fmap edgeT items) ) (Product d) (foldr1 (<>) ((fmap tag items)<> [p3])) |
-                Edge  (Product p) (Product d) p3 <- es ,
-                items <-  replicateM (length p) es ,
-                (sort . concat $ fmap (edgeH ) items)  ==  p ,
-                allTheSame (==)  (fmap(edgeT ) items) ,
-                all (not . (==d)) (fmap(edgeT) items) ]
+      go (v:vs) esM =  go vs (M.unionWith punion esM
+         ( M.fromList $ edgesKeys [(ComposePath h (S.fromList nonOverlapped,i,S.singleton p3) d )  |
+                p3 <- es ,
+                let bnd = pbound p3
+                    p = fst bnd
+                    d = snd bnd,
+                items <- fmap nonOverlap $ concat $  fmap (flip replicateM $ es) [1..S.size p] ,
+                let
+                    nonOverlapped = nonOverlap items
+                    h = S.unions $ fmap edgeH nonOverlapped
+                    i = S.unions $ fmap edgeT nonOverlapped,
+                i == p, h /= d , i /= h,
+                all (==h) (fmap edgeH nonOverlapped)
+                ]
          ))
          where
-            edgeH (Edge _ (Product k) _ ) = k
-            edgeT (Edge (Product i) _ _ ) = i
-
-allTheSame ::  (a -> a -> Bool) ->  [a] -> Bool
-allTheSame  f xs = and $ map (f ( head xs)) (tail xs)
+            es = fmap snd . M.toList $ esM
+            edgeH = fst . pbound
+            edgeT = snd . pbound
 
 
-nested ::  Edge a (Edge a b) -> [(a, [(a, [Edge a b])])]
-nested (Edge (Product x) (Product y)  p ) = fmap (,fmap (,[p]) y) x
+
+nested ::  Path a b -> (Set a, [(a, Path a b )])
+nested p  = (x,fmap (,p) (S.toList y))
+  where (x,y) = pbound p
 
 
-hashGraph  :: Ord a => Graph a (Edge a b)-> Map a (Map a [(Edge a b )])
-hashGraph = M.map (M.fromListWith (++)) .  M.fromListWith (++)  . concat . fmap nested . edges
+hashGraph  :: (Ord b,Ord a) => Graph a b -> HashSchema a b
+hashGraph = M.map (M.fromListWith (punion)) .  M.fromListWith (++)  .   fmap nested . fmap snd . M.toList .  edges
 
 find norm end m = case M.lookup norm m of
                     Just i -> M.lookup end i
                     Nothing -> Nothing
 
-queryHash :: Ord a => [a] -> Map a (Map a b) -> a  -> [Maybe b]
+queryHash :: Ord a => [a] -> Map (Set a) (Map a b) -> (Set a)  -> [Maybe b]
 queryHash filters schema  base =  map (\f-> find base f schema)  filters
 
 
 
 
-type HashSchema  a b = Map a (Map a [Edge a b ])
 

@@ -1,5 +1,13 @@
-{-# LANGUAGE DeriveFunctor,GeneralizedNewtypeDeriving,FlexibleContexts,DeriveFoldable ,TupleSections #-}
-module Main where
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+module Query where
 
 import Warshal
 import qualified Data.Foldable as F
@@ -7,6 +15,18 @@ import Data.Foldable (Foldable)
 import Data.Char ( isAlpha )
 import Data.Maybe
 import Data.Monoid hiding (Product)
+
+import qualified Data.Text.Lazy as T
+
+import Data.GraphViz (preview)
+import Data.Graph.Inductive.PatriciaTree
+import qualified Data.Graph.Inductive.Graph as PG
+import qualified Data.GraphViz.Attributes as GA
+import qualified Data.GraphViz.Attributes.Complete as GAC
+
+import Database.PostgreSQL.Simple
+import Database.PostgreSQL.Simple.ToField
+
 import Control.Monad
 import GHC.Exts
 import Data.Tuple
@@ -22,182 +42,199 @@ import System.Environment ( getArgs )
 import Text.Parsec hiding(State)
 import Text.Parsec.String
 import Text.Printf ( printf )
+import Data.Text.Lazy(Text)
 import Debug.Trace
 
 
-filterTable [] b =  show b
-filterTable filters b =  "(SELECT *  FROM " <> show b <>  " WHERE " <> intercalate " AND " (fmap renderFilter filters)  <> ") as " <> show b
+data KType
+   = Primitive Text
+   | Array KType
+   | KOptional KType
+   deriving(Eq,Ord)
 
-joinPredicate r b = " ON " <> intercalate " AND " ( fmap (\(t,f) -> (table t) <> "." <> keyValue f <> " = " <> (table b) <> "." <> keyValue f )  r )
+instance Show KType where
+  show = T.unpack . showTy
 
-joinQuerySet (From b f  _) =  " FROM " <>  filterTable (fmap (\(k,f) -> (b,k,f) ) f ) b
-joinQuerySet (Join b f  _ r (p) ) = joinQuerySet p <>  " JOIN " <> filterTable (fmap (\(k,f) -> (b,k,f) ) f ) b <> joinPredicate (S.toList r) b
-
-data JoinPath b a
-    = From b [(a,Filter)] (Set a)
-    | Join b [(a,Filter)] (Set a) (Set (b ,a)) (JoinPath b a)
-    deriving(Eq,Ord,Show)
-
-data Table
-    =  Base Key (JoinPath Table Key)
-    |  Raw { schema :: String , table :: String}
-    |  Project (Set Attribute) Table
-    |  Reduce (Set Key) (Set (Aggregate Attribute) )  Table
-    deriving(Eq,Ord)
-
-showTable (Raw s t) = s <> "." <> t
-showTable (Base k p) =   joinQuerySet p
-showTable (Project s t) = "SELECT " <> intercalate ","  (fmap renderAttribute $ S.toList s)  <>  showTable t
-showTable (Reduce j t p) =  "(SELECT " <> intercalate "," (fmap (keyValue) (S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <>  showTable p  <> " GROUP BY " <> intercalate "," (fmap (keyValue) (S.toList j) )  <> ") as ctx0"
-
-instance Show Table where
-    show  = showTable
-
-
-addJoin :: (Ord b,Ord a) => b -> [a] -> JoinPath b a -> JoinPath b a
-addJoin tnew f p = case mapPath tnew f p of
-            Left accnew -> Join tnew [] (S.fromList f) (S.fromList accnew) (p )
-            Right i -> i
-    where
-        mapPath tnew f (From t fi  s ) =  if t == tnew
-                then  (Right $ From t fi snew )
-                else  (Left $ fmap (t,) $ filter ((flip S.member) s) f)
-            where snew =  foldr S.insert  s f
-        mapPath tnew  f (Join t fi s clause (p) ) = res
-            where  res = case mapPath tnew f p  of
-                    Right pnew  -> Right $ Join t fi  s (foldr S.insert clause ((fmap (tnew,) $ filter ((flip S.member) s) f))) (pnew)
-                    Left accnew -> if t == tnew
-                        then Right $ Join t  fi  (foldr S.insert  s f)  (foldr S.insert  clause accnew ) (p)
-                        else Left $ (fmap (t,) $ filter ((flip S.member) s) f) <> accnew
-
-joinSet :: (Ord b,Ord a) => [Edge a b] -> Maybe (JoinPath  b a )
-joinSet p = foldr joinPath Nothing p
-
-joinPath ((Edge i j ll)) (Just p)  = Just $  addJoin  ll ( unProduct i <>  unProduct j)  p
-joinPath ((Edge i j ll)) Nothing  =  Just $ From ll  [] (S.fromList ( unProduct i <> unProduct j))
-joinPath (ProductPath l  k) m = foldl (flip joinPath)  m  (l <> k)
-
-
-
-
-
+showTy (Primitive i) = i
+showTy (Array i) = showTy i <> "[]"
+showTy (KOptional i) = showTy i <> "*"
 
 data Key
     = Key
-    { keyValue :: String
-    , keyType :: String
+    { keyValue :: Text
+    , keyType :: KType
     }deriving(Eq,Ord)
 
 instance Show Key where
-  show (Key v t) = v
+  show =T.unpack . showKey
 
-edgeK :: Parser (Edge Key Table)
-edgeK = do
-  let valid = noneOf ('\n':" -|")
-  i <- (fmap (uncurry Key . break (==':')) $ many1 valid) `sepBy1` spaces
-  string "->" >> spaces
-  v <- (fmap (uncurry Key . break (==':')) $ many1 valid) `sepBy1` spaces
-  string "|" >> spaces
-  o <- many1 valid
-  spaces
-  return $ Edge (Product $ sort $ i)  (Product $ sort  $ v) ((\(i,j)->Raw  i (tail j) ) $ break (=='.') o)
+showKey (Key v t) = v <> "::" <> showTy t
 
 
+data JoinPath a b
+    = From b (Set a)
+    | Join b (Set a) (Set (b ,a)) (JoinPath a b)
+    deriving(Eq,Ord,Show)
 
-
-
-
-flatEdge (Edge x y o) =  [x,y]
-
-
-listEquals :: (Map String (Set String)) -> [Key] -> [Key] -> Bool
-listEquals ms v = all (==True) . zipWith (typeEquals ms) v
-
-typeEquals ms (Key c "") (Key m "") = c == m
-typeEquals ms k1 k2
-    | keyType k1 /= keyType k2  = False
-    | otherwise = e
-    where s = M.lookup (keyType k1) ms
-          e = case s of
-                Just set ->  sequal set (keyValue k1) (keyValue k2)
-                Nothing -> keyValue k1 == keyValue k2
-          sequal s a b =  S.member a s && S.member b s
-
-
-
-nested ::  (Edge a b, Edge a b) -> [(a, [(a, [Edge a b])])]
-nested (p,Edge (Product x) (Product y)  o) = fmap (,fmap (,[p]) y) x
-
-
-
-find norm end m = case M.lookup norm m of
-                    Just i -> M.lookup end i
-                    Nothing -> Nothing
-
-
+instance Foldable (JoinPath a) where
+  foldMap f (Join a _ _ p) = f a <>  F.foldMap f p
+  foldMap f (From p _) = f p
 
 data Aggregate a
-   = Aggregate [a] String
+   = Aggregate [a] Text
    deriving(Show,Eq,Ord)
 
+renderAggr f (Aggregate l s )  = s  <> "(" <> T.intercalate ","  (fmap f l)  <> ")"
 
 
 data Attribute
-   = Metric String
+   = Metric Key
    | Prod Attribute Attribute
    | Rate Attribute Attribute
    | Agg (Aggregate Attribute)
    deriving(Eq,Ord,Show)
 
-renderAttribute (Metric s ) = s
-renderAttribute (Prod m1 m2  ) =  renderAttribute m1 <> "*" <> renderAttribute m2
-renderAttribute (Rate m1 m2  ) = renderAttribute m1 <> "/" <> renderAttribute m2
+renderAttribute :: Attribute -> Text
+renderAttribute (Metric s ) = keyValue s
+renderAttribute (Prod m1 m2 ) =  renderAttribute m1 <> "*" <> renderAttribute m2
+renderAttribute (Rate m1 m2 ) = renderAttribute m1 <> "/" <> renderAttribute m2
 renderAttribute (Agg m2  ) = renderAggr renderAttribute m2
 
 
 data Filter
-   = Category (Set Int)
+   = Category (Set Text)
    | And [Filter]
    | Or [Filter]
    deriving(Eq,Ord,Show)
 
 
 -- Pretty Print Filter
-renderFilter (Raw _ table ,name,Category i) = table <> "." <> keyValue name <> " IN( " <>  intercalate "," (fmap show $ S.toList i) <> ")"
-renderFilter (table ,name,And i) =  intercalate " AND "  (fmap (renderFilter . (table ,name,)) i)
+renderFilter (Raw _ table _ ,name,Category i) = table <> "." <> keyValue name <> " IN( " <>  T.intercalate "," (fmap (\s -> "'" <> s <> "'" ) $ S.toList i) <> ")"
+renderFilter (table ,name,And i) =  T.intercalate " AND "  (fmap (renderFilter . (table ,name,)) i)
 
 
+
+data Table
+    =  Base (Set Key) (JoinPath Key Table)
+    |  Raw Text Text (Set Key)
+    |  Filtered [(Key,Filter)] Table
+    |  Project (Set Attribute) Table
+    |  Reduce (Set Key) (Set (Aggregate Attribute) )  Table
+    |  Limit Table Int
+    deriving(Eq,Ord,Show)
+
+tableName (Base _ (From t  _)) = tableName t
+tableName (Raw _ t _) = t
+tableName (Filtered _ t ) = tableName t
+tableName (Limit t _) = tableName t
+tableName i = error $ show i
+
+
+--- Traverse the joinPath returning the keyList
+joinKeys (From b k ) = fmap (b,) (S.toList k)
+joinKeys (Join b k _ p) = fmap (b,) (S.toList k) <> joinKeys p
+
+
+renderNamespacedKeySet (t,k) = tableName t <> "." <> keyValue k
+
+-- Generate a sql query from the AST
+showTable :: Table -> Text
+showTable (Filtered f t) = filterTable (fmap (\(k,f) -> (t,k,f) ) f ) t
+  where
+      filterTable [] b =  showTable b
+      filterTable filters b =  "(SELECT *  FROM " <> showTable b <>  " WHERE " <> T.intercalate " AND " (fmap renderFilter filters)  <> ") as " <> ( tableName b )
+showTable (Raw s t _) = s <> "." <> t
+showTable b@(Base k p) = " FROM (SELECT " <> (T.intercalate "," $ ( keyValue <$> S.toList attrs) <> fmap renderNamespacedKeySet jattrs ) <> joinQuerySet p <>") as base"
+  where
+    attrs = S.filter (not . (`S.member` (S.fromList $ fmap snd jattrs) )) $ allKeys b
+    jattrs = nubBy (\ i j-> snd i == snd j) $ joinKeys p
+    joinQuerySet (From b _) =  " FROM " <>  showTable b
+    joinQuerySet (Join b _ r p) = joinQuerySet p <>  " JOIN " <> showTable b <> joinPredicate (S.toList r) b
+      where joinPredicate r (Raw _ b _) = " ON " <> T.intercalate " AND " ( fmap (\(t,f) -> tableName t <> "." <> keyValue f <> " = " <> b <> "." <> keyValue f )  r )
+            joinPredicate r (Filtered f b) = joinPredicate r b
+
+
+showTable (Project s t)
+    | S.null s =  "(SELECT " <>  showTable t  <> ") as ctx0"
+    | otherwise = "(SELECT " <> T.intercalate ","  (renderAttribute <$> S.toList s)  <>  showTable t  <> ") as ctx0"
+showTable (Reduce j t p) =  "SELECT " <> T.intercalate "," (fmap keyValue (S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <> " FROM " <>   showTable p  <> " GROUP BY " <> T.intercalate "," (fmap keyValue (S.toList j))
+showTable (Limit t v) = showTable t <> " LIMIT 100"
+
+
+
+joinPath ((Path i ll j)) (Just p)  = Just $  addJoin  ll ( i `S.union` j)  p
+joinPath ((Path i ll j)) Nothing  =  Just $ From ll   ( i `S.union` j)
+joinPath (ComposePath i (l,ij,k) j ) m = foldr joinPath  m  (S.toList l <> S.toList k)
+joinPath (PathOption i p j ) m =  joinPath ( head $ S.toList p ) m
+
+
+addJoin :: (Ord b,Ord a) => a -> Set b -> JoinPath b a -> JoinPath b a
+addJoin tnew f p = case mapPath tnew f p of
+            Left accnew -> Join tnew  f accnew (p )
+            Right i -> i
+    where
+        mapPath :: (Ord b , Ord a) => a -> Set b -> JoinPath b a -> Either (Set (a,b)) (JoinPath b a)
+        mapPath tnew f (From t   s ) =  if t == tnew
+                then  (Right $ From t  snew )
+                else  (Left $ S.mapMonotonic (t,) $  s `S.intersection` f)
+            where snew =  s `S.union` f
+        mapPath tnew  f (Join t  s clause p ) = res
+            where  res = case mapPath tnew f p  of
+                    Right pnew  -> Right $ Join t   s (clause `S.union` (S.mapMonotonic (tnew,) $  s `S.intersection` f)) pnew
+                    Left accnew -> if t == tnew
+                        then Right $ Join t  (s `S.union` f)  (clause `S.union` accnew ) p
+                        else Left $ (S.mapMonotonic (t,) $ s `S.intersection` f)  `S.union` accnew
+
+
+
+
+addFilterTable ff b@(Raw _ _ _ ) = Filtered ff b
+addFilterTable ff b@(Filtered fi _ ) = Filtered (fi<>ff) b
 
 -- Label each table with filter clauses
 specializeJoin
   :: Map Key Filter
-    -> JoinPath Table Key
-    -> (Map Key Filter,JoinPath Table Key)
-specializeJoin f (From t fi s) =  (M.fromList ff , From t (ff <> fi) s)
+    -> JoinPath Key Table
+    -> (Map Key Filter,JoinPath Key Table )
+specializeJoin f (From t s) =  (M.fromList ff , From (addFilterTable ff t) s)
     where ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList s))
-specializeJoin f (Join t fi s r (p) ) =  (ms1,Join t ( ff <> fi ) s r ss)
+specializeJoin f (Join t s r (p) ) =  (ms1,Join (addFilterTable ff t) s r ss)
     where (ms,ss) = specializeJoin f p
           ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList s))
           ms1 = foldr (\(i,j) s -> M.insert i  j s) ms ff
+
+createFilter
+  :: Map Key Filter
+  ->  HashSchema Key Table
+  -> Table
+  -> (Map Key Filter, Table)
+createFilter filters schema (Base k j) = (m,Base k spec)
+    where
+      path = queryHash (M.keys  filters)  schema k
+      Just join =  foldr joinPath (Just j) (catMaybes path)
+      (m,spec) = specializeJoin filters join
+createFilter filters schema (Project a t) = fmap (Project a) (createFilter filters schema t)
+createFilter filters schema (Reduce  k a t) = fmap (Reduce k a) (createFilter filters schema t)
 
 
 
 
 createAggregate  schema key attr  old
-    = Reduce (S.fromList key) (S.fromList attr) (addAggregate schema  key attr old )
+    = Reduce (S.fromList key) (S.fromList attr) (addAggregate schema  key attr (Project S.empty old))
 
 addAggregate
   :: HashSchema Key Table
      -> [Key] -> [Aggregate Attribute] -> Table -> Table
-addAggregate schema key attr (Base k s) =   case concat $  catMaybes $ queryHash key  schema k  of
+addAggregate schema key attr (Base k s) =   case   catMaybes $ queryHash key  schema k  of
                         [] -> Base k  s
                         l -> Base k  (fromJust $ foldr joinPath  (Just s) l)
-addAggregate schema key attr (Reduce j t  p) =  case concat $ concat $ fmap (\ki -> catMaybes $  queryHash key  schema ki)  (S.toList j)  of
+
+addAggregate schema key aggr (Project a t) =  Project (foldr S.insert a attr )  (addAggregate schema key aggr t)
+  where attr =  concat $ fmap (\(Aggregate l _)-> l) aggr
+addAggregate schema key attr (Reduce j t  p) =  case concat $  fmap (\ki -> catMaybes $  queryHash key  schema (S.singleton ki))  (S.toList j)  of
                         [] -> Reduce (foldr S.insert j key) (foldr S.insert t attr)  (addAggregate schema key attr p )
                         l -> Reduce  j t  p
 
-
-renderAggr f (Aggregate l s )  = s  <> "(" <> intercalate ","  (fmap f l)  <> ")"
 
 reduce ::  [Key]
      -> [Aggregate Attribute]
@@ -208,18 +245,12 @@ reduce group aggr = do
   return ()
 
 
+getAttributeTable (Raw _ _ i) = i
+
 freeVars (Metric c) = [c]
 freeVars (Rate c k ) = freeVars c <> freeVars k
 freeVars (Prod c k ) = freeVars c <> freeVars k
 freeVars (Agg (Aggregate l _ ) ) = concatMap freeVars l
-
-createFilter filters schema (Base k j) = (m,Base k spec)
-    where
-      path = queryHash (M.keys  filters)  schema k
-      Just join =  foldr joinPath  (Just j )  (concat $ catMaybes  path)
-      (m,spec) = specializeJoin filters join
-createFilter filters schema (Project a t) = fmap (Project a) (createFilter filters schema t)
-createFilter filters schema (Reduce  k a t) = fmap (Reduce k a) (createFilter filters schema t)
 
 predicate
   :: [(Key,Filter)]
@@ -233,78 +264,69 @@ project
      -> QueryT ()
 project attributes =  do
   (schema,table) <- get
-  put (schema,Project (S.fromList attributes) table)
+  put (schema,Limit (Project (S.filter (`S.member` S.fromList attributes) (S.mapMonotonic Metric $ allKeys table))table) 100 )
+
+projectAll
+     :: QueryT ()
+projectAll =  do
+  (schema,table) <- get
+  put (schema,Limit (Project (S.mapMonotonic Metric (allKeys table)) table)100)
 
 
-entityTable =
-    [(cat "id_machine","otmisnet.machine")
-    ,(cat "id_client","otmisnet.cliet")
-    ,(cat "id_operator","otmisnet.operator")
-    ,(cat "id_contour","otmisnet.contour")
-    ,(cat "id_order","otmisnet.order")]
-
-attributesTable =
-    [(cat "id_service",["timerange","bounding"])
-    ,(cat "id_machine",["machine_name","machine_serial","id_client","machine_model"])
-    ,(cat "id_operator",["operator_name","operator_cpf","id_client"])
-    ,(cat "id_client",["client_name","client_cpf"])]
-
-attr = [Metric "timerange",Metric "bounding",Metric "machine_name"]
-
-cat s = Key s ""
-
-base key entityTable schema = do
-  let Just t = M.lookup key entityTable
-  put (schema,Base key $ From t [] (S.singleton key))
+allKeys :: Table -> Set Key
+allKeys (Raw _ _ p) = p
+allKeys (Limit p _ ) = allKeys p
+allKeys (Filtered _ p) = allKeys p
+allKeys (Project _ p) = allKeys p
+allKeys (Reduce _ _ p) = allKeys p
+allKeys (Base _ p) = F.foldMap allKeys p
 
 
 newtype QueryT a
-  = QueryT {runQueryT :: (State (HashSchema Key Table, Table)  a)} deriving(Functor,Applicative,Monad,MonadState (HashSchema Key Table, Table) )
+  = QueryT {runQueryT :: State (HashSchema Key Table, Table)  a} deriving(Functor,Applicative,Monad,MonadState (HashSchema Key Table, Table) )
 
-runQuery t s =  snd $ snd $ runState ( runQueryT t) s
+runQuery t =  execState ( runQueryT t)
 
-readGraph :: FilePath -> IO (Graph Key (Edge Key Table))
+{-
+--- Read Schema Graph
+edgeK :: Parser (Path Key Table)
+edgeK = do
+  let valid = noneOf ('\n':" -|")
+      key (i,j) =  Key i (Primitive j)
+  i <- (fmap (key . break (==':')) $ many1 valid) `sepBy1` spaces
+  string "->" >> spaces
+  v <- (fmap (key . break (==':')) $ many1 valid) `sepBy1` spaces
+  string "|" >> spaces
+  o <- many1 valid
+  spaces
+  return $ Path (S.fromList i)   ((\(i,j)->Raw  i (T.tail j) S.empty ) $ T.break (=='.') o)(S.fromList v)
+
+
+readGraph :: FilePath -> IO (Graph Key Table)
 readGraph fp = do
   r <- parseFromFile (many1 edgeK) fp
   case r of
     Left err -> error (show err)
-    Right es -> return $ Graph { edges = fmap (\e@(Edge t h l) ->(Edge t h e)) es
-                              , hvertices = nub .  map hedge $ es
-                              , tvertices = nub .  map tedge $ es  }
+    Right es -> return $ Graph { edges = pathMap es
+                              , hvertices = nub .  map (fst .pbound) $ es
+                              , tvertices = nub .  map (snd .pbound) $ es  }
+-}
 
-instance Monoid (Edge a b) where
-  mappend i j =  ProductPath [i] [j]
+pathLabel (Path i (Raw s l _) j) = l
+pathLabel (ComposePath i (p1,p12,p2) j) = T.intercalate "," $  fmap pathLabel (S.toList p1) <> fmap pathLabel (S.toList p2)
+pathLabel (PathOption i p j) = T.intercalate "\n" (fmap pathLabel (S.toList p))
 
-main :: IO ()
-main = do
-  -- [f] <- getArgs
-  let f = "Graph.schema"
-  print "Query"
-  graph <-  readGraph f
-  graph2 <-  readGraph "Graph2.schema"
+instance GA.Labellable (Path Key Table) where
+  toLabelValue l  = GAC.StrLabel (pathLabel l)
+instance GA.Labellable (Set Key ) where
+  toLabelValue i = GAC.StrLabel (T.intercalate "," (keyValue <$> S.toList i))
 
-  let e@(Edge x y p) = Edge (Product [cat "id_machine",cat "timerange"] )(Product [cat "order_number"]) (Raw "otmisnet" "service_order")
-      e1 = Edge x y e
-      g2 = addEdge e1 g3
-      g1 = warshall graph
-      g3 = warshall graph2
-  print  $ hvertices g1 == hvertices g2
-  print  $ tvertices g1 == tvertices g2
-  print $ g1
-  print $ g2
-  print $ length $ edges g1
-  print $ length $ edges g2
-  print $ length $ edges g3
-  print $ edges g1 == edges g2
-  let schema = hashGraph  g1
-      baseTable= Base (cat "id_service")$  From  (Raw "onetgeo""services") [] (S.singleton (cat "id_service" ))
-  print $  runQuery
-    (do
-      predicate  [(cat "id_machine", Category $ S.fromList [1,2,3])]
-      project [Metric "timerange",Metric "bounding",Metric "machine_name"]
-    ) (schema ,baseTable)
-  print $ runQuery
-    (do
-      predicate  [(cat "id_machine", Category $ S.fromList [1,2,3]),(cat "id_order" , Category $ S.fromList [9,8])]
-      reduce [(cat "id_operator"),cat "id_contour"] [Aggregate [Metric "timerange"] "min"]
-    ) (schema ,baseTable)
+cvLabeled :: Graph Key Table -> Gr (Set Key) (Path Key Table)
+cvLabeled g = PG.mkGraph lvertices ledges
+  where v = M.fromList $ zip set [0..]
+        set = nub $ hvertices g <> tvertices g
+        lvertices = fmap (\e -> (fromJust (M.lookup e v),e)) set
+        ledges = fmap (\e -> case pbound e of
+                            (t,h) -> (fromJust (M.lookup t v) ,fromJust (M.lookup h v) ,e)) (fmap snd $ M.toList $ edges g)
+
+
