@@ -172,6 +172,9 @@ instance Show Showable where
 
 projectKey conn baseTables hashGraph = (\i -> queryWith_ (fromShowableList (keySetToMap (allKeys i))) conn . buildQuery $ i, projectAllKeys baseTables hashGraph )
 
+withConn action = do
+  conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda "
+  action conn
 
 main :: IO ()
 main = do
