@@ -47,7 +47,7 @@ instance (Show a,Show b) => Show (Graph a b) where
                     (unwords . map show $ tvertices g)
                     (unlines . map show $ fmap snd $ M.toList $ edges g)
 
-          {-
+{-
 mergeGraph :: Graph a b -> Graph a b -> Graph a b
 mergeGraph i k = Graph { hvertices = nub $ sort $ hvertices i <>  hvertices k
                        , tvertices = nub $ sort $ tvertices i <> tvertices k

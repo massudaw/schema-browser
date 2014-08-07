@@ -1,6 +1,7 @@
 {-# LANGUAGE RankNTypes,NoMonomorphismRestriction,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 import Query
 import Schema
+import Data.Traversable (Traversable,traverse)
 import Warshal
 import Control.Monad(void,mapM,replicateM,liftM)
 import Data.Functor.Compose
@@ -13,9 +14,11 @@ import Graphics.UI.Threepenny.Core
 import Data.Monoid
 
 import Debug.Trace
+import qualified Data.Foldable as F
 import qualified Data.Text.Lazy as T
 import Data.ByteString.Lazy(toStrict)
 import Data.Text.Lazy.Encoding
+import qualified Data.Text.Encoding as TE
 import Data.Text.Lazy (Text)
 import qualified Data.Set as S
 import Database.PostgreSQL.Simple
@@ -38,7 +41,14 @@ renderPostgresqlConn (DB n u p h pt)
 
 db = DB "usda" "postgres" "queijo" "localhost" "5432"
 
+type QueryCursor t =(t Key, (HashSchema Key Table, Table))
 --setup :: (S.Set Key -> IO [[Showable]]) -> [Key] -> Window -> UI ()
+setup
+  ::
+     (forall t. Traversable t => (QueryCursor t -> IO [t Showable],
+         QueryT (t Key)
+         -> S.Set Key -> QueryCursor t ))
+     -> [S.Set Key] -> Window -> UI ()
 setup action k w = void $ do
   return w # set title "Data Browser"
   dbInfo <- UI.span
@@ -52,7 +62,13 @@ setup action k w = void $ do
     ]]
   getBody w #+ [element span]
 
-chooseKey (proj,action) items = do
+chooseKey
+  ::
+     (forall t. Traversable t => (QueryCursor t  -> IO [t Showable],
+         QueryT (t Key)
+         -> S.Set Key -> QueryCursor t ))
+     -> [S.Set Key] -> UI (Element,[(S.Set Key, Element)])
+chooseKey c@(proj,action) items = do
   buttons <- mapM (\k-> do
     fmap (k,) $ UI.button # set text (showVertex k)) items
   span <- UI.span
@@ -65,8 +81,8 @@ chooseKey (proj,action) items = do
     on UI.click  b $ const $ do
       mapM_ (\(_,i)-> element  i # set UI.enabled True ) buttons
       element b # set UI.enabled False
-      let (schema,table) = action (project (fmap Metric (S.toList k))) k
-      let filterOptions = case M.keys <$> M.lookup k schema of
+      let (_,(schema,table)) = action (project (fmap Metric (S.toList k))) k
+          filterOptions = case M.keys <$> M.lookup k schema of
                 Just l -> k : fmap S.singleton l
                 Nothing -> [k]
       fitems <- mapM (\kv-> fmap (S.toList kv,) $ UI.button # set UI.text (showVertex kv) ) filterOptions
@@ -74,16 +90,22 @@ chooseKey (proj,action) items = do
       let baseAction m = action m k
       mapM_ (\(fk,fb)-> do
         on UI.click  fb $ const $ do
-          let (schema,table) = action (project (fmap Metric fk)) (S.fromList fk)
-          v <- liftIO $ proj table
-          vitems <- mapM (\kv-> fmap (kv,) $ UI.button # set UI.text (L.intercalate "," (fmap show kv)) ) v
+          let
+            doQuery :: (forall t. Traversable t =>
+                  (QueryCursor t  -> IO [t Showable],
+                    QueryT (t Key)
+                    -> S.Set Key -> QueryCursor t )) ->
+                  [Key] -> UI [PK Showable]
+            doQuery (p,a) arg =  liftIO $ p $ a projectDesc (S.fromList arg)
+          v <- doQuery c fk
+          vitems <- mapM (\kv-> fmap (pkKey kv,) $ UI.button # set UI.text (L.intercalate "," (fmap show (pkDescription kv))) ) v
           mapM_ (\(kv,bv)-> do
             on UI.click bv $ const $ do
-              let (schema,t) = baseAction ( do
+              let ares@(m,(schema,t)) = baseAction ( do
                   predicate $  fmap (\(fkv,kv)-> (fkv,Category (S.fromList [T.pack $ show kv]))) $ zip  fk   kv
                   projectAll
                   )
-              kvd <- liftIO $ proj  t
+              kvd <- liftIO $ proj ares
               element spanHD # set text  (showVertex  (allKeys t))
               elems <- mapM (\i-> UI.li # set text (L.intercalate "," (fmap show i))) (fmap (zip (S.toList $allKeys t)) kvd)
               element spanD # set children elems
@@ -108,7 +130,7 @@ data Showable
   | SOptional (Maybe Showable)
   | SComposite (Vector Showable)
 
-renderedType keyMap = \f b ->
+renderedType key = \f b ->
    case F.name f  of
       Just name -> let
           go ::  KType
@@ -118,9 +140,9 @@ renderedType keyMap = \f b ->
             (Array (Primitive i)) -> SComposite <$> prim name i f b
             (KOptional (Array (Primitive i))) ->  fmap (SOptional . fmap SComposite . getCompose ) $ prim name i f b
             (Primitive i) ->  fmap unOnly $ prim  name i f b
-          in case M.lookup name keyMap of
-              Just i ->  go i
-              Nothing -> error $ "no type " <> BS.unpack name <> " in keyMap"
+          in case (keyValue key == T.fromStrict (TE.decodeUtf8 name)) of
+              True ->  go (keyType key)
+              False -> error $ "no match type for " <> BS.unpack name <> " with key" <> show key
       Nothing -> error "no name for field"
      where
 
@@ -156,13 +178,12 @@ instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
 
-
-
-fromShowableList keyMap = do
+fromShowableList foldable = do
+    let keyMap = keySetToMap foldable
     n <- FR.numFieldsRemaining
-    replicateM n (FR.fieldWith $ renderedType keyMap)
+    traverse (FR.fieldWith . renderedType) foldable
 
-keySetToMap ks = M.fromList $  fmap (\(Key k t)-> (toStrict $ encodeUtf8 k,t))  (S.toList ks)
+keySetToMap ks = M.fromList $  fmap (\(Key k _ t)-> (toStrict $ encodeUtf8 k,t))  (F.toList ks)
 
 instance Show Showable where
   show (Showable a) = T.unpack a
@@ -170,7 +191,14 @@ instance Show Showable where
   show (DNumeric a) = show a
   show (SOptional a) = show a
 
-projectKey conn baseTables hashGraph = (\i -> queryWith_ (fromShowableList (keySetToMap (allKeys i))) conn . buildQuery $ i, projectAllKeys baseTables hashGraph )
+projectKey
+  :: Traversable t => Connection
+     -> M.Map (S.Set Key) Table
+     -> HashSchema Key Table ->
+     ((t Key, (HashSchema Key Table, Table)) -> IO [t Showable],
+         QueryT (t Key)
+         -> S.Set Key -> (t Key, (HashSchema Key Table, Table)))
+projectKey conn baseTables hashGraph = (\(j,(h,i)) -> queryWith_ (fromShowableList j) conn . buildQuery $ i, projectAllKeys baseTables hashGraph )
 
 withConn action = do
   conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda "
@@ -181,12 +209,17 @@ main = do
   let schema = "public"
   conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda "
   inf@(k,baseTables) <- keyTables conn  schema
+  connTest <- connectPostgreSQL "user=postgres password=queijo dbname=test"
+  traverse (execute_ connTest . fromString . T.unpack . dropTable) baseTables
+  traverse (execute_  connTest . fromString . T.unpack . createTable) baseTables
+
   --print baseTables
   graph <- fmap graphFromPath $ schemaKeys conn  schema inf
   graphAttributes <- fmap graphFromPath $ schemaAttributes conn  schema inf
   let
       g1 = warshall graph
       schema = hashGraph  g1
-      (proj,q) = projectKey conn  baseTables schema
-  startGUI defaultConfig (setup (proj,q) (M.keys baseTables))
+      q = projectKey conn  baseTables schema
+  startGUI defaultConfig (setup q (M.keys baseTables))
+  print "END"
 
