@@ -41,8 +41,16 @@ renderPostgresqlConn (DB n u p h pt)
 
 db = DB "usda" "postgres" "queijo" "localhost" "5432"
 
+data Showable
+  = Showable Text
+  | Numeric Int
+  | DNumeric Double
+  | SOptional (Maybe Showable)
+  | SComposite (Vector Showable)
+
+
 type QueryCursor t =(t Key, (HashSchema Key Table, Table))
---setup :: (S.Set Key -> IO [[Showable]]) -> [Key] -> Window -> UI ()
+
 setup
   ::
      (forall t. Traversable t => (QueryCursor t -> IO [t Showable],
@@ -117,18 +125,7 @@ chooseKey c@(proj,action) items = do
       ) buttons
   return (span,buttons)
 
-graphKeySet g
-  =  L.nub $ concatMap S.toList (hvertices g <> tvertices g)
 
-graphAttributeSet baseTables
-  =  S.unions $ fmap allKeys $ fmap snd $ M.toList baseTables
-
-data Showable
-  = Showable Text
-  | Numeric Int
-  | DNumeric Double
-  | SOptional (Maybe Showable)
-  | SComposite (Vector Showable)
 
 renderedType key = \f b ->
    case F.name f  of

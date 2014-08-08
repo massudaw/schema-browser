@@ -22,6 +22,9 @@ import qualified Data.GraphViz.Attributes.Complete as GAC
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.ToField
 
+import Data.Vector (Vector)
+import qualified Data.Vector as V
+
 import Control.Monad
 import GHC.Exts
 import Data.Tuple
@@ -39,7 +42,7 @@ import qualified Data.Text.Lazy as T
 
 
 createType :: (Text,Text,Text,Text) -> IO (Text,Key)
-createType (t,c,ty,"YES" ) =do
+createType (t,c,ty,"YES") =do
   uq <- newUnique
   return (t,Key c uq (KOptional $ Primitive ty))
 createType (t,c,ty,"NO") = do
@@ -49,25 +52,31 @@ createType v = error $ show v
 
 type InformationSchema = (Map Text Key,Map (Set Key) Table)
 
+foreignKeys :: Query
+foreignKeys = "select clc.relname,cl.relname,array_agg(att2.attname),   array_agg(att.attname) from    (select  unnest(con1.conkey) as parent, unnest(con1.confkey) as child, con1.confrelid,con1.conrelid  from   pg_class cl     join pg_namespace ns on cl.relnamespace = ns.oid   join pg_constraint con1 on con1.conrelid = cl.oid where   ns.nspname = ? and con1.contype = 'f' ) con  join pg_attribute att on  att.attrelid = con.confrelid and att.attnum = con.child  join pg_class cl on  cl.oid = con.confrelid   join pg_class clc on  clc.oid = con.conrelid   join pg_attribute att2 on  att2.attrelid = con.conrelid and att2.attnum = con.parent   group by clc.relname, cl.relname"
+
+-- TODO: Properly treat Maybe Key
+-- TODO: Load Foreigh Key Information
 keyTables :: Connection -> Text -> IO InformationSchema
 keyTables conn schema = do
-       res2 <- join $ fmap (sequence . fmap createType) $  query conn "SELECT table_name,column_name,data_type,is_nullable FROM information_schema.tables natural join information_schema.columns  WHERE table_schema = ? AND table_type='BASE TABLE'" (Only schema) :: IO [(Text,Key)]
+       res2 <- join $ sequence . fmap createType <$>  query conn "SELECT table_name,column_name,data_type,is_nullable FROM information_schema.tables natural join information_schema.columns  WHERE table_schema = ? AND table_type='BASE TABLE'" (Only schema)
        let keyMap = M.fromList keyList
            keyListSet = groupSplit (\(c,k)-> c) keyList
            keyList =  fmap (\(t,k@(Key c _ _))-> (c,k)) res2
            ambigous = filter (\(_,l)->length (nubBy (\i j -> keyType i == keyType j) $ fmap snd l) > 1) keyListSet
        -- Log Ambiguous Keys (With same name and different types)
-       -- TODO: Properly treat Maybe Key
-       -- TODO: Load Foreigh Key Information
        when (length ambigous > 0) $ do
          print "Ambigous Key Types"
          mapM_ (\(c,l)-> print $ nubBy (\i j -> keyType i == keyType j) $ fmap snd l) ambigous
-       tableDescription <- (fmap (\(t,c)-> (t,fromJust $ M.lookup c keyMap))) <$> query conn "SELECT table_name,description FROM public.table_description WHERE table_schema = ? " (Only schema) :: IO [(Text,Key)]
-       let descMap = M.fromList tableDescription
-       res <- fmap (fmap (\(t,c)-> (t,fromJust $ M.lookup c keyMap))) $  query conn "SELECT table_name,column_name FROM information_schema.tables natural join information_schema.columns natural join information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND table_type='BASE TABLE' AND constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Key)]
+       let
+        lookupKey :: Functor f => f Text -> f Key
+        lookupKey = fmap (fromJust . flip M.lookup keyMap)
+       descMap <- M.fromList . fmap lookupKey <$> query conn "SELECT table_name,description FROM public.table_description WHERE table_schema = ? " (Only schema)
+       res <- fmap lookupKey <$> query conn "SELECT table_name,column_name FROM information_schema.tables natural join information_schema.columns natural join information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND table_type='BASE TABLE' AND constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Key)]
+       fks <- M.fromListWith S.union . fmap (\(tp,tc,kp,kc) -> (tp,S.singleton $ Path (S.fromList $ V.toList $ lookupKey kp) tc (S.fromList $ V.toList $ lookupKey kc))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path Key Text)))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,Key n _ _)-> fromJust $ M.lookup n keyMap ) l )) $ groupSplit (\(t,_)-> t)  res2 :: Map Text (Set Key)
            pks =  fmap (\(c,l)-> let pks = S.fromList $ fmap (\(_,j)-> j ) l
-                                in (pks ,Raw schema c pks (M.lookup  c descMap) S.empty (fromJust $ M.lookup c all) )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
+                                in (pks ,Raw schema c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks ) (fromJust $ M.lookup c all) )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
        return (keyMap, M.fromList $ fmap (\(c,t)-> (c,t)) pks)
 
 
@@ -105,6 +114,7 @@ schemaKeys conn schema (keyTable,map) = do
                     ((tpk,pk),pkl)<- pks,
                     tfk == tpk]
        return rels
+
 projectAllKeys
   :: Traversable t => Map (Set Key) Table
      -> HashSchema Key Table

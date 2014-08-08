@@ -132,7 +132,7 @@ renderFilter (table ,name,And i) =  T.intercalate " AND "  (fmap (renderFilter .
 
 data Table
     =  Base (Set Key) (JoinPath Key Table)
-    |  Raw Text Text (Set Key) (Maybe Key) (Set (Path Key String)) (Set Key)
+    |  Raw Text Text (Set Key) (Maybe Key) (Set (Path Key Text)) (Set Key)
     |  Filtered [(Key,Filter)] Table
     |  Project [Attribute] Table
     |  Reduce (Set Key) (Set (Aggregate Attribute) )  Table
