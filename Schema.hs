@@ -1,4 +1,4 @@
-{-# LANGUAGE BangPatterns,OverloadedStrings #-}
+{-# LANGUAGE TupleSections,BangPatterns,OverloadedStrings #-}
 
 module Schema where
 
@@ -41,16 +41,12 @@ import qualified Data.Text.Lazy as T
 
 
 
-createType :: (Text,Text,Text,Text) -> IO (Text,Key)
-createType (t,c,ty,"YES") =do
-  uq <- newUnique
-  return (t,Key c uq (KOptional $ Primitive ty))
-createType (t,c,ty,"NO") = do
-  uq <- newUnique
-  return (t,Key c  uq (Primitive ty))
-createType v = error $ show v
+createType :: Map Text Unique -> (Text,Text,Maybe Text ,Text,Text) -> (Text,Key)
+createType un (t,c,trans,ty,"YES") =(t,Key c   trans (fromJust $M.lookup c un) (KOptional $ Primitive ty))
+createType un (t,c,trans,ty,"NO") = (t,Key c  trans (fromJust $ M.lookup c un) (Primitive ty))
+createType un v = error $ show v
 
-type InformationSchema = (Map Text Key,Map (Set Key) Table)
+type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table)
 
 foreignKeys :: Query
 foreignKeys = "select clc.relname,cl.relname,array_agg(att2.attname),   array_agg(att.attname) from    (select  unnest(con1.conkey) as parent, unnest(con1.confkey) as child, con1.confrelid,con1.conrelid  from   pg_class cl     join pg_namespace ns on cl.relnamespace = ns.oid   join pg_constraint con1 on con1.conrelid = cl.oid where   ns.nspname = ? and con1.contype = 'f' ) con  join pg_attribute att on  att.attrelid = con.confrelid and att.attnum = con.child  join pg_class cl on  cl.oid = con.confrelid   join pg_class clc on  clc.oid = con.conrelid   join pg_attribute att2 on  att2.attrelid = con.conrelid and att2.attnum = con.parent   group by clc.relname, cl.relname"
@@ -59,32 +55,42 @@ foreignKeys = "select clc.relname,cl.relname,array_agg(att2.attname),   array_ag
 -- TODO: Load Foreigh Key Information
 keyTables :: Connection -> Text -> IO InformationSchema
 keyTables conn schema = do
-       res2 <- join $ sequence . fmap createType <$>  query conn "SELECT table_name,column_name,data_type,is_nullable FROM information_schema.tables natural join information_schema.columns  WHERE table_schema = ? AND table_type='BASE TABLE'" (Only schema)
+       uniqueMap <- join $ mapM (\(Only i)-> (i,) <$> newUnique) <$>  query conn "select o.column_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name where table_schema = ? and table_type='BASE TABLE'" (Only schema) -- :: IO (Map Text Unique)
+       res2 <- fmap (createType (M.fromList uniqueMap)) <$>  query conn "select table_name,o.column_name,translation,data_type,is_nullable from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name where table_schema = ? and table_type='BASE TABLE'" (Only schema)
+       print res2
        let keyMap = M.fromList keyList
            keyListSet = groupSplit (\(c,k)-> c) keyList
-           keyList =  fmap (\(t,k@(Key c _ _))-> (c,k)) res2
+           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
            ambigous = filter (\(_,l)->length (nubBy (\i j -> keyType i == keyType j) $ fmap snd l) > 1) keyListSet
        -- Log Ambiguous Keys (With same name and different types)
        when (length ambigous > 0) $ do
          print "Ambigous Key Types"
          mapM_ (\(c,l)-> print $ nubBy (\i j -> keyType i == keyType j) $ fmap snd l) ambigous
        let
-        lookupKey :: Functor f => f Text -> f Key
+        lookupKey :: Functor f => f (Text,Text) -> f Key
         lookupKey = fmap (fromJust . flip M.lookup keyMap)
-       descMap <- M.fromList . fmap lookupKey <$> query conn "SELECT table_name,description FROM public.table_description WHERE table_schema = ? " (Only schema)
-       res <- fmap lookupKey <$> query conn "SELECT table_name,column_name FROM information_schema.tables natural join information_schema.columns natural join information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND table_type='BASE TABLE' AND constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Key)]
-       fks <- M.fromListWith S.union . fmap (\(tp,tc,kp,kc) -> (tp,S.singleton $ Path (S.fromList $ V.toList $ lookupKey kp) tc (S.fromList $ V.toList $ lookupKey kc))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path Key Text)))
-       let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,Key n _ _)-> fromJust $ M.lookup n keyMap ) l )) $ groupSplit (\(t,_)-> t)  res2 :: Map Text (Set Key)
-           pks =  fmap (\(c,l)-> let pks = S.fromList $ fmap (\(_,j)-> j ) l
-                                in (pks ,Raw schema c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks ) (fromJust $ M.lookup c all) )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
-       return (keyMap, M.fromList $ fmap (\(c,t)-> (c,t)) pks)
+        lookupKey' :: Functor f => f (Text,Text) -> f (Text,Key)
+        lookupKey' = fmap  (\(t,c)-> (t,fromJust $ M.lookup (t,c) keyMap) )
+        lookupKey2 :: Functor f => f (Text,Text) -> f Key
+        lookupKey2 = fmap  (\(t,c)->fromJust $ M.lookup (t,c) keyMap )
+       descMap <- M.fromList . fmap  (\(t,c)-> (t,fromJust $ M.lookup (t,c) keyMap) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
+       res <- lookupKey' <$> query conn "SELECT table_name,column_name FROM information_schema.tables natural join information_schema.columns natural join information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND table_type='BASE TABLE' AND constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Key)]
+       fks <- M.fromListWith S.union . fmap (\(tp,tc,kp,kc) -> (tp,S.singleton $ Path (S.fromList $ V.toList $  lookupKey2 (fmap (tp,) kp)) tc (S.fromList $ V.toList $ lookupKey2 (fmap (tc,) kc)))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path Key Text)))
+       let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> fromJust $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  res2 :: Map Text (Set Key)
+           pks =  fmap (\(c,l)-> let
+                                  pks = S.fromList $ fmap (\(_,j)-> j ) l
+                                  attr = S.difference (fromJust $ M.lookup c all) pks
+                                in (pks ,Raw schema c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks ) attr )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
+       let ret = (keyMap, M.fromList $ fmap (\(c,t)-> (c,t)) pks)
+       print ret
+       return ret
 
 
 schemaAttributes :: Connection -> Text -> InformationSchema -> IO [Path Key Table]
 schemaAttributes conn schema (keyTable,map) = do
-       res <- fmap (fmap (\(t,c,ckn)-> (t,ckn,fromJust $ M.lookup c keyTable))) $  query conn "SELECT table_name,column_name,constraint_name FROM information_schema.tables natural join information_schema.columns natural join information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND table_type='BASE TABLE' AND constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Text,Key)]
+       res <- fmap (fmap (\(t,c,ckn)-> (t,ckn,fromJust $ M.lookup (t,c) keyTable))) $  query conn "SELECT table_name,column_name,constraint_name FROM information_schema.tables natural join information_schema.columns natural join information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND table_type='BASE TABLE' AND constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Text,Key)]
        let pks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j ) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res :: [((Text,Text),Set Key)]
-       res2 <- fmap (fmap (\(t,c)-> (t,fromJust $ M.lookup c keyTable))) $  query conn "SELECT table_name,column_name FROM information_schema.tables natural join information_schema.columns WHERE table_schema = ? AND table_type='BASE TABLE'" (Only schema):: IO [(Text,Key)]
+       res2 <- fmap (fmap (\(t,c)-> (t,fromJust $ M.lookup (t,c) keyTable))) $  query conn "SELECT table_name,column_name FROM information_schema.tables natural join information_schema.columns WHERE table_schema = ? AND table_type='BASE TABLE'" (Only schema):: IO [(Text,Key)]
        let fks =  fmap (\(c,l)-> (c,fmap (\(_,j)-> j) l )) $ groupSplit (\(t,_)-> t)  res2 :: [(Text,[Key])]
            rels = [ Path pkl (fromJust $ M.lookup pkl map) (S.singleton fkli) |
                     (tfk,fkl)<- fks,
@@ -105,9 +111,9 @@ graphFromPath p = Graph {hvertices = fmap fst bs,
 -- TODO : Implement ordinal information
 schemaKeys :: Connection -> Text -> InformationSchema -> IO [Path Key Table]
 schemaKeys conn schema (keyTable,map) = do
-       res <- fmap (fmap (\(t,c,ckn)-> (t,ckn,fromJust $ M.lookup c keyTable ))) $  query conn "SELECT table_name,column_name,constraint_name FROM information_schema.tables natural join information_schema.columns natural join information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND table_type='BASE TABLE' AND constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Text,Key)]
+       res <- fmap (fmap (\(t,c,ckn)-> (t,ckn,fromJust $ M.lookup (t,c) keyTable ))) $  query conn "SELECT table_name,column_name,constraint_name FROM information_schema.tables natural join information_schema.columns natural join information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND table_type='BASE TABLE' AND constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Text,Key)]
        let pks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j ) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res :: [((Text,Text),Set Key)]
-       res2 <- fmap (fmap (\(t,c,ckn)-> (t,ckn,fromJust $ M.lookup c keyTable ))) $  query conn "SELECT kc.table_name,kc.column_name,constraint_name FROM information_schema.tables natural join information_schema.key_column_usage kc natural join information_schema.table_constraints inner join information_schema.columns cl on cl.table_name = kc.table_name and cl.column_name = kc.column_name  WHERE kc.table_schema = ? AND table_type='BASE TABLE' AND constraint_type='FOREIGN KEY'" (Only schema):: IO [(Text,Text,Key)]
+       res2 <- fmap (fmap (\(t,c,ckn)-> (t,ckn,fromJust $ M.lookup (t,c) keyTable ))) $  query conn "SELECT kc.table_name,kc.column_name,constraint_name FROM information_schema.tables natural join information_schema.key_column_usage kc natural join information_schema.table_constraints inner join information_schema.columns cl on cl.table_name = kc.table_name and cl.column_name = kc.column_name  WHERE kc.table_schema = ? AND table_type='BASE TABLE' AND constraint_type='FOREIGN KEY'" (Only schema):: IO [(Text,Text,Key)]
        let fks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res2 :: [((Text,Text),Set Key)]
            rels = [ Path pkl (fromJust $ M.lookup pkl map) fkl |
                     ((tfk,fk),fkl)<- fks,

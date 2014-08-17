@@ -12,6 +12,7 @@
 module Query where
 
 import Warshal
+import Data.Vector(Vector)
 import qualified Data.Foldable as F
 import Data.Foldable (Foldable)
 import Data.Char ( isAlpha )
@@ -28,6 +29,7 @@ import qualified Data.GraphViz.Attributes.Complete as GAC
 
 import Data.Traversable(Traversable)
 import Database.PostgreSQL.Simple
+import Database.PostgreSQL.Simple.Time
 import Database.PostgreSQL.Simple.ToField
 
 import Control.Monad
@@ -50,24 +52,49 @@ import Debug.Trace
 
 import Data.Unique
 
-data KType
-   = Primitive Text
-   | Array KType
-   | KOptional KType
+data Prim
+   = PText
+   | PInt
+   | PDouble
+   | PDate
+   | PTimestamp
    deriving(Eq,Ord)
 
-instance Show KType where
+textToPrim "character varying" = PText
+textToPrim "text" = PText
+textToPrim "character" = PText
+textToPrim "double precision" = PDouble
+textToPrim "float8" = PDouble
+textToPrim "int4" = PInt
+textToPrim "int8" = PInt
+textToPrim "integer" = PInt
+textToPrim "smallint" = PInt
+textToPrim "timestamp without time zone" = PTimestamp
+textToPrim "date" = PDate
+textToPrim i = error $ "no case for type " <> T.unpack i
+
+
+
+
+data KType a
+   = Primitive a
+   | Array (KType a)
+   | KOptional (KType a)
+   deriving(Eq,Ord,Functor)
+
+instance Show (KType Text) where
   show = T.unpack . showTy
 
-showTy (Primitive i) = i
+showTy (Primitive i ) = i
 showTy (Array i) = showTy i <> "[]"
 showTy (KOptional i) = showTy i <> "*"
 
 data Key
     = Key
     { keyValue :: Text
+    , keyTranslation :: Maybe Text
     , keyFastUnique :: Unique
-    , keyType :: KType
+    , keyType :: KType Text
     }
 
 instance Eq Key where
@@ -84,8 +111,7 @@ instance Ord Key where
 instance Show Key where
    show = T.unpack . showKey
   --show (Key v u _) = show v <> show (hashUnique u)
-showKey (Key v _ t) = v <> "::" <> showTy t
-
+showKey k  = maybe (keyValue k<> "::" <> showTy (keyType k)) id (keyTranslation k)
 
 data JoinPath a b
     = From b (Set a)
@@ -116,28 +142,61 @@ renderAttribute (Prod m1 m2 ) =  renderAttribute m1 <> "*" <> renderAttribute m2
 renderAttribute (Rate m1 m2 ) = renderAttribute m1 <> "/" <> renderAttribute m2
 renderAttribute (Agg m2  ) = renderAggr renderAttribute m2
 
+data Showable
+  = Showable Text
+  | Numeric Int
+  | DNumeric Double
+  | DTimestamp LocalTimestamp
+  | DDate Date
+  | SOptional (Maybe Showable)
+  | SComposite (Vector Showable)
+  deriving(Ord,Eq,Read)
+
+
+instance Show Showable where
+  show (Showable a) = T.unpack a
+  show (Numeric a) = show a
+  show (DNumeric a) = show a
+  show (SOptional a) = show a
+  show (DDate a) = show a
+  show (DTimestamp a) = show a
+
 
 data Filter
-   = Category (Set Text)
+   = Category (Set (PK Showable))
    | And [Filter]
    | Or [Filter]
-   deriving(Eq,Ord,Show)
+   deriving(Eq,Ord)
 
+instance Show Filter where
+  show (Category i ) = intercalate "," $ fmap show $ S.toList i
+instance Monoid Filter where
+  mempty = Category S.empty
+  mappend (Category i ) (Category j ) = Category (S.union i j)
 
 -- Pretty Print Filter
-renderFilter (table ,name,Category i) = tableName table <> "." <> keyValue name <> " IN( " <>  T.intercalate "," (fmap (\s -> "'" <> s <> "'" ) $ S.toList i) <> ")"
+renderFilter (table ,name,Category i) = tableName table <> "." <> keyValue name <> " IN( " <>  T.intercalate "," (fmap (\s -> "'" <> T.pack (show $ head (pkKey s)) <> "'" ) $ S.toList i) <> ")"
 renderFilter (table ,name,And i) =  T.intercalate " AND "  (fmap (renderFilter . (table ,name,)) i)
 
 
 
 data Table
     =  Base (Set Key) (JoinPath Key Table)
+    -- Schema | PKS | Description | FKS | Attrs
     |  Raw Text Text (Set Key) (Maybe Key) (Set (Path Key Text)) (Set Key)
     |  Filtered [(Key,Filter)] Table
     |  Project [Attribute] Table
     |  Reduce (Set Key) (Set (Aggregate Attribute) )  Table
     |  Limit Table Int
     deriving(Eq,Ord,Show)
+
+atBase f (Base _ (From t  _)) = atBase f t
+atBase f t@(Raw _ _ _ _ _ _ ) = f t
+atBase f (Filtered _ t ) = atBase f t
+atBase f (Project _ t ) = atBase f t
+atBase f (Limit t _) = atBase f t
+atBase f i = error $ "atBase " <> show i
+
 
 tableName (Base _ (From t  _)) = tableName t
 tableName (Raw _ t _ _ _ _ ) = t
@@ -174,17 +233,19 @@ showTable (Project s t) = "(SELECT " <> T.intercalate ","  (renderAttribute <$> 
 showTable (Reduce j t p) =  "SELECT " <> T.intercalate "," (fmap keyValue (S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <> " FROM " <>   showTable p  <> " GROUP BY " <> T.intercalate "," (fmap keyValue (S.toList j))
 showTable (Limit t v) = showTable t <> " LIMIT 100"
 
+insert conn kv (Raw sch tbl _ _ _ _) = execute conn (fromString $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
 
 dropTable (Raw sch tbl _ _ _ _ )= "DROP TABLE "<> sch <>"."<> tbl
 
 createTable (Raw sch tbl pk _ fk attr) = "CREATE TABLE " <> sch <>"."<> tbl <> "\n(\n" <> T.intercalate "," commands <> "\n)"
-  where commands = (renderAttr <$> S.toList attr ) <> [renderPK]
-        renderAttr (Key name _ ty) = name <> " " <> renderTy ty
+  where commands = (renderAttr <$> S.toList attr ) <> [renderPK] <> fmap renderFK (S.toList fk)
+        renderAttr k = keyValue k <> " " <> renderTy (keyType k)
         renderKeySet pk = T.intercalate "," (fmap keyValue (S.toList pk ))
         renderTy (KOptional ty) = renderTy ty <> " NOT NULL"
         renderTy (Array ty) = renderTy ty <> "[] "
-        renderTy (Primitive ty) = ty
+        renderTy (Primitive ty ) = ty
         renderPK = "CONSTRAINT " <> tbl <> "_PK PRIMARY KEY (" <>  renderKeySet pk <> ")"
+        renderFK (Path origin table end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY (" <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
 
 
 joinPath ((Path i ll j)) (Just p)  = Just $  addJoin  ll ( i `S.union` j)  p
@@ -269,8 +330,6 @@ reduce group aggr = do
   put (schema,createAggregate schema group aggr table)
   return ()
 
-
-
 freeVars (Metric c) = [c]
 freeVars (Rate c k ) = freeVars c <> freeVars k
 freeVars (Prod c k ) = freeVars c <> freeVars k
@@ -285,7 +344,12 @@ predicate filters = do
 
 
 data PK a
-  = PK { pkKey:: [a], pkDescription :: [a]} deriving(Functor,Foldable,Traversable)
+  = PK { pkKey:: [a], pkDescription :: [a]} deriving(Functor,Foldable,Traversable,Eq,Ord)
+
+
+instance Show a => Show (PK a)  where
+  show (PK i []) = intercalate "," $ fmap show i
+  show (PK i j ) = intercalate  "," $ fmap show j
 
 projectDesc
      :: QueryT (PK Key)
@@ -327,7 +391,7 @@ baseDescKeys (Base _ p) = from baseDescKeys p
 
 
 allKeys :: Table -> Set Key
-allKeys (Raw _ _ _ _ _ p) = p
+allKeys (Raw _ _ pk _ fk p) = S.unions  $ [pk,p] <> fmap (\(Path _ _ i) -> i) (S.toList fk)
 allKeys (Limit p _ ) = allKeys p
 allKeys (Filtered _ p) = allKeys p
 allKeys (Project _ p) = allKeys p
