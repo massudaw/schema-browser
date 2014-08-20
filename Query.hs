@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
@@ -12,11 +13,13 @@
 module Query where
 
 import Warshal
+import Data.Typeable
 import Data.Vector(Vector)
 import qualified Data.Foldable as F
 import Data.Foldable (Foldable)
 import Data.Char ( isAlpha )
 import Data.Maybe
+import qualified Numeric.Interval as Interval
 import Data.Monoid hiding (Product)
 
 import qualified Data.Text.Lazy as T
@@ -52,12 +55,13 @@ import Debug.Trace
 
 import Data.Unique
 
-data Prim
+data KPrim
    = PText
    | PInt
    | PDouble
    | PDate
    | PTimestamp
+   | PPosition
    deriving(Eq,Ord)
 
 textToPrim "character varying" = PText
@@ -71,14 +75,14 @@ textToPrim "integer" = PInt
 textToPrim "smallint" = PInt
 textToPrim "timestamp without time zone" = PTimestamp
 textToPrim "date" = PDate
+textToPrim "POINT" = PPosition
 textToPrim i = error $ "no case for type " <> T.unpack i
-
-
 
 
 data KType a
    = Primitive a
-   | Array (KType a)
+   | KArray (KType a)
+   | KInterval (KType a)
    | KOptional (KType a)
    deriving(Eq,Ord,Functor)
 
@@ -86,8 +90,9 @@ instance Show (KType Text) where
   show = T.unpack . showTy
 
 showTy (Primitive i ) = i
-showTy (Array i) = showTy i <> "[]"
+showTy (KArray i) = showTy i <> "[]"
 showTy (KOptional i) = showTy i <> "*"
+showTy (KInterval i) = showTy i <> "()"
 
 data Key
     = Key
@@ -142,15 +147,19 @@ renderAttribute (Prod m1 m2 ) =  renderAttribute m1 <> "*" <> renderAttribute m2
 renderAttribute (Rate m1 m2 ) = renderAttribute m1 <> "/" <> renderAttribute m2
 renderAttribute (Agg m2  ) = renderAggr renderAttribute m2
 
+newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read)
+
 data Showable
   = Showable Text
   | Numeric Int
   | DNumeric Double
   | DTimestamp LocalTimestamp
+  | SPosition Position
   | DDate Date
   | SOptional (Maybe Showable)
   | SComposite (Vector Showable)
-  deriving(Ord,Eq,Read)
+  | SInterval (Interval.Interval Showable)
+  deriving(Ord,Eq)
 
 
 instance Show Showable where
@@ -159,7 +168,9 @@ instance Show Showable where
   show (DNumeric a) = show a
   show (SOptional a) = show a
   show (DDate a) = show a
+  show (SInterval a) = show a
   show (DTimestamp a) = show a
+  show (SPosition a) = show a
 
 
 data Filter
@@ -212,6 +223,11 @@ joinKeys (Join b k _ p) = fmap (b,) (S.toList k) <> joinKeys p
 
 renderNamespacedKeySet (t,k) = tableName t <> "." <> keyValue k
 
+isKOptional (KOptional i) = True
+isKOptional (KInterval i) = isKOptional i
+isKOptional (Primitive _ ) = False
+isKOptional (KArray i)  = isKOptional i
+
 -- Generate a sql query from the AST
 showTable :: Table -> Text
 showTable (Filtered f t) = filterTable (fmap (\(k,f) -> (t,k,f) ) f ) t
@@ -224,7 +240,9 @@ showTable b@(Base k p) = " FROM (SELECT " <> (T.intercalate "," $ ( keyValue <$>
     attrs = S.filter (not . (`S.member` (S.fromList $ fmap snd jattrs) )) $ allKeys b
     jattrs = nubBy (\ i j-> snd i == snd j) $ joinKeys p
     joinQuerySet (From b _) =  " FROM " <>  showTable b
-    joinQuerySet (Join b _ r p) = joinQuerySet p <>  " JOIN " <> showTable b <> joinPredicate (S.toList r) b
+    joinQuerySet (Join b _ r p)
+      |  any (\(Key _ _ _ k )-> isKOptional k ) (snd <$> S.toList r)  = joinQuerySet p <>  " LEFT JOIN " <> showTable b <> joinPredicate (S.toList r) b
+      | otherwise  = joinQuerySet p <>  " JOIN " <> showTable b <> joinPredicate (S.toList r) b
       where joinPredicate r b = " ON " <> T.intercalate " AND " ( fmap (\(t,f) -> tableName t <> "." <> keyValue f <> " = " <> tableName b <> "." <> keyValue f )  r )
 
 
@@ -233,7 +251,17 @@ showTable (Project s t) = "(SELECT " <> T.intercalate ","  (renderAttribute <$> 
 showTable (Reduce j t p) =  "SELECT " <> T.intercalate "," (fmap keyValue (S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <> " FROM " <>   showTable p  <> " GROUP BY " <> T.intercalate "," (fmap keyValue (S.toList j))
 showTable (Limit t v) = showTable t <> " LIMIT 100"
 
-insert conn kv (Raw sch tbl _ _ _ _) = execute conn (fromString $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
+update conn kv kold (Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShowId $ T.unpack update )  (fmap snd kv <> koldPk)
+  where
+    koldM = M.fromList kold
+    equality (k,v)= keyValue k <> "="  <> "?"
+    koldPk = fmap (\i-> fromJust $ M.lookup i koldM) (S.toList pk)
+    pred   =" WHERE " <> T.intercalate "," (fmap  equality koldPk)
+    setter = " SET " <> T.intercalate "," (fmap equality kv)
+    values = " (" <> T.intercalate "," (fmap (const "?") kv) <> ")"
+    update = "UPDATE " <> sch <>"."<> tbl <> setter <>  pred <> values
+
+insert conn kv (Raw sch tbl _ _ _ _) = execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
 
 dropTable (Raw sch tbl _ _ _ _ )= "DROP TABLE "<> sch <>"."<> tbl
 
@@ -242,7 +270,7 @@ createTable (Raw sch tbl pk _ fk attr) = "CREATE TABLE " <> sch <>"."<> tbl <> "
         renderAttr k = keyValue k <> " " <> renderTy (keyType k)
         renderKeySet pk = T.intercalate "," (fmap keyValue (S.toList pk ))
         renderTy (KOptional ty) = renderTy ty <> " NOT NULL"
-        renderTy (Array ty) = renderTy ty <> "[] "
+        renderTy (KArray ty) = renderTy ty <> "[] "
         renderTy (Primitive ty ) = ty
         renderPK = "CONSTRAINT " <> tbl <> "_PK PRIMARY KEY (" <>  renderKeySet pk <> ")"
         renderFK (Path origin table end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY (" <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"

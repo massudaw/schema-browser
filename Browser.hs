@@ -1,23 +1,36 @@
-{-# LANGUAGE RecursiveDo,RankNTypes,NoMonomorphismRestriction,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+{-# LANGUAGE RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 import Query
+import System.IO.Memoize
+import Debug.Trace
 import Schema
+import Postgresql
 import Data.Maybe
+import Data.Distributive
 import Text.Read
+import Data.Typeable
+import Data.Time.Parse
 import Reactive.Threepenny
+import           Database.PostgreSQL.Simple.Arrays as Arrays
 import Data.Graph(stronglyConnComp,flattenSCCs)
 import Control.Exception
+import           Data.Attoparsec.Char8 hiding (Result)
 import Data.Traversable (Traversable,traverse)
 import Warshal
+import Data.Time.LocalTime
 import Data.IORef
 import Control.Monad(void,mapM,replicateM,liftM,join)
 import Data.Functor.Compose
+import qualified Database.PostgreSQL.Simple.TypeInfo.Static as TI
 import qualified Data.List as L
 import Data.Vector(Vector)
+import qualified Numeric.Interval as Interval
+import qualified Numeric.Interval.Internal as NI
 import qualified Data.ByteString.Char8 as BS
 
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core
 import Data.Monoid
+import Data.Time.Parse
 
 import System.IO.Unsafe
 import Debug.Trace
@@ -31,35 +44,15 @@ import qualified Data.Set as S
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Time
 import Database.PostgreSQL.Simple.Ok
-import qualified Database.PostgreSQL.Simple.FromField as F
+import Database.PostgreSQL.Simple.FromField as F
 import qualified Database.PostgreSQL.Simple.ToField as TF
 import qualified Database.PostgreSQL.Simple.FromRow as FR
 import Data.GraphViz (preview)
 import qualified Data.Map as M
+import Blaze.ByteString.Builder(fromByteString)
+import Blaze.ByteString.Builder.Char8(fromChar)
 import Data.Map (Map)
 import Data.String
-
-data DB = DB { dbName :: String
-          , dbUser :: String
-          , dbPassword :: String
-          , dbHost :: String
-          , dbPort :: String
-          }deriving(Show)
-
-renderPostgresqlConn (DB n u p h pt)
-  = "user=" <> u <> " password=" <> p <> " dbname=" <> n
-
-db = DB "usda" "postgres" "queijo" "localhost" "5432"
-
-
-instance TF.ToField Showable where
-  toField (Showable t) = TF.toField t
-  toField (Numeric t) = TF.toField t
-  toField (DDate t) = TF.toField t
-  toField (DTimestamp t) = TF.toField t
-  toField (DNumeric t) = TF.toField t
-  toField (SOptional t) = TF.toField t
-  toField (SComposite t) = TF.toField t
 
 type QueryCursor t =(t Key, (HashSchema Key Table, Table))
 
@@ -76,47 +69,35 @@ setup conn action k w = void $ do
   element dbInfo # set text (show db)
   span <- chooseKey  conn action k
   dbH <- UI.div # set children [dbInfo]
-  --kH <- UI.div # set children (fmap snd keys)
   getBody w #+ [element dbH]
   getBody w #+ [element span]
 
-defaultType t =
-    case keyType t of
-      KOptional i -> Just (SOptional Nothing)
-      i -> Nothing
 
-readType t =
-    case fmap textToPrim $ keyType t of
-      Primitive PText -> readText
-      Primitive PDouble ->  readDouble
-      Primitive PInt -> readInt
-      Primitive PTimestamp -> readInt
-      Primitive PDate-> readInt
-      KOptional (Primitive PText ) -> readMaybeText
-      KOptional (Primitive PInt )-> readMaybeInt
-      KOptional (Primitive PDouble ) -> readMaybeDouble
-      KOptional (Primitive PTimestamp) -> readMaybeDouble
-      KOptional (Primitive PDate) -> readMaybeDouble
-      i -> error ( "Missing type: " <> show (keyType t))
-    where
-      readInt ""= Nothing
-      readInt i = fmap Numeric . readMaybe $ i
-      readDouble ""= Nothing
-      readDouble i = fmap DNumeric . readMaybe $ i
-      readText "" = Nothing
-      readText i = fmap Showable . readMaybe $  "\"" <> i <> "\""
-      readMaybeText "" = Just $ SOptional Nothing
-      readMaybeText i = fmap (SOptional . Just . Showable) . readMaybe $  "\"" <> i <> "\""
-      readMaybeInt "" = Just $ SOptional Nothing
-      readMaybeInt i = fmap (SOptional . Just . Numeric) . readMaybe $ i
-      readMaybeDouble "" = Just $ SOptional Nothing
-      readMaybeDouble i = fmap (SOptional . Just . DNumeric) . readMaybe $i
+safeTail [] = []
+safeTail i = tail i
 
 allMaybes i = case all isJust i of
         True -> Just $ catMaybes i
         False -> Nothing
 
-crudUI conn (proj,action) table@(Raw s t pk desc fk allI) = do
+distMaybeList Nothing = []
+distMaybeList (Just i) = fmap Just i
+
+renderShowable (SOptional i ) = maybe "" show i
+renderShowable (SInterval i)  = renderShowable (Interval.inf i) <> "," <> renderShowable (Interval.sup i)
+renderShowable i = show i
+
+crudUI conn (proj,action) table@(Raw s t pk desc fk allI) initial = do
+  let
+    initialMap :: Tidings (Maybe (Map Key Showable))
+    initialMap = fmap (M.fromList . zip (S.toList $ pk <> allI)) <$> initial
+    lookupIMs :: [Key] -> Tidings (Maybe [Showable])
+    lookupIMs ks = allMaybes <$> ( (\m ks -> fmap (\ki->  join $ fmap (M.lookup ki) m) ks) <$> initialMap <*> pure ks)
+    lookupIM :: Key -> Tidings (Maybe Showable)
+    lookupIM k = join .fmap ( M.lookup k) <$> initialMap
+    forceDefaultType k (Just i ) = renderShowable i
+    forceDefaultType k (Nothing) = ""
+
   body <- UI.div
   let fkSet = S.unions $ fmap (\(Path o t ifk) ->  ifk)  (S.toList fk)
       paint e b = element e # sink UI.style (fmap (\i-> case i of
@@ -124,18 +105,41 @@ crudUI conn (proj,action) table@(Raw s t pk desc fk allI) = do
         Nothing -> [("background-color","red")]) b )
   attrs <- mapM (\i-> do
       l<- UI.span # set text (show i)
-      m<- UI.input
-      pk <- stepper (defaultType i) $ fmap (readType i) $ UI.valueChange m
+      let tdi = forceDefaultType i <$> lookupIM i
+      m<- UI.input # sink UI.value (facts tdi)
+      let pke = fmap (readType i) $ unionWith const (UI.valueChange m) (rumors tdi)
+      pk <- stepper (defaultType i)  pke
+      let pkt = tidings pk pke
+          ei (Just a) = Just a
+          ei Nothing = defaultType i
+          edited = (\o j-> if o == ei j then Nothing else j) <$> pkt <*> lookupIM i
+          editedFlag (Just i) = "*" <> renderShowable i
+          editedFlag Nothing = ""
+      edited <- UI.span # sink text (fmap editedFlag (facts edited))
       paint l pk
-      sp <- UI.li # set children [l,m]
+      sp <- UI.li # set children [l,m,edited]
       return (sp,fmap (i,) <$> pk)) $ filter (not. (`S.member` fkSet)) $ S.toList (pk <> allI)
   fks <- mapM (\(Path o t ifk) -> do
       res <- liftIO $ proj $ action projectDesc ifk
-      box <- UI.listBox (pure res) (pure Nothing)  (pure (\v-> UI.span # set text (show v)))
+      let tdi = fmap (\i-> PK  i i ) <$> lookupIMs ( S.toList ifk)
+      box <- UI.listBox (pure res) tdi (pure (\v-> UI.span # set text (show v)))
       l<- UI.span # set text (show $ S.toList ifk)
-      let fksel = fmap pkKey <$> facts (UI.userSelection box)
+      let
+          pkt :: Tidings (Maybe (PK Showable))
+          pkt = UI.userSelection box
+          ei i (Just a) = Just a
+          ei i Nothing = defaultType i
+          olds :: Tidings [Maybe Showable]
+          olds = foldr (liftA2 (:)) (pure []) $ fmap lookupIM (S.toList ifk)
+          edited :: Tidings [Maybe Showable]
+          edited = (\k o j-> if (distMaybeList $ fmap pkKey o) == liftA2 ei k j then fmap (const Nothing) k else j) <$> pure (S.toList ifk) <*> pkt <*> olds
+          editedListFlag (Just i) = "*" <> L.intercalate "," (fmap renderShowable i)
+          editedListFlag Nothing = ""
+      edited <- UI.span # sink text (editedListFlag . allMaybes <$> (facts edited))
+      let fksel = fmap pkKey <$>  facts (UI.userSelection box)
       paint (getElement l) fksel
-      fk <- UI.li # set  children [l, getElement box]
+
+      fk <- UI.li # set  children [l, getElement box,edited]
       return (fk,fmap (zip (S.toList ifk)) <$> fksel )) (S.toList fk)
   let attrsB = foldr (liftA2 (:))  (pure [])  (snd <$> attrs)
   let fkattrsB = foldr (liftA2 (:)) (fmap (fmap (\i-> [i])) <$> attrsB) (snd <$> fks)
@@ -154,35 +158,27 @@ crudUI conn (proj,action) table@(Raw s t pk desc fk allI) = do
   return body
 
 
-
-filterKey (k,f) = do
-  label <- UI.span # set text (show k)
-  elems <- mapM (\(Category i)-> mapM (\j-> UI.li # set text (show j)) (S.toList i)) f
-  body <- UI.span # set children (concat elems )
-  remove <- UI.button # set text "Remove"
-  UI.div # set children [label,remove,body]
-
-insdel :: (Ord a,Ord b,Show a,Show b) => Behavior [(a,[b])] -> UI (TrivialWidget (Map a [b]))
+insdel :: (Ord a,Ord b,Show a,Show b) => Behavior (Map a [b]) -> UI (TrivialWidget (Map a [b]))
 insdel binsK =do
-  add <- UI.button # set text "ADD"
-  remove <- UI.button # set text "REMOVE"
+  add <- UI.button # set text "Save"
+  remove <- UI.button # set text "Delete"
   res <- filterWB (UI.click add) (UI.click remove) binsK
   out <- UI.div # set children [getElement res,add,remove]
   return $ TrivialWidget (triding res ) out
 
 filterWB emap erem bkin = mdo
   let initialB = pure map
-      insB = concatenate . fmap (uncurry $ M.insertWith (<>)) <$> bkin
+      insB =  M.unionWith mappend <$> bkin
       delB = fmap M.delete <$> bsel2
       recAdd = insB <@ emap
-      recDel = filterJust $  delB <@ erem
+      recDel = filterJust $ delB <@ erem
   let recE = (unionWith (.) recAdd recDel )
   recB <- accumB M.empty  (unionWith (.) recAdd recDel )
   let sk i = UI.li # set text (show i)
   resSpan <- UI.listBox  (fmap M.toList recB) (pure Nothing) (pure sk)
   element resSpan # set (attr "size") "10" # set style [("width","400px")]
-  let ev = rumors (UI.userSelection resSpan)
-  bsel2 <- stepper Nothing (fmap fst <$> ev)
+  let ev = fmap fst <$> rumors (UI.userSelection resSpan)
+  bsel2 <- stepper Nothing ev
   -- Return the widget and create an event after addition and removal
   return $ tri (getElement resSpan) recB (recB <@ recE)
 
@@ -195,9 +191,6 @@ instance Widget (TrivialWidget  a) where
   getElement (TrivialWidget t e) = e
 
 
-filterDiv f = do
-  keys <- mapM filterKey (M.toList f)
-  UI.div # set children keys
 
 
 buttonSet ks h =do
@@ -207,13 +200,14 @@ buttonSet ks h =do
   bv <-stepper (head ks) (evs)
   return (dv,tidings bv evs)
 
-invertPK  (PK k [] ) = fmap (\i -> PK [i] []) k
-invertPK  (PK k d ) = zipWith (\i j -> PK [i] [j]) k d
 
 buttonString  h  k= do
   b <- UI.button # set text (h k)
   let ev = pure k <@ UI.click  b
   return (b,ev)
+
+invertPK  (PK k [] ) = fmap (\i -> PK [i] []) k
+invertPK  (PK k d ) = zipWith (\i j -> PK [i] [j]) k d
 
 projectFk action k = case M.keys <$> M.lookup k schema of
                 Just l -> k : fmap S.singleton l
@@ -235,8 +229,23 @@ doQuery (p,a) q f arg  = p $ a (do
 items :: WriteAttr Element [UI Element]
 items = mkWriteAttr $ \i x -> void $ return x # set children [] #+ i
 
-unsafeMapIOT :: (a -> IO b) -> Tidings a -> Tidings b
-unsafeMapIOT f x = tidings (unsafeMapIOB f $ facts x) (unsafeMapIO f $ rumors x)
+joinT :: MonadIO m => Tidings (IO a) -> m (Tidings a)
+joinT = mapT id
+
+delayT :: MonadIO m => Tidings a -> m (Tidings a)
+delayT x = do
+  c <- currentValue  (facts x)
+  bh <- stepper c (rumors x)
+  return $ tidings bh (rumors x)
+
+mapT :: MonadIO m => (a -> IO b) -> Tidings a -> m (Tidings b)
+mapT f x =  do
+  let ev = unsafeMapIO (trace "executed" . f) $ rumors x
+  c <- currentValue  (facts x)
+  b <- liftIO $ f c
+  bh <- stepper b ev
+  return $ tidings bh ev
+
 
 
 chooseKey
@@ -246,89 +255,47 @@ chooseKey
          -> S.Set Key -> QueryCursor t ))
      -> [S.Set Key] -> UI Element
 chooseKey conn c@(proj,action) kitems = mdo
+  -- Base Button Set
   (eBset,bBset) <- buttonSet kitems showVertex
-  let bFk = fmap (projectFk action) (facts bBset)
-  fkbox <- UI.listBox bFk (fmap Just $ facts bBset) (pure (\i-> UI.li # set text (showVertex i)))
+  -- Filter Box (Saved Filter)
+  ff  <- insdel (facts filterT)
+  -- Filterable Keys
+  let bFk = fmap (projectFk action) bBset
+  fkbox <- UI.listBox (facts bFk) (fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
   let bkev =  filterJust (rumors $ UI.userSelection fkbox)
-  ff  <- insdel filterB
-  let
-    bp =  unsafeMapIOT id $ doQuery c projectDesc <$> triding ff <*> (fmap fromJust $ UI.userSelection fkbox)
-    vp = unsafeMapIOT id $ doQuery c projectAll <$> (M.unionWith mappend <$> (M.fromListWith mappend <$> filterT) <*> triding ff ) <*>  bBset
+  -- Filter Query
+  bp <- joinT $ doQuery c projectDesc <$> triding ff <*> (fmap fromJust $ UI.userSelection fkbox)
+  -- Filter Selector
   let line n = UI.li # set  text (show n)
   filterItemBox <- UI.listBox (facts bp) (pure Nothing) (pure (\i-> UI.li # set text (show i)))
-  -- Filter Selector Behaviour
+  -- Filter Map Selected
   let
     filterMaybe f (Just i ) = f i
     filterMaybe _ _  = []
-    filterB = facts filterT
-    filterT :: Tidings [(Key,[Filter])]
-    filterT = filterMaybe (fmap (\(fkv,kv)-> (fkv,[Category (S.fromList [kv])]))) <$> arg
+    filterT :: Tidings (Map Key [Filter])
+    filterT = M.fromListWith mappend <$> (filterMaybe (fmap (\(fkv,kv)-> (fkv,[Category (S.fromList [kv])]))) <$> arg)
       where arg :: Tidings (Maybe [(Key, PK Showable)])
             arg = liftA2 (zipWith (,)) <$> (fmap S.toList  <$> UI.userSelection fkbox ) <*> (fmap invertPK <$> UI.userSelection filterItemBox)
 
-  bDivRes <- UI.div  # sink items (fmap line <$> (facts vp))
+  -- Final Query (Saved Filter <> Filter Map Selected)
+  vp <- joinT $ doQuery c projectAll <$> (M.unionWith mappend <$>  filterT <*> triding ff ) <*>  bBset
+  -- Final Query ListBox
+  itemList <- UI.listBox (facts vp) (const <$> pure Nothing <*> bFk) (pure (\i -> line i))
+  element (getElement itemList) # set UI.multiple True
+  element (getElement filterItemBox) # set UI.multiple True
   let bCrud  = fmap (\k -> [do
       let (_,(schema,table)) = action (project (fmap Metric (S.toList k))) k
           filterOptions = case M.keys <$> M.lookup k schema of
                     Just l -> k : fmap S.singleton l
                     Nothing -> [k]
-      crud <- atBase (crudUI conn c) table
+      crud <- atBase (crudUI conn c) table $ (UI.userSelection itemList)
       return crud]) (facts bBset)
   insertDiv <- UI.div # sink items bCrud
-  UI.span # set children [getElement ff,eBset,getElement fkbox,getElement filterItemBox,insertDiv,bDivRes]
+  filterSel <- UI.div # set children [getElement fkbox]
+  filterSel2 <- UI.div # set children [getElement filterItemBox]
+  UI.div # set children [getElement ff,eBset,filterSel,filterSel2,insertDiv,getElement itemList ]
   -- Result
 
-
-renderedType key = \f b ->
-   case F.name f  of
-      Just name -> let
-          go ::  KType Text
-                -> F.Conversion Showable
-          go t = case t of
-            (KOptional (Primitive i)) -> SOptional <$> prim name (textToPrim i) f b
-            (Array (Primitive i)) -> SComposite <$> prim name (textToPrim i) f b
-            (KOptional (Array (Primitive i))) ->  fmap (SOptional . fmap SComposite . getCompose ) $ prim name (textToPrim i) f b
-            (Primitive i) ->  fmap unOnly $ prim  name (textToPrim i) f b
-          in case (keyValue key == T.fromStrict (TE.decodeUtf8 name)) of
-              True ->  go (keyType key)
-              False -> error $ "no match type for " <> BS.unpack name <> " with key" <> show key
-      Nothing -> error "no name for field"
-     where
-
-
-unOnly :: Only a -> a
-unOnly (Only i) = i
-
-prim :: (F.FromField (f1 LocalTimestamp),F.FromField (f1 Date),F.FromField (f1 Text), F.FromField (f1 Double), F.FromField (f1 Int), Functor f1) =>
-          BS.ByteString
-        -> Prim
-        -> F.Field
-        -> Maybe BS.ByteString
-        -> F.Conversion (f1 Showable)
-prim  name p f b = case p of
-            PText ->  s $ F.fromField f b
-            PInt -> n $ F.fromField  f b
-            PDouble -> d $ F.fromField  f b
-            PDate -> da $ F.fromField  f b
-            PTimestamp -> t $ F.fromField  f b
-  where
-    s = fmap (fmap Showable)
-    n = fmap (fmap Numeric)
-    d = fmap (fmap DNumeric)
-    da = fmap (fmap DDate)
-    t = fmap (fmap DTimestamp)
-
-instance (F.FromField (f (g a))) => F.FromField (Compose f g a) where
-   fromField = fmap (fmap (fmap (Compose ) )) $ F.fromField
-
-instance F.FromField a => F.FromField (Only a) where
-  fromField = fmap (fmap (fmap Only)) F.fromField
-
-
-fromShowableList foldable = do
-    let keyMap = keySetToMap foldable
-    n <- FR.numFieldsRemaining
-    traverse (FR.fieldWith . renderedType) foldable
 
 keySetToMap ks = M.fromList $  fmap (\(Key k _ _ t)-> (toStrict $ encodeUtf8 k,t))  (F.toList ks)
 
@@ -341,19 +308,16 @@ projectKey
          -> S.Set Key -> (t Key, (HashSchema Key Table, Table)))
 projectKey conn baseTables hashGraph = (\(j,(h,i)) -> queryWith_ (fromShowableList j) conn . traceShowId . buildQuery $ i, projectAllKeys baseTables hashGraph )
 
-withConn action = do
-  conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda "
-  action conn
-
 topSortTables tables = flattenSCCs $ stronglyConnComp item
   where item = fmap (\n@(Raw _ t k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
 
 main :: IO ()
 main = do
-  let schema = "public"
-  conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
-  --conn <- connectPostgreSQL "user=postgres password=queijo dbname=test"
-  inf@(k,baseTables) <- keyTables conn  schema
+  --let schema = "public"
+  --conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
+  let schema = "health"
+  conn <- connectPostgreSQL "user=postgres password=queijo dbname=test"
+  inf@(k,baseTables,_) <- keyTables conn  schema
   {-  let sorted = topSortTables (M.elems baseTables)
 
   print "DROPPING TABLES"
