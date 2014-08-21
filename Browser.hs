@@ -28,7 +28,7 @@ import qualified Numeric.Interval.Internal as NI
 import qualified Data.ByteString.Char8 as BS
 
 import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Core
+import Graphics.UI.Threepenny.Core hiding (delete)
 import Data.Monoid
 import Data.Time.Parse
 
@@ -64,31 +64,23 @@ setup
      -> [S.Set Key] -> Window -> UI ()
 setup conn action k w = void $ do
   return w # set title "Data Browser"
-  dbInfo <- UI.span
-  UI.button
-  element dbInfo # set text (show db)
   span <- chooseKey  conn action k
-  dbH <- UI.div # set children [dbInfo]
-  getBody w #+ [element dbH]
   getBody w #+ [element span]
 
-
-safeTail [] = []
-safeTail i = tail i
 
 allMaybes i = case all isJust i of
         True -> Just $ catMaybes i
         False -> Nothing
 
-distMaybeList Nothing = []
-distMaybeList (Just i) = fmap Just i
-
+renderShowable :: Showable -> String
 renderShowable (SOptional i ) = maybe "" show i
 renderShowable (SInterval i)  = renderShowable (Interval.inf i) <> "," <> renderShowable (Interval.sup i)
 renderShowable i = show i
 
 crudUI conn (proj,action) table@(Raw s t pk desc fk allI) initial = do
   let
+    oldItems :: Tidings (Maybe [(Key,Showable)])
+    oldItems = fmap (zip (S.toList $ pk <> allI)) <$> initial
     initialMap :: Tidings (Maybe (Map Key Showable))
     initialMap = fmap (M.fromList . zip (S.toList $ pk <> allI)) <$> initial
     lookupIMs :: [Key] -> Tidings (Maybe [Showable])
@@ -97,7 +89,6 @@ crudUI conn (proj,action) table@(Raw s t pk desc fk allI) initial = do
     lookupIM k = join .fmap ( M.lookup k) <$> initialMap
     forceDefaultType k (Just i ) = renderShowable i
     forceDefaultType k (Nothing) = ""
-
   body <- UI.div
   let fkSet = S.unions $ fmap (\(Path o t ifk) ->  ifk)  (S.toList fk)
       paint e b = element e # sink UI.style (fmap (\i-> case i of
@@ -112,41 +103,64 @@ crudUI conn (proj,action) table@(Raw s t pk desc fk allI) initial = do
       let pkt = tidings pk pke
           ei (Just a) = Just a
           ei Nothing = defaultType i
-          edited = (\o j-> if o == ei j then Nothing else j) <$> pkt <*> lookupIM i
+          edited = (\o j-> if o == ei j then Nothing else liftA2 (,) o j) <$> pkt <*> lookupIM i
           editedFlag (Just i) = "*" <> renderShowable i
           editedFlag Nothing = ""
-      edited <- UI.span # sink text (fmap editedFlag (facts edited))
+      e <- UI.span # sink text (editedFlag . fmap snd <$> (facts edited))
       paint l pk
-      sp <- UI.li # set children [l,m,edited]
-      return (sp,fmap (i,) <$> pk)) $ filter (not. (`S.member` fkSet)) $ S.toList (pk <> allI)
+      sp <- UI.li # set children [l,m,e]
+      return (sp,liftA2 (,) (fmap(i,) . fmap fst <$> (facts edited) ) (fmap (i,) <$> pk))) $ filter (not. (`S.member` fkSet)) $ S.toList (pk <> allI)
   fks <- mapM (\(Path o t ifk) -> do
-      res <- liftIO $ proj $ action projectDesc ifk
+      res <- trace "combo" $ liftIO $ proj $ action projectDesc ifk
       let tdi = fmap (\i-> PK  i i ) <$> lookupIMs ( S.toList ifk)
       box <- UI.listBox (pure res) tdi (pure (\v-> UI.span # set text (show v)))
       l<- UI.span # set text (show $ S.toList ifk)
       let
           pkt :: Tidings (Maybe (PK Showable))
           pkt = UI.userSelection box
-          ei i (Just a) = Just a
-          ei i Nothing = defaultType i
-          olds :: Tidings [Maybe Showable]
-          olds = foldr (liftA2 (:)) (pure []) $ fmap lookupIM (S.toList ifk)
-          edited :: Tidings [Maybe Showable]
-          edited = (\k o j-> if (distMaybeList $ fmap pkKey o) == liftA2 ei k j then fmap (const Nothing) k else j) <$> pure (S.toList ifk) <*> pkt <*> olds
+          ei :: [Key] -> Maybe [Showable] -> Maybe [Showable]
+          ei i Nothing = allMaybes $ fmap defaultType i
+          ei i d = d
+          olds :: Tidings (Maybe [Showable])
+          olds = allMaybes <$> (foldr (liftA2 (:)) (pure []) $ fmap lookupIM (S.toList ifk))
+          edited :: Tidings (Maybe [(Showable,Showable)])
+          edited = (\k o j-> if (fmap pkKey o) == ei k j then Nothing else liftA2 zip (fmap pkKey o) j) <$> pure (S.toList ifk) <*> pkt <*> olds
           editedListFlag (Just i) = "*" <> L.intercalate "," (fmap renderShowable i)
           editedListFlag Nothing = ""
-      edited <- UI.span # sink text (editedListFlag . allMaybes <$> (facts edited))
+      e <- UI.span # sink text (editedListFlag . fmap (fmap snd) <$> facts edited)
       let fksel = fmap pkKey <$>  facts (UI.userSelection box)
       paint (getElement l) fksel
 
-      fk <- UI.li # set  children [l, getElement box,edited]
-      return (fk,fmap (zip (S.toList ifk)) <$> fksel )) (S.toList fk)
-  let attrsB = foldr (liftA2 (:))  (pure [])  (snd <$> attrs)
-  let fkattrsB = foldr (liftA2 (:)) (fmap (fmap (\i-> [i])) <$> attrsB) (snd <$> fks)
-  insertB <- UI.button  # sink UI.enabled (fmap (all isJust)  fkattrsB) # set text "INSERT"
+      fk <- UI.li # set  children [l, getElement box,e]
+      let bres = liftA2 (,) (fmap (zip (S.toList ifk)). fmap (fmap fst) <$> facts edited ) (fmap (zip (S.toList ifk)) <$> fksel)
+          --bres = (fmap (zip (S.toList ifk)) <$> fksel)
+      return (fk,bres)) (S.toList fk)
+
+  let
+    buildList' i j = foldr (liftA2 (:)) (fmap (fmap (\i-> [i])) <$> buildList i) j
+        where buildList = foldr (liftA2 (:))  (pure [])
+    fkattrsB = buildList'  (fmap snd .snd <$> attrs) (fmap snd .snd <$> fks)
+    efkattrsB = buildList' (fmap fst . snd <$> attrs) (fmap fst . snd <$> fks)
+
+  insertB <- UI.button  # sink UI.enabled (fmap (all isJust)  (fkattrsB)) # set text "INSERT"
+  editB <- UI.button  # sink UI.enabled (liftA2 (&&) (fmap (any isJust)  (efkattrsB)) (fmap (all isJust)  (fkattrsB))) # set text "EDIT"
+  deleteB <- UI.button  # sink UI.enabled (isJust <$> facts oldItems) # set text "DELETE"
   end <- UI.div
+  on UI.click editB $ const $ do
+    i <- catMaybes <$> currentValue efkattrsB
+    k <- fromJust <$> currentValue (facts oldItems)
+    res <- liftIO $ catch (Right <$> update conn (concat i) k table) (\e -> return $ Left (show (e :: SqlError) ))
+    case res of
+      Right _ -> return ()
+      Left v -> element end # set text v >> return ()
+  on UI.click deleteB $ const $ do
+    k <- fromJust <$> currentValue (facts oldItems)
+    res <- liftIO $ catch (Right <$> delete conn k table) (\e -> return $ Left (show (e :: SqlError) ))
+    case res of
+      Right _ -> return ()
+      Left v -> element end # set text v >> return ()
   on UI.click insertB $ const $ do
-    k <- currentValue fkattrsB
+    k <- currentValue (fkattrsB)
     case allMaybes k of
       Just i ->  do
         res <- liftIO $ catch (Right <$> insert conn (concat i) table) (\e -> return $ Left (show (e :: SqlError) ))
@@ -154,7 +168,7 @@ crudUI conn (proj,action) table@(Raw s t pk desc fk allI) initial = do
           Right _ -> return ()
           Left v -> element end # set text v >> return ()
       Nothing -> return ()
-  element body # set children ((fst <$> attrs ) <> (fst <$> fks) <> [insertB,end])
+  element body # set children ((fst <$> attrs ) <> (fst <$> fks) <> [insertB,editB,deleteB,end])
   return body
 
 
@@ -166,45 +180,50 @@ insdel binsK =do
   out <- UI.div # set children [getElement res,add,remove]
   return $ TrivialWidget (triding res ) out
 
+-- Generate a accum the behaviour and generate the ahead of promised event
+accumT :: MonadIO m => a -> Event (a -> a) -> m (Tidings a)
+accumT e ev = do
+  b <- accumB e ev
+  return $ tidings b (flip ($) <$> b <@> ev)
+
+accumTs :: MonadIO m => a -> [Event (a -> a)] -> m (Tidings a)
+accumTs e = accumT e . foldr1 (unionWith (.))
+
+
 filterWB emap erem bkin = mdo
-  let initialB = pure map
+  let
       insB =  M.unionWith mappend <$> bkin
       delB = fmap M.delete <$> bsel2
       recAdd = insB <@ emap
-      recDel = filterJust $ delB <@ erem
-  let recE = (unionWith (.) recAdd recDel )
-  recB <- accumB M.empty  (unionWith (.) recAdd recDel )
+      recDel = filterJust $ (facts delB) <@ erem
+  recT <- accumTs M.empty  [recAdd,recDel]
   let sk i = UI.li # set text (show i)
-  resSpan <- UI.listBox  (fmap M.toList recB) (pure Nothing) (pure sk)
+  resSpan <- UI.listBox  (fmap M.toList recT) (pure Nothing) (pure sk)
   element resSpan # set (attr "size") "10" # set style [("width","400px")]
-  let ev = fmap fst <$> rumors (UI.userSelection resSpan)
-  bsel2 <- stepper Nothing ev
-  -- Return the widget and create an event after addition and removal
-  return $ tri (getElement resSpan) recB (recB <@ recE)
+  let bsel2 = fmap fst <$> UI.userSelection resSpan
+  -- Return the triding
+  return $ TrivialWidget recT (getElement resSpan)
+
+instance Widget (TrivialWidget  a) where
+  getElement (TrivialWidget t e) = e
 
 data TrivialWidget a =
   TrivialWidget { triding :: (Tidings a) , trielem ::  Element}
 
 tri e b v = TrivialWidget (tidings  b v) e
 
-instance Widget (TrivialWidget  a) where
-  getElement (TrivialWidget t e) = e
-
-
-
 
 buttonSet ks h =do
-  buttons <- mapM (buttonString h)ks
+  buttons <- mapM (buttonString h) ks
   dv <- UI.div # set children (fst <$> buttons)
-  let evs = foldr1 (unionWith (const) )  (snd <$> buttons)
-  bv <-stepper (head ks) (evs)
+  let evs = foldr1 (unionWith (const))  (snd <$> buttons)
+  bv <- stepper (head ks) evs
   return (dv,tidings bv evs)
-
-
-buttonString  h  k= do
-  b <- UI.button # set text (h k)
-  let ev = pure k <@ UI.click  b
-  return (b,ev)
+    where
+      buttonString h k= do
+        b <- UI.button # set text (h k)
+        let ev = pure k <@ UI.click  b
+        return (b,ev)
 
 invertPK  (PK k [] ) = fmap (\i -> PK [i] []) k
 invertPK  (PK k d ) = zipWith (\i j -> PK [i] [j]) k d
@@ -226,27 +245,27 @@ doQuery (p,a) q f arg  = p $ a (do
     filterToPred (k,f) = fmap (k,) f
 
 
-items :: WriteAttr Element [UI Element]
-items = mkWriteAttr $ \i x -> void $ return x # set children [] #+ i
 
 joinT :: MonadIO m => Tidings (IO a) -> m (Tidings a)
 joinT = mapT id
 
-delayT :: MonadIO m => Tidings a -> m (Tidings a)
-delayT x = do
-  c <- currentValue  (facts x)
-  bh <- stepper c (rumors x)
-  return $ tidings bh (rumors x)
 
 mapT :: MonadIO m => (a -> IO b) -> Tidings a -> m (Tidings b)
 mapT f x =  do
-  let ev = unsafeMapIO (trace "executed" . f) $ rumors x
+  let ev = unsafeMapIO f $ rumors x
   c <- currentValue  (facts x)
   b <- liftIO $ f c
   bh <- stepper b ev
   return $ tidings bh ev
 
+items :: WriteAttr Element [UI Element]
+items = mkWriteAttr $ \i x -> void $ return x # set children [] #+ i
 
+adEvent ne t = do
+  c <- currentValue (facts t)
+  let ev = unionWith const (rumors t) ne
+  nb <- stepper c ev
+  return $ tidings nb ev
 
 chooseKey
   :: Connection ->
@@ -261,13 +280,13 @@ chooseKey conn c@(proj,action) kitems = mdo
   ff  <- insdel (facts filterT)
   -- Filterable Keys
   let bFk = fmap (projectFk action) bBset
-  fkbox <- UI.listBox (facts bFk) (fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
-  let bkev =  filterJust (rumors $ UI.userSelection fkbox)
+  fkbox <- UI.listBox bFk (fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
   -- Filter Query
-  bp <- joinT $ doQuery c projectDesc <$> triding ff <*> (fmap fromJust $ UI.userSelection fkbox)
+  bp <- joinT $ trace "bp" .(\i j-> maybe (return []) id (fmap (doQuery c projectDesc i) j)) <$> triding ff <*> UI.userSelection fkbox
+
   -- Filter Selector
   let line n = UI.li # set  text (show n)
-  filterItemBox <- UI.listBox (facts bp) (pure Nothing) (pure (\i-> UI.li # set text (show i)))
+  filterItemBox <- UI.listBox bp (pure Nothing) (pure (\i-> UI.li # set text (show i)))
   -- Filter Map Selected
   let
     filterMaybe f (Just i ) = f i
@@ -278,9 +297,9 @@ chooseKey conn c@(proj,action) kitems = mdo
             arg = liftA2 (zipWith (,)) <$> (fmap S.toList  <$> UI.userSelection fkbox ) <*> (fmap invertPK <$> UI.userSelection filterItemBox)
 
   -- Final Query (Saved Filter <> Filter Map Selected)
-  vp <- joinT $ doQuery c projectAll <$> (M.unionWith mappend <$>  filterT <*> triding ff ) <*>  bBset
+  vp <- joinT $ (trace "vp" . doQuery c projectAll) <$> (M.unionWith mappend <$>  filterT <*> triding ff ) <*>  bBset
   -- Final Query ListBox
-  itemList <- UI.listBox (facts vp) (const <$> pure Nothing <*> bFk) (pure (\i -> line i))
+  itemList <- UI.listBox vp (pure Nothing) (pure (\i -> line i))
   element (getElement itemList) # set UI.multiple True
   element (getElement filterItemBox) # set UI.multiple True
   let bCrud  = fmap (\k -> [do
@@ -313,10 +332,10 @@ topSortTables tables = flattenSCCs $ stronglyConnComp item
 
 main :: IO ()
 main = do
-  --let schema = "public"
-  --conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
-  let schema = "health"
-  conn <- connectPostgreSQL "user=postgres password=queijo dbname=test"
+  let schema = "public"
+  conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
+  -- let schema = "health"
+  -- conn <- connectPostgreSQL "user=postgres password=queijo dbname=test"
   inf@(k,baseTables,_) <- keyTables conn  schema
   {-  let sorted = topSortTables (M.elems baseTables)
 
@@ -339,6 +358,6 @@ main = do
       g1 = warshall graph
       schema = hashGraph  g1
       q = projectKey conn  baseTables schema
+  print baseTables
   startGUI defaultConfig (setup conn q (M.keys baseTables))
-  print "END"
 
