@@ -24,6 +24,7 @@ import Data.Monoid hiding (Product)
 
 import qualified Data.Text.Lazy as T
 
+import GHC.Int
 import Data.GraphViz (preview)
 import Data.Graph.Inductive.PatriciaTree
 import qualified Data.Graph.Inductive.Graph as PG
@@ -251,15 +252,29 @@ showTable (Project s t) = "(SELECT " <> T.intercalate ","  (renderAttribute <$> 
 showTable (Reduce j t p) =  "SELECT " <> T.intercalate "," (fmap keyValue (S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <> " FROM " <>   showTable p  <> " GROUP BY " <> T.intercalate "," (fmap keyValue (S.toList j))
 showTable (Limit t v) = showTable t <> " LIMIT 100"
 
-update conn kv kold (Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShowId $ T.unpack update )  (fmap snd kv <> koldPk)
+delete
+  :: ToField b =>
+     Connection ->  [(Key, b)] -> Table -> IO GHC.Int.Int64
+delete conn kold (Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShowId $ T.unpack del) (fmap snd koldPk)
   where
     koldM = M.fromList kold
-    equality (k,v)= keyValue k <> "="  <> "?"
-    koldPk = fmap (\i-> fromJust $ M.lookup i koldM) (S.toList pk)
-    pred   =" WHERE " <> T.intercalate "," (fmap  equality koldPk)
+    equality (k,_)= keyValue k <> "="  <> "?"
+    koldPk = fmap (\i-> (i,fromJust $ M.lookup i koldM)) (S.toList pk)
+    pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
+    del = "DELETE FROM " <> sch <>"."<> tbl <>   pred
+
+
+update
+  :: ToField b =>
+     Connection -> [(Key, b)] -> [(Key, b)] -> Table -> IO GHC.Int.Int64
+update conn kv kold (Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShowId $ T.unpack up)  (fmap snd kv <> fmap snd koldPk)
+  where
+    koldM = M.fromList kold
+    equality (k,_)= keyValue k <> "="  <> "?"
+    koldPk = fmap (\i-> (i,fromJust $ M.lookup i koldM)) (S.toList pk)
+    pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     setter = " SET " <> T.intercalate "," (fmap equality kv)
-    values = " (" <> T.intercalate "," (fmap (const "?") kv) <> ")"
-    update = "UPDATE " <> sch <>"."<> tbl <> setter <>  pred <> values
+    up = "UPDATE " <> sch <>"."<> tbl <> setter <>  pred
 
 insert conn kv (Raw sch tbl _ _ _ _) = execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
 
@@ -372,8 +387,14 @@ predicate filters = do
 
 
 data PK a
-  = PK { pkKey:: [a], pkDescription :: [a]} deriving(Functor,Foldable,Traversable,Eq,Ord)
+  = PK { pkKey:: [a], pkDescription :: [a]} deriving(Functor,Foldable,Traversable)
 
+
+instance Eq a => Eq (PK a) where
+  i == j = pkKey i == pkKey j
+
+instance Ord a => Ord (PK a) where
+  compare i j = compare (pkKey i) (pkKey j)
 
 instance Show a => Show (PK a)  where
   show (PK i []) = intercalate "," $ fmap show i
