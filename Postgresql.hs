@@ -62,6 +62,22 @@ data DB = DB { dbName :: String
           , dbPort :: String
           }deriving(Show)
 
+textToPrim "character varying" = PText
+textToPrim "text" = PText
+textToPrim "character" = PText
+textToPrim "double precision" = PDouble
+textToPrim "float8" = PDouble
+textToPrim "int4" = PInt
+textToPrim "int8" = PInt
+textToPrim "integer" = PInt
+textToPrim "boolean" = PBoolean
+textToPrim "smallint" = PInt
+textToPrim "timestamp without time zone" = PTimestamp
+textToPrim "date" = PDate
+textToPrim "POINT" = PPosition
+textToPrim i = error $ "no case for type " <> T.unpack i
+
+
 renderPostgresqlConn (DB n u p h pt)
   = "user=" <> u <> " password=" <> p <> " dbname=" <> n
 
@@ -71,8 +87,8 @@ db = DB "usda" "postgres" "queijo" "localhost" "5432"
 newtype UnQuoted a = UnQuoted {unQuoted :: a}
 
 instance TF.ToField (UnQuoted Showable) where
-  toField (UnQuoted (DTimestamp i )) = TF.Plain $ localTimestampToBuilder i
-  toField (UnQuoted (DDate i )) = TF.Plain $ dateToBuilder i
+  toField (UnQuoted (STimestamp i )) = TF.Plain $ localTimestampToBuilder i
+  toField (UnQuoted (SDate i )) = TF.Plain $ dateToBuilder i
   toField i = TF.toField i
 
 instance TF.ToField Position where
@@ -90,15 +106,16 @@ instance TF.ToField (UnQuoted a) => TF.ToField (Interval.Interval a) where
 intervalBuilder i =  TF.Many [TF.Plain $ fromByteString "\'[" ,  TF.toField $  (UnQuoted $ Interval.inf i) , TF.Plain $ fromChar ',' , TF.toField  (UnQuoted $ Interval.sup i) , TF.Plain $ fromByteString "]\'"]
 
 instance TF.ToField Showable where
-  toField (Showable t) = TF.toField t
-  toField (Numeric t) = TF.toField t
-  toField (DDate t) = TF.toField t
-  toField (DTimestamp t) = TF.toField t
-  toField (DNumeric t) = TF.toField t
+  toField (SText t) = TF.toField t
+  toField (SNumeric t) = TF.toField t
+  toField (SDate t) = TF.toField t
+  toField (STimestamp t) = TF.toField t
+  toField (SDouble t) = TF.toField t
   toField (SOptional t) = TF.toField t
   toField (SComposite t) = TF.toField t
   toField (SInterval t) = TF.toField t
   toField (SPosition t) = TF.toField t
+  toField (SBoolean t) = TF.toField t
 
 defaultType t =
     case keyType t of
@@ -107,13 +124,14 @@ defaultType t =
 
 
 readType t =
-    case fmap textToPrim $ keyType t of
+    case fmap textToPrim  t of
       Primitive PText -> readText
       Primitive PDouble ->  readDouble
       Primitive PInt -> readInt
       Primitive PTimestamp -> readTimestamp
       Primitive PDate-> readDate
       Primitive PPosition -> readPosition
+      Primitive PBoolean -> readBoolean
       KInterval (Primitive PTimestamp ) -> inter readTimestamp
       KOptional (KInterval (Primitive PTimestamp )) -> opt (inter readTimestamp)
       KOptional (Primitive PText ) -> opt readText
@@ -122,14 +140,16 @@ readType t =
       KOptional (Primitive PTimestamp) -> opt readTimestamp
       KOptional (Primitive PDate) -> opt readDate
       KOptional (Primitive PPosition) -> opt readPosition
-      i -> error ( "Missing type: " <> show (keyType t))
+      KOptional (Primitive PBoolean) -> opt readBoolean
+      i -> error ( "Missing type: " <> show t)
     where
-      readInt = nonEmpty (fmap Numeric . readMaybe)
-      readDouble = nonEmpty (fmap DNumeric . readMaybe)
-      readText = nonEmpty (\i-> fmap Showable . readMaybe $  "\"" <> i <> "\"")
-      readDate =  fmap (DDate . Finite . localDay . fst) . strptime "%Y-%m-%d"
+      readInt = nonEmpty (fmap SNumeric . readMaybe)
+      readBoolean = nonEmpty (fmap SBoolean . readMaybe)
+      readDouble = nonEmpty (fmap SDouble. readMaybe)
+      readText = nonEmpty (\i-> fmap SText . readMaybe $  "\"" <> i <> "\"")
+      readDate =  fmap (SDate . Finite . localDay . fst) . strptime "%Y-%m-%d"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
-      readTimestamp =  fmap (DTimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%S"
+      readTimestamp =  fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%S"
       nonEmpty f ""  = Nothing
       nonEmpty f i  = f i
       opt f "" =  Just $ SOptional Nothing
@@ -139,50 +159,62 @@ readType t =
 safeTail [] = []
 safeTail i = tail i
 
+postgresqlFunctions "count" _ = Primitive PInt
 
+attrToKey (Metric k) = renderedName k
+attrToKey (Agg (Aggregate k "count")) = renderedType (postgresqlFunctions "count" k)
 
-renderedType key = \f b ->
-   case F.name f  of
+renderedName key = \f b ->
+ case F.name f  of
       Just name -> let
-          go ::  KType Text
+          in case (keyValue key == T.fromStrict (TE.decodeUtf8 name)) of
+              True ->  renderedType (fmap textToPrim $ keyType key) f b
+              False -> error $ "no match type for " <> BS.unpack name <> " with key" <> show key
+
+      Nothing -> error "no name for field"
+
+renderedType key f b = go key
+  where
+          go ::  KType KPrim
                 -> F.Conversion Showable
           go t = case t of
-            (KInterval (Primitive i)) -> SInterval <$> prim name (textToPrim i) f b
-            (KOptional (Primitive i)) -> SOptional <$> prim name (textToPrim i) f b
-            (KArray (Primitive i)) -> SComposite <$> prim name (textToPrim i) f b
-            (KOptional (KArray (Primitive i))) ->  fmap (SOptional . fmap SComposite . getCompose ) $ prim name (textToPrim i) f b
-            (KOptional (KInterval (Primitive i))) -> (SOptional . fmap SInterval . getCompose ) <$> prim name (textToPrim i) f b
-            (Primitive i) ->  fmap unOnly $ prim  name (textToPrim i) f b
-          in case (keyValue key == T.fromStrict (TE.decodeUtf8 name)) of
-              True ->  go (keyType key)
-              False -> error $ "no match type for " <> BS.unpack name <> " with key" <> show key
-      Nothing -> error "no name for field"
-     where
+            (KInterval (Primitive i)) -> SInterval <$> prim i f b
+            (KOptional (Primitive i)) -> SOptional <$> prim i f b
+            (KArray (Primitive i)) -> SComposite <$> prim i f b
+            (KOptional (KArray (Primitive i))) ->  fmap (SOptional . fmap SComposite . getCompose ) $ prim i f b
+            (KOptional (KInterval (Primitive i))) -> (SOptional . fmap SInterval . getCompose ) <$> prim i f b
+            (Primitive i) ->  fmap unOnly $ prim  i f b
+
+renderShowable :: Showable -> String
+renderShowable (SOptional i ) = maybe "" show i
+renderShowable (SInterval i)  = renderShowable (Interval.inf i) <> "," <> renderShowable (Interval.sup i)
+renderShowable i = show i
 
 
 unOnly :: Only a -> a
 unOnly (Only i) = i
 
-prim :: (F.FromField (f1 Position ),F.FromField (f1 LocalTimestamp),F.FromField (f1 Date),F.FromField (f1 Text), F.FromField (f1 Double), F.FromField (f1 Int), Functor f1) =>
-          BS.ByteString
-        -> KPrim
+prim :: (F.FromField (f1 Bool ),F.FromField (f1 Position ),F.FromField (f1 LocalTimestamp),F.FromField (f1 Date),F.FromField (f1 Text), F.FromField (f1 Double), F.FromField (f1 Int), Functor f1) =>
+          KPrim
         -> F.Field
         -> Maybe BS.ByteString
         -> F.Conversion (f1 Showable)
-prim  name p f b = case p of
+prim  p f b = case p of
             PText ->  s $ F.fromField f b
             PInt -> n $ F.fromField  f b
             PDouble -> d $ F.fromField  f b
             PDate -> da $ F.fromField  f b
             PTimestamp -> t $ F.fromField  f b
             PPosition -> pos $ F.fromField  f b
+            PBoolean -> bo $ F.fromField  f b
   where
-    s = fmap (fmap Showable)
-    n = fmap (fmap Numeric)
-    d = fmap (fmap DNumeric)
-    da = fmap (fmap DDate)
-    t = fmap (fmap DTimestamp)
+    s = fmap (fmap SText)
+    n = fmap (fmap SNumeric)
+    d = fmap (fmap SDouble)
+    da = fmap (fmap SDate)
+    t = fmap (fmap STimestamp)
     pos = fmap (fmap SPosition)
+    bo = fmap (fmap SBoolean)
 
 instance (F.FromField (f (g a))) => F.FromField (Compose f g a) where
   fromField = fmap (fmap (fmap (Compose ) )) $ F.fromField
@@ -255,11 +287,8 @@ instance F.FromField a => F.FromField (Only a) where
 
 
 fromShowableList foldable = do
-    let keyMap = keySetToMap foldable
     n <- FR.numFieldsRemaining
-    traverse (FR.fieldWith . renderedType) foldable
-
-keySetToMap ks = M.fromList $  fmap (\(Key k _ _ t)-> (toStrict $ encodeUtf8 k,t))  (F.toList ks)
+    traverse (FR.fieldWith . attrToKey) foldable
 
 withConn action = do
   conn <- connectPostgreSQL "user=postgres password=queijo dbname=test"

@@ -212,7 +212,9 @@ warshall g = Graph { edges = go (hvertices g <> tvertices g) (edges g)
             edgeH = fst . pbound
             edgeT = snd . pbound
 
-
+nestedInv ::  Path a b -> (Set a, [(a, Path a b )])
+nestedInv p  = (x,fmap (,p) (S.toList y))
+  where (y,x) = pbound p
 
 nested ::  Path a b -> (Set a, [(a, Path a b )])
 nested p  = (x,fmap (,p) (S.toList y))
@@ -221,6 +223,9 @@ nested p  = (x,fmap (,p) (S.toList y))
 
 hashGraph  :: (Ord b,Ord a) => Graph a b -> HashSchema a b
 hashGraph = M.map (M.fromListWith (punion)) .  M.fromListWith (++)  .   fmap nested . fmap snd . M.toList .  edges
+
+hashGraphInv  :: (Ord b,Ord a) => Graph a b -> HashSchema a b
+hashGraphInv = M.map (M.fromListWith (punion)) .  M.fromListWith (++)  .   fmap nestedInv . fmap snd . M.toList .  edges
 
 find norm end m = case M.lookup norm m of
                     Just i -> M.lookup end i

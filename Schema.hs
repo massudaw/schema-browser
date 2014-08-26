@@ -130,9 +130,9 @@ schemaKeys conn schema (keyTable,map,_) = do
 projectAllKeys
   :: Traversable t => Map (Set Key) Table
      -> HashSchema Key Table
-     -> QueryT (t Key)
+     -> QueryT (t KAttribute)
      -> Set Key
-     -> (t Key , (HashSchema Key Table, Table))
+     -> (t KAttribute, (HashSchema Key Table, Table))
 projectAllKeys baseTables hashGraph m bkey
   = case M.lookup bkey baseTables  of
       Just t ->   runQuery  m (hashGraph,Base bkey $ From t bkey)

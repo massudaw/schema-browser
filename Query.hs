@@ -58,26 +58,13 @@ import Data.Unique
 
 data KPrim
    = PText
+   | PBoolean
    | PInt
    | PDouble
    | PDate
    | PTimestamp
    | PPosition
    deriving(Eq,Ord)
-
-textToPrim "character varying" = PText
-textToPrim "text" = PText
-textToPrim "character" = PText
-textToPrim "double precision" = PDouble
-textToPrim "float8" = PDouble
-textToPrim "int4" = PInt
-textToPrim "int8" = PInt
-textToPrim "integer" = PInt
-textToPrim "smallint" = PInt
-textToPrim "timestamp without time zone" = PTimestamp
-textToPrim "date" = PDate
-textToPrim "POINT" = PPosition
-textToPrim i = error $ "no case for type " <> T.unpack i
 
 
 data KType a
@@ -135,14 +122,14 @@ data Aggregate a
 renderAggr f (Aggregate l s )  = s  <> "(" <> T.intercalate ","  (fmap f l)  <> ")"
 
 
-data Attribute
+data KAttribute
    = Metric Key
-   | Prod Attribute Attribute
-   | Rate Attribute Attribute
-   | Agg (Aggregate Attribute)
+   | Prod KAttribute KAttribute
+   | Rate KAttribute KAttribute
+   | Agg (Aggregate KAttribute)
    deriving(Eq,Ord,Show)
 
-renderAttribute :: Attribute -> Text
+renderAttribute :: KAttribute -> Text
 renderAttribute (Metric s ) = keyValue s
 renderAttribute (Prod m1 m2 ) =  renderAttribute m1 <> "*" <> renderAttribute m2
 renderAttribute (Rate m1 m2 ) = renderAttribute m1 <> "/" <> renderAttribute m2
@@ -151,12 +138,13 @@ renderAttribute (Agg m2  ) = renderAggr renderAttribute m2
 newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read)
 
 data Showable
-  = Showable Text
-  | Numeric Int
-  | DNumeric Double
-  | DTimestamp LocalTimestamp
+  = SText Text
+  | SNumeric Int
+  | SBoolean Bool
+  | SDouble Double
+  | STimestamp LocalTimestamp
   | SPosition Position
-  | DDate Date
+  | SDate Date
   | SOptional (Maybe Showable)
   | SComposite (Vector Showable)
   | SInterval (Interval.Interval Showable)
@@ -164,14 +152,15 @@ data Showable
 
 
 instance Show Showable where
-  show (Showable a) = T.unpack a
-  show (Numeric a) = show a
-  show (DNumeric a) = show a
-  show (SOptional a) = show a
-  show (DDate a) = show a
-  show (SInterval a) = show a
-  show (DTimestamp a) = show a
+  show (SText a) = T.unpack a
+  show (SNumeric a) = show a
+  show (SDouble a) = show a
+  show (SBoolean a) = show a
+  show (SDate a) = show a
+  show (STimestamp a) = show a
   show (SPosition a) = show a
+  show (SOptional a) = show a
+  show (SInterval a) = show a
 
 
 data Filter
@@ -197,8 +186,8 @@ data Table
     -- Schema | PKS | Description | FKS | Attrs
     |  Raw Text Text (Set Key) (Maybe Key) (Set (Path Key Text)) (Set Key)
     |  Filtered [(Key,Filter)] Table
-    |  Project [Attribute] Table
-    |  Reduce (Set Key) (Set (Aggregate Attribute) )  Table
+    |  Project [KAttribute] Table
+    |  Reduce (Set Key) (Set (Aggregate KAttribute) )  Table
     |  Limit Table Int
     deriving(Eq,Ord,Show)
 
@@ -249,8 +238,8 @@ showTable b@(Base k p) = " FROM (SELECT " <> (T.intercalate "," $ ( keyValue <$>
 
 showTable (Project [] t) =  "(SELECT " <>  showTable t  <> ") as ctx0"
 showTable (Project s t) = "(SELECT " <> T.intercalate ","  (renderAttribute <$> s)  <>  showTable t  <> ") as ctx0"
-showTable (Reduce j t p) =  "SELECT " <> T.intercalate "," (fmap keyValue (S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <> " FROM " <>   showTable p  <> " GROUP BY " <> T.intercalate "," (fmap keyValue (S.toList j))
-showTable (Limit t v) = showTable t <> " LIMIT 100"
+showTable (Reduce j t p) =  "(SELECT " <> T.intercalate "," (fmap keyValue (S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <> " FROM " <>   showTable p  <> " GROUP BY " <> T.intercalate "," (fmap keyValue (S.toList j)) <> " ) as ctx0"
+showTable (Limit t v) = showTable t <> " LIMIT " <> T.pack (show v)
 
 delete
   :: ToField b =>
@@ -353,7 +342,7 @@ createAggregate  schema key attr  old
 
 addAggregate
   :: HashSchema Key Table
-     -> [Key] -> [Aggregate Attribute] -> Table -> Table
+     -> [Key] -> [Aggregate KAttribute] -> Table -> Table
 addAggregate schema key attr (Base k s) =   case   catMaybes $ queryHash key  schema k  of
                         [] -> Base k  s
                         l -> Base k  (fromJust $ foldr joinPath  (Just s) l)
@@ -366,12 +355,15 @@ addAggregate schema key attr (Reduce j t  p) =  case concat $  fmap (\ki -> catM
 
 
 reduce ::  [Key]
-     -> [Aggregate Attribute]
-     -> QueryT ()
+     -> [Aggregate KAttribute]
+     -> QueryT [KAttribute]
 reduce group aggr = do
   (schema,table) <- get
   put (schema,createAggregate schema group aggr table)
-  return ()
+  return (fmap Metric group <> fmap Agg aggr)
+
+countAll :: [Key] -> QueryT [KAttribute]
+countAll i = reduce i  [ Aggregate [Metric $ Key "*" Nothing undefined (Primitive "integer")] "count"]
 
 freeVars (Metric c) = [c]
 freeVars (Rate c k ) = freeVars c <> freeVars k
@@ -401,30 +393,30 @@ instance Show a => Show (PK a)  where
   show (PK i j ) = intercalate  "," $ fmap show j
 
 projectDesc
-     :: QueryT (PK Key)
+     :: QueryT (PK KAttribute)
 projectDesc =  do
   (schema,table) <- get
   let k@(keys,desc) = baseDescKeys table
       pk = PK (S.toList keys) (S.toList desc)
-  put (schema,Limit (Project (fmap Metric (F.toList pk) ) table) 100)
-  return pk
+  put (schema,Limit (Project (fmap Metric (F.toList pk) ) table) 200)
+  return (fmap Metric pk)
 
 
 project
-  :: [Attribute]
-     -> QueryT [Key]
+  :: [KAttribute]
+     -> QueryT [KAttribute]
 project attributes =  do
   (schema,table) <- get
   let result = filter (`elem` attributes) (fmap Metric $ S.toList $ allKeys table)
-  put (schema,Limit (Project result table) 100 )
-  return $ fmap (\(Metric i) -> i) result
+  put (schema,Limit (Project result table) 200 )
+  return  result
 
 projectAll
-     :: QueryT [Key]
+     :: QueryT [KAttribute]
 projectAll =  do
   (schema,table) <- get
-  let result = S.toList $ allKeys table
-  put (schema,Limit (Project (fmap Metric result ) table)100)
+  let result = fmap Metric $ S.toList $ allKeys table
+  put (schema,Limit (Project result  table) 200)
   return result
 
 baseDescKeys :: Table -> (Set Key ,Set Key)

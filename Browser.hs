@@ -54,12 +54,12 @@ import Blaze.ByteString.Builder.Char8(fromChar)
 import Data.Map (Map)
 import Data.String
 
-type QueryCursor t =(t Key, (HashSchema Key Table, Table))
+type QueryCursor t =(t KAttribute, (HashSchema Key Table, Table))
 
 setup
   ::Connection ->
      (forall t. Traversable t => (QueryCursor t -> IO [t Showable],
-         QueryT (t Key)
+         QueryT (t KAttribute)
          -> S.Set Key -> QueryCursor t ))
      -> [S.Set Key] -> Window -> UI ()
 setup conn action k w = void $ do
@@ -71,11 +71,6 @@ setup conn action k w = void $ do
 allMaybes i = case all isJust i of
         True -> Just $ catMaybes i
         False -> Nothing
-
-renderShowable :: Showable -> String
-renderShowable (SOptional i ) = maybe "" show i
-renderShowable (SInterval i)  = renderShowable (Interval.inf i) <> "," <> renderShowable (Interval.sup i)
-renderShowable i = show i
 
 crudUI conn (proj,action) table@(Raw s t pk desc fk allI) initial = do
   let
@@ -98,7 +93,7 @@ crudUI conn (proj,action) table@(Raw s t pk desc fk allI) initial = do
       l<- UI.span # set text (show i)
       let tdi = forceDefaultType i <$> lookupIM i
       m<- UI.input # sink UI.value (facts tdi)
-      let pke = fmap (readType i) $ unionWith const (UI.valueChange m) (rumors tdi)
+      let pke = fmap (readType (keyType i)) $ unionWith const (UI.valueChange m) (rumors tdi)
       pk <- stepper (defaultType i)  pke
       let pkt = tidings pk pke
           ei (Just a) = Just a
@@ -180,6 +175,7 @@ insdel binsK =do
   out <- UI.div # set children [getElement res,add,remove]
   return $ TrivialWidget (triding res ) out
 
+
 -- Generate a accum the behaviour and generate the ahead of promised event
 accumT :: MonadIO m => a -> Event (a -> a) -> m (Tidings a)
 accumT e ev = do
@@ -188,6 +184,18 @@ accumT e ev = do
 
 accumTs :: MonadIO m => a -> [Event (a -> a)] -> m (Tidings a)
 accumTs e = accumT e . foldr1 (unionWith (.))
+
+joinT :: MonadIO m => Tidings (IO a) -> m (Tidings a)
+joinT = mapT id
+
+mapT :: MonadIO m => (a -> IO b) -> Tidings a -> m (Tidings b)
+mapT f x =  do
+  let ev = unsafeMapIO f $ rumors x
+  c <- currentValue  (facts x)
+  b <- liftIO $ f c
+  bh <- stepper b ev
+  return $ tidings bh ev
+
 
 
 filterWB emap erem bkin = mdo
@@ -235,8 +243,8 @@ projectFk action k = case M.keys <$> M.lookup k schema of
 
 doQuery :: Traversable t => (forall t. Traversable t =>
                     (QueryCursor t  -> IO [t Showable],
-                      QueryT (t Key)
-                      -> S.Set Key -> QueryCursor t ))-> QueryT (t Key)  ->
+                      QueryT (t KAttribute)
+                      -> S.Set Key -> QueryCursor t ))-> QueryT (t KAttribute)  ->
                     (Map Key [Filter]) -> (S.Set Key) -> IO [t Showable]
 doQuery (p,a) q f arg  = p $ a (do
               predicate (concat $ filterToPred <$> (M.toList f))
@@ -244,19 +252,6 @@ doQuery (p,a) q f arg  = p $ a (do
   where
     filterToPred (k,f) = fmap (k,) f
 
-
-
-joinT :: MonadIO m => Tidings (IO a) -> m (Tidings a)
-joinT = mapT id
-
-
-mapT :: MonadIO m => (a -> IO b) -> Tidings a -> m (Tidings b)
-mapT f x =  do
-  let ev = unsafeMapIO f $ rumors x
-  c <- currentValue  (facts x)
-  b <- liftIO $ f c
-  bh <- stepper b ev
-  return $ tidings bh ev
 
 items :: WriteAttr Element [UI Element]
 items = mkWriteAttr $ \i x -> void $ return x # set children [] #+ i
@@ -270,7 +265,7 @@ adEvent ne t = do
 chooseKey
   :: Connection ->
      (forall t. Traversable t => (QueryCursor t  -> IO [t Showable],
-         QueryT (t Key)
+         QueryT (t KAttribute)
          -> S.Set Key -> QueryCursor t ))
      -> [S.Set Key] -> UI Element
 chooseKey conn c@(proj,action) kitems = mdo
@@ -280,13 +275,18 @@ chooseKey conn c@(proj,action) kitems = mdo
   ff  <- insdel (facts filterT)
   -- Filterable Keys
   let bFk = fmap (projectFk action) bBset
-  fkbox <- UI.listBox bFk (fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
+  fkbox <- UI.listBox bFk (const <$> pure Nothing <*> fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
+
+  -- countAll Query
+
+  countQ <- joinT $ trace "count" .(\i j-> doQuery c (countAll (S.toList j)) i j) <$> triding ff <*> bBset
+  count<-UI.div # sink text (fmap show $ facts  countQ)
   -- Filter Query
   bp <- joinT $ trace "bp" .(\i j-> maybe (return []) id (fmap (doQuery c projectDesc i) j)) <$> triding ff <*> UI.userSelection fkbox
 
   -- Filter Selector
   let line n = UI.li # set  text (show n)
-  filterItemBox <- UI.listBox bp (pure Nothing) (pure (\i-> UI.li # set text (show i)))
+  filterItemBox <- UI.listBox bp (const <$> pure Nothing <*> UI.userSelection fkbox) (pure (\i-> UI.li # set text (show i)))
   -- Filter Map Selected
   let
     filterMaybe f (Just i ) = f i
@@ -299,7 +299,7 @@ chooseKey conn c@(proj,action) kitems = mdo
   -- Final Query (Saved Filter <> Filter Map Selected)
   vp <- joinT $ (trace "vp" . doQuery c projectAll) <$> (M.unionWith mappend <$>  filterT <*> triding ff ) <*>  bBset
   -- Final Query ListBox
-  itemList <- UI.listBox vp (pure Nothing) (pure (\i -> line i))
+  itemList <- UI.listBox vp (const <$> pure Nothing <*> bBset) (pure (\i -> line i))
   element (getElement itemList) # set UI.multiple True
   element (getElement filterItemBox) # set UI.multiple True
   let bCrud  = fmap (\k -> [do
@@ -312,19 +312,20 @@ chooseKey conn c@(proj,action) kitems = mdo
   insertDiv <- UI.div # sink items bCrud
   filterSel <- UI.div # set children [getElement fkbox]
   filterSel2 <- UI.div # set children [getElement filterItemBox]
-  UI.div # set children [getElement ff,eBset,filterSel,filterSel2,insertDiv,getElement itemList ]
+  UI.div # set children [count,getElement ff,eBset,filterSel,filterSel2,insertDiv,getElement itemList ]
   -- Result
 
 
 keySetToMap ks = M.fromList $  fmap (\(Key k _ _ t)-> (toStrict $ encodeUtf8 k,t))  (F.toList ks)
 
+
 projectKey
   :: Traversable t => Connection
      -> M.Map (S.Set Key) Table
      -> HashSchema Key Table ->
-     ((t Key, (HashSchema Key Table, Table)) -> IO [t Showable],
-         QueryT (t Key)
-         -> S.Set Key -> (t Key, (HashSchema Key Table, Table)))
+     (QueryCursor t -> IO [t Showable],
+         QueryT (t KAttribute)
+         -> S.Set Key -> (QueryCursor t ))
 projectKey conn baseTables hashGraph = (\(j,(h,i)) -> queryWith_ (fromShowableList j) conn . traceShowId . buildQuery $ i, projectAllKeys baseTables hashGraph )
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item
@@ -332,12 +333,14 @@ topSortTables tables = flattenSCCs $ stronglyConnComp item
 
 main :: IO ()
 main = do
-  let schema = "public"
-  conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
-  -- let schema = "health"
-  -- conn <- connectPostgreSQL "user=postgres password=queijo dbname=test"
+  --let schema = "public"
+  --conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
+  let schema = "health"
+  conn <- connectPostgreSQL "user=postgres password=queijo dbname=test"
+  --conn <- connectPostgreSQL "user=postgres password=queijo dbname=finance"
   inf@(k,baseTables,_) <- keyTables conn  schema
-  {-  let sorted = topSortTables (M.elems baseTables)
+  {-
+  let sorted = topSortTables (M.elems baseTables)
 
   print "DROPPING TABLES"
   traverse (\t -> do
@@ -350,14 +353,14 @@ main = do
     execute_  connTest . fromString . T.unpack . createTable $ t
     print $ tableName t
     )  sorted
--}
+  -}
   graph <- fmap graphFromPath $ schemaKeys conn  schema inf
-  --preview $ cvLabeled graph
+  -- preview $ cvLabeled graph
   graphAttributes <- fmap graphFromPath $ schemaAttributes conn  schema inf
   let
       g1 = warshall graph
       schema = hashGraph  g1
+      schemaInv = hashGraphInv  g1
       q = projectKey conn  baseTables schema
-  print baseTables
   startGUI defaultConfig (setup conn q (M.keys baseTables))
 
