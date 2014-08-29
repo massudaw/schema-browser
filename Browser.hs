@@ -1,6 +1,6 @@
 {-# LANGUAGE RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 import Query
-import System.IO.Memoize
+import Widgets
 import Debug.Trace
 import Schema
 import Postgresql
@@ -61,10 +61,11 @@ setup
      (forall t. Traversable t => (QueryCursor t -> IO [t Showable],
          QueryT (t KAttribute)
          -> S.Set Key -> QueryCursor t ))
+     -> InformationSchema
      -> [S.Set Key] -> Window -> UI ()
-setup conn action k w = void $ do
+setup conn action inf k w = void $ do
   return w # set title "Data Browser"
-  span <- chooseKey  conn action k
+  span <- chooseKey  conn action inf k
   getBody w #+ [element span]
 
 
@@ -72,7 +73,14 @@ allMaybes i = case all isJust i of
         True -> Just $ catMaybes i
         False -> Nothing
 
-crudUI conn (proj,action) table@(Raw s t pk desc fk allI) initial = do
+
+crudUI
+  :: Connection
+     -> (t, Map (S.Set Key) Table, t2)
+     -> ProjAction -> Table
+     -> Tidings (Maybe [Showable])
+     -> UI Element
+crudUI conn tmap c@(proj,action) table@(Raw s t pk desc fk allI) initial = do
   let
     oldItems :: Tidings (Maybe [(Key,Showable)])
     oldItems = fmap (zip (S.toList $ pk <> allI)) <$> initial
@@ -86,9 +94,7 @@ crudUI conn (proj,action) table@(Raw s t pk desc fk allI) initial = do
     forceDefaultType k (Nothing) = ""
   body <- UI.div
   let fkSet = S.unions $ fmap (\(Path o t ifk) ->  ifk)  (S.toList fk)
-      paint e b = element e # sink UI.style (fmap (\i-> case i of
-        Just _ -> [("background-color","green")]
-        Nothing -> [("background-color","red")]) b )
+      paint e b = element e # sink UI.style (greenRed . isJust <$> b)
   attrs <- mapM (\i-> do
       l<- UI.span # set text (show i)
       let tdi = forceDefaultType i <$> lookupIM i
@@ -123,23 +129,38 @@ crudUI conn (proj,action) table@(Raw s t pk desc fk allI) initial = do
           editedListFlag (Just i) = "*" <> L.intercalate "," (fmap renderShowable i)
           editedListFlag Nothing = ""
       e <- UI.span # sink text (editedListFlag . fmap (fmap snd) <$> facts edited)
-      let fksel = fmap pkKey <$>  facts (UI.userSelection box)
+      let fksel = fmap pkKey <$>  facts pkt
       paint (getElement l) fksel
-
-      fk <- UI.li # set  children [l, getElement box,e]
+      chw <- checkedWidget
+      let
+        -- Find when there is selection and the expand is checked
+        findMaybe (Just i) True = Just <$> findQ c projectAll ifk i
+        findMaybe _ _ = return Nothing
+      exT <- joinT $ findMaybe <$> pkt <*> triding chw
+      celem <- crudUI conn tmap c (fromJust $ M.lookup ifk (pkMap tmap)) exT
+      element celem # sink UI.style (noneShow <$> (facts $ triding chw))
+      fk <- UI.li # set  children [l, getElement box,e,getElement chw,celem]
       let bres = liftA2 (,) (fmap (zip (S.toList ifk)). fmap (fmap fst) <$> facts edited ) (fmap (zip (S.toList ifk)) <$> fksel)
-          --bres = (fmap (zip (S.toList ifk)) <$> fksel)
       return (fk,bres)) (S.toList fk)
-
   let
     buildList' i j = foldr (liftA2 (:)) (fmap (fmap (\i-> [i])) <$> buildList i) j
         where buildList = foldr (liftA2 (:))  (pure [])
     fkattrsB = buildList'  (fmap snd .snd <$> attrs) (fmap snd .snd <$> fks)
     efkattrsB = buildList' (fmap fst . snd <$> attrs) (fmap fst . snd <$> fks)
+  panelItems <- processPanel conn efkattrsB fkattrsB table oldItems
+  element body # set children ((fst <$> attrs) <> (fst <$> fks) <> panelItems)
+  return body
 
-  insertB <- UI.button  # sink UI.enabled (fmap (all isJust)  (fkattrsB)) # set text "INSERT"
-  editB <- UI.button  # sink UI.enabled (liftA2 (&&) (fmap (any isJust)  (efkattrsB)) (fmap (all isJust)  (fkattrsB))) # set text "EDIT"
-  deleteB <- UI.button  # sink UI.enabled (isJust <$> facts oldItems) # set text "DELETE"
+processPanel
+  :: TF.ToField b =>
+     Connection
+     -> Behavior [Maybe [(Key, b)]]
+     -> Behavior [Maybe [(Key, b)]]
+     -> Table
+     -> Tidings (Maybe [(Key, b)])
+     -> UI [Element]
+processPanel conn efkattrsB fkattrsB table oldItems = do
+  editB <- UI.button # sink UI.enabled (liftA2 (&&) (fmap (any isJust)  (efkattrsB)) (fmap (all isJust)  (fkattrsB))) # set text "EDIT"
   end <- UI.div
   on UI.click editB $ const $ do
     i <- catMaybes <$> currentValue efkattrsB
@@ -148,12 +169,14 @@ crudUI conn (proj,action) table@(Raw s t pk desc fk allI) initial = do
     case res of
       Right _ -> return ()
       Left v -> element end # set text v >> return ()
+  deleteB <- UI.button  # sink UI.enabled (isJust <$> facts oldItems) # set text "DELETE"
   on UI.click deleteB $ const $ do
     k <- fromJust <$> currentValue (facts oldItems)
     res <- liftIO $ catch (Right <$> delete conn k table) (\e -> return $ Left (show (e :: SqlError) ))
     case res of
       Right _ -> return ()
       Left v -> element end # set text v >> return ()
+  insertB <- UI.button  # sink UI.enabled (all isJust <$> fkattrsB) # set text "INSERT"
   on UI.click insertB $ const $ do
     k <- currentValue (fkattrsB)
     case allMaybes k of
@@ -163,98 +186,39 @@ crudUI conn (proj,action) table@(Raw s t pk desc fk allI) initial = do
           Right _ -> return ()
           Left v -> element end # set text v >> return ()
       Nothing -> return ()
-  element body # set children ((fst <$> attrs ) <> (fst <$> fks) <> [insertB,editB,deleteB,end])
-  return body
+  return [insertB,editB,deleteB,end]
 
-
-insdel :: (Ord a,Ord b,Show a,Show b) => Behavior (Map a [b]) -> UI (TrivialWidget (Map a [b]))
-insdel binsK =do
-  add <- UI.button # set text "Save"
-  remove <- UI.button # set text "Delete"
-  res <- filterWB (UI.click add) (UI.click remove) binsK
-  out <- UI.div # set children [getElement res,add,remove]
-  return $ TrivialWidget (triding res ) out
-
-
--- Generate a accum the behaviour and generate the ahead of promised event
-accumT :: MonadIO m => a -> Event (a -> a) -> m (Tidings a)
-accumT e ev = do
-  b <- accumB e ev
-  return $ tidings b (flip ($) <$> b <@> ev)
-
-accumTs :: MonadIO m => a -> [Event (a -> a)] -> m (Tidings a)
-accumTs e = accumT e . foldr1 (unionWith (.))
-
-joinT :: MonadIO m => Tidings (IO a) -> m (Tidings a)
-joinT = mapT id
-
-mapT :: MonadIO m => (a -> IO b) -> Tidings a -> m (Tidings b)
-mapT f x =  do
-  let ev = unsafeMapIO f $ rumors x
-  c <- currentValue  (facts x)
-  b <- liftIO $ f c
-  bh <- stepper b ev
-  return $ tidings bh ev
-
-
-
-filterWB emap erem bkin = mdo
-  let
-      insB =  M.unionWith mappend <$> bkin
-      delB = fmap M.delete <$> bsel2
-      recAdd = insB <@ emap
-      recDel = filterJust $ (facts delB) <@ erem
-  recT <- accumTs M.empty  [recAdd,recDel]
-  let sk i = UI.li # set text (show i)
-  resSpan <- UI.listBox  (fmap M.toList recT) (pure Nothing) (pure sk)
-  element resSpan # set (attr "size") "10" # set style [("width","400px")]
-  let bsel2 = fmap fst <$> UI.userSelection resSpan
-  -- Return the triding
-  return $ TrivialWidget recT (getElement resSpan)
-
-instance Widget (TrivialWidget  a) where
-  getElement (TrivialWidget t e) = e
-
-data TrivialWidget a =
-  TrivialWidget { triding :: (Tidings a) , trielem ::  Element}
-
-tri e b v = TrivialWidget (tidings  b v) e
-
-
-buttonSet ks h =do
-  buttons <- mapM (buttonString h) ks
-  dv <- UI.div # set children (fst <$> buttons)
-  let evs = foldr1 (unionWith (const))  (snd <$> buttons)
-  bv <- stepper (head ks) evs
-  return (dv,tidings bv evs)
-    where
-      buttonString h k= do
-        b <- UI.button # set text (h k)
-        let ev = pure k <@ UI.click  b
-        return (b,ev)
 
 invertPK  (PK k [] ) = fmap (\i -> PK [i] []) k
 invertPK  (PK k d ) = zipWith (\i j -> PK [i] [j]) k d
 
 projectFk action k = case M.keys <$> M.lookup k schema of
-                Just l -> k : fmap S.singleton l
-                Nothing -> [k]
+                Just l ->  fmap S.singleton l
+                Nothing -> []
           where (_,(schema,table)) = action (project []) k
 
-doQuery :: Traversable t => (forall t. Traversable t =>
+type ProjAction = (forall t. Traversable t =>
                     (QueryCursor t  -> IO [t Showable],
                       QueryT (t KAttribute)
-                      -> S.Set Key -> QueryCursor t ))-> QueryT (t KAttribute)  ->
+                      -> S.Set Key -> QueryCursor t ))
+
+
+findQ :: Traversable t => ProjAction -> QueryT (t KAttribute)  ->
+                    (S.Set Key) -> PK Showable -> IO (t Showable)
+findQ (p,a) q  arg f = fmap head $ p $ a (do
+              predicate filter
+              q ) arg
+  where
+    filter = zipWith (\s k -> (k,Category (S.singleton s))) (invertPK f) (S.toList arg)
+
+
+doQuery :: Traversable t => ProjAction -> QueryT (t KAttribute)  ->
                     (Map Key [Filter]) -> (S.Set Key) -> IO [t Showable]
 doQuery (p,a) q f arg  = p $ a (do
               predicate (concat $ filterToPred <$> (M.toList f))
               q ) arg
   where
     filterToPred (k,f) = fmap (k,) f
-
-
-items :: WriteAttr Element [UI Element]
-items = mkWriteAttr $ \i x -> void $ return x # set children [] #+ i
 
 adEvent ne t = do
   c <- currentValue (facts t)
@@ -263,26 +227,28 @@ adEvent ne t = do
   return $ tidings nb ev
 
 chooseKey
-  :: Connection ->
-     (forall t. Traversable t => (QueryCursor t  -> IO [t Showable],
-         QueryT (t KAttribute)
-         -> S.Set Key -> QueryCursor t ))
-     -> [S.Set Key] -> UI Element
-chooseKey conn c@(proj,action) kitems = mdo
+  :: Connection -> ProjAction
+     -> InformationSchema -> [S.Set Key] -> UI Element
+chooseKey conn c@(proj,action) inf kitems = mdo
   -- Base Button Set
-  (eBset,bBset) <- buttonSet kitems showVertex
+  bset <- buttonSet kitems showVertex
+  let bBset = triding bset
   -- Filter Box (Saved Filter)
   ff  <- insdel (facts filterT)
   -- Filterable Keys
   let bFk = fmap (projectFk action) bBset
-  fkbox <- UI.listBox bFk (const <$> pure Nothing <*> fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
+  fkbox <- UI.listBox (liftA2 (:) bBset bFk) (const <$> pure Nothing <*> fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
 
   -- countAll Query
-
-  countQ <- joinT $ trace "count" .(\i j-> doQuery c (countAll (S.toList j)) i j) <$> triding ff <*> bBset
+  let
+    countQuery i j k
+      | S.null j = return []
+      | otherwise = doQuery c (countAll (pkMap inf) (S.toList j)) i k
+  countQ <- joinT $ trace "count" . countQuery  <$> triding ff <*> (foldr  S.union S.empty <$> bFk) <*> bBset
   count<-UI.div # sink text (fmap show $ facts  countQ)
+
   -- Filter Query
-  bp <- joinT $ trace "bp" .(\i j-> maybe (return []) id (fmap (doQuery c projectDesc i) j)) <$> triding ff <*> UI.userSelection fkbox
+  bp <- joinT $ trace "bp" .(\i j-> maybe (return []) id (fmap (doQuery c projectDesc i) j)) <$>triding ff <*> UI.userSelection fkbox
 
   -- Filter Selector
   let line n = UI.li # set  text (show n)
@@ -305,14 +271,14 @@ chooseKey conn c@(proj,action) kitems = mdo
   let bCrud  = fmap (\k -> [do
       let (_,(schema,table)) = action (project (fmap Metric (S.toList k))) k
           filterOptions = case M.keys <$> M.lookup k schema of
-                    Just l -> k : fmap S.singleton l
-                    Nothing -> [k]
-      crud <- atBase (crudUI conn c) table $ (UI.userSelection itemList)
+             Just l -> k : fmap S.singleton l
+             Nothing -> [k]
+      crud <- atBase (crudUI conn inf c) table $ (UI.userSelection itemList)
       return crud]) (facts bBset)
   insertDiv <- UI.div # sink items bCrud
   filterSel <- UI.div # set children [getElement fkbox]
   filterSel2 <- UI.div # set children [getElement filterItemBox]
-  UI.div # set children [count,getElement ff,eBset,filterSel,filterSel2,insertDiv,getElement itemList ]
+  UI.div # set children [count , getElement ff,getElement bset ,filterSel,filterSel2,insertDiv,getElement itemList ]
   -- Result
 
 
@@ -362,5 +328,5 @@ main = do
       schema = hashGraph  g1
       schemaInv = hashGraphInv  g1
       q = projectKey conn  baseTables schema
-  startGUI defaultConfig (setup conn q (M.keys baseTables))
+  startGUI defaultConfig (setup conn q inf (M.keys baseTables))
 

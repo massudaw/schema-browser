@@ -38,6 +38,7 @@ import Database.PostgreSQL.Simple.ToField
 
 import Control.Monad
 import GHC.Exts
+import System.IO.Unsafe
 import Data.Tuple
 import Control.Applicative
 import Data.List ( nubBy,nub, sort,intercalate,sortBy,isInfixOf )
@@ -129,11 +130,14 @@ data KAttribute
    | Agg (Aggregate KAttribute)
    deriving(Eq,Ord,Show)
 
+attrName (Metric k ) = keyValue k
+attrName (Agg (Aggregate args n)) = n
+
 renderAttribute :: KAttribute -> Text
 renderAttribute (Metric s ) = keyValue s
 renderAttribute (Prod m1 m2 ) =  renderAttribute m1 <> "*" <> renderAttribute m2
 renderAttribute (Rate m1 m2 ) = renderAttribute m1 <> "/" <> renderAttribute m2
-renderAttribute (Agg m2  ) = renderAggr renderAttribute m2
+renderAttribute a@(Agg m2  ) = renderAggr renderAttribute m2 <> " as " <> attrName a
 
 newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read)
 
@@ -180,7 +184,6 @@ renderFilter (table ,name,Category i) = tableName table <> "." <> keyValue name 
 renderFilter (table ,name,And i) =  T.intercalate " AND "  (fmap (renderFilter . (table ,name,)) i)
 
 
-
 data Table
     =  Base (Set Key) (JoinPath Key Table)
     -- Schema | PKS | Description | FKS | Attrs
@@ -191,20 +194,17 @@ data Table
     |  Limit Table Int
     deriving(Eq,Ord,Show)
 
-atBase f (Base _ (From t  _)) = atBase f t
 atBase f t@(Raw _ _ _ _ _ _ ) = f t
 atBase f (Filtered _ t ) = atBase f t
 atBase f (Project _ t ) = atBase f t
+atBase f (Reduce _ _ t ) = atBase f t
 atBase f (Limit t _) = atBase f t
-atBase f i = error $ "atBase " <> show i
+atBase f (Base _ p ) = from p
+  where from (From t _) = atBase f t
+        from (Join _ _ _ p) = from p
 
-
-tableName (Base _ (From t  _)) = tableName t
-tableName (Raw _ t _ _ _ _ ) = t
-tableName (Filtered _ t ) = tableName t
-tableName (Limit t _) = tableName t
-tableName i = error $ show i
-
+normalizing = atBase (\(Raw _ _ t _ _ _ )-> t)
+tableName = atBase (\(Raw _ t _ _ _ _ )-> t)
 
 --- Traverse the joinPath returning the keyList
 joinKeys (From b k ) = fmap (b,) (S.toList k)
@@ -225,9 +225,9 @@ showTable (Filtered f t) = filterTable (fmap (\(k,f) -> (t,k,f) ) f ) t
       filterTable [] b =  showTable b
       filterTable filters b =  "(SELECT *  FROM " <> showTable b <>  " WHERE " <> T.intercalate " AND " (fmap renderFilter filters)  <> ") as " <> ( tableName b )
 showTable (Raw s t _ _  _ _) = s <> "." <> t
-showTable b@(Base k p) = " FROM (SELECT " <> (T.intercalate "," $ ( keyValue <$> S.toList attrs) <> fmap renderNamespacedKeySet jattrs ) <> joinQuerySet p <>") as base"
+showTable b@(Base k p) = " FROM (SELECT " <> (T.intercalate "," $ ( attrName <$> S.toList attrs) <> fmap renderNamespacedKeySet jattrs ) <> joinQuerySet p <>") as " <> tableName b
   where
-    attrs = S.filter (not . (`S.member` (S.fromList $ fmap snd jattrs) )) $ allKeys b
+    attrs = S.filter (not . (`S.member` (S.fromList $ fmap (Metric. snd) jattrs) )) $ allAttrs b
     jattrs = nubBy (\ i j-> snd i == snd j) $ joinKeys p
     joinQuerySet (From b _) =  " FROM " <>  showTable b
     joinQuerySet (Join b _ r p)
@@ -236,9 +236,9 @@ showTable b@(Base k p) = " FROM (SELECT " <> (T.intercalate "," $ ( keyValue <$>
       where joinPredicate r b = " ON " <> T.intercalate " AND " ( fmap (\(t,f) -> tableName t <> "." <> keyValue f <> " = " <> tableName b <> "." <> keyValue f )  r )
 
 
-showTable (Project [] t) =  "(SELECT " <>  showTable t  <> ") as ctx0"
-showTable (Project s t) = "(SELECT " <> T.intercalate ","  (renderAttribute <$> s)  <>  showTable t  <> ") as ctx0"
-showTable (Reduce j t p) =  "(SELECT " <> T.intercalate "," (fmap keyValue (S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <> " FROM " <>   showTable p  <> " GROUP BY " <> T.intercalate "," (fmap keyValue (S.toList j)) <> " ) as ctx0"
+showTable (Project [] t) = "(SELECT " <>  showTable t  <> ") as " <> tableName t
+showTable (Project s t) = "(SELECT " <> T.intercalate ","  (attrName <$> s)  <>  showTable t  <> ") as " <> tableName t
+showTable (Reduce j t p) =  "(SELECT " <> T.intercalate "," (fmap keyValue (S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <> " FROM " <>   showTable p  <> " GROUP BY " <> T.intercalate "," (fmap keyValue (S.toList j)) <> " ) as " <> tableName p
 showTable (Limit t v) = showTable t <> " LIMIT " <> T.pack (show v)
 
 delete
@@ -265,6 +265,7 @@ update conn kv kold (Raw sch tbl pk _ _ _) = execute conn (fromString $ traceSho
     setter = " SET " <> T.intercalate "," (fmap equality kv)
     up = "UPDATE " <> sch <>"."<> tbl <> setter <>  pred
 
+
 insert conn kv (Raw sch tbl _ _ _ _) = execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
 
 dropTable (Raw sch tbl _ _ _ _ )= "DROP TABLE "<> sch <>"."<> tbl
@@ -280,32 +281,34 @@ createTable (Raw sch tbl pk _ fk attr) = "CREATE TABLE " <> sch <>"."<> tbl <> "
         renderFK (Path origin table end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY (" <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
 
 
-joinPath ((Path i ll j)) (Just p)  = Just $  addJoin  ll ( i `S.union` j)  p
-joinPath ((Path i ll j)) Nothing  =  Just $ From ll   ( i `S.union` j)
+joinPath (Path i ll j) (Just p) = Just $ addJoin  ll ( i `S.union` j)  p
+joinPath (Path i ll j) Nothing  =  Just $ From ll   ( i `S.union` j)
 joinPath (ComposePath i (l,ij,k) j ) m = foldr joinPath  m  (S.toList l <> S.toList k)
 joinPath (PathOption i p j ) m =  joinPath ( head $ S.toList p ) m
 
 
-addJoin :: (Ord b,Ord a) => a -> Set b -> JoinPath b a -> JoinPath b a
+addJoin :: (Show a,Show b,Ord b,Ord a) => a -> Set b -> JoinPath b a -> JoinPath b a
 addJoin tnew f p = case mapPath tnew f p of
-            Left accnew -> Join tnew  f accnew (p )
+            -- Add new case
+            Left accnew -> Join tnew f accnew p
+            -- Just update with new joins
             Right i -> i
     where
-        mapPath :: (Ord b , Ord a) => a -> Set b -> JoinPath b a -> Either (Set (a,b)) (JoinPath b a)
+        mapPath :: (Show a,Show b,Ord b,Ord a) => a -> Set b -> JoinPath b a -> Either (Set (a,b)) (JoinPath b a)
         mapPath tnew f (From t   s ) =  if t == tnew
                 then  (Right $ From t  snew )
                 else  (Left $ S.mapMonotonic (t,) $  s `S.intersection` f)
             where snew =  s `S.union` f
         mapPath tnew  f (Join t  s clause p ) = res
             where  res = case mapPath tnew f p  of
-                    Right pnew  -> Right $ Join t   s (clause `S.union` (S.mapMonotonic (tnew,) $  s `S.intersection` f)) pnew
+                    Right pnew  -> Right $ Join t s (clause `S.union` (S.mapMonotonic (tnew,) $  s `S.intersection` f)) pnew
                     Left accnew -> if t == tnew
                         then Right $ Join t  (s `S.union` f)  (clause `S.union` accnew ) p
                         else Left $ (S.mapMonotonic (t,) $ s `S.intersection` f)  `S.union` accnew
 
 
 
-
+addFilterTable [] b = b
 addFilterTable ff b@(Filtered fi _ ) = Filtered (fi<>ff) b
 addFilterTable ff b = Filtered ff b
 
@@ -362,8 +365,18 @@ reduce group aggr = do
   put (schema,createAggregate schema group aggr table)
   return (fmap Metric group <> fmap Agg aggr)
 
-countAll :: [Key] -> QueryT [KAttribute]
-countAll i = reduce i  [ Aggregate [Metric $ Key "*" Nothing undefined (Primitive "integer")] "count"]
+countAll :: Map (Set Key) Table ->  [Key] -> QueryT [KAttribute]
+countAll tmap i = do
+  let agg = [ Aggregate [Metric $ Key "*" Nothing (unsafePerformIO $ newUnique) (Primitive "integer")] "count"]
+  reduce i  agg
+  (schema,table) <- get
+  let
+    paths = catMaybes $ fmap (\ti-> (\k -> Path (S.singleton ti) k (S.singleton ti )) <$> M.lookup (S.singleton ti) tmap ) i
+    Just res = foldr joinPath (Just $ From table (S.fromList i)) paths
+    attrs = (traceShowId $ fmap Metric $ concat $ fmap F.toList $ fmap (\ti->  baseDescKeys (fromJust $ M.lookup (S.singleton ti) tmap)) i ) <> fmap Agg agg
+
+  put (schema,Project attrs $ Base (S.fromList i) res )
+  return attrs
 
 freeVars (Metric c) = [c]
 freeVars (Rate c k ) = freeVars c <> freeVars k
@@ -396,8 +409,7 @@ projectDesc
      :: QueryT (PK KAttribute)
 projectDesc =  do
   (schema,table) <- get
-  let k@(keys,desc) = baseDescKeys table
-      pk = PK (S.toList keys) (S.toList desc)
+  let pk = baseDescKeys table
   put (schema,Limit (Project (fmap Metric (F.toList pk) ) table) 200)
   return (fmap Metric pk)
 
@@ -419,9 +431,9 @@ projectAll =  do
   put (schema,Limit (Project result  table) 200)
   return result
 
-baseDescKeys :: Table -> (Set Key ,Set Key)
-baseDescKeys (Raw _ _ pk Nothing _ _ ) = (pk,pk)
-baseDescKeys (Raw _ _ pk (Just d) _ _ ) = (pk,S.singleton d)
+baseDescKeys :: Table -> PK Key
+baseDescKeys (Raw _ _ pk Nothing _ _ ) = PK (S.toList pk) (S.toList pk)
+baseDescKeys (Raw _ _ pk (Just d) _ _ ) = PK (S.toList pk) [d]
 baseDescKeys (Limit p _ ) = baseDescKeys p
 baseDescKeys (Filtered _ p) = baseDescKeys p
 baseDescKeys (Project _ p) = baseDescKeys p
@@ -430,9 +442,18 @@ baseDescKeys (Base _ p) = from baseDescKeys p
   where from f (From t _ ) = f t
         from f (Join _ _ _ p) =  from f p
 
+allAttrs :: Table -> Set KAttribute
+allAttrs (Raw _ _ pk _ fk p) = S.mapMonotonic Metric $ S.union pk p
+allAttrs (Limit p _ ) = allAttrs p
+allAttrs (Filtered _ p) = allAttrs p
+allAttrs (Project a p) = S.fromList a
+allAttrs (Reduce g r p) = S.mapMonotonic Metric g <> S.mapMonotonic Agg r
+allAttrs (Base _ p) = F.foldMap allAttrs p
+
+
 
 allKeys :: Table -> Set Key
-allKeys (Raw _ _ pk _ fk p) = S.unions  $ [pk,p] <> fmap (\(Path _ _ i) -> i) (S.toList fk)
+allKeys (Raw _ _ pk _ fk p) = S.union pk p
 allKeys (Limit p _ ) = allKeys p
 allKeys (Filtered _ p) = allKeys p
 allKeys (Project _ p) = allKeys p

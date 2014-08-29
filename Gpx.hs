@@ -47,9 +47,9 @@ getPoint = atTag "trkpt" >>>
     lon <- getAttrValue "lon" -< x
     ele <- text <<< atTag "ele" -< x
     time <- text <<< atTag "time" -< x
-    returnA -< [SPosition $ Position (read lat,read lon,read ele),DTimestamp $ Finite $ fromJust $ fmap fst  $ strptime "%Y-%m-%dT%H:%M:%SZ" time ]
+    returnA -< [SPosition $ Position (read lat,read lon,read ele),STimestamp $ Finite $ fromJust $ fmap fst  $ strptime "%Y-%m-%dT%H:%M:%SZ" time ]
 
-file = "/home/massudaw/2014-08-18-0839.gpx"
+file = "/home/massudaw/2014-08-26-1719.gpx"
 
 execF = exec file
 exec file = do
@@ -64,5 +64,5 @@ exec file = do
   print (tableMap inf)
   let withFields k t l s = (zip  (fmap (\i->maybe (error "no key") id $ M.lookup (t,i) (keyMap k)) l) s, maybe (error $ "noTable" ) id $  M.lookup t (tableMap k))
   res <- runX arr
-  mapM_ (\i-> uncurry (insert conn) (withFields inf "track" ["id_run","id_sample","position","instant"] (Numeric 1 : i))) (zipWith (:) (fmap Numeric [0..]) res)
+  mapM_ (\i-> uncurry (insert conn) (withFields inf "track" ["id_run","id_sample","position","instant"] (SNumeric 5 : i))) (zipWith (:) (fmap SNumeric [0..]) res)
   --print $ fmap getter i
