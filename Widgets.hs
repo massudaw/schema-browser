@@ -1,4 +1,4 @@
-{-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE NoMonomorphismRestriction,RecursiveDo #-}
 module Widgets where
 
 

@@ -65,7 +65,7 @@ data KPrim
    | PDate
    | PTimestamp
    | PPosition
-   deriving(Eq,Ord)
+   deriving(Show,Eq,Ord)
 
 
 data KType a
@@ -75,13 +75,16 @@ data KType a
    | KOptional (KType a)
    deriving(Eq,Ord,Functor)
 
-instance Show (KType Text) where
-  show = T.unpack . showTy
+instance Show (KType KPrim) where
+  show =  showTy show
 
-showTy (Primitive i ) = i
-showTy (KArray i) = showTy i <> "[]"
-showTy (KOptional i) = showTy i <> "*"
-showTy (KInterval i) = showTy i <> "()"
+instance Show (KType Text) where
+  show = T.unpack . showTy id
+
+showTy f (Primitive i ) = f i
+showTy f (KArray i) = showTy f i <> "[]"
+showTy f (KOptional i) = showTy f i <> "*"
+showTy f (KInterval i) = showTy f i <> "()"
 
 data Key
     = Key
@@ -105,7 +108,7 @@ instance Ord Key where
 instance Show Key where
    show = T.unpack . showKey
   --show (Key v u _) = show v <> show (hashUnique u)
-showKey k  = maybe (keyValue k<> "::" <> showTy (keyType k)) id (keyTranslation k)
+showKey k  = maybe (keyValue k<> "::" <> showTy id (keyType k)) id (keyTranslation k)
 
 data JoinPath a b
     = From b (Set a)
@@ -233,7 +236,7 @@ showTable b@(Base k p) = " FROM (SELECT " <> (T.intercalate "," $ ( attrName <$>
     joinQuerySet (Join b _ r p)
       |  any (\(Key _ _ _ k )-> isKOptional k ) (snd <$> S.toList r)  = joinQuerySet p <>  " LEFT JOIN " <> showTable b <> joinPredicate (S.toList r) b
       | otherwise  = joinQuerySet p <>  " JOIN " <> showTable b <> joinPredicate (S.toList r) b
-      where joinPredicate r b = " ON " <> T.intercalate " AND " ( fmap (\(t,f) -> tableName t <> "." <> keyValue f <> " = " <> tableName b <> "." <> keyValue f )  r )
+      where joinPredicate r b = " ON " <> T.intercalate " AND " (fmap (\(t,f) -> tableName t <> "." <> keyValue f <> " = " <> tableName b <> "." <> keyValue f )  r )
 
 
 showTable (Project [] t) = "(SELECT " <>  showTable t  <> ") as " <> tableName t

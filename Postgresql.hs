@@ -124,7 +124,7 @@ defaultType t =
 
 
 readType t =
-    case fmap textToPrim  t of
+    case t of
       Primitive PText -> readText
       Primitive PDouble ->  readDouble
       Primitive PInt -> readInt
@@ -149,7 +149,7 @@ readType t =
       readText = nonEmpty (\i-> fmap SText . readMaybe $  "\"" <> i <> "\"")
       readDate =  fmap (SDate . Finite . localDay . fst) . strptime "%Y-%m-%d"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
-      readTimestamp =  fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%S"
+      readTimestamp =  fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%OS"
       nonEmpty f ""  = Nothing
       nonEmpty f i  = f i
       opt f "" =  Just $ SOptional Nothing

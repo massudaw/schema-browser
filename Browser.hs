@@ -1,4 +1,5 @@
 {-# LANGUAGE RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+
 import Query
 import Widgets
 import Debug.Trace
@@ -99,20 +100,20 @@ crudUI conn tmap c@(proj,action) table@(Raw s t pk desc fk allI) initial = do
       l<- UI.span # set text (show i)
       let tdi = forceDefaultType i <$> lookupIM i
       m<- UI.input # sink UI.value (facts tdi)
-      let pke = fmap (readType (keyType i)) $ unionWith const (UI.valueChange m) (rumors tdi)
+      let pke = fmap (readType (textToPrim <$> keyType i)) $ unionWith const (UI.valueChange m) (rumors tdi)
       pk <- stepper (defaultType i)  pke
       let pkt = tidings pk pke
           ei (Just a) = Just a
           ei Nothing = defaultType i
-          edited = (\o j-> if o == ei j then Nothing else liftA2 (,) o j) <$> pkt <*> lookupIM i
-          editedFlag (Just i) = "*" <> renderShowable i
+          edited = (\o j-> if (renderShowable <$> o) == (renderShowable <$> (ei j)) then Nothing else liftA2 (,) o j) <$> pkt <*> lookupIM i
+          editedFlag (Just i) = "#" <> renderShowable i
           editedFlag Nothing = ""
       e <- UI.span # sink text (editedFlag . fmap snd <$> (facts edited))
       paint l pk
       sp <- UI.li # set children [l,m,e]
       return (sp,liftA2 (,) (fmap(i,) . fmap fst <$> (facts edited) ) (fmap (i,) <$> pk))) $ filter (not. (`S.member` fkSet)) $ S.toList (pk <> allI)
   fks <- mapM (\(Path o t ifk) -> do
-      res <- trace "combo" $ liftIO $ proj $ action projectDesc ifk
+      res <-  liftIO $ proj $ action projectDesc ifk
       let tdi = fmap (\i-> PK  i i ) <$> lookupIMs ( S.toList ifk)
       box <- UI.listBox (pure res) tdi (pure (\v-> UI.span # set text (show v)))
       l<- UI.span # set text (show $ S.toList ifk)
@@ -244,11 +245,11 @@ chooseKey conn c@(proj,action) inf kitems = mdo
     countQuery i j k
       | S.null j = return []
       | otherwise = doQuery c (countAll (pkMap inf) (S.toList j)) i k
-  countQ <- joinT $ trace "count" . countQuery  <$> triding ff <*> (foldr  S.union S.empty <$> bFk) <*> bBset
+  countQ <- joinT $ countQuery  <$> triding ff <*> (foldr  S.union S.empty <$> bFk) <*> bBset
   count<-UI.div # sink text (fmap show $ facts  countQ)
 
   -- Filter Query
-  bp <- joinT $ trace "bp" .(\i j-> maybe (return []) id (fmap (doQuery c projectDesc i) j)) <$>triding ff <*> UI.userSelection fkbox
+  bp <- joinT $ (\i j-> maybe (return []) id (fmap (doQuery c projectDesc i) j)) <$>triding ff <*> UI.userSelection fkbox
 
   -- Filter Selector
   let line n = UI.li # set  text (show n)
@@ -263,23 +264,22 @@ chooseKey conn c@(proj,action) inf kitems = mdo
             arg = liftA2 (zipWith (,)) <$> (fmap S.toList  <$> UI.userSelection fkbox ) <*> (fmap invertPK <$> UI.userSelection filterItemBox)
 
   -- Final Query (Saved Filter <> Filter Map Selected)
-  vp <- joinT $ (trace "vp" . doQuery c projectAll) <$> (M.unionWith mappend <$>  filterT <*> triding ff ) <*>  bBset
+  vp <- joinT $ doQuery c projectAll <$> (M.unionWith mappend <$>  filterT <*> triding ff ) <*>  bBset
   -- Final Query ListBox
   itemList <- UI.listBox vp (const <$> pure Nothing <*> bBset) (pure (\i -> line i))
   element (getElement itemList) # set UI.multiple True
   element (getElement filterItemBox) # set UI.multiple True
-  let bCrud  = fmap (\k -> [do
-      let (_,(schema,table)) = action (project (fmap Metric (S.toList k))) k
-          filterOptions = case M.keys <$> M.lookup k schema of
-             Just l -> k : fmap S.singleton l
-             Nothing -> [k]
-      crud <- atBase (crudUI conn inf c) table $ (UI.userSelection itemList)
-      return crud]) (facts bBset)
+  let bCrud = fmap (\k -> pure $ do
+        let (_,(schema,table)) = action (project (fmap Metric (S.toList k))) k
+            filterOptions = case M.keys <$> M.lookup k schema of
+               Just l -> k : fmap S.singleton l
+               Nothing -> [k]
+        crud <- atBase (crudUI conn inf c) table $ (UI.userSelection itemList)
+        return crud) (facts bBset)
   insertDiv <- UI.div # sink items bCrud
   filterSel <- UI.div # set children [getElement fkbox]
   filterSel2 <- UI.div # set children [getElement filterItemBox]
   UI.div # set children [count , getElement ff,getElement bset ,filterSel,filterSel2,insertDiv,getElement itemList ]
-  -- Result
 
 
 keySetToMap ks = M.fromList $  fmap (\(Key k _ _ t)-> (toStrict $ encodeUtf8 k,t))  (F.toList ks)
