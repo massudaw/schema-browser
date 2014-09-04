@@ -1,4 +1,5 @@
-{-# LANGUAGE RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+{-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 
 import Query
 import Widgets
@@ -127,7 +128,7 @@ crudUI conn tmap c@(proj,action) table@(Raw s t pk desc fk allI) initial = do
           olds = allMaybes <$> (foldr (liftA2 (:)) (pure []) $ fmap lookupIM (S.toList ifk))
           edited :: Tidings (Maybe [(Showable,Showable)])
           edited = (\k o j-> if (fmap pkKey o) == ei k j then Nothing else liftA2 zip (fmap pkKey o) j) <$> pure (S.toList ifk) <*> pkt <*> olds
-          editedListFlag (Just i) = "*" <> L.intercalate "," (fmap renderShowable i)
+          editedListFlag (Just i) = "#" <> L.intercalate "," (fmap renderShowable i)
           editedListFlag Nothing = ""
       e <- UI.span # sink text (editedListFlag . fmap (fmap snd) <$> facts edited)
       let fksel = fmap pkKey <$>  facts pkt
@@ -227,6 +228,28 @@ adEvent ne t = do
   nb <- stepper c ev
   return $ tidings nb ev
 
+filterWidget
+  :: ProjAction
+     -> Tidings (S.Set Key)
+     -> Tidings (Map Key [Filter])
+     -> UI (UI.MultiListBox (PK Showable ),UI.ListBox (S.Set Key ),TrivialWidget (Map Key [Filter]))
+filterWidget c bBset filterT = do
+  -- Filter Box (Saved Filter)
+  ff  <- insdel (facts filterT)
+  -- Filterable Keys
+  let bFk = fmap (projectFk (snd c)) bBset
+  fkbox <- UI.listBox (liftA2 (:) bBset bFk) (const <$> pure Nothing <*> fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
+  -- Filter Query
+  bp <- joinT $ (\i j-> maybe (return []) id (fmap (doQuery c projectDesc i) j)) <$> triding ff <*> UI.userSelection fkbox
+
+  -- Filter Selector
+  filterItemBox <- UI.multiListBox bp (const <$> pure [] <*> UI.userSelection fkbox) (pure (\i-> UI.li # set text (show i)))
+  return  (filterItemBox,fkbox,ff)
+
+line n = UI.li # set  text (show n)
+
+
+
 chooseKey
   :: Connection -> ProjAction
      -> InformationSchema -> [S.Set Key] -> UI Element
@@ -235,38 +258,39 @@ chooseKey conn c@(proj,action) inf kitems = mdo
   bset <- buttonSet kitems showVertex
   let bBset = triding bset
   -- Filter Box (Saved Filter)
-  ff  <- insdel (facts filterT)
-  -- Filterable Keys
-  let bFk = fmap (projectFk action) bBset
-  fkbox <- UI.listBox (liftA2 (:) bBset bFk) (const <$> pure Nothing <*> fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
+
+  (filterItemBox,fkbox,ff) <- filterWidget c bBset filterT
 
   -- countAll Query
   let
-    countQuery i j k
+    bFk = fmap (projectFk (snd c)) bBset
+    aggQuery i j ka k
       | S.null j = return []
-      | otherwise = doQuery c (countAll (pkMap inf) (S.toList j)) i k
-  countQ <- joinT $ countQuery  <$> triding ff <*> (foldr  S.union S.empty <$> bFk) <*> bBset
-  count<-UI.div # sink text (fmap show $ facts  countQ)
+      | otherwise = doQuery c (aggAll  (pkMap inf) (S.toList j) ka)  i k
 
-  -- Filter Query
-  bp <- joinT $ (\i j-> maybe (return []) id (fmap (doQuery c projectDesc i) j)) <$>triding ff <*> UI.userSelection fkbox
+  let pkFields = allAttrs . fromJust . (flip M.lookup (pkMap inf)) <$> bBset
+      aggregators = (concat . fmap (\i->  flip availableAggregators i . primType $ i) . S.toList <$> pkFields )
+  let aset = flip buttonSet show <$> facts aggregators
+  --t <- joinT $ aggQuery  <$> triding ff <*> (S.unions <$> bFk) <*> aggregators <*> bBset
+  --count <- UI.div # sink text (fmap show $ facts  t)
+  pkFieldsDiv <- UI.div # sink items (pure .fmap (getElement) <$> aset)
 
-  -- Filter Selector
-  let line n = UI.li # set  text (show n)
-  filterItemBox <- UI.listBox bp (const <$> pure Nothing <*> UI.userSelection fkbox) (pure (\i-> UI.li # set text (show i)))
   -- Filter Map Selected
   let
     filterMaybe f (Just i ) = f i
     filterMaybe _ _  = []
     filterT :: Tidings (Map Key [Filter])
-    filterT = M.fromListWith mappend <$> (filterMaybe (fmap (\(fkv,kv)-> (fkv,[Category (S.fromList [kv])]))) <$> arg)
-      where arg :: Tidings (Maybe [(Key, PK Showable)])
-            arg = liftA2 (zipWith (,)) <$> (fmap S.toList  <$> UI.userSelection fkbox ) <*> (fmap invertPK <$> UI.userSelection filterItemBox)
+    filterT = M.fromListWith mappend <$> (filterMaybe (fmap (\(fkv,kv)-> (fkv,[Category (S.fromList kv)]))) <$> arg)
+      where arg :: Tidings (Maybe [(Key, [PK Showable])])
+            arg = (\i j -> fmap (\nj -> zipWith (,) nj (L.transpose j) ) i) <$> (fmap S.toList  <$> UI.userSelection fkbox ) <*> (fmap invertPK <$> UI.multiUserSelection filterItemBox)
 
   -- Final Query (Saved Filter <> Filter Map Selected)
-  vp <- joinT $ doQuery c projectAll <$> (M.unionWith mappend <$>  filterT <*> triding ff ) <*>  bBset
+  vp <- joinT $ doQuery c projectAll <$> (M.unionWith mappend <$>  filterT <*>  triding ff ) <*>  bBset
+
   -- Final Query ListBox
   itemList <- UI.listBox vp (const <$> pure Nothing <*> bBset) (pure (\i -> line i))
+  multi <- UI.multiListBox vp (pure [])  (pure line)
+  divMulti <- UI.div # sink text (fmap show <$> facts $ UI.multiUserSelection multi)
   element (getElement itemList) # set UI.multiple True
   element (getElement filterItemBox) # set UI.multiple True
   let bCrud = fmap (\k -> pure $ do
@@ -279,7 +303,7 @@ chooseKey conn c@(proj,action) inf kitems = mdo
   insertDiv <- UI.div # sink items bCrud
   filterSel <- UI.div # set children [getElement fkbox]
   filterSel2 <- UI.div # set children [getElement filterItemBox]
-  UI.div # set children [count , getElement ff,getElement bset ,filterSel,filterSel2,insertDiv,getElement itemList ]
+  UI.div # set children [pkFieldsDiv,{-count ,-} getElement multi,divMulti,getElement ff,getElement bset ,filterSel,filterSel2,insertDiv,getElement itemList ]
 
 
 keySetToMap ks = M.fromList $  fmap (\(Key k _ _ t)-> (toStrict $ encodeUtf8 k,t))  (F.toList ks)

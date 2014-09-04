@@ -9,6 +9,7 @@ import Graphics.UI.Threepenny.Core hiding (delete)
 
 import qualified Data.Map as M
 import Data.Map (Map)
+import Data.Traversable(traverse)
 import Data.Monoid
 
 
@@ -58,14 +59,14 @@ insdel binsK =do
     filterWB emap erem bkin = mdo
       let
           insB =  M.unionWith mappend <$> bkin
-          delB = fmap M.delete <$> bsel2
+          delB = foldr (.) id . fmap M.delete <$> bsel2
           recAdd = insB <@ emap
-          recDel = filterJust $ (facts delB) <@ erem
+          recDel =  (facts delB) <@ erem
       recT <- accumTs M.empty  [recAdd,recDel]
       let sk i = UI.li # set text (show i)
-      resSpan <- UI.listBox  (fmap M.toList recT) (pure Nothing) (pure sk)
+      resSpan <- UI.multiListBox  (fmap M.toList recT) (pure []) (pure sk)
       element resSpan # set (attr "size") "10" # set style [("width","400px")]
-      let bsel2 = fmap fst <$> UI.userSelection resSpan
+      let bsel2 = fmap fst <$> UI.multiUserSelection resSpan
       -- Return the triding
       return $ TrivialWidget recT (getElement resSpan)
 
@@ -91,6 +92,7 @@ buttonSet ks h =do
         b <- UI.button # set text (h k)
         let ev = pure k <@ UI.click  b
         return (b,ev)
+
 
 items :: WriteAttr Element [UI Element]
 items = mkWriteAttr $ \i x -> void $ return x # set children [] #+ i

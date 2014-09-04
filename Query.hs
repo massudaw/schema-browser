@@ -36,6 +36,7 @@ import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Time
 import Database.PostgreSQL.Simple.ToField
 
+import Data.Time
 import Control.Monad
 import GHC.Exts
 import System.IO.Unsafe
@@ -64,6 +65,7 @@ data KPrim
    | PDouble
    | PDate
    | PTimestamp
+   | PInterval
    | PPosition
    deriving(Show,Eq,Ord)
 
@@ -123,24 +125,33 @@ data Aggregate a
    = Aggregate [a] Text
    deriving(Show,Eq,Ord)
 
-renderAggr f (Aggregate l s )  = s  <> "(" <> T.intercalate ","  (fmap f l)  <> ")"
 
-
-data KAttribute
-   = Metric Key
-   | Prod KAttribute KAttribute
-   | Rate KAttribute KAttribute
-   | Agg (Aggregate KAttribute)
+type KAttribute = FAttribute Key
+data FAttribute a
+   = Metric a
+   | Operator (FAttribute a) Text Text (FAttribute a)
+   -- | Rate FAttribute KAttribute
+   | Agg (Aggregate (FAttribute a ))
+   | Fun [FAttribute a] Text
    deriving(Eq,Ord,Show)
 
+attrInputSet (Metric k ) = [k]
+attrInputSet (Operator l k n r ) = concat $ [attrInputSet l, attrInputSet r]
+attrInputSet (Fun args k ) = concat $ attrInputSet <$> args
+attrInputSet (Agg (Aggregate args k) ) = concat $ attrInputSet <$> args
+
 attrName (Metric k ) = keyValue k
-attrName (Agg (Aggregate args n)) = n
+attrName (Operator l k n r ) = attrName l  <> n <>  attrName r
+attrName (Fun args n ) =  T.concat (fmap attrName args) <>  n
+attrName (Agg (Aggregate args n)) = T.concat (fmap attrName args) <>  n
 
 renderAttribute :: KAttribute -> Text
 renderAttribute (Metric s ) = keyValue s
-renderAttribute (Prod m1 m2 ) =  renderAttribute m1 <> "*" <> renderAttribute m2
-renderAttribute (Rate m1 m2 ) = renderAttribute m1 <> "/" <> renderAttribute m2
+renderAttribute (Operator l k n r ) = renderAttribute l <>  " " <> k <> " " <> renderAttribute r
+-- renderAttribute (Prod m1 m2 ) =  renderAttribute m1 <> "*" <> renderAttribute m2
+renderAttribute (Fun arg n ) = n <> "(" <> T.intercalate "," (renderAttribute <$> arg) <>")"
 renderAttribute a@(Agg m2  ) = renderAggr renderAttribute m2 <> " as " <> attrName a
+  where renderAggr f (Aggregate l s )  = s  <> "(" <> T.intercalate ","  (fmap f l)  <> ")"
 
 newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read)
 
@@ -150,6 +161,7 @@ data Showable
   | SBoolean Bool
   | SDouble Double
   | STimestamp LocalTimestamp
+  | SPInterval DiffTime
   | SPosition Position
   | SDate Date
   | SOptional (Maybe Showable)
@@ -161,13 +173,15 @@ data Showable
 instance Show Showable where
   show (SText a) = T.unpack a
   show (SNumeric a) = show a
-  show (SDouble a) = show a
   show (SBoolean a) = show a
-  show (SDate a) = show a
+  show (SDouble a) = show a
   show (STimestamp a) = show a
+  show (SDate a) = show a
   show (SPosition a) = show a
   show (SOptional a) = show a
   show (SInterval a) = show a
+  show (SPInterval a) = show a
+  -- show (SComposite a) = show a
 
 
 data Filter
@@ -192,8 +206,8 @@ data Table
     -- Schema | PKS | Description | FKS | Attrs
     |  Raw Text Text (Set Key) (Maybe Key) (Set (Path Key Text)) (Set Key)
     |  Filtered [(Key,Filter)] Table
-    |  Project [KAttribute] Table
-    |  Reduce (Set Key) (Set (Aggregate KAttribute) )  Table
+    |  Project [KAttribute ] Table
+    |  Reduce (Set Key) (Set (Aggregate (KAttribute ) ) )  Table
     |  Limit Table Int
     deriving(Eq,Ord,Show)
 
@@ -228,10 +242,10 @@ showTable (Filtered f t) = filterTable (fmap (\(k,f) -> (t,k,f) ) f ) t
       filterTable [] b =  showTable b
       filterTable filters b =  "(SELECT *  FROM " <> showTable b <>  " WHERE " <> T.intercalate " AND " (fmap renderFilter filters)  <> ") as " <> ( tableName b )
 showTable (Raw s t _ _  _ _) = s <> "." <> t
-showTable b@(Base k p) = " FROM (SELECT " <> (T.intercalate "," $ ( attrName <$> S.toList attrs) <> fmap renderNamespacedKeySet jattrs ) <> joinQuerySet p <>") as " <> tableName b
+showTable b@(Base k p) = " from (SELECT " <> (T.intercalate "," $ ( S.toList attrs) <> fmap renderNamespacedKeySet jattrs ) <> joinQuerySet p <>") as " <> tableName b
   where
-    attrs = S.filter (not . (`S.member` (S.fromList $ fmap (Metric. snd) jattrs) )) $ allAttrs b
-    jattrs = nubBy (\ i j-> snd i == snd j) $ joinKeys p
+    attrs = S.mapMonotonic attrName $ S.filter (not . (`S.member` (S.fromList $ fmap (Metric. snd) jattrs) )) $ allAttrs b
+    jattrs =  nubBy (\ i j-> snd i == snd j) $ joinKeys p
     joinQuerySet (From b _) =  " FROM " <>  showTable b
     joinQuerySet (Join b _ r p)
       |  any (\(Key _ _ _ k )-> isKOptional k ) (snd <$> S.toList r)  = joinQuerySet p <>  " LEFT JOIN " <> showTable b <> joinPredicate (S.toList r) b
@@ -240,8 +254,8 @@ showTable b@(Base k p) = " FROM (SELECT " <> (T.intercalate "," $ ( attrName <$>
 
 
 showTable (Project [] t) = "(SELECT " <>  showTable t  <> ") as " <> tableName t
-showTable (Project s t) = "(SELECT " <> T.intercalate ","  (attrName <$> s)  <>  showTable t  <> ") as " <> tableName t
-showTable (Reduce j t p) =  "(SELECT " <> T.intercalate "," (fmap keyValue (S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <> " FROM " <>   showTable p  <> " GROUP BY " <> T.intercalate "," (fmap keyValue (S.toList j)) <> " ) as " <> tableName p
+showTable (Project s t) = "(SELECT " <> T.intercalate ","  (nub $ attrName <$> s)  <>  showTable t  <> ") as " <> tableName t
+showTable (Reduce j t p) =  "(SELECT " <> T.intercalate "," (fmap keyValue (traceShowId $ S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <> " FROM " <>   showTable p  <> " GROUP BY " <> T.intercalate "," (fmap keyValue (S.toList j)) <> " ) as " <> tableName p
 showTable (Limit t v) = showTable t <> " LIMIT " <> T.pack (show v)
 
 delete
@@ -322,7 +336,7 @@ specializeJoin
     -> (Map Key Filter,JoinPath Key Table )
 specializeJoin f (From t s) =  (M.fromList ff , From (addFilterTable ff t) s)
     where ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList s))
-specializeJoin f (Join t s r (p) ) =  (ms1,Join (addFilterTable ff t) s r ss)
+specializeJoin f (Join t s r p) =  (ms1,Join (addFilterTable ff t) s r ss)
     where (ms,ss) = specializeJoin f p
           ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList s))
           ms1 = foldr (\(i,j) s -> M.insert i  j s) ms ff
@@ -341,10 +355,8 @@ createFilter filters schema (Project a t) = fmap (Project a) (createFilter filte
 createFilter filters schema (Reduce  k a t) = fmap (Reduce k a) (createFilter filters schema t)
 
 
-
-
 createAggregate  schema key attr  old
-    = Reduce (S.fromList key) (S.fromList attr) (addAggregate schema  key attr (Project [] old))
+    = Reduce (S.fromList key) (S.fromList attr) (addAggregate schema  key attr (Project (fmap Metric key) old))
 
 addAggregate
   :: HashSchema Key Table
@@ -354,7 +366,7 @@ addAggregate schema key attr (Base k s) =   case   catMaybes $ queryHash key  sc
                         l -> Base k  (fromJust $ foldr joinPath  (Just s) l)
 
 addAggregate schema key aggr (Project a t) =  Project (foldr (:) a attr )  (addAggregate schema key aggr t)
-  where attr =  concat $ fmap (\(Aggregate l _)-> l) aggr
+  where attr =  concat $ fmap (fmap Metric . attrInputSet. Agg) aggr
 addAggregate schema key attr (Reduce j t  p) =  case concat $  fmap (\ki -> catMaybes $  queryHash key  schema (S.singleton ki))  (S.toList j)  of
                         [] -> Reduce (foldr S.insert j key) (foldr S.insert t attr)  (addAggregate schema key attr p )
                         l -> Reduce  j t  p
@@ -368,6 +380,31 @@ reduce group aggr = do
   put (schema,createAggregate schema group aggr table)
   return (fmap Metric group <> fmap Agg aggr)
 
+aggAll :: Map (Set Key) Table ->  [Key] -> [Aggregate KAttribute] -> QueryT [KAttribute]
+aggAll tmap i agg = do
+  reduce i  agg
+  (schema,table) <- get
+  let
+    paths = catMaybes $ fmap (\ti-> (\k -> Path (S.singleton ti) k (S.singleton ti )) <$> M.lookup (S.singleton ti) tmap ) i
+    Just res = foldr joinPath (Just $ From table (S.fromList i)) paths
+    attrs = nub $ (fmap Metric $ concat $ fmap F.toList $ fmap (\ti->  baseDescKeys (fromJust $ M.lookup (S.singleton ti) tmap)) i ) <> fmap Agg agg
+  put (schema,Project attrs $ Base (S.fromList i) res )
+  return attrs
+
+
+countAll :: Map (Set Key) Table ->  [Key] -> QueryT [KAttribute ]
+countAll tmap i = do
+  let agg = [ Aggregate [Metric $ Key "distance" Nothing (unsafePerformIO $ newUnique) (Primitive "double precision")] "sum"]
+  reduce i  agg
+  (schema,table) <- get
+  let
+    paths = catMaybes $ fmap (\ti-> (\k -> Path (S.singleton ti) k (S.singleton ti )) <$> M.lookup (S.singleton ti) tmap ) i
+    Just res = foldr joinPath (Just $ From table (S.fromList i)) paths
+    attrs = (traceShowId $ fmap Metric $ concat $ fmap F.toList $ fmap (\ti->  baseDescKeys (fromJust $ M.lookup (S.singleton ti) tmap)) i ) <> fmap Agg agg
+  put (schema,Project attrs $ Base (S.fromList i) res )
+  return attrs
+
+{-
 countAll :: Map (Set Key) Table ->  [Key] -> QueryT [KAttribute]
 countAll tmap i = do
   let agg = [ Aggregate [Metric $ Key "*" Nothing (unsafePerformIO $ newUnique) (Primitive "integer")] "count"]
@@ -380,10 +417,11 @@ countAll tmap i = do
 
   put (schema,Project attrs $ Base (S.fromList i) res )
   return attrs
+-}
 
 freeVars (Metric c) = [c]
-freeVars (Rate c k ) = freeVars c <> freeVars k
-freeVars (Prod c k ) = freeVars c <> freeVars k
+-- freeVars (Rate c k ) = freeVars c <> freeVars k
+-- freeVars (Prod c k ) = freeVars c <> freeVars k
 freeVars (Agg (Aggregate l _ ) ) = concatMap freeVars l
 
 predicate
@@ -409,7 +447,7 @@ instance Show a => Show (PK a)  where
   show (PK i j ) = intercalate  "," $ fmap show j
 
 projectDesc
-     :: QueryT (PK KAttribute)
+     :: QueryT (PK (KAttribute ))
 projectDesc =  do
   (schema,table) <- get
   let pk = baseDescKeys table
@@ -418,8 +456,8 @@ projectDesc =  do
 
 
 project
-  :: [KAttribute]
-     -> QueryT [KAttribute]
+  :: [KAttribute ]
+     -> QueryT [KAttribute ]
 project attributes =  do
   (schema,table) <- get
   let result = filter (`elem` attributes) (fmap Metric $ S.toList $ allKeys table)

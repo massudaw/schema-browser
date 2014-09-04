@@ -1,8 +1,10 @@
 {-# LANGUAGE RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 module Postgresql where
 import Query
+import Data.Scientific hiding(scientific)
 import Data.Bits
 import Debug.Trace
+import Data.Time.Clock
 import Schema
 import qualified Data.Serialize as Sel
 import Data.Maybe
@@ -73,6 +75,7 @@ textToPrim "integer" = PInt
 textToPrim "boolean" = PBoolean
 textToPrim "smallint" = PInt
 textToPrim "timestamp without time zone" = PTimestamp
+textToPrim "interval" = PInterval
 textToPrim "date" = PDate
 textToPrim "POINT" = PPosition
 textToPrim i = error $ "no case for type " <> T.unpack i
@@ -129,14 +132,16 @@ readType t =
       Primitive PDouble ->  readDouble
       Primitive PInt -> readInt
       Primitive PTimestamp -> readTimestamp
+      Primitive PInterval -> readInteval
       Primitive PDate-> readDate
       Primitive PPosition -> readPosition
       Primitive PBoolean -> readBoolean
-      KInterval (Primitive PTimestamp ) -> inter readTimestamp
-      KOptional (KInterval (Primitive PTimestamp )) -> opt (inter readTimestamp)
-      KOptional (Primitive PText ) -> opt readText
-      KOptional (Primitive PInt )-> opt readInt
-      KOptional (Primitive PDouble ) -> opt readDouble
+      KInterval (Primitive PTimestamp) -> inter readTimestamp
+      KOptional (KInterval (Primitive PTimestamp)) -> opt (inter readTimestamp)
+      KOptional (Primitive PInterval) -> opt readInteval
+      KOptional (Primitive PText) -> opt readText
+      KOptional (Primitive PInt)-> opt readInt
+      KOptional (Primitive PDouble) -> opt readDouble
       KOptional (Primitive PTimestamp) -> opt readTimestamp
       KOptional (Primitive PDate) -> opt readDate
       KOptional (Primitive PPosition) -> opt readPosition
@@ -150,6 +155,7 @@ readType t =
       readDate =  fmap (SDate . Finite . localDay . fst) . strptime "%Y-%m-%d"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
       readTimestamp =  fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%OS"
+      readInteval =  fmap SPInterval . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
       nonEmpty f ""  = Nothing
       nonEmpty f i  = f i
       opt f "" =  Just $ SOptional Nothing
@@ -159,16 +165,44 @@ readType t =
 safeTail [] = []
 safeTail i = tail i
 
-postgresqlFunctions "count" _ = Primitive PInt
 
-attrToKey (Metric k) = renderedName k
-attrToKey (Agg (Aggregate k "count")) = renderedType (postgresqlFunctions "count" k)
+primType (Metric k ) = textToPrim <$> keyType k
+primType (Agg g) =  postgresqlFunctions g
+primType f@(Fun _ _) =  pgfun f
+primType f@(Operator r _ _ l) =  pgfun f
+
+
+
+availableAggregators (Primitive PInt) k = [Aggregate [k] "count"]
+availableAggregators (Primitive PDouble) k = [Aggregate [k] "sum"]
+availableAggregators (KInterval i ) k = [Aggregate [Operator (Fun [k] "upper") "-" "diff" (Fun [k] "lower")] "sum"]
+availableAggregators i k = []
+
+subSpace (Primitive PTimestamp)  = Primitive PInterval
+subSpace (Primitive PDate)  = Primitive PInterval
+
+pgfun :: KAttribute -> KType KPrim
+pgfun (Fun [k] "lower" ) = case primType k of
+    KInterval i -> i
+    i -> error "not inteval"
+pgfun (Fun [k] "upper" )  = case primType k of
+    KInterval i -> traceShowId i
+    i -> error "not inteval"
+pgfun (Operator l "-" n r) = traceShowId $ subSpace (traceShowId $ primType l)
+
+
+postgresqlFunctions :: Aggregate KAttribute -> KType KPrim
+postgresqlFunctions (Aggregate _ "count" ) = Primitive PInt
+postgresqlFunctions (Aggregate [k] "sum" ) = primType k
+
+attrToKey k@(Metric i) = renderedName i
+attrToKey t@(Agg _)  = renderedType (primType t)
 
 renderedName key = \f b ->
  case F.name f  of
       Just name -> let
           in case (keyValue key == T.fromStrict (TE.decodeUtf8 name)) of
-              True ->  renderedType (fmap textToPrim $ keyType key) f b
+              True ->  renderedType (textToPrim <$> keyType key) f b
               False -> error $ "no match type for " <> BS.unpack name <> " with key" <> show key
 
       Nothing -> error "no name for field"
@@ -194,7 +228,7 @@ renderShowable i = show i
 unOnly :: Only a -> a
 unOnly (Only i) = i
 
-prim :: (F.FromField (f1 Bool ),F.FromField (f1 Position ),F.FromField (f1 LocalTimestamp),F.FromField (f1 Date),F.FromField (f1 Text), F.FromField (f1 Double), F.FromField (f1 Int), Functor f1) =>
+prim :: (F.FromField (f1 Bool ),F.FromField (f1 DiffTime),F.FromField (f1 Position ),F.FromField (f1 LocalTimestamp),F.FromField (f1 Date),F.FromField (f1 Text), F.FromField (f1 Double), F.FromField (f1 Int), Functor f1) =>
           KPrim
         -> F.Field
         -> Maybe BS.ByteString
@@ -204,6 +238,7 @@ prim  p f b = case p of
             PInt -> n $ F.fromField  f b
             PDouble -> d $ F.fromField  f b
             PDate -> da $ F.fromField  f b
+            PInterval -> i $ F.fromField  f b
             PTimestamp -> t $ F.fromField  f b
             PPosition -> pos $ F.fromField  f b
             PBoolean -> bo $ F.fromField  f b
@@ -212,6 +247,7 @@ prim  p f b = case p of
     n = fmap (fmap SNumeric)
     d = fmap (fmap SDouble)
     da = fmap (fmap SDate)
+    i = fmap (fmap SPInterval)
     t = fmap (fmap STimestamp)
     pos = fmap (fmap SPosition)
     bo = fmap (fmap SBoolean)
@@ -246,6 +282,17 @@ instance F.FromField Position where
 
 instance Functor Interval.Interval where
   fmap f i = NI.I (f (Interval.inf i)) ( f (Interval.sup i))
+
+instance F.FromField DiffTime where
+  fromField  f mdat = case  mdat of
+    Nothing -> F.returnError F.UnexpectedNull f ""
+    Just dat -> do
+      case parseOnly (do
+        [h,m,s] <- sepBy1 (fromJust . toBoundedInteger <$> scientific) (char ':')
+        return $ secondsToDiffTime (fromIntegral $ h * 3600 + (60 :: Int) * m + s)) dat of
+          Left err -> F.returnError F.ConversionFailed f err
+          Right conv -> return conv
+
 
 -- | any postgresql array whose elements are compatible with type @a@
 instance (F.FromField a,Ord a, Typeable a) => F.FromField (Interval.Interval a) where
