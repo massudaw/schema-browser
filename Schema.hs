@@ -10,6 +10,7 @@ import Data.Foldable (Foldable)
 import Data.Traversable (Traversable)
 import Data.Char ( isAlpha )
 import Data.Maybe
+import Data.Functor.Identity
 import Data.Monoid
 
 
@@ -130,7 +131,7 @@ schemaKeys conn schema (keyTable,map,_) = do
 projectAllKeys
   :: Traversable t => Map (Set Key) Table
      -> HashSchema Key Table
-     -> QueryT (t KAttribute)
+     -> QueryT Identity (t KAttribute)
      -> Set Key
      -> (t KAttribute, (HashSchema Key Table, Table))
 projectAllKeys baseTables hashGraph m bkey

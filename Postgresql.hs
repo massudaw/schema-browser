@@ -6,13 +6,13 @@ import Data.Bits
 import Debug.Trace
 import Data.Time.Clock
 import Schema
+import Control.Applicative
 import qualified Data.Serialize as Sel
 import Data.Maybe
 import Text.Read
 import Data.Typeable
 import qualified Data.ByteString.Base16 as B16
 import Data.Time.Parse
-import Reactive.Threepenny
 import           Database.PostgreSQL.Simple.Arrays as Arrays
 import Data.Graph(stronglyConnComp,flattenSCCs)
 import Control.Exception
@@ -30,8 +30,6 @@ import qualified Numeric.Interval as Interval
 import qualified Numeric.Interval.Internal as NI
 import qualified Data.ByteString.Char8 as BS
 
-import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Core
 import Data.Monoid
 import Data.Time.Parse
 
@@ -186,9 +184,9 @@ pgfun (Fun [k] "lower" ) = case primType k of
     KInterval i -> i
     i -> error "not inteval"
 pgfun (Fun [k] "upper" )  = case primType k of
-    KInterval i -> traceShowId i
+    KInterval i -> i
     i -> error "not inteval"
-pgfun (Operator l "-" n r) = traceShowId $ subSpace (traceShowId $ primType l)
+pgfun (Operator l "-" n r) =  subSpace ( primType l)
 
 
 postgresqlFunctions :: Aggregate KAttribute -> KType KPrim
@@ -228,11 +226,11 @@ renderShowable i = show i
 unOnly :: Only a -> a
 unOnly (Only i) = i
 
-prim :: (F.FromField (f1 Bool ),F.FromField (f1 DiffTime),F.FromField (f1 Position ),F.FromField (f1 LocalTimestamp),F.FromField (f1 Date),F.FromField (f1 Text), F.FromField (f1 Double), F.FromField (f1 Int), Functor f1) =>
+prim :: (F.FromField (f Bool ),F.FromField (f DiffTime),F.FromField (f Position ),F.FromField (f LocalTimestamp),F.FromField (f Date),F.FromField (f Text), F.FromField (f Double), F.FromField (f Int), Functor f) =>
           KPrim
         -> F.Field
         -> Maybe BS.ByteString
-        -> F.Conversion (f1 Showable)
+        -> F.Conversion (f Showable)
 prim  p f b = case p of
             PText ->  s $ F.fromField f b
             PInt -> n $ F.fromField  f b

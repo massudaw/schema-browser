@@ -181,11 +181,14 @@ instance Show Showable where
   show (SOptional a) = show a
   show (SInterval a) = show a
   show (SPInterval a) = show a
-  -- show (SComposite a) = show a
+  show (SComposite a) = show a
 
 
 data Filter
+   -- Set containement
    = Category (Set (PK Showable))
+   -- Range Intersection
+   | RangeFilter (Interval.Interval (PK Showable))
    | And [Filter]
    | Or [Filter]
    deriving(Eq,Ord)
@@ -199,6 +202,7 @@ instance Monoid Filter where
 -- Pretty Print Filter
 renderFilter (table ,name,Category i) = tableName table <> "." <> keyValue name <> " IN( " <>  T.intercalate "," (fmap (\s -> "'" <> T.pack (show $ head (pkKey s)) <> "'" ) $ S.toList i) <> ")"
 renderFilter (table ,name,And i) =  T.intercalate " AND "  (fmap (renderFilter . (table ,name,)) i)
+renderFilter (table ,name,RangeFilter i) =  tableName table <> "." <> keyValue name <> " BETWEEN " <> T.intercalate " AND "  (fmap (\s -> "'" <> T.pack (show $ head (pkKey s)) <> "'" ) [Interval.inf i,Interval.sup i])
 
 
 data Table
@@ -211,6 +215,16 @@ data Table
     |  Limit Table Int
     deriving(Eq,Ord,Show)
 
+atTables f t@(Raw _ _ _ _ _ _ ) = f t
+atTables f (Filtered _ t ) = atTables f t
+atTables f (Project _ t ) = atTables f t
+atTables f (Reduce _ _ t ) = atTables f t
+atTables f (Limit t _) = atTables f t
+atTables f (Base _ p ) = from p
+  where from (From t _) = atTables f t
+        from (Join t _ _ p) = atTables f t <> from p
+
+
 atBase f t@(Raw _ _ _ _ _ _ ) = f t
 atBase f (Filtered _ t ) = atBase f t
 atBase f (Project _ t ) = atBase f t
@@ -222,6 +236,7 @@ atBase f (Base _ p ) = from p
 
 normalizing = atBase (\(Raw _ _ t _ _ _ )-> t)
 tableName = atBase (\(Raw _ t _ _ _ _ )-> t)
+tablesName = atBase (\(Raw _ t _ _ _ _ )-> S.singleton t)
 
 --- Traverse the joinPath returning the keyList
 joinKeys (From b k ) = fmap (b,) (S.toList k)
@@ -282,6 +297,8 @@ update conn kv kold (Raw sch tbl pk _ _ _) = execute conn (fromString $ traceSho
     setter = " SET " <> T.intercalate "," (fmap equality kv)
     up = "UPDATE " <> sch <>"."<> tbl <> setter <>  pred
 
+insertPK f conn kv (Raw sch tbl pk  _ _ _) = fmap (zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> " RETURNING " <>  T.intercalate "," (keyValue <$> pkList)) (fmap snd kv)
+  where pkList = S.toList pk
 
 insert conn kv (Raw sch tbl _ _ _ _) = execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
 
@@ -304,22 +321,22 @@ joinPath (ComposePath i (l,ij,k) j ) m = foldr joinPath  m  (S.toList l <> S.toL
 joinPath (PathOption i p j ) m =  joinPath ( head $ S.toList p ) m
 
 
-addJoin :: (Show a,Show b,Ord b,Ord a) => a -> Set b -> JoinPath b a -> JoinPath b a
+--addJoin :: (Show a,Show b,Ord b,Ord a) => a -> Set b -> JoinPath b a -> JoinPath b a
 addJoin tnew f p = case mapPath tnew f p of
             -- Add new case
             Left accnew -> Join tnew f accnew p
             -- Just update with new joins
             Right i -> i
     where
-        mapPath :: (Show a,Show b,Ord b,Ord a) => a -> Set b -> JoinPath b a -> Either (Set (a,b)) (JoinPath b a)
-        mapPath tnew f (From t   s ) =  if t == tnew
+        --mapPath :: (Show a,Show b,Ord b,Ord a) => a -> Set b -> JoinPath b a -> Either (Set (a,b)) (JoinPath b a)
+        mapPath tnew f (From t   s ) =  if tablesName tnew `S.isSubsetOf`  tablesName t
                 then  (Right $ From t  snew )
                 else  (Left $ S.mapMonotonic (t,) $  s `S.intersection` f)
             where snew =  s `S.union` f
         mapPath tnew  f (Join t  s clause p ) = res
             where  res = case mapPath tnew f p  of
                     Right pnew  -> Right $ Join t s (clause `S.union` (S.mapMonotonic (tnew,) $  s `S.intersection` f)) pnew
-                    Left accnew -> if t == tnew
+                    Left accnew -> if tablesName tnew `S.isSubsetOf`  tablesName t
                         then Right $ Join t  (s `S.union` f)  (clause `S.union` accnew ) p
                         else Left $ (S.mapMonotonic (t,) $ s `S.intersection` f)  `S.union` accnew
 
@@ -372,15 +389,15 @@ addAggregate schema key attr (Reduce j t  p) =  case concat $  fmap (\ki -> catM
                         l -> Reduce  j t  p
 
 
-reduce ::  [Key]
+reduce :: Monad m => [Key]
      -> [Aggregate KAttribute]
-     -> QueryT [KAttribute]
+     -> QueryT m [KAttribute]
 reduce group aggr = do
   (schema,table) <- get
   put (schema,createAggregate schema group aggr table)
   return (fmap Metric group <> fmap Agg aggr)
 
-aggAll :: Map (Set Key) Table ->  [Key] -> [Aggregate KAttribute] -> QueryT [KAttribute]
+aggAll ::Monad m => Map (Set Key) Table ->  [Key] -> [Aggregate KAttribute] -> QueryT m [KAttribute]
 aggAll tmap i agg = do
   reduce i  agg
   (schema,table) <- get
@@ -392,7 +409,7 @@ aggAll tmap i agg = do
   return attrs
 
 
-countAll :: Map (Set Key) Table ->  [Key] -> QueryT [KAttribute ]
+countAll :: Monad m =>Map (Set Key) Table ->  [Key] -> QueryT m [KAttribute ]
 countAll tmap i = do
   let agg = [ Aggregate [Metric $ Key "distance" Nothing (unsafePerformIO $ newUnique) (Primitive "double precision")] "sum"]
   reduce i  agg
@@ -405,7 +422,7 @@ countAll tmap i = do
   return attrs
 
 {-
-countAll :: Map (Set Key) Table ->  [Key] -> QueryT [KAttribute]
+countAll :: Map (Set Key) Table ->  [Key] -> QueryT m [KAttribute]
 countAll tmap i = do
   let agg = [ Aggregate [Metric $ Key "*" Nothing (unsafePerformIO $ newUnique) (Primitive "integer")] "count"]
   reduce i  agg
@@ -425,8 +442,8 @@ freeVars (Metric c) = [c]
 freeVars (Agg (Aggregate l _ ) ) = concatMap freeVars l
 
 predicate
-  :: [(Key,Filter)]
-     -> QueryT ()
+  :: Monad m =>[(Key,Filter)]
+     -> QueryT m ()
 predicate filters = do
   (schema,table) <- get
   put (schema, snd  $ createFilter (M.fromList filters) schema table)
@@ -447,7 +464,7 @@ instance Show a => Show (PK a)  where
   show (PK i j ) = intercalate  "," $ fmap show j
 
 projectDesc
-     :: QueryT (PK (KAttribute ))
+     :: Monad m =>QueryT m (PK (KAttribute ))
 projectDesc =  do
   (schema,table) <- get
   let pk = baseDescKeys table
@@ -456,16 +473,17 @@ projectDesc =  do
 
 
 project
-  :: [KAttribute ]
-     -> QueryT [KAttribute ]
+  :: Monad m =>[KAttribute ]
+     -> QueryT m [KAttribute ]
 project attributes =  do
   (schema,table) <- get
   let result = filter (`elem` attributes) (fmap Metric $ S.toList $ allKeys table)
   put (schema,Limit (Project result table) 200 )
   return  result
 
+
 projectAll
-     :: QueryT [KAttribute]
+     :: Monad m => QueryT m [KAttribute]
 projectAll =  do
   (schema,table) <- get
   let result = fmap Metric $ S.toList $ allKeys table
@@ -473,7 +491,7 @@ projectAll =  do
   return result
 
 baseDescKeys :: Table -> PK Key
-baseDescKeys (Raw _ _ pk Nothing _ _ ) = PK (S.toList pk) (S.toList pk)
+baseDescKeys (Raw _ _ pk Nothing _ _ ) = PK (S.toList pk)  []
 baseDescKeys (Raw _ _ pk (Just d) _ _ ) = PK (S.toList pk) [d]
 baseDescKeys (Limit p _ ) = baseDescKeys p
 baseDescKeys (Filtered _ p) = baseDescKeys p
@@ -502,8 +520,8 @@ allKeys (Reduce _ _ p) = allKeys p
 allKeys (Base _ p) = F.foldMap allKeys p
 
 
-newtype QueryT a
-  = QueryT {runQueryT :: State (HashSchema Key Table, Table)  a} deriving(Functor,Applicative,Monad,MonadState (HashSchema Key Table, Table) )
+newtype QueryT m a
+  = QueryT {runQueryT :: StateT  (HashSchema Key Table, Table)  m a} deriving(Functor,Applicative,Monad,MonadState (HashSchema Key Table, Table) )
 
 runQuery t =  runState ( runQueryT t)
 
