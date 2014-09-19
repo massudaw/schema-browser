@@ -72,10 +72,22 @@ data KPrim
 
 data KType a
    = Primitive a
+   | KSerial (KType a)
    | KArray (KType a)
    | KInterval (KType a)
    | KOptional (KType a)
    deriving(Eq,Ord,Functor)
+
+isSerial (KSerial _) = True
+isSerial _ = False
+isOptional (KOptional _) = True
+isOptional _ = False
+
+foldKType f (KOptional k) = f k
+foldKType f (KInterval k) = f k
+foldKType f (KArray k) = f k
+foldKType f (KSerial k) = f k
+foldKType f k@(Primitive _) = f k
 
 instance Show (KType KPrim) where
   show =  showTy show
@@ -87,6 +99,7 @@ showTy f (Primitive i ) = f i
 showTy f (KArray i) = showTy f i <> "[]"
 showTy f (KOptional i) = showTy f i <> "*"
 showTy f (KInterval i) = showTy f i <> "()"
+showTy f (KSerial i) = showTy f i <> "?"
 
 data Key
     = Key
@@ -110,7 +123,7 @@ instance Ord Key where
 instance Show Key where
    show = T.unpack . showKey
   --show (Key v u _) = show v <> show (hashUnique u)
-showKey k  = maybe (keyValue k<> "::" <> showTy id (keyType k)) id (keyTranslation k)
+showKey k  = maybe (keyValue k) id (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::"  <> showTy id (keyType k)
 
 data JoinPath a b
     = From b (Set a)
@@ -164,10 +177,15 @@ data Showable
   | SPInterval DiffTime
   | SPosition Position
   | SDate Date
+  | SSerial (Maybe Showable)
   | SOptional (Maybe Showable)
   | SComposite (Vector Showable)
   | SInterval (Interval.Interval Showable)
   deriving(Ord,Eq)
+
+normalize (SSerial a ) = join $ fmap normalize a
+normalize (SOptional a ) = join  $ fmap normalize a
+normalize i = Just i
 
 
 instance Show Showable where
@@ -177,6 +195,7 @@ instance Show Showable where
   show (SDouble a) = show a
   show (STimestamp a) = show a
   show (SDate a) = show a
+  show (SSerial a) = show a
   show (SPosition a) = show a
   show (SOptional a) = show a
   show (SInterval a) = show a
@@ -214,6 +233,8 @@ data Table
     |  Reduce (Set Key) (Set (Aggregate (KAttribute ) ) )  Table
     |  Limit Table Int
     deriving(Eq,Ord,Show)
+
+description (Raw _ _ _ desc _ _ ) = desc
 
 atTables f t@(Raw _ _ _ _ _ _ ) = f t
 atTables f (Filtered _ t ) = atTables f t
@@ -270,7 +291,7 @@ showTable b@(Base k p) = " from (SELECT " <> (T.intercalate "," $ ( S.toList att
 
 showTable (Project [] t) = "(SELECT " <>  showTable t  <> ") as " <> tableName t
 showTable (Project s t) = "(SELECT " <> T.intercalate ","  (nub $ attrName <$> s)  <>  showTable t  <> ") as " <> tableName t
-showTable (Reduce j t p) =  "(SELECT " <> T.intercalate "," (fmap keyValue (traceShowId $ S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <> " FROM " <>   showTable p  <> " GROUP BY " <> T.intercalate "," (fmap keyValue (S.toList j)) <> " ) as " <> tableName p
+showTable (Reduce j t p) =  "(SELECT " <> T.intercalate "," (fmap keyValue (S.toList j)  <> fmap (renderAttribute.Agg )  (S.toList t ) )   <> " FROM " <>   showTable p  <> " GROUP BY " <> T.intercalate "," (fmap keyValue (S.toList j)) <> " ) as " <> tableName p
 showTable (Limit t v) = showTable t <> " LIMIT " <> T.pack (show v)
 
 delete
@@ -297,10 +318,12 @@ update conn kv kold (Raw sch tbl pk _ _ _) = execute conn (fromString $ traceSho
     setter = " SET " <> T.intercalate "," (fmap equality kv)
     up = "UPDATE " <> sch <>"."<> tbl <> setter <>  pred
 
-insertPK f conn kv (Raw sch tbl pk  _ _ _) = fmap (zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> " RETURNING " <>  T.intercalate "," (keyValue <$> pkList)) (fmap snd kv)
+insertPK f conn kva (Raw sch tbl pk  _ _ _) = fmap (zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> " RETURNING " <>  T.intercalate "," (keyValue <$> pkList)) (fmap snd kv)
   where pkList = S.toList pk
+        kv = filter ( not . isSerial . keyType . fst) kva
 
-insert conn kv (Raw sch tbl _ _ _ _) = execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
+insert conn kva (Raw sch tbl _ _ _ _) = execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
+  where kv = filter ( not . isSerial . keyType . fst) kva
 
 dropTable (Raw sch tbl _ _ _ _ )= "DROP TABLE "<> sch <>"."<> tbl
 
@@ -417,7 +440,8 @@ countAll tmap i = do
   let
     paths = catMaybes $ fmap (\ti-> (\k -> Path (S.singleton ti) k (S.singleton ti )) <$> M.lookup (S.singleton ti) tmap ) i
     Just res = foldr joinPath (Just $ From table (S.fromList i)) paths
-    attrs = (traceShowId $ fmap Metric $ concat $ fmap F.toList $ fmap (\ti->  baseDescKeys (fromJust $ M.lookup (S.singleton ti) tmap)) i ) <> fmap Agg agg
+    attrs = ( fmap Metric $ concat $ fmap F.toList $ fmap (\ti->  baseDescKeys (fromJust $ M.lookup (S.singleton ti) tmap)) i ) <> fmap Agg agg
+
   put (schema,Project attrs $ Base (S.fromList i) res )
   return attrs
 
@@ -461,7 +485,7 @@ instance Ord a => Ord (PK a) where
 
 instance Show a => Show (PK a)  where
   show (PK i []) = intercalate "," $ fmap show i
-  show (PK i j ) = intercalate  "," $ fmap show j
+  show (PK i j ) = intercalate "," (fmap show i) <> "-"<> intercalate  "," ( fmap show j)
 
 projectDesc
      :: Monad m =>QueryT m (PK (KAttribute ))
@@ -567,4 +591,19 @@ cvLabeled g = PG.mkGraph lvertices ledges
         ledges = fmap (\e -> case pbound e of
                             (t,h) -> (fromJust (M.lookup t v) ,fromJust (M.lookup h v) ,e)) (fmap snd $ M.toList $ edges g)
 
+
+instance IsString Showable where
+  fromString i = SText (T.pack i)
+
+instance Num Showable where
+  SNumeric i +  SNumeric j = SNumeric (i + j)
+  SNumeric i *  SNumeric j = SNumeric (i * j)
+  fromInteger i = SNumeric $ fromIntegral i
+  negate (SNumeric i) = SNumeric $ negate i
+  abs (SNumeric i) = SNumeric $ abs i
+  signum (SNumeric i) = SNumeric $ signum i
+
+instance Fractional Showable where
+  fromRational i = SDouble (fromRational i)
+  recip (SDouble i) = SDouble (recip i)
 

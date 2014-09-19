@@ -29,6 +29,11 @@ accumT e ev = do
 accumTs :: MonadIO m => a -> [Event (a -> a)] -> m (Tidings a)
 accumTs e = accumT e . foldr1 (unionWith (.))
 
+addTs :: MonadIO m => Tidings a -> [Event a] -> m (Tidings a)
+addTs t e = do
+  i <- currentValue (facts t)
+  accumTs i $ fmap const  <$> ((rumors t) : e)
+
 joinT :: MonadIO m => Tidings (IO a) -> m (Tidings a)
 joinT = mapT id
 

@@ -1,6 +1,7 @@
 {-# LANGUAGE RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 module Postgresql where
 import Query
+import GHC.Stack
 import Data.Scientific hiding(scientific)
 import Data.Bits
 import Debug.Trace
@@ -70,6 +71,7 @@ textToPrim "float8" = PDouble
 textToPrim "int4" = PInt
 textToPrim "int8" = PInt
 textToPrim "integer" = PInt
+textToPrim "bigint" = PInt
 textToPrim "boolean" = PBoolean
 textToPrim "smallint" = PInt
 textToPrim "timestamp without time zone" = PTimestamp
@@ -110,6 +112,7 @@ instance TF.ToField Showable where
   toField (SText t) = TF.toField t
   toField (SNumeric t) = TF.toField t
   toField (SDate t) = TF.toField t
+  toField (SSerial t) = maybe (TF.Plain $ fromByteString "null") TF.toField t
   toField (STimestamp t) = TF.toField t
   toField (SDouble t) = TF.toField t
   toField (SOptional t) = TF.toField t
@@ -212,13 +215,15 @@ renderedType key f b = go key
           go t = case t of
             (KInterval (Primitive i)) -> SInterval <$> prim i f b
             (KOptional (Primitive i)) -> SOptional <$> prim i f b
+            (KSerial (Primitive i)) -> SSerial <$> prim i f b
             (KArray (Primitive i)) -> SComposite <$> prim i f b
             (KOptional (KArray (Primitive i))) ->  fmap (SOptional . fmap SComposite . getCompose ) $ prim i f b
             (KOptional (KInterval (Primitive i))) -> (SOptional . fmap SInterval . getCompose ) <$> prim i f b
             (Primitive i) ->  fmap unOnly $ prim  i f b
 
 renderShowable :: Showable -> String
-renderShowable (SOptional i ) = maybe "" show i
+renderShowable (SOptional i ) = maybe "" renderShowable i
+renderShowable (SSerial i ) = maybe "" renderShowable i
 renderShowable (SInterval i)  = renderShowable (Interval.inf i) <> "," <> renderShowable (Interval.sup i)
 renderShowable i = show i
 
@@ -286,8 +291,14 @@ instance F.FromField DiffTime where
     Nothing -> F.returnError F.UnexpectedNull f ""
     Just dat -> do
       case parseOnly (do
-        [h,m,s] <- sepBy1 (fromJust . toBoundedInteger <$> scientific) (char ':')
-        return $ secondsToDiffTime (fromIntegral $ h * 3600 + (60 :: Int) * m + s)) dat of
+          res  <- sepBy1 (fromJust . toBoundedInteger <$> scientific) (char ':')
+          return $ case res  of
+            [s] ->  secondsToDiffTime (fromIntegral s)
+            [m,s] ->  secondsToDiffTime (fromIntegral $  (60 :: Int) * m + s)
+            [h,m,s] ->  secondsToDiffTime (fromIntegral $ h * 3600 + (60 :: Int) * m + s)
+            [d,h,m,s] -> secondsToDiffTime (fromIntegral $ d *3600*24 + h * 3600 + (60 :: Int) * m + s)
+            v -> errorWithStackTrace $ show v) dat of
+
           Left err -> F.returnError F.ConversionFailed f err
           Right conv -> return conv
 

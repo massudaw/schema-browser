@@ -42,11 +42,14 @@ import qualified Data.Text.Lazy as T
 
 
 
-createType :: Map Text Unique -> (Text,Text,Maybe Text ,Text,Text,Text,Maybe Text) -> (Text,Key)
-createType un (t,c,trans,"tsrange",_,n,_) = (t,Key   c trans (fromJust $ M.lookup c un) (nullable n $ KInterval $ Primitive "timestamp without time zone"))
-createType un (t,c,trans,_,"geometry",n,p) = (t,Key   c trans (fromJust $ M.lookup c un) (nullable n $ Primitive $ fromJust p))
-createType un (t,c,trans,ty,_,n,_) =(t,Key c   trans (fromJust $M.lookup c un) (nullable n $ Primitive ty))
+createType :: Map Text Unique -> (Text,Text,Maybe Text ,Text,Text,Text,Maybe Text,Maybe Text) -> (Text,Key)
+createType un (t,c,trans,"tsrange",_,n,def,_) = (t,Key   c trans (fromJust $ M.lookup c un) (nullable n $ KInterval $ Primitive "timestamp without time zone"))
+createType un (t,c,trans,_,"geometry",n,def,p) = (t,Key   c trans (fromJust $ M.lookup c un) (nullable n $ Primitive $ fromJust p))
+createType un (t,c,trans,ty,_,n,def,_) =(t,Key c   trans (fromJust $M.lookup c un) (serial def . nullable n $ Primitive ty))
 --createType un v = error $ show v
+
+serial (Just xs ) t = if T.isPrefixOf  "nextval" xs then KSerial t else t
+serial Nothing t = t
 
 nullable "YES" t = KOptional t
 nullable "NO" t = t
@@ -65,7 +68,7 @@ foreignKeys = "select clc.relname,cl.relname,array_agg(att2.attname),   array_ag
 keyTables :: Connection -> Text -> IO InformationSchema
 keyTables conn schema = do
        uniqueMap <- join $ mapM (\(Only i)-> (i,) <$> newUnique) <$>  query conn "select o.column_name from information_schema.tables natural join information_schema.columns o where table_schema = ? and table_type='BASE TABLE'" (Only schema) -- :: IO (Map Text Unique)
-       res2 <- fmap (createType (M.fromList uniqueMap)) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_name,is_nullable, type from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? and table_type='BASE TABLE'" (Only schema)
+       res2 <- fmap (createType (M.fromList uniqueMap)) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_name,is_nullable,column_default, type from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? and table_type='BASE TABLE'" (Only schema)
        let keyMap = M.fromList keyList
            keyListSet = groupSplit (\(c,k)-> c) keyList
            keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2

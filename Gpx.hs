@@ -4,6 +4,7 @@ module Gpx where
 import Query
 import Data.Monoid
 import Schema
+import Data.String
 import GHC.Stack
 import Postgresql
 import Database.PostgreSQL.Simple
@@ -61,19 +62,19 @@ lookupKeys inf t l = fmap (\(k,s)-> (maybe (error "no key") id $ M.lookup (t,k) 
 
 withFields k t l = (l, maybe (error $ "noTable" ) id $  M.lookup t (tableMap k))
 
-execF = exec file
-exec file = do
+execF = exec file [("distance",0),("id_shoes",1),("id_person",1),("id_place",1)]
+
+exec file inputs = do
   let schema = "health"
   conn <- connectPostgreSQL "user=postgres password=queijo dbname=test"
   --let file = "/home/massudaw/src/geo-gpx/etc/gpx.xml"
   let
-    --arr :: IOStateArrow () XmlTree
     arr = readDocument [withValidate no,withTrace 1] file
         >>> getPoint
   inf <- keyTables conn  schema
   print (tableMap inf)
   res <- runX arr
-  let runVals = [("period",SInterval $ (last $ head res ) ... (last $ last res)),("distance",SNumeric 0),("id_shoes",SNumeric 1),("id_person",SNumeric 1),("id_place",SNumeric 1)]
+  let runVals = [("period",SInterval $ (last $ head res ) ... (last $ last res))]  <> inputs
       runInput = withFields inf  "run" $   lookupKeys inf "run"  runVals
   print runInput
   pkrun <- uncurry (insertPK fromShowableList conn) runInput
