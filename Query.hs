@@ -15,12 +15,14 @@ module Query where
 import Warshal
 import Data.Typeable
 import Data.Vector(Vector)
+import Data.Functor.Classes
 import qualified Data.Foldable as F
 import Data.Foldable (Foldable)
 import Data.Char ( isAlpha )
 import Data.Maybe
 import qualified Numeric.Interval as Interval
 import Data.Monoid hiding (Product)
+import Data.Functor.Product
 
 import qualified Data.Text.Lazy as T
 
@@ -195,9 +197,11 @@ instance Show Showable where
   show (SDouble a) = show a
   show (STimestamp a) = show a
   show (SDate a) = show a
-  show (SSerial a) = show a
+  show (SSerial a) = maybe "" show a
+  -- show (SSerial a) = show a
   show (SPosition a) = show a
-  show (SOptional a) = show a
+  --show (SOptional a) = show a
+  show (SOptional a) = maybe "" show a
   show (SInterval a) = show a
   show (SPInterval a) = show a
   show (SComposite a) = show a
@@ -318,12 +322,16 @@ update conn kv kold (Raw sch tbl pk _ _ _) = execute conn (fromString $ traceSho
     setter = " SET " <> T.intercalate "," (fmap equality kv)
     up = "UPDATE " <> sch <>"."<> tbl <> setter <>  pred
 
-insertPK f conn kva (Raw sch tbl pk  _ _ _) = fmap (zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> " RETURNING " <>  T.intercalate "," (keyValue <$> pkList)) (fmap snd kv)
+insertPK f conn kva (Raw sch tbl pk  _ _ attr ) = fmap (zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> " RETURNING " <>  T.intercalate "," (keyValue <$> pkList)) (fmap snd kv)
   where pkList = S.toList pk
-        kv = filter ( not . isSerial . keyType . fst) kva
+        kv = filter (\(k,_) -> S.member k pk || S.member k attr ) $ filter ( not . isSerial . keyType . fst) kva
 
-insert conn kva (Raw sch tbl _ _ _ _) = execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
-  where kv = filter ( not . isSerial . keyType . fst) kva
+getKey  (Raw sch tbl pk desc fk attr) k =  M.lookup k table
+  where table = M.fromList $ fmap (\i-> (keyValue i, i)) $ S.toList (pk <> attr)
+
+insert conn kva t@(Raw sch tbl pk _ _ attr ) = execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
+  where kv = filter (\(k,_) -> S.member k pk || S.member k attr ) $ filter ( not . isSerial . keyType . fst)  kvb
+        kvb = catMaybes $ fmap (\i-> fmap (,snd i) . getKey t . keyValue . fst $ i  ) kva
 
 dropTable (Raw sch tbl _ _ _ _ )= "DROP TABLE "<> sch <>"."<> tbl
 
@@ -445,20 +453,6 @@ countAll tmap i = do
   put (schema,Project attrs $ Base (S.fromList i) res )
   return attrs
 
-{-
-countAll :: Map (Set Key) Table ->  [Key] -> QueryT m [KAttribute]
-countAll tmap i = do
-  let agg = [ Aggregate [Metric $ Key "*" Nothing (unsafePerformIO $ newUnique) (Primitive "integer")] "count"]
-  reduce i  agg
-  (schema,table) <- get
-  let
-    paths = catMaybes $ fmap (\ti-> (\k -> Path (S.singleton ti) k (S.singleton ti )) <$> M.lookup (S.singleton ti) tmap ) i
-    Just res = foldr joinPath (Just $ From table (S.fromList i)) paths
-    attrs = (traceShowId $ fmap Metric $ concat $ fmap F.toList $ fmap (\ti->  baseDescKeys (fromJust $ M.lookup (S.singleton ti) tmap)) i ) <> fmap Agg agg
-
-  put (schema,Project attrs $ Base (S.fromList i) res )
-  return attrs
--}
 
 freeVars (Metric c) = [c]
 -- freeVars (Rate c k ) = freeVars c <> freeVars k
@@ -476,6 +470,14 @@ predicate filters = do
 data PK a
   = PK { pkKey:: [a], pkDescription :: [a]} deriving(Functor,Foldable,Traversable)
 
+instance Show1 PK where
+  showsPrec1 i (PK a b ) =  showsPrec1 i a <> showsPrec1 (i + length a) b
+
+instance Ord1 PK where
+  compare1 (PK i j) (PK a b) = compare (compare1 i a ) (compare1 j b)
+
+instance Eq1 PK where
+  eq1 (PK i j) (PK a b) = eq1 i a == eq1 j b
 
 instance Eq a => Eq (PK a) where
   i == j = pkKey i == pkKey j
@@ -489,7 +491,7 @@ instance Show a => Show (PK a)  where
 
 projectDesc
      :: Monad m =>QueryT m (PK (KAttribute ))
-projectDesc =  do
+projectDesc =  trace "projectDesc" $  do
   (schema,table) <- get
   let pk = baseDescKeys table
   put (schema,Limit (Project (fmap Metric (F.toList pk) ) table) 200)
@@ -499,16 +501,25 @@ projectDesc =  do
 project
   :: Monad m =>[KAttribute ]
      -> QueryT m [KAttribute ]
-project attributes =  do
+project attributes =trace "project" $  do
   (schema,table) <- get
   let result = filter (`elem` attributes) (fmap Metric $ S.toList $ allKeys table)
   put (schema,Limit (Project result table) 200 )
   return  result
 
+projectDescAll
+     :: Monad m => QueryT m (Product PK [] KAttribute)
+projectDescAll =  do
+  (schema,table) <- get
+  let result = fmap Metric $ S.toList $ (allKeys table) `S.difference` ((\(PK i j)-> S.fromList (i <> j) )  $ baseDescKeys table)
+  let pk = fmap Metric $ baseDescKeys table
+  put (schema,Limit (Project (F.toList pk <> result)  table) 200)
+  return $ trace ("projectDescAll: " <> show  pk <> "-" <> show  result)  $(Pair pk result)
+
 
 projectAll
      :: Monad m => QueryT m [KAttribute]
-projectAll =  do
+projectAll =  trace "projectAll" $  do
   (schema,table) <- get
   let result = fmap Metric $ S.toList $ allKeys table
   put (schema,Limit (Project result  table) 200)

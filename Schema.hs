@@ -54,11 +54,14 @@ serial Nothing t = t
 nullable "YES" t = KOptional t
 nullable "NO" t = t
 
-keyMap (i,_,_) = i
-pkMap (_,i,_) = i
-tableMap (_,_,i) = i
+keyMap (i,_,_,_,_) = i
+pkMap (_,i,_,_,_) = i
+tableMap (_,_,i,_,_) = i
+hashedGraph (_,_,_,i,_) = i
+hashedGraphInv (_,_,_,_,i) = i
 
-type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
+type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashSchema Key Table, Map (Set Key) (Map (Set Key) (Path Key Table)))
+type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 
 foreignKeys :: Query
 foreignKeys = "select clc.relname,cl.relname,array_agg(att2.attname),   array_agg(att.attname) from    (select  unnest(con1.conkey) as parent, unnest(con1.confkey) as child, con1.confrelid,con1.conrelid  from   pg_class cl     join pg_namespace ns on cl.relnamespace = ns.oid   join pg_constraint con1 on con1.conrelid = cl.oid where   ns.nspname = ? and con1.contype = 'f' ) con  join pg_attribute att on  att.attrelid = con.confrelid and att.attnum = con.child  join pg_class cl on  cl.oid = con.confrelid   join pg_class clc on  clc.oid = con.conrelid   join pg_attribute att2 on  att2.attrelid = con.conrelid and att2.attnum = con.parent   group by clc.relname, cl.relname"
@@ -92,12 +95,16 @@ keyTables conn schema = do
                                   pks = S.fromList $ fmap (\(_,j)-> j ) l
                                   attr = S.difference (fromJust $ M.lookup c all) pks
                                 in (pks ,Raw schema c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks ) attr )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
-       let ret = (keyMap, M.fromList $ fmap (\(c,t)-> (c,t)) pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
-       return ret
+       let ret@(i1,i2,i3) = (keyMap, M.fromList $ fmap (\(c,t)-> (c,t)) pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
+       paths <- schemaKeys conn schema ret
+       let graph = hashGraph $ warshall $ graphFromPath paths
+       let invgraph = hashGraphInv' $ warshall $ graphFromPath paths
+       print fks
+       return (i1,i2,i3,graph,invgraph)
 
 
 schemaAttributes :: Connection -> Text -> InformationSchema -> IO [Path Key Table]
-schemaAttributes conn schema (keyTable,map,_) = do
+schemaAttributes conn schema (keyTable,map,_,_,_) = do
        res <- fmap (fmap (\(t,c,ckn)-> (t,ckn,fromJust $ M.lookup (t,c) keyTable))) $  query conn "SELECT table_name,column_name,constraint_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Text,Key)]
        let pks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j ) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res :: [((Text,Text),Set Key)]
        res2 <- fmap (fmap (\(t,c)-> (t,fromJust $ M.lookup (t,c) keyTable))) $  query conn "SELECT table_name,column_name FROM information_schema.tables natural join information_schema.columns WHERE table_schema = ? AND table_type='BASE TABLE'" (Only schema):: IO [(Text,Key)]
@@ -119,7 +126,7 @@ graphFromPath p = Graph {hvertices = fmap fst bs,
   where bs = fmap pbound p
 
 -- TODO : Implement ordinal information
-schemaKeys :: Connection -> Text -> InformationSchema -> IO [Path Key Table]
+schemaKeys :: Connection -> Text -> TableSchema -> IO [Path Key Table]
 schemaKeys conn schema (keyTable,map,_) = do
        res <- fmap (fmap (\(t,c,ckn)-> (t,ckn,fromJust $ M.lookup (t,c) keyTable ))) $  query conn "SELECT table_name,column_name,constraint_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND  constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Text,Key)]
        let pks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j ) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res :: [((Text,Text),Set Key)]

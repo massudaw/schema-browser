@@ -204,7 +204,7 @@ renderedName key = \f b ->
       Just name -> let
           in case (keyValue key == T.fromStrict (TE.decodeUtf8 name)) of
               True ->  renderedType (textToPrim <$> keyType key) f b
-              False -> error $ "no match type for " <> BS.unpack name <> " with key" <> show key
+              False -> error $ "no match type for " <> BS.unpack name <> " with key " <> show key
 
       Nothing -> error "no name for field"
 

@@ -84,6 +84,21 @@ noneShow False = [("display","none")]
 greenRed True = [("background-color","green")]
 greenRed False = [("background-color","red")]
 
+switch all (Just k) = do
+        mapM_ (\e -> element e # set UI.style (noneShow False) ) all
+        element k # set style (noneShow True)
+        return ()
+
+tabbed :: [(String,Element)] -> UI Element
+tabbed  tabs = do
+  header <- buttonSet  (fst <$> tabs) show
+  let lk k = M.lookup k (M.fromList tabs)
+  v <- currentValue (facts $ lk <$> triding header)
+  switch (fmap snd tabs) v
+  onEvent (rumors $ lk <$> triding header) (switch (fmap snd tabs))
+  body <- UI.div # set children (snd <$> tabs)
+  UI.div # set children [getElement header,body]
+
 -- List of buttons with constant value
 buttonSet :: [a] -> (a -> String) -> UI (TrivialWidget a)
 buttonSet ks h =do
@@ -97,7 +112,6 @@ buttonSet ks h =do
         b <- UI.button # set text (h k)
         let ev = pure k <@ UI.click  b
         return (b,ev)
-
 
 items :: WriteAttr Element [UI Element]
 items = mkWriteAttr $ \i x -> void $ return x # set children [] #+ i

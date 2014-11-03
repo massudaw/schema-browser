@@ -212,6 +212,11 @@ warshall g = Graph { edges = go (hvertices g <> tvertices g) (edges g)
             edgeH = fst . pbound
             edgeT = snd . pbound
 
+nestedInv' ::  Path a b -> (Set a, [(Set a, Path a b )])
+nestedInv' p  = (x,[(y,p)])
+  where (y,x) = pbound p
+
+
 nestedInv ::  Path a b -> (Set a, [(a, Path a b )])
 nestedInv p  = (x,fmap (,p) (S.toList y))
   where (y,x) = pbound p
@@ -227,14 +232,14 @@ hashGraph = M.map (M.fromListWith (punion)) .  M.fromListWith (++)  .   fmap nes
 hashGraphInv  :: (Ord b,Ord a) => Graph a b -> HashSchema a b
 hashGraphInv = M.map (M.fromListWith (punion)) .  M.fromListWith (++)  .   fmap nestedInv . fmap snd . M.toList .  edges
 
+hashGraphInv'  :: (Ord b,Ord a) => Graph a b -> Map (Set a) (Map (Set a) (Path a b))
+hashGraphInv' = M.map (M.fromListWith (punion)) .  M.fromListWith (++)  .   fmap nestedInv' . fmap snd . M.toList .  edges
+
 find norm end m = case M.lookup norm m of
                     Just i -> M.lookup end i
                     Nothing -> Nothing
 
 queryHash :: Ord a => [a] -> Map (Set a) (Map a b) -> (Set a)  -> [Maybe b]
 queryHash filters schema  base =  map (\f-> find base f schema)  filters
-
-
-
 
 

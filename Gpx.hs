@@ -1,5 +1,6 @@
 {-# LANGUAGE Arrows, TupleSections,OverloadedStrings,NoMonomorphismRestriction #-}
-module Gpx where
+module Gpx
+  (exec,execKey,execF) where
 
 import Query
 import Data.Monoid
@@ -12,7 +13,7 @@ import Control.Applicative
 import Numeric.Interval((...))
 
 import Data.Maybe
-import Data.Text.Lazy (Text)
+import Data.Text.Lazy (Text,unpack)
 import Text.Read
 import qualified Data.Map as M
 import Data.Time.Parse
@@ -25,6 +26,7 @@ import Text.XML.HXT.Arrow.XmlState.TypeDefs
 
 import Control.Arrow.IOStateListArrow
 import Text.XML.HXT.Arrow.XmlState
+import qualified Data.List as L
 
 import Database.PostgreSQL.Simple.Time
 
@@ -56,27 +58,31 @@ getPoint = atTag "trkpt" >>>
     time <- text <<< atTag "time" -< x
     returnA -< [SPosition $ Position (read lat,read lon,read ele),STimestamp $ Finite $ fromJust $ fmap fst  $ strptime "%Y-%m-%dT%H:%M:%SZ" time ]
 
+file :: Showable
 file = "/home/massudaw/2014-08-27-1653.gpx"
 
-lookupKeys inf t l = fmap (\(k,s)-> (maybe (error "no key") id $ M.lookup (t,k) (keyMap inf),s)) l
+lookupKeys inf t l = fmap (\(k,s)-> (maybe (error ("no key: " <> show k ) ) id $ M.lookup (t,k) (keyMap inf),s)) l
 
 withFields k t l = (l, maybe (error $ "noTable" ) id $  M.lookup t (tableMap k))
 
-execF = exec file [("distance",0),("id_shoes",1),("id_person",1),("id_place",1)]
+execF = exec [("file",file),("distance",0),("id_shoes",1),("id_person",1),("id_place",1)]
 
-exec file inputs = do
+execKey f = exec (fmap (\(k,v)-> (keyValue k , v) ) f)
+
+exec inputs = do
   let schema = "health"
   conn <- connectPostgreSQL "user=postgres password=queijo dbname=test"
-  --let file = "/home/massudaw/src/geo-gpx/etc/gpx.xml"
+  let Just (_,SText file) = L.find ((== "file") . fst) inputs
   let
-    arr = readDocument [withValidate no,withTrace 1] file
+    arr = readDocument [withValidate no,withTrace 1] (unpack file)
         >>> getPoint
   inf <- keyTables conn  schema
   print (tableMap inf)
   res <- runX arr
-  let runVals = [("period",SInterval $ (last $ head res ) ... (last $ last res))]  <> inputs
+  let runVals = [("period",SInterval $ (last $ head res ) ... (last $ last res))]  <> L.filter ((/= "file") . fst ) inputs
       runInput = withFields inf  "run" $   lookupKeys inf "run"  runVals
   print runInput
   pkrun <- uncurry (insertPK fromShowableList conn) runInput
+  print pkrun
   mapM_ (\i-> uncurry (insert conn) (withFields inf "track" (pkrun <> lookupKeys inf "track" i))) (consLL "id_sample" (SNumeric <$> [0..])  $  zipLL (repeat []) ["position","instant"] res )
-  return ()
+  return (Nothing ,[])
