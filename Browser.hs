@@ -238,42 +238,24 @@ paint e b = element e # sink UI.style (greenRed . isJust <$> b)
 
 data Plugins
   = Plugins
-  { _inputs :: (Table, S.Set Key)
-  , _action :: [(Key,Showable)] -> IO (Maybe (UI Element) , [[(Key,Showable)]])
+  { _name :: String 
+  ,_inputs :: (Table, S.Set Key)
+  , _action :: Connection -> InformationSchema -> Plugins -> Tidings (Maybe [(Key,Showable)]) -> IO (Maybe (UI Element) , [[(Key,Showable)]])
   }
 
 classifyKeys (table@(Raw s t pk desc fk allI),keys) = (S.intersection keys attrSet,S.intersection keys fkSet)
   where fkSet = S.unions $ fmap (\(Path ifk t o) ->  ifk)  (S.toList fk)
         attrSet = S.fromList $ filter (not. (`S.member` fkSet)) $ (S.toList pk <> S.toList allI)
 
-pluginUI conn inf (Plugins (table@(Raw s t pk desc fk allI),keys) a) oldItems = do
-  let
-    initialMap :: Tidings (Maybe (Map Key Showable))
-    initialMap = fmap M.fromList <$> oldItems
-    lookupFKS :: [Key] -> Tidings (Maybe [Showable])
-    lookupFKS ks = allMaybes <$> ((\m ks -> fmap (\ki->  join $ fmap (M.lookup ki) m) ks) <$> initialMap <*> pure ks)
-    lookupAttrs :: Key -> Tidings (Maybe Showable)
-    lookupAttrs k = join . fmap (M.lookup k) <$> initialMap
-  let fkSet = S.unions $ fmap (\(Path ifk t o) ->  ifk)  (S.toList fk)
-  attrs <- mapM (attrUI lookupAttrs) $ filter (not. (`S.member` fkSet)) $ S.toList keys
-  fks <- mapM (fkUI conn inf lookupAttrs lookupFKS) (S.toList fk)
-  let
-    buildList' i j = foldr (liftA2 (:)) (fmap (fmap (\i-> [i])) <$> buildList i) j
-        where buildList = foldr (liftA2 (:))  (pure [])
-    fkattrsB = buildList'  (fmap snd .snd <$> attrs) (fmap snd .snd <$> fks)
-    efkattrsB = buildList' (fmap fst . snd <$> attrs) (fmap fst . snd <$> fks)
-  process <- UI.input # set UI.type_ "submit" # set text "PROCESS"
-  let ev = unsafeMapIO a (filterJust $ fmap (fmap concat . allMaybes) $ (fmap traceShowId fkattrsB) <@ UI.click process)
-  resB <- stepper (Nothing,[]) ev
-  res <- UI.div # sink  text (show . snd <$> resB)
-  resElem <- UI.div # sink  items (maybeToList . fst <$> resB)
-  crudHeader <- UI.div # set text (T.unpack t)
-  formP <- UI.form # set UI.target (T.unpack t) # set UI.method "post"# set UI.action ("http://siapi.bombeiros.go.gov.br/consulta/consulta_cnpj_cpf.php")
-    # set children (crudHeader : (fst <$> attrs) <> (fst <$> fks) <> [process] )
-    # set style [("border","1px"),("border-color","gray"),("border-style","solid")]
-  iframe <- mkElement "iframe" # set UI.name (T.unpack t) # set UI.id_ (T.unpack t) {- # set UI.src ("http://siapi.bombeiros.go.gov.br/consulta/consulta_cnpj_cpf.php")-} # set style [("width","100%"),("heigth","300px")]
-  body <- UI.div  # set children [formP,res,iframe]
-  return (body,fmap concat . allMaybes <$> fkattrsB)
+attrSet pkm (Raw s t pk desc fk allI) =  pk <> allI <>  foldr mappend mempty (catMaybes $ pathTable <$> (F.toList fk) )
+	where pathTable (Path o t e) = attrSet pkm <$> M.lookup e pkm
+					
+
+pluginUI conn inf p@(Plugins n (table@(Raw s t pk desc fk allI),keys) a) oldItems = do
+  let plug = a conn inf p
+  let ev = plug oldItems 
+  body <- UI.div  # set items ( (UI.div # set text n:) . pure . join . liftIO $ (fromJust . fst <$> ev) :: [UI Element])
+  return (body,undefined)
 
 
 
@@ -520,9 +502,6 @@ chooseKey conn  pg inf kitems = mdo
       where arg :: Tidings (Maybe [(Key, [PK Showable])])
             arg = (\i j -> fmap (\nj -> zipWith (,) nj (L.transpose j) ) i) <$> (fmap S.toList  <$> UI.userSelection fkbox ) <*> (fmap invertPK <$> UI.multiUserSelection filterItemBox)
     filterT = liftA2 (M.unionWith mappend) categoryT rangeT
-  sel <- UI.multiListBox bFk bFk (pure (line . showVertex))
-  t <- joinT $ aggQuery  <$> (M.unionWith mappend <$> filterT <*> triding ff) <*> (S.unions <$> UI.multiUserSelection sel) <*> aggregators <*> bBset
-  count <- UI.div # sink text (fmap show $ facts t)
 
   -- Final Query (Saved Filter <> Filter Map Selected)
   vp <- joinT $ doQueryAttr conn inf projectDescAll <$> (M.unionWith mappend <$> filterT <*> triding ff) <*>  bBset
@@ -534,6 +513,10 @@ chooseKey conn  pg inf kitems = mdo
     categoryT1 = M.fromListWith mappend <$> (filterMaybe (fmap (\(fkv,kv)-> (fkv,[Category (S.fromList kv)]))) <$> arg)
       where arg :: Tidings (Maybe [(Key, [PK Showable])])
             arg = (\i j -> fmap (\nj -> zipWith (,) nj (L.transpose j) ) i) <$> (fmap S.toList  . Just <$> bBset ) <*> (fmap invertPK  . maybeToList . fmap (\(Pair i _ ) -> fmap snd i ) <$> UI.userSelection itemList)
+
+  sel <- UI.multiListBox bFk bFk (pure (line . showVertex))
+  t <- joinT $ aggQuery  <$> (M.unionWith mappend <$> categoryT1 <*> triding ff) <*> (S.unions <$> UI.multiUserSelection sel) <*> aggregators <*> bBset
+  count <- UI.div # sink text (fmap show $ facts t)
 
   selected <- selectedItems conn inf (M.unionWith mappend <$> categoryT1 <*> triding ff) bBset
   element (getElement itemList) # set UI.multiple True
@@ -547,24 +530,48 @@ chooseKey conn  pg inf kitems = mdo
         let eres = fmap (addToList  (S.toList k)  (maybeToList $ description (fromJust $ M.lookup k (pkMap inf) )) <$> ) evs
         res2 <- accumTs (fmap (fromJust.normalize) <$> v ) eres
         return crud) <$>  bBset  <*> (fmap (\(Pair  j _ )-> fmap snd j)<$> vp)
-  let res = fmap (\i -> pluginUI conn inf i (fmap (F.toList) <$> UI.userSelection itemList  ) ) . (\i -> filter (\(Plugins (Raw _ _ pk _ _ _ ,_) _ )-> S.isSubsetOf  pk i ) pg) <$> bBset
+  let res = fmap (\i -> pluginUI conn inf i (fmap (F.toList) <$> UI.userSelection itemList  ) ) . (\i -> filter (\(Plugins n tb _ )-> S.isSubsetOf  (snd tb) (traceShowId $ attrSet (pkMap inf) (fromJust $ M.lookup i(pkMap inf)))  )pg ) <$> bBset
   plugins <- UI.div # sink items (fmap (fmap fst) <$> facts res)
   insertDiv <- UI.div # sink items (facts bCrud)
   filterSel <- UI.div # set children [getElement fkbox,getElement range, getElement filterItemBox]
   aggr <- UI.div # set children [getElement sel , count]
-  tab <- tabbed [("CRUD",insertDiv),("FILTER",filterSel),("AGGREGATE", aggr), ("PLUGIN",plugins),("SELECTED",selected)]
+  tab <- tabbed  [("CRUD",insertDiv),("FILTER",filterSel),("AGGREGATE", aggr), ("PLUGIN",plugins),("SELECTED",selected)]
   UI.div # set children ([ getElement ff,getElement bset ,getElement itemList ,tab] )
  
+queryCnpjProject conn inf (Plugins n (table@(Raw s t pk desc fk allI),keys) a) oldItems= return (Just $ do
+  let
+    initialMap :: Tidings (Maybe (Map Key Showable))
+    initialMap = fmap M.fromList <$> oldItems
+    lookupFKS :: [Key] -> Tidings (Maybe [Showable])
+    lookupFKS ks = allMaybes <$> ((\m ks -> fmap (\ki->  join $ fmap (M.lookup ki) m) ks) <$> initialMap <*> pure ks)
+    lookupAttrs :: Key -> Tidings (Maybe Showable)
+    lookupAttrs k = join . fmap (M.lookup k) <$> initialMap
+  let fkSet = S.unions $ fmap (\(Path ifk t o) ->  ifk)  (S.toList fk)
+  attrs <- mapM (attrUI lookupAttrs) $ filter (not. (`S.member` fkSet)) $ S.toList keys
+  fks <- mapM (fkUI conn inf lookupAttrs lookupFKS) (S.toList fk)
+  let
+    buildList' i j = foldr (liftA2 (:)) (fmap (fmap (\i-> [i])) <$> buildList i) j
+        where buildList = foldr (liftA2 (:))  (pure [])
+    fkattrsB = buildList'  (fmap snd .snd <$> attrs) (fmap snd .snd <$> fks)
+    efkattrsB = buildList' (fmap fst . snd <$> attrs) (fmap fst . snd <$> fks)
+  process <- UI.input # set UI.type_ "submit" # set text "PROCESS"
+  crudHeader <- UI.div # set text (T.unpack t)
+  formP <- UI.form # set UI.target (T.unpack t) # set UI.method "post"# set UI.action ("http://siapi.bombeiros.go.gov.br/consulta/consulta_cnpj_cpf.php")
+    # set children (crudHeader : (fst <$> attrs) <> (fst <$> fks) <> [process]  )
+    # set style [("border","1px"),("border-color","gray"),("border-style","solid")]
+  iframe <- mkElement "iframe" # set UI.name (T.unpack t) # set UI.id_ (T.unpack t) # set style [("width","100%"),("heigth","300px")]
+  body <- UI.div  # set children [formP,iframe]
+  return body,[])
 
-queryCnpjProject inputs = do
-  let Just (SText cnpj) = join $ fmap (normalize .  snd) $ L.find ((== "cgc_cpf") . keyValue . fst) inputs
-      element = mkElement "iframe" # set UI.id_ "owner" {- # set UI.src ("http://siapi.bombeiros.go.gov.br/consulta/consulta_cnpj_cpf.php")-} # set style [("width","100%"),("heigth","300px")]
-      form = mkElement "form" # set UI.target "owner"
-      ediv = do
-        e <- element
-        f <- form
-        UI.div # set children [f,e]
-  return (Nothing ,[])
+
+queryCnpjReceita _ _ _ inputs = do
+  let open inputs = 
+		let res = case join $ fmap (normalize .  snd) $ L.find ((== "cgc_cpf") . keyValue . fst) inputs of
+			Just (SText cnpj) -> Just cnpj
+			i -> Nothing
+		in res 
+      element = mkElement "iframe" # sink UI.src (maybe "http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/Cnpjreva_Solicitacao2.asp" id . fmap (("http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/Cnpjreva_Solicitacao2.asp?cnpj="<>). T.unpack) . join . fmap open <$> facts inputs) # set style [("width","100%"),("heigth","600px")]
+  return (Just element,[])
 
 
 
@@ -625,14 +632,19 @@ main = do
  -- preview $ cvLabeled graph
  -- graphAttributes <- fmap graphFromPath $ schemaAttributes conn  schema inf
   fkey <- fileKey
-  let
+  {-let
     Just table = M.lookup "run" (tableMap inf)
     keys = catMaybes $ fmap (flip M.lookup (keyMap inf) . ("run",)) ["distance","id_shoes","id_person","id_place"]
     pg = Plugins (table,S.fromList (fkey : keys)) execKey
-  fkey <- fileKey
+  fkey <- fileKey-}
   let
     Just table1 = M.lookup "fire_project" (tableMap inf)
     keys1 = catMaybes $ fmap (flip M.lookup (keyMap inf) . ("fire_project",)) ["id_owner","ano","protocolo"]
-    pg1 = Plugins (table1,S.fromList (keys1)) queryCnpjProject
-  startGUI defaultConfig (setup conn  [pg1] inf (M.keys baseTables))
+    pg1 = Plugins "ProjetoBombeiro" (table1,S.fromList (keys1)) queryCnpjProject
+  let
+    Just table2 = M.lookup "owner" (tableMap inf)
+    keys2 = catMaybes $ fmap (flip M.lookup (keyMap inf) . ("owner",)) ["id_owner"]
+    pg2 = Plugins "CnpjReceita" (table2,S.fromList keys2) queryCnpjReceita
+
+  startGUI defaultConfig (setup conn  [pg1,pg2] inf (M.keys baseTables))
 
