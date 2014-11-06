@@ -26,6 +26,12 @@ accumT e ev = do
   b <- accumB e ev
   return $ tidings b (flip ($) <$> b <@> ev)
 
+accumTds :: MonadIO m => Tidings a -> [Event (a -> a)] -> m (Tidings a)
+accumTds e l = do 
+	ve <- currentValue (facts e)
+	accumT ve $ foldr1 (unionWith (.)) ((const <$> rumors e ) : l)
+
+
 accumTs :: MonadIO m => a -> [Event (a -> a)] -> m (Tidings a)
 accumTs e = accumT e . foldr1 (unionWith (.))
 
@@ -88,6 +94,17 @@ switch all (Just k) = do
         mapM_ (\e -> element e # set UI.style (noneShow False) ) all
         element k # set style (noneShow True)
         return ()
+
+tabbedChk :: [(String,Element)] -> [TrivialWidget Bool] -> UI Element
+tabbedChk tabs chk = do
+  header <- buttonSet  (fst <$> tabs) show
+  let lk k = M.lookup k (M.fromList tabs)
+  v <- currentValue (facts $ lk <$> triding header)
+  switch (snd <$> tabs) v
+  onEvent (rumors $ lk <$> triding header) (switch (snd <$> tabs))
+  body <- UI.div # set children (snd <$> tabs)
+  UI.div # set children [getElement header,body]
+
 
 tabbed :: [(String,Element)] -> UI Element
 tabbed  tabs = do

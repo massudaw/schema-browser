@@ -271,9 +271,11 @@ joinKeys (Join b k _ p) = fmap (b,) (S.toList k) <> joinKeys p
 renderNamespacedKeySet (t,k) = tableName t <> "." <> keyValue k
 
 isKOptional (KOptional i) = True
+isKOptional (KSerial i) = isKOptional i 
 isKOptional (KInterval i) = isKOptional i
 isKOptional (Primitive _ ) = False
 isKOptional (KArray i)  = isKOptional i
+isKOptional i = error (show i)
 
 -- Generate a sql query from the AST
 showTable :: Table -> Text
@@ -282,7 +284,7 @@ showTable (Filtered f t) = filterTable (fmap (\(k,f) -> (t,k,f) ) f ) t
       filterTable [] b =  showTable b
       filterTable filters b =  "(SELECT *  FROM " <> showTable b <>  " WHERE " <> T.intercalate " AND " (fmap renderFilter filters)  <> ") as " <> ( tableName b )
 showTable (Raw s t _ _  _ _) = s <> "." <> t
-showTable b@(Base k p) = " from (SELECT " <> (T.intercalate "," $ ( S.toList attrs) <> fmap renderNamespacedKeySet jattrs ) <> joinQuerySet p <>") as " <> tableName b
+showTable b@(Base _ p) = " from (SELECT " <> (T.intercalate "," $ ( S.toList attrs) <> fmap renderNamespacedKeySet jattrs ) <> joinQuerySet p <>") as " <> tableName b
   where
     attrs = S.mapMonotonic attrName $ S.filter (not . (`S.member` (S.fromList $ fmap (Metric. snd) jattrs) )) $ allAttrs b
     jattrs =  nubBy (\ i j-> snd i == snd j) $ joinKeys p
@@ -362,14 +364,14 @@ addJoin tnew f p = case mapPath tnew f p of
         --mapPath :: (Show a,Show b,Ord b,Ord a) => a -> Set b -> JoinPath b a -> Either (Set (a,b)) (JoinPath b a)
         mapPath tnew f (From t   s ) =  if tablesName tnew `S.isSubsetOf`  tablesName t
                 then  (Right $ From t  snew )
-                else  (Left $ S.mapMonotonic (t,) $  s `S.intersection` f)
+                else  (Left $ S.mapMonotonic (t,) $  (allKeys t) `S.intersection` f)
             where snew =  s `S.union` f
         mapPath tnew  f (Join t  s clause p ) = res
             where  res = case mapPath tnew f p  of
-                    Right pnew  -> Right $ Join t s (clause `S.union` (S.mapMonotonic (tnew,) $  s `S.intersection` f)) pnew
+                    Right pnew  -> Right $ Join t s (clause `S.union` (S.mapMonotonic (tnew,) $  (allKeys t) `S.intersection` f)) pnew
                     Left accnew -> if tablesName tnew `S.isSubsetOf`  tablesName t
                         then Right $ Join t  (s `S.union` f)  (clause `S.union` accnew ) p
-                        else Left $ (S.mapMonotonic (t,) $ s `S.intersection` f)  `S.union` accnew
+                        else Left $ (S.mapMonotonic (t,) $ (allKeys t) `S.intersection` f)  `S.union` accnew
 
 
 
@@ -506,6 +508,25 @@ project attributes =trace "project" $  do
   let result = filter (`elem` attributes) (fmap Metric $ S.toList $ allKeys table)
   put (schema,Limit (Project result table) 200 )
   return  result
+
+recursePath invSchema (Path i t e)  = Path i nextT  e : recursePaths invSchema nextT 
+	where nextT@(Raw _ _ _ _ fk _ ) = fromJust (M.lookup t (invSchema))
+
+recursePaths invSchema (Raw _ _ _ _ fk _ )  = concat $ recursePath invSchema <$> S.toList fk
+
+projectDescAllRec
+     :: Monad m => Map Text Table ->  QueryT m (Product PK [] KAttribute)
+projectDescAllRec invSchema =  do
+  (schema,table@(Base _ t@(From ta@(Raw _ _ k _ fk  _) _ ) )  ) <- get
+  let  
+      table1 = case  M.lookup k schema of 
+	Just pv -> Base k (fromJust $ foldl (flip joinPath) (Just t)  (recursePaths invSchema ta))
+	Nothing -> table
+  let result = fmap Metric $ S.toList $ (allKeys table1) `S.difference` ((\(PK i j)-> S.fromList (i <> j) )  $ baseDescKeys table)
+  let pk = fmap Metric $ baseDescKeys table
+  put (schema,Limit (Project (F.toList pk <> result)  table1 ) 200)
+  return $ trace ("projectDescAllRec: " <> show  pk <> " || " <> show  result)  $(Pair pk result)
+
 
 projectDescAll
      :: Monad m => QueryT m (Product PK [] KAttribute)

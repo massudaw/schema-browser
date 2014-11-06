@@ -84,86 +84,6 @@ allMaybes i = case all isJust i of
         True -> Just $ catMaybes i
         False -> Nothing
 
-        {-
-fileUpload
-  :: Connection
-     -> S.Set Key
-     -> (t, Map (S.Set Key) Table, t2)
-     -> ProjAction -> Table
-     -> Tidings (Maybe [Showable])
-     -> UI Element
-fileUpload conn other tmap c@(proj,action) table@(Raw s t pk desc fk allI) initial = do
-  let
-    oldItems :: Tidings (Maybe [(Key,Showable)])
-    oldItems = fmap (zip (S.toList  pk <>  S.toList allI)) <$> initial
-    initialMap :: Tidings (Maybe (Map Key Showable))
-    initialMap = fmap M.fromList <$> oldItems
-    lookupFKS :: [Key] -> Tidings (Maybe [Showable])
-    lookupFKS ks = allMaybes <$> ( (\m ks -> fmap (\ki->  join $ fmap (M.lookup ki) m) ks) <$> initialMap <*> pure ks)
-    lookupAttrs :: Key -> Tidings (Maybe Showable)
-    lookupAttrs k = join .fmap ( M.lookup k) <$> initialMap
-    forceDefaultType k (Just i ) = renderShowable i
-    forceDefaultType k (Nothing) = ""
-  body <- UI.div
-  let fkSet = S.unions $ fmap (\(Path o t ifk) ->  ifk)  (S.toList fk)
-      paint e b = element e # sink UI.style (greenRed . isJust <$> b)
-  attrs <- mapM (\i-> do
-      l<- UI.span # set text (show i)
-      let tdi = forceDefaultType i <$> lookupAttrs i
-      m<- UI.input # sink UI.value (facts tdi)
-      let pke = fmap (readType (textToPrim <$> keyType i)) $ unionWith const (UI.valueChange m) (rumors tdi)
-      pk <- stepper (defaultType i)  pke
-      let pkt = tidings pk pke
-          ei (Just a) = Just a
-          ei Nothing = defaultType i
-          edited = (\o j-> if (renderShowable <$> o) == (renderShowable <$> (ei j)) then Nothing else liftA2 (,) o j) <$> pkt <*> lookupAttrs i
-          editedFlag (Just i) = "#" <> renderShowable i
-          editedFlag Nothing = ""
-      e <- UI.span # sink text (editedFlag . fmap snd <$> (facts edited))
-      paint l pk
-      sp <- UI.li # set children [l,m,e]
-      return (sp,liftA2 (,) (fmap(i,) . fmap fst <$> (facts edited) ) (fmap (i,) <$> pk))) $ filter (not. (`S.member` (fkSet <> other) )) $ (S.toList pk <> S.toList allI)
-  fks <- mapM (\(Path o t ifk) -> do
-      res <-  liftIO $ proj $ action projectDesc ifk
-      let tdi = fmap (\i-> PK  i [] ) <$> lookupFKS ( S.toList ifk)
-      box <- UI.listBox (pure res) tdi (pure (\v-> UI.span # set text (show v)))
-      l<- UI.span # set text (show $ S.toList ifk)
-      let
-          pkt :: Tidings (Maybe (PK Showable))
-          pkt = UI.userSelection box
-          ei :: [Key] -> Maybe [Showable] -> Maybe [Showable]
-          ei i Nothing = allMaybes $ fmap defaultType i
-          ei i d = d
-          olds :: Tidings (Maybe [Showable])
-          olds = allMaybes <$> (foldr (liftA2 (:)) (pure []) $ fmap lookupAttrs (S.toList ifk))
-          edited :: Tidings (Maybe [(Showable,Showable)])
-          edited = (\k o j-> if (fmap pkKey o) == ei k j then Nothing else liftA2 zip (fmap pkKey o) j) <$> pure (S.toList ifk) <*> pkt <*> olds
-          editedListFlag (Just i) = "#" <> L.intercalate "," (fmap renderShowable i)
-          editedListFlag Nothing = ""
-      e <- UI.span # sink text (editedListFlag . fmap (fmap snd) <$> facts edited)
-      let fksel = fmap pkKey <$>  facts pkt
-      paint (getElement l) fksel
-      chw <- checkedWidget
-      let
-        -- Find when there is selection and the expand is checked
-        findMaybe (Just i) True = Just <$> findQ c projectAll ifk i
-        findMaybe _ _ = return Nothing
-      exT <- joinT $ findMaybe <$> pkt <*> triding chw
-      (celem ,tcelem) <- crudUI conn tmap c (fromJust $ M.lookup ifk (pkMap tmap)) exT
-      element celem # sink UI.style (noneShow <$> (facts $ triding chw))
-      fk <- UI.li # set  children [l, getElement box,e,getElement chw,celem]
-      let bres = liftA2 (,) (fmap (zip (S.toList ifk)). fmap (fmap fst) <$> facts edited ) (fmap (zip (S.toList ifk)) <$> fksel)
-      return (fk,bres)) $ filter (not. (`S.isSubsetOf` other ) . (\(Path _ _ ifk) -> ifk) ) $ (S.toList fk)
-  let
-    buildList' i j = foldr (liftA2 (:)) (fmap (fmap (\i-> [i])) <$> buildList i) j
-        where buildList = foldr (liftA2 (:))  (pure [])
-    fkattrsB = buildList'  (fmap snd .snd <$> attrs) (fmap snd .snd <$> fks)
-    efkattrsB = buildList' (fmap fst . snd <$> attrs) (fmap fst . snd <$> fks)
-  panelItems <- processPanel conn efkattrsB fkattrsB table oldItems
-  crudHeader <- UI.div # set text "CRUD"
-  element body # set children (crudHeader : (fst <$> attrs) <> (fst <$> fks) <> panelItems)
-  return body
--}
 
 attrUI  lookupAttrs i
   | isSerial (keyType i) = do
@@ -190,10 +110,10 @@ attrUI  lookupAttrs i
       return (sp,liftA2 (,) (fmap(i,) . fmap fst <$> (facts edited) ) (fmap (i,) <$> pk))
 
 
-fkUI conn tmap lookupAttrs lookupFKS (Path ifk t o) = mdo
+fkUI conn tmap lookupAttrs lookupFKS oldItems (Path ifk t o) = mdo
       l <- UI.span # set text (show $ S.toList ifk)
       let
-          tdi =  fmap (\i-> PK  i [] ) <$> lookupFKS (S.toList ifk)
+          tdi =  fmap (\i-> PK  (fromJust .normalize <$> i) [] ) <$> lookupFKS (S.toList ifk)
       box <- UI.listBox res2 tdi (pure (\v-> UI.span # set text (show v)))
       let
           pkt :: Tidings (Maybe (PK Showable))
@@ -204,20 +124,15 @@ fkUI conn tmap lookupAttrs lookupFKS (Path ifk t o) = mdo
           olds :: Tidings (Maybe [Showable])
           olds = allMaybes <$> (foldr (liftA2 (:)) (pure []) $ fmap lookupAttrs (S.toList ifk))
           edited :: Tidings (Maybe [(Showable,Showable)])
-          edited = (\k o j-> if (fmap pkKey o) == ei k j then Nothing else liftA2 zip (fmap pkKey o) j) <$> pure (S.toList ifk) <*> pkt <*> olds
+          edited = (\k o j-> if (fmap pkKey o) == (fmap (fmap (fromJust.normalize)) (ei k j)) then Nothing else liftA2 zip (fmap pkKey o) j) <$> pure (S.toList ifk) <*> pkt <*> olds
           editedListFlag (Just i) = "#" <> L.intercalate "," (fmap renderShowable i)
           editedListFlag Nothing = ""
           fksel = fmap pkKey <$>  facts pkt
       e <- UI.span # sink text (editedListFlag . fmap (fmap snd) <$> facts edited)
       paint (getElement l) fksel
       chw <- checkedWidget
-      let
-        -- Find when there is selection and the expand is checked
-        findMaybe (Just i) _ = findMQ conn tmap projectAll ifk i
-        findMaybe _ _ = return Nothing
-      exT <- joinT $ findMaybe <$> pkt <*> triding chw
       let subtable = fromJust $ M.lookup ifk (pkMap tmap)
-      (celem,tcrud,evs) <- crudUI conn tmap  subtable (fmap (fmap (\(Metric k, t)-> (k,t))) <$> exT)
+      (celem,tcrud,evs) <- crudUI conn tmap  subtable oldItems 
       let eres = fmap (addToList  (S.toList o)  (maybeToList $ description subtable) <$> ) evs
       res <-  liftIO $ projectKey' conn tmap projectDesc ifk
       res2 <- accumTs (fmap (fromJust.normalize) <$> (fmap (fmap snd) res)) eres
@@ -254,7 +169,7 @@ attrSet pkm (Raw s t pk desc fk allI) =  pk <> allI <>  foldr mappend mempty (ca
 pluginUI conn inf p@(Plugins n (table@(Raw s t pk desc fk allI),keys) a) oldItems = do
   let plug = a conn inf p
   let ev = plug oldItems 
-  body <- UI.div  # set items ( (UI.div # set text n:) . pure . join . liftIO $ (fromJust . fst <$> ev) :: [UI Element])
+  body <- UI.div  # set items ((UI.div # set text n:) . pure . join . liftIO $ (fromJust . fst <$> ev) :: [UI Element])
   return (body,undefined)
 
 
@@ -276,7 +191,7 @@ crudUI conn tmap  table@(Raw s t pk desc fk allI) oldItems= do
   body <- UI.div
   let fkSet = S.unions $ fmap (\(Path ifk t o) ->  ifk)  (S.toList fk)
   attrs <- mapM (attrUI lookupAttrs) $ filter (not. (`S.member` fkSet)) $ (S.toList pk <> S.toList allI)
-  fks <- mapM (fkUI conn tmap lookupAttrs lookupFKS) (S.toList fk)
+  fks <- mapM (fkUI conn tmap lookupAttrs lookupFKS oldItems ) (S.toList fk)
   let
     buildList' i j = foldr (liftA2 (:)) (fmap (fmap (\i-> [i])) <$> buildList i) j
         where buildList = foldr (liftA2 (:))  (pure [])
@@ -425,6 +340,9 @@ unionsT c = do
   b <- stepper vcur ecur
   return $ tidings b ecur
 
+filterMaybe f (Just i ) = f i
+filterMaybe _ _  = []
+
 
 filterWidget
   :: Connection -> InformationSchema
@@ -458,7 +376,16 @@ selectedItems conn inf ff key = do
   UI.div # sink items (fmap (\k -> (\i-> UI.div # set items (UI.div # set text (showVertex $ fst k ) : i)) . fmap (line.show.F.toList) . snd  $ k ) <$> facts bp)
   -- UI.div # sink items (fmap (line . show . fst) <$> facts invItems )
 
-
+{-
+recurseQuery conn inf pk attr = do
+     let Just table@(Raw s t pk d fks a) = M.lookup pk (pkMap inf) 
+	 categoryT1 :: Map Key [Filter]
+	 categoryT1 = M.fromListWith mappend  (filterMaybe (fmap (\(fkv,kv)-> (fkv,[Category (S.fromList kv)]))) <$> arg)
+	      where arg :: Maybe [(Key, [PK Showable])]
+		    arg = (\i j -> fmap (\nj -> zipWith (,) nj (L.transpose j) ) i) (fmap S.toList  . Just $ pk)  (fmap invertPK  . maybeToList . fmap (\(Pair i _ ) -> fmap snd i ) attr)
+     res <- mapM (\(Path _ _ fk)-> recurseQuery conn inf categoryT1 fk (M.lookup fk (M.fromList attr))) (S.toList fks)
+     return $ foldl (\(Pair _ i) (Pair r l) -> (Pair r (l <> i))) attr  res 
+-}
 chooseKey
   :: Connection
      -> [Plugins]
@@ -484,8 +411,6 @@ chooseKey conn  pg inf kitems = mdo
 
   -- Filter Map Selected
   let
-    filterMaybe f (Just i ) = f i
-    filterMaybe _ _  = []
     rangeT :: Tidings (Map Key [Filter])
     rangeT = corners <$> _rangeSelection range <*> (fmap S.toList  <$> UI.userSelection fkbox)
       where corners i mk = case i of
@@ -503,8 +428,10 @@ chooseKey conn  pg inf kitems = mdo
             arg = (\i j -> fmap (\nj -> zipWith (,) nj (L.transpose j) ) i) <$> (fmap S.toList  <$> UI.userSelection fkbox ) <*> (fmap invertPK <$> UI.multiUserSelection filterItemBox)
     filterT = liftA2 (M.unionWith mappend) categoryT rangeT
 
+	
+  
   -- Final Query (Saved Filter <> Filter Map Selected)
-  vp <- joinT $ doQueryAttr conn inf projectDescAll <$> (M.unionWith mappend <$> filterT <*> triding ff) <*>  bBset
+  vp <- joinT $ doQueryAttr conn inf (projectDescAllRec (tableMap inf)) <$> (M.unionWith mappend <$> filterT <*> triding ff) <*>  bBset
 
   -- Final Query ListBox
   itemList <- UI.listBox (vp) (const <$> pure Nothing <*> bBset) (pure (\i -> line $ show  $ F.toList $ fmap snd i))
@@ -521,16 +448,16 @@ chooseKey conn  pg inf kitems = mdo
   selected <- selectedItems conn inf (M.unionWith mappend <$> categoryT1 <*> triding ff) bBset
   element (getElement itemList) # set UI.multiple True
   element (getElement filterItemBox) # set UI.multiple True
-  let bCrud = (\k v -> pure $ do
+  let bCrud = (\k -> pure $ do
         let -- (_,(schema,table)) = action (project (fmap Metric (S.toList k))) k
             filterOptions = case M.keys <$> M.lookup k (hashedGraph inf) of
                Just l -> k : fmap S.singleton l
                Nothing -> [k]
-        (crud,_,evs) <- atBase (crudUI conn inf ) (fromJust $ M.lookup k (pkMap inf) ) $ fmap (F.toList ) <$> (UI.userSelection itemList)
+        (crud,_,evs) <- crudUI conn inf  (fromJust $ M.lookup k (pkMap inf) ) $ fmap F.toList <$> (UI.userSelection itemList)
         let eres = fmap (addToList  (S.toList k)  (maybeToList $ description (fromJust $ M.lookup k (pkMap inf) )) <$> ) evs
-        res2 <- accumTs (fmap (fromJust.normalize) <$> v ) eres
-        return crud) <$>  bBset  <*> (fmap (\(Pair  j _ )-> fmap snd j)<$> vp)
-  let res = fmap (\i -> pluginUI conn inf i (fmap (F.toList) <$> UI.userSelection itemList  ) ) . (\i -> filter (\(Plugins n tb _ )-> S.isSubsetOf  (snd tb) (traceShowId $ attrSet (pkMap inf) (fromJust $ M.lookup i(pkMap inf)))  )pg ) <$> bBset
+        res2 <- accumTds (fmap (\(Pair j _ )-> fmap (fromJust.normalize.snd) j) <$> vp ) eres
+        return crud) <$>  bBset
+  let res = fmap (\i -> pluginUI conn inf i (fmap F.toList <$> UI.userSelection itemList  ) ) . (\i -> filter (\(Plugins n tb _ )-> S.isSubsetOf  (snd tb) (attrSet (pkMap inf) (fromJust $ M.lookup i(pkMap inf)))  )pg ) <$> bBset
   plugins <- UI.div # sink items (fmap (fmap fst) <$> facts res)
   insertDiv <- UI.div # sink items (facts bCrud)
   filterSel <- UI.div # set children [getElement fkbox,getElement range, getElement filterItemBox]
@@ -548,18 +475,17 @@ queryCnpjProject conn inf (Plugins n (table@(Raw s t pk desc fk allI),keys) a) o
     lookupAttrs k = join . fmap (M.lookup k) <$> initialMap
   let fkSet = S.unions $ fmap (\(Path ifk t o) ->  ifk)  (S.toList fk)
   attrs <- mapM (attrUI lookupAttrs) $ filter (not. (`S.member` fkSet)) $ S.toList keys
-  fks <- mapM (fkUI conn inf lookupAttrs lookupFKS) (S.toList fk)
+  fks <- mapM (fkUI conn inf lookupAttrs lookupFKS oldItems) (S.toList fk)
   let
     buildList' i j = foldr (liftA2 (:)) (fmap (fmap (\i-> [i])) <$> buildList i) j
         where buildList = foldr (liftA2 (:))  (pure [])
     fkattrsB = buildList'  (fmap snd .snd <$> attrs) (fmap snd .snd <$> fks)
     efkattrsB = buildList' (fmap fst . snd <$> attrs) (fmap fst . snd <$> fks)
-  process <- UI.input # set UI.type_ "submit" # set text "PROCESS"
-  crudHeader <- UI.div # set text (T.unpack t)
+  process <- UI.input # set UI.type_ "submit"
+  mapM_ (\i -> element i # set UI.style [("display","none")]) $ (fst <$> attrs) <> (fst <$> fks)
   formP <- UI.form # set UI.target (T.unpack t) # set UI.method "post"# set UI.action ("http://siapi.bombeiros.go.gov.br/consulta/consulta_cnpj_cpf.php")
-    # set children (crudHeader : (fst <$> attrs) <> (fst <$> fks) <> [process]  )
-    # set style [("border","1px"),("border-color","gray"),("border-style","solid")]
-  iframe <- mkElement "iframe" # set UI.name (T.unpack t) # set UI.id_ (T.unpack t) # set style [("width","100%"),("heigth","300px")]
+    # set children ( (fst <$> attrs) <> (fst <$> fks) <> [process]  )
+  iframe <- mkElement "iframe" # set UI.name (T.unpack t) # set UI.id_ (T.unpack t) # set style [("width","100%"),("height","300px")]
   body <- UI.div  # set children [formP,iframe]
   return body,[])
 
@@ -570,7 +496,8 @@ queryCnpjReceita _ _ _ inputs = do
 			Just (SText cnpj) -> Just cnpj
 			i -> Nothing
 		in res 
-      element = mkElement "iframe" # sink UI.src (maybe "http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/Cnpjreva_Solicitacao2.asp" id . fmap (("http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/Cnpjreva_Solicitacao2.asp?cnpj="<>). T.unpack) . join . fmap open <$> facts inputs) # set style [("width","100%"),("heigth","600px")]
+      addrs ="http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/Cnpjreva_Solicitacao2.asp"
+      element = mkElement "iframe" # sink UI.src (maybe addrs ((addrs <>"?cnpj=") <>) . fmap T.unpack . join . fmap open <$> facts inputs) # set style [("width","100%"),("height","300px")]
   return (Just element,[])
 
 
@@ -610,7 +537,7 @@ main = do
   --let schema = "public"
   --conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
   let schemaN = "incendio"
-  conn <- connectPostgreSQL "host=192.168.0.102 user=postgres password=queijo dbname=incendio"
+  conn <- connectPostgreSQL "host=localhost user=postgres password=queijo dbname=incendio"
   --conn <- connectPostgreSQL "user=postgres password=queijo dbname=finance"
   inf@(k,baseTables,_,schema,invSchema ) <- keyTables conn  schemaN
   {-
