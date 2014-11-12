@@ -13,7 +13,6 @@ import Postgresql
 import Data.Maybe
 import Data.Distributive
 import Data.Functor.Identity
-import Data.Functor.Product
 import Text.Read
 import Data.Typeable
 import Data.Time.Parse
@@ -114,38 +113,38 @@ modifyList box =  (\ ml me -> liftA2  (\l e -> F.toList e <> filter (\(i,j)-> no
 justError e (Just i) = i
 justError e  _ = error e
 
-fkUI conn tmap lookupAttrs lookupFKS' oldItems (Path ifk t o) = mdo
+fkUI conn tmap lookupAttrs  oldItems (Path ifk t o) = mdo
       l <- UI.span # set text (show $ S.toList ifk)
       let
 	  initialMap :: Tidings (Maybe (Map Key Showable))
-	  initialMap = fmap M.fromList <$> oldItems
+	  initialMap = fmap (fmap normalize .M.fromList) <$> oldItems
 	  lookupFKS :: [Key] -> Tidings (Maybe [(Key,Showable)])
 	  lookupFKS ks = allMaybes <$> ((\m ks -> fmap (\ki->  join $ fmap (fmap (fmap (ki,)) $ M.lookup ki) m) ks) <$> initialMap <*> pure ks)
-	  tdi :: Tidings (Maybe (Product PK [] (Key,Showable)))
-          tdi =  fmap (\i-> Pair (PK  ((\(k,i)-> (k,justError "tdi not normalizable" . normalize $i ))<$> i) []) [] ) <$> lookupFKS (S.toList ifk)
-      box <- UI.listBox res2 tdi (pure (\v-> UI.span # set text (show $ (\(Pair k _)-> snd <$> k) v)))
+	  tdi :: Tidings (Maybe (KV  (Key,Showable)))
+          tdi =  fmap (\i-> KV (PK  ((\(k,i)-> (k, normalize $i ))<$> i) []) [] ) <$> lookupFKS (S.toList ifk)
+      box <- UI.listBox (res2) (tdi) (pure (\v-> UI.span # set text (show $ (\(KV k _)-> snd <$> k) v)))
       let
           pkt :: Tidings (Maybe (PK Showable))
-          pkt = fmap (\(Pair i _) -> fmap snd i) <$> UI.userSelection box
+          pkt = fmap (\(KV i _) -> fmap snd i) <$> UI.userSelection box
           ei :: [Key] -> Maybe [Showable] -> Maybe [Showable]
           ei i Nothing = allMaybes $ fmap defaultType i
           ei i d = d
           olds :: Tidings (Maybe [Showable])
           olds = allMaybes <$> (foldr (liftA2 (:)) (pure []) $ fmap lookupAttrs (S.toList ifk))
           edited :: Tidings (Maybe [(Showable,Showable)])
-          edited = (\k o j-> if (fmap pkKey o) == (fmap (fmap (justError "edited not normalizable" .normalize)) (ei k j)) then Nothing else liftA2 zip (fmap pkKey o) j) <$> pure (S.toList ifk) <*> pkt <*> olds
+          edited = (\k o j-> if (fmap pkKey o) == (fmap normalize <$> ei k j) then Nothing else liftA2 zip (fmap pkKey o) j) <$> pure (S.toList ifk) <*> pkt <*> olds
           editedListFlag (Just i) = "#" <> L.intercalate "," (fmap renderShowable i)
           editedListFlag Nothing = ""
           fksel = fmap pkKey <$>  facts pkt
       e <- UI.span # sink text (editedListFlag . fmap (fmap snd) <$> facts edited)
       paint (getElement l) fksel
       chw <- checkedWidget
-      let subtable = justError "no subtable fkUI" $ M.lookup ifk (pkMap tmap)
-      tdis <- accumTds oldItems [modifyList (rumors $ UI.userSelection box)]
+      let subtable = justError "no subtable fkUI" $ M.lookup o (pkMap tmap)
+      tdis <- accumTds (fmap (fmap (fmap normalize)) <$> oldItems) [modifyList (rumors $ UI.userSelection box)]
       (celem,tcrud,evs) <- crudUI conn tmap  subtable tdis 
       let eres = fmap (addToList  (S.toList o)  (maybeToList $ description subtable) (S.toList o) <$> ) evs
-      res <-  liftIO $ projectKey conn tmap (projectDescAllRec (tableMap tmap ))ifk
-      res2 <- accumTs (res) eres
+      res <-  liftIO $ projectKey conn tmap (projectDescAllRec (tableMap tmap )) o
+      res2 <- accumTs (fmap (fmap (fmap normalize)) res) eres
       --let res2 = tidings (pure res) never
       -- TODO: Implement recursive selection after insertion
       -- tdi2 <- addTs (pure Nothing) $ (\i-> editedMod (S.toList o)  (maybeToList $ description subtable)   <$> i) <$> evs
@@ -201,7 +200,7 @@ crudUI conn tmap  table@(Raw s t pk desc fk allI) oldItems= do
   body <- UI.div
   let fkSet = S.unions $ fmap (\(Path ifk t o) ->  ifk)  (S.toList fk)
   attrs <- mapM (attrUI lookupAttrs) $ filter (not. (`S.member` fkSet)) $ (S.toList pk <> S.toList allI)
-  fks <- mapM (fkUI conn tmap lookupAttrs lookupFKS oldItems ) (S.toList fk)
+  fks <- mapM (fkUI conn tmap lookupAttrs oldItems ) (S.toList fk)
   let
     buildList' i j = foldr (liftA2 (:)) (fmap (fmap (\i-> [i])) <$> buildList i) j
         where buildList = foldr (liftA2 (:))  (pure [])
@@ -215,13 +214,13 @@ crudUI conn tmap  table@(Raw s t pk desc fk allI) oldItems= do
   return (body,fmap concat . allMaybes <$> fkattrsB,evsa)
 
 -- interpret collection operations for lists
-addToList i j a (Insert m) =  (\i->  mappend (fmap ((\(k,v)-> (k,fromJust.normalize $ v)))  <$> maybeToList i) ) (editedMod  i j a m )
-addToList i j a (Delete m ) =  (\i->  concat . L.delete (fmap ((\(k,v)-> (k,fromJust.normalize $ v)))  <$> maybeToList i)  . fmap pure ) (editedMod  i j a m )
+addToList i j a (Insert m) =  (\i->  mappend (fmap ((\(k,v)-> (k,normalize $ v)))  <$> maybeToList i) ) (editedMod  i j a m )
+addToList i j a (Delete m ) =  (\i->  concat . L.delete (fmap ((\(k,v)-> (k,normalize $ v)))  <$> maybeToList i)  . fmap pure ) (editedMod  i j a m )
 addToList i j a (Edit m n ) =  addToList i j a (Insert m) . addToList i j a (Delete n)
 
 -- lookup pk from attribute list
-editedMod :: Ord a => [a] -> [a] -> [a] ->  Maybe [(a,b)] -> Maybe (Product PK  []  (a,b))
-editedMod  i j a m=  join $ fmap (\mn-> liftA3 (\ik jk ak -> Pair (PK ik jk ) ak) (look mn i) (look mn j) (look mn a)) m
+editedMod :: Ord a => [a] -> [a] -> [a] ->  Maybe [(a,b)] -> Maybe (KV (a,b))
+editedMod  i j a m=  join $ fmap (\mn-> liftA3 (\ik jk ak -> KV (PK ik jk ) ak) (look mn i) (look mn j) (look mn a)) m
   where look mn k = allMaybes $ fmap (\ki -> fmap (ki,) $  M.lookup ki (M.fromList mn) ) k
 
 data Modification a b
@@ -245,13 +244,13 @@ processPanel conn efkattrsB fkattrsB table oldItems = do
       editAction isM kM = do
         let i = catMaybes isM
             k = fromJust kM
-        res <- liftIO $ catch (Right <$> update conn (concat i) k table) (\e -> return $ Left (show (e :: SqlError) ))
+        res <- liftIO $ catch (Right <$> update conn (concat i) k table) (\e -> return $ Left (show $ traceShowId (e :: SqlError) ))
         return $ fmap (const (Edit (concat <$> allMaybes isM) kM)) res
       deleteAction k =  do
-        res <- liftIO $ catch (Right <$> delete conn (fromJust k) table) (\e -> return $ Left (show (e :: SqlError) ))
+        res <- liftIO $ catch (Right <$> delete conn (fromJust k) table) (\e -> return $ Left (show $ traceShowId  (e :: SqlError) ))
         return $ const (Delete k ) <$> res
       insertAction i = do
-          res <- catch (Right <$> insertPK fromShowableList conn (concat i) table) (\e -> return $ Left (show (e :: SqlError) ))
+          res <- catch (Right <$> insertPK fromShowableList conn (concat i) table) (\e -> return $ Left (show $ traceShowId (e :: SqlError) ))
           return $ (\v -> Insert $ Just $ (v <> filter (not . flip elem (fst <$> v) . fst) (concat i))) <$> res
 
       evi,evd,eve :: Event (Modification Key Showable)
@@ -392,9 +391,9 @@ recurseQuery conn inf pk attr = do
 	 categoryT1 :: Map Key [Filter]
 	 categoryT1 = M.fromListWith mappend  (filterMaybe (fmap (\(fkv,kv)-> (fkv,[Category (S.fromList kv)]))) <$> arg)
 	      where arg :: Maybe [(Key, [PK Showable])]
-		    arg = (\i j -> fmap (\nj -> zipWith (,) nj (L.transpose j) ) i) (fmap S.toList  . Just $ pk)  (fmap invertPK  . maybeToList . fmap (\(Pair i _ ) -> fmap snd i ) attr)
+		    arg = (\i j -> fmap (\nj -> zipWith (,) nj (L.transpose j) ) i) (fmap S.toList  . Just $ pk)  (fmap invertPK  . maybeToList . fmap (\(KV i _ ) -> fmap snd i ) attr)
      res <- mapM (\(Path _ _ fk)-> recurseQuery conn inf categoryT1 fk (M.lookup fk (M.fromList attr))) (S.toList fks)
-     return $ foldl (\(Pair _ i) (Pair r l) -> (Pair r (l <> i))) attr  res 
+     return $ foldl (\(KV _ i) (KV r l) -> (KV r (l <> i))) attr  res 
 -}
 chooseKey
   :: Connection
@@ -449,11 +448,11 @@ chooseKey conn  pg inf kitems = mdo
     categoryT1 :: Tidings (Map Key [Filter])
     categoryT1 = M.fromListWith mappend <$> (filterMaybe (fmap (\(fkv,kv)-> (fkv,[Category (S.fromList kv)]))) <$> arg)
       where arg :: Tidings (Maybe [(Key, [PK Showable])])
-            arg = (\i j -> fmap (\nj -> zipWith (,) nj (L.transpose j) ) i) <$> (fmap S.toList  . Just <$> bBset ) <*> (fmap invertPK  . maybeToList . fmap (\(Pair i _ ) -> fmap snd i ) <$> UI.userSelection itemList)
+            arg = (\i j -> fmap (\nj -> zipWith (,) nj (L.transpose j) ) i) <$> (fmap S.toList  . Just <$> bBset ) <*> (fmap invertPK  . maybeToList . fmap (\(KV i _ ) -> fmap snd i ) <$> UI.userSelection itemList)
 
   sel <- UI.multiListBox bFk bFk (pure (line . showVertex))
-  t <- joinT $ aggQuery  <$> (M.unionWith mappend <$> categoryT1 <*> triding ff) <*> (S.unions <$> UI.multiUserSelection sel) <*> aggregators <*> bBset
-  count <- UI.div # sink text (fmap show $ facts t)
+  -- t <- joinT $ aggQuery  <$> (M.unionWith mappend <$> categoryT1 <*> triding ff) <*> (S.unions <$> UI.multiUserSelection sel) <*> aggregators <*> bBset
+  -- count <- UI.div # sink text (fmap show $ facts t)
 
   selected <- selectedItems conn inf (M.unionWith mappend <$> categoryT1 <*> triding ff) bBset
   element (getElement itemList) # set UI.multiple True
@@ -463,18 +462,19 @@ chooseKey conn  pg inf kitems = mdo
             filterOptions = case M.keys <$> M.lookup k (hashedGraph inf) of
                Just l -> k : fmap S.singleton l
                Nothing -> [k]
-        (crud,_,evs) <- crudUI conn inf  (fromJust $ M.lookup k (pkMap inf) ) $ (\i -> case i of
-												Nothing -> Just [] 
-												i -> i ) . fmap F.toList  <$> (UI.userSelection itemList)
+	    convertPK i = case fmap F.toList i of
+			Nothing -> Just [] 
+			i -> i  
+        (crud,_,evs) <- crudUI conn inf  (fromJust $ M.lookup k (pkMap inf) ) $ convertPK <$> UI.userSelection itemList
         let eres = fmap (addToList  (S.toList k)  (maybeToList $ description (fromJust $ M.lookup k (pkMap inf) )) [] <$> ) evs
-        -- res2 <- accumTds (fmap (fmap (fromJust.normalize.snd) ) <$> vp ) eres
+        res2 <- accumTds vp  eres
         return crud) <$>  bBset
   let res = fmap (\i -> pluginUI conn inf i (fmap F.toList <$> UI.userSelection itemList  ) ) . (\i -> filter (\(Plugins n tb _ )-> S.isSubsetOf  (snd tb) (attrSet (pkMap inf) (fromJust $ M.lookup i(pkMap inf)))  )pg ) <$> bBset
   plugins <- UI.div # sink items (fmap (fmap fst) <$> facts res)
   insertDiv <- UI.div # sink items (facts bCrud)
   filterSel <- UI.div # set children [getElement fkbox,getElement range, getElement filterItemBox]
-  aggr <- UI.div # set children [getElement sel , count]
-  tab <- tabbed  [("CRUD",insertDiv),("FILTER",filterSel),("AGGREGATE", aggr), ("PLUGIN",plugins),("SELECTED",selected)]
+  -- aggr <- UI.div # set children [getElement sel , count]
+  tab <- tabbed  [("CRUD",insertDiv),("FILTER",filterSel){-,("AGGREGATE", aggr)-}, ("PLUGIN",plugins),("SELECTED",selected)]
   UI.div # set children ([ getElement ff,getElement bset ,getElement itemList ,tab] )
  
 queryCnpjProject conn inf (Plugins n (table@(Raw s t pk desc fk allI),keys) a) oldItems= return (Just $ do
@@ -487,7 +487,7 @@ queryCnpjProject conn inf (Plugins n (table@(Raw s t pk desc fk allI),keys) a) o
     lookupAttrs k = join . fmap (M.lookup k) <$> initialMap
   let fkSet = S.unions $ fmap (\(Path ifk t o) ->  ifk)  (S.toList fk)
   attrs <- mapM (attrUI lookupAttrs) $ filter (not. (`S.member` fkSet)) $ S.toList keys
-  fks <- mapM (fkUI conn inf lookupAttrs lookupFKS oldItems) (S.toList fk)
+  fks <- mapM (fkUI conn inf lookupAttrs oldItems) (S.toList fk)
   let
     buildList' i j = foldr (liftA2 (:)) (fmap (fmap (\i-> [i])) <$> buildList i) j
         where buildList = foldr (liftA2 (:))  (pure [])
@@ -504,7 +504,7 @@ queryCnpjProject conn inf (Plugins n (table@(Raw s t pk desc fk allI),keys) a) o
 
 queryCnpjReceita _ _ _ inputs = do
   let open inputs = 
-		let res = case join $ fmap (normalize .  snd) $ L.find ((== "cgc_cpf") . keyValue . fst) inputs of
+		let res = case  fmap (normalize .  snd) $ L.find ((== "cgc_cpf") . keyValue . fst) inputs of
 			Just (SText cnpj) -> Just cnpj
 			i -> Nothing
 		in res 
@@ -557,7 +557,7 @@ main = do
   --let schema = "public"
   --conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
   let schemaN = "incendio"
-  conn <- connectPostgreSQL "host=localhost user=postgres password=queijo dbname=incendio"
+  conn <- connectPostgreSQL "user=postgres dbname=incendio"
   --conn <- connectPostgreSQL "user=postgres password=queijo dbname=finance"
   inf@(k,baseTables,_,schema,invSchema ) <- keyTables conn  schemaN
   {-

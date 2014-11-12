@@ -27,7 +27,7 @@ import Debug.Trace
 type HashSchema  a b = Map (Set a) (Map a (Path a b ))
 
 instance (Show a, Show b) => Show (Path a b) where
-    show (Path x o y) = printf "%s-> %s| %s " (showVertex x) (showVertex y) (show o)
+    show (Path x o y) = printf "%s -| %s |- > %s " (showVertex x) (show o) (showVertex y)
     show (ComposePath x (px,i,py) y ) = printf "Compose %s-> %s-> %s\n  Path: %s| %s"
         (showVertex x) (showVertex i) (showVertex y) (showVertex px) (showVertex py)
     show (PathOption x ps y)

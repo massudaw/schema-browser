@@ -71,7 +71,7 @@ execKey f = exec (fmap (\(k,v)-> (keyValue k , v) ) f)
 
 exec inputs = do
   let schema = "health"
-  conn <- connectPostgreSQL "user=postgres password=queijo dbname=test"
+  conn <- connectPostgreSQL "user=postgres dbname=test"
   let Just (_,SText file) = L.find ((== "file") . fst) inputs
   let
     arr = readDocument [withValidate no,withTrace 1] (unpack file)
