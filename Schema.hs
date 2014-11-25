@@ -44,6 +44,7 @@ import qualified Data.Text.Lazy as T
 
 createType :: Map Text Unique -> (Text,Text,Maybe Text ,Text,Text,Text,Maybe Text,Maybe Text) -> (Text,Key)
 createType un (t,c,trans,"tsrange",_,n,def,_) = (t,Key   c trans (fromJust $ M.lookup c un) (nullable n $ KInterval $ Primitive "timestamp without time zone"))
+createType un (t,c,trans,"ARRAY",i,n,def,p) = (t,Key   c trans (fromJust $ M.lookup c un) (nullable n $ KArray $ (Primitive (T.tail i))))
 createType un (t,c,trans,_,"geometry",n,def,p) = (t,Key   c trans (fromJust $ M.lookup c un) (nullable n $ Primitive $ fromJust p))
 createType un (t,c,trans,ty,_,n,def,_) =(t,Key c   trans (fromJust $M.lookup c un) (serial def . nullable n $ Primitive ty))
 --createType un v = error $ show v
@@ -54,13 +55,14 @@ serial Nothing t = t
 nullable "YES" t = KOptional t
 nullable "NO" t = t
 
-keyMap (i,_,_,_,_) = i
-pkMap (_,i,_,_,_) = i
-tableMap (_,_,i,_,_) = i
-hashedGraph (_,_,_,i,_) = i
-hashedGraphInv (_,_,_,_,i) = i
+keyMap (i,_,_,_,_,_) = i
+pkMap (_,i,_,_,_,_) = i
+tableMap (_,_,i,_,_,_) = i
+hashedGraph (_,_,_,i,_,_) = i
+hashedGraphInv (_,_,_,_,i,_) = i
+graphP (_,_,_,_,_,i) = i
 
-type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashSchema Key Table, Map (Set Key) (Map (Set Key) (Path Key Table)))
+type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashSchema Key Table, Map (Set Key) (Map (Set Key) (Path Key Table)),Graph Key Table )
 type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 
 foreignKeys :: Query
@@ -97,14 +99,15 @@ keyTables conn schema = do
                                 in (pks ,Raw schema c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks ) attr )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
        let ret@(i1,i2,i3) = (keyMap, M.fromList $ fmap (\(c,t)-> (c,t)) pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        paths <- schemaKeys conn schema ret
-       let graph = hashGraph $ warshall $ graphFromPath paths
-       let invgraph = hashGraphInv' $ warshall $ graphFromPath paths
+       let graphP = graphFromPath paths
+       let graph = hashGraph $ warshall $ graphP 
+       let invgraph = hashGraphInv' $ warshall $ graphP
        print fks
-       return (i1,i2,i3,graph,invgraph)
+       return (i1,i2,i3,graph,invgraph,graphP)
 
 
 schemaAttributes :: Connection -> Text -> InformationSchema -> IO [Path Key Table]
-schemaAttributes conn schema (keyTable,map,_,_,_) = do
+schemaAttributes conn schema (keyTable,map,_,_,_,_) = do
        res <- fmap (fmap (\(t,c,ckn)-> (t,ckn,fromJust $ M.lookup (t,c) keyTable))) $  query conn "SELECT table_name,column_name,constraint_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Text,Key)]
        let pks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j ) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res :: [((Text,Text),Set Key)]
        res2 <- fmap (fmap (\(t,c)-> (t,fromJust $ M.lookup (t,c) keyTable))) $  query conn "SELECT table_name,column_name FROM information_schema.tables natural join information_schema.columns WHERE table_schema = ? AND table_type='BASE TABLE'" (Only schema):: IO [(Text,Key)]

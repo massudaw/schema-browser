@@ -27,6 +27,7 @@ import Data.Functor.Compose
 import qualified Database.PostgreSQL.Simple.TypeInfo.Static as TI
 import qualified Data.List as L
 import Data.Vector(Vector)
+import qualified Data.Vector as Vector 
 import qualified Numeric.Interval as Interval
 import qualified Numeric.Interval.Internal as NI
 import qualified Data.ByteString.Char8 as BS
@@ -64,6 +65,7 @@ data DB = DB { dbName :: String
           }deriving(Show)
 
 textToPrim "character varying" = PText
+textToPrim "varchar" = PText
 textToPrim "text" = PText
 textToPrim "character" = PText
 textToPrim "double precision" = PDouble
@@ -139,6 +141,8 @@ readType t =
       Primitive PBoolean -> readBoolean
       KInterval (Primitive PTimestamp) -> inter readTimestamp
       KOptional (KInterval (Primitive PTimestamp)) -> opt (inter readTimestamp)
+      KArray (Primitive PText) -> parseArray readText
+      KOptional (KArray (Primitive PText)) -> opt (parseArray readText)
       KOptional (Primitive PInterval) -> opt readInteval
       KOptional (Primitive PText) -> opt readText
       KOptional (Primitive PInt)-> opt readInt
@@ -162,10 +166,23 @@ readType t =
       opt f "" =  Just $ SOptional Nothing
       opt f i = fmap (SOptional .Just) $ f i
       inter f = (\(i,j)-> fmap SInterval $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
+      -- array f = (\(i,j)-> fmap SComposite $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
+      parseArray f i =   fmap (SComposite. Vector.fromList) $  allMaybes $ fmap f $ unIntercalate (==',') i
+
+allMaybes i = case all isJust i of
+        True -> Just $ catMaybes i
+        False -> Nothing
+
 
 safeTail [] = []
 safeTail i = tail i
 
+unIntercalate :: ( Char -> Bool) -> String -> [String]
+unIntercalate pred s                 =  case dropWhile pred s of
+                                "" -> []
+                                s' -> w : unIntercalate pred s''
+                                      where (w, s'') =
+                                             break pred s'
 
 primType (Metric k ) = textToPrim <$> keyType k
 primType (Agg g) =  postgresqlFunctions g

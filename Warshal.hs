@@ -87,6 +87,7 @@ mergeGraph i k = Graph { hvertices = nub $ sort $ hvertices i <>  hvertices k
 data Path a b
   -- Trivial Path
   = Path  (Set a)  b  (Set a)
+  | FKPath  (Set a)  b  (Set a)
   -- Path Composition And Product
   | ComposePath (Set a) (Set (Path a b),Set a,Set (Path a b)) (Set a)
   -- Path Options
@@ -186,13 +187,13 @@ nonOverlap items = filter (\i-> all (not . S.isProperSubsetOf  (snd $pbound $ i)
 {-# INLINE nonOverlap #-}
 
 
-warshall :: (Ord a,Ord b) => Graph a b -> Graph a b
+warshall :: (Ord a,Show a,Show b ,Ord b) => Graph a b -> Graph a b
 warshall g = Graph { edges = go (hvertices g <> tvertices g) (edges g)
                    , hvertices = hvertices g
                    , tvertices = tvertices g }
     where
       go [] es     = es
-      go (v:vs) esM =  go vs (M.unionWith punion esM
+      go (v:vs) esM =  go vs ( M.unionWith punion esM
          ( M.fromList $ edgesKeys [(ComposePath h (S.fromList nonOverlapped,i,S.singleton p3) d )  |
                 p3 <- es ,
                 let bnd = pbound p3

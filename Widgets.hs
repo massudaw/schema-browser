@@ -1,5 +1,4 @@
-{-# LANGUAGE NoMonomorphismRestriction,RecursiveDo #-}
-module Widgets where
+{-# LANGUAGE NoMonomorphismRestriction,RecursiveDo #-} module Widgets where
 
 
 import Control.Monad
@@ -11,6 +10,7 @@ import qualified Data.Map as M
 import Data.Map (Map)
 import Data.Traversable(traverse)
 import Data.Monoid
+import Data.Foldable (foldl')
 
 
 instance Widget (TrivialWidget  a) where
@@ -26,10 +26,23 @@ accumT e ev = do
   b <- accumB e ev
   return $ tidings b (flip ($) <$> b <@> ev)
 
+foldrTds ::  Applicative  f => (b -> a -> a ) -> f a -> [f b] -> f a
+foldrTds fun  =  foldr (liftA2 fun)
+
+fmapTds ::  Tidings a  -> (b -> a -> a ) -> [Event  b] -> Tidings a
+fmapTds e fun l =   tidings (facts e) $ (\li ii ->  foldr fun li ii) <$> facts e <@> unions  l
+
+applyTds ::  Tidings a  ->  Event  (a -> a) -> Tidings a
+applyTds e l =   tidings (facts e) $ (flip ($)) <$> facts e <@> l
+
+foldTds ::  Tidings a  ->  [Event  (a -> a)] -> Tidings a
+foldTds =  foldl' applyTds
+
+
 accumTds :: MonadIO m => Tidings a -> [Event (a -> a)] -> m (Tidings a)
-accumTds e l = do 
+accumTds e l = do
 	ve <- currentValue (facts e)
-	accumT ve $ foldr1 (unionWith (.)) ((const <$> rumors e ) : l)
+	accumT ve $ foldl1 (unionWith (.)) (l ++ [const <$> rumors e ])
 
 
 accumTs :: MonadIO m => a -> [Event (a -> a)] -> m (Tidings a)
@@ -56,7 +69,7 @@ mapT f x =  do
   c <- currentValue  (facts x)
   b <- liftIO $ f c
   bh <- stepper b ev
-  return $ tidings bh ev
+  return $ tidings bh ( bh <@ rumors x)
 
 
 insdel :: (Ord a,Ord b,Monoid b,Show a,Show b) => Behavior (Map a b) -> UI (TrivialWidget (Map a b))
