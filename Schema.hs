@@ -42,11 +42,11 @@ import qualified Data.Text.Lazy as T
 
 
 
-createType :: Map Text Unique -> (Text,Text,Maybe Text ,Text,Text,Text,Maybe Text,Maybe Text) -> (Text,Key)
-createType un (t,c,trans,"tsrange",_,n,def,_) = (t,Key   c trans (fromJust $ M.lookup c un) (nullable n $ KInterval $ Primitive "timestamp without time zone"))
-createType un (t,c,trans,"ARRAY",i,n,def,p) = (t,Key   c trans (fromJust $ M.lookup c un) (nullable n $ KArray $ (Primitive (T.tail i))))
-createType un (t,c,trans,_,"geometry",n,def,p) = (t,Key   c trans (fromJust $ M.lookup c un) (nullable n $ Primitive $ fromJust p))
-createType un (t,c,trans,ty,_,n,def,_) =(t,Key c   trans (fromJust $M.lookup c un) (serial def . nullable n $ Primitive ty))
+createType :: Unique -> (Text,Text,Maybe Text ,Text,Text,Text,Maybe Text,Maybe Text) -> Key
+createType un (t,c,trans,"tsrange",_,n,def,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "timestamp without time zone"))
+createType un (t,c,trans,"ARRAY",i,n,def,p) = (Key   c trans un (nullable n $ KArray $ (Primitive (T.tail i))))
+createType un (t,c,trans,_,"geometry",n,def,p) = (Key   c trans un (nullable n $ Primitive $ fromJust p))
+createType un (t,c,trans,ty,_,n,def,_) =(Key c   trans un (serial def . nullable n $ Primitive ty))
 --createType un v = error $ show v
 
 serial (Just xs ) t = if T.isPrefixOf  "nextval" xs then KSerial t else t
@@ -62,18 +62,17 @@ hashedGraph (_,_,_,i,_,_) = i
 hashedGraphInv (_,_,_,_,i,_) = i
 graphP (_,_,_,_,_,i) = i
 
-type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashSchema Key Table, Map (Set Key) (Map (Set Key) (Path Key Table)),Graph Key Table )
+-- type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashSchema Key Table, Map (Set Key) (Map (Set Key) (Path Key Table)),Graph Key Table )
+type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashSchema Key (SqlOperation Table), Map (Set Key) (Map (Set Key) (Path Key (SqlOperation Table))),Graph Key (SqlOperation Table) )
 type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 
 foreignKeys :: Query
 foreignKeys = "select clc.relname,cl.relname,array_agg(att2.attname),   array_agg(att.attname) from    (select  unnest(con1.conkey) as parent, unnest(con1.confkey) as child, con1.confrelid,con1.conrelid  from   pg_class cl     join pg_namespace ns on cl.relnamespace = ns.oid   join pg_constraint con1 on con1.conrelid = cl.oid where   ns.nspname = ? and con1.contype = 'f' ) con  join pg_attribute att on  att.attrelid = con.confrelid and att.attnum = con.child  join pg_class cl on  cl.oid = con.confrelid   join pg_class clc on  clc.oid = con.conrelid   join pg_attribute att2 on  att2.attrelid = con.conrelid and att2.attnum = con.parent   group by clc.relname, cl.relname"
 
--- TODO: Properly treat Maybe Key
--- TODO: Load Foreigh Key Information
 keyTables :: Connection -> Text -> IO InformationSchema
 keyTables conn schema = do
-       uniqueMap <- join $ mapM (\(Only i)-> (i,) <$> newUnique) <$>  query conn "select o.column_name from information_schema.tables natural join information_schema.columns o where table_schema = ? and table_type='BASE TABLE'" (Only schema) -- :: IO (Map Text Unique)
-       res2 <- fmap (createType (M.fromList uniqueMap)) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_name,is_nullable,column_default, type from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? and table_type='BASE TABLE'" (Only schema)
+       uniqueMap <- join $ mapM (\i-> (i,) <$> newUnique) <$>  query conn "select o.table_name,o.column_name from information_schema.tables natural join information_schema.columns o where table_schema = ? and table_type='BASE TABLE'" (Only schema)
+       res2 <- fmap ((\i@(t,c,o,j,k,l,m,n)-> (t,) $ createType  ((\(t,c,i,j,k,l,m,n)-> fromJust $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_name,is_nullable,column_default, type from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? and table_type='BASE TABLE'" (Only schema)
        let keyMap = M.fromList keyList
            keyListSet = groupSplit (\(c,k)-> c) keyList
            keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
@@ -90,19 +89,21 @@ keyTables conn schema = do
        descMap <- M.fromList . fmap  (\(t,c)-> (t,fromJust $ M.lookup (t,c) keyMap) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
        res <- lookupKey' <$> query conn "SELECT table_name,column_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ?  AND constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Key)]
        print res
-       let lookFk t k =S.fromList $ V.toList $ lookupKey2 (fmap (t,) k)
-       fks <- M.fromListWith S.union . fmap (\(tp,tc,kp,kc) -> (tp,S.singleton $ Path (lookFk tp kp) tc (lookFk tc kc))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path Key Text)))
+       let lookFk t k =V.toList $ lookupKey2 (fmap (t,) k)
+       fks <- M.fromListWith S.union . fmap (\(tp,tc,kp,kc) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) (FKJoinTable tp (zip (lookFk tp kp ) (lookFk tc kc)) tc) (S.fromList $ lookFk tc kc))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path Key (SqlOperation Text))))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> fromJust $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  res2 :: Map Text (Set Key)
            pks =  fmap (\(c,l)-> let
-                                  pks = S.fromList $ fmap (\(_,j)-> j ) l
+                                  pks = S.fromList $ fmap snd l
                                   attr = S.difference (fromJust $ M.lookup c all) pks
                                 in (pks ,Raw schema c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks ) attr )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
-       let ret@(i1,i2,i3) = (keyMap, M.fromList $ fmap (\(c,t)-> (c,t)) pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
-       paths <- schemaKeys conn schema ret
-       let graphP = graphFromPath paths
-       let graph = hashGraph $ warshall $ graphP 
-       let invgraph = hashGraphInv' $ warshall $ graphP
-       print fks
+       let ret@(i1,i2,i3) = (keyMap, M.fromList  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
+       paths <- schemaKeys' conn schema ret
+       let graphI =  graphFromPath (paths <> (fmap (fmap (fromJust . flip M.lookup i3)) <$> concat (fmap (F.toList.snd) (M.toList fks))))
+           graphP = warshall2 $ graphI
+           graph = hashGraph $ graphP
+           invgraph = hashGraphInv' $ graphP
+       print graphI
+       print graphP
        return (i1,i2,i3,graph,invgraph,graphP)
 
 
@@ -129,13 +130,27 @@ graphFromPath p = Graph {hvertices = fmap fst bs,
   where bs = fmap pbound p
 
 -- TODO : Implement ordinal information
+schemaKeys' :: Connection -> Text -> TableSchema -> IO [Path Key (SqlOperation Table)]
+schemaKeys' conn schema (keyTable,map,_) = do
+       res <- fmap (fmap (\(t,c,ckn)-> (t,ckn,fromJust $ M.lookup (t,c) keyTable ))) $  query conn "SELECT table_name,column_name,constraint_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND  constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Text,Key)]
+       let pks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j ) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res :: [((Text,Text),Set Key)]
+       res2 <- fmap (fmap (\(t,c,ckn)-> (t,ckn,fromJust $ M.lookup (t,c) keyTable ))) $  query conn "SELECT kc.table_name,kc.column_name,constraint_name FROM information_schema.key_column_usage kc natural join information_schema.table_constraints  WHERE kc.table_schema = ?  AND constraint_type='FOREIGN KEY'" (Only schema):: IO [(Text,Text,Key)]
+       let fks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res2 :: [((Text,Text),Set Key)]
+           rels = [ Path pkl (FetchTable $ fromJust $ M.lookup pkl map) fkl |
+                    ((tfk,fk),fkl)<- fks,
+                    ((tpk,pk),pkl)<- pks,
+                    tfk == tpk]
+       return rels
+
+
+-- TODO : Implement ordinal information
 schemaKeys :: Connection -> Text -> TableSchema -> IO [Path Key Table]
 schemaKeys conn schema (keyTable,map,_) = do
        res <- fmap (fmap (\(t,c,ckn)-> (t,ckn,fromJust $ M.lookup (t,c) keyTable ))) $  query conn "SELECT table_name,column_name,constraint_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND  constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Text,Key)]
        let pks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j ) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res :: [((Text,Text),Set Key)]
        res2 <- fmap (fmap (\(t,c,ckn)-> (t,ckn,fromJust $ M.lookup (t,c) keyTable ))) $  query conn "SELECT kc.table_name,kc.column_name,constraint_name FROM information_schema.key_column_usage kc natural join information_schema.table_constraints  WHERE kc.table_schema = ?  AND constraint_type='FOREIGN KEY'" (Only schema):: IO [(Text,Text,Key)]
        let fks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res2 :: [((Text,Text),Set Key)]
-           rels = [ Path pkl (fromJust $ M.lookup pkl map) fkl |
+           rels = [ Path pkl (fromJust $ M.lookup pkl map) (fkl) |
                     ((tfk,fk),fkl)<- fks,
                     ((tpk,pk),pkl)<- pks,
                     tfk == tpk]
@@ -143,14 +158,14 @@ schemaKeys conn schema (keyTable,map,_) = do
 
 projectAllKeys
   :: Traversable t => Map (Set Key) Table
-     -> HashSchema Key Table
+     -> HashSchema Key (SqlOperation Table)
      -> QueryT Identity (t KAttribute)
      -> Set Key
-     -> (t KAttribute, (HashSchema Key Table, Table))
+     -> (t KAttribute, (HashSchema Key (SqlOperation Table), Table))
 projectAllKeys baseTables hashGraph m bkey
   = case M.lookup bkey baseTables  of
       Just t ->   runQuery  m (hashGraph,Base bkey $ From t bkey)
-      Nothing -> error $  "No baseTable for key " <> showVertex bkey
+      Nothing -> error $  "No baseTable for key " <> show ( fmap showKey (F.toList bkey)) -- <> " in baseMap " <> show (M.mapKeys (S.mapMonotonic showKey) baseTables)
 
 buildQuery q =   "SELECT * FROM " <> fromString (T.unpack $ showTable q)
 

@@ -86,12 +86,6 @@ isSerial _ = False
 isOptional (KOptional _) = True
 isOptional _ = False
 
-foldKType f (KOptional k) = f k
-foldKType f (KInterval k) = f k
-foldKType f (KArray k) = f k
-foldKType f (KSerial k) = f k
-foldKType f k@(Primitive _) = f k
-
 instance Show (KType KPrim) where
   show =  showTy show
 
@@ -103,6 +97,8 @@ showTy f (KArray i) = showTy f i <> "[]"
 showTy f (KOptional i) = showTy f i <> "*"
 showTy f (KInterval i) = showTy f i <> "()"
 showTy f (KSerial i) = showTy f i <> "?"
+
+-- keyValue k = keyName k <> (T.pack $ show $ hashUnique $ keyFastUnique k)
 
 data Key
     = Key
@@ -124,9 +120,9 @@ instance Ord Key where
 
 
 instance Show Key where
-   -- show = T.unpack . showKey
-   show (Key v u _ _ ) = T.unpack v -- <> show (hashUnique u)
-showKey k  = maybe (keyValue k) id (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::"  <> showTy id (keyType k)
+   show = T.unpack . showKey
+   -- show (Key v u _ _ ) = T.unpack v -- <> show (hashUnique u)
+showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::"  <> showTy id (keyType k)
 
 data JoinPath a b
     = From b (Set a)
@@ -233,16 +229,24 @@ renderFilter (table ,name,Category i) = tableName table <> "." <> keyValue name 
 renderFilter (table ,name,And i) =  T.intercalate " AND "  (fmap (renderFilter . (table ,name,)) i)
 renderFilter (table ,name,RangeFilter i) =  tableName table <> "." <> keyValue name <> " BETWEEN " <> T.intercalate " AND "  (fmap (\s -> "'" <> T.pack (show $ head (pkKey s)) <> "'" ) [Interval.inf i,Interval.sup i])
 
+data SqlOperation a
+  = FetchTable a
+  | FKJoinTable a [(Key,Key)] a
+  deriving(Eq,Ord,Show,Functor)
+
+
+instance Show Table where
+  show = T.unpack . tableName
 
 data Table
     =  Base (Set Key) (JoinPath Key Table)
     -- Schema | PKS | Description | FKS | Attrs
-    |  Raw Text Text (Set Key) (Maybe Key) (Set (Path Key Text)) (Set Key)
+    |  Raw Text Text (Set Key) (Maybe Key) (Set (Path Key (SqlOperation Text))) (Set Key)
     |  Filtered [(Key,Filter)] Table
     |  Project [KAttribute ] Table
     |  Reduce (Set Key) (Set (Aggregate (KAttribute ) ) )  Table
     |  Limit Table Int
-    deriving(Eq,Ord,Show)
+    deriving(Eq,Ord)
 
 description (Raw _ _ _ desc _ _ ) = desc
 
@@ -297,20 +301,20 @@ showTable (Filtered f t) = filterTable (fmap (\(k,f) -> (t,k,f) ) f ) t
       filterTable [] b =  showTable b
       filterTable filters b =  "(SELECT *  FROM " <> showTable b <>  " WHERE " <> T.intercalate " AND " (fmap renderFilter filters)  <> ") as " <> ( tableName b )
 showTable (Raw s t _ _  _ _) = s <> "." <> t
-showTable b@(Base _ p) = " from (SELECT " <> (T.intercalate "," $ ( S.toList attrs) <> fmap renderNamespacedKeySet jattrs ) <> joinQuerySet p <>") as " <> tableName b
+showTable b@(Base _ p) = " from (SELECT " <> (T.intercalate "," $  attrs <> fmap renderNamespacedKeySet jattrs ) <> joinQuerySet p <>") as " <> tableName b
   where
-    attrs = S.mapMonotonic attrName $ S.filter (not . (`S.member` (S.fromList $ fmap (Metric. snd) jattrs) )) $ allAttrs b
-    jattrs =  nubBy (\ i j-> snd i == snd j) $ joinKeys p
+    attrs = fmap attrName $ filter (not . (`S.member` (S.fromList $ fmap (keyValue. snd) jattrs) ).keyValue . (\(Metric i) -> i) ) $  S.toList $ allAttrs b
+    jattrs =  nubBy (\ i j-> keyValue (snd i) == keyValue (snd j)) $ joinKeys p
     joinQuerySet (From b _) =  " FROM " <>  showTable b
     joinQuerySet (LeftJoin b _ r p)
-      |  any (\(Key _ _ _ k )-> isKOptional k ) (fst . snd <$> S.toList r)  = joinQuerySet p <>  " LEFT JOIN " <> showTable b <> joinPredicate (S.toList r) b
+      |  any (isKOptional . keyType  ) (fst . snd <$> S.toList r)  = joinQuerySet p <>  " LEFT JOIN " <> showTable b <> joinPredicate (S.toList r) b
       | S.null r = joinQuerySet p <>  " JOIN " <> showTable b <> " ON true"
       | otherwise  =  F.foldl' joinType (joinQuerySet p) mapK
       where joinPredicate2 b (0,r)  = showTable b   <> " ON " <> T.intercalate " AND " (fmap (\(t,f) -> t <> "." <> keyValue (fst f) <> " = " <> tableName b <> "." <> (snd f) )  r )
       	    joinPredicate2 b (i,r)  = showTable b <> " AS " <> tempName  <> " ON " <> T.intercalate " AND " (fmap (\(t,f) -> t <> "." <> keyValue (fst f) <> " = " <> tempName  <> "." <> (snd f) )  r )
 		            where tempName = tableName b <> T.pack (show i)
             joinType  l ir@(i,r)
-              | any (\(Key _ _ _ k )-> isKOptional k ) (fst . snd <$> r) = l <> " LEFT JOIN " <> joinPredicate2 b ir
+              | any (isKOptional .keyType  ) (fst . snd <$> r) = l <> " LEFT JOIN " <> joinPredicate2 b ir
               | otherwise =  l <> " JOIN " <> joinPredicate2 b ir
 	    mapK :: [(Int,[(Text,(Key, Text))])]
 	    mapK =  M.toList $ M.fromListWith (++)  $ fmap (fmap pure) $ concat $   concat $ fmap snd $ M.toList $ fmap (zipWith (\i j-> (i,) <$> j) [0..]) mapkPre
@@ -320,14 +324,14 @@ showTable b@(Base _ p) = " from (SELECT " <> (T.intercalate "," $ ( S.toList att
 
 
     joinQuerySet (Join b _ r p)
-      |  any (\(Key _ _ _ k )-> isKOptional k ) (fst . snd <$> S.toList r)  = joinQuerySet p <>  " LEFT JOIN " <> showTable b <> joinPredicate (S.toList r) b
+      |  any (isKOptional . keyType  ) (fst . snd <$> S.toList r)  = joinQuerySet p <>  " LEFT JOIN " <> showTable b <> joinPredicate (S.toList r) b
       | S.null r = joinQuerySet p <>  " JOIN " <> showTable b <> " ON true"
       | otherwise  =  F.foldl' joinType (joinQuerySet p) mapK
       where joinPredicate2 b (0,r)  = showTable b   <> " ON " <> T.intercalate " AND " (fmap (\(t,f) -> t <> "." <> keyValue (fst f) <> " = " <> tableName b <> "." <> (snd f) )  r )
       	    joinPredicate2 b (i,r)  = showTable b <> " AS " <> tempName  <> " ON " <> T.intercalate " AND " (fmap (\(t,f) -> t <> "." <> keyValue (fst f) <> " = " <> tempName  <> "." <> (snd f) )  r )
 		            where tempName = tableName b <> T.pack (show i)
             joinType  l ir@(i,r)
-              | any (\(Key _ _ _ k )-> isKOptional k ) (fst . snd <$> r) = l <> " LEFT JOIN " <> joinPredicate2 b ir
+              | any (isKOptional . keyType ) (fst . snd <$> r) = l <> " LEFT JOIN " <> joinPredicate2 b ir
               | otherwise =  l <> " JOIN " <> joinPredicate2 b ir
 	    mapK :: [(Int,[(Text,(Key, Text))])]
 	    mapK =  M.toList $ M.fromListWith (++)  $ fmap (fmap pure) $ concat $   concat $ fmap snd $ M.toList $ fmap (zipWith (\i j-> (i,) <$> j) [0..]) mapkPre
@@ -386,13 +390,13 @@ createTable (Raw sch tbl pk _ fk attr) = "CREATE TABLE " <> sch <>"."<> tbl <> "
         renderTy (KArray ty) = renderTy ty <> "[] "
         renderTy (Primitive ty ) = ty
         renderPK = "CONSTRAINT " <> tbl <> "_PK PRIMARY KEY (" <>  renderKeySet pk <> ")"
-        renderFK (Path origin table end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
+        renderFK (Path origin (FKJoinTable _ ks table) end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
 
-joinPath (Path i ll j) (Just p) = Just $ addJoin  ll (S.mapMonotonic (\k-> (k,k)) $  i `S.union` j)  p
-joinPath (Path i ll j) Nothing  =  Just $ From ll   (i `S.union` j)
-joinPath (FKPath i ll j) (Just p) = Just $ addJoin  ll (S.fromList $ zip (S.toList i) (S.toList j)) p
-joinPath (FKPath i ll j) Nothing  =  Just $ From ll   (i `S.union` j)
-joinPath (ComposePath i (l,ij,k) j ) m = foldr joinPath  m  ((S.toList l)  <> ( S.toList k))
+joinPath (Path i (FKJoinTable _ ks ll ) j) (Just p) = Just $ addJoin  ll (S.fromList ks)  p
+joinPath (Path i (FetchTable ll ) j) (Just p) = Just $ addJoin  ll ((S.fromList $ zip (S.toList i) (S.toList j)))  p
+-- joinPath (Path i (FKJoinTable _ ks ll) j) Nothing  =  Just $ From ll   (i `S.union` j)
+joinPath (Path i (FetchTable ll) j) Nothing  =  Just $ From ll   (i `S.union` j)
+joinPath (ComposePath i (l,ij,k) j ) m = F.foldl' (flip joinPath)  m  ((S.toList l)  <> ( S.toList k))
 joinPath (PathOption i p j ) m =  joinPath ( head $ S.toList p ) m
 -- joinPath i m = error $ "joinPath : " <> (show i )
 
@@ -404,7 +408,7 @@ joinPath (PathOption i p j ) m =  joinPath ( head $ S.toList p ) m
 
 addJoin tnew f p = case mapPath tnew  f p of
             -- Add new case
-            Left accnew -> case any (\(Key _ _ _ k )-> isKOptional k ) (fst . snd <$> S.toList accnew ) of
+            Left accnew -> case any (isKOptional . keyType  ) (fst . snd <$> S.toList accnew ) of
                              True ->  LeftJoin tnew (S.mapMonotonic fst f) accnew p
                              False -> Join tnew (S.mapMonotonic fst f) accnew p
             -- Just update with new joins
@@ -444,15 +448,15 @@ specializeJoin
     -> JoinPath Key Table
     -> (Map Key Filter,JoinPath Key Table )
 specializeJoin f (From t s) =  (M.fromList ff , From (addFilterTable ff t) s)
-    where ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList s))
+    where ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList $ allKeys t))
 specializeJoin f (Join t s r p) =  (ms1,Join (addFilterTable ff t) s r ss)
     where (ms,ss) = specializeJoin f p
-          ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList s))
+          ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList $ allKeys t))
           ms1 = foldr (\(i,j) s -> M.insert i  j s) ms ff
 
 createFilter
   :: Map Key Filter
-  ->  HashSchema Key Table
+  ->  HashSchema Key (SqlOperation Table)
   -> Table
   -> (Map Key Filter, Table)
 createFilter filters schema (Base k j) = (m,Base k spec)
@@ -468,7 +472,7 @@ createAggregate  schema key attr  old
     = Reduce (S.fromList key) (S.fromList attr) (addAggregate schema  key attr (Project (fmap Metric key) old))
 
 addAggregate
-  :: HashSchema Key Table
+  :: HashSchema Key (SqlOperation Table)
      -> [Key] -> [Aggregate KAttribute] -> Table -> Table
 addAggregate schema key attr (Base k s) =   case   catMaybes $ queryHash key  schema k  of
                         [] -> Base k  s
@@ -494,7 +498,7 @@ aggAll tmap i agg = do
   reduce i  agg
   (schema,table) <- get
   let
-    paths = catMaybes $ fmap (\ti-> (\k -> Path (S.singleton ti) k (S.singleton ti )) <$> M.lookup (S.singleton ti) tmap ) i
+    paths = catMaybes $ fmap (\ti-> (\k -> Path (S.singleton ti) (FetchTable k) (S.singleton ti )) <$> M.lookup (S.singleton ti) tmap ) i
     Just res = foldr joinPath (Just $ From table (S.fromList i)) paths
     attrs = nub $ (fmap Metric $ concat $ fmap F.toList $ fmap (\ti->  baseDescKeys (fromJust $ M.lookup (S.singleton ti) tmap)) i ) <> fmap Agg agg
   put (schema,Project attrs $ Base (S.fromList i) res )
@@ -507,7 +511,7 @@ countAll tmap i = do
   reduce i  agg
   (schema,table) <- get
   let
-    paths = catMaybes $ fmap (\ti-> (\k -> Path (S.singleton ti) k (S.singleton ti )) <$> M.lookup (S.singleton ti) tmap ) i
+    paths = catMaybes $ fmap (\ti-> (\k -> Path (S.singleton ti) (FetchTable k) (S.singleton ti )) <$> M.lookup (S.singleton ti) tmap ) i
     Just res = foldr joinPath (Just $ From table (S.fromList i)) paths
     attrs = ( fmap Metric $ concat $ fmap F.toList $ fmap (\ti->  baseDescKeys (fromJust $ M.lookup (S.singleton ti) tmap)) i ) <> fmap Agg agg
 
@@ -580,7 +584,6 @@ projectDesc =  trace "projectDesc" $  do
   put (schema,Limit (Project (fmap Metric (F.toList pk) ) table) 200)
   return (fmap Metric pk)
 
-
 project
   :: Monad m =>[KAttribute ]
      -> QueryT m [KAttribute ]
@@ -590,17 +593,52 @@ project attributes =trace "project" $  do
   put (schema,Limit (Project result table) 200 )
   return  result
 
-recursePath invSchema (Path i t e)  = FKPath i nextT  e : recursePaths invSchema nextT
-	where nextT@(Raw _ _ _ _ fk _ ) = fromJust (M.lookup t (invSchema))
+recursePath invSchema (Path i (FetchTable t) e)  = Path i (FetchTable nextT ) e : recursePaths invSchema nextT
+  where nextT@(Raw _ _ _ _ fk _ ) = fromJust (M.lookup t (invSchema))
+recursePath invSchema (Path i (FKJoinTable w ks t) e)  = Path i (FKJoinTable backT ks nextT ) e : recursePaths invSchema nextT
+  where nextT@(Raw _ _ _ _ fk _ ) = fromJust (M.lookup t (invSchema))
+        backT = fromJust (M.lookup w (invSchema))
 
 recursePaths invSchema (Raw _ _ _ _ fk _ )  = concat $ recursePath invSchema <$> S.toList fk
+
+newtype TB1 a = TB1 (KV (TB a))  deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
+
+data TB a
+  = FKT {-[a]-} (TB1 a)
+  | Attr a
+  deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
+
+allRec  isOpt invSchema ta@(Raw _ _ k desc fk attr) =
+  let
+      baseCase = KV (PK (fun k) (fun (S.fromList $ F.toList desc)))  (fun (maybe attr (`S.delete` attr) desc))
+      fkCase (Path ifk (FKJoinTable bt kv nt)  o ) = FKT {- (S.toList ifk)-} (allRec isOptional invSchema (fromJust (M.lookup nt  invSchema )))
+            where isOptional = any (isKOptional . keyType . fst) (F.toList kv) || isOpt
+      leftFst True keys = fmap (\((Key a b c  e) ) -> ( Key a b c  (makeOptional e))) keys
+      leftFst False keys = keys
+      fun items = fmap Attr (F.toList $ items `S.difference` fkSet ) <> (fkCase <$> filter (\(Path ifk _ _) -> ifk `S.isSubsetOf` items ) (F.toList fk) )
+      fkSet = S.unions $  fmap (\(Path ifk _ _) -> ifk)  $S.toList fk
+  in leftFst isOpt  $ TB1 baseCase
+
+projectAllRec'
+     :: Monad m => Map Text Table ->  QueryT m (TB1 KAttribute)
+projectAllRec' invSchema =  do
+  (schema,table@(Base _ t@(From ta@(Raw _ _ k _ fk  _) _ ) )  ) <- get
+  let
+      table1 = case  M.lookup k schema of
+        Just pv -> Base k (fromJust $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
+        Nothing -> table
+      attrs = Metric <$> allRec False invSchema ta
+  put (schema,Limit (Project (F.toList attrs)  table1 ) 200)
+  return $ trace ("projectDescAllRec: " <> show attrs ) attrs
+
+
 
 allAttrsRec  invSchema ta@(Raw _ _ k _ fk  _) =
   let
       t = From  ta k
-      table1 = Base k (fromJust $ foldl (flip joinPath) (Just t)  ( recursePaths invSchema ta))
-      result = fmap Metric $ S.toList $ (allKeys table1) `S.difference` (S.fromList . F.toList  $ baseDescKeys ta)
-      pk = fmap Metric $ baseDescKeys ta
+      table1 = Base k (fromJust $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
+      result =  nubBy (\i j -> keyValue i == keyValue j) $ filter (not .(`S.member` (S.fromList $ fmap keyValue $  F.toList  $ baseDescKeys ta)) . keyValue )  $S.toList $ (allKeys table1)
+      pk =  baseDescKeys ta
   in result
 
 projectDescAllRec
@@ -609,10 +647,10 @@ projectDescAllRec invSchema =  do
   (schema,table@(Base _ t@(From ta@(Raw _ _ k _ fk  _) _ ) )  ) <- get
   let
       table1 = case  M.lookup k schema of
-	Just pv -> Base k (fromJust $ foldl (flip joinPath) (Just t)  ( recursePaths invSchema ta))
-	Nothing -> table
-  let result = fmap Metric $ S.toList $ (allKeys table1) `S.difference` (S.fromList . F.toList  $ baseDescKeys table)
-  let pk = fmap Metric $ baseDescKeys table
+        Just pv -> Base k (fromJust $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
+        Nothing -> table
+  let result = fmap Metric $ nubBy (\i j -> keyValue i == keyValue j) $ filter (not .(`S.member` (S.fromList $ fmap keyValue $  F.toList  $ baseDescKeys table)) . keyValue )  $S.toList $ (allKeys table1)
+  let pk = fmap Metric $baseDescKeys table
   put (schema,Limit (Project (F.toList pk <> result)  table1 ) 200)
   return $ trace ("projectDescAllRec: " <> show  pk <> " || " <> show  result)  $(KV pk result)
 
@@ -621,7 +659,7 @@ projectDescAll
      :: Monad m => QueryT m (KV  KAttribute)
 projectDescAll =  do
   (schema,table) <- get
-  let result = fmap Metric $ S.toList $ (allKeys table) `S.difference` ((\(PK i j)-> S.fromList (i <> j) )  $ baseDescKeys table)
+  let result = fmap Metric $ nubBy (\i j -> keyValue i == keyValue j) $ filter (not .(`S.member` (S.fromList $ fmap keyValue $  F.toList  $ baseDescKeys table)) . keyValue )  $S.toList $ (allKeys table)
   let pk = fmap Metric $ baseDescKeys table
   put (schema,Limit (Project (F.toList pk <> result)  table) 200)
   return $ trace ("projectDescAll: " <> show  pk <> "-" <> show  result)  $(KV pk result)
@@ -675,7 +713,7 @@ allKeys (Base _ p) = go p
 
 
 newtype QueryT m a
-  = QueryT {runQueryT :: StateT  (HashSchema Key Table, Table)  m a} deriving(Functor,Applicative,Monad,MonadState (HashSchema Key Table, Table) )
+  = QueryT {runQueryT :: StateT  (HashSchema Key (SqlOperation Table), Table)  m a} deriving(Functor,Applicative,Monad,MonadState (HashSchema Key (SqlOperation Table), Table) )
 
 runQuery t =  runState ( runQueryT t)
 

@@ -1,5 +1,6 @@
-{-# languAGE ScopedTypeVariables #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
@@ -13,6 +14,9 @@ import Schema
 import Gpx
 import PandocRenderer
 import Data.Unique
+import Control.Monad.Trans.Class as C
+import Control.Monad.Trans.Maybe
+import Control.Monad
 import Postgresql
 import Data.Aeson
 import Data.Maybe
@@ -116,20 +120,31 @@ liftJust l (Just i) (Just j) = Just (l i j)
 liftJust l Nothing (Just j) = Nothing
 liftJust l (Just j) Nothing  = Just j
 liftJust l Nothing Nothing  = Nothing
-modifyList box =  (\ ml me -> liftJust (\l e -> F.toList e <> filter (\(i,j)-> not  $ S.member i (S.fromList $ fmap fst (F.toList e))  )  l) me ml ) <$> box
+modifyList box =  (\ ml me -> trace ("liftJust " <> show me <> " _ " <> show ml ) $  liftJust (\l e -> F.toList e <> filter (\(i,j)-> not  $ S.member i (S.fromList $ fmap fst (F.toList e))  )  l) me ml ) <$> box
 
 justError e (Just i) = i
 justError e  _ = error e
 
-fkUI :: Connection -> InformationSchema -> Tidings (Maybe [(Key,Showable)]) -> Tidings (Maybe (Map Key Showable)) -> Tidings (Maybe [(Key,Showable)]) -> Path Key Text -> UI (Element,Behavior (Maybe [(Key, Showable)], Maybe [(Key, Showable)]))
-fkUI conn inf oldItems plugItens fks (Path ifk table o) = mdo
-      l <- UI.span # set text (show $ S.toList ifk)
+fkUI
+  :: Connection
+  -> InformationSchema
+  -> Tidings (Maybe [(Key,Showable)])
+  -> Tidings (Maybe (Map Key Showable))
+  -> Path Key (SqlOperation Text)
+  -> UI (Element,Behavior (Maybe [(Key, Showable)], Maybe [(Key, Showable)]))
+fkUI conn inf oldItems plugItens  (Path ifk table o ) = mdo
+      l <- UI.span # set text (show $ S.toList o)
+      res <- liftIO $ projectKey conn inf (projectDescAllRec (tableMap inf )) o
       let
-          lookupFKS :: S.Set Key -> Tidings (Maybe [(Key,Showable)]) -> Tidings (Maybe [(Key,Showable)])
-          lookupFKS ks initialMap = allMaybes <$> (\m -> fmap (\ki->  join $ fmap (fmap (ki,) . M.lookup ki) m) (S.toList ks)) <$> (fmap M.fromList <$> initialMap )
+          subtable :: Table
+          subtable = fromJust $  M.lookup o (pkMap inf )
+          subtableAttrs =  allAttrsRec (tableMap inf) subtable
+          lookupFKS :: (Functor f ,F.Foldable f) => f Key -> Tidings (Maybe [(Key,Showable)]) -> Tidings (Maybe (f (Key,Showable)))
+          lookupFKS ks initialMap = allMaybes <$> (\m -> fmap (\ki->  join $ fmap (fmap (ki,) . M.lookup ki) m) ks) <$> (fmap M.fromList <$> initialMap )
+              where keys =  allAttrsRec (tableMap inf) subtable
           tdi :: Tidings (Maybe (KV  (Key,Showable)))
-          tdi =  fmap (\i-> KV (PK  (fmap normalize <$> i) []) [] ) <$> lookupFKS ifk oldItems
-      box <- UI.listBox res2 (tdi) (pure (\v-> UI.span # set text (show $ (\(KV k _)-> snd <$> k) v)))
+          tdi =  liftA2 (\d a -> fmap normalize <$> KV  d  a ) <$>  lookupFKS (baseDescKeys subtable) oldItems <*> lookupFKS (subtableAttrs) oldItems
+      box <- UI.listBox res2 tdi (pure (\v-> UI.span # set text (show $ (\(KV k _)-> snd <$> k) v)))
       let
           pkt :: Tidings (Maybe (PK Showable))
           pkt = fmap (\(KV i _) -> fmap (normalize.snd) i) <$> UI.userSelection box
@@ -137,23 +152,18 @@ fkUI conn inf oldItems plugItens fks (Path ifk table o) = mdo
           ei i Nothing = allMaybes $ fmap defaultType i
           ei i d = d
           olds :: Tidings (Maybe [Showable])
-          olds =  fmap (fmap (normalize . snd) ) <$> lookupFKS ifk updatedSelection
+          olds =  fmap (fmap (normalize . snd) ) <$> lookupFKS (F.toList o) oldItems
           edited :: Tidings (Maybe [(Showable,Showable)])
-          edited = (\o j-> if (fmap pkKey o) == (fmap normalize <$> ei (S.toList ifk) j) then Nothing else liftA2 zip (fmap pkKey o) j) <$> pkt <*> olds
+          edited = (\i j-> if (fmap pkKey i) == (fmap normalize <$> ei (S.toList o) j) then Nothing else liftA2 zip (fmap pkKey i) j) <$> pkt <*> olds
           editedListFlag (Just i) = "#" <> L.intercalate "," (fmap renderShowable i)
           editedListFlag Nothing = ""
           fksel = fmap pkKey <$>  facts pkt
       e <- UI.span # sink text (editedListFlag . fmap (fmap snd) <$> facts edited)
       paint (getElement l) fksel
       chw <- checkedWidget
-      let
-          subtable :: Table
-          subtable = fromJust $  M.lookup o (pkMap inf )
-      updatedSelection <- accumTds (fmap (fmap (fmap normalize)) <$> oldItems) [modifyList (rumors $ UI.userSelection box)]
-      (celem,tcrud,evs) <- crudUI conn inf subtable (fmap traceShowId updatedSelection) plugItens
-      let eres = fmap (addToList  (S.toList o)  (maybeToList $ description subtable) (fmap (\(Metric i) -> i)  ( allAttrsRec (tableMap inf ) subtable )) <$> ) evs
-      res <-  liftIO $ projectKey conn inf (projectDescAllRec (tableMap inf )) o
-      res2 <- accumTds (pure $ fmap (fmap (fmap normalize)) res) eres
+      (celem,tcrud,evs) <- crudUI conn inf subtable (fmap (traceShowId .F.toList) <$> UI.userSelection box ) plugItens
+      let eres = fmap (addToList  (S.toList o)  (maybeToList $ description subtable) ( ( allAttrsRec (tableMap inf ) subtable )) <$> ) evs
+      res2  <-  accumTds (pure $ fmap (fmap (fmap normalize)) res) eres
       -- let res2 = foldTds (pure $ fmap (fmap (fmap normalize)) res) eres
       -- TODO: Implement recursive selection after insertion
       -- tdi2 <- addTs (pure Nothing) $ (\i-> editedMod (S.toList o)  (maybeToList $ description subtable)   <$> i) <$> evs
@@ -177,11 +187,11 @@ data Plugins
   }
 
 classifyKeys (table@(Raw s t pk desc fk allI),keys) = (S.intersection keys attrSet,S.intersection keys fkSet)
-  where fkSet = S.unions $ fmap (\(Path ifk t o) ->  ifk)  (S.toList fk)
-        attrSet = S.fromList $ filter (not. (`S.member` fkSet)) $ (S.toList pk <> S.toList allI)
+    where fkSet = S.unions $ fmap (\(Path ifk t o) ->  ifk)  (S.toList fk)
+          attrSet = S.fromList $ filter (not. (`S.member` fkSet)) $ (S.toList pk <> S.toList allI)
 
 attrSet pkm (Raw s t pk desc fk allI) =  pk <> allI <>  foldr mappend mempty (catMaybes $ pathTable <$> (F.toList fk) )
-	where pathTable (Path o t e) = attrSet pkm <$> M.lookup e pkm
+    where pathTable (Path o t e) = attrSet pkm <$> M.lookup e pkm
 
 
 pluginUI conn inf p@(Plugins n (table@(Raw s t pk desc fk allI),keys) a) oldItems = do
@@ -204,16 +214,14 @@ crudUI conn inf table@(Raw s t pk desc fk allI) oldItems pluginItems = do
   let
     initialMap :: Tidings (Maybe (Map Key Showable))
     initialMap = fmap (M.fromList ) <$> oldItems
-    lookupFKS :: [Key] -> Tidings (Maybe [(Key,Showable)])
-    lookupFKS ks = allMaybes <$> ((\m ks -> fmap (\ki->  join $ fmap (fmap (ki,) . M.lookup ki) m) ks) <$> initialMap <*> pure ks)
     lookupAttrs :: Key -> Tidings (Maybe Showable)
     lookupAttrs k = join . fmap ( M.lookup k) <$> initialMap
   body <- UI.div
   let fkSet = S.unions $ fmap (\(Path ifk t o) ->  ifk)  (S.toList fk)
   attrs <- mapM (\i -> attrUI' (lookupAttrs i) (join . fmap (M.lookup i ) <$> pluginItems) i )  $ filter (not. (`S.member` fkSet)) $ (S.toList pk <> S.toList allI)
-  fks <- mapM (\i@(Path ifk  _ _ ) -> fkUI conn inf oldItems pluginItems (lookupFKS (S.toList ifk) ) i ) (S.toList fk)
+  fks <- mapM (\i@(Path ifk  _ o ) -> fkUI conn inf oldItems pluginItems  i ) (S.toList fk)
   let
-    buildList' i j = foldr (liftA2 (:)) (fmap (fmap (\i-> [i])) <$> buildList i) j
+    buildList' i j = foldr (liftA2 (:)) (fmap (fmap pure) <$> buildList i) j
         where buildList = foldr (liftA2 (:))  (pure [])
     fkattrsB = buildList'  (fmap snd .snd <$> attrs) (fmap snd .snd <$> fks)
     efkattrsB = buildList' (fmap fst . snd <$> attrs) (fmap fst . snd <$> fks)
@@ -227,7 +235,7 @@ crudUI conn inf table@(Raw s t pk desc fk allI) oldItems pluginItems = do
 -- interpret collection operations for lists
 addToList i j a (Insert m) =  (\i->  mappend (fmap ((\(k,v)-> (k,normalize $ v)))  <$> maybeToList i) ) (editedMod  i j a m )
 addToList i j a (Delete m ) =  (\i->  concat . L.delete (fmap ((\(k,v)-> (k,normalize $ v)))  <$> maybeToList i)  . fmap pure ) (editedMod  i j a m )
-addToList i j a (Edit m n ) =  addToList i j a (Insert $ trace ( "insert" <> show m) m) . addToList i j a (Delete $ trace ("delete:" <> show n ) n)
+addToList i j a (Edit m n ) =  addToList i j a (Insert  m) . addToList i j a (Delete n)
 
 -- lookup pk from attribute list
 editedMod :: Ord a => [a] -> [a] -> [a] ->  Maybe [(a,b)] -> Maybe (KV (a,b))
@@ -238,6 +246,7 @@ data Modification a b
   = Edit (Maybe [(a,b)]) (Maybe [(a,b)])
   | Insert (Maybe [(a,b)])
   | Delete (Maybe [(a,b)])
+
 
 processPanel
      :: Connection
@@ -250,7 +259,6 @@ processPanel conn efkattrsB fkattrsB table oldItems = do
   editB <- UI.button # sink UI.enabled (liftA2 (&&) (any isJust <$>  efkattrsB) (all isJust  <$> fkattrsB)) # set text "EDIT"
   deleteB <- UI.button  # sink UI.enabled (isJust <$> facts oldItems) # set text "DELETE"
   insertB <- UI.button  # sink UI.enabled (all isJust <$> fkattrsB) # set text "INSERT"
-
   let
       editAction isM kM = do
         let i = catMaybes isM
@@ -265,14 +273,18 @@ processPanel conn efkattrsB fkattrsB table oldItems = do
           res <- catch (Right <$> insertPK fromShowableList conn (concat i) table) (\e -> return $ Left (show $ traceShowId (e :: SqlError) ))
           return $ (\v -> Insert $ Just $ (v <> (filter (not . isEmptyShowable . snd) $ filter (not . flip elem (fst <$> v) . fst) (concat i)))) <$> res
 
-      evi,evd,eve :: Event (Modification Key Showable)
-      (evid,evi) = split $ unsafeMapIO id $ (insertAction . catMaybes <$> fkattrsB) <@ UI.click insertB
-      (evdd,evd) = split $ unsafeMapIO id $ (deleteAction <$> facts oldItems) <@ UI.click deleteB
-      (eved,eve) = split $ unsafeMapIO id $ (editAction <$> efkattrsB <*> (facts oldItems) ) <@ UI.click editB
+      evir, evdr,ever :: Event (Modification Key Showable)
+      (evid,evir) = spMap $ (insertAction . catMaybes <$> fkattrsB) <@ (UI.click insertB)
+      (evdd,evdr) = spMap $ (deleteAction <$> facts oldItems) <@ UI.click deleteB
+      (eved,ever) = spMap $ (editAction  <$> efkattrsB <*> (facts oldItems) ) <@ UI.click editB
+      spMap = split . unsafeMapIO id
 
- -- stp <- stepper [] (unions [evdd,eved])
---  end <- UI.div # sink text (show <$> stp)
-  return ([insertB,editB,deleteB],[evi,eve,evd])
+  -- (evid,evir) <- split <$> shortCut (insertAction . catMaybes <$> fkattrsB)  (UI.click insertB)
+  -- (evdd,evdr) <- split <$> shortCut (deleteAction <$> facts oldItems) (UI.click deleteB)
+  -- (eved,ever) <- split <$> shortCut (editAction  <$> efkattrsB <*> (facts oldItems) ) (UI.click editB)
+  --stp <- stepper [] (unions [evid,evdd,eved])
+  --end <- UI.div # sink text (show <$> stp)
+  return ([insertB,editB,deleteB],[evir,ever,evdr])
 
 isEmptyShowable (SOptional Nothing ) = True
 isEmptyShowable (SSerial Nothing ) = True
@@ -296,31 +308,15 @@ type ProjAction = (forall t. Traversable t =>
 safeHead [] = Nothing
 safeHead i = Just $ head i
 
-findMQ :: Traversable t => Connection -> InformationSchema -> QueryT Identity (t KAttribute)  ->
-                    (S.Set Key) -> PK Showable -> IO (Maybe (t (KAttribute,Showable)))
-findMQ conn inf q  arg f = fmap safeHead $ projectKey' conn inf (do
-              predicate filter
-              q ) arg
-  where
-    filter = zipWith (\s k -> (k,Category (S.singleton s))) (invertPK f) (S.toList arg)
-    attrs = runQuery q
 
 
-
-
-findQ :: Traversable t => Connection -> InformationSchema -> QueryT Identity (t KAttribute)  ->
-                    (S.Set Key) -> PK Showable -> IO (t Showable)
-findQ conn inf q  arg f = fmap (fmap snd) $  fmap head $ projectKey' conn inf (do
-              predicate filter
-              q ) arg
-  where
-    filter = zipWith (\s k -> (k,Category (S.singleton s))) (invertPK f) (S.toList arg)
 
 doQueryTable :: Traversable t => Connection -> InformationSchema -> QueryT Identity (t KAttribute)  ->
                     (Map Key [Filter]) -> (S.Set Key) -> IO (t Key,[t Showable])
 doQueryTable conn inf q f arg  = projectTable  conn inf (do
               predicate (concat $ filterToPred <$> (M.toList f))
-              q ) arg
+              q
+               ) arg
   where
     filterToPred (k,f) = fmap (k,) f
 
@@ -338,7 +334,8 @@ doQuery :: Traversable t => Connection -> InformationSchema -> QueryT Identity (
                     (Map Key [Filter]) -> (S.Set Key) -> IO [t Showable]
 doQuery conn inf q f arg  = fmap (fmap (fmap snd )) $ projectKey' conn inf (do
               predicate (concat $ filterToPred <$> (M.toList f))
-              q ) arg
+              q
+               ) arg
   where
     filterToPred (k,f) = fmap (k,) f
 
@@ -386,12 +383,13 @@ filterWidget
 filterWidget conn inf bBset filterT = do
   -- Filter Box (Saved Filter)
   ff  <- insdel (facts filterT)
+
   -- Filterable Keys
   let bFk = fmap (projectFk (hashedGraph inf) ) bBset
-  fkbox <- UI.listBox (liftA2 (:) bBset bFk) (const <$> pure Nothing <*> fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
+  fkbox <- UI.listBox (liftA2 (<>) (fmap S.singleton .S.toList <$> bBset) bFk) (const <$> pure Nothing <*> fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
+
   -- Filter Query
   bp <- joinT $ (\i j-> maybe (return []) id (fmap (doQuery conn inf projectDesc i) j)) <$> triding ff <*> UI.userSelection fkbox
-
   rangeWidget <- rangeBoxes (UI.userSelection fkbox)  bp
 
   -- Filter Selector
@@ -408,12 +406,17 @@ tableElem h b =  grid $ header h : body b
 
 selectedItems conn inf ff key = do
   let
-    invItems :: Tidings [(S.Set Key , Path Key Table)]
+    invItems :: Tidings [(S.Set Key , Path Key (SqlOperation Table))]
     invItems = ((\k -> case  M.lookup k (hashedGraphInv inf) of
-            Just invItems -> M.toList invItems
+            Just invItems ->  M.toList invItems
             Nothing -> [] )) <$> key
-  bp <- joinT $ (\i j-> mapM (\k-> fmap (fst k,) . doQueryTable conn inf projectDescAll i.  fst $ k ) j) <$> ff <*>  invItems
-  UI.div # sink items (fmap (\k -> (\i-> UI.div # set items (UI.div # set text (showVertex $ fst k) : [tableElem  (F.toList $ fst i) $ fmap F.toList (snd i)])) . snd  $ k ) <$> facts bp)
+  let
+    query i j
+      | M.null i = return []
+      | otherwise = fmap catMaybes $ mapM (\k-> fmap (fmap (fst k,)) . (`Control.Exception.catch` (\e-> flip const (e :: SomeException)  $ return Nothing ) ) . fmap Just . doQueryTable conn inf projectDescAll i.  fst $ k ) j
+  bp <- joinT $ (query <$> fmap traceShowId ff <*> invItems)
+  body <- UI.div # sink items (fmap (\k -> (\i-> UI.div # set items (UI.div # set text (showVertex $ fst k) : [tableElem  (F.toList $ fst i) $ fmap F.toList (snd i)])) . snd  $ k ) <$> facts bp)
+  UI.div # set children [body]
 
 
 chooserKey conn pg inf kitems  = do
@@ -465,6 +468,7 @@ chooseKey conn  pg inf key = mdo
 
   -- Final Query (Saved Filter <> Filter Map Selected)
   vp <- joinT $ doQueryAttr conn inf (projectDescAllRec (tableMap inf)) <$> (M.unionWith mappend <$> filterT <*> triding ff) <*>  bBset
+  vp' <- joinT $ doQueryAttr conn inf (projectAllRec' (tableMap inf)) <$> (M.unionWith mappend <$> filterT <*> triding ff) <*>  bBset
 
   -- Final Query ListBox
   filterInp <- UI.input
@@ -483,7 +487,7 @@ chooseKey conn  pg inf key = mdo
   -- t <- joinT $ aggQuery  <$> (M.unionWith mappend <$> categoryT1 <*> triding ff) <*> (S.unions <$> UI.multiUserSelection sel) <*> aggregators <*> bBset
   -- count <- UI.div # sink text (fmap show $ facts t)
 
-  selected <- selectedItems conn inf (M.unionWith mappend <$> categoryT1 <*> triding ff) bBset
+  selected <- selectedItems conn inf categoryT1  bBset
   element (getElement itemList) # set UI.multiple True
   element (getElement filterItemBox) # set UI.multiple True
   res  <- mapM (\i -> pluginUI conn inf i (fmap F.toList <$> UI.userSelection itemList  ) )   (filter (\(Plugins n tb _ )-> S.isSubsetOf  (snd tb) (attrSet (pkMap inf) (fromJust $ M.lookup key (pkMap inf)))  ) pg )
@@ -506,12 +510,13 @@ chooseKey conn  pg inf key = mdo
         i -> i
      subtable = fromJust $ M.lookup key (pkMap inf)
   (crud,_,evs) <- crudUI conn inf  subtable  (convertPK <$>  UI.userSelection  itemList)  tdi2
-  let eres = fmap (addToList  (S.toList key)  (maybeToList $ description subtable ) (F.toList $ (fmap (\(Metric i )-> i) $ ( allAttrsRec (tableMap inf ) subtable )  ) ) <$> ) evs
+  let eres = fmap (addToList  (S.toList key)  (maybeToList $ description subtable ) (F.toList $   allAttrsRec (tableMap inf ) subtable    ) <$> ) evs
   res2 <- accumTds (fmap (fmap (fmap normalize)) <$> vp)   eres
   insertDiv <- UI.div # set children [crud]
   filterSel <- UI.div # set children [getElement ff,getElement fkbox,getElement range, getElement filterItemBox]
+  vpDiv <- UI.listBox (vp') (pure Nothing) (pure (\i-> UI.div # set text (show i) ))
   -- aggr <- UI.div # set children [getElement sel , count]
-  tab <- tabbed  [("CRUD",insertDiv),("FILTER",filterSel){-,("AGGREGATE", aggr)-}, ("PLUGIN",plugins),("SELECTED",selected)]
+  tab <- tabbed  [("TEST", getElement vpDiv),("CRUD",insertDiv),("FILTER",filterSel){-,("AGGREGATE", aggr)-}, ("PLUGIN",plugins),("SELECTED",selected)]
   itemSel <- UI.div # set children [filterInp]
   UI.div # set children ([itemSel,getElement itemList,tab] )
 
@@ -527,7 +532,7 @@ queryCnpjProject conn inf (Plugins n (table@(Raw s t pk desc fk allI),keys) a) o
     lookupAttrs k = join . fmap ( M.lookup k) <$> initialMap
   let fkSet = S.unions $ fmap (\(Path ifk t o) ->  ifk)  (S.toList fk)
   attrs <- mapM (\i-> attrUI' (lookupAttrs i ) (pure Nothing) i) $ filter (not. (`S.member` fkSet)) $ S.toList keys
-  fks <- mapM (\i@(Path ifk _ _ ) -> fkUI conn inf oldItems (pure Nothing) (lookupFKS (S.toList ifk) ) i ) (S.toList fk)
+  fks <- mapM (\i@(Path ifk _ _ ) -> fkUI conn inf oldItems (pure Nothing)  i ) (S.toList fk)
   let
     buildList' i j = foldr (liftA2 (:)) (fmap (fmap (\i-> [i])) <$> buildList i) j
         where buildList = foldr (liftA2 (:))  (pure [])
@@ -544,11 +549,9 @@ queryCnpjProject conn inf (Plugins n (table@(Raw s t pk desc fk allI),keys) a) o
 pluginOrcamento inf =
   let
     Just table2 = M.lookup "pricing" (tableMap inf)
-    keys2 = catMaybes $ fmap (flip M.lookup (keyMap inf) . ("pricing",)) ["id_project"]
+    keys2 = catMaybes $ fmap (flip M.lookup (keyMap inf) . ("pricing",)) ["pricing_price"]
     pg2 = Plugins "Pricing Document" (table2,S.fromList keys2) renderProjectPricing
   in pg2
-
-
 
 pluginCEP inf =
   let
@@ -556,6 +559,21 @@ pluginCEP inf =
     keys2 = catMaybes $ fmap (flip M.lookup (keyMap inf) . ("owner",)) ["id_owner"]
     pg2 = Plugins "CEP Correios" (table2,S.fromList keys2) queryCEP2
   in pg2
+
+pluginProtocolId inf =
+  let
+    Just table2 = M.lookup "fire_project" (tableMap inf)
+    keys2 = catMaybes $ fmap (flip M.lookup (keyMap inf) . ("fire_project",)) ["protocolo","ano"]
+    pg2 = Plugins "Protocolo Id" (table2,S.fromList keys2) queryProtocoloId
+  in pg2
+
+pluginAndamentoId inf =
+  let
+    Just table2 = M.lookup "fire_project" (tableMap inf)
+    keys2 = catMaybes $ fmap (flip M.lookup (keyMap inf) . ("fire_project",)) ["id_bombeiro"]
+    pg2 = Plugins "Andamento" (table2,S.fromList keys2) queryAndamento2
+  in pg2
+
 
 
 simpleGetRequest =  fmap BSL.pack . join . fmap HTTP.getResponseBody . HTTP.simpleHTTP . HTTP.getRequest
@@ -573,22 +591,124 @@ solicitationPlugin inf =
     pg2 = Plugins "Solicitacao Projeto Bombeiro" (table2,S.fromList keys2) solicitationForm
   in pg2
 
+renderUrl' args url = address
+  where
+    kv i = catMaybes $ (\k ->   (\inp ->  fmap (snd k,) . M.lookup (fst k) . M.fromList $ fmap (\(k,v)-> (keyValue k,v)) inp ) $  i ) <$> args
+    renderKv = HTTP.urlEncodeVars . fmap (\(k,v)-> (k , show v))
+    address i =  url <> "?"  <> renderKv (kv i)
 
+renderUrlM args url = fmap address . kv
+  where
+    kv i = allMaybes $ (\k -> join . fmap (\inp ->  fmap (snd k,) . M.lookup (fst k) . M.fromList $ fmap (\(k,v)-> (keyValue k,v)) inp ) $  i ) <$> args
+    renderKv = HTTP.urlEncodeVars . fmap (\(k,v)-> (k , show v))
+    address i =  url <> "?"  <> renderKv i
+
+renderUrl args url = address
+  where
+    kv i = catMaybes $ (\k -> join . fmap (\inp ->  fmap (snd k,) . M.lookup (fst k) . M.fromList $ fmap (\(k,v)-> (keyValue k,v)) inp ) $  i ) <$> args
+    renderKv = HTTP.urlEncodeVars . fmap (\(k,v)-> (k , show v))
+    address i =  url <> "?"  <> renderKv (kv i)
 -- This Iframe needs cross reference scripting enabled in the browser , this implies big security concerns
 renderUrlWithKeys args url inputs =   element
   where
-	 kv i = catMaybes $ (\k -> join . fmap (\inp ->  fmap (snd k,) . M.lookup (fst k) . M.fromList $ fmap (\(k,v)-> (keyValue k,v)) inp ) $  i ) <$> args
-	 renderKv = HTTP.urlEncodeVars . fmap (\(k,v)-> (k , show v))
-	 address i =  url <> "?"  <> renderKv (kv i)
-         element = mkElement "iframe" # sink UI.src (address <$> facts inputs) # set style [("width","100%"),("height","300px")] # set (strAttr "onload") script
-	 -- script to set query kv to form kv
-	 script = "var win = this.contentWindow ; var docu = this.contentDocument ; function getUrlVars() {    var vars = [], hash;    var hashes = win.location.href.slice(win.location.href.indexOf('?') + 1).split('&');    for(var i = 0; i < hashes.length; i++)    {        hash = hashes[i].split('=');        vars.push(hash[0]);        vars[hash[0]] = hash[1] != null ? decodeURIComponent(hash[1].replace(/\\+/g, ' ')) : hash[1] ;    }    return vars;} ; var args = getUrlVars(); Object.keys(args).map(function(i){var doc = docu.getElementById(i) ; doc != null ? doc.value = args[i] : args[i] });"
+    element = mkElement "iframe" # sink UI.src (renderUrl args url <$> facts inputs) # set style [("width","100%"),("height","300px")] # set (strAttr "onload") script
+    -- script to set query kv to form kv
+    script = "var win = this.contentWindow ; var docu = this.contentDocument ; function getUrlVars() {    var vars = [], hash;    var hashes = win.location.href.slice(win.location.href.indexOf('?') + 1).split('&');    for(var i = 0; i < hashes.length; i++)    {        hash = hashes[i].split('=');        vars.push(hash[0]);        vars[hash[0]] = hash[1] != null ? decodeURIComponent(hash[1].replace(/\\+/g, ' ')) : hash[1] ;    }    return vars;} ; var args = getUrlVars(); Object.keys(args).map(function(i){var doc = docu.getElementById(i) ; doc != null ? doc.value = args[i] : args[i] });"
 
+
+spanList :: ([a] -> Bool) -> [a] -> ([a], [a])
+
+spanList _ [] = ([],[])
+spanList func list@(x:xs) =
+    if func list
+       then (x:ys,zs)
+       else ([],list)
+    where (ys,zs) = spanList func xs
+
+{- | Similar to Data.List.break, but performs the test on the entire remaining
+list instead of just one element.
+-}
+breakList :: ([a] -> Bool) -> [a] -> ([a], [a])
+breakList func = spanList (not . func)
 
 solicitationForm _ _  _ inputs =  (,pure Nothing) <$> element
    where translate  =  [("owner_municipio","localidade"),("cgc_cpf","cgc_cpf"),("owner_name","razao_social"),("logradouro","logradouro"),("owner_number","numero"),("owner_complemento","complemento")]
-	 address =  "http://siapi.bombeiros.go.gov.br/projeto/cad_solicitacao_projeto.php"
+         address =  "http://siapi.bombeiros.go.gov.br/projeto/cad_solicitacao_projeto.php"
          element = renderUrlWithKeys translate address inputs
+
+splitL :: Eq a => [a] -> [a] -> [[a]]
+splitL _ [] = []
+splitL delim str =
+    let (firstline, remainder) = breakList (L.isPrefixOf delim) str
+        in
+        firstline : case remainder of
+                                   [] -> []
+                                   x -> if x == delim
+                                        then [] : []
+                                        else splitL delim
+                                                 (drop (length delim) x)
+
+getRequest ::  String -> MaybeT IO BSL.ByteString
+getRequest = join . C.lift . (`catch` (\e ->  traceShow (e :: IOException) $ return mzero ) ).  fmap return . simpleGetRequest
+
+queryAndamento2 conn inf  k  input =
+  let
+      tableName = "fire_project"
+      addrs ="http://siapi.bombeiros.go.gov.br/consulta/consulta_protocolo.php"
+      translate = [("protocolo" , "protocolo"),("ano","ano")]
+      addrs_a ="http://siapi.bombeiros.go.gov.br/consulta/consulta_andamento.php"
+      translate_a = [("id_bombeiro" , "id")]
+      element = do
+        b <- UI.button # set UI.text "Submit"
+        tq <-  mapT (\inputs-> ( runMaybeT $ do
+                url <- MaybeT $ return $ renderUrlM translate addrs  $ filter (not . isEmptyShowable. snd )  <$>inputs
+                lq <-  getRequest . traceShowId $ url
+                let
+                  lq2 =  Just . maybe M.empty (uncurry M.singleton . ("id_bombeiro",)) . fmap SNumeric . readMaybe.  fst .  break (=='&') . concat . tail .  splitL ("php?id=")  .traceShowId . T.unpack . decodeLatin1  $  lq
+                  lkeys = fmap ( M.toList . M.mapKeys (fromJust . flip M.lookup (keyMap inf) . (tableName,)  ))  $ lq2
+                tq <-  getRequest . traceShowId . (renderUrl translate_a addrs_a)  $  lkeys
+                let
+                  tq2 =  T.unpack $  decodeLatin1 tq
+                  convertAndamento [da,desc] = [("andamento_date",SDate . Finite . localDay . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.pack desc))]
+                  convertAndamento i = error $ "convertAndamento:  " <> show i
+                  tkeys v =  M.mapKeys (fromJust . flip M.lookup (keyMap inf) . ("andamento" :: Text,)  )  v
+                  prepareArgs  = fmap ( tkeys . M.fromList . convertAndamento ) .  tailEmpty . concat
+                  lookInput = fromJust . L.find ((== "id_project") . keyValue . fst)
+                  insertAndamento :: String -> Maybe [(Key,Showable)] -> MaybeT IO ()
+                  insertAndamento i (Just j)  =  C.lift $ do
+                      html <- readHtml $ traceShowId i
+                      mapM_ (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) undefined )) $ insert conn  (M.toList kv) (fromJust $ M.lookup  "andamento" (tableMap inf) )) (fmap ( uncurry M.insert  (lookInput j)) $ prepareArgs html)
+                  insertAndamento i Nothing  =  return ()
+                insertAndamento tq2 inputs )      ) (shortCutClick input (UI.click b))
+        e <- UI.div # sink UI.text (fmap show $ facts $ tq)
+        body <-UI.div # set children [b,e]
+        return (body , pure Nothing)
+  in  element
+
+tailEmpty [] = []
+tailEmpty i  = tail i
+
+queryProtocoloId _ inf  _ inputs =
+  let
+      element = do
+        b <- UI.button # set UI.text "Submit"
+        tkeys <-  mapT (\ip -> runMaybeT  $ do
+                  let
+                    tableName = "fire_project"
+                    addrs ="http://siapi.bombeiros.go.gov.br/consulta/consulta_protocolo.php"
+                    translate = [("protocolo" , "protocolo"),("ano","ano")]
+                  url <- MaybeT $ return $ renderUrlM translate addrs  $ filter (not . isEmptyShowable. snd ) <$> ip
+                  lq <-  getRequest . traceShowId $ url
+                  let
+                    decode = T.unpack . decodeLatin1
+                    parse =  fst .  break (=='&') . concat . tailEmpty .  splitL ("php?id=")
+                    convert  =  (uncurry M.singleton <$>) . join . lkeys . ("id_bombeiro",)
+                    lkeys (k,v) = (\kf -> (kf,) <$> (readType (textToPrim <$> keyType kf) v) ) <$> M.lookup (tableName,k) (keyMap inf)
+                  MaybeT . return . convert . parse . decode $ lq)
+                      (shortCutClick inputs (UI.click b))
+        body <-UI.div # set children [b]
+        return (body , tkeys)
+  in  element
 
 
 queryCEP2 _ inf  _ inputs =
@@ -628,15 +748,6 @@ queryCnpjReceita _ _ _ inputs =
 
 
 keySetToMap ks = M.fromList $  fmap (\(Key k _ _ t)-> (toStrict $ encodeUtf8 k,t))  (F.toList ks)
-
-selectQuery
-  :: Traversable t => Connection
-     -> M.Map (S.Set Key) Table
-     -> HashSchema Key Table
-     -> QueryT Identity (t KAttribute)
-     -> S.Set Key -> IO [t Showable]
-selectQuery conn baseTables hashGraph q k =  queryWith_ (fromShowableList j) conn (buildQuery i)
-   where (j,(h,i)) =  projectAllKeys baseTables hashGraph  q k
 
 projectKey
   :: Connection
@@ -717,6 +828,6 @@ main = do
     keys = catMaybes $ fmap (flip M.lookup (keyMap inf) . ("run",)) ["distance","id_shoes","id_person","id_place"]
     pg = Plugins (table,S.fromList (fkey : keys)) execKey
   fkey <- fileKey-}
-  startGUI defaultConfig (setup conn  [pluginBombeiro inf ,pluginCnpjReceita inf ,pluginCEP inf,solicitationPlugin inf,pluginOrcamento inf] inf (M.keys baseTables))
+  startGUI defaultConfig (setup conn  [pluginAndamentoId inf , pluginBombeiro inf ,pluginCnpjReceita inf ,pluginCEP inf,solicitationPlugin inf,pluginOrcamento inf,pluginProtocolId inf] inf (M.keys baseTables))
   print "Finish"
 

@@ -33,7 +33,7 @@ fmapTds ::  Tidings a  -> (b -> a -> a ) -> [Event  b] -> Tidings a
 fmapTds e fun l =   tidings (facts e) $ (\li ii ->  foldr fun li ii) <$> facts e <@> unions  l
 
 applyTds ::  Tidings a  ->  Event  (a -> a) -> Tidings a
-applyTds e l =   tidings (facts e) $ (flip ($)) <$> facts e <@> l
+applyTds e l =   tidings (facts e) $ (flip ($)) <$> facts e <@> unionWith const (const <$> rumors e) l
 
 foldTds ::  Tidings a  ->  [Event  (a -> a)] -> Tidings a
 foldTds =  foldl' applyTds
@@ -68,8 +68,8 @@ mapT f x =  do
   let ev = unsafeMapIO f $ rumors x
   c <- currentValue  (facts x)
   b <- liftIO $ f c
-  bh <- stepper b ev
-  return $ tidings bh ( bh <@ rumors x)
+  bh <- stepper  b ev
+  return $ tidings bh (bh <@ rumors x)
 
 
 insdel :: (Ord a,Ord b,Monoid b,Show a,Show b) => Behavior (Map a b) -> UI (TrivialWidget (Map a b))

@@ -28,11 +28,11 @@ type HashSchema  a b = Map (Set a) (Map a (Path a b ))
 
 instance (Show a, Show b) => Show (Path a b) where
     show (Path x o y) = printf "%s -| %s |- > %s " (showVertex x) (show o) (showVertex y)
-    show (ComposePath x (px,i,py) y ) = printf "Compose %s-> %s-> %s\n  Path: %s| %s"
-        (showVertex x) (showVertex i) (showVertex y) (showVertex px) (showVertex py)
+    show (ComposePath x (px,i,py) y ) = printf "%s -.> %s "
+         (showVertex px)  (showVertex py)
     show (PathOption x ps y)
-      | otherwise = printf "Options: %s-> %s \n %s"
-        (showVertex x) (showVertex y) (intercalate "\n " $ fmap (\(l,v) ->  show l <> "." <> show v) $ zip [0..1]  (S.toList ps))
+      | otherwise = printf "Options: %s -> %s [%s]"
+        (showVertex x) (showVertex y) (intercalate " | " $ fmap (\(l,v) ->  show l <> "." <> show v) $ zip [0..1]  (S.toList ps))
 
 showVertex = intercalate  "," . fmap show . S.toList
 
@@ -40,6 +40,7 @@ data Graph a b = Graph { hvertices :: [Set a]
                      , tvertices :: [Set a]
                      , edges :: Map (Set a,Set a) (Path a b) }
                      deriving(Eq)
+
 
 instance (Show a,Show b) => Show (Graph a b) where
     show g = printf "Inputs: %s\nOutputs: %s\nEdges:\n%s"
@@ -84,15 +85,26 @@ mergeGraph i k = Graph { hvertices = nub $ sort $ hvertices i <>  hvertices k
             edgeT (Edge (Product i) _ _ ) = i
 -}
 
+data Cardinality a
+  = One a
+  | Many a
+  deriving(Eq,Ord,Show)
+
 data Path a b
   -- Trivial Path
   = Path  (Set a)  b  (Set a)
+  | TagPath  (Cardinality (Set a))  b  (Cardinality (Set a))
   | FKPath  (Set a)  b  (Set a)
   -- Path Composition And Product
   | ComposePath (Set a) (Set (Path a b),Set a,Set (Path a b)) (Set a)
   -- Path Options
   | PathOption (Set a) (Set (Path a b)) (Set a)
-  deriving(Eq,Ord)
+  deriving(Eq,Ord )
+
+instance Functor (Path a) where
+  fmap f (Path i t j ) =  (Path i (f t ) j)
+  fmap f (FKPath i t j ) =  (FKPath i (f t ) j)
+  fmap f (TagPath i t j ) =  (TagPath i (f t ) j)
 
 pbound (Path h1 _ t1) = (h1,t1)
 pbound (ComposePath h1 _ t1) =  (h1,t1)
@@ -185,6 +197,31 @@ edgesKeys = fmap (\i-> (pbound i ,i))
 nonOverlap items = filter (\i-> all (not . S.isProperSubsetOf  (snd $pbound $ i))  spi ) items
   where spi = fmap (snd.pbound) items
 {-# INLINE nonOverlap #-}
+
+warshall2 :: (Ord a,Show a,Show b ,Ord b) => Graph a b -> Graph a b
+warshall2 g = Graph { edges = go (hvertices g <> tvertices g) (edges g)
+                   , hvertices = hvertices g
+                   , tvertices = tvertices g }
+    where
+      go [] es     = es
+      go (v:vs) esM =  go vs ( M.unionWith punion esM
+         ( M.fromList $ edgesKeys [(ComposePath h (S.singleton items,i,S.singleton p3) d )  |
+                items <- (fmap snd . M.toList $ edges g) ,
+                p3 <- es,
+                let bnd = pbound p3
+                    p = fst bnd
+                    d = snd bnd,
+                -- items <- fmap nonOverlap $ concat $  fmap (flip replicateM $ es) [1..S.size p] ,
+                let
+                    h = fst (pbound items)
+                    i = snd (pbound items),
+                i == p, h /= d , i /= h
+                ]
+         ))
+         where
+            es = fmap snd . M.toList $ esM
+            edgeH = fst . pbound
+            edgeT = snd . pbound
 
 
 warshall :: (Ord a,Show a,Show b ,Ord b) => Graph a b -> Graph a b

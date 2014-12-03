@@ -1,6 +1,6 @@
 {-# LANGUAGE Arrows, TupleSections,OverloadedStrings,NoMonomorphismRestriction #-}
 module Gpx
-  (exec,execKey,execF) where
+  (readHtml,exec,execKey,execF) where
 
 import Query
 import Data.Monoid
@@ -50,6 +50,12 @@ zipIL i l k = zipWith mappend (repeat i)  (fmap (zip l) k)
 zipLL i l k = zipWith mappend i (fmap (zip l) k)
 zipLI i l k = zipWith mappend i (repeat $ zip l k)
 
+getTable :: ArrowXml a => a XmlTree [[String]]
+getTable =  atTag "table"  >>> listA (rows >>> listA cols) where
+        rows = getChildren >>> hasName "tr"
+        cols = atTag "td" />   (( getChildren >>> getText) <+> (hasText ( not .all (`elem` " \t\r\n")) >>>  getText))
+
+
 getPoint = atTag "trkpt" >>>
   proc x -> do
     lat <- getAttrValue "lat"  -< x
@@ -68,6 +74,12 @@ withFields k t l = (l, maybe (error $ "noTable" ) id $  M.lookup t (tableMap k))
 execF = exec [("file",file),("distance",0),("id_shoes",1),("id_person",1),("id_place",1)]
 
 execKey f = exec (fmap (\(k,v)-> (keyValue k , v) ) f)
+
+readHtml file = do
+  let
+      arr = readString [withValidate no,withWarnings yes ,withTrace 1 , withParseHTML yes] file
+        >>> getTable
+  runX arr
 
 exec inputs = do
   let schema = "health"

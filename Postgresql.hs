@@ -27,7 +27,7 @@ import Data.Functor.Compose
 import qualified Database.PostgreSQL.Simple.TypeInfo.Static as TI
 import qualified Data.List as L
 import Data.Vector(Vector)
-import qualified Data.Vector as Vector 
+import qualified Data.Vector as Vector
 import qualified Numeric.Interval as Interval
 import qualified Numeric.Interval.Internal as NI
 import qualified Data.ByteString.Char8 as BS
@@ -128,31 +128,28 @@ defaultType t =
       KOptional i -> Just (SOptional Nothing)
       i -> Nothing
 
+readType t = case t of
+    Primitive i -> readPrim i
+    KOptional i -> opt (readType i)
+    KArray i  -> parseArray (readType i)
+    KInterval i -> inter (readType i)
+  where
+      opt f "" =  Just $ SOptional Nothing
+      opt f i = fmap (SOptional .Just) $ f i
+      parseArray f i =   fmap (SComposite. Vector.fromList) $  allMaybes $ fmap f $ unIntercalate (==',') i
+      inter f = (\(i,j)-> fmap SInterval $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
 
-readType t =
-    case t of
-      Primitive PText -> readText
-      Primitive PDouble ->  readDouble
-      Primitive PInt -> readInt
-      Primitive PTimestamp -> readTimestamp
-      Primitive PInterval -> readInteval
-      Primitive PDate-> readDate
-      Primitive PPosition -> readPosition
-      Primitive PBoolean -> readBoolean
-      KInterval (Primitive PTimestamp) -> inter readTimestamp
-      KOptional (KInterval (Primitive PTimestamp)) -> opt (inter readTimestamp)
-      KArray (Primitive PText) -> parseArray readText
-      KOptional (KArray (Primitive PText)) -> opt (parseArray readText)
-      KOptional (Primitive PInterval) -> opt readInteval
-      KOptional (Primitive PText) -> opt readText
-      KOptional (Primitive PInt)-> opt readInt
-      KOptional (Primitive PDouble) -> opt readDouble
-      KOptional (Primitive PTimestamp) -> opt readTimestamp
-      KOptional (Primitive PDate) -> opt readDate
-      KOptional (Primitive PPosition) -> opt readPosition
-      KOptional (Primitive PBoolean) -> opt readBoolean
-      i -> error ( "Missing type: " <> show t)
-    where
+readPrim t =
+  case t of
+     PText -> readText
+     PDouble ->  readDouble
+     PInt -> readInt
+     PTimestamp -> readTimestamp
+     PInterval -> readInteval
+     PDate-> readDate
+     PPosition -> readPosition
+     PBoolean -> readBoolean
+  where
       readInt = nonEmpty (fmap SNumeric . readMaybe)
       readBoolean = nonEmpty (fmap SBoolean . readMaybe)
       readDouble = nonEmpty (fmap SDouble. readMaybe)
@@ -163,14 +160,10 @@ readType t =
       readInteval =  fmap SPInterval . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
       nonEmpty f ""  = Nothing
       nonEmpty f i  = f i
-      opt f "" =  Just $ SOptional Nothing
-      opt f i = fmap (SOptional .Just) $ f i
-      inter f = (\(i,j)-> fmap SInterval $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
-      -- array f = (\(i,j)-> fmap SComposite $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
-      parseArray f i =   fmap (SComposite. Vector.fromList) $  allMaybes $ fmap f $ unIntercalate (==',') i
 
-allMaybes i = case all isJust i of
-        True -> Just $ catMaybes i
+
+allMaybes i = case F.all isJust i of
+        True -> Just $ fmap fromJust i
         False -> Nothing
 
 
@@ -237,6 +230,7 @@ renderedType key f b = go key
             (KOptional (KArray (Primitive i))) ->  fmap (SOptional . fmap SComposite . getCompose ) $ prim i f b
             (KOptional (KInterval (Primitive i))) -> (SOptional . fmap SInterval . getCompose ) <$> prim i f b
             (Primitive i) ->  fmap unOnly $ prim  i f b
+            i ->  error $ "missing case renderedType: " <> (show i)
 
 renderShowable :: Showable -> String
 renderShowable (SOptional i ) = maybe "" renderShowable i
@@ -364,7 +358,7 @@ fromShowableList foldable = do
     traverse (FR.fieldWith . attrToKey) foldable
 
 withConn action = do
-  conn <- connectPostgreSQL "user=postgres password=queijo dbname=test"
+  conn <- connectPostgreSQL "user=postgres password=queijo dbname=incendio"
   action conn
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item
