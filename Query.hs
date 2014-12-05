@@ -220,6 +220,10 @@ data Filter
 
 instance Show Filter where
   show (Category i ) = intercalate "," $ fmap show $ S.toList i
+  show (RangeFilter i ) =  show i
+  show (And i ) =  show i
+  show (Or i ) =  show i
+
 instance Monoid Filter where
   mempty = Category S.empty
   mappend (Category i ) (Category j ) = Category (S.union i j)
@@ -366,7 +370,7 @@ update conn kv kold (Raw sch tbl pk _ _ _) = execute conn (fromString $ traceSho
     koldPk = fmap (\i-> (i,fromJust $ M.lookup i koldM)) (S.toList pk)
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     setter = " SET " <> T.intercalate "," (fmap equality skv )
-    up = "UPDATE " <> sch <>"."<> tbl <> setter <>  pred
+    up = "update " <> sch <>"."<> tbl <> setter <>  pred
     skv = nubBy (\(i,j) (k,l) -> i == k)  kv
 
 insertPK f conn kva (Raw sch tbl pk  _ _ attr ) = fmap (zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> " RETURNING " <>  T.intercalate "," (keyValue <$> pkList)) (fmap snd kv)
@@ -608,6 +612,24 @@ data TB a
   | Attr a
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
+tbPK (TB1 (KV (PK i _)  _)) = concat $ fmap go i
+  where go (FKT tb) = tbPK tb
+        go (Attr a) = [a]
+
+data Tag = TAttr | TPK
+allKVRec  (TB1 (KV (PK k d) e ))= F.foldr zipPK (KV (PK [] []) []) $ (go TPK (\i -> KV (PK i []) [])  <$> k) <> (go TAttr (\i-> KV (PK [] i) [] ) <$> d) <> ( go TAttr (\i-> KV (PK [] []) i) <$> e)
+  where zipPK (KV (PK i j) k) (KV (PK m n) o) = KV (PK (i <> m) (j <> n)) (k <> o )
+        go  TAttr l (FKT tb) =  l $ F.toList $ allKVRec  tb
+        go  TPK l (FKT tb) =  allKVRec  tb
+        go  _ l (Attr a) = l [a]
+
+
+allPKRec  (TB1 (KV (PK k d) i ))=  F.foldr zipPK (PK [] []) $ (go (flip PK []) <$> k) <> (go (PK []) <$> d)
+  where zipPK (PK i j) (PK m n) = (PK (i <> m) (j <> n))
+        go l (FKT tb) = allPKRec tb
+        go l (Attr a) = l [a]
+
+
 allRec  isOpt invSchema ta@(Raw _ _ k desc fk attr) =
   let
       baseCase = KV (PK (fun k) (fun (S.fromList $ F.toList desc)))  (fun (maybe attr (`S.delete` attr) desc))
@@ -622,8 +644,9 @@ allRec  isOpt invSchema ta@(Raw _ _ k desc fk attr) =
 projectAllRec'
      :: Monad m => Map Text Table ->  QueryT m (TB1 KAttribute)
 projectAllRec' invSchema =  do
-  (schema,table@(Base _ t@(From ta@(Raw _ _ k _ fk  _) _ ) )  ) <- get
+  (schema,table@(Base _ t  )) <- get
   let
+      ta@(Raw _ _ k _ _ _ ) = atBase id table
       table1 = case  M.lookup k schema of
         Just pv -> Base k (fromJust $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
         Nothing -> table
@@ -644,8 +667,9 @@ allAttrsRec  invSchema ta@(Raw _ _ k _ fk  _) =
 projectDescAllRec
      :: Monad m => Map Text Table ->  QueryT m (KV KAttribute)
 projectDescAllRec invSchema =  do
-  (schema,table@(Base _ t@(From ta@(Raw _ _ k _ fk  _) _ ) )  ) <- get
+  (schema,table@(Base _ t)) <- get
   let
+      ta@(Raw _ _ k _ _ _ ) = atBase id table
       table1 = case  M.lookup k schema of
         Just pv -> Base k (fromJust $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
         Nothing -> table
