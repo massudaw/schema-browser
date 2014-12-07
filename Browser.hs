@@ -101,10 +101,12 @@ attrUI'  tAttr plugItens i
       return (sp,liftA2 (,) (fmap (i,) <$> facts tAttr ) (pure (Just (i,SSerial Nothing))))
   | otherwise = do
       l<- UI.span # set text (show i)
-      let tdi = forceDefaultType i <$> tAttr
+
+      let tdi = traceShowId . forceDefaultType i <$> foldrTds justCase plugItens [tAttr]
+          justCase i j@(Just _) = j
+          justCase i Nothing = i
       inputUI <- UI.input # sink UI.value (facts tdi) # set UI.name (T.unpack $ keyValue i) # set UI.id_ (T.unpack $ keyValue i) # set UI.type_ "text"
-      let pkev = foldr1 (unionWith const) [forceDefaultType i  . Just  <$> filterJust (rumors plugItens),UI.valueChange inputUI,rumors tdi]
-          pke = readType (textToPrim <$> keyType i) <$> pkev
+      let pke = foldl1 (unionWith justCase ) [readType (textToPrim <$> keyType i) <$> UI.valueChange inputUI,rumors $ foldrTds justCase plugItens [tAttr]]
       pk <- stepper (defaultType i)  pke
       let pkt = tidings pk pke
           ei (Just a) = Just a
@@ -126,6 +128,11 @@ modifyList box =  (\ ml me -> trace ("liftJust " <> show me <> " _ " <> show ml 
 justError e (Just i) = i
 justError e  _ = error e
 
+
+generateUI (k,v) =
+  case keyType k of
+       Primitive i -> UI.input # set UI.value (forceDefaultType k v)
+       i -> UI.div
 
 fkUI
   :: Connection
@@ -151,19 +158,19 @@ fkUI conn inf oldItems plugItens  oldItems1 (Path ifk table o1 ) = mdo
       l <- UI.span # set text (show $ S.toList o)
       box <- UI.listBox res2 tdi (pure (\v-> UI.span # set text (show $ (\(KV k _)-> snd <$> k) v)))
       let
-          pkt :: Tidings (Maybe (PK Showable))
-          pkt = fmap (\(KV i _) -> fmap (normalize.snd) i) <$> UI.userSelection box
+          pkt :: Tidings (Maybe (PK (Key,Showable)))
+          pkt = fmap (\(KV i _) -> fmap (fmap normalize) i) <$> UI.userSelection box
           ei :: [Key] -> Maybe [Showable] -> Maybe [Showable]
           ei i Nothing = allMaybes $ fmap defaultType i
           ei i d = d
-          olds :: Tidings (Maybe [Showable])
-          olds =  fmap (fmap (normalize . snd) ) <$> lookupFKS (F.toList o) oldItems
-          edited :: Tidings (Maybe [(Showable,Showable)])
-          edited = (\i j-> if (fmap pkKey i) == (fmap normalize <$> ei (S.toList o) j) then Nothing else liftA2 zip (fmap pkKey i) j) <$> pkt <*> olds
+          olds :: Tidings (Maybe [(Key,Showable)])
+          olds =  lookupFKS (F.toList o) oldItems
+          edited :: Tidings (Maybe [((Key,Showable),(Key,Showable))])
+          edited = (\i j-> if (fmap (fmap snd) $ fmap pkKey i) == (fmap normalize <$> ei (S.toList o) (fmap (fmap snd) j)) then Nothing else liftA2 zip (fmap pkKey i) j) <$> pkt <*> olds
           editedListFlag (Just i) = "#" <> L.intercalate "," (fmap renderShowable i)
           editedListFlag Nothing = ""
           fksel = fmap pkKey <$>  facts pkt
-      e <- UI.span # sink text (editedListFlag . fmap (fmap snd) <$> facts edited)
+      e <- UI.span # sink text (editedListFlag . fmap (fmap (snd .snd)) <$> facts edited)
       paint (getElement l) fksel
       chw <- checkedWidget
       (celem,tcrud,evs) <- crudUI conn inf subtable (fmap F.toList <$> UI.userSelection box ) plugItens oldItems1
@@ -176,7 +183,7 @@ fkUI conn inf oldItems plugItens  oldItems1 (Path ifk table o1 ) = mdo
         # sink UI.style (noneShow <$> (facts $ triding chw))
         # set style [("padding-left","10px")]
       fk <- UI.li # set  children [l, getElement box,e,getElement chw,celem]
-      let bres = liftA2 (,) (fmap (zip (S.toList ifk)). fmap (fmap fst) <$> facts edited ) (liftA2 (liftA2 mappend) (fmap (zip (S.toList ifk)) <$> fksel) tcrud)
+      let bres = liftA2 (,) (fmap (fmap fst) <$> facts edited ) fksel -- (liftA2 (liftA2 mappend) fksel tcrud)
       return (fk,bres)
 
 forceDefaultType k (Just i ) = renderShowable i
@@ -260,10 +267,15 @@ editedMod :: Ord a => [a] -> [a] -> [a] ->  Maybe [(a,b)] -> Maybe (KV (a,b))
 editedMod  i j a m=  join $ fmap (\mn-> liftA3 (\ik jk ak -> KV (PK ik jk ) ak) (look mn i) (look mn j) (look mn a)) m
   where look mn k = allMaybes $ fmap (\ki -> fmap (ki,) $  M.lookup ki (M.fromList mn) ) k
 
+data TableModification
+  = TableModification Table (Modification Key Showable)
+  deriving(Eq,Show)
+
 data Modification a b
   = Edit (Maybe [(a,b)]) (Maybe [(a,b)])
   | Insert (Maybe [(a,b)])
   | Delete (Maybe [(a,b)])
+  deriving(Eq,Show)
 
 
 processPanel
@@ -281,14 +293,14 @@ processPanel conn efkattrsB fkattrsB table oldItems = do
       editAction isM kM = do
         let i = catMaybes isM
             k = fromJust kM
-        res <- liftIO $ catch (Right <$> update conn (concat i) k table) (\e -> return $ Left (show $ traceShowId (e :: SqlError) ))
+        res <- liftIO $ catch (Right <$> update conn (concat i) k table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
         let updated = concat $ catMaybes isM
         return $ fmap (const (Edit (fmap (mappend updated) (filter (\(k,_) -> not $ k `elem` (fmap fst updated)) <$> kM) ) kM)) res
       deleteAction k =  do
-        res <- liftIO $ catch (Right <$> delete conn (fromJust k) table) (\e -> return $ Left (show $ traceShowId  (e :: SqlError) ))
+        res <- liftIO $ catch (Right <$> delete conn (fromJust k) table) (\e -> return $ Left (show $ traceShowId  (e :: SomeException) ))
         return $ const (Delete k ) <$> res
       insertAction i = do
-          res <- catch (Right <$> insertPK fromShowableList conn (concat i) table) (\e -> return $ Left (show $ traceShowId (e :: SqlError) ))
+          res <- catch (Right <$> insertPK fromShowableList conn (concat i) table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
           return $ (\v -> Insert $ Just $ (v <> (filter (not . isEmptyShowable . snd) $ filter (not . flip elem (fst <$> v) . fst) (concat i)))) <$> res
 
       evir, evdr,ever :: Event (Modification Key Showable)
@@ -304,9 +316,6 @@ processPanel conn efkattrsB fkattrsB table oldItems = do
   -- end <- UI.div # sink text (show <$> stp)
   return ([insertB,editB,deleteB],[evir,ever,evdr])
 
-isEmptyShowable (SOptional Nothing ) = True
-isEmptyShowable (SSerial Nothing ) = True
-isEmptyShowable i = False
 
 -- Split composite PKs in list of atomic pks
 invertPK :: PK a -> [PK a]
@@ -529,7 +538,7 @@ chooseKey conn  pg inf key = mdo
   (crud,_,evs) <- crudUI conn inf  subtable  ( convertPK <$>  UI.userSelection  itemList)  tdi2 (pure Nothing ) -- UI.userSelection itemList)
   let eres = fmap (addToList  (S.toList key)  (maybeToList $ description subtable ) (F.toList $   allAttrsRec (tableMap inf ) subtable    ) <$> ) evs
   res2 <- accumTds (fmap (fmap (fmap normalize)) <$> vp)   eres
-  resPoll  <- mapM (\i -> pollingUI conn inf i (fmap F.toList <$> res2 ) )   (filter (\(PollingPlugins n tb _ )-> S.isSubsetOf  (snd tb) (attrSet (pkMap inf) (fromJust $ M.lookup key (pkMap inf)))  )   [pollingAndamento inf ])
+  resPoll  <- mapM (\i -> pollingUI conn inf i (fmap F.toList <$> vp ) )   (filter (\(PollingPlugins n tb _ )-> S.isSubsetOf  (snd tb) (attrSet (pkMap inf) (fromJust $ M.lookup key (pkMap inf)))  )   [pollingAndamento inf ])
   polling <- UI.div # set children (fst <$> resPoll)
   insertDiv <- UI.div # set children [crud]
   filterSel <- UI.div # set children [getElement ff,getElement fkbox,getElement range, getElement filterItemBox]
@@ -676,52 +685,67 @@ splitL delim str =
 getRequest ::  String -> MaybeT IO BSL.ByteString
 getRequest = join . C.lift . (`catch` (\e ->  traceShow (e :: IOException) $ return mzero ) ).  fmap return . simpleGetRequest
 
+
 queryAndamento3 conn inf  k  input = do
         b <- UI.button # set UI.text "Submit" -- # sink UI.enabled (maybe False (\i -> not $ elem "aproval_date" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd )i) ) <$> facts input)
         bh <-stepper [] (rumors input)
-        tq <-  mapT (mapM (\inputs-> ( runMaybeT $ do
+        tq <-  mapT (mapM (\inputs-> fmap (snd $ fromJust .L.find ((== "project_description") . keyValue . fst )$ inputs,) <$> (  runMaybeT $ do
                 MaybeT $ return $ if elem "aproval_date" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs ) then Nothing else Just undefined
                 let tableName = "fire_project"
                     addrs ="http://siapi.bombeiros.go.gov.br/consulta/consulta_protocolo.php"
                     translate = [("protocolo" , "protocolo"),("ano","ano")]
                     addrs_a ="http://siapi.bombeiros.go.gov.br/consulta/consulta_andamento.php"
                     translate_a = [("id_bombeiro" , "id")]
-                lkeys <- if not $ elem "id_bombeiro" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs )
+                (lkeys,modB) <- if not $ elem "id_bombeiro" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs )
                    then do
                     url <- MaybeT $ return $ renderUrlM translate addrs  $ filter (not . isEmptyShowable. snd )  <$> Just inputs
                     lq <-  getRequest . traceShowId $ url
                     let
-                      lq2 =  Just . maybe M.empty (uncurry M.singleton . ("id_bombeiro",)) . fmap SNumeric . readMaybe.  fst .  break (=='&') . concat . tail .  splitL ("php?id=")  .traceShowId . T.unpack . decodeLatin1  $  lq
+                      lq2 =  Just . maybe M.empty (uncurry M.singleton . ("id_bombeiro",)) . fmap SNumeric . readMaybe.  fst .  break (=='&') . concat . tail .  splitL ("php?id=")  .T.unpack . decodeLatin1  $  lq
                       lkeys = fmap ( M.toList . M.mapKeys (fromJust . flip M.lookup (keyMap inf) . (tableName,)  ))  $ lq2
-                    C.lift $ update conn (fromJust lkeys) inputs (fromJust $ M.lookup  tableName (tableMap inf) )
-                    return $  lkeys
-                   else do return $ fmap (\i-> [i])   $ L.find ((== "id_bombeiro") .  keyValue . fst) inputs
+                    mod <- C.lift $ updateMod conn (fromJust lkeys) inputs (fromJust $ M.lookup  tableName (tableMap inf) )
+                    return $  (lkeys,mod)
+                   else do return $ (fmap (\i-> [i])   $ L.find ((== "id_bombeiro") .  keyValue . fst) inputs,Nothing)
                 tq <-  getRequest . traceShowId . (renderUrl translate_a addrs_a)  $  lkeys
                 let
                   tq2 =  T.unpack $  decodeLatin1 tq
-                  convertAndamento [da,desc] = [("andamento_date",SDate . Finite . localDay . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.pack desc))]
+                  convertAndamento [da,desc] = [("andamento_date",SDate . Finite . localDay . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  desc))]
                   convertAndamento i = error $ "convertAndamento:  " <> show i
                   tkeys v =  M.mapKeys (fromJust . flip M.lookup (keyMap inf) . ("andamento" :: Text,)  )  v
                   prepareArgs  = fmap ( tkeys . M.fromList . convertAndamento ) .  tailEmpty . concat
                   lookInput = fromJust .L.find ((== "id_project") . keyValue . fst)
-                  insertAndamento :: String -> MaybeT IO [Int64]
+                  insertAndamento :: String -> MaybeT IO [Maybe TableModification]
                   insertAndamento i  =  C.lift $ do
-                      html <- readHtml $ traceShowId i
+                      html <- readHtml $ i
                       let
                           args :: [Map Key Showable]
                           args = fmap ( fmap normalize . uncurry M.insert  (lookInput inputs )) $ prepareArgs html
-
-                      case filter ( maybe False (\(SText t) -> T.isInfixOf "Aprovado" t ) .  M.lookup "andamento_description" . M.mapKeys keyValue )  args of
-                                            [i] -> update conn [(fromJust . flip M.lookup (keyMap inf) $ (tableName,"aproval_date") , fromJust $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] inputs (fromJust $ M.lookup  tableName (tableMap inf) ) >> return ()
-                                            i -> return ()
+                      mod <- case filter ( maybe False (\(SText t) -> T.isInfixOf "Aprovado" t ) .  M.lookup "andamento_description" . M.mapKeys keyValue )  args of
+                          [i] -> updateMod  conn [(fromJust . flip M.lookup (keyMap inf) $ (tableName,"aproval_date") , fromJust $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] inputs (fromJust $ M.lookup  tableName (tableMap inf) )
+                          i -> return Nothing
                       vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) $fromJust $  M.lookup  "andamento" (tableMap inf ))
                       let kk = S.mapMonotonic (fmap normalize) $ S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . F.toList ) vp) :: S.Set (Map Key Showable)
-                      mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) undefined )) $ insert conn  (M.toList kv) (fromJust $ M.lookup  "andamento" (tableMap inf) )) (S.toList $ (S.fromList args ) `S.difference` kk)
+                      adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  (M.toList kv) (fromJust $ M.lookup  "andamento" (tableMap inf) )) (S.toList $ (S.fromList args ) `S.difference` kk)
+                      return $ mod : adds
                 v <- insertAndamento tq2
-                MaybeT $ return (if length v > 0 then Just () else Nothing )))) $ shortCutClick input (UI.click b)
-        e <- UI.div # sink UI.text (fmap show $ facts $ tq  )
+                let mods =catMaybes $  modB : v
+                mapM (C.lift . logTableModification inf conn) mods
+                return mods )))  (tidings bh (facts input <@ (UI.click b)))
+        e <- UI.div # sink UI.text (show . catMaybes <$> facts  tq  )
         body <-UI.div # set children [b,e]
         return (body , pure Nothing)
+
+updateMod conn kv old table = do
+  update conn  kv old table
+  return $ Just $ TableModification table (Edit ( Just kv ) (Just old) )
+
+insertMod conn kv table = do
+  insert conn  kv table
+  return $ Just $ TableModification table (Insert $ Just kv)
+
+logTableModification inf conn (TableModification table i) = do
+  let look k = fromJust $ M.lookup ("modification_table",k) (keyMap inf)
+  insertPK fromShowableList conn [(look "table_name" ,SText $ tableName  table) , (look "modification_data", SText $ T.pack $ show i)] (fromJust $ M.lookup ("modification_table") (tableMap inf))
 
 
 queryAndamento2 conn inf  k  input = do
@@ -906,6 +930,6 @@ main = do
     keys = catMaybes $ fmap (flip M.lookup (keyMap inf) . ("run",)) ["distance","id_shoes","id_person","id_place"]
     pg = Plugins (table,S.fromList (fkey : keys)) execKey
   fkey <- fileKey-}
-  startGUI defaultConfig (setup conn  [pluginAndamentoId inf , pluginBombeiro inf ,pluginCnpjReceita inf ,pluginCEP inf,solicitationPlugin inf,pluginOrcamento inf,pluginProtocolId inf] inf (M.keys baseTables))
+  startGUI defaultConfig (setup conn  [pluginAndamentoId inf , pluginBombeiro inf ,pluginCnpjReceita inf ,pluginCEP inf,{-solicitationPlugin inf,-} pluginOrcamento inf,pluginProtocolId inf] inf (M.keys baseTables))
   print "Finish"
 

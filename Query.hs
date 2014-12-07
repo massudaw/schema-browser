@@ -355,7 +355,8 @@ delete conn kold (Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShowId
   where
     koldM = M.fromList kold
     equality (k,_)= keyValue k <> "="  <> "?"
-    koldPk = fmap (\i-> (i,fromJust $ M.lookup i koldM)) (S.toList pk)
+    memberPK k = S.member (keyValue $ fst k) (S.fromList $ fmap  keyValue $ S.toList  pk)
+    koldPk = filter memberPK kold
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     del = "DELETE FROM " <> sch <>"."<> tbl <>   pred
 
@@ -367,18 +368,29 @@ update conn kv kold (Raw sch tbl pk _ _ _) = execute conn (fromString $ traceSho
   where
     koldM = M.fromList kold
     equality (k,_)= keyValue k <> "="  <> "?"
-    koldPk = fmap (\i-> (i,fromJust $ M.lookup i koldM)) (S.toList pk)
+    memberPK k = S.member (keyValue $ fst k) (S.fromList $ fmap  keyValue $ S.toList  pk)
+    koldPk = filter memberPK kold
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     setter = " SET " <> T.intercalate "," (fmap equality skv )
-    up = "update " <> sch <>"."<> tbl <> setter <>  pred
+    up = "UPDATE " <> sch <>"."<> tbl <> setter <>  pred
     skv = nubBy (\(i,j) (k,l) -> i == k)  kv
 
-insertPK f conn kva (Raw sch tbl pk  _ _ attr ) = fmap (zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> " RETURNING " <>  T.intercalate "," (keyValue <$> pkList)) (fmap snd kv)
-  where pkList = S.toList pk
-        kv = nub $ filter (\(k,_) -> S.member k pk || S.member k attr ) $ filter ( not . isSerial . keyType . fst) kva
+insertPK f conn kva t@(Raw sch tbl pk  _ _ attr ) = fmap (traceShowId . zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> maybe "" (\i -> " RETURNING " <>  T.intercalate "," (keyValue <$> i ) ) pkListM ) (fmap snd $ traceShowId kv)
+  where pkList = S.toList $ S.filter (isSerial . keyType ) $ traceShowId pk
+        pkListM= case pkList of
+                  [] -> Nothing
+                  i -> Just i
+        kv = nub $ filter (\(k,_) -> memberPK k || memberAttr k ) $    traceShowId kva
+        memberPK k = S.member (keyValue k) (S.fromList $ fmap  keyValue $ S.toList $ S.filter (not . isSerial . keyType ) pk)
+        memberAttr k = S.member (keyValue k) (S.fromList $ fmap  keyValue $ S.toList attr)
 
 getKey  (Raw sch tbl pk desc fk attr) k =  M.lookup k table
   where table = M.fromList $ fmap (\i-> (keyValue i, i)) $ S.toList (pk <> attr)
+
+isEmptyShowable (SOptional Nothing ) = True
+isEmptyShowable (SSerial Nothing ) = True
+isEmptyShowable i = False
+
 
 insert conn kva t@(Raw sch tbl pk _ _ attr ) = execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
   where kv = filter (\(k,_) -> S.member k pk || S.member k attr ) $ filter ( not . isSerial . keyType . fst)  kvb

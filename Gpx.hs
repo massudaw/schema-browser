@@ -77,7 +77,7 @@ execKey f = exec (fmap (\(k,v)-> (keyValue k , v) ) f)
 
 readHtml file = do
   let
-      arr = readString [withValidate no,withWarnings yes ,withTrace 1 , withParseHTML yes] file
+      arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
         >>> getTable
   runX arr
 

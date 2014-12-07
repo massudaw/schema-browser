@@ -29,8 +29,8 @@ accumT e ev = do
 foldrTds ::  Applicative  f => (b -> a -> a ) -> f a -> [f b] -> f a
 foldrTds fun  =  foldr (liftA2 fun)
 
-fmapTds ::  Tidings a  -> (b -> a -> a ) -> [Event  b] -> Tidings a
-fmapTds e fun l =   tidings (facts e) $ (\li ii ->  foldr fun li ii) <$> facts e <@> unions  l
+fmapTds ::  Tidings a  -> (a -> a -> a ) -> [Event  a] -> Tidings a
+fmapTds e fun l =   tidings (facts e) $ (\li ii ->  foldr fun li ii) <$> facts e <@> unions  (rumors e: l)
 
 applyTds ::  Tidings a  ->  Event  (a -> a) -> Tidings a
 applyTds e l =   tidings (facts e) $ (flip ($)) <$> facts e <@> unionWith const (const <$> rumors e) l
