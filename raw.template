@@ -1,0 +1,13 @@
+\documentclass[a4paper, oneside,imperial]{article}
+\usepackage[utf8]{inputenc} % set input encoding to utf8
+
+$if(title)$
+\title{$title$}
+$endif$ 
+
+\begin{document}
+
+
+$body$ 
+
+\end{document}

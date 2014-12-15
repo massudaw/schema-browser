@@ -1,0 +1,56 @@
+Implement fully same table multiple joins
+-- Query generator
+-- FK Field
+-- Query Parser 
+-- Query Interpreter 
+
+Extensions
+  o- Bank extract Import
+  oo Bradesco 
+  oo Itau
+
+  -- Per Account Custom Import Rules
+
+  o- Poller for fire_project
+  -- Statefull one per instance pooler
+  oo Query 
+  oo Diff
+  oo Persistence
+
+  oo CEP 
+  oo Input
+  oo Return
+
+  o- CPF
+  oo Pass Input args 
+  -- Need parse Result
+  -- Utopic captcha bypass
+
+  o- Document Generator
+  oo Basic Pandoc Generator
+  -- Need Proper Header and Footer
+
+
+Multiple Schema joins 
+-- Generate Queries with multiple schemas
+-- Join Graphs
+
+
+Implement Proper LEFT JOIN
+oo Left Join ( Need subquery after the join)
+oo Propagating null fields over the join chain
+-- Subquery after leftJoin
+-- Check Maybe (FK Field) support
+
+Implement Absolute attribute name for multiple same table join
+-- Table structure return value for ambigous name results
+
+Pagination
+-- Long Table Pagination
+
+Client Side Filtering
+oo Basic Client Side Text Filtering
+-- Database FullText Filtering 
+-- Paginated Filtering
+
+
