@@ -213,7 +213,7 @@ attrToKey t@(Agg _)  = renderedType (primType t)
 renderedName key = \f b ->
  case F.name f  of
       Just name -> let
-          in case (keyValue key == T.fromStrict (TE.decodeUtf8 name)) of
+          in case (keyValue key == T.fromStrict (TE.decodeUtf8 name) || maybe False (== T.fromStrict (TE.decodeUtf8 name)) (keyAlias key)  ) of
               True ->  renderedType (textToPrim <$> keyType key) f b
               False -> error $ "no match type for " <> BS.unpack name <> " with key " <> show key
 

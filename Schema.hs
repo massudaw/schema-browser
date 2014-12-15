@@ -43,10 +43,10 @@ import qualified Data.Text.Lazy as T
 
 
 createType :: Unique -> (Text,Text,Maybe Text ,Text,Text,Text,Maybe Text,Maybe Text) -> Key
-createType un (t,c,trans,"tsrange",_,n,def,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "timestamp without time zone"))
-createType un (t,c,trans,"ARRAY",i,n,def,p) = (Key   c trans un (nullable n $ KArray $ (Primitive (T.tail i))))
-createType un (t,c,trans,_,"geometry",n,def,p) = (Key   c trans un (nullable n $ Primitive $ fromJust p))
-createType un (t,c,trans,ty,_,n,def,_) =(Key c   trans un (serial def . nullable n $ Primitive ty))
+createType un (t,c,trans,"tsrange",_,n,def,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "timestamp without time zone"))
+createType un (t,c,trans,"ARRAY",i,n,def,p) = (Key   c Nothing trans un (nullable n $ KArray $ (Primitive (T.tail i))))
+createType un (t,c,trans,_,"geometry",n,def,p) = (Key   c Nothing trans un (nullable n $ Primitive $ fromJust p))
+createType un (t,c,trans,ty,_,n,def,_) =(Key c   Nothing trans un (serial def . nullable n $ Primitive ty))
 --createType un v = error $ show v
 
 serial (Just xs ) t = if T.isPrefixOf  "nextval" xs then KSerial t else t

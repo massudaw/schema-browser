@@ -174,8 +174,6 @@ liftJust l (Just j) Nothing  = Just j
 liftJust l Nothing Nothing  = Nothing
 modifyList box =  (\ ml me -> trace ("liftJust " <> show me <> " _ " <> show ml ) $  liftJust (\l e -> F.toList e <> filter (\(i,j)-> not  $ S.member i (S.fromList $ fmap fst (F.toList e))  )  l) me ml ) <$> box
 
-justError e (Just i) = i
-justError e  _ = error e
 
 
 generateUI (k,v) =
@@ -200,7 +198,7 @@ fkUI conn inf oldItems plugItens  oldItems1 (Path ifk table o1 ) = mdo
           o = S.fromList oL
           subtable :: Table
           subtable = fromJust $  M.lookup o1 (pkMap inf )
-          subtableAttrs =  allRec False (tableMap inf) subtable
+          subtableAttrs =  allRec (tableMap inf) subtable
           lookupFKS :: (Functor f ,Show (f (Maybe (Key,Showable))),F.Foldable f) => f Key -> Tidings (Maybe [(Key,Showable)]) -> Tidings (Maybe (f (Key,Showable)))
           lookupFKS ks initialMap = allMaybes <$> (\m -> fmap (\ki->  join $ fmap (fmap (ki,) . M.lookup ki) m) ks) <$> (fmap M.fromList <$> initialMap )
           tdi :: Tidings (Maybe (KV  (Key,Showable)))
@@ -224,7 +222,7 @@ fkUI conn inf oldItems plugItens  oldItems1 (Path ifk table o1 ) = mdo
       paint (getElement l) fksel
       chw <- checkedWidget
       (celem,tcrud,evs) <- crudUI conn inf subtable (fmap F.toList <$> UI.userSelection box ) plugItens oldItems1
-      let eres = fmap (addToList  ( ( allKVRec $ allRec False (tableMap inf ) subtable )) <$> ) evs
+      let eres = fmap (addToList  ( ( allKVRec $ allRec (tableMap inf ) subtable )) <$> ) evs
       res2  <-  accumTds (pure $ fmap (fmap (fmap normalize)) res) eres
       -- let res2 = foldTds (pure $ fmap (fmap (fmap normalize)) res) eres
       -- TODO: Implement recursive selection after insertion
@@ -570,7 +568,7 @@ chooseKey conn  pg inf key = mdo
 
   let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
 
-  let sortSet = F.toList . allRec False (tableMap inf) . fromJust . flip M.lookup (pkMap inf) <$> bBset
+  let sortSet = F.toList . allRec (tableMap inf) . fromJust . flip M.lookup (pkMap inf) <$> bBset
   sortList  <- UI.listBox sortSet ((safeHead . F.toList) <$> sortSet) (pure (line . show  ))
   asc <- checkedWidget
   let listManip :: (Show (f (Key,Showable)), F.Foldable f) => String ->[f (Key,Showable)] -> Maybe Key -> Bool -> [f (Key,Showable)]
@@ -615,7 +613,7 @@ chooseKey conn  pg inf key = mdo
         i -> i
      subtable = fromJust $ M.lookup key (pkMap inf)
   (crud,_,evs) <- crudUI conn inf  subtable  ( convertPK <$>  UI.userSelection  itemList)  tdi2 (pure Nothing ) -- UI.userSelection itemList)
-  let eres = fmap (addToList  (allKVRec $ allRec False (tableMap inf ) subtable )  <$> ) evs
+  let eres = fmap (addToList  (allKVRec $ allRec (tableMap inf ) subtable )  <$> ) evs
   res2 <- accumTds (fmap (fmap (fmap normalize)) <$> vp)   eres
   insertDiv <- UI.div # set children [crud]
   filterSel <- UI.div # set children [getElement ff,getElement fkbox,getElement range, getElement filterItemBox]
@@ -885,7 +883,7 @@ queryCnpjReceita _ _ _ inputs =
 
 
 
-keySetToMap ks = M.fromList $  fmap (\(Key k _ _ t)-> (toStrict $ encodeUtf8 k,t))  (F.toList ks)
+keySetToMap ks = M.fromList $  fmap (\(Key k _ _ _ t)-> (toStrict $ encodeUtf8 k,t))  (F.toList ks)
 
 projectKey
   :: Connection
@@ -912,9 +910,6 @@ projectKey'
 projectKey' conn inf q  = (\(j,(h,i)) -> fmap (fmap (zipWithTF (,) j)) . queryWith_ (fromShowableList j) conn . traceShowId . buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
 
 
-
-zipWithTF g t f = snd (mapAccumL map_one (F.toList f) t)
-  where map_one (x:xs) y = (xs, g y x)
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item
   where item = fmap (\n@(Raw _ t k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
