@@ -67,7 +67,7 @@ type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table
 type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 
 foreignKeys :: Query
-foreignKeys = "select clc.relname,cl.relname,array_agg(att2.attname),   array_agg(att.attname) from    (select  unnest(con1.conkey) as parent, unnest(con1.confkey) as child, con1.confrelid,con1.conrelid  from   pg_class cl     join pg_namespace ns on cl.relnamespace = ns.oid   join pg_constraint con1 on con1.conrelid = cl.oid where   ns.nspname = ? and con1.contype = 'f' ) con  join pg_attribute att on  att.attrelid = con.confrelid and att.attnum = con.child  join pg_class cl on  cl.oid = con.confrelid   join pg_class clc on  clc.oid = con.conrelid   join pg_attribute att2 on  att2.attrelid = con.conrelid and att2.attnum = con.parent   group by clc.relname, cl.relname"
+foreignKeys = "select clc.relname,cl.relname,array_agg(att2.attname),   array_agg(att.attname) from    (select  con1.conname,unnest(con1.conkey) as parent, unnest(con1.confkey) as child, con1.confrelid,con1.conrelid  from   pg_class cl     join pg_namespace ns on cl.relnamespace = ns.oid   join pg_constraint con1 on con1.conrelid = cl.oid where   ns.nspname = ? and con1.contype = 'f' ) con  join pg_attribute att on  att.attrelid = con.confrelid and att.attnum = con.child  join pg_class cl on  cl.oid = con.confrelid   join pg_class clc on  clc.oid = con.conrelid   join pg_attribute att2 on  att2.attrelid = con.conrelid and att2.attnum = con.parent   group by clc.relname, cl.relname,con.conname"
 
 keyTables :: Connection -> Text -> IO InformationSchema
 keyTables conn schema = do
@@ -155,6 +155,15 @@ schemaKeys conn schema (keyTable,map,_) = do
                     ((tpk,pk),pkl)<- pks,
                     tfk == tpk]
        return rels
+
+projectAllTable
+  :: Traversable t => Map (Set Key) Table
+     -> HashSchema Key (SqlOperation Table)
+     -> QueryT Identity (t KAttribute)
+     -> Table
+     -> (t KAttribute, (HashSchema Key (SqlOperation Table), Table))
+projectAllTable baseTables hashGraph m  table@(Raw _ _ bkey _ _ _)  = runQuery  m (hashGraph,Base bkey $ From table  bkey)
+
 
 projectAllKeys
   :: Traversable t => Map (Set Key) Table

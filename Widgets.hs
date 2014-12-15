@@ -1,4 +1,4 @@
-{-# LANGUAGE NoMonomorphismRestriction,RecursiveDo #-} module Widgets where
+{-# LANGUAGE RankNTypes,RecordWildCards,DeriveFunctor,NoMonomorphismRestriction,RecursiveDo #-} module Widgets where
 
 
 import Control.Monad
@@ -7,6 +7,7 @@ import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (delete)
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 import Data.Map (Map)
 import Data.Traversable(traverse)
 import Data.Monoid
@@ -17,7 +18,7 @@ instance Widget (TrivialWidget  a) where
     getElement (TrivialWidget t e) = e
 
 data TrivialWidget a =
-    TrivialWidget { triding :: (Tidings a) , trielem ::  Element}
+    TrivialWidget { triding :: (Tidings a) , trielem ::  Element} deriving(Functor)
 
 
 -- Generate a accum the behaviour and generate the ahead of promised event
@@ -99,6 +100,9 @@ insdel binsK =do
 noneShow True = [("display","block")]
 noneShow False = [("display","none")]
 
+noneShowSpan True = [("display","inline")]
+noneShowSpan False = [("display","none")]
+
 -- Background Style green/red
 greenRed True = [("background-color","green")]
 greenRed False = [("background-color","red")]
@@ -146,12 +150,17 @@ buttonSet ks h =do
 items :: WriteAttr Element [UI Element]
 items = mkWriteAttr $ \i x -> void $ return x # set children [] #+ i
 
+appendItems :: WriteAttr Element [UI Element]
+appendItems = mkWriteAttr $ \i x -> void $ return x  #+ i
+
 -- Simple checkbox
 checkedWidget :: UI (TrivialWidget Bool)
 checkedWidget = do
   i <- UI.input # set UI.type_ "checkbox"
   let e = UI.checkedChange i
   b <- stepper False e
-  return $ TrivialWidget  (tidings b e) i
+  dv <- UI.span # set children [i] # set UI.style [("margin","2px")]
+  return $ TrivialWidget  (tidings b e) dv
+
 
 

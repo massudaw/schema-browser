@@ -124,19 +124,20 @@ instance TF.ToField Showable where
   toField (SBoolean t) = TF.toField t
 
 defaultType t =
-    case keyType t of
+    case t of
       KOptional i -> Just (SOptional Nothing)
       i -> Nothing
 
 readType t = case t of
     Primitive i -> readPrim i
     KOptional i -> opt (readType i)
+    KSerial i -> opt (readType i)
     KArray i  -> parseArray (readType i)
     KInterval i -> inter (readType i)
   where
       opt f "" =  Just $ SOptional Nothing
       opt f i = fmap (SOptional .Just) $ f i
-      parseArray f i =   fmap (SComposite. Vector.fromList) $  allMaybes $ fmap f $ unIntercalate (==',') i
+      parseArray f i =   fmap (SComposite. Vector.fromList) $  allMaybes $ fmap f $ unIntercalate (=='\n') i
       inter f = (\(i,j)-> fmap SInterval $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
 
 readPrim t =
@@ -225,6 +226,8 @@ renderedType key f b = go key
           go t = case t of
             (KInterval (Primitive i)) -> SInterval <$> prim i f b
             (KOptional (Primitive i)) -> SOptional <$> prim i f b
+            (KOptional (KSerial (Primitive i))) -> SOptional <$> prim i f b
+            (KSerial (KOptional (Primitive i))) -> SOptional <$> prim i f b
             (KSerial (Primitive i)) -> SSerial <$> prim i f b
             (KArray (Primitive i)) -> SComposite <$> prim i f b
             (KOptional (KArray (Primitive i))) ->  fmap (SOptional . fmap SComposite . getCompose ) $ prim i f b
@@ -236,6 +239,7 @@ renderShowable :: Showable -> String
 renderShowable (SOptional i ) = maybe "" renderShowable i
 renderShowable (SSerial i ) = maybe "" renderShowable i
 renderShowable (SInterval i)  = renderShowable (Interval.inf i) <> "," <> renderShowable (Interval.sup i)
+renderShowable (SComposite i)  = unlines $ F.toList $ fmap renderShowable i
 renderShowable i = show i
 
 
