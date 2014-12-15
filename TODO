@@ -22,7 +22,7 @@ Extensions
   oo Return
 
   o- CPF
-  oo Pass Input args 
+  oo Pass Input args
   -- Need parse Result
   -- Utopic captcha bypass
 
@@ -30,8 +30,11 @@ Extensions
   oo Basic Pandoc Generator
   -- Need Proper Header and Footer
 
+  -- Import WhatsApp 
+  -- Import log messages
+  -- Process log with ibm whatson
 
-Multiple Schema joins 
+Multiple Schema joins
 -- Generate Queries with multiple schemas
 -- Join Graphs
 
@@ -43,7 +46,9 @@ oo Propagating null fields over the join chain
 -- Check Maybe (FK Field) support
 
 Implement Absolute attribute name for multiple same table join
--- Table structure return value for ambigous name results
+oo create alias for globalname (name size limit)
+oo Table structure return value for ambigous name results
+--  index application maps with globalname instead of key
 
 Pagination
 -- Long Table Pagination
@@ -53,4 +58,10 @@ oo Basic Client Side Text Filtering
 -- Database FullText Filtering 
 -- Paginated Filtering
 
+Aggregation
+oo Client Side aggregation
+-- Model affine values
+-- Aggregation tables
+-- Database aggregation
+-- Query Generation Aggregation
 
