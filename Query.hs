@@ -353,7 +353,7 @@ splitJoins j = j
 
 aliasJoin b@(Base k1 p) =   zipWith (\i (j,l)-> (j,(i,l))) (T.pack . ("v" <> ). show <$> [0..]) aliasMap
   where
-    aliasMap =  fmap (\i -> (aliasedKey $ (\(p,(t,k))-> (p,k))i,i)) attrs
+    aliasMap =  fmap (\i -> ( (\(p,(t,k))-> (p,k))i,i)) attrs
     attrs = {-filter (not . (`S.member` (S.fromList  $ fmap (keyValue.snd) jattrs) ). keyValue  . snd . snd )  $ -} S.toList $ allAttrs' b
     jattrs =  nubBy (\ i j-> keyValue (snd i) == keyValue (snd j)) $ fmap (\(b,(k,l))->(b,k)) $ S.toList $ joinKeys p
 
@@ -495,8 +495,8 @@ joinPath (PathOption i p j ) m =  joinPath ( head $ S.toList p ) m
 addJoin tnew f p = case mapPath tnew  f p of
             -- Add new case
             Left accnew -> case any (isKOptional . keyType  ) (fst . snd <$> S.toList accnew ) of
-                             True ->  LeftJoin tnew (S.mapMonotonic fst f) accnew p
-                             False -> Join tnew (S.mapMonotonic fst f) accnew p
+                             True ->  LeftJoin tnew (S.map fst f) accnew p
+                             False -> Join tnew (S.map fst f) accnew p
             -- Just update with new joins
             Right i -> i
     where
@@ -507,20 +507,20 @@ addJoin tnew f p = case mapPath tnew  f p of
         --mapPath :: (Show a,Show b,Ord b,Ord a) => a -> Set b -> JoinPath b a -> Either (Set (a,b)) (JoinPath b a)
         mapPath tnew f (From t   s ) =  if tablesName tnew `S.isSubsetOf`  tablesName t
                 then  (Right $ From t  snew )
-                else  (Left $ S.mapMonotonic (t,) $  filterFst t f)
-            where snew =  s `S.union` (S.mapMonotonic snd f)
+                else  (Left $ S.map (t,) $  filterFst t f)
+            where snew =  s `S.union` (S.map snd f)
         mapPath tnew f (Join t  s clause p ) = res
             where  res = case mapPath tnew  f p  of
-                    Right pnew  -> Right $ Join t s (clause `S.union` (S.mapMonotonic (tnew,) $  filterFst t f)) pnew
+                    Right pnew  -> Right $ Join t s (clause `S.union` (S.map (tnew,) $  filterFst t f)) pnew
                     Left accnew -> if tablesName tnew `S.isSubsetOf`  tablesName t
-                        then Right $ Join t  (s `S.union` S.mapMonotonic snd f)  (clause `S.union` accnew ) p
-                        else Left $ (S.mapMonotonic (t,) $ filterFst t  f)  `S.union` accnew
+                        then Right $ Join t  (s `S.union` S.map snd f)  (clause `S.union` accnew ) p
+                        else Left $ (S.map (t,) $ filterFst t  f)  `S.union` accnew
         mapPath tnew f (LeftJoin t  s clause p ) = res
             where  res = case mapPath tnew  f p  of
-                    Right pnew  -> Right $ LeftJoin t s (clause `S.union` (S.mapMonotonic (tnew,) $  filterLeftFst t f)) pnew
+                    Right pnew  -> Right $ LeftJoin t s (clause `S.union` (S.map (tnew,) $  filterLeftFst t f)) pnew
                     Left accnew -> if tablesName tnew `S.isSubsetOf`  tablesName t
-                        then Right $ LeftJoin t  (s `S.union` S.mapMonotonic snd f)  (clause `S.union` accnew) p
-                        else Left $ (S.mapMonotonic (t,) $ filterLeftFst t  f)  `S.union` accnew
+                        then Right $ LeftJoin t  (s `S.union` S.map snd f)  (clause `S.union` accnew) p
+                        else Left $ (S.map (t,) $ filterLeftFst t  f)  `S.union` accnew
 
 
 
@@ -727,7 +727,7 @@ allRecBase  isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
             where isOptional = any (isKOptional . keyType . fst) (F.toList kv) || isOpt
                   bindMap = M.fromList $ fmap swap kv
                   aliasKeyValue k
-                     =  (PathCons $ S.mapMonotonic (,p) k)
+                     =  (PathCons $ S.map (,p) k)
                   substBind k = case M.lookup k bindMap of
                                     Just i -> i
                                     Nothing -> k
@@ -748,8 +748,8 @@ projectAllRec' invSchema =  do
         Just pv -> Base k $ splitJoins  (fromJust $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
         Nothing -> table
       attrs =  Metric . alterName <$> (allAliasedRec invSchema ta)
-      aliasMap =  M.fromList $ aliasJoin table1
-      alterName ak@(p,Key k al a b c ) = (Key k (Just $ fst $justError "lookupAlias" $ M.lookup (aliasedKey ak) aliasMap ) a b c )
+      aliasMap =   fmap fst $ M.fromList $ aliasJoin table1
+      alterName ak@(p,Key k al a b c ) = (Key k (Just $ justError ("lookupAlias "  <> show ak <> " " <> show aliasMap )$ M.lookup ak aliasMap ) a b c )
   put (schema,Limit (Project (F.toList attrs ) table1 ) 500)
   return $ trace ("projectDescAllRec: " <> show attrs ) attrs
 
@@ -790,7 +790,7 @@ projectTableAttrs r@(Raw _ _ pk desc _ _) =  do
   let
       kv = Metric . alterName . (PathRoot, ) <$> getTableKV r
       aliasMap =  M.fromList $ aliasJoin table
-      alterName ak@(p,Key k al a b c ) = (Key k (Just $ fst $justError "lookupAlias" $ M.lookup (aliasedKey ak) aliasMap ) a b c )
+      alterName ak@(p,Key k al a b c ) = (Key k (Just $ fst $justError "lookupAlias" $ M.lookup ak aliasMap ) a b c )
   put (schema,Limit (Project (F.toList kv)  table) 500)
   return $ trace ("projectTableAttrs : " <> show  kv )  kv
 
@@ -833,41 +833,43 @@ data AliasPath a
     deriving(Show,Eq,Ord,Foldable)
 
 allAttrs' :: Table -> Set (AliasPath Key,(Table,Key))
-allAttrs' t@(Raw _ _ pk _ fk p) = S.mapMonotonic ((PathRoot,) . (t,)) $ S.union pk p
+allAttrs' t@(Raw _ _ pk _ fk p) = S.map ((PathRoot,) . (t,)) $ S.union pk p
 allAttrs' (Limit p _ ) = allAttrs' p
 allAttrs' (Filtered _ p) = allAttrs' p
 allAttrs' (Base _ p) =  snd $  from allAttrs' p
-  where from f (From t pk ) = (sm1,ft)
+  where from f (From t pk ) = traceShow ("from " <> show t <> " " <> show pk <> " " <> show sm1 ) (sm1,ft)
           where ft = f t
-                sm1 =  foldr (\i m -> M.insert (snd $ snd i) PathRoot m ) M.empty (S.toList ft)
-        from f (SplitJoin _ t pk rel p) =  (sm , (foldr (<>) S.empty $ fmap (\(n,_) -> S.mapMonotonic (\(_,(ta,k))-> (pth $ S.singleton n,(alterTableName (<> (keyValue n) ) ta,k))) (f t) ) rel )  <> sp)
+                sm1 =  foldr (\i m -> M.insert (snd $ snd i) PathRoot m ) M.empty (S.toList ft) :: Map Key (AliasPath Key)
+        from f (SplitJoin _ t pk rel p) =  (sm , (foldr (<>) S.empty $ fmap (\(n,_) -> S.map (\(_,(ta,k))-> (pth $ S.singleton n,(alterTableName (<> (keyValue n) ) ta,k))) (f t) ) rel )  <> sp)
           where
                 (sm,sp) = from f p
-                -- pth1 = fmap (\(n,_) -> S.mapMonotonic (\(_,(ta,k))-> ([ pth $ S.singleton n],(alterTableName (<> (keyValue n) ) ta,k))) (f t) ) rel
-                pth n = PathCons (S.mapMonotonic (\nk -> (nk,fromJust $ M.lookup nk sm) )n )
+                -- pth1 = fmap (\(n,_) -> S.map (\(_,(ta,k))-> ([ pth $ S.singleton n],(alterTableName (<> (keyValue n) ) ta,k))) (f t) ) rel
+                pth n = PathCons (S.map (\nk -> (nk,(justError "allAttrs' pathSplit")$ M.lookup nk sm) )n )
                 ft = f t
-        from f (LeftJoin t pk r p) = (sm1,S.mapMonotonic (\(_,(ta,k))-> (pth ,(ta,k))) ft  <>   sp)
-          where n = S.mapMonotonic fromJust $ S.filter isJust $ S.mapMonotonic (\i -> M.lookup (i)  ( M.fromList $ fmap snd $ S.toList r) ) pk
+        from f (LeftJoin t _ r p) = (sm1,S.map (\(_,(ta,k))-> (pth ,(ta,k))) ft  <>   sp)
+          where n = S.map (justError "allAttrs' filterSet") $ S.filter isJust $ S.map (\i -> M.lookup (i)  ( M.fromList $ fmap (swap.snd) $ S.toList r) ) pk
                 (sm,sp) = from f p
                 sm1 =  foldr (\i m -> M.insert (snd $ snd i) pth  m ) sm (S.toList ft)
-                pth = PathCons (S.mapMonotonic (\nk -> (nk,fromJust (M.lookup nk sm)) ) pk )
+                pth = PathCons (S.map (\nk -> (nk,(justError "allAttrs' pathLeft") (M.lookup nk sm)) ) n )
                 ft = f t
-        from f (Join t pk r p) = (sm1,S.mapMonotonic (\(_,(ta,k))-> (pth ,(ta,k))) ft  <>   sp)
-          where n = S.mapMonotonic fromJust $ S.filter isJust $ S.mapMonotonic (\i -> M.lookup (i)  ( M.fromList $ fmap snd $ S.toList r) ) pk
-                (sm,sp) = from f p
+                pk = atBase (\(Raw _ _ p _ _ _) -> p) t :: Set Key
+        from f (Join t _  r p) = traceShow ("relation " <> show pk <> " " <> show t <>  " " <> show r <> " " <>  show sm1 ) (sm1,S.map (\(_,(ta,k))-> (pth ,(ta,k))) ft  <>   sp)
+          where n = S.map (justError "allAttrs' filterSet")$ S.filter isJust $ S.map (\i -> M.lookup i  ( M.fromList $ fmap (swap.snd) $ S.toList $  r) ) pk
+                (sm,sp) =  from f p
                 sm1 =  foldr (\i m -> M.insert (snd $ snd i) pth  m ) sm (S.toList ft)
-                pth = PathCons (S.mapMonotonic (\nk -> (nk,fromJust (M.lookup nk sm)) ) pk )
+                pth = PathCons (S.map(\nk -> (nk,(justError "allAttrs' pathJoin") (M.lookup nk sm)) ) n )
                 ft = f t
+                pk = atBase (\(Raw _ _ p _ _ _) -> p) t :: Set Key
 
 
 
 
 allAttrs :: Table -> Set KAttribute
-allAttrs t@(Raw _ _ pk _ fk p) = S.mapMonotonic (Metric) $ S.union pk p
+allAttrs t@(Raw _ _ pk _ fk p) = S.map(Metric) $ S.union pk p
 allAttrs (Limit p _ ) = allAttrs p
 allAttrs (Filtered _ p) = allAttrs p
 allAttrs (Project a p) = S.fromList $ F.toList a
-allAttrs (Reduce g r p) = S.mapMonotonic Metric g <> S.mapMonotonic Agg r
+allAttrs (Reduce g r p) = S.map Metric g <> S.map Agg r
 allAttrs (Base _ p) = F.foldMap allAttrs p
 
 
@@ -881,10 +883,10 @@ allKeys (Reduce _ _ p) = allKeys p
 allKeys (Base _ p) = go p
   where go (From t _) = allKeys t
         go (Join t _ r p )
-          | any (\(Key _ _ _ _ k )-> isKOptional k ) (fst . snd <$> S.toList r)  = ( S.mapMonotonic (\case {ki@(Key _ _ _ _ (KOptional _) )-> ki ; (Key i a j l k)-> (Key i a j l (KOptional k)) }) (allKeys t )) <> go p
+          | any (\(Key _ _ _ _ k )-> isKOptional k ) (fst . snd <$> S.toList r)  = ( S.map (\case {ki@(Key _ _ _ _ (KOptional _) )-> ki ; (Key i a j l k)-> (Key i a j l (KOptional k)) }) (allKeys t )) <> go p
           | otherwise = allKeys t <> go p
         go (LeftJoin t _ r p )
-          | any (\(Key _ _ _ _ k )-> isKOptional k ) (fst . snd <$> S.toList r)  = (S.mapMonotonic (\case {ki@(Key _ _ _ _ (KOptional _) )-> ki ; (Key i a j l k)-> (Key i a j l (KOptional k)) }) (allKeys t )) <> go p
+          | any (\(Key _ _ _ _ k )-> isKOptional k ) (fst . snd <$> S.toList r)  = (S.map (\case {ki@(Key _ _ _ _ (KOptional _) )-> ki ; (Key i a j l k)-> (Key i a j l (KOptional k)) }) (allKeys t )) <> go p
           | otherwise = allKeys t <> go p
 
 
