@@ -57,6 +57,7 @@ import System.IO.Unsafe
 import Debug.Trace
 import qualified Data.Foldable as F
 import qualified Data.Text.Lazy as T
+import qualified Data.Text.Lazy.IO as T
 import Data.ByteString.Lazy(toStrict)
 import Data.Text.Lazy.Encoding
 import qualified Data.Text.Encoding as TE
@@ -93,7 +94,7 @@ setup w = void $ do
   getBody w #+ [element chooserDiv]
   onEvent evDB $ (\(conn,inf@(_,baseTables,_,schema,invSchema,graphP))-> do
     let k = M.keys baseTables
-    let pg = catMaybes [pluginBradescoCsv inf,pluginItauTxt inf ,pluginAndamentoId inf , pluginBombeiro inf ,pluginCnpjReceita inf ,pluginCEP inf,{-solicitationPlugin inf,-} pluginOrcamento inf]
+    let pg = catMaybes [pluginWapp inf ,pluginBradescoCsv inf,pluginItauTxt inf ,pluginAndamentoId inf , pluginBombeiro inf ,pluginCnpjReceita inf ,pluginCEP inf,{-solicitationPlugin inf,-} pluginOrcamento inf]
         poll = catMaybes [pollingAndamento inf ]
     span <- chooserKey  conn pg inf k
     poll <- poller conn poll inf
@@ -655,7 +656,10 @@ pluginCEP = plug "CEP Correios" queryCEP2 "owner" ["id_owner"]
 pluginAndamentoId = plug "Andamento" queryAndamento2 "fire_project" ["id_bombeiro"]
 
 pluginItauTxt = plug  "Extrato Itau" itauExtractTxt "account" ["id_account"]
+
 pluginBradescoCsv = plug  "Extrato Bradesco" bradescoExtractTxt "account" ["id_account"]
+
+pluginWapp = plug  "Import Conversation" wappImport "chat" ["chat_instant"]
 
 pollingAndamento = poll "Andamento Poll" 60 queryAndamento3 "fire_project" ["id_bombeiro"]
 
@@ -840,7 +844,31 @@ itauExtractTxt  conn  inf  _ inputs = do
     out <- UI.div # sink UI.text outStp
     (,pure Nothing) <$> UI.div # set children [pathInput,b,out]
 
+buildList' i j = foldr (liftA2 (:)) i j
+        -- where buildList = foldr (liftA2 (:))  (pure [])
+fkattrsB inputs fks = buildList'   inputs fks
 
+wappImport conn inf _ _ = do
+  let chat@(Raw _ _ pk desc ifk attrs) = lookTable inf "chat"
+  pathInput <- UI.input -- # set UI.type_ "file"
+  b <- UI.button # set UI.text "Import"
+  bhInp <- stepper "" (UI.valueChange pathInput)
+  v <- mapM (fkUI conn inf (pure Nothing) (pure Nothing) (pure Nothing) ) $ S.toList ifk
+  let
+      ninputs = allMaybes <$> (fkattrsB (pure mempty) (fmap snd.snd <$> v))
+  output <- UI.div # set children (fst <$> v)
+  let process (Just inp) path = do
+        file <-  liftIO $ T.readFile "testwapp.txt"
+        let result =  fmap  parse $ filter (\(i,xs) -> isJust $ strptime "%d de %b %R" (T.unpack i)) $   T.breakOn ("-") <$> T.split (=='\n') file
+            parse (d,t) = [STimestamp $ Finite $ fst $ fromJust $ strptime "%d de %b %R %Y" (T.unpack d <> " 2014")] <> (SText   <$> [T.drop 2 p, T.drop 2 c])
+              where (p,c) =  T.breakOn (":") t
+        return result
+      process (Just inp) path = do return []
+      j = unsafeMapIO id $ process  <$> ninputs <*> bhInp <@ UI.click b
+  outStp <- stepper "" (fmap show $ j)
+  out <- UI.div # sink UI.text outStp
+  inp <- UI.div # sink UI.text (show <$> ninputs)
+  (,pure Nothing) <$> UI.div # set children [output,pathInput,b,out,inp]
 
 queryAndamento2 conn inf  k  input = do
         b <- UI.button # set UI.text "Submit"  # sink UI.enabled (maybe False (\i -> not $ elem "aproval_date" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd )i) ) <$> facts input)
