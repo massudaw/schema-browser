@@ -728,9 +728,13 @@ splitL delim str =
 getRequest ::  String -> MaybeT IO BSL.ByteString
 getRequest = join . C.lift . (`catch` (\e ->  traceShow (e :: IOException) $ return mzero ) ).  fmap return . simpleGetRequest
 
+lookTable inf t = justError ("no table: " <> T.unpack t) $ M.lookup t (tableMap inf)
+
 queryAndamento4 conn inf k inputs = fmap (snd $ fromJust .L.find ((== "project_description") . keyValue . fst )$ inputs,) <$> (  runMaybeT $ do
                 MaybeT $ return $ if elem "aproval_date" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs ) then Nothing else Just undefined
                 let tableName = "fire_project"
+                    fire_project = lookTable inf "fire_project"
+                    andamento = lookTable inf "andamento"
                     addrs ="http://siapi.bombeiros.go.gov.br/consulta/consulta_protocolo.php"
                     translate = [("protocolo" , "protocolo"),("ano","ano")]
                 (lkeys,modB) <- if not $ elem "id_bombeiro" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs )
@@ -751,7 +755,7 @@ queryAndamento4 conn inf k inputs = fmap (snd $ fromJust .L.find ((== "project_d
                   tq2 =  T.unpack $  decodeLatin1 tq
                   convertAndamento [da,desc] = [("andamento_date",SDate . Finite . localDay . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  desc))]
                   convertAndamento i = error $ "convertAndamento:  " <> show i
-                  tkeys v =  M.mapKeys (fromJust . flip M.lookup (keyMap inf) . ("andamento" :: Text,)  )  v
+                  tkeys v =  M.mapKeys (justError "attr table andamento" . flip M.lookup (keyMap inf) . ("andamento" :: Text,)  )  v
                   prepareArgs  = fmap ( tkeys . M.fromList . convertAndamento ) .  tailEmpty . concat
                   lookInput = justError "could not find id_project" .L.find ((== "id_project") . keyValue . fst)
                   insertAndamento :: String -> MaybeT IO [Maybe (TableModification Showable)]
@@ -761,11 +765,11 @@ queryAndamento4 conn inf k inputs = fmap (snd $ fromJust .L.find ((== "project_d
                           args :: [Map Key Showable]
                           args = fmap (uncurry M.insert  (lookInput inputs )) $ prepareArgs html
                       mod <- case filter ( maybe False (\(SText t) -> T.isInfixOf "Aprovado" t ) .  M.lookup "andamento_description" . M.mapKeys keyValue )  args of
-                          [i] -> updateMod  conn [(justError "could not lookup approval_date " . flip M.lookup (keyMap inf) $ (tableName,"aproval_date") , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] inputs (fromJust $ M.lookup  tableName (tableMap inf) )
+                          [i] -> updateMod  conn [(justError "could not lookup approval_date " . flip M.lookup (keyMap inf) $ (tableName,"aproval_date") , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] inputs fire_project
                           i -> return Nothing
-                      vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) $fromJust $  M.lookup  "andamento" (tableMap inf ))
+                      vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) andamento )
                       let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . F.toList ) vp) :: S.Set (Map Key Showable)
-                      adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  (M.toList kv) (fromJust $ M.lookup  "andamento" (tableMap inf) )) (S.toList $ (S.fromList args ) `S.difference`  kk)
+                      adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  (M.toList kv) (andamento )) (S.toList $ (S.fromList args ) `S.difference`  kk)
                       return $ mod : adds
                 v <- insertAndamento tq2
                 let mods =catMaybes $  modB : v
