@@ -693,37 +693,43 @@ recursePath invSchema (Path i (FKJoinTable w ks t) e)  = Path i (FKJoinTable bac
 
 recursePaths invSchema (Raw _ _ _ _ fk _ )  = concat $ recursePath invSchema <$> S.toList fk
 
-newtype TB1 a = TB1 (KV (TB a))  deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
+newtype TB1 a = TB1 {unTB1 :: (KV (TB a)) }deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
 data TB a
-  = FKT {-[a]-} (TB1 a)
+  = FKT [a] (TB1 a)
   | Attr a
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
 tbPK (TB1 (KV (PK i _)  _)) = concat $ fmap go i
-  where go (FKT tb) = tbPK tb
+  where go (FKT _ tb) = tbPK tb
         go (Attr a) = [a]
 
 data Tag = TAttr | TPK
 allKVRec  (TB1 (KV (PK k d) e ))= F.foldr zipPK (KV (PK [] []) []) $ (go TPK (\i -> KV (PK i []) [])  <$> k) <> (go TAttr (\i-> KV (PK [] i) [] ) <$> d) <> ( go TAttr (\i-> KV (PK [] []) i) <$> e)
   where zipPK (KV (PK i j) k) (KV (PK m n) o) = KV (PK (i <> m) (j <> n)) (k <> o )
-        go  TAttr l (FKT tb) =  l $ F.toList $ allKVRec  tb
-        go  TPK l (FKT tb) =  allKVRec  tb
+        go  TAttr l (FKT _ tb) =  l $ F.toList $ allKVRec  tb
+        go  TPK l (FKT _ tb) =  allKVRec  tb
         go  _ l (Attr a) = l [a]
 
 
 allPKRec  (TB1 (KV (PK k d) i ))=  F.foldr zipPK (PK [] []) $ (go (flip PK []) <$> k) <> (go (PK []) <$> d)
   where zipPK (PK i j) (PK m n) = (PK (i <> m) (j <> n))
-        go l (FKT tb) = allPKRec tb
+        go l (FKT _ tb) = allPKRec tb
         go l (Attr a) = l [a]
 
 
-allRec i t = fmap snd $ allRecBase False PathRoot i t
-allAliasedRec i t = allRecBase False PathRoot i t
-allRecBase  isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
+allRec i t = fmap snd $ allAliasedRec i t
+allAliasedRec i t = tb1Rec False PathRoot i t
+tb1Rec isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
   let
       baseCase = KV (PK (fun k) (fun (S.fromList $ F.toList desc)))  (fun (maybe attr (`S.delete` attr) desc))
-      fkCase (Path ifk (FKJoinTable bt kv nt)  o ) = FKT {- (S.toList ifk)-}  {- $ fmap substBind -} (allRecBase isOptional (aliasKeyValue ifk ) invSchema (fromJust (M.lookup nt  invSchema )))
+      leftFst True keys = fmap (fmap (\((Key a al b c  e) ) -> ( Key a al b c  (makeOptional e)))) keys
+      leftFst False keys = keys
+      fun items = fmap Attr (fmap (p,) $ F.toList $ items `S.difference` fkSet ) <> (fkCase invSchema isOpt p <$> filter (\(Path ifk _ _) -> ifk `S.isSubsetOf` items ) (F.toList fk) )
+      fkSet = S.unions $  fmap (\(Path ifk _ _) -> ifk)  $S.toList fk
+  in leftFst isOpt  $ TB1 baseCase
+
+fkCase invSchema isOpt p (Path ifk (FKJoinTable bt kv nt)  o ) = FKT  ((p,) <$>S.toList ifk)  {- $ fmap substBind -} (tb1Rec isOptional (aliasKeyValue ifk ) invSchema (fromJust (M.lookup nt  invSchema )))
             where isOptional = any (isKOptional . keyType . fst) (F.toList kv) || isOpt
                   bindMap = M.fromList $ fmap swap kv
                   aliasKeyValue k
@@ -731,11 +737,6 @@ allRecBase  isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
                   substBind k = case M.lookup k bindMap of
                                     Just i -> i
                                     Nothing -> k
-      leftFst True keys = fmap (fmap (\((Key a al b c  e) ) -> ( Key a al b c  (makeOptional e)))) keys
-      leftFst False keys = keys
-      fun items = fmap Attr (fmap (p,) $ F.toList $ items `S.difference` fkSet ) <> (fkCase <$> filter (\(Path ifk _ _) -> ifk `S.isSubsetOf` items ) (F.toList fk) )
-      fkSet = S.unions $  fmap (\(Path ifk _ _) -> ifk)  $S.toList fk
-  in leftFst isOpt  $ TB1 baseCase
 
 
 projectAllRec'

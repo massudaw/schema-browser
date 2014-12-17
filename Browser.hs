@@ -34,6 +34,7 @@ import Data.Graph(stronglyConnComp,flattenSCCs)
 import Control.Exception
 import           Data.Attoparsec.Char8 hiding (Result)
 import Data.Traversable (mapAccumL,Traversable,traverse)
+import qualified Data.Traversable as Tra
 import Warshal
 import Data.Time.LocalTime
 import Data.IORef
@@ -111,8 +112,8 @@ databaseChooser = do
         --conn <- connectPostgreSQL "user=postgres password=queijo dbname=finance"
         inf@(k,baseTables,_,schema,invSchema,graphP) <- keyTables conn  schemaN
         return (conn,inf)
-  dbNameB <- stepper "incendio" (T.pack <$> UI.valueChange dbName)
-  schNameB <- stepper "incendio" (T.pack <$> UI.valueChange  schemaName)
+  dbNameB <- stepper "health" (T.pack <$> UI.valueChange dbName)
+  schNameB <- stepper "health" (T.pack <$> UI.valueChange  schemaName)
   return $ (unsafeMapIO id $ genSchema <$> schNameB <*> dbNameB <@ UI.click load,chooserDiv)
 
 -- TODO: Remove Normalization to avoid inconsistencies
@@ -183,6 +184,86 @@ generateUI (k,v) =
        i -> UI.div
 
 ifApply p f a = if p a then f a else a
+crudUITable
+  :: Connection
+     -> InformationSchema
+     -> TB1 Key
+     -> Tidings (Maybe (TB1 (Key,Showable)))
+     -> UI (Element,Behavior (Maybe (TB1 (Key,Showable))))
+crudUITable conn inf (TB1 (KV (PK k d) a)) oldItems = do
+  let
+      tbCase td ix i@(FKT _ _) = fkUITable conn inf (fmap ((!!ix) .td .unTB1) <$> oldItems) i
+      tbCase td ix a@(Attr i) = attrUITable (fmap ((!!ix) .td .unTB1) <$> oldItems)  a
+      mapMI f = Tra.mapM (uncurry f) . zip [0..]
+  ks <- mapMI (tbCase (pkKey.kvKey)) k
+  ds <- mapMI (tbCase (pkDescription.kvKey)) d
+  as <- mapMI (tbCase (kvAttr)) a
+  let fks = KV (PK ks ds ) as
+  crudHeader <- UI.div # set text (T.unpack "")
+  listBody <- UI.ul
+    # set children (F.toList (fst <$> fks))
+    # set style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
+  body <- UI.div
+    # set children ([crudHeader, listBody ] )
+    # set style [("border","2px"),("border-color","gray"),("border-style","solid")]
+  return (body, fmap TB1 . Tra.sequenceA <$> Tra.sequenceA (fmap snd fks) )
+
+attrUITable
+  :: Tidings (Maybe (TB (Key,Showable)))
+     -> TB Key
+     -> UI
+          (Element, Behavior (Maybe (TB (Key, Showable))))
+attrUITable  tAttr' (Attr i) = do
+      l<- UI.span # set text (show i)
+      let tdi = tAttr -- foldrTds justCase plugItens [tAttr]
+          justCase i j@(Just _) = j
+          justCase i Nothing = i
+      attrUI <- buildUI (keyType i) tdi
+      expandEdit <- checkedWidget
+      let
+          ei (Just a) = Just a
+          ei Nothing = defaultType (keyType i)
+      e <- buildUI (keyType i) tAttr
+      eplug <- buildUI (keyType i) (pure Nothing)
+      element e # sink UI.style (noneShowSpan <$> (facts $ triding expandEdit)) # set UI.enabled False
+      element eplug # sink UI.style (noneShowSpan <$> (facts $ triding expandEdit)) # set UI.enabled False
+      paint l (facts $ triding attrUI )
+      sp <- UI.li # set children [l,getElement attrUI ,getElement expandEdit,getElement e,getElement eplug]
+      return (sp,(fmap (Attr .(i,)) <$> facts (triding attrUI ) ))
+  where tAttr = fmap (\(Attr i)-> snd i) <$> tAttr'
+
+
+
+fkUITable
+  :: Connection
+  -> InformationSchema
+  -> Tidings (Maybe (TB (Key,Showable)))
+  -> TB Key
+  -> UI (Element,Behavior (Maybe (TB (Key, Showable))))
+fkUITable conn inf oldItems tb@(FKT ifk tb1@(TB1 (KV (PK o0 desc) attrs)) ) = mdo
+      let
+          o1 = S.fromList $ concat $ attrNonRec <$> o0
+          attrNonRec (FKT ifk _ ) = ifk
+          attrNonRec (Attr i ) = [i]
+          tdi :: Tidings (Maybe (TB1  (Key,Showable)))
+          tdi =  fmap (\(FKT _ t) -> t) <$> oldItems
+      res <- liftIO $ projectKey conn inf (projectAllRec' (tableMap inf )) o1
+      l <- UI.span # set text (show ifk)
+      box <- UI.listBox (pure res) tdi (pure (\v-> UI.span # set text (show $ kvKey $ unTB1 $  snd <$> v)))
+      let
+          pkt :: Tidings (Maybe [(Key,Showable)])
+          pkt = fmap (\(TB1 (KV i _ )  ) ->  (concat $ fmap attrNonRec $ pkKey i)) <$> UI.userSelection box
+          fksel = fmap (zip ifk . fmap snd ) <$>  facts pkt
+      paint (getElement l) fksel
+      chw <- checkedWidget
+      (celem,tcrud) <- crudUITable conn inf tb1 (UI.userSelection box )
+      element celem
+        # sink UI.style (noneShow <$> (facts $ triding chw))
+        # set style [("padding-left","10px")]
+      fk <- UI.li # set  children [l, getElement box,getElement chw,celem]
+      let bres =  liftA2 (liftA2 FKT) fksel  tcrud
+      return (fk,bres)
+
 
 fkUI
   :: Connection
@@ -195,16 +276,14 @@ fkUI
 fkUI conn inf oldItems plugItens  oldItems1 (Path ifk table o1 ) = mdo
       res <- fmap (fmap allKVRec ) $ liftIO $ projectKey conn inf (projectAllRec' (tableMap inf )) o1
       let
-          (PK oL _)  = allPKRec subtableAttrs
-          o = S.fromList oL
           subtable :: Table
-          subtable = fromJust $  M.lookup o1 (pkMap inf )
+          subtable = fromJust $  M.lookup o1 (pkMap inf)
           subtableAttrs =  allRec (tableMap inf) subtable
           lookupFKS :: (Functor f ,Show (f (Maybe (Key,Showable))),F.Foldable f) => f Key -> Tidings (Maybe [(Key,Showable)]) -> Tidings (Maybe (f (Key,Showable)))
           lookupFKS ks initialMap = allMaybes <$> (\m -> fmap (\ki->  join $ fmap (fmap (ki,) . M.lookup ki) m) ks) <$> (fmap M.fromList <$> initialMap )
           tdi :: Tidings (Maybe (KV  (Key,Showable)))
           tdi =  fmap (\a -> fmap normalize <$> allKVRec a ) <$> lookupFKS subtableAttrs oldItems
-      l <- UI.span # set text (show $ S.toList o)
+      l <- UI.span # set text (show $ S.toList ifk)
       box <- UI.listBox res2 tdi (pure (\v-> UI.span # set text (show $ (\(KV k _)-> snd <$> k) v)))
       let
           pkt :: Tidings (Maybe (PK (Key,Showable)))
@@ -213,12 +292,12 @@ fkUI conn inf oldItems plugItens  oldItems1 (Path ifk table o1 ) = mdo
           ei i Nothing = allMaybes $ fmap (defaultType . keyType) i
           ei i d = d
           olds :: Tidings (Maybe [(Key,Showable)])
-          olds =  lookupFKS (F.toList o) oldItems
+          olds =  lookupFKS (F.toList ifk) oldItems
           edited :: Tidings (Maybe [((Key,Showable),(Key,Showable))])
-          edited = (\i j-> if (fmap (fmap snd) $ fmap pkKey i) == (fmap normalize <$> ei (S.toList o) (fmap (fmap snd) j)) then Nothing else liftA2 zip (fmap pkKey i) j) <$> pkt <*> olds
+          edited = (\i j-> if (fmap (fmap snd) $ fmap pkKey i) == (fmap normalize <$> ei (S.toList ifk) (fmap (fmap snd) j)) then Nothing else liftA2 zip (fmap pkKey i) j) <$> pkt <*> olds
           editedListFlag (Just i) = "#" <> L.intercalate "," (fmap renderShowable i)
           editedListFlag Nothing = ""
-          fksel = fmap pkKey <$>  facts pkt
+          fksel = fmap (zip (S.toList ifk) .fmap snd . pkKey) <$>  facts pkt
       e <- UI.span # sink text (editedListFlag . fmap (fmap (snd .snd)) <$> facts edited)
       paint (getElement l) fksel
       chw <- checkedWidget
@@ -848,27 +927,37 @@ buildList' i j = foldr (liftA2 (:)) i j
         -- where buildList = foldr (liftA2 (:))  (pure [])
 fkattrsB inputs fks = buildList'   inputs fks
 
+lookAttr inp attr = justError ("Error looking Attr: " <> show attr <> " " <> show inp) $ M.lookup attr  inp
+lookKeyMap inp attr = justError ("Error looking KeyMap: " <> show attr <> " " <> show inp) $ M.lookup attr  inp
+
 wappImport conn inf _ _ = do
   let chat@(Raw _ _ pk desc ifk attrs) = lookTable inf "chat"
   pathInput <- UI.input -- # set UI.type_ "file"
   b <- UI.button # set UI.text "Import"
   bhInp <- stepper "" (UI.valueChange pathInput)
-  v <- mapM (fkUI conn inf (pure Nothing) (pure Nothing) (pure Nothing) ) $ S.toList ifk
+  v <- mapM (fkUITable conn inf (pure Nothing)  . fmap snd . fkCase (tableMap inf) False PathRoot) $ S.toList ifk
   let
-      ninputs = allMaybes <$> (fkattrsB (pure mempty) (fmap snd.snd <$> v))
+      ninputs = allMaybes <$> (fkattrsB (pure mempty) (snd <$> v))
   output <- UI.div # set children (fst <$> v)
   let process (Just inp) path = do
         file <-  liftIO $ T.readFile "testwapp.txt"
         let result =  fmap  parse $ filter (\(i,xs) -> isJust $ strptime "%d de %b %R" (T.unpack i)) $   T.breakOn ("-") <$> T.split (=='\n') file
-            parse (d,t) = [STimestamp $ Finite $ fst $ fromJust $ strptime "%d de %b %R %Y" (T.unpack d <> " 2014")] <> (SText   <$> [T.drop 2 p, T.drop 2 c])
+            parse (d,t) =  (fmap (\(k,s)-> (fromJust $ M.lookup ("chat",k) (keyMap inf),s) ) $  [("chat_instant",STimestamp $ Finite $ fst $ fromJust $ strptime "%d de %b %R %Y" (T.unpack d <> " 2014"))] <> [("chat_text",SText $ T.drop 2 c)] ) <> speaker <> target
               where (p,c) =  T.breakOn (":") t
+                    name = T.unpack $ T.drop 2 p
+                    Just (FKT speaker _ )= F.find (L.isInfixOf name . show ) inp
+                    Just (FKT target _ )= F.find (not . L.isInfixOf name. show ) inp
+            queryFilter [(k1,v1),(k2,v2)] = M.fromList $  fmap (fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) )) [(lookKeyMap (keyMap inf) ("chat","speaker_contact"),v1),(lookKeyMap (keyMap inf) ("chat","target_contact"),v2)]
+        vp <- mapM (\speaker -> doQueryAttr conn inf (projectAllRec' (tableMap inf)) (queryFilter (traceShowId $ (\(FKT [i] _ )-> i ) <$> speaker))  pk) (L.permutations inp)
+        let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["speaker_contact","target_contact","query_text","query_instant"] ) . keyValue . fst ) . F.toList ) (concat vp)) :: S.Set (Map Key Showable)
+        adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SomeException)) Nothing )) $ fmap Just $ insertPK fromShowableList  conn  (M.toList kv) chat ) (S.toList $ ( S.fromList (M.fromList <$> result )) `S.difference` kk)
         return result
-      process (Just inp) path = do return []
+      process Nothing  path = do return []
       j = unsafeMapIO id $ process  <$> ninputs <*> bhInp <@ UI.click b
   outStp <- stepper "" (fmap show $ j)
   out <- UI.div # sink UI.text outStp
-  inp <- UI.div # sink UI.text (show <$> ninputs)
-  (,pure Nothing) <$> UI.div # set children [output,pathInput,b,out,inp]
+  inpOut <- UI.div # sink UI.text (show <$> ninputs)
+  (,pure Nothing) <$> UI.div # set children [output,pathInput,b,out,inpOut]
 
 queryAndamento2 conn inf  k  input = do
         b <- UI.button # set UI.text "Submit"  # sink UI.enabled (maybe False (\i -> not $ elem "aproval_date" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd )i) ) <$> facts input)
