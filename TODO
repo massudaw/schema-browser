@@ -33,6 +33,7 @@ Extensions
   -- Import WhatsApp 
   -- Import log messages
   -- Process log with ibm whatson
+  -- Debug error during insertion "returned command result"
 
 Multiple Schema joins
 -- Generate Queries with multiple schemas
@@ -49,6 +50,7 @@ Implement Absolute attribute name for multiple same table join
 oo create alias for globalname (name size limit)
 oo Table structure return value for ambigous name results
 --  index application maps with globalname instead of key
+-- Create a crudUI without indexing to allow ambigous name
 
 Pagination
 -- Long Table Pagination
