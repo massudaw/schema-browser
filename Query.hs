@@ -15,12 +15,16 @@ module Query where
 
 import Warshal
 import Data.Tuple
+import Data.Functor.Apply
+import Data.Functor.Compose
 import Data.Typeable
+import Data.Distributive
 import Data.Vector(Vector)
 import Data.Functor.Classes
 import qualified Data.Foldable as F
 import Data.Foldable (Foldable)
 import Data.Traversable (mapAccumL)
+import qualified Data.Traversable as Tra
 import Data.Char ( isAlpha )
 import Data.Maybe
 import qualified Numeric.Interval as Interval
@@ -189,6 +193,15 @@ normalize (SOptional (Just a) ) = a
 normalize a@(SOptional Nothing ) = a
 normalize i = i
 
+transformKey (KSerial i)  (KOptional j) (SSerial v)  | i == j = (SOptional v)
+transformKey (KOptional i)  (KSerial j) (SOptional v)  | i == j = (SSerial v)
+transformKey (KSerial j)  l@(Primitive _ ) (SSerial v) | j == l  && isJust v =  fromJust v
+transformKey (KOptional j)  l@(Primitive _ ) (SOptional v) | j == l  && isJust v = fromJust v
+transformKey l@(Primitive _)  (KOptional j ) v | j == l  = SOptional $ Just v
+transformKey l@(Primitive _)  (KSerial j ) v | j == l  = SSerial $ Just v
+transformKey ki kr v | ki == kr = v
+transformKey ki kr  v = error  ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
+
 
 instance Show Showable where
   show (SText a) = T.unpack a
@@ -197,11 +210,11 @@ instance Show Showable where
   show (SDouble a) = show a
   show (STimestamp a) = show a
   show (SDate a) = show a
-  show (SSerial a) = maybe "" show a
+  show (SSerial a) = maybe " " ((" "<>) . show) a
   -- show (SSerial a) = show a
   show (SPosition a) = show a
   --show (SOptional a) = show a
-  show (SOptional a) = maybe "" show a
+  show (SOptional a) = maybe "  " (("  "<>). show) a
   show (SInterval a) = show a
   show (SPInterval a) = show a
   show (SComposite a) = intercalate "," $ F.toList (fmap show a)
@@ -450,12 +463,14 @@ update conn kv kold t@(Raw sch tbl pk _ _ _) = fmap (,TableModification t (Edit 
     up = "UPDATE " <> sch <>"."<> tbl <> setter <>  pred
     skv = nubBy (\(i,j) (k,l) -> i == k)  kv
 
-insertPK f conn kva t@(Raw sch tbl pk  _ _ attr ) = fmap (traceShowId . zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> maybe "" (\i -> " RETURNING " <>  T.intercalate "," (keyValue <$> i ) ) pkListM ) (fmap snd $ traceShowId kv)
-  where pkList = S.toList $ S.filter (isSerial . keyType ) $ traceShowId pk
+insertPK f conn kva t@(Raw sch tbl pk  _ _ attr ) = case pkListM of
+                                                      Just reti ->  fmap ( zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> " RETURNING " <>  T.intercalate "," (keyValue <$> reti )  ) (fmap snd  kv)
+                                                      Nothing ->   liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")"   ) (fmap snd  kv) >> return []
+  where pkList = S.toList $ S.filter (isSerial . keyType )  pk
         pkListM= case pkList of
                   [] -> Nothing
                   i -> Just i
-        kv = nub $ filter (\(k,_) -> memberPK k || memberAttr k ) $    traceShowId kva
+        kv = nub $ filter (\(k,_) -> memberPK k || memberAttr k ) $    kva
         memberPK k = S.member (keyValue k) (S.fromList $ fmap  keyValue $ S.toList $ S.filter (not . isSerial . keyType ) pk)
         memberAttr k = S.member (keyValue k) (S.fromList $ fmap  keyValue $ S.toList attr)
 
@@ -695,6 +710,19 @@ recursePaths invSchema (Raw _ _ _ _ fk _ )  = concat $ recursePath invSchema <$>
 
 newtype TB1 a = TB1 {unTB1 :: (KV (TB a)) }deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
+instance Apply TB1 where
+  TB1 a <.> TB1 a1 =  TB1 (getCompose $ Compose a <.> Compose a1)
+
+instance Apply KV where
+  KV pk i <.> KV pk1 i1 = KV (pk <.> pk1) (getZipList $ ZipList i <.> ZipList i1)
+
+instance Apply PK where
+  PK i j <.> PK i1 j1 = PK (getZipList $ ZipList i <.> ZipList i1 ) ( getZipList $ ZipList j <.> ZipList j1)
+
+instance Apply TB where
+  Attr a <.>  Attr a1 = Attr $ a a1
+  FKT l t <.> FKT l1 t1 = FKT (l <.> l1) (t <.> t1)
+
 data TB a
   = FKT [a] (TB1 a)
   | Attr a
@@ -751,7 +779,7 @@ projectAllRec' invSchema =  do
       attrs =  Metric . alterName <$> (allAliasedRec invSchema ta)
       aliasMap =   fmap fst $ M.fromList $ aliasJoin table1
       alterName ak@(p,Key k al a b c ) = (Key k (Just $ justError ("lookupAlias "  <> show ak <> " " <> show aliasMap )$ M.lookup ak aliasMap ) a b c )
-  put (schema,Limit (Project (F.toList attrs ) table1 ) 500)
+  put (schema,Project (F.toList attrs ) table1 )
   return $ trace ("projectDescAllRec: " <> show attrs ) attrs
 
 
@@ -838,7 +866,7 @@ allAttrs' t@(Raw _ _ pk _ fk p) = S.map ((PathRoot,) . (t,)) $ S.union pk p
 allAttrs' (Limit p _ ) = allAttrs' p
 allAttrs' (Filtered _ p) = allAttrs' p
 allAttrs' (Base _ p) =  snd $  from allAttrs' p
-  where from f (From t pk ) = traceShow ("from " <> show t <> " " <> show pk <> " " <> show sm1 ) (sm1,ft)
+  where from f (From t pk ) = {-traceShow ("from " <> show t <> " " <> show pk <> " " <> show sm1 )-} (sm1,ft)
           where ft = f t
                 sm1 =  foldr (\i m -> M.insert (snd $ snd i) PathRoot m ) M.empty (S.toList ft) :: Map Key (AliasPath Key)
         from f (SplitJoin _ t pk rel p) =  (sm , (foldr (<>) S.empty $ fmap (\(n,_) -> S.map (\(_,(ta,k))-> (pth $ S.singleton n,(alterTableName (<> (keyValue n) ) ta,k))) (f t) ) rel )  <> sp)
@@ -854,7 +882,7 @@ allAttrs' (Base _ p) =  snd $  from allAttrs' p
                 pth = PathCons (S.map (\nk -> (nk,(justError "allAttrs' pathLeft") (M.lookup nk sm)) ) n )
                 ft = f t
                 pk = atBase (\(Raw _ _ p _ _ _) -> p) t :: Set Key
-        from f (Join t _  r p) = traceShow ("relation " <> show pk <> " " <> show t <>  " " <> show r <> " " <>  show sm1 ) (sm1,S.map (\(_,(ta,k))-> (pth ,(ta,k))) ft  <>   sp)
+        from f (Join t _  r p) = (sm1,S.map (\(_,(ta,k))-> (pth ,(ta,k))) ft  <>   sp)
           where n = S.map (justError "allAttrs' filterSet")$ S.filter isJust $ S.map (\i -> M.lookup i  ( M.fromList $ fmap (swap.snd) $ S.toList $  r) ) pk
                 (sm,sp) =  from f p
                 sm1 =  foldr (\i m -> M.insert (snd $ snd i) pth  m ) sm (S.toList ft)
