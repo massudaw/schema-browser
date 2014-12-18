@@ -188,18 +188,22 @@ processPanelTable conn attrsB table oldItemsi = do
   editB <- UI.button # sink UI.enabled (liftA2 (&&) (isJust <$>  efkattrsB) (isJust <$> fkattrsB)) # set text "EDIT"
   insertB <- UI.button  # sink UI.enabled (isJust <$> fkattrsB) # set text "INSERT"
   let
-      deleteAction k =  do
+      deleteAction ki =  do
+        let k = fmap (concat . F.toList .fmap attrNonRec .unTB1 ) ki
+            kf = fmap F.toList ki
         res <- liftIO $ catch (Right <$> delete conn (fromJust k) table) (\e -> return $ Left (show $ traceShowId  (e :: SomeException) ))
-        return $ const (Delete k ) <$> res
+        return $ const (Delete kf ) <$> res
       editAction attr old = do
         let i = traceShowId $ fromJust isM
             k = traceShowId $ fromJust kM
             kM = (concat . F.toList .fmap attrNonRec .unTB1 ) <$> old
             isM :: Maybe [(Key,Showable)]
-            isM = (catMaybes . concat .F.toList. fmap attrNonRec . unTB1 ) <$> (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attr old
+            isM = (catMaybes . concat . F.toList  . fmap attrNonRec .unTB1) <$> (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attr old
+            isM' :: Maybe [(Key,Showable)]
+            isM' = (catMaybes . F.toList  ) <$> (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attr old
             kM' = F.toList <$> old
         res <- liftIO $ catch (Right <$> update conn i k table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
-        let updated = fromJust isM
+        let updated = fromJust isM'
         return $ fmap (const (Edit (fmap (mappend updated) (filter (\(k,_) -> not $ k `elem` (fmap fst updated)) <$> kM') ) kM')) res
 
       insertAction ip = do
@@ -210,7 +214,7 @@ processPanelTable conn attrsB table oldItemsi = do
 
       evir, ever ,evdr:: Event (Modification Key Showable)
       (evid,evir) = spMap $ filterJust $ (fmap insertAction  <$> attrsB ) <@ (UI.click insertB)
-      (evdd,evdr) = spMap $ (deleteAction <$> facts oldItems) <@ UI.click deleteB
+      (evdd,evdr) = spMap $ (deleteAction <$> facts oldItemsi) <@ UI.click deleteB
       (eved,ever) = spMap $ (editAction  <$> attrsB <*> (facts oldItemsi) ) <@ UI.click editB
       spMap = split . unsafeMapIO id
 
