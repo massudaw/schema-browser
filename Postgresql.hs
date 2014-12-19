@@ -80,6 +80,7 @@ textToPrim "timestamp without time zone" = PTimestamp
 textToPrim "interval" = PInterval
 textToPrim "date" = PDate
 textToPrim "POINT" = PPosition
+textToPrim "LINESTRING" = PLineString
 textToPrim i = error $ "no case for type " <> T.unpack i
 
 
@@ -150,6 +151,7 @@ readPrim t =
      PDate-> readDate
      PPosition -> readPosition
      PBoolean -> readBoolean
+     PLineString -> readLineString
   where
       readInt = nonEmpty (fmap SNumeric . readMaybe)
       readBoolean = nonEmpty (fmap SBoolean . readMaybe)
@@ -157,6 +159,7 @@ readPrim t =
       readText = nonEmpty (\i-> fmap SText . readMaybe $  "\"" <> i <> "\"")
       readDate =  fmap (SDate . Finite . localDay . fst) . strptime "%Y-%m-%d"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
+      readLineString = nonEmpty (fmap SLineString . readMaybe)
       readTimestamp =  fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%OS"
       readInteval =  fmap SPInterval . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
       nonEmpty f ""  = Nothing
@@ -181,7 +184,7 @@ unIntercalate pred s                 =  case dropWhile pred s of
 primType (Metric k ) = textToPrim <$> keyType k
 primType (Agg g) =  postgresqlFunctions g
 primType f@(Fun _ _) =  pgfun f
-primType f@(Operator r _ _ l) =  pgfun f
+primType f@(Operator r _ e l) =  pgfun f
 
 
 
@@ -224,15 +227,15 @@ renderedType key f b = go key
           go ::  KType KPrim
                 -> F.Conversion Showable
           go t = case t of
-            (KInterval (Primitive i)) -> SInterval <$> prim i f b
+            (KInterval (Primitive i)) -> SInterval <$>  prim i f b
             (KOptional (Primitive i)) -> SOptional <$> prim i f b
-            (KOptional (KSerial (Primitive i))) -> SOptional <$> prim i f b
-            (KSerial (KOptional (Primitive i))) -> SOptional <$> prim i f b
             (KSerial (Primitive i)) -> SSerial <$> prim i f b
             (KArray (Primitive i)) -> SComposite <$> prim i f b
-            (KOptional (KArray (Primitive i))) ->  fmap (SOptional . fmap SComposite . getCompose ) $ prim i f b
-            (KOptional (KInterval (Primitive i))) -> (SOptional . fmap SInterval . getCompose ) <$> prim i f b
-            (Primitive i) ->  fmap unOnly $ prim  i f b
+            (KOptional (KSerial (Primitive i))) -> SOptional . fmap SSerial . getCompose <$> prim i f b
+            (KOptional (KArray (Primitive i))) ->  SOptional . fmap SComposite . getCompose  <$> prim i f b
+            (KOptional (KInterval (Primitive i))) -> SOptional . fmap SInterval . getCompose  <$> prim i f b
+            (KSerial (KOptional (Primitive i))) -> SSerial . fmap SOptional . getCompose <$> prim i f b
+            (Primitive i) ->  unOnly <$> prim  i f b
             i ->  error $ "missing case renderedType: " <> (show i)
 
 renderShowable :: Showable -> String
@@ -246,7 +249,7 @@ renderShowable i = show i
 unOnly :: Only a -> a
 unOnly (Only i) = i
 
-prim :: (F.FromField (f Bool ),F.FromField (f DiffTime),F.FromField (f Position ),F.FromField (f LocalTimestamp),F.FromField (f Date),F.FromField (f Text), F.FromField (f Double), F.FromField (f Int), Functor f) =>
+prim :: (F.FromField (f Bool ),F.FromField (f LineString),F.FromField (f DiffTime),F.FromField (f Position ),F.FromField (f LocalTimestamp),F.FromField (f Date),F.FromField (f Text), F.FromField (f Double), F.FromField (f Int), Functor f) =>
           KPrim
         -> F.Field
         -> Maybe BS.ByteString
@@ -259,6 +262,7 @@ prim  p f b = case p of
             PInterval -> i $ F.fromField  f b
             PTimestamp -> t $ F.fromField  f b
             PPosition -> pos $ F.fromField  f b
+            PLineString -> lin $ F.fromField  f b
             PBoolean -> bo $ F.fromField  f b
   where
     s = fmap (fmap SText)
@@ -267,11 +271,52 @@ prim  p f b = case p of
     da = fmap (fmap SDate)
     i = fmap (fmap SPInterval)
     t = fmap (fmap STimestamp)
-    pos = fmap (fmap SPosition)
+    lin = fmap (fmap SLineString)
+    pos = fmap (fmap SPosition )
     bo = fmap (fmap SBoolean)
 
 instance (F.FromField (f (g a))) => F.FromField (Compose f g a) where
   fromField = fmap (fmap (fmap (Compose ) )) $ F.fromField
+
+instance Sel.Serialize Position where
+  get = do
+      x <- Sel.getFloat64le
+      y <- Sel.getFloat64le
+      z <- Sel.getFloat64le
+      return  $ Position (x,y,z)
+  put (Position (x,y,z)) = do
+      Sel.putFloat64le x
+      Sel.putFloat64le y
+      Sel.putFloat64le z
+instance Sel.Serialize LineString where
+  get = do
+      n <- Sel.getWord32host
+      LineString .Vector.fromList <$> replicateM (fromIntegral n ) Sel.get
+  put (LineString  v ) = do
+      mapM_ (Sel.put) (F.toList v)
+
+
+
+instance F.FromField LineString where
+  fromField f t = case  fmap (Sel.runGet getV ) decoded of
+    Just i -> case i of
+      Right i -> pure i
+      Left e -> error e
+    Nothing -> error "empty value"
+    where
+      getV = do
+          i <- Sel.getWord8
+          if i  == 1
+           then do
+             typ <- Sel.getWord32host
+             srid <- Sel.getWord32host
+             let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
+             case ty  of
+               2 -> Sel.get
+               i -> error $ "type not implemented " <> show ty <> "  "<> show decoded
+           else
+             return (error $ "BE not implemented " <> show i <> "  " <> show decoded)
+      decoded = fmap (fst . B16.decode) t
 
 instance F.FromField Position where
   fromField f t = case  fmap (Sel.runGet getV ) decoded of
@@ -288,11 +333,7 @@ instance F.FromField Position where
              srid <- Sel.getWord32host
              let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
              case ty  of
-               1 -> do
-                x <- Sel.getFloat64le
-                y <- Sel.getFloat64le
-                z <- Sel.getFloat64le
-                return  $ Position (x,y,z)
+               1 -> Sel.get
                i -> error $ "type not implemented " <> show ty <> "  "<> show decoded
            else
              return (error $ "BE not implemented " <> show i <> "  " <> show decoded)
@@ -332,11 +373,14 @@ instance (F.FromField a,Ord a, Typeable a) => F.FromField (Interval.Interval a) 
                      Right conv -> (Interval....) <$>  (fmap (!!0) conv) <*> (fmap (!!1) conv)
           _ -> F.returnError F.Incompatible f ""
 
+plain' :: String -> Parser BS.ByteString
+plain' delim = takeWhile1 (notInClass (delim <> "\"{}"))
+
 range :: Char -> Parser [ArrayFormat]
-range delim = char '[' *> option [] (arrays <|> strings) <* char ']'
+range delim = (char '('  <|> char '[' ) *> option [] (arrays <|> strings) <* (char ')' <|> char ']')
   where
-        strings = sepBy1 (Quoted <$> quoted <|> Plain <$> plain delim) (char delim)
-        arrays  = sepBy1 (Arrays.Array <$> array delim) (char ',')
+        strings = sepBy1 (Quoted <$> quoted <|> Plain <$> plain' ",;[]()" ) (char delim)
+        arrays  = sepBy1 (Arrays.Array <$> array ';') (char delim)
                 -- NB: Arrays seem to always be delimited by commas.
             --
 fromArray :: (FromField a)
@@ -362,7 +406,7 @@ fromShowableList foldable = do
     traverse (FR.fieldWith . attrToKey) foldable
 
 withConn action = do
-  conn <- connectPostgreSQL "user=postgres password=queijo dbname=incendio"
+  conn <- connectPostgreSQL "user=postgres password=queijo dbname=health"
   action conn
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item

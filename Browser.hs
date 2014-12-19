@@ -104,24 +104,36 @@ setup w = void $ do
     header <- tabbed [("Query",span) ,("Process",poll)]
     getBody w #+ [element header])
 
+listDBS = do
+  connMeta <- connectPostgreSQL ("user=postgres dbname=postgres")
+  dbs :: [Only Text]<- query_  connMeta "SELECT datname FROM pg_database  WHERE datistemplate = false"
+  M.fromList <$> mapM (\db -> do
+        connDb <- connectPostgreSQL ("user=postgres dbname=" <> toStrict (encodeUtf8 db))
+        schemas :: [Only Text] <- query_  connDb "SELECT schema_name from information_schema.schemata"
+        return (db,fmap unOnly schemas)) (fmap unOnly dbs)
+
 databaseChooser = do
-  dbName <- UI.input
-  schemaName <- UI.input
-  load <- UI.button # set UI.text "Connect"
-  chooserDiv <- UI.div # set children [dbName,schemaName,load]
-  let genSchema schemaN dbName = do
-        conn <- connectPostgreSQL ("user=postgres dbname=" <> toStrict ( encodeUtf8 dbName))
-        --conn <- connectPostgreSQL "user=postgres password=queijo dbname=finance"
+  dbs  <- liftIO$ listDBS
+  dbsW <- UI.listBox (pure $ M.keys dbs ) (pure Nothing ) (pure (\i -> UI.div # set text (T.unpack i)))
+  schW <- UI.listBox (concat . maybeToList .join .fmap  (flip M.lookup dbs) <$> UI.userSelection dbsW ) (pure Nothing ) (pure (\i -> UI.div # set text (T.unpack i)))
+  load <- UI.button # set UI.text "Connect" # sink UI.enabled (facts $ liftA2 (&&) (isJust <$> UI.userSelection dbsW) (isJust <$> UI.userSelection schW))
+  chooserDiv <- UI.div # set children [getElement dbsW,getElement schW,load]
+  let genSchema (Just dbN) (Just schemaN) = do
+        conn <- connectPostgreSQL ("user=postgres dbname=" <> toStrict ( encodeUtf8 dbN ))
         inf@(k,baseTables,_,schema,invSchema,graphP) <- keyTables conn  schemaN
         return (conn,inf)
-  dbNameB <- stepper "health" (T.pack <$> UI.valueChange dbName)
-  schNameB <- stepper "health" (T.pack <$> UI.valueChange  schemaName)
-  return $ (unsafeMapIO id $ genSchema <$> schNameB <*> dbNameB <@ UI.click load,chooserDiv)
+  return $ (unsafeMapIO id $ genSchema <$> (facts $ UI.userSelection dbsW ) <*> (facts $ UI.userSelection schW) <@ UI.click load,chooserDiv)
 
 -- TODO: Remove Normalization to avoid inconsistencies
+unSSerial (SSerial i ) = i
+unSSerial i = traceShow ("No Pattern Match SSerial " <> show i) Nothing
+
+unSOptional (SOptional i ) = i
+unSOptional i = traceShow ("No Pattern Match SOptional" <> show i) Nothing
+
 buildUI i  tdi = case i of
-         (KOptional ti) -> fmap (Just . SOptional) <$> buildUI ti (join .fmap (\(SOptional i) -> i) <$> tdi)
-         (KSerial ti) -> fmap (Just . SSerial) <$> buildUI ti ( join .fmap (\(SSerial i) -> i) <$> tdi)
+         (KOptional ti) -> fmap (Just . SOptional) <$> buildUI ti (join . fmap unSOptional <$> tdi)
+         (KSerial ti) -> fmap (Just . SSerial) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
          (KArray ti)  -> do
           let
               justCase i j@(Just _) = j
@@ -131,7 +143,7 @@ buildUI i  tdi = case i of
           pk <- stepper (defaultType i)  pke
           let pkt = tidings pk pke
           return $ TrivialWidget pkt inputUI
-         _ -> do
+         z -> do
           let
               justCase i j@(Just _) = j
               justCase i Nothing = i
@@ -499,7 +511,10 @@ poller conn poll inf = do
 
 chooserKey conn pg inf kitems  = do
   -- Base Button Set
-  bset <- buttonSet kitems showVertex
+  bset <- buttonSet kitems (\i -> case M.lookup i (pkMap inf) of
+                                       Just (Raw _ i  _ _ _ _ )-> T.unpack i
+                                       Nothing -> showVertex i )
+
   let bBset = triding bset
   body <- UI.div # sink items (facts (pure . chooseKey conn pg inf <$> bBset ))
   UI.div # set children [getElement bset, body]
@@ -551,7 +566,10 @@ chooseKey conn  pg inf key = mdo
 
   let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
 
-  let sortSet = F.toList . allRec (tableMap inf) . fromJust . flip M.lookup (pkMap inf) <$> bBset
+  let sortSet = filter (filterIntervalSort . keyType ) . F.toList . allRec (tableMap inf) . fromJust . flip M.lookup (pkMap inf) <$> bBset
+      filterIntervalSort (KInterval i) = False
+      filterIntervalSort (KOptional i) = filterIntervalSort i
+      filterIntervalSort i = True
   sortList  <- UI.listBox sortSet ((safeHead . F.toList) <$> sortSet) (pure (line . show  ))
   asc <- checkedWidget
   let listManip :: (Show (f (Key,Showable)), F.Foldable f) => String ->[f (Key,Showable)] -> Maybe Key -> Bool -> [f (Key,Showable)]
@@ -715,6 +733,7 @@ getRequest ::  String -> MaybeT IO BSL.ByteString
 getRequest = join . C.lift . (`catch` (\e ->  traceShow (e :: IOException) $ return mzero ) ).  fmap return . simpleGetRequest
 
 lookTable inf t = justError ("no table: " <> T.unpack t) $ M.lookup t (tableMap inf)
+
 
 queryAndamento4 conn inf k inputs = fmap (snd $ fromJust .L.find ((== "project_description") . keyValue . fst )$ inputs,) <$> (  runMaybeT $ do
                 MaybeT $ return $ if elem "aproval_date" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs ) then Nothing else Just undefined

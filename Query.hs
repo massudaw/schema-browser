@@ -76,6 +76,7 @@ data KPrim
    | PTimestamp
    | PInterval
    | PPosition
+   | PLineString
    deriving(Show,Eq,Ord)
 
 
@@ -126,8 +127,8 @@ instance Ord Key where
    k >= l = keyFastUnique k >= keyFastUnique l
 
 instance Show Key where
-   -- show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
-   show k = T.unpack $ showKey k
+    show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
+   -- show k = T.unpack $ showKey k
    -- show (Key v u _ _ ) = T.unpack v -- <> show (hashUnique u)
 showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::"  <> showTy id (keyType k)
 
@@ -170,6 +171,7 @@ renderAttribute a@(Agg m2  ) = renderAggr renderAttribute m2 <> " as " <> attrNa
   where renderAggr f (Aggregate l s )  = s  <> "(" <> T.intercalate ","  (fmap f l)  <> ")"
 
 newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read)
+newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,Read)
 
 data Showable
   = SText Text
@@ -179,6 +181,7 @@ data Showable
   | STimestamp LocalTimestamp
   | SPInterval DiffTime
   | SPosition Position
+  | SLineString LineString
   | SDate Date
   | SSerial (Maybe Showable)
   | SOptional (Maybe Showable)
@@ -209,6 +212,7 @@ instance Show Showable where
   show (SBoolean a) = show a
   show (SDouble a) = show a
   show (STimestamp a) = show a
+  show (SLineString a ) = show a
   show (SDate a) = show a
   show (SSerial a) = maybe " " ((" "<>) . show) a
   -- show (SSerial a) = show a
