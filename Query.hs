@@ -257,10 +257,22 @@ data SqlOperation a
 instance Show Table where
   show = T.unpack . tableName
 
+data TableType
+ = ReadOnly
+ | WriteOnly
+ | ReadWrite
+ deriving(Eq,Ord,Show)
+
 data Table
     =  Base (Set Key) (JoinPath Key Table)
     -- Schema | PKS | Description | FKS | Attrs
-    |  Raw Text Text (Set Key) (Maybe Key) (Set (Path Key (SqlOperation Text))) (Set Key)
+    |  Raw { rawSchema :: (Text,TableType)
+           , rawName :: Text
+           , rawPK :: (Set Key)
+           , rawDescription :: (Maybe Key)
+           , rawFKS ::  (Set (Path Key (SqlOperation Text)))
+           , rawAttrs :: (Set Key)
+           }
     |  Filtered [(Key,Filter)] Table
     |  Project [ KAttribute ] Table
     |  Reduce (Set Key) (Set (Aggregate (KAttribute ) ) )  Table
@@ -371,8 +383,7 @@ splitJoins j = j
 aliasJoin b@(Base k1 p) =   zipWith (\i (j,l)-> (j,(i,l))) (T.pack . ("v" <> ). show <$> [0..]) aliasMap
   where
     aliasMap =  fmap (\i -> ( (\(p,(t,k))-> (p,k))i,i)) attrs
-    attrs = {-filter (not . (`S.member` (S.fromList  $ fmap (keyValue.snd) jattrs) ). keyValue  . snd . snd )  $ -} S.toList $ allAttrs' b
-    jattrs =  nubBy (\ i j-> keyValue (snd i) == keyValue (snd j)) $ fmap (\(b,(k,l))->(b,k)) $ S.toList $ joinKeys p
+    attrs = S.toList $ allAttrs' b
 
 -- Generate a sql query from the AST
 showTable :: Table -> Text
@@ -380,7 +391,7 @@ showTable (Filtered f t) = filterTable (fmap (\(k,f) -> (t,k,f) ) f ) t
   where
       filterTable [] b =  showTable b
       filterTable filters b =  "(SELECT *  FROM " <> showTable b <>  " WHERE " <> T.intercalate " AND " (fmap renderFilter filters)  <> ") as " <> ( tableName b )
-showTable (Raw s t _ _  _ _) = s <> "." <> t
+showTable (Raw s t _ _  _ _) = fst s <> "." <> t
 showTable b@(Base k1 p) = " from (SELECT " <> T.intercalate ","  ((\(a,p)-> renderAliasedKey p a) . snd <$> attrs )  <> joinQuerySet p <>") as " <> tableName b
   where
     attrs = aliasJoin b
@@ -433,14 +444,14 @@ showTable (Limit t v) = showTable t <> " LIMIT " <> T.pack (show v)
 delete
   :: ToField b =>
      Connection ->  [(Key, b)] -> Table -> IO GHC.Int.Int64
-delete conn kold (Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShowId $ T.unpack del) (fmap snd koldPk)
+delete conn kold t@(Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShowId $ T.unpack del) (fmap snd koldPk)
   where
     koldM = M.fromList kold
     equality (k,_)= keyValue k <> "="  <> "?"
     memberPK k = S.member (keyValue $ fst k) (S.fromList $ fmap  keyValue $ S.toList  pk)
     koldPk = filter memberPK kold
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
-    del = "DELETE FROM " <> sch <>"."<> tbl <>   pred
+    del = "DELETE FROM " <> rawFullName t <>   pred
 
 data TableModification b
   = TableModification Table (Modification Key b)
@@ -464,12 +475,12 @@ update conn kv kold t@(Raw sch tbl pk _ _ _) = fmap (,TableModification t (Edit 
     koldPk = filter memberPK kold
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     setter = " SET " <> T.intercalate "," (fmap equality skv )
-    up = "UPDATE " <> sch <>"."<> tbl <> setter <>  pred
+    up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = nubBy (\(i,j) (k,l) -> i == k)  kv
 
 insertPK f conn kva t@(Raw sch tbl pk  _ _ attr ) = case pkListM of
-                                                      Just reti ->  fmap ( zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> " RETURNING " <>  T.intercalate "," (keyValue <$> reti )  ) (fmap snd  kv)
-                                                      Nothing ->   liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")"   ) (fmap snd  kv) >> return []
+                                                      Just reti ->  fmap ( zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> " RETURNING " <>  T.intercalate "," (keyValue <$> reti )  ) (fmap snd  kv)
+                                                      Nothing ->   liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")"   ) (fmap snd  kv) >> return []
   where pkList = S.toList $ S.filter (isSerial . keyType )  pk
         pkListM= case pkList of
                   [] -> Nothing
@@ -486,13 +497,15 @@ isEmptyShowable (SSerial Nothing ) = True
 isEmptyShowable i = False
 
 
-insert conn kva t@(Raw sch tbl pk _ _ attr ) = execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> sch <>"."<> tbl <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
+insert conn kva t@(Raw sch tbl pk _ _ attr ) = execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t  <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
   where kv = filter (\(k,_) -> S.member k pk || S.member k attr ) $ filter ( not . isSerial . keyType . fst)  kvb
         kvb = catMaybes $ fmap (\i-> fmap (,snd i) . getKey t . keyValue . fst $ i  ) kva
 
-dropTable (Raw sch tbl _ _ _ _ )= "DROP TABLE "<> sch <>"."<> tbl
+dropTable r@(Raw sch tbl _ _ _ _ )= "DROP TABLE "<> rawFullName r
 
-createTable (Raw sch tbl pk _ fk attr) = "CREATE TABLE " <> sch <>"."<> tbl <> "\n(\n" <> T.intercalate "," commands <> "\n)"
+rawFullName (Raw (sch,tt) tbl _ _ _ _) = sch <> "." <> tbl
+
+createTable r@(Raw sch tbl pk _ fk attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n" <> T.intercalate "," commands <> "\n)"
   where commands = (renderAttr <$> S.toList attr ) <> [renderPK] <> fmap renderFK (S.toList fk)
         renderAttr k = keyValue k <> " " <> renderTy (keyType k)
         renderKeySet pk = T.intercalate "," (fmap keyValue (S.toList pk ))
@@ -866,7 +879,7 @@ data AliasPath a
     deriving(Show,Eq,Ord,Foldable)
 
 allAttrs' :: Table -> Set (AliasPath Key,(Table,Key))
-allAttrs' t@(Raw _ _ pk _ fk p) = S.map ((PathRoot,) . (t,)) $ S.union pk p
+allAttrs' r@(Raw _ _ _ _ _ _) = S.map ((PathRoot,) . (r,)) $ rawKeys r
 allAttrs' (Limit p _ ) = allAttrs' p
 allAttrs' (Filtered _ p) = allAttrs' p
 allAttrs' (Base _ p) =  snd $  from allAttrs' p
@@ -896,9 +909,10 @@ allAttrs' (Base _ p) =  snd $  from allAttrs' p
 
 
 
+rawKeys r = S.union (rawPK r ) (rawAttrs r)
 
 allAttrs :: Table -> Set KAttribute
-allAttrs t@(Raw _ _ pk _ fk p) = S.map(Metric) $ S.union pk p
+allAttrs r@(Raw _ _ _ _ _ _) = S.map(Metric) $ rawKeys r
 allAttrs (Limit p _ ) = allAttrs p
 allAttrs (Filtered _ p) = allAttrs p
 allAttrs (Project a p) = S.fromList $ F.toList a
@@ -908,7 +922,7 @@ allAttrs (Base _ p) = F.foldMap allAttrs p
 
 
 allKeys :: Table -> Set Key
-allKeys (Raw _ _ pk _ fk p) = S.union pk p
+allKeys r@(Raw _ _ _ _ _ _) = rawKeys r
 allKeys (Limit p _ ) = allKeys p
 allKeys (Filtered _ p) = allKeys p
 allKeys (Project _ p) = allKeys p

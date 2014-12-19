@@ -30,14 +30,18 @@ Extensions
   oo Basic Pandoc Generator
   -- Need Proper Header and Footer
 
-  -- Import WhatsApp 
-  -- Import log messages
+  o- Import WhatsApp 
+  oo Import log messages
   -- Process log with ibm whatson
   -- Debug error during insertion "returned command result"
 
 Multiple Schema joins
 -- Generate Queries with multiple schemas
 -- Join Graphs
+
+View Support
+oo Introspect views as tables
+-- Fix not null view fields
 
 
 Implement Proper LEFT JOIN
@@ -59,6 +63,7 @@ Client Side Filtering
 oo Basic Client Side Text Filtering
 -- Database FullText Filtering 
 -- Paginated Filtering
+-- Bug in interval comparison
 
 Aggregation
 oo Client Side aggregation

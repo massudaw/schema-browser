@@ -12,6 +12,7 @@ import Widgets
 import Data.Functor.Apply
 import Debug.Trace
 import Data.Ord
+import Data.Tuple
 import Schema
 import Data.Char (toLower)
 import Gpx
@@ -165,7 +166,7 @@ crudUITable
      -> UI (Element,Behavior (Maybe (TB1 (Key,Showable))),[Event (Modification Key Showable)])
 crudUITable conn inf tb@(TB1 (KV (PK k d) a)) oldItems = do
   let
-      tbCase td ix i@(FKT _ _) = fkUITable conn inf (fmap ((!!ix) .td .unTB1) <$> oldItems) i
+      tbCase td ix i@(FKT ifk _) = fkUITable conn inf (fromJust $ L.find (\(Path ifkp _ _) -> S.fromList ifk == ifkp) $ S.toList $ rawFKS table) (fmap ((!!ix) .td .unTB1) <$> oldItems) i
       tbCase td ix a@(Attr i) = attrUITable (fmap ((!!ix) .td .unTB1) <$> oldItems)  a
       mapMI f = Tra.mapM (uncurry f) . zip [0..]
       Just table = M.lookup (S.fromList $findPK tb) (pkMap inf)
@@ -273,19 +274,23 @@ attrNonRec (Attr i ) = [i]
 fkUITable
   :: Connection
   -> InformationSchema
+  -> Path Key (SqlOperation Text)
   -> Tidings (Maybe (TB (Key,Showable)))
   -> TB Key
   -> UI (Element,Behavior (Maybe (TB (Key, Showable))))
-fkUITable conn inf oldItems tb@(FKT ifk tb1) = mdo
+fkUITable conn inf (Path _ (FKJoinTable _ rel _ ) _ ) oldItems  tb@(FKT ifk tb1) = mdo
       let
           o1 = S.fromList $ findPK tb1
+          relTable = M.fromList $ fmap swap rel
           tdi :: Tidings (Maybe (TB1  (Key,Showable)))
           tdi =  fmap (\(FKT _ t) -> t) <$> oldItems
       res <- liftIO $ projectKey conn inf (projectAllRec' (tableMap inf )) o1
       l <- UI.span # set text (show ifk)
       box <- UI.listBox res2 tdi (pure (\v-> UI.span # set text (show $ kvKey $ unTB1 $  snd <$> v)))
       let
-        fksel = fmap (zipWith (\kn (ko,v)-> (kn,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v) )  ifk  ) <$>  facts (fmap findPK  <$> UI.userSelection box)
+        lookFKsel (ko,v)= (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
+          where kn = fromJust $ M.lookup ko relTable
+        fksel = fmap (fmap lookFKsel ) <$>  facts (fmap findPK  <$> UI.userSelection box)
         tdsel = fmap (\i -> FKT (zip ifk . fmap snd  . findPK $ i ) i)  <$>  UI.userSelection box
         edited = liftA2 (\i j -> join $ liftA2 (\i j-> if  i == j then Nothing else Just j ) i j) oldItems tdsel
       paint (getElement l) fksel
@@ -613,15 +618,24 @@ chooseKey conn  pg inf key = mdo
         Nothing -> Just []
         i -> i
      table = fromJust $ M.lookup key (pkMap inf)
-  (crud,_,evs) <- crudUITable conn inf (allRec (tableMap inf) table) (UI.userSelection  itemList) -- UI.userSelection itemList)
-  let eres = fmap (addToList  (allRec (tableMap inf ) table )  <$> ) evs
-  res2 <- accumTds vp  eres
-  insertDiv <- UI.div # set children [crud]
+
+  let whenWriteable = do
+        if (snd ( rawSchema table) `elem` [WriteOnly,ReadWrite] )
+          then do
+            (crud,_,evs) <- crudUITable conn inf (allRec (tableMap inf) table) (UI.userSelection  itemList)
+            let eres = fmap (addToList  (allRec (tableMap inf ) table )  <$> ) evs
+            res2 <- accumTds vp  eres
+            insertDiv <- UI.div # set children [crud]
+            return (res2 ,Just ("CRUD",insertDiv) )
+          else do
+            return (vp,Nothing)
+  (res2,crud) <- whenWriteable
   filterSel <- UI.div # set children [getElement ff,getElement fkbox,getElement range, getElement filterItemBox]
   -- aggr <- UI.div # set children [getElement sel , count]
-  tab <- tabbed  [("CRUD",insertDiv),("FILTER",filterSel){-,("AGGREGATE", aggr)-},("PLUGIN",plugins),("SELECTED",selected)]
+  tab <- tabbed  (maybeToList crud <> [("FILTER",filterSel){-,("AGGREGATE", aggr)-},("PLUGIN",plugins),("SELECTED",selected)])
   itemSel <- UI.div # set children [filterInp,getElement sortList,getElement asc]
   UI.div # set children ([itemSel,getElement itemList,total,tab] )
+
 
 
 
@@ -864,7 +878,7 @@ wappImport conn inf _ _ = do
   pathInput <- UI.input  -- # set UI.type_ "file"
   b <- UI.button # set UI.text "Import"
   bhInp <- stepper "" (UI.valueChange pathInput)
-  v <- mapM (fkUITable conn inf (pure Nothing)  . fmap snd . fkCase (tableMap inf) False PathRoot) $ S.toList ifk
+  v <- mapM (\path -> fkUITable conn inf path (pure Nothing)  . fmap snd . fkCase (tableMap inf) False PathRoot $ path) $ S.toList ifk
   let
       ninputs = allMaybes <$> (fkattrsB (pure mempty) (snd <$> v))
   output <- UI.div # set children (fst <$> v)
