@@ -235,6 +235,8 @@ renderedType key f b = go key
             (KOptional (KArray (Primitive i))) ->  SOptional . fmap SComposite . getCompose  <$> prim i f b
             (KOptional (KInterval (Primitive i))) -> SOptional . fmap SInterval . getCompose  <$> prim i f b
             (KSerial (KOptional (Primitive i))) -> SSerial . fmap SOptional . getCompose <$> prim i f b
+            (KOptional (KOptional (Primitive i))) -> SOptional . fmap SOptional . getCompose <$> prim i f b
+            (KOptional (KOptional (KOptional (Primitive i)))) -> SOptional . fmap (SOptional . fmap SOptional . getCompose) .  getCompose <$> prim i f b
             (Primitive i) ->  unOnly <$> prim  i f b
             i ->  error $ "missing case renderedType: " <> (show i)
 

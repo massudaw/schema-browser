@@ -43,12 +43,19 @@ View Support
 oo Introspect views as tables
 -- Fix not null view fields
 
+oo Hide Insert and Edit operations for views
+-- Can represent queriable plugins and do joins
+
+Write Only Tables
+--  Can represent some plugins that do insertions
 
 Implement Proper LEFT JOIN
 oo Left Join ( Need subquery after the join)
 oo Propagating null fields over the join chain
 -- Subquery after leftJoin
 -- Check Maybe (FK Field) support
+-- Propagate nulabitiy when relations is left join
+   over all the application
 
 Implement Absolute attribute name for multiple same table join
 oo create alias for globalname (name size limit)

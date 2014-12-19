@@ -768,14 +768,14 @@ allAliasedRec i t = tb1Rec False PathRoot i t
 tb1Rec isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
   let
       baseCase = KV (PK (fun k) (fun (S.fromList $ F.toList desc)))  (fun (maybe attr (`S.delete` attr) desc))
-      leftFst True keys = fmap (fmap (\((Key a al b c  e) ) -> ( Key a al b c  (makeOptional e)))) keys
+      leftFst True keys = fmap (fmap (\((Key a al b c  e) ) -> ( Key a al b c  (KOptional e)))) keys
       leftFst False keys = keys
       fun items = fmap Attr (fmap (p,) $ F.toList $ items `S.difference` fkSet ) <> (fkCase invSchema isOpt p <$> filter (\(Path ifk _ _) -> ifk `S.isSubsetOf` items ) (F.toList fk) )
       fkSet = S.unions $  fmap (\(Path ifk _ _) -> ifk)  $S.toList fk
   in leftFst isOpt  $ TB1 baseCase
 
 fkCase invSchema isOpt p (Path ifk (FKJoinTable bt kv nt)  o ) = FKT  ((p,) <$>S.toList ifk)  {- $ fmap substBind -} (tb1Rec isOptional (aliasKeyValue ifk ) invSchema (fromJust (M.lookup nt  invSchema )))
-            where isOptional = any (isKOptional . keyType . fst) (F.toList kv) || isOpt
+            where isOptional = any (isKOptional . keyType ) (F.toList ifk)
                   bindMap = M.fromList $ fmap swap kv
                   aliasKeyValue k
                      =  (PathCons $ S.map (,p) k)

@@ -127,10 +127,10 @@ databaseChooser = do
 
 -- TODO: Remove Normalization to avoid inconsistencies
 unSSerial (SSerial i ) = i
-unSSerial i = traceShow ("No Pattern Match SSerial " <> show i) Nothing
+unSSerial i = traceShow ("No Pattern Match SSerial-" <> show i) Nothing
 
 unSOptional (SOptional i ) = i
-unSOptional i = traceShow ("No Pattern Match SOptional" <> show i) Nothing
+unSOptional i = traceShow ("No Pattern Match SOptional-" <> show i) Nothing
 
 buildUI i  tdi = case i of
          (KOptional ti) -> fmap (Just . SOptional) <$> buildUI ti (join . fmap unSOptional <$> tdi)
@@ -278,12 +278,13 @@ fkUITable
   -> Tidings (Maybe (TB (Key,Showable)))
   -> TB Key
   -> UI (Element,Behavior (Maybe (TB (Key, Showable))))
-fkUITable conn inf (Path _ (FKJoinTable _ rel _ ) _ ) oldItems  tb@(FKT ifk tb1) = mdo
+fkUITable conn inf (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT ifk tb1) = mdo
       let
           o1 = S.fromList $ findPK tb1
+          isLeftJoin = any isKOptional $  keyType <$> F.toList rl
           relTable = M.fromList $ fmap swap rel
           tdi :: Tidings (Maybe (TB1  (Key,Showable)))
-          tdi =  fmap (\(FKT _ t) -> t) <$> oldItems
+          tdi =  (if isLeftJoin then join . fmap (\(FKT _ t) -> Tra.sequence $  unkeyOptional  <$> t ) else fmap (\(FKT _ t )-> t) ) <$> oldItems
       res <- liftIO $ projectKey conn inf (projectAllRec' (tableMap inf )) o1
       l <- UI.span # set text (show ifk)
       box <- UI.listBox res2 tdi (pure (\v-> UI.span # set text (show $ kvKey $ unTB1 $  snd <$> v)))
@@ -295,15 +296,19 @@ fkUITable conn inf (Path _ (FKJoinTable _ rel _ ) _ ) oldItems  tb@(FKT ifk tb1)
         edited = liftA2 (\i j -> join $ liftA2 (\i j-> if  i == j then Nothing else Just j ) i j) oldItems tdsel
       paint (getElement l) fksel
       chw <- checkedWidget
-      (celem,tcrud,evs) <- crudUITable conn inf tb1 (UI.userSelection box)
+      (celem,tcrud,evs) <- crudUITable conn inf (if isLeftJoin then unKOptional <$> tb1  else tb1 ) (UI.userSelection box)
       let eres = fmap (addToList  (allRec (tableMap inf) (fromJust $ M.lookup o1 (pkMap inf))) <$> ) evs
       res2  <-  accumTds (pure res) eres
       element celem
         # sink UI.style (noneShow <$> (facts $ triding chw))
         # set style [("padding-left","10px")]
       fk <- UI.li # set  children [l, getElement box,getElement chw,celem]
-      let bres =  liftA2 (liftA2 FKT) fksel  tcrud
+      let bres =  liftA2 (liftA2 FKT) fksel  (if isLeftJoin then fmap (fmap keyOptional) <$> tcrud else tcrud )
       return (fk,bres)
+
+keyOptional ((Key a b c d e) ,v) = (Key a b c d (KOptional e)  ,SOptional $ Just v)
+unkeyOptional ((Key a b c d (KOptional e)) ,(SOptional v) ) = fmap (Key a b c d e  , ) v
+unKOptional ((Key a b c d (KOptional e))) = (Key a b c d e )
 
 addToList i  (Insert m) =  (\i-> mappend (fmap ((\(k,v)-> (k, v)))  <$> maybeToList i) ) (editedMod  i m )
 addToList i  (Delete m ) =  (\i-> concat . L.delete (fmap ((\(k,v)-> (k, v)))  <$> maybeToList i)  . fmap pure ) (editedMod  i  m )
