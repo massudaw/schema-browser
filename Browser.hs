@@ -700,13 +700,13 @@ strAttr name = mkWriteAttr (set' (attr name))
 renderUrlM args url = fmap address . kv
   where
     kv i = allMaybes $ (\k -> join . fmap (\inp ->  fmap (snd k,) . M.lookup (fst k) . M.fromList $ fmap (\(k,v)-> (keyValue k,v)) inp ) $  i ) <$> args
-    renderKv = HTTP.urlEncodeVars . fmap (\(k,v)-> (k , show v))
+    renderKv = HTTP.urlEncodeVars . fmap (\(k,v)-> (k , renderShowable v))
     address i =  url <> "?"  <> renderKv i
 
 renderUrl args url = address
   where
     kv i = catMaybes $ (\k -> join . fmap (\inp ->  fmap (snd k,) . M.lookup (fst k) . M.fromList $ fmap (\(k,v)-> (keyValue k,v)) inp ) $  i ) <$> args
-    renderKv = HTTP.urlEncodeVars . fmap (\(k,v)-> (k , show v))
+    renderKv = HTTP.urlEncodeVars . fmap (\(k,v)-> (k , renderShowable v))
     address i =  url <> "?"  <> renderKv (kv i)
 -- This Iframe needs cross reference scripting enabled in the browser , this implies big security concerns
 renderUrlWithKeys args url inputs =   element
@@ -755,7 +755,6 @@ lookTable inf t = justError ("no table: " <> T.unpack t) $ M.lookup t (tableMap 
 
 
 queryAndamento4 conn inf k inputs = fmap (snd $ fromJust .L.find ((== "project_description") . keyValue . fst )$ inputs,) <$> (  runMaybeT $ do
-                MaybeT $ return $ if elem "aproval_date" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs ) then Nothing else Just undefined
                 let tableName = "fire_project"
                     fire_project = lookTable inf "fire_project"
                     andamento = lookTable inf "andamento"
@@ -772,18 +771,22 @@ queryAndamento4 conn inf k inputs = fmap (snd $ fromJust .L.find ((== "project_d
                     return $  (lkeys,mod)
                    else do return $ (fmap (\i-> [i])   $ L.find ((== "id_bombeiro") .  keyValue . fst) inputs,Nothing)
                 let
-                    addrs_a ="http://siapi.bombeiros.go.gov.br/consulta/consulta_andamento.php"
-                    translate_a = [("id_bombeiro" , "id")]
-                tq <-  getRequest . traceShowId . (renderUrl translate_a addrs_a)  $  lkeys
-                let
-                  tq2 =  T.unpack $  decodeLatin1 tq
-                  convertAndamento [da,desc] = [("andamento_date",SDate . Finite . localDay . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  desc))]
-                  convertAndamento i = error $ "convertAndamento:  " <> show i
-                  tkeys v =  M.mapKeys (justError "attr table andamento" . flip M.lookup (keyMap inf) . ("andamento" :: Text,)  )  v
-                  prepareArgs  = fmap ( tkeys . M.fromList . convertAndamento ) .  tailEmpty . concat
-                  lookInput = justError "could not find id_project" . fmap (\(k,v) -> let k1 = fromJust $ M.lookup ("andamento","id_project") (keyMap inf) in (k1, transformKey (textToPrim <$> keyType k)  (textToPrim <$> keyType k1) v) ) . L.find ((== "id_project") . keyValue . fst)
-                  insertAndamento :: String -> MaybeT IO [Maybe (TableModification Showable)]
-                  insertAndamento i  =  C.lift $ do
+                  tkeys t v =  M.mapKeys (justError "attr table andamento" . flip M.lookup (keyMap inf) . (t ,)  )  v
+                  insertAndamento :: MaybeT IO [Maybe (TableModification Showable)]
+                  insertAndamento   = do
+                    let
+                        addrs_a ="http://siapi.bombeiros.go.gov.br/consulta/consulta_andamento.php"
+                        translate_a = [("id_bombeiro" , "id")]
+                    MaybeT $ return $ if elem "aproval_date" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs )  then Nothing else Just undefined
+                    tq <-  getRequest . traceShowId . (renderUrl translate_a addrs_a)  $  lkeys
+                    let
+                      i =  T.unpack $  decodeLatin1 tq
+                      convertAndamento [da,desc] = [("andamento_date",SDate . Finite . localDay . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  desc))]
+                      convertAndamento i = error $ "convertAndamento:  " <> show i
+                      prepareArgs  = fmap ( tkeys "andamento". M.fromList . convertAndamento ) .  tailEmpty . concat
+                      lookInput = justError "could not find id_project" . fmap (\(k,v) -> let k1 = fromJust $ M.lookup ("andamento","id_project") (keyMap inf) in (k1, transformKey (textToPrim <$> keyType k)  (textToPrim <$> keyType k1) v) ) . L.find ((== "id_project") . keyValue . fst)
+
+                    C.lift $ do
                       html <- readHtml $ i
                       let
                           args :: S.Set (Map Key Showable)
@@ -794,10 +797,21 @@ queryAndamento4 conn inf k inputs = fmap (snd $ fromJust .L.find ((== "project_d
                       vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) andamento )
 
                       let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . concat . F.toList . fmap attrNonRec . unTB1) vp) :: S.Set (Map Key Showable)
-                      adds <- traceShow ("KK " <> show kk <> " \n ARGS " <> show args) $ mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
+                      adds <- {-traceShow ("KK " <> show kk <> " \n ARGS " <> show args) $-} mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
                       return $ mod : adds
-                v <- insertAndamento tq2
-                let mods =catMaybes $  modB : v
+
+                  updateSolicitacao :: MaybeT IO (Maybe (TableModification Showable))
+                  updateSolicitacao = do
+                    MaybeT $ return $ if elem "area" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs )  then Nothing else Just undefined
+                    let  addrs_b ="http://siapi.bombeiros.go.gov.br/consulta/consulta_solicitacao.php"
+                         translate_b = [("id_bombeiro" ,"id")]
+                    tq3 <-  getRequest . traceShowId . (renderUrl translate_b addrs_b)  $  lkeys
+                    htmlSoli <- C.lift $ testSolicitation tq3
+                    let tq4 = catMaybes .fmap Tra.sequence . M.toList . tkeys  "fire_project" . M.fromList $ htmlSoli
+                    C.lift $ updateMod  conn tq4 inputs fire_project
+                and <-  C.lift $ concat . maybeToList <$> runMaybeT insertAndamento
+                sol <-  C.lift $ maybeToList <$> runMaybeT updateSolicitacao
+                let mods =  catMaybes (  modB :  and  <> sol)
                 mapM (C.lift . logTableModification inf conn) mods
                 MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) mods )
 
@@ -822,6 +836,37 @@ bradescoRead file = do
   file <- TE.decodeLatin1 <$> BS.readFile file
   let result =  fmap (fmap TE.unpack . L.take 5) $ filter (\(i:xs) -> isJust $ strptime "%d/%m/%y" (TE.unpack i)) $ filter ((>5) . length) $  TE.split (';'==) <$> TE.split (=='\r') file
   return result
+
+testIAG = do
+  f <- BSL.readFile "testiag.html"
+  testSolicitation f
+testFranklin = do
+  f <- BSL.readFile "solicitacao.html"
+  testSolicitation f
+testHimalaia= do
+  f <- BSL.readFile "himalaia.html"
+  testSolicitation f
+
+testSolicitation f = do
+  -- f <- BSL.readFile "solicitacao.html"
+  let dec =  decodeLatin1 f
+  html <-  (head . traceShowId <$> readHtml (traceShowId . T.unpack $ dec ))
+  let packed = fmap (fmap T.pack) html
+      log = fmap (splitAt 2) $ safeHead $ filter ((==4).length) packed
+      tx = fmap (splitAt 2) $ safeHead $ filter (T.isInfixOf "TAXA" . head ) $ filter ((==3).length) packed
+      translateSolicitation :: [(Text,(Text,Text-> Maybe Showable))]
+      translateSolicitation  =
+        [("ÁREA CONSTRUÍDA",("area",(\i-> SDouble <$> readMaybe (T.unpack $ fst $ T.break (' '==) i))))
+        ,("VALOR  DA TAXA",("taxa_aprovacao",(\i -> SDouble <$> readMaybe (T.unpack $ fst $ T.breakOn ("\160") i))))
+        ,("LOCAL DE ATENDIMENTO",("local_atendimento",fmap SText . nonEmpty ))
+        ,("REGIÃO DE ATENDIMENTO",("regiao_atendimento",fmap SText . nonEmpty ))
+        ,("TAXA PAGA",("taxa_paga",fmap SBoolean . readMaybe . T.unpack))
+        ]
+      nonEmpty "" = Nothing
+      nonEmpty i = Just i
+      keyvalue = fmap (\[i,j]-> (T.strip $ fst (T.breakOn "..:" i) ,j)) $ (filter ((==2). length) $  traceShowId  $ packed <> maybe [] (\(logr,num) -> [logr,num]) log  <> maybe [["TAXA PAGA..:","True"]] (\(taxa,apagar) -> [taxa,["TAXA PAGA..:", T.pack $ show $ not $ T.isInfixOf "TAXA A RECOLHER" dec ]] ) tx)
+      result =  catMaybes .fmap (\(k,v) -> fmap ($v) <$> M.lookup k (M.fromList translateSolicitation))
+  return $ (result keyvalue)
 
 
 bradescoExtractTxt  conn  inf  _ inputs = do

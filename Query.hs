@@ -533,7 +533,7 @@ addJoin tnew f p = case mapPath tnew  f p of
             Right i -> i
     where
         filterFst t = S.filter ((`S.member` allKeys t) . fst )
-        filterLeftFst t f = S.map (\((Key a al b c  e) ,j) -> ( Key a al b c  (makeOptional e),j)) keys
+        filterLeftFst t f = S.map (\((Key a al b c  e) ,j) -> ( Key a al b c  (e),j)) keys
             where keys =  S.filter ((`S.member` allKeys t) . fst ) f
 
         --mapPath :: (Show a,Show b,Ord b,Ord a) => a -> Set b -> JoinPath b a -> Either (Set (a,b)) (JoinPath b a)
@@ -797,7 +797,7 @@ projectAllRec' invSchema =  do
       aliasMap =   fmap fst $ M.fromList $ aliasJoin table1
       alterName ak@(p,Key k al a b c ) = (Key k (Just $ justError ("lookupAlias "  <> show ak <> " " <> show aliasMap )$ M.lookup ak aliasMap ) a b c )
   put (schema,Project (F.toList attrs ) table1 )
-  return $ trace ("projectDescAllRec: " <> show attrs ) attrs
+  return {-$ trace ("projectDescAllRec: " <> show attrs )-} attrs
 
 
 justError e (Just i) = i

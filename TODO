@@ -49,6 +49,10 @@ oo Hide Insert and Edit operations for views
 Write Only Tables
 --  Can represent some plugins that do insertions
 
+Type Checking
+-- Implement Key Value checks to assert KType
+   and Showable are type correct
+
 Implement Proper LEFT JOIN
 oo Left Join ( Need subquery after the join)
 oo Propagating null fields over the join chain
