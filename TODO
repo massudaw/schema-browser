@@ -17,6 +17,10 @@ Extensions
   oo Diff
   oo Persistence
 
+  -o Fire Project
+  oo Implement Solicitation parser
+  -- Normalize local_atendimento and regiao_atendimento
+
   oo CEP 
   oo Input
   oo Return
@@ -38,6 +42,10 @@ Extensions
 Multiple Schema joins
 -- Generate Queries with multiple schemas
 -- Join Graphs
+
+Types UI 
+-- Improve Especialized type UI
+-- getCurrentTime button
 
 View Support
 oo Introspect views as tables

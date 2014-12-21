@@ -136,24 +136,47 @@ buildUI i  tdi = case i of
          (KOptional ti) -> fmap (Just . SOptional) <$> buildUI ti (join . fmap unSOptional <$> tdi)
          (KSerial ti) -> fmap (Just . SSerial) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
          (KArray ti)  -> do
-          let
-              justCase i j@(Just _) = j
-              justCase i Nothing = i
-          inputUI <- UI.textarea # sink UI.value (facts (forceDefaultType  <$> tdi)) # set UI.style [("width","300px"),("height","60px"),("vertical-align","middle")]
-          let pke = foldl1 (unionWith justCase ) [readType (textToPrim <$> i) <$> UI.valueChange inputUI,rumors  tdi]
-          pk <- stepper (defaultType i)  pke
-          let pkt = tidings pk pke
-          return $ TrivialWidget pkt inputUI
+            inputUI <- UI.textarea # sink UI.value (facts (forceDefaultType  <$> tdi)) # set UI.style [("width","300px"),("height","60px"),("vertical-align","middle")]
+            let pke = foldl1 (unionWith justCase) [readType i <$> UI.valueChange inputUI,rumors  tdi]
+            pk <- stepper (defaultType i)  pke
+            let pkt = tidings pk pke
+            return $ TrivialWidget pkt inputUI
+         (KInterval ti) -> do
+            inf <- buildUI ti (fmap (\(SInterval i) ->Interval.inf i) <$> tdi)
+            sup <- buildUI ti (fmap (\(SInterval i) ->Interval.sup i) <$> tdi)
+            composed <- UI.span # set UI.children (fmap getElement [inf,sup])
+            let td = (\m n -> fmap SInterval $ join $ liftF2 Interval.interval m n) <$> triding inf  <*> triding sup
+            return $ TrivialWidget td composed
+         (Primitive PTimestamp) -> do
+            itime <- liftIO $  getCurrentTime
+            timeButton <- UI.button # set UI.text "now"
+            let evCurr = unsafeMapIO (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
+            currentTime <- stepper Nothing evCurr
+            let
+                tdcurr = fmap (STimestamp . Finite . utcToLocalTime utc)  <$> tidings currentTime evCurr
+                tdi2 = foldrTds justCase tdcurr [tdi]
+            oneInput tdi2 [timeButton]
+         (Primitive PDate) -> do
+            itime <- liftIO $  getCurrentTime
+            timeButton <- UI.button # set UI.text "now"
+            let evCurr = unsafeMapIO (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
+            currentTime <- stepper Nothing evCurr
+            let
+                tdcurr = fmap (SDate . Finite . localDay . utcToLocalTime utc)  <$> tidings currentTime evCurr
+                tdi2 = foldrTds justCase tdcurr [tdi]
+            oneInput tdi2 [timeButton]
          z -> do
-          let
-              justCase i j@(Just _) = j
-              justCase i Nothing = i
-          inputUI <- UI.input # sink UI.value (facts (forceDefaultType  <$> tdi))
-          let pke = foldl1 (unionWith justCase ) [readType (textToPrim <$> i) <$> UI.valueChange inputUI,rumors  tdi]
-          pk <- stepper (defaultType i)  pke
-          let pkt = tidings pk pke
-          return $ TrivialWidget pkt inputUI
-
+            oneInput tdi []
+  where
+    justCase i j@(Just _) = j
+    justCase i Nothing = i
+    oneInput tdi elem = do
+            inputUI <- UI.input # sink UI.value (facts (forceDefaultType  <$> tdi))
+            let pke = foldl1 (unionWith justCase ) [readType i <$> UI.valueChange inputUI,rumors  tdi]
+            pk <- stepper (defaultType i)  pke
+            let pkt = tidings pk pke
+            sp <- UI.span # set children (inputUI : elem)
+            return $ TrivialWidget pkt sp
 
 
 ifApply p f a = if p a then f a else a
@@ -249,13 +272,13 @@ attrUITable  tAttr' (Attr i) = do
       let tdi = tAttr -- foldrTds justCase plugItens [tAttr]
           justCase i j@(Just _) = j
           justCase i Nothing = i
-      attrUI <- buildUI (keyType i) tdi
+      attrUI <- buildUI (textToPrim <$> keyType i) tdi
       expandEdit <- checkedWidget
       let
           ei (Just a) = Just a
           ei Nothing = defaultType (keyType i)
-      e <- buildUI (keyType i) tAttr
-      eplug <- buildUI (keyType i) (pure Nothing)
+      e <- buildUI (textToPrim <$>keyType i) tAttr
+      eplug <- buildUI (textToPrim <$>keyType i) (pure Nothing)
       element e # sink UI.style (noneShowSpan <$> (facts $ triding expandEdit)) # set UI.enabled False
       element eplug # sink UI.style (noneShowSpan <$> (facts $ triding expandEdit)) # set UI.enabled False
       paint l (facts $ triding attrUI )
@@ -584,17 +607,24 @@ chooseKey conn  pg inf key = mdo
   asc <- checkedWidget
   let listManip :: (Show (f (Key,Showable)), F.Foldable f) => String ->[f (Key,Showable)] -> Maybe Key -> Bool -> [f (Key,Showable)]
       listManip i j Nothing  _ =  filtering  i j
-      listManip i j (Just s) b  = filtering i .  L.sortBy ( ifApply (const b) flip (comparing (M.lookup s .M.fromList . F.toList )) ) $ (F.toList j)
+      listManip i j (Just s) b  =   L.sortBy ( ifApply (const b) flip (comparing (fmap snd .F.find ((== s).fst) )) ) $ filtering i j
       filtering i= filter (L.isInfixOf (toLower <$> i) . fmap toLower . show )
       listRes = listManip  <$> filterInpT <*> res2 <*> UI.userSelection sortList <*> triding asc
       reducer (SDouble i) (SDouble j)  =  SDouble $ i + j
+      reducer (SOptional i) (SOptional j)  =  SOptional $ liftF2 reducer  i  j
+      reducer (SSerial i) (SSerial j)  =  SSerial $ liftF2 reducer  i  j
       reducer i j = error $ "not reducible : " <> show i <> " - " <> show j
       isReducible (Primitive PDouble)  = True
+      isReducible (KOptional i )  =  isReducible i
+      isReducible (KSerial i )  =  isReducible i
       isReducible i = False
 
   itemList <- UI.listBox listRes  (pure Nothing) (pure (\i -> line $ show  $ allKVRec $ fmap snd i))
   element itemList # set UI.style [("width","100%"),("height","300px")]
-  total <- UI.div  # sink UI.text (("Total: " <> ) . show . (\k-> foldr (M.unionWith reducer ) M.empty (  M.fromList . filter(isReducible . fmap textToPrim . keyType . fst) . F.toList <$> k )) <$>  facts listRes)
+  let foldr1Safe f [] = []
+      foldr1Safe f xs = foldr1 f xs
+  total <- UI.div  # sink UI.text (("Total: " <> ) . show . (\k-> foldr1Safe (zipWith (\(k,v) (k1,v1) -> (k,reducer v v1)) )  ( filter(isReducible . fmap textToPrim . keyType . fst) . F.toList <$> k )) <$>  facts listRes)
+
   let
     categoryT1 :: Tidings (Map Key [Filter])
     categoryT1 = M.fromListWith mappend <$> (filterMaybe (fmap (\(fkv,kv)-> (fkv,[Category (S.fromList kv)]))) <$> arg)
