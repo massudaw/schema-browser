@@ -13,6 +13,7 @@ import Data.Functor.Apply
 import Debug.Trace
 import Data.Ord
 import Data.Tuple
+import OAuth
 import Schema
 import Data.Char (toLower)
 import Gpx
@@ -98,7 +99,7 @@ setup w = void $ do
   getBody w #+ [element chooserDiv]
   onEvent evDB $ (\(conn,inf@(_,baseTables,_,schema,invSchema,graphP))-> do
     let k = M.keys baseTables
-    let pg = catMaybes [pluginWapp inf ,pluginBradescoCsv inf,pluginItauTxt inf ,pluginAndamentoId inf , pluginBombeiro inf ,pluginCnpjReceita inf ,pluginCEP inf,{-solicitationPlugin inf,-} pluginOrcamento inf]
+    let pg = catMaybes [pluginOAuth inf ,pluginWapp inf ,pluginBradescoCsv inf,pluginItauTxt inf ,pluginAndamentoId inf , pluginBombeiro inf ,pluginCnpjReceita inf ,pluginCEP inf,{-solicitationPlugin inf,-} pluginOrcamento inf]
         poll = catMaybes [pollingAndamento inf ]
     span <- chooserKey  conn pg inf k
     poll <- poller conn poll inf
@@ -126,6 +127,7 @@ databaseChooser = do
   return $ (unsafeMapIO id $ genSchema <$> (facts $ UI.userSelection dbsW ) <*> (facts $ UI.userSelection schW) <@ UI.click load,chooserDiv)
 
 -- TODO: Remove Normalization to avoid inconsistencies
+
 unSSerial (SSerial i ) = i
 unSSerial i = traceShow ("No Pattern Match SSerial-" <> show i) Nothing
 
@@ -273,7 +275,7 @@ attrUITable  tAttr' (Attr i) = do
           justCase i j@(Just _) = j
           justCase i Nothing = i
       attrUI <- buildUI (textToPrim <$> keyType i) tdi
-      expandEdit <- checkedWidget
+      expandEdit <- checkedWidget (pure False)
       let
           ei (Just a) = Just a
           ei Nothing = defaultType (keyType i)
@@ -318,7 +320,7 @@ fkUITable conn inf (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT ifk t
         tdsel = fmap (\i -> FKT (zip ifk . fmap snd  . findPK $ i ) i)  <$>  UI.userSelection box
         edited = liftA2 (\i j -> join $ liftA2 (\i j-> if  i == j then Nothing else Just j ) i j) oldItems tdsel
       paint (getElement l) fksel
-      chw <- checkedWidget
+      chw <- checkedWidget (pure False)
       (celem,tcrud,evs) <- crudUITable conn inf (if isLeftJoin then unKOptional <$> tb1  else tb1 ) (UI.userSelection box)
       let eres = fmap (addToList  (allRec (tableMap inf) (fromJust $ M.lookup o1 (pkMap inf))) <$> ) evs
       res2  <-  accumTds (pure res) eres
@@ -354,6 +356,7 @@ data Plugins
   ,_inputs :: (Table, S.Set Key)
   , _action :: Connection -> InformationSchema -> Plugins -> Tidings (Maybe [(Key,Showable)]) -> UI (Element,Tidings (Maybe (Map Key Showable)) )
   }
+
 data  PollingPlugins = PollingPlugins
   { _pollingName :: String
   , _pollingTime :: Int
@@ -506,11 +509,11 @@ filterWidget conn inf bBset filterT = do
   fkbox <- UI.listBox (liftA2 (<>) (fmap S.singleton .S.toList <$> bBset) bFk) (const <$> pure Nothing <*> fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
 
   -- Filter Query
-  bp <- joinT $ (\i j-> maybe (return []) id (fmap (doQuery conn inf projectDesc i) j)) <$> triding ff <*> UI.userSelection fkbox
-  rangeWidget <- rangeBoxes (UI.userSelection fkbox)  bp
+  bp <- joinT $ (\i j-> maybe (return []) id (fmap (doQuery conn inf (projectAllRec' (tableMap inf) )  i) j)) <$> triding ff <*> UI.userSelection fkbox
+  rangeWidget <- rangeBoxes (UI.userSelection fkbox)  (fmap (kvKey . allKVRec ) <$> bp)
 
   -- Filter Selector
-  filterItemBox <- UI.multiListBox bp (const <$> pure [] <*> UI.userSelection fkbox) (pure (\i-> UI.li # set text (show i)))
+  filterItemBox <- UI.multiListBox (fmap (kvKey . allKVRec) <$> bp) (const <$> pure [] <*> UI.userSelection fkbox) (pure (\i-> UI.li # set text (show i)))
   return  (filterItemBox,fkbox, rangeWidget ,ff)
 
 line n = UI.li # set  text n
@@ -521,17 +524,17 @@ tableElem h b =  grid $ header h : body b
 	      st i = UI.div # set text (show  i) # set UI.style [("padding","5px"),("border-width","1px"),("border-color","gray"),("border-style","solid")]
 
 
-selectedItems conn inf ff key = do
+selectedItems enabled conn inf ff key = do
   let
     invItems :: Tidings [(S.Set Key , Path Key (SqlOperation Table))]
     invItems = ((\k -> case  M.lookup k (hashedGraphInv inf) of
             Just invItems ->  M.toList invItems
             Nothing -> [] )) <$> key
   let
-    query i j
-      | M.null i = return []
+    query ena i j
+      | M.null i  || not ena = return []
       | otherwise = fmap catMaybes $ mapM (\k-> fmap (fmap (fst k,)) . (`catch` (\e-> flip const (e :: SomeException)  $ return $ traceShow e  Nothing ) ) . fmap Just . doQueryTable conn inf (projectTableAttrs  (fromJust $ M.lookup (fst k) $ pkMap inf )) i.  fst $ k ) j
-  bp <- joinT $ (query <$> ff <*> invItems)
+  bp <- joinT $ (query <$> enabled <*> ff <*> invItems)
   body <- UI.div # sink items (fmap (\(v,i) -> UI.div # set items (UI.div # set text (showVertex  v ) : [tableElem  (F.toList $ fst i) $ fmap F.toList (snd i)]) )  . filter (not . null . snd .snd)  <$> facts bp)
   UI.div # set children [body]
 
@@ -568,9 +571,9 @@ chooseKey conn  pg inf key = mdo
       | S.null j = return []
       | otherwise = doQuery conn inf (aggAll  (pkMap inf) (S.toList j) ka)  i k-}
 
-  let pkFields = allAttrs . fromJust . (flip M.lookup (pkMap inf)) <$> bBset
-      aggregators = (concat . fmap (\i->  flip availableAggregators i . primType $ i) . S.toList <$> pkFields )
-  let aset = flip buttonSet show <$> facts aggregators
+  -- let pkFields = allAttrs . fromJust . (flip M.lookup (pkMap inf)) <$> bBset
+  -- aggregators = (concat . fmap (\i->  flip availableAggregators i . primType $ i) . S.toList <$> pkFields )
+  -- let aset = flip buttonSet show <$> facts aggregators
 
   -- Filter Map Selected
   let
@@ -604,13 +607,13 @@ chooseKey conn  pg inf key = mdo
       filterIntervalSort (KOptional i) = filterIntervalSort i
       filterIntervalSort i = True
   sortList  <- UI.listBox sortSet ((safeHead . F.toList) <$> sortSet) (pure (line . show  ))
-  asc <- checkedWidget
+  asc <- checkedWidget (pure False)
   let listManip :: (Show (f (Key,Showable)), F.Foldable f) => String ->[f (Key,Showable)] -> Maybe Key -> Bool -> [f (Key,Showable)]
       listManip i j Nothing  _ =  filtering  i j
       listManip i j (Just s) b  =   L.sortBy ( ifApply (const b) flip (comparing (fmap snd .F.find ((== s).fst) )) ) $ filtering i j
       filtering i= filter (L.isInfixOf (toLower <$> i) . fmap toLower . show )
       listRes = listManip  <$> filterInpT <*> res2 <*> UI.userSelection sortList <*> triding asc
-      reducer (SDouble i) (SDouble j)  =  SDouble $ i + j
+      reducer i@(SDouble _) j@(SDouble _)  =  i + j
       reducer (SOptional i) (SOptional j)  =  SOptional $ liftF2 reducer  i  j
       reducer (SSerial i) (SSerial j)  =  SSerial $ liftF2 reducer  i  j
       reducer i j = error $ "not reducible : " <> show i <> " - " <> show j
@@ -634,12 +637,14 @@ chooseKey conn  pg inf key = mdo
   sel <- UI.multiListBox (pure bFk) (pure bFk) (pure (line . showVertex))
   -- t <- joinT $ aggQuery  <$> (M.unionWith mappend <$> categoryT1 <*> triding ff) <*> (S.unions <$> UI.multiUserSelection sel) <*> aggregators <*> bBset
   -- count <- UI.div # sink text (fmap show $ facts t)
-
-  selected <- selectedItems conn inf categoryT1  bBset
+  selCheck <- checkedWidget (pure False)
+  selected <- selectedItems (triding selCheck) conn inf categoryT1  bBset
   element (getElement itemList) # set UI.multiple True
   element (getElement filterItemBox) # set UI.multiple True
-  res  <- mapM (\i -> pluginUI conn inf i (fmap F.toList <$> UI.userSelection itemList  ) )   (filter (\(Plugins n tb _ )-> S.isSubsetOf  (snd tb) (attrSet (pkMap inf) (fromJust $ M.lookup key (pkMap inf)))  ) pg )
-  plugins <- UI.div # set children (fst <$> res)
+  pluginsChk <- checkedWidget (pure False)
+  res  <- mapM (\i -> pluginUI conn inf i ((\i j ->if i then fmap F.toList j else Nothing) <$> triding pluginsChk <*> UI.userSelection itemList  ) )   (filter (\(Plugins n tb _ )-> S.isSubsetOf  (snd tb) (attrSet (pkMap inf) (fromJust $ M.lookup key (pkMap inf)))  ) pg )
+  pluginsDiv <- UI.div # set children (fst <$> res)
+  let plugins = ("PLUGINS" ,(pluginsChk,pluginsDiv))
   let
       tdi2 = case snd <$> res of
         [] -> pure Nothing
@@ -661,13 +666,15 @@ chooseKey conn  pg inf key = mdo
             let eres = fmap (addToList  (allRec (tableMap inf ) table )  <$> ) evs
             res2 <- accumTds vp  eres
             insertDiv <- UI.div # set children [crud]
-            return (res2 ,Just ("CRUD",insertDiv) )
+            chk <- checkedWidget (pure True)
+            return (res2 ,Just ("CRUD",(chk,insertDiv)) )
           else do
             return (vp,Nothing)
   (res2,crud) <- whenWriteable
   filterSel <- UI.div # set children [getElement ff,getElement fkbox,getElement range, getElement filterItemBox]
   -- aggr <- UI.div # set children [getElement sel , count]
-  tab <- tabbed  (maybeToList crud <> [("FILTER",filterSel){-,("AGGREGATE", aggr)-},("PLUGIN",plugins),("SELECTED",selected)])
+  -- tab <- tabbed  (maybeToList crud <> [("FILTER",filterSel){-,("AGGREGATE", aggr)-},("PLUGIN",plugins),("SELECTED",selected)])
+  tab <- tabbedChk  ( maybeToList crud <>[("SELECTED",(selCheck ,selected)),plugins])
   itemSel <- UI.div # set children [filterInp,getElement sortList,getElement asc]
   UI.div # set children ([itemSel,getElement itemList,total,tab] )
 
@@ -699,6 +706,14 @@ poll :: (Ord a, Ord t) => String -> Int -> (Connection -> InformationSchema -> P
 poll name time fun table attr inf = flip (PollingPlugins name time) fun <$> genPlugin table attr inf
 
 pluginOrcamento = plug "Pricing Document" renderProjectPricing "pricing" ["pricing_price"]
+
+pluginOAuth = plug "Contact" pluginContactDiv "contact" ["id_contact"]
+
+pluginContactDiv conn inf p inp = do
+  b <- UI.button # set UI.text "query"
+  st <- stepper "" (unsafeMapIO (fmap show) (pure (pluginContact inf )<@ UI.click b))
+  e <- UI.div # sink UI.text st
+  (,pure Nothing ) <$> UI.div # set UI.children [b,e]
 
 pluginCEP = plug "CEP Correios" queryCEP2 "owner" ["id_owner"]
 
@@ -899,6 +914,9 @@ testSolicitation f = do
   return $ (result keyvalue)
 
 
+sdate  = SDate . Finite .localDay
+stimestamp  = STimestamp . Finite
+
 bradescoExtractTxt  conn  inf  _ inputs = do
     pathInput <- UI.input -- # set UI.type_ "file"
     b <- UI.button # set UI.text "Import"
@@ -908,8 +926,8 @@ bradescoExtractTxt  conn  inf  _ inputs = do
           let parse  = uncurry M.insert (lookInput inp )  . tkeys . parseField  <$> content
               lookInput = fromJust .L.find ((== "id_account") . keyValue . fst)
               tkeys v =  M.mapKeys (fromJust . flip M.lookup (keyMap inf) . ("transaction" :: Text,)  )  v
-              parseField [d,desc,_,v,""] = M.fromList [("transaction_date",SDate $ Finite $ localDay $ fst $ fromJust $ strptime "%d/%m/%y" d),("transaction_description",SText $ T.pack desc),("transaction_price", SDouble $ read $ fmap (\i -> if i == ',' then '.' else i) $ filter (not . (`elem` ".\"")) v)]
-              parseField [d,desc,_,"",v] = M.fromList [("transaction_date",SDate $ Finite $ localDay $ fst $ fromJust $ strptime "%d/%m/%y" d),("transaction_description",SText $ T.pack desc),("transaction_price", SDouble $ read $ fmap (\i -> if i == ',' then '.' else i) $ filter (not . (`elem` ".\"")) v)]
+              parseField [d,desc,_,v,""] = M.fromList [("transaction_date",sdate $ fst $ fromJust $ strptime "%d/%m/%y" d),("transaction_description",SText $ T.pack desc),("transaction_price", SDouble $ read $ fmap (\i -> if i == ',' then '.' else i) $ filter (not . (`elem` ".\"")) v)]
+              parseField [d,desc,_,"",v] = M.fromList [("transaction_date",sdate $ fst $ fromJust $ strptime "%d/%m/%y" d),("transaction_description",SText $ T.pack desc),("transaction_price", SDouble $ read $ fmap (\i -> if i == ',' then '.' else i) $ filter (not . (`elem` ".\"")) v)]
           vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inp ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) $fromJust $  M.lookup  "transaction" (tableMap inf ))
           let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_account","transaction_description","transaction_date","transaction_price"] ) . keyValue . fst ) . F.toList ) vp) :: S.Set (Map Key Showable)
           adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ fmap Just $ insertPK fromShowableList  conn  (M.toList kv) (fromJust $ M.lookup  "transaction" (tableMap inf) )) (S.toList $ ( S.fromList parse ) `S.difference` kk)

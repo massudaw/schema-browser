@@ -407,10 +407,6 @@ fromShowableList foldable = do
     n <- FR.numFieldsRemaining
     traverse (FR.fieldWith . attrToKey) foldable
 
-withConn action = do
-  conn <- connectPostgreSQL "user=postgres password=queijo dbname=health"
-  action conn
-
 topSortTables tables = flattenSCCs $ stronglyConnComp item
   where item = fmap (\n@(Raw _ t k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
 

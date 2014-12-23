@@ -10,6 +10,7 @@ import Data.Foldable (Foldable)
 import Data.Traversable (Traversable)
 import Data.Char ( isAlpha )
 import Data.Maybe
+import Data.String
 import Data.Functor.Identity
 import Data.Monoid
 
@@ -39,6 +40,7 @@ import Debug.Trace
 
 import Data.Text.Lazy(Text)
 import qualified Data.Text.Lazy as T
+import qualified Data.ByteString.Char8 as BS
 
 
 
@@ -127,7 +129,6 @@ schemaAttributes conn schema (keyTable,map,_,_,_,_) = do
                     tfk == tpk]
        return rels
 
-groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
 
 graphFromPath p = Graph {hvertices = fmap fst bs,
                          tvertices = fmap snd bs,
@@ -173,4 +174,12 @@ projectAllKeys baseTables hashGraph m bkey
       Nothing -> error $  "No baseTable for key " <> show ( fmap showKey (F.toList bkey)) -- <> " in baseMap " <> show (M.mapKeys (S.mapMonotonic showKey) baseTables)
 
 buildQuery q =   "SELECT * FROM " <> fromString (T.unpack $ showTable q)
+
+
+withInf s f = withConn s (f <=< flip keyTables s)
+
+withConn s action = do
+  conn <- connectPostgreSQL $ "user=postgres password=queijo dbname=" <> fromString (T.unpack s)
+  action conn
+
 

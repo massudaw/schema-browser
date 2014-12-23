@@ -134,8 +134,7 @@ showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> "::" <> T.pa
 
 
 instance Foldable (JoinPath a) where
-  foldMap f (Join a _ _ p) = f a <>  F.foldMap f p
-  foldMap f (LeftJoin a _ _ p) = f a <>  F.foldMap f p
+  foldMap f (Join ty a  _ p) = f a <>  F.foldMap f p
   foldMap f (From p _) = f p
 
 data Aggregate a
@@ -296,9 +295,8 @@ atTables f (Reduce _ _ t ) = atTables f t
 atTables f (Limit t _) = atTables f t
 atTables f (Base _ p ) = from p
   where from (From t _) = atTables f t
-        from (Join t _ _ p) = atTables f t <> from p
-        from (LeftJoin t _ _ p) = atTables f t <> from p
-        from (SplitJoin _ t _ _ p) = atTables f t <> from p
+        from (Join ty t _ p) = atTables f t <> from p
+        from (SplitJoin _ t  _ p) = atTables f t <> from p
 
 
 atBase f t@(Raw _ _ _ _ _ _ ) = f t
@@ -309,8 +307,7 @@ atBase f (Limit t _) = atBase f t
 atBase f (Base _ p ) = from p
   where from (From t _) = atBase f t
         from (Join _ _ _ p) = from p
-        from (LeftJoin _ _ _ p) = from p
-        from (SplitJoin _ _ _ _ p ) = from p
+        from (SplitJoin _ _  _ p ) = from p
 
 normalizing = atBase (\(Raw _ _ t _ _ _ )-> t)
 tableName = atBase (\(Raw _ t _ _ _ _ )-> t)
@@ -318,10 +315,6 @@ alterTableName f = atBase (\(Raw s t p i j l )-> (Raw s (f t)  p i j l))
 tablesName = atBase (\(Raw _ t _ _ _ _ )-> S.singleton t)
 
 --- Traverse the joinPath returning the keyList
-joinKeys (From b k ) = S.empty
-joinKeys (Join b k r p) =  r  <> joinKeys p
-joinKeys (LeftJoin b k r p) =  r <> joinKeys p
-joinKeys (SplitJoin _ b k r p) = S.fromList (concat $ fmap snd r) <> joinKeys p
 
 aliasedKey (PathRoot  ,v) = keyValue v
 aliasedKey (v ,k) =  path v   <> "_" <> keyValue k
@@ -350,31 +343,26 @@ data JoinType
   = JInner
   | JLeft
   deriving(Eq,Show,Ord)
+
 data JoinPath a b
     = From b (Set a)
-    | Join b (Set a) (Set (b,(a,a))) (JoinPath a b)
-    | LeftJoin b (Set a) (Set (b,(a,a))) (JoinPath a b)
-    | SplitJoin JoinType b (Set a) [(Key,[(b,(a,a))])] (JoinPath a b)
+    | Join  JoinType b (Set (b,Set (a,a))) (JoinPath a b)
+    | SplitJoin JoinType b  [(Set a,[(b,Set (a,a))])] (JoinPath a b)
     deriving(Eq,Ord,Show)
 
 
 splitJoins j@(From p r ) = j
-splitJoins j@(LeftJoin b k r p) = case length mapK  == 1 of
+splitJoins j@(Join ty b r p) = case length mapK  == 1 of
                                      True -> j
-                                     False -> SplitJoin JLeft b k  mapK p
+                                     False -> traceShowId $ SplitJoin ty b   mapK p
       where
-        mapK :: [(Key,[(Table,(Key, Key))])]
-        mapK =  M.toList $ M.fromListWith (<>)  $ fmap (fmap pure) $ concat $ concat $ fmap snd $ M.toList $ {-fmap ( zipWith (\i j-> (i,) <$> j) [0..] )-} mapkPre
-        mapkPre :: Map Key ([[(Key,(Table,(Key,Key)))]])
-        mapkPre = fmap (fmap (\(i,j)-> fmap (i,) j) . M.toList . M.fromListWith (<>))    $ M.fromListWith (<>) ((\f@(t,(i,j))-> (j,[(i,([(t,(i,j))]))])) <$> S.toList r)
-splitJoins j@(Join b k r p) = case length mapK  == 1 of
-                                     True -> j
-                                     False -> SplitJoin JInner b k  mapK p
-      where
-        mapK :: [(Key,[(Table,(Key, Key))])]
-        mapK =  M.toList $ M.fromListWith (<>)  $ fmap (fmap pure) $ concat $ concat $ fmap snd $ M.toList mapkPre
-        mapkPre :: Map Key ([[(Key,(Table,(Key,Key)))]])
-        mapkPre = fmap (fmap (\(i,j)-> fmap (i,) j). M.toList . M.fromListWith (<>))    $ M.fromListWith (<>) ((\f@(t,(i,j))-> (j,[(i,([(t,(i,j))]))])) <$> S.toList r)
+        mapK :: [(Set Key,[(Table,Set (Key, Key))])]
+        mapK = M.toList $ M.fromListWith (<>) $ fmap (fmap pure) $ concat $ concat $ fmap snd $ M.toList mapkPre
+        mapkPre :: Map (Set Key) ([[(Set Key,(Table,Set (Key,Key)))]])
+        mapkPre = fmap (fmap (\(i,j)-> fmap (i,) j) . M.toList . M.fromListWith (<>)) groupJoins
+        groupJoins ::  Map (Set Key) [(Set Key,[(Table,Set (Key,Key))])]
+        groupJoins =  M.fromListWith (<>) ((\f@(t,a)-> ( S.map snd a , [( S.map fst a , [( t , a )] )] )) <$> S.toList r)
+
 splitJoins j = j
 
 
@@ -396,44 +384,18 @@ showTable b@(Base k1 p) = " from (SELECT " <> T.intercalate ","  ((\(a,p)-> rend
   where
     attrs = aliasJoin b
     joinQuerySet (From b _) =  " FROM " <>  showTable b
-    joinQuerySet (SplitJoin t b _ r p) =  F.foldl' joinType (joinQuerySet p) r
-        where joinType  l ir@(i,r)
-                | any (isKOptional .keyType  ) (fst . snd <$> r) = l <> " LEFT JOIN " <> joinPredicate2 b ir
+    joinQuerySet (SplitJoin t b  r p) =  F.foldl' joinType (joinQuerySet p) r
+        where joinType  l ir@(_,r)
+                | t == JLeft = l <> " LEFT JOIN " <> joinPredicate2 b ir
                 | otherwise =  l <> " JOIN " <> joinPredicate2 b ir
-              joinPredicate2 b (i,r)  = showTable b <> " AS " <> tempName  <> " ON " <> T.intercalate " AND " (fmap (\(t,f) -> tableName t <> "." <> keyValue (fst f) <> " = " <> tempName  <> "." <> keyValue (snd f) )  r )
-                where tempName = tableName b <> (keyValue i)
-    joinQuerySet (LeftJoin b _ r p)
-      |  any (isKOptional . keyType  ) (fst . snd <$> S.toList r)  = joinQuerySet p <>  " LEFT JOIN " <> showTable b <> joinPredicate (S.toList r) b
-      | S.null r = joinQuerySet p <>  " JOIN " <> showTable b <> " ON true"
-      | otherwise  =  F.foldl' joinType (joinQuerySet p) mapK
-      where joinPredicate2 b (0,r)  = showTable b   <> " ON " <> T.intercalate " AND " (fmap (\(t,f) -> t <> "." <> keyValue (fst f) <> " = " <> tableName b <> "." <> (snd f) )  r )
-      	    joinPredicate2 b (i,r)  = showTable b <> " AS " <> tempName  <> " ON " <> T.intercalate " AND " (fmap (\(t,f) -> t <> "." <> keyValue (fst f) <> " = " <> tempName  <> "." <> (snd f) )  r )
-		            where tempName = tableName b <> T.pack (show i)
-            joinType  l ir@(i,r)
-              | any (isKOptional .keyType  ) (fst . snd <$> r) = l <> " LEFT JOIN " <> joinPredicate2 b ir
-              | otherwise =  l <> " JOIN " <> joinPredicate2 b ir
-            mapK :: [(Int,[(Text,(Key, Text))])]
-            mapK =  M.toList $ M.fromListWith (++)  $ fmap (fmap pure) $ concat $   concat $ fmap snd $ M.toList $ fmap (zipWith (\i j-> (i,) <$> j) [0..]) mapkPre
-            mapkPre :: Map Key ([[(Text,(Key,Text))]])
-            mapkPre = fmap (fmap snd . M.toList . M.fromListWith (<>))    $ M.fromListWith (<>) ((\f@(t,(i,j))-> (j,[(i,([(tableName t,(i,keyValue j))]))])) <$> S.toList r)
-            joinPredicate r b = " ON " <> T.intercalate " AND " (fmap (\(t,f) -> tableName t <> "." <> keyValue (fst f) <> " = " <> tableName b <> "." <> keyValue (snd f) )  r )
-
-
-    joinQuerySet (Join b _ r p)
-      |  any (isKOptional . keyType  ) (fst . snd <$> S.toList r)  = joinQuerySet p <>  " LEFT JOIN " <> showTable b <> joinPredicate (S.toList r) b
-      | S.null r = joinQuerySet p <>  " JOIN " <> showTable b <> " ON true"
-      | otherwise  =  F.foldl' joinType (joinQuerySet p) mapK
-      where joinPredicate2 b (0,r)  = showTable b   <> " ON " <> T.intercalate " AND " (fmap (\(t,f) -> t <> "." <> keyValue (fst f) <> " = " <> tableName b <> "." <> (snd f) )  r )
-      	    joinPredicate2 b (i,r)  = showTable b <> " AS " <> tempName  <> " ON " <> T.intercalate " AND " (fmap (\(t,f) -> t <> "." <> keyValue (fst f) <> " = " <> tempName  <> "." <> (snd f) )  r )
-		            where tempName = tableName b <> T.pack (show i)
-            joinType  l ir@(i,r)
-              | any (isKOptional . keyType ) (fst . snd <$> r) = l <> " LEFT JOIN " <> joinPredicate2 b ir
-              | otherwise =  l <> " JOIN " <> joinPredicate2 b ir
-	    mapK :: [(Int,[(Text,(Key, Text))])]
-	    mapK =  M.toList $ M.fromListWith (++)  $ fmap (fmap pure) $ concat $   concat $ fmap snd $ M.toList $ fmap (zipWith (\i j-> (i,) <$> j) [0..]) mapkPre
-	    mapkPre :: Map Key ([[(Text,(Key,Text))]])
-	    mapkPre = fmap (fmap snd . M.toList . M.fromListWith (<>))    $ M.fromListWith (<>) ((\f@(t,(i,j))-> (j,[(i,([(tableName t,(i,keyValue j))]))])) <$> S.toList r)
- 	    joinPredicate r b = " ON " <> T.intercalate " AND " (fmap (\(t,f) -> tableName t <> "." <> keyValue (fst f) <> " = " <> tableName b <> "." <> keyValue (snd f) )  r )
+              joinPredicate2 b (i,r)  = showTable b <> " AS " <> tempName  <> " ON " <> T.intercalate " AND " (fmap (\(t,fs) -> T.intercalate " AND " $ fmap (\f-> tableName t <> "." <> keyValue (fst f) <> " = " <> tempName  <> "." <> keyValue (snd f)) $ S.toList fs )  r )
+                where tempName = tableName b <> (T.intercalate "_" $ fmap keyValue $ S.toList i)
+    joinQuerySet (Join ty b  r p)  = joinType (joinQuerySet p)  r
+        where
+            joinType  l ir
+                | ty == JLeft = l <> " LEFT JOIN " <> joinPredicate b ir
+                | otherwise =  l <> " JOIN " <> joinPredicate b ir
+            joinPredicate  b  r  = showTable b <> " ON " <> T.intercalate " AND " (fmap (\(t,fs) -> T.intercalate " AND " $ fmap (\f-> tableName t <> "." <> keyValue (fst f) <> " = " <> tableName b <> "." <> keyValue (snd f)) $ S.toList fs )  $ S.toList r )
 
 showTable (Project s t)
   |  F.all (const False) s  = "(SELECT " <>  showTable t  <> ") as " <> tableName t
@@ -524,35 +486,45 @@ joinPath (PathOption i p j ) m =  joinPath ( head $ S.toList p ) m
 
 
 
+addJoin
+  :: Table
+  -> Set (Key, Key) -> JoinPath Key Table -> JoinPath Key Table
 addJoin tnew f p = case mapPath tnew  f p of
             -- Add new case
-            Left accnew -> case any (isKOptional . keyType  ) (fst . snd <$> S.toList accnew ) of
-                             True ->  LeftJoin tnew (S.map fst f) accnew p
-                             False -> Join tnew (S.map fst f) accnew p
+            Left accnew -> case any (isKOptional . keyType  ) (concat $ fmap fst . S.toList .  snd <$> S.toList accnew ) of
+                             True ->  Join JLeft tnew  accnew  p
+                             False ->  Join JInner tnew accnew  p
             -- Just update with new joins
             Right i -> i
     where
-        filterFst t = S.filter ((`S.member` allKeys t) . fst )
-        filterLeftFst t f = S.map (\((Key a al b c  e) ,j) -> ( Key a al b c  (e),j)) keys
-            where keys =  S.filter ((`S.member` allKeys t) . fst ) f
+        filterFst t elem=  if S.null filtered then Nothing else Just (t,filtered)
+          where filtered = S.filter ((`S.member` allKeys t) . fst ) elem
 
         --mapPath :: (Show a,Show b,Ord b,Ord a) => a -> Set b -> JoinPath b a -> Either (Set (a,b)) (JoinPath b a)
         mapPath tnew f (From t   s ) =  if tablesName tnew `S.isSubsetOf`  tablesName t
-                then  (Right $ From t  snew )
-                else  (Left $ S.map (t,) $  filterFst t f)
+                then  Right $ From t  snew
+                else  Left $ maybe S.empty S.singleton   (filterFst t f)
             where snew =  s `S.union` (S.map snd f)
-        mapPath tnew f (Join t  s clause p ) = res
+        mapPath tnew f (Join ty t clause p ) = res
             where  res = case mapPath tnew  f p  of
-                    Right pnew  -> Right $ Join t s (clause `S.union` (S.map (tnew,) $  filterFst t f)) pnew
+                    Right pnew  -> Right $ Join ty t  (maybe clause (`S.insert` clause ) (filterFst t f)) pnew
+                    Left accnew -> if tablesName tnew `S.isSubsetOf`  tablesName t
+                        then Right $ Join ty t   (clause `S.union` accnew ) p
+                        else Left $ maybe accnew (`S.insert`accnew) (filterFst t  f)
+
+        {- mapPath tnew f (Join t  s clause p ) = res
+            where  res = case mapPath tnew  f p  of
+                    Right pnew  -> Right $ Join t s (clause `S.union` ((tnew,) $  filterFst t f)) pnew
                     Left accnew -> if tablesName tnew `S.isSubsetOf`  tablesName t
                         then Right $ Join t  (s `S.union` S.map snd f)  (clause `S.union` accnew ) p
-                        else Left $ (S.map (t,) $ filterFst t  f)  `S.union` accnew
+                        else Left $ ((t,) $ filterFst t  f)  `S.union` accnew
         mapPath tnew f (LeftJoin t  s clause p ) = res
             where  res = case mapPath tnew  f p  of
-                    Right pnew  -> Right $ LeftJoin t s (clause `S.union` (S.map (tnew,) $  filterLeftFst t f)) pnew
+                    Right pnew  -> Right $ LeftJoin t s (clause `S.union` ((tnew,) $  filterFst t f)) pnew
                     Left accnew -> if tablesName tnew `S.isSubsetOf`  tablesName t
                         then Right $ LeftJoin t  (s `S.union` S.map snd f)  (clause `S.union` accnew) p
-                        else Left $ (S.map (t,) $ filterLeftFst t  f)  `S.union` accnew
+                        else Left $ ((t,) $ filterFst t  f)  `S.union` accnew
+                        -}
 
 
 
@@ -567,16 +539,13 @@ specializeJoin
     -> (Map Key Filter,JoinPath Key Table )
 specializeJoin f (From t s) =  (M.fromList ff , From (addFilterTable ff t) s)
     where ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList $ allKeys t))
-specializeJoin f (Join t s r p) =  (ms1,Join (addFilterTable ff t) s r ss)
-    where (ms,ss) = specializeJoin f p
-          ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList $ allKeys t))
-          ms1 = foldr (\(i,j) s -> M.insert i  j s) ms ff
-specializeJoin f (LeftJoin t s r p) =  (ms1,Join (addFilterTable ff t) s r ss)
-    where (ms,ss) = specializeJoin f p
+specializeJoin f (Join ty t r p) =  (ms1,Join ty (addFilterTable ff t) r sp)
+    where (ms,sp) = specializeJoin f p
           ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList $ allKeys t))
           ms1 = foldr (\(i,j) s -> M.insert i  j s) ms ff
 
 specializeJoin f i = error $ "specializeJoin " <> show f <> " --- "<> show i
+
 createFilter
   :: Map Key Filter
   ->  HashSchema Key (SqlOperation Table)
@@ -700,14 +669,6 @@ instance Show a => Show (KV a)  where
   show (KV i []) =  show i
   show (KV i j ) = (show i) <> "|"<> intercalate  "," ( fmap show j)
 
-projectDesc
-     :: Monad m =>QueryT m (PK (KAttribute ))
-projectDesc =  trace "projectDesc" $  do
-  (schema,table) <- get
-  let pk = baseDescKeys table
-  put (schema,Limit (Project (F.toList $ Metric <$> pk ) table) 500)
-  return (fmap Metric pk)
-
 project
   :: Monad m =>[KAttribute ]
      -> QueryT m [KAttribute ]
@@ -750,6 +711,7 @@ tbPK (TB1 (KV (PK i _)  _)) = concat $ fmap go i
         go (Attr a) = [a]
 
 data Tag = TAttr | TPK
+
 allKVRec  (TB1 (KV (PK k d) e ))= F.foldr zipPK (KV (PK [] []) []) $ (go TPK (\i -> KV (PK i []) [])  <$> k) <> (go TAttr (\i-> KV (PK [] i) [] ) <$> d) <> ( go TAttr (\i-> KV (PK [] []) i) <$> e)
   where zipPK (KV (PK i j) k) (KV (PK m n) o) = KV (PK (i <> m) (j <> n)) (k <> o )
         go  TAttr l (FKT _ tb) =  l $ F.toList $ allKVRec  tb
@@ -765,6 +727,7 @@ allPKRec  (TB1 (KV (PK k d) i ))=  F.foldr zipPK (PK [] []) $ (go (flip PK []) <
 
 allRec i t = fmap snd $ allAliasedRec i t
 allAliasedRec i t = tb1Rec False PathRoot i t
+
 tb1Rec isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
   let
       baseCase = KV (PK (fun k) (fun (S.fromList $ F.toList desc)))  (fun (maybe attr (`S.delete` attr) desc))
@@ -803,30 +766,6 @@ projectAllRec' invSchema =  do
 justError e (Just i) = i
 justError e  _ = error e
 
--- allAttrsRec = allRec
-allAttrsRec  invSchema ta@(Raw _ _ k _ fk  _) =
-  let
-      t = From  ta k
-      table1 = Base k $ splitJoins (fromJust $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
-      result =  nubBy (\i j -> keyValue i == keyValue j) $ filter (not .(`S.member` (S.fromList $ fmap keyValue $  F.toList  $ baseDescKeys ta)) . keyValue )  $S.toList $ (allKeys table1)
-      pk =  baseDescKeys ta
-  in result
-
-projectDescAllRec
-     :: Monad m => Map Text Table ->  QueryT m (KV KAttribute)
-projectDescAllRec invSchema =  do
-  (schema,table@(Base _ t)) <- get
-  let
-      ta@(Raw _ _ k _ _ _ ) = atBase id table
-      table1 = case  M.lookup k schema of
-        Just pv -> Base k $ splitJoins (fromJust $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
-        Nothing -> table
-  let result = fmap Metric $ nubBy (\i j -> keyValue i == keyValue j) $ filter (not .(`S.member` (S.fromList $ fmap keyValue $  F.toList  $ baseDescKeys table)) . keyValue )  $S.toList $ (allKeys table1)
-  let pk = fmap Metric $baseDescKeys table
-      kv = KV pk result
-  put (schema,Limit (Project (F.toList kv)   table1 ) 500)
-  return $ trace ("projectDescAllRec: " <> show  pk <> " || " <> show  result) kv
-
 getTableKV (Raw _ _ pk desc _ attrs) = KV (PK (F.toList pk) (F.toList desc) ) (F.toList $ maybe attrs (`S.delete` attrs) desc )
 
 projectTableAttrs
@@ -841,38 +780,6 @@ projectTableAttrs r@(Raw _ _ pk desc _ _) =  do
   return $ trace ("projectTableAttrs : " <> show  kv )  kv
 
 
-
-projectDescAll
-     :: Monad m => QueryT m (KV  KAttribute)
-projectDescAll =  do
-  (schema,table) <- get
-  let result = fmap Metric $ nubBy (\i j -> keyValue i == keyValue j) $ filter (not .(`S.member` (S.fromList $ fmap keyValue $  F.toList  $ baseDescKeys table)) . keyValue )  $S.toList $ (allKeys table)
-  let pk = fmap Metric $ baseDescKeys table
-      kv = KV pk result
-  put (schema,Limit (Project (F.toList kv) table) 500)
-  return $ trace ("projectDescAll: " <> show  pk <> "-" <> show  result) kv
-
-
-projectAll
-     :: Monad m => QueryT m [KAttribute]
-projectAll =  trace "projectAll" $  do
-  (schema,table) <- get
-  let result = fmap Metric $ S.toList $ allKeys table
-  put (schema,Limit (Project result  table) 500)
-  return result
-
-baseDescKeys :: Table -> PK Key
-baseDescKeys (Raw _ _ pk Nothing _ _ ) = PK (S.toList pk)  []
-baseDescKeys (Raw _ _ pk (Just d) _ _ ) = PK (S.toList pk) [d]
-baseDescKeys (Limit p _ ) = baseDescKeys p
-baseDescKeys (Filtered _ p) = baseDescKeys p
-baseDescKeys (Project _ p) = baseDescKeys p
-baseDescKeys (Reduce _ _ p) = baseDescKeys p
-baseDescKeys (Base _ p) = from baseDescKeys p
-  where from f (From t _ ) = f t
-        from f (Join _ _ _ p) =  from f p
-        from f (LeftJoin _ _ _ p) =  from f p
-
 data AliasPath a
     = PathCons (Set (a,AliasPath a))
     | PathRoot
@@ -886,39 +793,23 @@ allAttrs' (Base _ p) =  snd $  from allAttrs' p
   where from f (From t pk ) = {-traceShow ("from " <> show t <> " " <> show pk <> " " <> show sm1 )-} (sm1,ft)
           where ft = f t
                 sm1 =  foldr (\i m -> M.insert (snd $ snd i) PathRoot m ) M.empty (S.toList ft) :: Map Key (AliasPath Key)
-        from f (SplitJoin _ t pk rel p) =  (sm , (foldr (<>) S.empty $ fmap (\(n,_) -> S.map (\(_,(ta,k))-> (pth $ S.singleton n,(alterTableName (<> (keyValue n) ) ta,k))) (f t) ) rel )  <> sp)
+        from f (SplitJoin _ t  rel p) =  (sm , (foldr (<>) S.empty $ fmap (\(n,_) -> S.map (\(_,(ta,k))-> (pth $  n,(alterTableName (<> (T.intercalate "_" $ fmap keyValue $ S.toList n) ) ta,k))) (f t) ) rel )  <> sp)
           where
                 (sm,sp) = from f p
                 -- pth1 = fmap (\(n,_) -> S.map (\(_,(ta,k))-> ([ pth $ S.singleton n],(alterTableName (<> (keyValue n) ) ta,k))) (f t) ) rel
                 pth n = PathCons (S.map (\nk -> (nk,(justError "allAttrs' pathSplit")$ M.lookup nk sm) )n )
                 ft = f t
-        from f (LeftJoin t _ r p) = (sm1,S.map (\(_,(ta,k))-> (pth ,(ta,k))) ft  <>   sp)
-          where n = S.map (justError "allAttrs' filterSet") $ S.filter isJust $ S.map (\i -> M.lookup (i)  ( M.fromList $ fmap (swap.snd) $ S.toList r) ) pk
+        from f (Join ty t r p) = (sm1,S.map (\(_,(ta,k))-> (pth ,(ta,k))) ft  <>   sp)
+          where n = S.map (justError "allAttrs' filterSet") $ S.filter isJust $ S.map (\i -> M.lookup i  (M.fromList $ concat $ fmap (fmap swap . S.toList .snd) $ S.toList r) ) pk
                 (sm,sp) = from f p
                 sm1 =  foldr (\i m -> M.insert (snd $ snd i) pth  m ) sm (S.toList ft)
                 pth = PathCons (S.map (\nk -> (nk,(justError "allAttrs' pathLeft") (M.lookup nk sm)) ) n )
                 ft = f t
-                pk = atBase (\(Raw _ _ p _ _ _) -> p) t :: Set Key
-        from f (Join t _  r p) = (sm1,S.map (\(_,(ta,k))-> (pth ,(ta,k))) ft  <>   sp)
-          where n = S.map (justError "allAttrs' filterSet")$ S.filter isJust $ S.map (\i -> M.lookup i  ( M.fromList $ fmap (swap.snd) $ S.toList $  r) ) pk
-                (sm,sp) =  from f p
-                sm1 =  foldr (\i m -> M.insert (snd $ snd i) pth  m ) sm (S.toList ft)
-                pth = PathCons (S.map(\nk -> (nk,(justError "allAttrs' pathJoin") (M.lookup nk sm)) ) n )
-                ft = f t
-                pk = atBase (\(Raw _ _ p _ _ _) -> p) t :: Set Key
+                pk = atBase (\(Raw _ _ p _ _ _) -> p) t
 
 
 
 rawKeys r = S.union (rawPK r ) (rawAttrs r)
-
-allAttrs :: Table -> Set KAttribute
-allAttrs r@(Raw _ _ _ _ _ _) = S.map(Metric) $ rawKeys r
-allAttrs (Limit p _ ) = allAttrs p
-allAttrs (Filtered _ p) = allAttrs p
-allAttrs (Project a p) = S.fromList $ F.toList a
-allAttrs (Reduce g r p) = S.map Metric g <> S.map Agg r
-allAttrs (Base _ p) = F.foldMap allAttrs p
-
 
 
 allKeys :: Table -> Set Key
@@ -929,11 +820,8 @@ allKeys (Project _ p) = allKeys p
 allKeys (Reduce _ _ p) = allKeys p
 allKeys (Base _ p) = go p
   where go (From t _) = allKeys t
-        go (Join t _ r p )
-          | any (\(Key _ _ _ _ k )-> isKOptional k ) (fst . snd <$> S.toList r)  = ( S.map (\case {ki@(Key _ _ _ _ (KOptional _) )-> ki ; (Key i a j l k)-> (Key i a j l (KOptional k)) }) (allKeys t )) <> go p
-          | otherwise = allKeys t <> go p
-        go (LeftJoin t _ r p )
-          | any (\(Key _ _ _ _ k )-> isKOptional k ) (fst . snd <$> S.toList r)  = (S.map (\case {ki@(Key _ _ _ _ (KOptional _) )-> ki ; (Key i a j l k)-> (Key i a j l (KOptional k)) }) (allKeys t )) <> go p
+        go (Join ty t r p )
+          | any (\(Key _ _ _ _ k )-> isKOptional k ) (concat $ fmap fst .S.toList . snd <$> S.toList r)  = ( S.map (\case {ki@(Key _ _ _ _ (KOptional _) )-> ki ; (Key i a j l k)-> (Key i a j l (KOptional k)) }) (allKeys t )) <> go p
           | otherwise = allKeys t <> go p
 
 
@@ -995,13 +883,18 @@ instance IsString Showable where
 
 instance Num Showable where
   SNumeric i +  SNumeric j = SNumeric (i + j)
+  SDouble i +  SDouble j = SDouble (i + j)
   SNumeric i *  SNumeric j = SNumeric (i * j)
+  SDouble i *  SDouble j = SDouble (i * j)
   fromInteger i = SNumeric $ fromIntegral i
   negate (SNumeric i) = SNumeric $ negate i
   abs (SNumeric i) = SNumeric $ abs i
+  abs (SDouble i) = SDouble $ abs i
   signum (SNumeric i) = SNumeric $ signum i
 
 instance Fractional Showable where
   fromRational i = SDouble (fromRational i)
   recip (SDouble i) = SDouble (recip i)
+
+groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
 

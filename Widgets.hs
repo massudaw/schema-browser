@@ -112,15 +112,25 @@ switch all (Just k) = do
         element k # set style (noneShow True)
         return ()
 
-tabbedChk :: [(String,Element)] -> [TrivialWidget Bool] -> UI Element
-tabbedChk tabs chk = do
-  header <- buttonSet  (fst <$> tabs) show
-  let lk k = M.lookup k (M.fromList tabs)
-  v <- currentValue (facts $ lk <$> triding header)
-  switch (snd <$> tabs) v
-  onEvent (rumors $ lk <$> triding header) (switch (snd <$> tabs))
-  body <- UI.div # set children (snd <$> tabs)
-  UI.div # set children [getElement header,body]
+tabbedChk :: [(String,(TrivialWidget Bool,Element))] -> UI (Element)
+tabbedChk tabs = do
+    (tds,headers) <- checkeds tabs
+    header <- UI.div # set children headers
+    let lk td (k,(_,e))  = do
+          let enab = S.member  k <$> td
+          element e # sink UI.style (noneShow <$> facts enab)
+    mapM_ (lk tds) tabs
+    body <- UI.div # set children (snd .snd <$> tabs)
+    UI.div # set children [header,body]
+  where
+    checked i = do
+      label <- UI.span # set UI.text (fst i)
+      dv <- UI.span # set children [label,getElement (fst $ snd i)]
+      return (((\b -> if  b then S.singleton (fst i) else S.empty) <$> (triding $fst $ snd i)) ,dv)
+    checkeds is  = do
+      chks <- mapM checked is
+      return $ foldr (\(t,d) (ta,da) -> (liftA2 S.union t ta, d : da) ) (pure S.empty,[]) chks
+
 
 
 tabbed :: [(String,Element)] -> UI Element
@@ -147,6 +157,7 @@ buttonSet ks h =do
         let ev = pure k <@ UI.click  b
         return (b,ev)
 
+
 items :: WriteAttr Element [UI Element]
 items = mkWriteAttr $ \i x -> void $ return x # set children [] #+ i
 
@@ -154,11 +165,12 @@ appendItems :: WriteAttr Element [UI Element]
 appendItems = mkWriteAttr $ \i x -> void $ return x  #+ i
 
 -- Simple checkbox
-checkedWidget :: UI (TrivialWidget Bool)
-checkedWidget = do
-  i <- UI.input # set UI.type_ "checkbox"
+checkedWidget :: Tidings Bool -> UI (TrivialWidget Bool)
+checkedWidget init = do
+  i <- UI.input # set UI.type_ "checkbox" # sink UI.checked(facts init)
   let e = UI.checkedChange i
-  b <- stepper False e
+  v <- currentValue (facts init)
+  b <- stepper v e
   dv <- UI.span # set children [i] # set UI.style [("margin","2px")]
   return $ TrivialWidget  (tidings b e) dv
 
