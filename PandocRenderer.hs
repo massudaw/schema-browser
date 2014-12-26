@@ -35,7 +35,7 @@ renderProjectPricing _ _ _ inputs = (,pure Nothing) <$> element
           cshow (SOptional a ) =  Nothing
       -- myDoc :: Pandoc
       myDoc env = setTitle "My title" $ doc $
-         para (vr "contact_name" <> ",") <>
+         para (vr "firstname" <> ",") <>
          orderedList [
            para "Serviços Executados" <> arrayVar env "pricing_service" ,
            para "Valor da Proposta" <>
@@ -51,7 +51,7 @@ renderProjectPricing _ _ _ inputs = (,pure Nothing) <$> element
            para "Despesas do Contratante" <>
               plain "As despesas referentes a cópias dos projetos e taxas para aprovação não estão inclusas no orçamento e são por conta do Contratante",
            para "Validade da Proposta" <>
-              plain ("A proposta terá validade de " <>  vr "pricing_expiration" <>  " dias."),
+              plain ("A proposta terá validade de 10 dias."),
            para "Prazo de Entrega" <>
               plain ( vr "pricing_execution_time" <> " dias  úteis, após a confirmação da proposta ou assinatura do contrato.")
             ]

@@ -24,5 +24,6 @@ executable layer
    mtl >=2.2 && <2.3,
    parsec >=3.1 && <3.2, hxt >=9.3 && <9.4, hxt-curl >=9.1 && <9.2, pandoc, HTTP,aeson , pandoc-types,lens, base64-bytestring,hxt-curl,semigroupoids
    ,handa-gdata >0.7 , http-conduit, directory ,process,xml
+   ,unordered-containers
   -- hs-source-dirs:      
   default-language:    Haskell2010

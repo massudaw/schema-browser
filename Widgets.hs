@@ -113,6 +113,7 @@ switch all (Just k) = do
         return ()
 
 tabbedChk :: [(String,(TrivialWidget Bool,Element))] -> UI (Element)
+tabbedChk [] = UI.div
 tabbedChk tabs = do
     (tds,headers) <- checkeds tabs
     header <- UI.div # set children headers
@@ -134,8 +135,9 @@ tabbedChk tabs = do
 
 
 tabbed :: [(String,Element)] -> UI Element
+tabbed [] = UI.div
 tabbed  tabs = do
-  header <- buttonSet  (fst <$> tabs) show
+  header <- buttonSet  (fst <$> tabs) id
   let lk k = M.lookup k (M.fromList tabs)
   v <- currentValue (facts $ lk <$> triding header)
   switch (fmap snd tabs) v
@@ -148,7 +150,7 @@ buttonSet :: [a] -> (a -> String) -> UI (TrivialWidget a)
 buttonSet ks h =do
   buttons <- mapM (buttonString h) ks
   dv <- UI.div # set children (fst <$> buttons)
-  let evs = foldr1 (unionWith (const))  (snd <$> buttons)
+  let evs = foldr (unionWith (const)) never (snd <$> buttons)
   bv <- stepper (head ks) evs
   return (TrivialWidget (tidings bv evs) dv)
     where

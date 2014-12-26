@@ -1,6 +1,6 @@
 {-# LANGUAGE Arrows, TupleSections,OverloadedStrings,NoMonomorphismRestriction #-}
 module Gpx
-  (readHtml,exec,execKey,execF) where
+  (readHtmlReceita,readHtml,exec,execKey,execF) where
 
 import Query
 import Data.Monoid
@@ -27,6 +27,10 @@ import Text.XML.HXT.Arrow.XmlState.TypeDefs
 import Control.Arrow.IOStateListArrow
 import Text.XML.HXT.Arrow.XmlState
 import qualified Data.List as L
+
+import qualified Data.ByteString as BS
+import qualified Data.Text.Encoding as TE
+import qualified Data.Text as TE
 
 import Database.PostgreSQL.Simple.Time
 
@@ -55,6 +59,13 @@ getTable =  atTag "table"  >>> listA (rows >>> listA cols) where
         rows = getChildren >>> hasName "tr"
         cols = atTag "td" />   (( getChildren >>> getText) <+> (hasText ( not .all (`elem` " \t\r\n")) >>>  getText))
 
+getTable' :: ArrowXml a => a XmlTree b  -> a XmlTree [[b]]
+getTable' b=  atTag "table"  >>> listA (rows >>> listA cols) where
+        rows = getChildren >>> is "tr"
+        cols = getChildren >>> is "td" >>> b
+
+
+is x = deep (isElem >>> hasName x)
 
 getPoint = atTag "trkpt" >>>
   proc x -> do
@@ -74,6 +85,33 @@ withFields k t l = (l, maybe (error $ "noTable" ) id $  M.lookup t (tableMap k))
 execF = exec [("file",file),("distance",0),("id_shoes",1),("id_person",1),("id_place",1)]
 
 execKey f = exec (fmap (\(k,v)-> (keyValue k , v) ) f)
+
+readHtmlReceita file = do
+  let
+      txt = trim ^<< hasText ( not .all (`elem` " *\160\t\r\n")) >>>  getText
+      arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
+        >>> getTable' ( getTable' ((is "font" /> txt ) &&& (is "font" /> is "b" /> txt) )    {-<+> ( Left ^<< getChildren >>> getChildren >>> txt)-}  )
+  l <- runX arr
+  return $ concat $ concat $ l !! 1 !! 0
+
+
+trim :: String -> String
+trim = triml . trimr
+
+-- | Remove leading space (including newlines) from string.
+triml :: String -> String
+triml = dropWhile (`elem` " \r\n\t")
+
+-- | Remove trailing space (including newlines) from string.
+trimr :: String -> String
+trimr = reverse . triml . reverse
+
+testReceita = do
+  kk <- BS.readFile "receita.html"
+  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  readHtmlReceita inp
+
+
 
 readHtml file = do
   let

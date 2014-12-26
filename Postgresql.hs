@@ -81,6 +81,7 @@ textToPrim "interval" = PInterval
 textToPrim "date" = PDate
 textToPrim "POINT" = PPosition
 textToPrim "LINESTRING" = PLineString
+textToPrim "box3d" = PBounding
 textToPrim i = error $ "no case for type " <> T.unpack i
 
 
@@ -99,6 +100,32 @@ instance TF.ToField (UnQuoted Showable) where
 
 instance TF.ToField Position where
   toField = TF.toField . UnQuoted
+
+instance TF.ToField LineString where
+  toField = TF.toField . UnQuoted
+
+instance TF.ToField Bounding where
+  toField = TF.toField . UnQuoted
+
+instance TF.ToField (UnQuoted Bounding ) where
+  toField (UnQuoted (Bounding l)) = TF.Many  [str "ST_3DMakeBox(", TF.Many points ,   str ")"]
+    where del = TF.Plain $ fromChar ','
+          str = TF.Plain . fromByteString
+          points :: [TF.Action]
+          points = [point (Interval.inf l), del, point (Interval.sup l)]
+          point :: Position -> TF.Action
+          point (Position (lat,lon,alt)) = TF.Many [str "ST_setsrid(ST_MakePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str "),4326)"]
+
+
+instance TF.ToField (UnQuoted LineString) where
+  toField (UnQuoted (LineString l)) = TF.Many  [str "ST_SetSRID(ST_MakeLine (", TF.Many points ,   str "),4326)"]
+    where del = TF.Plain $ fromChar ','
+          str = TF.Plain . fromByteString
+          points :: [TF.Action]
+          points = L.intercalate [del] (fmap point (F.toList l))
+          point :: Position -> [TF.Action]
+          point (Position (lat,lon,alt)) = [str "ST_MakePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str ")"]
+
 
 instance TF.ToField (UnQuoted Position) where
   toField (UnQuoted (Position (lat,lon,alt))) = TF.Many [str "ST_SetSRID(ST_MakePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str "),4326)"]
@@ -122,6 +149,8 @@ instance TF.ToField Showable where
   toField (SComposite t) = TF.toField t
   toField (SInterval t) = TF.toField t
   toField (SPosition t) = TF.toField t
+  toField (SLineString t) = TF.toField t
+  toField (SBounding t) = TF.toField t
   toField (SBoolean t) = TF.toField t
 
 defaultType t =
@@ -147,11 +176,12 @@ readPrim t =
      PDouble ->  readDouble
      PInt -> readInt
      PTimestamp -> readTimestamp
-     PInterval -> readInteval
+     PInterval -> readInterval
      PDate-> readDate
      PPosition -> readPosition
      PBoolean -> readBoolean
      PLineString -> readLineString
+     PBounding -> readBounding
   where
       readInt = nonEmpty (fmap SNumeric . readMaybe)
       readBoolean = nonEmpty (fmap SBoolean . readMaybe)
@@ -160,8 +190,10 @@ readPrim t =
       readDate =  fmap (SDate . Finite . localDay . fst) . strptime "%Y-%m-%d"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
       readLineString = nonEmpty (fmap SLineString . readMaybe)
+      readBounding = nonEmpty (fmap SBounding . fmap Bounding . (fmap (\(SInterval i ) -> fmap (\(SPosition p )-> p) i)) . inter readPosition )
+      inter f = (\(i,j)-> fmap SInterval $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
       readTimestamp =  fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%OS"
-      readInteval =  fmap SPInterval . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
+      readInterval =  fmap SPInterval . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
       nonEmpty f ""  = Nothing
       nonEmpty f i  = f i
 
@@ -251,7 +283,7 @@ renderShowable i = show i
 unOnly :: Only a -> a
 unOnly (Only i) = i
 
-prim :: (F.FromField (f Bool ),F.FromField (f LineString),F.FromField (f DiffTime),F.FromField (f Position ),F.FromField (f LocalTimestamp),F.FromField (f Date),F.FromField (f Text), F.FromField (f Double), F.FromField (f Int), Functor f) =>
+prim :: (F.FromField (f Bool ),F.FromField (f Bounding),F.FromField (f LineString),F.FromField (f DiffTime),F.FromField (f Position ),F.FromField (f LocalTimestamp),F.FromField (f Date),F.FromField (f Text), F.FromField (f Double), F.FromField (f Int), Functor f) =>
           KPrim
         -> F.Field
         -> Maybe BS.ByteString
@@ -265,6 +297,7 @@ prim  p f b = case p of
             PTimestamp -> t $ F.fromField  f b
             PPosition -> pos $ F.fromField  f b
             PLineString -> lin $ F.fromField  f b
+            PBounding -> boun $ F.fromField  f b
             PBoolean -> bo $ F.fromField  f b
   where
     s = fmap (fmap SText)
@@ -274,11 +307,21 @@ prim  p f b = case p of
     i = fmap (fmap SPInterval)
     t = fmap (fmap STimestamp)
     lin = fmap (fmap SLineString)
+    boun = fmap (fmap SBounding)
     pos = fmap (fmap SPosition )
     bo = fmap (fmap SBoolean)
 
 instance (F.FromField (f (g a))) => F.FromField (Compose f g a) where
   fromField = fmap (fmap (fmap (Compose ) )) $ F.fromField
+
+instance Sel.Serialize Bounding where
+  get = do
+      i <- liftA2 (Interval....) Sel.get Sel.get
+      return  $ Bounding i
+  put (Bounding i ) = do
+      Sel.put (Interval.sup i)
+      Sel.put (Interval.inf i)
+
 
 instance Sel.Serialize Position where
   get = do
@@ -290,6 +333,7 @@ instance Sel.Serialize Position where
       Sel.putFloat64le x
       Sel.putFloat64le y
       Sel.putFloat64le z
+
 instance Sel.Serialize LineString where
   get = do
       n <- Sel.getWord32host
@@ -303,8 +347,8 @@ instance F.FromField LineString where
   fromField f t = case  fmap (Sel.runGet getV ) decoded of
     Just i -> case i of
       Right i -> pure i
-      Left e -> error e
-    Nothing -> error "empty value"
+      Left e -> F.returnError F.ConversionFailed f e
+    Nothing -> F.returnError F.UnexpectedNull f "empty value"
     where
       getV = do
           i <- Sel.getWord8
@@ -320,11 +364,27 @@ instance F.FromField LineString where
              return (error $ "BE not implemented " <> show i <> "  " <> show decoded)
       decoded = fmap (fst . B16.decode) t
 
+instance F.FromField Bounding where
+  fromField f t = case  t of
+    Nothing -> F.returnError F.UnexpectedNull f ""
+    Just dat -> do
+      case parseOnly box3dParser   dat of
+          Left err -> F.returnError F.ConversionFailed f err
+          Right conv -> return conv
+
+box3dParser = do
+          string "BOX3D"
+          let makePoint [x,y,z] = Position (x,y,z)
+          res  <- char '(' *> sepBy1 (sepBy1 ( scientific) (char ' ') ) (char ',') <* char ')'
+          return $ case fmap (fmap  realToFrac) res  of
+            [m,s] ->  Bounding (makePoint m Interval.... makePoint s)
+
+
 instance F.FromField Position where
   fromField f t = case  fmap (Sel.runGet getV ) decoded of
     Just i -> case i of
       Right i -> pure i
-      Left e -> error e
+      Left e -> F.returnError F.ConversionFailed  f e
     Nothing -> error "empty value"
     where
       getV = do

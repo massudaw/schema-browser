@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
@@ -76,6 +77,7 @@ data KPrim
    | PTimestamp
    | PInterval
    | PPosition
+   | PBounding
    | PLineString
    deriving(Show,Eq,Ord)
 
@@ -146,7 +148,6 @@ type KAttribute = FAttribute Key
 data FAttribute a
    = Metric a
    | Operator (FAttribute a) Text Text (FAttribute a)
-   -- | Rate FAttribute KAttribute
    | Agg (Aggregate (FAttribute a ))
    | Fun [FAttribute a] Text
    deriving(Eq,Ord,Show)
@@ -169,7 +170,10 @@ renderAttribute (Fun arg n ) = n <> "(" <> T.intercalate "," (renderAttribute <$
 renderAttribute a@(Agg m2  ) = renderAggr renderAttribute m2 <> " as " <> attrName a
   where renderAggr f (Aggregate l s )  = s  <> "(" <> T.intercalate ","  (fmap f l)  <> ")"
 
+
 newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read)
+
+newtype Bounding = Bounding (Interval.Interval Position) deriving(Eq,Ord,Typeable,Show)
 newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,Read)
 
 data Showable
@@ -180,6 +184,7 @@ data Showable
   | STimestamp LocalTimestamp
   | SPInterval DiffTime
   | SPosition Position
+  | SBounding Bounding
   | SLineString LineString
   | SDate Date
   | SSerial (Maybe Showable)
@@ -212,6 +217,7 @@ instance Show Showable where
   show (SDouble a) = show a
   show (STimestamp a) = show a
   show (SLineString a ) = show a
+  show (SBounding a ) = show a
   show (SDate a) = show a
   show (SSerial a) = maybe " " ((" "<>) . show) a
   -- show (SSerial a) = show a
@@ -257,10 +263,10 @@ instance Show Table where
   show = T.unpack . tableName
 
 data TableType
- = ReadOnly
- | WriteOnly
- | ReadWrite
- deriving(Eq,Ord,Show)
+   = ReadOnly
+   | WriteOnly
+   | ReadWrite
+   deriving(Eq,Ord,Show)
 
 data Table
     =  Base (Set Key) (JoinPath Key Table)
@@ -277,15 +283,7 @@ data Table
     |  Reduce (Set Key) (Set (Aggregate (KAttribute ) ) )  Table
     |  Limit Table Int
      deriving(Eq,Ord)
-{-
-instance Eq Table where
-  (Raw i j _ _ _ _) == (Raw l m _ _ _ _) = i ==  l && j == m
-instance Ord Table where
-  compare (Raw i j _ _ _ _)  (Raw l m _ _ _ _) = compare i l <> compare j m
-  compare (Filtered j i)  (Filtered m l ) = compare i l <> compare j m
-  compare (Base _ i)  (Base _ l ) = compare i l
-  compare m n = error $ "error compare " <> show m <> show n
--}
+
 description (Raw _ _ _ desc _ _ ) = desc
 
 atTables f t@(Raw _ _ _ _ _ _ ) = f t
@@ -322,14 +320,10 @@ aliasedKey (v ,k) =  path v   <> "_" <> keyValue k
         path (PathCons i) = T.intercalate "_" $ fmap (\(k,p)-> (\case {PathRoot -> "" ; m@(PathCons _ ) -> (path m <> "_")}) p <> keyValue k  ) $ S.toList i
 
 
-renderNamespacedKeySet (t,k) = tableName t <> "." <> keyValue k
 
 renderAliasedKey (PathRoot  ,v)  a = renderNamespacedKeySet v <> " AS " <> a
+  where renderNamespacedKeySet (t,k) = tableName t <> "." <> keyValue k
 renderAliasedKey (v ,(t,k)) a = tableName t <> "." <> keyValue k <> " AS " <> a
-
-
-makeOptional i@(KOptional _) = i
-makeOptional i = KOptional i
 
 
 isKOptional (KOptional i) = True
@@ -337,7 +331,6 @@ isKOptional (KSerial i) = isKOptional i
 isKOptional (KInterval i) = isKOptional i
 isKOptional (Primitive _) = False
 isKOptional (KArray i)  = isKOptional i
-isKOptional i = error (show i)
 
 data JoinType
   = JInner
@@ -362,10 +355,7 @@ splitJoins j@(Join ty b r p) = case length mapK  == 1 of
         mapkPre = fmap (fmap (\(i,j)-> fmap (i,) j) . M.toList . M.fromListWith (<>)) groupJoins
         groupJoins ::  Map (Set Key) [(Set Key,[(Table,Set (Key,Key))])]
         groupJoins =  M.fromListWith (<>) ((\f@(t,a)-> ( S.map snd a , [( S.map fst a , [( t , a )] )] )) <$> S.toList r)
-
 splitJoins j = j
-
-
 
 
 aliasJoin b@(Base k1 p) =   zipWith (\i (j,l)-> (j,(i,l))) (T.pack . ("v" <> ). show <$> [0..]) aliasMap
@@ -498,7 +488,7 @@ addJoin tnew f p = case mapPath tnew  f p of
             Right i -> i
     where
         filterFst t elem=  if S.null filtered then Nothing else Just (t,filtered)
-          where filtered = S.filter ((`S.member` allKeys t) . fst ) elem
+          where filtered = S.filter ((`S.member` (S.map (snd.snd) $   allAttrs' t)) . fst ) elem
 
         --mapPath :: (Show a,Show b,Ord b,Ord a) => a -> Set b -> JoinPath b a -> Either (Set (a,b)) (JoinPath b a)
         mapPath tnew f (From t   s ) =  if tablesName tnew `S.isSubsetOf`  tablesName t
@@ -538,10 +528,10 @@ specializeJoin
     -> JoinPath Key Table
     -> (Map Key Filter,JoinPath Key Table )
 specializeJoin f (From t s) =  (M.fromList ff , From (addFilterTable ff t) s)
-    where ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList $ allKeys t))
+    where ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (fmap (snd . snd) $ S.toList $ allAttrs' t))
 specializeJoin f (Join ty t r p) =  (ms1,Join ty (addFilterTable ff t) r sp)
     where (ms,sp) = specializeJoin f p
-          ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (S.toList $ allKeys t))
+          ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (fmap (snd . snd) $ S.toList $ allAttrs' t))
           ms1 = foldr (\(i,j) s -> M.insert i  j s) ms ff
 
 specializeJoin f i = error $ "specializeJoin " <> show f <> " --- "<> show i
@@ -669,14 +659,6 @@ instance Show a => Show (KV a)  where
   show (KV i []) =  show i
   show (KV i j ) = (show i) <> "|"<> intercalate  "," ( fmap show j)
 
-project
-  :: Monad m =>[KAttribute ]
-     -> QueryT m [KAttribute ]
-project attributes =trace "project" $  do
-  (schema,table) <- get
-  let result = filter (`elem` attributes) (fmap Metric $ S.toList $ allKeys table)
-  put (schema,Limit (Project result table) 500 )
-  return  result
 
 recursePath invSchema (Path i (FetchTable t) e)  = Path i (FetchTable nextT ) e : recursePaths invSchema nextT
   where nextT@(Raw _ _ _ _ fk _ ) = fromJust (M.lookup t (invSchema))
@@ -810,19 +792,6 @@ allAttrs' (Base _ p) =  snd $  from allAttrs' p
 
 
 rawKeys r = S.union (rawPK r ) (rawAttrs r)
-
-
-allKeys :: Table -> Set Key
-allKeys r@(Raw _ _ _ _ _ _) = rawKeys r
-allKeys (Limit p _ ) = allKeys p
-allKeys (Filtered _ p) = allKeys p
-allKeys (Project _ p) = allKeys p
-allKeys (Reduce _ _ p) = allKeys p
-allKeys (Base _ p) = go p
-  where go (From t _) = allKeys t
-        go (Join ty t r p )
-          | any (\(Key _ _ _ _ k )-> isKOptional k ) (concat $ fmap fst .S.toList . snd <$> S.toList r)  = ( S.map (\case {ki@(Key _ _ _ _ (KOptional _) )-> ki ; (Key i a j l k)-> (Key i a j l (KOptional k)) }) (allKeys t )) <> go p
-          | otherwise = allKeys t <> go p
 
 
 

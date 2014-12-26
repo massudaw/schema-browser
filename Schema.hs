@@ -49,6 +49,7 @@ createType un (t,c,trans,"tsrange",_,n,def,_) = (Key   c Nothing trans un (nulla
 createType un (t,c,trans,"int4range",_,n,def,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "int4"))
 createType un (t,c,trans,"ARRAY",i,n,def,p) = (Key   c Nothing trans un (nullable n $ KArray $ (Primitive (T.tail i))))
 createType un (t,c,trans,_,"geometry",n,def,p) = (Key   c Nothing trans un (nullable n $ Primitive $ (\(Just i) -> i) p))
+createType un (t,c,trans,_,"box3d",n,def,p) = (Key   c Nothing trans un (nullable n $ Primitive $  "box3d"))
 createType un (t,c,trans,ty,_,n,def,_) =(Key c   Nothing trans un (serial def . nullable n $ Primitive ty))
 --createType un v = error $ show v
 
