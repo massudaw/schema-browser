@@ -263,21 +263,12 @@ renderedType key f b = go key
             (KOptional (Primitive i)) -> SOptional <$> prim i f b
             (KSerial (Primitive i)) -> SSerial <$> prim i f b
             (KArray (Primitive i)) -> SComposite <$> prim i f b
-            (KOptional (KSerial (Primitive i))) -> SOptional . fmap SSerial . getCompose <$> prim i f b
             (KOptional (KArray (Primitive i))) ->  SOptional . fmap SComposite . getCompose  <$> prim i f b
             (KOptional (KInterval (Primitive i))) -> SOptional . fmap SInterval . getCompose  <$> prim i f b
-            (KSerial (KOptional (Primitive i))) -> SSerial . fmap SOptional . getCompose <$> prim i f b
-            (KOptional (KOptional (Primitive i))) -> SOptional . fmap SOptional . getCompose <$> prim i f b
-            (KOptional (KOptional (KOptional (Primitive i)))) -> SOptional . fmap (SOptional . fmap SOptional . getCompose) .  getCompose <$> prim i f b
+            (KSerial (KOptional (Primitive i))) -> error $ "invalid type " <>  show t
             (Primitive i) ->  unOnly <$> prim  i f b
+            (KOptional i) -> SOptional . Just <$>  go  i
             i ->  error $ "missing case renderedType: " <> (show i)
-
-renderShowable :: Showable -> String
-renderShowable (SOptional i ) = maybe "" renderShowable i
-renderShowable (SSerial i ) = maybe "" renderShowable i
-renderShowable (SInterval i)  = renderShowable (Interval.inf i) <> "," <> renderShowable (Interval.sup i)
-renderShowable (SComposite i)  = unlines $ F.toList $ fmap renderShowable i
-renderShowable i = show i
 
 
 unOnly :: Only a -> a
