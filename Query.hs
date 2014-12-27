@@ -352,7 +352,7 @@ data JoinPath a b
 
 
 splitJoins j@(From p r ) = j
-splitJoins j@(Join ty b r p) = case length (traceShowId mapK)  == 1 of
+splitJoins j@(Join ty b r p) = case length mapK  == 1 of
                                      True -> Join ty b r $ splitJoins p
                                      False ->  SplitJoin ty b   mapK (splitJoins p)
       where
@@ -768,7 +768,7 @@ projectTableAttrs r@(Raw _ _ pk desc _ _) =  do
       aliasMap =  M.fromList $ aliasJoin $ Base k  $ splitJoins table
       alterName ak@(p,Key k al a b c ) = (Key k (Just $ fst $justError "lookupAlias" $ M.lookup ak aliasMap ) a b c )
   put (schema,Limit (Project (F.toList kv) $ Base k $ splitJoins  table) 500)
-  return $ trace ("projectTableAttrs : " <> show  kv )  kv
+  return {- trace ("projectTableAttrs : " <> show  kv ) -}  kv
 
 
 data AliasPath a

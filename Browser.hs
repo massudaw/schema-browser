@@ -542,7 +542,7 @@ selectedItems enabled conn inf ff key = do
   let
     query ena i j
       | M.null i  || not ena = return []
-      | otherwise = fmap catMaybes $ mapM (\k-> fmap (fmap (fst k,)) . (`catch` (\e-> flip const (e :: SomeException)  $ return $ traceShow e  Nothing ) ) . fmap Just . doQueryTable conn inf (projectTableAttrs  (fromJust $ M.lookup (fst k) $ pkMap inf )) i.  fst $ k ) j
+      | otherwise = fmap catMaybes $ mapM (\k-> fmap (fmap (fst k,)) . (`catch` (\e-> flip const (e :: SomeException)  $ return $ Nothing ) ) . fmap Just . doQueryTable conn inf (projectTableAttrs  (fromJust $ M.lookup (fst k) $ pkMap inf )) i.  fst $ k ) j
   bp <- joinT $ (query <$> enabled <*> ff <*> invItems)
   body <- UI.div # sink items (fmap (\(v,i) -> UI.div # set items (UI.div # set text (showVertex  v ) : [tableElem  (F.toList $ fst i) $ fmap F.toList (snd i)]) )  . filter (not . null . snd .snd)  <$> facts bp)
   UI.div # set children [body]
