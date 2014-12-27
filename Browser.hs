@@ -234,8 +234,8 @@ processPanelTable conn attrsB table oldItemsi = do
         res <- liftIO $ catch (Right <$> delete conn (fromJust k) table) (\e -> return $ Left (show $ traceShowId  (e :: SomeException) ))
         return $ const (Delete kf ) <$> res
       editAction attr old = do
-        let i = traceShowId $ fromJust isM
-            k = traceShowId $ fromJust kM
+        let i = fromJust isM
+            k = fromJust kM
             kM = (concat . F.toList .fmap attrNonRec .unTB1 ) <$> old
             isM :: Maybe [(Key,Showable)]
             isM = (catMaybes . concat . F.toList  . fmap attrNonRec .unTB1) <$> (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attr old
@@ -261,7 +261,7 @@ processPanelTable conn attrsB table oldItemsi = do
   -- (evid,evir) <- split <$> shortCut (insertAction . catMaybes <$> fkattrsB)  (UI.click insertB)
   -- (evdd,evdr) <- split <$> shortCut (deleteAction <$> facts oldItems) (UI.click deleteB)
   -- (eved,ever) <- split <$> shortCut (editAction  <$> efkattrsB <*> (facts oldItems) ) (UI.click editB)
-  -- stp <- stepper [] (unions [evid,evdd])
+  -- STP <- stepper [] (unions [evid,evdd])
   -- end <- UI.div # sink text (show <$> stp)
   return ([insertB,editB,deleteB],[evir,ever,evdr])
 
@@ -350,7 +350,7 @@ addToList i  (Edit m n ) =  (map (\e-> if maybe False (e == ) (editedMod i n) th
 
 -- lookup pk from attribute list
 editedMod :: (Show (f (a,b)),Show (a,b),Traversable f ,Ord a) => f a ->  Maybe [(a,b)] -> Maybe (f (a,b))
-editedMod  i  m=  traceShow m $ traceShowId $ join $ fmap (\mn-> look mn i ) m
+editedMod  i  m=  join $ fmap (\mn-> look mn i ) m
   where look mn k = allMaybes $ fmap (\ki -> fmap (ki,) $  M.lookup ki (M.fromList mn) ) k
 
 
@@ -410,7 +410,7 @@ pollingUI conn inf p@(PollingPlugins n deftime (table@(Raw s t pk desc fk allI),
   return (body, snd ev)
 
 
-pluginUI conn inf p@(Plugins n (table@(Raw s t pk desc fk allI),keys) a) oldItems = do
+pluginUI conn inf oldItems p@(Plugins n (table@(Raw s t pk desc fk allI),keys) a) = do
   let plug = a conn inf p
   ev <- plug oldItems
   headerP <- UI.div # set text n
@@ -563,6 +563,19 @@ chooserKey conn pg inf kitems  = do
   body <- UI.div # sink items (facts (pure . chooseKey conn pg inf <$> bBset ))
   UI.div # set children [getElement bset, body]
 
+recurseTable conn inf t@(Raw _ n _ _ p _) pgs oldItems = do
+  let fpgs = filter (\(Plugins n (tb,_)  _) -> tb == t) pgs
+      findFK pk (TB1 kv) = fmap (\(FKT _ t ) -> t) $ L.find (\(FKT pkt _ ) -> S.fromList (fmap fst pkt) ==  pk ) $ L.filter fks $  F.toList kv
+        where fks (FKT pk l) = True
+              fks i = False
+  res <- mapM (\p -> (_name p,) <$> pluginUI conn inf (fmap F.toList <$> oldItems) p) fpgs
+  base <- tabbed (fmap (\(i,(j,_))->  (i,j)) res )
+
+  childs <- mapM (\(Path i (FKJoinTable _  _ t )  _) ->  (show i,) <$> recurseTable conn inf (lookTable inf t)  pgs (join .fmap (  findFK  i) <$>  oldItems) ) (S.toList p)
+  childDiv <- tabbed (childs )
+  UI.div # set children [base,childDiv]
+
+
 chooseKey
   :: Connection
      -> [Plugins]
@@ -630,7 +643,7 @@ chooseKey conn  pg inf key = mdo
       isReducible (KSerial i )  =  isReducible i
       isReducible i = False
 
-  itemList <- UI.listBox listRes  (pure Nothing) (pure (\i -> line $ show  $ allKVRec $ fmap snd i))
+  itemList <- UI.listBox listRes  (pure Nothing) (pure (\i -> line $ show  $ allKVRec $ i))
   element itemList # set UI.style [("width","100%"),("height","300px")]
   let foldr1Safe f [] = []
       foldr1Safe f xs = foldr1 f xs
@@ -650,7 +663,7 @@ chooseKey conn  pg inf key = mdo
   element (getElement itemList) # set UI.multiple True
   element (getElement filterItemBox) # set UI.multiple True
   pluginsChk <- checkedWidget (pure False)
-  res  <- mapM (\i -> (_name i ,) <$> pluginUI conn inf i ((\i j ->if i then fmap F.toList j else Nothing) <$> triding pluginsChk <*> UI.userSelection itemList  ) )   (filter (\(Plugins n tb _ )-> S.isSubsetOf  (snd tb) (attrSet (pkMap inf) (fromJust $ M.lookup key (pkMap inf)))  ) pg )
+  res  <- mapM (\i -> (_name i ,) <$> pluginUI conn inf ((\i j ->if i then fmap F.toList j else Nothing) <$> triding pluginsChk <*> UI.userSelection itemList  ) i )   (filter (\(Plugins n tb _ )-> S.isSubsetOf  (snd tb) (attrSet (pkMap inf) (fromJust $ M.lookup key (pkMap inf)))  ) pg )
   pluginsDiv <- tabbed ((\(l,(d,_))-> (l,d) )<$> res)
   let plugins = ("PLUGINS" ,(pluginsChk,pluginsDiv))
   let
@@ -679,10 +692,12 @@ chooseKey conn  pg inf key = mdo
           else do
             return (vp,Nothing)
   (res2,crud) <- whenWriteable
+  crpgs <- checkedWidget (pure False)
+  rpgs <- recurseTable conn inf table pg (UI.userSelection itemList)
   filterSel <- UI.div # set children [getElement ff,getElement fkbox,getElement range, getElement filterItemBox]
   -- aggr <- UI.div # set children [getElement sel , count]
   -- tab <- tabbed  (maybeToList crud <> [("FILTER",filterSel){-,("AGGREGATE", aggr)-},("PLUGIN",plugins),("SELECTED",selected)])
-  tab <- tabbedChk  ( maybeToList crud <>[("SELECTED",(selCheck ,selected)),plugins])
+  tab <- tabbedChk  ( maybeToList crud <>[("SELECTED",(selCheck ,selected)),plugins,("PLUGINSR",(crpgs,rpgs))])
   itemSel <- UI.div # set children [filterInp,getElement sortList,getElement asc]
   UI.div # set children ([itemSel,getElement itemList,total,tab] )
 
@@ -723,11 +738,15 @@ pluginContactDiv conn inf p inp = do
   e <- UI.div # sink UI.text st
   (,pure Nothing ) <$> UI.div # set UI.children [b,e]
 
-pluginCEP = plug "CEP Correios" queryCEP2 "owner" ["id_owner"]
+--------------------
+-- Address Plugins -
+pluginCEP = plug "CEP Correios" queryCEP2 "address" ["id"]
 
-pluginGeocode = plug "Geocode" queryGeocode "owner" ["id_owner"]
+pluginGeocode = plug "Geocode" queryGeocode "address" ["id"]
 
-pluginGoogleMap = plug "Google Map" showMap "owner" ["id_owner"]
+pluginGoogleMap = plug "Google Map" showMap "address" ["id"]
+-- Address Plugins -
+--------------------
 
 pluginAndamentoId = plug "Andamento" queryAndamento2 "fire_project" ["id_bombeiro"]
 
@@ -1047,27 +1066,27 @@ queryGeocode conn inf _ inputs =  do
             loc =dec !> "results" !!> 0 !> "geometry" !> "location"
             bounds =dec !> "results" !!> 0 !> "geometry" !> "bounds"
             viewport =dec !> "results" !!> 0 !> "geometry" !> "viewport"
-            lkey g =fromJust $ M.lookup ("owner",g) (keyMap inf)
+            lkey g =fromJust $ M.lookup ("address",g) (keyMap inf)
             getPos l = Position <$> liftA2 (\(A.Number i) (A.Number j)-> (realToFrac i ,realToFrac j ,0)) (l !> "lng" )( l  !> "lat" )
         p <- MaybeT $ return $ getPos loc
         b <- MaybeT $ return $ case (fmap Bounding $ join $ Interval.interval <$> getPos (bounds !> "southwest") <*> getPos (bounds !> "northeast"), fmap Bounding $ join $ Interval.interval <$> getPos (viewport !> "southwest") <*> getPos (viewport !> "northeast")) of
                                     (i@(Just _), _ ) -> i
                                     (Nothing , j) -> j
-        mod <- C.lift $ updateMod conn [(lkey "geocode" ,SPosition p  ),( lkey "bounding", SBounding b)] i (fromJust $ M.lookup  "owner" (tableMap inf) )
+        mod <- C.lift $ updateMod conn [(lkey "geocode" ,SPosition p  ),( lkey "bounding", SBounding b)] i (lookTable inf "address"  )
         return p
   let et =  unsafeMapIO req (facts inputs <@ UI.click b)
   t <- stepper "" (show <$> et)
   out <- UI.div # UI.sink text t
   (,pure Nothing) <$>  UI.div # set children [b,out]
   where
-    url inp = "http://maps.googleapis.com/maps/api/geocode/json?address=" <> (HTTP.urlEncode $ vr "logradouro"  <> " , " <> vr "owner_number" <> " - " <>  vr "owner_bairro" <> " , " <> vr "owner_municipio" <> " - " <> vr "owner_uf")
-      where vr i =  maybe "" id $ fmap (show . snd )  $ L.find ((==i).keyValue.fst)  inp
+    url inp = "http://maps.googleapis.com/maps/api/geocode/json?address=" <> (HTTP.urlEncode $ vr "logradouro"  <> " , " <> vr "number" <> " - " <>  vr "bairro" <> " , " <> vr "municipio" <> " - " <> vr "uf")
+      where vr i =  maybe "" id $ fmap (renderShowable . snd )  $ L.find ((==i).keyValue.fst)  inp
 
 unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w -> runUI w (f a))
 
 queryCEP2 _ inf  _ inputs =
   let open inputs =
-		let res = case  fmap (normalize .  snd) $ L.find ((== "owner_cep") . keyValue . fst) inputs of
+		let res = case  fmap (normalize .  snd) $ L.find ((== "cep") . keyValue . fst) inputs of
 			Just (SText cnpj) -> Just cnpj
 			i -> Nothing
 		in res
@@ -1076,13 +1095,13 @@ queryCEP2 _ inf  _ inputs =
         b <- UI.button # set UI.text "Submit"
 	tq <-   mapT (fmap ( \i -> fmap ( M.filter (/="")) $ decode i )  ) (  maybe (return "{}") ( (`catch` (\e ->  return $ trace (show (e :: IOException )) "{}" ) ). simpleGetRequest  . traceShowId .  (\i-> addrs <> i <> ".json") ) . fmap T.unpack . join .  fmap open <$> (flip shortCutClick (UI.click b) ) inputs )
  	let
-	    Just table2 = M.lookup "owner" (tableMap inf)
-            translate "localidade" =  "owner_municipio"
-            translate "cep" =  "owner_cep"
-            translate "uf" =  "owner_uf"
-            translate "bairro" =  "owner_bairro"
+	    Just table2 = M.lookup "address" (tableMap inf)
+            translate "localidade" =  "municipio"
+            translate "cep" =  "cep"
+            translate "uf" =  "uf"
+            translate "bairro" =  "bairro"
 	    translate i = i
-	    tkeys = fmap (fmap SText . M.mapKeys (fromJust . flip M.lookup (keyMap inf) . ("owner",) . translate))  <$> tq
+	    tkeys = fmap (fmap SText . M.mapKeys (fromJust . flip M.lookup (keyMap inf) . ("address",) . translate))  <$> tq
         e <- UI.div  # sink UI.text ( show  <$> facts tq)
  	body <-UI.div # set children [b,e]
 	return (body ,tkeys)
@@ -1113,20 +1132,22 @@ queryCnpjReceita conn inf  _ inputs = do
               l <- UI.get contentHtml element
               res <- liftIO (readHtmlReceita $ TE.unpack $ TE.decodeLatin1 $ BS.pack l)
               let
+                  spt "" = Nothing
+                  spt i= Just . SText . T.pack $ i
                   translate =
-                    [("CEP",("owner_cep" ,Just . SText . T.pack . filter (not . (`elem` "-."))))
-                    ,("UF",("owner_uf",Just .SText . T.pack ))
-                    ,("NOME EMPRESARIAL",("owner_name",Just .SText . T.pack ))
-                    ,("LOGRADOURO",("logradouro",Just .SText . T.pack) )
-                    ,("NÚMERO",("owner_number",fmap SNumeric . readMaybe ) )
-                    ,("COMPLEMENTO",("owner_complemento",Just .SText . T.pack) )
-                    ,("BAIRRO/DISTRITO",("owner_bairro",Just .SText . T.pack))
-                    ,("MUNICÍPIO",("owner_municipio",Just . SText . T.pack))]
-                  translator t i = fmap (\(k,v) -> join $ fmap (\(kv,f) ->  liftA2 (,) (lkeys kv) (f $ v) ) (M.lookup k t )) i
-                  lkeys kv = M.lookup ("owner",kv) (keyMap inf)
+                    [("CEP",("cep" , filter (not . (`elem` "-."))))
+                    ,("UF",("uf",id ))
+                    ,("NOME EMPRESARIAL",("name",id))
+                    ,("LOGRADOURO",("logradouro", id) )
+                    ,("NÚMERO",("number",id  ) )
+                    ,("COMPLEMENTO",("complemento",id) )
+                    ,("BAIRRO/DISTRITO",("bairro",id))
+                    ,("MUNICÍPIO",("municipio",id))]
+                  translator t i = fmap (\(k,v) -> join $ fmap (\(kv,f) ->  join $ fmap (\kkv -> fmap (kkv,) $ readType (textToPrim <$> keyType kkv) $ f v) (lkeys kv)  ) (M.lookup k t )) i
+                  lkeys kv = M.lookup ("address",kv) (keyMap inf)
                   nv = catMaybes $ translator (M.fromList translate) res
-                  owner = lookTable inf "owner"
-              liftIO $ updateMod conn nv inp owner
+                  address = lookTable inf "address"
+              liftIO $ updateMod conn nv inp address
               return nv
                     ) (filterJust $ facts inputs <@ UI.click b))
     out <- UI.div # sink UI.text (show <$> s)
