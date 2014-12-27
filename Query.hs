@@ -192,7 +192,7 @@ data Showable
   | SComposite (Vector Showable)
   | SInterval (Interval.Interval Showable)
   | SScopedKeySet (Map Key Showable)
-  deriving(Ord,Eq)
+  deriving(Ord,Eq,Show)
 
 normalize (SSerial (Just a) ) =  a
 normalize a@(SSerial Nothing  ) =  a
@@ -208,25 +208,6 @@ transformKey l@(Primitive _)  (KOptional j ) v | j == l  = SOptional $ Just v
 transformKey l@(Primitive _)  (KSerial j ) v | j == l  = SSerial $ Just v
 transformKey ki kr v | ki == kr = v
 transformKey ki kr  v = error  ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
-
-
-instance Show Showable where
-  show (SText a) = T.unpack a
-  show (SNumeric a) = show a
-  show (SBoolean a) = show a
-  show (SDouble a) = show a
-  show (STimestamp a) = show a
-  show (SLineString a ) = show a
-  show (SBounding a ) = show a
-  show (SDate a) = show a
-  show (SSerial a) = maybe " " ((" "<>) . show) a
-  -- show (SSerial a) = show a
-  show (SPosition a) = show a
-  --show (SOptional a) = show a
-  show (SOptional a) = maybe "  " (("  "<>). show) a
-  show (SInterval a) = show a
-  show (SPInterval a) = show a
-  show (SComposite a) = intercalate "," $ F.toList (fmap show a)
 
 
 data Filter
@@ -249,9 +230,9 @@ instance Monoid Filter where
   mappend (Category i ) (Category j ) = Category (S.union i j)
 
 -- Pretty Print Filter
-renderFilter (table ,name,Category i) = tableName table <> "." <> keyValue name <> " IN( " <>  T.intercalate "," (fmap (\s -> "'" <> T.pack (show $ head (pkKey s)) <> "'" ) $ S.toList i) <> ")"
+renderFilter (table ,name,Category i) = tableName table <> "." <> keyValue name <> " IN( " <>  T.intercalate "," (fmap (\s -> "'" <> T.pack (renderShowable $ head (pkKey s)) <> "'" ) $ S.toList i) <> ")"
 renderFilter (table ,name,And i) =  T.intercalate " AND "  (fmap (renderFilter . (table ,name,)) i)
-renderFilter (table ,name,RangeFilter i) =  tableName table <> "." <> keyValue name <> " BETWEEN " <> T.intercalate " AND "  (fmap (\s -> "'" <> T.pack (show $ head (pkKey s)) <> "'" ) [Interval.inf i,Interval.sup i])
+renderFilter (table ,name,RangeFilter i) =  tableName table <> "." <> keyValue name <> " BETWEEN " <> T.intercalate " AND "  (fmap (\s -> "'" <> T.pack (renderShowable$ head (pkKey s)) <> "'" ) [Interval.inf i,Interval.sup i])
 
 data SqlOperation a
   = FetchTable a
@@ -295,6 +276,32 @@ atTables f (Base _ p ) = from p
   where from (From t _) = atTables f t
         from (Join ty t _ p) = atTables f t <> from p
         from (SplitJoin _ t  _ p) = atTables f t <> from p
+
+renderShowable :: Showable -> String
+renderShowable (SOptional i ) = maybe "" renderShowable i
+renderShowable (SSerial i ) = maybe "" renderShowable i
+renderShowable (SInterval i)  = renderShowable (Interval.inf i) <> "," <> renderShowable (Interval.sup i)
+renderShowable (SComposite i)  = unlines $ F.toList $ fmap renderShowable i
+renderShowable i = shw i
+ where
+  shw (SText a) = T.unpack a
+  shw (SNumeric a) = show a
+  shw (SBoolean a) = show a
+  shw (SDouble a) = show a
+  shw (STimestamp a) = show a
+  shw (SLineString a ) = show a
+  shw (SBounding a ) = show a
+  shw (SDate a) = show a
+  shw (SSerial a) = maybe " " ((" "<>) . shw) a
+  -- show (SSerial a) = show a
+  shw (SPosition a) = show a
+  --show (SOptional a) = show a
+  shw (SOptional a) = maybe "  " (("  "<>). shw) a
+  shw (SInterval a) = shw (Interval.inf a) <> " , " <> shw (Interval.sup a)
+  shw (SPInterval a) = show a
+  shw (SComposite a) = intercalate "," $ F.toList (fmap shw a)
+
+
 
 
 atBase f t@(Raw _ _ _ _ _ _ ) = f t
@@ -345,9 +352,9 @@ data JoinPath a b
 
 
 splitJoins j@(From p r ) = j
-splitJoins j@(Join ty b r p) = case length mapK  == 1 of
-                                     True -> j
-                                     False -> traceShowId $ SplitJoin ty b   mapK p
+splitJoins j@(Join ty b r p) = case length (traceShowId mapK)  == 1 of
+                                     True -> Join ty b r $ splitJoins p
+                                     False ->  SplitJoin ty b   mapK (splitJoins p)
       where
         mapK :: [(Set Key,[(Table,Set (Key, Key))])]
         mapK = M.toList $ M.fromListWith (<>) $ fmap (fmap pure) $ concat $ concat $ fmap snd $ M.toList mapkPre
@@ -362,6 +369,8 @@ aliasJoin b@(Base k1 p) =   zipWith (\i (j,l)-> (j,(i,l))) (T.pack . ("v" <> ). 
   where
     aliasMap =  fmap (\i -> ( (\(p,(t,k))-> (p,k))i,i)) attrs
     attrs = S.toList $ allAttrs' b
+
+fullTableName  i = (T.intercalate "_" $ fmap (\k -> keyValue k <> (T.pack $ show $ hashUnique (keyFastUnique k))) $ S.toList i)
 
 -- Generate a sql query from the AST
 showTable :: Table -> Text
@@ -379,7 +388,7 @@ showTable b@(Base k1 p) = " from (SELECT " <> T.intercalate ","  ((\(a,p)-> rend
                 | t == JLeft = l <> " LEFT JOIN " <> joinPredicate2 b ir
                 | otherwise =  l <> " JOIN " <> joinPredicate2 b ir
               joinPredicate2 b (i,r)  = showTable b <> " AS " <> tempName  <> " ON " <> T.intercalate " AND " (fmap (\(t,fs) -> T.intercalate " AND " $ fmap (\f-> tableName t <> "." <> keyValue (fst f) <> " = " <> tempName  <> "." <> keyValue (snd f)) $ S.toList fs )  r )
-                where tempName = tableName b <> (T.intercalate "_" $ fmap keyValue $ S.toList i)
+                where tempName = tableName b <> fullTableName  i
     joinQuerySet (Join ty b  r p)  = joinType (joinQuerySet p)  r
         where
             joinType  l ir
@@ -531,7 +540,7 @@ specializeJoin f (From t s) =  (M.fromList ff , From (addFilterTable ff t) s)
     where ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (fmap (snd . snd) $ S.toList $ allAttrs' t))
 specializeJoin f (Join ty t r p) =  (ms1,Join ty (addFilterTable ff t) r sp)
     where (ms,sp) = specializeJoin f p
-          ff = catMaybes  (fmap (\ i -> fmap (i,). (flip M.lookup) f $ i) (fmap (snd . snd) $ S.toList $ allAttrs' t))
+          ff = catMaybes  (fmap (\ i -> fmap (i,). flip M.lookup f  $ i) (fmap (snd . snd) $ S.toList $ allAttrs' t))
           ms1 = foldr (\(i,j) s -> M.insert i  j s) ms ff
 
 specializeJoin f i = error $ "specializeJoin " <> show f <> " --- "<> show i
@@ -738,10 +747,10 @@ projectAllRec' invSchema =  do
       table1 = case  M.lookup k schema of
         Just pv -> Base k $ splitJoins  (fromJust $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
         Nothing -> table
-      attrs =  Metric . alterName <$> (allAliasedRec invSchema ta)
+      attrs =  Metric . alterName <$> (allAliasedRec invSchema ta )
       aliasMap =   fmap fst $ M.fromList $ aliasJoin table1
-      alterName ak@(p,Key k al a b c ) = (Key k (Just $ justError ("lookupAlias "  <> show ak <> " " <> show aliasMap )$ M.lookup ak aliasMap ) a b c )
-  put (schema,Project (F.toList attrs ) table1 )
+      alterName ak@(p,Key k al a b c ) = (Key k (Just $ justError ("lookupAlias "  <> show ak <> " " <> show aliasMap  <> T.unpack (showTable table1 )  ) $ M.lookup ak aliasMap ) a b c )
+  put (schema,Project (F.toList attrs )  table1 )
   return {-$ trace ("projectDescAllRec: " <> show attrs )-} attrs
 
 
@@ -753,12 +762,12 @@ getTableKV (Raw _ _ pk desc _ attrs) = KV (PK (F.toList pk) (F.toList desc) ) (F
 projectTableAttrs
      :: Monad m => Table -> QueryT m (KV  KAttribute)
 projectTableAttrs r@(Raw _ _ pk desc _ _) =  do
-  (schema,table) <- get
+  (schema,Base k  table) <- get
   let
       kv = Metric . alterName . (PathRoot, ) <$> getTableKV r
-      aliasMap =  M.fromList $ aliasJoin table
+      aliasMap =  M.fromList $ aliasJoin $ Base k  $ splitJoins table
       alterName ak@(p,Key k al a b c ) = (Key k (Just $ fst $justError "lookupAlias" $ M.lookup ak aliasMap ) a b c )
-  put (schema,Limit (Project (F.toList kv)  table) 500)
+  put (schema,Limit (Project (F.toList kv) $ Base k $ splitJoins  table) 500)
   return $ trace ("projectTableAttrs : " <> show  kv )  kv
 
 
@@ -775,7 +784,7 @@ allAttrs' (Base _ p) =  snd $  from allAttrs' p
   where from f (From t pk ) = {-traceShow ("from " <> show t <> " " <> show pk <> " " <> show sm1 )-} (sm1,ft)
           where ft = f t
                 sm1 =  foldr (\i m -> M.insert (snd $ snd i) PathRoot m ) M.empty (S.toList ft) :: Map Key (AliasPath Key)
-        from f (SplitJoin _ t  rel p) =  (sm , (foldr (<>) S.empty $ fmap (\(n,_) -> S.map (\(_,(ta,k))-> (pth $  n,(alterTableName (<> (T.intercalate "_" $ fmap keyValue $ S.toList n) ) ta,k))) (f t) ) rel )  <> sp)
+        from f (SplitJoin _ t  rel p) =  (sm , (foldr (<>) S.empty $ fmap (\(n,_) -> S.map (\(_,(ta,k))-> (pth $  n,(alterTableName (<> fullTableName n  ) ta,k))) (f t) ) rel )  <> sp)
           where
                 (sm,sp) = from f p
                 -- pth1 = fmap (\(n,_) -> S.map (\(_,(ta,k))-> ([ pth $ S.singleton n],(alterTableName (<> (keyValue n) ) ta,k))) (f t) ) rel
