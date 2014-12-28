@@ -181,7 +181,7 @@ warshall2 g = Graph { edges = go (hvertices g <> tvertices g) (pmapnew (M.toList
                    , hvertices = hvertices g
                    , tvertices = tvertices g }
     where
-      initE = fmap Left $ fmap head $ edges g
+      initE = fmap Left $ edges g
       pmapnew nedges = M.fromListWith mappend $ fmap (fmap (S.singleton )) nedges
       generateTrails es m = filter ((/=[]).snd) $ fmap (\e -> (e,go  e)) es
         where
@@ -190,7 +190,7 @@ warshall2 g = Graph { edges = go (hvertices g <> tvertices g) (pmapnew (M.toList
             i <- M.lookup e m
             return $ concat $ (\ii-> case ii of
                  Right p -> [ComposePath h  (S.singleton ho, p,S.singleton to) t | ho <- go (h,p) , to <- go (p,t)]
-                 Left j -> [j]) <$> i
+                 Left j -> j ) <$> i
       allWays :: Eq a => [a] -> [(a,a)]
       allWays e = [(i,j) | i <- e , j <- e , i /= j]
       go [] pmap _  = M.fromList $ generateTrails (allWays (hvertices g <> tvertices g)) (fmap S.toList  pmap)
