@@ -12,6 +12,7 @@ import Data.Map (Map)
 import Data.Traversable(traverse)
 import Data.Monoid
 import Data.Foldable (foldl')
+import Numeric.Interval (Interval(..),interval)
 
 
 instance Widget (TrivialWidget  a) where
@@ -132,6 +133,22 @@ tabbedChk tabs = do
       chks <- mapM checked is
       return $ foldr (\(t,d) (ta,da) -> (liftA2 S.union t ta, d : da) ) (pure S.empty,[]) chks
 
+
+data RangeBox a
+  = RangeBox
+  { _rangeSelection ::  Tidings (Maybe (Interval (Maybe a)))
+  , _rangeElement :: Element
+  }
+
+rangeBoxes fkbox bp = do
+  rangeInit <- UI.listBox bp (const <$> pure Nothing <*> fkbox) (pure (\i-> UI.li # set text (show i)))
+  rangeEnd <- UI.listBox bp (const <$> pure Nothing <*> fkbox) (pure (\i-> UI.li # set text (show i)))
+  range <- UI.div # set children (getElement <$> [rangeInit,rangeEnd])
+  return $ RangeBox (interval <$> (UI.userSelection rangeInit) <*> (UI.userSelection rangeEnd)) range
+
+
+instance Widget (RangeBox a) where
+  getElement = _rangeElement
 
 
 tabbed :: [(String,Element)] -> UI Element
