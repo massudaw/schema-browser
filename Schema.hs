@@ -67,7 +67,7 @@ hashedGraphInv (_,_,_,_,i,_) = i
 graphP (_,_,_,_,_,i) = i
 
 -- type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashSchema Key Table, Map (Set Key) (Map (Set Key) (Path Key Table)),Graph Key Table )
-type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashSchema Key (SqlOperation Table), Map (Set Key) (Map (Set Key) (Path Key (SqlOperation Table))),Graph Key (SqlOperation Table) )
+type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashSchema Key (SqlOperation Table), Map (Set Key) (Map (Set Key) [Path Key (SqlOperation Table)]),Graph Key (SqlOperation Table) )
 type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 
 foreignKeys :: Query
@@ -96,8 +96,6 @@ keyTables conn schema = do
        descMap <- M.fromList . fmap  (\(t,c)-> (t,(\(Just i) -> i) $ M.lookup (t,c) keyMap) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
        res <- lookupKey' <$> query conn "SELECT table_name,column_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ?  AND constraint_type='PRIMARY KEY' union select table_name,unnest(pk_column) as column_name from metadata.view_pk where table_schema = ?" (schema,schema) :: IO [(Text,Key)]
        resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM information_schema.tables where table_schema = ? " (Only schema) :: IO (Map Text TableType)
-       print res
-       print res
        let lookFk t k =V.toList $ lookupKey2 (fmap (t,) k)
        fks <- M.fromListWith S.union . fmap (\(tp,tc,kp,kc) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) (FKJoinTable tp (zip (lookFk tp kp ) (lookFk tc kc)) tc) (S.fromList $ lookFk tc kc))) <$> query conn foreignKeys (schema,schema) :: IO (Map Text (Set (Path Key (SqlOperation Text))))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  res2 :: Map Text (Set Key)
@@ -111,8 +109,6 @@ keyTables conn schema = do
            graphP = warshall2 $ graphI
            graph = hashGraph $ graphP
            invgraph = hashGraphInv' $ graphP
-       print graphI
-       print graphP
        return (i1,i2,i3,graph,invgraph,graphP)
 
 
@@ -133,7 +129,7 @@ schemaAttributes conn schema (keyTable,map,_,_,_,_) = do
 
 graphFromPath p = Graph {hvertices = fmap fst bs,
                          tvertices = fmap snd bs,
-                         edges = pathMap p
+                         edges = fmap pure $ pathMap p
                          }
   where bs = fmap pbound p
 
