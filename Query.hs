@@ -256,7 +256,7 @@ data Table
            , rawName :: Text
            , rawPK :: (Set Key)
            , rawDescription :: (Maybe Key)
-           , rawFKS ::  (Set (Path Key (SqlOperation Text)))
+           , rawFKS ::  (Set (Path (Set Key) (SqlOperation Text)))
            , rawAttrs :: (Set Key)
            }
     |  Filtered [(Key,Filter)] Table
@@ -539,17 +539,19 @@ specializeJoin f (Join ty t r p) =  (ms1,Join ty (addFilterTable ff t) r sp)
 specializeJoin f i = error $ "specializeJoin " <> show f <> " --- "<> show i
 
 addPath
-  :: Monad m => [Path Key (SqlOperation Table) ]
+  :: Monad m => [Path (Set Key) (SqlOperation Table) ]
   -> QueryT m ()
 addPath  p = do
   (schema,Base k j ) <- get
   put (schema,Base k ((\(Just i)-> i) $ F.foldl' (flip joinPathL) (Just j) p))
 
 
+type HashQuery =  HashSchema (Set Key) (SqlOperation Table)
+type PathQuery = Path (Set Key) (SqlOperation Table)
 
 createFilter
   :: Map Key Filter
-  ->  HashSchema Key (SqlOperation Table)
+  ->  HashQuery
   -> Table
   -> (Map Key Filter, Table)
 createFilter filters schema (Base k j) = (m,Base k spec)
@@ -565,7 +567,7 @@ createAggregate  schema key attr  old
     = Reduce (S.fromList key) (S.fromList attr) (addAggregate schema  key attr (Project (fmap Metric key) old))
 
 addAggregate
-  :: HashSchema Key (SqlOperation Table)
+  :: HashQuery
      -> [Key] -> [Aggregate KAttribute] -> Table -> Table
 addAggregate schema key attr (Base k s) =   case   catMaybes $ queryHash key  schema k  of
                         [] -> Base k  s
@@ -808,7 +810,7 @@ rawKeys r = S.union (rawPK r ) (rawAttrs r)
 
 
 newtype QueryT m a
-  = QueryT {runQueryT :: StateT  (HashSchema Key (SqlOperation Table), Table)  m a} deriving(Functor,Applicative,Monad,MonadState (HashSchema Key (SqlOperation Table), Table) )
+  = QueryT {runQueryT :: StateT  (HashQuery, Table)  m a} deriving(Functor,Applicative,Monad,MonadState (HashQuery, Table) )
 
 runQuery t =  runState ( runQueryT t)
 
@@ -840,12 +842,12 @@ readGraph fp = do
 pathLabel (ComposePath i (p1,p12,p2) j) = T.intercalate "," $  fmap pathLabel (S.toList p1) <> fmap pathLabel (S.toList p2)
 pathLabel (Path i t j) = tableName t
 
-instance GA.Labellable (Path Key Table) where
+instance GA.Labellable (Path (Set Key) Table) where
   toLabelValue l  = GAC.StrLabel (pathLabel l)
 instance GA.Labellable (Set Key ) where
   toLabelValue i = GAC.StrLabel (T.intercalate "," (keyValue <$> S.toList i))
 
-cvLabeled :: Graph Key Table -> Gr (Set Key) (Path Key Table)
+cvLabeled :: Graph (Set Key) Table -> Gr (Set Key) (Path (Set Key) Table)
 cvLabeled g = PG.mkGraph lvertices ledges
   where v = M.fromList $ zip set [0..]
         set = nub $ hvertices g <> tvertices g

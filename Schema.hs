@@ -67,7 +67,7 @@ hashedGraphInv (_,_,_,_,i,_) = i
 graphP (_,_,_,_,_,i) = i
 
 -- type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashSchema Key Table, Map (Set Key) (Map (Set Key) (Path Key Table)),Graph Key Table )
-type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashSchema Key (SqlOperation Table), Map (Set Key) (Map (Set Key) [Path Key (SqlOperation Table)]),Graph Key (SqlOperation Table) )
+type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashQuery , HashQuery ,Graph (Set Key) (SqlOperation Table) )
 type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 
 foreignKeys :: Query
@@ -97,7 +97,7 @@ keyTables conn schema = do
        res <- lookupKey' <$> query conn "SELECT table_name,column_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ?  AND constraint_type='PRIMARY KEY' union select table_name,unnest(pk_column) as column_name from metadata.view_pk where table_schema = ?" (schema,schema) :: IO [(Text,Key)]
        resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM information_schema.tables where table_schema = ? " (Only schema) :: IO (Map Text TableType)
        let lookFk t k =V.toList $ lookupKey2 (fmap (t,) k)
-       fks <- M.fromListWith S.union . fmap (\(tp,tc,kp,kc) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) (FKJoinTable tp (zip (lookFk tp kp ) (lookFk tc kc)) tc) (S.fromList $ lookFk tc kc))) <$> query conn foreignKeys (schema,schema) :: IO (Map Text (Set (Path Key (SqlOperation Text))))
+       fks <- M.fromListWith S.union . fmap (\(tp,tc,kp,kc) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) (FKJoinTable tp (zip (lookFk tp kp ) (lookFk tc kc)) tc) (S.fromList $ lookFk tc kc))) <$> query conn foreignKeys (schema,schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation Text ) )))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  res2 :: Map Text (Set Key)
            pks =  fmap (\(c,l)-> let
                                   pks = S.fromList $ fmap snd l
@@ -112,20 +112,6 @@ keyTables conn schema = do
        return (i1,i2,i3,graph,invgraph,graphP)
 
 
-schemaAttributes :: Connection -> Text -> InformationSchema -> IO [Path Key Table]
-schemaAttributes conn schema (keyTable,map,_,_,_,_) = do
-       res <- fmap (fmap (\(t,c,ckn)-> (t,ckn,(\(Just i) -> i) $ M.lookup (t,c) keyTable))) $  query conn "SELECT table_name,column_name,constraint_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Text,Key)]
-       let pks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j ) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res :: [((Text,Text),Set Key)]
-       res2 <- fmap (fmap (\(t,c)-> (t,(\(Just i) -> i) $ M.lookup (t,c) keyTable))) $  query conn "SELECT table_name,column_name FROM information_schema.tables natural join information_schema.columns WHERE table_schema = ? AND table_type='BASE TABLE'" (Only schema):: IO [(Text,Key)]
-       let fks =  fmap (\(c,l)-> (c,fmap (\(_,j)-> j) l )) $ groupSplit (\(t,_)-> t)  res2 :: [(Text,[Key])]
-           rels = [ Path pkl ((\(Just i) -> i) $ M.lookup pkl map) (S.singleton fkli) |
-                    (tfk,fkl)<- fks,
-                    fkli <- fkl,
-                    ((tpk,pk),pkl)<- pks,
-                    not $ fkli `S.member` pkl,
-                    tfk == tpk]
-       return rels
-
 
 graphFromPath p = Graph {hvertices = fmap fst bs,
                          tvertices = fmap snd bs,
@@ -134,7 +120,7 @@ graphFromPath p = Graph {hvertices = fmap fst bs,
   where bs = fmap pbound p
 
 -- TODO : Implement ordinal information
-schemaKeys' :: Connection -> Text -> TableSchema -> IO [Path Key (SqlOperation Table)]
+schemaKeys' :: Connection -> Text -> TableSchema -> IO [PathQuery ]
 schemaKeys' conn schema (keyTable,map,_) = do
        res <- fmap (fmap (\(t,c,ckn)-> (t,ckn,(\(Just i) -> i) $ M.lookup (t,c) keyTable ))) $  query conn "SELECT table_name,column_name,constraint_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND  constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Text,Key)]
        let pks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j ) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res :: [((Text,Text),Set Key)]
@@ -152,19 +138,19 @@ schemaKeys' conn schema (keyTable,map,_) = do
 
 projectAllTable
   :: Traversable t => Map (Set Key) Table
-     -> HashSchema Key (SqlOperation Table)
-     -> QueryT Identity (t KAttribute)
+     -> HashQuery
+       -> QueryT Identity (t KAttribute)
      -> Table
-     -> (t KAttribute, (HashSchema Key (SqlOperation Table), Table))
+     -> (t KAttribute, (HashQuery , Table))
 projectAllTable baseTables hashGraph m  table@(Raw _ _ bkey _ _ _)  = runQuery  m (hashGraph,Base bkey $ From table  bkey)
 
 
 projectAllKeys
   :: Traversable t => Map (Set Key) Table
-     -> HashSchema Key (SqlOperation Table)
+     -> HashQuery
      -> QueryT Identity (t KAttribute)
      -> Set Key
-     -> (t KAttribute, (HashSchema Key (SqlOperation Table), Table))
+     -> (t KAttribute, (HashQuery , Table))
 projectAllKeys baseTables hashGraph m bkey
   = case M.lookup bkey baseTables  of
       Just t ->   runQuery  m (hashGraph,Base bkey $ From t bkey)

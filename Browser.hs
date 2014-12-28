@@ -91,7 +91,6 @@ import Data.String
 import GHC.Show
 import Data.Functor.Classes
 
-type QueryCursor t =(t KAttribute, (HashSchema Key Table, Table))
 
 
 setup
@@ -301,7 +300,7 @@ attrNonRec (Attr i ) = [i]
 fkUITable
   :: Connection
   -> InformationSchema
-  -> Path Key (SqlOperation Text)
+  -> Path (Set Key) (SqlOperation Text)
   -> Tidings (Maybe (TB (Key,Showable)))
   -> TB Key
   -> UI (Element,Behavior (Maybe (TB (Key, Showable))))
@@ -428,15 +427,11 @@ projectFk schema k = case M.keys <$> M.lookup k schema of
                 Just l ->   l
                 Nothing -> []
 
-type ProjAction = (forall t. Traversable t =>
-                    (QueryCursor t  -> IO [t Showable],
-                      QueryT Identity (t KAttribute)
-                      -> S.Set Key -> QueryCursor t ))
 
 
 
 doQueryTable :: Traversable t => Connection -> InformationSchema -> QueryT Identity (t KAttribute)  ->
-                    (Map Key [Filter]) -> [Path Key (SqlOperation Table)] -> (S.Set Key) -> IO (t Key,[t Showable])
+                    (Map Key [Filter]) -> [PathQuery] -> (S.Set Key) -> IO (t Key,[t Showable])
 doQueryTable conn inf q f p arg  = projectTable  conn inf (do
               predicate (concat $ filterToPred <$> (M.toList f))
               addPath p
@@ -500,7 +495,7 @@ tableElem h b =  grid $ header h : body b
 
 selectedItems enabled conn inf ff key = do
   let
-    invItems :: Tidings [(S.Set Key , [Path Key (SqlOperation Table)])]
+    invItems :: Tidings [(S.Set Key , [PathQuery])]
     invItems = ((\k -> case  M.lookup k (hashedGraphInv inf) of
             Just invItems ->   M.toList invItems
             Nothing -> [] )) <$> key

@@ -24,18 +24,18 @@ import Text.Printf ( printf )
 import Debug.Trace
 
 
-type HashSchema  a b = Map (Set a) (Map (Set a) [(Path a b )])
+type HashSchema  a b = Map a (Map a [(Path a b )])
 
 instance (Show a, Show b) => Show (Path a b) where
-    show (Path x o y) = printf "%s - %s -> %s " (showVertex x) (show o) (showVertex y)
+    show (Path x o y) = printf "%s - %s -> %s " (show x) (show o) (show y)
     show (ComposePath x (px,i,py) y ) = printf "%s . %s "
-         (showVertex px)  (showVertex py)
+         (showVertex px)  (show py)
 
-showVertex = intercalate  "," . fmap show . S.toList
+showVertex = show
 
-data Graph a b = Graph { hvertices :: [Set a]
-                     , tvertices :: [Set a]
-                     , edges :: Map (Set a,Set a) [Path a b] }
+data Graph a b = Graph { hvertices :: [a]
+                     , tvertices :: [a]
+                     , edges :: Map (a,a) [Path a b] }
                      deriving(Eq)
 
 
@@ -91,10 +91,10 @@ data Cardinality a
 
 data Path a b
   -- Trivial Path
-  = Path  (Set a)  b  (Set a)
+  = Path  a  b  a
   -- | TagPath  (Cardinality (Set a))  b  (Cardinality (Set a))
   -- Path Composition And Product
-  | ComposePath (Set a) (Set (Path a b),Set a,Set (Path a b)) (Set a)
+  | ComposePath a (Set (Path a b),a,Set (Path a b)) a
   deriving(Eq,Ord )
 
 instance Functor (Path a) where
@@ -174,19 +174,15 @@ addEdge e g = Graph { edges = go intersects  $ go (M.singleton (pbound e) e) (M.
 -}
 edgesKeys = fmap (\i-> (pbound i ,i))
 
-nonOverlap items = filter (\i-> all (not . S.isProperSubsetOf  (snd $pbound $ i))  spi ) items
-  where spi = fmap (snd.pbound) items
-{-# INLINE nonOverlap #-}
 
 
-warshall2 :: (Ord a,Show a,Show b ,Ord b) => Graph a b -> Graph a b
-warshall2 g = Graph { edges = go (hvertices g <> tvertices g) (pmapnew (M.toList $fmap head $ edges g) ) (fmap head $ edges g)
+warshall2 :: (Ord a,Ord b) => Graph a b -> Graph a b
+warshall2 g = Graph { edges = go (hvertices g <> tvertices g) (pmapnew (M.toList initE)) initE
                    , hvertices = hvertices g
                    , tvertices = tvertices g }
     where
-      pmapnew nedges = M.fromListWith mappend $ fmap (fmap (S.singleton .trails)) nedges
-      trails (ComposePath _ (_ , i ,_) _ )=  Right i
-      trails i = Left i
+      initE = fmap Left $ fmap head $ edges g
+      pmapnew nedges = M.fromListWith mappend $ fmap (fmap (S.singleton )) nedges
       generateTrails es m = filter ((/=[]).snd) $ fmap (\e -> (e,go  e)) es
         where
           -- go :: (Set a ,Set a)-> [Path a b]
@@ -197,24 +193,22 @@ warshall2 g = Graph { edges = go (hvertices g <> tvertices g) (pmapnew (M.toList
                  Left j -> [j]) <$> i
       allWays :: Eq a => [a] -> [(a,a)]
       allWays e = [(i,j) | i <- e , j <- e , i /= j]
-      go [] pmap es     = M.fromList $ generateTrails (allWays (hvertices g <> tvertices g)) (fmap S.toList  pmap)
+      go [] pmap _  = M.fromList $ generateTrails (allWays (hvertices g <> tvertices g)) (fmap S.toList  pmap)
       go (v:vs) pmap esM =  go vs (M.unionWith mappend pmap (pmapnew nedges)) ( M.union esM
           (M.fromList  nedges) )
          where
-            nedges  =  edgesKeys [(ComposePath h (S.singleton items,i,S.singleton p3) d )  |
-                items <- (fmap snd . M.toList $  fmap head $ edges g) ,
+            nedges  =  [((h,d), Right i)    |
+                items <- M.keys initE  ,
                 p3 <- es,
-                let bnd = pbound p3
+                let bnd = p3
                     p = fst bnd
                     d = snd bnd,
                 let
-                    h = fst (pbound items)
-                    i = snd (pbound items),
+                    h = fst items
+                    i = snd items,
                 i == p, h /= d , i /= h
                 ]
-            es = fmap snd . M.toList $ esM
-            edgeH = fst . pbound
-            edgeT = snd . pbound
+            es = M.keys esM
 
 renderInv  = putStrLn . unlines . fmap (\(i,j) ->  show i <> "\n" <> unlines (fmap (\(k,v) -> "\t" <> show k  <> " -- " <> show (length v)<> "\n" <> unlines (fmap (("\t\t" <> ) .show)  v) )  (M.toList j )) )  . M.toList
 {-
@@ -244,15 +238,11 @@ warshall g = Graph { edges = go (hvertices g <> tvertices g) (edges g)
             edgeH = fst . pbound
             edgeT = snd . pbound
 -}
-nestedInv' ::  (Set a , Set a) -> [Path a b] -> (Set a, [(Set a, Path a b )])
+nestedInv' ::  (a , a) -> [Path a b] -> (a, [(a, Path a b )])
 nestedInv' (y,x) p  = (x,fmap (y,) p)
 
 
-nestedInv ::  Path a b -> (Set a, [(a, Path a b )])
-nestedInv p  = (x,fmap (,p) (S.toList y))
-  where (y,x) = pbound p
-
-nested :: (Set a , Set a) -> [Path a b] -> (Set a, [(Set a, Path a b )])
+nested :: (a , a) -> [Path a b] -> (a, [(a, Path a b )])
 nested (x,y) p  = (x,fmap (y,) p  )
 
 
@@ -260,14 +250,14 @@ hashGraph  :: (Ord b,Ord a) => Graph a b -> HashSchema a b
 hashGraph = M.map ((M.fromListWith (++)) .  fmap (fmap pure )) . M.fromListWith (++)  .   fmap (uncurry nested) . M.toList .  edges
 
 
-hashGraphInv'  :: (Ord b,Ord a) => Graph a b -> Map (Set a) (Map (Set a) [Path a b])
+hashGraphInv'  :: (Ord b,Ord a) => Graph a b -> Map (a) (Map (a) [Path a b])
 hashGraphInv' = M.map (M.fromListWith (++) . fmap (fmap pure) ) .  M.fromListWith (++)  .   fmap (uncurry nestedInv') . M.toList .  edges
 
 find norm end m = case M.lookup norm m of
                     Just i -> M.lookup end i
                     Nothing -> Nothing
 
-queryHash :: Ord a => [Set a] -> HashSchema a b -> (Set a)  -> [Maybe [Path a b]]
+queryHash :: Ord a => [a] -> HashSchema a b -> (a)  -> [Maybe [Path a b]]
 queryHash filters schema  base =  map (\f-> find base f schema)  filters
 
 
