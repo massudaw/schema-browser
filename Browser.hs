@@ -425,7 +425,7 @@ invertPK  (PK k [] ) = fmap (\i -> PK [i] []) k
 invertPK  (PK k d ) = zipWith (\i j -> PK [i] [j]) k d
 
 projectFk schema k = case M.keys <$> M.lookup k schema of
-                Just l ->  fmap S.singleton l
+                Just l ->   l
                 Nothing -> []
 
 type ProjAction = (forall t. Traversable t =>
@@ -480,7 +480,7 @@ filterWidget conn inf bBset filterT = do
 
   -- Filterable Keys
   let bFk = fmap (projectFk (hashedGraph inf) ) bBset
-  fkbox <- UI.listBox (liftA2 (<>) (fmap S.singleton .S.toList <$> bBset) bFk) (const <$> pure Nothing <*> fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
+  fkbox <- UI.listBox (liftA2 (:)  bBset bFk) (const <$> pure Nothing <*> fmap Just bBset) (pure (\i-> UI.li # set text (showVertex i)))
 
   -- Filter Query
   bp <- joinT $ (\i j-> maybe (return []) id (fmap (doQuery conn inf (projectAllRec' (tableMap inf) )  i) j)) <$> triding ff <*> UI.userSelection fkbox
@@ -500,16 +500,16 @@ tableElem h b =  grid $ header h : body b
 
 selectedItems enabled conn inf ff key = do
   let
-    invItems :: Tidings [(S.Set Key , Path Key (SqlOperation Table))]
+    invItems :: Tidings [(S.Set Key , [Path Key (SqlOperation Table)])]
     invItems = ((\k -> case  M.lookup k (hashedGraphInv inf) of
-            Just invItems ->  concat $ fmap (\(k,j) ->  (k,) <$> j) (M.toList invItems)
+            Just invItems ->   M.toList invItems
             Nothing -> [] )) <$> key
   let
     query ena i j key
       | M.null i  || not ena = return []
-      | otherwise = fmap catMaybes $ mapM (\k-> fmap (fmap (fst k,)) . (`catch` (\e-> traceShow (e :: SomeException)  $ return $ Nothing ) ) . fmap Just . doQueryTable conn inf (projectTableAttrs  ((\(Just i)-> i) $ M.lookup (fst k) $ pkMap inf )) i (pure $ snd k) $ key  ) j
+      | otherwise =  traverse (\k-> traverse (\sk-> catMaybes <$> traverse (\ski -> (`catch` (\e-> traceShow (e :: SomeException)  $ return  Nothing ) ) $ traverse (\lv->  (ski,) <$> doQueryTable conn inf  (projectTableAttrs lv)  i (pure  ski)  key)  ( M.lookup (fst k) (pkMap inf)) ) sk ) k ) j
   bp <- joinT $ (query <$> enabled <*> ff <*> invItems <*> key)
-  body <- UI.div # sink items (fmap (\(v,i) -> UI.div # set items (UI.div # set text (showVertex  v ) : [tableElem  (F.toList $ fst i) $ fmap F.toList (snd i)]) )  . filter (not . null . snd .snd)  <$> facts bp)
+  body <- UI.div # sink items (fmap (\(v,i) -> UI.div # set items (UI.div # set text (showVertex  v ) : (fmap (\(p,v) -> UI.div # set items (UI.div # set text (show p) :  [tableElem  (F.toList $ fst v) $ fmap F.toList (snd v)] )) i ) ) )  . filter (not . all ( null  . snd  . snd) .snd) . fmap (fmap (filter (not.null.snd.snd)))  <$> facts bp)
   UI.div # set children [body]
 
 poller conn poll inf = do
@@ -638,7 +638,7 @@ chooseKey conn  pg inf key = mdo
 
   let
      filterOptions = case M.keys <$> M.lookup key (hashedGraph inf) of
-               Just l -> key : fmap S.singleton l
+               Just l -> key :  l
                Nothing -> [key]
      convertPK i = case fmap F.toList i of
         Nothing -> Just []

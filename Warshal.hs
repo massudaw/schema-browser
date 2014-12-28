@@ -24,15 +24,12 @@ import Text.Printf ( printf )
 import Debug.Trace
 
 
-type HashSchema  a b = Map (Set a) (Map a (Path a b ))
+type HashSchema  a b = Map (Set a) (Map (Set a) [(Path a b )])
 
 instance (Show a, Show b) => Show (Path a b) where
     show (Path x o y) = printf "%s - %s -> %s " (showVertex x) (show o) (showVertex y)
     show (ComposePath x (px,i,py) y ) = printf "%s . %s "
          (showVertex px)  (showVertex py)
-    show (PathOption x ps y)
-      | otherwise = printf "Options: %s -> %s [%s]"
-        (showVertex x) (showVertex y) (intercalate " | " $ fmap (\(l,v) ->  show l <> "." <> show v) $ zip [0..1]  (S.toList ps))
 
 showVertex = intercalate  "," . fmap show . S.toList
 
@@ -85,46 +82,29 @@ mergeGraph i k = Graph { hvertices = nub $ sort $ hvertices i <>  hvertices k
             edgeT (Edge (Product i) _ _ ) = i
 -}
 
+{-
 data Cardinality a
   = One a
   | Many a
   deriving(Eq,Ord,Show)
+-}
 
 data Path a b
   -- Trivial Path
   = Path  (Set a)  b  (Set a)
-  | TagPath  (Cardinality (Set a))  b  (Cardinality (Set a))
-  | FKPath  (Set a)  b  (Set a)
+  -- | TagPath  (Cardinality (Set a))  b  (Cardinality (Set a))
   -- Path Composition And Product
   | ComposePath (Set a) (Set (Path a b),Set a,Set (Path a b)) (Set a)
-  -- Path Options
-  | PathOption (Set a) (Set (Path a b)) (Set a)
   deriving(Eq,Ord )
 
 instance Functor (Path a) where
   fmap f (Path i t j ) =  (Path i (f t ) j)
-  fmap f (FKPath i t j ) =  (FKPath i (f t ) j)
-  fmap f (TagPath i t j ) =  (TagPath i (f t ) j)
 
 pbound (Path h1 _ t1) = (h1,t1)
 pbound (ComposePath h1 _ t1) =  (h1,t1)
-pbound (PathOption h1 _ t1) =  (h1,t1)
 {-# INLINE pbound #-}
 
 psame i j = pbound i == pbound j
-
-punion i = psimplify . puniond i
-  where
-    puniond (PathOption h1 l1 t1) (PathOption h2 l2 t2) =  PathOption h1 (S.union l1 l2) t1
-    puniond (PathOption h1 l1 t1) l2 = PathOption h1 (S.insert l2 l1 ) t1
-    puniond l2 (PathOption h1 l1 t1) = PathOption h1 (S.insert l2 l1 ) t1
-    puniond i j = PathOption h (S.fromList [i,j]) t
-        where (h,t) = pbound i
-    psimplify p@(PathOption h1 l1 t1)
-      | S.size l1 == 1 = head (S.toList l1)
-      | otherwise =  p
-    psimplify p = p
-{-# INLINE punion #-}
 
 pathMap = M.fromList . edgesKeys
 
@@ -215,11 +195,11 @@ warshall2 g = Graph { edges = go (hvertices g <> tvertices g) (pmapnew (M.toList
             return $ concat $ (\ii-> case ii of
                  Right p -> [ComposePath h  (S.singleton ho, p,S.singleton to) t | ho <- go (h,p) , to <- go (p,t)]
                  Left j -> [j]) <$> i
-      allWays :: Eq a => [Set a] -> [(Set a,Set a)]
+      allWays :: Eq a => [a] -> [(a,a)]
       allWays e = [(i,j) | i <- e , j <- e , i /= j]
       go [] pmap es     = M.fromList $ generateTrails (allWays (hvertices g <> tvertices g)) (fmap S.toList  pmap)
-      go (v:vs) pmap esM =  go vs (M.unionWith mappend pmap (pmapnew nedges)) ( M.unionWith punion esM
-          (M.fromListWith punion  nedges) )
+      go (v:vs) pmap esM =  go vs (M.unionWith mappend pmap (pmapnew nedges)) ( M.union esM
+          (M.fromList  nedges) )
          where
             nedges  =  edgesKeys [(ComposePath h (S.singleton items,i,S.singleton p3) d )  |
                 items <- (fmap snd . M.toList $  fmap head $ edges g) ,
@@ -272,12 +252,12 @@ nestedInv ::  Path a b -> (Set a, [(a, Path a b )])
 nestedInv p  = (x,fmap (,p) (S.toList y))
   where (y,x) = pbound p
 
-nested :: (Set a , Set a) -> [Path a b] -> (Set a, [(a, Path a b )])
-nested (x,y) p  = (x,liftA2 (,) (S.toList y) p)
+nested :: (Set a , Set a) -> [Path a b] -> (Set a, [(Set a, Path a b )])
+nested (x,y) p  = (x,fmap (y,) p  )
 
 
 hashGraph  :: (Ord b,Ord a) => Graph a b -> HashSchema a b
-hashGraph = M.map (M.fromListWith (punion)) .  M.fromListWith (++)  .   fmap (uncurry nested) . M.toList .  edges
+hashGraph = M.map ((M.fromListWith (++)) .  fmap (fmap pure )) . M.fromListWith (++)  .   fmap (uncurry nested) . M.toList .  edges
 
 
 hashGraphInv'  :: (Ord b,Ord a) => Graph a b -> Map (Set a) (Map (Set a) [Path a b])
@@ -287,7 +267,7 @@ find norm end m = case M.lookup norm m of
                     Just i -> M.lookup end i
                     Nothing -> Nothing
 
-queryHash :: Ord a => [a] -> Map (Set a) (Map a b) -> (Set a)  -> [Maybe b]
+queryHash :: Ord a => [Set a] -> HashSchema a b -> (Set a)  -> [Maybe [Path a b]]
 queryHash filters schema  base =  map (\f-> find base f schema)  filters
 
 

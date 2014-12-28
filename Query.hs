@@ -481,12 +481,10 @@ joinPath (Path i (FKJoinTable _ ks ll ) j) (Just p) = Just $ addJoin  ll (S.from
 joinPath (Path i (FetchTable ll ) j) (Just p) = Just $ addJoin  ll ((S.fromList $ zip (S.toList i) (S.toList j)))  p
 -- joinPath (Path i (FetchTable ll) j) Nothing  =  Just $ From ll   (i `S.union` j)
 joinPath (ComposePath i (l,ij,k) j ) m = F.foldl' (flip joinPath)  m  ((S.toList l)  <> ( S.toList k))
-joinPath (PathOption i p j ) m =  joinPath ( head $ S.toList p ) m
 
 joinPathL (Path i (FKJoinTable ll  ks _ ) j) (Just p) = Just $ addJoin  ll (S.fromList $ fmap swap ks)  p
 joinPathL (Path i (FetchTable ll ) j) (Just p) = Just $ addJoin  ll ((S.fromList $ zip (S.toList i) (S.toList j)))  p
 joinPathL (ComposePath i (l,ij,k) j ) m = F.foldr joinPathL  m  ((S.toList l)  <> ( S.toList k))
-joinPathL (PathOption i p j ) m =  error "option" -- joinPathL ( head $ S.toList p ) m
 
 {-
 attrPath  (Path i (FetchTable ll) _ )  = const  (TB1 (KV (PK [] [] ) []))
@@ -556,8 +554,8 @@ createFilter
   -> (Map Key Filter, Table)
 createFilter filters schema (Base k j) = (m,Base k spec)
     where
-      path = queryHash (M.keys  filters)  schema k
-      Just join =  foldr joinPath (Just j) (catMaybes path)
+      path = queryHash (fmap S.singleton $ M.keys  filters)  schema k
+      Just join =  foldr joinPath (Just j) (concat $ catMaybes path)
       (m,spec) = specializeJoin filters join
 createFilter filters schema (Project a t) = fmap (Project a) (createFilter filters schema t)
 createFilter filters schema (Reduce  k a t) = fmap (Reduce k a) (createFilter filters schema t)
@@ -840,7 +838,6 @@ readGraph fp = do
 -}
 
 pathLabel (ComposePath i (p1,p12,p2) j) = T.intercalate "," $  fmap pathLabel (S.toList p1) <> fmap pathLabel (S.toList p2)
-pathLabel (PathOption i p j) = T.intercalate "\n" (fmap pathLabel (S.toList p))
 pathLabel (Path i t j) = tableName t
 
 instance GA.Labellable (Path Key Table) where
