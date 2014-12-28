@@ -202,8 +202,8 @@ normalize i = i
 
 transformKey (KSerial i)  (KOptional j) (SSerial v)  | i == j = (SOptional v)
 transformKey (KOptional i)  (KSerial j) (SOptional v)  | i == j = (SSerial v)
-transformKey (KSerial j)  l@(Primitive _ ) (SSerial v) | j == l  && isJust v =  fromJust v
-transformKey (KOptional j)  l@(Primitive _ ) (SOptional v) | j == l  && isJust v = fromJust v
+transformKey (KSerial j)  l@(Primitive _ ) (SSerial v) | j == l  && isJust v =  (\(Just i)-> i) v
+transformKey (KOptional j)  l@(Primitive _ ) (SOptional v) | j == l  && isJust v = (\(Just i)-> i) v
 transformKey l@(Primitive _)  (KOptional j ) v | j == l  = SOptional $ Just v
 transformKey l@(Primitive _)  (KSerial j ) v | j == l  = SSerial $ Just v
 transformKey ki kr v | ki == kr = v
@@ -352,7 +352,7 @@ data JoinPath a b
 
 
 splitJoins j@(From p r ) = j
-splitJoins j@(Join ty b r p) = case length mapK  == 1 of
+splitJoins j@(Join ty b r p) = case {-all (<2) $ fmap (length. snd )  -} length mapK  <2 of
                                      True -> Join ty b r $ splitJoins p
                                      False ->  SplitJoin ty b   mapK (splitJoins p)
       where
@@ -479,11 +479,20 @@ createTable r@(Raw sch tbl pk _ fk attr) = "CREATE TABLE " <> rawFullName r  <> 
 
 joinPath (Path i (FKJoinTable _ ks ll ) j) (Just p) = Just $ addJoin  ll (S.fromList ks)  p
 joinPath (Path i (FetchTable ll ) j) (Just p) = Just $ addJoin  ll ((S.fromList $ zip (S.toList i) (S.toList j)))  p
-joinPath (Path i (FetchTable ll) j) Nothing  =  Just $ From ll   (i `S.union` j)
+-- joinPath (Path i (FetchTable ll) j) Nothing  =  Just $ From ll   (i `S.union` j)
 joinPath (ComposePath i (l,ij,k) j ) m = F.foldl' (flip joinPath)  m  ((S.toList l)  <> ( S.toList k))
 joinPath (PathOption i p j ) m =  joinPath ( head $ S.toList p ) m
 
+joinPathL (Path i (FKJoinTable ll  ks _ ) j) (Just p) = Just $ addJoin  ll (S.fromList $ fmap swap ks)  p
+joinPathL (Path i (FetchTable ll ) j) (Just p) = Just $ addJoin  ll ((S.fromList $ zip (S.toList i) (S.toList j)))  p
+joinPathL (ComposePath i (l,ij,k) j ) m = F.foldr joinPathL  m  ((S.toList l)  <> ( S.toList k))
+joinPathL (PathOption i p j ) m =  error "option" -- joinPathL ( head $ S.toList p ) m
 
+{-
+attrPath  (Path i (FetchTable ll) _ )  = const  (TB1 (KV (PK [] [] ) []))
+attrPath  (Path i (FKJoinTable ll ks tt ) j) = \i-> TB1 (KV (PK [FKT (S.toList j) i ] [] ) [] )
+attrPath  (ComposePath _ (l,ij,k) _)  = attrPath (head $ S.toList k) . attrPath (head $ S.toList l)
+-}
 
 addJoin
   :: Table
@@ -511,20 +520,6 @@ addJoin tnew f p = case mapPath tnew  f p of
                         then Right $ Join ty t   (clause `S.union` accnew ) p
                         else Left $ maybe accnew (`S.insert`accnew) (filterFst t  f)
 
-        {- mapPath tnew f (Join t  s clause p ) = res
-            where  res = case mapPath tnew  f p  of
-                    Right pnew  -> Right $ Join t s (clause `S.union` ((tnew,) $  filterFst t f)) pnew
-                    Left accnew -> if tablesName tnew `S.isSubsetOf`  tablesName t
-                        then Right $ Join t  (s `S.union` S.map snd f)  (clause `S.union` accnew ) p
-                        else Left $ ((t,) $ filterFst t  f)  `S.union` accnew
-        mapPath tnew f (LeftJoin t  s clause p ) = res
-            where  res = case mapPath tnew  f p  of
-                    Right pnew  -> Right $ LeftJoin t s (clause `S.union` ((tnew,) $  filterFst t f)) pnew
-                    Left accnew -> if tablesName tnew `S.isSubsetOf`  tablesName t
-                        then Right $ LeftJoin t  (s `S.union` S.map snd f)  (clause `S.union` accnew) p
-                        else Left $ ((t,) $ filterFst t  f)  `S.union` accnew
-                        -}
-
 
 
 addFilterTable [] b = b
@@ -544,6 +539,15 @@ specializeJoin f (Join ty t r p) =  (ms1,Join ty (addFilterTable ff t) r sp)
           ms1 = foldr (\(i,j) s -> M.insert i  j s) ms ff
 
 specializeJoin f i = error $ "specializeJoin " <> show f <> " --- "<> show i
+
+addPath
+  :: Monad m => [Path Key (SqlOperation Table) ]
+  -> QueryT m ()
+addPath  p = do
+  (schema,Base k j ) <- get
+  put (schema,Base k ((\(Just i)-> i) $ F.foldl' (flip joinPathL) (Just j) p))
+
+
 
 createFilter
   :: Map Key Filter
@@ -567,7 +571,7 @@ addAggregate
      -> [Key] -> [Aggregate KAttribute] -> Table -> Table
 addAggregate schema key attr (Base k s) =   case   catMaybes $ queryHash key  schema k  of
                         [] -> Base k  s
-                        l -> Base k  (fromJust $ foldr joinPath  (Just s) l)
+                        l -> Base k  ((\(Just i)-> i) $ foldr joinPath  (Just s) l)
 
 addAggregate schema key aggr (Project a t) =  Project (F.foldr (:) a attr )  (addAggregate schema key aggr t)
   where attr =  concat $ fmap (fmap Metric . attrInputSet. Agg) aggr
@@ -591,7 +595,7 @@ aggAll tmap i agg = do
   let
     paths = catMaybes $ fmap (\ti-> (\k -> Path (S.singleton ti) (FetchTable k) (S.singleton ti )) <$> M.lookup (S.singleton ti) tmap ) i
     Just res = foldr joinPath (Just $ From table (S.fromList i)) paths
-    attrs = nub $ (fmap Metric $ concat $ fmap F.toList $ fmap (\ti->  baseDescKeys (fromJust $ M.lookup (S.singleton ti) tmap)) i ) <> fmap Agg agg
+    attrs = nub $ (fmap Metric $ concat $ fmap F.toList $ fmap (\ti->  baseDescKeys ((\(Just i)-> i) $ M.lookup (S.singleton ti) tmap)) i ) <> fmap Agg agg
   put (schema,Project attrs $ Base (S.fromList i) res )
   return attrs
 
@@ -604,7 +608,7 @@ countAll tmap i = do
   let
     paths = catMaybes $ fmap (\ti-> (\k -> Path (S.singleton ti) (FetchTable k) (S.singleton ti )) <$> M.lookup (S.singleton ti) tmap ) i
     Just res = foldr joinPath (Just $ From table (S.fromList i)) paths
-    attrs = ( fmap Metric $ concat $ fmap F.toList $ fmap (\ti->  baseDescKeys (fromJust $ M.lookup (S.singleton ti) tmap)) i ) <> fmap Agg agg
+    attrs = ( fmap Metric $ concat $ fmap F.toList $ fmap (\ti->  baseDescKeys ((\(Just i)-> i) $ M.lookup (S.singleton ti) tmap)) i ) <> fmap Agg agg
 
   put (schema,Project attrs $ Base (S.fromList i) res )
   return attrs
@@ -670,10 +674,10 @@ instance Show a => Show (KV a)  where
 
 
 recursePath invSchema (Path i (FetchTable t) e)  = Path i (FetchTable nextT ) e : recursePaths invSchema nextT
-  where nextT@(Raw _ _ _ _ fk _ ) = fromJust (M.lookup t (invSchema))
+  where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup t (invSchema))
 recursePath invSchema (Path i (FKJoinTable w ks t) e)  = Path i (FKJoinTable backT ks nextT ) e : recursePaths invSchema nextT
-  where nextT@(Raw _ _ _ _ fk _ ) = fromJust (M.lookup t (invSchema))
-        backT = fromJust (M.lookup w (invSchema))
+  where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup t (invSchema))
+        backT = (\(Just i)-> i) (M.lookup w (invSchema))
 
 recursePaths invSchema (Raw _ _ _ _ fk _ )  = concat $ recursePath invSchema <$> S.toList fk
 
@@ -728,7 +732,7 @@ tb1Rec isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
       fkSet = S.unions $  fmap (\(Path ifk _ _) -> ifk)  $S.toList fk
   in leftFst isOpt  $ TB1 baseCase
 
-fkCase invSchema isOpt p (Path ifk (FKJoinTable bt kv nt)  o ) = FKT  ((p,) <$>S.toList ifk)  {- $ fmap substBind -} (tb1Rec isOptional (aliasKeyValue ifk ) invSchema (fromJust (M.lookup nt  invSchema )))
+fkCase invSchema isOpt p (Path ifk (FKJoinTable bt kv nt)  o ) = FKT  ((p,) <$>S.toList ifk)  {- $ fmap substBind -} (tb1Rec isOptional (aliasKeyValue ifk ) invSchema ((\(Just i)-> i) (M.lookup nt  invSchema )))
             where isOptional = any (isKOptional . keyType ) (F.toList ifk)
                   bindMap = M.fromList $ fmap swap kv
                   aliasKeyValue k
@@ -745,7 +749,7 @@ projectAllRec' invSchema =  do
   let
       ta@(Raw _ _ k _ _ _ ) = atBase id table
       table1 = case  M.lookup k schema of
-        Just pv -> Base k $ splitJoins  (fromJust $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
+        Just pv -> Base k $ splitJoins  ((\(Just i)-> i) $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
         Nothing -> table
       attrs =  Metric . alterName <$> (allAliasedRec invSchema ta )
       aliasMap =   fmap fst $ M.fromList $ aliasJoin table1
@@ -764,10 +768,11 @@ projectTableAttrs
 projectTableAttrs r@(Raw _ _ pk desc _ _) =  do
   (schema,Base k  table) <- get
   let
-      kv = Metric . alterName . (PathRoot, ) <$> getTableKV r
-      aliasMap =  M.fromList $ aliasJoin $ Base k  $ splitJoins table
-      alterName ak@(p,Key k al a b c ) = (Key k (Just $ fst $justError "lookupAlias" $ M.lookup ak aliasMap ) a b c )
-  put (schema,Limit (Project (F.toList kv) $ Base k $ splitJoins  table) 500)
+      table1 = Base k $ splitJoins table
+      kv =  fmap (\i-> Metric $ alterName . (\(Just i)-> i) $ F.find (\k-> i == snd k ) (M.keys aliasMap) ) $ getTableKV r
+      aliasMap =  M.fromList $ aliasJoin  table1
+      alterName ak@(p,Key k al a b c ) = (Key k (Just $ fst $justError ("lookupAlias "  <> show ak <> " " <> show aliasMap  <> T.unpack (showTable table1 )  ) $ M.lookup ak aliasMap ) a b c )
+  put (schema,Limit (Project (F.toList kv) $ table1) 500)
   return {- trace ("projectTableAttrs : " <> show  kv ) -}  kv
 
 
@@ -784,11 +789,11 @@ allAttrs' (Base _ p) =  snd $  from allAttrs' p
   where from f (From t pk ) = {-traceShow ("from " <> show t <> " " <> show pk <> " " <> show sm1 )-} (sm1,ft)
           where ft = f t
                 sm1 =  foldr (\i m -> M.insert (snd $ snd i) PathRoot m ) M.empty (S.toList ft) :: Map Key (AliasPath Key)
-        from f (SplitJoin _ t  rel p) =  (sm , (foldr (<>) S.empty $ fmap (\(n,_) -> S.map (\(_,(ta,k))-> (pth $  n,(alterTableName (<> fullTableName n  ) ta,k))) (f t) ) rel )  <> sp)
+        from f s@(SplitJoin _ t  rel p) =  (sm , (foldr (<>) S.empty $ fmap (\(n,_) -> S.map (\(_,(ta,k))-> (pth $  n,(alterTableName (<> fullTableName n  ) ta,k))) (f t) ) rel )  <> sp)
           where
                 (sm,sp) = from f p
                 -- pth1 = fmap (\(n,_) -> S.map (\(_,(ta,k))-> ([ pth $ S.singleton n],(alterTableName (<> (keyValue n) ) ta,k))) (f t) ) rel
-                pth n = PathCons (S.map (\nk -> (nk,(justError "allAttrs' pathSplit")$ M.lookup nk sm) )n )
+                pth n = PathCons (S.map (\nk -> (nk,(justError $ "allAttrs' pathSplit KEY " <> show nk <> " MAP " <> show sm  <> " JOIN " <> show s )$ M.lookup nk sm) )n )
                 ft = f t
         from f (Join ty t r p) = (sm1,S.map (\(_,(ta,k))-> (pth ,(ta,k))) ft  <>   sp)
           where n = S.map (justError "allAttrs' filterSet") $ S.filter isJust $ S.map (\i -> M.lookup i  (M.fromList $ concat $ fmap (fmap swap . S.toList .snd) $ S.toList r) ) pk
@@ -847,9 +852,9 @@ cvLabeled :: Graph Key Table -> Gr (Set Key) (Path Key Table)
 cvLabeled g = PG.mkGraph lvertices ledges
   where v = M.fromList $ zip set [0..]
         set = nub $ hvertices g <> tvertices g
-        lvertices = fmap (\e -> (fromJust (M.lookup e v),e)) set
+        lvertices = fmap (\e -> ((\(Just i)-> i) (M.lookup e v),e)) set
         ledges = fmap (\e -> case pbound e of
-                            (t,h) -> (fromJust (M.lookup t v) ,fromJust (M.lookup h v) ,e)) (fmap snd $ M.toList $ edges g)
+                            (t,h) -> ((\(Just i)-> i) (M.lookup t v) ,(\(Just i)-> i) (M.lookup h v) ,e)) (fmap snd $ M.toList $ fmap head $ edges g)
 
 zipWithTF g t f = snd (mapAccumL map_one (F.toList f) t)
   where map_one (x:xs) y = (xs, g y x)
