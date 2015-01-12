@@ -26,10 +26,6 @@ import Debug.Trace
 
 type HashSchema  a b = Map a (Map a [(Path a b )])
 
-instance (Show a, Show b) => Show (Path a b) where
-    show (Path x o y) = printf "%s - %s -> %s " (show x) (show o) (show y)
-    show (ComposePath x (px,i,py) y ) = printf "%s . %s "
-         (showVertex px)  (show py)
 
 showVertex = show
 
@@ -95,7 +91,7 @@ data Path a b
   -- | TagPath  (Cardinality (Set a))  b  (Cardinality (Set a))
   -- Path Composition And Product
   | ComposePath a (Set (Path a b),a,Set (Path a b)) a
-  deriving(Eq,Ord )
+  deriving(Eq,Ord,Show )
 
 instance Functor (Path a) where
   fmap f (Path i t j ) =  (Path i (f t ) j)
@@ -191,14 +187,14 @@ warshall2 g = Graph { edges = go (hvertices g <> tvertices g) (pmapnew (M.toList
             return $ concat $ (\ii-> case ii of
                  Right p -> [ComposePath h  (S.singleton ho, p,S.singleton to) t | ho <- go (h,p) , to <- go (p,t)]
                  Left j -> j ) <$> i
-      allWays :: Eq a => [a] -> [(a,a)]
-      allWays e = [(i,j) | i <- e , j <- e , i /= j]
-      go [] pmap _  = M.fromList $ generateTrails (allWays (hvertices g <> tvertices g)) (fmap S.toList  pmap)
+      allWays :: Eq a => [a] -> [a] -> [(a,a)]
+      allWays e t = [(i,j) | i <- e , j <- t , i /= j]
+      go [] pmap _  = M.fromList $ generateTrails (allWays (hvertices g ) (tvertices g)) (fmap S.toList  pmap)
       go (v:vs) pmap esM =  go vs (M.unionWith mappend pmap (pmapnew nedges)) ( M.union esM
           (M.fromList  nedges) )
          where
             nedges  =  [((h,d), Right i)    |
-                items <- M.keys initE  ,
+                items <- M.keys initE,
                 p3 <- es,
                 let bnd = p3
                     p = fst bnd

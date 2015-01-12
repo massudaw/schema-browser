@@ -25,7 +25,7 @@ import qualified Data.Map as M
 import qualified Data.Foldable as F
 
 
-renderProjectPricing _ _ _ inputs = (,pure Nothing) <$> element
+renderProjectPricing _ _  inputs = (,pure Nothing) <$> element
    where
       varMap input = M.fromList $ (\(i,j)-> (keyValue i,j)) <$> input
       var env str = maybe "" fromString (renderShowable <$> M.lookup str (varMap env) )

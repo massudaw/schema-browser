@@ -65,6 +65,7 @@ data DB = DB { dbName :: String
           }deriving(Show)
 
 textToPrim "character varying" = PText
+textToPrim "name" = PText
 textToPrim "varchar" = PText
 textToPrim "text" = PText
 textToPrim "character" = PText
@@ -369,6 +370,7 @@ box3dParser = do
           res  <- char '(' *> sepBy1 (sepBy1 ( scientific) (char ' ') ) (char ',') <* char ')'
           return $ case fmap (fmap  realToFrac) res  of
             [m,s] ->  Bounding (makePoint m Interval.... makePoint s)
+
 
 
 instance F.FromField Position where

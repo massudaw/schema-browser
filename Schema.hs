@@ -11,6 +11,7 @@ import Data.Traversable (Traversable)
 import Data.Char ( isAlpha )
 import Data.Maybe
 import Data.String
+import Control.Monad.IO.Class
 import Data.Functor.Identity
 import Data.Monoid
 
@@ -71,7 +72,7 @@ type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table
 type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 
 foreignKeys :: Query
-foreignKeys = "select clc.relname,cl.relname,array_agg(att2.attname),   array_agg(att.attname) from    (select  con1.conname,unnest(con1.conkey) as parent, unnest(con1.confkey) as child, con1.confrelid,con1.conrelid  from   pg_class cl     join pg_namespace ns on cl.relnamespace = ns.oid   join pg_constraint con1 on con1.conrelid = cl.oid where   ns.nspname = ? and con1.contype = 'f' ) con  join pg_attribute att on  att.attrelid = con.confrelid and att.attnum = con.child  join pg_class cl on  cl.oid = con.confrelid   join pg_class clc on  clc.oid = con.conrelid   join pg_attribute att2 on  att2.attrelid = con.conrelid and att2.attnum = con.parent   group by clc.relname, cl.relname,con.conname union select origin_table_name,target_table_name,origin_fks,target_fks from metadata.view_fks where origin_schema_name = ? and target_schema_name = origin_schema_name "
+foreignKeys = "select origin_table_name,target_table_name,origin_fks,target_fks from metadata.fks where origin_schema_name = target_schema_name  and  target_schema_name = ?"
 
 keyTables :: Connection -> Text -> IO InformationSchema
 keyTables conn schema = do
@@ -80,16 +81,11 @@ keyTables conn schema = do
        let keyMap = M.fromList keyList
            keyListSet = groupSplit (\(c,k)-> c) keyList
            keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
-           ambigous = filter (\(_,l)->length (nubBy (\i j -> keyType i == keyType j) $ fmap snd l) > 1) keyListSet
-       -- Log Ambiguous Keys (With same name and different types)
-       when (length ambigous > 0) $ do
-         print "Ambigous Key Types"
-         mapM_ (\(c,l)-> print $ nubBy (\i j -> keyType i == keyType j) $ fmap snd l) ambigous
        let
         lookupKey' :: Functor f => f (Text,Text) -> f (Text,Key)
         lookupKey' = fmap  (\(t,c)-> (t,(\(Just i) -> i) $ M.lookup (t,c) keyMap) )
         lookupKey2 :: Functor f => f (Text,Text) -> f Key
-        lookupKey2 = fmap  (\(t,c)->(\(Just i) -> i) $ M.lookup (t,c) keyMap )
+        lookupKey2 = fmap  (\(t,c)->(\(Just i) -> i) $ M.lookup ( (t,c)) keyMap )
         readTT :: Text ->  TableType
         readTT "BASE TABLE" = ReadWrite
         readTT "VIEW" = ReadOnly
@@ -97,7 +93,7 @@ keyTables conn schema = do
        res <- lookupKey' <$> query conn "SELECT table_name,column_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ?  AND constraint_type='PRIMARY KEY' union select table_name,unnest(pk_column) as column_name from metadata.view_pk where table_schema = ?" (schema,schema) :: IO [(Text,Key)]
        resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM information_schema.tables where table_schema = ? " (Only schema) :: IO (Map Text TableType)
        let lookFk t k =V.toList $ lookupKey2 (fmap (t,) k)
-       fks <- M.fromListWith S.union . fmap (\(tp,tc,kp,kc) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) (FKJoinTable tp (zip (lookFk tp kp ) (lookFk tc kc)) tc) (S.fromList $ lookFk tc kc))) <$> query conn foreignKeys (schema,schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation Text ) )))
+       fks <- M.fromListWith S.union . fmap (\i@(tp,tc,kp,kc) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) (FKJoinTable tp (zip (lookFk tp kp ) (lookFk tc kc)) tc) (S.fromList $ lookFk tc kc))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation Text ) )))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  res2 :: Map Text (Set Key)
            pks =  fmap (\(c,l)-> let
                                   pks = S.fromList $ fmap snd l
@@ -120,19 +116,12 @@ graphFromPath p = Graph {hvertices = fmap fst bs,
   where bs = fmap pbound p
 
 -- TODO : Implement ordinal information
-schemaKeys' :: Connection -> Text -> TableSchema -> IO [PathQuery ]
+schemaKeys' :: Connection -> Text -> TableSchema -> IO [PathQuery]
 schemaKeys' conn schema (keyTable,map,_) = do
-       res <- fmap (fmap (\(t,c,ckn)-> (t,ckn,(\(Just i) -> i) $ M.lookup (t,c) keyTable ))) $  query conn "SELECT table_name,column_name,constraint_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ? AND  constraint_type='PRIMARY KEY'" (Only schema) :: IO [(Text,Text,Key)]
-       let pks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j ) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res :: [((Text,Text),Set Key)]
-       res2 <- fmap (fmap (\(t,c,ckn)-> (t,ckn,(\(Just i) -> i) $ M.lookup (t,c) keyTable ))) $  query conn "SELECT kc.table_name,kc.column_name,constraint_name FROM information_schema.key_column_usage kc natural join information_schema.table_constraints  WHERE kc.table_schema = ?  AND constraint_type='FOREIGN KEY'" (Only schema):: IO [(Text,Text,Key)]
-       resView <- query conn "select table_name,pk_column,origin_fks from metadata.view_fks join metadata.view_pk on origin_table_name = table_name and origin_schema_name = table_schema where table_schema = ? " (Only schema)
-       let fks =  fmap (\(c,l)-> (c,S.fromList $ fmap (\(_,_,j)-> j) l )) $ groupSplit (\(t,ck,_)-> (t,ck))  res2 :: [((Text,Text),Set Key)]
-           rels = [ Path pkl (FetchTable $ (\(Just i) -> i) $ M.lookup pkl map) fkl |
-                    ((tfk,fk),fkl)<- fks,
-                    ((tpk,pk),pkl)<- pks,
-                    tfk == tpk]
+       resView <- query conn "select table_name,pks,origin_fks from metadata.fks join metadata.pks on origin_table_name = table_name and origin_schema_name = schema_name where schema_name = ?" (Only schema)
+       let
            viewRels = (\(pk,fk) -> Path pk (FetchTable $ (\(Just i) -> i) $ M.lookup pk map) fk). (\(t,pk,fks) -> (S.fromList $ (\i->(\(Just i) -> i) $ M.lookup (t,i) keyTable ) <$> (V.toList pk) ,S.fromList $ (\i->(\(Just i) -> i) $ M.lookup (t,i) keyTable ) <$>  (V.toList fks) ) ) <$> resView
-       return $ rels <> viewRels
+       return viewRels
 
 
 
@@ -160,9 +149,16 @@ buildQuery q =   "SELECT * FROM " <> fromString (T.unpack $ showTable q)
 
 
 withInf s f = withConn s (f <=< flip keyTables s)
+withConnInf s f = withConn s (\conn ->  f conn  =<< liftIO ( flip keyTables s conn) )
 
-withConn s action = do
-  conn <- connectPostgreSQL $ "user=postgres password=queijo dbname=" <> fromString (T.unpack s)
+withConn s action =  do
+  conn <- liftIO $connectPostgreSQL $ "user=postgres password=queijo dbname=" <> fromString (T.unpack s)
   action conn
+
+lookTable :: InformationSchema -> Text -> Table
+lookTable inf t = justError ("no table: " <> T.unpack t) $ M.lookup t (tableMap inf)
+
+lookKey :: InformationSchema -> Text -> Text -> Key
+lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k ) $ M.lookup (t,k) (keyMap inf)
 
 

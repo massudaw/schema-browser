@@ -240,8 +240,6 @@ data SqlOperation a
   deriving(Eq,Ord,Show,Functor)
 
 
-instance Show Table where
-  show = T.unpack . tableName
 
 data TableType
    = ReadOnly
@@ -263,7 +261,7 @@ data Table
     |  Project [ KAttribute ] Table
     |  Reduce (Set Key) (Set (Aggregate (KAttribute ) ) )  Table
     |  Limit Table Int
-     deriving(Eq,Ord)
+     deriving(Eq,Ord,Show)
 
 description (Raw _ _ _ desc _ _ ) = desc
 
@@ -466,13 +464,14 @@ dropTable r@(Raw sch tbl _ _ _ _ )= "DROP TABLE "<> rawFullName r
 
 rawFullName (Raw (sch,tt) tbl _ _ _ _) = sch <> "." <> tbl
 
-createTable r@(Raw sch tbl pk _ fk attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n" <> T.intercalate "," commands <> "\n)"
+createTable r@(Raw sch tbl pk _ fk attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
   where commands = (renderAttr <$> S.toList attr ) <> [renderPK] <> fmap renderFK (S.toList fk)
-        renderAttr k = keyValue k <> " " <> renderTy (keyType k)
+        renderAttr k = keyValue k <> " " <> renderTy (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
         renderKeySet pk = T.intercalate "," (fmap keyValue (S.toList pk ))
-        renderTy (KOptional ty) = renderTy ty <> " NOT NULL"
+        renderTy (KOptional ty) = renderTy ty <> ""
+        renderTy (KSerial ty) = renderTy ty <> ""
+        renderTy (KInterval ty) = renderTy ty <> ""
         renderTy (KArray ty) = renderTy ty <> "[] "
-
         renderTy (Primitive ty ) = ty
         renderPK = "CONSTRAINT " <> tbl <> "_PK PRIMARY KEY (" <>  renderKeySet pk <> ")"
         renderFK (Path origin (FKJoinTable _ ks table) end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
@@ -748,12 +747,11 @@ projectAllRec' invSchema =  do
   (schema,table@(Base _ t  )) <- get
   let
       ta@(Raw _ _ k _ _ _ ) = atBase id table
-      table1 = case  M.lookup k schema of
-        Just pv -> Base k $ splitJoins  ((\(Just i)-> i) $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
-        Nothing -> table
-      attrs =  Metric . alterName <$> (allAliasedRec invSchema ta )
+      path = ( recursePaths invSchema ta)
+      table1 = Base k $ splitJoins  ((\(Just i)-> i) $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
+      attrs =  Metric . alterName <$> traceShowId (traceShow ta $ allAliasedRec invSchema ta )
       aliasMap =   fmap fst $ M.fromList $ aliasJoin table1
-      alterName ak@(p,Key k al a b c ) = (Key k (Just $ justError ("lookupAlias "  <> show ak <> " " <> show aliasMap  <> T.unpack (showTable table1 )  ) $ M.lookup ak aliasMap ) a b c )
+      alterName ak@(p,Key k al a b c ) = (Key k (Just $ justError ("lookupAlias "  <> show ak <> " " <> show aliasMap   <> " -- paths " <> show path <> T.unpack (showTable table1 )  ) $ M.lookup ak aliasMap ) a b c )
   put (schema,Project (F.toList attrs )  table1 )
   return {-$ trace ("projectDescAllRec: " <> show attrs )-} attrs
 
@@ -788,7 +786,7 @@ allAttrs' (Filtered _ p) = allAttrs' p
 allAttrs' (Base _ p) =  snd $  from allAttrs' p
   where from f (From t pk ) = {-traceShow ("from " <> show t <> " " <> show pk <> " " <> show sm1 )-} (sm1,ft)
           where ft = f t
-                sm1 =  foldr (\i m -> M.insert (snd $ snd i) PathRoot m ) M.empty (S.toList ft) :: Map Key (AliasPath Key)
+                sm1 =  foldr (\i m -> M.insert (snd $ snd i) PathRoot m ) M.empty (S.toList ft)
         from f s@(SplitJoin _ t  rel p) =  (sm , (foldr (<>) S.empty $ fmap (\(n,_) -> S.map (\(_,(ta,k))-> (pth $  n,(alterTableName (<> fullTableName n  ) ta,k))) (f t) ) rel )  <> sp)
           where
                 (sm,sp) = from f p
