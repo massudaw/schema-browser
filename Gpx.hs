@@ -1,6 +1,6 @@
 {-# LANGUAGE Arrows, TupleSections,OverloadedStrings,NoMonomorphismRestriction #-}
 module Gpx
-  (readHtmlReceita,readHtml,exec,execKey,execF) where
+  (readSiapi3Andamento,readHtmlReceita,readHtml,exec,execKey,execF) where
 
 import Query
 import Data.Monoid
@@ -111,6 +111,26 @@ testReceita = do
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
   readHtmlReceita inp
 
+
+testSiapi3 = do
+  kk <- BS.readFile "siapi3.html"
+  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  readSiapi3Andamento inp
+
+readSiapi3Solicitacao file = do
+  let
+      txt = trim ^<< ( (atTag "a" <+> atTag "span") >>> getChildren >>> {-hasText (\i ->  (not $ all (`elem` "\r\n\t") i )) >>> -} getText) <+> ((notContaining (atTag "div") (deep (hasName "a") <+> deep (hasName "span"))  >>> deep getText )  )
+      arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
+          >>> deep (hasAttrValue "id" (=="formListaDeAndamentos:tabela")) >>> getTable' txt
+  tail .head <$> runX arr
+
+
+readSiapi3Andamento file = do
+  let
+      txt = trim ^<< ( (atTag "a" <+> atTag "span") >>> getChildren >>> {-hasText (\i ->  (not $ all (`elem` "\r\n\t") i )) >>> -} getText) <+> ((notContaining (atTag "div") (deep (hasName "a") <+> deep (hasName "span"))  >>> deep getText )  )
+      arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
+          >>> deep (hasAttrValue "id" (=="formListaDeAndamentos:tabela")) >>> getTable' txt
+  tail .head <$> runX arr
 
 
 readHtml file = do

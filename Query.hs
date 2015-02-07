@@ -414,13 +414,13 @@ delete conn kold t@(Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShow
 
 data TableModification b
   = TableModification Table (Modification Key b)
-  deriving(Eq,Show)
+  deriving(Eq,Show,Functor)
 
 data Modification a b
   = Edit (Maybe [(a,b)]) (Maybe [(a,b)])
   | Insert (Maybe [(a,b)])
   | Delete (Maybe [(a,b)])
-  deriving(Eq,Show)
+  deriving(Eq,Show,Functor)
 
 
 update
@@ -491,6 +491,7 @@ attrPath  (Path i (FKJoinTable ll ks tt ) j) = \i-> TB1 (KV (PK [FKT (S.toList j
 attrPath  (ComposePath _ (l,ij,k) _)  = attrPath (head $ S.toList k) . attrPath (head $ S.toList l)
 -}
 
+
 addJoin
   :: Table
   -> Set (Key, Key) -> JoinPath Key Table -> JoinPath Key Table
@@ -502,20 +503,23 @@ addJoin tnew f p = case mapPath tnew  f p of
             -- Just update with new joins
             Right i -> i
     where
-        filterFst t elem=  if S.null filtered then Nothing else Just (t,filtered)
+        filterFst JInner t elem=  if S.null filtered then Nothing else Just (t,filtered)
           where filtered = S.filter ((`S.member` (S.map (snd.snd) $   allAttrs' t)) . fst ) elem
+        filterFst JLeft t elem=  if S.null filtered then Nothing else Just (t,filtered)
+          where filtered = S.map (\(i,j) -> (makeOptional i ,j) )$ S.filter ((`S.member` (S.map (snd.snd) $   allAttrs' t)) . fst ) elem
+                makeOptional (Key a b c d ty) = (Key a b c d (KOptional ty))
 
         --mapPath :: (Show a,Show b,Ord b,Ord a) => a -> Set b -> JoinPath b a -> Either (Set (a,b)) (JoinPath b a)
         mapPath tnew f (From t   s ) =  if tablesName tnew `S.isSubsetOf`  tablesName t
                 then  Right $ From t  snew
-                else  Left $ maybe S.empty S.singleton   (filterFst t f)
+                else  Left $ maybe S.empty S.singleton   (filterFst JInner t f)
             where snew =  s `S.union` (S.map snd f)
         mapPath tnew f (Join ty t clause p ) = res
             where  res = case mapPath tnew  f p  of
-                    Right pnew  -> Right $ Join ty t  (maybe clause (`S.insert` clause ) (filterFst t f)) pnew
+                    Right pnew  -> Right $ Join ty t  (maybe clause (`S.insert` clause ) (filterFst ty t f)) pnew
                     Left accnew -> if tablesName tnew `S.isSubsetOf`  tablesName t
                         then Right $ Join ty t   (clause `S.union` accnew ) p
-                        else Left $ maybe accnew (`S.insert`accnew) (filterFst t  f)
+                        else Left $ maybe accnew (`S.insert`accnew) (filterFst ty t  f)
 
 
 
@@ -749,7 +753,7 @@ projectAllRec' invSchema =  do
       ta@(Raw _ _ k _ _ _ ) = atBase id table
       path = ( recursePaths invSchema ta)
       table1 = Base k $ splitJoins  ((\(Just i)-> i) $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
-      attrs =  Metric . alterName <$> traceShowId (traceShow ta $ allAliasedRec invSchema ta )
+      attrs =  Metric . alterName <$> (allAliasedRec invSchema ta )
       aliasMap =   fmap fst $ M.fromList $ aliasJoin table1
       alterName ak@(p,Key k al a b c ) = (Key k (Just $ justError ("lookupAlias "  <> show ak <> " " <> show aliasMap   <> " -- paths " <> show path <> T.unpack (showTable table1 )  ) $ M.lookup ak aliasMap ) a b c )
   put (schema,Project (F.toList attrs )  table1 )

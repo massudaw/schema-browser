@@ -69,6 +69,7 @@ textToPrim "name" = PText
 textToPrim "varchar" = PText
 textToPrim "text" = PText
 textToPrim "character" = PText
+textToPrim "char" = PText
 textToPrim "double precision" = PDouble
 textToPrim "float8" = PDouble
 textToPrim "int4" = PInt

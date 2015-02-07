@@ -2,14 +2,18 @@
 {-# languAGE RecursiveDo #-}
 {-# languAGE DeriveFunctor #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 
 import Query
+import Incendio
 import Pdf
+import Siapi3
 import GHC.Generics
 import qualified Network.HTTP as HTTP
+import Network.Browser
 import Widgets
 import Data.Functor.Apply
 import System.Directory
@@ -105,7 +109,7 @@ setup w = void $ do
   getBody w #+ [element chooserDiv, element body]
   onEvent evDB $ (\(conn,inf@(_,baseTables,_,schema,invSchema,graphP))-> do
     let k = M.keys baseTables
-    let pg = catMaybes [pluginGoogleMap inf , pluginGeocode inf ,pluginOAuth inf ,pluginWapp inf ,pluginBradescoCsv inf,pluginItauTxt inf ,pluginAndamentoId inf , pluginBombeiro inf ,pluginCnpjReceita inf ,pluginCEP inf,{-solicitationPlugin inf,-} pluginOrcamento inf]
+    let pg = catMaybes [documentSprinklerProject inf ,plugCircuit inf ,pluginGoogleMap inf , pluginGeocode inf ,pluginOAuth inf ,pluginWapp inf ,pluginBradescoCsv inf,pluginItauTxt inf ,pluginAndamentoId inf , pluginBombeiro inf ,pluginCnpjReceita inf ,pluginCEP inf,{-solicitationPlugin inf,-} pluginOrcamento inf]
         poll = catMaybes [pollingAndamento inf ]
     span <- chooserKey  conn pg inf k
     poll <- poller conn poll inf
@@ -313,12 +317,12 @@ attrUITable  tAttr' (Attr i) = do
       let
           ei (Just a) = Just a
           ei Nothing = defaultType (keyType i)
-      e <- buildUI (textToPrim <$>keyType i) tAttr
-      eplug <- buildUI (textToPrim <$>keyType i) (pure Nothing)
-      element e # sink UI.style (noneShowSpan <$> (facts $ triding expandEdit)) # set UI.enabled False
-      element eplug # sink UI.style (noneShowSpan <$> (facts $ triding expandEdit)) # set UI.enabled False
+      -- e <- buildUI (textToPrim <$>keyType i) tAttr
+      -- eplug <- buildUI (textToPrim <$>keyType i) (pure Nothing)
+      -- element e # sink UI.style (noneShowSpan <$> (facts $ triding expandEdit)) # set UI.enabled False
+      -- element eplug # sink UI.style (noneShowSpan <$> (facts $ triding expandEdit)) # set UI.enabled False
       paint l (facts $ triding attrUI )
-      sp <- UI.li # set children [l,getElement attrUI ,getElement expandEdit,getElement e,getElement eplug]
+      sp <- UI.li # set children [l,getElement attrUI {-, getElement expandEdit,getElement e,getElement eplug-}]
       let insertT = fmap (Attr .(i,)) <$> (triding attrUI)
           editT = liftA2 (\n m -> join $ liftA2 (\i j -> if i == j then Nothing else Just j) n m) tAttr' insertT
       return (sp,facts insertT)
@@ -555,10 +559,9 @@ poller conn poll inf = do
 
 chooserKey conn pg inf kitems  = do
   -- Base Button Set
-  bset <- buttonSet kitems (\i -> case M.lookup i (pkMap inf) of
+  bset <- buttonSet (L.sortBy (comparing (fmap keyValue . S.toList )) kitems) (\i -> case M.lookup i (pkMap inf) of
                                        Just (Raw _ i  _ _ _ _ )-> T.unpack i
                                        Nothing -> showVertex i )
-
   let bBset = triding bset
   body <- UI.div # sink items (facts (pure . chooseKey conn pg inf <$> bBset ))
   UI.div # set children [getElement bset, body]
@@ -633,7 +636,7 @@ chooseKey conn  pg inf key = mdo
       listManip i j Nothing  _ =  filtering  i j
       listManip i j (Just s) b  =   L.sortBy ( ifApply (const b) flip (comparing (fmap snd .F.find ((== s).fst) )) ) $ filtering i j
       filtering :: (Show (f Showable), Functor f) => String -> [f (Key,Showable)] -> [f (Key,Showable)]
-      filtering i= filter (L.isInfixOf (toLower <$> i) . fmap toLower . show  . fmap snd )
+      filtering i = filter (L.isInfixOf (toLower <$> i) . fmap toLower . show  . fmap snd)
       listRes = listManip  <$> filterInpT <*> res2 <*> UI.userSelection sortList <*> triding asc
       reducer i@(SDouble _) j@(SDouble _)  =  i + j
       reducer (SOptional i) (SOptional j)  =  SOptional $ liftF2 reducer  i  j
@@ -684,7 +687,7 @@ chooseKey conn  pg inf key = mdo
   let whenWriteable = do
         if True -- (snd ( rawSchema table) `elem` [WriteOnly,ReadWrite] )
           then do
-            (crud,_,evs) <- crudUITable conn inf (allRec (tableMap inf) table) (UI.userSelection  itemList)
+            (crud,_,evs) <- crudUITable conn inf (allRec (tableMap inf) table) ({-tidings (facts $ UI.userSelection  itemList) never -} UI.userSelection itemList)
             let eres = fmap (addToList  (allRec (tableMap inf ) table )  <$> ) evs
             res2 <- accumTds vp  eres
             insertDiv <- UI.div # set children [crud]
@@ -735,7 +738,9 @@ plug  name fun table attr inf = flip (Plugins name ) fun <$> (genPlugin table at
 poll :: (Ord a, Ord t) => String -> Int -> (Connection -> InformationSchema -> Tidings [[(Key, Showable)]] -> UI (Element, Tidings (Maybe (Map Key Showable)))) -> t -> [a] -> (Map (t, a) Key, t1, Map t Table, t3, t4, t5) -> Maybe PollingPlugins
 poll name time fun table attr inf = flip (PollingPlugins name time) fun <$> genPlugin table attr inf
 
-pluginOrcamento = plug "Pricing Document" renderProjectPricing "pricing" ["pricing_price"]
+pluginOrcamento = plug "Orçamento" renderProjectPricing "pricing" ["pricing_price"]
+
+documentSprinklerProject = plug "Memorial Sprinkler" renderFireProjectReport "project_sprinkler" []
 
 pluginOAuth = plug "Contact" pluginContactDiv "contact" ["id_contact"]
 
@@ -772,6 +777,8 @@ pluginBombeiro = plug "Projeto Bombeiro" queryCnpjProject "fire_project" ["id_ow
 pluginCnpjReceita = plug "Cnpj Receita" queryCnpjReceita "owner" ["id_owner"]
 
 simpleGetRequest =  fmap BSL.pack . join . fmap HTTP.getResponseBody . HTTP.simpleHTTP . HTTP.getRequest
+
+plugCircuit = plug "Circuit" queryCircuit "project_sprinkler" ["id_sprinkler"]
 
 
 shortCutClick  t i = tidings (facts t) (facts t <@ i)
@@ -812,10 +819,26 @@ getRequest ::  String -> MaybeT IO BSL.ByteString
 getRequest = join . C.lift . (`catch` (\e ->  traceShow (e :: IOException) $ return mzero ) ).  fmap return . simpleGetRequest
 
 
-queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "project_description") . keyValue . fst )$ inputs,) <$> (  runMaybeT $ do
-                let tableName = "fire_project"
-                    fire_project = lookTable inf "fire_project"
-                    andamento = lookTable inf "andamento"
+hasInput k v inp = case snd <$> lookInput  k inp of
+                        Just i  -> testShowable v i
+                        Nothing -> False
+
+testShowable  v s = case s of
+          (SOptional Nothing ) -> False
+          (SOptional (Just i)) -> testShowable v i
+          i -> v i
+
+
+lookInput k = L.find ((== k ) . keyValue . fst )
+
+queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "project_description") . keyValue . fst )$ inputs,) <$> (runMaybeT $  do
+              let
+                  fire_project = lookTable inf "fire_project"
+                  andamento = lookTable inf "andamento"
+              ano <- MaybeT $ return $ lookInput "ano" $ filter (not . isEmptyShowable. snd )  $ inputs
+              if testShowable (<=14) (snd ano )
+                then do
+                let
                     addrs ="http://siapi.bombeiros.go.gov.br/consulta/consulta_protocolo.php"
                     translate = [("protocolo" , "protocolo"),("ano","ano")]
                 (lkeys,modB) <- if not $ elem "id_bombeiro" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs )
@@ -824,12 +847,12 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                     lq <-  getRequest . traceShowId $ url
                     let
                       lq2 =  Just . maybe M.empty (uncurry M.singleton . ("id_bombeiro",)) . fmap SNumeric . readMaybe.  fst .  break (=='&') . concat . tail .  splitL ("php?id=")  .T.unpack . decodeLatin1  $  lq
-                      lkeys = fmap ( M.toList . M.mapKeys ((\(Just i)-> i) . flip M.lookup (keyMap inf) . (tableName,)  ))  $ lq2
-                    mod <- C.lift $ updateMod conn ((\(Just i)-> i) lkeys) inputs ((\(Just i)-> i) $ M.lookup  tableName (tableMap inf) )
+                      lkeys = fmap ( M.toList . M.mapKeys ((\(Just i)-> i) . flip M.lookup (keyMap inf) . ("fire_project",)  ))  $ lq2
+                    mod <- C.lift $ updateMod conn ((\(Just i)-> i) lkeys) inputs  fire_project
                     return $  (lkeys,mod)
                    else do return $ (fmap (\i-> [i])   $ L.find ((== "id_bombeiro") .  keyValue . fst) inputs,Nothing)
                 let
-                  tkeys t v =  M.mapKeys (justError "attr table andamento" . flip M.lookup (keyMap inf) . (t ,)  )  v
+                  tkeys t v =  M.mapKeys (lookKey inf t )  v
                   insertAndamento :: MaybeT IO [Maybe (TableModification Showable)]
                   insertAndamento   = do
                     let
@@ -850,7 +873,7 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                           args :: S.Set (Map Key Showable)
                           args = S.fromList $ fmap (uncurry M.insert  (lookInput inputs )) $ prepareArgs html
                       mod <- case filter ( maybe False (\(SText t) -> T.isInfixOf "Aprovado" t ) .  M.lookup "andamento_description" . M.mapKeys keyValue )  $ S.toList args of
-                          [i] -> updateMod  conn [(justError "could not lookup approval_date " . flip M.lookup (keyMap inf) $ (tableName,"aproval_date") , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] inputs fire_project
+                          [i] -> updateMod  conn [(justError "could not lookup approval_date " . flip M.lookup (keyMap inf) $ ("fire_project","aproval_date") , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] inputs fire_project
                           i -> return Nothing
                       vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) andamento )
 
@@ -860,19 +883,47 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
 
                   updateSolicitacao :: MaybeT IO (Maybe (TableModification Showable))
                   updateSolicitacao = do
-                    MaybeT $ return $ if elem "area" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs )  then Nothing else Just undefined
+                    MaybeT $ return $ if maybe False (\(_,SOptional  mb)-> maybe False (\(SBoolean b) -> b) mb)$ L.find ((=="taxa_paga"). keyValue . fst) $ (filter (not . isEmptyShowable. snd ) inputs )  then Nothing else Just undefined
                     let  addrs_b ="http://siapi.bombeiros.go.gov.br/consulta/consulta_solicitacao.php"
                          translate_b = [("id_bombeiro" ,"id")]
                     tq3 <-  getRequest . traceShowId . (renderUrl translate_b addrs_b)  $  lkeys
                     htmlSoli <- C.lift $ testSolicitation tq3
                     let tq4 = catMaybes .fmap Tra.sequence . M.toList . tkeys  "fire_project" . M.fromList $ htmlSoli
+                    MaybeT $ return $ if not $ maybe False (\(_,SBoolean mb)-> mb) $ L.find ((=="taxa_paga"). keyValue . fst)  tq4 then Nothing else Just undefined
                     C.lift $ updateMod  conn tq4 inputs fire_project
-                and <-  C.lift $ concat . maybeToList <$> runMaybeT insertAndamento
-                sol <-  C.lift $ maybeToList <$> runMaybeT updateSolicitacao
-                gets <- C.lift $ testPdfGet conn inf inputs
-                let mods =  catMaybes (  gets: modB :  and  <> sol)
+                  getPdf = do
+                    MaybeT $ return $ if (\i->elem "analista" i || elem "aproval_date" i ) $ (keyValue . fst <$> filter (not . isEmptyShowable. snd ) inputs ) then Nothing else Just undefined
+                    C.lift $ testPdfGet conn inf inputs
+                and <- C.lift $ concat . maybeToList <$> runMaybeT insertAndamento
+                sol <- C.lift $ maybeToList <$> runMaybeT updateSolicitacao
+                gets <-C.lift $ maybeToList <$> runMaybeT getPdf
+                let mods =  catMaybes (   modB :  gets <> and  <> sol)
                 mapM (C.lift . logTableModification inf conn) mods
-                MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) mods )
+                MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) mods
+              else do
+                    html <- MaybeT $   fmap join $ Tra.sequence $  liftA3 siapi3 (getInput "protocolo" inputs) (getInput "ano" inputs) (getInput "cgc_cpf" inputs)
+                    let
+                      tkeys t v =  M.mapKeys (lookKey inf t)  v
+                      convertAndamento [da,desc,s,sta] = [("andamento_date",SDate . Finite . localDay . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)]
+                      convertAndamento i = error $ "convertAndamento:  " <> show i
+                      prepareArgs  = fmap (tkeys "andamento" . M.fromList . convertAndamento)
+                      lookInput = justError "could not find id_project" . fmap (\(k,v) -> let k1 = (\(Just i)-> i) $ M.lookup ("andamento","id_project") (keyMap inf) in (k1, transformKey (textToPrim <$> keyType k)  (textToPrim <$> keyType k1) v) ) . L.find ((== "id_project") . keyValue . fst)
+
+                    mods <- C.lift $  do
+                      let
+                          args :: S.Set (Map Key Showable)
+                          args = S.fromList $ fmap (uncurry M.insert  (lookInput inputs )) $  prepareArgs  $ traceShowId html
+                      mod <- case filter ( maybe False (\(SText t) -> T.isInfixOf "Aprovado" t ) .  M.lookup "andamento_description" . M.mapKeys keyValue )  $ S.toList args of
+                          [] -> return Nothing
+                          i:xs -> updateMod  conn [(lookKey inf "fire_project" "aproval_date"  , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] inputs fire_project
+                      vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) andamento )
+
+                      let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . concat . F.toList . fmap attrNonRec . unTB1) vp) :: S.Set (Map Key Showable)
+                      adds <- {-traceShow ("KK " <> show kk <> " \n ARGS " <> show args) $-} mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
+                      return $ mod : adds
+                    MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) (catMaybes mods ))
+
+getInput k = fmap (BSL.toStrict. BSL.pack .renderShowable . snd) . lookInput k
 
 allNonEmpty [] = Nothing
 allNonEmpty l = Just  l
@@ -882,7 +933,7 @@ eitherToMaybeT (Right r) =  Just r
 
 queryAndamento3 conn inf  input = do
         tq <-  mapT (mapM (queryAndamento4 conn inf  ) ) input
-        e <- UI.div # sink appendItems ( fmap (\i -> UI.div # set text (show i) ) . catMaybes  <$> facts tq  )
+        e <- UI.div # sink appendItems ( fmap (\i -> UI.div # set text (show $ (fmap (fmap renderShowable)) <$> i) ) . catMaybes  <$> facts tq  )
         return (e , pure Nothing)
 
 updateMod conn kv old table = do
@@ -917,7 +968,7 @@ testHimalaia= do
 testSolicitation f = do
   -- f <- BSL.readFile "solicitacao.html"
   let dec =  decodeLatin1 f
-  html <-  (head <$> readHtml (traceShowId . T.unpack $ dec ))
+  html <-  (head <$> readHtml ( T.unpack $ dec ))
   let packed = fmap (fmap T.pack) html
       log = fmap (splitAt 2) $ safeHead $ filter ((==4).length) packed
       tx = fmap (splitAt 2) $ safeHead $ filter (T.isInfixOf "TAXA" . head ) $ filter ((==3).length) packed
@@ -938,6 +989,13 @@ testSolicitation f = do
 
 sdate  = SDate . Finite .localDay
 stimestamp  = STimestamp . Finite
+
+queryCircuit conn inf inputs = do
+   let j = unsafeMapIO id $ readLinks conn inf  <$> filterJust (rumors inputs)
+   outStp <- stepper ""  j
+   out <- UI.div # sink  UI.html (BSL.unpack <$> outStp)
+   (,pure Nothing) <$> UI.div # set children [out]
+
 
 bradescoExtractTxt  conn  inf   inputs = do
     pathInput <- UI.input -- # set UI.type_ "file"
@@ -1220,10 +1278,10 @@ testPdfGet conn inf inp =  runMaybeT$ do
      then do
         url <- MaybeT $ return $ renderUrlM translate addrs  $ filter (not . isEmptyShowable. snd )  <$> Just inp
         pdf <- getRequest $ traceShowId url
-        C.lift $ BS.writeFile (traceShowId tempName) (BSL.toStrict pdf)
+        C.lift $ BS.writeFile (tempName) (BSL.toStrict pdf)
         v <- C.lift $ parseBombeiroPdf tempName
         C.lift $ removeFile tempName
-        v <- MaybeT $ return $ eitherToMaybeT $ traceShowId v
+        v <- MaybeT $ return $ eitherToMaybeT $ v
         let vp  =  catMaybes . applyTranslator (M.fromList transK) . fmap (fmap (T.unpack . T.fromStrict ) )  $  v
         MaybeT $   updateMod  conn vp inp fire_project
       else MaybeT $ return Nothing
@@ -1302,7 +1360,6 @@ projectKey' conn inf q  = (\(j,(h,i)) -> fmap (fmap (zipWithTF (,) j)) . queryWi
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item
   where item = fmap (\n@(Raw _ t k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
-
 
 
 main :: IO ()
