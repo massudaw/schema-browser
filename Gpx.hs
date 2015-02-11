@@ -119,7 +119,7 @@ testSiapi3 = do
 
 readSiapi3Solicitacao file = do
   let
-      txt = trim ^<< ( (atTag "a" <+> atTag "span") >>> getChildren >>> {-hasText (\i ->  (not $ all (`elem` "\r\n\t") i )) >>> -} getText) <+> ((notContaining (atTag "div") (deep (hasName "a") <+> deep (hasName "span"))  >>> deep getText )  )
+      txt = trim ^<< ( concat ^<< listA ((atTag "a" <+> atTag "span") >>> getChildren >>>  getText)) <+> ((notContaining (atTag "div") (deep (hasName "a") <+> deep (hasName "span"))  >>> deep getText )  )
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
           >>> deep (hasAttrValue "id" (=="formListaDeAndamentos:tabela")) >>> getTable' txt
   tail .head <$> runX arr
@@ -127,7 +127,7 @@ readSiapi3Solicitacao file = do
 
 readSiapi3Andamento file = do
   let
-      txt = trim ^<< ( (atTag "a" <+> atTag "span") >>> getChildren >>> {-hasText (\i ->  (not $ all (`elem` "\r\n\t") i )) >>> -} getText) <+> ((notContaining (atTag "div") (deep (hasName "a") <+> deep (hasName "span"))  >>> deep getText )  )
+      txt = trim ^<< (concat ^<< listA ((atTag "a" <+> atTag "span") >>> getChildren >>>  getText))
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
           >>> deep (hasAttrValue "id" (=="formListaDeAndamentos:tabela")) >>> getTable' txt
   tail .head <$> runX arr

@@ -22,16 +22,18 @@ import qualified Data.ByteString.Lazy.Char8 as BSLC
 import qualified Data.ByteString.Lazy as BSL
 
 import Gpx
+import Debug.Trace
+
 
 siapi3 protocolo ano cgc_cpf = do
   let opts = defaults & manager .~ Left (opensslManagerSettings context)
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
-    r <- Sess.get session siapiAndamento3Url
+    r <- Sess.get session $ traceShowId siapiAndamento3Url
     let view =  snd . BS.breakSubstring("ViewState") . BSL.toStrict <$>
            r ^? responseBody
         viewValue = BSC.takeWhile (/='\"') . BS.drop 7 . snd .BS.breakSubstring "value=\"" <$> view
     pr <- traverse (Sess.post session siapiAndamento3Url. protocolocnpjForm protocolo ano cgc_cpf ) viewValue
-    r <- Sess.get session siapiListAndamento3Url
+    r <- Sess.get session $ traceShowId $ siapiListAndamento3Url
     traverse (readSiapi3Andamento . BSLC.unpack  ) (r ^? responseBody)
 
 protocolocnpjForm :: BS.ByteString ->BS.ByteString ->BS.ByteString ->BS.ByteString -> [FormParam]

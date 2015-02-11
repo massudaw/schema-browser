@@ -904,7 +904,7 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                     html <- MaybeT $   fmap join $ Tra.sequence $  liftA3 siapi3 (getInput "protocolo" inputs) (getInput "ano" inputs) (getInput "cgc_cpf" inputs)
                     let
                       tkeys t v =  M.mapKeys (lookKey inf t)  v
-                      convertAndamento [da,desc,s,sta] = [("andamento_date",SDate . Finite . localDay . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)]
+                      convertAndamento [_,da,desc,s,sta] = [("andamento_date",SDate . Finite . localDay . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)]
                       convertAndamento i = error $ "convertAndamento:  " <> show i
                       prepareArgs  = fmap (tkeys "andamento" . M.fromList . convertAndamento)
                       lookInput = justError "could not find id_project" . fmap (\(k,v) -> let k1 = (\(Just i)-> i) $ M.lookup ("andamento","id_project") (keyMap inf) in (k1, transformKey (textToPrim <$> keyType k)  (textToPrim <$> keyType k1) v) ) . L.find ((== "id_project") . keyValue . fst)

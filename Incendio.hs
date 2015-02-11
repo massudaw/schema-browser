@@ -1,7 +1,7 @@
 {-# LANGUAGE TupleSections,RankNTypes ,OverloadedStrings #-}
 module Incendio (readLinks) where
 
-import Diagram
+-- import Diagram
 import Element
 import Sprinkler
 import Grid
@@ -111,9 +111,11 @@ readLinks conn inf input = do
       n =  transformN . fmap snd . fromJust . projeKeys ["id","linklist"] . F.toList <$> j
       nh =  transformNH . fmap snd . fromJust . projeKeys ["id","linklist","pressure"] . F.toList <$> jh
       m =  transformM . fmap snd . fromJust . projeKeys ["id","bicos"] . traceShowId . F.toList <$> r
-      grid = traceShowId $ Grid l nh n  []
-      iter region =  solveIter (enableSprinklers region $ Iteration ((\(id,_,_,_) -> (id,4)) <$> l) ((\(i,_)->(i,200)) <$> n) (fmap realToFrac grid)) jacobianEqNodeHeadGrid
-  return $ renderSvg $ renderDia SVG (SVGOptions (Width 500) Nothing) (L.foldr1 (|||) $fmap (assembleMap . drawGrid 212 31. iter. snd) m :: Diagram B R2)
+      --grid = traceShowId $ Grid l nh n  []
+      --iter region =  solveIter (enableSprinklers region $ Iteration ((\(id,_,_,_) -> (id,4)) <$> l) ((\(i,_)->(i,200)) <$> n) (fmap realToFrac grid)) jacobianEqNodeHeadGrid
+
+  --return $ renderSvg $ renderDia SVG (SVGOptions (Width 500) Nothing) (L.foldr1 (|||) $fmap (assembleMap . drawGrid 212 31. iter. snd) m :: Diagram B R2)
+  return ""
 
 projeKeys ks inp = allMaybes $ (\i -> L.find ((==i).keyValue.fst) inp ) <$> ks
 
