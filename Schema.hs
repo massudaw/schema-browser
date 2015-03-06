@@ -105,7 +105,7 @@ keyTables conn schema = do
            graphP = warshall2 $ graphI
            graph = hashGraph $ graphP
            invgraph = hashGraphInv' $ graphP
-       return (i1,i2,i3,graph,invgraph,graphP)
+       return $ traceShow (fmap (\(i,j) -> (i,showKey j)) res2) (i1,i2,i3,graph,invgraph,graphP)
 
 
 

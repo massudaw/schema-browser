@@ -150,8 +150,19 @@ rangeBoxes fkbox bp = do
 instance Widget (RangeBox a) where
   getElement = _rangeElement
 
+tabbedB :: [(String,(Element,Behavior Bool))] ->  UI Element
+tabbedB [] = UI.div
+tabbedB  tabs = do
+  header <- buttonSetB  ((\(i,(e,b)) -> (i,b))<$> tabs) id
+  let lk k = M.lookup k (M.fromList $ (\(s,(e,_))-> (s,e)) <$> tabs)
+  v <- currentValue (facts $ lk <$> triding header)
+  switch (fmap (fst.snd) tabs) v
+  onEvent (rumors $ lk <$> triding header) (switch (fst.snd <$> tabs))
+  body <- UI.div # set children (fst.snd <$> tabs)
+  UI.div # set children [getElement header,body]
 
-tabbed :: [(String,Element)] -> UI Element
+
+tabbed :: [(String,Element)] ->  UI Element
 tabbed [] = UI.div
 tabbed  tabs = do
   header <- buttonSet  (fst <$> tabs) id
@@ -163,7 +174,34 @@ tabbed  tabs = do
   UI.div # set children [getElement header,body]
 
 -- List of buttons with constant value
-buttonSet :: [a] -> (a -> String) -> UI (TrivialWidget a)
+buttonFSet :: [a] -> Behavior (String -> Bool ) ->  (a -> String) -> UI (TrivialWidget a)
+buttonFSet ks bf h =do
+  buttons <- mapM (buttonString h) ks
+  dv <- UI.div # set children (fst <$> buttons)
+  let evs = foldr (unionWith (const)) never (snd <$> buttons)
+  bv <- stepper (head ks) evs
+  return (TrivialWidget (tidings bv evs) dv)
+    where
+      buttonString h k= do
+        b <- UI.button # set text (h k)# sink UI.style ((\i-> noneShowSpan (i (h k))) <$> bf)
+        let ev = pure k <@ UI.click  b
+        return (b,ev)
+
+buttonSetB :: [(a,Behavior Bool)]  ->  (a -> String) -> UI (TrivialWidget a)
+buttonSetB ks h =do
+  buttons <- mapM (\i ->  buttonString h (fst i)  (snd i) ) ks
+  dv <- UI.div # set children (fst <$> buttons)
+  let evs = foldr (unionWith (const)) never (snd <$> buttons)
+  bv <- stepper (fst $ head ks) evs
+  return (TrivialWidget (tidings bv evs) dv)
+    where
+      buttonString h k l = do
+        b <- UI.button # set text (h k) # sink UI.style (noneShow <$> l)
+        let ev = pure k <@ UI.click  b
+        return (b,ev)
+
+
+buttonSet :: [a]  ->  (a -> String) -> UI (TrivialWidget a)
 buttonSet ks h =do
   buttons <- mapM (buttonString h) ks
   dv <- UI.div # set children (fst <$> buttons)
@@ -175,6 +213,7 @@ buttonSet ks h =do
         b <- UI.button # set text (h k)
         let ev = pure k <@ UI.click  b
         return (b,ev)
+
 
 
 items :: WriteAttr Element [UI Element]
