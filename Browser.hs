@@ -9,6 +9,7 @@
 
 import Query
 import Incendio
+import Step
 import Pdf
 import Siapi3
 import CnpjReceita
@@ -1196,46 +1197,6 @@ queryCEP2' _ inf   inputs =
         body <-UI.div # set children [b,e]
         return (body ,fmap M.toList <$> tkeys)
   in  element
-
-
-
-data Step a
-  = SAttr (String,(Text, a -> String))
-  | SFK (Set Text) [Step a]
-  deriving(Show)
-
-instance Show (a -> Maybe Showable) where
-  show _ = ""
-
-instance Show (a -> String) where
-  show _ = ""
-
-data FKEdit
-  = FKEInsertGenerated
-  | FKEInsertFind
-  | FKEUpdateAttr
-  | FKEUpdateFK
-  deriving(Show)
-
-data AEdit
-  = AEInsert
-  | AEUpdate
-  deriving(Show)
-
-data TEdit
-  = TInsert
-  | TUpdate
-  | TDelete
-  | TGenerated
-  deriving(Show)
-
-data TablePlan a = TablePlan TEdit Table [StepPlan a]
-
-data StepPlan a
-  = SPAttr AEdit Key a
-  | SPFK FKEdit (Path (Set Key) (SqlOperation Table)) [StepPlan a]
-  | TBPlan TEdit Table [StepPlan a]
-  deriving(Show,Functor)
 
 
 executeStep
