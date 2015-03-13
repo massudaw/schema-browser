@@ -21,7 +21,6 @@ import Data.Time.Parse
 import Data.Time
 import Text.XML.HXT.Core
 
-import Text.XML.HXT.Curl
 import Text.XML.HXT.Arrow.Pickle
 import Text.XML.HXT.Arrow.XmlState.TypeDefs
 
