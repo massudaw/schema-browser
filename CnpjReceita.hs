@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections,LambdaCase,OverloadedStrings #-}
 module CnpjReceita where
 import Network.Wreq
 import qualified Network.Wreq.Session as Sess
@@ -34,28 +34,30 @@ import qualified Data.ByteString.Base64.Lazy as B64
 evalUI el f  = getWindow el >>= \w -> runUI w f
 
 
-
 cnpjquery el cpfe = do
   let opts = defaults & manager .~ Left man
       man  = opensslManagerSettings context
   withOpenSSL $ Sess.withSessionWith man $ \session -> do
     ev <- evalUI el (do
-          cap <- mapT (traverse (\cgc_cpf ->  do
+          captchaCap <- UI.button # set UI.text "Submit"
+          let cap = unsafeMapIO ( traverse (\cgc_cpf ->  do
                   r <- Sess.getWith (opts & param "cnpj" .~ [T.pack $ BSC.unpack cgc_cpf]) session $ traceShowId cnpjhome
-                  (^? responseBody) <$> (Sess.get session $ traceShowId cnpjcaptcha))) ( fmap traceShowId $ cpfe)
+                  (^? responseBody) <$> (Sess.get session $ traceShowId cnpjcaptcha))) ( (\case {""-> Nothing ; i -> Just i } )  <$> (facts cpfe <@ UI.click captchaCap ) )
           inpCap <-UI.input # set UI.style [("width","120px")]
-          capB <- stepper Nothing (join <$> rumors cap )
           submitCap <- UI.button # set UI.text "Submit"
-          capE <- UI.img# sink UI.src ((("data:image/png;base64,"++) . maybe "" (BSLC.unpack.B64.encode)) <$> capB )
+          capb <- stepper Nothing (join <$> cap)
+          capE <- UI.img# sink UI.src ((("data:image/png;base64,"++) . maybe "" (BSLC.unpack.B64.encode)) <$> capb )
           dv<-UI.div
-          element el # set UI.children [capE,dv,inpCap,submitCap]
+          element el # set UI.children [captchaCap ,capE,dv,inpCap,submitCap]
           binpCap <- stepper "" (UI.valueChange inpCap)
           return ( binpCap <@ UI.click submitCap) )
-    let out =  unsafeMapIO (\(cgc_cpf,captcha) ->  do
-          pr <- traverse (Sess.post session cnpjpost . protocolocnpjForm cgc_cpf   ) (Just $ BSC.pack captcha  )
-          traverse (readHtmlReceita . BSLC.unpack ) (fromJust pr ^? responseBody)) (filterJust $ liftA2 (,) <$> facts cpfe <@> fmap Just ev)
+    let out =  unsafeMapIO (\(cp,captcha) ->  do
+          pr <- traverse (Sess.post session (traceShowId cnpjpost) . protocolocnpjForm cp ) (Just $ BSC.pack captcha  )
+          pr <- traverse (Sess.post session (traceShowId cnpjpost) . protocolocnpjForm cp ) (Just $ BSC.pack captcha  )
+          traverse (readHtmlReceita . BSLC.unpack ) (fromJust pr ^? responseBody)
+              ) $ (,) <$> facts cpfe <@> ev
     {-evalUI el (do
-          st <- stepper  "" (fmap show  out)
+          st <- stepper  "" (fmap  show out)
           d <- UI.div # sink UI.html st
           element el #+ [element d])-}
     return out
@@ -77,7 +79,7 @@ test = do
   startGUI defaultConfig (\w -> do
                       e <- UI.div
                       i<-UI.input
-                      bhi <- stepper Nothing (Just <$> UI.valueChange i)
-                      liftIO $ cnpjquery e (fmap BSC.pack <$> tidings bhi (Just <$> UI.valueChange i))
+                      bhi <- stepper "" (UI.valueChange i)
+                      liftIO $ cnpjquery e $ pure "01008713010399"
                       getBody w #+ [element i ,element e]
                       return () )

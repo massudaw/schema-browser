@@ -50,7 +50,7 @@ projectKey
 projectKey conn inf q  = (\(j,(h,i)) -> fmap (fmap (zipWithTF (,) (fmap (\(Metric i)-> i) j))) . queryWith_ (fromShowableList j) conn .  buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
 
 insertNode conn inf proj l =
-  insert conn (fmap (\(l,v)->(lookKey inf "node" l,v))  $ zip ["project","id","linklist"]  (SNumeric proj :makeNode l) ) (lookTable inf "node")
+  insert conn ((\(l,v)->(lookKey inf "node" l,v))  <$>  zip ["project","id","linklist"]  (SNumeric proj :makeNode l) ) (lookTable inf "node")
 
 insertLink conn inf proj l =
   insert conn (fmap (\(l,v)->(lookKey inf "link" l,v))  $ zip ["project","id","headnode","tailnode","diameterhead","var","tag"]  (SNumeric proj :makeLink l) ) (lookTable inf "link")
@@ -122,6 +122,4 @@ projeKeys ks inp = allMaybes $ (\i -> L.find ((==i).keyValue.fst) inp ) <$> ks
 testLinks = do
   m <-newUnique
   withConnInf "incendio" (\i j -> do
-                         -- mapM (insertLink i j 64)  (links $ grid test3) )
-                         --mapM (insertNode i j 64)  (nodesFlowSet $ grid test3) )
                          readLinks i j [(Key "id_sprinkler" (Just "id_sprinkler") Nothing  m (Primitive "bigint") ,SNumeric 64)])

@@ -10,7 +10,8 @@ import GHC.Stack
 import Postgresql
 import Database.PostgreSQL.Simple
 import Control.Applicative
-import Numeric.Interval((...))
+import Data.Interval (interval)
+import qualified Data.ExtendedReal as ER
 
 import Data.Maybe
 import Data.Text.Lazy (Text,unpack)
@@ -149,7 +150,7 @@ exec inputs = do
   inf <- keyTables conn  schema
   print (tableMap inf)
   res <- runX arr
-  let runVals = [("period",SInterval $ (last $ head res ) ... (last $ last res))]  <> L.filter ((/= "file") . fst ) inputs
+  let runVals = [("period",SInterval $ (ER.Finite $ last $ head res ,True) `interval` (ER.Finite $ last $ last res,True))]  <> L.filter ((/= "file") . fst ) inputs
       runInput = withFields inf  "run" $   lookupKeys inf "run"  runVals
   print runInput
   pkrun <- uncurry (insertPK fromShowableList conn) runInput

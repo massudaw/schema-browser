@@ -1,16 +1,20 @@
-{-# LANGUAGE RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+{-# LANGUAGE DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 module Postgresql where
 import Query
 import GHC.Stack
 import Data.Scientific hiding(scientific)
 import Data.Bits
+import Data.Tuple
 import Debug.Trace
 import Data.Time.Clock
+import qualified Data.Char as Char
 import Schema
 import Control.Applicative
 import qualified Data.Serialize as Sel
 import Data.Maybe
 import Text.Read
+import qualified Data.ExtendedReal as ER
+import Data.ExtendedReal (Extended)
 import Data.Typeable
 import qualified Data.ByteString.Base16 as B16
 import Data.Time.Parse
@@ -18,7 +22,8 @@ import           Database.PostgreSQL.Simple.Arrays as Arrays
 import Data.Graph(stronglyConnComp,flattenSCCs)
 import Control.Exception
 import           Data.Attoparsec.Char8 hiding (Result)
-import Data.Traversable (Traversable,traverse)
+import Data.Traversable (Traversable,traverse,sequence)
+import qualified Data.Traversable  as Tra
 import Warshal
 import Data.Time.LocalTime
 import Data.IORef
@@ -28,8 +33,8 @@ import qualified Database.PostgreSQL.Simple.TypeInfo.Static as TI
 import qualified Data.List as L
 import Data.Vector(Vector)
 import qualified Data.Vector as Vector
-import qualified Numeric.Interval as Interval
-import qualified Numeric.Interval.Internal as NI
+import qualified Data.Interval as Interval
+import Data.Interval (Interval)
 import qualified Data.ByteString.Char8 as BS
 
 import Data.Monoid
@@ -38,6 +43,7 @@ import Data.Time.Parse
 import System.IO.Unsafe
 import Debug.Trace
 import qualified Data.Foldable as F
+import Data.Foldable (Foldable)
 import qualified Data.Text.Lazy as T
 import Data.ByteString.Lazy(toStrict)
 import Data.Text.Lazy.Encoding
@@ -71,8 +77,13 @@ textToPrim "text" = PText
 textToPrim "character" = PText
 textToPrim "char" = PText
 textToPrim "double precision" = PDouble
+textToPrim "numeric" = PDouble
 textToPrim "float8" = PDouble
 textToPrim "int4" = PInt
+-- textToPrim "bank_account" = PBackAccount
+textToPrim "cnpj" = PCnpj
+textToPrim "sql_identifier" =  PText
+textToPrim "cpf" = PCpf
 textToPrim "int8" = PInt
 textToPrim "integer" = PInt
 textToPrim "bigint" = PInt
@@ -95,9 +106,16 @@ db = DB "usda" "postgres" "queijo" "localhost" "5432"
 -- Wrap new instances without quotes delimiting primitive values
 newtype UnQuoted a = UnQuoted {unQuoted :: a}
 
+deriving instance Foldable Interval
+deriving instance Foldable Extended
+deriving instance Traversable Extended
+deriving instance Traversable Interval
+
 instance TF.ToField (UnQuoted Showable) where
   toField (UnQuoted (STimestamp i )) = TF.Plain $ localTimestampToBuilder i
   toField (UnQuoted (SDate i )) = TF.Plain $ dateToBuilder i
+  toField (UnQuoted (SDouble i )) =  TF.toField i
+  toField (UnQuoted (SNumeric i )) =  TF.toField i
   toField i = TF.toField i
 
 instance TF.ToField Position where
@@ -114,9 +132,9 @@ instance TF.ToField (UnQuoted Bounding ) where
     where del = TF.Plain $ fromChar ','
           str = TF.Plain . fromByteString
           points :: [TF.Action]
-          points = [point (Interval.inf l), del, point (Interval.sup l)]
-          point :: Position -> TF.Action
-          point (Position (lat,lon,alt)) = TF.Many [str "ST_setsrid(ST_MakePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str "),4326)"]
+          points = [point (Interval.lowerBound l), del, point (Interval.upperBound l)]
+          -- point :: Position -> TF.Action
+          point (ER.Finite (Position (lat,lon,alt))) = TF.Many [str "ST_setsrid(ST_MakePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str "),4326)"]
 
 
 instance TF.ToField (UnQuoted LineString) where
@@ -134,11 +152,13 @@ instance TF.ToField (UnQuoted Position) where
     where del = TF.Plain $ fromChar ','
           str = TF.Plain . fromByteString
 
-instance TF.ToField (UnQuoted a) => TF.ToField (Interval.Interval a) where
+instance TF.ToField a => TF.ToField (Interval.Interval a) where
   toField = intervalBuilder
 
+instance TF.ToField a => TF.ToField (UnQuoted (Interval.Extended a )) where
+  toField (UnQuoted (ER.Finite i)) = TF.toField i
 
-intervalBuilder i =  TF.Many [TF.Plain $ fromByteString "\'[" ,  TF.toField $  (UnQuoted $ Interval.inf i) , TF.Plain $ fromChar ',' , TF.toField  (UnQuoted $ Interval.sup i) , TF.Plain $ fromByteString "]\'"]
+intervalBuilder i =  TF.Many [TF.Plain $ fromByteString "\'[" ,  TF.toField $  (UnQuoted $ Interval.lowerBound i) , TF.Plain $ fromChar ',' , TF.toField  (UnQuoted $ Interval.upperBound i) , TF.Plain $ fromByteString "]\'"]
 
 instance TF.ToField Showable where
   toField (SText t) = TF.toField t
@@ -160,21 +180,28 @@ defaultType t =
       KOptional i -> Just (SOptional Nothing)
       i -> Nothing
 
+readTypeOpt t Nothing = case t of
+    KOptional i -> Just $ SOptional Nothing
+    i -> Nothing
+readTypeOpt t (Just i) = readType t i
+
 readType t = case t of
     Primitive i -> readPrim i
     KOptional i -> opt (readType i)
     KSerial i -> opt (readType i)
     KArray i  -> parseArray (readType i)
-    KInterval i -> inter (readType i)
+    -- KInterval i -> inter (readType i)
   where
       opt f "" =  Just $ SOptional Nothing
       opt f i = fmap (SOptional .Just) $ f i
       parseArray f i =   fmap (SComposite. Vector.fromList) $  allMaybes $ fmap f $ unIntercalate (=='\n') i
-      inter f = (\(i,j)-> fmap SInterval $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
+      -- inter f = (\(i,j)-> fmap SInterval $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
 
 readPrim t =
   case t of
      PText -> readText
+     PCnpj -> readCnpj
+     PCpf-> readCpf
      PDouble ->  readDouble
      PInt -> readInt
      PTimestamp -> readTimestamp
@@ -183,25 +210,61 @@ readPrim t =
      PPosition -> readPosition
      PBoolean -> readBoolean
      PLineString -> readLineString
-     PBounding -> readBounding
+     -- PBounding -> readBounding
   where
       readInt = nonEmpty (fmap SNumeric . readMaybe)
       readBoolean = nonEmpty (fmap SBoolean . readMaybe)
       readDouble = nonEmpty (fmap SDouble. readMaybe)
       readText = nonEmpty (\i-> fmap SText . readMaybe $  "\"" <> i <> "\"")
+      readCnpj = nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cnpjValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
+      readCpf = nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cpfValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
       readDate =  fmap (SDate . Finite . localDay . fst) . strptime "%Y-%m-%d"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
       readLineString = nonEmpty (fmap SLineString . readMaybe)
-      readBounding = nonEmpty (fmap SBounding . fmap Bounding . (fmap (\(SInterval i ) -> fmap (\(SPosition p )-> p) i)) . inter readPosition )
-      inter f = (\(i,j)-> fmap SInterval $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
+      -- readBounding = nonEmpty (fmap SBounding . fmap Bounding . (fmap (\(SInterval i ) -> fmap (\(SPosition p )-> p) i)) . inter readPosition )
+      inter f = (\(i,j)-> fmap SInterval $  Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
       readTimestamp =  fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%OS"
       readInterval =  fmap SPInterval . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
       nonEmpty f ""  = Nothing
       nonEmpty f i  = f i
 
+eitherToMaybe = either (const Nothing) Just
+
+readDigit i
+  | Char.isDigit i = Just $ Char.digitToInt i
+  | otherwise = Nothing
+
+cpfValidate i
+  | length i /= 11 = Left "Invalid size Brazilian Cnpj need 14 digits"
+  | m1v == m1 && m2v == m2 = Right i
+  | otherwise = Left "Invalid checksum check your number"
+  where multiplier1 =  [10,9,8,7,6,5,4,3,2]
+        multiplier2 =  [11,10,9,8,7,6,5,4,3,2]
+        multSum i j =  if remainder <2 then 0 else 11 - remainder
+            where remainder = sum (zipWith (*) i j) `mod` 11
+        m1 = multSum i multiplier1
+        m2 = multSum i multiplier2
+        [m1v,m2v] = drop 9 i
+
+
+cnpjValidate i
+  | length i /= 14 = Left "Invalid size Brazilian Cnpj need 14 digits"
+  | m1v == m1 && m2v == m2 = Right i
+  | otherwise = Left "Invalid checksum check your number"
+  where multiplier1 = [ 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2 ]
+        multiplier2 = [ 6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2 ]
+        multSum i j =  if remainder <2 then 0 else 11 - remainder
+            where remainder = sum (zipWith (*) i j) `mod` 11
+        m1 = multSum i multiplier1
+        m2 = multSum i multiplier2
+        [m1v,m2v] = drop 12 i
+
+tcnpj = [0,4,8,2,5,5,8,0,0,0,0,1,0,7]
+cpf = [0,2,8,4,0,3,0,1,1,2,1]
+
 
 allMaybes i = case F.all isJust i of
-        True -> Just $ fmap fromJust i
+        True -> Just $ fmap (justError "wrong invariant allMaybes") i
         False -> Nothing
 
 
@@ -216,33 +279,11 @@ unIntercalate pred s                 =  case dropWhile pred s of
                                              break pred s'
 
 primType (Metric k ) = textToPrim <$> keyType k
-primType (Agg g) =  postgresqlFunctions g
-primType f@(Fun _ _) =  pgfun f
-primType f@(Operator r _ e l) =  pgfun f
 
 
 
-availableAggregators (Primitive PInt) k = [Aggregate [k] "count"]
-availableAggregators (Primitive PDouble) k = [Aggregate [k] "sum"]
-availableAggregators (KInterval i ) k = [Aggregate [Operator (Fun [k] "upper") "-" "diff" (Fun [k] "lower")] "sum"]
-availableAggregators i k = []
-
-subSpace (Primitive PTimestamp)  = Primitive PInterval
-subSpace (Primitive PDate)  = Primitive PInterval
-
-pgfun :: KAttribute -> KType KPrim
-pgfun (Fun [k] "lower" ) = case primType k of
-    KInterval i -> i
-    i -> error "not inteval"
-pgfun (Fun [k] "upper" )  = case primType k of
-    KInterval i -> i
-    i -> error "not inteval"
-pgfun (Operator l "-" n r) =  subSpace ( primType l)
 
 
-postgresqlFunctions :: Aggregate KAttribute -> KType KPrim
-postgresqlFunctions (Aggregate _ "count" ) = Primitive PInt
-postgresqlFunctions (Aggregate [k] "sum" ) = primType k
 
 attrToKey k@(Metric i) = renderedName i
 attrToKey t@(Agg _)  = renderedType (primType t)
@@ -283,6 +324,8 @@ prim :: (F.FromField (f Bool ),F.FromField (f Bounding),F.FromField (f LineStrin
         -> F.Conversion (f Showable)
 prim  p f b = case p of
             PText ->  s $ F.fromField f b
+            PCnpj->  s $ F.fromField f b
+            PCpf ->  s $ F.fromField f b
             PInt -> n $ F.fromField  f b
             PDouble -> d $ F.fromField  f b
             PDate -> da $ F.fromField  f b
@@ -307,13 +350,19 @@ prim  p f b = case p of
 instance (F.FromField (f (g a))) => F.FromField (Compose f g a) where
   fromField = fmap (fmap (fmap (Compose ) )) $ F.fromField
 
+instance Sel.Serialize a => Sel.Serialize (ER.Extended a ) where
+  get = ER.Finite <$> Sel.get
+  put (ER.Finite i ) = Sel.put i
 instance Sel.Serialize Bounding where
   get = do
-      i <- liftA2 (Interval....) Sel.get Sel.get
+      i <- liftA2 (Interval.interval) Sel.get Sel.get
       return  $ Bounding i
   put (Bounding i ) = do
-      Sel.put (Interval.sup i)
-      Sel.put (Interval.inf i)
+      Sel.put (Interval.upperBound i)
+      Sel.put (Interval.lowerBound i)
+
+instance Functor (Interval.Interval) where
+  fmap f (Interval.Interval (ei,ec) (ji,jc)) = Interval.Interval (f <$> ei,ec) (f <$> ji,jc)
 
 
 instance Sel.Serialize Position where
@@ -370,7 +419,7 @@ box3dParser = do
           let makePoint [x,y,z] = Position (x,y,z)
           res  <- char '(' *> sepBy1 (sepBy1 ( scientific) (char ' ') ) (char ',') <* char ')'
           return $ case fmap (fmap  realToFrac) res  of
-            [m,s] ->  Bounding (makePoint m Interval.... makePoint s)
+            [m,s] ->  Bounding ((ER.Finite $ makePoint m ,True) `Interval.interval` (ER.Finite $ makePoint s,True))
 
 
 
@@ -395,25 +444,31 @@ instance F.FromField Position where
              return (error $ "BE not implemented " <> show i <> "  " <> show decoded)
       decoded = fmap (fst . B16.decode) t
 
-instance Functor Interval.Interval where
-  fmap f i = NI.I (f (Interval.inf i)) ( f (Interval.sup i))
+
+safeMaybe e f i = maybe (errorWithStackTrace (e  <> ", input = " <> show i )) id (f i)
 
 instance F.FromField DiffTime where
   fromField  f mdat = case  mdat of
     Nothing -> F.returnError F.UnexpectedNull f ""
     Just dat -> do
-      case parseOnly (do
-          res  <- sepBy1 (fromJust . toBoundedInteger <$> scientific) (char ':')
-          return $ case res  of
-            [s] ->  secondsToDiffTime (fromIntegral s)
-            [m,s] ->  secondsToDiffTime (fromIntegral $  (60 :: Int) * m + s)
-            [h,m,s] ->  secondsToDiffTime (fromIntegral $ h * 3600 + (60 :: Int) * m + s)
-            [d,h,m,s] -> secondsToDiffTime (fromIntegral $ d *3600*24 + h * 3600 + (60 :: Int) * m + s)
-            v -> errorWithStackTrace $ show v) dat of
+      case parseOnly diffInterval dat of
 
           Left err -> F.returnError F.ConversionFailed f err
           Right conv -> return conv
 
+diffIntervalLayout = sepBy1 (toRealFloat <$> scientific) (string " days " <|> string " day " <|>  string ":" )
+
+diffInterval = (do
+  res  <- diffIntervalLayout
+  return $ case res  of
+    [s] ->  secondsToDiffTime (round s)
+    [m,s] ->  secondsToDiffTime (round $  (60 ) * m + s)
+    [h,m,s] ->  secondsToDiffTime (round $ h * 3600 + (60 ) * m + s)
+    [d,h,m,s] -> secondsToDiffTime (round $ d *3600*24 + h * 3600 + (60  ) * m + s)
+    v -> errorWithStackTrace $ show v)
+
+instance (F.FromField a ) => F.FromField (Interval.Extended a) where
+  fromField  i mdat = ER.Finite <$> (fromField i mdat)
 
 -- | any postgresql array whose elements are compatible with type @a@
 instance (F.FromField a,Ord a, Typeable a) => F.FromField (Interval.Interval a) where
@@ -422,26 +477,34 @@ instance (F.FromField a,Ord a, Typeable a) => F.FromField (Interval.Interval a) 
         case info of
           F.Range{} ->
               case mdat of
-                Nothing  -> F.returnError F.UnexpectedNull f ""
+                Nothing  -> F.returnError F.UnexpectedNull f "Null Range"
                 Just  dat -> do
                    case parseOnly (fromArray info f) dat of
                      Left  err  -> F.returnError F.ConversionFailed f err
-                     Right conv -> (Interval....) <$>  (fmap (!!0) conv) <*> (fmap (!!1) conv)
+                     Right conv ->  conv
           _ -> F.returnError F.Incompatible f ""
 
 plain' :: String -> Parser BS.ByteString
 plain' delim = takeWhile1 (notInClass (delim <> "\"{}"))
 
-range :: Char -> Parser [ArrayFormat]
-range delim = (char '('  <|> char '[' ) *> option [] (arrays <|> strings) <* (char ')' <|> char ']')
+parseInter token = do
+    lb <- (char '[' >> return False) <|> (char '(' >> return True)
+    [i,j] <- token
+    rb <- (char ']' >> return False) <|> (char ')' >> return True)
+    return [(lb,ER.Finite i),(rb,ER.Finite j)]
+
+range :: Char -> Parser (Interval.Interval ArrayFormat)
+range delim = (\[i,j]-> Interval.Interval i j ) . fmap swap  <$>  parseInter (strings <|>arrays)
+
   where
         strings = sepBy1 (Quoted <$> quoted <|> Plain <$> plain' ",;[]()" ) (char delim)
         arrays  = sepBy1 (Arrays.Array <$> array ';') (char delim)
                 -- NB: Arrays seem to always be delimited by commas.
-            --
+
+
 fromArray :: (FromField a)
-          => TypeInfo -> Field -> Parser (Conversion [a])
-fromArray typeInfo f = sequence . (parseIt <$>) <$> range delim
+          => TypeInfo -> Field -> Parser (Conversion (Interval.Interval a))
+fromArray typeInfo f = Tra.sequence . (parseIt <$>) <$> range delim
   where
     delim = typdelim (rngsubtype typeInfo)
     fElem = f{ typeOid = typoid (rngsubtype typeInfo) }

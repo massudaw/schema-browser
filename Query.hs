@@ -28,11 +28,12 @@ import Data.Traversable (mapAccumL)
 import qualified Data.Traversable as Tra
 import Data.Char ( isAlpha )
 import Data.Maybe
-import qualified Numeric.Interval as Interval
+import qualified Data.Interval as Interval
 import Data.Monoid hiding (Product)
 import Data.Functor.Product
 
 import qualified Data.Text.Lazy as T
+import qualified Data.ExtendedReal as ER
 
 import GHC.Int
 import Data.GraphViz (preview)
@@ -68,6 +69,9 @@ import Debug.Trace
 
 import Data.Unique
 
+instance Ord a => Ord (Interval.Interval a ) where
+  compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)
+
 data KPrim
    = PText
    | PBoolean
@@ -78,6 +82,8 @@ data KPrim
    | PInterval
    | PPosition
    | PBounding
+   | PCnpj
+   | PCpf
    | PLineString
    deriving(Show,Eq,Ord)
 
@@ -232,7 +238,7 @@ instance Monoid Filter where
 -- Pretty Print Filter
 renderFilter (table ,name,Category i) = tableName table <> "." <> keyValue name <> " IN( " <>  T.intercalate "," (fmap (\s -> "'" <> T.pack (renderShowable $ head (pkKey s)) <> "'" ) $ S.toList i) <> ")"
 renderFilter (table ,name,And i) =  T.intercalate " AND "  (fmap (renderFilter . (table ,name,)) i)
-renderFilter (table ,name,RangeFilter i) =  tableName table <> "." <> keyValue name <> " BETWEEN " <> T.intercalate " AND "  (fmap (\s -> "'" <> T.pack (renderShowable$ head (pkKey s)) <> "'" ) [Interval.inf i,Interval.sup i])
+-- renderFilter (table ,name,RangeFilter i) =  tableName table <> "." <> keyValue name <> " BETWEEN " <> T.intercalate " AND "  (fmap (\s -> "'" <> T.pack (renderShowable$ head (pkKey s)) <> "'" ) [Interval.inf i,Interval.sup i])
 
 data SqlOperation a
   = FetchTable a
@@ -281,7 +287,7 @@ atTables f (Base _ p ) = from p
 renderShowable :: Showable -> String
 renderShowable (SOptional i ) = maybe "" renderShowable i
 renderShowable (SSerial i ) = maybe "" renderShowable i
-renderShowable (SInterval i)  = renderShowable (Interval.inf i) <> "," <> renderShowable (Interval.sup i)
+renderShowable (SInterval i)  = showInterval i
 renderShowable (SComposite i)  = unlines $ F.toList $ fmap renderShowable i
 renderShowable i = shw i
  where
@@ -298,10 +304,14 @@ renderShowable i = shw i
   shw (SPosition a) = show a
   --show (SOptional a) = show a
   shw (SOptional a) = maybe "  " (("  "<>). shw) a
-  shw (SInterval a) = shw (Interval.inf a) <> " , " <> shw (Interval.sup a)
+  shw (SInterval a) = showInterval a
   shw (SPInterval a) = show a
   shw (SComposite a) = intercalate "," $ F.toList (fmap shw a)
 
+showInterval (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> renderShowable i <> "," <> renderShowable l <> ocr m
+    where
+      ocl j = if j then "(" else "["
+      ocr j = if j then ")" else "]"
 
 
 
@@ -364,7 +374,7 @@ splitJoins j@(Join ty b r p) = case hasSplit of
         groupJoins ::  Map (Set Key) [(Set Key,[(Table,Set (Key,Key))])]
         groupJoins =  M.fromListWith (<>) ((\f@(t,a)-> ( S.map snd a , [( S.map fst a , [( t , a )] )] )) <$> S.toList r)
         -- hasSplit ::  Map (Set Key) [(Set Key,[(Table,Set (Key,Key))])]
-        hasSplit =  traceShowId $ all (\i -> length (snd i) <2) $ traceShowId $ M.toList $  M.fromListWith (<>) ((\f@(t,a)-> (  ( S.map snd a , [( t , a )] ) )) <$> S.toList r)
+        hasSplit =   all (\i -> length (snd i) <2) $ M.toList $  M.fromListWith (<>) ((\f@(t,a)-> (  ( S.map snd a , [( t , a )] ) )) <$> S.toList r)
 splitJoins j = j
 
 
@@ -374,6 +384,18 @@ aliasJoin b@(Base k1 p) =   zipWith (\i (j,l)-> (j,(i,l))) (T.pack . ("v" <> ). 
     attrs = S.toList $ allAttrs' b
 
 fullTableName  i = (T.intercalate "_" $ fmap (\k -> keyValue k <> (T.pack $ show $ hashUnique (keyFastUnique k))) $ S.toList i)
+
+intersectionOp (KOptional i) (KOptional j ) = intersectionOp i j
+intersectionOp (i) (KOptional j ) = intersectionOp i j
+intersectionOp (KOptional i) (j ) = intersectionOp i j
+intersectionOp (KInterval i) (KInterval j )  = " && "
+intersectionOp (KInterval i) (j )
+    | i == j = " @> "
+    | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
+intersectionOp i (KInterval j )
+    | i == j = " <@ "
+    | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
+intersectionOp i j = " = "
 
 -- Generate a sql query from the AST
 showTable :: Table -> Text
@@ -388,16 +410,16 @@ showTable b@(Base k1 p) = " from (SELECT " <> T.intercalate ","  ((\(a,p)-> rend
     joinQuerySet (From b _) =  " FROM " <>  showTable b
     joinQuerySet (SplitJoin t b  r p) =  F.foldl' joinType (joinQuerySet p) r
         where joinType  l ir@(_,r)
-                | t == JLeft = l <> " LEFT JOIN " <> joinPredicate2 b ir
+                | any (isKOptional . keyType) (concat $ fmap fst . S.toList .  snd <$> r ) =  {-| t == JLeft = -} l <> " LEFT JOIN " <> joinPredicate2 b ir
                 | otherwise =  l <> " JOIN " <> joinPredicate2 b ir
-              joinPredicate2 b (i,r)  = showTable b <> " AS " <> tempName  <> " ON " <> T.intercalate " AND " (fmap (\(t,fs) -> T.intercalate " AND " $ fmap (\f-> tableName t <> "." <> keyValue (fst f) <> " = " <> tempName  <> "." <> keyValue (snd f)) $ S.toList fs )  r )
+              joinPredicate2 b (i,r)  = showTable b <> " AS " <> tempName  <> " ON " <> T.intercalate " AND " (fmap (\(t,fs) -> T.intercalate " AND " $ fmap (\f-> tableName t <> "." <> keyValue (fst f) <> intersectionOp (keyType (fst f)) (keyType (snd f))   <> tempName  <> "." <> keyValue (snd f)) $ S.toList fs )  r )
                 where tempName = tableName b <> fullTableName  i
     joinQuerySet (Join ty b  r p)  = joinType (joinQuerySet p)  r
         where
             joinType  l ir
                 | ty == JLeft = l <> " LEFT JOIN " <> joinPredicate b ir
                 | otherwise =  l <> " JOIN " <> joinPredicate b ir
-            joinPredicate  b  r  = showTable b <> " ON " <> T.intercalate " AND " (fmap (\(t,fs) -> T.intercalate " AND " $ fmap (\f-> tableName t <> "." <> keyValue (fst f) <> " = " <> tableName b <> "." <> keyValue (snd f)) $ S.toList fs )  $ S.toList r )
+            joinPredicate  b  r  = showTable b <> " ON " <> T.intercalate " AND " (fmap (\(t,fs) -> T.intercalate " AND " $ fmap (\f-> tableName t <> "." <> keyValue (fst f) <> intersectionOp (keyType (fst f)) (keyType (snd f))    <> tableName b <> "." <> keyValue (snd f)) $ S.toList fs )  $ S.toList r )
 
 showTable (Project s t)
   |  F.all (const False) s  = "(SELECT " <>  showTable t  <> ") as " <> tableName t
@@ -802,7 +824,7 @@ allAttrs' :: Table -> Set (AliasPath Key,(Table,Key))
 allAttrs' r@(Raw _ _ _ _ _ _) = S.map ((PathRoot,) . (r,)) $ rawKeys r
 allAttrs' (Limit p _ ) = allAttrs' p
 allAttrs' (Filtered _ p) = allAttrs' p
-allAttrs' (Base _ p) =  snd $  from allAttrs' (traceShowId p)
+allAttrs' (Base _ p) =  snd $  from allAttrs' p
   where from f (From t pk ) = (sm1,ft)
           where ft = f t
                 sm1 =  foldr (\i m -> M.insert (snd $ snd i) PathRoot m ) M.empty (S.toList ft)
@@ -897,3 +919,6 @@ instance Fractional Showable where
 
 groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
 
+interval' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
+inf' = (\(ER.Finite i) -> i) . Interval.lowerBound
+sup' = (\(ER.Finite i) -> i) . Interval.upperBound

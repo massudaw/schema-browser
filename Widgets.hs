@@ -12,7 +12,9 @@ import Data.Map (Map)
 import Data.Traversable(traverse)
 import Data.Monoid
 import Data.Foldable (foldl')
-import Numeric.Interval (Interval(..),interval)
+import Data.Interval (Interval(..),interval)
+import qualified Data.ExtendedReal as ER
+import qualified Data.Interval as Interval
 
 
 instance Widget (TrivialWidget  a) where
@@ -136,7 +138,7 @@ tabbedChk tabs = do
 
 data RangeBox a
   = RangeBox
-  { _rangeSelection ::  Tidings (Maybe (Interval (Maybe a)))
+  { _rangeSelection ::  Tidings (Maybe (Interval a))
   , _rangeElement :: Element
   }
 
@@ -144,8 +146,7 @@ rangeBoxes fkbox bp = do
   rangeInit <- UI.listBox bp (const <$> pure Nothing <*> fkbox) (pure (\i-> UI.li # set text (show i)))
   rangeEnd <- UI.listBox bp (const <$> pure Nothing <*> fkbox) (pure (\i-> UI.li # set text (show i)))
   range <- UI.div # set children (getElement <$> [rangeInit,rangeEnd])
-  return $ RangeBox (interval <$> (UI.userSelection rangeInit) <*> (UI.userSelection rangeEnd)) range
-
+  return $ RangeBox (  liftA2 interval'' <$> (UI.userSelection rangeInit) <*> (UI.userSelection rangeEnd)) range
 
 instance Widget (RangeBox a) where
   getElement = _rangeElement
@@ -234,3 +235,4 @@ checkedWidget init = do
 
 
 
+interval'' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)

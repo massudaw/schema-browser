@@ -45,13 +45,16 @@ import qualified Data.ByteString.Char8 as BS
 
 
 
-createType :: Unique -> (Text,Text,Maybe Text ,Text,Text,Text,Maybe Text,Maybe Text) -> Key
-createType un (t,c,trans,"tsrange",_,n,def,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "timestamp without time zone"))
-createType un (t,c,trans,"int4range",_,n,def,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "int4"))
-createType un (t,c,trans,"ARRAY",i,n,def,p) = (Key   c Nothing trans un (nullable n $ KArray $ (Primitive (T.tail i))))
-createType un (t,c,trans,_,"geometry",n,def,p) = (Key   c Nothing trans un (nullable n $ Primitive $ (\(Just i) -> i) p))
-createType un (t,c,trans,_,"box3d",n,def,p) = (Key   c Nothing trans un (nullable n $ Primitive $  "box3d"))
-createType un (t,c,trans,ty,_,n,def,_) =(Key c   Nothing trans un (serial def . nullable n $ Primitive ty))
+createType :: Unique -> (Text,Text,Maybe Text ,Text,Text,Text,Maybe Text,Maybe Text,Maybe Text) -> Key
+createType un (t,c,trans,"tsrange",_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "timestamp without time zone"))
+createType un (t,c,trans,"int4range",_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "int4"))
+createType un (t,c,trans,"numrange",_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "numeric"))
+createType un (t,c,trans,"USER-DEFINED","floatrange",n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "double precision"))
+createType un (t,c,trans,"ARRAY",i,n,def,p,_) = (Key   c Nothing trans un (nullable n $ KArray $ (Primitive (T.tail i))))
+createType un (t,c,trans,_,"geometry",n,def,p,_) = (Key   c Nothing trans un (nullable n $ Primitive $ (\(Just i) -> i) p))
+createType un (t,c,trans,_,"box3d",n,def,p,_) = (Key   c Nothing trans un (nullable n $ Primitive $  "box3d"))
+createType un (t,c,trans,ty,_,n,def,_,Just dom ) =(Key c   Nothing trans un (serial def . nullable n $ Primitive dom))
+createType un (t,c,trans,ty,_,n,def,_,_) =(Key c   Nothing trans un (serial def . nullable n $ Primitive ty))
 --createType un v = error $ show v
 
 serial (Just xs ) t = if T.isPrefixOf  "nextval" xs then KSerial t else t
@@ -77,7 +80,7 @@ foreignKeys = "select origin_table_name,target_table_name,origin_fks,target_fks 
 keyTables :: Connection -> Text -> IO InformationSchema
 keyTables conn schema = do
        uniqueMap <- join $ mapM (\i-> (i,) <$> newUnique) <$>  query conn "select o.table_name,o.column_name from information_schema.tables natural join information_schema.columns o where table_schema = ? "(Only schema)
-       res2 <- fmap ((\i@(t,c,o,j,k,l,m,n)-> (t,) $ createType  ((\(t,c,i,j,k,l,m,n)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_name,is_nullable,column_default, type from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? " (Only schema)
+       res2 <- fmap ((\i@(t,c,o,j,k,l,m,n,d)-> (t,) $ createType  ((\(t,c,i,j,k,l,m,n,d)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? " (Only schema)
        let keyMap = M.fromList keyList
            keyListSet = groupSplit (\(c,k)-> c) keyList
            keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
