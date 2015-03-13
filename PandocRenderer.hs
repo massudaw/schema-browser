@@ -23,7 +23,9 @@ import Data.Maybe
 import qualified Data.ByteString.Lazy.Char8 as BS
 import qualified Data.Map as M
 import qualified Data.Foldable as F
+import qualified Data.Sequence as Seq
 
+import System.IO
 
 renderFireProjectReport conn _ inputs = (,pure Nothing) <$> element
   where
@@ -44,11 +46,13 @@ renderFireProjectReport conn _ inputs = (,pure Nothing) <$> element
           vr = var env
       element = do
              template <- liftIO $ readFile "raw.template"
-             pdfTidings <- joinT   ( maybe (return (Left "")) ( makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template } . myDoc) <$> inputs)
+             pdfTidings <- joinT   ( maybe (return (Left "")) ( makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template } . myDoc) <$>  inputs)
              mkElement "iframe" # sink UI.src ( fmap (\i -> "data:application/pdf;base64," <> i) $ fmap (either BS.unpack (BS.unpack.BS64.encode)) $ facts pdfTidings) # set style [("width","100%"),("height","300px")]
             --UI.div # sink html (maybe ""  (writeHtmlString def . myDoc) <$> facts inputs)
 
 
+setFooter :: Blocks -> Pandoc -> Pandoc
+setFooter = setMeta "footer"
 renderProjectPricing _ _  inputs = (,pure Nothing) <$> element
    where
       varMap input = M.fromList $ (\(i,j)-> (keyValue i,j)) <$> input
@@ -58,8 +62,8 @@ renderProjectPricing _ _  inputs = (,pure Nothing) <$> element
           cshow (SComposite a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
           cshow (SOptional a ) =  Nothing
       -- myDoc :: Pandoc
-      myDoc env = setTitle "My title" $ doc $
-         para (vr "firstname" <> ",") <>
+      myDoc env = setTitle "Orçamento do Serviço" $
+         doc $  para (vr "firstname" <> ",") <>
          orderedList [
            para "Serviços Executados" <> arrayVar env "pricing_service" ,
            para "Valor da Proposta" <>
@@ -82,15 +86,15 @@ renderProjectPricing _ _  inputs = (,pure Nothing) <$> element
         where
           vr = var env
       element = do
-             template <- liftIO $ readFile "raw.template"
+             template <- liftIO $ readFile' utf8 "raw.template"
              pdfTidings <- joinT   ( maybe (return (Left "")) ( makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template } . myDoc) <$> inputs)
              mkElement "iframe" # sink UI.src ( fmap (\i -> "data:application/pdf;base64," <> i) $ fmap (either BS.unpack (BS.unpack.BS64.encode)) $ facts pdfTidings) # set style [("width","100%"),("height","300px")]
             --UI.div # sink html (maybe ""  (writeHtmlString def . myDoc) <$> facts inputs)
 
-test = do
-    template <-  readFile "raw.template"
-    let tex =   writeLaTeX def  {writerStandalone = True ,writerTemplate = template } (setTitle "Title" (doc (para "para")))
-    putStrLn tex
-    makePDF "pdflatex"  writeLaTeX def  {writerStandalone = True ,writerTemplate = template } (setTitle "Title" (doc (para "para")))
+readFile' e name = openFile name ReadMode >>= liftM2 (>>) (flip hSetEncoding $ e)   hGetContents
 
-template ="\\documentclass{minimal}  \\usepackage{fancyhdr}  \\setlength{\\headheight}{15.2pt}  \\pagestyle{fancy}   \\chead{My fancy header}  \\cfoot{\\thepage} "
+test = do
+    template <-  readFile' utf8 "raw.template"
+    let tex =   writeLaTeX def  {writerStandalone = True ,writerTemplate = template } (setTitle "Title" (doc (para "para")))
+    either (print ) (BS.writeFile "raw.pdf") =<< makePDF "pdflatex"  writeLaTeX def  {writerStandalone = True ,writerTemplate = template } (setTitle "Title" (doc (para "para")))
+
