@@ -182,7 +182,7 @@ warshall2 g = Graph { edges = go (hvertices g <> tvertices g) (pmapnew (M.toList
       generateTrails es m = filter ((/=[]).snd) $ fmap (\e -> (e,go  e)) es
         where
           -- go :: (Set a ,Set a)-> [Path a b]
-          go e@(h,t) = concat $ maybeToList $ do
+          go e@(h,t) =  concat $ maybeToList $ do
             i <- M.lookup e m
             return $ concat $ (\ii-> case ii of
                  Right p -> [ComposePath h  (S.singleton ho, p,S.singleton to) t | ho <- go (h,p) , to <- go (p,t)]
@@ -190,7 +190,7 @@ warshall2 g = Graph { edges = go (hvertices g <> tvertices g) (pmapnew (M.toList
       allWays :: Eq a => [a] -> [a] -> [(a,a)]
       allWays e t = [(i,j) | i <- e , j <- t , i /= j]
       go [] pmap _  = M.fromList $ generateTrails (allWays (hvertices g ) (tvertices g)) (fmap S.toList  pmap)
-      go (v:vs) pmap esM =  go vs (M.unionWith mappend pmap (pmapnew nedges)) ( M.union esM
+      go (v:vs) pmap esM =  go vs ( M.unionWith mappend pmap (pmapnew nedges)) ( M.union esM
           (M.fromList  nedges) )
          where
             nedges  =  [((h,d), Right i)    |

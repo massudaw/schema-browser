@@ -234,5 +234,12 @@ checkedWidget init = do
   return $ TrivialWidget  (tidings b e) dv
 
 
+wrapListBox l p q = do
+  o <- UI.listBox l p q
+  return $ TrivialWidget (UI.userSelection o ) (getElement o)
+
+optionalListBox l o s = do
+  o <-UI.listBox ((Nothing:) <$>  fmap (fmap Just) l) (fmap Just <$> o) s
+  return $TrivialWidget  (fmap join $ UI.userSelection o)(getElement o)
 
 interval'' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)

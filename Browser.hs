@@ -5,7 +5,9 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 
 import Query
 -- import Incendio
@@ -376,6 +378,7 @@ makeOptional :: Functor f => f Key -> Maybe (f (Key,Showable)) -> Maybe (f (Key,
 makeOptional def (Just i ) = Just $ fmap keyOptional i
 makeOptional def Nothing = Just $ fmap (\i -> (i,SOptional Nothing)) def
 
+
 fkUITable
   :: Connection
   -> InformationSchema
@@ -400,16 +403,18 @@ fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT i
           filtering i= filter (L.isInfixOf (toLower <$> i) . fmap toLower . show )
           listRes = filtering <$> filterInpT <*> res2
 
-      box <- UI.listBox listRes tdi (pure (\v-> UI.span # set text (show $ fmap renderShowable $ kvKey $ allKVRec $  snd <$> v)))
+      box <- if isLeftJoin
+                then optionalListBox  listRes tdi (pure (maybe (UI.div ) (\v-> UI.span # set text (L.intercalate "," $ fmap renderShowable $ F.toList $  kvKey $ allKVRec $  snd <$> v))  ))
+                else wrapListBox listRes tdi (pure ((\v-> UI.span # set text (L.intercalate "," $ fmap renderShowable $ F.toList $  kvKey $ allKVRec $  snd <$> v))))
       let
         lookFKsel (ko,v)= (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
           where kn = (\(Just i)-> i) $ M.lookup ko relTable
-        fksel = fmap (fmap lookFKsel ) <$>  (fmap findPK  <$> UI.userSelection box)
-        tdsel = fmap (\i -> FKT (zip ifk . fmap snd  . findPK $ i ) i)  <$>  UI.userSelection box
+        fksel = fmap (fmap lookFKsel ) <$>  (fmap findPK  <$> triding box)
+        tdsel = fmap (\i -> FKT (zip ifk . fmap snd  . findPK $ i ) i)  <$>  triding box
         edited = liftA2 (\i j -> join $ liftA2 (\i j-> if  i == j then Nothing else Just j ) i j) oldItems tdsel
       paint (getElement l) (facts $ if isLeftJoin then makeOptional (S.toList rl)<$> fksel else fksel )
       chw <- checkedWidget (pure False)
-      (celem,tcrud,evs) <- crudUITable conn inf pgs (if isLeftJoin then unKOptional <$> tb1  else tb1 ) (UI.userSelection box)
+      (celem,tcrud,evs) <- crudUITable conn inf pgs (if isLeftJoin then unKOptional <$> tb1  else tb1 ) (triding box)
       let eres = fmap (addToList  (allRec (tableMap inf) ((\(Just i)-> i) $ M.lookup o1 (pkMap inf))) <$> ) evs
       res2  <-  accumTds (pure $ if isLeftJoin then  res else res) eres
       element celem
@@ -418,6 +423,7 @@ fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT i
       fk <- UI.li # set  children [l, getElement box,filterInp,getElement chw,celem]
       let bres =  liftA2 (liftA2 FKT) (if isLeftJoin then makeOptional (S.toList rl)<$> fksel else fksel ) (if isLeftJoin then makeOptional tb1 <$> tcrud else tcrud )
       return (fk,bres)
+
 
 keyOptional ((Key a b c d e) ,v) = (Key a b c d (KOptional e)  ,SOptional $ Just v)
 unkeyOptional ((Key a b c d (KOptional e)) ,(SOptional v) ) = fmap (Key a b c d e  , ) v
@@ -723,7 +729,7 @@ chooseKey conn  pg inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,_,evs) <- crudUITable conn inf (catMaybes $ ($inf) <$> [queryTimeline,queryShowMap ,queryGeocodeBoundary ,queryCEPBoundary ,queryCNPJBoundary]) (allRec (tableMap inf) table) (UI.userSelection itemList)
+            (crud,_,evs) <- crudUITable conn inf (catMaybes $ ($inf) <$> [lplugOrcamento , queryTimeline,queryShowMap ,queryGeocodeBoundary ,queryCEPBoundary ,queryCNPJBoundary]) (allRec (tableMap inf) table) (UI.userSelection itemList)
             let eres = fmap (addToList  (allRec (tableMap inf ) table )  <$> ) evs
             res2 <- accumTds vp  eres
             insertDiv <- UI.div # set children [crud]
@@ -754,6 +760,10 @@ plug  name fun table attr inf = flip (Plugins name ) fun <$> (genPlugin table at
 
 poll :: (Ord a, Ord t) => String -> Int -> (Connection -> InformationSchema -> Tidings [[(Key, Showable)]] -> UI (Element, Tidings (Maybe (Map Key Showable)))) -> t -> [a] -> (Map (t, a) Key, t1, Map t Table, t3, t4, t5) -> Maybe PollingPlugins
 poll name time fun table attr inf = flip (PollingPlugins name time) fun <$> genPlugin table attr inf
+
+lplugOrcamento inf = lplug' inf "Orçamento" ("pricing",[("pricing","pricing_price"), ("pricing","pricing_date")]) ("", []) (\i j k -> renderProjectPricing i j  ((\(PluginBoundary (_,i))-> Just i)<$> k))
+
+-- queryTimeline inf = lplug' inf "Google Map" ("pricing" ,[("pricing","pricing_date"),("fire_project","aproval_date")] ) ("address" ,[]) showMap2
 
 pluginOrcamento = plug "Orçamento" renderProjectPricing "pricing" ["pricing_price"]
 
@@ -1084,13 +1094,14 @@ data Timeline
   }
 
 queryShowMap inf = lplug inf "Google Map" ("address" ,["geocode" :: Text] ) ("address" ,[]) showMap'
+
 queryTimeline inf = lplug' inf "Google Map" ("pricing" ,[("pricing","pricing_date"),("fire_project","aproval_date")] ) ("address" ,[]) showMap2
 
 showMap' conn inf inputs = do
   let
     -- req :: [(Key,Showable)] -> Maybe String
       req (PluginBoundary (t,[(_,SPosition (Position (lon,lat,_)))])) =
-          Just $ "http://maps.google.com/?output=embed&q=" <> (HTTP.urlEncode $ show lat  <> " , " <>  show lon )
+          Just $ "http://maps.google.com/?output=embed&q=" <> (HTTP.urlEncode $ show lat  <> "," <>  show lon )
       req (PluginBoundary (_,[])) = Nothing
 
   (,pure Nothing) <$> iframe  # sink UI.src (maybe "" id . req  <$> facts inputs)# set style [("width","100%"),("height","300px")]
@@ -1386,6 +1397,6 @@ main = do
   -}
   -- preview $ cvLabeled (graphP )
 --  preview $ cvLabeled (warshall graphP )
-  startGUI (defaultConfig {tpCustomHTML = Just "body.html" ,tpStatic = Just "../threepenny-gui/src/Graphics/UI"})  setup
+  startGUI (defaultConfig )  setup
   print "Finish"
 

@@ -63,7 +63,7 @@ renderProjectPricing _ _  inputs = (,pure Nothing) <$> element
           cshow (SOptional a ) =  Nothing
       -- myDoc :: Pandoc
       myDoc env = setTitle "Orçamento do Serviço" $
-         doc $  para (vr "firstname" <> ",") <>
+         doc $  para (vr "firstname" <> vr "middlename" <> vr "lastname" <> ",") <>
          orderedList [
            para "Serviços Executados" <> arrayVar env "pricing_service" ,
            para "Valor da Proposta" <>
