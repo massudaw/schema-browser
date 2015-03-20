@@ -104,11 +104,12 @@ keyTables conn schema = do
                                 in (pks ,Raw (schema , (\(Just i) -> i) $ M.lookup c resTT) c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks ) attr )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
        let ret@(i1,i2,i3) = (keyMap, M.fromList  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        paths <- schemaKeys' conn schema ret
-       let graphI =  graphFromPath (paths <> (fmap (fmap ((\(Just i) -> i) . flip M.lookup i3)) <$> concat (fmap (F.toList.snd) (M.toList fks))))
+       let graphI =  graphFromPath (filter (\i -> fst (pbound i) /= snd (pbound i) ) $ paths <> (fmap (fmap ((\(Just i) -> i) . flip M.lookup i3)) <$> concat (fmap (F.toList.snd) (M.toList fks))))
            graphP = warshall2 $ graphI
            graph = hashGraph $ graphP
            invgraph = hashGraphInv' $ graphP
-       return $ traceShow (fmap (\(i,j) -> (i,showKey j)) res2) (i1,i2,i3,graph,invgraph,graphP)
+       print  graphI
+       return  (i1,i2,i3,graph,invgraph,graphP)
 
 
 
