@@ -135,8 +135,8 @@ instance Ord Key where
    k >= l = keyFastUnique k >= keyFastUnique l
 
 instance Show Key where
-   -- show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
-   show k = T.unpack $ showKey k
+   show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
+   -- show k = T.unpack $ showKey k
    -- show (Key v u _ _ ) = T.unpack v -- <> show (hashUnique u)
 showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::"  <> showTy id (keyType k)
 
@@ -721,6 +721,9 @@ recursePaths invSchema (Raw _ _ _ _ fk _ )  = concat $ recursePath invSchema <$>
 
 newtype TB1 a = TB1 {unTB1 :: (KV (TB a)) }deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
+instance Monoid (TB1 a) where
+  mempty = TB1 (KV (PK [] []) [] )
+
 instance Apply TB1 where
   TB1 a <.> TB1 a1 =  TB1 (getCompose $ Compose a <.> Compose a1)
 
@@ -733,6 +736,14 @@ instance Apply PK where
 instance Apply TB where
   Attr a <.>  Attr a1 = Attr $ a a1
   FKT l t <.> FKT l1 t1 = FKT (l <.> l1) (t <.> t1)
+
+unIntercalate :: ( Char -> Bool) -> String -> [String]
+unIntercalate pred s                 =  case dropWhile pred s of
+                                "" -> []
+                                s' -> w : unIntercalate pred s''
+                                      where (w, s'') =
+                                             break pred s'
+
 
 data TB a
   = FKT [a] (TB1 a)
@@ -896,8 +907,6 @@ cvLabeled g = PG.mkGraph lvertices ledges
 
 zipWithTF g t f = snd (mapAccumL map_one (F.toList f) t)
   where map_one (x:xs) y = (xs, g y x)
-
-
 
 instance IsString Showable where
   fromString i = SText (T.pack i)

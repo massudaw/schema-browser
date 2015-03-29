@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes,RecordWildCards,DeriveFunctor,NoMonomorphismRestriction,RecursiveDo #-} module Widgets where
+{-# LANGUAGE LambdaCase,RankNTypes,RecordWildCards,DeriveFunctor,NoMonomorphismRestriction,RecursiveDo #-} module Widgets where
 
 
 import Control.Monad
@@ -243,3 +243,14 @@ optionalListBox l o s = do
   return $TrivialWidget  (fmap join $ UI.userSelection o)(getElement o)
 
 interval'' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
+
+
+read1 (EventData (Just s:_)) = read s
+
+onkey :: Element -> (Int -> Maybe Int ) -> Event String
+onkey el f = unsafeMapUI el (const $ UI.get value el) (filterJust $ f . read1 <$> domEvent "keydown" el)
+onEnter el = onkey el (\case {13-> Just 13; i -> Nothing})
+
+
+
+unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w -> runUI w (f a))

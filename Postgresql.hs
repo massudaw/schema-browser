@@ -263,6 +263,7 @@ tcnpj = [0,4,8,2,5,5,8,0,0,0,0,1,0,7]
 cpf = [0,2,8,4,0,3,0,1,1,2,1]
 
 
+allMaybes i | F.all (const False) i  = Nothing
 allMaybes i = case F.all isJust i of
         True -> Just $ fmap (justError "wrong invariant allMaybes") i
         False -> Nothing
@@ -270,13 +271,6 @@ allMaybes i = case F.all isJust i of
 
 safeTail [] = []
 safeTail i = tail i
-
-unIntercalate :: ( Char -> Bool) -> String -> [String]
-unIntercalate pred s                 =  case dropWhile pred s of
-                                "" -> []
-                                s' -> w : unIntercalate pred s''
-                                      where (w, s'') =
-                                             break pred s'
 
 primType (Metric k ) = textToPrim <$> keyType k
 

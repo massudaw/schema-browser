@@ -31,6 +31,7 @@ executable layer
    ,http-client-openssl
    ,base64-bytestring
    ,semigroupoids
+   , arrows
    -- Google Auth
    ,handa-gdata > 0.7
    , http-conduit, directory ,process,xml
@@ -47,5 +48,9 @@ executable layer
    -- ,diagrams-svg
    -- ,ad
    -- ,blaze-svg
+   ,bifunctors
+   ,stringsearch
+   ,lucid
   -- hs-source-dirs:      
+
   default-language:    Haskell2010

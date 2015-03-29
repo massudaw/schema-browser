@@ -1,6 +1,6 @@
 {-# LANGUAGE Arrows, TupleSections,OverloadedStrings,NoMonomorphismRestriction #-}
 module Gpx
-  (readSiapi3Andamento,readHtmlReceita,readHtml,exec,execKey,execF) where
+  (readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readHtmlReceita,readHtml,exec,execKey,execF) where
 
 import Query
 import Data.Monoid
@@ -94,6 +94,13 @@ readHtmlReceita file = do
   l <- runX arr
   return $ concat $ concat $ l !! 1 !! 0
 
+readInputForm file = runX (readString [withValidate no , withWarnings no , withParseHTML yes] file >>> atTag "form" >>> getChildren >>> atTag "input" >>> attrP )
+    where
+      attrP :: ArrowXml a => a XmlTree (String,String)
+      attrP = proc t -> do
+            i <- getAttrValue "name" -< t
+            j <- getAttrValue "value" -< t
+            returnA -<  (i,j)
 
 trim :: String -> String
 trim = triml . trimr
@@ -106,10 +113,21 @@ triml = dropWhile (`elem` " \r\n\t")
 trimr :: String -> String
 trimr = reverse . triml . reverse
 
+testFormCrea = do
+  kk <- BS.readFile "creaLogged.html"
+  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  readInputForm inp
+
+
 testReceita = do
   kk <- BS.readFile "receita.html"
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
   readHtmlReceita inp
+
+testCreaArt = do
+  kk <- BS.readFile "creaHistoricoArt.html"
+  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  readCreaHistoricoHtml inp
 
 
 testSiapi3 = do
@@ -131,6 +149,12 @@ readSiapi3Andamento file = do
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
           >>> deep (hasAttrValue "id" (=="formListaDeAndamentos:tabela")) >>> getTable' txt
   tail .head <$> runX arr
+
+readCreaHistoricoHtml file = fmap tail <$> do
+  let
+      arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
+        >>> getTable'  (deep (trim ^<< getText))
+  runX arr
 
 
 readHtml file = do

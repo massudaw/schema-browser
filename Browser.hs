@@ -1,5 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE Arrows #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE BangPatterns #-}
@@ -106,6 +107,9 @@ import Data.String
 import GHC.Show
 import Data.Functor.Classes
 
+import Control.Arrow
+import Data.ByteString.Search (replace)
+import Crea
 
 setup
      ::  Window -> UI ()
@@ -116,18 +120,9 @@ setup w = void $ do
   getBody w #+ [element chooserDiv , element body]
   onEvent evDB $ (\(conn,inf@(_,baseTables,_,schema,invSchema,graphP))-> do
     let k = M.keys baseTables
-    let pg = catMaybes [documentSprinklerProject inf , pluginOAuth inf ,pluginWapp inf ,pluginBradescoCsv inf,pluginItauTxt inf ,pluginAndamentoId inf ,  pluginOrcamento inf]
-        poll = catMaybes [pollingAndamento inf ]
+    let pg = catMaybes [documentSprinklerProject inf , pluginOAuth inf ,pluginWapp inf ,pluginBradescoCsv inf,pluginItauTxt inf ,pluginAndamentoId inf  ]
     span <- chooserKey  conn pg inf k
-    poll <- poller conn poll inf
-    header <- tabbed [("Query",span) ,("Process",poll)]
-    element body # set UI.children [header] )
-
-read1 (EventData (Just s:_)) = read s
-
-onkey :: Element -> (Int -> Maybe Int ) -> Event String
-onkey el f = unsafeMapUI el (const $ UI.get value el) (filterJust $ f . read1 <$> domEvent "keydown" el)
-onEnter el = onkey el (\case {13-> Just 13; i -> Nothing})
+    element body # set UI.children [span] )
 
 layout  infT = do
   vis <- UI.div # set UI.id_ "visualization"
@@ -198,9 +193,7 @@ takeWhileJust snoc empty l = step l
       test (Just x) os =  snoc  os x
       test Nothing os = os
 
-
 applyUI el f = (\a-> getWindow el >>= \w -> runUI w (f a))
-
 
 buildUI i  tdi = case i of
          (KOptional ti) -> fmap ((Just. SOptional) ) <$> buildUI ti (join . fmap unSOptional <$> tdi)
@@ -282,7 +275,7 @@ crudUITable conn inf pgs tb@(TB1 (KV (PK k d) a)) oldItems = do
       (mapMI (tbCase (pkDescription.kvKey)) d)
       (mapMI (tbCase (kvAttr)) a)
   let tb = fmap TB1 . Tra.sequenceA <$> Tra.sequenceA (snd <$> fks)
-  res <- mapM (pluginUI' conn inf (fmap F.toList <$> tb )) (filter (\(BoundedPlugin _ (PluginBoundary (t,_),_) _ ) -> t ==table) pgs)
+  res <- mapM (pluginUI' conn inf tb ) (filter (\(BoundedPlugin _ (t,_) _ ) -> t == tableName table) pgs)
   (panelItems,evsa)<- processPanelTable conn (facts tb) table oldItems
   listBody <- UI.ul
     # set children (F.toList (fst <$> fks))
@@ -457,25 +450,28 @@ data Plugins
   }
   | BoundedPlugin
   { _name :: String
-  , _bounds :: (PluginBoundary Table Key,PluginBoundary Table Key)
-  , _boundedAction :: Connection -> InformationSchema -> Tidings (PluginBoundary Table (Key,Showable)) -> UI (Element,Tidings (Maybe [(Key,Showable)] ))
+  , _bounds :: (Text,([(Bool,[[Text]])],[(Bool,[[Text]])]))-- PluginBoundary Table Key,PluginBoundary Table Key)
+  , _boundedAction :: Connection -> InformationSchema -> Tidings (Maybe (TB1 (Key,Showable))) -> UI Element
   }
 
-data  PollingPlugins = PollingPlugins
+data  PollingPlugins
+  = PollingPlugins
   { _pollingName :: String
   , _pollingTime :: Int
   , _pollingInputs :: (Table, S.Set Key)
-  , _pollingAction :: Connection -> InformationSchema ->  Tidings ([[(Key,Showable)]]) -> UI (Element,Tidings (Maybe (Map Key Showable)) )
+  , _pollingAction :: Connection -> InformationSchema ->  Tidings [[(Key,Showable)]] -> UI (Element,Tidings (Maybe (Map Key Showable)) )
   }
-
-classifyKeys (table@(Raw s t pk desc fk allI),keys) = (S.intersection keys attrSet,S.intersection keys fkSet)
-    where fkSet = S.unions $ fmap (\(Path ifk t o) ->  ifk)  (S.toList fk)
-          attrSet = S.fromList $ filter (not. (`S.member` fkSet)) $ (S.toList pk <> S.toList allI)
+  | BoundedPollingPlugins
+  { _pollingName :: String
+  , _pollingTime :: Int
+  , _pollingBounds :: (Text,([(Bool,[[Text]])],[(Bool,[[Text]])]))
+  , _pollingBoundedAction :: Connection -> InformationSchema ->  Tidings [TB1 (Key,Showable)] -> UI Element
+  }
 
 attrSet pkm (Raw s t pk desc fk allI) =  pk <> allI <>  foldr mappend mempty (catMaybes $ pathTable <$> (F.toList fk) )
     where pathTable (Path o t e) = attrSet pkm <$> M.lookup e pkm
 
-pollingUI conn inf p@(PollingPlugins n deftime (table@(Raw s t pk desc fk allI),keys) a) = do
+pollingUI' conn inf listRes p@(BoundedPollingPlugins n deftime (table,f) a) = do
   let plug = a conn inf
   headerP <- UI.div # set text n
   b <- UI.button # set UI.text "Submit"
@@ -496,24 +492,29 @@ pollingUI conn inf p@(PollingPlugins n deftime (table@(Raw s t pk desc fk allI),
           element staT # set UI.enabled True ))
   let
     evpoll =(unionWith const (UI.click b) (UI.tick tmr))
-    evq = fmap (fmap (F.toList .allKVRec)) $ unsafeMapIO  (\i -> doQueryAttr conn inf (projectAllRec' (tableMap inf) ) M.empty pk)    evpoll
   bht <- stepper Nothing (unsafeMapIO (fmap Just . const getCurrentTime) evpoll)
-  bh <- stepper [] evq
   output <- UI.div  # sink text ((\v  t -> "Timer Interval: " <> show (fromIntegral v/60000) <> " minutes" <> " -  Last Poll: " <> maybe "-" show t ) <$> inter <*> bht)
-  ev <- plug (tidings bh evq )
-  body <- UI.div  # set children (([headerP,b,inp,staT,stoT,output]<>) . pure $  fst ev :: [Element])
-  return (body, snd ev)
+  let evb = ( (facts (filter (\i -> tdInput i && tdOutput1 i ) <$>listRes) <@ UI.click b))
+      tdInput i =  maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd t) i) (fst f)
+      tdOutput1 i =  maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd f) i) (snd f)
 
-isActivePlugin oldItems (BoundedPlugin n (PluginBoundary input,noutput) action) =   (\o -> (maybe False (const True). allMaybes . traceShowId . fmap (\i ->  (i,) <$> M.lookup i (maybe M.empty M.fromList o )) $ (snd input)))  <$> oldItems
+  bh <- stepper []  evb
+  ev <- plug  (tidings bh evb)
+  body <- UI.div  # set children [headerP,b,inp,staT,stoT,output,ev]
+  return body
 
-pluginUI' conn inf oldItems (BoundedPlugin n (PluginBoundary input,noutput) action) = do
-  let plug = action conn inf
-      tdInput = (\o -> (maybe False (const True). allMaybes .  fmap (\i ->  join $   fmap (i,) . unSOptional'  <$> M.lookup i (maybe M.empty M.fromList o )) $ (snd input)))  <$> oldItems
 
-  ev <- plug $ (\o -> PluginBoundary $ (fst input ,    catMaybes .  fmap (\i ->  join $fmap (i,) . unRSOptional' <$> M.lookup i (maybe M.empty M.fromList o )) $ (snd input)) ) <$> oldItems
+pluginUI' conn inf oldItems (BoundedPlugin n (t,f) action) = do
   headerP <- UI.div # set text n
-  body <- UI.div  # set children ((headerP:) . pure $  fst ev :: [Element]) # sink UI.style (noneShowSpan <$> facts tdInput)
-
+  overwrite <- checkedWidget (pure False)
+  let plug = action conn inf
+      tdInput = (\i -> maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd t) i) (fst f) ) <$>  oldItems
+      tdOutput1 = (\i -> maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd f) i) (snd f) ) <$>  oldItems
+      tdOutput= liftA2 (\i j -> if i then True else j) (triding overwrite)  tdOutput1
+  ev <- plug  oldItems
+  bod <- UI.div  # set children [ev] # sink UI.style (noneShowSpan <$> facts tdOutput)
+  element overwrite # sink UI.style (noneShowSpan . not <$> facts tdOutput1)
+  body <- UI.div # set children [headerP,getElement overwrite,bod] # sink UI.style (noneShowSpan <$> facts tdInput)
   return (body,  pure Nothing :: Tidings (Maybe [(Key,Showable)]))
 
 
@@ -615,11 +616,6 @@ selectedItems enabled conn inf ff key = do
   body <- UI.div # sink items (fmap (\(v,i) -> UI.div # set items (UI.div # set text (showVertex  v ) : (fmap (\(p,v) -> UI.div # set items (UI.div # set text (show p) :  [tableElem  (F.toList $ fst v) $ fmap F.toList (snd v)] )) i ) ) )  . filter (not . all ( null  . snd  . snd) .snd) . fmap (fmap (filter (not.null.snd.snd)))  <$> facts bp)
   UI.div # set children [body]
 
-poller conn poll inf = do
-  -- Base Button Set
-  resPoll  <- mapM ( pollingUI conn inf)   $ poll
-  polling <- UI.div # set children (fst <$> resPoll)
-  UI.div # set children [polling]
 
 chooserKey conn pg inf kitems  = do
   -- Base Button Set
@@ -711,9 +707,13 @@ chooseKey conn  pg inf key = mdo
   element (getElement itemList) # set UI.multiple True
   element (getElement filterItemBox) # set UI.multiple True
   pluginsChk <- checkedWidget (pure False)
+  pollingChk <- checkedWidget (pure False)
+  pres  <- mapM (\i -> (_pollingName i ,) <$> pollingUI' conn inf ((\i j ->if i then j else [] ) <$> triding pollingChk <*>listRes ) i)  (filter (\(BoundedPollingPlugins n _  (tb,_)  _ )-> tb  == (tableName $ (\(Just i)-> i) $ M.lookup key (pkMap inf)  ))  [queryPollAndamentoB ,queryPollArtAndamento])
   res  <- mapM (\i -> (_name i ,) <$> pluginUI conn inf ((\i j ->if i then fmap F.toList j else Nothing) <$> triding pluginsChk <*> UI.userSelection itemList  ) i )   (filter (\(Plugins n tb _ )-> S.isSubsetOf  (snd tb) (attrSet (pkMap inf) ((\(Just i)-> i) $ M.lookup key (pkMap inf)))  ) pg )
   pluginsDiv <- tabbed ((\(l,(d,_))-> (l,d) )<$> res)
+  pollingsDiv <- tabbed ((\(l,d)-> (l,d) )<$> pres)
   let plugins = ("PLUGINS" ,(pluginsChk,pluginsDiv))
+      pollings = ("POLLINGS" ,(pollingChk ,pollingsDiv ))
   let
       tdi2 = case snd .snd <$> res of
         [] -> pure Nothing
@@ -729,7 +729,7 @@ chooseKey conn  pg inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,_,evs) <- crudUITable conn inf (catMaybes $ ($inf) <$> [lplugOrcamento , queryTimeline,queryShowMap ,queryGeocodeBoundary ,queryCEPBoundary ,queryCNPJBoundary]) (allRec (tableMap inf) table) (UI.userSelection itemList)
+            (crud,_,evs) <- crudUITable conn inf ([lplugOrcamento ,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJBoundary ,queryTimeline, queryAndamentoB,queryArtAndamento ] ) (allRec (tableMap inf) table) (UI.userSelection itemList)
             let eres = fmap (addToList  (allRec (tableMap inf ) table )  <$> ) evs
             res2 <- accumTds vp  eres
             insertDiv <- UI.div # set children [crud]
@@ -743,7 +743,7 @@ chooseKey conn  pg inf key = mdo
               # set style [("width","100%"),("height","300px")]
   code <- tabbed [("CREATE",createcode),("DROP",dropcode)]
   filterSel <- UI.div # set children [getElement ff,getElement fkbox,getElement range, getElement filterItemBox]
-  tab <- tabbedChk  ( maybeToList crud <>[("SELECTED",(selCheck ,selected)),plugins,("CODE",(codeChk,code))])
+  tab <- tabbedChk  ( maybeToList crud <>[("SELECTED",(selCheck ,selected)),plugins,pollings,("CODE",(codeChk,code))])
   itemSel <- UI.div # set children [filterInp,getElement sortList,getElement asc]
   UI.div # set children ([itemSel,getElement itemList,total,tab] )
 
@@ -761,11 +761,9 @@ plug  name fun table attr inf = flip (Plugins name ) fun <$> (genPlugin table at
 poll :: (Ord a, Ord t) => String -> Int -> (Connection -> InformationSchema -> Tidings [[(Key, Showable)]] -> UI (Element, Tidings (Maybe (Map Key Showable)))) -> t -> [a] -> (Map (t, a) Key, t1, Map t Table, t3, t4, t5) -> Maybe PollingPlugins
 poll name time fun table attr inf = flip (PollingPlugins name time) fun <$> genPlugin table attr inf
 
-lplugOrcamento inf = lplug' inf "Orçamento" ("pricing",[("pricing","pricing_price"), ("pricing","pricing_date")]) ("", []) (\i j k -> renderProjectPricing i j  ((\(PluginBoundary (_,i))-> Just i)<$> k))
+lplugOrcamento = BoundedPlugin "Orçamento" ("pricing",fst renderProjectPricingA )  (\i j k -> snd renderProjectPricingA $   k)
 
--- queryTimeline inf = lplug' inf "Google Map" ("pricing" ,[("pricing","pricing_date"),("fire_project","aproval_date")] ) ("address" ,[]) showMap2
 
-pluginOrcamento = plug "Orçamento" renderProjectPricing "pricing" ["pricing_price"]
 
 documentSprinklerProject = plug "Memorial Sprinkler" renderFireProjectReport "project_sprinkler" []
 
@@ -776,10 +774,6 @@ pluginContactDiv conn inf inp = do
   st <- stepper "" (unsafeMapIO (fmap show) (pure (pluginContact inf )<@ UI.click b))
   e <- UI.div # sink UI.text st
   (,pure Nothing ) <$> UI.div # set UI.children [b,e]
-
---------------------
--- Address Plugins -
-
 
 -- Address Plugins -
 --------------------
@@ -798,8 +792,6 @@ pollingAndamento = poll "Andamento Poll" 60 queryAndamento3 "fire_project" ["id_
 simpleGetRequest =  fmap BSL.pack . join . fmap HTTP.getResponseBody . HTTP.simpleHTTP . HTTP.getRequest
 
 shortCutClick  t i = tidings (facts t) (facts t <@ i)
-
-
 
 renderUrlM args url = fmap address . kv
   where
@@ -833,6 +825,32 @@ testShowable  v s = case s of
           i -> v i
 
 lookInput k = L.find ((== k ) . keyValue . fst )
+
+queryAndamentoB =  BoundedPlugin "Andamento Bombeiro" ("fire_project", staticP arrow ) elem
+  where
+    arrow :: FunArrowPlug (Maybe Showable)
+    arrow = proc t -> do
+      idp <- varT "id_project" -< t
+      ano <- varT "ano" -< t
+      protocolo <- varT "protocolo" -< t
+      cpf <- varT "id_owner,id_contact:id_owner:cgc_cpf" -< t
+      odx "aproval_date" -<t
+      returnA -< idp
+    elem conn inf inputs = fst <$> queryAndamento2  conn inf (fmap F.toList <$> inputs)
+
+queryPollAndamentoB =  BoundedPollingPlugins "Andamento Bombeiro" 10  ("fire_project", staticP arrow ) elem
+  where
+    arrow :: FunArrowPlug (Maybe Showable)
+    arrow = proc t -> do
+      idp <- varT "id_project" -< t
+      ano <- varT "ano" -< t
+      protocolo <- varT "protocolo" -< t
+      cpf <- varT "id_owner,id_contact:id_owner:cgc_cpf" -< t
+      odx "aproval_date" -< t
+      returnA -< idp
+    elem conn inf inputs = fst <$> queryAndamento3  conn inf (fmap F.toList <$> inputs)
+
+
 
 queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "project_description") . keyValue . fst )$ inputs,) <$> (runMaybeT $  do
               let
@@ -941,7 +959,7 @@ eitherToMaybeT (Right r) =  Just r
 queryAndamento3 conn inf  input = do
         tq <-  mapT (mapM (queryAndamento4 conn inf  ) ) input
         e <- UI.div # sink appendItems ( fmap (\i -> UI.div # set text (show $ (fmap (fmap renderShowable)) <$> i) ) . catMaybes  <$> facts tq  )
-        return (e , pure Nothing)
+        return (e , pure Nothing :: Tidings (Maybe (Map Key Showable)))
 
 updateMod conn kv old table = do
   (i,j) <- update conn  kv old table
@@ -1081,11 +1099,32 @@ queryAndamento2 conn inf   input = do
         tq <-  mapT (\case {Just input -> queryAndamento4 conn inf input ; Nothing -> return Nothing}) (shortCutClick input (UI.click b))
         e <- UI.div # sink UI.text (fmap (maybe "" show ) $ facts $ tq)
         body <-UI.div # set children [b,e]
-        return (body , pure Nothing)
+        return (body , pure Nothing :: Tidings (Maybe (Map Key Showable)))
 
 tailEmpty [] = []
 tailEmpty i  = tail i
 
+
+
+data PluginBoundary b a
+  = PluginBoundary  (b,[a])
+  | PluginBoundaryTB  (b,TB1 a)
+  deriving(Show)
+
+pluginTable (PluginBoundary (i,_)) = i
+pluginTable (PluginBoundaryTB  (i,_)) = i
+
+queryShowMap = BoundedPlugin "Google Map" ("address", fst showMap') (\i j k -> snd showMap'$ k)
+
+showMap' = (staticP req , element)
+  where
+      varT t =   join . fmap (unRSOptional'.snd)  <$> idxT t
+      req :: FunArrowPlug  (Maybe String)
+      req = proc t -> do
+            p<- varT "geocode" -< t
+            returnA -< (\(SPosition (Position (lon,lat,_)))-> "http://maps.google.com/?output=embed&q=" <> (HTTP.urlEncode $ show lat  <> "," <>  show lon )) <$>  p
+      element inputs = do
+        iframe  # sink UI.src (maybe "" id . dynP req  <$> facts inputs) # set style [("width","99%"),("height","300px")]
 
 data Timeline
   = Timeline
@@ -1093,26 +1132,21 @@ data Timeline
   , dates :: [(Day,String)]
   }
 
-queryShowMap inf = lplug inf "Google Map" ("address" ,["geocode" :: Text] ) ("address" ,[]) showMap'
-
-queryTimeline inf = lplug' inf "Google Map" ("pricing" ,[("pricing","pricing_date"),("fire_project","aproval_date")] ) ("address" ,[]) showMap2
-
-showMap' conn inf inputs = do
-  let
-    -- req :: [(Key,Showable)] -> Maybe String
-      req (PluginBoundary (t,[(_,SPosition (Position (lon,lat,_)))])) =
-          Just $ "http://maps.google.com/?output=embed&q=" <> (HTTP.urlEncode $ show lat  <> "," <>  show lon )
-      req (PluginBoundary (_,[])) = Nothing
-
-  (,pure Nothing) <$> iframe  # sink UI.src (maybe "" id . req  <$> facts inputs)# set style [("width","100%"),("height","300px")]
-
-showMap2 conn inf inputs = do
-  e <- UI.div # set UI.id_ "timeline-embed"
-  let
-      generateEvents (PluginBoundary (_,inp))= fmap (\(i,SDate (Finite j))-> (j,T.unpack $ keyValue i )) $filter ((==(Primitive PDate)).  fmap textToPrim .keyType.unKOptional.fst) inp
-      timeline i = Timeline "hello" (generateEvents i)
-  i <- UI.div # sink UI.html  (fmap (\i->  "<script>    var container = document.getElementById('timeline-embed');var items = new vis.DataSet("  <>  BSL.unpack (traceShowId $ encode (timeline i)) <> ") ;  var options = {} ; if (container.vis != null ) { container.vis.destroy(); } ; container.vis = new vis.Timeline(container,items,options); </script>") $ facts inputs)
-  (,pure Nothing) <$> UI.div # set children [e,i]
+queryTimeline = BoundedPlugin "Timeline" ("pricing",staticP arrow)  elem
+  where
+    convDateArr i = fmap swap $ fmap (fmap (\(SDate (Finite f)) -> f)) $ catMaybes $ fmap (traverse unRSOptional') $ catMaybes $ i
+    arrow :: FunArrowPlug [(Day,String)]
+    arrow = proc t -> do
+      prd <- varT "pricing_date" -< t
+      apd <- varN "id_project:aproval_date" -< t
+      returnA -<  convDateArr  [("Orçamento",)<$> prd,("Aprovação",) <$> apd]
+    elem con inf inputs = do
+        e <- UI.div # set UI.id_ "timeline-embed"
+        let
+            generateEvents (PluginBoundary (_,inp))= fmap (\(i,SDate (Finite j))-> (j,T.unpack $ keyValue i )) $filter ((==(Primitive PDate)).  fmap textToPrim .keyType.unKOptional.fst) inp
+            timeline i = Timeline "hello" (dynP arrow $ i)
+        i <- UI.div # sink UI.html  (fmap (\i->  "<script>    var container = document.getElementById('timeline-embed');var items = new vis.DataSet("  <>  BSL.unpack (traceShowId $ encode (timeline i)) <> ") ;  var options = {} ; if (container.vis != null ) { container.vis.destroy(); } ; container.vis = new vis.Timeline(container,items,options); </script>") $ facts inputs)
+        UI.div # set children [e,i]
 
 
 instance ToJSON Timeline where
@@ -1121,98 +1155,211 @@ instance ToJSON Timeline where
     where dates (id,(i,j)) = object ["id" .= (id :: Int) ,"start" .=  ti i, "content" .= j, "type" .= ("point" :: String)]
           ti  = formatTime defaultTimeLocale "%Y/%m/%d"
 
-
-data PluginBoundary b a
-  = PluginBoundary  (b,[a])
-  deriving(Show)
-
-queryGeocodeBoundary  inf = lplug inf "Google Geocode" ("address" ,["id","logradouro","number","bairro","municipio","uf"] ) ("address" , ["geocode","bounding"]) queryGeocode'
-
-unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w -> runUI w (f a))
-
-
-queryGeocode' conn inf  inputs =  do
-  b <- UI.button # set UI.text "Import"
-  let
-      req (PluginBoundary (_,[])) = return Nothing
-      req (PluginBoundary (addresss,im)) = runMaybeT $ do
-        r <- getRequest  . traceShowId . url $im
-        let dec = decode r :: Maybe Value
-            loc = dec !> "results" !!> 0 !> "geometry" !> "location"
-            bounds = dec !> "results" !!> 0 !> "geometry" !> "bounds"
-            viewport = dec !> "results" !!> 0 !> "geometry" !> "viewport"
-            lkey  = lookKey inf "address"
-            getPos l = Position <$> liftA2 (\(A.Number i) (A.Number j)-> (realToFrac i ,realToFrac j ,0)) (l !> "lng" )( l  !> "lat" )
-        p <- MaybeT $ return $ getPos loc
-        b <- MaybeT $ return $ case (fmap Bounding $  (\i j -> Interval.interval (ER.Finite i ,True) (ER.Finite j ,True))<$> getPos (bounds !> "southwest") <*> getPos (bounds !> "northeast"), fmap Bounding $ (\i j -> Interval.interval (ER.Finite i ,True) (ER.Finite j ,True))<$> getPos (viewport !> "southwest") <*> getPos (viewport !> "northeast")) of
-                                    (i@(Just _), _ ) -> i
-                                    (Nothing , j) -> j
-        mod <- C.lift $ updateMod conn [(lkey "geocode" ,SPosition p),( lkey "bounding", SBounding b)] im (lookTable inf "address")
-        C.lift $ traverse (logTableModification inf conn) mod
-        return [(lkey "geocode" ,SPosition p),( lkey "bounding", SBounding b)]
-  let et =  unsafeMapIO req (facts inputs <@ UI.click b)
-  t <- stepper "" (show <$> et)
-  out <- UI.div # UI.sink text t
-  (,pure Nothing) <$>  UI.div # set children [b,out]
+queryArtCrea = BoundedPlugin "Documento Final Art Crea" ("art",staticP url) elem
   where
-    url [id,logradouro,number,bairro,municipio,uf] = "http://maps.googleapis.com/maps/api/geocode/json?address=" <> (HTTP.urlEncode $ vr logradouro  <> " , " <> vr number <> " - " <>  vr bairro <> " , " <> vr municipio <> " - " <> vr uf)
-      where vr =   renderShowable   .snd -- $ L.find ((==i).keyValue.fst)  inp
-    url i = error $ "url error " <>  show i
+    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
+    url :: ArrowPlug (Kleisli IO) (Maybe String)
+    url = proc t -> do
+      i <- varTB "art_number" -< t
+      idxT "payment_date" -<  t
+      r <- at "crea_register" (proc t -> do
+                               n <- varTB "crea_number" -< t
+                               u <- varTB "crea_user"-< t
+                               p <- varTB "crea_password"-< t
+                               returnA -< liftA3 (, , ) n u p  ) -< t
+      act (fmap join  . traverse (\(i, (j, k,a)) -> creaLoginArt  j k a i ) ) -< liftA2 (,) i r
+    elem conn inf inputs = do
+       let ev = unsafeMapIO (dynPK url) (rumors inputs)
+       i <- stepper  "" (maybe "" id <$> ev)
+       print<-printIFrame "creaFrame"
+       frame<-iframe  # set UI.name "creaFrame" # set UI.id_ "creaFrame" # UI.sink (strAttr "srcdoc") i # UI.set UI.style [("width","100%"),("height","300px")]
+       UI.div # set children [print,frame]
 
-queryCEPBoundary inf
-  = lplug inf "Correios CEP" ("address",["cep"]) ("address",["geocode","bounding"]) queryCEP2'
-
-lkTable :: InformationSchema -> Text -> Maybe Table
-lkTable inf k = M.lookup k (tableMap inf)
-
-lkKey :: InformationSchema -> Text -> Text -> Maybe Key
-lkKey inf t k = M.lookup (t,k) (keyMap inf)
-
-ltp :: InformationSchema -> Text -> [Text] -> Maybe (Table ,[Key])
-ltp inf t k = (,) <$> lkTable inf t <*> (allMaybes $ lkKey inf t <$> k)
-
-ltp' :: InformationSchema -> [(Text,Text)] -> Maybe [Key]
-ltp' inf k = (allMaybes $ uncurry (lkKey inf)  <$> k)
-
-lplug' inf n (i,ki) (o,ko) a= do
-  inpT <- lkTable inf i
-  inp <- ltp' inf ki
-  out <- ltp inf o ko
-  return $ BoundedPlugin n   (PluginBoundary (inpT,inp), PluginBoundary out)  a
+queryArtBoletoCrea = BoundedPlugin "Boleto Art Crea" ("art",staticP url) elem
+  where
+    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
+    url :: ArrowPlug (Kleisli IO) (Maybe String)
+    url = proc t -> do
+      i <- varTB "art_number" -< t
+      idxT "verified_date" -< t
+      odx "payment_date" -<  t
+      r <- at "crea_register" (proc t -> do
+                               n <- varTB "crea_number" -< t
+                               u <- varTB "crea_user"-< t
+                               p <- varTB "crea_password"-< t
+                               returnA -< liftA3 (, , ) n u p  ) -< t
+      act ( traverse (\(i, (j, k,a)) -> creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
+    elem conn inf inputs = do
+       let ev = unsafeMapIO (dynPK url) (rumors inputs)
+       i <- stepper "" (maybe "" id <$> ev)
+       pdfFrame i # set UI.name "creaBoletoFrame" # set UI.id_ "creaBoletoFrame"
 
 
-lplug inf n (i,ki) (o,ko) a= do
-  inp <- ltp inf i ki
-  out <- ltp inf o ko
-  return $ BoundedPlugin n   (PluginBoundary inp, PluginBoundary out)  a
+printIFrame i = do
+   print <- UI.button # set UI.text "Imprimir"
+   bh <- stepper "" (pure ("<script> window.frames[\"" <> i <>  "\"].focus(); window.frames[\"" <> i <> "\"].print();</script>") <@ UI.click print)
+   dv <- UI.div # UI.sink UI.html bh
+   UI.div # set children [print,dv]
 
-queryCEP2' _ inf   inputs =
-  let open (PluginBoundary (_,[(_,SText cnp)])) = cnp
-      open (PluginBoundary (_,i)) = traceShow i ""
-      addrs ="http://cep.correiocontrol.com.br/"
-      element = do
-        b <- UI.button # set UI.text "Submit"
-        let tq = unsafeMapIO (\input -> do
-                     if input /= "" then do
+checkOutput i = proc t -> do
+      o <- odx i -< fst t
+      v <- odx i -< snd t
+      returnA -< if isJust o  && fmap snd o == fmap snd v
+         then Nothing
+         else v
+
+
+queryPollArtAndamento = BoundedPollingPlugins "Andamento Art Crea"  10  ("art",staticP url) elem
+  where
+    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
+    url :: ArrowPlug (Kleisli IO) [(Text,Showable)]
+    url = proc t -> do
+      i <- varTB "art_number" -< t
+      odx "verified_date" -< t
+      odx "payment_date" -< t
+      r <- at "crea_register" (proc t -> do
+                               n <- varTB "crea_number" -< t
+                               u <- varTB "crea_user"-< t
+                               p <- varTB "crea_password"-< t
+                               returnA -< liftA3 (, , ) n u p  ) -< t
+      o <- act (fmap (join .maybeToList) . traverse (\(i, (j, k,a)) -> creaConsultaArt  j k a i ) ) -< liftA2 (,) i r
+      let
+          artVeri d = Attr ("verified_date" ,SOptional $ Just $ STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" ( d !!1) )
+          artPayd d = Attr ("payment_date" ,SOptional $Just $ STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" (d !!1) )
+          artInp :: [[String]] -> TB1 (Text,Showable)
+          artInp inp = TB1 $ KV (PK [] []) $ catMaybes [artVeri <$>  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd <$> L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (traceShowId inp) ]
+      i <- checkOutput "verified_date" -< (t,Just$ artInp o)
+      j <- checkOutput "payment_date" -< (t,Just $artInp o)
+      returnA -< (catMaybes [i, j] )
+
+
+    elem conn inf inputs = do
+       let ev = unsafeMapIO (mapM (\im -> do
+                              h <- dynPK url (Just im)
+                              updateArtStatus (Just im)  h).traceShowId  ) (rumors inputs)
+           updateArtStatus  im it = do
+              let i = fmap (first (lookKey inf "art")) it
+              if null (i)
+                 then return []
+                 else maybeToList <$> updateMod conn (i)  (fromJust $ fmap F.toList im) (lookTable inf "art")
+       bh <- stepper [] ev
+       UI.div # sink UI.text (show <$> bh )
+
+
+
+queryArtAndamento = BoundedPlugin "Andamento Art Crea" ("art",staticP url) elem
+  where
+    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
+    url :: ArrowPlug (Kleisli IO) [[String]]
+    url = proc t -> do
+      i <- varTB "art_number" -< t
+      r <- at "crea_register" (proc t -> do
+                               n <- varTB "crea_number" -< t
+                               u <- varTB "crea_user"-< t
+                               p <- varTB "crea_password"-< t
+                               returnA -< liftA3 (, , ) n u p  ) -< t
+      act (fmap (join .maybeToList) . traverse (\(i, (j, k,a)) -> creaConsultaArt  j k a i ) ) -< liftA2 (,) i r
+    elem conn inf inputs = do
+       consulta <- UI.button # set UI.text "Consultar"
+       let ev = unsafeMapIO (\im -> do
+                              h <- dynPK url im
+                              updateArtStatus im  h ) (facts inputs <@ UI.click consulta)
+           updateArtStatus  im i = do
+              let artVeri d = (lookKey inf "art" "verified_date" ,STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" ( d !!1) )
+                  artPayd d = (lookKey inf "art" "payment_date" ,STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" (d !!1) )
+                  artInp inp = catMaybes [artVeri <$>  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd <$> L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (traceShowId inp) ]
+              if null (artInp i)
+                 then return []
+                 else maybeToList <$> updateMod conn (artInp i)  (fromJust $ fmap F.toList im) (lookTable inf "art")
+       i <- stepper [] ev
+       out <- UI.div # sink UI.text (show <$> i )
+       UI.div # set children [consulta ,out]
+
+testParse = strptime "%d/%m/%Y %H:%M""24/03/2015 08:30"
+
+strAttr :: String -> WriteAttr Element String
+strAttr name = mkWriteAttr (set' (attr name))
+
+queryGeocodeBoundary = BoundedPlugin "Google Geocode" ("address",staticP url) elem
+  where
+    elem conn inf inputs = do
+      b <- UI.button # set UI.text "Import"
+      let
+          req im = runMaybeT $ do
+            r <- getRequest  . traceShowId  . dynP url $im
+            let dec = decode r :: Maybe Value
+                loc = dec !> "results" !!> 0 !> "geometry" !> "location"
+                bounds = dec !> "results" !!> 0 !> "geometry" !> "bounds"
+                viewport = dec !> "results" !!> 0 !> "geometry" !> "viewport"
+                lkey  = lookKey inf "address"
+                getPos l = Position <$> liftA2 (\(A.Number i) (A.Number j)-> (realToFrac i ,realToFrac j ,0)) (l !> "lng" )( l  !> "lat" )
+            p <- MaybeT $ return $ getPos loc
+            b <- MaybeT $ return $ case (fmap Bounding $  (\i j -> Interval.interval (ER.Finite i ,True) (ER.Finite j ,True))<$> getPos (bounds !> "southwest") <*> getPos (bounds !> "northeast"), fmap Bounding $ (\i j -> Interval.interval (ER.Finite i ,True) (ER.Finite j ,True))<$> getPos (viewport !> "southwest") <*> getPos (viewport !> "northeast")) of
+                                        (i@(Just _), _ ) -> i
+                                        (Nothing , j) -> j
+            mod <- C.lift $ updateMod conn [(lkey "geocode" ,SPosition p),( lkey "bounding", SBounding b)] (fromJust $ fmap F.toList im) (lookTable inf "address")
+            C.lift $ traverse (logTableModification inf conn) mod
+            return [(lkey "geocode" ,SPosition p),( lkey "bounding", SBounding b)]
+      let et =  unsafeMapIO req (facts inputs <@ UI.click b)
+      t <- stepper "" (show <$> et)
+      out <- UI.div # UI.sink text t
+      UI.div # set children [b,out]
+
+    url :: FunArrowPlug String
+    url = proc t -> do
+      id <- varT "id" -< t
+      log <- varT "logradouro"-< t
+      num <- varN "number"-< t
+      bai <- varN "bairro"-< t
+      mun <- varT "municipio"-< t
+      uf <- varT "uf"-< t
+      returnA -<  "http://maps.googleapis.com/maps/api/geocode/json?address=" <> (HTTP.urlEncode $ vr log <> " , " <> vr num <> " - " <>  vr bai<> " , " <> vr mun <> " - " <> vr uf)
+      where vr =  maybe "" renderShowable
+
+
+varT t = join . fmap (unRSOptional'.snd)  <$> idxT t
+varN t = fmap snd  <$> idx t
+
+type FunArrowPlug o = Step.Parser (->) (Bool,[[Text]]) (Maybe (TB1 (Key,Showable))) o
+type ArrowPlug a o = Step.Parser a (Bool,[[Text]]) (Maybe (TB1 (Key,Showable))) o
+
+dynPK =  runKleisli . dynP
+
+queryCEPBoundary = BoundedPlugin  "Correios CEP" ("address",staticP open  )  element
+  where
+      open :: ArrowPlug  (Kleisli IO ) (Maybe (Map Text Text))
+      open = proc t -> do
+          i <- varT "cep" -< t
+          odx "bairro" -< t
+          odx "municipio" -< t
+          odx "uf" -< t
+          odx "logradouro" -< t
+          r <- (act (fmap join . traverse (\input -> do
                        v <- ( (`catch` (\e ->  return $ trace (show (e :: IOException )) "{}" ) ). simpleGetRequest  . traceShowId .  (\i-> addrs <> i <> ".json") ) . T.unpack $ input
-                       return $ ( \i -> fmap ( M.filter (/="")) $ decode i )  v
-                     else return Nothing
-                       ) (open .traceShowId <$> (facts inputs <@ UI.click b))
+
+                       return $ ( \i -> fmap ( M.filter (/="")) $ decode i ) v ))) -< (\(SText t)-> t) <$> i
+          returnA -< r
+
+      addrs ="http://cep.correiocontrol.com.br/"
+      element conn inf inputs = do
+        b <- UI.button # set UI.text "Submit"
+        let
+          tq :: Event (Maybe (Map Text Text))
+          tq = unsafeMapIO (dynPK open) (facts inputs <@ UI.click b)
 
         bh <- stepper Nothing tq
         let
-          Just table2 = M.lookup "address" (tableMap inf)
+          Just table2 = M.lookup "address"  (tableMap inf)
+          translate :: Text -> Text
           translate "localidade" =  "municipio"
           translate "cep" =  "cep"
           translate "uf" =  "uf"
           translate "bairro" =  "bairro"
           translate i = i
-          tkeys = fmap (fmap SText . M.mapKeys ((\(Just i)-> i) . flip M.lookup (keyMap inf) . ("address",) . translate))  <$> (tidings bh (bh <@ UI.click b))
-        e <- UI.div  # sink UI.text ( show  <$> bh )
+          -- tkeys = fmap (fmap SText . M.mapKeys ((\(Just i)-> i) . flip M.lookup (keyMap inf) . ("address",) . translate))  <$> (tidings bh (bh <@ UI.click b))
+        e <- UI.div # sink UI.text (show <$> bh )
         body <-UI.div # set children [b,e]
-        return (body ,fmap M.toList <$> tkeys)
-  in  element
-
+        return body
 
 executeStep
   :: Connection
@@ -1226,14 +1373,14 @@ executeStep  conn inputs (TBPlan t  ta steps) =  do
                traverse (\i -> insertMod conn (concat i) ta) (allMaybes k)
                return $ Just []
             TUpdate -> do
-               traverse (\i -> updateMod conn (concat i) inputs ta) (traceShowId $ onlyJust k)
+               traverse (\i -> updateMod conn (concat i) inputs ta) (onlyJust k)
                return $ Just []
 executeStep  _ _ (SPAttr t k v) = return $ fmap (\i -> [(k,i)]) v
 executeStep  conn inputs (SPFK t (Path  i (FKJoinTable ti s tj ) j) steps) = do
   k <-  mapM (executeStep conn inputs) steps
   traceShowId <$> joinTable (M.fromList $ swap <$> s) <$> case t of
        FKEInsertGenerated -> do
-         traverse (\i -> traceShowId <$> insertPK fromShowableList conn (concat i) tj) (allMaybes $traceShowId k)
+         traverse (\i -> insertPK fromShowableList conn (concat i) tj) (allMaybes k)
        FKEUpdateFK -> do
          traverse (\i -> do
                     updateMod conn ( concat  i) inputs tj
@@ -1320,20 +1467,21 @@ testPdfGet conn inf inp =  runMaybeT$ do
 
 
 
-queryCNPJBoundary inf
-  = lplug' inf "CNPJ Receita" ("owner", [("owner","cgc_cpf"),("owner","id_owner"),("owner","address"), ("address","id")]) ("address" , ["geocode","bounding"]) queryCnpjReceita2
-
-queryCnpjReceita2 conn inf inputs = do
-  out <- UI.div
-  let boundFun  (PluginBoundary (_,(_,SText cpf):xs))=  BS.pack $ T.unpack cpf
-      boundFun  (PluginBoundary (_,[]))=  ""
-  ev <- liftIO  $ cnpjquery out (boundFun. traceShowId  <$> inputs)
-  s <- stepper [] (unsafeMapIO (\(inp,res) -> do
-              testPlan conn inf  inp ( M.fromList $ traceShowId res) ("owner",testStep)
-              return []
-                    ) (filterJust $ liftA2 (,) <$> ((\(PluginBoundary (i,j))-> traceShowId $ Just j) <$> facts inputs) <@> ev ))
-  element out #+ [UI.div # sink UI.text s]
-  ((,pure Nothing) <$> element out)
+queryCNPJBoundary =
+  let arrow :: FunArrowPlug  (Maybe Text)
+      arrow = proc t -> do
+        i <- varT "cnpj_number" -< t
+        returnA -< (\(SText s)->  s)  <$> i
+      elem conn inf inputs = do
+          out <- UI.div
+          ev <- liftIO  $ cnpjquery out (maybe "" id . fmap (BS.pack.T.unpack) . dynP arrow <$> inputs)
+          s <- stepper [] (unsafeMapIO (\(inp,res) -> do
+                      testPlan conn inf (traceShowId. catMaybes . fmap (traverse unRSOptional') . F.toList $ inp) ( M.fromList $ traceShowId res) ("owner",testStep)
+                      return []
+                            ) (filterJust $ liftA2 (,) <$> facts inputs <@> ev ))
+          element out #+ [UI.div # sink UI.text s]
+          return out
+  in (BoundedPlugin "CNPJ Receita" ("owner",staticP arrow )   elem)
 
 translateK inf t =  fmap  (\(i,(kv,f))->  (i,) $  (\kkv ->  (kkv,) $ readType (textToPrim <$> keyType kkv) . f ) (lkeys kv))
   where
@@ -1397,6 +1545,8 @@ main = do
   -}
   -- preview $ cvLabeled (graphP )
 --  preview $ cvLabeled (warshall graphP )
-  startGUI (defaultConfig )  setup
+  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  setup
   print "Finish"
+
+
 
