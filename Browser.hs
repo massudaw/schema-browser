@@ -120,7 +120,7 @@ setup w = void $ do
   getBody w #+ [element chooserDiv , element body]
   onEvent evDB $ (\(conn,inf@(_,baseTables,_,schema,invSchema,graphP))-> do
     let k = M.keys baseTables
-    let pg = catMaybes [documentSprinklerProject inf , pluginOAuth inf ,pluginWapp inf ,pluginBradescoCsv inf,pluginItauTxt inf ,pluginAndamentoId inf  ]
+    let pg = catMaybes [documentSprinklerProject inf , pluginOAuth inf ,pluginWapp inf ,pluginBradescoCsv inf,pluginItauTxt inf ]
     span <- chooserKey  conn pg inf k
     element body # set UI.children [span] )
 
@@ -518,13 +518,6 @@ pluginUI' conn inf oldItems (BoundedPlugin n (t,f) action) = do
   return (body,  pure Nothing :: Tidings (Maybe [(Key,Showable)]))
 
 
-pluginUI conn inf oldItems p@(Plugins n (table@(Raw s t pk desc fk allI),keys) a) = do
-  let plug = a conn inf
-  ev <- plug oldItems
-  headerP <- UI.div # set text n
-  body <- UI.div  # set children ((headerP:) . pure $  fst ev :: [Element])
-  return (body,  snd ev )
-
 
 
 -- Split composite PKs in list of atomic pks
@@ -709,17 +702,9 @@ chooseKey conn  pg inf key = mdo
   pluginsChk <- checkedWidget (pure False)
   pollingChk <- checkedWidget (pure False)
   pres  <- mapM (\i -> (_pollingName i ,) <$> pollingUI' conn inf ((\i j ->if i then j else [] ) <$> triding pollingChk <*>listRes ) i)  (filter (\(BoundedPollingPlugins n _  (tb,_)  _ )-> tb  == (tableName $ (\(Just i)-> i) $ M.lookup key (pkMap inf)  ))  [queryPollAndamentoB ,queryPollArtAndamento])
-  res  <- mapM (\i -> (_name i ,) <$> pluginUI conn inf ((\i j ->if i then fmap F.toList j else Nothing) <$> triding pluginsChk <*> UI.userSelection itemList  ) i )   (filter (\(Plugins n tb _ )-> S.isSubsetOf  (snd tb) (attrSet (pkMap inf) ((\(Just i)-> i) $ M.lookup key (pkMap inf)))  ) pg )
-  pluginsDiv <- tabbed ((\(l,(d,_))-> (l,d) )<$> res)
   pollingsDiv <- tabbed ((\(l,d)-> (l,d) )<$> pres)
-  let plugins = ("PLUGINS" ,(pluginsChk,pluginsDiv))
-      pollings = ("POLLINGS" ,(pollingChk ,pollingsDiv ))
   let
-      tdi2 = case snd .snd <$> res of
-        [] -> pure Nothing
-        xs -> foldr1 (liftA2 mappend)  xs
-
-  let
+     pollings = ("POLLINGS" ,(pollingChk ,pollingsDiv ))
      filterOptions = case M.keys <$> M.lookup key (hashedGraph inf) of
                Just l -> key :  l
                Nothing -> [key]
@@ -743,7 +728,7 @@ chooseKey conn  pg inf key = mdo
               # set style [("width","100%"),("height","300px")]
   code <- tabbed [("CREATE",createcode),("DROP",dropcode)]
   filterSel <- UI.div # set children [getElement ff,getElement fkbox,getElement range, getElement filterItemBox]
-  tab <- tabbedChk  ( maybeToList crud <>[("SELECTED",(selCheck ,selected)),plugins,pollings,("CODE",(codeChk,code))])
+  tab <- tabbedChk  ( maybeToList crud <>[("SELECTED",(selCheck ,selected)),pollings,("CODE",(codeChk,code))])
   itemSel <- UI.div # set children [filterInp,getElement sortList,getElement asc]
   UI.div # set children ([itemSel,getElement itemList,total,tab] )
 
