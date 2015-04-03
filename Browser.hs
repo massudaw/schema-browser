@@ -150,24 +150,7 @@ databaseChooser sargs = do
   chooserDiv <- UI.div # set children [getElement dbsW,load]
   return $ (tidings (facts chooserT) chooserEv,chooserDiv)
 
--- TODO: Remove Normalization to avoid inconsistencies
 
-
-data FKTSelector k s = FKTSelector (TB k) (TrivialWidget (Maybe (TB (k,s))))
-
-
-k3 :: KType Text -> TB Key
-k3 t = Attr $ Key "" Nothing Nothing (unsafePerformIO newUnique) t
-tb1 = TB1 $ KV (PK [k3 (Primitive "integer")] []) []
-fkt1 = FKT [k3 (Primitive "integer")] tb1
-
---listFKT :: TB Key  -> Tidings [TB (Key,Showable)] -> Tidings (Maybe (TB (Key,Showable))) -> UI (FKTSelector Key Showable)
-listFKT l@(FKT k (TB1 (KV (PK kf _ ) _ )))  = do
-  let rel = zipWith (\i j -> (i,classifyFK i j)) (fmap (fmap textToPrim . keyType) <$> k) (fmap (fmap textToPrim . keyType) <$> kf)
-      buildSel (Attr i ) = buildUI i  (pure Nothing)
-  i <- mapM (\(i,j) -> buildSel i ) rel
-  UI.div # set UI.children (getElement <$> i)
- -- return$ FKTSelector l undefined
 
 unSOptional' (SOptional i ) = i
 unSOptional' (SSerial i )  = i
