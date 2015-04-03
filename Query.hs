@@ -735,7 +735,7 @@ instance Apply PK where
 
 instance Apply TB where
   Attr a <.>  Attr a1 = Attr $ a a1
-  FKT l t <.> FKT l1 t1 = FKT (l <.> l1) (t <.> t1)
+  FKT l t <.> FKT l1 t1 = FKT (zipWith (<.>) l   l1) (t <.> t1)
 
 unIntercalate :: ( Char -> Bool) -> String -> [String]
 unIntercalate pred s                 =  case dropWhile pred s of
@@ -746,7 +746,7 @@ unIntercalate pred s                 =  case dropWhile pred s of
 
 
 data TB a
-  = FKT [a] (TB1 a)
+  = FKT [TB a] (TB1 a)
   | Attr a
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
@@ -781,7 +781,7 @@ tb1Rec isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
       fkSet = S.unions $  fmap (\(Path ifk _ _) -> ifk)  $S.toList fk
   in leftFst isOpt  $ TB1 baseCase
 
-fkCase invSchema isOpt p (Path ifk (FKJoinTable bt kv nt)  o ) = FKT  ((p,) <$>S.toList ifk)  {- $ fmap substBind -} (tb1Rec isOptional (aliasKeyValue ifk ) invSchema ((\(Just i)-> i) (M.lookup nt  invSchema )))
+fkCase invSchema isOpt p (Path ifk (FKJoinTable bt kv nt)  o ) = FKT  (Attr. (p,) <$>S.toList ifk)  (tb1Rec isOptional (aliasKeyValue ifk ) invSchema ((\(Just i)-> i) (M.lookup nt  invSchema )))
             where isOptional = any (isKOptional . keyType ) (F.toList ifk)
                   bindMap = M.fromList $ fmap swap kv
                   aliasKeyValue k
@@ -931,3 +931,19 @@ groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
 interval' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
 inf' = (\(ER.Finite i) -> i) . Interval.lowerBound
 sup' = (\(ER.Finite i) -> i) . Interval.upperBound
+
+
+unSOptional (SOptional i) = i
+unSOptional i = traceShow ("No Pattern Match SOptional-" <> show i) Nothing
+
+unSSerial (SSerial i) = i
+unSSerial i = traceShow ("No Pattern Match SSerial-" <> show i) Nothing
+
+unRSOptional (SOptional i) = join $ fmap unRSOptional i
+unRSOptional i = traceShow ("No Pattern Match SOptional-" <> show i) Nothing
+
+unRSOptional' (SOptional i) = join $ unRSOptional' <$> i
+unRSOptional' (SSerial i )  = join $ unRSOptional' <$>i
+unRSOptional' i   = Just i
+
+

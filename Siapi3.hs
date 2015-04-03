@@ -21,11 +21,12 @@ import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as BSLC
 import qualified Data.ByteString.Lazy as BSL
 
+import qualified Data.List as L
+
 import Gpx
 import Debug.Trace
 
-
-siapi3 protocolo ano cgc_cpf = do
+siapi3Page protocolo ano cgc_cpf = do
   let opts = defaults & manager .~ Left (opensslManagerSettings context)
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
     r <- Sess.get session $ traceShowId siapiAndamento3Url
@@ -34,7 +35,14 @@ siapi3 protocolo ano cgc_cpf = do
         viewValue = BSC.takeWhile (/='\"') . BS.drop 7 . snd .BS.breakSubstring "value=\"" <$> view
     pr <- traverse (Sess.post session siapiAndamento3Url. protocolocnpjForm protocolo ano cgc_cpf ) viewValue
     r <- Sess.get session $ traceShowId $ siapiListAndamento3Url
-    traverse (readSiapi3Andamento . BSLC.unpack  ) (r ^? responseBody)
+    return $ BSLC.unpack <$>  (r ^? responseBody)
+
+
+siapi3 protocolo ano cgc_cpf = do
+    v <- (siapi3Page protocolo ano cgc_cpf)
+    r <- traverse readSiapi3Andamento  v
+    return $ liftA2 (,) r ( L.isInfixOf "AGUARDANDO PAGAMENTO DA TAXA" <$> v)
+
 
 protocolocnpjForm :: BS.ByteString ->BS.ByteString ->BS.ByteString ->BS.ByteString -> [FormParam]
 protocolocnpjForm prot ano cgc_cpf vv = ["javax.faces.partial.ajax"  := ("true"::BS.ByteString)
@@ -50,3 +58,8 @@ protocolocnpjForm prot ano cgc_cpf vv = ["javax.faces.partial.ajax"  := ("true":
 
 siapiAndamento3Url = "https://siapi3.bombeiros.go.gov.br/paginaInicialWeb.jsf"
 siapiListAndamento3Url = "https://siapi3.bombeiros.go.gov.br/listarAndamentosWeb.jsf"
+
+testSiapi3 = do
+  siapi3 "40277" "15" "17800968000103"
+
+

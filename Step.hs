@@ -1,4 +1,4 @@
-{-# LANGUAGE StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,TupleSections,FlexibleInstances, DeriveFunctor  #-}
+{-# LANGUAGE OverloadedStrings,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,TupleSections,FlexibleInstances, DeriveFunctor  #-}
 module Step where
 
 import Query
@@ -113,29 +113,25 @@ indexTB1 (l:xs) t
   = do
     (TB1 (KV (PK k d)  v)) <- t
     let finder = L.find (L.any (==l). L.permutations . fmap (keyString.fst).kattr)
-    i <-  finder v `mplus` finder k `mplus` finder d
+        i = justError ("error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  finder v `mplus` finder k `mplus` finder d
     case i  of
          Attr l -> Nothing
          FKT l j -> case xs of
                          [] -> Just j
                          i  -> indexTB1 xs (Just j)
-  where
-    kattr (Attr i ) = [i]
-    kattr (FKT i _ ) = i
 
 
 indexTable (l:xs) (TB1 (KV (PK k d)  v))
   = do
     let finder = L.find (L.any (==l). L.permutations . fmap (keyString .fst) .kattr)
-    i <-  finder v `mplus` finder k `mplus` finder d
+        i = justError ("error finding key: " <> T.unpack (T.intercalate ","l) ) $ finder v `mplus` finder k `mplus` finder d
     case i  of
          Attr l -> return l
          FKT l j -> indexTable xs j
-  where
-    kattr (Attr i ) = [i]
-    kattr (FKT i _ ) = i
 
 
+kattr (Attr i ) = [i]
+kattr (FKT i _ ) = L.concat $ kattr <$> i
 
 class KeyString i where
   keyString :: i -> Text

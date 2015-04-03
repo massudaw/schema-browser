@@ -1,4 +1,4 @@
-{-# LANGUAGE LambdaCase,RankNTypes,RecordWildCards,DeriveFunctor,NoMonomorphismRestriction,RecursiveDo #-} module Widgets where
+{-# LANGUAGE TupleSections,LambdaCase,RankNTypes,RecordWildCards,DeriveFunctor,NoMonomorphismRestriction,RecursiveDo #-} module Widgets where
 
 
 import Control.Monad
@@ -15,6 +15,11 @@ import Data.Foldable (foldl')
 import Data.Interval (Interval(..),interval)
 import qualified Data.ExtendedReal as ER
 import qualified Data.Interval as Interval
+import qualified Data.List as L
+import Text.Read
+import Query
+import Postgresql
+import Data.Maybe
 
 
 instance Widget (TrivialWidget  a) where
@@ -66,6 +71,15 @@ adEvent ne t = do
   let ev = unionWith const (rumors t) ne
   nb <- stepper c ev
   return $ tidings nb ev
+
+mapUIT :: Element -> (a -> UI b) -> Tidings a -> UI (Tidings b)
+mapUIT e f x =  do
+  let ev = unsafeMapUI e f $ rumors x
+  c <- currentValue  (facts x)
+  b <- f c
+  bh <- stepper  b ev
+  return $ tidings bh (bh <@ rumors x)
+
 
 mapT :: MonadIO m => (a -> IO b) -> Tidings a -> m (Tidings b)
 mapT f x =  do
@@ -175,12 +189,13 @@ tabbed  tabs = do
   UI.div # set children [getElement header,body]
 
 -- List of buttons with constant value
-buttonFSet :: [a] -> Behavior (String -> Bool ) ->  (a -> String) -> UI (TrivialWidget a)
-buttonFSet ks bf h =do
+buttonFSet :: [a] -> Behavior (Maybe a) -> Behavior (String -> Bool ) ->  (a -> String) -> UI (TrivialWidget a)
+buttonFSet ks binit bf h =do
   buttons <- mapM (buttonString h) ks
   dv <- UI.div # set children (fst <$> buttons)
   let evs = foldr (unionWith (const)) never (snd <$> buttons)
-  bv <- stepper (head ks) evs
+  v <- currentValue binit
+  bv <- stepper (maybe (head ks) id v) evs
   return (TrivialWidget (tidings bv evs) dv)
     where
       buttonString h k= do
@@ -249,8 +264,24 @@ read1 (EventData (Just s:_)) = read s
 
 onkey :: Element -> (Int -> Maybe Int ) -> Event String
 onkey el f = unsafeMapUI el (const $ UI.get value el) (filterJust $ f . read1 <$> domEvent "keydown" el)
+
 onEnter el = onkey el (\case {13-> Just 13; i -> Nothing})
+
+
+testPointInRange ui = do
+  startGUI defaultConfig {tpPort = Just 8000} (\w -> do
+                      e1 <- ui
+                      getBody w #+ [element e1]
+                      return () )
 
 
 
 unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w -> runUI w (f a))
+
+paint e b = element e # sink UI.style (greenRed . isJust <$> b)
+paintBorder e b = element e # sink UI.style (greenRed . isJust <$> b)
+  where
+      greenRed True = [("border-color","green")]
+      greenRed False = [("border-color","red")]
+
+

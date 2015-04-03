@@ -88,10 +88,11 @@ keyTables conn schema = do
         lookupKey' :: Functor f => f (Text,Text) -> f (Text,Key)
         lookupKey' = fmap  (\(t,c)-> (t,(\(Just i) -> i) $ M.lookup (t,c) keyMap) )
         lookupKey2 :: Functor f => f (Text,Text) -> f Key
-        lookupKey2 = fmap  (\(t,c)->(\(Just i) -> i) $ M.lookup ( (t,c)) keyMap )
+        lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) keyMap )
         readTT :: Text ->  TableType
         readTT "BASE TABLE" = ReadWrite
         readTT "VIEW" = ReadOnly
+        readTT i =  error $ T.unpack i
        descMap <- M.fromList . fmap  (\(t,c)-> (t,(\(Just i) -> i) $ M.lookup (t,c) keyMap) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
        res <- lookupKey' <$> query conn "SELECT table_name,column_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ?  AND constraint_type='PRIMARY KEY' union select table_name,unnest(pk_column) as column_name from metadata.view_pk where table_schema = ?" (schema,schema) :: IO [(Text,Key)]
        resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM information_schema.tables where table_schema = ? " (Only schema) :: IO (Map Text TableType)

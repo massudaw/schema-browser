@@ -11,6 +11,7 @@ import Postgresql
 import Database.PostgreSQL.Simple
 import Control.Applicative
 import Data.Interval (interval)
+import qualified Data.Interval as Interval
 import qualified Data.ExtendedReal as ER
 
 import Data.Maybe
