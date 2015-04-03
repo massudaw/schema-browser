@@ -20,6 +20,8 @@ import Text.Read
 import Query
 import Postgresql
 import Data.Maybe
+import Data.Distributive
+
 
 
 instance Widget (TrivialWidget  a) where
@@ -27,6 +29,7 @@ instance Widget (TrivialWidget  a) where
 
 data TrivialWidget a =
     TrivialWidget { triding :: (Tidings a) , trielem ::  Element} deriving(Functor)
+
 
 
 -- Generate a accum the behaviour and generate the ahead of promised event

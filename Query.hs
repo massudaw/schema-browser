@@ -803,7 +803,7 @@ projectAllRec' invSchema =  do
       aliasMap =   fmap fst $ M.fromList $ aliasJoin table1
       alterName ak@(p,Key k al a b c ) = (Key k (Just $ justError ("lookupAlias "  <> show ak <> " " <> show aliasMap   <> " -- paths " <> show path <> T.unpack (showTable table1 )  ) $ M.lookup ak aliasMap ) a b c )
   put (schema,Project (F.toList attrs )  table1 )
-  return {-$ trace ("projectDescAllRec: " <> show attrs )-} attrs
+  return  attrs
 
 
 justError e (Just i) = i
@@ -821,15 +821,13 @@ projectTableAttrs r@(Raw _ _ pk desc _ _) =  do
       aliasMap =  M.fromList $ aliasJoin  table1
       alterName ak@(p,Key k al a b c ) = (Key k (Just $ fst $justError ("lookupAlias "  <> show ak <> " " <> show aliasMap  <> T.unpack (showTable table1 )  ) $ M.lookup ak aliasMap ) a b c )
   put (schema,Limit (Project (F.toList kv) $ table1) 500)
-  return {- trace ("projectTableAttrs : " <> show  kv ) -}  kv
+  return kv
 
 
 data AliasPath a
     = PathCons (Set (a,AliasPath a))
     | PathRoot
     deriving(Show,Eq,Ord,Foldable)
-
-
 
 allAttrs' :: Table -> Set (AliasPath Key,(Table,Key))
 allAttrs' r@(Raw _ _ _ _ _ _) = S.map ((PathRoot,) . (r,)) $ rawKeys r
@@ -853,41 +851,12 @@ allAttrs' (Base _ p) =  snd $  from allAttrs' p
                 ft = f t
                 pk = atBase (\(Raw _ _ p _ _ _) -> p) t
 
-
-
 rawKeys r = S.union (rawPK r ) (rawAttrs r)
-
-
 
 newtype QueryT m a
   = QueryT {runQueryT :: StateT  (HashQuery, Table)  m a} deriving(Functor,Applicative,Monad,MonadState (HashQuery, Table) )
 
 runQuery t =  runState ( runQueryT t)
-
-{-
---- Read Schema Graph
-edgeK :: Parser (Path Key Table)
-edgeK = do
-  let valid = noneOf ('\n':" -|")
-      key (i,j) =  Key i (Primitive j)
-  i <- (fmap (key . break (==':')) $ many1 valid) `sepBy1` spaces
-  string "->" >> spaces
-  v <- (fmap (key . break (==':')) $ many1 valid) `sepBy1` spaces
-  string "|" >> spaces
-  o <- many1 valid
-  spaces
-  return $ Path (S.fromList i)   ((\(i,j)->Raw  i (T.tail j) S.empty ) $ T.break (=='.') o)(S.fromList v)
-
-
-readGraph :: FilePath -> IO (Graph Key Table)
-readGraph fp = do
-  r <- parseFromFile (many1 edgeK) fp
-  case r of
-    Left err -> error (show err)
-    Right es -> return $ Graph { edges = pathMap es
-                              , hvertices = nub .  map (fst .pbound) $ es
-                              , tvertices = nub .  map (snd .pbound) $ es  }
--}
 
 pathLabel (ComposePath i (p1,p12,p2) j) = T.intercalate "," $  fmap pathLabel (S.toList p1) <> fmap pathLabel (S.toList p2)
 pathLabel (Path i t j) = tableName t

@@ -286,7 +286,6 @@ selectedItems enabled conn inf ff key = do
 
 
 chooserKey conn inf kitems i = do
-  -- Base Button Set
   let initKey = pure . join $ fmap rawPK . flip M.lookup (tableMap inf) . T.pack <$> i
   filterInp <- UI.input
   filterInpBh <- stepper "" (onEnter filterInp)
@@ -304,8 +303,6 @@ chooseKey conn  inf key = mdo
   -- Filter Box (Saved Filter)
   let bBset = pure key :: Tidings (S.Set Key)
   (filterItemBox,fkbox,range,ff) <- filterWidget conn inf bBset filterT
-
-  -- countAll Query
   let
     bFk = projectFk (hashedGraph inf) key
 

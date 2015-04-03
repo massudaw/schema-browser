@@ -76,19 +76,26 @@ pluginUI' conn inf oldItems (BoundedPlugin n (t,f) action) = do
 isPrim (Primitive i) = True
 isPrim i = False
 
-pointInRangeSelection :: Connection -> InformationSchema -> [Plugins ] -> TB Key ->  Tidings [TB1 (Key,Showable)] -> Tidings (Maybe (TB (Key,Showable))) -> UI (TrivialWidget (Maybe (TB (Key,Showable ))))
-pointInRangeSelection conn inf pgs attr@(FKT fkattr@[Attr k] tbfk ) lks selks
-  |isPrim (keyType k) = do
-      let l = fmap (\(TB1 (KV (PK [Attr (SInterval i)] _) _)) ->  i). (fmap (fmap snd)) <$> lks
-          sel = fmap (\(FKT [Attr i] (TB1 (KV (PK [Attr (SInterval j)] _) _)) )->  (i,j)) . fmap (fmap snd) <$> selks
+unAttr (Attr i) = i
 
-      i <- buildUI (textToPrim <$> keyType k) (fmap fst <$> sel)
-      let initSel j im  = join $ (\i -> L.find (\m-> Interval.member i m) j  ) <$> im
-          vv =  triding i
+pointInRangeSelection
+  :: Connection
+  -> InformationSchema
+  -> [Plugins ]
+  -> TB Key
+  -> Tidings [TB1 (Key,Showable)]
+  -> Tidings (Maybe (TB (Key,Showable)))
+  -> UI (TrivialWidget (Maybe (TB (Key,Showable ))))
+pointInRangeSelection conn inf pgs attr@(FKT fkattr tbfk ) lks selks
+  | all isPrim (keyType . unAttr<$> fkattr ) = do
+      let l = fmap (\(TB1 (KV (PK i _) _)) ->  (\(SInterval iv) -> iv). unAttr <$> i). (fmap (fmap snd)) <$> lks
+          sel = fmap (\(FKT i (TB1 (KV (PK j _) _)) )->  zip (unAttr <$> i) ((\(SInterval iv) -> iv). unAttr <$> j)) . fmap (fmap snd) <$> selks
+
+      i <-  Tra.sequence $ zipWith (\l m -> buildUI m (fmap (!!l) <$> (fmap (fmap fst) <$> sel)) ) [0..] (fmap textToPrim . keyType .unAttr <$> fkattr )
+      let initSel j im  = join $ (\i -> L.find (\m-> all id $ zipWith Interval.member i m) j  ) <$> im
+          vv =  allMaybes <$> Tra.sequenceA (triding <$> i)
       li <- wrapListBox l (liftA2 initSel l vv) (pure (\i -> UI.div # set UI.text (show i)))
-
-      let
-          tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK [Attr (SInterval l)] _ ) _ ))-> Interval.member k l). fmap snd) i) j ) <$> lks <*> vv
+      let tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK  l _ ) _ ))-> all id $ zipWith Interval.member k  ((\(SInterval iv) -> iv). unAttr <$> l)) . fmap snd) i) j ) <$> lks <*> vv
       l <- UI.span # set text (show fkattr)
       (ce,ct,cev) <- crudUITable conn inf pgs (tbfk ) tb
       chw <- checkedWidget (pure False)
@@ -96,10 +103,29 @@ pointInRangeSelection conn inf pgs attr@(FKT fkattr@[Attr k] tbfk ) lks selks
         # sink UI.style (noneShow <$> (facts $ triding chw))
         # set style [("padding-left","10px")]
       paint (getElement l) (facts vv)
-      o <- UI.div # set children [l,getElement i , getElement li,getElement chw,ce]
-      return $ TrivialWidget   (liftA2 (liftA2 (\i j-> FKT [Attr (k,i)] j)  ) vv ct) o
+      o <- UI.div # set children (l: (getElement <$> i) <>  [getElement li,getElement chw,ce])
+      return $ TrivialWidget   (liftA2 (liftA2 (\i j-> FKT (zipWith (\l m -> (,m) <$> l)  fkattr i ) j)  ) vv ct) o
+  | all isKOptional (keyType . unAttr<$> fkattr ) = do
+      let l = fmap (\(TB1 (KV (PK i _) _)) ->  (\(SInterval iv) -> iv). unAttr <$> i). (fmap (fmap snd)) <$> lks
+          sel =   join . fmap (\(FKT i (TB1 (KV (PK j _) _)) )->  allMaybes $ zipWith (liftA2 (\m (SInterval l) -> (m,l))) (unSOptional . unAttr <$> i) (unSOptional . unAttr <$> j)) . fmap (fmap snd) <$> selks
 
-  | isKOptional (keyType k) = do
+      i <-  Tra.sequence $ zipWith (\l (KOptional m) -> buildUI m (fmap (!!l) <$> (fmap (fmap fst) <$> sel)) ) [0..] (fmap textToPrim . keyType .unAttr <$> fkattr )
+      let initSel j im  = join $ (\i -> L.find (\m-> all id $ zipWith Interval.member i m) j  ) <$> im
+          vv =  allMaybes  <$> Tra.sequenceA (triding <$> i)
+          vvm =  allMaybes . fmap (Just .SOptional) <$> Tra.sequenceA (triding <$> i)
+      li <- wrapListBox l (liftA2 initSel l (vv)) (pure (\i -> UI.div # set UI.text (show i)))
+      let tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK  l _ ) _ ))-> all id $ zipWith Interval.member k  ((\(SInterval iv) -> iv). unAttr <$> l)) . fmap snd) i) j ) <$> lks <*> (vv)
+      l <- UI.span # set text (show fkattr)
+      (ce,ct,cev) <- crudUITable conn inf pgs (unKOptional <$> tbfk ) tb
+      chw <- checkedWidget (pure False)
+      element ce
+        # sink UI.style (noneShow <$> (facts $ triding chw))
+        # set style [("paddig-left","10px")]
+      paint (getElement l) (facts vvm)
+      o <- UI.div # set children (l: (getElement <$> i) <>  [getElement li,getElement chw,ce])
+      return $ TrivialWidget   (liftA2 (liftA2 (\i j-> FKT (zipWith (\l m -> (,m) <$> l)  fkattr i ) j)  ) vvm ct) o
+
+  {-| isKOptional (keyType k) = do
       let l = fmap (\(TB1 (KV (PK [Attr ( SInterval i)] _) _)) ->  i). (fmap (fmap snd)) <$> lks
           sel = join . fmap (\(FKT [Attr (SOptional  i)] (TB1 (KV (PK [Attr (SOptional  j)] _) _)) )->  liftA2 (\m (SInterval l) -> (m,l)) i j ) . fmap (fmap snd) <$> selks
       i <- buildUI ((\(KOptional i) -> i) $ textToPrim <$> keyType k) (fmap fst <$> sel)
@@ -114,12 +140,10 @@ pointInRangeSelection conn inf pgs attr@(FKT fkattr@[Attr k] tbfk ) lks selks
       element ce
         # sink UI.style (noneShow <$> (facts $ triding chw))
         # set style [("padding-left","10px")]
-
       paint (getElement l) (Just. SOptional <$> facts vv)
       o <- UI.div # set children [l,getElement i , getElement li,getElement chw,ce]
-      return $ TrivialWidget   (liftA2 (liftA2 (\i j-> FKT [Attr (k,i)] j)  ) (traceShowId.Just . SOptional <$> vv) (traceShowId . makeOptional tbfk <$>ct ) ) ( o)
-
-
+      return $ TrivialWidget   (liftA2 (liftA2 (\i j-> FKT [Attr (k,i)] j)  ) (traceShowId.Just . SOptional <$> vv) (traceShowId . makeOptional tbfk <$>ct ) ) o
+      -}
   | otherwise = error (show attr)
 
 
@@ -130,7 +154,7 @@ attrUITable
           (TrivialWidget (Maybe (TB (Key, Showable))))
 attrUITable  tAttr' (Attr i) = do
       l<- UI.span # set text (show i)
-      let tdi = tAttr -- foldrTds justCase plugItens [tAttr]
+      let tdi = tAttr
           justCase i j@(Just _) = j
           justCase i Nothing = i
       attrUI <- buildUI (textToPrim <$> keyType i) tdi
@@ -138,12 +162,8 @@ attrUITable  tAttr' (Attr i) = do
       let
           ei (Just a) = Just a
           ei Nothing = defaultType (keyType i)
-      -- e <- buildUI (textToPrim <$>keyType i) tAttr
-      -- eplug <- buildUI (textToPrim <$>keyType i) (pure Nothing)
-      -- element e # sink UI.style (noneShowSpan <$> (facts $ triding expandEdit)) # set UI.enabled False
-      -- element eplug # sink UI.style (noneShowSpan <$> (facts $ triding expandEdit)) # set UI.enabled False
       paint l (facts $ triding attrUI )
-      sp <- UI.li # set children [l,getElement attrUI {-, getElement expandEdit,getElement e,getElement eplug-}]
+      sp <- UI.li # set children [l,getElement attrUI ]
       let insertT = fmap (Attr .(i,)) <$> (triding attrUI)
           editT = liftA2 (\n m -> join $ liftA2 (\i j -> if i == j then Nothing else Just j) n m) tAttr' insertT
       return $ TrivialWidget insertT sp
@@ -201,8 +221,6 @@ buildUI i  tdi = case i of
             paintBorder inputUI (facts pkt)
             sp <- UI.span # set children (inputUI : elem)
             return $ TrivialWidget pkt sp
-
-
     takeWhileJust snoc empty l = step l
       where
           step (x:xs) =  liftA2 test x (step xs)
@@ -329,9 +347,6 @@ classifyFK (FKT i _) (FKT j _) = concat $ liftA2 classifyFK i j
 classifyFK i j = [Equal]
 
 
-
-
-
 fkUITable
   :: Connection
   -> InformationSchema
@@ -342,14 +357,8 @@ fkUITable
   -> UI (TrivialWidget(Maybe (TB (Key, Showable))))
 fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT ifk tb1)
     | all (==Elem) (concat $ zipWith classifyFK (Attr . fmap textToPrim .keyType <$> F.toList rl ) (Attr .fmap textToPrim . keyType <$> F.toList rr) ) = do
-      let
-          o1 = S.fromList $ findPK tb1
-          isLeftJoin = any isKOptional $  keyType <$> F.toList rl
-          relTable = M.fromList $ fmap swap rel
-          tdi :: Tidings (Maybe (TB1  (Key,Showable)))
-          tdi =  (if isLeftJoin then join . fmap (\(FKT _ t) -> Tra.sequence $  unkeyOptional  <$> t ) else fmap (\(FKT _ t )-> t) ) <$> oldItems
-      res <- liftIO $ projectKey conn inf (projectAllRec' (tableMap inf )) o1
-      pointInRangeSelection conn inf pgs tb  (pure res) oldItems
+        res <- liftIO $ projectKey conn inf (projectAllRec' (tableMap inf )) (S.fromList $ findPK tb1)
+        pointInRangeSelection conn inf pgs tb (pure res) oldItems
     | otherwise = mdo
       let
           o1 = S.fromList $ findPK tb1
@@ -371,8 +380,8 @@ fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT i
                 else wrapListBox listRes tdi (pure ((\v-> UI.span # set text (L.intercalate "," $ fmap renderShowable $ F.toList $  kvKey $ allKVRec $  snd <$> v))))
       let
         lookFKsel (ko,v)= (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
-          where kn = (\(Just i)-> i) $ M.lookup ko relTable
-        fksel = fmap (fmap lookFKsel ) <$>  (fmap findPK  <$> triding box)
+          where kn = justError "relTable" $ M.lookup ko relTable
+        fksel = fmap (fmap lookFKsel) <$>  (fmap findPK  <$> triding box)
         tdsel = fmap (\i -> FKT (zipWith (\i j -> (,j) <$> i)  ifk . fmap snd  . findPK $ i ) i)  <$>  triding box
         edited = liftA2 (\i j -> join $ liftA2 (\i j-> if  i == j then Nothing else Just j ) i j) oldItems tdsel
       paint (getElement l) (facts $ if isLeftJoin then makeOptional (S.toList rl)<$> fksel else fksel )
@@ -381,8 +390,8 @@ fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT i
       let eres = fmap (addToList  (allRec (tableMap inf) ((\(Just i)-> i) $ M.lookup o1 (pkMap inf))) <$> ) evs
       res2  <-  accumTds (pure res) eres
       element celem
-        # sink UI.style (noneShow <$> (facts $ triding chw))
-        # set style [("padding-left","10px")]
+          # sink UI.style (noneShow <$> (facts $ triding chw))
+          # set style [("padding-left","10px")]
       fk <- UI.li # set  children [l, getElement box,filterInp,getElement chw,celem]
       let bres =  liftA2 (liftA2 FKT) (fmap (fmap Attr) <$> if isLeftJoin then makeOptional (S.toList rl)<$> fksel else fksel ) (if isLeftJoin then makeOptional tb1 <$> tcrud else tcrud )
       return $ TrivialWidget bres fk
