@@ -76,8 +76,8 @@ pluginUI' conn inf oldItems (BoundedPlugin n (t,f) action) = do
 isPrim (Primitive i) = True
 isPrim i = False
 
-pointInRangeSelection :: TB Key ->  Tidings [TB1 (Key,Showable)] -> Tidings (Maybe (TB (Key,Showable))) -> UI (TrivialWidget (Maybe (TB (Key,Showable ))))
-pointInRangeSelection attr@(FKT fkattr@[Attr k]  j ) lks selks
+pointInRangeSelection :: Connection -> InformationSchema -> TB Key ->  Tidings [TB1 (Key,Showable)] -> Tidings (Maybe (TB (Key,Showable))) -> UI (TrivialWidget (Maybe (TB (Key,Showable ))))
+pointInRangeSelection conn inf attr@(FKT fkattr@[Attr k]  j ) lks selks
   |isPrim (keyType k) = do
       let l = fmap (\(TB1 (KV (PK [Attr (SInterval i)] _) _)) ->  i). (fmap (fmap snd)) <$> lks
           sel = fmap (\(FKT [Attr i] (TB1 (KV (PK [Attr (SInterval j)] _) _)) )->  (i,j)) . fmap (fmap snd) <$> selks
@@ -89,6 +89,7 @@ pointInRangeSelection attr@(FKT fkattr@[Attr k]  j ) lks selks
       let
           tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK [Attr (SInterval l)] _ ) _ ))-> Interval.member k l). fmap snd) i) j ) <$> lks <*> vv
       l <- UI.span # set text (show fkattr)
+      -- res <- crudUITable  conn inf
       paint (getElement l) (facts vv)
       o <- UI.div # set children [l,getElement i , getElement li]
       return $ TrivialWidget   (liftA2 (liftA2 (\i j-> FKT [Attr (k,i)] j)  ) vv tb ) o
@@ -304,6 +305,20 @@ editedMod :: (Show (f (a,b)),Show (a,b),Traversable f ,Ord a) => f a ->  Maybe [
 editedMod  i  m=  join $ fmap (\mn-> look mn i ) m
   where look mn k = allMaybes $ fmap (\ki -> fmap (ki,) $  M.lookup ki (M.fromList mn) ) k
 
+data Inclusion
+  = Equal
+  | Contains
+  | Elem
+  deriving(Eq,Ord,Show)
+
+classifyFK (Attr (KOptional (Primitive PDouble))) (Attr (KInterval (Primitive PDouble))) =  [Elem]
+classifyFK (Attr (Primitive PDouble)) (Attr (KInterval (Primitive PDouble))) =  [Elem]
+classifyFK (Attr (Primitive i )) (Attr (Primitive j))  | i == j = [Equal]
+classifyFK (FKT i _) (FKT j _) = concat $ liftA2 classifyFK i j
+classifyFK i j = [Equal]
+
+
+
 
 
 fkUITable
@@ -314,7 +329,17 @@ fkUITable
   -> Tidings (Maybe (TB (Key,Showable)))
   -> TB Key
   -> UI (TrivialWidget(Maybe (TB (Key, Showable))))
-fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT ifk tb1) = mdo
+fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT ifk tb1)
+    | all (==Elem) (concat $ zipWith classifyFK (Attr . fmap textToPrim .keyType <$> F.toList rl ) (Attr .fmap textToPrim . keyType <$> F.toList rr) ) = do
+      let
+          o1 = S.fromList $ findPK tb1
+          isLeftJoin = any isKOptional $  keyType <$> F.toList rl
+          relTable = M.fromList $ fmap swap rel
+          tdi :: Tidings (Maybe (TB1  (Key,Showable)))
+          tdi =  (if isLeftJoin then join . fmap (\(FKT _ t) -> Tra.sequence $  unkeyOptional  <$> t ) else fmap (\(FKT _ t )-> t) ) <$> oldItems
+      res <- liftIO $ projectKey conn inf (projectAllRec' (tableMap inf )) o1
+      pointInRangeSelection conn inf tb  (pure res) oldItems
+    | otherwise = mdo
       let
           o1 = S.fromList $ findPK tb1
           isLeftJoin = any isKOptional $  keyType <$> F.toList rl
@@ -350,140 +375,3 @@ fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT i
       fk <- UI.li # set  children [l, getElement box,filterInp,getElement chw,celem]
       let bres =  liftA2 (liftA2 FKT) (fmap (fmap Attr) <$> if isLeftJoin then makeOptional (S.toList rl)<$> fksel else fksel ) (if isLeftJoin then makeOptional tb1 <$> tcrud else tcrud )
       return $ TrivialWidget bres fk
-
-{-
-crudUITable
-  :: Connection
-     -> InformationSchema
-     -> [Plugins]
-     -> TB1 Key
-     -> Tidings (Maybe (TB1 (Key,Showable)))
-     -> UI (Element,Tidings (Maybe (TB1 (Key,Showable))),[Event (Modification Key Showable)])
-crudUITable conn inf pgs tb@(TB1 (KV (PK k d) a)) oldItems = do
-  let
-      tbCase td ix i@(FKT ifk _) = fkUITable conn inf pgs ((\(Just i)-> i) $ L.find (\(Path ifkp _ _) -> S.fromList (concat $ kattr <$> ifk) == ifkp) $ S.toList $ rawFKS table) (fmap ((!!ix) .td .unTB1) <$> oldItems) i
-      tbCase td ix a@(Attr i) = attrUITable (fmap ((!!ix) .td .unTB1) <$> oldItems)  a
-      mapMI f = Tra.mapM (uncurry f) . zip [0..]
-      Just table = M.lookup (S.fromList $findPK tb) (pkMap inf)
-  fks <- liftA3 (\i j k -> KV (PK i j ) k)
-      (mapMI (tbCase (pkKey.kvKey)) k)
-      (mapMI (tbCase (pkDescription.kvKey)) d)
-      (mapMI (tbCase (kvAttr)) a)
-  let tb = fmap TB1 . Tra.sequenceA <$> Tra.sequenceA (triding <$> fks)
-  (panelItems,evsa)<- processPanelTable conn inf (facts tb) table oldItems
-  let commitedTB = tidings (facts tb) (unionWith const (facts tb <@ unions evsa) (rumors oldItems) )
-  res <- mapM (pluginUI' conn inf commitedTB ) (filter (\(BoundedPlugin _ (t,_) _ ) -> t == tableName table) pgs)
-  listBody <- UI.ul
-    # set children (F.toList (getElement <$> fks))
-    # set style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
-  body <- UI.div
-    # set children ( listBody :  panelItems <> (fst <$> res))
-    # set style [("border","2px"),("border-color","gray"),("border-style","solid")]
-  return (body, commitedTB  ,evsa)
-
-
-processPanelTable
-     :: Connection
-     -> InformationSchema
-     -> Behavior (Maybe (TB1 (Key, Showable)))
-     -> Table
-     -> Tidings (Maybe (TB1 (Key, Showable)))
-     -> UI ([Element],[Event (Modification Key Showable)])
-processPanelTable conn inf attrsB table oldItemsi = do
-  let fkattrsB = fmap (concat . F.toList .fmap attrNonRec .unTB1 ) <$> attrsB
-      oldItems = fmap (concat . F.toList .fmap attrNonRec .unTB1 ) <$> oldItemsi
-      efkattrsB :: Behavior (Maybe [(Key,Showable)])
-      efkattrsB = fmap (catMaybes . concat .F.toList. fmap attrNonRec . unTB1 ) <$> liftA2 (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attrsB (facts oldItemsi)
-  deleteB <- UI.button  # sink UI.enabled (isJust <$> facts oldItems) # set text "DELETE"
-  editB <- UI.button # sink UI.enabled (liftA2 (&&) (isJust <$>  efkattrsB) (isJust <$> fkattrsB)) # set text "EDIT"
-  insertB <- UI.button  # sink UI.enabled (isJust <$> fkattrsB) # set text "INSERT"
-  let
-      deleteAction ki =  do
-        let k = fmap (concat . F.toList .fmap attrNonRec .unTB1 ) ki
-            kf = fmap F.toList ki
-        res <- liftIO $ catch (Right <$> delete conn ((\(Just i)-> i) k) table) (\e -> return $ Left (show $ traceShowId  (e :: SomeException) ))
-        return $ const (Delete kf ) <$> res
-      editAction attr old = do
-        let i = (\(Just i)-> i) isM
-            k = (\(Just i)-> i) kM
-            kM = (concat . F.toList .fmap attrNonRec .unTB1 ) <$> old
-            isM :: Maybe [(Key,Showable)]
-            isM = (catMaybes . concat . F.toList  . fmap attrNonRec .unTB1) <$> (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attr old
-            isM' :: Maybe [(Key,Showable)]
-            isM' = (catMaybes . F.toList  ) <$> (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attr old
-            kM' = F.toList <$> old
-        res <- liftIO $ catch (Right <$> update conn i k table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
-        let updated = (\(Just i)-> i) isM'
-        return $ fmap (const (Edit (fmap (mappend updated) (filter (\(k,_) -> not $ k `elem` (fmap fst updated)) <$> kM') ) kM')) res
-
-      insertAction ip = do
-          let i2 = F.toList  ip
-              i = concat . F.toList .fmap attrNonRec .unTB1 $ ip
-          res <- catch (Right <$> insertPK fromShowableList conn i table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
-          return $ (\v -> Insert $ Just $ (v <> (filter (not . flip elem (fst <$> v) . fst) i2))) <$> res
-
-      evir, ever ,evdr:: Event (Modification Key Showable)
-      (evid,evir) = spMap $ filterJust $ (fmap insertAction  <$> attrsB ) <@ (UI.click insertB)
-      (evdd,evdr) = spMap $ (deleteAction <$> facts oldItemsi) <@ UI.click deleteB
-      (eved,ever) = spMap $ (editAction  <$> attrsB <*> (facts oldItemsi) ) <@ UI.click editB
-      spMap = split . unsafeMapIO id
-
-  return ([insertB,editB,deleteB],[evir,ever,evdr])
-
-findPK = concat . fmap attrNonRec . pkKey  . kvKey . unTB1
-
-attrNonRec (FKT ifk _ ) = ifk
-attrNonRec (Attr i ) = [i]
-
-tableNonrec (TB1 k ) = concat $ F.toList $ kvAttr $ fmap attrNonRec k
-
-makeOptional :: Functor f => f Key -> Maybe (f (Key,Showable)) -> Maybe (f (Key,Showable))
-makeOptional def (Just i ) = Just $ fmap keyOptional i
-makeOptional def Nothing = Just $ fmap (\i -> (i,SOptional Nothing)) def
-
-
-fkUITable
-  :: Connection
-  -> InformationSchema
-  -> [Plugins]
-  -> Path (Set Key) (SqlOperation Text)
-  -> Tidings (Maybe (TB (Key,Showable)))
-  -> TB Key
-  -> UI (Element,Tidings (Maybe (TB (Key, Showable))))
-fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT ifk tb1) = mdo
-      let
-          o1 = S.fromList $ findPK tb1
-          isLeftJoin = any isKOptional $  keyType <$> F.toList rl
-          relTable = M.fromList $ fmap swap rel
-          tdi :: Tidings (Maybe (TB1  (Key,Showable)))
-          tdi =  (if isLeftJoin then join . fmap (\(FKT _ t) -> Tra.sequence $  unkeyOptional  <$> t ) else fmap (\(FKT _ t )-> t) ) <$> oldItems
-      res <- liftIO $ projectKey conn inf (projectAllRec' (tableMap inf )) o1
-      l <- UI.span # set text (show ifk)
-
-      filterInp <- UI.input
-      filterInpBh <- stepper "" (onEnter filterInp )
-      let filterInpT = tidings filterInpBh (onEnter filterInp)
-          filtering i= filter (L.isInfixOf (toLower <$> i) . fmap toLower . show )
-          listRes = filtering <$> filterInpT <*> res2
-
-      box <- if isLeftJoin
-                then optionalListBox  listRes tdi (pure (maybe (UI.div ) (\v-> UI.span # set text (L.intercalate "," $ fmap renderShowable $ F.toList $  kvKey $ allKVRec $  snd <$> v))  ))
-                else wrapListBox listRes tdi (pure ((\v-> UI.span # set text (L.intercalate "," $ fmap renderShowable $ F.toList $  kvKey $ allKVRec $  snd <$> v))))
-      let
-        lookFKsel (ko,v)= (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
-          where kn = (\(Just i)-> i) $ M.lookup ko relTable
-        fksel = fmap (fmap lookFKsel ) <$>  (fmap findPK  <$> triding box)
-        tdsel = fmap (\i -> FKT (zip ifk . fmap snd  . findPK $ i ) i)  <$>  triding box
-        edited = liftA2 (\i j -> join $ liftA2 (\i j-> if  i == j then Nothing else Just j ) i j) oldItems tdsel
-      paint (getElement l) (facts $ if isLeftJoin then makeOptional (S.toList rl)<$> fksel else fksel )
-      chw <- checkedWidget (pure False)
-      (celem,tcrud,evs) <- crudUITable conn inf pgs (if isLeftJoin then unKOptional <$> tb1  else tb1 ) (triding box)
-      let eres = fmap (addToList  (allRec (tableMap inf) ((\(Just i)-> i) $ M.lookup o1 (pkMap inf))) <$> ) evs
-      res2  <-  accumTds (pure $ if isLeftJoin then  res else res) eres
-      element celem
-        # sink UI.style (noneShow <$> (facts $ triding chw))
-        # set style [("padding-left","10px")]
-      fk <- UI.li # set  children [l, getElement box,filterInp,getElement chw,celem]
-      let bres =  liftA2 (liftA2 FKT) (if isLeftJoin then makeOptional (S.toList rl)<$> fksel else fksel ) (if isLeftJoin then makeOptional tb1 <$> tcrud else tcrud )
-      return (fk,bres)
--}
