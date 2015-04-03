@@ -72,6 +72,34 @@ import Data.Unique
 instance Ord a => Ord (Interval.Interval a ) where
   compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)
 
+textToPrim "character varying" = PText
+textToPrim "name" = PText
+textToPrim "varchar" = PText
+textToPrim "text" = PText
+textToPrim "character" = PText
+textToPrim "char" = PText
+textToPrim "double precision" = PDouble
+textToPrim "numeric" = PDouble
+textToPrim "float8" = PDouble
+textToPrim "int4" = PInt
+-- textToPrim "bank_account" = PBackAccount
+textToPrim "cnpj" = PCnpj
+textToPrim "sql_identifier" =  PText
+textToPrim "cpf" = PCpf
+textToPrim "int8" = PInt
+textToPrim "integer" = PInt
+textToPrim "bigint" = PInt
+textToPrim "boolean" = PBoolean
+textToPrim "smallint" = PInt
+textToPrim "timestamp without time zone" = PTimestamp
+textToPrim "interval" = PInterval
+textToPrim "date" = PDate
+textToPrim "POINT" = PPosition
+textToPrim "LINESTRING" = PLineString
+textToPrim "box3d" = PBounding
+textToPrim i = error $ "no case for type " <> T.unpack i
+
+
 data KPrim
    = PText
    | PBoolean
@@ -390,10 +418,10 @@ intersectionOp (i) (KOptional j ) = intersectionOp i j
 intersectionOp (KOptional i) (j ) = intersectionOp i j
 intersectionOp (KInterval i) (KInterval j )  = " && "
 intersectionOp (KInterval i) (j )
-    | i == j = " @> "
+    | (textToPrim <$> i) == (textToPrim <$> j) = " @> "
     | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
 intersectionOp i (KInterval j )
-    | i == j = " <@ "
+    |fmap textToPrim i == fmap textToPrim j = " <@ "
     | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
 intersectionOp i j = " = "
 

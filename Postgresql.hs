@@ -71,34 +71,6 @@ data DB = DB { dbName :: String
           , dbPort :: String
           }deriving(Show)
 
-textToPrim "character varying" = PText
-textToPrim "name" = PText
-textToPrim "varchar" = PText
-textToPrim "text" = PText
-textToPrim "character" = PText
-textToPrim "char" = PText
-textToPrim "double precision" = PDouble
-textToPrim "numeric" = PDouble
-textToPrim "float8" = PDouble
-textToPrim "int4" = PInt
--- textToPrim "bank_account" = PBackAccount
-textToPrim "cnpj" = PCnpj
-textToPrim "sql_identifier" =  PText
-textToPrim "cpf" = PCpf
-textToPrim "int8" = PInt
-textToPrim "integer" = PInt
-textToPrim "bigint" = PInt
-textToPrim "boolean" = PBoolean
-textToPrim "smallint" = PInt
-textToPrim "timestamp without time zone" = PTimestamp
-textToPrim "interval" = PInterval
-textToPrim "date" = PDate
-textToPrim "POINT" = PPosition
-textToPrim "LINESTRING" = PLineString
-textToPrim "box3d" = PBounding
-textToPrim i = error $ "no case for type " <> T.unpack i
-
-
 renderPostgresqlConn (DB n u p h pt)
   = "user=" <> u <> " password=" <> p <> " dbname=" <> n
 
