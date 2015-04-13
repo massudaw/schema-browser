@@ -324,16 +324,18 @@ chooseKey conn  inf key = mdo
       where arg :: Tidings (Maybe [(Key, [PK Showable])])
             arg = (\i j -> fmap (\nj -> zipWith (,) nj (L.transpose j) ) i) <$> (fmap S.toList  <$> UI.userSelection fkbox ) <*> (fmap invertPK <$> UI.multiUserSelection filterItemBox)
     filterT = categoryT -- liftA2 (M.unionWith mappend) categoryT rangeT
-
-
-  vp <-   joinT $ doQueryAttr conn inf (projectAllRec' (tableMap inf)) <$> (M.unionWith mappend <$> filterT <*> triding ff) <*>  bBset
+  vp <- joinT $ (\i j -> do
+                    let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup j $ pkMap inf )
+                    queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
+                    -- doQueryAttr conn inf (projectAllRec' (tableMap inf) ) i j
+                    ) <$> (M.unionWith mappend <$> filterT <*> triding ff) <*>  bBset
   -- Final Query ListBox
   filterInp <- UI.input
   filterInpBh <- stepper "" (onEnter filterInp)
 
   let filterInpT = tidings filterInpBh (onEnter  filterInp)
 
-  let sortSet = filter (filterIntervalSort . keyType ) . F.toList . tableNonRec  . allRec (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) <$> bBset
+  let sortSet = filter (filterIntervalSort . keyType ) . F.toList . tableNonRec  . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) <$> bBset
       filterIntervalSort (KInterval i) = False
       filterIntervalSort (KOptional i) = filterIntervalSort i
       filterIntervalSort i = True
@@ -354,7 +356,7 @@ chooseKey conn  inf key = mdo
       isReducible (KSerial i )  =  isReducible i
       isReducible i = False
 
-  itemList <- UI.listBox listRes  (pure Nothing) (pure (\i -> line $   L.intercalate "," (F.toList $ fmap (renderShowable . snd ) $  kvKey $ allKVRec i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) $  tableNonrec i)))
+  itemList <- UI.listBox listRes  (pure Nothing) (pure (\i -> line $   L.intercalate "," (F.toList $ fmap (renderShowable . snd ) $  fmap unAttr $ kvKey $ unTB1 i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) $  tableNonrec i)))
   element itemList # set UI.style [("width","100%"),("height","300px")]
   let
     foldr1Safe f [] = []
@@ -365,7 +367,7 @@ chooseKey conn  inf key = mdo
     categoryT1 :: Tidings (Map Key [Filter])
     categoryT1 = M.fromListWith mappend <$> (filterMaybe (fmap (\(fkv,kv)-> (fkv,[Category (S.fromList kv)]))) <$> arg)
       where arg :: Tidings (Maybe [(Key, [PK Showable])])
-            arg = (\i j -> fmap (\nj -> zipWith (,) nj (L.transpose j) ) i) <$> (fmap S.toList  . Just <$> bBset ) <*> (fmap invertPK  . maybeToList . fmap (\i -> snd <$> kvKey ( allKVRec i) )  <$> UI.userSelection itemList)
+            arg = (\i j -> fmap (\nj -> zipWith (,) nj (L.transpose j) ) i) <$> (fmap S.toList  . Just <$> bBset ) <*> (fmap invertPK  . maybeToList . fmap (\i -> snd <$> fmap unAttr  (kvKey ( unTB1 i) ))  <$> UI.userSelection itemList)
 
   sel <- UI.multiListBox (pure bFk) (pure bFk) (pure (line . showVertex))
   selCheck <- checkedWidget (pure False)
@@ -386,8 +388,8 @@ chooseKey conn  inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,_,evs) <- crudUITable conn inf [lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJBoundary ,queryTimeline, queryAndamentoB,queryArtAndamento ] (allRec (tableMap inf) table) (UI.userSelection itemList)
-            let eres = fmap (addToList  (allRec (tableMap inf ) table )  <$> ) evs
+            (crud,_,evs) <- crudUITable conn inf [lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJBoundary ,queryTimeline, queryAndamentoB,queryArtAndamento ] (allRec' (tableMap inf) table) (UI.userSelection itemList)
+            let eres = fmap (addToList  (allRec' (tableMap inf ) table )  <$> ) evs
             res2 <- accumTds vp  eres
             insertDiv <- UI.div # set children [crud]
             chk <- checkedWidget (pure True)
@@ -402,10 +404,11 @@ chooseKey conn  inf key = mdo
   filterSel <- UI.div # set children [getElement ff,getElement fkbox,getElement range, getElement filterItemBox]
   v <- liftIO  $ doQueryAttr conn inf (projectAllRec' (tableMap inf)) (M.singleton (lookKey inf "modification_table" "table_name") [Category $S.fromList $ [PK [SText .tableName $ table ] []]]) (S.singleton $lookKey inf "modification_table" "modification_id" )
   modBox <- checkedWidget (pure True)
-  box <- UI.multiListBox (pure v) (pure []) (pure (\i -> line $   L.intercalate "," (F.toList $ fmap (renderShowable . snd ) $   allKVRec i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) $  tableNonrec i)))
+  box <- UI.multiListBox (pure v) (pure []) (pure (\i -> line $   L.intercalate "," (F.toList $ fmap (show . fmap (renderShowable . snd )) $   unTB1$ i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) $  tableNonrec i)))
   tab <- tabbedChk  (maybeToList crud <> [("SELECTED",(selCheck ,selected)),pollings,("CODE",(codeChk,code)),("MODS",(modBox,getElement box))])
   itemSel <- UI.div # set children [filterInp,getElement sortList,getElement asc]
   UI.div # set children ([itemSel,getElement itemList,total,tab] )
+
 
 
 
@@ -1166,27 +1169,19 @@ applyTranslator t i = fmap (\(k,v) ->  join $ (\(kv,f) -> fmap (kv,) (f$v))   <$
 iframe = mkElement "iframe"
 
 
-{-
-projectKey
-  :: Connection
-     -> InformationSchema ->
-     (forall t . Traversable t => QueryT Identity (t KAttribute)
-         -> S.Set Key -> IO [t (Key,Showable)])
-projectKey conn inf q  = (\(j,(h,i)) -> fmap (fmap (zipWithTF (,) (fmap (\(Metric i)-> i) j))) . queryWith_ (fromShowableList j) conn . traceShowId . buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
--}
 projectTable
   :: Connection
      -> InformationSchema ->
      (forall t . Traversable t => QueryT Identity (t KAttribute)
          -> S.Set Key -> IO (t Key ,[t Showable]))
-projectTable conn inf q  = (\(j,(h,i)) -> fmap (fmap (\(Metric k) -> k) j,)  . queryWith_ (fromShowableList j) conn . traceShowId . buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
+projectTable conn inf q  = (\(j,(h,i)) -> fmap (fmap (\(Metric k) -> k) j,)  . queryWith_ (fromShowableList j) conn . buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
 
 projectKey'
   :: Connection
      -> InformationSchema ->
      (forall t . Traversable t => QueryT Identity (t KAttribute)
          -> S.Set Key -> IO [t (KAttribute ,Showable)])
-projectKey' conn inf q  = (\(j,(h,i)) -> fmap (fmap (zipWithTF (,) j)) . queryWith_ (fromShowableList j) conn . traceShowId . buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
+projectKey' conn inf q  = (\(j,(h,i)) -> fmap (fmap (zipWithTF (,) j)) . queryWith_ (fromShowableList j) conn . buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
 
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item
@@ -1239,4 +1234,11 @@ layout  infT = do
   UI.div # set children [vis,script]
 
 
+testFireQuery q = withConnInf "incendio" (\conn inf -> do
+                                       let rp = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
+                                       print rp
+                                       print $ (allRec' (tableMap inf)(fromJust $ M.lookup q (tableMap inf)))
+                                       q <- queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
+                                       putStrLn$ unlines $ fmap show q
+                                           )
 

@@ -31,6 +31,7 @@ import Data.Maybe
 import qualified Data.Interval as Interval
 import Data.Monoid hiding (Product)
 import Data.Functor.Product
+import Data.Bifunctor
 
 import qualified Data.Text.Lazy as T
 import qualified Data.ExtendedReal as ER
@@ -54,6 +55,7 @@ import System.IO.Unsafe
 import Data.Tuple
 import Control.Applicative
 import Data.List ( nubBy,nub, sort,intercalate,sortBy,isInfixOf )
+import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
@@ -61,7 +63,7 @@ import Data.Set (Set)
 import Control.Monad.State
 import Control.Monad.State.Class
 import System.Environment ( getArgs )
-import Text.Parsec hiding(State)
+import Text.Parsec hiding(label,State)
 import Text.Parsec.String
 import Text.Printf ( printf )
 import Data.Text.Lazy(Text)
@@ -122,12 +124,17 @@ data KType a
    | KArray (KType a)
    | KInterval (KType a)
    | KOptional (KType a)
+   | KTable [KType a]
    deriving(Eq,Ord,Functor)
 
 isSerial (KSerial _) = True
 isSerial _ = False
+isPrim (Primitive i) = True
+isPrim i = False
 isOptional (KOptional _) = True
 isOptional _ = False
+isArray (KArray _) = True
+isArray _ = False
 
 instance Show (KType KPrim) where
   show =  showTy show
@@ -136,12 +143,11 @@ instance Show (KType Text) where
   show = T.unpack . showTy id
 
 showTy f (Primitive i ) = f i
-showTy f (KArray i) = "[" <>  showTy f i <> "]"
+showTy f (KArray i) = "{" <>  showTy f i <> "}"
 showTy f (KOptional i) = showTy f i <> "*"
-showTy f (KInterval i) = showTy f i <> "()"
+showTy f (KInterval i) = "(" <>  showTy f i <> ")"
 showTy f (KSerial i) = showTy f i <> "?"
 
--- keyValue k = keyName k <> (T.pack $ show $ hashUnique $ keyFastUnique k)
 
 data Key
     = Key
@@ -163,10 +169,9 @@ instance Ord Key where
    k >= l = keyFastUnique k >= keyFastUnique l
 
 instance Show Key where
-   show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
-   -- show k = T.unpack $ showKey k
-   -- show (Key v u _ _ ) = T.unpack v -- <> show (hashUnique u)
-showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::"  <> showTy id (keyType k)
+   -- show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
+   show  =  T.unpack .showKey
+showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> {-"::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> -} "::"  <> showTy id (keyType k)
 
 
 instance Foldable (JoinPath a) where
@@ -358,14 +363,6 @@ tableName = atBase (\(Raw _ t _ _ _ _ )-> t)
 alterTableName f = atBase (\(Raw s t p i j l )-> (Raw s (f t)  p i j l))
 tablesName = atBase (\(Raw _ t _ _ _ _ )-> S.singleton t)
 
---- Traverse the joinPath returning the keyList
-
-aliasedKey (PathRoot  ,v) = keyValue v
-aliasedKey (v ,k) =  path v   <> "_" <> keyValue k
-  where path PathRoot  = ""
-        path (PathCons i) = T.intercalate "_" $ fmap (\(k,p)-> (\case {PathRoot -> "" ; m@(PathCons _ ) -> (path m <> "_")}) p <> keyValue k  ) $ S.toList i
-
-
 
 renderAliasedKey (PathRoot  ,v)  a = renderNamespacedKeySet v <> " AS " <> a
   where renderNamespacedKeySet (t,k) = tableName t <> "." <> keyValue k
@@ -406,24 +403,28 @@ splitJoins j@(Join ty b r p) = case hasSplit of
 splitJoins j = j
 
 
-aliasJoin b@(Base k1 p) =   zipWith (\i (j,l)-> (j,(i,l))) (T.pack . ("v" <> ). show <$> [0..]) aliasMap
+aliasJoin b@(Base k1 p) = zipWith (\i (j,l)-> (j,(i,l))) (T.pack . ("v" <> ). show <$> [0..]) aliasMap
   where
     aliasMap =  fmap (\i -> ( (\(p,(t,k))-> (p,k))i,i)) attrs
     attrs = S.toList $ allAttrs' b
 
-fullTableName  i = (T.intercalate "_" $ fmap (\k -> keyValue k <> (T.pack $ show $ hashUnique (keyFastUnique k))) $ S.toList i)
+fullTableName = T.intercalate "_" . fmap (\k -> keyValue k <> (T.pack $ show $ hashUnique (keyFastUnique k))) . S.toList
 
-intersectionOp (KOptional i) (KOptional j ) = intersectionOp i j
-intersectionOp (i) (KOptional j ) = intersectionOp i j
+inner b l m = l <> b <> m
+intersectionOp (KOptional i) (KOptional j) = intersectionOp i j
+intersectionOp i (KOptional j) = intersectionOp i j
 intersectionOp (KOptional i) (j ) = intersectionOp i j
-intersectionOp (KInterval i) (KInterval j )  = " && "
-intersectionOp (KInterval i) (j )
-    | (textToPrim <$> i) == (textToPrim <$> j) = " @> "
+intersectionOp (KInterval i) (KInterval j )  = inner " && "
+intersectionOp (KInterval i) j
+    | fmap textToPrim i == fmap textToPrim j =  inner " @> "
     | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
-intersectionOp i (KInterval j )
-    |fmap textToPrim i == fmap textToPrim j = " <@ "
+intersectionOp i (KInterval j)
+    |fmap textToPrim i == fmap textToPrim j = inner " <@ "
     | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
-intersectionOp i j = " = "
+intersectionOp (KArray i ) j
+    | fmap textToPrim i == fmap textToPrim j = (\j i -> i <> " IN (select * from unnest("<> j <> ") ) ")
+    | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
+intersectionOp i j = inner " = "
 
 -- Generate a sql query from the AST
 showTable :: Table -> Text
@@ -438,16 +439,16 @@ showTable b@(Base k1 p) = " from (SELECT " <> T.intercalate ","  ((\(a,p)-> rend
     joinQuerySet (From b _) =  " FROM " <>  showTable b
     joinQuerySet (SplitJoin t b  r p) =  F.foldl' joinType (joinQuerySet p) r
         where joinType  l ir@(_,r)
-                | any (isKOptional . keyType) (concat $ fmap fst . S.toList .  snd <$> r ) =  {-| t == JLeft = -} l <> " LEFT JOIN " <> joinPredicate2 b ir
+                | any (isKOptional . keyType) (concat $ fmap fst . S.toList .  snd <$> r ) = l <> " LEFT JOIN " <> joinPredicate2 b ir
                 | otherwise =  l <> " JOIN " <> joinPredicate2 b ir
-              joinPredicate2 b (i,r)  = showTable b <> " AS " <> tempName  <> " ON " <> T.intercalate " AND " (fmap (\(t,fs) -> T.intercalate " AND " $ fmap (\f-> tableName t <> "." <> keyValue (fst f) <> intersectionOp (keyType (fst f)) (keyType (snd f))   <> tempName  <> "." <> keyValue (snd f)) $ S.toList fs )  r )
+              joinPredicate2 b (i,r)  = showTable b <> " AS " <> tempName  <> " ON " <> T.intercalate " AND " (fmap (\(t,fs) -> T.intercalate " AND " $ fmap (\f-> intersectionOp ( keyType (fst f)) (keyType (snd f)) (tableName t <> "." <> keyValue (fst f)) (tempName <> "." <> keyValue (snd f))) $ S.toList fs )  r )
                 where tempName = tableName b <> fullTableName  i
     joinQuerySet (Join ty b  r p)  = joinType (joinQuerySet p)  r
         where
             joinType  l ir
                 | ty == JLeft = l <> " LEFT JOIN " <> joinPredicate b ir
                 | otherwise =  l <> " JOIN " <> joinPredicate b ir
-            joinPredicate  b  r  = showTable b <> " ON " <> T.intercalate " AND " (fmap (\(t,fs) -> T.intercalate " AND " $ fmap (\f-> tableName t <> "." <> keyValue (fst f) <> intersectionOp (keyType (fst f)) (keyType (snd f))    <> tableName b <> "." <> keyValue (snd f)) $ S.toList fs )  $ S.toList r )
+            joinPredicate  b  r  = showTable b <> " ON " <> T.intercalate " AND " (fmap (\(t,fs) -> T.intercalate " AND " $ fmap (\f-> intersectionOp (keyType (fst f)) (keyType (snd f)) (tableName t <> "." <> keyValue (fst f) ) (tableName b <> "." <> keyValue (snd f)) )  $ S.toList fs )  $ S.toList r )
 
 showTable (Project s t)
   |  F.all (const False) s  = "(SELECT " <>  showTable t  <> ") as " <> tableName t
@@ -540,12 +541,7 @@ joinPathL (Path i (FKJoinTable ll  ks _ ) j) (Just p) = Just $ addJoin  ll (S.fr
 joinPathL (Path i (FetchTable ll ) j) (Just p) = Just $ addJoin  ll ((S.fromList $ zip (S.toList i) (S.toList j)))  p
 joinPathL (ComposePath i (l,ij,k) j ) m = F.foldr joinPathL  m  ((S.toList l)  <> ( S.toList k))
 
-{-
-attrPath  (Path i (FetchTable ll) _ )  = const  (TB1 (KV (PK [] [] ) []))
-attrPath  (Path i (FKJoinTable ll ks tt ) j) = \i-> TB1 (KV (PK [FKT (S.toList j) i ] [] ) [] )
-attrPath  (ComposePath _ (l,ij,k) _)  = attrPath (head $ S.toList k) . attrPath (head $ S.toList l)
--}
-
+makeOpt (Key a b c d ty) = (Key a b c d (KOptional ty))
 
 addJoin
   :: Table
@@ -560,10 +556,9 @@ addJoin tnew f p = case mapPath tnew  f p of
             Right i -> i
     where
         filterFst JInner t elem=  if S.null filtered then Nothing else Just (t,filtered)
-          where filtered = S.filter ((`S.member` (S.map (snd.snd) $   allAttrs' t)) . fst ) elem
+          where filtered = S.filter ((`S.member` (S.map (snd.snd) $ allAttrs' t)) . fst ) elem
         filterFst JLeft t elem=  if S.null filtered then Nothing else Just (t,filtered)
-          where filtered = S.map (\(i,j) -> (makeOptional i ,j) )$ S.filter ((`S.member` (S.map (snd.snd) $   allAttrs' t)) . fst ) elem
-                makeOptional (Key a b c d ty) = (Key a b c d (KOptional ty))
+          where filtered = S.map (\(i,j) -> (makeOpt i ,j) )$ S.filter ((`S.member` (S.map (snd.snd) $ allAttrs' t)) . fst ) elem
 
         --mapPath :: (Show a,Show b,Ord b,Ord a) => a -> Set b -> JoinPath b a -> Either (Set (a,b)) (JoinPath b a)
         mapPath tnew f (From t   s ) =  if tablesName tnew `S.isSubsetOf`  tablesName t
@@ -695,17 +690,17 @@ predicate filters = do
 
 
 data KV a
-  = KV {kvKey  :: PK a , kvAttr ::  [a] }deriving(Functor,Foldable,Traversable)
+  = KV {kvKey  :: PK a , kvAttr ::  [a] }deriving(Functor,Foldable,Traversable,Show)
 
 data PK a
-  = PK { pkKey:: [a], pkDescription :: [a]} deriving(Functor,Foldable,Traversable)
-
+  = PK { pkKey:: [a], pkDescription :: [a]} deriving(Functor,Foldable,Traversable,Show)
+{-
 instance Show1 KV  where
   showsPrec1 i (KV a b ) =  showsPrec1 i a <> showsPrec1 (i + length (F.toList a)) b
 
 instance Show1 PK where
   showsPrec1 i (PK a b ) =  showsPrec1 i a <> showsPrec1 (i + length a) b
-
+-}
 instance Ord1 PK where
   compare1 (PK i j) (PK a b) = compare (compare1 i a ) (compare1 j b)
 
@@ -729,7 +724,7 @@ instance Ord a => Ord (PK a) where
 
 instance Ord a => Ord (KV a) where
   compare i j = compare (kvKey i) (kvKey j)
-
+{-
 instance Show a => Show (PK a)  where
   show (PK i []) = intercalate "," $ fmap show i
   show (PK i j ) = intercalate "," (fmap show i) <> "-"<> intercalate  "," ( fmap show j)
@@ -737,20 +732,12 @@ instance Show a => Show (PK a)  where
 instance Show a => Show (KV a)  where
   show (KV i []) =  show i
   show (KV i j ) = (show i) <> "|"<> intercalate  "," ( fmap show j)
+-}
 
-
-recursePath invSchema (Path i (FetchTable t) e)  = Path i (FetchTable nextT ) e : recursePaths invSchema nextT
-  where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup t (invSchema))
-recursePath invSchema (Path i (FKJoinTable w ks t) e)  = Path i (FKJoinTable backT ks nextT ) e : recursePaths invSchema nextT
-  where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup t (invSchema))
-        backT = (\(Just i)-> i) (M.lookup w (invSchema))
-
-recursePaths invSchema (Raw _ _ _ _ fk _ )  = concat $ recursePath invSchema <$> S.toList fk
-
-newtype TB1 a = TB1 {unTB1 :: (KV (TB a)) }deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
-
-instance Monoid (TB1 a) where
-  mempty = TB1 (KV (PK [] []) [] )
+data TB1 a
+  = TB1 {unTB1 :: (KV (TB a)) }
+  | LB1 {unLB1 :: (KV (Labeled Text (TB a))) }
+  deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
 instance Apply TB1 where
   TB1 a <.> TB1 a1 =  TB1 (getCompose $ Compose a <.> Compose a1)
@@ -772,9 +759,11 @@ unIntercalate pred s                 =  case dropWhile pred s of
                                       where (w, s'') =
                                              break pred s'
 
-
 data TB a
   = FKT [TB a] (TB1 a)
+  | LFKT [Labeled Text (TB a)] (TB1 a)
+  | AKT [TB a] [TB1 a]
+  | LAKT [Labeled Text (TB a)] [TB1 a]
   | Attr a
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
@@ -797,6 +786,7 @@ allPKRec  (TB1 (KV (PK k d) i ))=  F.foldr zipPK (PK [] []) $ (go (flip PK []) <
         go l (Attr a) = l [a]
 
 
+allRec' i t = fmap snd $ tb1Rec' False PathRoot i t
 allRec i t = fmap snd $ allAliasedRec i t
 allAliasedRec i t = tb1Rec False PathRoot i t
 
@@ -809,15 +799,154 @@ tb1Rec isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
       fkSet = S.unions $  fmap (\(Path ifk _ _) -> ifk)  $S.toList fk
   in leftFst isOpt  $ TB1 baseCase
 
-fkCase invSchema isOpt p (Path ifk (FKJoinTable bt kv nt)  o ) = FKT  (Attr. (p,) <$>S.toList ifk)  (tb1Rec isOptional (aliasKeyValue ifk ) invSchema ((\(Just i)-> i) (M.lookup nt  invSchema )))
+tb1Rec' isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
+  let
+      baseCase = KV (PK (fun k) (fun (S.fromList $ F.toList desc)))  (fun (maybe attr (`S.delete` attr) desc) <> fkSet )
+      leftFst True keys = fmap (fmap (\((Key a al b c  e) ) -> ( Key a al b c  (KOptional e)))) keys
+      leftFst False keys = keys
+      fun items = fmap Attr (fmap (p,) $ F.toList $ items ) -- <> (fkCase invSchema isOpt p <$> filter (\(Path ifk _ _) -> ifk `S.isSubsetOf` items ) (F.toList fk) )
+      fkSet = fkCase' invSchema isOpt p <$>  (F.toList fk)
+  in leftFst isOpt  $ TB1 baseCase
+
+fkCase' invSchema isOpt p (Path ifk (FKJoinTable bt kv nt)  o )
+    | isArr = AKT (Attr. (p,) <$>S.toList ifk)  [tb1Rec' isOptional (aliasKeyValue ifk ) invSchema ((\(Just i)-> i) (M.lookup nt  invSchema ))]
+    | otherwise = FKT  (Attr. (p,) <$>S.toList ifk)  (tb1Rec' isOptional (aliasKeyValue ifk ) invSchema ((\(Just i)-> i) (M.lookup nt  invSchema )))
             where isOptional = any (isKOptional . keyType ) (F.toList ifk)
+                  isArr = any (isArray . keyType ) (F.toList ifk)
                   bindMap = M.fromList $ fmap swap kv
-                  aliasKeyValue k
-                     =  (PathCons $ S.map (,p) k)
+                  aliasKeyValue k =  (PathCons $ S.map (,p) k)
                   substBind k = case M.lookup k bindMap of
                                     Just i -> i
                                     Nothing -> k
 
+
+fkCase invSchema isOpt p (Path ifk (FKJoinTable bt kv nt)  o ) = FKT  (Attr. (p,) <$>S.toList ifk)  (tb1Rec isOptional (aliasKeyValue ifk ) invSchema ((\(Just i)-> i) (M.lookup nt  invSchema )))
+            where isOptional = any (isKOptional . keyType ) (F.toList ifk)
+                  bindMap = M.fromList $ fmap swap kv
+                  aliasKeyValue k =  (PathCons $ S.map (,p) k)
+                  substBind k = case M.lookup k bindMap of
+                                    Just i -> i
+                                    Nothing -> k
+
+recursePath invSchema (Path i (FetchTable t) e)  = Path i (FetchTable nextT) e : recursePaths invSchema nextT
+  where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup t (invSchema))
+recursePath invSchema (Path i (FKJoinTable w ks t) e)  = Path i (FKJoinTable backT ks nextT) e : recursePaths invSchema nextT
+  where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup t (invSchema))
+        backT = (\(Just i)-> i) (M.lookup w (invSchema))
+
+type QueryRef = State ((Int,Map Int Table ),(Int,Map Int Key))
+
+recursePaths invSchema (Raw _ _ _ _ fk _ )  = concat $ recursePath invSchema <$> S.toList fk
+
+
+data Labeled l v
+  = Labeled
+  { label :: l
+  , labelValue :: v
+  }
+  | Unlabeled
+  { labelValue :: v
+  } deriving(Eq,Show,Ord,Foldable,Functor,Traversable)
+
+rawLPK t@(Labeled b i ) = (t,) . (\i -> Labeled (keyValue i) (Attr i) ) <$> S.toList (rawPK i)
+
+tableToKV r =   KV (PK (S.toList (rawPK r)) (maybeToList (rawDescription r)) ) (S.toList (rawAttrs r))
+
+labelTable i = do
+   t <- tname i
+   name <- Tra.traverse (kname t) (tableToKV i)
+   let query = "(SELECT " <>  T.intercalate "," (F.toList $ aliasKeys <$> name) <> " FROM " <> aliasTable t <> ") as " <> label t
+   return (t,LB1 $ fmap snd $ name,query)
+
+recursePath' bn invSchema (Path i (FetchTable t) e)  = recursePaths' bn invSchema nextT
+  where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup t (invSchema))
+recursePath' (ksbn,bn) invSchema (Path i (FKJoinTable w ks tn) e)
+    | any (isArray . keyType . fst) (ks)  =   do
+          (bt,ksb,bq) <- labelTable backT
+          let pksb = (pkKey $ kvKey $ unLB1 ksb )
+              -- pksbn = (pkKey $ kvKey $ ksbn )
+          (nt,ksn,nq) <- labelTable nextT
+          let pksn = (pkKey $ kvKey $ unLB1 ksn )
+          pths <- recursePaths' (F.toList . unLB1$ksn,nt)  invSchema nextT
+          tas <- tname nextT
+          let knas =(Key (tableName nextT) Nothing Nothing (unsafePerformIO newUnique) (Primitive "integer" ))
+          kas <- kname tas  knas
+          let jt = if any (isKOptional.keyType.fst) ks then " LEFT JOIN " else " JOIN "
+              query =  jt <> "(SELECT " <> T.intercalate "," (label <$> pksb) <> "," <> "array_agg((" <> (T.intercalate ","  (fmap label $ (F.toList $ unLB1 $ ksn) <> fst pths)) <> ")) as " <> label (snd kas) <> " FROM " <> bq <> (jt <> nq <> " ON "  <> joinLPredicate (fkm (F.toList $ unLB1 $ ksb) (F.toList $ unLB1  ksn)) )<> snd pths <>   " GROUP BY " <>  T.intercalate "," (label <$> pksb ) <> ") as " <>  label tas  <> " ON " <>  joinLPredicate (zip ksbn pksb)
+          return $ ([Labeled (label $ snd kas) (LAKT (fmap (\i -> justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (fst <$> ks)) [(LB1 $ (unLB1 ksn) { kvAttr = kvAttr (unLB1 ksn) <> fst pths})  ]) ] , query)
+
+    | otherwise = do
+          (nt,ksn,nq) <- labelTable nextT
+          let pksn = (pkKey $ kvKey $ unLB1 ksn )
+          pths <- recursePaths' (F.toList . unLB1$ ksn,nt)  invSchema nextT
+          let jt = if any (isKOptional.keyType.fst) ks then " LEFT JOIN " else " JOIN "
+              mapOpt = fmap (fmap (fmap (\i -> if any (isKOptional.keyType.fst) ks then  makeOpt i else i)))
+          return $ ( [Labeled ""  $ LFKT (fmap (\i -> justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (fst <$> ks)) (LB1 $ mapOpt $ (unLB1 ksn) { kvAttr = kvAttr (unLB1 ksn) <> fst pths}) ]  ,(jt <> nq <> " ON "  <> joinLPredicate (fkm ksbn pksn) <>  (snd pths)))
+  where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup tn (invSchema))
+        backT = (\(Just i)-> i) (M.lookup w (invSchema))
+        joinLPredicate   =   T.intercalate " AND " . fmap (\(l,r)->  intersectionOp (keyType . unAttr . labelValue $l) (keyType $ unAttr . labelValue $r) (label l)  (label r ))
+        fkm m n = zip (look (fst <$> ks) m) (look (snd <$> ks) n)
+          where
+            look ki i = justError ("missing FK on " <> show ki <> show i ) $ allMaybes $ fmap (\j-> L.find (\v -> unAttr (labelValue v) == j) i  ) ki
+
+unAttr (Attr i) = i
+mkKey i = do
+  (c,m) <- snd <$> get
+  let next = (c+1,M.insert (c+1) i m)
+  modify (\(j,_) -> (j,next))
+  return (c+1,i)
+
+mkTable i = do
+  (c,m) <- fst <$> get
+  let next = (c+1,M.insert (c+1) i m)
+  modify (\(_,j) -> (next,j))
+  return (c+1)
+
+aliasKeys (t,Labeled  a (Attr (Key n _  _ _ _)))  = label t <> "." <> n <> " as " <> a
+
+nonAliasKeys (t,Labeled a (Attr (Key n _  _ _ _)))  = label t <> "." <> n
+
+aliasTable (Labeled t r) = showTable r <> " as " <> t
+
+kname :: Labeled Text Table -> Key -> QueryRef (Labeled Text Table ,Labeled Text (TB Key))
+kname t i = do
+  n <- mkKey i
+  return $ (t,Labeled ("k" <> (T.pack $  show $ fst n)) (Attr i) )
+
+tname :: Table -> QueryRef (Labeled Text Table)
+tname i = do
+  n <- mkTable i
+  return $ Labeled ("t" <> (T.pack $  show n)) i
+
+explodeLabel (Labeled l (Attr _)) = l
+explodeLabel (Labeled l (FKT i (LB1 t) )) = "(" <> T.intercalate "," (( F.toList $ fmap explodeLabel t))  <> ")"
+explodeLabel (Labeled l (LFKT i (LB1 t) )) = T.intercalate "," (( F.toList $ fmap explodeLabel i)) <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel t))  <> ")"
+explodeLabel (Labeled l (LAKT i _ )) = T.intercalate "," (( F.toList $ fmap explodeLabel i)) <> "," <> l
+
+rootPaths' invSchema r@(Raw _ _ _ _ fk _ ) = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
+  (t,ks,q) <- labelTable r
+  (attrs,js) <- recursePaths' (F.toList $ unLB1 $ks,t) invSchema r
+  return ( LB1 $  (unLB1 ks) { kvAttr = kvAttr (unLB1 ks) <> attrs } , "SELECT (" <> T.intercalate "," (fmap explodeLabel $ (F.toList $ unLB1 ks) <> attrs)  <> (") FROM " <> q ) <> js)
+
+recursePaths' i invSchema r@(Raw _ _ _ _ fk _ )  =  do
+  pths <- mapM (\l -> recursePath' i   invSchema l ) $ S.toList fk
+  return $ (concat $ fmap fst pths,foldl mappend  ""  (snd <$> pths))
+
+backPK (Path i _ j)  = S.toList i
+
+{-
+projectDirect
+     :: Monad m => Table -> Map Text Table -> (TB1 KAttribute,Text)
+projectDirect  ta@(Raw sch _ k _ _ _)  invSchema =  do
+  let
+      path = recursePaths invSchema ta
+      table1 = Base k $ splitJoins  ((\(Just i)-> i) $ F.foldl' (flip joinPath) (Just t)  ( recursePaths invSchema ta))
+      attrs =  Metric . alterName <$> (allAliasedRec invSchema ta )
+      aliasMap =   traceShowId $ fmap fst $ M.fromList $ aliasJoin table1
+      alterName ak@(p,Key k al a b c ) = (Key k (Just $ justError ("lookupAlias "  <> show ak <> " " <> show aliasMap   <> " -- paths " <> show path <> T.unpack (showTable table1 )  ) $ M.lookup ak aliasMap ) a b c )
+  put (Project (F.toList attrs)  table1)
+  return  attrs
+-}
 
 projectAllRec'
      :: Monad m => Map Text Table ->  QueryT m (TB1 KAttribute)
@@ -857,6 +986,7 @@ data AliasPath a
     | PathRoot
     deriving(Show,Eq,Ord,Foldable)
 
+
 allAttrs' :: Table -> Set (AliasPath Key,(Table,Key))
 allAttrs' r@(Raw _ _ _ _ _ _) = S.map ((PathRoot,) . (r,)) $ rawKeys r
 allAttrs' (Limit p _ ) = allAttrs' p
@@ -879,12 +1009,12 @@ allAttrs' (Base _ p) =  snd $  from allAttrs' p
                 ft = f t
                 pk = atBase (\(Raw _ _ p _ _ _) -> p) t
 
-rawKeys r = S.union (rawPK r ) (rawAttrs r)
+rawKeys r = (rawPK r ) <> (maybe S.empty S.singleton (rawDescription r) ) <> (rawAttrs r)
 
 newtype QueryT m a
   = QueryT {runQueryT :: StateT  (HashQuery, Table)  m a} deriving(Functor,Applicative,Monad,MonadState (HashQuery, Table) )
 
-runQuery t =  runState ( runQueryT t)
+runQuery t =  runState (runQueryT t)
 
 pathLabel (ComposePath i (p1,p12,p2) j) = T.intercalate "," $  fmap pathLabel (S.toList p1) <> fmap pathLabel (S.toList p2)
 pathLabel (Path i t j) = tableName t
@@ -903,21 +1033,21 @@ cvLabeled g = PG.mkGraph lvertices ledges
                             (t,h) -> ((\(Just i)-> i) (M.lookup t v) ,(\(Just i)-> i) (M.lookup h v) ,e)) (fmap snd $ M.toList $ fmap head $ edges g)
 
 zipWithTF g t f = snd (mapAccumL map_one (F.toList f) t)
-  where map_one (x:xs) y = (xs, g y x)
+    where map_one (x:xs) y = (xs, g y x)
 
 instance IsString Showable where
-  fromString i = SText (T.pack i)
+    fromString i = SText (T.pack i)
 
 instance Num Showable where
-  SNumeric i +  SNumeric j = SNumeric (i + j)
-  SDouble i +  SDouble j = SDouble (i + j)
-  SNumeric i *  SNumeric j = SNumeric (i * j)
-  SDouble i *  SDouble j = SDouble (i * j)
-  fromInteger i = SNumeric $ fromIntegral i
-  negate (SNumeric i) = SNumeric $ negate i
-  abs (SNumeric i) = SNumeric $ abs i
-  abs (SDouble i) = SDouble $ abs i
-  signum (SNumeric i) = SNumeric $ signum i
+    SNumeric i +  SNumeric j = SNumeric (i + j)
+    SDouble i +  SDouble j = SDouble (i + j)
+    SNumeric i *  SNumeric j = SNumeric (i * j)
+    SDouble i *  SDouble j = SDouble (i * j)
+    fromInteger i = SNumeric $ fromIntegral i
+    negate (SNumeric i) = SNumeric $ negate i
+    abs (SNumeric i) = SNumeric $ abs i
+    abs (SDouble i) = SDouble $ abs i
+    signum (SNumeric i) = SNumeric $ signum i
 
 instance Fractional Showable where
   fromRational i = SDouble (fromRational i)
@@ -942,5 +1072,10 @@ unRSOptional i = traceShow ("No Pattern Match SOptional-" <> show i) Nothing
 unRSOptional' (SOptional i) = join $ unRSOptional' <$> i
 unRSOptional' (SSerial i )  = join $ unRSOptional' <$>i
 unRSOptional' i   = Just i
+
+allMaybes i | F.all (const False) i  = Nothing
+allMaybes i = case F.all isJust i of
+        True -> Just $ fmap (justError "wrong invariant allMaybes") i
+        False -> Nothing
 
 

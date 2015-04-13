@@ -70,7 +70,6 @@ hashedGraph (_,_,_,i,_,_) = i
 hashedGraphInv (_,_,_,_,i,_) = i
 graphP (_,_,_,_,_,i) = i
 
--- type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashSchema Key Table, Map (Set Key) (Map (Set Key) (Path Key Table)),Graph Key Table )
 type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashQuery , HashQuery ,Graph (Set Key) (SqlOperation Table) )
 type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 
@@ -101,7 +100,7 @@ keyTables conn schema = do
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  res2 :: Map Text (Set Key)
            pks =  fmap (\(c,l)-> let
                                   pks = S.fromList $ fmap snd l
-                                  attr = S.difference ((\(Just i) -> i) $ M.lookup c all) pks
+                                  attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $maybeToList $ M.lookup c descMap) <> pks)
                                 in (pks ,Raw (schema , (\(Just i) -> i) $ M.lookup c resTT) c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks ) attr )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
        let ret@(i1,i2,i3) = (keyMap, M.fromList  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        paths <- schemaKeys' conn schema ret
@@ -109,7 +108,6 @@ keyTables conn schema = do
            graphP = warshall2 $ graphI
            graph = hashGraph $ graphP
            invgraph = hashGraphInv' $ graphP
-       print  graphI
        return  (i1,i2,i3,graph,invgraph,graphP)
 
 

@@ -183,7 +183,6 @@ readPrim t =
      PPosition -> readPosition
      PBoolean -> readBoolean
      PLineString -> readLineString
-     -- PBounding -> readBounding
   where
       readInt = nonEmpty (fmap SNumeric . readMaybe)
       readBoolean = nonEmpty (fmap SBoolean . readMaybe)
@@ -236,33 +235,118 @@ tcnpj = [0,4,8,2,5,5,8,0,0,0,0,1,0,7]
 cpf = [0,2,8,4,0,3,0,1,1,2,1]
 
 
-allMaybes i | F.all (const False) i  = Nothing
-allMaybes i = case F.all isJust i of
-        True -> Just $ fmap (justError "wrong invariant allMaybes") i
-        False -> Nothing
-
 
 safeTail [] = []
 safeTail i = tail i
 
 primType (Metric k ) = textToPrim <$> keyType k
 
-
-
-
-
-
-attrToKey k@(Metric i) = renderedName i
-attrToKey t@(Agg _)  = renderedType (primType t)
+attrToKey (Metric i) = renderedName i
 
 renderedName key = \f b ->
- case F.name f  of
+   case F.name f  of
       Just name -> let
           in case (keyValue key == T.fromStrict (TE.decodeUtf8 name) || maybe False (== T.fromStrict (TE.decodeUtf8 name)) (keyAlias key)  ) of
-              True ->  renderedType (textToPrim <$> keyType key) f b
+              True ->  case (textToPrim <$> keyType key) of
+                            k@(KTable l) ->  case  traverse (parseOnly (parseShowable k)) b of
+                                                  (Right (Just r)) -> return r
+                                                  (Right Nothing) -> error "no parse value"
+                            kt -> renderedType kt  f b
               False -> error $ "no match type for " <> BS.unpack name <> " with key " <> show key
-
       Nothing -> error "no name for field"
+
+
+unIntercalateAtto :: Alternative f => [f a1] -> f a -> f [a1]
+unIntercalateAtto l s = go l
+  where go (e:cs) =  liftA2 (:) e  (s *> go cs <|> pure [])
+        go [] = pure []
+
+parseAttr (Attr i) = do
+  s<- parseShowable (textToPrim <$> keyType i)
+  return $  Attr (i,s)
+
+parseAttr (LAKT l [t]) = do
+  ml <- unIntercalateAtto (parseAttr .labelValue <$> l) (char ',')
+  r <- doublequoted (parseArray ( doublequoted $ parseTable t))
+  return $ AKT ml  r
+
+parseAttr (LFKT l j ) = do
+  ml <- unIntercalateAtto (parseAttr .labelValue <$> l) (char ',')
+  mj <- doublequoted (parseTable j) <|> parseTable j
+  return $ FKT ml mj
+
+parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
+
+parseTable (LB1 (KV (PK i d ) m)) = (char '('  *> (do
+  im <- unIntercalateAtto (parseAttr .labelValue<$> (i <> d <> m) ) (char ',')
+  return (TB1 (KV ( PK (L.take (length i) im ) (L.take (length d) $L.drop (length i) $  im))(L.drop (length i + length d) im)) )) <* char ')' )
+
+parseTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
+  im <- unIntercalateAtto (parseAttr <$> (i <> d <> m) ) (char ',')
+  return (TB1 (KV (PK (L.take (length i) im ) (drop (length i) $ L.take (length d) im))(drop (length i + length d) im)) )) <* char ')' )
+
+
+-- | Recognizes a quoted string.
+doublequoted :: Parser a -> Parser a
+doublequoted  p = takeWhile1 (flip elem "\"\\")  *> p <* takeWhile1 (flip elem "\"\\")
+
+parseShowable
+  :: KType KPrim
+       -> Parser Showable
+parseShowable (Primitive i ) =  (do
+   case i of
+        PInt ->  SNumeric <$>  signed decimal
+        PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
+        PDouble -> SDouble <$> pg_double
+        PText -> SText . T.fromStrict .  TE.decodeUtf8   <$> (plain' "\\\")," <|> doublequoted  (plain' "\\\"") )
+        PCnpj -> parseShowable (Primitive PText)
+        PCpf -> parseShowable (Primitive PText)
+        PTimestamp ->
+             let p =  do
+                    i <- fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%OS"<$> plain' "\\\",)"
+                    maybe (fail "cant parse date") return i
+                 in p <|> doublequoted p
+        PDate ->
+             let p = do
+                    i <- fmap (SDate . Finite . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)"
+                    maybe (fail "cant parse date") return i
+                 in p <|> doublequoted p
+        PPosition -> do
+          s <- plain' "\",)"
+          case  Sel.runGet getPosition (fst $ B16.decode s)of
+              i -> case i of
+                Right i -> pure $ SPosition i
+                Left e -> fail e
+        PBounding -> SBounding <$> ((doublequoted box3dParser ) <|> box3dParser)
+        i -> error $ "primitive not implemented - " <> show i) <?> (show i)
+parseShowable (KArray i)
+    =  SComposite . Vector.fromList <$> (par <|> doublequoted par)
+      where par = char '{'  *>  sepBy (parseShowable i) (char ',') <* char '}'
+parseShowable (KOptional i)
+    = SOptional <$> ( (Just <$> (parseShowable i)) <|> pure Nothing )
+parseShowable (KSerial i)
+    = SSerial <$> ((Just <$> parseShowable i) <|> pure Nothing)
+parseShowable (KInterval k)=
+    let
+      inter = do
+        lb <- (char '[' >> return False) <|> (char '(' >> return True)
+        i <- parseShowable k
+        char ','
+        j <- parseShowable k
+        rb <- (char ']' >> return False) <|> (char ')' >> return True)
+        return $ SInterval $ Interval.interval (ER.Finite i,lb) (ER.Finite j,rb)
+    in doublequoted inter <|> inter
+
+parseShowable i  = error $  "not implemented " <> show i
+
+pg_double :: Parser Double
+pg_double
+    =   (string "NaN"       *> pure ( 0 / 0))
+    <|> (string "Infinity"  *> pure ( 1 / 0))
+    <|> (string "-Infinity" *> pure (-1 / 0))
+    <|> double
+
+
 
 renderedType key f b = go key
   where
@@ -276,6 +360,7 @@ renderedType key f b = go key
             (KOptional (KArray (Primitive i))) ->  SOptional . fmap SComposite . getCompose  <$> prim i f b
             (KOptional (KInterval (Primitive i))) -> SOptional . fmap SInterval . getCompose  <$> prim i f b
             (KSerial (KOptional (Primitive i))) -> error $ "invalid type " <>  show t
+            -- (KTable (i:j:[]))->  fmap STable . mapM go $ i
             (Primitive i) ->  unOnly <$> prim  i f b
             (KOptional i) -> SOptional . Just <$>  go  i
             i ->  error $ "missing case renderedType: " <> (show i)
@@ -320,6 +405,7 @@ instance (F.FromField (f (g a))) => F.FromField (Compose f g a) where
 instance Sel.Serialize a => Sel.Serialize (ER.Extended a ) where
   get = ER.Finite <$> Sel.get
   put (ER.Finite i ) = Sel.put i
+
 instance Sel.Serialize Bounding where
   get = do
       i <- liftA2 (Interval.interval) Sel.get Sel.get
@@ -391,13 +477,15 @@ box3dParser = do
 
 
 instance F.FromField Position where
-  fromField f t = case  fmap (Sel.runGet getV ) decoded of
+  fromField f t = case  fmap (Sel.runGet getPosition ) decoded of
     Just i -> case i of
       Right i -> pure i
       Left e -> F.returnError F.ConversionFailed  f e
     Nothing -> error "empty value"
     where
-      getV = do
+        decoded = fmap (fst . B16.decode) t
+
+getPosition = do
           i <- Sel.getWord8
           if i  == 1
            then do
@@ -406,10 +494,9 @@ instance F.FromField Position where
              let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
              case ty  of
                1 -> Sel.get
-               i -> error $ "type not implemented " <> show ty <> "  "<> show decoded
+               i -> error $ "type not implemented " <> show ty
            else
-             return (error $ "BE not implemented " <> show i <> "  " <> show decoded)
-      decoded = fmap (fst . B16.decode) t
+             return (error $ "BE not implemented " <> show i  )
 
 
 safeMaybe e f i = maybe (errorWithStackTrace (e  <> ", input = " <> show i )) id (f i)
@@ -486,9 +573,13 @@ fromArray typeInfo f = Tra.sequence . (parseIt <$>) <$> range delim
 instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
+fromAttr foldable = do
+    FR.fieldWith (\i j -> case traverse (parseOnly (parseTable (    foldable))) j of
+                               (Right (Just r ) ) -> return r
+                               Right Nothing -> error (show j <> show foldable)
+                               Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  <> "  "<> show foldable) )
 
 fromShowableList foldable = do
-    n <- FR.numFieldsRemaining
     traverse (FR.fieldWith . attrToKey) foldable
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item
@@ -499,6 +590,6 @@ projectKey
      -> InformationSchema ->
      (forall t . Traversable t => QueryT Identity (t KAttribute)
          -> S.Set Key -> IO [t (Key,Showable)])
-projectKey conn inf q  = (\(j,(h,i)) -> fmap (fmap (zipWithTF (,) (fmap (\(Metric i)-> i) j))) . queryWith_ (fromShowableList j) conn . traceShowId . buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
+projectKey conn inf q  = (\(j,(h,i)) -> fmap (fmap (zipWithTF (,) (fmap (\(Metric i)-> i) j))) . queryWith_ (fromShowableList j) conn .  buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
 
 
