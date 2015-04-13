@@ -859,29 +859,29 @@ labelTable i = do
    let query = "(SELECT " <>  T.intercalate "," (F.toList $ aliasKeys <$> name) <> " FROM " <> aliasTable t <> ") as " <> label t
    return (t,LB1 $ fmap snd $ name,query)
 
-recursePath' bn invSchema (Path i (FetchTable t) e)  = recursePaths' bn invSchema nextT
+recursePath' isLeft bn invSchema (Path i (FetchTable t) e)  = recursePaths' isLeft bn invSchema nextT
   where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup t (invSchema))
-recursePath' (ksbn,bn) invSchema (Path i (FKJoinTable w ks tn) e)
+recursePath' isLeft (ksbn,bn) invSchema (Path i (FKJoinTable w ks tn) e)
     | any (isArray . keyType . fst) (ks)  =   do
           (bt,ksb,bq) <- labelTable backT
           let pksb = (pkKey $ kvKey $ unLB1 ksb )
               -- pksbn = (pkKey $ kvKey $ ksbn )
           (nt,ksn,nq) <- labelTable nextT
           let pksn = (pkKey $ kvKey $ unLB1 ksn )
-          pths <- recursePaths' (F.toList . unLB1$ksn,nt)  invSchema nextT
+          pths <- recursePaths' ( any (isKOptional.keyType.fst) ks || isLeft) (F.toList . unLB1$ksn,nt)  invSchema nextT
           tas <- tname nextT
           let knas =(Key (tableName nextT) Nothing Nothing (unsafePerformIO newUnique) (Primitive "integer" ))
           kas <- kname tas  knas
-          let jt = if any (isKOptional.keyType.fst) ks then " LEFT JOIN " else " JOIN "
+          let jt = if any (isKOptional.keyType.fst) ks || isLeft  then " LEFT JOIN " else " JOIN "
               query =  jt <> "(SELECT " <> T.intercalate "," (label <$> pksb) <> "," <> "array_agg((" <> (T.intercalate ","  (fmap label $ (F.toList $ unLB1 $ ksn) <> fst pths)) <> ")) as " <> label (snd kas) <> " FROM " <> bq <> (jt <> nq <> " ON "  <> joinLPredicate (fkm (F.toList $ unLB1 $ ksb) (F.toList $ unLB1  ksn)) )<> snd pths <>   " GROUP BY " <>  T.intercalate "," (label <$> pksb ) <> ") as " <>  label tas  <> " ON " <>  joinLPredicate (zip ksbn pksb)
           return $ ([Labeled (label $ snd kas) (LAKT (fmap (\i -> justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (fst <$> ks)) [(LB1 $ (unLB1 ksn) { kvAttr = kvAttr (unLB1 ksn) <> fst pths})  ]) ] , query)
 
     | otherwise = do
           (nt,ksn,nq) <- labelTable nextT
           let pksn = (pkKey $ kvKey $ unLB1 ksn )
-          pths <- recursePaths' (F.toList . unLB1$ ksn,nt)  invSchema nextT
-          let jt = if any (isKOptional.keyType.fst) ks then " LEFT JOIN " else " JOIN "
-              mapOpt = fmap (fmap (fmap (\i -> if any (isKOptional.keyType.fst) ks then  makeOpt i else i)))
+          pths <- recursePaths' ( any (isKOptional.keyType.fst) ks || isLeft) (F.toList . unLB1$ ksn,nt)  invSchema nextT
+          let jt = if any (isKOptional.keyType.fst) ks || isLeft then " LEFT JOIN " else " JOIN "
+              mapOpt = fmap (fmap (fmap (\i -> if any (isKOptional.keyType.fst) ks || isLeft then  makeOpt i else i)))
           return $ ( [Labeled ""  $ LFKT (fmap (\i -> justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (fst <$> ks)) (LB1 $ mapOpt $ (unLB1 ksn) { kvAttr = kvAttr (unLB1 ksn) <> fst pths}) ]  ,(jt <> nq <> " ON "  <> joinLPredicate (fkm ksbn pksn) <>  (snd pths)))
   where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup tn (invSchema))
         backT = (\(Just i)-> i) (M.lookup w (invSchema))
@@ -926,11 +926,11 @@ explodeLabel (Labeled l (LAKT i _ )) = T.intercalate "," (( F.toList $ fmap expl
 
 rootPaths' invSchema r@(Raw _ _ _ _ fk _ ) = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   (t,ks,q) <- labelTable r
-  (attrs,js) <- recursePaths' (F.toList $ unLB1 $ks,t) invSchema r
+  (attrs,js) <- recursePaths' False (F.toList $ unLB1 $ks,t) invSchema r
   return ( LB1 $  (unLB1 ks) { kvAttr = kvAttr (unLB1 ks) <> attrs } , "SELECT (" <> T.intercalate "," (fmap explodeLabel $ (F.toList $ unLB1 ks) <> attrs)  <> (") FROM " <> q ) <> js)
 
-recursePaths' i invSchema r@(Raw _ _ _ _ fk _ )  =  do
-  pths <- mapM (\l -> recursePath' i   invSchema l ) $ S.toList fk
+recursePaths' isLeft i invSchema r@(Raw _ _ _ _ fk _ )  =  do
+  pths <- mapM (\l -> recursePath' isLeft  i   invSchema l ) $ S.toList fk
   return $ (concat $ fmap fst pths,foldl mappend  ""  (snd <$> pths))
 
 backPK (Path i _ j)  = S.toList i
