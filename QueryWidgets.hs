@@ -220,7 +220,7 @@ crudUITable
      -> UI (Element,Tidings (Maybe (TB1 (Key,Showable))),[Event (Modification Key Showable)])
 crudUITable conn inf pgs tb@(TB1 (KV (PK k d) a)) oldItems = do
   let
-      tbCase :: (forall a . KV a -> [a]) -> Int -> TB Key -> UI (TrivialWidget (Maybe (TB (Key,Showable))))
+      tbCase :: (forall a . KV a -> [a]) -> Int -> TB Key {--> Tidings (Maybe (TB1 (Key,Showable))) -}-> UI (TrivialWidget (Maybe (TB (Key,Showable))))
       tbCase td ix i@(AKT ifk _) = fkUITable conn inf pgs ((\(Just i)-> i) $ L.find (\(Path ifkp _ _) -> S.fromList ((\(Attr i) -> i) <$> ifk ) == ifkp) $ S.toList $ rawFKS table) (fmap (\v -> justError ("AKT" <> show (ix,td $ unTB1 tb, td . unTB1 $ v)). (`atMay` ix) .td .unTB1$ v) <$> oldItems) i
       tbCase td ix i@(FKT ifk _) = fkUITable conn inf pgs ((\(Just i)-> i) $ L.find (\(Path ifkp _ _) -> S.fromList ((\(Attr i) -> i) <$> ifk ) == ifkp) $ S.toList $ rawFKS table) (fmap (\v -> justError ("FKT" <> show (ix,td $ unTB1 tb, td . unTB1 $ v)). (`atMay` ix) .td .unTB1$ v) <$> oldItems) i
       tbCase td ix a@(Attr i) = attrUITable (fmap (\v -> justError ("Attr " <> show (ix, td $ unTB1 tb, td . unTB1 $ v) ).(`atMay`ix) .td .unTB1 $ v) <$> oldItems)  a
@@ -342,8 +342,7 @@ fkUITable
 fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT ifk tb1)
     | all (==Elem) (concat $ zipWith classifyFK (Attr . fmap textToPrim .keyType <$> F.toList rl ) (Attr .fmap textToPrim . keyType <$> F.toList rr) ) = do
         let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup (S.fromList $ findPK tb1)  $ pkMap inf )
-        res <- liftIO$ queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
-        -- res <- liftIO $ projectKey conn inf (projectAllRec' (tableMap inf )) (S.fromList $ findPK tb1)
+        res <- liftIO$ queryWith_ (fromAttr (fst rp)) conn  (fromString $ T.unpack $ snd rp)
         pointInRangeSelection conn inf pgs tb (pure res) oldItems
     | otherwise = mdo
       let
@@ -354,7 +353,6 @@ fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT i
           tdi =  (if isLeftJoin then join . fmap (\(FKT _ t) -> Tra.sequence $  unkeyOptional  <$> t ) else fmap (\(FKT _ t )-> t) ) <$> oldItems
       let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup (S.fromList $ findPK tb1)  $ pkMap inf )
       res <- liftIO$ queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
-      --res <- liftIO $ projectKey conn inf (projectAllRec' (tableMap inf )) o1
       l <- UI.span # set text (show ifk)
 
       filterInp <- UI.input
@@ -383,6 +381,7 @@ fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT i
       fk <- UI.li # set  children [l, getElement box,filterInp,getElement chw,celem]
       let bres =  liftA2 (liftA2 FKT) (fmap (fmap Attr) <$> if isLeftJoin then makeOptional (S.toList rl)<$> fksel else fksel ) (if isLeftJoin then makeOptional tb1 <$> tcrud else tcrud )
       return $ TrivialWidget bres fk
+
 fkUITable conn inf pgs path@(Path rl (FKJoinTable frl  rel frr ) rr ) oldItems  tb@(AKT ifk [tb1]) =
   do
      fks <- mapM (\ix-> fkUITable conn inf pgs (Path rl (FKJoinTable frl (fmap (first unKArray ) rel) frr) rr) ( join . fmap (\(AKT l m) -> (\mi -> FKT (fmap (fmap (first  unKArray) ) l) mi) <$> atMay m ix )  <$>  oldItems) (FKT ifk tb1)) [0..4]
