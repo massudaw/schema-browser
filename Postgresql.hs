@@ -131,7 +131,11 @@ instance TF.ToField a => TF.ToField (Interval.Interval a) where
 instance TF.ToField a => TF.ToField (UnQuoted (Interval.Extended a )) where
   toField (UnQuoted (ER.Finite i)) = TF.toField i
 
-intervalBuilder i =  TF.Many [TF.Plain $ fromByteString "\'[" ,  TF.toField $  (UnQuoted $ Interval.lowerBound i) , TF.Plain $ fromChar ',' , TF.toField  (UnQuoted $ Interval.upperBound i) , TF.Plain $ fromByteString "]\'"]
+intervalBuilder i =  TF.Many [TF.Plain $ fromByteString ("\'"  <> lbd (snd $ Interval.lowerBound' i)) ,  TF.toField $  (UnQuoted $ Interval.lowerBound i) , TF.Plain $ fromChar ',' , TF.toField  (UnQuoted $ Interval.upperBound i) , TF.Plain $ fromByteString (ubd (snd $ Interval.upperBound' i) <> "\'")]
+    where lbd True  =  "["
+          lbd False = "("
+          ubd True = "]"
+          ubd False =")"
 
 instance TF.ToField Showable where
   toField (SText t) = TF.toField t
@@ -262,7 +266,7 @@ unIntercalateAtto l s = go l
         go [] = pure []
 
 parseAttr (Attr i) = do
-  s<- parseShowable (textToPrim <$> keyType i)
+  s<- parseShowable (textToPrim <$> keyType (i))
   return $  Attr (i,s)
 
 parseAttr (LAKT l [t]) = do
@@ -298,27 +302,38 @@ parseShowable (Primitive i ) =  (do
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
-        PText -> SText . T.fromStrict .  TE.decodeUtf8   <$> (plain' "\\\")," <|> doublequoted  (plain' "\\\"") )
+        PText -> SText . T.fromStrict .  TE.decodeUtf8   <$> (plain' "\\\"),}" <|> doublequoted  (plain' "\\\"") )
         PCnpj -> parseShowable (Primitive PText)
         PCpf -> parseShowable (Primitive PText)
+        PInterval ->
+          let i = SPInterval <$> diffInterval
+           in doublequoted i <|> i
+
         PTimestamp ->
              let p =  do
-                    i <- fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%OS"<$> plain' "\\\",)"
+                    i <- fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%OS"<$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i
                  in p <|> doublequoted p
         PDate ->
              let p = do
-                    i <- fmap (SDate . Finite . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)"
+                    i <- fmap (SDate . Finite . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i
                  in p <|> doublequoted p
         PPosition -> do
-          s <- plain' "\",)"
+          s <- plain' "\",)}"
           case  Sel.runGet getPosition (fst $ B16.decode s)of
               i -> case i of
                 Right i -> pure $ SPosition i
                 Left e -> fail e
+        PLineString -> do
+          s <- plain' "\",)}"
+          case  Sel.runGet getLineString (fst $ B16.decode s)of
+              i -> case i of
+                Right i -> pure $ SLineString i
+                Left e -> fail e
         PBounding -> SBounding <$> ((doublequoted box3dParser ) <|> box3dParser)
-        i -> error $ "primitive not implemented - " <> show i) <?> (show i)
+        --i -> error $ "primitive not implemented - " <> show i
+            ) <?> (show i)
 parseShowable (KArray i)
     =  SComposite . Vector.fromList <$> (par <|> doublequoted par)
       where par = char '{'  *>  sepBy (parseShowable i) (char ',') <* char '}'
@@ -329,11 +344,11 @@ parseShowable (KSerial i)
 parseShowable (KInterval k)=
     let
       inter = do
-        lb <- (char '[' >> return False) <|> (char '(' >> return True)
+        lb <- (char '[' >> return True ) <|> (char '(' >> return False )
         i <- parseShowable k
         char ','
         j <- parseShowable k
-        rb <- (char ']' >> return False) <|> (char ')' >> return True)
+        rb <- (char ']' >> return True) <|> (char ')' >> return False )
         return $ SInterval $ Interval.interval (ER.Finite i,lb) (ER.Finite j,rb)
     in doublequoted inter <|> inter
 
@@ -439,7 +454,7 @@ instance Sel.Serialize LineString where
 
 
 instance F.FromField LineString where
-  fromField f t = case  fmap (Sel.runGet getV ) decoded of
+  fromField f t = case  fmap (Sel.runGet getLineString ) decoded of
     Just i -> case i of
       Right i -> pure i
       Left e -> F.returnError F.ConversionFailed f e
@@ -454,10 +469,24 @@ instance F.FromField LineString where
              let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
              case ty  of
                2 -> Sel.get
-               i -> error $ "type not implemented " <> show ty <> "  "<> show decoded
+               i -> error $ "type not implemented " <> show ty
            else
-             return (error $ "BE not implemented " <> show i <> "  " <> show decoded)
+             return (error $ "BE not implemented " <> show i )
       decoded = fmap (fst . B16.decode) t
+
+getLineString = do
+          i <- Sel.getWord8
+          if i  == 1
+           then do
+             typ <- Sel.getWord32host
+             srid <- Sel.getWord32host
+             let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
+             case ty  of
+               2 -> Sel.get
+               i -> error $ "type not implemented " <> show ty
+           else
+             return (error $ "BE not implemented " <> show i )
+
 
 instance F.FromField Bounding where
   fromField f t = case  t of
@@ -539,19 +568,19 @@ instance (F.FromField a,Ord a, Typeable a) => F.FromField (Interval.Interval a) 
           _ -> F.returnError F.Incompatible f ""
 
 plain' :: String -> Parser BS.ByteString
-plain' delim = takeWhile1 (notInClass (delim <> "\"{}"))
+plain' delim = takeWhile1 (notInClass (delim ))
 
 parseInter token = do
-    lb <- (char '[' >> return False) <|> (char '(' >> return True)
+    lb <- (char '[' >> return True) <|> (char '(' >> return False)
     [i,j] <- token
-    rb <- (char ']' >> return False) <|> (char ')' >> return True)
+    rb <- (char ']' >> return True ) <|> (char ')' >> return False )
     return [(lb,ER.Finite i),(rb,ER.Finite j)]
 
 range :: Char -> Parser (Interval.Interval ArrayFormat)
 range delim = (\[i,j]-> Interval.Interval i j ) . fmap swap  <$>  parseInter (strings <|>arrays)
 
   where
-        strings = sepBy1 (Quoted <$> quoted <|> Plain <$> plain' ",;[]()" ) (char delim)
+        strings = sepBy1 (Quoted <$> quoted <|> Plain <$> plain' ",;[](){}\"" ) (char delim)
         arrays  = sepBy1 (Arrays.Array <$> array ';') (char delim)
                 -- NB: Arrays seem to always be delimited by commas.
 

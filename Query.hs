@@ -343,8 +343,8 @@ renderShowable i = shw i
 
 showInterval (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> renderShowable i <> "," <> renderShowable l <> ocr m
     where
-      ocl j = if j then "(" else "["
-      ocr j = if j then ")" else "]"
+      ocl j = if j then "[" else "("
+      ocr j = if j then "]" else ")"
 
 
 
@@ -1055,7 +1055,7 @@ instance Fractional Showable where
 
 groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
 
-interval' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
+-- interval' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
 inf' = (\(ER.Finite i) -> i) . Interval.lowerBound
 sup' = (\(ER.Finite i) -> i) . Interval.upperBound
 

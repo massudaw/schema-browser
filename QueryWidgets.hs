@@ -160,10 +160,12 @@ buildUI i  tdi = case i of
             composed <- UI.span # set children (fmap getElement widgets)
             return  $ TrivialWidget tdcomp composed
          (KInterval ti) -> do
-            inf <- buildUI ti (fmap (\(SInterval i) -> inf' i) <$> tdi)
-            sup <- buildUI ti (fmap (\(SInterval i) -> sup' i) <$> tdi)
-            composed <- UI.span # set UI.children (fmap getElement [inf,sup])
-            let td = (\m n -> fmap SInterval $  liftF2 interval' m n) <$> triding inf  <*> triding sup
+            inf <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (\(SInterval i) -> inf' i) <$> tdi)
+            sup <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (\(SInterval i) -> sup' i) <$> tdi)
+            lbd <- fmap Just <$> checkedWidget (maybe False id . fmap (\(SInterval i) -> snd . Interval.lowerBound' $i) <$> tdi)
+            ubd <- fmap Just <$> checkedWidget (maybe False id .fmap (\(SInterval i) -> snd . Interval.upperBound' $i) <$> tdi)
+            composed <- UI.span # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
+            let td = (\m n -> traceShowId  .fmap SInterval $   liftF2 interval m n) <$> (liftA2 (,) <$> triding inf  <*> triding lbd) <*> (liftA2 (,) <$> triding sup <*> triding ubd)
             return $ TrivialWidget td composed
          (Primitive PTimestamp) -> do
             itime <- liftIO $  getCurrentTime
@@ -251,7 +253,7 @@ processPanelTable conn attrsB table oldItemsi = do
       efkattrsB = fmap (catMaybes . concat .F.toList. fmap attrNonRec . unTB1 ) <$> liftA2 (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attrsB (facts oldItemsi)
   deleteB <- UI.button  # sink UI.enabled (isJust <$> facts oldItems) # set text "DELETE"
   editB <- UI.button # sink UI.enabled (liftA2 (&&) (isJust <$>  efkattrsB) (isJust <$> fkattrsB)) # set text "EDIT"
-  insertB <- UI.button  # sink UI.enabled (isJust <$> fkattrsB) # set text "INSERT"
+  insertB <- UI.button  # sink UI.enabled ( isJust <$> fkattrsB) # set text "INSERT"
   let
       deleteAction ki =  do
         let k = fmap (concat . F.toList .fmap attrNonRec .unTB1 ) ki
@@ -273,7 +275,7 @@ processPanelTable conn attrsB table oldItemsi = do
 
       insertAction ip = do
           let i2 = F.toList  ip
-              i = concat . F.toList .fmap attrNonRec .unTB1 $ ip
+              i = L.nubBy (\i j -> fst i == fst j  )  .concat .  F.toList .fmap attrNonRec .unTB1 $ ip
           res <- catch (Right <$> insertPK fromShowableList conn i table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
           return $ (\v -> Insert $ Just $ (v <> (filter (not . flip elem (fst <$> v) . fst) i2))) <$> res
 
@@ -382,8 +384,9 @@ fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT i
 fkUITable conn inf pgs path@(Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(AKT ifk [tb1]) =
   do
      fks <- mapM (\ix-> fkUITable conn inf pgs path ( join . fmap (\(AKT l m) -> (\mi -> FKT l mi) <$> atMay m ix )  <$>  oldItems) (FKT ifk tb1)) [0..4]
-     fksE <- UI.div # set children (getElement <$> fks)
-     let bres = fmap (fmap (\l -> AKT (fmap  (,SComposite $ V.fromList (fmap fst l)) <$> ifk) (fmap snd l)). allMaybes ) $ Tra.sequenceA ( fmap (fmap (\(FKT i j ) -> (head $ fmap (snd.unAttr) $ i, j)) ) . triding <$> fks)
+     sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
+     fksE <- UI.div # set children (getElement <$> fks )
+     let bres = (fmap (\l -> AKT (fmap  (,SComposite $ V.fromList (fmap fst l)) <$> ifk) (fmap snd l)). allMaybes .  L.takeWhile (maybe False (const True))) <$> Tra.sequenceA ( fmap (fmap (\(FKT i j ) -> (head $ fmap (snd.unAttr) $ i, j)) ) . triding <$> fks)
      return $ TrivialWidget bres fksE
 
 

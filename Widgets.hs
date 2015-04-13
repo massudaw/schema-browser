@@ -244,8 +244,8 @@ appendItems = mkWriteAttr $ \i x -> void $ return x  #+ i
 -- Simple checkbox
 checkedWidget :: Tidings Bool -> UI (TrivialWidget Bool)
 checkedWidget init = do
-  i <- UI.input # set UI.type_ "checkbox" # sink UI.checked(facts init)
-  let e = UI.checkedChange i
+  i <- UI.input # set UI.type_ "checkbox" # sink UI.checked (facts init)
+  let e = unionWith const (rumors init) (UI.checkedChange i)
   v <- currentValue (facts init)
   b <- stepper v e
   dv <- UI.span # set children [i] # set UI.style [("margin","2px")]
