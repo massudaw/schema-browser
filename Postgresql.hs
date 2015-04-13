@@ -343,6 +343,7 @@ parseShowable (KSerial i)
     = SSerial <$> ((Just <$> parseShowable i) <|> pure Nothing)
 parseShowable (KInterval k)=
     let
+      emptyInter = const (SInterval Interval.empty) <$> string "empty"
       inter = do
         lb <- (char '[' >> return True ) <|> (char '(' >> return False )
         i <- parseShowable k
@@ -350,7 +351,7 @@ parseShowable (KInterval k)=
         j <- parseShowable k
         rb <- (char ']' >> return True) <|> (char ')' >> return False )
         return $ SInterval $ Interval.interval (ER.Finite i,lb) (ER.Finite j,rb)
-    in doublequoted inter <|> inter
+    in doublequoted inter <|> inter <|> emptyInter
 
 parseShowable i  = error $  "not implemented " <> show i
 

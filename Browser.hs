@@ -326,7 +326,7 @@ chooseKey conn  inf key = mdo
     filterT = categoryT -- liftA2 (M.unionWith mappend) categoryT rangeT
   vp <- joinT $ (\i j -> do
                     let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup j $ pkMap inf )
-                    queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
+                    queryWith_ (fromAttr (fst rp) ) conn  (traceShowId $ fromString $ T.unpack $ snd rp)
                     -- doQueryAttr conn inf (projectAllRec' (tableMap inf) ) i j
                     ) <$> (M.unionWith mappend <$> filterT <*> triding ff) <*>  bBset
   -- Final Query ListBox

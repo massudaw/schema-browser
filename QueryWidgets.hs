@@ -5,6 +5,7 @@ import Control.Monad
 import Reactive.Threepenny
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (delete)
+import Data.Bifunctor
 
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -165,7 +166,7 @@ buildUI i  tdi = case i of
             lbd <- fmap Just <$> checkedWidget (maybe False id . fmap (\(SInterval i) -> snd . Interval.lowerBound' $i) <$> tdi)
             ubd <- fmap Just <$> checkedWidget (maybe False id .fmap (\(SInterval i) -> snd . Interval.upperBound' $i) <$> tdi)
             composed <- UI.span # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
-            let td = (\m n -> traceShowId  .fmap SInterval $   liftF2 interval m n) <$> (liftA2 (,) <$> triding inf  <*> triding lbd) <*> (liftA2 (,) <$> triding sup <*> triding ubd)
+            let td = (\m n -> fmap SInterval $  join . fmap (\i-> if Interval.null i then Nothing else Just i) $ liftF2 interval m n) <$> (liftA2 (,) <$> triding inf  <*> triding lbd) <*> (liftA2 (,) <$> triding sup <*> triding ubd)
             return $ TrivialWidget td composed
          (Primitive PTimestamp) -> do
             itime <- liftIO $  getCurrentTime
@@ -303,6 +304,7 @@ makeOptional def Nothing = Just $ fmap (\i -> (i,SOptional Nothing)) def
 keyOptional ((Key a b c d e) ,v) = (Key a b c d (KOptional e)  ,SOptional $ Just v)
 unkeyOptional ((Key a b c d (KOptional e)) ,(SOptional v) ) = fmap (Key a b c d e  , ) v
 unKOptional ((Key a b c d (KOptional e))) = (Key a b c d e )
+unKArray ((Key a b c d (KArray e))) = (Key a b c d e )
 kOptional ((Key a b c d e)) = (Key a b c d (KOptional e) )
 
 addToList i  (Insert m) =  (\i-> mappend (fmap ((\(k,v)-> (k, v)))  <$> maybeToList i) ) (editedMod  i m )
@@ -381,9 +383,9 @@ fkUITable conn inf pgs (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT i
       fk <- UI.li # set  children [l, getElement box,filterInp,getElement chw,celem]
       let bres =  liftA2 (liftA2 FKT) (fmap (fmap Attr) <$> if isLeftJoin then makeOptional (S.toList rl)<$> fksel else fksel ) (if isLeftJoin then makeOptional tb1 <$> tcrud else tcrud )
       return $ TrivialWidget bres fk
-fkUITable conn inf pgs path@(Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(AKT ifk [tb1]) =
+fkUITable conn inf pgs path@(Path rl (FKJoinTable frl  rel frr ) rr ) oldItems  tb@(AKT ifk [tb1]) =
   do
-     fks <- mapM (\ix-> fkUITable conn inf pgs path ( join . fmap (\(AKT l m) -> (\mi -> FKT l mi) <$> atMay m ix )  <$>  oldItems) (FKT ifk tb1)) [0..4]
+     fks <- mapM (\ix-> fkUITable conn inf pgs (Path rl (FKJoinTable frl (fmap (first unKArray ) rel) frr) rr) ( join . fmap (\(AKT l m) -> (\mi -> FKT (fmap (fmap (first  unKArray) ) l) mi) <$> atMay m ix )  <$>  oldItems) (FKT ifk tb1)) [0..4]
      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      fksE <- UI.div # set children (getElement <$> fks )
      let bres = (fmap (\l -> AKT (fmap  (,SComposite $ V.fromList (fmap fst l)) <$> ifk) (fmap snd l)). allMaybes .  L.takeWhile (maybe False (const True))) <$> Tra.sequenceA ( fmap (fmap (\(FKT i j ) -> (head $ fmap (snd.unAttr) $ i, j)) ) . triding <$> fks)

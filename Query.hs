@@ -341,6 +341,7 @@ renderShowable i = shw i
   shw (SPInterval a) = show a
   shw (SComposite a) = intercalate "," $ F.toList (fmap shw a)
 
+showInterval i | i == Interval.empty = show i
 showInterval (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> renderShowable i <> "," <> renderShowable l <> ocr m
     where
       ocl j = if j then "[" else "("
@@ -414,7 +415,7 @@ inner b l m = l <> b <> m
 intersectionOp (KOptional i) (KOptional j) = intersectionOp i j
 intersectionOp i (KOptional j) = intersectionOp i j
 intersectionOp (KOptional i) (j ) = intersectionOp i j
-intersectionOp (KInterval i) (KInterval j )  = inner " && "
+intersectionOp (KInterval i) (KInterval j )  = inner " = "
 intersectionOp (KInterval i) j
     | fmap textToPrim i == fmap textToPrim j =  inner " @> "
     | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
