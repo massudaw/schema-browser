@@ -1235,10 +1235,11 @@ layout  infT = do
 
 
 testFireQuery q = withConnInf "incendio" (\conn inf -> do
-                                       let rp = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
-                                       print rp
+                                       let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                        print $ (allRec' (tableMap inf)(fromJust $ M.lookup q (tableMap inf)))
-                                       q <- queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
-                                       putStrLn$ unlines $ fmap show q
+                                       print (rp)
+                                       q <- queryWith_ (fromAttr (rp) ) conn  (fromString $ T.unpack $ rpq)
+                                       -- putStrLn$ unlines $ fmap show q
+                                       return ()
                                            )
 

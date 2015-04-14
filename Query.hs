@@ -783,7 +783,6 @@ allKVRec  (TB1 (KV (PK k d) e ))= F.foldr zipPK (KV (PK [] []) []) $ (go TPK (\i
         go  TAttr l (FKT _ tb) =  l $ F.toList $ allKVRec  tb
         go  TPK l (FKT _ tb) =  allKVRec  tb
         go  TAttr l (AKT _ tb) = l $ concat $  F.toList . allKVRec <$> tb
-        -- go  TPK l (AKT _ tb) = l $ concat $  F.toList . allKVRec <$> tb
         go  _ l (Attr a) = l [a]
 
 
@@ -793,8 +792,8 @@ allPKRec  (TB1 (KV (PK k d) i ))=  F.foldr zipPK (PK [] []) $ (go (flip PK []) <
         go l (Attr a) = l [a]
 
 
-allRec' i t = fmap snd $ tb1Rec' False PathRoot i t
-allRec i t = fmap snd $ allAliasedRec i t
+
+
 allAliasedRec i t = tb1Rec False PathRoot i t
 
 tb1Rec isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
@@ -805,26 +804,6 @@ tb1Rec isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
       fun items = fmap Attr (fmap (p,) $ F.toList $ items `S.difference` fkSet ) <> (fkCase invSchema isOpt p <$> filter (\(Path ifk _ _) -> ifk `S.isSubsetOf` items ) (F.toList fk) )
       fkSet = S.unions $  fmap (\(Path ifk _ _) -> ifk)  $S.toList fk
   in leftFst isOpt  $ TB1 baseCase
-
-tb1Rec' isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
-  let
-      baseCase = KV (PK (fun k) (fun (S.fromList $ F.toList desc)))  (fun attr  )
-      leftFst True keys = fmap (fmap (\((Key a al b c  e) ) -> ( Key a al b c  (KOptional e)))) keys
-      leftFst False keys = keys
-      fun items = fmap Attr (fmap (p,) $ F.toList $ items `S.difference` fkSet ) <> (fkCase' invSchema isOpt p <$> filter (\(Path ifk _ _) -> ifk `S.isSubsetOf` items ) (F.toList fk) )
-      fkSet = S.unions $  fmap (\(Path ifk _ _) -> ifk)  $S.toList fk
-  in leftFst isOpt  $ TB1 baseCase
-
-fkCase' invSchema isOpt p (Path ifk (FKJoinTable bt kv nt)  o )
-    | isArr = AKT (Attr. (p,) <$>S.toList ifk)  [tb1Rec' isOptional (aliasKeyValue ifk ) invSchema ((\(Just i)-> i) (M.lookup nt  invSchema ))]
-    | otherwise = FKT  (Attr. (p,) <$>S.toList ifk)  (tb1Rec' isOptional (aliasKeyValue ifk ) invSchema ((\(Just i)-> i) (M.lookup nt  invSchema )))
-            where isOptional = any (isKOptional . keyType ) (F.toList ifk)
-                  isArr = any (isArray . keyType ) (F.toList ifk)
-                  bindMap = M.fromList $ fmap swap kv
-                  aliasKeyValue k =  (PathCons $ S.map (,p) k)
-                  substBind k = case M.lookup k bindMap of
-                                    Just i -> i
-                                    Nothing -> k
 
 
 fkCase invSchema isOpt p (Path ifk (FKJoinTable bt kv nt)  o ) = FKT  (Attr. (p,) <$>S.toList ifk)  (tb1Rec isOptional (aliasKeyValue ifk ) invSchema ((\(Just i)-> i) (M.lookup nt  invSchema )))
@@ -868,7 +847,7 @@ labelTable i = do
 
 recursePath' isLeft bn invSchema (Path i (FetchTable t) e)  = recursePaths' isLeft bn invSchema nextT
   where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup t (invSchema))
-recursePath' isLeft (ksbn,bn) invSchema (Path i (FKJoinTable w ks tn) e)
+recursePath' isLeft (ksbn,bn) invSchema (Path ifk (FKJoinTable w ks tn) e)
     | any (isArray . keyType . fst) (ks)  =   do
           (bt,ksb,bq) <- labelTable backT
           let pksb = (pkKey $ kvKey $ unLB1 ksb )
@@ -885,13 +864,12 @@ recursePath' isLeft (ksbn,bn) invSchema (Path i (FKJoinTable w ks tn) e)
                   return (attrs <> (concat $ fst <$> pt), snd <$> pt)
           let nkv pk desc attr = (LB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
           (tb,q) <-liftA3 nkv (fun npk) (fun ndesc) (fun nattr)
-          -- pths <- recursePaths' ( any (isKOptional.keyType.fst) ks || isLeft) (F.toList . unLB1$ksn,nt)  invSchema nextT
           tas <- tname nextT
           let knas =(Key (tableName nextT) Nothing Nothing (unsafePerformIO newUnique) (Primitive "integer" ))
           kas <- kname tas  knas
-          let jt = if any (isKOptional.keyType.fst) ks || isLeft  then " LEFT JOIN " else " JOIN "
+          let jt = if nextLeft  then " LEFT JOIN " else " JOIN "
               query =  jt <> "(SELECT " <> T.intercalate "," (label <$> pksb) <> "," <> "array_agg((" <> (T.intercalate ","  (fmap label $ (F.toList $ unLB1 $ tb ) )) <> ")) as " <> label (snd kas) <> " FROM " <> bq <> (jt <> nq <> " ON "  <> joinLPredicate (fkm (F.toList $ unLB1 $ ksb) (F.toList $ unLB1  ksn)) )<> q <>   " GROUP BY " <>  T.intercalate "," (label <$> pksb ) <> ") as " <>  label tas  <> " ON " <>  joinLPredicate (zip ksbn pksb)
-          return $ ([Labeled (label $ snd kas) (LAKT (fmap (\i -> justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (fst <$> ks)) [tb  ]) ] , query)
+          return $ ([Labeled (label $ snd kas) (LAKT (fmap (\i -> justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) [tb  ]) ] , query)
 
     | otherwise = do
           (nt,ksn@(LB1 (KV (PK npk ndesc) nattr)),nq) <- labelTable nextT
@@ -903,12 +881,11 @@ recursePath' isLeft (ksbn,bn) invSchema (Path i (FKJoinTable w ks tn) e)
                       itemSet = S.fromList $ fmap (unAttr.labelValue) items
                   pt <- mapM (recursePath' nextLeft (F.toList .unLB1 $ ksn ,nt) invSchema) (filter (\(Path ifk _ _) -> ifk `S.isSubsetOf`  itemSet ) (F.toList $ rawFKS nextT ))
                   return (attrs <> (concat $ fst <$> pt), snd <$> pt)
-              mapOpt = fmap (fmap (fmap (\i -> if any (isKOptional.keyType.fst) ks || isLeft then  makeOpt i else i)))
-              nkv pk desc attr = (LB1 $ mapOpt  (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
+              mapOpt = fmap (\i -> if any (isKOptional.keyType.fst) ks then  makeOpt i else i)
+              nkv pk desc attr = (mapOpt $ LB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
           (tb,q) <-liftA3 nkv (fun npk) (fun ndesc) (fun nattr)
-         --  pths <- recursePaths' ( any (isKOptional.keyType.fst) ks || isLeft) (F.toList . unLB1$ ksn,nt)  invSchema nextT
-          let jt = if any (isKOptional.keyType.fst) ks || isLeft then " LEFT JOIN " else " JOIN "
-          return $ ( [Labeled ""  $ LFKT (fmap (\i -> justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (fst <$> ks)) (tb ) ]  ,(jt <> nq <> " ON "  <> joinLPredicate (fkm ksbn pksn) <>  q))
+          let jt = if nextLeft  then " LEFT JOIN " else " JOIN "
+          return $ ( [Labeled ""  $ LFKT (fmap (\i -> justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (tb ) ]  ,(jt <> nq <> " ON "  <> joinLPredicate (fkm ksbn pksn) <>  q))
   where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup tn (invSchema))
         backT = (\(Just i)-> i) (M.lookup w (invSchema))
         joinLPredicate   =   T.intercalate " AND " . fmap (\(l,r)->  intersectionOp (keyType . unAttr . labelValue $l) (keyType $ unAttr . labelValue $r) (label l)  (label r ))
@@ -953,6 +930,13 @@ explodeLabel (Labeled l (Attr _)) = l
 explodeLabel (Labeled l (FKT i (LB1 t) )) = "(" <> T.intercalate "," (( F.toList $ fmap explodeLabel t))  <> ")"
 explodeLabel (Labeled l (LFKT i (LB1 t) )) = T.intercalate "," (( F.toList $ fmap explodeLabel i)) <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel t))  <> ")"
 explodeLabel (Labeled l (LAKT i _ )) = T.intercalate "," (( F.toList $ fmap explodeLabel i)) <> "," <> l
+
+unTlabel (LB1 kv ) = TB1 $ fmap unlabel kv
+unlabel (Labeled l (LFKT i t) ) = (FKT (fmap unlabel i) (unTlabel t ))
+unlabel (Labeled l (LAKT i [t]) ) = (AKT (fmap unlabel i) [unTlabel t])
+unlabel (Labeled l a@(Attr i )) = a
+
+allRec' i t = unTlabel $ fst $ rootPaths' i t
 
 rootPaths' invSchema r@(Raw _ _ _ _ fk _ ) = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   (t,ks@(LB1 (KV (PK npk ndesc) nattr)),q) <- labelTable r

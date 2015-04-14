@@ -141,13 +141,15 @@ attrUITable  tAttr' (Attr i) = do
       return $ TrivialWidget insertT sp
   where tAttr = fmap (\(Attr i)-> snd i) <$> tAttr'
 
+unSComposite (SComposite i) = i
+unSComposite i = error (show i)
 
 buildUI i  tdi = case i of
          (KOptional ti) -> fmap ((Just. SOptional) ) <$> buildUI ti (join . fmap unSOptional <$> tdi)
          (KSerial ti) -> fmap (Just . SSerial) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
          (KArray ti) -> do
             -- el <- UI.div
-            widgets <- mapM (\i-> buildUI ti (join . fmap (\(SComposite a)-> a V.!? i ) <$> tdi )) [0..20]
+            widgets <- mapM (\i-> buildUI ti (join . fmap (\a -> unSComposite a V.!? i ) <$> tdi )) [0..20]
             let tdcomp = fmap (\i -> if V.null i then Nothing else Just . SComposite $ i ). takeWhileJust  V.snoc V.empty $ ( triding <$> widgets)
                 hideNext Nothing Nothing = False
                 hideNext (Just _) _ = True
@@ -220,7 +222,7 @@ crudUITable conn inf pgs tb@(TB1 (KV (PK k d) a)) oldItems = do
       tbCase td ix i@(AKT ifk _) = fkUITable conn inf pgs ((\(Just i)-> i) $ L.find (\(Path ifkp _ _) -> S.fromList ((\(Attr i) -> i) <$> ifk ) == ifkp) $ S.toList $ rawFKS table) (fmap (\v -> justError ("AKT" <> show (ix,td $ unTB1 tb, td . unTB1 $ v)). (`atMay` ix) .td .unTB1$ v) <$> oldItems) i
       tbCase td ix i@(FKT ifk _) = fkUITable conn inf pgs ((\(Just i)-> i) $ L.find (\(Path ifkp _ _) -> S.fromList ((\(Attr i) -> i) <$> ifk ) == ifkp) $ S.toList $ rawFKS table) (fmap (\v -> justError ("FKT" <> show (ix,td $ unTB1 tb, td . unTB1 $ v)). (`atMay` ix) .td .unTB1$ v) <$> oldItems) i
       tbCase td ix a@(Attr i) = attrUITable (fmap (\v -> justError ("Attr " <> show (ix, td $ unTB1 tb, td . unTB1 $ v) ).(`atMay`ix) .td .unTB1 $ v) <$> oldItems)  a
-      mapMI f = Tra.mapM (uncurry f). {-filter (filterAtt.snd)  .-} zip [0..]
+      mapMI f = Tra.mapM (uncurry f) . zip [0..]
       Just table = M.lookup (S.fromList $findPK tb) (pkMap inf)
       fkSet = S.unions $ fmap (\(Path i _ _)-> i ) $ S.toList $rawFKS table
       filterAtt (Attr i ) =  not $ S.member i fkSet
