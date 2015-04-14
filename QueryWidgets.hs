@@ -70,10 +70,6 @@ pluginUI' conn inf oldItems (BoundedPlugin n (t,f) action) = do
   body <- UI.div # set children [headerP,getElement overwrite,bod] # sink UI.style (noneShowSpan <$> facts tdInput)
   return (body,  pure Nothing :: Tidings (Maybe [(Key,Showable)]))
 
-
-
-
-
 pointInRangeSelection
   :: Connection
   -> InformationSchema
@@ -224,8 +220,11 @@ crudUITable conn inf pgs tb@(TB1 (KV (PK k d) a)) oldItems = do
       tbCase td ix i@(AKT ifk _) = fkUITable conn inf pgs ((\(Just i)-> i) $ L.find (\(Path ifkp _ _) -> S.fromList ((\(Attr i) -> i) <$> ifk ) == ifkp) $ S.toList $ rawFKS table) (fmap (\v -> justError ("AKT" <> show (ix,td $ unTB1 tb, td . unTB1 $ v)). (`atMay` ix) .td .unTB1$ v) <$> oldItems) i
       tbCase td ix i@(FKT ifk _) = fkUITable conn inf pgs ((\(Just i)-> i) $ L.find (\(Path ifkp _ _) -> S.fromList ((\(Attr i) -> i) <$> ifk ) == ifkp) $ S.toList $ rawFKS table) (fmap (\v -> justError ("FKT" <> show (ix,td $ unTB1 tb, td . unTB1 $ v)). (`atMay` ix) .td .unTB1$ v) <$> oldItems) i
       tbCase td ix a@(Attr i) = attrUITable (fmap (\v -> justError ("Attr " <> show (ix, td $ unTB1 tb, td . unTB1 $ v) ).(`atMay`ix) .td .unTB1 $ v) <$> oldItems)  a
-      mapMI f = Tra.mapM (uncurry f) . zip [0..]
+      mapMI f = Tra.mapM (uncurry f). {-filter (filterAtt.snd)  .-} zip [0..]
       Just table = M.lookup (S.fromList $findPK tb) (pkMap inf)
+      fkSet = S.unions $ fmap (\(Path i _ _)-> i ) $ S.toList $rawFKS table
+      filterAtt (Attr i ) =  not $ S.member i fkSet
+      filterAtt i = True
   fks <- liftA3 (\i j k -> KV (PK i j ) k)
       (mapMI (tbCase (pkKey.kvKey)) k)
       (mapMI (tbCase (pkDescription.kvKey)) d)
@@ -251,7 +250,7 @@ processPanelTable conn attrsB table oldItemsi = do
   let fkattrsB = fmap (concat . F.toList . fmap attrNonRec . unTB1) <$> attrsB
       oldItems = fmap (concat . F.toList . fmap attrNonRec . unTB1) <$> oldItemsi
       efkattrsB :: Behavior (Maybe [(Key,Showable)])
-      efkattrsB = fmap (catMaybes . concat .F.toList. fmap attrNonRec . unTB1 ) <$> liftA2 (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attrsB (facts oldItemsi)
+      efkattrsB = fmap (catMaybes . concat .F.toList. traceShowId . fmap attrNonRec . unTB1 ) <$> liftA2 (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attrsB (facts oldItemsi)
   deleteB <- UI.button  # sink UI.enabled (isJust <$> facts oldItems) # set text "DELETE"
   editB <- UI.button # sink UI.enabled (liftA2 (&&) (isJust <$>  efkattrsB) (isJust <$> fkattrsB)) # set text "EDIT"
   insertB <- UI.button  # sink UI.enabled ( isJust <$> fkattrsB) # set text "INSERT"
@@ -264,9 +263,9 @@ processPanelTable conn attrsB table oldItemsi = do
       editAction attr old = do
         let i = (\(Just i)-> i) isM
             k = (\(Just i)-> i) kM
-            kM = (concat . F.toList .fmap attrNonRec .unTB1 ) <$> old
+            kM = (L.nubBy (\i j -> fst i == fst j  )  .concat . F.toList .fmap attrNonRec .unTB1 .traceShowId ) <$> old
             isM :: Maybe [(Key,Showable)]
-            isM = (catMaybes . concat . F.toList  . fmap attrNonRec .unTB1) <$> (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attr old
+            isM = ( L.nubBy (\i j -> fst i == fst j  ) . catMaybes . concat . F.toList  . fmap attrNonRec .unTB1.traceShowId) <$> (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) (traceShowId <$> attr) (traceShowId <$>  old)
             isM' :: Maybe [(Key,Showable)]
             isM' = (catMaybes . F.toList  ) <$> (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attr old
             kM' = F.toList <$> old
@@ -329,7 +328,7 @@ classifyFK (FKT i _) (FKT j _) = concat $ liftA2 classifyFK i j
 classifyFK i j = [Equal]
 
 
-showFK = (pure ((\v-> UI.span # set text (L.intercalate "," $ fmap renderShowable $ F.toList $  fmap unAttr $ kvKey $ unTB1  $  snd <$> v))))
+showFK = (pure ((\v-> UI.span # set text (L.intercalate "," $ fmap renderShowable $ F.toList $  kvKey $ allKVRec $  snd <$> v))))
 
 fkUITable
   :: Connection
