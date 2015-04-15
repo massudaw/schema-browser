@@ -116,7 +116,7 @@ indexTB1 (l:xs) t
         i = justError ("error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  finder v `mplus` finder k `mplus` finder d
     case i  of
          Attr l -> Nothing
-         FKT l j -> case xs of
+         FKT l _ j -> case xs of
                          [] -> Just j
                          i  -> indexTB1 xs (Just j)
 
@@ -127,11 +127,11 @@ indexTable (l:xs) (TB1 (KV (PK k d)  v))
         i = justError ("error finding key: " <> T.unpack (T.intercalate ","l) ) $ finder v `mplus` finder k `mplus` finder d
     case i  of
          Attr l -> return l
-         FKT l j -> indexTable xs j
+         FKT l _  j -> indexTable xs j
 
 
 kattr (Attr i ) = [i]
-kattr (FKT i _ ) = L.concat $ kattr <$> i
+kattr (FKT i _ _ ) = L.concat $ kattr <$> i
 
 class KeyString i where
   keyString :: i -> Text

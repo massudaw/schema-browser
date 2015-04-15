@@ -274,10 +274,10 @@ parseAttr (LAKT l [t]) = do
   r <- doublequoted (parseArray ( doublequoted $ parseTable t)) <|> parseArray (doublequoted $ parseTable t) <|> pure []
   return $ AKT ml  r
 
-parseAttr (LFKT l j ) = do
+parseAttr (LFKT l refl j ) = do
   ml <- unIntercalateAtto (parseAttr .labelValue <$> l) (char ',')
   mj <- doublequoted (parseTable j) <|> parseTable j
-  return $ FKT ml mj
+  return $ FKT ml refl mj
 
 parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 
