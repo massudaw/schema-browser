@@ -79,49 +79,6 @@ intersectPred p1 p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  
 
 intersectPredTuple  = (\i j -> intersectPred (textToPrim <$> keyType (fst i)) (textToPrim <$> keyType (fst j)) (snd i) (snd j))
 
-pointInRangeSelection
-  :: Connection
-  -> InformationSchema
-  -> [Plugins ]
-  -> Set Key
-  -> [(TB Key,TrivialWidget (Maybe (TB (Key,Showable))))]
-  -> TB Key
-  -> Tidings [TB1 (Key,Showable)]
-  -> Tidings (Maybe (TB (Key,Showable)))
-  -> UI (TrivialWidget (Maybe (TB (Key,Showable ))))
-pointInRangeSelection conn inf pgs created wl attr@(FKT fkattr tbfk ) lks selks
-  | all isPrim (keyType . unAttr<$> fkattr ) = do
-      let
-          sel = fmap (\(FKT i _ )->  (Just . unAttr <$> i) ) . fmap (fmap snd) <$> selks
-      (vv ,ct, o) <- inner tbfk sel fkattr
-      return $ TrivialWidget   (liftA2 (liftA2 (\i j-> FKT (fmap Attr i)  j)  ) vv ct) o
-  | all isKOptional (keyType . unAttr<$> fkattr ) = do
-      let
-          fkattr'=  fmap unKOptional  <$> fkattr
-          sel = fmap (\(FKT i _ )->  (unSOptional . unAttr <$> i) ) . fmap (fmap snd) <$> selks
-      (vv ,ct, o) <- inner tbfk sel fkattr
-      return $ TrivialWidget   (liftA2 (liftA2 (\i j-> FKT i  j)  ) (maybe (Just $ fmap (,SOptional Nothing) <$> fkattr) Just  <$> (fmap (fmap Attr )<$> vv)) ((maybe (Just $ (,SOptional Nothing)<$> tbfk) Just )<$> ct)) o
-  | otherwise = error (show attr)
-  where inner tbfk sel fkattr' = do
-            let iold :: Tidings ([Maybe [(Key,Showable)]])
-                iold  =   fmap (join . fmap (allMaybes . fmap (  (\(i,j)-> (unKOptional i,)<$> j) . fmap unSOptional))) <$> (Tra.sequenceA $ fmap (fmap ( kattr) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ kattr $ fst i) oldASet) wl)
-                oldASet :: Set Key
-                oldASet = S.fromList (filter (flip S.member created) $ unAttr <$> fkattr' )
-            i <-  Tra.sequence $ zipWith (\l m -> fmap ( fmap (m,)) <$> buildUI (fmap textToPrim . keyType $ m) (join . fmap (!!l) <$> sel )) [0..] (unAttr <$> filter (not . flip S.member created.unAttr ) fkattr' )
-            let
-                vv =  join . fmap (lorder (unAttr <$> fkattr') ) . fmap concat . allMaybes  <$> liftA2 (++) (fmap (fmap pure)<$> Tra.sequenceA (triding <$> i)  ) iold
-            let tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK  l _ ) _ ))-> all id $ zipWith intersectPredTuple  k  (unAttr <$> l)) ) i) j ) <$> lks <*> vv
-            (ce,ct,cev) <- crudUITable conn inf pgs tbfk  tb
-            li <- wrapListBox lks tb showFK
-            chw <- checkedWidget (pure False)
-            element ce
-              # sink UI.style (noneShow <$> (facts $ triding chw))
-              # set style [("paddig-left","10px")]
-            l <- UI.span # set text (show fkattr')
-            paint (getElement l) (facts vv)
-            o <- UI.div # set children (l: (getElement <$> i) <>  [getElement li,getElement chw,ce])
-            return (vv,ct,o)
-
 
 lorder lo lref = allMaybes $ fmap (\k -> L.find (\i-> fst i == k ) lref) lo
 
@@ -328,6 +285,10 @@ makeOptional def Nothing = Just $ fmap (\i -> (i,SOptional Nothing)) def
 keyOptional ((Key a b c d e) ,v) = (Key a b c d (KOptional e)  ,SOptional $ Just v)
 unkeyOptional ((Key a b c d (KOptional e)) ,(SOptional v) ) = fmap (Key a b c d e  , ) v
 unKOptional ((Key a b c d (KOptional e))) = (Key a b c d e )
+
+unKOptional' ((Key a b c d (KOptional e))) = unKOptional' (Key a b c d e )
+unKOptional' ((Key a b c d e)) = (Key a b c d e )
+
 unKArray ((Key a b c d (KArray e))) = (Key a b c d e )
 kOptional ((Key a b c d e)) = (Key a b c d (KOptional e) )
 
@@ -416,5 +377,50 @@ akUITable conn inf pgs path@(Path rl (FKJoinTable frl  rel frr ) rr ) oldItems  
      fksE <- UI.div # set children (getElement <$> fks )
      let bres = (fmap (\l -> AKT (fmap  (,SComposite $ V.fromList (fmap fst l)) <$> ifk) (fmap snd l)). allMaybes .  L.takeWhile (maybe False (const True))) <$> Tra.sequenceA ( fmap (fmap (\(FKT i j ) -> (head $ fmap (snd.unAttr) $ i, j)) ) . triding <$> fks)
      return $ TrivialWidget bres fksE
+
+pointInRangeSelection
+  :: Connection
+  -> InformationSchema
+  -> [Plugins ]
+  -> Set Key
+  -> [(TB Key,TrivialWidget (Maybe (TB (Key,Showable))))]
+  -> TB Key
+  -> Tidings [TB1 (Key,Showable)]
+  -> Tidings (Maybe (TB (Key,Showable)))
+  -> UI (TrivialWidget (Maybe (TB (Key,Showable ))))
+pointInRangeSelection conn inf pgs created wl attr@(FKT fkattr tbfk ) lks selks
+  | all isPrim (keyType . unAttr<$> fkattr ) = do
+      let
+          sel = fmap (\(FKT i _ )->  (Just . unAttr <$> i) ) . fmap (fmap snd) <$> selks
+      (vv ,ct, o) <- inner tbfk sel fkattr
+      return $ TrivialWidget   (liftA2 (liftA2 (\i j-> FKT (fmap Attr i)  j)  ) vv ct) o
+  | all isKOptional (keyType . unAttr<$> fkattr ) = do
+      let
+          fkattr'=  fmap unKOptional'  <$> fkattr
+          tbfk' = unKOptional <$> tbfk
+          sel = fmap (\(FKT i _ )->  (unRSOptional' . unAttr <$> i) ) . fmap (fmap snd) <$> selks
+      (vv ,ct, o) <- inner tbfk' sel fkattr'
+      return $ TrivialWidget   (liftA2 (liftA2 FKT ) (fmap (fmap Attr ). makeOptional (fmap unAttr fkattr') <$> vv) (makeOptional tbfk' <$> ct)) o
+  | otherwise = error (show attr)
+  where inner tbfk sel fkattr' = do
+            let iold :: Tidings ([Maybe [(Key,Showable)]])
+                iold  =   fmap (join . fmap (allMaybes . fmap (  (\(i,j)-> (unKOptional' i,)<$> j) . fmap unRSOptional'))) <$> (Tra.sequenceA $ fmap (fmap ( kattr) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ kattr $ fst i) oldASet) wl)
+                oldASet :: Set Key
+                oldASet = S.fromList (filter (flip S.member created) $ unAttr <$> fkattr' )
+            attrsUI <-  Tra.sequence $ fmap (\(l, m) -> fmap ( fmap (m,)) <$> buildUI (fmap textToPrim . keyType $ m) (join . fmap (!!l)  <$> sel )  ) $ filter (not . flip S.member created.snd) $ zip [0..] (unAttr <$>   fkattr' )
+            let
+                vv =  join . fmap (lorder (unAttr <$> fkattr') ) . fmap concat . allMaybes  <$> liftA2 (++) (fmap (fmap pure)<$> Tra.sequenceA (triding <$> attrsUI)  ) iold
+            let tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK  l _ ) _ ))-> all id $ zipWith intersectPredTuple  k  (unAttr <$> l)) ) i) j ) <$> lks <*> vv
+            (ce,ct,cev) <- crudUITable conn inf pgs tbfk  tb
+            li <- wrapListBox lks tb showFK
+            chw <- checkedWidget (pure False)
+            element ce
+              # sink UI.style (noneShow <$> (facts $ triding chw))
+              # set style [("paddig-left","10px")]
+            l <- UI.span # set text (show fkattr')
+            paint (getElement l) (facts vv)
+            o <- UI.div # set children (l: (getElement <$> attrsUI) <>  [getElement li,getElement chw,ce])
+            return (vv,ct,o)
+
 
 
