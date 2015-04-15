@@ -16,12 +16,6 @@ import Data.Functor.Identity
 import Data.Monoid
 
 
-import Data.GraphViz (preview)
-import Data.Graph.Inductive.PatriciaTree
-import qualified Data.Graph.Inductive.Graph as PG
-import qualified Data.GraphViz.Attributes as GA
-import qualified Data.GraphViz.Attributes.Complete as GAC
-
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.ToField
 

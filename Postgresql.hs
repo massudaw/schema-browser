@@ -57,7 +57,7 @@ import Database.PostgreSQL.Simple.Ok
 import Database.PostgreSQL.Simple.FromField as F
 import qualified Database.PostgreSQL.Simple.ToField as TF
 import qualified Database.PostgreSQL.Simple.FromRow as FR
-import Data.GraphViz (preview)
+-- import Data.GraphViz (preview)
 import qualified Data.Map as M
 import Blaze.ByteString.Builder(fromByteString)
 import Blaze.ByteString.Builder.Char8(fromChar)
