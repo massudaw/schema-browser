@@ -1081,13 +1081,13 @@ sup' = (\(ER.Finite i) -> i) . Interval.upperBound
 
 
 unSOptional (SOptional i) = i
-unSOptional i = traceShow ("No Pattern Match SOptional-" <> show i) Nothing
+unSOptional i = traceShow ("unSOptional No Pattern Match SOptional-" <> show i) Nothing
 
 unSSerial (SSerial i) = i
-unSSerial i = traceShow ("No Pattern Match SSerial-" <> show i) Nothing
+unSSerial i = traceShow ("unSSerial No Pattern Match SSerial-" <> show i) Nothing
 
 unRSOptional (SOptional i) = join $ fmap unRSOptional i
-unRSOptional i = traceShow ("No Pattern Match SOptional-" <> show i) Nothing
+unRSOptional i = traceShow ("unRSOptional No Pattern Match SOptional-" <> show i) Nothing
 
 unRSOptional' (SOptional i) = join $ unRSOptional' <$> i
 unRSOptional' (SSerial i )  = join $ unRSOptional' <$>i
