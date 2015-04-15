@@ -182,7 +182,7 @@ crudUITable
 crudUITable conn inf pgs tb@(TB1 (KV (PK k d) a)) oldItems = do
   let
       tbCase :: (forall a . Lens (KV a) (KV a) [a] [a] ) -> Int -> TB Key -> Set Key -> [(TB Key,TrivialWidget (Maybe (TB (Key,Showable))))] -> Tidings (Maybe (TB1 (Key,Showable))) -> UI (TrivialWidget (Maybe (TB (Key,Showable))))
-      tbCase td ix i@(AKT ifk _) created wl oldItems = do
+      tbCase td ix i@(AKT ifk refl  _) created wl oldItems = do
         akUITable conn inf pgs ((\(Just i)-> i) $ L.find (\(Path ifkp _ _) -> S.fromList ((\(Attr i) -> i) <$> ifk ) == ifkp) $ S.toList $ rawFKS table) (fmap (\v -> justError "AKT" .(^? unTB1.td . Le.ix ix ) $ v) <$> oldItems) i
       tbCase td ix i@(FKT ifk _ _) created wl oldItems  = do
         fkUITable conn inf pgs created (filter (isReflexive .fst) wl) ((\(Just i)-> i) $ L.find (\(Path ifkp _ _) -> S.fromList ((\(Attr i) -> i) <$> ifk ) == ifkp) $ S.toList $ rawFKS table) (fmap (\v -> justError "FKT" . (^? unTB1. td . Le.ix ix ) $ v) <$> oldItems) i
@@ -267,7 +267,7 @@ processPanelTable conn attrsB table oldItemsi = do
 findPK = concat . fmap attrNonRec . _pkKey  . _kvKey . _unTB1
 
 attrNonRec (FKT ifk _ _ ) = concat $ fmap kattr ifk
-attrNonRec (AKT ifk _ ) = concat $ fmap kattr ifk
+attrNonRec (AKT ifk _ _ ) = concat $ fmap kattr ifk
 attrNonRec (Attr i ) = [i]
 
 tableNonrec (TB1 k ) = concat $ F.toList $ _kvAttr $ fmap attrNonRec k
@@ -320,11 +320,11 @@ fkUITable
   -> Tidings (Maybe (TB (Key,Showable)))
   -> TB Key
   -> UI (TrivialWidget(Maybe (TB (Key, Showable))))
-fkUITable conn inf pgs created wl (Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT ifk refl tb1)
+fkUITable conn inf pgs created wl path@(Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT ifk refl tb1)
     | all (==Elem) (concat $ zipWith classifyFK (Attr . fmap textToPrim .keyType <$> (fst <$> ksn ) ) (Attr .fmap textToPrim . keyType <$>  (snd <$> ksn )) ) = do
         let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup (S.fromList $ findPK tb1)  $ pkMap inf )
         res <- liftIO$ queryWith_ (fromAttr (fst rp)) conn  (fromString $ T.unpack $ snd rp)
-        pointInRangeSelection conn inf pgs created wl tb (pure res) oldItems
+        pointInRangeSelection conn inf pgs created wl path tb (pure res) oldItems
     | otherwise = mdo
       let
           o1 = S.fromList $ findPK tb1
@@ -364,13 +364,15 @@ fkUITable conn inf pgs created wl (Path rl (FKJoinTable _  rel _ ) rr ) oldItems
       return $ TrivialWidget bres fk
     where ksn = filter (\i -> not $ S.member (fst i) created) rel
 
-akUITable conn inf pgs path@(Path rl (FKJoinTable frl  rel frr ) rr ) oldItems  tb@(AKT ifk [tb1]) =
+akUITable conn inf pgs path@(Path rl (FKJoinTable frl  rel frr ) rr ) oldItems  tb@(AKT ifk refl [tb1]) =
   do
-     fks <- mapM (\ix-> fkUITable conn inf pgs S.empty [] (Path rl (FKJoinTable frl (fmap (first unKArray ) rel) frr) rr) ( join . fmap (\(AKT l m) -> (\mi -> FKT (fmap (fmap (first  unKArray) ) l) True mi) <$> atMay m ix )  <$>  oldItems) (FKT ifk True tb1)) [0..4]
+     fks <- mapM (\ix-> fkUITable conn inf pgs S.empty [] (Path rl (FKJoinTable frl (fmap (first unKArray ) rel) frr) rr) ( join . fmap (\(AKT l refl m) -> (\mi -> FKT (fmap (fmap (first  unKArray) ) l) refl mi) <$> atMay m ix )  <$>  oldItems) (FKT ifk refl tb1)) [0..4]
      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      fksE <- UI.div # set children (getElement <$> fks )
-     let bres = (fmap (\l -> AKT (fmap  (,SComposite $ V.fromList (fmap fst l)) <$> ifk) (fmap snd l)). allMaybes .  L.takeWhile (maybe False (const True))) <$> Tra.sequenceA ( fmap (fmap (\(FKT i _ j ) -> (head $ fmap (snd.unAttr) $ i, j)) ) . triding <$> fks)
+     let bres = (fmap (\l -> AKT (fmap  (,SComposite $ V.fromList (fmap fst l)) <$> ifk) refl (fmap snd l)). allMaybes .  L.takeWhile (maybe False (const True))) <$> Tra.sequenceA ( fmap (fmap (\(FKT i _ j ) -> (head $ fmap (snd.unAttr) $ i, j)) ) . triding <$> fks)
      return $ TrivialWidget bres fksE
+
+interPoint ks i j = all (\(l,m) -> justError "interPoint wrong fields" $ liftA2 intersectPredTuple  (L.find ((==l).fst) i ) (L.find ((==m).fst) j)) ks
 
 pointInRangeSelection
   :: Connection
@@ -378,11 +380,12 @@ pointInRangeSelection
   -> [Plugins ]
   -> Set Key
   -> [(TB Key,TrivialWidget (Maybe (TB (Key,Showable))))]
+  -> Path (Set Key) (SqlOperation Text)
   -> TB Key
   -> Tidings [TB1 (Key,Showable)]
   -> Tidings (Maybe (TB (Key,Showable)))
   -> UI (TrivialWidget (Maybe (TB (Key,Showable ))))
-pointInRangeSelection conn inf pgs created wl attr@(FKT fkattr refl tbfk ) lks selks
+pointInRangeSelection conn inf pgs created wl (Path _ (FKJoinTable _ ksjoin _ ) _ ) attr@(FKT fkattr refl tbfk ) lks selks
   | all isPrim (keyType . unAttr<$> fkattr ) = do
       let
           sel = fmap (\i->  (Just . unAttr <$> _tbref i) ) . fmap (fmap snd) <$> selks
@@ -404,7 +407,7 @@ pointInRangeSelection conn inf pgs created wl attr@(FKT fkattr refl tbfk ) lks s
             attrsUI <-  Tra.sequence $ fmap (\(l, m) -> fmap ( fmap (m,)) <$> buildUI (fmap textToPrim . keyType $ m) (join . fmap (!!l)  <$> sel )  ) $ filter (not . flip S.member created.snd) $ zip [0..] (unAttr <$>   fkattr' )
             let
                 vv =  join . fmap (lorder (unAttr <$> fkattr') ) . fmap concat . allMaybes  <$> liftA2 (++) (fmap (fmap pure)<$> Tra.sequenceA (triding <$> attrsUI)  ) iold
-            let tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK  l _ ) _ ))-> all id $ zipWith intersectPredTuple  k  (unAttr <$> l)) ) i) j ) <$> lks <*> vv
+            let tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK  l _ ) _ ))-> interPoint ksjoin {-all id $ zipWith intersectPredTuple -} k  (unAttr <$> l)) ) i) j ) <$> lks <*> vv
             (ce,ct,cev) <- crudUITable conn inf pgs tbfk  tb
             li <- wrapListBox lks tb showFK
             chw <- checkedWidget (pure False)

@@ -269,10 +269,10 @@ parseAttr (Attr i) = do
   s<- parseShowable (textToPrim <$> keyType (i)) <?> show i
   return $  Attr (i,s)
 
-parseAttr (LAKT l [t]) = do
+parseAttr (LAKT l refl [t]) = do
   ml <- unIntercalateAtto (parseAttr .labelValue <$> l) (char ',')
   r <- doublequoted (parseArray ( doublequoted $ parseTable t)) <|> parseArray (doublequoted $ parseTable t) <|> pure []
-  return $ AKT ml  r
+  return $ AKT ml  refl r
 
 parseAttr (LFKT l refl j ) = do
   ml <- unIntercalateAtto (parseAttr .labelValue <$> l) (char ',')

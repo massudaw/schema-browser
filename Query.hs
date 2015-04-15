@@ -138,9 +138,14 @@ data TB a
     }
   | AKT
     { _tbref :: [TB a]
+    , _reflexive :: Bool
     , _akttable :: [TB1 a]
     }
-  | LAKT [Labeled Text (TB a)] [TB1 a]
+  | LAKT
+    { _ltbreef :: [Labeled Text (TB a)]
+    , _reflexive :: Bool
+    , _akttable :: [TB1 a]
+    }
   | Attr
     { _tbattr :: a
     }
@@ -793,7 +798,7 @@ instance Apply PK where
 instance Apply TB where
   Attr a <.>  Attr a1 = Attr $ a a1
   FKT l i t <.> FKT l1 i1 t1 = FKT (zipWith (<.>) l   l1) (i && i1)  (t <.> t1)
-  AKT l t <.> AKT l1 t1 = AKT (zipWith (<.>) l   l1) (getZipList $ liftF2 (<.>) (ZipList t) (ZipList t1))
+  AKT l i t <.> AKT l1 i1 t1 = AKT (zipWith (<.>) l   l1) (i && i1 ) (getZipList $ liftF2 (<.>) (ZipList t) (ZipList t1))
   l <.> j = error  "cant apply"
 
 unIntercalate :: ( Char -> Bool) -> String -> [String]
@@ -813,7 +818,7 @@ allKVRec  (TB1 (KV (PK k d) e ))= F.foldr zipPK (KV (PK [] []) []) $ (go TPK (\i
   where zipPK (KV (PK i j) k) (KV (PK m n) o) = KV (PK (i <> m) (j <> n)) (k <> o )
         go  TAttr l (FKT _ _ tb) =  l $ F.toList $ allKVRec  tb
         go  TPK l (FKT _ _ tb) =  allKVRec  tb
-        go  TAttr l (AKT _ tb) = l $ concat $  F.toList . allKVRec <$> tb
+        go  TAttr l (AKT _ _ tb) = l $ concat $  F.toList . allKVRec <$> tb
         go  _ l (Attr a) = l [a]
 
 
@@ -873,7 +878,7 @@ isPairReflexive (Primitive i ) (Primitive j) | i == j = True
 isPairReflexive (KOptional i ) j = isPairReflexive i j
 isPairReflexive i  (KOptional j) = isPairReflexive i j
 isPairReflexive i  (KSerial j) = isPairReflexive i j
-isPairReflexive (KArray i )   j = False
+isPairReflexive (KArray i )   j = True
 isPairReflexive i j = error $ "isPairReflexive " <> show i <> " - "<> show  j
 
 isPathReflexive (FKJoinTable _ ks _)
@@ -904,7 +909,7 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           kas <- kname tas  knas
           let jt = if nextLeft  then " LEFT JOIN " else " JOIN "
               query =  jt <> "(SELECT " <> T.intercalate "," (label <$> pksb) <> "," <> "array_agg((" <> (T.intercalate ","  (fmap label $ (F.toList $ unLB1 $ tb ) )) <> ")) as " <> label (snd kas) <> " FROM " <> bq <> (jt <> nq <> " ON "  <> joinLPredicate (fkm (F.toList $ unLB1 $ ksb) (F.toList $ unLB1  ksn)) )<> q <>   " GROUP BY " <>  T.intercalate "," (label <$> pksb ) <> ") as " <>  label tas  <> " ON " <>  joinLPredicate (zip ksbn pksb)
-          return $ ([Labeled (label $ snd kas) (LAKT (fmap (\i -> justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) [tb  ]) ] , query)
+          return $ ([Labeled (label $ snd kas) (LAKT (fmap (\i -> justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo )  [tb  ]) ] , query)
 
     | otherwise = do
           (nt,ksn@(LB1 (KV (PK npk ndesc) nattr)),nq) <- labelTable nextT
@@ -964,11 +969,11 @@ tname i = do
 explodeLabel (Labeled l (Attr _)) = l
 -- explodeLabel (Labeled l (FKT i _ (LB1 t) )) = "(" <> T.intercalate "," (( F.toList $ fmap explodeLabel t))  <> ")"
 explodeLabel (Labeled l (LFKT i refl (LB1 t) )) = T.intercalate "," (( F.toList $ fmap explodeLabel i)) <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel t))  <> ")"
-explodeLabel (Labeled l (LAKT i _ )) = T.intercalate "," (( F.toList $ fmap explodeLabel i)) <> "," <> l
+explodeLabel (Labeled l (LAKT i _ _ )) = T.intercalate "," (( F.toList $ fmap explodeLabel i)) <> "," <> l
 
 unTlabel (LB1 kv ) = TB1 $ fmap unlabel kv
 unlabel (Labeled l (LFKT i refl t) ) = (FKT (fmap unlabel i) refl (unTlabel t ))
-unlabel (Labeled l (LAKT i [t]) ) = (AKT (fmap unlabel i) [unTlabel t])
+unlabel (Labeled l (LAKT i refl [t]) ) = (AKT (fmap unlabel i) refl [unTlabel t])
 unlabel (Labeled l a@(Attr i )) = a
 
 allRec' i t = unTlabel $ fst $ rootPaths' i t
