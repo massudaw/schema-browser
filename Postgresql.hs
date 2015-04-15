@@ -266,12 +266,12 @@ unIntercalateAtto l s = go l
         go [] = pure []
 
 parseAttr (Attr i) = do
-  s<- parseShowable (textToPrim <$> keyType (i))
+  s<- parseShowable (textToPrim <$> keyType (i)) <?> show i
   return $  Attr (i,s)
 
 parseAttr (LAKT l [t]) = do
   ml <- unIntercalateAtto (parseAttr .labelValue <$> l) (char ',')
-  r <- doublequoted (parseArray ( doublequoted $ parseTable t))
+  r <- doublequoted (parseArray ( doublequoted $ parseTable t)) <|> parseArray (doublequoted $ parseTable t) <|> pure []
   return $ AKT ml  r
 
 parseAttr (LFKT l j ) = do
