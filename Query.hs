@@ -125,36 +125,41 @@ isReflexive (FKT _  r _ ) = r
 isReflexive (LFKT _  r _ ) = r
 isReflexive _ = True
 
+data TBRel  i
+  = TBLeft (Maybe (TBRel i))
+  | TBIdent i
+  | TBArray [TBRel i]
+
 data TB a
   = FKT
-    { _tbref :: [TB a]
-    , _reflexive :: Bool
-    , _fkttable :: (TB1 a)
+    { _tbref :: ! [TB a]
+    , _reflexive :: ! Bool
+    , _fkttable :: ! (TB1 a)
     }
   | LFKT
-    { _ltbref :: [Labeled Text (TB a)]
-    , _reflexive :: Bool
-    , _fkttable ::  (TB1 a)
+    { _ltbref :: ! [Labeled Text (TB a)]
+    , _reflexive :: ! Bool
+    , _fkttable :: ! (TB1 a)
     }
   | AKT
-    { _tbref :: [TB a]
-    , _reflexive :: Bool
-    , _akttable :: [TB1 a]
+    { _tbref :: ! [TB a]
+    , _reflexive :: ! Bool
+    , _akttable :: ! [TB1 a]
     }
   | LAKT
-    { _ltbreef :: [Labeled Text (TB a)]
-    , _reflexive :: Bool
-    , _akttable :: [TB1 a]
+    { _ltbreef :: ! [Labeled Text (TB a)]
+    , _reflexive :: ! Bool
+    , _akttable :: ! [TB1 a]
     }
   | Attr
-    { _tbattr :: a
+    { _tbattr :: ! a
     }
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
 
 data TB1 a
-  = TB1 {_unTB1 :: (KV (TB a)) }
-  | LB1 {unLB1 :: (KV (Labeled Text (TB a))) }
+  = TB1 {_unTB1 :: ! (KV (TB a)) }
+  | LB1 {unLB1 :: ! (KV (Labeled Text (TB a))) }
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
 
@@ -191,6 +196,7 @@ isPrim i = False
 isOptional (KOptional _) = True
 isOptional _ = False
 isArray (KArray _) = True
+isArray (KOptional i) = isArray i
 isArray _ = False
 
 instance Show (KType KPrim) where
@@ -273,21 +279,21 @@ newtype Bounding = Bounding (Interval.Interval Position) deriving(Eq,Ord,Typeabl
 newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,Read)
 
 data Showable
-  = SText Text
-  | SNumeric Int
-  | SBoolean Bool
-  | SDouble Double
-  | STimestamp LocalTimestamp
-  | SPInterval DiffTime
-  | SPosition Position
-  | SBounding Bounding
-  | SLineString LineString
-  | SDate Date
-  | SSerial (Maybe Showable)
-  | SOptional (Maybe Showable)
-  | SComposite (Vector Showable)
-  | SInterval (Interval.Interval Showable)
-  | SScopedKeySet (Map Key Showable)
+  = SText !Text
+  | SNumeric !Int
+  | SBoolean !Bool
+  | SDouble !Double
+  | STimestamp !LocalTimestamp
+  | SPInterval !DiffTime
+  | SPosition !Position
+  | SBounding !Bounding
+  | SLineString !LineString
+  | SDate !Date
+  | SSerial !(Maybe Showable)
+  | SOptional !(Maybe Showable)
+  | SComposite !(Vector Showable)
+  | SInterval !(Interval.Interval Showable)
+  | SScopedKeySet !(Map Key Showable)
   deriving(Ord,Eq,Show)
 
 normalize (SSerial (Just a) ) =  a
@@ -468,20 +474,31 @@ aliasJoin b@(Base k1 p) = zipWith (\i (j,l)-> (j,(i,l))) (T.pack . ("v" <> ). sh
 
 fullTableName = T.intercalate "_" . fmap (\k -> keyValue k <> (T.pack $ show $ hashUnique (keyFastUnique k))) . S.toList
 
+
+getPrim i@(Primitive _ ) = textToPrim <$> i
+getPrim (KOptional j) =  getPrim j
+getPrim (KSerial j) =  getPrim j
+getPrim (KArray j) =  getPrim j
+getPrim (KInterval j) =  getPrim j
+
 inner b l m = l <> b <> m
 intersectionOp (KOptional i) (KOptional j) = intersectionOp i j
 intersectionOp i (KOptional j) = intersectionOp i j
-intersectionOp (KOptional i) (j ) = intersectionOp i j
+intersectionOp (KOptional i) j = intersectionOp i j
 intersectionOp (KInterval i) (KInterval j )  = inner " = "
+intersectionOp (KArray i) (KArray j )  = inner " = "
 intersectionOp (KInterval i) j
-    | fmap textToPrim i == fmap textToPrim j =  inner " @> "
+    | getPrim i == getPrim j =  inner " @> "
     | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
 intersectionOp i (KInterval j)
-    |fmap textToPrim i == fmap textToPrim j = inner " <@ "
+    | getPrim i == getPrim j = inner " <@ "
     | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
 intersectionOp (KArray i ) j
-    | fmap textToPrim i == fmap textToPrim j = (\j i -> i <> " IN (select * from unnest("<> j <> ") ) ")
-    | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
+    | fmap textToPrim i == getPrim j = (\j i -> i <> " IN (select * from unnest("<> j <> ") ) ")
+    | otherwise = error $ "wrong type intersectionOp {*} - * " <> show i <> " /= " <> show j
+intersectionOp j (KArray i )
+    | getPrim i == getPrim j = (\ i j  -> i <> " IN (select * from unnest("<> j <> ") ) ")
+    | otherwise = error $ "wrong type intersectionOp * - {*} " <> show j <> " /= " <> show i
 intersectionOp i j = inner " = "
 
 -- Generate a sql query from the AST
@@ -527,7 +544,7 @@ delete conn kold t@(Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShow
     del = "DELETE FROM " <> rawFullName t <>   pred
 
 data TableModification b
-  = TableModification Table (Modification Key b)
+  = TableModification (Maybe Int) Table (Modification Key b)
   deriving(Eq,Show,Functor)
 
 data Modification a b
@@ -540,7 +557,7 @@ data Modification a b
 update
   :: ToField b =>
      Connection -> [(Key, b)] -> [(Key, b)] -> Table -> IO (GHC.Int.Int64,TableModification b)
-update conn kv kold t@(Raw sch tbl pk _ _ _) = fmap (,TableModification t (Edit (Just skv) (Just koldPk ) )) $ execute conn (fromString $ traceShowId $ T.unpack up)  (fmap snd skv <> fmap snd koldPk)
+update conn kv kold t@(Raw sch tbl pk _ _ _) = fmap (,TableModification Nothing t (Edit (Just skv) (Just koldPk ) )) $ execute conn (fromString $ traceShowId $ T.unpack up)  (fmap snd skv <> fmap snd koldPk)
   where
     koldM = M.fromList kold
     equality (k,_)= keyValue k <> "="  <> "?"
@@ -874,6 +891,7 @@ labelTable i = do
 
 
 isPairReflexive (Primitive i ) (KInterval (Primitive j)) | i == j = False
+isPairReflexive (Primitive j) (KArray (Primitive i) )   = False
 isPairReflexive (Primitive i ) (Primitive j) | i == j = True
 isPairReflexive (KOptional i ) j = isPairReflexive i j
 isPairReflexive i  (KOptional j) = isPairReflexive i j
@@ -884,8 +902,8 @@ isPairReflexive i j = error $ "isPairReflexive " <> show i <> " - "<> show  j
 isPathReflexive (FKJoinTable _ ks _)
   = all id $ fmap (\(i,j)-> isPairReflexive (textToPrim <$> keyType i ) (textToPrim <$> keyType j)) ks
 
-recursePath' isLeft bn invSchema (Path i (FetchTable t) e)  = recursePaths' isLeft bn invSchema nextT
-  where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup t (invSchema))
+intersectionOpK i j = intersectionOp (keyType i ) (keyType j)
+
 
 recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
     | any (isArray . keyType . fst) (ks)  =   do
@@ -902,13 +920,14 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
                       itemSet = S.fromList $ fmap (unAttr.labelValue) items
                   pt <- mapM (recursePath' nextLeft (F.toList .unLB1 $ ksn ,nt) invSchema) (filter (\(Path ifk jo  _) ->  ifk `S.isSubsetOf`  itemSet ) (F.toList $ rawFKS nextT ))
                   return (attrs <> (concat $ fst <$> pt), snd <$> pt)
-          let nkv pk desc attr = (LB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
+              mapOpt = fmap (\i -> if any (isKOptional.keyType.fst) ks then  makeOpt i else i)
+          let nkv pk desc attr = (mapOpt $ LB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
           (tb,q) <-liftA3 nkv (fun npk) (fun ndesc) (fun nattr)
           tas <- tname nextT
           let knas =(Key (tableName nextT) Nothing Nothing (unsafePerformIO newUnique) (Primitive "integer" ))
           kas <- kname tas  knas
           let jt = if nextLeft  then " LEFT JOIN " else " JOIN "
-              query =  jt <> "(SELECT " <> T.intercalate "," (label <$> pksb) <> "," <> "array_agg((" <> (T.intercalate ","  (fmap label $ (F.toList $ unLB1 $ tb ) )) <> ")) as " <> label (snd kas) <> " FROM " <> bq <> (jt <> nq <> " ON "  <> joinLPredicate (fkm (F.toList $ unLB1 $ ksb) (F.toList $ unLB1  ksn)) )<> q <>   " GROUP BY " <>  T.intercalate "," (label <$> pksb ) <> ") as " <>  label tas  <> " ON " <>  joinLPredicate (zip ksbn pksb)
+              query =  jt <> "(SELECT " <> T.intercalate "," (label <$> pksb) <> "," <> "array_agg((" <> (T.intercalate ","  (fmap explodeLabel $ (F.toList $ unLB1 $ tb ) )) <> ")) as " <> label (snd kas) <> " FROM " <> bq <> (jt <> nq <> " ON "  <> joinLPredicate (fkm (F.toList $ unLB1 $ ksb) (F.toList $ unLB1  ksn)) )<> q <>   " GROUP BY " <>  T.intercalate "," (label <$> pksb ) <> ") as " <>  label tas  <> " ON " <>  joinLPredicate (zip ksbn pksb)
           return $ ([Labeled (label $ snd kas) (LAKT (fmap (\i -> justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo )  [tb  ]) ] , query)
 
     | otherwise = do
@@ -928,7 +947,7 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           return $ ( [Labeled ""  $ LFKT (fmap (\i -> justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo ) (tb ) ]  ,(jt <> nq <> " ON "  <> joinLPredicate (fkm ksbn pksn) <>  q))
   where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup tn (invSchema))
         backT = (\(Just i)-> i) (M.lookup w (invSchema))
-        joinLPredicate   =   T.intercalate " AND " . fmap (\(l,r)->  intersectionOp (keyType . unAttr . labelValue $ l) (keyType $ unAttr . labelValue $ r) (label l)  (label r ))
+        joinLPredicate   =   T.intercalate " AND " . fmap (\(l,r)->  intersectionOpK (unAttr . labelValue $ l) (unAttr . labelValue $ r) (label l)  (label r ))
         fkSet = S.unions $ fmap (\(Path ifk _ _) -> ifk)$ filter (\(Path _ ifk  _) -> isPathReflexive ifk)  $ S.toList (rawFKS nextT)
         nextLeft = any (isKOptional.keyType.fst) ks || isLeft
         fkm m n = zip (look (fst <$> ks) m) (look (snd <$> ks) n)
@@ -992,9 +1011,6 @@ rootPaths' invSchema r@(Raw _ _ _ _ fk _ ) = fst $ flip runState ((0,M.empty),(0
   (tb,js) <-liftA3 nkv (fun npk) (fun ndesc) (fun nattr)
   return ( tb , "SELECT (" <> T.intercalate "," (fmap explodeLabel $ (F.toList $ unLB1 tb))  <> (") FROM " <> q ) <> js)
 
-recursePaths' isLeft i invSchema r@(Raw _ _ _ _ fk _ )  =  do
-  pths <- mapM (\l -> recursePath' isLeft  i   invSchema l ) $ S.toList fk
-  return $ (concat $ fmap fst pths,foldl mappend  ""  (snd <$> pths))
 
 backPK (Path i _ j)  = S.toList i
 

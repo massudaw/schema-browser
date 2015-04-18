@@ -22,6 +22,7 @@ import qualified Network.HTTP as HTTP
 import Network.Browser
 import Widgets
 import QueryWidgets
+import Control.Concurrent
 import Data.Functor.Apply
 import System.Environment
 import Debug.Trace
@@ -114,16 +115,18 @@ import Data.ByteString.Search (replace)
 import Crea
 
 setup
-     ::  [String] -> Window -> UI ()
-setup args w = void $ do
+     ::  Show b => Event [b] -> [String] -> Window -> UI ()
+setup e args w = void $ do
   return w # set title "Data Browser"
   (evDB,chooserDiv) <- databaseChooser args
   body <- UI.div
+  be <- stepper [] e
+  pollRes <- UI.div # sink UI.text (show <$> be)
   getBody w #+ [element chooserDiv , element body]
   mapUIT body (traverse (\(conn,inf@(_,baseTables,_,schema,invSchema,graphP))-> do
     let k = M.keys baseTables
     span <- chooserKey  conn inf k (atMay args 2)
-    element body # set UI.children [span] )) evDB
+    element body # set UI.children [span,pollRes] )) evDB
 
 listDBS :: IO (Map Text [Text])
 listDBS = do
@@ -133,6 +136,7 @@ listDBS = do
         connDb <- connectPostgreSQL ("user=postgres dbname=" <> toStrict (encodeUtf8 db))
         schemas :: [Only Text] <- query_  connDb "SELECT schema_name from information_schema.schemata"
         return (db,filter (not . (`elem` ["information_schema","pg_catalog","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas)) (fmap unOnly dbs)
+
 
 databaseChooser sargs = do
   let args = fmap T.pack sargs
@@ -387,7 +391,7 @@ chooseKey conn  inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,_,evs) <- crudUITable conn inf [lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJBoundary ,queryTimeline, queryAndamentoB,queryArtAndamento ] (allRec' (tableMap inf) table) (UI.userSelection itemList)
+            (crud,_,evs) <- crudUITable conn inf [{-lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJBoundary ,queryTimeline, queryAndamentoB,queryArtAndamento -}] (allRec' (tableMap inf) table) (UI.userSelection itemList)
             let eres = fmap (addToList  (allRec' (tableMap inf ) table )  <$> ) evs
             res2 <- accumTds vp  eres
             insertDiv <- UI.div # set children [crud]
@@ -413,13 +417,13 @@ chooseKey conn  inf key = mdo
 
 lplugOrcamento = BoundedPlugin "Orçamento" ("pricing",fst renderProjectPricingA )  (\i j k -> snd renderProjectPricingA $   k)
 
-
+{-
 pluginContactDiv conn inf inp = do
   b <- UI.button # set UI.text "query"
   st <- stepper "" (unsafeMapIO (fmap show) (pure (pluginContact inf )<@ UI.click b))
   e <- UI.div # sink UI.text st
   (,pure Nothing ) <$> UI.div # set UI.children [b,e]
-
+-}
 
 simpleGetRequest =  fmap BSL.pack . join . fmap HTTP.getResponseBody . HTTP.simpleHTTP . HTTP.getRequest
 
@@ -470,7 +474,8 @@ queryAndamentoB =  BoundedPlugin "Andamento Bombeiro" ("fire_project", staticP a
       returnA -< idp
     elem conn inf inputs = fst <$> queryAndamento2  conn inf (fmap F.toList <$> inputs)
 
-queryPollAndamentoB =  BoundedPollingPlugins "Andamento Bombeiro" 10  ("fire_project", staticP arrow ) elem
+queryPollAndamentoB :: PollingPlugins (Tidings [TB1 (Key,Showable)]) (UI Element)
+queryPollAndamentoB =  BoundedPollingPlugins "Andamento Bombeiro" 60  ("fire_project", staticP arrow ) elem
   where
     arrow :: FunArrowPlug (Maybe Showable)
     arrow = proc t -> do
@@ -480,7 +485,59 @@ queryPollAndamentoB =  BoundedPollingPlugins "Andamento Bombeiro" 10  ("fire_pro
       cpf <- varT "id_owner,id_contact:id_owner:cgc_cpf" -< t
       odx "aproval_date" -< t
       returnA -< idp
-    elem conn inf inputs = fst <$> queryAndamento3  conn inf (fmap F.toList <$> inputs)
+    elem conn inf inputs = fst <$> queryAndamento3  conn inf (traceShowId.fmap F.toList <$> inputs)
+
+queryPollAndamentoIO ,queryPollArtAndamentoIO  :: PollingPlugins [TB1 (Key,Showable)] (IO [([TableModification Showable])])
+
+queryPollAndamentoIO =  BoundedPollingPlugins "Andamento Bombeiro" 60  ("fire_project", staticP arrow ) elem
+  where
+    arrow :: FunArrowPlug (Maybe Showable)
+    arrow = proc t -> do
+      idp <- varT "id_project" -< t
+      ano <- varT "ano" -< t
+      protocolo <- varT "protocolo" -< t
+      cpf <- varT "id_owner,id_contact:id_owner:cgc_cpf" -< t
+      odx "aproval_date" -< t
+      returnA -< idp
+    elem conn inf inputs = fmap snd . catMaybes <$> mapM (queryAndamento4  conn inf . F.toList ) inputs
+
+queryPollArtAndamentoIO = BoundedPollingPlugins "Andamento Art Crea"  60  ("art",staticP url) elem
+  where
+    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
+    url :: ArrowPlug (Kleisli IO) [(Text,Showable)]
+    url = proc t -> do
+      i <- varTB "art_number" -< t
+      odx "verified_date" -< t
+      odx "payment_date" -< t
+      r <- at "crea_register" (proc t -> do
+                               n <- varTB "crea_number" -< t
+                               u <- varTB "crea_user"-< t
+                               p <- varTB "crea_password"-< t
+                               returnA -< liftA3 (, , ) n u p  ) -< t
+      o <- act (fmap (join .maybeToList) . traverse (\(i, (j, k,a)) -> creaConsultaArt  j k a i ) ) -< liftA2 (,) i r
+      let
+          artVeri d = Attr ("verified_date" ,SOptional $ Just $ STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" ( d !!1) )
+          artPayd d = Attr ("payment_date" ,SOptional $Just $ STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" (d !!1) )
+          artInp :: [[String]] -> TB1 (Text,Showable)
+          artInp inp = TB1 $ KV (PK [] []) $ catMaybes [artVeri <$>  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd <$> L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (traceShowId inp) ]
+      i <- checkOutput "verified_date" -< (t,Just$ artInp o)
+      j <- checkOutput "payment_date" -< (t,Just $artInp o)
+      returnA -< (catMaybes [i, j] )
+
+
+    elem conn inf inputs = do
+       let ev = mapM (\im -> do
+                              h <- dynPK url (Just im)
+                              updateArtStatus (Just im)  h) inputs
+           updateArtStatus  im it = do
+              let i = fmap (first (lookKey inf "art")) it
+              if null (i)
+                 then return []
+                 else do
+                   v <- updateMod conn inf (i)  (fromJust $ fmap F.toList im) (lookTable inf "art")
+                   traverse (logTableModification inf conn ) v
+                   return $ maybeToList v
+       ev
 
 
 
@@ -489,6 +546,7 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                   fire_project = lookTable inf "fire_project"
                   andamento = lookTable inf "andamento"
               ano <- MaybeT $ return $ lookInput "ano" $ filter (not . isEmptyShowable. snd )  $ inputs
+              liftIO$ print (getInput "project_description" inputs)
               if testShowable (<=14) (snd ano )
                 then do
                 let
@@ -501,7 +559,7 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                     let
                       lq2 =  Just . maybe M.empty (uncurry M.singleton . ("id_bombeiro",)) . fmap SNumeric . readMaybe.  fst .  break (=='&') . concat . tail .  splitL ("php?id=")  .T.unpack . decodeLatin1  $  lq
                       lkeys = fmap ( M.toList . M.mapKeys ((\(Just i)-> i) . flip M.lookup (keyMap inf) . ("fire_project",)  ))  $ lq2
-                    mod <- C.lift $ updateMod conn ((\(Just i)-> i) lkeys) inputs  fire_project
+                    mod <- C.lift $ updateMod conn inf ((\(Just i)-> i) lkeys) inputs  fire_project
                     return $  (lkeys,mod)
                    else do return $ (fmap (\i-> [i])   $ L.find ((== "id_bombeiro") .  keyValue . fst) inputs,Nothing)
                 let
@@ -526,12 +584,12 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                           args :: S.Set (Map Key Showable)
                           args = S.fromList $ fmap (uncurry M.insert  (lookInput inputs )) $ prepareArgs html
                       mod <- case filter ( maybe False (\(SText t) -> T.isInfixOf "Aprovado" t ) .  M.lookup "andamento_description" . M.mapKeys keyValue )  $ S.toList args of
-                          [i] -> updateMod  conn [(justError "could not lookup approval_date " . flip M.lookup (keyMap inf) $ ("fire_project","aproval_date") , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] inputs fire_project
+                          [i] -> updateMod  conn inf [(justError "could not lookup approval_date " . flip M.lookup (keyMap inf) $ ("fire_project","aproval_date") , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] inputs fire_project
                           i -> return Nothing
                       vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) andamento )
 
                       let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . concat . F.toList . fmap attrNonRec . _unTB1) vp) :: S.Set (Map Key Showable)
-                      adds <- {-traceShow ("KK " <> show kk <> " \n ARGS " <> show args) $-} mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
+                      adds <- {-traceShow ("KK " <> show kk <> " \n ARGS " <> show args) $-} mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  inf (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
                       return $ mod : adds
 
                   updateSolicitacao :: MaybeT IO (Maybe (TableModification Showable))
@@ -543,7 +601,7 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                     htmlSoli <- C.lift $ testSolicitation tq3
                     let tq4 = catMaybes .fmap Tra.sequence . M.toList . tkeys  "fire_project" . M.fromList $ htmlSoli
                     MaybeT $ return $ if not $ maybe False (\(_,SBoolean mb)-> mb) $ L.find ((=="taxa_paga"). keyValue . fst)  tq4 then Nothing else Just undefined
-                    C.lift $ updateMod  conn tq4 inputs fire_project
+                    C.lift $ updateMod  conn inf tq4 inputs fire_project
                   getPdf = do
                     MaybeT $ return $ if (\i->elem "analista" i || elem "aproval_date" i ) $ (keyValue . fst <$> filter (not . isEmptyShowable. snd ) inputs ) then Nothing else Just undefined
                     C.lift $ testPdfGet conn inf inputs
@@ -554,7 +612,7 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                 mapM (C.lift . logTableModification inf conn) mods
                 MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) mods
               else do
-                    MaybeT $ return $ if elem "aproval_date" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs )  then Nothing else Just undefined
+                    -- MaybeT $ return $ if elem "aproval_date" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs )  then Nothing else Just undefined
                     html <- MaybeT $   fmap join $ Tra.sequence $  liftA3 siapi3 (getInput "protocolo" inputs) (getInput "ano" inputs) (getInput "cgc_cpf" inputs)
                     MaybeT $ return $ case (L.null $ join $ join $  fst html) of
                                   True -> Nothing
@@ -569,7 +627,7 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                     firemods <- C.lift $ do
                       let taxa_paga = maybe False (\(SBoolean mb)-> mb) $ join $ fmap (unRSOptional' .snd)$  lookInputV "taxa_paga"  inputs
                       if not taxa_paga
-                         then (if taxa_paga /= (not .snd $html) then updateMod  conn [(lookKey inf "fire_project" "taxa_paga" , SBoolean . not .snd $html)] inputs fire_project else return Nothing)
+                         then (if taxa_paga /= (not .snd $html) then updateMod  conn inf [(lookKey inf "fire_project" "taxa_paga" , SBoolean . not .snd $html)] inputs fire_project else return Nothing)
                          else return  Nothing
 
                     mods <- C.lift $  do
@@ -578,11 +636,11 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                           args = S.fromList $ fmap (uncurry M.insert  (lookInput inputs )) $  prepareArgs  $ fst html
                       mod <- case filter ( maybe False (\(SText t) -> T.isInfixOf "APROVADO" t ) .  M.lookup "andamento_description" . M.mapKeys keyValue )  $ S.toList args of
                           [] -> return Nothing
-                          i:xs -> updateMod  conn [(lookKey inf "fire_project" "aproval_date"  , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] inputs fire_project
+                          i:xs -> updateMod  conn inf [(lookKey inf "fire_project" "aproval_date"  , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] inputs fire_project
                       vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) andamento )
 
                       let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . concat . F.toList . fmap attrNonRec . _unTB1) vp) :: S.Set (Map Key Showable)
-                      adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
+                      adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  inf (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
                       return $ mod : adds
                     mapM (C.lift . logTableModification inf conn) (catMaybes $firemods:mods)
                     MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) (catMaybes (firemods:mods) ))
@@ -600,19 +658,30 @@ queryAndamento3 conn inf  input = do
         e <- UI.div # sink appendItems ( fmap (\i -> UI.div # set text (show $ (fmap (fmap renderShowable)) <$> i) ) . catMaybes  <$> facts tq  )
         return (e , pure Nothing :: Tidings (Maybe (Map Key Showable)))
 
-updateMod conn kv old table = do
+deleteMod conn inf kv table = do
+  delete conn kv table
+  Just <$> logTableModification inf conn (TableModification Nothing table (Delete $ Just kv))
+
+updateMod conn inf kv old table = do
   (i,j) <- update conn  kv old table
-  return $ Just j
+  Just <$> logTableModification inf conn j
 
-insertMod conn kv table = do
+insertPKMod conn inf kv table = do
+  s <- insertPK fromShowableList conn kv table
+  let mod =  TableModification Nothing table (Insert $ Just $ kv <> s)
+  Just <$> logTableModification inf conn mod
+
+insertMod conn inf kv table = do
   insert conn  kv table
-  return $ Just $ TableModification table (Insert $ Just kv)
+  let mod =  TableModification Nothing table (Insert $ Just kv)
+  Just <$> logTableModification inf conn mod
 
-logTableModification inf conn (TableModification table i) = do
+logTableModification inf conn (TableModification Nothing table i) = do
   let look k = lookKey inf "modification_table" k
   time <- getCurrentTime
   let ltime = STimestamp . Finite . utcToLocalTime utc $ time
-  insertPK fromShowableList conn [(look "modification_time", ltime ) ,(look "table_name" ,SText $ tableName  table) , (look "modification_data", SText $ T.pack $ show i)] ((\(Just i)-> i) $ M.lookup ("modification_table") (tableMap inf))
+  [s] <- insertPK fromShowableList conn [(look "modification_time", ltime ) ,(look "table_name" ,SText $ tableName  table) , (look "modification_data", SText $ T.pack $ show i)] ((\(Just i)-> i) $ M.lookup ("modification_table") (tableMap inf))
+  return (TableModification ((\(SSerial (Just (SNumeric i)))-> Just i ) $ snd s) table i )
 
 bradescoRead file = do
   file <- TE.decodeLatin1 <$> BS.readFile file
@@ -735,8 +804,8 @@ wappImport conn inf  _ = do
 -}
 
 queryAndamento2 conn inf   input = do
-        b <- UI.button # set UI.text "Submit"  # sink UI.enabled (maybe False (\i -> not $ elem "aproval_date" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd )i) ) <$> facts input)
-        tq <-  mapT (\case {Just input -> queryAndamento4 conn inf input ; Nothing -> return Nothing}) (shortCutClick input (UI.click b))
+        b <- UI.button # set UI.text "Submit"
+        tq <-  mapT (\case {Just input -> queryAndamento4 conn inf (traceShowId input) ; Nothing -> return Nothing}) (shortCutClick input (UI.click b))
         e <- UI.div # sink UI.text (fmap (maybe "" show ) $ facts $ tq)
         body <-UI.div # set children [b,e]
         return (body , pure Nothing :: Tidings (Maybe (Map Key Showable)))
@@ -746,13 +815,6 @@ tailEmpty i  = tail i
 
 
 
-data PluginBoundary b a
-  = PluginBoundary  (b,[a])
-  | PluginBoundaryTB  (b,TB1 a)
-  deriving(Show)
-
-pluginTable (PluginBoundary (i,_)) = i
-pluginTable (PluginBoundaryTB  (i,_)) = i
 
 queryShowMap = BoundedPlugin "Google Map" ("address", fst showMap') (\i j k -> snd showMap'$ k)
 
@@ -783,7 +845,6 @@ queryTimeline = BoundedPlugin "Timeline" ("pricing",staticP arrow)  elem
     elem con inf inputs = do
         e <- UI.div # set UI.id_ "timeline-embed"
         let
-            generateEvents (PluginBoundary (_,inp))= fmap (\(i,SDate (Finite j))-> (j,T.unpack $ keyValue i )) $filter ((==(Primitive PDate)).  fmap textToPrim .keyType.unKOptional.fst) inp
             timeline i = Timeline "hello" (dynP arrow $ i)
         i <- UI.div # sink UI.html  (fmap (\i->  "<script>    var container = document.getElementById('timeline-embed');var items = new vis.DataSet("  <>  BSL.unpack (traceShowId $ encode (timeline i)) <> ") ;  var options = {} ; if (container.vis != null ) { container.vis.destroy(); } ; container.vis = new vis.Timeline(container,items,options); </script>") $ facts inputs)
         UI.div # set children [e,i]
@@ -868,7 +929,7 @@ checkOutput i = proc t -> do
          else v
 
 
-queryPollArtAndamento = BoundedPollingPlugins "Andamento Art Crea"  10  ("art",staticP url) elem
+queryPollArtAndamento = BoundedPollingPlugins "Andamento Art Crea"  60  ("art",staticP url) elem
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
     url :: ArrowPlug (Kleisli IO) [(Text,Showable)]
@@ -901,11 +962,13 @@ queryPollArtAndamento = BoundedPollingPlugins "Andamento Art Crea"  10  ("art",s
               if null (i)
                  then return []
                  else do
-                   v <- updateMod conn (i)  (fromJust $ fmap F.toList im) (lookTable inf "art")
+                   v <- updateMod conn inf (i)  (fromJust $ fmap F.toList im) (lookTable inf "art")
                    traverse (logTableModification inf conn ) v
                    return $ maybeToList v
        bh <- stepper [] ev
        UI.div # sink UI.text (show <$> bh )
+
+
 
 
 
@@ -932,7 +995,7 @@ queryArtAndamento = BoundedPlugin "Andamento Art Crea" ("art",staticP url) elem
                   artInp inp = catMaybes [artVeri <$>  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd <$> L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (traceShowId inp) ]
               if null (artInp i)
                  then return []
-                 else maybeToList <$> updateMod conn (artInp i)  (fromJust $ fmap F.toList im) (lookTable inf "art")
+                 else maybeToList <$> updateMod conn inf (artInp i)  (fromJust $ fmap F.toList im) (lookTable inf "art")
        i <- stepper [] ev
        out <- UI.div # sink UI.text (show <$> i )
        UI.div # set children [consulta ,out]
@@ -959,7 +1022,7 @@ queryGeocodeBoundary = BoundedPlugin "Google Geocode" ("address",staticP url) el
             b <- MaybeT $ return $ case (fmap Bounding $  (\i j -> Interval.interval (ER.Finite i ,True) (ER.Finite j ,True))<$> getPos (bounds !> "southwest") <*> getPos (bounds !> "northeast"), fmap Bounding $ (\i j -> Interval.interval (ER.Finite i ,True) (ER.Finite j ,True))<$> getPos (viewport !> "southwest") <*> getPos (viewport !> "northeast")) of
                                         (i@(Just _), _ ) -> i
                                         (Nothing , j) -> j
-            mod <- C.lift $ updateMod conn [(lkey "geocode" ,SPosition p),( lkey "bounding", SBounding b)] (fromJust $ fmap F.toList im) (lookTable inf "address")
+            mod <- C.lift $ updateMod conn inf [(lkey "geocode" ,SPosition p),( lkey "bounding", SBounding b)] (fromJust $ fmap F.toList im) (lookTable inf "address")
             C.lift $ traverse (logTableModification inf conn) mod
             return [(lkey "geocode" ,SPosition p),( lkey "bounding", SBounding b)]
       let et =  unsafeMapIO req (facts inputs <@ UI.click b)
@@ -1034,14 +1097,14 @@ executeStep  conn inf inputs (TBPlan t  ta steps) =  do
           case t of
             TInsert -> do
                traverse (\i -> do
-                        mod <- insertMod conn (concat i) ta
+                        mod <- insertMod conn inf (concat i) ta
                         traverse (logTableModification inf conn ) mod
                         return mod
                         ) (allMaybes k)
                return $ Just []
             TUpdate -> do
                traverse (\i -> do
-                        mod <- updateMod conn (concat i) inputs ta
+                        mod <- updateMod conn inf (concat i) inputs ta
                         traverse (logTableModification inf conn ) mod
                         return mod
                         ) (onlyJust k)
@@ -1055,7 +1118,7 @@ executeStep  conn inf inputs (SPFK t (Path  i (FKJoinTable ti s tj ) j) steps) =
          traverse (\i -> insertPK fromShowableList conn (concat i) tj) (allMaybes k)
        FKEUpdateFK -> do
          traverse (\i -> do
-                    mod <- updateMod conn ( concat  i) inputs tj
+                    mod <- updateMod conn inf ( concat  i) inputs tj
                     traverse (logTableModification inf conn ) mod
                     let upPKs = filter ((`S.member` j) .fst) (concat i)
                     return  upPKs
@@ -1135,7 +1198,7 @@ testPdfGet conn inf inp =  runMaybeT$ do
         C.lift $ removeFile tempName
         v <- MaybeT $ return $ eitherToMaybeT $ v
         let vp  =  catMaybes . applyTranslator (M.fromList transK) . fmap (fmap (T.unpack . T.fromStrict ) )  $  v
-        MaybeT $   updateMod  conn vp inp fire_project
+        MaybeT $   updateMod  conn inf vp inp fire_project
       else MaybeT $ return Nothing
 
 
@@ -1187,6 +1250,7 @@ topSortTables tables = flattenSCCs $ stronglyConnComp item
   where item = fmap (\n@(Raw _ t k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
 
 
+
 main :: IO ()
 main = do
   args <- getArgs
@@ -1209,8 +1273,34 @@ main = do
   -}
   -- preview $ cvLabeled (graphP )
 --  preview $ cvLabeled (warshall graphP )
-  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup args)
+  (e,h) <- newEvent
+  forkIO $ poller  h queryPollAndamentoIO
+  forkIO $ poller  h queryPollArtAndamentoIO
+  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)
   print "Finish"
+
+poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
+  conn <- connectPostgreSQL ("user=postgres dbname=incendio")
+  inf@(k,baseTables,_,schema,invSchema,graphP) <- keyTables conn  "incendio"
+  let loop =  do
+        print =<<  getCurrentTime
+        print "START"
+        let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
+        listRes <- queryWith_ (fromAttr (fst rp) ) conn  (traceShowId $ fromString $ T.unpack $ snd rp)
+        let evb = filter (\i -> tdInput i && tdOutput1 i ) listRes
+            tdInput i =  maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd t) i) (fst f)
+            tdOutput1 i =  maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd f) i) (snd f)
+
+        i <- elem conn inf evb
+        handler i
+        print =<<  getCurrentTime
+        print "END"
+        threadDelay (d*1000*1000*60)
+        loop
+  loop
+
+
+
 
 layout  infT = do
   vis <- UI.div # set UI.id_ "visualization"
@@ -1236,7 +1326,7 @@ layout  infT = do
 testFireQuery q = withConnInf "incendio" (\conn inf -> do
                                        let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                        print $ (allRec' (tableMap inf)(fromJust $ M.lookup q (tableMap inf)))
-                                       print (rp)
+                                       print (rpq)
                                        q <- queryWith_ (fromAttr (rp) ) conn  (fromString $ T.unpack $ rpq)
                                        -- putStrLn$ unlines $ fmap show q
                                        return ()

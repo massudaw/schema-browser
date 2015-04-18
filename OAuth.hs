@@ -33,6 +33,7 @@ secret = "BlFl0V93LxQCSLvXt9UfkHnO"
 file   = "./tokens.txt"
 --
 
+{-
 pluginContact inf = do
   v <- liftIO $ pluginContactGoogle
   let project l = (emails l :  phones l : names l )
@@ -42,28 +43,30 @@ pluginContact inf = do
 
           phones = projectPhone inf  . filterChildrenName ((=="phoneNumber").qName)
   return $ project <$> (filterChildrenName ((=="entry") . qName) v)
+-}
+
+gmailScope = "https://www.googleapis.com/auth/gmail.modify"
 
 pluginContactGoogle = do
   -- Ask for permission to read/write your fusion tables:
   let client = OAuth2Client { clientId = cid, clientSecret = secret }
-      permissionUrl = formUrl client ["https://www.google.com/m8/feeds"]
+      permissionUrl = formUrl client ["https://www.googleapis.com/auth/contacts.readonly",gmailScope]
   b <- doesFileExist file
   unless b $ do
       putStrLn$ "Load this URL: "++show permissionUrl
       case os of
-        "linux"  -> rawSystem "xdg-open" [permissionUrl]
+        "linux"  -> rawSystem "firefox" [permissionUrl]
         "darwin" -> rawSystem "open"       [permissionUrl]
         _        -> return ExitSuccess
       putStrLn "Please paste the verification code: "
       authcode <- getLine
       tokens   <- exchangeCode client authcode
-      putStrLn $ "Received access token: "++show (accessToken tokens)
+      putStrLn $ "Received access token: " ++ show (accessToken tokens)
       tokens2  <- refreshTokens client tokens
-      putStrLn $ "As a test, refreshed token: "++show (accessToken tokens2)
+      putStrLn $ "As a test, refreshed token: " ++ show (accessToken tokens2)
       writeFile file (show tokens2)
   accessTok <- fmap (accessToken . read) (readFile file)
-  print =<< simpleHttpHeader [("GData-Version","3.0")] ("https://www.google.com/m8/feeds/contacts/default/full?alt=json&access_token=" ++ accessTok)
-  listContacts (toAccessToken accessTok)
+  BL.writeFile "contacts.json"=<< simpleHttpHeader [("GData-Version","3.0")] ("https://www.googleapis.com/gmail/v1/users" <> "/me/messages/14c37a4056062823?q=\"from:wesley.massuda@gmail.com\"&access_token=" ++ accessTok)
 
 projectPhone inf elem  = lkeys elem
   where
