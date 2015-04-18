@@ -48,16 +48,16 @@ import Data.String
 data Plugins
   = BoundedPlugin
   { _name :: String
-  , _bounds :: (Text,([(Bool,[[Text]])],[(Bool,[[Text]])]))-- PluginBoundary Table Key,PluginBoundary Table Key)
+  , _bounds :: (Text,([(Bool,[[Text]])],[(Bool,[[Text]])]))
   , _boundedAction :: Connection -> InformationSchema -> Tidings (Maybe (TB1 (Key,Showable))) -> UI Element
   }
 
-data  PollingPlugins
+data  PollingPlugins fi fo
   = BoundedPollingPlugins
   { _pollingName :: String
   , _pollingTime :: Int
   , _pollingBounds :: (Text,([(Bool,[[Text]])],[(Bool,[[Text]])]))
-  , _pollingBoundedAction :: Connection -> InformationSchema ->  Tidings [TB1 (Key,Showable)] -> UI Element
+  , _pollingBoundedAction :: Connection -> InformationSchema ->  fi -> fo
   }
 
 pluginUI' conn inf oldItems (BoundedPlugin n (t,f) action) = do
@@ -73,6 +73,7 @@ pluginUI' conn inf oldItems (BoundedPlugin n (t,f) action) = do
   return (body,  pure Nothing :: Tidings (Maybe [(Key,Showable)]))
 
 intersectPred p@(Primitive _ ) (KInterval i) j (SInterval l )  | p == i =  Interval.member j l
+intersectPred p@(Primitive _ ) (KArray i) j (SComposite l )  | p == i =  V.elem j l
 intersectPred p1@(Primitive _ ) p2@(Primitive _) j l   | p1 == p2 =  j ==  l
 intersectPred p1@(KOptional i ) p2 (SOptional j) l  =  maybe False id $ fmap (\m -> intersectPred i p2 m l) j
 intersectPred p1 p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
@@ -105,18 +106,19 @@ attrUITable  tAttr' (Attr i) = do
   where tAttr = fmap (\(Attr i)-> snd i) <$> tAttr'
 
 unSComposite (SComposite i) = i
-unSComposite i = error (show i)
+unSComposite i = error ("unSComposite " <> show i)
 
 buildUI i  tdi = case i of
          (KOptional ti) -> fmap ((Just. SOptional) ) <$> buildUI ti (join . fmap unSOptional <$> tdi)
          (KSerial ti) -> fmap (Just . SSerial) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
          (KArray ti) -> do
             -- el <- UI.div
-            widgets <- mapM (\i-> buildUI ti (join . fmap (\a -> unSComposite a V.!? i ) <$> tdi )) [0..20]
+            let arraySize = 10
+            widgets <- mapM (\i-> buildUI ti (join . fmap (\a -> unSComposite a V.!? i ) <$> tdi )) [0..arraySize]
             let tdcomp = fmap (\i -> if V.null i then Nothing else Just . SComposite $ i ). takeWhileJust  V.snoc V.empty $ ( triding <$> widgets)
                 hideNext Nothing Nothing = False
                 hideNext (Just _) _ = True
-                tshow = fmap (\i-> noneShow <$> liftA2 hideNext ((if (i -1 ) < 0 then const (Just (SOptional Nothing) ) else join . fmap (\(SComposite a)-> a V.!?  (i - 1)  )) <$> tdcomp ) (join . fmap (\(SComposite a)-> a V.!? i ) <$> tdcomp )) [0..20]
+                tshow = fmap (\i-> noneShow <$> liftA2 hideNext ((if (i -1 ) < 0 then const (Just (SOptional Nothing) ) else join . fmap (\(SComposite a)-> a V.!?  (i - 1)  )) <$> tdcomp ) (join . fmap (\(SComposite a)-> a V.!? i ) <$> tdcomp )) [0..arraySize]
                 ziped = zipWith (\i j -> element j # sink UI.style (facts i))  tshow (fmap getElement widgets)
             sequence ziped
             composed <- UI.span # set children (fmap getElement widgets)
@@ -278,12 +280,15 @@ makeOptional def Nothing = Just $ fmap (\i -> (i,SOptional Nothing)) def
 
 keyOptional ((Key a b c d e) ,v) = (Key a b c d (KOptional e)  ,SOptional $ Just v)
 unkeyOptional ((Key a b c d (KOptional e)) ,(SOptional v) ) = fmap (Key a b c d e  , ) v
+
 unKOptional ((Key a b c d (KOptional e))) = (Key a b c d e )
+unKOptional i = error ("unKOptional " <> show i)
 
 unKOptional' ((Key a b c d (KOptional e))) = unKOptional' (Key a b c d e )
 unKOptional' ((Key a b c d e)) = (Key a b c d e )
 
 unKArray ((Key a b c d (KArray e))) = (Key a b c d e )
+unKArray ((Key a b c d (KOptional (KArray e) ))) = (Key a b c d e )
 kOptional ((Key a b c d e)) = (Key a b c d (KOptional e) )
 
 addToList i  (Insert m) =  (\i-> mappend (fmap ((\(k,v)-> (k, v)))  <$> maybeToList i) ) (editedMod  i m )
@@ -302,7 +307,9 @@ data Inclusion
   deriving(Eq,Ord,Show)
 
 classifyFK (Attr (KOptional (Primitive i ))) (Attr (KInterval (Primitive j ))) | i == j =  [Elem]
+classifyFK (Attr (KOptional (Primitive i ))) (Attr (KArray (Primitive j ))) | i == j =  [Elem]
 classifyFK (Attr (Primitive i )) (Attr (KInterval (Primitive j ))) | i == j =  [Elem]
+classifyFK (Attr (Primitive i )) (Attr (KArray(Primitive j ))) | i == j =  [Elem]
 classifyFK (Attr (Primitive i )) (Attr (Primitive j))  | i == j = [Equal]
 classifyFK (FKT i _ _) (FKT j _ _) = concat $ liftA2 classifyFK i j
 classifyFK i j = [Equal]
@@ -366,13 +373,16 @@ fkUITable conn inf pgs created wl path@(Path rl (FKJoinTable _  rel _ ) rr ) old
 
 akUITable conn inf pgs path@(Path rl (FKJoinTable frl  rel frr ) rr ) oldItems  tb@(AKT ifk refl [tb1]) =
   do
-     fks <- mapM (\ix-> fkUITable conn inf pgs S.empty [] (Path rl (FKJoinTable frl (fmap (first unKArray ) rel) frr) rr) ( join . fmap (\(AKT l refl m) -> (\mi -> FKT (fmap (fmap (first  unKArray) ) l) refl mi) <$> atMay m ix )  <$>  oldItems) (FKT ifk refl tb1)) [0..4]
+     let isLeft = (any (any (isKOptional . keyType).  kattr ) ifk)
+     fks <- mapM (\ix-> fkUITable conn inf pgs S.empty [] (Path (if isLeft then S.map unKOptional rl else rl ) (FKJoinTable frl (fmap (first unKArray ) rel) frr) rr) ( join . fmap (\(AKT l refl m) -> (\mi -> FKT  l refl  mi ) <$>  unLeft (atMay m ix) )  <$>  oldItems) (FKT (fmap (fmap unKArray) ifk) refl (if isLeft then fmap unKOptional tb1 else tb1 ) )) [0..8]
      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      fksE <- UI.div # set children (getElement <$> fks )
      let bres = (fmap (\l -> AKT (fmap  (,SComposite $ V.fromList (fmap fst l)) <$> ifk) refl (fmap snd l)). allMaybes .  L.takeWhile (maybe False (const True))) <$> Tra.sequenceA ( fmap (fmap (\(FKT i _ j ) -> (head $ fmap (snd.unAttr) $ i, j)) ) . triding <$> fks)
      return $ TrivialWidget bres fksE
 
 interPoint ks i j = all (\(l,m) -> justError "interPoint wrong fields" $ liftA2 intersectPredTuple  (L.find ((==l).fst) i ) (L.find ((==m).fst) j)) ks
+
+unLeft i = join $  fmap ( allMaybes . fmap (traverse unSOptional) ) i
 
 pointInRangeSelection
   :: Connection
@@ -404,9 +414,9 @@ pointInRangeSelection conn inf pgs created wl (Path _ (FKJoinTable _ ksjoin _ ) 
                 iold  =   fmap (join . fmap (allMaybes . fmap (  (\(i,j)-> (unKOptional' i,)<$> j) . fmap unRSOptional'))) <$> (Tra.sequenceA $ fmap (fmap ( kattr) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ kattr $ fst i) oldASet) wl)
                 oldASet :: Set Key
                 oldASet = S.fromList (filter (flip S.member created) $ unAttr <$> fkattr' )
-            attrsUI <-  Tra.sequence $ fmap (\(l, m) -> fmap ( fmap (m,)) <$> buildUI (fmap textToPrim . keyType $ m) (join . fmap (!!l)  <$> sel )  ) $ filter (not . flip S.member created.snd) $ zip [0..] (unAttr <$>   fkattr' )
+            -- attrsUI <-  Tra.sequence $ fmap (\(l, m) -> fmap ( fmap (m,)) <$> buildUI (fmap textToPrim . keyType $ m) (join . fmap (!!l)  <$> sel )  ) $ filter (not . flip S.member created.snd) $ zip [0..] (unAttr <$>   fkattr' )
             let
-                vv =  join . fmap (lorder (unAttr <$> fkattr') ) . fmap concat . allMaybes  <$> liftA2 (++) (fmap (fmap pure)<$> Tra.sequenceA (triding <$> attrsUI)  ) iold
+                vv =  join . fmap (lorder (unAttr <$> fkattr') ) . fmap concat . allMaybes  <$> {-liftA2 (++) (fmap (fmap pure)<$> Tra.sequenceA (triding <$> attrsUI)  ) -}iold
             let tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK  l _ ) _ ))-> interPoint ksjoin {-all id $ zipWith intersectPredTuple -} k  (unAttr <$> l)) ) i) j ) <$> lks <*> vv
             (ce,ct,cev) <- crudUITable conn inf pgs tbfk  tb
             li <- wrapListBox lks tb showFK
@@ -416,8 +426,5 @@ pointInRangeSelection conn inf pgs created wl (Path _ (FKJoinTable _ ksjoin _ ) 
               # set style [("paddig-left","10px")]
             l <- UI.span # set text (show $ unAttr <$> fkattr')
             paint (getElement l) (facts vv)
-            o <- UI.div # set children (l: (getElement <$> attrsUI) <>  [getElement li,getElement chw,ce])
+            o <- UI.div # set children (l: {-(getElement <$> attrsUI) <> -} [getElement li,getElement chw,ce])
             return (vv,ct,o)
-
-
-
