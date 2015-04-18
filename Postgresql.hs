@@ -604,7 +604,8 @@ instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
 fromAttr foldable = do
-    FR.fieldWith (\i j -> case traverse (parseOnly (parseTable (    foldable))) j of
+    let parser  = parseTable foldable
+    FR.fieldWith (\i j -> case traverse (parseOnly parser) j of
                                (Right (Just r ) ) -> return r
                                Right Nothing -> error (show j <> show foldable)
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  <> "  "<> show foldable) )

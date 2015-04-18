@@ -23,6 +23,7 @@ import Data.Functor.Compose
 import Data.Typeable
 import Data.Distributive
 import Data.Vector(Vector)
+import qualified Data.Vector as Vector
 import Data.Functor.Classes
 import qualified Data.Foldable as F
 import Data.Foldable (Foldable)
@@ -82,7 +83,6 @@ textToPrim "double precision" = PDouble
 textToPrim "numeric" = PDouble
 textToPrim "float8" = PDouble
 textToPrim "int4" = PInt
--- textToPrim "bank_account" = PBackAccount
 textToPrim "cnpj" = PCnpj
 textToPrim "sql_identifier" =  PText
 textToPrim "cpf" = PCpf
@@ -214,11 +214,11 @@ showTy f (KSerial i) = showTy f i <> "?"
 
 data Key
     = Key
-    { keyValue :: Text
-    , keyAlias :: Maybe Text
-    , keyTranslation :: Maybe Text
-    , keyFastUnique :: Unique
-    , keyType :: KType Text
+    { keyValue :: ! Text
+    , keyAlias :: ! (Maybe Text)
+    , keyTranslation :: ! (Maybe Text)
+    , keyFastUnique :: ! Unique
+    , keyType :: ! (KType Text)
     }
 
 instance Eq Key where
@@ -482,6 +482,15 @@ getPrim (KArray j) =  getPrim j
 getPrim (KInterval j) =  getPrim j
 
 inner b l m = l <> b <> m
+
+intersectPred p@(Primitive _ ) (KInterval i) j (SInterval l )  | p == i =  Interval.member j l
+intersectPred p@(Primitive _ ) (KArray i) j (SComposite l )  | p == i =  Vector.elem j l
+intersectPred p1@(Primitive _ ) p2@(Primitive _) j l   | p1 == p2 =  j ==  l
+intersectPred p1@(KOptional i ) p2 (SOptional j) l  =  maybe False id $ fmap (\m -> intersectPred i p2 m l) j
+intersectPred p1 p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
+
+
+
 intersectionOp (KOptional i) (KOptional j) = intersectionOp i j
 intersectionOp i (KOptional j) = intersectionOp i j
 intersectionOp (KOptional i) j = intersectionOp i j
@@ -986,7 +995,6 @@ tname i = do
   return $ Labeled ("t" <> (T.pack $  show n)) i
 
 explodeLabel (Labeled l (Attr _)) = l
--- explodeLabel (Labeled l (FKT i _ (LB1 t) )) = "(" <> T.intercalate "," (( F.toList $ fmap explodeLabel t))  <> ")"
 explodeLabel (Labeled l (LFKT i refl (LB1 t) )) = T.intercalate "," (( F.toList $ fmap explodeLabel i)) <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel t))  <> ")"
 explodeLabel (Labeled l (LAKT i _ _ )) = T.intercalate "," (( F.toList $ fmap explodeLabel i)) <> "," <> l
 
@@ -1012,7 +1020,6 @@ rootPaths' invSchema r@(Raw _ _ _ _ fk _ ) = fst $ flip runState ((0,M.empty),(0
   return ( tb , "SELECT (" <> T.intercalate "," (fmap explodeLabel $ (F.toList $ unLB1 tb))  <> (") FROM " <> q ) <> js)
 
 
-backPK (Path i _ j)  = S.toList i
 
 
 projectAllRec'
@@ -1033,7 +1040,7 @@ projectAllRec' invSchema =  do
 justError e (Just i) = i
 justError e  _ = error e
 
-getTableKV (Raw _ _ pk desc _ attrs) = KV (PK (F.toList pk) (F.toList desc) ) (F.toList $ maybe attrs (`S.delete` attrs) desc )
+getTableKV (Raw _ _ pk desc _ attrs) = KV (PK (F.toList pk) (F.toList desc) ) (F.toList desc )
 
 projectTableAttrs
      :: Monad m => Table -> QueryT m (KV  KAttribute)
@@ -1084,6 +1091,7 @@ pathLabel (Path i t j) = tableName t
 zipWithTF g t f = snd (mapAccumL map_one (F.toList f) t)
     where map_one (x:xs) y = (xs, g y x)
 
+-- Literals Instances
 instance IsString Showable where
     fromString i = SText (T.pack i)
 
