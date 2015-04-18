@@ -132,6 +132,7 @@ indexTable (l:xs) (TB1 (KV (PK k d)  v))
 
 kattr (Attr i ) = [i]
 kattr (FKT i _ _ ) = L.concat $ kattr <$> i
+kattr (AKT i _ _ ) = L.concat $ kattr <$> i
 
 class KeyString i where
   keyString :: i -> Text
