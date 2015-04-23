@@ -50,8 +50,5 @@ prefeituraLoginCookie = "http://www2.goiania.go.gov.br/sistemas/saces/asp/saces0
 prefeituraLoginFormUrl ="http://www2.goiania.go.gov.br/sistemas/saces/asp/saces00005a1.asp"
 prefeituraConsutalNota nota = "http://www2.goiania.go.gov.br/sistemas/snfse/asp/snfse00200w0.asp?nota=" <> nota
 
-testSiapi3 = do
-  n127 <- prefeituraNota "1553542" "1" "denise17" "127"
-  traverse (writeFile "n127.html") n127
 
 
