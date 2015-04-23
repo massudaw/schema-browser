@@ -223,7 +223,6 @@ cpfValidate i
         m2 = multSum i multiplier2
         [m1v,m2v] = drop 9 i
 
-
 cnpjValidate i
   | length i /= 14 = Left "Invalid size Brazilian Cnpj need 14 digits"
   | m1v == m1 && m2v == m2 = Right i
@@ -237,9 +236,8 @@ cnpjValidate i
         [m1v,m2v] = drop 12 i
 
 tcnpj = [0,4,8,2,5,5,8,0,0,0,0,1,0,7]
+
 cpf = [0,2,8,4,0,3,0,1,1,2,1]
-
-
 
 safeTail [] = []
 safeTail i = tail i
@@ -272,24 +270,25 @@ parseAttr (Attr i) = do
 
 parseAttr (LAKT l refl [t]) = do
   ml <- unIntercalateAtto (parseAttr .labelValue <$> l) (char ',')
-  r <- doublequoted (parseArray ( doublequoted $ parseTable t)) <|> parseArray (doublequoted $ parseTable t) <|> pure []
+  r <- doublequoted (parseArray ( doublequoted $ parseLabeledTable t)) <|> parseArray (doublequoted $ parseLabeledTable t) <|> pure []
   return $ AKT ml  refl r
 
 parseAttr (LFKT l refl j ) = do
   ml <- unIntercalateAtto (parseAttr .labelValue <$> l) (char ',')
-  mj <- doublequoted (parseTable j) <|> parseTable j
+  mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j
   return $ FKT ml refl mj
 
 parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 
-parseTable (LB1 (KV (PK i d ) m)) = (char '('  *> (do
-  im <- unIntercalateAtto (parseAttr .labelValue<$> (i <> d <> m) ) (char ',')
+parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
+  im <- unIntercalateAtto (parseAttr .labelValue . getCompose <$> (i <> d <> m) ) (char ',')
   return (TB1 (KV ( PK (L.take (length i) im ) (L.take (length d) $L.drop (length i) $  im))(L.drop (length i + length d) im)) )) <* char ')' )
 
+{-
 parseTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
   im <- unIntercalateAtto (parseAttr <$> (i <> d <> m) ) (char ',')
   return (TB1 (KV (PK (L.take (length i) im ) (drop (length i) $ L.take (length d) im))(drop (length i + length d) im)) )) <* char ')' )
-
+-}
 
 -- | Recognizes a quoted string.
 doublequoted :: Parser a -> Parser a
@@ -608,7 +607,7 @@ instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
 fromAttr foldable = do
-    let parser  = parseTable foldable
+    let parser  = parseLabeledTable foldable
     FR.fieldWith (\i j -> case traverse (parseOnly parser) j of
                                (Right (Just r ) ) -> return r
                                Right Nothing -> error (show j <> show foldable)

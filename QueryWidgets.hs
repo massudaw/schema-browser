@@ -363,8 +363,8 @@ fkUITable conn inf pgs created wl path@(Path rl (FKJoinTable _  rel _ ) rr ) old
     where ksn = filter (\i -> not $ S.member (fst i) created) rel
 
 
-akUITable conn inf pgs path@(Path rl (FKJoinTable frl  rel frr ) rr ) oldItems  tb@(AKT ifk@[_] refl [tb1]) =
-  do
+akUITable conn inf pgs path@(Path rl (FKJoinTable frl  rel frr ) rr ) oldItems  tb@(AKT ifk@[_] refl [tb1])
+  | otherwise = do
      let isLeft = any (any (isKOptional . keyType).  kattr) ifk
          path = Path (S.map unKArray $ if isLeft then S.map unKOptional rl else rl ) (FKJoinTable frl (fmap (first unKArray) rel) frr) rr
          indexItens ix = join . fmap (\(AKT [l] refl m) -> (\li mi -> FKT  [li] refl  mi ) <$> (join $ traverse (indexArray ix ) <$> unLeftBind l) <*> (if isLeft then unLeft else id ) (atMay m ix) )  <$>  oldItems
