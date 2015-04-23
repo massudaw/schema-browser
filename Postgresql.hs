@@ -151,6 +151,7 @@ instance TF.ToField Showable where
   toField (SLineString t) = TF.toField t
   toField (SBounding t) = TF.toField t
   toField (SBoolean t) = TF.toField t
+  toField (SBinary t) = TF.toField t
 
 defaultType t =
     case t of
@@ -299,6 +300,9 @@ parseShowable
        -> Parser Showable
 parseShowable (Primitive i ) =  (do
    case i of
+        PPdf -> let
+              pr = SBinary . fst . B16.decode .BS.drop 1 <$>  plain' "\",)}"
+                in doublequoted pr <|> pr
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double

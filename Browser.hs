@@ -28,7 +28,6 @@ import System.Environment
 import Debug.Trace
 import Data.Ord
 import Data.Tuple
-import OAuth
 import Data.Time.Format
 import System.Locale
 import Data.Aeson
@@ -166,36 +165,36 @@ tableNonRec (TB1 k ) = concat $ F.toList $  fmap attrNonRec k
 
 
 pollingUI' conn inf listRes p@(BoundedPollingPlugins n deftime (table,f) a) = do
-  let plug = a conn inf
-  headerP <- UI.div # set text n
-  b <- UI.button # set UI.text "Submit"
-  let  convert = 60000
-  inp <- UI.input # set UI.value  (show deftime)
-  inter <- stepper (deftime*convert) (filterJust  $ fmap (fmap (*convert).readMaybe) (UI.valueChange inp) )
-  tmr <- UI.timer # sink UI.interval  inter
-  staT <- UI.button # set text "Start" # set UI.enabled True
-  stoT <- UI.button # set text "Stop" # set UI.enabled False
-  onEvent (UI.click staT) (const (do
-          UI.start tmr
-          v <- tmr # UI.get UI.interval
-          element stoT # set UI.enabled True
-          element staT # set UI.enabled False ))
-  onEvent (UI.click stoT) (const (do
-          UI.stop tmr
-          element stoT # set UI.enabled False
-          element staT # set UI.enabled True ))
-  let
-    evpoll =(unionWith const (UI.click b) (UI.tick tmr))
-  bht <- stepper Nothing (unsafeMapIO (fmap Just . const getCurrentTime) evpoll)
-  output <- UI.div  # sink text ((\v  t -> "Timer Interval: " <> show (fromIntegral v/60000) <> " minutes" <> " -  Last Poll: " <> maybe "-" show t ) <$> inter <*> bht)
-  let evb = ( (facts (filter (\i -> tdInput i && tdOutput1 i ) <$>listRes) <@ UI.click b))
-      tdInput i =  maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd t) i) (fst f)
-      tdOutput1 i =  maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd f) i) (snd f)
+    let plug = a conn inf
+    headerP <- UI.div # set text n
+    b <- UI.button # set UI.text "Submit"
+    let  convert = 60000
+    inp <- UI.input # set UI.value  (show deftime)
+    inter <- stepper (deftime*convert) (filterJust  $ fmap (fmap (*convert).readMaybe) (UI.valueChange inp) )
+    tmr <- UI.timer # sink UI.interval  inter
+    staT <- UI.button # set text "Start" # set UI.enabled True
+    stoT <- UI.button # set text "Stop" # set UI.enabled False
+    onEvent (UI.click staT) (const (do
+            UI.start tmr
+            v <- tmr # UI.get UI.interval
+            element stoT # set UI.enabled True
+            element staT # set UI.enabled False ))
+    onEvent (UI.click stoT) (const (do
+            UI.stop tmr
+            element stoT # set UI.enabled False
+            element staT # set UI.enabled True ))
+    let
+      evpoll =(unionWith const (UI.click b) (UI.tick tmr))
+    bht <- stepper Nothing (unsafeMapIO (fmap Just . const getCurrentTime) evpoll)
+    output <- UI.div  # sink text ((\v  t -> "Timer Interval: " <> show (fromIntegral v/60000) <> " minutes" <> " -  Last Poll: " <> maybe "-" show t ) <$> inter <*> bht)
+    let evb = ( (facts (filter (\i -> tdInput i && tdOutput1 i ) <$>listRes) <@ UI.click b))
+        tdInput i =  maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd t) i) (fst f)
+        tdOutput1 i =  maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd f) i) (snd f)
 
-  bh <- stepper []  evb
-  ev <- plug  (tidings bh evb)
-  body <- UI.div  # set children [headerP,b,inp,staT,stoT,output,ev]
-  return body
+    bh <- stepper []  evb
+    ev <- plug  (tidings bh evb)
+    body <- UI.div  # set children [headerP,b,inp,staT,stoT,output,ev]
+    return body
 
 
 -- Split composite PKs in list of atomic pks
@@ -299,6 +298,8 @@ chooserKey conn inf kitems i = do
   body <- UI.div # sink items (facts (pure . chooseKey conn inf <$> bBset ))
   UI.div # set children [filterInp,getElement bset, body]
 
+tableNonrec (TB1 k ) = concat $ F.toList $ _kvAttr $ fmap attrNonRec k
+
 chooseKey
   :: Connection
      -> InformationSchema -> S.Set Key -> UI Element
@@ -391,7 +392,7 @@ chooseKey conn  inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,_,evs) <- crudUITable conn inf [{-lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJBoundary ,queryTimeline, queryAndamentoB,queryArtAndamento -}] (allRec' (tableMap inf) table) (UI.userSelection itemList)
+            (crud,_,evs) <- crudUITable conn inf [queryTimeline  ,lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJBoundary ,queryTimeline, queryAndamentoB,queryArtAndamento ] (allRec' (tableMap inf) table) (UI.userSelection itemList)
             let eres = fmap (addToList  (allRec' (tableMap inf ) table )  <$> ) evs
             res2 <- accumTds vp  eres
             insertDiv <- UI.div # set children [crud]
@@ -485,7 +486,7 @@ queryPollAndamentoB =  BoundedPollingPlugins "Andamento Bombeiro" 60  ("fire_pro
       cpf <- varT "id_owner,id_contact:id_owner:cgc_cpf" -< t
       odx "aproval_date" -< t
       returnA -< idp
-    elem conn inf inputs = fst <$> queryAndamento3  conn inf (traceShowId.fmap F.toList <$> inputs)
+    elem conn inf inputs = fst <$> queryAndamento3  conn inf (fmap F.toList <$> inputs)
 
 queryPollAndamentoIO ,queryPollArtAndamentoIO  :: PollingPlugins [TB1 (Key,Showable)] (IO [([TableModification Showable])])
 
@@ -519,7 +520,7 @@ queryPollArtAndamentoIO = BoundedPollingPlugins "Andamento Art Crea"  60  ("art"
           artVeri d = Attr ("verified_date" ,SOptional $ Just $ STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" ( d !!1) )
           artPayd d = Attr ("payment_date" ,SOptional $Just $ STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" (d !!1) )
           artInp :: [[String]] -> TB1 (Text,Showable)
-          artInp inp = TB1 $ KV (PK [] []) $ catMaybes [artVeri <$>  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd <$> L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (traceShowId inp) ]
+          artInp inp = TB1 $ KV (PK [] []) $ [maybe (Attr ("verified_date",SOptional Nothing)) artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,maybe (Attr ("payment_date",SOptional Nothing)) artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       i <- checkOutput "verified_date" -< (t,Just$ artInp o)
       j <- checkOutput "payment_date" -< (t,Just $artInp o)
       returnA -< (catMaybes [i, j] )
@@ -535,7 +536,6 @@ queryPollArtAndamentoIO = BoundedPollingPlugins "Andamento Art Crea"  60  ("art"
                  then return []
                  else do
                    v <- updateMod conn inf (i)  (fromJust $ fmap F.toList im) (lookTable inf "art")
-                   traverse (logTableModification inf conn ) v
                    return $ maybeToList v
        ev
 
@@ -573,7 +573,7 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                     tq <-  getRequest . traceShowId . (renderUrl translate_a addrs_a)  $  lkeys
                     let
                       i =  T.unpack $  decodeLatin1 tq
-                      convertAndamento [da,desc] = [("andamento_date",SDate . Finite . localDay . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  desc))]
+                      convertAndamento [da,desc] = [("andamento_date",STimestamp . Finite . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  desc))]
                       convertAndamento i = error $ "convertAndamentoLegacy:  " <> show i
                       prepareArgs  = fmap ( tkeys "andamento". M.fromList . convertAndamento ) .  tailEmpty . concat
                       lookInput = justError "could not find id_project" . fmap (\(k,v) -> let k1 = (\(Just i)-> i) $ M.lookup ("andamento","id_project") (keyMap inf) in (k1, transformKey (textToPrim <$> keyType k)  (textToPrim <$> keyType k1) v) ) . L.find ((== "id_project") . keyValue . fst)
@@ -589,7 +589,7 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                       vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) andamento )
 
                       let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . concat . F.toList . fmap attrNonRec . _unTB1) vp) :: S.Set (Map Key Showable)
-                      adds <- {-traceShow ("KK " <> show kk <> " \n ARGS " <> show args) $-} mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  inf (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
+                      adds <-  mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  inf (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
                       return $ mod : adds
 
                   updateSolicitacao :: MaybeT IO (Maybe (TableModification Showable))
@@ -609,7 +609,6 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                 sol <- C.lift $ maybeToList <$> runMaybeT updateSolicitacao
                 gets <-C.lift $ maybeToList <$> runMaybeT getPdf
                 let mods =  catMaybes (   modB :  gets <> and  <> sol)
-                mapM (C.lift . logTableModification inf conn) mods
                 MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) mods
               else do
                     -- MaybeT $ return $ if elem "aproval_date" ((keyValue . fst)<$>  filter (not . isEmptyShowable. snd ) inputs )  then Nothing else Just undefined
@@ -619,7 +618,7 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                                   False -> Just undefined
                     let
                       tkeys t v =  M.mapKeys (lookKey inf t)  v
-                      convertAndamento [_,da,desc,s,sta] = [("andamento_date",SDate . Finite . localDay . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)]
+                      convertAndamento [_,da,desc,s,sta] = [("andamento_date",STimestamp . Finite .  fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)]
                       convertAndamento i = error $ "convertAndamento2015 :  " <> show i
                       prepareArgs  = fmap (tkeys "andamento" . M.fromList . convertAndamento)
                       lookInput = justError "could not find id_project" . fmap (\(k,v) -> let k1 = (\(Just i)-> i) $ M.lookup ("andamento","id_project") (keyMap inf) in (k1, transformKey (textToPrim <$> keyType k)  (textToPrim <$> keyType k1) v) ) . L.find ((== "id_project") . keyValue . fst)
@@ -642,7 +641,6 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                       let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . concat . F.toList . fmap attrNonRec . _unTB1) vp) :: S.Set (Map Key Showable)
                       adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  inf (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
                       return $ mod : adds
-                    mapM (C.lift . logTableModification inf conn) (catMaybes $firemods:mods)
                     MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) (catMaybes (firemods:mods) ))
 
 getInput k = fmap (BSL.toStrict. BSL.pack .renderShowable . snd) . lookInput k
@@ -719,10 +717,8 @@ testSolicitation f = do
       result =  catMaybes .fmap (\(k,v) -> fmap ($v) <$> M.lookup k (M.fromList translateSolicitation))
   return $ (result keyvalue)
 
-
-sdate  = SDate . Finite .localDay
-stimestamp  = STimestamp . Finite
-
+sdate = SDate . Finite . localDay
+stimestamp = STimestamp . Finite
 
 bradescoExtractTxt  conn  inf   inputs = do
     pathInput <- UI.input -- # set UI.type_ "file"
@@ -754,7 +750,7 @@ itauExtractTxt  conn  inf   inputs = do
           let parse  = uncurry M.insert (lookInput inp )  . tkeys . parseField . unIntercalate (';'==) <$> lines (filter (/='\r') file)
               lookInput = (\(Just i)-> i) .L.find ((== "id_account") . keyValue . fst)
               tkeys v =  M.mapKeys (lookKey  inf "transaction")  v
-              parseField [d,desc,v] = M.fromList [("transaction_date",SDate $ Finite $ localDay $ fst $ (\(Just i)-> i) $ strptime "%d/%m/%Y" d),("transaction_description",SText $ T.pack desc),("transaction_price", SDouble $ read $ fmap (\i -> if i == ',' then '.' else i) v)]
+              parseField [d,desc,v] = M.fromList [("transaction_date", SDate $ Finite $ localDay $ fst $ (\(Just i)-> i) $ strptime "%d/%m/%Y" d),("transaction_description",SText $ T.pack desc),("transaction_price", SDouble $ read $ fmap (\i -> if i == ',' then '.' else i) v)]
           vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inp ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) $(\(Just i)-> i) $  M.lookup  "transaction" (tableMap inf ))
           let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_account","transaction_description","transaction_date","transaction_price"] ) . keyValue . fst ) . F.toList ) vp) :: S.Set (Map Key Showable)
           adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ fmap Just $ insertPK fromShowableList  conn  (M.toList kv) ((\(Just i)-> i) $ M.lookup  "transaction" (tableMap inf) )) (S.toList $ ( S.fromList parse ) `S.difference` kk)
@@ -771,41 +767,9 @@ lookAttr inp attr = justError ("Error looking Attr: " <> show attr <> " " <> sho
 
 lookKeyMap inp attr = justError ("Error looking KeyMap: " <> show attr <> " " <> show inp) $ M.lookup attr  inp
 
-{-
-
-wappImport conn inf  _ = do
-  let chat@(Raw _ _ pk desc ifk attrs) = lookTable inf "chat"
-  pathInput <- UI.input  -- # set UI.type_ "file"
-  b <- UI.button # set UI.text "Import"
-  bhInp <- stepper "" (UI.valueChange pathInput)
-  v <- mapM (\path -> fkUITable conn inf [] path (pure Nothing)  . fmap snd . fkCase (tableMap inf) False PathRoot $ path) $ S.toList ifk
-  let
-      ninputs = allMaybes <$> (fkattrsB (pure mempty) (snd <$> v))
-  output <- UI.div # set children (fst <$> v)
-  let process (Just inp) path = do
-        file <-  liftIO $ T.readFile path
-        let result =  S.fromList $ M.fromList <$>  (fmap  parse $ filter (\(i,xs) -> isJust $ strptime "%d de %b %R" (T.unpack $ translateMonth i)) $   T.breakOn ("-") <$> T.split (=='\n') file)
-            parse (d,t) =  (\(k,s)-> (lookKey inf "chat"  k,s)) <$>  [("chat_instant",STimestamp $ Finite $ fst $ (\(Just i)-> i) $ strptime "%d de %b %R %Y" (T.unpack (translateMonth d) <> " 2014")),("chat_text",SText $ T.drop 2 c), ("speaker_contact",snd $ head speaker )  ,("target_contact",snd $ head target)]
-              where (p,c) =  T.breakOn (":") t
-                    name = T.unpack $ T.drop 2 p
-                    Just (FKT [Attr speaker] _ )= F.find (L.isInfixOf name . show ) inp
-                    Just (FKT [Attr target] _ )= F.find (not . L.isInfixOf name. show ) inp
-            queryFilter [(k1,v1),(k2,v2)] = M.fromList $  fmap (fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) )) [(lookKeyMap (keyMap inf) ("chat","speaker_contact"),v1),(lookKeyMap (keyMap inf) ("chat","target_contact"),v2)]
-        vp <- mapM (\speaker -> doQueryAttr conn inf (projectAllRec' (tableMap inf)) (queryFilter ((\(FKT [Attr i] _ )-> i ) <$> speaker))  pk) (L.permutations inp)
-        let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["speaker_contact","target_contact","chat_text","chat_instant"] ) . keyValue . fst ) . F.toList ) (concat vp)) :: S.Set (Map Key Showable)
-        adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SomeException)) Nothing )) $ fmap Just $ insertPK fromShowableList  conn  (M.toList kv) chat ) (S.toList $  result  `S.difference` kk)
-        return result
-      process Nothing  path = do return S.empty
-      j = unsafeMapIO id $ process  <$> facts ninputs <*> bhInp <@ UI.click b
-  outStp <- stepper "" (fmap show $ j)
-  out <- UI.div # sink UI.text outStp
-  inpOut <- UI.div # sink UI.text (show <$> facts ninputs)
-  (,pure Nothing) <$> UI.div # set children [output,pathInput,b,out,inpOut]
--}
-
 queryAndamento2 conn inf   input = do
         b <- UI.button # set UI.text "Submit"
-        tq <-  mapT (\case {Just input -> queryAndamento4 conn inf (traceShowId input) ; Nothing -> return Nothing}) (shortCutClick input (UI.click b))
+        tq <-  mapT (\case {Just input -> queryAndamento4 conn inf (input) ; Nothing -> return Nothing}) (shortCutClick input (UI.click b))
         e <- UI.div # sink UI.text (fmap (maybe "" show ) $ facts $ tq)
         body <-UI.div # set children [b,e]
         return (body , pure Nothing :: Tidings (Maybe (Map Key Showable)))
@@ -836,17 +800,21 @@ data Timeline
 
 queryTimeline = BoundedPlugin "Timeline" ("pricing",staticP arrow)  elem
   where
-    convDateArr i = fmap swap $ fmap (fmap (\(SDate (Finite f)) -> f)) $ catMaybes $ fmap (traverse unRSOptional') $ catMaybes $ i
+    convDateArr i = swap . fmap (\(SDate (Finite f))-> f) <$> (catMaybes $ fmap (traverse unRSOptional') $ catMaybes $ i)
     arrow :: FunArrowPlug [(Day,String)]
     arrow = proc t -> do
       prd <- varT "pricing_date" -< t
+      papr <- varN "pricing_approval" -< t
       apd <- varN "id_project:aproval_date" -< t
-      returnA -<  convDateArr  [("Orçamento",)<$> prd,("Aprovação",) <$> apd]
+      arr <- varN "pagamentos:payment_date" -< t
+      arrD <- varN "pagamentos:payment_description" -< t
+      let vv =  concat $ maybeToList $ (\(SComposite i) (SComposite j)-> fmap Just $ zip (renderShowable <$> F.toList j ) (F.toList i)) <$>  arr <*> arrD
+
+      returnA -<  convDateArr ([("Proposta de Enviada",)<$> prd,("Projeto Aprovado",) <$> apd ,("Proposta Aprovada",) <$> papr] <>  vv )
     elem con inf inputs = do
         e <- UI.div # set UI.id_ "timeline-embed"
-        let
-            timeline i = Timeline "hello" (dynP arrow $ i)
-        i <- UI.div # sink UI.html  (fmap (\i->  "<script>    var container = document.getElementById('timeline-embed');var items = new vis.DataSet("  <>  BSL.unpack (traceShowId $ encode (timeline i)) <> ") ;  var options = {} ; if (container.vis != null ) { container.vis.destroy(); } ; container.vis = new vis.Timeline(container,items,options); </script>") $ facts inputs)
+        let  timeline i = Timeline "hello" (dynP arrow $ i)
+        i <- UI.div # sink UI.html  (fmap (\i->  "<script>    var container = document.getElementById('timeline-embed');var items = new vis.DataSet("  <>  BSL.unpack ( encode (timeline i)) <> ") ;  var options = {} ; if (container.vis != null ) { container.vis.destroy(); } ; container.vis = new vis.Timeline(container,items,options); </script>") $ facts inputs)
         UI.div # set children [e,i]
 
 
@@ -897,22 +865,36 @@ queryArtCrea = BoundedPlugin "Documento Final Art Crea" ("art",staticP url) elem
 
 queryArtBoletoCrea = BoundedPlugin "Boleto Art Crea" ("art",staticP url) elem
   where
+    updateArtStatus  conn inf it im = do
+              let i = fmap (first (lookKey inf "art")) (it)
+              if null (i) || not (isJust im)
+                 then return []
+                 else do
+                   v <- updateMod conn inf (i)  (fromJust $ fmap F.toList im) (lookTable inf "art")
+                   return $ maybeToList v
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe String)
+    url :: ArrowPlug (Kleisli IO) ([(Text,Showable)])
     url = proc t -> do
       i <- varTB "art_number" -< t
       idxT "verified_date" -< t
-      odx "payment_date" -<  t
+      odx "boleto" -<  t
       r <- at "crea_register" (proc t -> do
                                n <- varTB "crea_number" -< t
                                u <- varTB "crea_user"-< t
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
-      act ( traverse (\(i, (j, k,a)) -> creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
+      b <- act ( traverse (\(i, (j, k,a)) -> creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
+      let ao =  Just $ TB1 $ KV (PK [] []) [Attr  ("boleto",   SOptional $ (SBinary. BS.pack) <$> b)]
+      ob <- checkOutput "boleto" -< (t , ao)
+      returnA -< catMaybes [ob]
     elem conn inf inputs = do
-       let ev = unsafeMapIO (dynPK url) (rumors inputs)
-       i <- stepper "" (maybe "" id <$> ev)
-       pdfFrame i # set UI.name "creaBoletoFrame" # set UI.id_ "creaBoletoFrame"
+       let ev = unsafeMapIO (maybe (return []) (\inp -> do
+                            b <- dynPK url (Just inp)
+                            updateArtStatus conn inf b (Just inp)
+                            )) (rumors inputs)
+       i <- stepper [] ev
+       UI.div # sink UI.text (show <$> i)
+
 
 
 printIFrame i = do
@@ -947,23 +929,22 @@ queryPollArtAndamento = BoundedPollingPlugins "Andamento Art Crea"  60  ("art",s
           artVeri d = Attr ("verified_date" ,SOptional $ Just $ STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" ( d !!1) )
           artPayd d = Attr ("payment_date" ,SOptional $Just $ STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" (d !!1) )
           artInp :: [[String]] -> TB1 (Text,Showable)
-          artInp inp = TB1 $ KV (PK [] []) $ catMaybes [artVeri <$>  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd <$> L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (traceShowId inp) ]
+          artInp inp = TB1 $ KV (PK [] []) $ [maybe (Attr ("verified_date",SOptional Nothing)) artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,maybe (Attr ("payment_date",SOptional Nothing)) artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       i <- checkOutput "verified_date" -< (t,Just$ artInp o)
       j <- checkOutput "payment_date" -< (t,Just $artInp o)
-      returnA -< (catMaybes [i, j] )
+      returnA -< catMaybes [i, j]
 
 
     elem conn inf inputs = do
        let ev = unsafeMapIO (mapM (\im -> do
                               h <- dynPK url (Just im)
-                              updateArtStatus (Just im)  h).traceShowId  ) (rumors inputs)
+                              updateArtStatus (Just im)  h)) (rumors inputs)
            updateArtStatus  im it = do
               let i = fmap (first (lookKey inf "art")) it
               if null (i)
                  then return []
                  else do
                    v <- updateMod conn inf (i)  (fromJust $ fmap F.toList im) (lookTable inf "art")
-                   traverse (logTableModification inf conn ) v
                    return $ maybeToList v
        bh <- stepper [] ev
        UI.div # sink UI.text (show <$> bh )
@@ -992,7 +973,7 @@ queryArtAndamento = BoundedPlugin "Andamento Art Crea" ("art",staticP url) elem
            updateArtStatus  im i = do
               let artVeri d = (lookKey inf "art" "verified_date" ,STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" ( d !!1) )
                   artPayd d = (lookKey inf "art" "payment_date" ,STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" (d !!1) )
-                  artInp inp = catMaybes [artVeri <$>  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd <$> L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (traceShowId inp) ]
+                  artInp inp = catMaybes [artVeri <$>  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd <$> L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
               if null (artInp i)
                  then return []
                  else maybeToList <$> updateMod conn inf (artInp i)  (fromJust $ fmap F.toList im) (lookTable inf "art")
@@ -1011,7 +992,7 @@ queryGeocodeBoundary = BoundedPlugin "Google Geocode" ("address",staticP url) el
       b <- UI.button # set UI.text "Import"
       let
           req im = runMaybeT $ do
-            r <- getRequest  . traceShowId  . dynP url $im
+            r <- getRequest  .  dynP url $im
             let dec = decode r :: Maybe Value
                 loc = dec !> "results" !!> 0 !> "geometry" !> "location"
                 bounds = dec !> "results" !!> 0 !> "geometry" !> "bounds"
@@ -1023,7 +1004,6 @@ queryGeocodeBoundary = BoundedPlugin "Google Geocode" ("address",staticP url) el
                                         (i@(Just _), _ ) -> i
                                         (Nothing , j) -> j
             mod <- C.lift $ updateMod conn inf [(lkey "geocode" ,SPosition p),( lkey "bounding", SBounding b)] (fromJust $ fmap F.toList im) (lookTable inf "address")
-            C.lift $ traverse (logTableModification inf conn) mod
             return [(lkey "geocode" ,SPosition p),( lkey "bounding", SBounding b)]
       let et =  unsafeMapIO req (facts inputs <@ UI.click b)
       t <- stepper "" (show <$> et)
@@ -1098,14 +1078,12 @@ executeStep  conn inf inputs (TBPlan t  ta steps) =  do
             TInsert -> do
                traverse (\i -> do
                         mod <- insertMod conn inf (concat i) ta
-                        traverse (logTableModification inf conn ) mod
                         return mod
                         ) (allMaybes k)
                return $ Just []
             TUpdate -> do
                traverse (\i -> do
                         mod <- updateMod conn inf (concat i) inputs ta
-                        traverse (logTableModification inf conn ) mod
                         return mod
                         ) (onlyJust k)
 
@@ -1113,13 +1091,12 @@ executeStep  conn inf inputs (TBPlan t  ta steps) =  do
 executeStep  _ inf _ (SPAttr t k v) = return $ fmap (\i -> [(k,i)]) v
 executeStep  conn inf inputs (SPFK t (Path  i (FKJoinTable ti s tj ) j) steps) = do
   k <-  mapM (executeStep conn inf inputs) steps
-  traceShowId <$> joinTable (M.fromList $ swap <$> s) <$> case t of
+  joinTable (M.fromList $ swap <$> s) <$> case t of
        FKEInsertGenerated -> do
          traverse (\i -> insertPK fromShowableList conn (concat i) tj) (allMaybes k)
        FKEUpdateFK -> do
          traverse (\i -> do
                     mod <- updateMod conn inf ( concat  i) inputs tj
-                    traverse (logTableModification inf conn ) mod
                     let upPKs = filter ((`S.member` j) .fst) (concat i)
                     return  upPKs
                   ) (onlyJust k)
@@ -1128,7 +1105,7 @@ joinTable  m  i= join $ allMaybes . fmap (fmap swap . Tra.sequence . fmap (flip 
 
 onlyJust = allNonEmpty . catMaybes
 
-testPlan conn inf input ndata = executeStep  conn inf input   .  generateValues ndata .  traceShowId . generateStepPlan inf input
+testPlan conn inf input ndata = executeStep  conn inf input   .  generateValues ndata .   generateStepPlan inf input
 
 generateValues
   :: (Ord k, Functor f) => Map k a -> f (k, Maybe a -> b) -> f b
@@ -1212,7 +1189,7 @@ queryCNPJBoundary =
           out <- UI.div
           ev <- liftIO  $ cnpjquery out (maybe "" id . fmap (BS.pack.T.unpack) . dynP arrow <$> inputs)
           s <- stepper [] (unsafeMapIO (\(inp,res) -> do
-                      testPlan conn inf (traceShowId. catMaybes . fmap (traverse unRSOptional') . F.toList $ inp) ( M.fromList $ traceShowId res) ("owner",testStep)
+                      testPlan conn inf ( catMaybes . fmap (traverse unRSOptional') . F.toList $ inp) ( M.fromList  res) ("owner",testStep)
                       return []
                             ) (filterJust $ liftA2 (,) <$> facts inputs <@> ev ))
           element out #+ [UI.div # sink UI.text s]

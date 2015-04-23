@@ -37,6 +37,7 @@ import Data.Functor.Product
 import Data.Bifunctor
 
 import qualified Data.Text.Lazy as T
+import qualified Data.ByteString as BS
 import qualified Data.ExtendedReal as ER
 
 import GHC.Int
@@ -77,6 +78,7 @@ textToPrim "character varying" = PText
 textToPrim "name" = PText
 textToPrim "varchar" = PText
 textToPrim "text" = PText
+textToPrim "pdf" = PPdf
 textToPrim "character" = PText
 textToPrim "char" = PText
 textToPrim "double precision" = PDouble
@@ -175,6 +177,7 @@ data KPrim
    | PPosition
    | PBounding
    | PCnpj
+   | PPdf
    | PCpf
    | PLineString
    deriving(Show,Eq,Ord)
@@ -182,6 +185,7 @@ data KPrim
 
 data KType a
    = Primitive a
+   | InlineTable a
    | KSerial (KType a)
    | KArray (KType a)
    | KInterval (KType a)
@@ -212,13 +216,15 @@ showTy f (KInterval i) = "(" <>  showTy f i <> ")"
 showTy f (KSerial i) = showTy f i <> "?"
 
 
-data Key
+type Key = FKey (KType Text)
+
+data FKey a
     = Key
     { keyValue :: ! Text
     , keyAlias :: ! (Maybe Text)
     , keyTranslation :: ! (Maybe Text)
     , keyFastUnique :: ! Unique
-    , keyType :: ! (KType Text)
+    , keyType :: ! a
     }
 
 instance Eq Key where
@@ -232,8 +238,8 @@ instance Ord Key where
    k >= l = keyFastUnique k >= keyFastUnique l
 
 instance Show Key where
-   show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
-   -- show  =  T.unpack .showKey
+   -- show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
+   show  =  T.unpack .showKey
 showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> {-"::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> -} "::"  <> showTy id (keyType k)
 
 
@@ -290,6 +296,7 @@ data Showable
   | SLineString !LineString
   | SDate !Date
   | SSerial !(Maybe Showable)
+  | SBinary !BS.ByteString
   | SOptional !(Maybe Showable)
   | SComposite !(Vector Showable)
   | SInterval !(Interval.Interval Showable)
@@ -304,8 +311,13 @@ normalize i = i
 
 transformKey (KSerial i)  (KOptional j) (SSerial v)  | i == j = (SOptional v)
 transformKey (KOptional i)  (KSerial j) (SOptional v)  | i == j = (SSerial v)
-transformKey (KSerial j)  l@(Primitive _ ) (SSerial v) | j == l  && isJust v =  (\(Just i)-> i) v
-transformKey (KOptional j)  l@(Primitive _ ) (SOptional v) | j == l  && isJust v = (\(Just i)-> i) v
+transformKey (KOptional j)  l@(Primitive _) (SOptional v)
+    | isJust v = transformKey j l (fromJust v)
+    | otherwise = error "no transform optional nothing"
+transformKey (KSerial j)  l@(Primitive _) (SSerial v)
+    | isJust v = transformKey j l (fromJust v)
+    | otherwise = error "no transform serial nothing"
+-- transformKey (KOptional j)  l@(Primitive _ ) (SOptional v) | j == l  && isJust v = (\(Just i)-> i) v
 transformKey l@(Primitive _)  (KOptional j ) v | j == l  = SOptional $ Just v
 transformKey l@(Primitive _)  (KSerial j ) v | j == l  = SSerial $ Just v
 transformKey ki kr v | ki == kr = v
@@ -395,11 +407,12 @@ renderShowable i = shw i
   shw (SLineString a ) = show a
   shw (SBounding a ) = show a
   shw (SDate a) = show a
-  shw (SSerial a) = maybe " " ((" "<>) . shw) a
-  -- show (SSerial a) = show a
+  -- shw (SSerial a) = maybe " " ((" "<>) . shw) a
+  shw (SSerial a) = show a
+  shw (SBinary a) = show a
   shw (SPosition a) = show a
-  --show (SOptional a) = show a
-  shw (SOptional a) = maybe "  " (("  "<>). shw) a
+  shw (SOptional a) = show a
+  -- shw (SOptional a) = maybe "  " (("  "<>). shw) a
   shw (SInterval a) = showInterval a
   shw (SPInterval a) = show a
   shw (SComposite a) = intercalate "," $ F.toList (fmap shw a)
@@ -761,11 +774,6 @@ countAll tmap i = do
 
 -}
 
-freeVars (Metric c) = [c]
--- freeVars (Rate c k ) = freeVars c <> freeVars k
--- freeVars (Prod c k ) = freeVars c <> freeVars k
-freeVars (Agg (Aggregate l _ ) ) = concatMap freeVars l
-
 predicate
   :: Monad m =>[(Key,Filter)]
      -> QueryT m ()
@@ -854,8 +862,6 @@ allPKRec  (TB1 (KV (PK k d) i ))=  F.foldr zipPK (PK [] []) $ (go (flip PK []) <
         go l (Attr a) = l [a]
 
 
-
-
 allAliasedRec i t = tb1Rec False PathRoot i t
 
 tb1Rec isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
@@ -918,10 +924,8 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
     | any (isArray . keyType . fst) (ks)  =   do
           (bt,ksb,bq) <- labelTable backT
           let pksb = (_pkKey $ _kvKey $ unLB1 ksb )
-              -- pksbn = (_pkKey $ _kvKey $ ksbn )
           (nt,ksn@(LB1 (KV (PK npk ndesc) nattr)),nq) <- labelTable nextT
           let pksn = (_pkKey $ _kvKey $ unLB1 ksn )
-              -- fun :: [Labeled Text (TB Key) ]-> State ((Int, Map Int Table), (Int, Map Int Key))  ([Labeled Text (TB Key)], [Text])
               fun items =  do
                   let attrs :: [Labeled Text (TB Key)]
                       attrs = filter (\i -> not $ S.member (unAttr.labelValue $ i) fkSet) items

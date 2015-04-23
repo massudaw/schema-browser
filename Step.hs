@@ -4,11 +4,12 @@ module Step where
 import Query
 import Control.Applicative
 import qualified Data.Text.Lazy as T
+import Data.Text.Lazy (Text)
 import Warshal
 import Data.String
-import Data.Text.Lazy
 import Data.Set (Set)
 import qualified Data.List as L
+import qualified Data.Vector as Vector
 
 import Control.Arrow.Transformer.Static
 import Control.Monad
@@ -20,6 +21,10 @@ import Data.Monoid
 import Control.Monad
 import qualified Data.Bifunctor as BF
 
+import Safe
+import qualified Data.Traversable as T
+
+import Debug.Trace
 deriving instance Functor m => Functor (Kleisli m i )
 
 data Step a
@@ -95,15 +100,15 @@ odxT = logTableInter True
 splitIndex l = (fmap T.pack . unIntercalate (','==)<$> unIntercalate (':'==) l)
 
 indexTableInter
-  :: (KeyString k ,Arrow a) =>
-      Bool -> String -> Parser  a (Bool,[[Text]]) (Maybe (TB1 (k, b))) (Maybe (k, b))
+  :: (Show k ,KeyString k ,Arrow a) =>
+      Bool -> String -> Parser  a (Bool,[[Text]]) (Maybe (TB1 (k, Showable))) (Maybe (k, Showable))
 indexTableInter b l =
   let ll = (fmap T.pack . unIntercalate (','==)<$> unIntercalate (':'==) l)
    in  P ([(b ,ll)],[] ) (arr (join . fmap (indexTable ll)))
 
 logTableInter
-  :: (KeyString k ,Arrow a) =>
-      Bool -> String -> Parser  a (Bool,[[Text]]) (Maybe (TB1 (k, b))) (Maybe (k, b))
+  :: (Show k ,KeyString k ,Arrow a) =>
+      Bool -> String -> Parser  a (Bool,[[Text]]) (Maybe (TB1 (k, Showable))) (Maybe (k, Showable))
 logTableInter b l =
   let ll = (fmap T.pack . unIntercalate (','==)<$> unIntercalate (':'==) l)
    in  P ([],[(b ,ll)]) (arr (join . fmap (indexTable ll)))
@@ -113,7 +118,7 @@ indexTB1 (l:xs) t
   = do
     (TB1 (KV (PK k d)  v)) <- t
     let finder = L.find (L.any (==l). L.permutations . fmap (keyString.fst).kattr)
-        i = justError ("error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  finder v `mplus` finder k `mplus` finder d
+        i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  finder v `mplus` finder k `mplus` finder d
     case i  of
          Attr l -> Nothing
          FKT l _ j -> case xs of
@@ -121,13 +126,15 @@ indexTB1 (l:xs) t
                          i  -> indexTB1 xs (Just j)
 
 
-indexTable (l:xs) (TB1 (KV (PK k d)  v))
+indexTable (l:xs) t@(TB1 (KV (PK k d)  v))
   = do
     let finder = L.find (L.any (==l). L.permutations . fmap (keyString .fst) .kattr)
-        i = justError ("error finding key: " <> T.unpack (T.intercalate ","l) ) $ finder v `mplus` finder k `mplus` finder d
+        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate ","l) <> show t ) $ finder v `mplus` finder k `mplus` finder d
     case i  of
          Attr l -> return l
          FKT l _  j -> indexTable xs j
+         AKT l _  j -> let i =  T.traverse (indexTable xs)  j
+                       in liftA2 (,) (Just  (fst $ unAttr $ head l) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
 
 
 kattr (Attr i ) = [i]

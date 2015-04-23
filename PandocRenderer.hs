@@ -8,7 +8,7 @@ import Text.Pandoc.Options
 import Widgets
 import Text.Pandoc.PDF
 import Data.ByteString.Base64.Lazy as BS64
-import qualified Network.HTTP as HTTP
+-- import qualified Network.HTTP as HTTP
 import Control.Monad
 import Control.Monad.IO.Class
 import Text.Pandoc.Writers.HTML

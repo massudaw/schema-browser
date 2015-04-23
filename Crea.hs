@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Crea where
 import Network.Wreq
+import QueryWidgets
 import qualified Network.Wreq.Session as Sess
 
 
@@ -58,7 +59,7 @@ creaBoletoArt rnp user pass art = do
     pr <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
     pr <- Sess.get session $ (traceShowId (creaArtBoleto (BSC.unpack art) ))
     let Just boleto = BSC.unpack . fst . BSC.break ('\"'==)  . BS.drop 11 . snd . BS.breakSubstring "cod_boleto=" . traceShowId . BSL.toStrict <$> (pr ^? responseBody)
-    Sess.get session $ (traceShowId (creaArtGeraBoleto ( boleto) ))
+    Sess.get session $ ((creaArtGeraBoleto ( boleto) ))
     return (creaTmpBoleto ( boleto) )
 
 
@@ -113,4 +114,3 @@ mainTest = do
                       getBody w #+ [UI.element e1]
                       return () )
 
-pdfFrame pdf = mkElement "iframe" UI.# sink UI.src   pdf  UI.# UI.set style [("width","100%"),("height","300px")]
