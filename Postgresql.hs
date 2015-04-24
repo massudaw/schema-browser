@@ -3,6 +3,7 @@ module Postgresql where
 import Query
 import GHC.Stack
 import Data.Functor.Identity
+import Data.Functor.Compose
 import Data.Scientific hiding(scientific)
 import Data.Bits
 import Data.Tuple
@@ -269,26 +270,21 @@ parseAttr (Attr i) = do
   return $  Attr (i,s)
 
 parseAttr (LAKT l refl [t]) = do
-  ml <- unIntercalateAtto (parseAttr .labelValue <$> l) (char ',')
+  ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose <$> l) (char ',')
   r <- doublequoted (parseArray ( doublequoted $ parseLabeledTable t)) <|> parseArray (doublequoted $ parseLabeledTable t) <|> pure []
   return $ AKT ml  refl r
 
 parseAttr (LFKT l refl j ) = do
-  ml <- unIntercalateAtto (parseAttr .labelValue <$> l) (char ',')
+  ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose <$> l) (char ',')
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j
   return $ FKT ml refl mj
 
 parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 
 parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
-  im <- unIntercalateAtto (parseAttr .labelValue . getCompose <$> (i <> d <> m) ) (char ',')
+  im <- unIntercalateAtto (fmap (Compose . Identity) . parseAttr .labelValue . getCompose <$> (i <> d <> m) ) (char ',')
   return (TB1 (KV ( PK (L.take (length i) im ) (L.take (length d) $L.drop (length i) $  im))(L.drop (length i + length d) im)) )) <* char ')' )
 
-{-
-parseTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
-  im <- unIntercalateAtto (parseAttr <$> (i <> d <> m) ) (char ',')
-  return (TB1 (KV (PK (L.take (length i) im ) (drop (length i) $ L.take (length d) im))(drop (length i + length d) im)) )) <* char ')' )
--}
 
 -- | Recognizes a quoted string.
 doublequoted :: Parser a -> Parser a

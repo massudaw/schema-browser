@@ -6,6 +6,8 @@ import Control.Applicative
 import qualified Data.Text.Lazy as T
 import Data.Text.Lazy (Text)
 import Warshal
+import Data.Functor.Compose
+import Data.Functor.Identity
 import Data.String
 import Data.Set (Set)
 import qualified Data.List as L
@@ -99,9 +101,9 @@ odxT = logTableInter True
 
 splitIndex l = (fmap T.pack . unIntercalate (','==)<$> unIntercalate (':'==) l)
 
-indexTableInter
+{-indexTableInter
   :: (Show k ,KeyString k ,Arrow a) =>
-      Bool -> String -> Parser  a (Bool,[[Text]]) (Maybe (TB1 (k, Showable))) (Maybe (k, Showable))
+      Bool -> String -> Parser  a (Bool,[[Text]]) (Maybe (TB1 (k, Showable))) (Maybe (k, Showable))-}
 indexTableInter b l =
   let ll = (fmap T.pack . unIntercalate (','==)<$> unIntercalate (':'==) l)
    in  P ([(b ,ll)],[] ) (arr (join . fmap (indexTable ll)))
@@ -119,27 +121,29 @@ indexTB1 (l:xs) t
     (TB1 (KV (PK k d)  v)) <- t
     let finder = L.find (L.any (==l). L.permutations . fmap (keyString.fst).kattr)
         i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  finder v `mplus` finder k `mplus` finder d
-    case i  of
+    case runIdentity $ getCompose $i  of
          Attr l -> Nothing
          FKT l _ j -> case xs of
                          [] -> Just j
                          i  -> indexTB1 xs (Just j)
 
 
+-- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
 indexTable (l:xs) t@(TB1 (KV (PK k d)  v))
   = do
     let finder = L.find (L.any (==l). L.permutations . fmap (keyString .fst) .kattr)
         i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate ","l) <> show t ) $ finder v `mplus` finder k `mplus` finder d
-    case i  of
+    case runIdentity $ getCompose $ i  of
          Attr l -> return l
          FKT l _  j -> indexTable xs j
          AKT l _  j -> let i =  T.traverse (indexTable xs)  j
-                       in liftA2 (,) (Just  (fst $ unAttr $ head l) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
+                       in liftA2 (,) (Just  (fst $ unAttr $   runIdentity $ getCompose $ head l) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
 
 
-kattr (Attr i ) = [i]
-kattr (FKT i _ _ ) = L.concat $ kattr <$> i
-kattr (AKT i _ _ ) = L.concat $ kattr <$> i
+kattr = kattri . runIdentity . getCompose
+kattri (Attr i ) = [i]
+kattri (FKT i _ _ ) =  (L.concat $ kattr  <$> i)
+kattri (AKT i _ _ ) =  (L.concat $ kattr <$> i)
 
 class KeyString i where
   keyString :: i -> Text
@@ -161,5 +165,12 @@ instance (Applicative (a i) , IsString m) => IsString (Parser a s i m) where
 instance (Applicative (a i),Monoid m) => Monoid (Parser a s i m) where
   mempty = P mempty (pure mempty)
   mappend (P i  l) (P j m ) =  P (mappend i j) (liftA2 mappend l  m )
+
+findPK = concat . fmap (attrNonRec . runIdentity . getCompose) . _pkKey  . _kvKey . _unTB1
+
+
+attrNonRec (FKT ifk _ _ ) = concat $ fmap kattr ifk
+attrNonRec (AKT ifk _ _ ) = concat $ fmap kattr ifk
+attrNonRec (Attr i ) = [i]
 
 

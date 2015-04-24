@@ -161,7 +161,7 @@ unSOptional' i   = Just i
 applyUI el f = (\a-> getWindow el >>= \w -> runUI w (f a))
 
 
-tableNonRec (TB1 k ) = concat $ F.toList $  fmap attrNonRec k
+tableNonRec (TB1 k ) = concat $ F.toList $  fmap (attrNonRec. unTB ) k
 
 
 pollingUI' conn inf listRes p@(BoundedPollingPlugins n deftime (table,f) a) = do
@@ -298,7 +298,7 @@ chooserKey conn inf kitems i = do
   body <- UI.div # sink items (facts (pure . chooseKey conn inf <$> bBset ))
   UI.div # set children [filterInp,getElement bset, body]
 
-tableNonrec (TB1 k ) = concat $ F.toList $ _kvAttr $ fmap attrNonRec k
+tableNonrec (TB1 k ) = concat $ F.toList $ _kvAttr $ fmap (attrNonRec .unTB) k
 
 chooseKey
   :: Connection
@@ -520,7 +520,7 @@ queryPollArtAndamentoIO = BoundedPollingPlugins "Andamento Art Crea"  60  ("art"
           artVeri d = Attr ("verified_date" ,SOptional $ Just $ STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" ( d !!1) )
           artPayd d = Attr ("payment_date" ,SOptional $Just $ STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" (d !!1) )
           artInp :: [[String]] -> TB1 (Text,Showable)
-          artInp inp = TB1 $ KV (PK [] []) $ [maybe (Attr ("verified_date",SOptional Nothing)) artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,maybe (Attr ("payment_date",SOptional Nothing)) artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
+          artInp inp = TB1 $ KV (PK [] []) $ fmap _tb $ [maybe (Attr ("verified_date",SOptional Nothing)) artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,maybe (Attr ("payment_date",SOptional Nothing)) artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       i <- checkOutput "verified_date" -< (t,Just$ artInp o)
       j <- checkOutput "payment_date" -< (t,Just $artInp o)
       returnA -< (catMaybes [i, j] )
@@ -588,7 +588,7 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                           i -> return Nothing
                       vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) andamento )
 
-                      let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . concat . F.toList . fmap attrNonRec . _unTB1) vp) :: S.Set (Map Key Showable)
+                      let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . concat . F.toList . fmap (attrNonRec .unTB). _unTB1) vp) :: S.Set (Map Key Showable)
                       adds <-  mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  inf (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
                       return $ mod : adds
 
@@ -599,7 +599,7 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                          translate_b = [("id_bombeiro" ,"id")]
                     tq3 <-  getRequest . traceShowId . (renderUrl translate_b addrs_b)  $  lkeys
                     htmlSoli <- C.lift $ testSolicitation tq3
-                    let tq4 = catMaybes .fmap Tra.sequence . M.toList . tkeys  "fire_project" . M.fromList $ htmlSoli
+                    let tq4 = catMaybes .fmap Tra.sequence . M.toList . tkeys "fire_project" . M.fromList $ htmlSoli
                     MaybeT $ return $ if not $ maybe False (\(_,SBoolean mb)-> mb) $ L.find ((=="taxa_paga"). keyValue . fst)  tq4 then Nothing else Just undefined
                     C.lift $ updateMod  conn inf tq4 inputs fire_project
                   getPdf = do
@@ -638,7 +638,7 @@ queryAndamento4 conn inf  inputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "pro
                           i:xs -> updateMod  conn inf [(lookKey inf "fire_project" "aproval_date"  , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] inputs fire_project
                       vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) andamento )
 
-                      let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . concat . F.toList . fmap attrNonRec . _unTB1) vp) :: S.Set (Map Key Showable)
+                      let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . concat . F.toList . fmap (attrNonRec . unTB) . _unTB1) vp) :: S.Set (Map Key Showable)
                       adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  inf (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
                       return $ mod : adds
                     MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) (catMaybes (firemods:mods) ))
@@ -884,7 +884,7 @@ queryArtBoletoCrea = BoundedPlugin "Boleto Art Crea" ("art",staticP url) elem
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act ( traverse (\(i, (j, k,a)) -> creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ TB1 $ KV (PK [] []) [Attr  ("boleto",   SOptional $ (SBinary. BS.pack) <$> b)]
+      let ao =  Just $ TB1 $ KV (PK [] []) [_tb $ Attr  ("boleto",   SOptional $ (SBinary. BS.pack) <$> b)]
       ob <- checkOutput "boleto" -< (t , ao)
       returnA -< catMaybes [ob]
     elem conn inf inputs = do
@@ -929,7 +929,7 @@ queryPollArtAndamento = BoundedPollingPlugins "Andamento Art Crea"  60  ("art",s
           artVeri d = Attr ("verified_date" ,SOptional $ Just $ STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" ( d !!1) )
           artPayd d = Attr ("payment_date" ,SOptional $Just $ STimestamp $ Finite $ (\(Just i)-> fst i) $ strptime "%d/%m/%Y %H:%M" (d !!1) )
           artInp :: [[String]] -> TB1 (Text,Showable)
-          artInp inp = TB1 $ KV (PK [] []) $ [maybe (Attr ("verified_date",SOptional Nothing)) artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,maybe (Attr ("payment_date",SOptional Nothing)) artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
+          artInp inp = TB1 $ KV (PK [] []) $ fmap _tb $ [maybe (Attr ("verified_date",SOptional Nothing)) artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,maybe (Attr ("payment_date",SOptional Nothing)) artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       i <- checkOutput "verified_date" -< (t,Just$ artInp o)
       j <- checkOutput "payment_date" -< (t,Just $artInp o)
       returnA -< catMaybes [i, j]
