@@ -128,10 +128,11 @@ instance (Functor f,Eq1 f) => Eq1 (TB  f) where
   eq1 (Attr i ) (Attr l) = i == l
   eq1 (FKT i ir im ) (FKT l lr lm) = eq1 i l && (ir == lr) && (im == lm)
   eq1 (AKT i ir im ) (AKT l lr lm) = eq1 i l && (ir == lr) && (im == lm)
+
 instance (Functor f,Ord1 f) => Ord1 (TB f ) where
   compare1 (Attr i ) (Attr l) = compare i l
-  compare1 (FKT i ir im ) (FKT l lr lm) = compare1 i l -- && (compare ir lr) && (compare im lm)
-  compare1 (AKT i ir im ) (AKT l lr lm) = compare1 i l -- && (compare ir lr) && (compare im lm)
+  compare1 (FKT i ir im ) (FKT l lr lm) = compare1 i l <> (compare ir lr) <> (compare im lm)
+  compare1 (AKT i ir im ) (AKT l lr lm) = compare1 i l <> (compare ir lr) <> (compare im lm)
 instance (Functor f,Show1 f) => Show1 (TB f  ) where
   showsPrec1 ix (Attr i ) = showsPrec ix i
   showsPrec1 ix (FKT i ir im ) = showsPrec1 ix i <> showsPrec ix ir <> showsPrec ix im
@@ -140,7 +141,7 @@ instance (Functor f,Show1 f) => Show1 (TB f  ) where
 instance Eq f => Eq1 (Labeled f ) where
   eq1 (Labeled  ir im ) (Labeled lr lm) = (ir == lr) && (im  == lm)
 instance Ord f => Ord1 (Labeled f ) where
-  compare1 (Labeled  ir im ) (Labeled lr lm) = (compare ir lr) -- >> (compare im  lm)
+  compare1 (Labeled  ir im ) (Labeled lr lm) = (compare ir lr) <> (compare im  lm)
 instance Show f => Show1 (Labeled f ) where
   showsPrec1 ix (Labeled  ir im ) =  showsPrec ix ir <> showsPrec ix im
 
@@ -154,7 +155,7 @@ data TBRel  i
 
 data TB f a
   = FKT
-    { _tbref :: ! [Compose f (TB f) a]
+    { _tbref :: ![Compose f (TB f) a]
     , _reflexive :: ! Bool
     -- , _fkrelation :: [(TB a,TB a)]
     , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
@@ -162,7 +163,7 @@ data TB f a
   | AKT
     { _tbref :: ! [Compose f (TB f) a]
     , _reflexive :: ! Bool
-    -- , _fkrelation :: [(TB a,TB a)]
+    -- , _fkrelation :: [(Compose f (TB f) a,Compose f (TB f) a)]
     , _akttable :: ! [FTB1 (Compose f (TB f)) a]
     }
   | Attr
@@ -172,8 +173,8 @@ data TB f a
 
 type TB1 = FTB1 (Compose Identity (TB Identity) )
 
-data FTB1 f a
-  = TB1 {_unTB1 :: ! (KV (f a)) }
+newtype FTB1 f a
+  = TB1 {_unTB1 :: (KV (f a)) }
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
 _unlb1 ( TB1  i ) = fmap getCompose i
