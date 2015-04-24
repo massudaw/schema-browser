@@ -124,24 +124,18 @@ data AliasPath a
     deriving(Show,Eq,Ord,Foldable)
 
 
-instance Eq1 (TB  ) where
+instance (Functor f,Eq1 f) => Eq1 (TB  f) where
   eq1 (Attr i ) (Attr l) = i == l
   eq1 (FKT i ir im ) (FKT l lr lm) = eq1 i l && (ir == lr) && (im == lm)
   eq1 (AKT i ir im ) (AKT l lr lm) = eq1 i l && (ir == lr) && (im == lm)
-  eq1 (LFKT i ir im ) (LFKT l lr lm) = eq1 i l && (ir == lr) && (im == lm)
-  eq1 (LAKT i ir im ) (LAKT l lr lm) = eq1 i l && (ir == lr) && (im == lm)
-instance Ord1 (TB  ) where
+instance (Functor f,Ord1 f) => Ord1 (TB f ) where
   compare1 (Attr i ) (Attr l) = compare i l
   compare1 (FKT i ir im ) (FKT l lr lm) = compare1 i l -- && (compare ir lr) && (compare im lm)
   compare1 (AKT i ir im ) (AKT l lr lm) = compare1 i l -- && (compare ir lr) && (compare im lm)
-  compare1 (LFKT i ir im ) (LFKT l lr lm) = compare1 i l -- && (compare ir lr) && (compare im lm)
-  compare1 (LAKT i ir im ) (LAKT l lr lm) = compare1 i l -- && (compare ir lr) && (compare im lm)
-instance Show1 (TB  ) where
+instance (Functor f,Show1 f) => Show1 (TB f  ) where
   showsPrec1 ix (Attr i ) = showsPrec ix i
   showsPrec1 ix (FKT i ir im ) = showsPrec1 ix i <> showsPrec ix ir <> showsPrec ix im
   showsPrec1 ix (AKT i ir im ) = showsPrec1 ix i <> showsPrec ix ir <> showsPrec ix im
-  showsPrec1 ix (LFKT i ir im ) = showsPrec1 ix i <> showsPrec ix ir <> showsPrec ix im
-  showsPrec1 ix (LAKT i ir im ) = showsPrec1 ix i <> showsPrec ix ir <> showsPrec ix im
 
 instance Eq f => Eq1 (Labeled f ) where
   eq1 (Labeled  ir im ) (Labeled lr lm) = (ir == lr) && (im  == lm)
@@ -151,7 +145,6 @@ instance Show f => Show1 (Labeled f ) where
   showsPrec1 ix (Labeled  ir im ) =  showsPrec ix ir <> showsPrec ix im
 
 isReflexive (FKT _  r _ ) = r
-isReflexive (LFKT _  r _ ) = r
 isReflexive _ = True
 
 data TBRel  i
@@ -159,43 +152,32 @@ data TBRel  i
   | TBIdent i
   | TBArray [TBRel i]
 
-data TB a
+data TB f a
   = FKT
-    { _tbref :: ! [Compose Identity TB a]
+    { _tbref :: ! [Compose f (TB f) a]
     , _reflexive :: ! Bool
     -- , _fkrelation :: [(TB a,TB a)]
-    , _fkttable :: ! (FTB1 (Compose Identity TB) a)
-    }
-  | LFKT
-    { _ltbref :: ! [Compose (Labeled Text ) TB a]
-    , _reflexive :: ! Bool
-    -- , _lfkrelation :: [(Labeled Text (TB a),TB a)]
-    , _lfkttable :: ! (FTB1 (Compose (Labeled Text) TB) a)
+    , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
     }
   | AKT
-    { _tbref :: ! [Compose Identity TB a]
+    { _tbref :: ! [Compose f (TB f) a]
     , _reflexive :: ! Bool
     -- , _fkrelation :: [(TB a,TB a)]
-    , _akttable :: ! [FTB1 (Compose Identity TB) a]
-    }
-  | LAKT
-    { _ltbreef :: ! [Compose (Labeled Text) TB a]
-    , _reflexive :: ! Bool
-    -- , _lfkrelation :: [(Labeled Text (TB a),TB a)]
-    , _lakttable :: ! [FTB1 (Compose (Labeled Text) TB) a]
+    , _akttable :: ! [FTB1 (Compose f (TB f)) a]
     }
   | Attr
     { _tbattr :: ! a
     }
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
-type TB1 = FTB1 (Compose Identity TB)
+type TB1 = FTB1 (Compose Identity (TB Identity) )
 
 data FTB1 f a
   = TB1 {_unTB1 :: ! (KV (f a)) }
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
 _unlb1 ( TB1  i ) = fmap getCompose i
+
 unlb1 ( TB1  i ) = fmap getCompose i
 
 
@@ -796,7 +778,7 @@ instance Apply KV where
 instance Apply PK where
   PK i j <.> PK i1 j1 = PK (getZipList $ ZipList i <.> ZipList i1 ) ( getZipList $ ZipList j <.> ZipList j1)
 
-instance Apply TB where
+instance Apply f => Apply (TB f) where
   Attr a <.>  Attr a1 = Attr $ a a1
   FKT l i t <.> FKT l1 i1 t1 = FKT (zipWith (<.>) l   l1) (i && i1)  (t <.> t1)
   AKT l i t <.> AKT l1 i1 t1 = AKT (zipWith (<.>) l   l1) (i && i1 ) (getZipList $ liftF2 (<.>) (ZipList t) (ZipList t1))
@@ -865,7 +847,7 @@ rawLPK t@(Labeled b i ) = (t,) . (\i -> Labeled (keyValue i) (Attr i) ) <$> S.to
 tableToKV r =   do
   KV (PK (S.toList (rawPK r)) (maybeToList (rawDescription r)) ) (S.toList (rawAttrs r))
 
-labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (Labeled Text Table,FTB1 (Compose (Labeled Text) TB ) Key,Text)
+labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (Labeled Text Table,FTB1 (Compose (Labeled Text) (TB (Labeled Text) )) Key,Text)
 labelTable i = do
    t <- tname i
    name <- Tra.traverse ( kname t) (tableToKV i)
@@ -896,7 +878,7 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           (nt,ksn@(TB1 (KV (PK npk ndesc) nattr)),nq) <- labelTable nextT
           let pksn = (_pkKey $ _kvKey $ unlb1 ksn )
               fun items =  do
-                  let attrs :: [Compose (Labeled Text) TB Key]
+                  let attrs :: [TBLabel  Key]
                       attrs = fmap Compose $ filter (\i -> not $ S.member (unAttr.labelValue $ i) fkSet) items
                       itemSet :: S.Set Key
                       itemSet = S.fromList $ fmap (unAttr.labelValue) items
@@ -910,13 +892,13 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           kas <- kname tas  knas
           let jt = if nextLeft  then " LEFT JOIN " else " JOIN "
               query =  jt <> "(SELECT " <> T.intercalate "," (label <$> pksb) <> "," <> "array_agg((" <> (T.intercalate ","  (fmap explodeLabel $ (F.toList $ unlb1 $ tb ) )) <> ")) as " <> label (snd kas) <> " FROM " <> bq <> (jt <> nq <> " ON "  <> joinLPredicate (fkm (F.toList $ unlb1 $ ksb) (F.toList $ unlb1 ksn)) )<> q <>   " GROUP BY " <>  T.intercalate "," (label <$> pksb ) <> ") as " <>  label tas  <> " ON " <>  joinLPredicate (zip ksbn pksb)
-          return $ ([Compose $ Labeled (label $ snd kas) (LAKT (fmap (\i -> Compose . justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo )  [tb  ]) ] , query)
+          return $ ([Compose $ Labeled (label $ snd kas) (AKT (fmap (\i -> Compose . justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo )  [tb  ]) ] , query)
 
     | otherwise = do
           (nt,ksn@(TB1 (KV (PK npk ndesc) nattr)),nq) <- labelTable nextT
           let pksn = (_pkKey $ _kvKey $ unlb1 ksn )
               fun items =  do
-                  let attrs :: [Compose (Labeled Text) TB Key]
+                  let attrs :: [TBLabel  Key]
                       attrs = fmap Compose $ filter (\i -> not $ S.member (unAttr.labelValue $ i) fkSet) items
                       itemSet :: S.Set Key
                       itemSet = S.fromList $ fmap (unAttr.labelValue) items
@@ -926,7 +908,7 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
               nkv pk desc attr = (mapOpt $ TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
           (tb,q) <-liftA3 nkv (fun $ fmap getCompose npk) (fun $ fmap getCompose ndesc) (fun $ fmap getCompose nattr)
           let jt = if nextLeft  then " LEFT JOIN " else " JOIN "
-          return $ ( [Compose $ Labeled ""  $ LFKT (fmap (\i -> Compose . justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo ) (tb ) ]  ,(jt <> nq <> " ON "  <> joinLPredicate (fkm ksbn pksn) <>  q))
+          return $ ( [Compose $ Labeled ""  $ FKT (fmap (\i -> Compose . justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo ) (tb ) ]  ,(jt <> nq <> " ON "  <> joinLPredicate (fkm ksbn pksn) <>  q))
   where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup tn (invSchema))
         backT = (\(Just i)-> i) (M.lookup w (invSchema))
         joinLPredicate   =   T.intercalate " AND " . fmap (\(l,r)->  intersectionOpK (unAttr . labelValue $ l) (unAttr . labelValue $ r) (label l)  (label r ))
@@ -960,7 +942,7 @@ nonAliasKeys (t,Labeled a (Attr (Key n _  _ _ _)))  = label t <> "." <> n
 
 aliasTable (Labeled t r) = showTable r <> " as " <> t
 
-kname :: Labeled Text Table -> Key -> QueryRef (Labeled Text Table ,Labeled Text (TB Key))
+kname :: Labeled Text Table -> Key -> QueryRef (Labeled Text Table ,Labeled Text (TB (Labeled Text) Key))
 kname t i = do
   n <- mkKey i
   return $ (t,Labeled ("k" <> (T.pack $  show $ fst n)) (Attr i) )
@@ -970,16 +952,17 @@ tname i = do
   n <- mkTable i
   return $ Labeled ("t" <> (T.pack $  show n)) i
 
-explodeLabel :: Labeled Text (TB (Key)) -> Text
+explodeLabel :: Labeled Text (TB (Labeled Text) Key) -> Text
 explodeLabel (Labeled l (Attr _)) = l
-explodeLabel (Labeled l (LFKT i refl t )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i)) <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel $ unlb1 t))  <> ")"
-explodeLabel (Labeled l (LAKT i _ _ )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i)) <> "," <> l
+explodeLabel (Labeled l (FKT i refl t )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i)) <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel $ unlb1 t))  <> ")"
+explodeLabel (Labeled l (AKT i _ _ )) = T.intercalate "," (( F.toList $ (explodeLabel. getCompose ) <$> i)) <> "," <> l
 
 unTlabel kv  = TB1 $ fmap (Compose . Identity .unlabel) $ unlb1 kv
-unlabel (Labeled l (LFKT i refl t) ) = (FKT (fmap (Compose . Identity .unlabel.getCompose) i) refl (unTlabel t ))
-unlabel (Labeled l (LAKT i refl [t]) ) = (AKT (fmap (Compose . Identity . unlabel.getCompose) i) refl [unTlabel t])
-unlabel (Labeled l a@(Attr i )) = a
+unlabel (Labeled l (FKT i refl t) ) = (FKT (fmap (Compose . Identity .unlabel.getCompose) i) refl (unTlabel t ))
+unlabel (Labeled l (AKT i refl [t]) ) = (AKT (fmap (Compose . Identity . unlabel.getCompose) i) refl [unTlabel t])
+unlabel (Labeled l (Attr i )) = Attr i
 
+type TBLabel =  Compose (Labeled Text) (TB (Labeled Text))
 allRec'
   :: Map Text Table
      -> Table
@@ -991,7 +974,7 @@ rootPaths' invSchema r@(Raw _ _ _ _ fk _ ) = fst $ flip runState ((0,M.empty),(0
   (t,ks@(TB1 (KV (PK npk ndesc) nattr)),q) <- labelTable r
   let fkSet = S.unions $ fmap (\(Path ifk _ _) -> ifk)$ filter (\(Path _ ifk  _) -> isPathReflexive ifk) $ S.toList fk
       fun items =  do
-                  let attrs :: [Compose (Labeled Text) TB Key]
+                  let attrs :: [TBLabel Key]
                       attrs = fmap Compose $ filter (\i -> not $ S.member (unAttr.labelValue $ i) fkSet) items
                       itemSet :: S.Set Key
                       itemSet = S.fromList $ fmap (unAttr.labelValue) items

@@ -82,10 +82,10 @@ intersectPredTuple  = (\i j -> intersectPred (textToPrim <$> keyType (fst i)) (t
 lorder lo lref = allMaybes $ fmap (\k -> L.find (\i-> fst i == k ) lref) lo
 
 attrUITable
-  :: Tidings (Maybe (TB (Key,Showable)))
-     -> TB Key
+  :: Tidings (Maybe (TB Identity (Key,Showable)))
+     -> TB Identity Key
      -> UI
-          (TrivialWidget (Maybe (TB (Key, Showable))))
+          (TrivialWidget (Maybe (TB Identity (Key, Showable))))
 attrUITable  tAttr' (Attr i) = do
       l<- UI.span # set text (show i)
       let tdi = tAttr
@@ -186,7 +186,7 @@ crudUITable
      -> UI (Element,Tidings (Maybe (TB1 (Key,Showable))),[Event (Modification Key Showable)])
 crudUITable conn inf pgs ftb@(TB1 (KV (PK k d) a)) oldItems = do
   let
-      tbCase :: (forall a . Lens (KV a) (KV a) [a] [a] ) -> Int -> TB Key -> Set Key -> [(TB Key,TrivialWidget (Maybe (TB (Key,Showable))))] -> Tidings (Maybe (TB1 (Key,Showable))) -> UI (TrivialWidget (Maybe (TB (Key,Showable))))
+      tbCase :: (forall a . Lens (KV a) (KV a) [a] [a] ) -> Int -> TB Identity Key -> Set Key -> [(TB Identity Key,TrivialWidget (Maybe (TB Identity (Key,Showable))))] -> Tidings (Maybe (TB1 (Key,Showable))) -> UI (TrivialWidget (Maybe (TB Identity (Key,Showable))))
       tbCase td ix i@(AKT ifk refl  _) created wl oldItems = do
         akUITable conn inf pgs ((\(Just i)-> i) $ L.find (\(Path ifkp _ _) -> S.fromList (unAttr . unTB  <$> ifk ) == ifkp) $ S.toList $ rawFKS table) (fmap (\v -> unTB. justError "AKT" .(^? unTB1.td . Le.ix ix ) $ v) <$> oldItems) i
       tbCase td ix i@(FKT ifk _ _) created wl oldItems  = do
@@ -310,11 +310,11 @@ fkUITable
   -> InformationSchema
   -> [Plugins]
   -> Set Key
-  -> [(TB Key,TrivialWidget (Maybe (TB (Key,Showable))))]
+  -> [(TB Identity Key,TrivialWidget (Maybe (TB Identity (Key,Showable))))]
   -> Path (Set Key) (SqlOperation Text)
-  -> Tidings (Maybe (TB (Key,Showable)))
-  -> TB Key
-  -> UI (TrivialWidget(Maybe (TB (Key, Showable))))
+  -> Tidings (Maybe (TB Identity (Key,Showable)))
+  -> TB Identity Key
+  -> UI (TrivialWidget(Maybe (TB Identity (Key, Showable))))
 fkUITable conn inf pgs created wl path@(Path rl (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT ifk refl tb1)
     | not refl = do
         let rp = rootPaths'  (tableMap inf) (fromJust $ M.lookup rr $ pkMap inf )
@@ -383,12 +383,12 @@ nonInjectiveSelection
   -> InformationSchema
   -> [Plugins ]
   -> Set Key
-  -> [(TB Key,TrivialWidget (Maybe (TB (Key,Showable))))]
+  -> [(TB Identity Key,TrivialWidget (Maybe (TB Identity (Key,Showable))))]
   -> Path (Set Key) (SqlOperation Text)
-  -> TB Key
+  -> TB Identity Key
   -> Tidings [TB1 (Key,Showable)]
-  -> Tidings (Maybe (TB (Key,Showable)))
-  -> UI (TrivialWidget (Maybe (TB (Key,Showable ))))
+  -> Tidings (Maybe (TB Identity (Key,Showable)))
+  -> UI (TrivialWidget (Maybe (TB Identity (Key,Showable ))))
 nonInjectiveSelection conn inf pgs created wl (Path _ (FKJoinTable _ ksjoin _ ) o1 ) attr@(FKT fkattr refl tbfk ) lks selks
   | all isPrim (keyType . unAttr.unTB<$> fkattr ) = do
       let
