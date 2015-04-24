@@ -363,7 +363,7 @@ akUITable conn inf pgs path@(Path rl (FKJoinTable frl  rel frr ) rr ) oldItems  
   | otherwise = do
      let isLeft = any (any (isKOptional . keyType).  kattr) ifk
          path = Path (S.map unKArray $ if isLeft then S.map unKOptional rl else rl ) (FKJoinTable frl (fmap (first unKArray) rel) frr) rr
-         indexItens ix = join . fmap (\(AKT [l] refl m) -> (\li mi -> FKT  [li] refl  mi ) <$> (join $ traverse (indexArray ix ) <$> unLeftBind l) <*> (if isLeft then unLeft else id ) (atMay m ix) )  <$>  oldItems
+         indexItens ix = join . fmap (\(AKT [l] refl m) -> (\li mi -> FKT  [li] refl  mi ) <$> (join $ traverse (indexArray ix ) <$> (if isLeft then unLeftBind l else Just l)) <*> (if isLeft then unLeft else id ) (atMay m ix) )  <$>  oldItems
          fkst = FKT (fmap (fmap unKArray ) ifk) refl (if isLeft then fmap unKOptional tb1 else tb1 )
      fks <- mapM (\ix-> fkUITable conn inf pgs S.empty [] path  (indexItens ix) fkst ) [0..8]
      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
