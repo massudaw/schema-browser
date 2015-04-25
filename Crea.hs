@@ -1,7 +1,8 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns,OverloadedStrings #-}
 module Crea where
 import Network.Wreq
 import QueryWidgets
+import Query
 import qualified Network.Wreq.Session as Sess
 
 
@@ -10,12 +11,15 @@ import Network.HTTP.Client.OpenSSL
 import Network.HTTP.Client.TLS
 import Network.HTTP.Client (defaultManagerSettings, managerResponseTimeout)
 
+import System.Process (callCommand)
 import Control.Lens
 import Control.Applicative
 import Data.Char
+import Data.String
 import Control.Monad
 import Data.Maybe
 import Data.Monoid
+import System.Directory
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
@@ -49,7 +53,16 @@ creaLoginArt rnp user pass art = do
     form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
     pr <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
     pr <- Sess.get session $ (traceShowId (creaArtQuery (BSC.unpack art) ))
-    return $ BSLC.unpack .(replace (fst replacePath ) (snd replacePath ) . (BSL.toStrict  )) <$> (pr ^? responseBody)
+    let html = (replace (fst replacePath ) (snd replacePath ) . (BSL.toStrict  )) <$> (pr ^? responseBody)
+    let
+      output = (BSC.unpack art) <> ".pdf"
+      input = (BSC.unpack  art ) <> ".html"
+    traverse (BSL.writeFile (fromString input )) html
+    callCommand $ "wkhtmltopdf --print-media-type -T 10 page " <> input <>   " " <> output
+    !file <- BS.readFile (fromString output)
+    removeFile input
+    removeFile output
+    return $ fmap (SBinary  ) $ Just file
 
 creaBoletoArt rnp user pass art = do
   let opts = defaults & manager .~ Left (opensslManagerSettings context)
@@ -60,7 +73,9 @@ creaBoletoArt rnp user pass art = do
     pr <- Sess.get session $ (traceShowId (creaArtBoleto (BSC.unpack art) ))
     let Just boleto = BSC.unpack . fst . BSC.break ('\"'==)  . BS.drop 11 . snd . BS.breakSubstring "cod_boleto=" . traceShowId . BSL.toStrict <$> (pr ^? responseBody)
     Sess.get session $ ((creaArtGeraBoleto ( boleto) ))
-    return (creaTmpBoleto ( boleto) )
+    bol <- Sess.get session $ (creaTmpBoleto ( boleto) )
+    traverse (BSL.writeFile "boleto.pdf") bol
+    return (fromJust $ bol ^? responseBody )
 
 
 
@@ -105,3 +120,12 @@ creaTmpBoleto boleto = "http://www.crea-go.org.br/guia/tmp/" <> boleto <> ".pdf"
 replacePath :: (BSC.ByteString,BSC.ByteString)
 replacePath = ("/art1025"  , "http://www.crea-go.org.br/art1025")
 
+
+
+mainTest = do
+  startGUI defaultConfig {tpPort = Just 8000} (\w -> do
+                      i <- liftIO $ creaLoginArt "1009533630" "Denise" "5559" "1020150028082"
+                      -- liftIO $ traverse (writeFile "creaLogged.html") i
+                      e1 <- buildUI (Primitive PPdf) (pure  i)
+                      getBody w #+ [UI.element e1]
+                      return () )
