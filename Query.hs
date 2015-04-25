@@ -12,6 +12,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Query where
 
@@ -133,17 +134,28 @@ instance (Functor f,Ord1 f) => Ord1 (TB f ) where
   compare1 (Attr i ) (Attr l) = compare i l
   compare1 (FKT i ir im ) (FKT l lr lm) = compare1 i l <> (compare ir lr) <> (compare im lm)
   compare1 (AKT i ir im ) (AKT l lr lm) = compare1 i l <> (compare ir lr) <> (compare im lm)
+
+instance (Show a,Show (f (TB f  a))) => Show (TB f a) where
+  show (Attr i ) = "Attr " <> show i
+  show (FKT i ir (TB1 im) ) = "FKT " <> show (fmap getCompose i ) <> " " <> show ir <>  show  (fmap getCompose im)
+
+instance Show1 PK where
+  showsPrec1 ix (PK l  n)  =  showsPrec1 ix l <> showsPrec1 ix n
+
+instance Show1 KV where
+  showsPrec1 ix (KV l  n)  =  showsPrec1 ix l <> showsPrec1 ix n
+
 instance (Functor f,Show1 f) => Show1 (TB f  ) where
   showsPrec1 ix (Attr i ) = showsPrec ix i
-  showsPrec1 ix (FKT i ir im ) = showsPrec1 ix i <> showsPrec ix ir <> showsPrec ix im
-  showsPrec1 ix (AKT i ir im ) = showsPrec1 ix i <> showsPrec ix ir <> showsPrec ix im
+  showsPrec1 ix (FKT i ir im ) =  showsPrec1 ix i -- <> showsPrec ix ir <> showsPrec1 ix ( _unTB1 im)
+  -- showsPrec1 ix (AKT i ir im ) =  showsPrec1 ix i <> showsPrec1 ix (Compose $ fmap (_unTB1)  im)
 
 instance Eq f => Eq1 (Labeled f ) where
   eq1 (Labeled  ir im ) (Labeled lr lm) = (ir == lr) && (im  == lm)
 instance Ord f => Ord1 (Labeled f ) where
   compare1 (Labeled  ir im ) (Labeled lr lm) = (compare ir lr) <> (compare im  lm)
 instance Show f => Show1 (Labeled f ) where
-  showsPrec1 ix (Labeled  ir im ) =  showsPrec ix ir <> showsPrec ix im
+  showsPrec1 ix (Labeled  ir im ) =   showsPrec ix  im
 
 isReflexive (FKT _  r _ ) = r
 isReflexive _ = True
@@ -169,7 +181,7 @@ data TB f a
   | Attr
     { _tbattr :: ! a
     }
-  deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
+  deriving(Eq,Ord,Functor,Foldable,Traversable)
 
 type TB1 = FTB1 (Compose Identity (TB Identity) )
 
@@ -893,7 +905,7 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           kas <- kname tas  knas
           let jt = if nextLeft  then " LEFT JOIN " else " JOIN "
               query =  jt <> "(SELECT " <> T.intercalate "," (label <$> pksb) <> "," <> "array_agg((" <> (T.intercalate ","  (fmap explodeLabel $ (F.toList $ unlb1 $ tb ) )) <> ")) as " <> label (snd kas) <> " FROM " <> bq <> (jt <> nq <> " ON "  <> joinLPredicate (fkm (F.toList $ unlb1 $ ksb) (F.toList $ unlb1 ksn)) )<> q <>   " GROUP BY " <>  T.intercalate "," (label <$> pksb ) <> ") as " <>  label tas  <> " ON " <>  joinLPredicate (zip ksbn pksb)
-          return $ ([Compose $ Labeled (label $ snd kas) (AKT (fmap (\i -> Compose . justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo )  [tb  ]) ] , query)
+          return $ ([Compose $ Labeled (label $ snd kas) (AKT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo )  [tb  ]) ] , query)
 
     | otherwise = do
           (nt,ksn@(TB1 (KV (PK npk ndesc) nattr)),nq) <- labelTable nextT
@@ -904,12 +916,12 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
                       itemSet :: S.Set Key
                       itemSet = S.fromList $ fmap (unAttr.labelValue) items
                   pt <- mapM (recursePath' nextLeft (F.toList .unlb1 $ ksn ,nt) invSchema) (filter (\(Path ifk jo _) ->  ifk `S.isSubsetOf`  itemSet ) (F.toList $ rawFKS nextT ))
-                  return (attrs <> (concat $ fst <$> pt), snd <$> pt)
+                  return (attrs  <> (concat $ fst <$> pt), snd <$> pt)
               mapOpt = fmap (\i -> if any (isKOptional.keyType.fst) ks then  makeOpt i else i)
               nkv pk desc attr = (mapOpt $ TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
           (tb,q) <-liftA3 nkv (fun $ fmap getCompose npk) (fun $ fmap getCompose ndesc) (fun $ fmap getCompose nattr)
           let jt = if nextLeft  then " LEFT JOIN " else " JOIN "
-          return $ ( [Compose $ Labeled ""  $ FKT (fmap (\i -> Compose . justError ("cant find " <> show i). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo ) (tb ) ]  ,(jt <> nq <> " ON "  <> joinLPredicate (fkm ksbn pksn) <>  q))
+          return $ ( [Compose $ Labeled ""  $ FKT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo ) (tb ) ]  ,(jt <> nq <> " ON "  <> joinLPredicate (fkm ksbn pksn) <>  q))
   where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup tn (invSchema))
         backT = (\(Just i)-> i) (M.lookup w (invSchema))
         joinLPredicate   =   T.intercalate " AND " . fmap (\(l,r)->  intersectionOpK (unAttr . labelValue $ l) (unAttr . labelValue $ r) (label l)  (label r ))
@@ -917,13 +929,13 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
         nextLeft = any (isKOptional.keyType.fst) ks || isLeft
         fkm m n = zip (look (fst <$> ks) m) (look (snd <$> ks) n)
           where
-            look ki i = justError ("missing FK on " <> show ki <> show i ) $ allMaybes $ fmap (\j-> L.find (\v -> unAttr (labelValue v) == j) i  ) ki
+            look ki i = justError ("missing FK on " ) $ allMaybes $ fmap (\j-> L.find (\v -> unAttr (labelValue v) == j) i  ) ki
 
 unTB = runIdentity . getCompose
 _tb = Compose . Identity
 
 unAttr (Attr i) = i
-unAttr i = errorWithStackTrace $ "cant find attr" <> (show i)
+unAttr i = errorWithStackTrace $ "cant find attr" -- <> (show i)
 
 mkKey i = do
   (c,m) <- snd <$> get

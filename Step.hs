@@ -132,7 +132,7 @@ indexTB1 (l:xs) t
 indexTable (l:xs) t@(TB1 (KV (PK k d)  v))
   = do
     let finder = L.find (L.any (==l). L.permutations . fmap (keyString .fst) .kattr)
-        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate ","l) <> show t ) $ finder v `mplus` finder k `mplus` finder d
+        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate ","l) ) $ finder v `mplus` finder k `mplus` finder d
     case runIdentity $ getCompose $ i  of
          Attr l -> return l
          FKT l _  j -> indexTable xs j
