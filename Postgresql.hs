@@ -55,7 +55,9 @@ import qualified Data.Set as S
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Time
 import Database.PostgreSQL.Simple.Ok
-import Database.PostgreSQL.Simple.FromField as F
+import qualified Database.PostgreSQL.Simple.FromField as F
+import Database.PostgreSQL.Simple.FromField hiding(Binary,Identity)
+-- import Database.PostgreSQL.Simple.FromField (fromField,typeOid,typoid,TypeInfo,rngsubtype,typdelim,Conversion,Field,FromField)
 import qualified Database.PostgreSQL.Simple.ToField as TF
 import qualified Database.PostgreSQL.Simple.FromRow as FR
 -- import Data.GraphViz (preview)
@@ -152,7 +154,7 @@ instance TF.ToField Showable where
   toField (SLineString t) = TF.toField t
   toField (SBounding t) = TF.toField t
   toField (SBoolean t) = TF.toField t
-  toField (SBinary t) = TF.toField t
+  toField (SBinary t) = TF.toField (Binary t)
 
 defaultType t =
     case t of
@@ -270,25 +272,29 @@ parseAttr (Attr i) = do
   return $  Attr (i,s)
 
 parseAttr (AKT l refl [t]) = do
-  ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose <$> l) (char ',')
+  ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose  <$> l) (char ',')
   r <- doublequoted (parseArray ( doublequoted $ parseLabeledTable t)) <|> parseArray (doublequoted $ parseLabeledTable t) <|> pure []
   return $ AKT ml  refl r
 
 parseAttr (FKT l refl j ) = do
-  ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose <$> l) (char ',')
+  ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose  <$> l) (char ',')
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j
-  return $ FKT ml refl mj
+  return $  FKT ml refl mj
 
 parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 
 parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
   im <- unIntercalateAtto (fmap (Compose . Identity) . parseAttr .labelValue . getCompose <$> (i <> d <> m) ) (char ',')
-  return (TB1 (KV ( PK (L.take (length i) im ) (L.take (length d) $L.drop (length i) $  im))(L.drop (length i + length d) im)) )) <* char ')' )
+  return (TB1 (KV ( PK (L.take (length i) im ) (L.take (length d) $L.drop (length i) $  im))(L.drop (length i + length d) im)) )) <*  char ')' )
 
 
 -- | Recognizes a quoted string.
+--doublequoted :: Parser a -> Parser a
+--doublequoted  p = takeWhile1 (flip elem "\"\\")  *> p <* takeWhile1 (flip elem "\"\\")
+--
 doublequoted :: Parser a -> Parser a
-doublequoted  p = takeWhile1 (flip elem "\"\\")  *> p <* takeWhile1 (flip elem "\"\\")
+doublequoted  p =  (char '\"'  <|> char '\\') *>  inner <* (char '\"' <|> char '\\')
+  where inner = (doublequoted p <|> p)
 
 parseShowable
   :: KType KPrim
@@ -301,7 +307,7 @@ parseShowable (Primitive i ) =  (do
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
-        PText -> SText . T.fromStrict .  TE.decodeUtf8   <$> (plain' "\\\"),}" <|> doublequoted  (plain' "\\\"") )
+        PText -> SText . T.fromStrict  . TE.decodeUtf8   <$> (   doublequoted  (plain' "\\\"") <|> plain' "\\\"'),}" <|> (const "''" <$> string "\"\"" ) )
         PCnpj -> parseShowable (Primitive PText)
         PCpf -> parseShowable (Primitive PText)
         PInterval ->
@@ -570,6 +576,9 @@ instance (F.FromField a,Ord a, Typeable a) => F.FromField (Interval.Interval a) 
 plain' :: String -> Parser BS.ByteString
 plain' delim = takeWhile1 (notInClass (delim ))
 
+plain0' :: String -> Parser BS.ByteString
+plain0' delim = Data.Attoparsec.Char8.takeWhile (notInClass (delim ))
+
 parseInter token = do
     lb <- (char '[' >> return True) <|> (char '(' >> return False)
     [i,j] <- token
@@ -603,11 +612,11 @@ instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
 fromAttr foldable = do
-    let parser  = parseLabeledTable foldable
-    FR.fieldWith (\i j -> case traverse (parseOnly parser) j of
+    let parser  = parseLabeledTable foldable -- <|> doublequoted (parseLabeledTable foldable)
+    FR.fieldWith (\i j -> case traverse (parseOnly   parser) j of
                                (Right (Just r ) ) -> return r
-                               Right Nothing -> error (show j <> show foldable)
-                               Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  <> "  "<> show foldable) )
+                               Right Nothing -> error (show j )
+                               Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
 
 fromShowableList foldable = do
     traverse (FR.fieldWith . attrToKey) foldable
