@@ -114,7 +114,7 @@ import Data.ByteString.Search (replace)
 import Crea
 
 setup
-     ::  Show b => Event [b] -> [String] -> Window -> UI ()
+     ::   Event [Int] -> [String] -> Window -> UI ()
 setup e args w = void $ do
   return w # set title "Data Browser"
   (evDB,chooserDiv) <- databaseChooser args
@@ -379,7 +379,7 @@ chooseKey conn  inf key = mdo
   element (getElement itemList) # set UI.multiple True
   element (getElement filterItemBox) # set UI.multiple True
   pollingChk <- checkedWidget (pure True)
-  pres  <- mapM (\i -> (_pollingName i ,) <$> pollingUI' conn inf ((\i j ->if i then j else [] ) <$> triding pollingChk <*>listRes ) i)  (filter (\(BoundedPollingPlugins n _  (tb,_)  _ )-> tb  == (tableName $ (\(Just i)-> i) $ M.lookup key (pkMap inf)  ))  [queryPollAndamentoB ,queryPollArtAndamento])
+  pres  <- mapM (\i -> (_pollingName i ,) <$> pollingUI' conn inf ((\i j ->if i then j else [] ) <$> triding pollingChk <*>listRes ) i)  (filter (\(BoundedPollingPlugins n _  (tb,_)  _ )-> tb  == (tableName $ (\(Just i)-> i) $ M.lookup key (pkMap inf)  ))  [{-queryPollAndamentoB ,queryPollArtAndamento-}])
   pollingsDiv <- tabbed ((\(l,d)-> (l,d) )<$> pres)
   let
      pollings = ("POLLINGS" ,(pollingChk ,pollingsDiv ))
@@ -392,12 +392,12 @@ chooseKey conn  inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,_,evs) <- crudUITable conn inf [queryTimeline  ,lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJBoundary ,queryTimeline, queryAndamentoB,queryArtAndamento ] (allRec' (tableMap inf) table) (UI.userSelection itemList)
+            (crud,_,evs) <- crudUITable conn inf [queryArtCrea{-queryTimeline  ,lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJBoundary ,queryTimeline, queryAndamentoB,queryArtAndamento-} ] (allRec' (tableMap inf) table) (UI.userSelection itemList)
             let eres = fmap (addToList  (allRec' (tableMap inf ) table )  <$> ) evs
-            res2 <- accumTds vp  eres
+            -- res2 <- accumTds vp  eres
             insertDiv <- UI.div # set children [crud]
             chk <- checkedWidget (pure True)
-            return (res2 ,Just ("CRUD",(chk,insertDiv)) )
+            return (vp ,Just ("CRUD",(chk,insertDiv)) )
   (res2,crud) <- whenWriteable
   codeChk <- checkedWidget (pure False)
   createcode <- UI.textarea # set UI.text (T.unpack$ createTable table)
@@ -845,23 +845,35 @@ notaPrefeitura = BoundedPlugin "Nota Prefeitura" ("nota",staticP url) elem
 
 queryArtCrea = BoundedPlugin "Documento Final Art Crea" ("art",staticP url) elem
   where
+    updateArtStatus  conn inf it im = do
+              let i = fmap (first (lookKey inf "art")) (it)
+              if null (i) || not (isJust im)
+                 then return []
+                 else do
+                   v <- updateMod conn inf (i)  (fromJust $ fmap F.toList im) (lookTable inf "art")
+                   return $ maybeToList v
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe String)
+    url :: ArrowPlug (Kleisli IO) ([(Text,Showable)])
     url = proc t -> do
       i <- varTB "art_number" -< t
       idxT "payment_date" -<  t
+      odx "art" -<  t
       r <- at "crea_register" (proc t -> do
                                n <- varTB "crea_number" -< t
                                u <- varTB "crea_user"-< t
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
-      act (fmap join  . traverse (\(i, (j, k,a)) -> creaLoginArt  j k a i ) ) -< liftA2 (,) i r
+      b <- act (fmap join  . traverse (\(i, (j, k,a)) -> creaLoginArt  j k a i ) ) -< liftA2 (,) i r
+      let ao =  Just $ TB1 $ KV (PK [] []) [_tb $ Attr  ("art",    SOptional b)]
+      ob <- checkOutput "art" -< (t , ao)
+      returnA -< catMaybes [ob]
     elem conn inf inputs = do
-       let ev = unsafeMapIO (dynPK url) (rumors inputs)
-       i <- stepper  "" (maybe "" id <$> ev)
-       print<-printIFrame "creaFrame"
-       frame<-iframe  # set UI.name "creaFrame" # set UI.id_ "creaFrame" # UI.sink (strAttr "srcdoc") i # UI.set UI.style [("width","100%"),("height","300px")]
-       UI.div # set children [print,frame]
+       let ev = unsafeMapIO (maybe (return []) (\inp -> do
+                              b <- dynPK url (Just inp)
+                              updateArtStatus conn inf b (Just inp)
+                            )) (rumors inputs)
+       i <- stepper [] ev
+       UI.div # sink UI.text (show <$> i)
 
 queryArtBoletoCrea = BoundedPlugin "Boleto Art Crea" ("art",staticP url) elem
   where
@@ -884,7 +896,7 @@ queryArtBoletoCrea = BoundedPlugin "Boleto Art Crea" ("art",staticP url) elem
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act ( traverse (\(i, (j, k,a)) -> creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ TB1 $ KV (PK [] []) [_tb $ Attr  ("boleto",   SOptional $ (SBinary. BS.pack) <$> b)]
+      let ao =  Just $ TB1 $ KV (PK [] []) [_tb $ Attr  ("boleto",   SOptional $ (SBinary. BSL.toStrict) <$> b)]
       ob <- checkOutput "boleto" -< (t , ao)
       returnA -< catMaybes [ob]
     elem conn inf inputs = do
@@ -1251,8 +1263,8 @@ main = do
   -- preview $ cvLabeled (graphP )
 --  preview $ cvLabeled (warshall graphP )
   (e,h) <- newEvent
-  forkIO $ poller  h queryPollAndamentoIO
-  forkIO $ poller  h queryPollArtAndamentoIO
+  -- forkIO $ poller  h queryPollAndamentoIO
+--  forkIO $ poller  h queryPollArtAndamentoIO
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)
   print "Finish"
 
@@ -1294,7 +1306,7 @@ layout  infT = do
             lid t = justError ("no key " <> show t) (M.lookup t vmap)
             nodesJSON = "var nodes = " <> encode (genVertices <$> v) <> ";"
             edgesJSON = "var edges = " <> encode (genEdges <$> e) <> ";"
-            graphJSON = "<script> " <> (BSL.unpack (nodesJSON <> edgesJSON))  <> "var container = document.getElementById('visualization');  var data = { nodes: nodes,edges: edges}; var options = { hierarchicalLayout : { layout : 'direction' } , edges : { style : 'arrow'}} ;  var network = new vis.Network(container, data, options ); </script> "
+            graphJSON = "<script> " <> BSL.unpack (nodesJSON <> edgesJSON) <> "var container = document.getElementById('visualization');  var data = { nodes: nodes,edges: edges}; var options = { hierarchicalLayout : { layout : 'direction' } , edges : { style : 'arrow'}} ;  var network = new vis.Network(container, data, options ); </script> "
         in graphJSON
   script <- UI.div # sink UI.html (maybe "" draw <$> infT)
   UI.div # set children [vis,script]
@@ -1302,10 +1314,9 @@ layout  infT = do
 
 testFireQuery q = withConnInf "incendio" (\conn inf -> do
                                        let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
-                                       print $ (allRec' (tableMap inf)(fromJust $ M.lookup q (tableMap inf)))
-                                       print (rpq)
+                                       putStrLn (  show rpq)
+                                       putStrLn (  show rp)
                                        q <- queryWith_ (fromAttr (rp) ) conn  (fromString $ T.unpack $ rpq)
-                                       -- putStrLn$ unlines $ fmap show q
-                                       return ()
+                                       putStrLn$  unlines $ fmap show q
                                            )
 

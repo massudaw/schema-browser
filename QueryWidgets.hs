@@ -18,6 +18,7 @@ import Data.Map (Map)
 import Data.Traversable(Traversable,traverse)
 import qualified Data.Traversable as Tra
 
+import qualified Data.ByteString.Base64 as B64
 import Data.Monoid
 import Safe
 import Data.Foldable (foldl')
@@ -107,7 +108,7 @@ unSComposite (SComposite i) = i
 unSComposite i = error ("unSComposite " <> show i)
 
 buildUI i  tdi = case i of
-         (KOptional ti) -> fmap ((Just. SOptional) ) <$> buildUI ti (join . fmap unSOptional <$> tdi)
+         (KOptional ti) -> fmap (Just. SOptional) <$> buildUI ti (join . fmap unSOptional  <$> tdi)
          (KSerial ti) -> fmap (Just . SSerial) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
          (KArray ti) -> do
             -- el <- UI.div
@@ -148,7 +149,7 @@ buildUI i  tdi = case i of
                 tdi2 = foldrTds justCase tdcurr [tdi]
             oneInput tdi2 [timeButton]
          (Primitive PPdf) -> do
-           let v = (\(SBinary i) -> BSC.unpack i )
+           let v = (\(SBinary i) -> "data:application/pdf;base64," <>  (BSC.unpack $ B64.encode i) <> "")
            f <- pdfFrame (maybe ""   v <$> facts tdi)
            return (TrivialWidget tdi f)
 
@@ -298,7 +299,7 @@ addToList i  (Delete m ) =  (\i-> concat . L.delete (fmap ((\(k,v)-> (k, v)))  <
 addToList i  (Edit m n ) =  (map (\e-> if maybe False (e == ) (editedMod i n) then  fmap (\(k,v) -> (k,)  $ (\(Just i)-> i) $ M.lookup k (M.fromList $ (\(Just i)-> i) m) ) e  else e ) ) --addToList i  (Insert  m) . addToList i  (Delete n)
 
 -- lookup pk from attribute list
-editedMod :: (Show (f (a,b)),Show (a,b),Traversable f ,Ord a) => f a ->  Maybe [(a,b)] -> Maybe (f (a,b))
+editedMod :: (Traversable f ,Ord a) => f a ->  Maybe [(a,b)] -> Maybe (f (a,b))
 editedMod  i  m=  join $ fmap (\mn-> look mn i ) m
   where look mn k = allMaybes $ fmap (\ki -> fmap (ki,) $  M.lookup ki (M.fromList mn) ) k
 
@@ -333,7 +334,7 @@ fkUITable conn inf pgs created wl path@(Path rl (FKJoinTable _  rel _ ) rr ) old
       filterInp <- UI.input
       filterInpBh <- stepper "" (onEnter filterInp )
       let filterInpT = tidings filterInpBh (onEnter filterInp)
-          filtering i= filter (L.isInfixOf (toLower <$> i) . fmap toLower . show )
+          filtering i= filter (L.isInfixOf (toLower <$> i) . fmap toLower . show  )
           listRes = filtering <$> filterInpT <*> res2
 
       box <- if isLeftJoin
@@ -375,6 +376,7 @@ akUITable _ _ _ _ _ _ = error "akUITable not implemented"
 interPoint ks i j = all (\(l,m) -> justError "interPoint wrong fields" $ liftA2 intersectPredTuple  (L.find ((==l).fst) i ) (L.find ((==m).fst) j)) ks
 
 indexArray ix s =  atMay (unArray s) ix
+
 unArray (k,SComposite s) = (unKArray k,) <$> V.toList s
 
 -- Create non
