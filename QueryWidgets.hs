@@ -264,6 +264,8 @@ crudUITable conn inf pgs ftb@(TB1 (KV (PK k d) a)) oldItems = do
 tbpk :: Lens  (KV a) (KV a) [a] [a]
 tbpk = kvKey . pkKey
 
+filterTB1 f = TB1 . filterKV f . _unTB1
+
 processPanelTable
    :: Connection
    -> Behavior (Maybe (TB1 (Key, Showable)))
@@ -273,11 +275,15 @@ processPanelTable
 processPanelTable conn attrsB table oldItemsi = do
   let fkattrsB = fmap (concat . F.toList . fmap (attrNonRec . unTB) . _unTB1) <$> attrsB
       oldItems = fmap (concat . F.toList . fmap (attrNonRec .unTB) . _unTB1) <$> oldItemsi
-      efkattrsB :: Behavior (Maybe [(Key,Showable)])
-      efkattrsB = fmap (catMaybes . concat .F.toList.  fmap (attrNonRec . unTB). _unTB1 ) <$> liftA2 (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attrsB (facts oldItemsi)
-  deleteB <- UI.button  # sink UI.enabled (isJust <$> facts oldItems) # set text "DELETE"
-  editB <- UI.button # sink UI.enabled (liftA2 (&&) (isJust <$>  efkattrsB) (isJust <$> fkattrsB)) # set text "EDIT"
-  insertB <- UI.button  # sink UI.enabled ( isJust <$> fkattrsB) # set text "INSERT"
+  insertB <- UI.button # set text "INSERT"
+  -- Insert when isValid
+        # sink UI.enabled ( isJust <$> fkattrsB)
+  editB <- UI.button # set text "EDIT"
+  -- Edit when any persistent field has changed
+        # sink UI.enabled (liftA2 (\i j -> maybe False (any id . F.toList . filterTB1 (isReflexive.runIdentity.getCompose) ) $ liftA2 (liftF2 (/=) ) i j) attrsB (facts oldItemsi))
+  deleteB <- UI.button # set text "DELETE"
+  -- Delete when isValid
+        # sink UI.enabled (isJust <$> facts oldItems)
   let
       deleteAction ki =  do
         let k = fmap (concat . F.toList .fmap (attrNonRec .unTB) ._unTB1 ) ki
@@ -321,7 +327,7 @@ unLeftBind i =  ( allMaybes . fmap (traverse unSOptional.first unKOptional ) ) i
 
 makeOptional :: Functor f => f Key -> Maybe (f (Key,Showable)) -> Maybe (f (Key,Showable))
 makeOptional def (Just i ) = Just $ fmap keyOptional i
-makeOptional def Nothing = Just $ fmap (\i -> (i,SOptional Nothing)) def
+makeOptional def Nothing = Just $ fmap (\i -> (i,justError "nonOptional type in left join makeOptional" $ showableDef (keyType i))) def
 
 keyOptional ((Key a b c d e) ,v) = (Key a b c d (KOptional e)  ,SOptional $ Just v)
 unkeyOptional ((Key a b c d (KOptional e)) ,(SOptional v) ) = fmap (Key a b c d e  , ) v
@@ -353,6 +359,7 @@ editedMod  i  m=  join $ fmap (\mn-> look mn i ) m
 
 
 showFK = (pure ((\v-> UI.span # set text (L.intercalate "," $ fmap renderShowable $ F.toList $  _kvKey $ allKVRec $  snd <$> v))))
+
 
 fkUITable
   :: Connection
@@ -392,7 +399,7 @@ fkUITable conn inf pgs created wl path@(Path _ (FKJoinTable _  rel _ ) rr ) oldI
         reorderPK l = fmap (\i -> justError "reorder wrong" $ L.find ((== i).fst) l )  (unAttr . unTB <$> ifk)
         lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
           where kn = justError "relTable" $ M.lookup ko relTable
-        fksel = (if isLeftJoin then Just . maybe (fmap (,SOptional Nothing) (unAttr. unTB <$> ifk)) id  else id ) . fmap (reorderPK . fmap lookFKsel)  <$>  (fmap findPK  <$> triding box)
+        fksel = (if isLeftJoin then Just . maybe (fmap (\k-> (k,justError "non optional type in left join" $ showableDef (keyType k)) ) (unAttr. unTB <$> ifk)) id  else id ) . fmap (reorderPK . fmap lookFKsel)  <$>  (fmap findPK  <$> triding box)
       paint (getElement l) (facts fksel)
       chw <- checkedWidget (pure False)
       (celem,tcrud,evs) <- crudUITable conn inf pgs (if isLeftJoin then unKOptional <$> tb1  else tb1 ) (triding box)

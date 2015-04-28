@@ -320,11 +320,9 @@ data Showable
   | SScopedKeySet !(Map Key Showable)
   deriving(Ord,Eq,Show)
 
-normalize (SSerial (Just a) ) =  a
-normalize a@(SSerial Nothing  ) =  a
-normalize (SOptional (Just a) ) = a
-normalize a@(SOptional Nothing ) = a
-normalize i = i
+showableDef (KOptional i) = Just $ SOptional (showableDef i)
+showableDef (KSerial i) = Just $ SSerial (showableDef i)
+showableDef i = Nothing
 
 transformKey (KSerial i)  (KOptional j) (SSerial v)  | i == j = (SOptional v)
 transformKey (KOptional i)  (KSerial j) (SOptional v)  | i == j = (SSerial v)

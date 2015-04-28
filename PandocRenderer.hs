@@ -39,10 +39,10 @@ renderFireProjectReport conn _ inputs = (,pure Nothing) <$> element
   where
       varMap input = M.fromList $ (\(i,j)-> (keyValue i,j)) <$> input
       var env str = maybe "" fromString (renderShowable <$> M.lookup str (varMap env) )
-      arrayVar env str = bulletList . concat . maybeToList $ join  (cshow . normalize <$> M.lookup str (varMap env) )
+      arrayVar env str = bulletList . concat . maybeToList $ join  (cshow <$> M.lookup str (varMap env) )
         where
           cshow (SComposite a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
-          cshow (SOptional a ) =  Nothing
+          cshow (SOptional a ) =  join $ fmap cshow a
       -- myDoc :: Pandoc
       myDoc env = setTitle "Project Report" $ doc $
          bulletList [
@@ -68,10 +68,10 @@ renderProjectPricingA = (staticP myDoc , element )
       varMap input = M.fromList $ (\(i,j)-> (keyValue i,j)) <$> input
       var str =  maybe "" fromString . fmap (renderShowable.snd) <$> idx str
       varT str =  maybe "" fromString . fmap (renderShowable.snd) <$> idxT str
-      arrayVar i str = (bulletList . concat . maybeToList . join . fmap   (cshow . normalize . snd) ) <$> indexTableInter i str
+      arrayVar i str = (bulletList . concat . maybeToList . join . fmap   (cshow .  snd) ) <$> indexTableInter i str
         where
           cshow (SComposite a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
-          cshow (SOptional a ) =  Nothing
+          cshow (SOptional a ) =  join $ fmap cshow a
       -- myDoc :: a -> Pandoc
       myDoc :: Step.Parser (->) (Bool,[[Text]]) (Maybe (TB1 (Key,Showable))) Pandoc
       myDoc = proc env -> do
@@ -116,10 +116,10 @@ renderProjectPricing _ _  inputs = (,pure Nothing) <$> element
    where
       varMap input = M.fromList $ (\(i,j)-> (keyValue i,j)) <$> input
       var env str = maybe "" fromString (renderShowable <$> M.lookup str (varMap env) )
-      arrayVar env str = bulletList . concat . maybeToList $ join  (cshow . normalize <$> M.lookup str (varMap env) )
+      arrayVar env str = bulletList . concat . maybeToList $ join  (cshow  <$> M.lookup str (varMap env) )
         where
           cshow (SComposite a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
-          cshow (SOptional a ) =  Nothing
+          cshow (SOptional a ) =  join $ fmap cshow a
       -- myDoc :: Pandoc
       myDoc env = setTitle "Orçamento do Serviço" $
          doc $  para (vr "firstname" <> " " <> vr "middlename" <> " " <> vr "lastname" <> ",") <>
