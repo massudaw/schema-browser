@@ -22,6 +22,14 @@ import Postgresql
 import Data.Maybe
 import Data.Distributive
 
+import System.Directory
+import System.Process(callCommand)
+import Data.String
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BSC
+import qualified Data.ByteString.Lazy.Char8 as BSLC
+import qualified Data.ByteString.Lazy as BSL
+
 
 
 instance Widget (TrivialWidget  a) where
@@ -68,6 +76,8 @@ addTs t e = do
 joinT :: MonadIO m => Tidings (IO a) -> m (Tidings a)
 joinT = mapT id
 
+joinTEvent = mapTEvent id
+
 adEvent :: Event a -> Tidings a -> UI (Tidings a)
 adEvent ne t = do
   c <- currentValue (facts t)
@@ -83,6 +93,14 @@ mapUIT e f x =  do
   bh <- stepper  b ev
   return $ tidings bh (bh <@ rumors x)
 
+
+mapTEvent f x = do
+  (e,h) <- liftIO $ newEvent
+  onEvent (rumors x) (\i -> liftIO $ (f i)  >>= h)
+  i <- currentValue (facts x)
+  be <- liftIO $ f i
+  t <- stepper be e
+  return $ tidings t e
 
 mapT :: MonadIO m => (a -> IO b) -> Tidings a -> m (Tidings b)
 mapT f x =  do
@@ -286,5 +304,26 @@ paintBorder e b = element e # sink UI.style (greenRed . isJust <$> b)
   where
       greenRed True = [("border-color","green")]
       greenRed False = [("border-color","red")]
+
+
+
+-- Convert html to Pdf using wkhtmltopdf
+htmlToPdf art html = do
+    let
+      output = (BSC.unpack art) <> ".pdf"
+      input = (BSC.unpack  art ) <> ".html"
+    traverse (BSL.writeFile (fromString input )) html
+    callCommand $ "wkhtmltopdf --print-media-type -T 10 page " <> input <>   " " <> output
+    file <- BS.readFile (fromString output)
+    removeFile input
+    removeFile output
+    return file
+
+-- Botão de imprimir frame no browser
+printIFrame i = do
+   print <- UI.button # set UI.text "Imprimir"
+   bh <- stepper "" (pure ("<script> window.frames[\"" <> i <>  "\"].focus(); window.frames[\"" <> i <> "\"].print();</script>") <@ UI.click print)
+   dv <- UI.div # UI.sink UI.html bh
+   UI.div # set children [print,dv]
 
 

@@ -4,6 +4,9 @@ import Network.Wreq
 import qualified Network.Wreq.Session as Sess
 
 
+import Widgets
+import Query
+
 import OpenSSL.Session (context)
 import Network.HTTP.Client.OpenSSL
 import Network.HTTP.Client.TLS
@@ -34,7 +37,9 @@ siapi3Page protocolo ano cgc_cpf nota = do
     pr <- Sess.post session (traceShowId prefeituraLoginFormUrl) (prefeituraForm protocolo ano cgc_cpf)
     print (pr ^? responseBody)
     r <- Sess.get session $ traceShowId $ (BSC.unpack $ prefeituraConsutalNota nota)
-    return $ BSLC.unpack .(replace ("/sistemas/"::BS.ByteString) ("http://www2.goiania.go.gov.br/sistemas/"::BS.ByteString). BSL.toStrict ) <$> (r ^? responseBody)
+    let html =  (replace ("/sistemas/"::BS.ByteString) ("http://www2.goiania.go.gov.br/sistemas/"::BS.ByteString). BSL.toStrict ) <$> (r ^? responseBody)
+    file <- htmlToPdf (nota <> protocolo) html
+    return $ Just $ SBinary  file
 
 
 prefeituraNota protocolo ano cgc_cpf nota = do

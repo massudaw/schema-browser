@@ -7,6 +7,7 @@ import Data.Functor.Compose
 import Data.Scientific hiding(scientific)
 import Data.Bits
 import Data.Tuple
+import Control.Lens ((^.))
 import Debug.Trace
 import Data.Time.Clock
 import qualified Data.Char as Char
@@ -267,14 +268,19 @@ unIntercalateAtto l s = go l
   where go (e:cs) =  liftA2 (:) e  (s *> go cs <|> pure [])
         go [] = pure []
 
+
+subsAKT r t = subs r (fmap (^. unTB1 .kvKey. pkKey) t)
+  where subs i j = fmap (\r -> (justError "no key Found subs" $ L.find (\i -> fmap fst i == fst r ) i , zipWith (\m n -> justError "no key Found subs" $L.find (\i-> fmap fst i == n) m ) j (snd r) ))
+
 parseAttr (Attr i) = do
   s<- parseShowable (textToPrim <$> keyType (i)) <?> show i
   return $  Attr (i,s)
 
-parseAttr (AKT l refl [t]) = do
+
+parseAttr (AKT l refl rel [t]) = do
   ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose  <$> l) (char ',')
   r <- doublequoted (parseArray ( doublequoted $ parseLabeledTable t)) <|> parseArray (doublequoted $ parseLabeledTable t) <|> pure []
-  return $ AKT ml  refl r
+  return $ AKT ml  refl (subsAKT ml r rel) r
 
 parseAttr (FKT l refl j ) = do
   ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose  <$> l) (char ',')
@@ -289,9 +295,13 @@ parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
 
 
 -- | Recognizes a quoted string.
---doublequoted :: Parser a -> Parser a
---doublequoted  p = takeWhile1 (flip elem "\"\\")  *> p <* takeWhile1 (flip elem "\"\\")
+doublequoted' :: Parser a -> Parser a
+doublequoted'  p = takeWhile1 (flip elem "\"\\")  *> p <* takeWhile1 (flip elem "\"\\")
 --
+quotedRec :: Char -> Parser a -> Parser a
+quotedRec c  p =  char c  *>  inner <* char c
+  where inner = (quotedRec c p <|> p)
+
 doublequoted :: Parser a -> Parser a
 doublequoted  p =  (char '\"'  <|> char '\\') *>  inner <* (char '\"' <|> char '\\')
   where inner = (doublequoted p <|> p)
@@ -302,8 +312,8 @@ parseShowable
 parseShowable (Primitive i ) =  (do
    case i of
         PPdf -> let
-              pr = SBinary . fst . B16.decode .BS.drop 1 <$>  plain' "\",)}"
-                in doublequoted pr <|> pr
+              pr = SBinary . fst . B16.decode . BS.drop 3   <$>  plain' "\",)}"
+                in (quotedRec '"') pr <|> pr
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double

@@ -132,18 +132,18 @@ indexTB1 (l:xs) t
 indexTable (l:xs) t@(TB1 (KV (PK k d)  v))
   = do
     let finder = L.find (L.any (==l). L.permutations . fmap (keyString .fst) .kattr)
-        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate ","l) ) $ finder v `mplus` finder k `mplus` finder d
+        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder v `mplus` finder k `mplus` finder d
     case runIdentity $ getCompose $ i  of
          Attr l -> return l
          FKT l _  j -> indexTable xs j
-         AKT l _  j -> let i =  T.traverse (indexTable xs)  j
+         AKT l _ _ j -> let i =  T.traverse (indexTable xs)  j
                        in liftA2 (,) (Just  (fst $ unAttr $   runIdentity $ getCompose $ head l) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
 
 
 kattr = kattri . runIdentity . getCompose
 kattri (Attr i ) = [i]
 kattri (FKT i _ _ ) =  (L.concat $ kattr  <$> i)
-kattri (AKT i _ _ ) =  (L.concat $ kattr <$> i)
+kattri (AKT i _ _ _ ) =  (L.concat $ kattr <$> i)
 
 class KeyString i where
   keyString :: i -> Text
@@ -170,7 +170,7 @@ findPK = concat . fmap (attrNonRec . runIdentity . getCompose) . _pkKey  . _kvKe
 
 
 attrNonRec (FKT ifk _ _ ) = concat $ fmap kattr ifk
-attrNonRec (AKT ifk _ _ ) = concat $ fmap kattr ifk
+attrNonRec (AKT ifk _ _ _ ) = concat $ fmap kattr ifk
 attrNonRec (Attr i ) = [i]
 
 

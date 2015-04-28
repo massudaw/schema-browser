@@ -1,7 +1,9 @@
 {-# LANGUAGE BangPatterns,OverloadedStrings #-}
 module Crea where
+
 import Network.Wreq
 import QueryWidgets
+import Widgets
 import Query
 import qualified Network.Wreq.Session as Sess
 
@@ -11,7 +13,6 @@ import Network.HTTP.Client.OpenSSL
 import Network.HTTP.Client.TLS
 import Network.HTTP.Client (defaultManagerSettings, managerResponseTimeout)
 
-import System.Process (callCommand)
 import Control.Lens
 import Control.Applicative
 import Data.Char
@@ -19,7 +20,9 @@ import Data.String
 import Control.Monad
 import Data.Maybe
 import Data.Monoid
+
 import System.Directory
+import System.Process (callCommand)
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
@@ -46,6 +49,7 @@ creaLogin rnp user pass = do
     --pr <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
     return (cr ^? responseBody)
 
+
 creaLoginArt rnp user pass art = do
   let opts = defaults & manager .~ Left (opensslManagerSettings context)
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
@@ -54,14 +58,7 @@ creaLoginArt rnp user pass art = do
     pr <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
     pr <- Sess.get session $ (traceShowId (creaArtQuery (BSC.unpack art) ))
     let html = (replace (fst replacePath ) (snd replacePath ) . (BSL.toStrict  )) <$> (pr ^? responseBody)
-    let
-      output = (BSC.unpack art) <> ".pdf"
-      input = (BSC.unpack  art ) <> ".html"
-    traverse (BSL.writeFile (fromString input )) html
-    callCommand $ "wkhtmltopdf --print-media-type -T 10 page " <> input <>   " " <> output
-    !file <- BS.readFile (fromString output)
-    removeFile input
-    removeFile output
+    file <- htmlToPdf art html
     return $ fmap (SBinary  ) $ Just file
 
 creaBoletoArt rnp user pass art = do
