@@ -109,6 +109,10 @@ data PK a
 data KV a
   = KV {_kvKey  :: PK a , _kvAttr ::  [a] }deriving(Functor,Foldable,Traversable,Show)
 
+mapKV f (KV (PK l m) n) =  KV (PK (map f l)(map f m)) (map f n)
+
+filterKV i (KV (PK l m) n) = KV (PK (filter i l) (filter i m )) (filter i n)
+
 
 data Labeled l v
   = Labeled
@@ -142,6 +146,7 @@ instance Show f => Show1 (Labeled f ) where
   showsPrec1 = showsPrec
 
 isReflexive (FKT _  r _ ) = r
+isReflexive (AKT _  r _ _ ) = r
 isReflexive _ = True
 
 data TBRel  i

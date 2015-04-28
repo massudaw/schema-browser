@@ -70,9 +70,6 @@ data  PollingPlugins fi fo
   , _pollingBoundedAction :: Connection -> InformationSchema ->  fi -> fo
   }
 
-mapKV f (KV (PK l m) n) =  KV (PK (map f l)(map f l)) (map f l)
-
-filterKV i (KV (PK l m) n) = KV (PK (filter i l) (filter i m )) (filter i n)
 containKV f = (\i ->   S.member ( S.fromList $ fmap keyValue $  kattr (Compose . Identity $ fst i)) (S.fromList $ fmap (S.fromList .head) $ fmap snd $ f))
 
 -- [Note] Smooth Plugins
@@ -292,7 +289,7 @@ processPanelTable conn attrsB table oldItemsi = do
             k = (\(Just i)-> i) kM
             kM = (L.nubBy (\i j -> fst i == fst j  )  .concat . F.toList .fmap (attrNonRec .unTB) ._unTB1 ) <$> old
             isM :: Maybe [(Key,Showable)]
-            isM = ( L.nubBy (\i j -> fst i == fst j  ) . catMaybes . concat . F.toList  . fmap (attrNonRec. unTB ) .  filterKV (isReflexive .runIdentity . getCompose) ._unTB1)  <$> (liftA2 (liftF2  (\i j -> if i == j then Nothing else  traceShow (i,j) $ Just i))) attr old
+            isM = ( L.nubBy (\i j -> fst i == fst j  ) . catMaybes . concat . F.toList  . fmap (attrNonRec. unTB ) .  mapKV traceShowId . filterKV (isReflexive .runIdentity . getCompose) ._unTB1)  <$> (liftA2 (liftF2  (\i j -> if i == j then Nothing else  traceShow (i,j) $ Just i))) attr old
             isM' :: Maybe [(Key,Showable)]
             isM' = (catMaybes . F.toList ) <$> (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attr old
             kM' = F.toList <$> old
@@ -393,12 +390,10 @@ fkUITable conn inf pgs created wl path@(Path _ (FKJoinTable _  rel _ ) rr ) oldI
                 else wrapListBox listRes tdi showFK
       let
         reorderPK l = fmap (\i -> justError "reorder wrong" $ L.find ((== i).fst) l )  (unAttr . unTB <$> ifk)
-        lookFKsel (ko,v)= (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
+        lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
           where kn = justError "relTable" $ M.lookup ko relTable
-        fksel = fmap (reorderPK . fmap lookFKsel)  <$>  (fmap findPK  <$> triding box)
-        tdsel = fmap (\i -> FKT (zipWith (\i j -> (,j) <$> i)  ifk . fmap snd  . findPK $ i ) refl i)  <$>  triding box
-        edited = liftA2 (\i j -> join $ liftA2 (\i j-> if  i == j then Nothing else Just j ) i j) oldItems tdsel
-      paint (getElement l) (facts $ if isLeftJoin then makeOptional (unAttr. unTB <$> ifk) <$> fksel else fksel )
+        fksel = (if isLeftJoin then Just . maybe (fmap (,SOptional Nothing) (unAttr. unTB <$> ifk)) id  else id ) . fmap (reorderPK . fmap lookFKsel)  <$>  (fmap findPK  <$> triding box)
+      paint (getElement l) (facts fksel)
       chw <- checkedWidget (pure False)
       (celem,tcrud,evs) <- crudUITable conn inf pgs (if isLeftJoin then unKOptional <$> tb1  else tb1 ) (triding box)
       let eres = fmap (addToList  (allRec' (tableMap inf) ((\(Just i)-> i) $ M.lookup rr (pkMap inf))) <$> ) evs
@@ -407,7 +402,7 @@ fkUITable conn inf pgs created wl path@(Path _ (FKJoinTable _  rel _ ) rr ) oldI
           # sink UI.style (noneShow <$> (facts $ triding chw))
           # set style [("padding-left","10px")]
       fk <- UI.li # set  children [l, getElement box,filterInp,getElement chw,celem]
-      let bres =  liftA2 (liftA2 (\i -> FKT i refl ) ) (fmap (fmap (_tb . Attr)) <$> if isLeftJoin then makeOptional (unAttr.unTB <$> ifk) <$> fksel else fksel ) (if isLeftJoin then makeOptional tb1 <$> tcrud else tcrud )
+      let bres =  liftA2 (liftA2 (\i -> FKT i refl ) ) (fmap (fmap (_tb . Attr)) <$> fksel ) (if isLeftJoin then makeOptional tb1 <$> tcrud else tcrud )
       return $ TrivialWidget bres fk
     where ksn = filter (\i -> not $ S.member (fst i) created) rel
 
