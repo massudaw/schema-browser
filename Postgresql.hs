@@ -353,9 +353,9 @@ parseShowable (KArray i)
     =  SComposite . Vector.fromList <$> (par <|> doublequoted par)
       where par = char '{'  *>  sepBy (parseShowable i) (char ',') <* char '}'
 parseShowable (KOptional i)
-    = SOptional <$> ( (Just <$> (parseShowable i)) <|> pure Nothing )
+    = SOptional <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
 parseShowable (KSerial i)
-    = SSerial <$> ((Just <$> parseShowable i) <|> pure Nothing)
+    = SSerial <$> ((Just <$> parseShowable i) <|> pure (showableDef i))
 parseShowable (KInterval k)=
     let
       emptyInter = const (SInterval Interval.empty) <$> string "empty"

@@ -322,6 +322,7 @@ data Showable
 
 showableDef (KOptional i) = Just $ SOptional (showableDef i)
 showableDef (KSerial i) = Just $ SSerial (showableDef i)
+showableDef (KArray i ) = Just (SComposite Vector.empty)
 showableDef i = Nothing
 
 transformKey (KSerial i)  (KOptional j) (SSerial v)  | i == j = (SOptional v)

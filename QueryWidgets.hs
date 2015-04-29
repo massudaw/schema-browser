@@ -145,10 +145,10 @@ buildUI i  tdi = case i of
             -- el <- UI.div
             let arraySize = 10
             widgets <- mapM (\i-> buildUI ti (join . fmap (\a -> unSComposite a V.!? i ) <$> tdi )) [0..arraySize]
-            let tdcomp = fmap (\i -> if V.null i then Nothing else Just . SComposite $ i ). takeWhileJust  V.snoc V.empty $ ( triding <$> widgets)
+            let tdcomp = fmap (\v -> if V.null v then showableDef i else Just . SComposite $ v ). takeWhileJust  (flip V.cons) V.empty $ ( triding <$> widgets)
                 hideNext Nothing Nothing = False
                 hideNext (Just _) _ = True
-                tshow = fmap (\i-> noneShow <$> liftA2 hideNext ((if (i -1 ) < 0 then const (Just (SOptional Nothing) ) else join . fmap (\(SComposite a)-> a V.!?  (i - 1)  )) <$> tdcomp ) (join . fmap (\(SComposite a)-> a V.!? i ) <$> tdcomp )) [0..arraySize]
+                tshow = fmap (\idx-> noneShow <$> liftA2 hideNext ((if (idx -1 ) < 0 then const (showableDef i  ) else join . fmap (\(SComposite a)-> a V.!?  (idx - 1)  )) <$> tdcomp ) (join . fmap (\(SComposite a)-> a V.!? idx ) <$> tdcomp )) [0..arraySize]
                 ziped = zipWith (\i j -> element j # sink UI.style (facts i))  tshow (fmap getElement widgets)
             sequence ziped
             composed <- UI.span # set children (fmap getElement widgets)
@@ -261,10 +261,9 @@ crudUITable conn inf pgs ftb@(TB1 (KV (PK k d) a)) oldItems = do
     # set style [("border","2px"),("border-color","gray"),("border-style","solid")]
   return (body, tableb ,evsa)
 
-tbpk :: Lens  (KV a) (KV a) [a] [a]
-tbpk = kvKey . pkKey
 
 filterTB1 f = TB1 . filterKV f . _unTB1
+mapTB1 f = TB1 . mapKV f . _unTB1
 
 processPanelTable
    :: Connection
@@ -280,7 +279,7 @@ processPanelTable conn attrsB table oldItemsi = do
         # sink UI.enabled ( isJust <$> fkattrsB)
   editB <- UI.button # set text "EDIT"
   -- Edit when any persistent field has changed
-        # sink UI.enabled (liftA2 (\i j -> maybe False (any id . F.toList . filterTB1 (isReflexive.runIdentity.getCompose) ) $ liftA2 (liftF2 (/=) ) i j) attrsB (facts oldItemsi))
+        # sink UI.enabled (liftA2 (\i j -> maybe False (any id . F.toList . mapTB1 traceShowId . filterTB1 (any id . F.toList)  . filterTB1 (isReflexive.runIdentity.getCompose)  ) $ liftA2 (liftF2 (\l m -> if l  /= m then traceShow (l,m) True else False) )  i j) attrsB (facts oldItemsi))
   deleteB <- UI.button # set text "DELETE"
   -- Delete when isValid
         # sink UI.enabled (isJust <$> facts oldItems)
@@ -299,7 +298,7 @@ processPanelTable conn attrsB table oldItemsi = do
             isM' :: Maybe [(Key,Showable)]
             isM' = (catMaybes . F.toList ) <$> (liftA2 (liftF2  (\i j -> if i == j then Nothing else Just i))) attr old
             kM' = F.toList <$> old
-        res <- liftIO $ catch (maybe (return (Left "no attribute changed")) (\l-> Right <$> update conn l (fromJust old) table) i ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
+        res <- liftIO $ catch (maybe (return (Left "no attribute changed check edit restriction")) (\l-> Right <$> update conn l (fromJust old) table) i ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
         let updated = (\(Just i)-> i) isM'
         return $ fmap (const (Edit (fmap (mappend updated) (filter (\(k,_) -> not $ k `elem` (fmap fst updated)) <$> kM') ) (fromJust old) )) res
 
@@ -423,7 +422,7 @@ akUITable conn inf pgs path@(Path rl (FKJoinTable frl  rel frr ) rr ) oldItems  
      fks <- mapM (\ix-> fkUITable conn inf pgs S.empty [] path  (makeOptional fkst <$>indexItens ix) fkst ) [0..8]
      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (fmap unLeft . triding <$> fks)
      fksE <- UI.div # set children (getElement <$> fks )
-     let bres = fmap (\l -> AKT (fmap  (,SComposite $ V.fromList (fmap fst l)) <$> ifk) refl [] (fmap snd l)). allMaybes .  L.takeWhile (maybe False (const True)) <$> Tra.sequenceA (fmap (fmap (\(FKT i _ j ) -> (head $ fmap (snd.unAttr.unTB) $ i, j)) ) . fmap unLeft . triding <$> fks)
+     let bres = fmap (\l -> AKT (fmap  (,SComposite $ V.fromList $  (fmap fst l)) <$> ifk) refl [] (fmap snd l)). allMaybes .  L.takeWhile (maybe False (const True)) <$> Tra.sequenceA (fmap (fmap (\(FKT i _ j ) -> (head $ fmap (snd.unAttr.unTB) $ i, j)) ) . fmap unLeft . triding <$> fks)
      return $ (\i -> if isLeft then makeOptional tb i else i) <$>  TrivialWidget bres fksE
 akUITable _ _ _ _ _ _ = error "akUITable not implemented"
 
