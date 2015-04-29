@@ -324,9 +324,9 @@ unLeft i = join $  fmap ( allMaybes . fmap (traverse unSOptional.first unKOption
 unLeftBind :: (F.Foldable f,Functor f) => f (Key,Showable) -> Maybe (f (Key,Showable))
 unLeftBind i =  ( allMaybes . fmap (traverse unSOptional.first unKOptional ) ) i
 
-makeOptional :: Functor f => f Key -> Maybe (f (Key,Showable)) -> Maybe (f (Key,Showable))
+makeOptional :: (F.Foldable f, Functor f) => f Key -> Maybe (f (Key,Showable)) -> Maybe (f (Key,Showable))
 makeOptional def (Just i ) = Just $ fmap keyOptional i
-makeOptional def Nothing = Just $ fmap (\i -> (i,justError "nonOptional type in left join makeOptional" $ showableDef (keyType i))) def
+makeOptional def Nothing = allMaybes $ fmap (\i -> (i,)  <$> showableDef (keyType i)) def
 
 keyOptional ((Key a b c d e) ,v) = (Key a b c d (KOptional e)  ,SOptional $ Just v)
 unkeyOptional ((Key a b c d (KOptional e)) ,(SOptional v) ) = fmap (Key a b c d e  , ) v
