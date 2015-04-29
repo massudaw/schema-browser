@@ -55,6 +55,13 @@ data Plugins
   , _bounds :: (Text,([(Bool,[[Text]])],[(Bool,[[Text]])]))
   , _boundedAction :: Connection -> InformationSchema -> (Tidings (Maybe (TB1 (Key,Showable)))) -> UI Element
   }
+  | StatefullPlugin
+  { _name :: String
+  , _bounds :: [(Text,([(Bool,[[Text]])],[(Bool,[[Text]])]))]
+  , _state :: [(Bool,[[Text]])]
+  , _statefullAction ::
+      [Connection -> InformationSchema -> (Maybe (TB1 (Key,Showable))) -> (Maybe (TB1 (Key,Showable))) -> IO (Maybe (TB1 (Key,Showable))] )
+  }
   | BoundedPlugin2
   { _name :: String
   , _bounds :: (Text,([(Bool,[[Text]])],[(Bool,[[Text]])]))
