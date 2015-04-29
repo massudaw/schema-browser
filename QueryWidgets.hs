@@ -281,14 +281,14 @@ processPanelTable
    -> Tidings (Maybe (TB1 (Key, Showable)))
    -> UI ([Element],[Event (Modification Key Showable)])
 processPanelTable conn attrsB table oldItemsi = do
-  let fkattrsB = fmap (concat . F.toList . fmap (attrNonRec . unTB) . _unTB1) <$> attrsB
-      oldItems = fmap (concat . F.toList . fmap (attrNonRec .unTB) . _unTB1) <$> oldItemsi
+  let fkattrsB = fmap (concat . F.toList . fmap (attrNonRec . unTB) . _unTB1. tableNonRef ) <$> attrsB
+      oldItems = fmap (concat . F.toList . fmap (attrNonRec .unTB) . _unTB1. tableNonRef ) <$> oldItemsi
   insertB <- UI.button # set text "INSERT"
   -- Insert when isValid
         # sink UI.enabled ( isJust <$> fkattrsB)
   editB <- UI.button # set text "EDIT"
   -- Edit when any persistent field has changed
-        # sink UI.enabled (liftA2 (\i j -> maybe False (any fst . F.toList . mapTB1 traceShowId .tableNonRef . filterTB1 (any fst . F.toList){-  . filterTB1 (isReflexive.runIdentity.getCompose) -} ) $ liftA2 (liftF2 (\l m -> if l  /= m then traceShow (l,m) (True,(l,m)) else (False,(l,m))) )  i j) attrsB (facts oldItemsi))
+        # sink UI.enabled (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then traceShow (l,m) (True,(l,m)) else (False,(l,m))) )  i j) (fmap tableNonRef <$> attrsB) (fmap tableNonRef <$> facts oldItemsi))
   deleteB <- UI.button # set text "DELETE"
   -- Delete when isValid
         # sink UI.enabled (isJust <$> facts oldItems)
@@ -420,7 +420,6 @@ fkUITable conn inf pgs created wl path@(Path _ (FKJoinTable _  rel _ ) rr ) oldI
       fk <- UI.li # set  children [l, getElement box,filterInp,getElement chw,celem]
       let bres =  liftA2 (liftA2 (\i -> FKT i refl ) ) (fmap (fmap (_tb . Attr)) <$> fksel ) (if isLeftJoin then makeOptional tb1 <$> tcrud else tcrud )
       return $ TrivialWidget bres fk
-    where ksn = filter (\i -> not $ S.member (fst i) created) rel
 
 
 akUITable conn inf pgs path@(Path rl (FKJoinTable frl  rel frr ) rr ) oldItems  tb@(AKT ifk@[_] refl _ [tb1])
@@ -470,11 +469,11 @@ nonInjectiveSelection conn inf pgs created wl (Path _ (FKJoinTable _ ksjoin _ ) 
       return $ TrivialWidget   (liftA2 (liftA2 (\i j-> FKT (fmap (_tb.Attr) i)  refl j)  ) vv ct) o
   | all isKOptional (keyType . unAttr.unTB<$> fkattr ) = do
       let
+          fkattr'=  unTB <$> (fmap unKOptional  <$> fkattr)
           oldASet :: Set Key
           oldASet = S.fromList (filter (flip S.member created) $ unAttr <$> fkattr' )
           iold :: Tidings ([Maybe [(Key,Showable)]])
           iold  =   fmap (join . fmap (allMaybes . fmap (  (\(i,j)-> (unKOptional i,)<$> j) . fmap unSOptional))) <$> (Tra.sequenceA $ fmap (fmap ( kattr . _tb ) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ kattr $ _tb $ fst $ i) oldASet) wl)
-          fkattr'=  unTB <$> (fmap unKOptional  <$> fkattr)
           tbfk' = unKOptional <$> tbfk
           sel = fmap (\i->  (unSOptional . unAttr .unTB<$> _tbref i) ) . fmap (fmap snd) <$> selks
       (vv ,ct, els) <- inner tbfk' sel fkattr' iold
