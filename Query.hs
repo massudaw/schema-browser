@@ -884,7 +884,7 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           kas <- kname tas  knas
           let relLabel = fkm (F.toList $ unlb1 $ ksb) (F.toList $ unlb1 ksn)
           let jt = if nextLeft  then " LEFT JOIN " else " JOIN "
-              query =  jt <> "(SELECT " <> T.intercalate "," (label <$> pksb) <> "," <> "array_agg((" <> (T.intercalate ","  (fmap explodeLabel $ (F.toList $ unlb1 $ tb ) )) <> ")) as " <> label (snd kas) <> " FROM " <> bq <> (jt <> nq <> " ON "  <> joinLPredicate (fkm (F.toList $ unlb1 $ ksb) (F.toList $ unlb1 ksn)) )<> q <>   " GROUP BY " <>  T.intercalate "," (label <$> pksb ) <> ") as " <>  label tas  <> " ON " <>  joinLPredicate (zip ksbn pksb)
+              query =  jt <> "(SELECT " <> T.intercalate "," (label <$> pksb) <> "," <> "array_agg((" <> (T.intercalate ","  (fmap explodeLabel $ (F.toList $ unlb1 $ tb ) )) <> ")) as " <> label (snd kas) <> " FROM " <> bq <> (jt <> " LATERAL ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (head (look (fst <$> ks) (F.toList$ unlb1 ksb) ))  <> ") as arr) as z1 "  <> jt <> nq  <> " ON " <>  label (head (look (snd <$> ks) (F.toList $ unlb1 ksn) )) <> " = arr order by arrrow ) as z1 ON true " <>  q <>   " GROUP BY " <>  T.intercalate "," (label <$> pksb ) <> ") as " <>  label tas  <> " ON " <>  joinLPredicate (zip ksbn pksb))
           return $ ([Compose $ Labeled (label $ snd kas) (AKT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo ) (first (Compose .Identity .unlabel ) . second (pure . Compose .Identity .unlabel) <$> relLabel)  [tb  ]) ] , query)
 
     | otherwise = do
@@ -900,8 +900,7 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
         fkSet = S.unions $ fmap (\(Path ifk _ _) -> ifk)$ filter (\(Path _ ifk  _) -> isPathReflexive ifk)  $ S.toList (rawFKS nextT)
         nextLeft = any (isKOptional.keyType.fst) ks || isLeft
         fkm m n = zip (look (fst <$> ks) m) (look (snd <$> ks) n)
-          where
-            look ki i = justError ("missing FK on " ) $ allMaybes $ fmap (\j-> L.find (\v -> unAttr (labelValue v) == j) i  ) ki
+        look ki i = justError ("missing FK on " ) $ allMaybes $ fmap (\j-> L.find (\v -> unAttr (labelValue v) == j) i  ) ki
         mapOpt = fmap (\i -> if any (isKOptional.keyType.fst) ks then  makeOpt i else i)
         fun ksn nt items =  do
                   let attrs :: [TBLabel  Key]
