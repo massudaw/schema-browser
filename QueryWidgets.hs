@@ -265,6 +265,15 @@ crudUITable conn inf pgs ftb@(TB1 (KV (PK k d) a)) oldItems = do
 filterTB1 f = TB1 . filterKV f . _unTB1
 mapTB1 f = TB1 . mapKV f . _unTB1
 
+
+tableNonRef (TB1 (KV (PK l m ) n)  )  = TB1 (KV (PK (fun l) (fun m) ) (fun n))
+  where nonRef (Attr i ) = [Compose $ Identity $ Attr i]
+        nonRef (FKT i True _ ) = i
+        nonRef (FKT i False _ ) = []
+        nonRef (AKT i True _ _ ) = i
+        nonRef (AKT i False _ _ ) = []
+        fun  = concat . fmap (nonRef . runIdentity . getCompose)
+
 processPanelTable
    :: Connection
    -> Behavior (Maybe (TB1 (Key, Showable)))
@@ -279,7 +288,7 @@ processPanelTable conn attrsB table oldItemsi = do
         # sink UI.enabled ( isJust <$> fkattrsB)
   editB <- UI.button # set text "EDIT"
   -- Edit when any persistent field has changed
-        # sink UI.enabled (liftA2 (\i j -> maybe False (any id . F.toList . mapTB1 traceShowId . filterTB1 (any id . F.toList)  . filterTB1 (isReflexive.runIdentity.getCompose)  ) $ liftA2 (liftF2 (\l m -> if l  /= m then traceShow (l,m) True else False) )  i j) attrsB (facts oldItemsi))
+        # sink UI.enabled (liftA2 (\i j -> maybe False (any fst . F.toList . mapTB1 traceShowId .tableNonRef . filterTB1 (any fst . F.toList){-  . filterTB1 (isReflexive.runIdentity.getCompose) -} ) $ liftA2 (liftF2 (\l m -> if l  /= m then traceShow (l,m) (True,(l,m)) else (False,(l,m))) )  i j) attrsB (facts oldItemsi))
   deleteB <- UI.button # set text "DELETE"
   -- Delete when isValid
         # sink UI.enabled (isJust <$> facts oldItems)
@@ -327,6 +336,7 @@ unLeftBind i =  ( allMaybes . fmap (traverse unSOptional.first unKOptional ) ) i
 makeOptional :: (F.Foldable f, Functor f) => f Key -> Maybe (f (Key,Showable)) -> Maybe (f (Key,Showable))
 makeOptional def (Just i ) = Just $ fmap keyOptional i
 makeOptional def Nothing = allMaybes $ fmap (\i -> (i,)  <$> showableDef (keyType i)) def
+-- makeOptional def Nothing = Just $ fmap (\i -> (kOptional i,  SOptional $ showableDef (keyType i))) def
 
 keyOptional ((Key a b c d e) ,v) = (Key a b c d (KOptional e)  ,SOptional $ Just v)
 unkeyOptional ((Key a b c d (KOptional e)) ,(SOptional v) ) = fmap (Key a b c d e  , ) v
@@ -423,7 +433,7 @@ akUITable conn inf pgs path@(Path rl (FKJoinTable frl  rel frr ) rr ) oldItems  
      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (fmap unLeft . triding <$> fks)
      fksE <- UI.div # set children (getElement <$> fks )
      let bres = fmap (\l -> AKT (fmap  (,SComposite $ V.fromList $  (fmap fst l)) <$> ifk) refl [] (fmap snd l)). allMaybes .  L.takeWhile (maybe False (const True)) <$> Tra.sequenceA (fmap (fmap (\(FKT i _ j ) -> (head $ fmap (snd.unAttr.unTB) $ i, j)) ) . fmap unLeft . triding <$> fks)
-     return $ (\i -> if isLeft then makeOptional tb i else i) <$>  TrivialWidget bres fksE
+     return $ (if isLeft then makeOptional tb else id) <$>  TrivialWidget bres fksE
 akUITable _ _ _ _ _ _ = error "akUITable not implemented"
 
 interPoint ks i j = all (\(l,m) -> justError "interPoint wrong fields" $ liftA2 intersectPredTuple  (L.find ((==l).fst) i ) (L.find ((==m).fst) j)) ks
@@ -447,30 +457,34 @@ nonInjectiveSelection
 nonInjectiveSelection conn inf pgs created wl (Path _ (FKJoinTable _ ksjoin _ ) o1 ) attr@(FKT fkattr refl tbfk ) lks selks
   | all isPrim (keyType . unAttr.unTB<$> fkattr ) = do
       let
+          fkattr' = unTB <$> fkattr
+          oldASet :: Set Key
+          oldASet = S.fromList (filter (flip S.member created) $ unAttr <$> fkattr' )
+          iold :: Tidings ([Maybe [(Key,Showable)]])
+          iold  =    (Tra.sequenceA $ fmap (fmap ( kattr . _tb ) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ kattr $ _tb $ fst $ i) oldASet) wl)
           sel = fmap (\i->  (Just . unAttr .unTB<$> _tbref i) ) . fmap (fmap snd) <$> selks
-      (vv ,ct, els) <- inner tbfk sel (unTB <$> fkattr)
-      l <- UI.span # set text (show $ unAttr .unTB<$> fkattr)
+      (vv ,ct, els) <- inner tbfk sel  fkattr' iold
+      l <- UI.span # set text (show $ unAttr <$> fkattr')
       paint (getElement l) (facts vv)
       o <- UI.div # set children (l: els)
       return $ TrivialWidget   (liftA2 (liftA2 (\i j-> FKT (fmap (_tb.Attr) i)  refl j)  ) vv ct) o
   | all isKOptional (keyType . unAttr.unTB<$> fkattr ) = do
       let
-          fkattr'=  fmap unKOptional'  <$> fkattr
-          tbfk' = unKOptional' <$> tbfk
-          sel = fmap (\i->  (unRSOptional' . unAttr .unTB<$> _tbref i) ) . fmap (fmap snd) <$> selks
-      (vv ,ct, els) <- inner tbfk' sel ( unTB <$> fkattr')
+          oldASet :: Set Key
+          oldASet = S.fromList (filter (flip S.member created) $ unAttr <$> fkattr' )
+          iold :: Tidings ([Maybe [(Key,Showable)]])
+          iold  =   fmap (join . fmap (allMaybes . fmap (  (\(i,j)-> (unKOptional i,)<$> j) . fmap unSOptional))) <$> (Tra.sequenceA $ fmap (fmap ( kattr . _tb ) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ kattr $ _tb $ fst $ i) oldASet) wl)
+          fkattr'=  unTB <$> (fmap unKOptional  <$> fkattr)
+          tbfk' = unKOptional <$> tbfk
+          sel = fmap (\i->  (unSOptional . unAttr .unTB<$> _tbref i) ) . fmap (fmap snd) <$> selks
+      (vv ,ct, els) <- inner tbfk' sel fkattr' iold
       l <- UI.span # set text (show $ unAttr . unTB <$> fkattr)
-      let vvo = (fmap (fmap Attr ). makeOptional (unAttr . unTB <$> fkattr') <$> vv)
+      let vvo = (fmap (fmap Attr ). makeOptional (unAttr . unTB <$> fkattr) <$> vv)
       paint (getElement l) (facts vvo)
       o <- UI.div # set children (l: els)
-      return $ TrivialWidget   (liftA2 (liftA2 (\i -> FKT i refl ) ) (fmap (fmap (_tb . Attr ) ). makeOptional (fmap (unAttr .unTB) fkattr') <$> vv) (makeOptional tbfk' <$> ct)) o
+      return $ TrivialWidget   (liftA2 (liftA2 (\i -> FKT i refl ) ) (fmap (fmap (_tb . Attr ) ). makeOptional (fmap (unAttr .unTB) fkattr) <$> vv) (makeOptional tbfk <$> ct)) o
   | otherwise = error (show attr)
-  where inner tbfk sel fkattr' = mdo
-            let
-                iold :: Tidings ([Maybe [(Key,Showable)]])
-                iold  =   fmap (join . fmap (allMaybes . fmap (  (\(i,j)-> (unKOptional' i,)<$> j) . fmap unRSOptional'))) <$> (Tra.sequenceA $ fmap (fmap ( kattr . _tb ) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ kattr $ _tb $ fst $ i) oldASet) wl)
-                oldASet :: Set Key
-                oldASet = S.fromList (filter (flip S.member created) $ unAttr <$> fkattr' )
+  where inner tbfk sel fkattr' iold = mdo
             let
                 vv =  join . fmap (lorder (unAttr <$> fkattr') ) . fmap concat . allMaybes  <$> iold
                 tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK  l _ ) _ ))-> interPoint ksjoin k  (unAttr . unTB <$> l)) ) i) j ) <$> lks <*> vv
