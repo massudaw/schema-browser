@@ -61,7 +61,7 @@ getCaptchaCpf' _ inf i  handler = do
       liftIO $ print "tryTakeMVAR Captcha"
       mvar <- liftIO $takeMVar i
       out <- ( fmap join . Tra.traverse getCaptchaCpfShowable $traceShowId $ traceShow "takeMVar" mvar)
-      let nkey = lookFresh inf "Statefull CPF Receita" "owner" "captchaViewer"
+      let nkey = lookFresh inf "CPF Receita" "owner" "captchaViewer"
       handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (nkey ,) . SBinary  . BSL.toStrict ) $ out
       return ()) rv
   return ()
@@ -126,7 +126,7 @@ getCaptcha' _ inf i  handler = do
       liftIO $ print "tryTakeMVAR Captcha"
       mvar <- liftIO $takeMVar i
       out <- ( fmap join . Tra.traverse getCaptchaShowable $traceShowId $ traceShow "takeMVar" mvar)
-      let nkey = lookFresh inf "Statefull CNPJ Receita" "owner" "captchaViewer"
+      let nkey = lookFresh inf "CNPJ Receita" "owner" "captchaViewer"
       handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (nkey ,) . SBinary  . BSL.toStrict ) $ out
       return ()) rv
   return ()

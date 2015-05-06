@@ -1090,7 +1090,7 @@ queryCPFStatefull =
                             ) (filterJust $ liftA2 (,) <$> facts inputs <@> ev ))
           element out #+ [UI.div # sink UI.text s]
           return out
-  in (StatefullPlugin "Statefull CPF Receita" "owner" [([(False,[["cpf_number"]])],[(False ,[["captchaViewer"]])]),([(True,[["captchaInput"]])],[(True,[["owner_name"]])])]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] cpfCall )
+  in (StatefullPlugin "CPF Receita" "owner" [([(True,[["cpf_number"]])],[(False ,[["captchaViewer"]])]),([(True,[["captchaInput"]])],[(True,[["owner_name"]])])]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] cpfCall )
 
 
 
@@ -1108,7 +1108,7 @@ queryCNPJStatefull =
                             ) (filterJust $ liftA2 (,) <$> facts inputs <@> ev ))
           element out #+ [UI.div # sink UI.text s]
           return out
-  in (StatefullPlugin "Statefull CNPJ Receita" "owner" [([(False,[["cnpj_number"]])],[(False ,[["captchaViewer"]])]),([(True,[["captchaInput"]])],[(True,[["owner_name"]])])]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] wrapplug )
+  in (StatefullPlugin "CNPJ Receita" "owner" [([(True,[["cnpj_number"]])],[(False ,[["captchaViewer"]])]),([(True,[["captchaInput"]])],[(True,[["owner_name"]])])]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] wrapplug )
 
 
 
