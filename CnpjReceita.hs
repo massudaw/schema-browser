@@ -30,6 +30,7 @@ import qualified Data.Text as T
 import qualified Data.Traversable as Tra
 import qualified Data.Text.Lazy as TL
 
+import Safe
 import Query
 import Schema
 import Widgets
@@ -47,6 +48,57 @@ import Control.Monad.Reader
 import qualified Data.Foldable as F
 
 
+getInp :: TL.Text -> [(Key,Showable)] -> Maybe BSC.ByteString
+getInp l  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t)-> t )) . unRSOptional' . snd) . L.find ((==l) . keyValue . fst)
+
+cpfCall = WrappedCall initCnpj [getCaptchaCpf',getCpf']
+
+getCaptchaCpf' ::
+     a -> InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
+getCaptchaCpf' _ inf i  handler = do
+  rv <- ask
+  liftIO $ forkIO $ runReaderT  (forever $ do
+      liftIO $ print "tryTakeMVAR Captcha"
+      mvar <- liftIO $takeMVar i
+      out <- ( fmap join . Tra.traverse getCaptchaCpfShowable $traceShowId $ traceShow "takeMVar" mvar)
+      let nkey = lookFresh inf "Statefull CPF Receita" "owner" "captchaViewer"
+      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (nkey ,) . SBinary  . BSL.toStrict ) $ out
+      return ()) rv
+  return ()
+
+
+getCaptchaCpf cgc_cpf  = do
+     session <- ask
+     liftIO $ do
+       r <-  Sess.getWith (defaults & param "cpf" .~ [T.pack $ BSC.unpack cgc_cpf]) session $ traceShowId cpfhome
+       (^? responseBody) <$> (Sess.get session $ traceShowId cpfcaptcha)
+getCaptchaCpfShowable tinput =
+      let input = F.toList tinput
+      in fmap join $ Tra.sequence $  fmap getCaptchaCpf  (getInp "cpf_number" input)
+
+
+getCpf' ::
+     a -> InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
+getCpf' _ inf i  handler = do
+  rv <- ask
+  liftIO $ forkIO $ runReaderT (forever $ do
+      liftIO $ print "tryTakeMVAR Cpf"
+      mvar <- liftIO $ takeMVar i
+      out <- fmap (join . fmap headMay.join) . Tra.traverse getCpfShowable $traceShowId $ traceShow "takeMVar" mvar
+      liftIO $ print out
+      let name = lookKey inf "owner" "owner_name"
+      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (name ,) . SOptional .Just . SText . TL.pack ) $ out
+      return ()) rv
+  return ()
+
+getCpfShowable tinput = fmap join $ Tra.sequence $  liftA2 getCpf (getInp "captchaInput" input ) (getInp "cpf_number" input)
+  where input = F.toList tinput
+getCpf captcha cgc_cpf = do
+    session <- ask
+    liftIO $ do
+          pr <- traverse (Sess.post session (traceShowId cpfpost) . protocolocpfForm cgc_cpf ) (Just $  captcha  )
+          traverse (BSL.writeFile "cpf_name.html" ) (join $ fmap (^? responseBody)  pr)
+          traverse (readCpfName . BSLC.unpack ) (fromJust pr ^? responseBody)
 
 wrapplug = WrappedCall initCnpj [getCaptcha',getCnpj']
 
@@ -55,14 +107,15 @@ initCnpj   =  (\i -> do
       man  = opensslManagerSettings context
   withOpenSSL $ Sess.withSessionWith man i) . runReaderT
 
+
 getCaptcha cgc_cpf  = do
      session <- ask
      liftIO $ do
        r <-  Sess.getWith (defaults & param "cnpj" .~ [T.pack $ BSC.unpack cgc_cpf]) session $ traceShowId cnpjhome
        (^? responseBody) <$> (Sess.get session $ traceShowId cnpjcaptcha)
-
-getInp :: TL.Text -> [(Key,Showable)] -> Maybe BSC.ByteString
-getInp l  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t)-> t )) . unRSOptional' . snd) . L.find ((==l) . keyValue . fst)
+getCaptchaShowable tinput =
+      let input = F.toList tinput
+      in fmap join $ Tra.sequence $  fmap getCaptcha  (getInp "cnpj_number" input)
 
 
 getCaptcha' ::
@@ -72,12 +125,13 @@ getCaptcha' _ inf i  handler = do
   liftIO $ forkIO $ runReaderT  (forever $ do
       liftIO $ print "tryTakeMVAR Captcha"
       mvar <- liftIO $takeMVar i
-      _ <- ( fmap join . Tra.traverse getCaptchaShowable $traceShowId $ traceShow "takeMVar" mvar)
       out <- ( fmap join . Tra.traverse getCaptchaShowable $traceShowId $ traceShow "takeMVar" mvar)
       let nkey = lookFresh inf "Statefull CNPJ Receita" "owner" "captchaViewer"
       handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (nkey ,) . SBinary  . BSL.toStrict ) $ out
       return ()) rv
   return ()
+
+
 
 getCnpj' ::
      a -> InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
@@ -92,15 +146,14 @@ getCnpj' _ inf i  handler = do
       return ()) rv
   return ()
 
-getCaptchaShowable tinput =
-      let input = F.toList tinput
-      in fmap join $ Tra.sequence $  fmap getCaptcha  (getInp "cgc_cpf" input)
 
 
 
-getCnpjShowable tinput = fmap join $ Tra.sequence $  liftA2 getCnpj (getInp "captchaInput" input ) (getInp "cgc_cpf" input)
+
+
+
+getCnpjShowable tinput = fmap join $ Tra.sequence $  liftA2 getCnpj (getInp "captchaInput" input ) (getInp "cnpj_number" input)
   where input = F.toList tinput
-
 getCnpj captcha cgc_cpf = do
     session <- ask
     liftIO $ do
@@ -142,6 +195,13 @@ cnpjquery el cpfe = do
                 ))
     return result
 
+protocolocpfForm :: BS.ByteString -> BS.ByteString -> [FormParam]
+protocolocpfForm cgc_cpf captcha
+                     = [
+                       "txtCPF"    := cgc_cpf
+                       ,"txtTexto_captcha_serpro_gov_br" := captcha
+                       ,"Enviar" := ("Consultar" :: BS.ByteString)
+                       ]
 
 protocolocnpjForm :: BS.ByteString -> BS.ByteString -> [FormParam]
 protocolocnpjForm cgc_cpf captcha
@@ -151,6 +211,9 @@ protocolocnpjForm cgc_cpf captcha
                        ,"submit1" := ("Consultar" :: BS.ByteString)
                        ,"search_type" := ("cnpj" :: BS.ByteString)
                        ]
+cpfhome  ="http://www.receita.fazenda.gov.br/Aplicacoes/ATCTA/cpf/ConsultaPublica.asp"
+cpfcaptcha = "http://www.receita.fazenda.gov.br/Aplicacoes/ATCTA/cpf/captcha/gerarCaptcha.asp"
+cpfpost = "http://www.receita.fazenda.gov.br/Aplicacoes/ATCTA/cpf/ConsultaPublicaExibir.asp"
 
 cnpjhome  ="http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/cnpjreva_solicitacao.asp"
 cnpjcaptcha = "http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/captcha/gerarCaptcha.asp"

@@ -314,7 +314,7 @@ chooseKey conn  inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,_,evs) <- crudUITable conn inf  [queryTimeline,lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJStatefull{-,queryCNPJBoundary -},queryTimeline, queryAndamentoB,queryArtAndamento ] (allRec' (tableMap inf) table) (UI.userSelection itemList)
+            (crud,_,evs) <- crudUITable conn inf  [queryTimeline,lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull{-,queryCNPJBoundary -},queryTimeline, queryAndamentoB,queryArtAndamento ] (allRec' (tableMap inf) table) (UI.userSelection itemList)
             let eres = fmap (addToList  (allRec' (tableMap inf ) table )  <$> ) evs
             res2 <- accumTds vp eres
             insertDiv <- UI.div # set children [crud]
@@ -1075,6 +1075,23 @@ testPdfGet conn inf inp =  runMaybeT$ do
         let vp  =  catMaybes . applyTranslator (M.fromList transK) . fmap (fmap (T.unpack . T.fromStrict ) )  $  v
         MaybeT $   updateMod  conn inf vp inp fire_project
       else MaybeT $ return Nothing
+
+queryCPFStatefull =
+  let arrow :: FunArrowPlug  (Maybe Text)
+      arrow = proc t -> do
+        i <- varT "cpf_number" -< t
+        returnA -< (\(SText s)->  s)  <$> i
+      elem conn inf inputs = do
+          out <- UI.div
+          ev <- cnpjquery out ( fmap (BS.pack.T.unpack) . dynP arrow <$> inputs)
+          s <- stepper [] (unsafeMapIO (\(inp,res) -> do
+                      testPlan conn inf ( inp) ( M.fromList  res) ("owner",testStep)
+                      return []
+                            ) (filterJust $ liftA2 (,) <$> facts inputs <@> ev ))
+          element out #+ [UI.div # sink UI.text s]
+          return out
+  in (StatefullPlugin "Statefull CPF Receita" "owner" [([(False,[["cpf_number"]])],[(False ,[["captchaViewer"]])]),([(True,[["captchaInput"]])],[(True,[["owner_name"]])])]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] cpfCall )
+
 
 
 queryCNPJStatefull =

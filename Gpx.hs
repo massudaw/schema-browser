@@ -1,6 +1,6 @@
 {-# LANGUAGE Arrows, TupleSections,OverloadedStrings,NoMonomorphismRestriction #-}
 module Gpx
-  (readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readHtmlReceita,readHtml,exec,execKey,execF) where
+  (readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readHtmlReceita,readHtml,exec,execKey,execF) where
 
 import Query
 import Data.Monoid
@@ -87,6 +87,15 @@ execF = exec [("file",file),("distance",0),("id_shoes",1),("id_person",1),("id_p
 
 execKey f = exec (fmap (\(k,v)-> (keyValue k , v) ) f)
 
+readCpfName file = do
+  let
+      txt = trim ^<< hasText ( not .all (`elem` " *\160\t\r\n")) >>>  getText
+      arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
+        >>> ( is "span" >>> hasAttrValue "class" ("clConteudoDados"==) /> ( hasText ("Nome da Pessoa"  `L.isInfixOf`)) >>> getText )
+  l <- runX arr
+  return  $ trim . L.drop 1 . L.dropWhile (/=':') <$> L.nub l
+
+
 readHtmlReceita file = do
   let
       txt = trim ^<< hasText ( not .all (`elem` " *\160\t\r\n")) >>>  getText
@@ -113,6 +122,12 @@ triml = dropWhile (`elem` " \r\n\t")
 -- | Remove trailing space (including newlines) from string.
 trimr :: String -> String
 trimr = reverse . triml . reverse
+
+testCpfName = do
+  kk <- BS.readFile "cpf_name.html"
+  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  readCpfName inp
+
 
 testFormCrea = do
   kk <- BS.readFile "creaLogged.html"
