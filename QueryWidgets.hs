@@ -125,15 +125,14 @@ pluginUI conn oinf initItems (StatefullPlugin n tname tf fresh   (WrappedCall in
       freshKeys = fmap (lookFresh  inf n tname . fst ) <$> fresh
   freshUI <- Tra.sequence $   zipWith  (\(input,output) freshs -> do
       (h,t :: Tidings (Maybe (TB1 (Key,Showable))) ) <- liftIO $ generateFresh
-      UI.onEvent (rumors initItems ) (liftIO . h . const Nothing)
       elems <- mapM (\fresh -> do
         let hasF l = any (\i -> (head $ head  (snd i)) == keyValue fresh) l
         case  (hasF input , hasF output)  of
              (True,False) -> do
-               tdi <- attrUITable (const Nothing <$> initItems ) ( Attr  fresh)
-               return  (Right $  tdi)
+               tdi <- attrUITable (const Nothing <$> initItems) (Attr fresh)
+               return  (Right tdi)
              (False,True)->  do
-               tdi <- attrUITable ((fmap (\ v -> Attr . justError ("no key " <> show fresh <> " in " <>  show v ) . L.find ((== fresh) .fst) . F.toList $ v ) ) <$>   t) ( Attr  fresh)
+               tdi <- attrUITable (fmap (\v -> Attr . justError ("no key " <> show fresh <> " in " <>  show v ) . L.find ((== fresh) .fst) . F.toList $ v ) <$> t) (Attr fresh)
                return $ (Left tdi)
              (True,True) -> error $ "circular reference " <> show fresh
              (False,False)-> error $ "unreferenced variable "<> show fresh
@@ -147,7 +146,7 @@ pluginUI conn oinf initItems (StatefullPlugin n tname tf fresh   (WrappedCall in
           trinp <- cutEvent (UI.click inpPost) inp
           ei <- UI.div # set UI.children ((fmap getElement $ rights elems ) <> [inpPost])
           return $ TrivialWidget trinp ei
-      return (h,t,lefts elems ,ei )
+      return (h,(fmap snd output,t),(lefts elems) ,ei )
            ) tf freshKeys
 
   el <- UI.div # set UI.children (concat $ fmap (\(_,_,o,i)-> concat $ [fmap getElement o ,[getElement i]]) freshUI )
@@ -155,7 +154,7 @@ pluginUI conn oinf initItems (StatefullPlugin n tname tf fresh   (WrappedCall in
       let oldItems = foldl1 (liftA2 (liftA2 mergeTB1)) (triding inp: unoldItems)
       liftEvent window (rumors oldItems) (\i -> action conn inf  i  (liftIO . h) )
       return  [oldItems]  ))  (return [initItems] ) ( zip tf $ zip freshUI ac)
-  return (el ,  ([] , fmap F.toList <$> ((\(_,o,_,_) -> o)$ last freshUI ) ))
+  return (el ,  ( fmap (fmap F.toList .traceShowId) <$> ((\(_,o,_,_) -> o)$ last freshUI ) ))
 
 
 pluginUI conn inf unoldItems (BoundedPlugin2 n t f action) = do
