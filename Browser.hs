@@ -122,8 +122,8 @@ setup e args w = void $ do
   be <- stepper [] e
   pollRes <- UI.div # sink UI.text (show <$> be)
   getBody w #+ [element chooserDiv , element body]
-  mapUIT body (traverse (\(conn,inf@(_,baseTables,_,schema,invSchema,graphP))-> do
-    let k = M.keys baseTables
+  mapUIT body (traverse (\(conn,inf)-> do
+    let k = M.keys (pkMap inf )
     span <- chooserKey  conn inf k (atMay args 2)
     element body # set UI.children [span,pollRes] )) evDB
 
@@ -146,7 +146,7 @@ databaseChooser sargs = do
   load <- UI.button # set UI.text "Connect" # sink UI.enabled (facts (isJust <$> UI.userSelection dbsW) )
   let genSchema (dbN,schemaN) = do
         conn <- connectPostgreSQL ("user=postgres dbname=" <> toStrict ( encodeUtf8 dbN ))
-        inf@(k,baseTables,_,schema,invSchema,graphP) <- keyTables conn  schemaN
+        inf <- keyTables conn  schemaN
         return (conn,inf)
   chooserT <-  mapTEvent (traverse genSchema) (UI.userSelection dbsW )
   let chooserEv = facts chooserT <@ UI.click load
@@ -314,7 +314,7 @@ chooseKey conn  inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,_,evs) <- crudUITable conn inf  [queryTimeline,lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJBoundary ,queryTimeline, queryAndamentoB,queryArtAndamento ] (allRec' (tableMap inf) table) (UI.userSelection itemList)
+            (crud,_,evs) <- crudUITable conn inf  [queryTimeline,lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJStatefull{-,queryCNPJBoundary -},queryTimeline, queryAndamentoB,queryArtAndamento ] (allRec' (tableMap inf) table) (UI.userSelection itemList)
             let eres = fmap (addToList  (allRec' (tableMap inf ) table )  <$> ) evs
             res2 <- accumTds vp eres
             insertDiv <- UI.div # set children [crud]
@@ -337,7 +337,7 @@ chooseKey conn  inf key = mdo
 
 
 
-lplugOrcamento = BoundedPlugin "Orçamento" ("pricing",fst renderProjectPricingA )  (\i j k -> snd renderProjectPricingA $   k)
+lplugOrcamento = BoundedPlugin "Orçamento" "pricing" (fst renderProjectPricingA )  (\i j k -> snd renderProjectPricingA $   k)
 
 {-
 pluginContactDiv conn inf inp = do
@@ -384,7 +384,7 @@ testShowable  v s = case s of
 lookInput k = L.find ((== k ) . keyValue . fst )
 lookInputV k = L.find ((== k ) . keyValue . fst )
 
-queryAndamentoB =  BoundedPlugin "Andamento Bombeiro" ("fire_project", staticP arrow ) elem
+queryAndamentoB =  BoundedPlugin "Andamento Bombeiro" "fire_project"( staticP arrow ) elem
   where
     arrow :: FunArrowPlug (Maybe Showable)
     arrow = proc t -> do
@@ -701,7 +701,7 @@ tailEmpty i  = tail i
 
 
 
-queryShowMap = BoundedPlugin "Google Map" ("address", fst showMap') (\i j k -> snd showMap'$ k)
+queryShowMap = BoundedPlugin "Google Map" "address"( fst showMap') (\i j k -> snd showMap'$ k)
 
 showMap' = (staticP req , element)
   where
@@ -719,7 +719,7 @@ data Timeline
   , dates :: [(Day,String)]
   }
 
-queryTimeline = BoundedPlugin "Timeline" ("pricing",staticP arrow)  elem
+queryTimeline = BoundedPlugin "Timeline" "pricing"(staticP arrow)  elem
   where
     convDateArr i = swap . fmap (\(SDate (Finite f))-> f) <$> (catMaybes $ fmap (traverse unRSOptional') $ catMaybes $ i)
     arrow :: FunArrowPlug [(Day,String)]
@@ -745,7 +745,7 @@ instance ToJSON Timeline where
     where dates (id,(i,j)) = object ["id" .= (id :: Int) ,"start" .=  ti i, "content" .= j, "type" .= ("point" :: String)]
           ti  = formatTime defaultTimeLocale "%Y/%m/%d"
 
-notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" ("nota",staticP url) elem
+notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" "nota"(staticP url) elem
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
     url :: ArrowPlug (Kleisli IO) (Maybe (TB1 (Text,Showable)))
@@ -766,7 +766,7 @@ notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" ("nota",staticP url) elem
                               return $ fmap (first (lookKey inf "nota")) <$> b
                             )
 
-queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" ("art",staticP url) elem
+queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" "art"(staticP url) elem
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
     url :: ArrowPlug (Kleisli IO) (Maybe (TB1 (Text,Showable)))
@@ -789,7 +789,7 @@ queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" ("art",staticP url) ele
 
 
 queryArtBoletoCrea :: Plugins
-queryArtBoletoCrea = BoundedPlugin2 "Boleto Art Crea" ("art",staticP url) elem
+queryArtBoletoCrea = BoundedPlugin2 "Boleto Art Crea" "art"(staticP url) elem
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
     url :: ArrowPlug (Kleisli IO) (Maybe (TB1 (Text,Showable)))
@@ -863,7 +863,7 @@ queryPollArtAndamento = BoundedPollingPlugins "Andamento Art Crea"  60  ("art",s
 
 
 
-queryArtAndamento = BoundedPlugin "Andamento Art Crea" ("art",staticP url) elem
+queryArtAndamento = BoundedPlugin "Andamento Art Crea" "art"(staticP url) elem
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
     url :: ArrowPlug (Kleisli IO) [[String]]
@@ -896,7 +896,7 @@ testParse = strptime "%d/%m/%Y %H:%M""24/03/2015 08:30"
 strAttr :: String -> WriteAttr Element String
 strAttr name = mkWriteAttr (set' (attr name))
 
-queryGeocodeBoundary = BoundedPlugin "Google Geocode" ("address",staticP url) elem
+queryGeocodeBoundary = BoundedPlugin "Google Geocode" "address"(staticP url) elem
   where
     elem conn inf inputs = do
       b <- UI.button # set UI.text "Import"
@@ -940,7 +940,7 @@ type ArrowPlug a o = Step.Parser a (Bool,[[Text]]) (Maybe (TB1 (Key,Showable))) 
 
 dynPK =  runKleisli . dynP
 
-queryCEPBoundary = BoundedPlugin2  "Correios CEP" ("address",staticP open  )  element
+queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address"(staticP open  )  element
   where
       translate :: Text -> Text
       translate "localidade" =  "municipio"
@@ -1077,6 +1077,23 @@ testPdfGet conn inf inp =  runMaybeT$ do
       else MaybeT $ return Nothing
 
 
+queryCNPJStatefull =
+  let arrow :: FunArrowPlug  (Maybe Text)
+      arrow = proc t -> do
+        i <- varT "cnpj_number" -< t
+        returnA -< (\(SText s)->  s)  <$> i
+      elem conn inf inputs = do
+          out <- UI.div
+          ev <- cnpjquery out ( fmap (BS.pack.T.unpack) . dynP arrow <$> inputs)
+          s <- stepper [] (unsafeMapIO (\(inp,res) -> do
+                      testPlan conn inf ( inp) ( M.fromList  res) ("owner",testStep)
+                      return []
+                            ) (filterJust $ liftA2 (,) <$> facts inputs <@> ev ))
+          element out #+ [UI.div # sink UI.text s]
+          return out
+  in (StatefullPlugin "Statefull CNPJ Receita" "owner" [([(False,[["cnpj_number"]])],[(False ,[["captchaViewer"]])]),([(True,[["captchaInput"]])],[(True,[["owner_name"]])])]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] wrapplug )
+
+
 
 queryCNPJBoundary =
   let arrow :: FunArrowPlug  (Maybe Text)
@@ -1085,14 +1102,14 @@ queryCNPJBoundary =
         returnA -< (\(SText s)->  s)  <$> i
       elem conn inf inputs = do
           out <- UI.div
-          ev <- liftIO  $ cnpjquery out (maybe "" id . fmap (BS.pack.T.unpack) . dynP arrow <$> inputs)
+          ev <- cnpjquery out ( fmap (BS.pack.T.unpack) . dynP arrow <$> inputs)
           s <- stepper [] (unsafeMapIO (\(inp,res) -> do
                       testPlan conn inf ( inp) ( M.fromList  res) ("owner",testStep)
                       return []
                             ) (filterJust $ liftA2 (,) <$> facts inputs <@> ev ))
           element out #+ [UI.div # sink UI.text s]
           return out
-  in (BoundedPlugin "CNPJ Receita" ("owner",staticP arrow )   elem)
+  in (BoundedPlugin "CNPJ Receita" "owner" (staticP arrow )   elem)
 
 translateK inf t =  fmap  (\(i,(kv,f))->  (i,) $  (\kkv ->  (kkv,) $ readType (textToPrim <$> keyType kkv) . f ) (lkeys kv))
   where
@@ -1154,7 +1171,7 @@ main = do
 
 poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
   conn <- connectPostgreSQL ("user=postgres dbname=incendio")
-  inf@(k,baseTables,_,schema,invSchema,graphP) <- keyTables conn  "incendio"
+  inf <- keyTables conn  "incendio"
   let loop =  do
         print =<<  getCurrentTime
         print "START"

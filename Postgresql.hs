@@ -311,7 +311,7 @@ parseShowable
        -> Parser Showable
 parseShowable (Primitive i ) =  (do
    case i of
-        PPdf -> let
+        PMime _ -> let
               pr = SBinary . fst . B16.decode . BS.drop 3   <$>  plain' "\",)}"
                 in (quotedRec '"') pr <|> pr
         PInt ->  SNumeric <$>  signed decimal

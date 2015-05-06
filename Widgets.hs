@@ -21,6 +21,7 @@ import Query
 import Postgresql
 import Data.Maybe
 import Data.Distributive
+import Control.Concurrent
 
 import System.Directory
 import System.Process(callCommand)
@@ -31,6 +32,7 @@ import qualified Data.ByteString.Lazy.Char8 as BSLC
 import qualified Data.ByteString.Lazy as BSL
 
 
+import Debug.Trace
 
 instance Widget (TrivialWidget  a) where
     getElement (TrivialWidget t e) = e
@@ -93,10 +95,30 @@ mapUIT e f x =  do
   bh <- stepper  b ev
   return $ tidings bh (bh <@ rumors x)
 
+-- liftEvent :: MonadIO m => Event a -> (a -> m void) -> m ()
+liftEvent window e h = do
+    ivar <- liftIO $ newEmptyMVar
+    liftIO $ register e (void . runUI window . liftIO . maybe (return ()) (putMVar ivar . Just . traceShowId . traceShow "putMVar") )
+    h  ivar
+    return ()
+
+cutEvent ev b = do
+ v <- currentValue (facts b)
+ let nev = facts b <@ ev
+ nbev <- stepper v nev
+ return  $tidings nbev nev
+
+
+addEvent ev b = do
+ v <- currentValue (facts b)
+ let nev = unionWith const ev (rumors b)
+ nbev <- stepper v nev
+ return  $tidings nbev nev
+
 
 mapTEvent f x = do
   (e,h) <- liftIO $ newEvent
-  onEvent (rumors x) (\i -> liftIO $ (f i)  >>= h)
+  onEvent (rumors x) (\i -> liftIO . forkIO $ (f i)  >>= h)
   i <- currentValue (facts x)
   be <- liftIO $ f i
   t <- stepper be e

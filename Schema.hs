@@ -39,6 +39,8 @@ import qualified Data.ByteString.Char8 as BS
 
 
 
+
+
 createType :: Unique -> (Text,Text,Maybe Text,Text,Text,Text,Text,Maybe Text,Maybe Text,Maybe Text) -> Key
 createType un (t,c,trans,"tsrange",_,_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "timestamp without time zone"))
 createType un (t,c,trans,"int4range",_,_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "int4"))
@@ -60,14 +62,17 @@ serial Nothing t = t
 nullable "YES" t = KOptional t
 nullable "NO" t = t
 
-keyMap (i,_,_,_,_,_) = i
-pkMap (_,i,_,_,_,_) = i
-tableMap (_,_,i,_,_,_) = i
-hashedGraph (_,_,_,i,_,_) = i
-hashedGraphInv (_,_,_,_,i,_) = i
-graphP (_,_,_,_,_,i) = i
+data InformationSchema
+  = InformationSchema
+  { keyMap :: Map (Text,Text) Key
+  , pkMap :: Map (Set Key) Table
+  , tableMap :: Map Text Table
+  , hashedGraph :: HashQuery
+  , hashedGraphInv :: HashQuery
+  , graphP :: Graph (Set Key) (SqlOperation Table)
+  , pluginsMap :: Map (Text,Text,Text) Key
+  }
 
-type InformationSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table, HashQuery , HashQuery ,Graph (Set Key) (SqlOperation Table) )
 type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 
 foreignKeys :: Query
@@ -106,7 +111,7 @@ keyTables conn schema = do
            graphP = warshall2 $ graphI
            graph = hashGraph $ graphP
            invgraph = hashGraphInv' $ graphP
-       return  (i1,i2,i3,graph,invgraph,graphP)
+       return  $ InformationSchema i1 i2 i3 graph invgraph graphP M.empty
 
 
 
@@ -163,3 +168,7 @@ lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k ) $ M.lookup (t,k) (keyMap inf)
 
 
+
+newKey name ty = do
+  un <- newUnique
+  return $ Key name Nothing Nothing    un ty

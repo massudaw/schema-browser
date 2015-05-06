@@ -1,10 +1,12 @@
-{-# LANGUAGE FlexibleContexts,TupleSections,LambdaCase,RankNTypes,RecordWildCards,DeriveFunctor,NoMonomorphismRestriction,RecursiveDo #-}
+{-# LANGUAGE OverloadedStrings,ScopedTypeVariables,FlexibleContexts,ExistentialQuantification,TupleSections,LambdaCase,RankNTypes,RecordWildCards,DeriveFunctor,NoMonomorphismRestriction,RecursiveDo #-}
 module QueryWidgets where
 
 import Data.Functor.Compose
 import Data.Functor.Identity
 import Control.Monad
+import Control.Concurrent
 import Reactive.Threepenny
+import Data.Either
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (delete)
 import Data.Bifunctor
@@ -49,22 +51,33 @@ import qualified Data.Text.Lazy as T
 import qualified Data.ByteString.Char8 as BSC
 import Data.String
 
+data WrappedCall =  forall m . MonadIO m =>  WrappedCall
+      { runCall ::  forall a . m a -> IO a
+      , stepsCall :: [Connection -> InformationSchema -> MVar (Maybe (TB1 (Key,Showable)))  -> (Maybe (TB1 (Key,Showable)) -> m ()) -> m () ]
+      }
+
+evalUI el f  = getWindow el >>= \w -> runUI w f
+
+
+
 data Plugins
   = BoundedPlugin
-  { _name :: String
-  , _bounds :: (Text,([(Bool,[[Text]])],[(Bool,[[Text]])]))
+  { _name :: Text
+  , _bounds :: Text
+  , _arrowbounds :: ([(Bool,[[Text]])],[(Bool,[[Text]])])
   , _boundedAction :: Connection -> InformationSchema -> (Tidings (Maybe (TB1 (Key,Showable)))) -> UI Element
   }
   | StatefullPlugin
-  { _name :: String
-  , _bounds :: [(Text,([(Bool,[[Text]])],[(Bool,[[Text]])]))]
-  , _state :: [(Bool,[[Text]])]
-  , _statefullAction ::
-      [Connection -> InformationSchema -> (Maybe (TB1 (Key,Showable))) -> (Maybe (TB1 (Key,Showable))) -> IO (Maybe (TB1 (Key,Showable))] )
+  { _name ::  Text
+  , _bounds :: Text
+  , _statebounds :: [([(Bool,[[Text]])],[(Bool,[[Text]])])]
+  , _statevar :: [[(Text,KType Text)]]
+  , _statefullAction :: WrappedCall
   }
   | BoundedPlugin2
-  { _name :: String
-  , _bounds :: (Text,([(Bool,[[Text]])],[(Bool,[[Text]])]))
+  { _name :: Text
+  , _bounds :: Text
+  , _arrowbounds :: ([(Bool,[[Text]])],[(Bool,[[Text]])])
   , _boundedAction2 :: Connection -> InformationSchema -> (Maybe (TB1 (Key,Showable))) -> IO (Maybe (TB1 (Key,Showable)))
   }
 
@@ -85,26 +98,85 @@ containKV f = (\i ->   S.member ( S.fromList $ fmap keyValue $  kattr (Compose .
 -- Hide when output is already filled
 -- Let overwrite output with user command
 
-pluginUI conn inf unoldItems (BoundedPlugin2 n (t,f) action) = do
-  let oldItems = unoldItems -- fmap TB1 . Tra.sequenceA <$> Tra.sequenceA (fmap snd    unoldItems)
-      outputItems = oldItems -- fmap TB1 . Tra.sequenceA <$> Tra.sequenceA (fmap snd $ (filterKV (containKV (fst f)) )   unoldItems)
+generateFresh = do
+  (e,h) <- liftIO $ newEvent
+  b <- stepper Nothing e
+  return $ (h,tidings b e)
 
+addAttr (TB1 (KV pk a)) e =  TB1 (KV pk (a <> e))
+
+mergeTB1 (TB1 k) (TB1 k2) = TB1 (k <> k2)
+
+lookFresh inf n tname i = justError "no freshKey" $ M.lookup (n,tname,i) (pluginsMap inf)
+
+createFresh n tname pmap i ty  =  do
+  k <- newKey i ty
+  return $ M.insert (n,tname,i) k pmap
+
+instance Monoid (KV a) where
+  mempty = KV (PK [] []) []
+  mappend (KV (PK i j ) l) (KV ( PK m n ) o)  =  (KV (PK (i <> m) ( j <> n)) (l <> o))
+
+pluginUI conn oinf initItems (StatefullPlugin n tname tf fresh   (WrappedCall init ac ) ) = do
+  window <- askWindow
+  m <- liftIO $  foldl (\i (kn,kty) -> (\m -> createFresh  n tname m kn kty) =<< i ) (return $ pluginsMap oinf) (concat fresh)
+  let inf = oinf {pluginsMap = m}
+      freshKeys :: [[Key]]
+      freshKeys = fmap (lookFresh  inf n tname . fst ) <$> fresh
+  freshUI <- Tra.sequence $   zipWith  (\(input,output) freshs -> do
+      (h,t :: Tidings (Maybe (TB1 (Key,Showable))) ) <- liftIO $ generateFresh
+      UI.onEvent (rumors initItems ) (liftIO . h . const Nothing)
+      elems <- mapM (\fresh -> do
+        let hasF l = any (\i -> (head $ head  (snd i)) == keyValue fresh) l
+        case  (hasF input , hasF output)  of
+             (True,False) -> do
+               tdi <- attrUITable (const Nothing <$> initItems ) ( Attr  fresh)
+               return  (Right $  tdi)
+             (False,True)->  do
+               tdi <- attrUITable ((fmap (\ v -> Attr . justError ("no key " <> show fresh <> " in " <>  show v ) . L.find ((== fresh) .fst) . F.toList $ v ) ) <$>   t) ( Attr  fresh)
+               return $ (Left tdi)
+             (True,True) -> error $ "circular reference " <> show fresh
+             (False,False)-> error $ "unreferenced variable "<> show fresh
+           ) freshs
+      let inp = fmap (TB1 . KV (PK [] [])) <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap (Compose .Identity )) . triding) (rights elems) )
+      ei <- if not $ any (\i -> any (\fresh -> (head $ head  (snd i)) == keyValue fresh) freshs )  input
+         then
+          TrivialWidget (pure (Just  $ TB1 mempty) ) <$> UI.div
+         else do
+          inpPost <- UI.button # set UI.text "Submit"
+          trinp <- cutEvent (UI.click inpPost) inp
+          ei <- UI.div # set UI.children ((fmap getElement $ rights elems ) <> [inpPost])
+          return $ TrivialWidget trinp ei
+      return (h,t,lefts elems ,ei )
+           ) tf freshKeys
+
+  el <- UI.div # set UI.children (concat $ fmap (\(_,_,o,i)-> concat $ [fmap getElement o ,[getElement i]]) freshUI )
+  liftIO $ forkIO  $ fmap (const ()) $ init $ foldl (\ unoldM (f,((h,htidings,loui,inp),action))  -> unoldM >>= (\unoldItems -> do
+      let oldItems = foldl1 (liftA2 (liftA2 mergeTB1)) (triding inp: unoldItems)
+      liftEvent window (rumors oldItems) (\i -> action conn inf  i  (liftIO . h) )
+      return  [oldItems]  ))  (return [initItems] ) ( zip tf $ zip freshUI ac)
+  return (el ,  ([] , fmap F.toList <$> ((\(_,o,_,_) -> o)$ last freshUI ) ))
+
+
+pluginUI conn inf unoldItems (BoundedPlugin2 n t f action) = do
+  let oldItems = unoldItems
+      outputItems = oldItems
   overwrite <- checkedWidget (pure False)
   let tdInput = (\i -> maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd t) i) (fst f) ) <$>  oldItems
       tdOutput1 = (\i -> maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd f) i) (snd f) ) <$>  outputItems
       tdOutput= liftA2 (\i j -> if i then True else j) (triding overwrite)  tdOutput1
   let ovev =((\ j i  -> if i then j else Nothing) <$>   oldItems <*> tdOutput1)
   cv <- currentValue (facts ovev)
-  headerP <- UI.button # set text n # sink UI.enabled (facts tdInput)
+  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (facts tdInput)
   let ecv = (facts ovev <@ UI.click headerP)
   bcv <- stepper cv (facts ovev <@ UI.click headerP)
   pgOut <- mapTEvent (action conn inf) (tidings bcv ecv)
   return (headerP, (fmap snd $ snd f ,  fmap F.toList <$> pgOut ))
 
 
-pluginUI conn inf unoldItems (BoundedPlugin n (t,f) action) = do
+pluginUI conn inf unoldItems (BoundedPlugin n t f action) = do
   let oldItems = unoldItems -- fmap TB1 . Tra.sequenceA <$> Tra.sequenceA (fmap snd $    unoldItems)
-  headerP <- UI.div # set text n
+  headerP <- UI.div # set text (T.unpack n)
   overwrite <- checkedWidget (pure False)
   let tdInput = (\i -> maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd t) i) (fst f) ) <$>  oldItems
       tdOutput1 = (\i -> maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd f) i) (snd f) ) <$>  oldItems
@@ -131,7 +203,6 @@ attrUITable  tAttr' (Attr i) = do
           justCase i j@(Just _) = j
           justCase i Nothing = i
       attrUI <- buildUI (textToPrim <$> keyType i) tdi
-      expandEdit <- checkedWidget (pure False)
       let
           ei (Just a) = Just a
           ei Nothing = defaultType (keyType i)
@@ -182,11 +253,14 @@ buildUI i  tdi = case i of
                 newEv = (unionWith const (rumors tdi) $ fmap (SDate . Finite . localDay . utcToLocalTime utc) <$> evCurr)
             tdi2 <- addEvent newEv  tdi
             oneInput tdi2 [timeButton]
-         (Primitive PPdf) -> do
-           let binarySrc = (\(SBinary i) -> "data:application/pdf;base64," <>  (BSC.unpack $ B64.encode i) <> "")
+         (Primitive (PMime mime)) -> do
+           let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) <> "")
            clearB <- UI.button # set UI.text "clear"
            tdi2 <- addEvent (const Nothing <$> UI.click clearB) tdi
-           f <- pdfFrame (maybe "" binarySrc <$> facts tdi2)
+           let fty = case mime of
+                "application/pdf" -> ("iframe",  [("width","100%"),("height","300px")])
+                "image/jpg" -> ("img",[])
+           f <- pdfFrame fty (maybe "" binarySrc <$> facts tdi2)
            fd <- UI.div # set children [clearB,f]
            return (TrivialWidget tdi2 fd)
 
@@ -214,12 +288,6 @@ buildUI i  tdi = case i of
 forceDefaultType  (Just i ) = renderShowable i
 forceDefaultType  (Nothing) = ""
 
-addEvent ev b = do
- v <- currentValue (facts b)
- let nev = unionWith const ev (rumors b)
- nbev <- stepper v nev
- return  $tidings nbev nev
-
 crudUITable
   :: Connection
      -> InformationSchema
@@ -240,7 +308,7 @@ crudUITable conn inf pgs ftb@(TB1 (KV (PK k d) a)) oldItems = do
             tbi = fmap (\v -> unTB . justError "Attr".(^? unTB1.td . Le.ix ix) $ v) <$> oldItems
         plugTdi <- foldr (\i j ->  addEvent  i =<< j) (return tbi ) ( rumors . fmap ( join . fmap ( fmap Attr . L.find ((== i).fst)))  <$> fmap snd thisPlugs)
         attrUITable plugTdi a
-  res <- mapM (pluginUI conn inf oldItems) (filter ((== tableName table ) . fst  . _bounds ) pgs)
+  res <- mapM (pluginUI conn inf oldItems) (filter ((== tableName table ) . _bounds ) pgs)
   let plugmods = snd <$> res
   let mapMI f e = foldl (\jm (l,m)  -> do
                 (w,ok) <- jm
@@ -504,4 +572,4 @@ nonInjectiveSelection conn inf pgs created wl (Path _ (FKJoinTable _ ksjoin _ ) 
               # set style [("paddig-left","10px")]
             return (vv,ct, [getElement li,getElement chw,ce])
 
-pdfFrame pdf = mkElement "iframe" UI.# sink UI.src pdf  UI.# UI.set style [("width","100%"),("height","300px")]
+pdfFrame fty pdf = mkElement (fst fty ) UI.# sink UI.src pdf  UI.# UI.set style (snd fty)

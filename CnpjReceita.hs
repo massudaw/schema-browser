@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections,LambdaCase,OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts,TupleSections,LambdaCase,OverloadedStrings #-}
 module CnpjReceita where
 import Network.Wreq
 import qualified Network.Wreq.Session as Sess
@@ -15,13 +15,25 @@ import Data.Char
 import Control.Monad
 import Data.Maybe
 import Data.Monoid
+import Data.Functor.Compose
+import Data.Functor.Identity
+import Control.Concurrent.Async
+import Control.Concurrent
+
+import qualified Data.List as L
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as BSLC
 import qualified Data.ByteString.Lazy as BSL
-import Data.Text as T
+import qualified Data.Text as T
+import qualified Data.Traversable as Tra
+import qualified Data.Text.Lazy as TL
 
+import Query
+import Schema
+import Widgets
+import QueryWidgets
 import Gpx
 import Widgets
 import Debug.Trace
@@ -31,36 +43,105 @@ import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (get,delete)
 
 import qualified Data.ByteString.Base64.Lazy as B64
-evalUI el f  = getWindow el >>= \w -> runUI w f
+import Control.Monad.Reader
+import qualified Data.Foldable as F
+
+
+
+wrapplug = WrappedCall initCnpj [getCaptcha',getCnpj']
+
+initCnpj   =  (\i -> do
+  let opts = defaults & manager .~ Left man
+      man  = opensslManagerSettings context
+  withOpenSSL $ Sess.withSessionWith man i) . runReaderT
+
+getCaptcha cgc_cpf  = do
+     session <- ask
+     liftIO $ do
+       r <-  Sess.getWith (defaults & param "cnpj" .~ [T.pack $ BSC.unpack cgc_cpf]) session $ traceShowId cnpjhome
+       (^? responseBody) <$> (Sess.get session $ traceShowId cnpjcaptcha)
+
+getInp :: TL.Text -> [(Key,Showable)] -> Maybe BSC.ByteString
+getInp l  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t)-> t )) . unRSOptional' . snd) . L.find ((==l) . keyValue . fst)
+
+
+getCaptcha' ::
+     a -> InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
+getCaptcha' _ inf i  handler = do
+  rv <- ask
+  liftIO $ forkIO $ runReaderT  (forever $ do
+      liftIO $ print "tryTakeMVAR Captcha"
+      mvar <- liftIO $takeMVar i
+      _ <- ( fmap join . Tra.traverse getCaptchaShowable $traceShowId $ traceShow "takeMVar" mvar)
+      out <- ( fmap join . Tra.traverse getCaptchaShowable $traceShowId $ traceShow "takeMVar" mvar)
+      let nkey = lookFresh inf "Statefull CNPJ Receita" "owner" "captchaViewer"
+      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (nkey ,) . SBinary  . BSL.toStrict ) $ out
+      return ()) rv
+  return ()
+
+getCnpj' ::
+     a -> InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
+getCnpj' _ inf i  handler = do
+  rv <- ask
+  liftIO $ forkIO $ runReaderT (forever $ do
+      liftIO $ print "tryTakeMVAR Cnpj "
+      mvar <- liftIO $ takeMVar i
+      out <- fmap join . Tra.traverse getCnpjShowable $traceShowId $ traceShow "takeMVar" mvar
+      liftIO $ print out
+      -- handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (,) . SText . TL.pack. BSLC.unpack) $ out
+      return ()) rv
+  return ()
+
+getCaptchaShowable tinput =
+      let input = F.toList tinput
+      in fmap join $ Tra.sequence $  fmap getCaptcha  (getInp "cgc_cpf" input)
+
+
+
+getCnpjShowable tinput = fmap join $ Tra.sequence $  liftA2 getCnpj (getInp "captchaInput" input ) (getInp "cgc_cpf" input)
+  where input = F.toList tinput
+
+getCnpj captcha cgc_cpf = do
+    session <- ask
+    liftIO $ do
+          pr <- traverse (Sess.post session (traceShowId cnpjpost) . protocolocnpjForm cgc_cpf ) (Just $  captcha  )
+          traverse (readHtmlReceita . BSLC.unpack ) (fromJust pr ^? responseBody)
 
 
 cnpjquery el cpfe = do
-  let opts = defaults & manager .~ Left man
-      man  = opensslManagerSettings context
-  withOpenSSL $ Sess.withSessionWith man $ \session -> do
-    ev <- evalUI el (do
-          captchaCap <- UI.button # set UI.text "Submit"
-          let cap = unsafeMapIO ( traverse (\cgc_cpf ->  do
-                  r <- Sess.getWith (opts & param "cnpj" .~ [T.pack $ BSC.unpack cgc_cpf]) session $ traceShowId cnpjhome
-                  (^? responseBody) <$> (Sess.get session $ traceShowId cnpjcaptcha))) ( (\case {""-> Nothing ; i -> Just i } )  <$> (facts cpfe <@ UI.click captchaCap ) )
-          inpCap <-UI.input # set UI.style [("width","120px")]
-          submitCap <- UI.button # set UI.text "Submit"
-          capb <- stepper Nothing (join <$> cap)
-          capE <- UI.img# sink UI.src ((("data:image/png;base64,"++) . maybe "" (BSLC.unpack.B64.encode)) <$> capb )
-          dv<-UI.div
-          element el # set UI.children [captchaCap ,capE,dv,inpCap,submitCap]
-          binpCap <- stepper "" (UI.valueChange inpCap)
-          return ( binpCap <@ UI.click submitCap) )
-    let out =  unsafeMapIO (\(cp,captcha) ->  do
-          pr <- traverse (Sess.post session (traceShowId cnpjpost) . protocolocnpjForm cp ) (Just $ BSC.pack captcha  )
-          pr <- traverse (Sess.post session (traceShowId cnpjpost) . protocolocnpjForm cp ) (Just $ BSC.pack captcha  )
-          traverse (readHtmlReceita . BSLC.unpack ) (fromJust pr ^? responseBody)
-              ) $ (,) <$> facts cpfe <@> ev
-    {-evalUI el (do
-          st <- stepper  "" (fmap  show out)
-          d <- UI.div # sink UI.html st
-          element el #+ [element d])-}
-    return out
+    let opts = defaults & manager .~ Left man
+        man  = opensslManagerSettings context
+    (captcha,hcaptcha) <- liftIO $ newEvent
+    (precaptcha,prehcaptcha) <- liftIO $ newEvent
+    (result,hresult) <- liftIO $ newEvent
+    inpCap <-UI.input # set UI.style [("width","120px")]
+    submitCap <- UI.button # set UI.text "Submit"
+    capb <- stepper Nothing captcha
+    cappreb <- stepper "" precaptcha
+    capE <- UI.div
+        -- Loading Gif
+        # sink items (pure. const (UI.img # set UI.src ("static/ajax-loader.gif" )   )<$>  cappreb)
+        -- Captcha
+        # sink items (pure. const (UI.img # sink UI.src ((("data:image/png;base64,"++) . maybe "" (BSLC.unpack.B64.encode)) <$> capb ) )   <$>  capb)
+    dv <-UI.div
+    element el # set UI.children [capE,dv,inpCap,submitCap]
+    binpCap <- stepper "" (UI.valueChange inpCap)
+    liftIO $ withOpenSSL $ Sess.withSessionWith man $ \session -> do
+        evalUI el $ do
+            UI.onEvent (rumors cpfe) (liftIO . traverse (\cgc_cpf ->  do
+                i <- forkIO $ (do
+                              r <- Sess.getWith (opts & param "cnpj" .~ [T.pack $ BSC.unpack cgc_cpf]) session $ traceShowId cnpjhome
+                              (^? responseBody) <$> (Sess.get session $ traceShowId cnpjcaptcha)
+                              ) >>= hcaptcha
+                prehcaptcha ("Carregando Captcha em " <> show i)
+                    ))
+            UI.onEvent ((,) <$> facts cpfe <@> (binpCap <@ UI.click submitCap)) (liftIO . forkIO . (\(cp,captcha) ->  do
+                pr <- (Sess.post session (traceShowId cnpjpost) . protocolocnpjForm (fromJust cp) ) (BSC.pack captcha  )
+                v <- traverse (readHtmlReceita . BSLC.unpack ) (pr ^? responseBody)
+                hresult v
+                ))
+    return result
+
 
 protocolocnpjForm :: BS.ByteString -> BS.ByteString -> [FormParam]
 protocolocnpjForm cgc_cpf captcha
@@ -80,6 +161,6 @@ test = do
                       e <- UI.div
                       i<-UI.input
                       bhi <- stepper "" (UI.valueChange i)
-                      liftIO $ cnpjquery e $ pure "01008713010399"
+                      cnpjquery e $ pure (Just "01008713010399")
                       getBody w #+ [element i ,element e]
                       return () )

@@ -80,7 +80,8 @@ textToPrim "character varying" = PText
 textToPrim "name" = PText
 textToPrim "varchar" = PText
 textToPrim "text" = PText
-textToPrim "pdf" = PPdf
+textToPrim "pdf" = PMime "application/pdf"
+textToPrim "jpg" = PMime "image/jpg"
 textToPrim "character" = PText
 textToPrim "char" = PText
 textToPrim "double precision" = PDouble
@@ -194,7 +195,7 @@ data KPrim
    | PPosition
    | PBounding
    | PCnpj
-   | PPdf
+   | PMime Text
    | PCpf
    | PLineString
    deriving(Show,Eq,Ord)
