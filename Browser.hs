@@ -122,7 +122,7 @@ setup e args w = void $ do
   be <- stepper [] e
   pollRes <- UI.div # sink UI.text (show <$> be)
   getBody w #+ [element chooserDiv , element body]
-  mapUIT body (traverse (\(conn,inf)-> do
+  mapUITEvent body (traverse (\(conn,inf)-> do
     let k = M.keys (pkMap inf )
     span <- chooserKey  conn inf k (atMay args 2)
     element body # set UI.children [span,pollRes] )) evDB
@@ -135,7 +135,6 @@ listDBS = do
         connDb <- connectPostgreSQL ("user=postgres dbname=" <> toStrict (encodeUtf8 db))
         schemas :: [Only Text] <- query_  connDb "SELECT schema_name from information_schema.schemata"
         return (db,filter (not . (`elem` ["information_schema","pg_catalog","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas)) (fmap unOnly dbs)
-
 
 
 databaseChooser sargs = do
@@ -505,7 +504,7 @@ queryAndamento4 conn inf  tbinputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "p
                           args :: S.Set (Map Key Showable)
                           args = S.fromList $ fmap (uncurry M.insert  (lookInput inputs )) $ prepareArgs html
                       mod <- case filter ( maybe False (\(SText t) -> T.isInfixOf "Aprovado" t ) .  M.lookup "andamento_description" . M.mapKeys keyValue )  $ S.toList args of
-                          [i] -> updateMod  conn inf [(justError "could not lookup approval_date " . flip M.lookup (keyMap inf) $ ("fire_project","aproval_date") , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] tbinputs fire_project
+                          -- [i] -> updateMod  conn inf [(justError "could not lookup aproval_date " . flip M.lookup (keyMap inf) $ ("fire_project","aproval_date") , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] tbinputs fire_project
                           i -> return Nothing
                       vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) andamento )
 
@@ -554,14 +553,14 @@ queryAndamento4 conn inf  tbinputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "p
                       let
                           args :: S.Set (Map Key Showable)
                           args = S.fromList $ fmap (uncurry M.insert  (lookInput inputs )) $  prepareArgs  $ fst html
-                      mod <- case filter ( maybe False (\(SText t) -> T.isInfixOf "APROVADO" t ) .  M.lookup "andamento_description" . M.mapKeys keyValue )  $ S.toList args of
-                          [] -> return Nothing
-                          i:xs -> updateMod  conn inf [(lookKey inf "fire_project" "aproval_date"  , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] tbinputs fire_project
+                      --mod <- case filter ( maybe False (\(SText t) -> T.isInfixOf "APROVADO" t ) .  M.lookup "andamento_description" . M.mapKeys keyValue )  $ S.toList args of
+                       --   [] -> return Nothing
+                          -- i:xs -> updateMod  conn inf [(lookKey inf "fire_project" "aproval_date"  , justError "could not lookup andamento_date" $ M.lookup "andamento_date"  $ M.mapKeys keyValue i)] tbinputs fire_project
                       vp <- doQueryAttr conn inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) andamento )
 
                       let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . concat . F.toList . fmap (attrNonRec . unTB) . _unTB1) vp) :: S.Set (Map Key Showable)
                       adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod conn  inf (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
-                      return $ mod : adds
+                      return $  adds
                     MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) (catMaybes (firemods:mods) ))
 
 getInput k = fmap (BSL.toStrict. BSL.pack .renderShowable . snd) . lookInput k

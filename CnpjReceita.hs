@@ -21,6 +21,7 @@ import Control.Concurrent.Async
 import Control.Concurrent
 
 import qualified Data.List as L
+import qualified Data.Map as M
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
@@ -58,9 +59,8 @@ getCaptchaCpf' ::
 getCaptchaCpf' _ inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT  (forever $ do
-      liftIO $ print "tryTakeMVAR Captcha"
       mvar <- liftIO $takeMVar i
-      out <- ( fmap join . Tra.traverse getCaptchaCpfShowable $traceShowId $ traceShow "takeMVar" mvar)
+      out <- ( fmap join . Tra.traverse getCaptchaCpfShowable  $ mvar)
       let nkey = lookFresh inf "CPF Receita" "owner" "captchaViewer"
       handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (nkey ,) . SBinary  . BSL.toStrict ) $ out
       return ()) rv
@@ -82,10 +82,8 @@ getCpf' ::
 getCpf' _ inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT (forever $ do
-      liftIO $ print "tryTakeMVAR Cpf"
       mvar <- liftIO $ takeMVar i
-      out <- fmap (join . fmap headMay.join) . Tra.traverse getCpfShowable $traceShowId $ traceShow "takeMVar" mvar
-      liftIO $ print out
+      out <- fmap (join . fmap headMay.join) . Tra.traverse getCpfShowable $  mvar
       let name = lookKey inf "owner" "owner_name"
       handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (name ,) . SOptional .Just . SText . TL.pack ) $ out
       return ()) rv
@@ -123,9 +121,8 @@ getCaptcha' ::
 getCaptcha' _ inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT  (forever $ do
-      liftIO $ print "tryTakeMVAR Captcha"
       mvar <- liftIO $takeMVar i
-      out <- ( fmap join . Tra.traverse getCaptchaShowable $traceShowId $ traceShow "takeMVar" mvar)
+      out <- ( fmap join . Tra.traverse getCaptchaShowable $ mvar)
       let nkey = lookFresh inf "CNPJ Receita" "owner" "captchaViewer"
       handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (nkey ,) . SBinary  . BSL.toStrict ) $ out
       return ()) rv
@@ -138,16 +135,12 @@ getCnpj' ::
 getCnpj' _ inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT (forever $ do
-      liftIO $ print "tryTakeMVAR Cnpj "
       mvar <- liftIO $ takeMVar i
-      out <- fmap join . Tra.traverse getCnpjShowable $traceShowId $ traceShow "takeMVar" mvar
-      liftIO $ print out
-      -- handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (,) . SText . TL.pack. BSLC.unpack) $ out
+      out <- fmap ( join . fmap (M.lookup "NOME EMPRESARIAL" . M.fromList) . join) . Tra.traverse getCnpjShowable $ mvar
+      let name = lookKey inf "owner" "owner_name"
+      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (name ,) . SOptional .Just . SText . TL.pack  ) $ out
       return ()) rv
   return ()
-
-
-
 
 
 

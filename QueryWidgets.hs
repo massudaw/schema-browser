@@ -56,7 +56,6 @@ data WrappedCall =  forall m . MonadIO m =>  WrappedCall
       , stepsCall :: [Connection -> InformationSchema -> MVar (Maybe (TB1 (Key,Showable)))  -> (Maybe (TB1 (Key,Showable)) -> m ()) -> m () ]
       }
 
-evalUI el f  = getWindow el >>= \w -> runUI w f
 
 
 
@@ -112,6 +111,7 @@ lookFresh inf n tname i = justError "no freshKey" $ M.lookup (n,tname,i) (plugin
 createFresh n tname pmap i ty  =  do
   k <- newKey i ty
   return $ M.insert (n,tname,i) k pmap
+
 
 instance Monoid (KV a) where
   mempty = KV (PK [] []) []
@@ -300,7 +300,10 @@ crudUITable conn inf pgs ftb@(TB1 (KV (PK k d) a)) oldItems = do
       tbCase td ix i@(AKT ifk refl  _ _) created wl plugItens oldItems = do
         akUITable conn inf pgs ((\(Just i)-> i) $ L.find (\(Path ifkp _ _) -> S.fromList (unAttr . unTB  <$> ifk ) == ifkp) $ S.toList $ rawFKS table) (fmap (\v -> unTB. justError "AKT" .(^? unTB1.td . Le.ix ix ) $ v) <$> oldItems) i
       tbCase td ix i@(FKT ifk _ _) created wl plugItens oldItems  = do
-        fkUITable conn inf pgs created (filter (isReflexive .fst) wl) ((\(Just i)-> i) $ L.find (\(Path ifkp _ _) -> S.fromList ((\(Attr i) -> i) . unTB  <$> ifk ) == ifkp) $ S.toList $ rawFKS table) (fmap (\v -> unTB . justError "FKT" . (^? unTB1. td . Le.ix ix ) $ v) <$> oldItems) i
+        let path@(Path _ _ rr)  = (justError "no path Found"  $ L.find (\(Path ifkp _ _) -> S.fromList ((\(Attr i) -> i) . unTB  <$> ifk ) == ifkp) $ S.toList $ rawFKS table)
+        let rp = rootPaths'  (tableMap inf) (fromJust $ M.lookup rr $ pkMap inf )
+        res <- liftIO$ queryWith_ (fromAttr (fst rp)) conn  (fromString $ T.unpack $ snd rp)
+        fkUITable conn inf pgs created res (filter (isReflexive .fst) wl) path (fmap (\v -> unTB . justError "FKT" . (^? unTB1. td . Le.ix ix ) $ v) <$> oldItems) i
       tbCase td ix a@(Attr i) created wl plugItens oldItems = do
         let thisPlugs = filter (any ((== [keyValue i]).head) . fst) $  plugItens
             tbi = fmap (\v -> unTB . justError "Attr".(^? unTB1.td . Le.ix ix) $ v) <$> oldItems
@@ -448,15 +451,14 @@ fkUITable
   -> InformationSchema
   -> [Plugins]
   -> Set Key
+  -> [TB1 (Key,Showable)]
   -> [(TB Identity Key,TrivialWidget (Maybe (TB Identity (Key,Showable))))]
   -> Path (Set Key) (SqlOperation Text)
   -> Tidings (Maybe (TB Identity (Key,Showable)))
   -> TB Identity Key
   -> UI (TrivialWidget(Maybe (TB Identity (Key, Showable))))
-fkUITable conn inf pgs created wl path@(Path _ (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT ifk refl tb1)
+fkUITable conn inf pgs created res wl path@(Path _ (FKJoinTable _  rel _ ) rr ) oldItems  tb@(FKT ifk refl tb1)
     | not refl = do
-        let rp = rootPaths'  (tableMap inf) (fromJust $ M.lookup rr $ pkMap inf )
-        res <- liftIO$ queryWith_ (fromAttr (fst rp)) conn  (fromString $ T.unpack $ snd rp)
         nonInjectiveSelection conn inf pgs created wl path tb (pure res) oldItems
     | otherwise = mdo
       let
@@ -464,8 +466,6 @@ fkUITable conn inf pgs created wl path@(Path _ (FKJoinTable _  rel _ ) rr ) oldI
           relTable = M.fromList $ fmap swap rel
           tdi :: Tidings (Maybe (TB1  (Key,Showable)))
           tdi =  (if isLeftJoin then join . fmap (Tra.sequence . fmap unkeyOptional . _fkttable ) else fmap _fkttable  ) <$> oldItems
-      let rp = rootPaths'  (tableMap inf) (fromJust $ M.lookup rr $ pkMap inf )
-      res <- liftIO$ queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
       l <- UI.span # set text (show $ unAttr .unTB <$>   ifk)
 
       filterInp <- UI.input
@@ -501,7 +501,9 @@ akUITable conn inf pgs path@(Path rl (FKJoinTable frl  rel frr ) rr ) oldItems  
          path = Path (S.map (kOptional . unKArray) $ if isLeft then S.map unKOptional rl else rl ) (FKJoinTable frl (fmap (first (kOptional.unKArray)) rel) frr) rr
          indexItens ix = join . fmap (\(AKT [l] refl _ m) -> (\li mi ->  FKT  [li] refl  mi ) <$> (join $ traverse (indexArray ix ) <$> (if isLeft then unLeftBind l else Just l)) <*> (if isLeft then unLeft else id ) (atMay m ix) )  <$>  oldItems
          fkst = FKT (fmap (fmap (kOptional . unKArray) ) ifk) refl (fmap kOptional $ if isLeft then fmap unKOptional tb1 else tb1 )
-     fks <- mapM (\ix-> fkUITable conn inf pgs S.empty [] path  (makeOptional fkst <$>indexItens ix) fkst ) [0..8]
+     let rp = rootPaths'  (tableMap inf) (fromJust $ M.lookup rr $ pkMap inf )
+     res <- liftIO$ queryWith_ (fromAttr (fst rp)) conn  (fromString $ T.unpack $ snd rp)
+     fks <- mapM (\ix-> fkUITable conn inf pgs S.empty res [] path  (makeOptional fkst <$>indexItens ix) fkst ) [0..8]
      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (fmap unLeft . triding <$> fks)
      fksE <- UI.div # set children (getElement <$> fks )
      let bres = fmap (\l -> AKT (fmap  (,SComposite $ V.fromList $  (fmap fst l)) <$> ifk) refl [] (fmap snd l)). allMaybes .  L.takeWhile (maybe False (const True)) <$> Tra.sequenceA (fmap (fmap (\(FKT i _ j ) -> (head $ fmap (snd.unAttr.unTB) $ i, j)) ) . fmap unLeft . triding <$> fks)

@@ -61,6 +61,8 @@ foldTds ::  Tidings a  ->  [Event  (a -> a)] -> Tidings a
 foldTds =  foldl' applyTds
 
 
+evalUI el f  = getWindow el >>= \w -> runUI w f
+
 accumTds :: MonadIO m => Tidings a -> [Event (a -> a)] -> m (Tidings a)
 accumTds e l = do
 	ve <- currentValue (facts e)
@@ -87,6 +89,7 @@ adEvent ne t = do
   nb <- stepper c ev
   return $ tidings nb ev
 
+{-
 mapUIT :: Element -> (a -> UI b) -> Tidings a -> UI (Tidings b)
 mapUIT e f x =  do
   let ev = unsafeMapUI e f $ rumors x
@@ -94,14 +97,16 @@ mapUIT e f x =  do
   b <- f c
   bh <- stepper  b ev
   return $ tidings bh (bh <@ rumors x)
+  -}
 
--- liftEvent :: MonadIO m => Event a -> (a -> m void) -> m ()
+liftEvent :: MonadIO m => Window -> Event a -> (MVar a -> m void) -> m ()
 liftEvent window e h = do
     ivar <- liftIO $ newEmptyMVar
-    liftIO $ register e (void . runUI window . liftIO . maybe (return ()) (putMVar ivar . Just . traceShowId . traceShow "putMVar") )
+    liftIO $ register e (void . runUI window . liftIO  . putMVar ivar  )
     h  ivar
     return ()
 
+cutEvent :: MonadIO m => Event b -> Tidings a -> m (Tidings a)
 cutEvent ev b = do
  v <- currentValue (facts b)
  let nev = facts b <@ ev
@@ -109,11 +114,21 @@ cutEvent ev b = do
  return  $tidings nbev nev
 
 
+addEvent :: MonadIO m => Event a -> Tidings a -> m (Tidings a)
 addEvent ev b = do
  v <- currentValue (facts b)
  let nev = unionWith const ev (rumors b)
  nbev <- stepper v nev
  return  $tidings nbev nev
+
+mapUITEvent body f x = do
+  (e,h) <- liftIO $ newEvent
+  onEvent (rumors x) (\i -> liftIO . forkIO $ (evalUI body $  f i)  >>= h)
+  i <- currentValue (facts x)
+  be <- liftIO $ evalUI body $ f i
+  t <- stepper be e
+  return $ tidings t e
+
 
 
 mapTEvent f x = do
