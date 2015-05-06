@@ -117,8 +117,10 @@ instance Monoid (KV a) where
   mempty = KV (PK [] []) []
   mappend (KV (PK i j ) l) (KV ( PK m n ) o)  =  (KV (PK (i <> m) ( j <> n)) (l <> o))
 
-pluginUI conn oinf initItems (StatefullPlugin n tname tf fresh   (WrappedCall init ac ) ) = do
+pluginUI conn oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac ) ) = do
   window <- askWindow
+  let tdInput = (\i -> maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd t) i) (fst $ head tf ) ) <$>   initItems
+  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (facts tdInput)
   m <- liftIO $  foldl (\i (kn,kty) -> (\m -> createFresh  n tname m kn kty) =<< i ) (return $ pluginsMap oinf) (concat fresh)
   let inf = oinf {pluginsMap = m}
       freshKeys :: [[Key]]
@@ -128,13 +130,9 @@ pluginUI conn oinf initItems (StatefullPlugin n tname tf fresh   (WrappedCall in
       elems <- mapM (\fresh -> do
         let hasF l = any (\i -> (head $ head  (snd i)) == keyValue fresh) l
         case  (hasF input , hasF output)  of
-             (True,False) -> do
-               tdi <- attrUITable (const Nothing <$> initItems) (Attr fresh)
-               return  (Right tdi)
-             (False,True)->  do
-               tdi <- attrUITable (fmap (\v -> Attr . justError ("no key " <> show fresh <> " in " <>  show v ) . L.find ((== fresh) .fst) . F.toList $ v ) <$> t) (Attr fresh)
-               return $ (Left tdi)
-             (True,True) -> error $ "circular reference " <> show fresh
+             (True,False)-> Right <$> attrUITable (const Nothing <$> initItems) (Attr fresh)
+             (False,True)->  Left <$> attrUITable (fmap (\v -> Attr . justError ("no key " <> show fresh <> " in " <>  show v ) . L.find ((== fresh) .fst) . F.toList $ v ) <$> t) (Attr fresh)
+             (True,True)-> error $ "circular reference " <> show fresh
              (False,False)-> error $ "unreferenced variable "<> show fresh
            ) freshs
       let inp = fmap (TB1 . KV (PK [] [])) <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap (Compose .Identity )) . triding) (rights elems) )
@@ -149,12 +147,13 @@ pluginUI conn oinf initItems (StatefullPlugin n tname tf fresh   (WrappedCall in
       return (h,(fmap snd output,t),(lefts elems) ,ei )
            ) tf freshKeys
 
-  el <- UI.div # set UI.children (concat $ fmap (\(_,_,o,i)-> concat $ [fmap getElement o ,[getElement i]]) freshUI )
+  el <- UI.div # set UI.children (headerP : (concat $ fmap (\(_,_,o,i)-> concat $ [fmap getElement o ,[getElement i]]) freshUI ))
   liftIO $ forkIO  $ fmap (const ()) $ init $ foldl (\ unoldM (f,((h,htidings,loui,inp),action))  -> unoldM >>= (\unoldItems -> do
       let oldItems = foldl1 (liftA2 (liftA2 mergeTB1)) (triding inp: unoldItems)
       liftEvent window (rumors oldItems) (\i -> action conn inf  i  (liftIO . h) )
       return  [oldItems]  ))  (return [initItems] ) ( zip tf $ zip freshUI ac)
-  return (el ,  ( fmap (fmap F.toList .traceShowId) <$> ((\(_,o,_,_) -> o)$ last freshUI ) ))
+  element el # sink UI.style (noneShow <$> facts tdInput)
+  return (el ,  ( fmap (fmap F.toList) <$> ((\(_,o,_,_) -> o)$ last freshUI ) ))
 
 
 pluginUI conn inf unoldItems (BoundedPlugin2 n t f action) = do
