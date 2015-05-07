@@ -83,10 +83,11 @@ getCpf' _ inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT (forever $ do
       mvar <- liftIO $ takeMVar i
-      out <- fmap (join . fmap headMay.join) . Tra.traverse getCpfShowable $  mvar
-      let name = lookKey inf "owner" "owner_name"
-      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (name ,) . SOptional .Just . SText . TL.pack ) $ out
-      return ()) rv
+      outM <- fmap (join . fmap headMay.join) . Tra.traverse getCpfShowable $  mvar
+      maybe (return ()) (\out-> do
+          let attr i = Compose . Identity .  Attr . (lookKey inf "owner" i ,)
+          handler . Just . (TB1 .KV (PK [][]) . pure . attr "owner_name" . SOptional .Just . SText . TL.pack ) $ out
+          return ()) outM ) rv
   return ()
 
 getCpfShowable tinput = fmap join $ Tra.sequence $  liftA2 getCpf (getInp "captchaInput" input ) (getInp "cpf_number" input)
@@ -95,7 +96,7 @@ getCpf captcha cgc_cpf = do
     session <- ask
     liftIO $ do
           pr <- traverse (Sess.post session (traceShowId cpfpost) . protocolocpfForm cgc_cpf ) (Just $  captcha  )
-          traverse (BSL.writeFile "cpf_name.html" ) (join $ fmap (^? responseBody)  pr)
+          traverse (BSL.writeFile "cpf_name.html") (join $ fmap (^? responseBody)  pr)
           traverse (readCpfName . BSLC.unpack ) (fromJust pr ^? responseBody)
 
 wrapplug = WrappedCall initCnpj [getCaptcha',getCnpj']
@@ -136,10 +137,31 @@ getCnpj' _ inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT (forever $ do
       mvar <- liftIO $ takeMVar i
-      out <- fmap ( join . fmap (M.lookup "NOME EMPRESARIAL" . M.fromList) . join) . Tra.traverse getCnpjShowable $ mvar
-      let name = lookKey inf "owner" "owner_name"
-      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (name ,) . SOptional .Just . SText . TL.pack  ) $ out
-      return ()) rv
+      outM <- fmap ( fmap  M.fromList . join) . Tra.traverse getCnpjShowable $ mvar
+      maybe (return () ) (\ out-> do
+        let own i = Compose . Identity .  Attr . (lookKey inf "owner" i ,)
+            attr i = Compose . Identity .  Attr . (lookKey inf "address" i ,)
+            idx  = SOptional . fmap (SText . TL.pack) . flip M.lookup out
+            fk i  = Compose . Identity . FKT i True
+            tb pk desc attr = TB1 $ KV (PK pk desc) attr
+            attrs = tb [] [own "owner_name" (idx "NOME EMPRESARIAL")]
+                    [fk [own "address" (SOptional Nothing)]
+                          (fmap (keyOptional ) $ tb [attr "id" (SSerial Nothing) ]
+                              []
+                              [attr "logradouro" (idx "LOGRADOURO")
+                              ,attr "number" (idx "NÚMERO")
+                              ,attr "complemento" (idx "COMPLEMENTO")
+                              ,attr "cep" (idx "CEP")
+                              ,attr "bairro" (idx "BAIRRO/DISTRITO")
+                              ,attr "municipio" (idx "MUNICÍPIO")
+                              ,attr "uf" (idx "UF")
+                              ,attr "geocode" (SOptional Nothing)
+                              ,attr "bounding" (SOptional Nothing)
+                              ]
+                              )
+                    ]
+        handler . Just $ attrs
+        return ()) outM ) rv
   return ()
 
 
@@ -150,6 +172,7 @@ getCnpjShowable tinput = fmap join $ Tra.sequence $  liftA2 getCnpj (getInp "cap
 getCnpj captcha cgc_cpf = do
     session <- ask
     liftIO $ do
+          pr <- traverse (Sess.post session (traceShowId cnpjpost) . protocolocnpjForm cgc_cpf ) (Just $  captcha  )
           pr <- traverse (Sess.post session (traceShowId cnpjpost) . protocolocnpjForm cgc_cpf ) (Just $  captcha  )
           traverse (readHtmlReceita . BSLC.unpack ) (fromJust pr ^? responseBody)
 

@@ -113,6 +113,7 @@ data KV a
 mapKV f (KV (PK l m) n) =  KV (PK (map f l)(map f m)) (map f n)
 
 filterKV i (KV (PK l m) n) = KV (PK (filter i l) (filter i m )) (filter i n)
+findKV i (KV (PK l m) n) =  (L.find i l)  `mplus` (L.find i m ) `mplus` (L.find i n)
 
 
 data Labeled l v

@@ -99,10 +99,10 @@ mapUIT e f x =  do
   return $ tidings bh (bh <@ rumors x)
   -}
 
-liftEvent :: MonadIO m => Window -> Event a -> (MVar a -> m void) -> m ()
+liftEvent :: MonadIO m => Window -> Event (Maybe a) -> (MVar (Maybe a) -> m void) -> m ()
 liftEvent window e h = do
     ivar <- liftIO $ newEmptyMVar
-    liftIO $ register e (void . runUI window . liftIO  . putMVar ivar  )
+    liftIO $ register e (void . runUI window . liftIO  . maybe (return ()) ( putMVar ivar .Just )  )
     h  ivar
     return ()
 
@@ -112,6 +112,14 @@ cutEvent ev b = do
  let nev = facts b <@ ev
  nbev <- stepper v nev
  return  $tidings nbev nev
+
+updateEvent :: MonadIO m =>  (a -> Maybe a) -> Event a -> Tidings a -> m (Tidings a)
+updateEvent validate ev b = do
+ v <- currentValue (facts b)
+ let nev = unionWith const (filterJust (validate <$> ev)) (rumors b)
+ nbev <- stepper v nev
+ return  $tidings nbev nev
+
 
 
 addEvent :: MonadIO m => Event a -> Tidings a -> m (Tidings a)

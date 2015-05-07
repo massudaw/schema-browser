@@ -313,7 +313,7 @@ chooseKey conn  inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,_,evs) <- crudUITable conn inf  [queryTimeline,lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull{-,queryCNPJBoundary -},queryTimeline, queryAndamentoB,queryArtAndamento ] (allRec' (tableMap inf) table) (UI.userSelection itemList)
+            (crud,_,evs) <- crudUITable conn inf  [queryTimeline,lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull{-,queryCNPJBoundary -},queryTimeline, queryAndamentoB,queryArtAndamento ] [] (allRec' (tableMap inf) table) (UI.userSelection itemList)
             let eres = fmap (addToList  (allRec' (tableMap inf ) table )  <$> ) evs
             res2 <- accumTds vp eres
             insertDiv <- UI.div # set children [crud]
@@ -895,31 +895,9 @@ testParse = strptime "%d/%m/%Y %H:%M""24/03/2015 08:30"
 strAttr :: String -> WriteAttr Element String
 strAttr name = mkWriteAttr (set' (attr name))
 
-queryGeocodeBoundary = BoundedPlugin "Google Geocode" "address"(staticP url) elem
+queryGeocodeBoundary = BoundedPlugin2 "Google Geocode" "address" (staticP url) element
   where
-    elem conn inf inputs = do
-      b <- UI.button # set UI.text "Import"
-      let
-          req im = runMaybeT $ do
-            r <- getRequest  .  dynP url $im
-            let dec = decode r :: Maybe Value
-                loc = dec !> "results" !!> 0 !> "geometry" !> "location"
-                bounds = dec !> "results" !!> 0 !> "geometry" !> "bounds"
-                viewport = dec !> "results" !!> 0 !> "geometry" !> "viewport"
-                lkey  = lookKey inf "address"
-                getPos l = Position <$> liftA2 (\(A.Number i) (A.Number j)-> (realToFrac i ,realToFrac j ,0)) (l !> "lng" )( l  !> "lat" )
-            p <- MaybeT $ return $ getPos loc
-            b <- MaybeT $ return $ case (fmap Bounding $  (\i j -> Interval.interval (ER.Finite i ,True) (ER.Finite j ,True))<$> getPos (bounds !> "southwest") <*> getPos (bounds !> "northeast"), fmap Bounding $ (\i j -> Interval.interval (ER.Finite i ,True) (ER.Finite j ,True))<$> getPos (viewport !> "southwest") <*> getPos (viewport !> "northeast")) of
-                                        (i@(Just _), _ ) -> i
-                                        (Nothing , j) -> j
-            mod <- C.lift $ updateMod conn inf [(lkey "geocode" ,SPosition p),( lkey "bounding", SBounding b)] (fromJust $ im) (lookTable inf "address")
-            return [(lkey "geocode" ,SPosition p),( lkey "bounding", SBounding b)]
-      let et =  unsafeMapIO req (facts inputs <@ UI.click b)
-      t <- stepper "" (show <$> et)
-      out <- UI.div # UI.sink text t
-      UI.div # set children [b,out]
-
-    url :: FunArrowPlug String
+    url :: ArrowPlug (Kleisli IO) (Maybe (TB1 (Text,Showable)))
     url = proc t -> do
       id <- varT "id" -< t
       log <- varT "logradouro"-< t
@@ -927,8 +905,28 @@ queryGeocodeBoundary = BoundedPlugin "Google Geocode" "address"(staticP url) ele
       bai <- varN "bairro"-< t
       mun <- varT "municipio"-< t
       uf <- varT "uf"-< t
-      returnA -<  "http://maps.googleapis.com/maps/api/geocode/json?address=" <> (HTTP.urlEncode $ vr log <> " , " <> vr num <> " - " <>  vr bai<> " , " <> vr mun <> " - " <> vr uf)
-      where vr =  maybe "" renderShowable
+      let im = "http://maps.googleapis.com/maps/api/geocode/json?address=" <> (HTTP.urlEncode $ vr log <> " , " <> vr num <> " - " <>  vr bai<> " , " <> vr mun <> " - " <> vr uf)
+          vr =  maybe "" renderShowable
+      r <- act (\im-> runMaybeT $ do
+            r <-  getRequest    $ im
+            let dec = decode r :: Maybe Value
+                loc = dec !> "results" !!> 0 !> "geometry" !> "location"
+                bounds = dec !> "results" !!> 0 !> "geometry" !> "bounds"
+                viewport = dec !> "results" !!> 0 !> "geometry" !> "viewport"
+                getPos l = Position <$> liftA2 (\(A.Number i) (A.Number j)-> (realToFrac i ,realToFrac j ,0)) (l !> "lng" )( l  !> "lat" )
+            p <- MaybeT $ return $ getPos loc
+            b <- MaybeT $ return $ case (fmap Bounding $  (\i j -> Interval.interval (ER.Finite i ,True) (ER.Finite j ,True))<$> getPos (bounds !> "southwest") <*> getPos (bounds !> "northeast"), fmap Bounding $ (\i j -> Interval.interval (ER.Finite i ,True) (ER.Finite j ,True))<$> getPos (viewport !> "southwest") <*> getPos (viewport !> "northeast")) of
+                                        (i@(Just _), _ ) -> i
+                                        (Nothing , j) -> j
+            return [("geocode" ,SPosition p),("bounding", SBounding b)]) -<  im
+
+      let tb = TB1 . KV (PK [] []) . fmap (Compose . Identity. Attr . second (SOptional. Just )) <$> r
+      returnA -< tb
+
+    element conn inf
+          = maybe (return Nothing) (\inp -> do
+                   b <- dynPK url (Just inp)
+                   return $ fmap (first (lookKey inf "address")) <$> b)
 
 
 varT t = join . fmap (unRSOptional'.snd)  <$> idxT t
@@ -1075,39 +1073,25 @@ testPdfGet conn inf inp =  runMaybeT$ do
         MaybeT $   updateMod  conn inf vp inp fire_project
       else MaybeT $ return Nothing
 
-queryCPFStatefull =
-  let arrow :: FunArrowPlug  (Maybe Text)
-      arrow = proc t -> do
-        i <- varT "cpf_number" -< t
-        returnA -< (\(SText s)->  s)  <$> i
-      elem conn inf inputs = do
-          out <- UI.div
-          ev <- cnpjquery out ( fmap (BS.pack.T.unpack) . dynP arrow <$> inputs)
-          s <- stepper [] (unsafeMapIO (\(inp,res) -> do
-                      testPlan conn inf ( inp) ( M.fromList  res) ("owner",testStep)
-                      return []
-                            ) (filterJust $ liftA2 (,) <$> facts inputs <@> ev ))
-          element out #+ [UI.div # sink UI.text s]
-          return out
-  in (StatefullPlugin "CPF Receita" "owner" [([(True,[["cpf_number"]])],[(False ,[["captchaViewer"]])]),([(True,[["captchaInput"]])],[(True,[["owner_name"]])])]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] cpfCall )
+queryCPFStatefull =  StatefullPlugin "CPF Receita" "owner" [([(True,[["cpf_number"]])],[(False ,[["captchaViewer"]])]),([(True,[["captchaInput"]])],[(True,[["owner_name"]])])]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] cpfCall
 
 
 
-queryCNPJStatefull =
-  let arrow :: FunArrowPlug  (Maybe Text)
-      arrow = proc t -> do
-        i <- varT "cnpj_number" -< t
-        returnA -< (\(SText s)->  s)  <$> i
-      elem conn inf inputs = do
-          out <- UI.div
-          ev <- cnpjquery out ( fmap (BS.pack.T.unpack) . dynP arrow <$> inputs)
-          s <- stepper [] (unsafeMapIO (\(inp,res) -> do
-                      testPlan conn inf ( inp) ( M.fromList  res) ("owner",testStep)
-                      return []
-                            ) (filterJust $ liftA2 (,) <$> facts inputs <@> ev ))
-          element out #+ [UI.div # sink UI.text s]
-          return out
-  in (StatefullPlugin "CNPJ Receita" "owner" [([(True,[["cnpj_number"]])],[(False ,[["captchaViewer"]])]),([(True,[["captchaInput"]])],[(True,[["owner_name"]])])]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] wrapplug )
+queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
+  [([(True,[["cnpj_number"]])]
+    ,[(False ,[["captchaViewer"]])])
+  ,([(True,[["captchaInput"]])]
+    ,[(True,[["owner_name"]])
+      ,(True,[["address"]])
+      ,(True,[["address"],["logradouro"]])
+      ,(True,[["address"],["number"]])
+      ,(True,[["address"],["uf"]])
+      ,(True,[["address"],["cep"]])
+      ,(True,[["address"],["complemento"]])
+      ,(True,[["address"],["municipio"]])
+      ,(True,[["address"],["bairro"]])
+      ])]
+  [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] wrapplug
 
 
 
@@ -1190,7 +1174,7 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
   inf <- keyTables conn  "incendio"
   let loop =  do
         print =<<  getCurrentTime
-        print "START"
+        print ("START" ::String)
         let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
         listRes <- queryWith_ (fromAttr (fst rp) ) conn  (traceShowId $ fromString $ T.unpack $ snd rp)
         let evb = filter (\i -> tdInput i && tdOutput1 i ) listRes
@@ -1200,7 +1184,7 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
         i <- elem conn inf evb
         handler i
         print =<<  getCurrentTime
-        print "END"
+        print ("END" ::String)
         threadDelay (d*1000*1000*60)
         loop
   loop
