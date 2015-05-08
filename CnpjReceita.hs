@@ -137,13 +137,20 @@ getCnpj' _ inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT (forever $ do
       mvar <- liftIO $ takeMVar i
-      outM <- fmap ( fmap  M.fromList . join) . Tra.traverse getCnpjShowable $ mvar
+      outM <- fmap ( fmap  (M.fromListWith (++) . fmap (fmap (\i -> [i]) )) . join) . Tra.traverse getCnpjShowable $ mvar
+      liftIO $ print outM
       maybe (return () ) (\ out-> do
         let own i = Compose . Identity .  Attr . (lookKey inf "owner" i ,)
             attr i = Compose . Identity .  Attr . (lookKey inf "address" i ,)
-            idx  = SOptional . fmap (SText . TL.pack) . flip M.lookup out
+            cna i = Compose . Identity .  Attr . (lookKey inf "cnae" i ,)
+            idx  = SOptional . fmap (SText . TL.pack . head) . flip M.lookup out
             fk i  = Compose . Identity . FKT i True
+            afk i  = Compose . Identity . AKT i True []
             tb pk desc attr = TB1 $ KV (PK pk desc) attr
+            (pcnae,pdesc) = traceShowId $ (SOptional $   fmap (SText .TL.filter (not . flip L.elem "-.") . fst) t ,  SOptional $  SText .  snd <$>  t)
+                where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)
+            scnae = fmap (\t -> ((SText .TL.filter (not . flip L.elem "-.") . fst) t ,    (SText .  snd ) t)) ts
+                where ts = join . maybeToList $ fmap ( TL.breakOn " - " .  TL.pack ) <$> (M.lookup "CÓDIGO E DESCRIÇÃO DAS ATIVIDADES ECONÔMICAS SECUNDÁRIAS" out)
             attrs = tb [] [own "owner_name" (idx "NOME EMPRESARIAL")]
                     [fk [own "address" (SOptional Nothing)]
                           (fmap (keyOptional ) $ tb [attr "id" (SSerial Nothing) ]
@@ -156,11 +163,16 @@ getCnpj' _ inf i  handler = do
                               ,attr "municipio" (idx "MUNICÍPIO")
                               ,attr "uf" (idx "UF")
                               ,attr "geocode" (SOptional Nothing)
-                              ,attr "bounding" (SOptional Nothing)
-                              ]
+                              ,attr "bounding" (SOptional Nothing)]
                               )
+                     ,fk [own "atividade_principal" pcnae]
+                                (keyOptional <$> tb [cna "id" pcnae] [cna "description" pdesc] [] )
+                     ,afk [own "atividades_secundarias" pcnae]
+                                (fmap keyOptional <$>
+                                  (\(pcnae,pdesc)-> tb [cna "id" pcnae] [cna "description" pdesc] [] ) <$> scnae)
+
                     ]
-        handler . Just $ attrs
+        handler . Just $ traceShowId attrs
         return ()) outM ) rv
   return ()
 

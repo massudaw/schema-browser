@@ -209,16 +209,6 @@ projectFk schema k = case M.keys <$> M.lookup k schema of
 
 
 
-doQueryTable :: Traversable t => Connection -> InformationSchema -> QueryT Identity (t KAttribute)  ->
-                    (Map Key [Filter]) -> [PathQuery] -> (S.Set Key) -> IO (t Key,[t Showable])
-doQueryTable conn inf q f p arg  = projectTable  conn inf (do
-              predicate (concat $ filterToPred <$> (M.toList f))
-              addPath p
-              q
-               ) arg
-  where
-    filterToPred (k,f) = fmap (k,) f
-
 
 doQueryAttr :: Traversable t => Connection -> InformationSchema -> QueryT Identity (t KAttribute)  ->
                     (Map Key [Filter]) -> (S.Set Key) -> IO [t (Key,Showable)]
@@ -905,6 +895,8 @@ queryGeocodeBoundary = BoundedPlugin2 "Google Geocode" "address" (staticP url) e
       bai <- varN "bairro"-< t
       mun <- varT "municipio"-< t
       uf <- varT "uf"-< t
+      odx "geocode" -< t
+      odx "bounding" -< t
       let im = "http://maps.googleapis.com/maps/api/geocode/json?address=" <> (HTTP.urlEncode $ vr log <> " , " <> vr num <> " - " <>  vr bai<> " , " <> vr mun <> " - " <> vr uf)
           vr =  maybe "" renderShowable
       r <- act (\im-> runMaybeT $ do
@@ -1083,6 +1075,12 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
   ,([(True,[["captchaInput"]])]
     ,[(True,[["owner_name"]])
       ,(True,[["address"]])
+      ,(True,[["atividades_secundarias"]])
+      ,(True,[["atividades_secundarias"],["id"]])
+      ,(True,[["atividades_secundarias"],["description"]])
+      ,(True,[["atividade_principal"]])
+      ,(True,[["atividade_principal"],["id"]])
+      ,(True,[["atividade_principal"],["description"]])
       ,(True,[["address"],["logradouro"]])
       ,(True,[["address"],["number"]])
       ,(True,[["address"],["uf"]])
@@ -1123,12 +1121,6 @@ applyTranslator t i = fmap (\(k,v) ->  join $ (\(kv,f) -> fmap (kv,) (f$v))   <$
 iframe = mkElement "iframe"
 
 
-projectTable
-  :: Connection
-     -> InformationSchema ->
-     (forall t . Traversable t => QueryT Identity (t KAttribute)
-         -> S.Set Key -> IO (t Key ,[t Showable]))
-projectTable conn inf q  = (\(j,(h,i)) -> fmap (fmap (\(Metric k) -> k) j,)  . queryWith_ (fromShowableList j) conn . buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
 
 projectKey'
   :: Connection
