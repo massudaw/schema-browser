@@ -55,8 +55,8 @@ getInp l  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t
 cpfCall = WrappedCall initCnpj [getCaptchaCpf',getCpf']
 
 getCaptchaCpf' ::
-     a -> InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
-getCaptchaCpf' _ inf i  handler = do
+     InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
+getCaptchaCpf' inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT  (forever $ do
       mvar <- liftIO $takeMVar i
@@ -78,8 +78,8 @@ getCaptchaCpfShowable tinput =
 
 
 getCpf' ::
-     a -> InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
-getCpf' _ inf i  handler = do
+     InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
+getCpf'  inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT (forever $ do
       mvar <- liftIO $ takeMVar i
@@ -118,8 +118,8 @@ getCaptchaShowable tinput =
 
 
 getCaptcha' ::
-     a -> InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
-getCaptcha' _ inf i  handler = do
+     InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
+getCaptcha'  inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT  (forever $ do
       mvar <- liftIO $takeMVar i
@@ -132,8 +132,8 @@ getCaptcha' _ inf i  handler = do
 
 
 getCnpj' ::
-     a -> InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
-getCnpj' _ inf i  handler = do
+     InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
+getCnpj'  inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT (forever $ do
       mvar <- liftIO $ takeMVar i

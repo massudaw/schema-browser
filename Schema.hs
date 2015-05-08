@@ -71,6 +71,7 @@ data InformationSchema
   , hashedGraphInv :: HashQuery
   , graphP :: Graph (Set Key) (SqlOperation Table)
   , pluginsMap :: Map (Text,Text,Text) Key
+  , conn :: Connection
   }
 
 type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
@@ -111,7 +112,7 @@ keyTables conn schema = do
            graphP = warshall2 $ graphI
            graph = hashGraph $ graphP
            invgraph = hashGraphInv' $ graphP
-       return  $ InformationSchema i1 i2 i3 graph invgraph graphP M.empty
+       return  $ InformationSchema i1 i2 i3 graph invgraph graphP M.empty conn
 
 
 
@@ -155,7 +156,7 @@ buildQuery q =   "SELECT * FROM " <> fromString (T.unpack $ showTable q)
 
 
 withInf s f = withConn s (f <=< flip keyTables s)
-withConnInf s f = withConn s (\conn ->  f conn  =<< liftIO ( flip keyTables s conn) )
+withConnInf s f = withConn s (\conn ->  f =<< liftIO ( flip keyTables s conn) )
 
 withConn s action =  do
   conn <- liftIO $connectPostgreSQL $ "user=postgres password=queijo dbname=" <> fromString (T.unpack s)

@@ -635,10 +635,10 @@ topSortTables tables = flattenSCCs $ stronglyConnComp item
   where item = fmap (\n@(Raw _ t k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
 
 projectKey
-  :: Connection
-     -> InformationSchema ->
+  ::
+    InformationSchema ->
      (forall t . Traversable t => QueryT Identity (t KAttribute)
          -> S.Set Key -> IO [t (Key,Showable)])
-projectKey conn inf q  = (\(j,(h,i)) -> fmap (fmap (zipWithTF (,) (fmap (\(Metric i)-> i) j))) . queryWith_ (fromShowableList j) conn .  buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
+projectKey inf q  = (\(j,(h,i)) -> fmap (fmap (zipWithTF (,) (fmap (\(Metric i)-> i) j))) . queryWith_ (fromShowableList j) (conn inf) .  buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
 
 
