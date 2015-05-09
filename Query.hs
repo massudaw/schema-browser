@@ -787,16 +787,13 @@ instance Apply f => Apply (TB f) where
   AKT l i m t <.> AKT l1 i1 m1 t1 = AKT (zipWith (<.>) l   l1) (i && i1 ) (zipWith (\(p1,p2) (t1,t2)-> (p1 <.>t1 ,zipWith (<.>) p2  t2) ) m m1) (getZipList $ liftF2 (<.>) (ZipList t) (ZipList t1))
   l <.> j = error  "cant apply"
 
+
 unIntercalate :: ( Char -> Bool) -> String -> [String]
 unIntercalate pred s                 =  case dropWhile pred s of
                                 "" -> []
                                 s' -> w : unIntercalate pred s''
                                       where (w, s'') =
                                              break pred s'
-
-tbPK (TB1 (KV (PK i _)  _)) = concat $ fmap (go.runIdentity.getCompose) i
-  where go (FKT _ _ tb) = tbPK tb
-        go (Attr a) = [a]
 
 data Tag = TAttr | TPK
 

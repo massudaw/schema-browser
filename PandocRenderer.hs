@@ -92,7 +92,7 @@ renderProjectPricingA = (staticP myDoc , element )
                       plain ("Valor total:  " <> p ),
                    para "Dados do Servico" <>
                      bulletList [
-                       plain ("Propietário : " <> o ),
+                       plain ("Proprietário : " <> o ),
                        plain ("Endereço: " <> end ),
                        plain ("Local: " <> mun )
                           ],

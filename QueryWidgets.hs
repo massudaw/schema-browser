@@ -57,8 +57,6 @@ data WrappedCall =  forall m . MonadIO m =>  WrappedCall
       }
 
 
-
-
 data Plugins
   = BoundedPlugin
   { _name :: Text
@@ -218,7 +216,6 @@ buildUI i  tdi = case i of
          (KOptional ti) -> fmap (Just. SOptional) <$> buildUI ti (join . fmap unSOptional  <$> tdi)
          (KSerial ti) -> fmap (Just . SSerial) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
          (KArray ti) -> do
-            -- el <- UI.div
             let arraySize = 10
             widgets <- mapM (\i-> buildUI ti (join . fmap (\a -> unSComposite a V.!? i ) <$> tdi )) [0..arraySize]
             let tdcomp = fmap (\v -> if V.null v then showableDef i else Just . SComposite $ v ). takeWhileJust  (flip V.cons) V.empty $ ( triding <$> widgets)
