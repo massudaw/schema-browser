@@ -123,7 +123,7 @@ indexTB1 (l:xs) t
         i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  finder v `mplus` finder k `mplus` finder d
     case runIdentity $ getCompose $i  of
          Attr l -> Nothing
-         FKT l _ j -> case xs of
+         FKT l _ _ j -> case xs of
                          [] -> Just j
                          i  -> indexTB1 xs (Just j)
 
@@ -135,14 +135,14 @@ indexTable (l:xs) t@(TB1 (KV (PK k d)  v))
         i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder v `mplus` finder k `mplus` finder d
     case runIdentity $ getCompose $ i  of
          Attr l -> return l
-         FKT l _  j -> indexTable xs j
+         FKT l _ _ j -> indexTable xs j
          AKT l _ _ j -> let i =  T.traverse (indexTable xs)  j
                        in liftA2 (,) (Just  (fst $ unAttr $   runIdentity $ getCompose $ head l) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
 
 
 kattr = kattri . runIdentity . getCompose
 kattri (Attr i ) = [i]
-kattri (FKT i _ _ ) =  (L.concat $ kattr  <$> i)
+kattri (FKT i _ _ _ ) =  (L.concat $ kattr  <$> i)
 kattri (AKT i _ _ _ ) =  (L.concat $ kattr <$> i)
 
 class KeyString i where
@@ -169,7 +169,7 @@ instance (Applicative (a i),Monoid m) => Monoid (Parser a s i m) where
 findPK = concat . fmap (attrNonRec . runIdentity . getCompose) . _pkKey  . _kvKey . _unTB1
 
 
-attrNonRec (FKT ifk _ _ ) = concat $ fmap kattr ifk
+attrNonRec (FKT ifk _ _ _ ) = concat $ fmap kattr ifk
 attrNonRec (AKT ifk _ _ _ ) = concat $ fmap kattr ifk
 attrNonRec (Attr i ) = [i]
 

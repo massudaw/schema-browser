@@ -280,12 +280,12 @@ parseAttr (Attr i) = do
 parseAttr (AKT l refl rel [t]) = do
   ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose  <$> l) (char ',')
   r <- doublequoted (parseArray ( doublequoted $ parseLabeledTable t)) <|> parseArray (doublequoted $ parseLabeledTable t) <|> pure []
-  return $ AKT ml  refl (subsAKT ml r rel) r
+  return $ AKT ml  refl rel  r
 
-parseAttr (FKT l refl j ) = do
+parseAttr (FKT l refl rel j ) = do
   ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose  <$> l) (char ',')
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j
-  return $  FKT ml refl mj
+  return $  FKT ml refl rel mj
 
 parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 
