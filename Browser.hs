@@ -496,6 +496,7 @@ queryAndamento4 inf  tbinputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "projec
                 let mods =  catMaybes (   modB :  gets <> and  <> sol)
                 MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) mods)
 
+
 {-queryAndamentoSiapi3 =  BoundedPlugin2 "Andamento Bombeiro" "fire_project"( staticP arrow ) elem
   where
     arrow :: ArrowPlug (Kleisli IO) (Maybe (TB1 (Text,Showable)))
@@ -937,85 +938,9 @@ queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address"(staticP open  )  ele
                    b <- dynPK open (Just inp)
                    return $ fmap (first (lookKey inf "address")) <$> b)
 
-executeStep
-  ::
-   InformationSchema
-  -> TB1 (Key,Showable)
-  -> StepPlan (Maybe Showable)
-  -> IO (Maybe [(Key,Showable)])
-executeStep  inf inputs (TBPlan t  ta steps) =  do
-          k <- mapM (executeStep inf inputs ) steps
-          case t of
-            TInsert -> do
-               traverse (\i -> do
-                        mod <- insertMod inf (concat i) ta
-                        return mod
-                        ) (allMaybes k)
-               return $ Just []
-            TUpdate -> do
-               traverse (\i -> do
-                        mod <- updateMod inf (concat i) inputs ta
-                        return mod
-                        ) (onlyJust k)
-
-               return $ Just []
-executeStep   inf _ (SPAttr t k v) = return $ fmap (\i -> [(k,i)]) v
-executeStep  inf inputs (SPFK t (Path  i (FKJoinTable ti s tj ) j) steps) = do
-  k <-  mapM (executeStep inf inputs) steps
-  joinTable (M.fromList $ swap <$> s) <$> case t of
-       FKEInsertGenerated -> do
-         traverse (\i -> insertPK fromShowableList (conn inf) (concat i) tj) (allMaybes k)
-       FKEUpdateFK -> do
-         traverse (\i -> do
-                    mod <- updateMod inf ( concat  i) inputs tj
-                    let upPKs = filter ((`S.member` j) .fst) (concat i)
-                    return  upPKs
-                  ) (onlyJust k)
-
 joinTable  m  i= join $ allMaybes . fmap (fmap swap . Tra.sequence . fmap (flip M.lookup  m) . swap ) <$> i
 
 onlyJust = allNonEmpty . catMaybes
-
-
-generateValues
-  :: (Ord k, Functor f) => Map k a -> f (k, Maybe a -> b) -> f b
-generateValues m plan = fmap (\(l,f)->  f  $ M.lookup l m ) plan
-
-generateStepPlan
-  :: InformationSchema
-     -> TB1 (Key, b)
-     -> (Text, [Step a])
-     -> StepPlan (String, Maybe a -> Maybe Showable)
-generateStepPlan inf input (tname , i) = TBPlan TUpdate table (fmap (attrPlan table) i)
-  where
-    attrPlan table (SAttr i) =  (if k `S.member` inputSet  then SPAttr AEUpdate  else SPAttr AEInsert) k $ transformAttr table i
-        where k = (lookKey inf  (tableName  table) . fst . snd $ i)
-    attrPlan table (SFK fk steps)
-      | all (`S.member` inputSet) (fmap (lookKey inf (tableName table)) $ F.toList fk ) = SPFK FKEUpdateFK (fmap (lookTable inf) <$> path)  (attrPlan tfk <$> steps)
-      | all (isSerial . keyType ) . filter (not . (`S.member` inputSet)  ) $ (F.toList fkt) = SPFK FKEInsertGenerated (fmap (lookTable inf) <$> path)  (attrPlan tfk <$> steps)
-      | otherwise  = SPFK FKEInsertFind (fmap (lookTable inf) <$> path)  (attrPlan tfk <$> steps)
-        where path@(Path _ (FKJoinTable _ _ j) fkt )  = justError ("table  " <> T.unpack (tableName table ) <>  " has no path for keyset " <> show fk  ) $ L.find (\(Path i _ _) -> S.map keyValue i == fk) (F.toList (rawFKS table) )
-              tfk = lookTable inf j
-    inputSet = S.fromList $ F.toList $ fmap fst input
-    transformAttr table (i,(k,f)) = (i,(readTypeOpt (textToPrim <$> keyType nk ) .  fmap f))
-        where nk = lookKey inf (tableName table) k
-    table = lookTable inf tname
-
-
-
-testStep = translate_o
-  where
-    translate_o =
-      [SAttr ("NOME EMPRESARIAL",("owner_name",id))
-      ,SFK (S.singleton "address") translate]
-    translate = fmap SAttr
-      [("CEP",("cep" , filter (not . (`elem` "-."))))
-      ,("UF",("uf",id ))
-      ,("LOGRADOURO",("logradouro", id))
-      ,("NÚMERO",("number",id))
-      ,("COMPLEMENTO",("complemento",id))
-      ,("BAIRRO/DISTRITO",("bairro",id))
-      ,("MUNICÍPIO",("municipio",id))]
 
 
 testPdfGet inf inp =  runMaybeT$ do
@@ -1040,6 +965,7 @@ testPdfGet inf inp =  runMaybeT$ do
         let vp  =  catMaybes . applyTranslator (M.fromList transK) . fmap (fmap (T.unpack . T.fromStrict ) )  $  v
         MaybeT $   updateMod  inf vp inp fire_project
       else MaybeT $ return Nothing
+
 
 queryCPFStatefull =  StatefullPlugin "CPF Receita" "owner" [([(True,[["cpf_number"]])],[(False ,[["captchaViewer"]])]),([(True,[["captchaInput"]])],[(True,[["owner_name"]])])]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] cpfCall
 

@@ -273,9 +273,12 @@ subsAKT r t = subs r (fmap (^. unTB1 .kvKey. pkKey) t)
   where subs i j = fmap (\r -> (justError "no key Found subs" $ L.find (\i -> fmap fst i == fst r ) i , zipWith (\m n -> justError "no key Found subs" $L.find (\i-> fmap fst i == n) m ) j (snd r) ))
 
 parseAttr (Attr i) = do
-  s<- parseShowable (textToPrim <$> keyType (i)) <?> show i
+  s<- parseShowable (textToPrim <$> keyType i) <?> show i
   return $  Attr (i,s)
 
+parseAttr (IT i j) = do
+  mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j <|>  return ((,SOptional Nothing) <$> unTlabel j)
+  return $ IT []  mj
 
 parseAttr (AKT l refl rel [t]) = do
   ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose  <$> l) (char ',')

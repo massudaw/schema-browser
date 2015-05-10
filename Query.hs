@@ -163,6 +163,10 @@ data TB f a
     , _fkrelation :: [(Key,Key)]
     , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
     }
+  | IT
+    { _tbref :: ![Compose f (TB f) a]
+    , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
+    }
   | AKT
     { _tbref :: ! [Compose f (TB f) a]
     , _reflexive :: ! Bool
@@ -205,7 +209,7 @@ data KPrim
 
 data KType a
    = Primitive a
-   | InlineTable a
+   | InlineTable Text
    | KSerial (KType a)
    | KArray (KType a)
    | KInterval (KType a)
@@ -230,6 +234,7 @@ instance Show (KType Text) where
   show = T.unpack . showTy id
 
 showTy f (Primitive i ) = f i
+showTy f (InlineTable i ) = "[" <>  fromString (T.unpack i) <> "]"
 showTy f (KArray i) = "{" <>  showTy f i <> "}"
 showTy f (KOptional i) = showTy f i <> "*"
 showTy f (KInterval i) = "(" <>  showTy f i <> ")"
@@ -370,6 +375,7 @@ renderFilter (table ,name,And i) =  T.intercalate " AND "  (fmap (renderFilter .
 data SqlOperation a
   = FetchTable a
   | FKJoinTable a [(Key,Key)] a
+  | FKInlineTable a
   deriving(Eq,Ord,Show,Functor)
 
 
@@ -868,9 +874,17 @@ isPairReflexive i j = error $ "isPairReflexive " <> show i <> " - "<> show  j
 
 isPathReflexive (FKJoinTable _ ks _)
   = all id $ fmap (\(i,j)-> isPairReflexive (textToPrim <$> keyType i ) (textToPrim <$> keyType j)) ks
+isPathReflexive (FKInlineTable _)= True
 
 intersectionOpK i j = intersectionOp (keyType i ) (keyType j)
 
+
+recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKInlineTable t ) e)
+    = do
+          (bt,ksb,bq) <- labelTable backT
+          return $ ( [Compose $ Labeled ""  $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk ))  ksb  ]  ,"")
+    where
+        backT = (\(Just i)-> i) (M.lookup t (invSchema))
 
 recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
     | any (isArray . keyType . fst) (ks)  =   do
@@ -949,6 +963,7 @@ tname i = do
 explodeLabel :: Labeled Text (TB (Labeled Text) Key) -> Text
 explodeLabel (Labeled l (Attr _)) = l
 explodeLabel (Labeled l (FKT i refl rel t )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i)) <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel $ unlb1 t))  <> ")"
+explodeLabel (Labeled l (IT i t )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i))--  <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel $ unlb1 t))  <> ")"
 explodeLabel (Labeled l (AKT i _ _ _ )) = T.intercalate "," (( F.toList $ (explodeLabel. getCompose ) <$> i)) <> "," <> l
 
 unTlabel kv  = TB1 $ fmap (Compose . Identity .unlabel) $ unlb1 kv
@@ -969,7 +984,7 @@ allRec' i t = unTlabel $ fst $ rootPaths' i t
 
 rootPaths' invSchema r@(Raw _ _ _ _ fk _ ) = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   (t,ks@(TB1 (KV (PK npk ndesc) nattr)),q) <- labelTable r
-  let fkSet = S.unions $ fmap (\(Path ifk _ _) -> ifk)$ filter (\(Path _ ifk  _) -> isPathReflexive ifk) $ S.toList fk
+  let fkSet = traceShowId $ S.unions $ fmap (\(Path ifk _ _) -> ifk)$ traceShowId $ filter (\(Path _ ifk  _) -> isPathReflexive ifk) $ S.toList fk
       fun items =  do
                   let attrs :: [TBLabel Key]
                       attrs = fmap Compose $ filter (\i -> not $ S.member (unAttr.labelValue $ i) fkSet) items

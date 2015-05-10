@@ -47,7 +47,7 @@ createType un (t,c,trans,"int4range",_,_,n,def,_,_) = (Key   c Nothing trans un 
 createType un (t,c,trans,"numrange",_,_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "numeric"))
 createType un (t,c,trans,"USER-DEFINED",_,"floatrange",n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "double precision"))
 -- Table columns Primitive
-createType un (t,c,trans,"USER-DEFINED",udtschema ,udtname,n,def,_,_) | udtschema == "incendio" = (Key c Nothing trans un (nullable n $ InlineTable udtname ))
+createType un (t,c,trans,"USER-DEFINED",udtschema ,udtname,n,def,_,_) |  udtschema == "incendio" = (Key c Nothing trans un (nullable n $ traceShowId $  InlineTable udtname ))
 createType un (t,c,trans,"ARRAY",udtschema ,udtname,n,def,_,_) | udtschema == "incendio" = (Key c Nothing trans un (nullable n $ KArray $ InlineTable udtname ))
 createType un (t,c,trans,"ARRAY",_,i,n,def,p,_) = (Key   c Nothing trans un (nullable n $ KArray $ (Primitive (T.tail i))))
 createType un (t,c,trans,_,_,"geometry",n,def,p,_) = (Key   c Nothing trans un (nullable n $ Primitive $ (\(Just i) -> i) p))
@@ -83,7 +83,7 @@ foreignKeys = "select origin_table_name,target_table_name,origin_fks,target_fks 
 keyTables :: Connection -> Text -> IO InformationSchema
 keyTables conn schema = do
        uniqueMap <- join $ mapM (\i-> (i,) <$> newUnique) <$>  query conn "select o.table_name,o.column_name from information_schema.tables natural join information_schema.columns o where table_schema = ? "(Only schema)
-       res2 <- fmap ((\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? " (Only schema)
+       res2 <- fmap (traceShowId . (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? " (Only schema)
        let keyMap = M.fromList keyList
            keyListSet = groupSplit (\(c,k)-> c) keyList
            keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
@@ -104,8 +104,9 @@ keyTables conn schema = do
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  res2 :: Map Text (Set Key)
            pks =  fmap (\(c,l)-> let
                                   pks = S.fromList $ fmap snd l
+                                  inlineFK = traceShowId $ (fmap (\k -> (\t -> Path (S.singleton k ) (FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) . traceShowId . S.toList  )<$> (M.lookup c all)
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $maybeToList $ M.lookup c descMap) <> pks)
-                                in (pks ,Raw (schema , (\(Just i) -> i) $ M.lookup c resTT) c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks ) attr )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
+                                in (pks ,Raw (schema , (\(Just i) -> i) $ M.lookup c resTT) c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK  ) attr )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
        let ret@(i1,i2,i3) = (keyMap, M.fromList  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        paths <- schemaKeys' conn schema ret
        let graphI =  graphFromPath (filter (\i -> fst (pbound i) /= snd (pbound i) ) $ paths <> (fmap (fmap ((\(Just i) -> i) . flip M.lookup i3)) <$> concat (fmap (F.toList.snd) (M.toList fks))))
@@ -114,7 +115,14 @@ keyTables conn schema = do
            invgraph = hashGraphInv' $ graphP
        return  $ InformationSchema i1 i2 i3 graph invgraph graphP M.empty conn
 
+inlineName (KOptional i) = inlineName i
+inlineName (KArray a ) = inlineName a
+inlineName (InlineTable i) = i
 
+isInline (KOptional i ) = isInline i
+isInline (KArray i ) = isInline i
+isInline (InlineTable i) = True
+isInline _ = False
 
 graphFromPath p = Graph {hvertices = fmap fst bs,
                          tvertices = fmap snd bs,
