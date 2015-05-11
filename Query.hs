@@ -72,9 +72,8 @@ import Debug.Trace
 import GHC.Stack
 
 import Data.Unique
+import Types
 
-instance Ord a => Ord (Interval.Interval a ) where
-  compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)
 
 textToPrim "character varying" = PText
 textToPrim "name" = PText
@@ -104,118 +103,14 @@ textToPrim "LINESTRING" = PLineString
 textToPrim "box3d" = PBounding
 textToPrim i = error $ "no case for type " <> T.unpack i
 
-data PK a
-  = PK { _pkKey:: [a], _pkDescription :: [a]} deriving(Functor,Foldable,Traversable,Show)
-
-data KV a
-  = KV {_kvKey  :: PK a , _kvAttr ::  [a] }deriving(Functor,Foldable,Traversable,Show)
-
-mapKV f (KV (PK l m) n) =  KV (PK (map f l)(map f m)) (map f n)
-
-filterKV i (KV (PK l m) n) = KV (PK (filter i l) (filter i m )) (filter i n)
-findKV i (KV (PK l m) n) =  (L.find i l)  `mplus` (L.find i m ) `mplus` (L.find i n)
-
-
-data Labeled l v
-  = Labeled
-  { label :: l
-  , labelValue :: v
-  }
-  | Unlabeled
-  { labelValue :: v
-  } deriving(Eq,Show,Ord,Foldable,Functor,Traversable)
-
-data AliasPath a
-    = PathCons (Set (a,AliasPath a))
-    | PathRoot
-    deriving(Show,Eq,Ord,Foldable)
-
-
-instance (Functor f,Eq1 f) => Eq1 (TB  f) where
-  eq1 i j = i == j
-
-instance (Functor f,Ord1 f) => Ord1 (TB f ) where
-  compare1 i j = compare i j
-
-instance (Functor f,Show1 f) => Show1 (TB f  ) where
-  showsPrec1 = showsPrec
-
-instance Eq f => Eq1 (Labeled f ) where
-  eq1 i j = i == j
-instance Ord f => Ord1 (Labeled f ) where
-  compare1 i j  = compare i j
-instance Show f => Show1 (Labeled f ) where
-  showsPrec1 = showsPrec
-
 isReflexive (FKT _  r _ _ ) = r
 isReflexive (AKT _  r _ _ ) = r
 isReflexive _ = True
-
-data TBRel  i
-  = TBLeft (Maybe (TBRel i))
-  | TBIdent i
-  | TBArray [TBRel i]
-
-data TB f a
-  = FKT
-    { _tbref :: ![Compose f (TB f) a]
-    , _reflexive :: ! Bool
-    , _fkrelation :: [(Key,Key)]
-    , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
-    }
-  | IT
-    { _tbref :: ![Compose f (TB f) a]
-    , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
-    }
-  | AKT
-    { _tbref :: ! [Compose f (TB f) a]
-    , _reflexive :: ! Bool
-    , _fkrelation :: [(Key,Key)]
-    -- , _afkrelation :: [(Compose Identity (TB  Identity ) a , [Compose Identity (TB Identity ) a] )]
-    , _akttable :: ! [FTB1 (Compose f (TB f)) a]
-    }
-  | Attr
-    { _tbattr :: ! a
-    }
-  deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
-
-type TB1 = FTB1 (Compose Identity (TB Identity) )
-
-newtype FTB1 f a
-  = TB1 {_unTB1 :: (KV (f a)) }
-  deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
 _unlb1 ( TB1  i ) = fmap getCompose i
 
 unlb1 ( TB1  i ) = fmap getCompose i
 
-
-data KPrim
-   = PText
-   | PBoolean
-   | PInt
-   | PDouble
-   | PDate
-   | PTimestamp
-   | PInterval
-   | PPosition
-   | PBounding
-   | PCnpj
-   | PMime Text
-   | PCpf
-   | PLineString
-   deriving(Show,Eq,Ord)
-
-
-data KType a
-   = Primitive a
-   | InlineTable Text
-   | KSerial (KType a)
-   | KArray (KType a)
-   | KInterval (KType a)
-   | KOptional (KType a)
-   | KTable [KType a]
-   deriving(Eq,Ord,Functor)
 
 isSerial (KSerial _) = True
 isSerial _ = False
@@ -227,63 +122,6 @@ isArray (KArray _) = True
 isArray (KOptional i) = isArray i
 isArray _ = False
 
-instance Show (KType KPrim) where
-  show =  showTy show
-
-instance Show (KType Text) where
-  show = T.unpack . showTy id
-
-showTy f (Primitive i ) = f i
-showTy f (InlineTable i ) = "[" <>  fromString (T.unpack i) <> "]"
-showTy f (KArray i) = "{" <>  showTy f i <> "}"
-showTy f (KOptional i) = showTy f i <> "*"
-showTy f (KInterval i) = "(" <>  showTy f i <> ")"
-showTy f (KSerial i) = showTy f i <> "?"
-
-
-type Key = FKey (KType Text)
-
-data FKey a
-    = Key
-    { keyValue :: ! Text
-    , keyAlias :: ! (Maybe Text)
-    , keyTranslation :: ! (Maybe Text)
-    , keyFastUnique :: ! Unique
-    , keyType :: ! a
-    }
-
-instance Eq Key where
-   k == l = keyFastUnique k == keyFastUnique l
-   k /= l = keyFastUnique k /= keyFastUnique l
-
-instance Ord Key where
-   k > l = keyFastUnique k > keyFastUnique l
-   k < l = keyFastUnique k < keyFastUnique l
-   k <= l = keyFastUnique k <= keyFastUnique l
-   k >= l = keyFastUnique k >= keyFastUnique l
-
-instance Show Key where
-   -- show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
-   show  =  T.unpack .showKey
-showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> {-"::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> -} "::"  <> showTy id (keyType k)
-
-
-instance Foldable (JoinPath a) where
-  foldMap f (Join ty a  _ p) = f a <>  F.foldMap f p
-  foldMap f (From p _) = f p
-
-data Aggregate a
-   = Aggregate [a] Text
-   deriving(Show,Eq,Ord)
-
-
-type KAttribute = FAttribute Key
-data FAttribute a
-   = Metric a
-   | Operator (FAttribute a) Text Text (FAttribute a)
-   | Agg (Aggregate (FAttribute a ))
-   | Fun [FAttribute a] Text
-   deriving(Eq,Ord,Show)
 
 attrInputSet (Metric k ) = [k]
 attrInputSet (Operator l k n r ) = concat $ [attrInputSet l, attrInputSet r]
@@ -303,30 +141,6 @@ renderAttribute (Fun arg n ) = n <> "(" <> T.intercalate "," (renderAttribute <$
 renderAttribute a@(Agg m2  ) = renderAggr renderAttribute m2 <> " as " <> attrName a
   where renderAggr f (Aggregate l s )  = s  <> "(" <> T.intercalate ","  (fmap f l)  <> ")"
 
-
-newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read)
-
-newtype Bounding = Bounding (Interval.Interval Position) deriving(Eq,Ord,Typeable,Show)
-newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,Read)
-
-data Showable
-  = SText !Text
-  | SNumeric !Int
-  | SBoolean !Bool
-  | SDouble !Double
-  | STimestamp !LocalTimestamp
-  | SPInterval !DiffTime
-  | SPosition !Position
-  | SBounding !Bounding
-  | SLineString !LineString
-  | SDate !Date
-  | SSerial !(Maybe Showable)
-  | SBinary !BS.ByteString
-  | SOptional !(Maybe Showable)
-  | SComposite !(Vector Showable)
-  | SInterval !(Interval.Interval Showable)
-  | SScopedKeySet !(Map Key Showable)
-  deriving(Ord,Eq,Show)
 
 showableDef (KOptional i) = Just $ SOptional (showableDef i)
 showableDef (KSerial i) = Just $ SSerial (showableDef i)
@@ -348,62 +162,10 @@ transformKey ki kr v | ki == kr = v
 transformKey ki kr  v = error  ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
 
 
-data Filter
-   -- Set containement
-   = Category (Set (PK Showable))
-   -- Range Intersection
-   | RangeFilter (Interval.Interval (PK Showable))
-   | And [Filter]
-   | Or [Filter]
-   deriving(Eq,Ord)
-
-instance Show Filter where
-  show (Category i ) = intercalate "," $ fmap show $ S.toList i
-  show (RangeFilter i ) =  show i
-  show (And i ) =  show i
-  show (Or i ) =  show i
-
-instance Monoid Filter where
-  mempty = Category S.empty
-  mappend (Category i ) (Category j ) = Category (S.union i j)
-
 -- Pretty Print Filter
 renderFilter (table ,name,Category i) = tableName table <> "." <> keyValue name <> " IN( " <>  T.intercalate "," (fmap (\s -> "'" <> T.pack (renderShowable $ head (_pkKey s)) <> "'" ) $ S.toList i) <> ")"
 renderFilter (table ,name,And i) =  T.intercalate " AND "  (fmap (renderFilter . (table ,name,)) i)
 -- renderFilter (table ,name,RangeFilter i) =  tableName table <> "." <> keyValue name <> " BETWEEN " <> T.intercalate " AND "  (fmap (\s -> "'" <> T.pack (renderShowable$ head (_pkKey s)) <> "'" ) [Interval.inf i,Interval.sup i])
-
-data SqlOperation a
-  = FetchTable a
-  | FKJoinTable a [(Key,Key)] a
-  | FKInlineTable a
-  deriving(Eq,Ord,Show,Functor)
-
-
-
-data TableType
-   = ReadOnly
-   | WriteOnly
-   | ReadWrite
-   deriving(Eq,Ord,Show)
-
-data Table
-    =  Base (Set Key) (JoinPath Key Table)
-    -- Schema | PKS | Description | FKS | Attrs
-    |  Raw { rawSchema :: (Text,TableType)
-           , rawName :: Text
-           , rawPK :: (Set Key)
-           , rawDescription :: (Maybe Key)
-           , rawFKS ::  (Set (Path (Set Key) (SqlOperation Text)))
-           , rawAttrs :: (Set Key)
-           }
-    |  Filtered [(Key,Filter)] Table
-    |  Project [ KAttribute ] Table
-    |  Reduce (Set Key) (Set (Aggregate (KAttribute ) ) )  Table
-    |  Limit Table Int
-     deriving(Eq,Ord)
-
-instance Show Table where
-  show = T.unpack . tableName
 
 description (Raw _ _ _ desc _ _ ) = desc
 
@@ -450,18 +212,10 @@ showInterval (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> ren
 
 
 
-atBase f t@(Raw _ _ _ _ _ _ ) = f t
-atBase f (Filtered _ t ) = atBase f t
-atBase f (Project _ t ) = atBase f t
-atBase f (Reduce _ _ t ) = atBase f t
-atBase f (Limit t _) = atBase f t
-atBase f (Base _ p ) = from p
-  where from (From t _) = atBase f t
-        from (Join _ _ _ p) = from p
-        from (SplitJoin _ _  _ p ) = from p
-
 normalizing = atBase (\(Raw _ _ t _ _ _ )-> t)
-tableName = atBase (\(Raw _ t _ _ _ _ )-> t)
+
+
+
 alterTableName f = atBase (\(Raw s t p i j l )-> (Raw s (f t)  p i j l))
 tablesName = atBase (\(Raw _ t _ _ _ _ )-> S.singleton t)
 
@@ -476,17 +230,6 @@ isKOptional (KSerial i) = isKOptional i
 isKOptional (KInterval i) = isKOptional i
 isKOptional (Primitive _) = False
 isKOptional (KArray i)  = isKOptional i
-
-data JoinType
-  = JInner
-  | JLeft
-  deriving(Eq,Show,Ord)
-
-data JoinPath a b
-    = From b (Set a)
-    | Join  JoinType b (Set (b,Set (a,a))) (JoinPath a b)
-    | SplitJoin JoinType b  [(Set a,[(b,Set (a,a))])] (JoinPath a b)
-    deriving(Eq,Ord,Show)
 
 -- transform a multiple intersecting join in independent ones
 splitJoins j@(From p r ) = j
@@ -590,16 +333,6 @@ delete conn kold t@(Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShow
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     del = "DELETE FROM " <> rawFullName t <>   pred
 
-data TableModification b
-  = TableModification (Maybe Int) Table (Modification Key b)
-  deriving(Eq,Show,Functor)
-
-data Modification a b
-  = Edit (Maybe [(a,b)]) (TB1 (a,b))
-  | Insert (Maybe [(a,b)])
-  | Delete (Maybe [(a,b)])
-  deriving(Eq,Show,Functor)
-
 
 update
   :: ToField b =>
@@ -652,8 +385,10 @@ createTable r@(Raw sch tbl pk _ fk attr) = "CREATE TABLE " <> rawFullName r  <> 
         renderTy (KInterval ty) = renderTy ty <> ""
         renderTy (KArray ty) = renderTy ty <> "[] "
         renderTy (Primitive ty ) = ty
+        renderTy (InlineTable ty ) = ty
         renderPK = "CONSTRAINT " <> tbl <> "_PK PRIMARY KEY (" <>  renderKeySet pk <> ")"
         renderFK (Path origin (FKJoinTable _ ks table) end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
+        renderFK (Path origin _  end) = ""
 
 joinPath (Path i (FKJoinTable _ ks ll ) j) (Just p) = Just $ addJoin  ll (S.fromList ks)  p
 joinPath (Path i (FetchTable ll ) j) (Just p) = Just $ addJoin  ll ((S.fromList $ zip (S.toList i) (S.toList j)))  p
@@ -755,46 +490,6 @@ predicate filters = do
   put (schema, snd  $ createFilter (M.fromList filters) schema table)
 
 
-instance Ord1 PK where
-  compare1 (PK i j) (PK a b) = compare (compare1 i a ) (compare1 j b)
-
-instance Ord1 KV where
-  compare1 (KV i j) (KV a b) = compare (compare1 i a ) (compare1 j b)
-
-instance Eq1 PK where
-  eq1 (PK i j) (PK a b) = eq1 i a == eq1 j b
-
-instance Eq1 KV where
-  eq1 (KV i j) (KV a b) = eq1 i a == eq1 j b
-
-instance Eq a => Eq (PK a) where
-  i == j = _pkKey i == _pkKey j
-
-instance Eq a => Eq (KV a) where
-  i == j = _kvKey i == _kvKey j
-
-instance Ord a => Ord (PK a) where
-  compare i j = compare (_pkKey i) (_pkKey j)
-
-instance Ord a => Ord (KV a) where
-  compare i j = compare (_kvKey i) (_kvKey j)
-
-instance (Apply f )=> Apply (FTB1 f ) where
-  TB1 a <.> TB1 a1 =  TB1 (getCompose $ Compose a <.> Compose a1)
-
-instance Apply KV where
-  KV pk i <.> KV pk1 i1 = KV (pk <.> pk1) (getZipList $ ZipList i <.> ZipList i1)
-
-instance Apply PK where
-  PK i j <.> PK i1 j1 = PK (getZipList $ ZipList i <.> ZipList i1 ) ( getZipList $ ZipList j <.> ZipList j1)
-
-instance Apply f => Apply (TB f) where
-  Attr a <.>  Attr a1 = Attr $ a a1
-  FKT l i m t <.> FKT l1 i1 m1 t1 = FKT (zipWith (<.>) l   l1) (i && i1)  m1  (t <.> t1)
-  AKT l i m t <.> AKT l1 i1 m1 t1 = AKT (zipWith (<.>) l   l1) (i && i1 ) m1  (getZipList $ liftF2 (<.>) (ZipList t) (ZipList t1))
-  l <.> j = error  "cant apply"
-
-
 unIntercalate :: ( Char -> Bool) -> String -> [String]
 unIntercalate pred s                 =  case dropWhile pred s of
                                 "" -> []
@@ -808,13 +503,16 @@ allKVRec  (TB1 (KV (PK k d) e ))= F.foldr zipPK (KV (PK [] []) []) $ (go TPK (\i
   where zipPK (KV (PK i j) k) (KV (PK m n) o) = KV (PK (i <> m) (j <> n)) (k <> o )
         go  TAttr l (FKT _ _ _ tb) =  l $ F.toList $ allKVRec  tb
         go  TPK l (FKT _ _ _ tb) =  allKVRec  tb
+        go  TAttr l (IT  _ tb) =  l $ F.toList $ allKVRec  tb
+        go  TPK l (IT  _ tb) =  allKVRec  tb
+        go  TAttr l (IAT _  tb) = l $ concat $  F.toList . allKVRec <$> tb
+        -- go  TPK l (AKT _ _ _ tb) = concat $  allKVRec <$> tb
         go  TAttr l (AKT _ _ _ tb) = l $ concat $  F.toList . allKVRec <$> tb
         go  _ l (Attr a) = l [a]
 
 
 allPKRec  (TB1 (KV (PK k d) i ))=  F.foldr zipPK (PK [] []) $ (go (flip PK []) . runIdentity . getCompose <$> k) <> (go (PK []) . runIdentity . getCompose <$> d)
   where zipPK (PK i j) (PK m n) = (PK (i <> m) (j <> n))
-        go l (FKT _ _ _ tb) = allPKRec tb
         go l (Attr a) = l [a]
 
 
@@ -844,7 +542,6 @@ recursePath invSchema (Path i (FKJoinTable w ks t) e)  = Path i (FKJoinTable bac
   where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup t (invSchema))
         backT = (\(Just i)-> i) (M.lookup w (invSchema))
 
-type QueryRef = State ((Int,Map Int Table ),(Int,Map Int Key))
 
 recursePaths invSchema (Raw _ _ _ _ fk _ )  = concat $ recursePath invSchema <$> S.toList fk
 
@@ -880,7 +577,10 @@ intersectionOpK i j = intersectionOp (keyType i ) (keyType j)
 
 
 recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKInlineTable t ) e)
-    = do
+    | any (isArray . keyType ) (S.toList ifk)  =   do
+          (bt,ksb,bq) <- labelTable backT
+          return $ ( [Compose $ Labeled ""  $ IAT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) [ksb]  ]  ,"")
+    | otherwise = do
           (bt,ksb,bq) <- labelTable backT
           return $ ( [Compose $ Labeled ""  $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk ))  ksb  ]  ,"")
     where
@@ -964,10 +664,13 @@ explodeLabel :: Labeled Text (TB (Labeled Text) Key) -> Text
 explodeLabel (Labeled l (Attr _)) = l
 explodeLabel (Labeled l (FKT i refl rel t )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i)) <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel $ unlb1 t))  <> ")"
 explodeLabel (Labeled l (IT i t )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i))--  <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel $ unlb1 t))  <> ")"
+explodeLabel (Labeled l (IAT i t )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i))--  <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel $ unlb1 t))  <> ")"
 explodeLabel (Labeled l (AKT i _ _ _ )) = T.intercalate "," (( F.toList $ (explodeLabel. getCompose ) <$> i)) <> "," <> l
 
 unTlabel kv  = TB1 $ fmap (Compose . Identity .unlabel) $ unlb1 kv
 unlabel (Labeled l (FKT i refl fkrel t) ) = (FKT (fmap relabel i) refl fkrel (unTlabel t ))
+unlabel (Labeled l (IT i t) ) = (IT (fmap relabel i) (unTlabel t ))
+unlabel (Labeled l (IAT i [t]) ) = (IAT (fmap relabel i) [unTlabel t ])
 unlabel (Labeled l (AKT i refl fkrel [t]) ) = (AKT (fmap relabel i) refl fkrel [unTlabel t])
 unlabel (Labeled l (Attr i )) = Attr i
 
@@ -1067,25 +770,8 @@ pathLabel (Path i t j) = tableName t
 
 zipWithTF g t f = snd (mapAccumL map_one (F.toList f) t)
     where map_one (x:xs) y = (xs, g y x)
+          -- map_one [] y = ([] , [] )
 
--- Literals Instances
-instance IsString Showable where
-    fromString i = SText (T.pack i)
-
-instance Num Showable where
-    SNumeric i +  SNumeric j = SNumeric (i + j)
-    SDouble i +  SDouble j = SDouble (i + j)
-    SNumeric i *  SNumeric j = SNumeric (i * j)
-    SDouble i *  SDouble j = SDouble (i * j)
-    fromInteger i = SNumeric $ fromIntegral i
-    negate (SNumeric i) = SNumeric $ negate i
-    abs (SNumeric i) = SNumeric $ abs i
-    abs (SDouble i) = SDouble $ abs i
-    signum (SNumeric i) = SNumeric $ signum i
-
-instance Fractional Showable where
-  fromRational i = SDouble (fromRational i)
-  recip (SDouble i) = SDouble (recip i)
 
 groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
 
@@ -1108,12 +794,8 @@ unRSOptional' (SSerial i )  = join $ unRSOptional' <$>i
 unRSOptional' i   = Just i
 
 allMaybes i | F.all (const False) i  = Nothing
-allMaybes i = case F.all isJust i of
-        True -> Just $ fmap (justError "wrong invariant allMaybes") i
-        False -> Nothing
+allMaybes i = if F.all isJust i
+        then Just $ fmap (justError "wrong invariant allMaybes") i
+        else Nothing
 
 
-makeLenses ''KV
-makeLenses ''PK
-makeLenses ''TB
-makeLenses ''FTB1

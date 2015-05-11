@@ -5,6 +5,7 @@ import qualified Network.Wreq.Session as Sess
 
 
 import Widgets
+import Types
 import Query
 
 import OpenSSL.Session (context)

@@ -11,6 +11,7 @@
 {-# LANGUAGE NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 
 import Query
+import Types
 import Step
 import PrefeituraSNFSE
 import Pdf
@@ -56,7 +57,6 @@ import Reactive.Threepenny
 import           Database.PostgreSQL.Simple.Arrays as Arrays
 import Data.Graph(stronglyConnComp,flattenSCCs)
 import Control.Exception
-import           Data.Attoparsec.Char8 hiding (Result)
 import Data.Traversable (mapAccumL,Traversable,traverse)
 import qualified Data.Traversable as Tra
 import Warshal
@@ -427,12 +427,16 @@ queryPollArtAndamentoIO = BoundedPollingPlugins "Andamento Art Crea"  60  ("art"
        ev
 
 
-queryAndamento4 inf  tbinputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "project_description") . keyValue . fst )$ F.toList $ tbinputs,) <$> (runMaybeT $  do
-                let
+queryAndamento4 inf  tbinputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "project_description") . keyValue . fst )$ F.toList $ tbinputs,) <$> (runMaybeT $
+          do
+            let
                   inputs = F.toList tbinputs
                   fire_project = lookTable inf "fire_project"
                   andamento = lookTable inf "andamento"
-                ano <- MaybeT $ return $ lookInput "ano" $ filter (not . isEmptyShowable. snd )  $ inputs
+            ano <- MaybeT $ return $ lookInput "ano" $ filter (not . isEmptyShowable. snd )  $ inputs
+            if snd ano <=14
+
+              then (do
                 liftIO$ print (getInput "project_description" inputs)
                 let
                     addrs ="http://siapi.bombeiros.go.gov.br/consulta/consulta_protocolo.php"
@@ -495,6 +499,8 @@ queryAndamento4 inf  tbinputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "projec
                 gets <-C.lift $ maybeToList <$> runMaybeT getPdf
                 let mods =  catMaybes (   modB :  gets <> and  <> sol)
                 MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) mods)
+
+              else querySiapi3 inf tbinputs)
 
 
 {-queryAndamentoSiapi3 =  BoundedPlugin2 "Andamento Bombeiro" "fire_project"( staticP arrow ) elem
@@ -1082,6 +1088,7 @@ layout  infT = do
             genVertices (i,t ) = object [ "id" .= i, "label" .= T.intercalate "," (F.toList (S.map keyValue t)) ]
             genEdges (Path i (FKJoinTable m _ l)  j ) = object [ "from" .= lid i , "to" .= lid j  , "label" .= (tableName m <> " join " <> tableName l ) ]
             genEdges (Path i (FetchTable  l)  j ) = object [ "from" .= lid i , "to" .= lid j  , "label" .= tableName l ]
+            genEdges (Path i (FKInlineTable l)  j ) = object [ "from" .= lid i , "to" .= lid j  , "label" .= tableName l ]
             lid t = justError ("no key " <> show t) (M.lookup t vmap)
             nodesJSON = "var nodes = " <> encode (genVertices <$> v) <> ";"
             edgesJSON = "var edges = " <> encode (genEdges <$> e) <> ";"

@@ -32,6 +32,7 @@ import qualified Data.Traversable as Tra
 import qualified Data.Text.Lazy as TL
 
 import Safe
+import Types
 import Query
 import Schema
 import Widgets

@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns,OverloadedStrings #-}
 module Crea where
 
+import Types
 import Network.Wreq
 import QueryWidgets
 import Widgets

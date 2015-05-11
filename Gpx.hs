@@ -2,6 +2,7 @@
 module Gpx
   (readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readHtmlReceita,readHtml,exec,execKey,execF) where
 
+import Types
 import Query
 import Data.Monoid
 import Schema

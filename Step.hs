@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,TupleSections,FlexibleInstances, DeriveFunctor  #-}
 module Step where
 
+import Types
 import Query
 import Control.Applicative
 import qualified Data.Text.Lazy as T
@@ -143,6 +144,8 @@ indexTable (l:xs) t@(TB1 (KV (PK k d)  v))
 kattr = kattri . runIdentity . getCompose
 kattri (Attr i ) = [i]
 kattri (FKT i _ _ _ ) =  (L.concat $ kattr  <$> i)
+kattri (IT i  _ ) =  (L.concat $ kattr  <$> i)
+kattri (IAT i  _ ) =  (L.concat $ kattr  <$> i)
 kattri (AKT i _ _ _ ) =  (L.concat $ kattr <$> i)
 
 class KeyString i where
@@ -170,6 +173,8 @@ findPK = concat . fmap (attrNonRec . runIdentity . getCompose) . _pkKey  . _kvKe
 
 
 attrNonRec (FKT ifk _ _ _ ) = concat $ fmap kattr ifk
+attrNonRec (IT ifk _ ) = concat $ fmap kattr ifk
+attrNonRec (IAT ifk _ ) = concat $ fmap kattr ifk
 attrNonRec (AKT ifk _ _ _ ) = concat $ fmap kattr ifk
 attrNonRec (Attr i ) = [i]
 

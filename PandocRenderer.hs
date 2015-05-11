@@ -4,7 +4,9 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 module PandocRenderer where
+
 import Text.Pandoc.Options
+import Types
 import Widgets
 import Text.Pandoc.PDF
 import Data.ByteString.Base64.Lazy as BS64

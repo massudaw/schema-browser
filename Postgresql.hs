@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 module Postgresql where
+import Types
 import Query
 import GHC.Stack
 import Data.Functor.Identity
@@ -279,6 +280,9 @@ parseAttr (Attr i) = do
 parseAttr (IT i j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j <|>  return ((,SOptional Nothing) <$> unTlabel j)
   return $ IT []  mj
+parseAttr (IAT i [t]) = do
+  r <- doublequoted (parseArray ( doublequoted $ parseLabeledTable t)) <|> parseArray (doublequoted $ parseLabeledTable t) <|> pure []
+  return $ IAT []  r
 
 parseAttr (AKT l refl rel [t]) = do
   ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose  <$> l) (char ',')
