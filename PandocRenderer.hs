@@ -56,7 +56,7 @@ renderFireProjectReport conn _ inputs = (,pure Nothing) <$> element
           vr = var env
       element = do
              template <- liftIO $ readFile "raw.template"
-             pdfTidings <- joinT   ( maybe (return (Left "")) ( makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template } . myDoc) <$>  inputs)
+             pdfTidings <- joinTEvent   ( maybe (return (Left "")) ( makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template } . myDoc) <$>  inputs)
              mkElement "iframe" # sink UI.src ( fmap (\i -> "data:application/pdf;base64," <> i) $ fmap (either BS.unpack (BS.unpack.BS64.encode)) $ facts pdfTidings) # set style [("width","100%"),("height","300px")]
             --UI.div # sink html (maybe ""  (writeHtmlString def . myDoc) <$> facts inputs)
             --
@@ -109,7 +109,7 @@ renderProjectPricingA = (staticP myDoc , element )
                     ])
       element inputs = do
              template <- liftIO $ readFile' utf8 "raw.template"
-             pdfTidings <- joinT   ( ( makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template } . dynP myDoc  ) <$> inputs)
+             pdfTidings <- joinTEvent   ( ( makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template } . dynP myDoc  ) <$> inputs)
              mkElement "iframe" # sink UI.src ( fmap (\i -> "data:application/pdf;base64," <> i) $ fmap (either BS.unpack (BS.unpack.BS64.encode)) $ facts pdfTidings) # set style [("width","100%"),("height","300px")]
             --UI.div # sink html (maybe ""  (writeHtmlString def . myDoc) <$> facts inputs)
 
@@ -148,7 +148,7 @@ renderProjectPricing _ _  inputs = (,pure Nothing) <$> element
           vr = var env
       element = do
              template <- liftIO $ readFile' utf8 "raw.template"
-             pdfTidings <- joinT   ( maybe (return (Left "")) ( makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template } . myDoc ) <$> inputs)
+             pdfTidings <- joinTEvent   ( maybe (return (Left "")) ( makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template } . myDoc ) <$> inputs)
              mkElement "iframe" # sink UI.src ( fmap (\i -> "data:application/pdf;base64," <> i) $ fmap (either BS.unpack (BS.unpack.BS64.encode)) $ facts pdfTidings) # set style [("width","100%"),("height","300px")]
             --UI.div # sink html (maybe ""  (writeHtmlString def . myDoc) <$> facts inputs)
 

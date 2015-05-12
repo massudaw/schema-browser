@@ -144,7 +144,7 @@ renderAttribute a@(Agg m2  ) = renderAggr renderAttribute m2 <> " as " <> attrNa
 
 showableDef (KOptional i) = Just $ SOptional (showableDef i)
 showableDef (KSerial i) = Just $ SSerial (showableDef i)
-showableDef (KArray i ) = Just (SComposite Vector.empty)
+showableDef (KArray i ) = Nothing -- Just (SComposite Vector.empty)
 showableDef i = Nothing
 
 transformKey (KSerial i)  (KOptional j) (SSerial v)  | i == j = (SOptional v)
@@ -229,6 +229,7 @@ isKOptional (KOptional i) = True
 isKOptional (KSerial i) = isKOptional i
 isKOptional (KInterval i) = isKOptional i
 isKOptional (Primitive _) = False
+isKOptional (InlineTable _ _) = False
 isKOptional (KArray i)  = isKOptional i
 
 -- transform a multiple intersecting join in independent ones
@@ -348,6 +349,27 @@ update conn kv kold t@(Raw sch tbl pk _ _ _) = fmap (,TableModification Nothing 
     up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = nubBy (\(i,j) (k,l) -> i == k)  kv
 
+attrType (Attr i)= keyType (fst i)
+attrType (IT [i] _) = (attrType $ runIdentity $ getCompose i)
+attrType (IAT [i] _) = (attrType $ runIdentity $ getCompose i)
+attrType i = error $ " no attr value instance " <> show i
+
+attrValueName (Attr i)= keyValue (fst i)
+attrValueName (IT [i] _) = (attrValueName $ runIdentity $ getCompose i)
+attrValueName (IAT [i] _) = (attrValueName $ runIdentity $ getCompose i)
+attrValueName i = error $ " no attr value instance " <> show i
+
+insertAttr f conn (TB1 k ) t@(Raw sch tbl pk  _ _ attr ) = if not (L.null pkList)
+              then   do
+        let iquery = T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName  kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")" <> " RETURNING ROW(" <>  T.intercalate "," (attrValueName . runIdentity . getCompose <$> pkList ) <> ")"
+        liftIO $ print iquery
+        out <-  fmap (F.toList . head) $ liftIO $ queryWith (f (fmap fst $ TB1 $ KV (PK pkList []) [])) conn (fromString  iquery ) (  kva)
+        return $ fmap (\(k',v') -> maybe (k',v') id $  L.find (\(nk,nv) ->nk == k' ) out) (TB1 k)
+              else liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")"   ) ( kva) >> return (TB1 (KV (PK [] [] ) []))
+  where pkList =   L.filter (isSerial . attrType . runIdentity . getCompose ) (_pkKey . _kvKey $ k )
+        kva = L.filter (not . isSerial . attrType ) $ fmap (runIdentity . getCompose)  $ F.toList k
+
+
 insertPK f conn kva t@(Raw sch tbl pk  _ _ attr ) = case pkListM of
                                                       Just reti ->  fmap ( zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> " RETURNING " <>  T.intercalate "," (keyValue <$> reti )  ) (fmap snd  kv)
                                                       Nothing ->   liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")"   ) (fmap snd  kv) >> return []
@@ -385,7 +407,7 @@ createTable r@(Raw sch tbl pk _ fk attr) = "CREATE TABLE " <> rawFullName r  <> 
         renderTy (KInterval ty) = renderTy ty <> ""
         renderTy (KArray ty) = renderTy ty <> "[] "
         renderTy (Primitive ty ) = ty
-        renderTy (InlineTable ty ) = ty
+        renderTy (InlineTable s ty ) = s <> "." <> ty
         renderPK = "CONSTRAINT " <> tbl <> "_PK PRIMARY KEY (" <>  renderKeySet pk <> ")"
         renderFK (Path origin (FKJoinTable _ ks table) end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
         renderFK (Path origin _  end) = ""
@@ -683,11 +705,11 @@ allRec'
      -> Table
      -> TB1
           Key
-allRec' i t = unTlabel $ fst $ rootPaths' i t
+allRec' i t = fst $ rootPaths' i t
 
-rootPaths' invSchema r@(Raw _ _ _ _ fk _ ) = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
+rootPaths' invSchema r@(Raw _ _ _ _ fk _ ) = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   (t,ks@(TB1 (KV (PK npk ndesc) nattr)),q) <- labelTable r
-  let fkSet = traceShowId $ S.unions $ fmap (\(Path ifk _ _) -> ifk)$ traceShowId $ filter (\(Path _ ifk  _) -> isPathReflexive ifk) $ S.toList fk
+  let fkSet =  S.unions $ fmap (\(Path ifk _ _) -> ifk)$  filter (\(Path _ ifk  _) -> isPathReflexive ifk) $ S.toList fk
       fun items =  do
                   let attrs :: [TBLabel Key]
                       attrs = fmap Compose $ filter (\i -> not $ S.member (unAttr.labelValue $ i) fkSet) items

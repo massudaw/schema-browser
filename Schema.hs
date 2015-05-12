@@ -48,8 +48,8 @@ createType un (t,c,trans,"int4range",_,_,n,def,_,_) = (Key   c Nothing trans un 
 createType un (t,c,trans,"numrange",_,_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "numeric"))
 createType un (t,c,trans,"USER-DEFINED",_,"floatrange",n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "double precision"))
 -- Table columns Primitive
-createType un (t,c,trans,"USER-DEFINED",udtschema ,udtname,n,def,_,_) |  udtschema == "incendio" = (Key c Nothing trans un (nullable n $ traceShowId $  InlineTable udtname ))
-createType un (t,c,trans,"ARRAY",udtschema ,udtname,n,def,_,_) | udtschema == "incendio" = (Key c Nothing trans un (nullable n $ KArray $ InlineTable $ T.drop 1 udtname ))
+createType un (t,c,trans,"USER-DEFINED",udtschema ,udtname,n,def,_,_) |  udtschema == "incendio" = (Key c Nothing trans un (nullable n $ traceShowId $  InlineTable  udtschema udtname ))
+createType un (t,c,trans,"ARRAY",udtschema ,udtname,n,def,_,_) | udtschema == "incendio" = (Key c Nothing trans un (nullable n $ KArray $ InlineTable  udtschema $T.drop 1 udtname ))
 createType un (t,c,trans,"ARRAY",_,i,n,def,p,_) = (Key   c Nothing trans un (nullable n $ KArray $ (Primitive (T.tail i))))
 createType un (t,c,trans,_,_,"geometry",n,def,p,_) = (Key   c Nothing trans un (nullable n $ Primitive $ (\(Just i) -> i) p))
 createType un (t,c,trans,_,_,"box3d",n,def,p,_) = (Key   c Nothing trans un (nullable n $ Primitive $  "box3d"))
@@ -118,11 +118,15 @@ keyTables conn schema = do
 
 inlineName (KOptional i) = inlineName i
 inlineName (KArray a ) = inlineName a
-inlineName (InlineTable i) = i
+inlineName (InlineTable _ i) = i
+
+inlineFullName (KOptional i) = inlineFullName i
+inlineFullName (KArray a ) = inlineFullName a
+inlineFullName (InlineTable s i) = s <> "." <> i
 
 isInline (KOptional i ) = isInline i
 isInline (KArray i ) = isInline i
-isInline (InlineTable i) = True
+isInline (InlineTable _ i) = True
 isInline _ = False
 
 graphFromPath p = Graph {hvertices = fmap fst bs,

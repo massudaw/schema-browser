@@ -287,7 +287,7 @@ chooseKey inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,_,evs) <- crudUITable inf  [queryTimeline,lplugOrcamento ,notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull{-,queryCNPJBoundary -},queryTimeline, queryAndamentoB,queryArtAndamento ] [] (allRec' (tableMap inf) table) (UI.userSelection itemList)
+            (crud,_,evs) <- crudUITable inf  [queryTimeline,lplugOrcamento ,siapi3Plugin , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull{-,queryCNPJBoundary -},queryTimeline, queryAndamentoB,queryArtAndamento ] [] (allRec' (tableMap inf) table) (UI.userSelection itemList)
             let eres = fmap (addToList  (allRec' (tableMap inf ) table )  <$> ) evs
             res2 <- accumTds vp eres
             insertDiv <- UI.div # set children [crud]
@@ -478,7 +478,7 @@ queryAndamento4 inf  tbinputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "projec
                       vp <- doQueryAttr inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) andamento )
 
                       let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . concat . F.toList . fmap (attrNonRec .unTB). _unTB1) vp) :: S.Set (Map Key Showable)
-                      adds <-  mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod inf (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
+                      adds <-  mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertModOld inf (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
                       return $ mod : adds
 
                   updateSolicitacao :: MaybeT IO (Maybe (TableModification Showable))
@@ -545,9 +545,34 @@ querySiapi3 inf tbinputs = do
                 vp <- doQueryAttr inf (projectAllRec' (tableMap inf)) (uncurry M.singleton $  fmap ( (\i->[i]) . Category . S.singleton . flip PK [].(\i->[i]) ) (lookInput inputs ) ) ( (\(Raw _ _ pk _ _ _ ) -> pk ) andamento )
 
                 let kk = S.fromList (fmap (M.fromList . filter ((`elem` ["id_project","andamento_description","andamento_date"] ) . keyValue . fst ) . concat . F.toList . fmap (attrNonRec . unTB) . _unTB1) vp) :: S.Set (Map Key Showable)
-                adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertMod inf (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
+                adds <- mapM (\kv -> (`catch` (\e -> return $ trace ( show (e :: SqlError)) Nothing )) $ insertModOld inf (M.toList kv) (andamento )) (S.toList $ args  `S.difference`  kk)
                 return $  adds
               MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) (catMaybes (firemods:mods) )
+
+siapi3Plugin = BoundedPlugin2 "Siapi3 Andamento" "fire_project"(staticP url) elem
+  where
+    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
+    url :: ArrowPlug (Kleisli IO) (Maybe (TB1 (Text,Showable)))
+    url = proc t -> do
+      protocolo <- varTB "protocolo" -< t
+      ano <- varTB "ano" -< t
+      cpf <- varTB "id_owner,id_contact:id_owner:cgc_cpf" -< t
+      odx "andamentos:andamento_date" -<  t
+      odx "andamentos:andamento_description" -<  t
+      b <- act (fmap join . fmap traceShowId . Tra.traverse   (\(i,j,k)-> siapi3  i j k )) -<  traceShowId (liftA3 (,,) protocolo ano cpf)
+      let convertAndamento [_,da,desc,s,sta] = TB1 $ fmap (Compose . Identity .Attr ) $ KV (PK [("andamento_date",STimestamp . Finite .  fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)] []) []
+          convertAndamento i = error $ "convertAndamento2015 :  " <> show i
+      let ao bv =   TB1 $ KV (PK [] []) [Compose . Identity $ (IAT
+                                            [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
+                                            (reverse $ fmap convertAndamento bv)) ]
+      returnA -< traceShowId . ao . fst <$> b
+
+    elem inf = maybe (return Nothing) (\inp -> do
+                              b <- dynPK url (Just inp)
+                              return $ fmap (first (\i-> justError "no key siapi3" $ M.lookup ("fire_project_event",i) (keyMap inf ) `mplus` M.lookup ("fire_project",i) (keyMap inf ) )) <$> b
+                            )
+
+
 
 getInput k = fmap (BSL.toStrict. BSL.pack .renderShowable . snd) . lookInput k
 
@@ -558,26 +583,32 @@ eitherToMaybeT (Left i) =  Nothing
 eitherToMaybeT (Right r) =  Just r
 
 queryAndamento3 inf  input = do
-        tq <-  mapT (mapM (queryAndamento4 inf  ) ) input
+        tq <-  mapTEvent (mapM (queryAndamento4 inf  ) ) input
         e <- UI.div # sink appendItems ( fmap (\i -> UI.div # set text (show $ (fmap (fmap renderShowable)) <$> i) ) . catMaybes  <$> facts tq  )
         return (e , pure Nothing :: Tidings (Maybe (Map Key Showable)))
 
 deleteMod inf kv table = do
-  delete (conn inf) kv table
-  Just <$> logTableModification inf (TableModification Nothing table (Delete $ Just kv))
+  delete (conn inf) (F.toList kv) table
+  Just <$> logTableModification inf (TableModification Nothing table (DeleteTB kv))
 
 updateMod inf kv old table = do
   (i,j) <- update (conn  inf) kv old table
   Just <$> logTableModification inf j
 
 insertPKMod inf kv table = do
-  s <- insertPK fromShowableList (conn inf) kv table
-  let mod =  TableModification Nothing table (Insert $ Just $ kv <> s)
+  s <- insertAttr fromAttr (conn inf) kv table
+  let mod =  TableModification Nothing table (InsertTB s)
   Just <$> logTableModification inf mod
 
+insertModOld inf kv table = do
+  kvn <- insertPK fromShowableList  (conn  inf) kv table
+  let mod =  TableModification Nothing table (Insert  $ Just $ kv <>  kvn)
+  Just <$> logTableModification inf mod
+
+
 insertMod inf kv table = do
-  insert (conn  inf) kv table
-  let mod =  TableModification Nothing table (Insert $ Just kv)
+  kvn <- insertAttr fromAttr (conn  inf) kv table
+  let mod =  TableModification Nothing table (InsertTB  kvn)
   Just <$> logTableModification inf mod
 
 logTableModification inf (TableModification Nothing table i) = do
@@ -675,7 +706,7 @@ lookKeyMap inp attr = justError ("Error looking KeyMap: " <> show attr <> " " <>
 
 queryAndamento2 inf   input = do
         b <- UI.button # set UI.text "Submit"
-        tq <-  mapT (\case {Just input -> queryAndamento4 inf (input) ; Nothing -> return Nothing}) (shortCutClick input (UI.click b))
+        tq <-  mapTEvent (\case {Just input -> queryAndamento4 inf (input) ; Nothing -> return Nothing}) (shortCutClick input (UI.click b))
         e <- UI.div # sink UI.text (fmap (maybe "" show ) $ facts $ tq)
         body <-UI.div # set children [b,e]
         return (body , pure Nothing :: Tidings (Maybe (Map Key Showable)))

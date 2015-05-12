@@ -3,7 +3,7 @@ module Gpx
   (readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readHtmlReceita,readHtml,exec,execKey,execF) where
 
 import Types
-import Query
+-- import Query
 import Data.Monoid
 import Schema
 import Data.String
@@ -148,7 +148,7 @@ testCreaArt = do
 
 
 testSiapi3 = do
-  kk <- BS.readFile "siapi3.html"
+  kk <- BS.readFile "siapi32.html"
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
   readSiapi3Andamento inp
 
@@ -193,7 +193,7 @@ exec inputs = do
   let runVals = [("period",SInterval $ (ER.Finite $ last $ head res ,True) `interval` (ER.Finite $ last $ last res,True))]  <> L.filter ((/= "file") . fst ) inputs
       runInput = withFields inf  "run" $   lookupKeys inf "run"  runVals
   print runInput
-  pkrun <- uncurry (insertPK fromShowableList conn) runInput
-  print pkrun
-  mapM_ (\i-> uncurry (insert conn) (withFields inf "track" (pkrun <> lookupKeys inf "track" i))) (consLL "id_sample" (SNumeric <$> [0..])  $  zipLL (repeat []) ["position","instant"] res )
+  -- pkrun <- uncurry (insertPK fromShowableList conn) runInput
+  -- print pkrun
+  -- mapM_ (\i-> uncurry (insert conn) (withFields inf "track" (pkrun <> lookupKeys inf "track" i))) (consLL "id_sample" (SNumeric <$> [0..])  $  zipLL (repeat []) ["position","instant"] res )
   return (Nothing ,[])

@@ -177,7 +177,7 @@ data KPrim
 
 data KType a
    = Primitive a
-   | InlineTable Text
+   | InlineTable Text Text
    | KSerial (KType a)
    | KArray (KType a)
    | KInterval (KType a)
@@ -192,7 +192,7 @@ instance Show (KType Text) where
   show = T.unpack . showTy id
 
 showTy f (Primitive i ) = f i
-showTy f (InlineTable i ) = "[" <>  fromString (T.unpack i) <> "]"
+showTy f (InlineTable s i ) = "[" <>  fromString (T.unpack $ s <> "." <>  i) <> "]"
 showTy f (KArray i) = "{" <>  showTy f i <> "}"
 showTy f (KOptional i) = showTy f i <> "*"
 showTy f (KInterval i) = "(" <>  showTy f i <> ")"
@@ -350,6 +350,8 @@ data TableModification b
 data Modification a b
   = Edit (Maybe [(a,b)]) (TB1 (a,b))
   | Insert (Maybe [(a,b)])
+  | InsertTB (TB1 (a,b))
+  | DeleteTB (TB1 (a,b))
   | Delete (Maybe [(a,b)])
   deriving(Eq,Show,Functor)
 
@@ -391,6 +393,8 @@ instance Apply f => Apply (TB f) where
   Attr a <.>  Attr a1 = Attr $ a a1
   FKT l i m t <.> FKT l1 i1 m1 t1 = FKT (zipWith (<.>) l   l1) (i && i1)  m1  (t <.> t1)
   AKT l i m t <.> AKT l1 i1 m1 t1 = AKT (zipWith (<.>) l   l1) (i && i1 ) m1  (getZipList $ liftF2 (<.>) (ZipList t) (ZipList t1))
+  IT l  t <.> IT l1 t1 = IT (zipWith (<.>) l   l1)  (t <.> t1)
+  IAT l t <.> IAT l1 t1 = IAT (zipWith (<.>) l   l1)   (getZipList $ liftF2 (<.>) (ZipList t) (ZipList t1))
   l <.> j = error  "cant apply"
 
 type QueryRef = State ((Int,Map Int Table ),(Int,Map Int Key))

@@ -18,7 +18,6 @@ import qualified Data.Interval as Interval
 import qualified Data.List as L
 import Text.Read
 import Query
-import Postgresql
 import Data.Maybe
 import Data.Distributive
 import Control.Concurrent
@@ -77,9 +76,6 @@ addTs t e = do
   i <- currentValue (facts t)
   accumTs i $ fmap const  <$> ((rumors t) : e)
 
-joinT :: MonadIO m => Tidings (IO a) -> m (Tidings a)
-joinT = mapT id
-
 joinTEvent = mapTEvent id
 
 adEvent :: Event a -> Tidings a -> UI (Tidings a)
@@ -89,15 +85,7 @@ adEvent ne t = do
   nb <- stepper c ev
   return $ tidings nb ev
 
-{-
-mapUIT :: Element -> (a -> UI b) -> Tidings a -> UI (Tidings b)
-mapUIT e f x =  do
-  let ev = unsafeMapUI e f $ rumors x
-  c <- currentValue  (facts x)
-  b <- f c
-  bh <- stepper  b ev
-  return $ tidings bh (bh <@ rumors x)
-  -}
+
 
 liftEvent :: MonadIO m => Window -> Event (Maybe a) -> (MVar (Maybe a) -> m void) -> m ()
 liftEvent window e h = do
@@ -138,6 +126,12 @@ mapUITEvent body f x = do
   return $ tidings t e
 
 
+mapEvent f x = do
+  (e,h) <- liftIO $ newEvent
+  onEvent x (\i -> liftIO . forkIO $ (f i)  >>= h)
+  return  e
+
+
 
 mapTEvent f x = do
   (e,h) <- liftIO $ newEvent
@@ -146,7 +140,7 @@ mapTEvent f x = do
   be <- liftIO $ f i
   t <- stepper be e
   return $ tidings t e
-
+{-
 mapT :: MonadIO m => (a -> IO b) -> Tidings a -> m (Tidings b)
 mapT f x =  do
   let ev = unsafeMapIO f $ rumors x
@@ -154,7 +148,7 @@ mapT f x =  do
   b <- liftIO $ f c
   bh <- stepper  b ev
   return $ tidings bh (bh <@ rumors x)
-
+-}
 
 insdel :: (Ord a,Ord b,Monoid b,Show a,Show b) => Behavior (Map a b) -> UI (TrivialWidget (Map a b))
 insdel binsK =do

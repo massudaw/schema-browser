@@ -23,6 +23,7 @@ import Data.Typeable
 import qualified Data.ByteString.Base16 as B16
 import Data.Time.Parse
 import           Database.PostgreSQL.Simple.Arrays as Arrays
+import           Database.PostgreSQL.Simple.Types as PGTypes
 import Data.Graph(stronglyConnComp,flattenSCCs)
 import Control.Exception
 import           Data.Attoparsec.Char8 hiding (Result)
@@ -88,6 +89,19 @@ deriving instance Foldable Interval
 deriving instance Foldable Extended
 deriving instance Traversable Extended
 deriving instance Traversable Interval
+
+
+instance  TF.ToField (TB Identity (Key,Showable))  where
+  toField (Attr i) = TF.toField (snd i)
+  toField (IT [n] (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  runIdentity.getCompose <$> F.toList  i )
+  toField (IAT [n] is ) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  (traceShowId $ inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
+
+
+instance TF.ToField a => TF.ToField (TBRecord a) where
+  toField (TBRecord s l) =  TF.Many   (TF.Plain (fromByteString "ROW(") : L.intercalate [TF.Plain $ fromChar ','] (fmap (pure.TF.toField) l) <> [TF.Plain (fromByteString $ ") :: " <>  BS.pack (T.unpack s) )] )
+
+
+data TBRecord a = TBRecord Text [a]
 
 instance TF.ToField (UnQuoted Showable) where
   toField (UnQuoted (STimestamp i )) = TF.Plain $ localTimestampToBuilder i
@@ -278,26 +292,26 @@ parseAttr (Attr i) = do
   return $  Attr (i,s)
 
 parseAttr (IT i j) = do
-  mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j <|>  return ((,SOptional Nothing) <$> unTlabel j)
-  return $ IT []  mj
+  mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j <|>  return ((,SOptional Nothing) <$> j)
+  return $ IT  (fmap (,SOptional Nothing) <$> i ) mj
 parseAttr (IAT i [t]) = do
   r <- doublequoted (parseArray ( doublequoted $ parseLabeledTable t)) <|> parseArray (doublequoted $ parseLabeledTable t) <|> pure []
-  return $ IAT []  r
+  return $ IAT (fmap (,SOptional Nothing) <$> i)  r
 
 parseAttr (AKT l refl rel [t]) = do
-  ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose  <$> l) (char ',')
+  ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .runIdentity .getCompose  <$> l) (char ',')
   r <- doublequoted (parseArray ( doublequoted $ parseLabeledTable t)) <|> parseArray (doublequoted $ parseLabeledTable t) <|> pure []
   return $ AKT ml  refl rel  r
 
 parseAttr (FKT l refl rel j ) = do
-  ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .labelValue .getCompose  <$> l) (char ',')
+  ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .runIdentity .getCompose  <$> l) (char ',')
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j
   return $  FKT ml refl rel mj
 
 parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 
 parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
-  im <- unIntercalateAtto (fmap (Compose . Identity) . parseAttr .labelValue . getCompose <$> (i <> d <> m) ) (char ',')
+  im <- unIntercalateAtto (fmap (Compose . Identity) . parseAttr .runIdentity . getCompose <$> (i <> d <> m) ) (char ',')
   return (TB1 (KV ( PK (L.take (length i) im ) (L.take (length d) $L.drop (length i) $  im))(L.drop (length i + length d) im)) )) <*  char ')' )
 
 
