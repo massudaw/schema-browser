@@ -349,6 +349,7 @@ data TableModification b
 
 data Modification a b
   = Edit (Maybe [(a,b)]) (TB1 (a,b))
+  | EditTB (TB1 (a,b)) (TB1 (a,b))
   | Insert (Maybe [(a,b)])
   | InsertTB (TB1 (a,b))
   | DeleteTB (TB1 (a,b))

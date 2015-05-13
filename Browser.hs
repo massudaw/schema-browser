@@ -434,7 +434,7 @@ queryAndamento4 inf  tbinputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "projec
                   fire_project = lookTable inf "fire_project"
                   andamento = lookTable inf "andamento"
             ano <- MaybeT $ return $ lookInput "ano" $ filter (not . isEmptyShowable. snd )  $ inputs
-            if snd ano <=14
+            if testShowable (<=14) (snd ano )
 
               then (do
                 liftIO$ print (getInput "project_description" inputs)
@@ -496,8 +496,8 @@ queryAndamento4 inf  tbinputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "projec
                     C.lift $ testPdfGet inf tbinputs
                 and <- C.lift $ concat . maybeToList <$> runMaybeT insertAndamento
                 sol <- C.lift $ maybeToList <$> runMaybeT updateSolicitacao
-                gets <-C.lift $ maybeToList <$> runMaybeT getPdf
-                let mods =  catMaybes (   modB :  gets <> and  <> sol)
+                -- gets <-C.lift $ maybeToList <$> runMaybeT getPdf
+                let mods =  catMaybes (   modB :  and  <> sol)
                 MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) mods)
 
               else querySiapi3 inf tbinputs)
@@ -569,15 +569,13 @@ siapi3Plugin = BoundedPlugin2 "Siapi3 Andamento" "fire_project"(staticP url) ele
 
     elem inf = maybe (return Nothing) (\inp -> do
                               b <- dynPK url (Just inp)
-                              return $ fmap (first (\i-> justError "no key siapi3" $ M.lookup ("fire_project_event",i) (keyMap inf ) `mplus` M.lookup ("fire_project",i) (keyMap inf ) )) <$> b
+                              return $ fmap (first (lookKey'  inf ["fire_project_event","fire_project"])) <$> b
                             )
 
-
+lookKey' inf t k = justError ("lookKey' cant find key " <> show k <> " in " <> show t) $  foldr1 mplus $ fmap (\ti -> M.lookup (ti,k) (keyMap inf)) t
 
 getInput k = fmap (BSL.toStrict. BSL.pack .renderShowable . snd) . lookInput k
 
-allNonEmpty [] = Nothing
-allNonEmpty l = Just  l
 
 eitherToMaybeT (Left i) =  Nothing
 eitherToMaybeT (Right r) =  Just r
@@ -588,7 +586,7 @@ queryAndamento3 inf  input = do
         return (e , pure Nothing :: Tidings (Maybe (Map Key Showable)))
 
 deleteMod inf kv table = do
-  delete (conn inf) (F.toList kv) table
+  delete (conn inf)  kv table
   Just <$> logTableModification inf (TableModification Nothing table (DeleteTB kv))
 
 updateMod inf kv old table = do
@@ -732,22 +730,29 @@ showMap' = (staticP req , element)
 data Timeline
   = Timeline
   { header :: String
-  , dates :: [(Day,String)]
+  , dates :: [(Either Day LocalTime,String)]
   }
 
 queryTimeline = BoundedPlugin "Timeline" "pricing"(staticP arrow)  elem
   where
-    convDateArr i = swap . fmap (\(SDate (Finite f))-> f) <$> (catMaybes $ fmap (traverse unRSOptional') $ catMaybes $ i)
-    arrow :: FunArrowPlug [(Day,String)]
+    convDateArr i = swap . fmap projDate  <$> (catMaybes $ fmap (traverse unRSOptional') $ catMaybes $ i)
+    projDate (SDate (Finite f)) = Left f
+    projDate (STimestamp (Finite f)) =  Right f
+    projDate (SOptional (Just j )  ) = projDate j
+    projDate i = error $ " projDate " <> show i
+    arrow :: FunArrowPlug [(Either Day LocalTime,String)]
     arrow = proc t -> do
       prd <- varT "pricing_date" -< t
       papr <- varN "pricing_approval" -< t
       apd <- varN "id_project:aproval_date" -< t
       arr <- varN "pagamentos:payment_date" -< t
       arrD <- varN "pagamentos:payment_description" -< t
+      andDa <- varN "id_project:andamentos:andamento_date" -< t
+      andDe <- varN "id_project:andamentos:andamento_description" -< t
       let vv =  concat $ maybeToList $ (\(SComposite i) (SComposite j)-> fmap Just $ zip (renderShowable <$> F.toList j ) (F.toList i)) <$>  arr <*> arrD
+      let vvand =  concat $ maybeToList $ (\(SComposite i) (SComposite j)-> fmap Just $ zip (renderShowable <$> F.toList j ) (F.toList i)) <$>  andDa <*> andDe
 
-      returnA -<  convDateArr ([("Proposta de Enviada",)<$> prd,("Projeto Aprovado",) <$> apd ,("Proposta Aprovada",) <$> papr] <>  vv )
+      returnA -<  convDateArr ([("Proposta de Enviada",)<$> prd,("Projeto Aprovado",) <$> apd ,("Proposta Aprovada",) <$> papr] <>  vv <> vvand )
     elem inf inputs = do
         e <- UI.div # set UI.id_ "timeline-embed"
         let  timeline i = Timeline "hello" (dynP arrow $ i)
@@ -758,8 +763,10 @@ queryTimeline = BoundedPlugin "Timeline" "pricing"(staticP arrow)  elem
 instance ToJSON Timeline where
   toJSON (Timeline h v) = toJSON (dates <$> zip [0..] v)
 
-    where dates (id,(i,j)) = object ["id" .= (id :: Int) ,"start" .=  ti i, "content" .= j, "type" .= ("point" :: String)]
+    where dates (id,(Right i,j)) = object ["id" .= (id :: Int) ,"start" .=  ti i, "content" .= j, "type" .= ("point" :: String)]
+          dates (id,(Left i,j)) = object ["id" .= (id :: Int) ,"start" .=  tti i, "content" .= j, "type" .= ("point" :: String)]
           ti  = formatTime defaultTimeLocale "%Y/%m/%d"
+          tti  = formatTime defaultTimeLocale "%Y/%m/%d %H:%M:%S"
 
 notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" "nota"(staticP url) elem
   where
@@ -1005,7 +1012,6 @@ testPdfGet inf inp =  runMaybeT$ do
 
 
 queryCPFStatefull =  StatefullPlugin "CPF Receita" "owner" [([(True,[["cpf_number"]])],[(False ,[["captchaViewer"]])]),([(True,[["captchaInput"]])],[(True,[["owner_name"]])])]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] cpfCall
-
 
 
 queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"

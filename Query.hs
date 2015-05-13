@@ -323,16 +323,26 @@ showTable (Reduce j t p) =  "(SELECT " <> T.intercalate "," (fmap keyValue (S.to
 showTable (Limit t v) = showTable t <> " LIMIT " <> T.pack (show v)
 
 delete
-  :: ToField b =>
-     Connection ->  [(Key, b)] -> Table -> IO GHC.Int.Int64
-delete conn kold t@(Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShowId $ T.unpack del) (fmap snd koldPk)
+  :: (Show b ,ToField (TB Identity (Key,b)) ) =>
+     Connection ->  TB1 (Key, b) -> Table -> IO GHC.Int.Int64
+delete conn kold t@(Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShowId $ T.unpack del) koldPk
   where
-    koldM = M.fromList kold
-    equality (k,_)= keyValue k <> "="  <> "?"
-    memberPK k = S.member (keyValue $ fst k) (S.fromList $ fmap  keyValue $ S.toList  pk)
-    koldPk = filter memberPK kold
+    equality k = attrValueName k <> "="  <> "?"
+    koldPk = runIdentity . getCompose <$> F.toList (_pkKey $ _kvKey $ _unTB1 $ tableNonRef kold)
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     del = "DELETE FROM " <> rawFullName t <>   pred
+
+updateAttr
+  :: Show b => ToField (TB Identity (Key,b)) =>
+     Connection -> TB1 (Key, b) -> TB1 (Key, b) -> Table -> IO (GHC.Int.Int64,TableModification b)
+updateAttr conn kv kold t@(Raw sch tbl pk _ _ _) = fmap (,TableModification Nothing t (EditTB  kv  kold  )) $ execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk)
+  where
+    equality k = attrValueName k <> "="  <> "?"
+    koldPk = runIdentity . getCompose <$> F.toList (_pkKey $ _kvKey $ _unTB1 $ tableNonRef kold)
+    pred   =" WHERE " <> T.intercalate " AND " (equality <$> koldPk)
+    setter = " SET " <> T.intercalate "," (equality <$> skv )
+    up = "UPDATE " <> rawFullName t <> setter <>  pred
+    skv = runIdentity . getCompose <$> F.toList (_unTB1 $ tableNonRef kv)
 
 
 update
@@ -359,15 +369,27 @@ attrValueName (IT [i] _) = (attrValueName $ runIdentity $ getCompose i)
 attrValueName (IAT [i] _) = (attrValueName $ runIdentity $ getCompose i)
 attrValueName i = error $ " no attr value instance " <> show i
 
-insertAttr f conn (TB1 k ) t@(Raw sch tbl pk  _ _ attr ) = if not (L.null pkList)
+insertAttr f conn krec  t@(Raw sch tbl pk  _ _ attr ) = if not (L.null pkList)
               then   do
         let iquery = T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName  kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")" <> " RETURNING ROW(" <>  T.intercalate "," (attrValueName . runIdentity . getCompose <$> pkList ) <> ")"
         liftIO $ print iquery
         out <-  fmap (F.toList . head) $ liftIO $ queryWith (f (fmap fst $ TB1 $ KV (PK pkList []) [])) conn (fromString  iquery ) (  kva)
-        return $ fmap (\(k',v') -> maybe (k',v') id $  L.find (\(nk,nv) ->nk == k' ) out) (TB1 k)
-              else liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")"   ) ( kva) >> return (TB1 (KV (PK [] [] ) []))
+        return $ fmap (\(k',v') -> maybe (k',v') id $  L.find (\(nk,nv) ->nk == k' ) out) krec
+              else liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")"   )  kva >> return krec
   where pkList =   L.filter (isSerial . attrType . runIdentity . getCompose ) (_pkKey . _kvKey $ k )
         kva = L.filter (not . isSerial . attrType ) $ fmap (runIdentity . getCompose)  $ F.toList k
+        (TB1 k ) = tableNonRef krec
+
+tableNonRef (TB1 (KV (PK l m ) n)  )  = TB1 (KV (PK (fun l) (fun m) ) (fun n))
+  where nonRef (Attr i ) = [Compose $ Identity $ Attr i]
+        nonRef (FKT i True _ _ ) = i
+        nonRef (FKT i False _ _ ) = []
+        nonRef it@(IT i _ ) = [Compose $ Identity $ it ]
+        nonRef it@(IAT i _ ) = [Compose $ Identity $ it ]
+        nonRef (AKT i True _ _ ) = i
+        nonRef (AKT i False _ _ ) = []
+        fun  = concat . fmap (nonRef . runIdentity . getCompose)
+
 
 
 insertPK f conn kva t@(Raw sch tbl pk  _ _ attr ) = case pkListM of
@@ -814,6 +836,8 @@ unRSOptional i = traceShow ("unRSOptional No Pattern Match SOptional-" <> show i
 unRSOptional' (SOptional i) = join $ unRSOptional' <$> i
 unRSOptional' (SSerial i )  = join $ unRSOptional' <$>i
 unRSOptional' i   = Just i
+
+
 
 allMaybes i | F.all (const False) i  = Nothing
 allMaybes i = if F.all isJust i

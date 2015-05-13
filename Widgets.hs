@@ -128,14 +128,14 @@ mapUITEvent body f x = do
 
 mapEvent f x = do
   (e,h) <- liftIO $ newEvent
-  onEvent x (\i -> liftIO . forkIO $ (f i)  >>= h)
+  onEvent x (\i -> liftIO $ (f i)  >>= h)
   return  e
 
 
 
 mapTEvent f x = do
   (e,h) <- liftIO $ newEvent
-  onEvent (rumors x) (\i -> liftIO . forkIO $ (f i)  >>= h)
+  onEvent (rumors x) (\i -> liftIO $  (f i)  >>= h)
   i <- currentValue (facts x)
   be <- liftIO $ f i
   t <- stepper be e
@@ -339,6 +339,15 @@ testPointInRange ui = do
 unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w -> runUI w (f a))
 
 paint e b = element e # sink UI.style (greenRed . isJust <$> b)
+paintEdit e b i  = element e # sink UI.style ((\ m n -> pure . ("background-color",) $ cond  m n ) <$> b <*> i )
+  where cond i j
+          | isJust i  && isNothing j  = "green"
+          | isNothing i  && isNothing j = "red"
+          | isNothing i && isJust j  = "purple"
+          | i /= j = "yellow"
+          | i == j = "blue"
+          | otherwise = "green"
+
 paintBorder e b = element e # sink UI.style (greenRed . isJust <$> b)
   where
       greenRed True = [("border-color","green")]
