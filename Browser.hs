@@ -141,13 +141,13 @@ databaseChooser sargs = do
   let args = fmap T.pack sargs
       dbsInit = liftA2 (,) (safeHead args) (safeHead $ tail args)
   dbs  <- liftIO$ listDBS
-  dbsW <- UI.listBox (pure $ concat $ fmap (\(i,j) -> (i,) <$> j) $ M.toList dbs ) (pure dbsInit  ) (pure (\i -> UI.div # set text (show i)))
-  load <- UI.button # set UI.text "Connect" # sink UI.enabled (facts (isJust <$> UI.userSelection dbsW) )
+  dbsW <- listBox (pure $ concat $ fmap (\(i,j) -> (i,) <$> j) $ M.toList dbs ) (pure dbsInit  ) (pure id) (pure (line . show ))
+  load <- UI.button # set UI.text "Connect" # sink UI.enabled (facts (isJust <$> userSelection dbsW) )
   let genSchema (dbN,schemaN) = do
         conn <- connectPostgreSQL ("user=postgres dbname=" <> toStrict ( encodeUtf8 dbN ))
         inf <- keyTables conn  schemaN
         return (conn,inf)
-  chooserT <-  mapTEvent (traverse genSchema) (UI.userSelection dbsW )
+  chooserT <-  mapTEvent (traverse genSchema) (userSelection dbsW )
   let chooserEv = facts chooserT <@ UI.click load
   chooserDiv <- UI.div # set children [getElement dbsW,load]
   return $ (tidings (facts chooserT) chooserEv,chooserDiv)
@@ -218,7 +218,7 @@ doQuery inf q f arg  = fmap (fmap (fmap snd )) $ projectKey' inf (do
 
 
 
-line n = UI.li # set  text n
+line n =  set  text n
 
 
 
@@ -247,24 +247,20 @@ chooseKey inf key = mdo
                     ) <$>   bBset
   -- Final Query ListBox
   filterInp <- UI.input
-  filterInpBh <- stepper "" (onEnter filterInp)
+  filterInpBh <- stepper "" (UI.valueChange filterInp)
 
-  let filterInpT = tidings filterInpBh (onEnter  filterInp)
+  let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
 
   let sortSet = filter (filterIntervalSort . keyType ) . F.toList . tableNonRec  . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) <$> bBset
       filterIntervalSort (KInterval i) = False
       filterIntervalSort (KOptional i) = filterIntervalSort i
       filterIntervalSort i = True
-  sortList  <- UI.listBox sortSet ((safeHead . F.toList) <$> sortSet) (pure (line . show))
+  sortList  <- listBox sortSet ((safeHead . F.toList) <$> sortSet) (pure id) (pure (line . show))
   asc <- checkedWidget (pure False)
-  let listManip :: (Show (f Showable), Traversable f) => String ->[f (Key,Showable)] -> Maybe Key -> Bool -> [f (Key,Showable)]
-      listManip i j Nothing  _ =  filtering  i j
-      listManip i j (Just s) b  =   L.sortBy ( ifApply (const b) flip (comparing (fmap snd .F.find ((== s).fst) )) ) $ filtering i j
-      filtering :: (Show (f Showable), Functor f) => String -> [f (Key,Showable)] -> [f (Key,Showable)]
-      filtering i = filter (L.isInfixOf (toLower <$> i) . fmap toLower . show  . fmap snd)
-      listRes = listManip  <$> filterInpT <*> res2 <*> UI.userSelection sortList <*> triding asc
+  let
+      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd)
 
-  itemList <- UI.listBox listRes  (pure Nothing ) (pure (\i -> line $   L.intercalate "," (F.toList $ fmap (renderShowable . snd ) $  _kvKey $ allKVRec i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) $  tableNonrec i)))
+  itemList <- listBox res2 (pure Nothing) (pure id) ((\l -> (\ i -> (set UI.style (noneShow $ filteringPred l i  ) ) . line (   L.intercalate "," (F.toList $ fmap (renderShowable . snd ) $  _kvKey $ allKVRec i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) $  tableNonrec i)))) <$> filterInpT)
   element (getElement itemList) # set UI.multiple True
   element itemList # set UI.style [("width","100%"),("height","300px")]
   let
@@ -274,7 +270,7 @@ chooseKey inf key = mdo
   let
 
   pollingChk <- checkedWidget (pure True)
-  pres  <- mapM (\i -> (_pollingName i ,) <$> pollingUI' inf ((\i j ->if i then j else [] ) <$> triding pollingChk <*>listRes ) i)  (filter (\(BoundedPollingPlugins n _  (tb,_)  _ )-> tb  == (tableName $ (\(Just i)-> i) $ M.lookup key (pkMap inf)  ))  [queryPollAndamentoB ,queryPollArtAndamento])
+  pres  <- mapM (\i -> (_pollingName i ,) <$> pollingUI' inf ((\i j ->if i then j else [] ) <$> triding pollingChk <*>res2 ) i)  (filter (\(BoundedPollingPlugins n _  (tb,_)  _ )-> tb  == (tableName $ (\(Just i)-> i) $ M.lookup key (pkMap inf)  ))  [queryPollAndamentoB ,queryPollArtAndamento])
   pollingsDiv <- tabbed ((\(l,d)-> (l,d) )<$> pres)
   let
      pollings = ("POLLINGS" ,(pollingChk ,pollingsDiv ))
@@ -287,7 +283,7 @@ chooseKey inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,_,evs) <- crudUITable inf  [queryTimeline,lplugOrcamento ,siapi3Plugin , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull{-,queryCNPJBoundary -},queryTimeline, queryAndamentoB,queryArtAndamento ] [] (allRec' (tableMap inf) table) (UI.userSelection itemList)
+            (crud,_,evs) <- crudUITable inf  [queryTimeline,lplugOrcamento ,siapi3Plugin , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryShowMap ,queryCEPBoundary ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull{-,queryCNPJBoundary -},queryTimeline, queryAndamentoB,queryArtAndamento ] [] (allRec' (tableMap inf) table) (userSelection itemList)
             let eres = fmap (addToList  (allRec' (tableMap inf ) table )  <$> ) evs
             res2 <- accumTds vp eres
             insertDiv <- UI.div # set children [crud]
@@ -300,10 +296,10 @@ chooseKey inf key = mdo
   dropcode <- UI.textarea # set UI.text (T.unpack$ dropTable table)
               # set style [("width","100%"),("height","300px")]
   code <- tabbed [("CREATE",createcode),("DROP",dropcode)]
-  v <- liftIO  $ doQueryAttr inf (projectAllRec' (tableMap inf)) (M.singleton (lookKey inf "modification_table" "table_name") [Category $S.fromList $ [PK [SText .tableName $ table ] []]]) (S.singleton $lookKey inf "modification_table" "modification_id" )
-  modBox <- checkedWidget (pure True)
-  box <- UI.multiListBox (pure v) (pure []) (pure (\i -> line $   L.intercalate "," (F.toList $ fmap (show . fmap (renderShowable . snd )) $   _unTB1$ i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) $  tableNonrec i)))
-  tab <- tabbedChk  (maybeToList crud <> [pollings,("CODE",(codeChk,code)),("MODS",(modBox,getElement box))])
+  -- v <- liftIO  $ doQueryAttr inf (projectAllRec' (tableMap inf)) (M.singleton (lookKey inf "modification_table" "table_name") [Category $S.fromList $ [PK [SText .tableName $ table ] []]]) (S.singleton $lookKey inf "modification_table" "modification_id" )
+  -- modBox <- checkedWidget (pure True)
+  -- box <- UI.multiListBox (pure v) (pure []) (pure (\i -> line $   L.intercalate "," (F.toList $ fmap (show . fmap (renderShowable . snd )) $   _unTB1$ i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) $  tableNonrec i)))
+  tab <- tabbedChk  (maybeToList crud <> [pollings,("CODE",(codeChk,code)){-,("MODS",(modBox,getElement box))-}])
   itemSel <- UI.div # set children [filterInp,getElement sortList,getElement asc]
   UI.div # set children ([itemSel,getElement itemList,tab] )
 

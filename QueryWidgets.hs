@@ -167,7 +167,7 @@ pluginUI inf unoldItems (BoundedPlugin2 n t f action) = do
   headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (facts tdInput)
   let ecv = (facts oldItems<@ UI.click headerP)
   bcv <- stepper cv (facts oldItems <@ UI.click headerP)
-  pgOut <- mapTEvent (action inf) (traceShowId <$> tidings bcv ecv)
+  pgOut <- mapTEvent (action inf) (tidings bcv ecv)
   return (headerP, (fmap snd $ snd f ,   pgOut ))
 
 
@@ -311,13 +311,13 @@ tbCase inf pgs td ix i@(IT ifk tb1 ) created wl plugItens oldItems  = do
 tbCase inf pgs td ix i@(IAT ifk _ ) created wl plugItens oldItems  = do
         let tbi = fmap (\v -> Compose . Identity . unTB . justError "IAT" . (^? unTB1. td . Le.ix ix ) $ v) <$> oldItems
             thisPlugs = filter (any ((== (fmap (keyValue.unAttr.runIdentity.getCompose) ifk)) . head ) . fst) $  plugItens
-            pfks =  (first ( filter (not . L.null ) . traceShowId . fmap (L.drop 1) . L.filter ((== (fmap (keyValue.unAttr.runIdentity.getCompose) ifk)) . head ))  . second ( fmap ( join .  fmap (fmap  (_akttable . runIdentity . getCompose ) . findTB1 ((== ifk ) . fmap (fmap fst )  . tbAttr . runIdentity . getCompose  )). traceShowId )  ) <$> thisPlugs)
+            pfks =  (first ( filter (not . L.null ) .  fmap (L.drop 1) . L.filter ((== (fmap (keyValue.unAttr.runIdentity.getCompose) ifk)) . head ))  . second ( fmap ( join .  fmap (fmap  (_akttable . runIdentity . getCompose ) . findTB1 ((== ifk ) . fmap (fmap fst )  . tbAttr . runIdentity . getCompose  )) )  ) <$> thisPlugs)
         iaUITable inf pgs pfks (fmap (runIdentity . getCompose ) <$>  tbi) i
 
 tbCase inf pgs td ix a@(Attr i) created wl plugItens oldItems = do
         let thisPlugs = filter (any ((== [keyValue i]).head) . fst) $  (fmap (fmap (fmap F.toList) ) <$> plugItens)
             tbi = fmap (\v -> unTB . justError "Attr".(^? unTB1.td . Le.ix ix) $ v) <$> oldItems
-        let evs  = {-plugTdi <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse (Tra.traverse diffOptional ))) i =<< j) (return tbi )-} ( rumors . fmap ( join . fmap ( fmap Attr . L.find ((== i).fst )) . traceShowId )   <$>  (fmap snd thisPlugs))
+        let evs  = {-plugTdi <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse (Tra.traverse diffOptional ))) i =<< j) (return tbi )-} ( rumors . fmap ( join . fmap ( fmap Attr . L.find ((== i).fst )) )   <$>  (fmap snd thisPlugs))
         attrUITable tbi evs a
 
 uiTable
@@ -334,7 +334,7 @@ uiTable inf pgs pmods ftb@(TB1 (KV (PK k d) a)) oldItems = do
       Just table = M.lookup (S.fromList $ findPK ftb) (pkMap inf)
 
   res <- mapM (pluginUI inf oldItems) (filter ((== tableName table ) . _bounds ) pgs)
-  let plugmods = traceShow (fst <$> pmods) $ (snd <$> res ) <> pmods
+  let plugmods = (snd <$> res ) <> pmods
   let mapMI f e = foldl (\jm (l,m)  -> do
                 (w,ok) <- jm
                 wn <- f l (unTB m) ok w plugmods oldItems
@@ -435,7 +435,7 @@ processPanelTable conn attrsB table oldItemsi = do
         # sink UI.enabled ( isJust <$> fkattrsB)
   editB <- UI.button # set text "EDIT"
   -- Edit when any persistent field has changed
-        -- # sink UI.enabled (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then traceShow (l,m) (True,(l,m)) else (False,(l,m))) )  i j) (fmap tableNonRef <$> attrsB) (fmap tableNonRef <$> facts oldItemsi))
+        # sink UI.enabled (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then traceShow (l,m) (True,(l,m)) else (False,(l,m))) )  i j) (fmap tableNonRef <$> attrsB) (fmap tableNonRef <$> facts oldItemsi))
   deleteB <- UI.button # set text "DELETE"
   -- Delete when isValid
         # sink UI.enabled (isJust <$> facts oldItems)
@@ -455,7 +455,7 @@ processPanelTable conn attrsB table oldItemsi = do
         return $ fmap (const (EditTB (fromJust isM) (fromJust old) )) res
 
       insertAction ip = do
-          res <- catch (Right <$> insertAttr (fromAttr .traceShowId)  conn ip table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
+          res <- catch (Right <$> insertAttr (fromAttr )  conn ip table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
           return $ InsertTB  <$> res
 
   let    spMap = fmap split . mapEvent id
@@ -513,7 +513,7 @@ editedMod  i  m=  join $ fmap (\mn-> look mn i ) m
   where look mn k = allMaybes $ fmap (\ki -> fmap (ki,) $  M.lookup ki (M.fromList mn) ) k
 
 
-showFK = (pure ((\v-> UI.span # set text (L.intercalate "," $ fmap renderShowable $ F.toList $  _kvKey $ allKVRec $  snd <$> v))))
+showFK = (pure ((\v j ->j  # set text (L.intercalate "," $ fmap renderShowable $ F.toList $  _kvKey $ allKVRec $  snd <$> v))))
 
 tablePKSet  tb1 = S.fromList $ fmap (unAttr . runIdentity . getCompose ) $ _pkKey $ _kvKey $ _unTB1 $ tableNonRef tb1
 
@@ -554,7 +554,7 @@ iaUITable
 iaUITable inf pgs plmods oldItems  tb@(IAT ifk [tb1])
     = do
       l <- UI.span # set text (show $ unAttr .unTB <$>   ifk)
-      items <- mapM (\ix -> (uiTable inf pgs (fmap (fmap ( join . traceShowId . fmap (\tbl -> atMay  tbl ix))) <$> plmods) tb1 (join . fmap (flip atMay ix . _akttable)  <$> oldItems))) [0..20]
+      items <- mapM (\ix -> (uiTable inf pgs (fmap (fmap ( join .  fmap (\tbl -> atMay  tbl ix))) <$> plmods) tb1 (join . fmap (flip atMay ix . _akttable)  <$> oldItems))) [0..20]
       let tds = snd <$> items
           es = fst <$> items
       sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (tail es ) ( tds )
@@ -599,12 +599,10 @@ fkUITable inf pgs created res pmods wl  oldItems  tb@(FKT ifk refl rel tb1)
       l <- UI.span # set text (show $ unAttr .unTB <$>   ifk)
 
       filterInp <- UI.input
-      filterInpBh <- stepper "" (onEnter filterInp )
-      let filterInpT = tidings filterInpBh (onEnter filterInp)
-          filtering i= filter (L.isInfixOf (toLower <$> i) . fmap toLower . show  )
-          listRes = filtering <$> filterInpT <*> (fmap fst res2)
-
-      box <- optionalListBox  listRes tdi (maybe UI.div <$> showFK)
+      filterInpBh <- stepper "" (UI.valueChange filterInp )
+      let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
+          filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd
+      box <- optionalListBox  (fmap fst res2) tdi  (pure id ) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
       let
         reorderPK l = fmap (\i -> justError "reorder wrong" $ L.find ((== i).fst) l )  (unAttr . unTB <$> ifk)
         lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
@@ -628,7 +626,7 @@ fkUITable inf pgs created res pmods wl  oldItems  tb@(FKT ifk refl rel tb1)
 akUITable inf pgs plmods  oldItems  tb@(AKT ifk@[_] refl rel  [tb1])
   | otherwise = do
      let isLeft = any (any (isKOptional . keyType).  kattr) ifk
-         indexItens ix = join . fmap (\(AKT [l] refl _ m) -> (\li mi ->  FKT  [li] refl (fmap (first unKArray) rel) mi ) <$> (join $ traverse (indexArray ix . traceShow  l) <$> (if isLeft then unLeftBind l else Just l)) <*> (if isLeft then unLeft else id ) (atMay m ix) )  <$>  oldItems
+         indexItens ix = join . fmap (\(AKT [l] refl _ m) -> (\li mi ->  FKT  [li] refl (fmap (first unKArray) rel) mi ) <$> (join $ traverse (indexArray ix  ) <$> (if isLeft then unLeftBind l else Just l)) <*> (if isLeft then unLeft else id ) (atMay m ix) )  <$>  oldItems
          fkst = FKT (fmap (fmap unKArray ) (if isLeft then fmap unKOptional <$> ifk else ifk)) refl (fmap (first (unKArray)) rel) (if isLeft then fmap unKOptional tb1 else tb1 )
          rr = tablePKSet tb1
          rp = rootPaths'  (tableMap inf) (fromJust $ M.lookup rr $ pkMap inf )
@@ -638,8 +636,8 @@ akUITable inf pgs plmods  oldItems  tb@(AKT ifk@[_] refl rel  [tb1])
      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      dv <- UI.div # set children (getElement <$> fks)
      fksE <- UI.li # set children (l : [dv])
-     let bres = (if isLeft then Just . maybe (AKT (fmap (\k-> (k ,fromJust $ showableDef (keyType k) ) ) <$> ifk) refl rel []) id else id) . fmap (\l -> AKT ( fmap  (( if isLeft then keyOptional else id) . (,SComposite $ V.fromList $  (fmap fst l))) <$> ifk) refl rel (fmap snd l)). allMaybes .  L.takeWhile (maybe False (const True)) <$> Tra.sequenceA (fmap (fmap (\(FKT i _ _ j ) -> (head $ fmap (snd.unAttr.unTB) $ i, (if isLeft then fmap keyOptional else id ) j)) )  . triding <$> fks)
-     paintEdit (getElement l) (traceShowId . traceShow "new" <$> facts bres) (traceShowId . traceShow "old" <$> facts oldItems)
+     let bres = (if isLeft then Just . maybe (AKT (fmap (\k-> (k ,fromJust $ showableDef (keyType k) ) ) <$> ifk) refl rel [((\k-> (k ,fromJust $ showableDef (keyType k) ))  <$> tb1)]) id else id) . fmap (\l -> AKT ( fmap  (( if isLeft then keyOptional else id) . (,SComposite $ V.fromList $  (fmap fst l))) <$> ifk) refl rel (fmap snd l)). allMaybes .  L.takeWhile (maybe False (const True)) <$> Tra.sequenceA (fmap (fmap (\(FKT i _ _ j ) -> (head $ fmap (snd.unAttr.unTB) $ i, (if isLeft then fmap keyOptional else id ) j)) )  . triding <$> fks)
+     paintEdit (getElement l) (facts bres) (facts oldItems)
      return $  TrivialWidget bres  fksE
 akUITable  _ _  _ _ _ = error "akUITable not implemented"
 
@@ -673,9 +671,10 @@ nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lk
           sel = fmap (\i->  (Just . unAttr .unTB<$> _tbref i) ) . fmap (fmap snd) <$> selks
       (vv ,ct, els) <- inner tbfk sel  fkattr' iold
       l <- UI.span # set text (show $ unAttr <$> fkattr')
-      paint (getElement l) (facts vv)
       o <- UI.li # set children (l: els)
-      return $ TrivialWidget   (liftA2 (liftA2 (\i j-> FKT (fmap (_tb.Attr) i)  refl ksjoin j)  ) vv ct) o
+      let bres = (liftA2 (liftA2 (\i j-> FKT (fmap (_tb.Attr) i)  refl ksjoin j)  ) vv ct)
+      paintEdit (getElement l) (facts ct ) (fmap _fkttable <$> facts selks)
+      return $ TrivialWidget    bres o
   | all isKOptional (keyType . unAttr.unTB<$> fkattr ) = do
       let
           fkattr'=  unTB <$> (fmap unKOptional  <$> fkattr)
@@ -688,16 +687,19 @@ nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lk
       (vv ,ct, els) <- inner tbfk' sel fkattr' iold
       l <- UI.span # set text (show $ unAttr . unTB <$> fkattr)
       let vvo = (fmap (fmap Attr ). makeOptional (unAttr . unTB <$> fkattr) <$> vv)
-      paint (getElement l) (facts vvo)
       o <- UI.div # set children (l: els)
-      return $ TrivialWidget   (liftA2 (liftA2 (\i -> FKT i refl ksjoin ) ) (fmap (fmap (_tb . Attr ) ). makeOptional (fmap (unAttr .unTB) fkattr) <$> vv) (makeOptional tbfk <$> ct)) o
+      let
+          fksel = (fmap (fmap (_tb . Attr ) ). makeOptional (fmap (unAttr .unTB) fkattr) <$> vv)
+          bres = (liftA2 (liftA2 (\i -> FKT i refl ksjoin ) ) fksel (makeOptional tbfk <$> ct))
+      paintEdit (getElement l) (makeOptional tbfk <$> facts ct ) (fmap _fkttable  <$> facts selks)
+      return $ TrivialWidget    bres o
   | otherwise = error (show attr)
   where inner tbfk sel fkattr' iold = mdo
             let
                 o1 = tablePKSet tbfk
                 vv =  join . fmap (lorder (unAttr <$> fkattr') ) . fmap concat . allMaybes  <$> iold
                 tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK  l _ ) _ ))-> interPoint ksjoin k  (unAttr . unTB <$> l)) ) i) j ) <$> lks <*> vv
-            li <- wrapListBox res2 tb showFK
+            li <- wrapListBox res2 tb (pure id) showFK
             (ce,ct,evs) <- crudUITable inf pgs [] tbfk  tb
             let eres = fmap (addToList  (allRec' (tableMap inf) ((\(Just i)-> i) $ M.lookup o1 (pkMap inf))) <$> ) evs
             res2  <-  accumTds lks eres

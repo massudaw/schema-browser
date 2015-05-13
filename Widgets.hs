@@ -1,4 +1,5 @@
-{-# LANGUAGE TupleSections,LambdaCase,RankNTypes,RecordWildCards,DeriveFunctor,NoMonomorphismRestriction,RecursiveDo #-} module Widgets where
+{-# LANGUAGE TupleSections,ScopedTypeVariables,LambdaCase,RankNTypes,DeriveFunctor,RecordWildCards,NoMonomorphismRestriction,RecursiveDo #-}
+module Widgets where
 
 
 import Control.Monad
@@ -21,6 +22,7 @@ import Query
 import Data.Maybe
 import Data.Distributive
 import Control.Concurrent
+import qualified Data.Aeson as JSON
 
 import System.Directory
 import System.Process(callCommand)
@@ -165,10 +167,10 @@ insdel binsK =do
           recAdd = insB <@ emap
           recDel =  (facts delB) <@ erem
       recT <- accumTs M.empty  [recAdd,recDel]
-      let sk i = UI.li # set text (show i)
-      resSpan <- UI.multiListBox  (fmap M.toList recT) (pure []) (pure sk)
+      let sk i =  set text (show i)
+      resSpan <- multiListBox  (fmap M.toList recT) (pure []) (pure sk)
       element resSpan # set (attr "size") "10" # set style [("width","400px")]
-      let bsel2 = fmap fst <$> UI.multiUserSelection resSpan
+      let bsel2 = fmap fst <$> multiUserSelection resSpan
       -- Return the triding
       return $ TrivialWidget recT (getElement resSpan)
 
@@ -217,10 +219,10 @@ data RangeBox a
   }
 
 rangeBoxes fkbox bp = do
-  rangeInit <- UI.listBox bp (const <$> pure Nothing <*> fkbox) (pure (\i-> UI.li # set text (show i)))
-  rangeEnd <- UI.listBox bp (const <$> pure Nothing <*> fkbox) (pure (\i-> UI.li # set text (show i)))
+  rangeInit <- listBox bp (const <$> pure Nothing <*> fkbox) (pure id) (pure (set text . show ))
+  rangeEnd <- listBox bp (const <$> pure Nothing <*> fkbox) (pure id) (pure (UI.set text . show ))
   range <- UI.div # set children (getElement <$> [rangeInit,rangeEnd])
-  return $ RangeBox (  liftA2 interval'' <$> (UI.userSelection rangeInit) <*> (UI.userSelection rangeEnd)) range
+  return $ RangeBox (  liftA2 interval'' <$> (userSelection rangeInit) <*> (userSelection rangeEnd)) range
 
 instance Widget (RangeBox a) where
   getElement = _rangeElement
@@ -309,13 +311,13 @@ checkedWidget init = do
   return $ TrivialWidget  (tidings b e) dv
 
 
-wrapListBox l p q = do
-  o <- UI.listBox l p q
-  return $ TrivialWidget (UI.userSelection o ) (getElement o)
+wrapListBox l p f q = do
+  o <- listBox l p f q
+  return $ TrivialWidget (userSelection o ) (getElement o)
 
-optionalListBox l o s = do
-  o <-UI.listBox ((Nothing:) <$>  fmap (fmap Just) l) (fmap Just <$> o) s
-  return $TrivialWidget  (fmap join $ UI.userSelection o)(getElement o)
+optionalListBox l o f s = do
+  o <- listBox ((Nothing:) <$>  fmap (fmap Just) l) (fmap Just <$> o) f s
+  return $TrivialWidget  (fmap join $ userSelection o)(getElement o)
 
 interval'' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
 
@@ -373,5 +375,142 @@ printIFrame i = do
    bh <- stepper "" (pure ("<script> window.frames[\"" <> i <>  "\"].focus(); window.frames[\"" <> i <> "\"].print();</script>") <@ UI.click print)
    dv <- UI.div # UI.sink UI.html bh
    UI.div # set children [print,dv]
+
+
+
+
+{-----------------------------------------------------------------------------
+    List box
+------------------------------------------------------------------------------}
+-- | A list of values. The user can select entries.
+data ListBox a = ListBox
+    { _elementLB   :: Element
+    , _selectionLB :: Tidings (Maybe a)
+    }
+
+data MultiListBox a = MultiListBox
+    { _elementMLB   :: Element
+    , _selectionMLB :: Tidings [a]
+    }
+
+
+instance Widget (ListBox a) where getElement = _elementLB
+instance Widget (MultiListBox a) where getElement = _elementMLB
+
+-- | User changes to the current selection (possibly empty).
+userSelection :: ListBox a -> Tidings (Maybe a)
+userSelection = _selectionLB
+
+multiUserSelection :: MultiListBox a -> Tidings [a]
+multiUserSelection = _selectionMLB
+
+setLookup x s = if S.member x s then Just x else Nothing
+
+-- | Create a 'ListBox'.
+listBox :: forall a. Ord a
+    => Tidings [a]               -- ^ list of items
+    -> Tidings (Maybe a)         -- ^ selected item
+    -> Tidings ([a] -> [a])      -- ^ view list to list transform (filter,sort)
+    -> Tidings (a -> UI Element -> UI Element) -- ^ display for an item
+    -> UI (ListBox a)
+listBox bitems bsel bfilter bdisplay = do
+    list <- UI.select
+    let bindices :: Tidings [a]
+        bindices =  bfilter <*> bitems
+    -- animate output items
+    element list # sink oitems (facts $ map <$> bdisplay <*> bitems )
+
+    -- animate output selection
+    let
+        bindex   = lookupIndex <$> facts bitems <*> facts bsel
+        lookupIndex indices Nothing    = Nothing
+        lookupIndex indices (Just sel) = L.findIndex (== sel)  indices
+
+    element list # sink UI.selection bindex
+
+
+    -- changing the display won't change the current selection
+    -- eDisplay <- changes display
+    -- sink listBox [ selection :== stepper (-1) $ bSelection <@ eDisplay ]
+
+    -- user selection
+    let
+        eindexes = (\l i -> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <@> UI.selectionChange list
+    e <- currentValue (facts bsel)
+    let
+        ev =  unionWith const eindexes (rumors bsel)
+    bsel2 <- stepper e ev
+    let
+        _selectionLB = tidings bsel2 ev
+        _elementLB   = list
+
+    return ListBox {..}
+
+at_ :: [a] -> Int -> Either String a
+at_ xs o | o < 0 = Left $ "index must not be negative, index=" ++ show o
+         | otherwise = f o xs
+    where f 0 (x:xs) = Right x
+          f i (x:xs) = f (i-1) xs
+          f i [] = Left $ "index too large, index=" ++ show o ++ ", length=" ++ show (o-i)
+
+-- | Create a 'ListBox'.
+multiListBox :: forall a. Ord a
+    => Tidings [a]               -- ^ list of items
+    -> Tidings [a]         -- ^ selected item
+    -> Tidings (a -> UI Element -> UI Element) -- ^ display for an item
+    -> UI (MultiListBox a)
+multiListBox bitems bsel bdisplay = do
+    list <- UI.select # set UI.multiple True
+
+    -- animate output items
+    element list # sink oitems (facts $ map <$> bdisplay <*> bitems)
+
+    -- animate output selection
+    let bindices :: Tidings (M.Map a Int)
+        bindices = (M.fromList . flip zip [0..]) <$> bitems
+        bindex   = lookupIndex <$> bindices <*> bsel
+
+        lookupIndex indices sel = catMaybes $ (flip M.lookup indices) <$> sel
+
+    element list # sink selectedMultiple (facts bindex)
+
+    -- changing the display won't change the current selection
+    -- eDisplay <- changes display
+    -- sink listBox [ selection :== stepper (-1) $ bSelection <@ eDisplay ]
+
+    -- user selection
+    let bindices2 :: Tidings (M.Map Int a)
+        bindices2 = M.fromList . zip [0..] <$> bitems
+        eindexes = lookupIndex <$> facts bindices2 <@> selectionMultipleChange list
+    e <- currentValue (facts bsel)
+    let
+        eindexes2 = (\m-> catMaybes $ fmap (flip setLookup m) e)  <$> (S.fromList <$> rumors bitems)
+        ev =  foldr1 (unionWith const) [rumors bsel,eindexes]
+    bsel2 <- stepper e ev
+    let
+        _selectionMLB = tidings bsel2 ev
+        _elementMLB   = list
+
+    return MultiListBox {..}
+
+
+
+
+oitems = mkWriteAttr $ \i x -> void $ do
+    return x # set children [] #+ map (\i -> UI.option # i) i
+
+
+
+
+selectionMultipleChange :: Element -> Event [Int]
+selectionMultipleChange el = unsafeMapUI el (const $ UI.get selectedMultiple el) (UI.click el)
+
+
+selectedMultiple :: Attr Element [Int]
+selectedMultiple = mkReadWriteAttr get set
+  where
+    get   el = fmap from $ callFunction $ ffi "getOpts($(%1))" el
+    set v el = runFunction $ ffi "setOpts($(%1),%2)" el (JSON.toJSON  v)
+    from s = let JSON.Success x =JSON.fromJSON s in x
 
 
