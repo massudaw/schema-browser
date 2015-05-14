@@ -14,7 +14,7 @@ import Query
 import Types
 import Step
 import PrefeituraSNFSE
-import Pdf
+-- import Pdf
 import Safe hiding (at)
 import Siapi3
 import CnpjReceita
@@ -255,12 +255,12 @@ chooseKey inf key = mdo
       filterIntervalSort (KInterval i) = False
       filterIntervalSort (KOptional i) = filterIntervalSort i
       filterIntervalSort i = True
-  sortList  <- listBox sortSet ((safeHead . F.toList) <$> sortSet) (pure id) (pure (line . show))
-  asc <- checkedWidget (pure False)
+  sortList  <- multiListBox sortSet (F.toList <$> bBset) {-(pure id)-} (pure (line . show))
+  asc <- checkedWidget (pure True)
   let
       filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd)
 
-  itemList <- listBox res2 (pure Nothing) (pure id) ((\l -> (\ i -> (set UI.style (noneShow $ filteringPred l i  ) ) . line (   L.intercalate "," (F.toList $ fmap (renderShowable . snd ) $  _kvKey $ allKVRec i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) $  tableNonrec i)))) <$> filterInpT)
+  itemList <- listBox (sorting <$> triding asc <*> multiUserSelection sortList <*> res2)  (pure Nothing) (pure id ) ((\l -> (\ i -> (set UI.style (noneShow $ filteringPred l i  ) ) . line (   L.intercalate "," (F.toList $ fmap (renderShowable . snd ) $  _kvKey $ allKVRec i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) $  tableNonrec i)))) <$> filterInpT)
   element (getElement itemList) # set UI.multiple True
   element itemList # set UI.style [("width","100%"),("height","300px")]
   let
@@ -371,7 +371,7 @@ queryPollAndamentoB =  BoundedPollingPlugins "Andamento Bombeiro" 60  ("fire_pro
       returnA -< idp
     elem inf inputs = fst <$> queryAndamento3  inf inputs
 
-queryPollAndamentoIO ,queryPollArtAndamentoIO  :: PollingPlugins [TB1 (Key,Showable)] (IO [([TableModification Showable])])
+queryPollAndamentoIO ,queryPollArtAndamentoIO  , siapi3Polling :: PollingPlugins [TB1 (Key,Showable)] (IO [([TableModification Showable])])
 
 queryPollAndamentoIO =  BoundedPollingPlugins "Andamento Bombeiro" 60  ("fire_project", staticP arrow ) elem
   where
@@ -487,12 +487,8 @@ queryAndamento4 inf  tbinputs = fmap (snd $ (\(Just i)-> i) .L.find ((== "projec
                     let tq4 = catMaybes .fmap Tra.sequence . M.toList . tkeys "fire_project" . M.fromList $ htmlSoli
                     MaybeT $ return $ if not $ maybe False (\(_,SBoolean mb)-> mb) $ L.find ((=="taxa_paga"). keyValue . fst)  tq4 then Nothing else Just undefined
                     C.lift $ updateMod  inf tq4 tbinputs fire_project
-                  getPdf = do
-                    MaybeT $ return $ if (\i->elem "analista" i || elem "aproval_date" i ) $ (keyValue . fst <$> filter (not . isEmptyShowable. snd ) inputs ) then Nothing else Just undefined
-                    C.lift $ testPdfGet inf tbinputs
                 and <- C.lift $ concat . maybeToList <$> runMaybeT insertAndamento
                 sol <- C.lift $ maybeToList <$> runMaybeT updateSolicitacao
-                -- gets <-C.lift $ maybeToList <$> runMaybeT getPdf
                 let mods =  catMaybes (   modB :  and  <> sol)
                 MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) mods)
 
@@ -545,6 +541,33 @@ querySiapi3 inf tbinputs = do
                 return $  adds
               MaybeT $ return  $ (\case {[] -> Nothing ; i -> Just i }) (catMaybes (firemods:mods) )
 
+siapi3Polling = BoundedPollingPlugins "Siapi3 Andamento" 60 ("fire_project" ,staticP url) elem
+  where
+    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
+    url :: ArrowPlug (Kleisli IO) (Maybe (TB1 (Text,Showable)))
+    url = proc t -> do
+      protocolo <- varTB "protocolo" -< t
+      ano <- varTB "ano" -< t
+      cpf <- varTB "id_owner,id_contact:id_owner:cgc_cpf" -< t
+      odx "andamentos:andamento_date" -<  t
+      odx "andamentos:andamento_description" -<  t
+      b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= 14 then  return Nothing else siapi3  i j k )) -<  traceShowId $ (liftA3 (,,) protocolo ano cpf)
+      let convertAndamento [_,da,desc,s,sta] = TB1 $ fmap (Compose . Identity .Attr ) $ KV (PK [("andamento_date",STimestamp . Finite .  fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)] []) []
+          convertAndamento i = error $ "convertAndamento2015 :  " <> show i
+      let ao bv =   case  (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
+                    Just i -> Nothing
+                    Nothing -> Just $ TB1 $ KV (PK [] []) ( [iat bv])
+          iat bv = Compose . Identity $ (IAT
+                                            [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
+                                            (reverse $ fmap convertAndamento bv))
+      returnA -< join  ( ao . fst <$> b)
+
+    elem inf =  fmap (pure. catMaybes) . mapM (\inp -> do
+                              b <- dynPK url (Just  inp)
+                              let o =  fmap (first (lookKey'  inf ["fire_project_event","fire_project"])) <$> b
+                              maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf "fire_project")) o
+                            )
+
 siapi3Plugin = BoundedPlugin2 "Siapi3 Andamento" "fire_project"(staticP url) elem
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
@@ -555,18 +578,18 @@ siapi3Plugin = BoundedPlugin2 "Siapi3 Andamento" "fire_project"(staticP url) ele
       cpf <- varTB "id_owner,id_contact:id_owner:cgc_cpf" -< t
       odx "andamentos:andamento_date" -<  t
       odx "andamentos:andamento_description" -<  t
-      b <- act (fmap join . fmap traceShowId . Tra.traverse   (\(i,j,k)-> siapi3  i j k )) -<  traceShowId (liftA3 (,,) protocolo ano cpf)
+      b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> siapi3  i j k )) -<  traceShowId (liftA3 (,,) protocolo ano cpf)
       let convertAndamento [_,da,desc,s,sta] = TB1 $ fmap (Compose . Identity .Attr ) $ KV (PK [("andamento_date",STimestamp . Finite .  fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)] []) []
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
       let ao bv =   TB1 $ KV (PK [] []) [Compose . Identity $ (IAT
                                             [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
                                             (reverse $ fmap convertAndamento bv)) ]
-      returnA -< traceShowId . ao . fst <$> b
+      returnA -<  ao . fst <$> b
 
     elem inf = maybe (return Nothing) (\inp -> do
                               b <- dynPK url (Just inp)
-                              return $ fmap (first (lookKey'  inf ["fire_project_event","fire_project"])) <$> b
-                            )
+                              return $ fmap (first (lookKey'  inf ["fire_project_event","fire_project"])) <$> b)
+
 
 lookKey' inf t k = justError ("lookKey' cant find key " <> show k <> " in " <> show t) $  foldr1 mplus $ fmap (\ti -> M.lookup (ti,k) (keyMap inf)) t
 
@@ -588,6 +611,11 @@ deleteMod inf kv table = do
 updateMod inf kv old table = do
   (i,j) <- update (conn  inf) kv old table
   Just <$> logTableModification inf j
+
+updateModAttr inf kv old table = do
+  (i,j) <- updateAttr (conn  inf) kv old table
+  Just <$> logTableModification inf j
+
 
 insertPKMod inf kv table = do
   s <- insertAttr fromAttr (conn inf) kv table
@@ -983,29 +1011,6 @@ joinTable  m  i= join $ allMaybes . fmap (fmap swap . Tra.sequence . fmap (flip 
 onlyJust = allNonEmpty . catMaybes
 
 
-testPdfGet inf inp =  runMaybeT$ do
-  let addrs = "http://siapi.bombeiros.go.gov.br/relatorios/relatorio_exigencia_projeto_web.php"
-      translate = [("protocolo" , "protocolo"),("ano","ano")]
-      tempName = "temp" <> renderShowable (snd $ justError "no id project testPdfGet"  $L.find ((=="id_project").keyValue .fst) $ F.toList inp) <> ".pdf"
-      fire_project = lookTable inf "fire_project"
-      translate_q =
-            [("Name",("analista",id))
-            ,("tipo",("id_tipo",id))
-            ,("subtipo",("id_subtipo",id))
-            ,("Carga de incêndio",("carga_incendio", fst . L.break (' '==) ))]
-      transK = nonUpdateTranslator (F.toList inp) $ translateK inf "fire_project" translate_q
-  if (not . null $  transK )
-     then do
-        url <- MaybeT $ return $ renderUrlM translate addrs  $ filter (not . isEmptyShowable. snd )  <$> Just (F.toList inp)
-        pdf <- getRequest $ traceShowId url
-        C.lift $ BS.writeFile (tempName) (BSL.toStrict pdf)
-        v <- C.lift $ parseBombeiroPdf tempName
-        C.lift $ removeFile tempName
-        v <- MaybeT $ return $ eitherToMaybeT $ v
-        let vp  =  catMaybes . applyTranslator (M.fromList transK) . fmap (fmap (T.unpack . T.fromStrict ) )  $  v
-        MaybeT $   updateMod  inf vp inp fire_project
-      else MaybeT $ return Nothing
-
 
 queryCPFStatefull =  StatefullPlugin "CPF Receita" "owner" [([(True,[["cpf_number"]])],[(False ,[["captchaViewer"]])]),([(True,[["captchaInput"]])],[(True,[["owner_name"]])])]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] cpfCall
 
@@ -1080,10 +1085,12 @@ main = do
     print $ tableName t
     )  sorted
   -}
-  (e,h) <- newEvent
+  (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
+  -- forkIO $ poller  h siapi3Polling
   forkIO $ poller  h queryPollAndamentoIO
-  forkIO $ poller  h queryPollArtAndamentoIO
+  --forkIO $ poller  h queryPollArtAndamentoIO
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)
+  getLine
   print "Finish"
 
 poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
@@ -1094,7 +1101,7 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
         print ("START" ::String)
         let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
         listRes <- queryWith_ (fromAttr (fst rp) ) conn  (traceShowId $ fromString $ T.unpack $ snd rp)
-        let evb = filter (\i -> tdInput i && tdOutput1 i ) listRes
+        let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
             tdInput i =  maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd t) i) (fst f)
             tdOutput1 i =  maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd f) i) (snd f)
 

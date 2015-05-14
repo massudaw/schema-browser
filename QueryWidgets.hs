@@ -10,6 +10,7 @@ import Data.Either
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (delete)
 import Data.Bifunctor
+import Data.Ord
 import Control.Lens (Lens,(^.),(^?),(&),(.~))
 import qualified Control.Lens as Le
 
@@ -602,7 +603,7 @@ fkUITable inf pgs created res pmods wl  oldItems  tb@(FKT ifk refl rel tb1)
       filterInpBh <- stepper "" (UI.valueChange filterInp )
       let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd
-      box <- optionalListBox  (fmap fst res2) tdi  (pure id ) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+      box <- optionalListBox  (sorting True (S.toList rr) <$> fmap fst res2) tdi  (pure id ) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
       let
         reorderPK l = fmap (\i -> justError "reorder wrong" $ L.find ((== i).fst) l )  (unAttr . unTB <$> ifk)
         lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
@@ -713,3 +714,9 @@ pdfFrame fty pdf = mkElement (fst fty ) UI.# sink UI.src pdf  UI.# UI.set style 
 
 allNonEmpty [] = Nothing
 allNonEmpty l = Just  l
+
+sorting :: Bool -> [Key] -> [TB1 (Key,Showable)]-> [TB1 (Key,Showable)]
+sorting b ss  =  L.sortBy (ifApply b flip (comparing (\i ->  fmap (\s -> fmap snd $ F.find ((== s).fst) i  ) ss) ))
+  where ifApply True i =  i
+        ifApply False _ = id
+

@@ -29,7 +29,7 @@ executable layer
    , hxt >=9.3 && <9.4
    , pandoc == 1.13.2
    , HTTP
-   ,aeson 
+   , aeson 
    , pandoc-types
    ,lens
    ,wreq
@@ -45,7 +45,7 @@ executable layer
    , http-conduit, directory ,process,xml
    ,unordered-containers
    -- Pdf Parser
-   ,io-streams,pdf-toolbox-document,pdf-toolbox-core
+   -- ,io-streams,pdf-toolbox-document,pdf-toolbox-core
    -- Interval
    ,old-locale
    ,data-interval
