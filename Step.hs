@@ -73,6 +73,8 @@ data Parser m s a b = P ([s],[s]) (m a b) deriving Functor
 
 dynP (P s d) = d
 
+dynPK =  runKleisli . dynP
+
 staticP (P s d) = s
 
 liftReturn = Kleisli . (return <$> )
@@ -182,4 +184,8 @@ kattri (IT i  _ ) =  (L.concat $ kattr  <$> i)
 kattri (IAT i  _ ) =  (L.concat $ kattr  <$> i)
 kattri (AKT i _ _ _ ) =  (L.concat $ kattr <$> i)
 
+varT t = join . fmap (unRSOptional'.snd)  <$> idxT t
+varN t = fmap snd  <$> idx t
 
+type FunArrowPlug o = Step.Parser (->) (Bool,[[Text]]) (Maybe (TB1 (Key,Showable))) o
+type ArrowPlug a o = Step.Parser a (Bool,[[Text]]) (Maybe (TB1 (Key,Showable))) o

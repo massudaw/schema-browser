@@ -420,7 +420,9 @@ instance Fractional Showable where
   recip (SDouble i) = SDouble (recip i)
 
 
+
 makeLenses ''KV
 makeLenses ''PK
 makeLenses ''TB
 makeLenses ''FTB1
+

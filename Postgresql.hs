@@ -263,20 +263,6 @@ safeTail i = tail i
 
 primType (Metric k ) = textToPrim <$> keyType k
 
-attrToKey (Metric i) = renderedName i
-
-renderedName key = \f b ->
-   case F.name f  of
-      Just name -> let
-          in case (keyValue key == T.fromStrict (TE.decodeUtf8 name) || maybe False (== T.fromStrict (TE.decodeUtf8 name)) (keyAlias key)  ) of
-              True ->  case (textToPrim <$> keyType key) of
-                            k@(KTable l) ->  case  traverse (parseOnly (parseShowable k)) b of
-                                                  (Right (Just r)) -> return r
-                                                  (Right Nothing) -> error "no parse value"
-                            kt -> renderedType kt  f b
-              False -> error $ "no match type for " <> BS.unpack name <> " with key " <> show key
-      Nothing -> error "no name for field"
-
 
 unIntercalateAtto :: Alternative f => [f a1] -> f a -> f [a1]
 unIntercalateAtto l s = go l
@@ -400,56 +386,8 @@ pg_double
 
 
 
-renderedType key f b = go key
-  where
-          go ::  KType KPrim
-                -> F.Conversion Showable
-          go t = case t of
-            (KInterval (Primitive i)) -> SInterval <$>  prim i f b
-            (KOptional (Primitive i)) -> SOptional <$> prim i f b
-            (KSerial (Primitive i)) -> SSerial <$> prim i f b
-            (KArray (Primitive i)) -> SComposite <$> prim i f b
-            (KOptional (KArray (Primitive i))) ->  SOptional . fmap SComposite . getCompose  <$> prim i f b
-            (KOptional (KInterval (Primitive i))) -> SOptional . fmap SInterval . getCompose  <$> prim i f b
-            (KSerial (KOptional (Primitive i))) -> error $ "invalid type " <>  show t
-            -- (KTable (i:j:[]))->  fmap STable . mapM go $ i
-            (Primitive i) ->  unOnly <$> prim  i f b
-            (KOptional i) -> SOptional . Just <$>  go  i
-            i ->  error $ "missing case renderedType: " <> (show i)
-
-
 unOnly :: Only a -> a
 unOnly (Only i) = i
-
-prim :: (F.FromField (f Bool ),F.FromField (f Bounding),F.FromField (f LineString),F.FromField (f DiffTime),F.FromField (f Position ),F.FromField (f LocalTimestamp),F.FromField (f Date),F.FromField (f Text), F.FromField (f Double), F.FromField (f Int), Functor f) =>
-          KPrim
-        -> F.Field
-        -> Maybe BS.ByteString
-        -> F.Conversion (f Showable)
-prim  p f b = case p of
-            PText ->  s $ F.fromField f b
-            PCnpj->  s $ F.fromField f b
-            PCpf ->  s $ F.fromField f b
-            PInt -> n $ F.fromField  f b
-            PDouble -> d $ F.fromField  f b
-            PDate -> da $ F.fromField  f b
-            PInterval -> i $ F.fromField  f b
-            PTimestamp -> t $ F.fromField  f b
-            PPosition -> pos $ F.fromField  f b
-            PLineString -> lin $ F.fromField  f b
-            PBounding -> boun $ F.fromField  f b
-            PBoolean -> bo $ F.fromField  f b
-  where
-    s = fmap (fmap SText)
-    n = fmap (fmap SNumeric)
-    d = fmap (fmap SDouble)
-    da = fmap (fmap SDate)
-    i = fmap (fmap SPInterval)
-    t = fmap (fmap STimestamp)
-    lin = fmap (fmap SLineString)
-    boun = fmap (fmap SBounding)
-    pos = fmap (fmap SPosition )
-    bo = fmap (fmap SBoolean)
 
 instance (F.FromField (f (g a))) => F.FromField (Compose f g a) where
   fromField = fmap (fmap (fmap (Compose ) )) $ F.fromField
@@ -587,23 +525,6 @@ diffInterval = (do
     [d,h,m,s] -> secondsToDiffTime (round $ d *3600*24 + h * 3600 + (60  ) * m + s)
     v -> errorWithStackTrace $ show v)
 
-instance (F.FromField a ) => F.FromField (Interval.Extended a) where
-  fromField  i mdat = ER.Finite <$> (fromField i mdat)
-
--- | any postgresql array whose elements are compatible with type @a@
-instance (F.FromField a,Ord a, Typeable a) => F.FromField (Interval.Interval a) where
-    fromField f mdat = do
-        info <- F.typeInfo f
-        case info of
-          F.Range{} ->
-              case mdat of
-                Nothing  -> F.returnError F.UnexpectedNull f "Null Range"
-                Just  dat -> do
-                   case parseOnly (fromArray info f) dat of
-                     Left  err  -> F.returnError F.ConversionFailed f err
-                     Right conv ->  conv
-          _ -> F.returnError F.Incompatible f ""
-
 plain' :: String -> Parser BS.ByteString
 plain' delim = takeWhile1 (notInClass (delim ))
 
@@ -649,17 +570,7 @@ fromAttr foldable = do
                                Right Nothing -> error (show j )
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
 
-fromShowableList foldable = do
-    traverse (FR.fieldWith . attrToKey) foldable
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item
   where item = fmap (\n@(Raw _ t k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
-
-projectKey
-  ::
-    InformationSchema ->
-     (forall t . Traversable t => QueryT Identity (t KAttribute)
-         -> S.Set Key -> IO [t (Key,Showable)])
-projectKey inf q  = (\(j,(h,i)) -> fmap (fmap (zipWithTF (,) (fmap (\(Metric i)-> i) j))) . queryWith_ (fromShowableList j) (conn inf) .  buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
-
 

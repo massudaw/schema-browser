@@ -45,6 +45,7 @@ import Reactive.Threepenny
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (get,delete)
 
+import RuntimeTypes
 import qualified Data.ByteString.Base64.Lazy as B64
 import Control.Monad.Reader
 import qualified Data.Foldable as F

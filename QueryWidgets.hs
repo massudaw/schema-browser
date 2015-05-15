@@ -1,6 +1,8 @@
 {-# LANGUAGE OverloadedStrings,ScopedTypeVariables,FlexibleContexts,ExistentialQuantification,TupleSections,LambdaCase,RankNTypes,RecordWildCards,DeriveFunctor,NoMonomorphismRestriction,RecursiveDo #-}
 module QueryWidgets where
 
+import RuntimeTypes
+
 import Data.Functor.Compose
 import Data.Functor.Identity
 import Control.Monad
@@ -52,42 +54,6 @@ import Debug.Trace
 import qualified Data.Text.Lazy as T
 import qualified Data.ByteString.Char8 as BSC
 import Data.String
-
-data WrappedCall =  forall m . MonadIO m =>  WrappedCall
-      { runCall ::  forall a . m a -> IO a
-      , stepsCall :: [InformationSchema -> MVar (Maybe (TB1 (Key,Showable)))  -> (Maybe (TB1 (Key,Showable)) -> m ()) -> m () ]
-      }
-
-
-data Plugins
-  = BoundedPlugin
-  { _name :: Text
-  , _bounds :: Text
-  , _arrowbounds :: ([(Bool,[[Text]])],[(Bool,[[Text]])])
-  , _boundedAction :: InformationSchema -> (Tidings (Maybe (TB1 (Key,Showable)))) -> UI Element
-  }
-  | StatefullPlugin
-  { _name ::  Text
-  , _bounds :: Text
-  , _statebounds :: [([(Bool,[[Text]])],[(Bool,[[Text]])])]
-  , _statevar :: [[(Text,KType Text)]]
-  , _statefullAction :: WrappedCall
-  }
-  | BoundedPlugin2
-  { _name :: Text
-  , _bounds :: Text
-  , _arrowbounds :: ([(Bool,[[Text]])],[(Bool,[[Text]])])
-  , _boundedAction2 :: InformationSchema -> (Maybe (TB1 (Key,Showable))) -> IO (Maybe (TB1 (Key,Showable)))
-  }
-
-
-data  PollingPlugins fi fo
-  = BoundedPollingPlugins
-  { _pollingName :: String
-  , _pollingTime :: Int
-  , _pollingBounds :: (Text,([(Bool,[[Text]])],[(Bool,[[Text]])]))
-  , _pollingBoundedAction :: InformationSchema ->  fi -> fo
-  }
 
 containKV f = (\i ->   S.member ( S.fromList $ fmap keyValue $  kattr (Compose . Identity $ fst i)) (S.fromList $ fmap (S.fromList .head) $ fmap snd $ f))
 
@@ -234,6 +200,9 @@ buildUI i  tdi = case i of
             composed <- UI.span # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
             let td = (\m n -> fmap SInterval $  join . fmap (\i-> if Interval.null i then Nothing else Just i) $ liftF2 interval m n) <$> (liftA2 (,) <$> triding inf  <*> triding lbd) <*> (liftA2 (,) <$> triding sup <*> triding ubd)
             return $ TrivialWidget td composed
+         -- (Primitive Position) -> do
+                      -- returnA -< (\(SPosition (Position (lon,lat,_)))-> "http://maps.google.com/?output=embed&q=" <> (HTTP.urlEncode $ show lat  <> "," <>  show lon )) <$>  p
+            -- mkElement "iframe" # sink UI.src (maybe "" id . dynP req  <$> facts inputs) # set style [("width","99%"),("height","300px")]
          (Primitive PTimestamp) -> do
             itime <- liftIO $  getCurrentTime
             timeButton <- UI.button # set UI.text "now"

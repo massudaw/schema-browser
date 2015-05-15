@@ -144,30 +144,6 @@ schemaKeys' conn schema (keyTable,map,_) = do
        return viewRels
 
 
-
-projectAllTable
-  :: Traversable t => Map (Set Key) Table
-     -> HashQuery
-       -> QueryT Identity (t KAttribute)
-     -> Table
-     -> (t KAttribute, (HashQuery , Table))
-projectAllTable baseTables hashGraph m  table@(Raw _ _ bkey _ _ _)  = runQuery  m (hashGraph,Base bkey $ From table  bkey)
-
-
-projectAllKeys
-  :: Traversable t => Map (Set Key) Table
-     -> HashQuery
-     -> QueryT Identity (t KAttribute)
-     -> Set Key
-     -> (t KAttribute, (HashQuery , Table))
-projectAllKeys baseTables hashGraph m bkey
-  = case M.lookup bkey baseTables  of
-      Just t ->   runQuery  m (hashGraph,Base bkey $ From t bkey)
-      Nothing -> error $  "No baseTable for key " <> show ( fmap showKey (F.toList bkey)) -- <> " in baseMap " <> show (M.mapKeys (S.mapMonotonic showKey) baseTables)
-
-buildQuery q =   "SELECT * FROM " <> fromString (T.unpack $ showTable q)
-
-
 withInf s f = withConn s (f <=< flip keyTables s)
 withConnInf s f = withConn s (\conn ->  f =<< liftIO ( flip keyTables s conn) )
 
