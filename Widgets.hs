@@ -130,7 +130,7 @@ mapUITEvent body f x = do
 
 mapEvent f x = do
   (e,h) <- liftIO $ newEvent
-  onEvent x (\i -> liftIO $ (f i)  >>= h)
+  onEvent x (\i -> liftIO .forkIO $  (f i)  >>= h)
   return  e
 
 

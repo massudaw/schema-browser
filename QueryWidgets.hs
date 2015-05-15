@@ -72,8 +72,8 @@ addAttr (TB1 (KV pk a)) e =  TB1 (KV pk (a <> e))
 
 mergeTB1 (TB1 k) (TB1 k2) = TB1 (k <> k2)
 
-lookFresh inf n tname i = justError "no freshKey" $ M.lookup (n,tname,i) (pluginsMap inf)
 
+lookFresh inf n tname i = justError "no freshKey" $ M.lookup (n,tname,i) (pluginsMap inf)
 createFresh n tname pmap i ty  =  do
   k <- newKey i ty
   return $ M.insert (n,tname,i) k pmap
@@ -200,9 +200,9 @@ buildUI i  tdi = case i of
             composed <- UI.span # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
             let td = (\m n -> fmap SInterval $  join . fmap (\i-> if Interval.null i then Nothing else Just i) $ liftF2 interval m n) <$> (liftA2 (,) <$> triding inf  <*> triding lbd) <*> (liftA2 (,) <$> triding sup <*> triding ubd)
             return $ TrivialWidget td composed
-         -- (Primitive Position) -> do
-                      -- returnA -< (\(SPosition (Position (lon,lat,_)))-> "http://maps.google.com/?output=embed&q=" <> (HTTP.urlEncode $ show lat  <> "," <>  show lon )) <$>  p
-            -- mkElement "iframe" # sink UI.src (maybe "" id . dynP req  <$> facts inputs) # set style [("width","99%"),("height","300px")]
+         {-(Primitive Position) -> do
+            let addrs = (\(SPosition (Position (lon,lat,_)))-> "http://maps.google.com/?output=embed&q=" <> (HTTP.urlEncode $ show lat  <> "," <>  show lon )) <$>  tdi
+            mkElement "iframe" # sink UI.src (maybe "" id <$> facts addrs) # set style [("width","99%"),("height","300px")]-}
          (Primitive PTimestamp) -> do
             itime <- liftIO $  getCurrentTime
             timeButton <- UI.button # set UI.text "now"
@@ -562,10 +562,10 @@ fkUITable inf pgs created res pmods wl  oldItems  tb@(FKT ifk refl rel tb1)
           rr = S.fromList $ fmap (unAttr . runIdentity . getCompose ) $ _pkKey $ _kvKey $ _unTB1 $ tableNonRef tb1
           isLeftJoin = any isKOptional $  keyType . unAttr . unTB <$> ifk
           relTable = M.fromList $ fmap swap rel
-          tdi :: Tidings (Maybe (TB1  (Key,Showable)))
-          tdi =  (if isLeftJoin then join . fmap (Tra.sequence . fmap unkeyOptional . _fkttable ) else fmap _fkttable  ) <$> oldItems
-          -- oldSel :: Tidings (Maybe (TB1  (Key,Showable)))
-          oldSel =   fmap _tbref <$> oldItems
+          oldSel = fmap _tbref <$> oldItems
+          tdipre = (if isLeftJoin then join . fmap (Tra.sequence . fmap unkeyOptional . _fkttable ) else fmap _fkttable ) <$> oldItems
+          plmods = fmap (fmap (if isLeftJoin then  join . fmap (Tra.traverse unkeyOptional) else id)) <$> pmods
+      tdi <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse (Tra.traverse diffOptional ))) i   =<< j)  (return tdipre) (rumors . snd <$> plmods)
       l <- UI.span # set text (show $ unAttr .unTB <$>   ifk)
 
       filterInp <- UI.input
@@ -579,7 +579,7 @@ fkUITable inf pgs created res pmods wl  oldItems  tb@(FKT ifk refl rel tb1)
           where kn = justError "relTable" $ M.lookup ko relTable
         fksel = (if isLeftJoin then Just . maybe (fmap (\k-> (k,justError "non optional type in left join" $ showableDef (keyType k)) ) (unAttr. unTB <$> ifk)) id  else id ) . fmap (reorderPK . fmap lookFKsel)  <$>  (fmap findPK  <$> triding box)
       chw <- checkedWidget (pure False)
-      (celem,tcrud,evs) <- crudUITable inf pgs pmods (if isLeftJoin then unKOptional <$> tb1  else tb1 ) (triding box)
+      (celem,tcrud,evs) <- crudUITable inf pgs plmods (if isLeftJoin then unKOptional <$> tb1  else tb1 ) (triding box)
       let eres ev = (\e -> second (modifyTB (allRec' (tableMap inf) ((\(Just i)-> i) $ M.lookup rr (pkMap inf))) e) .
                            first (addToList (allRec' (tableMap inf) ((\(Just i)-> i) $ M.lookup rr (pkMap inf))) e) ) <$> ev
       res2  <-  accumTds (liftA2 (,) (pure res) tdi ) (eres <$> evs)
@@ -598,10 +598,11 @@ akUITable inf pgs plmods  oldItems  tb@(AKT ifk@[_] refl rel  [tb1])
      let isLeft = any (any (isKOptional . keyType).  kattr) ifk
          indexItens ix = join . fmap (\(AKT [l] refl _ m) -> (\li mi ->  FKT  [li] refl (fmap (first unKArray) rel) mi ) <$> (join $ traverse (indexArray ix  ) <$> (if isLeft then unLeftBind l else Just l)) <*> (if isLeft then unLeft else id ) (atMay m ix) )  <$>  oldItems
          fkst = FKT (fmap (fmap unKArray ) (if isLeft then fmap unKOptional <$> ifk else ifk)) refl (fmap (first (unKArray)) rel) (if isLeft then fmap unKOptional tb1 else tb1 )
+         pmods = map (second (fmap (fmap (fmap (if isLeft then Tra.traverse unkeyOptional else Just )))) ) plmods
          rr = tablePKSet tb1
          rp = rootPaths'  (tableMap inf) (fromJust $ M.lookup rr $ pkMap inf )
      res <- liftIO$ queryWith_ (fromAttr (fst rp)) (conn  inf) (fromString $ T.unpack $ snd rp)
-     fks <- mapM (\ix-> fkUITable inf pgs S.empty res (fmap (fmap ( join . fmap (\tbl -> atMay  tbl ix))) <$> plmods) [] (indexItens ix) fkst ) [0..8]
+     fks <- mapM (\ix-> fkUITable inf pgs S.empty res (fmap (fmap ( join .  join . fmap (\tbl -> atMay  tbl ix))) <$> pmods) [] (indexItens ix) fkst ) [0..8]
      l <- UI.span # set text (show $ unAttr .unTB <$>   ifk)
      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      dv <- UI.div # set children (getElement <$> fks)

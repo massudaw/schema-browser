@@ -31,6 +31,7 @@ import qualified Data.Text as T
 import qualified Data.Traversable as Tra
 import qualified Data.Text.Lazy as TL
 
+import Data.Bifunctor
 import Safe
 import Types
 import Query
@@ -168,7 +169,7 @@ getCnpj'  inf i  handler = do
                               ,attr "bounding" (SOptional Nothing)]
                               )
                      ,fk [own "atividade_principal" pcnae]
-                                (keyOptional <$> tb [cna "id" pcnae] [cna "description" pdesc] [] )
+                                (first kOptional <$> tb [cna "id" pcnae] [cna "description" pdesc] [] )
                      ,afk [own "atividades_secundarias" pcnae]
                                 (fmap keyOptional <$>
                                   (\(pcnae,pdesc)-> tb [cna "id" pcnae] [cna "description" pdesc] [] ) <$> scnae)
