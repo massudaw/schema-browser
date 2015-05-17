@@ -200,10 +200,17 @@ chooserKey inf kitems i = do
   let initKey = pure . join $ fmap rawPK . flip M.lookup (tableMap inf) . T.pack <$> i
   filterInp <- UI.input
   filterInpBh <- stepper "" (onEnter filterInp)
-  bset <- buttonFSet  (L.sortBy (comparing (fmap keyValue . S.toList )) kitems)  initKey ((\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> i) ))<$> filterInpBh) (\i -> case M.lookup i (pkMap inf) of
+
+  let rp = rootPaths'  (tableMap inf) (justError "no table" $ M.lookup "ordering" $ tableMap inf )
+  i <-liftIO $  queryWith_ (fromAttr (fst rp) ) (conn inf) (traceShowId $ fromString $ T.unpack $ snd rp)
+  let orderMap = Just $ M.fromList $ (\t ->  (\(l,m) -> ((\(SText k) -> k) $ snd l ,(\(SNumeric n ) -> n) $ snd m)) $ (justError "nokey table" $ L.find ((=="table_name").keyValue . fst ) $ F.toList t, justError "no key usage" $ L.find ((=="usage").keyValue . fst ) $ F.toList $ t)).fmap (unAttr.runIdentity.getCompose) . (\(TB1 (KV (PK [i] []) [d])) -> [i ,d]) <$> i
+  bset <- buttonFSet  (L.sortBy (flip $  comparing (\ pkset -> liftA2 M.lookup  (fmap tableName . flip M.lookup (pkMap inf) $ pkset ) orderMap)) kitems)  initKey ((\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> i) ))<$> filterInpBh) (\i -> case M.lookup i (pkMap inf) of
                                        Just (Raw _ i  _ _ _ _ )-> T.unpack i
                                        Nothing -> showVertex i )
   let bBset = triding bset
+  onEvent (rumors bBset) (\ i ->
+      liftIO $ execute (conn inf) ("UPDATE incendio.ordering SET usage = usage + 1 where table_name = ? ") (Only ( fmap tableName $ M.lookup i (pkMap inf)) )
+        )
   body <- UI.div # sink items (facts (pure . chooseKey inf <$> bBset ))
   UI.div # set children [filterInp,getElement bset, body]
 
@@ -645,10 +652,10 @@ main = do
     )  sorted
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
-  forkIO $ poller  h siapi3Polling
-  forkIO $ poller  h siapi2Polling
+  -- forkIO $ poller  h siapi3Polling
+  -- forkIO $ poller  h siapi2Polling
   -- forkIO $ poller  h queryPollAndamentoIO
-  forkIO $ poller  h artAndamentoPolling
+  -- forkIO $ poller  h artAndamentoPolling
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)
   print "Finish"
 

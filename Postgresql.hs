@@ -294,7 +294,7 @@ parseAttr (FKT l refl rel j ) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j
   return $  FKT ml refl rel mj
 
-parseArray p = (char '{' *>  sepBy p (char ',') <* char '}')
+parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 
 parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
   im <- unIntercalateAtto (fmap (Compose . Identity) . parseAttr .runIdentity . getCompose <$> (i <> d <> m) ) (char ',')

@@ -130,7 +130,7 @@ mapUITEvent body f x = do
 
 mapEvent f x = do
   (e,h) <- liftIO $ newEvent
-  onEvent x (\i -> liftIO .forkIO $  (f i)  >>= h)
+  onEvent x (\i -> liftIO . forkIO $ (f i)  >>= h)
   return  e
 
 
@@ -414,7 +414,7 @@ listBox :: forall a. Ord a
     -> Tidings (a -> UI Element -> UI Element) -- ^ display for an item
     -> UI (ListBox a)
 listBox bitems bsel bfilter bdisplay = do
-    list <- UI.select
+    list <- UI.select # set UI.class_ "selectpicker"
     let bindices :: Tidings [a]
         bindices =  bfilter <*> bitems
     -- animate output items

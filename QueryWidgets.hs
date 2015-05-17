@@ -163,7 +163,7 @@ attrUITable
      -> TB Identity Key
      -> UI (TrivialWidget (Maybe (TB Identity (Key, Showable))))
 attrUITable  tAttr' evs (Attr i) = do
-      l<- UI.span # set text (show i)
+      l<- flabel # set text (show i)
       tdi' <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse (Tra.traverse diffOptional ))) i =<< j) (return tAttr') evs
       let tdi = fmap (\(Attr i)-> snd i) <$>tdi'
           justCase i j@(Just _) = j
@@ -500,7 +500,7 @@ iUITable
   -> UI (TrivialWidget(Maybe (TB Identity (Key, Showable))))
 iUITable inf pgs pmods oldItems  tb@(IT ifk tb1)
     = do
-      l <- UI.span # set text (show $ unAttr .unTB <$>   ifk)
+      l <- flabel # set text (show $ unAttr .unTB <$>   ifk)
       (celem,tcrud) <- uiTable inf pgs pmods tb1 (fmap _fkttable <$> oldItems)
       element celem
           # set style [("padding-left","10px")]
@@ -509,6 +509,8 @@ iUITable inf pgs pmods oldItems  tb@(IT ifk tb1)
       let bres =  fmap (fmap (IT (fmap (,SOptional Nothing ) <$> ifk)  ) )  ((if isLeft then makeOptional tb1 else id)  <$> tcrud )
       paintEdit  (getElement l) (facts bres) (facts oldItems)
       return $ TrivialWidget bres fk
+
+flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 
 iaUITable
   ::
@@ -523,7 +525,7 @@ iaUITable
   -> UI (TrivialWidget(Maybe (TB Identity (Key, Showable))))
 iaUITable inf pgs plmods oldItems  tb@(IAT ifk [tb1])
     = do
-      l <- UI.span # set text (show $ unAttr .unTB <$>   ifk)
+      l <- flabel # set text (show $ unAttr .unTB <$>   ifk)
       items <- mapM (\ix -> (uiTable inf pgs (fmap (fmap ( join .  fmap (\tbl -> atMay  tbl ix))) <$> plmods) tb1 (join . fmap (flip atMay ix . _akttable)  <$> oldItems))) [0..20]
       let tds = snd <$> items
           es = fst <$> items
@@ -561,12 +563,13 @@ fkUITable inf pgs created res pmods wl  oldItems  tb@(FKT ifk refl rel tb1)
       let
           rr = S.fromList $ fmap (unAttr . runIdentity . getCompose ) $ _pkKey $ _kvKey $ _unTB1 $ tableNonRef tb1
           isLeftJoin = any isKOptional $  keyType . unAttr . unTB <$> ifk
+          unLeftJoin = if isLeftJoin then join . fmap (Tra.traverse unkeyOptional) else id
           relTable = M.fromList $ fmap swap rel
           oldSel = fmap _tbref <$> oldItems
-          tdipre = (if isLeftJoin then join . fmap (Tra.sequence . fmap unkeyOptional . _fkttable ) else fmap _fkttable ) <$> oldItems
-          plmods = fmap (fmap (if isLeftJoin then  join . fmap (Tra.traverse unkeyOptional) else id)) <$> pmods
+          tdipre = unLeftJoin  . fmap _fkttable <$> oldItems
+          plmods = fmap (fmap unLeftJoin) <$> pmods
       tdi <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse (Tra.traverse diffOptional ))) i   =<< j)  (return tdipre) (rumors . snd <$> plmods)
-      l <- UI.span # set text (show $ unAttr .unTB <$>   ifk)
+      l <- flabel # set text (show $ unAttr .unTB <$>   ifk)
 
       filterInp <- UI.input
       filterInpBh <- stepper "" (UI.valueChange filterInp )
@@ -593,6 +596,7 @@ fkUITable inf pgs created res pmods wl  oldItems  tb@(FKT ifk refl rel tb1)
       return $ TrivialWidget bres fk
 
 
+
 akUITable inf pgs plmods  oldItems  tb@(AKT ifk@[_] refl rel  [tb1])
   | otherwise = do
      let isLeft = any (any (isKOptional . keyType).  kattr) ifk
@@ -603,7 +607,7 @@ akUITable inf pgs plmods  oldItems  tb@(AKT ifk@[_] refl rel  [tb1])
          rp = rootPaths'  (tableMap inf) (fromJust $ M.lookup rr $ pkMap inf )
      res <- liftIO$ queryWith_ (fromAttr (fst rp)) (conn  inf) (fromString $ T.unpack $ snd rp)
      fks <- mapM (\ix-> fkUITable inf pgs S.empty res (fmap (fmap ( join .  join . fmap (\tbl -> atMay  tbl ix))) <$> pmods) [] (indexItens ix) fkst ) [0..8]
-     l <- UI.span # set text (show $ unAttr .unTB <$>   ifk)
+     l <- flabel # set text (show $ unAttr .unTB <$>   ifk)
      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      dv <- UI.div # set children (getElement <$> fks)
      fksE <- UI.li # set children (l : [dv])
@@ -641,7 +645,7 @@ nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lk
           iold  =    (Tra.sequenceA $ fmap (fmap ( kattr . _tb ) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ kattr $ _tb $ fst $ i) oldASet) wl)
           sel = fmap (\i->  (Just . unAttr .unTB<$> _tbref i) ) . fmap (fmap snd) <$> selks
       (vv ,ct, els) <- inner tbfk sel  fkattr' iold
-      l <- UI.span # set text (show $ unAttr <$> fkattr')
+      l <- flabel # set text (show $ unAttr <$> fkattr')
       o <- UI.li # set children (l: els)
       let bres = (liftA2 (liftA2 (\i j-> FKT (fmap (_tb.Attr) i)  refl ksjoin j)  ) vv ct)
       paintEdit (getElement l) (facts ct ) (fmap _fkttable <$> facts selks)
@@ -656,7 +660,7 @@ nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lk
           tbfk' = unKOptional <$> tbfk
           sel = fmap (\i->  (unSOptional . unAttr .unTB<$> _tbref i) ) . fmap (fmap snd) <$> selks
       (vv ,ct, els) <- inner tbfk' sel fkattr' iold
-      l <- UI.span # set text (show $ unAttr . unTB <$> fkattr)
+      l <- flabel # set text (show $ unAttr . unTB <$> fkattr)
       let vvo = (fmap (fmap Attr ). makeOptional (unAttr . unTB <$> fkattr) <$> vv)
       o <- UI.div # set children (l: els)
       let
