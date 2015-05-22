@@ -163,7 +163,7 @@ transformKey ki kr  v = error  ("No key transform defined for : " <> show ki <> 
 
 
 -- Pretty Print Filter
-renderFilter (table ,name,Category i) = tableName table <> "." <> keyValue name <> " IN( " <>  T.intercalate "," (fmap (\s -> "'" <> T.pack (renderShowable $ head (_pkKey s)) <> "'" ) $ S.toList i) <> ")"
+renderFilter (table ,name,Category i) = rawName table <> "." <> keyValue name <> " IN( " <>  T.intercalate "," (fmap (\s -> "'" <> T.pack (renderShowable $ head (_pkKey s)) <> "'" ) $ S.toList i) <> ")"
 renderFilter (table ,name,And i) =  T.intercalate " AND "  (fmap (renderFilter . (table ,name,)) i)
 
 description (Raw _ _ _ desc _ _ ) = desc
@@ -220,8 +220,8 @@ tablesName = atBase (\(Raw _ t _ _ _ _ )-> S.singleton t)
 
 
 renderAliasedKey (PathRoot  ,v)  a = renderNamespacedKeySet v <> " AS " <> a
-  where renderNamespacedKeySet (t,k) = tableName t <> "." <> keyValue k
-renderAliasedKey (v ,(t,k)) a = tableName t <> "." <> keyValue k <> " AS " <> a
+  where renderNamespacedKeySet (t,k) = rawName t <> "." <> keyValue k
+renderAliasedKey (v ,(t,k)) a = rawName t <> "." <> keyValue k <> " AS " <> a
 
 
 isKOptional (KOptional i) = True
@@ -330,11 +330,11 @@ insertAttr f conn krec  t@(Raw sch tbl pk  _ _ attr ) = if not (L.null pkList)
         (TB1 k ) = tableNonRef krec
 
 tableNonRef (TB1 (KV (PK l m ) n)  )  = TB1 (KV (PK (fun l) (fun m) ) (fun n))
-  where nonRef (Attr i ) = [Compose $ Identity $ Attr i]
+  where nonRef i@(Attr _ ) = [Compose $ Identity $ i]
         nonRef (FKT i True _ _ ) = i
         nonRef (FKT i False _ _ ) = []
-        nonRef it@(IT i _ ) = [Compose $ Identity $ it ]
-        nonRef it@(IAT i _ ) = [Compose $ Identity $ it ]
+        nonRef it@(IT _ _ ) = [Compose $ Identity $ it ]
+        nonRef it@(IAT _ _ ) = [Compose $ Identity $ it ]
         nonRef (AKT i True _ _ ) = i
         nonRef (AKT i False _ _ ) = []
         fun  = concat . fmap (nonRef . runIdentity . getCompose)
@@ -492,7 +492,7 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           let nkv pk desc attr = ( mapOpt $ TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
           (tb,q) <-liftA3 nkv (fun ksn nt $ fmap getCompose npk) (fun ksn nt $ fmap getCompose ndesc) (fun ksn nt $ fmap getCompose nattr)
           tas <- tname nextT
-          let knas =(Key (tableName nextT) Nothing Nothing (unsafePerformIO newUnique) (Primitive "integer" ))
+          let knas =(Key (rawName nextT) Nothing Nothing (unsafePerformIO newUnique) (Primitive "integer" ))
           kas <- kname tas  knas
           let relLabel = fkm (F.toList $ unlb1 $ ksb) (F.toList $ unlb1 ksn)
           let jt = if nextLeft  then " LEFT JOIN " else " JOIN "

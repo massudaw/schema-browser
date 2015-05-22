@@ -93,7 +93,9 @@ deriving instance Traversable Interval
 
 instance  TF.ToField (TB Identity (Key,Showable))  where
   toField (Attr i) = TF.toField (snd i)
+  toField (IT [n] is ) | isKOptional (keyType $ fst $ unAttr $ runIdentity $getCompose $ n) = TF.Plain ( fromByteString "null")
   toField (IT [n] (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  runIdentity.getCompose <$> F.toList  i )
+  toField (IAT [n] is ) | isKOptional (keyType $ fst $ unAttr $ runIdentity $getCompose $ n) = TF.Plain ( fromByteString "null")
   toField (IAT [n] is ) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
 
 
@@ -280,6 +282,7 @@ parseAttr (Attr i) = do
 parseAttr (IT i j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j <|>  return ((,SOptional Nothing) <$> j)
   return $ IT  (fmap (,SOptional Nothing) <$> i ) mj
+
 parseAttr (IAT i [t]) = do
   r <- doublequoted (parseArray ( doublequoted $ parseLabeledTable t)) <|> parseArray (doublequoted $ parseLabeledTable t) <|> pure []
   return $ IAT (fmap (,SOptional Nothing) <$> i)  r

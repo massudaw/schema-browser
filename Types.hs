@@ -304,7 +304,7 @@ data TableType
 data Table
     =  Base (Set Key) (JoinPath Key Table)
     -- Schema | PKS | Description | FKS | Attrs
-    |  Raw { rawSchema :: (Text,TableType)
+    |  Raw { rawSchema :: (Text,(TableType,Maybe Text))
            , rawName :: Text
            , rawPK :: (Set Key)
            , rawDescription :: (Maybe Key)
@@ -320,7 +320,9 @@ data Table
 instance Show Table where
   show = T.unpack . tableName
 
-tableName = atBase (\(Raw _ t _ _ _ _ )-> t)
+
+tableName = atBase (\(Raw (_,(_,trans))  t _ _ _ _ )-> t )
+translatedName = atBase (\(Raw (_,(_,trans))  t _ _ _ _ )-> maybe t id trans )
 atBase f t@(Raw _ _ _ _ _ _ ) = f t
 atBase f (Filtered _ t ) = atBase f t
 atBase f (Project _ t ) = atBase f t
@@ -381,7 +383,7 @@ instance Ord a => Ord (PK a) where
 instance Ord a => Ord (KV a) where
   compare i j = compare (_kvKey i) (_kvKey j)
 
-instance (Apply f )=> Apply (FTB1 f ) where
+instance Apply f => Apply (FTB1 f ) where
   TB1 a <.> TB1 a1 =  TB1 (getCompose $ Compose a <.> Compose a1)
 
 instance Apply KV where
@@ -392,10 +394,10 @@ instance Apply PK where
 
 instance Apply f => Apply (TB f) where
   Attr a <.>  Attr a1 = Attr $ a a1
-  FKT l i m t <.> FKT l1 i1 m1 t1 = FKT (zipWith (<.>) l   l1) (i && i1)  m1  (t <.> t1)
-  AKT l i m t <.> AKT l1 i1 m1 t1 = AKT (zipWith (<.>) l   l1) (i && i1 ) m1  (getZipList $ liftF2 (<.>) (ZipList t) (ZipList t1))
-  IT l  t <.> IT l1 t1 = IT (zipWith (<.>) l   l1)  (t <.> t1)
-  IAT l t <.> IAT l1 t1 = IAT (zipWith (<.>) l   l1)   (getZipList $ liftF2 (<.>) (ZipList t) (ZipList t1))
+  FKT l i m t <.> FKT l1 i1 m1 t1 = FKT (zipWith (<.>) l l1) (i && i1) m1 (t <.> t1)
+  AKT l i m t <.> AKT l1 i1 m1 t1 = AKT (zipWith (<.>) l l1) (i && i1) m1 (zipWith (<.>) t t1)
+  IT l t <.> IT l1 t1 = IT (zipWith (<.>) l l1) (t <.> t1)
+  IAT l t <.> IAT l1 t1 = IAT (zipWith (<.>) l l1) (zipWith (<.>) t t1)
   l <.> j = error  "cant apply"
 
 type QueryRef = State ((Int,Map Int Table ),(Int,Map Int Key))

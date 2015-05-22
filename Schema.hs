@@ -98,6 +98,7 @@ keyTables conn schema = do
         readTT "VIEW" = ReadOnly
         readTT i =  error $ T.unpack i
        descMap <- M.fromList . fmap  (\(t,c)-> (t,(\(Just i) -> i) $ M.lookup (t,c) keyMap) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
+       transMap <- M.fromList   <$> query conn "SELECT table_name,translation FROM metadata.table_name_translation WHERE schema_name = ? " (Only schema)
        res <- lookupKey' <$> query conn "SELECT table_name,column_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ?  AND constraint_type='PRIMARY KEY' union select table_name,unnest(pk_column) as column_name from metadata.view_pk where table_schema = ?" (schema,schema) :: IO [(Text,Key)]
        resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM information_schema.tables where table_schema = ? " (Only schema) :: IO (Map Text TableType)
        let lookFk t k =V.toList $ lookupKey2 (fmap (t,) k)
@@ -107,7 +108,7 @@ keyTables conn schema = do
                                   pks = S.fromList $ fmap snd l
                                   inlineFK =  (fmap (\k -> (\t -> Path (S.singleton k ) (FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList  )<$> (M.lookup c all)
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $maybeToList $ M.lookup c descMap) <> pks)
-                                in (pks ,Raw (schema , (\(Just i) -> i) $ M.lookup c resTT) c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK  ) attr )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
+                                in (pks ,Raw (schema , ((\(Just i) -> i) $ M.lookup c resTT, M.lookup c transMap) ) c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK  ) attr )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
        let ret@(i1,i2,i3) = (keyMap, M.fromList  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        paths <- schemaKeys' conn schema ret
        let graphI =  graphFromPath (filter (\i -> fst (pbound i) /= snd (pbound i) ) $ paths <> (fmap (fmap ((\(Just i) -> i) . flip M.lookup i3)) <$> concat (fmap (F.toList.snd) (M.toList fks))))

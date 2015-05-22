@@ -303,7 +303,7 @@ uiTable inf pgs pmods ftb@(TB1 (KV (PK k d) a)) oldItems = do
   let
       Just table = M.lookup (S.fromList $ findPK ftb) (pkMap inf)
 
-  res <- mapM (pluginUI inf oldItems) (filter ((== tableName table ) . _bounds ) pgs)
+  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds ) pgs)
   let plugmods = (snd <$> res ) <> pmods
   let mapMI f e = foldl (\jm (l,m)  -> do
                 (w,ok) <- jm
@@ -348,7 +348,7 @@ crudUITable inf pgs pmods ftb@(TB1 (KV (PK k d) a)) oldItems = do
   let
       Just table = M.lookup (S.fromList $ findPK ftb) (pkMap inf)
 
-  res <- mapM (pluginUI inf oldItems) (filter ((== tableName table ) . _bounds ) pgs)
+  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds ) pgs)
   let plugmods = (snd <$> res ) <> pmods
   let mapMI f e = foldl (\jm (l,m)  -> do
                 (w,ok) <- jm
@@ -390,6 +390,7 @@ filterTB1 f = TB1 . filterKV f . _unTB1
 findTB1 f =  findKV f . _unTB1
 mapTB1 f = TB1 . mapKV f . _unTB1
 
+tb1Diff f (TB1 k1 ) (TB1 k2) =  liftF2 f k1 k2
 
 processPanelTable
    :: Connection
@@ -405,7 +406,7 @@ processPanelTable conn attrsB table oldItemsi = do
         # sink UI.enabled ( isJust <$> fkattrsB)
   editB <- UI.button # set text "EDIT"
   -- Edit when any persistent field has changed
-        # sink UI.enabled (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then traceShow (l,m) (True,(l,m)) else (False,(l,m))) )  i j) (fmap tableNonRef <$> attrsB) (fmap tableNonRef <$> facts oldItemsi))
+        # sink UI.enabled (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (tb1Diff (\l m -> if l  /= m then traceShow (l,m) (True,(l,m)) else (False,(l,m))) )  i j) (fmap tableNonRef <$> attrsB) (fmap tableNonRef <$> facts oldItemsi))
   deleteB <- UI.button # set text "DELETE"
   -- Delete when isValid
         # sink UI.enabled (isJust <$> facts oldItems)
