@@ -263,7 +263,6 @@ cpf = [0,2,8,4,0,3,0,1,1,2,1]
 safeTail [] = []
 safeTail i = tail i
 
-primType (Metric k ) = textToPrim <$> keyType k
 
 
 unIntercalateAtto :: Alternative f => [f a1] -> f a -> f [a1]
@@ -272,7 +271,7 @@ unIntercalateAtto l s = go l
         go [] = pure []
 
 
-subsAKT r t = subs r (fmap (^. unTB1 .kvKey. pkKey) t)
+subsAKT r t = subs r (fmap ((^. kvKey. pkKey) . _unTB1) t)
   where subs i j = fmap (\r -> (justError "no key Found subs" $ L.find (\i -> fmap fst i == fst r ) i , zipWith (\m n -> justError "no key Found subs" $L.find (\i-> fmap fst i == n) m ) j (snd r) ))
 
 parseAttr (Attr i) = do
@@ -298,6 +297,9 @@ parseAttr (FKT l refl rel j ) = do
   return $  FKT ml refl rel mj
 
 parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
+
+parseLabeledTable (LeftTB1 (Just i )) =
+  LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (fmap makeOpt i) >> return Nothing))
 
 parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
   im <- unIntercalateAtto (fmap (Compose . Identity) . parseAttr .runIdentity . getCompose <$> (i <> d <> m) ) (char ',')

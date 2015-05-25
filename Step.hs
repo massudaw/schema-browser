@@ -132,6 +132,7 @@ indexTB1 (l:xs) t
 
 
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
+indexTable l (LeftTB1 j) = join $ fmap (indexTable l) j
 indexTable (l:xs) t@(TB1 (KV (PK k d)  v))
   = do
     let finder = L.find (L.any (==l). L.permutations . fmap (keyString .fst) .kattr)
@@ -169,6 +170,9 @@ instance (Applicative (a i),Monoid m) => Monoid (Parser a s i m) where
   mappend (P i  l) (P j m ) =  P (mappend i j) (liftA2 mappend l  m )
 
 findPK = concat . fmap (attrNonRec . runIdentity . getCompose) . _pkKey  . _kvKey . _unTB1
+
+findPKM (LeftTB1 i ) =  join $ fmap findPKM i
+findPKM i  = Just $ findPK i
 
 
 attrNonRec (FKT ifk _ _ _ ) = concat $ fmap kattr ifk

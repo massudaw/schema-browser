@@ -124,6 +124,19 @@ data TBRel  i
   | TBIdent i
   | TBArray [TBRel i]
 
+type Key = FKey (KType Text)
+
+data FKey a
+    = Key
+    { keyValue :: ! Text
+    , keyAlias :: ! (Maybe Text)
+    , keyTranslation :: ! (Maybe Text)
+    , keyFastUnique :: ! Unique
+    , keyType :: ! a
+    }
+
+
+
 data TB f a
   = FKT
     { _tbref :: ![Compose f (TB f) a]
@@ -131,6 +144,12 @@ data TB f a
     , _fkrelation :: [(Key,Key)]
     , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
     }
+  {-| ForeignRel Bool [(Key,Key)] (TB f a)
+  | Relation [Compose f (TB f) a] (TB f a)
+  | BaseTable (FTB1 (Compose f (TB f)) a)
+  | ArrayRel [TB f a]
+  -}
+  | OptionalRel  (Maybe (TB f a))
   | IT
     { _tbref :: ![Compose f (TB f) a]
     , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
@@ -143,7 +162,6 @@ data TB f a
     { _tbref :: ! [Compose f (TB f) a]
     , _reflexive :: ! Bool
     , _fkrelation :: [(Key,Key)]
-    -- , _afkrelation :: [(Compose Identity (TB  Identity ) a , [Compose Identity (TB Identity ) a] )]
     , _akttable :: ! [FTB1 (Compose f (TB f)) a]
     }
   | Attr
@@ -153,9 +171,12 @@ data TB f a
 
 type TB1 = FTB1 (Compose Identity (TB Identity) )
 
-newtype FTB1 f a
-  = TB1 {_unTB1 :: (KV (f a)) }
+
+data FTB1 f a
+  = TB1 (KV (f a))
+  | LeftTB1 (Maybe (FTB1 f a))
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
+
 
 
 data KPrim
@@ -185,6 +206,7 @@ data KType a
    | KTable [KType a]
    deriving(Eq,Ord,Functor)
 
+
 instance Show (KType KPrim) where
   show =  showTy show
 
@@ -198,17 +220,6 @@ showTy f (KOptional i) = showTy f i <> "*"
 showTy f (KInterval i) = "(" <>  showTy f i <> ")"
 showTy f (KSerial i) = showTy f i <> "?"
 
-
-type Key = FKey (KType Text)
-
-data FKey a
-    = Key
-    { keyValue :: ! Text
-    , keyAlias :: ! (Maybe Text)
-    , keyTranslation :: ! (Maybe Text)
-    , keyFastUnique :: ! Unique
-    , keyType :: ! a
-    }
 
 instance Eq Key where
    k == l = keyFastUnique k == keyFastUnique l
@@ -226,27 +237,10 @@ instance Show Key where
 showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> {-"::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> -} "::"  <> showTy id (keyType k)
 
 
-instance Foldable (JoinPath a) where
-  foldMap f (Join ty a  _ p) = f a <>  F.foldMap f p
-  foldMap f (From p _) = f p
-
-data Aggregate a
-   = Aggregate [a] Text
-   deriving(Show,Eq,Ord)
-
-
-type KAttribute = FAttribute Key
-data FAttribute a
-   = Metric a
-   | Operator (FAttribute a) Text Text (FAttribute a)
-   | Agg (Aggregate (FAttribute a ))
-   | Fun [FAttribute a] Text
-   deriving(Eq,Ord,Show)
-
-
 newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read)
 
 newtype Bounding = Bounding (Interval.Interval Position) deriving(Eq,Ord,Typeable,Show)
+
 newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,Read)
 
 data Showable
@@ -302,60 +296,33 @@ data TableType
    deriving(Eq,Ord,Show)
 
 data Table
-    =  Base (Set Key) (JoinPath Key Table)
-    -- Schema | PKS | Description | FKS | Attrs
-    |  Raw { rawSchema :: (Text,(TableType,Maybe Text))
+    =  Raw { rawSchema :: (Text,(TableType,Maybe Text))
            , rawName :: Text
            , rawPK :: (Set Key)
            , rawDescription :: (Maybe Key)
            , rawFKS ::  (Set (Path (Set Key) (SqlOperation Text)))
            , rawAttrs :: (Set Key)
            }
-    |  Filtered [(Key,Filter)] Table
-    |  Project [ KAttribute ] Table
-    |  Reduce (Set Key) (Set (Aggregate (KAttribute ) ) )  Table
-    |  Limit Table Int
      deriving(Eq,Ord)
 
 instance Show Table where
   show = T.unpack . tableName
 
 
-tableName = atBase (\(Raw (_,(_,trans))  t _ _ _ _ )-> t )
-translatedName = atBase (\(Raw (_,(_,trans))  t _ _ _ _ )-> maybe t id trans )
-atBase f t@(Raw _ _ _ _ _ _ ) = f t
-atBase f (Filtered _ t ) = atBase f t
-atBase f (Project _ t ) = atBase f t
-atBase f (Reduce _ _ t ) = atBase f t
-atBase f (Limit t _) = atBase f t
-atBase f (Base _ p ) = from p
-  where from (From t _) = atBase f t
-        from (Join _ _ _ p) = from p
-        from (SplitJoin _ _  _ p ) = from p
+tableName = rawName
+translatedName (Raw (_,(_,trans))  t _ _ _ _ ) =  maybe t id trans
 
 
-data JoinType
-  = JInner
-  | JLeft
-  deriving(Eq,Show,Ord)
 
-data JoinPath a b
-    = From b (Set a)
-    | Join  JoinType b (Set (b,Set (a,a))) (JoinPath a b)
-    | SplitJoin JoinType b  [(Set a,[(b,Set (a,a))])] (JoinPath a b)
-    deriving(Eq,Ord,Show)
 
 data TableModification b
   = TableModification (Maybe Int) Table (Modification Key b)
   deriving(Eq,Show,Functor)
 
 data Modification a b
-  = Edit (Maybe [(a,b)]) (TB1 (a,b))
-  | EditTB (TB1 (a,b)) (TB1 (a,b))
-  | Insert (Maybe [(a,b)])
+  = EditTB (TB1 (a,b)) (TB1 (a,b))
   | InsertTB (TB1 (a,b))
   | DeleteTB (TB1 (a,b))
-  | Delete (Maybe [(a,b)])
   deriving(Eq,Show,Functor)
 
 
@@ -426,5 +393,5 @@ instance Fractional Showable where
 makeLenses ''KV
 makeLenses ''PK
 makeLenses ''TB
-makeLenses ''FTB1
+-- makeLenses ''FTB1
 

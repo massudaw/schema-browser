@@ -347,7 +347,7 @@ type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModificat
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
       let ao bv = {-case  (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
                     Just i -> Nothing
-                    Nothing -> -} Just $ TB1 $ KV (PK [] []) ( [iat bv])
+                    Nothing -> -} traceShowId $ Just $ TB1 $ KV (PK [] []) ( [iat bv])
           iat bv = Compose . Identity $ (IAT
                                             [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
                                             (reverse $ fmap convertAndamento bv))
@@ -652,10 +652,11 @@ main = do
     )  sorted
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
-
+{-
   forkIO $ poller  h siapi3Polling
   forkIO $ poller  h siapi2Polling
   forkIO $ poller  h artAndamentoPolling
+-}
 
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)
   print "Finish"

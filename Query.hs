@@ -110,6 +110,7 @@ isReflexive _ = True
 _unlb1 ( TB1  i ) = fmap getCompose i
 
 unlb1 ( TB1  i ) = fmap getCompose i
+unlb1 ( LeftTB1  (Just i ) ) = unlb1 i
 
 
 isSerial (KSerial _) = True
@@ -123,23 +124,7 @@ isArray (KOptional i) = isArray i
 isArray _ = False
 
 
-attrInputSet (Metric k ) = [k]
-attrInputSet (Operator l k n r ) = concat $ [attrInputSet l, attrInputSet r]
-attrInputSet (Fun args k ) = concat $ attrInputSet <$> args
-attrInputSet (Agg (Aggregate args k) ) = concat $ attrInputSet <$> args
 
-attrName (Metric k ) = maybe (keyValue k ) id (keyAlias k)
-attrName (Operator l k n r ) = attrName l  <> n <>  attrName r
-attrName (Fun args n ) =  T.concat (fmap attrName args) <>  n
-attrName (Agg (Aggregate args n)) = T.concat (fmap attrName args) <>  n
-
-renderAttribute :: KAttribute -> Text
-renderAttribute (Metric s ) = keyValue s
-renderAttribute (Operator l k n r ) = renderAttribute l <>  " " <> k <> " " <> renderAttribute r
--- renderAttribute (Prod m1 m2 ) =  renderAttribute m1 <> "*" <> renderAttribute m2
-renderAttribute (Fun arg n ) = n <> "(" <> T.intercalate "," (renderAttribute <$> arg) <>")"
-renderAttribute a@(Agg m2  ) = renderAggr renderAttribute m2 <> " as " <> attrName a
-  where renderAggr f (Aggregate l s )  = s  <> "(" <> T.intercalate ","  (fmap f l)  <> ")"
 
 
 showableDef (KOptional i) = Just $ SOptional (showableDef i)
@@ -169,14 +154,6 @@ renderFilter (table ,name,And i) =  T.intercalate " AND "  (fmap (renderFilter .
 description (Raw _ _ _ desc _ _ ) = desc
 
 atTables f t@(Raw _ _ _ _ _ _ ) = f t
-atTables f (Filtered _ t ) = atTables f t
-atTables f (Project _ t ) = atTables f t
-atTables f (Reduce _ _ t ) = atTables f t
-atTables f (Limit t _) = atTables f t
-atTables f (Base _ p ) = from p
-  where from (From t _) = atTables f t
-        from (Join ty t _ p) = atTables f t <> from p
-        from (SplitJoin _ t  _ p) = atTables f t <> from p
 
 renderShowable :: Showable -> String
 renderShowable (SOptional i ) = maybe "" renderShowable i
@@ -209,14 +186,9 @@ showInterval (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> ren
       ocl j = if j then "[" else "("
       ocr j = if j then "]" else ")"
 
-
-
-normalizing = atBase (\(Raw _ _ t _ _ _ )-> t)
-
-
-
-alterTableName f = atBase (\(Raw s t p i j l )-> (Raw s (f t)  p i j l))
-tablesName = atBase (\(Raw _ t _ _ _ _ )-> S.singleton t)
+normalizing = (\(Raw _ _ t _ _ _ )-> t)
+alterTableName f = (\(Raw s t p i j l )-> (Raw s (f t)  p i j l))
+tablesName = (\(Raw _ t _ _ _ _ )-> S.singleton t)
 
 
 renderAliasedKey (PathRoot  ,v)  a = renderNamespacedKeySet v <> " AS " <> a
@@ -293,7 +265,7 @@ updateAttr conn kv kold t@(Raw sch tbl pk _ _ _) = fmap (,TableModification Noth
     up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = runIdentity . getCompose <$> F.toList (_unTB1 $ tableNonRef kv)
 
-
+{-
 update
   :: ToField b =>
      Connection -> [(Key, b)] -> TB1 (Key, b) -> Table -> IO (GHC.Int.Int64,TableModification b)
@@ -307,6 +279,7 @@ update conn kv kold t@(Raw sch tbl pk _ _ _) = fmap (,TableModification Nothing 
     setter = " SET " <> T.intercalate "," (fmap equality skv )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = nubBy (\(i,j) (k,l) -> i == k)  kv
+-}
 
 attrType (Attr i)= keyType (fst i)
 attrType (IT [i] _) = (attrType $ runIdentity $ getCompose i)
@@ -329,6 +302,7 @@ insertAttr f conn krec  t@(Raw sch tbl pk  _ _ attr ) = if not (L.null pkList)
         kva = L.filter (not . isSerial . attrType ) $ fmap (runIdentity . getCompose)  $ F.toList k
         (TB1 k ) = tableNonRef krec
 
+tableNonRef (LeftTB1 (Just i )) = tableNonRef i
 tableNonRef (TB1 (KV (PK l m ) n)  )  = TB1 (KV (PK (fun l) (fun m) ) (fun n))
   where nonRef i@(Attr _ ) = [Compose $ Identity $ i]
         nonRef (FKT i True _ _ ) = i
@@ -340,7 +314,7 @@ tableNonRef (TB1 (KV (PK l m ) n)  )  = TB1 (KV (PK (fun l) (fun m) ) (fun n))
         fun  = concat . fmap (nonRef . runIdentity . getCompose)
 
 
-
+{-
 insertPK f conn kva t@(Raw sch tbl pk  _ _ attr ) = case pkListM of
                                                       Just reti ->  fmap ( zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> " RETURNING " <>  T.intercalate "," (keyValue <$> reti )  ) (fmap snd  kv)
                                                       Nothing ->   liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")"   ) (fmap snd  kv) >> return []
@@ -355,15 +329,16 @@ insertPK f conn kva t@(Raw sch tbl pk  _ _ attr ) = case pkListM of
 
 getKey  (Raw sch tbl pk desc fk attr) k =  M.lookup k table
   where table = M.fromList $ fmap (\i-> (keyValue i, i)) $ S.toList (pk <> attr)
-
+-}
 isEmptyShowable (SOptional Nothing ) = True
 isEmptyShowable (SSerial Nothing ) = True
 isEmptyShowable i = False
 
-
+{-
 insert conn kva t@(Raw sch tbl pk desc _ attr ) = execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t  <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
   where kv = filter (\(k,_) -> S.member k (maybe S.empty S.singleton desc )|| S.member k pk || S.member k attr ) $ filter ( not . isSerial . keyType . fst)  kvb
         kvb = catMaybes $ fmap (\i-> fmap (,snd i) . getKey t . keyValue . fst $ i  ) kva
+-}
 
 dropTable r@(Raw sch tbl _ _ _ _ )= "DROP TABLE "<> rawFullName r
 
@@ -513,7 +488,7 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
         nextLeft = any (isKOptional.keyType.fst) ks || isLeft
         fkm m n = zip (look (fst <$> ks) m) (look (snd <$> ks) n)
         look ki i = justError ("missing FK on " ) $ allMaybes $ fmap (\j-> L.find (\v -> unAttr (labelValue v) == j) i  ) ki
-        mapOpt = fmap (\i -> if any (isKOptional.keyType.fst) ks then  makeOpt i else i)
+        mapOpt i = if any (isKOptional.keyType.fst) ks then  LeftTB1 $ Just  i else i
         fun ksn nt items =  do
                   let attrs :: [TBLabel  Key]
                       attrs = fmap Compose $ filter (\i -> not $ S.member (unAttr.labelValue $ i) fkSet) items
@@ -564,7 +539,9 @@ explodeLabel (Labeled l (IT i t )) = T.intercalate "," (( F.toList $ (explodeLab
 explodeLabel (Labeled l (IAT i t )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i))--  <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel $ unlb1 t))  <> ")"
 explodeLabel (Labeled l (AKT i _ _ _ )) = T.intercalate "," (( F.toList $ (explodeLabel. getCompose ) <$> i)) <> "," <> l
 
-unTlabel kv  = TB1 $ fmap (Compose . Identity .unlabel) $ unlb1 kv
+unTlabel (TB1 kv)  = TB1 $ fmap (Compose . Identity .unlabel) $ fmap getCompose kv
+unTlabel (LeftTB1 kv)  = LeftTB1 $ fmap unTlabel kv
+
 unlabel (Labeled l (FKT i refl fkrel t) ) = (FKT (fmap relabel i) refl fkrel (unTlabel t ))
 unlabel (Labeled l (IT i t) ) = (IT (fmap relabel i) (unTlabel t ))
 unlabel (Labeled l (IAT i [t]) ) = (IAT (fmap relabel i) [unTlabel t ])
@@ -598,7 +575,7 @@ rootPaths' invSchema r@(Raw _ _ _ _ fk _ ) = (\(i,j) -> (unTlabel i,j ) ) $ fst 
 
 
 justError e (Just i) = i
-justError e  _ = error e
+justError e  _ = errorWithStackTrace e
 
 
 groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
@@ -621,6 +598,9 @@ unRSOptional' (SOptional i) = join $ unRSOptional' <$> i
 unRSOptional' (SSerial i )  = join $ unRSOptional' <$>i
 unRSOptional' i   = Just i
 
+_unTB1 (TB1 i ) =  i
+_unTB1 (LeftTB1 (Just i )) = _unTB1 i
+_unTB1 i =  errorWithStackTrace $ show i
 
 
 allMaybes i | F.all (const False) i  = Nothing
