@@ -93,9 +93,9 @@ deriving instance Traversable Interval
 
 instance  TF.ToField (TB Identity (Key,Showable))  where
   toField (Attr i) = TF.toField (snd i)
-  toField (IT [n] is ) | isKOptional (keyType $ fst $ unAttr $ runIdentity $getCompose $ n) = TF.Plain ( fromByteString "null")
+  toField (IT [n] (LeftTB1 i)  ) | isKOptional (keyType $ fst $ unAttr $ runIdentity $getCompose $ n) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT [n] ) i
   toField (IT [n] (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  runIdentity.getCompose <$> F.toList  i )
-  toField (IAT [n] is ) | isKOptional (keyType $ fst $ unAttr $ runIdentity $getCompose $ n) = TF.Plain ( fromByteString "null")
+  toField (IAT [n] [] ) | isKOptional (keyType $ fst $ unAttr $ runIdentity $getCompose $ n) = TF.Plain ( fromByteString "null")
   toField (IAT [n] is ) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
 
 

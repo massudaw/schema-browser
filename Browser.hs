@@ -652,11 +652,11 @@ main = do
     )  sorted
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
-{-
+
   forkIO $ poller  h siapi3Polling
   forkIO $ poller  h siapi2Polling
   forkIO $ poller  h artAndamentoPolling
--}
+
 
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)
   print "Finish"

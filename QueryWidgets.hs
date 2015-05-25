@@ -640,8 +640,8 @@ nonInjectiveSelection
   -> Tidings [TB1 (Key,Showable)]
   -> Tidings (Maybe (TB Identity (Key,Showable)))
   -> UI (TrivialWidget (Maybe (TB Identity (Key,Showable ))))
-nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lks selks = do
-  -- | all isPrim (keyType . unAttr.unTB<$> fkattr ) = do
+nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lks selks
+  | all isPrim (keyType . unAttr.unTB<$> fkattr ) = do
       let
           fkattr' = unTB <$> fkattr
           oldASet :: Set Key
@@ -655,14 +655,14 @@ nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lk
       let bres = (liftA2 (liftA2 (\i j-> FKT (fmap (_tb.Attr) i)  refl ksjoin j)  ) vv ct)
       paintEdit (getElement l) (facts ct ) (fmap _fkttable <$> facts selks)
       return $ TrivialWidget    bres o
-  {-| all isKOptional (keyType . unAttr.unTB<$> fkattr ) = do
+  | all isKOptional (keyType . unAttr.unTB<$> fkattr ) = do
       let
-          fkattr'=  unTB <$> (unKOptional  <$> fkattr)
+          fkattr'=  unTB <$> (fmap unKOptional  <$> fkattr)
           oldASet :: Set Key
           oldASet = S.fromList (filter (flip S.member created) $ unAttr <$> fkattr' )
           iold :: Tidings ([Maybe [(Key,Showable)]])
-          iold  =   fmap (join . fmap (allMaybes . fmap (  (\(i,j)-> (unKOptional i,)<$> j) . fmap unSOptional))) <$> (Tra.sequenceA $ fmap (fmap ( kattr . _tb ) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ kattr $ _tb $ fst $ i) oldASet) wl)
-          tbfk' = tbfk
+          iold  =   (Tra.sequenceA $ fmap (fmap ( kattr . _tb ) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ kattr $ _tb $ fst $ i) oldASet) wl)
+          tbfk' = (\(LeftTB1 (Just i) )-> i ) tbfk
           sel = fmap (\i->  (unSOptional . unAttr .unTB<$> _tbref i) ) . fmap (fmap snd) <$> selks
       (vv ,ct, els) <- inner tbfk' sel fkattr' iold
       l <- flabel # set text (show $ unAttr . unTB <$> fkattr)
@@ -670,10 +670,10 @@ nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lk
       o <- UI.div # set children (l: els)
       let
           fksel = (fmap (fmap (_tb . Attr ) ). makeOptional (fmap (unAttr .unTB) fkattr) <$> vv)
-          bres = (liftA2 (liftA2 (\i -> FKT i refl ksjoin ) ) fksel (makeOptional tbfk <$> ct))
-      paintEdit (getElement l) (makeOptional tbfk <$> facts ct ) (fmap _fkttable  <$> facts selks)
+          bres = (liftA2 (liftA2 (\i -> FKT i refl ksjoin ) ) fksel (Just . LeftTB1 <$> ct))
+      paintEdit (getElement l) (Just. LeftTB1 <$> facts ct ) (fmap _fkttable  <$> facts selks)
       return $ TrivialWidget    bres o
-  | otherwise = error (show attr)-}
+  | otherwise = error (show attr)
   where inner tbfk sel fkattr' iold = mdo
             let
                 o1 = tablePKSet tbfk
