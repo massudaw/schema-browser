@@ -95,8 +95,7 @@ instance  TF.ToField (TB Identity (Key,Showable))  where
   toField (Attr i) = TF.toField (snd i)
   toField (IT [n] (LeftTB1 i)  ) | isKOptional (keyType $ fst $ unAttr $ runIdentity $getCompose $ n) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT [n] ) i
   toField (IT [n] (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  runIdentity.getCompose <$> F.toList  i )
-  toField (IAT [n] [] ) | isKOptional (keyType $ fst $ unAttr $ runIdentity $getCompose $ n) = TF.Plain ( fromByteString "null")
-  toField (IAT [n] is ) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
+  toField (IT [n] (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
 
 
 instance TF.ToField a => TF.ToField (TBRecord a) where
@@ -274,6 +273,7 @@ unIntercalateAtto l s = go l
 subsAKT r t = subs r (fmap ((^. kvKey. pkKey) . _unTB1) t)
   where subs i j = fmap (\r -> (justError "no key Found subs" $ L.find (\i -> fmap fst i == fst r ) i , zipWith (\m n -> justError "no key Found subs" $L.find (\i-> fmap fst i == n) m ) j (snd r) ))
 
+-- parseAttr i | traceShow i False = error ""
 parseAttr (Attr i) = do
   s<- parseShowable (textToPrim <$> keyType i) <?> show i
   return $  Attr (i,s)
@@ -282,13 +282,10 @@ parseAttr (IT i j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j <|>  return ((,SOptional Nothing) <$> j)
   return $ IT  (fmap (,SOptional Nothing) <$> i ) mj
 
-parseAttr (IAT i [t]) = do
-  r <- doublequoted (parseArray ( doublequoted $ parseLabeledTable t)) <|> parseArray (doublequoted $ parseLabeledTable t) <|> pure []
-  return $ IAT (fmap (,SOptional Nothing) <$> i)  r
 
-parseAttr (AKT l refl rel [t]) = do
+parseAttr (AKT l refl rel t) = do
   ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .runIdentity .getCompose  <$> l) (char ',')
-  r <- doublequoted (parseArray ( doublequoted $ parseLabeledTable t)) <|> parseArray (doublequoted $ parseLabeledTable t) <|> pure []
+  r <- doublequoted ( parseLabeledTable t) <|>  parseLabeledTable t
   return $ AKT ml  refl rel  r
 
 parseAttr (FKT l refl rel j ) = do
@@ -298,6 +295,9 @@ parseAttr (FKT l refl rel j ) = do
 
 parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 
+-- parseLabeledTable i | traceShow  i False = error ""
+parseLabeledTable (ArrayTB1 [t]) =
+  ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (fmap makeOpt t))  >>  pure []) <|> pure [])
 parseLabeledTable (LeftTB1 (Just i )) =
   LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (fmap makeOpt i) >> return Nothing))
 

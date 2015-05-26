@@ -149,20 +149,15 @@ data TB f a
   | BaseTable (FTB1 (Compose f (TB f)) a)
   | ArrayRel [TB f a]
   -}
-  | OptionalRel  (Maybe (TB f a))
   | IT
     { _tbref :: ![Compose f (TB f) a]
     , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
-    }
-  | IAT
-    { _tbref :: ![Compose f (TB f) a]
-    , _akttable :: ! [FTB1 (Compose f (TB f)) a]
     }
   | AKT
     { _tbref :: ! [Compose f (TB f) a]
     , _reflexive :: ! Bool
     , _fkrelation :: [(Key,Key)]
-    , _akttable :: ! [FTB1 (Compose f (TB f)) a]
+    , _akttable :: ! (FTB1 (Compose f (TB f)) a)
     }
   | Attr
     { _tbattr :: ! a
@@ -175,6 +170,7 @@ type TB1 = FTB1 (Compose Identity (TB Identity) )
 data FTB1 f a
   = TB1 (KV (f a))
   | LeftTB1 (Maybe (FTB1 f a))
+  | ArrayTB1 [(FTB1 f a)]
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
 
@@ -362,9 +358,8 @@ instance Apply PK where
 instance Apply f => Apply (TB f) where
   Attr a <.>  Attr a1 = Attr $ a a1
   FKT l i m t <.> FKT l1 i1 m1 t1 = FKT (zipWith (<.>) l l1) (i && i1) m1 (t <.> t1)
-  AKT l i m t <.> AKT l1 i1 m1 t1 = AKT (zipWith (<.>) l l1) (i && i1) m1 (zipWith (<.>) t t1)
+  AKT l i m t <.> AKT l1 i1 m1 t1 = AKT (zipWith (<.>) l l1) (i && i1) m1 ((<.>) t t1)
   IT l t <.> IT l1 t1 = IT (zipWith (<.>) l l1) (t <.> t1)
-  IAT l t <.> IAT l1 t1 = IAT (zipWith (<.>) l l1) (zipWith (<.>) t t1)
   l <.> j = error  "cant apply"
 
 type QueryRef = State ((Int,Map Int Table ),(Int,Map Int Key))

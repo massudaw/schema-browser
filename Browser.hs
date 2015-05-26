@@ -306,15 +306,15 @@ testShowable  v s = case s of
       odx "andamentos:andamento_date" -<  t
       odx "andamentos:andamento_description" -<  t
       b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else siapi2  i j  )) -<  (liftA2 (,) protocolo ano )
-      let ao bv =  Just $ TB1 $ KV (PK [] []) ( [iat bv]){- case  (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
+      let ao bv =  Just $ TB1 $ KV (PK [] []) [iat bv]{- case  (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
                     Just i -> Nothing
                     Nothing -> Just $ TB1 $ KV (PK [] []) ( [iat bv])-}
           convertAndamento :: [String] -> TB1 (Text,Showable)
           convertAndamento [da,des] =  TB1 $ fmap (Compose . Identity .Attr ) $ KV (PK [("andamento_date",STimestamp . Finite . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))] [] ) []
           convertAndamento i = error $ "convertAndamento " <> show i
-          iat bv = Compose . Identity $ (IAT
+          iat bv = Compose . Identity $ (IT
                                             [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
-                                            (reverse $  fmap convertAndamento bv))
+                                            (ArrayTB1 $ reverse $  fmap convertAndamento bv))
       returnA -< join  (  ao  .  tailEmpty . concat <$> join b)
 
     elem inf =  fmap (pure. catMaybes) . mapM (\inp -> do
@@ -348,9 +348,9 @@ type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModificat
       let ao bv = {-case  (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
                     Just i -> Nothing
                     Nothing -> -} traceShowId $ Just $ TB1 $ KV (PK [] []) ( [iat bv])
-          iat bv = Compose . Identity $ (IAT
+          iat bv = Compose . Identity $ (IT
                                             [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
-                                            (reverse $ fmap convertAndamento bv))
+                                            (ArrayTB1 $ reverse $ fmap convertAndamento bv))
       returnA -< join  ( ao . fst <$> b)
 
     elem inf =  fmap (pure. catMaybes) . mapM (\inp -> do
@@ -653,9 +653,10 @@ main = do
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
 
-  forkIO $ poller  h siapi3Polling
+  {-forkIO $ poller  h siapi3Polling
   forkIO $ poller  h siapi2Polling
   forkIO $ poller  h artAndamentoPolling
+  -}
 
 
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)
