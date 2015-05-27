@@ -104,7 +104,6 @@ textToPrim "box3d" = PBounding
 textToPrim i = error $ "no case for type " <> T.unpack i
 
 isReflexive (FKT _  r _ _ ) = r
-isReflexive (AKT _  r _ _ ) = r
 isReflexive _ = True
 
 _unlb1 ( TB1  i ) = fmap getCompose i
@@ -147,11 +146,6 @@ transformKey l@(Primitive _)  (KSerial j ) v | j == l  = SSerial $ Just v
 transformKey ki kr v | ki == kr = v
 transformKey ki kr  v = error  ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
 
-
--- Pretty Print Filter
-renderFilter (table ,name,Category i) = rawName table <> "." <> keyValue name <> " IN( " <>  T.intercalate "," (fmap (\s -> "'" <> T.pack (renderShowable $ head (_pkKey s)) <> "'" ) $ S.toList i) <> ")"
-renderFilter (table ,name,And i) =  T.intercalate " AND "  (fmap (renderFilter . (table ,name,)) i)
-
 description (Raw _ _ _ desc _ _ ) = desc
 
 atTables f t@(Raw _ _ _ _ _ _ ) = f t
@@ -187,13 +181,7 @@ showInterval (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> ren
       ocl j = if j then "[" else "("
       ocr j = if j then "]" else ")"
 
-normalizing = (\(Raw _ _ t _ _ _ )-> t)
-alterTableName f = (\(Raw s t p i j l )-> (Raw s (f t)  p i j l))
-tablesName = (\(Raw _ t _ _ _ _ )-> S.singleton t)
 
-
-renderAliasedKey (PathRoot  ,v)  a = renderNamespacedKeySet v <> " AS " <> a
-  where renderNamespacedKeySet (t,k) = rawName t <> "." <> keyValue k
 renderAliasedKey (v ,(t,k)) a = rawName t <> "." <> keyValue k <> " AS " <> a
 
 
@@ -266,21 +254,6 @@ updateAttr conn kv kold t@(Raw sch tbl pk _ _ _) = fmap (,TableModification Noth
     up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = runIdentity . getCompose <$> F.toList (_unTB1 $ tableNonRef kv)
 
-{-
-update
-  :: ToField b =>
-     Connection -> [(Key, b)] -> TB1 (Key, b) -> Table -> IO (GHC.Int.Int64,TableModification b)
-update conn kv kold t@(Raw sch tbl pk _ _ _) = fmap (,TableModification Nothing t (Edit (Just skv) kold  )) $ execute conn (fromString $ traceShowId $ T.unpack up)  (fmap snd skv <> fmap snd koldPk)
-  where
-    koldM = M.fromList (F.toList kold)
-    equality (k,_)= keyValue k <> "="  <> "?"
-    memberPK k = S.member (keyValue $ fst k) (S.fromList $ fmap  keyValue $ S.toList  pk)
-    koldPk = filter memberPK (F.toList kold)
-    pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
-    setter = " SET " <> T.intercalate "," (fmap equality skv )
-    up = "UPDATE " <> rawFullName t <> setter <>  pred
-    skv = nubBy (\(i,j) (k,l) -> i == k)  kv
--}
 
 attrType (Attr i)= keyType (fst i)
 attrType (IT [i] _) = (attrType $ runIdentity $ getCompose i)
@@ -308,37 +281,15 @@ tableNonRef (TB1 (KV (PK l m ) n)  )  = TB1 (KV (PK (fun l) (fun m) ) (fun n))
         nonRef (FKT i True _ _ ) = i
         nonRef (FKT i False _ _ ) = []
         nonRef it@(IT _ _ ) = [Compose $ Identity $ it ]
-        nonRef (AKT i True _ _ ) = i
-        nonRef (AKT i False _ _ ) = []
         fun  = concat . fmap (nonRef . runIdentity . getCompose)
 
 
-{-
-insertPK f conn kva t@(Raw sch tbl pk  _ _ attr ) = case pkListM of
-                                                      Just reti ->  fmap ( zip pkList . head) $ liftIO $ queryWith (f $ Metric <$> pkList) conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")" <> " RETURNING " <>  T.intercalate "," (keyValue <$> reti )  ) (fmap snd  kv)
-                                                      Nothing ->   liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")"   ) (fmap snd  kv) >> return []
-  where pkList = S.toList $ S.filter (isSerial . keyType )  pk
-        pkListM= case pkList of
-                  [] -> Nothing
-                  i -> Just i
-        kv = nub $ filter (\(k,_) -> memberPK k || memberAttr k || memberDesc k) $    kva
-        memberPK k = S.member (keyValue k) (S.fromList $ fmap  keyValue $ S.toList $ S.filter (not . isSerial . keyType ) pk)
-        memberAttr k = S.member (keyValue k) (S.fromList $ fmap  keyValue $ S.toList attr)
-        memberDesc k = S.member (keyValue k) (S.map keyValue $ maybe S.empty S.singleton $ rawDescription t )
-
-getKey  (Raw sch tbl pk desc fk attr) k =  M.lookup k table
-  where table = M.fromList $ fmap (\i-> (keyValue i, i)) $ S.toList (pk <> attr)
--}
 
 isEmptyShowable (SOptional Nothing ) = True
 isEmptyShowable (SSerial Nothing ) = True
 isEmptyShowable i = False
 
-{-
-insert conn kva t@(Raw sch tbl pk desc _ attr ) = execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t  <>" ( " <> T.intercalate "," (fmap (keyValue . fst) kv) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kv) <> ")") (fmap snd kv)
-  where kv = filter (\(k,_) -> S.member k (maybe S.empty S.singleton desc )|| S.member k pk || S.member k attr ) $ filter ( not . isSerial . keyType . fst)  kvb
-        kvb = catMaybes $ fmap (\i-> fmap (,snd i) . getKey t . keyValue . fst $ i  ) kva
--}
+
 
 dropTable r@(Raw sch tbl _ _ _ _ )= "DROP TABLE "<> rawFullName r
 
@@ -369,6 +320,7 @@ unIntercalate pred s                 =  case dropWhile pred s of
                                       where (w, s'') =
                                              break pred s'
 
+
 data Tag = TAttr | TPK
 
 allKVRec  (TB1 (KV (PK k d) e ))= F.foldr zipPK (KV (PK [] []) []) $ (go TPK (\i -> KV (PK i []) []) . runIdentity . getCompose  <$> k) <> (go TAttr (\i-> KV (PK [] i) [] ) . runIdentity . getCompose <$> d) <> ( go TAttr (\i-> KV (PK [] []) i) . runIdentity . getCompose <$> e)
@@ -377,8 +329,6 @@ allKVRec  (TB1 (KV (PK k d) e ))= F.foldr zipPK (KV (PK [] []) []) $ (go TPK (\i
         go  TPK l (FKT _ _ _ tb) =  allKVRec  tb
         go  TAttr l (IT  _ tb) =  l $ F.toList $ allKVRec  tb
         go  TPK l (IT  _ tb) =  allKVRec  tb
-        -- go  TPK l (AKT _ _ _ tb) = concat $  allKVRec <$> tb
-        go  TAttr l (AKT _ _ _ tb) = l $ F.toList . allKVRec $ tb
         go  _ l (Attr a) = l [a]
 
 
@@ -386,38 +336,6 @@ allPKRec  (TB1 (KV (PK k d) i ))=  F.foldr zipPK (PK [] []) $ (go (flip PK []) .
   where zipPK (PK i j) (PK m n) = (PK (i <> m) (j <> n))
         go l (Attr a) = l [a]
 
-
-allAliasedRec i t = tb1Rec False PathRoot i t
-
-tb1Rec isOpt p  invSchema ta@(Raw _ _ k desc fk attr) =
-  let
-      baseCase = KV (PK (fun k) (fun (S.fromList $ F.toList desc)))  (fun (maybe attr (`S.delete` attr) desc))
-      leftFst True keys = fmap (fmap (\((Key a al b c  e) ) -> ( Key a al b c  (KOptional e)))) keys
-      leftFst False keys = keys
-      fun items = fmap (Compose . Identity  ) $ (fmap (Attr . (p,)) $ F.toList $ items `S.difference` fkSet ) <> (fkCase invSchema isOpt p <$> filter (\(Path ifk _ _) -> ifk `S.isSubsetOf` items ) (F.toList fk) )
-      fkSet = S.unions $  fmap (\(Path ifk _ _) -> ifk)  $S.toList fk
-  in leftFst isOpt  $ TB1 baseCase
-
-
-fkCase invSchema isOpt p (Path ifk (FKJoinTable bt kv nt)  o ) = FKT  (Compose . Identity . Attr. (p,) <$>S.toList ifk) True kv (tb1Rec isOptional (aliasKeyValue ifk ) invSchema ((\(Just i)-> i) (M.lookup nt  invSchema )))
-            where isOptional = any (isKOptional . keyType ) (F.toList ifk)
-                  bindMap = M.fromList $ fmap swap kv
-                  aliasKeyValue k =  (PathCons $ S.map (,p) k)
-                  substBind k = case M.lookup k bindMap of
-                                    Just i -> i
-                                    Nothing -> k
-
-recursePath invSchema (Path i (FetchTable t) e)  = Path i (FetchTable nextT) e : recursePaths invSchema nextT
-  where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup t (invSchema))
-recursePath invSchema (Path i (FKJoinTable w ks t) e)  = Path i (FKJoinTable backT ks nextT) e : recursePaths invSchema nextT
-  where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup t (invSchema))
-        backT = (\(Just i)-> i) (M.lookup w (invSchema))
-
-
-recursePaths invSchema (Raw _ _ _ _ fk _ )  = concat $ recursePath invSchema <$> S.toList fk
-
-
-rawLPK t@(Labeled b i ) = (t,) . (\i -> Labeled (keyValue i) (Attr i) ) <$> S.toList (rawPK i)
 
 tableToKV r =   do
   KV (PK (S.toList (rawPK r)) (maybeToList (rawDescription r)) ) (S.toList (rawAttrs r))
@@ -450,12 +368,15 @@ intersectionOpK i j = intersectionOp (keyType i ) (keyType j)
 recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKInlineTable t ) e)
     | any (isArray . keyType ) (S.toList ifk)  =   do
           (bt,ksb,bq) <- labelTable backT
-          return $ ( [Compose $ Labeled ""  $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (ArrayTB1 [ksb])  ]  ,"")
+
+          return $ ( [Compose $ Labeled ""  $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (mapOpt $ ArrayTB1 [ksb])  ]  ,"")
     | otherwise = do
           (bt,ksb,bq) <- labelTable backT
-          return $ ( [Compose $ Labeled ""  $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk ))  ksb  ]  ,"")
+          return $ ( [Compose $ Labeled ""  $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk ))  (mapOpt ksb ) ]  ,"")
     where
         backT = (\(Just i)-> i) (M.lookup t (invSchema))
+        nextLeft = any (isKOptional.keyType) $ S.toList ifk
+        mapOpt i = if nextLeft  then  LeftTB1 $ Just  i else i
 
 recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
     | any (isArray . keyType . fst) (ks)  =   do
@@ -516,8 +437,6 @@ mkTable i = do
   return (c+1)
 
 aliasKeys (t,Labeled  a (Attr (Key n _  _ _ _)))  = label t <> "." <> n <> " as " <> a
-
-nonAliasKeys (t,Labeled a (Attr (Key n _  _ _ _)))  = label t <> "." <> n
 
 aliasTable (Labeled t r) = showTable r <> " as " <> t
 

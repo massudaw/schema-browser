@@ -141,8 +141,6 @@ indexTable (l:xs) t@(TB1 (KV (PK k d)  v))
          Attr l -> return l
          FKT l _ _ j -> indexTable xs j
          IT l j -> indexTable xs j
-         AKT l _ _ j -> indexTable xs j {- let i =  T.traverse (indexTable xs)  j
-                       in liftA2 (,) (Just  (fst $ unAttr $   runIdentity $ getCompose $ head l) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)-}
 indexTable l (ArrayTB1 j) =  liftA2 (,) ((head <$> fmap (fmap fst) i) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
        where i =   T.traverse  (indexTable l) j
 
@@ -177,14 +175,12 @@ findPKM i  = Just $ findPK i
 
 attrNonRec (FKT ifk _ _ _ ) = concat $ fmap kattr ifk
 attrNonRec (IT ifk _ ) = concat $ fmap kattr ifk
-attrNonRec (AKT ifk _ _ _ ) = concat $ fmap kattr ifk
 attrNonRec (Attr i ) = [i]
 
 kattr = kattri . runIdentity . getCompose
 kattri (Attr i ) = [i]
 kattri (FKT i _ _ _ ) =  (L.concat $ kattr  <$> i)
 kattri (IT i  _ ) =  (L.concat $ kattr  <$> i)
-kattri (AKT i _ _ _ ) =  (L.concat $ kattr <$> i)
 
 varT t = join . fmap (unRSOptional'.snd)  <$> idxT t
 varN t = fmap snd  <$> idx t

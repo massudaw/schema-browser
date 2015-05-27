@@ -314,7 +314,7 @@ testShowable  v s = case s of
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
                                             [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
-                                            (ArrayTB1 $ reverse $  fmap convertAndamento bv))
+                                            (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
       returnA -< join  (  ao  .  tailEmpty . concat <$> join b)
 
     elem inf =  fmap (pure. catMaybes) . mapM (\inp -> do
@@ -350,7 +350,7 @@ type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModificat
                     Nothing -> -} traceShowId $ Just $ TB1 $ KV (PK [] []) ( [iat bv])
           iat bv = Compose . Identity $ (IT
                                             [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
-                                            (ArrayTB1 $ reverse $ fmap convertAndamento bv))
+                                            (LeftTB1 $ Just $ ArrayTB1 $ reverse $ fmap convertAndamento bv))
       returnA -< join  ( ao . fst <$> b)
 
     elem inf =  fmap (pure. catMaybes) . mapM (\inp -> do
@@ -598,8 +598,6 @@ checkOutput i = proc t -> do
                    return $ fmap (first (lookKey inf "art")) <$> b)
 
 
-
-
 queryCPFStatefull =  StatefullPlugin "CPF Receita" "owner" [([(True,[["cpf_number"]])],[(False ,[["captchaViewer"]])]),([(True,[["captchaInput"]])],[(True,[["owner_name"]])])]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] cpfCall
 
 
@@ -652,11 +650,11 @@ main = do
     )  sorted
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
-
-  {-forkIO $ poller  h siapi3Polling
+{-
+  forkIO $ poller  h siapi3Polling
   forkIO $ poller  h siapi2Polling
   forkIO $ poller  h artAndamentoPolling
-  -}
+-}
 
 
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)

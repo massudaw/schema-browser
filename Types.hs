@@ -82,12 +82,15 @@ data PK a
 data KV a
   = KV {_kvKey  :: PK a , _kvAttr ::  [a] }deriving(Functor,Foldable,Traversable,Show)
 
+-- Utility functions for kv
 mapKV f (KV (PK l m) n) =  KV (PK (map f l)(map f m)) (map f n)
-
 filterKV i (KV (PK l m) n) = KV (PK (filter i l) (filter i m )) (filter i n)
 findKV i (KV (PK l m) n) =  (L.find i l)  `mplus` (L.find i m ) `mplus` (L.find i n)
 
 
+-- Reference labeling
+-- exchange label reference for values when labeled
+-- inline values reference when unlabeled
 data Labeled l v
   = Labeled
   { label :: l
@@ -96,12 +99,6 @@ data Labeled l v
   | Unlabeled
   { labelValue :: v
   } deriving(Eq,Show,Ord,Foldable,Functor,Traversable)
-
-data AliasPath a
-    = PathCons (Set (a,AliasPath a))
-    | PathRoot
-    deriving(Show,Eq,Ord,Foldable)
-
 
 instance (Functor f,Eq1 f) => Eq1 (TB  f) where
   eq1 i j = i == j
@@ -119,11 +116,6 @@ instance Ord f => Ord1 (Labeled f ) where
 instance Show f => Show1 (Labeled f ) where
   showsPrec1 = showsPrec
 
-data TBRel  i
-  = TBLeft (Maybe (TBRel i))
-  | TBIdent i
-  | TBArray [TBRel i]
-
 type Key = FKey (KType Text)
 
 data FKey a
@@ -135,8 +127,6 @@ data FKey a
     , keyType :: ! a
     }
 
-
-
 data TB f a
   = FKT
     { _tbref :: ![Compose f (TB f) a]
@@ -144,24 +134,16 @@ data TB f a
     , _fkrelation :: [(Key,Key)]
     , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
     }
-  {-| ForeignRel Bool [(Key,Key)] (TB f a)
-  | Relation [Compose f (TB f) a] (TB f a)
-  | BaseTable (FTB1 (Compose f (TB f)) a)
-  | ArrayRel [TB f a]
-  -}
+  -- Foreign Table
   | IT
     { _tbref :: ![Compose f (TB f) a]
     , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
     }
-  | AKT
-    { _tbref :: ! [Compose f (TB f) a]
-    , _reflexive :: ! Bool
-    , _fkrelation :: [(Key,Key)]
-    , _akttable :: ! (FTB1 (Compose f (TB f)) a)
-    }
+  -- Inline Table
   | Attr
     { _tbattr :: ! a
     }
+  -- Attribute
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
 
 type TB1 = FTB1 (Compose Identity (TB Identity) )
@@ -194,7 +176,7 @@ data KPrim
 
 data KType a
    = Primitive a
-   | InlineTable Text Text
+   | InlineTable {- schema -} Text {- tablename -} Text
    | KSerial (KType a)
    | KArray (KType a)
    | KInterval (KType a)
@@ -229,9 +211,7 @@ instance Ord Key where
 
 instance Show Key where
    show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
-   -- show  =  T.unpack .showKey
 showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> {-"::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> -} "::"  <> showTy id (keyType k)
-
 
 newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read)
 
@@ -258,31 +238,12 @@ data Showable
   | SScopedKeySet !(Map Key Showable)
   deriving(Ord,Eq,Show)
 
-data Filter
-   -- Set containement
-   = Category (Set (PK Showable))
-   -- Range Intersection
-   | RangeFilter (Interval.Interval (PK Showable))
-   | And [Filter]
-   | Or [Filter]
-   deriving(Eq,Ord)
-
-instance Show Filter where
-  show (Category i ) = intercalate "," $ fmap show $ S.toList i
-  show (RangeFilter i ) =  show i
-  show (And i ) =  show i
-  show (Or i ) =  show i
-
-instance Monoid Filter where
-  mempty = Category S.empty
-  mappend (Category i ) (Category j ) = Category (S.union i j)
 
 data SqlOperation a
   = FetchTable a
   | FKJoinTable a [(Key,Key)] a
   | FKInlineTable a
   deriving(Eq,Ord,Show,Functor)
-
 
 
 data TableType
@@ -307,8 +268,6 @@ instance Show Table where
 
 tableName = rawName
 translatedName (Raw (_,(_,trans))  t _ _ _ _ ) =  maybe t id trans
-
-
 
 
 data TableModification b
@@ -358,7 +317,6 @@ instance Apply PK where
 instance Apply f => Apply (TB f) where
   Attr a <.>  Attr a1 = Attr $ a a1
   FKT l i m t <.> FKT l1 i1 m1 t1 = FKT (zipWith (<.>) l l1) (i && i1) m1 (t <.> t1)
-  AKT l i m t <.> AKT l1 i1 m1 t1 = AKT (zipWith (<.>) l l1) (i && i1) m1 ((<.>) t t1)
   IT l t <.> IT l1 t1 = IT (zipWith (<.>) l l1) (t <.> t1)
   l <.> j = error  "cant apply"
 
@@ -383,10 +341,7 @@ instance Fractional Showable where
   fromRational i = SDouble (fromRational i)
   recip (SDouble i) = SDouble (recip i)
 
-
-
 makeLenses ''KV
 makeLenses ''PK
 makeLenses ''TB
--- makeLenses ''FTB1
 

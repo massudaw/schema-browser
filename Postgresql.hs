@@ -283,10 +283,6 @@ parseAttr (IT i j) = do
   return $ IT  (fmap (,SOptional Nothing) <$> i ) mj
 
 
-parseAttr (AKT l refl rel t) = do
-  ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .runIdentity .getCompose  <$> l) (char ',')
-  r <- doublequoted ( parseLabeledTable t) <|>  parseLabeledTable t
-  return $ AKT ml  refl rel  r
 
 parseAttr (FKT l refl rel j ) = do
   ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .runIdentity .getCompose  <$> l) (char ',')

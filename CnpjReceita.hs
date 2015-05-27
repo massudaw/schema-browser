@@ -148,15 +148,15 @@ getCnpj'  inf i  handler = do
             cna i = Compose . Identity .  Attr . (lookKey inf "cnae" i ,)
             idx  = SOptional . fmap (SText . TL.pack . head) . flip M.lookup out
             fk i  = Compose . Identity . FKT i True []
-            afk i  = Compose . Identity . AKT i True [] . ArrayTB1
+            afk i  = Compose . Identity . FKT i True [] . LeftTB1 . Just . ArrayTB1
             tb pk desc attr = TB1 $ KV (PK pk desc) attr
-            (pcnae,pdesc) = traceShowId $ (SOptional $   fmap (SText .TL.filter (not . flip L.elem "-.") . fst) t ,  SOptional $  SText .  snd <$>  t)
+            (pcnae,pdesc) = traceShowId $ (justError "wrong primary activity " $ fmap (SText .TL.filter (not . flip L.elem "-.") . fst) t ,  SOptional $  SText .  snd <$>  t)
                 where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)
             scnae = fmap (\t -> ((SText .TL.filter (not . flip L.elem "-.") . fst) t ,    (SText .  snd ) t)) ts
                 where ts = join . maybeToList $ fmap ( TL.breakOn " - " .  TL.pack ) <$> (M.lookup "CÓDIGO E DESCRIÇÃO DAS ATIVIDADES ECONÔMICAS SECUNDÁRIAS" out)
             attrs = tb [] [own "owner_name" (idx "NOME EMPRESARIAL")]
                     [fk [own "address" (SOptional Nothing)]
-                          (fmap (keyOptional ) $ tb [attr "id" (SSerial Nothing) ]
+                          (LeftTB1 $ Just $  tb [attr "id" (SSerial Nothing) ]
                               []
                               [attr "logradouro" (idx "LOGRADOURO")
                               ,attr "number" (idx "NÚMERO")
@@ -169,10 +169,9 @@ getCnpj'  inf i  handler = do
                               ,attr "bounding" (SOptional Nothing)]
                               )
                      ,fk [own "atividade_principal" pcnae]
-                                (first kOptional <$> tb [cna "id" pcnae] [cna "description" pdesc] [] )
+                                (LeftTB1 $ Just $ tb [cna "id" pcnae] [cna "description" pdesc] [] )
                      ,afk [own "atividades_secundarias" pcnae]
-                                (fmap keyOptional <$>
-                                  (\(pcnae,pdesc)-> tb [cna "id" pcnae] [cna "description" pdesc] [] ) <$> scnae)
+                                ((\(pcnae,pdesc)-> tb [cna "id" pcnae] [cna "description" pdesc] [] ) <$> scnae)
 
                     ]
         handler . Just $ traceShowId attrs
