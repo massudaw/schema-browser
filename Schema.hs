@@ -42,19 +42,20 @@ import qualified Data.ByteString.Char8 as BS
 
 
 
-createType :: Unique -> (Text,Text,Maybe Text,Text,Text,Text,Text,Maybe Text,Maybe Text,Maybe Text) -> Key
-createType un (t,c,trans,"tsrange",_,_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "timestamp without time zone"))
-createType un (t,c,trans,"int4range",_,_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "int4"))
-createType un (t,c,trans,"numrange",_,_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "numeric"))
-createType un (t,c,trans,"USER-DEFINED",_,"floatrange",n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "double precision"))
+createType :: Text ->  Unique -> (Text,Text,Maybe Text,Text,Text,Text,Text,Maybe Text,Maybe Text,Maybe Text) -> Key
+createType _ un (t,c,trans,"tsrange",_,_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "timestamp without time zone"))
+createType _ un (t,c,trans,"daterange",_,_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "date"))
+createType _ un (t,c,trans,"int4range",_,_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "int4"))
+createType _ un (t,c,trans,"numrange",_,_,n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "numeric"))
+createType _ un (t,c,trans,"USER-DEFINED",_,"floatrange",n,def,_,_) = (Key   c Nothing trans un (nullable n $ KInterval $ Primitive "double precision"))
 -- Table columns Primitive
-createType un (t,c,trans,"USER-DEFINED",udtschema ,udtname,n,def,_,_) |  udtschema == "incendio" = (Key c Nothing trans un (nullable n $ traceShowId $  InlineTable  udtschema udtname ))
-createType un (t,c,trans,"ARRAY",udtschema ,udtname,n,def,_,_) | udtschema == "incendio" = (Key c Nothing trans un (nullable n $ KArray $ InlineTable  udtschema $T.drop 1 udtname ))
-createType un (t,c,trans,"ARRAY",_,i,n,def,p,_) = (Key   c Nothing trans un (nullable n $ KArray $ (Primitive (T.tail i))))
-createType un (t,c,trans,_,_,"geometry",n,def,p,_) = (Key   c Nothing trans un (nullable n $ Primitive $ (\(Just i) -> i) p))
-createType un (t,c,trans,_,_,"box3d",n,def,p,_) = (Key   c Nothing trans un (nullable n $ Primitive $  "box3d"))
-createType un (t,c,trans,ty,_,_,n,def,_,Just dom ) =(Key c   Nothing trans un (serial def . nullable n $ Primitive dom))
-createType un (t,c,trans,ty,_,_,n,def,_,_) =(Key c   Nothing trans un (serial def . nullable n $ Primitive ty))
+createType s un (t,c,trans,"USER-DEFINED",udtschema ,udtname,n,def,_,_) |  udtschema == s = (Key c Nothing trans un (nullable n $ traceShowId $  InlineTable  udtschema udtname ))
+createType s un (t,c,trans,"ARRAY",udtschema ,udtname,n,def,_,_) | udtschema == s = (Key c Nothing trans un (nullable n $ KArray $ InlineTable  udtschema $T.drop 1 udtname ))
+createType _ un (t,c,trans,"ARRAY",_,i,n,def,p,_) = (Key   c Nothing trans un (nullable n $ KArray $ (Primitive (T.tail i))))
+createType _ un (t,c,trans,_,_,"geometry",n,def,p,_) = (Key   c Nothing trans un (nullable n $ Primitive $ (\(Just i) -> i) p))
+createType _ un (t,c,trans,_,_,"box3d",n,def,p,_) = (Key   c Nothing trans un (nullable n $ Primitive $  "box3d"))
+createType _ un (t,c,trans,ty,_,_,n,def,_,Just dom ) =(Key c   Nothing trans un (serial def . nullable n $ Primitive dom))
+createType _ un (t,c,trans,ty,_,_,n,def,_,_) =(Key c   Nothing trans un (serial def . nullable n $ Primitive ty))
 --createType un v = error $ show v
 
 serial (Just xs ) t = if T.isPrefixOf  "nextval" xs then KSerial t else t
@@ -65,7 +66,8 @@ nullable "NO" t = t
 
 data InformationSchema
   = InformationSchema
-  { keyMap :: Map (Text,Text) Key
+  { schemaName :: Text
+  , keyMap :: Map (Text,Text) Key
   , pkMap :: Map (Set Key) Table
   , tableMap :: Map Text Table
   , hashedGraph :: HashQuery
@@ -84,7 +86,7 @@ foreignKeys = "select origin_table_name,target_table_name,origin_fks,target_fks 
 keyTables :: Connection -> Text -> IO InformationSchema
 keyTables conn schema = do
        uniqueMap <- join $ mapM (\i-> (i,) <$> newUnique) <$>  query conn "select o.table_name,o.column_name from information_schema.tables natural join information_schema.columns o where table_schema = ? "(Only schema)
-       res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? " (Only schema)
+       res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? " (Only schema)
        let keyMap = M.fromList keyList
            keyListSet = groupSplit (\(c,k)-> c) keyList
            keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
@@ -115,7 +117,7 @@ keyTables conn schema = do
            graphP = warshall2 $ graphI
            graph = hashGraph $ graphP
            invgraph = hashGraphInv' $ graphP
-       return  $ InformationSchema i1 i2 i3 graph invgraph graphP M.empty conn
+       return  $ InformationSchema schema i1 i2 i3 graph invgraph graphP M.empty conn
 
 inlineName (KOptional i) = inlineName i
 inlineName (KArray a ) = inlineName a

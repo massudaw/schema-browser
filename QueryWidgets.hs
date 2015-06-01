@@ -575,19 +575,26 @@ fkUITable inf pgs created res plmods  wl oldItems  tb@(FKT ilk refl rel  (LeftTB
     let emptyFKT = (FKT (fmap (,SOptional Nothing)  <$> ilk) refl rel (LeftTB1 Nothing))
     return $ (Just . maybe  emptyFKT (\(FKT ifk refl rel  tb)-> FKT (fmap keyOptional <$> ifk) refl rel (LeftTB1 (Just tb)))) <$> tb
 fkUITable inf pgs created res2 plmods  wl oldItems  tb@(FKT ifk@[_] refl rel  (ArrayTB1 [tb1]) ) = do
+     offset <- UI.input
+     let offsetE =  (filterJust $ readMaybe <$> onEnter offset)
+     offsetB <- stepper 0 offsetE
      let
-         indexItens ix = join . fmap (\(FKT [l] refl _ (ArrayTB1 m) ) -> (\li mi ->  FKT  [li] refl (fmap (first unKArray) rel) mi ) <$> (traverse (indexArray ix)   l) <*> (atMay m ix) )  <$>  oldItems
+         offsetT = tidings offsetB offsetE
+         indexItens ix = (\o -> join . fmap (\(FKT [l] refl _ (ArrayTB1 m)  )  -> (\li mi ->  FKT  [li] refl (fmap (first unKArray) rel) mi ) <$> (traverse (indexArray (ix + o) )   l) <*> (atMay (L.drop o m) ix) ))  <$>  offsetT <*> oldItems
          fkst = FKT (fmap (fmap unKArray ) ifk) refl (fmap (first (unKArray)) rel)  tb1
          rr = tablePKSet tb1
          rp = rootPaths'  (tableMap inf) (fromJust $ M.lookup rr $ pkMap inf )
      res <- liftIO$ queryWith_ (fromAttr (fst rp)) (conn  inf) (fromString $ T.unpack $ snd rp)
-     fks <- mapM (\ix-> fkUITable inf pgs S.empty res (fmap (fmap (  join . fmap (\(ArrayTB1 tbl) -> atMay  tbl ix))) <$> plmods) [] (indexItens ix) fkst ) [0..8]
+     fks <- mapM (\ix-> fkUITable inf pgs S.empty res (fmap (\t -> liftA2 (\o ->   join . fmap (\(ArrayTB1 tbl)-> atMay  tbl (ix + o) )) offsetT t ) <$> plmods ) [] (indexItens ix) fkst ) [0..8]
      l <- flabel # set text (show $ unAttr .unTB <$>   ifk)
      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      dv <- UI.div # set children (getElement <$> fks)
-     fksE <- UI.li # set children (l : [dv])
-     let bres =  fmap (\l -> FKT ( fmap  ( (,SComposite $ V.fromList $  (fmap fst l))) <$> ifk) refl rel (ArrayTB1 $ fmap snd l)) .  allMaybes .  L.takeWhile (maybe False (const True)) <$> Tra.sequenceA (fmap (fmap (\(FKT i _ _ j ) -> (head $ fmap (snd.unAttr.unTB) $ i,  j)) )  . triding <$> fks)
-     paintEdit (getElement l) (facts bres) (facts oldItems)
+     fksE <- UI.li # set children (l : offset: [dv])
+
+     let bres2 =    allMaybes .  L.takeWhile (maybe False (const True)) <$> Tra.sequenceA (fmap (fmap (\(FKT i _ _ j ) -> (head $ fmap (snd.unAttr.unTB) $ i,  j)) )  . triding <$> fks)
+         bres = (\ o -> liftA2 (\l (FKT [lc] refl rel (ArrayTB1 m )) -> FKT ( fmap  ( (,SComposite $ V.fromList $  ((L.take o $ F.toList $ unSComposite $snd $ (unAttr $ runIdentity $ getCompose lc)  )<> fmap fst l <> (L.drop (o + 9 )  $ F.toList $ unSComposite $snd $ (unAttr $ runIdentity $ getCompose lc)  )))) <$> ifk) refl rel (ArrayTB1 $ L.take o m <> fmap snd l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> oldItems
+         --bresOld =(\ o -> fmap (\ (FKT [lc] refl rel (ArrayTB1 m )) -> FKT ( fmap  ( (,SComposite $ V.fromList $  ((L.drop (o + 9) $ F.toList $ unSComposite $snd $ (unAttr $ runIdentity $ getCompose lc)  )))) <$> ifk) refl rel (ArrayTB1 $ L.drop (o + 9 ) m ))) <$> offsetT <*> oldItems
+     paintEdit (getElement l) (facts bres) (facts oldItems )
      return $  TrivialWidget bres  fksE
 fkUITable  _ _ _ _  _ _ _ _ = errorWithStackTrace "akUITable not implemented"
 

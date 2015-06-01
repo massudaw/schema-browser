@@ -323,6 +323,7 @@ unIntercalate pred s                 =  case dropWhile pred s of
 
 data Tag = TAttr | TPK
 
+-- allKVRec  i | traceShow i False = error "error"
 allKVRec  (TB1 (KV (PK k d) e ))= F.foldr zipPK (KV (PK [] []) []) $ (go TPK (\i -> KV (PK i []) []) . runIdentity . getCompose  <$> k) <> (go TAttr (\i-> KV (PK [] i) [] ) . runIdentity . getCompose <$> d) <> ( go TAttr (\i-> KV (PK [] []) i) . runIdentity . getCompose <$> e)
   where zipPK (KV (PK i j) k) (KV (PK m n) o) = KV (PK (i <> m) (j <> n)) (k <> o )
         go  TAttr l (FKT _ _ _ tb) =  l $ F.toList $ allKVRec  tb
@@ -365,18 +366,13 @@ isPathReflexive (FKInlineTable _)= True
 intersectionOpK i j = intersectionOp (keyType i ) (keyType j)
 
 
-recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKInlineTable t ) e)
-    | any (isArray . keyType ) (S.toList ifk)  =   do
+recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKInlineTable t ) e) = do
           (bt,ksb,bq) <- labelTable backT
-
-          return $ ( [Compose $ Labeled ""  $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (mapOpt $ ArrayTB1 [ksb])  ]  ,"")
-    | otherwise = do
-          (bt,ksb,bq) <- labelTable backT
-          return $ ( [Compose $ Labeled ""  $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk ))  (mapOpt ksb ) ]  ,"")
+          return $ ( [Compose $ Labeled ""  $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk ))  (mapOpt $ mapArray ksb ) ]  ,"")
     where
-        backT = (\(Just i)-> i) (M.lookup t (invSchema))
-        nextLeft = any (isKOptional.keyType) $ S.toList ifk
-        mapOpt i = if nextLeft  then  LeftTB1 $ Just  i else i
+        mapArray i =  if any (isArray . keyType ) (S.toList ifk) then ArrayTB1 [i] else i
+        mapOpt i = if any (isKOptional.keyType) (S.toList ifk) then  LeftTB1 $ Just  i else i
+        backT = justError "recursepath lookIT " (M.lookup t (invSchema))
 
 recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
     | any (isArray . keyType . fst) (ks)  =   do
@@ -391,7 +387,7 @@ recursePath' isLeft (ksbn,bn) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           kas <- kname tas  knas
           let relLabel = fkm (F.toList $ unlb1 $ ksb) (F.toList $ unlb1 ksn)
           let jt = if nextLeft  then " LEFT JOIN " else " JOIN "
-              query =  jt <> "(SELECT " <> T.intercalate "," (label <$> pksb) <> "," <> "array_agg((" <> (T.intercalate ","  (fmap explodeLabel $ (F.toList $ unlb1 $ tb ) )) <> " )order by arrrow) as " <> label (snd kas) <> " FROM " <> bq <> (jt <> " LATERAL ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (head (look (fst <$> ks) (F.toList$ unlb1 ksb) ))  <> ") as arr) as z1 "  <> jt <> nq  <> " ON " <>  label (head (look (snd <$> ks) (F.toList $ unlb1 ksn) )) <> " = arr ) as z1 ON true " <>  q <>   " GROUP BY " <>  T.intercalate "," (label <$> pksb ) <> ") as " <>  label tas  <> " ON " <>  joinLPredicate (zip ksbn pksb))
+              query =  jt <> "(SELECT " <> T.intercalate "," (label <$> pksb) <> "," <> "array_agg(ROW(" <> (T.intercalate ","  (fmap explodeLabel $ (F.toList $ unlb1 $ tb ) )) <> " )order by arrrow) as " <> label (snd kas) <> " FROM " <> bq <> (jt <> " LATERAL ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (head (look (fst <$> ks) (F.toList$ unlb1 ksb) ))  <> ") as arr) as z1 "  <> jt <> nq  <> " ON " <>  label (head (look (snd <$> ks) (F.toList $ unlb1 ksn) )) <> " = arr ) as z1 ON true " <>  q <>   " GROUP BY " <>  T.intercalate "," (label <$> pksb ) <> ") as " <>  label tas  <> " ON " <>  joinLPredicate (zip ksbn pksb))
           return $ ([Compose $ Labeled (label $ snd kas) (FKT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo ) ks  (mapOpt $ ArrayTB1 [tb  ])) ] , query)
 
     | otherwise = do
@@ -452,9 +448,9 @@ tname i = do
 
 explodeLabel :: Labeled Text (TB (Labeled Text) Key) -> Text
 explodeLabel (Labeled l (Attr _)) = l
-explodeLabel (Labeled l (IT i t )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i))--  <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel $ unlb1 t))  <> ")"
+explodeLabel (Labeled l (IT i t )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i))
 explodeLabel (Labeled l (FKT i _ _ _ )) = T.intercalate "," (( F.toList $ (explodeLabel. getCompose ) <$> i)) <> "," <> l
-explodeLabel (Unlabeled (FKT i refl rel t )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i)) <> ",(" <> T.intercalate "," (( F.toList $ fmap explodeLabel $ unlb1 t))  <> ")"
+explodeLabel (Unlabeled (FKT i refl rel t )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i)) <> ", ROW(" <> T.intercalate "," (( F.toList $ fmap explodeLabel $ unlb1 t))  <> ")"
 
 unTlabel (TB1 kv)  = TB1 $ fmap (Compose . Identity .unlabel) $ fmap getCompose kv
 unTlabel (LeftTB1 kv)  = LeftTB1 $ fmap unTlabel kv
@@ -469,6 +465,7 @@ relabel = Compose . Identity . unlabel.getCompose
 
 type TBLabel =  Compose (Labeled Text) (TB (Labeled Text))
 type TBIdent =  Compose Identity  (TB Identity )
+
 allRec'
   :: Map Text Table
      -> Table
@@ -488,7 +485,7 @@ rootPaths' invSchema r@(Raw _ _ _ _ fk _ ) = (\(i,j) -> (unTlabel i,j ) ) $ fst 
                   return (attrs <> (concat $ fst <$> pt), snd <$> pt)
       nkv pk desc attr = (TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
   (tb,js) <-liftA3 nkv (fun $ fmap getCompose npk) (fun $ fmap getCompose ndesc) (fun $ fmap getCompose nattr)
-  return ( tb , "SELECT (" <> T.intercalate "," (fmap explodeLabel $ (F.toList $ unlb1 tb))  <> (") FROM " <> q ) <> js)
+  return ( tb , "SELECT ROW(" <> T.intercalate "," (fmap explodeLabel $ (F.toList $ unlb1 tb))  <> (") FROM " <> q ) <> js)
 
 
 justError e (Just i) = i

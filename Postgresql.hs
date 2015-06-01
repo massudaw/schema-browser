@@ -44,6 +44,7 @@ import qualified Data.ByteString.Char8 as BS
 
 import Data.Monoid
 import Data.Time.Parse
+import Prelude hiding (takeWhile)
 
 import System.IO.Unsafe
 import Debug.Trace
@@ -93,9 +94,10 @@ deriving instance Traversable Interval
 
 instance  TF.ToField (TB Identity (Key,Showable))  where
   toField (Attr i) = TF.toField (snd i)
-  toField (IT [n] (LeftTB1 i)  ) | isKOptional (keyType $ fst $ unAttr $ runIdentity $getCompose $ n) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT [n] ) i
+  toField (IT [n] (LeftTB1 i)  ) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT [n] ) i
   toField (IT [n] (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  runIdentity.getCompose <$> F.toList  i )
   toField (IT [n] (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
+  toField e = errorWithStackTrace (show e)
 
 
 instance TF.ToField a => TF.ToField (TBRecord a) where
@@ -145,11 +147,11 @@ instance TF.ToField (UnQuoted Position) where
     where del = TF.Plain $ fromChar ','
           str = TF.Plain . fromByteString
 
-instance TF.ToField a => TF.ToField (Interval.Interval a) where
+instance TF.ToField (UnQuoted a) => TF.ToField (Interval.Interval a) where
   toField = intervalBuilder
 
-instance TF.ToField a => TF.ToField (UnQuoted (Interval.Extended a )) where
-  toField (UnQuoted (ER.Finite i)) = TF.toField i
+instance TF.ToField (UnQuoted a) => TF.ToField (UnQuoted (Interval.Extended a )) where
+  toField (UnQuoted (ER.Finite i)) = TF.toField (UnQuoted i)
 
 intervalBuilder i =  TF.Many [TF.Plain $ fromByteString ("\'"  <> lbd (snd $ Interval.lowerBound' i)) ,  TF.toField $  (UnQuoted $ Interval.lowerBound i) , TF.Plain $ fromChar ',' , TF.toField  (UnQuoted $ Interval.upperBound i) , TF.Plain $ fromByteString (ubd (snd $ Interval.upperBound' i) <> "\'")]
     where lbd True  =  "["
@@ -282,8 +284,6 @@ parseAttr (IT i j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j <|>  return ((,SOptional Nothing) <$> j)
   return $ IT  (fmap (,SOptional Nothing) <$> i ) mj
 
-
-
 parseAttr (FKT l refl rel j ) = do
   ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .runIdentity .getCompose  <$> l) (char ',')
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j
@@ -293,35 +293,31 @@ parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 
 -- parseLabeledTable i | traceShow  i False = error ""
 parseLabeledTable (ArrayTB1 [t]) =
-  ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (fmap makeOpt t))  >>  pure []) <|> pure [])
+  ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (fmap makeOpt t))  >>  return [] ) <|> return []  )
 parseLabeledTable (LeftTB1 (Just i )) =
-  LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (fmap makeOpt i) >> return Nothing))
-
+  LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (fmap makeOpt i) >> return Nothing) )
 parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
   im <- unIntercalateAtto (fmap (Compose . Identity) . parseAttr .runIdentity . getCompose <$> (i <> d <> m) ) (char ',')
   return (TB1 (KV ( PK (L.take (length i) im ) (L.take (length d) $L.drop (length i) $  im))(L.drop (length i + length d) im)) )) <*  char ')' )
 
-
--- | Recognizes a quoted string.
-doublequoted' :: Parser a -> Parser a
-doublequoted'  p = takeWhile1 (flip elem "\"\\")  *> p <* takeWhile1 (flip elem "\"\\")
---
+{-
 quotedRec :: Char -> Parser a -> Parser a
 quotedRec c  p =  char c  *>  inner <* char c
   where inner = (quotedRec c p <|> p)
+-}
 
 doublequoted :: Parser a -> Parser a
-doublequoted  p =  (char '\"'  <|> char '\\') *>  inner <* (char '\"' <|> char '\\')
-  where inner = (doublequoted p <|> p)
-
+doublequoted  p =   (takeWhile (== '\\') >>  char '\"') *>  inner <* ( takeWhile (=='\\') >> char '\"')
+  where inner = doublequoted p <|> p
 parseShowable
   :: KType KPrim
        -> Parser Showable
+-- parseShowable  i | traceShow i False = error ""
 parseShowable (Primitive i ) =  (do
    case i of
         PMime _ -> let
               pr = SBinary . fst . B16.decode . BS.drop 3   <$>  plain' "\",)}"
-                in (quotedRec '"') pr <|> pr
+                in (doublequoted ) pr <|> pr
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
@@ -566,7 +562,7 @@ instance F.FromField a => F.FromField (Only a) where
 
 fromAttr foldable = do
     let parser  = parseLabeledTable foldable -- <|> doublequoted (parseLabeledTable foldable)
-    FR.fieldWith (\i j -> case traverse (parseOnly   parser) j of
+    FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
                                (Right (Just r ) ) -> return r
                                Right Nothing -> error (show j )
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )

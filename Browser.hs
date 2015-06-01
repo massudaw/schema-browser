@@ -202,14 +202,14 @@ chooserKey inf kitems i = do
   filterInpBh <- stepper "" (onEnter filterInp)
 
   let rp = rootPaths'  (tableMap inf) (justError "no table" $ M.lookup "ordering" $ tableMap inf )
-  i <-liftIO $  queryWith_ (fromAttr (fst rp) ) (conn inf) (traceShowId $ fromString $ T.unpack $ snd rp)
-  let orderMap = Just $ M.fromList $ (\t ->  (\(l,m) -> ((\(SText k) -> k) $ snd l ,(\(SNumeric n ) -> n) $ snd m)) $ (justError "nokey table" $ L.find ((=="table_name").keyValue . fst ) $ F.toList t, justError "no key usage" $ L.find ((=="usage").keyValue . fst ) $ F.toList $ t)).fmap (unAttr.runIdentity.getCompose) . (\(TB1 (KV (PK [i] []) [d])) -> [i ,d]) <$> i
+  i :: [(Text,Int)] <- liftIO $ query (conn inf) (fromString "SELECT table_name,usage from metadata.ordering where schema_name = ?") (Only (schemaName inf))
+  let orderMap = Just $ M.fromList  i
   bset <- buttonFSet  (L.sortBy (flip $  comparing (\ pkset -> liftA2 M.lookup  (fmap rawName . flip M.lookup (pkMap inf) $ pkset ) orderMap)) kitems)  initKey ((\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> i) ))<$> filterInpBh) (\i -> case M.lookup i (pkMap inf) of
                                        Just t -> T.unpack (translatedName t)
                                        Nothing -> showVertex i )
   let bBset = triding bset
   onEvent (rumors bBset) (\ i ->
-      liftIO $ execute (conn inf) ("UPDATE incendio.ordering SET usage = usage + 1 where table_name = ? ") (Only ( fmap rawName $ M.lookup i (pkMap inf)) )
+      liftIO $ execute (conn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
   body <- UI.div # sink items (facts (pure . chooseKey inf <$> bBset ))
   UI.div # set children [filterInp,getElement bset, body]
@@ -232,11 +232,11 @@ chooseKey inf key = mdo
 
   let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
 
-  let sortSet = filter (filterIntervalSort . keyType ) . F.toList . tableNonRec  . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) <$> bBset
+  let sortSet = {-filter (filterIntervalSort . keyType ) .-} F.toList . tableNonRec  . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) <$> bBset
       filterIntervalSort (KInterval i) = False
       filterIntervalSort (KOptional i) = filterIntervalSort i
       filterIntervalSort i = True
-  sortList  <- multiListBox sortSet (F.toList <$> bBset) {-(pure id)-} (pure (line . show))
+  sortList  <- multiListBox sortSet (F.toList <$> bBset) (pure (line . show))
   asc <- checkedWidget (pure True)
   let
       filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd)
@@ -306,9 +306,9 @@ testShowable  v s = case s of
       odx "andamentos:andamento_date" -<  t
       odx "andamentos:andamento_description" -<  t
       b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else siapi2  i j  )) -<  (liftA2 (,) protocolo ano )
-      let ao bv =  Just $ TB1 $ KV (PK [] []) [iat bv]{- case  (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
+      let ao bv =   case  join (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
                     Just i -> Nothing
-                    Nothing -> Just $ TB1 $ KV (PK [] []) ( [iat bv])-}
+                    Nothing -> Just $ TB1 $ KV (PK [] []) ( [iat bv])
           convertAndamento :: [String] -> TB1 (Text,Showable)
           convertAndamento [da,des] =  TB1 $ fmap (Compose . Identity .Attr ) $ KV (PK [("andamento_date",STimestamp . Finite . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))] [] ) []
           convertAndamento i = error $ "convertAndamento " <> show i
@@ -345,9 +345,9 @@ type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModificat
       b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= 14 then  return Nothing else siapi3  i j k )) -<   (liftA3 (,,) protocolo ano cpf)
       let convertAndamento [_,da,desc,s,sta] = TB1 $ fmap (Compose . Identity .Attr ) $ KV (PK [("andamento_date",STimestamp . Finite .  fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)] []) []
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
-      let ao bv = {-case  (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
-                    Just i -> Nothing
-                    Nothing -> -} traceShowId $ Just $ TB1 $ KV (PK [] []) ( [iat bv])
+      let ao bv = case  join $ (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
+                    Just i ->  Nothing
+                    Nothing ->  Just $ TB1 $ KV (PK [] []) ( [iat bv])
           iat bv = Compose . Identity $ (IT
                                             [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
                                             (LeftTB1 $ Just $ ArrayTB1 $ reverse $ fmap convertAndamento bv))
@@ -580,9 +580,9 @@ checkOutput i = proc t -> do
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       v <- act (fmap (join .maybeToList) . traverse (\(i, (j, k,a)) -> creaConsultaArt  j k a i ) ) -< liftA2 (,) i r
-      let artVeri d = ("verified_date" ,SOptional $ fmap (STimestamp . Finite . fst) $ strptime "%d/%m/%Y %H:%M" ( d !!1) )
-          artPayd d = ("payment_date" ,SOptional $ fmap (STimestamp . Finite . fst )  $ strptime "%d/%m/%Y %H:%M" (d !!1) )
-          artInp inp = Just $ TB1 $ KV (PK [] [] ) $fmap (Compose . Identity . Attr ) $ catMaybes [artVeri <$>  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd <$> L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
+      let artVeri dm = ("verified_date" ,) . SOptional . join $(\d ->  fmap (STimestamp . Finite . fst) $ strptime "%d/%m/%Y %H:%M" ( d !!1) ) <$> dm
+          artPayd dm = ("payment_date" ,) . SOptional . join $ (\d -> fmap (STimestamp . Finite . fst )  $ strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
+          artInp inp = Just $ TB1 $ KV (PK [] [] ) $fmap (Compose . Identity . Attr ) $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       i <- checkOutput "verified_date" -< (t,artInp v)
       j <- checkOutput "payment_date" -< (t,artInp v)
       returnA -< (catMaybes [i, j] )
@@ -650,11 +650,11 @@ main = do
     )  sorted
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
-{-
+
   forkIO $ poller  h siapi3Polling
   forkIO $ poller  h siapi2Polling
   forkIO $ poller  h artAndamentoPolling
--}
+
 
 
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)
@@ -704,12 +704,13 @@ layout  infT = do
   script <- UI.div # sink UI.html (maybe "" draw <$> infT)
   UI.div # set children [vis,script]
 
-
-testFireQuery q = withConnInf "incendio" (\inf -> do
+testParse sch q = withConnInf sch (\inf -> do
                                        let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                        putStrLn (  show rpq)
                                        putStrLn (  show rp)
                                        q <- queryWith_ (fromAttr (rp) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        putStrLn$  unlines $ fmap show q
                                            )
+testFireQuery q = testParse "incendio"  q
+testAcademia q = testParse "academia"  q
 
