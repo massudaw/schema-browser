@@ -137,6 +137,7 @@ data TB f a
   -- Foreign Table
   | IT
     { _tbref :: ![Compose f (TB f) a]
+    , ittableName :: Text
     , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
     }
   -- Inline Table
@@ -317,7 +318,7 @@ instance Apply PK where
 instance Apply f => Apply (TB f) where
   Attr a <.>  Attr a1 = Attr $ a a1
   FKT l i m t <.> FKT l1 i1 m1 t1 = FKT (zipWith (<.>) l l1) (i && i1) m1 (t <.> t1)
-  IT l t <.> IT l1 t1 = IT (zipWith (<.>) l l1) (t <.> t1)
+  IT l n t <.> IT l1 n1 t1 = IT (zipWith (<.>) l l1) n1 (t <.> t1)
   l <.> j = error  "cant apply"
 
 type QueryRef = State ((Int,Map Int Table ),(Int,Map Int Key))

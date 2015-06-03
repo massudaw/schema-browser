@@ -280,7 +280,7 @@ tableNonRef (TB1 (KV (PK l m ) n)  )  = TB1 (KV (PK (fun l) (fun m) ) (fun n))
   where nonRef i@(Attr _ ) = [Compose $ Identity $ i]
         nonRef (FKT i True _ _ ) = i
         nonRef (FKT i False _ _ ) = []
-        nonRef it@(IT _ _ _ ) = [Compose $ Identity $ it ]
+        nonRef it@(IT i j k ) = [Compose $ Identity $ (IT  i j (tableNonRef k )) ]
         fun  = concat . fmap (nonRef . runIdentity . getCompose)
 
 
@@ -388,7 +388,7 @@ recursePath' isLeft (ksbn,_) invSchema (Path ifk jo@(FKInlineTable t ) e)
               nkv pk desc attr = (mapOpt $ TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
           (tb,q) <-liftA3 nkv (fun ksn $ fmap getCompose npk) (fun ksn $ fmap getCompose ndesc) (fun ksn $ fmap getCompose nattr)
           let jt = if nextLeft  then " LEFT JOIN " else " JOIN "
-          return $ ( [Compose $ Unlabeled $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (tableName nextT)   (mapOpt $ mapArray tb) ]  ,q)
+          return $ ( [Compose $ Unlabeled $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (tableName nextT)   (mapOpt tb) ]  ,q)
     where
         nextLeft =  isLeft || any (isKOptional.keyType) (S.toList ifk)
         mapArray i =  if any (isArray . keyType ) (S.toList ifk) then ArrayTB1 [i] else i

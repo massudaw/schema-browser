@@ -87,31 +87,34 @@ keyTables :: Connection -> Text -> IO InformationSchema
 keyTables conn schema = do
        uniqueMap <- join $ mapM (\i-> (i,) <$> newUnique) <$>  query conn "select o.table_name,o.column_name from information_schema.tables natural join information_schema.columns o where table_schema = ? "(Only schema)
        res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? " (Only schema)
-       let keyMap = M.fromList keyList
-           keyListSet = groupSplit (\(c,k)-> c) keyList
-           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
        let
-        lookupKey' :: Functor f => f (Text,Text) -> f (Text,Key)
-        lookupKey' = fmap  (\(t,c)-> (t,(\(Just i) -> i) $ M.lookup (t,c) keyMap) )
-        lookupKey2 :: Functor f => f (Text,Text) -> f Key
-        lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) keyMap )
-        readTT :: Text ->  TableType
-        readTT "BASE TABLE" = ReadWrite
-        readTT "VIEW" = ReadOnly
-        readTT i =  error $ T.unpack i
+          keyMap = M.fromList keyList
+          keyListSet = groupSplit (\(c,k)-> c) keyList
+          keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
+       let
+          lookupKey3 :: (Functor  g, Functor f) => f (Text,g Text) -> f (Text,g Key)
+          lookupKey3 = fmap  (\(t,c)-> (t,fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap) c) )
+          lookupKey' :: Functor f => f (Text,Text) -> f (Text,Key)
+          lookupKey' = fmap  (\(t,c)-> (t,(\(Just i) -> i) $ M.lookup (t,c) keyMap) )
+          lookupKey2 :: Functor f => f (Text,Text) -> f Key
+          lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) keyMap )
+          readTT :: Text ->  TableType
+          readTT "BASE TABLE" = ReadWrite
+          readTT "VIEW" = ReadOnly
+          readTT i =  error $ T.unpack i
        descMap <- M.fromList . fmap  (\(t,c)-> (t,(\(Just i) -> i) $ M.lookup (t,c) keyMap) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
        transMap <- M.fromList   <$> query conn "SELECT table_name,translation FROM metadata.table_name_translation WHERE schema_name = ? " (Only schema)
-       res <- lookupKey' <$> query conn "SELECT table_name,column_name FROM information_schema.key_column_usage natural join information_schema.table_constraints WHERE table_schema = ?  AND constraint_type='PRIMARY KEY' union select table_name,unnest(pk_column) as column_name from metadata.view_pk where table_schema = ?" (schema,schema) :: IO [(Text,Key)]
+       res <- traceShowId . lookupKey3 <$> query conn "SELECT table_name,pks FROM metadata.pks  where schema_name = ?" (Only schema) :: IO [(Text,Vector Key )]
        resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM information_schema.tables where table_schema = ? " (Only schema) :: IO (Map Text TableType)
        let lookFk t k =V.toList $ lookupKey2 (fmap (t,) k)
        fks <- M.fromListWith S.union . fmap (\i@(tp,tc,kp,kc) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) (FKJoinTable tp (zip (lookFk tp kp ) (lookFk tc kc)) tc) (S.fromList $ lookFk tc kc))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation Text ) )))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  res2 :: Map Text (Set Key)
-           pks =  fmap (\(c,l)-> let
-                                  pks = S.fromList $ fmap snd l
+           pks =  traceShowId $ (\(c,pksl)-> let
+                                  pks = S.fromList $ F.toList pksl
                                   inlineFK =  (fmap (\k -> (\t -> Path (S.singleton k ) (FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList  )<$> (M.lookup c all)
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $maybeToList $ M.lookup c descMap) <> pks)
-                                in (pks ,Raw (schema , ((\(Just i) -> i) $ M.lookup c resTT, M.lookup c transMap) ) c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK  ) attr )) $ groupSplit (\(t,_)-> t)  res :: [(Set Key,Table)]
-       let ret@(i1,i2,i3) = (keyMap, M.fromList  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
+                                in (pks ,Raw (schema , ((\(Just i) -> i) $ M.lookup c resTT, M.lookup c transMap) ) c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK  ) attr )) <$> res :: [(Set Key,Table)]
+       let ret@(i1,i2,i3) = (keyMap, M.fromList $ filter (not.S.null .fst)  pks,traceShowId $  M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        paths <- schemaKeys' conn schema ret
        let graphI =  graphFromPath (filter (\i -> fst (pbound i) /= snd (pbound i) ) $ paths <> (fmap (fmap ((\(Just i) -> i) . flip M.lookup i3)) <$> concat (fmap (F.toList.snd) (M.toList fks))))
            graphP = warshall2 $ graphI
@@ -159,7 +162,6 @@ lookTable inf t = justError ("no table: " <> T.unpack t) $ M.lookup t (tableMap 
 
 lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k ) $ M.lookup (t,k) (keyMap inf)
-
 
 
 newKey name ty = do

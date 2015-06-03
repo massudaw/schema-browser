@@ -232,10 +232,7 @@ chooseKey inf key = mdo
 
   let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
 
-  let sortSet = {-filter (filterIntervalSort . keyType ) .-} F.toList . tableNonRec  . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) <$> bBset
-      filterIntervalSort (KInterval i) = False
-      filterIntervalSort (KOptional i) = filterIntervalSort i
-      filterIntervalSort i = True
+  let sortSet =  F.toList . tableNonRec  . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) <$> bBset
   sortList  <- multiListBox sortSet (F.toList <$> bBset) (pure (line . show))
   asc <- checkedWidget (pure True)
   let
@@ -314,6 +311,7 @@ testShowable  v s = case s of
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
                                             [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
+                                            "fire_project_event"
                                             (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
       returnA -< join  (  ao  .  tailEmpty . concat <$> join b)
 
@@ -350,6 +348,7 @@ type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModificat
                     Nothing ->  Just $ TB1 $ KV (PK [] []) ( [iat bv])
           iat bv = Compose . Identity $ (IT
                                             [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
+                                            "fire_project_event"
                                             (LeftTB1 $ Just $ ArrayTB1 $ reverse $ fmap convertAndamento bv))
       returnA -< join  ( ao . fst <$> b)
 
@@ -651,9 +650,10 @@ main = do
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
 
-  forkIO $ poller  h siapi3Polling
+{-  forkIO $ poller  h siapi3Polling
   forkIO $ poller  h siapi2Polling
   forkIO $ poller  h artAndamentoPolling
+  -}
 
 
 

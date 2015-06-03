@@ -89,7 +89,7 @@ getCpf'  inf i  handler = do
       outM <- fmap (join . fmap headMay.join) . Tra.traverse getCpfShowable $  mvar
       maybe (return ()) (\out-> do
           let attr i = Compose . Identity .  Attr . (lookKey inf "owner" i ,)
-          handler . Just . (TB1 .KV (PK [][]) . pure . attr "owner_name" . SOptional .Just . SText . TL.pack ) $ out
+          handler . Just $ (TB1 $ KV (PK [] . pure . attr "owner_name" . SOptional .Just . SText . TL.pack  $ out) [] )
           return ()) outM ) rv
   return ()
 
