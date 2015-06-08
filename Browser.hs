@@ -650,9 +650,6 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
         loop
   loop
 
-
-
-
 layout  infT = do
   vis <- UI.div # set UI.id_ "visualization"
   let draw inf  =

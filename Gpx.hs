@@ -22,9 +22,9 @@ import Text.XML.HXT.Core
 
 import qualified Data.List as L
 
-import qualified Data.ByteString as BS
-import qualified Data.Text.Encoding as TE
-import qualified Data.Text as TE
+-- import qualified Data.ByteString as BS
+-- import qualified Data.Text.Encoding as TE
+-- import qualified Data.Text as TE
 
 import Database.PostgreSQL.Simple.Time
 
@@ -107,6 +107,7 @@ triml = dropWhile (`elem` " \r\n\t")
 trimr :: String -> String
 trimr = reverse . triml . reverse
 
+{-
 testCpfName = do
   kk <- BS.readFile "cpf_name.html"
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
@@ -140,7 +141,7 @@ readSiapi3Solicitacao file = do
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
           >>> deep (hasAttrValue "id" (=="formListaDeAndamentos:tabela")) >>> getTable' txt
   tail .head <$> runX arr
-
+-}
 
 readSiapi3Andamento file = do
   let

@@ -23,7 +23,7 @@ import Data.Time.Parse
 import           Database.PostgreSQL.Simple.Arrays as Arrays
 import           Database.PostgreSQL.Simple.Types as PGTypes
 import Data.Graph(stronglyConnComp,flattenSCCs)
-import           Data.Attoparsec.Char8 hiding (Result)
+import           Data.Attoparsec.ByteString.Char8 hiding (Result)
 import Data.Traversable (Traversable,traverse)
 import qualified Data.Traversable  as Tra
 import Warshal
@@ -478,7 +478,7 @@ plain' :: String -> Parser BS.ByteString
 plain' delim = takeWhile1 (notInClass (delim ))
 
 plain0' :: String -> Parser BS.ByteString
-plain0' delim = Data.Attoparsec.Char8.takeWhile (notInClass (delim ))
+plain0' delim = Data.Attoparsec.ByteString.Char8.takeWhile (notInClass (delim ))
 
 parseInter token = do
     lb <- (char '[' >> return True) <|> (char '(' >> return False)
