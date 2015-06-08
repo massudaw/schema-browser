@@ -14,9 +14,6 @@ import Data.Set (Set)
 import qualified Data.List as L
 import qualified Data.Vector as Vector
 
-import Control.Arrow.Transformer.Static
-import Control.Monad
-import Control.Monad.IO.Class
 import Control.Arrow
 import Control.Category (Category(..),id)
 import Prelude hiding((.),id)
@@ -24,10 +21,8 @@ import Data.Monoid
 import Control.Monad
 import qualified Data.Bifunctor as BF
 
-import Safe
 import qualified Data.Traversable as T
 
-import Debug.Trace
 deriving instance Functor m => Functor (Kleisli m i )
 
 data Step a

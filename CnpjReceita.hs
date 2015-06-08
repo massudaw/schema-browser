@@ -6,18 +6,13 @@ import qualified Network.Wreq.Session as Sess
 
 import OpenSSL.Session (context)
 import Network.HTTP.Client.OpenSSL
-import Network.HTTP.Client.TLS
-import Network.HTTP.Client (defaultManagerSettings, managerResponseTimeout)
 
 import Control.Lens hiding (element,set,get,(#))
 import Control.Applicative
-import Data.Char
 import Control.Monad
 import Data.Maybe
 import Data.Monoid
 import Data.Functor.Compose
-import Data.Functor.Identity
-import Control.Concurrent.Async
 import Control.Concurrent
 
 import qualified Data.List as L
@@ -31,12 +26,10 @@ import qualified Data.Text as T
 import qualified Data.Traversable as Tra
 import qualified Data.Text.Lazy as TL
 
-import Data.Bifunctor
 import Safe
 import Types
 import Query
 import Schema
-import Widgets
 import QueryWidgets
 import Gpx
 import Widgets
@@ -105,7 +98,7 @@ getCpf captcha cgc_cpf = do
 wrapplug = WrappedCall initCnpj [getCaptcha',getCnpj']
 
 initCnpj   =  (\i -> do
-  let opts = defaults & manager .~ Left man
+  let
       man  = opensslManagerSettings context
   withOpenSSL $ Sess.withSessionWith man i) . runReaderT
 

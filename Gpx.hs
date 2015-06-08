@@ -7,27 +7,19 @@ import Types
 import Data.Monoid
 import Schema
 import Data.String
-import GHC.Stack
-import Postgresql
 import Database.PostgreSQL.Simple
 import Control.Applicative
 import Data.Interval (interval)
-import qualified Data.Interval as Interval
 import qualified Data.ExtendedReal as ER
 
 import Data.Maybe
-import Data.Text.Lazy (Text,unpack)
+import Data.Text.Lazy (unpack)
 import Text.Read
 import qualified Data.Map as M
 import Data.Time.Parse
-import Data.Time
 import Text.XML.HXT.Core
 
-import Text.XML.HXT.Arrow.Pickle
-import Text.XML.HXT.Arrow.XmlState.TypeDefs
 
-import Control.Arrow.IOStateListArrow
-import Text.XML.HXT.Arrow.XmlState
 import qualified Data.List as L
 
 import qualified Data.ByteString as BS
@@ -46,16 +38,7 @@ atTag tag = deep (isElem >>> hasName tag)
 
 text = getChildren >>> getText
 
-consII l k i=  (l,k) : i
-consIL l k i=  zipWith (:) (repeat (l,k))  i
-consLL l k i=  zipWith (:) (fmap (l,) k)  i
-consLI l k i=  zipWith (:) (fmap (l,) k)  (repeat i)
 
-
-zipII i l k = i <> zip  l k
-zipIL i l k = zipWith mappend (repeat i)  (fmap (zip l) k)
-zipLL i l k = zipWith mappend i (fmap (zip l) k)
-zipLI i l k = zipWith mappend i (repeat $ zip l k)
 
 getTable :: ArrowXml a => a XmlTree [[String]]
 getTable =  atTag "table"  >>> listA (rows >>> listA cols) where
@@ -91,7 +74,6 @@ execKey f = exec (fmap (\(k,v)-> (keyValue k , v) ) f)
 
 readCpfName file = do
   let
-      txt = trim ^<< hasText ( not .all (`elem` " *\160\t\r\n")) >>>  getText
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
         >>> ( is "span" >>> hasAttrValue "class" ("clConteudoDados"==) /> ( hasText ("Nome da Pessoa"  `L.isInfixOf`)) >>> getText )
   l <- runX arr
@@ -146,7 +128,6 @@ testCreaArt = do
   kk <- BS.readFile "creaHistoricoArt.html"
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
   readCreaHistoricoHtml inp
-
 
 testSiapi3 = do
   kk <- BS.readFile "siapi32.html"

@@ -18,58 +18,32 @@ module Types where
 
 import Warshal
 import Control.Lens.TH
-import Data.Tuple
 import Data.Functor.Apply
 import Data.Functor.Compose
 import Data.Functor.Identity
 import Data.Typeable
-import Data.Distributive
 import Data.Vector(Vector)
-import qualified Data.Vector as Vector
 import Data.Functor.Classes
-import qualified Data.Foldable as F
 import Data.Foldable (Foldable)
-import Data.Traversable (mapAccumL)
-import qualified Data.Traversable as Tra
-import Data.Char ( isAlpha )
-import Data.Maybe
 import qualified Data.Interval as Interval
 import Data.Monoid hiding (Product)
-import Data.Functor.Product
-import Data.Bifunctor
 
 import qualified Data.Text.Lazy as T
 import qualified Data.ByteString as BS
-import qualified Data.ExtendedReal as ER
 
-import GHC.Int
 
 import Data.Traversable(Traversable)
-import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Time
-import Database.PostgreSQL.Simple.ToField
 
 import Data.Time
 import Control.Monad
 import GHC.Exts
-import System.IO.Unsafe
-import Data.Tuple
 import Control.Applicative
-import Data.List ( nubBy,nub, sort,intercalate,sortBy,isInfixOf )
 import qualified Data.List as L
-import qualified Data.Map as M
-import qualified Data.Set as S
 import Data.Map (Map)
 import Data.Set (Set)
 import Control.Monad.State
-import Control.Monad.State.Class
-import System.Environment ( getArgs )
-import Text.Parsec hiding(label,State)
-import Text.Parsec.String
-import Text.Printf ( printf )
 import Data.Text.Lazy(Text)
-import Debug.Trace
-import GHC.Stack
 
 import Data.Unique
 

@@ -7,27 +7,19 @@ import Query
 import Data.Unique
 import Warshal
 import qualified Data.Foldable as F
-import Data.Foldable (Foldable)
-import Data.Traversable (Traversable)
-import Data.Char ( isAlpha )
 import Data.Maybe
 import Data.String
 import Control.Monad.IO.Class
-import Data.Functor.Identity
 import Data.Monoid
 
 
 import Database.PostgreSQL.Simple
-import Database.PostgreSQL.Simple.ToField
 
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 
 import Control.Monad
-import GHC.Exts
-import Data.Tuple
 import Control.Applicative
-import Data.List ( nubBy,nub, sort,intercalate,sortBy,isInfixOf )
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
@@ -36,7 +28,6 @@ import Debug.Trace
 
 import Data.Text.Lazy(Text)
 import qualified Data.Text.Lazy as T
-import qualified Data.ByteString.Char8 as BS
 
 
 
@@ -89,13 +80,10 @@ keyTables conn schema = do
        res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? " (Only schema)
        let
           keyMap = M.fromList keyList
-          keyListSet = groupSplit (\(c,k)-> c) keyList
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
        let
           lookupKey3 :: (Functor  g, Functor f) => f (Text,g Text) -> f (Text,g Key)
           lookupKey3 = fmap  (\(t,c)-> (t,fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap) c) )
-          lookupKey' :: Functor f => f (Text,Text) -> f (Text,Key)
-          lookupKey' = fmap  (\(t,c)-> (t,(\(Just i) -> i) $ M.lookup (t,c) keyMap) )
           lookupKey2 :: Functor f => f (Text,Text) -> f Key
           lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) keyMap )
           readTT :: Text ->  TableType

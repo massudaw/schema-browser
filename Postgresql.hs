@@ -9,7 +9,6 @@ import Data.Scientific hiding(scientific)
 import Data.Bits
 import Data.Tuple
 import Control.Lens ((^.))
-import Debug.Trace
 import Data.Time.Clock
 import qualified Data.Char as Char
 import Schema
@@ -19,57 +18,41 @@ import Data.Maybe
 import Text.Read
 import qualified Data.ExtendedReal as ER
 import Data.ExtendedReal (Extended)
-import Data.Typeable
 import qualified Data.ByteString.Base16 as B16
 import Data.Time.Parse
 import           Database.PostgreSQL.Simple.Arrays as Arrays
 import           Database.PostgreSQL.Simple.Types as PGTypes
 import Data.Graph(stronglyConnComp,flattenSCCs)
-import Control.Exception
 import           Data.Attoparsec.Char8 hiding (Result)
-import Data.Traversable (Traversable,traverse,sequence)
+import Data.Traversable (Traversable,traverse)
 import qualified Data.Traversable  as Tra
 import Warshal
 import Data.Time.LocalTime
-import Data.IORef
-import Control.Monad(when,void,mapM,replicateM,liftM,join)
-import Data.Functor.Compose
-import qualified Database.PostgreSQL.Simple.TypeInfo.Static as TI
+import Control.Monad(replicateM,join)
 import qualified Data.List as L
-import Data.Vector(Vector)
 import qualified Data.Vector as Vector
 import qualified Data.Interval as Interval
 import Data.Interval (Interval)
 import qualified Data.ByteString.Char8 as BS
 
 import Data.Monoid
-import Data.Time.Parse
 import Prelude hiding (takeWhile)
 
-import System.IO.Unsafe
-import Debug.Trace
 import qualified Data.Foldable as F
 import Data.Foldable (Foldable)
 import qualified Data.Text.Lazy as T
-import Data.ByteString.Lazy(toStrict)
-import Data.Text.Lazy.Encoding
 import qualified Data.Text.Encoding as TE
 import Data.Text.Lazy (Text)
 import qualified Data.Set as S
-import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Time
-import Database.PostgreSQL.Simple.Ok
 import qualified Database.PostgreSQL.Simple.FromField as F
 import Database.PostgreSQL.Simple.FromField hiding(Binary,Identity)
 -- import Database.PostgreSQL.Simple.FromField (fromField,typeOid,typoid,TypeInfo,rngsubtype,typdelim,Conversion,Field,FromField)
 import qualified Database.PostgreSQL.Simple.ToField as TF
 import qualified Database.PostgreSQL.Simple.FromRow as FR
 -- import Data.GraphViz (preview)
-import qualified Data.Map as M
 import Blaze.ByteString.Builder(fromByteString)
 import Blaze.ByteString.Builder.Char8(fromChar)
-import Data.Map (Map)
-import Data.String
 
 data DB = DB { dbName :: String
           , dbUser :: String
@@ -220,8 +203,6 @@ readPrim t =
       readDate =  fmap (SDate . Finite . localDay . fst) . strptime "%Y-%m-%d"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
       readLineString = nonEmpty (fmap SLineString . readMaybe)
-      -- readBounding = nonEmpty (fmap SBounding . fmap Bounding . (fmap (\(SInterval i ) -> fmap (\(SPosition p )-> p) i)) . inter readPosition )
-      inter f = (\(i,j)-> fmap SInterval $  Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
       readTimestamp =  fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%OS"
       readInterval =  fmap SPInterval . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
       nonEmpty f ""  = Nothing
@@ -425,27 +406,6 @@ instance Sel.Serialize LineString where
 
 
 
-instance F.FromField LineString where
-  fromField f t = case  fmap (Sel.runGet getLineString ) decoded of
-    Just i -> case i of
-      Right i -> pure i
-      Left e -> F.returnError F.ConversionFailed f e
-    Nothing -> F.returnError F.UnexpectedNull f "empty value"
-    where
-      getV = do
-          i <- Sel.getWord8
-          if i  == 1
-           then do
-             typ <- Sel.getWord32host
-             srid <- Sel.getWord32host
-             let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
-             case ty  of
-               2 -> Sel.get
-               i -> error $ "type not implemented " <> show ty
-           else
-             return (error $ "BE not implemented " <> show i )
-      decoded = fmap (fst . B16.decode) t
-
 getLineString = do
           i <- Sel.getWord8
           if i  == 1
@@ -459,14 +419,6 @@ getLineString = do
            else
              return (error $ "BE not implemented " <> show i )
 
-
-instance F.FromField Bounding where
-  fromField f t = case  t of
-    Nothing -> F.returnError F.UnexpectedNull f ""
-    Just dat -> do
-      case parseOnly box3dParser   dat of
-          Left err -> F.returnError F.ConversionFailed f err
-          Right conv -> return conv
 
 box3dParser = do
           string "BOX3D"

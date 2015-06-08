@@ -17,56 +17,36 @@
 module Query where
 
 import Warshal
-import Control.Lens.TH
-import Data.Tuple
 import Data.Functor.Apply
 import Data.Functor.Compose
 import Data.Functor.Identity
-import Data.Typeable
-import Data.Distributive
-import Data.Vector(Vector)
 import qualified Data.Vector as Vector
-import Data.Functor.Classes
 import qualified Data.Foldable as F
-import Data.Foldable (Foldable)
 import Data.Traversable (mapAccumL)
 import qualified Data.Traversable as Tra
-import Data.Char ( isAlpha )
 import Data.Maybe
 import qualified Data.Interval as Interval
 import Data.Monoid hiding (Product)
-import Data.Functor.Product
-import Data.Bifunctor
 
 import qualified Data.Text.Lazy as T
-import qualified Data.ByteString as BS
 import qualified Data.ExtendedReal as ER
 
 import GHC.Int
 
-import Data.Traversable(Traversable)
 import Database.PostgreSQL.Simple
-import Database.PostgreSQL.Simple.Time
 import Database.PostgreSQL.Simple.ToField
 
-import Data.Time
 import Control.Monad
 import GHC.Exts
 import System.IO.Unsafe
-import Data.Tuple
 import Control.Applicative
-import Data.List ( nubBy,nub, sort,intercalate,sortBy,isInfixOf )
+import Data.List (intercalate)
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
 import Data.Set (Set)
 import Control.Monad.State
-import Control.Monad.State.Class
-import System.Environment ( getArgs )
-import Text.Parsec hiding(label,State)
-import Text.Parsec.String
-import Text.Printf ( printf )
 import Data.Text.Lazy(Text)
 import Debug.Trace
 import GHC.Stack
@@ -360,8 +340,8 @@ isPairReflexive (Primitive i ) (KInterval (Primitive j)) | i == j = False
 isPairReflexive (Primitive j) (KArray (Primitive i) )   = False
 isPairReflexive (Primitive i ) (Primitive j) | i == j = True
 isPairReflexive (KOptional i ) j = isPairReflexive i j
-isPairReflexive i  (KOptional j) = isPairReflexive i j
-isPairReflexive i  (KSerial j) = isPairReflexive i j
+isPairReflexive i (KOptional j) = isPairReflexive i j
+isPairReflexive i (KSerial j) = isPairReflexive i j
 isPairReflexive (KArray i )   j = True
 isPairReflexive i j = error $ "isPairReflexive " <> show i <> " - "<> show  j
 
@@ -371,8 +351,7 @@ isPathReflexive (FKInlineTable _)= True
 
 intersectionOpK i j = intersectionOp (keyType i ) (keyType j)
 
-
-recursePath' isLeft (ksbn,_) invSchema (Path ifk jo@(FKInlineTable t ) e)
+recursePath' isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
     | any (isArray . keyType) (S.toList ifk)  =   do
           tas <- tname nextT
           let knas =(Key (rawName nextT) Nothing Nothing (unsafePerformIO newUnique) (Primitive "integer" ))
@@ -380,14 +359,15 @@ recursePath' isLeft (ksbn,_) invSchema (Path ifk jo@(FKInlineTable t ) e)
           let jt = if nextLeft then " LEFT JOIN " else " JOIN "
               tname = head $ fmap (\i -> label . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )
               ksn@(TB1 (KV (PK npk ndesc) nattr)) = preLabelTable ( "(" <> label tas <> ")")  nextT
-              query = jt <> " LATERAL (SELECT array_agg(ROW(" <> (T.intercalate ","  (fmap explodeLabel $ (F.toList $ unlb1 $ ksn ) )) <> " )) as " <> label (snd kas) <> " FROM  UNNEST(" <> tname  <> ") as "<> label tas <> " )  as " <>  label tas <> " ON true"
-          return $ ( [Compose $ Labeled (label $ snd kas) $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (tableName nextT)   (mapOpt $ mapArray ksn ) ]  ,query)
+              nkv pk desc attr = (TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
+          (tb,q) <-liftA3 nkv (fun ksn $ fmap getCompose npk) (fun ksn $ fmap getCompose ndesc) (fun ksn $ fmap getCompose nattr)
+          let query = jt <> " LATERAL (SELECT array_agg(ROW(" <> (T.intercalate ","  (fmap explodeLabel $ (F.toList $ unlb1 $ tb ) )) <> " ) order by arrrow ) as " <> label (snd kas) <> " FROM  (SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> tname  <> ") as arr) as arr ) "<> label tas <> q <> " )  as " <>  label tas <> " ON true"
+          return $ ( [Compose $ Labeled (label $ snd kas) $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (tableName nextT)   (mapOpt $ mapArray tb ) ]  ,query )
     | otherwise = do
           let tname = head $ fmap (\i -> label . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )
               ksn@(TB1 (KV (PK npk ndesc) nattr)) = preLabelTable ( "(" <> tname <> ")")  nextT
-              nkv pk desc attr = (mapOpt $ TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
+              nkv pk desc attr = (TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
           (tb,q) <-liftA3 nkv (fun ksn $ fmap getCompose npk) (fun ksn $ fmap getCompose ndesc) (fun ksn $ fmap getCompose nattr)
-          let jt = if nextLeft  then " LEFT JOIN " else " JOIN "
           return $ ( [Compose $ Unlabeled $ IT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (tableName nextT)   (mapOpt tb) ]  ,q)
     where
         nextLeft =  isLeft || any (isKOptional.keyType) (S.toList ifk)
@@ -400,16 +380,16 @@ recursePath' isLeft (ksbn,_) invSchema (Path ifk jo@(FKInlineTable t ) e)
                       attrs = fmap Compose $ filter (\i -> not $ S.member (unAttr.labelValue $ i) fkSet) items
                       itemSet :: S.Set Key
                       itemSet = S.fromList $ fmap (unAttr.labelValue) items
-                  pt <- mapM (recursePath' nextLeft (F.toList .unlb1 $ ksn ,undefined) invSchema) (filter (\(Path ifk jo  _) ->  ifk `S.isSubsetOf`  itemSet ) (F.toList $ rawFKS nextT ))
+                  pt <- mapM (recursePath' nextLeft (F.toList .unlb1 $ ksn ) invSchema) (filter (\(Path ifk jo  _) ->  ifk `S.isSubsetOf`  itemSet ) (F.toList $ rawFKS nextT ))
                   return (attrs <> (concat $ fst <$> pt), snd <$> pt)
 
 
-recursePath' isLeft (ksbn,_) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
+recursePath' isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
     | any (isArray . keyType . fst) (ks)  =   do
           (nt,ksn@(TB1 (KV (PK npk ndesc) nattr)),nq) <- labelTable nextT
-          let pksn = (_pkKey $ _kvKey $ unlb1 ksn )
-          let nkv pk desc attr = ( TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
-          (tb,q) <-liftA3 nkv (fun ksn nt $ fmap getCompose npk) (fun ksn nt $ fmap getCompose ndesc) (fun ksn nt $ fmap getCompose nattr)
+          let
+              nkv pk desc attr = ( TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
+          (tb,q) <-liftA3 nkv (fun ksn $ fmap getCompose npk) (fun ksn $ fmap getCompose ndesc) (fun ksn $ fmap getCompose nattr)
           tas <- tname nextT
           let knas =(Key (rawName nextT) Nothing Nothing (unsafePerformIO newUnique) (Primitive "integer" ))
           kas <- kname tas  knas
@@ -421,23 +401,22 @@ recursePath' isLeft (ksbn,_) invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           (nt,ksn@(TB1 (KV (PK npk ndesc) nattr)),nq) <- labelTable nextT
           let pksn = (_pkKey $ _kvKey $ unlb1 ksn )
               nkv pk desc attr = (mapOpt $ TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
-          (tb,q) <-liftA3 nkv (fun ksn nt $ fmap getCompose npk) (fun ksn nt $ fmap getCompose ndesc) (fun ksn nt $ fmap getCompose nattr)
+          (tb,q) <-liftA3 nkv (fun ksn $ fmap getCompose npk) (fun ksn $ fmap getCompose ndesc) (fun ksn $ fmap getCompose nattr)
           let jt = if nextLeft  then " LEFT JOIN " else " JOIN "
-          return $ ( [Compose $ Unlabeled $ FKT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo ) ks tb  ]  ,(jt <> nq <> " ON "  <> joinLPredicate (fkm ksbn pksn) <>  q))
-  where nextT@(Raw _ _ _ _ fk _ ) = (\(Just i)-> i) (M.lookup tn (invSchema))
-        backT = (\(Just i)-> i) (M.lookup w (invSchema))
+          return ([Compose $ Unlabeled $ FKT (fmap (\i -> Compose . justError ("cant find " ). L.find ((== i) . unAttr. labelValue  )$ ksbn) (S.toList ifk )) (isPathReflexive jo ) ks tb]  , jt <> nq <> " ON "  <> joinLPredicate (fkm ksbn pksn) <> q )
+  where nextT = (\(Just i)-> i) (M.lookup tn (invSchema))
         joinLPredicate   =   T.intercalate " AND " . fmap (\(l,r)->  intersectionOpK (unAttr . labelValue $ l) (unAttr . labelValue $ r) (label l)  (label r ))
         fkSet = S.unions $ fmap (\(Path ifk _ _) -> ifk)$ filter (\(Path _ ifk  _) -> isPathReflexive ifk)  $ S.toList (rawFKS nextT)
         nextLeft = any (isKOptional.keyType.fst) ks || isLeft
         fkm m n = zip (look (fst <$> ks) m) (look (snd <$> ks) n)
         look ki i = justError ("missing FK on " ) $ allMaybes $ fmap (\j-> L.find (\v -> unAttr (labelValue v) == j) i  ) ki
         mapOpt i = if any (isKOptional.keyType.fst) ks then  LeftTB1 $ Just  i else i
-        fun ksn nt items =  do
+        fun ksn items =  do
                   let attrs :: [TBLabel  Key]
                       attrs = fmap Compose $ filter (\i -> not $ S.member (unAttr.labelValue $ i) fkSet) items
                       itemSet :: S.Set Key
                       itemSet = S.fromList $ fmap (unAttr.labelValue) items
-                  pt <- mapM (recursePath' nextLeft (F.toList .unlb1 $ ksn ,nt) invSchema) (filter (\(Path ifk jo  _) ->  ifk `S.isSubsetOf`  itemSet ) (F.toList $ rawFKS nextT ))
+                  pt <- mapM (recursePath' nextLeft (F.toList .unlb1 $ ksn ) invSchema) (filter (\(Path ifk jo  _) ->  ifk `S.isSubsetOf`  itemSet ) (F.toList $ rawFKS nextT ))
                   return (attrs <> (concat $ fst <$> pt), snd <$> pt)
 
 
@@ -511,7 +490,7 @@ rootPaths' invSchema r@(Raw _ _ _ _ fk _ ) = (\(i,j) -> (unTlabel i,j ) ) $ fst 
                       attrs = fmap Compose $ filter (\i -> not $ S.member (unAttr.labelValue $ i) fkSet) items
                       itemSet :: S.Set Key
                       itemSet = S.fromList $ fmap (unAttr.labelValue) items
-                  pt <- mapM (recursePath' False (F.toList .unlb1 $ ks ,t) invSchema) (filter (\(Path ifk jo _)-> ifk `S.isSubsetOf`  itemSet ) (F.toList fk ))
+                  pt <- mapM (recursePath' False (F.toList .unlb1 $ ks ) invSchema) (filter (\(Path ifk jo _)-> ifk `S.isSubsetOf`  itemSet ) (F.toList fk ))
                   return (attrs <> (concat $ fst <$> pt), snd <$> pt)
       nkv pk desc attr = (TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
   (tb,js) <-liftA3 nkv (fun $ fmap getCompose npk) (fun $ fmap getCompose ndesc) (fun $ fmap getCompose nattr)

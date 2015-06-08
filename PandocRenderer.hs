@@ -13,22 +13,16 @@ import Data.ByteString.Base64.Lazy as BS64
 -- import qualified Network.HTTP as HTTP
 import Control.Monad
 import Control.Monad.IO.Class
-import Text.Pandoc.Writers.HTML
 import Text.Pandoc.Writers.LaTeX
-import Graphics.UI.Threepenny ((#),style,set,mkElement,sink,string,html,facts,src)
-import qualified Graphics.UI.Threepenny.Elements as UI
+import Graphics.UI.Threepenny ((#),style,set,mkElement,sink,facts)
 import qualified Graphics.UI.Threepenny.Attributes as UI
 import Text.Pandoc.Builder hiding ((<>))
 import Control.Applicative
-import Debug.Trace
-import Postgresql
 import Data.String
 import Query
 import Data.Maybe
 import qualified Data.ByteString.Lazy.Char8 as BS
-import qualified Data.Map as M
 import qualified Data.Foldable as F
-import qualified Data.Sequence as Seq
 
 import System.IO
 
@@ -36,7 +30,7 @@ import Step
 import Control.Arrow
 import Data.Monoid
 import Data.Text.Lazy(Text)
-
+{-
 renderFireProjectReport conn _ inputs = (,pure Nothing) <$> element
   where
       varMap input = M.fromList $ (\(i,j)-> (keyValue i,j)) <$> input
@@ -60,6 +54,8 @@ renderFireProjectReport conn _ inputs = (,pure Nothing) <$> element
              mkElement "iframe" # sink UI.src ( fmap (\i -> "data:application/pdf;base64," <> i) $ fmap (either BS.unpack (BS.unpack.BS64.encode)) $ facts pdfTidings) # set style [("width","100%"),("height","300px")]
             --UI.div # sink html (maybe ""  (writeHtmlString def . myDoc) <$> facts inputs)
             --
+            -}
+
 setFooter ,setT :: Blocks -> Pandoc -> Pandoc
 setFooter = setMeta "footer"
 
@@ -67,7 +63,6 @@ setT = setMeta "title"
 
 renderProjectPricingA = (staticP myDoc , element )
    where
-      varMap input = M.fromList $ (\(i,j)-> (keyValue i,j)) <$> input
       var str =  maybe "" fromString . fmap (renderShowable.snd) <$> idx str
       varT str =  maybe "" fromString . fmap (renderShowable.snd) <$> idxT str
       arrayVar i str = (bulletList . concat . maybeToList . join . fmap   (cshow .  snd) ) <$> indexTableInter i str
@@ -111,9 +106,8 @@ renderProjectPricingA = (staticP myDoc , element )
              template <- liftIO $ readFile' utf8 "raw.template"
              pdfTidings <- joinTEvent   ( ( makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template } . dynP myDoc  ) <$> inputs)
              mkElement "iframe" # sink UI.src ( fmap (\i -> "data:application/pdf;base64," <> i) $ fmap (either BS.unpack (BS.unpack.BS64.encode)) $ facts pdfTidings) # set style [("width","100%"),("height","300px")]
-            --UI.div # sink html (maybe ""  (writeHtmlString def . myDoc) <$> facts inputs)
 
-
+{-
 renderProjectPricing _ _  inputs = (,pure Nothing) <$> element
    where
       varMap input = M.fromList $ (\(i,j)-> (keyValue i,j)) <$> input
@@ -151,11 +145,10 @@ renderProjectPricing _ _  inputs = (,pure Nothing) <$> element
              pdfTidings <- joinTEvent   ( maybe (return (Left "")) ( makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template } . myDoc ) <$> inputs)
              mkElement "iframe" # sink UI.src ( fmap (\i -> "data:application/pdf;base64," <> i) $ fmap (either BS.unpack (BS.unpack.BS64.encode)) $ facts pdfTidings) # set style [("width","100%"),("height","300px")]
             --UI.div # sink html (maybe ""  (writeHtmlString def . myDoc) <$> facts inputs)
-
+-}
 readFile' e name = openFile name ReadMode >>= liftM2 (>>) (flip hSetEncoding $ e)   hGetContents
 
 test = do
     template <-  readFile' utf8 "raw.template"
-    let tex =   writeLaTeX def  {writerStandalone = True ,writerTemplate = template } (setTitle "Title" (doc (para "para")))
     either (print ) (BS.writeFile "raw.pdf") =<< makePDF "pdflatex"  writeLaTeX def  {writerStandalone = True ,writerTemplate = template } (setTitle "Title" (doc (para "para")))
 

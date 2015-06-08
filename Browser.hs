@@ -32,56 +32,32 @@ import Data.Aeson
 import Utils
 import Schema
 import Data.Char (toLower)
-import Gpx
-import Data.Functor.Compose (Compose(..))
 import PandocRenderer
-import Data.Unique
-import Control.Monad.Trans.Class as C
-import Control.Monad.Trans.Maybe
 import Control.Monad
 import Postgresql
-import Data.Aeson as A
 import Data.Maybe
-import Data.Distributive
 import Data.Functor.Identity
 import Text.Read
-import qualified Data.HashMap.Strict as HM
-import System.Directory
-import Data.Typeable
 import Data.Time.Parse
 import Reactive.Threepenny
-import           Database.PostgreSQL.Simple.Arrays as Arrays
 import Data.Graph(stronglyConnComp,flattenSCCs)
-import Control.Exception
-import Data.Traversable (mapAccumL,Traversable,traverse)
+import Data.Traversable (traverse)
 import qualified Data.Traversable as Tra
 import Warshal
 import Data.Time.LocalTime
-import Data.IORef
-import Control.Monad((>=>),void,mapM,replicateM,liftM,join)
 import Data.Functor.Compose
-import qualified Database.PostgreSQL.Simple.TypeInfo.Static as TI
 import qualified Data.List as L
-import Data.Vector(Vector)
-import qualified Data.Vector as V
-import qualified Data.Interval as Interval
-import qualified Data.ExtendedReal as ER
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.Time
 
 import RuntimeTypes
-import Reactive.Threepenny
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (get,delete)
 import Data.Monoid hiding (Product(..))
-import Data.Time.Parse
 
-import System.IO.Unsafe
-import Debug.Trace
 import qualified Data.Foldable as F
 import qualified Data.Text.Lazy as T
-import qualified Data.Text.Lazy.IO as T
 import Data.ByteString.Lazy(toStrict)
 import Data.Text.Lazy.Encoding
 import qualified Data.Text.Encoding as TE
@@ -93,21 +69,12 @@ import Data.Set (Set)
 
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Time
-import Database.PostgreSQL.Simple.Ok
-import Database.PostgreSQL.Simple.FromField as F
-import qualified Database.PostgreSQL.Simple.ToField as TF
-import qualified Database.PostgreSQL.Simple.FromRow as FR
 import qualified Data.Map as M
-import Blaze.ByteString.Builder(fromByteString)
-import Blaze.ByteString.Builder.Char8(fromChar)
 import Data.Map (Map)
 import Data.String
 
-import GHC.Show
-import Data.Functor.Classes
 
 import Control.Arrow
-import Data.ByteString.Search (replace)
 import Crea
 
 setup
@@ -124,8 +91,9 @@ setup e args w = void $ do
     span <- chooserKey  inf k (atMay args 2)
     element body # set UI.children [span,pollRes] )) evDB
 
-listDBS :: IO (Map Text [Text])
-listDBS = do
+
+listDBS ::  String -> IO (Map Text [Text])
+listDBS dname = do
   connMeta <- connectPostgreSQL ("user=postgres dbname=postgres")
   dbs :: [Only Text]<- query_  connMeta "SELECT datname FROM pg_database  WHERE datistemplate = false"
   M.fromList <$> mapM (\db -> do
@@ -133,20 +101,34 @@ listDBS = do
         schemas :: [Only Text] <- query_  connDb "SELECT schema_name from information_schema.schemata"
         return (db,filter (not . (`elem` ["information_schema","pg_catalog","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas)) (fmap unOnly dbs)
 
+loginWidget userI passI =  do
+  username <- UI.input # set UI.name "username"
+  password <- UI.input # set UI.name "password" # set UI.type_ "password"
+  let usernameE = (\i -> if L.null i then Nothing else Just i) <$> UI.valueChange username
+      passwordE = (\i -> if L.null i then Nothing else Just i) <$> UI.valueChange password
+  usernameB <- stepper userI usernameE
+  passwordB <- stepper passI passwordE
+  let usernameT = tidings usernameB usernameE
+      passwordT = tidings passwordB passwordE
+  login <- UI.div # set children [username,password]
+  return $ TrivialWidget (liftA2 (liftA2 (,)) usernameT passwordT) login
+
+
 
 databaseChooser sargs = do
   let args = fmap T.pack sargs
       dbsInit = liftA2 (,) (safeHead args) (safeHead $ tail args)
-  dbs  <- liftIO$ listDBS
+  dbs <- liftIO $ listDBS  (head sargs)
+  wid <- loginWidget Nothing Nothing
   dbsW <- listBox (pure $ concat $ fmap (\(i,j) -> (i,) <$> j) $ M.toList dbs ) (pure dbsInit  ) (pure id) (pure (line . show ))
   load <- UI.button # set UI.text "Connect" # sink UI.enabled (facts (isJust <$> userSelection dbsW) )
-  let genSchema (dbN,schemaN) = do
-        conn <- connectPostgreSQL ("user=postgres dbname=" <> toStrict ( encodeUtf8 dbN ))
+  let genSchema ((user,pass),(dbN,schemaN)) = do
+        conn <- connectPostgreSQL ("user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> toStrict ( encodeUtf8 dbN ))
         inf <- keyTables conn  schemaN
         return (conn,inf)
-  chooserT <-  mapTEvent (traverse genSchema) (userSelection dbsW )
+  chooserT <-  mapTEvent (traverse genSchema) (liftA2 (liftA2 (,)) (triding wid) ( userSelection dbsW ))
   let chooserEv = facts chooserT <@ UI.click load
-  chooserDiv <- UI.div # set children [getElement dbsW,load]
+  chooserDiv <- UI.div # set children [getElement wid ,getElement dbsW,load]
   return $ (tidings (facts chooserT) chooserEv,chooserDiv)
 
 
@@ -201,7 +183,6 @@ chooserKey inf kitems i = do
   filterInp <- UI.input
   filterInpBh <- stepper "" (onEnter filterInp)
 
-  let rp = rootPaths'  (tableMap inf) (justError "no table" $ M.lookup "ordering" $ tableMap inf )
   i :: [(Text,Int)] <- liftIO $ query (conn inf) (fromString "SELECT table_name,usage from metadata.ordering where schema_name = ?") (Only (schemaName inf))
   let orderMap = Just $ M.fromList  i
   bset <- buttonFSet  (L.sortBy (flip $  comparing (\ pkset -> liftA2 M.lookup  (fmap rawName . flip M.lookup (pkMap inf) $ pkset ) orderMap)) kitems)  initKey ((\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> i) ))<$> filterInpBh) (\i -> case M.lookup i (pkMap inf) of
@@ -240,20 +221,8 @@ chooseKey inf key = mdo
   itemList <- listBox (sorting <$> triding asc <*> multiUserSelection sortList <*> res2)  (pure Nothing) (pure id ) ((\l -> (\ i -> (set UI.style (noneShow $ filteringPred l i  ) ) . line (   L.intercalate "," (F.toList $ fmap (renderShowable . snd ) $  _kvKey $ allKVRec i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) $  tableNonrec i)))) <$> filterInpT)
   element (getElement itemList) # set UI.multiple True
   element itemList # set UI.style [("width","70%"),("height","300px")]
-  let
-    foldr1Safe f [] = []
-    foldr1Safe f xs = foldr1 f xs
 
   let
-
-  pollingChk <- checkedWidget (pure True)
-  let
-     filterOptions = case M.keys <$> M.lookup key (hashedGraph inf) of
-               Just l -> key :  l
-               Nothing -> [key]
-     convertPK i = case fmap F.toList i of
-        Nothing -> Just []
-        i -> i
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
@@ -380,12 +349,14 @@ insertMod inf kv table = do
   let mod =  TableModification Nothing table (InsertTB  kvn)
   Just <$> logTableModification inf mod
 
+
 logTableModification inf (TableModification Nothing table i) = do
   let look k = lookKey inf "modification_table" k
   time <- getCurrentTime
   let ltime = STimestamp . Finite . utcToLocalTime utc $ time
   s <- insertAttr fromAttr (conn inf) (TB1 $ fmap (Compose . Identity . Attr)$KV (PK  [(look "modification_id",SSerial Nothing)] []) [(look "modification_time", ltime ),(look "table_name" ,SText $ rawName table) , (look "modification_data", SText $ T.pack $ show i)]  ) ((\(Just i)-> i) $ M.lookup ("modification_table") (tableMap inf))
   return (TableModification ((\(SSerial (Just (SNumeric i)))-> Just i ) $  snd $  unAttr $ runIdentity $ getCompose $ head $_pkKey $ _kvKey $ _unTB1 s) table i )
+
 
 bradescoRead file = do
   file <- TE.decodeLatin1 <$> BS.readFile file
@@ -470,7 +441,6 @@ queryTimeline = BoundedPlugin "Timeline" "pricing"(staticP arrow)  elem
       andDa <- varN "id_project:andamentos:andamento_date" -< t
       andDe <- varN "id_project:andamentos:andamento_description" -< t
       let vv =  concat $ maybeToList $ (\(SComposite i) (SComposite j)-> fmap Just $ zip (renderShowable <$> F.toList j ) (F.toList i)) <$>  arr <*> arrD
-      let vvand =  concat $ maybeToList $ (\(SComposite i) (SComposite j)-> fmap Just $ zip (renderShowable <$> F.toList j ) (F.toList i)) <$>  andDa <*> andDe
 
       returnA -<  convDateArr ([("Proposta de Enviada",)<$> prd,("Projeto Aprovado",) <$> apd ,("Proposta Aprovada",) <$> papr] <>  vv {-<> vvand -})
     elem inf inputs = do
@@ -650,10 +620,10 @@ main = do
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
 
-{-  forkIO $ poller  h siapi3Polling
+  forkIO $ poller  h siapi3Polling
   forkIO $ poller  h siapi2Polling
   forkIO $ poller  h artAndamentoPolling
-  -}
+
 
 
 
@@ -670,7 +640,7 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
         listRes <- queryWith_ (fromAttr (fst rp) ) conn  (traceShowId $ fromString $ T.unpack $ snd rp)
         let evb = filter (\i -> tdInput i  {-&& tdOutput1 i-} ) listRes
             tdInput i =  maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd t) i) (fst f)
-            tdOutput1 i =  maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd f) i) (snd f)
+            -- tdOutput1 i =  maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd f) i) (snd f)
 
         i <- elem inf evb
         handler i

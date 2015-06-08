@@ -6,19 +6,14 @@ import qualified Network.Wreq.Session as Sess
 
 import OpenSSL.Session (context)
 import Network.HTTP.Client.OpenSSL
-import Network.HTTP.Client.TLS
-import Network.HTTP.Client (defaultManagerSettings, managerResponseTimeout)
 
 import Control.Lens
 import Utils
 import Control.Applicative
-import Data.Char
 import Control.Monad
-import Data.Maybe
 import Data.Monoid
 
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TL
 import qualified Data.ByteString as BS
@@ -29,10 +24,8 @@ import qualified Data.ByteString.Lazy as BSL
 import qualified Data.List as L
 
 import Gpx
-import Debug.Trace
 
 siapi3Page protocolo ano cgc_cpf = do
-  let opts = defaults & manager .~ Left (opensslManagerSettings context)
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
     print siapiAndamento3Url
     r <- Sess.get session $ siapiAndamento3Url

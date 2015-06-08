@@ -13,14 +13,11 @@ import Data.Map (Map)
 import Data.Traversable(traverse)
 import Data.Monoid
 import Data.Foldable (foldl')
-import Data.Interval (Interval(..),interval)
+import Data.Interval (Interval(..))
 import qualified Data.ExtendedReal as ER
 import qualified Data.Interval as Interval
 import qualified Data.List as L
-import Text.Read
-import Query
 import Data.Maybe
-import Data.Distributive
 import Control.Concurrent
 import qualified Data.Aeson as JSON
 
@@ -29,11 +26,9 @@ import System.Process(callCommand)
 import Data.String
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
-import qualified Data.ByteString.Lazy.Char8 as BSLC
 import qualified Data.ByteString.Lazy as BSL
 
 
-import Debug.Trace
 
 instance Widget (TrivialWidget  a) where
     getElement (TrivialWidget t e) = e
@@ -415,8 +410,6 @@ listBox :: forall a. Ord a
     -> UI (ListBox a)
 listBox bitems bsel bfilter bdisplay = do
     list <- UI.select # set UI.class_ "selectpicker"
-    let bindices :: Tidings [a]
-        bindices =  bfilter <*> bitems
     -- animate output items
     element list # sink oitems (facts $ map <$> bdisplay <*> bitems )
 
@@ -484,7 +477,7 @@ multiListBox bitems bsel bdisplay = do
         eindexes = lookupIndex <$> facts bindices2 <@> selectionMultipleChange list
     e <- currentValue (facts bsel)
     let
-        eindexes2 = (\m-> catMaybes $ fmap (flip setLookup m) e)  <$> (S.fromList <$> rumors bitems)
+        -- eindexes2 = (\m-> catMaybes $ fmap (flip setLookup m) e)  <$> (S.fromList <$> rumors bitems)
         ev =  foldr1 (unionWith const) [rumors bsel,eindexes]
     bsel2 <- stepper e ev
     let

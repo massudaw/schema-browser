@@ -1,27 +1,14 @@
 {-# LANGUAGE ScopedTypeVariables,BangPatterns,NoMonomorphismRestriction,DeriveFunctor,GeneralizedNewtypeDeriving,FlexibleContexts,DeriveFoldable ,TupleSections #-}
 module Warshal where
 
-import qualified Data.Foldable as F
-import Data.Foldable (Foldable)
-import Data.Char ( isAlpha )
 import Data.Maybe
 import Data.Monoid hiding(Product)
-import Control.Monad
-import GHC.Exts
-import Data.Tuple
 import Control.Applicative
-import Data.List ( nubBy,nub, sort,intercalate,sortBy,isInfixOf ,transpose)
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
 import Data.Set (Set)
-import Control.Monad.State
-import Control.Monad.State.Class
-import System.Environment ( getArgs )
-import Text.Parsec hiding(State)
-import Text.Parsec.String
 import Text.Printf ( printf )
-import Debug.Trace
 
 
 type HashSchema  a b = Map a (Map a [(Path a b )])
