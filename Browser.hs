@@ -88,7 +88,7 @@ setup e args w = void $ do
   getBody w #+ [element chooserDiv , element body]
   mapUITEvent body (traverse (\(conn,inf)-> do
     let k = M.keys (pkMap inf )
-    span <- chooserKey  inf k (atMay args 2)
+    span <- chooserKey  inf k (atMay args 4)
     element body # set UI.children [span,pollRes] )) evDB
 
 
@@ -102,8 +102,8 @@ listDBS dname = do
         return (db,filter (not . (`elem` ["information_schema","pg_catalog","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas)) (fmap unOnly dbs)
 
 loginWidget userI passI =  do
-  username <- UI.input # set UI.name "username"
-  password <- UI.input # set UI.name "password" # set UI.type_ "password"
+  username <- UI.input # set UI.name "username" # set UI.value (maybe "" id userI)
+  password <- UI.input # set UI.name "password" # set UI.type_ "password" # set UI.value (maybe "" id passI)
   let usernameE = (\i -> if L.null i then Nothing else Just i) <$> UI.valueChange username
       passwordE = (\i -> if L.null i then Nothing else Just i) <$> UI.valueChange password
   usernameB <- stepper userI usernameE
@@ -119,7 +119,7 @@ databaseChooser sargs = do
   let args = fmap T.pack sargs
       dbsInit = liftA2 (,) (safeHead args) (safeHead $ tail args)
   dbs <- liftIO $ listDBS  (head sargs)
-  wid <- loginWidget Nothing Nothing
+  wid <- loginWidget (atMay  sargs 2 ) (atMay  sargs 3)
   dbsW <- listBox (pure $ concat $ fmap (\(i,j) -> (i,) <$> j) $ M.toList dbs ) (pure dbsInit  ) (pure id) (pure (line . show ))
   load <- UI.button # set UI.text "Connect" # sink UI.enabled (facts (isJust <$> userSelection dbsW) )
   let genSchema ((user,pass),(dbN,schemaN)) = do
