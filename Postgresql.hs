@@ -521,5 +521,5 @@ fromAttr foldable = do
 
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item
-  where item = fmap (\n@(Raw _ t k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
+  where item = fmap (\n@(Raw _ _ _ t _ k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
 

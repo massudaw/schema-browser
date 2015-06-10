@@ -14,6 +14,7 @@ import Data.Set (Set)
 import qualified Data.List as L
 import qualified Data.Vector as Vector
 
+import GHC.Stack
 import Control.Arrow
 import Control.Category (Category(..),id)
 import Prelude hiding((.),id)
@@ -65,6 +66,8 @@ data StepPlan a
   deriving(Show,Functor)
 
 data Parser m s a b = P ([s],[s]) (m a b) deriving Functor
+
+liftParser (P i j ) = (P i ((\l -> Kleisli $  return <$> l ) $ j ) )
 
 dynP (P s d) = d
 
@@ -138,6 +141,7 @@ indexTable (l:xs) t@(TB1 (KV (PK k d)  v))
          IT l _ j -> indexTable xs j
 indexTable l (ArrayTB1 j) =  liftA2 (,) ((head <$> fmap (fmap fst) i) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
        where i =   T.traverse  (indexTable l) j
+indexTable i j = errorWithStackTrace (show (i,j))
 
 
 

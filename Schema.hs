@@ -66,6 +66,7 @@ data InformationSchema
   , graphP :: Graph (Set Key) (SqlOperation Table)
   , pluginsMap :: Map (Text,Text,Text) Key
   , conn :: Connection
+  , rootconn :: Connection
   }
 
 type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
@@ -73,9 +74,15 @@ type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 foreignKeys :: Query
 foreignKeys = "select origin_table_name,target_table_name,origin_fks,target_fks from metadata.fks where origin_schema_name = target_schema_name  and  target_schema_name = ?"
 
+queryAuthorization :: Connection -> Text -> Text -> IO (Map Text [Text])
+queryAuthorization conn schema user = do
+    sq <- query conn aq (schema,user)
+    let convert (tname,authorizations) = (tname ,V.toList authorizations)
+    return $ M.fromList $ convert <$> sq
+  where aq = "select table_name,authorizations from metadata.authorization where table_schema = ? and grantee = ? "
 
-keyTables :: Connection -> Text -> IO InformationSchema
-keyTables conn schema = do
+keyTables :: Connection -> Connection -> (Text ,Text)-> IO InformationSchema
+keyTables conn userconn (schema ,user) = do
        uniqueMap <- join $ mapM (\i-> (i,) <$> newUnique) <$>  query conn "select o.table_name,o.column_name from information_schema.tables natural join information_schema.columns o where table_schema = ? "(Only schema)
        res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? " (Only schema)
        let
@@ -90,6 +97,7 @@ keyTables conn schema = do
           readTT "BASE TABLE" = ReadWrite
           readTT "VIEW" = ReadOnly
           readTT i =  error $ T.unpack i
+       authorization <- queryAuthorization conn schema user
        descMap <- M.fromList . fmap  (\(t,c)-> (t,(\(Just i) -> i) $ M.lookup (t,c) keyMap) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
        transMap <- M.fromList   <$> query conn "SELECT table_name,translation FROM metadata.table_name_translation WHERE schema_name = ? " (Only schema)
        res <- traceShowId . lookupKey3 <$> query conn "SELECT table_name,pks FROM metadata.pks  where schema_name = ?" (Only schema) :: IO [(Text,Vector Key )]
@@ -101,14 +109,14 @@ keyTables conn schema = do
                                   pks = S.fromList $ F.toList pksl
                                   inlineFK =  (fmap (\k -> (\t -> Path (S.singleton k ) (FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList  )<$> (M.lookup c all)
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $maybeToList $ M.lookup c descMap) <> pks)
-                                in (pks ,Raw (schema , ((\(Just i) -> i) $ M.lookup c resTT, M.lookup c transMap) ) c pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK  ) attr )) <$> res :: [(Set Key,Table)]
+                                in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap)  c (maybe [] id $ M.lookup c authorization)  pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK  ) attr )) <$> res :: [(Set Key,Table)]
        let ret@(i1,i2,i3) = (keyMap, M.fromList $ filter (not.S.null .fst)  pks,traceShowId $  M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        paths <- schemaKeys' conn schema ret
        let graphI =  graphFromPath (filter (\i -> fst (pbound i) /= snd (pbound i) ) $ paths <> (fmap (fmap ((\(Just i) -> i) . flip M.lookup i3)) <$> concat (fmap (F.toList.snd) (M.toList fks))))
            graphP = warshall2 $ graphI
            graph = hashGraph $ graphP
            invgraph = hashGraphInv' $ graphP
-       return  $ InformationSchema schema i1 i2 i3 graph invgraph graphP M.empty conn
+       return  $ InformationSchema schema i1 i2 i3 graph invgraph graphP M.empty userconn conn
 
 inlineName (KOptional i) = inlineName i
 inlineName (KArray a ) = inlineName a
@@ -138,8 +146,8 @@ schemaKeys' conn schema (keyTable,map,_) = do
        return viewRels
 
 
-withInf s f = withConn s (f <=< flip keyTables s)
-withConnInf s f = withConn s (\conn ->  f =<< liftIO ( flip keyTables s conn) )
+-- withInf s f = withConn s (f <=< flip keyTables (s,"postgres"))
+-- withConnInf s f = withConn s (\conn ->  f =<< liftIO ( flip keyTables (s,"postgres") conn conn ) )
 
 withConn s action =  do
   conn <- liftIO $connectPostgreSQL $ "user=postgres password=queijo dbname=" <> fromString (T.unpack s)

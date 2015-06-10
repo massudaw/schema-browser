@@ -47,6 +47,7 @@ import Warshal
 import Data.Time.LocalTime
 import Data.Functor.Compose
 import qualified Data.List as L
+import qualified Data.Vector as Vector
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.Time
@@ -86,20 +87,21 @@ setup e args w = void $ do
   be <- stepper [] e
   pollRes <- UI.div # sink UI.text (show <$> be)
   getBody w #+ [element chooserDiv , element body]
-  mapUITEvent body (traverse (\(conn,inf)-> do
-    let k = M.keys (pkMap inf )
+  mapUITEvent body (traverse (\(inf)-> do
+    let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
     span <- chooserKey  inf k (atMay args 4)
     element body # set UI.children [span,pollRes] )) evDB
 
 
-listDBS ::  String -> IO (Map Text [Text])
+listDBS ::  String -> IO (Map Text (Connection,[Text]))
 listDBS dname = do
   connMeta <- connectPostgreSQL ("user=postgres dbname=postgres")
   dbs :: [Only Text]<- query_  connMeta "SELECT datname FROM pg_database  WHERE datistemplate = false"
-  M.fromList <$> mapM (\db -> do
+  map <- M.fromList <$> mapM (\db -> do
         connDb <- connectPostgreSQL ("user=postgres dbname=" <> toStrict (encodeUtf8 db))
         schemas :: [Only Text] <- query_  connDb "SELECT schema_name from information_schema.schemata"
-        return (db,filter (not . (`elem` ["information_schema","pg_catalog","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas)) (fmap unOnly dbs)
+        return (db,(connDb,filter (not . (`elem` ["information_schema","pg_catalog","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas))) (fmap unOnly dbs)
+  return map
 
 loginWidget userI passI =  do
   username <- UI.input # set UI.name "username" # set UI.value (maybe "" id userI)
@@ -113,19 +115,23 @@ loginWidget userI passI =  do
   login <- UI.div # set children [username,password]
   return $ TrivialWidget (liftA2 (liftA2 (,)) usernameT passwordT) login
 
+instance Ord Connection where
+  i < j = 1 < 2
+  i <= j = 1 < 2
+instance Eq Connection where
+  i == j = True
 
 
 databaseChooser sargs = do
   let args = fmap T.pack sargs
-      dbsInit = liftA2 (,) (safeHead args) (safeHead $ tail args)
   dbs <- liftIO $ listDBS  (head sargs)
+  let dbsInit = join $ fmap (\(d,s) -> (d,) . (,s) . fst <$>  M.lookup s dbs ) $ liftA2 (,) (safeHead args) (safeHead $ tail args)
   wid <- loginWidget (atMay  sargs 2 ) (atMay  sargs 3)
-  dbsW <- listBox (pure $ concat $ fmap (\(i,j) -> (i,) <$> j) $ M.toList dbs ) (pure dbsInit  ) (pure id) (pure (line . show ))
+  dbsW <- listBox (pure $ concat $ fmap (\(i,(c,j)) -> (i,) . (c,) <$> j) $ M.toList dbs ) (pure dbsInit  ) (pure id) (pure (line . show .fmap snd ))
   load <- UI.button # set UI.text "Connect" # sink UI.enabled (facts (isJust <$> userSelection dbsW) )
-  let genSchema ((user,pass),(dbN,schemaN)) = do
+  let genSchema ((user,pass),(dbN,(dbConn,schemaN))) = do
         conn <- connectPostgreSQL ("user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> toStrict ( encodeUtf8 dbN ))
-        inf <- keyTables conn  schemaN
-        return (conn,inf)
+        keyTables dbConn conn (schemaN,T.pack user)
   chooserT <-  mapTEvent (traverse genSchema) (liftA2 (liftA2 (,)) (triding wid) ( userSelection dbsW ))
   let chooserEv = facts chooserT <@ UI.click load
   chooserDiv <- UI.div # set children [getElement wid ,getElement dbsW,load]
@@ -183,14 +189,14 @@ chooserKey inf kitems i = do
   filterInp <- UI.input
   filterInpBh <- stepper "" (onEnter filterInp)
 
-  i :: [(Text,Int)] <- liftIO $ query (conn inf) (fromString "SELECT table_name,usage from metadata.ordering where schema_name = ?") (Only (schemaName inf))
+  i :: [(Text,Int)] <- liftIO $ query (rootconn inf) (fromString "SELECT table_name,usage from metadata.ordering where schema_name = ?") (Only (schemaName inf))
   let orderMap = Just $ M.fromList  i
   bset <- buttonFSet  (L.sortBy (flip $  comparing (\ pkset -> liftA2 M.lookup  (fmap rawName . flip M.lookup (pkMap inf) $ pkset ) orderMap)) kitems)  initKey ((\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> i) ))<$> filterInpBh) (\i -> case M.lookup i (pkMap inf) of
                                        Just t -> T.unpack (translatedName t)
                                        Nothing -> showVertex i )
   let bBset = triding bset
   onEvent (rumors bBset) (\ i ->
-      liftIO $ execute (conn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
+      liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
   body <- UI.div # sink items (facts (pure . chooseKey inf <$> bBset ))
   UI.div # set children [filterInp,getElement bset, body]
@@ -226,7 +232,7 @@ chooseKey inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,_,evs) <- crudUITable inf  [queryTimeline,lplugOrcamento ,siapi3Plugin ,siapi2Plugin , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary  ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryTimeline, queryArtAndamento ] [] (allRec' (tableMap inf) table) (userSelection itemList)
+            (crud,_,evs) <- crudUITable inf  [queryTimeline,lplugOrcamento ,siapi3Plugin ,siapi2Plugin , gerarPagamentos , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary  ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryTimeline, queryArtAndamento ] [] (allRec' (tableMap inf) table) (userSelection itemList)
             let eres = fmap (addToList  (allRec' (tableMap inf ) table )  <$> ) evs
             res2 <- accumTds vp eres
             insertDiv <- UI.div # set children [crud]
@@ -245,14 +251,14 @@ chooseKey inf key = mdo
   UI.div # set children ([itemSelec,tab] )
 
 
-lplugOrcamento = BoundedPlugin "Orçamento" "pricing" (fst renderProjectPricingA )  (\ j k -> snd renderProjectPricingA $   k)
+lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" (fst renderProjectPricingA )  ( snd renderProjectPricingA )
 
-
+{-
 testPlugin db pg input = startGUI defaultConfig $ \w -> do
     let e = withConnInf db (\inf -> fst <$> pg inf (pure (fmap (\((t,k),v) -> (lookKey inf t k ,v)) <$> input)))
     getBody w #+ [e]
     return ()
-
+-}
 
 
 testShowable  v s = case s of
@@ -269,14 +275,15 @@ testShowable  v s = case s of
     url = proc t -> do
       protocolo <- varTB "protocolo" -< t
       ano <- varTB "ano" -< t
+      odx "aproval_date" -< t
       odx "andamentos:andamento_date" -<  t
       odx "andamentos:andamento_description" -<  t
-      b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else siapi2  i j  )) -<  (liftA2 (,) protocolo ano )
+      b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else fmap traceShowId (siapi2  i j)  )) -<  (liftA2 (,) protocolo ano )
       let ao bv =   case  join (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
                     Just i -> Nothing
                     Nothing -> Just $ TB1 $ KV (PK [] []) ( [iat bv])
           convertAndamento :: [String] -> TB1 (Text,Showable)
-          convertAndamento [da,des] =  TB1 $ fmap (Compose . Identity .Attr ) $ KV (PK [("andamento_date",STimestamp . Finite . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))] [] ) []
+          convertAndamento [da,des] =  TB1 $ fmap (Compose . Identity .Attr ) $ KV  (PK [] []) ([("andamento_date",STimestamp . Finite . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))] )
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
                                             [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
@@ -307,14 +314,15 @@ type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModificat
       protocolo <- varTB "protocolo" -< t
       ano <- varTB "ano" -< t
       cpf <- varTB "id_owner,id_contact:id_owner:cgc_cpf" -< t
+      odx "aproval_date" -< t
       odx "andamentos:andamento_date" -<  t
       odx "andamentos:andamento_description" -<  t
       b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= 14 then  return Nothing else siapi3  i j k )) -<   (liftA3 (,,) protocolo ano cpf)
-      let convertAndamento [_,da,desc,s,sta] = TB1 $ fmap (Compose . Identity .Attr ) $ KV (PK [("andamento_date",STimestamp . Finite .  fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)] []) []
+      let convertAndamento [_,da,desc,s,sta] = TB1 $ fmap (Compose . Identity .Attr ) $ KV (PK [] []) ([("andamento_date",STimestamp . Finite .  fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)] )
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
       let ao bv = case  join $ (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
                     Just i ->  Nothing
-                    Nothing ->  Just $ TB1 $ KV (PK [] []) ( [iat bv])
+                    Nothing ->  traceShow (iat bv,t) $  Just $ TB1 $ KV (PK [] []) ( [iat bv])
           iat bv = Compose . Identity $ (IT
                                             [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
                                             "fire_project_event"
@@ -458,6 +466,33 @@ instance ToJSON Timeline where
           ti  = formatTime defaultTimeLocale "%Y/%m/%d"
           tti  = formatTime defaultTimeLocale "%Y/%m/%d %H:%M:%S"
 
+attrT = Compose . Identity. Attr
+gerarPagamentos = BoundedPlugin2 "Pagamentos" "plano_aluno" (staticP url) elem
+  where
+    url :: ArrowPlug (Kleisli IO) (Maybe (TB1 (Text,Showable)))
+    url = proc t -> do
+      v <- varT "frequencia,meses:price" -< t
+      m <- varT "frequencia,meses:meses"-< t
+      k <- varT "desconto"-< t
+      pinicio <- varT "pagamento:inicio"-< t
+      p <- varT "pagamento:vezes"-< t
+      let valorTotal =  liftA3 (\v m k -> v* (fromIntegral m)*(1 - k)) v m k
+          valorParcela = liftA2 (\v p -> v/(p))  valorTotal p
+      f <- varT "pagamento:forma_pagamento:forma"-< t
+      odx "pagamento:pagamentos:price" -<  t
+      odx "pagamento:pagamentos:scheduled_date" -<  t
+      let pagamento = Compose $ Identity $ FKT ([Compose $ Identity $ Attr $ ("pagamentos",SOptional  $ Just $ SComposite (Vector.fromList $ replicate (maybe 0 fromIntegral  p)  (SOptional Nothing)))]) True [] (LeftTB1 $ Just $ ArrayTB1 (replicate (maybe 0 fromIntegral  p) (TB1 (KV (PK [attrT ("id",SSerial Nothing)] [attrT ("description",SOptional Nothing)]) [attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ]))))
+          ao :: Maybe (TB1 (Text,Showable))
+          ao =  Just $ TB1 $ KV (PK [] []) [Compose $ Identity $ IT [Compose $ Identity $ Attr$  ("pagamento",SOptional Nothing)] "parcelamento" (LeftTB1 $ Just $ TB1 $ KV (PK [] [] ) [pagamento ])]
+
+      returnA -< ao
+
+    elem inf = maybe (return Nothing) (\inp -> do
+                              b <- dynPK url (Just inp)
+                              return $ fmap (first (lookKey' inf ["parcelamento","plano_aluno","pagamento"])) <$> b
+                            )
+
+
 notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" "nota"(staticP url) elem
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
@@ -594,7 +629,7 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
 
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item
-  where item = fmap (\n@(Raw _ t k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
+  where item = fmap (\n@(Raw _ _ _ t _ k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
 
 
 
@@ -619,10 +654,11 @@ main = do
     )  sorted
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
-
-  forkIO $ poller  h siapi3Polling
-  forkIO $ poller  h siapi2Polling
-  forkIO $ poller  h artAndamentoPolling
+{-
+  forkIO $ poller h siapi3Polling
+  forkIO $ poller h siapi2Polling
+  forkIO $ poller h artAndamentoPolling
+-}
 
 
 
@@ -632,15 +668,15 @@ main = do
 
 poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
   conn <- connectPostgreSQL ("user=postgres dbname=incendio")
-  inf <- keyTables conn  "incendio"
+  inf <- keyTables conn  conn ("incendio","postgres")
   let loop =  do
         print =<<  getCurrentTime
         print ("START" ::String)
         let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
         listRes <- queryWith_ (fromAttr (fst rp) ) conn  (traceShowId $ fromString $ T.unpack $ snd rp)
-        let evb = filter (\i -> tdInput i  {-&& tdOutput1 i-} ) listRes
+        let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
             tdInput i =  maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd t) i) (fst f)
-            -- tdOutput1 i =  maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd f) i) (snd f)
+            tdOutput1 i =  maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd f) i) (snd f)
 
         i <- elem inf evb
         handler i
@@ -671,7 +707,7 @@ layout  infT = do
   script <- UI.div # sink UI.html (maybe "" draw <$> infT)
   UI.div # set children [vis,script]
 
-testParse sch q = withConnInf sch (\inf -> do
+{- testParse sch q = withConnInf sch (\inf -> do
                                        let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                        putStrLn (  show rpq)
                                        putStrLn (  show rp)
@@ -680,4 +716,4 @@ testParse sch q = withConnInf sch (\inf -> do
                                            )
 testFireQuery q = testParse "incendio"  q
 testAcademia q = testParse "academia"  q
-
+-}

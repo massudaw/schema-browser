@@ -170,7 +170,7 @@ exec inputs = do
   let
     arr = readDocument [withValidate no,withTrace 1] (unpack file)
         >>> getPoint
-  inf <- keyTables conn  schema
+  inf <- keyTables conn conn  (schema,"postgres")
   print (tableMap inf)
   res <- runX arr
   let runVals = [("period",SInterval $ (ER.Finite $ last $ head res ,True) `interval` (ER.Finite $ last $ last res,True))]  <> L.filter ((/= "file") . fst ) inputs

@@ -126,9 +126,9 @@ transformKey l@(Primitive _)  (KSerial j ) v | j == l  = SSerial $ Just v
 transformKey ki kr v | ki == kr = v
 transformKey ki kr  v = error  ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
 
-description (Raw _ _ _ desc _ _ ) = desc
+description  = rawDescription
 
-atTables f t@(Raw _ _ _ _ _ _ ) = f t
+atTables f t = f t
 
 renderShowable :: Showable -> String
 renderShowable (SOptional i ) = maybe "" renderShowable i
@@ -210,12 +210,12 @@ intersectionOp j (KArray i )
     | otherwise = error $ "wrong type intersectionOp * - {*} " <> show j <> " /= " <> show i
 intersectionOp i j = inner " = "
 
-showTable (Raw s t _ _  _ _) = fst s <> "." <> t
+showTable t  = rawSchema t <> "." <> rawName t
 
 delete
   :: (Show b ,ToField (TB Identity (Key,b)) ) =>
      Connection ->  TB1 (Key, b) -> Table -> IO GHC.Int.Int64
-delete conn kold t@(Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShowId $ T.unpack del) koldPk
+delete conn kold t = execute conn (fromString $ traceShowId $ T.unpack del) koldPk
   where
     equality k = attrValueName k <> "="  <> "?"
     koldPk = runIdentity . getCompose <$> F.toList (_pkKey $ _kvKey $ _unTB1 $ tableNonRef kold)
@@ -225,7 +225,7 @@ delete conn kold t@(Raw sch tbl pk _ _ _) = execute conn (fromString $ traceShow
 updateAttr
   :: Show b => ToField (TB Identity (Key,b)) =>
      Connection -> TB1 (Key, b) -> TB1 (Key, b) -> Table -> IO (GHC.Int.Int64,TableModification b)
-updateAttr conn kv kold t@(Raw sch tbl pk _ _ _) = fmap (,TableModification Nothing t (EditTB  kv  kold  )) $ execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk)
+updateAttr conn kv kold t = fmap (,TableModification Nothing t (EditTB  kv  kold  )) $ execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk)
   where
     equality k = attrValueName k <> "="  <> "?"
     koldPk = runIdentity . getCompose <$> F.toList (_pkKey $ _kvKey $ _unTB1 $ tableNonRef kold)
@@ -243,7 +243,7 @@ attrValueName (Attr i)= keyValue (fst i)
 attrValueName (IT [i] _  _) = (attrValueName $ runIdentity $ getCompose i)
 attrValueName i = error $ " no attr value instance " <> show i
 
-insertAttr f conn krec  t@(Raw sch tbl pk  _ _ attr ) = if not (L.null pkList)
+insertAttr f conn krec  t = if not (L.null pkList)
               then   do
         let iquery = T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName  kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")" <> " RETURNING ROW(" <>  T.intercalate "," (attrValueName . runIdentity . getCompose <$> pkList ) <> ")"
         liftIO $ print iquery
@@ -271,11 +271,11 @@ isEmptyShowable i = False
 
 
 
-dropTable r@(Raw sch tbl _ _ _ _ )= "DROP TABLE "<> rawFullName r
+dropTable r= "DROP TABLE "<> rawFullName r
 
-rawFullName (Raw (sch,tt) tbl _ _ _ _) = sch <> "." <> tbl
+rawFullName = showTable
 
-createTable r@(Raw sch tbl pk _ fk attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
+createTable r@(Raw sch _ _ tbl _ pk _ fk attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
   where commands = (renderAttr <$> S.toList attr ) <> [renderPK] <> fmap renderFK (S.toList fk)
         renderAttr k = keyValue k <> " " <> renderTy (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
         renderKeySet pk = T.intercalate "," (fmap keyValue (S.toList pk ))
@@ -482,15 +482,15 @@ allRec'
           Key
 allRec' i t = fst $ rootPaths' i t
 
-rootPaths' invSchema r@(Raw _ _ _ _ fk _ ) = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
+rootPaths' invSchema r = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   (t,ks@(TB1 (KV (PK npk ndesc) nattr)),q) <- labelTable r
-  let fkSet =  S.unions $ fmap (\(Path ifk _ _) -> ifk)$  filter (\(Path _ ifk  _) -> isPathReflexive ifk) $ S.toList fk
+  let fkSet =  S.unions $ fmap (\(Path ifk _ _) -> ifk)$  filter (\(Path _ ifk  _) -> isPathReflexive ifk) $ S.toList (rawFKS r)
       fun items =  do
                   let attrs :: [TBLabel Key]
                       attrs = fmap Compose $ filter (\i -> not $ S.member (unAttr.labelValue $ i) fkSet) items
                       itemSet :: S.Set Key
                       itemSet = S.fromList $ fmap (unAttr.labelValue) items
-                  pt <- mapM (recursePath' False (F.toList .unlb1 $ ks ) invSchema) (filter (\(Path ifk jo _)-> ifk `S.isSubsetOf`  itemSet ) (F.toList fk ))
+                  pt <- mapM (recursePath' False (F.toList .unlb1 $ ks ) invSchema) (filter (\(Path ifk jo _)-> ifk `S.isSubsetOf`  itemSet ) (F.toList (rawFKS r) ))
                   return (attrs <> (concat $ fst <$> pt), snd <$> pt)
       nkv pk desc attr = (TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
   (tb,js) <-liftA3 nkv (fun $ fmap getCompose npk) (fun $ fmap getCompose ndesc) (fun $ fmap getCompose nattr)

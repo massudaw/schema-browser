@@ -61,6 +61,7 @@ executable layer
    ,stringsearch
    ,safe
    ,async
+   ,tasty
   -- hs-source-dirs:      
 
   default-language:    Haskell2010

@@ -61,6 +61,12 @@ containKV f = (\i ->   S.member ( S.fromList $ fmap keyValue $  kattr (Compose .
 -- Hide when output is already filled
 -- Let overwrite output with user command
 
+-- modifyTB :: (Traversable f ,Ord a) => f a -> Modification a b ->  Maybe ( f (a,b)) -> Maybe (f (a,b))
+modifyTB  (InsertTB m) =  const (Just m)
+modifyTB  (DeleteTB m ) =  const Nothing
+modifyTB  (EditTB (TB1 m) n ) =  fmap( mapTB1 (\i -> maybe i id $ L.find (\k -> (tbAttr $ fmap fst $ runIdentity $ getCompose k) == (tbAttr $ fmap fst $ runIdentity $ getCompose i) ) ls ) )
+    where ls = F.toList m
+
 generateFresh = do
   (e,h) <- liftIO $ newEvent
   b <- stepper Nothing e
@@ -210,7 +216,7 @@ buildUI i  tdi = case i of
             tdi2 <- addEvent newEv  tdi
             oneInput tdi2 [timeButton]
          (Primitive (PMime mime)) -> do
-           let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) <> "")
+           let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
            clearB <- UI.button # set UI.text "clear"
            tdi2 <- addEvent (const Nothing <$> UI.click clearB) tdi
            let fty = case mime of
@@ -378,13 +384,14 @@ processPanelTable
 processPanelTable conn attrsB table oldItemsi = do
   let fkattrsB = fmap (concat . F.toList . fmap (attrNonRec . unTB) . _unTB1. tableNonRef ) <$> attrsB
       oldItems = fmap (concat . F.toList . fmap (attrNonRec .unTB) . _unTB1. tableNonRef ) <$> oldItemsi
-  insertB <- UI.button # set text "INSERT"
+  insertB <- UI.button # set text "INSERT" # set UI.style (noneShowSpan ("INSERT" `elem` rawAuthorization table ))
   -- Insert when isValid
         # sink UI.enabled ( isJust <$> fkattrsB)
-  editB <- UI.button # set text "EDIT"
+  editB <- UI.button # set text "EDIT" # set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table ))
+
   -- Edit when any persistent field has changed
         # sink UI.enabled (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (tb1Diff (\l m -> if l  /= m then traceShow (l,m) (True,(l,m)) else (False,(l,m))) )  i j) (fmap tableNonRef <$> attrsB) (fmap tableNonRef <$> facts oldItemsi))
-  deleteB <- UI.button # set text "DELETE"
+  deleteB <- UI.button # set text "DELETE" # set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table ))
   -- Delete when isValid
         # sink UI.enabled (isJust <$> facts oldItems)
   let
@@ -462,11 +469,11 @@ iUITable inf pgs pmods oldItems  tb@(IT ifk na  (TB1 tb1))
       element celem
           # set style [("padding-left","10px")]
       fk <- UI.li # set  children [l, celem]
-      let bres =  fmap (fmap (IT (fmap (,SOptional Nothing ) <$> ifk) na  ) ) tcrud
+      let bres =  fmap (fmap (IT (fmap (,SOptional Nothing ) <$> ifk) na  ) ) (tcrud)
       paintEdit  (getElement l) (facts bres) (facts oldItems)
       return $ TrivialWidget bres fk
 iUITable inf pgs pmods oldItems  tb@(IT ifk na (LeftTB1 (Just tb1))) = do
-   tr <- iUITable inf pgs (fmap (fmap unLeftTB)<$>  pmods) (join . fmap (\(IT itk na (LeftTB1 l)) -> IT itk na <$>  l) <$>  oldItems) (IT (fmap unKOptional <$> ifk) na tb1)
+   tr <- iUITable inf pgs (fmap (fmap unLeftTB) <$> pmods) (join . fmap (\(IT itk na (LeftTB1 l)) -> IT itk na <$>  l) <$>  oldItems) (IT ifk na tb1)
    return $  Just . maybe ((IT (fmap (,SOptional Nothing ) <$> ifk) na  (LeftTB1 Nothing))) (\(IT i na j ) -> IT i na (LeftTB1 (Just j)))  <$> tr
 iUITable inf pgs plmods oldItems  tb@(IT ifk na (ArrayTB1 [tb1]))
     = do
@@ -482,8 +489,8 @@ iUITable inf pgs plmods oldItems  tb@(IT ifk na (ArrayTB1 [tb1]))
       sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (tail es ) ( tds )
       fk <- UI.li # set  children (l: offset:  (getElement <$> items))
       let bres2 = fmap (fmap (\(IT i na j ) -> j)) . allMaybes . L.takeWhile (maybe False (const True)) <$> Tra.sequenceA (triding <$> items)
-          emptyFKT = Just . maybe (IT (fmap (,SComposite (V.empty)) <$> ifk) na (ArrayTB1 []) ) id
-          bres = (\o -> liftA2 (\l (IT _ na (ArrayTB1 m )) -> IT (fmap (,SComposite V.empty) <$> ifk)  na (ArrayTB1 $ L.take o m <> l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
+          emptyFKT = Just . maybe (IT (fmap (,SOptional Nothing ) <$> ifk) na (ArrayTB1 []) ) id
+          bres = (\o -> liftA2 (\l (IT _ na (ArrayTB1 m )) -> IT (fmap (,SOptional Nothing ) <$> ifk)  na (ArrayTB1 $ L.take o m <> l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
       paintEdit  (getElement l) (facts bres) (facts oldItems)
       return $ TrivialWidget bres fk
 
@@ -511,7 +518,6 @@ fkUITable inf pgs created res pmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 
       let
           rr = S.fromList $ fmap (unAttr . runIdentity . getCompose ) $ _pkKey $ _kvKey $ _unTB1 $ tableNonRef tb1
           relTable = M.fromList $ fmap swap rel
-          oldSel = fmap _tbref <$> oldItems
           tdipre = fmap _fkttable <$> oldItems
           plmods =  pmods
       tdi <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse (Tra.traverse diffOptional ))) i   =<< j)  (return tdipre) (rumors . snd <$> plmods)
@@ -521,15 +527,15 @@ fkUITable inf pgs created res pmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 
       filterInpBh <- stepper "" (UI.valueChange filterInp )
       let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd
-      box <- optionalListBox  (sorting True (S.toList rr) <$> fmap fst res2) tdi  (pure id ) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+      box <- optionalListBox  (sorting True (S.toList rr) <$> fmap fst res2) tdi (pure id ) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
       let
         reorderPK l = fmap (\i -> justError "reorder wrong" $ L.find ((== i).fst) l )  (unAttr . unTB <$> ifk)
         lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
           where kn = justError "relTable" $ M.lookup ko relTable
-        fksel =  fmap (reorderPK . fmap lookFKsel)  <$>  (join . fmap findPKM  <$> triding box)
+        fksel =  (\box -> fmap (\ibox -> FKT (fmap (_tb . Attr). reorderPK . fmap lookFKsel $ ibox) refl rel (fromJust box) ) .  join . fmap findPKM $ box ) <$>  ( triding box)
       chw <- checkedWidget (pure False)
-      (celem,tcrud,evs) <- crudUITable inf pgs plmods tb1  (triding box)
-      let eres ev = (\e -> {-second (modifyTB (allRec' (tableMap inf) ((\(Just i)-> i) $ M.lookup rr (pkMap inf))) e) .-}
+      (celem,_ ,evs) <- crudUITable inf pgs plmods tb1  (triding box)
+      let eres ev = (\e -> second (modifyTB  e) .
                            first (addToList (allRec' (tableMap inf) ((\(Just i)-> i) $ M.lookup rr (pkMap inf))) e) ) <$> ev
       res2  <-  accumTds (liftA2 (,) (pure res) tdi ) (eres <$> evs)
       element celem
@@ -537,9 +543,13 @@ fkUITable inf pgs created res pmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 
           # sink UI.style (noneShow <$> (facts $ triding chw))
           # set style [("padding-left","10px")]
       fk <- UI.li # set  children [l, getElement box,filterInp,getElement chw,celem]
-      let bres =  liftA2 (liftA2 (\i -> FKT i refl rel )) (fmap (fmap (_tb . Attr)) <$> fksel ) tcrud
-      paintEdit  (getElement l) (facts fksel) (fmap (fmap (unAttr. runIdentity.getCompose)) <$> facts oldSel)
-      return $ TrivialWidget bres fk
+      paintEdit  (getElement l) (facts fksel) ( facts oldItems)
+      return $ TrivialWidget fksel fk
+
+
+
+
+
 fkUITable inf pgs created res plmods  wl oldItems  tb@(FKT ilk refl rel  (LeftTB1 (Just tb1 ))) = do
     tb <- fkUITable inf pgs created res (fmap (fmap unLeftTB) <$> plmods)  wl (join . fmap (\(FKT ifk refl rel  (LeftTB1 tb)) -> liftA2 (\ik -> FKT ik  refl (first unKOptional <$> rel)) (traverse (traverse (unKeyOptional )) ifk) tb) <$> oldItems)  (FKT (fmap unKOptional<$> ilk) refl (first unKOptional <$> rel) tb1)
     let emptyFKT = (FKT (fmap (,SOptional Nothing)  <$> ilk) refl rel (LeftTB1 Nothing))
@@ -610,14 +620,14 @@ nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lk
                 vv =  join . fmap (lorder (unAttr <$> fkattr') ) . fmap concat . allMaybes  <$> iold
                 tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK  l _ ) _ ))-> interPoint ksjoin k  (unAttr . unTB <$> l)) ) i) j ) <$> lks <*> vv
             li <- wrapListBox res2 tb (pure id) showFK
-            (ce,ct,evs) <- crudUITable inf pgs [] tbfk  tb
+            (ce,_,evs) <- crudUITable inf pgs [] tbfk  tb
             let eres = fmap (addToList  (allRec' (tableMap inf) ((\(Just i)-> i) $ M.lookup o1 (pkMap inf))) <$> ) evs
             res2  <-  accumTds lks eres
             chw <- checkedWidget (pure False)
             element ce
               # sink UI.style (noneShow <$> (facts $ triding chw))
               # set style [("paddig-left","10px")]
-            return (vv,ct, [getElement li,getElement chw,ce])
+            return (vv,tb, [getElement li,getElement chw,ce])
 
 pdfFrame fty pdf = mkElement (fst fty ) UI.# sink UI.src pdf  UI.# UI.set style (snd fty)
 
