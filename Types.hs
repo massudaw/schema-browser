@@ -32,6 +32,8 @@ import qualified Data.Text.Lazy as T
 import qualified Data.ByteString as BS
 
 
+import GHC.Stack
+
 import Data.Traversable(Traversable)
 import Database.PostgreSQL.Simple.Time
 
@@ -51,10 +53,10 @@ instance Ord a => Ord (Interval.Interval a ) where
   compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)
 
 data PK a
-  = PK { _pkKey:: [a], _pkDescription :: [a]} deriving(Functor,Foldable,Traversable,Show)
+  = PK { _pkKey:: [a], _pkDescription :: [a]} deriving(Eq,Ord,Functor,Foldable,Traversable,Show)
 
 data KV a
-  = KV {_kvKey  :: PK a , _kvAttr ::  [a] }deriving(Functor,Foldable,Traversable,Show)
+  = KV {_kvKey  :: PK a , _kvAttr ::  [a] }deriving(Eq,Ord,Functor,Foldable,Traversable,Show)
 
 -- Utility functions for kv
 mapKV f (KV (PK l m) n) =  KV (PK (map f l)(map f m)) (map f n)
@@ -83,12 +85,6 @@ instance (Functor f,Ord1 f) => Ord1 (TB f ) where
 instance (Functor f,Show1 f) => Show1 (TB f  ) where
   showsPrec1 = showsPrec
 
-instance Eq f => Eq1 (Labeled f ) where
-  eq1 i j = i == j
-instance Ord f => Ord1 (Labeled f ) where
-  compare1 i j  = compare i j
-instance Show f => Show1 (Labeled f ) where
-  showsPrec1 = showsPrec
 
 type Key = FKey (KType Text)
 
@@ -179,10 +175,7 @@ instance Eq Key where
    k /= l = keyFastUnique k /= keyFastUnique l
 
 instance Ord Key where
-   k > l = keyFastUnique k > keyFastUnique l
-   k < l = keyFastUnique k < keyFastUnique l
-   k <= l = keyFastUnique k <= keyFastUnique l
-   k >= l = keyFastUnique k >= keyFastUnique l
+   compare i j = compare (keyFastUnique i) (keyFastUnique j)
 
 instance Show Key where
    show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
@@ -228,8 +221,11 @@ data TableType
    deriving(Eq,Ord,Show)
 
 data Table
-    =  Raw { rawSchema :: (Text,(TableType,Maybe Text))
+    =  Raw { rawSchema :: Text
+           , rawTableType :: TableType
+           , rawTranslation :: Maybe Text
            , rawName :: Text
+           , rawAuthorization :: [Text]
            , rawPK :: (Set Key)
            , rawDescription :: (Maybe Key)
            , rawFKS ::  (Set (Path (Set Key) (SqlOperation Text)))
@@ -242,7 +238,7 @@ instance Show Table where
 
 
 tableName = rawName
-translatedName (Raw (_,(_,trans))  t _ _ _ _ ) =  maybe t id trans
+translatedName tb =  maybe (rawName tb) id (rawTranslation tb )
 
 
 data TableModification b
@@ -255,45 +251,11 @@ data Modification a b
   | DeleteTB (TB1 (a,b))
   deriving(Eq,Show,Functor)
 
-
-instance Ord1 PK where
-  compare1 (PK i j) (PK a b) = compare (compare1 i a ) (compare1 j b)
-
-instance Ord1 KV where
-  compare1 (KV i j) (KV a b) = compare (compare1 i a ) (compare1 j b)
-
-instance Eq1 PK where
-  eq1 (PK i j) (PK a b) = eq1 i a == eq1 j b
-
-instance Eq1 KV where
-  eq1 (KV i j) (KV a b) = eq1 i a == eq1 j b
-
-instance Eq a => Eq (PK a) where
-  i == j = _pkKey i == _pkKey j
-
-instance Eq a => Eq (KV a) where
-  i == j = _kvKey i == _kvKey j
-
-instance Ord a => Ord (PK a) where
-  compare i j = compare (_pkKey i) (_pkKey j)
-
-instance Ord a => Ord (KV a) where
-  compare i j = compare (_kvKey i) (_kvKey j)
-
-instance Apply f => Apply (FTB1 f ) where
-  TB1 a <.> TB1 a1 =  TB1 (getCompose $ Compose a <.> Compose a1)
-
 instance Apply KV where
   KV pk i <.> KV pk1 i1 = KV (pk <.> pk1) (getZipList $ ZipList i <.> ZipList i1)
 
 instance Apply PK where
   PK i j <.> PK i1 j1 = PK (getZipList $ ZipList i <.> ZipList i1 ) ( getZipList $ ZipList j <.> ZipList j1)
-
-instance Apply f => Apply (TB f) where
-  Attr a <.>  Attr a1 = Attr $ a a1
-  FKT l i m t <.> FKT l1 i1 m1 t1 = FKT (zipWith (<.>) l l1) (i && i1) m1 (t <.> t1)
-  IT l n t <.> IT l1 n1 t1 = IT (zipWith (<.>) l l1) n1 (t <.> t1)
-  l <.> j = error  "cant apply"
 
 type QueryRef = State ((Int,Map Int Table ),(Int,Map Int Key))
 
@@ -301,13 +263,27 @@ type QueryRef = State ((Int,Map Int Table ),(Int,Map Int Key))
 instance IsString Showable where
     fromString i = SText (T.pack i)
 
+instance Enum Showable where
+    toEnum = SNumeric . toEnum
+    fromEnum (SNumeric i ) = fromEnum i
+
+instance Real Showable where
+  toRational (SDouble i )=  toRational i
+
+instance Integral Showable where
+  -- quotRem i = quotRem i
+  toInteger (SNumeric i) = toInteger i
+  quotRem (SNumeric i ) (SNumeric j ) = (\(l,m) -> (SNumeric l , SNumeric m)) $ quotRem i j
+
+
 instance Num Showable where
     SNumeric i +  SNumeric j = SNumeric (i + j)
     SDouble i +  SDouble j = SDouble (i + j)
     SNumeric i *  SNumeric j = SNumeric (i * j)
     SDouble i *  SDouble j = SDouble (i * j)
-    fromInteger i = SNumeric $ fromIntegral i
+    fromInteger i = SDouble $ fromIntegral i
     negate (SNumeric i) = SNumeric $ negate i
+    negate (SDouble i) = SDouble $ negate i
     abs (SNumeric i) = SNumeric $ abs i
     abs (SDouble i) = SDouble $ abs i
     signum (SNumeric i) = SNumeric $ signum i
@@ -315,6 +291,8 @@ instance Num Showable where
 instance Fractional Showable where
   fromRational i = SDouble (fromRational i)
   recip (SDouble i) = SDouble (recip i)
+  recip (SNumeric i) = SDouble (recip $ fromIntegral i)
+  recip i = errorWithStackTrace (show i)
 
 makeLenses ''KV
 makeLenses ''PK
