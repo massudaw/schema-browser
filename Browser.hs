@@ -232,8 +232,8 @@ chooseKey inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,_,evs) <- crudUITable inf  [queryTimeline,lplugOrcamento ,siapi3Plugin ,siapi2Plugin , gerarPagamentos , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary  ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryTimeline, queryArtAndamento ] [] (allRec' (tableMap inf) table) (userSelection itemList)
-            let eres = fmap (addToList  (allRec' (tableMap inf ) table )  <$> ) evs
+            (crud,evs) <- crudUITable inf  [queryTimeline,lplugOrcamento ,siapi3Plugin ,siapi2Plugin , gerarPagamentos , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary  ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryTimeline, queryArtAndamento ] [] (allRec' (tableMap inf) table) (userSelection itemList)
+            let eres = fmap addToList <$> evs
             res2 <- accumTds vp eres
             insertDiv <- UI.div # set children [crud]
             chk <- checkedWidget (pure True)
@@ -654,12 +654,10 @@ main = do
     )  sorted
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
-{-
+
   forkIO $ poller h siapi3Polling
   forkIO $ poller h siapi2Polling
   forkIO $ poller h artAndamentoPolling
--}
-
 
 
 

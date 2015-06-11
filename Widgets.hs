@@ -59,10 +59,15 @@ foldTds =  foldl' applyTds
 
 evalUI el f  = getWindow el >>= \w -> runUI w f
 
+accumBds :: MonadIO m => Tidings a -> [Event (a -> a)] -> m (Behavior a)
+accumBds e l = do
+	ve <- currentValue (facts e)
+	accumB ve $ concatenate <$> unions (l ++ [const <$> rumors e ])
+
 accumTds :: MonadIO m => Tidings a -> [Event (a -> a)] -> m (Tidings a)
 accumTds e l = do
 	ve <- currentValue (facts e)
-	accumT ve $ foldl1 (unionWith (.)) (l ++ [const <$> rumors e ])
+	accumT ve $ concatenate <$> unions (l ++ [const <$> rumors e ])
 
 
 accumTs :: MonadIO m => a -> [Event (a -> a)] -> m (Tidings a)
@@ -309,6 +314,14 @@ checkedWidget init = do
 wrapListBox l p f q = do
   o <- listBox l p f q
   return $ TrivialWidget (userSelection o ) (getElement o)
+
+optionalListBox' l o  s = mdo
+  ol <- UI.listBox ((Nothing:) <$>  fmap (fmap Just) l) (fmap Just <$> st) s
+  let sel = unionWith const (rumors $ fmap join $ UI.userSelection ol) (rumors o)
+  v <- currentValue ( facts o)
+  st <- stepper v sel
+  return $ TrivialWidget (tidings st sel ) (getElement ol)
+
 
 optionalListBox l o f s = do
   o <- listBox ((Nothing:) <$>  fmap (fmap Just) l) (fmap Just <$> o) f s

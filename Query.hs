@@ -300,10 +300,8 @@ unIntercalate pred s                 =  case dropWhile pred s of
                                       where (w, s'') =
                                              break pred s'
 
-
 data Tag = TAttr | TPK
 
--- allKVRec  i | traceShow i False = error "error"
 allKVRec  (TB1 (KV (PK k d) e ))= F.foldr zipPK (KV (PK [] []) []) $ (go TPK (\i -> KV (PK i []) []) . runIdentity . getCompose  <$> k) <> (go TAttr (\i-> KV (PK [] i) [] ) . runIdentity . getCompose <$> d) <> ( go TAttr (\i-> KV (PK [] []) i) . runIdentity . getCompose <$> e)
   where zipPK (KV (PK i j) k) (KV (PK m n) o) = KV (PK (i <> m) (j <> n)) (k <> o )
         go  TAttr l (FKT _ _ _ tb) =  l $ F.toList $ allKVRec  tb

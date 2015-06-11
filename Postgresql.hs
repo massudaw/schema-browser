@@ -3,6 +3,7 @@ module Postgresql where
 import Types
 import Query
 import GHC.Stack
+import Debug.Trace
 import Data.Functor.Identity
 import Data.Functor.Compose
 import Data.Scientific hiding(scientific)
