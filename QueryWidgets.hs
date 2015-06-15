@@ -15,6 +15,7 @@ import Data.Bifunctor
 import Data.Ord
 import Control.Lens (Lens,(^?))
 import qualified Control.Lens as Le
+import Utils
 
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -43,7 +44,7 @@ import Widgets
 import Schema
 import Step
 import qualified Data.Foldable as F
-import Data.Char
+-- import Data.Char
 import Data.Tuple
 import Database.PostgreSQL.Simple
 import Control.Exception
@@ -134,10 +135,10 @@ pluginUI inf unoldItems (BoundedPlugin2 n t f action) = do
       -- tdOutput1 = (\i -> maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd f) i) (snd f) ) <$>  outputItems
       -- tdOutput= liftA2 (\i j -> if i then True else j) (triding overwrite)  tdOutput1
   -- let ovev =((\ j i  -> if i then j else Nothing) <$>   oldItems <*> tdOutput1)
-  cv <- currentValue (facts oldItems)
+  v <- currentValue (facts oldItems)
   headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (facts tdInput)
   let ecv = (facts oldItems<@ UI.click headerP)
-  bcv <- stepper cv (facts oldItems <@ UI.click headerP)
+  bcv <- stepper v (facts oldItems <@ UI.click headerP)
   pgOut <- mapTEvent (action inf) (tidings bcv ecv)
   return (headerP, (fmap snd $ snd f ,   pgOut ))
 
@@ -232,7 +233,7 @@ buildUI i  tdi = case i of
     justCase i j@(Just _) = j
     justCase i Nothing = i
     oneInput tdi elem = do
-            f <- stepper Nothing (rumors tdi)
+            let f = facts tdi
             inputUI <- UI.input # sink UI.value ((forceDefaultType  <$> f))
             let pke = foldl1 (unionWith justCase ) [readType i <$> UI.valueChange inputUI,rumors  tdi]
             pk <- stepper (defaultType i)  pke
@@ -310,7 +311,7 @@ uiTable inf pgs tname plmods ftb@(TB1 (KV (PK k d) a)) oldItems = do
     else do
       return []
   body <- UI.div
-    # set children ( listBody : plugins )
+    # set children (listBody : plugins )
     # set style [("border","2px"),("border-color","gray"),("border-style","solid")]
   return (body, tableb )
 
@@ -501,6 +502,7 @@ iUITable inf pgs plmods oldItems  tb@(IT ifk na (ArrayTB1 [tb1]))
       paintEdit  (getElement l) (facts bres) (facts oldItems)
       return $ TrivialWidget bres fk
 
+
 fkUITable
   ::
   InformationSchema
@@ -523,37 +525,34 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
         nonInjectiveSelection inf pgs created wl tb (pure res) oldItems
     | otherwise = mdo
       let
-          rr = S.fromList $ fmap (unAttr . runIdentity . getCompose ) $ _pkKey $ _kvKey $ _unTB1 $ tableNonRef tb1
           relTable = M.fromList $ fmap swap rel
           tdipre = fmap _fkttable <$> oldItems
       tdi <- foldr (\i j -> updateEvent  (fmap (Tra.traverse (Tra.traverse diffOptional ))) i =<< j)  (return tdipre) (rumors . snd <$> plmods)
-      v <- currentValue ( facts tdi)
       l <- flabel # set text (show $ unAttr .unTB <$> ifk)
-      filterInp <- UI.input
+      {-filterInp <- UI.input
       filterInpBh <- stepper "" (UI.valueChange filterInp )
-
-      let
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
-          filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd
+          filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd-}
+      let
           Just table = M.lookup (S.fromList $ findPK tb1 ) (pkMap inf)
       ol <- UI.listBox dataList bselection  dataViewer
       let evsel = unionWith const (rumors $ join <$> UI.userSelection ol) (rumors tdi)
-      prop <- stepper v evsel
+      prop <- stepper Nothing evsel
       let tds = tidings prop evsel
       (celem,tableb) <- uiTable inf pgs (rawName table) plmods tb1  tds
       (panelItems,evs) <- processPanelTable (conn inf) (facts tableb) res2 table tds
       let
-          sel = fmap head $ unions $ [(rumors $ fmap join $ UI.userSelection ol),rumors tdi] <> (fmap modifyTB <$> evs)
           dataList = ((Nothing:) <$>  fmap (fmap Just) (res2))
           bselection = (fmap Just <$> st)
           dataViewer = (pure ( maybe UI.div  showFKE))
+          sel = fmap head $ unions $ [(rumors $ join <$> UI.userSelection ol), rumors tdi] <> (fmap modifyTB <$> evs)
+      st <- stepper Nothing sel
       res2  <-  accumB res  (fmap concatenate $ unions $ fmap addToList <$> evs)
-      st <- stepper v sel
       let
         reorderPK l = fmap (\i -> justError "reorder wrong" $ L.find ((== i).fst) l )  (unAttr . unTB <$> ifk)
         lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
           where kn = justError "relTable" $ M.lookup ko relTable
-        box = TrivialWidget (tidings st sel ) (getElement ol)
+        box = TrivialWidget (tidings st sel) (getElement ol)
         fksel =  (\box -> fmap (\ibox -> FKT (fmap (_tb . Attr). reorderPK . fmap lookFKsel $ ibox) refl rel (fromJust box) ) .  join . fmap findPKM $ box ) <$>  ( triding box)
       chw <- checkedWidget (pure False)
       element panelItems
@@ -565,7 +564,7 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
           # sink UI.style (noneShow <$> (facts $ triding chw))
           # set style [("padding-left","10px")]
       element celem
-      fk <- UI.li # set  children [l, getElement box,filterInp,getElement chw,celem, panelItems ]
+      fk <- UI.li # set  children [l, getElement box,{-filterInp,-}getElement chw,celem, panelItems ]
       paintEdit  (getElement l) (facts fksel) ( facts oldItems)
       return $ TrivialWidget fksel fk
 
@@ -635,7 +634,7 @@ nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lk
   | otherwise = errorWithStackTrace (show attr)
   where inner tbfk sel fkattr' iold = mdo
             let
-                o1 = tablePKSet tbfk
+                -- o1 = tablePKSet tbfk
                 vv =  join . fmap (lorder (unAttr <$> fkattr') ) . fmap concat . allMaybes  <$> iold
                 tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK  l _ ) _ ))-> interPoint ksjoin k  (unAttr . unTB <$> l)) ) i) j ) <$> lks <*> vv
             li <- wrapListBox res2 tb (pure id) showFK

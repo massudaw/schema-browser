@@ -32,9 +32,12 @@ executable layer
    , aeson 
    , pandoc-types
    ,lens
+   ,reactive-banana
+   ,reactive-banana-wx
    ,wreq
    ,http-client
    ,http-types
+   ,wx
    ,HsOpenSSL
    ,http-client-tls
    ,http-client-openssl

@@ -16,7 +16,7 @@
 
 module Query where
 
-import Warshal
+-- import Warshal
 import Data.Functor.Apply
 import Data.Functor.Compose
 import Data.Functor.Identity
@@ -32,6 +32,7 @@ import qualified Data.Text.Lazy as T
 import qualified Data.ExtendedReal as ER
 
 import GHC.Int
+import Utils
 
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.ToField
@@ -45,7 +46,7 @@ import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
-import Data.Set (Set)
+-- import Data.Set (Set)
 import Control.Monad.State
 import Data.Text.Lazy(Text)
 import Debug.Trace
@@ -289,8 +290,6 @@ createTable r@(Raw sch _ _ tbl _ pk _ fk attr) = "CREATE TABLE " <> rawFullName 
         renderFK (Path origin (FKJoinTable _ ks table) end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
         renderFK (Path origin _  end) = ""
 
-type HashQuery =  HashSchema (Set Key) (SqlOperation Table)
-type PathQuery = Path (Set Key) (SqlOperation Table)
 
 
 unIntercalate :: ( Char -> Bool) -> String -> [String]
@@ -495,11 +494,8 @@ rootPaths' invSchema r = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,
   return ( tb , "SELECT ROW(" <> T.intercalate "," (fmap explodeLabel $ (F.toList $ unlb1 tb))  <> (") FROM " <> q ) <> js)
 
 
-justError e (Just i) = i
-justError e  _ = errorWithStackTrace e
 
 
-groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
 
 -- interval' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
 inf' = (\(ER.Finite i) -> i) . Interval.lowerBound

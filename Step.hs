@@ -6,7 +6,7 @@ import Query
 import Control.Applicative
 import qualified Data.Text.Lazy as T
 import Data.Text.Lazy (Text)
-import Warshal
+-- import Warshal
 import Data.Functor.Compose
 import Data.Functor.Identity
 import Data.String
@@ -21,6 +21,7 @@ import Prelude hiding((.),id)
 import Data.Monoid
 import Control.Monad
 import qualified Data.Bifunctor as BF
+import Utils
 
 import qualified Data.Traversable as T
 

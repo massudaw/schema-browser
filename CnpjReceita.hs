@@ -29,6 +29,7 @@ import qualified Data.Text.Lazy as TL
 import Safe
 import Types
 import Query
+import Utils
 import Schema
 import QueryWidgets
 import Gpx

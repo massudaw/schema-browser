@@ -7,6 +7,8 @@ import qualified Data.Text as TE
 import qualified Data.Text.Lazy as T
 import  Data.Aeson
 import qualified Data.Vector as V
+import GHC.Stack
+import GHC.Exts
 
 spanList :: ([a] -> Bool) -> [a] -> ([a], [a])
 
@@ -60,3 +62,7 @@ translateMonth v = foldr (\i -> (uncurry T.replace) i )  v transTable
               where transTable = [("out","oct"),("dez","dec"),("set","sep"),("ago","aug"),("fev","feb"),("abr","apr"),("mai","may")]
 
 
+justError e (Just i) = i
+justError e  _ = errorWithStackTrace e
+
+groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f

@@ -9,6 +9,7 @@ import Debug.Trace
 import Text.Pandoc.Options
 import Types
 import Text.Pandoc.PDF
+import Utils
 
 import Control.Monad
 import Text.Pandoc.Writers.LaTeX

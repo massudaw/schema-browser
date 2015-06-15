@@ -16,7 +16,7 @@
 
 module Types where
 
-import Warshal
+-- import Warshal
 import Control.Lens.TH
 import Data.Functor.Apply
 import Data.Functor.Compose
@@ -51,6 +51,15 @@ import Data.Unique
 
 instance Ord a => Ord (Interval.Interval a ) where
   compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)
+
+data Path a b
+  -- Trivial Path
+  = Path  a  b  a
+  -- | TagPath  (Cardinality (Set a))  b  (Cardinality (Set a))
+  -- Path Composition And Product
+  | ComposePath a (Set (Path a b),a,Set (Path a b)) a
+  deriving(Eq,Ord,Show )
+
 
 data PK a
   = PK { _pkKey:: [a], _pkDescription :: [a]} deriving(Eq,Ord,Functor,Foldable,Traversable,Show)
@@ -294,7 +303,11 @@ instance Fractional Showable where
   recip (SNumeric i) = SDouble (recip $ fromIntegral i)
   recip i = errorWithStackTrace (show i)
 
+-- type HashQuery =  HashSchema (Set Key) (SqlOperation Table)
+type PathQuery = Path (Set Key) (SqlOperation Table)
+
 makeLenses ''KV
 makeLenses ''PK
 makeLenses ''TB
+
 

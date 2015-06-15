@@ -43,7 +43,7 @@ import Reactive.Threepenny
 import Data.Graph(stronglyConnComp,flattenSCCs)
 import Data.Traversable (traverse)
 import qualified Data.Traversable as Tra
-import Warshal
+-- import Warshal
 import Data.Time.LocalTime
 import Data.Functor.Compose
 import qualified Data.List as L
@@ -65,7 +65,6 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.Text as TE
 import Data.Text.Lazy (Text)
 import qualified Data.Set as S
-import Data.Set (Set)
 
 
 import Database.PostgreSQL.Simple
@@ -122,6 +121,8 @@ instance Eq Connection where
   i == j = True
 
 
+form td ev =  tidings (facts td ) (facts td <@ ev )
+
 databaseChooser sargs = do
   let args = fmap T.pack sargs
   dbs <- liftIO $ listDBS  (head sargs)
@@ -129,13 +130,14 @@ databaseChooser sargs = do
   wid <- loginWidget (atMay  sargs 2 ) (atMay  sargs 3)
   dbsW <- listBox (pure $ concat $ fmap (\(i,(c,j)) -> (i,) . (c,) <$> j) $ M.toList dbs ) (pure dbsInit  ) (pure id) (pure (line . show .fmap snd ))
   load <- UI.button # set UI.text "Connect" # sink UI.enabled (facts (isJust <$> userSelection dbsW) )
+  let login = liftA2 (liftA2 (,)) (triding wid) ( userSelection dbsW )
+      formLogin = form login (UI.click load)
   let genSchema ((user,pass),(dbN,(dbConn,schemaN))) = do
         conn <- connectPostgreSQL ("user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> toStrict ( encodeUtf8 dbN ))
         keyTables dbConn conn (schemaN,T.pack user)
-  chooserT <-  mapTEvent (traverse genSchema) (liftA2 (liftA2 (,)) (triding wid) ( userSelection dbsW ))
-  let chooserEv = facts chooserT <@ UI.click load
+  chooserT <-  mapTEvent (traverse genSchema) formLogin
   chooserDiv <- UI.div # set children [getElement wid ,getElement dbsW,load]
-  return $ (tidings (facts chooserT) chooserEv,chooserDiv)
+  return $ (chooserT,chooserDiv)
 
 
 
@@ -145,10 +147,9 @@ unSOptional' i   = Just i
 
 applyUI el f = (\a-> getWindow el >>= \w -> runUI w (f a))
 
-
 tableNonRec (TB1 k ) = concat $ F.toList $  fmap (attrNonRec. unTB ) k
 
-
+{-
 pollingUI' inf listRes p@(BoundedPollingPlugins n deftime (table,f) a) = do
     let plug = a inf
     headerP <- UI.div # set text n
@@ -180,7 +181,7 @@ pollingUI' inf listRes p@(BoundedPollingPlugins n deftime (table,f) a) = do
     ev <- plug  (tidings bh evb)
     body <- UI.div  # set children [headerP,b,inp,staT,stoT,output,ev]
     return body
-
+-}
 
 line n =  set  text n
 
@@ -193,7 +194,7 @@ chooserKey inf kitems i = do
   let orderMap = Just $ M.fromList  i
   bset <- buttonFSet  (L.sortBy (flip $  comparing (\ pkset -> liftA2 M.lookup  (fmap rawName . flip M.lookup (pkMap inf) $ pkset ) orderMap)) kitems)  initKey ((\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> i) ))<$> filterInpBh) (\i -> case M.lookup i (pkMap inf) of
                                        Just t -> T.unpack (translatedName t)
-                                       Nothing -> showVertex i )
+                                       Nothing -> show i )
   let bBset = triding bset
   onEvent (rumors bBset) (\ i ->
       liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
@@ -683,12 +684,12 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
         threadDelay (d*1000*1000*60)
         loop
   loop
-
+{-
 layout  infT = do
   vis <- UI.div # set UI.id_ "visualization"
   let draw inf  =
         let
-            g = graphP inf
+            -- g = graphP inf
             v :: [(Int,Set Key)]
             v = zip [0..] (L.nub $ hvertices g <> tvertices g)
             e = filter  (\case {(Path _ _ _)-> True ; i -> False}) $ concat $ fmap snd $ M.toList $ edges g
@@ -704,7 +705,7 @@ layout  infT = do
         in graphJSON
   script <- UI.div # sink UI.html (maybe "" draw <$> infT)
   UI.div # set children [vis,script]
-
+-}
 {- testParse sch q = withConnInf sch (\inf -> do
                                        let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                        putStrLn (  show rpq)

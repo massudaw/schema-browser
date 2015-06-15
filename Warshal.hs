@@ -9,7 +9,7 @@ import qualified Data.Set as S
 import Data.Map (Map)
 import Data.Set (Set)
 import Text.Printf ( printf )
-
+import Types
 
 type HashSchema  a b = Map a (Map a [(Path a b )])
 
@@ -71,14 +71,6 @@ data Cardinality a
   | Many a
   deriving(Eq,Ord,Show)
 -}
-
-data Path a b
-  -- Trivial Path
-  = Path  a  b  a
-  -- | TagPath  (Cardinality (Set a))  b  (Cardinality (Set a))
-  -- Path Composition And Product
-  | ComposePath a (Set (Path a b),a,Set (Path a b)) a
-  deriving(Eq,Ord,Show )
 
 instance Functor (Path a) where
   fmap f (Path i t j ) =  (Path i (f t ) j)

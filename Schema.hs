@@ -3,15 +3,13 @@
 module Schema where
 
 import Types
-import Query
 import Data.Unique
-import Warshal
 import qualified Data.Foldable as F
 import Data.Maybe
 import Data.String
 import Control.Monad.IO.Class
 import Data.Monoid
-
+import Utils
 
 import Database.PostgreSQL.Simple
 
@@ -61,9 +59,9 @@ data InformationSchema
   , keyMap :: Map (Text,Text) Key
   , pkMap :: Map (Set Key) Table
   , tableMap :: Map Text Table
-  , hashedGraph :: HashQuery
-  , hashedGraphInv :: HashQuery
-  , graphP :: Graph (Set Key) (SqlOperation Table)
+  -- , hashedGraph :: HashQuery
+  -- , hashedGraphInv :: HashQuery
+  -- , graphP :: Graph (Set Key) (SqlOperation Table)
   , pluginsMap :: Map (Text,Text,Text) Key
   , conn :: Connection
   , rootconn :: Connection
@@ -112,11 +110,11 @@ keyTables conn userconn (schema ,user) = do
                                 in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap)  c (maybe [] id $ M.lookup c authorization)  pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK  ) attr )) <$> res :: [(Set Key,Table)]
        let ret@(i1,i2,i3) = (keyMap, M.fromList $ filter (not.S.null .fst)  pks,traceShowId $  M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        paths <- schemaKeys' conn schema ret
-       let graphI =  graphFromPath (filter (\i -> fst (pbound i) /= snd (pbound i) ) $ paths <> (fmap (fmap ((\(Just i) -> i) . flip M.lookup i3)) <$> concat (fmap (F.toList.snd) (M.toList fks))))
-           graphP = warshall2 $ graphI
-           graph = hashGraph $ graphP
-           invgraph = hashGraphInv' $ graphP
-       return  $ InformationSchema schema i1 i2 i3 graph invgraph graphP M.empty userconn conn
+       -- let graphI =  graphFromPath (filter (\i -> fst (pbound i) /= snd (pbound i) ) $ paths <> (fmap (fmap ((\(Just i) -> i) . flip M.lookup i3)) <$> concat (fmap (F.toList.snd) (M.toList fks))))
+           -- graphP = warshall2 $ graphI
+           -- graph = hashGraph $ graphP
+           -- invgraph = hashGraphInv' $ graphP
+       return  $ InformationSchema schema i1 i2 i3 M.empty userconn conn
 
 inlineName (KOptional i) = inlineName i
 inlineName (KArray a ) = inlineName a
@@ -131,11 +129,11 @@ isInline (KArray i ) = isInline i
 isInline (InlineTable _ i) = True
 isInline _ = False
 
-graphFromPath p = Graph {hvertices = fmap fst bs,
+{-graphFromPath p = Graph {hvertices = fmap fst bs,
                          tvertices = fmap snd bs,
                          edges = fmap pure $ pathMap p
                          }
-  where bs = fmap pbound p
+  where bs = fmap pbound p-}
 
 -- TODO : Implement ordinal information
 schemaKeys' :: Connection -> Text -> TableSchema -> IO [PathQuery]

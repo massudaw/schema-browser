@@ -3,7 +3,7 @@ module Postgresql where
 import Types
 import Query
 import GHC.Stack
-import Debug.Trace
+-- import Debug.Trace
 import Data.Functor.Identity
 import Data.Functor.Compose
 import Data.Scientific hiding(scientific)
@@ -13,6 +13,7 @@ import Control.Lens ((^.))
 import Data.Time.Clock
 import qualified Data.Char as Char
 import Schema
+import Utils
 import Control.Applicative
 import qualified Data.Serialize as Sel
 import Data.Maybe
@@ -27,7 +28,7 @@ import Data.Graph(stronglyConnComp,flattenSCCs)
 import           Data.Attoparsec.ByteString.Char8 hiding (Result)
 import Data.Traversable (Traversable,traverse)
 import qualified Data.Traversable  as Tra
-import Warshal
+-- import Warshal
 import Data.Time.LocalTime
 import Control.Monad(replicateM,join)
 import qualified Data.List as L
