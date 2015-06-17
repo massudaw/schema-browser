@@ -16,7 +16,7 @@ build-type:          Simple
 cabal-version:       >=1.10
 
 executable layer
-  main-is:             Browser.hs
+  main-is:             Desktop.hs
   ghc-options:         -O0 -threaded -rtsopts -fprof-auto -caf-all
   -- other-modules:       
   other-extensions:    TupleSections, BangPatterns, OverloadedStrings, RecursiveDo, FlexibleInstances, RankNTypes, NoMonomorphismRestriction, UndecidableInstances, FlexibleContexts, ExistentialQuantification, DeriveDataTypeable, DeriveFunctor, DeriveFoldable, DeriveTraversable, GeneralizedNewtypeDeriving, ScopedTypeVariables, Arrows
