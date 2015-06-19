@@ -10,7 +10,6 @@ import Graphics.UI.Threepenny.Core hiding (delete)
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
-import Data.Traversable(traverse)
 import Data.Monoid
 import Data.Foldable (foldl')
 import Data.Interval (Interval(..))
@@ -20,13 +19,6 @@ import qualified Data.List as L
 import Data.Maybe
 import Control.Concurrent
 import qualified Data.Aeson as JSON
-
-import System.Directory
-import System.Process(callCommand)
-import Data.String
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as BSC
-import qualified Data.ByteString.Lazy as BSL
 
 
 
@@ -79,10 +71,10 @@ adEvent ne t = do
 
 
 
-liftEvent :: MonadIO m => Window -> Event (Maybe a) -> (MVar (Maybe a) -> m void) -> m ()
-liftEvent window e h = do
+liftEvent :: MonadIO m => Event (Maybe a) -> (MVar (Maybe a) -> m void) -> m ()
+liftEvent e h = do
     ivar <- liftIO $ newEmptyMVar
-    liftIO $ register e (void . runUI window . liftIO  . maybe (return ()) ( putMVar ivar .Just )  )
+    liftIO $ register e (void .  maybe (return ()) ( putMVar ivar .Just )  )
     h  ivar
     return ()
 
@@ -356,17 +348,6 @@ paintBorder e b = element e # sink UI.style (greenRed . isJust <$> b)
 
 
 -- Convert html to Pdf using wkhtmltopdf
-htmlToPdf art html = do
-    let
-      output = (BSC.unpack art) <> ".pdf"
-      input = (BSC.unpack  art ) <> ".html"
-    traverse (BSL.writeFile (fromString input )) html
-    callCommand $ "wkhtmltopdf --print-media-type -T 10 page " <> input <>   " " <> output
-    file <- BS.readFile (fromString output)
-    removeFile input
-    removeFile output
-    return file
-
 -- Botão de imprimir frame no browser
 printIFrame i = do
    print <- UI.button # set UI.text "Imprimir"

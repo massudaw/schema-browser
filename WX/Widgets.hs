@@ -156,6 +156,14 @@ reactiveListDisplay w bitems bsel bdisplay = do
     esel <- eventSelection w
     return $ tidings bsel $ flip M.lookup <$> bindices2 <@> esel
 
+mapTEvent f ev = do
+  ini <- initial (facts ev)
+  e <- mapIOEvent f (rumors ev)
+  bini <- liftIO $ f ini
+  let bh = stepper bini e
+  return $ tidings bh e
+
+
 mapIOEvent f ev = do
   (e,h) <- newEvent
   reactimate $ (\i->   ( f i)  >>=   h ) <$> ev
@@ -278,6 +286,16 @@ greenRed False = [("background-color","red")]
 interval'' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
 
 
+
+liftEvent :: forall  a  m . (MonadIO m ) => (forall t . Frameworks t => Event t (Maybe a)) -> (MVar (Maybe a) -> m () ) -> m ()
+liftEvent e h = do
+    ivar <- liftIO $ newEmptyMVar
+    let
+      handler ::Frameworks t =>  Moment t ()
+      handler = reactimate $ (void .  liftIO  . maybe (return ()) ( putMVar ivar .Just )  ) <$> e
+    liftIO$ actuate  =<< ( compile handler  )
+    h  ivar
+    return ()
 
 
 

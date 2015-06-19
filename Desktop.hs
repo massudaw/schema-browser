@@ -84,7 +84,6 @@ import Control.Arrow
 import Crea
 
 
-
 deleteChildren ref = do
               i <- get ref children
               mapM_ objectDelete i
@@ -93,13 +92,12 @@ main
      :: IO ()
 main = start $ do
   args <- getArgs
-  fr <- frame [ text := "Data Browser" ]
-  f <- scrolledWindow fr [scrollRate := Size 5 5 ]
-  set fr [layout := fill $ widget f]
+  f <- frame [ text := "Data Browser" ]
   let net :: forall t . Frameworks t => Moment t ()
       net = do
-          pnb1 <- liftIO $ panel f [fullRepaintOnResize := True]
-          pnb2 <- liftIO $ panel f [fullRepaintOnResize := True]
+          pnb1 <- liftIO $ panel f []
+          pnb2  <- liftIO $ panel f []
+          -- pnb2 <- liftIO $ panel f [fullRepaintOnResize := True]
           (dataItem ,net) <-  databaseChooser pnb1  args
           liftIO $ set  pnb1  [layout :=  dataItem ]
           liftIO $ set  f [layout := boxed "Database" $ column 5 [widget pnb1,fill $ boxed "Schema" $ widget pnb2 ]]
@@ -125,7 +123,7 @@ runSubnet parent subnet event = do
           reactimate $ (\minf -> do
                         deleteChildren parent
                         ((actuate =<<) . (\inf -> compile ( nsubnet parent inf) )) minf
-                        windowReFit parent
+                        repaintTree parent
                         return () ) <$> rumors event
 
 
@@ -146,14 +144,6 @@ loginWidget f userI passI =  mdo
 
 
 
-mapTEvent f x = do
-  (e,h) <- newEvent
-  reactimate ((\i -> liftIO $  (f i)  >>= h) <$> (rumors x))
-  i <- initial (facts x)
-  be <- liftIO $ f i
-  let t = stepper be e
-  return $ tidings t e
-
 listDBS ::  String -> IO (Map Text (Connection,[Text]))
 listDBS dname = do
   connMeta <- connectPostgreSQL ("user=postgres dbname=postgres")
@@ -169,7 +159,7 @@ databaseChooser f sargs = mdo
   dbs <- liftIO $ listDBS  (head sargs)
   let dbsInit = join $ fmap (\(d,s) -> (d,) . (,s) . fst <$>  M.lookup s dbs ) $ liftA2 (,) (safeHead args) (safeHead $ tail args)
   wid <- loginWidget f (atMay sargs 2) (atMay sargs 3)
-  listBox     <- liftIO $ comboBox f []
+  listBox  <- liftIO $ comboBox f []
   td <- reactiveComboDisplay listBox (pure $ concat $ fmap (\(i,(c,j)) -> (i,) . (c,) <$> j) $ M.toList dbs ) sel  (pure (\(i,(_,j))-> show (i,j) ))
   let sel = stepper dbsInit (rumors td)
   connect <- liftIO $ button f [ text := "Connect" ]
@@ -251,7 +241,7 @@ fixSelectionsEvent listbox =
 -- List of buttons with constant value
 
 chooserKey i f inf = do
-  frame1 <- liftIO $ panel f []
+  frame1 <- liftIO $ scrolledWindow f [scrollRate := Size 5 5 ]
   let initKey = pure . join $ fmap rawPK . flip M.lookup (tableMap inf) . T.pack <$> i
       kitems =  M.keys (pkMap inf )
   filterInp <- liftIO $ entry frame1 []
@@ -319,7 +309,7 @@ chooseKey f inf key = mdo
   let
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
-  (crud,evs) <- crudUITable frame1 inf  {-[queryTimeline,lplugOrcamento ,siapi3Plugin ,siapi2Plugin , gerarPagamentos , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary  ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryTimeline, queryArtAndamento ] -} []  res2  [] (allRec' (tableMap inf) table) (itemListT )
+  (crud,evs) <- crudUITable frame1 inf  [{-gerarPagamentos lplugOrcamento ,siapi3Plugin ,siapi2Plugin , gerarPagamentos , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary  ,queryGeocodeBoundary, queryCNPJStatefull,queryCPFStatefull,queryTimeline, queryArtAndamento -} ]   res2  [] (allRec' (tableMap inf) table) (itemListT )
   vpi <- initial (facts vp)
   let eres = fmap addToList <$> evs
       res2 = accumB vpi  (unions $ (const <$> rumors vp): eres)
@@ -334,10 +324,10 @@ chooseKey f inf key = mdo
   -- itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [filterInp,getElement sortList,getElement asc] )
 --   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.style [("display","inline-flex")]
  --  UI.div # set children ([itemSelec] )
-  liftIO $ set frame1 [layout := (row 10 [column 5 [  widget sortList , widget box, row 10 [label "Filtrar" , widget filterInp],crud ],widget itemList])]
+  liftIO $ set frame1 [layout := fill (column 0 [row 10 [column 5 [  widget sortList , widget box, row 10 [label "Filtrar" , widget filterInp]],widget itemList],crud ])]
   return $ fill $ widget frame1
 
-{-
+
 lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" (fst renderProjectPricingA )  ( snd renderProjectPricingA )
 
 {-
@@ -513,46 +503,6 @@ tailEmpty i  = tail i
 
 
 
-data Timeline
-  = Timeline
-  { header :: String
-  , dates :: [(Either Day LocalTime,String)]
-  }
-
-queryTimeline = BoundedPlugin "Timeline" "pricing"(staticP arrow)  elem
-  where
-    convDateArr i = swap . fmap projDate  <$> (catMaybes $ fmap (traverse unRSOptional') $ catMaybes $ i)
-    projDate (SDate (Finite f)) = Left f
-    projDate (STimestamp (Finite f)) =  Right f
-    projDate (SOptional (Just j )  ) = projDate j
-    projDate i = error $ " projDate " <> show i
-    arrow :: FunArrowPlug [(Either Day LocalTime,String)]
-    arrow = proc t -> do
-      prd <- varT "pricing_date" -< t
-      papr <- varN "pricing_approval" -< t
-      apd <- varN "id_project:aproval_date" -< t
-      arr <- varN "pagamentos:payment_date" -< t
-      arrD <- varN "pagamentos:payment_description" -< t
-      andDa <- varN "id_project:andamentos:andamento_date" -< t
-      andDe <- varN "id_project:andamentos:andamento_description" -< t
-      let vv =  concat $ maybeToList $ (\(SComposite i) (SComposite j)-> fmap Just $ zip (renderShowable <$> F.toList j ) (F.toList i)) <$>  arr <*> arrD
-
-      returnA -<  convDateArr ([("Proposta de Enviada",)<$> prd,("Projeto Aprovado",) <$> apd ,("Proposta Aprovada",) <$> papr] <>  vv {-<> vvand -})
-    elem inf inputs = do
-        e <- UI.div # set UI.id_ "timeline-embed"
-        let  timeline i = Timeline "hello" (dynP arrow $ i)
-        i <- UI.div # sink UI.html  (fmap (\i->  "<script>    var container = document.getElementById('timeline-embed');var items = new vis.DataSet("  <>  BSL.unpack ( encode (timeline i)) <> ") ;  var options = {} ; if (container.vis != null ) { container.vis.destroy(); } ; container.vis = new vis.Timeline(container,items,options); </script>") $ facts inputs)
-        UI.div # set children [e,i]
-
-
-instance ToJSON Timeline where
-  toJSON (Timeline h v) = toJSON (dates <$> zip [0..] v)
-
-    where dates (id,(Right i,j)) = object ["id" .= (id :: Int) ,"start" .=  ti i, "content" .= j, "type" .= ("point" :: String)]
-          dates (id,(Left i,j)) = object ["id" .= (id :: Int) ,"start" .=  tti i, "content" .= j, "type" .= ("point" :: String)]
-          ti  = formatTime defaultTimeLocale "%Y/%m/%d"
-          tti  = formatTime defaultTimeLocale "%Y/%m/%d %H:%M:%S"
-
 attrT = Compose . Identity. Attr
 gerarPagamentos = BoundedPlugin2 "Pagamentos" "plano_aluno" (staticP url) elem
   where
@@ -718,7 +668,7 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
 topSortTables tables = flattenSCCs $ stronglyConnComp item
   where item = fmap (\n@(Raw _ _ _ t _ k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
 
-
+{-
 
 main :: IO ()
 main = do
@@ -750,7 +700,7 @@ main = do
 
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)
   print "Finish"
-
+-}
 poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
   conn <- connectPostgreSQL ("user=postgres dbname=incendio")
   inf <- keyTables conn  conn ("incendio","postgres")
@@ -802,5 +752,5 @@ layout  infT = do
 testFireQuery q = testParse "incendio"  q
 testAcademia q = testParse "academia"  q
 -}
--}
+
 

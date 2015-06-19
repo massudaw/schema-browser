@@ -25,10 +25,14 @@ import Data.Functor.Apply
 import System.Environment
 import Debug.Trace
 import Data.Ord
-import Data.Tuple
-import Data.Time.Format
-import System.Locale
-import Data.Aeson
+
+-- Timeline
+--import Data.Time.Format
+--import System.Locale
+--import Data.Aeson
+--import Text.Read
+
+import Data.Time.Parse
 import Utils
 import Schema
 import Data.Char (toLower)
@@ -37,8 +41,6 @@ import Control.Monad
 import Postgresql
 import Data.Maybe
 import Data.Functor.Identity
-import Text.Read
-import Data.Time.Parse
 import Reactive.Threepenny
 import Data.Graph(stronglyConnComp,flattenSCCs)
 import Data.Traversable (traverse)
@@ -233,7 +235,7 @@ chooseKey inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,evs) <- crudUITable inf  [queryTimeline,lplugOrcamento ,siapi3Plugin ,siapi2Plugin , gerarPagamentos , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary  ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryTimeline, queryArtAndamento ] [] (allRec' (tableMap inf) table) (userSelection itemList)
+            (crud,evs) <- crudUITable inf  [lplugOrcamento ,siapi3Plugin ,siapi2Plugin , gerarPagamentos , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary  ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull, queryArtAndamento ] [] (allRec' (tableMap inf) table) (userSelection itemList)
             let eres = fmap addToList <$> evs
             res2 <- accumTds vp eres
             insertDiv <- UI.div # set children [crud]
@@ -421,12 +423,12 @@ itauExtractTxt  inf   inputs = do
 
 fkattrsB inputs fks = foldr (liftA2 (:))   inputs fks
 
-
 tailEmpty [] = []
 tailEmpty i  = tail i
 
 
 
+{-
 data Timeline
   = Timeline
   { header :: String
@@ -466,6 +468,7 @@ instance ToJSON Timeline where
           dates (id,(Left i,j)) = object ["id" .= (id :: Int) ,"start" .=  tti i, "content" .= j, "type" .= ("point" :: String)]
           ti  = formatTime defaultTimeLocale "%Y/%m/%d"
           tti  = formatTime defaultTimeLocale "%Y/%m/%d %H:%M:%S"
+-}
 
 attrT = Compose . Identity. Attr
 gerarPagamentos = BoundedPlugin2 "Pagamentos" "plano_aluno" (staticP url) elem
@@ -668,22 +671,28 @@ main = do
 poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
   conn <- connectPostgreSQL ("user=postgres dbname=incendio")
   inf <- keyTables conn  conn ("incendio","postgres")
-  let loop =  do
-        print =<<  getCurrentTime
-        print ("START" ::String)
-        let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
-        listRes <- queryWith_ (fromAttr (fst rp) ) conn  (traceShowId $ fromString $ T.unpack $ snd rp)
-        let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
-            tdInput i =  maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd t) i) (fst f)
-            tdOutput1 i =  maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd f) i) (snd f)
+  forever $ do
+        [t :: Only UTCTime] <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
+        startTime <- getCurrentTime
+        let intervalsec = fromIntegral $ 60*d
+        if diffUTCTime startTime  (unOnly t) >  intervalsec
+        then do
+            execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
+            print ("START - " <> show startTime  ::String)
+            let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
+            listRes <- queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
+            let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
+                tdInput i =  maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd t) i) (fst f)
+                tdOutput1 i =  maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd f) i) (snd f)
+            i <- elem inf evb
+            handler i
+            end <- getCurrentTime
+            print ("END - " <> show end ::String)
+            execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (end ,n,a,"incendio" :: String)
+            threadDelay (d*1000*1000*60)
+        else do
+            threadDelay (round $ (*1000000) $ realToFrac $ diffUTCTime startTime (unOnly t))
 
-        i <- elem inf evb
-        handler i
-        print =<<  getCurrentTime
-        print ("END" ::String)
-        threadDelay (d*1000*1000*60)
-        loop
-  loop
 {-
 layout  infT = do
   vis <- UI.div # set UI.id_ "visualization"

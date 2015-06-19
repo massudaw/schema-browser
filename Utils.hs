@@ -9,6 +9,16 @@ import  Data.Aeson
 import qualified Data.Vector as V
 import GHC.Stack
 import GHC.Exts
+import Data.Monoid
+
+import System.Directory
+import System.Process(callCommand)
+import Data.Traversable
+
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BSC
+import qualified Data.ByteString.Lazy as BSL
+
 
 spanList :: ([a] -> Bool) -> [a] -> ([a], [a])
 
@@ -66,3 +76,18 @@ justError e (Just i) = i
 justError e  _ = errorWithStackTrace e
 
 groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
+
+
+
+htmlToPdf art html = do
+    let
+      output = (BSC.unpack art) <> ".pdf"
+      input = (BSC.unpack  art ) <> ".html"
+    traverse (BSL.writeFile (fromString input )) html
+    callCommand $ "wkhtmltopdf --print-media-type -T 10 page " <> input <>   " " <> output
+    file <- BS.readFile (fromString output)
+    removeFile input
+    removeFile output
+    return file
+
+

@@ -78,7 +78,6 @@ addAttr (TB1 (KV pk a)) e =  TB1 (KV pk (a <> e))
 mergeTB1 (TB1 k) (TB1 k2) = TB1 (k <> k2)
 
 
-lookFresh inf n tname i = justError "no freshKey" $ M.lookup (n,tname,i) (pluginsMap inf)
 createFresh n tname pmap i ty  =  do
   k <- newKey i ty
   return $ M.insert (n,tname,i) k pmap
@@ -121,7 +120,7 @@ pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac )
   el <- UI.div # set UI.children (headerP : (concat $ fmap (\(_,_,o,i)-> concat $ [fmap getElement o ,[getElement i]]) freshUI ))
   liftIO $ forkIO  $ fmap (const ()) $ init $ foldl (\ unoldM (f,((h,htidings,loui,inp),action))  -> unoldM >>= (\unoldItems -> do
       let oldItems = foldl1 (liftA2 (liftA2 mergeTB1)) (triding inp: unoldItems)
-      liftEvent window (rumors oldItems) (\i -> action inf  i  (liftIO . h) )
+      liftEvent (rumors oldItems) (\i -> action inf  i  (liftIO . h) )
       return  [oldItems]  ))  (return [initItems] ) ( zip tf $ zip freshUI ac)
   element el # sink UI.style (noneShow <$> facts tdInput)
   return (el ,  (  ((\(_,o,_,_) -> o)$ last freshUI ) ))
@@ -142,7 +141,7 @@ pluginUI inf unoldItems (BoundedPlugin2 n t f action) = do
   pgOut <- mapTEvent (action inf) (tidings bcv ecv)
   return (headerP, (fmap snd $ snd f ,   pgOut ))
 
-
+{-
 pluginUI inf unoldItems (BoundedPlugin n t f action) = do
   let oldItems = unoldItems -- fmap TB1 . Tra.sequenceA <$> Tra.sequenceA (fmap snd $    unoldItems)
   headerP <- UI.div # set text (T.unpack n)
@@ -156,6 +155,7 @@ pluginUI inf unoldItems (BoundedPlugin n t f action) = do
   element overwrite # sink UI.style (noneShowSpan . not <$> facts tdOutput1)
   body <- UI.div # set children [headerP,getElement overwrite,bod] # sink UI.style (noneShowSpan <$> facts tdInput)
   return (body,  ([] , pure Nothing ))
+-}
 
 intersectPredTuple  = (\i j -> intersectPred (textToPrim <$> keyType (fst i)) (textToPrim <$> keyType (fst j)) (snd i) (snd j))
 
@@ -450,9 +450,9 @@ editedMod :: (Traversable f ,Ord a) => f a ->  Maybe [(a,b)] -> Maybe (f (a,b))
 editedMod  i  m=  join $ fmap (\mn-> look mn i ) m
   where look mn k = allMaybes $ fmap (\ki -> fmap (ki,) $  M.lookup ki (M.fromList mn) ) k
 
-showFKE v =  UI.div # set text (L.intercalate "," $ fmap renderShowable $ F.toList $  _kvKey $ allKVRec $  snd <$> v)
+showFKE v =  UI.div # set text (L.take 100 $ L.intercalate "," $ fmap renderShowable $ F.toList $  _kvKey $ allKVRec $  snd <$> v)
 
-showFK = (pure ((\v j ->j  # set text (L.intercalate "," $ fmap renderShowable $ F.toList $  _kvKey $ allKVRec $  snd <$> v))))
+showFK = (pure ((\v j ->j  # set text (L.take 100 $ L.intercalate "," $ fmap renderShowable $ F.toList $  _kvKey $ allKVRec $  snd <$> v))))
 
 tablePKSet  tb1 = S.fromList $ fmap (unAttr . runIdentity . getCompose ) $ _pkKey $ _kvKey $ unTB1 $ tableNonRef tb1
 

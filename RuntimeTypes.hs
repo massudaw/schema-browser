@@ -5,17 +5,16 @@ import Control.Concurrent
 import Schema
 import Types
 import Data.Text.Lazy
-import Reactive.Threepenny
-import Graphics.UI.Threepenny.Core
+import Control.Monad.IO.Class
 
 data Plugins
-  = BoundedPlugin
+  = {-BoundedPlugin
   { _name :: Text
   , _bounds :: Text
   , _arrowbounds :: ([(Bool,[[Text]])],[(Bool,[[Text]])])
   , _boundedAction :: InformationSchema -> (Tidings (Maybe (TB1 (Key,Showable)))) -> UI Element
   }
-  | StatefullPlugin
+  |-} StatefullPlugin
   { _name ::  Text
   , _bounds :: Text
   , _statebounds :: [([(Bool,[[Text]])],[(Bool,[[Text]])])]

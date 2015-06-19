@@ -15,7 +15,58 @@ build-type:          Simple
 -- extra-source-files:  
 cabal-version:       >=1.10
 
-executable layer
+executable threepenny-layer
+  main-is:             Browser.hs
+  ghc-options:         -O2 -threaded -rtsopts -fprof-auto -caf-all
+  -- other-modules:       
+  other-extensions:    TupleSections, BangPatterns, OverloadedStrings, RecursiveDo, FlexibleInstances, RankNTypes, NoMonomorphismRestriction, UndecidableInstances, FlexibleContexts, ExistentialQuantification, DeriveDataTypeable, DeriveFunctor, DeriveFoldable, DeriveTraversable, GeneralizedNewtypeDeriving, ScopedTypeVariables, Arrows
+  build-depends:       scientific,blaze-builder,base >=4.7 && <4.8
+   , postgresql-simple >=0.4 && <0.5
+   , vector >=0.10 && <0.11
+   , containers >=0.5 && <0.6, text >=1.1 && <1.2, cereal >=0.4 && <0.5, base16-bytestring >=0.1 && <0.2, strptime >=1.0 && <1.1, threepenny-gui   , attoparsec >=0.12 && <0.13, time >=1.4 && <1.5, transformers >=0.4 && <0.5,  bytestring >=0.10 && <0.11, distributive >=0.4 && <0.5,
+   mtl >=2.2 && <2.3,
+   parsec >=3.1 && <3.2
+   , hxt >=9.3 && <9.4
+   , pandoc == 1.13.2
+   -- , HTTP
+   , aeson 
+   , pandoc-types
+   ,lens
+   ,wreq
+   ,http-client
+   ,http-types
+   ,HsOpenSSL
+   ,http-client-tls
+   ,http-client-openssl
+   ,base64-bytestring
+   ,semigroupoids
+   , arrows
+   -- Google Auth
+   -- ,handa-gdata > 0.7
+   , http-conduit, directory ,process,xml
+   ,unordered-containers
+   -- Pdf Parser
+   -- ,io-streams,pdf-toolbox-document,pdf-toolbox-core
+   -- Interval
+   ,old-locale
+   ,data-interval
+   ,extended-reals
+   -- Incendio Module
+   -- ,incendio
+   -- ,diagrams-lib
+   -- ,diagrams-svg
+   -- ,ad
+   -- ,blaze-svg
+   ,bifunctors
+   ,stringsearch
+   ,safe
+   ,async
+   ,tasty
+  -- hs-source-dirs:      
+
+  default-language:    Haskell2010
+
+executable wxwidgets-layer
   main-is:             Desktop.hs
   ghc-options:         -O0 -threaded -rtsopts -fprof-auto -caf-all
   -- other-modules:       
@@ -23,7 +74,7 @@ executable layer
   build-depends:       scientific,blaze-builder,base >=4.7 && <4.8
    , postgresql-simple >=0.4 && <0.5
    , vector >=0.10 && <0.11
-   , containers >=0.5 && <0.6, text >=1.1 && <1.2, cereal >=0.4 && <0.5, base16-bytestring >=0.1 && <0.2, strptime >=1.0 && <1.1, threepenny-gui   , attoparsec >=0.12 && <0.13, time >=1.4 && <1.5, transformers >=0.4 && <0.5,  bytestring >=0.10 && <0.11, distributive >=0.4 && <0.5,
+   , containers >=0.5 && <0.6, text >=1.1 && <1.2, cereal >=0.4 && <0.5, base16-bytestring >=0.1 && <0.2, strptime >=1.0 && <1.1,   attoparsec >=0.12 && <0.13, time >=1.4 && <1.5, transformers >=0.4 && <0.5,  bytestring >=0.10 && <0.11, distributive >=0.4 && <0.5,
    mtl >=2.2 && <2.3,
    parsec >=3.1 && <3.2
    , hxt >=9.3 && <9.4
@@ -68,3 +119,5 @@ executable layer
   -- hs-source-dirs:      
 
   default-language:    Haskell2010
+
+

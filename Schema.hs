@@ -157,6 +157,8 @@ lookTable inf t = justError ("no table: " <> T.unpack t) $ M.lookup t (tableMap 
 lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k ) $ M.lookup (t,k) (keyMap inf)
 
+lookFresh inf n tname i = justError "no freshKey" $ M.lookup (n,tname,i) (pluginsMap inf)
+
 
 newKey name ty = do
   un <- newUnique

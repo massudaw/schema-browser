@@ -4,8 +4,9 @@ import Network.Wreq
 import qualified Network.Wreq.Session as Sess
 
 
-import Widgets
+-- import Widgets
 import Types
+import Utils
 
 import OpenSSL.Session (context)
 import Network.HTTP.Client.OpenSSL

@@ -11,7 +11,6 @@ import Control.Lens hiding (element,set,get,(#))
 import Control.Applicative
 import Control.Monad
 import Data.Maybe
-import Data.Monoid
 import Data.Functor.Compose
 import Control.Concurrent
 
@@ -31,17 +30,13 @@ import Types
 import Query
 import Utils
 import Schema
-import QueryWidgets
+-- import QueryWidgets
 import Gpx
-import Widgets
+-- import Widgets
 import Debug.Trace
 
-import Reactive.Threepenny
-import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Core hiding (get,delete)
 
 import RuntimeTypes
-import qualified Data.ByteString.Base64.Lazy as B64
 import Control.Monad.Reader
 import qualified Data.Foldable as F
 
@@ -184,7 +179,7 @@ getCnpj captcha cgc_cpf = do
           pr <- traverse (Sess.post session (traceShowId cnpjpost) . protocolocnpjForm cgc_cpf ) (Just $  captcha  )
           traverse (readHtmlReceita . BSLC.unpack ) (fromJust pr ^? responseBody)
 
-
+{-
 cnpjquery el cpfe = do
     let opts = defaults & manager .~ Left man
         man  = opensslManagerSettings context
@@ -218,7 +213,7 @@ cnpjquery el cpfe = do
                 hresult v
                 ))
     return result
-
+-}
 protocolocpfForm :: BS.ByteString -> BS.ByteString -> [FormParam]
 protocolocpfForm cgc_cpf captcha
                      = [
@@ -242,7 +237,7 @@ cpfpost = "http://www.receita.fazenda.gov.br/Aplicacoes/ATCTA/cpf/ConsultaPublic
 cnpjhome  ="http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/cnpjreva_solicitacao.asp"
 cnpjcaptcha = "http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/captcha/gerarCaptcha.asp"
 cnpjpost = "http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/valida.asp"
-
+{-
 test = do
   startGUI defaultConfig (\w -> do
                       e <- UI.div
@@ -251,3 +246,4 @@ test = do
                       cnpjquery e $ pure (Just "01008713010399")
                       getBody w #+ [element i ,element e]
                       return () )
+                      -}
