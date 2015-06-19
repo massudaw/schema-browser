@@ -20,6 +20,7 @@ import Data.Maybe
 import Control.Concurrent
 import qualified Data.Aeson as JSON
 
+import Safe
 
 
 instance Widget (TrivialWidget  a) where
@@ -478,9 +479,17 @@ oitems = mkWriteAttr $ \i x -> void $ do
 
 
 
+fileChange :: Element -> Event (Maybe String)
+fileChange el = unsafeMapUI el (const $ UI.get readFileAttr el) (UI.valueChange el)
 
 selectionMultipleChange :: Element -> Event [Int]
 selectionMultipleChange el = unsafeMapUI el (const $ UI.get selectedMultiple el) (UI.click el)
+
+readFileAttr :: ReadAttr Element (Maybe String)
+readFileAttr = mkReadAttr get
+  where
+    get   el = fmap (headMay . from ) $  callFunction $ ffi "readFileInput($(%1))" el
+    from s = let JSON.Success x =JSON.fromJSON s in x
 
 
 selectedMultiple :: Attr Element [Int]

@@ -361,14 +361,6 @@ insertMod inf kv table = do
   Just <$> logTableModification inf mod
 
 
-logTableModification inf (TableModification Nothing table i) = do
-  let look k = lookKey inf "modification_table" k
-  time <- getCurrentTime
-  let ltime = STimestamp . Finite . utcToLocalTime utc $ time
-  s <- insertAttr fromAttr (conn inf) (TB1 $ fmap (Compose . Identity . Attr)$KV (PK  [(look "modification_id",SSerial Nothing)] []) [(look "modification_time", ltime ),(look "table_name" ,SText $ rawName table) , (look "modification_data", SText $ T.pack $ show i)]  ) ((\(Just i)-> i) $ M.lookup ("modification_table") (tableMap inf))
-  return (TableModification ((\(SSerial (Just (SNumeric i)))-> Just i ) $  snd $  unAttr $ runIdentity $ getCompose $ head $_pkKey $ _kvKey $ _unTB1 s) table i )
-
-
 bradescoRead file = do
   file <- TE.decodeLatin1 <$> BS.readFile file
   let result =  fmap (fmap TE.unpack . L.take 5) $ filter (\(i:xs) -> isJust $ strptime "%d/%m/%y" (TE.unpack i)) $ filter ((>5) . length) $  TE.split (';'==) <$> TE.split (=='\r') file
@@ -715,13 +707,19 @@ layout  infT = do
   script <- UI.div # sink UI.html (maybe "" draw <$> infT)
   UI.div # set children [vis,script]
 -}
-{- testParse sch q = withConnInf sch (\inf -> do
+
+withInf d s f = withConn d (f <=< (\conn -> keyTables conn conn (s,"postgres")))
+withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres")) )
+
+testParse db sch q = withConnInf db sch (\inf -> do
                                        let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                        putStrLn (  show rpq)
                                        putStrLn (  show rp)
                                        q <- queryWith_ (fromAttr (rp) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        putStrLn$  unlines $ fmap show q
                                            )
-testFireQuery q = testParse "incendio"  q
-testAcademia q = testParse "academia"  q
--}
+testFireMetaQuery q = testParse "incendio" "metadata"  q
+testFireQuery q = testParse "incendio" "incendio"  q
+testAcademia q = testParse "academia" "academia"  q
+
+

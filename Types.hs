@@ -22,6 +22,8 @@ import Data.Functor.Apply
 import Data.Functor.Compose
 import Data.Functor.Identity
 import Data.Typeable
+import Data.Aeson
+import Data.Aeson.TH
 import Data.Vector(Vector)
 import Data.Functor.Classes
 import Data.Foldable (Foldable)
@@ -253,6 +255,7 @@ translatedName tb =  maybe (rawName tb) id (rawTranslation tb )
 data TableModification b
   = TableModification (Maybe Int) Table (Modification Key b)
   deriving(Eq,Show,Functor)
+
 
 data Modification a b
   = EditTB (TB1 (a,b)) (TB1 (a,b))

@@ -77,6 +77,7 @@ textToPrim "bigint" = PInt
 textToPrim "boolean" = PBoolean
 textToPrim "smallint" = PInt
 textToPrim "timestamp without time zone" = PTimestamp
+textToPrim "timestamp with time zone" = PTimestamp
 textToPrim "interval" = PInterval
 textToPrim "date" = PDate
 textToPrim "POINT" = PPosition
@@ -382,7 +383,7 @@ recursePath' isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
 
 
 recursePath' isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
-    | any (isArray . keyType . fst) (ks)  =   do
+    | any (isArray . keyType . fst) ks  =   do
           (nt,ksn@(TB1 (KV (PK npk ndesc) nattr)),nq) <- labelTable nextT
           let
               nkv pk desc attr = ( TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
@@ -487,7 +488,7 @@ rootPaths' invSchema r = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,
                       attrs = fmap Compose $ filter (\i -> not $ S.member (unAttr.labelValue $ i) fkSet) items
                       itemSet :: S.Set Key
                       itemSet = S.fromList $ fmap (unAttr.labelValue) items
-                  pt <- mapM (recursePath' False (F.toList .unlb1 $ ks ) invSchema) (filter (\(Path ifk jo _)-> ifk `S.isSubsetOf`  itemSet ) (F.toList (rawFKS r) ))
+                  pt <- mapM (recursePath' False (F.toList .unlb1 $ ks ) invSchema) (filter (\(Path ifk jo _)-> ifk `S.isSubsetOf`  itemSet) (F.toList (rawFKS r)))
                   return (attrs <> (concat $ fst <$> pt), snd <$> pt)
       nkv pk desc attr = (TB1 (KV (PK (fst pk) (fst desc)) (fst attr)), foldl mappend "" $ snd pk <> snd desc <> snd attr)
   (tb,js) <-liftA3 nkv (fun $ fmap getCompose npk) (fun $ fmap getCompose ndesc) (fun $ fmap getCompose nattr)

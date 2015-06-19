@@ -219,12 +219,15 @@ buildUI i  tdi = case i of
          (Primitive (PMime mime)) -> do
            let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
            clearB <- UI.button # set UI.text "clear"
-           tdi2 <- addEvent (const Nothing <$> UI.click clearB) tdi
+           file <- UI.input # set UI.class_ "file_client" # set UI.type_ "file" # set UI.multiple True
+           UI.div # sink UI.html (pure "<script> $(\".file_client\").on('change',handleFileSelect); </script>")
+           inp <- UI.span # set children [file,clearB]
+           tdi2 <- addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fileChange file ) =<< addEvent (const Nothing <$> UI.click clearB) tdi
            let fty = case mime of
                 "application/pdf" -> ("iframe",  [("width","100%"),("height","300px")])
                 "image/jpg" -> ("img",[])
            f <- pdfFrame fty (maybe "" binarySrc <$> facts tdi2)
-           fd <- UI.div # set children [clearB,f]
+           fd <- UI.div # set children [inp,f]
            return (TrivialWidget tdi2 fd)
 
          z -> do
@@ -348,7 +351,7 @@ crudUITable inf pgs pmods ftb@(TB1 (KV (PK k d) a)) oldItems = do
   let
       tableb :: Tidings (Maybe (TB1 (Key,Showable)))
       tableb  = fmap (TB1 . fmap _tb) . Tra.sequenceA <$> Tra.sequenceA (triding .snd <$> fks)
-  (panelItems,evsa)<- processPanelTable (conn inf)  (facts tableb) (pure [])table oldItems
+  (panelItems,evsa)<- processPanelTable inf  (facts tableb) (pure [])table oldItems
   listBody <- UI.ul
     # set children (F.toList (getElement .snd <$> fks))
     # set style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
@@ -381,13 +384,13 @@ tb1Diff f (TB1 k1 ) (TB1 k2) =  liftF2 f k1 k2
 onBin bin p x y = bin (p x) (p y)
 
 processPanelTable
-   :: Connection
+   :: InformationSchema
    -> Behavior (Maybe (TB1 (Key, Showable)))
    -> Behavior [TB1 (Key,Showable)]
    -> Table
    -> Tidings (Maybe (TB1 (Key, Showable)))
    -> UI (Element,[Event (Modification Key Showable)])
-processPanelTable conn attrsB res table oldItemsi = do
+processPanelTable inf attrsB res table oldItemsi = do
   let
       fkattrsB = fmap (concat . F.toList . fmap (attrNonRec . unTB) . _unTB1. tableNonRef ) <$> attrsB
       oldItems = fmap (concat . F.toList . fmap (attrNonRec .unTB) . _unTB1. tableNonRef ) <$> oldItemsi
@@ -404,17 +407,17 @@ processPanelTable conn attrsB res table oldItemsi = do
         # sink UI.enabled (isJust <$> facts oldItems)
   let
       deleteAction ki =  do
-        res <- liftIO $ catch (Right <$> delete conn ki table) (\e -> return $ Left (show $ traceShowId  (e :: SomeException) ))
+        res <- liftIO $ catch (Right <$> delete (conn inf) ki table) (\e -> return $ Left (show $ traceShowId  (e :: SomeException) ))
         return $ const (DeleteTB ki ) <$> res
       editAction attr old = do
         let
             isM :: Maybe (TB1 (Key,Showable))
             isM =  join $ fmap TB1 . allMaybes . filterKV (maybe False (const True)) <$> (liftA2 (liftF2 (\i j -> if i == j then Nothing else  traceShow (i,j) $ Just i))) (_unTB1 . tableNonRef  <$> attr) (_unTB1 . tableNonRef <$> old)
-        res <- liftIO $ catch (maybe (return (Left "no attribute changed check edit restriction")) (\l-> Right <$> updateAttr conn l (fromJust old) table) isM ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
+        res <- liftIO $ catch (maybe (return (Left "no attribute changed check edit restriction")) (\l-> Right <$> updateAttr (conn inf) l (fromJust old) table) isM ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
         return $ fmap (const (EditTB (fromJust isM) (fromJust old) )) res
 
       insertAction ip = do
-          res <- catch (Right <$> insertAttr (fromAttr )  conn ip table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
+          res <- catch (Right <$> insertAttr (fromAttr )  (conn inf) ip table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
           return $ InsertTB  <$> res
 
   let    spMap = fmap split . mapEvent id
@@ -424,7 +427,15 @@ processPanelTable conn attrsB res table oldItemsi = do
   bd <- stepper [] (unions [evid,evdd,eved])
   errorOut <- UI.div # sink UI.text (L.intercalate "," <$> bd)
   transaction <- UI.div # set children [insertB,editB,deleteB,errorOut]
+  onEvent (fmap head $ unions [evir,ever,evdr]) ( liftIO . logTableModification inf . TableModification Nothing table )
   return (transaction ,[evir,ever,evdr])
+
+logTableModification inf (TableModification Nothing table i) = do
+  time <- getCurrentTime
+  let ltime =  Finite . utcToLocalTime utc $ time
+  [id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (modification_time,table_name,modification_data,schema_name) VALUES (?,?,?,?) returning modification_id "  (ltime,rawName table,show i , schemaName inf)
+  return (TableModification (unOnly id) table i )
+
 
 keyOptional (k,v) = (kOptional k ,SOptional $ Just v)
 
@@ -540,7 +551,7 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
       prop <- stepper Nothing evsel
       let tds = tidings prop evsel
       (celem,tableb) <- uiTable inf pgs (rawName table) plmods tb1  tds
-      (panelItems,evs) <- processPanelTable (conn inf) (facts tableb) res2 table tds
+      (panelItems,evs) <- processPanelTable inf (facts tableb) res2 table tds
       let
           dataList = ((Nothing:) <$>  fmap (fmap Just) (res2))
           bselection = (fmap Just <$> st)
