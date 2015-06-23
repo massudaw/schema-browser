@@ -78,6 +78,7 @@ findKV i (KV (PK l m) n) =  (L.find i l)  `mplus` (L.find i m ) `mplus` (L.find 
 -- Reference labeling
 -- exchange label reference for values when labeled
 -- inline values reference when unlabeled
+
 data Labeled l v
   = Labeled
   { label :: l
@@ -102,29 +103,28 @@ type Key = FKey (KType Text)
 data FKey a
     = Key
     { keyValue :: ! Text
-    , keyAlias :: ! (Maybe Text)
     , keyTranslation :: ! (Maybe Text)
     , keyFastUnique :: ! Unique
     , keyType :: ! a
     }
 
 data TB f a
-  = FKT
+  = FKT -- Foreign Table
     { _tbref :: ![Compose f (TB f) a]
     , _reflexive :: ! Bool
     , _fkrelation :: [(Key,Key)]
     , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
     }
-  -- Foreign Table
-  | IT
+
+  | IT -- Inline Table
     { _tbref :: ![Compose f (TB f) a]
     , ittableName :: Text
     , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
     }
-  -- Inline Table
+  | TBEither
+    (Compose f (TB f) Key ) (Compose f (TB f) Key ) (Maybe (Compose f (TB f) a)) (Maybe (Compose f (TB f) a))
   | Attr
-    { _tbattr :: ! a
-    }
+    { _tbattr :: ! a }
   -- Attribute
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
 
@@ -159,6 +159,7 @@ data KPrim
 data KType a
    = Primitive a
    | InlineTable {- schema -} Text {- tablename -} Text
+   | KEither (KType a) (KType a)
    | KSerial (KType a)
    | KArray (KType a)
    | KInterval (KType a)
@@ -201,6 +202,8 @@ newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,
 data Showable
   = SText !Text
   | SNumeric !Int
+  | SEitherR Showable
+  | SEitherL Showable
   | SBoolean !Bool
   | SDouble !Double
   | STimestamp !LocalTimestamp
@@ -218,11 +221,12 @@ data Showable
   deriving(Ord,Eq,Show)
 
 
-data SqlOperation a
-  = FetchTable a
-  | FKJoinTable a [(Key,Key)] a
-  | FKInlineTable a
-  deriving(Eq,Ord,Show,Functor)
+data SqlOperation
+  = FetchTable Text
+  | FKJoinTable Text [(Key,Key)] Text
+  | FKInlineTable Text
+  | FKEitherField Key (Key,Key)
+  deriving(Eq,Ord,Show)
 
 
 data TableType
@@ -239,7 +243,7 @@ data Table
            , rawAuthorization :: [Text]
            , rawPK :: (Set Key)
            , rawDescription :: (Maybe Key)
-           , rawFKS ::  (Set (Path (Set Key) (SqlOperation Text)))
+           , rawFKS ::  (Set (Path (Set Key) (SqlOperation )))
            , rawAttrs :: (Set Key)
            }
      deriving(Eq,Ord)
@@ -307,7 +311,7 @@ instance Fractional Showable where
   recip i = errorWithStackTrace (show i)
 
 -- type HashQuery =  HashSchema (Set Key) (SqlOperation Table)
-type PathQuery = Path (Set Key) (SqlOperation Table)
+type PathQuery = Path (Set Key) (SqlOperation )
 
 makeLenses ''KV
 makeLenses ''PK

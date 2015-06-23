@@ -281,7 +281,7 @@ testShowable  v s = case s of
       odx "aproval_date" -< t
       odx "andamentos:andamento_date" -<  t
       odx "andamentos:andamento_description" -<  t
-      b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else fmap traceShowId (siapi2  i j)  )) -<  (liftA2 (,) protocolo ano )
+      b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else (siapi2  i j)  )) -<  (liftA2 (,) protocolo ano )
       let ao bv =   case  join (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
                     Just i -> Nothing
                     Nothing -> Just $ TB1 $ KV (PK [] []) ( [iat bv])
@@ -297,8 +297,7 @@ testShowable  v s = case s of
     elem inf =  fmap (pure. catMaybes) . mapM (\inp -> do
                               b <- dynPK url (Just  inp)
                               let o =  fmap (first (lookKey'  inf ["fire_project_event","fire_project"])) <$> b
-                              maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf "fire_project")) o
-                            )
+                              maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf "fire_project")) o)
     elemp inf = maybe (return Nothing) (\inp -> do
                               b <- dynPK url (Just inp)
                               return $ fmap (first (lookKey'  inf ["fire_project_event","fire_project"])) <$> b)

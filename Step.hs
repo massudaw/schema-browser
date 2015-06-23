@@ -38,7 +38,7 @@ instance Show (a -> Maybe Showable) where
 
 instance Show (a -> String) where
   show _ = ""
-
+{-
 data FKEdit
   = FKEInsertGenerated
   | FKEInsertFind
@@ -59,13 +59,12 @@ data TEdit
   deriving(Show)
 
 data TablePlan a = TablePlan TEdit Table [StepPlan a]
-
 data StepPlan a
   = SPAttr AEdit Key a
   | SPFK FKEdit (Path (Set Key) (SqlOperation Table)) [StepPlan a]
   | TBPlan TEdit Table [StepPlan a]
   deriving(Show,Functor)
-
+-}
 data Parser m s a b = P ([s],[s]) (m a b) deriving Functor
 
 liftParser (P i j ) = (P i ((\l -> Kleisli $  return <$> l ) $ j ) )
@@ -174,13 +173,16 @@ findPKM i  = Just $ findPK i
 
 
 attrNonRec (FKT ifk _ _ _ ) = concat $ fmap kattr ifk
+attrNonRec (TBEither _ _ ifk ifk2 ) =  (maybe [] id $ fmap kattr ifk) <> (maybe [] id $ fmap kattr ifk)
 attrNonRec (IT ifk _ _ ) = concat $ fmap kattr ifk
 attrNonRec (Attr i ) = [i]
 
 kattr = kattri . runIdentity . getCompose
 kattri (Attr i ) = [i]
+kattri (TBEither i j k l  ) = (maybe [] id $ fmap kattr k ) <> (maybe [] id $ fmap kattr l )
 kattri (FKT i _ _ _ ) =  (L.concat $ kattr  <$> i)
 kattri (IT i  _ _ ) =  (L.concat $ kattr  <$> i)
+
 
 varT t = join . fmap (unRSOptional'.snd)  <$> idxT t
 varN t = fmap snd  <$> idx t

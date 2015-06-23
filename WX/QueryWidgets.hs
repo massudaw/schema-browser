@@ -182,8 +182,6 @@ attrUITable  parent tAttr' evs (Attr i) = do
       return $ TrivialWidget insertT sp
   where tAttr = fmap (\(Attr i)-> snd i) <$> tAttr'
 
-unSComposite (SComposite i) = i
-unSComposite i = errorWithStackTrace ("unSComposite " <> show i)
 
 
 buildUI :: forall a t . Frameworks t => Window a -> KType KPrim -> Tidings t (Maybe Showable ) -> Moment t (TrivialWidget t (Maybe Showable) )
@@ -415,19 +413,19 @@ processPanelTable f conn attrsB res table oldItemsi = do
   sink errorOut [text :== ( bd)]
   let transaction = column 5 [row 5  [widget insertB,widget editB,widget deleteB],widget errorOut]
   return (transaction ,[evir,ever,evdr])
-
+{-
 keyOptional (k,v) = (kOptional k ,SOptional $ Just v)
 
 unKeyOptional (k  ,(SOptional v) ) = fmap (unKOptional k, ) v
 
-kOptional (Key a b c d e) = Key a b c d (KOptional e)
+kOptional (Key a  c d e) = Key a  c d (KOptional e)
 
-unKOptional ((Key a b c d (KOptional e))) = (Key a b c d e )
+unKOptional ((Key a  c d (KOptional e))) = (Key a  c d e )
 unKOptional i = errorWithStackTrace ("unKOptional " <> show i)
 
-unKArray (Key a b c d (KArray e)) = Key a b c d e
-unKArray (Key a b c d (KOptional (KArray e) )) = Key a b c d e
-
+unKArray (Key a  c d (KArray e)) = Key a  c d e
+unKArray (Key a  c d (KOptional (KArray e) )) = Key a  c d e
+-}
 
 
 addToList  (InsertTB m) =  (m:)

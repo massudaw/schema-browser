@@ -258,10 +258,31 @@ unIntercalateAtto l s = go l
 subsAKT r t = subs r (fmap ((^. kvKey. pkKey) . _unTB1) t)
   where subs i j = fmap (\r -> (justError "no key Found subs" $ L.find (\i -> fmap fst i == fst r ) i , zipWith (\m n -> justError "no key Found subs" $L.find (\i-> fmap fst i == n) m ) j (snd r) ))
 
+unKOptionalAttr (Attr i ) = Attr (unKOptional i)
+unKOptionalAttr (IT i r (LeftTB1 (Just j))  ) = (\i j-> IT  i r j )  (fmap (fmap unKOptional ) i)  j
+unKOptionalAttr (FKT i r l (LeftTB1 (Just j))  ) = FKT (fmap (fmap unKOptional) i) r l j
+unOptionalAttr (Attr i ) = Attr <$> (unKeyOptional i)
+unOptionalAttr (IT i r (LeftTB1 j)  ) = liftA2 (\i j-> IT  i r j )  (traverse (traverse unKeyOptional ) i)  j
+unOptionalAttr (FKT i r l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i r l j) (traverse (traverse unKeyOptional) i)  j
+
 -- parseAttr i | traceShow i False = error ""
 parseAttr (Attr i) = do
   s<- parseShowable (textToPrim <$> keyType i) <?> show i
   return $  Attr (i,s)
+parseAttr (TBEither l r  _ _ )
+    =  doublequoted parseTb <|> parseTb
+      where
+        parseTb = char '(' *> parseInner <* char ')'
+        parseInner = do
+              ls <- parseAttr (runIdentity $ getCompose l)
+              char ','
+              rs <- parseAttr (runIdentity $ getCompose r)
+              return $ TBEither l r  (Compose . Identity  <$> unOptionalAttr ls) (Compose . Identity <$> unOptionalAttr rs) {-case (l,r) of
+                   (SOptional (Just i),SOptional Nothing ) -> SEitherL i
+                   (SOptional Nothing ,SOptional (Just j )) -> SEitherR j
+                   (SOptional (Just _),SOptional (Just _ )) -> errorWithStackTrace "multiple  match"
+                   (SOptional Nothing ,SOptional Nothing) -> errorWithStackTrace "no match"
+-}
 
 parseAttr (IT i na j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j <|>  return ((,SOptional Nothing) <$> j)
@@ -339,6 +360,32 @@ parseShowable (Primitive i ) =  (do
 parseShowable (KArray i)
     =  SComposite . Vector.fromList <$> (par <|> doublequoted par)
       where par = char '{'  *>  sepBy (parseShowable i) (char ',') <* char '}'
+parseShowable (KOptional (KEither i j ))
+    =  doublequoted parseTb <|> parseTb
+      where
+        parseTb = char '(' *> parseInner <* char ')'
+        parseInner = do
+              l <- parseShowable (KOptional i)
+              char ','
+              r <- parseShowable (KOptional j)
+              return $ case (l,r) of
+                   (SOptional (Just i),SOptional Nothing ) ->SOptional $ Just $  SEitherL i
+                   (SOptional Nothing ,SOptional (Just j )) ->SOptional $ Just $ SEitherR j
+                   (SOptional (Just _),SOptional (Just _ )) -> errorWithStackTrace "multiple  match"
+                   (SOptional Nothing ,SOptional Nothing) -> SOptional Nothing -- errorWithStackTrace "no match"
+parseShowable (KEither i j )
+    =  doublequoted parseTb <|> parseTb
+      where
+        parseTb = char '(' *> parseInner <* char ')'
+        parseInner = do
+              l <- parseShowable (KOptional i)
+              char ','
+              r <- parseShowable (KOptional j)
+              return $ case (l,r) of
+                   (SOptional (Just i),SOptional Nothing ) -> SEitherL i
+                   (SOptional Nothing ,SOptional (Just j )) -> SEitherR j
+                   (SOptional (Just _),SOptional (Just _ )) -> errorWithStackTrace "multiple  match"
+                   (SOptional Nothing ,SOptional Nothing) -> errorWithStackTrace "no match"
 parseShowable (KOptional i)
     = SOptional <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
 parseShowable (KSerial i)

@@ -488,8 +488,10 @@ selectionMultipleChange el = unsafeMapUI el (const $ UI.get selectedMultiple el)
 readFileAttr :: ReadAttr Element (Maybe String)
 readFileAttr = mkReadAttr get
   where
-    get   el = fmap (headMay . from ) $  callFunction $ ffi "readFileInput($(%1))" el
-    from s = let JSON.Success x =JSON.fromJSON s in x
+    get   el = fmap (join . fmap headMay . from ) $  callFunction $ ffi "readFileInput($(%1))" el
+    from s = case JSON.fromJSON s of
+                  JSON.Success x -> Just x
+                  i -> Nothing -- errorWithStackTrace (show i)
 
 
 selectedMultiple :: Attr Element [Int]
