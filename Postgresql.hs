@@ -3,7 +3,7 @@ module Postgresql where
 import Types
 import Query
 import GHC.Stack
--- import Debug.Trace
+import Debug.Trace
 import Data.Functor.Identity
 import Data.Functor.Compose
 import Data.Scientific hiding(scientific)
@@ -262,22 +262,20 @@ unKOptionalAttr (Attr i ) = Attr (unKOptional i)
 unKOptionalAttr (IT i r (LeftTB1 (Just j))  ) = (\i j-> IT  i r j )  (fmap (fmap unKOptional ) i)  j
 unKOptionalAttr (FKT i r l (LeftTB1 (Just j))  ) = FKT (fmap (fmap unKOptional) i) r l j
 unOptionalAttr (Attr i ) = Attr <$> (unKeyOptional i)
-unOptionalAttr (IT i r (LeftTB1 j)  ) = liftA2 (\i j-> IT  i r j )  (traverse (traverse unKeyOptional ) i)  j
+unOptionalAttr (IT i r (LeftTB1 j)  ) = (\j-> IT  i r j ) <$>     j
 unOptionalAttr (FKT i r l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i r l j) (traverse (traverse unKeyOptional) i)  j
 
 -- parseAttr i | traceShow i False = error ""
 parseAttr (Attr i) = do
   s<- parseShowable (textToPrim <$> keyType i) <?> show i
   return $  Attr (i,s)
-parseAttr (TBEither l r  _ _ )
+parseAttr (TBEither l  _ )
     =  doublequoted parseTb <|> parseTb
       where
         parseTb = char '(' *> parseInner <* char ')'
         parseInner = do
-              ls <- parseAttr (runIdentity $ getCompose l)
-              char ','
-              rs <- parseAttr (runIdentity $ getCompose r)
-              return $ TBEither l r  (Compose . Identity  <$> unOptionalAttr ls) (Compose . Identity <$> unOptionalAttr rs) {-case (l,r) of
+              res <- unIntercalateAtto (parseAttr . runIdentity .getCompose <$> l) (char ',')
+              return $ TBEither l  (Compose . Identity <$> (L.find ( maybe False (const True) . unOptionalAttr)) res)  {-case (l,r) of
                    (SOptional (Just i),SOptional Nothing ) -> SEitherL i
                    (SOptional Nothing ,SOptional (Just j )) -> SEitherR j
                    (SOptional (Just _),SOptional (Just _ )) -> errorWithStackTrace "multiple  match"
@@ -285,7 +283,7 @@ parseAttr (TBEither l r  _ _ )
 -}
 
 parseAttr (IT i na j) = do
-  mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j <|>  return ((,SOptional Nothing) <$> j)
+  mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j -- <|>  return ((,SOptional Nothing) <$> j)
   return $ IT  (fmap (,SOptional Nothing) <$> i ) na mj
 
 parseAttr (FKT l refl rel j ) = do
@@ -299,7 +297,7 @@ parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 parseLabeledTable (ArrayTB1 [t]) =
   ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (fmap makeOpt t))  >>  return [] ) <|> return []  )
 parseLabeledTable (LeftTB1 (Just i )) =
-  LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (fmap makeOpt i) >> return Nothing) <|> return Nothing )
+  LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (fmap makeOpt i) >> return Nothing) )
 parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
   im <- unIntercalateAtto (fmap (Compose . Identity) . parseAttr .runIdentity . getCompose <$> (i <> d <> m) ) (char ',')
   return (TB1 (KV ( PK (L.take (length i) im ) (L.take (length d) $L.drop (length i) $  im))(L.drop (length i + length d) im)) )) <*  char ')' )
@@ -321,7 +319,7 @@ parseShowable (Primitive i ) =  (do
    case i of
         PMime _ -> let
               pr = SBinary . fst . B16.decode . BS.drop 3   <$>  plain' "\",)}"
-                in (doublequoted ) pr <|> pr
+                in doublequoted  pr <|> pr
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
@@ -360,7 +358,7 @@ parseShowable (Primitive i ) =  (do
 parseShowable (KArray i)
     =  SComposite . Vector.fromList <$> (par <|> doublequoted par)
       where par = char '{'  *>  sepBy (parseShowable i) (char ',') <* char '}'
-parseShowable (KOptional (KEither i j ))
+{-parseShowable (KOptional (KEither i j ))
     =  doublequoted parseTb <|> parseTb
       where
         parseTb = char '(' *> parseInner <* char ')'
@@ -386,6 +384,7 @@ parseShowable (KEither i j )
                    (SOptional Nothing ,SOptional (Just j )) -> SEitherR j
                    (SOptional (Just _),SOptional (Just _ )) -> errorWithStackTrace "multiple  match"
                    (SOptional Nothing ,SOptional Nothing) -> errorWithStackTrace "no match"
+-}
 parseShowable (KOptional i)
     = SOptional <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
 parseShowable (KSerial i)
@@ -563,7 +562,7 @@ instance F.FromField a => F.FromField (Only a) where
 
 fromAttr foldable = do
     let parser  = parseLabeledTable foldable -- <|> doublequoted (parseLabeledTable foldable)
-    FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
+    FR.fieldWith (\i j -> case traverse (parseOnly  parser )  (j) of
                                (Right (Just r ) ) -> return r
                                Right Nothing -> error (show j )
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )

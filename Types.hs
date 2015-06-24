@@ -122,7 +122,7 @@ data TB f a
     , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
     }
   | TBEither
-    (Compose f (TB f) Key ) (Compose f (TB f) Key ) (Maybe (Compose f (TB f) a)) (Maybe (Compose f (TB f) a))
+    [(Compose f (TB f) Key )]  (Maybe (Compose f (TB f) a))
   | Attr
     { _tbattr :: ! a }
   -- Attribute
@@ -159,7 +159,7 @@ data KPrim
 data KType a
    = Primitive a
    | InlineTable {- schema -} Text {- tablename -} Text
-   | KEither (KType a) (KType a)
+   | KEither [KType a]
    | KSerial (KType a)
    | KArray (KType a)
    | KInterval (KType a)
@@ -225,7 +225,7 @@ data SqlOperation
   = FetchTable Text
   | FKJoinTable Text [(Key,Key)] Text
   | FKInlineTable Text
-  | FKEitherField Key (Key,Key)
+  | FKEitherField Key [Key]
   deriving(Eq,Ord,Show)
 
 

@@ -179,16 +179,6 @@ attrUITable  tAttr' evs (Attr i) = do
   where tAttr = fmap (\(Attr i)-> snd i) <$> tAttr'
 buildUI i  tdi = case i of
          (KOptional ti) -> fmap (Just. SOptional) <$> buildUI ti (join . fmap unSOptional  <$> tdi)
-         (KEither  tl tr) ->  do
-            lui <- buildUI tl (join . fmap unSEitherL <$> tdi)
-            rui <- buildUI tr (join . fmap unSEitherR <$> tdi)
-            let mix (Just _ ) (Just _ ) = Nothing
-                mix (Just i ) Nothing = Just $ SEitherL i
-                mix Nothing (Just i ) = Just $ SEitherR i
-                mix Nothing Nothing = Nothing
-                teither = liftA2 mix (triding lui)  (triding rui)
-            el <- UI.div # set children [getElement lui,getElement rui]
-            return $ TrivialWidget  teither el
          (KSerial ti) -> fmap (Just . SSerial) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
          (KArray ti) -> do
             let arraySize = 10
@@ -279,22 +269,19 @@ tbCase inf pgs a@(Attr i) created wl plugItens oldItems = do
             tbi = oldItems
             evs  = (rumors . fmap ( join . fmap ( fmap Attr . L.find ((== i).fst )) )   <$>  (fmap snd thisPlugs))
         attrUITable tbi evs a
-tbCase inf pgs a@(TBEither l r _ _ ) created wl plugItens oldItems = do
-        let  tbl = fmap (runIdentity.getCompose ) . join . fmap (\(TBEither _ _ i j ) -> i ) <$> oldItems
-             tbr = fmap (runIdentity.getCompose ) .join . fmap (\(TBEither _ _ i j ) -> j ) <$> oldItems
-             ru = unKOptionalAttr $ runIdentity $ getCompose r
-             lu = unKOptionalAttr $ runIdentity $ getCompose l
-        lw <- tbCase inf pgs (lu) created wl plugItens  tbl
-        rw <- tbCase inf pgs (ru) created wl plugItens tbr
-        let     mix (Just _ ) (Just _ ) = Nothing
-                mix (Just i ) Nothing = Just $ TBEither l r (Just $ Compose $ Identity $ i) Nothing
-                mix Nothing (Just i ) = Just $ TBEither l r Nothing (Just $ Compose $ Identity $  i)
-                mix Nothing Nothing = Nothing
-                teither = liftA2 mix (triding lw)  (triding rw)
-        eil <- UI.span # set text "Either"
-        el <- UI.ul #  set UI.style [("padding-left","0px")] # set UI.class_ "navlist" # set children [getElement lw,getElement rw]
-        lid <- UI.li # set children [el]
-        return $ TrivialWidget  teither lid
+tbCase inf pgs a@(TBEither ls  _ ) created wl plugItens oldItems = mdo
+        ws <- mapM (\l -> do
+            let  tbl = join . fmap (unOptionalAttr . runIdentity.getCompose) .join .  fmap (\(TBEither _  j ) -> join $ fmap (\i -> if (fmap fst i == l) then j else Nothing) j ) <$> oldItems
+                 lu = unKOptionalAttr $ runIdentity $ getCompose l
+            lw <- tbCase inf pgs lu created wl plugItens tbl
+            return lw ) ls
+        let   teitherl = foldr (liftA2 (:)) (pure []) (triding <$> ws)
+        -- st <- stepper True evch
+        chk  <- buttonDivSet [0..(length ls - 1)]  (facts $ (join . fmap (\(TBEither _ j ) -> join $ (flip L.elemIndex ls)  <$> (fmap fst <$> j) )<$>   oldItems)  ) show (\i -> UI.button # set text (show i) )
+        let   res = liftA2 (\c j -> join $ atMay   j c    ) (triding chk) teitherl
+        sequence $ zipWith (\el ix-> element  el # sink UI.style (noneShow <$> ((==ix) <$> facts (triding chk) ))) ws  [0..]
+        lid <- UI.div # set children (getElement chk : (getElement <$> ws))
+        return $ TrivialWidget  res  lid
 
 
 
@@ -348,6 +335,9 @@ unLeftTB  = join . fmap  un
       un (LeftTB1 i) = i
       un i = errorWithStackTrace ("unleft " <> show i )
 
+brow = UI.div # set UI.class_ "row"
+bfield s = UI.div # set UI.class_ ("col-lg-" <> show s)
+
 crudUITable
   ::
      InformationSchema
@@ -367,7 +357,7 @@ crudUITable inf pgs pmods ftb@(TB1 (KV (PK k d) a)) oldItems = do
   return (body,evsa)
 
 tbAttr (IT  i _ _ ) = i
-tbAttr (TBEither  _ _ i j  ) = (maybeToList i <> maybeToList j )
+tbAttr (TBEither  _   j  ) = (maybeToList j )
 tbAttr (FKT i _ _ _ ) = i
 tbAttr a@(Attr i ) = [Compose . Identity $ a]
 

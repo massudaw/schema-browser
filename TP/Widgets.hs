@@ -233,6 +233,21 @@ tabbed  tabs = do
   body <- UI.div # set children (snd <$> tabs)
   UI.div # set children [getElement header,body]
 
+buttonDivSet :: Eq a => [a] -> Behavior (Maybe a) ->  (a -> String) ->  (a -> UI Element ) -> UI (TrivialWidget a)
+buttonDivSet ks binit h  el = mdo
+  buttons <- mapM (buttonString h bv ) ks
+  dv <- UI.div # set children (fst <$> buttons)
+  let evs = foldr (unionWith const) never (snd <$> buttons)
+  v <- currentValue binit
+  bv <- stepper (maybe (head ks) id v) evs
+  return (TrivialWidget (tidings bv evs) dv)
+    where
+      buttonString h  bv k = do
+        b <- el k # sink UI.enabled (not . (k==) <$> bv)
+        let ev = pure k <@ UI.click  b
+        return (b,ev)
+
+
 -- List of buttons with constant value
 buttonFSet :: [a] -> Behavior (Maybe a) -> Behavior (String -> Bool ) ->  (a -> String) -> UI (TrivialWidget a)
 buttonFSet ks binit bf h =do

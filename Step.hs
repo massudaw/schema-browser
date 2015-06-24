@@ -173,13 +173,13 @@ findPKM i  = Just $ findPK i
 
 
 attrNonRec (FKT ifk _ _ _ ) = concat $ fmap kattr ifk
-attrNonRec (TBEither _ _ ifk ifk2 ) =  (maybe [] id $ fmap kattr ifk) <> (maybe [] id $ fmap kattr ifk)
+attrNonRec (TBEither _  ifk ) =   (maybe [] id $ fmap kattr ifk)
 attrNonRec (IT ifk _ _ ) = concat $ fmap kattr ifk
 attrNonRec (Attr i ) = [i]
 
 kattr = kattri . runIdentity . getCompose
 kattri (Attr i ) = [i]
-kattri (TBEither i j k l  ) = (maybe [] id $ fmap kattr k ) <> (maybe [] id $ fmap kattr l )
+kattri (TBEither i l  ) =  (maybe [] id $ fmap kattr l )
 kattri (FKT i _ _ _ ) =  (L.concat $ kattr  <$> i)
 kattri (IT i  _ _ ) =  (L.concat $ kattr  <$> i)
 

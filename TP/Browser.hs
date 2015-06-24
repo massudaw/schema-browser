@@ -715,7 +715,7 @@ testParse db sch q = withConnInf db sch (\inf -> do
                                        putStrLn (  show rpq)
                                        putStrLn (  show rp)
                                        q <- queryWith_ (fromAttr (rp) ) (conn  inf) (fromString $ T.unpack $ rpq)
-                                       putStrLn$  unlines $ fmap show q
+                                       return $ q
                                            )
 testFireMetaQuery q = testParse "incendio" "metadata"  q
 testFireQuery q = testParse "incendio" "incendio"  q

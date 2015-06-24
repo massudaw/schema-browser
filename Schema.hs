@@ -70,42 +70,6 @@ type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 foreignKeys :: Query
 foreignKeys = "select origin_table_name,target_table_name,origin_fks,target_fks from metadata.fks where origin_schema_name = target_schema_name  and  target_schema_name = ?"
 
-preprocessSumTypes  m = go m (dataset m)
- where
-   go m dt
-     | not (M.null dt) = do
-        res <- foldr (\((c,k),kk) i  -> i >>= pair c kk  )(return m) (M.toList dt)
-        go res  (dataset res)
-     | otherwise = return m
-   dataset m = M.filter (\k -> T.isPrefixOf "l_" (keyValue k) || T.isPrefixOf "al_" (keyValue k) ) m
-   unOptional (KOptional i ) = i
-   pair  c p m  = case T.unpack $ keyValue p of
-      'r':'_':xs  -> do
-          let
-            name = (c,T.pack $ "l_" <>  xs )
-            left = justError ("no left side " <> T.unpack (snd name ) <> "of " <> show p <> show m ) $ M.lookup  name m
-          key <- newKey (T.pack xs) (KEither  (unOptional $keyType left) (unOptional $keyType p) )
-          return (M.insert (c,keyValue key) key $   M.delete (c,(keyValue p))$ M.delete name m)
-      'l':'_':xs  -> do
-          let
-            name = (c,T.pack $ "r_" <>  xs )
-            right = justError ("no right side " <> T.unpack (snd name ) <> " of " <> show p <> show m ) $ M.lookup  name m
-          key <- newKey (T.pack xs) (KEither  (unOptional $keyType p) (unOptional $keyType right) )
-          return (M.insert (c,keyValue key) key $   M.delete (c,(keyValue p))$ M.delete name m)
-      'a':'r':'_':xs  -> do
-          let
-            name = (c,T.pack $ "al_" <>  xs )
-            left = justError ("no left side " <> T.unpack (snd name ) <> "of " <> show p <> show m ) $ M.lookup  name m
-          key <- newKey (T.pack xs) (KOptional $ KEither  (unOptional $keyType left) (unOptional $keyType p) )
-          return (M.insert (c,keyValue key) key $   M.delete (c,(keyValue p))$ M.delete name m)
-      'a':'l':'_':xs  -> do
-          let
-            name = (c,T.pack $ "ar_" <>  xs )
-            right = justError ("no right side " <> T.unpack (snd name ) <> " of " <> show p <> show m ) $ M.lookup  name m
-          key <- newKey (T.pack xs) (KOptional $ KEither  (unOptional $ keyType p) (unOptional $ keyType right) )
-          return (M.insert (c,keyValue key) key $   M.delete (c,(keyValue p))$ M.delete name m)
-
-      i ->  return m
 
 queryAuthorization :: Connection -> Text -> Text -> IO (Map Text [Text])
 queryAuthorization conn schema user = do
@@ -136,13 +100,12 @@ keyTables conn userconn (schema ,user) = do
        authorization <- queryAuthorization conn schema user
        descMap <- M.fromList . fmap  (\(t,c)-> (t,(\(Just i) -> i) $ M.lookup (t,c) keyMap) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
        transMap <- M.fromList   <$> query conn "SELECT table_name,translation FROM metadata.table_name_translation WHERE schema_name = ? " (Only schema)
-       eitherMap <- fmap (M.fromListWith mappend)  . join $  mapM (\(t,r,l,n)-> do
+       eitherMap <- fmap (M.fromListWith mappend)  . join $  mapM (\(t,l,n)-> do
          un <- newUnique
          let
-           lcol = lookupKey (t,l)
-           rcol = lookupKey (t,r)
-           tnew = Key n Nothing un (KEither (keyType lcol) (keyType rcol))
-         return (t,[Path (S.fromList [lcol,rcol]) (FKEitherField tnew (lcol,rcol)) (S.singleton tnew) ]) ) <$> query conn "SELECT table_name,right_column,left_column,column_name FROM metadata.table_either WHERE table_schema = ? " (Only schema)
+           lcol = lookupKey . (t,) <$> V.toList l
+           tnew = Key n Nothing un (KEither (keyType <$> lcol) )
+         return (t,[Path (S.fromList lcol) (FKEitherField tnew lcol) (S.singleton tnew) ]) ) <$> query conn "SELECT table_name,sum_columns,column_name FROM metadata.table_either WHERE table_schema = ? " (Only schema)
 
 
        res <- lookupKey3 <$> query conn "SELECT table_name,pks FROM metadata.pks  where schema_name = ?" (Only schema) :: IO [(Text,Vector Key )]
