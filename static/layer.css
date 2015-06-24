@@ -7,11 +7,11 @@ a { text-decoration: none; margin: 0 10px; }
   width: 100%;
   text-align: center;
 }
-button:enabled{
+button.buttonSet:enabled{
   background-color:darkgray
   
 }
-button:disabled{
+button.buttonSet:disabled{
   background-color:lightgray
   
 }

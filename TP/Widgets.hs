@@ -243,7 +243,7 @@ buttonDivSet ks binit h  el = mdo
   return (TrivialWidget (tidings bv evs) dv)
     where
       buttonString h  bv k = do
-        b <- el k # sink UI.enabled (not . (k==) <$> bv)
+        b <- el k # set UI.class_ "buttonSet" # sink UI.enabled (not . (k==) <$> bv)
         let ev = pure k <@ UI.click  b
         return (b,ev)
 
@@ -258,7 +258,7 @@ buttonFSet ks binit bf h =mdo
   return (TrivialWidget (tidings bv evs) dv)
     where
       buttonString h bv k= do
-        b <- UI.button # set text (h k)# sink UI.style ((\i-> noneShowSpan (i (h k))) <$> bf)# sink UI.enabled (not . (k==) <$> bv)
+        b <- UI.button # set UI.class_ "buttonSet" # set text (h k)# sink UI.style ((\i-> noneShowSpan (i (h k))) <$> bf)# sink UI.enabled (not . (k==) <$> bv)
         let ev = pure k <@ UI.click  b
         return (b,ev)
 
@@ -428,12 +428,8 @@ listBox bitems bsel bfilter bdisplay = do
     -- user selection
     let
         eindexes = (\l i -> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <@> UI.selectionChange list
-    e <- currentValue (facts bsel)
     let
-        ev =  unionWith const eindexes (rumors bsel)
-    bsel2 <- stepper e ev
-    let
-        _selectionLB = tidings bsel2 ev
+        _selectionLB = tidings (facts bsel) eindexes
         _elementLB   = list
 
     return ListBox {..}

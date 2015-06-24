@@ -16,6 +16,7 @@ import Data.Ord
 import Control.Lens (Lens,(^?))
 import qualified Control.Lens as Le
 import Utils
+import Data.Char
 
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -518,14 +519,18 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
           tdipre = fmap _fkttable <$> oldItems
       tdi <- foldr (\i j -> updateEvent  (fmap (Tra.traverse (Tra.traverse diffOptional ))) i =<< j)  (return tdipre) (rumors . snd <$> plmods)
       l <- flabel # set text (show $ unAttr .unTB <$> ifk)
-      {-filterInp <- UI.input
+      filterInp <- UI.input
       filterInpBh <- stepper "" (UI.valueChange filterInp )
+      let
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
-          filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd-}
+          filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd
+          sortList :: Tidings ([Maybe (TB1 (Key,Showable))])
+          sortList = (Nothing:) <$>  fmap (fmap Just) (tidings (sorting <$> pure True <*> pure (fmap snd rel ) <*> res2) never)
       let
           Just table = M.lookup (S.fromList $ findPK tb1 ) (pkMap inf)
-      ol <- UI.listBox dataList bselection  dataViewer
-      let evsel = unionWith const (rumors $ join <$> UI.userSelection ol) (rumors tdi)
+      ol <- listBox (sortList ) (tidings bselection  never ) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+
+      let evsel = unionWith const (rumors $ join <$> userSelection ol) (rumors tdi)
       prop <- stepper Nothing evsel
       let tds = tidings prop evsel
       (celem,tableb) <- uiTable inf pgs (rawName table) plmods tb1  tds
@@ -534,7 +539,7 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
           dataList = ((Nothing:) <$>  fmap (fmap Just) (res2))
           bselection = (fmap Just <$> st)
           dataViewer = (pure ( maybe UI.div  showFKE))
-          sel = fmap head $ unions $ [(rumors $ join <$> UI.userSelection ol), rumors tdi] <> (fmap modifyTB <$> evs)
+          sel = fmap head $ unions $ [(rumors $ join <$> userSelection ol), rumors tdi] <> (fmap modifyTB <$> evs)
       st <- stepper Nothing sel
       res2  <-  accumB res  (fmap concatenate $ unions $ fmap addToList <$> evs)
       let
@@ -553,7 +558,7 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
           # sink UI.style (noneShow <$> (facts $ triding chw))
           # set style [("padding-left","10px")]
       element celem
-      fk <- UI.li # set  children [l, getElement box,{-filterInp,-}getElement chw,celem, panelItems ]
+      fk <- UI.li # set  children [l, getElement box,filterInp,getElement chw,celem, panelItems ]
       paintEdit  (getElement l) (facts fksel) ( facts oldItems)
       return $ TrivialWidget fksel fk
 
