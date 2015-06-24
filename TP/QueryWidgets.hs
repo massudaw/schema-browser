@@ -277,9 +277,9 @@ tbCase inf pgs a@(TBEither ls  _ ) created wl plugItens oldItems = mdo
             return lw ) ls
         let   teitherl = foldr (liftA2 (:)) (pure []) (triding <$> ws)
         -- st <- stepper True evch
-        chk  <- buttonDivSet [0..(length ls - 1)]  (facts $ (join . fmap (\(TBEither _ j ) -> join $ (flip L.elemIndex ls)  <$> (fmap fst <$> j) )<$>   oldItems)  ) show (\i -> UI.button # set text (show i) )
-        let   res = liftA2 (\c j -> join $ atMay   j c    ) (triding chk) teitherl
-        sequence $ zipWith (\el ix-> element  el # sink UI.style (noneShow <$> ((==ix) <$> facts (triding chk) ))) ws  [0..]
+        chk  <- buttonDivSet (zip [0..(length ls - 1)] ls)  (facts $ (join . fmap (\(TBEither _ j ) ->   join $ (\e -> fmap (,e) . (flip L.elemIndex ls) $     e ) <$> (fmap fst <$> j) )<$>   oldItems)  ) (show .kattr. snd)(\i -> UI.button # set text (show $ kattr $ snd i) )
+        let   res = liftA2 (\c j -> join $ atMay   j (fst c)    ) (triding chk) teitherl
+        sequence $ zipWith (\el ix-> element  el # sink UI.style (noneShow <$> ((==ix) .fst <$> facts (triding chk) ))) ws  [0..]
         lid <- UI.div # set children (getElement chk : (getElement <$> ws))
         return $ TrivialWidget  res  lid
 

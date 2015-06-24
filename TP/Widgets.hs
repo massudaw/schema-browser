@@ -247,19 +247,18 @@ buttonDivSet ks binit h  el = mdo
         let ev = pure k <@ UI.click  b
         return (b,ev)
 
-
 -- List of buttons with constant value
-buttonFSet :: [a] -> Behavior (Maybe a) -> Behavior (String -> Bool ) ->  (a -> String) -> UI (TrivialWidget a)
-buttonFSet ks binit bf h =do
-  buttons <- mapM (buttonString h) ks
+buttonFSet :: Eq a => [a] -> Behavior (Maybe a) -> Behavior (String -> Bool ) ->  (a -> String) -> UI (TrivialWidget a)
+buttonFSet ks binit bf h =mdo
+  buttons <- mapM (buttonString h bv ) ks
   dv <- UI.div # set children (fst <$> buttons)
   let evs = foldr (unionWith (const)) never (snd <$> buttons)
   v <- currentValue binit
   bv <- stepper (maybe (head ks) id v) evs
   return (TrivialWidget (tidings bv evs) dv)
     where
-      buttonString h k= do
-        b <- UI.button # set text (h k)# sink UI.style ((\i-> noneShowSpan (i (h k))) <$> bf)
+      buttonString h bv k= do
+        b <- UI.button # set text (h k)# sink UI.style ((\i-> noneShowSpan (i (h k))) <$> bf)# sink UI.enabled (not . (k==) <$> bv)
         let ev = pure k <@ UI.click  b
         return (b,ev)
 

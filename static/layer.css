@@ -7,7 +7,10 @@ a { text-decoration: none; margin: 0 10px; }
   width: 100%;
   text-align: center;
 }
-
+button:enabled{
+  background-color:darkgray
+  
+}
 button:disabled{
   background-color:lightgray
   

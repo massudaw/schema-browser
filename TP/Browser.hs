@@ -190,7 +190,7 @@ line n =  set  text n
 chooserKey inf kitems i = do
   let initKey = pure . join $ fmap rawPK . flip M.lookup (tableMap inf) . T.pack <$> i
   filterInp <- UI.input
-  filterInpBh <- stepper "" (onEnter filterInp)
+  filterInpBh <- stepper "" (UI.valueChange filterInp)
 
   i :: [(Text,Int)] <- liftIO $ query (rootconn inf) (fromString "SELECT table_name,usage from metadata.ordering where schema_name = ?") (Only (schemaName inf))
   let orderMap = Just $ M.fromList  i
