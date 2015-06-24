@@ -266,7 +266,7 @@ tableNonRefK (TB1 (KV (PK l m ) n)  )  = TB1 (KV (PK (fun l) (fun m) ) (fun n))
         nonRef i@(Attr _ ) = [Compose $ Identity $ i]
         nonRef (FKT i True _ _ ) = i
         -- Fix Either expansion
-        -- nonRef (TBEither kj j ) =  maybe (addDefault <$> kj) optionalAttr j
+        nonRef (TBEither kj j ) =  maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap fst j ) then j else addDefault i) kj) j
         nonRef (FKT i False _ _ ) = []
         nonRef it@(IT i j k ) = [Compose $ Identity $ (IT  i j (tableNonRefK k )) ]
         fun  = concat . fmap (nonRef . runIdentity . getCompose)

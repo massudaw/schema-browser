@@ -272,16 +272,15 @@ tbCase inf pgs a@(Attr i) created wl plugItens oldItems = do
         attrUITable tbi evs a
 tbCase inf pgs a@(TBEither ls  _ ) created wl plugItens oldItems = mdo
         ws <- mapM (\l -> do
-            let  tbl = join . fmap (unOptionalAttr . runIdentity.getCompose) .join .  fmap (\(TBEither _  j ) -> join $ fmap (\i -> if (fmap fst i == l) then j else Nothing) j ) <$> oldItems
-                 lu = unKOptionalAttr $ runIdentity $ getCompose l
+            let  tbl = fmap (runIdentity.getCompose) .join .  fmap (\(TBEither _  j ) -> join $ fmap (\i -> if (fmap fst i == l) then j else Nothing) j ) <$> oldItems
+                 lu = runIdentity $ getCompose l
             lw <- tbCase inf pgs lu created wl plugItens tbl
             return lw ) ls
-        let   teitherl = foldr (liftA2 (:)) (pure []) (triding <$> ws)
-        -- st <- stepper True evch
-        chk  <- buttonDivSet (zip [0..(length ls - 1)] ls)  (facts $ (join . fmap (\(TBEither _ j ) ->   join $ (\e -> fmap (,e) . (flip L.elemIndex ls) $     e ) <$> (fmap fst <$> j) )<$>   oldItems)  ) (show .kattr. snd)(\i -> UI.button # set text (show $ kattr $ snd i) )
-        let   res = liftA2 (\c j -> join $ atMay   j (fst c)    ) (triding chk) teitherl
+        chk  <- buttonDivSet (zip [0..(length ls - 1)] ls)  ((join . fmap (\(TBEither _ j ) ->   join $ (\e -> fmap (,e) . (traceShowId  . flip L.elemIndex ls) $ e ) <$> ((fmap fst <$> j)))<$>   oldItems)) (show .kattr. snd) (\i -> UI.button # set text (show $ kattr $ snd i) )
         sequence $ zipWith (\el ix-> element  el # sink UI.style (noneShow <$> ((==ix) .fst <$> facts (triding chk) ))) ws  [0..]
-        lid <- UI.div # set children (getElement chk : (getElement <$> ws))
+        let teitherl = foldr (liftA2 (:)) (pure []) (triding <$> ws)
+            res = liftA2 (\c j -> fmap (TBEither ls . fmap (Compose . Identity) ) $ atMay j (fst c)) (triding chk) teitherl
+        lid <- UI.li # set children (getElement chk : (getElement <$> ws))
         return $ TrivialWidget  res  lid
 
 
@@ -526,7 +525,6 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd
           sortList :: Tidings ([Maybe (TB1 (Key,Showable))])
           sortList = (Nothing:) <$>  fmap (fmap Just) (tidings (sorting <$> pure True <*> pure (fmap snd rel ) <*> res2) never)
-      let
           Just table = M.lookup (S.fromList $ findPK tb1 ) (pkMap inf)
       ol <- listBox (sortList ) (tidings bselection  never ) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
