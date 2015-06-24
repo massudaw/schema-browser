@@ -79,9 +79,9 @@ deriving instance Traversable Interval
 
 instance  TF.ToField (TB Identity (Key,Showable))  where
   toField (Attr i) = TF.toField (snd i)
-  toField (IT [n] na (LeftTB1 i)  ) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT [n] na ) i
-  toField (IT [n] _ (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  runIdentity.getCompose <$> F.toList  i )
-  toField (IT [n] _ (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
+  toField (IT n (LeftTB1 i)  ) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
+  toField (IT (n,_)  (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ n ) $  runIdentity.getCompose <$> F.toList  i )
+  toField (IT (n,_)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType  n) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
   toField e = errorWithStackTrace (show e)
 
 
@@ -259,10 +259,10 @@ subsAKT r t = subs r (fmap ((^. kvKey. pkKey) . _unTB1) t)
   where subs i j = fmap (\r -> (justError "no key Found subs" $ L.find (\i -> fmap fst i == fst r ) i , zipWith (\m n -> justError "no key Found subs" $L.find (\i-> fmap fst i == n) m ) j (snd r) ))
 
 unKOptionalAttr (Attr i ) = Attr (unKOptional i)
-unKOptionalAttr (IT i r (LeftTB1 (Just j))  ) = (\i j-> IT  i r j )  (fmap (fmap unKOptional ) i)  j
+unKOptionalAttr (IT  r (LeftTB1 (Just j))  ) = (\j-> IT   r j )    j
 unKOptionalAttr (FKT i r l (LeftTB1 (Just j))  ) = FKT (fmap (fmap unKOptional) i) r l j
 unOptionalAttr (Attr i ) = Attr <$> (unKeyOptional i)
-unOptionalAttr (IT i r (LeftTB1 j)  ) = (\j-> IT  i r j ) <$>     j
+unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
 unOptionalAttr (FKT i r l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i r l j) (traverse (traverse unKeyOptional) i)  j
 
 -- parseAttr i | traceShow i False = error ""
@@ -282,9 +282,9 @@ parseAttr (TBEither l  _ )
                    (SOptional Nothing ,SOptional Nothing) -> errorWithStackTrace "no match"
 -}
 
-parseAttr (IT i na j) = do
+parseAttr (IT na j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j -- <|>  return ((,SOptional Nothing) <$> j)
-  return $ IT  (fmap (,SOptional Nothing) <$> i ) na mj
+  return $ IT  (na,SOptional Nothing) mj
 
 parseAttr (FKT l refl rel j ) = do
   ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .runIdentity .getCompose  <$> l) (char ',')
@@ -570,4 +570,5 @@ fromAttr foldable = do
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item
   where item = fmap (\n@(Raw _ _ _ t _ k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
+
 

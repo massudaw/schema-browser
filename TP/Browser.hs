@@ -240,7 +240,7 @@ chooseKey inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,evs) <- crudUITable inf  [lplugOrcamento ,siapi3Plugin ,siapi2Plugin , gerarPagamentos , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary  ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull, queryArtAndamento ] [] (allRec' (tableMap inf) table) itemListT
+            (crud,evs) <- crudUITable inf  [lplugOrcamento ,siapi3Plugin ,siapi2Plugin , gerarPagamentos , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary  ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull, queryArtAndamento ] (facts res2) [] (allRec' (tableMap inf) table) itemListT
             let eres = fmap addToList <$> evs
             res2 <- accumTds vp eres
             insertDiv <- UI.div # set children [crud]
@@ -294,8 +294,7 @@ testShowable  v s = case s of
           convertAndamento [da,des] =  TB1 $ fmap (Compose . Identity .Attr ) $ KV  (PK [] []) ([("andamento_date",STimestamp . Finite . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))] )
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
-                                            [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
-                                            "fire_project_event"
+                                            ("andamentos",SOptional Nothing)
                                             (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
       returnA -< join  (  ao  .  tailEmpty . concat <$> join b)
 
@@ -331,8 +330,7 @@ type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModificat
                     Just i ->  Nothing
                     Nothing ->  traceShow (iat bv,t) $  Just $ TB1 $ KV (PK [] []) ( [iat bv])
           iat bv = Compose . Identity $ (IT
-                                            [Compose . Identity $ Attr $ ("andamentos",SOptional Nothing)]
-                                            "fire_project_event"
+                                            ("andamentos",SOptional Nothing)
                                             (LeftTB1 $ Just $ ArrayTB1 $ reverse $ fmap convertAndamento bv))
       returnA -< join  ( ao . fst <$> b)
 
@@ -483,7 +481,7 @@ gerarPagamentos = BoundedPlugin2 "Pagamentos" "plano_aluno" (staticP url) elem
       odx "pagamento:pagamentos:scheduled_date" -<  t
       let pagamento = Compose $ Identity $ FKT ([Compose $ Identity $ Attr $ ("pagamentos",SOptional  $ Just $ SComposite (Vector.fromList $ replicate (maybe 0 fromIntegral  p)  (SOptional Nothing)))]) True [] (LeftTB1 $ Just $ ArrayTB1 (replicate (maybe 0 fromIntegral  p) (TB1 (KV (PK [attrT ("id",SSerial Nothing)] [attrT ("description",SOptional Nothing)]) [attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ]))))
           ao :: Maybe (TB1 (Text,Showable))
-          ao =  Just $ TB1 $ KV (PK [] []) [Compose $ Identity $ IT [Compose $ Identity $ Attr$  ("pagamento",SOptional Nothing)] "parcelamento" (LeftTB1 $ Just $ TB1 $ KV (PK [] [] ) [pagamento ])]
+          ao =  Just $ TB1 $ KV (PK [] []) [Compose $ Identity $ IT   ("pagamento",SOptional Nothing)  (LeftTB1 $ Just $ TB1 $ KV (PK [] [] ) [pagamento ])]
 
       returnA -< ao
 

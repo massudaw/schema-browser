@@ -117,8 +117,7 @@ data TB f a
     }
 
   | IT -- Inline Table
-    { _tbref :: ![Compose f (TB f) a]
-    , ittableName :: Text
+    { _ittableName :: a
     , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
     }
   | TBEither
