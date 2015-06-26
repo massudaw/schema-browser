@@ -117,6 +117,8 @@ loginWidget userI passI =  do
   login <- UI.div # set children [username,password]
   return $ TrivialWidget (liftA2 (liftA2 (,)) usernameT passwordT) login
 
+instance Show Connection where
+  show i =""
 instance Ord Connection where
   i < j = 1 < 2
   i <= j = 1 < 2
@@ -697,7 +699,7 @@ main = do
 
 
 
-  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)
+  startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html"})  (setup e args)
   print "Finish"
 
 poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
