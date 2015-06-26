@@ -24,7 +24,6 @@ import Safe
 
 
 import Debug.Trace
-import Safe
 
 instance Widget (TrivialWidget  a) where
     getElement (TrivialWidget t e) = e
@@ -330,16 +329,16 @@ optionalListBox l o f s = do
 interval'' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
 
 
--- read1 (EventData (Just s:_)) = read s
+read1 (EventData (Just s:_)) = read s
 
 onkey :: Element -> (Int -> Maybe Int ) -> Event String
-onkey el f = unsafeMapUI el (const $ UI.get value el) (filterJust $ f . unsafeFromJSON <$> domEvent "keydown" el)
+onkey el f = unsafeMapUI el (const $ UI.get value el) (filterJust $ f . read1 <$> domEvent "keydown" el)
 
 onEnter el = onkey el (\case {13-> Just 13; i -> Nothing})
 
 
 testPointInRange ui = do
-  startGUI defaultConfig  (\w -> do
+  startGUI defaultConfig {tpPort = Just 8000} (\w -> do
                       e1 <- ui
                       getBody w #+ [element e1]
                       return () )
@@ -404,7 +403,7 @@ multiUserSelection = _selectionMLB
 setLookup x s = if S.member x s then Just x else Nothing
 
 -- | Create a 'ListBox'.
-listBox :: forall a. (Show a ,Ord a)
+listBox :: forall a. Ord a
     => Tidings [a]               -- ^ list of items
     -> Tidings (Maybe a)         -- ^ selected item
     -> Tidings ([a] -> [a])      -- ^ view list to list transform (filter,sort)
@@ -412,8 +411,10 @@ listBox :: forall a. (Show a ,Ord a)
     -> UI (ListBox a)
 listBox bitems bsel bfilter bdisplay = do
     list <- UI.select # set UI.class_ "selectpicker"
+    let bindices :: Tidings [a]
+        bindices =  bfilter <*> bitems
     -- animate output items
-    element list # sink oitems ( map <$> facts bdisplay <*> facts bitems )
+    element list # sink oitems (facts $ map <$> bdisplay <*> bitems )
 
     -- animate output selection
     let
@@ -421,7 +422,7 @@ listBox bitems bsel bfilter bdisplay = do
         lookupIndex indices Nothing    = Nothing
         lookupIndex indices (Just sel) = L.findIndex (== sel)  indices
 
-    element list # sink UI.selection (bindex)
+    element list # sink UI.selection bindex
 
 
     -- changing the display won't change the current selection
@@ -429,9 +430,8 @@ listBox bitems bsel bfilter bdisplay = do
     -- sink listBox [ selection :== stepper (-1) $ bSelection <@ eDisplay ]
 
     -- user selection
-    evList <- selectionChange list
     let
-        eindexes = (\l i ->  join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <@> (evList )
+        eindexes = (\l i -> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <@> UI.selectionChange list
     let
         ev =  unionWith const eindexes (rumors bsel)
     let
@@ -472,7 +472,6 @@ multiListBox bitems bsel bdisplay = do
     -- eDisplay <- changes display
     -- sink listBox [ selection :== stepper (-1) $ bSelection <@ eDisplay ]
 
-
     -- user selection
     let bindices2 :: Tidings (M.Map Int a)
         bindices2 = M.fromList . zip [0..] <$> bitems
@@ -492,21 +491,15 @@ multiListBox bitems bsel bdisplay = do
 
 
 oitems = mkWriteAttr $ \i x -> void $ do
-    return x # set children [] #+ map (\i -> UI.option # set items [UI.div # i ] ) i
+    return x # set children [] #+ map (\i -> UI.option # i) i
+
 
 
 fileChange :: Element -> Event (Maybe String)
 fileChange el = unsafeMapUI el (const $ UI.get readFileAttr el) (UI.valueChange el)
 
 selectionMultipleChange :: Element -> Event [Int]
-selectionMultipleChange el = unsafeMapUI el (const $ UI.get selectedMultiple el) (unionWith const ( fmap (const ()) $onEnter el ) (UI.click el))
-
-selectionChange :: Element -> UI (Event (Maybe Int))
-selectionChange el = do
-  (e , h) <- liftIO $newEvent
-  onEvent (UI.click el) (\_ ->  liftIO . h =<<  UI.get UI.selection el)
-  -- unsafeMapUI el ( const $ UI.get UI.selection el) (UI.click el)
-  return e
+selectionMultipleChange el = unsafeMapUI el (const $ UI.get selectedMultiple el) (UI.click el)
 
 readFileAttr :: ReadAttr Element (Maybe String)
 readFileAttr = mkReadAttr get
