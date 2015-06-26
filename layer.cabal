@@ -64,6 +64,7 @@ executable threepenny-layer
    ,safe
    ,async
    ,tasty
+   ,extra
   -- hs-source-dirs:      
 
   default-language:    Haskell2010

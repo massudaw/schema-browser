@@ -82,6 +82,9 @@ textToPrim "timestamp without time zone" = PTimestamp
 textToPrim "timestamp with time zone" = PTimestamp
 textToPrim "interval" = PInterval
 textToPrim "date" = PDate
+textToPrim "time" = PDayTime
+textToPrim "time with time zone" = PDayTime
+textToPrim "time without time zone" = PDayTime
 textToPrim "POINT" = PPosition
 textToPrim "LINESTRING" = PLineString
 textToPrim "box3d" = PBounding
@@ -152,6 +155,7 @@ renderShowable i = shw i
     shw (SLineString a ) = show a
     shw (SBounding a ) = show a
     shw (SDate a) = show a
+    shw (SDayTime a) = show a
     shw (SSerial a) = show a
     shw (SBinary a) = show "<Binary>"
     shw (SPosition a) = show a
@@ -191,6 +195,7 @@ getPrim (KInterval j) =  getPrim j
 inner b l m = l <> b <> m
 
 intersectPred p@(Primitive _ ) (KInterval i) j (SInterval l )  | p == i =  Interval.member j l
+intersectPred p@(KInterval j ) (KInterval i) (SInterval k)  (SInterval l )   =  Interval.isSubsetOf k  l
 intersectPred p@(Primitive _ ) (KArray i) j (SComposite l )  | p == i =  Vector.elem j l
 intersectPred p1@(Primitive _ ) p2@(Primitive _) j l   | p1 == p2 =  j ==  l
 intersectPred p1@(KOptional i ) p2 (SOptional j) l  =  maybe False id $ fmap (\m -> intersectPred i p2 m l) j
@@ -201,7 +206,7 @@ intersectPred p1 p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  
 intersectionOp (KOptional i) (KOptional j) = intersectionOp i j
 intersectionOp i (KOptional j) = intersectionOp i j
 intersectionOp (KOptional i) j = intersectionOp i j
-intersectionOp (KInterval i) (KInterval j )  = inner " = "
+intersectionOp (KInterval i) (KInterval j )  = inner " <@ "
 intersectionOp (KArray i) (KArray j )  = inner " = "
 intersectionOp (KInterval i) j
     | getPrim i == getPrim j =  inner " @> "
@@ -250,16 +255,19 @@ attrValueName (Attr i)= keyValue (fst i)
 attrValueName (IT i  _) = (keyValue  $ fst i)
 attrValueName i = error $ " no attr value instance " <> show i
 
+type TBValue = TB1 (Key,Showable)
+type TBType = TB1 Key
+
+
 insertAttr
-  :: (MonadIO m  ,Functor m ,ToField
-                             (TB Identity (FKey (KType Text), Showable))) =>
-     ((TB1  Key)
-      -> RowParser
-           (TB1 (Key, Showable)))
+  :: (MonadIO m
+     ,Functor m
+     ,ToField (TB Identity (Key, Showable)))
+     => (TBType -> RowParser TBValue)
      -> Connection
-     -> TB1 (Key,Showable) -- FTB1 (Compose Identity (TB Identity)) (FKey (KType t), b)
+     -> TBValue
      -> Table
-     -> m (TB1 (Key,Showable ))-- cFTB1 (Compose Identity (TB Identity)) (FKey (KType t), b))
+     -> m TBValue
 insertAttr f conn krec  t = if not (L.null pkList)
               then   do
         let iquery = T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName  kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")" <> " RETURNING ROW(" <>  T.intercalate "," (attrValueName . runIdentity . getCompose <$> pkList ) <> ")"
@@ -364,12 +372,13 @@ unIntercalate pred s                 =  case dropWhile pred s of
 
 data Tag = TAttr | TPK
 
+allKVRec (LeftTB1 i) = maybe mempty allKVRec i
+allKVRec (ArrayTB1 i) = mconcat $ allKVRec <$> i
 allKVRec  (TB1 (KV (PK k d) e ))= F.foldr zipPK (KV (PK [] []) []) $ (go TPK (\i -> KV (PK i []) []) . runIdentity . getCompose  <$> k) <> (go TAttr (\i-> KV (PK [] i) [] ) . runIdentity . getCompose <$> d) <> ( go TAttr (\i-> KV (PK [] []) i) . runIdentity . getCompose <$> e)
   where zipPK (KV (PK i j) k) (KV (PK m n) o) = KV (PK (i <> m) (j <> n)) (k <> o )
         go  TAttr l (FKT _ _ _ tb) =  l $ F.toList $ allKVRec  tb
         go  TPK l (FKT _ _ _ tb) =  allKVRec  tb
-        go  TAttr l (TBEither _  tbr) =  maybe mempty id $ go TAttr l . runIdentity . getCompose <$>  tbr -- $ F.toList $ allKVRec  tb
-        go  TPK l (TBEither _  tbl ) =  maybe mempty id $ go TPK l . runIdentity . getCompose <$>  tbl -- $ F.toList $ allKVRec  tb
+        go  i l (TBEither _  tbr) =  maybe mempty id $ go i l . runIdentity . getCompose <$>  tbr
         go  TAttr l (IT  _ tb) =  l $ F.toList $ allKVRec  tb
         go  TPK l (IT  _ tb) =  allKVRec  tb
         go  _ l (Attr a) = l [a]
@@ -493,7 +502,7 @@ recursePath' isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
   where
         joinLPredicate   =   T.intercalate " AND " . fmap (\(l,r)->  intersectionOpK (unAttr . labelValue $ l) (unAttr . labelValue $ r) (label l)  (label r ))
         fkm m n = zip (look (fst <$> ks) m) (look (snd <$> ks) n)
-        look ki i = justError ("missing FK on " ) $ allMaybes $ fmap (\j-> L.find (\v -> unAttr (labelValue v) == j) i  ) ki
+        look ki i = justError ("missing FK on " <> show (ki,ks ,unAttr . labelValue <$> i )  ) $ allMaybes $ fmap (\j-> L.find (\v -> unAttr (labelValue v) == j) i  ) ki
         nextT = (\(Just i)-> i) (M.lookup tn (invSchema))
         nextLeft = any (isKOptional.keyType) (S.toList ifk) || isLeft
         mapArray i =  if isArrayRel ifk then ArrayTB1 [i] else i

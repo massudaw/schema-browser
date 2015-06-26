@@ -2,10 +2,10 @@
 module TP.QueryWidgets where
 
 import RuntimeTypes
-
 import Data.Functor.Compose
 import Data.Functor.Identity
 import Control.Monad
+import System.Time.Extra
 import Control.Concurrent
 import Reactive.Threepenny
 import Data.Either
@@ -13,17 +13,15 @@ import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (delete)
 import Data.Bifunctor
 import Data.Ord
-import Control.Lens (Lens,(^?))
+import Control.Lens ((^?))
 import qualified Control.Lens as Le
 import Utils
 import Data.Char
-
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Set (Set)
 import Data.Traversable(Traversable,traverse)
 import qualified Data.Traversable as Tra
-
 import qualified Data.ByteString.Base64 as B64
 import Data.Monoid
 import Safe
@@ -45,7 +43,6 @@ import TP.Widgets
 import Schema
 import Step
 import qualified Data.Foldable as F
--- import Data.Char
 import Data.Tuple
 import Database.PostgreSQL.Simple
 import Control.Exception
@@ -117,7 +114,6 @@ pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac )
           return $ TrivialWidget trinp ei
       return (h,(fmap snd output,t),(lefts elems) ,ei )
            ) tf freshKeys
-
   el <- UI.div # set UI.children (headerP : (concat $ fmap (\(_,_,o,i)-> concat $ [fmap getElement o ,[getElement i]]) freshUI ))
   liftIO $ forkIO  $ fmap (const ()) $ init $ foldl (\ unoldM (f,((h,htidings,loui,inp),action))  -> unoldM >>= (\unoldItems -> do
       let oldItems = foldl1 (liftA2 (liftA2 mergeTB1)) (triding inp: unoldItems)
@@ -183,7 +179,7 @@ buildUI i  tdi = case i of
          (KSerial ti) -> fmap (Just . SSerial) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
          (KArray ti) -> do
             let arraySize = 10
-            widgets <- mapM (\i-> buildUI ti (join . fmap (\a -> unSComposite a V.!? i ) <$> tdi )) [0..arraySize]
+            widgets <- mapM (\i-> buildUI ti (join . fmap (\a-> unSComposite a V.!? i) <$> tdi )) [0..arraySize]
             let tdcomp =  fmap (SComposite . V.fromList) .  allMaybes .  L.takeWhile (maybe False (const True)) <$> (Tra.sequenceA $ triding <$> widgets)
             sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (tail $ getElement <$> widgets) (triding <$> widgets)
             composed <- UI.span # set children (fmap getElement widgets)
@@ -203,14 +199,14 @@ buildUI i  tdi = case i of
             itime <- liftIO $  getCurrentTime
             timeButton <- UI.button # set UI.text "now"
             evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
-            let  newEv = (unionWith const (rumors tdi) $ fmap (STimestamp . Finite .  utcToLocalTime utc) <$> evCurr)
+            let  newEv = (unionWith const (rumors tdi) $ fmap (STimestamp . utcToLocalTime utc) <$> evCurr)
             tdi2 <- addEvent newEv  tdi
             oneInput tdi2 [timeButton]
          (Primitive PDate) -> do
             itime <- liftIO $  getCurrentTime
             timeButton <- UI.button # set UI.text "now"
             evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
-            let  newEv = (unionWith const (rumors tdi) $ fmap (SDate . Finite . localDay . utcToLocalTime utc) <$> evCurr)
+            let  newEv = (unionWith const (rumors tdi) $ fmap (SDate . localDay . utcToLocalTime utc) <$> evCurr)
             tdi2 <- addEvent newEv  tdi
             oneInput tdi2 [timeButton]
          (Primitive (PMime mime)) -> do
@@ -254,16 +250,15 @@ tbCase inf pgs i@(FKT ifk _ _ tb1 ) created wl plugItens oldItems  = do
         let
             rr =  tablePKSet tb1
             table = justError "no table found" $ M.lookup rr $ pkMap inf
-            rp = rootPaths'  (tableMap inf) table
             tbi = fmap (Compose . Identity)  <$> oldItems
             thisPlugs = filter (any ((== (fmap (keyValue.unAttr.runIdentity.getCompose) ifk)) . head ) . fst) $  plugItens
             pfks =  (first ( filter (not . L.null ) . fmap (L.drop 1) . L.filter ((== (fmap (keyValue.unAttr.runIdentity.getCompose) ifk)) . head ))  . second ( fmap ( join .  fmap (fmap  (_fkttable . runIdentity . getCompose ) . findTB1 ((== ifk ) . fmap (fmap fst )  . tbAttr . runIdentity . getCompose  )))  ) <$> thisPlugs)
-        res <- liftIO$ queryWith_  (fromAttr (fst rp)) (conn inf)(fromString $ T.unpack $ snd rp)
+        res <- liftIO$ addTable inf table
         fkUITable inf pgs created res pfks (filter (isReflexive .fst) wl) (fmap (runIdentity . getCompose ) <$>  tbi) i
 tbCase inf pgs i@(IT na tb1 ) created wl plugItens oldItems  = do
         let tbi = fmap (Compose . Identity ) <$> oldItems
             thisPlugs = filter ((any (== [keyValue na ]) . head ) . fst) $  plugItens
-            pfks =  (first ( filter (not . L.null ) . fmap (L.drop 1) . L.filter ((== [keyValue na]) . head ))  . second ( fmap ( join .  fmap (fmap  (_fkttable . runIdentity . getCompose ) . findTB1 ((== [na]) . kattr  .fmap fst )))  ) <$> thisPlugs)
+            pfks =  first ( filter (not . L.null ) . fmap (L.drop 1) . L.filter ((== [keyValue na]) . head ))  . second ( fmap ( join .  fmap (fmap  (_fkttable . runIdentity . getCompose ) . findTB1 ((== [na]) . kattr  .fmap fst )))  ) <$> thisPlugs
         iUITable inf pgs pfks (fmap (runIdentity . getCompose ) <$>  tbi) i
 tbCase inf pgs a@(Attr i) created wl plugItens oldItems = do
         let thisPlugs = filter (any ((== [keyValue i]).head) . fst) $  (fmap (fmap (fmap F.toList) ) <$> plugItens)
@@ -272,7 +267,7 @@ tbCase inf pgs a@(Attr i) created wl plugItens oldItems = do
         attrUITable tbi evs a
 tbCase inf pgs a@(TBEither ls  _ ) created wl plugItens oldItems = mdo
         ws <- mapM (\l -> do
-            let  tbl = fmap (runIdentity.getCompose) .join .  fmap (\(TBEither _  j ) -> join $ fmap (\i -> if (fmap fst i == l) then j else Nothing) j ) <$> oldItems
+            let  tbl = fmap (runIdentity.getCompose) . join . fmap (\(TBEither _  j) -> join $ fmap (\i -> if (fmap fst i == l) then j else Nothing) j) <$> oldItems
                  lu = runIdentity $ getCompose l
             lw <- tbCase inf pgs lu created wl plugItens tbl
             return lw ) ls
@@ -372,7 +367,6 @@ unTB1 (TB1 i)  = i
 
 tb1Diff f (TB1 k1 ) (TB1 k2) =  liftF2 f k1 k2
 
--- on :: (Ord a) => (b -> a) -> b -> b -> Ordering
 onBin bin p x y = bin (p x) (p y)
 
 processPanelTable
@@ -424,10 +418,9 @@ processPanelTable inf attrsB res table oldItemsi = do
 
 logTableModification inf (TableModification Nothing table i) = do
   time <- getCurrentTime
-  let ltime =  Finite . utcToLocalTime utc $ time
+  let ltime =  utcToLocalTime utc $ time
   [id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (modification_time,table_name,modification_data,schema_name) VALUES (?,?,?,?) returning modification_id "  (ltime,rawName table,show i , schemaName inf)
   return (TableModification (unOnly id) table i )
-
 
 
 addToList  (InsertTB m) =  (m:)
@@ -535,9 +528,7 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
       (celem,tableb) <- uiTable inf pgs (rawName table) plmods tb1  tds
       (panelItems,evs) <- processPanelTable inf (facts tableb) res2 table tds
       let
-          dataList = ((Nothing:) <$>  fmap (fmap Just) (res2))
-          bselection = (fmap Just <$> st)
-          dataViewer = (pure ( maybe UI.div  showFKE))
+          bselection = fmap Just <$> st
           sel = fmap head $ unions $ [(rumors $ join <$> userSelection ol), rumors tdi] <> (fmap modifyTB <$> evs)
       st <- stepper Nothing sel
       res2  <-  accumB res  (fmap concatenate $ unions $ fmap addToList <$> evs)
@@ -549,11 +540,11 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
         fksel =  (\box -> fmap (\ibox -> FKT (fmap (_tb . Attr). reorderPK . fmap lookFKsel $ ibox) refl rel (fromJust box) ) .  join . fmap findPKM $ box ) <$>  ( triding box)
       chw <- checkedWidget (pure False)
       element panelItems
-          # set UI.style (noneShow False )
+          # set UI.style (noneShow False)
           # sink UI.style (noneShow <$> (facts $ triding chw))
           # set style [("padding-left","10px")]
       element celem
-          # set UI.style (noneShow False )
+          # set UI.style (noneShow False)
           # sink UI.style (noneShow <$> (facts $ triding chw))
           # set style [("padding-left","10px")]
       element celem
@@ -574,9 +565,8 @@ fkUITable inf pgs created res2 plmods  wl oldItems  tb@(FKT ifk@[_] refl rel  (A
          indexItens ix = (\o -> join . fmap (\(FKT [l] refl _ (ArrayTB1 m)  )  -> (\li mi ->  FKT  [li] refl (fmap (first unKArray) rel) mi ) <$> (traverse (indexArray (ix + o) )   l) <*> (atMay (L.drop o m) ix) ))  <$>  offsetT <*> oldItems
          fkst = FKT (fmap (fmap unKArray ) ifk) refl (fmap (first (unKArray)) rel)  tb1
          rr = tablePKSet tb1
-         rp = rootPaths'  (tableMap inf) (fromJust $ M.lookup rr $ pkMap inf )
-     res <- liftIO$ queryWith_ (fromAttr (fst rp)) (conn  inf) (fromString $ T.unpack $ snd rp)
-     fks <- mapM (\ix-> fkUITable inf pgs S.empty res (fmap (\t -> liftA2 (\o ->   join . fmap (\(ArrayTB1 tbl)-> atMay  tbl (ix + o) )) offsetT t ) <$> plmods ) [] (indexItens ix) fkst ) [0..8]
+     res <- liftIO$ addTable inf (fromJust $ M.lookup rr $ pkMap inf )
+     fks <- mapM (\ix-> fkUITable inf pgs S.empty res (fmap (\t -> liftA2 (\o ->   join . fmap (\(ArrayTB1 tbl)-> atMay  tbl (ix + o) )) offsetT t ) <$> plmods ) [] (indexItens ix) fkst) [0..8]
      l <- flabel # set text (show $ unAttr .unTB <$>   ifk)
      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      dv <- UI.div # set children (getElement <$> fks)
@@ -609,8 +599,7 @@ nonInjectiveSelection
   -> Tidings [TB1 (Key,Showable)]
   -> Tidings (Maybe (TB Identity (Key,Showable)))
   -> UI (TrivialWidget (Maybe (TB Identity (Key,Showable ))))
-nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lks selks
-  | all isPrim (keyType . unAttr.unTB<$> fkattr ) = do
+nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lks selks = do
       let
           fkattr' = unTB <$> fkattr
           oldASet :: Set Key
@@ -624,10 +613,8 @@ nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lk
       let bres = liftA2 (liftA2 (\i j-> FKT (fmap (_tb.Attr) i)  refl ksjoin j)) vv ct
       paintEdit (getElement l) (facts ct) (fmap _fkttable <$> facts selks)
       return $ TrivialWidget bres o
-  | otherwise = errorWithStackTrace (show attr)
   where inner tbfk sel fkattr' iold = mdo
             let
-                -- o1 = tablePKSet tbfk
                 vv =  join . fmap (lorder (unAttr <$> fkattr') ) . fmap concat . allMaybes  <$> iold
                 tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK  l _ ) _ ))-> interPoint ksjoin k  (unAttr . unTB <$> l)) ) i) j ) <$> lks <*> vv
             li <- wrapListBox res2 tb (pure id) showFK

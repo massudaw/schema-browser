@@ -144,6 +144,7 @@ data KPrim
    | PInt
    | PDouble
    | PDate
+   | PDayTime
    | PTimestamp
    | PInterval
    | PPosition
@@ -205,12 +206,13 @@ data Showable
   | SEitherL Showable
   | SBoolean !Bool
   | SDouble !Double
-  | STimestamp !LocalTimestamp
+  | STimestamp !LocalTime
   | SPInterval !DiffTime
   | SPosition !Position
   | SBounding !Bounding
   | SLineString !LineString
-  | SDate !Date
+  | SDate !Day
+  | SDayTime !TimeOfDay
   | SSerial !(Maybe Showable)
   | SBinary !BS.ByteString
   | SOptional !(Maybe Showable)

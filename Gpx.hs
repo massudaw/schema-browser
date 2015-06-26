@@ -59,7 +59,7 @@ getPoint = atTag "trkpt" >>>
     lon <- getAttrValue "lon" -< x
     ele <- text <<< atTag "ele" -< x
     time <- text <<< atTag "time" -< x
-    returnA -< [SPosition $ Position (read lat,read lon,read ele),STimestamp $ Finite $ fromJust $ fmap fst  $ strptime "%Y-%m-%dT%H:%M:%SZ" time ]
+    returnA -< [SPosition $ Position (read lat,read lon,read ele),STimestamp $  fromJust $ fmap fst  $ strptime "%Y-%m-%dT%H:%M:%SZ" time ]
 
 file :: Showable
 file = "/home/massudaw/2014-08-27-1653.gpx"

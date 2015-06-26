@@ -23,6 +23,7 @@ import qualified Data.Set as S
 import Data.Map (Map)
 import Data.Set (Set)
 import Debug.Trace
+import Control.Concurrent
 
 import Data.Text.Lazy(Text)
 import qualified Data.Text.Lazy as T
@@ -38,6 +39,7 @@ createType _ un (t,c,trans,"daterange",_,_,n,def,_,_) = (Key   c trans un (nulla
 createType _ un (t,c,trans,"int4range",_,_,n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "int4"))
 createType _ un (t,c,trans,"numrange",_,_,n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "numeric"))
 createType _ un (t,c,trans,"USER-DEFINED",_,"floatrange",n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "double precision"))
+createType _ un (t,c,trans,"USER-DEFINED",_,"trange",n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "time"))
 -- Table columns Primitive
 createType s un (t,c,trans,"USER-DEFINED",udtschema ,udtname,n,def,_,_) |  udtschema == s = (Key c trans un (nullable n $ traceShowId $  InlineTable  udtschema udtname ))
 createType s un (t,c,trans,"ARRAY",udtschema ,udtname,n,def,_,_) | udtschema == s = (Key c trans un (nullable n $ KArray $ InlineTable  udtschema $T.drop 1 udtname ))
@@ -61,6 +63,7 @@ data InformationSchema
   , pkMap :: Map (Set Key) Table
   , tableMap :: Map Text Table
   , pluginsMap :: Map (Text,Text,Text) Key
+  , mvarMap :: MVar (Map Table (MVar [(TB1 (Key,Showable))]))
   , conn :: Connection
   , rootconn :: Connection
   }
@@ -125,7 +128,8 @@ keyTables conn userconn (schema ,user) = do
            -- graphP = warshall2 $ graphI
            -- graph = hashGraph $ graphP
            -- invgraph = hashGraphInv' $ graphP
-       return  $ InformationSchema schema i1 i2 i3 M.empty userconn conn
+       mvar <- newMVar M.empty
+       return  $ InformationSchema schema i1 i2 i3 M.empty mvar  userconn conn
 
 inlineName (KOptional i) = inlineName i
 inlineName (KArray a ) = inlineName a
@@ -167,6 +171,7 @@ lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k ) $ M.lookup (t,k) (keyMap inf)
 
 lookFresh inf n tname i = justError "no freshKey" $ M.lookup (n,tname,i) (pluginsMap inf)
+
 
 
 newKey name ty = do

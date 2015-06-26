@@ -13,8 +13,13 @@ import Control.Lens ((^.))
 import Data.Time.Clock
 import qualified Data.Char as Char
 import Schema
+import Control.Concurrent
 import Utils
+import qualified Data.Map as M
+import Data.String
+
 import Control.Applicative
+import Control.Monad.IO.Class
 import qualified Data.Serialize as Sel
 import Data.Maybe
 import Text.Read
@@ -40,6 +45,8 @@ import qualified Data.ByteString.Char8 as BS
 import Data.Monoid
 import Prelude hiding (takeWhile)
 
+import System.Time.Extra
+
 import qualified Data.Foldable as F
 import Data.Foldable (Foldable)
 import qualified Data.Text.Lazy as T
@@ -52,6 +59,7 @@ import Database.PostgreSQL.Simple.FromField hiding(Binary,Identity)
 -- import Database.PostgreSQL.Simple.FromField (fromField,typeOid,typoid,TypeInfo,rngsubtype,typdelim,Conversion,Field,FromField)
 import qualified Database.PostgreSQL.Simple.ToField as TF
 import qualified Database.PostgreSQL.Simple.FromRow as FR
+import Database.PostgreSQL.Simple
 -- import Data.GraphViz (preview)
 import Blaze.ByteString.Builder(fromByteString)
 import Blaze.ByteString.Builder.Char8(fromChar)
@@ -92,8 +100,9 @@ instance TF.ToField a => TF.ToField (TBRecord a) where
 data TBRecord a = TBRecord Text [a]
 
 instance TF.ToField (UnQuoted Showable) where
-  toField (UnQuoted (STimestamp i )) = TF.Plain $ localTimestampToBuilder i
-  toField (UnQuoted (SDate i )) = TF.Plain $ dateToBuilder i
+  toField (UnQuoted (STimestamp i )) = TF.Plain $ localTimestampToBuilder (Finite i)
+  toField (UnQuoted (SDate i )) = TF.Plain $ dateToBuilder (Finite i)
+  toField (UnQuoted (SDayTime  i )) = TF.Plain $ timeOfDayToBuilder (i)
   toField (UnQuoted (SDouble i )) =  TF.toField i
   toField (UnQuoted (SNumeric i )) =  TF.toField i
   toField i = TF.toField i
@@ -148,6 +157,7 @@ instance TF.ToField Showable where
   toField (SText t) = TF.toField t
   toField (SNumeric t) = TF.toField t
   toField (SDate t) = TF.toField t
+  toField (SDayTime t) = TF.toField t
   toField (SSerial t) = maybe (TF.Plain $ fromByteString "null") TF.toField t
   toField (STimestamp t) = TF.toField t
   toField (SDouble t) = TF.toField t
@@ -192,6 +202,7 @@ readPrim t =
      PTimestamp -> readTimestamp
      PInterval -> readInterval
      PDate-> readDate
+     PDayTime -> readDayTime
      PPosition -> readPosition
      PBoolean -> readBoolean
      PLineString -> readLineString
@@ -202,10 +213,11 @@ readPrim t =
       readText = nonEmpty (\i-> fmap SText . readMaybe $  "\"" <> i <> "\"")
       readCnpj = nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cnpjValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
       readCpf = nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cpfValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
-      readDate =  fmap (SDate . Finite . localDay . fst) . strptime "%Y-%m-%d"
+      readDate =  fmap (SDate . localDay . fst) . strptime "%Y-%m-%d"
+      readDayTime =  fmap (SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
       readLineString = nonEmpty (fmap SLineString . readMaybe)
-      readTimestamp =  fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%OS"
+      readTimestamp =  fmap (STimestamp  .  fst) . strptime "%Y-%m-%d %H:%M:%OS"
       readInterval =  fmap SPInterval . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
       nonEmpty f ""  = Nothing
       nonEmpty f i  = f i
@@ -332,12 +344,17 @@ parseShowable (Primitive i ) =  (do
 
         PTimestamp ->
              let p =  do
-                    i <- fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%OS"<$> plain' "\\\",)}"
+                    i <- fmap (STimestamp  . fst) . strptime "%Y-%m-%d %H:%M:%OS"<$> plain' "\\\",)}"
+                    maybe (fail "cant parse date") return i
+                 in p <|> doublequoted p
+        PDayTime ->
+             let p =  do
+                    i <- fmap (SDayTime . localTimeOfDay .  fst) . strptime "%H:%M:%S"<$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i
                  in p <|> doublequoted p
         PDate ->
              let p = do
-                    i <- fmap (SDate . Finite . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)}"
+                    i <- fmap (SDate . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i
                  in p <|> doublequoted p
         PPosition -> do
@@ -358,33 +375,6 @@ parseShowable (Primitive i ) =  (do
 parseShowable (KArray i)
     =  SComposite . Vector.fromList <$> (par <|> doublequoted par)
       where par = char '{'  *>  sepBy (parseShowable i) (char ',') <* char '}'
-{-parseShowable (KOptional (KEither i j ))
-    =  doublequoted parseTb <|> parseTb
-      where
-        parseTb = char '(' *> parseInner <* char ')'
-        parseInner = do
-              l <- parseShowable (KOptional i)
-              char ','
-              r <- parseShowable (KOptional j)
-              return $ case (l,r) of
-                   (SOptional (Just i),SOptional Nothing ) ->SOptional $ Just $  SEitherL i
-                   (SOptional Nothing ,SOptional (Just j )) ->SOptional $ Just $ SEitherR j
-                   (SOptional (Just _),SOptional (Just _ )) -> errorWithStackTrace "multiple  match"
-                   (SOptional Nothing ,SOptional Nothing) -> SOptional Nothing -- errorWithStackTrace "no match"
-parseShowable (KEither i j )
-    =  doublequoted parseTb <|> parseTb
-      where
-        parseTb = char '(' *> parseInner <* char ')'
-        parseInner = do
-              l <- parseShowable (KOptional i)
-              char ','
-              r <- parseShowable (KOptional j)
-              return $ case (l,r) of
-                   (SOptional (Just i),SOptional Nothing ) -> SEitherL i
-                   (SOptional Nothing ,SOptional (Just j )) -> SEitherR j
-                   (SOptional (Just _),SOptional (Just _ )) -> errorWithStackTrace "multiple  match"
-                   (SOptional Nothing ,SOptional Nothing) -> errorWithStackTrace "no match"
--}
 parseShowable (KOptional i)
     = SOptional <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
 parseShowable (KSerial i)
@@ -560,12 +550,35 @@ fromArray typeInfo f = Tra.sequence . (parseIt <$>) <$> range delim
 instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
+
 fromAttr foldable = do
-    let parser  = parseLabeledTable foldable -- <|> doublequoted (parseLabeledTable foldable)
-    FR.fieldWith (\i j -> case traverse (parseOnly  parser )  (j) of
+    let parser  = parseLabeledTable foldable
+    FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
                                (Right (Just r ) ) -> return r
                                Right Nothing -> error (show j )
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
+
+selectAll inf table   = liftIO $ do
+      let rp = rootPaths'  (tableMap inf) table
+      (t,v) <- duration  $ queryWith_  (fromAttr (fst rp)) (conn inf)(fromString $ T.unpack $ snd rp)
+      print (tableName table,t)
+      return v
+
+addTable inf table = do
+    let mvar = mvarMap inf
+    mmap <- takeMVar mvar
+    (isEmpty,mtable) <- case (M.lookup table mmap ) of
+         Just i -> do
+           emp <- isEmptyMVar i
+           putMVar mvar mmap
+           return (emp,i)
+         Nothing -> do
+           res <- selectAll  inf table
+           mnew <- newMVar res
+           putMVar mvar (M.insert table mnew mmap)
+           return (True,mnew )
+    readMVar mtable
+
 
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item

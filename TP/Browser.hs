@@ -25,6 +25,7 @@ import Data.Functor.Apply
 import System.Environment
 import Debug.Trace
 import Data.Ord
+import OFX
 
 -- Timeline
 --import Data.Time.Format
@@ -131,8 +132,12 @@ databaseChooser sargs = do
   let dbsInit = join $ fmap (\(d,s) -> (d,) . (,s) . fst <$>  M.lookup s dbs ) $ liftA2 (,) (safeHead args) (safeHead $ tail args)
   wid <- loginWidget (atMay  sargs 2 ) (atMay  sargs 3)
   dbsW <- listBox (pure $ concat $ fmap (\(i,(c,j)) -> (i,) . (c,) <$> j) $ M.toList dbs ) (pure dbsInit  ) (pure id) (pure (line . show .fmap snd ))
-  load <- UI.button # set UI.text "Connect" # sink UI.enabled (facts (isJust <$> userSelection dbsW) )
-  let login = liftA2 (liftA2 (,)) (triding wid) ( userSelection dbsW )
+  cc <- currentValue (facts $ userSelection dbsW)
+  let dbsWE = rumors $ userSelection dbsW
+  dbsWB <- stepper cc dbsWE
+  let dbsWT  = tidings dbsWB dbsWE
+  load <- UI.button # set UI.text "Connect" # sink UI.enabled (facts (isJust <$> dbsWT) )
+  let login = liftA2 (liftA2 (,)) (triding wid) ( dbsWT )
       formLogin = form login (UI.click load)
   let genSchema ((user,pass),(dbN,(dbConn,schemaN))) = do
         conn <- connectPostgreSQL ("user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> toStrict ( encodeUtf8 dbN ))
@@ -211,10 +216,12 @@ chooseKey
       InformationSchema -> S.Set Key -> UI Element
 chooseKey inf key = mdo
   -- Filter Box (Saved Filter)
+
+  liftIO$ swapMVar  (mvarMap inf) M.empty
   let bBset = pure key :: Tidings (S.Set Key)
   vp <- joinTEvent $ (\j -> do
-                    let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup j $ pkMap inf )
-                    queryWith_ (fromAttr (fst rp) ) (conn inf) (traceShowId $ fromString $ T.unpack $ snd rp)
+                    addTable inf (fromJust  $ M.lookup j $ pkMap inf )
+
                     ) <$>   bBset
   -- Final Query ListBox
   filterInp <- UI.input
@@ -240,7 +247,7 @@ chooseKey inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,evs) <- crudUITable inf  [lplugOrcamento ,siapi3Plugin ,siapi2Plugin , gerarPagamentos , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary  ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull, queryArtAndamento ] (facts res2) [] (allRec' (tableMap inf) table) itemListT
+            (crud,evs) <- crudUITable inf  [lplugOrcamento ,siapi3Plugin ,siapi2Plugin , gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary  ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull, queryArtAndamento ] (facts res2) [] (allRec' (tableMap inf) table) itemListT
             let eres = fmap addToList <$> evs
             res2 <- accumTds vp eres
             insertDiv <- UI.div # set children [crud]
@@ -291,7 +298,7 @@ testShowable  v s = case s of
                     Just i -> Nothing
                     Nothing -> Just $ TB1 $ KV (PK [] []) ( [iat bv])
           convertAndamento :: [String] -> TB1 (Text,Showable)
-          convertAndamento [da,des] =  TB1 $ fmap (Compose . Identity .Attr ) $ KV  (PK [] []) ([("andamento_date",STimestamp . Finite . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))] )
+          convertAndamento [da,des] =  TB1 $ fmap (Compose . Identity .Attr ) $ KV  (PK [] []) ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))] )
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
                                             ("andamentos",SOptional Nothing)
@@ -324,7 +331,7 @@ type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModificat
       odx "andamentos:andamento_date" -<  t
       odx "andamentos:andamento_description" -<  t
       b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= 14 then  return Nothing else siapi3  i j k )) -<   (liftA3 (,,) protocolo ano cpf)
-      let convertAndamento [_,da,desc,s,sta] = TB1 $ fmap (Compose . Identity .Attr ) $ KV (PK [] []) ([("andamento_date",STimestamp . Finite .  fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)] )
+      let convertAndamento [_,da,desc,s,sta] = TB1 $ fmap (Compose . Identity .Attr ) $ KV (PK [] []) ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)] )
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
       let ao bv = case  join $ (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
                     Just i ->  Nothing
@@ -369,8 +376,8 @@ bradescoRead file = do
   return result
 
 
-sdate = SDate . Finite . localDay
-stimestamp = STimestamp . Finite
+sdate = SDate . localDay
+stimestamp = STimestamp
 
 {-
 bradescoExtractTxt  inf   inputs = do
@@ -465,7 +472,7 @@ instance ToJSON Timeline where
 -}
 
 attrT = Compose . Identity. Attr
-gerarPagamentos = BoundedPlugin2 "Pagamentos" "plano_aluno" (staticP url) elem
+gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" "plano_aluno" (staticP url) elem
   where
     url :: ArrowPlug (Kleisli IO) (Maybe (TB1 (Text,Showable)))
     url = proc t -> do
@@ -477,9 +484,12 @@ gerarPagamentos = BoundedPlugin2 "Pagamentos" "plano_aluno" (staticP url) elem
       let valorTotal =  liftA3 (\v m k -> v* (fromIntegral m)*(1 - k)) v m k
           valorParcela = liftA2 (\v p -> v/(p))  valorTotal p
       f <- varT "pagamento:forma_pagamento:forma"-< t
+      odx "pagamento:pagamentos" -<  t
+      odx "pagamento:pagamentos:description" -<  t
       odx "pagamento:pagamentos:price" -<  t
       odx "pagamento:pagamentos:scheduled_date" -<  t
-      let pagamento = Compose $ Identity $ FKT ([Compose $ Identity $ Attr $ ("pagamentos",SOptional  $ Just $ SComposite (Vector.fromList $ replicate (maybe 0 fromIntegral  p)  (SOptional Nothing)))]) True [] (LeftTB1 $ Just $ ArrayTB1 (replicate (maybe 0 fromIntegral  p) (TB1 (KV (PK [attrT ("id",SSerial Nothing)] [attrT ("description",SOptional Nothing)]) [attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ]))))
+      let total = maybe 0 fromIntegral  p
+      let pagamento = Compose $ Identity $ FKT ([Compose $ Identity $ Attr $ ("pagamentos",SOptional Nothing)]) True [] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> TB1 (KV (PK [attrT ("id",SSerial Nothing)] [attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" )]) [attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ])) ([1.. total] )))
           ao :: Maybe (TB1 (Text,Showable))
           ao =  Just $ TB1 $ KV (PK [] []) [Compose $ Identity $ IT   ("pagamento",SOptional Nothing)  (LeftTB1 $ Just $ TB1 $ KV (PK [] [] ) [pagamento ])]
 
@@ -489,6 +499,34 @@ gerarPagamentos = BoundedPlugin2 "Pagamentos" "plano_aluno" (staticP url) elem
                               b <- dynPK url (Just inp)
                               return $ fmap (first (lookKey' inf ["parcelamento","plano_aluno","pagamento"])) <$> b
                             )
+pagamentoServico = BoundedPlugin2 "Gerar Pagamento" "servico_venda" (staticP url) elem
+  where
+    url :: ArrowPlug (Kleisli IO) (Maybe (TB1 (Text,Showable)))
+    url = proc t -> do
+      v <- varT "pacote,servico:servico:price" -< t
+      n <- varT "pacote,servico:pacote" -< t
+      d <- varT "pacote,servico:desconto"-< t
+      pinicio <- varT "pagamento:inicio"-< t
+      p <- varT "pagamento:vezes"-< t
+      let valorTotal =  liftA3 (\d v n  -> (1-d)*v* (fromIntegral n)) d v n
+          valorParcela = liftA2 (\v p -> v/p)  valorTotal p
+      f <- varT "pagamento:forma_pagamento:forma"-< t
+      odx "pagamento:pagamentos" -<  t
+      odx "pagamento:pagamentos:description" -<  t
+      odx "pagamento:pagamentos:price" -<  t
+      odx "pagamento:pagamentos:scheduled_date" -<  t
+      let total = maybe 0 fromIntegral  p
+      let pagamento = Compose $ Identity $ FKT ([Compose $ Identity $ Attr $ ("pagamentos",SOptional Nothing)]) True [] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> TB1 (KV (PK [attrT ("id",SSerial Nothing)] [attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" )]) [attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ])) ([1.. total] )))
+          ao :: Maybe (TB1 (Text,Showable))
+          ao =  Just $ TB1 $ KV (PK [] []) [Compose $ Identity $ IT   ("pagamento",SOptional Nothing)  (LeftTB1 $ Just $ TB1 $ KV (PK [] [] ) [pagamento ])]
+
+      returnA -< ao
+
+    elem inf = maybe (return Nothing) (\inp -> do
+                              b <- dynPK url (Just inp)
+                              return $ fmap (first (lookKey' inf ["parcelamento","servico_venda","pagamento"])) <$> b
+                            )
+
 
 
 notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" "nota"(staticP url) elem
@@ -582,8 +620,8 @@ checkOutput i = proc t -> do
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       v <- act (fmap (join .maybeToList) . traverse (\(i, (j, k,a)) -> creaConsultaArt  j k a i ) ) -< liftA2 (,) i r
-      let artVeri dm = ("verified_date" ,) . SOptional . join $(\d ->  fmap (STimestamp . Finite . fst) $ strptime "%d/%m/%Y %H:%M" ( d !!1) ) <$> dm
-          artPayd dm = ("payment_date" ,) . SOptional . join $ (\d -> fmap (STimestamp . Finite . fst )  $ strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
+      let artVeri dm = ("verified_date" ,) . SOptional . join $(\d ->  fmap (STimestamp . fst) $ strptime "%d/%m/%Y %H:%M" ( d !!1) ) <$> dm
+          artPayd dm = ("payment_date" ,) . SOptional . join $ (\d -> fmap (STimestamp . fst )  $ strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
           artInp inp = Just $ TB1 $ KV (PK [] [] ) $fmap (Compose . Identity . Attr ) $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       i <- checkOutput "verified_date" -< (t,artInp v)
       j <- checkOutput "payment_date" -< (t,artInp v)
