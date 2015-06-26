@@ -3,44 +3,32 @@ module Crea where
 
 import Types
 import Network.Wreq
-import QueryWidgets
-import Widgets
-import Query
+import Utils
+-- import QueryWidgets
+-- import Widgets
 import qualified Network.Wreq.Session as Sess
 
 
 import OpenSSL.Session (context)
 import Network.HTTP.Client.OpenSSL
-import Network.HTTP.Client.TLS
-import Network.HTTP.Client (defaultManagerSettings, managerResponseTimeout)
 
 import Control.Lens
 import Control.Applicative
-import Data.Char
-import Data.String
-import Control.Monad
 import Data.Maybe
 import Data.Monoid
 
-import System.Directory
-import System.Process (callCommand)
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as BSLC
 import qualified Data.ByteString.Lazy as BSL
-import Data.ByteString.Base64.Lazy as BS64
 
 import Gpx
 import Debug.Trace
 
-import Reactive.Threepenny
-import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Core hiding (get,delete)
 import Data.ByteString.Search (replace)
 
 creaLogin rnp user pass = do
-  let opts = defaults & manager .~ Left (opensslManagerSettings context)
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
     -- r <- Sess.get session $ traceShowId creaLoginUrl
     -- print $ r  ^. responseCookieJar
@@ -52,7 +40,6 @@ creaLogin rnp user pass = do
 
 
 creaLoginArt rnp user pass art = do
-  let opts = defaults & manager .~ Left (opensslManagerSettings context)
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
     cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
     form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
@@ -63,7 +50,6 @@ creaLoginArt rnp user pass art = do
     return $ fmap (SBinary  ) $ Just file
 
 creaBoletoArt rnp user pass art = do
-  let opts = defaults & manager .~ Left (opensslManagerSettings context)
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
     cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
     form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
@@ -78,7 +64,6 @@ creaBoletoArt rnp user pass art = do
 
 
 creaConsultaArt rnp user pass art = do
-  let opts = defaults & manager .~ Left (opensslManagerSettings context)
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
     cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
     form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
@@ -119,7 +104,7 @@ replacePath :: (BSC.ByteString,BSC.ByteString)
 replacePath = ("/art1025"  , "http://www.crea-go.org.br/art1025")
 
 
-
+{-
 mainTest = do
   startGUI defaultConfig {tpPort = Just 8000} (\w -> do
                       i <- liftIO $ creaLoginArt "1009533630" "Denise" "5559" "1020150028082"
@@ -127,3 +112,4 @@ mainTest = do
                       e1 <- buildUI (Primitive $ textToPrim "pdf") (pure  i)
                       getBody w #+ [UI.element e1]
                       return () )
+                      -}

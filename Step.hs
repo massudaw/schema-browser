@@ -6,7 +6,7 @@ import Query
 import Control.Applicative
 import qualified Data.Text.Lazy as T
 import Data.Text.Lazy (Text)
-import Warshal
+-- import Warshal
 import Data.Functor.Compose
 import Data.Functor.Identity
 import Data.String
@@ -14,20 +14,17 @@ import Data.Set (Set)
 import qualified Data.List as L
 import qualified Data.Vector as Vector
 
-import Control.Arrow.Transformer.Static
-import Control.Monad
-import Control.Monad.IO.Class
+import GHC.Stack
 import Control.Arrow
 import Control.Category (Category(..),id)
 import Prelude hiding((.),id)
 import Data.Monoid
 import Control.Monad
 import qualified Data.Bifunctor as BF
+import Utils
 
-import Safe
 import qualified Data.Traversable as T
 
-import Debug.Trace
 deriving instance Functor m => Functor (Kleisli m i )
 
 data Step a
@@ -41,7 +38,7 @@ instance Show (a -> Maybe Showable) where
 
 instance Show (a -> String) where
   show _ = ""
-
+{-
 data FKEdit
   = FKEInsertGenerated
   | FKEInsertFind
@@ -62,16 +59,19 @@ data TEdit
   deriving(Show)
 
 data TablePlan a = TablePlan TEdit Table [StepPlan a]
-
 data StepPlan a
   = SPAttr AEdit Key a
   | SPFK FKEdit (Path (Set Key) (SqlOperation Table)) [StepPlan a]
   | TBPlan TEdit Table [StepPlan a]
   deriving(Show,Functor)
-
+-}
 data Parser m s a b = P ([s],[s]) (m a b) deriving Functor
 
+liftParser (P i j ) = (P i ((\l -> Kleisli $  return <$> l ) $ j ) )
+
 dynP (P s d) = d
+
+dynPK =  runKleisli . dynP
 
 staticP (P s d) = s
 
@@ -130,6 +130,7 @@ indexTB1 (l:xs) t
 
 
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
+indexTable l (LeftTB1 j) = join $ fmap (indexTable l) j
 indexTable (l:xs) t@(TB1 (KV (PK k d)  v))
   = do
     let finder = L.find (L.any (==l). L.permutations . fmap (keyString .fst) .kattr)
@@ -137,11 +138,10 @@ indexTable (l:xs) t@(TB1 (KV (PK k d)  v))
     case runIdentity $ getCompose $ i  of
          Attr l -> return l
          FKT l _ _ j -> indexTable xs j
-         IT l j -> indexTable xs j
-         IAT l j -> let i =  T.traverse (indexTable xs)  j
-                       in liftA2 (,) (Just  (fst $ unAttr $   runIdentity $ getCompose $ head l) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
-         AKT l _ _ j -> let i =  T.traverse (indexTable xs)  j
-                       in liftA2 (,) (Just  (fst $ unAttr $   runIdentity $ getCompose $ head l) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
+         IT  _ j -> indexTable xs j
+indexTable l (ArrayTB1 j) =  liftA2 (,) ((head <$> fmap (fmap fst) i) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
+       where i =   T.traverse  (indexTable l) j
+indexTable i j = errorWithStackTrace (show (i,j))
 
 
 
@@ -168,18 +168,25 @@ instance (Applicative (a i),Monoid m) => Monoid (Parser a s i m) where
 
 findPK = concat . fmap (attrNonRec . runIdentity . getCompose) . _pkKey  . _kvKey . _unTB1
 
+findPKM (LeftTB1 i ) =  join $ fmap findPKM i
+findPKM i  = Just $ findPK i
+
 
 attrNonRec (FKT ifk _ _ _ ) = concat $ fmap kattr ifk
-attrNonRec (IT ifk _ ) = concat $ fmap kattr ifk
-attrNonRec (IAT ifk _ ) = concat $ fmap kattr ifk
-attrNonRec (AKT ifk _ _ _ ) = concat $ fmap kattr ifk
+attrNonRec (TBEither _  ifk ) =   (maybe [] id $ fmap kattr ifk)
+attrNonRec (IT ifk  _ ) = [ifk]
 attrNonRec (Attr i ) = [i]
 
 kattr = kattri . runIdentity . getCompose
 kattri (Attr i ) = [i]
+kattri (TBEither i l  ) =  (maybe [] id $ fmap kattr l )
 kattri (FKT i _ _ _ ) =  (L.concat $ kattr  <$> i)
-kattri (IT i  _ ) =  (L.concat $ kattr  <$> i)
-kattri (IAT i  _ ) =  (L.concat $ kattr  <$> i)
-kattri (AKT i _ _ _ ) =  (L.concat $ kattr <$> i)
+kattri (IT i  _ ) =  [ i]
 
+
+varT t = join . fmap (unRSOptional'.snd)  <$> idxT t
+varN t = fmap snd  <$> idx t
+
+type FunArrowPlug o = Step.Parser (->) (Bool,[[Text]]) (Maybe (TB1 (Key,Showable))) o
+type ArrowPlug a o = Step.Parser a (Bool,[[Text]]) (Maybe (TB1 (Key,Showable))) o
 

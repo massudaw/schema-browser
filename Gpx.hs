@@ -7,54 +7,38 @@ import Types
 import Data.Monoid
 import Schema
 import Data.String
-import GHC.Stack
-import Postgresql
 import Database.PostgreSQL.Simple
 import Control.Applicative
 import Data.Interval (interval)
-import qualified Data.Interval as Interval
 import qualified Data.ExtendedReal as ER
 
 import Data.Maybe
-import Data.Text.Lazy (Text,unpack)
+import Data.Text.Lazy (unpack)
 import Text.Read
 import qualified Data.Map as M
 import Data.Time.Parse
-import Data.Time
 import Text.XML.HXT.Core
 
-import Text.XML.HXT.Arrow.Pickle
-import Text.XML.HXT.Arrow.XmlState.TypeDefs
 
-import Control.Arrow.IOStateListArrow
-import Text.XML.HXT.Arrow.XmlState
 import qualified Data.List as L
 
-import qualified Data.ByteString as BS
-import qualified Data.Text.Encoding as TE
-import qualified Data.Text as TE
+-- import qualified Data.ByteString as BS
+-- import qualified Data.Text.Encoding as TE
+-- import qualified Data.Text as TE
 
 import Database.PostgreSQL.Simple.Time
 
 import Prelude hiding ((.),id)
 import Control.Category
 
+import Debug.Trace
 
 
 atTag tag = deep (isElem >>> hasName tag)
 
 text = getChildren >>> getText
 
-consII l k i=  (l,k) : i
-consIL l k i=  zipWith (:) (repeat (l,k))  i
-consLL l k i=  zipWith (:) (fmap (l,) k)  i
-consLI l k i=  zipWith (:) (fmap (l,) k)  (repeat i)
 
-
-zipII i l k = i <> zip  l k
-zipIL i l k = zipWith mappend (repeat i)  (fmap (zip l) k)
-zipLL i l k = zipWith mappend i (fmap (zip l) k)
-zipLI i l k = zipWith mappend i (repeat $ zip l k)
 
 getTable :: ArrowXml a => a XmlTree [[String]]
 getTable =  atTag "table"  >>> listA (rows >>> listA cols) where
@@ -75,7 +59,7 @@ getPoint = atTag "trkpt" >>>
     lon <- getAttrValue "lon" -< x
     ele <- text <<< atTag "ele" -< x
     time <- text <<< atTag "time" -< x
-    returnA -< [SPosition $ Position (read lat,read lon,read ele),STimestamp $ Finite $ fromJust $ fmap fst  $ strptime "%Y-%m-%dT%H:%M:%SZ" time ]
+    returnA -< [SPosition $ Position (read lat,read lon,read ele),STimestamp $  fromJust $ fmap fst  $ strptime "%Y-%m-%dT%H:%M:%SZ" time ]
 
 file :: Showable
 file = "/home/massudaw/2014-08-27-1653.gpx"
@@ -90,7 +74,6 @@ execKey f = exec (fmap (\(k,v)-> (keyValue k , v) ) f)
 
 readCpfName file = do
   let
-      txt = trim ^<< hasText ( not .all (`elem` " *\160\t\r\n")) >>>  getText
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
         >>> ( is "span" >>> hasAttrValue "class" ("clConteudoDados"==) /> ( hasText ("Nome da Pessoa"  `L.isInfixOf`)) >>> getText )
   l <- runX arr
@@ -103,7 +86,7 @@ readHtmlReceita file = do
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
         >>> getTable' ( getTable' ((is "font" /> txt ) &&& (is "font" /> is "b" /> txt) )    {-<+> ( Left ^<< getChildren >>> getChildren >>> txt)-}  )
   l <- runX arr
-  return $ concat $ concat $ l !! 1 !! 0
+  return $ concat $ concat $ (traceShowId l) !! 1 !! 0
 
 readInputForm file = runX (readString [withValidate no , withWarnings no , withParseHTML yes] file >>> atTag "form" >>> getChildren >>> atTag "input" >>> attrP )
     where
@@ -124,6 +107,7 @@ triml = dropWhile (`elem` " \r\n\t")
 trimr :: String -> String
 trimr = reverse . triml . reverse
 
+{-
 testCpfName = do
   kk <- BS.readFile "cpf_name.html"
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
@@ -146,7 +130,6 @@ testCreaArt = do
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
   readCreaHistoricoHtml inp
 
-
 testSiapi3 = do
   kk <- BS.readFile "siapi32.html"
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
@@ -158,7 +141,7 @@ readSiapi3Solicitacao file = do
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
           >>> deep (hasAttrValue "id" (=="formListaDeAndamentos:tabela")) >>> getTable' txt
   tail .head <$> runX arr
-
+-}
 
 readSiapi3Andamento file = do
   let
@@ -187,7 +170,7 @@ exec inputs = do
   let
     arr = readDocument [withValidate no,withTrace 1] (unpack file)
         >>> getPoint
-  inf <- keyTables conn  schema
+  inf <- keyTables conn conn  (schema,"postgres")
   print (tableMap inf)
   res <- runX arr
   let runVals = [("period",SInterval $ (ER.Finite $ last $ head res ,True) `interval` (ER.Finite $ last $ last res,True))]  <> L.filter ((/= "file") . fst ) inputs

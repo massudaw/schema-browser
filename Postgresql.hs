@@ -3,72 +3,66 @@ module Postgresql where
 import Types
 import Query
 import GHC.Stack
+import Debug.Trace
 import Data.Functor.Identity
 import Data.Functor.Compose
 import Data.Scientific hiding(scientific)
 import Data.Bits
 import Data.Tuple
 import Control.Lens ((^.))
-import Debug.Trace
 import Data.Time.Clock
 import qualified Data.Char as Char
 import Schema
+import Control.Concurrent
+import Utils
+import qualified Data.Map as M
+import Data.String
+
 import Control.Applicative
+import Control.Monad.IO.Class
 import qualified Data.Serialize as Sel
 import Data.Maybe
 import Text.Read
 import qualified Data.ExtendedReal as ER
 import Data.ExtendedReal (Extended)
-import Data.Typeable
 import qualified Data.ByteString.Base16 as B16
 import Data.Time.Parse
 import           Database.PostgreSQL.Simple.Arrays as Arrays
 import           Database.PostgreSQL.Simple.Types as PGTypes
 import Data.Graph(stronglyConnComp,flattenSCCs)
-import Control.Exception
-import           Data.Attoparsec.Char8 hiding (Result)
-import Data.Traversable (Traversable,traverse,sequence)
+import           Data.Attoparsec.ByteString.Char8 hiding (Result)
+import Data.Traversable (Traversable,traverse)
 import qualified Data.Traversable  as Tra
-import Warshal
+-- import Warshal
 import Data.Time.LocalTime
-import Data.IORef
-import Control.Monad(when,void,mapM,replicateM,liftM,join)
-import Data.Functor.Compose
-import qualified Database.PostgreSQL.Simple.TypeInfo.Static as TI
+import Control.Monad(replicateM,join)
 import qualified Data.List as L
-import Data.Vector(Vector)
 import qualified Data.Vector as Vector
 import qualified Data.Interval as Interval
 import Data.Interval (Interval)
 import qualified Data.ByteString.Char8 as BS
 
 import Data.Monoid
-import Data.Time.Parse
+import Prelude hiding (takeWhile)
 
-import System.IO.Unsafe
-import Debug.Trace
+import System.Time.Extra
+
 import qualified Data.Foldable as F
 import Data.Foldable (Foldable)
 import qualified Data.Text.Lazy as T
-import Data.ByteString.Lazy(toStrict)
-import Data.Text.Lazy.Encoding
 import qualified Data.Text.Encoding as TE
 import Data.Text.Lazy (Text)
 import qualified Data.Set as S
-import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Time
-import Database.PostgreSQL.Simple.Ok
 import qualified Database.PostgreSQL.Simple.FromField as F
 import Database.PostgreSQL.Simple.FromField hiding(Binary,Identity)
 -- import Database.PostgreSQL.Simple.FromField (fromField,typeOid,typoid,TypeInfo,rngsubtype,typdelim,Conversion,Field,FromField)
 import qualified Database.PostgreSQL.Simple.ToField as TF
 import qualified Database.PostgreSQL.Simple.FromRow as FR
+import Database.PostgreSQL.Simple
 -- import Data.GraphViz (preview)
-import qualified Data.Map as M
 import Blaze.ByteString.Builder(fromByteString)
 import Blaze.ByteString.Builder.Char8(fromChar)
-import Data.Map (Map)
-import Data.String
 
 data DB = DB { dbName :: String
           , dbUser :: String
@@ -93,8 +87,10 @@ deriving instance Traversable Interval
 
 instance  TF.ToField (TB Identity (Key,Showable))  where
   toField (Attr i) = TF.toField (snd i)
-  toField (IT [n] (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  runIdentity.getCompose <$> F.toList  i )
-  toField (IAT [n] is ) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  (traceShowId $ inlineFullName $ keyType $ fst (unAttr $ runIdentity $ getCompose n)) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
+  toField (IT n (LeftTB1 i)  ) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
+  toField (IT (n,_)  (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ n ) $  runIdentity.getCompose <$> F.toList  i )
+  toField (IT (n,_)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType  n) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
+  toField e = errorWithStackTrace (show e)
 
 
 instance TF.ToField a => TF.ToField (TBRecord a) where
@@ -104,8 +100,9 @@ instance TF.ToField a => TF.ToField (TBRecord a) where
 data TBRecord a = TBRecord Text [a]
 
 instance TF.ToField (UnQuoted Showable) where
-  toField (UnQuoted (STimestamp i )) = TF.Plain $ localTimestampToBuilder i
-  toField (UnQuoted (SDate i )) = TF.Plain $ dateToBuilder i
+  toField (UnQuoted (STimestamp i )) = TF.Plain $ localTimestampToBuilder (Finite i)
+  toField (UnQuoted (SDate i )) = TF.Plain $ dateToBuilder (Finite i)
+  toField (UnQuoted (SDayTime  i )) = TF.Plain $ timeOfDayToBuilder (i)
   toField (UnQuoted (SDouble i )) =  TF.toField i
   toField (UnQuoted (SNumeric i )) =  TF.toField i
   toField i = TF.toField i
@@ -144,11 +141,11 @@ instance TF.ToField (UnQuoted Position) where
     where del = TF.Plain $ fromChar ','
           str = TF.Plain . fromByteString
 
-instance TF.ToField a => TF.ToField (Interval.Interval a) where
+instance TF.ToField (UnQuoted a) => TF.ToField (Interval.Interval a) where
   toField = intervalBuilder
 
-instance TF.ToField a => TF.ToField (UnQuoted (Interval.Extended a )) where
-  toField (UnQuoted (ER.Finite i)) = TF.toField i
+instance TF.ToField (UnQuoted a) => TF.ToField (UnQuoted (Interval.Extended a )) where
+  toField (UnQuoted (ER.Finite i)) = TF.toField (UnQuoted i)
 
 intervalBuilder i =  TF.Many [TF.Plain $ fromByteString ("\'"  <> lbd (snd $ Interval.lowerBound' i)) ,  TF.toField $  (UnQuoted $ Interval.lowerBound i) , TF.Plain $ fromChar ',' , TF.toField  (UnQuoted $ Interval.upperBound i) , TF.Plain $ fromByteString (ubd (snd $ Interval.upperBound' i) <> "\'")]
     where lbd True  =  "["
@@ -160,6 +157,7 @@ instance TF.ToField Showable where
   toField (SText t) = TF.toField t
   toField (SNumeric t) = TF.toField t
   toField (SDate t) = TF.toField t
+  toField (SDayTime t) = TF.toField t
   toField (SSerial t) = maybe (TF.Plain $ fromByteString "null") TF.toField t
   toField (STimestamp t) = TF.toField t
   toField (SDouble t) = TF.toField t
@@ -204,6 +202,7 @@ readPrim t =
      PTimestamp -> readTimestamp
      PInterval -> readInterval
      PDate-> readDate
+     PDayTime -> readDayTime
      PPosition -> readPosition
      PBoolean -> readBoolean
      PLineString -> readLineString
@@ -214,12 +213,11 @@ readPrim t =
       readText = nonEmpty (\i-> fmap SText . readMaybe $  "\"" <> i <> "\"")
       readCnpj = nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cnpjValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
       readCpf = nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cpfValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
-      readDate =  fmap (SDate . Finite . localDay . fst) . strptime "%Y-%m-%d"
+      readDate =  fmap (SDate . localDay . fst) . strptime "%Y-%m-%d"
+      readDayTime =  fmap (SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
       readLineString = nonEmpty (fmap SLineString . readMaybe)
-      -- readBounding = nonEmpty (fmap SBounding . fmap Bounding . (fmap (\(SInterval i ) -> fmap (\(SPosition p )-> p) i)) . inter readPosition )
-      inter f = (\(i,j)-> fmap SInterval $  Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
-      readTimestamp =  fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%OS"
+      readTimestamp =  fmap (STimestamp  .  fst) . strptime "%Y-%m-%d %H:%M:%OS"
       readInterval =  fmap SPInterval . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
       nonEmpty f ""  = Nothing
       nonEmpty f i  = f i
@@ -261,21 +259,6 @@ cpf = [0,2,8,4,0,3,0,1,1,2,1]
 safeTail [] = []
 safeTail i = tail i
 
-primType (Metric k ) = textToPrim <$> keyType k
-
-attrToKey (Metric i) = renderedName i
-
-renderedName key = \f b ->
-   case F.name f  of
-      Just name -> let
-          in case (keyValue key == T.fromStrict (TE.decodeUtf8 name) || maybe False (== T.fromStrict (TE.decodeUtf8 name)) (keyAlias key)  ) of
-              True ->  case (textToPrim <$> keyType key) of
-                            k@(KTable l) ->  case  traverse (parseOnly (parseShowable k)) b of
-                                                  (Right (Just r)) -> return r
-                                                  (Right Nothing) -> error "no parse value"
-                            kt -> renderedType kt  f b
-              False -> error $ "no match type for " <> BS.unpack name <> " with key " <> show key
-      Nothing -> error "no name for field"
 
 
 unIntercalateAtto :: Alternative f => [f a1] -> f a -> f [a1]
@@ -284,57 +267,71 @@ unIntercalateAtto l s = go l
         go [] = pure []
 
 
-subsAKT r t = subs r (fmap (^. unTB1 .kvKey. pkKey) t)
+subsAKT r t = subs r (fmap ((^. kvKey. pkKey) . _unTB1) t)
   where subs i j = fmap (\r -> (justError "no key Found subs" $ L.find (\i -> fmap fst i == fst r ) i , zipWith (\m n -> justError "no key Found subs" $L.find (\i-> fmap fst i == n) m ) j (snd r) ))
 
+unKOptionalAttr (Attr i ) = Attr (unKOptional i)
+unKOptionalAttr (IT  r (LeftTB1 (Just j))  ) = (\j-> IT   r j )    j
+unKOptionalAttr (FKT i r l (LeftTB1 (Just j))  ) = FKT (fmap (fmap unKOptional) i) r l j
+unOptionalAttr (Attr i ) = Attr <$> (unKeyOptional i)
+unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
+unOptionalAttr (FKT i r l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i r l j) (traverse (traverse unKeyOptional) i)  j
+
+-- parseAttr i | traceShow i False = error ""
 parseAttr (Attr i) = do
   s<- parseShowable (textToPrim <$> keyType i) <?> show i
   return $  Attr (i,s)
+parseAttr (TBEither l  _ )
+    =  doublequoted parseTb <|> parseTb
+      where
+        parseTb = char '(' *> parseInner <* char ')'
+        parseInner = do
+              res <- unIntercalateAtto (parseAttr . runIdentity .getCompose <$> l) (char ',')
+              return $ TBEither l  (Compose . Identity <$> (L.find ( maybe False (const True) . unOptionalAttr)) res)  {-case (l,r) of
+                   (SOptional (Just i),SOptional Nothing ) -> SEitherL i
+                   (SOptional Nothing ,SOptional (Just j )) -> SEitherR j
+                   (SOptional (Just _),SOptional (Just _ )) -> errorWithStackTrace "multiple  match"
+                   (SOptional Nothing ,SOptional Nothing) -> errorWithStackTrace "no match"
+-}
 
-parseAttr (IT i j) = do
-  mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j <|>  return ((,SOptional Nothing) <$> j)
-  return $ IT  (fmap (,SOptional Nothing) <$> i ) mj
-parseAttr (IAT i [t]) = do
-  r <- doublequoted (parseArray ( doublequoted $ parseLabeledTable t)) <|> parseArray (doublequoted $ parseLabeledTable t) <|> pure []
-  return $ IAT (fmap (,SOptional Nothing) <$> i)  r
-
-parseAttr (AKT l refl rel [t]) = do
-  ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .runIdentity .getCompose  <$> l) (char ',')
-  r <- doublequoted (parseArray ( doublequoted $ parseLabeledTable t)) <|> parseArray (doublequoted $ parseLabeledTable t) <|> pure []
-  return $ AKT ml  refl rel  r
+parseAttr (IT na j) = do
+  mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j -- <|>  return ((,SOptional Nothing) <$> j)
+  return $ IT  (na,SOptional Nothing) mj
 
 parseAttr (FKT l refl rel j ) = do
   ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .runIdentity .getCompose  <$> l) (char ',')
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j
   return $  FKT ml refl rel mj
 
-parseArray p = (char '{' *>  sepBy p (char ',') <* char '}')
+parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 
+-- parseLabeledTable i | traceShow  i False = error ""
+parseLabeledTable (ArrayTB1 [t]) =
+  ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (fmap makeOpt t))  >>  return [] ) <|> return []  )
+parseLabeledTable (LeftTB1 (Just i )) =
+  LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (fmap makeOpt i) >> return Nothing) )
 parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
   im <- unIntercalateAtto (fmap (Compose . Identity) . parseAttr .runIdentity . getCompose <$> (i <> d <> m) ) (char ',')
   return (TB1 (KV ( PK (L.take (length i) im ) (L.take (length d) $L.drop (length i) $  im))(L.drop (length i + length d) im)) )) <*  char ')' )
 
-
--- | Recognizes a quoted string.
-doublequoted' :: Parser a -> Parser a
-doublequoted'  p = takeWhile1 (flip elem "\"\\")  *> p <* takeWhile1 (flip elem "\"\\")
---
+{-
 quotedRec :: Char -> Parser a -> Parser a
 quotedRec c  p =  char c  *>  inner <* char c
   where inner = (quotedRec c p <|> p)
+-}
 
 doublequoted :: Parser a -> Parser a
-doublequoted  p =  (char '\"'  <|> char '\\') *>  inner <* (char '\"' <|> char '\\')
-  where inner = (doublequoted p <|> p)
-
+doublequoted  p =   (takeWhile (== '\\') >>  char '\"') *>  inner <* ( takeWhile (=='\\') >> char '\"')
+  where inner = doublequoted p <|> p
 parseShowable
   :: KType KPrim
        -> Parser Showable
+-- parseShowable  i | traceShow i False = error ""
 parseShowable (Primitive i ) =  (do
    case i of
         PMime _ -> let
               pr = SBinary . fst . B16.decode . BS.drop 3   <$>  plain' "\",)}"
-                in (quotedRec '"') pr <|> pr
+                in doublequoted  pr <|> pr
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
@@ -347,12 +344,17 @@ parseShowable (Primitive i ) =  (do
 
         PTimestamp ->
              let p =  do
-                    i <- fmap (STimestamp  . Finite . fst) . strptime "%Y-%m-%d %H:%M:%OS"<$> plain' "\\\",)}"
+                    i <- fmap (STimestamp  . fst) . strptime "%Y-%m-%d %H:%M:%OS"<$> plain' "\\\",)}"
+                    maybe (fail "cant parse date") return i
+                 in p <|> doublequoted p
+        PDayTime ->
+             let p =  do
+                    i <- fmap (SDayTime . localTimeOfDay .  fst) . strptime "%H:%M:%S"<$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i
                  in p <|> doublequoted p
         PDate ->
              let p = do
-                    i <- fmap (SDate . Finite . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)}"
+                    i <- fmap (SDate . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i
                  in p <|> doublequoted p
         PPosition -> do
@@ -400,56 +402,8 @@ pg_double
 
 
 
-renderedType key f b = go key
-  where
-          go ::  KType KPrim
-                -> F.Conversion Showable
-          go t = case t of
-            (KInterval (Primitive i)) -> SInterval <$>  prim i f b
-            (KOptional (Primitive i)) -> SOptional <$> prim i f b
-            (KSerial (Primitive i)) -> SSerial <$> prim i f b
-            (KArray (Primitive i)) -> SComposite <$> prim i f b
-            (KOptional (KArray (Primitive i))) ->  SOptional . fmap SComposite . getCompose  <$> prim i f b
-            (KOptional (KInterval (Primitive i))) -> SOptional . fmap SInterval . getCompose  <$> prim i f b
-            (KSerial (KOptional (Primitive i))) -> error $ "invalid type " <>  show t
-            -- (KTable (i:j:[]))->  fmap STable . mapM go $ i
-            (Primitive i) ->  unOnly <$> prim  i f b
-            (KOptional i) -> SOptional . Just <$>  go  i
-            i ->  error $ "missing case renderedType: " <> (show i)
-
-
 unOnly :: Only a -> a
 unOnly (Only i) = i
-
-prim :: (F.FromField (f Bool ),F.FromField (f Bounding),F.FromField (f LineString),F.FromField (f DiffTime),F.FromField (f Position ),F.FromField (f LocalTimestamp),F.FromField (f Date),F.FromField (f Text), F.FromField (f Double), F.FromField (f Int), Functor f) =>
-          KPrim
-        -> F.Field
-        -> Maybe BS.ByteString
-        -> F.Conversion (f Showable)
-prim  p f b = case p of
-            PText ->  s $ F.fromField f b
-            PCnpj->  s $ F.fromField f b
-            PCpf ->  s $ F.fromField f b
-            PInt -> n $ F.fromField  f b
-            PDouble -> d $ F.fromField  f b
-            PDate -> da $ F.fromField  f b
-            PInterval -> i $ F.fromField  f b
-            PTimestamp -> t $ F.fromField  f b
-            PPosition -> pos $ F.fromField  f b
-            PLineString -> lin $ F.fromField  f b
-            PBounding -> boun $ F.fromField  f b
-            PBoolean -> bo $ F.fromField  f b
-  where
-    s = fmap (fmap SText)
-    n = fmap (fmap SNumeric)
-    d = fmap (fmap SDouble)
-    da = fmap (fmap SDate)
-    i = fmap (fmap SPInterval)
-    t = fmap (fmap STimestamp)
-    lin = fmap (fmap SLineString)
-    boun = fmap (fmap SBounding)
-    pos = fmap (fmap SPosition )
-    bo = fmap (fmap SBoolean)
 
 instance (F.FromField (f (g a))) => F.FromField (Compose f g a) where
   fromField = fmap (fmap (fmap (Compose ) )) $ F.fromField
@@ -490,27 +444,6 @@ instance Sel.Serialize LineString where
 
 
 
-instance F.FromField LineString where
-  fromField f t = case  fmap (Sel.runGet getLineString ) decoded of
-    Just i -> case i of
-      Right i -> pure i
-      Left e -> F.returnError F.ConversionFailed f e
-    Nothing -> F.returnError F.UnexpectedNull f "empty value"
-    where
-      getV = do
-          i <- Sel.getWord8
-          if i  == 1
-           then do
-             typ <- Sel.getWord32host
-             srid <- Sel.getWord32host
-             let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
-             case ty  of
-               2 -> Sel.get
-               i -> error $ "type not implemented " <> show ty
-           else
-             return (error $ "BE not implemented " <> show i )
-      decoded = fmap (fst . B16.decode) t
-
 getLineString = do
           i <- Sel.getWord8
           if i  == 1
@@ -524,14 +457,6 @@ getLineString = do
            else
              return (error $ "BE not implemented " <> show i )
 
-
-instance F.FromField Bounding where
-  fromField f t = case  t of
-    Nothing -> F.returnError F.UnexpectedNull f ""
-    Just dat -> do
-      case parseOnly box3dParser   dat of
-          Left err -> F.returnError F.ConversionFailed f err
-          Right conv -> return conv
 
 box3dParser = do
           string "BOX3D"
@@ -587,28 +512,11 @@ diffInterval = (do
     [d,h,m,s] -> secondsToDiffTime (round $ d *3600*24 + h * 3600 + (60  ) * m + s)
     v -> errorWithStackTrace $ show v)
 
-instance (F.FromField a ) => F.FromField (Interval.Extended a) where
-  fromField  i mdat = ER.Finite <$> (fromField i mdat)
-
--- | any postgresql array whose elements are compatible with type @a@
-instance (F.FromField a,Ord a, Typeable a) => F.FromField (Interval.Interval a) where
-    fromField f mdat = do
-        info <- F.typeInfo f
-        case info of
-          F.Range{} ->
-              case mdat of
-                Nothing  -> F.returnError F.UnexpectedNull f "Null Range"
-                Just  dat -> do
-                   case parseOnly (fromArray info f) dat of
-                     Left  err  -> F.returnError F.ConversionFailed f err
-                     Right conv ->  conv
-          _ -> F.returnError F.Incompatible f ""
-
 plain' :: String -> Parser BS.ByteString
 plain' delim = takeWhile1 (notInClass (delim ))
 
 plain0' :: String -> Parser BS.ByteString
-plain0' delim = Data.Attoparsec.Char8.takeWhile (notInClass (delim ))
+plain0' delim = Data.Attoparsec.ByteString.Char8.takeWhile (notInClass (delim ))
 
 parseInter token = do
     lb <- (char '[' >> return True) <|> (char '(' >> return False)
@@ -642,24 +550,38 @@ fromArray typeInfo f = Tra.sequence . (parseIt <$>) <$> range delim
 instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
+
 fromAttr foldable = do
-    let parser  = parseLabeledTable foldable -- <|> doublequoted (parseLabeledTable foldable)
-    FR.fieldWith (\i j -> case traverse (parseOnly   parser) j of
+    let parser  = parseLabeledTable foldable
+    FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
                                (Right (Just r ) ) -> return r
                                Right Nothing -> error (show j )
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
 
-fromShowableList foldable = do
-    traverse (FR.fieldWith . attrToKey) foldable
+selectAll inf table   = liftIO $ do
+      let rp = rootPaths'  (tableMap inf) table
+      (t,v) <- duration  $ queryWith_  (fromAttr (fst rp)) (conn inf)(fromString $ T.unpack $ snd rp)
+      print (tableName table,t)
+      return v
+
+addTable inf table = do
+    let mvar = mvarMap inf
+    mmap <- takeMVar mvar
+    (isEmpty,mtable) <- case (M.lookup table mmap ) of
+         Just i -> do
+           emp <- isEmptyMVar i
+           putMVar mvar mmap
+           return (emp,i)
+         Nothing -> do
+           res <- selectAll  inf table
+           mnew <- newMVar res
+           putMVar mvar (M.insert table mnew mmap)
+           return (True,mnew )
+    readMVar mtable
+
+
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item
-  where item = fmap (\n@(Raw _ t k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
-
-projectKey
-  ::
-    InformationSchema ->
-     (forall t . Traversable t => QueryT Identity (t KAttribute)
-         -> S.Set Key -> IO [t (Key,Showable)])
-projectKey inf q  = (\(j,(h,i)) -> fmap (fmap (zipWithTF (,) (fmap (\(Metric i)-> i) j))) . queryWith_ (fromShowableList j) (conn inf) .  buildQuery $ i ) . projectAllKeys (pkMap inf ) (hashedGraph inf) q
+  where item = fmap (\n@(Raw _ _ _ t _ k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
 
 

@@ -1,5 +1,5 @@
 {-# LANGUAGE TupleSections,ScopedTypeVariables,LambdaCase,RankNTypes,DeriveFunctor,RecordWildCards,NoMonomorphismRestriction,RecursiveDo #-}
-module Widgets where
+module TP.Widgets where
 
 
 import Control.Monad
@@ -10,27 +10,17 @@ import Graphics.UI.Threepenny.Core hiding (delete)
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
-import Data.Traversable(traverse)
 import Data.Monoid
 import Data.Foldable (foldl')
-import Data.Interval (Interval(..),interval)
+import Data.Interval (Interval(..))
 import qualified Data.ExtendedReal as ER
 import qualified Data.Interval as Interval
 import qualified Data.List as L
-import Text.Read
-import Query
 import Data.Maybe
-import Data.Distributive
 import Control.Concurrent
 import qualified Data.Aeson as JSON
 
-import System.Directory
-import System.Process(callCommand)
-import Data.String
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as BSC
-import qualified Data.ByteString.Lazy.Char8 as BSLC
-import qualified Data.ByteString.Lazy as BSL
+import Safe
 
 
 import Debug.Trace
@@ -68,16 +58,11 @@ evalUI el f  = getWindow el >>= \w -> runUI w f
 accumTds :: MonadIO m => Tidings a -> [Event (a -> a)] -> m (Tidings a)
 accumTds e l = do
 	ve <- currentValue (facts e)
-	accumT ve $ foldl1 (unionWith (.)) (l ++ [const <$> rumors e ])
+	accumT ve $ concatenate <$> unions (l ++ [const <$> rumors e ])
 
 
 accumTs :: MonadIO m => a -> [Event (a -> a)] -> m (Tidings a)
 accumTs e = accumT e . foldr1 (unionWith (.))
-
-addTs :: MonadIO m => Tidings a -> [Event a] -> m (Tidings a)
-addTs t e = do
-  i <- currentValue (facts t)
-  accumTs i $ fmap const  <$> ((rumors t) : e)
 
 joinTEvent = mapTEvent id
 
@@ -90,10 +75,10 @@ adEvent ne t = do
 
 
 
-liftEvent :: MonadIO m => Window -> Event (Maybe a) -> (MVar (Maybe a) -> m void) -> m ()
-liftEvent window e h = do
+liftEvent :: MonadIO m => Event (Maybe a) -> (MVar (Maybe a) -> m void) -> m ()
+liftEvent e h = do
     ivar <- liftIO $ newEmptyMVar
-    liftIO $ register e (void . runUI window . liftIO  . maybe (return ()) ( putMVar ivar .Just )  )
+    liftIO $ register e (void .  maybe (return ()) ( putMVar ivar .Just )  )
     h  ivar
     return ()
 
@@ -131,7 +116,7 @@ mapUITEvent body f x = do
 
 mapEvent f x = do
   (e,h) <- liftIO $ newEvent
-  onEvent x (\i -> liftIO $ (f i)  >>= h)
+  onEvent x (\i -> liftIO . forkIO $ (f i)  >>= h)
   return  e
 
 
@@ -251,18 +236,32 @@ tabbed  tabs = do
   body <- UI.div # set children (snd <$> tabs)
   UI.div # set children [getElement header,body]
 
+buttonDivSet :: Eq a => [a] -> Tidings (Maybe a) ->  (a -> String) ->  (a -> UI Element ) -> UI (TrivialWidget a)
+buttonDivSet ks binit h  el = mdo
+  buttons <- mapM (buttonString h bv ) ks
+  dv <- UI.div # set children (fst <$> buttons)
+  let evs = foldr (unionWith const) (filterJust $ rumors binit) (snd <$> buttons)
+  v <- currentValue (facts binit)
+  bv <- stepper (maybe (head ks) id v) evs
+  return (TrivialWidget (tidings bv evs) dv)
+    where
+      buttonString h  bv k = do
+        b <- el k # set UI.class_ "buttonSet" # sink UI.enabled (not . (k==) <$> bv)
+        let ev = pure k <@ UI.click  b
+        return (b,ev)
+
 -- List of buttons with constant value
-buttonFSet :: [a] -> Behavior (Maybe a) -> Behavior (String -> Bool ) ->  (a -> String) -> UI (TrivialWidget a)
-buttonFSet ks binit bf h =do
-  buttons <- mapM (buttonString h) ks
+buttonFSet :: Eq a => [a] -> Behavior (Maybe a) -> Behavior (String -> Bool ) ->  (a -> String) -> UI (TrivialWidget a)
+buttonFSet ks binit bf h =mdo
+  buttons <- mapM (buttonString h bv ) ks
   dv <- UI.div # set children (fst <$> buttons)
   let evs = foldr (unionWith (const)) never (snd <$> buttons)
   v <- currentValue binit
   bv <- stepper (maybe (head ks) id v) evs
   return (TrivialWidget (tidings bv evs) dv)
     where
-      buttonString h k= do
-        b <- UI.button # set text (h k)# sink UI.style ((\i-> noneShowSpan (i (h k))) <$> bf)
+      buttonString h bv k= do
+        b <- UI.button # set UI.class_ "buttonSet" # set text (h k)# sink UI.style ((\i-> noneShowSpan (i (h k))) <$> bf)# sink UI.enabled (not . (k==) <$> bv)
         let ev = pure k <@ UI.click  b
         return (b,ev)
 
@@ -316,6 +315,14 @@ wrapListBox l p f q = do
   o <- listBox l p f q
   return $ TrivialWidget (userSelection o ) (getElement o)
 
+optionalListBox' l o  s = mdo
+  ol <- UI.listBox ((Nothing:) <$>  fmap (fmap Just) l) (fmap Just <$> st) (maybe UI.div <$> s)
+  let sel = unionWith const (rumors $ fmap join $ UI.userSelection ol) (rumors o)
+  v <- currentValue ( facts o)
+  st <- stepper v sel
+  return $ TrivialWidget (tidings st sel ) (getElement ol)
+
+
 optionalListBox l o f s = do
   o <- listBox ((Nothing:) <$>  fmap (fmap Just) l) (fmap Just <$> o) f s
   return $TrivialWidget  (fmap join $ userSelection o)(getElement o)
@@ -359,17 +366,6 @@ paintBorder e b = element e # sink UI.style (greenRed . isJust <$> b)
 
 
 -- Convert html to Pdf using wkhtmltopdf
-htmlToPdf art html = do
-    let
-      output = (BSC.unpack art) <> ".pdf"
-      input = (BSC.unpack  art ) <> ".html"
-    traverse (BSL.writeFile (fromString input )) html
-    callCommand $ "wkhtmltopdf --print-media-type -T 10 page " <> input <>   " " <> output
-    file <- BS.readFile (fromString output)
-    removeFile input
-    removeFile output
-    return file
-
 -- Botão de imprimir frame no browser
 printIFrame i = do
    print <- UI.button # set UI.text "Imprimir"
@@ -415,7 +411,7 @@ listBox :: forall a. (Show a ,Ord a)
     -> Tidings (a -> UI Element -> UI Element) -- ^ display for an item
     -> UI (ListBox a)
 listBox bitems bsel bfilter bdisplay = do
-    list <- UI.select
+    list <- UI.select # set UI.class_ "selectpicker"
     -- animate output items
     element list # sink oitems ( map <$> facts bdisplay <*> facts bitems )
 
@@ -435,13 +431,11 @@ listBox bitems bsel bfilter bdisplay = do
     -- user selection
     evList <- selectionChange list
     let
-        eindexes = (\l i ->  join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <@> (traceShowId <$> evList )
-    e <- currentValue (facts bsel)
+        eindexes = (\l i ->  join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <@> (evList )
     let
         ev =  unionWith const eindexes (rumors bsel)
-    bsel2 <- stepper e ev
     let
-        _selectionLB = tidings bsel2 ev
+        _selectionLB = tidings (facts bsel) eindexes
         _elementLB   = list
 
     return ListBox {..}
@@ -485,7 +479,7 @@ multiListBox bitems bsel bdisplay = do
         eindexes = lookupIndex <$> facts bindices2 <@> selectionMultipleChange list
     e <- currentValue (facts bsel)
     let
-        eindexes2 = (\m-> catMaybes $ fmap (flip setLookup m) e)  <$> (S.fromList <$> rumors bitems)
+        -- eindexes2 = (\m-> catMaybes $ fmap (flip setLookup m) e)  <$> (S.fromList <$> rumors bitems)
         ev =  foldr1 (unionWith const) [rumors bsel,eindexes]
     bsel2 <- stepper e ev
     let
@@ -501,6 +495,8 @@ oitems = mkWriteAttr $ \i x -> void $ do
     return x # set children [] #+ map (\i -> UI.option # set items [UI.div # i ] ) i
 
 
+fileChange :: Element -> Event (Maybe String)
+fileChange el = unsafeMapUI el (const $ UI.get readFileAttr el) (UI.valueChange el)
 
 selectionMultipleChange :: Element -> Event [Int]
 selectionMultipleChange el = unsafeMapUI el (const $ UI.get selectedMultiple el) (unionWith const ( fmap (const ()) $onEnter el ) (UI.click el))
@@ -511,6 +507,14 @@ selectionChange el = do
   onEvent (UI.click el) (\_ ->  liftIO . h =<<  UI.get UI.selection el)
   -- unsafeMapUI el ( const $ UI.get UI.selection el) (UI.click el)
   return e
+
+readFileAttr :: ReadAttr Element (Maybe String)
+readFileAttr = mkReadAttr get
+  where
+    get   el = fmap (join . fmap headMay . from ) $  callFunction $ ffi "readFileInput($(%1))" el
+    from s = case JSON.fromJSON s of
+                  JSON.Success x -> Just x
+                  i -> Nothing -- errorWithStackTrace (show i)
 
 
 selectedMultiple :: Attr Element [Int]

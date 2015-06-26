@@ -7,6 +7,18 @@ import qualified Data.Text as TE
 import qualified Data.Text.Lazy as T
 import  Data.Aeson
 import qualified Data.Vector as V
+import GHC.Stack
+import GHC.Exts
+import Data.Monoid
+
+import System.Directory
+import System.Process(callCommand)
+import Data.Traversable
+
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BSC
+import qualified Data.ByteString.Lazy as BSL
+
 
 spanList :: ([a] -> Bool) -> [a] -> ([a], [a])
 
@@ -58,5 +70,24 @@ o !> v  = goObject o >>=  HM.lookup (v :: TE.Text)
 translateMonth :: T.Text -> T.Text
 translateMonth v = foldr (\i -> (uncurry T.replace) i )  v transTable
               where transTable = [("out","oct"),("dez","dec"),("set","sep"),("ago","aug"),("fev","feb"),("abr","apr"),("mai","may")]
+
+
+justError e (Just i) = i
+justError e  _ = errorWithStackTrace e
+
+groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
+
+
+
+htmlToPdf art html = do
+    let
+      output = (BSC.unpack art) <> ".pdf"
+      input = (BSC.unpack  art ) <> ".html"
+    traverse (BSL.writeFile (fromString input )) html
+    callCommand $ "wkhtmltopdf --print-media-type -T 10 page " <> input <>   " " <> output
+    file <- BS.readFile (fromString output)
+    removeFile input
+    removeFile output
+    return file
 
 

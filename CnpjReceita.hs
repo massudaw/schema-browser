@@ -6,18 +6,12 @@ import qualified Network.Wreq.Session as Sess
 
 import OpenSSL.Session (context)
 import Network.HTTP.Client.OpenSSL
-import Network.HTTP.Client.TLS
-import Network.HTTP.Client (defaultManagerSettings, managerResponseTimeout)
 
 import Control.Lens hiding (element,set,get,(#))
 import Control.Applicative
-import Data.Char
 import Control.Monad
 import Data.Maybe
-import Data.Monoid
 import Data.Functor.Compose
-import Data.Functor.Identity
-import Control.Concurrent.Async
 import Control.Concurrent
 
 import qualified Data.List as L
@@ -34,18 +28,15 @@ import qualified Data.Text.Lazy as TL
 import Safe
 import Types
 import Query
+import Utils
 import Schema
-import Widgets
-import QueryWidgets
+-- import QueryWidgets
 import Gpx
-import Widgets
+-- import Widgets
 import Debug.Trace
 
-import Reactive.Threepenny
-import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Core hiding (get,delete)
 
-import qualified Data.ByteString.Base64.Lazy as B64
+import RuntimeTypes
 import Control.Monad.Reader
 import qualified Data.Foldable as F
 
@@ -87,7 +78,7 @@ getCpf'  inf i  handler = do
       outM <- fmap (join . fmap headMay.join) . Tra.traverse getCpfShowable $  mvar
       maybe (return ()) (\out-> do
           let attr i = Compose . Identity .  Attr . (lookKey inf "owner" i ,)
-          handler . Just . (TB1 .KV (PK [][]) . pure . attr "owner_name" . SOptional .Just . SText . TL.pack ) $ out
+          handler . Just $ (TB1 $ KV (PK [] . pure . attr "owner_name" . SOptional .Just . SText . TL.pack  $ out) [] )
           return ()) outM ) rv
   return ()
 
@@ -103,7 +94,7 @@ getCpf captcha cgc_cpf = do
 wrapplug = WrappedCall initCnpj [getCaptcha',getCnpj']
 
 initCnpj   =  (\i -> do
-  let opts = defaults & manager .~ Left man
+  let
       man  = opensslManagerSettings context
   withOpenSSL $ Sess.withSessionWith man i) . runReaderT
 
@@ -146,15 +137,15 @@ getCnpj'  inf i  handler = do
             cna i = Compose . Identity .  Attr . (lookKey inf "cnae" i ,)
             idx  = SOptional . fmap (SText . TL.pack . head) . flip M.lookup out
             fk i  = Compose . Identity . FKT i True []
-            afk i  = Compose . Identity . AKT i True []
+            afk i  = Compose . Identity . FKT i True [] . LeftTB1 . Just . ArrayTB1
             tb pk desc attr = TB1 $ KV (PK pk desc) attr
-            (pcnae,pdesc) = traceShowId $ (SOptional $   fmap (SText .TL.filter (not . flip L.elem "-.") . fst) t ,  SOptional $  SText .  snd <$>  t)
+            (pcnae,pdesc) = traceShowId $ (justError "wrong primary activity " $ fmap (SText .TL.filter (not . flip L.elem "-.") . fst) t ,  SOptional $  SText .  snd <$>  t)
                 where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)
             scnae = fmap (\t -> ((SText .TL.filter (not . flip L.elem "-.") . fst) t ,    (SText .  snd ) t)) ts
                 where ts = join . maybeToList $ fmap ( TL.breakOn " - " .  TL.pack ) <$> (M.lookup "CÓDIGO E DESCRIÇÃO DAS ATIVIDADES ECONÔMICAS SECUNDÁRIAS" out)
             attrs = tb [] [own "owner_name" (idx "NOME EMPRESARIAL")]
                     [fk [own "address" (SOptional Nothing)]
-                          (fmap (keyOptional ) $ tb [attr "id" (SSerial Nothing) ]
+                          (LeftTB1 $ Just $  tb [attr "id" (SSerial Nothing) ]
                               []
                               [attr "logradouro" (idx "LOGRADOURO")
                               ,attr "number" (idx "NÚMERO")
@@ -167,10 +158,9 @@ getCnpj'  inf i  handler = do
                               ,attr "bounding" (SOptional Nothing)]
                               )
                      ,fk [own "atividade_principal" pcnae]
-                                (keyOptional <$> tb [cna "id" pcnae] [cna "description" pdesc] [] )
+                                (LeftTB1 $ Just $ tb [cna "id" pcnae] [cna "description" pdesc] [] )
                      ,afk [own "atividades_secundarias" pcnae]
-                                (fmap keyOptional <$>
-                                  (\(pcnae,pdesc)-> tb [cna "id" pcnae] [cna "description" pdesc] [] ) <$> scnae)
+                                ((\(pcnae,pdesc)-> tb [cna "id" pcnae] [cna "description" pdesc] [] ) <$> scnae)
 
                     ]
         handler . Just $ traceShowId attrs
@@ -189,7 +179,7 @@ getCnpj captcha cgc_cpf = do
           pr <- traverse (Sess.post session (traceShowId cnpjpost) . protocolocnpjForm cgc_cpf ) (Just $  captcha  )
           traverse (readHtmlReceita . BSLC.unpack ) (fromJust pr ^? responseBody)
 
-
+{-
 cnpjquery el cpfe = do
     let opts = defaults & manager .~ Left man
         man  = opensslManagerSettings context
@@ -223,7 +213,7 @@ cnpjquery el cpfe = do
                 hresult v
                 ))
     return result
-
+-}
 protocolocpfForm :: BS.ByteString -> BS.ByteString -> [FormParam]
 protocolocpfForm cgc_cpf captcha
                      = [
@@ -247,7 +237,7 @@ cpfpost = "http://www.receita.fazenda.gov.br/Aplicacoes/ATCTA/cpf/ConsultaPublic
 cnpjhome  ="http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/cnpjreva_solicitacao.asp"
 cnpjcaptcha = "http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/captcha/gerarCaptcha.asp"
 cnpjpost = "http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/valida.asp"
-
+{-
 test = do
   startGUI defaultConfig (\w -> do
                       e <- UI.div
@@ -256,3 +246,4 @@ test = do
                       cnpjquery e $ pure (Just "01008713010399")
                       getBody w #+ [element i ,element e]
                       return () )
+                      -}
