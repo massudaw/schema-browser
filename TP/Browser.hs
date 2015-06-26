@@ -268,13 +268,6 @@ chooseKey inf key = mdo
 
 lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" (fst renderProjectPricingA )  ( snd renderProjectPricingA )
 
-{-
-testPlugin db pg input = startGUI defaultConfig $ \w -> do
-    let e = withConnInf db (\inf -> fst <$> pg inf (pure (fmap (\((t,k),v) -> (lookKey inf t k ,v)) <$> input)))
-    getBody w #+ [e]
-    return ()
--}
-
 
 testShowable  v s = case s of
           (SOptional Nothing ) -> False
