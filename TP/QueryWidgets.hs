@@ -390,7 +390,7 @@ processPanelTable inf attrsB res table oldItemsi = do
         # sink UI.enabled (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (tb1Diff (\l m -> if l  /= m then traceShow (l,m) (True,(l,m)) else (False,(l,m))) )  i j) (fmap tableNonRef <$> attrsB) (fmap tableNonRef <$> facts oldItemsi))
   deleteB <- UI.button # set text "DELETE" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table ))
   -- Delete when isValid
-        # sink UI.enabled (isJust <$> facts oldItems)
+        # sink UI.enabled ( liftA2 (&&) (isJust <$> facts oldItems) (liftA2 (\i j -> maybe False (not . flip contains j) i  ) attrsB res))
   let
       deleteAction ki =  do
         res <- liftIO $ catch (Right <$> delete (conn inf) ki table) (\e -> return $ Left (show $ traceShowId  (e :: SomeException) ))
