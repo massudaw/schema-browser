@@ -97,6 +97,8 @@ instance (Functor f,Ord1 f) => Ord1 (TB f ) where
 instance (Functor f,Show1 f) => Show1 (TB f  ) where
   showsPrec1 = showsPrec
 
+instance (Show f) =>  Show1 (Labeled f  ) where
+  showsPrec1 = showsPrec
 
 type Key = FKey (KType Text)
 

@@ -514,8 +514,8 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
           relTable = M.fromList $ fmap swap rel
       ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . rumors . snd <$> plmods)
       let
-          search = (\i j -> join $ fmap (\k-> L.find (\(TB1 (KV (PK  l _ ) _ ))-> interPoint rel k  (unAttr . unTB <$> l) ) i) $ traceShowId  j )
-          tdi = traceShowId <$>   tidings ( search <$> res2 <*> (fmap (concat . fmap kattr . _tbref )<$> facts ftdi )) ((search  <$> res2 <@> (fmap (concat . fmap kattr . _tbref )<$> rumors ftdi )))
+          search = (\i j -> join $ fmap (\k-> L.find (\(TB1 (KV (PK  l _ ) _ ))-> interPoint rel k  (concat $ kattr . Compose . Identity . unTB <$> l) ) i) $ j )
+          tdi = tidings ( search <$> res2 <*> (fmap (concat . fmap kattr . _tbref )<$> facts ftdi )) ((search  <$> res2 <@> (fmap (concat . fmap kattr . _tbref )<$> rumors ftdi )))
       l <- flabel # set text (show $ unAttr .unTB <$> ifk)
       filterInp <- UI.input
       filterInpBh <- stepper "" (UI.valueChange filterInp)
@@ -558,7 +558,7 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
       return $ TrivialWidget fksel fk
 
 fkUITable inf pgs created res plmods  wl oldItems  tb@(FKT ilk refl rel  (LeftTB1 (Just tb1 ))) = do
-    let unLeftItens tds = join . fmap (\(FKT ifk refl rel  (LeftTB1 tb)) -> liftA2 (\ik -> FKT ik  refl (first unKOptional <$> rel)) (traverse (traverse (unKeyOptional )) ifk) tb) <$> tds
+    let unLeftItens tds = join . fmap (\(FKT ifk refl rel  (LeftTB1 tb)) -> liftA2 (\ik -> FKT ik  refl (first unKOptional <$> rel)) (traverse (traverse unKeyOptional ) ifk) tb) <$> tds
     tb <- fkUITable inf pgs created res (fmap (unLeftItens ) <$> plmods)  wl (unLeftItens  oldItems)  (FKT (fmap unKOptional<$> ilk) refl (first unKOptional <$> rel) tb1)
     let emptyFKT = (FKT (fmap (,SOptional Nothing)  <$> ilk) refl rel (LeftTB1 Nothing))
     return $ (Just . maybe  emptyFKT (\(FKT ifk refl rel  tb)-> FKT (fmap keyOptional <$> ifk) refl rel (LeftTB1 (Just tb)))) <$> tb

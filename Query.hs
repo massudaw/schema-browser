@@ -537,7 +537,7 @@ unTB = runIdentity . getCompose
 _tb = Compose . Identity
 
 unAttr (Attr i) = i
-unAttr i = errorWithStackTrace $ "cant find attr" -- <> (show i)
+unAttr i = errorWithStackTrace $ "cant find attr" <> (show i)
 
 mkKey i = do
   (c,m) <- snd <$> get
