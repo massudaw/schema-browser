@@ -216,9 +216,10 @@ buildUI i  tdi = case i of
            UI.div # sink UI.html (pure "<script> $(\".file_client\").on('change',handleFileSelect); </script>")
            tdi2 <- addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fileChange file ) =<< addEvent (const Nothing <$> UI.click clearB) tdi
            let fty = case mime of
-                "application/pdf" -> ("iframe",[("width","100%"),("height","300px")])
-                "image/jpg" -> ("img",[])
-           f <- pdfFrame fty (maybe "" binarySrc <$> facts tdi2)
+                "application/pdf" -> ("iframe","src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
+                "application/x-ofx" -> ("textarea","value",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+                "image/jpg" -> ("img","src",maybe "" binarySrc ,[])
+           f <- pdfFrame fty (facts tdi2)
            fd <- UI.div # set children [file,clearB,f]
            return (TrivialWidget tdi2 fd)
 
@@ -252,13 +253,13 @@ tbCase inf pgs i@(FKT ifk _ _ tb1 ) created wl plugItens oldItems  = do
             table = justError "no table found" $ M.lookup rr $ pkMap inf
             tbi = fmap (Compose . Identity)  <$> oldItems
             thisPlugs = filter (any ((== (fmap (keyValue.unAttr.runIdentity.getCompose) ifk)) . head ) . fst) $  plugItens
-            pfks =  (first ( filter (not . L.null ) . fmap (L.drop 1) . L.filter ((== (fmap (keyValue.unAttr.runIdentity.getCompose) ifk)) . head ))  . second ( fmap ( join .  fmap (fmap  (_fkttable . runIdentity . getCompose ) . findTB1 ((== ifk ) . fmap (fmap fst )  . tbAttr . runIdentity . getCompose  )))  ) <$> thisPlugs)
+            pfks =  (first ( filter (not . L.null ) . fmap (L.drop 1) . L.filter ((== (fmap (keyValue.unAttr.runIdentity.getCompose) ifk)) . head ))  . second ( fmap ( join .  fmap (fmap  (runIdentity . getCompose ) . findTB1 ((== ifk ) . fmap (fmap fst )  . tbAttr . runIdentity . getCompose  )))  ) <$> thisPlugs)
         res <- liftIO$ addTable inf table
         fkUITable inf pgs created res pfks (filter (isReflexive .fst) wl) (fmap (runIdentity . getCompose ) <$>  tbi) i
 tbCase inf pgs i@(IT na tb1 ) created wl plugItens oldItems  = do
         let tbi = fmap (Compose . Identity ) <$> oldItems
             thisPlugs = filter ((any (== [keyValue na ]) . head ) . fst) $  plugItens
-            pfks =  first ( filter (not . L.null ) . fmap (L.drop 1) . L.filter ((== [keyValue na]) . head ))  . second ( fmap ( join .  fmap (fmap  (_fkttable . runIdentity . getCompose ) . findTB1 ((== [na]) . kattr  .fmap fst )))  ) <$> thisPlugs
+            pfks =  first ( filter (not . L.null ) . fmap (L.drop 1) . L.filter ((== [keyValue na]) . head ))  . second ( fmap ( join .  fmap (fmap  ( runIdentity . getCompose ) . findTB1 ((== [na]) . kattr  .fmap fst )))  ) <$> thisPlugs
         iUITable inf pgs pfks (fmap (runIdentity . getCompose ) <$>  tbi) i
 tbCase inf pgs a@(Attr i) created wl plugItens oldItems = do
         let thisPlugs = filter (any ((== [keyValue i]).head) . fst) $  (fmap (fmap (fmap F.toList) ) <$> plugItens)
@@ -447,7 +448,7 @@ iUITable
   InformationSchema
   -> [Plugins]
   -- Plugin Modifications
-  -> [([[[Text]]],Tidings (Maybe (TB1 (Key,Showable))))]
+  -> [([[[Text]]],Tidings (Maybe (TB Identity (Key,Showable))))]
   -- Selected Item
   -> Tidings (Maybe (TB Identity (Key,Showable)))
   -- Static Information about relation
@@ -456,7 +457,7 @@ iUITable
 iUITable inf pgs pmods oldItems  tb@(IT na  (TB1 tb1))
     = do
       l <- flabel # set text (show  na )
-      (celem,tcrud) <- uiTable inf pgs (inlineName $ keyType na) pmods (TB1 tb1) (fmap _fkttable <$> oldItems)
+      (celem,tcrud) <- uiTable inf pgs (inlineName $ keyType na) (fmap (fmap (fmap _fkttable)) <$> pmods) (TB1 tb1) (fmap _fkttable <$> oldItems)
       element celem
           # set style [("padding-left","10px")]
       fk <- UI.li # set  children [l, celem]
@@ -464,7 +465,8 @@ iUITable inf pgs pmods oldItems  tb@(IT na  (TB1 tb1))
       paintEdit  (getElement l) (facts bres) (facts oldItems)
       return $ TrivialWidget bres fk
 iUITable inf pgs pmods oldItems  tb@(IT na (LeftTB1 (Just tb1))) = do
-   tr <- iUITable inf pgs (fmap (fmap unLeftTB) <$> pmods) (join . fmap (\(IT na (LeftTB1 l)) -> IT na <$>  l) <$>  oldItems) (IT na tb1)
+   let unLeftTable tb = join . fmap (\(IT na (LeftTB1 l)) -> IT na <$>  l) <$>  tb
+   tr <- iUITable inf pgs (fmap (unLeftTable) <$> pmods) (unLeftTable oldItems) (IT na tb1)
    return $  Just . maybe ((IT  (na,SOptional Nothing)  (LeftTB1 Nothing))) (\(IT  na j ) -> IT  na (LeftTB1 (Just j)))  <$> tr
 iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
     = do
@@ -474,7 +476,8 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
       let
          offsetT = tidings offsetB offsetE
       l <- flabel # set text (show  na )
-      items <- mapM (\ix -> (iUITable inf pgs ((fmap (\i -> (\o ->  join .  fmap (\(ArrayTB1 tbl) -> atMay  tbl (ix + o) )) <$> offsetT <*> i))   <$> plmods) ((\o -> join . fmap (\(IT  na  (ArrayTB1 j)) -> IT  na <$>  atMay j (ix + o)   ))  <$> offsetT <*> oldItems)) (IT  na tb1) ) [0..8]
+      let index ix tdi = (\o -> join . fmap (\(IT  na  (ArrayTB1 j)) -> IT  na <$>  atMay j (ix + o)   ))  <$> offsetT <*> tdi
+      items <- mapM (\ix -> iUITable inf pgs (fmap (index  ix ) <$> plmods) (index ix oldItems) (IT  na tb1) ) [0..8]
       let tds = triding <$> items
           es = getElement <$> items
       sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (tail es ) ( tds )
@@ -495,7 +498,7 @@ fkUITable
   -- Table Data
   -> [TB1 (Key,Showable)]
   -- Plugin Modifications
-  -> [([[[Text]]],Tidings (Maybe (TB1 (Key,Showable))))]
+  -> [([[[Text]]],Tidings (Maybe (TB Identity (Key,Showable))))]
   -- Same Table References
   -> [(TB Identity Key,TrivialWidget (Maybe (TB Identity (Key,Showable))))]
   -- Relation Event
@@ -509,11 +512,13 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
     | otherwise = mdo
       let
           relTable = M.fromList $ fmap swap rel
-          tdipre = fmap _fkttable <$> oldItems
-      tdi <- foldr (\i j -> updateEvent  (fmap (Tra.traverse (Tra.traverse diffOptional ))) i =<< j)  (return tdipre) (rumors . snd <$> plmods)
+      ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . rumors . snd <$> plmods)
+      let
+          search = (\i j -> join $ fmap (\k-> L.find (\(TB1 (KV (PK  l _ ) _ ))-> interPoint rel k  (unAttr . unTB <$> l) ) i) $ traceShowId  j )
+          tdi = traceShowId <$>   tidings ( search <$> res2 <*> (fmap (concat . fmap kattr . _tbref )<$> facts ftdi )) ((search  <$> res2 <@> (fmap (concat . fmap kattr . _tbref )<$> rumors ftdi )))
       l <- flabel # set text (show $ unAttr .unTB <$> ifk)
       filterInp <- UI.input
-      filterInpBh <- stepper "" (UI.valueChange filterInp )
+      filterInpBh <- stepper "" (UI.valueChange filterInp)
       let
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd
@@ -525,7 +530,7 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
       let evsel = unionWith const (rumors $ join <$> userSelection ol) (rumors tdi)
       prop <- stepper Nothing evsel
       let tds = tidings prop evsel
-      (celem,tableb) <- uiTable inf pgs (rawName table) plmods tb1  tds
+      (celem,tableb) <- uiTable inf pgs (rawName table) (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
       (panelItems,evs) <- processPanelTable inf (facts tableb) res2 table tds
       let
           bselection = fmap Just <$> st
@@ -553,7 +558,8 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
       return $ TrivialWidget fksel fk
 
 fkUITable inf pgs created res plmods  wl oldItems  tb@(FKT ilk refl rel  (LeftTB1 (Just tb1 ))) = do
-    tb <- fkUITable inf pgs created res (fmap (fmap unLeftTB) <$> plmods)  wl (join . fmap (\(FKT ifk refl rel  (LeftTB1 tb)) -> liftA2 (\ik -> FKT ik  refl (first unKOptional <$> rel)) (traverse (traverse (unKeyOptional )) ifk) tb) <$> oldItems)  (FKT (fmap unKOptional<$> ilk) refl (first unKOptional <$> rel) tb1)
+    let unLeftItens tds = join . fmap (\(FKT ifk refl rel  (LeftTB1 tb)) -> liftA2 (\ik -> FKT ik  refl (first unKOptional <$> rel)) (traverse (traverse (unKeyOptional )) ifk) tb) <$> tds
+    tb <- fkUITable inf pgs created res (fmap (unLeftItens ) <$> plmods)  wl (unLeftItens  oldItems)  (FKT (fmap unKOptional<$> ilk) refl (first unKOptional <$> rel) tb1)
     let emptyFKT = (FKT (fmap (,SOptional Nothing)  <$> ilk) refl rel (LeftTB1 Nothing))
     return $ (Just . maybe  emptyFKT (\(FKT ifk refl rel  tb)-> FKT (fmap keyOptional <$> ifk) refl rel (LeftTB1 (Just tb)))) <$> tb
 fkUITable inf pgs created res2 plmods  wl oldItems  tb@(FKT ifk@[_] refl rel  (ArrayTB1 [tb1]) ) = do
@@ -562,11 +568,11 @@ fkUITable inf pgs created res2 plmods  wl oldItems  tb@(FKT ifk@[_] refl rel  (A
      offsetB <- stepper 0 offsetE
      let
          offsetT = tidings offsetB offsetE
-         indexItens ix = (\o -> join . fmap (\(FKT [l] refl _ (ArrayTB1 m)  )  -> (\li mi ->  FKT  [li] refl (fmap (first unKArray) rel) mi ) <$> (traverse (indexArray (ix + o) )   l) <*> (atMay (L.drop o m) ix) ))  <$>  offsetT <*> oldItems
+         indexItens ix tds = (\o -> join . fmap (\(FKT [l] refl _ (ArrayTB1 m)  )  -> (\li mi ->  FKT  [li] refl (fmap (first unKArray) rel) mi ) <$> (traverse (indexArray (ix + o) )   l) <*> (atMay (L.drop o m) ix) ))  <$>  offsetT <*> tds
          fkst = FKT (fmap (fmap unKArray ) ifk) refl (fmap (first (unKArray)) rel)  tb1
          rr = tablePKSet tb1
      res <- liftIO$ addTable inf (fromJust $ M.lookup rr $ pkMap inf )
-     fks <- mapM (\ix-> fkUITable inf pgs S.empty res (fmap (\t -> liftA2 (\o ->   join . fmap (\(ArrayTB1 tbl)-> atMay  tbl (ix + o) )) offsetT t ) <$> plmods ) [] (indexItens ix) fkst) [0..8]
+     fks <- mapM (\ix-> fkUITable inf pgs S.empty res (fmap (indexItens ix )<$> plmods ) [] (indexItens ix oldItems) fkst) [0..8]
      l <- flabel # set text (show $ unAttr .unTB <$>   ifk)
      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      dv <- UI.div # set children (getElement <$> fks)
@@ -627,7 +633,10 @@ nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lk
               # set style [("paddig-left","10px")]
             return (vv,tb, [getElement li,getElement chw,ce])
 
-pdfFrame fty pdf = mkElement (fst fty ) UI.# sink UI.src pdf  UI.# UI.set style (snd fty)
+pdfFrame (elem,sr , call,st) pdf = mkElement (elem ) UI.# sink (strAttr sr) (call <$> pdf)  UI.# UI.set style (st)
+
+strAttr :: String -> WriteAttr Element String
+strAttr name = mkWriteAttr (set' (attr name))
 
 allNonEmpty [] = Nothing
 allNonEmpty l = Just  l

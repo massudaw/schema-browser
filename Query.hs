@@ -63,6 +63,7 @@ textToPrim "name" = PText
 textToPrim "varchar" = PText
 textToPrim "text" = PText
 textToPrim "pdf" = PMime "application/pdf"
+textToPrim "ofx" = PMime "application/x-ofx"
 textToPrim "jpg" = PMime "image/jpg"
 textToPrim "character" = PText
 textToPrim "char" = PText
@@ -198,9 +199,10 @@ intersectPred p@(Primitive _ ) (KInterval i) j (SInterval l )  | p == i =  Inter
 intersectPred p@(KInterval j ) (KInterval i) (SInterval k)  (SInterval l )   =  Interval.isSubsetOf k  l
 intersectPred p@(Primitive _ ) (KArray i) j (SComposite l )  | p == i =  Vector.elem j l
 intersectPred p1@(Primitive _ ) p2@(Primitive _) j l   | p1 == p2 =  j ==  l
+intersectPred p1 (KSerial p2 ) j (SSerial l)   | p1 == p2 =  maybe False (j ==) l
+intersectPred p1 (KOptional p2 ) j (SOptional l)   | p1 == p2 =  maybe False (j ==) l
 intersectPred p1@(KOptional i ) p2 (SOptional j) l  =  maybe False id $ fmap (\m -> intersectPred i p2 m l) j
 intersectPred p1 p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
-
 
 
 intersectionOp (KOptional i) (KOptional j) = intersectionOp i j
@@ -338,7 +340,6 @@ createTable r@(Raw sch _ _ tbl _ pk _ fk attr) = "CREATE TABLE " <> rawFullName 
         renderAttr k = keyValue k <> " " <> renderTy (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
         renderKeySet pk = T.intercalate "," (fmap keyValue (S.toList pk ))
         renderTy (KOptional ty) = renderTy ty <> ""
-        -- renderTy (KEither tl tr ) = renderTy tl <> "-" <> renderTy tr
         renderTy (KSerial ty) = renderTy ty <> ""
         renderTy (KInterval ty) = renderTy ty <> ""
         renderTy (KArray ty) = renderTy ty <> "[] "
@@ -351,7 +352,7 @@ createTable r@(Raw sch _ _ tbl _ pk _ fk attr) = "CREATE TABLE " <> rawFullName 
 
 keyOptional (k,v) = (kOptional k ,SOptional $ Just v)
 
-unKeyOptional (k  ,(SOptional v) ) = fmap (unKOptional k, ) v
+unKeyOptional (k  ,(SOptional v) ) = fmap (unKOptional k,) v
 
 kOptional (Key a  c d e) = Key a  c d (KOptional e)
 

@@ -1,4 +1,4 @@
-{-# LANGUAGE Arrows ,RecordWildCards#-}
+{-# LANGUAGE OverloadedStrings, Arrows ,RecordWildCards#-}
 module OFX where
 import System.Environment
 import Text.Parsec
@@ -28,27 +28,29 @@ tzone  = STimestamp . zonedTimeToLocalTime
 i =: j = (i,j)
 
 convertTrans (Transaction {..})  =
-  ["ftid" =: txt txFITID
-  ,"trntype" =: txt (tail $ show txTRNTYPE )
+  KV (PK  ["fitid" =: txt txFITID] [
+  "memo" =:  opt txt txMEMO
+    ])
+  ["trntype" =: txt (tail $ show txTRNTYPE )
   ,"dtposted" =: tzone txDTPOSTED
   ,"dtuser" =:  opt tzone txDTUSER
   ,"dtavail" =: opt tzone txDTAVAIL
   ,"trnamt" =: frac (read txTRNAMT )
-  ,"correctftid" =: opt txt txCORRECTFITID
+  ,"correctfitid" =: opt txt txCORRECTFITID
   ,"correctaction" =: opt (txt.show) txCORRECTACTION
   ,"srvrtid" =: opt txt txSRVRTID
   ,"checknum" =: opt txt txCHECKNUM
   ,"refnum" =: opt txt txREFNUM
   ,"sic" =: opt txt txSIC
   ,"payeeid" =: opt txt txPAYEEID
-  ,"memo" =:  opt txt txMEMO
   ]
 
 testAccount = do
   let tfile = "extrato2.ofx"
   file <- readFile tfile
-  fmap (fmap convertTrans) <$> account tfile file
+  either (const Nothing) Just . fmap (fmap convertTrans) <$> account tfile file
 
+ofxPlugin  i j = either (const Nothing) Just . fmap (fmap convertTrans) <$> account i j
 account :: String -> String -> IO (Either String [Transaction])
 account filename contents = do
    ofx <- case parse ofxFile filename contents of

@@ -156,40 +156,6 @@ applyUI el f = (\a-> getWindow el >>= \w -> runUI w (f a))
 
 tableNonRec (TB1 k ) = concat $ F.toList $  fmap (attrNonRec. unTB ) k
 
-{-
-pollingUI' inf listRes p@(BoundedPollingPlugins n deftime (table,f) a) = do
-    let plug = a inf
-    headerP <- UI.div # set text n
-    b <- UI.button # set UI.text "Submit"
-    let  convert = 60000
-    inp <- UI.input # set UI.value  (show deftime)
-    inter <- stepper (deftime*convert) (filterJust  $ fmap (fmap (*convert).readMaybe) (UI.valueChange inp) )
-    tmr <- UI.timer # sink UI.interval  inter
-    staT <- UI.button # set text "Start" # set UI.enabled True
-    stoT <- UI.button # set text "Stop" # set UI.enabled False
-    onEvent (UI.click staT) (const (do
-            UI.start tmr
-            v <- tmr # UI.get UI.interval
-            element stoT # set UI.enabled True
-            element staT # set UI.enabled False ))
-    onEvent (UI.click stoT) (const (do
-            UI.stop tmr
-            element stoT # set UI.enabled False
-            element staT # set UI.enabled True ))
-    let
-      evpoll =(unionWith const (UI.click b) (UI.tick tmr))
-    bht <- stepper Nothing (unsafeMapIO (fmap Just . const getCurrentTime) evpoll)
-    output <- UI.div  # sink text ((\v  t -> "Timer Interval: " <> show (fromIntegral v/60000) <> " minutes" <> " -  Last Poll: " <> maybe "-" show t ) <$> inter <*> bht)
-    let evb = ( (facts (filter (\i -> tdInput i && tdOutput1 i ) <$>listRes) <@ UI.click b))
-        tdInput i =  maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd t) i) (fst f)
-        tdOutput1 i =  maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ (indexTable  $ snd f) i) (snd f)
-
-    bh <- stepper []  evb
-    ev <- plug  (tidings bh evb)
-    body <- UI.div  # set children [headerP,b,inp,staT,stoT,output,ev]
-    return body
--}
-
 line n =  set  text n
 
 chooserKey inf kitems i = do
@@ -247,7 +213,7 @@ chooseKey inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   let whenWriteable = do
-            (crud,evs) <- crudUITable inf  [lplugOrcamento ,siapi3Plugin ,siapi2Plugin , gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary  ,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull, queryArtAndamento ] (facts res2) [] (allRec' (tableMap inf) table) itemListT
+            (crud,evs) <- crudUITable inf  [lplugOrcamento ,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryArtAndamento] (facts res2) [] (allRec' (tableMap inf) table) itemListT
             let eres = fmap addToList <$> evs
             res2 <- accumTds vp eres
             insertDiv <- UI.div # set children [crud]
@@ -311,7 +277,7 @@ testShowable  v s = case s of
 
 type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModification Showable])])
 
-(siapi3Polling   :: PollingPlugisIO  , siapi3Plugin :: Plugins) = (BoundedPollingPlugins "Siapi3 Andamento" 60 ("fire_project" ,staticP url) elem,BoundedPlugin2 "Siapi3 Andamento" "fire_project"(staticP url) elemp)
+(siapi3Polling   :: PollingPlugisIO  , siapi3Plugin :: Plugins) = (BoundedPollingPlugins "Siapi3 Andamento" 60 ("fire_project" ,staticP url) elem,BoundedPlugin2 "Siapi3 Andamento" "fire_project" (staticP url) elemp)
 
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
@@ -335,13 +301,13 @@ type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModificat
       returnA -< join  ( ao . fst <$> b)
 
     elem inf =  fmap (pure. catMaybes) . mapM (\inp -> do
-                              b <- dynPK url (Just  inp)
-                              let o =  fmap (first (lookKey'  inf ["fire_project_event","fire_project"])) <$> b
+                              o  <- geninf inf inp
                               maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf "fire_project")) o
                             )
-    elemp inf = maybe (return Nothing) (\inp -> do
-                              b <- dynPK url (Just inp)
-                              return $ fmap (first (lookKey'  inf ["fire_project_event","fire_project"])) <$> b)
+    elemp inf = maybe (return Nothing) (geninf inf)
+    geninf inf inp = do
+            b <- dynPK url (Just inp)
+            return $ fmap (first (lookKey'  inf ["fire_project_event","fire_project"])) <$> b
 
 
 lookKey' inf t k = justError ("lookKey' cant find key " <> show k <> " in " <> show t) $  foldr1 mplus $ fmap (\ti -> M.lookup (ti,k) (keyMap inf)) t
@@ -519,6 +485,41 @@ pagamentoServico = BoundedPlugin2 "Gerar Pagamento" "servico_venda" (staticP url
                               b <- dynPK url (Just inp)
                               return $ fmap (first (lookKey' inf ["parcelamento","servico_venda","pagamento"])) <$> b
                             )
+
+
+importarofx = BoundedPlugin2 "OFX Import" "account_file" (staticP url) elem
+  where
+    varTB = fmap ( fmap ( renderShowable ))<$>  varT
+    url :: ArrowPlug (Kleisli IO) (Maybe (TB1 (Text,Showable)))
+    url = proc t -> do
+      fn <- varT "file_name" -< t
+      i <- varT "import_file" -< t
+      r <- varT "account" -< t
+      odx "statements" -< t
+      at "statements" (proc t -> do
+        odx "fitid" -< t
+        odx "memo" -< t
+        odx "trntype" -< t
+        odx "dtposted" -< t
+        odx "dtuser" -< t
+        odx "dtavail" -< t
+        odx "trnamt" -< t
+        odx "correctfitid" -< t
+        odx "srvtid" -< t
+        odx "checknum" -< t
+        odx "refnum" -< t
+        odx "sic" -< t
+        odx "payeeid" -< t
+        ) -< t
+      b <- act (fmap join . traverse (\(SText i, SBinary r) -> ofxPlugin (T.unpack i) (BS.unpack r))) -< liftA2 (,) fn i
+      let ao :: TB1 (Text,Showable)
+          ao =  LeftTB1 $ ArrayTB1 . fmap (TB1 . fmap (Compose .Identity .Attr)) <$>  b
+          ref = [Compose $ Identity $ Attr ("statements",SOptional $ SComposite . Vector.fromList . fmap (snd . head ._pkKey . _kvKey ) <$> b)]
+          tbst = Just $ TB1 (KV (PK [] []) [Compose $ Identity $ FKT ref True [] ao])
+      returnA -< tbst
+    elem inf = maybe (return Nothing) (\inp -> do
+                b <- dynPK url (Just inp)
+                return $ fmap (first (lookKey' inf ["stmttrn","account_file"])) <$> b)
 
 
 
