@@ -357,10 +357,15 @@ paintEdit e b i  = element e # sink UI.style ((\ m n -> pure . ("background-colo
           | i == j = "blue"
           | otherwise = "green"
 
-paintBorder e b = element e # sink UI.style (greenRed . isJust <$> b)
-  where
-      greenRed True = [("border-color","green")]
-      greenRed False = [("border-color","red")]
+paintBorder e b i  = element e # sink UI.style ((\ m n -> (:[("border-style","solid"),("border-width","1px")]).("border-color",) $ cond  m n ) <$> b <*> i )
+  where cond i j
+          | isJust i  && isNothing j  = "green"
+          | isNothing i  && isNothing j = "red"
+          | isNothing i && isJust j  = "purple"
+          | i /= j = "yellow"
+          | i == j = "blue"
+          | otherwise = "green"
+
 
 
 

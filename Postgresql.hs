@@ -351,7 +351,7 @@ parseShowable (Primitive i ) =  (do
                  in p <|> doublequoted p
         PDayTime ->
              let p =  do
-                    i <- fmap (SDayTime . localTimeOfDay .  fst) . strptime "%H:%M:%S"<$> plain' "\\\",)}"
+                    i <- fmap (SDayTime . localTimeOfDay .  fst) . strptime "%H:%M:%OS"<$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i
                  in p <|> doublequoted p
         PDate ->
