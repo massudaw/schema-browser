@@ -494,6 +494,8 @@ oitems = mkWriteAttr $ \i x -> void $ do
     return x # set children [] #+ map (\i -> UI.option # i) i
 
 
+infixl 4 <#>
+b <#>  t = tidings ( b <*> facts t ) (b <@> rumors t)
 
 fileChange :: Element -> Event (Maybe String)
 fileChange el = unsafeMapUI el (const $ UI.get readFileAttr el) (UI.valueChange el)

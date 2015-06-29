@@ -156,7 +156,13 @@ applyUI el f = (\a-> getWindow el >>= \w -> runUI w (f a))
 
 tableNonRec (TB1 k ) = concat $ F.toList $  fmap (attrNonRec. unTB ) k
 
-line n =  set  text n
+line n =   set  text n
+
+attrLine i e   = do
+  let nonRec = tableNonrec i
+      attr i (k,v) = set  (strAttr (T.unpack $ keyValue k)) (renderShowable v) i
+      attrs   l i  = foldl attr i l
+  attrs (F.toList nonRec) $ line (   L.intercalate "," (F.toList $ fmap (renderShowable . snd ) $  _kvKey $ allKVRec i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) nonRec)) e
 
 chooserKey inf kitems i = do
   let initKey = pure . join $ fmap rawPK . flip M.lookup (tableMap inf) . T.pack <$> i
@@ -201,7 +207,7 @@ chooseKey inf key = mdo
   let
       filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd)
       tdiItemList = pure Nothing
-  itemList <- listBox (sorting <$> triding asc <*> multiUserSelection sortList <*> res2)  tdiItemList (pure id ) ((\l -> (\ i -> (set UI.style (noneShow $ filteringPred l i  ) ) . line (   L.intercalate "," (F.toList $ fmap (renderShowable . snd ) $  _kvKey $ allKVRec i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) $  tableNonrec i)))) <$> filterInpT)
+  itemList <- listBox (tidings res2 never {-(\a b c-> sorting b  c a ) <$>  res2 <#> triding asc <*> multiUserSelection sortList -})  itemListT (pure id ) ((\l -> (\ i -> (set UI.style (noneShow $ filteringPred l i  ) ) . attrLine i)) <$> filterInpT)
   let itemListE = unionWith const (rumors (userSelection itemList)) (rumors tdiItemList)
   initItemListB <- currentValue (facts tdiItemList)
   itemListB <- stepper initItemListB itemListE
@@ -212,15 +218,14 @@ chooseKey inf key = mdo
   let
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
-  let whenWriteable = do
-            (crud,evs) <- crudUITable inf  [lplugOrcamento ,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryArtAndamento] (facts res2) [] (allRec' (tableMap inf) table) itemListT
-            let eres = fmap addToList <$> evs
-            res2 <- accumTds vp eres
-            insertDiv <- UI.div # set children [crud]
-            chk <- checkedWidget (pure True)
-            return (res2 , Just ("CRUD",(chk,insertDiv)) )
-  (res2,crud) <- whenWriteable
+  chk <- checkedWidget (pure True)
+  (cru,evs) <- crudUITable inf  [lplugOrcamento ,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryArtAndamento] res2 [] (allRec' (tableMap inf) table) (pruneTidings (triding chk) itemListT )
+  let eres = fmap addToList <$> evs
+  iv <- currentValue (facts vp)
+  res2 <- accumB iv (fmap concatenate $ unions ((const <$> rumors vp):eres))
+  insertDiv <- UI.div # set children [cru]
   codeChk <- checkedWidget (pure False)
+  let crud = Just ("CRUD",(chk,insertDiv))
   createcode <- UI.textarea # set UI.text (T.unpack$ createTable table)
               # set style [("width","100%"),("height","300px")]
   dropcode <- UI.textarea # set UI.text (T.unpack$ dropTable table)
