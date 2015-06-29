@@ -163,11 +163,15 @@ buildUI i  tdi = case i of
             TrivialWidget offsetT offset <- offsetField 0
             let arraySize = 8
             widgets <- mapM (\i-> buildUI ti ((\o -> join . fmap (\a-> unSComposite a V.!? (i + o) )) <$> offsetT <*> tdi )) [0..arraySize]
-            let tdcomp =  fmap (SComposite . V.fromList) .  allMaybes .  L.takeWhile (isJust ) <$> (Tra.sequenceA $ triding <$> widgets)
+            let tdcomp =  fmap (V.fromList) .  allMaybes .  L.takeWhile isJust  <$> (Tra.sequenceA $ triding <$> widgets)
             sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (tail $ getElement <$> widgets) (triding <$> widgets)
+            let
+                emptyAttr = Just . maybe (SComposite  (V.fromList []) ) id
+                bres = (\o -> liftA2 (\l (SComposite m ) -> SComposite (V.take o m <> l <> V.drop  (o + 9 ) m ))) <$> offsetT <*> tdcomp <*> (emptyAttr <$> tdi)
             offsetDiv <- UI.div # set children (fmap getElement widgets)
             composed <- UI.span # set children [offset , offsetDiv]
-            return  $ TrivialWidget tdcomp composed
+            let tdres = liftA2
+            return  $ TrivialWidget bres composed
          (KInterval ti) -> do
             inf <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (\(SInterval i) -> inf' i) <$> tdi)
             sup <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (\(SInterval i) -> sup' i) <$> tdi)
@@ -611,7 +615,8 @@ fkUITable inf pgs created res2 plmods  wl oldItems  tb@(FKT ifk@[_] refl rel  (A
      l <- flabel # set text (show $ unAttr .unTB <$>   ifk)
      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      dv <- UI.div # set children (getElement <$> fks)
-     fksE <- UI.li # set children (l : offset: [dv])
+     leng <- UI.span # sink text (show .maybe 0 (length . (\(FKT _ _ _ (ArrayTB1 l) ) -> l)) <$> facts oldItems)
+     fksE <- UI.li # set children (l : offset : leng : [dv])
      let bres = indexItens tb offsetT fks oldItems
      paintEdit (getElement l) (facts bres) (facts oldItems )
      return $  TrivialWidget bres  fksE
