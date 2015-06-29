@@ -191,23 +191,21 @@ chooseKey inf key = mdo
 
   liftIO$ swapMVar  (mvarMap inf) M.empty
   let bBset = pure key :: Tidings (S.Set Key)
-  vp <- joinTEvent $ (\j -> do
-                    addTable inf (fromJust  $ M.lookup j $ pkMap inf )
+  vp <- liftIO $addTable inf (fromJust  $ M.lookup key $ pkMap inf )
 
-                    ) <$>   bBset
   -- Final Query ListBox
   filterInp <- UI.input
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
   let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
 
-  let sortSet =  F.toList . tableNonRec  . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) <$> bBset
-  sortList  <- multiListBox sortSet (F.toList <$> bBset) (pure (line . show))
+  let sortSet =  F.toList . tableNonRec  . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) $ key
+  sortList  <- multiListBox (pure sortSet) (F.toList <$> bBset) (pure (line . show))
   asc <- checkedWidget (pure True)
   let
       filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd)
       tdiItemList = pure Nothing
-  itemList <- listBox (tidings res2 never {-(\a b c-> sorting b  c a ) <$>  res2 <#> triding asc <*> multiUserSelection sortList -})  itemListT (pure id ) ((\l -> (\ i -> (set UI.style (noneShow $ filteringPred l i  ) ) . attrLine i)) <$> filterInpT)
+  itemList <- listBox (tidings res2 never ) itemListT (pure id ) ((\l -> (\ i -> (set UI.style (noneShow $ filteringPred l i  ) ) . attrLine i)) <$> filterInpT)
   let itemListE = unionWith const (rumors (userSelection itemList)) (rumors tdiItemList)
   initItemListB <- currentValue (facts tdiItemList)
   itemListB <- stepper initItemListB itemListE
@@ -219,10 +217,11 @@ chooseKey inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   chk <- checkedWidget (pure True)
-  (cru,evs) <- crudUITable inf  [lplugOrcamento ,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryArtAndamento] res2 [] (allRec' (tableMap inf) table) (pruneTidings (triding chk) itemListT )
+  (cru,evs) <- crudUITable inf plugList  res2 [] (allRec' (tableMap inf) table) (pruneTidings (triding chk) itemListT )
   let eres = fmap addToList <$> evs
-  iv <- currentValue (facts vp)
-  res2 <- accumB iv (fmap concatenate $ unions ((const <$> rumors vp):eres))
+      tsort = (\ b c -> trace "sort" . sorting b c ) <$> triding asc <*> multiUserSelection sortList
+  inisort <- currentValue (facts tsort)
+  res2 <- accumB (inisort vp) (fmap concatenate $ unions (rumors tsort :eres))
   insertDiv <- UI.div # set children [cru]
   codeChk <- checkedWidget (pure False)
   let crud = Just ("CRUD",(chk,insertDiv))
@@ -761,4 +760,4 @@ testFireMetaQuery q = testParse "incendio" "metadata"  q
 testFireQuery q = testParse "incendio" "incendio"  q
 testAcademia q = testParse "academia" "academia"  q
 
-
+plugList = [lplugOrcamento ,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryArtAndamento]

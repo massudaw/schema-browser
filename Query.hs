@@ -450,6 +450,7 @@ kattrli (FKT i _ _ _ ) =  (L.concat $ kattrl  <$> i)
 kattrli (IT i  _ ) =  [i]
 
 
+
 recursePath' isLeft ksbn invSchema (Path _ jo@(FKEitherField o l) _) = do
    let findAttr =(\i -> Compose . justError ("cant find " ). L.find ((== [i]) . kattrl  . Compose )$ ksbn)
    return $ ([Compose $ Unlabeled $  TBEither  (findAttr <$> l )  Nothing ],"")

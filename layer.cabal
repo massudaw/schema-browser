@@ -17,7 +17,7 @@ cabal-version:       >=1.10
 
 executable threepenny-layer
   main-is:             TP/Browser.hs
-  ghc-options:         -O0 -threaded -rtsopts -fprof-auto -caf-all
+  ghc-options:         -O2 -threaded -rtsopts -fprof-auto -caf-all
   -- other-modules:       
   other-extensions:    TupleSections, BangPatterns, OverloadedStrings, RecursiveDo, FlexibleInstances, RankNTypes, NoMonomorphismRestriction, UndecidableInstances, FlexibleContexts, ExistentialQuantification, DeriveDataTypeable, DeriveFunctor, DeriveFoldable, DeriveTraversable, GeneralizedNewtypeDeriving, ScopedTypeVariables, Arrows
   build-depends:       scientific,blaze-builder,base >=4.7 && <4.8

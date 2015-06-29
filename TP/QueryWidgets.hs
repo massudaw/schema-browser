@@ -84,8 +84,8 @@ instance Monoid (KV a) where
 
 pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac ) ) = do
   window <- askWindow
-  let tdInput = (\i -> maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd t) i) (fst $ head tf ) ) <$>   initItems
-  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (facts tdInput)
+  let tdInput = (\i -> isJust  $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd t) i) (fst $ head tf ) ) <$>   initItems
+  headerP <- UI.button # set text (T.unpack n) # sink0 UI.enabled (facts tdInput)
   m <- liftIO $  foldl (\i (kn,kty) -> (\m -> createFresh  n tname m kn kty) =<< i ) (return $ pluginsMap oinf) (concat fresh)
   let inf = oinf {pluginsMap = m}
       freshKeys :: [[Key]]
@@ -116,7 +116,7 @@ pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac )
       let oldItems = foldl1 (liftA2 (liftA2 mergeTB1)) (triding inp: unoldItems)
       liftEvent (rumors oldItems) (\i -> action inf  i  (liftIO . h) )
       return  [oldItems]  ))  (return [initItems] ) ( zip tf $ zip freshUI ac)
-  element el # sink UI.style (noneShow <$> facts tdInput)
+  element el # sink0 UI.style (noneShow <$> facts tdInput)
   return (el ,  (  ((\(_,o,_,_) -> o)$ last freshUI ) ))
 
 
@@ -124,32 +124,17 @@ pluginUI inf unoldItems (BoundedPlugin2 n t f action) = do
   let oldItems = unoldItems
       -- outputItems = oldItems
   overwrite <- checkedWidget (pure False)
-  let tdInput = (\i -> maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd t) i) (fst f) ) <$>  oldItems
+  let tdInput = (\i -> isJust  $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd t) i) (fst f) ) <$>  oldItems
       -- tdOutput1 = (\i -> maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd f) i) (snd f) ) <$>  outputItems
       -- tdOutput= liftA2 (\i j -> if i then True else j) (triding overwrite)  tdOutput1
   -- let ovev =((\ j i  -> if i then j else Nothing) <$>   oldItems <*> tdOutput1)
   v <- currentValue (facts oldItems)
-  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (facts tdInput)
+  headerP <- UI.button # set text (T.unpack n) # sink0 UI.enabled (facts tdInput)
   let ecv = (facts oldItems<@ UI.click headerP)
   bcv <- stepper v (facts oldItems <@ UI.click headerP)
   pgOut <- mapTEvent (action inf) (tidings bcv ecv)
   return (headerP, (fmap snd $ snd f ,   pgOut ))
 
-{-
-pluginUI inf unoldItems (BoundedPlugin n t f action) = do
-  let oldItems = unoldItems -- fmap TB1 . Tra.sequenceA <$> Tra.sequenceA (fmap snd $    unoldItems)
-  headerP <- UI.div # set text (T.unpack n)
-  overwrite <- checkedWidget (pure False)
-  let tdInput = (\i -> maybe False (const True) $ allMaybes $ fmap (\t -> (if fst t then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd t) i) (fst f) ) <$>  oldItems
-      tdOutput1 = (\i -> maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd f) i) (snd f) ) <$>  oldItems
-      tdOutput= liftA2 (\i j -> if i then True else j) (triding overwrite)  tdOutput1
-  let ovev = ((\ j i  -> if i then j else Nothing) <$>   oldItems <*> tdOutput1)
-  ev <- action inf ovev
-  bod <- UI.div  # set children [ev] # sink UI.style (noneShowSpan <$> facts tdOutput)
-  element overwrite # sink UI.style (noneShowSpan . not <$> facts tdOutput1)
-  body <- UI.div # set children [headerP,getElement overwrite,bod] # sink UI.style (noneShowSpan <$> facts tdInput)
-  return (body,  ([] , pure Nothing ))
--}
 
 intersectPredTuple  = (\i j -> intersectPred (textToPrim <$> keyType (fst i)) (textToPrim <$> keyType (fst j)) (snd i) (snd j))
 
@@ -175,11 +160,13 @@ buildUI i  tdi = case i of
          (KOptional ti) -> fmap (Just. SOptional) <$> buildUI ti (join . fmap unSOptional  <$> tdi)
          (KSerial ti) -> fmap (Just . SSerial) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
          (KArray ti) -> do
-            let arraySize = 10
-            widgets <- mapM (\i-> buildUI ti (join . fmap (\a-> unSComposite a V.!? i) <$> tdi )) [0..arraySize]
-            let tdcomp =  fmap (SComposite . V.fromList) .  allMaybes .  L.takeWhile (maybe False (const True)) <$> (Tra.sequenceA $ triding <$> widgets)
-            sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (tail $ getElement <$> widgets) (triding <$> widgets)
-            composed <- UI.span # set children (fmap getElement widgets)
+            TrivialWidget offsetT offset <- offsetField 0
+            let arraySize = 8
+            widgets <- mapM (\i-> buildUI ti ((\o -> join . fmap (\a-> unSComposite a V.!? (i + o) )) <$> offsetT <*> tdi )) [0..arraySize]
+            let tdcomp =  fmap (SComposite . V.fromList) .  allMaybes .  L.takeWhile (isJust ) <$> (Tra.sequenceA $ triding <$> widgets)
+            sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (tail $ getElement <$> widgets) (triding <$> widgets)
+            offsetDiv <- UI.div # set children (fmap getElement widgets)
+            composed <- UI.span # set children [offset , offsetDiv]
             return  $ TrivialWidget tdcomp composed
          (KInterval ti) -> do
             inf <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (\(SInterval i) -> inf' i) <$> tdi)
@@ -210,7 +197,7 @@ buildUI i  tdi = case i of
            let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
            clearB <- UI.button # set UI.text "clear"
            file <- UI.input # set UI.class_ "file_client" # set UI.type_ "file" # set UI.multiple True
-           UI.div # sink UI.html (pure "<script> $(\".file_client\").on('change',handleFileSelect); </script>")
+           UI.div # sink0 UI.html (pure "<script> $(\".file_client\").on('change',handleFileSelect); </script>")
            tdi2 <- addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fileChange file ) =<< addEvent (const Nothing <$> UI.click clearB) tdi
            let fty = case mime of
                 "application/pdf" -> ("iframe","src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
@@ -227,7 +214,7 @@ buildUI i  tdi = case i of
     justCase i Nothing = i
     oneInput tdi elem = do
             let f = facts tdi
-            inputUI <- UI.input # sink UI.value ((forceDefaultType  <$> f))
+            inputUI <- UI.input # sink0 UI.value ((forceDefaultType  <$> f))
             let pke = foldl1 (unionWith justCase ) [readType i <$> UI.valueChange inputUI,rumors  tdi]
             pk <- stepper (defaultType i)  pke
             let pkt = tidings pk pke
@@ -270,7 +257,7 @@ tbCase inf pgs a@(TBEither ls  _ ) created wl plugItens oldItems = mdo
             lw <- tbCase inf pgs lu created wl plugItens tbl
             return lw ) ls
         chk  <- buttonDivSet (zip [0..(length ls - 1)] ls)  ((join . fmap (\(TBEither _ j ) ->   join $ (\e -> fmap (,e) . (flip L.elemIndex ls) $ e ) <$> ((fmap fst <$> j)))<$>   oldItems)) (show .kattr. snd) (\i -> UI.button # set text (show $ kattr $ snd i) )
-        sequence $ zipWith (\el ix-> element  el # sink UI.style (noneShow <$> ((==ix) .fst <$> facts (triding chk) ))) ws  [0..]
+        sequence $ zipWith (\el ix-> element  el # sink0 UI.style (noneShow <$> ((==ix) .fst <$> facts (triding chk) ))) ws  [0..]
         let teitherl = foldr (liftA2 (:)) (pure []) (triding <$> ws)
             res = liftA2 (\c j -> fmap (TBEither ls . fmap (Compose . Identity) ) $ atMay j (fst c)) (triding chk) teitherl
         lid <- UI.li # set children (getElement chk : (getElement <$> ws))
@@ -396,7 +383,7 @@ processPanelTable inf attrsB res table oldItemsi = do
       editAction attr old = do
         let
             isM :: Maybe (TB1 (Key,Showable))
-            isM =  join $ fmap TB1 . allMaybes . filterKV (maybe False (const True)) <$> (liftA2 (liftF2 (\i j -> if i == j then Nothing else  traceShow (i,j) $ Just i))) (_unTB1 . tableNonRef  <$> attr) (_unTB1 . tableNonRef <$> old)
+            isM =  join $ fmap TB1 . allMaybes . filterKV (isJust ) <$> (liftA2 (liftF2 (\i j -> if i == j then Nothing else  traceShow (i,j) $ Just i))) (_unTB1 . tableNonRef  <$> attr) (_unTB1 . tableNonRef <$> old)
         res <- liftIO $ catch (maybe (return (Left "no attribute changed check edit restriction")) (\l-> Right <$> updateAttr (conn inf) l (fromJust old) table) isM ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
         return $ fmap (const (EditTB (fromJust isM) (fromJust old) )) res
 
@@ -468,12 +455,12 @@ leftItens tb@(FKT ilk refl rel _) tr  = Just . maybe  emptyFKT (\(FKT ifk refl r
   where emptyFKT = FKT (fmap (,SOptional Nothing)  <$> ilk) refl rel (LeftTB1 Nothing)
 
 indexItens tb@(FKT ifk refl rel _) offsetT fks oldItems  = bres
-  where  bres2 =    allMaybes .  L.takeWhile (maybe False (const True))  <$> Tra.sequenceA (fmap (fmap (\(FKT i _ _ j ) -> (head $ fmap (snd.unAttr.unTB) $ i,  j)) )  . triding <$> fks)
+  where  bres2 =    allMaybes .  L.takeWhile isJust  <$> Tra.sequenceA (fmap (fmap (\(FKT i _ _ j ) -> (head $ fmap (snd.unAttr.unTB) $ i,  j)) )  . triding <$> fks)
          emptyFKT = Just . maybe (FKT (fmap (,SComposite (V.empty)) <$> ifk) refl rel (ArrayTB1 []) ) id
          bres = (\o -> liftA2 (\l (FKT [lc] refl rel (ArrayTB1 m )) -> FKT ( fmap  ( (,SComposite $ V.fromList $  ((L.take o $ F.toList $ unSComposite $snd $ (unAttr $ runIdentity $ getCompose lc)  )<> fmap fst l <> (L.drop (o + 9 )  $ F.toList $ unSComposite $snd $ (unAttr $ runIdentity $ getCompose lc)  )))) <$> ifk) refl rel (ArrayTB1 $ L.take o m <> fmap snd l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
 
 indexItens tb@(IT na _) offsetT items oldItems  = bres
-   where bres2 = fmap (fmap (\(IT na j ) -> j)) . allMaybes . L.takeWhile (maybe False (const True)) <$> Tra.sequenceA (triding <$> items)
+   where bres2 = fmap (fmap (\(IT na j ) -> j)) . allMaybes . L.takeWhile isJust <$> Tra.sequenceA (triding <$> items)
          emptyFKT = Just . maybe (IT  (na,SOptional Nothing) (ArrayTB1 []) ) id
          bres = (\o -> liftA2 (\l (IT ns (ArrayTB1 m )) -> IT   ns (ArrayTB1 $ L.take o m <> l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
 
@@ -515,7 +502,7 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
                 (IT  na tb1)) [0..8]
       let tds = triding <$> items
           es = getElement <$> items
-      sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (tail es ) ( tds )
+      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (tail es ) ( tds )
       fk <- UI.li # set  children (l: offset:  (getElement <$> items))
       let bres = indexItens tb offsetT items oldItems
       paintEdit  (getElement l) (facts bres) (facts oldItems)
@@ -537,6 +524,9 @@ pruneTidings chw tds =   tidings chkBH chkAll
     chkBH = (\b e -> if b then e else Nothing ) <$> facts chw <*> facts tds
 
 
+sink0 attr uiv ui =  do
+  v <- currentValue uiv
+  ui # set attr v # sink attr uiv
 
 fkUITable
   ::
@@ -571,10 +561,10 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
       let
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd
-          sortList :: Tidings ([Maybe (TB1 (Key,Showable))])
-          sortList = (Nothing:) <$>  fmap (fmap Just) (tidings (sorting <$> pure True <*> pure (fmap snd rel ) <*> res2) never)
+          sortList :: Tidings ([(TB1 (Key,Showable))] -> [(TB1 (Key,Showable))])
+          sortList =  sorting  <$> pure True <*> pure (fmap snd rel )
           Just table = M.lookup (S.fromList $ findPK tb1 ) (pkMap inf)
-      ol <- listBox sortList  (tidings bselection  never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+      ol <- listBox (tidings ((Nothing:) <$>  fmap (fmap Just) res2) never) (tidings bselection  never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
       let evsel = unionWith const (rumors $ join <$> userSelection ol) (rumors tdi)
       prop <- stepper Nothing evsel
@@ -586,7 +576,8 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
           bselection = fmap Just <$> st
           sel = fmap head $ unions $ [(rumors $ join <$> userSelection ol), rumors tdi] <> (fmap modifyTB <$> evs)
       st <- stepper Nothing sel
-      res2  <-  accumB res  (fmap concatenate $ unions $ fmap addToList <$> evs)
+      inisort <- currentValue (facts sortList)
+      res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ (rumors sortList : (fmap addToList <$> evs)))
       let
         reorderPK l = fmap (\i -> justError "reorder wrong" $ L.find ((== i).fst) l )  (unAttr . unTB <$> ifk)
         lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
@@ -594,17 +585,17 @@ fkUITable inf pgs created res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1
         box = TrivialWidget (tidings st sel) (getElement ol)
         fksel =  (\box -> fmap (\ibox -> FKT (fmap (_tb . Attr). reorderPK . fmap lookFKsel $ ibox) refl rel (fromJust box) ) .  join . fmap findPKM $ box ) <$>  ( triding box)
       element panelItems
-          # set UI.style (noneShow False)
-          # sink UI.style (noneShow <$> (facts $ triding chw))
+          # sink0 UI.style (noneShow <$> (facts $ triding chw))
           # set style [("padding-left","10px")]
       element celem
           # set UI.style (noneShow False)
-          # sink UI.style (noneShow <$> (facts $ triding chw))
+          # sink0 UI.style (noneShow <$> (facts $ triding chw))
           # set style [("padding-left","10px")]
       element celem
       fk <- UI.li # set  children [l, getElement box,filterInp,getElement chw,celem, panelItems ]
       paintEdit  (getElement l) (facts fksel) ( facts oldItems)
       return $ TrivialWidget fksel fk
+
 
 
 fkUITable inf pgs created res plmods  wl oldItems  tb@(FKT ilk refl rel  (LeftTB1 (Just tb1 ))) = do
@@ -616,9 +607,9 @@ fkUITable inf pgs created res2 plmods  wl oldItems  tb@(FKT ifk@[_] refl rel  (A
          fkst = FKT (fmap (fmap unKArray ) ifk) refl (fmap (first (unKArray)) rel)  tb1
          rr = tablePKSet tb1
      res <- liftIO$ addTable inf (fromJust $ M.lookup rr $ pkMap inf )
-     fks <- mapM (\ix-> fkUITable inf pgs S.empty res (fmap (unIndexItens offsetT ix) <$> plmods ) [] (unIndexItens offsetT ix oldItems) fkst) [0..8]
+     fks <- mapM (\ix-> fkUITable inf pgs S.empty res (fmap (unIndexItens offsetT ix) <$> plmods ) [] (unIndexItens offsetT ix oldItems )  fkst) [0..8]
      l <- flabel # set text (show $ unAttr .unTB <$>   ifk)
-     sequence $ zipWith (\e t -> element e # sink UI.style (noneShow . maybe False (const True) <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
+     sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      dv <- UI.div # set children (getElement <$> fks)
      fksE <- UI.li # set children (l : offset: [dv])
      let bres = indexItens tb offsetT fks oldItems
@@ -669,11 +660,11 @@ nonInjectiveSelection inf pgs created wl  attr@(FKT fkattr refl ksjoin tbfk ) lk
             res2  <-  accumTds lks eres
             chw <- checkedWidget (pure False)
             element ce
-              # sink UI.style (noneShow <$> (facts $ triding chw))
+              # sink0 UI.style (noneShow <$> (facts $ triding chw))
               # set style [("paddig-left","10px")]
             return (vv,tb, [getElement li,getElement chw,ce])
 
-pdfFrame (elem,sr , call,st) pdf = mkElement (elem ) UI.# sink (strAttr sr) (call <$> pdf)  UI.# UI.set style (st)
+pdfFrame (elem,sr , call,st) pdf = mkElement (elem ) UI.# sink0 (strAttr sr) (call <$> pdf)  UI.# UI.set style (st)
 
 strAttr :: String -> WriteAttr Element String
 strAttr name = mkWriteAttr (set' (attr name))
@@ -686,3 +677,4 @@ sorting b ss  =  L.sortBy (ifApply b flip (comparing (\i ->  fmap (\s -> fmap sn
   where ifApply True i =  i
         ifApply False _ = id
 
+pruneArray ix tds = if ix > 1 then pruneTidings (isJust <$> tds (ix -1)) (tds ix) else tds ix

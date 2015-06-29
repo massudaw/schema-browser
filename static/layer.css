@@ -85,3 +85,15 @@ ul.navlist > li
   display: inline;
   list-style-type: none;
 }
+
+option[vencimento^="-"]
+{
+    background-color: lightcoral;
+    opacity: ;
+}
+
+option[vencimento^="-"]:before
+{
+    content:   attr(vencimento  float);
+    
+}
