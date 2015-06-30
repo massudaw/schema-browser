@@ -152,7 +152,6 @@ attrUITable  tAttr' evs (Attr i) = do
       attrUI <- buildUI (textToPrim <$> keyType i) tdi
       let insertT = fmap (Attr .(i,)) <$> (triding attrUI)
       return $ TrivialWidget insertT  (getElement attrUI)
-  where tAttr = fmap (\(Attr i)-> snd i) <$> tAttr'
 buildUI i  tdi = case i of
          (KOptional ti) -> do
            tdnew <- fmap (Just. SOptional) <$> buildUI ti (join . fmap unSOptional  <$> tdi)
@@ -245,8 +244,8 @@ buildUI i  tdi = case i of
             return $ TrivialWidget pkt sp
 
 
-forceDefaultType  (Just i ) = renderShowable i
-forceDefaultType  (Nothing) = ""
+forceDefaultType (Just i ) = renderShowable i
+forceDefaultType Nothing = ""
 
 diffOptional (SOptional i) = fmap (SOptional .Just)  . join $   unRSOptional' <$> i
 diffOptional (SSerial i )  = fmap (SSerial .Just) . join $  unRSOptional' <$>i
@@ -453,9 +452,13 @@ editedMod :: (Traversable f ,Ord a) => f a ->  Maybe [(a,b)] -> Maybe (f (a,b))
 editedMod  i  m=  join $ fmap (\mn-> look mn i ) m
   where look mn k = allMaybes $ fmap (\ki -> fmap (ki,) $  M.lookup ki (M.fromList mn) ) k
 
-showFKE v =  UI.div # set text (L.take 100 $ L.intercalate "," $ fmap renderShowable $ F.toList $  _kvKey $ allKVRec $  snd <$> v)
+eitherDescPK (PK i j )
+  |not ( L.null j) =  j
+  |  otherwise = i
 
-showFK = (pure ((\v j ->j  # set text (L.take 100 $ L.intercalate "," $ fmap renderShowable $ F.toList $  _kvKey $ allKVRec $  snd <$> v))))
+showFKE v =  UI.div # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ F.toList $ eitherDescPK $  _kvKey $ allKVRec $  snd <$> v)
+
+showFK = (pure ((\v j ->j  # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ F.toList $  eitherDescPK $ _kvKey $ allKVRec $  snd <$> v))))
 
 tablePKSet  tb1 = S.fromList $ fmap (unAttr . runIdentity . getCompose ) $ _pkKey $ _kvKey $ unTB1 $ tableNonRef tb1
 
@@ -597,8 +600,7 @@ fkUITable inf pgs res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ ) )
       prop <- stepper Nothing evsel
       let tds = tidings prop evsel
       chw <- checkedWidget (pure False)
-      (celem,tableb) <- uiTable inf pgs (rawName table) (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  (pruneTidings (triding chw) tds )
-      (panelItems,evs) <- processPanelTable inf (facts tableb) res2 table tds
+      (celem,evs) <- crudUITable inf pgs  res2 (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  (pruneTidings (triding chw) tds )
       let
           bselection = fmap Just <$> st
           sel = fmap head $ unions $ [(rumors $ join <$> userSelection ol), rumors tdi] <> (fmap modifyTB <$> evs)
@@ -611,15 +613,12 @@ fkUITable inf pgs res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ ) )
           where kn = justError "relTable" $ M.lookup ko relTable
         box = TrivialWidget (tidings st sel) (getElement ol)
         fksel =  (\box -> fmap (\ibox -> FKT (fmap (_tb . Attr). reorderPK . fmap lookFKsel $ ibox) refl rel (fromJust box) ) .  join . fmap findPKM $ box ) <$>  ( triding box)
-      element panelItems
-          # sink0 UI.style (noneShow <$> (facts $ triding chw))
-          # set style [("padding-left","10px")]
       element celem
           # set UI.style (noneShow False)
           # sink0 UI.style (noneShow <$> (facts $ triding chw))
           # set style [("padding-left","10px")]
       element celem
-      fk <- UI.div # set  children [getElement box,filterInp,getElement chw,celem, panelItems ]
+      fk <- UI.div # set  children [getElement box,filterInp,getElement chw,celem]
       -- paintEdit  (getElement l) (facts fksel) ( facts oldItems)
       return $ TrivialWidget fksel fk
 
