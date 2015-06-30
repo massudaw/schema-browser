@@ -607,6 +607,9 @@ unSSerial i = traceShow ("unSSerial No Pattern Match SSerial-" <> show i) Nothin
 unRSOptional (SOptional i) = join $ fmap unRSOptional i
 unRSOptional i = traceShow ("unRSOptional No Pattern Match SOptional-" <> show i) Nothing
 
+unRSOptional2 (SOptional i) = join $ unRSOptional' <$> i
+unRSOptional2 i   = Just i
+
 unRSOptional' (SOptional i) = join $ unRSOptional' <$> i
 unRSOptional' (SSerial i )  = join $ unRSOptional' <$>i
 unRSOptional' i   = Just i

@@ -293,8 +293,10 @@ type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModificat
       odx "aproval_date" -< t
       odx "andamentos:andamento_date" -<  t
       odx "andamentos:andamento_description" -<  t
+      odx "andamentos:andamento_user" -<  t
+      odx "andamentos:andamento_status" -<  t
       b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= 14 then  return Nothing else siapi3  i j k )) -<   (liftA3 (,,) protocolo ano cpf)
-      let convertAndamento [_,da,desc,s,sta] = TB1 $ fmap (Compose . Identity .Attr ) $ KV (PK [] []) ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc)] )
+      let convertAndamento [_,da,desc,user,sta] = TB1 $ fmap (Compose . Identity .Attr ) $ KV (PK [] []) ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc),("andamento_user",SOptional $ Just $ SText $ T.pack  user),("andamento_status",SOptional $ Just $ SText $ T.pack sta)] )
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
       let ao bv = case  join $ (findTB1 (== iat  bv)<$> (fmap (first keyValue) <$> t)) of
                     Just i ->  Nothing

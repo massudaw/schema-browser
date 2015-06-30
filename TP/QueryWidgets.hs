@@ -260,17 +260,17 @@ tbCase inf pgs i@(FKT ifk _ _ tb1 ) wl plugItens oldItems  = do
             tbi = fmap (Compose . Identity)  <$> oldItems
             thisPlugs = filter (any ((== (fmap (keyValue.unAttr.runIdentity.getCompose) ifk)) . head ) . fst) $  plugItens
             pfks =  (first ( filter (not . L.null ) . fmap (L.drop 1) . L.filter ((== (fmap (keyValue.unAttr.runIdentity.getCompose) ifk)) . head ))  . second ( fmap ( join .  fmap (fmap  (runIdentity . getCompose ) . findTB1 ((== ifk ) . fmap (fmap fst )  . tbAttr . runIdentity . getCompose  )))  ) <$> thisPlugs)
-        res <- liftIO$ addTable inf table
+        res <- liftIO $ addTable inf table
         tds <- fkUITable inf pgs res pfks (filter (isReflexive .fst) wl) (fmap (runIdentity . getCompose ) <$>  tbi) i
         dv <- UI.li # set children [l,getElement tds]
-        paintEdit l (facts (triding tds)) (facts oldItems)
+        paintEdit l (traceShowId <$> facts (triding tds)) (traceShowId <$> facts oldItems)
         return $ TrivialWidget (triding tds) dv
 
 tbCase inf pgs i@(IT na tb1 ) wl plugItens oldItems  = do
         l <- flabel # set text (show  na )
         let tbi = fmap (Compose . Identity ) <$> oldItems
             thisPlugs = filter ((any (== [keyValue na ]) . head ) . fst) $  plugItens
-            pfks =  first ( filter (not . L.null ) . fmap (L.drop 1) . L.filter ((== [keyValue na]) . head ))  . second ( fmap ( join .  fmap (fmap  ( runIdentity . getCompose ) . findTB1 ((== [na]) . kattr  .fmap fst )))  ) <$> thisPlugs
+            pfks =  first (filter (not . L.null ) . fmap (L.drop 1) . L.filter ((== [keyValue na]) . head ))  . second ( fmap ( join .  fmap (fmap (runIdentity . getCompose) . findTB1 ((== [na]) . kattr  .fmap fst )))  ) <$> thisPlugs
         tds <- iUITable inf pgs pfks (fmap (runIdentity . getCompose ) <$>  tbi) i
         dv <- UI.li # set children [l,getElement tds]
         paintEdit l (facts (triding tds)) (facts oldItems)
@@ -672,7 +672,9 @@ nonInjectiveSelection inf pgs wl  attr@(FKT fkattr refl ksjoin tbfk ) lks selks 
       return $ TrivialWidget bres o
   where inner tbfk sel fkattr' iold = mdo
             let
-                vv =  join . fmap (lorder $ unAttr <$> fkattr' ) . fmap concat . allMaybes  <$> iold
+                unRKOptional (Key a b d (KOptional c)  ) = Key a b d c
+                unRKOptional (Key a b d c  ) = Key a b d c
+                vv =  join . (fmap (traverse (traverse unRSOptional2. first unRKOptional ))) . join . fmap (lorder $ unAttr <$> fkattr' ) . fmap concat . allMaybes  <$> iold
                 tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 (KV (PK  l _ ) _ ))-> interPoint ksjoin k  (unAttr . unTB <$> l)) ) i) j ) <$> lks <*> vv
             li <- wrapListBox res2 tb (pure id) showFK
             (ce,evs) <- crudUITable inf pgs (facts res2) [] tbfk  tb
