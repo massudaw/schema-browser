@@ -3,7 +3,7 @@ module Postgresql where
 import Types
 import Query
 import GHC.Stack
-import Debug.Trace
+-- import Debug.Trace
 import Data.Functor.Identity
 import Data.Functor.Compose
 import Data.Scientific hiding(scientific)
@@ -332,7 +332,7 @@ parseShowable
 parseShowable (Primitive i ) =  (do
    case i of
         PMime _ -> let
-              pr = SBinary . fst . B16.decode . BS.drop 3   <$>  plain' "\",)}"
+              pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}" <* takeWhile (=='\\'))
                 in doublequoted  pr <|> pr
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))

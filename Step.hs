@@ -128,8 +128,8 @@ atR i (P s (Kleisli j) )  =  P (BF.second nest . BF.first nest $ s)  ( Kleisli (
 
 at i (P s j)  =  P (BF.second nest  . BF.first nest  $ s)  (j . arr (indexTB1 ind )  )
   where ind = splitIndex i
-        nest (Many i) = Many . pure . Nested ind $ Many i
         nest (Many [] ) = Many []
+        nest (Many i) = Many . pure . Nested ind $ Many i
 
 idx = indexTableInter False
 idxT = indexTableInter True
@@ -281,18 +281,21 @@ findPKM i  = Just $ findPK i
 
 attrNonRec (FKT ifk _ _ _ ) = concat $ fmap kattr ifk
 attrNonRec (TBEither _ _  ifk ) =   (maybe [] id $ fmap kattr ifk)
-attrNonRec (IT ifk  _ ) = []
+-- attrNonRec (IT ifk  _ ) = []
 attrNonRec (Attr _ i ) = [i]
+attrNonRec i = errorWithStackTrace (show i)
+
 
 kattr = kattri . runIdentity . getCompose
 kattri (Attr _ i ) = [i]
 kattri (TBEither _ i l  ) =  (maybe [] id $ fmap kattr l )
 kattri (FKT i _ _ _ ) =  (L.concat $ kattr  <$> i)
-kattri (IT _  i ) =  recTB i
+kattri i = errorWithStackTrace (show i)
+{-kattri (IT _  i ) =  recTB i
   where recTB (TB1 i ) =  concat $ fmap kattr (toList i)
         recTB (ArrayTB1 i ) = concat $ fmap recTB i
         recTB (LeftTB1 i ) = concat $ toList $ fmap recTB i
-
+-}
 
 keyattr = keyattri . runIdentity . getCompose
 keyattri (Attr i  _ ) = [i]

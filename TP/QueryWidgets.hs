@@ -77,7 +77,7 @@ createFresh n tname pmap i ty  =  do
   k <- newKey i ty
   return $ M.insert (n,tname,i) k pmap
 
-testTable i =  (\t -> join . fmap (allMaybes . F.toList . fmap (unRSOptional' .snd)) $ traceShowId $ (checkTable  $ traceShowId t)$ traceShowId  i)
+testTable i =  (\t -> join . fmap (allMaybes . F.toList . fmap (unRSOptional' .snd)) $  (checkTable  t) i)
 
 instance Monoid (KV a) where
   mempty = KV (PK [] []) []
@@ -292,7 +292,7 @@ tbCase inf pgs i@(IT na tb1 ) wl plugItens oldItems  = do
         l <- flabel # set text (show  na )
         let tbi = fmap (Compose . Identity ) <$> oldItems
             thisPlugs = filter (hasProd (isNested (IProd [keyValue na ])) . fst) $  plugItens
-            pfks =  first ( uNest . justError "No nested Prod IT" . (findProd (isNested (IProd [keyValue na]))))  . second ( fmap ( join .  fmap (fmap (runIdentity . getCompose) . findTB1 ((== [na]) . kattr  .fmap fst )))  ) <$> thisPlugs
+            pfks =  first ( uNest . justError "No nested Prod IT" . (findProd (isNested (IProd [keyValue na]))))  . second ( fmap ( join .  fmap (fmap (runIdentity . getCompose) . findTB1 ((== [na]) . keyattr )))  ) <$> thisPlugs
         tds <- iUITable inf pgs pfks (fmap (runIdentity . getCompose ) <$>  tbi) i
         dv <- UI.div #  set UI.class_ "col-xs-12" # set children [l,getElement tds]
         paintEdit l (facts (triding tds)) (facts oldItems)
@@ -312,7 +312,7 @@ tbCase inf pgs a@(TBEither n ls  _ ) wl plugItens oldItems = mdo
                  lu = runIdentity $ getCompose l
             lw <- tbCase inf pgs lu wl plugItens tbl
             return lw ) ls
-        chk  <- buttonDivSet (zip [0..(length ls - 1)] ls)  ((join . fmap (\(TBEither n _ j ) ->   join $ (\e -> fmap (,e) . (flip L.elemIndex ls) $ e ) <$> ((fmap fst <$> j)))<$>   oldItems)) (show .kattr. snd) (\i -> UI.button # set text (show $ kattr $ snd i) )
+        chk  <- buttonDivSet (zip [0..(length ls - 1)] ls)  ((join . fmap (\(TBEither n _ j ) ->   join $ (\e -> fmap (,e) . (flip L.elemIndex ls) $ e ) <$> ((fmap fst <$> j)))<$>   oldItems)) (show .keyattr . snd) (\i -> UI.button # set text (show $ keyattr $ snd i) )
         sequence $ zipWith (\el ix-> element  el # sink0 UI.style (noneShow <$> ((==ix) .fst <$> facts (triding chk) ))) ws  [0..]
         let teitherl = foldr (liftA2 (:)) (pure []) (triding <$> ws)
             res = liftA2 (\c j -> fmap (TBEither n ls . fmap (Compose . Identity) ) $ atMay j (fst c)) (triding chk) teitherl
@@ -428,19 +428,17 @@ processPanelTable
    -> UI (Element,[Event (Modification Key Showable)])
 processPanelTable inf attrsB res table oldItemsi = do
   let
-      -- fkattrsB = fmap (concat . F.toList . fmap (attrNonRec . unTB) . _unTB1. tableNonRef ) <$> attrsB
-      --oldItems = fmap (concat . F.toList . fmap (attrNonRec .unTB) . _unTB1. tableNonRef ) <$> oldItemsi
       contains v  = maybe True (const False) . L.find (onBin (==) (_pkKey._kvKey . _unTB1) v )
   insertB <- UI.button # set UI.class_ "buttonSet" # set text "INSERT" # set UI.style (noneShowSpan ("INSERT" `elem` rawAuthorization table ))
   -- Insert when isValid
-        -- # sink UI.enabled (liftA2 (&&) (isJust <$> fkattrsB) (liftA2 (\i j -> maybe False (flip contains j) i  ) attrsB  res))
+        # sink UI.enabled (liftA2 (&&) (isJust . fmap tableNonRef <$> attrsB ) (liftA2 (\i j -> maybe False (flip contains j) i  ) attrsB  res))
   editB <- UI.button # set text "EDIT" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table ))
 
   -- Edit when any persistent field has changed
         # sink UI.enabled (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (tb1Diff (\l m -> if l  /= m then traceShow (l,m) (True,(l,m)) else (False,(l,m))) )  i j) (fmap tableNonRef <$> attrsB) (fmap tableNonRef <$> facts oldItemsi))
   deleteB <- UI.button # set text "DELETE" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table ))
   -- Delete when isValid
-        -- # sink UI.enabled ( liftA2 (&&) (isJust <$> facts oldItems) (liftA2 (\i j -> maybe False (not . flip contains j) i  ) attrsB res))
+        # sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (not . flip contains j) i  ) attrsB res))
   let
       deleteAction ki =  do
         res <- liftIO $ catch (Right <$> delete (conn inf) ki table) (\e -> return $ Left (show $ traceShowId  (e :: SomeException) ))

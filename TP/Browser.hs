@@ -154,7 +154,7 @@ unSOptional' i   = Just i
 
 applyUI el f = (\a-> getWindow el >>= \w -> runUI w (f a))
 
-tableNonRec (TB1 k ) = concat $ F.toList $  fmap (attrNonRec. unTB ) k
+tableNonRec k  =  F.toList $  tableNonRef  k
 
 line n =   set  text n
 
@@ -181,7 +181,7 @@ chooserKey inf kitems i = do
   body <- UI.div # sink items (facts (pure . chooseKey inf <$> bBset ))
   UI.div # set children [filterInp,getElement bset, body]
 
-tableNonrec (TB1 k ) = concat $ F.toList $ _kvAttr $ fmap (attrNonRec .unTB) k
+tableNonrec k  = F.toList $ Compose $  _kvAttr $ (\(TB1 k)-> k) $ tableNonRef k
 
 chooseKey
   ::
@@ -256,13 +256,15 @@ testShowable  v s = case s of
       odx "aproval_date" -< t
       at "andamentos" (proc t -> do
         odx "andamento_date" -<  t
+        odx "andamento_user" -<  t
+        odx "andamento_status" -<  t
         odx "andamento_description" -<  t) -< t
       b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else (siapi2  i j)  )) -<  (liftA2 (,) protocolo ano )
       let ao bv =   case  join (findTB1 (== iat  bv)<$> (mapKey keyValue . fmap (first keyValue) <$> t)) of
                     Just i -> Nothing
                     Nothing -> Just $ TB1 $ KV (PK [] []) ( [iat bv])
           convertAndamento :: [String] -> TB2 Text (Text,Showable)
-          convertAndamento [da,des] =  TB1 $ fmap attrT  $ KV  (PK [] []) ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))] )
+          convertAndamento [da,des] =  TB1 $ fmap attrT  $ KV  (PK [] []) ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des)),("andamento_user",SOptional Nothing ),("andamento_status",SOptional Nothing )])
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
                                             "andamentos"
@@ -304,8 +306,8 @@ type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModificat
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
       let ao (bv,taxa) = case  join $ (findTB1 (== iat  bv)<$> (mapKey keyValue . fmap (first keyValue) <$> t)) of
                     Just i ->  Nothing
-                    Nothing ->    Just $ TB1 $ KV (PK [] []) ( [attrT ("taxa_paga",SBoolean taxa),iat bv])
-          iat bv = Compose . Identity $ (IT
+                    Nothing ->    Just $ TB1 $ KV (PK [] []) ( [attrT ("taxa_paga",SOptional $ Just $  SBoolean taxa),iat bv])
+          iat bv = traceShowId $ Compose . Identity $ (IT
                                             "andamentos"
                                             (LeftTB1 $ Just $ ArrayTB1 $ reverse $ fmap convertAndamento bv))
       returnA -< join  ( ao <$> b)
@@ -730,8 +732,8 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
             let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
             listRes <- queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
             let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
-                tdInput i =  isJust  $ (\t -> join . fmap (allMaybes . F.toList . fmap (unRSOptional' .snd)) $ (checkTable $ t) i) (fst f)
-                tdOutput1 i =  isJust  $ (\f -> join . fmap (allMaybes . F.toList . fmap (unRSOptional' .snd)) $ (checkTable $ f) i) (snd f)
+                tdInput i =  isJust  $ testTable i (fst f)
+                tdOutput1 i =  isJust  $ testTable i (snd f)
             i <- elem inf evb
             handler i
             end <- getCurrentTime

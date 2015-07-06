@@ -156,7 +156,7 @@ renderShowable i = shw i
     shw (SDate a) = show a
     shw (SDayTime a) = show a
     shw (SSerial a) = show a
-    shw (SBinary a) = show "<Binary>"
+    shw (SBinary _) = show "<Binary>"
     shw (SPosition a) = show a
     shw (SOptional a) = show a
     shw (SInterval a) = showInterval a
@@ -247,12 +247,12 @@ updateAttr conn kv kold t = fmap (,TableModification Nothing t (EditTB  kv  kold
     skv = runIdentity . getCompose <$> F.toList (_unTB1 $ tableNonRefK kv)
 
 
-attrType (Attr _ i)= keyType (fst i)
-attrType (IT i _) = keyType $ i
+attrType (Attr i _)= keyType i
+attrType (IT i _) = keyType  i
 attrType i = error $ " no attr value instance " <> show i
 
-attrValueName (Attr _ i)= keyValue (fst i)
-attrValueName (IT i  _) = (keyValue   i)
+attrValueName (Attr i _ )= keyValue i
+attrValueName (IT i  _) = keyValue i
 attrValueName i = error $ " no attr value instance " <> show i
 
 type TBValue = TB1 (Key,Showable)

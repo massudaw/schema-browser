@@ -115,25 +115,25 @@ data FKey a
 instance Bifunctor (TB Identity ) where
   first f (Attr k i) = Attr (f k) i
   first f (IT k i) = IT (f k) (mapKey f i)
-  first f (FKT k l m  i) = FKT  (fmap ((Compose . Identity . first f . runIdentity . getCompose)) k) l (fmap (first f . second f) m   ) (mapKey f i)
-  first f (TBEither k l m ) = TBEither k (fmap ((Compose . Identity . first f . runIdentity . getCompose)) l) (fmap ((Compose . Identity . first f . runIdentity . getCompose))  m)
+  first f (FKT k l m  i) = FKT  (fmap (Compose . Identity . first f . runIdentity . getCompose) k) l (fmap (first f . second f) m   ) (mapKey f i)
+  first f (TBEither k l m ) = TBEither (f k) ( fmap (fmap f . (Compose . Identity . first f . runIdentity . getCompose)) l) (fmap ((Compose . Identity . first f . runIdentity . getCompose))  m)
 
   second = fmap
 
 data TB f k a
   = FKT -- Foreign Table
-    { _tbref :: ![Compose f (TB f k) a]
-    , _reflexive :: ! Bool
+    { _tbref :: [Compose f (TB f k) a]
+    , _reflexive ::  Bool
     , _fkrelation :: [(k ,k)]
-    , _fkttable :: ! (FTB1 (Compose f (TB f k)) a)
+    , _fkttable ::  (FTB1 (Compose f (TB f k)) a)
     }
 
   | IT -- Inline Table
     { _ittableName :: k
-    , _fkttable :: ! (FTB1 (Compose f (TB f k)) a)
+    , _fkttable ::  (FTB1 (Compose f (TB f k)) a)
     }
   | TBEither
-    Key [(Compose f (TB f k) Key )]  (Maybe (Compose f (TB f k) a))
+    k [(Compose f (TB f k) k )]  (Maybe (Compose f (TB f k) a))
   | Attr
     { _tbattrkey :: k
     ,_tbattr :: a   }
