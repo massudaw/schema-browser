@@ -17,7 +17,6 @@
 
 module Query where
 
--- import Warshal
 import Data.Functor.Apply
 import Data.Functor.Compose
 import Data.Unique
@@ -35,6 +34,7 @@ import qualified Data.ExtendedReal as ER
 
 import GHC.Int
 import Utils
+import Data.Void
 
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Internal
@@ -113,8 +113,6 @@ isOptional _ = False
 isArray (KArray _) = True
 isArray (KOptional i) = isArray i
 isArray _ = False
-
-
 
 
 
@@ -227,7 +225,7 @@ intersectionOp i j = inner " = "
 showTable t  = rawSchema t <> "." <> rawName t
 
 delete
-  :: ToField (TB Identity (Key,Showable))  =>
+  :: ToField (TB Identity Key (Key,Showable))  =>
      Connection ->  TB1 (Key, Showable) -> Table -> IO GHC.Int.Int64
 delete conn kold t = execute conn (fromString $ traceShowId $ T.unpack del) koldPk
   where
@@ -237,7 +235,7 @@ delete conn kold t = execute conn (fromString $ traceShowId $ T.unpack del) kold
     del = "DELETE FROM " <> rawFullName t <>   pred
 
 updateAttr
-  :: ToField (TB Identity (Key,Showable)) =>
+  :: ToField (TB Identity Key (Key,Showable)) =>
      Connection -> TB1 (Key, Showable) -> TB1 (Key, Showable) -> Table -> IO (GHC.Int.Int64,TableModification Showable)
 updateAttr conn kv kold t = fmap (,TableModification Nothing t (EditTB  kv  kold  )) $ execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk)
   where
@@ -249,12 +247,12 @@ updateAttr conn kv kold t = fmap (,TableModification Nothing t (EditTB  kv  kold
     skv = runIdentity . getCompose <$> F.toList (_unTB1 $ tableNonRefK kv)
 
 
-attrType (Attr i)= keyType (fst i)
-attrType (IT i _) = keyType $ fst i
+attrType (Attr _ i)= keyType (fst i)
+attrType (IT i _) = keyType $ i
 attrType i = error $ " no attr value instance " <> show i
 
-attrValueName (Attr i)= keyValue (fst i)
-attrValueName (IT i  _) = (keyValue  $ fst i)
+attrValueName (Attr _ i)= keyValue (fst i)
+attrValueName (IT i  _) = (keyValue   i)
 attrValueName i = error $ " no attr value instance " <> show i
 
 type TBValue = TB1 (Key,Showable)
@@ -264,7 +262,7 @@ type TBType = TB1 Key
 insertAttr
   :: (MonadIO m
      ,Functor m
-     ,ToField (TB Identity (Key, Showable)))
+     ,ToField (TB Identity Key (Key, Showable)))
      => (TBType -> RowParser TBValue)
      -> Connection
      -> TBValue
@@ -285,20 +283,20 @@ tableNonRefK (ArrayTB1 i) = ArrayTB1 $ tableNonRefK <$> i
 tableNonRefK (LeftTB1 i ) = LeftTB1 $ tableNonRefK <$> i
 tableNonRefK (TB1 (KV (PK l m ) n)  )  = TB1 (KV (PK (fun l) (fun m) ) (fun n))
   where
-        nonRef i@(Attr _ ) = [Compose $ Identity $ i]
+        nonRef i@(Attr _ _ ) = [Compose $ Identity $ i]
         nonRef (FKT i True _ _ ) = i
         -- Fix Either expansion
-        nonRef (TBEither kj j ) =  maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap fst j ) then j else addDefault i) kj) j
+        nonRef (TBEither n kj j ) =  maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap fst j ) then j else addDefault i) kj) j
         nonRef (FKT i False _ _ ) = []
         nonRef it@(IT j k ) = [Compose $ Identity $ (IT   j (tableNonRefK k )) ]
         fun  = concat . fmap (nonRef . runIdentity . getCompose)
 
-optionalAttr  (Compose (Identity ((Attr i )))) = Compose . Identity . Attr $ keyOptional i
+optionalAttr  (Compose (Identity ((Attr k i )))) = Compose . Identity . Attr k $ keyOptional i
 optionalAttr  (Compose (Identity ((IT  rel j  )))) = Compose . Identity $  IT  rel (LeftTB1 $ Just $ j )
 -- optionalAttr  (IT i r j ) = IT (fmap (first kOptional)  i) r (LeftTB1 $ Just j )
 
-addDefault (Compose (Identity (Attr i))) = Compose (Identity (Attr (i,SOptional Nothing)))
-addDefault (Compose (Identity (IT  rel j ))) = Compose (Identity (IT  (rel,SOptional Nothing) (LeftTB1 Nothing)  ))
+addDefault (Compose (Identity (Attr k i))) = Compose (Identity (Attr k (i,SOptional Nothing)))
+addDefault (Compose (Identity (IT  rel j ))) = Compose (Identity (IT  rel (LeftTB1 Nothing)  ))
 
 overComp f =  f . runIdentity . getCompose
 
@@ -306,8 +304,8 @@ tableNonRef (ArrayTB1 i) = ArrayTB1 $ tableNonRef <$> i
 tableNonRef (LeftTB1 i ) = LeftTB1 $ tableNonRef <$> i
 tableNonRef (TB1 (KV (PK l m ) n)  )  = TB1 (KV (PK (fun l) (fun m) ) (fun n))
   where
-        nonRef i@(Attr _ ) = [Compose $ Identity $ i]
-        nonRef (TBEither l j ) = [Compose $ Identity $  TBEither l  (overComp (head . nonRef) <$> j ) ]
+        nonRef i@(Attr _ _ ) = [Compose $ Identity $ i]
+        nonRef (TBEither n l j ) = [Compose $ Identity $  TBEither n l  (overComp (head . nonRef) <$> j ) ]
         nonRef (FKT i True _ _ ) = i
         nonRef (FKT i False _ _ ) = []
         nonRef it@(IT j k ) = [Compose $ Identity $ (IT  j (tableNonRef k )) ]
@@ -379,27 +377,27 @@ allKVRec  (TB1 (KV (PK k d) e ))= F.foldr zipPK (KV (PK [] []) []) $ (go TPK (\i
   where zipPK (KV (PK i j) k) (KV (PK m n) o) = KV (PK (i <> m) (j <> n)) (k <> o )
         go  TAttr l (FKT _ _ _ tb) =  l $ F.toList $ allKVRec  tb
         go  TPK l (FKT _ _ _ tb) =  allKVRec  tb
-        go  i l (TBEither _  tbr) =  maybe mempty id $ go i l . runIdentity . getCompose <$>  tbr
+        go  i l (TBEither _ _  tbr) =  maybe mempty id $ go i l . runIdentity . getCompose <$>  tbr
         go  TAttr l (IT  _ tb) =  l $ F.toList $ allKVRec  tb
         go  TPK l (IT  _ tb) =  allKVRec  tb
-        go  _ l (Attr a) = l [a]
+        go  _ l (Attr _ a) = l [a]
 
 
 allPKRec  (TB1 (KV (PK k d) i ))=  F.foldr zipPK (PK [] []) $ (go (flip PK []) . runIdentity . getCompose <$> k) <> (go (PK []) . runIdentity . getCompose <$> d)
   where zipPK (PK i j) (PK m n) = (PK (i <> m) (j <> n))
-        go l (Attr a) = l [a]
+        go l (Attr _ a) = l [a]
 
 
 tableToKV r =   do
   KV (PK (S.toList (rawPK r)) (maybeToList (rawDescription r)) ) (S.toList (rawAttrs r))
 
-preLabelTable :: Text -> Table ->  (FTB1 (Compose (Labeled Text) (TB (Labeled Text) )) Key)
+preLabelTable :: Text -> Table ->  (FTB1 (Compose (Labeled Text) (TB (Labeled Text) Key )) Key)
 preLabelTable t i =
-   let v = fmap (\k -> Labeled (t <> "." <> keyValue k ) (Attr k) ) (tableToKV i)
+   let v = fmap (\k -> Labeled (t <> "." <> keyValue k ) (Attr k k) ) (tableToKV i)
    in (TB1 $ Compose <$> v )
 
 
-labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (Labeled Text Table,FTB1 (Compose (Labeled Text) (TB (Labeled Text) )) Key,Text)
+labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (Labeled Text Table,FTB1 (Compose (Labeled Text) (TB (Labeled Text) Key )) Key,Text)
 labelTable i = do
    t <- tname i
    name <- Tra.traverse ( kname t) (tableToKV i)
@@ -445,7 +443,7 @@ rootPaths' invSchema r = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,
   return ( tb , "SELECT ROW(" <> T.intercalate "," (fmap explodeLabel $ (F.toList $ unlb1 tb))  <> (") FROM " <> q ) <> js)
 
 kattrl = kattrli .  labelValue . getCompose
-kattrli (Attr i ) = [i]
+kattrli (Attr _ i ) = [i]
 kattrli (FKT i _ _ _ ) =  (L.concat $ kattrl  <$> i)
 kattrli (IT i  _ ) =  [i]
 
@@ -453,7 +451,7 @@ kattrli (IT i  _ ) =  [i]
 
 recursePath' isLeft ksbn invSchema (Path _ jo@(FKEitherField o l) _) = do
    let findAttr =(\i -> Compose . justError ("cant find " ). L.find ((== [i]) . kattrl  . Compose )$ ksbn)
-   return $ ([Compose $ Unlabeled $  TBEither  (findAttr <$> l )  Nothing ],"")
+   return $ ([Compose $ Unlabeled $  TBEither  o (findAttr <$> l )  Nothing ],"")
 
 recursePath' isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
     | isArrayRel ifk =   do
@@ -537,7 +535,7 @@ recurseTB invSchema  nextT nextLeft ksn items =  do
 unTB = runIdentity . getCompose
 _tb = Compose . Identity
 
-unAttr (Attr i) = i
+unAttr (Attr _ i) = i
 unAttr i = errorWithStackTrace $ "cant find attr" <> (show i)
 
 mkKey i = do
@@ -552,25 +550,25 @@ mkTable i = do
   modify (\(_,j) -> (next,j))
   return (c+1)
 
-aliasKeys (t,Labeled  a (Attr (Key n   _ _ _)))  = label t <> "." <> n <> " as " <> a
+aliasKeys (t,Labeled  a (Attr _ (Key n   _ _ _)))  = label t <> "." <> n <> " as " <> a
 
 aliasTable (Labeled t r) = showTable r <> " as " <> t
 
 
 
-kname :: Labeled Text Table -> Key -> QueryRef (Labeled Text (TB (Labeled Text) Key))
+kname :: Labeled Text Table -> Key -> QueryRef (Labeled Text (TB (Labeled Text) Key Key))
 kname t i = do
   n <- mkKey i
-  return $ (Labeled ("k" <> (T.pack $  show $ fst n)) (Attr i) )
+  return $ (Labeled ("k" <> (T.pack $  show $ fst n)) (Attr i i) )
 
 tname :: Table -> QueryRef (Labeled Text Table)
 tname i = do
   n <- mkTable i
   return $ Labeled ("t" <> (T.pack $  show n)) i
 
-explodeLabel :: Labeled Text (TB (Labeled Text) Key) -> Text
-explodeLabel (Labeled l (Attr _)) = l
-explodeLabel (Unlabeled (TBEither l  _ )) = "ROW(" <> T.intercalate "," (explodeLabel.getCompose<$>  l) <> ")"
+explodeLabel :: Labeled Text (TB (Labeled Text) Key Key ) -> Text
+explodeLabel (Labeled l (Attr _ _)) = l
+explodeLabel (Unlabeled (TBEither _  l  _ )) = "ROW(" <> T.intercalate "," (explodeLabel.getCompose<$>  l) <> ")"
 explodeLabel (Unlabeled (IT  n t )) =  "ROW(" <> T.intercalate "," (( F.toList $ fmap explodeLabel $ unlb1 t))  <> ")"
 explodeLabel (Labeled l (IT  _ _  )) =  l
 explodeLabel (Labeled l (FKT i _ _ _ )) = T.intercalate "," (( F.toList $ (explodeLabel. getCompose ) <$> i)) <> "," <> l
@@ -581,15 +579,15 @@ unTlabel (LeftTB1 kv)  = LeftTB1 $ fmap unTlabel kv
 unTlabel (ArrayTB1 kv)  = ArrayTB1 $ fmap unTlabel kv
 unlabel (Labeled l (IT tn t) ) = (IT tn (unTlabel t ))
 unlabel (Unlabeled (IT tn t) ) = (IT tn (unTlabel t ))
-unlabel (Unlabeled (TBEither  l  b ) ) = TBEither (relabel <$> l)   (fmap relabel b)
+unlabel (Unlabeled (TBEither  n l  b ) ) = TBEither n (relabel <$> l)   (fmap relabel b)
 unlabel (Labeled l (FKT i refl fkrel t) ) = (FKT (fmap relabel i) refl fkrel (unTlabel t ))
 unlabel (Unlabeled (FKT i refl fkrel t) ) = (FKT (fmap relabel i) refl fkrel (unTlabel t))
-unlabel (Labeled l (Attr i )) = Attr i
+unlabel (Labeled l (Attr k i )) = Attr k i
 
 relabel = Compose . Identity . unlabel.getCompose
 
-type TBLabel =  Compose (Labeled Text) (TB (Labeled Text))
-type TBIdent =  Compose Identity  (TB Identity )
+type TBLabel =  Compose (Labeled Text) (TB (Labeled Text) Key)
+type TBIdent =  Compose Identity  (TB Identity Key )
 
 
 

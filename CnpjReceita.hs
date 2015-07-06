@@ -54,7 +54,7 @@ getCaptchaCpf' inf i  handler = do
       mvar <- liftIO $takeMVar i
       out <- ( fmap join . Tra.traverse getCaptchaCpfShowable  $ mvar)
       let nkey = lookFresh inf "CPF Receita" "owner" "captchaViewer"
-      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (nkey ,) . SBinary  . BSL.toStrict ) $ out
+      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr nkey . (nkey ,) . SBinary  . BSL.toStrict ) $ out
       return ()) rv
   return ()
 
@@ -77,7 +77,7 @@ getCpf'  inf i  handler = do
       mvar <- liftIO $ takeMVar i
       outM <- fmap (join . fmap headMay.join) . Tra.traverse getCpfShowable $  mvar
       maybe (return ()) (\out-> do
-          let attr i = Compose . Identity .  Attr . (lookKey inf "owner" i ,)
+          let attr i = Compose . Identity .  Attr ( lookKey inf "owner" i) . (lookKey inf "owner" i ,)
           handler . Just $ (TB1 $ KV (PK [] . pure . attr "owner_name" . SOptional .Just . SText . TL.pack  $ out) [] )
           return ()) outM ) rv
   return ()
@@ -117,7 +117,7 @@ getCaptcha'  inf i  handler = do
       mvar <- liftIO $takeMVar i
       out <- ( fmap join . Tra.traverse getCaptchaShowable $ mvar)
       let nkey = lookFresh inf "CNPJ Receita" "owner" "captchaViewer"
-      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr. (nkey ,) . SBinary  . BSL.toStrict ) $ out
+      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr nkey . (nkey ,) . SBinary  . BSL.toStrict ) $ out
       return ()) rv
   return ()
 
@@ -132,9 +132,9 @@ getCnpj'  inf i  handler = do
       outM <- fmap ( fmap  (M.fromListWith (++) . fmap (fmap (\i -> [i]) )) . join) . Tra.traverse getCnpjShowable $ mvar
       liftIO $ print outM
       maybe (return () ) (\ out-> do
-        let own i = Compose . Identity .  Attr . (lookKey inf "owner" i ,)
-            attr i = Compose . Identity .  Attr . (lookKey inf "address" i ,)
-            cna i = Compose . Identity .  Attr . (lookKey inf "cnae" i ,)
+        let own i = Compose . Identity .  Attr (lookKey inf "owner" i ) . (lookKey inf "owner" i ,)
+            attr i = Compose . Identity .  Attr (lookKey inf "address" i ). (lookKey inf "address" i ,)
+            cna i = Compose . Identity .  Attr  (lookKey inf "cnae" i ) . (lookKey inf "cnae" i ,)
             idx  = SOptional . fmap (SText . TL.pack . head) . flip M.lookup out
             fk i  = Compose . Identity . FKT i True []
             afk i  = Compose . Identity . FKT i True [] . LeftTB1 . Just . ArrayTB1

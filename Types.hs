@@ -20,8 +20,10 @@ module Types where
 import Control.Lens.TH
 import Data.Functor.Apply
 import Data.Functor.Compose
+import Data.Bifunctor
 import Data.Functor.Identity
 import Data.Typeable
+import Data.Void
 import Data.Aeson
 import Data.Aeson.TH
 import Data.Vector(Vector)
@@ -88,13 +90,13 @@ data Labeled l v
   { labelValue :: v
   } deriving(Eq,Show,Ord,Foldable,Functor,Traversable)
 
-instance (Functor f,Eq1 f) => Eq1 (TB  f) where
+instance (Functor f,Eq1 f,Eq a) => Eq1 (TB  f a) where
   eq1 i j = i == j
 
-instance (Functor f,Ord1 f) => Ord1 (TB f ) where
+instance (Functor f,Ord1 f,Ord a) => Ord1 (TB f a ) where
   compare1 i j = compare i j
 
-instance (Functor f,Show1 f) => Show1 (TB f  ) where
+instance (Functor f,Show1 f,Show a) => Show1 (TB f  a) where
   showsPrec1 = showsPrec
 
 instance (Show f) =>  Show1 (Labeled f  ) where
@@ -110,34 +112,46 @@ data FKey a
     , keyType :: ! a
     }
 
-data TB f a
+instance Bifunctor (TB Identity ) where
+  first f (Attr k i) = Attr (f k) i
+  first f (IT k i) = IT (f k) (mapKey f i)
+  first f (FKT k l m  i) = FKT  (fmap ((Compose . Identity . first f . runIdentity . getCompose)) k) l (fmap (first f . second f) m   ) (mapKey f i)
+  first f (TBEither k l m ) = TBEither k (fmap ((Compose . Identity . first f . runIdentity . getCompose)) l) (fmap ((Compose . Identity . first f . runIdentity . getCompose))  m)
+
+  second = fmap
+
+data TB f k a
   = FKT -- Foreign Table
-    { _tbref :: ![Compose f (TB f) a]
+    { _tbref :: ![Compose f (TB f k) a]
     , _reflexive :: ! Bool
-    , _fkrelation :: [(Key,Key)]
-    , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
+    , _fkrelation :: [(k ,k)]
+    , _fkttable :: ! (FTB1 (Compose f (TB f k)) a)
     }
 
   | IT -- Inline Table
-    { _ittableName :: a
-    , _fkttable :: ! (FTB1 (Compose f (TB f)) a)
+    { _ittableName :: k
+    , _fkttable :: ! (FTB1 (Compose f (TB f k)) a)
     }
   | TBEither
-    [(Compose f (TB f) Key )]  (Maybe (Compose f (TB f) a))
+    Key [(Compose f (TB f k) Key )]  (Maybe (Compose f (TB f k) a))
   | Attr
-    { _tbattr :: ! a }
+    { _tbattrkey :: k
+    ,_tbattr :: a   }
   -- Attribute
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
 
-type TB1 = FTB1 (Compose Identity (TB Identity) )
+type TB1 = FTB1 (Compose Identity (TB Identity Key) )
+type TB2 k = FTB1 (Compose Identity (TB Identity k ) )
 
+mapKey f (TB1 k ) = TB1 . fmap (Compose . Identity . first f . runIdentity . getCompose) $  k
+mapKey f (LeftTB1 k ) = LeftTB1 (mapKey f <$> k)
+mapKey f (ArrayTB1 k ) = ArrayTB1 (mapKey f <$> k)
 
 data FTB1 f a
   = TB1 (KV (f a))
   | LeftTB1 (Maybe (FTB1 f a))
   | ArrayTB1 [(FTB1 f a)]
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
-
 
 
 data KPrim

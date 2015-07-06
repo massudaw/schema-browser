@@ -64,6 +64,7 @@ executable threepenny-layer
    ,safe
    ,async
    ,tasty
+   ,void
    ,extra
   -- hs-source-dirs:      
 

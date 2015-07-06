@@ -39,7 +39,7 @@ import qualified Data.Map as M
 
 queryGeocodeBoundary = BoundedPlugin2 "Google Geocode" "address" (staticP url) element
   where
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB1 (Text,Showable)))
+    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text (Text,Showable)))
     url = proc t -> do
       id <- varT "id" -< t
       log <- varT "logradouro"-< t
@@ -65,22 +65,22 @@ queryGeocodeBoundary = BoundedPlugin2 "Google Geocode" "address" (staticP url) e
                                         (Nothing , j) -> j
             return [("geocode" ,SPosition p),("bounding", SBounding b)]) -<  (im,addr)
 
-      let tb = TB1 . KV (PK [] []) . fmap (Compose . Identity. Attr . second (SOptional. Just )) <$> r
+      let tb = TB1 . KV (PK [] []) . fmap (Compose . Identity. (\i -> Attr (fst i ) i). second (SOptional. Just )) <$> r
       returnA -< tb
 
     element inf
           = maybe (return Nothing) (\inp -> do
                    b <- dynPK url (Just inp)
-                   return $ fmap (first (lookKey inf "address")) <$> b)
+                   return $ mapKey (lookKey inf "address") . fmap (first (lookKey inf "address")) <$> b)
 
 
 
-queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address"(staticP open  )  element
+queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address" (staticP open  )  element
   where
       translate :: Text -> Text
       translate "localidade" =  "municipio"
       translate i = i
-      open :: ArrowPlug  (Kleisli IO ) (Maybe (TB1 (Text ,Showable)))
+      open :: ArrowPlug  (Kleisli IO ) (Maybe (TB2 Text (Text ,Showable)))
       open = proc t -> do
           i <- varT "cep" -< t
           odx "bairro" -< t
@@ -90,12 +90,12 @@ queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address"(staticP open  )  ele
           r <- (act (  traverse (\input -> do
                        v <- get . traceShowId .  (\i-> addrs <> i <> ".json")  . TL.unpack $ input
                        return $ ( \i -> fmap (L.filter ((/="").snd) . M.toList ) $ join $ fmap decode (i ^? responseBody)  ) v ))) -< (\(SText t)-> t) <$> i
-          let tb = TB1 . KV (PK [] []) . fmap (Compose . Identity. Attr . first translate. second (SOptional. Just . SText)) <$> join r
+          let tb = TB1 . KV (PK [] []) . fmap (Compose . Identity. (\i -> Attr (fst i ) i ). first translate. second (SOptional. Just . SText)) <$> join r
           returnA -< tb
 
       addrs ="http://cep.correiocontrol.com.br/"
       element inf
           = maybe (return Nothing) (\inp -> do
                    b <- dynPK open (Just inp)
-                   return $ fmap (first (lookKey inf "address")) <$> b)
+                   return $ mapKey (lookKey inf "address") .fmap (first (lookKey inf "address")) <$> b)
 

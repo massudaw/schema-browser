@@ -71,17 +71,21 @@ renderProjectPricingA = (staticP myDoc , element )
           cshow (SComposite a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
           cshow (SOptional a ) =  join $ fmap cshow a
       -- myDoc :: a -> Pandoc
-      myDoc :: Step.Parser (Kleisli IO ) (Bool,[[Text]]) (Maybe (TB1 (Key,Showable))) (Maybe (TB1 (Text,Showable)))
+      myDoc :: Step.Parser (Kleisli IO ) (Access Text) (Maybe (TB1 (Key,Showable))) (Maybe (TB2 Text (Text,Showable)))
       myDoc = proc preenv -> do
           pdoc <- liftParser (proc env -> do
-              f <- at "id_project:id_owner,id_contact:id_contact" (varT "firstname"  <> " " <> var "middlename" <> " " <> var "lastname") -< env
-              idp <- varT "id_project:id_project" -< env
+              f <- at "id_project"
+                     ( at "id_owner,id_contact"
+                        ( at "id_contact" (varT "firstname"  <> " " <> var "middlename" <> " " <> var "lastname"))) -< env
+              idp <- at "id_project" (varT "id_project") -< env
               da <- varT "pricing_date" -< env
               v <- arrayVar True "pricing_service" -< env
               p <- varT "pricing_price" -< env
-              o <- varT "id_project:id_owner,id_contact:id_owner:owner_name" -< env
-              end <- at "id_project:address" (var "logradouro" <> ", "<> var "number" <> " " <> var "complemento") -< env
-              mun <- at "id_project:address" (var "municipio" <> "-" <> var "uf") -< env
+              o <- at "id_project"
+                     (at "id_owner,id_contact"
+                        (at "id_owner"  (varT"owner_name"))) -< env
+              end <- at "id_project" $ at "address" (var "logradouro" <> ", "<> var "number" <> " " <> var "complemento") -< env
+              mun <- at "id_project" $ at "address" (var "municipio" <> "-" <> var "uf") -< env
               d <- var "pricing_execution_time" -< env
               returnA -< trace "doc" $  (setT ( para $ "Proposta :" <> idp <> ", " <> ( da )) $ doc $
                      para ( f <> ",")
@@ -108,10 +112,10 @@ renderProjectPricingA = (staticP myDoc , element )
               template <- readFile' utf8 "raw.template"
               makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odx "orcamento" -< preenv
-          returnA -< traceShowId $ (Just .  TB1 . (KV (PK [] []) ) . pure . Compose. Identity . Attr. ("orcamento",).SOptional . Just . SBinary .  BS.toStrict . either id id ) outdoc
+          returnA -< traceShowId $ (Just .  TB1 . (KV (PK [] []) ) . pure . Compose. Identity . Attr "orcamento" . ("orcamento",).SOptional . Just . SBinary .  BS.toStrict . either id id ) outdoc
       element inf = maybe (return Nothing) (\inp -> do
                               b <- dynPK myDoc (Just inp)
-                              return $ fmap (first (lookKey2  inf ["pricing"])) <$> b)
+                              return $ mapKey (lookKey2  inf ["pricing"]) . fmap (first (lookKey2  inf ["pricing"])) <$> b)
 
 lookKey2 inf t k = justError ("lookKey' cant find key " <> show k <> " in " <> show t) $  foldr1 mplus $ fmap (\ti -> M.lookup (ti,k) (keyMap inf)) t
 

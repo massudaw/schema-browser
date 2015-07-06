@@ -85,11 +85,11 @@ deriving instance Traversable Extended
 deriving instance Traversable Interval
 
 
-instance  TF.ToField (TB Identity (Key,Showable))  where
-  toField (Attr i) = TF.toField (snd i)
+instance  TF.ToField (TB Identity Key (Key,Showable))  where
+  toField (Attr k i) = TF.toField (snd i)
   toField (IT n (LeftTB1 i)  ) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT (n,_)  (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ n ) $  runIdentity.getCompose <$> F.toList  i )
-  toField (IT (n,_)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType  n) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
+  toField (IT (n)  (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ n ) $  runIdentity.getCompose <$> F.toList  i )
+  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType  n) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
   toField e = errorWithStackTrace (show e)
 
 
@@ -270,24 +270,24 @@ unIntercalateAtto l s = go l
 subsAKT r t = subs r (fmap ((^. kvKey. pkKey) . _unTB1) t)
   where subs i j = fmap (\r -> (justError "no key Found subs" $ L.find (\i -> fmap fst i == fst r ) i , zipWith (\m n -> justError "no key Found subs" $L.find (\i-> fmap fst i == n) m ) j (snd r) ))
 
-unKOptionalAttr (Attr i ) = Attr (unKOptional i)
+unKOptionalAttr (Attr k i ) = Attr k (unKOptional i)
 unKOptionalAttr (IT  r (LeftTB1 (Just j))  ) = (\j-> IT   r j )    j
 unKOptionalAttr (FKT i r l (LeftTB1 (Just j))  ) = FKT (fmap (fmap unKOptional) i) r l j
-unOptionalAttr (Attr i ) = Attr <$> (unKeyOptional i)
+unOptionalAttr (Attr k i ) = Attr k <$> (unKeyOptional i)
 unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
 unOptionalAttr (FKT i r l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i r l j) (traverse (traverse unKeyOptional) i)  j
 
 -- parseAttr i | traceShow i False = error ""
-parseAttr (Attr i) = do
+parseAttr (Attr k i) = do
   s<- parseShowable (textToPrim <$> keyType i) <?> show i
-  return $  Attr (i,s)
-parseAttr (TBEither l  _ )
+  return $  Attr k (i,s)
+parseAttr (TBEither n l  _ )
     =  doublequoted parseTb <|> parseTb
       where
         parseTb = char '(' *> parseInner <* char ')'
         parseInner = do
               res <- unIntercalateAtto (parseAttr . runIdentity .getCompose <$> l) (char ',')
-              return $ TBEither l  (Compose . Identity <$> (L.find ( maybe False (const True) . unOptionalAttr)) res)  {-case (l,r) of
+              return $ TBEither n l  (Compose . Identity <$> (L.find ( maybe False (const True) . unOptionalAttr)) res)  {-case (l,r) of
                    (SOptional (Just i),SOptional Nothing ) -> SEitherL i
                    (SOptional Nothing ,SOptional (Just j )) -> SEitherR j
                    (SOptional (Just _),SOptional (Just _ )) -> errorWithStackTrace "multiple  match"
@@ -296,7 +296,7 @@ parseAttr (TBEither l  _ )
 
 parseAttr (IT na j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j -- <|>  return ((,SOptional Nothing) <$> j)
-  return $ IT  (na,SOptional Nothing) mj
+  return $ IT  na mj
 
 parseAttr (FKT l refl rel j ) = do
   ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .runIdentity .getCompose  <$> l) (char ',')
