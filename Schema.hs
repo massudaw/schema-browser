@@ -63,7 +63,7 @@ data InformationSchema
   , pkMap :: Map (Set Key) Table
   , tableMap :: Map Text Table
   , pluginsMap :: Map (Text,Text,Text) Key
-  , mvarMap :: MVar (Map Table (MVar [(TB1 (Key,Showable))]))
+  , mvarMap :: MVar (Map Table (MVar [(TB1 Showable)]))
   , conn :: Connection
   , rootconn :: Connection
   }

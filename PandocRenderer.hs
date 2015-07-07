@@ -71,7 +71,7 @@ renderProjectPricingA = (staticP myDoc , element )
           cshow (SComposite a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
           cshow (SOptional a ) =  join $ fmap cshow a
       -- myDoc :: a -> Pandoc
-      myDoc :: Step.Parser (Kleisli IO ) (Access Text) (Maybe (TB1 (Key,Showable))) (Maybe (TB2 Text (Text,Showable)))
+      myDoc :: Step.Parser (Kleisli IO ) (Access Text) (Maybe (TB1 Showable)) (Maybe (TB2 Text Showable))
       myDoc = proc preenv -> do
           pdoc <- liftParser (proc env -> do
               f <- at "id_project"
@@ -112,10 +112,10 @@ renderProjectPricingA = (staticP myDoc , element )
               template <- readFile' utf8 "raw.template"
               makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odx "orcamento" -< preenv
-          returnA -< traceShowId $ (Just .  TB1 . (KV (PK [] []) ) . pure . Compose. Identity . Attr "orcamento" . ("orcamento",).SOptional . Just . SBinary .  BS.toStrict . either id id ) outdoc
+          returnA -< traceShowId $ (Just .  TB1 . (KV (PK [] []) ) . pure . Compose. Identity . Attr "orcamento" . SOptional . Just . SBinary .  BS.toStrict . either id id ) outdoc
       element inf = maybe (return Nothing) (\inp -> do
                               b <- dynPK myDoc (Just inp)
-                              return $ mapKey (lookKey2  inf ["pricing"]) . fmap (first (lookKey2  inf ["pricing"])) <$> b)
+                              return $ mapKey (lookKey2  inf ["pricing"])  <$> b)
 
 lookKey2 inf t k = justError ("lookKey' cant find key " <> show k <> " in " <> show t) $  foldr1 mplus $ fmap (\ti -> M.lookup (ti,k) (keyMap inf)) t
 

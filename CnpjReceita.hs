@@ -38,23 +38,22 @@ import Debug.Trace
 
 import RuntimeTypes
 import Control.Monad.Reader
-import qualified Data.Foldable as F
 
 
-getInp :: TL.Text -> [(Key,Showable)] -> Maybe BSC.ByteString
-getInp l  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t)-> t )) . unRSOptional' . snd) . L.find ((==l) . keyValue . fst)
+getInp :: TL.Text -> TB1 Showable -> Maybe BSC.ByteString
+getInp l  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t)-> t )) . unRSOptional' . (\(Attr _ i) -> i). runIdentity . getCompose )  . findTB1 (overComp ((==l) . keyValue . (\(Attr k _ ) -> k )))
 
 cpfCall = WrappedCall initCnpj [getCaptchaCpf',getCpf']
 
 getCaptchaCpf' ::
-     InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
+     InformationSchema -> MVar (Maybe (TB1  Showable)) ->   (Maybe (TB1 (Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
 getCaptchaCpf' inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT  (forever $ do
       mvar <- liftIO $takeMVar i
       out <- ( fmap join . Tra.traverse getCaptchaCpfShowable  $ mvar)
       let nkey = lookFresh inf "CPF Receita" "owner" "captchaViewer"
-      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr nkey . (nkey ,) . SBinary  . BSL.toStrict ) $ out
+      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr nkey   . SBinary  . BSL.toStrict ) $ out
       return ()) rv
   return ()
 
@@ -65,25 +64,25 @@ getCaptchaCpf cgc_cpf  = do
        r <-  Sess.getWith (defaults & param "cpf" .~ [T.pack $ BSC.unpack cgc_cpf]) session $ traceShowId cpfhome
        (^? responseBody) <$> (Sess.get session $ traceShowId cpfcaptcha)
 getCaptchaCpfShowable tinput =
-      let input = F.toList tinput
+      let input = tinput
       in fmap join $ Tra.sequence $  fmap getCaptchaCpf  (getInp "cpf_number" input)
 
 
 getCpf' ::
-     InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
+     InformationSchema -> MVar (Maybe (TB1 ( Showable))) ->   (Maybe (TB1 (Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
 getCpf'  inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT (forever $ do
       mvar <- liftIO $ takeMVar i
       outM <- fmap (join . fmap headMay.join) . Tra.traverse getCpfShowable $  mvar
       maybe (return ()) (\out-> do
-          let attr i = Compose . Identity .  Attr ( lookKey inf "owner" i) . (lookKey inf "owner" i ,)
+          let attr i = Compose . Identity .  Attr ( lookKey inf "owner" i)
           handler . Just $ (TB1 $ KV (PK [] . pure . attr "owner_name" . SOptional .Just . SText . TL.pack  $ out) [] )
           return ()) outM ) rv
   return ()
 
 getCpfShowable tinput = fmap join $ Tra.sequence $  liftA2 getCpf (getInp "captchaInput" input ) (getInp "cpf_number" input)
-  where input = F.toList tinput
+  where input = tinput
 getCpf captcha cgc_cpf = do
     session <- ask
     liftIO $ do
@@ -105,26 +104,26 @@ getCaptcha cgc_cpf  = do
        r <-  Sess.getWith (defaults & param "cnpj" .~ [T.pack $ BSC.unpack cgc_cpf]) session $ traceShowId cnpjhome
        (^? responseBody) <$> (Sess.get session $ traceShowId cnpjcaptcha)
 getCaptchaShowable tinput =
-      let input = F.toList tinput
+      let input = tinput
       in fmap join $ Tra.sequence $  fmap getCaptcha  (getInp "cnpj_number" input)
 
 
 getCaptcha' ::
-     InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
+     InformationSchema -> MVar (Maybe (TB1 ( Showable))) ->   (Maybe (TB1 (Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
 getCaptcha'  inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT  (forever $ do
       mvar <- liftIO $takeMVar i
       out <- ( fmap join . Tra.traverse getCaptchaShowable $ mvar)
       let nkey = lookFresh inf "CNPJ Receita" "owner" "captchaViewer"
-      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr nkey . (nkey ,) . SBinary  . BSL.toStrict ) $ out
+      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr nkey .  SBinary  . BSL.toStrict ) $ out
       return ()) rv
   return ()
 
 
 
 getCnpj' ::
-     InformationSchema -> MVar (Maybe (TB1 (Key, Showable))) ->   (Maybe (TB1 (Key,Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
+     InformationSchema -> MVar (Maybe (TB1 ( Showable))) ->   (Maybe (TB1 (Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
 getCnpj'  inf i  handler = do
   rv <- ask
   liftIO $ forkIO $ runReaderT (forever $ do
@@ -132,9 +131,9 @@ getCnpj'  inf i  handler = do
       outM <- fmap ( fmap  (M.fromListWith (++) . fmap (fmap (\i -> [i]) )) . join) . Tra.traverse getCnpjShowable $ mvar
       liftIO $ print outM
       maybe (return () ) (\ out-> do
-        let own i = Compose . Identity .  Attr (lookKey inf "owner" i ) . (lookKey inf "owner" i ,)
-            attr i = Compose . Identity .  Attr (lookKey inf "address" i ). (lookKey inf "address" i ,)
-            cna i = Compose . Identity .  Attr  (lookKey inf "cnae" i ) . (lookKey inf "cnae" i ,)
+        let own i = Compose . Identity .  Attr (lookKey inf "owner" i )
+            attr i = Compose . Identity .  Attr (lookKey inf "address" i )
+            cna i = Compose . Identity .  Attr  (lookKey inf "cnae" i )
             idx  = SOptional . fmap (SText . TL.pack . head) . flip M.lookup out
             fk i  = Compose . Identity . FKT i True []
             afk i  = Compose . Identity . FKT i True [] . LeftTB1 . Just . ArrayTB1
@@ -171,7 +170,7 @@ getCnpj'  inf i  handler = do
 
 
 getCnpjShowable tinput = fmap join $ Tra.sequence $  liftA2 getCnpj (getInp "captchaInput" input ) (getInp "cnpj_number" input)
-  where input = F.toList tinput
+  where input = tinput
 getCnpj captcha cgc_cpf = do
     session <- ask
     liftIO $ do

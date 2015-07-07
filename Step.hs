@@ -142,19 +142,6 @@ instance Applicative m => Applicative (Kleisli m a ) where
   pure i = Kleisli (const (pure i ))
   Kleisli f <*> Kleisli j  =  Kleisli  $ (\i -> f i <*> j i )
 
-url :: Parser  (Kleisli (ReaderT (Maybe (TB1 (Key,Showable))) IO )) (Access Text)()  (Maybe Showable)
-url = proc _ -> do
-      descontado <-  liftA2 (\v k -> v*(1 - k) )
-              <$> atR "frequencia,meses"
-                  (liftA2 (\v m -> v * fromIntegral m) <$> idxR "price" <*> idxR "meses")
-              <*> idxR "desconto" -< ()
-      atR "pagamento" (proc descontado -> do
-          pinicio <- idxR "inicio"-< ()
-          p <- idxR "vezes" -< ()
-          let valorParcela = liftA2 (/)  descontado p
-          returnA -< valorParcela
-          ) -< descontado
-
 
 splitIndex l = (fmap T.pack . IProd . unIntercalate (','==) $ l)
 
@@ -177,7 +164,7 @@ indexTableInter b l =
 
 logTableInter
   :: (Show k ,KeyString k ,Arrow a) =>
-      Bool -> String -> Parser  a AccessTag (Maybe (TB1 (k, Showable))) (Maybe (k, Showable))
+      Bool -> String -> Parser  a AccessTag (Maybe (TB2 k   Showable)) (Maybe (k, Showable))
 logTableInter b l =
   let ll = splitIndex l
    in  P (Many [] ,Many [ll]) (arr (join . fmap (indexTable ll)))
@@ -234,7 +221,7 @@ indexTable (IProd l) t@(TB1 (KV (PK k d)  v))
     let finder = L.find (L.any (==l). L.permutations .keyattr. firstCI keyString )
         i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder v `mplus` finder k `mplus` finder d
     case runIdentity $ getCompose $ i  of
-         Attr _ l -> return l
+         Attr k l -> return (k,l)
 indexTable l (ArrayTB1 j) =  liftA2 (,) ((head <$> fmap (fmap fst) i) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
        where i =   T.traverse  (indexTable l) j
 indexTable i j = errorWithStackTrace (show (i,j))
@@ -273,10 +260,10 @@ instance (Monoid s ,Applicative (a i),Monoid m) => Monoid (Parser a s i m) where
   mempty = P mempty (pure mempty)
   mappend (P i  l) (P j m ) =  P (mappend i j) (liftA2 mappend l  m )
 
-findPK = concat . fmap (attrNonRec . runIdentity . getCompose) . _pkKey  . _kvKey . _unTB1
+findPK = concat . fmap keyattr  . _pkKey  . _kvKey . _unTB1
 
 findPKM (LeftTB1 i ) =  join $ fmap findPKM i
-findPKM i  = Just $ findPK i
+findPKM i  = Just $ concat . fmap (\i -> zip (keyattr i) (kattr i ))  . _pkKey  . _kvKey . _unTB1 $ i
 
 
 attrNonRec (FKT ifk _ _ _ ) = concat $ fmap kattr ifk
@@ -285,17 +272,27 @@ attrNonRec (TBEither _ _  ifk ) =   (maybe [] id $ fmap kattr ifk)
 attrNonRec (Attr _ i ) = [i]
 attrNonRec i = errorWithStackTrace (show i)
 
+aattr = aattri . runIdentity . getCompose
+aattri (Attr k i ) = [(k,i)]
+aattri (TBEither _ i l  ) =  (maybe [] id $ fmap aattr l )
+aattri (FKT i _ _ _ ) =  (L.concat $ aattr  <$> i)
+aattri (IT _  i ) =  recTB i
+  where recTB (TB1 i ) =  concat $ fmap aattr (toList i)
+        recTB (ArrayTB1 i ) = concat $ fmap recTB i
+        recTB (LeftTB1 i ) = concat $ toList $ fmap recTB i
+aattri i = errorWithStackTrace (show i)
+
 
 kattr = kattri . runIdentity . getCompose
 kattri (Attr _ i ) = [i]
 kattri (TBEither _ i l  ) =  (maybe [] id $ fmap kattr l )
 kattri (FKT i _ _ _ ) =  (L.concat $ kattr  <$> i)
-kattri i = errorWithStackTrace (show i)
-{-kattri (IT _  i ) =  recTB i
+kattri (IT _  i ) =  recTB i
   where recTB (TB1 i ) =  concat $ fmap kattr (toList i)
         recTB (ArrayTB1 i ) = concat $ fmap recTB i
         recTB (LeftTB1 i ) = concat $ toList $ fmap recTB i
--}
+kattri i = errorWithStackTrace (show i)
+
 
 keyattr = keyattri . runIdentity . getCompose
 keyattri (Attr i  _ ) = [i]
@@ -308,6 +305,6 @@ keyattri (IT i  _ ) =  [i ]
 varT t = join . fmap (unRSOptional'.snd)  <$> idxT t
 varN t = fmap snd  <$> idx t
 
-type FunArrowPlug o = Step.Parser (->) AccessTag (Maybe (TB1 (Key,Showable))) o
-type ArrowPlug a o = Step.Parser a AccessTag (Maybe (TB1 (Key,Showable))) o
+type FunArrowPlug o = Step.Parser (->) AccessTag (Maybe (TB1 Showable)) o
+type ArrowPlug a o = Step.Parser a AccessTag (Maybe (TB1 Showable)) o
 

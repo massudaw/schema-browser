@@ -8,13 +8,13 @@ import Data.Functor.Identity
 import Data.Functor.Compose
 import Data.Scientific hiding(scientific)
 import Data.Bits
+import Data.Bifunctor
+
 import Data.Tuple
-import Control.Lens ((^.))
 import Data.Time.Clock
 import qualified Data.Char as Char
 import Schema
 import Control.Concurrent
-import Utils
 import qualified Data.Map as M
 import Data.String
 
@@ -85,8 +85,8 @@ deriving instance Traversable Extended
 deriving instance Traversable Interval
 
 
-instance  TF.ToField (TB Identity Key (Key,Showable))  where
-  toField (Attr k i) = TF.toField (snd i)
+instance  TF.ToField (TB Identity Key Showable)  where
+  toField (Attr k i) = TF.toField i
   toField (IT n (LeftTB1 i)  ) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
   toField (IT (n)  (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ n ) $  runIdentity.getCompose <$> F.toList  i )
   toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType  n) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
@@ -267,32 +267,26 @@ unIntercalateAtto l s = go l
         go [] = pure []
 
 
-subsAKT r t = subs r (fmap ((^. kvKey. pkKey) . _unTB1) t)
-  where subs i j = fmap (\r -> (justError "no key Found subs" $ L.find (\i -> fmap fst i == fst r ) i , zipWith (\m n -> justError "no key Found subs" $L.find (\i-> fmap fst i == n) m ) j (snd r) ))
-
-unKOptionalAttr (Attr k i ) = Attr k (unKOptional i)
+unKOptionalAttr (Attr k i ) = Attr (unKOptional k) i
 unKOptionalAttr (IT  r (LeftTB1 (Just j))  ) = (\j-> IT   r j )    j
-unKOptionalAttr (FKT i r l (LeftTB1 (Just j))  ) = FKT (fmap (fmap unKOptional) i) r l j
-unOptionalAttr (Attr k i ) = Attr k <$> (unKeyOptional i)
+unKOptionalAttr (FKT i r l (LeftTB1 (Just j))  ) = FKT (fmap (mapComp (first unKOptional) ) i) r l j
+
+unOptionalAttr (Attr k i ) = Attr (unKOptional k) <$> unSOptional i
 unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
-unOptionalAttr (FKT i r l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i r l j) (traverse (traverse unKeyOptional) i)  j
+unOptionalAttr (FKT i r l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i r l j) (traverse ( traverse unSOptional . (mapComp (first unKOptional)) ) i)  j
 
 -- parseAttr i | traceShow i False = error ""
-parseAttr (Attr k i) = do
+parseAttr (Attr i _ ) = do
   s<- parseShowable (textToPrim <$> keyType i) <?> show i
-  return $  Attr k (i,s)
+  return $  Attr i s
+
 parseAttr (TBEither n l  _ )
     =  doublequoted parseTb <|> parseTb
       where
         parseTb = char '(' *> parseInner <* char ')'
         parseInner = do
               res <- unIntercalateAtto (parseAttr . runIdentity .getCompose <$> l) (char ',')
-              return $ TBEither n l  (Compose . Identity <$> (L.find ( maybe False (const True) . unOptionalAttr)) res)  {-case (l,r) of
-                   (SOptional (Just i),SOptional Nothing ) -> SEitherL i
-                   (SOptional Nothing ,SOptional (Just j )) -> SEitherR j
-                   (SOptional (Just _),SOptional (Just _ )) -> errorWithStackTrace "multiple  match"
-                   (SOptional Nothing ,SOptional Nothing) -> errorWithStackTrace "no match"
--}
+              return $ TBEither n l  (Compose . Identity <$> (L.find ( maybe False (const True) . unOptionalAttr)) res)
 
 parseAttr (IT na j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j -- <|>  return ((,SOptional Nothing) <$> j)
@@ -309,18 +303,13 @@ tryquoted i = doublequoted i <|> i
 -- Note Because the list has a mempty operation when parsing
 -- we have overlap between maybe and list so we allow only nonempty lists
 parseLabeledTable (ArrayTB1 [t]) =
-  ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (fmap makeOpt t))  >>  return (fail "")  ) )
+  ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey makeOpt t))  >>  return (fail "")  ) )
 parseLabeledTable (LeftTB1 (Just i )) =
-  LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (fmap makeOpt i) >> return Nothing) <|> return Nothing )
+  LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapKey makeOpt i) >> return Nothing) <|> return Nothing )
 parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
   im <- unIntercalateAtto (fmap (Compose . Identity) . parseAttr .runIdentity . getCompose <$> (i <> d <> m) ) (char ',')
   return (TB1 (KV ( PK (L.take (length i) im ) (L.take (length d) $L.drop (length i) $  im))(L.drop (length i + length d) im)) )) <*  char ')' )
 
-{-
-quotedRec :: Char -> Parser a -> Parser a
-quotedRec c  p =  char c  *>  inner <* char c
-  where inner = (quotedRec c p <|> p)
--}
 
 doublequoted :: Parser a -> Parser a
 doublequoted  p =   (takeWhile (== '\\') >>  char '\"') *>  inner <* ( takeWhile (=='\\') >> char '\"')

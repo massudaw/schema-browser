@@ -20,6 +20,7 @@ import Siapi3
 import CnpjReceita
 import TP.Widgets
 import TP.QueryWidgets
+import Control.Exception
 import Control.Monad.Reader
 import Control.Concurrent
 import Data.Functor.Apply
@@ -162,7 +163,7 @@ attrLine i e   = do
   let nonRec = tableNonrec i
       attr i (k,v) = set  (strAttr (T.unpack $ keyValue k)) (renderShowable v) i
       attrs   l i  = foldl attr i l
-  attrs (F.toList nonRec) $ line (   L.intercalate "," (F.toList $ fmap (renderShowable . snd ) $  _kvKey $ allKVRec i) <> "," <>  (L.intercalate "," $ fmap (renderShowable.snd) nonRec)) e
+  attrs (F.toList (tableAttrs i) ) $ line (   L.intercalate "," (F.toList $ fmap (renderShowable ) $  _kvKey $ allKVRec i) <> "," <>  (L.intercalate "," $ fmap (renderShowable) nonRec)) e
 
 chooserKey inf kitems i = do
   let initKey = pure . join $ fmap rawPK . flip M.lookup (tableMap inf) . T.pack <$> i
@@ -183,6 +184,16 @@ chooserKey inf kitems i = do
 
 tableNonrec k  = F.toList $ Compose $  _kvAttr $ (\(TB1 k)-> k) $ tableNonRef k
 
+tableKeys (TB1 k) = concat $ fmap keyattr (F.toList k)
+tableKeys (LeftTB1 (Just i)) = tableKeys i
+tableKeys (ArrayTB1 [i]) = tableKeys i
+
+tableAttrs (TB1 k) = concat $ fmap aattr (F.toList k)
+tableAttrs (LeftTB1 (Just i)) = tableAttrs i
+tableAttrs (ArrayTB1 [i]) = tableAttrs i
+
+
+
 chooseKey
   ::
       InformationSchema -> S.Set Key -> UI Element
@@ -199,11 +210,11 @@ chooseKey inf key = mdo
 
   let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
 
-  let sortSet =  F.toList . tableNonRec  . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) $ key
+  let sortSet =  F.toList . tableKeys . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) $ key
   sortList  <- multiListBox (pure sortSet) (F.toList <$> bBset) (pure (line . show))
   asc <- checkedWidget (pure True)
   let
-      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList . fmap snd)
+      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList  )
       tdiItemList = pure Nothing
   itemList <- listBox (tidings res2 never ) itemListT (pure id ) ((\l -> (\ i -> (set UI.style (noneShow $ filteringPred l i  ) ) . attrLine i)) <$> filterInpT)
   let itemListE = unionWith const (rumors (userSelection itemList)) (rumors tdiItemList)
@@ -249,7 +260,7 @@ testShowable  v s = case s of
 
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text (Text,Showable)))
+    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text Showable))
     url = proc t -> do
       protocolo <- varTB "protocolo" -< t
       ano <- varTB "ano" -< t
@@ -260,10 +271,10 @@ testShowable  v s = case s of
         odx "andamento_status" -<  t
         odx "andamento_description" -<  t) -< t
       b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else (siapi2  i j)  )) -<  (liftA2 (,) protocolo ano )
-      let ao bv =   case  join (findTB1 (== iat  bv)<$> (mapKey keyValue . fmap (first keyValue) <$> t)) of
+      let ao bv =   case  join (findTB1 (== iat  bv)<$> (mapKey keyValue  <$> t)) of
                     Just i -> Nothing
                     Nothing -> Just $ TB1 $ KV (PK [] []) ( [iat bv])
-          convertAndamento :: [String] -> TB2 Text (Text,Showable)
+          convertAndamento :: [String] -> TB2 Text (Showable)
           convertAndamento [da,des] =  TB1 $ fmap attrT  $ KV  (PK [] []) ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des)),("andamento_user",SOptional Nothing ),("andamento_status",SOptional Nothing )])
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
@@ -271,28 +282,30 @@ testShowable  v s = case s of
                                             (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
       returnA -< join  (  ao  .  tailEmpty . concat <$> join b)
 
-    elem inf =  fmap (pure. catMaybes) . mapM (\inp -> do
+    elem inf =  fmap (pure. catMaybes) . (\l ->  (`catch` (\e  -> const (return []) (e :: SomeException) )) $   mapM (\inp -> do
                               b <- dynPK url (Just  inp)
-                              let o =  mapKey  (lookKey'  inf ["fire_project_event","fire_project"]). fmap (first (lookKey'  inf ["fire_project_event","fire_project"])) <$> b
-                              maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf "fire_project")) o)
+                              let o =  mapKey  (lookKey'  inf ["fire_project_event","fire_project"]) <$> b
+                              maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf "fire_project")) o) l)
     elemp inf = maybe (return Nothing) (\inp -> do
                               b <- dynPK url (Just inp)
-                              return $ mapKey (lookKey'  inf ["fire_project_event","fire_project"]) . fmap (first (lookKey'  inf ["fire_project_event","fire_project"])) <$> b)
+                              return $ mapKey (lookKey'  inf ["fire_project_event","fire_project"])  <$> b)
 
 
 
 
-type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModification Showable])])
+type PollingPlugisIO = PollingPlugins [TB1 Showable] (IO [([TableModification Showable])])
 
 (siapi3Polling   :: PollingPlugisIO  , siapi3Plugin :: Plugins) = (BoundedPollingPlugins "Siapi3 Andamento" 60 ("fire_project" ,staticP url) elem,BoundedPlugin2 "Siapi3 Andamento" "fire_project" (staticP url) elemp)
 
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2  Text (Text,Showable)))
+    url :: ArrowPlug (Kleisli IO) (Maybe (TB2  Text Showable))
     url = proc t -> do
       protocolo <- varTB "protocolo" -< t
       ano <- varTB "ano" -< t
-      cpf <- at "id_owner,id_contact" (at "id_owner" (varTB "cgc_cpf")) -< t
+      cpf <- at "id_owner,id_contact"
+                $ at "id_owner"
+                    $ varTB "cgc_cpf" -< t
       odx "taxa_paga" -< t
       odx "aproval_date" -< t
       at "andamentos" (proc t -> do
@@ -304,22 +317,21 @@ type PollingPlugisIO = PollingPlugins [TB1 (Key,Showable)] (IO [([TableModificat
       b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= 14 then  return Nothing else siapi3  i j k )) -<   (liftA3 (,,) protocolo ano cpf)
       let convertAndamento [_,da,desc,user,sta] = TB1 $ fmap attrT  $ KV (PK [] []) ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc),("andamento_user",SOptional $ Just $ SText $ T.pack  user),("andamento_status",SOptional $ Just $ SText $ T.pack sta)] )
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
-      let ao (bv,taxa) = case  join $ (findTB1 (== iat  bv)<$> (mapKey keyValue . fmap (first keyValue) <$> t)) of
+      let ao (bv,taxa) = case  join $ (findTB1 (== iat  bv)<$> (mapKey keyValue  <$> t)) of
                     Just i ->  Nothing
-                    Nothing ->    Just $ TB1 $ KV (PK [] []) ( [attrT ("taxa_paga",SOptional $ Just $  SBoolean taxa),iat bv])
-          iat bv = traceShowId $ Compose . Identity $ (IT
-                                            "andamentos"
-                                            (LeftTB1 $ Just $ ArrayTB1 $ reverse $ fmap convertAndamento bv))
+                    Nothing ->    Just $ TB1 $ KV (PK [] []) ( [attrT ("taxa_paga",SOptional $ Just $  SBoolean $ not taxa),iat bv])
+          iat bv = Compose . Identity $ (IT "andamentos"
+                         (LeftTB1 $ Just $ ArrayTB1 $ reverse $ fmap convertAndamento bv))
       returnA -< join  ( ao <$> b)
 
-    elem inf =  fmap (pure. catMaybes) . mapM (\inp -> do
+    elem inf =  fmap (pure. catMaybes) .  mapM (\inp -> (`catch` (\e  -> const (traceShow (e,tableNonRef inp)  $ return Nothing) (e :: SomeException) )) $ do
                               o  <- geninf inf inp
                               maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf "fire_project")) o
                             )
     elemp inf = maybe (return Nothing) (geninf inf)
     geninf inf inp = do
             b <- dynPK url (Just inp)
-            return $ mapKey (lookKey'  inf ["fire_project_event","fire_project"]). fmap (first (lookKey'  inf ["fire_project_event","fire_project"])) <$> b
+            return $ mapKey (lookKey'  inf ["fire_project_event","fire_project"]) <$> b
 
 
 lookKey' inf t k = justError ("lookKey' cant find key " <> show k <> " in " <> show t) $  foldr1 mplus $ fmap (\ti -> M.lookup (ti,k) (keyMap inf)) t
@@ -442,10 +454,10 @@ instance ToJSON Timeline where
           tti  = formatTime defaultTimeLocale "%Y/%m/%d %H:%M:%S"
 -}
 
-attrT i = Compose . Identity. Attr (fst i) $ i
+attrT i = Compose . Identity. Attr (fst i) $ snd i
 gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" "plano_aluno" (staticP url) elem
   where
-    url :: Parser (Kleisli (ReaderT (Maybe (TB1 (Key,Showable))) IO)) (Access Text) () (Maybe (TB2  Text (Text,Showable)))
+    url :: Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))
     url = proc t -> do
           descontado <-  liftA2 (\v k -> v*(1 - k) )
               <$> atR "frequencia,meses"
@@ -460,19 +472,18 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" "plano_aluno" (staticP url) e
                   odxR "price" -<  t
                   odxR "scheduled_date" -<  t ) -< ()
               let total = maybe 0 fromIntegral  p
-              let pagamento = Compose $ Identity $ FKT ([Compose $ Identity $ Attr "pagamentos" $ ("pagamentos",SOptional Nothing)]) True [] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> TB1 (KV (PK [attrT ("id",SSerial Nothing)] [attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" )]) [attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ])) ([1.. total] )))
-                  ao :: Maybe (TB2 Text (Text,Showable))
+              let pagamento = Compose $ Identity $ FKT ([ attrT  ("pagamentos",SOptional Nothing)]) True [] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> TB1 (KV (PK [attrT ("id",SSerial Nothing)] [attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" )]) [attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ])) ([1.. total] )))
+                  ao :: Maybe (TB2 Text Showable)
                   ao =  Just $ TB1 $ KV (PK [] []) [Compose $ Identity $ IT   ("pagamento")  (LeftTB1 $ Just $ TB1 $ KV (PK [] [] ) [pagamento ])]
               returnA -< ao ) -< descontado
 
     elem inf = maybe (return Nothing) (\inp -> do
                   b <- runReaderT (dynPK   url $ ())  (Just inp)
-                  return $ mapKey (lookKey' inf ["parcelamento","plano_aluno","pagamento"]). fmap (first (lookKey' inf ["parcelamento","plano_aluno","pagamento"])) <$> b
+                  return $ mapKey (lookKey' inf ["parcelamento","plano_aluno","pagamento"]) <$> b )
 
-                            )
 pagamentoServico = BoundedPlugin2 "Gerar Pagamento" "servico_venda" (staticP url) elem
   where
-    url :: Parser (Kleisli (ReaderT (Maybe (TB1 (Key,Showable))) IO)) (Access Text) () (Maybe (TB2  Text (Text,Showable)))
+    url :: Parser (Kleisli (ReaderT (Maybe (TB1 (Showable))) IO)) (Access Text) () (Maybe (TB2  Text (Showable)))
     url = proc t -> do
           descontado <- atR "pacote,servico"
                   (liftA3 (\v m k -> v * fromIntegral m * (1 -k) ) <$> atR "servico" (idxR "price") <*> idxR "pacote"
@@ -486,20 +497,20 @@ pagamentoServico = BoundedPlugin2 "Gerar Pagamento" "servico_venda" (staticP url
                   odxR "price" -<  t
                   odxR "scheduled_date" -<  t ) -< ()
               let total = maybe 0 fromIntegral  p
-              let pagamento = Compose $ Identity $ FKT ([Compose $ Identity $ Attr "pagamentos" $ ("pagamentos",SOptional Nothing)]) True [] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> TB1 (KV (PK [attrT ("id",SSerial Nothing)] [attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" )]) [attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ])) ([1.. total] )))
-                  ao :: Maybe (TB2 Text (Text,Showable))
+              let pagamento = Compose $ Identity $ FKT ([attrT  ("pagamentos",SOptional Nothing)]) True [] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> TB1 (KV (PK [attrT ("id",SSerial Nothing)] [attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" )]) [attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ])) ([1.. total] )))
+                  ao :: Maybe (TB2 Text (Showable))
                   ao =  Just $ TB1 $ KV (PK [] []) [Compose $ Identity $ IT   ("pagamento")  (LeftTB1 $ Just $ TB1 $ KV (PK [] [] ) [pagamento ])]
               returnA -< ao ) -< descontado
 
     elem inf = maybe (return Nothing) (\inp -> do
                       b <- runReaderT (dynPK   url $ ())  (Just inp)
-                      return $ mapKey (lookKey' inf ["parcelamento","servico_venda","pagamento"]). fmap (first (lookKey' inf ["parcelamento","servico_venda","pagamento"])) <$> b
+                      return $ mapKey (lookKey' inf ["parcelamento","servico_venda","pagamento"]) <$> b
                             )
 
 
 importarofx = BoundedPlugin2 "OFX Import" "account_file" (staticP url) elem
   where
-    url :: Parser (Kleisli IO) (Access Text) (Maybe (TB1 (Key,Showable))) (Maybe (TB2 Text (Text,Showable)))
+    url :: Parser (Kleisli IO) (Access Text) (Maybe (TB1 (Showable))) (Maybe (TB2 Text (Showable)))
     url = proc t -> do
       fn <- varT "file_name" -< t
       i <- varT "import_file" -< t
@@ -521,23 +532,23 @@ importarofx = BoundedPlugin2 "OFX Import" "account_file" (staticP url) elem
         odx "payeeid" -< t
         ) -< t
       b <- act (fmap join . traverse (\(SText i, SBinary r) -> ofxPlugin (T.unpack i) (BS.unpack r))) -< liftA2 (,) fn i
-      let ao :: TB2 Text (Text,Showable)
-          ao =  LeftTB1 $ ArrayTB1 . fmap (TB1 . fmap (Compose .Identity .(\i -> Attr (fst i) i ) )) <$>  b
-          ref :: [Compose Identity (TB Identity Text) (Text,Showable)]
-          ref = [Compose $ Identity $ Attr "statements" ("statements",SOptional $ SComposite . Vector.fromList . fmap (snd . head ._pkKey . _kvKey ) <$> b)]
-          tbst :: (Maybe (TB2 Text (Text,Showable)))
+      let ao :: TB2 Text (Showable)
+          ao =  LeftTB1 $ ArrayTB1 . fmap (TB1 . fmap (attrT )) <$>  b
+          ref :: [Compose Identity (TB Identity Text) (Showable)]
+          ref = [attrT  ("statements",SOptional $ SComposite . Vector.fromList . fmap (snd . head ._pkKey . _kvKey ) <$> b)]
+          tbst :: (Maybe (TB2 Text (Showable)))
           tbst = Just $ TB1 (KV (PK [] []) [Compose $ Identity $ FKT ref True [] ao])
       returnA -< tbst
     elem inf = maybe (return Nothing) (\inp -> do
                 b <- dynPK url (Just inp)
-                return $ mapKey (lookKey' inf ["stmttrn","account_file"]) . fmap (first (lookKey' inf ["stmttrn","account_file"])) <$> b)
+                return $ mapKey (lookKey' inf ["stmttrn","account_file"])  <$> b)
 
 
 
 notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" "nota"(staticP url) elem
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text (Text,Showable)))
+    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text (Showable)))
     url = proc t -> do
       i <- varTB "id_nota" -< t
       odx "nota" -<  t
@@ -547,18 +558,18 @@ notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" "nota"(staticP url) elem
                                p <- varTB "goiania_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act (fmap join  . traverse (\(i, (j, k,a)) -> prefeituraNota j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ TB1 $ KV (PK [] []) [_tb $ Attr  "nota" ("nota",    SOptional b)]
+      let ao =  Just $ TB1 $ KV (PK [] []) [attrT ("nota",    SOptional b)]
       returnA -< ao
 
     elem inf = maybe (return Nothing) (\inp -> do
                               b <- dynPK url (Just inp)
-                              return $ mapKey (lookKey inf "nota") . fmap (first (lookKey inf "nota")) <$> b
+                              return $ mapKey (lookKey inf "nota")  <$> b
                             )
 
 queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" "art"(staticP url) elem
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text (Text,Showable)))
+    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text (Showable)))
     url = proc t -> do
       i <- varTB "art_number" -< t
       idxT "payment_date" -<  t
@@ -569,11 +580,11 @@ queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" "art"(staticP url) elem
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act (fmap join  . traverse (\(i, (j, k,a)) -> creaLoginArt  j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ TB1 $ KV (PK [] []) [_tb $ Attr  "art" ("art",    SOptional b)]
+      let ao =  Just $ TB1 $ KV (PK [] []) [attrT ("art",    SOptional b)]
       returnA -< ao
     elem inf = maybe (return Nothing) (\inp -> do
                               b <- dynPK url (Just inp)
-                              return $ mapKey (lookKey inf "art"). fmap (first (lookKey inf "art")) <$> b
+                              return $ mapKey (lookKey inf "art") <$> b
                             )
 
 
@@ -581,7 +592,7 @@ queryArtBoletoCrea :: Plugins
 queryArtBoletoCrea = BoundedPlugin2 "Boleto Art Crea" "art"(staticP url) elem
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text (Text,Showable)))
+    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text (Showable)))
     url = proc t -> do
       i <- varTB "art_number" -< t
       idxT "verified_date" -< t
@@ -592,13 +603,12 @@ queryArtBoletoCrea = BoundedPlugin2 "Boleto Art Crea" "art"(staticP url) elem
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act ( traverse (\(i, (j, k,a)) -> creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ TB1 $ KV (PK [] []) [_tb $ Attr  "boleto" ("boleto",   SOptional $ (SBinary. BSL.toStrict) <$> b)]
+      let ao =  Just $ TB1 $ KV (PK [] []) [attrT ("boleto",   SOptional $ (SBinary. BSL.toStrict) <$> b)]
       returnA -< ao
     elem inf
        = maybe (return Nothing) (\inp -> do
                             b <- dynPK url (Just inp)
-                            return $ mapKey  (lookKey inf "art"). fmap (first (lookKey inf "art")) <$> b
-                            )
+                            return $ mapKey  (lookKey inf "art") <$> b )
 
 
 {-
@@ -710,7 +720,7 @@ main = do
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
 
   forkIO $ poller h siapi3Polling
-  forkIO $ poller h siapi2Polling
+  -- forkIO $ poller h siapi2Polling
   -- forkIO $ poller h artAndamentoPolling
 
 
@@ -722,10 +732,11 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
   conn <- connectPostgreSQL ("user=postgres dbname=incendio")
   inf <- keyTables conn  conn ("incendio","postgres")
   forever $ do
+        threadDelay (1000*1000)
         [t :: Only UTCTime] <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
         startTime <- getCurrentTime
         let intervalsec = fromIntegral $ 60*d
-        if diffUTCTime startTime  (unOnly t) >  intervalsec
+        if True -- diffUTCTime startTime  (unOnly t) >  intervalsec
         then do
             execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
             print ("START - " <> show startTime  ::String)
@@ -733,7 +744,7 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
             listRes <- queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
             let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
                 tdInput i =  isJust  $ testTable i (fst f)
-                tdOutput1 i =  isJust  $ testTable i (snd f)
+                tdOutput1 i =   not $ isJust  $ testTable i (snd f)
             i <- elem inf evb
             handler i
             end <- getCurrentTime

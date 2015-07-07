@@ -23,6 +23,7 @@ import qualified Data.ByteString.Lazy as BSL
 
 import qualified Data.List as L
 
+import Debug.Trace
 import Gpx
 
 siapi3Page protocolo ano cgc_cpf = do
@@ -56,7 +57,7 @@ siapi2 protocolo ano = do
 siapi3 protocolo ano cgc_cpf = do
     v <- (siapi3Page protocolo ano cgc_cpf)
     r <- traverse readSiapi3Andamento  v
-    return $ liftA2 (,) r ( L.isInfixOf "AGUARDANDO PAGAMENTO DA TAXA" <$> v)
+    return $ traceShowId $ traceShow (protocolo,ano,cgc_cpf) $ liftA2 (,) r ( L.isInfixOf "AGUARDANDO PAGAMENTO DA TAXA" <$> v)
 
 
 protocolocnpjForm :: BS.ByteString ->BS.ByteString ->BS.ByteString ->BS.ByteString -> [FormParam]
@@ -75,6 +76,8 @@ siapiAndamento3Url = "https://siapi3.bombeiros.go.gov.br/paginaInicialWeb.jsf"
 siapiListAndamento3Url = "https://siapi3.bombeiros.go.gov.br/listarAndamentosWeb.jsf"
 
 testSiapi3 = do
-  siapi3 "40277" "15" "17800968000103"
+
+--   siapi3 "76259" "15" "01476129000133"
+     siapi3 "96660" "15" "13357228000185"
 
 

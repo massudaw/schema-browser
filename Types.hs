@@ -71,10 +71,14 @@ data PK a
 data KV a
   = KV {_kvKey  :: PK a , _kvAttr ::  [a] }deriving(Eq,Ord,Functor,Foldable,Traversable,Show)
 
--- Utility functions for kv
+filterTB1 f (TB1 i) = TB1 $ filterKV f i
+
+
+mapTB1  f (TB1 i)  =  TB1 (mapKV f i )
 mapKV f (KV (PK l m) n) =  KV (PK (map f l)(map f m)) (map f n)
 filterKV i (KV (PK l m) n) = KV (PK (filter i l) (filter i m )) (filter i n)
 findKV i (KV (PK l m) n) =  (L.find i l)  `mplus` (L.find i m ) `mplus` (L.find i n)
+findTB1  i (TB1 j )  =  findKV i j
 
 
 -- Reference labeling
@@ -116,7 +120,7 @@ instance Bifunctor (TB Identity ) where
   first f (Attr k i) = Attr (f k) i
   first f (IT k i) = IT (f k) (mapKey f i)
   first f (FKT k l m  i) = FKT  (fmap (Compose . Identity . first f . runIdentity . getCompose) k) l (fmap (first f . second f) m   ) (mapKey f i)
-  first f (TBEither k l m ) = TBEither (f k) ( fmap (fmap f . (Compose . Identity . first f . runIdentity . getCompose)) l) (fmap ((Compose . Identity . first f . runIdentity . getCompose))  m)
+  first f (TBEither k l m ) = TBEither (f k) ( fmap ( (Compose . Identity . first f . runIdentity . getCompose)) l) (fmap ((Compose . Identity . first f . runIdentity . getCompose))  m)
 
   second = fmap
 
@@ -133,7 +137,7 @@ data TB f k a
     , _fkttable ::  (FTB1 (Compose f (TB f k)) a)
     }
   | TBEither
-    k [(Compose f (TB f k) k )]  (Maybe (Compose f (TB f k) a))
+    k [(Compose f (TB f k) () )]  (Maybe (Compose f (TB f k) a))
   | Attr
     { _tbattrkey :: k
     ,_tbattr :: a   }
@@ -279,9 +283,9 @@ data TableModification b
 
 
 data Modification a b
-  = EditTB (TB1 (a,b)) (TB1 (a,b))
-  | InsertTB (TB1 (a,b))
-  | DeleteTB (TB1 (a,b))
+  = EditTB (TB2 a b) (TB2 a b)
+  | InsertTB (TB2 a b)
+  | DeleteTB (TB2 a b)
   deriving(Eq,Show,Functor)
 
 instance Apply KV where
