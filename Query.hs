@@ -161,8 +161,6 @@ renderShowable i = shw i
     shw (SOptional a) = show a
     shw (SInterval a) = showInterval a
     shw (SPInterval a) = show a
-    shw (SEitherR a) = renderShowable a
-    shw (SEitherL a) = renderShowable a
     shw (SComposite a) = intercalate "," $ F.toList (fmap shw a)
 
 showInterval i | i == Interval.empty = show i
@@ -291,17 +289,6 @@ tableNonRefK (TB1 (KV (PK l m ) n)  )  = TB1 (KV (PK (fun l) (fun m) ) (fun n))
         nonRef it@(IT j k ) = [Compose $ Identity $ (IT   j (tableNonRefK k )) ]
         fun  = concat . fmap (nonRef . runIdentity . getCompose)
 
-optionalAttr
-  :: Compose
-       Identity
-       (TB f (FKey (KType a), Showable))
-       (FKey (KType a1), Showable)
-     -> Compose
-          Identity
-          (TB f (FKey (KType a), Showable))
-          (FKey (KType a1), Showable)
-optionalAttr  (Compose (Identity ((Attr k i )))) = Compose . Identity . Attr (keyOptional k) $ keyOptional i
-optionalAttr  (Compose (Identity ((IT  rel j  )))) = Compose . Identity $  IT  rel (LeftTB1 $ Just $ j )
 
 addDefault (Compose (Identity (Attr k i))) = Compose (Identity (Attr k (SOptional Nothing)))
 addDefault (Compose (Identity (IT  rel j ))) = Compose (Identity (IT  rel (LeftTB1 Nothing)  ))
@@ -324,11 +311,6 @@ fakeKey n t = Key n Nothing (unsafePerformIO newUnique) t
 
 unSComposite (SComposite i) = i
 unSComposite i = errorWithStackTrace ("unSComposite " <> show i)
-
-unSEitherR (SEitherR r) = Just r
-unSEitherR (SEitherL r) = Nothing
-unSEitherL (SEitherL r) = Just r
-unSEitherL (SEitherR r) = Nothing
 
 
 

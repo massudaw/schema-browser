@@ -525,3 +525,8 @@ selectedMultiple = mkReadWriteAttr get set
     from s = let JSON.Success x =JSON.fromJSON s in x
 
 
+sink0 attr uiv ui =  do
+  v <- currentValue uiv
+  ui # set attr v # sink attr uiv
+
+

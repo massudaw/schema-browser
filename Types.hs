@@ -126,21 +126,24 @@ instance Bifunctor (TB Identity ) where
 
 data TB f k a
   = FKT -- Foreign Table
-    { _tbref :: [Compose f (TB f k) a]
-    , _reflexive ::  Bool
-    , _fkrelation :: [(k ,k)]
-    , _fkttable ::  (FTB1 (Compose f (TB f k)) a)
+    { _tbref :: ! [Compose f (TB f k) a]
+    , _reflexive ::  ! Bool
+    , _fkrelation :: ! [(k ,k)]
+    , _fkttable ::  ! (FTB1 (Compose f (TB f k)) a)
     }
 
   | IT -- Inline Table
-    { _ittableName :: k
-    , _fkttable ::  (FTB1 (Compose f (TB f k)) a)
+    { _ittableName :: ! k
+    , _fkttable ::  ! (FTB1 (Compose f (TB f k)) a)
     }
   | TBEither
-    k [(Compose f (TB f k) () )]  (Maybe (Compose f (TB f k) a))
+    { _tbeithername :: ! k
+    , _tbeitherref :: ! [(Compose f (TB f k) () )]
+    , _tbeithervalue:: ! (Maybe (Compose f (TB f k) a))
+    }
   | Attr
-    { _tbattrkey :: k
-    ,_tbattr :: a   }
+    { _tbattrkey :: ! k
+    ,_tbattr :: ! a   }
   -- Attribute
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
 
@@ -152,9 +155,9 @@ mapKey f (LeftTB1 k ) = LeftTB1 (mapKey f <$> k)
 mapKey f (ArrayTB1 k ) = ArrayTB1 (mapKey f <$> k)
 
 data FTB1 f a
-  = TB1 (KV (f a))
-  | LeftTB1 (Maybe (FTB1 f a))
-  | ArrayTB1 [(FTB1 f a)]
+  = TB1 ! (KV (f a))
+  | LeftTB1 ! (Maybe (FTB1 f a))
+  | ArrayTB1 ! [(FTB1 f a)]
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
 
@@ -222,8 +225,6 @@ newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,
 data Showable
   = SText !Text
   | SNumeric !Int
-  | SEitherR Showable
-  | SEitherL Showable
   | SBoolean !Bool
   | SDouble !Double
   | STimestamp !LocalTime

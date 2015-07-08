@@ -25,23 +25,23 @@ import qualified Data.Text as T
 import qualified Data.Traversable as Tra
 import qualified Data.Text.Lazy as TL
 
+import qualified Data.Vector as V
 import Safe
 import Types
 import Query
 import Utils
 import Schema
--- import QueryWidgets
 import Gpx
--- import Widgets
 import Debug.Trace
-
-
+import Step
 import RuntimeTypes
 import Control.Monad.Reader
 
 
 getInp :: TL.Text -> TB1 Showable -> Maybe BSC.ByteString
-getInp l  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t)-> t )) . unRSOptional' . (\(Attr _ i) -> i). runIdentity . getCompose )  . findTB1 (overComp ((==l) . keyValue . (\(Attr k _ ) -> k )))
+getInp l  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t)-> t )) . join . fmap unRSOptional' . cc . runIdentity . getCompose )  . findTB1 (((==[l]) . fmap keyValue . keyattr ))
+  where cc (TBEither _ _ (l) ) = join $fmap (cc.unTB) l
+        cc (Attr _ l ) = Just l
 
 cpfCall = WrappedCall initCnpj [getCaptchaCpf',getCpf']
 
@@ -61,11 +61,13 @@ getCaptchaCpf' inf i  handler = do
 getCaptchaCpf cgc_cpf  = do
      session <- ask
      liftIO $ do
-       r <-  Sess.getWith (defaults & param "cpf" .~ [T.pack $ BSC.unpack cgc_cpf]) session $ traceShowId cpfhome
-       (^? responseBody) <$> (Sess.get session $ traceShowId cpfcaptcha)
+       print cpfhome
+       r <-  Sess.getWith (defaults & param "cpf" .~ [T.pack $ BSC.unpack cgc_cpf]) session  cpfhome
+       print cpfcaptcha
+       (^? responseBody) <$> (Sess.get session $ cpfcaptcha)
 getCaptchaCpfShowable tinput =
       let input = tinput
-      in fmap join $ Tra.sequence $  fmap getCaptchaCpf  (getInp "cpf_number" input)
+      in fmap join $ Tra.sequence $  fmap getCaptchaCpf  (getInp "number" input)
 
 
 getCpf' ::
@@ -81,12 +83,13 @@ getCpf'  inf i  handler = do
           return ()) outM ) rv
   return ()
 
-getCpfShowable tinput = fmap join $ Tra.sequence $  liftA2 getCpf (getInp "captchaInput" input ) (getInp "cpf_number" input)
+getCpfShowable tinput = fmap join $ Tra.sequence $  liftA2 getCpf (getInp "captchaInput" input ) (getInp "number" input)
   where input = tinput
 getCpf captcha cgc_cpf = do
     session <- ask
     liftIO $ do
-          pr <- traverse (Sess.post session (traceShowId cpfpost) . protocolocpfForm cgc_cpf ) (Just $  captcha  )
+          print cpfpost
+          pr <- traverse (Sess.post session (cpfpost) . protocolocpfForm cgc_cpf ) (Just $  captcha  )
           traverse (BSL.writeFile "cpf_name.html") (join $ fmap (^? responseBody)  pr)
           traverse (readCpfName . BSLC.unpack ) (fromJust pr ^? responseBody)
 
@@ -101,11 +104,13 @@ initCnpj   =  (\i -> do
 getCaptcha cgc_cpf  = do
      session <- ask
      liftIO $ do
-       r <-  Sess.getWith (defaults & param "cnpj" .~ [T.pack $ BSC.unpack cgc_cpf]) session $ traceShowId cnpjhome
-       (^? responseBody) <$> (Sess.get session $ traceShowId cnpjcaptcha)
+       print cnpjhome
+       r <-  Sess.getWith (defaults & param "cnpj" .~ [T.pack $ BSC.unpack cgc_cpf]) session $ cnpjhome
+       print cnpjcaptcha
+       (^? responseBody) <$> (Sess.get session $ cnpjcaptcha)
 getCaptchaShowable tinput =
       let input = tinput
-      in fmap join $ Tra.sequence $  fmap getCaptcha  (getInp "cnpj_number" input)
+      in fmap join $ Tra.sequence $  fmap getCaptcha  (getInp "number" input)
 
 
 getCaptcha' ::
@@ -138,12 +143,12 @@ getCnpj'  inf i  handler = do
             fk i  = Compose . Identity . FKT i True []
             afk i  = Compose . Identity . FKT i True [] . LeftTB1 . Just . ArrayTB1
             tb pk desc attr = TB1 $ KV (PK pk desc) attr
-            (pcnae,pdesc) = traceShowId $ (justError "wrong primary activity " $ fmap (SText .TL.filter (not . flip L.elem "-.") . fst) t ,  SOptional $  SText .  snd <$>  t)
+            (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (SText .TL.filter (not . flip L.elem "-.") . fst) t ,  SOptional $  SText .  snd <$>  t)
                 where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)
             scnae = fmap (\t -> ((SText .TL.filter (not . flip L.elem "-.") . fst) t ,    (SText .  snd ) t)) ts
                 where ts = join . maybeToList $ fmap ( TL.breakOn " - " .  TL.pack ) <$> (M.lookup "CÓDIGO E DESCRIÇÃO DAS ATIVIDADES ECONÔMICAS SECUNDÁRIAS" out)
             attrs = tb [] [own "owner_name" (idx "NOME EMPRESARIAL")]
-                    [fk [own "address" (SOptional Nothing)]
+                    [fk [own "address" (SOptional (Just $ SNumeric (-1)))]
                           (LeftTB1 $ Just $  tb [attr "id" (SSerial Nothing) ]
                               []
                               [attr "logradouro" (idx "LOGRADOURO")
@@ -156,9 +161,9 @@ getCnpj'  inf i  handler = do
                               ,attr "geocode" (SOptional Nothing)
                               ,attr "bounding" (SOptional Nothing)]
                               )
-                     ,fk [own "atividade_principal" pcnae]
+                     ,fk [own "atividade_principal" (SOptional $ Just pcnae)]
                                 (LeftTB1 $ Just $ tb [cna "id" pcnae] [cna "description" pdesc] [] )
-                     ,afk [own "atividades_secundarias" pcnae]
+                     ,afk [own "atividades_secundarias" (SOptional $ Just $ SComposite $V.fromList $ fmap fst scnae)]
                                 ((\(pcnae,pdesc)-> tb [cna "id" pcnae] [cna "description" pdesc] [] ) <$> scnae)
 
                     ]
@@ -169,13 +174,14 @@ getCnpj'  inf i  handler = do
 
 
 
-getCnpjShowable tinput = fmap join $ Tra.sequence $  liftA2 getCnpj (getInp "captchaInput" input ) (getInp "cnpj_number" input)
+getCnpjShowable tinput = fmap join $ Tra.sequence $  liftA2 getCnpj (getInp "captchaInput" input ) (getInp "number" input)
   where input = tinput
 getCnpj captcha cgc_cpf = do
     session <- ask
     liftIO $ do
-          pr <- traverse (Sess.post session (traceShowId cnpjpost) . protocolocnpjForm cgc_cpf ) (Just $  captcha  )
-          pr <- traverse (Sess.post session (traceShowId cnpjpost) . protocolocnpjForm cgc_cpf ) (Just $  captcha  )
+          print cnpjpost
+          pr <- traverse (Sess.post session (cnpjpost) . protocolocnpjForm cgc_cpf ) (Just $  captcha  )
+          pr <- traverse (Sess.post session (cnpjpost) . protocolocnpjForm cgc_cpf ) (Just $  captcha  )
           traverse (readHtmlReceita . BSLC.unpack ) (fromJust pr ^? responseBody)
 
 {-

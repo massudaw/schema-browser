@@ -40,7 +40,7 @@ import Utils
 import Schema
 import Data.Char (toLower)
 import PandocRenderer
-import Control.Monad
+-- import Control.Monad
 import Postgresql
 import Data.Maybe
 import Data.Functor.Identity
@@ -207,10 +207,8 @@ chooseKey inf key = mdo
   -- Final Query ListBox
   filterInp <- UI.input
   filterInpBh <- stepper "" (UI.valueChange filterInp)
-
   let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
-
-  let sortSet =  F.toList . tableKeys . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) $ key
+      sortSet =  F.toList . tableKeys . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) $ key
   sortList  <- multiListBox (pure sortSet) (F.toList <$> bBset) (pure (line . show))
   asc <- checkedWidget (pure True)
   let
@@ -257,7 +255,6 @@ testShowable  v s = case s of
 
 
 (siapi2Polling   :: PollingPlugisIO  , siapi2Plugin :: Plugins) = (BoundedPollingPlugins "Siapi2 Andamento" 60 ("fire_project" ,staticP url) elem,BoundedPlugin2 "Siapi2 Andamento" "fire_project"(staticP url) elemp)
-
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
     url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text Showable))
@@ -298,31 +295,33 @@ type PollingPlugisIO = PollingPlugins [TB1 Showable] (IO [([TableModification Sh
 (siapi3Polling   :: PollingPlugisIO  , siapi3Plugin :: Plugins) = (BoundedPollingPlugins "Siapi3 Andamento" 60 ("fire_project" ,staticP url) elem,BoundedPlugin2 "Siapi3 Andamento" "fire_project" (staticP url) elemp)
 
   where
-    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2  Text Showable))
+    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    url :: ArrowReader -- ArrowPlug (Kleisli IO) (Maybe (TB2  Text Showable))
     url = proc t -> do
-      protocolo <- varTB "protocolo" -< t
-      ano <- varTB "ano" -< t
-      cpf <- at "id_owner,id_contact"
-                $ at "id_owner"
-                    $ varTB "cgc_cpf" -< t
-      odx "taxa_paga" -< t
-      odx "aproval_date" -< t
-      at "andamentos" (proc t -> do
-          odx "andamento_date" -<  t
-          odx "andamento_description" -<  t
-          odx "andamento_user" -<  t
-          odx "andamento_status" -<  t) -< t
+      protocolo <- varTB "protocolo" -< ()
+      ano <- varTB "ano" -< ()
+      cpf <- atR "id_owner,id_contact"
+                $ atR "id_owner"
+                    $ atAny "number" [varTB "cpf_number",varTB "cnpj_number"] -< t
+      odxR "taxa_paga" -< ()
+      odxR "aproval_date" -< ()
+      atR "andamentos" (proc t -> do
+          odxR "andamento_date" -<  t
+          odxR "andamento_description" -<  t
+          odxR "andamento_user" -<  t
+          odxR "andamento_status" -<  t) -< ()
 
-      b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= 14 then  return Nothing else siapi3  i j k )) -<   (liftA3 (,,) protocolo ano cpf)
+      b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= 14 then  return Nothing else liftIO $ siapi3  i j k )) -<   (liftA3 (,,) protocolo ano cpf)
       let convertAndamento [_,da,desc,user,sta] = TB1 $ fmap attrT  $ KV (PK [] []) ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc),("andamento_user",SOptional $ Just $ SText $ T.pack  user),("andamento_status",SOptional $ Just $ SText $ T.pack sta)] )
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
-      let ao (bv,taxa) = case  join $ (findTB1 (== iat  bv)<$> (mapKey keyValue  <$> t)) of
+      let ao  (bv,taxa) t = case  join $ (findTB1 (== iat  bv)<$> (mapKey keyValue  <$> t)) of
                     Just i ->  Nothing
                     Nothing ->    Just $ TB1 $ KV (PK [] []) ( [attrT ("taxa_paga",SOptional $ Just $  SBoolean $ not taxa),iat bv])
           iat bv = Compose . Identity $ (IT "andamentos"
                          (LeftTB1 $ Just $ ArrayTB1 $ reverse $ fmap convertAndamento bv))
-      returnA -< join  ( ao <$> b)
+      act (\i ->  do
+          t <- ask
+          return $  join $ ($t)<$> i ) -< ao <$> b
 
     elem inf =  fmap (pure. catMaybes) .  mapM (\inp -> (`catch` (\e  -> const (traceShow (e,tableNonRef inp)  $ return Nothing) (e :: SomeException) )) $ do
                               o  <- geninf inf inp
@@ -330,7 +329,7 @@ type PollingPlugisIO = PollingPlugins [TB1 Showable] (IO [([TableModification Sh
                             )
     elemp inf = maybe (return Nothing) (geninf inf)
     geninf inf inp = do
-            b <- dynPK url (Just inp)
+            b <- runReaderT (dynPK url $ () ) (Just inp)
             return $ mapKey (lookKey'  inf ["fire_project_event","fire_project"]) <$> b
 
 
@@ -453,6 +452,8 @@ instance ToJSON Timeline where
           ti  = formatTime defaultTimeLocale "%Y/%m/%d"
           tti  = formatTime defaultTimeLocale "%Y/%m/%d %H:%M:%S"
 -}
+
+type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))
 
 attrT i = Compose . Identity. Attr (fst i) $ snd i
 gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" "plano_aluno" (staticP url) elem
@@ -611,12 +612,11 @@ queryArtBoletoCrea = BoundedPlugin2 "Boleto Art Crea" "art"(staticP url) elem
                             return $ mapKey  (lookKey inf "art") <$> b )
 
 
-{-
 
 (queryArtAndamento ,artAndamentoPolling :: PollingPlugisIO ) = (BoundedPlugin2 "Andamento Art Crea" "art"(staticP url) elemp,BoundedPollingPlugins "Andamento Art Crea"  60 ("art",staticP url) elem)
   where
     varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Key (Key,Showable)))
+    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text Showable))
     url = proc t -> do
       i <- varTB "art_number" -< t
       odx "payment_date" -< t
@@ -629,32 +629,32 @@ queryArtBoletoCrea = BoundedPlugin2 "Boleto Art Crea" "art"(staticP url) elem
       v <- act (fmap (join .maybeToList) . traverse (\(i, (j, k,a)) -> creaConsultaArt  j k a i ) ) -< liftA2 (,) i r
       let artVeri dm = ("verified_date" ,) . SOptional . join $(\d ->  fmap (STimestamp . fst) $ strptime "%d/%m/%Y %H:%M" ( d !!1) ) <$> dm
           artPayd dm = ("payment_date" ,) . SOptional . join $ (\d -> fmap (STimestamp . fst )  $ strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
-          artInp inp = Just $ TB1 $ KV (PK [] [] ) $fmap (\i -> Compose . Identity . Attr (fst i ) $ i ) $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
+          artInp inp = Just $ TB1 $ KV (PK [] [] ) $fmap attrT   $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       i <- checkOutput "verified_date" -< (t,artInp v)
       j <- checkOutput "payment_date" -< (t,artInp v)
       returnA -< (catMaybes [i, j] )
-      returnA -< Just $ TB1 $KV  (PK [] [] ) $ fmap (\i -> Compose . Identity . Attr ( fst i) $ i) $  catMaybes [ i,j]
+      returnA -< Just $ TB1 $KV  (PK [] [] ) $ fmap attrT  $  catMaybes [ i,j]
     elem inf =  fmap (pure. catMaybes) . mapM (\inp -> do
                               b <- dynPK url (Just  inp)
-                              let o =   b
+                              let o = mapKey (lookKey' inf ["art","register_crea"]) <$>  b
                               maybe (return Nothing )  (\i -> if L.null (F.toList i) then return Nothing else updateModAttr inf i inp (lookTable inf "art")) o
                             )
     elemp inf
           = maybe (return Nothing) (\inp -> do
                    b <- dynPK url (Just inp)
-                   return $   b)
--}
+                   return $  mapKey (lookKey' inf ["art","register_crea"]) <$> b)
+
 
 queryCPFStatefull =  StatefullPlugin "CPF Receita" "owner" [staticP arrowF,staticP arrowS]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] cpfCall
     where
-      arrowF ,arrowS :: ArrowPlug (->) (Maybe (TB1 (Text,Showable)))
+      arrowF ,arrowS :: ArrowReader-- ArrowPlug (->) (Maybe (TB1 (Text,Showable)))
       arrowF = proc t -> do
-              idxT "cpf_number" -< t
-              odx "captchaViewer" -< t
+              atAny "number" [idxR "cpf_number"] -< t
+              odxR "captchaViewer" -< t
               returnA -< Nothing
       arrowS = proc t -> do
-              idxT "captchaInput" -< t
-              odx "owner_name" -< t
+              idxR "captchaInput" -< t
+              odxR "owner_name" -< t
               returnA -< Nothing
 
 
@@ -663,32 +663,34 @@ queryCPFStatefull =  StatefullPlugin "CPF Receita" "owner" [staticP arrowF,stati
 queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
   [staticP arrowF ,staticP arrowS ]
   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] wrapplug
-    where arrowF ,arrowS :: ArrowPlug (->) (Maybe (TB1 (Text,Showable)))
+    where arrowF ,arrowS :: ArrowReader -- ArrowPlug (->) (Maybe (TB1 (Text,Showable)))
           arrowF = proc t -> do
-            idxT "cnpj_number" -< t
-            odx "captchaViewer"-< t
+            atAny "number" [idxR "cnpj_number"] -< t
+            odxR "captchaViewer"-< t
             returnA -< Nothing
           arrowS = proc t -> do
-            idxT "captchaInput" -< t
-            odx "owner_name" -< t
-            odx "address"-< t
-            atO "atividades_secundarias" cnae -< t
-            atO "atividade_principal" cnae -< t
-            atO "address"  addrs -< t
+            idxR "captchaInput" -< t
+            odxR "owner_name" -< t
+            odxR "address"-< t
+            odxR "atividade_principal" -< ()
+            odxR "atividades_secundarias" -< ()
+            atR "atividades_secundarias" cnae -< t
+            atR "atividade_principal" cnae -< t
+            atR "address"  addrs -< t
 
             returnA -< Nothing
 
           cnae = proc t -> do
-                  odx "id" -< t
-                  odx "description" -< t
+                  odxR "id" -< t
+                  odxR "description" -< t
           addrs = proc t -> do
-                  odx "logradouro" -< t
-                  odx "number " -< t
-                  odx "uf" -< t
-                  odx "cep" -< t
-                  odx "complemento" -< t
-                  odx "municipio" -< t
-                  odx "bairro" -< t
+                  odxR "logradouro" -< t
+                  odxR "number " -< t
+                  odxR "uf" -< t
+                  odxR "cep" -< t
+                  odxR "complemento" -< t
+                  odxR "municipio" -< t
+                  odxR "bairro" -< t
 
 
 
@@ -719,11 +721,8 @@ main = do
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
 
-  forkIO $ poller h siapi3Polling
-  -- forkIO $ poller h siapi2Polling
-  -- forkIO $ poller h artAndamentoPolling
-
-
+  forkIO $ do
+      mapM_ (poller h) [siapi3Polling,siapi2Polling,artAndamentoPolling]
 
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)
   print "Finish"
@@ -736,7 +735,7 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
         [t :: Only UTCTime] <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
         startTime <- getCurrentTime
         let intervalsec = fromIntegral $ 60*d
-        if True -- diffUTCTime startTime  (unOnly t) >  intervalsec
+        if diffUTCTime startTime  (unOnly t) >  intervalsec
         then do
             execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
             print ("START - " <> show startTime  ::String)
@@ -752,7 +751,7 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
             execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (end ,n,a,"incendio" :: String)
             threadDelay (d*1000*1000*60)
         else do
-            threadDelay (round $ (*1000000) $ realToFrac $ diffUTCTime startTime (unOnly t))
+            threadDelay (round $ (*1000000) $  diffUTCTime startTime (unOnly t))
 
 {-
 layout  infT = do
