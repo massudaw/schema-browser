@@ -34,7 +34,6 @@ import qualified Data.ExtendedReal as ER
 
 import GHC.Int
 import Utils
-import Data.Void
 
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Internal
@@ -223,7 +222,7 @@ intersectionOp i j = inner " = "
 showTable t  = rawSchema t <> "." <> rawName t
 
 delete
-  :: ToField (TB Identity Key (Showable))  =>
+  :: ToField (TB Identity Key Showable)  =>
      Connection ->  TB1 (Showable) -> Table -> IO GHC.Int.Int64
 delete conn kold t = execute conn (fromString $ traceShowId $ T.unpack del) koldPk
   where
@@ -294,7 +293,13 @@ addDefault (Compose (Identity (Attr k i))) = Compose (Identity (Attr k (SOptiona
 addDefault (Compose (Identity (IT  rel j ))) = Compose (Identity (IT  rel (LeftTB1 Nothing)  ))
 
 overComp f =  f . runIdentity . getCompose
-mapComp f =  Compose. Identity . f . runIdentity . getCompose
+
+nonRef i@(Attr _ _ ) = [i]
+nonRef (TBEither n l j ) = [TBEither n l  (overComp (Compose . Identity . head . nonRef) <$> j ) ]
+nonRef (FKT i True _ _ ) = (fmap unTB i)
+nonRef (FKT i False _ _ ) = []
+nonRef it@(IT j k ) = [(IT  j (tableNonRef k )) ]
+
 
 tableNonRef (ArrayTB1 i) = ArrayTB1 $ tableNonRef <$> i
 tableNonRef (LeftTB1 i ) = LeftTB1 $ tableNonRef <$> i

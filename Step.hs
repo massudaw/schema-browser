@@ -332,3 +332,6 @@ varN t = fmap snd  <$> idx t
 type FunArrowPlug o = Step.Parser (->) AccessTag (Maybe (TB1 Showable)) o
 type ArrowPlug a o = Step.Parser a AccessTag (Maybe (TB1 Showable)) o
 
+
+attrT :: (a,b) -> Compose Identity (TB Identity a ) b
+attrT (i,j) = Compose . Identity $ Attr i j

@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 module Postgresql where
 import Types
+import Utils
 import Query
 import GHC.Stack
 -- import Debug.Trace

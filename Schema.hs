@@ -5,19 +5,25 @@ module Schema where
 import Types
 import Data.Unique
 import qualified Data.Foldable as F
+import Step
 import Data.Maybe
 import Data.String
 import Control.Monad.IO.Class
 import Data.Monoid
 import Utils
+import Control.Exception
 
+import Data.Functor.Identity
+import Data.Functor.Compose
 import Database.PostgreSQL.Simple
+import Data.Time
 
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 
 import Control.Monad
 import Control.Applicative
+import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
@@ -122,12 +128,7 @@ keyTables conn userconn (schema ,user) = do
                                   eitherFK =   M.lookup c eitherMap
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $maybeToList $ M.lookup c descMap) <> pks)
                                 in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap)  c (maybe [] id $ M.lookup c authorization)  pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
-       let ret@(i1,i2,i3) = (keyMap, M.fromList $ filter (not.S.null .fst)  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
-       -- paths <- schemaKeys' conn schema ret
-       -- let graphI =  graphFromPath (filter (\i -> fst (pbound i) /= snd (pbound i) ) $ paths <> (fmap (fmap ((\(Just i) -> i) . flip M.lookup i3)) <$> concat (fmap (F.toList.snd) (M.toList fks))))
-           -- graphP = warshall2 $ graphI
-           -- graph = hashGraph $ graphP
-           -- invgraph = hashGraphInv' $ graphP
+       let (i1,i2,i3) = (keyMap, M.fromList $ filter (not.S.null .fst)  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        mvar <- newMVar M.empty
        return  $ InformationSchema schema i1 i2 i3 M.empty mvar  userconn conn
 
@@ -144,20 +145,26 @@ isInline (KArray i ) = isInline i
 isInline (InlineTable _ i) = True
 isInline _ = False
 
-{-graphFromPath p = Graph {hvertices = fmap fst bs,
-                         tvertices = fmap snd bs,
-                         edges = fmap pure $ pathMap p
-                         }
-  where bs = fmap pbound p-}
-
--- TODO : Implement ordinal information
-{-schemaKeys' :: Connection -> Text -> TableSchema -> IO [PathQuery]
-schemaKeys' conn schema (keyTable,map,_) = do
-       resView <- query conn "select table_name,pks,origin_fks from metadata.fks join metadata.pks on origin_table_name = table_name and origin_schema_name = schema_name where schema_name = ?" (Only schema)
-       let
-           viewRels = (\(pk,fk) -> Path pk (FetchTable $ (\(Just i) -> i) $ M.lookup pk map) fk). (\(t,pk,fks) -> (S.fromList $ (\i->(\(Just i) -> i) $ M.lookup (t,i) keyTable ) <$> (V.toList pk) ,S.fromList $ (\i->(\(Just i) -> i) $ M.lookup (t,i) keyTable ) <$>  (V.toList fks) ) ) <$> resView
-       return viewRels
--}
+liftKeys
+  :: InformationSchema
+     -> Text
+     -> FTB1 (Compose Identity (TB Identity Text)) a
+     -> FTB1 (Compose Identity (TB Identity Key)) a
+liftKeys inf tname tb
+  = liftTable tname tb
+  where
+        liftTable tname (TB1 i )  = TB1 $ mapComp (liftField tname) <$> i
+        liftTable tname (LeftTB1 j ) = LeftTB1 $ liftTable tname <$> j
+        liftTable tname (ArrayTB1 j ) = ArrayTB1 $ liftTable tname <$> j
+        liftField :: Text -> TB Identity Text a -> TB Identity Key a
+        liftField tname (TBEither n k j ) = TBEither (lookKey inf tname n) (mapComp (liftField tname) <$> k ) (mapComp (liftField tname ) <$> j)
+        liftField tname (Attr t v) = Attr (lookKey inf tname t) v
+        liftField tname (FKT ref i rel2 tb) = FKT (mapComp (liftField tname) <$> ref)  i ( rel) (liftTable tname tb)
+            where Just (Path _ (FKJoinTable _ rel _ ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (concat $ fmap keyattr ref))  (F.toList$ rawFKS  ta)
+                  ta = lookTable inf tname
+        liftField tname (IT rel tb) = IT (lookKey inf tname rel) (liftTable tname2 tb)
+            where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList [rel])  (F.toList$ rawFKS  ta)
+                  ta = lookTable inf tname
 
 
 withConn s action =  do
@@ -172,8 +179,27 @@ lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpac
 
 lookFresh inf n tname i = justError "no freshKey" $ M.lookup (n,tname,i) (pluginsMap inf)
 
-
-
 newKey name ty = do
   un <- newUnique
   return $ Key name Nothing    un ty
+
+
+catchPluginException :: InformationSchema -> Text -> Text -> IO (Maybe a) -> IO (Maybe a)
+catchPluginException inf pname tname i = do
+  i `catch` (\e  -> do
+                execute (rootconn inf) "INSERT INTO metadata.plugin_exception (schema_name,table_name,plugin_name,exception) (?,?,?,?))" (schemaName inf,pname,tname,show (e :: SomeException) )
+                return Nothing )
+
+
+logTableModification
+  :: Show b =>
+     InformationSchema
+     -> TableModification b -> IO (TableModification b)
+logTableModification inf (TableModification Nothing table i) = do
+  time <- getCurrentTime
+  let ltime =  utcToLocalTime utc $ time
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (modification_time,table_name,modification_data,schema_name) VALUES (?,?,?,?) returning modification_id "  (ltime,rawName table,show i , schemaName inf)
+  return (TableModification (id) table i )
+
+
+

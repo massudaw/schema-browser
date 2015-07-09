@@ -23,9 +23,6 @@ import Data.Functor.Compose
 import Data.Bifunctor
 import Data.Functor.Identity
 import Data.Typeable
-import Data.Void
-import Data.Aeson
-import Data.Aeson.TH
 import Data.Vector(Vector)
 import Data.Functor.Classes
 import Data.Foldable (Foldable)

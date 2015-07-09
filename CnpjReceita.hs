@@ -143,10 +143,10 @@ getCnpj'  inf i  handler = do
             fk i  = Compose . Identity . FKT i True []
             afk i  = Compose . Identity . FKT i True [] . LeftTB1 . Just . ArrayTB1
             tb pk desc attr = TB1 $ KV (PK pk desc) attr
-            (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (SText .TL.filter (not . flip L.elem "-.") . fst) t ,  SOptional $  SText .  snd <$>  t)
+            (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (SText .TL.filter (not . flip L.elem "-.") . fst) t ,  SOptional $  SText .  TL.strip .  TL.drop 3. snd <$>  t)
                 where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)
-            scnae = fmap (\t -> ((SText .TL.filter (not . flip L.elem "-.") . fst) t ,    (SText .  snd ) t)) ts
-                where ts = join . maybeToList $ fmap ( TL.breakOn " - " .  TL.pack ) <$> (M.lookup "CÓDIGO E DESCRIÇÃO DAS ATIVIDADES ECONÔMICAS SECUNDÁRIAS" out)
+            scnae = fmap (\t -> ((SText .TL.filter (not . flip L.elem "-.") . fst) t ,    (SText .TL.strip . TL.drop 3 .  snd ) t)) ts
+                where ts = join . maybeToList $ fmap (  TL.breakOn " - " .  TL.pack ) <$> (M.lookup "CÓDIGO E DESCRIÇÃO DAS ATIVIDADES ECONÔMICAS SECUNDÁRIAS" out)
             attrs = tb [] [own "owner_name" (idx "NOME EMPRESARIAL")]
                     [fk [own "address" (SOptional (Just $ SNumeric (-1)))]
                           (LeftTB1 $ Just $  tb [attr "id" (SSerial Nothing) ]
@@ -219,6 +219,7 @@ cnpjquery el cpfe = do
                 ))
     return result
 -}
+
 protocolocpfForm :: BS.ByteString -> BS.ByteString -> [FormParam]
 protocolocpfForm cgc_cpf captcha
                      = [

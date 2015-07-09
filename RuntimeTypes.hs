@@ -26,7 +26,7 @@ data Plugins
 
 data  PollingPlugins fi fo
   = BoundedPollingPlugins
-  { _pollingName :: String
+  { _pollingName :: Text
   , _pollingTime :: Int
   , _pollingBounds :: (Text,(Access Text,Access Text))
   , _pollingBoundedAction :: InformationSchema ->  fi -> fo

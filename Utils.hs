@@ -11,6 +11,8 @@ import GHC.Stack
 import GHC.Exts
 import Data.Monoid
 
+import Data.Functor.Identity
+import Data.Functor.Compose
 import System.Directory
 import System.Process(callCommand)
 import Data.Traversable
@@ -91,3 +93,10 @@ htmlToPdf art html = do
     return file
 
 
+mapComp :: Functor t => (f a -> g b) ->  Compose t f a -> Compose t g b
+mapComp f =  Compose. fmap  f . getCompose
+
+data Compose2 f g a b = Compose2 { getCompose2 ::  f (g a b)}
+
+firstComp :: Functor t => (f a c -> g b c) ->  Compose2 t f a c -> Compose2 t g b c
+firstComp f =  Compose2 . fmap  f . getCompose2

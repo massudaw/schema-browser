@@ -1,73 +1,23 @@
-Implement fully same table multiple joins
--- Query generator
--- FK Field
--- Query Parser 
--- Query Interpreter 
-
-Extensions
-  o- Bank extract Import
-  oo Bradesco 
-  oo Itau
-
-  -- Per Account Custom Import Rules
-
-  o- Poller for fire_project
-  -- Statefull one per instance pooler
-  oo Query 
-  oo Diff
-  oo Persistence
-
-  -o Fire Project
-  oo Implement Solicitation parser
-  -- Normalize local_atendimento and regiao_atendimento
-
-  oo CEP 
-  oo Input
-  oo Return
-
-  o- CPF
-  oo Pass Input args
-  -- Need parse Result
-  -- Utopic captcha bypass
-
-  o- Document Generator
-  oo Basic Pandoc Generator
-  -- Need Proper Header and Footer
-
-  o- Import WhatsApp 
-  oo Import log messages
-  -- Process log with ibm whatson
-  -- Debug error during insertion "returned command result"
 
 Multiple Schema joins
 -- Generate Queries with multiple schemas
--- Join Graphs
+-- Join Schema Graphs
 
 Types UI 
 -- Improve Especialized type UI
--- getCurrentTime button
 
 View Support
-oo Introspect views as tables
--- Fix not null view fields
+-- Improve Fix not null view fields
+-- Hide Insert and Edit operations for views
 
-oo Hide Insert and Edit operations for views
--- Can represent queriable plugins and do joins
-
-Write Only Tables
---  Can represent some plugins that do insertions
+Global Table Update
+  -- Update all in  memory tables after crud operations
 
 Type Checking
 -- Implement Key Value checks to assert KType
    and Showable are type correct
+-- Preprocess Plugins to check for wrong references
 
-Implement Proper LEFT JOIN
-oo Left Join ( Need subquery after the join)
-oo Propagating null fields over the join chain
--- Subquery after leftJoin
--- Check Maybe (FK Field) support
--- Propagate nulabitiy when relations is left join
-   over all the application
 
 Implement Absolute attribute name for multiple same table join
 oo create alias for globalname (name size limit)
@@ -75,14 +25,19 @@ oo Table structure return value for ambigous name results
 --  index application maps with globalname instead of key
 -- Create a crudUI without indexing to allow ambigous name
 
+Multiple Selection Array
+-- Multilist select 
+
 Pagination
 -- Long Table Pagination
+
+Database Side Filtering
+
 
 Client Side Filtering
 oo Basic Client Side Text Filtering
 -- Database FullText Filtering 
 -- Paginated Filtering
--- Bug in interval comparison
 
 Aggregation
 oo Client Side aggregation
