@@ -409,11 +409,6 @@ crudUITable inf pgs open bres pmods ftb@(TB1 (KV (PK k d) a)) oldItemspre = do
           # sink0 UI.style (noneShow <$> (facts $ triding chw))
   return ([getElement chw , listBody  , panelItems ],evsa)
 
-tbAttr (IT  i _ ) = [Compose . Identity $Attr i i]
-tbAttr (TBEither  _ _   j  ) = (maybeToList j )
-tbAttr (FKT i _ _ _ ) = i
-tbAttr a@(Attr _ i ) = [Compose . Identity $ a]
-
 unTB1 (LeftTB1 (Just i) ) = unTB1 i
 unTB1 (ArrayTB1 [i] ) = unTB1 i
 unTB1 (TB1 i)  = i
@@ -438,7 +433,8 @@ processPanelTable inf attrsB res table oldItemsi = do
   editB <- UI.button # set text "EDIT" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table ))
 
   -- Edit when any persistent field has changed
-        # sink UI.enabled (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (tb1Diff (\l m -> if l  /= m then traceShow (l,m) (True,(l,m)) else (False,(l,m))) )  i j) (fmap tableNonRef <$> attrsB) (fmap tableNonRef <$> facts oldItemsi))
+        # sink UI.enabled (liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (tb1Diff (\l m -> if l  /= m then traceShow (l,m) (True,(l,m)) else (False,(l,m))) )  i j) (fmap tableNonRef <$> attrsB) (fmap tableNonRef <$> facts oldItemsi)) (liftA2 (\i j -> maybe False (not . flip contains j) i  ) attrsB  res))
+
   deleteB <- UI.button # set text "DELETE" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table ))
   -- Delete when isValid
         # sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (not . flip contains j) i  ) attrsB res))

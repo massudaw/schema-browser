@@ -18,6 +18,7 @@ import Schema
 import Control.Concurrent
 import qualified Data.Map as M
 import Data.String
+import Data.Attoparsec.Combinator (lookAhead)
 
 import Control.Applicative
 import Control.Monad.IO.Class
@@ -85,13 +86,13 @@ deriving instance Foldable Extended
 deriving instance Traversable Extended
 deriving instance Traversable Interval
 
-
 instance  TF.ToField (TB Identity Key Showable)  where
   toField (Attr k i) = TF.toField i
   toField (IT n (LeftTB1 i)  ) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
   toField (IT (n)  (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ n ) $  runIdentity.getCompose <$> F.toList  i )
   toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType  n) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
   toField e = errorWithStackTrace (show e)
+
 
 
 instance TF.ToField a => TF.ToField (TBRecord a) where
@@ -311,6 +312,12 @@ parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
   im <- unIntercalateAtto (fmap (Compose . Identity) . parseAttr .runIdentity . getCompose <$> (i <> d <> m) ) (char ',')
   return (TB1 (KV ( PK (L.take (length i) im ) (L.take (length d) $L.drop (length i) $  im))(L.drop (length i + length d) im)) )) <*  char ')' )
 
+quotedRec :: Int -> (Int -> Parser a)  -> Parser a
+quotedRec i  pint =   (takeWhile (== '\\') >>  char '\"') *> inner   <* ( takeWhile (=='\\') >> char '\"'  )
+  where inner = quotedRec (i+1) pint <|> p
+        p = pint i
+
+plainsInd i = (char '\\' >> return "") <|> plains (fmap (replicate i '\"' <>)  [")",",","}"])
 
 doublequoted :: Parser a -> Parser a
 doublequoted  p =   (takeWhile (== '\\') >>  char '\"') *>  inner <* ( takeWhile (=='\\') >> char '\"')
@@ -327,7 +334,7 @@ parseShowable (Primitive i ) =  (do
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
-        PText -> SText . T.fromStrict  . TE.decodeUtf8   <$> (   doublequoted  (plain' "\\\"") <|> plain' "\\\"'),}" <|> (const "''" <$> string "\"\"" ) )
+        PText -> SText . T.fromStrict  . TE.decodeUtf8   <$> (quotedRec 1 plainsInd <|> plain' "\\\"'),}" <|> (const "''" <$> string "\"\"" ) )
         PCnpj -> parseShowable (Primitive PText)
         PCpf -> parseShowable (Primitive PText)
         PInterval ->
@@ -503,6 +510,9 @@ diffInterval = (do
     [h,m,s] ->  secondsToDiffTime (round $ h * 3600 + (60 ) * m + s)
     [d,h,m,s] -> secondsToDiffTime (round $ d *3600*24 + h * 3600 + (60  ) * m + s)
     v -> errorWithStackTrace $ show v)
+
+plains :: [String] -> Parser BS.ByteString
+plains delims = BS.takeWhile (/='\\') . BS.pack <$> manyTill' anyChar (   foldr1 (<|>) $  lookAhead .string . BS.pack <$> delims)
 
 plain' :: String -> Parser BS.ByteString
 plain' delim = takeWhile1 (notInClass (delim ))

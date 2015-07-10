@@ -187,7 +187,7 @@ newKey name ty = do
 catchPluginException :: InformationSchema -> Text -> Text -> IO (Maybe a) -> IO (Maybe a)
 catchPluginException inf pname tname i = do
   i `catch` (\e  -> do
-                execute (rootconn inf) "INSERT INTO metadata.plugin_exception (schema_name,table_name,plugin_name,exception) (?,?,?,?))" (schemaName inf,pname,tname,show (e :: SomeException) )
+                execute (rootconn inf) "INSERT INTO metadata.plugin_exception (schema_name,table_name,plugin_name,exception) values(?,?,?,?)" (schemaName inf,pname,tname,show (e :: SomeException) )
                 return Nothing )
 
 

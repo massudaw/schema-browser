@@ -231,17 +231,9 @@ chooseKey inf key = mdo
   inisort <- currentValue (facts tsort)
   res2 <- accumB (inisort vp) (fmap concatenate $ unions (rumors tsort :eres))
   insertDiv <- UI.div # set children cru
-  codeChk <- checkedWidget (pure False)
-  let crud = Just ("CRUD",(chk,insertDiv))
-  createcode <- UI.textarea # set UI.text (T.unpack$ createTable table)
-              # set style [("width","100%"),("height","300px")]
-  dropcode <- UI.textarea # set UI.text (T.unpack$ dropTable table)
-              # set style [("width","100%"),("height","300px")]
-  code <- tabbed [("CREATE",createcode),("DROP",dropcode)]
-  tab <- tabbedChk  (maybeToList crud <> [("CODE",(codeChk,code))])
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [filterInp,getElement sortList,getElement asc] )
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.style [("display","inline-flex")]
-  UI.div # set children ([itemSelec,tab] )
+  UI.div # set children ([itemSelec,insertDiv ] )
 
 
 lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" (fst renderProjectPricingA )  ( snd renderProjectPricingA )
