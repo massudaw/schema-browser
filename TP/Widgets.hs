@@ -100,7 +100,7 @@ updateEvent validate ev b = do
 addEvent :: MonadIO m => Event a -> Tidings a -> m (Tidings a)
 addEvent ev b = do
  v <- currentValue (facts b)
- let nev = unionWith const ev (rumors b)
+ let nev = unionWith const (rumors b) ev
  nbev <- stepper v nev
  return  $tidings nbev nev
 

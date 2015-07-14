@@ -228,21 +228,21 @@ buildUI i  tdi = case i of
             itime <- liftIO $  getCurrentTime
             timeButton <- UI.button # set UI.text "now"
             evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
-            let  newEv = (unionWith const (rumors tdi) $ fmap (STimestamp . utcToLocalTime utc) <$> evCurr)
+            let  newEv = fmap (STimestamp . utcToLocalTime utc) <$> evCurr
             tdi2 <- addEvent newEv  tdi
             oneInput tdi2 [timeButton]
          (Primitive PDate) -> do
             itime <- liftIO $  getCurrentTime
             timeButton <- UI.button # set UI.text "now"
             evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
-            let  newEv = (unionWith const (rumors tdi) $ fmap (SDate . localDay . utcToLocalTime utc) <$> evCurr)
+            let  newEv =  fmap (SDate . localDay . utcToLocalTime utc) <$> evCurr
             tdi2 <- addEvent newEv  tdi
             oneInput tdi2 [timeButton]
          (Primitive PDayTime) -> do
             itime <- liftIO $  getCurrentTime
             timeButton <- UI.button # set UI.text "now"
             evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
-            let  newEv = (unionWith const (rumors tdi) $ fmap (SDayTime. localTimeOfDay . utcToLocalTime utc) <$> evCurr)
+            let  newEv = fmap (SDayTime. localTimeOfDay . utcToLocalTime utc) <$> evCurr
             tdi2 <- addEvent newEv  tdi
             oneInput tdi2 [timeButton]
 
@@ -271,7 +271,7 @@ buildUI i  tdi = case i of
             let f = facts tdi
             v <- currentValue f
             inputUI <- UI.input # sink0 UI.value ((forceDefaultType  <$> f))
-            let pke = foldl1 (unionWith justCase ) [readType i <$> UI.valueChange inputUI,rumors  tdi]
+            let pke = foldl1 (unionWith const ) [rumors tdi,readType i <$> UI.valueChange inputUI]
             pk <- stepper v  pke
             let pkt = tidings pk pke
             sp <- UI.div # set children (inputUI : elem)
@@ -409,12 +409,11 @@ crudUITable
      -> TB1 ()
      -> Tidings (Maybe (TB1 Showable))
      -> UI ([Element],Event [Modification Key Showable])
-crudUITable inf pgs open bres pmods ftb@(TB1 (KV (PK k d) a)) oldItemspre = do
+crudUITable inf pgs open bres pmods ftb@(TB1 (KV (PK k d) a)) oldItems = do
   chw <- checkedWidget open
   (h,e) <- liftIO $ newEvent
   let fun True = do
           let
-              oldItems = pruneTidings (triding chw) oldItemspre
               Just table = M.lookup (S.fromList $ findPK ftb) (pkMap inf)
           (listBody,tableb) <- uiTable inf pgs (tableName table) pmods ftb oldItems
           res <- mapM (plugTags inf bres) (filter ((== rawName table ) . _bounds ) pgs)
@@ -740,7 +739,6 @@ sorting b ss  =  L.sortBy (ifApply b flip (comparing (\i ->  findTB1  (not . S.n
   where ifApply True i =  i
         ifApply False _ = id
 
-pruneArray ix tds = if ix > 1 then pruneTidings (isJust <$> tds (ix -1)) (tds ix) else tds ix
 
 
 deleteMod inf kv table = do
