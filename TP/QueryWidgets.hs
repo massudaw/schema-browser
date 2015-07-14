@@ -269,9 +269,10 @@ buildUI i  tdi = case i of
     justCase i Nothing = i
     oneInput tdi elem = do
             let f = facts tdi
+            v <- currentValue f
             inputUI <- UI.input # sink0 UI.value ((forceDefaultType  <$> f))
             let pke = foldl1 (unionWith justCase ) [readType i <$> UI.valueChange inputUI,rumors  tdi]
-            pk <- stepper (defaultType i)  pke
+            pk <- stepper v  pke
             let pkt = tidings pk pke
             sp <- UI.div # set children (inputUI : elem)
             paintBorder sp (facts pkt) (facts tdi)
@@ -413,17 +414,12 @@ crudUITable inf pgs open bres pmods ftb@(TB1 (KV (PK k d) a)) oldItemspre = do
   (h,e) <- liftIO $ newEvent
   let fun True = do
           let
-              oldItems = pruneTidings (pure True ) oldItemspre
+              oldItems = pruneTidings (triding chw) oldItemspre
               Just table = M.lookup (S.fromList $ findPK ftb) (pkMap inf)
           (listBody,tableb) <- uiTable inf pgs (tableName table) pmods ftb oldItems
-          element listBody
-                  # sink0 UI.style (noneShow <$> (facts $ triding chw))
-
           res <- mapM (plugTags inf bres) (filter ((== rawName table ) . _bounds ) pgs)
           tags <- UI.div # set children res # set UI.style [("display","inline-flex")]
           (panelItems,evsa)<- processPanelTable inf  (facts tableb) bres table oldItems
-          element panelItems
-                  # sink0 UI.style (noneShow <$> (facts $ triding chw))
           let evs =  unions (evsa)
           onEvent evs (\i ->  liftIO $ e i )
           UI.div # set children [listBody,panelItems,tags]
@@ -630,6 +626,7 @@ fkUITable inf pgs res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ ) )
     | not refl = do
         nonInjectiveSelection inf pgs wl tb (pure res) oldItems
     | otherwise = mdo
+      cv <- currentValue (fmap (_fkttable) <$> facts oldItems)
       let
           relTable = M.fromList $ fmap swap rel
       ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . fmap traceShowId . rumors . snd <$> plmods)
@@ -646,13 +643,13 @@ fkUITable inf pgs res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ ) )
       ol <- listBox (tidings ((Nothing:) <$>  fmap (fmap Just) res2) never) (tidings bselection  never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
       let evsel = unionWith const (rumors $ join <$> userSelection ol) (rumors tdi)
-      prop <- stepper Nothing evsel
+      prop <- stepper cv evsel
       let tds = tidings prop evsel
       (celem,evs) <- crudUITable inf pgs  (pure False) res2 (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
       let
           bselection = fmap Just <$> st
           sel = fmap (head.concat) $ unions $ [(unions  [(rumors $ join <$> userSelection ol), rumors tdi]),(fmap modifyTB <$> evs)]
-      st <- stepper Nothing sel
+      st <- stepper cv sel
       inisort <- currentValue (facts sortList)
       res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [rumors sortList , (flip (foldr (\i -> addToList i)) <$> evs)])
       let

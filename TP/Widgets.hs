@@ -348,7 +348,7 @@ testPointInRange ui = do
 unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w -> runUI w (f a))
 
 paint e b = element e # sink UI.style (greenRed . isJust <$> b)
-paintEdit e b i  = element e # sink UI.style ((\ m n -> pure . ("background-color",) $ cond  m n ) <$> b <*> i )
+paintEdit e b i  = element e # sink0 UI.style ((\ m n -> pure . ("background-color",) $ cond  m n ) <$> b <*> i )
   where cond i j
           | isJust i  && isNothing j  = "green"
           | isNothing i  && isNothing j = "red"
@@ -357,7 +357,7 @@ paintEdit e b i  = element e # sink UI.style ((\ m n -> pure . ("background-colo
           | i == j = "blue"
           | otherwise = "green"
 
-paintBorder e b i  = element e # sink UI.style ((\ m n -> (:[("border-style","solid"),("border-width","1px")]).("border-color",) $ cond  m n ) <$> b <*> i )
+paintBorder e b i  = element e # sink0 UI.style ((\ m n -> (:[("border-style","solid"),("border-width","1px")]).("border-color",) $ cond  m n ) <$> b <*> i )
   where cond i j
           | isJust i  && isNothing j  = "green"
           | isNothing i  && isNothing j = "red"
