@@ -54,10 +54,10 @@ foldTds =  foldl' applyTds
 
 evalUI el f  = getWindow el >>= \w -> runUI w f
 
-accumTds :: MonadIO m => Tidings a -> [Event (a -> a)] -> m (Tidings a)
+accumTds :: MonadIO m => Tidings a -> Event (a -> a) -> m (Tidings a)
 accumTds e l = do
 	ve <- currentValue (facts e)
-	accumT ve $ concatenate <$> unions (l ++ [const <$> rumors e ])
+	accumT ve $ concatenate <$> unions ([l,const <$> rumors e ])
 
 
 accumTs :: MonadIO m => a -> [Event (a -> a)] -> m (Tidings a)

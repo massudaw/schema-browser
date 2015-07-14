@@ -4,19 +4,21 @@ import Types
 import Utils
 import Query
 import GHC.Stack
--- import Debug.Trace
+import Debug.Trace
 import Data.Functor.Identity
 import Data.Functor.Compose
 import Data.Scientific hiding(scientific)
 import Data.Bits
+import Data.Aeson
 import Data.Bifunctor
+import qualified  Data.Map as M
 
 import Data.Tuple
 import Data.Time.Clock
 import qualified Data.Char as Char
 import Schema
 import Control.Concurrent
-import qualified Data.Map as M
+import qualified Data.HashMap.Strict as HM
 import Data.String
 import Data.Attoparsec.Combinator (lookAhead)
 
@@ -313,11 +315,12 @@ parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
   return (TB1 (KV ( PK (L.take (length i) im ) (L.take (length d) $L.drop (length i) $  im))(L.drop (length i + length d) im)) )) <*  char ')' )
 
 quotedRec :: Int -> (Int -> Parser a)  -> Parser a
-quotedRec i  pint =   (takeWhile (== '\\') >>  char '\"') *> inner   <* ( takeWhile (=='\\') >> char '\"'  )
+quotedRec i  pint =   (takeWhile (== '\\') >>  char '\"') *> inner <* ( takeWhile (=='\\') >> char '\"'  )
   where inner = quotedRec (i+1) pint <|> p
         p = pint i
 
 plainsInd i = (char '\\' >> return "") <|> plains (fmap (replicate i '\"' <>)  [")",",","}"])
+
 
 doublequoted :: Parser a -> Parser a
 doublequoted  p =   (takeWhile (== '\\') >>  char '\"') *>  inner <* ( takeWhile (=='\\') >> char '\"')
@@ -334,7 +337,7 @@ parseShowable (Primitive i ) =  (do
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
-        PText -> SText . T.fromStrict  . TE.decodeUtf8   <$> (quotedRec 1 plainsInd <|> plain' "\\\"'),}" <|> (const "''" <$> string "\"\"" ) )
+        PText -> SText . T.fromStrict  . TE.decodeUtf8   <$> ( doublequoted (plain' "\\\"")  <|> plain' ",)}" <|>  (const "''" <$> string "\"\"" ) )
         PCnpj -> parseShowable (Primitive PText)
         PCpf -> parseShowable (Primitive PText)
         PInterval ->
@@ -552,6 +555,33 @@ fromArray typeInfo f = Tra.sequence . (parseIt <$>) <$> range delim
 instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
+instance FromJSON Showable where
+  parseJSON (Data.Aeson.String i ) = return $ SText $ T.fromStrict  i
+  parseJSON (Data.Aeson.Array i ) = do
+      i <- Vector.mapM parseJSON i
+      return $ SComposite   i
+  parseJSON (Data.Aeson.Number i) = return $ SDouble (toRealFloat i)
+  parseJSON i = errorWithStackTrace (show i)
+
+fromAesonTB (TB1 (KV (PK p d) v)) (Object m)  =
+  let ls = fmap snd $ HM.toList m
+      pk = L.take (length p) ls
+      dk = L.take (length d) $ L.drop (length pk) ls
+      vk = L.take (length v) $ L.drop (length pk + length d) ls
+  in TB1 (KV (PK (fromAesonAttr <$> (overComp id <$> p) <*> pk) (fromAesonAttr <$> (overComp id <$> d) <*> dk)) (fromAesonAttr <$> (overComp id <$> v) <*> vk))
+
+
+fromAesonAttr (Attr k _) i =
+    case keyType k of
+         KSerial _ ->
+           case  (fromJSON i) of
+                   Success a -> Compose $ Identity $ (Attr k (SOptional a ) :: TB Identity Key Showable)
+         KOptional _ ->
+           case  (fromJSON i) of
+                   Success a -> Compose $ Identity $ (Attr k (SOptional a ) :: TB Identity Key Showable)
+         _ ->
+           case  (fromJSON i) of
+                   Success a -> Compose $ Identity $ (Attr k (a ) :: TB Identity Key Showable)
 
 fromAttr foldable = do
     let parser  = parseLabeledTable foldable
@@ -559,6 +589,7 @@ fromAttr foldable = do
                                (Right (Just r ) ) -> return r
                                Right Nothing -> error (show j )
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
+
 
 selectAll inf table   = liftIO $ do
       let rp = rootPaths'  (tableMap inf) table

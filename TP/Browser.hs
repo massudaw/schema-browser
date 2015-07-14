@@ -229,7 +229,7 @@ chooseKey inf key = mdo
   let eres = fmap addToList <$> evs
       tsort = (\ b c -> trace "sort" . sorting b c ) <$> triding asc <*> multiUserSelection sortList
   inisort <- currentValue (facts tsort)
-  res2 <- accumB (inisort vp) (fmap concatenate $ unions (rumors tsort :eres))
+  res2 <- accumB (inisort vp) (fmap concatenate $ unions [rumors tsort , (flip (foldr (\i -> addToList i ) ) <$> evs)])
   insertDiv <- UI.div # set children cru
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [filterInp,getElement sortList,getElement asc] )
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.style [("display","inline-flex")]
@@ -237,6 +237,7 @@ chooseKey inf key = mdo
 
 
 lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" (fst renderProjectPricingA )  ( snd renderProjectPricingA )
+lplugReport = BoundedPlugin2 "Relatório " "pricing" (fst renderProjectReport )  ( snd renderProjectReport )
 
 
 testShowable  v s = case s of
@@ -334,19 +335,6 @@ lookKey' inf t k = justError ("lookKey' cant find key " <> show k <> " in " <> s
 eitherToMaybeT (Left i) =  Nothing
 eitherToMaybeT (Right r) =  Just r
 
-deleteMod inf kv table = do
-  delete (conn inf)  kv table
-  Just <$> logTableModification inf (TableModification Nothing table (DeleteTB kv))
-
-updateModAttr inf kv old table = do
-  (i,j) <- updateAttr (conn  inf) kv old table
-  Just <$> logTableModification inf j
-
-insertMod inf kv table = do
-  kvn <- insertAttr fromAttr (conn  inf) kv table
-  let mod =  TableModification Nothing table (InsertTB  kvn)
-  Just <$> logTableModification inf mod
-
 
 sdate = SDate . localDay
 stimestamp = STimestamp
@@ -396,7 +384,6 @@ instance ToJSON Timeline where
           tti  = formatTime defaultTimeLocale "%Y/%m/%d %H:%M:%S"
 -}
 
-type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))
 
 
 gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
@@ -462,7 +449,6 @@ importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
       fn <- varT "file_name" -< t
       i <- varT "import_file" -< t
       r <- at "account" $ varT "id_account" -< t
-      odx "statements" -< t
       at "statements" (proc t -> do
         odx "fitid" -< t
         odx "memo" -< t
@@ -472,7 +458,7 @@ importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
         odx "dtavail" -< t
         odx "trnamt" -< t
         odx "correctfitid" -< t
-        odx "srvtid" -< t
+        odx "srvrtid" -< t
         odx "checknum" -< t
         odx "refnum" -< t
         odx "sic" -< t
@@ -484,7 +470,7 @@ importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
           ref :: [Compose Identity (TB Identity Text) (Showable)]
           ref = [attrT  ("statements",SOptional $ SComposite . Vector.fromList . fmap (snd . head ._pkKey . _kvKey ) <$> b)]
           tbst :: (Maybe (TB2 Text (Showable)))
-          tbst = Just $ TB1 (KV (PK [] []) [Compose $ Identity $ FKT ref True [] ao])
+          tbst = Just $ TB1 (KV (PK [] []) [_tb $ FKT ref True [] ao])
       returnA -< tbst
     elem inf = maybe (return Nothing) (\inp -> do
                 b <- dynPK url (Just inp)
@@ -737,10 +723,11 @@ testParse db sch q = withConnInf db sch (\inf -> do
                                        putStrLn (  show rpq)
                                        putStrLn (  show rp)
                                        q <- queryWith_ (fromAttr (rp) ) (conn  inf) (fromString $ T.unpack $ rpq)
+                                       print q
                                        return $ q
                                            )
 testFireMetaQuery q = testParse "incendio" "metadata"  q
 testFireQuery q = testParse "incendio" "incendio"  q
 testAcademia q = testParse "academia" "academia"  q
 
-plugList = [lplugOrcamento ,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryArtAndamento]
+plugList = [lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryArtAndamento]

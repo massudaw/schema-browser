@@ -115,6 +115,7 @@ checkOutput i = proc t -> do
          else v
 
 
+
 test1 = do
   let testP = atAny "tbtest" [join . fmap unSOptional <$> idxR "ewfew" ,join . fmap unSOptional <$> idxR "ooooo":: Parser (Kleisli (ReaderT (Maybe (TB2 Text Showable)) IO) ) (Access Text) b (Maybe (Showable))]
       testData = Just (TB1 (KV (PK [] []) [Compose $ Identity $ TBEither "tbtest" [Compose $ Identity $ Attr "ewfew" (),Compose $ Identity $ Attr "ooooo" () ] (Just $ Compose $ Identity $ Attr "ewfew" (SOptional $ Just $ SText "24124"))] ))
@@ -125,27 +126,37 @@ test1 = do
 just (Just i ) (Just j) = Nothing
 just i Nothing = i
 just  Nothing i  = i
-just _ _ = Nothing
 
 
 atAny k ps = P (nest fsum,nest ssum ) (Kleisli (\i -> local (indexTB1 ind)$foldr1 (liftA2 just)  (fmap ($i) asum)))
   where
     nest [] = Many []
     nest ls = Many [Nested ind $ ISum ls]
-    ind = splitIndex k
+    ind = splitIndex True k
     fsum = filter (/= Many [])$ fmap (\(P s _ )-> fst s ) ps
     ssum = filter (/= Many [])$ fmap (\(P s _ )-> snd s ) ps
     asum = fmap (\(P s (Kleisli j) ) -> j ) ps
 
-atR i (P s (Kleisli j) )  =  P (BF.second nest . BF.first nest $ s) (Kleisli (\i -> local (indexTB1 ind) (j i )  ))
-  where ind = splitIndex i
+atRA i (P s (Kleisli j) )  =  P (BF.second nest . BF.first nest $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
+  where ind = splitIndex True i
+        nest (Many []) = Many []
+        nest (ISum [] ) = ISum []
+        nest (Many j) = Many . pure . Nested ind $ Many j
+        nest (ISum i) = Many . pure . Nested ind $ ISum i
+
+unLeftTB1 = join . fmap (\v -> case v of
+               (LeftTB1 i ) -> i
+               i@(TB1 _ ) -> Just i)
+
+atR i (P s (Kleisli j) )  =  P (BF.second nest . BF.first nest $ s) (Kleisli (\i -> local (unLeftTB1 . indexTB1 ind) (j i )  ))
+  where ind = splitIndex True i
         nest (Many []) = Many []
         nest (ISum [] ) = ISum []
         nest (Many j) = Many . pure . Nested ind $ Many j
         nest (ISum i) = Many . pure . Nested ind $ ISum i
 
 at i (P s j)  =  P (BF.second nest  . BF.first nest  $ s)  (j . arr (indexTB1 ind )  )
-  where ind = splitIndex i
+  where ind = splitIndex True i
         nest (Many [] ) = Many []
         nest (ISum [] ) = ISum []
         nest (Many i) = Many . pure . Nested ind $ Many i
@@ -163,34 +174,43 @@ instance Applicative m => Applicative (Kleisli m a ) where
   Kleisli f <*> Kleisli j  =  Kleisli  $ (\i -> f i <*> j i )
 
 
-splitIndex l = (fmap T.pack . IProd . unIntercalate (','==) $ l)
+splitIndex b l = (fmap T.pack . IProd b . unIntercalate (','==) $ l)
 
 odxR  l =
-  let ll = splitIndex l
+  let ll = splitIndex True l
    in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTable ll)))
+
+idxM  l =
+  let ll = splitIndex False l
+   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . join . fmap (unRSOptional' . snd) . join  . fmap (indexTable ll)))
+
+idxK  l =
+  let ll = splitIndex True l
+   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . justError "no value found " . fmap snd . join . fmap (indexTable ll)))
+
 
 
 
 idxR  l =
-  let ll = splitIndex l
+  let ll = splitIndex True l
    in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTable ll)))
 
 {-indexTableInter
   :: (Show k ,KeyString k ,Arrow a) =>
       Bool -> String -> Parser  a (Bool,[[Text]]) (Maybe (TB1 (k, Showable))) (Maybe (k, Showable))-}
 indexTableInter b l =
-  let ll = splitIndex l
+  let ll = splitIndex b l
    in  P (Many [ll],Many [] ) (arr (join . fmap (indexTable ll)))
 
 logTableInter
   :: (Show k ,KeyString k ,Arrow a) =>
       Bool -> String -> Parser  a AccessTag (Maybe (TB2 k   Showable)) (Maybe (k, Showable))
 logTableInter b l =
-  let ll = splitIndex l
+  let ll = splitIndex b l
    in  P (Many [] ,Many [ll]) (arr (join . fmap (indexTable ll)))
 
 
-indexTB1 (IProd l) t
+indexTB1 (IProd _ l) t
   = do
     (TB1 (KV (PK k d)  v)) <- t
     let finder = L.find (L.any (==l). L.permutations . keyattr . firstCI keyString)
@@ -203,7 +223,7 @@ indexTB1 (IProd l) t
 
 
 data Access a
-  = IProd [a]
+  = IProd Bool [a]
   | ISum  [Access a]
   | Nested (Access a) (Access a)
   | Many [Access a]
@@ -211,7 +231,7 @@ data Access a
 
 firstCI f (Compose (Identity i)) = Compose (Identity $ B.first f i)
 
-checkField (Nested (IProd l) nt ) t@(TB1 (KV (PK k d)  v))
+checkField (Nested (IProd _ l) nt ) t@(TB1 (KV (PK k d)  v))
   = do
     let finder = L.find (L.any (==l). L.permutations . keyattr . firstCI keyString  )
         i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder v `mplus` finder k `mplus` finder d
@@ -219,16 +239,17 @@ checkField (Nested (IProd l) nt ) t@(TB1 (KV (PK k d)  v))
          IT l  i -> Compose . Identity <$> (IT l  <$> checkTable nt i)
          TBEither n kj j  ->  checkField nt ( TB1 $ KV (PK [] []) $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j)
          FKT a  b c  d -> Compose . Identity <$> (FKT a b c <$>  checkTable nt d)
-checkField  (IProd l) t@(TB1 (KV (PK k d)  v))
+checkField  (IProd b l) t@(TB1 (KV (PK k d)  v))
   = do
     let finder = L.find (L.any (==l). L.permutations . keyattr . firstCI keyString  )
         i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder v `mplus` finder k `mplus` finder d
     Compose . Identity <$> case runIdentity $ getCompose $ i  of
-         Attr k l -> return $ Attr k l
-checkField  (ISum ls) t@(TB1 (KV (PK k d)  v))
-  = foldr1 just $  fmap (\(Many [l]) ->  join $ fmap (T.traverse  unRSOptional') $  checkField l t) ls
+         Attr k l -> fmap (Attr k ) . (\i -> if b then unRSOptional' i else Just i ) $ l
+         i -> errorWithStackTrace ( show (l,i))
 checkField  (ISum []) t@(TB1 (KV (PK k d)  v))
   = Nothing
+checkField  (ISum ls) t@(TB1 (KV (PK k d)  v))
+  = foldr1 just $  fmap (\(Many [l]) ->  join $ fmap (T.traverse  unRSOptional') $  checkField l t) ls
 checkField i j = errorWithStackTrace (show (i,j))
 
 
@@ -246,7 +267,7 @@ checkTable i j = errorWithStackTrace (show (i,j))
 
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
 indexTable l (LeftTB1 j) = join $ fmap (indexTable l) j
-indexTable (IProd l) t@(TB1 (KV (PK k d)  v))
+indexTable (IProd _ l) t@(TB1 (KV (PK k d)  v))
   = do
     let finder = L.find (L.any (==l). L.permutations .keyattr. firstCI keyString )
         i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder v `mplus` finder k `mplus` finder d
@@ -335,3 +356,5 @@ type ArrowPlug a o = Step.Parser a AccessTag (Maybe (TB1 Showable)) o
 
 attrT :: (a,b) -> Compose Identity (TB Identity a ) b
 attrT (i,j) = Compose . Identity $ Attr i j
+
+type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))

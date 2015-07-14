@@ -48,7 +48,6 @@ import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
--- import Data.Set (Set)
 import Control.Monad.State
 import Data.Text.Lazy(Text)
 import Debug.Trace
@@ -305,12 +304,12 @@ tableNonRef (ArrayTB1 i) = ArrayTB1 $ tableNonRef <$> i
 tableNonRef (LeftTB1 i ) = LeftTB1 $ tableNonRef <$> i
 tableNonRef (TB1 (KV (PK l m ) n)  )  = TB1 (KV (PK (fun l) (fun m) ) (fun n))
   where
-        nonRef i@(Attr _ _ ) = [Compose $ Identity $ i]
-        nonRef (TBEither n l j ) = [Compose $ Identity $  TBEither n l  (overComp (head . nonRef) <$> j ) ]
-        nonRef (FKT i True _ _ ) = i
-        nonRef (FKT i False _ _ ) = []
-        nonRef it@(IT j k ) = [Compose $ Identity $ (IT  j (tableNonRef k )) ]
-        fun  = concat . fmap (overComp nonRef )
+    nonRef i@(Attr _ _ ) = [Compose $ Identity $ i]
+    nonRef (TBEither n l j ) = [Compose $ Identity $  TBEither n l  (overComp (head . nonRef) <$> j ) ]
+    nonRef (FKT i True _ _ ) = i
+    nonRef (FKT i False _ _ ) = []
+    nonRef it@(IT j k ) = [Compose $ Identity $ (IT  j (tableNonRef k )) ]
+    fun  = concat . fmap (overComp nonRef )
 
 fakeKey n t = Key n Nothing (unsafePerformIO newUnique) t
 
@@ -330,18 +329,19 @@ dropTable r= "DROP TABLE "<> rawFullName r
 rawFullName = showTable
 
 createTable r@(Raw sch _ _ tbl _ pk _ fk attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
-  where commands = (renderAttr <$> S.toList attr ) <> [renderPK] <> fmap renderFK (S.toList fk)
-        renderAttr k = keyValue k <> " " <> renderTy (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
-        renderKeySet pk = T.intercalate "," (fmap keyValue (S.toList pk ))
-        renderTy (KOptional ty) = renderTy ty <> ""
-        renderTy (KSerial ty) = renderTy ty <> ""
-        renderTy (KInterval ty) = renderTy ty <> ""
-        renderTy (KArray ty) = renderTy ty <> "[] "
-        renderTy (Primitive ty ) = ty
-        renderTy (InlineTable s ty ) = s <> "." <> ty
-        renderPK = "CONSTRAINT " <> tbl <> "_PK PRIMARY KEY (" <>  renderKeySet pk <> ")"
-        renderFK (Path origin (FKJoinTable _ ks table) end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
-        renderFK (Path origin _  end) = ""
+  where
+    commands = (renderAttr <$> S.toList attr ) <> [renderPK] <> fmap renderFK (S.toList fk)
+    renderAttr k = keyValue k <> " " <> renderTy (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
+    renderKeySet pk = T.intercalate "," (fmap keyValue (S.toList pk ))
+    renderTy (KOptional ty) = renderTy ty <> ""
+    renderTy (KSerial ty) = renderTy ty <> ""
+    renderTy (KInterval ty) = renderTy ty <> ""
+    renderTy (KArray ty) = renderTy ty <> "[] "
+    renderTy (Primitive ty ) = ty
+    renderTy (InlineTable s ty ) = s <> "." <> ty
+    renderPK = "CONSTRAINT " <> tbl <> "_PK PRIMARY KEY (" <>  renderKeySet pk <> ")"
+    renderFK (Path origin (FKJoinTable _ ks table) end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
+    renderFK (Path origin _  end) = ""
 
 
 keyOptional (k,v) = (kOptional k ,SOptional $ Just v)
@@ -426,8 +426,7 @@ intersectionOpK i j = intersectionOp (keyType i ) (keyType j)
 allRec'
   :: Map Text Table
      -> Table
-     -> TB1
-          ()
+     -> TB1 ()
 allRec' i t = fst $ rootPaths' i t
 
 rootPaths' invSchema r = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
@@ -454,7 +453,7 @@ recursePath' isLeft ksbn invSchema (Path _ jo@(FKEitherField o l) _) = do
 recursePath' isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
     | isArrayRel ifk =   do
           tas <- tname nextT
-          let knas =(Key (rawName nextT) Nothing (unsafePerformIO newUnique) (Primitive "integer" ))
+          let knas = Key (rawName nextT) Nothing (unsafePerformIO newUnique) (Primitive "integer" )
           kas <- kname tas  knas
           let jt = if nextLeft then " LEFT JOIN " else " JOIN "
               tname = head $ fmap (\i -> label . justError ("cant find " ). L.find ((== i) . keyAttr . labelValue  )$ ksbn) (S.toList ifk )

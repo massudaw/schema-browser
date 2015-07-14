@@ -88,7 +88,7 @@ queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address" (staticP open  )  el
           odx "uf" -< t
           odx "logradouro" -< t
           r <- (act (  traverse (\input -> do
-                       v <- get . traceShowId .  (\i-> addrs <> i <> ".json")  . TL.unpack $ input
+                       v <- get . traceShowId .  (\i-> addrs <> (L.filter (flip elem ",.-" ) i) <> ".json")  . TL.unpack $ input
                        return $ ( \i -> fmap (L.filter ((/="").snd) . M.toList ) $ join $ fmap decode (i ^? responseBody)  ) v ))) -< (\(SText t)-> t) <$> i
           let tb = TB1 . KV (PK [] []) . fmap (Compose . Identity. (\i -> Attr (fst i ) (snd i) ). first translate. second (SOptional. Just . SText)) <$> join r
           returnA -< tb

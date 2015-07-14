@@ -27,6 +27,7 @@ import System.IO
 import Data.Functor.Compose
 import Data.Functor.Identity
 
+import Control.Monad.Reader
 import Step
 import Control.Arrow
 import Data.Monoid
@@ -62,8 +63,38 @@ setFooter = setMeta "footer"
 
 setT = setMeta "title"
 
+renderProjectReport = (staticP myDoc , element )
+   where
+      tname = "pricing"
+      payA = displayPay <$> (maybe (SText "Não Agendado") id <$> idxM "payment_date") <*> idxK "payment_description"  <*> idxK "price"
+          where displayPay i da j = plain $ (fromString.renderShowable $ i ) <>  " - " <>  (fromString . renderShowable $ da )<> " - R$ " <> ((fromString.renderShowable) j)
+      myDoc :: ArrowReader
+      myDoc = proc preenv -> do
+          pdoc <- (proc env -> do
+              pay <- atRA "pagamentos" $ payA -< ()
+              art <- atR "id_project" $ atR "art" $ atR "pagamento" $ payA-< ()
+              dare <- atR "id_project" $ atR "taxa_dare" $ payA -< ()
+              returnA -<   (setT ( para $ "Proposta :" ) $ doc $
+                     orderedList [
+                       para "Pagamento" <>
+                          bulletList pay <>
+                       para "Despesas" <>
+                          bulletList [art,dare] <>
+                          plain "As despesas referentes a cópias dos projetos e taxas para aprovação não estão inclusas no orçamento e são por conta do Contratante"
+                        ])) -< ()
+          outdoc <- act (\i -> do
+              template <- liftIO$ readFile' utf8 "raw.template"
+              liftIO$ makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
+          odxR "report" -< ()
+          returnA -<  (Just .  TB1 . (KV (PK [] []) ) . pure . Compose. Identity . Attr "report" . SOptional . Just . SBinary .  BS.toStrict . either id id ) outdoc
+      element inf = maybe (return Nothing) (\inp -> do
+                              b <- runReaderT (dynPK myDoc $ ()) (Just inp)
+                              return $ liftKeys inf tname <$> b)
+
+
 renderProjectPricingA = (staticP myDoc , element )
    where
+      tname = "pricing"
       var str =  maybe "" fromString . fmap (renderShowable.snd) <$> idx str
       varT str =  maybe "" fromString . fmap (renderShowable.snd) <$> idxT str
       arrayVar i str = (bulletList . concat . maybeToList . join . fmap   (cshow .  snd) ) <$> indexTableInter i str
@@ -87,7 +118,7 @@ renderProjectPricingA = (staticP myDoc , element )
               end <- at "id_project" $ at "address" (var "logradouro" <> ", "<> var "number" <> " " <> var "complemento") -< env
               mun <- at "id_project" $ at "address" (var "municipio" <> "-" <> var "uf") -< env
               d <- var "pricing_execution_time" -< env
-              returnA -< trace "doc" $  (setT ( para $ "Proposta :" <> idp <> ", " <> ( da )) $ doc $
+              returnA -< (setT ( para $ "Proposta :" <> idp <> ", " <> ( da )) $ doc $
                      para ( f <> ",")
                      <> orderedList [
                        para "Serviços Executados" <> v ,
@@ -112,10 +143,10 @@ renderProjectPricingA = (staticP myDoc , element )
               template <- readFile' utf8 "raw.template"
               makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odx "orcamento" -< preenv
-          returnA -< traceShowId $ (Just .  TB1 . (KV (PK [] []) ) . pure . Compose. Identity . Attr "orcamento" . SOptional . Just . SBinary .  BS.toStrict . either id id ) outdoc
+          returnA -<  (Just .  TB1 . (KV (PK [] []) ) . pure . Compose. Identity . Attr "orcamento" . SOptional . Just . SBinary .  BS.toStrict . either id id ) outdoc
       element inf = maybe (return Nothing) (\inp -> do
                               b <- dynPK myDoc (Just inp)
-                              return $ mapKey (lookKey2  inf ["pricing"])  <$> b)
+                              return $ liftKeys inf tname  <$> b)
 
 lookKey2 inf t k = justError ("lookKey' cant find key " <> show k <> " in " <> show t) $  foldr1 mplus $ fmap (\ti -> M.lookup (ti,k) (keyMap inf)) t
 
