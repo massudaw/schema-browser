@@ -52,6 +52,7 @@ createType s un (t,c,trans,"ARRAY",udtschema ,udtname,n,def,_,_) | udtschema == 
 createType _ un (t,c,trans,"ARRAY",_,i,n,def,p,_) = (Key   c trans un (nullable n $ KArray $ (Primitive (T.tail i))))
 createType _ un (t,c,trans,_,_,"geometry",n,def,p,_) = (Key   c trans un (nullable n $ Primitive $ (\(Just i) -> i) p))
 createType _ un (t,c,trans,_,_,"box3d",n,def,p,_) = (Key   c trans un (nullable n $ Primitive $  "box3d"))
+-- createType _ un (t,c,trans,ty,_,_,n,def,_,Just "pdf" ) =(Key c   trans un (serial def . nullable n $ KDelayed $ Primitive "pdf" ))
 createType _ un (t,c,trans,ty,_,_,n,def,_,Just dom ) =(Key c   trans un (serial def . nullable n $ Primitive dom))
 createType _ un (t,c,trans,ty,_,_,n,def,_,_) =(Key c   trans un (serial def . nullable n $ Primitive ty))
 --createType un v = error $ show v
@@ -90,7 +91,8 @@ queryAuthorization conn schema user = do
 keyTables :: Connection -> Connection -> (Text ,Text)-> IO InformationSchema
 keyTables conn userconn (schema ,user) = do
        uniqueMap <- join $ mapM (\i-> (i,) <$> newUnique) <$>  query conn "select o.table_name,o.column_name from information_schema.tables natural join information_schema.columns o where table_schema = ? "(Only schema)
-       res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name  left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ? " (Only schema)
+       --res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name where table_schema = ? " {- left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column " -} (Only schema)
+       res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default,'' :: text ,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name where table_schema = ? " {- left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column " -} (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
        -- keyMap <- preprocessSumTypes (M.fromList keyList)

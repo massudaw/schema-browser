@@ -1,4 +1,4 @@
 :set  -XOverloadedStrings
 :set -fwarn-unused-binds -fwarn-unused-imports
 :set -isrc
-:set args academia academia postgres queijo plano_aluno 
+:set args localhost incendio postgres queijo incendio art 

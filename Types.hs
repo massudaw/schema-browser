@@ -128,7 +128,6 @@ data TB f k a
     , _fkrelation :: ! [(k ,k)]
     , _fkttable ::  ! (FTB1 (Compose f (TB f k)) a)
     }
-
   | IT -- Inline Table
     { _ittableName :: ! k
     , _fkttable ::  ! (FTB1 (Compose f (TB f k)) a)
@@ -142,6 +141,7 @@ data TB f k a
     { _tbattrkey :: ! k
     ,_tbattr :: ! a   }
   -- Attribute
+
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
 
 type TB1 = FTB1 (Compose Identity (TB Identity Key) )
@@ -184,6 +184,7 @@ data KType a
    | KArray (KType a)
    | KInterval (KType a)
    | KOptional (KType a)
+   | KDelayed (KType a)
    | KTable [KType a]
    deriving(Eq,Ord,Functor)
 
@@ -235,6 +236,7 @@ data Showable
   | SBinary !BS.ByteString
   | SOptional !(Maybe Showable)
   | SComposite !(Vector Showable)
+  | SDelayed String (Maybe Showable)
   | SInterval !(Interval.Interval Showable)
   | SScopedKeySet !(Map Key Showable)
   deriving(Ord,Eq,Show)

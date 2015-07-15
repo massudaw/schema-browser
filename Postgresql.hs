@@ -174,6 +174,7 @@ instance TF.ToField Showable where
   toField (SBoolean t) = TF.toField t
   toField (SBinary t) = TF.toField (Binary t)
 
+
 defaultType t =
     case t of
       KOptional i -> Just (SOptional Nothing)
@@ -267,8 +268,9 @@ safeTail i = tail i
 
 unIntercalateAtto :: Alternative f => [f a1] -> f a -> f [a1]
 unIntercalateAtto l s = go l
-  where go (e:cs) =  liftA2 (:) e  (s *> go cs <|> pure [])
-        go [] = pure []
+  where
+    go [e] =  fmap pure  e
+    go (e:cs) =  liftA2 (:) e  (s *> go cs)
 
 
 unKOptionalAttr (Attr k i ) = Attr (unKOptional k) i
@@ -298,8 +300,9 @@ parseAttr (IT na j) = do
 
 parseAttr (FKT l refl rel j ) = do
   ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .runIdentity .getCompose  <$> l) (char ',')
+  char ','
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j
-  return $  FKT ml refl rel mj
+  return $  FKT ml refl rel  mj -- (fmap (const (SOptional Nothing) ) j )
 
 parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 
@@ -331,7 +334,7 @@ parseShowable
 -- parseShowable  i | traceShow i False = error ""
 parseShowable (Primitive i ) =  (do
    case i of
-        PMime _ -> let
+        PMime  _ -> let
               pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}" <* takeWhile (=='\\'))
                 in doublequoted  pr <|> pr
         PInt ->  SNumeric <$>  signed decimal
@@ -379,6 +382,8 @@ parseShowable (KArray i)
       where par = char '{'  *>  sepBy (parseShowable i) (char ',') <* char '}'
 parseShowable (KOptional i)
     = SOptional <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
+parseShowable (KDelayed i)
+    = return $ SDelayed  "query " Nothing -- ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
 parseShowable (KSerial i)
     = SSerial <$> ((Just <$> parseShowable i) )
 parseShowable (KInterval k)=

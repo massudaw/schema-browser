@@ -80,29 +80,45 @@ import Data.String
 import Control.Arrow
 import Crea
 
+data BrowserState
+  = BrowserState
+  {host :: String
+  ,dbn :: String
+  ,user :: String
+  ,pass :: String
+  ,schema :: Maybe String
+  ,table :: Maybe String
+  }
+
+
+argsToState  [h,d,u,p,s,t] = BrowserState h d  u p (Just s) (Just t )
+argsToState  [h,d,u,p,s] = BrowserState h d  u p  (Just s)  Nothing
+argsToState  [h,d,u,p] = BrowserState h d  u p Nothing Nothing
+
 setup
      :: Show a =>   Event [a] -> [String] -> Window -> UI ()
 setup e args w = void $ do
   return w # set title "Data Browser"
-  (evDB,chooserDiv) <- databaseChooser args
+  let bstate = argsToState args
+  (evDB,chooserDiv) <- databaseChooser bstate
   body <- UI.div
   be <- stepper [] e
   pollRes <- UI.div # sink UI.text (show <$> be)
   getBody w #+ [element chooserDiv , element body]
   mapUITEvent body (traverse (\(inf)-> do
     let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
-    span <- chooserKey  inf k (atMay args 4)
+    span <- chooserKey  inf k (table bstate)
     element body # set UI.children [span,pollRes] )) evDB
 
 
-listDBS ::  String -> IO (Map Text (Connection,[Text]))
+listDBS ::  BrowserState -> IO (Text,(Connection,[Text]))
 listDBS dname = do
-  connMeta <- connectPostgreSQL ("user=postgres dbname=postgres")
+  connMeta <- connectPostgreSQL (fromString $ "host=" <> host dname <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname <> " sslmode= require" )
   dbs :: [Only Text]<- query_  connMeta "SELECT datname FROM pg_database  WHERE datistemplate = false"
-  map <- M.fromList <$> mapM (\db -> do
-        connDb <- connectPostgreSQL ("user=postgres dbname=" <> toStrict (encodeUtf8 db))
+  map <- (\db -> do
+        connDb <- connectPostgreSQL ((fromString $ "host=" <> host dname <>" user=" <> user dname <> " dbname=" ) <> toStrict (encodeUtf8 db) <> (fromString $ " password=" <> pass dname <> " sslmode= require") )
         schemas :: [Only Text] <- query_  connDb "SELECT schema_name from information_schema.schemata"
-        return (db,(connDb,filter (not . (`elem` ["information_schema","pg_catalog","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas))) (fmap unOnly dbs)
+        return (db,(connDb,filter (not . (`elem` ["information_schema","pg_catalog","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas))) (T.pack $ dbn dname)
   return map
 
 loginWidget userI passI =  do
@@ -127,11 +143,10 @@ instance Eq Connection where
 form td ev =  tidings (facts td ) (facts td <@ ev )
 
 databaseChooser sargs = do
-  let args = fmap T.pack sargs
-  dbs <- liftIO $ listDBS  (head sargs)
-  let dbsInit = join $ fmap (\(d,s) -> (d,) . (,s) . fst <$>  M.lookup s dbs ) $ liftA2 (,) (safeHead args) (safeHead $ tail args)
-  wid <- loginWidget (atMay  sargs 2 ) (atMay  sargs 3)
-  dbsW <- listBox (pure $ concat $ fmap (\(i,(c,j)) -> (i,) . (c,) <$> j) $ M.toList dbs ) (pure dbsInit  ) (pure id) (pure (line . show .fmap snd ))
+  dbs <- liftIO $ listDBS  sargs
+  let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,) . (,T.pack s) . fst $ snd $ dbs ) $ ( schema sargs)
+  wid <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
+  dbsW <- listBox (pure $ (\(i,(c,j)) -> (i,) . (c,) <$> j) $ dbs ) (pure dbsInit  ) (pure id) (pure (line . show .fmap snd ))
   cc <- currentValue (facts $ userSelection dbsW)
   let dbsWE = rumors $ userSelection dbsW
   dbsWB <- stepper cc dbsWE
@@ -140,7 +155,8 @@ databaseChooser sargs = do
   let login = liftA2 (liftA2 (,)) (triding wid) ( dbsWT )
       formLogin = form login (UI.click load)
   let genSchema ((user,pass),(dbN,(dbConn,schemaN))) = do
-        conn <- connectPostgreSQL ("user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> toStrict ( encodeUtf8 dbN ))
+        conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> toStrict ( encodeUtf8 dbN )<> " sslmode= require")
+        execute_ conn "set bytea_output='hex'"
         keyTables dbConn conn (schemaN,T.pack user)
   chooserT <-  mapTEvent (traverse genSchema) formLogin
   chooserDiv <- UI.div # set children [getElement wid ,getElement dbsW,load]
@@ -225,7 +241,7 @@ chooseKey inf key = mdo
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
 
   chk <- checkedWidget (pure True)
-  (cru,evs) <- crudUITable inf plugList  (pure True ) res2 [] (allRec' (tableMap inf) table) (pruneTidings (triding chk) itemListT )
+  (cru,evs) <- crudUITable inf plugList  (pure True ) res2 [] (allRec' (tableMap inf) table) itemListT
   let eres = fmap addToList <$> evs
       tsort = (\ b c -> trace "sort" . sorting b c ) <$> triding asc <*> multiUserSelection sortList
   inisort <- currentValue (facts tsort)
@@ -730,4 +746,4 @@ testFireMetaQuery q = testParse "incendio" "metadata"  q
 testFireQuery q = testParse "incendio" "incendio"  q
 testAcademia q = testParse "academia" "academia"  q
 
-plugList = [lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCNPJStatefull,queryCPFStatefull,queryArtAndamento]
+plugList = [lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}queryCNPJStatefull,queryCPFStatefull,queryArtAndamento]

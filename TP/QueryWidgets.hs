@@ -157,6 +157,7 @@ attrSize (Attr k _ ) = go  (keyType k)
   where
     go i = case i of
                 KOptional l ->  go l
+                KDelayed l ->  go l
                 KSerial l -> go l
                 KArray l -> let (i1,i2) = go l in (i1+1,i2*8)
                 KInterval l -> let (i1,i2) = go l in (i1*2,i2)
@@ -196,6 +197,11 @@ buildUI i  tdi = case i of
            retUI <- UI.div # set children [getElement tdnew]
            paintBorder retUI (facts $ triding tdnew) (facts tdi)
            return $ TrivialWidget (triding tdnew ) retUI
+         {-(KDelayed q ) -> do
+           tdnew <- fmap (Just . Delayed "" . Just  ) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
+           retUI <- UI.div # set children [getElement tdnew]
+           paintBorder retUI (facts $ triding tdnew) (facts tdi)
+           return $ TrivialWidget (triding tdnew ) retUI-}
          (KArray ti) -> do
             TrivialWidget offsetT offset <- offsetField 0
             let arraySize = 8
@@ -299,7 +305,7 @@ tbCase inf pgs i@(FKT ifk _ _ tb1 ) wl plugItens oldItems  = do
         res <- liftIO $ addTable inf table
         tds <- fkUITable inf pgs res pfks (filter (isReflexive .fst) wl) (fmap (runIdentity . getCompose ) <$>  tbi) i
         dv <- UI.div #  set UI.class_ "col-xs-12"# set children [l,getElement tds]
-        paintEdit l (facts (triding tds)) (facts oldItems)
+        paintEdit l (facts (fmap _tbref <$> triding tds)) (fmap _tbref <$> facts oldItems)
         return $ TrivialWidget (triding tds) dv
 
 tbCase inf pgs i@(IT na tb1 ) wl plugItens oldItems  = do
@@ -625,8 +631,10 @@ fkUITable inf pgs res plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ ) )
     | not refl = do
         nonInjectiveSelection inf pgs wl tb (pure res) oldItems
     | otherwise = mdo
-      cv <- currentValue (fmap (_fkttable) <$> facts oldItems)
+      cvres <- currentValue (fmap (fmap unTB . _tbref) <$> facts oldItems)
+
       let
+          cv = search res cvres
           relTable = M.fromList $ fmap swap rel
       ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . fmap traceShowId . rumors . snd <$> plmods)
       let
