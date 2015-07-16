@@ -24,7 +24,6 @@ import qualified Data.Foldable as F
 import qualified Data.Map as M
 import Schema
 import System.IO
-import Data.Functor.Compose
 import Data.Functor.Identity
 
 import Control.Monad.Reader
@@ -86,7 +85,7 @@ renderProjectReport = (staticP myDoc , element )
               template <- liftIO$ readFile' utf8 "raw.template"
               liftIO$ makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odxR "report" -< ()
-          returnA -<  (Just .  TB1 . (KV (PK [] []) ) . pure . Compose. Identity . Attr "report" . SOptional . Just . SBinary .  BS.toStrict . either id id ) outdoc
+          returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "report" . SOptional . Just . SBinary .  BS.toStrict . either id id ) outdoc
       element inf = maybe (return Nothing) (\inp -> do
                               b <- runReaderT (dynPK myDoc $ ()) (Just inp)
                               return $ liftKeys inf tname <$> b)
@@ -143,7 +142,7 @@ renderProjectPricingA = (staticP myDoc , element )
               template <- readFile' utf8 "raw.template"
               makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odx "orcamento" -< preenv
-          returnA -<  (Just .  TB1 . (KV (PK [] []) ) . pure . Compose. Identity . Attr "orcamento" . SOptional . Just . SBinary .  BS.toStrict . either id id ) outdoc
+          returnA -<  (Just .  tbmap .mapFromTBList . pure . Compose. Identity . Attr "orcamento" . SOptional . Just . SBinary .  BS.toStrict . either id id ) outdoc
       element inf = maybe (return Nothing) (\inp -> do
                               b <- dynPK myDoc (Just inp)
                               return $ liftKeys inf tname  <$> b)

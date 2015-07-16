@@ -43,6 +43,8 @@ executable threepenny-layer
    ,http-client-openssl
    ,base64-bytestring
    ,semigroupoids
+   ,tasty
+   ,tasty-hunit
    , arrows
    -- Google Auth
    -- ,handa-gdata > 0.7

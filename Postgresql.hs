@@ -6,7 +6,6 @@ import Query
 import GHC.Stack
 import Debug.Trace
 import Data.Functor.Identity
-import Data.Functor.Compose
 import Data.Scientific hiding(scientific)
 import Data.Bits
 import Data.Aeson
@@ -16,7 +15,7 @@ import qualified  Data.Map as M
 import Data.Tuple
 import Data.Time.Clock
 import qualified Data.Char as Char
-import Schema
+-- import Schema
 import Control.Concurrent
 import qualified Data.HashMap.Strict as HM
 import Data.String
@@ -49,7 +48,6 @@ import qualified Data.ByteString.Char8 as BS
 import Data.Monoid
 import Prelude hiding (takeWhile)
 
-import System.Time.Extra
 
 import qualified Data.Foldable as F
 import Data.Foldable (Foldable)
@@ -91,8 +89,8 @@ deriving instance Traversable Interval
 instance  TF.ToField (TB Identity Key Showable)  where
   toField (Attr k i) = TF.toField i
   toField (IT n (LeftTB1 i)  ) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT (n)  (TB1 i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ n ) $  runIdentity.getCompose <$> F.toList  i )
-  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType  n) $  fmap (runIdentity . getCompose ) $ F.toList  $ _unTB1 $ i ) ) <$> is
+  toField (IT (n)  (TB1 m i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ n ) $  runIdentity.getCompose <$> F.toList (_kvvalues i) )
+  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType  n) $  fmap (runIdentity . getCompose ) $ F.toList  $ _kvvalues $ _unTB1 $ i ) ) <$> is
   toField e = errorWithStackTrace (show e)
 
 
@@ -279,8 +277,9 @@ unKOptionalAttr (FKT i r l (LeftTB1 (Just j))  ) = FKT (fmap (mapComp (first unK
 
 unOptionalAttr (Attr k i ) = Attr (unKOptional k) <$> unSOptional i
 unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
-unOptionalAttr (FKT i r l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i r l j) (traverse ( traverse unSOptional . (mapComp (first unKOptional)) ) i)  j
+unOptionalAttr (FKT i r l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i r l j) (traverse ( traverse unSOptional . (mapComp (firstTB unKOptional)) ) i)  j
 
+parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
 -- parseAttr i | traceShow i False = error ""
 parseAttr (Attr i _ ) = do
   s<- parseShowable (textToPrim <$> keyType i) <?> show i
@@ -299,7 +298,7 @@ parseAttr (IT na j) = do
   return $ IT  na mj
 
 parseAttr (FKT l refl rel j ) = do
-  ml <- unIntercalateAtto (fmap (Compose . Identity ) . parseAttr .runIdentity .getCompose  <$> l) (char ',')
+  ml <- unIntercalateAtto (traComp parseAttr <$> l) (char ',')
   char ','
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j
   return $  FKT ml refl rel  mj -- (fmap (const (SOptional Nothing) ) j )
@@ -309,13 +308,14 @@ parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 tryquoted i = doublequoted i <|> i
 -- Note Because the list has a mempty operation when parsing
 -- we have overlap between maybe and list so we allow only nonempty lists
+parseLabeledTable :: TB2 Key () -> Parser (TB2 Key Showable)
 parseLabeledTable (ArrayTB1 [t]) =
   ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey makeOpt t))  >>  return (fail "")  ) )
 parseLabeledTable (LeftTB1 (Just i )) =
   LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapKey makeOpt i) >> return Nothing) <|> return Nothing )
-parseLabeledTable (TB1 (KV (PK i d ) m)) = (char '('  *> (do
-  im <- unIntercalateAtto (fmap (Compose . Identity) . parseAttr .runIdentity . getCompose <$> (i <> d <> m) ) (char ',')
-  return (TB1 (KV ( PK (L.take (length i) im ) (L.take (length d) $L.drop (length i) $  im))(L.drop (length i + length d) im)) )) <*  char ')' )
+parseLabeledTable (TB1 me (KV  m)) = (char '('  *> (do
+  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> M.toList m ) (char ',')
+  return (TB1 me (KV (M.fromList im) ))) <*  char ')' )
 
 quotedRec :: Int -> (Int -> Parser a)  -> Parser a
 quotedRec i  pint =   (takeWhile (== '\\') >>  char '\"') *> inner <* ( takeWhile (=='\\') >> char '\"'  )
@@ -412,8 +412,6 @@ pg_double
 unOnly :: Only a -> a
 unOnly (Only i) = i
 
-instance (F.FromField (f (g a))) => F.FromField (Compose f g a) where
-  fromField = fmap (fmap (fmap (Compose ) )) $ F.fromField
 
 instance Sel.Serialize a => Sel.Serialize (ER.Extended a ) where
   get = ER.Finite <$> Sel.get
@@ -560,34 +558,6 @@ fromArray typeInfo f = Tra.sequence . (parseIt <$>) <$> range delim
 instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
-instance FromJSON Showable where
-  parseJSON (Data.Aeson.String i ) = return $ SText $ T.fromStrict  i
-  parseJSON (Data.Aeson.Array i ) = do
-      i <- Vector.mapM parseJSON i
-      return $ SComposite   i
-  parseJSON (Data.Aeson.Number i) = return $ SDouble (toRealFloat i)
-  parseJSON i = errorWithStackTrace (show i)
-
-fromAesonTB (TB1 (KV (PK p d) v)) (Object m)  =
-  let ls = fmap snd $ HM.toList m
-      pk = L.take (length p) ls
-      dk = L.take (length d) $ L.drop (length pk) ls
-      vk = L.take (length v) $ L.drop (length pk + length d) ls
-  in TB1 (KV (PK (fromAesonAttr <$> (overComp id <$> p) <*> pk) (fromAesonAttr <$> (overComp id <$> d) <*> dk)) (fromAesonAttr <$> (overComp id <$> v) <*> vk))
-
-
-fromAesonAttr (Attr k _) i =
-    case keyType k of
-         KSerial _ ->
-           case  (fromJSON i) of
-                   Success a -> Compose $ Identity $ (Attr k (SOptional a ) :: TB Identity Key Showable)
-         KOptional _ ->
-           case  (fromJSON i) of
-                   Success a -> Compose $ Identity $ (Attr k (SOptional a ) :: TB Identity Key Showable)
-         _ ->
-           case  (fromJSON i) of
-                   Success a -> Compose $ Identity $ (Attr k (a ) :: TB Identity Key Showable)
-
 fromAttr foldable = do
     let parser  = parseLabeledTable foldable
     FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
@@ -595,27 +565,6 @@ fromAttr foldable = do
                                Right Nothing -> error (show j )
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
 
-
-selectAll inf table   = liftIO $ do
-      let rp = rootPaths'  (tableMap inf) table
-      (t,v) <- duration  $ queryWith_  (fromAttr (fst rp)) (conn inf)(fromString $ T.unpack $ snd rp)
-      print (tableName table,t)
-      return v
-
-addTable inf table = do
-    let mvar = mvarMap inf
-    mmap <- takeMVar mvar
-    (isEmpty,mtable) <- case (M.lookup table mmap ) of
-         Just i -> do
-           emp <- isEmptyMVar i
-           putMVar mvar mmap
-           return (emp,i)
-         Nothing -> do
-           res <- selectAll  inf table
-           mnew <- newMVar res
-           putMVar mvar (M.insert table mnew mmap)
-           return (True,mnew )
-    readMVar mtable
 
 
 

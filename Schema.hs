@@ -12,9 +12,9 @@ import Control.Monad.IO.Class
 import Data.Monoid
 import Utils
 import Control.Exception
+import System.Time.Extra
 
 import Data.Functor.Identity
-import Data.Functor.Compose
 import Database.PostgreSQL.Simple
 import Data.Time
 
@@ -36,6 +36,8 @@ import qualified Data.Text.Lazy as T
 
 
 
+import Query
+import Postgresql
 
 
 createType :: Text ->  Unique -> (Text,Text,Maybe Text,Text,Text,Text,Text,Maybe Text,Maybe Text,Maybe Text) -> Key
@@ -47,7 +49,7 @@ createType _ un (t,c,trans,"numrange",_,_,n,def,_,_) = (Key   c trans un (nullab
 createType _ un (t,c,trans,"USER-DEFINED",_,"floatrange",n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "double precision"))
 createType _ un (t,c,trans,"USER-DEFINED",_,"trange",n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "time"))
 -- Table columns Primitive
-createType s un (t,c,trans,"USER-DEFINED",udtschema ,udtname,n,def,_,_) |  udtschema == s = (Key c trans un (nullable n $ traceShowId $  InlineTable  udtschema udtname ))
+createType s un (t,c,trans,"USER-DEFINED",udtschema ,udtname,n,def,_,_) |  udtschema == s = (Key c trans un (nullable n $ InlineTable  udtschema udtname ))
 createType s un (t,c,trans,"ARRAY",udtschema ,udtname,n,def,_,_) | udtschema == s = (Key c trans un (nullable n $ KArray $ InlineTable  udtschema $T.drop 1 udtname ))
 createType _ un (t,c,trans,"ARRAY",_,i,n,def,p,_) = (Key   c trans un (nullable n $ KArray $ (Primitive (T.tail i))))
 createType _ un (t,c,trans,_,_,"geometry",n,def,p,_) = (Key   c trans un (nullable n $ Primitive $ (\(Just i) -> i) p))
@@ -134,28 +136,17 @@ keyTables conn userconn (schema ,user) = do
        mvar <- newMVar M.empty
        return  $ InformationSchema schema i1 i2 i3 M.empty mvar  userconn conn
 
-inlineName (KOptional i) = inlineName i
-inlineName (KArray a ) = inlineName a
-inlineName (InlineTable _ i) = i
-
-inlineFullName (KOptional i) = inlineFullName i
-inlineFullName (KArray a ) = inlineFullName a
-inlineFullName (InlineTable s i) = s <> "." <> i
-
-isInline (KOptional i ) = isInline i
-isInline (KArray i ) = isInline i
-isInline (InlineTable _ i) = True
-isInline _ = False
-
 liftKeys
   :: InformationSchema
      -> Text
-     -> FTB1 (Compose Identity (TB Identity Text)) a
-     -> FTB1 (Compose Identity (TB Identity Key)) a
+     -> FTB1 (Compose Identity (TB Identity )) Text a
+     -> FTB1 (Compose Identity (TB Identity )) Key a
 liftKeys inf tname tb
   = liftTable tname tb
   where
-        liftTable tname (TB1 i )  = TB1 $ mapComp (liftField tname) <$> i
+        liftTable tname (TB1 _ (KV i) )  = TB1  (tableMeta ta) $ KV $ mapComp (liftField tname) <$> (M.mapKeys (S.map (lookKey inf tname)) i)
+            where
+                  ta = lookTable inf tname
         liftTable tname (LeftTB1 j ) = LeftTB1 $ liftTable tname <$> j
         liftTable tname (ArrayTB1 j ) = ArrayTB1 $ liftTable tname <$> j
         liftField :: Text -> TB Identity Text a -> TB Identity Key a
@@ -203,5 +194,43 @@ logTableModification inf (TableModification Nothing table i) = do
   [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (modification_time,table_name,modification_data,schema_name) VALUES (?,?,?,?) returning modification_id "  (ltime,rawName table,show i , schemaName inf)
   return (TableModification (id) table i )
 
+
+withInf d s f = withConn d (f <=< (\conn -> keyTables conn conn (s,"postgres")))
+withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres")) )
+
+
+testParse db sch q = withConnInf db sch (\inf -> do
+                                       let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
+                                       putStrLn (  show rpq)
+                                       putStrLn (  show rp)
+                                       q <- queryWith_ (fromAttr (rp) ) (conn  inf) (fromString $ T.unpack $ rpq)
+                                       print q
+                                       return $ q
+                                           )
+
+testFireMetaQuery q = testParse "incendio" "metadata"  q
+testFireQuery q = testParse "incendio" "incendio"  q
+testAcademia q = testParse "academia" "academia"  q
+
+selectAll inf table   = liftIO $ do
+      let rp = rootPaths'  (tableMap inf) table
+      (t,v) <- duration  $ queryWith_  (fromAttr (fst rp)) (conn inf)(fromString $ T.unpack $ snd rp)
+      print (tableName table,t)
+      return v
+
+addTable inf table = do
+    let mvar = mvarMap inf
+    mmap <- takeMVar mvar
+    (isEmpty,mtable) <- case (M.lookup table mmap ) of
+         Just i -> do
+           emp <- isEmptyMVar i
+           putMVar mvar mmap
+           return (emp,i)
+         Nothing -> do
+           res <- selectAll  inf table
+           mnew <- newMVar res
+           putMVar mvar (M.insert table mnew mmap)
+           return (True,mnew )
+    readMVar mtable
 
 

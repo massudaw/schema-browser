@@ -4,6 +4,8 @@ module Step where
 import qualified Data.Bifunctor as B
 import Types
 import Query
+import qualified Data.Map as M
+import qualified Data.Set as S
 import Data.Maybe
 import Data.Foldable (Foldable,toList)
 import Data.Maybe (isJust)
@@ -12,7 +14,6 @@ import Control.Applicative
 import qualified Data.Text.Lazy as T
 import Data.Text.Lazy (Text)
 -- import Warshal
-import Data.Functor.Compose
 import Data.Functor.Identity
 import Data.String
 import Data.Set (Set)
@@ -115,13 +116,14 @@ checkOutput i = proc t -> do
          else v
 
 
-
+{-
 test1 = do
   let testP = atAny "tbtest" [join . fmap unSOptional <$> idxR "ewfew" ,join . fmap unSOptional <$> idxR "ooooo":: Parser (Kleisli (ReaderT (Maybe (TB2 Text Showable)) IO) ) (Access Text) b (Maybe (Showable))]
       testData = Just (TB1 (KV (PK [] []) [Compose $ Identity $ TBEither "tbtest" [Compose $ Identity $ Attr "ewfew" (),Compose $ Identity $ Attr "ooooo" () ] (Just $ Compose $ Identity $ Attr "ewfew" (SOptional $ Just $ SText "24124"))] ))
 
   print $ staticP testP
   print =<< runReaderT (dynPK testP  () ) testData
+-}
 
 just (Just i ) (Just j) = Nothing
 just i Nothing = i
@@ -146,7 +148,7 @@ atRA i (P s (Kleisli j) )  =  P (BF.second nest . BF.first nest $ s) (Kleisli (\
 
 unLeftTB1 = join . fmap (\v -> case v of
                (LeftTB1 i ) -> i
-               i@(TB1 _ ) -> Just i)
+               i@(TB1 _ _ ) -> Just i)
 
 atR i (P s (Kleisli j) )  =  P (BF.second nest . BF.first nest $ s) (Kleisli (\i -> local (unLeftTB1 . indexTB1 ind) (j i )  ))
   where ind = splitIndex True i
@@ -212,14 +214,14 @@ logTableInter b l =
 
 indexTB1 (IProd _ l) t
   = do
-    (TB1 (KV (PK k d)  v)) <- t
+    (TB1  m (KV v)) <- t
     let finder = L.find (L.any (==l). L.permutations . keyattr . firstCI keyString)
-        i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  finder v `mplus` finder k `mplus` finder d
+        i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  finder $ toList v
     case runIdentity $ getCompose $i  of
          Attr _ l -> Nothing
          FKT l _ _ j -> return j
          IT l  j -> return j
-         TBEither n kj j  -> return $ TB1 $ KV (PK [] []) $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j
+         TBEither n kj j  -> return $ TB1 m $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j
 
 
 data Access a
@@ -229,26 +231,26 @@ data Access a
   | Many [Access a]
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
 
-firstCI f (Compose (Identity i)) = Compose (Identity $ B.first f i)
+firstCI f = mapComp (firstTB f)
 
-checkField (Nested (IProd _ l) nt ) t@(TB1 (KV (PK k d)  v))
+checkField (Nested (IProd _ l) nt ) t@(TB1 m (KV v))
   = do
     let finder = L.find (L.any (==l). L.permutations . keyattr . firstCI keyString  )
-        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder v `mplus` finder k `mplus` finder d
+        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder $ toList v
     case runIdentity $ getCompose $ i  of
          IT l  i -> Compose . Identity <$> (IT l  <$> checkTable nt i)
-         TBEither n kj j  ->  checkField nt ( TB1 $ KV (PK [] []) $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j)
+         TBEither n kj j  ->  checkField nt ( TB1 m $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j)
          FKT a  b c  d -> Compose . Identity <$> (FKT a b c <$>  checkTable nt d)
-checkField  (IProd b l) t@(TB1 (KV (PK k d)  v))
+checkField  (IProd b l) t@(TB1 m (KV v))
   = do
     let finder = L.find (L.any (==l). L.permutations . keyattr . firstCI keyString  )
-        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder v `mplus` finder k `mplus` finder d
+        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder $ toList v
     Compose . Identity <$> case runIdentity $ getCompose $ i  of
          Attr k l -> fmap (Attr k ) . (\i -> if b then unRSOptional' i else Just i ) $ l
          i -> errorWithStackTrace ( show (l,i))
-checkField  (ISum []) t@(TB1 (KV (PK k d)  v))
+checkField  (ISum []) t@(TB1 m (KV  v))
   = Nothing
-checkField  (ISum ls) t@(TB1 (KV (PK k d)  v))
+checkField  (ISum ls) t@(TB1 m (KV v))
   = foldr1 just $  fmap (\(Many [l]) ->  join $ fmap (T.traverse  unRSOptional') $  checkField l t) ls
 checkField i j = errorWithStackTrace (show (i,j))
 
@@ -256,8 +258,8 @@ checkField i j = errorWithStackTrace (show (i,j))
 
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
 checkTable l (LeftTB1 j) = join $ fmap (checkTable l) j
-checkTable (Many l) t@(TB1 (KV (PK k d)  v)) =
-  fmap (TB1 . (KV (PK [] []))). allMaybes $ flip checkField t <$> l
+checkTable (Many l) t@(TB1 m (KV   v)) =
+  fmap (TB1 m . KV . mapFromTBList ) . allMaybes $ flip checkField t <$> l
 
 checkTable l (ArrayTB1 i )
   | i == []  = Nothing
@@ -267,10 +269,10 @@ checkTable i j = errorWithStackTrace (show (i,j))
 
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
 indexTable l (LeftTB1 j) = join $ fmap (indexTable l) j
-indexTable (IProd _ l) t@(TB1 (KV (PK k d)  v))
+indexTable (IProd _ l) t@(TB1 m (KV v))
   = do
     let finder = L.find (L.any (==l). L.permutations .keyattr. firstCI keyString )
-        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder v `mplus` finder k `mplus` finder d
+        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder (toList v )
     case runIdentity $ getCompose $ i  of
          Attr k l -> return (k,l)
 indexTable l (ArrayTB1 j) =  liftA2 (,) ((head <$> fmap (fmap fst) i) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
@@ -311,10 +313,10 @@ instance (Monoid s ,Applicative (a i),Monoid m) => Monoid (Parser a s i m) where
   mempty = P mempty (pure mempty)
   mappend (P i  l) (P j m ) =  P (mappend i j) (liftA2 mappend l  m )
 
-findPK = concat . fmap keyattr  . _pkKey  . _kvKey . _unTB1
+findPK = concat . fmap keyattr  .toList . tbPK
 
-findPKM (LeftTB1 i ) =  join $ fmap findPKM i
-findPKM i  = Just $ concat . fmap (\i -> zip (keyattr i) (kattr i ))  . _pkKey  . _kvKey . _unTB1 $ i
+findPKM (LeftTB1 i ) =  join $ fmap (findPKM ) i
+findPKM i  = Just $ concat . fmap (\i -> zip (keyattr i) (kattr i )) .toList . tbPK $ i
 
 
 aattr = aattri . runIdentity . getCompose
@@ -322,28 +324,21 @@ aattri (Attr k i ) = [(k,i)]
 aattri (TBEither _ i l  ) =  (maybe [] id $ fmap aattr l )
 aattri (FKT i _ _ _ ) =  (L.concat $ aattr  <$> i)
 aattri (IT _  i ) =  recTB i
-  where recTB (TB1 i ) =  concat $ fmap aattr (toList i)
+  where recTB (TB1 _ (KV i )) =  concat $ fmap aattr (toList i)
         recTB (ArrayTB1 i ) = concat $ fmap recTB i
         recTB (LeftTB1 i ) = concat $ toList $ fmap recTB i
 
 
-kattr :: Compose Identity (TB Identity k ) a -> [a]
+kattr :: Compose Identity (TB Identity  ) k a -> [a]
 kattr = kattri . runIdentity . getCompose
 kattri (Attr _ i ) = [i]
 kattri (TBEither _ i l  ) =  (maybe [] id $ fmap kattr l )
 kattri (FKT i _ _ _ ) =  (L.concat $ kattr  <$> i)
 kattri (IT _  i ) =  recTB i
-  where recTB (TB1 i ) =  concat $ fmap kattr (toList i)
+  where recTB (TB1 m (KV i) ) =  concat $ fmap kattr (toList i)
         recTB (ArrayTB1 i ) = concat $ fmap recTB i
         recTB (LeftTB1 i ) = concat $ toList $ fmap recTB i
 
-
-keyattr :: Compose Identity (TB Identity k ) a -> [k]
-keyattr = keyattri . runIdentity . getCompose
-keyattri (Attr i  _ ) = [i]
-keyattri (TBEither k i l  ) =[k]
-keyattri (FKT i _ _ _ ) =  (L.concat $ keyattr  <$> i)
-keyattri (IT i  _ ) =  [i ]
 
 
 
@@ -354,7 +349,13 @@ type FunArrowPlug o = Step.Parser (->) AccessTag (Maybe (TB1 Showable)) o
 type ArrowPlug a o = Step.Parser a AccessTag (Maybe (TB1 Showable)) o
 
 
-attrT :: (a,b) -> Compose Identity (TB Identity a ) b
+attrT :: (a,b) -> Compose Identity (TB Identity  ) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
 type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))
+
+addToList  (InsertTB m) =  (m:)
+addToList  (DeleteTB m ) =  L.delete m
+addToList  (EditTB m n ) = (map (\e-> if  (e ==  n) then  mapTB1 (\i -> maybe i snd $ findTB1 (\k -> keyattr k == keyattr i  ) m ) e  else e ))
+
+

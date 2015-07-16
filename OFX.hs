@@ -7,6 +7,7 @@ import Data.OFX
 import System.IO
 import System.Exit
 
+import qualified Data.Map as M
 import Control.Applicative
 
 {-
@@ -28,22 +29,21 @@ tzone  = STimestamp . zonedTimeToLocalTime
 i =: j = (i,j)
 
 convertTrans (Transaction {..})  =
-  KV (PK  ["fitid" =: txt txFITID] [
-  "memo" =:  opt txt txMEMO
-    ])
-  ["trntype" =: txt (tail $ show txTRNTYPE )
-  ,"dtposted" =: tzone txDTPOSTED
-  ,"dtuser" =:  opt tzone txDTUSER
-  ,"dtavail" =: opt tzone txDTAVAIL
-  ,"trnamt" =: frac (read txTRNAMT )
-  ,"correctfitid" =: opt txt txCORRECTFITID
-  ,"correctaction" =: opt (txt.show) txCORRECTACTION
-  ,"srvrtid" =: opt txt txSRVRTID
-  ,"checknum" =: opt txt txCHECKNUM
-  ,"refnum" =: opt txt txREFNUM
-  ,"sic" =: opt txt txSIC
-  ,"payeeid" =: opt txt txPAYEEID
-  ]
+    ["fitid" =: txt txFITID
+    ,"memo" =:  opt txt txMEMO
+    ,"trntype" =: txt (tail $ show txTRNTYPE )
+    ,"dtposted" =: tzone txDTPOSTED
+    ,"dtuser" =:  opt tzone txDTUSER
+    ,"dtavail" =: opt tzone txDTAVAIL
+    ,"trnamt" =: frac (read txTRNAMT )
+    ,"correctfitid" =: opt txt txCORRECTFITID
+    ,"correctaction" =: opt (txt.show) txCORRECTACTION
+    ,"srvrtid" =: opt txt txSRVRTID
+    ,"checknum" =: opt txt txCHECKNUM
+    ,"refnum" =: opt txt txREFNUM
+    ,"sic" =: opt txt txSIC
+    ,"payeeid" =: opt txt txPAYEEID
+    ]
 
 testAccount = do
   let tfile = "extrato2.ofx"

@@ -19,13 +19,15 @@ module Types where
 -- import Warshal
 import Control.Lens.TH
 import Data.Functor.Apply
-import Data.Functor.Compose
 import Data.Bifunctor
+import Data.Maybe
 import Data.Functor.Identity
 import Data.Typeable
+import Data.Traversable(traverse)
 import Data.Vector(Vector)
 import Data.Functor.Classes
 import Data.Foldable (Foldable)
+import qualified Data.Foldable as F
 import qualified Data.Interval as Interval
 import Data.Monoid hiding (Product)
 
@@ -44,7 +46,9 @@ import GHC.Exts
 import Control.Applicative
 import qualified Data.List as L
 import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.Set (Set)
+import qualified Data.Set as Set
 import Control.Monad.State
 import Data.Text.Lazy(Text)
 
@@ -52,6 +56,9 @@ import Data.Unique
 
 instance Ord a => Ord (Interval.Interval a ) where
   compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)
+
+
+data Compose f g k a = Compose {getCompose :: f (g k a) } deriving (Functor,Foldable,Traversable,Ord,Eq,Show)
 
 data Path a b
   -- Trivial Path
@@ -65,18 +72,30 @@ data Path a b
 data PK a
   = PK { _pkKey:: [a], _pkDescription :: [a]} deriving(Eq,Ord,Functor,Foldable,Traversable,Show)
 
-data KV a
-  = KV {_kvKey  :: PK a , _kvAttr ::  [a] }deriving(Eq,Ord,Functor,Foldable,Traversable,Show)
-
-filterTB1 f (TB1 i) = TB1 $ filterKV f i
+data KV f k a
+  = KV {_kvvalues :: Map (Set k) (f k a)  }deriving(Eq,Ord,Functor,Foldable,Traversable,Show)
 
 
-mapTB1  f (TB1 i)  =  TB1 (mapKV f i )
-mapKV f (KV (PK l m) n) =  KV (PK (map f l)(map f m)) (map f n)
-filterKV i (KV (PK l m) n) = KV (PK (filter i l) (filter i m )) (filter i n)
-findKV i (KV (PK l m) n) =  (L.find i l)  `mplus` (L.find i m ) `mplus` (L.find i n)
-findTB1  i (TB1 j )  =  findKV i j
+data KVMetadata k
+  = KVMetadata
+  { _kvpk :: Set k
+  , _kvdesc :: Set k
+  }deriving(Eq,Ord,Show)
 
+filterTB1 f (TB1 m i) = TB1 m $ filterKV f i
+mapTB1  f (TB1 m i)  =  TB1 m (mapKV f i )
+mapKV f (KV  n) =  KV  (fmap f n)
+filterKV i (KV n) =  KV $ Map.fromList $ L.filter (i . snd) $ Map.toList  n
+findKV i (KV  n) =  L.find (i . snd) $Map.toList  n
+findTB1  i (TB1 m j )  =  findKV i j
+
+
+
+mapTBF f (Attr i k) = (Attr i k )
+mapTBF f (IT i k) = IT i (mapFTBF f k)
+mapTBF f (FKT i j r k) = FKT  (fmap (Compose .  fmap (mapTBF f) . f .   getCompose) i)  j r  (mapFTBF f k)
+
+mapFTBF f (TB1 m (KV i)) = TB1 m $ KV $ fmap (Compose .  fmap (mapTBF f) . f . getCompose) i
 
 -- Reference labeling
 -- exchange label reference for values when labeled
@@ -91,7 +110,7 @@ data Labeled l v
   { labelValue :: v
   } deriving(Eq,Show,Ord,Foldable,Functor,Traversable)
 
-instance (Functor f,Eq1 f,Eq a) => Eq1 (TB  f a) where
+{-instance (Functor f,Eq1 f,Eq a) => Eq1 (TB  f a) where
   eq1 i j = i == j
 
 instance (Functor f,Ord1 f,Ord a) => Ord1 (TB f a ) where
@@ -99,7 +118,7 @@ instance (Functor f,Ord1 f,Ord a) => Ord1 (TB f a ) where
 
 instance (Functor f,Show1 f,Show a) => Show1 (TB f  a) where
   showsPrec1 = showsPrec
-
+-}
 instance (Show f) =>  Show1 (Labeled f  ) where
   showsPrec1 = showsPrec
 
@@ -113,48 +132,64 @@ data FKey a
     , keyType :: ! a
     }
 
-instance Bifunctor (TB Identity ) where
-  first f (Attr k i) = Attr (f k) i
-  first f (IT k i) = IT (f k) (mapKey f i)
-  first f (FKT k l m  i) = FKT  (fmap (Compose . Identity . first f . runIdentity . getCompose) k) l (fmap (first f . second f) m   ) (mapKey f i)
-  first f (TBEither k l m ) = TBEither (f k) ( fmap ( (Compose . Identity . first f . runIdentity . getCompose)) l) (fmap ((Compose . Identity . first f . runIdentity . getCompose))  m)
+instance (Functor f ,Bifunctor g)  => Bifunctor (Compose f g ) where
+  first f  = Compose . fmap (first f) . getCompose
+  second f = Compose . fmap (second f) . getCompose
 
-  second = fmap
+
+
+
 
 data TB f k a
   = FKT -- Foreign Table
-    { _tbref :: ! [Compose f (TB f k) a]
+    { _tbref :: ! [Compose f (TB f) k  a]
     , _reflexive ::  ! Bool
     , _fkrelation :: ! [(k ,k)]
-    , _fkttable ::  ! (FTB1 (Compose f (TB f k)) a)
+    , _fkttable ::  ! (FTB1 (Compose f (TB f)) k a)
     }
   | IT -- Inline Table
     { _ittableName :: ! k
-    , _fkttable ::  ! (FTB1 (Compose f (TB f k)) a)
+    , _fkttable ::  ! (FTB1 (Compose f (TB f )) k a)
     }
   | TBEither
     { _tbeithername :: ! k
-    , _tbeitherref :: ! [(Compose f (TB f k) () )]
-    , _tbeithervalue:: ! (Maybe (Compose f (TB f k) a))
+    , _tbeitherref :: ! [(Compose f (TB f ) k () )]
+    , _tbeithervalue:: ! (Maybe (Compose f (TB f ) k a))
     }
   | Attr
     { _tbattrkey :: ! k
     ,_tbattr :: ! a   }
   -- Attribute
 
-  deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
+  deriving(Functor,Foldable,Traversable)
 
-type TB1 = FTB1 (Compose Identity (TB Identity Key) )
-type TB2 k = FTB1 (Compose Identity (TB Identity k ) )
+deriving instance (Eq (f (TB f k a )), Eq (f (TB f k () )) , Eq a , Eq k ) => Eq (TB f k a)
+deriving instance (Ord (f (TB f k a )), Ord (f (TB f k () )) , Ord a , Ord k ) => Ord (TB f k a)
+deriving instance (Show (f (TB f k a )), Show (f (TB f k () )) , Show a , Show k ) =>Show (TB f k a)
 
-mapKey f (TB1 k ) = TB1 . fmap (Compose . Identity . first f . runIdentity . getCompose) $  k
+type TB1 = TB2 Key
+type TB2 k = TB3 Identity k
+type TB3 f = FTB1 (Compose f (TB f))
+
+mapKVMeta f (KVMetadata s j ) =KVMetadata (Set.map f s) (Set.map f j)
+mapKey f (TB1 m k ) = TB1 (mapKVMeta f m) . firstKV f  $  k
 mapKey f (LeftTB1 k ) = LeftTB1 (mapKey f <$> k)
 mapKey f (ArrayTB1 k ) = ArrayTB1 (mapKey f <$> k)
 
-data FTB1 f a
-  = TB1 ! (KV (f a))
-  | LeftTB1 ! (Maybe (FTB1 f a))
-  | ArrayTB1 ! [(FTB1 f a)]
+firstKV  f (KV m ) = KV . fmap (mapComp (firstTB f) ) . Map.mapKeys (Set.map f) $ m
+secondKV  f (KV m ) = KV . fmap (second f ) $ m
+
+firstTB :: (Ord k, Functor f) => (c -> k) -> TB f c a -> TB f k a
+firstTB f (Attr k i) = Attr (f k) i
+firstTB f (IT k i) = IT (f k) (mapKey f i)
+firstTB f (FKT k l m  i) = FKT  (fmap (mapComp (firstTB f) ) k) l (fmap (first f . second f) m   ) (mapKey f i)
+firstTB f (TBEither k l m ) = TBEither (f k) ( fmap (mapComp (firstTB f)) l) (fmap (mapComp (firstTB f))  m)
+
+
+data FTB1 f k a
+  = TB1 (KVMetadata k) ! (KV f k a)
+  | LeftTB1 ! (Maybe (FTB1 f k a))
+  | ArrayTB1 ! [(FTB1 f k a)]
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable)
 
 
@@ -288,11 +323,12 @@ data Modification a b
   | DeleteTB (TB2 a b)
   deriving(Eq,Show,Functor)
 
-instance Apply KV where
-  KV pk i <.> KV pk1 i1 = KV (pk <.> pk1) (getZipList $ ZipList i <.> ZipList i1)
+instance (Ord k,Apply (f k) ,Functor (f k )) =>Apply  (KV f k) where
+  KV pk  <.> KV pk1 = KV (Map.intersectionWith (<.>) pk pk1)
 
 instance Apply PK where
   PK i j <.> PK i1 j1 = PK (getZipList $ ZipList i <.> ZipList i1 ) ( getZipList $ ZipList j <.> ZipList j1)
+
 
 type QueryRef = State ((Int,Map Int Table ),(Int,Map Int Key))
 
@@ -334,8 +370,68 @@ instance Fractional Showable where
 -- type HashQuery =  HashSchema (Set Key) (SqlOperation Table)
 type PathQuery = Path (Set Key) (SqlOperation )
 
+type TBLabel =  Compose (Labeled Text) (TB (Labeled Text) ) Key
+type TBIdent =  Compose Identity  (TB Identity ) Key
+
+overComp f =  f . runIdentity . getCompose
+
+mapFromTBList :: Ord k => [Compose Identity (TB Identity) k  a] -> Map (Set k) (Compose Identity ( TB Identity ) k  a)
+mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),i))
+
+keyattr :: Compose Identity (TB Identity ) k  a -> [k]
+keyattr = keyattri . runIdentity . getCompose
+keyattri (Attr i  _ ) = [i]
+keyattri (TBEither k i l  ) =[k]
+keyattri (FKT i _ _ _ ) =  (L.concat $ keyattr  <$> i)
+keyattri (IT i  _ ) =  [i ]
+
+
+
+tableNonRef :: Ord k => TB2 k a -> TB3 Identity k a
+tableNonRef (ArrayTB1 i) = ArrayTB1 $ tableNonRef <$> i
+tableNonRef (LeftTB1 i ) = LeftTB1 $ tableNonRef <$> i
+tableNonRef (TB1 m (KV  n)  )  = TB1 m (KV  (mapFromTBList $ fmap (Compose . Identity ) $ concat $ F.toList $  overComp nonRef <$> n))
+  where
+    nonRef :: Ord k => TB Identity k a -> [(TB Identity ) k a]
+    nonRef (Attr k v ) = [Attr k v]
+    nonRef (TBEither n l j ) = [TBEither n (concat $ traComp nonRef <$> l) (join $ fmap listToMaybe $ traComp nonRef <$> j) ]
+    nonRef (FKT i True _ _ ) = concat (overComp nonRef <$> i)
+    nonRef (FKT i False _ _ ) = []
+    nonRef it@(IT j k ) = [(IT  j (tableNonRef k )) ]
+
+
+tableNonRefK :: TB2 Key Showable -> TB3 Identity Key Showable
+tableNonRefK (ArrayTB1 i) = ArrayTB1 $ tableNonRefK <$> i
+tableNonRefK (LeftTB1 i ) = LeftTB1 $ tableNonRefK <$> i
+tableNonRefK (TB1 m (KV  n)   )  = TB1 m (KV (mapFromTBList $ fmap (Compose . Identity ) $ concat $ F.toList $  overComp nonRef <$> n))
+  where
+    nonRef :: TB Identity Key Showable -> [(TB Identity ) Key Showable]
+    nonRef (Attr k v ) = [ Attr k v ]
+    nonRef (TBEither n kj j ) =   concat $  fmap (overComp nonRef ) $ maybe (addDefault <$> kj) (\jl -> fmap (\i -> if i == fmap (const ()) jl  then jl else addDefault i) kj) j
+    nonRef (FKT i True _ _ ) = concat  (overComp nonRef <$> i)
+    nonRef (FKT i False _ _ ) = []
+    nonRef (IT j k ) = [(IT  j (tableNonRefK k )) ]
+
+addDefault = mapComp def
+  where
+    def ((Attr k i)) = (Attr k (SOptional Nothing))
+    def ((IT  rel j )) = (IT  rel (LeftTB1 Nothing)  )
+
+
+mapComp :: (Functor t) => (f c a -> g d b) ->  Compose t f c a -> Compose t g d b
+mapComp f =  Compose. fmap  f . getCompose
+
+traComp :: (Applicative k ,Traversable t ,Functor t )=> (f c a -> k (g d b)) ->  Compose t f c a -> k (Compose t g d b)
+traComp f =  fmap Compose. traverse f . getCompose
+
+concatComp  =  Compose . concat . fmap getCompose
+
+tableMeta t = KVMetadata (rawPK t) (maybe Set.empty Set.singleton $ rawDescription t)
+
 makeLenses ''KV
 makeLenses ''PK
 makeLenses ''TB
 
+
+tbmap = TB1 (KVMetadata Set.empty Set.empty) . KV
 

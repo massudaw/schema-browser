@@ -11,7 +11,6 @@ import Control.Lens hiding (element,set,get,(#))
 import Control.Applicative
 import Control.Monad
 import Data.Maybe
-import Data.Functor.Compose
 import Control.Concurrent
 
 import qualified Data.List as L
@@ -39,7 +38,7 @@ import Control.Monad.Reader
 
 
 getInp :: TL.Text -> TB1 Showable -> Maybe BSC.ByteString
-getInp l  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t)-> t )) . join . fmap unRSOptional' . cc . runIdentity . getCompose )  . findTB1 (((==[l]) . fmap keyValue . keyattr ))
+getInp l  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t)-> t )) . join . fmap unRSOptional' . cc . runIdentity . getCompose . snd )  . findTB1 (((==[l]) . fmap keyValue . keyattr ))
   where cc (TBEither _ _ (l) ) = join $fmap (cc.unTB) l
         cc (Attr _ l ) = Just l
 
@@ -53,7 +52,7 @@ getCaptchaCpf' inf i  handler = do
       mvar <- liftIO $takeMVar i
       out <- ( fmap join . Tra.traverse getCaptchaCpfShowable  $ mvar)
       let nkey = lookFresh inf "CPF Receita" "owner" "captchaViewer"
-      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr nkey   . SBinary  . BSL.toStrict ) $ out
+      handler . fmap (tbmap . mapFromTBList . pure . Compose. Identity . Attr nkey   . SBinary  . BSL.toStrict ) $ out
       return ()) rv
   return ()
 
@@ -79,7 +78,7 @@ getCpf'  inf i  handler = do
       outM <- fmap (join . fmap headMay.join) . Tra.traverse getCpfShowable $  mvar
       maybe (return ()) (\out-> do
           let attr i = Compose . Identity .  Attr ( lookKey inf "owner" i)
-          handler . Just $ (TB1 $ KV (PK [] . pure . attr "owner_name" . SOptional .Just . SText . TL.pack  $ out) [] )
+          handler . Just $ (tbmap . mapFromTBList . pure . attr "owner_name" . SOptional .Just . SText . TL.pack  $ out )
           return ()) outM ) rv
   return ()
 
@@ -121,7 +120,7 @@ getCaptcha'  inf i  handler = do
       mvar <- liftIO $takeMVar i
       out <- ( fmap join . Tra.traverse getCaptchaShowable $ mvar)
       let nkey = lookFresh inf "CNPJ Receita" "owner" "captchaViewer"
-      handler . fmap (TB1 .KV (PK [][]) . pure . Compose. Identity . Attr nkey .  SBinary  . BSL.toStrict ) $ out
+      handler . fmap (tbmap . mapFromTBList  . pure . Compose. Identity . Attr nkey .  SBinary  . BSL.toStrict ) $ out
       return ()) rv
   return ()
 
@@ -142,16 +141,16 @@ getCnpj'  inf i  handler = do
             idx  = SOptional . fmap (SText . TL.pack . head) . flip M.lookup out
             fk i  = Compose . Identity . FKT i True []
             afk i  = Compose . Identity . FKT i True [] . LeftTB1 . Just . ArrayTB1
-            tb pk desc attr = TB1 $ KV (PK pk desc) attr
+            tb attr = tbmap $ mapFromTBList attr
             (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (SText .TL.filter (not . flip L.elem "-.") . fst) t ,  SOptional $  SText .  TL.strip .  TL.drop 3. snd <$>  t)
                 where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)
             scnae = fmap (\t -> ((SText .TL.filter (not . flip L.elem "-.") . fst) t ,    (SText .TL.strip . TL.drop 3 .  snd ) t)) ts
                 where ts = join . maybeToList $ fmap (  TL.breakOn " - " .  TL.pack ) <$> (M.lookup "CÓDIGO E DESCRIÇÃO DAS ATIVIDADES ECONÔMICAS SECUNDÁRIAS" out)
-            attrs = tb [] [own "owner_name" (idx "NOME EMPRESARIAL")]
-                    [fk [own "address" (SOptional (Just $ SNumeric (-1)))]
-                          (LeftTB1 $ Just $  tb [attr "id" (SSerial Nothing) ]
-                              []
-                              [attr "logradouro" (idx "LOGRADOURO")
+            attrs = tb [ own "owner_name" (idx "NOME EMPRESARIAL")
+                       , fk [own "address" (SOptional (Just $ SNumeric (-1)))]
+                          (LeftTB1 $ Just $
+                          tb [attr "id" (SSerial Nothing)
+                              ,attr "logradouro" (idx "LOGRADOURO")
                               ,attr "number" (idx "NÚMERO")
                               ,attr "complemento" (idx "COMPLEMENTO")
                               ,attr "cep" (idx "CEP")
@@ -162,9 +161,9 @@ getCnpj'  inf i  handler = do
                               ,attr "bounding" (SOptional Nothing)]
                               )
                      ,fk [own "atividade_principal" (SOptional $ Just pcnae)]
-                                (LeftTB1 $ Just $ tb [cna "id" pcnae] [cna "description" pdesc] [] )
+                                (LeftTB1 $ Just $ tb [cna "id" pcnae,cna "description" pdesc] )
                      ,afk [own "atividades_secundarias" (SOptional $ Just $ SComposite $V.fromList $ fmap fst scnae)]
-                                ((\(pcnae,pdesc)-> tb [cna "id" pcnae] [cna "description" pdesc] [] ) <$> scnae)
+                                ((\(pcnae,pdesc)-> tb [cna "id" pcnae,cna "description" pdesc] ) <$> scnae)
 
                     ]
         handler . Just $ traceShowId attrs
