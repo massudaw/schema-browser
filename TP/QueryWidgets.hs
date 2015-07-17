@@ -67,8 +67,10 @@ generateFresh = do
   return $ (h,tidings b e)
 
 
-mergeTB1 (TB1 m k) (TB1 m2 k2) | m == m2 = TB1 m (k  <> k2)
 
+mergeTB1 (TB1 m k) (TB1 m2 k2)
+  | m == m2 = TB1 m (k  <> k2)
+  | otherwise = TB1 m (k <> k2) -- errorWithStackTrace (show (m,m2))
 
 createFresh n tname pmap i ty  =  do
   k <- newKey i ty
@@ -83,6 +85,7 @@ instance Ord k => Monoid (KV f k a) where
 pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac ) ) = do
   window <- askWindow
   let tdInput = isJust . join . fmap (flip testTable  (fst $ head tf ))  <$>   initItems
+      table = lookTable oinf tname
   headerP <- UI.button # set text (T.unpack n) # sink0 UI.enabled (facts tdInput)
   m <- liftIO $  foldl (\i (kn,kty) -> (\m -> createFresh  n tname m kn kty) =<< i ) (return $ pluginsMap oinf) (concat fresh)
   let inf = oinf {pluginsMap = m}
@@ -493,9 +496,9 @@ editedMod :: (Traversable f ,Ord a) => f a ->  Maybe [(a,b)] -> Maybe (f (a,b))
 editedMod  i  m=  join $ fmap (\mn-> look mn i ) m
   where look mn k = allMaybes $ fmap (\ki -> fmap (ki,) $  M.lookup ki (M.fromList mn) ) k
 
-showFKE v =  UI.div # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ F.toList $ KV $ eitherDescPK $  v)
+showFKE v =  UI.div # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec $  v)
 
-showFK = (pure ((\v j ->j  # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ F.toList $  KV $ eitherDescPK $ v))))
+showFK = (pure ((\v j ->j  # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec  $ v))))
 
 tablePKSet  tb1 = S.fromList $ concat $ fmap ( keyattr)  $ F.toList $ tbPK  tb1
 

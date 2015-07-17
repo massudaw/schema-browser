@@ -428,10 +428,18 @@ concatComp  =  Compose . concat . fmap getCompose
 
 tableMeta t = KVMetadata (rawPK t) (maybe Set.empty Set.singleton $ rawDescription t)
 
+tbmap :: Ord k => Map (Set k ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
+tbmap = TB1 (KVMetadata Set.empty Set.empty) . KV
+
+tblist :: Ord k => [Compose Identity  (TB Identity) k a] -> TB3 Identity k a
+tblist = tbmap . mapFromTBList
+
+tblist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TB3 Identity Key a
+tblist' t  = TB1 (tableMeta t) . KV . mapFromTBList
+
 makeLenses ''KV
 makeLenses ''PK
 makeLenses ''TB
 
 
-tbmap = TB1 (KVMetadata Set.empty Set.empty) . KV
 

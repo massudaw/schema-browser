@@ -289,7 +289,7 @@ insertAttr f conn krec  t = if not (L.null pkList)
   where pkList :: [ TB Identity Key Showable]
         pkList =   L.filter (isSerial . attrType ) . fmap (runIdentity. getCompose) $ (F.toList $ tbPK krec )
         kva = L.filter (not . isSerial . attrType ) $ fmap (runIdentity . getCompose) $ F.toList k
-        tb@(TB1 m (KV k) ) = tableNonRefK krec
+        (TB1 _ (KV k) ) = tableNonRefK krec
 
 
 
@@ -349,22 +349,16 @@ unIntercalate pred s                 =  case dropWhile pred s of
 
 data Tag = TAttr | TPK
 
+allKVRec :: TB1 Showable -> [Showable]
 allKVRec (LeftTB1 i) = maybe mempty allKVRec i
 allKVRec (ArrayTB1 i) = mconcat $ allKVRec <$> i
-allKVRec  (TB1 m (KV e))= (go TPK  . runIdentity . getCompose  <$> e)
-  where zipPK (KV  k) (KV  o) = KV  (k <> o )
-        go  TAttr  (FKT _ _ _ tb) =   concat $ F.toList $ allKVRec  tb
-        go  TPK  (FKT i _ _ tb) =  concat $ fmap (F.toList . go TPK .unTB) i
-        go  i  (TBEither _ _  tbr) =  maybe mempty id $ go i  . runIdentity . getCompose <$>  tbr
-        go  TAttr  (IT  _ tb) =   concat $ F.toList $ allKVRec  tb
-        go  TPK  (IT  _ tb) =  concat $ F.toList $ allKVRec  tb
-        go  _  (Attr _ a) =  [a]
+allKVRec  t@(TB1 m (KV e))=  concat $  F.toList (go . unTB <$> eitherDescPK t)
+  where
+        go  (FKT _ _ _ tb) =  allKVRec  tb
+        go  (TBEither _ _  tbr) =  maybe [] id $ go . unTB <$>  tbr
+        go  (IT  _ tb) = allKVRec tb
+        go  (Attr _ a) = [a]
 
-{-
-allPKRec  (TB1 (KV (PK k d) i ))=  F.foldr zipPK (PK [] []) $ (go (flip PK []) . runIdentity . getCompose <$> k) <> (go (PK []) . runIdentity . getCompose <$> d)
-  where zipPK (PK i j) (PK m n) = (PK (i <> m) (j <> n))
-        go l (Attr _ a) = l [a]
--}
 
 tableToKV r =   do
    (S.toList (rawPK r)) <> (maybeToList (rawDescription r))  <>(S.toList (rawAttrs r))

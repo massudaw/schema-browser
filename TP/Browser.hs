@@ -177,7 +177,7 @@ attrLine i e   = do
   let nonRec = tableNonrec i
       attr i (k,v) = set  (strAttr (T.unpack $ keyValue k)) (renderShowable v) i
       attrs   l i  = foldl attr i l
-  attrs (F.toList (tableAttrs i) ) $ line ( L.intercalate "," (fmap renderShowable .  F.toList . KV . eitherDescPK $ i) {-<> "," <>  (L.intercalate "," $ fmap (renderShowable) nonRec)-}) e
+  attrs (F.toList (tableAttrs i) ) $ line ( L.intercalate "," (fmap renderShowable .  allKVRec  $ i) <> "  -  " <>  (L.intercalate "," $ fmap (renderShowable) nonRec)) e
 
 chooserKey inf kitems i = do
   let initKey = pure . join $ fmap rawPK . flip M.lookup (tableMap inf) . T.pack <$> i
@@ -265,19 +265,19 @@ testShowable  v s = case s of
   where
     pname ="Siapi2 Andamento"
     tname = "fire_project"
-    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text Showable))
+    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    url :: ArrowReader
     url = proc t -> do
       protocolo <- varTB "protocolo" -< t
       ano <- varTB "ano" -< t
-      odx "aproval_date" -< t
-      at "andamentos" (proc t -> do
-        odx "andamento_date" -<  t
-        odx "andamento_user" -<  t
-        odx "andamento_status" -<  t
-        odx "andamento_description" -<  t) -< t
-      b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else (siapi2  i j)  )) -<  (liftA2 (,) protocolo ano )
-      let ao bv =   case  join (findTB1 (== iat  bv)<$> (mapKey keyValue  <$> t)) of
+      odxR "aproval_date" -< ()
+      atR "andamentos" (proc t -> do
+        odxR "andamento_date" -<  t
+        odxR "andamento_user" -<  t
+        odxR "andamento_status" -<  t
+        odxR "andamento_description" -<  t) -< t
+      b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else liftIO (siapi2  i j)  )) -<  (liftA2 (,) protocolo ano )
+      let ao bv t =   case  join (findTB1 (== iat  bv)<$> (mapKey keyValue  <$> t)) of
                     Just i -> Nothing
                     Nothing -> Just $ tblist   [iat bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
@@ -286,13 +286,16 @@ testShowable  v s = case s of
           iat bv = Compose . Identity $ (IT
                                             "andamentos"
                                             (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
-      returnA -< join  (  ao  .  tailEmpty . concat <$> join b)
+      act (\i ->  do
+          t <- ask
+          return $  join $ ($t)<$> i ) -< (\i -> ao  (tailEmpty . concat $ i) )<$> join b
+      -- returnA -< join  (  ao  .  tailEmpty . concat <$> join b)
 
     elem inf =  fmap (pure. catMaybes) . (\l -> mapM (\inp -> do
                               o <- elemp inf (Just inp)
                               maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf tname)) o) l)
     elemp inf = maybe (return Nothing) (\inp -> do
-                              b <- dynPK url (Just inp)
+                              b <- runReaderT (dynPK url $ () ) (Just inp)
                               return $ liftKeys inf tname   <$> b)
     tailEmpty [] = []
     tailEmpty i  = tail i
@@ -428,7 +431,6 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
                   b <- runReaderT (dynPK   url $ ())  (Just inp)
                   return $ liftKeys inf tname  <$> b )
 
-tblist = tbmap . mapFromTBList
 pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname (staticP url) elem
   where
     tname = "servico_venda"
@@ -446,9 +448,9 @@ pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname (staticP url) elem
                   odxR "price" -<  t
                   odxR "scheduled_date" -<  t ) -< ()
               let total = maybe 0 fromIntegral  p :: Int
-              let pagamento = Compose $ Identity $ FKT ([attrT  ("pagamentos",SOptional Nothing)]) True [] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> tbmap $ mapFromTBList [attrT ("id",SSerial Nothing),attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ]) ([1 .. total] )))
+              let pagamento = Compose $ Identity $ FKT ([attrT  ("pagamentos",SOptional Nothing)]) True [] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> tblist [attrT ("id",SSerial Nothing),attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ]) ([1 .. total] )))
                   ao :: Maybe (TB2 Text (Showable))
-                  ao =  Just $ tbmap $ mapFromTBList  [Compose $ Identity $ IT   ("pagamento")  (LeftTB1 $ Just $ tbmap $ mapFromTBList  [pagamento ])]
+                  ao =  Just $ tblist [Compose $ Identity $ IT   ("pagamento")  (LeftTB1 $ Just $ tblist[pagamento ])]
               returnA -< ao ) -< descontado
 
     elem inf = maybe (return Nothing) (\inp -> do
@@ -482,11 +484,11 @@ importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
         ) -< t
       b <- act (fmap join . traverse (\(SText i, SBinary r) -> ofxPlugin (T.unpack i) (BS.unpack r))) -< liftA2 (,) fn i
       let ao :: TB2 Text (Showable)
-          ao =  LeftTB1 $ ArrayTB1 . fmap (tbmap . mapFromTBList. fmap attrT ) <$>  b
+          ao =  LeftTB1 $ ArrayTB1 . fmap (tblist . fmap attrT ) <$>  b
           ref :: [Compose Identity (TB Identity ) Text(Showable)]
           ref = [attrT  ("statements",SOptional $ join $ fmap (SComposite . Vector.fromList ). allMaybes . fmap (M.lookup "fitid" . M.fromList ) <$> b)]
           tbst :: (Maybe (TB2 Text (Showable)))
-          tbst = Just $ tbmap $ mapFromTBList  [_tb $ FKT ref True [] ao]
+          tbst = Just $ tblist [_tb $ FKT ref True [] ao]
       returnA -< tbst
     elem inf = maybe (return Nothing) (\inp -> do
                 b <- dynPK url (Just inp)
@@ -508,7 +510,7 @@ notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" tname (staticP url) elem
                                p <- varTB "goiania_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act (fmap join  . traverse (\(i, (j, k,a)) -> prefeituraNota j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ tbmap $ mapFromTBList  [attrT ("nota",    SOptional b)]
+      let ao =  Just $ tblist [attrT ("nota",    SOptional b)]
       returnA -< ao
     elem inf = maybe (return Nothing) (\inp -> do
                               b <- dynPK url (Just inp)
@@ -530,7 +532,7 @@ queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" tname (staticP url) ele
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act (fmap join  . traverse (\(i, (j, k,a)) -> creaLoginArt  j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ tbmap $ mapFromTBList  [attrT ("art",    SOptional b)]
+      let ao =  Just $ tblist [attrT ("art",    SOptional b)]
       returnA -< ao
     elem inf = maybe (return Nothing) (\inp -> do
                               b <- dynPK url (Just inp)
@@ -555,7 +557,7 @@ queryArtBoletoCrea = BoundedPlugin2  pname tname (staticP url) elem
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act ( traverse (\(i, (j, k,a)) -> creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ tbmap $ mapFromTBList  [attrT ("boleto",   SOptional $ (SBinary. BSL.toStrict) <$> b)]
+      let ao =  Just $ tblist [attrT ("boleto",   SOptional $ (SBinary. BSL.toStrict) <$> b)]
       returnA -< ao
     elem inf
        = maybe (return Nothing) (\inp -> do
@@ -582,11 +584,11 @@ queryArtBoletoCrea = BoundedPlugin2  pname tname (staticP url) elem
       v <- act (fmap (join .maybeToList) . traverse (\(i, (j, k,a)) -> creaConsultaArt  j k a i ) ) -< liftA2 (,) i r
       let artVeri dm = ("verified_date" ,) . SOptional . join $(\d ->  fmap (STimestamp . fst) $ strptime "%d/%m/%Y %H:%M" ( d !!1) ) <$> dm
           artPayd dm = ("payment_date" ,) . SOptional . join $ (\d -> fmap (STimestamp . fst )  $ strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
-          artInp inp = Just $ tbmap $ mapFromTBList  $fmap attrT   $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
+          artInp inp = Just $ tblist $fmap attrT   $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       i <- checkOutput "verified_date" -< (t,artInp v)
       j <- checkOutput "payment_date" -< (t,artInp v)
       returnA -< (catMaybes [i, j] )
-      returnA -< Just $ tbmap $ mapFromTBList $ fmap attrT  $  catMaybes [ i,j]
+      returnA -< Just $ tblist $ fmap attrT  $  catMaybes [ i,j]
     elem inf =  fmap (pure. catMaybes) . mapM (\inp -> do
                  o <- elemp inf (Just inp)
                  maybe
@@ -676,8 +678,7 @@ main = do
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
 
-  forkIO $ do
-      mapM_ (poller h) [siapi3Polling,siapi2Polling,artAndamentoPolling]
+  mapM_ (forkIO . poller h) [artAndamentoPolling,siapi2Polling,siapi3Polling]
 
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)
   print "Finish"
