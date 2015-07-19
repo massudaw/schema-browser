@@ -214,14 +214,14 @@ logTableInter b l =
 
 indexTB1 (IProd _ l) t
   = do
-    (TB1  m (KV v)) <- t
+    (TB1  m v) <- t
     let finder = L.find (L.any (==l). L.permutations . keyattr . firstCI keyString)
-        i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  finder $ toList v
+        i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  finder $ toList $ _kvvalues $ unTB v
     case runIdentity $ getCompose $i  of
          Attr _ l -> Nothing
          FKT l _ _ j -> return j
          IT l  j -> return j
-         TBEither n kj j  -> return $ TB1 m $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j
+         TBEither n kj j  -> return $ TB1 m $ Compose $ Identity $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j
 
 
 data Access a
@@ -233,24 +233,24 @@ data Access a
 
 firstCI f = mapComp (firstTB f)
 
-checkField (Nested (IProd _ l) nt ) t@(TB1 m (KV v))
+checkField (Nested (IProd _ l) nt ) t@(TB1 m v)
   = do
     let finder = L.find (L.any (==l). L.permutations . keyattr . firstCI keyString  )
-        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder $ toList v
+        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder $ toList $ _kvvalues $ unTB v
     case runIdentity $ getCompose $ i  of
          IT l  i -> Compose . Identity <$> (IT l  <$> checkTable nt i)
-         TBEither n kj j  ->  checkField nt ( TB1 m $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j)
+         TBEither n kj j  ->  checkField nt ( TB1 m $ Compose $ Identity $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j)
          FKT a  b c  d -> Compose . Identity <$> (FKT a b c <$>  checkTable nt d)
-checkField  (IProd b l) t@(TB1 m (KV v))
+checkField  (IProd b l) t@(TB1 m v)
   = do
     let finder = L.find (L.any (==l). L.permutations . keyattr . firstCI keyString  )
-        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder $ toList v
+        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder $ toList $ _kvvalues $ unTB v
     Compose . Identity <$> case runIdentity $ getCompose $ i  of
          Attr k l -> fmap (Attr k ) . (\i -> if b then unRSOptional' i else Just i ) $ l
          i -> errorWithStackTrace ( show (l,i))
-checkField  (ISum []) t@(TB1 m (KV  v))
+checkField  (ISum []) t@(TB1 m v)
   = Nothing
-checkField  (ISum ls) t@(TB1 m (KV v))
+checkField  (ISum ls) t@(TB1 m v )
   = foldr1 just $  fmap (\(Many [l]) ->  join $ fmap (T.traverse  unRSOptional') $  checkField l t) ls
 checkField i j = errorWithStackTrace (show (i,j))
 
@@ -258,8 +258,8 @@ checkField i j = errorWithStackTrace (show (i,j))
 
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
 checkTable l (LeftTB1 j) = join $ fmap (checkTable l) j
-checkTable (Many l) t@(TB1 m (KV   v)) =
-  fmap (TB1 m . KV . mapFromTBList ) . allMaybes $ flip checkField t <$> l
+checkTable (Many l) t@(TB1 m v) =
+  fmap (TB1 m . Compose . Identity . KV . mapFromTBList ) . allMaybes $ flip checkField t <$> l
 
 checkTable l (ArrayTB1 i )
   | i == []  = Nothing
@@ -269,10 +269,10 @@ checkTable i j = errorWithStackTrace (show (i,j))
 
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
 indexTable l (LeftTB1 j) = join $ fmap (indexTable l) j
-indexTable (IProd _ l) t@(TB1 m (KV v))
+indexTable (IProd _ l) t@(TB1 m v)
   = do
     let finder = L.find (L.any (==l). L.permutations .keyattr. firstCI keyString )
-        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder (toList v )
+        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder (toList $ _kvvalues $ unTB v )
     case runIdentity $ getCompose $ i  of
          Attr k l -> return (k,l)
 indexTable l (ArrayTB1 j) =  liftA2 (,) ((head <$> fmap (fmap fst) i) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
@@ -313,10 +313,10 @@ instance (Monoid s ,Applicative (a i),Monoid m) => Monoid (Parser a s i m) where
   mempty = P mempty (pure mempty)
   mappend (P i  l) (P j m ) =  P (mappend i j) (liftA2 mappend l  m )
 
-findPK = concat . fmap keyattr  .toList . tbPK
+findPK = concat . fmap keyattr  .toList . _kvvalues  . unTB . tbPK
 
 findPKM (LeftTB1 i ) =  join $ fmap (findPKM ) i
-findPKM i  = Just $ concat . fmap (\i -> zip (keyattr i) (kattr i )) .toList . tbPK $ i
+findPKM i  = Just $ concat . fmap (\i -> zip (keyattr i) (kattr i )) .toList . _kvvalues . unTB . tbPK $ i
 
 
 aattr = aattri . runIdentity . getCompose
@@ -324,7 +324,7 @@ aattri (Attr k i ) = [(k,i)]
 aattri (TBEither _ i l  ) =  (maybe [] id $ fmap aattr l )
 aattri (FKT i _ _ _ ) =  (L.concat $ aattr  <$> i)
 aattri (IT _  i ) =  recTB i
-  where recTB (TB1 _ (KV i )) =  concat $ fmap aattr (toList i)
+  where recTB (TB1 _ i ) =  concat $ fmap aattr (toList $ _kvvalues $ unTB i)
         recTB (ArrayTB1 i ) = concat $ fmap recTB i
         recTB (LeftTB1 i ) = concat $ toList $ fmap recTB i
 
@@ -335,7 +335,7 @@ kattri (Attr _ i ) = [i]
 kattri (TBEither _ i l  ) =  (maybe [] id $ fmap kattr l )
 kattri (FKT i _ _ _ ) =  (L.concat $ kattr  <$> i)
 kattri (IT _  i ) =  recTB i
-  where recTB (TB1 m (KV i) ) =  concat $ fmap kattr (toList i)
+  where recTB (TB1 m i ) =  concat $ fmap kattr (toList $ _kvvalues $ unTB i)
         recTB (ArrayTB1 i ) = concat $ fmap recTB i
         recTB (LeftTB1 i ) = concat $ toList $ fmap recTB i
 
@@ -356,6 +356,6 @@ type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) IO)) (Access
 
 addToList  (InsertTB m) =  (m:)
 addToList  (DeleteTB m ) =  L.delete m
-addToList  (EditTB m n ) = (map (\e-> if  (e ==  n) then  mapTB1 (\i -> maybe i snd $ findTB1 (\k -> keyattr k == keyattr i  ) m ) e  else e ))
+addToList  (EditTB m n ) = (map (\e-> if  (e ==  n) then  mapTB1 (\i -> maybe i snd $ getCompose $  unTB $ findTB1 (\k -> keyattr k == keyattr i  ) m ) e  else e ))
 
 

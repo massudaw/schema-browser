@@ -38,7 +38,7 @@ import Control.Monad.Reader
 
 
 getInp :: TL.Text -> TB1 Showable -> Maybe BSC.ByteString
-getInp l  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t)-> t )) . join . fmap unRSOptional' . cc . runIdentity . getCompose . snd )  . findTB1 (((==[l]) . fmap keyValue . keyattr ))
+getInp l  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t)-> t )) . join . fmap unRSOptional' . cc . runIdentity . getCompose . snd )  .getCompose . runIdentity . getCompose . findTB1 (((==[l]) . fmap keyValue . keyattr ))
   where cc (TBEither _ _ (l) ) = join $fmap (cc.unTB) l
         cc (Attr _ l ) = Just l
 

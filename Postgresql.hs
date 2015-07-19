@@ -89,8 +89,8 @@ deriving instance Traversable Interval
 instance  TF.ToField (TB Identity Key Showable)  where
   toField (Attr k i) = TF.toField i
   toField (IT n (LeftTB1 i)  ) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT (n)  (TB1 m i) ) = TF.toField (TBRecord  (inlineFullName $ keyType $ n ) $  runIdentity.getCompose <$> F.toList (_kvvalues i) )
-  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\i -> (TBRecord  ( inlineFullName $ keyType  n) $  fmap (runIdentity . getCompose ) $ F.toList  $ _kvvalues $ _unTB1 $ i ) ) <$> is
+  toField (IT (n)  (TB1 m i) ) = TF.toField (TBRecord  (kvMetaFullName  m ) $  runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )
+  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\(TB1 m i ) -> (TBRecord  (kvMetaFullName  m ) $  fmap (runIdentity . getCompose ) $ F.toList  $ _kvvalues $ unTB i ) ) <$> is
   toField e = errorWithStackTrace (show e)
 
 
@@ -264,11 +264,12 @@ safeTail i = tail i
 
 
 
-unIntercalateAtto :: Alternative f => [f a1] -> f a -> f [a1]
+unIntercalateAtto :: (Alternative f )=> [f a1] -> f a -> f [a1]
 unIntercalateAtto l s = go l
   where
     go [e] =  fmap pure  e
     go (e:cs) =  liftA2 (:) e  (s *> go cs)
+    go [] = errorWithStackTrace  "empty list"
 
 
 unKOptionalAttr (Attr k i ) = Attr (unKOptional k) i
@@ -313,9 +314,9 @@ parseLabeledTable (ArrayTB1 [t]) =
   ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey makeOpt t))  >>  return (fail "")  ) )
 parseLabeledTable (LeftTB1 (Just i )) =
   LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapKey makeOpt i) >> return Nothing) <|> return Nothing )
-parseLabeledTable (TB1 me (KV  m)) = (char '('  *> (do
-  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> M.toList m ) (char ',')
-  return (TB1 me (KV (M.fromList im) ))) <*  char ')' )
+parseLabeledTable (TB1 me m) = (char '('  *> (do
+  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> M.toList (_kvvalues $ unTB m) ) (char ',')
+  return (TB1 me (Compose $ Identity $  KV (M.fromList im) ))) <*  char ')' )
 
 quotedRec :: Int -> (Int -> Parser a)  -> Parser a
 quotedRec i  pint =   (takeWhile (== '\\') >>  char '\"') *> inner <* ( takeWhile (=='\\') >> char '\"'  )
@@ -383,7 +384,7 @@ parseShowable (KArray i)
 parseShowable (KOptional i)
     = SOptional <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
 parseShowable (KDelayed i)
-    = return $ SDelayed  "query " Nothing -- ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
+    = SDelayed  <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
 parseShowable (KSerial i)
     = SSerial <$> ((Just <$> parseShowable i) )
 parseShowable (KInterval k)=
@@ -569,6 +570,6 @@ fromAttr foldable = do
 
 
 topSortTables tables = flattenSCCs $ stronglyConnComp item
-  where item = fmap (\n@(Raw _ _ _ t _ k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
+  where item = fmap (\n@(Raw _ _ _ _ t _ k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
 
 

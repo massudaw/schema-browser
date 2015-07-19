@@ -196,13 +196,13 @@ chooserKey inf kitems i = do
   body <- UI.div # sink items (facts (pure . chooseKey inf <$> bBset ))
   UI.div # set children [filterInp,getElement bset, body]
 
-tableNonrec k  = F.toList .  KV . tbAttr  $ tableNonRef k
+tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
 
-tableKeys (TB1 _ (KV k) ) = concat $ fmap keyattr (F.toList k)
+tableKeys (TB1 _ (k) ) = concat $ fmap keyattr (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
 tableKeys (LeftTB1 (Just i)) = tableKeys i
 tableKeys (ArrayTB1 [i]) = tableKeys i
 
-tableAttrs (TB1 _ (KV k) ) = concat $ fmap aattr (F.toList k)
+tableAttrs (TB1 _ (k) ) = concat $ fmap aattr (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
 tableAttrs (LeftTB1 (Just i)) = tableAttrs i
 tableAttrs (ArrayTB1 [i]) = tableAttrs i
 
@@ -277,14 +277,14 @@ testShowable  v s = case s of
         odxR "andamento_status" -<  t
         odxR "andamento_description" -<  t) -< t
       b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else liftIO (siapi2  i j)  )) -<  (liftA2 (,) protocolo ano )
-      let ao bv t =   case  join (findTB1 (== iat  bv)<$> (mapKey keyValue  <$> t)) of
+      let ao bv t =   case  join (getCompose . runIdentity .getCompose . findTB1 (== iat  bv)<$> (mapKey keyValue  <$> t)) of
                     Just i -> Nothing
                     Nothing -> Just $ tblist   [iat bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
           convertAndamento [da,des] =  tblist $ fmap attrT  $  ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des)),("andamento_user",SOptional Nothing ),("andamento_status",SOptional Nothing )])
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
-                                            "andamentos"
+                                            (attrT ("andamentos",()))
                                             (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
       act (\i ->  do
           t <- ask
@@ -329,10 +329,10 @@ type PollingPlugisIO = PollingPlugins [TB1 Showable] (IO [([TableModification Sh
       b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= 14 then  return Nothing else liftIO $ siapi3  i j k )) -<   (liftA3 (,,) protocolo ano cpf)
       let convertAndamento [_,da,desc,user,sta] =tblist  $ fmap attrT  $ ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc),("andamento_user",SOptional $ Just $ SText $ T.pack  user),("andamento_status",SOptional $ Just $ SText $ T.pack sta)] )
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
-      let ao  (bv,taxa) t = case  join $ (findTB1 (== iat  bv)<$> (mapKey keyValue  <$> t)) of
+      let ao  (bv,taxa) t = case  join $ (getCompose . runIdentity .getCompose . findTB1 (== iat  bv)<$> (mapKey keyValue  <$> t)) of
                     Just i ->  Nothing
                     Nothing ->    Just $ tblist  ( [attrT ("taxa_paga",SOptional $ Just $  SBoolean $ not taxa),iat bv])
-          iat bv = Compose . Identity $ (IT "andamentos"
+          iat bv = Compose . Identity $ (IT (attrT ("andamentos",()))
                          (LeftTB1 $ Just $ ArrayTB1 $ reverse $ fmap convertAndamento bv))
       act (\i ->  do
           t <- ask
@@ -424,7 +424,7 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
               let total = maybe 0 fromIntegral  p :: Int
               let pagamento = _tb $ FKT ([ attrT  ("pagamentos",SOptional Nothing)]) True [] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> tblist [attrT ("id",SSerial Nothing),attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ]) ([1.. total] )))
                   ao :: Maybe (TB2 Text Showable)
-                  ao =  Just $ tblist [_tb $ IT   "pagamento"  (LeftTB1 $ Just $ tblist [pagamento ])]
+                  ao =  Just $ tblist [_tb $ IT   (attrT ("pagamento",()))  (LeftTB1 $ Just $ tblist [pagamento ])]
               returnA -< ao ) -< descontado
 
     elem inf = maybe (return Nothing) (\inp -> do
@@ -450,7 +450,7 @@ pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname (staticP url) elem
               let total = maybe 0 fromIntegral  p :: Int
               let pagamento = Compose $ Identity $ FKT ([attrT  ("pagamentos",SOptional Nothing)]) True [] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> tblist [attrT ("id",SSerial Nothing),attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ]) ([1 .. total] )))
                   ao :: Maybe (TB2 Text (Showable))
-                  ao =  Just $ tblist [Compose $ Identity $ IT   ("pagamento")  (LeftTB1 $ Just $ tblist[pagamento ])]
+                  ao =  Just $ tblist [Compose $ Identity $ IT   (attrT ("pagamento",()))  (LeftTB1 $ Just $ tblist[pagamento ])]
               returnA -< ao ) -< descontado
 
     elem inf = maybe (return Nothing) (\inp -> do
@@ -651,8 +651,6 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
 
 
 
-topSortTables tables = flattenSCCs $ stronglyConnComp item
-  where item = fmap (\n@(Raw _ _ _ t _ k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
 
 
 

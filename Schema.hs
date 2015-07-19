@@ -9,6 +9,7 @@ import Step
 import Data.Maybe
 import Data.String
 import Control.Monad.IO.Class
+import GHC.Stack
 import Data.Monoid
 import Utils
 import Control.Exception
@@ -54,7 +55,7 @@ createType s un (t,c,trans,"ARRAY",udtschema ,udtname,n,def,_,_) | udtschema == 
 createType _ un (t,c,trans,"ARRAY",_,i,n,def,p,_) = (Key   c trans un (nullable n $ KArray $ (Primitive (T.tail i))))
 createType _ un (t,c,trans,_,_,"geometry",n,def,p,_) = (Key   c trans un (nullable n $ Primitive $ (\(Just i) -> i) p))
 createType _ un (t,c,trans,_,_,"box3d",n,def,p,_) = (Key   c trans un (nullable n $ Primitive $  "box3d"))
--- createType _ un (t,c,trans,ty,_,_,n,def,_,Just "pdf" ) =(Key c   trans un (serial def . nullable n $ KDelayed $ Primitive "pdf" ))
+createType _ un (t,c,trans,ty,_,_,n,def,_,Just "pdf" ) =(Key c   trans un (serial def . nullable n $ KDelayed $ Primitive "pdf" ))
 createType _ un (t,c,trans,ty,_,_,n,def,_,Just dom ) =(Key c   trans un (serial def . nullable n $ Primitive dom))
 createType _ un (t,c,trans,ty,_,_,n,def,_,_) =(Key c   trans un (serial def . nullable n $ Primitive ty))
 --createType un v = error $ show v
@@ -131,7 +132,7 @@ keyTables conn userconn (schema ,user) = do
                                   inlineFK =  (fmap (\k -> (\t -> Path (S.singleton k ) (FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList ) <$> (M.lookup c all)
                                   eitherFK =   M.lookup c eitherMap
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $maybeToList $ M.lookup c descMap) <> pks)
-                                in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap)  c (maybe [] id $ M.lookup c authorization)  pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
+                                in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (maybe [] id $ M.lookup c authorization)  pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
        let (i1,i2,i3) = (keyMap, M.fromList $ filter (not.S.null .fst)  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        mvar <- newMVar M.empty
        return  $ InformationSchema schema i1 i2 i3 M.empty mvar  userconn conn
@@ -139,12 +140,12 @@ keyTables conn userconn (schema ,user) = do
 liftKeys
   :: InformationSchema
      -> Text
-     -> FTB1 (Compose Identity (TB Identity )) Text a
-     -> FTB1 (Compose Identity (TB Identity )) Key a
+     -> FTB1 Identity Text a
+     -> FTB1 Identity Key a
 liftKeys inf tname tb
   = liftTable tname tb
   where
-        liftTable tname (TB1 _ (KV i) )  = TB1  (tableMeta ta) $ KV $ mapComp (liftField tname) <$> (M.mapKeys (S.map (lookKey inf tname)) i)
+        liftTable tname (TB1 _ v )  = TB1  (tableMeta ta) $ mapComp (\(KV i) -> KV $ mapComp (liftField tname) <$> (M.mapKeys (S.map (lookKey inf tname)) i)) v
             where
                   ta = lookTable inf tname
         liftTable tname (LeftTB1 j ) = LeftTB1 $ liftTable tname <$> j
@@ -155,8 +156,8 @@ liftKeys inf tname tb
         liftField tname (FKT ref i rel2 tb) = FKT (mapComp (liftField tname) <$> ref)  i ( rel) (liftTable tname tb)
             where Just (Path _ (FKJoinTable _ rel _ ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (concat $ fmap keyattr ref))  (F.toList$ rawFKS  ta)
                   ta = lookTable inf tname
-        liftField tname (IT rel tb) = IT (lookKey inf tname rel) (liftTable tname2 tb)
-            where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList [rel])  (F.toList$ rawFKS  ta)
+        liftField tname (IT rel tb) = IT (mapComp (liftField tname ) rel) (liftTable tname2 tb)
+            where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
                   ta = lookTable inf tname
 
 
@@ -202,9 +203,8 @@ withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s
 testParse db sch q = withConnInf db sch (\inf -> do
                                        let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                        putStrLn (  show rpq)
-                                       putStrLn (  show rp)
                                        q <- queryWith_ (fromAttr (rp) ) (conn  inf) (fromString $ T.unpack $ rpq)
-                                       print q
+                                       --print q
                                        return $ q
                                            )
 
@@ -232,5 +232,37 @@ addTable inf table = do
            putMVar mvar (M.insert table mnew mmap)
            return (True,mnew )
     readMVar mtable
+
+
+testLoadDelayed inf t = do
+   let table = lookTable inf t
+       tb = tableView (tableMap inf) table
+       tbold = rootPaths' (tableMap inf) table
+   print (selectQuery tb)
+   print (snd tbold)
+   print ( (T.length $ selectQuery tb ) == (T.length $ snd tbold))
+   print (zipWith (\i j -> if i == j then i else ' ' )  (T.unpack $ selectQuery tb ) (T.unpack $ snd tbold))
+   -- mapM (loadDelayed inf  tb ) res
+
+testFireQueryLoad t  = withConnInf "incendio" "incendio" (flip testLoadDelayed t)
+
+
+loadDelayed inf t@(TB1 k v) values
+  | S.null $ _kvdelayed k = return Nothing
+  | otherwise = do
+       let
+           str = "SELECT ROW(" <> attr <> ") FROM " <> showTable table <> " WHERE " <> whr
+           whr = T.intercalate "," ((\i-> (keyValue i) <>  " = ?") <$> S.toList (_kvpk k) )
+           attr = T.intercalate "," (keyValue <$> S.toList (_kvdelayed k))
+           table = justError "no table" $ M.lookup (_kvpk k) (pkMap inf)
+           delayed = TB1 k $ Compose $ Identity $ KV $ M.filterWithKey (\kv _ -> S.isSubsetOf kv (_kvdelayed k)) (_kvvalues $ unTB v)
+       print str
+       print delayed
+       i <- queryWith (fromAttr delayed)  (conn inf) (fromString $ T.unpack str) (fmap unTB $ F.toList $ tbPK values)
+       case i of
+            [] -> errorWithStackTrace "empty query"
+            [i] ->return $ Just i
+            _ -> errorWithStackTrace "multiple result query"
+
 
 
