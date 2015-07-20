@@ -15,7 +15,6 @@ import Types
 import Step
 import Location
 import PrefeituraSNFSE
-import Safe hiding (at)
 import Siapi3
 import CnpjReceita
 import TP.Widgets
@@ -44,7 +43,6 @@ import Postgresql
 import Data.Maybe
 import Data.Functor.Identity
 import Reactive.Threepenny
-import Data.Graph(stronglyConnComp,flattenSCCs)
 import Data.Traversable (traverse)
 import qualified Data.Traversable as Tra
 -- import Warshal
@@ -64,15 +62,12 @@ import qualified Data.Foldable as F
 import qualified Data.Text.Lazy as T
 import Data.ByteString.Lazy(toStrict)
 import Data.Text.Lazy.Encoding
-import qualified Data.Text.Encoding as TE
-import qualified Data.Text as TE
 import Data.Text.Lazy (Text)
 import qualified Data.Set as S
 
 
 import Database.PostgreSQL.Simple
 import qualified Data.Map as M
-import Data.Map (Map)
 import Data.String
 
 
@@ -218,6 +213,9 @@ chooseKey inf key = mdo
   let bBset = pure key :: Tidings (S.Set Key)
   vp <- liftIO $addTable inf (fromJust  $ M.lookup key $ pkMap inf )
 
+  let
+      tdi = pure Nothing
+  cv <- currentValue (facts tdi)
   -- Final Query ListBox
   filterInp <- UI.input
   filterInpBh <- stepper "" (UI.valueChange filterInp)
@@ -226,25 +224,23 @@ chooseKey inf key = mdo
   sortList  <- multiListBox (pure sortSet) (F.toList <$> bBset) (pure (line . show))
   asc <- checkedWidget (pure True)
   let
-      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList  )
-      tdiItemList = pure Nothing
-  itemList <- listBox (tidings res2 never ) itemListT (pure id ) ((\l -> (\ i -> (set UI.style (noneShow $ filteringPred l i  ) ) . attrLine i)) <$> filterInpT)
-  let itemListE = unionWith const (rumors (userSelection itemList)) (rumors tdiItemList)
-  initItemListB <- currentValue (facts tdiItemList)
-  itemListB <- stepper initItemListB itemListE
-  let itemListT = tidings itemListB itemListE
-  element (getElement itemList) # set UI.multiple True
-  element itemList # set UI.style [("width","70%"),("height","300px")]
-
+     filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList  )
+     tsort = (\ b c -> trace "sort" . sorting b c ) <$> triding asc <*> multiUserSelection sortList
+  itemList <- listBox (tidings res2 never) (tidings bselection never)  (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
+  let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
+  prop <- stepper cv (trace "evtrig" <$> evsel)
+  let tds = tidings prop evsel
   let
      table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
-
-  chk <- checkedWidget (pure True)
-  (cru,evs) <- crudUITable inf plugList  (pure True ) res2 [] (allRec' (tableMap inf) table) itemListT
-  let eres = fmap addToList <$> evs
-      tsort = (\ b c -> trace "sort" . sorting b c ) <$> triding asc <*> multiUserSelection sortList
+  (cru ,evs) <- crudUITable inf plugList  (pure True) res2 [] (allRec' (tableMap inf) table) tds
+  let
+     bselection = st
+     sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [{-(rumors  $userSelection itemList ) ,-} rumors tdi]),(fmap modifyTB <$> evs)]
+  st <- stepper cv sel
   inisort <- currentValue (facts tsort)
-  res2 <- accumB (inisort vp) (fmap concatenate $ unions [rumors tsort , (flip (foldr (\i -> addToList i ) ) <$> evs)])
+  res2 <- accumB (inisort vp) (fmap concatenate $ unions [rumors tsort , (flip (foldr addToList  ) <$> evs)])
+
+  element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","300px")]
   insertDiv <- UI.div # set children cru
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [filterInp,getElement sortList,getElement asc] )
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.style [("display","inline-flex")]

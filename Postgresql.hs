@@ -384,7 +384,7 @@ parseShowable (KArray i)
 parseShowable (KOptional i)
     = SOptional <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
 parseShowable (KDelayed i)
-    = SDelayed  <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
+    = (string "t" >> return (SDelayed Nothing))
 parseShowable (KSerial i)
     = SSerial <$> ((Just <$> parseShowable i) )
 parseShowable (KInterval k)=

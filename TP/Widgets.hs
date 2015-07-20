@@ -121,8 +121,9 @@ mapEvent f x = do
 
 
 mapTEvent f x = do
-  (e,h) <- liftIO $ newEvent
-  onEvent (rumors x) (\i -> liftIO $  (f i)  >>= h)
+  e <- mapEvent f (rumors x)
+  -- (e,h) <- liftIO $ newEvent
+  -- onEvent (rumors x) (\i -> liftIO $  (f i)  >>= h)
   i <- currentValue (facts x)
   be <- liftIO $ f i
   t <- stepper be e
@@ -438,7 +439,7 @@ listBox bitems bsel bfilter bdisplay = do
     let
         eindexes = (\l i -> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <@> UI.selectionChange list
     let
-        ev =  unionWith const eindexes (rumors bsel)
+        ev =  eindexes -- unionWith const eindexes (rumors bsel)
     let
         _selectionLB = tidings (facts bsel) eindexes
         _elementLB   = list

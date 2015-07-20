@@ -213,8 +213,9 @@ testFireQuery q = testParse "incendio" "incendio"  q
 testAcademia q = testParse "academia" "academia"  q
 
 selectAll inf table   = liftIO $ do
-      let rp = rootPaths'  (tableMap inf) table
-      (t,v) <- duration  $ queryWith_  (fromAttr (fst rp)) (conn inf)(fromString $ T.unpack $ snd rp)
+      let -- rp = rootPaths'  (tableMap inf) table
+          tb =  tableView (tableMap inf) table
+      (t,v) <- duration  $ queryWith_  (fromAttr (unTlabel tb)) (conn inf)(fromString $ T.unpack $ selectQuery tb)
       print (tableName table,t)
       return v
 
@@ -236,33 +237,41 @@ addTable inf table = do
 
 testLoadDelayed inf t = do
    let table = lookTable inf t
-       tb = tableView (tableMap inf) table
-       tbold = rootPaths' (tableMap inf) table
-   print (selectQuery tb)
-   print (snd tbold)
-   print ( (T.length $ selectQuery tb ) == (T.length $ snd tbold))
-   print (zipWith (\i j -> if i == j then i else ' ' )  (T.unpack $ selectQuery tb ) (T.unpack $ snd tbold))
-   -- mapM (loadDelayed inf  tb ) res
+       tb = {-filterKey (\i _-> not . any  (isKDelayed . keyType ) $  S.toList i ) $-} tableView (tableMap inf) table
+       tbdel = {-filterKey (\i _-> any  (isKDelayed . keyType ) $  S.toList i ) $-} tableView (tableMap inf) table
+   print tb
+   print tbdel
+   res  <- queryWith_ (fromAttr (unTlabel tb)) (conn inf) (fromString $ T.unpack $ selectQuery tb )
+   mapM (loadDelayed inf (unTlabel tbdel )) res
 
 testFireQueryLoad t  = withConnInf "incendio" "incendio" (flip testLoadDelayed t)
 
+mergeTB1 (TB1 m (Compose k) ) (TB1 m2 (Compose k2) )
+  | m == m2 = TB1 m (Compose $ liftA2 (<>) k k2)
+  | otherwise = TB1 m (Compose $ liftA2 (<>) k k2) -- errorWithStackTrace (show (m,m2))
 
-loadDelayed inf t@(TB1 k v) values
+ifOptional i = if isKOptional (keyType i) then unKOptional i else i
+ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
+
+-- Load optional not  loaded delayed values
+-- and merge to older values
+loadDelayed inf t@(TB1 k v) values@(TB1 ks vs)
   | S.null $ _kvdelayed k = return Nothing
+  | L.null delayedattrs  = return Nothing
   | otherwise = do
        let
            str = "SELECT ROW(" <> attr <> ") FROM " <> showTable table <> " WHERE " <> whr
            whr = T.intercalate "," ((\i-> (keyValue i) <>  " = ?") <$> S.toList (_kvpk k) )
-           attr = T.intercalate "," (keyValue <$> S.toList (_kvdelayed k))
+           attr = T.intercalate "," delayedattrs
            table = justError "no table" $ M.lookup (_kvpk k) (pkMap inf)
-           delayed = TB1 k $ Compose $ Identity $ KV $ M.filterWithKey (\kv _ -> S.isSubsetOf kv (_kvdelayed k)) (_kvvalues $ unTB v)
+           delayed = fmap (const ()) $ mapKey (ifDelayed . ifOptional) $ TB1 k $ Compose $ Identity $ KV $  (M.filterWithKey (\key v -> S.isSubsetOf key (_kvdelayed k) && maybe False id  (fmap (isNothing .unSDelayed) $ unSOptional $ _tbattr $ unTB v)  ) (_kvvalues $ unTB vs) )
        print str
-       print delayed
-       i <- queryWith (fromAttr delayed)  (conn inf) (fromString $ T.unpack str) (fmap unTB $ F.toList $ tbPK values)
-       case i of
+       is <- queryWith (fromAttr delayed)  (conn inf) (fromString $ T.unpack str) (fmap unTB $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK (tableNonRef values))
+       case is of
             [] -> errorWithStackTrace "empty query"
-            [i] ->return $ Just i
+            [i] ->return $ Just $ EditTB (mapKey (kOptional.kDelayed)  . fmap (SOptional. Just . SDelayed .Just) $ i  ) values
             _ -> errorWithStackTrace "multiple result query"
+  where delayedattrs =  (concat $ fmap keyValue . F.toList <$> M.keys (M.filterWithKey (\key v -> S.isSubsetOf key (_kvdelayed k) && maybe False id  (fmap (isNothing .unSDelayed) $ unSOptional $ _tbattr $ unTB v )) (_kvvalues $ unTB vs) ))
 
 
 

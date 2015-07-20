@@ -60,7 +60,7 @@ containKV f = (\i ->   S.member ( S.fromList $ fmap keyValue $  kattr (Compose .
 -- modifyTB :: (Traversable f ,Ord a) => f a -> Modification a b ->  Maybe ( f (a,b)) -> Maybe (f (a,b))
 modifyTB  (InsertTB m) =  (Just m)
 modifyTB  (DeleteTB m ) =  Nothing
-modifyTB  (EditTB m n ) =  fmap ( mapTB1 (\i -> maybe i (traceShowId.snd) $ getCompose . runIdentity . getCompose $ findTB1  (\k -> keyattr k == keyattr i) m ) ) (Just n)
+modifyTB  (EditTB m n ) =  fmap ( mapTB1 (\i -> maybe i (snd) $ getCompose . runIdentity . getCompose $ findTB1  (\k -> keyattr k == keyattr i) m ) ) (Just n)
 
 generateFresh = do
   (e,h) <- liftIO $ newEvent
@@ -68,9 +68,6 @@ generateFresh = do
   return $ (h,tidings b e)
 
 
-mergeTB1 (TB1 m (Compose k) ) (TB1 m2 (Compose k2) )
-  | m == m2 = TB1 m (Compose $ liftA2 (<>) k k2)
-  | otherwise = TB1 m (Compose $ liftA2 (<>) k k2) -- errorWithStackTrace (show (m,m2))
 
 createFresh n tname pmap i ty  =  do
   k <- newKey i ty
@@ -78,9 +75,6 @@ createFresh n tname pmap i ty  =  do
 
 testTable i =  (\t ->  fmap  F.toList  $  (checkTable  t) i)
 
-instance Ord k => Monoid (KV f k a) where
-  mempty = KV M.empty
-  mappend (KV i ) (KV j)   =    KV (M.union i  j)
 
 pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac ) ) = do
   window <- askWindow
@@ -200,7 +194,7 @@ buildUI i  tdi = case i of
            paintBorder retUI (facts $ triding tdnew) (facts tdi)
            return $ TrivialWidget (triding tdnew ) retUI
          (KDelayed ti) -> do
-           tdnew <- fmap (Just. SDelayed ) <$> buildUI ti (join . fmap unSOptional  <$> tdi)
+           tdnew <- fmap (Just. SDelayed ) <$> buildUI ti (join . fmap unSDelayed <$> tdi)
            retUI <- UI.div# set children [getElement tdnew]
            paintBorder retUI (facts $ triding tdnew) (facts tdi)
            return $ TrivialWidget (triding tdnew ) retUI
@@ -418,22 +412,28 @@ crudUITable
      -> TB1 ()
      -> Tidings (Maybe (TB1 Showable))
      -> UI ([Element],Event [Modification Key Showable])
-crudUITable inf pgs open bres pmods ftb@(TB1 m _ ) oldItems = do
+crudUITable inf pgs open bres pmods ftb@(TB1 m _ ) preoldItems = do
   chw <- checkedWidget open
   (h,e) <- liftIO $ newEvent
   let fun True = do
           let
               Just table = M.lookup (S.fromList $ findPK ftb) (pkMap inf)
-          -- delayed <- mapTEvent f
+          preoldItens <- currentValue (facts preoldItems)
+          loadedItens <- liftIO$ join <$> traverse (loadDelayed inf ftb.trace "ioload")   preoldItens
+          maybe (return ()) (liftIO. e. pure)  loadedItens
+          loadedItensEv <- mapEvent (fmap join <$> traverse (loadDelayed inf ftb . trace "evload")) (trace "selcrud" <$> rumors preoldItems)
+          let oldItemsE = (\i -> maybe i modifyTB ) <$> facts preoldItems <@> loadedItensEv
+          oldItemsB <- stepper (maybe preoldItens modifyTB loadedItens) oldItemsE
+          let oldItems = tidings oldItemsB oldItemsE
           (listBody,tableb) <- uiTable inf pgs (tableName table) pmods ftb oldItems
-          res <- mapM (plugTags inf bres) (filter ((== rawName table ) . _bounds ) pgs)
-          tags <- UI.div # set children res # set UI.style [("display","inline-flex")]
+          -- res <- mapM (plugTags inf bres) (filter ((== rawName table ) . _bounds ) pgs)
+          -- tags <- UI.div # set children res # set UI.style [("display","inline-flex")]
           (panelItems,evsa)<- processPanelTable inf  (facts tableb) bres table oldItems
-          let evs =  unions (evsa)
+          let evs =  unions (filterJust loadedItensEv : evsa)
           onEvent evs (\i ->  liftIO $ e i )
-          UI.div # set children [listBody,panelItems,tags]
-      fun False = UI.div
-  sub <- UI.div # sink0 items  (pure. fun <$> facts (triding chw))
+          UI.div # set children [listBody,panelItems]
+      fun False  = UI.div
+  sub <- UI.div # sink items  (pure .fun <$> facts (triding chw))
   return ([getElement chw ,  sub],h )
 
 unTB1 (LeftTB1 (Just i) ) = unTB1 i
@@ -646,23 +646,23 @@ fkUITable inf pgs plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ ) )
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList
           sortList :: Tidings ([TB1 Showable] -> [TB1 Showable])
           sortList =  sorting  <$> pure True <*> pure (fmap snd rel )
-      ol <- listBox (tidings ((Nothing:) <$>  fmap (fmap Just) res2) never) (tidings bselection  never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+      itemList <- listBox (tidings ((Nothing:) <$>  fmap (fmap Just) res2) never) (tidings bselection  never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
-      let evsel = unionWith const (rumors $ join <$> userSelection ol) (rumors tdi)
+      let evsel = unionWith const (rumors $ join <$> userSelection itemList) (rumors tdi)
       prop <- stepper cv evsel
       let tds = tidings prop evsel
       (celem,evs) <- crudUITable inf pgs  (pure False) res2 (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
       let
           bselection = fmap Just <$> st
-          sel = fmap (head.concat) $ unions $ [(unions  [(rumors $ join <$> userSelection ol), rumors tdi]),(fmap modifyTB <$> evs)]
+          sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [{-(rumors $ join <$> userSelection ol),-} rumors tdi]),(fmap modifyTB <$> evs)]
       st <- stepper cv sel
       inisort <- currentValue (facts sortList)
-      res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [rumors sortList , (flip (foldr (\i -> addToList i)) <$> evs)])
+      res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [rumors sortList , (flip (foldr addToList ) <$> evs)])
       let
         reorderPK l = fmap (\i -> justError "reorder wrong" $ L.find ((== i).fst) l )  (keyAttr . unTB <$> ifk)
         lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
           where kn = justError "relTable" $ M.lookup ko relTable
-        box = TrivialWidget (tidings st sel) (getElement ol)
+        box = TrivialWidget (tidings st sel) (getElement itemList)
         fksel =  (\box -> fmap (\ibox -> FKT (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . fmap lookFKsel $ ibox) refl rel (fromJust box) ) .  join . fmap findPKM $ box ) <$>  ( triding box)
       fk <- UI.div # set  children ([getElement box,filterInp] <> celem)
       return $ TrivialWidget fksel fk

@@ -1,4 +1,4 @@
 :set  -XOverloadedStrings
 :set -fwarn-unused-binds -fwarn-unused-imports
 :set -isrc
-:set args localhost incendio postgres queijo incendio art 
+:set args localhost incendio postgres queijo incendio transaction 

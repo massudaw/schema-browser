@@ -181,9 +181,23 @@ type TB3 f = FTB1 f
 mapKVMeta f (KVMetadata tn sch s j k l ) =KVMetadata tn sch (Set.map f s) (Set.map f j) (Set.map f k) (Set.map f l)
 
 
+filterKey f (TB1 m k ) = TB1 m . mapComp (\(KV kv) -> KV $ Map.filterWithKey f kv )  $  k
+filterKey f (LeftTB1 k ) = LeftTB1 (filterKey f <$> k)
+filterKey f (ArrayTB1 k ) = ArrayTB1 (filterKey f <$> k)
+  where
+    --frstTB :: (Ord k, Functor f) => (c -> k) -> TB f c a -> TB f k a
+    frstTB f (Attr k i) = Attr  k i
+    frstTB f (IT k i) = IT  k (filterKey f i)
+    frstTB f (FKT k l m  i) = FKT   k l m (filterKey  f i)
+    frstTB f (TBEither k l m ) = TBEither  k l (fmap (mapComp (frstTB f))  m)
+
+
+
+
 mapKey f (TB1 m k ) = TB1 (mapKVMeta f m) . mapComp (firstKV f)  $  k
 mapKey f (LeftTB1 k ) = LeftTB1 (mapKey f <$> k)
 mapKey f (ArrayTB1 k ) = ArrayTB1 (mapKey f <$> k)
+
 
 firstKV  f (KV m ) = KV . fmap (mapComp (firstTB f) ) . Map.mapKeys (Set.map f) $ m
 secondKV  f (KV m ) = KV . fmap (second f ) $ m
@@ -476,6 +490,10 @@ tblist = tbmap . mapFromTBList
 
 tblist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TB3 Identity Key a
 tblist' t  = TB1 (tableMeta t) . Compose . Identity . KV . mapFromTBList
+
+instance Ord k => Monoid (KV f k a) where
+  mempty = KV Map.empty
+  mappend (KV i ) (KV j)   =    KV (Map.union i  j)
 
 makeLenses ''KV
 makeLenses ''PK
