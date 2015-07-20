@@ -9,12 +9,13 @@ import Step
 import Data.Maybe
 import Data.String
 import Control.Monad.IO.Class
+import GHC.Stack
 import Data.Monoid
 import Utils
 import Control.Exception
+import System.Time.Extra
 
 import Data.Functor.Identity
-import Data.Functor.Compose
 import Database.PostgreSQL.Simple
 import Data.Time
 
@@ -36,6 +37,8 @@ import qualified Data.Text.Lazy as T
 
 
 
+import Query
+import Postgresql
 
 
 createType :: Text ->  Unique -> (Text,Text,Maybe Text,Text,Text,Text,Text,Maybe Text,Maybe Text,Maybe Text) -> Key
@@ -47,12 +50,12 @@ createType _ un (t,c,trans,"numrange",_,_,n,def,_,_) = (Key   c trans un (nullab
 createType _ un (t,c,trans,"USER-DEFINED",_,"floatrange",n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "double precision"))
 createType _ un (t,c,trans,"USER-DEFINED",_,"trange",n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "time"))
 -- Table columns Primitive
-createType s un (t,c,trans,"USER-DEFINED",udtschema ,udtname,n,def,_,_) |  udtschema == s = (Key c trans un (nullable n $ traceShowId $  InlineTable  udtschema udtname ))
+createType s un (t,c,trans,"USER-DEFINED",udtschema ,udtname,n,def,_,_) |  udtschema == s = (Key c trans un (nullable n $ InlineTable  udtschema udtname ))
 createType s un (t,c,trans,"ARRAY",udtschema ,udtname,n,def,_,_) | udtschema == s = (Key c trans un (nullable n $ KArray $ InlineTable  udtschema $T.drop 1 udtname ))
 createType _ un (t,c,trans,"ARRAY",_,i,n,def,p,_) = (Key   c trans un (nullable n $ KArray $ (Primitive (T.tail i))))
 createType _ un (t,c,trans,_,_,"geometry",n,def,p,_) = (Key   c trans un (nullable n $ Primitive $ (\(Just i) -> i) p))
 createType _ un (t,c,trans,_,_,"box3d",n,def,p,_) = (Key   c trans un (nullable n $ Primitive $  "box3d"))
--- createType _ un (t,c,trans,ty,_,_,n,def,_,Just "pdf" ) =(Key c   trans un (serial def . nullable n $ KDelayed $ Primitive "pdf" ))
+createType _ un (t,c,trans,ty,_,_,n,def,_,Just "pdf" ) =(Key c   trans un (serial def . nullable n $ KDelayed $ Primitive "pdf" ))
 createType _ un (t,c,trans,ty,_,_,n,def,_,Just dom ) =(Key c   trans un (serial def . nullable n $ Primitive dom))
 createType _ un (t,c,trans,ty,_,_,n,def,_,_) =(Key c   trans un (serial def . nullable n $ Primitive ty))
 --createType un v = error $ show v
@@ -129,33 +132,22 @@ keyTables conn userconn (schema ,user) = do
                                   inlineFK =  (fmap (\k -> (\t -> Path (S.singleton k ) (FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList ) <$> (M.lookup c all)
                                   eitherFK =   M.lookup c eitherMap
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $maybeToList $ M.lookup c descMap) <> pks)
-                                in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap)  c (maybe [] id $ M.lookup c authorization)  pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
+                                in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (maybe [] id $ M.lookup c authorization)  pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
        let (i1,i2,i3) = (keyMap, M.fromList $ filter (not.S.null .fst)  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        mvar <- newMVar M.empty
        return  $ InformationSchema schema i1 i2 i3 M.empty mvar  userconn conn
 
-inlineName (KOptional i) = inlineName i
-inlineName (KArray a ) = inlineName a
-inlineName (InlineTable _ i) = i
-
-inlineFullName (KOptional i) = inlineFullName i
-inlineFullName (KArray a ) = inlineFullName a
-inlineFullName (InlineTable s i) = s <> "." <> i
-
-isInline (KOptional i ) = isInline i
-isInline (KArray i ) = isInline i
-isInline (InlineTable _ i) = True
-isInline _ = False
-
 liftKeys
   :: InformationSchema
      -> Text
-     -> FTB1 (Compose Identity (TB Identity Text)) a
-     -> FTB1 (Compose Identity (TB Identity Key)) a
+     -> FTB1 Identity Text a
+     -> FTB1 Identity Key a
 liftKeys inf tname tb
   = liftTable tname tb
   where
-        liftTable tname (TB1 i )  = TB1 $ mapComp (liftField tname) <$> i
+        liftTable tname (TB1 _ v )  = TB1  (tableMeta ta) $ mapComp (\(KV i) -> KV $ mapComp (liftField tname) <$> (M.mapKeys (S.map (lookKey inf tname)) i)) v
+            where
+                  ta = lookTable inf tname
         liftTable tname (LeftTB1 j ) = LeftTB1 $ liftTable tname <$> j
         liftTable tname (ArrayTB1 j ) = ArrayTB1 $ liftTable tname <$> j
         liftField :: Text -> TB Identity Text a -> TB Identity Key a
@@ -164,8 +156,8 @@ liftKeys inf tname tb
         liftField tname (FKT ref i rel2 tb) = FKT (mapComp (liftField tname) <$> ref)  i ( rel) (liftTable tname tb)
             where Just (Path _ (FKJoinTable _ rel _ ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (concat $ fmap keyattr ref))  (F.toList$ rawFKS  ta)
                   ta = lookTable inf tname
-        liftField tname (IT rel tb) = IT (lookKey inf tname rel) (liftTable tname2 tb)
-            where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList [rel])  (F.toList$ rawFKS  ta)
+        liftField tname (IT rel tb) = IT (mapComp (liftField tname ) rel) (liftTable tname2 tb)
+            where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
                   ta = lookTable inf tname
 
 
@@ -202,6 +194,84 @@ logTableModification inf (TableModification Nothing table i) = do
   let ltime =  utcToLocalTime utc $ time
   [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (modification_time,table_name,modification_data,schema_name) VALUES (?,?,?,?) returning modification_id "  (ltime,rawName table,show i , schemaName inf)
   return (TableModification (id) table i )
+
+
+withInf d s f = withConn d (f <=< (\conn -> keyTables conn conn (s,"postgres")))
+withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres")) )
+
+
+testParse db sch q = withConnInf db sch (\inf -> do
+                                       let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
+                                       putStrLn (  show rpq)
+                                       q <- queryWith_ (fromAttr (rp) ) (conn  inf) (fromString $ T.unpack $ rpq)
+                                       --print q
+                                       return $ q
+                                           )
+
+testFireMetaQuery q = testParse "incendio" "metadata"  q
+testFireQuery q = testParse "incendio" "incendio"  q
+testAcademia q = testParse "academia" "academia"  q
+
+selectAll inf table   = liftIO $ do
+      let -- rp = rootPaths'  (tableMap inf) table
+          tb =  tableView (tableMap inf) table
+      (t,v) <- duration  $ queryWith_  (fromAttr (unTlabel tb)) (conn inf)(fromString $ T.unpack $ selectQuery tb)
+      print (tableName table,t)
+      return v
+
+addTable inf table = do
+    let mvar = mvarMap inf
+    mmap <- takeMVar mvar
+    (isEmpty,mtable) <- case (M.lookup table mmap ) of
+         Just i -> do
+           emp <- isEmptyMVar i
+           putMVar mvar mmap
+           return (emp,i)
+         Nothing -> do
+           res <- selectAll  inf table
+           mnew <- newMVar res
+           putMVar mvar (M.insert table mnew mmap)
+           return (True,mnew )
+    readMVar mtable
+
+
+testLoadDelayed inf t = do
+   let table = lookTable inf t
+       tb = {-filterKey (\i _-> not . any  (isKDelayed . keyType ) $  S.toList i ) $-} tableView (tableMap inf) table
+       tbdel = {-filterKey (\i _-> any  (isKDelayed . keyType ) $  S.toList i ) $-} tableView (tableMap inf) table
+   print tb
+   print tbdel
+   res  <- queryWith_ (fromAttr (unTlabel tb)) (conn inf) (fromString $ T.unpack $ selectQuery tb )
+   mapM (loadDelayed inf (unTlabel tbdel )) res
+
+testFireQueryLoad t  = withConnInf "incendio" "incendio" (flip testLoadDelayed t)
+
+mergeTB1 (TB1 m (Compose k) ) (TB1 m2 (Compose k2) )
+  | m == m2 = TB1 m (Compose $ liftA2 (<>) k k2)
+  | otherwise = TB1 m (Compose $ liftA2 (<>) k k2) -- errorWithStackTrace (show (m,m2))
+
+ifOptional i = if isKOptional (keyType i) then unKOptional i else i
+ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
+
+-- Load optional not  loaded delayed values
+-- and merge to older values
+loadDelayed inf t@(TB1 k v) values@(TB1 ks vs)
+  | S.null $ _kvdelayed k = return Nothing
+  | L.null delayedattrs  = return Nothing
+  | otherwise = do
+       let
+           str = "SELECT ROW(" <> attr <> ") FROM " <> showTable table <> " WHERE " <> whr
+           whr = T.intercalate "," ((\i-> (keyValue i) <>  " = ?") <$> S.toList (_kvpk k) )
+           attr = T.intercalate "," delayedattrs
+           table = justError "no table" $ M.lookup (_kvpk k) (pkMap inf)
+           delayed = fmap (const ()) $ mapKey (ifDelayed . ifOptional) $ TB1 k $ Compose $ Identity $ KV $  (M.filterWithKey (\key v -> S.isSubsetOf key (_kvdelayed k) && maybe False id  (fmap (isNothing .unSDelayed) $ unSOptional $ _tbattr $ unTB v)  ) (_kvvalues $ unTB vs) )
+       print str
+       is <- queryWith (fromAttr delayed)  (conn inf) (fromString $ T.unpack str) (fmap unTB $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK (tableNonRef values))
+       case is of
+            [] -> errorWithStackTrace "empty query"
+            [i] ->return $ Just $ EditTB (mapKey (kOptional.kDelayed)  . fmap (SOptional. Just . SDelayed .Just) $ i  ) values
+            _ -> errorWithStackTrace "multiple result query"
+  where delayedattrs =  (concat $ fmap keyValue . F.toList <$> M.keys (M.filterWithKey (\key v -> S.isSubsetOf key (_kvdelayed k) && maybe False id  (fmap (isNothing .unSDelayed) $ unSOptional $ _tbattr $ unTB v )) (_kvvalues $ unTB vs) ))
 
 
 

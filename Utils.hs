@@ -9,8 +9,10 @@ import  Data.Aeson
 import qualified Data.Vector as V
 import GHC.Stack
 import GHC.Exts
+import Data.Maybe
 import Data.Monoid
 
+import qualified Data.Map as M
 import Data.Functor.Identity
 import Data.Functor.Compose
 import System.Directory
@@ -93,8 +95,8 @@ htmlToPdf art html = do
     return file
 
 
-mapComp :: Functor t => (f a -> g b) ->  Compose t f a -> Compose t g b
-mapComp f =  Compose. fmap  f . getCompose
+allMaybesMap m = if M.null filtered then Nothing else Just filtered
+      where filtered  = fmap fromJust $ M.filter isJust m
 
 data Compose2 f g a b = Compose2 { getCompose2 ::  f (g a b)}
 

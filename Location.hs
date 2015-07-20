@@ -1,4 +1,4 @@
-{-# LANGUAGE Arrows,OverloadedStrings #-}
+{-# LANGUAGE TupleSections,Arrows,OverloadedStrings #-}
 module Location where
 import Network.Wreq
 
@@ -26,7 +26,6 @@ import Step
 import qualified Data.Text as T
 import Data.Text.Lazy
 import Data.Aeson
-import Data.Functor.Compose
 import Control.Arrow
 import Control.Monad.Trans.Maybe
 import Debug.Trace
@@ -34,8 +33,9 @@ import Control.Monad.Trans.Class
 
 
 import qualified Data.Map as M
+import qualified Data.Set as S
 
-
+{-
 
 queryGeocodeBoundary = BoundedPlugin2 "Google Geocode" "address" (staticP url) element
   where
@@ -73,7 +73,7 @@ queryGeocodeBoundary = BoundedPlugin2 "Google Geocode" "address" (staticP url) e
                    b <- dynPK url (Just inp)
                    return $ mapKey (lookKey inf "address")  <$> b)
 
-
+-}
 
 queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address" (staticP open  )  element
   where
@@ -90,7 +90,7 @@ queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address" (staticP open  )  el
           r <- (act (  traverse (\input -> do
                        v <- get . traceShowId .  (\i-> addrs <> (L.filter (flip elem ",.-" ) i) <> ".json")  . TL.unpack $ input
                        return $ ( \i -> fmap (L.filter ((/="").snd) . M.toList ) $ join $ fmap decode (i ^? responseBody)  ) v ))) -< (\(SText t)-> t) <$> i
-          let tb = TB1 . KV (PK [] []) . fmap (Compose . Identity. (\i -> Attr (fst i ) (snd i) ). first translate. second (SOptional. Just . SText)) <$> join r
+          let tb = tbmap . M.fromList .  fmap ( (\i -> (S.singleton (fst i) ,). Compose . Identity $ Attr (fst i ) (snd i)). first translate. second (SOptional. Just . SText)) <$> join r
           returnA -< tb
 
       addrs ="http://cep.correiocontrol.com.br/"
