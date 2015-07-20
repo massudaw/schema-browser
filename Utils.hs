@@ -95,7 +95,7 @@ htmlToPdf art html = do
     return file
 
 
-allMaybesMap m = if M.null m then Nothing else Just filtered
+allMaybesMap m = if M.null filtered then Nothing else Just filtered
       where filtered  = fmap fromJust $ M.filter isJust m
 
 data Compose2 f g a b = Compose2 { getCompose2 ::  f (g a b)}

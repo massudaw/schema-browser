@@ -80,7 +80,7 @@ pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac )
   window <- askWindow
   let tdInput = isJust . join . fmap (flip testTable  (fst $ head tf ))  <$>   initItems
       table = lookTable oinf tname
-  headerP <- UI.button # set text (T.unpack n) # sink0 UI.enabled (facts tdInput)
+  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (facts tdInput)
   m <- liftIO $  foldl (\i (kn,kty) -> (\m -> createFresh  n tname m kn kty) =<< i ) (return $ pluginsMap oinf) (concat fresh)
   let inf = oinf {pluginsMap = m}
       freshKeys :: [[Key]]
@@ -113,7 +113,7 @@ pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac )
       let oldItems = foldl1 (liftA2 (liftA2 mergeTB1)) (triding inp: unoldItems)
       liftEvent (rumors oldItems) (\i -> action inf  i  (liftIO . h) )
       return  [oldItems]  ))  (return [initItems] ) ( zip tf $ zip freshUI ac)
-  element el # sink0 UI.style (noneShow <$> facts tdInput)
+  element el # sink UI.style (noneShow <$> facts tdInput)
   return (el ,  (  ((\(_,o,_,_) -> o)$ last freshUI ) ))
 
 
@@ -124,7 +124,7 @@ pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
       -- tdOutput= liftA2 (\i j -> if i then True else j) (triding overwrite)  tdOutput1
   -- let ovev =((\ j i  -> if i then j else Nothing) <$>   oldItems <*> tdOutput1)
   v <- currentValue (facts oldItems)
-  headerP <- UI.button # set text (T.unpack n) # sink0 UI.enabled (facts tdInput)
+  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (facts tdInput)
   let ecv = (facts oldItems<@ UI.click headerP)
   bcv <- stepper v (facts oldItems <@ UI.click headerP)
   pgOut <- mapTEvent (catchPluginException inf n t . action inf) (tidings bcv ecv)
@@ -194,16 +194,10 @@ buildUI i  tdi = case i of
            paintBorder retUI (facts $ triding tdnew) (facts tdi)
            return $ TrivialWidget (triding tdnew ) retUI
          (KDelayed ti) -> do
-           tdnew <- fmap (Just. SDelayed ) <$> buildUI ti (join . fmap unSDelayed <$> tdi)
+           tdnew <- fmap (maybe Nothing (Just .SDelayed. Just)  ) <$> buildUI ti (join . fmap unSDelayed <$> tdi)
            retUI <- UI.div# set children [getElement tdnew]
            paintBorder retUI (facts $ triding tdnew) (facts tdi)
            return $ TrivialWidget (triding tdnew ) retUI
-
-         {-(KDelayed q ) -> do
-           tdnew <- fmap (Just . Delayed "" . Just  ) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
-           retUI <- UI.div # set children [getElement tdnew]
-           paintBorder retUI (facts $ triding tdnew) (facts tdi)
-           return $ TrivialWidget (triding tdnew ) retUI-}
          (KArray ti) -> do
             TrivialWidget offsetT offset <- offsetField 0
             let arraySize = 8
@@ -308,7 +302,7 @@ tbCase inf pgs i@(FKT ifk _ _ tb1 ) wl plugItens oldItems  = do
         return $ TrivialWidget (triding tds) dv
 
 tbCase inf pgs i@(IT na tb1 ) wl plugItens oldItems  = do
-        l <- flabel # set text (show  na )
+        l <- flabel # set text (show $ keyAttr .unTB $ na )
         let tbi = fmap (Compose . Identity ) <$> oldItems
             thisPlugs = filter (hasProd (isNested (IProd True (keyValue <$> keyattr na ))) . fst) $  plugItens
             pfks =  first ( uNest . justError "No nested Prod IT" . (findProd (isNested (IProd True (keyValue <$> keyattr na))))) . second ( fmap ( join .  fmap (fmap (runIdentity . getCompose) . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((== keyattr na).keyattr)))) <$> thisPlugs
@@ -316,6 +310,7 @@ tbCase inf pgs i@(IT na tb1 ) wl plugItens oldItems  = do
         dv <- UI.div #  set UI.class_ "col-xs-12" # set children [l,getElement tds]
         paintEdit l (facts (triding tds)) (facts oldItems)
         return $ TrivialWidget (triding tds) dv
+
 tbCase inf pgs a@(Attr i _ ) wl plugItens oldItems = do
         l<- flabel # set text (show i)
         let thisPlugs = filter (hasProd (== IProd True [keyValue i]) . fst)  plugItens
@@ -325,6 +320,7 @@ tbCase inf pgs a@(Attr i _ ) wl plugItens oldItems = do
         dv <- UI.div #  set UI.class_ ("col-xs-" <> show ( fst $ attrSize a) )# set children [l,getElement tds]
         paintEdit l (facts (triding tds)) (facts oldItems)
         return $ TrivialWidget (triding tds) dv
+
 tbCase inf pgs a@(TBEither n ls  _ ) wl plugItens oldItems = mdo
         l <- flabel # set text (show  n )
         ws <- mapM (\l -> do
@@ -419,9 +415,9 @@ crudUITable inf pgs open bres pmods ftb@(TB1 m _ ) preoldItems = do
           let
               Just table = M.lookup (S.fromList $ findPK ftb) (pkMap inf)
           preoldItens <- currentValue (facts preoldItems)
-          loadedItens <- liftIO$ join <$> traverse (loadDelayed inf ftb.trace "ioload")   preoldItens
+          loadedItens <- liftIO$ join <$> traverse (loadDelayed inf ftb)   preoldItens
           maybe (return ()) (liftIO. e. pure)  loadedItens
-          loadedItensEv <- mapEvent (fmap join <$> traverse (loadDelayed inf ftb . trace "evload")) (trace "selcrud" <$> rumors preoldItems)
+          loadedItensEv <- mapEvent (fmap join <$> traverse (loadDelayed inf ftb )) (rumors preoldItems)
           let oldItemsE = (\i -> maybe i modifyTB ) <$> facts preoldItems <@> loadedItensEv
           oldItemsB <- stepper (maybe preoldItens modifyTB loadedItens) oldItemsE
           let oldItems = tidings oldItemsB oldItemsE

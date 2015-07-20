@@ -273,23 +273,19 @@ testShowable  v s = case s of
         odxR "andamento_status" -<  t
         odxR "andamento_description" -<  t) -< t
       b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else liftIO (siapi2  i j)  )) -<  (liftA2 (,) protocolo ano )
-      let ao bv t =   case  join (getCompose . runIdentity .getCompose . findTB1 (== iat  bv)<$> (mapKey keyValue  <$> t)) of
-                    Just i -> Nothing
-                    Nothing -> Just $ tblist   [iat bv]
+      let ao bv  = Just $ tblist   [iat bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
           convertAndamento [da,des] =  tblist $ fmap attrT  $  ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des)),("andamento_user",SOptional Nothing ),("andamento_status",SOptional Nothing )])
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
-                                            (attrT ("andamentos",()))
-                                            (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
-      act (\i ->  do
-          t <- ask
-          return $  join $ ($t)<$> i ) -< (\i -> ao  (tailEmpty . concat $ i) )<$> join b
-      -- returnA -< join  (  ao  .  tailEmpty . concat <$> join b)
+                            (attrT ("andamentos",()))
+                            (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
+      returnA -< join  (  ao  .  tailEmpty . concat <$> join b)
 
     elem inf =  fmap (pure. catMaybes) . (\l -> mapM (\inp -> do
                               o <- elemp inf (Just inp)
-                              maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf tname)) o) l)
+                              let diff =  join $ liftA2 diffUpdateAttr o  (Just inp)
+                              maybe (return Nothing )  (\i -> updateModAttr inf (fromJust o) inp (lookTable inf tname)) diff ) l)
     elemp inf = maybe (return Nothing) (\inp -> do
                               b <- runReaderT (dynPK url $ () ) (Just inp)
                               return $ liftKeys inf tname   <$> b)
@@ -325,19 +321,15 @@ type PollingPlugisIO = PollingPlugins [TB1 Showable] (IO [([TableModification Sh
       b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= 14 then  return Nothing else liftIO $ siapi3  i j k )) -<   (liftA3 (,,) protocolo ano cpf)
       let convertAndamento [_,da,desc,user,sta] =tblist  $ fmap attrT  $ ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",SText $ T.pack  desc),("andamento_user",SOptional $ Just $ SText $ T.pack  user),("andamento_status",SOptional $ Just $ SText $ T.pack sta)] )
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
-      let ao  (bv,taxa) t = case  join $ (getCompose . runIdentity .getCompose . findTB1 (== iat  bv)<$> (mapKey keyValue  <$> t)) of
-                    Just i ->  Nothing
-                    Nothing ->    Just $ tblist  ( [attrT ("taxa_paga",SOptional $ Just $  SBoolean $ not taxa),iat bv])
+      let ao  (bv,taxa) =  Just $ tblist  ( [attrT ("taxa_paga",SOptional $ Just $  SBoolean $ not taxa),iat bv])
           iat bv = Compose . Identity $ (IT (attrT ("andamentos",()))
                          (LeftTB1 $ Just $ ArrayTB1 $ reverse $ fmap convertAndamento bv))
-      act (\i ->  do
-          t <- ask
-          return $  join $ ($t)<$> i ) -< ao <$> b
-
+      returnA -< join (ao <$> b)
     elem inf =  fmap (pure. catMaybes)
           .  mapM (\inp -> do
                         o  <- geninf inf inp
-                        maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf "fire_project")) o)
+                        let diff =   traceShowId $ join $ diffUpdateAttr  <$>  o <*> Just inp
+                        maybe (return Nothing )  (\i -> updateModAttr inf (fromJust o) inp (lookTable inf tname)) diff )
     elemp inf = maybe (return Nothing) (geninf inf)
     geninf inf inp = do
             b <- runReaderT (dynPK url $ () ) (Just inp)
@@ -581,17 +573,12 @@ queryArtBoletoCrea = BoundedPlugin2  pname tname (staticP url) elem
       let artVeri dm = ("verified_date" ,) . SOptional . join $(\d ->  fmap (STimestamp . fst) $ strptime "%d/%m/%Y %H:%M" ( d !!1) ) <$> dm
           artPayd dm = ("payment_date" ,) . SOptional . join $ (\d -> fmap (STimestamp . fst )  $ strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
           artInp inp = Just $ tblist $fmap attrT   $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
-      i <- checkOutput "verified_date" -< (t,artInp v)
-      j <- checkOutput "payment_date" -< (t,artInp v)
-      returnA -< (catMaybes [i, j] )
-      returnA -< Just $ tblist $ fmap attrT  $  catMaybes [ i,j]
+      returnA -< artInp v
     elem inf =  fmap (pure. catMaybes) . mapM (\inp -> do
                  o <- elemp inf (Just inp)
+                 let diff = liftA2 diffUpdateAttr o (Just inp)
                  maybe
-                  (return Nothing)
-                  (\i-> if L.null (F.toList i)
-                           then return Nothing
-                           else updateModAttr inf i inp (lookTable inf tname)) o)
+                  (return Nothing) (\i-> updateModAttr inf (fromJust o) inp (lookTable inf tname)) diff )
     elemp inf
           = maybe (return Nothing) (\inp -> do
                    b <- dynPK url (Just inp)
@@ -688,7 +675,7 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
         if diffUTCTime startTime  (unOnly t) >  intervalsec
         then do
             execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
-            print ("START - " <> show startTime  ::String)
+            print ("START " <>T.unpack n <> " - " <> show startTime  ::String)
             let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
             listRes <- queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
             let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
@@ -697,7 +684,7 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
             i <- elem inf evb
             handler i
             end <- getCurrentTime
-            print ("END - " <> show end ::String)
+            print ("END " <>T.unpack n <> " - " <> show end ::String)
             execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (end ,n,a,"incendio" :: String)
             threadDelay (d*1000*1000*60)
         else do

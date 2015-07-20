@@ -252,8 +252,10 @@ updateAttr conn kv kold t = execute conn (fromString $ traceShowId $ T.unpack up
     skv = runIdentity .getCompose <$> F.toList  (_kvvalues $ unTB tbskv)
     (TB1 _ (tbskv)) = isM
     isM :: TB3 Identity Key  Showable
-    isM =  (TB1  ( tableMeta t ) ) . _tb . KV .  fmap fromJust . M.filter isJust $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
+    isM =   (TB1  ( tableMeta t ) ) . _tb . KV .  fmap fromJust . M.filter isJust $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
 
+
+diffUpdateAttr  kv kold@(TB1 t _ ) =   fmap ((TB1  t ) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
 
 
 attrType :: TB Identity Key a -> KType Text
