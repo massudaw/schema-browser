@@ -170,6 +170,7 @@ instance TF.ToField Showable where
   toField (SLineString t) = TF.toField t
   toField (SBounding t) = TF.toField t
   toField (SBoolean t) = TF.toField t
+  toField (SDelayed t) = TF.toField t
   toField (SBinary t) = TF.toField (Binary t)
 
 

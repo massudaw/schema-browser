@@ -122,10 +122,10 @@ showableDef i = Nothing
 
 transformKey (KSerial i)  (KOptional j) (SSerial v)  | i == j = (SOptional v)
 transformKey (KOptional i)  (KSerial j) (SOptional v)  | i == j = (SSerial v)
-transformKey (KOptional j)  l@(Primitive _) (SOptional v)
+transformKey (KOptional j) l (SOptional v)
     | isJust v = transformKey j l (fromJust v)
     | otherwise = error "no transform optional nothing"
-transformKey (KSerial j)  l@(Primitive _) (SSerial v)
+transformKey (KSerial j)  l (SSerial v)
     | isJust v = transformKey j l (fromJust v)
     | otherwise = error "no transform serial nothing"
 -- transformKey (KOptional j)  l@(Primitive _ ) (SOptional v) | j == l  && isJust v = (\(Just i)-> i) v
@@ -200,6 +200,7 @@ inner b l m = l <> b <> m
 
 intersectPred p@(Primitive _ ) (KInterval i) j (SInterval l )  | p == i =  Interval.member j l
 intersectPred p@(KInterval j ) (KInterval i) (SInterval k)  (SInterval l )   =  Interval.isSubsetOf k  l
+intersectPred p@(KArray j ) (KArray i) (SComposite k)  (SComposite l )   =  S.fromList (F.toList k) `S.isSubsetOf` S.fromList  (F.toList l)
 intersectPred p@(Primitive _ ) (KArray i) j (SComposite l )  | p == i =  Vector.elem j l
 intersectPred p1@(Primitive _ ) p2@(Primitive _) j l   | p1 == p2 =  j ==  l
 intersectPred p1 (KSerial p2 ) j (SSerial l)   | p1 == p2 =  maybe False (j ==) l
@@ -212,7 +213,7 @@ intersectionOp (KOptional i) (KOptional j) = intersectionOp i j
 intersectionOp i (KOptional j) = intersectionOp i j
 intersectionOp (KOptional i) j = intersectionOp i j
 intersectionOp (KInterval i) (KInterval j )  = inner " <@ "
-intersectionOp (KArray i) (KArray j )  = inner " = "
+intersectionOp (KArray i) (KArray j )  = inner " <@ "
 intersectionOp (KInterval i) j
     | getPrim i == getPrim j =  inner " @> "
     | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
@@ -252,21 +253,21 @@ updateAttr conn kv kold t = execute conn (fromString $ traceShowId $ T.unpack up
     skv = runIdentity .getCompose <$> F.toList  (_kvvalues $ unTB tbskv)
     (TB1 _ (tbskv)) = isM
     isM :: TB3 Identity Key  Showable
-    isM =   (TB1  ( tableMeta t ) ) . _tb . KV .  fmap fromJust . M.filter isJust $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
+    isM =  justError "cant diff befor update" $ diffUpdateAttr kv kold
+
+diffUpdateAttr :: TB1 Showable -> TB1 Showable -> Maybe (TB1 Showable)
+diffUpdateAttr  kv kold@(TB1 t _ ) =  fmap ((TB1  t ) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
 
 
-diffUpdateAttr  kv kold@(TB1 t _ ) =   fmap ((TB1  t ) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
-
-
-attrType :: TB Identity Key a -> KType Text
+attrType :: Show a => TB Identity Key a -> KType Text
 attrType (Attr i _)= keyType i
 attrType (IT i _) = overComp attrType i
-attrType i = error $ " no attr value instance " -- <> show i
+attrType i = errorWithStackTrace $ " no attr value instance " <> show i
 
-attrValueName :: TB Identity Key a -> Text
+attrValueName :: Show a => TB Identity Key a -> Text
 attrValueName (Attr i _ )= keyValue i
 attrValueName (IT i  _) = overComp attrValueName i
-attrValueName i = error $ " no attr value instance " -- <> show i
+attrValueName i = errorWithStackTrace $ " no attr value instance " <> show i
 
 type TBValue = TB1 (Key,Showable)
 type TBType = TB1 Key
@@ -289,7 +290,7 @@ insertAttr f conn krec  t = if not (L.null pkList)
         return $ mapTB1 (mapComp (\case{ (Attr k' v')-> maybe (Attr k' v') (runIdentity . getCompose )  $ fmap snd $ getCompose $ unTB $ findTB1 (overComp (\case{Attr nk nv ->nk == k'; i-> False} )) out; i-> i} ) ) krec
               else liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")"   )  kva >> return krec
   where pkList :: [ TB Identity Key Showable]
-        pkList =   L.filter (isSerial . attrType ) . fmap (runIdentity. getCompose) $ (F.toList $ _kvvalues $ unTB $ tbPK krec )
+        pkList =   L.filter (isSerial . attrType ) . fmap (runIdentity. getCompose) $ (F.toList $ _kvvalues $ unTB $ tbPK $ tableNonRefK krec )
         kva = L.filter (not . isSerial . attrType ) $ fmap (runIdentity . getCompose) $ F.toList (_kvvalues $ unTB k)
         (TB1 _ k ) = tableNonRefK krec
 
@@ -400,7 +401,9 @@ isPairReflexive (Primitive i ) (Primitive j) | i == j = True
 isPairReflexive (KOptional i ) j = isPairReflexive i j
 isPairReflexive i (KOptional j) = isPairReflexive i j
 isPairReflexive i (KSerial j) = isPairReflexive i j
+isPairReflexive (KArray i )   (KArray j) | i == j = False
 isPairReflexive (KArray i )   j = True
+isPairReflexive (KInterval i) (KInterval j)  = isPairReflexive i j
 isPairReflexive i j = error $ "isPairReflexive " <> show i <> " - "<> show  j
 
 isPathReflexive (FKJoinTable _ ks _)
@@ -500,7 +503,7 @@ recursePath' isLeft ksbn invSchema (Path _ jo@(FKEitherField o l) _) = do
    return $ (Compose $ Unlabeled $  TBEither  o (findAttr <$> l )  Nothing)
 
 recursePath' isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
-    | isArrayRel ifk =   do
+    | isArrayRel ifk  {-&& not (isArrayRel e )-}=   do
           tas <- tname nextT
           let knas = Key (rawName nextT) Nothing (unsafePerformIO newUnique) (Primitive "integer" )
           kas <- kname tas  knas
@@ -526,7 +529,7 @@ recursePath' isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
         fun =  recurseTB invSchema nextT nextLeft
 
 recursePath' isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
-    | isArrayRel  ifk   =   do
+    | isArrayRel ifk && not (isArrayRel e) =   do
           (t,ksn) <- labelTable nextT
           tb <-fun ksn
           tas <- tname nextT
