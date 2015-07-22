@@ -1,13 +1,14 @@
 function setOpts(oSelect,selVals) {
   var opt, i = 0;
-  while (opt = oSelect[i++]) {
+  while (opt = oSelect[0][i++]) {
     var sel= false
     for(var j =0 ; j< selVals.length;j ++){
-      if(selVals[i] == opt.index)  sel = true;
+      if(selVals[j] == opt.index)  sel = true;
     }
     opt.selected = sel;
   }
 }
+
 
 function getOpts(oSelect1) {
   var oSelect = oSelect1[0]
