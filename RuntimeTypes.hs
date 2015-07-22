@@ -22,8 +22,13 @@ data Plugins
   , _arrowbounds :: (Access Text,Access Text)
   , _boundedAction2 :: InformationSchema -> (Maybe (TB1 Showable)) -> IO (Maybe (TB1 Showable))
   }
+  | ArrowPlugin
+  { _name :: Text
+  , _bounds :: Text
+  , _arrow :: ArrowReader
+  }
 
-
+{-
 data  PollingPlugins fi fo
   = BoundedPollingPlugins
   { _pollingName :: Text
@@ -31,6 +36,7 @@ data  PollingPlugins fi fo
   , _pollingBounds :: (Text,(Access Text,Access Text))
   , _pollingBoundedAction :: InformationSchema ->  fi -> fo
   }
+-}
 
 data WrappedCall =  forall m . MonadIO m =>  WrappedCall
       { runCall ::  forall a . m a -> IO a
