@@ -22,6 +22,7 @@ import Data.Functor.Apply
 import Data.Bifunctor
 import Data.Maybe
 import Data.Functor.Identity
+import Data.Ord
 import Data.Typeable
 import Data.Traversable(traverse)
 import Data.Vector(Vector)
@@ -148,14 +149,17 @@ instance (Functor f ,Bifunctor g)  => Bifunctor (Compose f g ) where
 
 
 data TB f k a
-  = FKT -- Foreign Table
+  = Attr
+    { _tbattrkey :: ! k
+    ,_tbattr :: ! a   }
+  | IT -- Inline Table
+    { _ittableName :: ! (Compose f (TB f ) k ())
+    , _fkttable ::  ! (FTB1 f  k a)
+    }
+  | FKT -- Foreign Table
     { _tbref :: ! [Compose f (TB f) k  a]
     , _reflexive ::  ! Bool
     , _fkrelation :: ! [(k ,k)]
-    , _fkttable ::  ! (FTB1 f  k a)
-    }
-  | IT -- Inline Table
-    { _ittableName :: ! (Compose f (TB f ) k ())
     , _fkttable ::  ! (FTB1 f  k a)
     }
   | TBEither
@@ -163,11 +167,6 @@ data TB f k a
     , _tbeitherref :: ! [(Compose f (TB f ) k () )]
     , _tbeithervalue:: ! (Maybe (Compose f (TB f ) k a))
     }
-  | Attr
-    { _tbattrkey :: ! k
-    ,_tbattr :: ! a   }
-  -- Attribute
-
   deriving(Functor,Foldable,Traversable)
 
 deriving instance (Eq (f (TB f k a )), Eq (f (TB f k () )) , Eq ( (FTB1 f  k a )) ,Eq a , Eq k ) => Eq (TB f k a)
@@ -273,7 +272,7 @@ instance Ord Key where
 
 instance Show Key where
    show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
-showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> {-"::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> -} "::"  <> showTy id (keyType k)
+showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<>  "::"  <> showTy id (keyType k)
 
 newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read)
 
@@ -415,7 +414,7 @@ keyattri (IT i  _ ) =  keyattr i
 -- tableAttr :: (Traversable f ,Ord k) => TB3 f k () -> [Compose f (TB f) k ()]
 -- tableAttr (ArrayTB1 i) = tableAttr <$> i
 -- tableAttr (LeftTB1 i ) = tableAttr<$> i
-tableAttr (TB1 m (Compose (Labeled _ (KV  n)))  ) = concat  $ F.toList (nonRef <$> n)
+tableAttr (TB1 m (Compose (Labeled _ (KV  n)))  ) = L.nub $  concat  $ F.toList (nonRef <$> n)
 
 nonRef :: (Eq f,Show k ,Show f,Ord k) => Compose (Labeled f ) (TB (Labeled f) ) k () -> [Compose (Labeled f ) (TB (Labeled f) ) k ()]
 nonRef i@(Compose (Labeled _ (Attr _ _ ))) =[i]
