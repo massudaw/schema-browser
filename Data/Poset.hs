@@ -41,12 +41,15 @@ instance Poset a => Poset [a] where
     compare = (mconcat .) . zipWith compare
 
 instance O.Ord a => Sortable (Set a) where
-    isOrdered i = True
+    isOrdered i
+      | Set.size i == 1 = True
+      | otherwise = False
+
 instance O.Ord a => Poset (Set a) where
     compare i j
       | Set.isSubsetOf i j = LT
       | Set.isSubsetOf j i = GT
-      |  otherwise = case O.compare i j of
+      |  otherwise = compare (Set.size i)  (Set.size j) <>  case O.compare i j of
                           O.LT -> LT
                           O.EQ -> EQ
                           O.GT -> GT

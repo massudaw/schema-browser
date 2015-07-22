@@ -209,6 +209,16 @@ intersectPred p1@(KOptional i ) p2 (SOptional j) l  =  maybe False id $ fmap (\m
 intersectPred p1 p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
 
 
+pkOp (KSerial j ) i  (SSerial l) k  = maybe False id (pkOp i j k <$> l)
+pkOp i (KSerial j ) k (SSerial l) = maybe False id (pkOp i j k <$> l)
+pkOp (KInterval i) (KInterval j) (SInterval k) (SInterval l)| i == j  = not $ Interval.null $ Interval.intersection  k l
+pkOp (KArray i) (KArray j) (SComposite k) (SComposite l) | i == j = not $ S.null $ S.intersection (S.fromList (F.toList k)) (S.fromList (F.toList  l ))
+pkOp (Primitive i ) (Primitive j ) k l  | i == j = k == l
+pkOp a b c d = errorWithStackTrace (show (a,b,c,d))
+
+pkOpSet i l = L.all id $ zipWith (\(a,b) (c,d)-> pkOp (keyType a)  (keyType c) b d)  i l
+
+
 intersectionOp (KOptional i) (KOptional j) = intersectionOp i j
 intersectionOp i (KOptional j) = intersectionOp i j
 intersectionOp (KOptional i) j = intersectionOp i j
@@ -396,14 +406,14 @@ expandTable tb = errorWithStackTrace (show tb)
 -- lb1 = TB1 . (fmap Compose)
 
 isPairReflexive (Primitive i ) (KInterval (Primitive j)) | i == j = False
-isPairReflexive (Primitive j) (KArray (Primitive i) )   = False
+isPairReflexive (Primitive j) (KArray (Primitive i) )  | i == j = False
+isPairReflexive (KInterval i) (KInterval j)  | i == j = False
 isPairReflexive (Primitive i ) (Primitive j) | i == j = True
 isPairReflexive (KOptional i ) j = isPairReflexive i j
-isPairReflexive i (KOptional j) = isPairReflexive i j
+-- isPairReflexive i (KOptional j) = isPairReflexive i j
 isPairReflexive i (KSerial j) = isPairReflexive i j
 isPairReflexive (KArray i )   (KArray j) | i == j = False
 isPairReflexive (KArray i )   j = True
-isPairReflexive (KInterval i) (KInterval j)  = isPairReflexive i j
 isPairReflexive i j = error $ "isPairReflexive " <> show i <> " - "<> show  j
 
 isPathReflexive (FKJoinTable _ ks _)
@@ -587,7 +597,7 @@ recurseTB invSchema  nextT nextLeft ksn@(TB1 m kv ) =  (TB1 m) <$>
     where fun =  (\kv -> do
                   let
                       items = _kvvalues kv
-                      fkSet = S.unions $ fmap pathRelRef $ filter ( isPathReflexive . pathRel) $ S.toList (rawFKS nextT)
+                      fkSet = traceShow (_kvname m) $ S.unions $ fmap pathRelRef $ filter ( isPathReflexive . pathRel) $ S.toList (rawFKS nextT)
                       eitherSet = S.unions $ fmap pathRelRef $ filter ( isPathEither . pathRel) $  S.toList (rawFKS nextT)
                       nonFKAttrs :: [(S.Set Key,TBLabel  ())]
                       nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf i fkSet) items
@@ -597,7 +607,7 @@ recurseTB invSchema  nextT nextLeft ksn@(TB1 m kv ) =  (TB1 m) <$>
                   let
                       nonEitherAttrs = filter (\(k,i) -> not $ S.isSubsetOf k eitherSet) (nonFKAttrs <> pt )
                   pt2 <- mapM (\fk -> fmap (((pathRelRef fk,))) .recursePath' nextLeft (fmap (fmap getCompose) $ nonFKAttrs<> pt ) invSchema$ fk ) (filter ( isPathEither . pathRel) $ F.toList $ rawFKS nextT )
-                  return ( KV $ M.fromList $ nonEitherAttrs <> pt2) )
+                  return (   KV $ M.fromList $ (\i->traceShow (fmap fst i) i ) $ nonEitherAttrs <> pt2) )
 
 
 

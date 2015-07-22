@@ -373,7 +373,7 @@ uiTable inf pgs tname plmods ftb@(TB1 m k ) oldItems = do
             w <- jm
             wn <- tbCase inf pgs  (unTB m) w plugmods (fmap (unTB . justError "FKT" . (^?  Le.ix l ) . unTBMap ) <$> oldItems)
             return (w <> [(unTB m,wn)])
-        ) (return [])(P.sortBy (P.comparing fst ) . M.toList . unTBMap $ ftb)
+        ) (return []) (P.sortBy (P.comparing fst ) . M.toList . unTBMap $ ftb)
   let
       tableb :: Tidings (Maybe (TB1 Showable))
       tableb  = fmap (TB1 (tableMeta table) . Compose . Identity . KV . mapFromTBList . fmap _tb) . Tra.sequenceA <$> Tra.sequenceA (triding .snd <$> fks)
@@ -393,7 +393,7 @@ uiTable inf pgs tname plmods ftb@(TB1 m k ) oldItems = do
 
 
 instance P.Poset (FKey (KType Text))where
-  compare  = (\i j -> case compare i j of
+  compare  = (\i j -> case compare (i) (j) of
                       EQ -> P.EQ
                       LT -> P.LT
                       GT -> P.GT )
@@ -464,18 +464,18 @@ processPanelTable
    -> UI (Element,[Event (Modification Key Showable)])
 processPanelTable inf attrsB res table oldItemsi = do
   let
-      contains v  = maybe True (const False) . L.find (onBin (==) (F.toList .  _kvvalues . unTB . tbPK ) v )
+      contains v  = maybe False (const True) . L.find (onBin (pkOpSet) (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ) v )
   insertB <- UI.button # set UI.class_ "buttonSet" # set text "INSERT" # set UI.style (noneShowSpan ("INSERT" `elem` rawAuthorization table ))
   -- Insert when isValid
-        # sink UI.enabled (liftA2 (&&) (isJust . fmap tableNonRef <$> attrsB ) (liftA2 (\i j -> maybe False (flip contains j) i  ) attrsB  res))
+        # sink UI.enabled (liftA2 (&&) (isJust . fmap tableNonRef <$> attrsB ) (liftA2 (\i j -> not $ maybe False (flip contains j) i  ) attrsB  res))
   editB <- UI.button # set text "EDIT" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table ))
 
   -- Edit when any persistent field has changed
-        # sink UI.enabled (liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then {-traceShow (l,m)-} (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . _unTB1 .  tableNonRef)<$> attrsB) (fmap (_kvvalues . unTB . _unTB1 . tableNonRef )<$> facts oldItemsi)) (liftA2 (\i j -> maybe False (not . flip contains j) i  ) attrsB  res))
+        # sink UI.enabled (liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then {-traceShow (l,m)-} (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . _unTB1 .  tableNonRef)<$> attrsB) (fmap (_kvvalues . unTB . _unTB1 . tableNonRef )<$> facts oldItemsi)) (liftA2 (\i j -> maybe False (flip contains j) i  ) attrsB  res))
 
   deleteB <- UI.button # set text "DELETE" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table ))
   -- Delete when isValid
-        # sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (not . flip contains j) i  ) attrsB res))
+        # sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> not $ maybe False (flip contains j) i  ) attrsB res))
   let
       deleteAction ki =  do
         res <- liftIO $ catch (Right <$> delete (conn inf) ki table) (\e -> return $ Left (show $ traceShowId  (e :: SomeException) ))
