@@ -290,7 +290,6 @@ siapi2Plugin = BoundedPlugin2  pname tname (staticP url) elemp
 
 
 
-type PollingPlugisIO = PollingPlugins [TB1 Showable] (IO [([TableModification Showable])])
 
 siapi3Plugin  = BoundedPlugin2 pname tname  (staticP url) elemp
 
