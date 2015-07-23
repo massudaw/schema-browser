@@ -198,16 +198,18 @@ getPrim (KInterval j) =  getPrim j
 
 inner b l m = l <> b <> m
 
-intersectPred p@(Primitive _ ) (KInterval i) j (SInterval l )  | p == i =  Interval.member j l
-intersectPred p@(KInterval j ) (KInterval i) (SInterval k)  (SInterval l )   =  Interval.isSubsetOf k  l
-intersectPred p@(KArray j ) (KArray i) (SComposite k)  (SComposite l )   =  S.fromList (F.toList k) `S.isSubsetOf` S.fromList  (F.toList l)
-intersectPred p@(Primitive _ ) (KArray i) j (SComposite l )  | p == i =  Vector.elem j l
-intersectPred p1@(Primitive _ ) p2@(Primitive _) j l   | p1 == p2 =  j ==  l
-intersectPred p1 (KSerial p2 ) j (SSerial l)   | p1 == p2 =  maybe False (j ==) l
-intersectPred p1 (KOptional p2 ) j (SOptional l)   | p1 == p2 =  maybe False (j ==) l
-intersectPred p1@(KOptional i ) p2 (SOptional j) l  =  maybe False id $ fmap (\m -> intersectPred i p2 m l) j
-intersectPred p1 p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
-
+-- Operators
+intersectPred p@(Primitive _) op  (KInterval i) j (SInterval l )  | p == i =  Interval.member j l
+intersectPred p@(KInterval j) "<@" (KInterval i) (SInterval k)  (SInterval l )   =  Interval.isSubsetOf k  l
+intersectPred p@(KInterval j) "=" (KInterval i) (SInterval k)  (SInterval l )   =  k == l
+intersectPred p@(KArray j) "<@" (KArray i) (SComposite k)  (SComposite l )   =  S.fromList (F.toList k) `S.isSubsetOf` S.fromList  (F.toList l)
+intersectPred p@(KArray j) "=" (KArray i) (SComposite k)  (SComposite l )   =  k == l
+intersectPred p@(Primitive _) op (KArray i) j (SComposite l )  | p == i =  Vector.elem j l
+intersectPred p1@(Primitive _) op  p2@(Primitive _) j l   | p1 == p2 =  j ==  l
+intersectPred p1 op  (KSerial p2) j (SSerial l)   | p1 == p2 =  maybe False (j ==) l
+intersectPred p1 op (KOptional p2) j (SOptional l)   | p1 == p2 =  maybe False (j ==) l
+intersectPred p1@(KOptional i ) op p2 (SOptional j) l  =  maybe False id $ fmap (\m -> intersectPred i op p2 m l) j
+intersectPred p1 op p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
 
 pkOp (KSerial j ) i  (SSerial l) k  = maybe False id (pkOp i j k <$> l)
 pkOp i (KSerial j ) k (SSerial l) = maybe False id (pkOp i j k <$> l)
@@ -219,24 +221,24 @@ pkOp a b c d = errorWithStackTrace (show (a,b,c,d))
 pkOpSet i l = L.all id $ zipWith (\(a,b) (c,d)-> pkOp (keyType a)  (keyType c) b d)  i l
 
 
-intersectionOp (KOptional i) (KOptional j) = intersectionOp i j
-intersectionOp i (KOptional j) = intersectionOp i j
-intersectionOp (KOptional i) j = intersectionOp i j
-intersectionOp (KInterval i) (KInterval j )  = inner " <@ "
-intersectionOp (KArray i) (KArray j )  = inner " <@ "
-intersectionOp (KInterval i) j
-    | getPrim i == getPrim j =  inner " @> "
-    | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
-intersectionOp i (KInterval j)
-    | getPrim i == getPrim j = inner " <@ "
-    | otherwise = error $ "wrong type intersectionOp " <> show i <> " /= " <> show j
-intersectionOp (KArray i ) j
+intersectionOp (KOptional i) op (KOptional j) = intersectionOp i op j
+intersectionOp i op (KOptional j) = intersectionOp i op j
+intersectionOp (KOptional i) op j = intersectionOp i op j
+intersectionOp (KInterval i) op (KInterval j )  = inner op
+intersectionOp (KArray i) op  (KArray j )  = inner op
+intersectionOp (KInterval i) op j
+    | getPrim i == getPrim j =  inner op
+    | otherwise = errorWithStackTrace $ "wrong type intersectionOp " <> show i <> " /= " <> show j
+intersectionOp i op (KInterval j)
+    | getPrim i == getPrim j = inner "<@"
+    | otherwise = errorWithStackTrace $ "wrong type intersectionOp " <> show i <> " /= " <> show j
+intersectionOp (KArray i ) op  j
     | fmap textToPrim i == getPrim j = (\j i -> i <> " IN (select * from unnest("<> j <> ") ) ")
-    | otherwise = error $ "wrong type intersectionOp {*} - * " <> show i <> " /= " <> show j
-intersectionOp j (KArray i )
+    | otherwise = errorWithStackTrace $ "wrong type intersectionOp {*} - * " <> show i <> " /= " <> show j
+intersectionOp j op (KArray i )
     | getPrim i == getPrim j = (\ i j  -> i <> " IN (select * from unnest("<> j <> ") ) ")
-    | otherwise = error $ "wrong type intersectionOp * - {*} " <> show j <> " /= " <> show i
-intersectionOp i j = inner " = "
+    | otherwise = errorWithStackTrace $ "wrong type intersectionOp * - {*} " <> show j <> " /= " <> show i
+intersectionOp i op j = inner op
 
 showTable t  = rawSchema t <> "." <> rawName t
 
@@ -405,19 +407,23 @@ expandTable tb = errorWithStackTrace (show tb)
 
 -- lb1 = TB1 . (fmap Compose)
 
-isPairReflexive (Primitive i ) (KInterval (Primitive j)) | i == j = False
-isPairReflexive (Primitive j) (KArray (Primitive i) )  | i == j = False
-isPairReflexive (KInterval i) (KInterval j)  | i == j = False
-isPairReflexive (Primitive i ) (Primitive j) | i == j = True
-isPairReflexive (KOptional i ) j = isPairReflexive i j
+isPairReflexive (Primitive i ) op (KInterval (Primitive j)) | i == j = False
+isPairReflexive (Primitive j) op  (KArray (Primitive i) )  | i == j = False
+isPairReflexive (KInterval i) op (KInterval j)
+  | i == j && op == "<@" = False
+  | i == j && op == "=" = True
+isPairReflexive (Primitive i ) op (Primitive j) | i == j = True
+isPairReflexive (KOptional i ) op  j = isPairReflexive i op j
 -- isPairReflexive i (KOptional j) = isPairReflexive i j
-isPairReflexive i (KSerial j) = isPairReflexive i j
-isPairReflexive (KArray i )   (KArray j) | i == j = False
-isPairReflexive (KArray i )   j = True
-isPairReflexive i j = error $ "isPairReflexive " <> show i <> " - "<> show  j
+isPairReflexive i op (KSerial j) = isPairReflexive i op j
+isPairReflexive (KArray i )  op  (KArray j)
+  | i == j  && op == "<@" = False
+  | i == j  && op == "=" = True
+isPairReflexive (KArray i )  op  j = True
+isPairReflexive i op  j = errorWithStackTrace $ "isPairReflexive " <> show i <> " - "<> show  j
 
 isPathReflexive (FKJoinTable _ ks _)
-  = all id $ fmap (\(i,j)-> isPairReflexive (textToPrim <$> keyType i ) (textToPrim <$> keyType j)) ks
+  = all id $ fmap (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
 isPathReflexive (FKInlineTable _)= True
 isPathReflexive (FKEitherField _ _)= False
 
@@ -426,7 +432,7 @@ isPathEither (FKInlineTable _)= False
 isPathEither (FKEitherField _ _)= True
 
 
-intersectionOpK i j = intersectionOp (keyType i ) (keyType j)
+--intersectionOpK (Rel i op  j) = intersectionOp (keyType i ) op (keyType j)
 
 allRec'
   :: Map Text Table
@@ -480,7 +486,7 @@ expandJoin left (Unlabeled (TBEither l kj j )) = foldr1 mappend (expandJoin left
 expandJoin left (Unlabeled (FKT i refl rel (LeftTB1 (Just tb)))) = expandJoin True (Unlabeled (FKT i refl rel tb))
 expandJoin left (Labeled l (FKT i refl rel (LeftTB1 (Just tb)))) = expandJoin True (Labeled l (FKT i refl rel tb))
 expandJoin left (Labeled l (FKT i refl ks (ArrayTB1 [ tb])))
-    = jt <> " JOIN LATERAL (SELECT " <> "array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (head (look (fst <$> ks) ( fmap getCompose $ concat $ fmap nonRef i ) ))  <> ") as arr) as z1 "  <> jt  <> " JOIN "<> expandTable tb   <> " ON " <>  label (head (look (snd <$> ks) ((fmap getCompose $ F.toList   (tableAttr tb) )) )) <> " = arr ) as z1 " <> expandQuery left tb  <>   "  ) as " <>  label tas  <> " ON true "
+    = jt <> " JOIN LATERAL (SELECT " <> "array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (head (look (_relOrigin <$> ks) ( fmap getCompose $ concat $ fmap nonRef i ) ))  <> ") as arr) as z1 "  <> jt  <> " JOIN "<> expandTable tb   <> " ON " <>  label (head (look (_relTarget <$> ks) ((fmap getCompose $ F.toList   (tableAttr tb) )) )) <> " = arr ) as z1 " <> expandQuery left tb  <>   "  ) as " <>  label tas  <> " ON true "
       where
           (TB1 _ (Compose tas )) = tb
           look ki i = justError ("missing FK on " <> show (ki,ks ,keyAttr . labelValue <$> i )  ) $ allMaybes $ fmap (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
@@ -494,9 +500,10 @@ expandJoin left (Labeled l (FKT i refl rel tb))
 
 expandJoin left i = errorWithStackTrace (show i)
 
-joinOnPredicate ks m n =  T.intercalate " AND " . fmap (\(l,r)->  intersectionOpK (keyAttr . labelValue $ l) (keyAttr . labelValue $ r) (label l)  (label r )) $  fkm m n
-    where fkm m n = zip (look (fst <$> ks) m) (look (snd <$> ks) n)
-          look ki i = justError ("missing FK on " <> show (ki,ks ,keyAttr . labelValue <$> i )  ) $ allMaybes $ fmap (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
+joinOnPredicate :: [Rel Key] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> Text
+joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectionOp (keyType . keyAttr . labelValue $ l) op (keyType . keyAttr . labelValue $ r) (label l)  (label r )) <$> fkm
+    where fkm  = (\rel -> Rel (look (_relOrigin rel ) m) (_relOperator rel) (look (_relTarget rel ) n)) <$>  ks
+          look ki i = justError ("missing FK on " <> show (ki,ks ,keyAttr . labelValue <$> i )) $ (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
 
 
 

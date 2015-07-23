@@ -147,6 +147,13 @@ instance (Functor f ,Bifunctor g)  => Bifunctor (Compose f g ) where
 
 
 
+data Rel k
+  = Rel
+  { _relOrigin :: k
+  , _relOperator:: Text
+  , _relTarget :: k
+  }deriving(Eq,Show,Ord,Functor,Foldable)
+
 
 data TB f k a
   = Attr
@@ -159,7 +166,7 @@ data TB f k a
   | FKT -- Foreign Table
     { _tbref :: ! [Compose f (TB f) k  a]
     , _reflexive ::  ! Bool
-    , _fkrelation :: ! [(k ,k)]
+    , _fkrelation :: ! [Rel k ]
     , _fkttable ::  ! (FTB1 f  k a)
     }
   | TBEither
@@ -204,7 +211,7 @@ secondKV  f (KV m ) = KV . fmap (second f ) $ m
 firstTB :: (Ord k, Functor f) => (c -> k) -> TB f c a -> TB f k a
 firstTB f (Attr k i) = Attr (f k) i
 firstTB f (IT k i) = IT (mapComp (firstTB f) k) ((mapKey f) i)
-firstTB f (FKT k l m  i) = FKT  (fmap (mapComp (firstTB f) ) k) l (fmap (first f . second f) m   ) ((mapKey f) i)
+firstTB f (FKT k l m  i) = FKT  (fmap (mapComp (firstTB f) ) k) l (fmap f  <$> m) ((mapKey f) i)
 firstTB f (TBEither k l m ) = TBEither (f k) ( fmap (mapComp (firstTB f)) l) (fmap (mapComp (firstTB f))  m)
 
 
@@ -304,7 +311,7 @@ data Showable
 
 data SqlOperation
   = FetchTable Text
-  | FKJoinTable Text [(Key,Key)] Text
+  | FKJoinTable Text [Rel Key] Text
   | FKInlineTable Text
   | FKEitherField Key [Key]
   deriving(Eq,Ord,Show)
@@ -497,6 +504,7 @@ instance Ord k => Monoid (KV f k a) where
 makeLenses ''KV
 makeLenses ''PK
 makeLenses ''TB
+makeLenses ''Rel
 
 
 

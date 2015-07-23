@@ -1,4 +1,29 @@
+BUGS
 -- Fix delayed upload for TBEITHER and IT
+-- Fix aliasing for same (set key) noninjective refs
+
+NEW FEATURES
+
+PAGINATE
+-- Implement pagination over now() for dates
+-- Metadata Paginate reference
+
+CONSTRAINED REFLEXIVE RELATION
+-- Drop down for selecting multiple columns reference
+
+ORDERING
+-- metadata ordering default
+
+CRUD
+Implement edit split for intervals and arrays
+
+PKPK FK CONSTRAINT
+-- Map over FK table the origin constraints
+
+
+CONSTRAINT OPERATOR
+-- Add operator to fks OK
+-- Add operators to pks
 
 Multiple Schema joins
 -- Generate Queries with multiple schemas
