@@ -35,6 +35,7 @@ import Control.Concurrent
 import Data.Text.Lazy(Text)
 import qualified Data.Text.Lazy as T
 
+import qualified Reactive.Threepenny as R
 
 
 import Query
@@ -56,6 +57,8 @@ createType _ un (t,c,trans,"ARRAY",_,i,n,def,p,_) = (Key   c trans un (nullable 
 createType _ un (t,c,trans,_,_,"geometry",n,def,p,_) = (Key   c trans un (nullable n $ Primitive $ (\(Just i) -> i) p))
 createType _ un (t,c,trans,_,_,"box3d",n,def,p,_) = (Key   c trans un (nullable n $ Primitive $  "box3d"))
 createType _ un (t,c,trans,ty,_,_,n,def,_,Just "pdf" ) =(Key c   trans un (serial def . nullable n $ KDelayed $ Primitive "pdf" ))
+createType _ un (t,c,trans,ty,_,_,n,def,_,Just "jpg" ) =(Key c   trans un (serial def . nullable n $ KDelayed $ Primitive "jpg" ))
+createType _ un (t,c,trans,ty,_,_,n,def,_,Just "ofx" ) =(Key c   trans un (serial def . nullable n $ KDelayed $ Primitive "ofx" ))
 createType _ un (t,c,trans,ty,_,_,n,def,_,Just dom ) =(Key c   trans un (serial def . nullable n $ Primitive dom))
 createType _ un (t,c,trans,ty,_,_,n,def,_,_) =(Key c   trans un (serial def . nullable n $ Primitive ty))
 --createType un v = error $ show v
@@ -73,7 +76,7 @@ data InformationSchema
   , pkMap :: Map (Set Key) Table
   , tableMap :: Map Text Table
   , pluginsMap :: Map (Text,Text,Text) Key
-  , mvarMap :: MVar (Map Table (MVar [(TB1 Showable)]))
+  , mvarMap :: MVar (Map Table ({-R.Event [TB1 Showable], R.Handler [TB1 Showable], -}MVar [(TB1 Showable)]))
   , conn :: Connection
   , rootconn :: Connection
   }
@@ -81,7 +84,7 @@ data InformationSchema
 type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 
 foreignKeys :: Query
-foreignKeys = "select origin_table_name,target_table_name,origin_fks,target_fks from metadata.fks where origin_schema_name = target_schema_name  and  target_schema_name = ?"
+foreignKeys = "select origin_table_name,target_table_name,origin_fks,target_fks,rel_fks from metadata.fks where origin_schema_name = target_schema_name  and  target_schema_name = ?"
 
 
 queryAuthorization :: Connection -> Text -> Text -> IO (Map Text [Text])
@@ -94,8 +97,8 @@ queryAuthorization conn schema user = do
 keyTables :: Connection -> Connection -> (Text ,Text)-> IO InformationSchema
 keyTables conn userconn (schema ,user) = do
        uniqueMap <- join $ mapM (\i-> (i,) <$> newUnique) <$>  query conn "select o.table_name,o.column_name from information_schema.tables natural join information_schema.columns o where table_schema = ? "(Only schema)
-       --res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name where table_schema = ? " {- left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column " -} (Only schema)
-       res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default,'' :: text ,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name where table_schema = ? " {- left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column " -} (Only schema)
+       res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name    left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ?"  (Only schema)
+       --res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default,'' :: text ,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name where table_schema = ? " {- left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column " -} (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
        -- keyMap <- preprocessSumTypes (M.fromList keyList)
@@ -125,7 +128,7 @@ keyTables conn userconn (schema ,user) = do
        res <- lookupKey3 <$> query conn "SELECT table_name,pks FROM metadata.pks  where schema_name = ?" (Only schema) :: IO [(Text,Vector Key )]
        resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM information_schema.tables where table_schema = ? " (Only schema) :: IO (Map Text TableType)
        let lookFk t k =V.toList $ lookupKey2 (fmap (t,) k)
-       fks <- M.fromListWith S.union . fmap (\i@(tp,tc,kp,kc) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) (FKJoinTable tp (zip (lookFk tp kp ) (lookFk tc kc)) tc) (S.fromList $ lookFk tc kc))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation ) )))
+       fks <- M.fromListWith S.union . fmap (\i@(tp,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) (FKJoinTable tp (zipWith3 (\a b c -> Rel a b c) (lookFk tp kp ) (V.toList rel) (lookFk tc kc)) tc) (S.fromList $ lookFk tc kc))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation ) )))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  M.toList keyMap :: Map Text (Set Key)
            pks =  (\(c,pksl)-> let
                                   pks = S.fromList $ F.toList pksl
@@ -202,7 +205,7 @@ withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s
 
 testParse db sch q = withConnInf db sch (\inf -> do
                                        let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
-                                       putStrLn (  show rpq)
+                                       --putStrLn (  show rpq)
                                        q <- queryWith_ (fromAttr (rp) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        --print q
                                        return $ q
@@ -232,7 +235,8 @@ addTable inf table = do
            mnew <- newMVar res
            putMVar mvar (M.insert table mnew mmap)
            return (True,mnew )
-    readMVar mtable
+    t <- readMVar mtable
+    return t
 
 
 testLoadDelayed inf t = do

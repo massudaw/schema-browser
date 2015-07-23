@@ -104,12 +104,4 @@ replacePath :: (BSC.ByteString,BSC.ByteString)
 replacePath = ("/art1025"  , "http://www.crea-go.org.br/art1025")
 
 
-{-
-mainTest = do
-  startGUI defaultConfig {tpPort = Just 8000} (\w -> do
-                      i <- liftIO $ creaLoginArt "1009533630" "Denise" "5559" "1020150028082"
-                      -- liftIO $ traverse (writeFile "creaLogged.html") i
-                      e1 <- buildUI (Primitive $ textToPrim "pdf") (pure  i)
-                      getBody w #+ [UI.element e1]
-                      return () )
-                      -}
+

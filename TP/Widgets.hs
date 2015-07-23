@@ -531,3 +531,11 @@ sink0 attr uiv ui =  do
   ui # set attr v # sink attr uiv
 
 
+pruneTidings chw tds =   tidings chkBH chkAll
+  where
+    chkEvent = fmap Just $ filterJust $ (\b e -> if b then e else Nothing ) <$> facts chw <@> rumors tds
+    chkBehaviour = fmap Just $ filterJust $ (\e b -> if b then e else Nothing ) <$>  facts tds <@> rumors chw
+    chkAll = unionWith const chkEvent chkBehaviour
+    chkBH = (\b e -> if b then e else Nothing ) <$> facts chw <*> facts tds
+
+

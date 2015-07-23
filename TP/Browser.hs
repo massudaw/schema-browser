@@ -220,12 +220,12 @@ chooseKey inf key = mdo
   filterInp <- UI.input
   filterInpBh <- stepper "" (UI.valueChange filterInp)
   let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
-      sortSet =  F.toList . tableKeys . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) $ key
-  sortList  <- multiListBox (pure sortSet) (F.toList <$> bBset) (pure (line . show))
+      sortSet =  F.toList . tableKeys . tableNonRef . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) $ key
+  sortList  <- multiListBox (pure sortSet) (traceShowId . F.toList <$> bBset) (pure (line . show))
   asc <- checkedWidget (pure True)
   let
      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList  )
-     tsort = (\ b c -> trace "sort" . sorting b c ) <$> triding asc <*> multiUserSelection sortList
+     tsort = (\ b c -> trace (T.unpack $ "sort " <> T.intercalate "," (fmap showKey c)) . sorting b (traceShowId c) ) <$> triding asc <*> multiUserSelection sortList
   itemList <- listBox (tidings res2 never) (tidings bselection never)  (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
   let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
   prop <- stepper cv (trace "evtrig" <$> evsel)
@@ -235,7 +235,7 @@ chooseKey inf key = mdo
   (cru ,evs) <- crudUITable inf plugList  (pure True) res2 [] (allRec' (tableMap inf) table) tds
   let
      bselection = st
-     sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [{-(rumors  $userSelection itemList ) ,-} rumors tdi]),(fmap modifyTB <$> evs)]
+     sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [(rumors  $userSelection itemList ) ,rumors tdi]),(fmap modifyTB <$> evs)]
   st <- stepper cv sel
   inisort <- currentValue (facts tsort)
   res2 <- accumB (inisort vp) (fmap concatenate $ unions [rumors tsort , (flip (foldr addToList  ) <$> evs)])
@@ -257,7 +257,7 @@ testShowable  v s = case s of
           i -> v i
 
 
-(siapi2Polling   :: PollingPlugisIO  , siapi2Plugin :: Plugins) = (BoundedPollingPlugins pname 60 (tname  ,staticP url) elem,BoundedPlugin2  pname tname (staticP url) elemp)
+siapi2Plugin = BoundedPlugin2  pname tname (staticP url) elemp
   where
     pname ="Siapi2 Andamento"
     tname = "fire_project"
@@ -282,10 +282,6 @@ testShowable  v s = case s of
                             (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
       returnA -< join  (  ao  .  tailEmpty . concat <$> join b)
 
-    elem inf =  fmap (pure. catMaybes) . (\l -> mapM (\inp -> do
-                              o <- elemp inf (Just inp)
-                              let diff =  join $ liftA2 diffUpdateAttr o  (Just inp)
-                              maybe (return Nothing )  (\i -> updateModAttr inf (fromJust o) inp (lookTable inf tname)) diff ) l)
     elemp inf = maybe (return Nothing) (\inp -> do
                               b <- runReaderT (dynPK url $ () ) (Just inp)
                               return $ liftKeys inf tname   <$> b)
@@ -294,9 +290,8 @@ testShowable  v s = case s of
 
 
 
-type PollingPlugisIO = PollingPlugins [TB1 Showable] (IO [([TableModification Showable])])
 
-(siapi3Polling   :: PollingPlugisIO  , siapi3Plugin :: Plugins) = (BoundedPollingPlugins pname 60 (tname ,staticP url) elem,BoundedPlugin2 pname tname  (staticP url) elemp)
+siapi3Plugin  = BoundedPlugin2 pname tname  (staticP url) elemp
 
   where
     pname , tname :: Text
@@ -325,11 +320,6 @@ type PollingPlugisIO = PollingPlugins [TB1 Showable] (IO [([TableModification Sh
           iat bv = Compose . Identity $ (IT (attrT ("andamentos",()))
                          (LeftTB1 $ Just $ ArrayTB1 $ reverse $ fmap convertAndamento bv))
       returnA -< join (ao <$> b)
-    elem inf =  fmap (pure. catMaybes)
-          .  mapM (\inp -> do
-                        o  <- geninf inf inp
-                        let diff =   traceShowId $ join $ diffUpdateAttr  <$>  o <*> Just inp
-                        maybe (return Nothing )  (\i -> updateModAttr inf (fromJust o) inp (lookTable inf tname)) diff )
     elemp inf = maybe (return Nothing) (geninf inf)
     geninf inf inp = do
             b <- runReaderT (dynPK url $ () ) (Just inp)
@@ -419,6 +409,7 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
                   b <- runReaderT (dynPK   url $ ())  (Just inp)
                   return $ liftKeys inf tname  <$> b )
 
+
 pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname (staticP url) elem
   where
     tname = "servico_venda"
@@ -498,7 +489,7 @@ notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" tname (staticP url) elem
                                p <- varTB "goiania_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act (fmap join  . traverse (\(i, (j, k,a)) -> prefeituraNota j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ tblist [attrT ("nota",    SOptional b)]
+      let ao =  Just $ tblist [attrT ("nota",    SOptional $ fmap (SDelayed .Just) b)]
       returnA -< ao
     elem inf = maybe (return Nothing) (\inp -> do
                               b <- dynPK url (Just inp)
@@ -528,7 +519,6 @@ queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" tname (staticP url) ele
                             )
 
 
--- queryArtBoletoCrea :: Plugins
 queryArtBoletoCrea = BoundedPlugin2  pname tname (staticP url) elem
   where
     pname = "Boleto Art Crea"
@@ -554,40 +544,32 @@ queryArtBoletoCrea = BoundedPlugin2  pname tname (staticP url) elem
 
 
 
-(queryArtAndamento ,artAndamentoPolling :: PollingPlugisIO ) = (BoundedPlugin2 pname tname (staticP url) elemp,BoundedPollingPlugins   pname 60 (tname ,staticP url) elem)
+queryArtAndamento = BoundedPlugin2 pname tname (staticP url) elemp
   where
     tname = "art"
     pname = "Andamento Art Crea"
-    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text Showable))
+    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    url :: ArrowReader
     url = proc t -> do
-      i <- varTB "art_number" -< t
-      odx "payment_date" -< t
-      odx "verified_date" -< t
-      r <- at "crea_register" (proc t -> do
-                               n <- varTB "crea_number" -< t
-                               u <- varTB "crea_user"-< t
-                               p <- varTB "crea_password"-< t
-                               returnA -< liftA3 (, , ) n u p  ) -< t
-      v <- act (fmap (join .maybeToList) . traverse (\(i, (j, k,a)) -> creaConsultaArt  j k a i ) ) -< liftA2 (,) i r
+      i <- varTB "art_number" -< ()
+      odxR "payment_date" -< ()
+      odxR "verified_date" -< ()
+      r <- atR "crea_register"
+          (liftA3 (,,) <$> varTB "crea_number" <*> varTB "crea_user" <*> varTB "crea_password") -< t
+      v <- act (fmap (join .maybeToList) . traverse (\(i, (j, k,a)) -> liftIO  $ creaConsultaArt  j k a i ) ) -< liftA2 (,) i r
       let artVeri dm = ("verified_date" ,) . SOptional . join $(\d ->  fmap (STimestamp . fst) $ strptime "%d/%m/%Y %H:%M" ( d !!1) ) <$> dm
           artPayd dm = ("payment_date" ,) . SOptional . join $ (\d -> fmap (STimestamp . fst )  $ strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
           artInp inp = Just $ tblist $fmap attrT   $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
-      returnA -< artInp v
-    elem inf =  fmap (pure. catMaybes) . mapM (\inp -> do
-                 o <- elemp inf (Just inp)
-                 let diff = liftA2 diffUpdateAttr o (Just inp)
-                 maybe
-                  (return Nothing) (\i-> updateModAttr inf (fromJust o) inp (lookTable inf tname)) diff )
+      returnA -< artInp (traceShowId v)
     elemp inf
           = maybe (return Nothing) (\inp -> do
-                   b <- dynPK url (Just inp)
+                   b <- runReaderT (dynPK url $ () )  (Just inp)
                    return $  liftKeys inf tname  <$> b)
 
 
 queryCPFStatefull =  StatefullPlugin "CPF Receita" "owner" [staticP arrowF,staticP arrowS]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] cpfCall
     where
-      arrowF ,arrowS :: ArrowReader-- ArrowPlug (->) (Maybe (TB1 (Text,Showable)))
+      arrowF ,arrowS :: ArrowReader
       arrowF = proc t -> do
               atAny "number" [idxR "cpf_number"] -< t
               odxR "captchaViewer" -< t
@@ -598,12 +580,10 @@ queryCPFStatefull =  StatefullPlugin "CPF Receita" "owner" [staticP arrowF,stati
               returnA -< Nothing
 
 
-
-
 queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
   [staticP arrowF ,staticP arrowS ]
   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] wrapplug
-    where arrowF ,arrowS :: ArrowReader -- ArrowPlug (->) (Maybe (TB1 (Text,Showable)))
+    where arrowF ,arrowS :: ArrowReader
           arrowF = proc t -> do
             atAny "number" [idxR "cnpj_number"] -< t
             odxR "captchaViewer"-< t
@@ -659,12 +639,12 @@ main = do
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
 
-  mapM_ (forkIO . poller h) [artAndamentoPolling,siapi2Polling,siapi3Polling]
+  mapM_ (forkIO . poller h) [queryArtAndamento,siapi2Plugin,siapi3Plugin ]
 
-  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html"})  (setup e args)
+  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e $ tail args)
   print "Finish"
 
-poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
+poller handler (BoundedPlugin2 n a f elemp ) = do
   conn <- connectPostgreSQL ("user=postgres dbname=incendio")
   inf <- keyTables conn  conn ("incendio","postgres")
   forever $ do
@@ -672,6 +652,7 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
         [t :: Only UTCTime] <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
         startTime <- getCurrentTime
         let intervalsec = fromIntegral $ 60*d
+            d = 60
         if diffUTCTime startTime  (unOnly t) >  intervalsec
         then do
             execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
@@ -681,6 +662,11 @@ poller handler (BoundedPollingPlugins n d (a,f) elem ) = do
             let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
                 tdInput i =  isJust  $ testTable i (fst f)
                 tdOutput1 i =   not $ isJust  $ testTable i (snd f)
+            let elem inf  = fmap (pure .catMaybes) .  mapM (\inp -> do
+                        o  <- elemp inf (Just inp)
+                        let diff =   traceShowId $ join $ diffUpdateAttr  <$>  o <*> Just inp
+                        maybe (return Nothing )  (\i -> updateModAttr inf (fromJust o) inp (lookTable inf a )) diff )
+
             i <- elem inf evb
             handler i
             end <- getCurrentTime
@@ -712,5 +698,6 @@ layout  infT = do
   script <- UI.div # sink UI.html (maybe "" draw <$> infT)
   UI.div # set children [vis,script]
 -}
+
 
 plugList = [lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}queryCNPJStatefull,queryCPFStatefull,queryArtAndamento]
