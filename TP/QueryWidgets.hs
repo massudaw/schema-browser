@@ -425,10 +425,8 @@ crudUITable inf pgs open bres pmods ftb@(TB1 m _ ) preoldItems = do
   chw <- checkedWidget open
   (h,e) <- liftIO $ newEvent
   let
-    tpkConstraint :: ([Compose Identity (TB Identity) Key ()], Behavior PKConstraint)
-    tpkConstraint = ( F.toList $ _kvvalues $ unTB $ tbPK ftb , flip pkConstraint  <$> tbnonOld)
-    tbnonOld :: Behavior [TB1 Showable]
-    tbnonOld = facts $ (\e l -> maybe l (flip L.delete l ) e  ) <$> preoldItems  <*> tidings bres never
+    tbnonPreOld :: Tidings [TB1 Showable]
+    tbnonPreOld = (\e l -> maybe l (flip L.delete l ) e  ) <$> preoldItems  <*> tidings bres never
   let fun True = do
           let
             table = lookPK inf ( S.fromList $ findPK ftb)
@@ -439,6 +437,9 @@ crudUITable inf pgs open bres pmods ftb@(TB1 m _ ) preoldItems = do
           let oldItemsE = (\i -> maybe i modifyTB ) <$> facts preoldItems <@> loadedItensEv
           oldItemsB <- stepper (maybe preoldItens modifyTB loadedItens) oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
+              tbnonOld = (\e l -> maybe l (flip L.delete l ) e  ) <$> oldItems  <*> tbnonPreOld
+              tpkConstraint :: ([Compose Identity (TB Identity) Key ()], Behavior PKConstraint)
+              tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK ftb , flip pkConstraint  <$> facts tbnonOld)
           (listBody,tableb) <- uiTable inf pgs [tpkConstraint] (tableName table) pmods ftb oldItems
           (panelItems,evsa)<- processPanelTable inf  (facts tableb) bres table oldItems
           let evs =  unions (filterJust loadedItensEv : evsa)
