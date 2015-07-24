@@ -424,9 +424,6 @@ crudUITable
 crudUITable inf pgs open bres pmods ftb@(TB1 m _ ) preoldItems = do
   chw <- checkedWidget open
   (h,e) <- liftIO $ newEvent
-  let
-    tbnonPreOld :: Tidings [TB1 Showable]
-    tbnonPreOld = (\e l -> maybe l (flip L.delete l ) e  ) <$> preoldItems  <*> tidings bres never
   let fun True = do
           let
             table = lookPK inf ( S.fromList $ findPK ftb)
@@ -437,9 +434,8 @@ crudUITable inf pgs open bres pmods ftb@(TB1 m _ ) preoldItems = do
           let oldItemsE = (\i -> maybe i modifyTB ) <$> facts preoldItems <@> loadedItensEv
           oldItemsB <- stepper (maybe preoldItens modifyTB loadedItens) oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
-              tbnonOld = (\e l -> maybe l (flip L.delete l ) e  ) <$> oldItems  <*> tbnonPreOld
               tpkConstraint :: ([Compose Identity (TB Identity) Key ()], Behavior PKConstraint)
-              tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK ftb , flip pkConstraint  <$> facts tbnonOld)
+              tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK ftb , flip pkConstraint  <$> bres )
           (listBody,tableb) <- uiTable inf pgs [tpkConstraint] (tableName table) pmods ftb oldItems
           (panelItems,evsa)<- processPanelTable inf  (facts tableb) bres table oldItems
           let evs =  unions (filterJust loadedItensEv : evsa)
@@ -483,7 +479,7 @@ processPanelTable inf attrsB res table oldItemsi = do
 
   deleteB <- UI.button # set text "DELETE" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table ))
   -- Delete when isValid
-        # sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> not $ maybe False (flip contains j) i  ) attrsB res))
+        # sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip contains j) i  ) (facts oldItemsi ) res))
   let
       deleteAction ki =  do
         res <- liftIO $ catch (Right <$> delete (conn inf) ki table) (\e -> return $ Left (show $ traceShowId  (e :: SomeException) ))
@@ -656,11 +652,11 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
 
       ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . snd <$> plmods)
       let
-          res3 :: Behavior [TB1 Showable]
-          res3 = (\el constr -> filter (not. maybe False constr . backFKRef relTable ifk . Just )  el )  <$> res2  <*> (if L.null constr  then pure (const False ) else snd $ head constr)
+          res3 :: Tidings [TB1 Showable]
+          res3 =  (\el constr td -> filter ( not. maybe False (\ex -> constr ex && maybe True (ex /=) td ) . backFKRef relTable ifk . Just )  el )  <$> res2  <#> tidings (if L.null constr  then pure (const False ) else snd $ head constr) never <*> (fmap ( _tbref )<$> ftdi)
       let
           search = (\i j -> join $ fmap (\k-> L.find (\(TB1 _ l )-> interPoint rel k  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList . _kvvalues . unTB $ l)) ) i) $ j )
-          tdi =  search <$> res3 <#> (fmap (fmap unTB. _tbref )<$> ftdi)
+          tdi =  search <$> res3 <*> (fmap (fmap unTB. _tbref )<$> ftdi)
       filterInp <- UI.input
       filterInpBh <- stepper "" (UI.valueChange filterInp)
       let
@@ -668,12 +664,12 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList
           sortList :: Tidings ([TB1 Showable] -> [TB1 Showable])
           sortList =  sorting  <$> pure True <*> pure (fmap (Le.view relTarget) rel)
-      itemList <- listBox (tidings ((Nothing:) <$>  fmap (fmap Just) res3) never) (tidings bselection  never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+      itemList <- listBox (((Nothing:) <$>  fmap (fmap Just) res3) ) (tidings bselection  never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
       let evsel = unionWith const (rumors $ join <$> userSelection itemList) (rumors tdi)
       prop <- stepper cv evsel
       let tds = tidings prop evsel
-      (celem,evs) <- crudUITable inf pgs  (pure False) res3 (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
+      (celem,evs) <- crudUITable inf pgs  (pure False) (facts res3) (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
       let
           bselection = fmap Just <$> st
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> userSelection itemList), rumors tdi]),(fmap modifyTB <$> evs)]

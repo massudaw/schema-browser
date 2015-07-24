@@ -219,7 +219,7 @@ selectAll inf table   = liftIO $ do
       let -- rp = rootPaths'  (tableMap inf) table
           tb =  tableView (tableMap inf) table
       (t,v) <- duration  $ queryWith_  (fromAttr (unTlabel tb)) (conn inf)(fromString $ T.unpack $ selectQuery tb)
-      print (tableName table,t)
+      print (tableName table,selectQuery tb,t)
       return v
 
 addTable inf table = do
