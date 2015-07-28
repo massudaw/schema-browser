@@ -265,10 +265,10 @@ loadDelayed inf t@(TB1 k v) values@(TB1 ks vs)
   | otherwise = do
        let
            str = "SELECT ROW(" <> attr <> ") FROM " <> showTable table <> " WHERE " <> whr
-           whr = T.intercalate "," ((\i-> (keyValue i) <>  " = ?") <$> S.toList (_kvpk k) )
+           whr = T.intercalate " AND " ((\i-> (keyValue i) <>  " = ?") <$> S.toList (_kvpk k) )
            attr = T.intercalate "," delayedattrs
            table = justError "no table" $ M.lookup (_kvpk k) (pkMap inf)
-           delayed = fmap (const ()) $ mapKey (ifDelayed . ifOptional) $ TB1 k $ Compose $ Identity $ KV $  (M.filterWithKey (\key v -> S.isSubsetOf key (_kvdelayed k) && maybe False id  (fmap (isNothing .unSDelayed) $ unSOptional $ _tbattr $ unTB v)  ) (_kvvalues $ unTB vs) )
+           delayed = fmap (const ()) $ mapKey (ifDelayed . ifOptional) $ TB1 k $ Compose $ Identity $ KV $  (M.filterWithKey (\key v -> S.isSubsetOf key (_kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs) )
        print str
        is <- queryWith (fromAttr delayed)  (conn inf) (fromString $ T.unpack str) (fmap unTB $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK (tableNonRef values))
        case is of

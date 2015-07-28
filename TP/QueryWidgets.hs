@@ -711,7 +711,7 @@ interPoint
      -> Bool
 interPoint ks i j = all (\(Rel l op  m) -> justError "interPoint wrong fields" $ liftA2 (intersectPredTuple  op) (L.find ((==l).keyAttr ) i )   (L.find ((==m).keyAttr ) j)) ks
 
-intersectPredTuple  op = (\i  j -> intersectPred (textToPrim <$> keyType (keyAttr i)) op  (textToPrim <$> keyType (keyAttr j)) (unAttr i) (unAttr j))
+intersectPredTuple  op = (\i j-> intersectPred (textToPrim <$> keyType (keyAttr i)) op  (textToPrim <$> keyType (keyAttr j)) (unAttr i) (unAttr j))
 
 unArray (SComposite s) =  V.toList s
 unArray o  = errorWithStackTrace $ "unArray no pattern " <> show o

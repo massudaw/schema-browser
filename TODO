@@ -4,6 +4,25 @@ BUGS
 
 NEW FEATURES
 
+MULTIPLE TRANSACTION DIFF FUNCTION
+-- Analyse diff tree and do INSERT SERIAL, INSERT , UPDATE 
+transancions with one click
+-- Over UI
+-- Over polling
+
+RESTRICT PLUGIN INPUT 
+-- Filter not used fields to improve diffs
+
+CUSTOM PER TABLE FILTERS
+-- ui filters and database filters
+-- define filter scope
+-- metadata structure to store filters
+-- typed ui widget
+-- deep nested reference
+-- multi column predicates
+-- subtyping constraints 
+-- and , or combinators
+
 PAGINATE
 -- Implement pagination over now() for dates
 -- Metadata Paginate reference
@@ -11,11 +30,12 @@ PAGINATE
 CONSTRAINED REFLEXIVE RELATION
 -- Drop down for selecting multiple columns reference
 
-ORDERING
+INDEX ORDERING
+-- index metadata
 -- metadata ordering default
 
 CRUD
-Implement edit split for intervals and arrays
+-- Implement edit split for intervals and arrays
 
 PKPK FK CONSTRAINT
 -- Map over FK table the origin constraints
@@ -27,7 +47,7 @@ CONSTRAINT OPERATOR
 
 Multiple Schema joins
 -- Generate Queries with multiple schemas
--- Join Schema Graphs
+-- Join Schema AST 
 
 Types UI 
 -- Improve Especialized type UI

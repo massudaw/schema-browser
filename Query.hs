@@ -200,12 +200,20 @@ inner b l m = l <> b <> m
 
 -- Operators
 intersectPred p@(Primitive _) op  (KInterval i) j (SInterval l )  | p == i =  Interval.member j l
-intersectPred p@(KInterval j) "<@" (KInterval i) (SInterval k)  (SInterval l )   =  Interval.isSubsetOf k  l
+intersectPred p@(KInterval j) "<@" (KInterval i) (SInterval k)  (SInterval l ) =  Interval.isSubsetOf k  l
+intersectPred p@(KInterval j) "@>" (KInterval i) (SInterval k)  (SInterval l ) =  flip Interval.isSubsetOf k l
 intersectPred p@(KInterval j) "=" (KInterval i) (SInterval k)  (SInterval l )   =  k == l
 intersectPred p@(KArray j) "<@" (KArray i) (SComposite k)  (SComposite l )   =  S.fromList (F.toList k) `S.isSubsetOf` S.fromList  (F.toList l)
+intersectPred p@(KArray j) "@>" (KArray i) (SComposite k)  (SComposite l )   =  S.fromList (F.toList l) `S.isSubsetOf` S.fromList  (F.toList k)
 intersectPred p@(KArray j) "=" (KArray i) (SComposite k)  (SComposite l )   =  k == l
 intersectPred p@(Primitive _) op (KArray i) j (SComposite l )  | p == i =  Vector.elem j l
-intersectPred p1@(Primitive _) op  p2@(Primitive _) j l   | p1 == p2 =  j ==  l
+intersectPred p1@(Primitive _) op  p2@(Primitive _) j l   | p1 == p2 =  case op of
+                                                                             "=" -> j ==  l
+                                                                             "<" -> j < l
+                                                                             ">" -> j > l
+                                                                             ">=" -> j >= l
+                                                                             "<=" -> j <= l
+                                                                             "/=" -> j /= l
 intersectPred p1 op  (KSerial p2) j (SSerial l)   | p1 == p2 =  maybe False (j ==) l
 intersectPred p1 op (KOptional p2) j (SOptional l)   | p1 == p2 =  maybe False (j ==) l
 intersectPred p1@(KOptional i ) op p2 (SOptional j) l  =  maybe False id $ fmap (\m -> intersectPred i op p2 m l) j
