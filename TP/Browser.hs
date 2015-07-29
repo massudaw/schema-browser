@@ -12,6 +12,7 @@
 
 import Query
 import Types
+import qualified Data.Binary as B
 import Step
 import Location
 import PrefeituraSNFSE
@@ -89,25 +90,36 @@ argsToState  [h,d,u,p,s,t] = BrowserState h d  u p (Just s) (Just t )
 argsToState  [h,d,u,p,s] = BrowserState h d  u p  (Just s)  Nothing
 argsToState  [h,d,u,p] = BrowserState h d  u p Nothing Nothing
 
+
 setup
      :: Show a =>   Event [a] -> [String] -> Window -> UI ()
 setup e args w = void $ do
-  return w # set title "Data Browser"
   let bstate = argsToState args
-  (evDB,chooserDiv) <- databaseChooser bstate
+  (evDB,chooserItens) <- databaseChooser bstate
   body <- UI.div
   be <- stepper [] e
   pollRes <- UI.div # sink UI.text (show <$> be)
-  getBody w #+ [element chooserDiv , element body]
-  mapUITEvent body (traverse (\(inf)-> do
-    let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
-    span <- chooserKey  inf k (table bstate)
-    element body # set UI.children [span,pollRes] )) evDB
+  return w # set title (host bstate <> " - " <>  dbn bstate)
+  nav  <- buttonSetUI ["Editor","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  element nav # set UI.class_ "col-xs-5"
+  chooserDiv <- UI.div # set children  (chooserItens <> [ getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
+  container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
+  getBody w #+ [element container]
+  mapUITEvent body (traverse (\(nav,inf)->
+      case nav of
+        "Changes" -> do
+            dash <- dashBoard inf
+            element body # set UI.children [dash]
+        "Editor" -> do
+            let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
+            span <- chooserKey  inf k (table bstate)
+            element body # set UI.children [span,pollRes] )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
 
 
+connRoot dname = (fromString $ "host=" <> host dname <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname <> " sslmode= require" )
 listDBS ::  BrowserState -> IO (Text,(Connection,[Text]))
 listDBS dname = do
-  connMeta <- connectPostgreSQL (fromString $ "host=" <> host dname <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname <> " sslmode= require" )
+  connMeta <- connectPostgreSQL (connRoot dname)
   dbs :: [Only Text]<- query_  connMeta "SELECT datname FROM pg_database  WHERE datistemplate = false"
   map <- (\db -> do
         connDb <- connectPostgreSQL ((fromString $ "host=" <> host dname <>" user=" <> user dname <> " dbname=" ) <> toStrict (encodeUtf8 db) <> (fromString $ " password=" <> pass dname <> " sslmode= require") )
@@ -116,16 +128,20 @@ listDBS dname = do
   return map
 
 loginWidget userI passI =  do
-  username <- UI.input # set UI.name "username" # set UI.value (maybe "" id userI)
-  password <- UI.input # set UI.name "password" # set UI.type_ "password" # set UI.value (maybe "" id passI)
+  usernamel <- flabel # set UI.text "Usuário"
+  username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set UI.value (maybe "" id userI)
+  passwordl <- flabel # set UI.text "Senha"
+  password <- UI.input # set UI.name "password" # set UI.style [("width","142px")] # set UI.type_ "password" # set UI.value (maybe "" id passI)
   let usernameE = (\i -> if L.null i then Nothing else Just i) <$> UI.valueChange username
       passwordE = (\i -> if L.null i then Nothing else Just i) <$> UI.valueChange password
+
+  userDiv <- UI.div # set children [usernamel,username] # set UI.class_  "col-xs-2"
+  passDiv <- UI.div # set children [passwordl,password] # set UI.class_  "col-xs-2"
   usernameB <- stepper userI usernameE
   passwordB <- stepper passI passwordE
   let usernameT = tidings usernameB usernameE
       passwordT = tidings passwordB passwordE
-  login <- UI.div # set children [username,password]
-  return $ TrivialWidget (liftA2 (liftA2 (,)) usernameT passwordT) login
+  return $ ((liftA2 (liftA2 (,)) usernameT passwordT) ,[userDiv,passDiv])
 
 instance Ord Connection where
   i < j = 1 < 2
@@ -139,22 +155,24 @@ form td ev =  tidings (facts td ) (facts td <@ ev )
 databaseChooser sargs = do
   dbs <- liftIO $ listDBS  sargs
   let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,) . (,T.pack s) . fst $ snd $ dbs ) $ ( schema sargs)
-  wid <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
-  dbsW <- listBox (pure $ (\(i,(c,j)) -> (i,) . (c,) <$> j) $ dbs ) (pure dbsInit  ) (pure id) (pure (line . show .fmap snd ))
+  (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
+  dbsW <- listBox (pure $ (\(i,(c,j)) -> (i,) . (c,) <$> j) $ dbs ) (pure dbsInit  ) (pure id) (pure (line . show . snd . fmap snd ))
+  schema <- flabel # set UI.text "schema"
   cc <- currentValue (facts $ userSelection dbsW)
   let dbsWE = rumors $ userSelection dbsW
   dbsWB <- stepper cc dbsWE
   let dbsWT  = tidings dbsWB dbsWE
-  load <- UI.button # set UI.text "Connect" # sink UI.enabled (facts (isJust <$> dbsWT) )
-  let login = liftA2 (liftA2 (,)) (triding wid) ( dbsWT )
+  load <- UI.button # set UI.text "Connect" # set UI.class_ "col-xs-1" # sink UI.enabled (facts (isJust <$> dbsWT) )
+  let login = liftA2 (liftA2 (,)) (widT) ( dbsWT )
       formLogin = form login (UI.click load)
   let genSchema ((user,pass),(dbN,(dbConn,schemaN))) = do
         conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> toStrict ( encodeUtf8 dbN )<> " sslmode= require")
         execute_ conn "set bytea_output='hex'"
         keyTables dbConn conn (schemaN,T.pack user)
+  element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   chooserT <-  mapTEvent (traverse genSchema) formLogin
-  chooserDiv <- UI.div # set children [getElement wid ,getElement dbsW,load]
-  return $ (chooserT,chooserDiv)
+  schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schema , getElement dbsW]
+  return $ (chooserT,(widE <> [schemaSel ,load]))
 
 
 
@@ -168,6 +186,26 @@ tableNonRec k  =  F.toList $  tableNonRef  k
 
 line n =   set  text n
 
+
+panel t els = UI.div # set items ( UI.h2 # set text (T.unpack t  ) : [UI.div # set items (F.toList els)])
+showModDiv i = UI.div # set UI.style [("display","flex")] # set items (showMod i)
+showMod (EditTB i j) = [showFKE j , operator  "| ~ |" , showFKE' i]
+showMod (InsertTB j) = [UI.div , operator "| + |" , showFKE j]
+showMod (DeleteTB j) = [showFKE j , operator "| - |" , UI.div]
+
+operator op = UI.div # set text op  # set UI.style [("margin-left","3px"),("margin-right","3px")]
+{-
+dashBoardAll  inf = do
+  els :: [(Text,Vector.Vector (Binary BSL.ByteString))] <-
+    liftIO $ query (rootconn inf) "SELECT modification_id,modification_date,table,modification_data from metadata.modification_table WHERE schema_name = ?" (Only $ schemaName inf)
+  UI.div  # set items ( (\(b,v)-> panel (translatedName $ lookTable inf b)  $ fmap (\(Binary d) -> ( (showModDiv $ liftMod inf b (B.decode d :: Modification Text Showable)))) v ) <$> els)
+-}
+
+dashBoard inf = do
+  els :: [(Text,Vector.Vector (Binary BSL.ByteString))] <-
+    liftIO $ query (rootconn inf) "SELECT table_name,array_agg(modification_data) from metadata.modification_table WHERE schema_name = ? group by table_name" (Only $ schemaName inf)
+  UI.div  # set items ( (\(b,v)-> panel (translatedName $ lookTable inf b)  $ fmap (\(Binary d) -> ( (showModDiv $ liftMod inf b (B.decode d :: Modification Text Showable)))) v ) <$> els)
+
 attrLine i e   = do
   let nonRec = tableNonrec i
       attr i (k,v) = set  (strAttr (T.unpack $ keyValue k)) (renderShowable v) i
@@ -176,7 +214,7 @@ attrLine i e   = do
 
 chooserKey inf kitems i = do
   let initKey = pure . join $ fmap rawPK . flip M.lookup (tableMap inf) . T.pack <$> i
-  filterInp <- UI.input
+  filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
   i :: [(Text,Int)] <- liftIO $ query (rootconn inf) (fromString "SELECT table_name,usage from metadata.ordering where schema_name = ?") (Only (schemaName inf))
@@ -188,8 +226,10 @@ chooserKey inf kitems i = do
   onEvent (rumors bBset) (\ i ->
       liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
-  body <- UI.div # sink items (facts (pure . chooseKey inf <$> bBset ))
-  UI.div # set children [filterInp,getElement bset, body]
+  tbChooser <- UI.div # set children [filterInp,getElement bset] # set UI.class_ "col-md-2"
+  body <- UI.div # sink items (facts (pure . chooseKey inf <$> bBset )) # set UI.class_ "col-md-10"
+
+  UI.div # set children [tbChooser , body]  # set UI.class_ "row"
 
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
 
@@ -201,6 +241,26 @@ tableAttrs (TB1 _ (k) ) = concat $ fmap aattr (F.toList $ _kvvalues $  runIdenti
 tableAttrs (LeftTB1 (Just i)) = tableAttrs i
 tableAttrs (ArrayTB1 [i]) = tableAttrs i
 
+validOp = ["&&","<@","@>","<",">","=","/=","<=",">="]
+
+
+filterCase inf t@(Attr k _ ) = do
+  opInp <- UI.input # set UI.text "="
+  opBh <- stepper "=" (UI.valueChange opInp)
+  let opT = (\v -> if elem v validOp then Just v else Nothing) <$> tidings opBh (UI.valueChange opInp)
+  elv <- attrUITable (pure Nothing) [] t
+  TrivialWidget (fmap (fmap (t,)) $ liftA2 (liftA2 (,)) opT (triding elv)) <$> UI.div # set children [opInp,getElement elv ]
+filterCase inf (FKT l _ _ tb1) =  filterUI inf tb1
+filterCase inf (IT _ tb1) = filterUI inf tb1
+
+filterUI inf (LeftTB1 (Just i))  =  filterUI inf i
+filterUI inf (ArrayTB1 [i])  = filterUI inf i
+filterUI inf t@(TB1 k v) = do
+  el <- listBox (pure (M.toList (_kvvalues $ runIdentity $ getCompose v) )) (pure Nothing) (pure id) (pure (\i j -> j # set text (show (T.intercalate "," $ keyValue <$> S.toList (fst i)) )))
+  elv <- mapDynEvent (maybe emptyUI  (filterCase inf . unTB . fmap (const ()) . snd )) (TrivialWidget (userSelection el) (getElement el))
+  out <- UI.div # sink UI.text (show <$> facts (triding elv))
+  TrivialWidget (triding elv) <$> UI.div # set children [getElement el , getElement elv,out]
+
 
 
 chooseKey
@@ -211,28 +271,29 @@ chooseKey inf key = mdo
 
   liftIO$ swapMVar  (mvarMap inf) M.empty
   let bBset = pure key :: Tidings (S.Set Key)
-  vp <- liftIO $addTable inf (fromJust  $ M.lookup key $ pkMap inf )
+      table = fromJust  $ M.lookup key $ pkMap inf
 
+  vp <- liftIO $ addTable inf table
   let
       tdi = pure Nothing
   cv <- currentValue (facts tdi)
   -- Final Query ListBox
   filterInp <- UI.input
   filterInpBh <- stepper "" (UI.valueChange filterInp)
+  el <- filterUI  inf (allRec' (tableMap inf)  table)
   let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
-      sortSet =  F.toList . tableKeys . tableNonRef . allRec' (tableMap inf). (\(Just i)-> i) . flip M.lookup (pkMap inf) $ key
+      sortSet =  F.toList . tableKeys . tableNonRef . allRec' (tableMap inf ) $ table
   sortList  <- multiListBox (pure sortSet) (traceShowId . F.toList <$> bBset) (pure (line . show))
   asc <- checkedWidget (pure True)
   let
      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList  )
      tsort = (\ b c -> trace (T.unpack $ "sort " <> T.intercalate "," (fmap showKey c)) . sorting b (traceShowId c) ) <$> triding asc <*> multiUserSelection sortList
-  itemList <- listBox (tidings res2 never) (tidings bselection never)  (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
+     res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 _ kv ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $ keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
+  itemList <- listBox res3  (tidings bselection never)  (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
   let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
   prop <- stepper cv (trace "evtrig" <$> evsel)
   let tds = tidings prop evsel
-  let
-     table = (\(Just i)-> i) $ M.lookup key (pkMap inf)
-  (cru ,evs) <- crudUITable inf plugList  (pure True) res2 [] (allRec' (tableMap inf) table) tds
+  (cru ,evs) <- crudUITable inf plugList  (pure True) (facts res3) [] (allRec' (tableMap inf) table) tds
   let
      bselection = st
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [(rumors  $userSelection itemList ) ,rumors tdi]),(fmap modifyTB <$> evs)]
@@ -242,14 +303,14 @@ chooseKey inf key = mdo
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","300px")]
   insertDiv <- UI.div # set children cru
-  itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [filterInp,getElement sortList,getElement asc] )
+  itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [filterInp,getElement sortList,getElement asc, getElement el] )
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.style [("display","inline-flex")]
-  UI.div # set children ([itemSelec,insertDiv ] )
+  header <- UI.h1 # set text (T.unpack $ translatedName table)
+  UI.div # set children ([header,itemSelec,insertDiv ] )
 
 
 lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" (fst renderProjectPricingA )  ( snd renderProjectPricingA )
 lplugReport = BoundedPlugin2 "Relatório " "pricing" (fst renderProjectReport )  ( snd renderProjectReport )
-
 
 testShowable  v s = case s of
           (SOptional Nothing ) -> False
@@ -380,45 +441,16 @@ instance ToJSON Timeline where
           tti  = formatTime defaultTimeLocale "%Y/%m/%d %H:%M:%S"
 -}
 
-
-
-gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
-  where
-    tname = "plano_aluno"
-    url :: Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))
-    url = proc t -> do
-          descontado <-  liftA2 (\v k -> v*(1 - k) )
-              <$> atR "frequencia,meses"
-                  (liftA2 (\v m -> v * fromIntegral m) <$> idxR "price" <*> idxR "meses")
-              <*> idxR "desconto" -< ()
-          atR "pagamento" (proc descontado -> do
-              pinicio <- idxR "inicio"-< ()
-              p <- idxR "vezes" -< ()
-              let valorParcela = liftA2 (/)  descontado p
-              atR "pagamentos" (proc t -> do
-                  odxR "description" -<  t
-                  odxR "price" -<  t
-                  odxR "scheduled_date" -<  t ) -< ()
-              let total = maybe 0 fromIntegral  p :: Int
-              let pagamento = _tb $ FKT ([ attrT  ("pagamentos",SOptional Nothing)]) True [] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> tblist [attrT ("id",SSerial Nothing),attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ]) ([1.. total] )))
-                  ao :: Maybe (TB2 Text Showable)
-                  ao =  Just $ tblist [_tb $ IT   (attrT ("pagamento",()))  (LeftTB1 $ Just $ tblist [pagamento ])]
-              returnA -< ao ) -< descontado
-
-    elem inf = maybe (return Nothing) (\inp -> do
-                  b <- runReaderT (dynPK   url $ ())  (Just inp)
-                  return $ liftKeys inf tname  <$> b )
-
-
-pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname (staticP url) elem
-  where
-    tname = "servico_venda"
-    url :: Parser (Kleisli (ReaderT (Maybe (TB1 (Showable))) IO)) (Access Text) () (Maybe (TB2  Text (Showable)))
-    url = proc t -> do
-          descontado <- atR "pacote,servico"
-                  (liftA3 (\v m k -> v * fromIntegral m * (1 -k) ) <$> atR "servico" (idxR "price") <*> idxR "pacote"
-                        <*> idxR "desconto") -< ()
-          atR "pagamento" (proc descontado -> do
+pagamentoArr
+  :: (KeyString a1,
+      MonadReader (Maybe (FTB1 Identity a1 Showable)) m, Show a1,
+      Ord a1) =>
+     Parser
+       (Kleisli m)
+       (Access Text)
+       (Maybe Showable)
+       (Maybe (TB2 Text Showable))
+pagamentoArr =  (proc descontado -> do
               pinicio <- idxR "inicio"-< ()
               p <- idxR "vezes" -< ()
               let valorParcela = liftA2 (/)  descontado p
@@ -430,7 +462,33 @@ pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname (staticP url) elem
               let pagamento = Compose $ Identity $ FKT ([attrT  ("pagamentos",SOptional Nothing)]) True [] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> tblist [attrT ("id",SSerial Nothing),attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ]) ([1 .. total] )))
                   ao :: Maybe (TB2 Text (Showable))
                   ao =  Just $ tblist [Compose $ Identity $ IT   (attrT ("pagamento",()))  (LeftTB1 $ Just $ tblist[pagamento ])]
-              returnA -< ao ) -< descontado
+              returnA -< ao )
+
+
+gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
+  where
+    tname = "plano_aluno"
+    url :: Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))
+    url = proc t -> do
+          descontado <-  liftA2 (\v k -> v*(1 - k) )
+              <$> atR "frequencia,meses"
+                  (liftA2 (\v m -> v * fromIntegral m) <$> idxR "price" <*> idxR "meses")
+              <*> idxR "desconto" -< ()
+          atR "pagamento" pagamentoArr -< descontado
+
+    elem inf = maybe (return Nothing) (\inp -> do
+                  b <- runReaderT (dynPK   url $ ())  (Just inp)
+                  return $ liftKeys inf tname  <$> b )
+
+pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname (staticP url) elem
+  where
+    tname = "servico_venda"
+    url :: Parser (Kleisli (ReaderT (Maybe (TB1 (Showable))) IO)) (Access Text) () (Maybe (TB2  Text (Showable)))
+    url = proc t -> do
+          descontado <- atR "pacote,servico"
+                  (liftA3 (\v m k -> v * fromIntegral m * (1 -k) ) <$> atR "servico" (idxR "price") <*> idxR "pacote"
+                        <*> idxR "desconto") -< ()
+          atR "pagamento"  pagamentoArr -< descontado
 
     elem inf = maybe (return Nothing) (\inp -> do
                       b <- runReaderT (dynPK   url $ ())  (Just inp)
@@ -523,23 +581,23 @@ queryArtBoletoCrea = BoundedPlugin2  pname tname (staticP url) elem
   where
     pname = "Boleto Art Crea"
     tname = "art"
-    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text (Showable)))
+    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    url :: ArrowReader
     url = proc t -> do
       i <- varTB "art_number" -< t
-      idxT "verified_date" -< t
-      odx "boleto" -< t
-      r <- at "crea_register" (proc t -> do
+      idxR "verified_date" -< t
+      odxR "boleto" -< t
+      r <- atR "crea_register" (proc t -> do
                                n <- varTB "crea_number" -< t
                                u <- varTB "crea_user"-< t
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
-      b <- act ( traverse (\(i, (j, k,a)) -> creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
+      b <- act ( traverse (\(i, (j, k,a)) -> lift $ creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
       let ao =  Just $ tblist [attrT ("boleto",   SOptional $ (SBinary. BSL.toStrict) <$> b)]
       returnA -< ao
     elem inf
        = maybe (return Nothing) (\inp -> do
-                            b <- dynPK url (Just inp)
+                            b <- runReaderT (dynPK url $ () ) (Just inp)
                             return $ liftKeys inf tname <$> b )
 
 
@@ -639,17 +697,17 @@ main = do
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
 
-  mapM_ (forkIO . poller h) [queryArtAndamento,siapi2Plugin,siapi3Plugin ]
+  mapM_ (forkIO . poller (argsToState (tail args) ) h) [queryArtAndamento,siapi2Plugin,siapi3Plugin ]
 
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e $ tail args)
   print "Finish"
 
-poller handler (BoundedPlugin2 n a f elemp ) = do
-  conn <- connectPostgreSQL ("user=postgres dbname=incendio")
-  inf <- keyTables conn  conn ("incendio","postgres")
+poller db handler (BoundedPlugin2 n a f elemp ) = do
+  conn <- connectPostgreSQL (connRoot db)
+  inf <- keyTables conn  conn (T.pack $ dbn db, T.pack $ user db)
   forever $ do
-        threadDelay (1000*1000)
         [t :: Only UTCTime] <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
+        threadDelay (1000*1000)
         startTime <- getCurrentTime
         let intervalsec = fromIntegral $ 60*d
             d = 60

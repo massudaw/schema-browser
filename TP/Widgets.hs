@@ -104,6 +104,9 @@ addEvent ev b = do
  nbev <- stepper v nev
  return  $tidings nbev nev
 
+mapUITEvent body f  = mapTEvent (\i -> evalUI body $ f i )
+
+{-
 mapUITEvent body f x = do
   (e,h) <- liftIO $ newEvent
   onEvent (rumors x) (\i -> liftIO . forkIO $ (evalUI body $  f i)  >>= h)
@@ -111,6 +114,19 @@ mapUITEvent body f x = do
   be <- liftIO $ evalUI body $ f i
   t <- stepper be e
   return $ tidings t e
+
+-}
+
+mapDynEvent f x = do
+  t <- mapUITEvent (getElement x) f (triding x)
+  sub <- UI.div # sink items (pure. element  <$> facts t )
+  (e,h) <- liftIO $ newEvent
+  onEvent (rumors t) (\x-> onEvent (rumors . triding $ x) (liftIO .  h) )
+  v <- currentValue (facts t)
+  i <- currentValue (facts (triding v))
+  bh <- stepper i e
+  return $ TrivialWidget (tidings bh e) sub
+
 
 
 mapEvent f x = do
@@ -122,8 +138,6 @@ mapEvent f x = do
 
 mapTEvent f x = do
   e <- mapEvent f (rumors x)
-  -- (e,h) <- liftIO $ newEvent
-  -- onEvent (rumors x) (\i -> liftIO $  (f i)  >>= h)
   i <- currentValue (facts x)
   be <- liftIO $ f i
   t <- stepper be e
@@ -261,9 +275,15 @@ buttonFSet ks binit bf h =mdo
   return (TrivialWidget (tidings bv evs) dv)
     where
       buttonString h bv k= do
-        b <- UI.button # set UI.class_ "buttonSet" # set text (h k)# sink UI.style ((\i-> noneShowSpan (i (h k))) <$> bf)# sink UI.enabled (not . (k==) <$> bv)
+        b <- UI.button
+            # set UI.class_ "buttonSet btn btn-default"
+            # set text (h k)
+            # set UI.style [("width","100%")]
+            # sink UI.style ((\i-> noneShowSpan (i (h k))) <$> bf)
+            # sink UI.enabled (not . (k==) <$> bv)
         let ev = pure k <@ UI.click  b
-        return (b,ev)
+        bd <- UI.div # set children [b]
+        return (bd,ev)
 
 buttonSetB :: [(a,Behavior Bool)]  ->  (a -> String) -> UI (TrivialWidget a)
 buttonSetB ks h =do
@@ -277,6 +297,21 @@ buttonSetB ks h =do
         b <- UI.button # set text (h k) # sink UI.style (noneShow <$> l)
         let ev = pure k <@ UI.click  b
         return (b,ev)
+
+buttonSetUI :: Eq a => [a]  ->  (a -> UI Element -> UI Element ) -> UI (TrivialWidget a)
+buttonSetUI ks h =mdo
+  buttons <- mapM (buttonString bv h) ks
+  dv <- UI.div # set children (fst <$> buttons)
+  let evs = foldr (unionWith (const)) never (snd <$> buttons)
+  bv <- stepper (head ks) evs
+  return (TrivialWidget (tidings bv evs) dv)
+    where
+      buttonString bv h k= do
+        b <- UI.button # (h k)
+            # sink UI.enabled (not . (k==) <$> bv)
+        let ev = pure k <@ UI.click  b
+        return (b,ev)
+
 
 
 buttonSet :: [a]  ->  (a -> String) -> UI (TrivialWidget a)
@@ -530,6 +565,8 @@ sink0 attr uiv ui =  do
   v <- currentValue uiv
   ui # set attr v # sink attr uiv
 
+
+emptyUI = TrivialWidget (pure Nothing) <$> UI.div
 
 pruneTidings chw tds =   tidings chkBH chkAll
   where

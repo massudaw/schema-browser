@@ -336,6 +336,9 @@ parseShowable
 -- parseShowable  i | traceShow i False = error ""
 parseShowable (Primitive i ) =  (do
    case i of
+        PBinary ->  let
+              pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}" <* takeWhile (=='\\'))
+                in doublequoted  pr <|> pr
         PMime  _ -> let
               pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}" <* takeWhile (=='\\'))
                 in doublequoted  pr <|> pr

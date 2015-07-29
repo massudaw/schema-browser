@@ -3,6 +3,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveFoldable #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -21,6 +22,11 @@ import Control.Lens.TH
 import Data.Functor.Apply
 import Data.Bifunctor
 import Data.Maybe
+import GHC.Generics
+import Data.Text.Binary
+import Data.Binary (Binary)
+import Data.Vector.Binary
+import qualified Data.Binary as B
 import Data.Functor.Identity
 import Data.Ord
 import Data.Typeable
@@ -42,6 +48,7 @@ import Data.Traversable(Traversable)
 import Database.PostgreSQL.Simple.Time
 
 import Data.Time
+import Data.Time.Clock.POSIX
 import Control.Monad
 import GHC.Exts
 import Control.Applicative
@@ -59,7 +66,8 @@ instance Ord a => Ord (Interval.Interval a ) where
   compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)
 
 
-data Compose f g k a = Compose {getCompose :: f (g k a) } deriving (Functor,Foldable,Traversable,Ord,Eq,Show)
+
+data Compose f g k a = Compose {getCompose :: f (g k a) } deriving (Functor,Foldable,Traversable,Ord,Eq,Show,Generic)
 
 data Path a b
   -- Trivial Path
@@ -74,7 +82,7 @@ data PK a
   = PK { _pkKey:: [a], _pkDescription :: [a]} deriving(Eq,Ord,Functor,Foldable,Traversable,Show)
 
 data KV f k a
-  = KV {_kvvalues :: Map (Set k) (f k a)  }deriving(Eq,Ord,Functor,Foldable,Traversable,Show)
+  = KV {_kvvalues :: Map (Set k) (f k a)  }deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
 
 
 data KVMetadata k
@@ -82,10 +90,10 @@ data KVMetadata k
   { _kvname :: Text
   , _kvschema :: Text
   , _kvpk :: Set k
-  , _kvdesc :: Set k
+  , _kvdesc :: [k]
   , _kvattrs :: Set k
   , _kvdelayed :: Set k
-  }deriving(Eq,Ord,Show)
+  }deriving(Eq,Ord,Show,Generic)
 
 kvMetaFullName m = _kvschema m <> "." <> _kvname m
 
@@ -145,15 +153,24 @@ instance (Functor f ,Bifunctor g)  => Bifunctor (Compose f g ) where
   second f = Compose . fmap (second f) . getCompose
 
 
-
-
 data Rel k
   = Rel
   { _relOrigin :: k
   , _relOperator:: Text
   , _relTarget :: k
-  }deriving(Eq,Show,Ord,Functor,Foldable)
+  }deriving(Eq,Show,Ord,Functor,Foldable,Generic)
 
+deriving instance Generic (Identity a)
+
+
+instance (Binary a ,Binary k) => Binary (Modification k   a)
+instance (Binary (f (g k a)) ) => Binary (Compose f g k a ) where
+instance (Binary (f k a) ,Binary k ) => Binary (KV f k a)
+instance Binary k => Binary (Rel k) where
+instance Binary a => Binary (Identity a) where
+instance (Binary (f (KV (Compose f (TB f)) g k)) , Binary (f (TB f g ())) ,Binary (f (TB f g k)), Binary k ,Binary g) => Binary (TB f g k )
+instance (Binary (f (KV (Compose f (TB f)) k a)) ,Binary k , Binary a ) => Binary (FTB1 f k a)
+instance Binary k => Binary (KVMetadata k )
 
 data TB f k a
   = Attr
@@ -174,7 +191,7 @@ data TB f k a
     , _tbeitherref :: ! [(Compose f (TB f ) k () )]
     , _tbeithervalue:: ! (Maybe (Compose f (TB f ) k a))
     }
-  deriving(Functor,Foldable,Traversable)
+  deriving(Functor,Foldable,Traversable,Generic)
 
 deriving instance (Eq (f (TB f k a )), Eq (f (TB f k () )) , Eq ( (FTB1 f  k a )) ,Eq a , Eq k ) => Eq (TB f k a)
 deriving instance (Ord (f (TB f k a )), Ord (f (TB f k () )) , Ord ( (FTB1 f  k a )) ,Ord a , Ord k ) => Ord (TB f k a)
@@ -184,7 +201,7 @@ type TB1 = TB2 Key
 type TB2 k = TB3 Identity k
 type TB3 f = FTB1 f
 
-mapKVMeta f (KVMetadata tn sch s j k l ) =KVMetadata tn sch (Set.map f s) (Set.map f j) (Set.map f k) (Set.map f l)
+mapKVMeta f (KVMetadata tn sch s j k l ) =KVMetadata tn sch (Set.map f s) (map f j) (Set.map f k) (Set.map f l)
 
 
 filterKey f (TB1 m k ) = TB1 m . mapComp (\(KV kv) -> KV $ Map.filterWithKey f kv )  $  k
@@ -219,7 +236,7 @@ data FTB1 f k a
   = TB1 (KVMetadata k) ! (Compose f (KV (Compose f (TB f))) k a)
   | LeftTB1 ! (Maybe (FTB1 f k a))
   | ArrayTB1 ! [(FTB1 f k a)]
-  deriving(Functor,Foldable,Traversable)
+  deriving(Functor,Foldable,Traversable,Generic)
 
 deriving instance (Eq (f (TB f k a )), Eq (f (TB f k () )) , Eq (f (KV (Compose f (TB f))  k a )) ,Eq a , Eq k ) => Eq (FTB1 f k a)
 deriving instance (Ord (f (TB f k a )), Ord (f (TB f k () )) , Ord (f (KV (Compose f (TB f)) k a )) ,Ord a , Ord k ) => Ord (FTB1 f k a)
@@ -239,6 +256,7 @@ data KPrim
    | PCnpj
    | PMime Text
    | PCpf
+   | PBinary
    | PLineString
    deriving(Show,Eq,Ord)
 
@@ -281,11 +299,43 @@ instance Show Key where
    show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
 showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<>  "::"  <> showTy id (keyType k)
 
-newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read)
 
-newtype Bounding = Bounding (Interval.Interval Position) deriving(Eq,Ord,Typeable,Show)
+instance Binary a => Binary (Interval.Extended a) where
+  put (Interval.Finite a ) = B.put a
+  get = Interval.Finite <$> B.get
+instance Binary a => Binary ( Interval.Interval a)  where
+  put (Interval.Interval i j ) = B.put i >> B.put j
+  get = liftA2 Interval.Interval B.get B.get
 
-newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,Read)
+
+instance Binary Position
+instance Binary Bounding
+instance Binary LineString
+
+newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read,Generic)
+
+newtype Bounding = Bounding (Interval.Interval Position) deriving(Eq,Ord,Typeable,Show,Generic)
+
+newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,Read,Generic)
+
+
+instance Binary Showable
+
+instance Binary DiffTime where
+  put i = B.put (round  (realToFrac i :: Double) :: Int )
+  get  = secondsToDiffTime <$> B.get
+
+instance Binary LocalTime where
+  put i = B.put (realToFrac $ utcTimeToPOSIXSeconds $ localTimeToUTC utc i :: Double)
+  get = utcToLocalTime utc . posixSecondsToUTCTime . realToFrac <$> (B.get :: B.Get Double)
+
+instance Binary Day where
+  put (ModifiedJulianDay i ) = B.put i
+  get = ModifiedJulianDay <$> B.get
+
+instance Binary TimeOfDay where
+  put i = B.put (timeOfDayToTime  i )
+  get = timeToTimeOfDay  <$> B.get
 
 data Showable
   = SText !Text
@@ -305,8 +355,7 @@ data Showable
   | SComposite !(Vector Showable)
   | SDelayed !(Maybe Showable)
   | SInterval !(Interval.Interval Showable)
-  | SScopedKeySet !(Map Key Showable)
-  deriving(Ord,Eq,Show)
+  deriving(Ord,Eq,Show,Generic)
 
 
 data SqlOperation
@@ -331,7 +380,7 @@ data Table
            , rawName :: Text
            , rawAuthorization :: [Text]
            , rawPK :: (Set Key)
-           , rawDescription :: (Maybe Key)
+           , rawDescription :: [Key]
            , rawFKS ::  (Set (Path (Set Key) (SqlOperation )))
            , rawAttrs :: (Set Key)
            }
@@ -347,14 +396,18 @@ translatedName tb =  maybe (rawName tb) id (rawTranslation tb )
 
 data TableModification b
   = TableModification (Maybe Int) Table (Modification Key b)
-  deriving(Eq,Show,Functor)
+  deriving(Eq,Show,Functor,Generic)
 
+
+mapMod f (EditTB i j ) = EditTB ( mapKey f i ) (mapKey f j)
+mapMod f (InsertTB i  ) = InsertTB ( mapKey f i )
+mapMod f (DeleteTB i  ) = DeleteTB ( mapKey f i )
 
 data Modification a b
   = EditTB (TB2 a b) (TB2 a b)
   | InsertTB (TB2 a b)
   | DeleteTB (TB2 a b)
-  deriving(Eq,Show,Functor)
+  deriving(Eq,Show,Functor,Generic)
 
 instance (Ord k,Apply (f k) ,Functor (f k )) =>Apply  (KV f k) where
   KV pk  <.> KV pk1 = KV (Map.intersectionWith (<.>) pk pk1)
@@ -486,10 +539,10 @@ traComp f =  fmap Compose. traverse f . getCompose
 
 concatComp  =  Compose . concat . fmap getCompose
 
-tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (maybe Set.empty Set.singleton $ rawDescription t) (rawAttrs t) (rawDelayed t)
+tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (rawAttrs t) (rawDelayed t)
 
 tbmap :: Ord k => Map (Set k ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
-tbmap = TB1 (KVMetadata "" ""  Set.empty Set.empty Set.empty Set.empty) . Compose . Identity . KV
+tbmap = TB1 (KVMetadata "" ""  Set.empty [] Set.empty Set.empty) . Compose . Identity . KV
 
 tblist :: Ord k => [Compose Identity  (TB Identity) k a] -> TB3 Identity k a
 tblist = tbmap . mapFromTBList
