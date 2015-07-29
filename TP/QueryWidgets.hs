@@ -145,8 +145,6 @@ plugTags inf bres (BoundedPlugin2 n t f action) = do
   UI.div # set children [headerP,el]
 
 
-
-
 lorder lo lref = allMaybes $ fmap (\k -> L.find (\i-> fst i == k ) lref) lo
 
 attrSize (TBEither n l _ ) = maximum $ fmap (attrSize . runIdentity . getCompose) l
@@ -356,8 +354,7 @@ uiTable
   ::
      InformationSchema
      -> [Plugins]
-     -- Plugin Modifications
-     -> SelPKConstraint -- [Behavior PKConstraint ]
+     -> SelPKConstraint
      -> Text
      -> [(Access Text,Event (Maybe (TB1 Showable)))]
      -> TB1 ()
@@ -514,6 +511,8 @@ editedMod  i  m=  join $ fmap (\mn-> look mn i ) m
 
 showFKE v =  UI.div # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec $  v)
 
+showFKE' v =  UI.div # set text (L.take 100 $ L.intercalate "," $ F.toList $ fmap renderShowable $   v)
+
 showFK = (pure ((\v j ->j  # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec  $ v))))
 
 tablePKSet  tb1 = S.fromList $ concat $ fmap ( keyattr)  $ F.toList $ _kvvalues $ unTB $ tbPK  tb1
@@ -594,7 +593,7 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
       (TrivialWidget offsetT offset) <- offsetField 0
       items <- mapM (\ix ->
             iUITable inf pgs
-                (fmap ( unIndexItens  ix <$> (facts offsetT) <@> ) <$> plmods)
+                (fmap (unIndexItens  ix <$> (facts offsetT) <@> ) <$> plmods)
                 (unIndexItens ix <$> offsetT <*>   oldItems)
                 (IT  na tb1)) [0..8]
       let tds = triding <$> items
@@ -653,7 +652,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
       ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . snd <$> plmods)
       let
           res3 :: Tidings [TB1 Showable]
-          res3 =  (\el constr td -> filter ( not. maybe False (\ex -> constr ex && maybe True (ex /=) td ) . backFKRef relTable ifk . Just )  el )  <$> res2  <#> tidings (if L.null constr  then pure (const False ) else snd $ head constr) never <*> (fmap ( _tbref )<$> ftdi)
+          res3 =  if L.null constr then tidings res2 never else (\el constr td -> filter (not. maybe False (\ex -> constr ex && maybe True (ex /=) td ) . backFKRef relTable ifk . Just )  el )  <$> res2  <#> tidings (snd $ head constr) never <*> (fmap ( _tbref )<$> ftdi)
       let
           search = (\i j -> join $ fmap (\k-> L.find (\(TB1 _ l )-> interPoint rel k  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList . _kvvalues . unTB $ l)) ) i) $ j )
           tdi =  search <$> res3 <*> (fmap (fmap unTB. _tbref )<$> ftdi)

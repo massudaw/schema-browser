@@ -9,6 +9,7 @@ import Step
 import Data.Maybe
 import Data.String
 import Control.Monad.IO.Class
+import qualified Data.Binary as B
 import GHC.Stack
 import Data.Monoid
 import Utils
@@ -102,7 +103,17 @@ keyTables conn userconn (schema ,user) = do
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
        -- keyMap <- preprocessSumTypes (M.fromList keyList)
-          keyMap = M.fromList keyList
+          keyMapPre = M.fromList keyList
+          lookupKey' ::  Map (Text,Text) Key -> (Text,Text) ->  Key
+          lookupKey' keyMap = (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) keyMap )
+       eitherItems <-  join $  mapM (\(t,l,n)-> do
+         un <- newUnique
+         let
+           lcol = lookupKey' keyMapPre . (t,) <$> V.toList l
+           tnew = Key n Nothing un (KEither (keyType <$> lcol) )
+         return (t,[(tnew,Path (S.fromList lcol) (FKEitherField tnew lcol) (S.singleton tnew) )]) ) <$> query conn "SELECT table_name,sum_columns,column_name FROM metadata.table_either WHERE table_schema = ? " (Only schema)
+       let eitherMap = M.fromListWith mappend  $ fmap (\(t,j) -> (t,fmap snd j )) $ eitherItems
+           keyMap =  foldr (uncurry M.insert) keyMapPre $ concat $ fmap (\(t,j) -> fmap (\ki -> ((t,keyValue ki),ki)) $ fmap fst j ) $ eitherItems
        let
           lookupKey3 :: (Functor  g, Functor f) => f (Text,g Text) -> f (Text,g Key)
           lookupKey3 = fmap  (\(t,c)-> (t,fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap) c) )
@@ -115,15 +126,8 @@ keyTables conn userconn (schema ,user) = do
           readTT "VIEW" = ReadOnly
           readTT i =  error $ T.unpack i
        authorization <- queryAuthorization conn schema user
-       descMap <- M.fromList . fmap  (\(t,c)-> (t,(\(Just i) -> i) $ M.lookup (t,c) keyMap) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
+       descMap <- M.fromList . fmap  (\(t,cs)-> (t,fmap (\c -> (\(Just i) -> i) $ M.lookup (t,c) keyMap) (V.toList cs)) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
        transMap <- M.fromList   <$> query conn "SELECT table_name,translation FROM metadata.table_name_translation WHERE schema_name = ? " (Only schema)
-       eitherMap <- fmap (M.fromListWith mappend)  . join $  mapM (\(t,l,n)-> do
-         un <- newUnique
-         let
-           lcol = lookupKey . (t,) <$> V.toList l
-           tnew = Key n Nothing un (KEither (keyType <$> lcol) )
-         return (t,[Path (S.fromList lcol) (FKEitherField tnew lcol) (S.singleton tnew) ]) ) <$> query conn "SELECT table_name,sum_columns,column_name FROM metadata.table_either WHERE table_schema = ? " (Only schema)
-
 
        res <- lookupKey3 <$> query conn "SELECT table_name,pks FROM metadata.pks  where schema_name = ?" (Only schema) :: IO [(Text,Vector Key )]
        resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM information_schema.tables where table_schema = ? " (Only schema) :: IO (Map Text TableType)
@@ -134,12 +138,15 @@ keyTables conn userconn (schema ,user) = do
                                   pks = S.fromList $ F.toList pksl
                                   inlineFK =  (fmap (\k -> (\t -> Path (S.singleton k ) (FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList ) <$> (M.lookup c all)
                                   eitherFK =   M.lookup c eitherMap
-                                  attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $maybeToList $ M.lookup c descMap) <> pks)
-                                in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (maybe [] id $ M.lookup c authorization)  pks (M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
+                                  attr = S.difference (S.filter (not. isKEither.keyType)  $ (\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> pks)
+                                in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (maybe [] id $ M.lookup c authorization)  pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
        let (i1,i2,i3) = (keyMap, M.fromList $ filter (not.S.null .fst)  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        mvar <- newMVar M.empty
        return  $ InformationSchema schema i1 i2 i3 M.empty mvar  userconn conn
 
+liftMod inf k (EditTB a b ) = EditTB (liftKeys inf k a) (liftKeys inf k b)
+liftMod inf k (InsertTB a  ) = InsertTB(liftKeys inf k a)
+liftMod inf k (DeleteTB a  ) = DeleteTB (liftKeys inf k a)
 liftKeys
   :: InformationSchema
      -> Text
@@ -156,8 +163,8 @@ liftKeys inf tname tb
         liftField :: Text -> TB Identity Text a -> TB Identity Key a
         liftField tname (TBEither n k j ) = TBEither (lookKey inf tname n) (mapComp (liftField tname) <$> k ) (mapComp (liftField tname ) <$> j)
         liftField tname (Attr t v) = Attr (lookKey inf tname t) v
-        liftField tname (FKT ref i rel2 tb) = FKT (mapComp (liftField tname) <$> ref)  i ( rel) (liftTable tname tb)
-            where Just (Path _ (FKJoinTable _ rel _ ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (concat $ fmap keyattr ref))  (F.toList$ rawFKS  ta)
+        liftField tname (FKT ref i rel2 tb) = FKT (mapComp (liftField tname) <$> ref)  i ( rel) (liftTable tname2 tb)
+            where Just (Path _ (FKJoinTable _ rel tname2 ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (concat $ fmap keyattr ref))  (F.toList$ rawFKS  ta)
                   ta = lookTable inf tname
         liftField tname (IT rel tb) = IT (mapComp (liftField tname ) rel) (liftTable tname2 tb)
             where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
@@ -189,13 +196,13 @@ catchPluginException inf pname tname i = do
 
 
 logTableModification
-  :: Show b =>
+  :: B.Binary b =>
      InformationSchema
      -> TableModification b -> IO (TableModification b)
 logTableModification inf (TableModification Nothing table i) = do
   time <- getCurrentTime
   let ltime =  utcToLocalTime utc $ time
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (modification_time,table_name,modification_data,schema_name) VALUES (?,?,?,?) returning modification_id "  (ltime,rawName table,show i , schemaName inf)
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (modification_time,table_name,modification_data,schema_name) VALUES (?,?,?,?) returning modification_id "  (ltime,rawName table, Binary (B.encode $ mapMod keyValue  i) , schemaName inf)
   return (TableModification (id) table i )
 
 
@@ -218,8 +225,9 @@ testAcademia q = testParse "academia" "academia"  q
 selectAll inf table   = liftIO $ do
       let -- rp = rootPaths'  (tableMap inf) table
           tb =  tableView (tableMap inf) table
+      print (tableName table,selectQuery tb)
       (t,v) <- duration  $ queryWith_  (fromAttr (unTlabel tb)) (conn inf)(fromString $ T.unpack $ selectQuery tb)
-      print (tableName table,selectQuery tb,t)
+      print (tableName table,t)
       return v
 
 addTable inf table = do

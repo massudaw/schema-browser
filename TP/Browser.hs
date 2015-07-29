@@ -12,6 +12,7 @@
 
 import Query
 import Types
+import qualified Data.Binary as B
 import Step
 import Location
 import PrefeituraSNFSE
@@ -89,20 +90,30 @@ argsToState  [h,d,u,p,s,t] = BrowserState h d  u p (Just s) (Just t )
 argsToState  [h,d,u,p,s] = BrowserState h d  u p  (Just s)  Nothing
 argsToState  [h,d,u,p] = BrowserState h d  u p Nothing Nothing
 
+
 setup
      :: Show a =>   Event [a] -> [String] -> Window -> UI ()
 setup e args w = void $ do
   let bstate = argsToState args
-  (evDB,chooserDiv) <- databaseChooser bstate
+  (evDB,chooserItens) <- databaseChooser bstate
   body <- UI.div
   be <- stepper [] e
   pollRes <- UI.div # sink UI.text (show <$> be)
-  getBody w #+ [element chooserDiv , element body]
   return w # set title (host bstate <> " - " <>  dbn bstate)
-  mapUITEvent body (traverse (\(inf)-> do
-    let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
-    span <- chooserKey  inf k (table bstate)
-    element body # set UI.children [span,pollRes] )) evDB
+  nav  <- buttonSetUI ["Editor","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  element nav # set UI.class_ "col-xs-5"
+  chooserDiv <- UI.div # set children  (chooserItens <> [ getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
+  container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
+  getBody w #+ [element container]
+  mapUITEvent body (traverse (\(nav,inf)->
+      case nav of
+        "Changes" -> do
+            dash <- dashBoard inf
+            element body # set UI.children [dash]
+        "Editor" -> do
+            let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
+            span <- chooserKey  inf k (table bstate)
+            element body # set UI.children [span,pollRes] )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
 
 
 connRoot dname = (fromString $ "host=" <> host dname <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname <> " sslmode= require" )
@@ -151,7 +162,7 @@ databaseChooser sargs = do
   let dbsWE = rumors $ userSelection dbsW
   dbsWB <- stepper cc dbsWE
   let dbsWT  = tidings dbsWB dbsWE
-  load <- UI.button # set UI.text "Connect" # sink UI.enabled (facts (isJust <$> dbsWT) )
+  load <- UI.button # set UI.text "Connect" # set UI.class_ "col-xs-1" # sink UI.enabled (facts (isJust <$> dbsWT) )
   let login = liftA2 (liftA2 (,)) (widT) ( dbsWT )
       formLogin = form login (UI.click load)
   let genSchema ((user,pass),(dbN,(dbConn,schemaN))) = do
@@ -161,8 +172,7 @@ databaseChooser sargs = do
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   chooserT <-  mapTEvent (traverse genSchema) formLogin
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schema , getElement dbsW]
-  chooserDiv <- UI.div # set children (widE <> [schemaSel ,load]) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
-  return $ (chooserT,chooserDiv)
+  return $ (chooserT,(widE <> [schemaSel ,load]))
 
 
 
@@ -175,6 +185,26 @@ applyUI el f = (\a-> getWindow el >>= \w -> runUI w (f a))
 tableNonRec k  =  F.toList $  tableNonRef  k
 
 line n =   set  text n
+
+
+panel t els = UI.div # set items ( UI.h2 # set text (T.unpack t  ) : [UI.div # set items (F.toList els)])
+showModDiv i = UI.div # set UI.style [("display","flex")] # set items (showMod i)
+showMod (EditTB i j) = [showFKE j , operator  "| ~ |" , showFKE' i]
+showMod (InsertTB j) = [UI.div , operator "| + |" , showFKE j]
+showMod (DeleteTB j) = [showFKE j , operator "| - |" , UI.div]
+
+operator op = UI.div # set text op  # set UI.style [("margin-left","3px"),("margin-right","3px")]
+{-
+dashBoardAll  inf = do
+  els :: [(Text,Vector.Vector (Binary BSL.ByteString))] <-
+    liftIO $ query (rootconn inf) "SELECT modification_id,modification_date,table,modification_data from metadata.modification_table WHERE schema_name = ?" (Only $ schemaName inf)
+  UI.div  # set items ( (\(b,v)-> panel (translatedName $ lookTable inf b)  $ fmap (\(Binary d) -> ( (showModDiv $ liftMod inf b (B.decode d :: Modification Text Showable)))) v ) <$> els)
+-}
+
+dashBoard inf = do
+  els :: [(Text,Vector.Vector (Binary BSL.ByteString))] <-
+    liftIO $ query (rootconn inf) "SELECT table_name,array_agg(modification_data) from metadata.modification_table WHERE schema_name = ? group by table_name" (Only $ schemaName inf)
+  UI.div  # set items ( (\(b,v)-> panel (translatedName $ lookTable inf b)  $ fmap (\(Binary d) -> ( (showModDiv $ liftMod inf b (B.decode d :: Modification Text Showable)))) v ) <$> els)
 
 attrLine i e   = do
   let nonRec = tableNonrec i
@@ -197,9 +227,9 @@ chooserKey inf kitems i = do
       liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
   tbChooser <- UI.div # set children [filterInp,getElement bset] # set UI.class_ "col-md-2"
-  body <- UI.div # sink items (facts (pure . chooseKey inf <$> bBset )) # set UI.class_ "col-md-10" # set UI.style [("padding-left","20px")]
+  body <- UI.div # sink items (facts (pure . chooseKey inf <$> bBset )) # set UI.class_ "col-md-10"
 
-  UI.div # set children [tbChooser , body] # set UI.style [("display","-webkit-box")] # set UI.class_ "row"
+  UI.div # set children [tbChooser , body]  # set UI.class_ "row"
 
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
 
@@ -244,7 +274,6 @@ chooseKey inf key = mdo
       table = fromJust  $ M.lookup key $ pkMap inf
 
   vp <- liftIO $ addTable inf table
-
   let
       tdi = pure Nothing
   cv <- currentValue (facts tdi)
@@ -552,23 +581,23 @@ queryArtBoletoCrea = BoundedPlugin2  pname tname (staticP url) elem
   where
     pname = "Boleto Art Crea"
     tname = "art"
-    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text (Showable)))
+    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    url :: ArrowReader
     url = proc t -> do
       i <- varTB "art_number" -< t
-      idxT "verified_date" -< t
-      odx "boleto" -< t
-      r <- at "crea_register" (proc t -> do
+      idxR "verified_date" -< t
+      odxR "boleto" -< t
+      r <- atR "crea_register" (proc t -> do
                                n <- varTB "crea_number" -< t
                                u <- varTB "crea_user"-< t
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
-      b <- act ( traverse (\(i, (j, k,a)) -> creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
+      b <- act ( traverse (\(i, (j, k,a)) -> lift $ creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
       let ao =  Just $ tblist [attrT ("boleto",   SOptional $ (SBinary. BSL.toStrict) <$> b)]
       returnA -< ao
     elem inf
        = maybe (return Nothing) (\inp -> do
-                            b <- dynPK url (Just inp)
+                            b <- runReaderT (dynPK url $ () ) (Just inp)
                             return $ liftKeys inf tname <$> b )
 
 

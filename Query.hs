@@ -61,6 +61,7 @@ textToPrim "character varying" = PText
 textToPrim "name" = PText
 textToPrim "varchar" = PText
 textToPrim "text" = PText
+textToPrim "bytea" = PBinary
 textToPrim "pdf" = PMime "application/pdf"
 textToPrim "ofx" = PMime "application/x-ofx"
 textToPrim "jpg" = PMime "image/jpg"
@@ -109,6 +110,7 @@ isPrim i = False
 isOptional (KOptional _) = True
 isOptional _ = False
 
+isArray :: KType i -> Bool
 isArray (KArray _) = True
 isArray (KOptional i) = isArray i
 isArray _ = False
@@ -178,6 +180,10 @@ isKDelayed (KOptional i) = isKDelayed i
 isKDelayed (KInterval i) = isKDelayed i
 isKDelayed (KArray i)  = isKDelayed i
 isKDelayed _ = False
+
+isKEither (KEither i) = True
+isKEither i = False
+
 
 
 isKOptional (KOptional i) = True
@@ -388,7 +394,7 @@ allKVRec  t@(TB1 m e)=  concat $  F.toList (go . unTB <$> (_kvvalues $ unTB $ ei
 
 
 tableToKV r =   do
-   (S.toList (rawPK r)) <> (maybeToList (rawDescription r))  <>(S.toList (rawAttrs r))
+   (S.toList (rawPK r)) <> (rawDescription r)  <>(S.toList (rawAttrs r))
 
 
 preLabelTable :: Text -> Table ->  (TB3 (Labeled Text)  Key () )
@@ -494,9 +500,13 @@ expandJoin left (Unlabeled (TBEither l kj j )) = foldr1 mappend (expandJoin left
 expandJoin left (Unlabeled (FKT i refl rel (LeftTB1 (Just tb)))) = expandJoin True (Unlabeled (FKT i refl rel tb))
 expandJoin left (Labeled l (FKT i refl rel (LeftTB1 (Just tb)))) = expandJoin True (Labeled l (FKT i refl rel tb))
 expandJoin left (Labeled l (FKT i refl ks (ArrayTB1 [ tb])))
-    = jt <> " JOIN LATERAL (SELECT " <> "array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (head (look (_relOrigin <$> ks) ( fmap getCompose $ concat $ fmap nonRef i ) ))  <> ") as arr) as z1 "  <> jt  <> " JOIN "<> expandTable tb   <> " ON " <>  label (head (look (_relTarget <$> ks) ((fmap getCompose $ F.toList   (tableAttr tb) )) )) <> " = arr ) as z1 " <> expandQuery left tb  <>   "  ) as " <>  label tas  <> " ON true "
+    = jt <> " JOIN LATERAL (SELECT " <> "array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (justError "no array in rel" $ L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) ( fmap getCompose $ concat $ fmap nonRef i ) ))  <> ") as arr) as z1 "  <> jt  <> " JOIN "<> expandTable tb   <> " ON " <>  label (head $ look  [ _relTarget $ justError "no array in rel" $ L.find (isArray. keyType . _relOrigin ) ks] (fmap getCompose $ F.toList   (tableAttr tb) ) ) <> " = arr " <> nonArrayJoin  <> " ) as z1 " <> expandQuery left tb  <>   "  ) as " <>  label tas  <> " ON true "
       where
+          nonArrayJoin = if L.null nonArrayRel then "" else " AND " <> joinOnPredicate nonArrayRel (fmap getCompose i) (fmap getCompose $ F.toList   (tableAttr tb))
+            where
+              nonArrayRel = L.filter (not . isArray . keyType . _relOrigin) ks
           (TB1 _ (Compose tas )) = tb
+          look :: [Key] -> [Labeled Text ((TB (Labeled Text)) Key ())] ->  [Labeled Text ((TB (Labeled Text)) Key ())]
           look ki i = justError ("missing FK on " <> show (ki,ks ,keyAttr . labelValue <$> i )  ) $ allMaybes $ fmap (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
           jt = if left then " LEFT" else ""
 expandJoin left (Unlabeled (FKT i refl rel tb))
@@ -524,7 +534,7 @@ recursePath'
           ((Int, Map Int Table), (Int, Map Int Key))
           (Compose (Labeled Text) (TB (Labeled Text)) Key ())
 recursePath' isLeft ksbn invSchema (Path _ jo@(FKEitherField o l) _) = do
-   let findAttr =(\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton i) . fst  )$ ksbn )
+   let findAttr =(\i -> Compose . justError ("cant find "  <> (show i)  ). fmap snd . L.find ((== S.singleton i) . fst  )$ ksbn )
    return $ (Compose $ Unlabeled $  TBEither  o (findAttr <$> l )  Nothing)
 
 recursePath' isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
@@ -583,18 +593,18 @@ pathRelStore (Path _ _ ifk ) = ifk
 
 eitherDescPK :: (Functor f,Ord k) =>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
 eitherDescPK i@(TB1 kv  _  )
-  | not ( S.null ( _kvdesc kv) ) =  tbDesc i
+  | not ( null ( _kvdesc kv) ) =  tbDesc i
   | otherwise = tbPK i
 
 
 tbDesc :: (Functor f,Ord k)=>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
-tbDesc  =  tbFilter  (\kv k -> (S.isSubsetOf k (_kvdesc kv ) ))
+tbDesc  =  tbFilter  (\kv k -> (S.isSubsetOf k (S.fromList $ _kvdesc kv ) ))
 
 tbPK :: (Functor f,Ord k)=>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
 tbPK = tbFilter  (\kv k -> (S.isSubsetOf k (_kvpk kv ) ))
 
 tbAttr :: (Functor f,Ord k) =>  TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
-tbAttr  =  tbFilter  (\kv k -> not (S.isSubsetOf k (_kvpk kv <> _kvdesc kv ) ))
+tbAttr  =  tbFilter  (\kv k -> not (S.isSubsetOf k (_kvpk kv <> (S.fromList (_kvdesc kv ))) ))
 
 tbFilter :: (Functor f,Ord k) =>  ( KVMetadata k -> Set k -> Bool) -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbFilter pred (TB1 kv item) =  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item

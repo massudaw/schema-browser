@@ -23,6 +23,9 @@ CUSTOM PER TABLE FILTERS
 -- subtyping constraints 
 -- and , or combinators
 
+PARTIALLY NONINJECTIVE REFERENCES
+-- Implement Constrained Reflexive references for arrays
+
 PAGINATE
 -- Implement pagination over now() for dates
 -- Metadata Paginate reference

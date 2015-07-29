@@ -156,16 +156,11 @@ getCnpj'  inf i  handler = do
                               ,attr "cep" (idx "CEP")
                               ,attr "bairro" (idx "BAIRRO/DISTRITO")
                               ,attr "municipio" (idx "MUNICÍPIO")
-                              ,attr "uf" (idx "UF")
-                              ,attr "geocode" (SOptional Nothing)
-                              ,attr "bounding" (SOptional Nothing)]
-                              )
-                     ,fk [own "atividade_principal" (SOptional $ Just pcnae)]
-                                (LeftTB1 $ Just $ tb [cna "id" pcnae,cna "description" pdesc] )
-                     ,afk [own "atividades_secundarias" (SOptional $ Just $ SComposite $V.fromList $ fmap fst scnae)]
-                                ((\(pcnae,pdesc)-> tb [cna "id" pcnae,cna "description" pdesc] ) <$> scnae)
-
-                    ]
+                              ,attr "uf" (idx "UF")])
+                       ,fk [own "atividade_principal" (SOptional $ Just pcnae)]
+                                  (LeftTB1 $ Just $ tb [cna "id" pcnae,cna "description" pdesc] )
+                       ,afk [own "atividades_secundarias" (SOptional $ Just $ SComposite $V.fromList $ fmap fst scnae)]
+                                  ((\(pcnae,pdesc)-> tb [cna "id" pcnae,cna "description" pdesc] ) <$> scnae)]
         handler . Just $ traceShowId attrs
         return ()) outM ) rv
   return ()
