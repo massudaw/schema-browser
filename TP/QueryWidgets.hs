@@ -291,7 +291,7 @@ diffOptional i   = Just i
 
 tbCase :: InformationSchema -> [Plugins] -> SelPKConstraint  -> TB Identity Key () -> [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key Showable)))] -> [(Access Text,Event (Maybe (TB1 Showable)))]-> Tidings (Maybe (TB Identity Key Showable)) -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
 tbCase inf pgs constr i@(FKT ifk _ rel tb1 ) wl plugItens oldItems  = do
-        l <- flabel # set text (show $ keyAttr .unTB <$> ifk)
+        l <- flabel # set text (show $ _relOrigin <$> rel )
         let
             tbi = fmap (Compose . Identity)  <$> oldItems
             thisPlugs = filter (hasProd (isNested ((IProd True $ concat $ fmap (fmap keyValue.keyattr) ifk)) ) . fst) $  plugItens
@@ -708,11 +708,11 @@ fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk refl rel  (LeftTB1 (Ju
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk refl rel  (ArrayTB1 [tb1]) ) = do
      (TrivialWidget offsetT offset) <- offsetField 0
      let
-         nonInj = filter (not . any (isArray .keyType ) . keyattr )  ifk
+         nonInj = fmap  _relOrigin   (filterNotReflexive rel )
          arrayK = mapComp (firstTB unKArray) <$> filter (all (isArray .keyType ) . keyattr)  ifk
          nonInjConstr :: SelTBConstraint
-         nonInjConstr = first (pure . Compose . Identity ) .fmap ( fmap (\j (TB1 _ l) -> traceShowId $ not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity) $ maybeToList j) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l  ) ). facts . triding) <$> filter (flip S.isSubsetOf (S.fromList$  concat $ keyattr <$> nonInj) . S.fromList . keyattr .Compose . Identity .fst) wl
-         fkst = FKT (nonInj <> arrayK) refl (fmap (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
+         nonInjConstr = first (pure . Compose . Identity ) .fmap ( fmap (\j (TB1 _ l) -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity) $ maybeToList j) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l  ) ). facts . triding) <$> filter (flip S.isSubsetOf (S.fromList   nonInj) . S.fromList . keyattr .Compose . Identity .fst) wl
+         fkst = FKT arrayK refl (fmap (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
      fks <- mapM (\ix-> fkUITable inf pgs (constr <> nonInjConstr ) (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods ) [] (unIndexItens ix <$> offsetT  <*>  oldItems) fkst) [0..8]
      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      dv <- UI.div # set children (getElement <$> fks)

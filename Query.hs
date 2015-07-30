@@ -436,7 +436,15 @@ isPairReflexive (KArray i )  op  (KArray j)
 isPairReflexive (KArray i )  op  j = True
 isPairReflexive i op  j = errorWithStackTrace $ "isPairReflexive " <> show i <> " - "<> show  j
 
-filterReflexive ks = filter (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
+filterNotReflexive ks
+  | any (isArray . keyType . _relOrigin) ks = L.filter (not . isArray . keyType . _relOrigin) ks
+  | otherwise = filter (\j-> not $  isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
+
+
+filterReflexive ks
+  | any (isArray . keyType . _relOrigin) ks = L.filter (isArray . keyType . _relOrigin) ks
+  | otherwise = filter (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
+
 isPathReflexive (FKJoinTable _ ks _)
   = all id $ fmap (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
 isPathReflexive (FKInlineTable _)= True
@@ -479,45 +487,43 @@ keyAttr i = errorWithStackTrace $ "cant find keyattr " <> (show i)
 selectQuery t = "SELECT " <> explodeRow t <> " FROM " <> expandTable t <> expandQuery False  t
 
 expandQuery left t@(TB1 meta m)
-    =  foldr1 mappend (expandJoin left .getCompose <$> F.toList (_kvvalues $ labelValue $ getCompose $ m))
+    =  foldr1 mappend (expandJoin left (F.toList (_kvvalues $ labelValue $ getCompose $ m) ) .getCompose <$> F.toList (_kvvalues $ labelValue $ getCompose $ m))
 
 
-expandJoin :: Bool -> Labeled Text (TB (Labeled Text) Key ()) -> Text
-expandJoin left (Unlabeled (IT i (LeftTB1 (Just tb) )))
-    = expandJoin True $ Unlabeled (IT i tb)
-expandJoin left (Labeled l (IT i (LeftTB1 (Just tb) )))
-    = expandJoin True $ Labeled l (IT i tb)
-expandJoin left (Labeled l (IT i (ArrayTB1 [tb] )))
+expandJoin :: Bool -> [Compose (Labeled Text) (TB (Labeled Text)) Key ()] -> Labeled Text (TB (Labeled Text) Key ()) -> Text
+expandJoin left env (Unlabeled (IT i (LeftTB1 (Just tb) )))
+    = expandJoin True env $ Unlabeled (IT i tb)
+expandJoin left env (Labeled l (IT i (LeftTB1 (Just tb) )))
+    = expandJoin True env $ Labeled l (IT i tb)
+expandJoin left env (Labeled l (IT i (ArrayTB1 [tb] )))
     = jt <> " JOIN LATERAL (SELECT array_agg(" <> explodeRow  tb  <> "  order by arrrow ) as " <> l <> " FROM  (SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> tname  <> ") as arr) as arr ) "<> label tas <> expandQuery left tb <> " )  as " <>  label tas <> " ON true"
         where
           (TB1 _ (Compose tas )) = tb
           tname = label $ getCompose i
           jt = if left then " LEFT" else ""
-expandJoin left (Labeled l (IT i tb)) = expandQuery left tb
-expandJoin left (Unlabeled  (IT _ tb )) = expandQuery left tb
-expandJoin left (Labeled _ (Attr _ _ )) = ""
-expandJoin left (Unlabeled  (Attr _ _ )) = ""
-expandJoin left (Unlabeled (TBEither l kj j )) = foldr1 mappend (expandJoin left .getCompose <$>  kj )
-expandJoin left (Unlabeled (FKT i refl rel (LeftTB1 (Just tb)))) = expandJoin True (Unlabeled (FKT i refl rel tb))
-expandJoin left (Labeled l (FKT i refl rel (LeftTB1 (Just tb)))) = expandJoin True (Labeled l (FKT i refl rel tb))
-expandJoin left (Labeled l (FKT i refl ks (ArrayTB1 [ tb])))
-    = jt <> " JOIN LATERAL (SELECT " <> "array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (justError "no array in rel" $ L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) ( fmap getCompose $ concat $ fmap nonRef i ) ))  <> ") as arr) as z1 "  <> jt  <> " JOIN "<> expandTable tb   <> " ON " <>  label (head $ look  [ _relTarget $ justError "no array in rel" $ L.find (isArray. keyType . _relOrigin ) ks] (fmap getCompose $ F.toList   (tableAttr tb) ) ) <> " = arr " <> nonArrayJoin  <> " ) as z1 " <> expandQuery left tb  <>   "  ) as " <>  label tas  <> " ON true "
+expandJoin left env (Labeled l (IT i tb)) = expandQuery left tb
+expandJoin left env (Unlabeled  (IT _ tb )) = expandQuery left tb
+expandJoin left env (Labeled _ (Attr _ _ )) = ""
+expandJoin left env (Unlabeled  (Attr _ _ )) = ""
+expandJoin left env (Unlabeled (TBEither l kj j )) = foldr1 mappend (expandJoin left env .getCompose <$>  kj )
+expandJoin left env (Unlabeled (FKT i refl rel (LeftTB1 (Just tb)))) = expandJoin True env (Unlabeled (FKT i refl rel tb))
+expandJoin left env (Labeled l (FKT i refl rel (LeftTB1 (Just tb)))) = expandJoin True env (Labeled l (FKT i refl rel tb))
+expandJoin left env (Labeled l (FKT _ refl ks (ArrayTB1 [ tb])))
+    = jt <> " JOIN LATERAL (SELECT " <> "array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (justError "no array in rel" $ L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) ( fmap getCompose $ concat $ fmap nonRef env ) ))  <> ") as arr) as z1 "  <> jt  <> " JOIN "<> expandTable tb   <> " ON " <>  label (head $ look  [ _relTarget $ justError "no array in rel" $ L.find (isArray. keyType . _relOrigin ) ks] (fmap getCompose $ F.toList   (tableAttr tb) ) ) <> " = arr " <> nonArrayJoin  <> " ) as z1 " <> expandQuery left tb  <>   "  ) as " <>  label tas  <> " ON true "
       where
-          nonArrayJoin = if L.null nonArrayRel then "" else " AND " <> joinOnPredicate nonArrayRel (fmap getCompose i) (fmap getCompose $ F.toList   (tableAttr tb))
+          nonArrayJoin = if L.null nonArrayRel then "" else " AND " <> joinOnPredicate nonArrayRel (fmap getCompose $ concat $ fmap nonRef  env ) (fmap getCompose $ F.toList   (tableAttr tb))
             where
               nonArrayRel = L.filter (not . isArray . keyType . _relOrigin) ks
           (TB1 _ (Compose tas )) = tb
           look :: [Key] -> [Labeled Text ((TB (Labeled Text)) Key ())] ->  [Labeled Text ((TB (Labeled Text)) Key ())]
           look ki i = justError ("missing FK on " <> show (ki,ks ,keyAttr . labelValue <$> i )  ) $ allMaybes $ fmap (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
           jt = if left then " LEFT" else ""
-expandJoin left (Unlabeled (FKT i refl rel tb))
-    =  jt <> " JOIN " <> expandTable tb <> " ON " <> joinOnPredicate rel (fmap getCompose $ concat $ fmap nonRef  i) (fmap getCompose $ F.toList   (tableAttr tb) ) <> expandQuery left tb
+expandJoin left env (Unlabeled (FKT _ refl rel tb))
+    =  jt <> " JOIN " <> expandTable tb <> " ON " <> joinOnPredicate rel (fmap getCompose $ concat $ fmap nonRef  env ) (fmap getCompose $ F.toList   (tableAttr tb) ) <> expandQuery left tb
     where
           jt = if left then " LEFT" else ""
-expandJoin left (Labeled l (FKT i refl rel tb))
-    = " JOIN " <> expandTable tb <> " ON " <> joinOnPredicate rel (fmap getCompose $ concat $ fmap nonRef  i) (fmap getCompose $ tableAttr tb)
 
-expandJoin left i = errorWithStackTrace (show i)
+expandJoin left env i = errorWithStackTrace (show i)
 
 joinOnPredicate :: [Rel Key] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> Text
 joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectionOp (keyType . keyAttr . labelValue $ l) op (keyType . keyAttr . labelValue $ r) (label l)  (label r )) <$> fkm
@@ -571,13 +577,13 @@ recursePath' isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           tas <- tname nextT
           let knas = (Key (rawName nextT) Nothing (unsafePerformIO newUnique) (Primitive "integer" ))
           kas <- kname tas  knas
-          return $ Compose $ Labeled (label $ kas) (FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton i) . fst )$ ksbn ) (S.toList ifk )) (isPathReflexive jo ) ks  (mapOpt $ mapArray tb  ))
+          return $ Compose $ Labeled (label $ kas) (FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton i) . fst )$ ksbn ) (_relOrigin <$> filterReflexive ks )) (isPathReflexive jo ) ks  (mapOpt $ mapArray tb  ))
 
     | otherwise = do
           (t,ksn) <- labelTable nextT
           let pksn = getCompose <$> F.toList (_kvvalues $ labelValue $ getCompose $ tbPK ksn)
           tb <-fun ksn
-          return $ Compose $ Unlabeled $ FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton i) . fst )$ ksbn ) (S.toList ifk )) (isPathReflexive jo ) ks (mapOpt tb)
+          return $ Compose $ Unlabeled $ FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton i) . fst )$ ksbn ) (_relOrigin <$> filterReflexive ks)) (isPathReflexive jo ) ks (mapOpt tb)
   where
         nextT = (\(Just i)-> i) (M.lookup tn (invSchema))
         nextLeft = any (isKOptional.keyType) (S.toList ifk) || isLeft
@@ -623,7 +629,7 @@ recurseTB invSchema  nextT nextLeft ksn@(TB1 m kv ) =  (TB1 m) <$>
     where fun =  (\kv -> do
                   let
                       items = _kvvalues kv
-                      fkSet = traceShow (_kvname m) $ S.unions $ fmap pathRelRef $ filter ( isPathReflexive . pathRel) $ S.toList (rawFKS nextT)
+                      fkSet =  S.unions $ fmap pathRelRef $ filter ( isPathReflexive . pathRel) $ S.toList (rawFKS nextT)
                       eitherSet = S.unions $ fmap pathRelRef $ filter ( isPathEither . pathRel) $  S.toList (rawFKS nextT)
                       nonFKAttrs :: [(S.Set Key,TBLabel  ())]
                       nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf i fkSet) items
@@ -633,7 +639,7 @@ recurseTB invSchema  nextT nextLeft ksn@(TB1 m kv ) =  (TB1 m) <$>
                   let
                       nonEitherAttrs = filter (\(k,i) -> not $ S.isSubsetOf k eitherSet) (nonFKAttrs <> pt )
                   pt2 <- mapM (\fk -> fmap (((pathRelRef fk,))) .recursePath' nextLeft (fmap (fmap getCompose) $ nonFKAttrs<> pt ) invSchema$ fk ) (filter ( isPathEither . pathRel) $ F.toList $ rawFKS nextT )
-                  return (   KV $ M.fromList $ (\i->traceShow (fmap fst i) i ) $ nonEitherAttrs <> pt2) )
+                  return (   KV $ M.fromList $ nonEitherAttrs <> pt2) )
 
 
 
@@ -680,8 +686,12 @@ explodeLabel (Labeled l (Attr k  _ ))
 explodeLabel (Unlabeled (TBEither _  l  _ )) = "ROW(" <> T.intercalate "," (explodeLabel.getCompose<$>  l) <> ")"
 explodeLabel (Unlabeled (IT  n t )) =  explodeRow  t
 explodeLabel (Labeled l (IT  _ _  )) =  l
-explodeLabel (Labeled l (FKT i _ _ _ )) = T.intercalate "," (F.toList $ (explodeLabel. getCompose ) <$> i) <> "," <> l
-explodeLabel (Unlabeled (FKT i refl rel t )) = T.intercalate "," (F.toList $ (explodeLabel.getCompose) <$> i) <> "," <> explodeRow t
+explodeLabel (Labeled l (FKT i _ _ _ )) = case i of
+             [] ->  l
+             i -> T.intercalate "," (F.toList $ (explodeLabel. getCompose ) <$> i) <> "," <> l
+explodeLabel (Unlabeled (FKT i refl rel t )) = case i of
+             [] -> explodeRow t
+             i -> T.intercalate "," (F.toList $ (explodeLabel.getCompose) <$> i) <> "," <> explodeRow t
 
 explodeRow (LeftTB1 (Just tb) ) = explodeRow tb
 explodeRow (ArrayTB1 [tb] ) = explodeRow tb
