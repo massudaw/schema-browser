@@ -436,6 +436,7 @@ isPairReflexive (KArray i )  op  (KArray j)
 isPairReflexive (KArray i )  op  j = True
 isPairReflexive i op  j = errorWithStackTrace $ "isPairReflexive " <> show i <> " - "<> show  j
 
+filterReflexive ks = filter (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
 isPathReflexive (FKJoinTable _ ks _)
   = all id $ fmap (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
 isPathReflexive (FKInlineTable _)= True
@@ -679,8 +680,8 @@ explodeLabel (Labeled l (Attr k  _ ))
 explodeLabel (Unlabeled (TBEither _  l  _ )) = "ROW(" <> T.intercalate "," (explodeLabel.getCompose<$>  l) <> ")"
 explodeLabel (Unlabeled (IT  n t )) =  explodeRow  t
 explodeLabel (Labeled l (IT  _ _  )) =  l
-explodeLabel (Labeled l (FKT i _ _ _ )) = T.intercalate "," (( F.toList $ (explodeLabel. getCompose ) <$> i)) <> "," <> l
-explodeLabel (Unlabeled (FKT i refl rel t )) = T.intercalate "," (( F.toList $ (explodeLabel.getCompose) <$> i)) <> "," <> explodeRow t
+explodeLabel (Labeled l (FKT i _ _ _ )) = T.intercalate "," (F.toList $ (explodeLabel. getCompose ) <$> i) <> "," <> l
+explodeLabel (Unlabeled (FKT i refl rel t )) = T.intercalate "," (F.toList $ (explodeLabel.getCompose) <$> i) <> "," <> explodeRow t
 
 explodeRow (LeftTB1 (Just tb) ) = explodeRow tb
 explodeRow (ArrayTB1 [tb] ) = explodeRow tb
