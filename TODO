@@ -23,6 +23,12 @@ CUSTOM PER TABLE FILTERS
 -- subtyping constraints 
 -- and , or combinators
 
+INDEXED PARTITION
+-- Static indexed tables, relations, schemas,dbs
+
+INDEXED CONSTRAINT
+-- Allow restrict partitioned tables
+
 PARTIALLY NONINJECTIVE REFERENCES
 -- Implement Constrained Reflexive references for arrays
 
