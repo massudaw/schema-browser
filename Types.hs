@@ -468,7 +468,7 @@ keyattr :: Compose Identity (TB Identity ) k  a -> [k]
 keyattr = keyattri . runIdentity . getCompose
 keyattri (Attr i  _ ) = [i]
 keyattri (TBEither k i l  ) =[k]
-keyattri (FKT i _ _ _ ) =  (L.concat $ keyattr  <$> i)
+keyattri (FKT i _ rel _ ) =  (_relOrigin <$> rel )
 keyattri (IT i  _ ) =  keyattr i
 
 -- tableAttr :: (Traversable f ,Ord k) => TB3 f k () -> [Compose f (TB f) k ()]

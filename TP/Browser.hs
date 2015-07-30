@@ -293,7 +293,7 @@ chooseKey inf key = mdo
   let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
   prop <- stepper cv (trace "evtrig" <$> evsel)
   let tds = tidings prop evsel
-  (cru ,evs) <- crudUITable inf plugList  (pure True) (facts res3) [] (allRec' (tableMap inf) table) tds
+  (cru ,evs) <- crudUITable inf plugList  (pure True) res3 [] (allRec' (tableMap inf) table) tds
   let
      bselection = st
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [(rumors  $userSelection itemList ) ,rumors tdi]),(fmap modifyTB <$> evs)]

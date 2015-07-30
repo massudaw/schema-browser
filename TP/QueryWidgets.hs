@@ -300,7 +300,7 @@ tbCase inf pgs constr i@(FKT ifk _ rel tb1 ) wl plugItens oldItems  = do
 
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             convertConstr :: SelTBConstraint
-            convertConstr = fmap (fmap (\constr -> (\i -> constr $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ))<$>  restrictConstraint
+            convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap _tbref td /= Just el )  $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ) <$> oldItems <*>  )<$>  restrictConstraint
         tds <- fkUITable inf pgs convertConstr pfks (filter (isReflexive .fst) wl) (fmap (runIdentity . getCompose ) <$>  tbi) i
         dv <- UI.div #  set UI.class_ "col-xs-12"# set children [l,getElement tds]
         paintEdit l (facts (fmap _tbref <$> triding tds)) (fmap _tbref <$> facts oldItems)
@@ -418,7 +418,7 @@ crudUITable
      InformationSchema
      -> [Plugins]
      -> Tidings Bool
-     -> Behavior [TB1 Showable]
+     -> Tidings [TB1 Showable]
      -> [(Access Text,Event (Maybe (TB1 Showable)))]
      -> TB1 ()
      -> Tidings (Maybe (TB1 Showable))
@@ -436,10 +436,10 @@ crudUITable inf pgs open bres pmods ftb@(TB1 m _ ) preoldItems = do
           let oldItemsE = (\i -> maybe i modifyTB ) <$> facts preoldItems <@> loadedItensEv
           oldItemsB <- stepper (maybe preoldItens modifyTB loadedItens) oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
-              tpkConstraint :: ([Compose Identity (TB Identity) Key ()], Behavior PKConstraint)
+              tpkConstraint :: ([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)
               tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK ftb , flip pkConstraint  <$> bres )
           (listBody,tableb) <- uiTable inf pgs [tpkConstraint] (tableName table) pmods ftb oldItems
-          (panelItems,evsa)<- processPanelTable inf  (facts tableb) bres table oldItems
+          (panelItems,evsa)<- processPanelTable inf  (facts tableb) (facts bres) table oldItems
           let evs =  unions (filterJust loadedItensEv : evsa)
           onEvent evs (\i ->  liftIO $ e i )
           UI.div # set children [listBody,panelItems]
@@ -458,8 +458,8 @@ onBin bin p x y = bin (p x) (p y)
 type PKConstraint = [Compose Identity (TB Identity ) Key Showable] -> Bool
 type TBConstraint = TB1 Showable -> Bool
 
-type SelPKConstraint = [([Compose Identity (TB Identity) Key ()],Behavior PKConstraint)]
-type SelTBConstraint = [([Compose Identity (TB Identity) Key ()],Behavior TBConstraint)]
+type SelPKConstraint = [([Compose Identity (TB Identity) Key ()],Tidings PKConstraint)]
+type SelTBConstraint = [([Compose Identity (TB Identity) Key ()],Tidings TBConstraint)]
 pkConstraint v  = maybe False (const True) . L.find (pkOpSet (concat . fmap aattr $ v ) . (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ))
 
 
@@ -492,9 +492,9 @@ processPanelTable inf attrsB res table oldItemsi = do
       editAction attr old = do
         let
             isM' :: Maybe (TB1 Showable)
-            isM' =  join $ fmap (TB1  (tableMeta table). Compose . Identity  . KV ) . allMaybesMap <$> (liftA2 (liftF2 (\i j -> if i == j  && overComp isReflexive i then Nothing else   Just i))) (_kvvalues. unTB . _unTB1 <$> attr) (_kvvalues. unTB . _unTB1  <$> old)
-        res <- liftIO $ catch (maybe (return (Left "no attribute changed check edit restriction")) (\l-> Right <$> updateAttr (conn inf) l (fromJust old) table) attr ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
-        return $ fmap (const (EditTB (fromJust isM') (fromJust old) )) res
+            isM' =  join $ fmap (TB1  (tableMeta table). Compose . Identity  . KV ) . allMaybesMap <$> (liftA2 (liftF2 (\i j -> if i == j then traceShow i Nothing else   traceShow (i,j) $ Just i))) (traceShowId . _kvvalues. unTB . _unTB1 <$> attr) (traceShowId . _kvvalues. unTB . _unTB1  <$> old)
+        res <- liftIO $ catch (maybe (return (Left "no attribute changed check edit restriction")) (\l-> Right <$> updateAttr (conn inf) l (justError "unold" old) table) attr ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
+        return $ fmap (const (EditTB (justError "unism'" isM') (justError "unold" old) )) res
 
       insertAction ip = do
           res <- catch (Right <$> insertAttr (fromAttr )  (conn inf) ip table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
@@ -668,7 +668,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
       ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . snd <$> plmods)
       let
           res3 :: Tidings [TB1 Showable]
-          res3 =  foldr (\constr  res2 -> (\el constr td -> filter (not. (\ex -> constr ex && (backFKRef relTable ifk (Just ex) /= td ))  )  el )  <$> res2  <*> tidings (snd constr) never <*> (fmap ( _tbref )<$> ftdi)) (tidings res2 never ) constr
+          res3 =  foldr (\constr  res2 -> (\el constr td -> filter (not. constr  )  el )  <$> res2  <*> snd constr <*> (fmap ( _tbref )<$> ftdi)) (tidings res2 never ) constr
       let
           search = (\i j -> join $ fmap (\k-> L.find (\(TB1 _ l )-> interPoint rel k  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList . _kvvalues . unTB $ l)) ) i) $ j )
           tdi =  search <$> res3 <*> (fmap (fmap unTB. _tbref )<$> ftdi)
@@ -684,7 +684,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
       let evsel = unionWith const (rumors $ join <$> userSelection itemList) (rumors tdi)
       prop <- stepper cv evsel
       let tds = tidings prop evsel
-      (celem,evs) <- crudUITable inf pgs  (pure False) (facts res3) (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
+      (celem,evs) <- crudUITable inf pgs  (pure False) res3 (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
       let
           bselection = fmap Just <$> st
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> userSelection itemList), rumors tdi]),(fmap modifyTB <$> evs)]
@@ -711,7 +711,7 @@ fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk refl rel  (ArrayTB1 [t
          nonInj = fmap  _relOrigin   (filterNotReflexive rel )
          arrayK = mapComp (firstTB unKArray) <$> filter (all (isArray .keyType ) . keyattr)  ifk
          nonInjConstr :: SelTBConstraint
-         nonInjConstr = first (pure . Compose . Identity ) .fmap ( fmap (\j (TB1 _ l) -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity) $ maybeToList j) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l  ) ). facts . triding) <$> filter (flip S.isSubsetOf (S.fromList   nonInj) . S.fromList . keyattr .Compose . Identity .fst) wl
+         nonInjConstr = first (pure . Compose . Identity ) .fmap ( fmap (\j (TB1 _ l) -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity) $ maybeToList j) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l  ) ).  triding) <$> filter (flip S.isSubsetOf (S.fromList   nonInj) . S.fromList . keyattr .Compose . Identity .fst) wl
          fkst = FKT arrayK refl (fmap (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
      fks <- mapM (\ix-> fkUITable inf pgs (constr <> nonInjConstr ) (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods ) [] (unIndexItens ix <$> offsetT  <*>  oldItems) fkst) [0..8]
      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
@@ -766,7 +766,7 @@ nonInjectiveSelection inf pgs wl  attr@(FKT fkattr refl ksjoin tbfk ) selks = do
                 vv =  join . (fmap (traverse (traverse unRSOptional2 . first unRKOptional ))) . join . fmap (lorder $ keyAttr <$> fkattr' ) . fmap concat . allMaybes  <$> iold
                 tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 _  l)-> interPoint ksjoin (uncurry Attr <$> k)  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList $ _kvvalues $ unTB $ l))) ) i) j ) <$> pure res <*> vv
             li <- wrapListBox res2 tb (pure id) showFK
-            (ce,evs) <- crudUITable inf pgs (pure False) (facts res2) [] tbfk  tb
+            (ce,evs) <- crudUITable inf pgs (pure False) res2 [] tbfk  tb
             let eres = flip (foldr addToList)  <$>  evs
             res2  <-  accumTds (pure res) eres
             return (vv,tb, (getElement li: ce))
