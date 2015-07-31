@@ -436,14 +436,15 @@ isPairReflexive (KArray i )  op  (KArray j)
 isPairReflexive (KArray i )  op  j = True
 isPairReflexive i op  j = errorWithStackTrace $ "isPairReflexive " <> show i <> " - "<> show  j
 
-filterNotReflexive ks
-  | any (isArray . keyType . _relOrigin) ks = L.filter (not . isArray . keyType . _relOrigin) ks
-  | otherwise = filter (\j-> not $  isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
+filterNotReflexive ks = L.filter (notReflexiveRel ks) ks
+filterReflexive ks = L.filter (reflexiveRel ks) ks
 
+reflexiveRel ks = not . notReflexiveRel ks
+notReflexiveRel ks
+  | any (isArray . keyType . _relOrigin) ks =  (not . isArray . keyType . _relOrigin)
+  | all (\j -> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks = const False
+  | otherwise = (\j-> not $  isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) ))
 
-filterReflexive ks
-  | any (isArray . keyType . _relOrigin) ks = L.filter (isArray . keyType . _relOrigin) ks
-  | otherwise = filter (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
 
 isPathReflexive (FKJoinTable _ ks _)
   = all id $ fmap (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
@@ -473,11 +474,6 @@ rootPaths' invSchema r = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,
   (t,ks) <- labelTable r
   tb <- recurseTB invSchema r False ks
   return ( tb , selectQuery tb ) -- "SELECT " <> explodeRow tb <>  (" FROM " <> q ) <> js)
-
-kattrl = kattrli .  labelValue . getCompose
-kattrli (Attr i _ ) = [i]
-kattrli (FKT i _ _ _ ) =  (L.concat $ kattrl  <$> i)
-kattrli (IT i  _ ) =  kattrl i
 
 -- keyAttr :: Show b  => TB Identity b a -> b
 keyAttr (Attr i _ ) = i

@@ -115,8 +115,8 @@ keyTables conn userconn (schema ,user) = do
        let eitherMap = M.fromListWith mappend  $ fmap (\(t,j) -> (t,fmap snd j )) $ eitherItems
            keyMap =  foldr (uncurry M.insert) keyMapPre $ concat $ fmap (\(t,j) -> fmap (\ki -> ((t,keyValue ki),ki)) $ fmap fst j ) $ eitherItems
        let
-          lookupKey3 :: (Functor  g, Functor f) => f (Text,g Text) -> f (Text,g Key)
-          lookupKey3 = fmap  (\(t,c)-> (t,fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap) c) )
+          lookupKey3 :: (Functor f) => f (Text,Maybe (Vector Text)) -> f (Text,Vector Key)
+          lookupKey3 = fmap  (\(t,c)-> (t,maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap)) c) )
           lookupKey2 :: Functor f => f (Text,Text) -> f Key
           lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) keyMap )
           lookupKey ::  (Text,Text) ->  Key
@@ -129,14 +129,14 @@ keyTables conn userconn (schema ,user) = do
        descMap <- M.fromList . fmap  (\(t,cs)-> (t,fmap (\c -> (\(Just i) -> i) $ M.lookup (t,c) keyMap) (V.toList cs)) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
        transMap <- M.fromList   <$> query conn "SELECT table_name,translation FROM metadata.table_name_translation WHERE schema_name = ? " (Only schema)
 
-       res <- lookupKey3 <$> query conn "SELECT table_name,pks FROM metadata.pks  where schema_name = ?" (Only schema) :: IO [(Text,Vector Key )]
+       res <- lookupKey3 <$> query conn "SELECT t.table_name,pks FROM metadata.tables t left join metadata.pks  p on p.schema_name = t.schema_name and p.table_name = t.table_name where t.schema_name = ?" (Only schema) :: IO [(Text,Vector Key )]
        resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM information_schema.tables where table_schema = ? " (Only schema) :: IO (Map Text TableType)
        let lookFk t k =V.toList $ lookupKey2 (fmap (t,) k)
        fks <- M.fromListWith S.union . fmap (\i@(tp,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) (FKJoinTable tp (zipWith3 (\a b c -> Rel a b c) (lookFk tp kp ) (V.toList rel) (lookFk tc kc)) tc) (S.fromList $ lookFk tc kc))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation ) )))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  M.toList keyMap :: Map Text (Set Key)
            pks =  (\(c,pksl)-> let
                                   pks = S.fromList $ F.toList pksl
-                                  inlineFK =  (fmap (\k -> (\t -> Path (S.singleton k ) (FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList ) <$> (M.lookup c all)
+                                  inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
                                   eitherFK =   M.lookup c eitherMap
                                   attr = S.difference (S.filter (not. isKEither.keyType)  $ (\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> pks)
                                 in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (maybe [] id $ M.lookup c authorization)  pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
