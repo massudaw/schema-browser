@@ -192,6 +192,8 @@ isKOptional (KInterval i) = isKOptional i
 isKOptional (Primitive _) = False
 isKOptional (InlineTable _ _) = False
 isKOptional (KArray i)  = isKOptional i
+isKOptional (KEither i) = False
+isKOptional i = errorWithStackTrace (show i)
 
 fullTableName = T.intercalate "_" . fmap (\k -> keyValue k <> (T.pack $ show $ hashUnique (keyFastUnique k))) . S.toList
 
@@ -674,11 +676,11 @@ tname i = do
   n <- mkTable i
   return $ Labeled ("t" <> (T.pack $  show n)) i
 
-
 explodeLabel :: Labeled Text (TB (Labeled Text) Key () ) -> Text
 explodeLabel (Labeled l (Attr k  _ ))
   | isKDelayed (keyType k) = "case when " <> l <> " is not null then true else null end"
   | otherwise =  l
+explodeLabel (Unlabeled (Attr k  _ )) = keyValue k
 explodeLabel (Unlabeled (TBEither _  l  _ )) = "ROW(" <> T.intercalate "," (explodeLabel.getCompose<$>  l) <> ")"
 explodeLabel (Unlabeled (IT  n t )) =  explodeRow  t
 explodeLabel (Labeled l (IT  _ _  )) =  l

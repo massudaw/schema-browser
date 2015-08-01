@@ -286,6 +286,7 @@ showTy f (KArray i) = "{" <>  showTy f i <> "}"
 showTy f (KOptional i) = showTy f i <> "*"
 showTy f (KInterval i) = "(" <>  showTy f i <> ")"
 showTy f (KSerial i) = showTy f i <> "?"
+showTy f i = errorWithStackTrace (show   i)
 
 
 instance Eq Key where
@@ -297,6 +298,7 @@ instance Ord Key where
 
 instance Show Key where
    show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
+
 showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<>  "::"  <> showTy id (keyType k)
 
 

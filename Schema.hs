@@ -1,4 +1,5 @@
-{-# LANGUAGE TupleSections,BangPatterns,OverloadedStrings #-}
+{-# LANGUAGE RankNTypes, TupleSections,BangPatterns,OverloadedStrings #-}
+
 
 module Schema where
 
@@ -265,6 +266,15 @@ mergeTB1 (TB1 m (Compose k) ) (TB1 m2 (Compose k2) )
 ifOptional i = if isKOptional (keyType i) then unKOptional i else i
 ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
 
+relabeling :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB f k a -> TB p k a
+relabeling p l (Attr k i ) = (Attr k i)
+relabeling p l (IT i tb ) = IT ((Compose.  l . relabeling p l . p . getCompose ) i) (relabelT p l tb)
+relabeling p l (TBEither  k i  j  ) = TBEither k (fmap (Compose.  l . relabeling p l . p . getCompose ) i) (fmap (Compose.  l . relabeling p l . p . getCompose )  j)
+
+relabelT :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB3 f k a -> TB3 p k a
+relabelT p l (TB1 m (Compose j)) =  (TB1 m (Compose $ l (KV $ fmap (Compose.  l . relabeling p l . p . getCompose ) (_kvvalues $ p j))))
+
+
 -- Load optional not  loaded delayed values
 -- and merge to older values
 loadDelayed inf t@(TB1 k v) values@(TB1 ks vs)
@@ -272,18 +282,20 @@ loadDelayed inf t@(TB1 k v) values@(TB1 ks vs)
   | L.null delayedattrs  = return Nothing
   | otherwise = do
        let
-           str = "SELECT ROW(" <> attr <> ") FROM " <> showTable table <> " WHERE " <> whr
            whr = T.intercalate " AND " ((\i-> (keyValue i) <>  " = ?") <$> S.toList (_kvpk k) )
            attr = T.intercalate "," delayedattrs
            table = justError "no table" $ M.lookup (_kvpk k) (pkMap inf)
-           delayed = fmap (const ()) $ mapKey (ifDelayed . ifOptional) $ TB1 k $ Compose $ Identity $ KV $  (M.filterWithKey (\key v -> S.isSubsetOf key (_kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs) )
+           delayed = fmap (const ()) $ mapKey (kOptional . ifDelayed . ifOptional) $ TB1 k $ Compose $ Identity $ KV filteredAttrs
+           str = "SELECT " <> explodeRow (relabelT runIdentity Unlabeled  delayed) <> " FROM " <> showTable table <> " WHERE " <> whr
        print str
        is <- queryWith (fromAttr delayed)  (conn inf) (fromString $ T.unpack str) (fmap unTB $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK (tableNonRef values))
        case is of
             [] -> errorWithStackTrace "empty query"
-            [i] ->return $ Just $ EditTB (mapKey (kOptional.kDelayed)  . fmap (SOptional. Just . SDelayed .Just) $ i  ) values
+            [i] ->return $ Just $ EditTB (mapKey (kOptional.kDelayed. unKOptional )  . fmap (SOptional . Just . SDelayed .  unSOptional ) $ i  ) values
             _ -> errorWithStackTrace "multiple result query"
-  where delayedattrs =  (concat $ fmap keyValue . F.toList <$> M.keys (M.filterWithKey (\key v -> S.isSubsetOf key (_kvdelayed k) && maybe False id  (fmap (isNothing .unSDelayed) $ unSOptional $ _tbattr $ unTB v )) (_kvvalues $ unTB vs) ))
+  where
+    delayedattrs = concat $ fmap keyValue . F.toList <$> M.keys filteredAttrs
+    filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf key (_kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs)
 
 
 
