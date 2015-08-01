@@ -479,7 +479,7 @@ processPanelTable inf attrsB res table oldItemsi = do
   editB <- UI.button # set text "EDIT" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table ))
 
   -- Edit when any persistent field has changed
-        # sink UI.enabled (liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then {-traceShow (l,m)-} (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . _unTB1 .  tableNonRef)<$> attrsB) (fmap (_kvvalues . unTB . _unTB1 . tableNonRef )<$> facts oldItemsi)) (liftA2 (\i j -> maybe False (flip contains j) i  ) attrsB  res))
+        # sink UI.enabled (liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then traceShow (l,m) (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . _unTB1 .  tableNonRef)<$> attrsB) (fmap (_kvvalues . unTB . _unTB1 . tableNonRef )<$> facts oldItemsi)) (liftA2 (\i j -> maybe False (flip contains j) i  ) attrsB  res))
 
   deleteB <- UI.button # set text "DELETE" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table ))
   -- Delete when isValid
@@ -492,7 +492,7 @@ processPanelTable inf attrsB res table oldItemsi = do
       editAction attr old = do
         let
             isM' :: Maybe (TB1 Showable)
-            isM' =  join $ fmap (TB1  (tableMeta table). Compose . Identity  . KV ) . allMaybesMap <$> (liftA2 (liftF2 (\i j -> if i == j then traceShow i Nothing else   traceShow (i,j) $ Just i))) (traceShowId . _kvvalues. unTB . _unTB1 <$> attr) (traceShowId . _kvvalues. unTB . _unTB1  <$> old)
+            isM' =  join $ fmap (TB1  (tableMeta table). Compose . Identity  . KV ) . allMaybesMap <$> (liftA2 (liftF2 (\i j -> if i == j then Nothing else   traceShow (i,j) $ Just i))) (traceShowId . _kvvalues. unTB . _unTB1 <$> attr) (traceShowId . _kvvalues. unTB . _unTB1  <$> old)
         res <- liftIO $ catch (maybe (return (Left "no attribute changed check edit restriction")) (\l-> Right <$> updateAttr (conn inf) l (justError "unold" old) table) attr ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
         return $ fmap (const (EditTB (justError "unism'" isM') (justError "unold" old) )) res
 
@@ -745,17 +745,16 @@ nonInjectiveSelection
   -> UI (TrivialWidget (Maybe (TB Identity Key Showable )))
 nonInjectiveSelection inf pgs wl  attr@(FKT fkattr refl ksjoin tbfk ) selks = do
       let
-          fkattr' = unTB <$> fkattr
           oldASet :: Set Key
-          oldASet = S.fromList (keyAttr <$> fkattr')
+          oldASet = S.fromList (_relOrigin <$>ksjoin )
           iold :: Tidings ([Maybe [(Key,Showable)]])
           iold  =    (Tra.sequenceA $ fmap (fmap ( aattr . _tb ) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ keyattr $ _tb $ fst $ i) oldASet) wl)
           sel = fmap (\i->  (Just . unAttr .unTB<$> _tbref i) ) <$> selks
-      (vv ,ct, els) <- inner tbfk sel  fkattr' iold
+      (vv ,ct, els) <- inner tbfk sel   iold
       o <- UI.div # set children (els)
-      let bres = liftA2 (liftA2 (\i j-> FKT (fmap (\i -> _tb $ Attr (fst i) (snd i) ) i)  refl ksjoin j)) vv ct
+      let bres = liftA2 (liftA2 (\i j-> FKT []  refl ksjoin j)) vv ct
       return $ TrivialWidget bres o
-  where inner tbfk sel fkattr' iold = mdo
+  where inner tbfk sel  iold = mdo
             let
                 table = justError "no table found" $ M.lookup rr $ pkMap inf
                 rr =  tablePKSet tbfk
@@ -763,7 +762,7 @@ nonInjectiveSelection inf pgs wl  attr@(FKT fkattr refl ksjoin tbfk ) selks = do
             let
                 unRKOptional (Key a b d (KOptional c)  ) = Key a b d c
                 unRKOptional (Key a b d c  ) = Key a b d c
-                vv =  join . (fmap (traverse (traverse unRSOptional2 . first unRKOptional ))) . join . fmap (lorder $ keyAttr <$> fkattr' ) . fmap concat . allMaybes  <$> iold
+                vv =  join . (fmap (traverse (traverse unRSOptional2 . first unRKOptional ))) . join . fmap (lorder $ _relOrigin <$> ksjoin  ) . fmap concat . allMaybes  <$> iold
                 tb = (\i j -> join $ fmap (\k-> L.find ((\(TB1 _  l)-> interPoint ksjoin (uncurry Attr <$> k)  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList $ _kvvalues $ unTB $ l))) ) i) j ) <$> pure res <*> vv
             li <- wrapListBox res2 tb (pure id) showFK
             (ce,evs) <- crudUITable inf pgs (pure False) res2 [] tbfk  tb

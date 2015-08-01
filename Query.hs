@@ -439,11 +439,11 @@ isPairReflexive i op  j = errorWithStackTrace $ "isPairReflexive " <> show i <> 
 filterNotReflexive ks = L.filter (notReflexiveRel ks) ks
 filterReflexive ks = L.filter (reflexiveRel ks) ks
 
-reflexiveRel ks = not . notReflexiveRel ks
-notReflexiveRel ks
-  | any (isArray . keyType . _relOrigin) ks =  (not . isArray . keyType . _relOrigin)
-  | all (\j -> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks = const False
-  | otherwise = (\j-> not $  isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) ))
+notReflexiveRel ks = not . reflexiveRel ks
+reflexiveRel ks
+  | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
+  | any (\j -> not $ isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks =  traceShow ks $ const False
+  | otherwise = (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) ))
 
 
 isPathReflexive (FKJoinTable _ ks _)
@@ -505,7 +505,7 @@ expandJoin left env (Unlabeled (TBEither l kj j )) = foldr1 mappend (expandJoin 
 expandJoin left env (Unlabeled (FKT i refl rel (LeftTB1 (Just tb)))) = expandJoin True env (Unlabeled (FKT i refl rel tb))
 expandJoin left env (Labeled l (FKT i refl rel (LeftTB1 (Just tb)))) = expandJoin True env (Labeled l (FKT i refl rel tb))
 expandJoin left env (Labeled l (FKT _ refl ks (ArrayTB1 [ tb])))
-    = jt <> " JOIN LATERAL (SELECT " <> "array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (justError "no array in rel" $ L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) ( fmap getCompose $ concat $ fmap nonRef env ) ))  <> ") as arr) as z1 "  <> jt  <> " JOIN "<> expandTable tb   <> " ON " <>  label (head $ look  [ _relTarget $ justError "no array in rel" $ L.find (isArray. keyType . _relOrigin ) ks] (fmap getCompose $ F.toList   (tableAttr tb) ) ) <> " = arr " <> nonArrayJoin  <> " ) as z1 " <> expandQuery left tb  <>   "  ) as " <>  label tas  <> " ON true "
+    = jt <> " JOIN LATERAL (SELECT " <> "array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (justError "no array in rel" $ L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) (fmap getCompose $ concat $ fmap nonRef env)))  <> ") as arr) as z1 "  <> jt  <> " JOIN " <> expandTable tb <> " ON " <>  label (head $ look  [ _relTarget $ justError "no array in rel" $ L.find (isArray. keyType . _relOrigin ) ks] (fmap getCompose $ F.toList   (tableAttr tb))) <> " = arr " <> nonArrayJoin  <> " ) as z1 " <> expandQuery left tb  <>   "  ) as " <>  label tas  <> " ON true "
       where
           nonArrayJoin = if L.null nonArrayRel then "" else " AND " <> joinOnPredicate nonArrayRel (fmap getCompose $ concat $ fmap nonRef  env ) (fmap getCompose $ F.toList   (tableAttr tb))
             where
@@ -515,7 +515,7 @@ expandJoin left env (Labeled l (FKT _ refl ks (ArrayTB1 [ tb])))
           look ki i = justError ("missing FK on " <> show (ki,ks ,keyAttr . labelValue <$> i )  ) $ allMaybes $ fmap (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
           jt = if left then " LEFT" else ""
 expandJoin left env (Unlabeled (FKT _ refl rel tb))
-    =  jt <> " JOIN " <> expandTable tb <> " ON " <> joinOnPredicate rel (fmap getCompose $ concat $ fmap nonRef  env ) (fmap getCompose $ F.toList   (tableAttr tb) ) <> expandQuery left tb
+    =  jt <> " JOIN " <> expandTable tb <> " ON " <> joinOnPredicate rel (fmap getCompose $ concat $ fmap nonRef env) (fmap getCompose $ F.toList   (tableAttr tb) ) <> expandQuery left tb
     where
           jt = if left then " LEFT" else ""
 

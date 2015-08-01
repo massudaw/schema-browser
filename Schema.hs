@@ -212,7 +212,7 @@ withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s
 
 testParse db sch q = withConnInf db sch (\inf -> do
                                        let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
-                                       --putStrLn (  show rpq)
+                                       -- putStrLn (  show rpq)
                                        q <- queryWith_ (fromAttr (rp) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        --print q
                                        return $ q
