@@ -213,9 +213,7 @@ withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s
 
 testParse db sch q = withConnInf db sch (\inf -> do
                                        let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
-                                       -- putStrLn (  show rpq)
                                        q <- queryWith_ (fromAttr (rp) ) (conn  inf) (fromString $ T.unpack $ rpq)
-                                       --print q
                                        return $ q
                                            )
 
@@ -224,7 +222,7 @@ testFireQuery q = testParse "incendio" "incendio"  q
 testAcademia q = testParse "academia" "academia"  q
 
 selectAll inf table   = liftIO $ do
-      let -- rp = rootPaths'  (tableMap inf) table
+      let
           tb =  tableView (tableMap inf) table
       print (tableName table,selectQuery tb)
       (t,v) <- duration  $ queryWith_  (fromAttr (unTlabel tb)) (conn inf)(fromString $ T.unpack $ selectQuery tb)
@@ -250,12 +248,10 @@ addTable inf table = do
 
 testLoadDelayed inf t = do
    let table = lookTable inf t
-       tb = {-filterKey (\i _-> not . any  (isKDelayed . keyType ) $  S.toList i ) $-} tableView (tableMap inf) table
-       tbdel = {-filterKey (\i _-> any  (isKDelayed . keyType ) $  S.toList i ) $-} tableView (tableMap inf) table
+       tb = tableView (tableMap inf) table
    print tb
-   print tbdel
    res  <- queryWith_ (fromAttr (unTlabel tb)) (conn inf) (fromString $ T.unpack $ selectQuery tb )
-   mapM (loadDelayed inf (unTlabel tbdel )) res
+   mapM (loadDelayed inf (unTlabel tb )) res
 
 testFireQueryLoad t  = withConnInf "incendio" "incendio" (flip testLoadDelayed t)
 
@@ -265,14 +261,6 @@ mergeTB1 (TB1 m (Compose k) ) (TB1 m2 (Compose k2) )
 
 ifOptional i = if isKOptional (keyType i) then unKOptional i else i
 ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
-
-relabeling :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB f k a -> TB p k a
-relabeling p l (Attr k i ) = (Attr k i)
-relabeling p l (IT i tb ) = IT ((Compose.  l . relabeling p l . p . getCompose ) i) (relabelT p l tb)
-relabeling p l (TBEither  k i  j  ) = TBEither k (fmap (Compose.  l . relabeling p l . p . getCompose ) i) (fmap (Compose.  l . relabeling p l . p . getCompose )  j)
-
-relabelT :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB3 f k a -> TB3 p k a
-relabelT p l (TB1 m (Compose j)) =  (TB1 m (Compose $ l (KV $ fmap (Compose.  l . relabeling p l . p . getCompose ) (_kvvalues $ p j))))
 
 
 -- Load optional not  loaded delayed values
@@ -286,12 +274,12 @@ loadDelayed inf t@(TB1 k v) values@(TB1 ks vs)
            attr = T.intercalate "," delayedattrs
            table = justError "no table" $ M.lookup (_kvpk k) (pkMap inf)
            delayed = fmap (const ()) $ mapKey (kOptional . ifDelayed . ifOptional) $ TB1 k $ Compose $ Identity $ KV filteredAttrs
-           str = "SELECT " <> explodeRow (relabelT runIdentity Unlabeled  delayed) <> " FROM " <> showTable table <> " WHERE " <> whr
+           str = "SELECT " <> explodeRow (relabelT runIdentity Unlabeled delayed) <> " FROM " <> showTable table <> " WHERE " <> whr
        print str
-       is <- queryWith (fromAttr delayed)  (conn inf) (fromString $ T.unpack str) (fmap unTB $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK (tableNonRef values))
+       is <- queryWith (fromAttr delayed) (conn inf) (fromString $ T.unpack str) (fmap unTB $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK (tableNonRef values))
        case is of
             [] -> errorWithStackTrace "empty query"
-            [i] ->return $ Just $ EditTB (mapKey (kOptional.kDelayed. unKOptional )  . fmap (SOptional . Just . SDelayed .  unSOptional ) $ i  ) values
+            [i] ->return $ Just $ EditTB (mapKey (kOptional.kDelayed.unKOptional) . fmap (SOptional . Just . SDelayed .  unSOptional ) $ i  ) values
             _ -> errorWithStackTrace "multiple result query"
   where
     delayedattrs = concat $ fmap keyValue . F.toList <$> M.keys filteredAttrs

@@ -27,26 +27,17 @@ import System.Environment
 import Debug.Trace
 import Data.Ord
 import OFX
-
--- Timeline
---import Data.Time.Format
---import System.Locale
---import Data.Aeson
---import Text.Read
-
 import Data.Time.Parse
 import Utils
 import Schema
 import Data.Char (toLower)
 import PandocRenderer
--- import Control.Monad
 import Postgresql
 import Data.Maybe
 import Data.Functor.Identity
 import Reactive.Threepenny
 import Data.Traversable (traverse)
 import qualified Data.Traversable as Tra
--- import Warshal
 import Data.Time.LocalTime
 import qualified Data.List as L
 import qualified Data.Vector as Vector
@@ -289,7 +280,7 @@ chooseKey inf key = mdo
      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList  )
      tsort = (\ b c -> trace (T.unpack $ "sort " <> T.intercalate "," (fmap showKey c)) . sorting b (traceShowId c) ) <$> triding asc <*> multiUserSelection sortList
      res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 _ kv ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $ keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
-  itemList <- listBox res3  (tidings bselection never)  (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
+  itemList <- listBox res3 (tidings bselection never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
   let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
   prop <- stepper cv (trace "evtrig" <$> evsel)
   let tds = tidings prop evsel
@@ -301,11 +292,11 @@ chooseKey inf key = mdo
   inisort <- currentValue (facts tsort)
   res2 <- accumB (inisort vp) (fmap concatenate $ unions [rumors tsort , (flip (foldr addToList  ) <$> evs)])
 
-  element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","300px")]
-  insertDiv <- UI.div # set children cru
-  itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [filterInp,getElement sortList,getElement asc, getElement el] )
-  itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.style [("display","inline-flex")]
-  header <- UI.h1 # set text (T.unpack $ translatedName table)
+  element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","300px")] # set UI.class_ "col-xs-9"
+  insertDiv <- UI.div # set children cru # set UI.class_ "row"
+  itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [filterInp,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"
+  itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row" # set UI.style [("display","inline-flex")]
+  header <- UI.h1 # set text (T.unpack $ translatedName table) # set UI.class_ "row"
   UI.div # set children ([header,itemSelec,insertDiv ] )
 
 

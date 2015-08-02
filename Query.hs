@@ -768,4 +768,12 @@ isInline (KArray i ) = isInline i
 isInline (InlineTable _ i) = True
 isInline _ = False
 
+relabeling :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB f k a -> TB p k a
+relabeling p l (Attr k i ) = (Attr k i)
+relabeling p l (IT i tb ) = IT ((Compose.  l . relabeling p l . p . getCompose ) i) (relabelT p l tb)
+relabeling p l (TBEither  k i  j  ) = TBEither k (fmap (Compose.  l . relabeling p l . p . getCompose ) i) (fmap (Compose.  l . relabeling p l . p . getCompose )  j)
+
+relabelT :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB3 f k a -> TB3 p k a
+relabelT p l (TB1 m (Compose j)) =  (TB1 m (Compose $ l (KV $ fmap (Compose.  l . relabeling p l . p . getCompose ) (_kvvalues $ p j))))
+
 
