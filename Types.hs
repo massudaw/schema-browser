@@ -469,7 +469,7 @@ mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),i))
 keyattr :: Compose Identity (TB Identity ) k  a -> [k]
 keyattr = keyattri . runIdentity . getCompose
 keyattri (Attr i  _ ) = [i]
-keyattri (TBEither k i l  ) =[k]
+keyattri (TBEither k i l  ) =  concat $ fmap keyattr i
 keyattri (FKT i _ rel _ ) =  (_relOrigin <$> rel )
 keyattri (IT i  _ ) =  keyattr i
 

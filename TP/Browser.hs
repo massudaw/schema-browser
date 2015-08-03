@@ -356,7 +356,7 @@ siapi3Plugin  = BoundedPlugin2 pname tname  (staticP url) elemp
       ano <- varTB "ano" -< ()
       cpf <- atR "id_owner,id_contact"
                 $ atR "id_owner"
-                    $ atAny "number" [varTB "cpf_number",varTB "cnpj_number"] -< t
+                    $ atAny "cpf_number,cnpj_number" [varTB "cpf_number",varTB "cnpj_number"] -< t
       odxR "taxa_paga" -< ()
       odxR "aproval_date" -< ()
       atR "andamentos" (proc t -> do
@@ -620,7 +620,7 @@ queryCPFStatefull =  StatefullPlugin "CPF Receita" "owner" [staticP arrowF,stati
     where
       arrowF ,arrowS :: ArrowReader
       arrowF = proc t -> do
-              atAny "number" [idxR "cpf_number"] -< t
+              atAny "cpf_number,cnpj_number" [idxR "cpf_number"] -< t
               odxR "captchaViewer" -< t
               returnA -< Nothing
       arrowS = proc t -> do
@@ -634,32 +634,31 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] wrapplug
     where arrowF ,arrowS :: ArrowReader
           arrowF = proc t -> do
-            atAny "number" [idxR "cnpj_number"] -< t
+            atAny "cpf_number,cnpj_number" [idxR "cnpj_number"] -< t
             odxR "captchaViewer"-< t
             returnA -< Nothing
           arrowS = proc t -> do
-            idxR "captchaInput" -< t
-            odxR "owner_name" -< t
-            odxR "address"-< t
-            odxR "atividade_principal" -< ()
-            odxR "atividades_secundarias" -< ()
-            atR "atividades_secundarias" cnae -< t
-            atR "atividade_principal" cnae -< t
-            atR "address"  addrs -< t
-
-            returnA -< Nothing
+              idxR "captchaInput" -< t
+              odxR "owner_name" -< t
+              odxR "address"-< t
+              odxR "atividade_principal" -< ()
+              odxR "atividades_secundarias" -< ()
+              atR "atividades_secundarias" cnae -< t
+              atR "atividade_principal" cnae -< t
+              atR "address"  addrs -< t
+              returnA -< Nothing
 
           cnae = proc t -> do
-                  odxR "id" -< t
-                  odxR "description" -< t
+              odxR "id" -< t
+              odxR "description" -< t
           addrs = proc t -> do
-                  odxR "logradouro" -< t
-                  odxR "number " -< t
-                  odxR "uf" -< t
-                  odxR "cep" -< t
-                  odxR "complemento" -< t
-                  odxR "municipio" -< t
-                  odxR "bairro" -< t
+              odxR "logradouro" -< t
+              odxR "number " -< t
+              odxR "uf" -< t
+              odxR "cep" -< t
+              odxR "complemento" -< t
+              odxR "municipio" -< t
+              odxR "bairro" -< t
 
 
 
