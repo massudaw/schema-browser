@@ -536,6 +536,7 @@ oitems = mkWriteAttr $ \i x -> void $ do
 
 
 infixl 4 <#>
+(<#>) :: Behavior (a -> b) -> Tidings a -> Tidings b
 b <#>  t = tidings ( b <*> facts t ) (b <@> rumors t)
 
 fileChange :: Element -> Event (Maybe String)

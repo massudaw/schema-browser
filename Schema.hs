@@ -112,7 +112,7 @@ keyTables conn userconn (schema ,user) = do
          let
            lcol = lookupKey' keyMapPre . (t,) <$> V.toList l
            tnew = Key n Nothing un (KEither (keyType <$> lcol) )
-         return (t,[(tnew,Path (S.fromList lcol) (FKEitherField tnew lcol) (S.singleton tnew) )]) ) <$> query conn "SELECT table_name,sum_columns,column_name FROM metadata.table_either WHERE table_schema = ? " (Only schema)
+         return (t,[(tnew,Path (S.singleton tnew ) (FKEitherField tnew lcol) (S.fromList lcol ) )]) ) <$> query conn "SELECT table_name,sum_columns,column_name FROM metadata.table_either WHERE table_schema = ? " (Only schema)
        let eitherMap = M.fromListWith mappend  $ fmap (\(t,j) -> (t,fmap snd j )) $ eitherItems
            keyMap =  foldr (uncurry M.insert) keyMapPre $ concat $ fmap (\(t,j) -> fmap (\ki -> ((t,keyValue ki),ki)) $ fmap fst j ) $ eitherItems
        let

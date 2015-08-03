@@ -135,19 +135,19 @@ getCnpj'  inf i  handler = do
       outM <- fmap ( fmap  (M.fromListWith (++) . fmap (fmap (\i -> [i]) )) . join) . Tra.traverse getCnpjShowable $ mvar
       liftIO $ print outM
       maybe (return () ) (\ out-> do
-        let own i = Compose . Identity .  Attr (lookKey inf "owner" i )
-            attr i = Compose . Identity .  Attr (lookKey inf "address" i )
-            cna i = Compose . Identity .  Attr  (lookKey inf "cnae" i )
+        let own = attr
+            attr i = Compose . Identity .  Attr  i
+            cna  =  attr
             idx  = SOptional . fmap (SText . TL.pack . head) . flip M.lookup out
-            fk i  = Compose . Identity . FKT i True []
-            afk i  = Compose . Identity . FKT i True [] . LeftTB1 . Just . ArrayTB1
-            tb attr = tbmap $ mapFromTBList attr
+            fk rel i  = Compose . Identity . FKT i True rel
+            afk rel i  = Compose . Identity . FKT i True rel . LeftTB1 . Just . ArrayTB1
+            tb attr = tbmap $ mapFromTBList $ traceShowId attr
             (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (SText .TL.filter (not . flip L.elem "-.") . fst) t ,  SOptional $  SText .  TL.strip .  TL.drop 3. snd <$>  t)
                 where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)
             scnae = fmap (\t -> ((SText .TL.filter (not . flip L.elem "-.") . fst) t ,    (SText .TL.strip . TL.drop 3 .  snd ) t)) ts
-                where ts = join . maybeToList $ fmap (  TL.breakOn " - " .  TL.pack ) <$> (M.lookup "CÓDIGO E DESCRIÇÃO DAS ATIVIDADES ECONÔMICAS SECUNDÁRIAS" out)
+                where ts = join . maybeToList $ fmap (TL.breakOn " - " .  TL.pack ) <$> (M.lookup "CÓDIGO E DESCRIÇÃO DAS ATIVIDADES ECONÔMICAS SECUNDÁRIAS" out)
             attrs = tb [ own "owner_name" (idx "NOME EMPRESARIAL")
-                       , fk [own "address" (SOptional (Just $ SNumeric (-1)))]
+                       , fk [Rel "address" "=" "id"] [own "address" (SOptional $ Just $ SNumeric (-1)) ]
                           (LeftTB1 $ Just $
                           tb [attr "id" (SSerial Nothing)
                               ,attr "logradouro" (idx "LOGRADOURO")
@@ -157,11 +157,11 @@ getCnpj'  inf i  handler = do
                               ,attr "bairro" (idx "BAIRRO/DISTRITO")
                               ,attr "municipio" (idx "MUNICÍPIO")
                               ,attr "uf" (idx "UF")])
-                       ,fk [own "atividade_principal" (SOptional $ Just pcnae)]
+                       ,fk [Rel "atividade_principal" "=" "id"] [own "atividade_principal" (SOptional $ Just pcnae)]
                                   (LeftTB1 $ Just $ tb [cna "id" pcnae,cna "description" pdesc] )
-                       ,afk [own "atividades_secundarias" (SOptional $ Just $ SComposite $V.fromList $ fmap fst scnae)]
+                       ,afk [(Rel "atividades_secundarias" "=" "id")] [own "atividades_secundarias" (SOptional $ Just $ SComposite $V.fromList $ fmap fst scnae)]
                                   ((\(pcnae,pdesc)-> tb [cna "id" pcnae,cna "description" pdesc] ) <$> scnae)]
-        handler . Just $ traceShowId attrs
+        handler . Just $ traceShowId $ liftKeys inf "owner" $ traceShowId attrs
         return ()) outM ) rv
   return ()
 
@@ -178,41 +178,6 @@ getCnpj captcha cgc_cpf = do
           pr <- traverse (Sess.post session (cnpjpost) . protocolocnpjForm cgc_cpf ) (Just $  captcha  )
           traverse (readHtmlReceita . BSLC.unpack ) (fromJust pr ^? responseBody)
 
-{-
-cnpjquery el cpfe = do
-    let opts = defaults & manager .~ Left man
-        man  = opensslManagerSettings context
-    (captcha,hcaptcha) <- liftIO $ newEvent
-    (precaptcha,prehcaptcha) <- liftIO $ newEvent
-    (result,hresult) <- liftIO $ newEvent
-    inpCap <-UI.input # set UI.style [("width","120px")]
-    submitCap <- UI.button # set UI.text "Submit"
-    capb <- stepper Nothing captcha
-    cappreb <- stepper "" precaptcha
-    capE <- UI.div
-        -- Loading Gif
-        # sink items (pure. const (UI.img # set UI.src ("static/ajax-loader.gif" )   )<$>  cappreb)
-        -- Captcha
-        # sink items (pure. const (UI.img # sink UI.src ((("data:image/png;base64,"++) . maybe "" (BSLC.unpack.B64.encode)) <$> capb ) )   <$>  capb)
-    dv <-UI.div
-    element el # set UI.children [capE,dv,inpCap,submitCap]
-    binpCap <- stepper "" (UI.valueChange inpCap)
-    liftIO $ withOpenSSL $ Sess.withSessionWith man $ \session -> do
-        evalUI el $ do
-            UI.onEvent (rumors cpfe) (liftIO . traverse (\cgc_cpf ->  do
-                i <- forkIO $ (do
-                              r <- Sess.getWith (opts & param "cnpj" .~ [T.pack $ BSC.unpack cgc_cpf]) session $ traceShowId cnpjhome
-                              (^? responseBody) <$> (Sess.get session $ traceShowId cnpjcaptcha)
-                              ) >>= hcaptcha
-                prehcaptcha ("Carregando Captcha em " <> show i)
-                    ))
-            UI.onEvent ((,) <$> facts cpfe <@> (binpCap <@ UI.click submitCap)) (liftIO . forkIO . (\(cp,captcha) ->  do
-                pr <- (Sess.post session (traceShowId cnpjpost) . protocolocnpjForm (fromJust cp) ) (BSC.pack captcha  )
-                v <- traverse (readHtmlReceita . BSLC.unpack ) (pr ^? responseBody)
-                hresult v
-                ))
-    return result
--}
 
 protocolocpfForm :: BS.ByteString -> BS.ByteString -> [FormParam]
 protocolocpfForm cgc_cpf captcha
@@ -224,7 +189,7 @@ protocolocpfForm cgc_cpf captcha
 
 protocolocnpjForm :: BS.ByteString -> BS.ByteString -> [FormParam]
 protocolocnpjForm cgc_cpf captcha
-                     = ["origem"  := ("comprovante"::BS.ByteString)
+                     = traceShowId ["origem"  := ("comprovante"::BS.ByteString)
                        ,"cnpj"    := cgc_cpf
                        ,"txtTexto_captcha_serpro_gov_br" := captcha
                        ,"submit1" := ("Consultar" :: BS.ByteString)

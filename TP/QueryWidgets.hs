@@ -50,15 +50,8 @@ import qualified Data.Text.Lazy as T
 import qualified Data.ByteString.Char8 as BSC
 import GHC.Stack
 
-containKV f = (\i ->   S.member ( S.fromList $ fmap keyValue $  kattr (Compose . Identity $ fst i)) (S.fromList $ fmap (S.fromList .head) $ fmap snd $ f))
 
--- [Note] Smooth Plugins
--- Just update when input change
--- Don't overwrite when wont change output
--- Hide when output is already filled
--- Let overwrite output with user command
-
--- modifyTB :: (Traversable f ,Ord a) => f a -> Modification a b ->  Maybe ( f (a,b)) -> Maybe (f (a,b))
+modifyTB :: Modification Key Showable ->   Maybe (TB1  Showable)
 modifyTB  (InsertTB m) =  (Just m)
 modifyTB  (DeleteTB m ) =  Nothing
 modifyTB  (EditTB m n ) =  fmap ( mapTB1 (\i -> maybe i (snd) $ getCompose . runIdentity . getCompose $ findTB1  (\k -> keyattr k == keyattr i) m ) ) (Just n)
@@ -69,13 +62,11 @@ generateFresh = do
   return $ (h,tidings b e)
 
 
-
 createFresh n tname pmap i ty  =  do
   k <- newKey i ty
   return $ M.insert (n,tname,i) k pmap
 
 testTable i =  (\t ->  fmap  F.toList  $  (checkTable  t) i)
-
 
 
 pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac ) ) = do
@@ -87,7 +78,7 @@ pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac )
   let inf = oinf {pluginsMap = m}
       freshKeys :: [[Key]]
       freshKeys = fmap (lookFresh  inf n tname . fst ) <$> fresh
-  freshUI <- Tra.sequence $   zipWith  (\(input,output) freshs -> do
+  freshUI <- Tra.sequence $   zipWith (\(input,output) freshs -> do
       (h,t :: Tidings (Maybe (TB1 Showable)) ) <- liftIO $ generateFresh
       elems <- mapM (\fresh -> do
         let hasF l = hasProd (== IProd True [ keyValue fresh] ) l
@@ -102,7 +93,7 @@ pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac )
         inp = fmap (tbmap . mapFromTBList) <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap (Compose .Identity )) . triding) (rights elems) )
       ei <- if not $ any (\fresh -> hasProd ( == IProd True [keyValue fresh]) input)  freshs
          then
-          TrivialWidget (pure (Just  $ tbmap $ M.empty) ) <$> UI.div
+          TrivialWidget (initItems) <$> UI.div
          else do
           inpPost <- UI.button # set UI.text "Submit"
           trinp <- cutEvent (UI.click inpPost) inp
@@ -111,10 +102,10 @@ pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac )
       return (h,(output,t),(lefts elems) ,ei )
            ) tf freshKeys
   el <- UI.div # set UI.children (headerP : (concat $ fmap (\(_,_,o,i)-> concat $ [fmap getElement o ,[getElement i]]) freshUI ))
-  liftIO $ forkIO  $ fmap (const ()) $ init $ foldl (\ unoldM (f,((h,htidings,loui,inp),action))  -> unoldM >>= (\unoldItems -> do
-      let oldItems = foldl1 (liftA2 (liftA2 mergeTB1)) (triding inp: unoldItems)
+  liftIO $ forkIO  $ fmap (const ()) $ init $ foldl (\unoldM (f,((h,htidings,loui,inp),action))  -> unoldM >>= (\unoldItems -> do
+      let oldItems = liftA2 (flip mergeTB1) <$>  facts unoldItems <#> triding inp
       liftEvent (rumors oldItems) (\i -> action inf  i  (liftIO . h) )
-      return  [oldItems]  ))  (return [initItems] ) ( zip tf $ zip freshUI ac)
+      return  oldItems ))  (return initItems ) ( zip tf $ zip freshUI ac)
   element el # sink UI.style (noneShow <$> facts tdInput)
   return (el ,  (  ((\(_,o,_,_) -> fmap rumors o)$ last freshUI ) ))
 
@@ -179,7 +170,7 @@ attrUITable
 attrUITable  tAttr' evs (Attr i _ ) = do
       tdi' <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse ( diffOptional ))) i =<< j) (return tAttr') evs
       let tdi = fmap (\(Attr  _ i )-> i) <$>tdi'
-      attrUI <- buildUI (textToPrim <$> keyType i) tdi
+      attrUI <- buildUI (textToPrim <$> keyType i) (fmap traceShowId tdi)
       let insertT = fmap (Attr i ) <$> (triding attrUI)
       return $ TrivialWidget insertT  (getElement attrUI)
 buildUI i  tdi = case i of
@@ -294,13 +285,13 @@ tbCase inf pgs constr i@(FKT ifk _ rel tb1 ) wl plugItens oldItems  = do
         l <- flabel # set text (show $ _relOrigin <$> rel )
         let
             tbi = fmap (Compose . Identity)  <$> oldItems
-            thisPlugs = filter (hasProd (isNested ((IProd True $ concat $ fmap (fmap keyValue.keyattr) ifk)) ) . fst) $  plugItens
-            pfks =  first ( uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ concat $ fmap (fmap keyValue.keyattr) ifk)))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> thisPlugs
+            thisPlugs = filter (hasProd (isNested ((IProd True $ concat $ fmap (fmap keyValue.keyattr) ifk))) . fst) $  plugItens
+            pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ concat $ fmap (fmap keyValue.keyattr) ifk)))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> thisPlugs
             restrictConstraint = filter ((== (fmap keyattr ifk)) . fmap keyattr  .fst) constr
 
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             convertConstr :: SelTBConstraint
-            convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap _tbref td /= Just el )  $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ) <$> oldItems <*>  )<$>  restrictConstraint
+            convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap _tbref td /= Just el )  $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ) <$> oldItems <*>) <$>  restrictConstraint
         tds <- fkUITable inf pgs convertConstr pfks (filter (isReflexive .fst) wl) (fmap (runIdentity . getCompose ) <$>  tbi) i
         dv <- UI.div #  set UI.class_ "col-xs-12"# set children [l,getElement tds]
         paintEdit l (facts (fmap _tbref <$> triding tds)) (fmap _tbref <$> facts oldItems)
@@ -310,7 +301,7 @@ tbCase inf pgs constr i@(IT na tb1 ) wl plugItens oldItems  = do
         l <- flabel # set text (show $ keyAttr .unTB $ na )
         let tbi = fmap (Compose . Identity ) <$> oldItems
             thisPlugs = filter (hasProd (isNested (IProd True (keyValue <$> keyattr na ))) . fst) $  plugItens
-            pfks =  first ( uNest . justError "No nested Prod IT" . (findProd (isNested (IProd True (keyValue <$> keyattr na))))) . second ( fmap ( join .  fmap (fmap (runIdentity . getCompose) . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((== keyattr na).keyattr)))) <$> thisPlugs
+            pfks =  first (uNest . justError "No nested Prod IT" . (findProd (isNested (IProd True (keyValue <$> keyattr na))))) . second ( fmap ( join .  fmap (fmap (runIdentity . getCompose) . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((== keyattr na).keyattr)))) <$> thisPlugs
         tds <- iUITable inf pgs pfks (fmap (runIdentity . getCompose ) <$>  tbi) i
         dv <- UI.div #  set UI.class_ "col-xs-12" # set children [l,getElement tds]
         paintEdit l (facts (triding tds)) (facts oldItems)
@@ -370,7 +361,7 @@ uiTable inf pgs constr tname plmods ftb@(TB1 m k ) oldItems = do
       Just table = M.lookup tname  (tableMap inf)
 
   res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds ) pgs)
-  let plugmods = (snd <$> res ) <> plmods
+  let plugmods = (snd <$> res) <> plmods
 
   fks <- foldl (\jm (l,m)  -> do
             w <- jm
@@ -492,7 +483,7 @@ processPanelTable inf attrsB res table oldItemsi = do
       editAction attr old = do
         let
             isM' :: Maybe (TB1 Showable)
-            isM' =  join $ fmap (TB1  (tableMeta table). Compose . Identity  . KV ) . allMaybesMap <$> (liftA2 (liftF2 (\i j -> if i == j then Nothing else   traceShow (i,j) $ Just i))) (traceShowId . _kvvalues. unTB . _unTB1 <$> attr) (traceShowId . _kvvalues. unTB . _unTB1  <$> old)
+            isM' =  join $ fmap (TB1  (tableMeta table). Compose . Identity  . KV ) . allMaybesMap <$> (liftA2 (liftF2 (\i j -> if i == j then Nothing else   traceShow (i,j) $ Just i))) (traceShow "new" .traceShowId . _kvvalues. unTB . _unTB1 <$> attr) (traceShow "old" . traceShowId . _kvvalues. unTB . _unTB1  <$> old)
         res <- liftIO $ catch (maybe (return (Left "no attribute changed check edit restriction")) (\l-> Right <$> updateAttr (conn inf) l (justError "unold" old) table) attr ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
         return $ fmap (const (EditTB (justError "unism'" isM') (justError "unold" old) )) res
 
@@ -603,7 +594,7 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
       (TrivialWidget offsetT offset) <- offsetField 0
       items <- mapM (\ix ->
             iUITable inf pgs
-                (fmap (unIndexItens  ix <$> (facts offsetT) <@> ) <$> plmods)
+                (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods)
                 (unIndexItens ix <$> offsetT <*>   oldItems)
                 (IT  na tb1)) [0..8]
       let tds = triding <$> items
@@ -665,8 +656,9 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
           table = justError "no table found" $ M.lookup rr $ pkMap inf
       res <- liftIO$ addTable inf table
 
-      ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . snd <$> plmods)
+      -- ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . snd <$> plmods)
       let
+          ftdi = oldItems
           res3 :: Tidings [TB1 Showable]
           res3 =  foldr (\constr  res2 -> (\el constr td -> filter (not. constr  )  el )  <$> res2  <*> snd constr <*> (fmap ( _tbref )<$> ftdi)) (tidings res2 never ) constr
       let
@@ -679,12 +671,12 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList
           sortList :: Tidings ([TB1 Showable] -> [TB1 Showable])
           sortList =  sorting  <$> pure True <*> pure (fmap (Le.view relTarget) rel)
-      itemList <- listBox (((Nothing:) <$>  fmap (fmap Just) res3) ) (tidings bselection  never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+      itemList <- listBox ((Nothing:) <$>  fmap (fmap Just) res3) (tidings bselection  never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
       let evsel = unionWith const (rumors $ join <$> userSelection itemList) (rumors tdi)
       prop <- stepper cv evsel
       let tds = tidings prop evsel
-      (celem,evs) <- crudUITable inf pgs  (pure False) res3 (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
+      (celem,evs) <- crudUITable inf pgs  (pure False) res3 (fmap (fmap (traceShowId . fmap _fkttable)) <$> plmods)  tb1  tds
       let
           bselection = fmap Just <$> st
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> userSelection itemList), rumors tdi]),(fmap modifyTB <$> evs)]
@@ -703,7 +695,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
 
 
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk refl rel  (LeftTB1 (Just tb1 ))) = do
-    tr <- fkUITable inf pgs constr (fmap (unLeftItens <$> ) <$> plmods)  wl (unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) refl (Le.over relOrigin unKOptional <$> rel) tb1)
+    tr <- fkUITable inf pgs constr (fmap (unLeftItens <$>) <$> plmods)  wl (unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) refl (Le.over relOrigin unKOptional <$> rel) tb1)
     return $ leftItens tb tr
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk refl rel  (ArrayTB1 [tb1]) ) = do
      (TrivialWidget offsetT offset) <- offsetField 0
@@ -713,7 +705,7 @@ fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk refl rel  (ArrayTB1 [t
          nonInjConstr :: SelTBConstraint
          nonInjConstr = first (pure . Compose . Identity ) .fmap ( fmap (\j (TB1 _ l) -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity) $ maybeToList j) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l  ) ).  triding) <$> filter (flip S.isSubsetOf (S.fromList   nonInj) . S.fromList . keyattr .Compose . Identity .fst) wl
          fkst = FKT arrayK refl (fmap (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
-     fks <- mapM (\ix-> fkUITable inf pgs (constr <> nonInjConstr ) (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods ) [] (unIndexItens ix <$> offsetT  <*>  oldItems) fkst) [0..8]
+     fks <- mapM (\ix-> fkUITable inf pgs (constr <> nonInjConstr) (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods ) [] (unIndexItens ix <$> offsetT  <*>  oldItems) fkst) [0..8]
      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      dv <- UI.div # set children (getElement <$> fks)
      let bres = indexItens tb offsetT fks oldItems
