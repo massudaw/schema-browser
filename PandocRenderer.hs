@@ -148,7 +148,6 @@ renderProjectPricingA = (staticP myDoc , element )
                               b <- dynPK myDoc (Just inp)
                               return $ liftKeys inf tname  <$> b)
 
-lookKey2 inf t k = justError ("lookKey' cant find key " <> show k <> " in " <> show t) $  foldr1 mplus $ fmap (\ti -> M.lookup (ti,k) (keyMap inf)) t
 
 
 {-

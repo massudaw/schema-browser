@@ -66,7 +66,7 @@ createFresh n tname pmap i ty  =  do
   k <- newKey i ty
   return $ M.insert (n,tname,i) k pmap
 
-testTable i =  (\t ->  fmap  F.toList  $  (checkTable  t) i)
+testTable i =  (\t ->  fmap  F.toList  $ traceShowId $ checkTable  t i)
 
 
 pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac ) ) = do
@@ -120,7 +120,6 @@ pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
   v <- currentValue (facts oldItems)
   headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (facts tdInput)
   let ecv = (facts oldItems<@ UI.click headerP)
-  bcv <- stepper v (facts oldItems <@ UI.click headerP)
   pgOut <- mapEvent (catchPluginException inf n t . action inf) (ecv)
   return (headerP, (snd f ,   pgOut ))
 
@@ -169,7 +168,7 @@ attrUITable
      -> TB Identity Key ()
      -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
 attrUITable  tAttr' evs (Attr i _ ) = do
-      tdi' <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse ( diffOptional ))) i =<< j) (return tAttr') evs
+      tdi' <- foldr (\i j ->  updateEvent   Just  i =<< j) (return tAttr') evs
       let tdi = fmap (\(Attr  _ i )-> i) <$>tdi'
       attrUI <- buildUI (textToPrim <$> keyType i) tdi
       let insertT = fmap (Attr i ) <$> (triding attrUI)

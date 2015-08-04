@@ -527,44 +527,44 @@ importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
 notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" tname (staticP url) elem
   where
     tname = "nota"
-    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text (Showable)))
+    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    url ::  ArrowReader
     url = proc t -> do
       i <- varTB "id_nota" -< t
-      odx "nota" -<  t
-      r <- at "inscricao" (proc t -> do
+      odxR "nota" -<  t
+      r <- atR "inscricao" (proc t -> do
                                n <- varTB "inscricao_municipal" -< t
                                u <- varTB "goiania_user"-< t
                                p <- varTB "goiania_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
-      b <- act (fmap join  . traverse (\(i, (j, k,a)) -> prefeituraNota j k a i ) ) -< liftA2 (,) i r
+      b <- act (fmap join  . traverse (\(i, (j, k,a)) -> liftIO$ prefeituraNota j k a i ) ) -< liftA2 (,) i r
       let ao =  Just $ tblist [attrT ("nota",    SOptional $ fmap (SDelayed .Just) b)]
       returnA -< ao
     elem inf = maybe (return Nothing) (\inp -> do
-                              b <- dynPK url (Just inp)
+                              b <- runReaderT (dynPK url  ()) (Just inp)
                               return $ liftKeys inf tname  <$> b
                             )
 
 queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" tname (staticP url) elem
   where
     tname = "art"
-    varTB = fmap ( fmap (BS.pack . renderShowable ))<$>  varT
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text (Showable)))
+    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    url :: ArrowReader
     url = proc t -> do
       i <- varTB "art_number" -< t
-      idxT "payment_date" -<  t
-      odx "art" -<  t
-      r <- at "crea_register" (proc t -> do
+      idxR "payment_date" -<  t
+      odxR "art" -<  t
+      r <- atR "crea_register" (proc t -> do
                                n <- varTB "crea_number" -< t
                                u <- varTB "crea_user"-< t
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
-      b <- act (fmap join  . traverse (\(i, (j, k,a)) -> creaLoginArt  j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ tblist [attrT ("art",    SOptional b)]
+      b <- act (fmap join  . fmap traceShowId . traverse (\(i, (j, k,a)) -> liftIO$ creaLoginArt  j k a i ) ) -< liftA2 (,) i r
+      let ao =  traceShowId $ Just $ tblist [attrT ("art",    SOptional $ fmap (SDelayed . Just ) b)]
       returnA -< ao
     elem inf = maybe (return Nothing) (\inp -> do
-                              b <- dynPK url (Just inp)
-                              return $ liftKeys inf tname <$> b
+                              b <- runReaderT (dynPK url  $ ()) (Just inp)
+                              return $ liftKeys inf tname . traceShowId <$> b
                             )
 
 
@@ -584,7 +584,7 @@ queryArtBoletoCrea = BoundedPlugin2  pname tname (staticP url) elem
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act ( traverse (\(i, (j, k,a)) -> lift $ creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ tblist [attrT ("boleto",   SOptional $ (SBinary. BSL.toStrict) <$> b)]
+      let ao =  Just $ tblist [attrT ("boleto",   SOptional  $ fmap ( SDelayed . Just) $ (SBinary. BSL.toStrict) <$> b)]
       returnA -< ao
     elem inf
        = maybe (return Nothing) (\inp -> do
