@@ -292,7 +292,6 @@ tbCase inf pgs constr i@(FKT ifk _ rel tb1 ) wl plugItens oldItems  = do
             thisPlugs = filter (hasProd (isNested ((IProd True $ concat $ fmap (fmap keyValue.keyattr) ifk))) . fst) $  plugItens
             pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ concat $ fmap (fmap keyValue.keyattr) ifk)))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> thisPlugs
             restrictConstraint = filter ((== (fmap keyattr ifk)) . fmap keyattr  .fst) constr
-
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             convertConstr :: SelTBConstraint
             convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap _tbref td /= Just el )  $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ) <$> oldItems <*>) <$>  restrictConstraint
@@ -698,8 +697,6 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
         fksel =  (\box -> fmap (\ibox -> FKT (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . fmap lookFKsel $ ibox) refl rel (fromJust box) ) .  join . fmap findPKM $ box ) <$>  ( triding box)
       fk <- UI.div # set  children ([getElement box,filterInp] <> celem)
       return $ TrivialWidget fksel fk
-
-
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk refl rel  (LeftTB1 (Just tb1 ))) = do
     tr <- fkUITable inf pgs constr (fmap (unLeftItens <$>) <$> plmods)  wl (unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) refl (Le.over relOrigin unKOptional <$> rel) tb1)
     return $ leftItens tb tr
@@ -735,8 +732,6 @@ pdfFrame (elem,sr , call,st) pdf = mkElement (elem ) UI.# sink0 (strAttr sr) (ca
 strAttr :: String -> WriteAttr Element String
 strAttr name = mkWriteAttr (set' (attr name))
 
-allNonEmpty [] = Nothing
-allNonEmpty l = Just  l
 
 sorting :: Bool -> [Key] -> [TB1 Showable]-> [TB1 Showable]
 sorting b ss  =  L.sortBy (ifApply b flip (comparing (filterTB1 (not . S.null . (`S.intersection` (S.fromList ss) ). S.fromList .keyattr ))  ))

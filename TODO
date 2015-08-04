@@ -24,22 +24,27 @@ CUSTOM PER TABLE FILTERS
 -- subtyping constraints 
 -- and , or combinators
 
+IMPROVE LEFT ARRAY TREATMENT 
+-- Try to change the TB to generalize over LEFTTB1
+ArrayTB1, SOptional , SComposite and maybe other higher kinded
+structures
+
 INDEXED PARTITION
 -- Static indexed tables, relations, schemas,dbs
 
 INDEXED CONSTRAINT
 -- Allow restrict partitioned tables
 
-PARTIALLY NONINJECTIVE REFERENCES
--- Implement Constrained Reflexive references for arrays
--- Implement totally non injective with partially non injective code
-
 PAGINATE
 -- Implement pagination over now() for dates
 -- Metadata Paginate reference
+-- Long Table Pagination
 
 CONSTRAINED REFLEXIVE RELATION
 -- Drop down for selecting multiple columns reference
+
+PARTIAL FK CONSTRAINT
+-- Propragate partial constraint 
 
 INDEX ORDERING
 -- index metadata
@@ -48,12 +53,7 @@ INDEX ORDERING
 CRUD
 -- Implement edit split for intervals and arrays
 
-PKPK FK CONSTRAINT
--- Map over FK table the origin constraints
-
-
 CONSTRAINT OPERATOR
--- Add operator to fks OK
 -- Add operators to pks
 
 Multiple Schema joins
@@ -62,6 +62,9 @@ Multiple Schema joins
 
 Types UI 
 -- Improve Especialized type UI
+
+RW Attribute Modifiers
+-- Create RW attributes
 
 View Support
 -- Improve Fix not null view fields
@@ -85,8 +88,6 @@ oo Table structure return value for ambigous name results
 Multiple Selection Array
 -- Multilist select 
 
-Pagination
--- Long Table Pagination
 
 Database Side Filtering
 
