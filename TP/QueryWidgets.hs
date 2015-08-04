@@ -168,7 +168,7 @@ attrUITable
      -> TB Identity Key ()
      -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
 attrUITable  tAttr' evs (Attr i _ ) = do
-      tdi' <- foldr (\i j ->  updateEvent   Just  i =<< j) (return tAttr') evs
+      tdi' <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse ( diffOptional ))) i =<< j) (return tAttr') evs
       let tdi = fmap (\(Attr  _ i )-> i) <$>tdi'
       attrUI <- buildUI (textToPrim <$> keyType i) tdi
       let insertT = fmap (Attr i ) <$> (triding attrUI)
@@ -294,7 +294,9 @@ tbCase inf pgs constr i@(FKT ifk _ rel tb1 ) wl plugItens oldItems  = do
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             convertConstr :: SelTBConstraint
             convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap _tbref td /= Just el )  $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ) <$> oldItems <*>) <$>  restrictConstraint
-        tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks (filter (isReflexive .fst) wl) (fmap (runIdentity . getCompose ) <$>  tbi) i
+        --    ftdi = fmap (runIdentity . getCompose ) <$>  tbi
+        ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return (fmap (runIdentity . getCompose ) <$>  tbi)) (fmap Just . filterJust . snd <$>  pfks )
+        tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks (filter (isReflexive .fst) wl) (ftdi ) i
         dv <- UI.div #  set UI.class_ "col-xs-12"# set children [l,getElement tds]
         paintEdit l (facts (fmap _tbref <$> triding tds)) (fmap _tbref <$> facts oldItems)
         return $ TrivialWidget (triding tds) dv
@@ -640,18 +642,15 @@ fkUITable
   -> TB Identity Key ()
   -> UI (TrivialWidget(Maybe (TB Identity Key Showable)))
 fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ ) ) = mdo
-      cvres <- currentValue (fmap (fmap unTB . _tbref) <$> facts oldItems)
-
       let
-          cv = search res cvres
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
           rr = tablePKSet tb1
           table = justError "no table found" $ M.lookup rr $ pkMap inf
       res <- liftIO$ addTable inf table
 
-      ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . snd <$> plmods)
       let
           -- Find non injective part of reference
+          ftdi = oldItems
           oldASet :: Set Key
           oldASet = S.fromList (_relOrigin <$> filterNotReflexive rel )
           iold :: Tidings ([Maybe [(Key,Showable)]])
@@ -668,19 +667,22 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
           search = (\i j -> join $ fmap (\k-> L.find (\(TB1 _ l )-> interPoint rel k  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList . _kvvalues . unTB $ l)) ) i) $ j )
           vv :: Tidings (Maybe [TB Identity Key Showable])
           vv =   liftA2 (<>) iold2  ftdi2
-          tdi =  search <$> res3 <*> vv
+      cvres <- currentValue (facts vv)
       filterInp <- UI.input
       filterInpBh <- stepper "" (UI.valueChange filterInp)
       let
+          cv = search res cvres
+          tdi =  search <$> res3 <*> vv
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList
           sortList :: Tidings ([TB1 Showable] -> [TB1 Showable])
           sortList =  sorting  <$> pure True <*> pure (fmap (Le.view relTarget) rel)
       itemList <- listBox ((Nothing:) <$>  fmap (fmap Just) res3) (tidings bselection  never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
-      let evsel = unionWith const (rumors $ join <$> userSelection itemList) (rumors tdi)
+      let evsel = unionWith const (rumors tdi) (rumors $ join <$> userSelection itemList)
       prop <- stepper cv evsel
-      let tds = tidings prop evsel
+      let ptds = tidings prop evsel
+      tds <- foldr (\i j -> updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap _fkttable.filterJust . snd <$>  plmods)
       (celem,evs) <- crudUITable inf pgs  (pure False) res3 (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
       let
           bselection = fmap Just <$> st

@@ -129,7 +129,7 @@ transformKey (KOptional j) l (SOptional v)
     | otherwise = error "no transform optional nothing"
 transformKey (KSerial j)  l (SSerial v)
     | isJust v = transformKey j l (fromJust v)
-    | otherwise = error "no transform serial nothing"
+    | otherwise = error $ "no transform serial nothing" <> show (l,v)
 -- transformKey (KOptional j)  l@(Primitive _ ) (SOptional v) | j == l  && isJust v = (\(Just i)-> i) v
 transformKey l@(Primitive _)  (KOptional j ) v | j == l  = SOptional $ Just v
 transformKey l@(Primitive _)  (KSerial j ) v | j == l  = SSerial $ Just v
