@@ -268,7 +268,7 @@ importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
         odxR "sic" -< t
         odxR "payeeid" -< t
         ) -< t
-      b <- act (fmap join . traverse (\(SText i, SBinary r) -> liftIO $ ofxPlugin (T.unpack i) (BS.unpack r))) -< liftA2 (,) fn i
+      b <- act (fmap join . traverse (\(SText i, (SOptional (Just (SDelayed (Just (SBinary r))))) ) -> liftIO $ ofxPlugin (T.unpack i) (BS.unpack r))) -< liftA2 (,) fn i
       let ao :: TB2 Text (Showable)
           ao =  LeftTB1 $ ArrayTB1 . fmap (tblist . fmap attrT ) <$>  b
           ref :: [Compose Identity (TB Identity ) Text(Showable)]
