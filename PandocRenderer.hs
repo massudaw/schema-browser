@@ -8,6 +8,7 @@ module PandocRenderer where
 import Debug.Trace
 import Text.Pandoc.Options
 import Types
+import RuntimeTypes
 import Text.Pandoc.PDF
 import Utils
 
@@ -101,7 +102,7 @@ renderProjectPricingA = (staticP myDoc , element )
           cshow (SComposite a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
           cshow (SOptional a ) =  join $ fmap cshow a
       -- myDoc :: a -> Pandoc
-      myDoc :: Step.Parser (Kleisli IO ) (Access Text) (Maybe (TB1 Showable)) (Maybe (TB2 Text Showable))
+      myDoc :: RuntimeTypes.Parser (Kleisli IO ) (Access Text) (Maybe (TB1 Showable)) (Maybe (TB2 Text Showable))
       myDoc = proc preenv -> do
           pdoc <- liftParser (proc env -> do
               f <- at "id_project"

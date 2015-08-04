@@ -217,8 +217,8 @@ chooserKey inf kitems i = do
   onEvent (rumors bBset) (\ i ->
       liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
-  tbChooser <- UI.div # set children [filterInp,getElement bset] # set UI.class_ "col-md-2"
-  body <- UI.div # sink items (facts (pure . chooseKey inf <$> bBset )) # set UI.class_ "col-md-10"
+  tbChooser <- UI.div # set children [filterInp,getElement bset] # set UI.class_ "col-xs-2"
+  body <- UI.div # sink items (facts (pure . chooseKey inf <$> bBset )) # set UI.class_ "col-xs-10"
 
   UI.div # set children [tbChooser , body]  # set UI.class_ "row"
 

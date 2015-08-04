@@ -1,12 +1,19 @@
-{-# LANGUAGE RankNTypes,ExistentialQuantification #-}
+{-# LANGUAGE DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
 module RuntimeTypes where
 
 import Control.Concurrent
 import Schema
 import Types
+import Control.Arrow
 import Data.Text.Lazy
 import Control.Monad.IO.Class
-import Step
+-- import Step
+
+import Control.Monad.Reader
+import Data.Foldable
+import Data.Traversable
+
+data Parser m s a b = P (s,s) (m a b) deriving Functor
 
 data Plugins
   =  StatefullPlugin
@@ -46,4 +53,12 @@ data WrappedCall =  forall m . MonadIO m =>  WrappedCall
 
 
 
+data Access a
+  = IProd Bool [a]
+  | ISum  [Access a]
+  | Nested (Access a) (Access a)
+  | Many [Access a]
+  deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
 
+
+type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))

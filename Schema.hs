@@ -6,7 +6,7 @@ module Schema where
 import Types
 import Data.Unique
 import qualified Data.Foldable as F
-import Step
+-- import Step
 import Data.Maybe
 import Data.String
 import Control.Monad.IO.Class

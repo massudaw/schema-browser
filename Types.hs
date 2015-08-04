@@ -532,6 +532,18 @@ addDefault = mapComp def
     def ((Attr k i)) = (Attr k (SOptional Nothing))
     def ((IT  rel j )) = (IT  rel (LeftTB1 Nothing)  )
 
+kattr :: Compose Identity (TB Identity  ) k a -> [a]
+kattr = kattri . runIdentity . getCompose
+kattri (Attr _ i ) = [i]
+kattri (TBEither _ i l  ) =  (maybe [] id $ fmap kattr l )
+kattri (FKT i _ _ _ ) =  (L.concat $ kattr  <$> i)
+kattri (IT _  i ) =  recTB i
+  where recTB (TB1 m i ) =  L.concat $ fmap kattr (F.toList $ _kvvalues $ runIdentity $ getCompose i)
+        recTB (ArrayTB1 i ) = L.concat $ fmap recTB i
+        recTB (LeftTB1 i ) = L.concat $ F.toList $ fmap recTB i
+
+
+
 
 mapComp :: (Functor t) => (f c a -> g d b) ->  Compose t f c a -> Compose t g d b
 mapComp f =  Compose. fmap  f . getCompose

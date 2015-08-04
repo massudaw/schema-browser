@@ -3,6 +3,7 @@ module Step where
 
 import qualified Data.Bifunctor as B
 import Types
+import RuntimeTypes
 import Query
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -34,11 +35,6 @@ import Utils
 import qualified Data.Traversable as T
 
 deriving instance Functor m => Functor (Kleisli m i )
-
-data Step a
-  = SAttr (String,(Text, a -> String))
-  | SFK (Set Text) [Step a]
-  deriving(Show)
 
 
 instance Show (a -> Maybe Showable) where
@@ -74,7 +70,6 @@ data StepPlan a
   deriving(Show,Functor)
 -}
 
-data Parser m s a b = P (s,s) (m a b) deriving Functor
 
 liftParser (P i j) = (P i ((\l -> Kleisli $  return <$> l ) $ j ) )
 
@@ -215,8 +210,8 @@ logTableInter b l =
 indexTB1 (IProd _ l) t
   = do
     (TB1  m v) <- t
-    let finder = L.find (L.any (==l). L.permutations . keyattr . firstCI keyString)
-        i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  finder $ toList $ _kvvalues $ unTB v
+    let
+        i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  M.lookup (S.fromList l) $ M.mapKeys (S.map keyString)$ _kvvalues $ unTB v
     case runIdentity $ getCompose $i  of
          Attr _ l -> Nothing
          FKT l _ _ j -> return j
@@ -224,22 +219,15 @@ indexTB1 (IProd _ l) t
          TBEither n kj j  -> return $ TB1 m $ Compose $ Identity $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j
 
 
-data Access a
-  = IProd Bool [a]
-  | ISum  [Access a]
-  | Nested (Access a) (Access a)
-  | Many [Access a]
-  deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
-
 firstCI f = mapComp (firstTB f)
 
 checkField (Nested (IProd _ l) nt ) t@(TB1 m v)
   = do
-    let finder = L.find (L.any (==l). L.permutations . keyattr . firstCI keyString  )
-        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder $ toList $ _kvvalues $ unTB v
+    let
+        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ M.lookup (S.fromList l) $ M.mapKeys (S.map keyString) $ _kvvalues $ unTB v
     case runIdentity $ getCompose $ i  of
          IT l  i -> Compose . Identity <$> (IT l  <$> checkTable nt i)
-         TBEither n kj j  ->  checkField nt ( TB1 m $ Compose $ Identity $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j)
+         TBEither n kj j  ->   checkField nt  ( TB1 m $ Compose $ Identity $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j)
          FKT a  b c  d -> Compose . Identity <$> (FKT a b c <$>  checkTable nt d)
 checkField  (IProd b l) t@(TB1 m v)
   = do
@@ -329,30 +317,17 @@ aattri (IT _  i ) =  recTB i
         recTB (LeftTB1 i ) = concat $ toList $ fmap recTB i
 
 
-kattr :: Compose Identity (TB Identity  ) k a -> [a]
-kattr = kattri . runIdentity . getCompose
-kattri (Attr _ i ) = [i]
-kattri (TBEither _ i l  ) =  (maybe [] id $ fmap kattr l )
-kattri (FKT i _ _ _ ) =  (L.concat $ kattr  <$> i)
-kattri (IT _  i ) =  recTB i
-  where recTB (TB1 m i ) =  concat $ fmap kattr (toList $ _kvvalues $ unTB i)
-        recTB (ArrayTB1 i ) = concat $ fmap recTB i
-        recTB (LeftTB1 i ) = concat $ toList $ fmap recTB i
-
-
-
 
 varT t = join . fmap (unRSOptional'.snd)  <$> idxT t
 varN t = fmap snd  <$> idx t
 
-type FunArrowPlug o = Step.Parser (->) AccessTag (Maybe (TB1 Showable)) o
-type ArrowPlug a o = Step.Parser a AccessTag (Maybe (TB1 Showable)) o
+type FunArrowPlug o = RuntimeTypes.Parser (->) AccessTag (Maybe (TB1 Showable)) o
+type ArrowPlug a o = RuntimeTypes.Parser a AccessTag (Maybe (TB1 Showable)) o
 
 
 attrT :: (a,b) -> Compose Identity (TB Identity  ) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
-type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))
 
 addToList  (InsertTB m) =  (m:)
 addToList  (DeleteTB m ) =  L.delete m
