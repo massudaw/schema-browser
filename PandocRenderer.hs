@@ -32,6 +32,7 @@ import Step
 import Control.Arrow
 import Data.Monoid
 import Data.Text.Lazy(Text)
+
 {-
 renderFireProjectReport conn _ inputs = (,pure Nothing) <$> element
   where
@@ -86,7 +87,7 @@ renderProjectReport = (staticP myDoc , element )
               template <- liftIO$ readFile' utf8 "raw.template"
               liftIO$ makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odxR "report" -< ()
-          returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "report" . SOptional . Just . SBinary .  BS.toStrict . either id id ) outdoc
+          returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "report" . SOptional . Just . SDelayed . Just . SBinary .  BS.toStrict . either id id ) outdoc
       element inf = maybe (return Nothing) (\inp -> do
                               b <- runReaderT (dynPK myDoc $ ()) (Just inp)
                               return $ liftKeys inf tname <$> b)
@@ -95,29 +96,30 @@ renderProjectReport = (staticP myDoc , element )
 renderProjectPricingA = (staticP myDoc , element )
    where
       tname = "pricing"
-      var str =  maybe "" fromString . fmap (renderShowable.snd) <$> idx str
-      varT str =  maybe "" fromString . fmap (renderShowable.snd) <$> idxT str
-      arrayVar i str = (bulletList . concat . maybeToList . join . fmap   (cshow .  snd) ) <$> indexTableInter i str
+      -- var :: Text -> Parser (->) (Access Text) () Inlines
+      var str =  maybe "" fromString . fmap (renderShowable) <$> idxM str
+      varT str =  maybe "" fromString . fmap (renderShowable) <$> idxR str
+      arrayVar  str = (bulletList . concat . maybeToList . join . fmap   (cshow ) ) <$> idxR str
         where
           cshow (SComposite a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
           cshow (SOptional a ) =  join $ fmap cshow a
       -- myDoc :: a -> Pandoc
-      myDoc :: RuntimeTypes.Parser (Kleisli IO ) (Access Text) (Maybe (TB1 Showable)) (Maybe (TB2 Text Showable))
+      myDoc :: ArrowReader
       myDoc = proc preenv -> do
-          pdoc <- liftParser (proc env -> do
-              f <- at "id_project"
-                     ( at "id_owner,id_contact"
-                        ( at "id_contact" (varT "firstname"  <> " " <> var "middlename" <> " " <> var "lastname"))) -< env
-              idp <- at "id_project" (varT "id_project") -< env
-              da <- varT "pricing_date" -< env
-              v <- arrayVar True "pricing_service" -< env
-              p <- varT "pricing_price" -< env
-              o <- at "id_project"
-                     (at "id_owner,id_contact"
-                        (at "id_owner"  (varT"owner_name"))) -< env
-              end <- at "id_project" $ at "address" (var "logradouro" <> ", "<> var "number" <> " " <> var "complemento") -< env
-              mun <- at "id_project" $ at "address" (var "municipio" <> "-" <> var "uf") -< env
+          pdoc <- (proc env -> do
+              f <- atR "id_project"
+                     ( atR "id_owner,id_contact"
+                        ( atR "id_contact" ((\f m l -> f <> " " <> m <> " " <> l ) <$> varT "firstname"  <*> var "middlename" <*> var "lastname"))) -< env
               d <- var "pricing_execution_time" -< env
+              idp <- atR "id_project" (varT "id_project") -< env
+              da <- varT "pricing_date" -< env
+              v <- arrayVar "pricing_service" -< env
+              p <- varT "pricing_price" -< env
+              o <- atR "id_project"
+                     (atR "id_owner,id_contact"
+                        (atR "id_owner"  (varT"owner_name"))) -< env
+              end <- atR "id_project" $ atR "address" (var "logradouro" <> ", "<> var "number" <> " " <> var "complemento") -< env
+              mun <- atR "id_project" $ atR "address" (var "municipio" <> "-" <> var "uf") -< env
               returnA -< (setT ( para $ "Proposta :" <> idp <> ", " <> ( da )) $ doc $
                      para ( f <> ",")
                      <> orderedList [
@@ -139,13 +141,13 @@ renderProjectPricingA = (staticP myDoc , element )
                        para "Prazo de Entrega" <>
                           plain ( d <> " dias  úteis, após a confirmação da proposta ou assinatura do contrato.")
                         ])) -< preenv
-          outdoc <- act (\i -> do
+          outdoc <- act (\i -> liftIO $ do
               template <- readFile' utf8 "raw.template"
               makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
-          odx "orcamento" -< preenv
-          returnA -<  (Just .  tbmap .mapFromTBList . pure . Compose. Identity . Attr "orcamento" . SOptional . Just . SBinary .  BS.toStrict . either id id ) outdoc
+          odxR "orcamento" -< preenv
+          returnA -<  (Just .  tbmap .mapFromTBList . pure . Compose. Identity . Attr "orcamento" . SOptional . Just . SDelayed .Just . SBinary .  BS.toStrict . either id id ) outdoc
       element inf = maybe (return Nothing) (\inp -> do
-                              b <- dynPK myDoc (Just inp)
+                              b <- runReaderT (dynPK myDoc ()) (Just inp)
                               return $ liftKeys inf tname  <$> b)
 
 

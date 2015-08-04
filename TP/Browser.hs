@@ -308,3 +308,89 @@ testShowable  v s = case s of
           (SOptional Nothing ) -> False
           (SOptional (Just i)) -> testShowable v i
           i -> v i
+
+
+
+main :: IO ()
+main = do
+  args <- getArgs
+  --let schema = "public"
+  --conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
+  {-
+  let sorted = topSortTables (M.elems baseTables)
+
+  print "DROPPING TABLES"
+  traverse (\t -> do
+    execute_ connTest . fromString . T.unpack . dropTable $ t
+    print $ tableName t
+    )  $ reverse  sorted
+
+  print "CREATING TABLES"
+  traverse (\t -> do
+    execute_  connTest . fromString . T.unpack . createTable $ t
+    print $ tableName t
+    )  sorted
+  -}
+  (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
+
+  mapM_ (forkIO . poller (argsToState (tail args) ) h) [queryArtAndamento,siapi2Plugin,siapi3Plugin ]
+
+  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e $ tail args)
+  print "Finish"
+
+poller db handler (BoundedPlugin2 n a f elemp ) = do
+  conn <- connectPostgreSQL (connRoot db)
+  inf <- keyTables conn  conn (T.pack $ dbn db, T.pack $ user db)
+  forever $ do
+        [t :: Only UTCTime] <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
+        threadDelay (1000*1000)
+        startTime <- getCurrentTime
+        let intervalsec = fromIntegral $ 60*d
+            d = 60
+        if diffUTCTime startTime  (unOnly t) >  intervalsec
+        then do
+            execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
+            print ("START " <>T.unpack n <> " - " <> show startTime  ::String)
+            let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
+            listRes <- queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
+            let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
+                tdInput i =  isJust  $ testTable i (fst f)
+                tdOutput1 i =   not $ isJust  $ testTable i (snd f)
+            let elem inf  = fmap (pure .catMaybes) .  mapM (\inp -> do
+                        o  <- elemp inf (Just inp)
+                        let diff =   traceShowId $ join $ diffUpdateAttr  <$>  o <*> Just inp
+                        maybe (return Nothing )  (\i -> updateModAttr inf (fromJust o) inp (lookTable inf a )) diff )
+
+            i <- elem inf evb
+            handler i
+            end <- getCurrentTime
+            print ("END " <>T.unpack n <> " - " <> show end ::String)
+            execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (end ,n,a,"incendio" :: String)
+            threadDelay (d*1000*1000*60)
+        else do
+            threadDelay (round $ (*1000000) $  diffUTCTime startTime (unOnly t))
+
+{-
+layout  infT = do
+  vis <- UI.div # set UI.id_ "visualization"
+  let draw inf  =
+        let
+            -- g = graphP inf
+            v :: [(Int,Set Key)]
+            v = zip [0..] (L.nub $ hvertices g <> tvertices g)
+            e = filter  (\case {(Path _ _ _)-> True ; i -> False}) $ concat $ fmap snd $ M.toList $ edges g
+            vmap = M.fromList $ swap <$>  v
+            genVertices (i,t ) = object [ "id" .= i, "label" .= T.intercalate "," (F.toList (S.map keyValue t)) ]
+            genEdges (Path i (FKJoinTable m _ l)  j ) = object [ "from" .= lid i , "to" .= lid j  , "label" .= (tableName m <> " join " <> tableName l ) ]
+            genEdges (Path i (FetchTable  l)  j ) = object [ "from" .= lid i , "to" .= lid j  , "label" .= tableName l ]
+            genEdges (Path i (FKInlineTable l)  j ) = object [ "from" .= lid i , "to" .= lid j  , "label" .= tableName l ]
+            lid t = justError ("no key " <> show t) (M.lookup t vmap)
+            nodesJSON = "var nodes = " <> encode (genVertices <$> v) <> ";"
+            edgesJSON = "var edges = " <> encode (genEdges <$> e) <> ";"
+            graphJSON = "<script> " <> BSL.unpack (nodesJSON <> edgesJSON) <> "var container = document.getElementById('visualization');  var data = { nodes: nodes,edges: edges}; var options = { hierarchicalLayout : { layout : 'direction' } , edges : { style : 'arrow'}} ;  var network = new vis.Network(container, data, options ); </script> "
+        in graphJSON
+  script <- UI.div # sink UI.html (maybe "" draw <$> infT)
+  UI.div # set children [vis,script]
+-}
+
+

@@ -72,6 +72,7 @@ data StepPlan a
 
 
 liftParser (P i j) = (P i ((\l -> Kleisli $  return <$> l ) $ j ) )
+liftParserR (P i j) = (P i ((\(Kleisli  l) -> Kleisli $  return  <$> l ) $ j ) )
 
 dynP (P s d) = d
 
@@ -173,14 +174,17 @@ instance Applicative m => Applicative (Kleisli m a ) where
 
 splitIndex b l = (fmap T.pack . IProd b . unIntercalate (','==) $ l)
 
+-- Obrigatory value with maybe wrapping
 odxR  l =
   let ll = splitIndex True l
    in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTable ll)))
 
+-- Optional value with maybe wrapping
 idxM  l =
   let ll = splitIndex False l
    in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . join . fmap (unRSOptional' . snd) . join  . fmap (indexTable ll)))
 
+-- Obrigatory value without maybe wrapping
 idxK  l =
   let ll = splitIndex True l
    in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . justError "no value found " . fmap snd . join . fmap (indexTable ll)))
@@ -234,7 +238,7 @@ checkField  (IProd b l) t@(TB1 m v)
     let
         i = justError ("checkField error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ M.lookup (S.fromList l) $ M.mapKeys (S.map keyString) $ _kvvalues $ unTB v
     Compose . Identity <$> case runIdentity $ getCompose $ i  of
-         Attr k v -> fmap (Attr k ) . traceShow (b,l)  . traceShowId . (\i -> if b then  unRSOptional' i else Just i ) $ v
+         Attr k v -> fmap (Attr k ) {-. traceShow (b,l)  . traceShowId -}. (\i -> if b then  unRSOptional' i else Just i ) $ v
          i -> errorWithStackTrace ( show (l,i))
 checkField  (ISum []) t@(TB1 m v)
   = Nothing
@@ -318,8 +322,6 @@ aattri (IT _  i ) =  recTB i
 
 
 
-varT t = join . fmap (unRSOptional'.snd)  <$> idxT t
-varN t = fmap snd  <$> idx t
 
 type FunArrowPlug o = RuntimeTypes.Parser (->) AccessTag (Maybe (TB1 Showable)) o
 type ArrowPlug a o = RuntimeTypes.Parser a AccessTag (Maybe (TB1 Showable)) o

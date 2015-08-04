@@ -20,6 +20,8 @@ import Query
 import Types
 import Schema
 import RuntimeTypes
+import Control.Monad.IO.Class
+import Control.Monad.Reader
 
 import Step
 
@@ -80,14 +82,14 @@ queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address" (staticP open  )  el
       translate :: Text -> Text
       translate "localidade" =  "municipio"
       translate i = i
-      open :: ArrowPlug  (Kleisli IO ) (Maybe (TB2 Text Showable))
+      open :: ArrowReader
       open = proc t -> do
-          i <- varT "cep" -< t
-          odx "bairro" -< t
-          odx "municipio" -< t
-          odx "uf" -< t
-          odx "logradouro" -< t
-          r <- (act (  traverse (\input -> do
+          i <- idxR "cep" -< t
+          odxR "bairro" -< t
+          odxR "municipio" -< t
+          odxR "uf" -< t
+          odxR "logradouro" -< t
+          r <- (act (  liftIO . traverse (\input -> do
                        v <- get . traceShowId .  (\i-> addrs <> (L.filter (flip elem ",.-" ) i) <> ".json")  . TL.unpack $ input
                        return $ ( \i -> fmap (L.filter ((/="").snd) . M.toList ) $ join $ fmap decode (i ^? responseBody)  ) v ))) -< (\(SText t)-> t) <$> i
           let tb = tbmap . M.fromList .  fmap ( (\i -> (S.singleton (fst i) ,). Compose . Identity $ Attr (fst i ) (snd i)). first translate. second (SOptional. Just . SText)) <$> join r
@@ -96,6 +98,6 @@ queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address" (staticP open  )  el
       addrs ="http://cep.correiocontrol.com.br/"
       element inf
           = maybe (return Nothing) (\inp -> do
-                   b <- dynPK open (Just inp)
+                   b <- runReaderT (dynPK open ()) (Just inp)
                    return $ mapKey (lookKey inf "address")  <$> b)
 
