@@ -189,8 +189,8 @@ buildUI i  tdi = case i of
            retUI <- UI.div# set children [getElement tdnew]
            paintBorder retUI (facts $ triding tdnew) (facts tdi)
            return $ TrivialWidget (triding tdnew ) retUI
-         (KArray ti) -> do
-            TrivialWidget offsetT offset <- offsetField 0
+         (KArray ti) -> mdo
+            TrivialWidget offsetT offset <- offsetField 0  (maybe 0 (V.length . (\(SComposite l ) -> l)) <$> facts bres)
             let arraySize = 8
             widgets <- mapM (\i-> buildUI ti ((\o -> join . fmap (\a-> unSComposite a V.!? (i + o) )) <$> offsetT <*> tdi )) [0..arraySize]
             let tdcomp =  fmap (V.fromList) .  allMaybes .  L.takeWhile isJust  <$> (Tra.sequenceA $ triding <$> widgets)
@@ -594,8 +594,8 @@ iUITable inf pgs pmods oldItems  tb@(IT na (LeftTB1 (Just tb1))) = do
    tr <- iUITable inf pgs (fmap (unLeftItens  <$> ) <$> pmods) (unLeftItens <$> oldItems) (IT na tb1)
    return $  leftItens tb tr
 iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
-    = do
-      (TrivialWidget offsetT offset) <- offsetField 0
+    = mdo
+      (TrivialWidget offsetT offset) <- offsetField 0 (maybe 0 (length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
       items <- mapM (\ix ->
             iUITable inf pgs
                 (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods)
@@ -610,10 +610,10 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
       res <- UI.div # set children (fk: (getElement <$> items))
       return $ TrivialWidget bres res
 
-offsetField  init = do
+offsetField  init max = do
   offsetL <- UI.span # set text "Offset: "
   offset <- UI.input # set UI.style [("width","50px")] # set UI.value (show init)
-  let offsetE =  (filterJust $ readMaybe <$> onEnter offset)
+  let offsetE =  filterJust $ (\m i -> if i <m then Just i else Nothing ) <$> max <@> (filterJust $ readMaybe <$> onEnter offset)
   offsetB <- stepper init offsetE
   let
      offsetT = tidings offsetB offsetE
@@ -694,7 +694,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
       st <- stepper cv sel
       inisort <- currentValue (facts sortList)
       res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [fmap const (rumors vpt) , rumors sortList])
-      onEvent (flip ($) <$> res2 <@> (flip (foldr addToList  ) <$>  evs))  (liftIO .  putMVar tmvar  )
+      onEvent (foldr addToList <$> res2 <@> evs)  (liftIO .  putMVar tmvar  )
       let
         reorderPK l = fmap (\i -> justError "reorder wrong" $ L.find ((== i).fst) l )  (keyAttr . unTB <$> ifk)
         lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
@@ -706,8 +706,8 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk refl rel  (LeftTB1 (Just tb1 ))) = do
     tr <- fkUITable inf pgs constr (fmap (unLeftItens <$>) <$> plmods)  wl (unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) refl (Le.over relOrigin unKOptional <$> rel) tb1)
     return $ leftItens tb tr
-fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk refl rel  (ArrayTB1 [tb1]) ) = do
-     (TrivialWidget offsetT offset) <- offsetField 0
+fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk refl rel  (ArrayTB1 [tb1]) ) = mdo
+     (TrivialWidget offsetT offset) <- offsetField 0 (maybe 0 (length . (\(FKT _ _ _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      let
          fkst = FKT (mapComp (firstTB unKArray)<$> ifk ) refl (fmap (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
      fks <- mapM (\ix-> fkUITable inf pgs constr (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods ) [] (unIndexItens ix <$> offsetT  <*>  oldItems) fkst) [0..8]

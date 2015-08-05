@@ -294,7 +294,7 @@ chooseKey inf key = mdo
   st <- stepper cv sel
   inisort <- currentValue (facts tsort)
   res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (rumors vpt) ,rumors tsort ])
-  onEvent (flip ($) <$> res2 <@> (flip (foldr addToList  ) <$>  evs))  (liftIO .  putMVar tmvar  )
+  onEvent (foldr addToList <$> res2 <@> evs)  (liftIO .  putMVar tmvar)
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","300px")] # set UI.class_ "col-xs-9"
   insertDiv <- UI.div # set children cru # set UI.class_ "row"
