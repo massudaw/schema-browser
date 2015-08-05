@@ -130,7 +130,7 @@ plugTags inf bres (BoundedPlugin2 n t f action) = do
       tdOutput = filter (not . isJust . (flip testTable (snd f))) <$> tdInput
   headerP <- UI.button # set text (T.unpack n)
   let ecv = tdOutput <@ UI.click headerP
-  -- pgOut <- mapEvent (mapM (\inp -> catchPluginException inf n t . maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf t)) =<< action inf (Just  inp))  ) ecv
+  pgOut <- mapEvent (mapM (\inp -> catchPluginException inf n t . maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf t)) =<< action inf (Just  inp))  ) ecv
 
   el <- UI.div # sink UI.text ((\i o t-> T.unpack n <> " (" <>  show (length o) <> "/" <> show (length i) <> "/" <> show (length t) <> ")" ) <$> tdInput <*> tdOutput <*> bres)
   UI.div # set children [headerP,el]
@@ -293,12 +293,12 @@ tbCase inf pgs constr i@(FKT ifk _ rel tb1 ) wl plugItens oldItems  = do
             restrictConstraint = filter ((== (fmap keyattr ifk)) . fmap keyattr  .fst) constr
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             convertConstr :: SelTBConstraint
-            convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap _tbref td /= Just el )  $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ) <$> oldItems <*>) <$>  restrictConstraint
+            convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap tbrefM td /= Just el )  $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ) <$> oldItems <*>) <$>  restrictConstraint
         --    ftdi = fmap (runIdentity . getCompose ) <$>  tbi
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return (fmap (runIdentity . getCompose ) <$>  tbi)) (fmap Just . filterJust . snd <$>  pfks )
         tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks (filter (isReflexive .fst) wl) (ftdi ) i
         dv <- UI.div #  set UI.class_ "col-xs-12"# set children [l,getElement tds]
-        paintEdit l (facts (fmap _tbref <$> triding tds)) (fmap _tbref <$> facts oldItems)
+        paintEdit l (facts (fmap tbrefM <$> triding tds)) (fmap tbrefM <$> facts oldItems)
         return $ TrivialWidget (triding tds) dv
 
 tbCase inf pgs constr i@(IT na tb1 ) wl plugItens oldItems  = do
@@ -369,7 +369,7 @@ uiTable inf pgs constr tname plmods ftb@(TB1 m k ) oldItems = do
 
   fks <- foldl (\jm (l,m)  -> do
             w <- jm
-            wn <- tbCase inf pgs  constr (unTB m) w plugmods (fmap (unTB . justError "FKT" . (^?  Le.ix l ) . unTBMap ) <$> oldItems)
+            wn <- tbCase inf pgs  constr (unTB m) w plugmods (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems)
             return (w <> [(unTB m,wn)])
         ) (return []) (P.sortBy (P.comparing fst ) . M.toList . unTBMap $ ftb)
   let
@@ -627,6 +627,9 @@ backFKRef relTable ifk box = fmap (\ibox -> (fmap (\ i -> _tb $ Attr (fst i ) (s
           where kn = justError "relTable" $ M.lookup ko relTable
 nonRefAttr l = concat $  fmap (uncurry Attr) . aattr <$> ( l )
 
+tbrefM i@(FKT _ _ _ _)  =  _tbref i
+tbrefM j = [Compose $ Identity $ j ] -- errorWithStackTrace ("tbref" <> show j )
+
 fkUITable
   ::
   InformationSchema
@@ -646,8 +649,9 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
           rr = tablePKSet tb1
           table = justError "no table found" $ M.lookup rr $ pkMap inf
-      res <- liftIO$ addTable inf table
 
+      (tmvar,vpt)  <- liftIO $ eventTable inf table
+      res <- currentValue (facts vpt)
       let
           -- Find non injective part of reference
           ftdi = oldItems
@@ -658,7 +662,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
           iold2 :: Tidings (Maybe [TB Identity  Key Showable])
           iold2 =  join . (fmap (traverse (traverse unRSOptional2 . firstTB unRKOptional ))) .  fmap (fmap ( uncurry Attr) . concat) . allMaybes <$> iold
           ftdi2 :: Tidings (Maybe [TB Identity  Key Showable])
-          ftdi2 =   fmap (fmap unTB. _tbref ) <$> ftdi
+          ftdi2 =   fmap (fmap unTB. tbrefM ) <$> ftdi
           res3 :: Tidings [TB1 Showable]
           res3 =  foldr (\constr  res2 -> (\el constr -> filter (not. constr  )  el )  <$> res2  <*> snd constr ) (tidings res2 never ) constr
           unRKOptional (Key a b d (KOptional c)  ) = Key a b d c
@@ -689,7 +693,8 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> userSelection itemList), rumors tdi]),(fmap modifyTB <$> evs)]
       st <- stepper cv sel
       inisort <- currentValue (facts sortList)
-      res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [rumors sortList , (flip (foldr addToList ) <$> evs)])
+      res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [fmap const (rumors vpt) , rumors sortList])
+      onEvent (flip ($) <$> res2 <@> (flip (foldr addToList  ) <$>  evs))  (liftIO .  putMVar tmvar  )
       let
         reorderPK l = fmap (\i -> justError "reorder wrong" $ L.find ((== i).fst) l )  (keyAttr . unTB <$> ifk)
         lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)

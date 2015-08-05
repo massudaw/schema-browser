@@ -268,13 +268,13 @@ importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
         odxR "sic" -< t
         odxR "payeeid" -< t
         ) -< t
-      b <- act (fmap join . traverse (\(SText i, (SOptional (Just (SDelayed (Just (SBinary r))))) ) -> liftIO $ ofxPlugin (T.unpack i) (BS.unpack r))) -< liftA2 (,) fn i
+      b <- act (fmap join . traverse (\(SText i, (SOptional (Just (SDelayed (Just (SBinary r))))) , acc ) -> liftIO $ ofxPlugin (T.unpack i) (BS.unpack r) acc )) -< liftA3 (,,) fn i r
       let ao :: TB2 Text (Showable)
           ao =  LeftTB1 $ ArrayTB1 . fmap (tblist . fmap attrT ) <$>  b
           ref :: [Compose Identity (TB Identity ) Text(Showable)]
           ref = [attrT  ("statements",SOptional $ join $ fmap (SComposite . Vector.fromList ). allMaybes . fmap (M.lookup "fitid" . M.fromList ) <$> b)]
           tbst :: (Maybe (TB2 Text (Showable)))
-          tbst = Just $ tblist [_tb $ FKT ref True [] ao]
+          tbst = Just $ tblist [_tb $ FKT ref True [Rel "statements" "=" "fitid",Rel "account" "=" "account"] ao]
       returnA -< tbst
     elem inf = maybe (return Nothing) (\inp -> do
                 b <- runReaderT (dynPK url ()) (Just inp)

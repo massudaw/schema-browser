@@ -78,7 +78,7 @@ data InformationSchema
   , pkMap :: Map (Set Key) Table
   , tableMap :: Map Text Table
   , pluginsMap :: Map (Text,Text,Text) Key
-  , mvarMap :: MVar (Map Table ({-R.Event [TB1 Showable], R.Handler [TB1 Showable], -}MVar [(TB1 Showable)]))
+  , mvarMap :: MVar (Map Table ({-R.Event [TB1 Showable], R.Handler [TB1 Showable], -} MVar  [TB1 Showable], R.Tidings [TB1 Showable]))
   , conn :: Connection
   , rootconn :: Connection
   }
@@ -165,7 +165,7 @@ liftKeys inf tname tb
         liftField tname (TBEither n k j ) = TBEither (lookKey inf tname n) (mapComp (liftField tname) <$> k ) (mapComp (liftField tname ) <$> j)
         liftField tname (Attr t v) = Attr (lookKey inf tname t) v
         liftField tname (FKT ref i rel2 tb) = FKT (mapComp (liftField tname) <$> ref)  i ( rel) (liftTable tname2 tb)
-            where Just (Path _ (FKJoinTable _ rel tname2 ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (concat $ fmap keyattr ref))  (F.toList$ rawFKS  ta)
+            where (Path _ (FKJoinTable _ rel tname2 ) _) = justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
                   ta = lookTable inf tname
         liftField tname (IT rel tb) = IT (mapComp (liftField tname ) rel) (liftTable tname2 tb)
             where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
@@ -229,20 +229,42 @@ selectAll inf table   = liftIO $ do
       print (tableName table,t)
       return v
 
+eventTable inf table = do
+    let mvar = mvarMap inf
+    mmap <- takeMVar mvar
+    (mtable,td) <- case (M.lookup table mmap ) of
+         Just (i,td) -> do
+           putMVar mvar mmap
+           return (i,td)
+         Nothing -> do
+           res <- selectAll  inf table
+           mnew <- newMVar res
+           (e,h) <- R.newEvent
+           ini <- readMVar mnew
+           forkIO $ forever $ do
+              h =<< takeMVar mnew
+           bh <- R.stepper ini e
+           let td = (R.tidings bh e)
+           putMVar mvar (M.insert table (mnew,td) mmap)
+           return (mnew,td)
+    return (mtable,td)
+
+
 addTable inf table = do
     let mvar = mvarMap inf
     mmap <- takeMVar mvar
     (isEmpty,mtable) <- case (M.lookup table mmap ) of
-         Just i -> do
+         Just (i,_) -> do
            emp <- isEmptyMVar i
            putMVar mvar mmap
            return (emp,i)
          Nothing -> do
            res <- selectAll  inf table
            mnew <- newMVar res
-           putMVar mvar (M.insert table mnew mmap)
+           putMVar mvar (M.insert table (mnew, pure []) mmap)
            return (True,mnew )
     t <- readMVar mtable
+
     return t
 
 

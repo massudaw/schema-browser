@@ -28,7 +28,7 @@ tzone  = STimestamp . zonedTimeToLocalTime
 
 i =: j = (i,j)
 
-convertTrans (Transaction {..})  =
+convertTrans acc (Transaction {..})  =
     ["fitid" =: txt txFITID
     ,"memo" =:  opt txt txMEMO
     ,"trntype" =: txt (tail $ show txTRNTYPE )
@@ -43,14 +43,16 @@ convertTrans (Transaction {..})  =
     ,"refnum" =: opt txt txREFNUM
     ,"sic" =: opt txt txSIC
     ,"payeeid" =: opt txt txPAYEEID
+    ,"account" =: acc
     ]
 
 testAccount = do
   let tfile = "extrato2.ofx"
+      acc = SNumeric 4
   file <- readFile tfile
-  either (const Nothing) Just . fmap (fmap convertTrans) <$> account tfile file
+  either (const Nothing) Just . fmap (fmap (convertTrans acc) ) <$> account tfile file
 
-ofxPlugin  i j = either (const Nothing) Just . fmap (fmap convertTrans) <$> account i j
+ofxPlugin  i j acc = either (const Nothing) Just . fmap (fmap (convertTrans acc) ) <$> account i j
 account :: String -> String -> IO (Either String [Transaction])
 account filename contents = do
    ofx <- case parse ofxFile filename contents of

@@ -265,7 +265,9 @@ chooseKey inf key = mdo
   let bBset = pure key :: Tidings (S.Set Key)
       table = fromJust  $ M.lookup key $ pkMap inf
 
-  vp <- liftIO $ addTable inf table
+  (tmvar,vpt)  <- liftIO $ eventTable inf table
+  vp <- currentValue (facts vpt)
+
   let
       tdi = pure Nothing
   cv <- currentValue (facts tdi)
@@ -291,7 +293,8 @@ chooseKey inf key = mdo
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [(rumors  $userSelection itemList ) ,rumors tdi]),(fmap modifyTB <$> evs)]
   st <- stepper cv sel
   inisort <- currentValue (facts tsort)
-  res2 <- accumB (inisort vp) (fmap concatenate $ unions [rumors tsort , (flip (foldr addToList  ) <$> evs)])
+  res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (rumors vpt) ,rumors tsort ])
+  onEvent (flip ($) <$> res2 <@> (flip (foldr addToList  ) <$>  evs))  (liftIO .  putMVar tmvar  )
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","300px")] # set UI.class_ "col-xs-9"
   insertDiv <- UI.div # set children cru # set UI.class_ "row"

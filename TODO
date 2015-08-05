@@ -1,6 +1,7 @@
 BUGS
 -- Fix aliasing for same (set key) noninjective refs
 -- Fix TBEither references on maps
+-- Proper Treat one optional key in product 
 
 NEW FEATURES
 
