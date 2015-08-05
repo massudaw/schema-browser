@@ -103,6 +103,9 @@ mapKV f (KV  n) =  KV  (fmap f n)
 filterKV i (KV n) =  KV $ Map.fromList $ L.filter (i . snd) $ Map.toList  n
 findKV i (KV  n) =  L.find (i . snd) $Map.toList  n
 findTB1  i (TB1 m j )  = mapComp (Compose . findKV i) j
+-- findTB1  l (LeftTB1  j )  = join $ findTB1  l <$> j -- errorWithStackTrace (show m)
+findTB1'  i (TB1 m j )  = Map.lookup  i (_kvvalues $ runIdentity $ getCompose j  )
+findTB1'  i (LeftTB1  j )  = join $ findTB1' i <$> j
 
 
 
@@ -445,6 +448,7 @@ instance Num Showable where
     fromInteger i = SDouble $ fromIntegral i
     negate (SNumeric i) = SNumeric $ negate i
     negate (SDouble i) = SDouble $ negate i
+    negate i = errorWithStackTrace (show i)
     abs (SNumeric i) = SNumeric $ abs i
     abs (SDouble i) = SDouble $ abs i
     signum (SNumeric i) = SNumeric $ signum i

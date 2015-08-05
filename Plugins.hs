@@ -108,7 +108,7 @@ siapi3Plugin  = BoundedPlugin2 pname tname  (staticP url) elemp
     pname = "Siapi3 Andamento"
     tname = "fire_project"
     varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
-    url :: ArrowReader -- ArrowPlug (Kleisli IO) (Maybe (TB2  Text Showable))
+    url :: ArrowReader
     url = proc t -> do
       protocolo <- varTB "protocolo" -< ()
       ano <- varTB "ano" -< ()
@@ -190,40 +190,43 @@ instance ToJSON Timeline where
           tti  = formatTime defaultTimeLocale "%Y/%m/%d %H:%M:%S"
 -}
 
+itR i f = atR i (IT (attrT (fromString i,())) <$> f)
+fktR i rel f = atR (L.intercalate "," (fmap fst i)) (FKT (attrT <$> i) True rel <$> f)
+
 pagamentoArr
   :: (KeyString a1,
       MonadReader (Maybe (FTB1 Identity a1 Showable)) m, Show a1,
-      Ord a1) =>
+      Functor m,Ord a1) =>
      Parser
        (Kleisli m)
        (Access Text)
        (Maybe Showable)
-       (Maybe (TB2 Text Showable))
-pagamentoArr =  (proc descontado -> do
+       ((TB Identity Text Showable))
+pagamentoArr =  itR "pagamento" (proc descontado -> do
               pinicio <- idxR "inicio"-< ()
               p <- idxR "vezes" -< ()
               let valorParcela = liftA2 (/)  descontado p
-              atR "pagamentos" (proc t -> do
-                  odxR "description" -<  t
-                  odxR "price" -<  t
-                  odxR "scheduled_date" -<  t ) -< ()
-              let total = maybe 0 fromIntegral  p :: Int
-              let pagamento = Compose $ Identity $ FKT ([attrT  ("pagamentos",SOptional Nothing)]) True [] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> tblist [attrT ("id",SSerial Nothing),attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ]) ([1 .. total] )))
-                  ao :: Maybe (TB2 Text (Showable))
-                  ao =  Just $ tblist [Compose $ Identity $ IT   (attrT ("pagamento",()))  (LeftTB1 $ Just $ tblist[pagamento ])]
-              returnA -< ao )
+              pg <- atR  "pagamentos" (proc (valorParcela,pinicio,p) -> do
+                  odxR "description" -<  ()
+                  odxR "price" -<  ()
+                  odxR "scheduled_date" -<  ()
+                  let total = maybe 0 fromIntegral  p :: Int
+                  let pagamento = _tb $ FKT ([attrT  ("pagamentos",SOptional (Just $ SComposite $ Vector.fromList (replicate total (SNumeric $ -1) )) )]) True [Rel "pagamentos" "=" "id"] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> tblist [attrT ("id",SSerial Nothing),attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ]) ([1 .. total])))
+                  returnA -<  pagamento ) -< (valorParcela,pinicio,p)
+              returnA -<  tblist [pg ] )
 
 
 gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
   where
     tname = "plano_aluno"
-    url :: Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))
+    url :: ArrowReader
     url = proc t -> do
-          descontado <-  liftA2 (\v k -> v*(1 - k) )
+          descontado <-  (\v k -> v*(1 - k) )
               <$> atR "frequencia,meses"
-                  (liftA2 (\v m -> v * fromIntegral m) <$> idxR "price" <*> idxR "meses")
-              <*> idxR "desconto" -< ()
-          atR "pagamento" pagamentoArr -< descontado
+                  ((\v m -> v * fromIntegral m) <$> idxK "price" <*> idxK "meses")
+              <*> idxK "desconto" -< ()
+          pag <- pagamentoArr -< Just descontado
+          returnA -< Just . tblist . pure . _tb  $ pag
 
     elem inf = maybe (return Nothing) (\inp -> do
                   b <- runReaderT (dynPK   url $ ())  (Just inp)
@@ -232,12 +235,13 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
 pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname (staticP url) elem
   where
     tname = "servico_venda"
-    url :: Parser (Kleisli (ReaderT (Maybe (TB1 (Showable))) IO)) (Access Text) () (Maybe (TB2  Text (Showable)))
+    url :: ArrowReader
     url = proc t -> do
           descontado <- atR "pacote,servico"
-                  (liftA3 (\v m k -> v * fromIntegral m * (1 -k) ) <$> atR "servico" (idxR "price") <*> idxR "pacote"
-                        <*> idxR "desconto") -< ()
-          atR "pagamento"  pagamentoArr -< descontado
+                  ((\v m k -> v * fromIntegral m * (1 -k) ) <$> atR "servico" (idxK "price") <*> idxK "pacote"
+                        <*> idxK "desconto") -< ()
+          pag <- pagamentoArr -< Just descontado
+          returnA -< Just . tblist . pure . _tb  $ pag
 
     elem inf = maybe (return Nothing) (\inp -> do
                       b <- runReaderT (dynPK   url $ ())  (Just inp)

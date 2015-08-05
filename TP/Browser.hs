@@ -209,6 +209,7 @@ chooserKey inf kitems i = do
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
+  liftIO$ swapMVar  (mvarMap inf) M.empty
   i :: [(Text,Int)] <- liftIO $ query (rootconn inf) (fromString "SELECT table_name,usage from metadata.ordering where schema_name = ?") (Only (schemaName inf))
   let orderMap = Just $ M.fromList  i
   bset <- buttonFSet  (L.sortBy (flip $  comparing (\ pkset -> liftA2 M.lookup  (fmap rawName . flip M.lookup (pkMap inf) $ pkset ) orderMap)) kitems)  initKey ((\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> i) ))<$> filterInpBh) (\i -> case M.lookup i (pkMap inf) of
@@ -261,7 +262,6 @@ chooseKey
 chooseKey inf key = mdo
   -- Filter Box (Saved Filter)
 
-  liftIO$ swapMVar  (mvarMap inf) M.empty
   let bBset = pure key :: Tidings (S.Set Key)
       table = fromJust  $ M.lookup key $ pkMap inf
 

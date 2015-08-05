@@ -294,8 +294,8 @@ tbCase inf pgs constr i@(FKT ifk _ rel tb1 ) wl plugItens oldItems  = do
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             convertConstr :: SelTBConstraint
             convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap tbrefM td /= Just el )  $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ) <$> oldItems <*>) <$>  restrictConstraint
-        --    ftdi = fmap (runIdentity . getCompose ) <$>  tbi
-        ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return (fmap (runIdentity . getCompose ) <$>  tbi)) (fmap Just . filterJust . snd <$>  pfks )
+            ftdi = fmap (runIdentity . getCompose ) <$>  tbi
+        --ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return (fmap (runIdentity . getCompose ) <$>  tbi)) (fmap Just . filterJust . snd <$>  pfks )
         tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks (filter (isReflexive .fst) wl) (ftdi ) i
         dv <- UI.div #  set UI.class_ "col-xs-12"# set children [l,getElement tds]
         paintEdit l (facts (fmap tbrefM <$> triding tds)) (fmap tbrefM <$> facts oldItems)
@@ -385,7 +385,7 @@ uiTable inf pgs constr tname plmods ftb@(TB1 m k ) oldItems = do
     else do
       return []
   body <- UI.div
-    # set children (listBody : plugins )
+    # set children (plugins  <> [listBody])
     # set style [("margin-left","10px"),("border","2px"),("border-color","gray"),("border-style","solid")]
   return (body, tableb )
 
