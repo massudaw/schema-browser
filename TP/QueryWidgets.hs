@@ -200,7 +200,7 @@ buildUI i  tdi = case i of
                 bres = (\o -> liftA2 (\l (SComposite m ) -> SComposite (V.take o m <> l <> V.drop  (o + 9 ) m ))) <$> offsetT <*> tdcomp <*> (emptyAttr <$> tdi)
             offsetDiv <- UI.div # set children (fmap getElement widgets)
             paintBorder offsetDiv (facts bres) (facts tdi)
-            leng <- UI.span # sink text (("Size: " ++) .show .maybe 0 (V.length . (\(SComposite l ) -> l)) <$> facts bres)
+            leng <- UI.span # sink0 text (("Size: " ++) .show .maybe 0 (V.length . (\(SComposite l ) -> l)) <$> facts bres)
             fk <- UI.div # set UI.style [("display","inline-flex")]  # set  children [offset,  leng ]
             composed <- UI.span # set children [fk , offsetDiv]
             return  $ TrivialWidget bres composed
@@ -249,7 +249,7 @@ buildUI i  tdi = case i of
                 "application/pdf" -> ("iframe","src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
                 "application/x-ofx" -> ("textarea","value",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
                 "image/jpg" -> ("img","src",maybe "" binarySrc ,[])
-           f <- pdfFrame fty (facts tdi2) # sink UI.style (noneShow . isJust <$> facts tdi2)
+           f <- pdfFrame fty (facts tdi2) # sink0 UI.style (noneShow . isJust <$> facts tdi2)
            fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]
            res <- UI.div # set children [fd,f]
            paintBorder res (facts tdi2) (facts  tdi)
