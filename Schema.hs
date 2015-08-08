@@ -315,7 +315,7 @@ zipCreate f =  fmap f . flip M.difference
 fullInsert :: InformationSchema -> TB1 Showable -> IO (TB3 Identity Key Showable)
 fullInsert inf (TB1 k1 v1 )  = do
    let proj = _kvvalues . unTB
-   ret <- TB1 k1 . Compose . Identity . KV <$>  Tra.traverse (\j -> traceShowId . Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
+   ret <- TB1 k1 . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
    (m,t) <- eventTable inf (lookTable inf (_kvname k1))
    l <- R.currentValue (R.facts t)
    if  L.elem ret l
@@ -327,7 +327,7 @@ fullInsert inf (TB1 k1 v1 )  = do
         return i
 
 fullInsert inf (LeftTB1 i ) = LeftTB1 <$> Tra.traverse (fullInsert inf) i
-fullInsert inf (ArrayTB1 i ) = ArrayTB1 . traceShowId <$> mapM (fullInsert inf) i
+fullInsert inf (ArrayTB1 i ) = ArrayTB1  <$> Tra.traverse (fullInsert inf) i
 
 noInsert :: InformationSchema -> TB1 Showable -> IO (TB3 Identity Key Showable)
 noInsert inf (TB1 k1 v1 )  = do

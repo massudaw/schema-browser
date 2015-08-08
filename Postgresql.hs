@@ -293,7 +293,7 @@ parseAttr (TBEither n l  _ )
         parseTb = char '(' *> parseInner <* char ')'
         parseInner = do
               res <- unIntercalateAtto (parseAttr . runIdentity .getCompose <$> l) (char ',')
-              return $ TBEither n l  (Compose . Identity <$> (L.find ( maybe False (const True) . unOptionalAttr)) res)
+              return $ TBEither n l  (Compose . Identity <$> (L.find ( isJust . unOptionalAttr)) res)
 
 parseAttr (IT na j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j -- <|>  return ((,SOptional Nothing) <$> j)

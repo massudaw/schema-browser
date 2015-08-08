@@ -285,11 +285,11 @@ chooseKey inf key = mdo
   asc <- checkedWidget (pure True)
   let
      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList  )
-     tsort = (\ b c -> trace (T.unpack $ "sort " <> T.intercalate "," (fmap showKey c)) . sorting b (c) ) <$> triding asc <*> multiUserSelection sortList
+     tsort = sorting <$> triding asc <*> multiUserSelection sortList
      res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 _ kv ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $ keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
   itemList <- listBox res3 (tidings bselection never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
   let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
-  prop <- stepper cv (trace "evtrig" <$> evsel)
+  prop <- stepper cv evsel
   let tds = tidings prop evsel
   (cru ,evs,pretdi) <- crudUITable inf plugList  (pure True) res3 [] (allRec' (tableMap inf) table) tds
   let

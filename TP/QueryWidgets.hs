@@ -331,7 +331,7 @@ tbCase inf pgs constr a@(TBEither n ls  _ ) wl plugItens oldItems = mdo
         chk  <- buttonDivSet (zip [0..(length ls - 1)] ls)  ((join . fmap (\(TBEither n _ j ) ->   join $ (\e -> fmap (,e) . (flip L.elemIndex ls) $ e ) <$> ((fmap (const ())<$> j)))<$>   oldItems)) (show .keyattr . snd) (\i -> UI.button # set text (show $ keyattr $ snd i) )
         sequence $ zipWith (\el ix-> element  el # sink0 UI.style (noneShow <$> ((==ix) .fst <$> facts (triding chk) ))) ws  [0..]
         let teitherl = foldr (liftA2 (:)) (pure []) (triding <$> ws)
-            res = liftA2 (\c j -> fmap (TBEither n ls . fmap (Compose . Identity) ) $ atMay j (fst c)) (triding chk) teitherl
+            res = liftA2 (\c j -> fmap (TBEither n ls . fmap (Compose . Identity) .  join . fmap unOptionalAttr ) $ atMay j (fst c)) (triding chk) teitherl
         paintEdit l (facts res) (facts oldItems)
         lid <- UI.div #  set UI.class_ ("col-xs-" <> show ( fst $ attrSize a ) )# set children (l:getElement chk : (getElement <$> ws))
         return $ TrivialWidget  res  lid
