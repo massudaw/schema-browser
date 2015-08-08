@@ -281,10 +281,10 @@ updateAttr conn kv kold t = execute conn (fromString $ traceShowId $ T.unpack up
     skv = runIdentity .getCompose <$> F.toList  (_kvvalues $ unTB tbskv)
     (TB1 _ (tbskv)) = isM
     isM :: TB3 Identity Key  Showable
-    isM =  justError "cant diff befor update" $ diffUpdateAttr kv kold
+    isM =  justError ("cant diff befor update" <> show (kv,kold)) $ diffUpdateAttr kv kold
 
 diffUpdateAttr :: TB1 Showable -> TB1 Showable -> Maybe (TB1 Showable)
-diffUpdateAttr  kv kold@(TB1 t _ ) =  fmap ((TB1  t ) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
+diffUpdateAttr  kv kold@(TB1 t _ ) =  fmap ((TB1  t ) . _tb . KV ) .  allMaybesMap  . traceShowId $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
 
 
 attrType :: Show a => TB Identity Key a -> KType Text
@@ -384,7 +384,7 @@ unIntercalate pred s                 =  case dropWhile pred s of
 
 data Tag = TAttr | TPK
 
-allKVRec :: TB1 Showable -> [Showable]
+allKVRec :: Ord f => TB2 f Showable -> [Showable]
 allKVRec (LeftTB1 i) = maybe mempty allKVRec i
 allKVRec (ArrayTB1 i) = mconcat $ allKVRec <$> i
 allKVRec  t@(TB1 m e)=  concat $  F.toList (go . unTB <$> (_kvvalues $ unTB $ eitherDescPK t))

@@ -92,7 +92,7 @@ setup e args w = void $ do
   be <- stepper [] e
   pollRes <- UI.div # sink UI.text (show <$> be)
   return w # set title (host bstate <> " - " <>  dbn bstate)
-  nav  <- buttonSetUI ["Editor","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  nav  <- buttonSetUI ["Editor","Changes","Recent Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   chooserDiv <- UI.div # set children  (chooserItens <> [ getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
@@ -101,11 +101,15 @@ setup e args w = void $ do
       case nav of
         "Changes" -> do
             dash <- dashBoard inf
-            element body # set UI.children [dash]
+            element body # set UI.children [dash]# set UI.class_ "row"
+
+        "Recent Changes" -> do
+            dash <- dashBoardAll inf
+            element body # set UI.children [dash] # set UI.class_ "row"
         "Editor" -> do
             let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
             span <- chooserKey  inf k (table bstate)
-            element body # set UI.children [span,pollRes] )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
+            element body # set UI.children [span,pollRes]# set UI.class_ "row"  )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
 
 
 connRoot dname = (fromString $ "host=" <> host dname <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname <> " sslmode= require" )
@@ -180,23 +184,23 @@ line n =   set  text n
 
 
 panel t els = UI.div # set items ( UI.h2 # set text (T.unpack t  ) : [UI.div # set items (F.toList els)])
-showModDiv i = UI.div # set UI.style [("display","flex")] # set items (showMod i)
+showModDiv i =  set UI.style [("display","flex")] . set items (showMod i)
 showMod (EditTB i j) = [showFKE j , operator  "| ~ |" , showFKE' i]
 showMod (InsertTB j) = [UI.div , operator "| + |" , showFKE j]
 showMod (DeleteTB j) = [showFKE j , operator "| - |" , UI.div]
 
 operator op = UI.div # set text op  # set UI.style [("margin-left","3px"),("margin-right","3px")]
-{-
+
 dashBoardAll  inf = do
-  els :: [(Text,Vector.Vector (Binary BSL.ByteString))] <-
-    liftIO $ query (rootconn inf) "SELECT modification_id,modification_date,table,modification_data from metadata.modification_table WHERE schema_name = ?" (Only $ schemaName inf)
-  UI.div  # set items ( (\(b,v)-> panel (translatedName $ lookTable inf b)  $ fmap (\(Binary d) -> ( (showModDiv $ liftMod inf b (B.decode d :: Modification Text Showable)))) v ) <$> els)
--}
+  els :: [(Int,LocalTime,Text,(Binary BSL.ByteString))] <-
+    liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,table_name,modification_data from metadata.modification_table WHERE schema_name = ? order by modification_id desc" (Only $ schemaName inf)
+  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( (UI.td# showModDiv ( (B.decode d :: Modification Text Showable))))) v] ) <$> els)
+
 
 dashBoard inf = do
   els :: [(Text,Vector.Vector (Binary BSL.ByteString))] <-
     liftIO $ query (rootconn inf) "SELECT table_name,array_agg(modification_data) from metadata.modification_table WHERE schema_name = ? group by table_name" (Only $ schemaName inf)
-  UI.div  # set items ( (\(b,v)-> panel (translatedName $ lookTable inf b)  $ fmap (\(Binary d) -> ( (showModDiv $ liftMod inf b (B.decode d :: Modification Text Showable)))) v ) <$> els)
+  UI.div  # set items ( (\(b,v)-> panel (translatedName $ lookTable inf b)  $ fmap (\(Binary d) -> ( (UI.div # showModDiv ((B.decode d :: Modification Text Showable))))) v ) <$> els)
 
 attrLine i e   = do
   let nonRec = tableNonrec i
@@ -277,17 +281,17 @@ chooseKey inf key = mdo
   el <- filterUI  inf (allRec' (tableMap inf)  table)
   let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
       sortSet =  F.toList . tableKeys . tableNonRef . allRec' (tableMap inf ) $ table
-  sortList  <- multiListBox (pure sortSet) (traceShowId . F.toList <$> bBset) (pure (line . show))
+  sortList  <- multiListBox (pure sortSet) (F.toList <$> bBset) (pure (line . show))
   asc <- checkedWidget (pure True)
   let
      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList  )
-     tsort = (\ b c -> trace (T.unpack $ "sort " <> T.intercalate "," (fmap showKey c)) . sorting b (traceShowId c) ) <$> triding asc <*> multiUserSelection sortList
+     tsort = (\ b c -> trace (T.unpack $ "sort " <> T.intercalate "," (fmap showKey c)) . sorting b (c) ) <$> triding asc <*> multiUserSelection sortList
      res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 _ kv ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $ keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
   itemList <- listBox res3 (tidings bselection never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
   let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
   prop <- stepper cv (trace "evtrig" <$> evsel)
   let tds = tidings prop evsel
-  (cru ,evs) <- crudUITable inf plugList  (pure True) res3 [] (allRec' (tableMap inf) table) tds
+  (cru ,evs,pretdi) <- crudUITable inf plugList  (pure True) res3 [] (allRec' (tableMap inf) table) tds
   let
      bselection = st
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [(rumors  $userSelection itemList ) ,rumors tdi]),(fmap modifyTB <$> evs)]
@@ -302,15 +306,6 @@ chooseKey inf key = mdo
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row" # set UI.style [("display","inline-flex")]
   header <- UI.h1 # set text (T.unpack $ translatedName table) # set UI.class_ "row"
   UI.div # set children ([header,itemSelec,insertDiv ] )
-
-
-lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" (fst renderProjectPricingA )  ( snd renderProjectPricingA )
-lplugReport = BoundedPlugin2 "Relatório " "pricing" (fst renderProjectReport )  ( snd renderProjectReport )
-
-testShowable  v s = case s of
-          (SOptional Nothing ) -> False
-          (SOptional (Just i)) -> testShowable v i
-          i -> v i
 
 
 
@@ -361,7 +356,7 @@ poller db handler (BoundedPlugin2 n a f elemp ) = do
                 tdOutput1 i =   not $ isJust  $ testTable i (snd f)
             let elem inf  = fmap (pure .catMaybes) .  mapM (\inp -> do
                         o  <- elemp inf (Just inp)
-                        let diff =   traceShowId $ join $ diffUpdateAttr  <$>  o <*> Just inp
+                        let diff =   join $ diffUpdateAttr  <$>  o <*> Just inp
                         maybe (return Nothing )  (\i -> updateModAttr inf (fromJust o) inp (lookTable inf a )) diff )
 
             i <- elem inf evb

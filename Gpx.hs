@@ -22,9 +22,9 @@ import Text.XML.HXT.Core
 
 import qualified Data.List as L
 
--- import qualified Data.ByteString as BS
--- import qualified Data.Text.Encoding as TE
--- import qualified Data.Text as TE
+import qualified Data.ByteString as BS
+import qualified Data.Text.Encoding as TE
+import qualified Data.Text as TE
 
 import Database.PostgreSQL.Simple.Time
 
@@ -107,6 +107,12 @@ triml = dropWhile (`elem` " \r\n\t")
 trimr :: String -> String
 trimr = reverse . triml . reverse
 
+testReceita = do
+  kk <- BS.readFile "receita.html"
+  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  readHtmlReceita inp
+
+
 {-
 testCpfName = do
   kk <- BS.readFile "cpf_name.html"
@@ -119,11 +125,6 @@ testFormCrea = do
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
   readInputForm inp
 
-
-testReceita = do
-  kk <- BS.readFile "receita.html"
-  let inp = (TE.unpack $ TE.decodeLatin1 kk)
-  readHtmlReceita inp
 
 testCreaArt = do
   kk <- BS.readFile "creaHistoricoArt.html"

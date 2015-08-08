@@ -546,6 +546,13 @@ kattri (IT _  i ) =  recTB i
         recTB (ArrayTB1 i ) = L.concat $ fmap recTB i
         recTB (LeftTB1 i ) = L.concat $ F.toList $ fmap recTB i
 
+data Modifier a
+  = MCreate a
+  | MDelete a
+  | MEdit a a
+  | MKeep a
+  deriving (Eq,Show,Functor,Ord)
+
 
 
 

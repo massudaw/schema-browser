@@ -4,6 +4,7 @@
 module Schema where
 
 import Types
+import qualified Data.Traversable as Tra
 import Data.Unique
 import qualified Data.Foldable as F
 -- import Step
@@ -307,5 +308,50 @@ loadDelayed inf t@(TB1 k v) values@(TB1 ks vs)
     delayedattrs = concat $ fmap keyValue . F.toList <$> M.keys filteredAttrs
     filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf key (_kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs)
 
+zipInter f = M.intersectionWith f
+zipDelete f = fmap f . M.difference
+zipCreate f =  fmap f . flip M.difference
+
+fullInsert :: InformationSchema -> TB1 Showable -> IO (TB3 Identity Key Showable)
+fullInsert inf (TB1 k1 v1 )  = do
+   let proj = _kvvalues . unTB
+   ret <- TB1 k1 . Compose . Identity . KV <$>  Tra.traverse (\j -> traceShowId . Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
+   (m,t) <- eventTable inf (lookTable inf (_kvname k1))
+   l <- R.currentValue (R.facts t)
+   if  L.elem ret l
+      then do
+        return ret
+      else do
+        i <- insertAttr fromAttr  (conn inf) ret (lookTable inf (_kvname k1))
+        putMVar m (i:l)
+        return i
+
+fullInsert inf (LeftTB1 i ) = LeftTB1 <$> Tra.traverse (fullInsert inf) i
+fullInsert inf (ArrayTB1 i ) = ArrayTB1 . traceShowId <$> mapM (fullInsert inf) i
+
+noInsert :: InformationSchema -> TB1 Showable -> IO (TB3 Identity Key Showable)
+noInsert inf (TB1 k1 v1 )  = do
+   let proj = _kvvalues . unTB
+   TB1 k1 . Compose . Identity . KV <$>  Tra.sequence (fmap (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1))
+
+
+
+fullDiffEdit :: InformationSchema -> TB1 Showable -> TB1 Showable -> IO (TB3 Identity Key Showable)
+fullDiffEdit inf old@(TB1 k1 v1 ) ed@(TB1 k2 v2) = do
+   let proj = _kvvalues . unTB
+   ed <-TB1 k2 . Compose . Identity . KV <$>  Tra.sequence (zipInter (\i j -> Compose <$>  tbDiffEdit inf  (unTB i) (unTB j) ) (proj v1 ) (proj v2))
+   updateAttr (conn inf) ed old (lookTable inf (_kvname k2))
+   return ed
+
+tbDiffEdit :: InformationSchema -> TB Identity Key Showable -> TB Identity Key Showable -> IO (Identity (TB Identity Key  Showable))
+tbDiffEdit inf i j
+  | i == j =  return (Identity j)
+  | otherwise = tbInsertEdit inf  j
+
+tbInsertEdit inf  j@(Attr k1 k2) = return $ Identity  (Attr k1 k2)
+tbInsertEdit inf  (IT k2 t2) = Identity . IT k2 <$> (noInsert inf t2 )
+tbInsertEdit inf  (FKT k2 f2 rel2 t2) = do
+   Identity . (\tb -> FKT  k2 f2 rel2 tb ) <$> fullInsert inf t2
+tbInsertEdit inf j = return $ Identity j
 
 
