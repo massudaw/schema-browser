@@ -331,8 +331,4 @@ attrT :: (a,b) -> Compose Identity (TB Identity  ) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
 
-addToList  (InsertTB m) =  (m:)
-addToList  (DeleteTB m ) =  L.delete m
-addToList  (EditTB m n ) = (map (\e-> if  (e ==  n) then  mapTB1 (\i -> maybe i snd $ getCompose $  unTB $ findTB1 (\k -> keyattr k == keyattr i  ) m ) e  else e ))
-
 

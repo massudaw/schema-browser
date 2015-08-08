@@ -553,6 +553,10 @@ data Modifier a
   | MKeep a
   deriving (Eq,Show,Functor,Ord)
 
+addToList  (InsertTB m) =  (m:)
+addToList  (DeleteTB m ) =  L.delete m
+addToList  (EditTB m n ) = (map (\e-> if  (e ==  n) then  mapTB1 (\i -> maybe i snd $ getCompose $  runIdentity $ getCompose $ findTB1 (\k -> keyattr k == keyattr i  ) m ) e  else e ))
+
 
 
 

@@ -3,6 +3,7 @@ module TP.QueryWidgets where
 
 import RuntimeTypes
 import Data.Functor.Identity
+import Control.Monad.Writer
 import Control.Monad
 import Control.Concurrent
 import Reactive.Threepenny
@@ -492,7 +493,7 @@ processPanelTable inf attrsB res table oldItemsi = do
         let
             isM' :: Maybe (TB1 Showable)
             isM' =  join $ fmap (TB1  (tableMeta table). Compose . Identity  . KV ) . allMaybesMap <$> (liftA2 (liftF2 (\i j -> if i == j then Nothing else    Just i))) ( _kvvalues. unTB . _unTB1 <$> attr) ( _kvvalues. unTB . _unTB1  <$> old)
-        res <- liftIO $ catch (maybe (return (Left "no attribute changed check edit restriction")) (\l-> Right <$> fullDiffEdit inf (justError "unold" old) l  ) attr ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
+        res <- liftIO $ catch (maybe (return (Left "no attribute changed check edit restriction")) (\l-> Right <$> transaction inf (fullDiffEdit inf (justError "unold" old) l)  ) attr ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
         return $ fmap (const (EditTB (justError "unattr" attr ) (justError "unold" old) )) res
 
       insertAction ip = do
@@ -662,16 +663,16 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
           ftdi = oldItems
           oldASet :: Set Key
           oldASet = S.fromList (_relOrigin <$> filterNotReflexive rel )
-          iold :: Tidings ([Maybe [(Key,Showable)]])
+          iold :: Tidings [Maybe [(Key,Showable)]]
           iold  =    (Tra.sequenceA $ fmap (fmap ( aattr . _tb ) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ keyattr $ _tb $ fst $ i) oldASet) wl)
           iold2 :: Tidings (Maybe [TB Identity  Key Showable])
           iold2 =  join . (fmap (traverse (traverse unRSOptional2 . firstTB unRKOptional ))) .  fmap (fmap ( uncurry Attr) . concat) . allMaybes <$> iold
           ftdi2 :: Tidings (Maybe [TB Identity  Key Showable])
           ftdi2 =   fmap (fmap unTB. tbrefM ) <$> ftdi
           res3 :: Tidings [TB1 Showable]
-          res3 =  foldr (\constr  res2 -> (\el constr -> filter (not. constr  )  el )  <$> res2  <*> snd constr ) (tidings res2 never ) constr
-          unRKOptional (Key a b d (KOptional c)  ) = Key a b d c
-          unRKOptional (Key a b d c  ) = Key a b d c
+          res3 =  foldr (\constr  res2 -> (\el constr -> filter (not. constr) el)  <$> res2  <*> snd constr ) (tidings res2 never) constr
+          unRKOptional (Key a b d (KOptional c)) = Key a b d c
+          unRKOptional (Key a b d c) = Key a b d c
       let
           search = (\i j -> join $ fmap (\k-> L.find (\(TB1 _ l )-> interPoint rel k  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList . _kvvalues . unTB $ l)) ) i) $ j )
           vv :: Tidings (Maybe [TB Identity Key Showable])
@@ -756,17 +757,5 @@ deleteMod inf kv table = do
   delete (conn inf)  kv table
   Just <$> logTableModification inf (TableModification Nothing table (DeleteTB kv))
 
-updateModAttr :: InformationSchema -> TB1 Showable -> TB1 Showable -> Table -> IO (Maybe (TableModification Showable))
-updateModAttr inf kv old table = join <$> traverse (\df -> do
-  updateAttr (conn  inf) kv old table
-  let mod =  TableModification Nothing table (EditTB  kv old)
-  Just <$> logTableModification inf mod) (diffUpdateAttr kv old)
-
-
-insertMod :: InformationSchema ->  TB1 Showable -> Table -> IO (Maybe (TableModification Showable))
-insertMod inf kv table = do
-  kvn <- insertAttr fromAttr (conn  inf) kv table
-  let mod =  TableModification Nothing table (InsertTB  kvn)
-  Just <$> logTableModification inf mod
 
 

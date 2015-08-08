@@ -40,6 +40,7 @@ import qualified Data.Text.Lazy as T
 
 import qualified Reactive.Threepenny as R
 
+import Control.Monad.Writer
 
 import Query
 import Postgresql
@@ -312,38 +313,66 @@ zipInter f = M.intersectionWith f
 zipDelete f = fmap f . M.difference
 zipCreate f =  fmap f . flip M.difference
 
-fullInsert :: InformationSchema -> TB1 Showable -> IO (TB3 Identity Key Showable)
+type TransactionM = WriterT [TableModification Showable] IO
+
+fullInsert :: InformationSchema -> TB1 Showable -> TransactionM  (TB3 Identity Key Showable)
 fullInsert inf (TB1 k1 v1 )  = do
    let proj = _kvvalues . unTB
    ret <- TB1 k1 . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
-   (m,t) <- eventTable inf (lookTable inf (_kvname k1))
+   (m,t) <- liftIO $ eventTable inf (lookTable inf (_kvname k1))
    l <- R.currentValue (R.facts t)
    if  L.elem ret l
       then do
         return ret
       else do
-        i <- insertAttr fromAttr  (conn inf) ret (lookTable inf (_kvname k1))
-        putMVar m (i:l)
-        return i
+        i <- liftIO $ insertMod inf ret (lookTable inf (_kvname k1))
+        tell (maybeToList i)
+        return ret
 
 fullInsert inf (LeftTB1 i ) = LeftTB1 <$> Tra.traverse (fullInsert inf) i
 fullInsert inf (ArrayTB1 i ) = ArrayTB1  <$> Tra.traverse (fullInsert inf) i
 
-noInsert :: InformationSchema -> TB1 Showable -> IO (TB3 Identity Key Showable)
+noInsert :: InformationSchema -> TB1 Showable -> TransactionM  (TB3 Identity Key Showable)
 noInsert inf (TB1 k1 v1 )  = do
    let proj = _kvvalues . unTB
    TB1 k1 . Compose . Identity . KV <$>  Tra.sequence (fmap (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1))
 
 
+insertMod :: InformationSchema ->  TB1 Showable -> Table -> IO (Maybe (TableModification Showable))
+insertMod inf kv table = do
+  kvn <- insertAttr fromAttr (conn  inf) kv table
+  let mod =  TableModification Nothing table (InsertTB  kvn)
+  Just <$> logTableModification inf mod
 
-fullDiffEdit :: InformationSchema -> TB1 Showable -> TB1 Showable -> IO (TB3 Identity Key Showable)
+
+transaction :: InformationSchema -> TransactionM a -> IO a
+transaction inf log = do
+  (md,mods)  <- runWriterT log
+  let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
+  Tra.traverse (\(k,v) -> do
+    (m,t) <- eventTable inf k
+    l <- R.currentValue (R.facts t)
+    let lf = foldr addToList l v
+    putMVar m lf
+    ) (M.toList aggr)
+  return md
+
+fullDiffEdit :: InformationSchema -> TB1 Showable -> TB1 Showable -> TransactionM  (TB3 Identity Key Showable)
 fullDiffEdit inf old@(TB1 k1 v1 ) ed@(TB1 k2 v2) = do
    let proj = _kvvalues . unTB
    ed <-TB1 k2 . Compose . Identity . KV <$>  Tra.sequence (zipInter (\i j -> Compose <$>  tbDiffEdit inf  (unTB i) (unTB j) ) (proj v1 ) (proj v2))
-   updateAttr (conn inf) ed old (lookTable inf (_kvname k2))
+   mod <- liftIO $ updateModAttr inf ed old (lookTable inf (_kvname k2))
+   tell (maybeToList mod)
    return ed
 
-tbDiffEdit :: InformationSchema -> TB Identity Key Showable -> TB Identity Key Showable -> IO (Identity (TB Identity Key  Showable))
+updateModAttr :: InformationSchema -> TB1 Showable -> TB1 Showable -> Table -> IO (Maybe (TableModification Showable))
+updateModAttr inf kv old table = join <$> Tra.traverse (\df -> do
+  updateAttr (conn  inf) kv old table
+  let mod =  TableModification Nothing table (EditTB  kv old)
+  Just <$> logTableModification inf mod) (diffUpdateAttr kv old)
+
+
+tbDiffEdit :: InformationSchema -> TB Identity Key Showable -> TB Identity Key Showable -> TransactionM (Identity (TB Identity Key  Showable))
 tbDiffEdit inf i j
   | i == j =  return (Identity j)
   | otherwise = tbInsertEdit inf  j
