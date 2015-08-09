@@ -120,7 +120,7 @@ pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
   -- let ovev =((\ j i  -> if i then j else Nothing) <$>   oldItems <*> tdOutput1)
   v <- currentValue (facts oldItems)
   headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput)
-  let ecv = (facts tdInput<@ UI.click headerP)
+  let ecv = (facts oldItems <@ UI.click headerP)
   pgOut <- mapEvent (catchPluginException inf n t . action inf) (ecv)
   return (headerP, (snd f ,   pgOut ))
 
