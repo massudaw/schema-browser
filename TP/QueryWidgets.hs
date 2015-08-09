@@ -67,7 +67,7 @@ createFresh n tname pmap i ty  =  do
   k <- newKey i ty
   return $ M.insert (n,tname,i) k pmap
 
-testTable i =  (\t ->  fmap  F.toList  $ checkTable  t i)
+testTable i =  (\t ->  checkTable  t i)
 
 
 pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac ) ) = do
@@ -114,13 +114,13 @@ pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac )
 
 pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
   overwrite <- checkedWidget (pure False)
-  let tdInput = isJust . join . fmap (flip testTable  (fst f)) <$>  oldItems
+  let tdInput = join . fmap (flip testTable  (fst f)) <$>  oldItems
       -- tdOutput1 = (\i -> maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd f) i) (snd f) ) <$>  outputItems
       -- tdOutput= liftA2 (\i j -> if i then True else j) (triding overwrite)  tdOutput1
   -- let ovev =((\ j i  -> if i then j else Nothing) <$>   oldItems <*> tdOutput1)
   v <- currentValue (facts oldItems)
-  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (facts tdInput)
-  let ecv = (facts oldItems<@ UI.click headerP)
+  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput)
+  let ecv = (facts tdInput<@ UI.click headerP)
   pgOut <- mapEvent (catchPluginException inf n t . action inf) (ecv)
   return (headerP, (snd f ,   pgOut ))
 

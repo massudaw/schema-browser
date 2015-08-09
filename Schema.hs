@@ -346,7 +346,7 @@ insertMod inf kv table = do
 
 
 transaction :: InformationSchema -> TransactionM a -> IO a
-transaction inf log = do
+transaction inf log = withTransaction (conn inf) $ do
   (md,mods)  <- runWriterT log
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
   Tra.traverse (\(k,v) -> do

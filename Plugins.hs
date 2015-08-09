@@ -79,13 +79,11 @@ siapi2Plugin = BoundedPlugin2  pname tname (staticP url) elemp
       odxR "aproval_date" -< ()
       atR "andamentos" (proc t -> do
         odxR "andamento_date" -<  t
-        odxR "andamento_user" -<  t
-        odxR "andamento_status" -<  t
         odxR "andamento_description" -<  t) -< t
       b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else liftIO (siapi2  i j)  )) -<  (liftA2 (,) protocolo ano )
       let ao bv  = Just $ tblist   [iat bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
-          convertAndamento [da,des] =  tblist $ fmap attrT  $  ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des)),("andamento_user",SOptional Nothing ),("andamento_status",SOptional Nothing )])
+          convertAndamento [da,des] =  tblist $ fmap attrT  $  ([("andamento_date",STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))])
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
                             (attrT ("andamentos",()))
