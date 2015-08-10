@@ -147,6 +147,7 @@ data FKey a
     = Key
     { keyValue :: ! Text
     , keyTranslation :: ! (Maybe Text)
+    , keyPosition :: Int
     , keyFastUnique :: ! Unique
     , keyType :: ! a
     }

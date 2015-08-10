@@ -77,6 +77,7 @@ textToPrim "cpf" = PCpf
 textToPrim "int8" = PInt
 textToPrim "integer" = PInt
 textToPrim "bigint" = PInt
+textToPrim "cardinal_number" = PInt
 textToPrim "boolean" = PBoolean
 textToPrim "smallint" = PInt
 textToPrim "timestamp without time zone" = PTimestamp
@@ -284,7 +285,7 @@ updateAttr conn kv kold t = execute conn (fromString $ traceShowId $ T.unpack up
     isM =  justError ("cant diff befor update" <> show (kv,kold)) $ diffUpdateAttr kv kold
 
 diffUpdateAttr :: TB1 Showable -> TB1 Showable -> Maybe (TB1 Showable)
-diffUpdateAttr  kv kold@(TB1 t _ ) =  fmap ((TB1  t ) . _tb . KV ) .  allMaybesMap  . traceShowId $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
+diffUpdateAttr  kv kold@(TB1 t _ ) =  fmap ((TB1  t ) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
 
 
 attrType :: Show a => TB Identity Key a -> KType Text
@@ -324,7 +325,7 @@ insertAttr f conn krec  t = if not (L.null pkList)
 
 
 
-fakeKey n t = Key n Nothing (unsafePerformIO newUnique) t
+fakeKey n t = Key n Nothing 0 (unsafePerformIO newUnique) t
 
 unSComposite (SComposite i) = i
 unSComposite i = errorWithStackTrace ("unSComposite " <> show i)
@@ -361,17 +362,17 @@ keyOptional (k,v) = (kOptional k ,SOptional $ Just v)
 
 unKeyOptional (k  ,(SOptional v) ) = fmap (unKOptional k,) v
 
-kOptional (Key a  c d e) = Key a  c d (KOptional e)
-kDelayed (Key a  c d e) = Key a  c d (KDelayed e)
+kOptional (Key a  c m d e) = Key a  c m d (KOptional e)
+kDelayed (Key a  c m d e) = Key a  c m d (KDelayed e)
 
-unKOptional ((Key a  c d (KOptional e))) = (Key a  c d e )
+unKOptional ((Key a  c m d (KOptional e))) = (Key a  c m d e )
 unKOptional i = errorWithStackTrace ("unKOptional" <> show i)
 
-unKDelayed ((Key a  c d (KDelayed e))) = (Key a  c d e )
+unKDelayed ((Key a  c m d (KDelayed e))) = (Key a  c m d e )
 unKDelayed i = errorWithStackTrace ("unKDelayed" <> show i)
 
-unKArray (Key a  c d (KArray e)) = Key a  c d e
-unKArray (Key a  c d (KOptional (KArray e) )) = Key a  c d e
+unKArray (Key a  c d m (KArray e)) = Key a  c d m e
+unKArray (Key a  c d m (KOptional (KArray e) )) = Key a  c d m e
 
 
 
@@ -416,7 +417,7 @@ expandTable tb@(TB1 meta (Compose (Labeled t ((KV i)))  ))  =
    let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name) <> " FROM " <> aliasTable <> ") as " <> t
        name =  tableAttr tb
        aliasTable = kvMetaFullName meta  <> " as " <> t
-       aliasKeys (Labeled  a (Attr (Key n   _ _ _) _ ))  = t <> "." <> n <> " as " <> a
+       aliasKeys (Labeled  a (Attr (Key n   _ _ _ _) _ ))  = t <> "." <> n <> " as " <> a
    in query
 expandTable tb = errorWithStackTrace (show tb)
 
@@ -444,7 +445,7 @@ filterReflexive ks = L.filter (reflexiveRel ks) ks
 notReflexiveRel ks = not . reflexiveRel ks
 reflexiveRel ks
   | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
-  | any (\j -> not $ isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks =  traceShow ks $ const False
+  | any (\j -> not $ isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks =  const False
   | otherwise = (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) ))
 
 
@@ -545,7 +546,7 @@ recursePath' isLeft ksbn invSchema (Path _ jo@(FKEitherField o l) _) = do
 recursePath' isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
     | isArrayRel ifk  {-&& not (isArrayRel e )-}=   do
           tas <- tname nextT
-          let knas = Key (rawName nextT) Nothing (unsafePerformIO newUnique) (Primitive "integer" )
+          let knas = Key (rawName nextT) Nothing 0 (unsafePerformIO newUnique) (Primitive "integer" )
           kas <- kname tas  knas
           let
               tname = head $ fmap (\i -> label . justError ("cant find " ). fmap snd . L.find ((== S.singleton i) . fst )$ ksbn ) (S.toList ifk )
@@ -573,7 +574,7 @@ recursePath' isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           (t,ksn) <- labelTable nextT
           tb <-fun ksn
           tas <- tname nextT
-          let knas = (Key (rawName nextT) Nothing (unsafePerformIO newUnique) (Primitive "integer" ))
+          let knas = (Key (rawName nextT) Nothing 0 (unsafePerformIO newUnique)  (Primitive "integer" ))
           kas <- kname tas  knas
           return $ Compose $ Labeled (label $ kas) (FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton i) . fst )$ ksbn ) (_relOrigin <$> filterReflexive ks )) (isPathReflexive jo ) ks  (mapOpt $ mapArray tb  ))
 
@@ -659,7 +660,7 @@ mkTable i = do
   modify (\(_,j) -> (next,j))
   return (c+1)
 
-aliasKeys (t,Labeled  a (Attr (Key n   _ _ _) _ ))  = label t <> "." <> n <> " as " <> a
+aliasKeys (t,Labeled  a (Attr (Key n   _ _ _ _) _ ))  = label t <> "." <> n <> " as " <> a
 
 
 aliasTable (Labeled t r) = showTable r <> " as " <> t
@@ -749,7 +750,7 @@ allMaybes i = if F.all isJust i
         then Just $ fmap (justError "wrong invariant allMaybes") i
         else Nothing
 
-makeOpt (Key a  c d ty) = (Key a  c d (KOptional ty))
+makeOpt (Key a  c d m ty) = (Key a  c d m (KOptional ty))
 
 zipWithTF g t f = snd (mapAccumL map_one (F.toList f) t)
     where map_one (x:xs) y = (xs, g y x)

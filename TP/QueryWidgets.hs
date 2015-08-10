@@ -64,7 +64,7 @@ generateFresh = do
 
 
 createFresh n tname pmap i ty  =  do
-  k <- newKey i ty
+  k <- newKey i ty 0
   return $ M.insert (n,tname,i) k pmap
 
 testTable i =  (\t ->  checkTable  t i)
@@ -132,7 +132,6 @@ plugTags inf bres (BoundedPlugin2 n t f action) = do
   headerP <- UI.button # set text (T.unpack n)
   let ecv = tdOutput <@ UI.click headerP
   pgOut <- mapEvent (mapM (\inp -> catchPluginException inf n t . maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf t)) =<< action inf (Just  inp))  ) ecv
-
   el <- UI.div # sink UI.text ((\i o t-> T.unpack n <> " (" <>  show (length o) <> "/" <> show (length i) <> "/" <> show (length t) <> ")" ) <$> tdInput <*> tdOutput <*> bres)
   UI.div # set children [headerP,el]
 
@@ -169,7 +168,7 @@ attrUITable
      -> TB Identity Key ()
      -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
 attrUITable  tAttr' evs (Attr i _ ) = do
-      tdi' <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse ( diffOptional ))) i =<< j) (return tAttr') evs
+      tdi' <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse diffOptional )) i =<< j) (return tAttr') evs
       let tdi = fmap (\(Attr  _ i )-> i) <$>tdi'
       attrUI <- buildUI (textToPrim <$> keyType i) tdi
       let insertT = fmap (Attr i ) <$> (triding attrUI)
@@ -671,8 +670,8 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
           ftdi2 =   fmap (fmap unTB. tbrefM ) <$> ftdi
           res3 :: Tidings [TB1 Showable]
           res3 =  foldr (\constr  res2 -> (\el constr -> filter (not. constr) el)  <$> res2  <*> snd constr ) (tidings res2 never) constr
-          unRKOptional (Key a b d (KOptional c)) = Key a b d c
-          unRKOptional (Key a b d c) = Key a b d c
+          unRKOptional (Key a b d m (KOptional c)) = Key a b d m c
+          unRKOptional (Key a b d m c) = Key a b d m c
       let
           search = (\i j -> join $ fmap (\k-> L.find (\(TB1 _ l )-> interPoint rel k  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList . _kvvalues . unTB $ l)) ) i) $ j )
           vv :: Tidings (Maybe [TB Identity Key Showable])

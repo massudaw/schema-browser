@@ -46,25 +46,25 @@ import Query
 import Postgresql
 
 
-createType :: Text ->  Unique -> (Text,Text,Maybe Text,Text,Text,Text,Text,Maybe Text,Maybe Text,Maybe Text) -> Key
-createType _ un (t,c,trans,"tsrange",_,_,n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "timestamp without time zone"))
-createType _ un (t,c,trans,"tstzrange",_,_,n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "timestamp with time zone"))
-createType _ un (t,c,trans,"daterange",_,_,n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "date"))
-createType _ un (t,c,trans,"int4range",_,_,n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "int4"))
-createType _ un (t,c,trans,"numrange",_,_,n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "numeric"))
-createType _ un (t,c,trans,"USER-DEFINED",_,"floatrange",n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "double precision"))
-createType _ un (t,c,trans,"USER-DEFINED",_,"trange",n,def,_,_) = (Key   c trans un (nullable n $ KInterval $ Primitive "time"))
+createType :: Text ->  (Text,Text,Text,Text,Text,Text,Maybe Text,Maybe Text,Maybe Text) -> KType Text
+createType _ (t,c,"tsrange",_,_,n,def,_,_) =  (nullable n $ KInterval $ Primitive "timestamp without time zone")
+createType _ (t,c,"tstzrange",_,_,n,def,_,_) =  (nullable n $ KInterval $ Primitive "timestamp with time zone")
+createType _ (t,c,"daterange",_,_,n,def,_,_) =  (nullable n $ KInterval $ Primitive "date")
+createType _ (t,c,"int4range",_,_,n,def,_,_) = (nullable n $ KInterval $ Primitive "int4")
+createType _ (t,c,"numrange",_,_,n,def,_,_) =  (nullable n $ KInterval $ Primitive "numeric")
+createType _ (t,c,"USER-DEFINED",_,"floatrange",n,def,_,_) =  (nullable n $ KInterval $ Primitive "double precision")
+createType _ (t,c,"USER-DEFINED",_,"trange",n,def,_,_) =  (nullable n $ KInterval $ Primitive "time")
 -- Table columns Primitive
-createType s un (t,c,trans,"USER-DEFINED",udtschema ,udtname,n,def,_,_) |  udtschema == s = (Key c trans un (nullable n $ InlineTable  udtschema udtname ))
-createType s un (t,c,trans,"ARRAY",udtschema ,udtname,n,def,_,_) | udtschema == s = (Key c trans un (nullable n $ KArray $ InlineTable  udtschema $T.drop 1 udtname ))
-createType _ un (t,c,trans,"ARRAY",_,i,n,def,p,_) = (Key   c trans un (nullable n $ KArray $ (Primitive (T.tail i))))
-createType _ un (t,c,trans,_,_,"geometry",n,def,p,_) = (Key   c trans un (nullable n $ Primitive $ (\(Just i) -> i) p))
-createType _ un (t,c,trans,_,_,"box3d",n,def,p,_) = (Key   c trans un (nullable n $ Primitive $  "box3d"))
-createType _ un (t,c,trans,ty,_,_,n,def,_,Just "pdf" ) =(Key c   trans un (serial def . nullable n $ KDelayed $ Primitive "pdf" ))
-createType _ un (t,c,trans,ty,_,_,n,def,_,Just "jpg" ) =(Key c   trans un (serial def . nullable n $ KDelayed $ Primitive "jpg" ))
-createType _ un (t,c,trans,ty,_,_,n,def,_,Just "ofx" ) =(Key c   trans un (serial def . nullable n $ KDelayed $ Primitive "ofx" ))
-createType _ un (t,c,trans,ty,_,_,n,def,_,Just dom ) =(Key c   trans un (serial def . nullable n $ Primitive dom))
-createType _ un (t,c,trans,ty,_,_,n,def,_,_) =(Key c   trans un (serial def . nullable n $ Primitive ty))
+createType s (t,c,"USER-DEFINED",udtschema ,udtname,n,def,_,_) |  udtschema == s = (nullable n $ InlineTable  udtschema udtname )
+createType s (t,c,"ARRAY",udtschema ,udtname,n,def,_,_) | udtschema == s = (nullable n $ KArray $ InlineTable  udtschema $T.drop 1 udtname )
+createType _ (t,c,"ARRAY",_,i,n,def,p,_) = (nullable n $ KArray $ (Primitive (T.tail i)))
+createType _ (t,c,_,_,"geometry",n,def,p,_) =  (nullable n $ Primitive $ (\(Just i) -> i) p)
+createType _ (t,c,_,_,"box3d",n,def,p,_) =  (nullable n $ Primitive $  "box3d")
+createType _ (t,c,ty,_,_,n,def,_,Just "pdf" ) =(serial def . nullable n $ KDelayed $ Primitive "pdf" )
+createType _ (t,c,ty,_,_,n,def,_,Just "jpg" ) = (serial def . nullable n $ KDelayed $ Primitive "jpg" )
+createType _ (t,c,ty,_,_,n,def,_,Just "ofx" ) = (serial def . nullable n $ KDelayed $ Primitive "ofx" )
+createType _ (t,c,ty,_,_,n,def,_,Just dom ) = (serial def . nullable n $ Primitive dom)
+createType _ (t,c,ty,_,_,n,def,_,_) =(serial def . nullable n $ Primitive ty)
 --createType un v = error $ show v
 
 serial (Just xs ) t = if T.isPrefixOf  "nextval" xs then KSerial t else t
@@ -100,8 +100,8 @@ queryAuthorization conn schema user = do
 
 keyTables :: Connection -> Connection -> (Text ,Text)-> IO InformationSchema
 keyTables conn userconn (schema ,user) = do
-       uniqueMap <- join $ mapM (\i-> (i,) <$> newUnique) <$>  query conn "select o.table_name,o.column_name from information_schema.tables natural join information_schema.columns o where table_schema = ? "(Only schema)
-       res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name    left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ?"  (Only schema)
+       uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) . Key c tr op <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from information_schema.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
+       res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z)-> (t,) $ (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap))  (createType  schema (t,c,j,k,l,m,n,d,z)) )) <$>  query conn "select table_name,o.column_name,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name    left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ?"  (Only schema)
        --res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default,'' :: text ,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name where table_schema = ? " {- left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column " -} (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
@@ -113,7 +113,7 @@ keyTables conn userconn (schema ,user) = do
          un <- newUnique
          let
            lcol = lookupKey' keyMapPre . (t,) <$> V.toList l
-           tnew = Key n Nothing un (KEither (keyType <$> lcol) )
+           tnew = Key n Nothing 0 un (KEither (keyType <$> lcol) )
          return (t,[(tnew,Path (S.fromList lcol) (FKEitherField tnew lcol) (S.singleton tnew) )]) ) <$> query conn "SELECT table_name,sum_columns,column_name FROM metadata.table_either WHERE table_schema = ? " (Only schema)
        let eitherMap = M.fromListWith mappend  $ fmap (\(t,j) -> (t,fmap snd j )) $ eitherItems
            keyMap =  foldr (uncurry M.insert) keyMapPre $ concat $ fmap (\(t,j) -> fmap (\ki -> ((t,keyValue ki),ki)) $ fmap fst j ) $ eitherItems
@@ -186,9 +186,9 @@ lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpac
 
 lookFresh inf n tname i = justError "no freshKey" $ M.lookup (n,tname,i) (pluginsMap inf)
 
-newKey name ty = do
+newKey name ty p = do
   un <- newUnique
-  return $ Key name Nothing    un ty
+  return $ Key name Nothing    p un ty
 
 
 catchPluginException :: InformationSchema -> Text -> Text -> IO (Maybe a) -> IO (Maybe a)

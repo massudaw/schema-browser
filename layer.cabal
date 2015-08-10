@@ -47,7 +47,7 @@ executable threepenny-layer
    ,tasty-hunit
    , arrows
    -- Google Auth
-   -- ,handa-gdata > 0.7
+   ,handa-gdata > 0.7
    , http-conduit, directory ,process,xml
    ,unordered-containers
    -- Pdf Parser

@@ -1,6 +1,5 @@
 BUGS
 -- Fix aliasing for same (set key) noninjective refs
--- Fix TBEither references on maps
 -- Proper Treat one optional key in product 
 
 NEW FEATURES
@@ -11,9 +10,6 @@ transancions with one click
 -- Over UI
 -- Over polling
 
-RESTRICT PLUGIN INPUT 
--- Filter not used fields to improve plugins diff 
--- fixes siapi2 plugin diff
 
 CUSTOM PER TABLE FILTERS
 -- ui filters and database filters
