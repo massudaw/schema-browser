@@ -179,6 +179,9 @@ insdel binsK =do
 noneShow True = [("display","block")]
 noneShow False = [("display","none")]
 
+noneShowFlex True = [("display","inline-flex")]
+noneShowFlex False = [("display","none")]
+
 noneShowSpan True = [("display","inline")]
 noneShowSpan False = [("display","none")]
 

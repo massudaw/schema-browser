@@ -173,6 +173,7 @@ attrUITable  tAttr' evs (Attr i _ ) = do
       attrUI <- buildUI (textToPrim <$> keyType i) tdi
       let insertT = fmap (Attr i ) <$> (triding attrUI)
       return $ TrivialWidget insertT  (getElement attrUI)
+
 buildUI i  tdi = case i of
          (KOptional ti) -> do
            tdnew <- fmap (Just. SOptional) <$> buildUI ti (join . fmap unSOptional  <$> tdi)
@@ -529,6 +530,7 @@ flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 unIndexItens :: Int -> Int -> Maybe (TB Identity  Key Showable) -> Maybe (TB Identity  Key Showable)
 unIndexItens ix o =  join . fmap (unIndex (ix+ o))
 
+unIndex o (Attr k (SComposite v)) = Attr (unKArray k) <$> (v V.!? o )
 unIndex o (IT  na  (ArrayTB1 j))
   =  IT  na <$>  atMay j o
 unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> [mapComp (firstTB unKArray) li]) (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi ) <$> join (traverse (indexArray o)  <$> l) <*> atMay m o
@@ -544,7 +546,8 @@ unLeftKey (FKT ilk rel  (LeftTB1 (Just tb1 ))) = (FKT (fmap unKOptional<$> ilk) 
 unLeftItens  :: TB Identity  Key Showable -> Maybe (TB Identity  Key Showable)
 unLeftItens = unLeftTB
   where
-
+    unLeftTB (Attr k v)
+      = Attr (unKOptional k) <$> unSOptional v
     unLeftTB (IT na (LeftTB1 l))
       = IT na <$>  l
     unLeftTB (FKT ifk rel  (LeftTB1 tb))
@@ -555,6 +558,7 @@ unLeftItens = unLeftTB
 
 
 
+attrOptional (Attr k v) =  Attr (kOptional k) (SOptional . Just $ v)
 attrOptional (FKT ifk rel  tb)  = FKT (tbOptional <$> ifk) (Le.over relOrigin kOptional <$> rel) (LeftTB1 (Just tb))
   where tbOptional = mapComp (firstTB kOptional) . fmap (SOptional . Just)
 attrOptional (IT na j) = IT  na (LeftTB1 (Just j))
@@ -596,13 +600,15 @@ iUITable inf pgs pmods oldItems  tb@(IT na  tb1@(TB1 meta _) )
               (fmap (fmap (fmap _fkttable)) <$> pmods)
               tb1
               (fmap _fkttable <$> oldItems)
-      element celem
-          # set style [("margin-left","10px")]
+      element celem #
+          set style [("margin-left","10px")]
       let bres =  fmap (fmap (IT  na  ) ) (tcrud)
       return $ TrivialWidget bres celem
 iUITable inf pgs pmods oldItems  tb@(IT na (LeftTB1 (Just tb1))) = do
    tr <- iUITable inf pgs (fmap (join . fmap unLeftItens  <$> ) <$> pmods) (join . fmap unLeftItens <$> oldItems) (IT na tb1)
    return $  leftItens tb tr
+
+
 iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
     = mdo
       (TrivialWidget offsetT offset) <- offsetField 0 (maybe 0 (length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
@@ -658,7 +664,6 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _ _ ) ) =
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
           rr = tablePKSet tb1
           table = justError "no table found" $ M.lookup rr $ pkMap inf
-
       (tmvar,vpt)  <- liftIO $ eventTable inf table
       res <- currentValue (facts vpt)
       let
@@ -719,8 +724,11 @@ fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) 
      (TrivialWidget offsetT offset) <- offsetField 0 (maybe 0 (length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      let
          fkst = FKT (mapComp (firstTB unKArray)<$> ifk ) (fmap (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
-     fks <- mapM (\ix-> fkUITable inf pgs constr (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods ) [] (unIndexItens ix <$> offsetT  <*>  oldItems) fkst) [0..8]
-     sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
+     fks <- traverse (\ix-> do
+         lb <- UI.div # sink UI.text (show . (+ix) <$> facts offsetT ) # set UI.style [("margin-right","5px")]
+         TrivialWidget tr el<- fkUITable inf pgs constr (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods) [] (unIndexItens ix <$> offsetT  <*>  oldItems) fkst
+         TrivialWidget tr <$> UI.div # set UI.children [lb,el] ) [0..8]
+     sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShowFlex <$> facts t)) (getElement <$> fks) (pure True : (fmap isJust . triding <$> fks))
      dv <- UI.div # set children (getElement <$> fks)
      let bres = indexItens tb offsetT fks oldItems
      leng <- UI.span # sink text (("Size: " ++) .show .maybe 0 (length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
