@@ -111,7 +111,7 @@ findTB1'  i (LeftTB1  j )  = join $ findTB1' i <$> j
 
 mapTBF f (Attr i k) = (Attr i k )
 mapTBF f (IT i k) = IT i ((mapFTBF f) k)
-mapTBF f (FKT i j r k) = FKT  (fmap (Compose .  fmap (mapTBF f) . f .   getCompose) i)  j r  (mapFTBF f k)
+mapTBF f (FKT i  r k) = FKT  (fmap (Compose .  fmap (mapTBF f) . f .   getCompose) i)   r  (mapFTBF f k)
 
 mapFTBF f (TB1 m i) = TB1 m $ mapComp (KV . fmap (Compose .  fmap (mapTBF f) . f . getCompose). _kvvalues ) i
 
@@ -179,15 +179,15 @@ instance Binary k => Binary (KVMetadata k )
 data TB f k a
   = Attr
     { _tbattrkey :: ! k
-    ,_tbattr :: ! a   }
+    ,_tbattr :: ! a
+    }
   | IT -- Inline Table
     { _ittableName :: ! (Compose f (TB f ) k ())
     , _fkttable ::  ! (FTB1 f  k a)
     }
   | FKT -- Foreign Table
     { _tbref :: ! [Compose f (TB f) k  a]
-    , _reflexive ::  ! Bool
-    , _fkrelation :: ! [Rel k ]
+    , _fkrelation :: ! [Rel k]
     , _fkttable ::  ! (FTB1 f  k a)
     }
   | TBEither
@@ -215,7 +215,7 @@ filterKey f (ArrayTB1 k ) = ArrayTB1 (filterKey f <$> k)
     --frstTB :: (Ord k, Functor f) => (c -> k) -> TB f c a -> TB f k a
     frstTB f (Attr k i) = Attr  k i
     frstTB f (IT k i) = IT  k (filterKey f i)
-    frstTB f (FKT k l m  i) = FKT   k l m (filterKey  f i)
+    frstTB f (FKT k  m  i) = FKT   k  m (filterKey  f i)
     frstTB f (TBEither k l m ) = TBEither  k l (fmap (mapComp (frstTB f))  m)
 
 
@@ -232,7 +232,7 @@ secondKV  f (KV m ) = KV . fmap (second f ) $ m
 firstTB :: (Ord k, Functor f) => (c -> k) -> TB f c a -> TB f k a
 firstTB f (Attr k i) = Attr (f k) i
 firstTB f (IT k i) = IT (mapComp (firstTB f) k) ((mapKey f) i)
-firstTB f (FKT k l m  i) = FKT  (fmap (mapComp (firstTB f) ) k) l (fmap f  <$> m) ((mapKey f) i)
+firstTB f (FKT k  m  i) = FKT  (fmap (mapComp (firstTB f) ) k)  (fmap f  <$> m) ((mapKey f) i)
 firstTB f (TBEither k l m ) = TBEither (f k) ( fmap (mapComp (firstTB f)) l) (fmap (mapComp (firstTB f))  m)
 
 
@@ -367,6 +367,7 @@ data Showable
 data SqlOperation
   = FetchTable Text
   | FKJoinTable Text [Rel Key] Text
+  | RecJoin (SqlOperation)
   | FKInlineTable Text
   | FKEitherField Key [Key]
   deriving(Eq,Ord,Show)
@@ -475,7 +476,7 @@ keyattr :: Compose Identity (TB Identity ) k  a -> [k]
 keyattr = keyattri . runIdentity . getCompose
 keyattri (Attr i  _ ) = [i]
 keyattri (TBEither k i l  ) =  concat $ fmap keyattr i
-keyattri (FKT i _ rel _ ) =  (_relOrigin <$> rel )
+keyattri (FKT i  rel _ ) =  (_relOrigin <$> rel )
 keyattri (IT i  _ ) =  keyattr i
 
 -- tableAttr :: (Traversable f ,Ord k) => TB3 f k () -> [Compose f (TB f) k ()]
@@ -486,8 +487,8 @@ tableAttr (TB1 m (Compose (Labeled _ (KV  n)))  ) = L.nub $  concat  $ F.toList 
 nonRef :: (Eq f,Show k ,Show f,Ord k) => Compose (Labeled f ) (TB (Labeled f) ) k () -> [Compose (Labeled f ) (TB (Labeled f) ) k ()]
 nonRef i@(Compose (Labeled _ (Attr _ _ ))) =[i]
 nonRef i@(Compose (Unlabeled  (Attr _ _ ))) =[i]
-nonRef (Compose (Unlabeled  ((FKT i _ _ _ )))) = concat (nonRef <$> i)
-nonRef (Compose (Labeled _ ((FKT i _ _ _ )))) = concat (nonRef <$> i)
+nonRef (Compose (Unlabeled  ((FKT i  _ _ )))) = concat (nonRef <$> i)
+nonRef (Compose (Labeled _ ((FKT i  _ _ )))) = concat (nonRef <$> i)
 nonRef (Compose (Unlabeled (IT j k ))) = nonRef j
 nonRef (Compose (Labeled _ (IT j k ))) = nonRef j
 nonRef (Compose (Unlabeled (TBEither n kj j ))) = concat $  fmap nonRef  $ maybe (addDefaultK <$> kj) (\jl -> fmap (\i -> if i == fmap (const ()) jl  then jl else addDefaultK i) kj) j
@@ -503,8 +504,7 @@ tableNonRef (TB1 m n  )  = TB1 m (mapComp (\(KV n)-> KV  (mapFromTBList $ fmap (
     nonRef :: Ord k => TB Identity k a -> [(TB Identity ) k a]
     nonRef (Attr k v ) = [Attr k v]
     nonRef (TBEither n l j ) = [TBEither n (concat $ traComp nonRef <$> l) (join $ fmap listToMaybe $ traComp nonRef <$> j) ]
-    nonRef (FKT i True _ _ ) = concat (overComp nonRef <$> i)
-    nonRef (FKT i False _ _ ) = []
+    nonRef (FKT i _ _ ) = concat (overComp nonRef <$> i)
     nonRef it@(IT j k ) = [(IT  j (tableNonRef k )) ]
 
 
@@ -516,8 +516,7 @@ tableNonRefK (TB1 m n   )  = TB1 m (mapComp (\(KV n)-> KV (mapFromTBList $ fmap 
     nonRef :: TB Identity Key Showable -> [(TB Identity ) Key Showable]
     nonRef (Attr k v ) = [ Attr k v ]
     nonRef (TBEither n kj j ) =   concat $  fmap (overComp nonRef ) $ maybe (addDefault <$> kj) (\jl -> fmap (\i -> if i == fmap (const ()) jl  then jl else addDefault i) kj) j
-    nonRef (FKT i True _ _ ) = concat  (overComp nonRef <$> i)
-    nonRef (FKT i False _ _ ) = []
+    nonRef (FKT i _ _ ) = concat  (overComp nonRef <$> i)
     nonRef (IT j k ) = [(IT  j (tableNonRefK k )) ]
 
 addDefaultK
@@ -541,7 +540,7 @@ kattr :: Compose Identity (TB Identity  ) k a -> [a]
 kattr = kattri . runIdentity . getCompose
 kattri (Attr _ i ) = [i]
 kattri (TBEither _ i l  ) =  (maybe [] id $ fmap kattr l )
-kattri (FKT i _ _ _ ) =  (L.concat $ kattr  <$> i)
+kattri (FKT i  _ _ ) =  (L.concat $ kattr  <$> i)
 kattri (IT _  i ) =  recTB i
   where recTB (TB1 m i ) =  L.concat $ fmap kattr (F.toList $ _kvvalues $ runIdentity $ getCompose i)
         recTB (ArrayTB1 i ) = L.concat $ fmap recTB i
@@ -579,6 +578,7 @@ tblist = tbmap . mapFromTBList
 
 tblist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TB3 Identity Key a
 tblist' t  = TB1 (tableMeta t) . Compose . Identity . KV . mapFromTBList
+
 
 instance Ord k => Monoid (KV f k a) where
   mempty = KV Map.empty

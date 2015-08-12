@@ -247,7 +247,7 @@ filterCase inf t@(Attr k _ ) = do
   let opT = (\v -> if elem v validOp then Just v else Nothing) <$> tidings opBh (UI.valueChange opInp)
   elv <- attrUITable (pure Nothing) [] t
   TrivialWidget (fmap (fmap (t,)) $ liftA2 (liftA2 (,)) opT (triding elv)) <$> UI.div # set children [opInp,getElement elv ]
-filterCase inf (FKT l _ _ tb1) =  filterUI inf tb1
+filterCase inf (FKT l  _ tb1) =  filterUI inf tb1
 filterCase inf (IT _ tb1) = filterUI inf tb1
 
 filterUI inf (LeftTB1 (Just i))  =  filterUI inf i

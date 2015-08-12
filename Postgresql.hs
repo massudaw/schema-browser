@@ -277,11 +277,11 @@ unIntercalateAtto l s = go l
 
 unKOptionalAttr (Attr k i ) = Attr (unKOptional k) i
 unKOptionalAttr (IT  r (LeftTB1 (Just j))  ) = (\j-> IT   r j )    j
-unKOptionalAttr (FKT i r l (LeftTB1 (Just j))  ) = FKT (fmap (mapComp (first unKOptional) ) i) r l j
+unKOptionalAttr (FKT i  l (LeftTB1 (Just j))  ) = FKT (fmap (mapComp (first unKOptional) ) i)  l j
 
 unOptionalAttr (Attr k i ) = Attr (unKOptional k) <$> unSOptional i
 unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
-unOptionalAttr (FKT i r l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i r l j) (traverse ( traverse unSOptional . (mapComp (firstTB unKOptional)) ) i)  j
+unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverse ( traverse unSOptional . (mapComp (firstTB unKOptional)) ) i)  j
 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
 -- parseAttr i | traceShow i False = error ""
@@ -301,7 +301,7 @@ parseAttr (IT na j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j -- <|>  return ((,SOptional Nothing) <$> j)
   return $ IT  na mj
 
-parseAttr (FKT l refl rel j ) = do
+parseAttr (FKT l rel j ) = do
   ml <- if L.null l
      then return []
      else do
@@ -309,7 +309,7 @@ parseAttr (FKT l refl rel j ) = do
        char ','
        return ml
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j
-  return $  FKT ml refl rel  mj -- (fmap (const (SOptional Nothing) ) j )
+  return $  FKT ml rel  mj
 
 parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 

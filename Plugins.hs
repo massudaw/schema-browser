@@ -189,7 +189,7 @@ instance ToJSON Timeline where
 -}
 
 itR i f = atR i (IT (attrT (fromString i,())) <$> f)
-fktR i rel f = atR (L.intercalate "," (fmap fst i)) (FKT (attrT <$> i) True rel <$> f)
+fktR i rel f = atR (L.intercalate "," (fmap fst i)) (FKT (attrT <$> i) rel <$> f)
 
 pagamentoArr
   :: (KeyString a1,
@@ -209,7 +209,7 @@ pagamentoArr =  itR "pagamento" (proc descontado -> do
                   odxR "price" -<  ()
                   odxR "scheduled_date" -<  ()
                   let total = maybe 0 fromIntegral  p :: Int
-                  let pagamento = _tb $ FKT ([attrT  ("pagamentos",SOptional (Just $ SComposite $ Vector.fromList (replicate total (SNumeric $ -1) )) )]) True [Rel "pagamentos" "=" "id"] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> tblist [attrT ("id",SSerial Nothing),attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ]) ([1 .. total])))
+                  let pagamento = _tb $ FKT ([attrT  ("pagamentos",SOptional (Just $ SComposite $ Vector.fromList (replicate total (SNumeric $ -1) )) )]) [Rel "pagamentos" "=" "id"] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> tblist [attrT ("id",SSerial Nothing),attrT ("description",SOptional $ Just $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",SOptional valorParcela), attrT ("scheduled_date",SOptional pinicio) ]) ([1 .. total])))
                   returnA -<  pagamento ) -< (valorParcela,pinicio,p)
               returnA -<  tblist [pg ] )
 
@@ -276,7 +276,7 @@ importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
           ref :: [Compose Identity (TB Identity ) Text(Showable)]
           ref = [attrT  ("statements",SOptional $ join $ fmap (SComposite . Vector.fromList ). allMaybes . fmap (M.lookup "fitid" . M.fromList ) <$> b)]
           tbst :: (Maybe (TB2 Text (Showable)))
-          tbst = Just $ tblist [_tb $ FKT ref True [Rel "statements" "=" "fitid",Rel "account" "=" "account"] ao]
+          tbst = Just $ tblist [_tb $ FKT ref [Rel "statements" "=" "fitid",Rel "account" "=" "account"] ao]
       returnA -< tbst
     elem inf = maybe (return Nothing) (\inp -> do
                 b <- runReaderT (dynPK url ()) (Just inp)

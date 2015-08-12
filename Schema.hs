@@ -135,11 +135,11 @@ keyTables conn userconn (schema ,user) = do
        res <- lookupKey3 <$> query conn "SELECT t.table_name,pks FROM metadata.tables t left join metadata.pks  p on p.schema_name = t.schema_name and p.table_name = t.table_name where t.schema_name = ?" (Only schema) :: IO [(Text,Vector Key )]
        resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM information_schema.tables where table_schema = ? " (Only schema) :: IO (Map Text TableType)
        let lookFk t k =V.toList $ lookupKey2 (fmap (t,) k)
-       fks <- M.fromListWith S.union . fmap (\i@(tp,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) (FKJoinTable tp (zipWith3 (\a b c -> Rel a b c) (lookFk tp kp ) (V.toList rel) (lookFk tc kc)) tc) (S.fromList $ lookFk tc kc))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation ) )))
+       fks <- M.fromListWith S.union . fmap (\i@(tp,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) (addRec tp tc $ FKJoinTable tp (zipWith3 (\a b c -> Rel a b c) (lookFk tp kp ) (V.toList rel) (lookFk tc kc)) tc) (S.fromList $ lookFk tc kc))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation ) )))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  M.toList keyMap :: Map Text (Set Key)
            pks =  (\(c,pksl)-> let
                                   pks = S.fromList $ F.toList pksl
-                                  inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
+                                  inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (addRec c (inlineName t) $  FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
                                   eitherFK =   M.lookup c eitherMap
                                   attr = S.difference (S.filter (not. isKEither.keyType)  $ (\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> pks)
                                 in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (maybe [] id $ M.lookup c authorization)  pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
@@ -147,6 +147,9 @@ keyTables conn userconn (schema ,user) = do
        mvar <- newMVar M.empty
        return  $ InformationSchema schema i1 i2 i3 M.empty mvar  userconn conn
 
+addRec i j
+  | i == j = RecJoin
+  | otherwise = id
 liftMod inf k (EditTB a b ) = EditTB (liftKeys inf k a) (liftKeys inf k b)
 liftMod inf k (InsertTB a  ) = InsertTB(liftKeys inf k a)
 liftMod inf k (DeleteTB a  ) = DeleteTB (liftKeys inf k a)
@@ -166,7 +169,7 @@ liftKeys inf tname tb
         liftField :: Text -> TB Identity Text a -> TB Identity Key a
         liftField tname (TBEither n k j ) = TBEither (lookKey inf tname n) (mapComp (liftField tname) <$> k ) (mapComp (liftField tname ) <$> j)
         liftField tname (Attr t v) = Attr (lookKey inf tname t) v
-        liftField tname (FKT ref i rel2 tb) = FKT (mapComp (liftField tname) <$> ref)  i ( rel) (liftTable tname2 tb)
+        liftField tname (FKT ref  rel2 tb) = FKT (mapComp (liftField tname) <$> ref)   ( rel) (liftTable tname2 tb)
             where (Path _ (FKJoinTable _ rel tname2 ) _) = justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
                   ta = lookTable inf tname
         liftField tname (IT rel tb) = IT (mapComp (liftField tname ) rel) (liftTable tname2 tb)
@@ -313,6 +316,7 @@ zipInter f = M.intersectionWith f
 zipDelete f = fmap f . M.difference
 zipCreate f =  fmap f . flip M.difference
 
+{-
 type TransactionM = WriterT [TableModification Showable] IO
 
 fullInsert :: InformationSchema -> TB1 Showable -> TransactionM  (TB3 Identity Key Showable)
@@ -325,9 +329,9 @@ fullInsert inf (TB1 k1 v1 )  = do
       then do
         return ret
       else do
-        i <- liftIO $ insertMod inf ret (lookTable inf (_kvname k1))
+        i@(Just (TableModification _ _ (InsertTB tb)))  <- liftIO $ insertMod inf ret (lookTable inf (_kvname k1))
         tell (maybeToList i)
-        return ret
+        return tb
 
 fullInsert inf (LeftTB1 i ) = LeftTB1 <$> Tra.traverse (fullInsert inf) i
 fullInsert inf (ArrayTB1 i ) = ArrayTB1  <$> Tra.traverse (fullInsert inf) i
@@ -379,8 +383,21 @@ tbDiffEdit inf i j
 
 tbInsertEdit inf  j@(Attr k1 k2) = return $ Identity  (Attr k1 k2)
 tbInsertEdit inf  (IT k2 t2) = Identity . IT k2 <$> (noInsert inf t2 )
-tbInsertEdit inf  (FKT k2 f2 rel2 t2) = do
-   Identity . (\tb -> FKT  k2 f2 rel2 tb ) <$> fullInsert inf t2
+tbInsertEdit inf  (FKT pk f2 rel2 t2) = do
+   case t2 of
+        t@(TB1 _ l) -> do
+           let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
+           Identity . (\tb -> FKT   (maybe pk  id $ backFKRef' relTable  pk (Just tb) ) f2 rel2 tb ) <$> fullInsert inf t
+        {-LeftTB1 i -> do
+           let pk = backFKRef' i unkeyOptional pk2
+           liftA2 (\ p t -> tbInsertEdit inf (FKT p f2 (rel2 .~ traverse . relOrigin $ unKOptional)  t)) (Tra.traverse unpk t
+        ArrayTB1 l -> do-}
 tbInsertEdit inf j = return $ Identity j
 
+backFKRef' relTable ifk box = fmap (\ibox -> (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . fmap lookFKsel $ ibox) ) .  join . fmap findPKM $ box
+  where
+        reorderPK l = fmap (\i -> justError ("reorder wrong" <> show (l,i)) $ L.find ((== i).fst) l )  (keyAttr . unTB <$> ifk)
+        lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
+          where kn = justError "relTable" $ M.lookup ko relTable
+-}
 

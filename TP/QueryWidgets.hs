@@ -139,7 +139,7 @@ plugTags inf bres (BoundedPlugin2 n t f action) = do
 lorder lo lref = allMaybes $ fmap (\k -> L.find (\i-> fst i == k ) lref) lo
 
 attrSize (TBEither n l _ ) = maximum $ fmap (attrSize . runIdentity . getCompose) l
-attrSize (FKT  _ _ _ _ ) = (12,4)
+attrSize (FKT  _  _ _ ) = (12,4)
 attrSize (IT _ _ ) = (12,4)
 attrSize (Attr k _ ) = go  (keyType k)
   where
@@ -281,7 +281,7 @@ diffOptional i   = Just i
 
 
 tbCase :: InformationSchema -> [Plugins] -> SelPKConstraint  -> TB Identity Key () -> [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key Showable)))] -> [(Access Text,Event (Maybe (TB1 Showable)))]-> Tidings (Maybe (TB Identity Key Showable)) -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
-tbCase inf pgs constr i@(FKT ifk _ rel tb1 ) wl plugItens oldItems  = do
+tbCase inf pgs constr i@(FKT ifk  rel tb1 ) wl plugItens oldItems  = do
         l <- flabel # set text (show $ _relOrigin <$> rel )
         let
             nonInj = fmap  _relOrigin   (filterNotReflexive rel)
@@ -296,7 +296,7 @@ tbCase inf pgs constr i@(FKT ifk _ rel tb1 ) wl plugItens oldItems  = do
             convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap tbrefM td /= Just el )  $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ) <$> oldItems <*>) <$>  restrictConstraint
             ftdi = fmap (runIdentity . getCompose ) <$>  tbi
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return (fmap (runIdentity . getCompose ) <$>  tbi)) (fmap Just . filterJust . snd <$>  pfks )
-        tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks (filter (isReflexive .fst) wl) (ftdi ) i
+        tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks wl (ftdi ) i
         dv <- UI.div #  set UI.class_ "col-xs-12"# set children [l,getElement tds]
         paintEdit l (facts (fmap tbrefM <$> triding tds)) (fmap tbrefM <$> facts oldItems)
         return $ TrivialWidget (triding tds) dv
@@ -478,7 +478,7 @@ processPanelTable inf attrsB res table oldItemsi = do
   editB <- UI.button # set text "EDIT" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table ))
 
   -- Edit when any persistent field has changed
-        -- # sink UI.enabled (liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . _unTB1 .  tableNonRef)<$> attrsB) (fmap (_kvvalues . unTB . _unTB1 . tableNonRef )<$> facts oldItemsi)) (liftA2 (\i j -> maybe False (flip contains j) i  ) attrsB  res))
+        # sink UI.enabled (liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . _unTB1 .  tableNonRef)<$> attrsB) (fmap (_kvvalues . unTB . _unTB1 . tableNonRef )<$> facts oldItemsi)) (liftA2 (\i j -> maybe False (flip contains j) i  ) attrsB  res))
 
   deleteB <- UI.button # set text "DELETE" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table ))
   -- Delete when isValid
@@ -506,7 +506,7 @@ processPanelTable inf attrsB res table oldItemsi = do
   bd <- stepper [] (unions [evid,evdd,eved])
   errorOut <- UI.span # sink UI.text (L.intercalate "," <$> bd)
   transaction <- UI.span# set children [insertB,editB,deleteB,errorOut]
-  onEvent (fmap head $ unions [evir,ever,evdr]) ( liftIO . logTableModification inf . TableModification Nothing table )
+  onEvent (fmap head $ unions [evir,evdr]) ( liftIO . logTableModification inf . TableModification Nothing table )
   return (transaction ,[evir,ever,evdr])
 
 
@@ -527,47 +527,52 @@ tablePKSet  tb1 = S.fromList $ concat $ fmap ( keyattr)  $ F.toList $ _kvvalues 
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 
 unIndexItens :: Int -> Int -> Maybe (TB Identity  Key Showable) -> Maybe (TB Identity  Key Showable)
-unIndexItens ix o=  join . fmap (unIndex o)
-  where
-    unIndex o (IT  na  (ArrayTB1 j))
-      =  IT  na <$>  atMay j (ix + o)
-    unIndex o (FKT els refl rel (ArrayTB1 m)  )
-      = (\li mi ->  FKT  (nonl <> [mapComp (firstTB unKArray) li]) refl (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi )
-            <$> join (traverse (indexArray (ix + o) ) <$> l)
-            <*> atMay m (ix + o)
-      where
-        l = L.find (all (isArray.keyType) . keyattr)  els
-        nonl = L.filter (not .all (isArray.keyType) . keyattr) els
-    unIndex o i = errorWithStackTrace (show (o,i))
+unIndexItens ix o =  join . fmap (unIndex (ix+ o))
 
-    indexArray ix s =  atMay (unArray s) ix
+unIndex o (IT  na  (ArrayTB1 j))
+  =  IT  na <$>  atMay j o
+unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> [mapComp (firstTB unKArray) li]) (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi ) <$> join (traverse (indexArray o)  <$> l) <*> atMay m o
+  where
+      l = L.find (all (isArray.keyType) . keyattr)  els
+      nonl = L.filter (not .all (isArray.keyType) . keyattr) els
+      indexArray ix s =  atMay (unArray s) ix
+unIndex o i = errorWithStackTrace (show (o,i))
 
 unLeftKey (IT na (LeftTB1 (Just tb1))) = IT na tb1
-unLeftKey (FKT ilk refl rel  (LeftTB1 (Just tb1 ))) = (FKT (fmap unKOptional<$> ilk) refl (Le.over relOrigin unKOptional <$> rel) tb1)
+unLeftKey (FKT ilk rel  (LeftTB1 (Just tb1 ))) = (FKT (fmap unKOptional<$> ilk) (Le.over relOrigin unKOptional <$> rel) tb1)
 
-unLeftItens  :: Maybe (TB Identity  Key Showable) -> Maybe (TB Identity  Key Showable)
-unLeftItens = join . fmap unLeftTB
+unLeftItens  :: TB Identity  Key Showable -> Maybe (TB Identity  Key Showable)
+unLeftItens = unLeftTB
   where
 
     unLeftTB (IT na (LeftTB1 l))
       = IT na <$>  l
-    unLeftTB (FKT ifk refl rel  (LeftTB1 tb))
-      = (\ik -> FKT ik  refl (Le.over relOrigin unKOptional <$> rel))
+    unLeftTB (FKT ifk rel  (LeftTB1 tb))
+      = (\ik -> FKT ik  (Le.over relOrigin unKOptional <$> rel))
           <$> traverse ( traverse unSOptional . mapComp (firstTB unKOptional )  ) ifk
           <*>  tb
     unLeftTB i = errorWithStackTrace (show i)
 
-tbOptional = mapComp (firstTB kOptional) . fmap (SOptional . Just)
 
-leftItens tb@(IT na _ ) tr =   Just . maybe  emptyIT (\(IT na j) -> IT  na (LeftTB1 (Just j)))  <$> tr
+
+attrOptional (FKT ifk rel  tb)  = FKT (tbOptional <$> ifk) (Le.over relOrigin kOptional <$> rel) (LeftTB1 (Just tb))
+  where tbOptional = mapComp (firstTB kOptional) . fmap (SOptional . Just)
+attrOptional (IT na j) = IT  na (LeftTB1 (Just j))
+
+
+leftItens tb@(IT na _ ) tr =   Just . maybe  emptyIT attrOptional <$> tr
   where emptyIT = IT  na  (LeftTB1 Nothing)
-leftItens tb@(FKT ilk refl rel _) tr  = Just . maybe  emptyFKT (\(FKT ifk refl rel  tb)-> FKT (tbOptional <$> ifk) refl (Le.over relOrigin kOptional <$> rel) (LeftTB1 (Just tb))) <$> tr
-  where emptyFKT = FKT (fmap (const (SOptional Nothing)) <$> ilk) refl rel (LeftTB1 Nothing)
+leftItens tb@(FKT ilk rel _) tr  = Just . maybe  emptyFKT attrOptional  <$> tr
+  where emptyFKT = FKT (fmap (const (SOptional Nothing)) <$> ilk) rel (LeftTB1 Nothing)
 
-indexItens tb@(FKT ifk refl rel _) offsetT fks oldItems  = bres
-  where  bres2 =    allMaybes .  L.takeWhile isJust  <$> Tra.sequenceA (fmap (fmap (\(FKT i _ _ j ) -> (head $ fmap (unAttr.unTB) $ i,  j)) )  . triding <$> fks)
-         emptyFKT = Just . maybe (FKT (fmap (const (SComposite (V.empty))) <$> ifk) refl rel (ArrayTB1 []) ) id
-         bres = (\o -> liftA2 (\l (FKT [lc] refl rel (ArrayTB1 m )) -> FKT (fmap (const (SComposite $ V.fromList $  ((L.take o $ F.toList $ unSComposite $(unAttr $ runIdentity $ getCompose lc)  )<> fmap fst l <> (L.drop (o + 9 )  $ F.toList $ unSComposite $(unAttr $ runIdentity $ getCompose lc)  )))) <$> ifk) refl rel (ArrayTB1 $ L.take o m <> fmap snd l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
+attrArray back oldItems  = (\(lc,tb) ->  FKT [Compose $ Identity $ Attr (head $ keyattr (head lc )) (SComposite . V.fromList $ head . kattr  <$> lc)] (_fkrelation back) (ArrayTB1 tb  ) )  $ unzip $ (\(FKT [lc] rel tb ) -> (lc , tb)) <$> oldItems
+attrArray back oldItems  = (\tb ->  IT  (_ittableName back) (ArrayTB1 tb  ) )  $ (\(IT _ tb ) -> tb) <$> oldItems
+
+
+indexItens tb@(FKT ifk rel _) offsetT fks oldItems  = bres
+  where  bres2 =    allMaybes .  L.takeWhile isJust  <$> Tra.sequenceA (fmap (fmap (\(FKT i  _ j ) -> (head $ fmap (unAttr.unTB) $ i,  j)) )  . triding <$> fks)
+         emptyFKT = Just . maybe (FKT (fmap (const (SComposite (V.empty))) <$> ifk) rel (ArrayTB1 []) ) id
+         bres = (\o -> liftA2 (\l (FKT [lc] rel (ArrayTB1 m )) -> FKT (fmap (const (SComposite $ V.fromList $  ((L.take o $ F.toList $ unSComposite $(unAttr $ runIdentity $ getCompose lc)  )<> fmap fst l <> (L.drop (o + 9 )  $ F.toList $ unSComposite $(unAttr $ runIdentity $ getCompose lc)  )))) <$> ifk) rel (ArrayTB1 $ L.take o m <> fmap snd l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
 
 indexItens tb@(IT na _) offsetT items oldItems  = bres
    where bres2 = fmap (fmap (\(IT na j ) -> j)) . allMaybes . L.takeWhile isJust <$> Tra.sequenceA (triding <$> items)
@@ -596,13 +601,12 @@ iUITable inf pgs pmods oldItems  tb@(IT na  tb1@(TB1 meta _) )
       let bres =  fmap (fmap (IT  na  ) ) (tcrud)
       return $ TrivialWidget bres celem
 iUITable inf pgs pmods oldItems  tb@(IT na (LeftTB1 (Just tb1))) = do
-   tr <- iUITable inf pgs (fmap (unLeftItens  <$> ) <$> pmods) (unLeftItens <$> oldItems) (IT na tb1)
+   tr <- iUITable inf pgs (fmap (join . fmap unLeftItens  <$> ) <$> pmods) (join . fmap unLeftItens <$> oldItems) (IT na tb1)
    return $  leftItens tb tr
 iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
     = mdo
       (TrivialWidget offsetT offset) <- offsetField 0 (maybe 0 (length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
-      items <- mapM (\ix ->
-            iUITable inf pgs
+      items <- mapM (\ix -> iUITable inf pgs
                 (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods)
                 (unIndexItens ix <$> offsetT <*>   oldItems)
                 (IT  na tb1)) [0..8]
@@ -632,7 +636,7 @@ backFKRef relTable ifk box = fmap (\ibox -> (fmap (\ i -> _tb $ Attr (fst i ) (s
           where kn = justError "relTable" $ M.lookup ko relTable
 nonRefAttr l = concat $  fmap (uncurry Attr) . aattr <$> ( l )
 
-tbrefM i@(FKT _ _ _ _)  =  _tbref i
+tbrefM i@(FKT _  _ _)  =  _tbref i
 tbrefM j = [Compose $ Identity $ j ] -- errorWithStackTrace ("tbref" <> show j )
 
 fkUITable
@@ -649,7 +653,7 @@ fkUITable
   -- Static Information about relation
   -> TB Identity Key ()
   -> UI (TrivialWidget(Maybe (TB Identity Key Showable)))
-fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ ) ) = mdo
+fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _ _ ) ) = mdo
       let
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
           rr = tablePKSet tb1
@@ -705,21 +709,21 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk refl rel tb1@(TB1 _ _ 
         lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
           where kn = justError "relTable" $ M.lookup ko relTable
         box = TrivialWidget (tidings st sel) (getElement itemList)
-        fksel =  (\box -> fmap (\ibox -> FKT (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . fmap lookFKsel $ ibox) refl rel (fromJust box) ) .  join . fmap findPKM $ box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> triding box)
+        fksel =  (\box -> fmap (\ibox -> FKT (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . fmap lookFKsel $ ibox) rel (fromJust box) ) .  join . fmap findPKM $ box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> triding box)
       fk <- UI.div # set  children ([getElement box,filterInp] <> celem)
       return $ TrivialWidget fksel fk
-fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk refl rel  (LeftTB1 (Just tb1 ))) = do
-    tr <- fkUITable inf pgs constr (fmap (unLeftItens <$>) <$> plmods)  wl (unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) refl (Le.over relOrigin unKOptional <$> rel) tb1)
+fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb1 ))) = do
+    tr <- fkUITable inf pgs constr (fmap (join . fmap unLeftItens <$>) <$> plmods)  wl (join . fmap unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOrigin unKOptional <$> rel) tb1)
     return $ leftItens tb tr
-fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk refl rel  (ArrayTB1 [tb1]) ) = mdo
-     (TrivialWidget offsetT offset) <- offsetField 0 (maybe 0 (length . (\(FKT _ _ _ (ArrayTB1 l) ) -> l)) <$> facts bres)
+fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) ) = mdo
+     (TrivialWidget offsetT offset) <- offsetField 0 (maybe 0 (length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      let
-         fkst = FKT (mapComp (firstTB unKArray)<$> ifk ) refl (fmap (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
+         fkst = FKT (mapComp (firstTB unKArray)<$> ifk ) (fmap (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
      fks <- mapM (\ix-> fkUITable inf pgs constr (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods ) [] (unIndexItens ix <$> offsetT  <*>  oldItems) fkst) [0..8]
      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (getElement <$> tail fks) (triding <$> fks)
      dv <- UI.div # set children (getElement <$> fks)
      let bres = indexItens tb offsetT fks oldItems
-     leng <- UI.span # sink text (("Size: " ++) .show .maybe 0 (length . (\(FKT _ _ _ (ArrayTB1 l) ) -> l)) <$> facts bres)
+     leng <- UI.span # sink text (("Size: " ++) .show .maybe 0 (length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      fksE <- UI.div # set UI.style [("display","inline-flex")] # set children [offset , leng ]
      res <- UI.div # set children [fksE ,dv]
      -- paintEdit (getElement l) (facts bres) (facts oldItems )
@@ -757,4 +761,88 @@ deleteMod inf kv table = do
   Just <$> logTableModification inf (TableModification Nothing table (DeleteTB kv))
 
 
+type TransactionM = WriterT [TableModification Showable] IO
 
+fullInsert :: InformationSchema -> TB1 Showable -> TransactionM  (TB3 Identity Key Showable)
+fullInsert inf (TB1 k1 v1 )  = do
+   let proj = _kvvalues . unTB
+   ret <- TB1 k1 . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
+   (m,t) <- liftIO $ eventTable inf (lookTable inf (_kvname k1))
+   l <- currentValue (facts t)
+   if  L.elem ret l
+      then do
+        return ret
+      else do
+        i@(Just (TableModification _ _ (InsertTB tb)))  <- liftIO $ insertMod inf ret (lookTable inf (_kvname k1))
+        tell (maybeToList i)
+        return tb
+
+fullInsert inf (LeftTB1 i ) = LeftTB1 <$> Tra.traverse (fullInsert inf) i
+fullInsert inf (ArrayTB1 i ) = ArrayTB1  <$> Tra.traverse (fullInsert inf) i
+
+noInsert :: InformationSchema -> TB1 Showable -> TransactionM  (TB3 Identity Key Showable)
+noInsert inf (LeftTB1 i ) = LeftTB1 <$> Tra.traverse (noInsert inf ) i
+noInsert inf (ArrayTB1 i ) = ArrayTB1 <$> Tra.traverse (noInsert inf ) i
+noInsert inf (TB1 k1 v1 )  = do
+   let proj = _kvvalues . unTB
+   TB1 k1 . Compose . Identity . KV <$>  Tra.sequence (fmap (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1))
+
+
+insertMod :: InformationSchema ->  TB1 Showable -> Table -> IO (Maybe (TableModification Showable))
+insertMod inf kv table = do
+  kvn <- insertAttr fromAttr (conn  inf) kv table
+  let mod =  TableModification Nothing table (InsertTB  kvn)
+  Just <$> logTableModification inf mod
+
+
+transaction :: InformationSchema -> TransactionM a -> IO a
+transaction inf log = withTransaction (conn inf) $ do
+  (md,mods)  <- runWriterT log
+  let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
+  Tra.traverse (\(k,v) -> do
+    (m,t) <- eventTable inf k
+    l <- currentValue (facts t)
+    let lf = foldr addToList l v
+    putMVar m lf
+    ) (M.toList aggr)
+  return md
+
+fullDiffEdit :: InformationSchema -> TB1 Showable -> TB1 Showable -> TransactionM  (TB3 Identity Key Showable)
+fullDiffEdit inf old@(TB1 k1 v1 ) ed@(TB1 k2 v2) = do
+   let proj = _kvvalues . unTB
+   ed <-TB1 k2 . Compose . Identity . KV <$>  Tra.sequence (zipInter (\i j -> Compose <$>  tbDiffEdit inf  (unTB i) (unTB j) ) (proj v1 ) (proj v2))
+   mod <- liftIO $ updateModAttr inf ed old (lookTable inf (_kvname k2))
+   tell (maybeToList mod)
+   return ed
+
+updateModAttr :: InformationSchema -> TB1 Showable -> TB1 Showable -> Table -> IO (Maybe (TableModification Showable))
+updateModAttr inf kv old table = join <$> Tra.traverse (\df -> do
+  updateAttr (conn  inf) kv old table
+  let mod =  TableModification Nothing table (EditTB  kv old)
+  Just <$> logTableModification inf mod) (diffUpdateAttr kv old)
+
+
+tbDiffEdit :: InformationSchema -> TB Identity Key Showable -> TB Identity Key Showable -> TransactionM (Identity (TB Identity Key  Showable))
+tbDiffEdit inf i j
+  | i == j =  return (Identity j)
+  | otherwise = tbInsertEdit inf  j
+
+tbInsertEdit inf  j@(Attr k1 k2) = return $ Identity  (Attr k1 k2)
+tbInsertEdit inf  (IT k2 t2) = Identity . IT k2 <$> noInsert inf t2
+tbInsertEdit inf  f@(FKT pk rel2  t2) =
+   case t2 of
+        t@(TB1 _ l) -> do
+           let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
+           Identity . (\tb -> FKT   (fromMaybe pk  $ backFKRef' relTable  pk (Just tb) ) rel2 tb ) <$> fullInsert inf t
+        LeftTB1 i ->
+           maybe (return (Identity f) ) (fmap (fmap attrOptional) . tbInsertEdit inf) (unLeftItens f)
+        ArrayTB1 l ->
+           fmap (fmap (attrArray f)) $ fmap Tra.sequenceA $ Tra.traverse (\ix ->   tbInsertEdit inf $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. length l - 1 ]
+
+tbInsertEdit inf j = return $ Identity j
+
+backFKRef' relTable ifk box = fmap (\ibox -> (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . fmap lookFKsel $ ibox) ) .  join . fmap findPKM $ box
+  where
+        reorderPK l = fmap (\i -> justError ("reorder wrong" <> show (l,i)) $ L.find ((== i).fst) l )  (keyAttr . unTB <$> ifk)
+        lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
+          where kn = justError "relTable" $ M.lookup ko relTable

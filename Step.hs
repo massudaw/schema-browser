@@ -218,7 +218,7 @@ indexTB1 (IProd _ l) t
         i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  M.lookup (S.fromList l) $ M.mapKeys (S.map keyString)$ _kvvalues $ unTB v
     case runIdentity $ getCompose $i  of
          Attr _ l -> Nothing
-         FKT l _ _ j -> return j
+         FKT l  _ j -> return j
          IT l  j -> return j
          TBEither n kj j  -> return $ TB1 m $ Compose $ Identity $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j
 
@@ -232,7 +232,7 @@ checkField (Nested (IProd _ l) nt ) t@(TB1 m v)
     case runIdentity $ getCompose $ i  of
          IT l  i -> Compose . Identity <$> (IT l  <$> checkTable nt i)
          TBEither n kj j  ->   checkField nt  ( TB1 m $ Compose $ Identity $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j)
-         FKT a  b c  d -> Compose . Identity <$> (FKT a b c <$>  checkTable nt d)
+         FKT a   c  d -> Compose . Identity <$> (FKT a  c <$>  checkTable nt d)
 checkField  (IProd b l) t@(TB1 m v)
   = do
     let
@@ -307,14 +307,12 @@ instance (Monoid s ,Applicative (a i),Monoid m) => Monoid (Parser a s i m) where
 
 findPK = concat . fmap keyattr  .toList . _kvvalues  . unTB . tbPK
 
-findPKM (LeftTB1 i ) =  join $ fmap (findPKM ) i
-findPKM i  = Just $ concat . fmap (\i -> zip (keyattr i) (kattr i )) .toList . _kvvalues . unTB . tbPK $ i
 
 
 aattr = aattri . runIdentity . getCompose
 aattri (Attr k i ) = [(k,i)]
 aattri (TBEither _ i l  ) =  (maybe [] id $ fmap aattr l )
-aattri (FKT i _ _ _ ) =  (L.concat $ aattr  <$> i)
+aattri (FKT i  _ _ ) =  (L.concat $ aattr  <$> i)
 aattri (IT _  i ) =  recTB i
   where recTB (TB1 _ i ) =  concat $ fmap aattr (toList $ _kvvalues $ unTB i)
         recTB (ArrayTB1 i ) = concat $ fmap recTB i
@@ -330,5 +328,9 @@ type ArrowPlug a o = RuntimeTypes.Parser a AccessTag (Maybe (TB1 Showable)) o
 attrT :: (a,b) -> Compose Identity (TB Identity  ) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
-
+{-
+addToList  (InsertTB m) =  (m:)
+addToList  (DeleteTB m ) =  L.delete m
+addToList  (EditTB m n ) = (map (\e-> if  (e ==  n) then  mapTB1 (\i -> maybe i snd $ getCompose $  unTB $ findTB1 (\k -> keyattr k == keyattr i  ) m ) e  else e ))
+-}
 
