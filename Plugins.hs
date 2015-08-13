@@ -97,6 +97,28 @@ siapi2Plugin = BoundedPlugin2  pname tname (staticP url) elemp
     tailEmpty i  = tail i
 
 
+analiseProjeto = BoundedPlugin2 pname tname (staticP url ) elemp
+  where
+    pname , tname :: Text
+    pname = "Cadastro Bombeiro"
+    tname = "fire_project"
+    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    url :: ArrowReader
+    url = proc t -> do
+      atR "id_owner,id_contact"
+                $ atR "id_owner"
+                    $ atAny "cpf_number,cnpj_number" [varTB "cpf_number",varTB "cnpj_number"] -< t
+      atR "address"
+                ((,,,) <$> idxK "complemento" <*> idxK "cep" <*> idxK "municipio" <*> idxK "uf") -< t
+      atR "dados_projeto" (idxK "area") -< ()
+      odxR "protocolo" -< ()
+      odxR "ano" -< ()
+      returnA -< Nothing
+    elemp inf = maybe (return Nothing) (geninf inf)
+    geninf inf inp = do
+            b <- runReaderT (dynPK url $ () ) (Just inp)
+            return $ liftKeys inf tname  <$> b
+
 
 
 siapi3Plugin  = BoundedPlugin2 pname tname  (staticP url) elemp
@@ -255,7 +277,7 @@ importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
       fn <- idxR "file_name" -< t
       i <- idxR "import_file" -< t
       r <- atR "account" $ idxR "id_account" -< t
-      atR "statements" (proc t -> do
+      atR "statements,account" (proc t -> do
         odxR "fitid" -< t
         odxR "memo" -< t
         odxR "trntype" -< t
@@ -421,4 +443,4 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
 
 
 
-plugList = [lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}queryCNPJStatefull,queryCPFStatefull,queryArtAndamento]
+plugList = [lplugOrcamento ,lplugReport,analiseProjeto,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}queryCNPJStatefull,queryCPFStatefull,queryArtAndamento]

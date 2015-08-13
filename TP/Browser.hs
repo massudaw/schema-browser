@@ -92,7 +92,7 @@ setup e args w = void $ do
   be <- stepper [] e
   pollRes <- UI.div # sink UI.text (show <$> be)
   return w # set title (host bstate <> " - " <>  dbn bstate)
-  nav  <- buttonSetUI ["Editor","Changes","Recent Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  nav  <- buttonSetUI ["Editor","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   chooserDiv <- UI.div # set children  (chooserItens <> [ getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
@@ -100,10 +100,6 @@ setup e args w = void $ do
   mapUITEvent body (traverse (\(nav,inf)->
       case nav of
         "Changes" -> do
-            dash <- dashBoard inf
-            element body # set UI.children [dash]# set UI.class_ "row"
-
-        "Recent Changes" -> do
             dash <- dashBoardAll inf
             element body # set UI.children [dash] # set UI.class_ "row"
         "Editor" -> do
@@ -192,9 +188,9 @@ showMod (DeleteTB j) = [showFKE j , operator "| - |" , UI.div]
 operator op = UI.div # set text op  # set UI.style [("margin-left","3px"),("margin-right","3px")]
 
 dashBoardAll  inf = do
-  els :: [(Int,LocalTime,Text,(Binary BSL.ByteString))] <-
-    liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,table_name,modification_data from metadata.modification_table WHERE schema_name = ? order by modification_id desc" (Only $ schemaName inf)
-  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( (UI.td# showModDiv ( (B.decode d :: Modification Text Showable))))) v] ) <$> els)
+  els :: [(Int,LocalTime,Text,Text,(Binary BSL.ByteString))] <-
+    liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,modification_data from metadata.modification_table WHERE schema_name = ? order by modification_id desc limit 100 " (Only $ schemaName inf)
+  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( (UI.td# showModDiv ( (B.decode d :: Modification Text Showable))))) v] ) <$> els)
 
 
 dashBoard inf = do

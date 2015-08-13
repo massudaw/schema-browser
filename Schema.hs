@@ -76,6 +76,7 @@ nullable "NO" t = t
 data InformationSchema
   = InformationSchema
   { schemaName :: Text
+  , username :: Text
   , keyMap :: Map (Text,Text) Key
   , pkMap :: Map (Set Key) Table
   , tableMap :: Map Text Table
@@ -145,7 +146,7 @@ keyTables conn userconn (schema ,user) = do
                                 in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (maybe [] id $ M.lookup c authorization)  pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
        let (i1,i2,i3) = (keyMap, M.fromList $ filter (not.S.null .fst)  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        mvar <- newMVar M.empty
-       return  $ InformationSchema schema i1 i2 i3 M.empty mvar  userconn conn
+       return  $ InformationSchema schema user i1 i2 i3 M.empty mvar  userconn conn
 
 addRec i j
   | i == j = RecJoin
@@ -197,7 +198,8 @@ newKey name ty p = do
 catchPluginException :: InformationSchema -> Text -> Text -> IO (Maybe a) -> IO (Maybe a)
 catchPluginException inf pname tname i = do
   i `catch` (\e  -> do
-                execute (rootconn inf) "INSERT INTO metadata.plugin_exception (schema_name,table_name,plugin_name,exception) values(?,?,?,?)" (schemaName inf,pname,tname,show (e :: SomeException) )
+                t <- getCurrentTime
+                execute (rootconn inf) "INSERT INTO metadata.plugin_exception (schema_name,table_name,plugin_name,exception,instant) values(?,?,?,?,?)" (schemaName inf,pname,tname,show (e :: SomeException) ,t )
                 return Nothing )
 
 
@@ -208,7 +210,7 @@ logTableModification
 logTableModification inf (TableModification Nothing table i) = do
   time <- getCurrentTime
   let ltime =  utcToLocalTime utc $ time
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (modification_time,table_name,modification_data,schema_name) VALUES (?,?,?,?) returning modification_id "  (ltime,rawName table, Binary (B.encode $ mapMod keyValue  i) , schemaName inf)
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,modification_data,schema_name) VALUES (?,?,?,?,?) returning modification_id "  (username inf ,ltime,rawName table, Binary (B.encode $ mapMod keyValue  i) , schemaName inf)
   return (TableModification (id) table i )
 
 

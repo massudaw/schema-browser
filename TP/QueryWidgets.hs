@@ -115,11 +115,9 @@ pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac )
 pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
   overwrite <- checkedWidget (pure False)
   let tdInput = join . fmap (flip testTable  (fst f)) <$>  oldItems
-      -- tdOutput1 = (\i -> maybe True (const False) $ allMaybes $ fmap (\f -> (if not(fst f ) then join . fmap unRSOptional' else id ) $ fmap snd $ join $ fmap (indexTable  $ snd f) i) (snd f) ) <$>  outputItems
-      -- tdOutput= liftA2 (\i j -> if i then True else j) (triding overwrite)  tdOutput1
-  -- let ovev =((\ j i  -> if i then j else Nothing) <$>   oldItems <*> tdOutput1)
+      tdOutput = join . fmap (flip testTable (snd f)) <$> oldItems
   v <- currentValue (facts oldItems)
-  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput)
+  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  ( isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   let ecv = (facts oldItems <@ UI.click headerP)
   pgOut <- mapEvent (catchPluginException inf n t . action inf) (ecv)
   return (headerP, (snd f ,   pgOut ))
@@ -161,114 +159,6 @@ attrSize (Attr k _ ) = go  (keyType k)
                                     "application/pdf" ->  (6,8)
                                     "application/x-ofx" ->  (6,8)
                        i -> (3,1)
-
-attrUITable
-  :: Tidings (Maybe (TB Identity Key Showable))
-     -> [Event (Maybe (TB Identity Key Showable))]
-     -> TB Identity Key ()
-     -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
-attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ (KOptional _) ) v) = do
-      res <- attrUITable (join . fmap unLeftItens <$> tAttr') evs (Attr (unKOptional i) v)
-      return (leftItens attr <$> res)
-attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ (KArray _) ) v) = mdo
-            TrivialWidget offsetT offset <- offsetField 0  (maybe 0 (V.length . (\(SComposite l ) -> l) . _tbattr) <$> facts bres)
-            let arraySize = 8
-            widgets <- mapM (\ix  -> attrUITable (unIndexItens ix  <$> offsetT <*> tAttr' ) evs (Attr (unKArray i) v  ) ) [0..arraySize]
-
-            sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (tail $ getElement <$> widgets) (triding <$> widgets)
-            let
-              bres = indexItens attr offsetT (triding <$> widgets) tAttr'
-            offsetDiv <- UI.div # set children (fmap getElement widgets)
-            paintBorder offsetDiv (facts bres ) (facts tAttr' )
-            leng <- UI.span # sink0 text (("Size: " ++) .show .maybe 0 (V.length . (\(SComposite l ) -> l) . _tbattr ) <$> facts bres)
-            fk <- UI.div # set UI.style [("display","inline-flex")]  # set  children [offset,  leng ]
-            composed <- UI.span # set children [fk , offsetDiv]
-            return  $ TrivialWidget  bres composed
-attrUITable  tAttr' evs (Attr i _ ) = do
-      tdi' <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse diffOptional )) i =<< j) (return tAttr') evs
-      let tdi = fmap (\(Attr  _ i )-> i) <$>tdi'
-      attrUI <- buildUI (textToPrim <$> keyType i) tdi
-      let insertT = fmap (Attr i ) <$> (triding attrUI)
-      return $ TrivialWidget insertT  (getElement attrUI)
-
-buildUI i  tdi = case i of
-         (KSerial ti) -> do
-           tdnew <- fmap (Just . SSerial) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
-           retUI <- UI.div # set children [getElement tdnew]
-           paintBorder retUI (facts $ triding tdnew) (facts tdi)
-           return $ TrivialWidget (triding tdnew ) retUI
-         (KDelayed ti) -> do
-           tdnew <- fmap (maybe Nothing (Just .SDelayed. Just)  ) <$> buildUI ti (join . fmap unSDelayed <$> tdi)
-           retUI <- UI.div# set children [getElement tdnew]
-           paintBorder retUI (facts $ triding tdnew) (facts tdi)
-           return $ TrivialWidget (triding tdnew ) retUI
-
-         (KInterval ti) -> do
-            inf <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (\(SInterval i) -> inf' i) <$> tdi)
-            sup <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (\(SInterval i) -> sup' i) <$> tdi)
-            lbd <- fmap Just <$> checkedWidget (maybe False id . fmap (\(SInterval i) -> snd . Interval.lowerBound' $i) <$> tdi)
-            ubd <- fmap Just <$> checkedWidget (maybe False id .fmap (\(SInterval i) -> snd . Interval.upperBound' $i) <$> tdi)
-            composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
-            subcomposed <- UI.div # set UI.children [composed]
-            let td = (\m n -> fmap SInterval $  join . fmap (\i-> if Interval.null i then Nothing else Just i) $ liftF2 interval m n) <$> (liftA2 (,) <$> triding inf  <*> triding lbd) <*> (liftA2 (,) <$> triding sup <*> triding ubd)
-            paintBorder subcomposed (facts td ) (facts tdi)
-            return $ TrivialWidget td subcomposed
-         {-(Primitive Position) -> do
-            let addrs = (\(SPosition (Position (lon,lat,_)))-> "http://maps.google.com/?output=embed&q=" <> (HTTP.urlEncode $ show lat  <> "," <>  show lon )) <$>  tdi
-            mkElement "iframe" # sink UI.src (maybe "" id <$> facts addrs) # set style [("width","99%"),("height","300px")]-}
-         (Primitive PTimestamp) -> do
-            itime <- liftIO $  getCurrentTime
-            timeButton <- UI.button # set UI.text "now"
-            evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
-            let  newEv = fmap (STimestamp . utcToLocalTime utc) <$> evCurr
-            tdi2 <- addEvent newEv  tdi
-            oneInput tdi2 [timeButton]
-         (Primitive PDate) -> do
-            itime <- liftIO $  getCurrentTime
-            timeButton <- UI.button # set UI.text "now"
-            evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
-            let  newEv =  fmap (SDate . localDay . utcToLocalTime utc) <$> evCurr
-            tdi2 <- addEvent newEv  tdi
-            oneInput tdi2 [timeButton]
-         (Primitive PDayTime) -> do
-            itime <- liftIO $  getCurrentTime
-            timeButton <- UI.button # set UI.text "now"
-            evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
-            let  newEv = fmap (SDayTime. localTimeOfDay . utcToLocalTime utc) <$> evCurr
-            tdi2 <- addEvent newEv  tdi
-            oneInput tdi2 [timeButton]
-
-         (Primitive (PMime mime)) -> do
-           let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
-           clearB <- UI.button # set UI.text "clear"
-           file <- UI.input # set UI.class_ "file_client" # set UI.type_ "file" # set UI.multiple True
-           UI.div # sink0 UI.html (pure "<script> $(\".file_client\").on('change',handleFileSelect); </script>")
-           tdi2 <- addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fileChange file ) =<< addEvent (const Nothing <$> UI.click clearB) tdi
-           let fty = case mime of
-                "application/pdf" -> ("iframe","src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
-                "application/x-ofx" -> ("textarea","value",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-                "image/jpg" -> ("img","src",maybe "" binarySrc ,[])
-           f <- pdfFrame fty (facts tdi2) # sink0 UI.style (noneShow . isJust <$> facts tdi2)
-           fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]
-           res <- UI.div # set children [fd,f]
-           paintBorder res (facts tdi2) (facts  tdi)
-           return (TrivialWidget tdi2 res)
-
-         z -> do
-            oneInput tdi []
-  where
-    justCase i j@(Just _) = j
-    justCase i Nothing = i
-    oneInput tdi elem = do
-            let f = facts tdi
-            v <- currentValue f
-            inputUI <- UI.input # sink0 UI.value ((forceDefaultType  <$> f))
-            let pke = foldl1 (unionWith const ) [rumors tdi,readType i <$> UI.valueChange inputUI]
-            pk <- stepper v  pke
-            let pkt = tidings pk pke
-            sp <- UI.div # set children (inputUI : elem)
-            paintBorder sp (facts pkt) (facts tdi)
-            return $ TrivialWidget pkt sp
 
 
 forceDefaultType (Just i ) = renderShowable i
@@ -471,17 +361,22 @@ processPanelTable
 processPanelTable inf attrsB res table oldItemsi = do
   let
       contains v  = maybe False (const True) . L.find (onBin (pkOpSet) (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ) v )
-  insertB <- UI.button # set UI.class_ "buttonSet" # set text "INSERT" # set UI.style (noneShowSpan ("INSERT" `elem` rawAuthorization table ))
+  insertB <- UI.button # set UI.class_ "buttonSet" # set text "INSERT" # set UI.style (noneShowSpan ("INSERT" `elem` rawAuthorization table )) #
   -- Insert when isValid
-        # sink UI.enabled (liftA2 (&&) (isJust . fmap tableNonRef <$> attrsB ) (liftA2 (\i j -> not $ maybe False (flip contains j) i  ) attrsB  res))
-  editB <- UI.button # set text "EDIT" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table ))
-
+         sink UI.enabled (liftA2 (&&) (isJust . fmap tableNonRef <$> attrsB ) (liftA2 (\i j -> not $ maybe False (flip contains j) i  ) attrsB  res))
+  editB <- UI.button #
+         set text "EDIT" #
+         set UI.class_ "buttonSet"#
+         set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table )) #
   -- Edit when any persistent field has changed
-        # sink UI.enabled (liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . _unTB1 .  tableNonRef)<$> attrsB) (fmap (_kvvalues . unTB . _unTB1 . tableNonRef )<$> facts oldItemsi)) (liftA2 (\i j -> maybe False (flip contains j) i  ) attrsB  res))
+         sink UI.enabled (liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . _unTB1 .  tableNonRef)<$> attrsB) (fmap (_kvvalues . unTB . _unTB1 . tableNonRef )<$> facts oldItemsi)) (liftA2 (\i j -> maybe False (flip contains j) i  ) attrsB  res))
 
-  deleteB <- UI.button # set text "DELETE" # set UI.class_ "buttonSet"# set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table ))
+  deleteB <- UI.button #
+         set text "DELETE" #
+         set UI.class_ "buttonSet"#
+         set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table )) #
   -- Delete when isValid
-        # sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip contains j) i  ) (facts oldItemsi ) res))
+         sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip contains j) i  ) (facts oldItemsi ) res))
   let
       deleteAction ki =  do
         res <- liftIO $ catch (Right <$> delete (conn inf) ki table) (\e -> return $ Left (show $ traceShowId  (e :: SomeException) ))
@@ -568,9 +463,9 @@ leftItens tb@(IT na _ ) =   Just . maybe  emptyIT attrOptional
 leftItens tb@(FKT ilk rel _) = Just . maybe  emptyFKT attrOptional
   where emptyFKT = FKT (fmap (const (SOptional Nothing)) <$> ilk) rel (LeftTB1 Nothing)
 
-attrArray back oldItems  = (\tb -> Attr (_tbattrkey back) (SComposite (V.fromList tb))) $ _tbattr <$> oldItems
-attrArray back oldItems  = (\(lc,tb) ->  FKT [Compose $ Identity $ Attr (head $ keyattr (head lc )) (SComposite . V.fromList $ head . kattr  <$> lc)] (_fkrelation back) (ArrayTB1 tb  ) )  $ unzip $ (\(FKT [lc] rel tb ) -> (lc , tb)) <$> oldItems
-attrArray back oldItems  = (\tb ->  IT  (_ittableName back) (ArrayTB1 tb  ) )  $ (\(IT _ tb ) -> tb) <$> oldItems
+attrArray back@(Attr  _ _) oldItems  = (\tb -> Attr (_tbattrkey back) (SComposite (V.fromList tb))) $ _tbattr <$> oldItems
+attrArray back@(FKT _ _ _) oldItems  = (\(lc,tb) ->  FKT [Compose $ Identity $ Attr (head $ keyattr (head lc )) (SComposite . V.fromList $ head . kattr  <$> lc)] (_fkrelation back) (ArrayTB1 tb  ) )  $ unzip $ (\(FKT [lc] rel tb ) -> (lc , tb)) <$> oldItems
+attrArray back@(IT _ _) oldItems  = (\tb ->  IT  (_ittableName back) (ArrayTB1 tb  ) )  $ (\(IT _ tb ) -> tb) <$> oldItems
 
 indexItens
   :: Show k =>
@@ -594,6 +489,115 @@ indexItens tb@(IT na _) offsetT items oldItems  = bres
    where bres2 = fmap (fmap (\(IT na j ) -> j)) . allMaybes . L.takeWhile isJust <$> Tra.sequenceA (items)
          emptyFKT = Just . maybe (IT  (na) (ArrayTB1 []) ) id
          bres = (\o -> liftA2 (\l (IT ns (ArrayTB1 m )) -> IT   ns (ArrayTB1 $ L.take o m <> l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
+
+attrUITable
+  :: Tidings (Maybe (TB Identity Key Showable))
+     -> [Event (Maybe (TB Identity Key Showable))]
+     -> TB Identity Key ()
+     -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
+attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ (KOptional _) ) v) = do
+      res <- attrUITable (join . fmap unLeftItens <$> tAttr') (fmap (join. fmap unLeftItens ) <$>  evs) (Attr (unKOptional i) v)
+      return (leftItens attr <$> res)
+attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ (KArray _) ) v) = mdo
+            TrivialWidget offsetT offset <- offsetField 0  (maybe 0 (V.length . (\(SComposite l ) -> l) . _tbattr) <$> facts bres)
+            let arraySize = 8
+            widgets <- mapM (\ix  -> attrUITable (unIndexItens ix  <$> offsetT <*> tAttr' ) ((unIndexItens ix  <$> facts offsetT <@> ) <$>  evs) (Attr (unKArray i) v  ) ) [0..arraySize]
+
+            sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (tail $ getElement <$> widgets) (triding <$> widgets)
+            let
+              bres = indexItens attr offsetT (triding <$> widgets) tAttr'
+            offsetDiv <- UI.div # set children (fmap getElement widgets)
+            paintBorder offsetDiv (facts bres ) (facts tAttr' )
+            leng <- UI.span # sink0 text (("Size: " ++) .show .maybe 0 (V.length . (\(SComposite l ) -> l) . _tbattr ) <$> facts bres)
+            fk <- UI.div # set UI.style [("display","inline-flex")]  # set  children [offset,  leng ]
+            composed <- UI.span # set children [fk , offsetDiv]
+            return  $ TrivialWidget  bres composed
+attrUITable  tAttr' evs (Attr i _ ) = do
+      tdi' <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse diffOptional )) i =<< j) (return tAttr') evs
+      let tdi = fmap (\(Attr  _ i )-> i) <$>tdi'
+      attrUI <- buildUI (textToPrim <$> keyType i) tdi
+      let insertT = fmap (Attr i ) <$> (triding attrUI)
+      return $ TrivialWidget insertT  (getElement attrUI)
+
+buildUI i  tdi = case i of
+         (KSerial ti) -> do
+           tdnew <- fmap (Just . SSerial) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
+           retUI <- UI.div # set children [getElement tdnew]
+           paintBorder retUI (facts $ triding tdnew) (facts tdi)
+           return $ TrivialWidget (triding tdnew ) retUI
+         (KDelayed ti) -> do
+           tdnew <- fmap (maybe Nothing (Just .SDelayed. Just)  ) <$> buildUI ti (join . fmap unSDelayed <$> tdi)
+           retUI <- UI.div# set children [getElement tdnew]
+           paintBorder retUI (facts $ triding tdnew) (facts tdi)
+           return $ TrivialWidget (triding tdnew ) retUI
+
+         (KInterval ti) -> do
+            inf <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (\(SInterval i) -> inf' i) <$> tdi)
+            sup <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (\(SInterval i) -> sup' i) <$> tdi)
+            lbd <- fmap Just <$> checkedWidget (maybe False id . fmap (\(SInterval i) -> snd . Interval.lowerBound' $i) <$> tdi)
+            ubd <- fmap Just <$> checkedWidget (maybe False id .fmap (\(SInterval i) -> snd . Interval.upperBound' $i) <$> tdi)
+            composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
+            subcomposed <- UI.div # set UI.children [composed]
+            let td = (\m n -> fmap SInterval $  join . fmap (\i-> if Interval.null i then Nothing else Just i) $ liftF2 interval m n) <$> (liftA2 (,) <$> triding inf  <*> triding lbd) <*> (liftA2 (,) <$> triding sup <*> triding ubd)
+            paintBorder subcomposed (facts td ) (facts tdi)
+            return $ TrivialWidget td subcomposed
+         {-(Primitive Position) -> do
+            let addrs = (\(SPosition (Position (lon,lat,_)))-> "http://maps.google.com/?output=embed&q=" <> (HTTP.urlEncode $ show lat  <> "," <>  show lon )) <$>  tdi
+            mkElement "iframe" # sink UI.src (maybe "" id <$> facts addrs) # set style [("width","99%"),("height","300px")]-}
+         (Primitive PTimestamp) -> do
+            itime <- liftIO $  getCurrentTime
+            timeButton <- UI.button # set UI.text "now"
+            evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
+            let  newEv = fmap (STimestamp . utcToLocalTime utc) <$> evCurr
+            tdi2 <- addEvent newEv  tdi
+            oneInput tdi2 [timeButton]
+         (Primitive PDate) -> do
+            itime <- liftIO $  getCurrentTime
+            timeButton <- UI.button # set UI.text "now"
+            evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
+            let  newEv =  fmap (SDate . localDay . utcToLocalTime utc) <$> evCurr
+            tdi2 <- addEvent newEv  tdi
+            oneInput tdi2 [timeButton]
+         (Primitive PDayTime) -> do
+            itime <- liftIO $  getCurrentTime
+            timeButton <- UI.button # set UI.text "now"
+            evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
+            let  newEv = fmap (SDayTime. localTimeOfDay . utcToLocalTime utc) <$> evCurr
+            tdi2 <- addEvent newEv  tdi
+            oneInput tdi2 [timeButton]
+
+         (Primitive (PMime mime)) -> do
+           let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
+           clearB <- UI.button # set UI.text "clear"
+           file <- UI.input # set UI.class_ "file_client" # set UI.type_ "file" # set UI.multiple True
+           UI.div # sink0 UI.html (pure "<script> $(\".file_client\").on('change',handleFileSelect); </script>")
+           tdi2 <- addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fileChange file ) =<< addEvent (const Nothing <$> UI.click clearB) tdi
+           let fty = case mime of
+                "application/pdf" -> ("iframe","src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
+                "application/x-ofx" -> ("textarea","value",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+                "image/jpg" -> ("img","src",maybe "" binarySrc ,[])
+           f <- pdfFrame fty (facts tdi2) # sink0 UI.style (noneShow . isJust <$> facts tdi2)
+           fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]
+           res <- UI.div # set children [fd,f]
+           paintBorder res (facts tdi2) (facts  tdi)
+           return (TrivialWidget tdi2 res)
+
+         z -> do
+            oneInput tdi []
+  where
+    justCase i j@(Just _) = j
+    justCase i Nothing = i
+    oneInput tdi elem = do
+            let f = facts tdi
+            v <- currentValue f
+            inputUI <- UI.input # sink0 UI.value ((forceDefaultType  <$> f))
+            let pke = foldl1 (unionWith const ) [rumors tdi,readType i <$> UI.valueChange inputUI]
+            pk <- stepper v  pke
+            let pkt = tidings pk pke
+            sp <- UI.div # set children (inputUI : elem)
+            paintBorder sp (facts pkt) (facts tdi)
+            return $ TrivialWidget pkt sp
+
 
 
 iUITable
@@ -619,8 +623,6 @@ iUITable inf pgs pmods oldItems  tb@(IT na  tb1@(TB1 meta _) )
 iUITable inf pgs pmods oldItems  tb@(IT na (LeftTB1 (Just tb1))) = do
    tr <- iUITable inf pgs (fmap (join . fmap unLeftItens  <$> ) <$> pmods) (join . fmap unLeftItens <$> oldItems) (IT na tb1)
    return $  leftItens tb <$> tr
-
-
 iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
     = mdo
       (TrivialWidget offsetT offset) <- offsetField 0 (maybe 0 (length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
@@ -853,7 +855,7 @@ tbInsertEdit inf  f@(FKT pk rel2  t2) =
    case t2 of
         t@(TB1 _ l) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           Identity . (\tb -> FKT   (fromMaybe pk  $ backFKRef' relTable  pk (Just tb) ) rel2 tb ) <$> fullInsert inf t
+           Identity . (\tb -> FKT   (fromMaybe pk  $ backFKRef relTable  pk (Just tb) ) rel2 tb ) <$> fullInsert inf t
         LeftTB1 i ->
            maybe (return (Identity f) ) (fmap (fmap attrOptional) . tbInsertEdit inf) (unLeftItens f)
         ArrayTB1 l ->
@@ -861,8 +863,3 @@ tbInsertEdit inf  f@(FKT pk rel2  t2) =
 
 tbInsertEdit inf j = return $ Identity j
 
-backFKRef' relTable ifk box = fmap (\ibox -> (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . fmap lookFKsel $ ibox) ) .  join . fmap findPKM $ box
-  where
-        reorderPK l = fmap (\i -> justError ("reorder wrong" <> show (l,i)) $ L.find ((== i).fst) l )  (keyAttr . unTB <$> ifk)
-        lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
-          where kn = justError "relTable" $ M.lookup ko relTable

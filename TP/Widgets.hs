@@ -186,8 +186,14 @@ noneShowSpan True = [("display","inline")]
 noneShowSpan False = [("display","none")]
 
 -- Background Style green/red
+
 greenRed True = [("background-color","green")]
 greenRed False = [("background-color","red")]
+
+greenRedBlue True True = [("background-color","blue")]
+greenRedBlue True False = [("background-color","green")]
+greenRedBlue False True = [("background-color","purple")]
+greenRedBlue False False= [("background-color","red")]
 
 switch all (Just k) = do
         mapM_ (\e -> element e # set UI.style (noneShow False) ) all
