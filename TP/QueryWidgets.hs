@@ -167,6 +167,23 @@ attrUITable
      -> [Event (Maybe (TB Identity Key Showable))]
      -> TB Identity Key ()
      -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
+attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ (KOptional _) ) v) = do
+      res <- attrUITable (join . fmap unLeftItens <$> tAttr') evs (Attr (unKOptional i) v)
+      return (leftItens attr <$> res)
+attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ (KArray _) ) v) = mdo
+            TrivialWidget offsetT offset <- offsetField 0  (maybe 0 (V.length . (\(SComposite l ) -> l) . _tbattr) <$> facts bres)
+            let arraySize = 8
+            widgets <- mapM (\ix  -> attrUITable (unIndexItens ix  <$> offsetT <*> tAttr' ) evs (Attr (unKArray i) v  ) ) [0..arraySize]
+
+            sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (tail $ getElement <$> widgets) (triding <$> widgets)
+            let
+              bres = indexItens attr offsetT (triding <$> widgets) tAttr'
+            offsetDiv <- UI.div # set children (fmap getElement widgets)
+            paintBorder offsetDiv (facts bres ) (facts tAttr' )
+            leng <- UI.span # sink0 text (("Size: " ++) .show .maybe 0 (V.length . (\(SComposite l ) -> l) . _tbattr ) <$> facts bres)
+            fk <- UI.div # set UI.style [("display","inline-flex")]  # set  children [offset,  leng ]
+            composed <- UI.span # set children [fk , offsetDiv]
+            return  $ TrivialWidget  bres composed
 attrUITable  tAttr' evs (Attr i _ ) = do
       tdi' <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse diffOptional )) i =<< j) (return tAttr') evs
       let tdi = fmap (\(Attr  _ i )-> i) <$>tdi'
@@ -175,11 +192,6 @@ attrUITable  tAttr' evs (Attr i _ ) = do
       return $ TrivialWidget insertT  (getElement attrUI)
 
 buildUI i  tdi = case i of
-         (KOptional ti) -> do
-           tdnew <- fmap (Just. SOptional) <$> buildUI ti (join . fmap unSOptional  <$> tdi)
-           retUI <- UI.div# set children [getElement tdnew]
-           paintBorder retUI (facts $ triding tdnew) (facts tdi)
-           return $ TrivialWidget (triding tdnew ) retUI
          (KSerial ti) -> do
            tdnew <- fmap (Just . SSerial) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
            retUI <- UI.div # set children [getElement tdnew]
@@ -190,21 +202,7 @@ buildUI i  tdi = case i of
            retUI <- UI.div# set children [getElement tdnew]
            paintBorder retUI (facts $ triding tdnew) (facts tdi)
            return $ TrivialWidget (triding tdnew ) retUI
-         (KArray ti) -> mdo
-            TrivialWidget offsetT offset <- offsetField 0  (maybe 0 (V.length . (\(SComposite l ) -> l)) <$> facts bres)
-            let arraySize = 8
-            widgets <- mapM (\i-> buildUI ti ((\o -> join . fmap (\a-> unSComposite a V.!? (i + o) )) <$> offsetT <*> tdi )) [0..arraySize]
-            let tdcomp =  fmap (V.fromList) .  allMaybes .  L.takeWhile isJust  <$> (Tra.sequenceA $ triding <$> widgets)
-            sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (tail $ getElement <$> widgets) (triding <$> widgets)
-            let
-                emptyAttr = Just . maybe (SComposite  (V.fromList []) ) id
-                bres = (\o -> liftA2 (\l (SComposite m ) -> SComposite (V.take o m <> l <> V.drop  (o + 9 ) m ))) <$> offsetT <*> tdcomp <*> (emptyAttr <$> tdi)
-            offsetDiv <- UI.div # set children (fmap getElement widgets)
-            paintBorder offsetDiv (facts bres) (facts tdi)
-            leng <- UI.span # sink0 text (("Size: " ++) .show .maybe 0 (V.length . (\(SComposite l ) -> l)) <$> facts bres)
-            fk <- UI.div # set UI.style [("display","inline-flex")]  # set  children [offset,  leng ]
-            composed <- UI.span # set children [fk , offsetDiv]
-            return  $ TrivialWidget bres composed
+
          (KInterval ti) -> do
             inf <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (\(SInterval i) -> inf' i) <$> tdi)
             sup <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (\(SInterval i) -> sup' i) <$> tdi)
@@ -563,23 +561,37 @@ attrOptional (FKT ifk rel  tb)  = FKT (tbOptional <$> ifk) (Le.over relOrigin kO
   where tbOptional = mapComp (firstTB kOptional) . fmap (SOptional . Just)
 attrOptional (IT na j) = IT  na (LeftTB1 (Just j))
 
-
-leftItens tb@(IT na _ ) tr =   Just . maybe  emptyIT attrOptional <$> tr
+leftItens tb@(Attr k _ ) =  maybe emptyAttr (Just .attrOptional)
+  where emptyAttr = Attr k <$> (showableDef (keyType k))
+leftItens tb@(IT na _ ) =   Just . maybe  emptyIT attrOptional
   where emptyIT = IT  na  (LeftTB1 Nothing)
-leftItens tb@(FKT ilk rel _) tr  = Just . maybe  emptyFKT attrOptional  <$> tr
+leftItens tb@(FKT ilk rel _) = Just . maybe  emptyFKT attrOptional
   where emptyFKT = FKT (fmap (const (SOptional Nothing)) <$> ilk) rel (LeftTB1 Nothing)
 
+attrArray back oldItems  = (\tb -> Attr (_tbattrkey back) (SComposite (V.fromList tb))) $ _tbattr <$> oldItems
 attrArray back oldItems  = (\(lc,tb) ->  FKT [Compose $ Identity $ Attr (head $ keyattr (head lc )) (SComposite . V.fromList $ head . kattr  <$> lc)] (_fkrelation back) (ArrayTB1 tb  ) )  $ unzip $ (\(FKT [lc] rel tb ) -> (lc , tb)) <$> oldItems
 attrArray back oldItems  = (\tb ->  IT  (_ittableName back) (ArrayTB1 tb  ) )  $ (\(IT _ tb ) -> tb) <$> oldItems
 
-
+indexItens
+  :: Show k =>
+     TB Identity k a
+     -> Tidings Int
+     -> [Tidings (Maybe (TB Identity k Showable))]
+     -> Tidings (Maybe (TB Identity k Showable))
+     -> Tidings (Maybe (TB Identity k Showable))
+indexItens tb@(Attr k v) offsetT atdcomp atdi =
+            let tdcomp = fmap (fmap _tbattr) . allMaybes .  L.takeWhile isJust <$> Tra.sequenceA atdcomp
+                tdi = fmap ( _tbattr) <$> atdi
+                emptyAttr = Just . maybe (SComposite  (V.fromList []) ) id
+                bres = (\o -> liftA2 (\l (SComposite m ) -> SComposite (V.take o m <> V.fromList l <> V.drop  (o + 9 ) m ))) <$> offsetT <*> tdcomp <*> (emptyAttr <$> tdi)
+            in fmap (Attr k) <$> bres
 indexItens tb@(FKT ifk rel _) offsetT fks oldItems  = bres
-  where  bres2 =    allMaybes .  L.takeWhile isJust  <$> Tra.sequenceA (fmap (fmap (\(FKT i  _ j ) -> (head $ fmap (unAttr.unTB) $ i,  j)) )  . triding <$> fks)
+  where  bres2 =    allMaybes .  L.takeWhile isJust  <$> Tra.sequenceA (fmap (fmap (\(FKT i  _ j ) -> (head $ fmap (unAttr.unTB) $ i,  j)) )  <$>  fks)
          emptyFKT = Just . maybe (FKT (fmap (const (SComposite (V.empty))) <$> ifk) rel (ArrayTB1 []) ) id
          bres = (\o -> liftA2 (\l (FKT [lc] rel (ArrayTB1 m )) -> FKT (fmap (const (SComposite $ V.fromList $  ((L.take o $ F.toList $ unSComposite $(unAttr $ runIdentity $ getCompose lc)  )<> fmap fst l <> (L.drop (o + 9 )  $ F.toList $ unSComposite $(unAttr $ runIdentity $ getCompose lc)  )))) <$> ifk) rel (ArrayTB1 $ L.take o m <> fmap snd l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
 
 indexItens tb@(IT na _) offsetT items oldItems  = bres
-   where bres2 = fmap (fmap (\(IT na j ) -> j)) . allMaybes . L.takeWhile isJust <$> Tra.sequenceA (triding <$> items)
+   where bres2 = fmap (fmap (\(IT na j ) -> j)) . allMaybes . L.takeWhile isJust <$> Tra.sequenceA (items)
          emptyFKT = Just . maybe (IT  (na) (ArrayTB1 []) ) id
          bres = (\o -> liftA2 (\l (IT ns (ArrayTB1 m )) -> IT   ns (ArrayTB1 $ L.take o m <> l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
 
@@ -606,7 +618,7 @@ iUITable inf pgs pmods oldItems  tb@(IT na  tb1@(TB1 meta _) )
       return $ TrivialWidget bres celem
 iUITable inf pgs pmods oldItems  tb@(IT na (LeftTB1 (Just tb1))) = do
    tr <- iUITable inf pgs (fmap (join . fmap unLeftItens  <$> ) <$> pmods) (join . fmap unLeftItens <$> oldItems) (IT na tb1)
-   return $  leftItens tb tr
+   return $  leftItens tb <$> tr
 
 
 iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
@@ -618,8 +630,8 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
                 (IT  na tb1)) [0..8]
       let tds = triding <$> items
           es = getElement <$> items
-      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (tail es ) ( tds )
-      let bres = indexItens tb offsetT items oldItems
+      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow <$> facts t)) es  (pure True : (fmap isJust <$>  tds ))
+      let bres = indexItens tb offsetT (triding <$>  items ) oldItems
       leng <- UI.span # sink text (("Size: " ++) . show .maybe 0 (length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
       fk <- UI.div # set UI.style [("display","inline-flex")]  # set  children [offset,  leng ]
       res <- UI.div # set children (fk: (getElement <$> items))
@@ -719,7 +731,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _ _ ) ) =
       return $ TrivialWidget fksel fk
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb1 ))) = do
     tr <- fkUITable inf pgs constr (fmap (join . fmap unLeftItens <$>) <$> plmods)  wl (join . fmap unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOrigin unKOptional <$> rel) tb1)
-    return $ leftItens tb tr
+    return $ leftItens tb <$> tr
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) ) = mdo
      (TrivialWidget offsetT offset) <- offsetField 0 (maybe 0 (length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      let
@@ -730,7 +742,7 @@ fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) 
          TrivialWidget tr <$> UI.div # set UI.children [lb,el] ) [0..8]
      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShowFlex <$> facts t)) (getElement <$> fks) (pure True : (fmap isJust . triding <$> fks))
      dv <- UI.div # set children (getElement <$> fks)
-     let bres = indexItens tb offsetT fks oldItems
+     let bres = indexItens tb offsetT (triding <$> fks) oldItems
      leng <- UI.span # sink text (("Size: " ++) .show .maybe 0 (length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      fksE <- UI.div # set UI.style [("display","inline-flex")] # set children [offset , leng ]
      res <- UI.div # set children [fksE ,dv]
