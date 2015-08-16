@@ -92,7 +92,7 @@ queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address" (staticP open  )  el
           r <- (act (  liftIO . traverse (\input -> do
                        v <- get . traceShowId .  (\i-> addrs <> (L.filter (flip elem ",.-" ) i) <> ".json")  . TL.unpack $ input
                        return $ ( \i -> fmap (L.filter ((/="").snd) . M.toList ) $ join $ fmap decode (i ^? responseBody)  ) v ))) -< (\(SText t)-> t) <$> i
-          let tb = tbmap . M.fromList .  fmap ( (\i -> (S.singleton (fst i) ,). Compose . Identity $ Attr (fst i ) (snd i)). first translate. second (SOptional. Just . SText)) <$> join r
+          let tb = tbmap . M.fromList .  fmap ( (\i -> (S.singleton (Inline $ fst i) ,). Compose . Identity $ Attr (fst i ) (snd i)). first translate. second (SOptional. Just . SText)) <$> join r
           returnA -< tb
 
       addrs ="http://cep.correiocontrol.com.br/"

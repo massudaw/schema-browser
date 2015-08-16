@@ -39,7 +39,7 @@ import Control.Monad.Reader
 
 
 getInp :: [TL.Text] -> TB1 Showable -> Maybe BSC.ByteString
-getInp l (TB1 k (Compose (Identity kv )))  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t)-> t )) . join . fmap unRSOptional' . cc . runIdentity . getCompose  )  .  M.lookup (S.fromList l) . M.mapKeys (S.map keyString) $ _kvvalues kv
+getInp l (TB1 k (Compose (Identity kv )))  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(SText t)-> t )) . join . fmap unRSOptional' . cc . runIdentity . getCompose  )  .  M.lookup (S.fromList l) . M.mapKeys (S.map (keyString._relOrigin)) $ _kvvalues kv
   where cc (TBEither _ _ (l) ) = join $fmap (cc.unTB) l
         cc (Attr _ l ) = Just l
 

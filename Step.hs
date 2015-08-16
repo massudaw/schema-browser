@@ -135,6 +135,12 @@ atAny k ps = P (nest fsum,nest ssum ) (Kleisli (\i -> local (indexTB1 ind)$foldr
     ssum = filter (/= Many [])$ fmap (\(P s _ )-> snd s ) ps
     asum = fmap (\(P s (Kleisli j) ) -> j ) ps
 
+atRA
+  :: (KeyString t2,
+      MonadReader (Maybe (FTB1 Identity t2 Showable)) m, Ord t2) =>
+     String
+     -> Parser (Kleisli m) (Access Text) t t1
+     -> Parser (Kleisli m) (Access Text) t [t1]
 atRA i (P s (Kleisli j) )  =  P (BF.second nest . BF.first nest $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
   where ind = splitIndex True i
         nest (Many []) = Many []
@@ -215,7 +221,7 @@ indexTB1 (IProd _ l) t
   = do
     (TB1  m v) <- t
     let
-        i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  M.lookup (S.fromList l) $ M.mapKeys (S.map keyString)$ _kvvalues $ unTB v
+        i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin))$ _kvvalues $ unTB v
     case runIdentity $ getCompose $i  of
          Attr _ l -> Nothing
          FKT l  _ j -> return j
@@ -228,15 +234,16 @@ firstCI f = mapComp (firstTB f)
 checkField (Nested (IProd _ l) nt ) t@(TB1 m v)
   = do
     let
-        i = justError ("checkField error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ M.lookup (S.fromList l) $ M.mapKeys (S.map keyString) $ _kvvalues $ unTB v
+        i = justError ("checkField error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB v
     case runIdentity $ getCompose $ i  of
          IT l  i -> Compose . Identity <$> (IT l  <$> checkTable nt i)
          TBEither n kj j  ->   checkField nt  ( TB1 m $ Compose $ Identity $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j)
          FKT a   c  d -> Compose . Identity <$> (FKT a  c <$>  checkTable nt d)
+         v -> errorWithStackTrace (show (v,l))
 checkField  (IProd b l) t@(TB1 m v)
   = do
     let
-        i = justError ("checkField error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ M.lookup (S.fromList l) $ M.mapKeys (S.map keyString) $ _kvvalues $ unTB v
+        i = justError ("checkField error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString._relOrigin)) $ _kvvalues $ unTB v
     Compose . Identity <$> case runIdentity $ getCompose $ i  of
          Attr k v -> fmap (Attr k ) {-. traceShow (b,l)  . traceShowId -}. (\i -> if b then  unRSOptional' i else Just i ) $ v
          i -> errorWithStackTrace ( show (l,i))
@@ -263,7 +270,7 @@ checkTable i j = errorWithStackTrace (show (i,j))
 indexTable l (LeftTB1 j) = join $ fmap (indexTable l) j
 indexTable (IProd _ l) t@(TB1 m v)
   = do
-    let finder = L.find (L.any (==l). L.permutations .keyattr. firstCI keyString )
+    let finder = L.find (L.any (==l). L.permutations .fmap _relOrigin. keyattr. firstCI keyString )
         i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder (toList $ _kvvalues $ unTB v )
     case runIdentity $ getCompose $ i  of
          Attr k l -> return (k,l)

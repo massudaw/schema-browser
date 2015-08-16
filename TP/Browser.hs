@@ -226,7 +226,7 @@ chooserKey inf kitems i = do
 
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
 
-tableKeys (TB1 _ (k) ) = concat $ fmap keyattr (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
+tableKeys (TB1 _ (k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
 tableKeys (LeftTB1 (Just i)) = tableKeys i
 tableKeys (ArrayTB1 [i]) = tableKeys i
 
@@ -249,7 +249,7 @@ filterCase inf (IT _ tb1) = filterUI inf tb1
 filterUI inf (LeftTB1 (Just i))  =  filterUI inf i
 filterUI inf (ArrayTB1 [i])  = filterUI inf i
 filterUI inf t@(TB1 k v) = do
-  el <- listBox (pure (M.toList (_kvvalues $ runIdentity $ getCompose v) )) (pure Nothing) (pure id) (pure (\i j -> j # set text (show (T.intercalate "," $ keyValue <$> S.toList (fst i)) )))
+  el <- listBox (pure (fmap (first (S.map _relOrigin)) $  M.toList (_kvvalues $ runIdentity $ getCompose v) )) (pure Nothing) (pure id) (pure (\i j -> j # set text (show (T.intercalate "," $ keyValue <$> S.toList (fst i)) )))
   elv <- mapDynEvent (maybe emptyUI  (filterCase inf . unTB . fmap (const ()) . snd )) (TrivialWidget (userSelection el) (getElement el))
   out <- UI.div # sink UI.text (show <$> facts (triding elv))
   TrivialWidget (triding elv) <$> UI.div # set children [getElement el , getElement elv,out]
@@ -282,7 +282,7 @@ chooseKey inf key = mdo
   let
      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList  )
      tsort = sorting <$> triding asc <*> multiUserSelection sortList
-     res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 _ kv ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $ keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
+     res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 _ kv ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $  keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
   itemList <- listBox res3 (tidings bselection never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
   let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
   prop <- stepper cv evsel

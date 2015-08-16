@@ -82,7 +82,7 @@ data PK a
   = PK { _pkKey:: [a], _pkDescription :: [a]} deriving(Eq,Ord,Functor,Foldable,Traversable,Show)
 
 data KV f k a
-  = KV {_kvvalues :: Map (Set k) (f k a)  }deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
+  = KV {_kvvalues :: Map (Set (Rel k)) (f k a)  }deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
 
 
 data KVMetadata k
@@ -104,6 +104,7 @@ filterKV i (KV n) =  KV $ Map.fromList $ L.filter (i . snd) $ Map.toList  n
 findKV i (KV  n) =  L.find (i . snd) $Map.toList  n
 findTB1  i (TB1 m j )  = mapComp (Compose . findKV i) j
 -- findTB1  l (LeftTB1  j )  = join $ findTB1  l <$> j -- errorWithStackTrace (show m)
+
 findTB1'  i (TB1 m j )  = Map.lookup  i (_kvvalues $ runIdentity $ getCompose j  )
 findTB1'  i (LeftTB1  j )  = join $ findTB1' i <$> j
 
@@ -128,21 +129,12 @@ data Labeled l v
   { labelValue :: v
   } deriving(Eq,Show,Ord,Foldable,Functor,Traversable)
 
-{-instance (Functor f,Eq1 f,Eq a) => Eq1 (TB  f a) where
-  eq1 i j = i == j
-
-instance (Functor f,Ord1 f,Ord a) => Ord1 (TB f a ) where
-  compare1 i j = compare i j
-
-instance (Functor f,Show1 f,Show a) => Show1 (TB f  a) where
-  showsPrec1 = showsPrec
--}
-
 instance (Show f) =>  Show1 (Labeled f  ) where
   showsPrec1 = showsPrec
 
 type Key = FKey (KType Text)
 
+data FKeyPath j
 data FKey a
     = Key
     { keyValue :: ! Text
@@ -158,20 +150,23 @@ instance (Functor f ,Bifunctor g)  => Bifunctor (Compose f g ) where
 
 
 data Rel k
-  = Rel
+
+  = Inline  {_relOrigin :: k}
+  | Rel
   { _relOrigin :: k
   , _relOperator:: Text
   , _relTarget :: k
-  }deriving(Eq,Show,Ord,Functor,Foldable,Generic)
+  }
+  deriving(Eq,Show,Ord,Functor,Foldable,Generic)
 
 deriving instance Generic (Identity a)
 
 
 instance (Binary a ,Binary k) => Binary (Modification k   a)
-instance (Binary (f (g k a)) ) => Binary (Compose f g k a ) where
+instance (Binary (f (g k a)) ) => Binary (Compose f g k a )
 instance (Binary (f k a) ,Binary k ) => Binary (KV f k a)
-instance Binary k => Binary (Rel k) where
-instance Binary a => Binary (Identity a) where
+instance Binary k => Binary (Rel k)
+instance Binary a => Binary (Identity a)
 instance (Binary (f (KV (Compose f (TB f)) g k)) , Binary (f (TB f g ())) ,Binary (f (TB f g k)), Binary k ,Binary g) => Binary (TB f g k )
 instance (Binary (f (KV (Compose f (TB f)) k a)) ,Binary k , Binary a ) => Binary (FTB1 f k a)
 instance Binary k => Binary (KVMetadata k )
@@ -226,7 +221,7 @@ mapKey f (LeftTB1 k ) = LeftTB1 (mapKey f <$> k)
 mapKey f (ArrayTB1 k ) = ArrayTB1 (mapKey f <$> k)
 
 
-firstKV  f (KV m ) = KV . fmap (mapComp (firstTB f) ) . Map.mapKeys (Set.map f) $ m
+firstKV  f (KV m ) = KV . fmap (mapComp (firstTB f) ) . Map.mapKeys (Set.map (fmap f)) $ m
 secondKV  f (KV m ) = KV . fmap (second f ) $ m
 
 firstTB :: (Ord k, Functor f) => (c -> k) -> TB f c a -> TB f k a
@@ -469,14 +464,14 @@ type TBIdent =  Compose Identity  (TB Identity ) Key
 
 overComp f =  f . runIdentity . getCompose
 
-mapFromTBList :: Ord k => [Compose Identity (TB Identity) k  a] -> Map (Set k) (Compose Identity ( TB Identity ) k  a)
+mapFromTBList :: Ord k => [Compose Identity (TB Identity) k  a] -> Map (Set (Rel k) ) (Compose Identity ( TB Identity ) k  a)
 mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),i))
 
-keyattr :: Compose Identity (TB Identity ) k  a -> [k]
+keyattr :: Compose Identity (TB Identity ) k  a -> [Rel k]
 keyattr = keyattri . runIdentity . getCompose
-keyattri (Attr i  _ ) = [i]
+keyattri (Attr i  _ ) = [Inline i]
 keyattri (TBEither k i l  ) =  concat $ fmap keyattr i
-keyattri (FKT i  rel _ ) =  (_relOrigin <$> rel )
+keyattri (FKT i  rel _ ) =  (rel )
 keyattri (IT i  _ ) =  keyattr i
 
 -- tableAttr :: (Traversable f ,Ord k) => TB3 f k () -> [Compose f (TB f) k ()]
@@ -570,7 +565,7 @@ concatComp  =  Compose . concat . fmap getCompose
 
 tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (rawAttrs t) (rawDelayed t)
 
-tbmap :: Ord k => Map (Set k ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
+tbmap :: Ord k => Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
 tbmap = TB1 (KVMetadata "" ""  Set.empty [] Set.empty Set.empty) . Compose . Identity . KV
 
 tblist :: Ord k => [Compose Identity  (TB Identity) k a] -> TB3 Identity k a
@@ -588,6 +583,4 @@ makeLenses ''KV
 makeLenses ''PK
 makeLenses ''TB
 makeLenses ''Rel
-
-
 

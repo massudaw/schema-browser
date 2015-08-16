@@ -162,7 +162,7 @@ liftKeys
 liftKeys inf tname tb
   = liftTable tname tb
   where
-        liftTable tname (TB1 _ v )  = TB1  (tableMeta ta) $ mapComp (\(KV i) -> KV $ mapComp (liftField tname) <$> (M.mapKeys (S.map (lookKey inf tname)) i)) v
+        liftTable tname (TB1 _ v )  = TB1  (tableMeta ta) $ mapComp (\(KV i) -> KV $ mapComp (liftField tname) <$> (M.mapKeys (S.map (fmap (lookKey inf tname))) i)) v
             where
                   ta = lookTable inf tname
         liftTable tname (LeftTB1 j ) = LeftTB1 $ liftTable tname <$> j
@@ -174,7 +174,7 @@ liftKeys inf tname tb
             where (Path _ (FKJoinTable _ rel tname2 ) _) = justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
                   ta = lookTable inf tname
         liftField tname (IT rel tb) = IT (mapComp (liftField tname ) rel) (liftTable tname2 tb)
-            where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
+            where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
                   ta = lookTable inf tname
 
 
@@ -311,8 +311,8 @@ loadDelayed inf t@(TB1 k v) values@(TB1 ks vs)
             [i] ->return $ Just $ EditTB (mapKey (kOptional.kDelayed.unKOptional) . fmap (SOptional . Just . SDelayed .  unSOptional ) $ i  ) values
             _ -> errorWithStackTrace "multiple result query"
   where
-    delayedattrs = concat $ fmap keyValue . F.toList <$> M.keys filteredAttrs
-    filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf key (_kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs)
+    delayedattrs = concat $ fmap (keyValue . (\(Inline i ) -> i)) .  F.toList <$> M.keys filteredAttrs
+    filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (_kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs)
 
 zipInter f = M.intersectionWith f
 zipDelete f = fmap f . M.difference
