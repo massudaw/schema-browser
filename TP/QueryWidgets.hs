@@ -179,10 +179,10 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1 ) wl plugItens oldItems  = do
             nonInj = fmap  _relOrigin   (filterNotReflexive rel)
             nonInjRefs = filter (flip S.isSubsetOf (S.fromList   nonInj) . S.fromList . fmap _relOrigin . keyattr .Compose . Identity .fst) wl
             nonInjConstr :: SelTBConstraint
-            nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 _ l) -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity) $ maybeToList j) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l)).triding) <$> (traceShow (fmap fst nonInjRefs) nonInjRefs)
+            nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 _ l) -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity) $ maybeToList j) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l)).triding) <$> nonInjRefs
             tbi = fmap (Compose . Identity)  <$> oldItems
-            thisPlugs = filter (hasProd (isNested ((IProd True $ concat $ fmap (fmap (keyValue._relOrigin).keyattr) ifk))) . fst) $  plugItens
-            pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ concat $ fmap (fmap (keyValue . _relOrigin ) .keyattr) ifk)))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> thisPlugs
+            thisPlugs = filter (hasProd (isNested (traceShowId (IProd True $ fmap (keyValue._relOrigin) rel ))) . traceShowId . fst) plugItens
+            pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) rel )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> (traceShow (fmap fst thisPlugs) thisPlugs)
             restrictConstraint = filter ((== (fmap keyattr ifk)) . fmap keyattr  .fst) constr
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             convertConstr :: SelTBConstraint
@@ -263,7 +263,7 @@ uiTable inf pgs constr tname refs plmods ftb@(TB1 m k ) oldItems = do
 
   fks <- foldl (\jm (l,m)  -> do
             w <- jm
-            wn <- (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) (traceShow ("debug refs" ,fmap fst refs) refs))
+            wn <- (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) refs)
             return (w <> [(unTB m,wn)])
         ) (return []) (P.sortBy (P.comparing fst ) . M.toList . unTBMap $ ftb)
   let
@@ -810,14 +810,13 @@ fullInsert inf (TB1 k1 v1 )  = do
    ret <- TB1 k1 . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
    (m,t) <- liftIO $ eventTable inf (lookTable inf (_kvname k1))
    l <- currentValue (facts t)
-   if  L.elem ret l
+   if  isJust $ L.find ((==tbPK (tableNonRef ret)).traceShowId . tbPK . tableNonRef ) l
       then do
         return ret
       else do
         i@(Just (TableModification _ _ (InsertTB tb)))  <- liftIO $ insertMod inf ret (lookTable inf (_kvname k1))
         tell (maybeToList i)
         return tb
-
 fullInsert inf (LeftTB1 i ) = LeftTB1 <$> Tra.traverse (fullInsert inf) i
 fullInsert inf (ArrayTB1 i ) = ArrayTB1  <$> Tra.traverse (fullInsert inf) i
 
