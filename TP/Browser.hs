@@ -190,7 +190,7 @@ operator op = UI.div # set text op  # set UI.style [("margin-left","3px"),("marg
 dashBoardAll  inf = do
   els :: [(Int,LocalTime,Text,Text,(Binary BSL.ByteString))] <-
     liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,modification_data from metadata.modification_table WHERE schema_name = ? order by modification_id desc limit 100 " (Only $ schemaName inf)
-  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( (UI.td# showModDiv ( (B.decode d :: Modification Text Showable))))) v] ) <$> els)
+  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( either (\i-> UI.td) (\(_,_,i ) -> UI.td# showModDiv (i:: Modification Text Showable))  (B.decodeOrFail d ))) v] ) <$> els)
 
 
 dashBoard inf = do
@@ -287,7 +287,7 @@ chooseKey inf key = mdo
   let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
   prop <- stepper cv evsel
   let tds = tidings prop evsel
-  (cru ,evs,pretdi) <- crudUITable inf plugList  (pure True) res3 [] (allRec' (tableMap inf) table) tds
+  (cru ,evs,pretdi) <- crudUITable inf plugList  (pure True)  res3 [] [] (allRec' (tableMap inf) table) tds
   let
      bselection = st
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [(rumors  $userSelection itemList ) ,rumors tdi]),(fmap modifyTB <$> evs)]

@@ -367,6 +367,7 @@ kOptional (Key a  c m d e) = Key a  c m d (KOptional e)
 kDelayed (Key a  c m d e) = Key a  c m d (KDelayed e)
 
 unKOptional ((Key a  c m d (KOptional e))) = (Key a  c m d e )
+unKOptional ((Key a  c m d (e@(Primitive _)))) = (Key a  c m d e )
 unKOptional i = errorWithStackTrace ("unKOptional" <> show i)
 
 unKDelayed ((Key a  c m d (KDelayed e))) = (Key a  c m d e )

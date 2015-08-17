@@ -10,6 +10,9 @@ transancions with one click
 -- Over UI
 -- Over polling
 
+EXTRA INFO ON HOVER
+-- Show Missing plugin Input and output on hover
+-- Preview transaction log on hover over insert , edit and delete
 
 CUSTOM PER TABLE FILTERS
 -- ui filters and database filters
