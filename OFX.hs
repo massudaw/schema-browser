@@ -22,6 +22,7 @@ import qualified Data.Text.Lazy as T
 
 
 opt f v = SOptional $ f <$> v
+serial f v = SSerial $ f <$> v
 txt = SText . T.pack
 frac = SDouble
 tzone  = STimestamp . zonedTimeToLocalTime
@@ -29,7 +30,7 @@ tzone  = STimestamp . zonedTimeToLocalTime
 i =: j = (i,j)
 
 convertTrans acc (Transaction {..})  =
-    ["fitid" =: txt txFITID
+    ["fitid" =: serial txt (Just txFITID)
     ,"memo" =:  opt txt txMEMO
     ,"trntype" =: txt (tail $ show txTRNTYPE )
     ,"dtposted" =: tzone txDTPOSTED

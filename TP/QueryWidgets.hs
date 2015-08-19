@@ -173,7 +173,7 @@ diffOptional i   = Just i
 
 
 tbCase :: InformationSchema -> [Plugins] -> SelPKConstraint  -> TB Identity Key () -> [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key Showable)))] -> [(Access Text,Event (Maybe (TB1 Showable)))]-> Tidings (Maybe (TB Identity Key Showable)) -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
-tbCase inf pgs constr i@(FKT ifk  rel tb1 ) wl plugItens oldItems  = do
+tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens oldItems  = do
         l <- flabel # set text (show $ _relOrigin <$> rel )
         let
             nonInj = fmap  _relOrigin   (filterNotReflexive rel)
@@ -181,8 +181,8 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1 ) wl plugItens oldItems  = do
             nonInjConstr :: SelTBConstraint
             nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 _ l) -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity) $ maybeToList j) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l)).triding) <$> nonInjRefs
             tbi = fmap (Compose . Identity)  <$> oldItems
-            thisPlugs = filter (hasProd (isNested (traceShowId (IProd True $ fmap (keyValue._relOrigin) rel ))) . traceShowId . fst) plugItens
-            pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) rel )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> (traceShow (fmap fst thisPlugs) thisPlugs)
+            thisPlugs = filter (hasProd (isNested (traceShowId (IProd True $ fmap (keyValue._relOrigin) (keyattri i) ))) . traceShowId . fst) plugItens
+            pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> (traceShow (fmap fst thisPlugs) thisPlugs)
             restrictConstraint = filter ((== (fmap keyattr ifk)) . fmap keyattr  .fst) constr
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             convertConstr :: SelTBConstraint
@@ -206,7 +206,7 @@ tbCase inf pgs constr i@(IT na tb1 ) wl plugItens oldItems  = do
 
 tbCase inf pgs constr a@(Attr i _ ) wl plugItens oldItems = do
         l<- flabel # set text (show i)
-        let thisPlugs = filter (hasProd (== IProd True [keyValue i]) . fst)  plugItens
+        let thisPlugs = filter (hasProd (== IProd True (keyValue . _relOrigin <$> keyattri a)) . fst)  plugItens
             tbi = oldItems
             evs  = ( fmap ( join . fmap ( fmap (runIdentity .  getCompose ) . fmap snd . getCompose . runIdentity . getCompose  . findTB1 (((== [i])  . fmap _relOrigin . keyattr )))) <$>  (fmap snd thisPlugs))
         tds <- attrUITable tbi evs a
@@ -221,7 +221,7 @@ tbCase inf pgs constr a@(TBEither n ls  _ ) wl plugItens oldItems = mdo
                  lu = runIdentity $ getCompose l
             lw <- tbCase inf pgs constr lu wl plugItens tbl
             return lw ) ls
-        chk  <- buttonDivSet (zip [0..(length ls - 1)] ls)  ((join . fmap (\(TBEither n _ j ) ->   join $ (\e -> fmap (,e) . (flip L.elemIndex ls) $ e ) <$> ((fmap (const ())<$> j)))<$>   oldItems)) (show .keyattr . snd) (\i -> UI.button # set text (show $ keyattr $ snd i) )
+        chk  <- buttonDivSet (zip [0..(length ls - 1)] ls)  ((join . fmap (\(TBEither n _ j ) ->   join $ (\e -> fmap (,e) . (flip L.elemIndex ls) $ e ) <$> ((fmap (const ())<$> j)))<$>   oldItems)) (show . fmap _relOrigin.keyattr . snd) (\i -> UI.button # set text (show $ keyattr $ snd i) )
         sequence $ zipWith (\el ix-> element  el # sink0 UI.style (noneShow <$> ((==ix) .fst <$> facts (triding chk) ))) ws  [0..]
         let teitherl = foldr (liftA2 (:)) (pure []) (triding <$> ws)
             res = liftA2 (\c j -> fmap (TBEither n ls . fmap (Compose . Identity) .  join . fmap unOptionalAttr ) $ atMay j (fst c)) (triding chk) teitherl

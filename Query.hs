@@ -288,6 +288,10 @@ updateAttr conn kv kold t = execute conn (fromString $ traceShowId $ T.unpack up
 diffUpdateAttr :: TB1 Showable -> TB1 Showable -> Maybe (TB1 Showable)
 diffUpdateAttr  kv kold@(TB1 t _ ) =  fmap ((TB1  t ) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
 
+attrValue :: Show a => TB Identity Key a -> a
+attrValue (Attr _  v)= v
+attrValue i = errorWithStackTrace $ " no attr value instance " <> show i
+
 
 attrType :: Show a => TB Identity Key a -> KType Text
 attrType (Attr i _)= keyType i
@@ -320,23 +324,18 @@ insertAttr f conn krec  t = if not (L.null pkList)
         return $ mapTB1 (mapComp (\case{ (Attr k' v')-> maybe (Attr k' v') (runIdentity . getCompose )  $ fmap snd $ getCompose $ unTB $ findTB1 (overComp (\case{Attr nk nv ->nk == k'; i-> False} )) out; i-> i} ) ) krec
               else liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")"   )  kva >> return krec
   where pkList :: [ TB Identity Key Showable]
-        pkList =   L.filter (isSerial . attrType ) . fmap (runIdentity. getCompose) $ (F.toList $ _kvvalues $ unTB $ tbPK $ tableNonRefK krec )
-        kva = L.filter (not . isSerial . attrType ) $ fmap (runIdentity . getCompose) $ F.toList (_kvvalues $ unTB k)
+        pkList =    L.filter pred  . fmap (runIdentity. getCompose) $ (F.toList $ _kvvalues $ unTB $ tbPK $ tableNonRefK krec )
+        pred i = (isSerial . attrType $ i) && (isNothing . unSSerial .attrValue $ i )
+        kva = L.filter (not . pred) $ fmap (runIdentity . getCompose) $ F.toList (_kvvalues $ unTB k)
         (TB1 _ k ) = tableNonRefK krec
 
-
-
-fakeKey n t = Key n Nothing 0 (unsafePerformIO newUnique) t
 
 unSComposite (SComposite i) = i
 unSComposite i = errorWithStackTrace ("unSComposite " <> show i)
 
-
-
 isEmptyShowable (SOptional Nothing ) = True
 isEmptyShowable (SSerial Nothing ) = True
 isEmptyShowable i = False
-
 
 
 dropTable r= "DROP TABLE "<> rawFullName r
@@ -532,7 +531,7 @@ joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectio
 
 
 
-recursePath'
+recursePath
   :: Bool
      -> [(Set (Rel Key), Labeled Text (TB (Labeled Text) Key ()))]
      -> Map Text Table
@@ -540,11 +539,11 @@ recursePath'
      -> State
           ((Int, Map Int Table), (Int, Map Int Key))
           (Compose (Labeled Text) (TB (Labeled Text)) Key ())
-recursePath' isLeft ksbn invSchema (Path _ jo@(FKEitherField o l) _) = do
+recursePath isLeft ksbn invSchema (Path _ jo@(FKEitherField o l) _) = do
    let findAttr =(\i -> Compose . justError ("cant find "  <> (show i)  ). fmap snd . L.find ((== S.singleton (Inline i)) . fst  )$ ksbn )
    return $ (Compose $ Unlabeled $  TBEither  o (findAttr <$> l )  Nothing)
 
-recursePath' isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
+recursePath isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
     | isArrayRel ifk  {-&& not (isArrayRel e )-}=   do
           tas <- tname nextT
           let knas = Key (rawName nextT) Nothing 0 (unsafePerformIO newUnique) (Primitive "integer" )
@@ -570,7 +569,8 @@ recursePath' isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
         nextT = justError ("recursepath lookIT "  <> show t <> " " <> show invSchema) (M.lookup t invSchema)
         fun =  recurseTB invSchema nextT nextLeft
 
-recursePath' isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
+
+recursePath isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
     | isArrayRel ifk && not (isArrayRel e) =   do
           (t,ksn) <- labelTable nextT
           tb <-fun ksn
@@ -630,20 +630,20 @@ recurseTB invSchema  nextT nextLeft ksn@(TB1 m kv ) =  (TB1 m) <$>
       (Compose (Unlabeled kv)) -> do
          i<- fun kv
          return (Compose (Unlabeled i))) kv
-
-    where fun =  (\kv -> do
-                  let
-                      items = _kvvalues kv
-                      fkSet,eitherSet :: S.Set Key
-                      fkSet =  S.unions $ fmap pathRelRef  $ filter ( isPathReflexive . pathRel) $ S.toList (rawFKS nextT)
-                      eitherSet = S.unions $  fmap pathRelRef $ filter ( isPathEither . pathRel) $  S.toList (rawFKS nextT)
-                      nonFKAttrs :: [(S.Set (Rel Key) ,TBLabel  ())]
-                      nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
-                  pt <- mapM (\fk -> fmap (((pathRelRel fk,))) . recursePath' nextLeft (M.toList $  fmap getCompose items ) invSchema $ fk ) (filter (not. isPathEither . pathRel ) (F.toList $ rawFKS nextT ))
-                  let
-                      nonEitherAttrs = filter (\(k,i) -> not $ S.isSubsetOf (S.map _relOrigin k) eitherSet) (nonFKAttrs <> pt )
-                  pt2 <- mapM (\fk -> fmap (((pathRelRel fk,))) .recursePath' nextLeft (fmap (fmap getCompose) $ nonFKAttrs<> pt ) invSchema$ fk ) (filter ( isPathEither . pathRel) $ F.toList $ rawFKS nextT )
-                  return (   KV $ M.fromList $ nonEitherAttrs <> pt2) )
+    where
+      fun =  (\kv -> do
+          let
+              items = _kvvalues kv
+              fkSet,eitherSet :: S.Set Key
+              fkSet =  S.unions $ fmap pathRelRef  $ filter ( isPathReflexive . pathRel) $ S.toList (rawFKS nextT)
+              eitherSet = S.unions $  fmap pathRelRef $ filter ( isPathEither . pathRel) $  S.toList (rawFKS nextT)
+              nonFKAttrs :: [(S.Set (Rel Key) ,TBLabel  ())]
+              nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
+          pt <- mapM (\fk -> fmap (((pathRelRel fk,))) . recursePath nextLeft (M.toList $  fmap getCompose items ) invSchema $ fk ) (filter (not. isPathEither . pathRel ) (F.toList $ rawFKS nextT ))
+          let
+              nonEitherAttrs = filter (\(k,i) -> not $ S.isSubsetOf (S.map _relOrigin k) eitherSet) (nonFKAttrs <> pt )
+          pt2 <- mapM (\fk -> fmap (((pathRelRel fk,))) .recursePath nextLeft (fmap (fmap getCompose) $ nonFKAttrs<> pt ) invSchema$ fk ) (filter ( isPathEither . pathRel) $ F.toList $ rawFKS nextT)
+          return (   KV $ M.fromList $ nonEitherAttrs <> pt2))
 
 
 

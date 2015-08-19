@@ -280,7 +280,7 @@ importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
       atR "statements,account" (proc t -> do
         odxR "fitid" -< t
         odxR "memo" -< t
-        odxR "trntype" -< t
+        atR "trntype" (odxR "trttype") -< t
         odxR "dtposted" -< t
         odxR "dtuser" -< t
         odxR "dtavail" -< t
