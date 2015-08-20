@@ -221,6 +221,7 @@ intersectPred p1@(Primitive _) op  p2@(Primitive _) j l   | p1 == p2 =  case op 
                                                                              ">=" -> j >= l
                                                                              "<=" -> j <= l
                                                                              "/=" -> j /= l
+
 intersectPred p1 op  (KSerial p2) j (SSerial l)   | p1 == p2 =  maybe False (j ==) l
 intersectPred p1 op (KOptional p2) j (SOptional l)   | p1 == p2 =  maybe False (j ==) l
 intersectPred p1@(KOptional i ) op p2 (SOptional j) l  =  maybe False id $ fmap (\m -> intersectPred i op p2 m l) j
@@ -251,7 +252,7 @@ intersectionOp (KArray i ) op  j
     | fmap textToPrim i == getPrim j = (\j i -> i <> " IN (select * from unnest("<> j <> ") ) ")
     | otherwise = errorWithStackTrace $ "wrong type intersectionOp {*} - * " <> show i <> " /= " <> show j
 intersectionOp j op (KArray i )
-    | getPrim i == getPrim j = (\ i j  -> i <> " IN (select * from unnest("<> j <> ") ) ")
+    | getPrim i == getPrim j = (\i j  -> i <> " IN (select * from unnest("<> j <> ") ) ")
     | otherwise = errorWithStackTrace $ "wrong type intersectionOp * - {*} " <> show j <> " /= " <> show i
 intersectionOp i op j = inner op
 

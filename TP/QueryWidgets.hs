@@ -183,7 +183,7 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens oldItems  = do
             tbi = fmap (Compose . Identity)  <$> oldItems
             thisPlugs = filter (hasProd (isNested (traceShowId (IProd True $ fmap (keyValue._relOrigin) (keyattri i) ))) . traceShowId . fst) plugItens
             pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> (traceShow (fmap fst thisPlugs) thisPlugs)
-            restrictConstraint = filter ((== (fmap keyattr ifk)) . fmap keyattr  .fst) constr
+            restrictConstraint = filter ((== (fmap _relOrigin $ keyattri i )) .  fmap _relOrigin . concat . fmap keyattr  .fst) constr
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             convertConstr :: SelTBConstraint
             convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap tbrefM td /= Just el )  $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ) <$> oldItems <*>) <$>  restrictConstraint
