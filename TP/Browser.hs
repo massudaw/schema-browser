@@ -14,6 +14,7 @@ import Query
 import Types
 import qualified Data.Binary as B
 import Step
+-- import Graph
 import Location
 import Plugins
 import PrefeituraSNFSE
@@ -334,7 +335,7 @@ main = do
   print "Finish"
 
 poller db handler plugs = do
-  let poll (BoundedPlugin2 n a f elemp ) =  do
+  let poll (BoundedPlugin2 n a f elemp) =  do
         conn <- connectPostgreSQL (connRoot db)
         inf <- keyTables conn  conn (T.pack $ dbn db, T.pack $ user db)
         tp  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
@@ -342,7 +343,7 @@ poller db handler plugs = do
               [Only i] -> Just i :: Maybe UTCTime
               [] -> Nothing
         forkIO $ (maybe (do
-          print "Closing conn plugin not registered"
+          print $ "Closing conn plugin [" <> T.unpack n <> "] not registered"
           close conn ) (\_ -> void $ forever $ do
           [t :: Only UTCTime]  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
           startTime <- getCurrentTime
@@ -371,31 +372,8 @@ poller db handler plugs = do
           else do
               threadDelay (round $ (*1000000) $  diffUTCTime startTime (unOnly t)) ) t )
             `catch` (\(e :: SomeException )->  do
-                print ("Closing conn on exception = " <> show e)
+                print ("Closing conn [" <> T.unpack n <> "] on exception " <> show e)
                 (close conn))
   mapM poll  plugs
-
-{-
-layout  infT = do
-  vis <- UI.div # set UI.id_ "visualization"
-  let draw inf  =
-        let
-            -- g = graphP inf
-            v :: [(Int,Set Key)]
-            v = zip [0..] (L.nub $ hvertices g <> tvertices g)
-            e = filter  (\case {(Path _ _ _)-> True ; i -> False}) $ concat $ fmap snd $ M.toList $ edges g
-            vmap = M.fromList $ swap <$>  v
-            genVertices (i,t ) = object [ "id" .= i, "label" .= T.intercalate "," (F.toList (S.map keyValue t)) ]
-            genEdges (Path i (FKJoinTable m _ l)  j ) = object [ "from" .= lid i , "to" .= lid j  , "label" .= (tableName m <> " join " <> tableName l ) ]
-            genEdges (Path i (FetchTable  l)  j ) = object [ "from" .= lid i , "to" .= lid j  , "label" .= tableName l ]
-            genEdges (Path i (FKInlineTable l)  j ) = object [ "from" .= lid i , "to" .= lid j  , "label" .= tableName l ]
-            lid t = justError ("no key " <> show t) (M.lookup t vmap)
-            nodesJSON = "var nodes = " <> encode (genVertices <$> v) <> ";"
-            edgesJSON = "var edges = " <> encode (genEdges <$> e) <> ";"
-            graphJSON = "<script> " <> BSL.unpack (nodesJSON <> edgesJSON) <> "var container = document.getElementById('visualization');  var data = { nodes: nodes,edges: edges}; var options = { hierarchicalLayout : { layout : 'direction' } , edges : { style : 'arrow'}} ;  var network = new vis.Network(container, data, options ); </script> "
-        in graphJSON
-  script <- UI.div # sink UI.html (maybe "" draw <$> infT)
-  UI.div # set children [vis,script]
--}
 
 

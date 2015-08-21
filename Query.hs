@@ -139,6 +139,71 @@ description  = rawDescription
 
 atTables f t = f t
 
+data Pattern  a
+  = PInter (Interval.Interval a)
+  | PArr [a]
+  | POne a
+  | PComp (Pattern [a])
+
+
+instance Enum [a] where
+
+data SubSet a
+   = ClosedSS
+   { minV :: a
+   , value :: a
+   , maxvalue :: a
+   }
+   | ScopedSS ([SubSet a] ->  SubSet a)
+
+year i = ClosedSS (-5000)  i 5000
+month i = ClosedSS 1  i 12
+
+dayS y m i = day (year y ) (month m) i
+
+
+day _ (ClosedSS _ 1 _) i = ClosedSS 1 i 31
+day (ClosedSS _ y _ )  (ClosedSS _ 2 _) i
+  | y `mod` 4 == 0 = ClosedSS 1 i 29
+  | otherwise = ClosedSS 1 i 28
+day _ (ClosedSS _ 3 _) i = ClosedSS 1 i 31
+day _ (ClosedSS _ 4 _) i = ClosedSS 1 i 30
+day _ (ClosedSS _ 5 _) i = ClosedSS 1 i 31
+day _ (ClosedSS _ 6 _) i = ClosedSS 1 i 30
+day _ (ClosedSS _ 7 _) i = ClosedSS 1 i 31
+day _ (ClosedSS _ 8 _) i = ClosedSS 1 i 31
+day _ (ClosedSS _ 9 _) i = ClosedSS 1 i 30
+day _ (ClosedSS _ 10 _) i = ClosedSS 1 i 31
+day _ (ClosedSS _ 11 _) i = ClosedSS 1 i 30
+day _ (ClosedSS _ 12 _) i = ClosedSS 1 i 31
+
+genInterval [] = return []
+genInterval (PComp a:xs) = do
+      v <- genPatt a
+      k <- genInterval xs
+      vi <- v
+      return (vi : k)
+  where
+      unFinite (ER.Finite i) = i
+      genPatt (PInter i) =  foldl1 (\j i -> do
+                                   ii <- i
+                                   ji <- j
+                                   return $ ii ++ ji ) $ fmap pure $ zipWith (\a b -> [a..b]) (unFinite (Interval.lowerBound i)) (unFinite (Interval.upperBound i))
+      genPatt (PArr i) = i
+      genPatt (POne i) = [i]
+genInterval (a:xs) = do
+      v <- genPatt a
+      k <- genInterval xs
+      return $ v:k
+  where
+      unFinite (ER.Finite i) = i
+      genPatt (PInter i) =  [unFinite (Interval.lowerBound i) .. unFinite (Interval.upperBound i)]
+      genPatt (PArr i) = i
+      genPatt (POne i) = [i]
+
+--      genPatt (PComp i ) =
+
+
 renderShowable :: Showable -> String
 renderShowable (SOptional i ) = maybe "" renderShowable i
 renderShowable (SSerial i ) = maybe "" renderShowable i
@@ -374,7 +439,8 @@ unKDelayed ((Key a  c m d (KDelayed e))) = (Key a  c m d e )
 unKDelayed i = errorWithStackTrace ("unKDelayed" <> show i)
 
 unKArray (Key a  c d m (KArray e)) = Key a  c d m e
-unKArray (Key a  c d m (KOptional (KArray e) )) = Key a  c d m e
+unKArray (Key a  c d m e) = Key a  c d m e
+-- unKArray (Key a  c d m (KOptional (KArray e) )) = Key a  c d m e
 
 
 
@@ -477,7 +543,7 @@ tableView  invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
 rootPaths' invSchema r = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   (t,ks) <- labelTable r
   tb <- recurseTB invSchema r False ks
-  return ( tb , selectQuery tb ) -- "SELECT " <> explodeRow tb <>  (" FROM " <> q ) <> js)
+  return ( tb , selectQuery tb )
 
 -- keyAttr :: Show b  => TB Identity b a -> b
 keyAttr (Attr i _ ) = i
@@ -509,8 +575,10 @@ expandJoin left env (Unlabeled (TBEither l kj j )) = foldr1 mappend (expandJoin 
 expandJoin left env (Unlabeled (FKT i rel (LeftTB1 (Just tb)))) = expandJoin True env (Unlabeled (FKT i rel tb))
 expandJoin left env (Labeled l (FKT i rel (LeftTB1 (Just tb)))) = expandJoin True env (Labeled l (FKT i rel tb))
 expandJoin left env (Labeled l (FKT _ ks (ArrayTB1 [ tb])))
-    = jt <> " JOIN LATERAL ( SELECT " <> "array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (justError "no array in rel" $ L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) (fmap getCompose $ concat $ fmap nonRef env)))  <> ") as arr) as z1 "  <> jt  <> " JOIN " <> expandTable tb <> " ON " <>  label (head $ look  [ _relTarget $ justError "no array in rel" $ L.find (isArray. keyType . _relOrigin ) ks] (fmap getCompose $ F.toList   (tableAttr tb))) <> " = arr " <> nonArrayJoin  <> " ) as z1 " <> expandQuery left tb  <>   "  ) as " <>  label tas  <> " ON true "
+    = jt <> " JOIN LATERAL ( SELECT " <> {-"array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (justError "no array in rel" $ L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) (fmap getCompose $ concat $ fmap nonRef env)))  <> ") as arr) as z1 "  <> jt  <> " JOIN " <> expandTable tb <> " ON " <>  label (head $ look  [ _relTarget $ justError "no array in rel" $ L.find (isArray. keyType . _relOrigin ) ks] (fmap getCompose $ F.toList   (tableAttr tb))) <> " = arr " <> nonArrayJoin  <> " ) as z1 " <> expandQuery left tb  <>-} hasArray ( L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) (fmap getCompose $ concat $ fmap nonRef env))) <> "  ) as " <>  label tas  <> " ON true " <> if left then "" else " WHERE " <> l <> " is not null"
       where
+          hasArray (Just _)  =  "array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (justError "no array in rel" $ L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) (fmap getCompose $ concat $ fmap nonRef env)))  <> ") as arr) as z1 "  <> jt  <> " JOIN " <> expandTable tb <> " ON " <>  label (head $ look  [ _relTarget $ justError "no array in rel" $ L.find (isArray. keyType . _relOrigin ) ks] (fmap getCompose $ F.toList   (tableAttr tb))) <> " = arr " <> nonArrayJoin  <> " ) as z1 " <> expandQuery left tb
+          hasArray Nothing = "array_agg(" <> explodeRow  tb <> " ) as " <> l <> " FROM " <> expandTable tb <>   expandQuery left tb <> " WHERE true " <>  nonArrayJoin
           nonArrayJoin = if L.null nonArrayRel then "" else " AND " <> joinOnPredicate nonArrayRel (fmap getCompose $ concat $ fmap nonRef  env ) (fmap getCompose $ F.toList   (tableAttr tb))
             where
               nonArrayRel = L.filter (not . isArray . keyType . _relOrigin) ks
@@ -572,6 +640,15 @@ recursePath isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
 
 
 recursePath isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
+    | S.size ifk   < S.size e =   do
+          (t,ksn) <- labelTable nextT
+          tb <-fun ksn
+          tas <- tname nextT
+          let knas = (Key (rawName nextT) Nothing 0 (unsafePerformIO newUnique)  (Primitive "integer" ))
+          kas <- kname tas  knas
+          return $ Compose $ Labeled (label $ kas) (FKT [] {-(fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filterReflexive ks ))-}  ks  (mapOpt $ ArrayTB1 [tb]  ))
+
+
     | isArrayRel ifk && not (isArrayRel e) =   do
           (t,ksn) <- labelTable nextT
           tb <-fun ksn

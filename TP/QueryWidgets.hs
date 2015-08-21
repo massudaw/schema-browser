@@ -176,8 +176,8 @@ tbCase :: InformationSchema -> [Plugins] -> SelPKConstraint  -> TB Identity Key 
 tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens oldItems  = do
         l <- flabel # set text (show $ _relOrigin <$> rel )
         let
-            nonInj = fmap  _relOrigin   (filterNotReflexive rel)
-            nonInjRefs = filter (flip S.isSubsetOf (S.fromList   nonInj) . S.fromList . fmap _relOrigin . keyattr .Compose . Identity .fst) wl
+            nonInj = (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ concat $ fmap _relOrigin . keyattr <$> ifk)
+            nonInjRefs = filter (flip S.isSubsetOf nonInj . S.fromList . fmap _relOrigin . keyattr .Compose . Identity .fst) wl
             nonInjConstr :: SelTBConstraint
             nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 _ l) -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity) $ maybeToList j) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l)).triding) <$> nonInjRefs
             tbi = fmap (Compose . Identity)  <$> oldItems
@@ -495,7 +495,7 @@ indexItens tb@(Attr k v) offsetT atdcomp atdi =
 indexItens tb@(FKT ifk rel _) offsetT fks oldItems  = bres
   where  bres2 =    allMaybes .  L.takeWhile isJust  <$> Tra.sequenceA (fmap (fmap (\(FKT i  _ j ) -> (head $ fmap (unAttr.unTB) $ i,  j)) )  <$>  fks)
          emptyFKT = Just . maybe (FKT (fmap (const (SComposite (V.empty))) <$> ifk) rel (ArrayTB1 []) ) id
-         bres = (\o -> liftA2 (\l (FKT [lc] rel (ArrayTB1 m )) -> FKT (fmap (const (SComposite $ V.fromList $  ((L.take o $ F.toList $ unSComposite $(unAttr $ runIdentity $ getCompose lc)  )<> fmap fst l <> (L.drop (o + 9 )  $ F.toList $ unSComposite $(unAttr $ runIdentity $ getCompose lc)  )))) <$> ifk) rel (ArrayTB1 $ L.take o m <> fmap snd l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
+         bres = (\o -> liftA2 (\l (FKT lc rel (ArrayTB1 m )) -> FKT ( maybe [] (\lc -> fmap (const (SComposite $ V.fromList $  ((L.take o $ F.toList $ unSComposite $(unAttr $ runIdentity $ getCompose lc)  )<> fmap fst l <> (L.drop (o + 9 )  $ F.toList $ unSComposite $(unAttr $ runIdentity $ getCompose lc)  )))) <$> ifk) (listToMaybe lc) ) rel (ArrayTB1 $ L.take o m <> fmap snd l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
 
 indexItens tb@(IT na _) offsetT items oldItems  = bres
    where bres2 = fmap (fmap (\(IT na j ) -> j)) . allMaybes . L.takeWhile isJust <$> Tra.sequenceA (items)
