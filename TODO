@@ -14,6 +14,11 @@ EXTRA INFO ON HOVER
 -- Show Missing plugin Input and output on hover
 -- Preview transaction log on hover over insert , edit and delete
 
+GENERATE AND PROPAGATE MORE CONSTRAINTS
+-- for unique table key constraint 
+-- for row check constraint
+
+
 CUSTOM PER TABLE FILTERS
 -- ui filters and database filters
 -- define filter scope

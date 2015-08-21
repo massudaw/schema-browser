@@ -28,6 +28,7 @@ import System.Environment
 import Debug.Trace
 import Data.Ord
 import OFX
+import Control.Exception
 import Data.Time.Parse
 import Utils
 import Schema
@@ -327,42 +328,52 @@ main = do
   -}
   (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
 
-  mapM_ (forkIO . poller (argsToState (tail args) ) h) [queryArtAndamento,siapi2Plugin,siapi3Plugin ]
+  poller (argsToState (tail args) ) h  [queryArtAndamento,siapi2Plugin,siapi3Plugin ]
 
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e $ tail args)
   print "Finish"
 
-poller db handler (BoundedPlugin2 n a f elemp ) = do
-  conn <- connectPostgreSQL (connRoot db)
-  inf <- keyTables conn  conn (T.pack $ dbn db, T.pack $ user db)
-  forever $ do
-        [t :: Only UTCTime] <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
-        threadDelay (1000*1000)
-        startTime <- getCurrentTime
-        let intervalsec = fromIntegral $ 60*d
-            d = 60
-        if diffUTCTime startTime  (unOnly t) >  intervalsec
-        then do
-            execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
-            print ("START " <>T.unpack n <> " - " <> show startTime  ::String)
-            let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
-            listRes <- queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
-            let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
-                tdInput i =  isJust  $ testTable i (fst f)
-                tdOutput1 i =   not $ isJust  $ testTable i (snd f)
-            let elem inf  = fmap (pure .catMaybes) .  mapM (\inp -> do
-                        o  <- elemp inf (Just inp)
-                        let diff =   join $ diffUpdateAttr  <$>  o <*> Just inp
-                        maybe (return Nothing )  (\i -> updateModAttr inf (fromJust o) inp (lookTable inf a )) diff )
+poller db handler plugs = do
+  let poll (BoundedPlugin2 n a f elemp ) =  do
+        conn <- connectPostgreSQL (connRoot db)
+        inf <- keyTables conn  conn (T.pack $ dbn db, T.pack $ user db)
+        tp  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
+        let t = case  tp of
+              [Only i] -> Just i :: Maybe UTCTime
+              [] -> Nothing
+        forkIO $ (maybe (do
+          print "Closing conn plugin not registered"
+          close conn ) (\_ -> void $ forever $ do
+          [t :: Only UTCTime]  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
+          startTime <- getCurrentTime
+          let intervalsec = fromIntegral $ 60*d
+              d = 60
+          if diffUTCTime startTime  (unOnly t) >  intervalsec
+          then do
+              execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
+              print ("START " <>T.unpack n <> " - " <> show startTime  ::String)
+              let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
+              listRes <- queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
+              let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
+                  tdInput i =  isJust  $ testTable i (fst f)
+                  tdOutput1 i =   not $ isJust  $ testTable i (snd f)
+              let elem inf  = fmap (pure .catMaybes) .  mapM (\inp -> do
+                          o  <- elemp inf (Just inp)
+                          let diff =   join $ diffUpdateAttr  <$>  o <*> Just inp
+                          maybe (return Nothing )  (\i -> updateModAttr inf (fromJust o) inp (lookTable inf a )) diff )
 
-            i <- elem inf evb
-            handler i
-            end <- getCurrentTime
-            print ("END " <>T.unpack n <> " - " <> show end ::String)
-            execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (end ,n,a,"incendio" :: String)
-            threadDelay (d*1000*1000*60)
-        else do
-            threadDelay (round $ (*1000000) $  diffUTCTime startTime (unOnly t))
+              i <- elem inf evb
+              handler i
+              end <- getCurrentTime
+              print ("END " <>T.unpack n <> " - " <> show end ::String)
+              execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (end ,n,a,"incendio" :: String)
+              threadDelay (d*1000*1000*60)
+          else do
+              threadDelay (round $ (*1000000) $  diffUTCTime startTime (unOnly t)) ) t )
+            `catch` (\(e :: SomeException )->  do
+                print ("Closing conn on exception = " <> show e)
+                (close conn))
+  mapM poll  plugs
 
 {-
 layout  infT = do
