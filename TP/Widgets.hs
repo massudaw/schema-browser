@@ -571,6 +571,9 @@ selectedMultiple = mkReadWriteAttr get set
     from s = let JSON.Success x =JSON.fromJSON s in x
 
 
+mousewheel :: Element -> Event Int
+mousewheel = fmap ((\i -> if i > 0 then 1 else -1) . read1 ) . domEvent "wheel"
+
 sink0 attr uiv ui =  do
   v <- currentValue uiv
   ui # set attr v # sink attr uiv

@@ -430,7 +430,7 @@ unIndexItens :: Int -> Int -> Maybe (TB Identity  Key Showable) -> Maybe (TB Ide
 unIndexItens ix o =  join . fmap (unIndex (ix+ o))
 
 unIndex o (Attr k (SComposite v)) = Attr (unKArray k) <$> (v V.!? o )
-unIndex o (IT  na  (ArrayTB1 j))
+unIndex o (IT na (ArrayTB1 j))
   =  IT  na <$>  atMay j o
 unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> [mapComp (firstTB unKArray) li]) (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi ) <$> join (traverse (indexArray o)  <$> l) <*> atMay m o
   where
@@ -511,7 +511,7 @@ attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ (KOptional _) ) v) = do
       res <- attrUITable (join . fmap unLeftItens <$> tAttr') (fmap (join. fmap unLeftItens ) <$>  evs) (Attr (unKOptional i) v)
       return (leftItens attr <$> res)
 attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ (KArray _) ) v) = mdo
-            TrivialWidget offsetT offset <- offsetField 0  (maybe 0 (V.length . (\(SComposite l ) -> l) . _tbattr) <$> facts bres)
+            TrivialWidget offsetT offset <- offsetField 0  never (maybe 0 (V.length . (\(SComposite l ) -> l) . _tbattr) <$> facts bres)
             let arraySize = 8
             widgets <- mapM (\ix  -> attrUITable (unIndexItens ix  <$> offsetT <*> tAttr' ) ((unIndexItens ix  <$> facts offsetT <@> ) <$>  evs) (Attr (unKArray i) v  ) ) [0..arraySize]
 
@@ -638,7 +638,7 @@ iUITable inf pgs pmods oldItems  tb@(IT na (LeftTB1 (Just tb1))) = do
    return $  leftItens tb <$> tr
 iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
     = mdo
-      (TrivialWidget offsetT offset) <- offsetField 0 (maybe 0 (length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
+      (TrivialWidget offsetT offset) <- offsetField 0 never (maybe 0 (length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
       items <- mapM (\ix -> iUITable inf pgs
                 (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods)
                 (unIndexItens ix <$> offsetT <*>   oldItems)
@@ -652,13 +652,21 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
       res <- UI.div # set children (fk: (getElement <$> items))
       return $ TrivialWidget bres res
 
-offsetField  init max = do
+offsetField  init ev  max = mdo
   offsetL <- UI.span # set text "Offset: "
-  offset <- UI.input # set UI.style [("width","50px")] # set UI.value (show init)
+  offset <- UI.input # set UI.style [("width","50px")] # sink UI.value (show <$> offsetB)
   let offsetE =  filterJust $ (\m i -> if i <m then Just i else Nothing ) <$> max <@> (filterJust $ readMaybe <$> onEnter offset)
-  offsetB <- stepper init offsetE
+      saturate m i j
+          | m == 0 = 0
+          | i + j < 0  = 0
+          | i + j > m -1  = m -1
+          | otherwise = i + j
+
+  let ev2 = (fmap concatenate $ unions [fmap const offsetE,saturate  <$> max <@> ev])
+  offsetB <- accumB init ev2
   let
-     offsetT = tidings offsetB offsetE
+     cev = flip ($) <$> offsetB <@> ev2
+     offsetT = tidings offsetB cev
   offparen <- UI.div # set children [offsetL,offset]
   return (TrivialWidget offsetT offparen)
 
@@ -754,7 +762,9 @@ fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb
     tr <- fkUITable inf pgs constr (fmap (join . fmap unLeftItens <$>) <$> plmods)  wl (join . fmap unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOrigin unKOptional <$> rel) tb1)
     return $ leftItens tb <$> tr
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) ) = mdo
-     (TrivialWidget offsetT offset) <- offsetField 0 (maybe 0 (length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
+     dv <- UI.div
+     let wheel = fmap negate $ mousewheel dv
+     (TrivialWidget offsetT offset) <- offsetField 0 (wheel) (maybe 0 (length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      let
          fkst = FKT (mapComp (firstTB unKArray)<$> ifk ) (fmap (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
      fks <- traverse (\ix-> do
@@ -762,7 +772,7 @@ fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) 
          TrivialWidget tr el<- fkUITable inf pgs constr (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods) wl (unIndexItens ix <$> offsetT  <*>  oldItems) fkst
          TrivialWidget tr <$> UI.div # set UI.children [lb,el] ) [0..8]
      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShowFlex <$> facts t)) (getElement <$> fks) (pure True : (fmap isJust . triding <$> fks))
-     dv <- UI.div # set children (getElement <$> fks)
+     element dv # set children (getElement <$> fks)
      let bres = indexItens tb offsetT (triding <$> fks) oldItems
      leng <- UI.span # sink text (("Size: " ++) .show .maybe 0 (length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      fksE <- UI.div # set UI.style [("display","inline-flex")] # set children [offset , leng ]
