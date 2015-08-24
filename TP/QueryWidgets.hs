@@ -319,7 +319,7 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 m _ ) preoldItems = do
   (h2,e2) <- liftIO $ newEvent
   let fun True = do
           let
-            table = lookPK inf ( S.fromList $ fmap _relOrigin $ findPK ftb)
+            table = lookPK inf ( S.fromList $ fmap _relOrigin $ findPK $ traceShowId ftb)
           preoldItens <- currentValue (facts preoldItems)
           loadedItens <- liftIO$ join <$> traverse (loadDelayed inf ftb)   preoldItens
           maybe (return ()) (liftIO. e. pure)  loadedItens
@@ -511,14 +511,16 @@ attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ (KOptional _) ) v) = do
       res <- attrUITable (join . fmap unLeftItens <$> tAttr') (fmap (join. fmap unLeftItens ) <$>  evs) (Attr (unKOptional i) v)
       return (leftItens attr <$> res)
 attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ (KArray _) ) v) = mdo
-            TrivialWidget offsetT offset <- offsetField 0  never (maybe 0 (V.length . (\(SComposite l ) -> l) . _tbattr) <$> facts bres)
+            offsetDiv  <- UI.div
+            let wheel = fmap negate $ mousewheel offsetDiv
+            TrivialWidget offsetT offset <- offsetField 0  wheel (maybe 0 (V.length . (\(SComposite l ) -> l) . _tbattr) <$> facts bres)
             let arraySize = 8
             widgets <- mapM (\ix  -> attrUITable (unIndexItens ix  <$> offsetT <*> tAttr' ) ((unIndexItens ix  <$> facts offsetT <@> ) <$>  evs) (Attr (unKArray i) v  ) ) [0..arraySize]
 
             sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (tail $ getElement <$> widgets) (triding <$> widgets)
             let
               bres = indexItens attr offsetT (triding <$> widgets) tAttr'
-            offsetDiv <- UI.div # set children (fmap getElement widgets)
+            element offsetDiv # set children (fmap getElement widgets)
             paintBorder offsetDiv (facts bres ) (facts tAttr' )
             leng <- UI.span # sink0 text (("Size: " ++) .show .maybe 0 (V.length . (\(SComposite l ) -> l) . _tbattr ) <$> facts bres)
             fk <- UI.div # set UI.style [("display","inline-flex")]  # set  children [offset,  leng ]
@@ -638,7 +640,9 @@ iUITable inf pgs pmods oldItems  tb@(IT na (LeftTB1 (Just tb1))) = do
    return $  leftItens tb <$> tr
 iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
     = mdo
-      (TrivialWidget offsetT offset) <- offsetField 0 never (maybe 0 (length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
+      dv <- UI.div
+      let wheel = fmap negate $ mousewheel dv
+      (TrivialWidget offsetT offset) <- offsetField 0 wheel (maybe 0 (length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
       items <- mapM (\ix -> iUITable inf pgs
                 (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods)
                 (unIndexItens ix <$> offsetT <*>   oldItems)
@@ -649,8 +653,8 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
       let bres = indexItens tb offsetT (triding <$>  items ) oldItems
       leng <- UI.span # sink text (("Size: " ++) . show .maybe 0 (length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
       fk <- UI.div # set UI.style [("display","inline-flex")]  # set  children [offset,  leng ]
-      res <- UI.div # set children (fk: (getElement <$> items))
-      return $ TrivialWidget bres res
+      element dv  # set children (fk: (getElement <$> items))
+      return $ TrivialWidget bres dv
 
 offsetField  init ev  max = mdo
   offsetL <- UI.span # set text "Offset: "
@@ -679,6 +683,8 @@ nonRefAttr l = concat $  fmap (uncurry Attr) . aattr <$> ( l )
 
 tbrefM i@(FKT _  _ _)  =  _tbref i
 tbrefM j = [Compose $ Identity $ j ] -- errorWithStackTrace ("tbref" <> show j )
+
+
 
 fkUITable
   ::
@@ -751,11 +757,11 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _ _ ) ) =
       res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [fmap const (rumors vpt) , rumors sortList])
       onEvent (foldr addToList <$> res2 <@> evs)  (liftIO .  putMVar tmvar  )
       let
-        reorderPK l = fmap (\i -> justError "reorder wrong" $ L.find ((== i).fst) l )  (keyAttr . unTB <$> ifk)
-        lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
-          where kn = justError "relTable" $ M.lookup ko relTable
+        reorderPK l = fmap (\i -> justError ("reorder wrong" <> show (ifk,l))  $ L.find ((== i).fst) l )  (keyAttr . unTB <$> ifk)
+        lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
+          where knm =  M.lookup ko relTable
         box = TrivialWidget (tidings st sel) (getElement itemList)
-        fksel =  (\box -> fmap (\ibox -> FKT (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . fmap lookFKsel $ fmap (first _relOrigin) ibox) rel (fromJust box) ) .  join . fmap findPKM $ box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> triding box)
+        fksel =  (\box -> fmap (\ibox -> FKT (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . catMaybes . fmap lookFKsel $ ibox) rel (fromJust box) ) .  fmap (concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1) $ box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> triding box)
       fk <- UI.div # set  children ([getElement box,filterInp] <> celem)
       return $ TrivialWidget fksel fk
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb1 ))) = do
