@@ -91,6 +91,7 @@ data KVMetadata k
   , _kvschema :: Text
   , _kvpk :: Set k
   , _kvdesc :: [k]
+  , _kvuniques :: [Set k]
   , _kvattrs :: Set k
   , _kvdelayed :: Set k
   }deriving(Eq,Ord,Show,Generic)
@@ -200,7 +201,7 @@ type TB1 = TB2 Key
 type TB2 k = TB3 Identity k
 type TB3 f = FTB1 f
 
-mapKVMeta f (KVMetadata tn sch s j k l ) =KVMetadata tn sch (Set.map f s) (map f j) (Set.map f k) (Set.map f l)
+mapKVMeta f (KVMetadata tn sch s j m k l ) =KVMetadata tn sch (Set.map f s) (map f j) (map (Set.map f) m ) (Set.map f k) (Set.map f l)
 
 
 filterKey f (TB1 m k ) = TB1 m . mapComp (\(KV kv) -> KV $ Map.filterWithKey f kv )  $  k
@@ -380,6 +381,7 @@ data Table
            , rawTranslation :: Maybe Text
            , rawDelayed :: (Set Key)
            , rawName :: Text
+           , uniqueConstraint :: [Set Key]
            , rawAuthorization :: [Text]
            , rawPK :: (Set Key)
            , rawDescription :: [Key]
@@ -563,10 +565,10 @@ traComp f =  fmap Compose. traverse f . getCompose
 
 concatComp  =  Compose . concat . fmap getCompose
 
-tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (rawAttrs t) (rawDelayed t)
+tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (uniqueConstraint t)(rawAttrs t) (rawDelayed t)
 
 tbmap :: Ord k => Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
-tbmap = TB1 (KVMetadata "" ""  Set.empty [] Set.empty Set.empty) . Compose . Identity . KV
+tbmap = TB1 (KVMetadata "" ""  Set.empty [] [] Set.empty Set.empty) . Compose . Identity . KV
 
 tblist :: Ord k => [Compose Identity  (TB Identity) k a] -> TB3 Identity k a
 tblist = tbmap . mapFromTBList

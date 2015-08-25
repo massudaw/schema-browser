@@ -292,14 +292,16 @@ intersectPred p1 op (KOptional p2) j (SOptional l)   | p1 == p2 =  maybe False (
 intersectPred p1@(KOptional i ) op p2 (SOptional j) l  =  maybe False id $ fmap (\m -> intersectPred i op p2 m l) j
 intersectPred p1 op p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
 
+pkOp (KOptional j ) i  (SOptional l) k  = maybe False id (pkOp i j k <$> l)
 pkOp (KSerial j ) i  (SSerial l) k  = maybe False id (pkOp i j k <$> l)
+pkOp i (KOptional j ) k (SOptional l) = maybe False id (pkOp i j k <$> l)
 pkOp i (KSerial j ) k (SSerial l) = maybe False id (pkOp i j k <$> l)
 pkOp (KInterval i) (KInterval j) (SInterval k) (SInterval l)| i == j  = not $ Interval.null $ Interval.intersection  k l
 pkOp (KArray i) (KArray j) (SComposite k) (SComposite l) | i == j = not $ S.null $ S.intersection (S.fromList (F.toList k)) (S.fromList (F.toList  l ))
 pkOp (Primitive i ) (Primitive j ) k l  | i == j = k == l
 pkOp a b c d = errorWithStackTrace (show (a,b,c,d))
 
-pkOpSet i l = L.all id $ zipWith (\(a,b) (c,d)-> pkOp (keyType a)  (keyType c) b d)  i l
+pkOpSet i l = L.all id $ zipWith (\(a,b) (c,d)-> pkOp (keyType a)  (keyType c) b d)  i (traceShow (i,l) l)
 
 
 intersectionOp (KOptional i) op (KOptional j) = intersectionOp i op j
@@ -408,7 +410,7 @@ dropTable r= "DROP TABLE "<> rawFullName r
 
 rawFullName = showTable
 
-createTable r@(Raw sch _ _ _ tbl _ pk _ fk attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
+createTable r@(Raw sch _ _ _ tbl _ _ pk _ fk attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
   where
     commands = (renderAttr <$> S.toList attr ) <> [renderPK] <> fmap renderFK (S.toList fk)
     renderAttr k = keyValue k <> " " <> renderTy (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
@@ -692,6 +694,10 @@ tbDesc  =  tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ 
 
 tbPK :: (Functor f,Ord k)=>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
 tbPK = tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv ) ))
+
+tbUn :: (Functor f,Ord k) =>   Set k -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
+tbUn un (TB1 kv item) =  (\kv ->  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item ) un
+  where pred kv k = (S.isSubsetOf (S.map _relOrigin k) kv )
 
 tbAttr :: (Functor f,Ord k) =>  TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbAttr  =  tbFilter  (\kv k -> not (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv <> (S.fromList (_kvdesc kv ))) ))

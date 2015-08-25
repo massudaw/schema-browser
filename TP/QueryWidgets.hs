@@ -181,12 +181,12 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens oldItems  = do
             nonInjConstr :: SelTBConstraint
             nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 _ l) -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity) $ maybeToList j) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l)).triding) <$> nonInjRefs
             tbi = fmap (Compose . Identity)  <$> oldItems
-            thisPlugs = filter (hasProd (isNested (traceShowId (IProd True $ fmap (keyValue._relOrigin) (keyattri i) ))) . traceShowId . fst) plugItens
-            pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> (traceShow (fmap fst thisPlugs) thisPlugs)
+            thisPlugs = filter (hasProd (isNested ((IProd True $ fmap (keyValue._relOrigin) (keyattri i) ))) .  fst) plugItens
+            pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> ( thisPlugs)
             restrictConstraint = filter ((== (fmap _relOrigin $ keyattri i )) .  fmap _relOrigin . concat . fmap keyattr  .fst) constr
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             convertConstr :: SelTBConstraint
-            convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap tbrefM td /= Just el )  $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ) <$> oldItems <*>) <$>  restrictConstraint
+            convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap tbrefM td /= Just el )  $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ) <$> oldItems <*>) <$>  traceShow (ifk , unlines . fmap show $ fmap fst restrictConstraint ) restrictConstraint
             ftdi = fmap (runIdentity . getCompose ) <$>  tbi
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return (fmap (runIdentity . getCompose ) <$>  tbi)) (fmap Just . filterJust . snd <$>  pfks )
         tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks wl (ftdi ) i
@@ -319,7 +319,7 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 m _ ) preoldItems = do
   (h2,e2) <- liftIO $ newEvent
   let fun True = do
           let
-            table = lookPK inf ( S.fromList $ fmap _relOrigin $ findPK $ traceShowId ftb)
+            table = lookPK inf ( S.fromList $ fmap _relOrigin $ findPK $ ftb)
           preoldItens <- currentValue (facts preoldItems)
           loadedItens <- liftIO$ join <$> traverse (loadDelayed inf ftb)   preoldItens
           maybe (return ()) (liftIO. e. pure)  loadedItens
@@ -329,7 +329,9 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 m _ ) preoldItems = do
           let oldItems = tidings oldItemsB oldItemsE
               tpkConstraint :: ([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)
               tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK ftb , flip pkConstraint  <$> bres )
-          (listBody,tableb) <- uiTable inf pgs [tpkConstraint] (tableName table) refs pmods ftb oldItems
+              unConstraints :: [([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)]
+              unConstraints = (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  ftb , flip (unConstraint un) <$> bres )) <$> _kvuniques m
+          (listBody,tableb) <- uiTable inf pgs (tpkConstraint:unConstraints) (tableName table) refs pmods ftb oldItems
           (panelItems,evsa)<- processPanelTable inf  (facts tableb) (facts bres) table oldItems
           let evs =  unions (filterJust loadedItensEv : evsa)
           onEvent evs (\i ->  liftIO $ e i )
@@ -355,6 +357,7 @@ type TBConstraint = TB1 Showable -> Bool
 type SelPKConstraint = [([Compose Identity (TB Identity) Key ()],Tidings PKConstraint)]
 type SelTBConstraint = [([Compose Identity (TB Identity) Key ()],Tidings TBConstraint)]
 pkConstraint v  = maybe False (const True) . L.find (pkOpSet (concat . fmap aattr $ v ) . (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ))
+unConstraint u v  = maybe False (const True) . L.find (pkOpSet (concat . fmap aattr $ v ) . (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbUn u  ))
 
 
 processPanelTable
@@ -674,11 +677,13 @@ offsetField  init ev  max = mdo
   offparen <- UI.div # set children [offsetL,offset]
   return (TrivialWidget offsetT offparen)
 
-backFKRef relTable ifk box = fmap (\ibox -> (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . fmap lookFKsel $ (fmap (first _relOrigin) ibox)) ) .  join . fmap findPKM $ box
+backFKRef relTable ifk box = fmap (\ibox -> (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . catMaybes . fmap lookFKsel $  ibox) ) .    fmap (concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1) $ box
   where
         reorderPK l = fmap (\i -> justError "reorder wrong" $ L.find ((== i).fst) l )  ( keyAttr . unTB <$> ifk)
-        lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
-          where kn = justError "relTable" $ M.lookup ko relTable
+        lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
+          where knm =  M.lookup ko relTable
+        -- lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
+         --  where kn = justError "relTable" $ M.lookup ko relTable
 nonRefAttr l = concat $  fmap (uncurry Attr) . aattr <$> ( l )
 
 tbrefM i@(FKT _  _ _)  =  _tbref i
@@ -713,7 +718,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _ _ ) ) =
           oldASet :: Set Key
           oldASet = S.fromList (_relOrigin <$> filterNotReflexive rel )
           replaceKey =  firstTB (\k -> maybe k _relTarget $ L.find ((==k)._relOrigin) rel)
-          nonInj = traceShowId $ S.difference (S.fromList $fmap  _relOrigin   $ filterReflexive $ rel) (S.unions $ fmap (S.fromList . fmap _relOrigin .keyattr) ifk)
+          nonInj =  S.difference (S.fromList $fmap  _relOrigin   $ filterReflexive $ rel) (S.unions $ fmap (S.fromList . fmap _relOrigin .keyattr) ifk)
           nonInjRefs = filter (flip S.isSubsetOf nonInj . S.fromList . fmap _relOrigin . keyattr .Compose . Identity .fst) wl
           staticold :: [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key (Showable))))]
           staticold  =    second (fmap (fmap replaceKey . join . fmap unLeftItens)) . first (replaceKey .unLeftKey) <$>  nonInjRefs
@@ -826,7 +831,7 @@ fullInsert inf (TB1 k1 v1 )  = do
    ret <- TB1 k1 . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
    (m,t) <- liftIO $ eventTable inf (lookTable inf (_kvname k1))
    l <- currentValue (facts t)
-   if  isJust $ L.find ((==tbPK (tableNonRef ret)).traceShowId . tbPK . tableNonRef ) l
+   if  isJust $ L.find ((==tbPK (tableNonRef ret)). tbPK . tableNonRef ) l
       then do
         return ret
       else do
