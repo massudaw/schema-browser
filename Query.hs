@@ -21,6 +21,7 @@ import Data.Functor.Apply
 import Data.Bifunctor
 import Data.Unique
 import Data.Functor.Identity
+import Data.Ord
 import qualified Data.Vector as Vector
 import qualified Data.Foldable as F
 import Data.Traversable (mapAccumL)
@@ -302,7 +303,7 @@ pkOp (KArray i) (KArray j) (SComposite k) (SComposite l) | i == j = not $ S.null
 pkOp (Primitive i ) (Primitive j ) k l  | i == j = k == l
 pkOp a b c d = errorWithStackTrace (show (a,b,c,d))
 
-pkOpSet i l = L.all id $ zipWith (\(a,b) (c,d)-> pkOp (keyType a)  (keyType c) b d) i l
+pkOpSet i l = (\i -> if L.null i then False else L.all id i) $ zipWith (\(a,b) (c,d)-> pkOp (keyType a)  (keyType c) b d) (L.sortBy (comparing fst ) i) (L.sortBy (comparing fst) l)
 
 
 intersectionOp (KOptional i) op (KOptional j) = intersectionOp i op j
@@ -515,7 +516,7 @@ filterReflexive ks = L.filter (reflexiveRel ks) ks
 notReflexiveRel ks = not . reflexiveRel ks
 reflexiveRel ks
   | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
-  | any (isJust . keyStatic . _relOrigin) ks = (traceShowId . isNothing . keyStatic. _relOrigin) . traceShowId
+  | any (isJust . keyStatic . _relOrigin) ks = ( isNothing . keyStatic. _relOrigin)
   | any (\j -> not $ isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks =  const False
   | otherwise = (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) ))
 
@@ -665,7 +666,7 @@ recursePath isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           (t,ksn) <- labelTable nextT
           let pksn = getCompose <$> F.toList (_kvvalues $ labelValue $ getCompose $ tbPK ksn)
           tb <-fun ksn
-          return $ Compose $ Unlabeled $ FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (traceShowId . _relOrigin <$> filterReflexive ks))  ks (mapOpt tb)
+          return $ Compose $ Unlabeled $ FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filterReflexive ks))  ks (mapOpt tb)
   where
         nextT = (\(Just i)-> i) (M.lookup tn (invSchema))
         nextLeft = any (isKOptional.keyType) (S.toList ifk) || isLeft
