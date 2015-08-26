@@ -44,6 +44,7 @@ import Control.Monad.Writer
 
 import Query
 import Postgresql
+import qualified Data.ByteString.Char8 as BS
 
 
 createType :: Text ->  (Text,Text,Text,Text,Text,Text,Maybe Text,Maybe Text,Maybe Text) -> KType Text
@@ -99,10 +100,14 @@ queryAuthorization conn schema user = do
     return $ M.fromList $ convert <$> sq
   where aq = "select table_name,authorizations from metadata.authorization where table_schema = ? and grantee = ? "
 
+unTOptional (KOptional i ) = i
+unTOptional i = i
+
 keyTables :: Connection -> Connection -> (Text ,Text)-> IO InformationSchema
 keyTables conn userconn (schema ,user) = do
-       uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) . Key c tr op <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from information_schema.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
-       res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z)-> (t,) $ (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap))  (createType  schema (t,c,j,k,l,m,n,d,z)) )) <$>  query conn "select table_name,o.column_name,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name    left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ?"  (Only schema)
+       uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from information_schema.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
+       res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable ( unTOptional ty) . BS.pack . T.unpack <$>  (join $ listToMaybe. T.splitOn "::" <$> n) ) ty )  (createType  schema (t,c,j,k,l,m,n,d,z)) )) <$>  query conn "select table_name,o.column_name,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name    left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ?"  (Only schema)
+       -- putStrLn (unlines $ fmap show res2)
        --res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default,'' :: text ,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name where table_schema = ? " {- left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column " -} (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
@@ -114,7 +119,7 @@ keyTables conn userconn (schema ,user) = do
          un <- newUnique
          let
            lcol = lookupKey' keyMapPre . (t,) <$> V.toList l
-           tnew = Key n Nothing 0 un (KEither (keyType <$> lcol) )
+           tnew = Key n Nothing 0 Nothing un (KEither (keyType <$> lcol) )
          return (t,[(tnew,Path (S.fromList lcol) (FKEitherField tnew lcol) (S.singleton tnew) )]) ) <$> query conn "SELECT table_name,sum_columns,column_name FROM metadata.table_either WHERE table_schema = ? " (Only schema)
        let eitherMap = M.fromListWith mappend  $ fmap (\(t,j) -> (t,fmap snd j )) $ eitherItems
            keyMap =  foldr (uncurry M.insert) keyMapPre $ concat $ fmap (\(t,j) -> fmap (\ki -> ((t,keyValue ki),ki)) $ fmap fst j ) $ eitherItems
@@ -193,7 +198,7 @@ lookFresh inf n tname i = justError "no freshKey" $ M.lookup (n,tname,i) (plugin
 
 newKey name ty p = do
   un <- newUnique
-  return $ Key name Nothing    p un ty
+  return $ Key name Nothing    p Nothing un ty
 
 
 catchPluginException :: InformationSchema -> Text -> Text -> IO (Maybe a) -> IO (Maybe a)
@@ -221,7 +226,7 @@ withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s
 
 testParse db sch q = withConnInf db sch (\inf -> do
                                        let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
-                                       print rpq
+                                       -- print rpq
                                        q <- queryWith_ (fromAttr (rp) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
                                            )

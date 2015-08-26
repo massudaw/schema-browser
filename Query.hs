@@ -125,15 +125,16 @@ transformKey (KSerial i)  (KOptional j) (SSerial v)  | i == j = (SOptional v)
 transformKey (KOptional i)  (KSerial j) (SOptional v)  | i == j = (SSerial v)
 transformKey (KOptional j) l (SOptional v)
     | isJust v = transformKey j l (fromJust v)
-    | otherwise = error "no transform optional nothing"
+    | otherwise = errorWithStackTrace "no transform optional nothing"
 transformKey (KSerial j)  l (SSerial v)
     | isJust v = transformKey j l (fromJust v)
     | otherwise =  SDelayed Nothing -- error $ "no transform serial nothing" <> show (l,v)
 -- transformKey (KOptional j)  l@(Primitive _ ) (SOptional v) | j == l  && isJust v = (\(Just i)-> i) v
-transformKey l@(Primitive _)  (KOptional j ) v | j == l  = SOptional $ Just v
-transformKey l@(Primitive _)  (KSerial j ) v | j == l  = SSerial $ Just v
+transformKey l@(Primitive _)  (KOptional j ) v  = SOptional $ Just (transformKey l j v)
+transformKey l@(Primitive _)  (KSerial j ) v   = SSerial $ Just (transformKey l j v)
+transformKey l@(Primitive _)  (KArray j ) v | j == l  = SComposite $ Vector.singleton  v
 transformKey ki kr v | ki == kr = v
-transformKey ki kr  v = error  ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
+transformKey ki kr  v = errorWithStackTrace  ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
 
 description  = rawDescription
 
@@ -301,7 +302,7 @@ pkOp (KArray i) (KArray j) (SComposite k) (SComposite l) | i == j = not $ S.null
 pkOp (Primitive i ) (Primitive j ) k l  | i == j = k == l
 pkOp a b c d = errorWithStackTrace (show (a,b,c,d))
 
-pkOpSet i l = L.all id $ zipWith (\(a,b) (c,d)-> pkOp (keyType a)  (keyType c) b d)  i (traceShow (i,l) l)
+pkOpSet i l = L.all id $ zipWith (\(a,b) (c,d)-> pkOp (keyType a)  (keyType c) b d) i l
 
 
 intersectionOp (KOptional i) op (KOptional j) = intersectionOp i op j
@@ -430,18 +431,18 @@ keyOptional (k,v) = (kOptional k ,SOptional $ Just v)
 
 unKeyOptional (k  ,(SOptional v) ) = fmap (unKOptional k,) v
 
-kOptional (Key a  c m d e) = Key a  c m d (KOptional e)
-kDelayed (Key a  c m d e) = Key a  c m d (KDelayed e)
+kOptional (Key a  c m n d e) = Key a  c m  n d (KOptional e)
+kDelayed (Key a  c m n d e) = Key a  c m  n d (KDelayed e)
 
-unKOptional ((Key a  c m d (KOptional e))) = (Key a  c m d e )
-unKOptional ((Key a  c m d (e@(Primitive _)))) = (Key a  c m d e )
+unKOptional ((Key a  c m n d (KOptional e))) = (Key a  c m n d e )
+unKOptional ((Key a  c m n d (e@(Primitive _)))) = (Key a  c m n d e )
 unKOptional i = errorWithStackTrace ("unKOptional" <> show i)
 
-unKDelayed ((Key a  c m d (KDelayed e))) = (Key a  c m d e )
+unKDelayed ((Key a  c m n d (KDelayed e))) = (Key a  c m n d e )
 unKDelayed i = errorWithStackTrace ("unKDelayed" <> show i)
 
-unKArray (Key a  c d m (KArray e)) = Key a  c d m e
-unKArray (Key a  c d m e) = Key a  c d m e
+unKArray (Key a  c d m n (KArray e)) = Key a  c d  m n e
+unKArray (Key a  c d m n e) = Key a  c d  m n e
 -- unKArray (Key a  c d m (KOptional (KArray e) )) = Key a  c d m e
 
 
@@ -487,7 +488,7 @@ expandTable tb@(TB1 meta (Compose (Labeled t ((KV i)))  ))  =
    let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name) <> " FROM " <> aliasTable <> ") as " <> t
        name =  tableAttr tb
        aliasTable = kvMetaFullName meta  <> " as " <> t
-       aliasKeys (Labeled  a (Attr (Key n   _ _ _ _) _ ))  = t <> "." <> n <> " as " <> a
+       aliasKeys (Labeled  a (Attr n    _ ))  = t <> "." <> keyValue n <> " as " <> a
    in query
 expandTable tb = errorWithStackTrace (show tb)
 
@@ -514,6 +515,7 @@ filterReflexive ks = L.filter (reflexiveRel ks) ks
 notReflexiveRel ks = not . reflexiveRel ks
 reflexiveRel ks
   | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
+  | any (isJust . keyStatic . _relOrigin) ks = (traceShowId . isNothing . keyStatic. _relOrigin) . traceShowId
   | any (\j -> not $ isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks =  const False
   | otherwise = (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) ))
 
@@ -577,7 +579,7 @@ expandJoin left env (Unlabeled (TBEither l kj j )) = foldr1 mappend (expandJoin 
 expandJoin left env (Unlabeled (FKT i rel (LeftTB1 (Just tb)))) = expandJoin True env (Unlabeled (FKT i rel tb))
 expandJoin left env (Labeled l (FKT i rel (LeftTB1 (Just tb)))) = expandJoin True env (Labeled l (FKT i rel tb))
 expandJoin left env (Labeled l (FKT _ ks (ArrayTB1 [ tb])))
-    = jt <> " JOIN LATERAL (select * from ( SELECT " <> {-"array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (justError "no array in rel" $ L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) (fmap getCompose $ concat $ fmap nonRef env)))  <> ") as arr) as z1 "  <> jt  <> " JOIN " <> expandTable tb <> " ON " <>  label (head $ look  [ _relTarget $ justError "no array in rel" $ L.find (isArray. keyType . _relOrigin ) ks] (fmap getCompose $ F.toList   (tableAttr tb))) <> " = arr " <> nonArrayJoin  <> " ) as z1 " <> expandQuery left tb  <>-} hasArray ( L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) (fmap getCompose $ concat $ fmap nonRef env))) <> "  ) as " <>  label tas  <>  (if left then "" else " WHERE " <> l <> " is not null " ) <> " ) as " <>  label tas <> " ON true "
+    = jt <> " JOIN LATERAL (select * from ( SELECT " <>  hasArray ( L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) (fmap getCompose $ concat $ fmap nonRef env))) <> "  ) as " <>  label tas  <>  (if left then "" else " WHERE " <> l <> " is not null " ) <> " ) as " <>  label tas <> " ON true "
       where
           hasArray (Just _)  =  "array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (justError "no array in rel" $ L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) (fmap getCompose $ concat $ fmap nonRef env)))  <> ") as arr) as z1 "  <> jt  <> " JOIN " <> expandTable tb <> " ON " <>  label (head $ look  [ _relTarget $ justError "no array in rel" $ L.find (isArray. keyType . _relOrigin ) ks] (fmap getCompose $ F.toList   (tableAttr tb))) <> " = arr " <> nonArrayJoin  <> " ) as z1 " <> expandQuery left tb
           hasArray Nothing = "array_agg(" <> explodeRow  tb <> " ) as " <> l <> " FROM " <> expandTable tb <>   expandQuery left tb <> " WHERE true " <>  nonArrayJoin
@@ -617,7 +619,7 @@ recursePath isLeft ksbn invSchema (Path _ jo@(FKEitherField o l) _) = do
 recursePath isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
     | isArrayRel ifk  {-&& not (isArrayRel e )-}=   do
           tas <- tname nextT
-          let knas = Key (rawName nextT) Nothing 0 (unsafePerformIO newUnique) (Primitive "integer" )
+          let knas = Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique) (Primitive "integer" )
           kas <- kname tas  knas
           let
               tname = head $ fmap (\i -> label . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (S.toList ifk )
@@ -646,7 +648,7 @@ recursePath isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           (t,ksn) <- labelTable nextT
           tb <-fun ksn
           tas <- tname nextT
-          let knas = (Key (rawName nextT) Nothing 0 (unsafePerformIO newUnique)  (Primitive "integer" ))
+          let knas = (Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique)  (Primitive "integer" ))
           kas <- kname tas  knas
           return $ Compose $ Labeled (label $ kas) (FKT [] {-(fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filterReflexive ks ))-}  ks  (mapOpt $ ArrayTB1 [tb]  ))
 
@@ -655,7 +657,7 @@ recursePath isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           (t,ksn) <- labelTable nextT
           tb <-fun ksn
           tas <- tname nextT
-          let knas = (Key (rawName nextT) Nothing 0 (unsafePerformIO newUnique)  (Primitive "integer" ))
+          let knas = (Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique)  (Primitive "integer" ))
           kas <- kname tas  knas
           return $ Compose $ Labeled (label $ kas) (FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filterReflexive ks ))  ks  (mapOpt $ mapArray tb  ))
 
@@ -663,7 +665,7 @@ recursePath isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           (t,ksn) <- labelTable nextT
           let pksn = getCompose <$> F.toList (_kvvalues $ labelValue $ getCompose $ tbPK ksn)
           tb <-fun ksn
-          return $ Compose $ Unlabeled $ FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filterReflexive ks))  ks (mapOpt tb)
+          return $ Compose $ Unlabeled $ FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (traceShowId . _relOrigin <$> filterReflexive ks))  ks (mapOpt tb)
   where
         nextT = (\(Just i)-> i) (M.lookup tn (invSchema))
         nextLeft = any (isKOptional.keyType) (S.toList ifk) || isLeft
@@ -719,7 +721,7 @@ recurseTB invSchema  nextT nextLeft ksn@(TB1 m kv ) =  (TB1 m) <$>
           let
               items = _kvvalues kv
               fkSet,eitherSet :: S.Set Key
-              fkSet =  S.unions $ fmap pathRelRef  $ filter ( isPathReflexive . pathRel) $ S.toList (rawFKS nextT)
+              fkSet =  S.filter  (isNothing . keyStatic ) $ S.unions $ fmap pathRelRef  $ filter ( isPathReflexive . pathRel) $ S.toList (rawFKS nextT)
               eitherSet = S.unions $  fmap pathRelRef $ filter ( isPathEither . pathRel) $  S.toList (rawFKS nextT)
               nonFKAttrs :: [(S.Set (Rel Key) ,TBLabel  ())]
               nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
@@ -749,7 +751,7 @@ mkTable i = do
   modify (\(_,j) -> (next,j))
   return (c+1)
 
-aliasKeys (t,Labeled  a (Attr (Key n   _ _ _ _) _ ))  = label t <> "." <> n <> " as " <> a
+aliasKeys (t,Labeled  a (Attr n   _ ))  = label t <> "." <> keyValue n <> " as " <> a
 
 
 aliasTable (Labeled t r) = showTable r <> " as " <> t
@@ -839,7 +841,7 @@ allMaybes i = if F.all isJust i
         then Just $ fmap (justError "wrong invariant allMaybes") i
         else Nothing
 
-makeOpt (Key a  c d m ty) = (Key a  c d m (KOptional ty))
+makeOpt (Key a  c d m n ty) = (Key a  c d m n (KOptional ty))
 
 zipWithTF g t f = snd (mapAccumL map_one (F.toList f) t)
     where map_one (x:xs) y = (xs, g y x)

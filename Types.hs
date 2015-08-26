@@ -141,6 +141,7 @@ data FKey a
     { keyValue :: ! Text
     , keyTranslation :: ! (Maybe Text)
     , keyPosition :: Int
+    , keyStatic :: Maybe Showable
     , keyFastUnique :: ! Unique
     , keyType :: ! a
     }
@@ -286,7 +287,8 @@ showTy f (KArray i) = "{" <>  showTy f i <> "}"
 showTy f (KOptional i) = showTy f i <> "*"
 showTy f (KInterval i) = "(" <>  showTy f i <> ")"
 showTy f (KSerial i) = showTy f i <> "?"
-showTy f i = errorWithStackTrace (show   i)
+showTy f (KDelayed i) = showTy f i <> "-"
+showTy f i = errorWithStackTrace ("no ty for " <> show   i)
 
 
 instance Eq Key where
@@ -298,8 +300,9 @@ instance Ord Key where
 
 instance Show Key where
    show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
+   -- show k = T.unpack $ showKey k
 
-showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<>  "::"  <> showTy id (keyType k)
+showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::"  <> showTy id (keyType k)
 
 
 instance Binary a => Binary (Interval.Extended a) where

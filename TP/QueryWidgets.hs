@@ -176,7 +176,7 @@ tbCase :: InformationSchema -> [Plugins] -> SelPKConstraint  -> TB Identity Key 
 tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens oldItems  = do
         l <- flabel # set text (show $ _relOrigin <$> rel )
         let
-            nonInj = (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ concat $ fmap _relOrigin . keyattr <$> ifk)
+            nonInj = traceShowId $ (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ concat $ fmap _relOrigin . keyattr <$> ifk)
             nonInjRefs = filter (flip S.isSubsetOf nonInj . S.fromList . fmap _relOrigin . keyattr .Compose . Identity .fst) wl
             nonInjConstr :: SelTBConstraint
             nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 _ l) -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity) $ maybeToList j) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l)).triding) <$> nonInjRefs
@@ -186,10 +186,10 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens oldItems  = do
             restrictConstraint = filter ((== (fmap _relOrigin $ keyattri i )) .  fmap _relOrigin . concat . fmap keyattr  .fst) constr
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             convertConstr :: SelTBConstraint
-            convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap tbrefM td /= Just el )  $ (justError "no backref" . backFKRef relTable ifk . Just) i)  ) <$> oldItems <*>) <$>  traceShow (ifk , unlines . fmap show $ fmap fst restrictConstraint ) restrictConstraint
+            convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr  el && fmap tbrefM td /= Just el )  $ (justError "no backref" . traceShowId . backFKRef relTable ifk . Just) i)) <$> oldItems <*>) <$>   restrictConstraint
             ftdi = fmap (runIdentity . getCompose ) <$>  tbi
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return (fmap (runIdentity . getCompose ) <$>  tbi)) (fmap Just . filterJust . snd <$>  pfks )
-        tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks wl (ftdi ) i
+        tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks wl (fmap traceShowId  ftdi ) i
         dv <- UI.div #  set UI.class_ "col-xs-12"# set children [l,getElement tds]
         paintEdit l (facts (fmap tbrefM <$> triding tds)) (fmap tbrefM <$> facts oldItems)
         return $ TrivialWidget (triding tds) dv
@@ -510,10 +510,10 @@ attrUITable
      -> [Event (Maybe (TB Identity Key Showable))]
      -> TB Identity Key ()
      -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
-attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ (KOptional _) ) v) = do
+attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ (KOptional _) ) v) = do
       res <- attrUITable (join . fmap unLeftItens <$> tAttr') (fmap (join. fmap unLeftItens ) <$>  evs) (Attr (unKOptional i) v)
       return (leftItens attr <$> res)
-attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ (KArray _) ) v) = mdo
+attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ (KArray _) ) v) = mdo
             offsetDiv  <- UI.div
             let wheel = fmap negate $ mousewheel offsetDiv
             TrivialWidget offsetT offset <- offsetField 0  wheel (maybe 0 (V.length . (\(SComposite l ) -> l) . _tbattr) <$> facts bres)
@@ -731,12 +731,12 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _ _ ) ) =
           ftdi2 =   fmap (fmap unTB. tbrefM ) <$> ftdi
           res3 :: Tidings [TB1 Showable]
           res3 =  foldr (\constr  res2 -> (\el constr -> filter (not. constr) el)  <$> res2  <*> snd constr ) (tidings res2 never) constr
-          unRKOptional (Key a b d m (KOptional c)) = Key a b d m c
-          unRKOptional (Key a b d m c) = Key a b d m c
+          unRKOptional (Key a b d n m (KOptional c)) = Key a b d n m c
+          unRKOptional (Key a b d n m c) = Key a b d n m c
       let
-          search = (\i j -> join $ fmap (\k-> L.find (\(TB1 _ l )-> interPoint rel k  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList . _kvvalues . unTB $ l)) ) i) $ j )
+          search = (\i j -> join $ fmap (\k-> L.find (\(TB1 kv l )-> traceShow (filter (flip S.member (_kvpk kv) . _relTarget) rel,k) $ interPoint (filter (flip S.member (_kvpk kv) . _relTarget) rel) k  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList . _kvvalues . unTB $ l)) ) i) $ j )
           vv :: Tidings (Maybe [TB Identity Key Showable])
-          vv =   liftA2 (<>) iold2  ftdi2
+          vv =   fmap traceShowId $ liftA2 (<>) iold2  ftdi2
       cvres <- currentValue (facts vv)
       filterInp <- UI.input
       filterInpBh <- stepper "" (UI.valueChange filterInp)
@@ -796,7 +796,7 @@ interPoint
      -> [TB Identity (FKey (KType Text)) Showable]
      -> [TB Identity (FKey (KType Text)) Showable]
      -> Bool
-interPoint ks i j = all id $  catMaybes $ fmap (\(Rel l op  m) -> {-justError "interPoint wrong fields" $-} liftA2 (intersectPredTuple  op) (L.find ((==l).keyAttr ) i )   (L.find ((==m).keyAttr ) j)) ks
+interPoint ks i j = (\i -> if L.null i then False else all id  i)$  catMaybes $ fmap (\(Rel l op  m) -> {-justError "interPoint wrong fields" $-} liftA2 (intersectPredTuple  op) (L.find ((==l).keyAttr ) i )   (L.find ((==m).keyAttr ) j)) ks
 
 intersectPredTuple  op = (\i j-> intersectPred (textToPrim <$> keyType (keyAttr i)) op  (textToPrim <$> keyType (keyAttr j)) (unAttr i) (unAttr j))
 

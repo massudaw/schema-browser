@@ -569,6 +569,11 @@ fromArray typeInfo f = Tra.sequence . (parseIt <$>) <$> range delim
 instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
+fromShowable ty v =
+   case parseOnly (parseShowable (textToPrim <$> ty )) v of
+      Right i -> Just i
+      Left l -> Nothing
+
 fromAttr foldable = do
     let parser  = parseLabeledTable foldable
     FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
