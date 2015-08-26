@@ -176,10 +176,10 @@ tbCase :: InformationSchema -> [Plugins] -> SelPKConstraint  -> TB Identity Key 
 tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens oldItems  = do
         l <- flabel # set text (show $ _relOrigin <$> rel )
         let
-            nonInj = (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ concat $ fmap _relOrigin . keyattr <$> ifk)
-            nonInjRefs = filter (flip S.isSubsetOf nonInj . S.fromList . fmap _relOrigin . keyattr .Compose . Identity .fst) wl
+            nonInj = traceShowId $ (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ concat $ fmap _relOrigin . keyattr <$> ifk)
+            nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattr .Compose . Identity .fst) wl
             nonInjConstr :: SelTBConstraint
-            nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 _ l) -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity) $ maybeToList j) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l)).triding) <$> nonInjRefs
+            nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 _ l) -> maybe True id $ (\ j -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity)  [j]) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) <$> j ).triding) <$> nonInjRefs
             tbi = fmap (Compose . Identity)  <$> oldItems
             thisPlugs = filter (hasProd (isNested ((IProd True $ fmap (keyValue._relOrigin) (keyattri i) ))) .  fst) plugItens
             pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> ( thisPlugs)
@@ -447,6 +447,7 @@ unLeftKey (IT na (LeftTB1 (Just tb1))) = IT na tb1
 unLeftKey i@(IT na (TB1 _ _ )) = i
 unLeftKey (FKT ilk rel  (LeftTB1 (Just tb1))) = (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOrigin unKOptional <$> rel) tb1)
 unLeftKey i@(FKT ilk rel  (TB1 _ _ )) = i
+unLeftKey i = errorWithStackTrace (show i)
 
 unLeftItens  :: TB Identity  Key Showable -> Maybe (TB Identity  Key Showable)
 unLeftItens = unLeftTB
@@ -718,7 +719,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _ _ ) ) =
           oldASet :: Set Key
           oldASet = S.fromList (_relOrigin <$> filterNotReflexive rel )
           replaceKey =  firstTB (\k -> maybe k _relTarget $ L.find ((==k)._relOrigin) rel)
-          nonInj =  S.difference (S.fromList $fmap  _relOrigin   $ filterReflexive $ rel) (S.unions $ fmap (S.fromList . fmap _relOrigin .keyattr) ifk)
+          nonInj =  traceShowId $ S.difference (S.fromList $fmap  _relOrigin   $ rel) (S.unions $ fmap (S.fromList . fmap _relOrigin .keyattr) ifk)
           nonInjRefs = filter (flip S.isSubsetOf nonInj . S.fromList . fmap _relOrigin . keyattr .Compose . Identity .fst) wl
           staticold :: [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key (Showable))))]
           staticold  =    second (fmap (fmap replaceKey . join . fmap unLeftItens)) . first (replaceKey .unLeftKey) <$>  nonInjRefs
@@ -795,7 +796,7 @@ interPoint
      -> [TB Identity (FKey (KType Text)) Showable]
      -> [TB Identity (FKey (KType Text)) Showable]
      -> Bool
-interPoint ks i j = (\i -> if L.null i then False else all id  i)$  catMaybes $ fmap (\(Rel l op  m) -> {-justError "interPoint wrong fields" $-} liftA2 (intersectPredTuple  op) (L.find ((==l).keyAttr ) i )   (L.find ((==m).keyAttr ) j)) ks
+interPoint ks i j = (\i -> if L.null i then traceShow (i,j) False else  all id  i)$  catMaybes $ fmap (\(Rel l op  m) -> {-justError "interPoint wrong fields" $-}  liftA2 (intersectPredTuple  op) (L.find ((==l).keyAttr ) i )   (L.find ((==m).keyAttr ) j)) ks
 
 intersectPredTuple  op = (\i j-> intersectPred (textToPrim <$> keyType (keyAttr i)) op  (textToPrim <$> keyType (keyAttr j)) (unAttr i) (unAttr j))
 

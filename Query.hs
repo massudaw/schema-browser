@@ -515,10 +515,13 @@ filterReflexive ks = L.filter (reflexiveRel ks) ks
 
 notReflexiveRel ks = not . reflexiveRel ks
 reflexiveRel ks
+  -- | any (isInlineRel) ks = isInlineRel
   | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
   | any (isJust . keyStatic . _relOrigin) ks = ( isNothing . keyStatic. _relOrigin)
   | any (\j -> not $ isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks =  const False
   | otherwise = (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) ))
+    where isInlineRel (Inline _ ) =  True
+          isInlineRel i = False
 
 
 isPathReflexive (FKJoinTable _ ks _)
