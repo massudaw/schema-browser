@@ -176,7 +176,7 @@ tbCase :: InformationSchema -> [Plugins] -> SelPKConstraint  -> TB Identity Key 
 tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens oldItems  = do
         l <- flabel # set text (show $ _relOrigin <$> rel )
         let
-            nonInj = traceShowId $ (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ concat $ fmap _relOrigin . keyattr <$> ifk)
+            nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ concat $ fmap _relOrigin . keyattr <$> ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattr .Compose . Identity .fst) wl
             nonInjConstr :: SelTBConstraint
             nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 _ l) -> maybe True id $ (\ j -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity)  [j]) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) <$> j ).triding) <$> nonInjRefs
@@ -186,7 +186,7 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens oldItems  = do
             restrictConstraint = filter ( (== (S.fromList .  fmap _relOrigin $ keyattri i )) . S.fromList .  fmap _relOrigin . concat . fmap keyattr  .fst) constr
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             convertConstr :: SelTBConstraint
-            convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr   el  && (maybe False (F.all id) $ liftA2 (M.intersectionWith (/=)) (M.fromList  . concat . fmap aattr . tbrefM  <$> td) (Just (M.fromList  . concat $ fmap aattr el) )))  $ (justError "no backref" . backFKRef relTable ( _relOrigin <$> rel ). Just) i)) <$> oldItems <*>) <$>   ( restrictConstraint)
+            convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr   el  {-&& (maybe False (F.any id) $ liftA2 (M.intersectionWith (/=)) (M.fromList  . concat . fmap aattr . tbrefM  <$> td) (Just (M.fromList  . concat $ fmap aattr el) ))-} )  $ (justError "no backref" . backFKRef relTable ( _relOrigin <$> rel ) . Just) i)) <$> oldItems <*>) <$>   ( restrictConstraint)
             ftdi = fmap (runIdentity . getCompose ) <$>  tbi
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return (fmap (runIdentity . getCompose ) <$>  tbi)) (fmap Just . filterJust . snd <$>  pfks )
         tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks wl (ftdi ) i
@@ -328,9 +328,9 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 m _ ) preoldItems = do
           oldItemsB <- stepper (maybe preoldItens modifyTB loadedItens) oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
               tpkConstraint :: ([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)
-              tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK ftb , flip pkConstraint  <$> bres )
+              tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK ftb , flip pkConstraint  <$> ((\e l -> maybe l (flip (L.deleteBy (onBin (pkOpSet) (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ))) l) e) <$> oldItems <*>bres))
               unConstraints :: [([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)]
-              unConstraints = (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  ftb , flip (unConstraint un) <$> bres )) <$> _kvuniques m
+              unConstraints = (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  ftb , flip (unConstraint un) <$> ((\e l -> maybe l (flip (L.deleteBy (onBin (pkOpSet) (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ))) l) e) <$> oldItems <*>bres))) <$> _kvuniques m
           (listBody,tableb) <- uiTable inf pgs (tpkConstraint:unConstraints) (tableName table) refs pmods ftb oldItems
           (panelItems,evsa)<- processPanelTable inf  (facts tableb) (facts bres) table oldItems
           let evs =  unions (filterJust loadedItensEv : evsa)
@@ -791,7 +791,6 @@ fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) 
      leng <- UI.span # sink text (("Size: " ++) .show .maybe 0 (length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      fksE <- UI.div # set UI.style [("display","inline-flex")] # set children [offset , leng ]
      res <- UI.div # set children [fksE ,dv]
-     -- paintEdit (getElement l) (facts bres) (facts oldItems )
      return $  TrivialWidget bres  res
 
 interPoint
@@ -799,7 +798,7 @@ interPoint
      -> [TB Identity (FKey (KType Text)) Showable]
      -> [TB Identity (FKey (KType Text)) Showable]
      -> Bool
-interPoint ks i j = (\i -> if L.null i then traceShow (i,j) False else  all id  i)$  catMaybes $ fmap (\(Rel l op  m) -> {-justError "interPoint wrong fields" $-}  liftA2 (intersectPredTuple  op) (L.find ((==l).keyAttr ) i )   (L.find ((==m).keyAttr ) j)) ks
+interPoint ks i j = (\i -> if L.null i then False else  all id  i)$  catMaybes $ fmap (\(Rel l op  m) -> {-justError "interPoint wrong fields" $-}  liftA2 (intersectPredTuple  op) (L.find ((==l).keyAttr ) i )   (L.find ((==m).keyAttr ) j)) ks
 
 intersectPredTuple  op = (\i j-> intersectPred (textToPrim <$> keyType (keyAttr i)) op  (textToPrim <$> keyType (keyAttr j)) (unAttr i) (unAttr j))
 
