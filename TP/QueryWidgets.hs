@@ -443,6 +443,7 @@ unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> [mapComp (fir
 unIndex o i = errorWithStackTrace (show (o,i))
 
 unLeftKey :: TB Identity Key () -> TB Identity Key ()
+unLeftKey (Attr k v ) = (Attr (unKOptional k) v)
 unLeftKey (IT na (LeftTB1 (Just tb1))) = IT na tb1
 unLeftKey i@(IT na (TB1 _ _ )) = i
 unLeftKey (FKT ilk rel  (LeftTB1 (Just tb1))) = (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOrigin unKOptional <$> rel) tb1)
@@ -550,8 +551,10 @@ buildUI i  tdi = case i of
            return $ TrivialWidget (triding tdnew ) retUI
 
          (KInterval ti) -> do
-            inf <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (\(SInterval i) -> inf' i) <$> tdi)
-            sup <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (\(SInterval i) -> sup' i) <$> tdi)
+            let unInterval f (SInterval i ) = f i
+                unInterval _ i = errorWithStackTrace (show i)
+            inf <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (unInterval inf' ) <$> tdi)
+            sup <- fmap (fmap ER.Finite) <$> buildUI ti (fmap (unInterval sup')  <$> tdi)
             lbd <- fmap Just <$> checkedWidget (maybe False id . fmap (\(SInterval i) -> snd . Interval.lowerBound' $i) <$> tdi)
             ubd <- fmap Just <$> checkedWidget (maybe False id .fmap (\(SInterval i) -> snd . Interval.upperBound' $i) <$> tdi)
             composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
@@ -718,8 +721,8 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _ _ ) ) =
           ftdi = oldItems
           oldASet :: Set Key
           oldASet = S.fromList (_relOrigin <$> filterNotReflexive rel )
-          replaceKey =  firstTB (\k -> maybe k _relTarget $ L.find ((==k)._relOrigin) rel)
-          nonInj =  traceShowId $ S.difference (S.fromList $fmap  _relOrigin   $ rel) (S.unions $ fmap (S.fromList . fmap _relOrigin .keyattr) ifk)
+          replaceKey =  firstTB (\k -> maybe k _relTarget $ L.find ((==k)._relOrigin) $ filterReflexive rel)
+          nonInj =   S.difference (S.fromList $fmap  _relOrigin   $ rel) (S.unions $ fmap (S.fromList . fmap _relOrigin .keyattr) ifk)
           nonInjRefs = filter (flip S.isSubsetOf nonInj . S.fromList . fmap _relOrigin . keyattr .Compose . Identity .fst) wl
           staticold :: [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key (Showable))))]
           staticold  =    second (fmap (fmap replaceKey . join . fmap unLeftItens)) . first (replaceKey .unLeftKey) <$>  nonInjRefs
