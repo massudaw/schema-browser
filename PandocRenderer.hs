@@ -73,8 +73,8 @@ renderProjectReport = (staticP myDoc , element )
       myDoc = proc preenv -> do
           pdoc <- (proc env -> do
               pay <- atRA "pagamentos" $ payA -< ()
-              art <- atR "id_project" $ atR "art" $ atR "pagamento" $ payA-< ()
-              dare <- atR "id_project" $ atR "taxa_dare" $ payA -< ()
+              art <- atR "id_project" $ atR "art" $ atR "tag_art,pagamento" $ payA-< ()
+              dare <- atR "id_project" $ atR "tag_taxa,taxa_dare" $ payA -< ()
               returnA -<   (setT ( para $ "Proposta :" ) $ doc $
                      orderedList [
                        para "Pagamento" <>
