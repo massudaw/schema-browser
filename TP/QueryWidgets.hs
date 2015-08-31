@@ -63,6 +63,7 @@ generateFresh = do
   return $ (h,tidings b e)
 
 
+
 createFresh n tname pmap i ty  =  do
   k <- newKey i ty 0
   return $ M.insert (n,tname,i) k pmap
@@ -327,11 +328,12 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 m _ ) preoldItems = do
           let oldItemsE = (\i -> maybe i modifyTB ) <$> facts preoldItems <@> loadedItensEv
           oldItemsB <- stepper (maybe preoldItens modifyTB loadedItens) oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
+              deleteCurrent e l =  maybe l (flip (L.deleteBy (onBin pkOpSet (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ))) l) e
               tpkConstraint :: ([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)
-              tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK ftb , flip pkConstraint  <$> ((\e l -> maybe l (flip (L.deleteBy (onBin (pkOpSet) (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ))) l) e) <$> oldItems <*>bres))
+              tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK ftb , flip pkConstraint  <$> (deleteCurrent  <$> oldItems <*>bres))
               unConstraints :: [([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)]
-              unConstraints = (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  ftb , flip (unConstraint un) <$> ((\e l -> maybe l (flip (L.deleteBy (onBin (pkOpSet) (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ))) l) e) <$> oldItems <*>bres))) <$> _kvuniques m
-          (listBody,tableb) <- uiTable inf pgs (tpkConstraint:unConstraints) (tableName table) refs pmods ftb oldItems
+              unConstraints = (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  ftb , flip (unConstraint un) <$> (deleteCurrent <$> oldItems <*>bres))) <$> _kvuniques m
+          (listBody,tableb) <- uiTable inf pgs (tpkConstraint:unConstraints) (_kvname m) refs pmods ftb oldItems
           (panelItems,evsa)<- processPanelTable inf  (facts tableb) (facts bres) table oldItems
           let evs =  unions (filterJust loadedItensEv : evsa)
           onEvent evs (\i ->  liftIO $ e i )
@@ -356,6 +358,7 @@ type TBConstraint = TB1 Showable -> Bool
 
 type SelPKConstraint = [([Compose Identity (TB Identity) Key ()],Tidings PKConstraint)]
 type SelTBConstraint = [([Compose Identity (TB Identity) Key ()],Tidings TBConstraint)]
+
 pkConstraint v  = maybe False (const True) . L.find (pkOpSet (concat . fmap aattr $ v ) . (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ))
 unConstraint u v  = maybe False (const True) . L.find ( pkOpSet (concat . fmap aattr $ v ) . (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbUn u  ))
 
@@ -663,22 +666,30 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
       element dv  # set children (fk: (getElement <$> items))
       return $ TrivialWidget bres dv
 
-offsetField  init ev  max = mdo
+offsetField  init eve  max = mdo
   offsetL <- UI.span # set text "Offset: "
   offset <- UI.input # set UI.style [("width","50px")] # sink UI.value (show <$> offsetB)
+  leng <- UI.span # sink text (("Size: " ++) .show  <$> max )
+  offparen <- UI.div # set children [offsetL,offset,leng]
+
   let offsetE =  filterJust $ (\m i -> if i <m then Just i else Nothing ) <$> max <@> (filterJust $ readMaybe <$> onEnter offset)
+      ev = unionWith const (negate <$> mousewheel offparen) eve
       saturate m i j
           | m == 0 = 0
           | i + j < 0  = 0
           | i + j > m -1  = m -1
           | otherwise = i + j
+      diff o m inc
+        | saturate m inc o /= o = Just (saturate m inc )
+        | otherwise = Nothing
 
-  let ev2 = (fmap concatenate $ unions [fmap const offsetE,saturate  <$> max <@> ev])
+  let
+      filt = ( filterJust $ diff <$> offsetB <*> max <@> ev  )
+      ev2 = (fmap concatenate $ unions [fmap const offsetE,filt ])
   offsetB <- accumB init ev2
   let
      cev = flip ($) <$> offsetB <@> ev2
      offsetT = tidings offsetB cev
-  offparen <- UI.div # set children [offsetL,offset]
   return (TrivialWidget offsetT offparen)
 
 backFKRef relTable ifk box = fmap (\ibox -> (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . catMaybes . fmap lookFKsel $  ibox) ) .    fmap (concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1) $ box
@@ -755,8 +766,8 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _ _ ) ) =
       let evsel = unionWith const (rumors tdi) (rumors $ join <$> userSelection itemList)
       prop <- stepper cv evsel
       let ptds = tidings prop evsel
-      tds <- foldr (\i j -> updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap _fkttable.filterJust . snd <$>  plmods)
-      (celem,evs,pretdi) <- crudUITable inf pgs  (pure False) res3 staticold (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
+      tds <- foldr (\i j ->updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap _fkttable.filterJust . snd <$>  plmods)
+      (celem,evs,pretdi) <-crudUITable inf pgs  (pure False) res3 staticold (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
       let
           bselection = fmap Just <$> st
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> userSelection itemList), rumors tdi]),(fmap modifyTB <$> evs)]

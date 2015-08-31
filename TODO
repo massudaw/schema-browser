@@ -1,9 +1,10 @@
 BUGS
--- Fix aliasing for same (set key) noninjective refs
 -- Proper Treat one optional key in product 
--- FK constraints can be bigger than pk
 
 NEW FEATURES
+
+JSON Field
+-- Implement a schema free field  
 
 MULTIPLE TRANSACTION DIFF FUNCTION
 -- Analyse diff tree and do INSERT SERIAL, INSERT , UPDATE 
@@ -16,10 +17,7 @@ EXTRA INFO ON HOVER
 -- Preview transaction log on hover over insert , edit and delete
 
 GENERATE AND PROPAGATE MORE CONSTRAINTS
--- for unique table key constraint 
 -- for row check constraint
-
-
 
 CUSTOM PER TABLE FILTERS
 -- ui filters and database filters

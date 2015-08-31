@@ -64,6 +64,47 @@ setFooter = setMeta "footer"
 
 setT = setMeta "title"
 
+renderProjectContract = (staticP myDoc , element )
+   where
+      tname = "pricing"
+      var str =  maybe "" fromString . fmap (renderShowable) <$> idxM str
+      varT str =  maybe "" fromString . fmap (renderShowable) <$> idxR str
+      payA = displayPay <$> (maybe (SText "Não Agendado") id <$> idxM "payment_date") <*> idxK "payment_description"  <*> idxK "price"
+          where displayPay i da j = plain $ (fromString.renderShowable $ i ) <>  " - " <>  (fromString . renderShowable $ da )<> " - R$ " <> ((fromString.renderShowable) j)
+      myDoc :: ArrowReader
+      myDoc = proc preenv -> do
+          pdoc <- (proc env -> do
+              pay <- atRA "pagamentos" $ payA -< ()
+              own <- atR "id_project"
+                     ( atR "id_owner,id_contact"
+                        ( atR "id_owner" ( varT "owner_name"  ))) -< env
+              art <- atR "id_project" $ atR "art" $ atR "tag_art,pagamento" $ payA-< ()
+              end <- atR "id_project" $ atR "address" (var "logradouro" <> ", "<> var "number" <> " " <> var "complemento" <> " " <> var "cep" <>" " <> var "municipio" <> "-" <> var "uf" ) -< env
+              dare <- atR "id_project" $ atR "tag_taxa,taxa_dare" $ payA -< ()
+              returnA -<   (setT ( para $ "Contrato de Prestação de Serviços / nº " ) $ doc $
+                     ((para "Cláusula Primeira"
+                          <> plain "As partes abaixo qualificadas celebram o presente contrato de Prestação de Serviços, consubstanciado nos regramentos e condições elencados nas Cláusulas especiais e Gerais a seguir:"  <>
+                      para "Contratante:"
+                          <> plain  (own <> ",  Empresa Sediada "  <> end )<>
+                      para "Contratada:"
+                          <> plain  "CONDOMINIO RESIDENCIAL THE PLACE,  Empresa Sediada") <>
+                     orderedList [
+                       para "Pagamento" <>
+                          bulletList pay <>
+                       para "Despesas" <>
+                          bulletList [art,dare] <>
+                          plain "As despesas referentes a cópias dos projetos e taxas para aprovação não estão inclusas no orçamento e são por conta do Contratante"
+                        ]))) -< ()
+          outdoc <- act (\i -> do
+              template <- liftIO$ readFile' utf8 "contract.template"
+              liftIO$ makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
+          odxR "contract" -< ()
+          returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "contract" . SOptional . Just . SDelayed . Just . SBinary .  BS.toStrict . either id id ) outdoc
+      element inf = maybe (return Nothing) (\inp -> do
+                              b <- runReaderT (dynPK myDoc $ ()) (Just inp)
+                              return $ liftKeys inf tname <$> b)
+
+
 renderProjectReport = (staticP myDoc , element )
    where
       tname = "pricing"
@@ -75,7 +116,7 @@ renderProjectReport = (staticP myDoc , element )
               pay <- atRA "pagamentos" $ payA -< ()
               art <- atR "id_project" $ atR "art" $ atR "tag_art,pagamento" $ payA-< ()
               dare <- atR "id_project" $ atR "tag_taxa,taxa_dare" $ payA -< ()
-              returnA -<   (setT ( para $ "Proposta :" ) $ doc $
+              returnA -<   (setT ( para $ "Contrato de Prestação de Serviços / nº  " ) $ doc $
                      orderedList [
                        para "Pagamento" <>
                           bulletList pay <>
@@ -152,45 +193,7 @@ renderProjectPricingA = (staticP myDoc , element )
 
 
 
-{-
-renderProjectPricing _ _  inputs = (,pure Nothing) <$> element
-   where
-      varMap input = M.fromList $ (\(i,j)-> (keyValue i,j)) <$> input
-      var env str = maybe "" fromString (renderShowable <$> M.lookup str (varMap env) )
-      arrayVar env str = bulletList . concat . maybeToList $ join  (cshow  <$> M.lookup str (varMap env) )
-        where
-          cshow (SComposite a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
-          cshow (SOptional a ) =  join $ fmap cshow a
-      -- myDoc :: Pandoc
-      myDoc env = setTitle "Orçamento do Serviço" $
-         doc $  para (vr "firstname" <> " " <> vr "middlename" <> " " <> vr "lastname" <> ",") <>
-         orderedList [
-           para "Serviços Executados" <> arrayVar env "pricing_service" ,
-           para "Valor da Proposta" <>
-              plain ("Valor total:  " <> vr "pricing_price"),
-           para "Dados do Servico" <>
-             bulletList [
-               plain ("Propietário : " <> vr "owner_name"),
-               plain ("Endereço: " <> vr "logradouro" <> ", " <> vr "number" <> " " <>   vr "complemento"),
-               plain ("Local: " <> vr "municipio" <> "-" <> vr "uf")
-                  ],
-           para "Condições de Pagamento" <>
-              plain "Entrada de 50% (cinquenta porcento) do valor da proposta, 50% (cinquenta por cento) na entrega dos projetos aprovados.",
-           para "Despesas do Contratante" <>
-              plain "As despesas referentes a cópias dos projetos e taxas para aprovação não estão inclusas no orçamento e são por conta do Contratante",
-           para "Validade da Proposta" <>
-              plain ("A proposta terá validade de 10 dias."),
-           para "Prazo de Entrega" <>
-              plain ( vr "pricing_execution_time" <> " dias  úteis, após a confirmação da proposta ou assinatura do contrato.")
-            ]
-        where
-          vr = var env
-      element = do
-             template <- liftIO $ readFile' utf8 "raw.template"
-             pdfTidings <- joinTEvent   ( maybe (return (Left "")) ( makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template } . myDoc ) <$> inputs)
-             mkElement "iframe" # sink UI.src ( fmap (\i -> "data:application/pdf;base64," <> i) $ fmap (either BS.unpack (BS.unpack.BS64.encode)) $ facts pdfTidings) # set style [("width","100%"),("height","300px")]
-            --UI.div # sink html (maybe ""  (writeHtmlString def . myDoc) <$> facts inputs)
--}
+
 readFile' e name = openFile name ReadMode >>= liftM2 (>>) (flip hSetEncoding $ e)   hGetContents
 
 test = do

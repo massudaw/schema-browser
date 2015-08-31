@@ -388,8 +388,6 @@ testPointInRange ui = do
                       getBody w #+ [element e1]
                       return () )
 
-
-
 unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w -> runUI w (f a))
 
 paint e b = element e # sink UI.style (greenRed . isJust <$> b)
@@ -399,6 +397,7 @@ paintEdit e b i  = element e # sink0 UI.style ((\ m n -> pure . ("background-col
           | isNothing i  && isNothing j = "red"
           | isNothing i && isJust j  = "purple"
           | i /= j = "yellow"
+          -- | i /= j = traceShow (i,j) "yellow"
           | i == j = "blue"
           | otherwise = "green"
 

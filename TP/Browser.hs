@@ -84,6 +84,76 @@ argsToState  [h,d,u,p,s,t] = BrowserState h d  u p (Just s) (Just t )
 argsToState  [h,d,u,p,s] = BrowserState h d  u p  (Just s)  Nothing
 argsToState  [h,d,u,p] = BrowserState h d  u p Nothing Nothing
 
+main :: IO ()
+main = do
+  args <- getArgs
+  --let schema = "public"
+  --conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
+  {-
+  let sorted = topSortTables (M.elems baseTables)
+
+  print "DROPPING TABLES"
+  traverse (\t -> do
+    execute_ connTest . fromString . T.unpack . dropTable $ t
+    print $ tableName t
+    )  $ reverse  sorted
+
+  print "CREATING TABLES"
+  traverse (\t -> do
+    execute_  connTest . fromString . T.unpack . createTable $ t
+    print $ tableName t
+    )  sorted
+  -}
+  (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
+
+  poller (argsToState (tail args) ) h  [queryArtAndamento,siapi2Plugin,siapi3Plugin ]
+
+  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e $ tail args)
+  print "Finish"
+
+poller db handler plugs = do
+  let poll (BoundedPlugin2 n a f elemp) =  do
+        conn <- connectPostgreSQL (connRoot db)
+        inf <- keyTables conn  conn (T.pack $ dbn db, T.pack $ user db)
+        tp  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
+        let t = case  tp of
+              [Only i] -> Just i :: Maybe UTCTime
+              [] -> Nothing
+        forkIO $ (maybe (do
+          print $ "Closing conn plugin [" <> T.unpack n <> "] not registered"
+          close conn ) (\_ -> void $ forever $ do
+          [t :: Only UTCTime]  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
+          startTime <- getCurrentTime
+          let intervalsec = fromIntegral $ 60*d
+              d = 60
+          if diffUTCTime startTime  (unOnly t) >  intervalsec
+          then do
+              execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
+              print ("START " <>T.unpack n <> " - " <> show startTime  ::String)
+              let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
+              listRes <- queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
+              let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
+                  tdInput i =  isJust  $ testTable i (fst f)
+                  tdOutput1 i =   not $ isJust  $ testTable i (snd f)
+              let elem inf  = fmap (pure .catMaybes) .  mapM (\inp -> do
+                          o  <- elemp inf (Just inp)
+                          let diff =   join $ diffUpdateAttr  <$>  o <*> Just inp
+                          maybe (return Nothing )  (\i -> updateModAttr inf (fromJust o) inp (lookTable inf a )) diff )
+
+              i <- elem inf evb
+              handler i
+              end <- getCurrentTime
+              print ("END " <>T.unpack n <> " - " <> show end ::String)
+              execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (end ,n,a,"incendio" :: String)
+              threadDelay (d*1000*1000*60)
+          else do
+              threadDelay (round $ (*1000000) $  diffUTCTime startTime (unOnly t)) ) t )
+            `catch` (\(e :: SomeException )->  do
+                print ("Closing conn [" <> T.unpack n <> "] on exception " <> show e)
+                (close conn))
+  mapM poll  plugs
+
+
 
 setup
      :: Show a =>   Event [a] -> [String] -> Window -> UI ()
@@ -106,7 +176,7 @@ setup e args w = void $ do
             element body # set UI.children [dash] # set UI.class_ "row"
         "Editor" -> do
             let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
-            span <- chooserKey  inf k (table bstate)
+            span <- chooserTable inf k (table bstate)
             element body # set UI.children [span,pollRes]# set UI.class_ "row"  )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
 
 
@@ -194,6 +264,12 @@ dashBoardAll  inf = do
     liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,modification_data from metadata.modification_table WHERE schema_name = ? order by modification_id desc limit 100 " (Only $ schemaName inf)
   UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( either (\i-> UI.td) (\(_,_,i ) -> UI.td# showModDiv (i:: Modification Text Showable))  (B.decodeOrFail d ))) v] ) <$> els)
 
+dashBoardAllTable  table inf = do
+  els :: [(Int,LocalTime,Text,Text,(Binary BSL.ByteString))] <-
+    liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,modification_data from metadata.modification_table WHERE schema_name = ? AND  table_name = ?  order by modification_id desc limit 100 " (schemaName inf,table)
+  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( either (\i-> UI.td) (\(_,_,i ) -> UI.td# showModDiv (i:: Modification Text Showable))  (B.decodeOrFail d ))) v] ) <$> els)
+
+
 
 dashBoard inf = do
   els :: [(Text,Vector.Vector (Binary BSL.ByteString))] <-
@@ -206,7 +282,7 @@ attrLine i e   = do
       attrs   l i  = foldl attr i l
   attrs (F.toList (tableAttrs i) ) $ line ( L.intercalate "," (fmap renderShowable .  allKVRec  $ i) <> "  -  " <>  (L.intercalate "," $ fmap (renderShowable) nonRec)) e
 
-chooserKey inf kitems i = do
+chooserTable inf kitems i = do
   let initKey = pure . join $ fmap rawPK . flip M.lookup (tableMap inf) . T.pack <$> i
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
@@ -222,9 +298,73 @@ chooserKey inf kitems i = do
       liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
   tbChooser <- UI.div # set children [filterInp,getElement bset] # set UI.class_ "col-xs-2"
-  body <- UI.div # sink items (facts (pure . chooseKey inf <$> bBset )) # set UI.class_ "col-xs-10"
+  nav  <- buttonSetUI ["Editor","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  element nav # set UI.class_ "col-xs-5"
+  header <- UI.h1 # sink text (T.unpack . translatedName .  justError "no table " . flip M.lookup (pkMap inf) <$> facts bBset ) # set UI.class_ "col-xs-7"
+  chooserDiv <- UI.div # set children  [header ,getElement nav] # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
+  body <- UI.div # set UI.class_ "row"
+  mapUITEvent body (\(nav,table)->
+      case nav of
+        "Changes" -> do
+            dash <- dashBoardAllTable (tableName $ justError "no table " $ M.lookup table (pkMap inf)) inf
+            element body # set UI.children [dash]
+        "Editor" -> do
+            span <- viewerKey inf table
+            element body # set UI.children [span]
+        ) $ liftA2 (,) (triding nav) bBset
+  subnet <- UI.div # set children [chooserDiv,body] # set UI.class_ "col-xs-10"
+  UI.div # set children [tbChooser, subnet ]  # set UI.class_ "row"
 
-  UI.div # set children [tbChooser , body]  # set UI.class_ "row"
+viewerKey
+  ::
+      InformationSchema -> S.Set Key -> UI Element
+viewerKey inf key = mdo
+  let
+      table = fromJust  $ M.lookup key $ pkMap inf
+
+  (tmvar,vpt)  <- liftIO $ eventTable inf table
+  vp <- currentValue (facts vpt)
+
+  let
+      tdi = pure Nothing
+  cv <- currentValue (facts tdi)
+  -- Final Query ListBox
+  filterInp <- UI.input
+  filterInpBh <- stepper "" (UI.valueChange filterInp)
+  el <- filterUI  inf (allRec' (tableMap inf)  table)
+  let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
+      sortSet =  F.toList . tableKeys . tableNonRef . allRec' (tableMap inf ) $ table
+  sortList  <- multiListBox (pure sortSet) (pure $ F.toList key ) (pure (line . show))
+  asc <- checkedWidget (pure True)
+  let
+     filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList  )
+     tsort = sorting <$> triding asc <*> multiUserSelection sortList
+     res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 _ kv ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $  keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
+  let pageSize = 20
+  itemList <- listBox ((\o -> L.take pageSize . L.drop (o*pageSize) )<$> triding offset <*>res3) (tidings bselection never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
+  offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) ((\i -> (L.length i `div` pageSize) ) <$> facts res3)
+  let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
+  prop <- stepper cv evsel
+  let tds = tidings prop evsel
+  (cru ,evs,pretdi) <- crudUITable inf plugList  (pure True)  res3 [] [] (allRec' (tableMap inf) table) tds
+  let
+     bselection = st
+     sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [(rumors  $userSelection itemList ) ,rumors tdi]),(fmap modifyTB <$> evs)]
+  st <- stepper cv sel
+  inisort <- currentValue (facts tsort)
+  res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (rumors vpt) ,rumors tsort ])
+  onEvent (foldr addToList <$> res2 <@> evs)  (liftIO .  putMVar tmvar)
+
+  element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
+  insertDiv <- UI.div # set children cru # set UI.class_ "row"
+  itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset , filterInp,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"
+  itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row" # set UI.style [("display","inline-flex")]
+  UI.div # set children ([itemSelec,insertDiv ] )
+
+
+
+
+
 
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
 
@@ -255,125 +395,5 @@ filterUI inf t@(TB1 k v) = do
   elv <- mapDynEvent (maybe emptyUI  (filterCase inf . unTB . fmap (const ()) . snd )) (TrivialWidget (userSelection el) (getElement el))
   out <- UI.div # sink UI.text (show <$> facts (triding elv))
   TrivialWidget (triding elv) <$> UI.div # set children [getElement el , getElement elv,out]
-
-
-
-chooseKey
-  ::
-      InformationSchema -> S.Set Key -> UI Element
-chooseKey inf key = mdo
-  -- Filter Box (Saved Filter)
-
-  let bBset = pure key :: Tidings (S.Set Key)
-      table = fromJust  $ M.lookup key $ pkMap inf
-
-  (tmvar,vpt)  <- liftIO $ eventTable inf table
-  vp <- currentValue (facts vpt)
-
-  let
-      tdi = pure Nothing
-  cv <- currentValue (facts tdi)
-  -- Final Query ListBox
-  filterInp <- UI.input
-  filterInpBh <- stepper "" (UI.valueChange filterInp)
-  el <- filterUI  inf (allRec' (tableMap inf)  table)
-  let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
-      sortSet =  F.toList . tableKeys . tableNonRef . allRec' (tableMap inf ) $ table
-  sortList  <- multiListBox (pure sortSet) (F.toList <$> bBset) (pure (line . show))
-  asc <- checkedWidget (pure True)
-  let
-     filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList  )
-     tsort = sorting <$> triding asc <*> multiUserSelection sortList
-     res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 _ kv ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $  keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
-  itemList <- listBox res3 (tidings bselection never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
-  let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
-  prop <- stepper cv evsel
-  let tds = tidings prop evsel
-  (cru ,evs,pretdi) <- crudUITable inf plugList  (pure True)  res3 [] [] (allRec' (tableMap inf) table) tds
-  let
-     bselection = st
-     sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [(rumors  $userSelection itemList ) ,rumors tdi]),(fmap modifyTB <$> evs)]
-  st <- stepper cv sel
-  inisort <- currentValue (facts tsort)
-  res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (rumors vpt) ,rumors tsort ])
-  onEvent (foldr addToList <$> res2 <@> evs)  (liftIO .  putMVar tmvar)
-
-  element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","300px")] # set UI.class_ "col-xs-9"
-  insertDiv <- UI.div # set children cru # set UI.class_ "row"
-  itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [filterInp,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"
-  itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row" # set UI.style [("display","inline-flex")]
-  header <- UI.h1 # set text (T.unpack $ translatedName table) # set UI.class_ "row"
-  UI.div # set children ([header,itemSelec,insertDiv ] )
-
-
-
-main :: IO ()
-main = do
-  args <- getArgs
-  --let schema = "public"
-  --conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
-  {-
-  let sorted = topSortTables (M.elems baseTables)
-
-  print "DROPPING TABLES"
-  traverse (\t -> do
-    execute_ connTest . fromString . T.unpack . dropTable $ t
-    print $ tableName t
-    )  $ reverse  sorted
-
-  print "CREATING TABLES"
-  traverse (\t -> do
-    execute_  connTest . fromString . T.unpack . createTable $ t
-    print $ tableName t
-    )  sorted
-  -}
-  (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
-
-  poller (argsToState (tail args) ) h  [queryArtAndamento,siapi2Plugin,siapi3Plugin ]
-
-  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e $ tail args)
-  print "Finish"
-
-poller db handler plugs = do
-  let poll (BoundedPlugin2 n a f elemp) =  do
-        conn <- connectPostgreSQL (connRoot db)
-        inf <- keyTables conn  conn (T.pack $ dbn db, T.pack $ user db)
-        tp  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
-        let t = case  tp of
-              [Only i] -> Just i :: Maybe UTCTime
-              [] -> Nothing
-        forkIO $ (maybe (do
-          print $ "Closing conn plugin [" <> T.unpack n <> "] not registered"
-          close conn ) (\_ -> void $ forever $ do
-          [t :: Only UTCTime]  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
-          startTime <- getCurrentTime
-          let intervalsec = fromIntegral $ 60*d
-              d = 60
-          if diffUTCTime startTime  (unOnly t) >  intervalsec
-          then do
-              execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
-              print ("START " <>T.unpack n <> " - " <> show startTime  ::String)
-              let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
-              listRes <- queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
-              let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
-                  tdInput i =  isJust  $ testTable i (fst f)
-                  tdOutput1 i =   not $ isJust  $ testTable i (snd f)
-              let elem inf  = fmap (pure .catMaybes) .  mapM (\inp -> do
-                          o  <- elemp inf (Just inp)
-                          let diff =   join $ diffUpdateAttr  <$>  o <*> Just inp
-                          maybe (return Nothing )  (\i -> updateModAttr inf (fromJust o) inp (lookTable inf a )) diff )
-
-              i <- elem inf evb
-              handler i
-              end <- getCurrentTime
-              print ("END " <>T.unpack n <> " - " <> show end ::String)
-              execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (end ,n,a,"incendio" :: String)
-              threadDelay (d*1000*1000*60)
-          else do
-              threadDelay (round $ (*1000000) $  diffUTCTime startTime (unOnly t)) ) t )
-            `catch` (\(e :: SomeException )->  do
-                print ("Closing conn [" <> T.unpack n <> "] on exception " <> show e)
-                (close conn))
-  mapM poll  plugs
 
 
