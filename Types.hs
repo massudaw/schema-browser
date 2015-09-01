@@ -220,6 +220,7 @@ filterKey f (ArrayTB1 k ) = ArrayTB1 (filterKey f <$> k)
 
 mapKey f (TB1 m k ) = TB1 (mapKVMeta f m) . mapComp (firstKV f)  $  k
 mapKey f (LeftTB1 k ) = LeftTB1 (mapKey f <$> k)
+mapKey f (DelayedTB1 k ) = DelayedTB1 (mapKey f <$> k)
 mapKey f (ArrayTB1 k ) = ArrayTB1 (mapKey f <$> k)
 
 
@@ -234,8 +235,9 @@ firstTB f (TBEither k l m ) = TBEither (f k) ( fmap (mapComp (firstTB f)) l) (fm
 
 
 data FTB1 f k a
-  = TB1 (KVMetadata k) ! (Compose f (KV (Compose f (TB f))) k a)
+  = TB1 ! (KVMetadata k) ! (Compose f (KV (Compose f (TB f))) k a)
   | LeftTB1 ! (Maybe (FTB1 f k a))
+  | DelayedTB1 ! (Maybe (FTB1 f k a))
   | ArrayTB1 ! [(FTB1 f k a)]
   deriving(Functor,Foldable,Traversable,Generic)
 
@@ -482,6 +484,7 @@ keyattri (IT i  _ ) =  keyattr i
 -- tableAttr :: (Traversable f ,Ord k) => TB3 f k () -> [Compose f (TB f) k ()]
 -- tableAttr (ArrayTB1 i) = tableAttr <$> i
 -- tableAttr (LeftTB1 i ) = tableAttr<$> i
+tableAttr (DelayedTB1 (Just tb)) = tableAttr tb
 tableAttr (TB1 m (Compose (Labeled _ (KV  n)))  ) = L.nub $  concat  $ F.toList (nonRef <$> n)
 
 nonRef :: (Eq f,Show k ,Show f,Ord k) => Compose (Labeled f ) (TB (Labeled f) ) k () -> [Compose (Labeled f ) (TB (Labeled f) ) k ()]
@@ -499,6 +502,7 @@ nonRef i = errorWithStackTrace (show i)
 tableNonRef :: Ord k => TB2 k a -> TB3 Identity k a
 tableNonRef (ArrayTB1 i) = ArrayTB1 $ tableNonRef <$> i
 tableNonRef (LeftTB1 i ) = LeftTB1 $ tableNonRef <$> i
+tableNonRef (DelayedTB1 i ) = DelayedTB1 $ tableNonRef <$> i
 tableNonRef (TB1 m n  )  = TB1 m (mapComp (\(KV n)-> KV  (mapFromTBList $ fmap (Compose . Identity ) $ concat $ F.toList $  overComp nonRef <$> n)) n)
   where
     nonRef :: Ord k => TB Identity k a -> [(TB Identity ) k a]

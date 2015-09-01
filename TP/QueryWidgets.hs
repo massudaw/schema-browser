@@ -187,7 +187,7 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens oldItems  = do
             restrictConstraint = filter ( (== (S.fromList .  fmap _relOrigin $ keyattri i )) . S.fromList .  fmap _relOrigin . concat . fmap keyattr  .fst) constr
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             convertConstr :: SelTBConstraint
-            convertConstr = fmap ((\td constr  -> (\i -> (\el -> constr   el  {-&& (maybe False (F.any id) $ liftA2 (M.intersectionWith (/=)) (M.fromList  . concat . fmap aattr . tbrefM  <$> td) (Just (M.fromList  . concat $ fmap aattr el) ))-} )  $ (justError "no backref" . backFKRef relTable ( _relOrigin <$> rel ) . Just) i)) <$> oldItems <*>) <$>   ( restrictConstraint)
+            convertConstr = fmap (fmap (\constr -> (constr   . justError "no backref" . backFKRef relTable ( _relOrigin <$> rel ) . Just ))) <$>  restrictConstraint
             ftdi = fmap (runIdentity . getCompose ) <$>  tbi
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return (fmap (runIdentity . getCompose ) <$>  tbi)) (fmap Just . filterJust . snd <$>  pfks )
         tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks wl (ftdi ) i
@@ -552,7 +552,6 @@ buildUI i  tdi = case i of
            retUI <- UI.div# set children [getElement tdnew]
            paintBorder retUI (facts $ triding tdnew) (facts tdi)
            return $ TrivialWidget (triding tdnew ) retUI
-
          (KInterval ti) -> do
             let unInterval f (SInterval i ) = f i
                 unInterval _ i = errorWithStackTrace (show i)
@@ -783,6 +782,10 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _ _ ) ) =
         fksel =  (\box -> fmap (\ibox -> FKT (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . catMaybes . fmap lookFKsel $ ibox) rel (fromJust box) ) .  fmap (concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1) $ box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> triding box)
       fk <- UI.div # set  children ([getElement box,filterInp] <> celem)
       return $ TrivialWidget fksel fk
+fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk rel  (DelayedTB1 (Just tb1 ))) = do
+    tr <- fkUITable inf pgs constr  plmods  wl oldItems  (FKT  ilk  rel tb1)
+    return $ tr
+
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb1 ))) = do
     tr <- fkUITable inf pgs constr (fmap (join . fmap unLeftItens <$>) <$> plmods)  wl (join . fmap unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOrigin unKOptional <$> rel) tb1)
     return $ leftItens tb <$> tr

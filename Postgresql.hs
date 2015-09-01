@@ -2,6 +2,7 @@
 module Postgresql where
 import Types
 import Data.Ord
+import Control.Monad
 import Utils
 import Query
 import GHC.Stack
@@ -318,7 +319,8 @@ tryquoted i = doublequoted i <|> i
 -- we have overlap between maybe and list so we allow only nonempty lists
 parseLabeledTable :: TB2 Key () -> Parser (TB2 Key Showable)
 parseLabeledTable (ArrayTB1 [t]) =
-  ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey makeOpt t))  >>  return (fail "")  ) )
+  ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey makeOpt t)) <|> parseArray (parseLabeledTable t)  >>  return (fail "")  ) )
+parseLabeledTable (DelayedTB1 _) =  string "t"  >> (return $ DelayedTB1 Nothing )
 parseLabeledTable (LeftTB1 (Just i )) =
   LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapKey makeOpt i) >> return Nothing) <|> return Nothing )
 parseLabeledTable (TB1 me m) = (char '('  *> (do

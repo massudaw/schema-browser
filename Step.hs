@@ -257,6 +257,7 @@ checkField i j = errorWithStackTrace (show (i,j))
 
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
 checkTable l (LeftTB1 j) = join $ fmap (checkTable l) j
+checkTable l (DelayedTB1 j) = join $ fmap (checkTable l) j
 checkTable (Many l) t@(TB1 m v) =
   fmap (TB1 m . Compose . Identity . KV . mapFromTBList ) . allMaybes $ flip checkField t <$> l
 

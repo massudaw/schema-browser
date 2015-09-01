@@ -269,6 +269,13 @@ dashBoardAllTable  table inf = do
     liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,modification_data from metadata.modification_table WHERE schema_name = ? AND  table_name = ?  order by modification_id desc limit 100 " (schemaName inf,table)
   UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( either (\i-> UI.td) (\(_,_,i ) -> UI.td# showModDiv (i:: Modification Text Showable))  (B.decodeOrFail d ))) v] ) <$> els)
 
+{-
+tableList table inf tb1 = do
+  els :: [(Int,LocalTime,Text,Text,(Binary BSL.ByteString))] <-
+    liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,modification_data from metadata.modification_table WHERE schema_name = ? AND  table_name = ?  order by modification_id desc limit 100 " (schemaName inf,table)
+  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( either (\i-> UI.td) (\(_,_,i ) -> UI.td# showModDiv (i:: Modification Text Showable))  (B.decodeOrFail d ))) v] ) <$> els)
+-}
+
 
 
 dashBoard inf = do
@@ -341,7 +348,7 @@ viewerKey inf key = mdo
      tsort = sorting <$> triding asc <*> multiUserSelection sortList
      res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 _ kv ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $  keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
   let pageSize = 20
-  itemList <- listBox ((\o -> L.take pageSize . L.drop (o*pageSize) )<$> triding offset <*>res3) (tidings bselection never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
+  itemList <- listBox ((\o -> L.take pageSize . L.drop (o*pageSize))<$> triding offset <*>res3) (tidings bselection never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
   offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) ((\i -> (L.length i `div` pageSize) ) <$> facts res3)
   let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
   prop <- stepper cv evsel
