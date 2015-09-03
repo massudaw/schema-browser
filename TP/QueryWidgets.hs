@@ -530,9 +530,7 @@ attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ (KArray _) ) v) = mdo
               bres = indexItens attr offsetT (triding <$> widgets) tAttr'
             element offsetDiv # set children (fmap getElement widgets)
             paintBorder offsetDiv (facts bres ) (facts tAttr' )
-            leng <- UI.span # sink0 text (("Size: " ++) .show .maybe 0 (V.length . (\(SComposite l ) -> l) . _tbattr ) <$> facts bres)
-            fk <- UI.div # set UI.style [("display","inline-flex")]  # set  children [offset,  leng ]
-            composed <- UI.span # set children [fk , offsetDiv]
+            composed <- UI.span # set children [offset , offsetDiv]
             return  $ TrivialWidget  bres composed
 attrUITable  tAttr' evs (Attr i _ ) = do
       tdi' <- foldr (\i j ->  updateEvent  (fmap (Tra.traverse diffOptional )) i =<< j) (return tAttr') evs
@@ -660,9 +658,7 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
           es = getElement <$> items
       sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow <$> facts t)) es  (pure True : (fmap isJust <$>  tds ))
       let bres = indexItens tb offsetT (triding <$>  items ) oldItems
-      leng <- UI.span # sink text (("Size: " ++) . show .maybe 0 (length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
-      fk <- UI.div # set UI.style [("display","inline-flex")]  # set  children [offset,  leng ]
-      element dv  # set children (fk: (getElement <$> items))
+      element dv  # set children (offset : (getElement <$> items))
       return $ TrivialWidget bres dv
 
 offsetField  init eve  max = mdo
@@ -802,9 +798,7 @@ fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) 
      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShowFlex <$> facts t)) (getElement <$> fks) (pure True : (fmap isJust . triding <$> fks))
      element dv # set children (getElement <$> fks)
      let bres = indexItens tb offsetT (triding <$> fks) oldItems
-     leng <- UI.span # sink text (("Size: " ++) .show .maybe 0 (length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
-     fksE <- UI.div # set UI.style [("display","inline-flex")] # set children [offset , leng ]
-     res <- UI.div # set children [fksE ,dv]
+     res <- UI.div # set children [offset ,dv]
      return $  TrivialWidget bres  res
 
 interPoint

@@ -22,6 +22,7 @@ import Data.Bifunctor
 import Data.Unique
 import Data.Functor.Identity
 import Data.Ord
+import Control.Lens
 import qualified Data.Vector as Vector
 import qualified Data.Foldable as F
 import Data.Traversable (mapAccumL)
@@ -267,6 +268,7 @@ fullTableName = T.intercalate "_" . fmap (\k -> keyValue k <> (T.pack $ show $ h
 
 getPrim i@(Primitive _ ) = textToPrim <$> i
 getPrim (KOptional j) =  getPrim j
+getPrim (KDelayed j) =  getPrim j
 getPrim (KSerial j) =  getPrim j
 getPrim (KArray j) =  getPrim j
 getPrim (KInterval j) =  getPrim j
@@ -562,9 +564,9 @@ keyAttr i = errorWithStackTrace $ "cant find keyattr " <> (show i)
 
 selectQuery t = "SELECT " <> explodeRow t <> " FROM " <> expandTable t <> expandQuery False  t
 
-expandQuery left (DelayedTB1 (Just t)) = expandQuery left t
+expandQuery left (DelayedTB1 (Just t)) = ""--  expandQuery left t
 expandQuery left t@(TB1 meta m)
-    =  foldr1 mappend (expandJoin left (F.toList (_kvvalues $ labelValue $ getCompose $ m) ) .getCompose <$> F.toList (_kvvalues $ labelValue $ getCompose $ m))
+    = foldr1 mappend (expandJoin left (F.toList (_kvvalues . labelValue . getCompose $ m) ) .getCompose <$> F.toList (_kvvalues . labelValue . getCompose $ m))
 
 
 expandJoin :: Bool -> [Compose (Labeled Text) (TB (Labeled Text)) Key ()] -> Labeled Text (TB (Labeled Text) Key ()) -> Text
@@ -573,9 +575,11 @@ expandJoin left env (Unlabeled (IT i (LeftTB1 (Just tb) )))
 expandJoin left env (Labeled l (IT i (LeftTB1 (Just tb) )))
     = expandJoin True env $ Labeled l (IT i tb)
 expandJoin left env (Labeled l (IT i (ArrayTB1 [tb] )))
-    = jt <> " JOIN LATERAL (SELECT array_agg(" <> explodeRow  tb  <> "  order by arrrow ) as " <> l <> " FROM  (SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> tname  <> ") as arr) as arr ) "<> label tas <> expandQuery left tb <> " )  as " <>  label tas <> " ON true"
+    = jt <> " JOIN LATERAL (SELECT array_agg(" <> explodeRow  tb  <> "  order by arrrow ) as " <> l <> " FROM  (SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> tname  <> ") as arr) as arr ) " <> label tas <> expandQuery left tb <> " )  as " <>  label tas <> " ON true"
         where
-          (TB1 _ (Compose tas )) = tb
+          tas = getTas tb
+          getTas (DelayedTB1 (Just tb))  = getTas tb
+          getTas (TB1 _ (Compose tas)) = tas
           tname = label $ getCompose i
           jt = if left then " LEFT" else ""
 expandJoin left env (Labeled l (IT i tb)) = expandQuery left tb
@@ -662,7 +666,7 @@ recursePath isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           tas <- tname nextT
           let knas = (Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique)  (Primitive "integer" ))
           kas <- kname tas  knas
-          return $ Compose $ Labeled (label $ kas) (FKT [] {-(fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filterReflexive ks ))-}  ks  (mapOpt $ ArrayTB1 [tb]  ))
+          return $ Compose $ Labeled (label $ kas) (FKT [] {-(fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filterReflexive ks ))-}  ks  (mapOpt $ ArrayTB1 [ tb]  ))
 
 
     | isArrayRel ifk && not (isArrayRel e) =   do
@@ -671,7 +675,7 @@ recursePath isLeft ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           tas <- tname nextT
           let knas = (Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique)  (Primitive "integer" ))
           kas <- kname tas  knas
-          return $ Compose $ Labeled (label $ kas) (FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filterReflexive ks ))  ks  (mapOpt $ mapArray tb  ))
+          return $ Compose $ Labeled (label $ kas) (FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filterReflexive ks ))  ks  (mapOpt $ mapArray $ tb  ))
 
     | otherwise = do
           (t,ksn) <- labelTable nextT
@@ -781,26 +785,78 @@ tname i = do
   return $ Labeled ("t" <> (T.pack $  show n)) i
 
 
-explodeLabel :: Labeled Text (TB (Labeled Text) Key () ) -> Text
-explodeLabel (Labeled l (Attr k  _ ))
-  | isKDelayed (keyType k) = "case when " <> l <> " is not null then true else null end"
-  | otherwise =  l
-explodeLabel (Unlabeled (Attr k  _ )) = keyValue k
-explodeLabel (Unlabeled (TBEither _  l  _ )) = "ROW(" <> T.intercalate "," (explodeLabel.getCompose<$>  l) <> ")"
-explodeLabel (Unlabeled (IT  n t )) =  explodeRow  t
-explodeLabel (Labeled l (IT  _ _  )) =  l
-explodeLabel (Labeled l (FKT i  _ _ )) = case i of
-             [] ->  l
-             i -> T.intercalate "," (F.toList $ (explodeLabel. getCompose ) <$> i) <> "," <> l
-explodeLabel (Unlabeled (FKT i rel t )) = case i of
-             [] -> explodeRow t
-             i -> T.intercalate "," (F.toList $ (explodeLabel.getCompose) <$> i) <> "," <> explodeRow t
 
-explodeRow (DelayedTB1 (Just tb)) = "case when " <> (  T.intercalate " and " $ fmap ((<> " is not null " ).explodeLabel .getCompose )(F.toList $ _kvvalues $ labelValue $ getCompose $ tbPK tb) )  <> " then true else  null end "
-explodeRow (LeftTB1 (Just tb) ) = explodeRow tb
-explodeRow (ArrayTB1 [tb] ) = explodeRow tb
-explodeRow (TB1 m (Compose (Labeled _ (KV tb)))) = "ROW(" <> (T.intercalate ","  (fmap (explodeLabel.getCompose)  $ F.toList  tb  )) <> " )"
-explodeRow (TB1 m (Compose (Unlabeled (KV tb)))) = "ROW(" <> (T.intercalate ","  (fmap (explodeLabel.getCompose)  $ F.toList  tb  )) <> " )"
+
+markDelayed i (LeftTB1 j) = LeftTB1 $ (markDelayed  i)<$> j
+markDelayed i (ArrayTB1 j) = ArrayTB1 $ (markDelayed  i)<$> j
+markDelayed True (TB1 m v) = TB1 m $ mapComp (KV . M.mapWithKey (\k v -> mapComp (recurseDel (if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then False else True)) v  ). _kvvalues ) v
+markDelayed False (TB1 m v) = TB1 m $ mapComp (KV . fmap (mapComp (recurseDel False)) . _kvvalues) v
+
+makeTB1Delayed (LeftTB1 i ) =  LeftTB1 $ makeTB1Delayed <$> i
+makeTB1Delayed (ArrayTB1 i ) =  ArrayTB1 $ makeTB1Delayed <$> i
+makeTB1Delayed (DelayedTB1 i ) =  DelayedTB1 i
+makeTB1Delayed i  =  DelayedTB1 $ Just (markDelayed True i)
+
+makeDelayed (KOptional i) = KOptional $ makeDelayed i
+makeDelayed (KArray i ) = KArray $ makeDelayed i
+makeDelayed (KDelayed i ) = i
+makeDelayed i  = KDelayed i
+
+alterKeyType f (Key a b c d m e) = (Key a b c d m (f e))
+
+recurseDel False a@(Attr k v) = a
+recurseDel True a@(Attr k v) = Attr (alterKeyType makeDelayed k ) v
+recurseDel False a@(IT k v ) = IT k $ markDelayed  False v
+recurseDel True a@(IT k v ) = IT (mapComp (recurseDel True ) k )  (makeTB1Delayed v)
+recurseDel False a@(FKT  k rel v ) = FKT k (fmap (over relTarget (alterKeyType makeDelayed)) rel) $ markDelayed  True v
+recurseDel True (FKT  k rel v ) = FKT (mapComp (recurseDel True ) <$> k ) (fmap (fmap (alterKeyType makeDelayed )) rel)  (makeTB1Delayed v)
+recurseDel False a@(TBEither c l  v ) = TBEither c (mapComp (recurseDel False ) <$> l) v
+recurseDel True a@(TBEither c l  v ) = TBEither c (mapComp (recurseDel True ) <$> l) v
+
+
+explodeRow :: TB3 (Labeled Text) Key () -> Text
+explodeRow = explodeRow'  (\i -> "ROW(" <> i <> ")")  "," (const id)
+explodeLabel :: Labeled Text (TB (Labeled Text) Key () ) -> Text
+explodeLabel = explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id)
+
+
+leafDel True i = " case when " <> i <> " is not null then true else null end "
+leafDel False i = " case when " <> i <> " is not null then true else null end "
+
+explodeRow' block  assoc  leaf (DelayedTB1 (Just tbd@(TB1 i tb))) = "(true)" -- if L.null pk then "" else  block (T.intercalate assoc $ fmap ( explodeDelayed block assoc leaf .getCompose )   pk)
+  where
+        pk = (F.toList $ _kvvalues $ labelValue $ getCompose $ tb)
+
+explodeRow' block assoc leaf (LeftTB1 (Just tb) ) = explodeRow' block assoc leaf tb
+explodeRow' block assoc leaf (ArrayTB1 [tb] ) = explodeRow' block assoc leaf tb
+explodeRow' block assoc leaf (TB1 m (Compose (Labeled _ (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
+explodeRow' block assoc leaf  (TB1 m (Compose (Unlabeled (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
+
+explodeDelayed block assoc leaf (Labeled l (Attr k  _ ))
+  | isKDelayed (keyType k) = leafDel (isArray (keyType k)) l
+  | otherwise =  leaf (isArray (keyType k)) l
+explodeDelayed block assoc leaf (Unlabeled (Attr k  _ )) = leaf (isArray (keyType k))  (keyValue k)
+explodeDelayed block assoc leaf (Unlabeled (TBEither _  l  _ )) =  block ( T.intercalate assoc (explodeDelayed block assoc leaf.getCompose<$>  l) )
+
+explodeDelayed block assoc leaf (Unlabeled (IT  n t )) =  explodeRow'  block assoc leaf t
+explodeDelayed block assoc leaf (Labeled l (IT  _ tb  )) = l -- if isTB1Delayed tb then leafDel (isTB1Array tb) l else leaf (isTB1Array tb) l
+explodeDelayed block assoc leaf (Labeled l (FKT i  _ tb  )) = case i of
+             [] -> l -- if isTB1Delayed tb then leafDel (isTB1Array tb) l else leaf (isTB1Array tb) l
+             i -> T.intercalate assoc (F.toList $ (explodeDelayed block assoc leaf . getCompose ) <$> i) <> assoc <> l -- (if isTB1Delayed tb then leafDel (isTB1Array tb)l else leaf (isTB1Array tb)l)
+explodeDelayed block assoc leaf (Unlabeled (FKT i rel t )) = case i of
+             [] -> explodeRow' block assoc leaf t
+             i -> T.intercalate assoc (F.toList $ (explodeDelayed block assoc leaf .getCompose) <$> i) <> assoc <> explodeRow' block assoc leaf t
+
+isTB1Array (DelayedTB1 (Just tb) ) = isTB1Array tb
+isTB1Array (LeftTB1 (Just tb)) = isTB1Array tb
+isTB1Array (ArrayTB1 [tb]) = True
+isTB1Array _ = False
+
+
+isTB1Delayed (DelayedTB1 _ ) = True
+isTB1Delayed (LeftTB1 (Just tb)) = isTB1Delayed tb
+isTB1Delayed (ArrayTB1 [tb]) = isTB1Delayed tb
+isTB1Delayed _ = False
 
 unTlabel (TB1 m kv )  = TB1 m $ overLabel (\(KV kv) -> KV $ fmap (Compose . Identity .unlabel.getCompose ) $   kv) kv
 unTlabel (LeftTB1 kv)  = LeftTB1 $ fmap unTlabel kv

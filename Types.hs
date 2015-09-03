@@ -290,6 +290,8 @@ showTy f (KOptional i) = showTy f i <> "*"
 showTy f (KInterval i) = "(" <>  showTy f i <> ")"
 showTy f (KSerial i) = showTy f i <> "?"
 showTy f (KDelayed i) = showTy f i <> "-"
+showTy f (KTable i) = "t"
+showTy f (KEither i) = "e"
 showTy f i = errorWithStackTrace ("no ty for " <> show   i)
 
 
@@ -301,10 +303,10 @@ instance Ord Key where
    compare i j = compare (keyFastUnique i) (keyFastUnique j)
 
 instance Show Key where
-   show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
-   -- show k = T.unpack $ showKey k
+   -- show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
+   show k = T.unpack $ showKey k
 
-showKey k  = keyValue k  <>  maybe "" ("-"<>) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::"  <> showTy id (keyType k)
+showKey k  =   maybe (keyValue k) id  (keyTranslation k) {-<> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k)-} <>  "::"   <> showTy id (keyType k)
 
 
 instance Binary a => Binary (Interval.Extended a) where

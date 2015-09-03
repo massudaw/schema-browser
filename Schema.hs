@@ -225,9 +225,11 @@ withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s
 
 
 testParse db sch q = withConnInf db sch (\inf -> do
-                                       let (rp,rpq) = rootPaths' (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
+                                       let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
+                                           rpd = (markDelayed False rp)
+                                           rpq = selectQuery rpd
                                        print rpq
-                                       q <- queryWith_ (fromAttr (rp) ) (conn  inf) (fromString $ T.unpack $ rpq)
+                                       q <- queryWith_ (fromAttr (unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
                                            )
 
@@ -238,8 +240,8 @@ testAcademia q = testParse "academia" "academia"  q
 selectAll inf table   = liftIO $ do
       let
           tb =  tableView (tableMap inf) table
-      print (tableName table,selectQuery tb)
-      (t,v) <- duration  $ queryWith_  (fromAttr (unTlabel tb)) (conn inf)(fromString $ T.unpack $ selectQuery tb)
+      print (tableName table,selectQuery (markDelayed False tb))
+      (t,v) <- duration  $ queryWith_  (fromAttr (unTlabel (markDelayed False tb))) (conn inf)(fromString $ T.unpack $ selectQuery $ markDelayed False tb)
       print (tableName table,t)
       return v
 
@@ -263,23 +265,6 @@ eventTable inf table = do
            return (mnew,td)
     return (mtable,td)
 
-
-addTable inf table = do
-    let mvar = mvarMap inf
-    mmap <- takeMVar mvar
-    (isEmpty,mtable) <- case (M.lookup table mmap ) of
-         Just (i,_) -> do
-           emp <- isEmptyMVar i
-           putMVar mvar mmap
-           return (emp,i)
-         Nothing -> do
-           res <- selectAll  inf table
-           mnew <- newMVar res
-           putMVar mvar (M.insert table (mnew, pure []) mmap)
-           return (True,mnew )
-    t <- readMVar mtable
-
-    return t
 
 
 testLoadDelayed inf t = do

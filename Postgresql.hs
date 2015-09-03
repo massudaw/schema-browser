@@ -318,9 +318,10 @@ tryquoted i = doublequoted i <|> i
 -- Note Because the list has a mempty operation when parsing
 -- we have overlap between maybe and list so we allow only nonempty lists
 parseLabeledTable :: TB2 Key () -> Parser (TB2 Key Showable)
+-- parseLabeledTable (ArrayTB1 [DelayedTB1 (Just tb)]) = ArrayTB1 . pure.  DelayedTB1 . Just <$> parseLabeledTable tb -- string "t"  >> (return $ ArrayTB1 [ DelayedTB1 Nothing] )
 parseLabeledTable (ArrayTB1 [t]) =
   ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey makeOpt t)) <|> parseArray (parseLabeledTable t)  >>  return (fail "")  ) )
-parseLabeledTable (DelayedTB1 _) =  string "t"  >> (return $ DelayedTB1 Nothing )
+parseLabeledTable (DelayedTB1 (Just tb) ) =  string "t" >>  return (DelayedTB1  Nothing) -- <$> parseLabeledTable tb
 parseLabeledTable (LeftTB1 (Just i )) =
   LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapKey makeOpt i) >> return Nothing) <|> return Nothing )
 parseLabeledTable (TB1 me m) = (char '('  *> (do
@@ -390,6 +391,8 @@ parseShowable (Primitive i ) =  (do
         PBounding -> SBounding <$> ((doublequoted box3dParser ) <|> box3dParser)
         --i -> error $ "primitive not implemented - " <> show i
             ) <?> (show i)
+parseShowable (KArray (KDelayed i))
+    = (string "t" >> return (SComposite $ Vector.singleton $ SDelayed Nothing))
 parseShowable (KArray i)
     =  SComposite . Vector.fromList <$> (par <|> doublequoted par)
       where par = char '{'  *>  sepBy (parseShowable i) (char ',') <* char '}'
