@@ -290,14 +290,6 @@ parseAttr (Attr i _ ) = do
   s<- parseShowable (textToPrim <$> keyType i) <?> show i
   return $  Attr i s
 
-parseAttr (TBEither n l  _ )
-    =  doublequoted parseTb <|> parseTb
-      where
-        parseTb = char '(' *> parseInner <* char ')'
-        parseInner = do
-              res <- unIntercalateAtto (parseAttr . runIdentity .getCompose <$> l) (char ',')
-              return $ TBEither n l  (Compose . Identity <$> (L.find ( isJust . unOptionalAttr)) res)
-
 parseAttr (IT na j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j -- <|>  return ((,SOptional Nothing) <$> j)
   return $ IT  na mj

@@ -444,4 +444,4 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
 
 
 
-plugList = [lplugContract ,lplugOrcamento ,lplugReport,analiseProjeto,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}queryCNPJStatefull,queryCPFStatefull,queryArtAndamento]
+plugList = [lplugContract ,lplugOrcamento ,lplugReport,analiseProjeto,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}{-queryCNPJStatefull,queryCPFStatefull,-}queryArtAndamento]

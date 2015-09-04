@@ -226,7 +226,6 @@ indexTB1 (IProd _ l) t
          Attr _ l -> Nothing
          FKT l  _ j -> return j
          IT l  j -> return j
-         TBEither n kj j  -> return $ TB1 m $ Compose $ Identity $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j
 
 
 firstCI f = mapComp (firstTB f)
@@ -237,7 +236,6 @@ checkField (Nested (IProd _ l) nt ) t@(TB1 m v)
         i = justError ("checkField error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB v
     case runIdentity $ getCompose $ i  of
          IT l  i -> Compose . Identity <$> (IT l  <$> checkTable nt i)
-         TBEither n kj j  ->   checkField nt  ( TB1 m $ Compose $ Identity $ KV $ mapFromTBList $ maybe (addDefault <$> kj) (\j -> fmap (\i -> if i == (fmap (const ()) j ) then j else addDefault i) kj) j)
          FKT a   c  d -> Compose . Identity <$> (FKT a  c <$>  checkTable nt d)
          v -> errorWithStackTrace (show (v,l))
 checkField  (IProd b l) t@(TB1 m v)
@@ -319,7 +317,8 @@ findPK = concat . fmap keyattr  .toList . _kvvalues  . unTB . tbPK
 
 aattr = aattri . runIdentity . getCompose
 aattri (Attr k i ) = [(k,i)]
-aattri (TBEither _ i l  ) =  (maybe [] id $ fmap aattr l )
+
+
 aattri (FKT i  _ _ ) =  (L.concat $ aattr  <$> i)
 aattri (IT _  i ) =  recTB i
   where recTB (TB1 _ i ) =  concat $ fmap aattr (toList $ _kvvalues $ unTB i)

@@ -187,11 +187,6 @@ data TB f k a
     , _fkrelation :: ! [Rel k]
     , _fkttable ::  ! (FTB1 f  k a)
     }
-  | TBEither
-    { _tbeithername :: ! k
-    , _tbeitherref :: ! [(Compose f (TB f ) k () )]
-    , _tbeithervalue:: ! (Maybe (Compose f (TB f ) k a))
-    }
   deriving(Functor,Foldable,Traversable,Generic)
 
 deriving instance (Eq (f (TB f k a )), Eq (f (TB f k () )) , Eq ( (FTB1 f  k a )) ,Eq a , Eq k ) => Eq (TB f k a)
@@ -213,7 +208,6 @@ filterKey f (ArrayTB1 k ) = ArrayTB1 (filterKey f <$> k)
     frstTB f (Attr k i) = Attr  k i
     frstTB f (IT k i) = IT  k (filterKey f i)
     frstTB f (FKT k  m  i) = FKT   k  m (filterKey  f i)
-    frstTB f (TBEither k l m ) = TBEither  k l (fmap (mapComp (frstTB f))  m)
 
 
 
@@ -231,7 +225,6 @@ firstTB :: (Ord k, Functor f) => (c -> k) -> TB f c a -> TB f k a
 firstTB f (Attr k i) = Attr (f k) i
 firstTB f (IT k i) = IT (mapComp (firstTB f) k) ((mapKey f) i)
 firstTB f (FKT k  m  i) = FKT  (fmap (mapComp (firstTB f) ) k)  (fmap f  <$> m) ((mapKey f) i)
-firstTB f (TBEither k l m ) = TBEither (f k) ( fmap (mapComp (firstTB f)) l) (fmap (mapComp (firstTB f))  m)
 
 
 data FTB1 f k a
@@ -267,7 +260,7 @@ data KPrim
 data KType a
    = Primitive a
    | InlineTable {- schema -} Text {- tablename -} Text
-   | KEither [KType a]
+   | KEither {- schema -} Text {- tablename -} Text
    | KSerial (KType a)
    | KArray (KType a)
    | KInterval (KType a)
@@ -285,13 +278,13 @@ instance Show (KType Text) where
 
 showTy f (Primitive i ) = f i
 showTy f (InlineTable s i ) = "[" <>  fromString (T.unpack $ s <> "." <>  i) <> "]"
+showTy f (KEither s i ) = "|" <>  fromString (T.unpack $ s <> "." <>  i) <> "|"
 showTy f (KArray i) = "{" <>  showTy f i <> "}"
 showTy f (KOptional i) = showTy f i <> "*"
 showTy f (KInterval i) = "(" <>  showTy f i <> ")"
 showTy f (KSerial i) = showTy f i <> "?"
 showTy f (KDelayed i) = showTy f i <> "-"
 showTy f (KTable i) = "t"
-showTy f (KEither i) = "e"
 showTy f i = errorWithStackTrace ("no ty for " <> show   i)
 
 
@@ -372,7 +365,7 @@ data SqlOperation
   | FKJoinTable Text [Rel Key] Text
   | RecJoin (SqlOperation)
   | FKInlineTable Text
-  | FKEitherField Key [Key]
+  | FKEitherField Text
   deriving(Eq,Ord,Show)
 
 
@@ -479,7 +472,6 @@ mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),i))
 keyattr :: Compose Identity (TB Identity ) k  a -> [Rel k]
 keyattr = keyattri . runIdentity . getCompose
 keyattri (Attr i  _ ) = [Inline i]
-keyattri (TBEither k i l  ) =  concat $ fmap keyattr i
 keyattri (FKT i  rel _ ) =  (rel )
 keyattri (IT i  _ ) =  keyattr i
 
@@ -496,7 +488,6 @@ nonRef (Compose (Unlabeled  ((FKT i  _ _ )))) = concat (nonRef <$> i)
 nonRef (Compose (Labeled _ ((FKT i  _ _ )))) = concat (nonRef <$> i)
 nonRef (Compose (Unlabeled (IT j k ))) = nonRef j
 nonRef (Compose (Labeled _ (IT j k ))) = nonRef j
-nonRef (Compose (Unlabeled (TBEither n kj j ))) = concat $  fmap nonRef  $ maybe (addDefaultK <$> kj) (\jl -> fmap (\i -> if i == fmap (const ()) jl  then jl else addDefaultK i) kj) j
 nonRef i = errorWithStackTrace (show i)
 
 
@@ -509,7 +500,6 @@ tableNonRef (TB1 m n  )  = TB1 m (mapComp (\(KV n)-> KV  (mapFromTBList $ fmap (
   where
     nonRef :: Ord k => TB Identity k a -> [(TB Identity ) k a]
     nonRef (Attr k v ) = [Attr k v]
-    nonRef (TBEither n l j ) = [TBEither n (concat $ traComp nonRef <$> l) (join $ fmap listToMaybe $ traComp nonRef <$> j) ]
     nonRef (FKT i _ _ ) = concat (overComp nonRef <$> i)
     nonRef it@(IT j k ) = [(IT  j (tableNonRef k )) ]
 
@@ -521,7 +511,6 @@ tableNonRefK (TB1 m n   )  = TB1 m (mapComp (\(KV n)-> KV (mapFromTBList $ fmap 
   where
     nonRef :: TB Identity Key Showable -> [(TB Identity ) Key Showable]
     nonRef (Attr k v ) = [ Attr k v ]
-    nonRef (TBEither n kj j ) =   concat $  fmap (overComp nonRef ) $ maybe (addDefault <$> kj) (\jl -> fmap (\i -> if i == fmap (const ()) jl  then jl else addDefault i) kj) j
     nonRef (FKT i _ _ ) = concat  (overComp nonRef <$> i)
     nonRef (IT j k ) = [(IT  j (tableNonRefK k )) ]
 
@@ -545,7 +534,6 @@ addDefault = mapComp def
 kattr :: Compose Identity (TB Identity  ) k a -> [a]
 kattr = kattri . runIdentity . getCompose
 kattri (Attr _ i ) = [i]
-kattri (TBEither _ i l  ) =  (maybe [] id $ fmap kattr l )
 kattri (FKT i  _ _ ) =  (L.concat $ kattr  <$> i)
 kattri (IT _  i ) =  recTB i
   where recTB (TB1 m i ) =  L.concat $ fmap kattr (F.toList $ _kvvalues $ runIdentity $ getCompose i)

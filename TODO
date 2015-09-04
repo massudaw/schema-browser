@@ -3,6 +3,10 @@ BUGS
 
 NEW FEATURES
 
+MIGRATE TBEither To InlinedTable
+
+Make delayed fields not used by plugins
+
 JSON Field
 -- Implement a schema free field  
 

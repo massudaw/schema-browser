@@ -249,8 +249,6 @@ isKDelayed (KInterval i) = isKDelayed i
 isKDelayed (KArray i)  = isKDelayed i
 isKDelayed _ = False
 
-isKEither (KEither i) = True
-isKEither i = False
 
 
 
@@ -260,7 +258,7 @@ isKOptional (KInterval i) = isKOptional i
 isKOptional (Primitive _) = False
 isKOptional (InlineTable _ _) = False
 isKOptional (KArray i)  = isKOptional i
-isKOptional (KEither i) = False
+isKOptional (KEither _ _) = False
 isKOptional i = errorWithStackTrace (show i)
 
 fullTableName = T.intercalate "_" . fmap (\k -> keyValue k <> (T.pack $ show $ hashUnique (keyFastUnique k))) . S.toList
@@ -467,7 +465,6 @@ allKVRec (ArrayTB1 i) = mconcat $ allKVRec <$> i
 allKVRec  t@(TB1 m e)=  concat $  F.toList (go . unTB <$> (_kvvalues $ unTB $ eitherDescPK t))
   where
         go  (FKT _  _ tb) =  allKVRec  tb
-        go  (TBEither _ _  tbr) =  maybe [] id $ go . unTB <$>  tbr
         go  (IT  _ tb) = allKVRec tb
         go  (Attr _ a) = [a]
 
@@ -532,12 +529,12 @@ reflexiveRel ks
 isPathReflexive (FKJoinTable _ ks _)
   = all id $ fmap (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
 isPathReflexive (FKInlineTable _)= True
-isPathReflexive (FKEitherField _ _)= False
+isPathReflexive (FKEitherField _ )= False
 isPathReflexive (RecJoin i ) = isPathReflexive i
 
 isPathEither (FKJoinTable _ ks _) = False
 isPathEither (FKInlineTable _)= False
-isPathEither (FKEitherField _ _)= True
+isPathEither (FKEitherField _ )= True
 isPathEither (RecJoin i ) = isPathEither i
 
 
@@ -586,7 +583,6 @@ expandJoin left env (Labeled l (IT i tb)) = expandQuery left tb
 expandJoin left env (Unlabeled  (IT _ tb )) = expandQuery left tb
 expandJoin left env (Labeled _ (Attr _ _ )) = ""
 expandJoin left env (Unlabeled  (Attr _ _ )) = ""
-expandJoin left env (Unlabeled (TBEither l kj j )) = foldr1 mappend (expandJoin left env .getCompose <$>  kj )
 expandJoin left env (Unlabeled (FKT i rel (LeftTB1 (Just tb)))) = expandJoin True env (Unlabeled (FKT i rel tb))
 expandJoin left env (Labeled l (FKT i rel (LeftTB1 (Just tb)))) = expandJoin True env (Labeled l (FKT i rel tb))
 expandJoin left env (Labeled l (FKT _ ks (ArrayTB1 [tb])))
@@ -628,10 +624,6 @@ recursePath
      -> State
           ((Int, Map Int Table), (Int, Map Int Key))
           (Compose (Labeled Text) (TB (Labeled Text)) Key ())
-recursePath isLeft ksbn invSchema (Path _ jo@(FKEitherField o l) _) = do
-   let findAttr =(\i -> Compose . justError ("cant find "  <> (show i)  ). fmap snd . L.find ((== S.singleton (Inline i)) . fst  )$ ksbn )
-   return $ (Compose $ Unlabeled $  TBEither  o (findAttr <$> l )  Nothing)
-
 recursePath isLeft ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
     | isArrayRel ifk  {-&& not (isArrayRel e )-}=   do
           tas <- tname nextT
@@ -695,7 +687,7 @@ isArrayRel ifk = any (isArray.keyType) (S.toList ifk)
 pathRelRel :: Path (Set Key ) SqlOperation -> Set (Rel Key)
 pathRelRel (Path _ (FKJoinTable _ rel  _ ) _ ) = S.fromList rel
 pathRelRel (Path r (FKInlineTable  _   )  _ ) = S.map Inline r
-pathRelRel (Path r (FKEitherField _ _   )  _ ) = S.map Inline r
+pathRelRel (Path r (FKEitherField _    )  _ ) = S.map Inline r
 
 pathRel (Path _ rel _ ) = rel
 pathRelRef (Path ifk _ _ ) = ifk
@@ -810,8 +802,6 @@ recurseDel False a@(IT k v ) = IT k $ markDelayed  False v
 recurseDel True a@(IT k v ) = IT (mapComp (recurseDel True ) k )  (makeTB1Delayed v)
 recurseDel False a@(FKT  k rel v ) = FKT k (fmap (over relTarget (alterKeyType makeDelayed)) rel) $ markDelayed  True v
 recurseDel True (FKT  k rel v ) = FKT (mapComp (recurseDel True ) <$> k ) (fmap (fmap (alterKeyType makeDelayed )) rel)  (makeTB1Delayed v)
-recurseDel False a@(TBEither c l  v ) = TBEither c (mapComp (recurseDel False ) <$> l) v
-recurseDel True a@(TBEither c l  v ) = TBEither c (mapComp (recurseDel True ) <$> l) v
 
 
 explodeRow :: TB3 (Labeled Text) Key () -> Text
@@ -836,7 +826,6 @@ explodeDelayed block assoc leaf (Labeled l (Attr k  _ ))
   | isKDelayed (keyType k) = leafDel (isArray (keyType k)) l
   | otherwise =  leaf (isArray (keyType k)) l
 explodeDelayed block assoc leaf (Unlabeled (Attr k  _ )) = leaf (isArray (keyType k))  (keyValue k)
-explodeDelayed block assoc leaf (Unlabeled (TBEither _  l  _ )) =  block ( T.intercalate assoc (explodeDelayed block assoc leaf.getCompose<$>  l) )
 
 explodeDelayed block assoc leaf (Unlabeled (IT  n t )) =  explodeRow'  block assoc leaf t
 explodeDelayed block assoc leaf (Labeled l (IT  _ tb  )) = l -- if isTB1Delayed tb then leafDel (isTB1Array tb) l else leaf (isTB1Array tb) l
@@ -865,7 +854,6 @@ unTlabel (DelayedTB1 kv)  = DelayedTB1 $ fmap unTlabel kv
 
 unlabel (Labeled l (IT tn t) ) = (IT (relabel tn) (unTlabel t ))
 unlabel (Unlabeled (IT tn t) ) = (IT (relabel tn) (unTlabel t ))
-unlabel (Unlabeled (TBEither  n l  b ) ) = TBEither n (relabel <$> l)   (fmap relabel b)
 unlabel (Labeled l (FKT i fkrel t) ) = (FKT (fmap relabel i) fkrel (unTlabel  t ))
 unlabel (Unlabeled (FKT i fkrel t) ) = (FKT (fmap relabel i) fkrel (unTlabel t))
 unlabel (Labeled l (Attr k i )) = Attr k i
@@ -922,10 +910,17 @@ zipWithTF g t f = snd (mapAccumL map_one (F.toList f) t)
 inlineName (KOptional i) = inlineName i
 inlineName (KArray a ) = inlineName a
 inlineName (InlineTable _ i) = i
+inlineName (KEither _ i) = i
 
 inlineFullName (KOptional i) = inlineFullName i
 inlineFullName (KArray a ) = inlineFullName a
 inlineFullName (InlineTable s i) = s <> "." <> i
+
+isKEither (KOptional i ) = isKEither i
+isKEither (KArray i ) = isKEither i
+isKEither (KEither _ i) = True
+isKEither _ = False
+
 
 isInline (KOptional i ) = isInline i
 isInline (KArray i ) = isInline i
@@ -935,7 +930,6 @@ isInline _ = False
 relabeling :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB f k a -> TB p k a
 relabeling p l (Attr k i ) = (Attr k i)
 relabeling p l (IT i tb ) = IT ((Compose.  l . relabeling p l . p . getCompose ) i) (relabelT p l tb)
-relabeling p l (TBEither  k i  j  ) = TBEither k (fmap (Compose.  l . relabeling p l . p . getCompose ) i) (fmap (Compose.  l . relabeling p l . p . getCompose )  j)
 
 relabelT :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB3 f k a -> TB3 p k a
 relabelT p l (TB1 m (Compose j)) =  (TB1 m (Compose $ l (KV $ fmap (Compose.  l . relabeling p l . p . getCompose ) (_kvvalues $ p j))))

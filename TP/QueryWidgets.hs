@@ -140,7 +140,6 @@ plugTags inf bres (BoundedPlugin2 n t f action) = do
 
 lorder lo lref = allMaybes $ fmap (\k -> L.find (\i-> fst i == k ) lref) lo
 
-attrSize (TBEither n l _ ) = maximum $ fmap (attrSize . runIdentity . getCompose) l
 attrSize (FKT  _  _ _ ) = (12,4)
 attrSize (IT _ _ ) = (12,4)
 attrSize (Attr k _ ) = go  (keyType k)
@@ -215,21 +214,21 @@ tbCase inf pgs constr a@(Attr i _ ) wl plugItens oldItems = do
         paintEdit l (facts (triding tds)) (facts oldItems)
         return $ TrivialWidget (triding tds) dv
 
-tbCase inf pgs constr a@(TBEither n ls  _ ) wl plugItens oldItems = mdo
+{-tbCase inf pgs constr a@(TBEither n ls   ) wl plugItens oldItems = mdo
         l <- flabel # set text (show  n )
         ws <- mapM (\l -> do
             let  tbl = fmap (runIdentity.getCompose) . join . fmap (\(TBEither n _  j) -> join $ fmap (\i -> if (fmap (const ()) i == l) then j else Nothing) j) <$> oldItems
                  lu = runIdentity $ getCompose l
             lw <- tbCase inf pgs constr lu wl plugItens tbl
             return lw ) ls
-        chk  <- buttonDivSet (zip [0..(length ls - 1)] ls)  ((join . fmap (\(TBEither n _ j ) ->   join $ (\e -> fmap (,e) . (flip L.elemIndex ls) $ e ) <$> ((fmap (const ())<$> j)))<$>   oldItems)) (show . fmap _relOrigin.keyattr . snd) (\i -> UI.button # set text (show $ keyattr $ snd i) )
+        chk  <- buttonDivSet (zip [0..(length ls - 1)] ls)  ((join . fmap (\(TBEither n  j ) ->   join $ (\e -> fmap (,e) . (flip L.elemIndex ls) $ e ) <$> ((fmap (const ())<$> j)))<$>   oldItems)) (show . fmap _relOrigin.keyattr . snd) (\i -> UI.button # set text (show $ keyattr $ snd i) )
         sequence $ zipWith (\el ix-> element  el # sink0 UI.style (noneShow <$> ((==ix) .fst <$> facts (triding chk) ))) ws  [0..]
         let teitherl = foldr (liftA2 (:)) (pure []) (triding <$> ws)
             res = liftA2 (\c j -> fmap (TBEither n ls . fmap (Compose . Identity) .  join . fmap unOptionalAttr ) $ atMay j (fst c)) (triding chk) teitherl
         paintEdit l (facts res) (facts oldItems)
         lid <- UI.div #  set UI.class_ ("col-xs-" <> show ( fst $ attrSize a ) )# set children (l:getElement chk : (getElement <$> ws))
         return $ TrivialWidget  res  lid
-
+-}
 
 hasProd p (Many i) = any p i
 hasProd p i = False
@@ -242,6 +241,54 @@ isNested p i   =  False -- p == pn
 uNest (Nested pn i) = i
 
 unTBMap = _kvvalues . unTB . _unTB1
+
+eiTable
+  ::
+     InformationSchema
+     -> [Plugins]
+     -> SelPKConstraint
+     -> Text
+     -> [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key Showable)))]
+     -> [(Access Text,Event (Maybe (TB1 Showable)))]
+     -> TB1 ()
+     -> Tidings (Maybe (TB1 Showable))
+     -> UI (Element,Tidings (Maybe (TB1 Showable)))
+eiTable inf pgs constr tname refs plmods ftb@(TB1 m k ) oldItems = do
+  let
+      Just table = M.lookup tname  (tableMap inf)
+
+  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds ) pgs)
+  let plugmods = (snd <$> res) <> plmods
+
+  fks <- foldl (\jm (l,m)  -> do
+            w <- jm
+            wn <- (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) refs)
+            return (w <> [(unTB m,wn)])
+        ) (return []) (P.sortBy (P.comparing fst ) . M.toList . unTBMap $ ftb)
+  let
+      tableb :: Tidings (Maybe (TB1 Showable))
+      tableb  = fmap (TB1 (tableMeta table) . Compose . Identity . KV . mapFromTBList . fmap _tb) . Tra.sequenceA <$> Tra.sequenceA (triding .snd <$> fks)
+      initialSum = (join . fmap (\(TB1 n  j ) ->    safeHead $ catMaybes  (fmap (Compose . Identity. fmap (const ()) ) . unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)) ))<$>   oldItems)
+  chk  <- buttonDivSet (F.toList (_kvvalues $ unTB k))  initialSum (show . fmap _relOrigin.keyattr ) (\i -> UI.button # set text (show $ keyattr $ i) )
+  sequence $ (\(ix,el) -> element  el # sink0 UI.style (noneShow <$> ((==keyattri ix) .keyattr <$> facts (triding chk) ))) <$> fks
+  let
+      resei = liftA2 (\c -> fmap (\t@(TB1 m k) ->  TB1 m . Compose $ Identity $ KV (M.mapWithKey  (\k v -> if k == S.fromList (keyattr c) then maybe (addDefault (fmap (const ()) v)) (const v) (unOptionalAttr $ unTB  v) else addDefault (fmap (const ()) v) ) (_kvvalues $ unTB k))) ) (triding chk) tableb
+  -- lid <- UI.div #  set UI.class_ ("col-xs-" <> show ( fst $ attrSize a ) )# set children (l:getElement chk : (getElement <$> ws))
+
+  listBody <- UI.div # set UI.class_ "row"
+    # set children (getElement chk : F.toList (getElement .snd <$> fks))
+    # set style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
+  plugins <-  if not (L.null (fst <$> res))
+    then do
+      pluginsHeader <- UI.div # set UI.text "Plugins"
+      pure <$> UI.div # set children (pluginsHeader : (fst <$> res))
+    else do
+      return []
+  body <- UI.div
+    # set children (plugins  <> [listBody])
+    # set style [("margin-left","10px"),("border","2px"),("border-color","gray"),("border-style","solid")]
+  return (body, resei)
+
 
 
 uiTable
@@ -633,7 +680,8 @@ iUITable
   -> UI (TrivialWidget(Maybe (TB Identity Key Showable)))
 iUITable inf pgs pmods oldItems  tb@(IT na  tb1@(TB1 meta _) )
     = do
-      (celem,tcrud) <- uiTable inf pgs [] (_kvname meta )
+      let tfun = if isKEither (keyType $ _relOrigin$  head $ keyattr $  na) then eiTable else uiTable
+      (celem,tcrud) <- tfun inf pgs [] (_kvname meta )
               []
               (fmap (fmap (fmap _fkttable)) <$> pmods)
               tb1

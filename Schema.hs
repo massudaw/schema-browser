@@ -47,25 +47,27 @@ import Postgresql
 import qualified Data.ByteString.Char8 as BS
 
 
-createType :: Text ->  (Text,Text,Text,Text,Text,Text,Maybe Text,Maybe Text,Maybe Text) -> KType Text
-createType _ (t,c,"tsrange",_,_,n,def,_,_) =  (nullable n $ KInterval $ Primitive "timestamp without time zone")
-createType _ (t,c,"tstzrange",_,_,n,def,_,_) =  (nullable n $ KInterval $ Primitive "timestamp with time zone")
-createType _ (t,c,"daterange",_,_,n,def,_,_) =  (nullable n $ KInterval $ Primitive "date")
-createType _ (t,c,"int4range",_,_,n,def,_,_) = (nullable n $ KInterval $ Primitive "int4")
-createType _ (t,c,"numrange",_,_,n,def,_,_) =  (nullable n $ KInterval $ Primitive "numeric")
-createType _ (t,c,"USER-DEFINED",_,"floatrange",n,def,_,_) =  (nullable n $ KInterval $ Primitive "double precision")
-createType _ (t,c,"USER-DEFINED",_,"trange",n,def,_,_) =  (nullable n $ KInterval $ Primitive "time")
+createType :: Text ->  (Text,Text,Text,Text,Text,Text,Maybe Text,Maybe Text,Maybe Text,Bool) -> KType Text
+createType _ (t,c,"tsrange",_,_,n,def,_,_,_) =  (nullable n $ KInterval $ Primitive "timestamp without time zone")
+createType _ (t,c,"tstzrange",_,_,n,def,_,_,_) =  (nullable n $ KInterval $ Primitive "timestamp with time zone")
+createType _ (t,c,"daterange",_,_,n,def,_,_,_) =  (nullable n $ KInterval $ Primitive "date")
+createType _ (t,c,"int4range",_,_,n,def,_,_,_) = (nullable n $ KInterval $ Primitive "int4")
+createType _ (t,c,"numrange",_,_,n,def,_,_,_) =  (nullable n $ KInterval $ Primitive "numeric")
+createType _ (t,c,"USER-DEFINED",_,"floatrange",n,def,_,_,_) =  (nullable n $ KInterval $ Primitive "double precision")
+createType _ (t,c,"USER-DEFINED",_,"trange",n,def,_,_,_) =  (nullable n $ KInterval $ Primitive "time")
 -- Table columns Primitive
-createType s (t,c,"USER-DEFINED",udtschema ,udtname,n,def,_,_) |  udtschema == s = (nullable n $ InlineTable  udtschema udtname )
-createType s (t,c,"ARRAY",udtschema ,udtname,n,def,_,_) | udtschema == s = (nullable n $ KArray $ InlineTable  udtschema $T.drop 1 udtname )
-createType _ (t,c,"ARRAY",_,i,n,def,p,_) = (nullable n $ KArray $ (Primitive (T.tail i)))
-createType _ (t,c,_,_,"geometry",n,def,p,_) =  (nullable n $ Primitive $ (\(Just i) -> i) p)
-createType _ (t,c,_,_,"box3d",n,def,p,_) =  (nullable n $ Primitive $  "box3d")
-createType _ (t,c,ty,_,_,n,def,_,Just "pdf" ) =(serial def . nullable n $ KDelayed $ Primitive "pdf" )
-createType _ (t,c,ty,_,_,n,def,_,Just "jpg" ) = (serial def . nullable n $ KDelayed $ Primitive "jpg" )
-createType _ (t,c,ty,_,_,n,def,_,Just "ofx" ) = (serial def . nullable n $ KDelayed $ Primitive "ofx" )
-createType _ (t,c,ty,_,_,n,def,_,Just dom ) = (serial def . nullable n $ Primitive dom)
-createType _ (t,c,ty,_,_,n,def,_,_) =(serial def . nullable n $ Primitive ty)
+createType s (t,c,"USER-DEFINED",udtschema ,udtname,n,def,_,_,False) |  udtschema == s = (nullable n $ InlineTable  udtschema udtname )
+createType s (t,c,"USER-DEFINED",udtschema ,udtname,n,def,_,_,True) |  udtschema == s = (nullable n $ KEither udtschema udtname )
+createType s (t,c,"ARRAY",udtschema ,udtname,n,def,_,_,False) | udtschema == s = (nullable n $ KArray $ InlineTable  udtschema $T.drop 1 udtname )
+createType s (t,c,"ARRAY",udtschema ,udtname,n,def,_,_,True) | udtschema == s = (nullable n $ KArray $ KEither udtschema $T.drop 1 udtname )
+createType _ (t,c,"ARRAY",_,i,n,def,p,_,_) = (nullable n $ KArray $ (Primitive (T.tail i)))
+createType _ (t,c,_,_,"geometry",n,def,p,_,_) =  (nullable n $ Primitive $ (\(Just i) -> i) p)
+createType _ (t,c,_,_,"box3d",n,def,p,_,_) =  (nullable n $ Primitive $  "box3d")
+createType _ (t,c,ty,_,_,n,def,_,Just "pdf" ,_) =(serial def . nullable n $ KDelayed $ Primitive "pdf" )
+createType _ (t,c,ty,_,_,n,def,_,Just "jpg" ,_) = (serial def . nullable n $ KDelayed $ Primitive "jpg" )
+createType _ (t,c,ty,_,_,n,def,_,Just "ofx" ,_) = (serial def . nullable n $ KDelayed $ Primitive "ofx" )
+createType _ (t,c,ty,_,_,n,def,_,Just dom ,_) = (serial def . nullable n $ Primitive dom)
+createType _ (t,c,ty,_,_,n,def,_,_,_) =(serial def . nullable n $ Primitive ty)
 --createType un v = error $ show v
 
 serial (Just xs ) t = if T.isPrefixOf  "nextval" xs then KSerial t else t
@@ -106,23 +108,23 @@ unTOptional i = i
 keyTables :: Connection -> Connection -> (Text ,Text)-> IO InformationSchema
 keyTables conn userconn (schema ,user) = do
        uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from information_schema.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
-       res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable ( unTOptional ty) . BS.pack . T.unpack <$>  (join $ listToMaybe. T.splitOn "::" <$> n) ) ty )  (createType  schema (t,c,j,k,l,m,n,d,z)) )) <$>  query conn "select table_name,o.column_name,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name    left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column where table_schema = ?"  (Only schema)
+       res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable ( unTOptional ty) . BS.pack . T.unpack <$>  (join $ listToMaybe. T.splitOn "::" <$> n) ) ty )  (createType  schema (t,c,j,k,l,m,n,d,z,b)) )) <$>  query conn "select ta.table_name,o.column_name,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name , st.table_name is not null from information_schema.tables ta natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name    left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column left join metadata.sum_table st on st.schema_name = udt_schema and ('_' || st.table_name = udt_name OR st.table_name = udt_name)   where table_schema = ?"  (Only schema)
        -- putStrLn (unlines $ fmap show res2)
        --res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default,'' :: text ,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name where table_schema = ? " {- left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column " -} (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
        -- keyMap <- preprocessSumTypes (M.fromList keyList)
-          keyMapPre = M.fromList keyList
+          keyMap = M.fromList keyList
           lookupKey' ::  Map (Text,Text) Key -> (Text,Text) ->  Key
           lookupKey' keyMap = (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) keyMap )
-       eitherItems <-  join $  mapM (\(t,l,n)-> do
+       {-eitherItems <-  join $  mapM (\(t,l,n)-> do
          un <- newUnique
          let
            lcol = lookupKey' keyMapPre . (t,) <$> V.toList l
            tnew = Key n Nothing 0 Nothing un (KEither (keyType <$> lcol) )
-         return (t,[(tnew,Path (S.fromList lcol) (FKEitherField tnew lcol) (S.singleton tnew) )]) ) <$> query conn "SELECT table_name,sum_columns,column_name FROM metadata.table_either WHERE table_schema = ? " (Only schema)
-       let eitherMap = M.fromListWith mappend  $ fmap (\(t,j) -> (t,fmap snd j )) $ eitherItems
-           keyMap =  foldr (uncurry M.insert) keyMapPre $ concat $ fmap (\(t,j) -> fmap (\ki -> ((t,keyValue ki),ki)) $ fmap fst j ) $ eitherItems
+         return (t,[(tnew,Path (S.fromList lcol) (FKEitherField tnew lcol) (S.singleton tnew) )]) ) <$> query conn "SELECT table_name,sum_columns,column_name FROM metadata.table_either WHERE table_schema = ? " (Only schema)-}
+       let --eitherMap = M.fromListWith mappend  $ fmap (\(t,j) -> (t,fmap snd j )) $ eitherItems
+           --keyMap =  foldr (uncurry M.insert) keyMapPre $ concat $ fmap (\(t,j) -> fmap (\ki -> ((t,keyValue ki),ki)) $ fmap fst j ) $ eitherItems
        let
           lookupKey3 :: (Functor f) => f (Text,Maybe (Vector Text)) -> f (Text,Vector Key)
           lookupKey3 = fmap  (\(t,c)-> (t,maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap)) c) )
@@ -147,8 +149,9 @@ keyTables conn userconn (schema ,user) = do
            pks =  (\(c,pksl)-> let
                                   pks = S.fromList $ F.toList pksl
                                   inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (addRec c (inlineName t) $  FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
-                                  eitherFK =   M.lookup c eitherMap
-                                  attr = S.difference (S.filter (not. isKEither.keyType)  $ (\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> pks)
+                                  eitherFK =  fmap (\k -> (\t -> Path (S.singleton k ) (addRec c (inlineName t) $  FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isKEither .keyType ) .  S.toList <$> M.lookup c all
+                                  -- eitherFK =   M.lookup c eitherMap
+                                  attr = S.difference ({-S.filter (not. isKEither.keyType)  $ -}(\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> pks)
                                 in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
        let (i1,i2,i3) = (keyMap, M.fromList $ filter (not.S.null .fst)  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        mvar <- newMVar M.empty
@@ -174,7 +177,6 @@ liftKeys inf tname tb
         liftTable tname (LeftTB1 j ) = LeftTB1 $ liftTable tname <$> j
         liftTable tname (ArrayTB1 j ) = ArrayTB1 $ liftTable tname <$> j
         liftField :: Text -> TB Identity Text a -> TB Identity Key a
-        liftField tname (TBEither n k j ) = TBEither (lookKey inf tname n) (mapComp (liftField tname) <$> k ) (mapComp (liftField tname ) <$> j)
         liftField tname (Attr t v) = Attr (lookKey inf tname t) v
         liftField tname (FKT ref  rel2 tb) = FKT (mapComp (liftField tname) <$> ref)   ( rel) (liftTable tname2 tb)
             where (Path _ (FKJoinTable _ rel tname2 ) _) = justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
