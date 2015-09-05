@@ -228,8 +228,9 @@ withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s
 
 testParse db sch q = withConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
-                                           rpd = (markDelayed False rp)
+                                           rpd = forceDesc True (markDelayed True rp)
                                            rpq = selectQuery rpd
+                                       print rpd
                                        print rpq
                                        q <- queryWith_ (fromAttr (unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
@@ -242,8 +243,9 @@ testAcademia q = testParse "academia" "academia"  q
 selectAll inf table   = liftIO $ do
       let
           tb =  tableView (tableMap inf) table
-      print (tableName table,selectQuery (markDelayed False tb))
-      (t,v) <- duration  $ queryWith_  (fromAttr (unTlabel (markDelayed False tb))) (conn inf)(fromString $ T.unpack $ selectQuery $ markDelayed False tb)
+          tbf = forceDesc True (markDelayed True tb)
+      print (tableName table,selectQuery tbf )
+      (t,v) <- duration  $ queryWith_  (fromAttr (unTlabel tbf)) (conn inf)(fromString $ T.unpack $ selectQuery $ tbf)
       print (tableName table,t)
       return v
 

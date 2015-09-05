@@ -214,21 +214,7 @@ tbCase inf pgs constr a@(Attr i _ ) wl plugItens oldItems = do
         paintEdit l (facts (triding tds)) (facts oldItems)
         return $ TrivialWidget (triding tds) dv
 
-{-tbCase inf pgs constr a@(TBEither n ls   ) wl plugItens oldItems = mdo
-        l <- flabel # set text (show  n )
-        ws <- mapM (\l -> do
-            let  tbl = fmap (runIdentity.getCompose) . join . fmap (\(TBEither n _  j) -> join $ fmap (\i -> if (fmap (const ()) i == l) then j else Nothing) j) <$> oldItems
-                 lu = runIdentity $ getCompose l
-            lw <- tbCase inf pgs constr lu wl plugItens tbl
-            return lw ) ls
-        chk  <- buttonDivSet (zip [0..(length ls - 1)] ls)  ((join . fmap (\(TBEither n  j ) ->   join $ (\e -> fmap (,e) . (flip L.elemIndex ls) $ e ) <$> ((fmap (const ())<$> j)))<$>   oldItems)) (show . fmap _relOrigin.keyattr . snd) (\i -> UI.button # set text (show $ keyattr $ snd i) )
-        sequence $ zipWith (\el ix-> element  el # sink0 UI.style (noneShow <$> ((==ix) .fst <$> facts (triding chk) ))) ws  [0..]
-        let teitherl = foldr (liftA2 (:)) (pure []) (triding <$> ws)
-            res = liftA2 (\c j -> fmap (TBEither n ls . fmap (Compose . Identity) .  join . fmap unOptionalAttr ) $ atMay j (fst c)) (triding chk) teitherl
-        paintEdit l (facts res) (facts oldItems)
-        lid <- UI.div #  set UI.class_ ("col-xs-" <> show ( fst $ attrSize a ) )# set children (l:getElement chk : (getElement <$> ws))
-        return $ TrivialWidget  res  lid
--}
+
 
 hasProd p (Many i) = any p i
 hasProd p i = False
@@ -392,9 +378,6 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 m _ ) preoldItems = do
   bh2 <- stepper  cv (unionWith const h2  (rumors preoldItems))
   return ([getElement chw ,  sub],h ,tidings bh2 (unionWith const h2  (rumors preoldItems)))
 
-unTB1 (LeftTB1 (Just i) ) = unTB1 i
-unTB1 (ArrayTB1 [i] ) = unTB1 i
-unTB1 (TB1 _ i)  = i
 
 tb1Diff f (TB1 _ k1 ) (TB1 _ k2) =  liftF2 f k1 k2
 
@@ -480,16 +463,16 @@ tablePKSet  tb1 = S.fromList $ concat $ fmap ( keyattr)  $ F.toList $ _kvvalues 
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 
 unIndexItens :: Int -> Int -> Maybe (TB Identity  Key Showable) -> Maybe (TB Identity  Key Showable)
-unIndexItens ix o =  join . fmap (unIndex (ix+ o))
+unIndexItens ix o =  join . fmap (unIndex (ix+ o) . traceShowId )
 
 unIndex o (Attr k (SComposite v)) = Attr (unKArray k) <$> (v V.!? o )
 unIndex o (IT na (ArrayTB1 j))
   =  IT  na <$>  atMay j o
 unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> [mapComp (firstTB unKArray) li]) (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi ) <$> join (traverse (indexArray o)  <$> l) <*> atMay m o
   where
-      l = L.find (all (isArray.keyType) . fmap _relOrigin . keyattr)  els
-      nonl = L.filter (not .all (isArray.keyType) . fmap _relOrigin . keyattr) els
-      indexArray ix s =  atMay (unArray s) ix
+    l = L.find (all (isArray.keyType) . fmap _relOrigin . keyattr)  els
+    nonl = L.filter (not .all (isArray.keyType) . fmap _relOrigin . keyattr) els
+    indexArray ix s =  atMay (unArray s) ix
 unIndex o i = errorWithStackTrace (show (o,i))
 
 unLeftKey :: TB Identity Key () -> TB Identity Key ()

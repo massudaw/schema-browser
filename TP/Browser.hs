@@ -17,9 +17,6 @@ import Step
 -- import Graph
 import Location
 import Plugins
-import PrefeituraSNFSE
-import Siapi3
-import CnpjReceita
 import TP.Widgets
 import TP.QueryWidgets
 import Control.Monad.Reader
@@ -28,13 +25,11 @@ import Data.Functor.Apply
 import System.Environment
 import Debug.Trace
 import Data.Ord
-import OFX
 import Control.Exception
 import Data.Time.Parse
 import Utils
 import Schema
 import Data.Char (toLower)
-import PandocRenderer
 import Postgresql
 import Data.Maybe
 import Data.Functor.Identity
@@ -67,7 +62,6 @@ import Data.String
 
 
 import Control.Arrow
-import Crea
 
 data BrowserState
   = BrowserState
@@ -130,8 +124,10 @@ poller db handler plugs = do
           then do
               execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
               print ("START " <>T.unpack n <> " - " <> show startTime  ::String)
-              let rp = rootPaths'  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
-              listRes <- queryWith_ (fromAttr (fst rp) ) conn  (fromString $ T.unpack $ snd rp)
+              let rpt = tableView  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
+                  rpd = accessTB ( fst f <> snd f) rpt
+                  rp = selectQuery rpd
+              listRes <- queryWith_ (fromAttr (unTlabel rpd )) conn  (fromString $ T.unpack $ rp)
               let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
                   tdInput i =  isJust  $ testTable i (fst f)
                   tdOutput1 i =   not $ isJust  $ testTable i (snd f)

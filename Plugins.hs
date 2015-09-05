@@ -108,7 +108,7 @@ analiseProjeto = BoundedPlugin2 pname tname (staticP url ) elemp
     url = proc t -> do
       atR "id_owner,id_contact"
                 $ atR "id_owner"
-                    $ atAny "cpf_number,cnpj_number" [varTB "cpf_number",varTB "cnpj_number"] -< t
+                    $ atAny "ir_reg" [varTB "cpf_number",varTB "cnpj_number"] -< t
       atR "address"
                 ((,,,) <$> idxK "complemento" <*> idxK "cep" <*> idxK "municipio" <*> idxK "uf") -< t
       atR "dados_projeto" (idxK "area") -< ()
@@ -135,7 +135,7 @@ siapi3Plugin  = BoundedPlugin2 pname tname  (staticP url) elemp
       ano <- varTB "ano" -< ()
       cpf <- atR "id_owner,id_contact"
                 $ atR "id_owner"
-                    $ atAny "cpf_number,cnpj_number" [varTB "cpf_number",varTB "cnpj_number"] -< t
+                    $ atAny "ir_reg" [varTB "cpf_number",varTB "cnpj_number"] -< t
       odxR "taxa_paga" -< ()
       odxR "aproval_date" -< ()
       atR "andamentos" (proc t -> do
@@ -402,7 +402,7 @@ queryCPFStatefull =  StatefullPlugin "CPF Receita" "owner" [staticP arrowF,stati
     where
       arrowF ,arrowS :: ArrowReader
       arrowF = proc t -> do
-              atAny "cpf_number,cnpj_number" [idxR "cpf_number"] -< t
+              atAny "ir_reg" [idxR "cpf_number"] -< t
               odxR "captchaViewer" -< t
               returnA -< Nothing
       arrowS = proc t -> do
@@ -416,7 +416,7 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] wrapplug
     where arrowF ,arrowS :: ArrowReader
           arrowF = proc t -> do
-            atAny "cpf_number,cnpj_number" [idxR "cnpj_number"] -< t
+            atAny "ir_reg" [idxR "cnpj_number"] -< t
             odxR "captchaViewer"-< t
             returnA -< Nothing
           arrowS = proc t -> do
@@ -442,6 +442,16 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
               odxR "municipio" -< t
               odxR "bairro" -< t
 
+testPlugin  db sch p = withConnInf db sch (\inf -> do
+                                       let rp = tableView (tableMap inf) (fromJust $ M.lookup (_bounds p) (tableMap inf))
+                                           bds = _arrowbounds p
+                                           rpd = accessTB  (fst bds <> snd bds) (markDelayed True rp)
+                                           rpq = selectQuery rpd
+                                       print rpq
+                                       q <- queryWith_ (fromAttr (unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
+                                       return $ q
+                                           )
 
 
-plugList = [lplugContract ,lplugOrcamento ,lplugReport,analiseProjeto,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}{-queryCNPJStatefull,queryCPFStatefull,-}queryArtAndamento]
+
+plugList = [lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}{-queryCNPJStatefull,queryCPFStatefull,-}queryArtAndamento]

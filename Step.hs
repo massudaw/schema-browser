@@ -230,10 +230,12 @@ indexTB1 (IProd _ l) t
 
 firstCI f = mapComp (firstTB f)
 
+findAttr l v = justError ("checkField error finding key: " <> T.unpack (T.intercalate "," l) ) $ M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB v
+
 checkField (Nested (IProd _ l) nt ) t@(TB1 m v)
   = do
     let
-        i = justError ("checkField error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB v
+        i = findAttr l v
     case runIdentity $ getCompose $ i  of
          IT l  i -> Compose . Identity <$> (IT l  <$> checkTable nt i)
          FKT a   c  d -> Compose . Identity <$> (FKT a  c <$>  checkTable nt d)
@@ -241,7 +243,7 @@ checkField (Nested (IProd _ l) nt ) t@(TB1 m v)
 checkField  (IProd b l) t@(TB1 m v)
   = do
     let
-        i = justError ("checkField error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString._relOrigin)) $ _kvvalues $ unTB v
+        i = findAttr l v
     Compose . Identity <$> case runIdentity $ getCompose $ i  of
          Attr k v -> fmap (Attr k ) {-. traceShow (b,l)  . traceShowId -}. (\i -> if b then  unRSOptional' i else Just i ) $ v
          i -> errorWithStackTrace ( show (l,i))
@@ -324,7 +326,7 @@ aattri (IT _  i ) =  recTB i
   where recTB (TB1 _ i ) =  concat $ fmap aattr (toList $ _kvvalues $ unTB i)
         recTB (ArrayTB1 i ) = concat $ fmap recTB i
         recTB (LeftTB1 i ) = concat $ toList $ fmap recTB i
-
+        recTB (DelayedTB1 i ) = concat $ toList $ fmap recTB i
 
 
 
@@ -335,9 +337,31 @@ type ArrowPlug a o = RuntimeTypes.Parser a AccessTag (Maybe (TB1 Showable)) o
 attrT :: (a,b) -> Compose Identity (TB Identity  ) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
-{-
-addToList  (InsertTB m) =  (m:)
-addToList  (DeleteTB m ) =  L.delete m
-addToList  (EditTB m n ) = (map (\e-> if  (e ==  n) then  mapTB1 (\i -> maybe i snd $ getCompose $  unTB $ findTB1 (\k -> keyattr k == keyattr i  ) m ) e  else e ))
--}
 
+findOne l  e
+  = L.find (\i -> S.fromList (proj i) == e ) $ case l of
+    Many l ->  l
+    ISum l -> l
+  where proj (IProd _ i) = i
+        proj (Nested (IProd _ i) n) = i
+        proj (Many [i]) = proj i
+        proj i = errorWithStackTrace (show i )
+
+accessTB i t = go t
+  where
+      go t = case t of
+        LeftTB1 j ->  LeftTB1 $ go <$> j
+        ArrayTB1 j -> ArrayTB1 $ go <$> j
+        DelayedTB1 (Just j) -> go j
+        TB1 m k -> TB1 m  (mapComp (\m -> KV $ M.mapWithKey  modify (_kvvalues $ m)) k )
+          where modify k =  mapComp (\v -> maybe v (flip accessAT v) $ findOne i (S.map (keyValue. _relOrigin) k))
+accessTB l t = errorWithStackTrace (show (l,t))
+
+accessAT (Nested (IProd b t) r) at
+    = case at of
+        IT k v -> IT (mapComp (firstTB (alterKeyType forceDAttr )) k ) (accessTB r v)
+        FKT k rel v -> FKT (mapComp (firstTB (alterKeyType forceDAttr )) <$> k) rel (accessTB r v)
+accessAT (IProd b t) at
+    = case at of
+        Attr k v -> Attr (alterKeyType forceDAttr k ) v
+accessAT (Many [i]) at = accessAT i at

@@ -152,7 +152,6 @@ instance (Functor f ,Bifunctor g)  => Bifunctor (Compose f g ) where
 
 
 data Rel k
-
   = Inline  {_relOrigin :: k}
   | Rel
   { _relOrigin :: k

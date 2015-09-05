@@ -777,6 +777,9 @@ tname i = do
   return $ Labeled ("t" <> (T.pack $  show n)) i
 
 
+markDelayed True (TB1 m v) = TB1 m $ mapComp (KV . M.mapWithKey (\k v -> mapComp (recurseDel (if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then False else True)) v  ). _kvvalues ) v
+markDelayed False (TB1 m v) = TB1 m $ mapComp (KV . fmap (mapComp (recurseDel False)) . _kvvalues) v
+
 
 
 markDelayed i (LeftTB1 j) = LeftTB1 $ (markDelayed  i)<$> j
@@ -791,8 +794,38 @@ makeTB1Delayed i  =  DelayedTB1 $ Just (markDelayed True i)
 
 makeDelayed (KOptional i) = KOptional $ makeDelayed i
 makeDelayed (KArray i ) = KArray $ makeDelayed i
-makeDelayed (KDelayed i ) = i
+makeDelayed (KDelayed i ) = KDelayed i
 makeDelayed i  = KDelayed i
+
+
+forceDesc rec (ArrayTB1 m ) = ArrayTB1 $ forceDesc rec <$> m
+forceDesc rec (LeftTB1 m ) = LeftTB1 $ forceDesc rec <$> m
+forceDesc rec (DelayedTB1 (Just m) ) = forceDesc rec m
+forceDesc rec (TB1 m v) =  TB1 m $ mapComp (KV . M.mapWithKey (\k v -> mapComp ((if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then forceDel True   else forceDel False  )) v   ). _kvvalues ) v
+forceDesc False (TB1 m v) =  TB1 m $ mapComp (KV . M.mapWithKey (\k v -> mapComp (forceDel False )  v   ). _kvvalues ) v
+forceDel rec t =
+            case t of
+              Attr k v ->  Attr (alterKeyType forceDAttr k) v
+              IT k v -> IT (mapComp (forceDel rec) k) (forceDesc True v)
+              FKT k rel v -> FKT (mapComp (forceDel rec) <$> k)  rel ((if rec then forceDesc False else id ) v)
+
+forceDTB1  v = go v
+  where
+    go v = case v of
+      LeftTB1 i -> LeftTB1 $ go <$> i
+      ArrayTB1 i -> ArrayTB1 $ go <$> i
+      DelayedTB1 (Just i) -> i
+      i -> i
+
+forceDAttr v = go v
+  where
+    go v = case v of
+      (KOptional i) -> KOptional $ go i
+      (KArray i ) -> KArray $ go i
+      (KDelayed i ) -> i
+      i -> i
+
+
 
 alterKeyType f (Key a b c d m e) = (Key a b c d m (f e))
 
@@ -800,8 +833,8 @@ recurseDel False a@(Attr k v) = a
 recurseDel True a@(Attr k v) = Attr (alterKeyType makeDelayed k ) v
 recurseDel False a@(IT k v ) = IT k $ markDelayed  False v
 recurseDel True a@(IT k v ) = IT (mapComp (recurseDel True ) k )  (makeTB1Delayed v)
-recurseDel False a@(FKT  k rel v ) = FKT k (fmap (over relTarget (alterKeyType makeDelayed)) rel) $ markDelayed  True v
-recurseDel True (FKT  k rel v ) = FKT (mapComp (recurseDel True ) <$> k ) (fmap (fmap (alterKeyType makeDelayed )) rel)  (makeTB1Delayed v)
+recurseDel False a@(FKT  k rel v ) = FKT k rel $ markDelayed  True v
+recurseDel True (FKT  k rel v ) = FKT (mapComp (recurseDel True ) <$> k )  rel  (makeTB1Delayed v)
 
 
 explodeRow :: TB3 (Labeled Text) Key () -> Text
