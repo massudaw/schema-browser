@@ -714,6 +714,10 @@ tbAttr  =  tbFilter  (\kv k -> not (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv 
 
 tbFilter :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbFilter pred (TB1 kv item) =  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item
+tbFilter pred (LeftTB1 (Just i)) = tbFilter pred i
+tbFilter pred (ArrayTB1 ([i])) = tbFilter pred i
+tbFilter pred (DelayedTB1 (Just i)) = tbFilter pred i
+f = errorWithStackTrace ""
 
 recurseTB :: Map Text Table -> Table -> Bool -> TB3 (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3 (Labeled Text) Key ())
 recurseTB invSchema  nextT nextLeft ksn@(TB1 m kv ) =  (TB1 m) <$>
@@ -741,8 +745,6 @@ recurseTB invSchema  nextT nextLeft ksn@(TB1 m kv ) =  (TB1 m) <$>
 
 
 
-unTB = runIdentity . getCompose
-_tb = Compose . Identity
 
 unAttr (Attr _ i) = i
 unAttr i = errorWithStackTrace $ "cant find attr" <> (show i)
@@ -789,12 +791,12 @@ markDelayed False (TB1 m v) = TB1 m $ mapComp (KV . fmap (mapComp (recurseDel Fa
 
 makeTB1Delayed (LeftTB1 i ) =  LeftTB1 $ makeTB1Delayed <$> i
 makeTB1Delayed (ArrayTB1 i ) =  ArrayTB1 $ makeTB1Delayed <$> i
-makeTB1Delayed (DelayedTB1 i ) =  DelayedTB1 i
+-- makeTB1Delayed (DelayedTB1 i ) =  DelayedTB1 i
 makeTB1Delayed i  =  DelayedTB1 $ Just (markDelayed True i)
 
 makeDelayed (KOptional i) = KOptional $ makeDelayed i
 makeDelayed (KArray i ) = KArray $ makeDelayed i
-makeDelayed (KDelayed i ) = KDelayed i
+-- makeDelayed (KDelayed i ) = KDelayed i
 makeDelayed i  = KDelayed i
 
 
@@ -928,11 +930,6 @@ _unTB1 (LeftTB1 (Just i )) = _unTB1 i
 _unTB1 (DelayedTB1 (Just i )) = _unTB1 i
 _unTB1 i =  errorWithStackTrace $ show i
 
-
-allMaybes i | F.all (const False) i  = Nothing
-allMaybes i = if F.all isJust i
-        then Just $ fmap (justError "wrong invariant allMaybes") i
-        else Nothing
 
 makeOpt (Key a  c d m n ty) = (Key a  c d m n (KOptional ty))
 

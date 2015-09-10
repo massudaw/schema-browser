@@ -29,9 +29,11 @@ import Data.Vector.Binary
 import qualified Data.Binary as B
 import Data.Functor.Identity
 import Data.Ord
+import Utils
 import Data.Typeable
 import Data.Traversable(traverse)
 import Data.Vector(Vector)
+import qualified Data.Vector as Vector
 import Data.Functor.Classes
 import Data.Foldable (Foldable)
 import qualified Data.Foldable as F
@@ -406,6 +408,9 @@ mapMod f (EditTB i j ) = EditTB ( mapKey f i ) (mapKey f j)
 mapMod f (InsertTB i  ) = InsertTB ( mapKey f i )
 mapMod f (DeleteTB i  ) = DeleteTB ( mapKey f i )
 
+unTB = runIdentity . getCompose
+_tb = Compose . Identity
+
 data Modification a b
   = EditTB (TB2 a b) (TB2 a b)
   | InsertTB (TB2 a b)
@@ -539,6 +544,18 @@ kattri (IT _  i ) =  recTB i
         recTB (ArrayTB1 i ) = L.concat $ fmap recTB i
         recTB (LeftTB1 i ) = L.concat $ F.toList $ fmap recTB i
 
+aattr = aattri . runIdentity . getCompose
+aattri (Attr k i ) = [(k,i)]
+
+
+aattri (FKT i  _ _ ) =  (L.concat $ aattr  <$> i)
+aattri (IT _  i ) =  recTB i
+  where recTB (TB1 _ i ) =  concat $ fmap aattr (F.toList $ _kvvalues $ runIdentity $ getCompose i)
+        recTB (ArrayTB1 i ) = concat $ fmap recTB i
+        recTB (LeftTB1 i ) = concat $ F.toList $ fmap recTB i
+        recTB (DelayedTB1 i ) = concat $ F.toList $ fmap recTB i
+
+
 data Modifier a
   = MCreate a
   | MDelete a
@@ -566,8 +583,14 @@ tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) 
 tbmap :: Ord k => Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
 tbmap = TB1 (KVMetadata "" ""  Set.empty [] [] Set.empty Set.empty) . Compose . Identity . KV
 
+tbmapPK :: Ord k => Set k -> Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
+tbmapPK pk = TB1 (KVMetadata "" ""  pk  [] [] Set.empty Set.empty) . Compose . Identity . KV
+
 tblist :: Ord k => [Compose Identity  (TB Identity) k a] -> TB3 Identity k a
 tblist = tbmap . mapFromTBList
+
+tblistPK :: Ord k => Set k -> [Compose Identity  (TB Identity) k a] -> TB3 Identity k a
+tblistPK s = tbmapPK s . mapFromTBList
 
 tblist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TB3 Identity Key a
 tblist' t  = TB1 (tableMeta t) . Compose . Identity . KV . mapFromTBList

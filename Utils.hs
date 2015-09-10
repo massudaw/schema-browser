@@ -18,6 +18,7 @@ import Data.Functor.Compose
 import System.Directory
 import System.Process(callCommand)
 import Data.Traversable
+import qualified Data.Foldable as F
 
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
@@ -102,3 +103,10 @@ data Compose2 f g a b = Compose2 { getCompose2 ::  f (g a b)}
 
 firstComp :: Functor t => (f a c -> g b c) ->  Compose2 t f a c -> Compose2 t g b c
 firstComp f =  Compose2 . fmap  f . getCompose2
+
+allMaybes i | F.all (const False) i  = Nothing
+allMaybes i = if F.all isJust i
+        then Just $ fmap (justError "wrong invariant allMaybes") i
+        else Nothing
+
+

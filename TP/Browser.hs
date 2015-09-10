@@ -120,7 +120,7 @@ poller db handler plugs = do
           startTime <- getCurrentTime
           let intervalsec = fromIntegral $ 60*d
               d = 60
-          if diffUTCTime startTime  (unOnly t) >  intervalsec
+          if  diffUTCTime startTime  (unOnly t) >  intervalsec
           then do
               execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
               print ("START " <>T.unpack n <> " - " <> show startTime  ::String)

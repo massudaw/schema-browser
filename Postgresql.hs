@@ -310,9 +310,8 @@ tryquoted i = doublequoted i <|> i
 -- Note Because the list has a mempty operation when parsing
 -- we have overlap between maybe and list so we allow only nonempty lists
 parseLabeledTable :: TB2 Key () -> Parser (TB2 Key Showable)
--- parseLabeledTable (ArrayTB1 [DelayedTB1 (Just tb)]) = ArrayTB1 . pure.  DelayedTB1 . Just <$> parseLabeledTable tb -- string "t"  >> (return $ ArrayTB1 [ DelayedTB1 Nothing] )
 parseLabeledTable (ArrayTB1 [t]) =
-  ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> parseArray (parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey makeOpt t)) <|> parseArray (parseLabeledTable t)  >>  return (fail "")  ) )
+  ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> parseArray (parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey makeOpt t))  >>  return (fail "")  ) )
 parseLabeledTable (DelayedTB1 (Just tb) ) =  string "t" >>  return (DelayedTB1  Nothing) -- <$> parseLabeledTable tb
 parseLabeledTable (LeftTB1 (Just i )) =
   LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapKey makeOpt i) >> return Nothing) <|> return Nothing )

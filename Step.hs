@@ -180,7 +180,7 @@ instance Applicative m => Applicative (Kleisli m a ) where
 
 splitIndex b l = (fmap T.pack . IProd b . unIntercalate (','==) $ l)
 
--- Obrigatory value with maybe wrapping
+  -- Obrigatory value with maybe wrapping
 odxR  l =
   let ll = splitIndex True l
    in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTable ll)))
@@ -264,8 +264,13 @@ checkTable (Many l) t@(TB1 m v) =
 checkTable l (ArrayTB1 i )
   | i == []  = Nothing
   | otherwise =   fmap ArrayTB1 $ allMaybes $ checkTable l <$> i
-checkTable i j = errorWithStackTrace (show (i,j))
 
+checkTable (ISum []) t@(TB1 m v)
+  = Nothing
+checkTable (ISum ls) t@(TB1 m v )
+  = fmap  (TB1 m . Compose . Identity . KV . mapFromTBList) . (\i -> if L.null i then Nothing else Just i) . catMaybes $ fmap (\(Many [l]) ->  join $ fmap (T.traverse  unRSOptional') $  checkField l t) ls
+
+checkTable i j = errorWithStackTrace (show ("checkTable" , i,j))
 
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
 indexTable l (LeftTB1 j) = join $ fmap (indexTable l) j
@@ -315,18 +320,6 @@ instance (Monoid s ,Applicative (a i),Monoid m) => Monoid (Parser a s i m) where
 
 findPK = concat . fmap keyattr  .toList . _kvvalues  . unTB . tbPK
 
-
-
-aattr = aattri . runIdentity . getCompose
-aattri (Attr k i ) = [(k,i)]
-
-
-aattri (FKT i  _ _ ) =  (L.concat $ aattr  <$> i)
-aattri (IT _  i ) =  recTB i
-  where recTB (TB1 _ i ) =  concat $ fmap aattr (toList $ _kvvalues $ unTB i)
-        recTB (ArrayTB1 i ) = concat $ fmap recTB i
-        recTB (LeftTB1 i ) = concat $ toList $ fmap recTB i
-        recTB (DelayedTB1 i ) = concat $ toList $ fmap recTB i
 
 
 

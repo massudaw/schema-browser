@@ -228,7 +228,7 @@ withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s
 
 testParse db sch q = withConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
-                                           rpd = forceDesc True (markDelayed True rp)
+                                           rpd = rp -- forceDesc True (markDelayed True rp)
                                            rpq = selectQuery rpd
                                        print rpd
                                        print rpq
@@ -243,7 +243,7 @@ testAcademia q = testParse "academia" "academia"  q
 selectAll inf table   = liftIO $ do
       let
           tb =  tableView (tableMap inf) table
-          tbf = forceDesc True (markDelayed True tb)
+          tbf = tb -- forceDesc True (markDelayed True tb)
       print (tableName table,selectQuery tbf )
       (t,v) <- duration  $ queryWith_  (fromAttr (unTlabel tbf)) (conn inf)(fromString $ T.unpack $ selectQuery $ tbf)
       print (tableName table,t)
@@ -309,6 +309,7 @@ loadDelayed inf t@(TB1 k v) values@(TB1 ks vs)
   where
     delayedattrs = concat $ fmap (keyValue . (\(Inline i ) -> i)) .  F.toList <$> M.keys filteredAttrs
     filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (_kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs)
+
 
 zipInter f = M.intersectionWith f
 zipDelete f = fmap f . M.difference
