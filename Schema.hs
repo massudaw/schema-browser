@@ -113,23 +113,11 @@ keyTables :: Connection -> Connection -> (Text ,Text)-> IO InformationSchema
 keyTables conn userconn (schema ,user) = do
        uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from information_schema.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
        res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ( unTOptional ty) . BS.pack . T.unpack <$>  (join $ listToMaybe. T.splitOn "::" <$> n) ) ty )  (createType  schema (t,c,j,k,l,m,n,d,z,b)) )) <$>  query conn "select ta.table_name,o.column_name,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name , st.table_name is not null from information_schema.tables ta natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name    left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column left join metadata.sum_table st on st.schema_name = udt_schema and ('_' || st.table_name = udt_name OR st.table_name = udt_name)   where table_schema = ?"  (Only schema)
-       -- putStrLn (unlines $ fmap show res2)
-       --res2 <- fmap ( (\i@(t,c,o,j,k,l,m,n,d,z)-> (t,) $ createType  schema ((\(t,c,i,j,k,l,m,n,d,z)-> (\(Just i) -> i) $ M.lookup (t,c) (M.fromList uniqueMap)) i) i )) <$>  query conn "select table_name,o.column_name,translation,data_type,udt_schema,udt_name,is_nullable,column_default,'' :: text ,domain_name from information_schema.tables natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name where table_schema = ? " {- left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column " -} (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
-       -- keyMap <- preprocessSumTypes (M.fromList keyList)
           keyMap = M.fromList keyList
           lookupKey' ::  Map (Text,Text) Key -> (Text,Text) ->  Key
           lookupKey' keyMap = (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) keyMap )
-       {-eitherItems <-  join $  mapM (\(t,l,n)-> do
-         un <- newUnique
-         let
-           lcol = lookupKey' keyMapPre . (t,) <$> V.toList l
-           tnew = Key n Nothing 0 Nothing un (KEither (keyType <$> lcol) )
-         return (t,[(tnew,Path (S.fromList lcol) (FKEitherField tnew lcol) (S.singleton tnew) )]) ) <$> query conn "SELECT table_name,sum_columns,column_name FROM metadata.table_either WHERE table_schema = ? " (Only schema)-}
-       let --eitherMap = M.fromListWith mappend  $ fmap (\(t,j) -> (t,fmap snd j )) $ eitherItems
-           --keyMap =  foldr (uncurry M.insert) keyMapPre $ concat $ fmap (\(t,j) -> fmap (\ki -> ((t,keyValue ki),ki)) $ fmap fst j ) $ eitherItems
-       let
           lookupKey3 :: (Functor f) => f (Text,Maybe (Vector Text)) -> f (Text,Vector Key)
           lookupKey3 = fmap  (\(t,c)-> (t,maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap)) c) )
           lookupKey2 :: Functor f => f (Text,Text) -> f Key

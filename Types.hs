@@ -27,6 +27,7 @@ import Data.Text.Binary
 import Data.Binary (Binary)
 import Data.Vector.Binary
 import qualified Data.Binary as B
+import qualified Data.Poset as P
 import Data.Functor.Identity
 import Data.Ord
 import Utils
@@ -594,6 +595,13 @@ tblistPK s = tbmapPK s . mapFromTBList
 
 tblist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TB3 Identity Key a
 tblist' t  = TB1 (tableMeta t) . Compose . Identity . KV . mapFromTBList
+
+instance P.Poset (FKey (KType Text))where
+  compare  = (\i j -> case compare (i) (j) of
+                      EQ -> P.EQ
+                      LT -> P.LT
+                      GT -> P.GT )
+
 
 
 instance Ord k => Monoid (KV f k a) where

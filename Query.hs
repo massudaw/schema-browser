@@ -22,6 +22,7 @@ import Data.Bifunctor
 import Data.Unique
 import Data.Functor.Identity
 import Data.Ord
+import qualified Data.Poset as P
 import Control.Lens
 import qualified Data.Vector as Vector
 import qualified Data.Foldable as F
@@ -519,11 +520,13 @@ notReflexiveRel ks = not . reflexiveRel ks
 reflexiveRel ks
   -- | any (isInlineRel) ks = isInlineRel
   | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
+  | all (isJust . keyStatic . _relOrigin) ks = ( isJust . keyStatic. _relOrigin)
   | any (isJust . keyStatic . _relOrigin) ks = ( isNothing . keyStatic. _relOrigin)
   | any (\j -> not $ isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks =  const False
   | otherwise = (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) ))
-    where isInlineRel (Inline _ ) =  True
-          isInlineRel i = False
+
+isInlineRel (Inline _ ) =  True
+isInlineRel i = False
 
 
 isPathReflexive (FKJoinTable _ ks _)
@@ -734,14 +737,14 @@ recurseTB invSchema  nextT nextLeft ksn@(TB1 m kv ) =  (TB1 m) <$>
           let
               items = _kvvalues kv
               fkSet:: S.Set Key
-              fkSet = S.filter (isNothing . keyStatic ) . S.unions . fmap pathRelRef $ filter (isPathReflexive . pathRel) $ S.toList (rawFKS nextT)
+              fkSet = {-S.filter (isNothing . keyStatic ) .-} S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then   i else filterReflexive i ) . S.toList . pathRelRel ) $ filter (isPathReflexive . pathRel) $ S.toList (rawFKS nextT)
               nonFKAttrs :: [(S.Set (Rel Key) ,TBLabel  ())]
               nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
           pt <- foldl (\acc  fk ->  do
                   vacc <- acc
                   i <- fmap (pathRelRel fk,) . recursePath nextLeft vacc ( (M.toList $  fmap getCompose items )) invSchema $ fk
                   return (fmap getCompose i:vacc)
-                  ) (return [])    (F.toList $ rawFKS nextT )
+                  ) (return [])   $ P.sortBy (P.comparing pathRelRel) (F.toList $ rawFKS nextT )
           return (   KV $ M.fromList $ nonFKAttrs <> (fmap (fmap Compose ) pt)))
 
 
@@ -908,7 +911,7 @@ sup' = (\(ER.Finite i) -> i) . Interval.upperBound
 
 
 unSOptional (SOptional i) = i
-unSOptional i = traceShow ("unSOptional No Pattern Match SOptional-" <> show i) Nothing
+unSOptional i = traceShow ("unSOptional No Pattern Match SOptional-" <> show i) (Just i)
 
 unSDelayed (SDelayed i) = i
 unSDelayed i = traceShow ("unSDelayed No Pattern Match" <> show i) Nothing

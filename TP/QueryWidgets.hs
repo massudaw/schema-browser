@@ -6,9 +6,9 @@ import Data.Functor.Identity
 import Control.Monad.Writer
 import Control.Monad
 import Control.Concurrent
+import qualified Data.Poset as P
 import Reactive.Threepenny
 import Data.Either
-import qualified Data.Poset as P
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (delete)
 import Data.String
@@ -175,10 +175,11 @@ diffOptional i   = Just i
 getRelOrigin =  fmap _relOrigin . concat . fmap keyattr
 
 tbCase :: InformationSchema -> [Plugins] -> SelPKConstraint  -> TB Identity Key () -> [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key Showable)))] -> [(Access Text,Event (Maybe (TB1 Showable)))]-> Tidings (Maybe (TB Identity Key Showable)) -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
-tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens oldItems  = do
+tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
         l <- flabel # set text (show $ _relOrigin <$> rel )
         let
-            nonInj =  traceShowId $ (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin ifk)
+            oldItems = maybe preoldItems (\v-> fmap (maybe (Just (FKT (fmap  (Compose . Identity . uncurry Attr)  v) rel (DelayedTB1 Nothing) )) Just ) preoldItems  ) (Tra.traverse (\k -> fmap (k,) . keyStatic $ k ) ( getRelOrigin ifk))
+            nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattr .Compose . Identity .fst) wl
             nonInjConstr :: SelTBConstraint
             nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 _ l) -> maybe True id $ (\ j -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity)  [j]) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) <$> j ).triding) <$> traceShow (fmap fst nonInjRefs ) nonInjRefs
@@ -302,7 +303,7 @@ uiTable inf pgs constr tname refs plmods ftb@(TB1 m k ) oldItems = do
 
   fks <- foldl (\jm (l,m)  -> do
             w <- jm
-            wn <- (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) refs)
+            wn <- (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $ traceShow (fmap fst refs) refs)
             return (w <> [(unTB m,wn)])
         ) (return []) (P.sortBy (P.comparing fst ) . M.toList . unTBMap $ ftb)
   let
@@ -321,13 +322,6 @@ uiTable inf pgs constr tname refs plmods ftb@(TB1 m k ) oldItems = do
     # set children (plugins  <> [listBody])
     # set style [("margin-left","10px"),("border","2px"),("border-color","gray"),("border-style","solid")]
   return (body, tableb )
-
-
-instance P.Poset (FKey (KType Text))where
-  compare  = (\i j -> case compare (i) (j) of
-                      EQ -> P.EQ
-                      LT -> P.LT
-                      GT -> P.GT )
 
 unLeftTB  = join . fmap  un
   where
@@ -764,8 +758,8 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _ _ ) ) =
           ftdi = oldItems
           oldASet :: Set Key
           oldASet = S.fromList (_relOrigin <$> filterNotReflexive rel )
-          replaceKey =  firstTB (\k -> maybe k _relTarget $ L.find ((==k)._relOrigin) $ filterReflexive rel)
-          nonInj =   S.difference (S.fromList $fmap  _relOrigin   $ rel) (S.unions $ fmap (S.fromList . fmap _relOrigin .keyattr) ifk)
+          replaceKey =  firstTB (\k -> traceShow k $ traceShowId  $ maybe k _relTarget $ L.find ((==k)._relOrigin) $ filter (\i -> keyType (_relOrigin i) == keyType (_relTarget i)) rel)
+          nonInj =   S.difference (S.fromList $ fmap  _relOrigin   $ rel) (S.fromList $ getRelOrigin ifk)
           nonInjRefs = filter (flip S.isSubsetOf nonInj . S.fromList . fmap _relOrigin . keyattr .Compose . Identity .fst) wl
           staticold :: [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key (Showable))))]
           staticold  =    second (fmap (fmap replaceKey . join . fmap unLeftItens)) . first (replaceKey .unLeftKey) <$>  nonInjRefs
