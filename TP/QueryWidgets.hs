@@ -178,19 +178,19 @@ tbCase :: InformationSchema -> [Plugins] -> SelPKConstraint  -> TB Identity Key 
 tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens oldItems  = do
         l <- flabel # set text (show $ _relOrigin <$> rel )
         let
-            nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin ifk)
+            nonInj =  traceShowId $ (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattr .Compose . Identity .fst) wl
             nonInjConstr :: SelTBConstraint
-            nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 _ l) -> maybe True id $ (\ j -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity)  [j]) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) <$> j ).triding) <$> nonInjRefs
+            nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 _ l) -> maybe True id $ (\ j -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity)  [j]) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) <$> j ).triding) <$> traceShow (fmap fst nonInjRefs ) nonInjRefs
             tbi = fmap (Compose . Identity)  <$> oldItems
             thisPlugs = filter (hasProd (isNested ((IProd True $ fmap (keyValue._relOrigin) (keyattri i) ))) .  fst) plugItens
             pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> ( thisPlugs)
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
-            pkset = traceShowId $ S.map (\ i -> justError "no ref"$   M.lookup i relTable) ( S.fromList $ fmap _relOrigin $ findPK $ tb1 )
+            pkset = S.map (\ i -> justError "no ref"$   M.lookup i relTable) ( S.fromList $ fmap _relOrigin $ findPK $ tb1 )
 
             restrictConstraint = filter ( (`S.isSubsetOf`  pkset) . S.fromList . getRelOrigin  .fst) constr
             convertConstr :: SelTBConstraint
-            convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> (constr   . justError "no backref" . backFKRef relTable (getRelOrigin f) . Just )) j ) <$>  traceShow ( fmap (getRelOrigin .fst) restrictConstraint) restrictConstraint
+            convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> (constr   . justError "no backref" . backFKRef relTable (getRelOrigin f) . Just )) j ) <$>  restrictConstraint
             ftdi = fmap (runIdentity . getCompose ) <$>  tbi
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return (fmap (runIdentity . getCompose ) <$>  tbi)) (fmap Just . filterJust . snd <$>  pfks )
         tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks wl (ftdi ) i
@@ -208,8 +208,9 @@ tbCase inf pgs constr i@(IT na tb1 ) wl plugItens oldItems  = do
         paintEdit l (facts (triding tds)) (facts oldItems)
         return $ TrivialWidget (triding tds) dv
 
-tbCase inf pgs constr a@(Attr i _ ) wl plugItens oldItems = do
+tbCase inf pgs constr a@(Attr i _ ) wl plugItens preoldItems = do
         l<- flabel # set text (show i)
+        let oldItems = maybe (preoldItems) (\v-> fmap (maybe (Just (Attr i v )) Just ) preoldItems  ) (keyStatic i)
         let thisPlugs = filter (hasProd (== IProd True (keyValue . _relOrigin <$> keyattri a)) . fst)  plugItens
             tbi = oldItems
             evs  = ( fmap ( join . fmap ( fmap (runIdentity .  getCompose ) . fmap snd . getCompose . runIdentity . getCompose  . findTB1 (((== [i])  . fmap _relOrigin . keyattr )))) <$>  (fmap snd thisPlugs))
@@ -438,9 +439,8 @@ processPanelTable inf attrsB res table oldItemsi = do
       insertAction ip = do
           res <- catch (Right <$> insertAttr (fromAttr )  (conn inf) ip table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
           return $ InsertTB  <$> res
-
   let    spMap = fmap split . mapEvent id
-         diff = liftA2 diffTB1 <$> facts oldItemsi <*> attrsB
+         diff = liftA2 diffTB1 <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB)
   (evid,evir) <- spMap $ filterJust $ (fmap insertAction  <$> attrsB ) <@ (UI.click insertB)
   (evdd,evdr) <- spMap $ filterJust $ (fmap deleteAction <$> facts oldItemsi) <@ UI.click deleteB
   (eved,ever) <- spMap $ (editAction  <$> attrsB <*> (facts oldItemsi) ) <@ UI.click editB
