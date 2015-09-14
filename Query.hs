@@ -19,13 +19,10 @@
 module Query where
 
 import Data.Functor.Apply
-import Data.Bifunctor
 import Data.Unique
 import Data.Functor.Identity
 import Data.Ord
 import qualified Data.Poset as P
-import Control.Lens
-import qualified Data.Vector as Vector
 import qualified Data.Foldable as F
 import Data.Traversable (mapAccumL)
 import qualified Data.Traversable as Tra
@@ -132,8 +129,7 @@ transformKey (KOptional j) l (LeftTB1  v)
     | otherwise = errorWithStackTrace "no transform optional nothing"
 transformKey (KSerial j)  l (SerialTB1 v)
     | isJust v = transformKey j l (fromJust v)
-    | otherwise =  DelayedTB1 Nothing -- error $ "no transform serial nothing" <> show (l,v)
--- transformKey (KOptional j)  l@(Primitive _ ) (SOptional v) | j == l  && isJust v = (\(Just i)-> i) v
+    | otherwise =  DelayedTB1 Nothing
 transformKey l@(Primitive _)  (KOptional j ) v  = LeftTB1 $ Just (transformKey l j v)
 transformKey l@(Primitive _)  (KSerial j ) v   = SerialTB1 $ Just (transformKey l j v)
 transformKey l@(Primitive _)  (KArray j ) v | j == l  = ArrayTB1 $ pure v
@@ -144,81 +140,16 @@ description  = rawDescription
 
 atTables f t = f t
 
-data Pattern  a
-  = PInter (Interval.Interval a)
-  | PArr [a]
-  | POne a
-  | PComp (Pattern [a])
-
-
-instance Enum [a] where
-
-data SubSet a
-   = ClosedSS
-   { minV :: a
-   , value :: a
-   , maxvalue :: a
-   }
-   | ScopedSS ([SubSet a] ->  SubSet a)
-
-year i = ClosedSS (-5000)  i 5000
-month i = ClosedSS 1  i 12
-
-dayS y m i = day (year y ) (month m) i
-
-
-day _ (ClosedSS _ 1 _) i = ClosedSS 1 i 31
-day (ClosedSS _ y _ )  (ClosedSS _ 2 _) i
-  | y `mod` 4 == 0 = ClosedSS 1 i 29
-  | otherwise = ClosedSS 1 i 28
-day _ (ClosedSS _ 3 _) i = ClosedSS 1 i 31
-day _ (ClosedSS _ 4 _) i = ClosedSS 1 i 30
-day _ (ClosedSS _ 5 _) i = ClosedSS 1 i 31
-day _ (ClosedSS _ 6 _) i = ClosedSS 1 i 30
-day _ (ClosedSS _ 7 _) i = ClosedSS 1 i 31
-day _ (ClosedSS _ 8 _) i = ClosedSS 1 i 31
-day _ (ClosedSS _ 9 _) i = ClosedSS 1 i 30
-day _ (ClosedSS _ 10 _) i = ClosedSS 1 i 31
-day _ (ClosedSS _ 11 _) i = ClosedSS 1 i 30
-day _ (ClosedSS _ 12 _) i = ClosedSS 1 i 31
-
-genInterval [] = return []
-genInterval (PComp a:xs) = do
-      v <- genPatt a
-      k <- genInterval xs
-      vi <- v
-      return (vi : k)
-  where
-      unFinite (ER.Finite i) = i
-      genPatt (PInter i) =  foldl1 (\j i -> do
-                                   ii <- i
-                                   ji <- j
-                                   return $ ii ++ ji ) $ fmap pure $ zipWith (\a b -> [a..b]) (unFinite (Interval.lowerBound i)) (unFinite (Interval.upperBound i))
-      genPatt (PArr i) = i
-      genPatt (POne i) = [i]
-genInterval (a:xs) = do
-      v <- genPatt a
-      k <- genInterval xs
-      return $ v:k
-  where
-      unFinite (ER.Finite i) = i
-      genPatt (PInter i) =  [unFinite (Interval.lowerBound i) .. unFinite (Interval.upperBound i)]
-      genPatt (PArr i) = i
-      genPatt (POne i) = [i]
-
---      genPatt (PComp i ) =
-
-
 renderShowable :: FTB Showable -> String
 renderShowable (LeftTB1 i ) = maybe "" renderShowable i
-renderShowable (DelayedTB1 i ) = maybe "" renderShowable i
+renderShowable (DelayedTB1 i ) =  maybe "<NotLoaded>" (\i -> "<Loaded| " <> renderShowable i <> "|>") i
 renderShowable (SerialTB1 i ) = maybe "" renderShowable i
 renderShowable (ArrayTB1 i)  = intercalate "," $ F.toList $ fmap renderShowable i
-renderShowable (IntervalTB1 i)  = showInterval renderShowable i -- intercalate "," $ F.toList $ fmap renderShowable i
-renderShowable (TB1  i) = shw i
+renderShowable (IntervalTB1 i)  = showInterval renderShowable i
+renderShowable (TB1  i) = renderPrim i
 
+shw :: Showable -> String
 shw (SText a) = T.unpack a
--- shw (SInterval i)  = showInterval i
 shw (SNumeric a) = show a
 shw (SBoolean a) = show a
 shw (SDouble a) = show a
@@ -227,11 +158,8 @@ shw (SLineString a ) = show a
 shw (SBounding a ) = show a
 shw (SDate a) = show a
 shw (SDayTime a) = show a
--- shw (SSerial a) = show a
 shw (SBinary _) = show "<Binary>"
--- shw (SDelayed  i ) = maybe "<NotLoaded>" (\i -> "<Loaded| " <> shw i <> "|>") i
 shw (SPosition a) = show a
--- shw (SInterval a) = showInterval shw a
 shw (SPInterval a) = show a
 
 renderPrim = shw
@@ -251,8 +179,6 @@ isKDelayed (KOptional i) = isKDelayed i
 isKDelayed (KInterval i) = isKDelayed i
 isKDelayed (KArray i)  = isKDelayed i
 isKDelayed _ = False
-
-
 
 
 isKOptional (KOptional i) = True
@@ -629,7 +555,6 @@ recursePath isLeft vacc ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
           let knas = Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique) (Primitive "integer" )
           kas <- kname tas  knas
           let
-              tname = head $ fmap (\i -> label . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (S.toList ifk )
               ksn = preLabelTable ( label tas )  nextT
           tb <- fun ksn
           let
@@ -670,7 +595,6 @@ recursePath isLeft vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
 
     | otherwise = do
           (t,ksn) <- labelTable nextT
-          let pksn = getCompose <$> F.toList (_kvvalues $ labelValue $ getCompose $ tbPK ksn)
           tb <-fun ksn
           return $ Compose $ Unlabeled $ FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks)))  ks (mapOpt $ tb)
   where
@@ -780,22 +704,16 @@ tname i = do
 
 markDelayed True (TB1 (m,v)) = TB1 . (m,) $ mapComp (KV . M.mapWithKey (\k v -> mapComp (recurseDel (if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then False else True)) v  ). _kvvalues ) v
 markDelayed False (TB1 (m,v)) = TB1 . (m,) $ mapComp (KV . fmap (mapComp (recurseDel False)) . _kvvalues) v
-
-
-
 markDelayed i (LeftTB1 j) = LeftTB1 $ (markDelayed  i)<$> j
 markDelayed i (ArrayTB1 j) = ArrayTB1 $ (markDelayed  i)<$> j
-markDelayed True (TB1 (m,v)) = TB1 . (m,) $ mapComp (KV . M.mapWithKey (\k v -> mapComp (recurseDel (if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then False else True)) v  ). _kvvalues ) v
-markDelayed False (TB1 (m,v)) = TB1 . (m,) $ mapComp (KV . fmap (mapComp (recurseDel False)) . _kvvalues) v
+
 
 makeTB1Delayed (LeftTB1 i ) =  LeftTB1 $ makeTB1Delayed <$> i
 makeTB1Delayed (ArrayTB1 i ) =  ArrayTB1 $ makeTB1Delayed <$> i
--- makeTB1Delayed (DelayedTB1 i ) =  DelayedTB1 i
 makeTB1Delayed i  =  DelayedTB1 $ Just (markDelayed True i)
 
 makeDelayed (KOptional i) = KOptional $ makeDelayed i
 makeDelayed (KArray i ) = KArray $ makeDelayed i
--- makeDelayed (KDelayed i ) = KDelayed i
 makeDelayed i  = KDelayed i
 
 
@@ -803,7 +721,6 @@ forceDesc rec (ArrayTB1 m ) = ArrayTB1 $ forceDesc rec <$> m
 forceDesc rec (LeftTB1 m ) = LeftTB1 $ forceDesc rec <$> m
 forceDesc rec (DelayedTB1 (Just m) ) = forceDesc rec m
 forceDesc rec (TB1 (m,v)) =  TB1 . (m,) $ mapComp (KV . M.mapWithKey (\k v -> mapComp ((if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then forceDel True   else forceDel False  )) v   ). _kvvalues ) v
-forceDesc False (TB1 (m,v)) =  TB1 . (m,) $ mapComp (KV . M.mapWithKey (\k v -> mapComp (forceDel False )  v   ). _kvvalues ) v
 forceDel rec t =
             case t of
               Attr k v ->  Attr (alterKeyType forceDAttr k) v
@@ -827,7 +744,6 @@ forceDAttr v = go v
       i -> i
 
 
-
 alterKeyType f (Key a b c d m e) = (Key a b c d m (f e))
 
 recurseDel False a@(Attr k v) = a
@@ -847,9 +763,7 @@ explodeLabel = explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id)
 leafDel True i = " case when " <> i <> " is not null then true else null end "
 leafDel False i = " case when " <> i <> " is not null then true else null end "
 
-explodeRow' block  assoc  leaf (DelayedTB1 (Just tbd@(TB1 (i,tb)))) = "(true)" -- if L.null pk then "" else  block (T.intercalate assoc $ fmap ( explodeDelayed block assoc leaf .getCompose )   pk)
-  where
-        pk = (F.toList $ _kvvalues $ labelValue $ getCompose $ tb)
+explodeRow' block  assoc  leaf (DelayedTB1 (Just tbd@(TB1 (i,tb)))) = "(true)"
 
 explodeRow' block assoc leaf (LeftTB1 (Just tb) ) = explodeRow' block assoc leaf tb
 explodeRow' block assoc leaf (ArrayTB1 [tb] ) = explodeRow' block assoc leaf tb

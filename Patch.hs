@@ -104,7 +104,6 @@ data PathTID k
 groupSplit2 :: Ord b => (a -> b) -> (a -> c ) -> [a] -> [(b ,[c])]
 groupSplit2 f g = fmap (\i-> (f $ head i , g <$> i)) . groupWith f
 
--- diffTB1 (TB1 k s)  (TB1 k s) =
 
 applyTable
   ::  (Ord k ,Show k) => [FTB1 Identity k Showable] -> PathT k -> [FTB1 Identity k Showable]
@@ -141,7 +140,9 @@ applyAttr (IT k i) (PKey s (Just p))  = IT k (applyTB1 i p)
 applyAttr (FKT  k rel i) (PKey s (Just p@(PIndex ix _)))  = FKT k rel  (applyTB1 i p)
 applyAttr (FKT  k rel i) (PKey s (Just p))  = FKT (mapComp (\i -> if Set.fromList (keyattri i)  == s  then applyAttr i (PKey s (Just p )) else i ) <$>  k) rel  (applyTB1 i p)
 
-diffAttr (Attr k i) (Attr l m ) = fmap (PKey (Set.singleton $ Inline k) . Just ) (diffShowable i m)
+diffPrimitive = diffShowable patchPrim diffPrim
+
+diffAttr (Attr k i) (Attr l m ) = fmap (PKey (Set.singleton $ Inline k) . Just ) (diffPrimitive i m)
 diffAttr (IT k i) (IT _ l) = fmap (PKey (Set.fromList $ keyattr k ) . Just ) (diffTB1 i l)
 diffAttr (FKT  k _ i) (FKT m _ l) = patchSet $ catMaybes $ zipWith (\i j -> diffAttr (unTB i) (unTB j)) k m  <> [diffTB1 i l]
 
@@ -166,52 +167,45 @@ createShowable (PAtom i ) = TB1 i
 createShowable (POpt i ) = LeftTB1 (createShowable <$> i)
 createShowable (PIdx ix o ) = ArrayTB1 (fromJust  $  pure . createShowable <$> o)
 
-patchShowable :: FTB Showable -> PathT k
-patchShowable (LeftTB1 j )  = POpt  (patchShowable <$> j)
-patchShowable (ArrayTB1 j )  = justError "can't be empty" $  patchSet   $ zipWith (\i m ->  PIdx i  (Just m) ) [0..]  (F.toList $ patchShowable <$> j)
-patchShowable (TB1 j) = PAtom j
+patchShowable :: (a -> PathT k) -> FTB a -> PathT k
+patchShowable p (LeftTB1 j )  = POpt  (patchShowable p <$> j)
+patchShowable p (ArrayTB1 j )  = justError "can't be empty" $  patchSet   $ zipWith (\i m ->  PIdx i  (Just m) ) [0..]  (F.toList $ patchShowable p <$> j)
+patchShowable p (TB1 j) = p j
 
-patchAttr a@(Attr k v) = PKey (Set.fromList (keyattri a)) (Just $ patchShowable v)
-patchAttr a@(IT k v) = patchTB1 v
-patchAttr a@(FKT k rel v) = patchTB1 v
+patchPrim j = PAtom j
 
-patchTB1  (LeftTB1 j ) = POpt (patchTB1 <$> j)
-patchTB1 (ArrayTB1 j) = justError "can't be empty" $ patchSet $ zipWith (\i m -> PIdx i (Just m)) [0..] (F.toList $ patchTB1 <$> j)
-patchTB1 (TB1 (m, k))  = justError "can't be empty"$ patchSet $  F.toList $ patchAttr  . unTB <$> (unKV k)
+patchAttr a@(Attr k v) = PKey (Set.fromList (keyattri a)) (Just $ patchShowable patchPrim v)
+patchAttr a@(IT k v) = patchShowable patchTB1 v
+patchAttr a@(FKT k rel v) = patchShowable patchTB1 v
 
 
-diffTB1 (TB1 (m, v)) (TB1 (n, o) ) = patchSet $ catMaybes $ F.toList  $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j))   (unKV v) (unKV o)
-diffTB1 (LeftTB1 i) (LeftTB1 j )
-    | isJust i && isJust j = fmap POpt (sequenceA $ liftA2 diffTB1 i j)
+patchTB1 (m, k)  = justError "can't be empty"$ patchSet $  F.toList $ patchAttr  . unTB <$> (unKV k)
+difftable (m, v) (n, o) = patchSet $ catMaybes $ F.toList  $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j)) (unKV v) (unKV o)
+
+diffTB1 :: TB1 Showable -> TB1 Showable -> Maybe (PathT Key )
+diffTB1 = diffShowable patchTB1  difftable
+
+
+
+diffShowable :: (Ord a,Show a,Show k) => (a -> PathT k ) -> (a -> a -> Maybe (PathT k)) ->  FTB a -> FTB a -> Maybe (PathT k)
+diffShowable p d  (LeftTB1 i) (LeftTB1 j)
+    | isJust i && isJust j = fmap POpt (sequenceA $ liftA2 (diffShowable  p d ) i j)
     | isJust i && isNothing j = Just $ POpt Nothing
-    | isNothing i && isJust j = Just $ POpt (patchTB1 <$> j)
-    | i /= j = fmap POpt ( liftA2 diffTB1 i j )
+    | isNothing i && isJust j = Just $ POpt (patchShowable p <$> j)
+    | i /= j = fmap POpt ( liftA2 (diffShowable p d ) i j )
     | otherwise = Nothing -- POpt Nothing
-diffTB1 (ArrayTB1 i) (ArrayTB1 j ) =
-    patchSet $  catMaybes $ zipWith (\i -> fmap (PIdx  i . Just) ) ( [0..]) (F.toList $ (zipWith diffTB1 i j)  )-- <> (Just . patchShowable <$> Vector.drop (Vector.length j) i ) <> (Just . patchShowable <$> L.drop (L.length i ) j ))
-diffTB1 (DelayedTB1 i) (DelayedTB1 j)
-    | isJust i && isJust j = fmap POpt (sequenceA $ liftA2 diffTB1 i j)
-    | isJust i && isNothing j = Just $ POpt Nothing
-    | isNothing i && isJust j = Just $ POpt (patchTB1 <$> j)
-    | i /= j = fmap POpt ( liftA2 diffTB1 i j )
-    | otherwise = Nothing -- POpt Nothing
-diffTB1 i j = errorWithStackTrace $ show ("diffTB1",i,j)
+diffShowable p d (ArrayTB1 i) (ArrayTB1 j) =
+    patchSet $  catMaybes $ zipWith (\i -> fmap (PIdx  i . Just) ) ( [0..]) (F.toList $ (zipWith (diffShowable p d ) i j)  <> (Just . patchShowable p <$> drop (length j) i ) <> (Just . patchShowable p <$> drop (length i ) j ))
+diffShowable p d (SerialTB1 i) (SerialTB1 j) = diffShowable p d (LeftTB1 i) (LeftTB1 j)
+diffShowable p d (DelayedTB1 i) (DelayedTB1 j) = diffShowable p d (LeftTB1 i) (LeftTB1 j)
+-- diffShowable (IntervalTB1 i) (IntervalTB1 j) = diffShowable i j
+diffShowable p d (TB1 i) (TB1  j) = d i j
+diffShowable p d  i j = errorWithStackTrace (show (i,j))
 
-diffShowable :: Show k => FTB Showable -> FTB Showable -> Maybe (PathT k)
-diffShowable (LeftTB1 i ) (LeftTB1 j )
-    -- | traceShow (i,j) False = error ""
-    | isJust i && isJust j = fmap POpt (sequenceA $ liftA2 diffShowable  i j)
-    | isJust i && isNothing j = Just $ POpt Nothing
-    | isNothing i && isJust j = Just $ POpt (patchShowable <$> j)
-    | i /= j = fmap POpt ( liftA2 diffShowable i j )
-    | otherwise = Nothing -- POpt Nothing
-diffShowable (ArrayTB1 i) (ArrayTB1 j) =
-    patchSet $  catMaybes $ zipWith (\i -> fmap (PIdx  i . Just) ) ( [0..]) (F.toList $ (zipWith diffShowable i j)  <> (Just . patchShowable <$> drop (length j) i ) <> (Just . patchShowable <$> drop (length i ) j ))
-diffShowable (SerialTB1 i) (SerialTB1 j) = diffShowable (LeftTB1 i) (LeftTB1 j)
-diffShowable (TB1 i) (TB1  j)
+
+diffPrim i j
   | i == j = Nothing
   | otherwise = Just $ PAtom j
-
 
 data PathT k
   = PKey (Set ( Rel k )) (Maybe (PathT k))

@@ -89,6 +89,7 @@ instance (TF.ToField a , TF.ToField (UnQuoted (a))) => TF.ToField (FTB a) where
   toField (DelayedTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
   toField (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   is
   toField (IntervalTB1 is ) = TF.toField  $ fmap (\(TB1 i ) -> i) is
+  toField (TB1 i) = TF.toField i
 
 
 instance  TF.ToField (TB Identity Key Showable)  where

@@ -375,7 +375,7 @@ tableKeys (TB1  (_,k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _k
 tableKeys (LeftTB1 (Just i)) = tableKeys i
 tableKeys (ArrayTB1 [i]) = tableKeys i
 
-tableAttrs (TB1  (_,k) ) = concat $ fmap aattr (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
+tableAttrs (TB1  (_,k)) = concat $ fmap aattr (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
 tableAttrs (LeftTB1 (Just i)) = tableAttrs i
 tableAttrs (ArrayTB1 [i]) = tableAttrs i
 

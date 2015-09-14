@@ -68,9 +68,7 @@ lookupKeys inf t l = fmap (\(k,s)-> (maybe (error ("no key: " <> show k ) ) id $
 
 withFields k t l = (l, maybe (error $ "noTable" ) id $  M.lookup t (tableMap k))
 
--- execF = exec [("file",file),("distance",0),("id_shoes",1),("id_person",1),("id_place",1)]
 
--- execKey f = exec (fmap (\(k,v)-> (keyValue k , v) ) f)
 
 readCpfName file = do
   let

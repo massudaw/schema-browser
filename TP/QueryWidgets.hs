@@ -189,7 +189,7 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             pkset = S.map (\ i -> justError "no ref"$   M.lookup i relTable) ( S.fromList $ fmap _relOrigin $ findPK $ tb1 )
 
-            restrictConstraint = filter ( (`S.isSubsetOf`  pkset) . S.fromList . getRelOrigin  .fst) constr
+            restrictConstraint = filter ((`S.isSubsetOf`  pkset) . S.fromList . getRelOrigin  .fst) constr
             convertConstr :: SelTBConstraint
             convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> (constr   . justError "no backref" . backFKRef relTable (getRelOrigin f) . Just )) j ) <$>  restrictConstraint
             ftdi = fmap (runIdentity . getCompose ) <$>  tbi
@@ -476,7 +476,7 @@ unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> [mapComp (fir
     indexArray ix s =  atMay (unArray s) ix
 unIndex o i = errorWithStackTrace (show (o,i))
 
-unLeftKey :: TB Identity Key () -> TB Identity Key ()
+unLeftKey :: (Ord b,Show b) => TB Identity Key b -> TB Identity Key b
 unLeftKey (Attr k v ) = (Attr (unKOptional k) v)
 unLeftKey (IT na (LeftTB1 (Just tb1))) = IT na tb1
 unLeftKey i@(IT na (TB1  _ )) = i
@@ -490,7 +490,7 @@ unLeftItens = unLeftTB
     unLeftTB (Attr k v)
       = Attr (unKOptional k) <$> unSOptional v
     unLeftTB (IT na (LeftTB1 l))
-      = IT na <$>  l
+      = IT (mapComp (firstTB unKOptional) na) <$>  l
     unLeftTB i@(IT na (TB1 (_,l)))
       = Just i
     unLeftTB (FKT ifk rel  (LeftTB1 tb))
