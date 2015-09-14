@@ -123,7 +123,22 @@ travPath f p i = f p i
 applyTB1
   :: (Show k , Ord k) =>
        FTB1 Identity k Showable -> PathT k -> FTB1 Identity k Showable
-applyTB1 t@(TB1 (m, v)) (PKey s (Just k)) = TB1 (m ,mapComp (KV . Map.mapWithKey (\key v -> if key == s then  mapComp (flip applyAttr (PKey s (Just k)) ) v else v ) . _kvvalues ) v)
+-- applyTB1 t@(TB1 (m, v)) (PKey s (Just k)) = TB1 (m ,mapComp (KV . Map.mapWithKey (\key v -> if key == s then  mapComp (flip applyAttr (PKey s (Just k)) ) v else v ) . _kvvalues ) v)
+applyTB1 = applyFTB createRecord applyRecord
+
+createRecord
+  :: (Show d, Ord d, Functor t2, Functor t1) =>
+     PathT d ->
+     (t, Compose t1 (KV (Compose t2 (TB Identity))) d Showable)
+createRecord (PKey s (Just k)) = undefined
+
+applyRecord
+  :: (Show d, Ord d, Functor t2, Functor t1) =>
+     (t, Compose t1 (KV (Compose t2 (TB Identity))) d Showable)
+     -> PathT d
+     -> (t, Compose t1 (KV (Compose t2 (TB Identity))) d Showable)
+applyRecord t@((m, v)) (PKey s (Just k)) = (m ,mapComp (KV . Map.mapWithKey (\key v -> if key == s then  mapComp (flip applyAttr (PKey s (Just k)) ) v else v ) . _kvvalues ) v)
+
 
 
 patchSet i
@@ -152,23 +167,31 @@ diffAttr (FKT  k _ i) (FKT m _ l) = patchSet $ catMaybes $ zipWith (\i j -> diff
 
 createAttr (PKey s (Just k) ) = Attr (_relOrigin $ head $ Set.toList s) (createShowable k)
 
-applyShowable (LeftTB1 i ) op@(POpt o) = case i of
+applyFTB pr a (LeftTB1 i ) op@(POpt o) = case i of
                       Nothing -> case o of
                             Nothing -> LeftTB1 Nothing
-                            Just j -> createShowable op
-                      Just _ -> LeftTB1 (applyShowable  <$> i <*> o )
-applyShowable (ArrayTB1 i ) (PIdx ix o) = case o of
+                            Just j -> createFTB pr op
+                      Just _ -> LeftTB1 (applyFTB pr a <$> i <*> o )
+applyFTB pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                       Nothing -> ArrayTB1 $ take (ix +1)  i
                       Just p -> if ix <=  length i - 1
-                                then ArrayTB1 $ imap (\i v -> if i == ix then applyShowable v p else v )  i
+                                then ArrayTB1 $ imap (\i v -> if i == ix then applyFTB pr a v p else v )  i
                                 else if ix == length i
-                                      then ArrayTB1 $ i <> [createShowable p]
+                                      then ArrayTB1 $ i <> [createFTB pr p]
                                       else errorWithStackTrace $ "ix bigger than next elem" <> show (ix, length i)
-applyShowable i p = errorWithStackTrace (show (i,p))
+applyFTB pr a (TB1 i) p  =  TB1 $ a i p
 
-createShowable (PAtom i ) = TB1 i
-createShowable (POpt i ) = LeftTB1 (createShowable <$> i)
-createShowable (PIdx ix o ) = ArrayTB1 (fromJust  $  pure . createShowable <$> o)
+applyPrim _ (PAtom i) = i
+
+createPrim (PAtom i) = i
+
+applyShowable = applyFTB createPrim applyPrim
+
+createShowable = createFTB createPrim
+
+createFTB p (POpt i ) = LeftTB1 (createFTB p <$> i)
+createFTB p (PIdx ix o ) = ArrayTB1 (fromJust  $  pure . createFTB p <$> o)
+createFTB p i  = TB1 $ p i
 
 patchPrim j = PAtom j
 
