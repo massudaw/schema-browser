@@ -21,11 +21,11 @@ import Types
 import qualified Data.Text.Lazy as T
 
 
-opt f v = SOptional $ f <$> v
-serial f v = SSerial $ f <$> v
-txt = SText . T.pack
-frac = SDouble
-tzone  = STimestamp . zonedTimeToLocalTime
+opt f v = LeftTB1 $  f <$> v
+serial f v = DelayedTB1 $ f <$> v
+txt = TB1 . SText . T.pack
+frac = TB1 . SDouble
+tzone  = TB1 . STimestamp . zonedTimeToLocalTime
 
 i =: j = (i,j)
 
@@ -45,11 +45,11 @@ convertTrans acc (Transaction {..})  =
     ,"sic" =: opt txt txSIC
     ,"payeeid" =: opt txt txPAYEEID
     ,"account" =: acc
-    ]
+    ] :: [(T.Text,FTB Showable)]
 
 testAccount = do
   let tfile = "extrato2.ofx"
-      acc = SNumeric 4
+      acc = TB1 $ SNumeric 4
   file <- readFile tfile
   either (const Nothing) Just . fmap (fmap (convertTrans acc) ) <$> account tfile file
 
@@ -64,4 +64,3 @@ account filename contents = do
    return $
       transactions
      $ ofx
-

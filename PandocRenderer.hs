@@ -69,7 +69,7 @@ renderProjectContract = (staticP myDoc , element )
       tname = "pricing"
       var str =  maybe "" fromString . fmap (renderShowable) <$> idxM str
       varT str =  maybe "" fromString . fmap (renderShowable) <$> idxR str
-      payA = displayPay <$> (maybe (SText "Não Agendado") id <$> idxM "payment_date") <*> idxK "payment_description"  <*> idxK "price"
+      payA = displayPay <$> (maybe (TB1 $ SText "Não Agendado") id <$> idxM "payment_date") <*> idxK "payment_description"  <*> idxK "price"
           where displayPay i da j = plain $ (fromString.renderShowable $ i ) <>  " - " <>  (fromString . renderShowable $ da )<> " - R$ " <> ((fromString.renderShowable) j)
       myDoc :: ArrowReader
       myDoc = proc preenv -> do
@@ -99,7 +99,7 @@ renderProjectContract = (staticP myDoc , element )
               template <- liftIO$ readFile' utf8 "contract.template"
               liftIO$ makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odxR "contract" -< ()
-          returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "contract" . SOptional . Just . SDelayed . Just . SBinary .  BS.toStrict . either id id ) outdoc
+          returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "contract" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict . either id id ) outdoc
       element inf = maybe (return Nothing) (\inp -> do
                               b <- runReaderT (dynPK myDoc $ ()) (Just inp)
                               return $ liftKeys inf tname <$> b)
@@ -108,7 +108,7 @@ renderProjectContract = (staticP myDoc , element )
 renderProjectReport = (staticP myDoc , element )
    where
       tname = "pricing"
-      payA = displayPay <$> (maybe (SText "Não Agendado") id <$> idxM "payment_date") <*> idxK "payment_description"  <*> idxK "price"
+      payA = displayPay <$> (maybe (TB1 $ SText "Não Agendado") id <$> idxM "payment_date") <*> idxK "payment_description"  <*> idxK "price"
           where displayPay i da j = plain $ (fromString.renderShowable $ i ) <>  " - " <>  (fromString . renderShowable $ da )<> " - R$ " <> ((fromString.renderShowable) j)
       myDoc :: ArrowReader
       myDoc = proc preenv -> do
@@ -128,7 +128,7 @@ renderProjectReport = (staticP myDoc , element )
               template <- liftIO$ readFile' utf8 "raw.template"
               liftIO$ makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odxR "report" -< ()
-          returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "report" . SOptional . Just . SDelayed . Just . SBinary .  BS.toStrict . either id id ) outdoc
+          returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "report" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict . either id id ) outdoc
       element inf = maybe (return Nothing) (\inp -> do
                               b <- runReaderT (dynPK myDoc $ ()) (Just inp)
                               return $ liftKeys inf tname <$> b)
@@ -142,8 +142,8 @@ renderProjectPricingA = (staticP myDoc , element )
       varT str =  maybe "" fromString . fmap (renderShowable) <$> idxR str
       arrayVar  str = (bulletList . concat . maybeToList . join . fmap   (cshow ) ) <$> idxR str
         where
-          cshow (SComposite a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
-          cshow (SOptional a ) =  join $ fmap cshow a
+          cshow (ArrayTB1 a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
+          cshow (LeftTB1 a ) =  join $ fmap cshow a
       -- myDoc :: a -> Pandoc
       myDoc :: ArrowReader
       myDoc = proc preenv -> do
@@ -186,7 +186,7 @@ renderProjectPricingA = (staticP myDoc , element )
               template <- readFile' utf8 "raw.template"
               makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odxR "orcamento" -< preenv
-          returnA -<  (Just .  tbmap .mapFromTBList . pure . Compose. Identity . Attr "orcamento" . SOptional . Just . SDelayed .Just . SBinary .  BS.toStrict . either id id ) outdoc
+          returnA -<  (Just .  tbmap .mapFromTBList . pure . Compose. Identity . Attr "orcamento" . LeftTB1 . Just . DelayedTB1 .Just . TB1 . SBinary .  BS.toStrict . either id id ) outdoc
       element inf = maybe (return Nothing) (\inp -> do
                               b <- runReaderT (dynPK myDoc ()) (Just inp)
                               return $ liftKeys inf tname  <$> b)

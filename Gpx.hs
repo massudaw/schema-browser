@@ -1,6 +1,6 @@
 {-# LANGUAGE Arrows, TupleSections,OverloadedStrings,NoMonomorphismRestriction #-}
 module Gpx
-  (readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readHtmlReceita,readHtml,exec,execKey,execF) where
+  (readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readHtmlReceita,readHtml) where
 
 import Types
 -- import Query
@@ -68,9 +68,9 @@ lookupKeys inf t l = fmap (\(k,s)-> (maybe (error ("no key: " <> show k ) ) id $
 
 withFields k t l = (l, maybe (error $ "noTable" ) id $  M.lookup t (tableMap k))
 
-execF = exec [("file",file),("distance",0),("id_shoes",1),("id_person",1),("id_place",1)]
+-- execF = exec [("file",file),("distance",0),("id_shoes",1),("id_person",1),("id_place",1)]
 
-execKey f = exec (fmap (\(k,v)-> (keyValue k , v) ) f)
+-- execKey f = exec (fmap (\(k,v)-> (keyValue k , v) ) f)
 
 readCpfName file = do
   let
@@ -163,7 +163,7 @@ readHtml file = do
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
         >>> getTable
   runX arr
-
+{-
 exec inputs = do
   let schema = "health"
   conn <- connectPostgreSQL "user=postgres dbname=test"
@@ -174,10 +174,11 @@ exec inputs = do
   inf <- keyTables conn conn  (schema,"postgres")
   print (tableMap inf)
   res <- runX arr
-  let runVals = [("period",SInterval $ (ER.Finite $ last $ head res ,True) `interval` (ER.Finite $ last $ last res,True))]  <> L.filter ((/= "file") . fst ) inputs
+  let runVals = [("period",IntervalTB1 $ (ER.Finite $ last $ head res ,True) `interval` (ER.Finite $ last $ last res,True))]  <> L.filter ((/= "file") . fst ) inputs
       runInput = withFields inf  "run" $   lookupKeys inf "run"  runVals
   print runInput
   -- pkrun <- uncurry (insertPK fromShowableList conn) runInput
   -- print pkrun
   -- mapM_ (\i-> uncurry (insert conn) (withFields inf "track" (pkrun <> lookupKeys inf "track" i))) (consLL "id_sample" (SNumeric <$> [0..])  $  zipLL (repeat []) ["position","instant"] res )
   return (Nothing ,[])
+  -}

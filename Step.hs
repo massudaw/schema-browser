@@ -150,7 +150,7 @@ atRA i (P s (Kleisli j) )  =  P (BF.second nest . BF.first nest $ s) (Kleisli (\
 
 unLeftTB1 = join . fmap (\v -> case v of
                (LeftTB1 i ) -> i
-               i@(TB1 _ _ ) -> Just i)
+               i@(TB1 _ ) -> Just i)
 
 atR i (P s (Kleisli j) )  =  P (BF.second nest . BF.first nest $ s) (Kleisli (\i -> local (unLeftTB1 . indexTB1 ind) (j i )  ))
   where ind = splitIndex True i
@@ -210,8 +210,8 @@ indexTableInter b l =
    in  P (Many [ll],Many [] ) (arr (join . fmap (indexTable ll)))
 
 logTableInter
-  :: (Show k ,KeyString k ,Arrow a) =>
-      Bool -> String -> Parser  a AccessTag (Maybe (TB2 k   Showable)) (Maybe (k, Showable))
+  :: (Ord k ,Show k ,KeyString k ,Arrow a) =>
+      Bool -> String -> Parser  a AccessTag (Maybe (TB2 k   Showable)) (Maybe (k, FTB Showable))
 logTableInter b l =
   let ll = splitIndex b l
    in  P (Many [] ,Many [ll]) (arr (join . fmap (indexTable ll)))
@@ -219,7 +219,7 @@ logTableInter b l =
 
 indexTB1 (IProd _ l) t
   = do
-    (TB1  m v) <- t
+    (TB1  (m,v)) <- t
     let
         i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin))$ _kvvalues $ unTB v
     case runIdentity $ getCompose $i  of
@@ -232,7 +232,8 @@ firstCI f = mapComp (firstTB f)
 
 findAttr l v = justError ("checkField error finding key: " <> T.unpack (T.intercalate "," l) ) $ M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB v
 
-checkField (Nested (IProd _ l) nt ) t@(TB1 m v)
+
+checkField (Nested (IProd _ l) nt ) t@(TB1 (m,v))
   = do
     let
         i = findAttr l v
@@ -240,17 +241,17 @@ checkField (Nested (IProd _ l) nt ) t@(TB1 m v)
          IT l  i -> Compose . Identity <$> (IT l  <$> checkTable nt i)
          FKT a   c  d -> Compose . Identity <$> (FKT a  c <$>  checkTable nt d)
          v -> errorWithStackTrace (show (v,l))
-checkField  (IProd b l) t@(TB1 m v)
+checkField  (IProd b l) t@(TB1 (m,v))
   = do
     let
         i = findAttr l v
     Compose . Identity <$> case runIdentity $ getCompose $ i  of
-         Attr k v -> fmap (Attr k ) {-. traceShow (b,l)  . traceShowId -}. (\i -> if b then  unRSOptional' i else Just i ) $ v
+         Attr k v -> fmap (Attr k ) . (\i -> if b then  unRSOptional' i else Just i ) $ v
          i -> errorWithStackTrace ( show (l,i))
-checkField  (ISum []) t@(TB1 m v)
+checkField  (ISum []) t@(TB1 v)
   = Nothing
-checkField  (ISum ls) t@(TB1 m v )
-  = foldr1 just $  fmap (\(Many [l]) ->  join $ fmap (T.traverse  unRSOptional') $  checkField l t) ls
+checkField  (ISum ls) t@(TB1 (m,v) )
+  = foldr1 just $  fmap (\(Many [l]) ->  join $ fmap (traComp ( traFAttr  unRSOptional')) $  checkField l t) ls
 checkField i j = errorWithStackTrace (show (i,j))
 
 
@@ -258,29 +259,29 @@ checkField i j = errorWithStackTrace (show (i,j))
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
 checkTable l (LeftTB1 j) = join $ fmap (checkTable l) j
 checkTable l (DelayedTB1 j) = join $ fmap (checkTable l) j
-checkTable (Many l) t@(TB1 m v) =
-  fmap (TB1 m . Compose . Identity . KV . mapFromTBList ) . allMaybes $ flip checkField t <$> l
+checkTable (Many l) t@(TB1 (m,v)) =
+  fmap (TB1 . (m,) . Compose . Identity . KV . mapFromTBList ) . allMaybes $ flip checkField t <$> l
 
 checkTable l (ArrayTB1 i )
   | i == []  = Nothing
   | otherwise =   fmap ArrayTB1 $ allMaybes $ checkTable l <$> i
 
-checkTable (ISum []) t@(TB1 m v)
+checkTable (ISum []) t@(TB1  v)
   = Nothing
-checkTable (ISum ls) t@(TB1 m v )
-  = fmap  (TB1 m . Compose . Identity . KV . mapFromTBList) . (\i -> if L.null i then Nothing else Just i) . catMaybes $ fmap (\(Many [l]) ->  join $ fmap (T.traverse  unRSOptional') $  checkField l t) ls
+checkTable (ISum ls) t@(TB1 (m,v) )
+  = fmap  (TB1 . (m,) . Compose . Identity . KV . mapFromTBList) . (\i -> if L.null i then Nothing else Just i) . catMaybes $ fmap (\(Many [l]) ->  join $ fmap (traComp (traFAttr unRSOptional')) $    checkField l t) ls
 
 checkTable i j = errorWithStackTrace (show ("checkTable" , i,j))
 
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
 indexTable l (LeftTB1 j) = join $ fmap (indexTable l) j
-indexTable (IProd _ l) t@(TB1 m v)
+indexTable (IProd _ l) t@(TB1 (m,v))
   = do
     let finder = L.find (L.any (==l). L.permutations .fmap _relOrigin. keyattr. firstCI keyString )
         i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder (toList $ _kvvalues $ unTB v )
     case runIdentity $ getCompose $ i  of
          Attr k l -> return (k,l)
-indexTable l (ArrayTB1 j) =  liftA2 (,) ((head <$> fmap (fmap fst) i) ) ( (\i -> SComposite . Vector.fromList $ i ) <$> fmap (fmap snd) i)
+indexTable l (ArrayTB1 j) =  liftA2 (,) ((head <$> fmap (fmap fst) i) ) ( (\i -> ArrayTB1   i ) <$> fmap (fmap snd) i)
        where i =   T.traverse  (indexTable l) j
 indexTable i j = errorWithStackTrace (show (i,j))
 
@@ -327,7 +328,7 @@ type FunArrowPlug o = RuntimeTypes.Parser (->) AccessTag (Maybe (TB1 Showable)) 
 type ArrowPlug a o = RuntimeTypes.Parser a AccessTag (Maybe (TB1 Showable)) o
 
 
-attrT :: (a,b) -> Compose Identity (TB Identity  ) a b
+attrT :: (a,FTB b) -> Compose Identity (TB Identity) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
 
@@ -346,7 +347,7 @@ accessTB i t = go t
         LeftTB1 j ->  LeftTB1 $ go <$> j
         ArrayTB1 j -> ArrayTB1 $ go <$> j
         DelayedTB1 (Just j) -> go j
-        TB1 m k -> TB1 m  (mapComp (\m -> KV $ M.mapWithKey  modify (_kvvalues $ m)) k )
+        TB1 (m,k) -> TB1   (m,mapComp (\m -> KV $ M.mapWithKey  modify (_kvvalues $ m)) k )
           where modify k =  mapComp (\v -> maybe v (flip accessAT v) $ findOne i (S.map (keyValue. _relOrigin) k))
 accessTB l t = errorWithStackTrace (show (l,t))
 

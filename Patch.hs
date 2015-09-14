@@ -61,8 +61,8 @@ import Data.Unique
 
 
 
-t1 =  [tblistPK (Set.singleton "id")  [Compose $ Identity $ Attr "id" (SNumeric 2),Compose $ Identity $ Attr "at1" (SOptional $ Just (SComposite $ Vector.fromList [SNumeric 1]))]]
-t1pk = SNumeric 2
+t1 =  [tblistPK (Set.singleton "id")  [Compose $ Identity $ Attr "id" (TB1 (SNumeric 2)),Compose $ Identity $ Attr "at1" (LeftTB1 $ Just (ArrayTB1 [TB1 $ SNumeric 1]))]]
+t1pk =  TB1 (SNumeric 2)
 p1,p2,p3 :: PathT String
 p1 = PIndex (Set.singleton t1pk) $ Just $ PKey (Set.fromList [Inline "at1"]) $ Just  (POpt Nothing)
 p2 = PIndex (Set.singleton t1pk) $ Just $ PKey (Set.fromList [Inline "at1"]) $ Just (POpt (Just (PIdx 0 (Just $ PAtom $ SNumeric 4))))
@@ -95,7 +95,7 @@ compactPatches  = justError "cant be empty" . patchSet . fmap recover .  groupSp
 
 data PathTID k
   = PIdPK (Set (Rel k))
-  | PIdIndex (Set Showable)
+  | PIdIndex (Set (FTB Showable))
   | PIdIdx Int
   | PIdOpt
   | PIdAtom
@@ -108,12 +108,12 @@ groupSplit2 f g = fmap (\i-> (f $ head i , g <$> i)) . groupWith f
 
 applyTable
   ::  (Ord k ,Show k) => [FTB1 Identity k Showable] -> PathT k -> [FTB1 Identity k Showable]
-applyTable l (PIndex i  p) =  catMaybes $ L.map (\tb@(TB1 m k) -> if  getPK tb ==  i  then (case p of
-                                                Just ps -> Just $ travPath applyTB1  (TB1 m k) ps
+applyTable l (PIndex i  p) =  catMaybes $ L.map (\tb@(TB1 (m, k)) -> if  getPK tb ==  i  then (case p of
+                                                Just ps -> Just $ travPath applyTB1  (TB1 (m, k)) ps
                                                 Nothing ->  Nothing
                                               ) else  (Just tb )) l
 
-getPK (TB1 m k) = Set.fromList (concat (fmap (fmap snd . aattr)  $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf (_kvpk m) (Set.map _relOrigin k)) (  _kvvalues (runIdentity $ getCompose k)))))
+getPK (TB1 (m, k)) = Set.fromList (concat (fmap (fmap snd . aattr)  $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf (_kvpk m) (Set.map _relOrigin k)) (  _kvvalues (runIdentity $ getCompose k)))))
 
 diffTable l l2 =  patchSet $ fmap (\(k,v) -> PIndex k  (Just v)) $  mapMaybe (\(k,v) -> (k,) <$> v ) $ Map.toList $ Map.intersectionWith (\i j -> diffTB1 i j) (mkMap l) (mkMap l2)
   where mkMap = Map.fromList . fmap (\i -> (getPK i,i))
@@ -124,7 +124,7 @@ travPath f p i = f p i
 applyTB1
   :: (Show k , Ord k) =>
        FTB1 Identity k Showable -> PathT k -> FTB1 Identity k Showable
-applyTB1 t@(TB1 m v) (PKey s (Just k)) = TB1 m (mapComp (KV . Map.mapWithKey (\key v -> if key == s then  mapComp (flip applyAttr (PKey s (Just k)) ) v else v ) . _kvvalues ) v)
+applyTB1 t@(TB1 (m, v)) (PKey s (Just k)) = TB1 (m ,mapComp (KV . Map.mapWithKey (\key v -> if key == s then  mapComp (flip applyAttr (PKey s (Just k)) ) v else v ) . _kvvalues ) v)
 
 
 patchSet i
@@ -148,28 +148,28 @@ diffAttr (FKT  k _ i) (FKT m _ l) = patchSet $ catMaybes $ zipWith (\i j -> diff
 
 createAttr (PKey s (Just k) ) = Attr (_relOrigin $ head $ Set.toList s) (createShowable k)
 
-applyShowable (SOptional i ) op@(POpt o) = case i of
+applyShowable (LeftTB1 i ) op@(POpt o) = case i of
                       Nothing -> case o of
-                            Nothing -> SOptional Nothing
+                            Nothing -> LeftTB1 Nothing
                             Just j -> createShowable op
-                      Just _ -> SOptional (applyShowable  <$> i <*> o )
-applyShowable (SComposite i ) (PIdx ix o) = case o of
-                      Nothing -> SComposite $ Vector.take (ix +1)  i
-                      Just p -> if ix <=  Vector.length i - 1
-                                then SComposite $ Vector.imap (\i v -> if i == ix then applyShowable v p else v )  i
-                                else if ix == Vector.length i
-                                      then SComposite $ i <> Vector.singleton (createShowable p)
-                                      else errorWithStackTrace $ "ix bigger than next elem" <> show (ix, Vector.length i)
+                      Just _ -> LeftTB1 (applyShowable  <$> i <*> o )
+applyShowable (ArrayTB1 i ) (PIdx ix o) = case o of
+                      Nothing -> ArrayTB1 $ take (ix +1)  i
+                      Just p -> if ix <=  length i - 1
+                                then ArrayTB1 $ imap (\i v -> if i == ix then applyShowable v p else v )  i
+                                else if ix == length i
+                                      then ArrayTB1 $ i <> [createShowable p]
+                                      else errorWithStackTrace $ "ix bigger than next elem" <> show (ix, length i)
 applyShowable i p = errorWithStackTrace (show (i,p))
 
-createShowable (PAtom i ) = i
-createShowable (POpt i ) = SOptional (createShowable <$> i)
-createShowable (PIdx ix o ) = SComposite (fromJust  $  Vector.singleton . createShowable <$> o)
+createShowable (PAtom i ) = TB1 i
+createShowable (POpt i ) = LeftTB1 (createShowable <$> i)
+createShowable (PIdx ix o ) = ArrayTB1 (fromJust  $  pure . createShowable <$> o)
 
-patchShowable :: Showable -> PathT k
-patchShowable (SOptional j )  = POpt  (patchShowable <$> j)
-patchShowable (SComposite j )  = justError "can't be empty" $  patchSet   $ zipWith (\i m ->  PIdx i  (Just m) ) [0..]  (F.toList $ patchShowable <$> j)
-patchShowable j = PAtom j
+patchShowable :: FTB Showable -> PathT k
+patchShowable (LeftTB1 j )  = POpt  (patchShowable <$> j)
+patchShowable (ArrayTB1 j )  = justError "can't be empty" $  patchSet   $ zipWith (\i m ->  PIdx i  (Just m) ) [0..]  (F.toList $ patchShowable <$> j)
+patchShowable (TB1 j) = PAtom j
 
 patchAttr a@(Attr k v) = PKey (Set.fromList (keyattri a)) (Just $ patchShowable v)
 patchAttr a@(IT k v) = patchTB1 v
@@ -177,10 +177,10 @@ patchAttr a@(FKT k rel v) = patchTB1 v
 
 patchTB1  (LeftTB1 j ) = POpt (patchTB1 <$> j)
 patchTB1 (ArrayTB1 j) = justError "can't be empty" $ patchSet $ zipWith (\i m -> PIdx i (Just m)) [0..] (F.toList $ patchTB1 <$> j)
-patchTB1 (TB1 m k)  = justError "can't be empty"$ patchSet $  F.toList $ patchAttr  . unTB <$> (unKV k)
+patchTB1 (TB1 (m, k))  = justError "can't be empty"$ patchSet $  F.toList $ patchAttr  . unTB <$> (unKV k)
 
 
-diffTB1 (TB1 m v) (TB1 n o ) = patchSet $ catMaybes $ F.toList  $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j))   (unKV v) (unKV o)
+diffTB1 (TB1 (m, v)) (TB1 (n, o) ) = patchSet $ catMaybes $ F.toList  $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j))   (unKV v) (unKV o)
 diffTB1 (LeftTB1 i) (LeftTB1 j )
     | isJust i && isJust j = fmap POpt (sequenceA $ liftA2 diffTB1 i j)
     | isJust i && isNothing j = Just $ POpt Nothing
@@ -197,28 +197,30 @@ diffTB1 (DelayedTB1 i) (DelayedTB1 j)
     | otherwise = Nothing -- POpt Nothing
 diffTB1 i j = errorWithStackTrace $ show ("diffTB1",i,j)
 
-diffShowable :: Show k => Showable -> Showable -> Maybe (PathT k)
-diffShowable (SOptional i ) (SOptional j )
+diffShowable :: Show k => FTB Showable -> FTB Showable -> Maybe (PathT k)
+diffShowable (LeftTB1 i ) (LeftTB1 j )
     -- | traceShow (i,j) False = error ""
     | isJust i && isJust j = fmap POpt (sequenceA $ liftA2 diffShowable  i j)
     | isJust i && isNothing j = Just $ POpt Nothing
     | isNothing i && isJust j = Just $ POpt (patchShowable <$> j)
     | i /= j = fmap POpt ( liftA2 diffShowable i j )
     | otherwise = Nothing -- POpt Nothing
-diffShowable (SComposite i) (SComposite j) =
-    patchSet $  catMaybes $ zipWith (\i -> fmap (PIdx  i . Just) ) ( [0..]) (F.toList $ (Vector.zipWith diffShowable i j)  <> (Just . patchShowable <$> Vector.drop (Vector.length j) i ) <> (Just . patchShowable <$> Vector.drop (Vector.length i ) j ))
-diffShowable i j
+diffShowable (ArrayTB1 i) (ArrayTB1 j) =
+    patchSet $  catMaybes $ zipWith (\i -> fmap (PIdx  i . Just) ) ( [0..]) (F.toList $ (zipWith diffShowable i j)  <> (Just . patchShowable <$> drop (length j) i ) <> (Just . patchShowable <$> drop (length i ) j ))
+diffShowable (SerialTB1 i) (SerialTB1 j) = diffShowable (LeftTB1 i) (LeftTB1 j)
+diffShowable (TB1 i) (TB1  j)
   | i == j = Nothing
   | otherwise = Just $ PAtom j
 
 
 data PathT k
   = PKey (Set ( Rel k )) (Maybe (PathT k))
-  | PIndex (Set Showable) (Maybe (PathT k))
+  | PIndex (Set (FTB Showable)) (Maybe (PathT k))
   | PatchSet [PathT k]
   | POpt (Maybe (PathT k))
   | PIdx Int (Maybe (PathT k))
   | PAtom Showable
   deriving (Eq,Ord,Show)
 
+imap f = map (uncurry f) . zip [0..]
 

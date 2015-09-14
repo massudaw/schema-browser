@@ -83,17 +83,20 @@ db = DB "usda" "postgres" "queijo" "localhost" "5432"
 -- Wrap new instances without quotes delimiting primitive values
 newtype UnQuoted a = UnQuoted {unQuoted :: a}
 
-deriving instance Foldable Interval
-deriving instance Foldable Extended
-deriving instance Traversable Extended
-deriving instance Traversable Interval
+instance (TF.ToField a , TF.ToField (UnQuoted (a))) => TF.ToField (FTB a) where
+  toField (LeftTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
+  toField (SerialTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
+  toField (DelayedTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
+  toField (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   is
+  toField (IntervalTB1 is ) = TF.toField  $ fmap (\(TB1 i ) -> i) is
+
 
 instance  TF.ToField (TB Identity Key Showable)  where
   toField (Attr k i) = TF.toField i
   toField (IT n (LeftTB1 i)  ) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT (n)  (TB1 m i) ) = TF.toField (TBRecord  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . _tbattrkey) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
+  toField (IT (n)  (TB1 (m,i)) ) = TF.toField (TBRecord  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . _tbattrkey) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (_kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
-  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\(TB1 m i ) -> (TBRecord  (kvMetaFullName  m ) $  fmap (runIdentity . getCompose ) $ F.toList  $ _kvvalues $ unTB i ) ) <$> is
+  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\(TB1 (m,i) ) -> (TBRecord  (kvMetaFullName  m ) $  fmap (runIdentity . getCompose ) $ F.toList  $ _kvvalues $ unTB i ) ) <$> is
   toField e = errorWithStackTrace (show e)
 
 
@@ -163,40 +166,40 @@ instance TF.ToField Showable where
   toField (SNumeric t) = TF.toField t
   toField (SDate t) = TF.toField t
   toField (SDayTime t) = TF.toField t
-  toField (SSerial t) = maybe (TF.Plain $ fromByteString "null") TF.toField t
+  -- toField (SSerial t) = maybe (TF.Plain $ fromByteString "null") TF.toField t
   toField (STimestamp t) = TF.toField t
   toField (SDouble t) = TF.toField t
-  toField (SOptional t) = TF.toField t
-  toField (SComposite t) = TF.toField t
-  toField (SInterval t) = TF.toField t
+  -- toField (SOptional t) = TF.toField t
+  -- toField (SComposite t) = TF.toField t
+  -- toField (SInterval t) = TF.toField t
   toField (SPosition t) = TF.toField t
   toField (SLineString t) = TF.toField t
   toField (SBounding t) = TF.toField t
   toField (SBoolean t) = TF.toField t
-  toField (SDelayed t) = TF.toField t
+  -- toField (SDelayed t) = TF.toField t
   toField (SBinary t) = TF.toField (Binary t)
 
 
 defaultType t =
     case t of
-      KOptional i -> Just (SOptional Nothing)
+      KOptional i -> Just (LeftTB1 Nothing)
       i -> Nothing
 
 readTypeOpt t Nothing = case t of
-    KOptional i -> Just $ SOptional Nothing
+    KOptional i -> Just $ LeftTB1 Nothing
     i -> Nothing
 readTypeOpt t (Just i) = readType t i
 
 readType t = case t of
-    Primitive i -> readPrim i
+    Primitive i -> fmap TB1 <$> readPrim i
     KOptional i -> opt (readType i)
-    KSerial i -> opt (readType i)
+    -- KSerial i -> opt (readType i)
     KArray i  -> parseArray (readType i)
     -- KInterval i -> inter (readType i)
   where
-      opt f "" =  Just $ SOptional Nothing
-      opt f i = fmap (SOptional .Just) $ f i
-      parseArray f i =   fmap (SComposite. Vector.fromList) $  allMaybes $ fmap f $ unIntercalate (=='\n') i
+      opt f "" =  Just $ LeftTB1 Nothing
+      opt f i = fmap (LeftTB1 .Just) $ f i
+      parseArray f i =   fmap ArrayTB1 $  allMaybes $ fmap f $ unIntercalate (=='\n') i
       -- inter f = (\(i,j)-> fmap SInterval $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
 
 readPrim t =
@@ -282,7 +285,7 @@ unKOptionalAttr (FKT i  l (LeftTB1 (Just j))  ) = FKT (fmap (mapComp (first unKO
 
 unOptionalAttr (Attr k i ) = Attr (unKOptional k) <$> unSOptional i
 unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
-unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverse ( traverse unSOptional . (mapComp (firstTB unKOptional)) ) i)  j
+unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverse ( traComp (traFAttr unSOptional) . (mapComp (firstTB unKOptional)) ) i)  j
 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
 -- parseAttr i | traceShow i False = error ""
@@ -315,9 +318,9 @@ parseLabeledTable (ArrayTB1 [t]) =
 parseLabeledTable (DelayedTB1 (Just tb) ) =  string "t" >>  return (DelayedTB1  Nothing) -- <$> parseLabeledTable tb
 parseLabeledTable (LeftTB1 (Just i )) =
   LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapKey makeOpt i) >> return Nothing) <|> return Nothing )
-parseLabeledTable (TB1 me m) = (char '('  *> (do
+parseLabeledTable (TB1 (me,m)) = (char '('  *> (do
   im <- unIntercalateAtto (traverse (traComp parseAttr) <$> M.toList (_kvvalues $ unTB m) ) (char ',')
-  return (TB1 me (Compose $ Identity $  KV (M.fromList im) ))) <*  char ')' )
+  return (TB1 (me,Compose $ Identity $  KV (M.fromList im) ))) <*  char ')' )
 
 quotedRec :: Int -> (Int -> Parser a)  -> Parser a
 quotedRec i  pint =   (takeWhile (== '\\') >>  char '\"') *> inner <* ( takeWhile (=='\\') >> char '\"'  )
@@ -330,11 +333,12 @@ plainsInd i = (char '\\' >> return "") <|> plains (fmap (replicate i '\"' <>)  [
 doublequoted :: Parser a -> Parser a
 doublequoted  p =   (takeWhile (== '\\') >>  char '\"') *>  inner <* ( takeWhile (=='\\') >> char '\"')
   where inner = doublequoted p <|> p
-parseShowable
-  :: KType KPrim
+
+parsePrim
+  :: KPrim
        -> Parser Showable
 -- parseShowable  i | traceShow i False = error ""
-parseShowable (Primitive i ) =  (do
+parsePrim i =  (do
    case i of
         PBinary ->  let
               pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}" <* takeWhile (=='\\'))
@@ -346,8 +350,8 @@ parseShowable (Primitive i ) =  (do
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
         PText -> SText . T.fromStrict  . TE.decodeUtf8   <$> ( doublequoted (plain' "\\\"")  <|> plain' ",)}" <|>  (const "''" <$> string "\"\"" ) )
-        PCnpj -> parseShowable (Primitive PText)
-        PCpf -> parseShowable (Primitive PText)
+        PCnpj -> parsePrim PText
+        PCpf -> parsePrim PText
         PInterval ->
           let i = SPInterval <$> diffInterval
            in doublequoted i <|> i
@@ -380,31 +384,33 @@ parseShowable (Primitive i ) =  (do
                 Right i -> pure $ SLineString i
                 Left e -> fail e
         PBounding -> SBounding <$> ((doublequoted box3dParser ) <|> box3dParser)
-        --i -> error $ "primitive not implemented - " <> show i
+        i -> error $ "primitive not implemented - " <> show i
             ) <?> (show i)
-parseShowable (KArray (KDelayed i))
-    = (string "t" >> return (SComposite $ Vector.singleton $ SDelayed Nothing))
+-- parseShowable (KArray (KDelayed i))
+    -- = (string "t" >> return (ArrayTB1 $ [ SDelayed Nothing]))
 parseShowable (KArray i)
-    =  SComposite . Vector.fromList <$> (par <|> doublequoted par)
+    =  ArrayTB1  <$> (par <|> doublequoted par)
       where par = char '{'  *>  sepBy (parseShowable i) (char ',') <* char '}'
 parseShowable (KOptional i)
-    = SOptional <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
+    = LeftTB1 <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
 parseShowable (KDelayed i)
-    = (string "t" >> return (SDelayed Nothing))
+    = (string "t" >> return (DelayedTB1 Nothing))
 parseShowable (KSerial i)
-    = SSerial <$> ((Just <$> parseShowable i) )
+    = SerialTB1 <$> ((Just <$> parseShowable i) )
 parseShowable (KInterval k)=
     let
-      emptyInter = const (SInterval Interval.empty) <$> string "empty"
+      emptyInter = const (IntervalTB1 Interval.empty) <$> string "empty"
       inter = do
         lb <- (char '[' >> return True ) <|> (char '(' >> return False )
         i <- parseShowable k
         char ','
         j <- parseShowable k
         rb <- (char ']' >> return True) <|> (char ')' >> return False )
-        return $ SInterval $ Interval.interval (ER.Finite i,lb) (ER.Finite j,rb)
+        return $ IntervalTB1 $ Interval.interval (ER.Finite i,lb) (ER.Finite j,rb)
     in doublequoted inter <|> inter <|> emptyInter
 
+
+parseShowable (Primitive i) = TB1 <$> parsePrim i
 parseShowable i  = error $  "not implemented " <> show i
 
 pg_double :: Parser Double
@@ -432,8 +438,6 @@ instance Sel.Serialize Bounding where
       Sel.put (Interval.upperBound i)
       Sel.put (Interval.lowerBound i)
 
-instance Functor (Interval.Interval) where
-  fmap f (Interval.Interval (ei,ec) (ji,jc)) = Interval.Interval (f <$> ei,ec) (f <$> ji,jc)
 
 
 instance Sel.Serialize Position where

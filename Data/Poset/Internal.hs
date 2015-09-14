@@ -122,11 +122,11 @@ class Sortable a => Ord a
 
 -- This hack allows us to leverage existing data structures defined in terms
 -- of 'Prelude.Ord'.
-instance Data.Poset.Internal.Ord a => Prelude.Ord a where
+{-instance Data.Poset.Internal.Ord a => Prelude.Ord a where
     compare = (totalOrder .) . compare
     (<)     = (<)
     (<=)    = (<=)
     (>=)    = (>=)
     (>)     = (>)
     min     = min
-    max     = max
+    max     = max-}

@@ -236,8 +236,8 @@ databaseChooser sargs = do
 
 
 
-unSOptional' (SOptional i ) = i
-unSOptional' (SSerial i )  = i
+unSOptional' (LeftTB1 i ) = i
+unSOptional' (SerialTB1 i )  = i
 unSOptional' i   = Just i
 
 applyUI el f = (\a-> getWindow el >>= \w -> runUI w (f a))
@@ -283,7 +283,7 @@ attrLine i e   = do
   let nonRec = tableNonrec i
       attr i (k,v) = set  (strAttr (T.unpack $ keyValue k)) (renderShowable v) i
       attrs   l i  = foldl attr i l
-  attrs (F.toList (tableAttrs i) ) $ line ( L.intercalate "," (fmap renderShowable .  allKVRec  $ i) <> "  -  " <>  (L.intercalate "," $ fmap (renderShowable) nonRec)) e
+  attrs (F.toList (tableAttrs i) ) $ line ( L.intercalate "," (fmap renderShowable .  allKVRec  $ i) <> "  -  " <>  (L.intercalate "," $ fmap (renderPrim ) nonRec)) e
 
 chooserTable inf kitems i = do
   let initKey = pure . join $ fmap rawPK . flip M.lookup (tableMap inf) . T.pack <$> i
@@ -340,9 +340,9 @@ viewerKey inf key = mdo
   sortList  <- multiListBox (pure sortSet) (pure $ F.toList key ) (pure (line . show))
   asc <- checkedWidget (pure True)
   let
-     filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderShowable) . F.toList  )
+     filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  . _unTB1 )
      tsort = sorting <$> triding asc <*> multiUserSelection sortList
-     res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 _ kv ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $  keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
+     res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 (_, kv) ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $  keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
   let pageSize = 20
   itemList <- listBox ((\o -> L.take pageSize . L.drop (o*pageSize))<$> triding offset <*>res3) (tidings bselection never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
   offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) ((\i -> (L.length i `div` pageSize) ) <$> facts res3)
@@ -371,11 +371,11 @@ viewerKey inf key = mdo
 
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
 
-tableKeys (TB1 _ (k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
+tableKeys (TB1  (_,k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
 tableKeys (LeftTB1 (Just i)) = tableKeys i
 tableKeys (ArrayTB1 [i]) = tableKeys i
 
-tableAttrs (TB1 _ (k) ) = concat $ fmap aattr (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
+tableAttrs (TB1  (_,k) ) = concat $ fmap aattr (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
 tableAttrs (LeftTB1 (Just i)) = tableAttrs i
 tableAttrs (ArrayTB1 [i]) = tableAttrs i
 
@@ -393,7 +393,7 @@ filterCase inf (IT _ tb1) = filterUI inf tb1
 
 filterUI inf (LeftTB1 (Just i))  =  filterUI inf i
 filterUI inf (ArrayTB1 [i])  = filterUI inf i
-filterUI inf t@(TB1 k v) = do
+filterUI inf t@(TB1 (k,v)) = do
   el <- listBox (pure (fmap (first (S.map _relOrigin)) $  M.toList (_kvvalues $ runIdentity $ getCompose v) )) (pure Nothing) (pure id) (pure (\i j -> j # set text (show (T.intercalate "," $ keyValue <$> S.toList (fst i)) )))
   elv <- mapDynEvent (maybe emptyUI  (filterCase inf . unTB . fmap (const ()) . snd )) (TrivialWidget (userSelection el) (getElement el))
   out <- UI.div # sink UI.text (show <$> facts (triding elv))

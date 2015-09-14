@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE DeriveFoldable #-}
@@ -95,14 +96,13 @@ textToPrim "LINESTRING" = PLineString
 textToPrim "box3d" = PBounding
 textToPrim i = error $ "no case for type " <> T.unpack i
 
-
-_unlb1 ( TB1  m i ) = fmap getCompose i
+{-
 
 unlb1 ( TB1  m i ) = fmap getCompose (_kvvalues $ labelValue $ getCompose $ i)
 unlb1 ( LeftTB1  (Just i ) ) = unlb1 i
 unlb1 ( DelayedTB1  (Just i ) ) = unlb1 i
 unlb1 ( ArrayTB1  [i ] ) = unlb1 i
-
+-}
 
 isSerial (KSerial _) = True
 isSerial _ = False
@@ -120,23 +120,23 @@ isArray _ = False
 
 
 
-showableDef (KOptional i) = Just $ SOptional (showableDef i)
-showableDef (KSerial i) = Just $ SSerial (showableDef i)
+showableDef (KOptional i) = Just $ LeftTB1 (showableDef i)
+showableDef (KSerial i) = Just $ SerialTB1 (showableDef i)
 showableDef (KArray i ) = Nothing -- Just (SComposite Vector.empty)
 showableDef i = Nothing
 
-transformKey (KSerial i)  (KOptional j) (SSerial v)  | i == j = (SOptional v)
-transformKey (KOptional i)  (KSerial j) (SOptional v)  | i == j = (SSerial v)
-transformKey (KOptional j) l (SOptional v)
+transformKey (KSerial i)  (KOptional j) (SerialTB1 v)  | i == j = LeftTB1  v
+transformKey (KOptional i)  (KSerial j) (LeftTB1 v)  | i == j = SerialTB1 v
+transformKey (KOptional j) l (LeftTB1  v)
     | isJust v = transformKey j l (fromJust v)
     | otherwise = errorWithStackTrace "no transform optional nothing"
-transformKey (KSerial j)  l (SSerial v)
+transformKey (KSerial j)  l (SerialTB1 v)
     | isJust v = transformKey j l (fromJust v)
-    | otherwise =  SDelayed Nothing -- error $ "no transform serial nothing" <> show (l,v)
+    | otherwise =  DelayedTB1 Nothing -- error $ "no transform serial nothing" <> show (l,v)
 -- transformKey (KOptional j)  l@(Primitive _ ) (SOptional v) | j == l  && isJust v = (\(Just i)-> i) v
-transformKey l@(Primitive _)  (KOptional j ) v  = SOptional $ Just (transformKey l j v)
-transformKey l@(Primitive _)  (KSerial j ) v   = SSerial $ Just (transformKey l j v)
-transformKey l@(Primitive _)  (KArray j ) v | j == l  = SComposite $ Vector.singleton  v
+transformKey l@(Primitive _)  (KOptional j ) v  = LeftTB1 $ Just (transformKey l j v)
+transformKey l@(Primitive _)  (KSerial j ) v   = SerialTB1 $ Just (transformKey l j v)
+transformKey l@(Primitive _)  (KArray j ) v | j == l  = ArrayTB1 $ pure v
 transformKey ki kr v | ki == kr = v
 transformKey ki kr  v = errorWithStackTrace  ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
 
@@ -209,36 +209,38 @@ genInterval (a:xs) = do
 --      genPatt (PComp i ) =
 
 
-renderShowable :: Showable -> String
-renderShowable (SOptional i ) = maybe "" renderShowable i
-renderShowable (SSerial i ) = maybe "" renderShowable i
-renderShowable (SInterval i)  = showInterval i
-renderShowable (SComposite i)  = unlines $ F.toList $ fmap renderShowable i
-renderShowable i = shw i
-   where
-    shw (SText a) = T.unpack a
-    shw (SNumeric a) = show a
-    shw (SBoolean a) = show a
-    shw (SDouble a) = show a
-    shw (STimestamp a) = show a
-    shw (SLineString a ) = show a
-    shw (SBounding a ) = show a
-    shw (SDate a) = show a
-    shw (SDayTime a) = show a
-    shw (SSerial a) = show a
-    shw (SBinary _) = show "<Binary>"
-    shw (SDelayed  i ) = maybe "<NotLoaded>" (\i -> "<Loaded| " <> shw i <> "|>") i
-    shw (SPosition a) = show a
-    shw (SOptional a) = show a
-    shw (SInterval a) = showInterval a
-    shw (SPInterval a) = show a
-    shw (SComposite a) = intercalate "," $ F.toList (fmap shw a)
+renderShowable :: FTB Showable -> String
+renderShowable (LeftTB1 i ) = maybe "" renderShowable i
+renderShowable (DelayedTB1 i ) = maybe "" renderShowable i
+renderShowable (SerialTB1 i ) = maybe "" renderShowable i
+renderShowable (ArrayTB1 i)  = intercalate "," $ F.toList $ fmap renderShowable i
+renderShowable (IntervalTB1 i)  = showInterval renderShowable i -- intercalate "," $ F.toList $ fmap renderShowable i
+renderShowable (TB1  i) = shw i
 
-showInterval i | i == Interval.empty = show i
-showInterval (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> renderShowable i <> "," <> renderShowable l <> ocr m
-    where
-      ocl j = if j then "[" else "("
-      ocr j = if j then "]" else ")"
+shw (SText a) = T.unpack a
+-- shw (SInterval i)  = showInterval i
+shw (SNumeric a) = show a
+shw (SBoolean a) = show a
+shw (SDouble a) = show a
+shw (STimestamp a) = show a
+shw (SLineString a ) = show a
+shw (SBounding a ) = show a
+shw (SDate a) = show a
+shw (SDayTime a) = show a
+-- shw (SSerial a) = show a
+shw (SBinary _) = show "<Binary>"
+-- shw (SDelayed  i ) = maybe "<NotLoaded>" (\i -> "<Loaded| " <> shw i <> "|>") i
+shw (SPosition a) = show a
+-- shw (SInterval a) = showInterval shw a
+shw (SPInterval a) = show a
+
+renderPrim = shw
+
+showInterval f i | i == Interval.empty = show i
+showInterval f (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> f i <> "," <> f l <> ocr m
+  where
+    ocl j = if j then "[" else "("
+    ocr j = if j then "]" else ")"
 
 
 renderAliasedKey (v ,(t,k)) a = rawName t <> "." <> keyValue k <> " AS " <> a
@@ -275,14 +277,14 @@ getPrim (KInterval j) =  getPrim j
 inner b l m = l <> b <> m
 
 -- Operators
-intersectPred p@(Primitive _) op  (KInterval i) j (SInterval l )  | p == i =  Interval.member j l
-intersectPred p@(KInterval j) "<@" (KInterval i) (SInterval k)  (SInterval l ) =  Interval.isSubsetOf k  l
-intersectPred p@(KInterval j) "@>" (KInterval i) (SInterval k)  (SInterval l ) =  flip Interval.isSubsetOf k l
-intersectPred p@(KInterval j) "=" (KInterval i) (SInterval k)  (SInterval l )   =  k == l
-intersectPred p@(KArray j) "<@" (KArray i) (SComposite k)  (SComposite l )   =  S.fromList (F.toList k) `S.isSubsetOf` S.fromList  (F.toList l)
-intersectPred p@(KArray j) "@>" (KArray i) (SComposite k)  (SComposite l )   =  S.fromList (F.toList l) `S.isSubsetOf` S.fromList  (F.toList k)
-intersectPred p@(KArray j) "=" (KArray i) (SComposite k)  (SComposite l )   =  k == l
-intersectPred p@(Primitive _) op (KArray i) j (SComposite l )  | p == i =  Vector.elem j l
+intersectPred p@(Primitive _) op  (KInterval i) j (IntervalTB1 l )  | p == i =  Interval.member j l
+intersectPred p@(KInterval j) "<@" (KInterval i) (IntervalTB1 k)  (IntervalTB1  l)  =  Interval.isSubsetOf k  l
+intersectPred p@(KInterval j) "@>" (KInterval i) (IntervalTB1 k)  (IntervalTB1 l) =  flip Interval.isSubsetOf k l
+intersectPred p@(KInterval j) "=" (KInterval i) (IntervalTB1 k)  (IntervalTB1 l)   =  k == l
+intersectPred p@(KArray j) "<@" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  S.fromList (F.toList k) `S.isSubsetOf` S.fromList  (F.toList l)
+intersectPred p@(KArray j) "@>" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  S.fromList (F.toList l) `S.isSubsetOf` S.fromList  (F.toList k)
+intersectPred p@(KArray j) "=" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  k == l
+intersectPred p@(Primitive _) op (KArray i) j (ArrayTB1 l )  | p == i =  elem j l
 intersectPred p1@(Primitive _) op  p2@(Primitive _) j l   | p1 == p2 =  case op of
                                                                              "=" -> j ==  l
                                                                              "<" -> j < l
@@ -291,17 +293,17 @@ intersectPred p1@(Primitive _) op  p2@(Primitive _) j l   | p1 == p2 =  case op 
                                                                              "<=" -> j <= l
                                                                              "/=" -> j /= l
 
-intersectPred p1 op  (KSerial p2) j (SSerial l)   | p1 == p2 =  maybe False (j ==) l
-intersectPred p1 op (KOptional p2) j (SOptional l)   | p1 == p2 =  maybe False (j ==) l
-intersectPred p1@(KOptional i ) op p2 (SOptional j) l  =  maybe False id $ fmap (\m -> intersectPred i op p2 m l) j
+intersectPred p1 op  (KSerial p2) j (SerialTB1 l)   | p1 == p2 =  maybe False (j ==) l
+intersectPred p1 op (KOptional p2) j (LeftTB1 l)   | p1 == p2 =  maybe False (j ==) l
+intersectPred p1@(KOptional i ) op p2 (LeftTB1 j) l  =  maybe False id $ fmap (\m -> intersectPred i op p2 m l) j
 intersectPred p1 op p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
 
-pkOp (KOptional j ) i  (SOptional l) k  = maybe False id (pkOp i j k <$> l)
-pkOp (KSerial j ) i  (SSerial l) k  = maybe False id (pkOp i j k <$> l)
-pkOp i (KOptional j ) k (SOptional l) = maybe False id (pkOp i j k <$> l)
-pkOp i (KSerial j ) k (SSerial l) = maybe False id (pkOp i j k <$> l)
-pkOp (KInterval i) (KInterval j) (SInterval k) (SInterval l)| i == j  = not $ Interval.null $ Interval.intersection  k l
-pkOp (KArray i) (KArray j) (SComposite k) (SComposite l) | i == j = not $ S.null $ S.intersection (S.fromList (F.toList k)) (S.fromList (F.toList  l ))
+pkOp (KOptional j ) i  (LeftTB1 l) k  = maybe False id (pkOp i j k <$> l)
+pkOp (KSerial j ) i  (SerialTB1 l) k  = maybe False id (pkOp i j k <$> l)
+pkOp i (KOptional j ) k (LeftTB1 l) = maybe False id (pkOp i j k <$> l)
+pkOp i (KSerial j ) k (SerialTB1 l) = maybe False id (pkOp i j k <$> l)
+pkOp (KArray i) (KArray j) (ArrayTB1 k) (ArrayTB1 l) | i == j = not $ S.null $ S.intersection (S.fromList (F.toList k)) (S.fromList (F.toList  l ))
+pkOp (KInterval i) (KInterval j) (IntervalTB1 k) (IntervalTB1 l)| i == j  = not $ Interval.null $ Interval.intersection  k l
 pkOp (Primitive i ) (Primitive j ) k l  | i == j = k == l
 pkOp a b c d = errorWithStackTrace (show (a,b,c,d))
 
@@ -353,24 +355,23 @@ updateAttr conn kv kold t = execute conn (fromString $ traceShowId $ T.unpack up
     setter = " SET " <> T.intercalate "," (equality <$> skv )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = runIdentity .getCompose <$> F.toList  (_kvvalues $ unTB tbskv)
-    (TB1 _ (tbskv)) = isM
+    (TB1 (_,tbskv)) = isM
     isM :: TB3 Identity Key  Showable
     isM =  justError ("cant diff befor update" <> show (kv,kold)) $ diffUpdateAttr kv kold
 
 diffUpdateAttr :: TB1 Showable -> TB1 Showable -> Maybe (TB1 Showable)
-diffUpdateAttr  kv kold@(TB1 t _ ) =  fmap ((TB1  t ) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
+diffUpdateAttr  kv kold@(TB1 (t,_) ) =  fmap (TB1 .(t,) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
 
-attrValue :: Show a => TB Identity Key a -> a
+attrValue :: (Ord a,Show a) => TB Identity Key a -> FTB a
 attrValue (Attr _  v)= v
 attrValue i = errorWithStackTrace $ " no attr value instance " <> show i
 
-
-attrType :: Show a => TB Identity Key a -> KType Text
+attrType :: (Ord a,Show a) => TB Identity Key a -> KType Text
 attrType (Attr i _)= keyType i
 attrType (IT i _) = overComp attrType i
 attrType i = errorWithStackTrace $ " no attr value instance " <> show i
 
-attrValueName :: Show a => TB Identity Key a -> Text
+attrValueName :: (Ord a,Show a) => TB Identity Key a -> Text
 attrValueName (Attr i _ )= keyValue i
 attrValueName (IT i  _) = overComp attrValueName i
 attrValueName i = errorWithStackTrace $ " no attr value instance " <> show i
@@ -392,21 +393,21 @@ insertAttr f conn krec  t = if not (L.null pkList)
               then   do
         let iquery = T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName  kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")" <> " RETURNING ROW(" <>  T.intercalate "," (attrValueName <$> pkList ) <> ")"
         liftIO $ print iquery
-        out <-  fmap head $ liftIO $ queryWith (f (fmap (const ()) $ TB1 (tableMeta t) $ _tb $  KV (M.fromList $ fmap (\i -> (S.singleton $ Inline $ keyAttr i,Compose (Identity i))) pkList ))) conn (fromString  iquery ) (  kva)
-        return $ mapTB1 (mapComp (\case{ (Attr k' v')-> maybe (Attr k' v') (runIdentity . getCompose )  $ fmap snd $ getCompose $ unTB $ findTB1 (overComp (\case{Attr nk nv ->nk == k'; i-> False} )) out; i-> i} ) ) krec
+        out :: TB1 Showable <-  fmap head $ liftIO $ queryWith (f (  TB1 . (tableMeta t,) . _tb $  KV (M.fromList $ fmap (\i -> (S.singleton $ Inline $ keyAttr i,Compose (Identity i))) (fmap (const ()) <$> pkList )))) conn (fromString  iquery ) (  kva)
+        return $ mapTB1 (mapComp (\case{ (Attr k' v')-> maybe (Attr k' v')    unTB $ fmap snd $ getCompose $ unTB $ findTB1 (overComp (\case{Attr nk nv ->nk == k'; i-> False} )) out; i-> i} ) ) krec
               else liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")"   )  kva >> return krec
   where pkList :: [ TB Identity Key Showable]
         pkList =    L.filter pred  . fmap (runIdentity. getCompose) $ (F.toList $ _kvvalues $ unTB $ tbPK $ tableNonRefK krec )
         pred i = (isSerial . attrType $ i) && (isNothing . unSSerial .attrValue $ i )
         kva = L.filter (not . pred) $ fmap (runIdentity . getCompose) $ F.toList (_kvvalues $ unTB k)
-        (TB1 _ k ) = tableNonRefK krec
+        (TB1 (_,k) ) = tableNonRefK krec
 
 
-unSComposite (SComposite i) = i
+unSComposite (ArrayTB1 i) = i
 unSComposite i = errorWithStackTrace ("unSComposite " <> show i)
 
-isEmptyShowable (SOptional Nothing ) = True
-isEmptyShowable (SSerial Nothing ) = True
+isEmptyShowable (LeftTB1 Nothing ) = True
+isEmptyShowable (SerialTB1 Nothing ) = True
 isEmptyShowable i = False
 
 
@@ -430,9 +431,9 @@ createTable r@(Raw sch _ _ _ tbl _ _ pk _ fk attr) = "CREATE TABLE " <> rawFullN
     renderFK (Path origin _  end) = ""
 
 
-keyOptional (k,v) = (kOptional k ,SOptional $ Just v)
+keyOptional (k,v) = (kOptional k ,LeftTB1 $ Just v)
 
-unKeyOptional (k  ,(SOptional v) ) = fmap (unKOptional k,) v
+unKeyOptional (k  ,(LeftTB1 v) ) = fmap (unKOptional k,) v
 
 kOptional (Key a  c m n d e) = Key a  c m  n d (KOptional e)
 kDelayed (Key a  c m n d e) = Key a  c m  n d (KDelayed e)
@@ -459,11 +460,11 @@ unIntercalate pred s                 =  case dropWhile pred s of
 
 data Tag = TAttr | TPK
 
-allKVRec :: Ord f => TB2 f Showable -> [Showable]
+allKVRec :: Ord f => TB2 f Showable -> [FTB Showable]
 allKVRec (DelayedTB1 i) = maybe mempty allKVRec i
 allKVRec (LeftTB1 i) = maybe mempty allKVRec i
 allKVRec (ArrayTB1 i) = mconcat $ allKVRec <$> i
-allKVRec  t@(TB1 m e)=  concat $  F.toList (go . unTB <$> (_kvvalues $ unTB $ eitherDescPK t))
+allKVRec  t@(TB1 (m, e))=  concat $  F.toList (go . unTB <$> (_kvvalues $ unTB $ eitherDescPK t))
   where
         go  (FKT _  _ tb) =  allKVRec  tb
         go  (IT  _ tb) = allKVRec tb
@@ -476,18 +477,18 @@ tableToKV r =   do
 
 preLabelTable :: Text -> Table ->  (TB3 (Labeled Text)  Key () )
 preLabelTable t i =
-   let v = fmap (\k -> (S.singleton (Inline k),Compose $ Labeled ( "(" <> t <> ")." <> keyValue k ) (Attr k () )) ) (tableToKV i)
-   in (TB1 (tableMeta i) $ Compose $ Labeled t $KV $ M.fromList $ v )
+   let v = fmap (\k -> (S.singleton (Inline k),Compose $ Labeled ( "(" <> t <> ")." <> keyValue k ) (Attr k (TB1 ()) )) ) (tableToKV i)
+   in (TB1 . (tableMeta i,) $ Compose $ Labeled t $KV $ M.fromList $ v )
 
 
 labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (Labeled Text Table,TB3 (Labeled Text)  Key  () )
 labelTable i = do
    t <- tname i
    name <- Tra.traverse (\k-> (S.singleton (Inline k),) <$> kname t k ) (tableToKV i)
-   return (t,TB1 (tableMeta i) $ Compose $ Labeled (label t) $ KV $ M.fromList $ fmap Compose <$> name)
+   return (t,TB1 . (tableMeta i,) $ Compose $ Labeled (label t) $ KV $ M.fromList $ fmap Compose <$> name)
 
 expandTable ::  TB3  (Labeled Text) Key  () -> Text
-expandTable tb@(TB1 meta (Compose (Labeled t ((KV i)))  ))  =
+expandTable tb@(TB1 (meta, Compose (Labeled t ((KV i)))  ))  =
    let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name) <> " FROM " <> aliasTable <> ") as " <> t
        name =  tableAttr tb
        aliasTable = kvMetaFullName meta  <> " as " <> t
@@ -496,8 +497,6 @@ expandTable tb@(TB1 meta (Compose (Labeled t ((KV i)))  ))  =
 expandTable (DelayedTB1 (Just tb)) = expandTable tb
 expandTable tb = errorWithStackTrace (show tb)
 
-
--- lb1 = TB1 . (fmap Compose)
 
 isPairReflexive (Primitive i ) op (KInterval (Primitive j)) | i == j = False
 isPairReflexive (Primitive j) op  (KArray (Primitive i) )  | i == j = False
@@ -518,7 +517,6 @@ filterReflexive ks = L.filter (reflexiveRel ks) ks
 
 notReflexiveRel ks = not . reflexiveRel ks
 reflexiveRel ks
-  -- | any (isInlineRel) ks = isInlineRel
   | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
   | all (isJust . keyStatic . _relOrigin) ks = ( isJust . keyStatic. _relOrigin)
   | any (isJust . keyStatic . _relOrigin) ks = ( isNothing . keyStatic. _relOrigin)
@@ -565,7 +563,7 @@ keyAttr i = errorWithStackTrace $ "cant find keyattr " <> (show i)
 selectQuery t = "SELECT " <> explodeRow t <> " FROM " <> expandTable t <> expandQuery False  t
 
 expandQuery left (DelayedTB1 (Just t)) = ""--  expandQuery left t
-expandQuery left t@(TB1 meta m)
+expandQuery left t@(TB1 (meta, m))
     = foldr1 mappend (expandJoin left (F.toList (_kvvalues . labelValue . getCompose $ m) ) .getCompose <$> F.toList (_kvvalues . labelValue . getCompose $ m))
 
 
@@ -579,7 +577,7 @@ expandJoin left env (Labeled l (IT i (ArrayTB1 [tb] )))
         where
           tas = getTas tb
           getTas (DelayedTB1 (Just tb))  = getTas tb
-          getTas (TB1 _ (Compose tas)) = tas
+          getTas (TB1  (_,Compose tas)) = tas
           tname = label $ getCompose i
           jt = if left then " LEFT" else ""
 expandJoin left env (Labeled l (IT i tb)) = expandQuery left tb
@@ -598,7 +596,7 @@ expandJoin left env (Labeled l (FKT _ ks (ArrayTB1 [tb])))
               nonArrayRel = L.filter (not . isArray . keyType . _relOrigin) ks
           tas = getTas tb
           getTas (DelayedTB1 (Just tb))  = getTas tb
-          getTas (TB1 _ (Compose tas)) = tas
+          getTas (TB1  (_,Compose tas)) = tas
           look :: [Key] -> [Labeled Text ((TB (Labeled Text)) Key ())] ->  [Labeled Text ((TB (Labeled Text)) Key ())]
           look ki i = justError ("missing FK on " <> show (ki,ks ,keyAttr . labelValue <$> i )  ) $ allMaybes $ fmap (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
           jt = if left then " LEFT" else ""
@@ -614,10 +612,7 @@ joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectio
     where fkm  = (\rel -> Rel (look (_relOrigin rel ) m) (_relOperator rel) (look (_relTarget rel ) n)) <$>  ks
           look ki i = justError ("missing FK on " <> show (ki,ks ,keyAttr . labelValue <$> i )) $ (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
 
-
-
-loadOnlyDescriptions (TB1 kv m ) = _kvpk kv
-
+loadOnlyDescriptions (TB1 (kv ,m) ) = _kvpk kv
 
 recursePath
   :: Bool
@@ -698,7 +693,7 @@ pathRelRef (Path ifk _ _ ) = ifk
 pathRelStore (Path _ _ ifk ) = ifk
 
 eitherDescPK :: (Functor f,Ord k) =>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
-eitherDescPK i@(TB1 kv  _  )
+eitherDescPK i@(TB1 (kv, _)  )
   | not ( null ( _kvdesc kv) ) =  tbDesc i
   | otherwise = tbPK i
 
@@ -710,21 +705,21 @@ tbPK :: (Functor f,Ord k)=>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
 tbPK = tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv ) ))
 
 tbUn :: (Functor f,Ord k) =>   Set k -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
-tbUn un (TB1 kv item) =  (\kv ->  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item ) un
+tbUn un (TB1 (kv,item)) =  (\kv ->  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item ) un
   where pred kv k = (S.isSubsetOf (S.map _relOrigin k) kv )
 
 tbAttr :: (Functor f,Ord k) =>  TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbAttr  =  tbFilter  (\kv k -> not (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv <> (S.fromList (_kvdesc kv ))) ))
 
 tbFilter :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
-tbFilter pred (TB1 kv item) =  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item
+tbFilter pred (TB1 (kv,item)) =  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item
 tbFilter pred (LeftTB1 (Just i)) = tbFilter pred i
 tbFilter pred (ArrayTB1 ([i])) = tbFilter pred i
 tbFilter pred (DelayedTB1 (Just i)) = tbFilter pred i
 f = errorWithStackTrace ""
 
 recurseTB :: Map Text Table -> Table -> Bool -> TB3 (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3 (Labeled Text) Key ())
-recurseTB invSchema  nextT nextLeft ksn@(TB1 m kv ) =  (TB1 m) <$>
+recurseTB invSchema  nextT nextLeft ksn@(TB1 (m, kv) ) =  TB1 . (m,) <$>
     (\kv -> case kv of
       (Compose (Labeled l kv )) -> do
          i <- fun kv
@@ -737,14 +732,14 @@ recurseTB invSchema  nextT nextLeft ksn@(TB1 m kv ) =  (TB1 m) <$>
           let
               items = _kvvalues kv
               fkSet:: S.Set Key
-              fkSet = {-S.filter (isNothing . keyStatic ) .-} S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then   i else filterReflexive i ) . S.toList . pathRelRel ) $ filter (isPathReflexive . pathRel) $ S.toList (rawFKS nextT)
+              fkSet =  S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter (isPathReflexive . pathRel) $ S.toList (rawFKS nextT)
               nonFKAttrs :: [(S.Set (Rel Key) ,TBLabel  ())]
               nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
           pt <- foldl (\acc  fk ->  do
                   vacc <- acc
                   i <- fmap (pathRelRel fk,) . recursePath nextLeft vacc ( (M.toList $  fmap getCompose items )) invSchema $ fk
                   return (fmap getCompose i:vacc)
-                  ) (return [])   $ P.sortBy (P.comparing pathRelRel) (F.toList $ rawFKS nextT )
+                  ) (return []) $ P.sortBy (P.comparing pathRelRel) (F.toList $ rawFKS nextT)
           return (   KV $ M.fromList $ nonFKAttrs <> (fmap (fmap Compose ) pt)))
 
 
@@ -772,7 +767,7 @@ aliasTable (Labeled t r) = showTable r <> " as " <> t
 kname :: Labeled Text Table -> Key -> QueryRef (Labeled Text (TB (Labeled Text) Key () ))
 kname t i = do
   n <- mkKey i
-  return $ (Labeled ("k" <> (T.pack $  show $ fst n)) (Attr i ()) )
+  return $ (Labeled ("k" <> (T.pack $  show $ fst n)) (Attr i (TB1 ())) )
 
 
 
@@ -783,15 +778,15 @@ tname i = do
   return $ Labeled ("t" <> (T.pack $  show n)) i
 
 
-markDelayed True (TB1 m v) = TB1 m $ mapComp (KV . M.mapWithKey (\k v -> mapComp (recurseDel (if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then False else True)) v  ). _kvvalues ) v
-markDelayed False (TB1 m v) = TB1 m $ mapComp (KV . fmap (mapComp (recurseDel False)) . _kvvalues) v
+markDelayed True (TB1 (m,v)) = TB1 . (m,) $ mapComp (KV . M.mapWithKey (\k v -> mapComp (recurseDel (if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then False else True)) v  ). _kvvalues ) v
+markDelayed False (TB1 (m,v)) = TB1 . (m,) $ mapComp (KV . fmap (mapComp (recurseDel False)) . _kvvalues) v
 
 
 
 markDelayed i (LeftTB1 j) = LeftTB1 $ (markDelayed  i)<$> j
 markDelayed i (ArrayTB1 j) = ArrayTB1 $ (markDelayed  i)<$> j
-markDelayed True (TB1 m v) = TB1 m $ mapComp (KV . M.mapWithKey (\k v -> mapComp (recurseDel (if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then False else True)) v  ). _kvvalues ) v
-markDelayed False (TB1 m v) = TB1 m $ mapComp (KV . fmap (mapComp (recurseDel False)) . _kvvalues) v
+markDelayed True (TB1 (m,v)) = TB1 . (m,) $ mapComp (KV . M.mapWithKey (\k v -> mapComp (recurseDel (if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then False else True)) v  ). _kvvalues ) v
+markDelayed False (TB1 (m,v)) = TB1 . (m,) $ mapComp (KV . fmap (mapComp (recurseDel False)) . _kvvalues) v
 
 makeTB1Delayed (LeftTB1 i ) =  LeftTB1 $ makeTB1Delayed <$> i
 makeTB1Delayed (ArrayTB1 i ) =  ArrayTB1 $ makeTB1Delayed <$> i
@@ -807,8 +802,8 @@ makeDelayed i  = KDelayed i
 forceDesc rec (ArrayTB1 m ) = ArrayTB1 $ forceDesc rec <$> m
 forceDesc rec (LeftTB1 m ) = LeftTB1 $ forceDesc rec <$> m
 forceDesc rec (DelayedTB1 (Just m) ) = forceDesc rec m
-forceDesc rec (TB1 m v) =  TB1 m $ mapComp (KV . M.mapWithKey (\k v -> mapComp ((if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then forceDel True   else forceDel False  )) v   ). _kvvalues ) v
-forceDesc False (TB1 m v) =  TB1 m $ mapComp (KV . M.mapWithKey (\k v -> mapComp (forceDel False )  v   ). _kvvalues ) v
+forceDesc rec (TB1 (m,v)) =  TB1 . (m,) $ mapComp (KV . M.mapWithKey (\k v -> mapComp ((if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then forceDel True   else forceDel False  )) v   ). _kvvalues ) v
+forceDesc False (TB1 (m,v)) =  TB1 . (m,) $ mapComp (KV . M.mapWithKey (\k v -> mapComp (forceDel False )  v   ). _kvvalues ) v
 forceDel rec t =
             case t of
               Attr k v ->  Attr (alterKeyType forceDAttr k) v
@@ -852,14 +847,14 @@ explodeLabel = explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id)
 leafDel True i = " case when " <> i <> " is not null then true else null end "
 leafDel False i = " case when " <> i <> " is not null then true else null end "
 
-explodeRow' block  assoc  leaf (DelayedTB1 (Just tbd@(TB1 i tb))) = "(true)" -- if L.null pk then "" else  block (T.intercalate assoc $ fmap ( explodeDelayed block assoc leaf .getCompose )   pk)
+explodeRow' block  assoc  leaf (DelayedTB1 (Just tbd@(TB1 (i,tb)))) = "(true)" -- if L.null pk then "" else  block (T.intercalate assoc $ fmap ( explodeDelayed block assoc leaf .getCompose )   pk)
   where
         pk = (F.toList $ _kvvalues $ labelValue $ getCompose $ tb)
 
 explodeRow' block assoc leaf (LeftTB1 (Just tb) ) = explodeRow' block assoc leaf tb
 explodeRow' block assoc leaf (ArrayTB1 [tb] ) = explodeRow' block assoc leaf tb
-explodeRow' block assoc leaf (TB1 m (Compose (Labeled _ (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
-explodeRow' block assoc leaf  (TB1 m (Compose (Unlabeled (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
+explodeRow' block assoc leaf (TB1 (m ,Compose (Labeled _ (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
+explodeRow' block assoc leaf  (TB1 (m ,Compose (Unlabeled (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
 
 explodeDelayed block assoc leaf (Labeled l (Attr k  _ ))
   | isKDelayed (keyType k) = leafDel (isArray (keyType k)) l
@@ -886,7 +881,7 @@ isTB1Delayed (LeftTB1 (Just tb)) = isTB1Delayed tb
 isTB1Delayed (ArrayTB1 [tb]) = isTB1Delayed tb
 isTB1Delayed _ = False
 
-unTlabel (TB1 m kv )  = TB1 m $ overLabel (\(KV kv) -> KV $ fmap (Compose . Identity .unlabel.getCompose ) $   kv) kv
+unTlabel (TB1 (m,kv) )  = TB1 . (m,) $ overLabel (\(KV kv) -> KV $ fmap (Compose . Identity .unlabel.getCompose ) $   kv) kv
 unTlabel (LeftTB1 kv)  = LeftTB1 $ fmap unTlabel kv
 unTlabel (ArrayTB1 kv)  = ArrayTB1 $ fmap unTlabel kv
 unTlabel (DelayedTB1 kv)  = DelayedTB1 $ fmap unTlabel kv
@@ -910,29 +905,35 @@ inf' = (\(ER.Finite i) -> i) . Interval.lowerBound
 sup' = (\(ER.Finite i) -> i) . Interval.upperBound
 
 
-unSOptional (SOptional i) = i
+unSOptional (LeftTB1 i) = i
 unSOptional i = traceShow ("unSOptional No Pattern Match SOptional-" <> show i) (Just i)
 
-unSDelayed (SDelayed i) = i
+unSDelayed (DelayedTB1 i) = i
 unSDelayed i = traceShow ("unSDelayed No Pattern Match" <> show i) Nothing
 
-unSSerial (SSerial i) = i
+unSSerial (SerialTB1 i) = i
 unSSerial i = traceShow ("unSSerial No Pattern Match SSerial-" <> show i) Nothing
 
-unRSOptional (SOptional i) = join $ fmap unRSOptional i
+unRSOptional (LeftTB1 i) = join $ fmap unRSOptional i
 unRSOptional i = traceShow ("unRSOptional No Pattern Match SOptional-" <> show i) Nothing
 
-unRSOptional2 (SOptional i) = join $ unRSOptional' <$> i
+unRSOptional2 (LeftTB1 i) = join $ unRSOptional2 <$> i
 unRSOptional2 i   = Just i
 
-unRSOptional' (SOptional i) = join $ unRSOptional' <$> i
-unRSOptional' (SSerial i )  = join $ unRSOptional' <$>i
+unRSOptional' (LeftTB1 i) = join $ unRSOptional' <$> i
+unRSOptional' (SerialTB1 i )  = join $ unRSOptional' <$> i
 unRSOptional' i   = Just i
 
-_unTB1 (TB1 m i ) =  i
+_unTB1 (TB1 (m,i) ) =  i
 _unTB1 (LeftTB1 (Just i )) = _unTB1 i
 _unTB1 (DelayedTB1 (Just i )) = _unTB1 i
 _unTB1 i =  errorWithStackTrace $ show i
+
+instance P.Poset (FKey (KType Text))where
+  compare  = (\i j -> case compare (i) (j) of
+                      EQ -> P.EQ
+                      LT -> P.LT
+                      GT -> P.GT )
 
 
 makeOpt (Key a  c d m n ty) = (Key a  c d m n (KOptional ty))
@@ -966,6 +967,6 @@ relabeling p l (Attr k i ) = (Attr k i)
 relabeling p l (IT i tb ) = IT ((Compose.  l . relabeling p l . p . getCompose ) i) (relabelT p l tb)
 
 relabelT :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB3 f k a -> TB3 p k a
-relabelT p l (TB1 m (Compose j)) =  (TB1 m (Compose $ l (KV $ fmap (Compose.  l . relabeling p l . p . getCompose ) (_kvvalues $ p j))))
+relabelT p l (TB1 (m ,Compose j)) =  (TB1  (m,Compose $ l (KV $ fmap (Compose.  l . relabeling p l . p . getCompose ) (_kvvalues $ p j))))
 
 

@@ -11,10 +11,9 @@
 module Data.Poset.Instances where
 
 import qualified Data.Poset.Internal as Poset
-import Data.Poset.Internal (Poset, Sortable, partialOrder, totalOrder)
+import Data.Poset.Internal (Poset, Sortable, partialOrder )
 
 import Data.Ratio
-import Data.List
 import Data.Word
 import Data.Int
 
