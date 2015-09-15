@@ -93,13 +93,6 @@ textToPrim "LINESTRING" = PLineString
 textToPrim "box3d" = PBounding
 textToPrim i = error $ "no case for type " <> T.unpack i
 
-{-
-
-unlb1 ( TB1  m i ) = fmap getCompose (_kvvalues $ labelValue $ getCompose $ i)
-unlb1 ( LeftTB1  (Just i ) ) = unlb1 i
-unlb1 ( DelayedTB1  (Just i ) ) = unlb1 i
-unlb1 ( ArrayTB1  [i ] ) = unlb1 i
--}
 
 isSerial (KSerial _) = True
 isSerial _ = False
@@ -114,7 +107,6 @@ isArray :: KType i -> Bool
 isArray (KArray _) = True
 isArray (KOptional i) = isArray i
 isArray _ = False
-
 
 
 showableDef (KOptional i) = Just $ LeftTB1 (showableDef i)
@@ -576,9 +568,7 @@ recursePath isLeft vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           tas <- tname nextT
           let knas = (Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique)  (Primitive "integer" ))
           kas <- kname tas  knas
-          return $ Compose $ Labeled (label $ kas) (FKT [] {-(fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filterReflexive ks ))-}  ks  (mapOpt $ ArrayTB1 [ tb]  ))
-
-
+          return $ Compose $ Labeled (label $ kas) (FKT [] ks  (mapOpt $ ArrayTB1 [ tb]  ))
     | isArrayRel ifk && not (isArrayRel e) =   do
           (t,ksn) <- labelTable nextT
           tb <-fun ksn
@@ -586,7 +576,6 @@ recursePath isLeft vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
           let knas = (Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique)  (Primitive "integer" ))
           kas <- kname tas  knas
           return $ Compose $ Labeled (label $ kas) (FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> (filter (\i -> not $ S.member i (S.unions $ fmap fst vacc)) $  filterReflexive ks) ))  ks  (mapOpt $ mapArray $ tb  ))
-
     | otherwise = do
           (t,ksn) <- labelTable nextT
           tb <-fun ksn
@@ -843,11 +832,7 @@ instance P.Poset (FKey (KType Text))where
                       LT -> P.LT
                       GT -> P.GT )
 
-
 makeOpt (Key a  c d m n ty) = (Key a  c d m n (KOptional ty))
-
-zipWithTF g t f = snd (mapAccumL map_one (F.toList f) t)
-    where map_one (x:xs) y = (xs, g y x)
 
 
 inlineName (KOptional i) = inlineName i
@@ -863,7 +848,6 @@ isKEither (KOptional i ) = isKEither i
 isKEither (KArray i ) = isKEither i
 isKEither (KEither _ i) = True
 isKEither _ = False
-
 
 isInline (KOptional i ) = isInline i
 isInline (KArray i ) = isInline i

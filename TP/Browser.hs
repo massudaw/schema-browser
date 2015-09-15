@@ -365,10 +365,6 @@ viewerKey inf key = mdo
   UI.div # set children ([itemSelec,insertDiv ] )
 
 
-
-
-
-
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
 
 tableKeys (TB1  (_,k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)

@@ -78,9 +78,6 @@ data Path a b
   deriving(Eq,Ord,Show )
 
 
-data PK a
-  = PK { _pkKey:: [a], _pkDescription :: [a]} deriving(Eq,Ord,Functor,Foldable,Traversable,Show)
-
 data KV f k a
   = KV {_kvvalues :: Map (Set (Rel k)) (f k a)  }deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
 
@@ -203,7 +200,6 @@ filterKey f (TB1 (m ,k) ) = TB1 . (m,) . mapComp (\(KV kv) -> KV $ Map.filterWit
 filterKey f (LeftTB1 k ) = LeftTB1 (filterKey f <$> k)
 filterKey f (ArrayTB1 k ) = ArrayTB1 (filterKey f <$> k)
   where
-    --frstTB :: (Ord k, Functor f) => (c -> k) -> TB f c a -> TB f k a
     frstTB f (Attr k i) = Attr  k i
     frstTB f (IT k i) = IT  k (filterKey f i)
     frstTB f (FKT k  m  i) = FKT   k  m (filterKey  f i)
@@ -266,24 +262,12 @@ instance Applicative FTB where
   ArrayTB1 i <*> ArrayTB1 j = ArrayTB1 $ liftA2 (<*>) i j
 
 deriving instance Functor Interval.Interval
--- deriving instance Functor Interval.Extended
 deriving instance Foldable Interval.Interval
 deriving instance Foldable Interval.Extended
 deriving instance Traversable Interval.Interval
 deriving instance Traversable Interval.Extended
 
 type FTB1 f k a = FTB (KVMetadata k, Compose f (KV (Compose f (TB f))) k a)
-
-{-data FTB1 f k a
-  = TB1 ! (KVMetadata k) ! (Compose f (KV (Compose f (TB f))) k a)
-  | LeftTB1 ! (Maybe (FTB1 f k a))
-  | DelayedTB1 ! (Maybe (FTB1 f k a))
-  | ArrayTB1 ! [(FTB1 f k a)]
-  deriving(Functor,Foldable,Traversable,Generic)
--}
--- deriving instance (Eq (f (TB f k a )), Eq (f (TB f k () )) , Eq (f (KV (Compose f (TB f))  k a )) ,Eq a , Eq k ) => Eq (FTB1 f k a)
--- deriving instance (Ord (f (TB f k a )), Ord (f (TB f k () )) , Ord (f (KV (Compose f (TB f)) k a )) ,Ord a , Ord k ) => Ord (FTB1 f k a)
--- deriving instance (Show (f (TB f k a )), Show (f (TB f k () )) , Show (f (KV (Compose f (TB f)) k a )) ,Show a , Show k ) =>Show (FTB1 f k a)
 
 data KPrim
    = PText
@@ -367,7 +351,6 @@ newtype Bounding = Bounding (Interval.Interval Position) deriving(Eq,Ord,Typeabl
 
 newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,Read,Generic)
 
-
 instance Binary Showable
 
 instance Binary DiffTime where
@@ -398,12 +381,7 @@ data Showable
   | SLineString !LineString
   | SDate !Day
   | SDayTime !TimeOfDay
-  -- | SSerial !(Maybe Showable)
   | SBinary !BS.ByteString
-  -- | SOptional !(Maybe Showable)
-  -- | SComposite !(Vector Showable)
-  -- | SDelayed !(Maybe Showable)
-  -- | SInterval !(Interval.Interval Showable)
   deriving(Ord,Eq,Show,Generic)
 
 
@@ -466,8 +444,6 @@ data Modification a b
 instance (Ord k,Apply (f k) ,Functor (f k )) =>Apply  (KV f k) where
   KV pk  <.> KV pk1 = KV (Map.intersectionWith (<.>) pk pk1)
 
-instance Apply PK where
-  PK i j <.> PK i1 j1 = PK (getZipList $ ZipList i <.> ZipList i1 ) ( getZipList $ ZipList j <.> ZipList j1)
 
 
 type QueryRef = State ((Int,Map Int Table ),(Int,Map Int Key))
@@ -538,7 +514,7 @@ mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),i))
 keyattr :: Compose Identity (TB Identity ) k  a -> [Rel k]
 keyattr = keyattri . runIdentity . getCompose
 keyattri (Attr i  _ ) = [Inline i]
-keyattri (FKT i  rel _ ) =  (rel )
+keyattri (FKT i  rel _ ) = rel
 keyattri (IT i  _ ) =  keyattr i
 
 -- tableAttr :: (Traversable f ,Ord k) => TB3 f k () -> [Compose f (TB f) k ()]
@@ -572,18 +548,9 @@ tableNonRef (TB1 (m,n)  )  = TB1 (m, mapComp (\(KV n)-> KV  (mapFromTBList $ fma
 tableNonRefK :: Ord k => TB2 k Showable -> TB3 Identity k Showable
 tableNonRefK   = tableNonRef
 
-addDefaultK
-  :: Functor g => Compose g (TB f) d a
-     -> Compose g (TB f) d ()
-addDefaultK = mapComp def
-  where
-    def ((Attr k i)) = (Attr k (const () <$> i) )
-    def ((IT  rel j )) = (IT  rel (LeftTB1 Nothing)  )
-
-
 addDefault
   :: Functor g => Compose g (TB f) d a
-     -> Compose g (TB f) d Showable
+     -> Compose g (TB f) d b
 addDefault = mapComp def
   where
     def ((Attr k i)) = (Attr k (LeftTB1 Nothing))
@@ -600,8 +567,6 @@ kattri (IT _  i ) =  recTB i
 
 aattr = aattri . runIdentity . getCompose
 aattri (Attr k i ) = [(k,i)]
-
-
 aattri (FKT i  _ _ ) =  (L.concat $ aattr  <$> i)
 aattri (IT _  i ) =  recTB i
   where recTB (TB1 (_, i) ) =  concat $ fmap aattr (F.toList $ _kvvalues $ runIdentity $ getCompose i)
@@ -610,18 +575,10 @@ aattri (IT _  i ) =  recTB i
         recTB (DelayedTB1 i ) = concat $ F.toList $ fmap recTB i
 
 
-data Modifier a
-  = MCreate a
-  | MDelete a
-  | MEdit a a
-  | MKeep a
-  deriving (Eq,Show,Functor,Ord)
 
 addToList  (InsertTB m) =  (m:)
 addToList  (DeleteTB m ) =  L.delete m
 addToList  (EditTB m n ) = (map (\e-> if  (e ==  n) then  mapTB1 (\i -> maybe i snd $ getCompose $  runIdentity $ getCompose $ findTB1 (\k -> keyattr k == keyattr i  ) m ) e  else e ))
-
-
 
 
 mapComp :: (Functor t) => (f c a -> g d b) ->  Compose t f c a -> Compose t g d b
@@ -660,7 +617,6 @@ instance Ord k => Monoid (KV f k a) where
 unKV = _kvvalues . unTB
 
 makeLenses ''KV
-makeLenses ''PK
 makeLenses ''TB
 makeLenses ''Rel
 

@@ -53,10 +53,10 @@ import qualified Data.ByteString.Char8 as BSC
 import GHC.Stack
 
 
-modifyTB :: Modification Key Showable ->   Maybe (TB1  Showable)
-modifyTB  (InsertTB m) =  (Just m)
-modifyTB  (DeleteTB m ) =  Nothing
-modifyTB  (EditTB m n ) =  fmap ( mapTB1 (\i -> maybe i (snd) $ getCompose . runIdentity . getCompose $ findTB1  (\k -> keyattr k == keyattr i) m ) ) (Just n)
+modifyTB :: Modification Key Showable -> Maybe (TB1 Showable)
+modifyTB  (InsertTB m) = Just m
+modifyTB  (DeleteTB m ) = Nothing
+modifyTB  (EditTB m n ) = fmap ( mapTB1 (\i -> maybe i (snd) $ getCompose . runIdentity . getCompose $ findTB1  (\k -> keyattr k == keyattr i) m ) ) (Just n)
 
 generateFresh = do
   (e,h) <- liftIO $ newEvent
@@ -228,8 +228,9 @@ hasProd p i = False
 findProd p (Many i) = L.find p i
 findProd p i = Nothing
 
-isNested p (Nested pn i)  =  p == pn
-isNested p i   =  False -- p == pn
+isNested p (Nested pn i) =  p == pn
+isNested p i =  False
+
 uNest (Nested pn i) = i
 
 unTBMap = _kvvalues . unTB . _unTB1
@@ -248,10 +249,8 @@ eiTable
 eiTable inf pgs constr tname refs plmods ftb@(TB1 (m,k) ) oldItems = do
   let
       Just table = M.lookup tname  (tableMap inf)
-
   res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds ) pgs)
   let plugmods = (snd <$> res) <> plmods
-
   fks <- foldl (\jm (l,m)  -> do
             w <- jm
             wn <- (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) refs)
@@ -606,7 +605,7 @@ buildUI i  tdi = case i of
 
 buildPrim :: Tidings (Maybe Showable) -> KPrim -> UI (TrivialWidget (Maybe Showable))
 buildPrim tdi i = case i of
-         {-(Primitive Position) -> do
+         {-(Position) -> do
             let addrs = (\(SPosition (Position (lon,lat,_)))-> "http://maps.google.com/?output=embed&q=" <> (HTTP.urlEncode $ show lat  <> "," <>  show lon )) <$>  tdi
             mkElement "iframe" # sink UI.src (maybe "" id <$> facts addrs) # set style [("width","99%"),("height","300px")]-}
          (PTimestamp) -> do
@@ -630,7 +629,6 @@ buildPrim tdi i = case i of
             let  newEv = fmap (SDayTime. localTimeOfDay . utcToLocalTime utc) <$> evCurr
             tdi2 <- addEvent newEv  tdi
             oneInput tdi2 [timeButton]
-
          (PMime mime) -> do
            let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
            clearB <- UI.button # set UI.text "clear"
@@ -646,7 +644,6 @@ buildPrim tdi i = case i of
            res <- UI.div # set children [fd,f]
            paintBorder res (facts tdi2) (facts  tdi)
            return (TrivialWidget tdi2 res)
-
          z -> do
             oneInput tdi []
   where
@@ -734,17 +731,16 @@ offsetField  init eve  max = mdo
      offsetT = tidings offsetB cev
   return (TrivialWidget offsetT offparen)
 
+
 backFKRef relTable ifk box = fmap (\ibox -> (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . catMaybes . fmap lookFKsel $  ibox) ) .    fmap (concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1) $ box
   where
         reorderPK l = fmap (\i -> justError (show ("reorder wrong", ifk , l,i))  $ L.find ((== i).fst) l )  ( ifk)
         lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
           where knm =  M.lookup ko relTable
-        -- lookFKsel (ko,v)=  (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)
-         --  where kn = justError "relTable" $ M.lookup ko relTable
 nonRefAttr l = concat $  fmap (uncurry Attr) . aattr <$> ( l )
 
 tbrefM i@(FKT _  _ _)  =  _tbref i
-tbrefM j = [Compose $ Identity $ j ] -- errorWithStackTrace ("tbref" <> show j )
+tbrefM j = [Compose $ Identity $ j ]
 
 
 
@@ -774,7 +770,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           ftdi = oldItems
           oldASet :: Set Key
           oldASet = S.fromList (_relOrigin <$> filterNotReflexive rel )
-          replaceKey =  firstTB (\k -> traceShow k $ traceShowId  $ maybe k _relTarget $ L.find ((==k)._relOrigin) $ filter (\i -> keyType (_relOrigin i) == keyType (_relTarget i)) rel)
+          replaceKey =  firstTB (\k -> maybe k _relTarget $ L.find ((==k)._relOrigin) $ filter (\i -> keyType (_relOrigin i) == keyType (_relTarget i)) rel)
           nonInj =   S.difference (S.fromList $ fmap  _relOrigin   $ rel) (S.fromList $ getRelOrigin ifk)
           nonInjRefs = filter (flip S.isSubsetOf nonInj . S.fromList . fmap _relOrigin . keyattr .Compose . Identity .fst) wl
           staticold :: [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key (Showable))))]
@@ -872,8 +868,6 @@ sorting :: Bool -> [Key] -> [TB1 Showable]-> [TB1 Showable]
 sorting b ss  =  L.sortBy (ifApply b flip (comparing (filterTB1 (not . S.null . (`S.intersection` (S.fromList ss) ). S.fromList . fmap _relOrigin .keyattr ))  ))
   where ifApply True i =  i
         ifApply False _ = id
-
-
 
 deleteMod :: InformationSchema ->  TB1 Showable -> Table -> IO (Maybe (TableModification Showable))
 deleteMod inf kv table = do
