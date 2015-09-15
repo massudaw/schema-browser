@@ -330,10 +330,6 @@ insertAttr f conn krec  t = if not (L.null pkList)
 unSComposite (ArrayTB1 i) = i
 unSComposite i = errorWithStackTrace ("unSComposite " <> show i)
 
-isEmptyShowable (LeftTB1 Nothing ) = True
-isEmptyShowable (SerialTB1 Nothing ) = True
-isEmptyShowable i = False
-
 
 dropTable r= "DROP TABLE "<> rawFullName r
 

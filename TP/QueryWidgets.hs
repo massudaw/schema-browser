@@ -542,7 +542,7 @@ indexItens s tb@(Attr k v) offsetT atdcomp atdi =
 indexItens s tb@(FKT ifk rel _) offsetT fks oldItems  = bres
   where  bres2 = takeArray (fmap (fmap (\(FKT i  _ j ) -> (head $ fmap (unAttr.unTB) $ i,  j)) )  <$>  fks)
          emptyFKT = Just . maybe (FKT (mapComp (mapFAttr (const (ArrayTB1 [] ))) <$> ifk) rel (ArrayTB1 []) ) id
-         bres = (\o -> liftA2 (\l (FKT lc rel (ArrayTB1 m )) -> FKT ( maybe [] (\lc -> mapComp (mapFAttr (const (ArrayTB1 $ splitArray s o  (L.take o $ unSComposite $ (unAttr $ unTB lc))  (fmap fst l)))) <$> ifk) (listToMaybe lc) ) rel (ArrayTB1 $ splitArray s o m (snd <$> l)  ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
+         bres = (\o -> liftA2 (\l (FKT lc rel (ArrayTB1 m )) -> FKT ( maybe [] (\lc -> mapComp (mapFAttr (const (ArrayTB1 $ splitArray s o  (unSComposite (unAttr $ unTB lc))  (fst <$>  l)))) <$> ifk) (listToMaybe lc) ) rel (ArrayTB1 $ splitArray s o m (snd <$> l)  ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
 
 indexItens s tb@(IT na _) offsetT items oldItems  = bres
    where bres2 = fmap (fmap _fkttable) <$> takeArray items

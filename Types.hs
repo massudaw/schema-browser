@@ -569,16 +569,8 @@ tableNonRef (TB1 (m,n)  )  = TB1 (m, mapComp (\(KV n)-> KV  (mapFromTBList $ fma
     nonRef (FKT i _ _ ) = concat (overComp nonRef <$> i)
     nonRef it@(IT j k ) = [(IT  j (tableNonRef k )) ]
 
-
-tableNonRefK :: TB2 Key Showable -> TB3 Identity Key Showable
-tableNonRefK (ArrayTB1 i) = ArrayTB1 $ tableNonRefK <$> i
-tableNonRefK (LeftTB1 i ) = LeftTB1 $ tableNonRefK <$> i
-tableNonRefK (TB1 (m, n)   )  = TB1 (m ,mapComp (\(KV n)-> KV (mapFromTBList $ fmap (Compose . Identity ) $ concat $ F.toList $  overComp nonRef <$> n)) n)
-  where
-    nonRef :: TB Identity Key Showable -> [(TB Identity ) Key Showable]
-    nonRef (Attr k v ) = [ Attr k v ]
-    nonRef (FKT i _ _ ) = concat  (overComp nonRef <$> i)
-    nonRef (IT j k ) = [(IT  j (tableNonRefK k )) ]
+tableNonRefK :: Ord k => TB2 k Showable -> TB3 Identity k Showable
+tableNonRefK   = tableNonRef
 
 addDefaultK
   :: Functor g => Compose g (TB f) d a

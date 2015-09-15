@@ -102,8 +102,6 @@ queryAuthorization conn schema user = do
     return $ M.fromList $ convert <$> sq
   where aq = "select table_name,authorizations from metadata.authorization where table_schema = ? and grantee = ? "
 
-unTOptional (KOptional i ) = i
-unTOptional i = i
 
 fromShowable2 i@(Primitive "character varying") v = fromShowable i $  BS.drop 1 (BS.init v)
 fromShowable2 i@(Primitive "text") v = fromShowable i $  BS.drop 1 (BS.init v)
@@ -112,7 +110,7 @@ fromShowable2 i v = fromShowable i v
 keyTables :: Connection -> Connection -> (Text ,Text)-> IO InformationSchema
 keyTables conn userconn (schema ,user) = do
        uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from information_schema.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
-       res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ( unTOptional ty) . BS.pack . T.unpack <$>  (join $ listToMaybe. T.splitOn "::" <$> n) ) ty )  (createType  schema (t,c,j,k,l,m,n,d,z,b)) )) <$>  query conn "select ta.table_name,o.column_name,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name , st.table_name is not null from information_schema.tables ta natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name    left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column left join metadata.sum_table st on st.schema_name = udt_schema and ('_' || st.table_name = udt_name OR st.table_name = udt_name)   where table_schema = ?"  (Only schema)
+       res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty . BS.pack . T.unpack <$>  (join $ listToMaybe. T.splitOn "::" <$> n) ) ty )  (createType  schema (t,c,j,k,l,m,n,d,z,b)) )) <$>  query conn "select ta.table_name,o.column_name,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name , st.table_name is not null from information_schema.tables ta natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name    left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column left join metadata.sum_table st on st.schema_name = udt_schema and ('_' || st.table_name = udt_name OR st.table_name = udt_name)   where table_schema = ?"  (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
           keyMap = M.fromList keyList
