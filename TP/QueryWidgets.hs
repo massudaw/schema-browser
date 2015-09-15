@@ -351,8 +351,7 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
   (h2,e2) <- liftIO $ newEvent
   (ediff ,hdiff) <- liftIO $ newEvent
   let fun True = do
-          let
-            table = lookPK inf ( S.fromList $ fmap _relOrigin $ findPK $ ftb)
+          let table = lookPK inf (S.fromList $ fmap _relOrigin $ findPK $ ftb)
           preoldItens <- currentValue (facts preoldItems)
           loadedItens <- liftIO$ join <$> traverse (loadDelayed inf ftb) preoldItens
           maybe (return ()) (liftIO. hev. pure)  loadedItens

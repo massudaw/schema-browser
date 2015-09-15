@@ -64,15 +64,16 @@ import Data.Unique
 t1 =  [tblistPK (Set.singleton "id")  [Compose $ Identity $ Attr "id" (TB1 (SNumeric 2)),Compose $ Identity $ Attr "at1" (LeftTB1 $ Just (ArrayTB1 [TB1 $ SNumeric 1]))]]
 t1pk =  TB1 (SNumeric 2)
 p1,p2,p3 :: PathT String
-p1 = PIndex (Set.singleton t1pk) $ Just $ PKey (Set.fromList [Inline "at1"]) $ Just  (POpt Nothing)
-p2 = PIndex (Set.singleton t1pk) $ Just $ PKey (Set.fromList [Inline "at1"]) $ Just (POpt (Just (PIdx 0 (Just $ PAtom $ SNumeric 4))))
-p3 = PIndex (Set.singleton t1pk) $ Just $PKey (Set.fromList [Inline "at1"]) $ Just (POpt (Just (PIdx 1 (Just $ PAtom $ SNumeric 5))))
+p1 = PIndex (Set.singleton t1pk) $ Just $ PKey (Set.fromList [Inline "at1"]) $ (POpt Nothing)
+p2 = PIndex (Set.singleton t1pk) $ Just $ PKey (Set.fromList [Inline "at1"]) $ (POpt (Just (PIdx 0 (Just $ PAtom $ SNumeric 4))))
+p3 = PIndex (Set.singleton t1pk) $ Just $PKey (Set.fromList [Inline "at1"]) $ (POpt (Just (PIdx 1 (Just $ PAtom $ SNumeric 5))))
 
 data PathT k
-  = PKey (Set ( Rel k )) (Maybe (PathT k))
+  = PKey (Set ( Rel k )) (PathT k)
   | PIndex (Set (FTB Showable)) (Maybe (PathT k))
   | PatchSet [PathT k]
   | POpt (Maybe (PathT k))
+  | PInter  Bool (PathT k)
   | PIdx Int (Maybe (PathT k))
   | PAtom Showable
   deriving (Eq,Ord,Show)
@@ -82,6 +83,7 @@ data PathTID k
   | PIdIndex (Set (FTB Showable))
   | PIdIdx Int
   | PIdOpt
+  | PIdInter Bool
   | PIdAtom
   deriving (Eq,Ord)
 
@@ -96,18 +98,21 @@ compactPatches  = justError "cant be empty" . patchSet . fmap recover .  groupSp
     pathProj (PIndex _ i) = i
     pathProj (PIdx _ i) = i
     pathProj (POpt  i) = i
-    pathProj (PKey _ i  ) = i
+    pathProj (PInter _ i) = Just i
+    pathProj (PKey _ i  ) = Just i
     pathProj i@(PAtom _  ) = Just i
     projectors :: Ord k => PathT k -> PathTID k
     projectors (PKey i _ ) = PIdPK i
     projectors (PIndex i _ ) = PIdIndex i
     projectors (PIdx i _ ) = PIdIdx i
     projectors (POpt _  ) = PIdOpt
+    projectors (PInter b _  ) = PIdInter b
     projectors (PAtom _  ) =  PIdAtom
-    recover (PIdPK i, j ) = PKey i  (compact j)
+    recover (PIdPK i, j ) = PKey i  (justError "no patch key" $ compact j)
     recover (PIdIndex i, j ) = PIndex i  (compact j)
     recover (PIdIdx i, j ) = PIdx i  (compact j)
     recover (PIdOpt , j ) = POpt  (compact j)
+    recover (PIdInter i , j ) = PInter i (justError "no patch inter" $ compact j)
     recover (PIdAtom , j ) = justError "can't be empty " $ patchSet (catMaybes j)
     compact j = compactPatches <$> Just (catMaybes j)
 
@@ -139,14 +144,14 @@ createRecord
   :: (Show d, Ord d, Functor t) =>
      PathT d ->
      (m, Compose t (KV (Compose t (TB Identity))) d Showable)
-createRecord (PKey s (Just k)) = undefined
+createRecord (PKey s k) = undefined
 
 applyRecord
   :: (Show d, Ord d,  Functor t) =>
      (m, Compose t (KV (Compose t (TB Identity))) d Showable)
      -> PathT d
      -> (m, Compose t (KV (Compose t (TB Identity))) d Showable)
-applyRecord t@((m, v)) (PKey s (Just k)) = (m ,mapComp (KV . Map.mapWithKey (\key v -> if key == s then  mapComp (flip applyAttr (PKey s (Just k)) ) v else v ) . _kvvalues ) v)
+applyRecord t@((m, v)) (PKey s k) = (m ,mapComp (KV . Map.mapWithKey (\key v -> if key == s then  mapComp (flip applyAttr (PKey s k) ) v else v ) . _kvvalues ) v)
 
 patchTB1 (m, k)  = justError "can't be empty"$ patchSet $  F.toList $ patchAttr  . unTB <$> (unKV k)
 
@@ -172,23 +177,23 @@ patchSet i
             normalize i = [i]
 
 
-applyAttr (Attr k i) (PKey s (Just p))  = Attr k (applyShowable i p)
-applyAttr (IT k i) (PKey s (Just p))  = IT k (applyTB1 i p)
-applyAttr (FKT  k rel i) (PKey s (Just p@(PIndex ix _)))  = FKT k rel  (applyTB1 i p)
-applyAttr (FKT  k rel i) (PKey s (Just p))  = FKT (mapComp (\i -> if Set.fromList (keyattri i)  == s  then applyAttr i (PKey s (Just p )) else i ) <$>  k) rel  (applyTB1 i p)
+applyAttr (Attr k i) (PKey s (p))  = Attr k (applyShowable i p)
+applyAttr (IT k i) (PKey s (p))  = IT k (applyTB1 i p)
+applyAttr (FKT  k rel i) (PKey s (p@(PIndex ix _)))  = FKT k rel  (applyTB1 i p)
+applyAttr (FKT  k rel i) (PKey s (p))  = FKT (mapComp (\i -> if Set.fromList (keyattri i)  == s  then applyAttr i (PKey s (p )) else i ) <$>  k) rel  (applyTB1 i p)
 
 
 
 diffAttr :: (Show k ,Ord k) => TB Identity k Showable -> TB Identity k Showable -> Maybe (PathT k )
-diffAttr (Attr k i) (Attr l m ) = fmap (PKey (Set.singleton $ Inline k) . Just ) (diffPrimitive i m)
-diffAttr (IT k i) (IT _ l) = fmap (PKey (Set.fromList $ keyattr k ) . Just ) (diffTB1 i l)
+diffAttr (Attr k i) (Attr l m ) = fmap (PKey (Set.singleton $ Inline k) ) (diffPrimitive i m)
+diffAttr (IT k i) (IT _ l) = fmap (PKey (Set.fromList $ keyattr k ) ) (diffTB1 i l)
 diffAttr (FKT  k _ i) (FKT m _ l) = patchSet $ catMaybes $ zipWith (\i j -> diffAttr (unTB i) (unTB j)) k m  <> [diffTB1 i l]
 
-patchAttr a@(Attr k v) = PKey (Set.fromList (keyattri a)) (Just $ patchFTB patchPrim v)
+patchAttr a@(Attr k v) = PKey (Set.fromList (keyattri a)) (patchFTB patchPrim v)
 patchAttr a@(IT k v) = patchFTB patchTB1 v
 patchAttr a@(FKT k rel v) = patchFTB patchTB1 v
 
-createAttr (PKey s (Just k) ) = Attr (_relOrigin $ head $ Set.toList s) (createShowable k)
+createAttr (PKey s (k) ) = Attr (_relOrigin $ head $ Set.toList s) (createShowable k)
 
 applyPrim _ (PAtom i) = i
 
@@ -204,9 +209,15 @@ createShowable = createFTB createPrim
 patchPrim j = PAtom j
 
 diffPrim i j
+  | traceShow (i,j) False = errorWithStackTrace "22"
   | i == j = Nothing
   | otherwise = Just $ PAtom j
 
+
+data IntervalDiff  a
+  = IntervalScale Bool a
+  | IntervalMove a
+  | IntervalCreate a
 
 
 
@@ -217,7 +228,7 @@ patchFTB p (LeftTB1 j )  = POpt  (patchFTB p <$> j)
 patchFTB p (ArrayTB1 j )  = justError "can't be empty" $  patchSet   $ zipWith (\i m ->  PIdx i  (Just m) ) [0..]  (F.toList $ patchFTB p <$> j)
 patchFTB p (TB1 j) = p j
 
-diffFTB :: (Ord a,Show a,Show k) => (a -> PathT k ) -> (a -> a -> Maybe (PathT k)) ->  FTB a -> FTB a -> Maybe (PathT k)
+diffFTB :: (Ord a,Show a,Ord k ,Show k) => (a -> PathT k ) -> (a -> a -> Maybe (PathT k)) ->  FTB a -> FTB a -> Maybe (PathT k)
 diffFTB p d  (LeftTB1 i) (LeftTB1 j)
     | isJust i && isJust j = fmap POpt (sequenceA $ liftA2 (diffFTB  p d ) i j)
     | isJust i && isNothing j = Just $ POpt Nothing
@@ -228,10 +239,18 @@ diffFTB p d (ArrayTB1 i) (ArrayTB1 j) =
     patchSet $  catMaybes $ zipWith (\i -> fmap (PIdx  i . Just) ) ( [0..]) (F.toList $ (zipWith (diffFTB p d ) i j)  <> (Just . patchFTB p <$> drop (length j) i ) <> (Just . patchFTB p <$> drop (length i ) j ))
 diffFTB p d (SerialTB1 i) (SerialTB1 j) = diffFTB p d (LeftTB1 i) (LeftTB1 j)
 diffFTB p d (DelayedTB1 i) (DelayedTB1 j) = diffFTB p d (LeftTB1 i) (LeftTB1 j)
--- diffFTB (IntervalTB1 i) (IntervalTB1 j) = diffFTB i j
+diffFTB p d (IntervalTB1 i) (IntervalTB1 j)
+  | i == j = Nothing
+  | otherwise =  patchSet $  catMaybes   [fmap (PInter False) (diffFTB p d (unFinite $ Interval.lowerBound i) (unFinite $ Interval.lowerBound j) ),fmap (PInter True) (  diffFTB p d (unFinite $ Interval.upperBound i) (unFinite $ Interval.upperBound j) )]
+
 diffFTB p d (TB1 i) (TB1  j) = d i j
 diffFTB p d  i j = errorWithStackTrace (show (i,j))
 
+unFinite (Interval.Finite i ) =  i
+
+instance Applicative Interval.Extended where
+  pure i = Interval.Finite i
+  (Interval.Finite i) <*> (Interval.Finite j) =  Interval.Finite $ i j
 
 applyFTB pr a (LeftTB1 i ) op@(POpt o) = case i of
                       Nothing -> case o of
