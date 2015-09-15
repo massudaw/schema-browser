@@ -665,6 +665,7 @@ instance Ord k => Monoid (KV f k a) where
   mempty = KV Map.empty
   mappend (KV i ) (KV j)   =    KV (Map.union i  j)
 
+unKV = _kvvalues . unTB
 
 makeLenses ''KV
 makeLenses ''PK

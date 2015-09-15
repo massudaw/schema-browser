@@ -148,21 +148,20 @@ renderShowable (ArrayTB1 i)  = intercalate "," $ F.toList $ fmap renderShowable 
 renderShowable (IntervalTB1 i)  = showInterval renderShowable i
 renderShowable (TB1  i) = renderPrim i
 
-shw :: Showable -> String
-shw (SText a) = T.unpack a
-shw (SNumeric a) = show a
-shw (SBoolean a) = show a
-shw (SDouble a) = show a
-shw (STimestamp a) = show a
-shw (SLineString a ) = show a
-shw (SBounding a ) = show a
-shw (SDate a) = show a
-shw (SDayTime a) = show a
-shw (SBinary _) = show "<Binary>"
-shw (SPosition a) = show a
-shw (SPInterval a) = show a
+renderPrim :: Showable -> String
+renderPrim (SText a) = T.unpack a
+renderPrim (SNumeric a) = show a
+renderPrim (SBoolean a) = show a
+renderPrim (SDouble a) = show a
+renderPrim (STimestamp a) = show a
+renderPrim (SLineString a ) = show a
+renderPrim (SBounding a ) = show a
+renderPrim (SDate a) = show a
+renderPrim (SDayTime a) = show a
+renderPrim (SBinary _) = show "<Binary>"
+renderPrim (SPosition a) = show a
+renderPrim (SPInterval a) = show a
 
-renderPrim = shw
 
 showInterval f i | i == Interval.empty = show i
 showInterval f (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> f i <> "," <> f l <> ocr m
@@ -190,7 +189,6 @@ isKOptional (KArray i)  = isKOptional i
 isKOptional (KEither _ _) = False
 isKOptional i = errorWithStackTrace (show i)
 
-fullTableName = T.intercalate "_" . fmap (\k -> keyValue k <> (T.pack $ show $ hashUnique (keyFastUnique k))) . S.toList
 
 
 getPrim i@(Primitive _ ) = textToPrim <$> i

@@ -462,7 +462,7 @@ tablePKSet  tb1 = S.fromList $ concat $ fmap ( keyattr)  $ F.toList $ _kvvalues 
 
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 
-unIndexItens :: Int -> Int -> Maybe (TB Identity  Key Showable) -> Maybe (TB Identity  Key Showable)
+unIndexItens ::  Int -> Int -> Maybe (TB Identity  Key Showable) -> Maybe (TB Identity  Key Showable)
 unIndexItens ix o =  join . fmap (unIndex (ix+ o) )
 
 unIndex :: Int -> TB Identity Key Showable -> Maybe (TB Identity Key Showable)
@@ -520,29 +520,34 @@ attrArray back@(Attr  _ _) oldItems  = (\tb -> Attr (_tbattrkey back) (ArrayTB1 
 attrArray back@(FKT _ _ _) oldItems  = (\(lc,tb) ->  FKT [Compose $ Identity $ Attr (_relOrigin $  head $ keyattr (head lc )) (ArrayTB1 $ head . kattr  <$> lc)] (_fkrelation back) (ArrayTB1 tb  ) )  $ unzip $ (\(FKT [lc] rel tb ) -> (lc , tb)) <$> oldItems
 attrArray back@(IT _ _) oldItems  = (\tb ->  IT  (_ittableName back) (ArrayTB1 tb  ) )  $ (\(IT _ tb ) -> tb) <$> oldItems
 
+
+splitArray s o m l = take o m <> l <> drop  (o + s ) m
+
+takeArray a = allMaybes . L.takeWhile isJust <$> Tra.sequenceA a
+
 indexItens
   :: (Ord k ,Show k) =>
-     TB Identity k a
+     Int
+     -> TB Identity k a
      -> Tidings Int
      -> [Tidings (Maybe (TB Identity k Showable))]
      -> Tidings (Maybe (TB Identity k Showable))
      -> Tidings (Maybe (TB Identity k Showable))
-indexItens tb@(Attr k v) offsetT atdcomp atdi =
-            let tdcomp = fmap (fmap _tbattr) . allMaybes .  L.takeWhile isJust <$> Tra.sequenceA atdcomp
+indexItens s tb@(Attr k v) offsetT atdcomp atdi =
+            let tdcomp = fmap (fmap _tbattr) <$>  takeArray atdcomp
                 tdi = fmap  _tbattr <$> atdi
-                emptyAttr = Just . maybe (ArrayTB1 [] ) id
-                bres = (\o -> liftA2 (\l (ArrayTB1 m ) -> ArrayTB1 (take o m <> l <> drop  (o + 9 ) m ))) <$> offsetT <*> tdcomp <*> (emptyAttr <$> tdi)
+                emptyAttr = Just . maybe []  unSComposite
+                bres = (\o -> liftA2 (\l m  -> ArrayTB1 (splitArray s o m l  ))) <$> offsetT <*> tdcomp <*> (emptyAttr <$> tdi)
             in fmap (Attr k) <$> bres
-indexItens tb@(FKT ifk rel _) offsetT fks oldItems  = bres
-  where  bres2 =    allMaybes .  L.takeWhile isJust  <$> Tra.sequenceA (fmap (fmap (\(FKT i  _ j ) -> (head $ fmap (unAttr.unTB) $ i,  j)) )  <$>  fks)
-         -- emptyFKT :: Maybe (TB Identity k Showable) -> Maybe (TB Identity k Showable)
+indexItens s tb@(FKT ifk rel _) offsetT fks oldItems  = bres
+  where  bres2 = takeArray (fmap (fmap (\(FKT i  _ j ) -> (head $ fmap (unAttr.unTB) $ i,  j)) )  <$>  fks)
          emptyFKT = Just . maybe (FKT (mapComp (mapFAttr (const (ArrayTB1 [] ))) <$> ifk) rel (ArrayTB1 []) ) id
-         bres = (\o -> liftA2 (\l (FKT lc rel (ArrayTB1 m )) -> FKT ( maybe [] (\lc -> mapComp (mapFAttr  (const (ArrayTB1 $ ((L.take o $ unSComposite $ (unAttr $ unTB lc)  )<> fmap fst l <> (L.drop (o + 9 )  $  unSComposite $(unAttr $ unTB lc)  ))))) <$> ifk) (listToMaybe lc) ) rel (ArrayTB1 $ L.take o m <> fmap snd l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
+         bres = (\o -> liftA2 (\l (FKT lc rel (ArrayTB1 m )) -> FKT ( maybe [] (\lc -> mapComp (mapFAttr (const (ArrayTB1 $ splitArray s o  (L.take o $ unSComposite $ (unAttr $ unTB lc))  (fmap fst l)))) <$> ifk) (listToMaybe lc) ) rel (ArrayTB1 $ splitArray s o m (snd <$> l)  ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
 
-indexItens tb@(IT na _) offsetT items oldItems  = bres
-   where bres2 = fmap (fmap (\(IT na j ) -> j)) . allMaybes . L.takeWhile isJust <$> Tra.sequenceA (items)
-         emptyFKT = Just . maybe (IT  (na) (ArrayTB1 []) ) id
-         bres = (\o -> liftA2 (\l (IT ns (ArrayTB1 m )) -> IT   ns (ArrayTB1 $ L.take o m <> l <> L.drop  (o + 9 ) m ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
+indexItens s tb@(IT na _) offsetT items oldItems  = bres
+   where bres2 = fmap (fmap _fkttable) <$> takeArray items
+         emptyFKT = Just . maybe [] (unSComposite . _fkttable)
+         bres = (\o -> liftA2 (\l m -> IT   na (ArrayTB1 $ splitArray s o m l ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
 
 attrUITable
   :: Tidings (Maybe (TB Identity Key Showable))
@@ -557,11 +562,11 @@ attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ (KArray _) ) v) = mdo
             let wheel = fmap negate $ mousewheel offsetDiv
             TrivialWidget offsetT offset <- offsetField 0  wheel (maybe 0 (length . (\(ArrayTB1 l ) -> l) . _tbattr) <$> facts bres)
             let arraySize = 8
-            widgets <- mapM (\ix  -> attrUITable (unIndexItens ix  <$> offsetT <*> tAttr' ) ((unIndexItens ix  <$> facts offsetT <@> ) <$>  evs) (Attr (unKArray i) v  ) ) [0..arraySize]
+            widgets <- mapM (\ix  -> attrUITable (unIndexItens ix  <$> offsetT <*> tAttr' ) ((unIndexItens ix  <$> facts offsetT <@> ) <$>  evs) (Attr (unKArray i) v  ) ) [0..arraySize -1 ]
 
             sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (tail $ getElement <$> widgets) (triding <$> widgets)
             let
-              bres = indexItens attr offsetT (triding <$> widgets) tAttr'
+              bres = indexItens arraySize  attr offsetT (triding <$> widgets) tAttr'
             element offsetDiv # set children (fmap getElement widgets)
             paintBorder offsetDiv (facts bres ) (facts tAttr' )
             composed <- UI.span # set children [offset , offsetDiv]
@@ -690,15 +695,16 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
     = mdo
       dv <- UI.div
       let wheel = fmap negate $ mousewheel dv
+          arraySize = 8
       (TrivialWidget offsetT offset) <- offsetField 0 wheel (maybe 0 (length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
       items <- mapM (\ix -> iUITable inf pgs
                 (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods)
                 (unIndexItens ix <$> offsetT <*>   oldItems)
-                (IT  na tb1)) [0..8]
+                (IT  na tb1)) [0..arraySize -1 ]
       let tds = triding <$> items
           es = getElement <$> items
       sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow <$> facts t)) es  (pure True : (fmap isJust <$>  tds ))
-      let bres = indexItens tb offsetT (triding <$>  items ) oldItems
+      let bres = indexItens arraySize tb offsetT (triding <$>  items ) oldItems
       element dv  # set children (offset : (getElement <$> items))
       return $ TrivialWidget bres dv
 
@@ -829,16 +835,17 @@ fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) ) = mdo
      dv <- UI.div
      let wheel = fmap negate $ mousewheel dv
+         arraySize = 8
      (TrivialWidget offsetT offset) <- offsetField 0 (wheel) (maybe 0 (length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      let
          fkst = FKT (mapComp (firstTB unKArray)<$> ifk ) (fmap (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
      fks <- traverse (\ix-> do
          lb <- UI.div # sink UI.text (show . (+ix) <$> facts offsetT ) # set UI.style [("margin-right","5px")]
          TrivialWidget tr el<- fkUITable inf pgs constr (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods) wl (unIndexItens ix <$> offsetT  <*>  oldItems) fkst
-         TrivialWidget tr <$> UI.div # set UI.children [lb,el] ) [0..8]
+         TrivialWidget tr <$> UI.div # set UI.children [lb,el] ) [0..arraySize -1 ]
      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShowFlex <$> facts t)) (getElement <$> fks) (pure True : (fmap isJust . triding <$> fks))
      element dv # set children (getElement <$> fks)
-     let bres = indexItens tb offsetT (triding <$> fks) oldItems
+     let bres = indexItens arraySize  tb offsetT (triding <$> fks) oldItems
      res <- UI.div # set children [offset ,dv]
      return $  TrivialWidget bres  res
 
