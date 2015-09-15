@@ -344,19 +344,20 @@ crudUITable
      -> [(Access Text,Event (Maybe (TB1 Showable)))]
      -> TB1 ()
      -> Tidings (Maybe (TB1 Showable))
-     -> UI ([Element],Event [Modification Key Showable],Tidings (Maybe (TB1 Showable)))
+     -> UI ([Element],Event [Modification Key Showable],Event (PathT Key) ,Tidings (Maybe (TB1 Showable)))
 crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
   chw <- checkedWidget open
-  (h,e) <- liftIO $ newEvent
+  (eev,hev) <- liftIO $ newEvent
   (h2,e2) <- liftIO $ newEvent
+  (ediff ,hdiff) <- liftIO $ newEvent
   let fun True = do
           let
             table = lookPK inf ( S.fromList $ fmap _relOrigin $ findPK $ ftb)
           preoldItens <- currentValue (facts preoldItems)
-          loadedItens <- liftIO$ join <$> traverse (loadDelayed inf ftb)   preoldItens
-          maybe (return ()) (liftIO. e. pure)  loadedItens
+          loadedItens <- liftIO$ join <$> traverse (loadDelayed inf ftb) preoldItens
+          maybe (return ()) (liftIO. hev. pure)  loadedItens
           loadedItensEv <- mapEvent (fmap join <$> traverse (loadDelayed inf ftb )) (rumors preoldItems)
-          let oldItemsE = (\i -> maybe i modifyTB ) <$> facts preoldItems <@> loadedItensEv
+          let oldItemsE = unionWith const (rumors preoldItems)  (modifyTB <$> (head <$> eev) )
           oldItemsB <- stepper (maybe preoldItens modifyTB loadedItens) oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
               deleteCurrent e l =  maybe l (flip (L.deleteBy (onBin pkOpSet (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ))) l) e
@@ -365,16 +366,17 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
               unConstraints :: [([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)]
               unConstraints = (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  (tableNonRef ftb) , flip (unConstraint un) <$> (deleteCurrent <$> oldItems <*>bres))) <$> _kvuniques m
           (listBody,tableb) <- uiTable inf pgs (traceShow (fmap ( fst) unConstraints) (tpkConstraint: unConstraints)) (_kvname m) refs pmods ftb oldItems
-          (panelItems,evsa)<- processPanelTable inf  (facts tableb) (facts bres) table oldItems
+          (panelItems,evsa,diff)<- processPanelTable inf  (facts tableb) (facts bres) table oldItems
           let evs =  unions (filterJust loadedItensEv : evsa)
-          onEvent evs (\i ->  liftIO $ e i )
+          onEvent evs (\i ->liftIO $ hev  i )
+          onEvent diff (\i ->liftIO $ hdiff i )
           onEvent (rumors tableb) (liftIO . e2  )
           UI.div # set children [listBody,panelItems]
       fun False  = UI.div
   sub <- UI.div # sink items  (pure .fun <$> facts (triding chw))
   cv <- currentValue (facts preoldItems)
   bh2 <- stepper  cv (unionWith const h2  (rumors preoldItems))
-  return ([getElement chw ,  sub],h ,tidings bh2 (unionWith const h2  (rumors preoldItems)))
+  return ([getElement chw ,  sub],eev , ediff ,tidings bh2 (unionWith const h2  (rumors preoldItems)))
 
 
 tb1Diff f (TB1 (_,k1) ) (TB1 (_,k2)) =  liftF2 f k1 k2
@@ -397,7 +399,7 @@ processPanelTable
    -> Behavior [TB1 Showable]
    -> Table
    -> Tidings (Maybe (TB1 Showable))
-   -> UI (Element,[Event (Modification Key Showable)])
+   -> UI (Element,[Event (Modification Key Showable)], Event (PathT Key) )
 processPanelTable inf attrsB res table oldItemsi = do
   let
       contains v  = maybe False (const True) . L.find (onBin (pkOpSet) (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ) v )
@@ -442,7 +444,7 @@ processPanelTable inf attrsB res table oldItemsi = do
   errorOut <- UI.span # sink UI.text (L.intercalate "," <$> bd)
   transaction <- UI.span# set children [insertB,editB,deleteB,errorOut,diffOut]
   onEvent (fmap head $ unions [evir,evdr]) ( liftIO . logTableModification inf . TableModification Nothing table )
-  return (transaction ,[evir,ever,evdr])
+  return (transaction ,[evir,ever,evdr], filterJust $ fmap join $ diff <@ unions (UI.click <$> [insertB,deleteB,editB]) )
 
 
 -- lookup pk from attribute list
@@ -805,7 +807,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
       prop <- stepper cv evsel
       let ptds = tidings prop evsel
       tds <- foldr (\i j ->updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap _fkttable.filterJust . snd <$>  plmods)
-      (celem,evs,pretdi) <-crudUITable inf pgs  (pure False) res3 staticold (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
+      (celem,evs,ediff,pretdi) <-crudUITable inf pgs  (pure False) res3 staticold (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
       let
           bselection = fmap Just <$> st
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> userSelection itemList), rumors tdi]),(fmap modifyTB <$> evs)]

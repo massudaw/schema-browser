@@ -29,6 +29,7 @@ import Control.Exception
 import Data.Time.Parse
 import Utils
 import Schema
+import Patch
 import Data.Char (toLower)
 import Postgresql
 import Data.Maybe
@@ -349,11 +350,13 @@ viewerKey inf key = mdo
   let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
   prop <- stepper cv evsel
   let tds = tidings prop evsel
-  (cru ,evs,pretdi) <- crudUITable inf plugList  (pure True)  res3 [] [] (allRec' (tableMap inf) table) tds
+  (cru ,evs,ediff,pretdi) <- crudUITable inf plugList  (pure True)  res3 [] [] (allRec' (tableMap inf) table) tds
   let
      bselection = st
-     sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [(rumors  $userSelection itemList ) ,rumors tdi]),(fmap modifyTB <$> evs)]
+     sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $userSelection itemList  ,rumors tdi]),(fmap modifyTB <$> evs)]
   st <- stepper cv sel
+  diffB <- stepper Nothing ((\i j -> flip applyTB1 j <$> i) <$> facts tds  <@> ediff)
+  diffE <- UI.div # sink UI.text (show <$> diffB)
   inisort <- currentValue (facts tsort)
   res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (rumors vpt) ,rumors tsort ])
   onEvent (foldr addToList <$> res2 <@> evs)  (liftIO .  putMVar tmvar)
@@ -362,7 +365,7 @@ viewerKey inf key = mdo
   insertDiv <- UI.div # set children cru # set UI.class_ "row"
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset , filterInp,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row" # set UI.style [("display","inline-flex")]
-  UI.div # set children ([itemSelec,insertDiv ] )
+  UI.div # set children ([itemSelec,insertDiv ,diffE] )
 
 
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
