@@ -35,6 +35,7 @@ import qualified Data.ExtendedReal as ER
 
 import GHC.Int
 import Utils
+import Patch
 
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Internal
@@ -294,6 +295,40 @@ attrValueName i = errorWithStackTrace $ " no attr value instance " <> show i
 
 type TBValue = TB1 (Key,Showable)
 type TBType = TB1 Key
+
+insertPatch
+  :: (MonadIO m
+     ,Functor m
+     ,ToField (TB Identity Key Showable))
+     => (TB2 Key () -> RowParser (TB2 Key Showable) )
+     -> Connection
+     -> PathT Key
+     -> Table
+     -> m (PathT Key)
+insertPatch f conn path@(PIndex m s (Just i) ) t =  if not $ L.null serialAttr
+      then do
+        let
+          iquery :: String
+          iquery = T.unpack $ prequery <> " RETURNING ROW(" <>  T.intercalate "," (projKey serialAttr) <> ")"
+        liftIO $ print iquery
+        out ::   TB1 Showable <-  fmap head $ liftIO $ queryWith (f (mapValue (const ()) serialTB )) conn (fromString  iquery ) directAttr
+        let Just gen = diffTB1 serialTB out
+        return (PIndex m s (compactPatches [i,gen]))
+      else do
+        let
+          iquery = T.unpack prequery
+        liftIO $ print iquery
+        liftIO $ execute  conn (fromString  iquery ) directAttr
+        return path
+    where
+      prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
+      attrs =  createAttr i
+      serial f =  filter (all (isSerial .keyType) .f)
+      direct f = filter (not.all (isSerial.keyType) .f)
+      serialAttr = serial (fmap _relOrigin .keyattri) attrs
+      directAttr = direct (fmap _relOrigin . keyattri) attrs
+      projKey = fmap (keyValue ._relOrigin) . concat . fmap keyattri
+      serialTB = tblist (fmap _tb  serialAttr)
 
 
 insertAttr

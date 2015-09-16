@@ -355,11 +355,11 @@ viewerKey inf key = mdo
      bselection = st
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $userSelection itemList  ,rumors tdi]),(fmap modifyTB <$> evs)]
   st <- stepper cv sel
-  diffB <- stepper Nothing ((\i j -> flip applyTB1 j <$> i) <$> facts tds  <@> ediff)
+  diffB <- stepper [] ((\i j -> applyTable i j ) <$> res2 <@> ediff)
   diffE <- UI.div # sink UI.text (show <$> diffB)
   inisort <- currentValue (facts tsort)
   res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (rumors vpt) ,rumors tsort ])
-  onEvent (foldr addToList <$> res2 <@> evs)  (liftIO .  putMVar tmvar)
+  onEvent (unionWith const (foldr addToList <$> res2 <@> evs) (applyTable <$> res2 <@> ediff)) (liftIO .  putMVar tmvar)
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   insertDiv <- UI.div # set children cru # set UI.class_ "row"

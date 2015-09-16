@@ -260,11 +260,10 @@ eiTable inf pgs constr tname refs plmods ftb@(TB1 (m,k) ) oldItems = do
       tableb :: Tidings (Maybe (TB1 Showable))
       tableb  = fmap (TB1 . (tableMeta table,) . Compose . Identity . KV . mapFromTBList . fmap _tb) . Tra.sequenceA <$> Tra.sequenceA (triding .snd <$> fks)
       initialSum = (join . fmap (\(TB1 (n,  j) ) ->    safeHead $ catMaybes  (fmap (Compose . Identity. fmap (const ()) ) . unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)) ))<$>   oldItems)
-  chk  <- buttonDivSet (F.toList (_kvvalues $ unTB k))  initialSum (show . fmap _relOrigin.keyattr ) (\i -> UI.button # set text (show $ keyattr $ i) )
+  chk  <- buttonDivSet (F.toList (_kvvalues $ unTB k))  initialSum (show . fmap _relOrigin.keyattr ) (\i -> UI.button # set text (L.intercalate "," $ fmap (show._relOrigin) $ keyattr $ i) )
   sequence $ (\(ix,el) -> element  el # sink0 UI.style (noneShow <$> ((==keyattri ix) .keyattr <$> facts (triding chk) ))) <$> fks
   let
       resei = liftA2 (\c -> fmap (\t@(TB1 (m, k)) -> TB1 . (m,) . Compose $ Identity $ KV (M.mapWithKey  (\k v -> if k == S.fromList (keyattr c) then maybe (addDefault (fmap (const ()) v)) (const v) (unOptionalAttr $ unTB  v) else addDefault (fmap (const ()) v)) (_kvvalues $ unTB k)))) (triding chk) tableb
-  -- lid <- UI.div #  set UI.class_ ("col-xs-" <> show ( fst $ attrSize a ) )# set children (l:getElement chk : (getElement <$> ws))
 
   listBody <- UI.div # set UI.class_ "row"
     # set children (getElement chk : F.toList (getElement .snd <$> fks))
@@ -434,16 +433,23 @@ processPanelTable inf attrsB res table oldItemsi = do
           res <- catch (Right <$> insertAttr (fromAttr )  (conn inf) ip table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
           return $ InsertTB  <$> res
   let    spMap = fmap split . mapEvent id
-         diff = liftA2 diffTB1 <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB)
-  (evid,evir) <- spMap $ filterJust $ (fmap insertAction  <$> attrsB ) <@ (UI.click insertB)
-  (evdd,evdr) <- spMap $ filterJust $ (fmap deleteAction <$> facts oldItemsi) <@ UI.click deleteB
-  (eved,ever) <- spMap $ (editAction  <$> attrsB <*> (facts oldItemsi) ) <@ UI.click editB
-  bd <- stepper [] (unions [evid,evdd,eved])
-  diffOut <- UI.span # sink UI.text (show <$> diff)
+         diffEdi = crudEdi <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click editB
+         diffDel = crudDel <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click deleteB
+         crudEdi (Just i) (Just j ) =  Just $ PIndex (tableMeta table) (getPK i) (diffTB1 i j)
+         crudIns _ (Just j)   =  traverse (\p -> insertPatch fromAttr (conn inf) p table)  $ Just $ PIndex (tableMeta table) (getPK j) (Just $ patchFTB patchTB1 j)
+         crudDel (Just j) _ = Just $ PIndex (tableMeta table) (getPK j) Nothing
+
+  diffIns <- mapEvent id $ crudIns <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click insertB
+  -- (evid,evir) <- spMap $ filterJust $ fmap insertAction  <$> attrsB  <@ UI.click insertB
+  (evdd,evdr) <- spMap $ filterJust $ fmap deleteAction <$> facts oldItemsi <@ UI.click deleteB
+  (eved,ever) <- spMap $ editAction  <$> attrsB <*> facts oldItemsi  <@ UI.click editB
+  bd <- stepper [] (unions [evdd,eved])
+  diffs <- stepper [] (unions [diffEdi,diffIns,diffDel])
+  diffOut <- UI.span # sink UI.text (show <$> diffs)
   errorOut <- UI.span # sink UI.text (L.intercalate "," <$> bd)
   transaction <- UI.span# set children [insertB,editB,deleteB,errorOut,diffOut]
-  onEvent (fmap head $ unions [evir,evdr]) ( liftIO . logTableModification inf . TableModification Nothing table )
-  return (transaction ,[evir,ever,evdr], filterJust $ fmap join $ diff <@ unions (UI.click <$> [insertB,deleteB,editB]) )
+  onEvent (fmap head $ unions [ever,evdr]) ( liftIO . logTableModification inf . TableModification Nothing table )
+  return (transaction ,[ever,evdr], fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffDel] )
 
 
 -- lookup pk from attribute list
@@ -609,28 +615,31 @@ buildPrim tdi i = case i of
          {-(Position) -> do
             let addrs = (\(SPosition (Position (lon,lat,_)))-> "http://maps.google.com/?output=embed&q=" <> (HTTP.urlEncode $ show lat  <> "," <>  show lon )) <$>  tdi
             mkElement "iframe" # sink UI.src (maybe "" id <$> facts addrs) # set style [("width","99%"),("height","300px")]-}
-         (PTimestamp) -> do
+         PBoolean -> do
+           res <- checkedWidgetM (fmap (\(SBoolean i) -> i) <$> tdi )
+           return (fmap SBoolean <$> res)
+         PTimestamp -> do
             itime <- liftIO $  getCurrentTime
             timeButton <- UI.button # set UI.text "now"
             evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
             let  newEv = fmap (STimestamp . utcToLocalTime utc) <$> evCurr
             tdi2 <- addEvent newEv  tdi
             oneInput tdi2 [timeButton]
-         (PDate) -> do
+         PDate -> do
             itime <- liftIO $  getCurrentTime
             timeButton <- UI.button # set UI.text "now"
             evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
             let  newEv =  fmap (SDate . localDay . utcToLocalTime utc) <$> evCurr
             tdi2 <- addEvent newEv  tdi
             oneInput tdi2 [timeButton]
-         (PDayTime) -> do
+         PDayTime -> do
             itime <- liftIO $  getCurrentTime
             timeButton <- UI.button # set UI.text "now"
             evCurr <-  mapEvent (fmap Just) (pure getCurrentTime <@ UI.click timeButton)
             let  newEv = fmap (SDayTime. localTimeOfDay . utcToLocalTime utc) <$> evCurr
             tdi2 <- addEvent newEv  tdi
             oneInput tdi2 [timeButton]
-         (PMime mime) -> do
+         PMime mime -> do
            let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
            clearB <- UI.button # set UI.text "clear"
            file <- UI.input # set UI.class_ "file_client" # set UI.type_ "file" # set UI.multiple True

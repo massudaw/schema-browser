@@ -606,6 +606,7 @@ tblistPK s = tbmapPK s . mapFromTBList
 tblist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TB3 Identity Key a
 tblist' t  = TB1 . (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 
+kvempty  = KVMetadata "" ""  Set.empty [] [] Set.empty Set.empty
 
 instance Ord a => Ord (Interval.Interval a ) where
   compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)

@@ -354,6 +354,15 @@ checkedWidget init = do
   dv <- UI.span # set children [i] # set UI.style [("margin","2px")]
   return $ TrivialWidget  (tidings b e) dv
 
+checkedWidgetM :: Tidings (Maybe Bool) -> UI (TrivialWidget (Maybe Bool))
+checkedWidgetM init = do
+  i <- UI.input # set UI.type_ "checkbox" # sink UI.checked (maybe False id <$> facts init)
+  let e = unionWith const (rumors init) (Just <$>  UI.checkedChange i)
+  v <- currentValue (facts init)
+  b <- stepper v e
+  dv <- UI.span # set children [i] # set UI.style [("margin","2px")]
+  return $ TrivialWidget  (tidings b e) dv
+
 
 wrapListBox l p f q = do
   o <- listBox l p f q
