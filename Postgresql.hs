@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+{-# LANGUAGE ConstraintKinds,TypeFamilies ,DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 module Postgresql where
 import Types
 import Data.Ord
@@ -603,12 +603,12 @@ fromAttr foldable = do
   -- where item = fmap (\n@(Raw _ _ _ _ t _ k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
 
 insertPatch
-  :: (MonadIO m ,Functor m ,TF.ToField (TB Identity Key Showable))
-     => (TBData Key () -> FR.RowParser (TBData Key Showable))
+  :: (PatchConstr Key a ,MonadIO m ,Functor m ,TF.ToField (TB Identity Key a ))
+     => (TBData Key () -> FR.RowParser (TBData Key a ))
      -> Connection
-     -> TBIdx Key Showable
+     -> TBIdx Key a
      -> Table
-     -> m (TBIdx Key Showable)
+     -> m (TBIdx Key a )
 insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
       then do
         let
@@ -637,38 +637,42 @@ insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
 
 
 deletePatch
-  :: TF.ToField (TB Identity Key  Showable)  =>
-     Connection ->  TBIdx Key Showable-> Table -> IO (TBIdx Key Showable)
+  :: (PatchConstr Key a ,TF.ToField (TB Identity Key  a ) ) =>
+     Connection ->  TBIdx Key a -> Table -> IO (TBIdx Key a)
 deletePatch conn patch@(m ,kold ,_) t = do
     execute conn (fromString $ traceShowId $ T.unpack del) koldPk
     return patch
   where
     equality k = attrValueName k <> "="  <> "?"
-    koldPk :: [TB Identity Key Showable]
-    koldPk = uncurry Attr <$> F.toList (traceShowId kold)
+    koldPk = uncurry Attr <$> F.toList kold
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     del = "DELETE FROM " <> rawFullName t <>   pred
 
 
 updatePatch
   :: TF.ToField (TB Identity Key Showable) =>
-     Connection -> TBIdx Key Showable -> Table -> IO (TBIdx Key Showable)
-updatePatch conn patch@(m ,kold  ,p) t =
-    execute conn (fromString $ traceShowId $ T.unpack up)  (fmap fst []  <> koldPk ) >> return patch
+     Connection -> TBData Key Showable -> TBIdx Key Showable -> Table -> IO (TBIdx Key Showable)
+updatePatch conn old@(mo,_ ) patch@(m ,kold  ,p) t =
+    execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk ) >> return patch
   where
+    kv = applyRecord old patch
     equality k = k <> "="  <> "?"
-    koldPk = snd <$> F.toList kold
+    koldPk = uncurry Attr <$> F.toList kold
     pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> F.toList kold)
-    setter = " SET " <> T.intercalate "," (equality . T.drop 1 .  snd <$> []  )
+    setter = " SET " <> T.intercalate "," (equality .   attrValueName <$> skv   )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
-    -- expand (PKey _ k v) =   fmap (\i -> "." <> (keyValue $ _relOrigin $ head $ S.toList k) <>i  ) <$> expand v
     expand (POpt  o) = maybe [(LeftTB1 Nothing,"")] expand o
     expand (PIdx i o) = fmap (("[" <> T.pack (show (i + 1 )) <> "]") <> ) <$>  (maybe [(LeftTB1 Nothing,"")] expand o)
     -- expand  (PIndex _ _ l) = concat $ maybeToList (fmap expand l)
     expand (PatchSet l) = concat $ fmap expand l
-    --expand (PInter  b i) = [( createShowable i,"")]
-    --expand i@(PAtom _)   = [(TB1 $ createPrim i,"")]
+    expand (PInter  b i) = [( createShowable i,"")]
+    -- expand i@(PAtom _)   = [(TB1 $ createPrim i,"")]
     expand i = errorWithStackTrace (show i)
+    skv = runIdentity .getCompose <$> F.toList  (_kvvalues $ unTB tbskv)
+    (TB1 (_,tbskv)) = isM
+    isM :: TB3 Identity Key  Showable
+    isM =  justError ("cant diff befor update" <> show (kv,kold)) $ diffUpdateAttr (TB1 kv) (TB1 old)
+
 
 
 

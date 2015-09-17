@@ -241,13 +241,13 @@ diffAttr (Attr k i) (Attr l m ) = fmap (PAttr k) (diffShowable i m)
 diffAttr (IT k i) (IT _ l) = fmap (PInline (_relOrigin $ head $ keyattr k ) ) (diffTB1 i l)
 -- diffAttr (FKT  k _ i) (FKT m _ l) = patchSet $ catMaybes $ zipWith (\i j -> diffAttr (unTB i) (unTB j)) k m  <> [diffTB1 i l]
 
-patchAttr :: (Show a , Ord a ,Ord k ,Show k ,a ~ Index a) => TB Identity k a -> PathAttr k (Index a)
+patchAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a)
 patchAttr a@(Attr k v) = PAttr k  (patchFTB id v)
 patchAttr a@(IT k v) = PInline (_relOrigin $ head $ (keyattr k)) (patchFTB patchTB1 v)
 --patchAttr a@(FKT k rel v) = PKey False (Set.fromList (keyattri  a)) ( patchFTB patchTB1 v)
 
 -- createAttr (PatchSet l) = concat $ fmap createAttr l
-createAttr :: (Index a~ a ,Show a , Ord a ,Ord k ,Show k ) => PathAttr k a -> TB Identity k a
+createAttr :: PatchConstr k a  => PathAttr k a -> TB Identity k a
 createAttr (PAttr  k s  ) = Attr k  (createShowable s)
 createAttr (PInline k s ) = IT (_tb $ Attr k (TB1 ())) (createFTB createTB1 s)
 
@@ -267,13 +267,6 @@ diffPrim :: (Eq a ,a ~ Index a) => a -> a -> Maybe (Index a)
 diffPrim i j
   | i == j = Nothing
   | otherwise = Just  j
-
-
-data IntervalDiff  a
-  = IntervalScale Bool a
-  | IntervalMove a
-  | IntervalCreate a
-
 
 
 -- FTB
@@ -335,13 +328,20 @@ applyFTB pr a (IntervalTB1 i) (PInter b p)
 applyFTB pr a (TB1 i) (PAtom p)  =  TB1 $ a i p
 applyFTB pr a  b (PatchSet l ) = foldl (applyFTB pr a ) b l
 
+-- createFTB :: (Index a  ->  a) -> PathFTB (Index a) -> a
 createFTB p (POpt i ) = LeftTB1 (createFTB p <$> i)
 createFTB p (PSerial i ) = SerialTB1 (createFTB p <$> i)
 createFTB p (PDelayed i ) = DelayedTB1 (createFTB p <$> i)
 createFTB p (PIdx ix o ) = ArrayTB1 (fromJust  $  pure . createFTB p <$> o)
 createFTB p (PInter b o ) = errorWithStackTrace "interval"
 createFTB p (PAtom i )  = TB1 $ p i
+createFTB p (PatchSet l) = foldl1 mappend (createFTB p <$> traceShow "createFTB PatchSet" l)
 
+
+instance Monoid (FTB a) where
+ mappend (LeftTB1 i) (LeftTB1 j) = LeftTB1 (i <> j)
+ mappend (ArrayTB1 i) (ArrayTB1 j) = ArrayTB1 (i <> j)
+ -- mappend (PatchSet i) (PatchSet j) = PatchSet (i <> j)
 
 imap f = map (uncurry f) . zip [0..]
 
