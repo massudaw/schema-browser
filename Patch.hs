@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -87,8 +88,9 @@ type family Index k
 type instance Index Showable = Showable
 type instance Index (TBData k a ) =  TBIdx k a
 
+type PatchConstr k a = (a ~ Index a, Ord a , Show a,Show k , Ord k)
+
 type TBIdx  k a = (KVMetadata k, Set (k ,FTB a ),[PathAttr k a])
-type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Identity))) k a )
 
 data PathAttr k a
   = PAttr k (PathFTB a)
@@ -160,7 +162,7 @@ groupSplit2 f g = fmap (\i-> (f $ head i , g <$> i)) . groupWith f
 
 
 applyTable
-  ::  (Ord k ,Show k) => [FTB1 Identity k Showable] -> PathFTB  (TBIdx k Showable )-> [FTB1 Identity k Showable]
+  ::  PatchConstr k a  => [FTB1 Identity k a ] -> PathFTB  (TBIdx k a )-> [FTB1 Identity k a ]
 applyTable l pidx@(PAtom (m,i, p) ) =  case L.find (\tb -> getPK tb == i ) l  of
                   Just _ ->  catMaybes $ L.map (\tb@(TB1 (m, k)) -> if  getPK tb ==  i  then (case p of
                                                 [] ->  Nothing
@@ -176,50 +178,43 @@ getPKM (m, k) = Set.fromList (concat (fmap aattr $ F.toList $ (Map.filterWithKey
 travPath f p (PatchSet i) = foldl f p i
 travPath f p i = f p i
 
-{-diffTable l l2 =  patchSet $ fmap (\(k,v) -> PIndex undefined  k  (Just v)) $  mapMaybe (\(k,v) -> (k,) <$> v ) $ Map.toList $ Map.intersectionWith (\i j -> diffTB1 i j) (mkMap l) (mkMap l2)
+diffTable l l2 =   catMaybes $ F.toList $ Map.intersectionWith (\i j -> diffTB1 i j) (mkMap l) (mkMap l2)
   where mkMap = Map.fromList . fmap (\i -> (getPK i,i))
--}
+
 
 applyTB1
-  :: (Show k , Ord k) =>
-       FTB1 Identity k Showable -> PathFTB   (TBIdx k Showable ) -> FTB1 Identity k Showable
+  :: (Index a~ a ,Show a , Ord a ,Show k , Ord k) =>
+       FTB1 Identity k a -> PathFTB   (TBIdx k a ) -> FTB1 Identity k a
 applyTB1 = applyFTB createTB1 applyRecord
 
 createTB1
-  :: (Show d, Ord d ) =>
-     (Index (TBData d Showable)) ->
-     (KVMetadata d , Compose Identity  (KV (Compose Identity  (TB Identity))) d Showable)
+  :: (Index a~ a ,Show a , Ord a ,Show d, Ord d ) =>
+     (Index (TBData d a )) ->
+     (KVMetadata d , Compose Identity  (KV (Compose Identity  (TB Identity))) d a)
 createTB1 (m ,s ,k)  = (m , _tb .KV . mapFromTBList . fmap (_tb . createAttr) $  k)
 createTB1  i = errorWithStackTrace (show i)
 
 
 
 applyRecord
-  :: (Show d, Ord d  ) =>
-    TBData d Showable
-     -> TBIdx d Showable
-     -> TBData d Showable
+  :: (Index a~ a ,Show a , Ord a ,Show d, Ord d  ) =>
+    TBData d a
+     -> TBIdx d a
+     -> TBData d a
 applyRecord t@((m, v)) (_ ,_  , k)  = (m ,mapComp (KV . Map.mapWithKey (\key vi -> foldl  (edit key) vi k  ) . _kvvalues ) v)
   where edit  key v k@(PAttr  s _)  = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
         -- key = (x,y)
         -- edit  key v i = errorWithStackTrace (show (v,i))
 
-patchTB1 :: (Show k,Ord k) => (KVMetadata k,
-      Compose
-        Identity (KV (Compose Identity (TB Identity))) k Showable) -> Index (TBData k Showable)
+patchTB1 :: (Show a , Ord a ,a ~ Index a ,Show k,Ord k) => TBData k  a -> Index (TBData k  a)
 patchTB1 (m, k)  = (m  ,(getPKM (m,k)) ,  F.toList $ patchAttr  . unTB <$> (unKV k))
 
 difftable
-  ::  (Show k , Ord k) => (KVMetadata k,
-      Compose
-        Identity (KV (Compose Identity (TB Identity))) k Showable)
-     -> (KVMetadata k ,
-         Compose
-           Identity (KV (Compose Identity (TB Identity))) k Showable)
-     -> Maybe (Index (TBData k Showable))
+  ::  (a ~ Index a, Ord a , Show a,Show k , Ord k) => TBData k a -> TBData k a
+     -> Maybe (Index (TBData k a ))
 difftable (m, v) (n, o) = Just  (m, (getPKM (m,v)),    catMaybes $ F.toList  $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j)) (unKV v) (unKV o))
 
-diffTB1 :: (Ord k ,Show k) =>  TB2 k Showable -> TB2  k  Showable -> Maybe (PathFTB   (Index (TBData k Showable)) )
+diffTB1 :: (a ~ Index a ,Ord a, Show a, Ord k ,Show k) =>  TB2 k a -> TB2  k  a -> Maybe (PathFTB   (Index (TBData k a )) )
 diffTB1 = diffFTB patchTB1  difftable
 
 
@@ -231,7 +226,8 @@ patchSet i
             normalize i = [i]
 
 
-applyAttr :: (Ord k , Show k ) => TB Identity k Showable -> PathAttr k Showable -> TB Identity k Showable
+
+applyAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k a -> TB Identity k a
 applyAttr (Attr k i) (PAttr _ p)  = Attr k (applyShowable i p)
 applyAttr (IT k i) (PInline _   p)  = IT k (applyTB1 i p)
 --applyAttr (FKT  k rel i) (PKey _ s (p@(PIndex m ix _)))  = FKT k rel  (applyTB1 i p)
@@ -240,41 +236,35 @@ applyAttr i j = errorWithStackTrace (show (i,j))
 
 
 
-diffAttr :: (Show k ,Ord k) => TB Identity k Showable -> TB Identity k Showable -> Maybe (PathAttr k  Showable )
+diffAttr :: PatchConstr k a  => TB Identity k a -> TB Identity k a -> Maybe (PathAttr k  a )
 diffAttr (Attr k i) (Attr l m ) = fmap (PAttr k) (diffShowable i m)
--- diffAttr (IT k i) (IT _ l) = fmap (PKey False (Set.fromList $ keyattr k ) ) (diffTB1 i l)
+diffAttr (IT k i) (IT _ l) = fmap (PInline (_relOrigin $ head $ keyattr k ) ) (diffTB1 i l)
 -- diffAttr (FKT  k _ i) (FKT m _ l) = patchSet $ catMaybes $ zipWith (\i j -> diffAttr (unTB i) (unTB j)) k m  <> [diffTB1 i l]
 
-patchAttr a@(Attr k v) = PAttr k  (patchFTB patchPrim v)
--- patchAttr a@(IT k v) = PKey False (Set.fromList (keyattri a)) (patchFTB patchTB1 v)
+patchAttr :: (Show a , Ord a ,Ord k ,Show k ,a ~ Index a) => TB Identity k a -> PathAttr k (Index a)
+patchAttr a@(Attr k v) = PAttr k  (patchFTB id v)
+patchAttr a@(IT k v) = PInline (_relOrigin $ head $ (keyattr k)) (patchFTB patchTB1 v)
 --patchAttr a@(FKT k rel v) = PKey False (Set.fromList (keyattri  a)) ( patchFTB patchTB1 v)
 
 -- createAttr (PatchSet l) = concat $ fmap createAttr l
-createAttr (PAttr  k s  )
-  -- | not b = [IT (_tb $ Attr (_relOrigin $ head $ Set.toList s) (TB1 ())) (createFTB createTB1 k)]
-  | otherwise =   Attr k  (createShowable s)
+createAttr :: (Index a~ a ,Show a , Ord a ,Ord k ,Show k ) => PathAttr k a -> TB Identity k a
+createAttr (PAttr  k s  ) = Attr k  (createShowable s)
+createAttr (PInline k s ) = IT (_tb $ Attr k (TB1 ())) (createFTB createTB1 s)
 
 createAttr i = errorWithStackTrace (show i)
 
--- applyPrim :: (Ord k,Show k) => Showable -> PathT k -> Showable
-applyPrim _ i = i
-applyPrim i j = errorWithStackTrace (show (i:: Showable ))
 
--- createPrim :: (Ord k ,Show k) => PathT k -> Showable
-createPrim i  = i
--- createPrim i = errorWithStackTrace (show i )
 
-diffShowable ::  FTB Showable -> FTB Showable -> Maybe (PathFTB   Showable)
-diffShowable = diffFTB patchPrim diffPrim
+diffShowable ::  (Show a,Ord a ,a ~ Index a) => FTB a -> FTB a -> Maybe (PathFTB (Index a))
+diffShowable = diffFTB id diffPrim
 
-applyShowable = applyFTB id applyPrim
+applyShowable ::  (Show a,Ord a ,a ~ Index a) => FTB a ->  PathFTB   (Index a)  -> FTB a
+applyShowable = applyFTB id (flip const )
 
 createShowable = createFTB id
 
-patchPrim j = j
-
+diffPrim :: (Eq a ,a ~ Index a) => a -> a -> Maybe (Index a)
 diffPrim i j
-  -- | i,j) False = errorWithStackTrace "22"
   | i == j = Nothing
   | otherwise = Just  j
 

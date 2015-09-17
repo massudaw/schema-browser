@@ -436,7 +436,7 @@ processPanelTable inf attrsB res table oldItemsi = do
           return $ InsertTB  <$> res
   let    spMap = fmap split . mapEvent id
          crudEdi (Just (TB1 i)) (Just (TB1 j) ) =  traverse (\p -> updatePatch (conn inf) p table) (difftable i j)
-         crudIns _ (Just (TB1 j))   =  traverse (\p -> insertPatch fromAttr (conn inf) p table)   ( Just $ patchTB1 j)
+         crudIns _ (Just (TB1 j))   =  traverse (\p -> insertPatch fromRecord (conn inf) p table)   ( Just $ patchTB1 j)
          crudDel (Just (TB1 j)) _ = traverse (\p -> deletePatch (conn inf ) p table) $ traceShow j  $ Just  (tableMeta table, getPKM j,[])
 
   diffEdi <- mapEvent id $ crudEdi <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click editB

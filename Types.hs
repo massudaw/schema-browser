@@ -82,6 +82,8 @@ data KV f k a
   = KV {_kvvalues :: Map (Set (Rel k)) (f k a)  }deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
 
 
+type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Identity))) k a )
+
 data KVMetadata k
   = KVMetadata
   { _kvname :: Text
@@ -223,6 +225,8 @@ mapFValue f (DelayedTB1 k ) = DelayedTB1 (mapFValue f <$> k)
 mapFValue f (ArrayTB1 k ) = ArrayTB1 (mapFValue f <$> k)
 
 
+
+mapRecord  f (m ,k)  = (m,) . mapComp (fmap  f)  $  k
 
 mapValue f (TB1 (m ,k) ) = TB1 . (m,) . mapComp (fmap  f)  $  k
 mapValue f (LeftTB1 k ) = LeftTB1 (mapValue f <$> k)
@@ -605,6 +609,9 @@ tblistPK s = tbmapPK s . mapFromTBList
 
 tblist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TB3 Identity Key a
 tblist' t  = TB1 . (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
+
+reclist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TBData Key a
+reclist' t  = (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 
 kvempty  = KVMetadata "" ""  Set.empty [] [] Set.empty Set.empty
 

@@ -345,14 +345,13 @@ viewerKey inf key = mdo
      tsort = sorting <$> triding asc <*> multiUserSelection sortList
      res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 (_, kv) ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $  keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
   let pageSize = 20
-  itemList <- listBox ((\o -> L.take pageSize . L.drop (o*pageSize))<$> triding offset <*>res3) (tidings bselection never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
+  itemList <- listBox ((\o -> L.take pageSize . L.drop (o*pageSize))<$> triding offset <*>res3) (tidings st never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
   offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) ((\i -> (L.length i `div` pageSize) ) <$> facts res3)
   let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
   prop <- stepper cv evsel
   let tds = tidings prop evsel
   (cru ,evs,ediff,pretdi) <- crudUITable inf plugList  (pure True)  res3 [] [] (allRec' (tableMap inf) table) tds
   let
-     bselection = st
      diffUp :: Event ([Maybe (TB1 Showable)])
      diffUp =  fmap pure $ (\i j -> flip applyTB1 j <$> i) <$> facts pretdi <@> ediff
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $userSelection itemList  ,rumors tdi]),diffUp]

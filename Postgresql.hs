@@ -324,6 +324,11 @@ parseLabeledTable (TB1 (me,m)) = (char '('  *> (do
   im <- unIntercalateAtto (traverse (traComp parseAttr) <$> M.toList (_kvvalues $ unTB m) ) (char ',')
   return (TB1 (me,Compose $ Identity $  KV (M.fromList im) ))) <*  char ')' )
 
+parseRecord  (me,m) = (char '('  *> (do
+  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> M.toList (_kvvalues $ unTB m) ) (char ',')
+  return (me,Compose $ Identity $  KV (M.fromList im) )) <*  char ')' )
+
+
 quotedRec :: Int -> (Int -> Parser a)  -> Parser a
 quotedRec i  pint =   (takeWhile (== '\\') >>  char '\"') *> inner <* ( takeWhile (=='\\') >> char '\"'  )
   where inner = quotedRec (i+1) pint <|> p
@@ -576,6 +581,14 @@ fromShowable ty v =
       Right i -> Just i
       Left l -> Nothing
 
+fromRecord foldable = do
+    let parser  = parseRecord foldable
+    FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
+                               (Right (Just r ) ) -> return r
+                               Right Nothing -> error (show j )
+                               Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
+
+
 fromAttr foldable = do
     let parser  = parseLabeledTable foldable
     FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
@@ -590,10 +603,8 @@ fromAttr foldable = do
   -- where item = fmap (\n@(Raw _ _ _ _ t _ k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
 
 insertPatch
-  :: (MonadIO m
-     ,Functor m
-     ,TF.ToField (TB Identity Key Showable))
-     => (TB2 Key () -> FR.RowParser (TB2 Key Showable) )
+  :: (MonadIO m ,Functor m ,TF.ToField (TB Identity Key Showable))
+     => (TBData Key () -> FR.RowParser (TBData Key Showable))
      -> Connection
      -> TBIdx Key Showable
      -> Table
@@ -604,8 +615,8 @@ insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
           iquery :: String
           iquery = T.unpack $ prequery <> " RETURNING ROW(" <>  T.intercalate "," (projKey serialAttr) <> ")"
         liftIO $ print iquery
-        out <-  fmap head $ liftIO $ queryWith (f (mapValue (const ()) serialTB )) conn (fromString  iquery ) directAttr
-        let Just (PAtom (_,_ ,gen)) = diffTB1 serialTB out
+        out <-  fmap head $ liftIO $ queryWith (f (mapRecord (const ()) serialTB )) conn (fromString  iquery ) directAttr
+        let Just (_,_ ,gen) = difftable serialTB out
         return $ (m,s,compactAttr (i <> gen))
       else do
         let
@@ -621,7 +632,7 @@ insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
       serialAttr = serial (fmap _relOrigin .keyattri) attrs
       directAttr = direct (fmap _relOrigin . keyattri) attrs
       projKey = fmap (keyValue ._relOrigin) . concat . fmap keyattri
-      serialTB = tblist (fmap _tb  serialAttr)
+      serialTB = reclist' t (fmap _tb  serialAttr)
 
 
 
