@@ -595,18 +595,18 @@ insertPatch
      ,TF.ToField (TB Identity Key Showable))
      => (TB2 Key () -> FR.RowParser (TB2 Key Showable) )
      -> Connection
-     -> PathT Key
+     -> TBIdx Key Showable
      -> Table
-     -> m (PathT Key)
-insertPatch f conn path@(PIndex m s (Just i) ) t =  if not $ L.null serialAttr
+     -> m (TBIdx Key Showable)
+insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
       then do
         let
           iquery :: String
           iquery = T.unpack $ prequery <> " RETURNING ROW(" <>  T.intercalate "," (projKey serialAttr) <> ")"
         liftIO $ print iquery
         out <-  fmap head $ liftIO $ queryWith (f (mapValue (const ()) serialTB )) conn (fromString  iquery ) directAttr
-        let Just (PIndex _ _ (Just gen)) = diffTB1 serialTB out
-        return $ PIndex m s  (compactPatches [i ,gen])
+        let Just (PAtom (_,_ ,gen)) = diffTB1 serialTB out
+        return $ (m,s,compactAttr (i <> gen))
       else do
         let
           iquery = T.unpack prequery
@@ -615,7 +615,7 @@ insertPatch f conn path@(PIndex m s (Just i) ) t =  if not $ L.null serialAttr
         return path
     where
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
-      attrs =  createAttr i
+      attrs =  createAttr <$> i
       serial f =  filter (all (isSerial .keyType) .f)
       direct f = filter (not.all (isSerial.keyType) .f)
       serialAttr = serial (fmap _relOrigin .keyattri) attrs
@@ -627,8 +627,8 @@ insertPatch f conn path@(PIndex m s (Just i) ) t =  if not $ L.null serialAttr
 
 deletePatch
   :: TF.ToField (TB Identity Key  Showable)  =>
-     Connection ->  PathT Key -> Table -> IO (PathT Key)
-deletePatch conn patch@(PIndex m kold Nothing) t = do
+     Connection ->  TBIdx Key Showable-> Table -> IO (TBIdx Key Showable)
+deletePatch conn patch@(m ,kold ,_) t = do
     execute conn (fromString $ traceShowId $ T.unpack del) koldPk
     return patch
   where
@@ -641,25 +641,23 @@ deletePatch conn patch@(PIndex m kold Nothing) t = do
 
 updatePatch
   :: TF.ToField (TB Identity Key Showable) =>
-     Connection -> PathT Key -> Table -> IO (PathT Key)
-updatePatch conn patch@(PIndex m kold  (Just p)) t =
-    execute conn (fromString $ traceShowId $ T.unpack up)  (fmap fst (expand $ traceShowId p)  <> koldPk ) >> return patch
+     Connection -> TBIdx Key Showable -> Table -> IO (TBIdx Key Showable)
+updatePatch conn patch@(m ,kold  ,p) t =
+    execute conn (fromString $ traceShowId $ T.unpack up)  (fmap fst []  <> koldPk ) >> return patch
   where
     equality k = k <> "="  <> "?"
     koldPk = snd <$> F.toList kold
     pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> F.toList kold)
-    setter = " SET " <> T.intercalate "," (equality . T.drop 1 .  snd <$> expand ( traceShowId p) )
+    setter = " SET " <> T.intercalate "," (equality . T.drop 1 .  snd <$> []  )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
-    skv = tbskv
-    tbskv :: [TB Identity Key Showable]
-    tbskv =  createAttr p
-    expand (PKey _  k v) =   fmap (\i -> "." <> (keyValue $ _relOrigin $ head $ S.toList k) <>i  ) <$> expand v
-    expand (POpt  o) = maybe [(LeftTB1 Nothing,"")] id (expand <$> o)
-    expand (PIdx i o) = fmap (("[" <> T.pack (show i) <> "]") <> ) <$> concat (maybeToList (fmap expand o))
-    expand (PIndex _   _ l ) = concat $ maybeToList (fmap expand l)
+    -- expand (PKey _ k v) =   fmap (\i -> "." <> (keyValue $ _relOrigin $ head $ S.toList k) <>i  ) <$> expand v
+    expand (POpt  o) = maybe [(LeftTB1 Nothing,"")] expand o
+    expand (PIdx i o) = fmap (("[" <> T.pack (show (i + 1 )) <> "]") <> ) <$>  (maybe [(LeftTB1 Nothing,"")] expand o)
+    -- expand  (PIndex _ _ l) = concat $ maybeToList (fmap expand l)
     expand (PatchSet l) = concat $ fmap expand l
-    expand (PInter  b i) = [( createShowable i,"")]
-    expand i@(PAtom _ )   = [(TB1 $ createPrim i,"")]
+    --expand (PInter  b i) = [( createShowable i,"")]
+    --expand i@(PAtom _)   = [(TB1 $ createPrim i,"")]
     expand i = errorWithStackTrace (show i)
+
 
 

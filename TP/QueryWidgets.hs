@@ -343,19 +343,20 @@ crudUITable
      -> [(Access Text,Event (Maybe (TB1 Showable)))]
      -> TB1 ()
      -> Tidings (Maybe (TB1 Showable))
-     -> UI ([Element],Event [Modification Key Showable],Event (PathT Key) ,Tidings (Maybe (TB1 Showable)))
+     -> UI ([Element],Event [Modification Key Showable],Event (PathFTB (TBIdx Key Showable) ) ,Tidings (Maybe (TB1 Showable)))
 crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
   chw <- checkedWidget open
   (eev,hev) <- liftIO $ newEvent
-  (h2,e2) <- liftIO $ newEvent
+  (e2,h2) <- liftIO $ newEvent
   (ediff ,hdiff) <- liftIO $ newEvent
+  (evdiff ,hvdiff) <- liftIO $ newEvent
   let fun True = do
           let table = lookPK inf (S.fromList $ fmap _relOrigin $ findPK $ ftb)
           preoldItens <- currentValue (facts preoldItems)
           loadedItens <- liftIO$ join <$> traverse (loadDelayed inf ftb) preoldItens
           maybe (return ()) (liftIO. hev. pure)  loadedItens
           loadedItensEv <- mapEvent (fmap join <$> traverse (loadDelayed inf ftb )) (rumors preoldItems)
-          let oldItemsE = unionWith const (rumors preoldItems)  (modifyTB <$> (head <$> eev) )
+          let oldItemsE =  fmap head $ unions (rumors preoldItems : evdiff:  ( head . fmap modifyTB <$> eev ) : [])
           oldItemsB <- stepper (maybe preoldItens modifyTB loadedItens) oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
               deleteCurrent e l =  maybe l (flip (L.deleteBy (onBin pkOpSet (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ))) l) e
@@ -365,16 +366,17 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
               unConstraints = (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  (tableNonRef ftb) , flip (unConstraint un) <$> (deleteCurrent <$> oldItems <*>bres))) <$> _kvuniques m
           (listBody,tableb) <- uiTable inf pgs (traceShow (fmap ( fst) unConstraints) (tpkConstraint: unConstraints)) (_kvname m) refs pmods ftb oldItems
           (panelItems,evsa,diff)<- processPanelTable inf  (facts tableb) (facts bres) table oldItems
-          let evs =  unions (filterJust loadedItensEv : evsa)
+          let evs =  unions (filterJust loadedItensEv  :evsa )
           onEvent evs (\i ->liftIO $ hev  i )
-          onEvent diff (\i ->liftIO $ hdiff i )
-          onEvent (rumors tableb) (liftIO . e2  )
+          onEvent diff (\i ->liftIO $ hdiff (PAtom i) )
+          onEvent ((\i j -> fmap (flip applyTB1 (PAtom j)  ) i) <$> facts oldItems <@> diff ) (\i ->liftIO $ hvdiff i )
+          onEvent (rumors tableb) (liftIO . h2)
           UI.div # set children [listBody,panelItems]
       fun False  = UI.div
   sub <- UI.div # sink items  (pure .fun <$> facts (triding chw))
   cv <- currentValue (facts preoldItems)
-  bh2 <- stepper  cv (unionWith const h2  (rumors preoldItems))
-  return ([getElement chw ,  sub],eev , ediff ,tidings bh2 (unionWith const h2  (rumors preoldItems)))
+  bh2 <- stepper  cv (unionWith const e2  (rumors preoldItems))
+  return ([getElement chw ,  sub],eev , ediff ,tidings bh2 (unionWith const e2  (rumors preoldItems)))
 
 
 tb1Diff f (TB1 (_,k1) ) (TB1 (_,k2)) =  liftF2 f k1 k2
@@ -397,7 +399,7 @@ processPanelTable
    -> Behavior [TB1 Showable]
    -> Table
    -> Tidings (Maybe (TB1 Showable))
-   -> UI (Element,[Event (Modification Key Showable)], Event (PathT Key) )
+   -> UI (Element,[Event (Modification Key Showable)], Event (TBIdx Key Showable) )
 processPanelTable inf attrsB res table oldItemsi = do
   let
       contains v  = maybe False (const True) . L.find (onBin (pkOpSet) (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ) v )
@@ -433,9 +435,9 @@ processPanelTable inf attrsB res table oldItemsi = do
           res <- catch (Right <$> insertAttr (fromAttr )  (conn inf) ip table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
           return $ InsertTB  <$> res
   let    spMap = fmap split . mapEvent id
-         crudEdi (Just i) (Just j ) =  traverse (\p -> updatePatch (conn inf) p table) (diffTB1 i j)
-         crudIns _ (Just j)   =  traverse (\p -> insertPatch fromAttr (conn inf) p table)   ( Just $ patchFTB patchTB1 j)
-         crudDel (Just j) _ = traverse (\p -> deletePatch (conn inf ) p table) $ traceShow j  $ Just $ PIndex (tableMeta table) (getPK j) Nothing
+         crudEdi (Just (TB1 i)) (Just (TB1 j) ) =  traverse (\p -> updatePatch (conn inf) p table) (difftable i j)
+         crudIns _ (Just (TB1 j))   =  traverse (\p -> insertPatch fromAttr (conn inf) p table)   ( Just $ patchTB1 j)
+         crudDel (Just (TB1 j)) _ = traverse (\p -> deletePatch (conn inf ) p table) $ traceShow j  $ Just  (tableMeta table, getPKM j,[])
 
   diffEdi <- mapEvent id $ crudEdi <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click editB
   diffDel <- mapEvent id $ crudDel <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click deleteB
