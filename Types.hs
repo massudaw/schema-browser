@@ -616,6 +616,16 @@ instance Ord k => Monoid (KV f k a) where
   mappend (KV i ) (KV j)   =    KV (Map.union i  j)
 
 unKV = _kvvalues . unTB
+isKEither (KOptional i ) = isKEither i
+isKEither (KArray i ) = isKEither i
+isKEither (KEither _ i) = True
+isKEither _ = False
+
+isInline (KOptional i ) = isInline i
+isInline (KArray i ) = isInline i
+isInline (InlineTable _ i) = True
+isInline _ = False
+
 
 makeLenses ''KV
 makeLenses ''TB

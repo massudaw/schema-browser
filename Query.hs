@@ -248,6 +248,7 @@ intersectionOp i op j = inner op
 
 showTable t  = rawSchema t <> "." <> rawName t
 
+
 delete
   :: ToField (TB Identity Key  Showable)  =>
      Connection ->  TB1 (Showable) -> Table -> IO GHC.Int.Int64
@@ -260,7 +261,6 @@ delete conn kold t = execute conn (fromString $ traceShowId $ T.unpack del) kold
 
 findPKM (LeftTB1 i ) =  join $ fmap (findPKM ) i
 findPKM i  = Just $ concat . fmap (\i -> zip (keyattr i) (kattr i )) .F.toList . _kvvalues . unTB . tbPK $ i
-
 updateAttr
   :: ToField (TB Identity Key Showable) =>
      Connection -> TB1  Showable -> TB1 Showable -> Table -> IO GHC.Int.Int64
@@ -296,39 +296,9 @@ attrValueName i = errorWithStackTrace $ " no attr value instance " <> show i
 type TBValue = TB1 (Key,Showable)
 type TBType = TB1 Key
 
-insertPatch
-  :: (MonadIO m
-     ,Functor m
-     ,ToField (TB Identity Key Showable))
-     => (TB2 Key () -> RowParser (TB2 Key Showable) )
-     -> Connection
-     -> PathT Key
-     -> Table
-     -> m (PathT Key)
-insertPatch f conn path@(PIndex m s (Just i) ) t =  if not $ L.null serialAttr
-      then do
-        let
-          iquery :: String
-          iquery = T.unpack $ prequery <> " RETURNING ROW(" <>  T.intercalate "," (projKey serialAttr) <> ")"
-        liftIO $ print iquery
-        out ::   TB1 Showable <-  fmap head $ liftIO $ queryWith (f (mapValue (const ()) serialTB )) conn (fromString  iquery ) directAttr
-        let Just gen = diffTB1 serialTB out
-        return (PIndex m s (compactPatches [i,gen]))
-      else do
-        let
-          iquery = T.unpack prequery
-        liftIO $ print iquery
-        liftIO $ execute  conn (fromString  iquery ) directAttr
-        return path
-    where
-      prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
-      attrs =  createAttr i
-      serial f =  filter (all (isSerial .keyType) .f)
-      direct f = filter (not.all (isSerial.keyType) .f)
-      serialAttr = serial (fmap _relOrigin .keyattri) attrs
-      directAttr = direct (fmap _relOrigin . keyattri) attrs
-      projKey = fmap (keyValue ._relOrigin) . concat . fmap keyattri
-      serialTB = tblist (fmap _tb  serialAttr)
+--
+-- Patch CRUD Postgresql Operations
+--
 
 
 insertAttr
@@ -878,16 +848,6 @@ inlineName (KEither _ i) = i
 inlineFullName (KOptional i) = inlineFullName i
 inlineFullName (KArray a ) = inlineFullName a
 inlineFullName (InlineTable s i) = s <> "." <> i
-
-isKEither (KOptional i ) = isKEither i
-isKEither (KArray i ) = isKEither i
-isKEither (KEither _ i) = True
-isKEither _ = False
-
-isInline (KOptional i ) = isInline i
-isInline (KArray i ) = isInline i
-isInline (InlineTable _ i) = True
-isInline _ = False
 
 relabeling :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB f k a -> TB p k a
 relabeling p l (Attr k i ) = (Attr k i)

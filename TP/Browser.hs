@@ -353,19 +353,19 @@ viewerKey inf key = mdo
   (cru ,evs,ediff,pretdi) <- crudUITable inf plugList  (pure True)  res3 [] [] (allRec' (tableMap inf) table) tds
   let
      bselection = st
-     sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $userSelection itemList  ,rumors tdi]),(fmap modifyTB <$> evs)]
+     diffUp :: Event ([Maybe (TB1 Showable)])
+     diffUp =  fmap pure $ (\i j -> flip applyTB1 j <$> i) <$> facts pretdi <@> ediff
+     sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $userSelection itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
-  diffB <- stepper [] ((\i j -> applyTable i j ) <$> res2 <@> ediff)
-  diffE <- UI.div # sink UI.text (show <$> diffB)
   inisort <- currentValue (facts tsort)
   res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (rumors vpt) ,rumors tsort ])
-  onEvent (unionWith const (foldr addToList <$> res2 <@> evs) (applyTable <$> res2 <@> ediff)) (liftIO .  putMVar tmvar)
+  onEvent (unionWith const (foldr addToList <$> res2 <@> evs) ((\i j -> foldl applyTable i (expandPSet j)) <$> res2 <@> ediff)) (liftIO .  putMVar tmvar)
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   insertDiv <- UI.div # set children cru # set UI.class_ "row"
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset , filterInp,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row" # set UI.style [("display","inline-flex")]
-  UI.div # set children ([itemSelec,insertDiv ,diffE] )
+  UI.div # set children ([itemSelec,insertDiv ] )
 
 
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k

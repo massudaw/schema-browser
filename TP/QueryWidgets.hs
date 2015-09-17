@@ -433,23 +433,23 @@ processPanelTable inf attrsB res table oldItemsi = do
           res <- catch (Right <$> insertAttr (fromAttr )  (conn inf) ip table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
           return $ InsertTB  <$> res
   let    spMap = fmap split . mapEvent id
-         diffEdi = crudEdi <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click editB
-         diffDel = crudDel <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click deleteB
-         crudEdi (Just i) (Just j ) =  Just $ PIndex (tableMeta table) (getPK i) (diffTB1 i j)
-         crudIns _ (Just j)   =  traverse (\p -> insertPatch fromAttr (conn inf) p table)  $ Just $ PIndex (tableMeta table) (getPK j) (Just $ patchFTB patchTB1 j)
-         crudDel (Just j) _ = Just $ PIndex (tableMeta table) (getPK j) Nothing
+         crudEdi (Just i) (Just j ) =  traverse (\p -> updatePatch (conn inf) p table) (diffTB1 i j)
+         crudIns _ (Just j)   =  traverse (\p -> insertPatch fromAttr (conn inf) p table)   ( Just $ patchFTB patchTB1 j)
+         crudDel (Just j) _ = traverse (\p -> deletePatch (conn inf ) p table) $ traceShow j  $ Just $ PIndex (tableMeta table) (getPK j) Nothing
 
+  diffEdi <- mapEvent id $ crudEdi <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click editB
+  diffDel <- mapEvent id $ crudDel <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click deleteB
   diffIns <- mapEvent id $ crudIns <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click insertB
   -- (evid,evir) <- spMap $ filterJust $ fmap insertAction  <$> attrsB  <@ UI.click insertB
-  (evdd,evdr) <- spMap $ filterJust $ fmap deleteAction <$> facts oldItemsi <@ UI.click deleteB
-  (eved,ever) <- spMap $ editAction  <$> attrsB <*> facts oldItemsi  <@ UI.click editB
-  bd <- stepper [] (unions [evdd,eved])
+  -- (evdd,evdr) <- spMap $ filterJust $ fmap deleteAction <$> facts oldItemsi <@ UI.click deleteB
+  -- (eved,ever) <- spMap $ editAction  <$> attrsB <*> facts oldItemsi  <@ UI.click editB
+  bd <- stepper [] (unions [])
   diffs <- stepper [] (unions [diffEdi,diffIns,diffDel])
   diffOut <- UI.span # sink UI.text (show <$> diffs)
   errorOut <- UI.span # sink UI.text (L.intercalate "," <$> bd)
   transaction <- UI.span# set children [insertB,editB,deleteB,errorOut,diffOut]
-  onEvent (fmap head $ unions [ever,evdr]) ( liftIO . logTableModification inf . TableModification Nothing table )
-  return (transaction ,[ever,evdr], fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffDel] )
+  -- onEvent (fmap head $ unions []) ( liftIO . logTableModification inf . TableModification Nothing table )
+  return (transaction ,[], fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffDel] )
 
 
 -- lookup pk from attribute list
@@ -884,6 +884,9 @@ deleteMod inf kv table = do
   delete (conn inf)  kv table
   Just <$> logTableModification inf (TableModification Nothing table (DeleteTB kv))
 
+--
+--  MultiTransaction Postgresql insertOperation
+--
 
 type TransactionM = WriterT [TableModification Showable] IO
 
@@ -963,4 +966,5 @@ tbInsertEdit inf  f@(FKT pk rel2  t2) =
            fmap (fmap (attrArray f)) $ fmap Tra.sequenceA $ Tra.traverse (\ix ->   tbInsertEdit inf $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. length l - 1 ]
 
 tbInsertEdit inf j = return $ Identity j
+
 

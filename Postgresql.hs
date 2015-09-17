@@ -6,6 +6,7 @@ import Control.Monad
 import Utils
 import Query
 import GHC.Stack
+import Patch
 import Debug.Trace
 import Data.Functor.Identity
 import Data.Scientific hiding(scientific)
@@ -93,9 +94,9 @@ instance (TF.ToField a , TF.ToField (UnQuoted (a))) => TF.ToField (FTB a) where
 
 
 instance  TF.ToField (TB Identity Key Showable)  where
-  toField (Attr k i) = TF.toField i
-  toField (IT n (LeftTB1 i)  ) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT (n)  (TB1 (m,i)) ) = TF.toField (TBRecord  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . _tbattrkey) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
+  toField (Attr _  i) = TF.toField i
+  toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
+  toField (IT n (TB1 (m,i))) = TF.toField (TBRecord  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . _tbattrkey) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (_kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
   toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\(TB1 (m,i) ) -> (TBRecord  (kvMetaFullName  m ) $  fmap (runIdentity . getCompose ) $ F.toList  $ _kvvalues $ unTB i ) ) <$> is
   toField e = errorWithStackTrace (show e)
@@ -587,5 +588,78 @@ fromAttr foldable = do
 
 -- topSortTables tables = flattenSCCs $ stronglyConnComp item
   -- where item = fmap (\n@(Raw _ _ _ _ t _ k _ fk _ ) -> (n,k,fmap (\(Path _ _ end)-> end) (S.toList fk) )) tables
+
+insertPatch
+  :: (MonadIO m
+     ,Functor m
+     ,TF.ToField (TB Identity Key Showable))
+     => (TB2 Key () -> FR.RowParser (TB2 Key Showable) )
+     -> Connection
+     -> PathT Key
+     -> Table
+     -> m (PathT Key)
+insertPatch f conn path@(PIndex m s (Just i) ) t =  if not $ L.null serialAttr
+      then do
+        let
+          iquery :: String
+          iquery = T.unpack $ prequery <> " RETURNING ROW(" <>  T.intercalate "," (projKey serialAttr) <> ")"
+        liftIO $ print iquery
+        out <-  fmap head $ liftIO $ queryWith (f (mapValue (const ()) serialTB )) conn (fromString  iquery ) directAttr
+        let Just (PIndex _ _ (Just gen)) = diffTB1 serialTB out
+        return $ PIndex m s  (compactPatches [i ,gen])
+      else do
+        let
+          iquery = T.unpack prequery
+        liftIO $ print iquery
+        liftIO $ execute  conn (fromString  iquery ) directAttr
+        return path
+    where
+      prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
+      attrs =  createAttr i
+      serial f =  filter (all (isSerial .keyType) .f)
+      direct f = filter (not.all (isSerial.keyType) .f)
+      serialAttr = serial (fmap _relOrigin .keyattri) attrs
+      directAttr = direct (fmap _relOrigin . keyattri) attrs
+      projKey = fmap (keyValue ._relOrigin) . concat . fmap keyattri
+      serialTB = tblist (fmap _tb  serialAttr)
+
+
+
+deletePatch
+  :: TF.ToField (TB Identity Key  Showable)  =>
+     Connection ->  PathT Key -> Table -> IO (PathT Key)
+deletePatch conn patch@(PIndex m kold Nothing) t = do
+    execute conn (fromString $ traceShowId $ T.unpack del) koldPk
+    return patch
+  where
+    equality k = attrValueName k <> "="  <> "?"
+    koldPk :: [TB Identity Key Showable]
+    koldPk = uncurry Attr <$> F.toList (traceShowId kold)
+    pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
+    del = "DELETE FROM " <> rawFullName t <>   pred
+
+
+updatePatch
+  :: TF.ToField (TB Identity Key Showable) =>
+     Connection -> PathT Key -> Table -> IO (PathT Key)
+updatePatch conn patch@(PIndex m kold  (Just p)) t =
+    execute conn (fromString $ traceShowId $ T.unpack up)  (fmap fst (expand $ traceShowId p)  <> koldPk ) >> return patch
+  where
+    equality k = k <> "="  <> "?"
+    koldPk = snd <$> F.toList kold
+    pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> F.toList kold)
+    setter = " SET " <> T.intercalate "," (equality . T.drop 1 .  snd <$> expand ( traceShowId p) )
+    up = "UPDATE " <> rawFullName t <> setter <>  pred
+    skv = tbskv
+    tbskv :: [TB Identity Key Showable]
+    tbskv =  createAttr p
+    expand (PKey _  k v) =   fmap (\i -> "." <> (keyValue $ _relOrigin $ head $ S.toList k) <>i  ) <$> expand v
+    expand (POpt  o) = maybe [(LeftTB1 Nothing,"")] id (expand <$> o)
+    expand (PIdx i o) = fmap (("[" <> T.pack (show i) <> "]") <> ) <$> concat (maybeToList (fmap expand o))
+    expand (PIndex _   _ l ) = concat $ maybeToList (fmap expand l)
+    expand (PatchSet l) = concat $ fmap expand l
+    expand (PInter  b i) = [( createShowable i,"")]
+    expand i@(PAtom _ )   = [(TB1 $ createPrim i,"")]
+    expand i = errorWithStackTrace (show i)
 
 
