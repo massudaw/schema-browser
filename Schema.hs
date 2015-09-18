@@ -21,6 +21,7 @@ import Data.Functor.Identity
 import Database.PostgreSQL.Simple
 import Data.Time
 
+import Data.Traversable(traverse)
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 
@@ -156,11 +157,11 @@ liftKeys
 liftKeys inf tname tb
   = liftTable tname tb
   where
-        liftTable tname (TB1 (_,v) )  = TB1 .(tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapComp (liftField tname) <$> (M.mapKeys (S.map (fmap (lookKey inf tname))) i)) v
+        liftTable' tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapComp (liftField tname) <$> (M.mapKeys (S.map (fmap (lookKey inf tname))) i)) v
             where
                   ta = lookTable inf tname
-        liftTable tname (LeftTB1 j ) = LeftTB1 $ liftTable tname <$> j
-        liftTable tname (ArrayTB1 j ) = ArrayTB1 $ liftTable tname <$> j
+        liftTable tname = fmap (liftTable' tname)
+
         liftField :: Text -> TB Identity Text a -> TB Identity Key a
         liftField tname (Attr t v) = Attr (lookKey inf tname t) v
         liftField tname (FKT ref  rel2 tb) = FKT (mapComp (liftField tname) <$> ref)   ( rel) (liftTable tname2 tb)

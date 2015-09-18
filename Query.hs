@@ -35,6 +35,7 @@ import qualified Data.ExtendedReal as ER
 
 import GHC.Int
 import Utils
+import Patch
 
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Internal
@@ -271,12 +272,11 @@ updateAttr conn kv kold t = execute conn (fromString $ traceShowId $ T.unpack up
     setter = " SET " <> T.intercalate "," (equality <$> skv )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = runIdentity .getCompose <$> F.toList  (_kvvalues $ unTB tbskv)
-    (TB1 (_,tbskv)) = isM
-    isM :: TB3 Identity Key  Showable
-    isM =  justError ("cant diff befor update" <> show (kv,kold)) $ diffUpdateAttr kv kold
+    tbskv =  snd isM
+    isM =  justError ("cant diff befor update" <> show (kv,kold)) $ diffUpdateAttr (unTB1 kv) (unTB1 kold)
 
-diffUpdateAttr :: TB1 Showable -> TB1 Showable -> Maybe (TB1 Showable)
-diffUpdateAttr  kv kold@(TB1 (t,_) ) =  fmap (TB1 .(t,) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRef  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRef $ kold )
+diffUpdateAttr :: TBData Key Showable -> TBData Key Showable -> Maybe (TBData Key Showable)
+diffUpdateAttr  kv kold@(t,_ )  =  fmap ((t,) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . snd . tableNonRef'  $ kv ) (unKV . snd . tableNonRef' $ kold )
 
 attrValue :: (Ord a,Show a) => TB Identity Key a -> FTB a
 attrValue (Attr _  v)= v
@@ -764,7 +764,7 @@ explodeRow' block assoc leaf (ArrayTB1 [tb] ) = explodeRow' block assoc leaf tb
 explodeRow' block assoc leaf (TB1 i ) = explodeRow'' block assoc leaf i
 
 explodeRow'' block assoc leaf  ((m ,Compose (Unlabeled (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
-explodeRow'' block assoc leaf  ((m ,Compose (Unlabeled (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
+explodeRow'' block assoc leaf  ((m ,Compose (Labeled l (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
 
 explodeDelayed block assoc leaf (Labeled l (Attr k  _ ))
   | isKDelayed (keyType k) = leafDel (isArray (keyType k)) l

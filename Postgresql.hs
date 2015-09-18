@@ -643,20 +643,21 @@ deletePatch conn patch@(m ,kold ,_) t = do
 
 updatePatch
   :: TF.ToField (TB Identity Key Showable) =>
-     Connection -> TBData Key Showable -> TBIdx Key Showable -> Table -> IO (TBIdx Key Showable)
-updatePatch conn old@(mo,_ ) patch@(m ,kold  ,p) t =
+     Connection -> TBData Key Showable -> TBData Key Showable -> Table -> IO (TBIdx Key Showable)
+updatePatch conn kv old  t =
     execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk ) >> return patch
   where
-    kv = applyRecord old patch
+    patch  = justError ("cant diff states" <> show (kv,old)) $ difftable old kv
+    kold = getPKM old
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> F.toList kold
     pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> F.toList kold)
     setter = " SET " <> T.intercalate "," (equality .   attrValueName <$> skv   )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
-    skv = runIdentity .getCompose <$> F.toList  (_kvvalues $ unTB tbskv)
-    (TB1 (_,tbskv)) = isM
-    isM :: TB3 Identity Key  Showable
-    isM =  justError ("cant diff befor update" <> show (kv,kold)) $ diffUpdateAttr (TB1 kv) (TB1 old)
+    skv = unTB <$> F.toList  (_kvvalues $ unTB tbskv)
+    tbskv = snd isM
+    isM :: TBData Key  Showable
+    isM =  justError ("cant diff befor update" <> show (kv,old)) $ diffUpdateAttr kv old
 
 
 

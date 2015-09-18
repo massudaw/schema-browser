@@ -417,11 +417,11 @@ processPanelTable inf attrsB res table oldItemsi = do
   -- Delete when isValid
          sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip contains j) i  ) (facts oldItemsi ) res))
   let    spMap = fmap split . mapEvent id
-         crudEdi (Just (TB1 i)) (Just (TB1 j) ) =  fmap join $ traverse (\p -> fmap (\g -> difftable i  g) $ transaction inf $ fullDiffEdit inf  i  j  ) (difftable i j)
+         crudEdi (Just (TB1 i)) (Just (TB1 j) ) =  fmap (\g -> difftable i  g) $ transaction inf $ fullDiffEdit inf  j i
          crudIns _ (Just (TB1 j))   =  traverse (\p -> insertPatch fromRecord (conn inf) p table)   ( Just $ patchTB1 j)
          crudDel (Just (TB1 j)) _ = traverse (\p -> deletePatch (conn inf ) p table) $ Just  (tableMeta table, getPKM j,[])
 
-  diffEdi <- mapEvent id $ crudEdi <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click editB
+  diffEdi <- mapEvent id $ crudEdi <$> facts oldItemsi <*> attrsB <@ UI.click editB
   diffDel <- mapEvent id $ crudDel <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click deleteB
   diffIns <- mapEvent id $ crudIns <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click insertB
   bd <- stepper [] (unions [])
@@ -920,18 +920,18 @@ transaction inf log = withTransaction (conn inf) $ do
   return md
 
 fullDiffEdit :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-fullDiffEdit inf old@((k1,v1) ) ed@((k2,v2)) = do
+fullDiffEdit inf old@((k1,v1) ) (k2,v2) = do
    let proj = _kvvalues . unTB
-   ed <- (k2,) . Compose . Identity . KV <$>  Tra.sequence (M.intersectionWith (\i j -> Compose <$>  tbDiffEdit inf  (unTB i) (unTB j) ) (proj v1 ) (proj v2))
-   mod <- liftIO $ updateModAttr inf ed old (lookTable inf (_kvname k2))
+   edn <- (k2,) . Compose . Identity . KV <$>  Tra.sequence (M.intersectionWith (\i j -> Compose <$>  tbDiffEdit inf  (unTB i) (unTB j) ) (proj v1 ) (proj v2))
+   mod <- liftIO $ updateModAttr inf edn old (lookTable inf (_kvname k2))
    tell (maybeToList mod)
-   return ed
+   return edn
 
 updateModAttr :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
-updateModAttr inf kv old table = join <$> Tra.traverse (\df -> do
-  patch <- updatePatch (conn  inf) kv  df table
+updateModAttr inf kv old table = do
+  patch <- updatePatch (conn  inf) kv  old  table
   let mod =  TableModification Nothing table patch
-  Just <$> logTableModification inf mod) (difftable old kv)
+  Just <$> logTableModification inf mod
 
 
 tbDiffEdit :: InformationSchema -> TB Identity Key Showable -> TB Identity Key Showable -> TransactionM (Identity (TB Identity Key  Showable))

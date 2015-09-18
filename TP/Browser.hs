@@ -134,7 +134,7 @@ poller db handler plugs = do
                   tdOutput1 i =   not $ isJust  $ testTable i (snd f)
               let elem inf  = fmap (pure .catMaybes) .  mapM (\inp -> do
                           o  <- elemp inf (Just inp)
-                          let diff =   join $ diffUpdateAttr  <$>  o <*> Just inp
+                          let diff =   join $ (\i j -> diffUpdateAttr   (unTB1 i ) (unTB1 j)) <$>  o <*> Just inp
                           maybe (return Nothing )  (\i -> updateModAttr inf (unTB1 $ fromJust o) (unTB1 inp) (lookTable inf a )) diff )
 
               i <- elem inf evb

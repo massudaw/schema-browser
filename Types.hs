@@ -23,7 +23,9 @@ import Data.Functor.Apply
 import Data.Bifunctor
 import GHC.Generics
 import Data.Binary (Binary)
+import Data.Vector.Binary
 import qualified Data.Binary as B
+import Data.Text.Binary
 import Data.Functor.Identity
 import Data.Typeable
 import Data.Vector(Vector)

@@ -208,8 +208,7 @@ applyRecord
      -> TBData d a
 applyRecord t@((m, v)) (_ ,_  , k)  = (m ,mapComp (KV . Map.mapWithKey (\key vi -> foldl  (edit key) vi k  ) . _kvvalues ) v)
   where edit  key v k@(PAttr  s _)  = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
-        -- key = (x,y)
-        -- edit  key v i = errorWithStackTrace (show (v,i))
+        edit  key v k@(PInline s _ ) = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
 
 patchTB1 :: (Show a , Ord a ,a ~ Index a ,Show k,Ord k) => TBData k  a -> Index (TBData k  a)
 patchTB1 (m, k)  = (m  ,(getPKM (m,k)) ,  F.toList $ patchAttr  . unTB <$> (unKV k))
@@ -217,7 +216,8 @@ patchTB1 (m, k)  = (m  ,(getPKM (m,k)) ,  F.toList $ patchAttr  . unTB <$> (unKV
 difftable
   ::  (a ~ Index a, Ord a , Show a,Show k , Ord k) => TBData k a -> TBData k a
      -> Maybe (Index (TBData k a ))
-difftable (m, v) (n, o) = Just  (m, (getPKM (m,v)),    catMaybes $ F.toList  $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j)) (unKV v) (unKV o))
+difftable (m, v) (n, o) = if L.null attrs then Nothing else Just  (m, (getPKM (m,v)), attrs)
+    where attrs = catMaybes $ F.toList  $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j)) (unKV v) (unKV o)
 
 diffTB1 :: (a ~ Index a ,Ord a, Show a, Ord k ,Show k) =>  TB2 k a -> TB2  k  a -> Maybe (PathFTB   (Index (TBData k a )) )
 diffTB1 = diffFTB patchTB1  difftable
