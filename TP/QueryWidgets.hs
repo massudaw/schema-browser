@@ -53,10 +53,6 @@ import qualified Data.ByteString.Char8 as BSC
 import GHC.Stack
 
 
-modifyTB :: Modification Key Showable -> Maybe (TB1 Showable)
-modifyTB  (InsertTB m) = Just m
-modifyTB  (DeleteTB m ) = Nothing
-modifyTB  (EditTB m n ) = fmap ( mapTB1 (\i -> maybe i (snd) $ getCompose . runIdentity . getCompose $ findTB1  (\k -> keyattr k == keyattr i) m ) ) (Just n)
 
 generateFresh = do
   (e,h) <- liftIO $ newEvent
@@ -126,7 +122,7 @@ pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
   let ecv = (facts oldItems <@ UI.click headerP)
   pgOut <- mapEvent (catchPluginException inf n t . action inf) (ecv)
   return (out, (snd f ,   pgOut ))
-
+{-
 
 plugTags inf oldItems (StatefullPlugin n t f action _) = UI.div
 plugTags inf bres (BoundedPlugin2 n t f action) = do
@@ -137,7 +133,7 @@ plugTags inf bres (BoundedPlugin2 n t f action) = do
   pgOut <- mapEvent (mapM (\inp -> catchPluginException inf n t . maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf t)) =<< action inf (Just  inp))  ) ecv
   el <- UI.div # sink UI.text ((\i o t-> T.unpack n <> " (" <>  show (length o) <> "/" <> show (length i) <> "/" <> show (length t) <> ")" ) <$> tdInput <*> tdOutput <*> bres)
   UI.div # set children [headerP,el]
-
+-}
 
 lorder lo lref = allMaybes $ fmap (\k -> L.find (\i-> fst i == k ) lref) lo
 
@@ -343,7 +339,7 @@ crudUITable
      -> [(Access Text,Event (Maybe (TB1 Showable)))]
      -> TB1 ()
      -> Tidings (Maybe (TB1 Showable))
-     -> UI ([Element],Event [Modification Key Showable],Event (PathFTB (TBIdx Key Showable) ) ,Tidings (Maybe (TB1 Showable)))
+     -> UI ([Element],Event (PathFTB (TBIdx Key Showable) ) ,Tidings (Maybe (TB1 Showable)))
 crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
   chw <- checkedWidget open
   (eev,hev) <- liftIO $ newEvent
@@ -354,10 +350,10 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
           let table = lookPK inf (S.fromList $ fmap _relOrigin $ findPK $ ftb)
           preoldItens <- currentValue (facts preoldItems)
           loadedItens <- liftIO$ join <$> traverse (loadDelayed inf ftb) preoldItens
-          maybe (return ()) (liftIO. hev. pure)  loadedItens
+          maybe (return ()) (\j -> liftIO $ hvdiff $ fmap (\i -> applyTB1  i (PAtom j) ) preoldItens )  loadedItens
           loadedItensEv <- mapEvent (fmap join <$> traverse (loadDelayed inf ftb )) (rumors preoldItems)
-          let oldItemsE =  fmap head $ unions ( evdiff: rumors preoldItems :  ( head . fmap modifyTB <$> eev ) : [])
-          oldItemsB <- stepper (maybe preoldItens modifyTB loadedItens) oldItemsE
+          let oldItemsE =  fmap head $ unions [ evdiff, rumors preoldItems  ]
+          oldItemsB <- stepper (maybe preoldItens (\j -> fmap (\i -> applyTB1 i (PAtom j) ) preoldItens ) loadedItens) oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
               deleteCurrent e l =  maybe l (flip (L.deleteBy (onBin pkOpSet (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ))) l) e
               tpkConstraint :: ([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)
@@ -365,9 +361,8 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
               unConstraints :: [([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)]
               unConstraints = (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  (tableNonRef ftb) , flip (unConstraint un) <$> (deleteCurrent <$> oldItems <*>bres))) <$> _kvuniques m
           (listBody,tableb) <- uiTable inf pgs (traceShow (fmap ( fst) unConstraints) (tpkConstraint: unConstraints)) (_kvname m) refs pmods ftb oldItems
-          (panelItems,evsa,diff)<- processPanelTable inf  (facts tableb) (facts bres) table oldItems
-          let evs =  unions (filterJust loadedItensEv  :[] )
-          onEvent evs (\i ->liftIO $ hev  i )
+          (panelItems,tdiff)<- processPanelTable inf  (facts tableb) (facts bres) table oldItems
+          let diff =unionWith const tdiff   (filterJust loadedItensEv)
           onEvent diff (\i ->liftIO $ hdiff (PAtom i) )
           onEvent ((\i j -> Just  $  maybe (TB1$ createTB1 j) (flip applyTB1 (PAtom j)  ) i) <$> facts oldItems <@> diff ) (\i ->liftIO $ hvdiff i )
           onEvent (rumors tableb) (liftIO . h2)
@@ -376,7 +371,7 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
   sub <- UI.div # sink items  (pure .fun <$> facts (triding chw))
   cv <- currentValue (facts preoldItems)
   bh2 <- stepper  cv (unionWith const e2  (rumors preoldItems))
-  return ([getElement chw ,  sub],eev , ediff ,tidings bh2 (unionWith const e2  (rumors preoldItems)))
+  return ([getElement chw ,  sub], ediff ,tidings bh2 (unionWith const e2  (rumors preoldItems)))
 
 
 tb1Diff f (TB1 (_,k1) ) (TB1 (_,k2)) =  liftF2 f k1 k2
@@ -399,7 +394,7 @@ processPanelTable
    -> Behavior [TB1 Showable]
    -> Table
    -> Tidings (Maybe (TB1 Showable))
-   -> UI (Element,[Event (Modification Key Showable)], Event (TBIdx Key Showable) )
+   -> UI (Element, Event (TBIdx Key Showable) )
 processPanelTable inf attrsB res table oldItemsi = do
   let
       contains v  = maybe False (const True) . L.find (onBin (pkOpSet) (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ) v )
@@ -420,7 +415,7 @@ processPanelTable inf attrsB res table oldItemsi = do
   -- Delete when isValid
          sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip contains j) i  ) (facts oldItemsi ) res))
   let
-      deleteAction ki =  do
+      {-deleteAction ki =  do
         res <- liftIO $ catch (Right <$> delete (conn inf) ki table) (\e -> return $ Left (show $ traceShowId  (e :: SomeException) ))
         return $ const (DeleteTB ki ) <$> res
       editAction :: Maybe (TB1 Showable) -> Maybe (TB1 Showable ) -> IO (Either String (Modification Key Showable))
@@ -428,12 +423,13 @@ processPanelTable inf attrsB res table oldItemsi = do
         let
             isM' :: Maybe (TB1 Showable)
             isM' =  join $ fmap (TB1  .(tableMeta table,). Compose . Identity  . KV ) . allMaybesMap <$> (liftA2 (liftF2 (\i j -> if i == j then Nothing else    Just i))) ( _kvvalues. unTB . _unTB1 <$> attr) ( _kvvalues. unTB . _unTB1  <$> old)
-        res <- liftIO $ catch (maybe (return (Left "no attribute changed check edit restriction")) (\l-> Right <$> transaction inf (fullDiffEdit inf (justError "unold" old) l)  ) attr ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
+        res <- liftIO $ catch (maybe (return (Left "no attribute changed check edit restriction")) (\l-> Right <$> transaction inf (fullDiffEdit inf (unTB1 $ justError "unold" old) (unTB1 l))  ) attr ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
         return $ fmap (const (EditTB (justError "unattr" attr ) (justError "unold" old) )) res
 
       insertAction ip = do
           res <- catch (Right <$> insertAttr (fromAttr )  (conn inf) ip table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
           return $ InsertTB  <$> res
+         -}
   let    spMap = fmap split . mapEvent id
          crudEdi (Just (TB1 i)) (Just (TB1 j) ) =  traverse (\p -> updatePatch (conn inf)  i p table) (difftable i j)
          crudIns _ (Just (TB1 j))   =  traverse (\p -> insertPatch fromRecord (conn inf) p table)   ( Just $ patchTB1 j)
@@ -450,8 +446,8 @@ processPanelTable inf attrsB res table oldItemsi = do
   diffOut <- UI.span # sink UI.text (show <$> diffs)
   errorOut <- UI.span # sink UI.text (L.intercalate "," <$> bd)
   transaction <- UI.span# set children [insertB,editB,deleteB,errorOut,diffOut]
-  -- onEvent (fmap head $ unions []) ( liftIO . logTableModification inf . TableModification Nothing table )
-  return (transaction ,[], fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffDel] )
+  onEvent (fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffDel]) ( liftIO . logTableModification inf . TableModification Nothing table )
+  return (transaction , fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffDel] )
 
 
 -- lookup pk from attribute list
@@ -788,7 +784,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           staticold :: [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key (Showable))))]
           staticold  =    second (fmap (fmap replaceKey . join . fmap unLeftItens)) . first (replaceKey .unLeftKey) <$>  nonInjRefs
           iold :: Tidings [Maybe [(Key,FTB Showable)]]
-          iold  = Tra.sequenceA $ fmap (fmap ( aattr . _tb ) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ fmap _relOrigin $ keyattr $ _tb $ fst $ i) oldASet) wl
+          iold  = Tra.sequenceA $ fmap (fmap ( aattr . _tb ) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ fmap _relOrigin $ keyattr . _tb . fst $ i) oldASet) wl
           iold2 :: Tidings (Maybe [TB Identity  Key Showable])
           iold2 =  join . (fmap (traverse ((traFAttr unRSOptional2 ) . firstTB unRKOptional ))) .  fmap (fmap ( uncurry Attr) . concat) . allMaybes <$> iold
           ftdi2 :: Tidings (Maybe [TB Identity  Key Showable])
@@ -817,14 +813,16 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
       prop <- stepper cv evsel
       let ptds = tidings prop evsel
       tds <- foldr (\i j ->updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap _fkttable.filterJust . snd <$>  plmods)
-      (celem,evs,ediff,pretdi) <-crudUITable inf pgs  (pure False) res3 staticold (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
+      (celem,ediff,pretdi) <-crudUITable inf pgs  (pure False) res3 staticold (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
       let
           bselection = fmap Just <$> st
-          sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> userSelection itemList), rumors tdi]),(fmap modifyTB <$> evs)]
+          diffUp :: Event ([Maybe (TB1 Showable)])
+          diffUp =  fmap pure $ (\i j -> flip applyTB1 j <$> i) <$> facts pretdi <@> ediff
+          sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> userSelection itemList), rumors tdi]),diffUp]
       st <- stepper cv sel
       inisort <- currentValue (facts sortList)
       res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [fmap const (rumors vpt) , rumors sortList])
-      onEvent (foldr addToList <$> res2 <@> evs)  (liftIO .  putMVar tmvar  )
+      onEvent ((\i j -> foldl applyTable i (expandPSet j)) <$> res2 <@> ediff)  (liftIO .  putMVar tmvar  )
       let
         reorderPK l = fmap (\i -> justError ("reorder wrong" <> show (ifk,l))  $ L.find ((== i).fst) l )  (keyAttr . unTB <$> ifk)
         lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
@@ -881,45 +879,48 @@ sorting b ss  =  L.sortBy (ifApply b flip (comparing (filterTB1 (not . S.null . 
   where ifApply True i =  i
         ifApply False _ = id
 
-deleteMod :: InformationSchema ->  TB1 Showable -> Table -> IO (Maybe (TableModification Showable))
-deleteMod inf kv table = do
-  delete (conn inf)  kv table
-  Just <$> logTableModification inf (TableModification Nothing table (DeleteTB kv))
+deleteMod :: InformationSchema ->  TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
+deleteMod inf j@(meta,_) table = do
+  let patch =  (tableMeta table, getPKM j,[])
+  deletePatch (conn inf)  patch table
+  Just <$> logTableModification inf (TableModification Nothing table patch)
 
 --
 --  MultiTransaction Postgresql insertOperation
 --
 
-type TransactionM = WriterT [TableModification Showable] IO
+type TransactionM = WriterT [TableModification (TBIdx Key Showable)] IO
 
-fullInsert :: InformationSchema -> TB1 Showable -> TransactionM  (TB3 Identity Key Showable)
-fullInsert inf (TB1 (k1,v1) )  = do
+fullInsert inf = Tra.traverse (fullInsert' inf )
+
+fullInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData Key Showable)
+fullInsert' inf ((k1,v1) )  = do
    let proj = _kvvalues . unTB
-   ret <- TB1 . (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
+   ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
    (m,t) <- liftIO $ eventTable inf (lookTable inf (_kvname k1))
    l <- currentValue (facts t)
-   if  isJust $ L.find ((==tbPK (tableNonRef ret)). tbPK . tableNonRef ) l
+   if  isJust $ L.find ((==tbPK (tableNonRef (TB1 ret))). tbPK . tableNonRef ) l
       then do
         return ret
       else do
-        i@(Just (TableModification _ _ (InsertTB tb)))  <- liftIO $ insertMod inf ret (lookTable inf (_kvname k1))
+        i@(Just (TableModification _ _ tb))  <- liftIO $ insertMod inf ret (lookTable inf (_kvname k1))
         tell (maybeToList i)
-        return tb
-fullInsert inf (LeftTB1 i ) = LeftTB1 <$> Tra.traverse (fullInsert inf) i
-fullInsert inf (ArrayTB1 i ) = ArrayTB1  <$> Tra.traverse (fullInsert inf) i
+        return $ createTB1 tb
 
-noInsert :: InformationSchema -> TB1 Showable -> TransactionM  (TB3 Identity Key Showable)
-noInsert inf (LeftTB1 i ) = LeftTB1 <$> Tra.traverse (noInsert inf ) i
-noInsert inf (ArrayTB1 i ) = ArrayTB1 <$> Tra.traverse (noInsert inf ) i
-noInsert inf (TB1 (k1,v1) )  = do
+
+noInsert inf = Tra.traverse (noInsert' inf)
+
+noInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData Key Showable)
+noInsert' inf (k1,v1)   = do
    let proj = _kvvalues . unTB
-   TB1 .(k1,) . Compose . Identity . KV <$>  Tra.sequence (fmap (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1))
+   (k1,) . Compose . Identity . KV <$>  Tra.sequence (fmap (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1))
 
 
-insertMod :: InformationSchema ->  TB1 Showable -> Table -> IO (Maybe (TableModification Showable))
-insertMod inf kv table = do
-  kvn <- insertAttr fromAttr (conn  inf) kv table
-  let mod =  TableModification Nothing table (InsertTB  kvn)
+insertMod :: InformationSchema ->  TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
+insertMod inf j  table = do
+  let patch = patchTB1 j
+  kvn <- insertPatch fromRecord (conn  inf) patch table
+  let mod =  TableModification Nothing table kvn
   Just <$> logTableModification inf mod
 
 
@@ -930,24 +931,24 @@ transaction inf log = withTransaction (conn inf) $ do
   Tra.traverse (\(k,v) -> do
     (m,t) <- eventTable inf k
     l <- currentValue (facts t)
-    let lf = foldr addToList l v
+    let lf = foldl (\i p -> applyTable  i (PAtom p)) l v
     putMVar m lf
     ) (M.toList aggr)
   return md
 
-fullDiffEdit :: InformationSchema -> TB1 Showable -> TB1 Showable -> TransactionM  (TB3 Identity Key Showable)
-fullDiffEdit inf old@(TB1 (k1,v1) ) ed@(TB1 (k2,v2)) = do
+fullDiffEdit :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
+fullDiffEdit inf old@((k1,v1) ) ed@((k2,v2)) = do
    let proj = _kvvalues . unTB
-   ed <-TB1 . (k2,) . Compose . Identity . KV <$>  Tra.sequence (zipInter (\i j -> Compose <$>  tbDiffEdit inf  (unTB i) (unTB j) ) (proj v1 ) (proj v2))
+   ed <- (k2,) . Compose . Identity . KV <$>  Tra.sequence (zipInter (\i j -> Compose <$>  tbDiffEdit inf  (unTB i) (unTB j) ) (proj v1 ) (proj v2))
    mod <- liftIO $ updateModAttr inf ed old (lookTable inf (_kvname k2))
    tell (maybeToList mod)
    return ed
 
-updateModAttr :: InformationSchema -> TB1 Showable -> TB1 Showable -> Table -> IO (Maybe (TableModification Showable))
+updateModAttr :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
 updateModAttr inf kv old table = join <$> Tra.traverse (\df -> do
-  updateAttr (conn  inf) kv old table
-  let mod =  TableModification Nothing table (EditTB  kv old)
-  Just <$> logTableModification inf mod) (diffUpdateAttr kv old)
+  patch <- updatePatch (conn  inf) kv  df table
+  let mod =  TableModification Nothing table patch
+  Just <$> logTableModification inf mod) (difftable old kv)
 
 
 tbDiffEdit :: InformationSchema -> TB Identity Key Showable -> TB Identity Key Showable -> TransactionM (Identity (TB Identity Key  Showable))

@@ -3,6 +3,9 @@ BUGS
 
 NEW FEATURES
 
+Improve Types
+-- Remove TB1 and use TBData instead
+
 MIGRATE TBEither To InlinedTable
 
 Make delayed fields not used by plugins

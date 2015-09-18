@@ -99,7 +99,7 @@ main = do
     print $ tableName t
     )  sorted
   -}
-  (e:: Event [[TableModification (Showable) ]] ,h) <- newEvent
+  (e:: Event [[TableModification (TBIdx Key Showable) ]] ,h) <- newEvent
 
   poller (argsToState (tail args) ) h  [queryArtAndamento,siapi2Plugin,siapi3Plugin ]
 
@@ -135,7 +135,7 @@ poller db handler plugs = do
               let elem inf  = fmap (pure .catMaybes) .  mapM (\inp -> do
                           o  <- elemp inf (Just inp)
                           let diff =   join $ diffUpdateAttr  <$>  o <*> Just inp
-                          maybe (return Nothing )  (\i -> updateModAttr inf (fromJust o) inp (lookTable inf a )) diff )
+                          maybe (return Nothing )  (\i -> updateModAttr inf (unTB1 $ fromJust o) (unTB1 inp) (lookTable inf a )) diff )
 
               i <- elem inf evb
               handler i
@@ -250,21 +250,22 @@ line n =   set  text n
 
 panel t els = UI.div # set items ( UI.h2 # set text (T.unpack t  ) : [UI.div # set items (F.toList els)])
 showModDiv i =  set UI.style [("display","flex")] . set items (showMod i)
-showMod (EditTB i j) = [showFKE j , operator  "| ~ |" , showFKE' i]
-showMod (InsertTB j) = [UI.div , operator "| + |" , showFKE j]
-showMod (DeleteTB j) = [showFKE j , operator "| - |" , UI.div]
+showMod i  = [UI.div # line (show i) ]
+-- showMod (EditTB i j) = [showFKE j , operator  "| ~ |" , showFKE' i]
+-- showMod (InsertTB j) = [UI.div , operator "| + |" , showFKE j]
+-- showMod (DeleteTB j) = [showFKE j , operator "| - |" , UI.div]
 
 operator op = UI.div # set text op  # set UI.style [("margin-left","3px"),("margin-right","3px")]
 
 dashBoardAll  inf = do
   els :: [(Int,LocalTime,Text,Text,(Binary BSL.ByteString))] <-
     liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,modification_data from metadata.modification_table WHERE schema_name = ? order by modification_id desc limit 100 " (Only $ schemaName inf)
-  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( either (\i-> UI.td # set UI.text (show i)) (\(_,_,i ) -> UI.td# showModDiv (i:: Modification Text Showable))  (B.decodeOrFail d ))) v] ) <$> els)
+  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( either (\i-> UI.td # set UI.text (show i)) (\(_,_,i ) -> UI.td# showModDiv (i:: TBIdx Text Showable ))  (B.decodeOrFail d ))) v] ) <$> els)
 
 dashBoardAllTable  table inf = do
   els :: [(Int,LocalTime,Text,Text,(Binary BSL.ByteString))] <-
     liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,modification_data from metadata.modification_table WHERE schema_name = ? AND  table_name = ?  order by modification_id desc limit 100 " (schemaName inf,table)
-  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( either (\i-> UI.td# set UI.text (show i)) (\(_,_,i ) -> UI.td# showModDiv (i:: Modification Text Showable))  (B.decodeOrFail d ))) v] ) <$> els)
+  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( either (\i-> UI.td# set UI.text (show i)) (\(_,_,i ) -> UI.td# showModDiv (i:: TBIdx Text Showable ))  (B.decodeOrFail d ))) v] ) <$> els)
 
 {-
 tableList table inf tb1 = do
@@ -278,7 +279,7 @@ tableList table inf tb1 = do
 dashBoard inf = do
   els :: [(Text,Vector.Vector (Binary BSL.ByteString))] <-
     liftIO $ query (rootconn inf) "SELECT table_name,array_agg(modification_data) from metadata.modification_table WHERE schema_name = ? group by table_name" (Only $ schemaName inf)
-  UI.div  # set items ( (\(b,v)-> panel (translatedName $ lookTable inf b)  $ fmap (\(Binary d) -> ( (UI.div # showModDiv ((B.decode d :: Modification Text Showable))))) v ) <$> els)
+  UI.div  # set items ( (\(b,v)-> panel (translatedName $ lookTable inf b)  $ fmap (\(Binary d) -> ( (UI.div # showModDiv ((B.decode d :: TBIdx Text Showable))))) v ) <$> els)
 
 attrLine i e   = do
   let nonRec = tableNonrec i
@@ -350,7 +351,7 @@ viewerKey inf key = mdo
   let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
   prop <- stepper cv evsel
   let tds = tidings prop evsel
-  (cru ,evs,ediff,pretdi) <- crudUITable inf plugList  (pure True)  res3 [] [] (allRec' (tableMap inf) table) tds
+  (cru,ediff,pretdi) <- crudUITable inf plugList  (pure True)  res3 [] [] (allRec' (tableMap inf) table) tds
   let
      diffUp :: Event ([Maybe (TB1 Showable)])
      diffUp =  fmap pure $ (\i j -> flip applyTB1 j <$> i) <$> facts pretdi <@> ediff
@@ -358,7 +359,7 @@ viewerKey inf key = mdo
   st <- stepper cv sel
   inisort <- currentValue (facts tsort)
   res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (rumors vpt) ,rumors tsort ])
-  onEvent (unionWith const (foldr addToList <$> res2 <@> evs) ((\i j -> foldl applyTable i (expandPSet j)) <$> res2 <@> ediff)) (liftIO .  putMVar tmvar)
+  onEvent ( ((\i j -> foldl applyTable i (expandPSet j)) <$> res2 <@> ediff)) (liftIO .  putMVar tmvar)
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   insertDiv <- UI.div # set children cru # set UI.class_ "row"

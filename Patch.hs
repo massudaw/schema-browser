@@ -74,6 +74,7 @@ p2 = PIndex kvempty (Set.singleton ("id",t1pk)) $ Just $ PKey True (Set.fromList
 p3 = PIndex kvempty (Set.singleton ("id",t1pk)) $ Just $PKey True (Set.fromList [Inline "at1"]) $ (POpt (Just (PIdx 1 (Just $ PAtom $ SNumeric 5))))
 p4 = PIndex kvempty (Set.singleton ("id",t1pk)) $ Just $PKey True (Set.fromList [Inline "at1"]) $ (POpt (Just (PIdx 1 Nothing )))
 -}
+
 data PathFTB   a
   = POpt (Maybe (PathFTB a))
   | PDelayed (Maybe (PathFTB a))
@@ -82,7 +83,7 @@ data PathFTB   a
   | PInter Bool (PathFTB a)
   | PatchSet [PathFTB a]
   | PAtom a
-  deriving(Show,Eq,Ord)
+  deriving(Show,Eq,Ord,Functor,Generic)
 
 type family Index k
 type instance Index Showable = Showable
@@ -95,7 +96,10 @@ type TBIdx  k a = (KVMetadata k, Set (k ,FTB a ),[PathAttr k a])
 data PathAttr k a
   = PAttr k (PathFTB a)
   | PInline k (PathFTB  (TBIdx k a ))
-  deriving(Show,Eq,Ord)
+  deriving(Show,Eq,Ord,Generic)
+
+instance (Binary k ) => Binary (PathFTB k )
+instance (Binary k ,Binary a) => Binary (PathAttr k a)
 
 data PathTID
   = PIdIdx Int
@@ -106,6 +110,13 @@ data PathTID
   | PIdAtom
   deriving (Eq,Ord,Show)
 
+
+firstPatch :: (Ord a ,Ord k , Ord j ) => (k -> j ) -> TBIdx k a -> TBIdx j a
+firstPatch f (i,j,k) = (mapKVMeta f i , Set.map (first f) j ,fmap (firstPatchAttr f) k)
+
+firstPatchAttr :: (Ord k , Ord j ,Ord a ) => (k -> j ) -> PathAttr k a -> PathAttr j a
+firstPatchAttr f (PAttr k a) = PAttr (f k) a
+firstPatchAttr f (PInline k a) = PInline (f k) (fmap (firstPatch f) a)
 
 
 compactionLaw t l = diffTB1 t (foldl applyTB1 t l ) == compactPatches l

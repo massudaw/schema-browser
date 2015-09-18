@@ -22,8 +22,8 @@ import Control.Lens.TH
 import Data.Functor.Apply
 import Data.Bifunctor
 import Data.Maybe
-import GHC.Generics
 import Data.Text.Binary
+import GHC.Generics
 import Data.Binary (Binary)
 import Data.Vector.Binary
 import qualified Data.Binary as B
@@ -70,11 +70,7 @@ import Data.Unique
 data Compose f g k a = Compose {getCompose :: f (g k a) } deriving (Functor,Foldable,Traversable,Ord,Eq,Show,Generic)
 
 data Path a b
-  -- Trivial Path
   = Path  a  b  a
-  -- | TagPath  (Cardinality (Set a))  b  (Cardinality (Set a))
-  -- Path Composition And Product
-  | ComposePath a (Set (Path a b),a,Set (Path a b)) a
   deriving(Eq,Ord,Show )
 
 
@@ -162,7 +158,6 @@ data Rel k
 deriving instance Generic (Identity a)
 
 
-instance (Binary a ,Binary k) => Binary (Modification k   a)
 instance (Binary (f (g k a)) ) => Binary (Compose f g k a )
 instance (Binary (f k a) ,Binary k ) => Binary (KV f k a)
 instance Binary k => Binary (Rel k)
@@ -392,7 +387,7 @@ data Showable
 data SqlOperation
   = FetchTable Text
   | FKJoinTable Text [Rel Key] Text
-  | RecJoin (SqlOperation)
+  | RecJoin SqlOperation
   | FKInlineTable Text
   | FKEitherField Text
   deriving(Eq,Ord,Show)
@@ -427,23 +422,15 @@ tableName = rawName
 translatedName tb =  maybe (rawName tb) id (rawTranslation tb )
 
 
-data TableModification b
-  = TableModification (Maybe Int) Table (Modification Key b)
+data TableModification p
+  = TableModification (Maybe Int) Table p
   deriving(Eq,Show,Functor,Generic)
 
 
-mapMod f (EditTB i j ) = EditTB ( mapKey f i ) (mapKey f j)
-mapMod f (InsertTB i  ) = InsertTB ( mapKey f i )
-mapMod f (DeleteTB i  ) = DeleteTB ( mapKey f i )
 
 unTB = runIdentity . getCompose
 _tb = Compose . Identity
 
-data Modification a b
-  = EditTB (TB2 a b) (TB2 a b)
-  | InsertTB (TB2 a b)
-  | DeleteTB (TB2 a b)
-  deriving(Eq,Show,Functor,Generic)
 
 instance (Ord k,Apply (f k) ,Functor (f k )) =>Apply  (KV f k) where
   KV pk  <.> KV pk1 = KV (Map.intersectionWith (<.>) pk pk1)
@@ -580,9 +567,6 @@ aattri (IT _  i ) =  recTB i
 
 
 
-addToList  (InsertTB m) =  (m:)
-addToList  (DeleteTB m ) =  L.delete m
-addToList  (EditTB m n ) = (map (\e-> if  (e ==  n) then  mapTB1 (\i -> maybe i snd $ getCompose $  runIdentity $ getCompose $ findTB1 (\k -> keyattr k == keyattr i  ) m ) e  else e ))
 
 
 mapComp :: (Functor t) => (f c a -> g d b) ->  Compose t f c a -> Compose t g d b
@@ -633,6 +617,7 @@ isInline (KArray i ) = isInline i
 isInline (InlineTable _ i) = True
 isInline _ = False
 
+unTB1 (TB1 i) = i
 
 makeLenses ''KV
 makeLenses ''TB

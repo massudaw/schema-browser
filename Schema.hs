@@ -44,6 +44,7 @@ import Control.Monad.Writer
 
 import Query
 import Postgresql
+import Patch
 import qualified Data.ByteString.Char8 as BS
 
 
@@ -150,9 +151,8 @@ keyTables conn userconn (schema ,user) = do
 addRec i j
   | i == j = RecJoin
   | otherwise = id
-liftMod inf k (EditTB a b ) = EditTB (liftKeys inf k a) (liftKeys inf k b)
-liftMod inf k (InsertTB a  ) = InsertTB(liftKeys inf k a)
-liftMod inf k (DeleteTB a  ) = DeleteTB (liftKeys inf k a)
+
+
 liftKeys
   :: InformationSchema
      -> Text
@@ -202,13 +202,13 @@ catchPluginException inf pname tname i = do
 
 
 logTableModification
-  :: B.Binary b =>
+  :: (B.Binary a ,Ord a) =>
      InformationSchema
-     -> TableModification b -> IO (TableModification b)
+     -> TableModification (TBIdx Key a)  -> IO (TableModification (TBIdx Key a))
 logTableModification inf (TableModification Nothing table i) = do
   time <- getCurrentTime
   let ltime =  utcToLocalTime utc $ time
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,modification_data,schema_name) VALUES (?,?,?,?,?) returning modification_id "  (username inf ,ltime,rawName table, Binary (B.encode $ mapMod keyValue  i) , schemaName inf)
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,modification_data,schema_name) VALUES (?,?,?,?,?) returning modification_id "  (username inf ,ltime,rawName table, Binary (B.encode $ firstPatch keyValue  i) , schemaName inf)
   return (TableModification (id) table i )
 
 
@@ -288,13 +288,14 @@ loadDelayed inf t@(TB1 (k,v)) values@(TB1 (ks,vs))
            whr = T.intercalate " AND " ((\i-> (keyValue i) <>  " = ?") <$> S.toList (_kvpk k) )
            attr = T.intercalate "," delayedattrs
            table = justError "no table" $ M.lookup (_kvpk k) (pkMap inf)
-           delayed =  mapKey (kOptional . ifDelayed . ifOptional) $ TB1 . (k,) . _tb $ KV (fmap (const ()) <$> filteredAttrs)
+           delayedTB1 =  TB1 . (k,) . _tb $ KV ( filteredAttrs)
+           delayed =  mapKey (kOptional . ifDelayed . ifOptional) (mapValue (const ()) delayedTB1)
            str = "SELECT " <> explodeRow (relabelT runIdentity Unlabeled delayed) <> " FROM " <> showTable table <> " WHERE " <> whr
        print str
        is <- queryWith (fromAttr delayed) (conn inf) (fromString $ T.unpack str) (fmap unTB $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK (tableNonRef values))
        case is of
             [] -> errorWithStackTrace "empty query"
-            [i] ->return $ Just $ EditTB (mapKey (kOptional.kDelayed.unKOptional) . mapFValue (LeftTB1 . Just . DelayedTB1 .  unSOptional ) $ i  ) values
+            [i] ->return $ traceShowId $ fmap (\(i,j,a) -> (i,getPKM (ks,vs),a)) $ difftable (unTB1 delayedTB1)(unTB1 . mapKey (kOptional.kDelayed.unKOptional) . mapFValue (LeftTB1 . Just . DelayedTB1 .  unSOptional ) $ i  )
             _ -> errorWithStackTrace "multiple result query"
   where
     delayedattrs = concat $ fmap (keyValue . (\(Inline i ) -> i)) .  F.toList <$> M.keys filteredAttrs
