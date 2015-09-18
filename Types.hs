@@ -79,6 +79,7 @@ data KV f k a
 
 
 type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Identity))) k a )
+type TB3Data  f k a = (KVMetadata k,Compose f (KV (Compose f (TB f ))) k a )
 
 data KVMetadata k
   = KVMetadata
@@ -214,26 +215,18 @@ mapFAttr f (Attr i v)  = (Attr i (f v))
 mapFAttr f (IT i v)  = IT i (mapFValue f v)
 mapFAttr f (FKT  i rel v)  = FKT (mapComp (mapFAttr f) <$> i) rel  (mapFValue f v)
 
-mapFValue f (TB1 (m ,k) ) = TB1 . (m,) . mapComp (KV . fmap (mapComp (mapFAttr f)) . _kvvalues )  $  k
-mapFValue f (LeftTB1 k ) = LeftTB1 (mapFValue f <$> k)
-mapFValue f (DelayedTB1 k ) = DelayedTB1 (mapFValue f <$> k)
-mapFValue f (ArrayTB1 k ) = ArrayTB1 (mapFValue f <$> k)
-
-
+mapFValue f = fmap (mapFValue' f)
+mapFValue' f ((m ,k) ) = (m,) . mapComp (KV . fmap (mapComp (mapFAttr f)) . _kvvalues )  $  k
 
 mapRecord  f (m ,k)  = (m,) . mapComp (fmap  f)  $  k
 
-mapValue f (TB1 (m ,k) ) = TB1 . (m,) . mapComp (fmap  f)  $  k
-mapValue f (LeftTB1 k ) = LeftTB1 (mapValue f <$> k)
-mapValue f (DelayedTB1 k ) = DelayedTB1 (mapValue f <$> k)
-mapValue f (ArrayTB1 k ) = ArrayTB1 (mapValue f <$> k)
+mapValue' f ((m ,k) ) = (m,) . mapComp (fmap  f)  $  k
+mapValue f = fmap (mapValue' f)
 
 
 
-mapKey f (TB1 (m ,k) ) = TB1 . (mapKVMeta f m,) . mapComp (firstKV f)  $  k
-mapKey f (LeftTB1 k ) = LeftTB1 (mapKey f <$> k)
-mapKey f (DelayedTB1 k ) = DelayedTB1 (mapKey f <$> k)
-mapKey f (ArrayTB1 k ) = ArrayTB1 (mapKey f <$> k)
+mapKey f = fmap (mapKey' f)
+mapKey' f ((m ,k) ) = (mapKVMeta f m,) . mapComp (firstKV f)  $  k
 
 
 firstKV  f (KV m ) = KV . fmap (mapComp (firstTB f) ) . Map.mapKeys (Set.map (fmap f)) $ m
@@ -525,19 +518,16 @@ nonRef i = errorWithStackTrace (show i)
 
 
 
-tableNonRef :: Ord k => TB2 k a -> TB3 Identity k a
-tableNonRef (ArrayTB1 i) = ArrayTB1 $ tableNonRef <$> i
-tableNonRef (LeftTB1 i ) = LeftTB1 $ tableNonRef <$> i
-tableNonRef (DelayedTB1 i ) = DelayedTB1 $ tableNonRef <$> i
-tableNonRef (TB1 (m,n)  )  = TB1 (m, mapComp (\(KV n)-> KV  (mapFromTBList $ fmap (Compose . Identity ) $ concat $ F.toList $  overComp nonRef <$> n)) n)
+tableNonRef :: Ord k => TB2 k a -> TB2 k a
+tableNonRef = fmap tableNonRef'
+
+tableNonRef' ((m,n)  )  = (m, mapComp (\(KV n)-> KV  (mapFromTBList $ fmap (Compose . Identity ) $ concat $ F.toList $  overComp nonRef <$> n)) n)
   where
     nonRef :: Ord k => TB Identity k a -> [(TB Identity ) k a]
     nonRef (Attr k v ) = [Attr k v]
     nonRef (FKT i _ _ ) = concat (overComp nonRef <$> i)
     nonRef it@(IT j k ) = [(IT  j (tableNonRef k )) ]
 
-tableNonRefK :: Ord k => TB2 k Showable -> TB3 Identity k Showable
-tableNonRefK   = tableNonRef
 
 addDefault
   :: Functor g => Compose g (TB f) d a

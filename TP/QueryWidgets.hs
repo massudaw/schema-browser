@@ -178,7 +178,7 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattr .Compose . Identity .fst) wl
             nonInjConstr :: SelTBConstraint
-            nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 (_,l)) -> maybe True id $ (\ j -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity)  [j]) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) <$> j ).triding) <$> traceShow (fmap fst nonInjRefs ) nonInjRefs
+            nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 (_,l)) -> maybe True id $ (\ j -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity)  [j]) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) <$> j ).triding) <$>  nonInjRefs
             tbi = fmap (Compose . Identity)  <$> oldItems
             thisPlugs = filter (hasProd (isNested ((IProd True $ fmap (keyValue._relOrigin) (keyattri i) ))) .  fst) plugItens
             pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> ( thisPlugs)
@@ -297,7 +297,7 @@ uiTable inf pgs constr tname refs plmods ftb@(TB1 (m,k) ) oldItems = do
 
   fks <- foldl (\jm (l,m)  -> do
             w <- jm
-            wn <- (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $ traceShow (fmap fst refs) refs)
+            wn <- (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $  refs)
             return (w <> [(unTB m,wn)])
         ) (return []) (P.sortBy (P.comparing fst ) . M.toList . unTBMap $ ftb)
   let
@@ -342,16 +342,15 @@ crudUITable
      -> UI ([Element],Event (PathFTB (TBIdx Key Showable) ) ,Tidings (Maybe (TB1 Showable)))
 crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
   chw <- checkedWidget open
-  (eev,hev) <- liftIO $ newEvent
   (e2,h2) <- liftIO $ newEvent
   (ediff ,hdiff) <- liftIO $ newEvent
   (evdiff ,hvdiff) <- liftIO $ newEvent
   let fun True = do
           let table = lookPK inf (S.fromList $ fmap _relOrigin $ findPK $ ftb)
           preoldItens <- currentValue (facts preoldItems)
-          loadedItens <- liftIO$ join <$> traverse (loadDelayed inf ftb) preoldItens
+          loadedItens <- liftIO$ join <$> traverse (loadDelayed inf (unTB1 ftb) . unTB1 ) preoldItens
           maybe (return ()) (\j -> liftIO $ hvdiff $ fmap (\i -> applyTB1  i (PAtom j) ) preoldItens )  loadedItens
-          loadedItensEv <- mapEvent (fmap join <$> traverse (loadDelayed inf ftb )) (rumors preoldItems)
+          loadedItensEv <- mapEvent (fmap join <$> traverse (loadDelayed inf (unTB1 ftb) . unTB1 )) (rumors preoldItems)
           let oldItemsE =  fmap head $ unions [ evdiff, rumors preoldItems  ]
           oldItemsB <- stepper (maybe preoldItens (\j -> fmap (\i -> applyTB1 i (PAtom j) ) preoldItens ) loadedItens) oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
@@ -360,12 +359,15 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
               tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK ftb , flip pkConstraint  <$> (deleteCurrent  <$> oldItems <*>bres))
               unConstraints :: [([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)]
               unConstraints = (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  (tableNonRef ftb) , flip (unConstraint un) <$> (deleteCurrent <$> oldItems <*>bres))) <$> _kvuniques m
-          (listBody,tableb) <- uiTable inf pgs (traceShow (fmap ( fst) unConstraints) (tpkConstraint: unConstraints)) (_kvname m) refs pmods ftb oldItems
+          (listBody,tableb) <- uiTable inf pgs ( (tpkConstraint: unConstraints)) (_kvname m) refs pmods ftb oldItems
           (panelItems,tdiff)<- processPanelTable inf  (facts tableb) (facts bres) table oldItems
           let diff =unionWith const tdiff   (filterJust loadedItensEv)
-          onEvent diff (\i ->liftIO $ hdiff (PAtom i) )
-          onEvent ((\i j -> Just  $  maybe (TB1$ createTB1 j) (flip applyTB1 (PAtom j)  ) i) <$> facts oldItems <@> diff ) (\i ->liftIO $ hvdiff i )
-          onEvent (rumors tableb) (liftIO . h2)
+          onEvent (PAtom <$> diff)
+              (liftIO . hdiff)
+          onEvent ((\i j -> Just  $  maybe (TB1$ createTB1 j) (flip applyTB1 (PAtom j)  ) i) <$> facts oldItems <@> diff )
+              (liftIO . hvdiff )
+          onEvent (rumors tableb)
+              (liftIO . h2)
           UI.div # set children [listBody,panelItems]
       fun False  = UI.div
   sub <- UI.div # sink items  (pure .fun <$> facts (triding chw))
@@ -414,33 +416,14 @@ processPanelTable inf attrsB res table oldItemsi = do
          set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table )) #
   -- Delete when isValid
          sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip contains j) i  ) (facts oldItemsi ) res))
-  let
-      {-deleteAction ki =  do
-        res <- liftIO $ catch (Right <$> delete (conn inf) ki table) (\e -> return $ Left (show $ traceShowId  (e :: SomeException) ))
-        return $ const (DeleteTB ki ) <$> res
-      editAction :: Maybe (TB1 Showable) -> Maybe (TB1 Showable ) -> IO (Either String (Modification Key Showable))
-      editAction attr old = do
-        let
-            isM' :: Maybe (TB1 Showable)
-            isM' =  join $ fmap (TB1  .(tableMeta table,). Compose . Identity  . KV ) . allMaybesMap <$> (liftA2 (liftF2 (\i j -> if i == j then Nothing else    Just i))) ( _kvvalues. unTB . _unTB1 <$> attr) ( _kvvalues. unTB . _unTB1  <$> old)
-        res <- liftIO $ catch (maybe (return (Left "no attribute changed check edit restriction")) (\l-> Right <$> transaction inf (fullDiffEdit inf (unTB1 $ justError "unold" old) (unTB1 l))  ) attr ) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
-        return $ fmap (const (EditTB (justError "unattr" attr ) (justError "unold" old) )) res
-
-      insertAction ip = do
-          res <- catch (Right <$> insertAttr (fromAttr )  (conn inf) ip table) (\e -> return $ Left (show $ traceShowId (e :: SomeException) ))
-          return $ InsertTB  <$> res
-         -}
   let    spMap = fmap split . mapEvent id
-         crudEdi (Just (TB1 i)) (Just (TB1 j) ) =  traverse (\p -> updatePatch (conn inf)  i p table) (difftable i j)
+         crudEdi (Just (TB1 i)) (Just (TB1 j) ) =  fmap join $ traverse (\p -> fmap (\g -> difftable i  g) $ transaction inf $ fullDiffEdit inf  i  j  ) (difftable i j)
          crudIns _ (Just (TB1 j))   =  traverse (\p -> insertPatch fromRecord (conn inf) p table)   ( Just $ patchTB1 j)
-         crudDel (Just (TB1 j)) _ = traverse (\p -> deletePatch (conn inf ) p table) $ traceShow j  $ Just  (tableMeta table, getPKM j,[])
+         crudDel (Just (TB1 j)) _ = traverse (\p -> deletePatch (conn inf ) p table) $ Just  (tableMeta table, getPKM j,[])
 
   diffEdi <- mapEvent id $ crudEdi <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click editB
   diffDel <- mapEvent id $ crudDel <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click deleteB
   diffIns <- mapEvent id $ crudIns <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click insertB
-  -- (evid,evir) <- spMap $ filterJust $ fmap insertAction  <$> attrsB  <@ UI.click insertB
-  -- (evdd,evdr) <- spMap $ filterJust $ fmap deleteAction <$> facts oldItemsi <@ UI.click deleteB
-  -- (eved,ever) <- spMap $ editAction  <$> attrsB <*> facts oldItemsi  <@ UI.click editB
   bd <- stepper [] (unions [])
   diffs <- stepper [] (unions [diffEdi,diffIns,diffDel])
   diffOut <- UI.span # sink UI.text (show <$> diffs)

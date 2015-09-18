@@ -267,7 +267,7 @@ updateAttr
 updateAttr conn kv kold t = execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk)
   where
     equality k = attrValueName k <> "="  <> "?"
-    koldPk = runIdentity . getCompose <$> F.toList ( _kvvalues . unTB $ tbPK (tableNonRefK kold))
+    koldPk = runIdentity . getCompose <$> F.toList ( _kvvalues . unTB $ tbPK (tableNonRef kold))
     pred   =" WHERE " <> T.intercalate " AND " (equality <$> koldPk)
     setter = " SET " <> T.intercalate "," (equality <$> skv )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
@@ -277,7 +277,7 @@ updateAttr conn kv kold t = execute conn (fromString $ traceShowId $ T.unpack up
     isM =  justError ("cant diff befor update" <> show (kv,kold)) $ diffUpdateAttr kv kold
 
 diffUpdateAttr :: TB1 Showable -> TB1 Showable -> Maybe (TB1 Showable)
-diffUpdateAttr  kv kold@(TB1 (t,_) ) =  fmap (TB1 .(t,) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRefK  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRefK $ kold )
+diffUpdateAttr  kv kold@(TB1 (t,_) ) =  fmap (TB1 .(t,) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (_kvvalues . unTB . _unTB1 . tableNonRef  $ kv ) (_kvvalues . unTB . _unTB1 . tableNonRef $ kold )
 
 attrValue :: (Ord a,Show a) => TB Identity Key a -> FTB a
 attrValue (Attr _  v)= v
@@ -318,10 +318,10 @@ insertAttr f conn krec  t = if not (L.null pkList)
         return $ mapTB1 (mapComp (\case{ (Attr k' v')-> maybe (Attr k' v')    unTB $ fmap snd $ getCompose $ unTB $ findTB1 (overComp (\case{Attr nk nv ->nk == k'; i-> False} )) out; i-> i} ) ) krec
               else liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")"   )  kva >> return krec
   where pkList :: [ TB Identity Key Showable]
-        pkList =    L.filter pred  . fmap (runIdentity. getCompose) $ (F.toList $ _kvvalues $ unTB $ tbPK $ tableNonRefK krec )
+        pkList =    L.filter pred  . fmap (runIdentity. getCompose) $ (F.toList $ _kvvalues $ unTB $ tbPK $ tableNonRef krec )
         pred i = (isSerial . attrType $ i) && (isNothing . unSSerial .attrValue $ i )
         kva = L.filter (not . pred) $ fmap (runIdentity . getCompose) $ F.toList (_kvvalues $ unTB k)
-        (TB1 (_,k) ) = tableNonRefK krec
+        (TB1 (_,k) ) = tableNonRef krec
 
 
 unSComposite (ArrayTB1 i) = i
@@ -616,6 +616,9 @@ tbDesc  =  tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ 
 tbPK :: (Functor f,Ord k)=>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
 tbPK = tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv ) ))
 
+tbPK' :: (Ord k)=>TBData k a -> Compose Identity  (KV  (Compose Identity (TB Identity  ))) k a
+tbPK' = tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv ) ))
+
 tbUn :: (Functor f,Ord k) =>   Set k -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbUn un (TB1 (kv,item)) =  (\kv ->  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item ) un
   where pred kv k = (S.isSubsetOf (S.map _relOrigin k) kv )
@@ -623,11 +626,14 @@ tbUn un (TB1 (kv,item)) =  (\kv ->  mapComp (\(KV item)->  KV $ M.filterWithKey 
 tbAttr :: (Functor f,Ord k) =>  TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbAttr  =  tbFilter  (\kv k -> not (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv <> (S.fromList (_kvdesc kv ))) ))
 
+tbFilter' pred (kv,item) =  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item
+
 tbFilter :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
-tbFilter pred (TB1 (kv,item)) =  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item
+tbFilter pred (TB1 i) = tbFilter' pred i
 tbFilter pred (LeftTB1 (Just i)) = tbFilter pred i
 tbFilter pred (ArrayTB1 ([i])) = tbFilter pred i
 tbFilter pred (DelayedTB1 (Just i)) = tbFilter pred i
+
 f = errorWithStackTrace ""
 
 recurseTB :: Map Text Table -> Table -> Bool -> TB3 (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3 (Labeled Text) Key ())
@@ -744,6 +750,8 @@ recurseDel True (FKT  k rel v ) = FKT (mapComp (recurseDel True ) <$> k )  rel  
 
 explodeRow :: TB3 (Labeled Text) Key () -> Text
 explodeRow = explodeRow'  (\i -> "ROW(" <> i <> ")")  "," (const id)
+explodeRecord :: TB3Data (Labeled Text) Key () -> Text
+explodeRecord  = explodeRow''   (\i -> "ROW(" <> i <> ")")  "," (const id)
 explodeLabel :: Labeled Text (TB (Labeled Text) Key () ) -> Text
 explodeLabel = explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id)
 
@@ -752,11 +760,12 @@ leafDel True i = " case when " <> i <> " is not null then true else null end "
 leafDel False i = " case when " <> i <> " is not null then true else null end "
 
 explodeRow' block  assoc  leaf (DelayedTB1 (Just tbd@(TB1 (i,tb)))) = "(true)"
-
 explodeRow' block assoc leaf (LeftTB1 (Just tb) ) = explodeRow' block assoc leaf tb
 explodeRow' block assoc leaf (ArrayTB1 [tb] ) = explodeRow' block assoc leaf tb
-explodeRow' block assoc leaf (TB1 (m ,Compose (Labeled _ (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
-explodeRow' block assoc leaf  (TB1 (m ,Compose (Unlabeled (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
+explodeRow' block assoc leaf (TB1 i ) = explodeRow'' block assoc leaf i
+
+explodeRow'' block assoc leaf  ((m ,Compose (Unlabeled (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
+explodeRow'' block assoc leaf  ((m ,Compose (Unlabeled (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
 
 explodeDelayed block assoc leaf (Labeled l (Attr k  _ ))
   | isKDelayed (keyType k) = leafDel (isArray (keyType k)) l
@@ -783,10 +792,8 @@ isTB1Delayed (LeftTB1 (Just tb)) = isTB1Delayed tb
 isTB1Delayed (ArrayTB1 [tb]) = isTB1Delayed tb
 isTB1Delayed _ = False
 
-unTlabel (TB1 (m,kv) )  = TB1 . (m,) $ overLabel (\(KV kv) -> KV $ fmap (Compose . Identity .unlabel.getCompose ) $   kv) kv
-unTlabel (LeftTB1 kv)  = LeftTB1 $ fmap unTlabel kv
-unTlabel (ArrayTB1 kv)  = ArrayTB1 $ fmap unTlabel kv
-unTlabel (DelayedTB1 kv)  = DelayedTB1 $ fmap unTlabel kv
+unTlabel' ((m,kv) )  = (m,) $ overLabel (\(KV kv) -> KV $ fmap (Compose . Identity .unlabel.getCompose ) $   kv) kv
+unTlabel  = fmap unTlabel'
 
 unlabel (Labeled l (IT tn t) ) = (IT (relabel tn) (unTlabel t ))
 unlabel (Unlabeled (IT tn t) ) = (IT (relabel tn) (unTlabel t ))
@@ -854,6 +861,9 @@ relabeling p l (Attr k i ) = (Attr k i)
 relabeling p l (IT i tb ) = IT ((Compose.  l . relabeling p l . p . getCompose ) i) (relabelT p l tb)
 
 relabelT :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB3 f k a -> TB3 p k a
-relabelT p l (TB1 (m ,Compose j)) =  (TB1  (m,Compose $ l (KV $ fmap (Compose.  l . relabeling p l . p . getCompose ) (_kvvalues $ p j))))
+relabelT p l =  fmap (relabelT' p l)
+
+relabelT' :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB3Data f k a -> TB3Data p k a
+relabelT' p l (m ,Compose j) =  (m,Compose $ l (KV $ fmap (Compose.  l . relabeling p l . p . getCompose ) (_kvvalues $ p j)))
 
 
