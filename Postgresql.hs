@@ -647,7 +647,7 @@ updatePatch
 updatePatch conn kv old  t =
     execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk ) >> return patch
   where
-    patch  = justError ("cant diff states" <> show (kv,old)) $ difftable old kv
+    patch  = justError ("cant diff states" <> show (kv,old)) $ difftable (tableNonRef' old) (tableNonRef' kv)
     kold = getPKM old
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> F.toList kold

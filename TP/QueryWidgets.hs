@@ -417,7 +417,7 @@ processPanelTable inf attrsB res table oldItemsi = do
   -- Delete when isValid
          sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip contains j) i  ) (facts oldItemsi ) res))
   let    spMap = fmap split . mapEvent id
-         crudEdi (Just (TB1 i)) (Just (TB1 j) ) =  fmap (\g -> difftable i  g) $ transaction inf $ fullDiffEdit inf  j i
+         crudEdi (Just (TB1 i)) (Just (TB1 j) ) =  fmap (\g -> difftable (tableNonRef' i)  (tableNonRef' g)) $ transaction inf $ fullDiffEdit inf   i j
          crudIns _ (Just (TB1 j))   =  traverse (\p -> insertPatch fromRecord (conn inf) p table)   ( Just $ patchTB1 j)
          crudDel (Just (TB1 j)) _ = traverse (\p -> deletePatch (conn inf ) p table) $ Just  (tableMeta table, getPKM j,[])
 

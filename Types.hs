@@ -480,7 +480,7 @@ type PathQuery = Path (Set Key) (SqlOperation )
 type TBLabel =  Compose (Labeled Text) (TB (Labeled Text) ) Key
 type TBIdent =  Compose Identity  (TB Identity ) Key
 
-overComp f =  f . runIdentity . getCompose
+overComp f =  f . unTB
 
 mapFromTBList :: Ord k => [Compose Identity (TB Identity) k  a] -> Map (Set (Rel k) ) (Compose Identity ( TB Identity ) k  a)
 mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),i))
@@ -511,8 +511,10 @@ nonRef (Compose (Labeled _ (IT j k ))) = nonRef j
 tableNonRef :: Ord k => TB2 k a -> TB2 k a
 tableNonRef = fmap tableNonRef'
 
-tableNonRef' ((m,n)  )  = (m, mapComp (\(KV n)-> KV  (mapFromTBList $ fmap (Compose . Identity ) $ concat $ F.toList $  overComp nonRef <$> n)) n)
+tableNonRef' :: Ord k => TBData k a -> TBData k a
+tableNonRef' (m,n)  = (m, mapComp (KV . rebuildTable . _kvvalues) n)
   where
+    rebuildTable n = mapFromTBList .  concat . F.toList $  traComp nonRef <$> n
     nonRef :: Ord k => TB Identity k a -> [(TB Identity ) k a]
     nonRef (Attr k v ) = [Attr k v]
     nonRef (FKT i _ _ ) = concat (overComp nonRef <$> i)
