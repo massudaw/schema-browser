@@ -4,7 +4,6 @@
 module Schema where
 
 import Types
-import qualified Data.Traversable as Tra
 import Data.Unique
 import qualified Data.Foldable as F
 -- import Step
@@ -32,7 +31,6 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
 import Data.Set (Set)
-import Debug.Trace
 import Control.Concurrent
 
 import Data.Text.Lazy(Text)
@@ -40,7 +38,6 @@ import qualified Data.Text.Lazy as T
 
 import qualified Reactive.Threepenny as R
 
-import Control.Monad.Writer
 
 import Query
 import Postgresql
@@ -115,8 +112,6 @@ keyTables conn userconn (schema ,user) = do
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
           keyMap = M.fromList keyList
-          lookupKey' ::  Map (Text,Text) Key -> (Text,Text) ->  Key
-          lookupKey' keyMap = (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) keyMap )
           lookupKey3 :: (Functor f) => f (Text,Maybe (Vector Text)) -> f (Text,Vector Key)
           lookupKey3 = fmap  (\(t,c)-> (t,maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap)) c) )
           lookupKey2 :: Functor f => f (Text,Text) -> f Key
@@ -280,14 +275,13 @@ ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
 
 -- Load optional not  loaded delayed values
 -- and merge to older values
-loadDelayed :: InformationSchema -> (TBData Key ()) -> (TBData Key Showable) -> IO (Maybe (TBIdx Key Showable))
-loadDelayed inf t@((k,v)) values@((ks,vs))
+loadDelayed :: InformationSchema -> TBData Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
+loadDelayed inf t@(k,v) values@(ks,vs)
   | S.null $ _kvdelayed k = return Nothing
   | L.null delayedattrs  = return Nothing
   | otherwise = do
        let
            whr = T.intercalate " AND " ((\i-> (keyValue i) <>  " = ?") <$> S.toList (_kvpk k) )
-           attr = T.intercalate "," delayedattrs
            table = justError "no table" $ M.lookup (_kvpk k) (pkMap inf)
            delayedTB1 =  (ks,) . _tb $ KV ( filteredAttrs)
            delayed =  mapKey' (kOptional . ifDelayed . ifOptional) (mapValue' (const ()) delayedTB1)
@@ -303,8 +297,5 @@ loadDelayed inf t@((k,v)) values@((ks,vs))
     filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (_kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs)
 
 
-zipInter f = M.intersectionWith f
-zipDelete f = fmap f . M.difference
-zipCreate f =  fmap f . flip M.difference
 
 

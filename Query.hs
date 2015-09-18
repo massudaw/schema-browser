@@ -24,7 +24,7 @@ import Data.Functor.Identity
 import Data.Ord
 import qualified Data.Poset as P
 import qualified Data.Foldable as F
-import Data.Traversable (mapAccumL)
+-- import Data.Traversable (mapAccumL)
 import qualified Data.Traversable as Tra
 import Data.Maybe
 import qualified Data.Interval as Interval
@@ -35,7 +35,6 @@ import qualified Data.ExtendedReal as ER
 
 import GHC.Int
 import Utils
-import Patch
 
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Internal

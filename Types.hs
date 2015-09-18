@@ -21,34 +21,21 @@ module Types where
 import Control.Lens.TH
 import Data.Functor.Apply
 import Data.Bifunctor
-import Data.Maybe
-import Data.Text.Binary
 import GHC.Generics
 import Data.Binary (Binary)
-import Data.Vector.Binary
 import qualified Data.Binary as B
 import Data.Functor.Identity
-import Data.Ord
-import Utils
 import Data.Typeable
-import qualified Data.Traversable as Tra
 import Data.Vector(Vector)
-import qualified Data.Vector as Vector
 import Data.Functor.Classes
 import Data.Foldable (Foldable)
 import qualified Data.Foldable as F
 import qualified Data.Interval as Interval
 import Data.Monoid hiding (Product)
-
 import qualified Data.Text.Lazy as T
 import qualified Data.ByteString as BS
-
-
 import GHC.Stack
-
 import Data.Traversable(Traversable,traverse)
-import Database.PostgreSQL.Simple.Time
-
 import Data.Time
 import Data.Time.Clock.POSIX
 import Control.Monad
@@ -194,19 +181,14 @@ type TB3 f k a = FTB1 f k a
 mapKVMeta f (KVMetadata tn sch s j m k l ) =KVMetadata tn sch (Set.map f s) (map f j) (map (Set.map f) m ) (Set.map f k) (Set.map f l)
 
 
-filterKey f (TB1 (m ,k) ) = TB1 . (m,) . mapComp (\(KV kv) -> KV $ Map.filterWithKey f kv )  $  k
-filterKey f (LeftTB1 k ) = LeftTB1 (filterKey f <$> k)
-filterKey f (ArrayTB1 k ) = ArrayTB1 (filterKey f <$> k)
-  where
-    frstTB f (Attr k i) = Attr  k i
-    frstTB f (IT k i) = IT  k (filterKey f i)
-    frstTB f (FKT k  m  i) = FKT   k  m (filterKey  f i)
+filterKey' f ((m ,k) ) = (m,) . mapComp (\(KV kv) -> KV $ Map.filterWithKey f kv )  $  k
+filterKey f = fmap f
+
 
 traFAttr :: (Traversable g ,Applicative f) => ( FTB a -> f (FTB a) ) -> TB g k a -> f (TB g k a)
 traFAttr f (Attr i v)  = Attr i <$> f v
 traFAttr f (IT i v)  = IT i <$> traverse (traFValue f) v
 traFAttr f (FKT  i rel v)  = liftA2 (\a b -> FKT a rel b)  (traverse (traComp (traFAttr f)) i) (traverse (traFValue f) v)
-
 traFValue f (m ,k) =  fmap ((m,)). traComp (fmap KV . traverse (traComp (traFAttr f)) . _kvvalues )  $  k
 
 
@@ -308,7 +290,7 @@ showTy f (KInterval i) = "(" <>  showTy f i <> ")"
 showTy f (KSerial i) = showTy f i <> "?"
 showTy f (KDelayed i) = showTy f i <> "-"
 showTy f (KTable i) = "t"
-showTy f i = errorWithStackTrace ("no ty for " <> show   i)
+-- showTy f i = errorWithStackTrace ("no ty for " <> show   i)
 
 
 instance Eq Key where
@@ -449,10 +431,10 @@ instance Real a => Real (FTB a) where
 
 instance Real Showable where
   toRational (SDouble i )=  toRational i
-  -- quotRem i = quotRem i
 
 instance Integral a => Integral (FTB a) where
   toInteger (TB1 i) = toInteger i
+  quotRem (TB1 i ) (TB1 j ) = (\(l,m) -> (TB1 l , TB1 m)) $ quotRem i j
 
 instance Integral Showable where
   toInteger (SNumeric i) = toInteger i
@@ -461,6 +443,11 @@ instance Integral Showable where
 
 instance Num a => Num (FTB a) where
     TB1 i + TB1 j = TB1 (i + j)
+    TB1 i - TB1 j = TB1 (i - j)
+    TB1 i * TB1 j = TB1 (i * j)
+    abs (TB1 i)  = TB1 (abs i )
+    signum (TB1 i)  = TB1 (signum i )
+    fromInteger i  = TB1 (fromInteger i )
 
 instance Num Showable where
     SNumeric i +  SNumeric j = SNumeric (i + j)
@@ -477,6 +464,7 @@ instance Num Showable where
 
 instance Fractional a => Fractional (FTB a) where
   fromRational i = TB1 (fromRational i)
+  recip (TB1 i) = TB1 $ recip i
 
 instance Fractional Showable where
   fromRational i = SDouble (fromRational i)
@@ -514,7 +502,7 @@ nonRef (Compose (Unlabeled  ((FKT i  _ _ )))) = concat (nonRef <$> i)
 nonRef (Compose (Labeled _ ((FKT i  _ _ )))) = concat (nonRef <$> i)
 nonRef (Compose (Unlabeled (IT j k ))) = nonRef j
 nonRef (Compose (Labeled _ (IT j k ))) = nonRef j
-nonRef i = errorWithStackTrace (show i)
+-- nonRef i = errorWithStackTrace (show i)
 
 
 

@@ -922,7 +922,7 @@ transaction inf log = withTransaction (conn inf) $ do
 fullDiffEdit :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
 fullDiffEdit inf old@((k1,v1) ) ed@((k2,v2)) = do
    let proj = _kvvalues . unTB
-   ed <- (k2,) . Compose . Identity . KV <$>  Tra.sequence (zipInter (\i j -> Compose <$>  tbDiffEdit inf  (unTB i) (unTB j) ) (proj v1 ) (proj v2))
+   ed <- (k2,) . Compose . Identity . KV <$>  Tra.sequence (M.intersectionWith (\i j -> Compose <$>  tbDiffEdit inf  (unTB i) (unTB j) ) (proj v1 ) (proj v2))
    mod <- liftIO $ updateModAttr inf ed old (lookTable inf (_kvname k2))
    tell (maybeToList mod)
    return ed

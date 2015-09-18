@@ -11,7 +11,6 @@ import Debug.Trace
 import Data.Functor.Identity
 import Data.Scientific hiding(scientific)
 import Data.Bits
-import Data.Aeson
 import Data.Bifunctor
 import qualified  Data.Map as M
 
@@ -19,8 +18,6 @@ import Data.Tuple
 import Data.Time.Clock
 import qualified Data.Char as Char
 -- import Schema
-import Control.Concurrent
-import qualified Data.HashMap.Strict as HM
 import Data.String
 import Data.Attoparsec.Combinator (lookAhead)
 
@@ -30,22 +27,18 @@ import qualified Data.Serialize as Sel
 import Data.Maybe
 import Text.Read
 import qualified Data.ExtendedReal as ER
-import Data.ExtendedReal (Extended)
 import qualified Data.ByteString.Base16 as B16
 import Data.Time.Parse
 import           Database.PostgreSQL.Simple.Arrays as Arrays
 import           Database.PostgreSQL.Simple.Types as PGTypes
-import Data.Graph(stronglyConnComp,flattenSCCs)
 import           Data.Attoparsec.ByteString.Char8 hiding (Result)
-import Data.Traversable (Traversable,traverse)
+import Data.Traversable (traverse)
 import qualified Data.Traversable  as Tra
 -- import Warshal
 import Data.Time.LocalTime
-import Control.Monad(replicateM,join)
 import qualified Data.List as L
 import qualified Data.Vector as Vector
 import qualified Data.Interval as Interval
-import Data.Interval (Interval)
 import qualified Data.ByteString.Char8 as BS
 
 import Data.Monoid
@@ -53,7 +46,6 @@ import Prelude hiding (takeWhile)
 
 
 import qualified Data.Foldable as F
-import Data.Foldable (Foldable)
 import qualified Data.Text.Lazy as T
 import qualified Data.Text.Encoding as TE
 import Data.Text.Lazy (Text)
@@ -345,7 +337,7 @@ parsePrim
   :: KPrim
        -> Parser Showable
 -- parseShowable  i | traceShow i False = error ""
-parsePrim i =  (do
+parsePrim i =  do
    case i of
         PBinary ->  let
               pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}" <* takeWhile (=='\\'))
@@ -391,8 +383,8 @@ parsePrim i =  (do
                 Right i -> pure $ SLineString i
                 Left e -> fail e
         PBounding -> SBounding <$> ((doublequoted box3dParser ) <|> box3dParser)
-        i -> error $ "primitive not implemented - " <> show i
-            ) <?> (show i)
+
+
 -- parseShowable (KArray (KDelayed i))
     -- = (string "t" >> return (ArrayTB1 $ [ SDelayed Nothing]))
 parseShowable (KArray i)
@@ -661,13 +653,6 @@ updatePatch conn old@(mo,_ ) patch@(m ,kold  ,p) t =
     pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> F.toList kold)
     setter = " SET " <> T.intercalate "," (equality .   attrValueName <$> skv   )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
-    expand (POpt  o) = maybe [(LeftTB1 Nothing,"")] expand o
-    expand (PIdx i o) = fmap (("[" <> T.pack (show (i + 1 )) <> "]") <> ) <$>  (maybe [(LeftTB1 Nothing,"")] expand o)
-    -- expand  (PIndex _ _ l) = concat $ maybeToList (fmap expand l)
-    expand (PatchSet l) = concat $ fmap expand l
-    expand (PInter  b i) = [( createShowable i,"")]
-    -- expand i@(PAtom _)   = [(TB1 $ createPrim i,"")]
-    expand i = errorWithStackTrace (show i)
     skv = runIdentity .getCompose <$> F.toList  (_kvvalues $ unTB tbskv)
     (TB1 (_,tbskv)) = isM
     isM :: TB3 Identity Key  Showable

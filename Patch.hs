@@ -15,21 +15,15 @@ module Patch where
 
 -- import Warshal
 import Types
-import Control.Lens.TH
 import Data.Functor.Apply
 import Data.Bifunctor
 import Data.Maybe
 import GHC.Generics
 import Data.Either
-import Data.Text.Binary
 import Data.Binary (Binary)
-import Data.Vector.Binary
-import qualified Data.Binary as B
 import Data.Functor.Identity
-import Data.Ord
 import Utils
-import Data.Typeable
-import Data.Traversable(traverse,sequenceA)
+import Data.Traversable(sequenceA)
 import Data.Vector(Vector)
 import qualified Data.Vector as Vector
 import Data.Functor.Classes
