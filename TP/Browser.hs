@@ -355,11 +355,11 @@ viewerKey inf key = mdo
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $userSelection itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
   inisort <- currentValue (facts tsort)
-  res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (rumors vpt) ,rumors tsort ])
+  res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (($) <$> facts tsort <@> rumors vpt) ,rumors tsort ])
   onEvent ( ((\i j -> foldl applyTable i (expandPSet j)) <$> res2 <@> ediff)) (liftIO .  putMVar tmvar)
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
-  title <- UI.h4  #  sink text (show . maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK)  <$> facts tds) # set UI.class_ "col-xs-8"
+  title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK)  <$> facts tds) # set UI.class_ "col-xs-8"
   insertDiv <- UI.div # set children [title,head cru] # set UI.class_ "row"
   insertDivBody <- UI.div # set children [insertDiv,last cru]# set UI.class_ "row"
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset , filterInp,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"

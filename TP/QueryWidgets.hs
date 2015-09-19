@@ -373,9 +373,9 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
               (liftIO . h2)
           UI.div # set children [listBody,panelItems]
       fun "Changes" = do
-            idx <- currentValue (facts preoldItems)
-            dash <- maybe UI.div (dashBoardAllTableIndex inf (tableName $ table ) . getPK ) idx
-            UI.div # set children  [dash] # sink items (maybe [] (pure . dashBoardAllTableIndex inf (tableName $ table ). getPK )   <$> facts preoldItems )
+            -- idx <- currentValue (facts preoldItems)
+            -- dash <- maybe UI.div (dashBoardAllTableIndex inf (tableName $ table ) . getPK ) idx
+            UI.div # sink0 items (maybe [] (pure . dashBoardAllTableIndex inf (tableName $ table ). getPK )   <$> facts preoldItems )
       fun i = UI.div
   sub <- UI.div # sink items  (pure .fun <$> facts (triding nav)) # set UI.class_ "row"
   cv <- currentValue (facts preoldItems)
@@ -808,7 +808,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> userSelection itemList), rumors tdi]),diffUp]
       st <- stepper cv sel
       inisort <- currentValue (facts sortList)
-      res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [fmap const (rumors vpt) , rumors sortList])
+      res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [fmap const (($) <$> facts sortList <@> rumors vpt) , rumors sortList])
       onEvent ((\i j -> foldl applyTable i (expandPSet j)) <$> res2 <@> ediff)  (liftIO .  putMVar tmvar  )
       let
         reorderPK l = fmap (\i -> justError ("reorder wrong" <> show (ifk,l))  $ L.find ((== i).fst) l )  (keyAttr . unTB <$> ifk)
@@ -836,10 +836,11 @@ fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) 
      let
          fkst = FKT (mapComp (firstTB unKArray)<$> ifk ) (fmap (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
      fks <- traverse (\ix-> do
-         lb <- UI.div # sink UI.text (show . (+ix) <$> facts offsetT ) # set UI.style [("margin-right","5px")]
+         lb <- UI.div # sink UI.text (show . (+ix) <$> facts offsetT ) # set UI.class_ "col-xs-1"
          TrivialWidget tr el<- fkUITable inf pgs constr (fmap (unIndexItens  ix <$> facts offsetT <@> ) <$> plmods) wl (unIndexItens ix <$> offsetT  <*>  oldItems) fkst
+         element el # set UI.class_ "col-xs-11"
          TrivialWidget tr <$> UI.div # set UI.children [lb,el] ) [0..arraySize -1 ]
-     sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShowFlex <$> facts t)) (getElement <$> fks) (pure True : (fmap isJust . triding <$> fks))
+     sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow <$> facts t)) (getElement <$> fks) (pure True : (fmap isJust . triding <$> fks))
      element dv # set children (getElement <$> fks)
      let bres = indexItens arraySize  tb offsetT (triding <$> fks) oldItems
      res <- UI.div # set children [offset ,dv]
