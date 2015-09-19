@@ -5,6 +5,7 @@ import RuntimeTypes
 import Data.Functor.Identity
 import Control.Monad.Writer
 import Control.Monad
+import qualified Data.Binary as B
 import Control.Concurrent
 import qualified Data.Poset as P
 import Reactive.Threepenny
@@ -50,6 +51,7 @@ import Control.Exception
 import Debug.Trace
 import qualified Data.Text.Lazy as T
 import qualified Data.ByteString.Char8 as BSC
+import qualified Data.ByteString.Lazy.Char8 as BSL
 import GHC.Stack
 
 
@@ -183,7 +185,7 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             thisPlugs = filter (hasProd (isNested ((IProd True $ fmap (keyValue._relOrigin) (keyattri i) ))) .  fst) plugItens
             pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> ( thisPlugs)
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
-            pkset = S.map (\ i -> justError "no ref"$   M.lookup i relTable) ( S.fromList $ fmap _relOrigin $ findPK $ tb1 )
+            pkset = S.map fromJust $ S.filter isJust $ S.map (\ i ->  M.lookup i relTable) ( S.fromList $ fmap _relOrigin $ findPK $ tb1 )
 
             restrictConstraint = filter ((`S.isSubsetOf`  pkset) . S.fromList . getRelOrigin  .fst) constr
             convertConstr :: SelTBConstraint
@@ -333,7 +335,7 @@ crudUITable
   ::
      InformationSchema
      -> [Plugins]
-     -> Tidings Bool
+     -> Tidings String
      -> Tidings [TB1 Showable]
      -> [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key Showable)))]
      -> [(Access Text,Event (Maybe (TB1 Showable)))]
@@ -341,12 +343,13 @@ crudUITable
      -> Tidings (Maybe (TB1 Showable))
      -> UI ([Element],Event (PathFTB (TBIdx Key Showable) ) ,Tidings (Maybe (TB1 Showable)))
 crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
-  chw <- checkedWidget open
   (e2,h2) <- liftIO $ newEvent
   (ediff ,hdiff) <- liftIO $ newEvent
   (evdiff ,hvdiff) <- liftIO $ newEvent
-  let fun True = do
-          let table = lookPK inf (S.fromList $ fmap _relOrigin $ findPK $ ftb)
+  nav  <- buttonSetUI open ["None","Editor","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  element nav # set UI.class_ "col-xs-4 pull-right"
+  let table = lookPK inf (S.fromList $ fmap _relOrigin $ findPK $ ftb)
+  let fun "Editor"= do
           preoldItens <- currentValue (facts preoldItems)
           loadedItens <- liftIO$ join <$> traverse (loadDelayed inf (unTB1 ftb) . unTB1 ) preoldItens
           maybe (return ()) (\j -> liftIO $ hvdiff $ fmap (\i -> applyTB1  i (PAtom j) ) preoldItens )  loadedItens
@@ -369,11 +372,16 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
           onEvent (rumors tableb)
               (liftIO . h2)
           UI.div # set children [listBody,panelItems]
-      fun False  = UI.div
-  sub <- UI.div # sink items  (pure .fun <$> facts (triding chw))
+      fun "Changes" = do
+            idx <- currentValue (facts preoldItems)
+            dash <- maybe UI.div (dashBoardAllTableIndex inf (tableName $ table ) . getPK ) idx
+            UI.div # set children  [dash] # sink items (maybe [] (pure . dashBoardAllTableIndex inf (tableName $ table ). getPK )   <$> facts preoldItems )
+      fun i = UI.div
+  sub <- UI.div # sink items  (pure .fun <$> facts (triding nav)) # set UI.class_ "row"
   cv <- currentValue (facts preoldItems)
   bh2 <- stepper  cv (unionWith const e2  (rumors preoldItems))
-  return ([getElement chw ,  sub], ediff ,tidings bh2 (unionWith const e2  (rumors preoldItems)))
+  -- subnet <- UI.div # set children [header,sub] # set UI.class_ "col-xs-10"
+  return ([getElement nav,sub], ediff ,tidings bh2 (unionWith const e2  (rumors preoldItems)))
 
 
 tb1Diff f (TB1 (_,k1) ) (TB1 (_,k2)) =  liftF2 f k1 k2
@@ -792,7 +800,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
       prop <- stepper cv evsel
       let ptds = tidings prop evsel
       tds <- foldr (\i j ->updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap _fkttable.filterJust . snd <$>  plmods)
-      (celem,ediff,pretdi) <-crudUITable inf pgs  (pure False) res3 staticold (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
+      (celem,ediff,pretdi) <-crudUITable inf pgs  (pure "None") res3 staticold (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
       let
           bselection = fmap Just <$> st
           diffUp :: Event ([Maybe (TB1 Showable)])
@@ -808,8 +816,11 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           where knm =  M.lookup ko relTable
         box = TrivialWidget (tidings st sel) (getElement itemList)
         fksel =  (\box -> fmap (\ibox -> FKT (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . catMaybes . fmap lookFKsel $ ibox) rel (fromJust box) ) .  fmap (concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1) $ box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> triding box)
-      fk <- UI.div # set  children ([getElement box,filterInp] <> celem)
-      return $ TrivialWidget fksel fk
+      element box # set UI.class_ "col-xs-5"
+      element filterInp # set UI.class_ "col-xs-3"
+      fk <- UI.div # set  children [getElement box,filterInp,head celem]  # set UI.class_ "row"
+      subnet <- UI.div # set children [fk,last celem] # set UI.class_ "col-xs-12"
+      return $ TrivialWidget fksel subnet
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk rel  (DelayedTB1 (Just tb1 ))) = do
     tr <- fkUITable inf pgs constr  plmods  wl oldItems  (FKT  ilk  rel tb1)
     return $ tr
@@ -949,4 +960,27 @@ tbInsertEdit inf  f@(FKT pk rel2  t2) =
 
 tbInsertEdit inf j = return $ Identity j
 
+dashBoardAll  inf = do
+  els  <-
+    liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,data_index,modification_data from metadata.modification_table WHERE schema_name = ? order by modification_id desc limit 100 " (Only $ schemaName inf)
+  renderChangesTable inf els
 
+renderChangesTable :: InformationSchema ->  [ (Int,LocalTime,Text,Text,Binary BSL.ByteString,Binary BSL.ByteString)] -> UI Element
+renderChangesTable inf els =  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,bidx,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b), (\(Binary d) -> ( either (\i-> UI.td # set UI.text (show i)) (\(_,_,i ) -> UI.td# showModDiv (i:: S.Set (Text ,FTB Showable) ))  (B.decodeOrFail d ))) bidx,  (\(Binary d) -> ( either (\i-> UI.td # set UI.text (show i)) (\(_,_,i ) -> UI.td# showModDiv (i:: [PathAttr Text Showable] ))  (B.decodeOrFail d ))) v] ) <$> els)
+
+dashBoardAllTable  table inf = do
+  els <-
+    liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,data_index,modification_data from metadata.modification_table WHERE schema_name = ? AND  table_name = ?  order by modification_id desc limit 100 " (schemaName inf,table)
+  renderChangesTable inf els
+
+dashBoardAllTableIndex  inf table idx = do
+  els <-
+    liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,data_index,modification_data from metadata.modification_table WHERE schema_name = ? AND  table_name = ?  AND data_index = ? order by modification_id desc limit 100 " (schemaName inf,table, Binary (B.encode (S.map (first keyValue) idx) ))
+  renderChangesTable inf els
+
+
+
+panel t els = UI.div # set items ( UI.h2 # set text (T.unpack t  ) : [UI.div # set items (F.toList els)])
+showModDiv i =  set UI.style [("display","flex")] . set items (showMod i)
+showMod i  = [UI.div # line (show i) ]
+line n =   set  text n

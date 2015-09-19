@@ -204,8 +204,9 @@ logTableModification
 logTableModification inf (TableModification Nothing table i) = do
   time <- getCurrentTime
   let ltime =  utcToLocalTime utc $ time
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,modification_data,schema_name) VALUES (?,?,?,?,?) returning modification_id "  (username inf ,ltime,rawName table, Binary (B.encode $ firstPatch keyValue  i) , schemaName inf)
-  return (TableModification (id) table i )
+      (m,pidx,pdata) = firstPatch keyValue  i
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index,modification_data,schema_name) VALUES (?,?,?,?,?,?) returning modification_id "  (username inf ,ltime,rawName table, Binary (B.encode pidx)  , Binary  (B.encode pdata) , schemaName inf)
+  return (TableModification id table i )
 
 
 withInf d s f = withConn d (f <=< (\conn -> keyTables conn conn (s,"postgres")))

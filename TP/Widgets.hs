@@ -307,12 +307,13 @@ buttonSetB ks h =do
         let ev = pure k <@ UI.click  b
         return (b,ev)
 
-buttonSetUI :: Eq a => [a]  ->  (a -> UI Element -> UI Element ) -> UI (TrivialWidget a)
-buttonSetUI ks h =mdo
+buttonSetUI :: Eq a => Tidings a -> [a]  ->  (a -> UI Element -> UI Element ) -> UI (TrivialWidget a)
+buttonSetUI tini ks h =mdo
+  iniV <- currentValue (facts tini)
   buttons <- mapM (buttonString bv h) ks
   dv <- UI.div # set children (fst <$> buttons)
-  let evs = foldr (unionWith (const)) never (snd <$> buttons)
-  bv <- stepper (head ks) evs
+  let evs = foldr (unionWith (const)) (rumors tini) (snd <$> buttons)
+  bv <- stepper iniV evs
   return (TrivialWidget (tidings bv evs) dv)
     where
       buttonString bv h k= do

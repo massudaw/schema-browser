@@ -249,31 +249,9 @@ intersectionOp i op j = inner op
 showTable t  = rawSchema t <> "." <> rawName t
 
 
-delete
-  :: ToField (TB Identity Key  Showable)  =>
-     Connection ->  TB1 (Showable) -> Table -> IO GHC.Int.Int64
-delete conn kold t = execute conn (fromString $ traceShowId $ T.unpack del) koldPk
-  where
-    equality k = attrValueName k <> "="  <> "?"
-    koldPk = runIdentity . getCompose <$> F.toList (_kvvalues . unTB . tbPK $ tableNonRef kold)
-    pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
-    del = "DELETE FROM " <> rawFullName t <>   pred
-
 findPKM (LeftTB1 i ) =  join $ fmap (findPKM ) i
 findPKM i  = Just $ concat . fmap (\i -> zip (keyattr i) (kattr i )) .F.toList . _kvvalues . unTB . tbPK $ i
-updateAttr
-  :: ToField (TB Identity Key Showable) =>
-     Connection -> TB1  Showable -> TB1 Showable -> Table -> IO GHC.Int.Int64
-updateAttr conn kv kold t = execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk)
-  where
-    equality k = attrValueName k <> "="  <> "?"
-    koldPk = runIdentity . getCompose <$> F.toList ( _kvvalues . unTB $ tbPK (tableNonRef kold))
-    pred   =" WHERE " <> T.intercalate " AND " (equality <$> koldPk)
-    setter = " SET " <> T.intercalate "," (equality <$> skv )
-    up = "UPDATE " <> rawFullName t <> setter <>  pred
-    skv = runIdentity .getCompose <$> F.toList  (_kvvalues $ unTB tbskv)
-    tbskv =  snd isM
-    isM =  justError ("cant diff befor update" <> show (kv,kold)) $ diffUpdateAttr (unTB1 kv) (unTB1 kold)
+
 
 diffUpdateAttr :: TBData Key Showable -> TBData Key Showable -> Maybe (TBData Key Showable)
 diffUpdateAttr  kv kold@(t,_ )  =  fmap ((t,) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . snd . tableNonRef'  $ kv ) (unKV . snd . tableNonRef' $ kold )
@@ -298,30 +276,6 @@ type TBType = TB1 Key
 --
 -- Patch CRUD Postgresql Operations
 --
-
-
-insertAttr
-  :: (MonadIO m
-     ,Functor m
-     ,ToField (TB Identity Key Showable))
-     => (TB2 Key () -> RowParser (TB2 Key Showable) )
-     -> Connection
-     -> TB3 Identity Key Showable
-     -> Table
-     -> m (TB3 Identity  Key Showable)
-insertAttr f conn krec  t = if not (L.null pkList)
-              then   do
-        let iquery = T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName  kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")" <> " RETURNING ROW(" <>  T.intercalate "," (attrValueName <$> pkList ) <> ")"
-        liftIO $ print iquery
-        out :: TB1 Showable <-  fmap head $ liftIO $ queryWith (f (  TB1 . (tableMeta t,) . _tb $  KV (M.fromList $ fmap (\i -> (S.singleton $ Inline $ keyAttr i,Compose (Identity i))) (fmap (const ()) <$> pkList )))) conn (fromString  iquery ) (  kva)
-        return $ mapTB1 (mapComp (\case{ (Attr k' v')-> maybe (Attr k' v')    unTB $ fmap snd $ getCompose $ unTB $ findTB1 (overComp (\case{Attr nk nv ->nk == k'; i-> False} )) out; i-> i} ) ) krec
-              else liftIO $ execute conn (fromString $ traceShowId $ T.unpack $ "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (fmap attrValueName kva) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") kva) <> ")"   )  kva >> return krec
-  where pkList :: [ TB Identity Key Showable]
-        pkList =    L.filter pred  . fmap (runIdentity. getCompose) $ (F.toList $ _kvvalues $ unTB $ tbPK $ tableNonRef krec )
-        pred i = (isSerial . attrType $ i) && (isNothing . unSSerial .attrValue $ i )
-        kva = L.filter (not . pred) $ fmap (runIdentity . getCompose) $ F.toList (_kvvalues $ unTB k)
-        (TB1 (_,k) ) = tableNonRef krec
-
 
 unSComposite (ArrayTB1 i) = i
 unSComposite i = errorWithStackTrace ("unSComposite " <> show i)

@@ -7,6 +7,12 @@ a { text-decoration: none; margin: 0 10px; }
   width: 100%;
   text-align: center;
 }
+
+.row {
+  margin-right: -5px;
+  margin-left: -5px;
+}
+
 button.buttonSet:enabled{
   background-color:darkgray
   
