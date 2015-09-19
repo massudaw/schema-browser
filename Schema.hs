@@ -218,12 +218,13 @@ testParse db sch q = withConnInf db sch (\inf -> do
                                            rpq = selectQuery rpd
                                        print rpd
                                        print rpq
-                                       q <- queryWith_ (fromAttr (unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
+                                       q <- queryWith_ (fromRecord (unTB1 $ unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
                                            )
 
 testFireMetaQuery q = testParse "incendio" "metadata"  q
 testFireQuery q = testParse "incendio" "incendio"  q
+testNutrition q = testParse "incendio" "nutrition"  q
 testAcademia q = testParse "academia" "academia"  q
 
 selectAll inf table   = liftIO $ do

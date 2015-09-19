@@ -265,7 +265,7 @@ safeTail i = tail i
 
 
 
-unIntercalateAtto :: (Alternative f )=> [f a1] -> f a -> f [a1]
+unIntercalateAtto :: (Show a1,Alternative f )=> [f a1] -> f a -> f [a1]
 unIntercalateAtto l s = go l
   where
     go [e] =  fmap pure  e
@@ -282,7 +282,7 @@ unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
 unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverse ( traComp (traFAttr unSOptional) . (mapComp (firstTB unKOptional)) ) i)  j
 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
--- parseAttr i | traceShow i False = error ""
+--parseAttr i | traceShow i False = error ""
 parseAttr (Attr i _ ) = do
   s<- parseShowable (textToPrim <$> keyType i) <?> show i
   return $  Attr i s
@@ -317,8 +317,18 @@ parseLabeledTable (TB1 (me,m)) = (char '('  *> (do
   return (TB1 (me,Compose $ Identity $  KV (M.fromList im) ))) <*  char ')' )
 
 parseRecord  (me,m) = (char '('  *> (do
-  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> M.toList (_kvvalues $ unTB m) ) (char ',')
+  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (M.toList (_kvvalues $ unTB m)) ) (char ',')
   return (me,Compose $ Identity $  KV (M.fromList im) )) <*  char ')' )
+
+
+
+startQuoted =  do
+  i <- lookAhead (takeWhile (inClass "\\\""))
+  readQuotedText (BS.length i)
+
+readQuotedText 0 = plain' ",)}"
+readQuotedText ix =  Tra.sequence (replicate ix backquote  ) *> ( liftA3 (\i j k -> i <> "\"" <> j <> "\""  <> k) (plain0' "\\\"") (readQuotedText (ix +1) ) (plain0' "\\\"")  <|> plain' "\\\"") <*  Tra.sequence (replicate ix backquote )
+      where backquote = satisfy (inClass "\\\"")
 
 
 quotedRec :: Int -> (Int -> Parser a)  -> Parser a
@@ -333,10 +343,17 @@ doublequoted :: Parser a -> Parser a
 doublequoted  p =   (takeWhile (== '\\') >>  char '\"') *>  inner <* ( takeWhile (=='\\') >> char '\"')
   where inner = doublequoted p <|> p
 
+testStr = "(8504801,\"SALPICAO \",99,\"NAO SE APLICA\",1,\"Salad, chicken (\"\"mayo\"\" dressing), with egg, chicken, breast, skin removed before cooking,  mayo type dressing, real,  regular, commercial, salt regular\",202.853,14.261,14.414,3.934,0.551,28.293,16.513,0.049,123.926,0.913,202.763,0,173.16,0.044,0.746,15.643,44.841,55.818,0.056,0.16,4.729,7.519,0.338,0.374,20.357,0.349,1.113,3.081,114.279,2.68,4.015,6.351,5.575,0.666,0.07,2.909,2.091)"
+
+testString = "9292,\"Salad, chicken (\"\"mayo\"\" dressing), with egg, chicken, breast, skin removed before cooking,  mayo type dressing, real,  regular, commercial, salt regular\",\"NAO SE APLICA\",\"Cactus pads (nopales), cooked, boiled\",\"Receita de Ambrosia digitada no NDS 0 fonte \"\"Culin\195\161ria Goiana\"\"\""
+testString2 = "\"Receita de Ambrosia digitada no NDS 0 fonte \"\"Culin\195\161ria Goiana\"\"\""
+ptestString = (parseOnly (unIntercalateAtto (parsePrim <$> [PText,PText,PText,PText,PText]) (char ',') )) testString
+ptestString2 = (parseOnly (unIntercalateAtto (parsePrim <$> [PText]) (char ',') )) testString2
+
 parsePrim
   :: KPrim
        -> Parser Showable
--- parseShowable  i | traceShow i False = error ""
+-- parsePrim i | traceShow i False = error ""
 parsePrim i =  do
    case i of
         PBinary ->  let
@@ -348,7 +365,7 @@ parsePrim i =  do
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
-        PText -> SText . T.fromStrict  . TE.decodeUtf8   <$> ( doublequoted (plain' "\\\"")  <|> plain' ",)}" <|>  (const "''" <$> string "\"\"" ) )
+        PText -> SText . T.fromStrict  . TE.decodeUtf8   <$> ( startQuoted <|> doublequoted (plain' "\\\"")  <|> plain' ",)}" <|>  (const "''" <$> string "\"\"" ) )
         PCnpj -> parsePrim PText
         PCpf -> parsePrim PText
         PInterval ->

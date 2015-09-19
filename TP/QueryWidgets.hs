@@ -418,8 +418,8 @@ processPanelTable inf attrsB res table oldItemsi = do
          sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip contains j) i  ) (facts oldItemsi ) res))
   let    spMap = fmap split . mapEvent id
          crudEdi (Just (TB1 i)) (Just (TB1 j) ) =  fmap (\g -> difftable (tableNonRef' i)  (tableNonRef' g)) $ transaction inf $ fullDiffEdit inf   i j
-         crudIns _ (Just (TB1 j))   =  traverse (\p -> insertPatch fromRecord (conn inf) p table)   ( Just $ patchTB1 j)
-         crudDel (Just (TB1 j)) _ = traverse (\p -> deletePatch (conn inf ) p table) $ Just  (tableMeta table, getPKM j,[])
+         crudIns _ (Just (TB1 j))   =  fmap tableDiff <$> insertMod inf j table
+         crudDel (Just (TB1 j)) _ = fmap tableDiff <$> deleteMod inf j table
 
   diffEdi <- mapEvent id $ crudEdi <$> facts oldItemsi <*> attrsB <@ UI.click editB
   diffDel <- mapEvent id $ crudDel <$> facts (fmap tableNonRef <$> oldItemsi) <*> (fmap tableNonRef <$> attrsB) <@ UI.click deleteB
@@ -429,14 +429,10 @@ processPanelTable inf attrsB res table oldItemsi = do
   diffOut <- UI.span # sink UI.text (show <$> diffs)
   errorOut <- UI.span # sink UI.text (L.intercalate "," <$> bd)
   transaction <- UI.span# set children [insertB,editB,deleteB,errorOut,diffOut]
-  onEvent (fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffDel]) ( liftIO . logTableModification inf . TableModification Nothing table )
-  return (transaction , fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffDel] )
+  -- onEvent (fmap head $ unions $ fmap filterJust [diffIns,diffDel]) ( liftIO . logTableModification inf . TableModification Nothing table )
+  return (transaction , fmap (head) $ unions $ fmap filterJust [diffEdi,diffIns,diffDel] )
 
 
--- lookup pk from attribute list
-editedMod :: (Traversable f ,Ord a) => f a ->  Maybe [(a,b)] -> Maybe (f (a,b))
-editedMod  i  m=  join $ fmap (\mn-> look mn i ) m
-  where look mn k = allMaybes $ fmap (\ki -> fmap (ki,) $  M.lookup ki (M.fromList mn) ) k
 
 
 showFKE v =  UI.div # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec $  v)

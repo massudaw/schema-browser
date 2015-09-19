@@ -10,6 +10,11 @@ MIGRATE TBEither To InlinedTable
 
 Make delayed fields not used by plugins
 
+Reversible Patch
+-- make reverse apply patch
+-- implement reversible patch data type 
+-- implement patch undo stack
+
 JSON Field
 -- Implement a schema free field  
 

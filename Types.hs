@@ -400,7 +400,11 @@ translatedName tb =  maybe (rawName tb) id (rawTranslation tb )
 
 
 data TableModification p
-  = TableModification (Maybe Int) Table p
+  = TableModification
+  { tableId :: (Maybe Int)
+  , tableObj :: Table
+  , tableDiff ::  p
+  }
   deriving(Eq,Show,Functor,Generic)
 
 
