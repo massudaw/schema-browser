@@ -180,6 +180,8 @@ applyTable l i = errorWithStackTrace (show (l,i))
 getPK (TB1 i) = getPKM i
 getPKM (m, k) = Set.fromList (concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(_kvpk m)) (  _kvvalues (runIdentity $ getCompose k)))))
 
+getPKAttr (m, k) = traComp (concat . F.toList . (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(_kvpk m))   )) k
+
 travPath f p (PatchSet i) = foldl f p i
 travPath f p i = f p i
 

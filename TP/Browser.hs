@@ -167,6 +167,7 @@ setup e args w = void $ do
   chooserDiv <- UI.div # set children  (chooserItens <> [ getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
   getBody w #+ [element container]
+  mapEvent (traverse (\inf -> liftIO$ swapMVar  (mvarMap inf) M.empty)) (rumors evDB)
   mapUITEvent body (traverse (\(nav,inf)->
       case nav of
         "Changes" -> do
@@ -283,7 +284,6 @@ chooserTable inf e kitems i = do
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
-  liftIO$ swapMVar  (mvarMap inf) M.empty
   i :: [(Text,Int)] <- liftIO $ query (rootconn inf) (fromString "SELECT table_name,usage from metadata.ordering where schema_name = ?") (Only (schemaName inf))
   let orderMap = Just $ M.fromList  i
   bset <- buttonFSet  (L.sortBy (flip $  comparing (\ pkset -> liftA2 M.lookup  (fmap rawName . flip M.lookup (pkMap inf) $ pkset ) orderMap)) kitems)  initKey ((\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> i) ))<$> filterInpBh) (\i -> case M.lookup i (pkMap inf) of
@@ -363,8 +363,10 @@ viewerKey inf key = mdo
   insertDiv <- UI.div # set children [title,head cru] # set UI.class_ "row"
   insertDivBody <- UI.div # set children [insertDiv,last cru]# set UI.class_ "row"
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset , filterInp,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"
-  itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row" -- # set UI.style [("display","inline-flex")]
-  UI.div # set children ([itemSelec,insertDivBody ] )
+  itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row"
+  tdswhere <- mapTEvent (traverse (selectQueryWhere fromRecord (conn inf) (unTB1 $ tableView  (tableMap inf) table) "=" )) (fmap (F.toList . getPK) <$> tds)
+  e <- UI.div # sink text (show <$> facts tdswhere)
+  UI.div # set children ([itemSelec,e,insertDivBody ] )
 
 
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k

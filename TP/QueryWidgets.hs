@@ -73,7 +73,6 @@ testTable i =  (\t ->  checkTable  t i)
 pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac ) ) = do
   window <- askWindow
   let tdInput = isJust . join . fmap (flip testTable  (fst $ head tf ))  <$>   initItems
-      table = lookTable oinf tname
   headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (facts tdInput)
   trinp <- cutEvent (UI.click headerP) initItems
   m <- liftIO $  foldl (\i (kn,kty) -> (\m -> createFresh  n tname m kn kty) =<< i ) (return $ pluginsMap oinf) (concat fresh)
@@ -124,8 +123,8 @@ pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
   let ecv = (facts oldItems <@ UI.click headerP)
   pgOut <- mapEvent (catchPluginException inf n t . action inf) (ecv)
   return (out, (snd f ,   pgOut ))
-{-
 
+{-
 plugTags inf oldItems (StatefullPlugin n t f action _) = UI.div
 plugTags inf bres (BoundedPlugin2 n t f action) = do
   let tdInput = filter (isJust .  (flip testTable  (fst f))) <$>  bres
@@ -185,9 +184,9 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             thisPlugs = filter (hasProd (isNested ((IProd True $ fmap (keyValue._relOrigin) (keyattri i) ))) .  fst) plugItens
             pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> ( thisPlugs)
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
-            pkset = S.map fromJust $ S.filter isJust $ S.map (\ i ->  M.lookup i relTable) ( S.fromList $ fmap _relOrigin $ findPK $ tb1 )
+            pkset = fmap S.fromList $ allMaybes $  fmap (\ i ->  M.lookup i relTable) ( fmap _relOrigin $ findPK $ tb1 )
 
-            restrictConstraint = filter ((`S.isSubsetOf`  pkset) . S.fromList . getRelOrigin  .fst) constr
+            restrictConstraint = filter ((\v -> maybe False  (v `S.isSubsetOf`)   pkset) . S.fromList . getRelOrigin  .fst) constr
             convertConstr :: SelTBConstraint
             convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> (constr   . justError "no backref" . backFKRef relTable (getRelOrigin f) . Just )) j ) <$>  restrictConstraint
             ftdi = fmap (runIdentity . getCompose ) <$>  tbi
@@ -966,7 +965,7 @@ dashBoardAll  inf = do
     liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,data_index,modification_data from metadata.modification_table WHERE schema_name = ? order by modification_id desc limit 100 " (Only $ schemaName inf)
   renderChangesTable inf els
 
-renderChangesTable :: InformationSchema ->  [ (Int,LocalTime,Text,Text,Binary BSL.ByteString,Binary BSL.ByteString)] -> UI Element
+renderChangesTable :: InformationSchema ->  [(Int,LocalTime,Text,Text,Binary BSL.ByteString,Binary BSL.ByteString)] -> UI Element
 renderChangesTable inf els =  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,bidx,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b), (\(Binary d) -> ( either (\i-> UI.td # set UI.text (show i)) (\(_,_,i ) -> UI.td# showModDiv (i:: S.Set (Text ,FTB Showable) ))  (B.decodeOrFail d ))) bidx,  (\(Binary d) -> ( either (\i-> UI.td # set UI.text (show i)) (\(_,_,i ) -> UI.td# showModDiv (i:: [PathAttr Text Showable] ))  (B.decodeOrFail d ))) v] ) <$> els)
 
 dashBoardAllTable  table inf = do

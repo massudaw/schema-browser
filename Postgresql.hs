@@ -1,4 +1,4 @@
-{-# LANGUAGE ConstraintKinds,TypeFamilies ,DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+{-# LANGUAGE ConstraintKinds,TypeFamilies ,DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,ScopedTypeVariables,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 module Postgresql where
 import Types
 import Data.Ord
@@ -677,5 +677,22 @@ updatePatch conn kv old  t =
     isM =  justError ("cant diff befor update" <> show (kv,old)) $ diffUpdateAttr kv old
 
 
+
+selectQueryWhere
+  :: (MonadIO m ,Functor m ,TF.ToField (TB Identity Key Showable ))
+     => (TBData Key () -> FR.RowParser (TBData Key Showable ))
+     -> Connection
+     -> TB3Data (Labeled Text) Key ()
+     -> Text
+     -> [(Key,FTB Showable )]
+     -> m [TBData Key Showable ]
+selectQueryWhere f conn t rel kold =  do
+        liftIO$ print que
+        liftIO $ queryWith (f (unTlabel' t) ) conn que koldPk
+  where pred = " WHERE " <> T.intercalate " AND " (equality . label . getCompose <$> fmap (labelValue.getCompose) (getPKAttr $ joinNonRef' t))
+        que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred
+        equality k = k <> rel   <> "?"
+        koldPk :: [TB Identity Key Showable ]
+        koldPk = (\(Attr k _) -> Attr k (justError "" $ M.lookup k (M.fromList kold)) ) <$> fmap (labelValue .getCompose.labelValue.getCompose) (getPKAttr $ joinNonRef' t)
 
 

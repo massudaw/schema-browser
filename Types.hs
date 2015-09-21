@@ -486,6 +486,13 @@ type TBIdent =  Compose Identity  (TB Identity ) Key
 
 overComp f =  f . unTB
 
+instance Monad (Labeled Text) where
+  return = Unlabeled
+  Unlabeled i >>= j = j i
+  Labeled t i >>= j = case j i of
+                    Unlabeled i -> Labeled t i
+                    Labeled t0 i -> Labeled (t <> "." <> t0) i
+
 mapFromTBList :: Ord k => [Compose Identity (TB Identity) k  a] -> Map (Set (Rel k) ) (Compose Identity ( TB Identity ) k  a)
 mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),i))
 
@@ -509,6 +516,24 @@ nonRef (Compose (Labeled _ ((FKT i  _ _ )))) = concat (nonRef <$> i)
 nonRef (Compose (Unlabeled (IT j k ))) = nonRef j
 nonRef (Compose (Labeled _ (IT j k ))) = nonRef j
 -- nonRef i = errorWithStackTrace (show i)
+
+-- joinNonRef :: Ord k => TB2 k a -> TB2 k a
+-- joinNonRef = fmap joinNonRef'
+
+-- joinNonRef' :: Ord k => TB3Data f k a -> TB3Data f k a
+joinNonRef' (m,n)  = (m, mapComp (rebuildTable . _kvvalues) n)
+  where
+    -- compJoin :: Monad f => Compose f (Compose f g ) k  a -> Compose f g k a
+    compJoin :: (Functor f, Monad f) =>
+         Compose f (Compose f g) k a -> Compose f g k a
+    compJoin = Compose . join . fmap getCompose . getCompose
+    rebuildTable n =     fmap compJoin . traComp nonRef <$> n
+    nonRef :: (Monad f,Traversable  f,Ord k) => TB f k a -> [Compose f (TB f ) k a]
+    nonRef (Attr k v ) = [Compose . return $ Attr k v]
+    nonRef (FKT i _ _ ) = tra
+        where tra = concat ( fmap compJoin   . traComp  nonRef <$> i)
+    -- nonRef it@(IT j k ) = [return $ (IT  j (joinNonRef k )) ]
+    --
 
 
 
