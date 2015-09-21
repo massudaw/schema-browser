@@ -19,13 +19,13 @@ import Data.Time.Clock
 import qualified Data.Char as Char
 -- import Schema
 import Data.String
-import Data.Attoparsec.Combinator (lookAhead)
+import Data.Attoparsec.Combinator (choice,lookAhead)
 
 import Control.Applicative
 import Control.Monad.IO.Class
 import qualified Data.Serialize as Sel
 import Data.Maybe
-import Text.Read
+import Text.Read hiding (choice)
 import qualified Data.ExtendedReal as ER
 import qualified Data.ByteString.Base16 as B16
 import Data.Time.Parse
@@ -327,9 +327,20 @@ startQuoted =  do
   readQuotedText (BS.length i)
 
 readQuotedText 0 = plain' ",)}"
-readQuotedText ix =  Tra.sequence (replicate ix backquote  ) *> ( liftA3 (\i j k -> i <> "\"" <> j <> "\""  <> k) (plain0' "\\\"") (readQuotedText (ix +1) ) (plain0' "\\\"")  <|> plain' "\\\"") <*  Tra.sequence (replicate ix backquote )
-      where backquote = satisfy (inClass "\\\"")
+readQuotedText ix =  do
+    i <- Tra.sequence (replicate ix backquote  )
+    v <- ( liftA2 (\i j  -> i <> BS.concat  j ) (scapedText ix)  (many1 (liftA2 (<>) (fmap requote (readQuotedText (ix +1))) (scapedText ix )))   <|> scapedText ix )
+    _ <-  string (BS.concat i)
+    return v
+      where backquote = string "\""  <|> string "\\\\" <|> string "\\"
+            requote t = "\"" <> t <> "\""
+            scapedText ix = liftA2 (<>) (plain0' "\\\"") (BS.intercalate "" <$> ( many ((<>) <$> choice (escapedItem  ix <$>  escapes) <*>  plain0' "\\\"")))
 
+              where
+                escapes = [("n","\n"),("r","\r"),("t","\t"),("224","\224"),("225","\225"),("227","\227"),("233","\233"),("237","\237"),("243","\243"),("245","\245"),("231","\231")]
+                escapedItem ix (c, o)  = Tra.sequence (replicate ix (char '\\'))  >> string c >> return o
+testEscaped2 =parseOnly startQuoted  "\"\"<!DOCTYPE HTML PUBLIC \\\\\"\"-//W3C//DTD HTML 4.01//EN\\\\\"\" \\\\\"\"http://www.w3.org/TR/html4/strict.dtd\\\\\"\">\\\\r\\\\n<HTML><HEAD><TITLE>N\\\\227o \\\\233 poss\\\\237vel exibir a p\\\\225gina</TITLE>\\\\r\\\\n<META HTTP-EQUIV=\\\\\"\"Content-Type\\\\\"\" Content=\\\\\"\"text/html; charset=windows-1252\\\\\"\">\\\\r\\\\n<STYLE type=\\\\\"\"text/css\\\\\"\">\\\\r\\\\n  BODY { font: 8pt/12pt verdana }\\\\r\\\\n  H1 { font: 13pt/15pt verdana }\\\\r\\\\n  H2 { font: 8pt/12pt verdana }\\\\r\\\\n  A:link { color: red }\\\\r\\\\n  A:visited { color: maroon }\\\\r\\\\n</STYLE>\\\\r\\\\n</HEAD><BODY><TABLE width=500 border=0 cellspacing=10><TR><TD>\\\\r\\\\n\\\\r\\\\n<h1>N\\\\227o \\\\233 poss\\\\237vel exibir a p\\\\225gina</h1>\\\\r\\\\nN\\\\227o \\\\233 poss\\\\237vel processar a solicita\\\\231\\\\227o neste momento. \\\\tO volume de tr\\\\225fego \\\\233 superior \\\\224 capacidade configurada no site.\\\\r\\\\n<hr>\\\\r\\\\n<p>Tente o seguinte:</p>\\\\r\\\\n<ul>\\\\r\\\\n<li>Clique no bot\\\\227o <a href=\\\\\"\"javascript:location.reload()\\\\\"\">Atualizar</a> ou tente novamente mais tarde.</li>\\\\r\\\\n<li>Se o erro persistir, contate o administrador do site para inform\\\\225-lo de que esse erro continua a ocorrer nesta URL.</li>\\\\r\\\\n</ul>\\\\r\\\\n<h2>Erro HTTP 500.13 - Erro do servidor: o servidor Web est\\\\225 muito ocupado.<br>IIS (Servi\\\\231os de Informa\\\\231\\\\245es da Internet)</h2>\\\\r\\\\n<hr>\\\\r\\\\n<p>Informa\\\\231\\\\245es t\\\\233cnicas (para equipe de suporte)</p>\\\\r\\\\n<ul>\\\\r\\\\n<li>V\\\\225 para <a href=\\\\\"\"http://go.microsoft.com/fwlink/?linkid=8180\\\\\"\">Servi\\\\231os de suporte t\\\\233cnico da Microsoft</a> e execute uma pesquisa de t\\\\237tulo com as palavras <b>HTTP</b> e <b>500</b>.</li>\\\\r\\\\n<li>Abra a <b>Ajuda do IIS</b>, que pode ser acessada no <B>Gerenciador do IIS</B> (inetmgr), e procure pelos t\\\\243picos <b>Monitorando e ajustando o desempenho de aplicativos da Web</b>, <b>Monitoramento de desempenho e ferramentas de escalabilidade</b> e <b>Sobre mensagens de erro personalizadas</b>.</li>\\\\r\\\\n</ul>\\\\r\\\\n\\\\r\\\\n</TD></TR></TABLE></BODY></HTML>\\\\r\\\\n\"\""
+testEscape = parseOnly startQuoted "\"\" <font face=\\\\\"\"Arial\\\\\"\" size=2>\\\\n<p>Microsoft OLE DB Provider for ODBC Drivers</font> <font face=\\\\\"\"Arial\\\\\"\" size=2>erro '80004005'</font>\\\\n<p>\\\\n<font face=\\\\\"\"Arial\\\\\"\" size=2>[IBM][CLI Driver][AS] SQL0104N  Um token inesperado &quot;&lt;&quot; foi encontrado ap&#243;s &quot;&quot;.  Os tokens esperados podem incluir:  &quot;( + - ? : DAY INF NAN NOT RID ROW RRN CASE CAST CHAR DATE DAYS&quot;.  SQLSTATE=42601\\\\r\\\\n</font>\\\\n<p>\\\\n<font face=\\\\\"\"Arial\\\\\"\" size=2>/sistemas/saces/classe/pacote_geral01.asp</font><font face=\\\\\"\"Arial\\\\\"\" size=2>, line 95</font> \"\""
 
 quotedRec :: Int -> (Int -> Parser a)  -> Parser a
 quotedRec i  pint =   (takeWhile (== '\\') >>  char '\"') *> inner <* ( takeWhile (=='\\') >> char '\"'  )
@@ -345,10 +356,13 @@ doublequoted  p =   (takeWhile (== '\\') >>  char '\"') *>  inner <* ( takeWhile
 
 testStr = "(8504801,\"SALPICAO \",99,\"NAO SE APLICA\",1,\"Salad, chicken (\"\"mayo\"\" dressing), with egg, chicken, breast, skin removed before cooking,  mayo type dressing, real,  regular, commercial, salt regular\",202.853,14.261,14.414,3.934,0.551,28.293,16.513,0.049,123.926,0.913,202.763,0,173.16,0.044,0.746,15.643,44.841,55.818,0.056,0.16,4.729,7.519,0.338,0.374,20.357,0.349,1.113,3.081,114.279,2.68,4.015,6.351,5.575,0.666,0.07,2.909,2.091)"
 
+testString3 = "\"StatusCodeException (Status {statusCode = 500, statusMessage = \"\"Internal Server Error\"\"}) [(\"\"Date\"\",\"\"Fri, 04 Sep 2015 20:34:49 GMT\"\"),(\"\"Server\"\",\"\"Microsoft-IIS/6.0\"\"),(\"\"MicrosoftOfficeWebServer\"\",\"\"5.0_Pub\"\"),(\"\"X-Powered-By\"\",\"\"ASP.NET\"\"),(\"\"Content-Length\"\",\"\"527\"\"),(\"\"Content-Type\"\",\"\"text/html; Charset=iso-8859-1\"\"),(\"\"Expires\"\",\"\"Sat, 15 May 1999 21:00:00 GMT\"\"),(\"\"Cache-control\"\",\"\"private\"\"),(\"\"X-Response-Body-Start\"\",\"\" <font face=\\\\\"\"Arial\\\\\"\" size=2>\\\\n<p>Microsoft OLE DB Provider for ODBC Drivers</font> <font face=\\\\\"\"Arial\\\\\"\" size=2>erro '80004005'</font>\\\\n<p>\\\\n<font face=\\\\\"\"Arial\\\\\"\" size=2>[IBM][CLI Driver][AS] SQL0104N  Um token inesperado &quot;&lt;&quot; foi encontrado ap&#243;s &quot;&quot;.  Os tokens esperados podem incluir:  &quot;( + - ? : DAY INF NAN NOT RID ROW RRN CASE CAST CHAR DATE DAYS&quot;.  SQLSTATE=42601\\\\r\\\\n</font>\\\\n<p>\\\\n<font face=\\\\\"\"Arial\\\\\"\" size=2>/sistemas/saces/classe/pacote_geral01.asp</font><font face=\\\\\"\"Arial\\\\\"\" size=2>, line 95</font> \"\"),(\"\"X-Request-URL\"\",\"\"POST http://www2.goiania.go.gov.br:80/sistemas/saces/asp/saces00005a1.asp\"\")] (CJ {expose = [Cookie {cookie_name = \"\"ASPSESSIONIDASQBRSTC\"\", cookie_value = \"\"FJDGMJKAJIGAICINDDHBNBOB\"\", cookie_expiry_time = 3015-01-05 00:00:00 UTC, cookie_domain = \"\"www2.goiania.go.gov.br\"\", cookie_path = \"\"/\"\", cookie_creation_time = 2015-09-04 20:34:48.13491 UTC, cookie_last_access_time = 2015-09-04 20:34:48.135013 UTC, cookie_persistent = False, cookie_host_only = True, cookie_secure_only = False, cookie_http_only = False}]})\""
+
 testString = "9292,\"Salad, chicken (\"\"mayo\"\" dressing), with egg, chicken, breast, skin removed before cooking,  mayo type dressing, real,  regular, commercial, salt regular\",\"NAO SE APLICA\",\"Cactus pads (nopales), cooked, boiled\",\"Receita de Ambrosia digitada no NDS 0 fonte \"\"Culin\195\161ria Goiana\"\"\""
 testString2 = "\"Receita de Ambrosia digitada no NDS 0 fonte \"\"Culin\195\161ria Goiana\"\"\""
 ptestString = (parseOnly (unIntercalateAtto (parsePrim <$> [PText,PText,PText,PText,PText]) (char ',') )) testString
 ptestString2 = (parseOnly (unIntercalateAtto (parsePrim <$> [PText]) (char ',') )) testString2
+ptestString3 = (parseOnly (startQuoted )) testString3
 
 parsePrim
   :: KPrim
@@ -365,7 +379,9 @@ parsePrim i =  do
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
-        PText -> SText . T.fromStrict  . TE.decodeUtf8   <$> ( startQuoted <|> doublequoted (plain' "\\\"")  <|> plain' ",)}" <|>  (const "''" <$> string "\"\"" ) )
+        PText -> let
+            dec = ( startQuoted <|> doublequoted (plain' "\\\"")  <|> plain' ",)}" <|>  (const "''" <$> string "\"\"" ) )
+              in    (fmap SText $ join $ either (fail.show)  (return . T.fromStrict)  . TE.decodeUtf8' <$> dec) <|> (SText . T.fromStrict  . TE.decodeLatin1 <$> dec )
         PCnpj -> parsePrim PText
         PCpf -> parsePrim PText
         PInterval ->
@@ -678,17 +694,17 @@ updatePatch conn kv old  t =
 
 
 
-selectQueryWhere
+selectQueryWherePK
   :: (MonadIO m ,Functor m ,TF.ToField (TB Identity Key Showable ))
      => (TBData Key () -> FR.RowParser (TBData Key Showable ))
      -> Connection
      -> TB3Data (Labeled Text) Key ()
      -> Text
      -> [(Key,FTB Showable )]
-     -> m [TBData Key Showable ]
-selectQueryWhere f conn t rel kold =  do
+     -> m (TBData Key Showable )
+selectQueryWherePK f conn t rel kold =  do
         liftIO$ print que
-        liftIO $ queryWith (f (unTlabel' t) ) conn que koldPk
+        liftIO $ head <$> queryWith (f (unTlabel' t) ) conn que koldPk
   where pred = " WHERE " <> T.intercalate " AND " (equality . label . getCompose <$> fmap (labelValue.getCompose) (getPKAttr $ joinNonRef' t))
         que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred
         equality k = k <> rel   <> "?"

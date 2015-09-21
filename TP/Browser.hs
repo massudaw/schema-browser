@@ -364,7 +364,7 @@ viewerKey inf key = mdo
   insertDivBody <- UI.div # set children [insertDiv,last cru]# set UI.class_ "row"
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset , filterInp,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row"
-  tdswhere <- mapTEvent (traverse (selectQueryWhere fromRecord (conn inf) (unTB1 $ tableView  (tableMap inf) table) "=" )) (fmap (F.toList . getPK) <$> tds)
+  tdswhere <- mapTEvent (traverse (selectQueryWherePK fromRecord (conn inf) (unTB1 $ tableView  (tableMap inf) table) "=" )) (fmap (F.toList . getPK) <$> tds)
   e <- UI.div # sink text (show <$> facts tdswhere)
   UI.div # set children ([itemSelec,e,insertDivBody ] )
 
