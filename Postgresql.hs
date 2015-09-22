@@ -381,7 +381,7 @@ parsePrim i =  do
         PDouble -> SDouble <$> pg_double
         PText -> let
             dec = ( startQuoted <|> doublequoted (plain' "\\\"")  <|> plain' ",)}" <|>  (const "''" <$> string "\"\"" ) )
-              in    (fmap SText $ join $ either (fail.show)  (return . T.fromStrict)  . TE.decodeUtf8' <$> dec) <|> (SText . T.fromStrict  . TE.decodeLatin1 <$> dec )
+              in    (fmap SText $ join $ either (fail.traceShowId . show)  (return . T.fromStrict)  . TE.decodeUtf8' <$> dec) <|> (SText . T.fromStrict  . TE.decodeLatin1 <$> dec )
         PCnpj -> parsePrim PText
         PCpf -> parsePrim PText
         PInterval ->
@@ -709,6 +709,25 @@ selectQueryWherePK f conn t rel kold =  do
         que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred
         equality k = k <> rel   <> "?"
         koldPk :: [TB Identity Key Showable ]
-        koldPk = (\(Attr k _) -> Attr k (justError "" $ M.lookup k (M.fromList kold)) ) <$> fmap (labelValue .getCompose.labelValue.getCompose) (getPKAttr $ joinNonRef' t)
+        koldPk = (\(Attr k _) -> Attr k (justError ("no value for key " <> show k) $ M.lookup k (M.fromList kold)) ) <$> fmap (labelValue .getCompose.labelValue.getCompose) (getPKAttr $ joinNonRef' t)
+
+
+selectQueryWhere
+  :: (MonadIO m ,Functor m )
+--      => (TBData Key () -> FR.RowParser (TBData Key Showable ))
+     => Connection
+     -> TB3Data (Labeled Text) Key ()
+     -> Text
+     -> [(Key,FTB Showable )]
+     -> m [TBData Key Showable]
+selectQueryWhere  conn t rel kold =  do
+        liftIO$ print que
+        let filterRec = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList (fst <$> kold))) . S.fromList . fmap _relOrigin.  keyattr )
+        liftIO  $ fmap filterRec <$> queryWith (fromRecord ( unTlabel' t) ) conn que koldPk
+  where pred = " WHERE " <> T.intercalate " AND " (equality . label <$> filter ((`S.isSubsetOf` (S.fromList (fst <$> kold))). S.singleton . keyAttr . labelValue ) ( fmap (getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)))
+        que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred
+        equality k = k <> rel   <> "?"
+        koldPk :: [TB Identity Key Showable ]
+        koldPk = catMaybes $ (\(Attr k _) -> Attr k <$> ( M.lookup k (M.fromList kold)) ) <$> fmap (labelValue .getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)
 
 

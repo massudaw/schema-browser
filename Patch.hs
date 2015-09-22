@@ -77,7 +77,7 @@ data PathFTB   a
   | PInter Bool (PathFTB a)
   | PatchSet [PathFTB a]
   | PAtom a
-  deriving(Show,Eq,Ord,Functor,Generic)
+  deriving(Show,Eq,Ord,Functor,Generic,Foldable)
 
 type family Index k
 type instance Index Showable = Showable
@@ -85,12 +85,12 @@ type instance Index (TBData k a ) =  TBIdx k a
 
 type PatchConstr k a = (a ~ Index a, Ord a , Show a,Show k , Ord k)
 
-type TBIdx  k a = (KVMetadata k, Set (k ,FTB a ),[PathAttr k a])
+type TBIdx  k a = (KVMetadata k, [(k ,FTB a )],[PathAttr k a])
 
 data PathAttr k a
   = PAttr k (PathFTB a)
   | PInline k (PathFTB  (TBIdx k a ))
-  deriving(Show,Eq,Ord,Generic)
+  deriving(Show,Eq,Ord,Generic,Foldable,Functor)
 
 instance (Binary k ) => Binary (PathFTB k )
 instance (Binary k ,Binary a) => Binary (PathAttr k a)
@@ -106,7 +106,7 @@ data PathTID
 
 
 firstPatch :: (Ord a ,Ord k , Ord j ) => (k -> j ) -> TBIdx k a -> TBIdx j a
-firstPatch f (i,j,k) = (mapKVMeta f i , Set.map (first f) j ,fmap (firstPatchAttr f) k)
+firstPatch f (i,j,k) = (mapKVMeta f i , fmap (first f) j ,fmap (firstPatchAttr f) k)
 
 firstPatchAttr :: (Ord k , Ord j ,Ord a ) => (k -> j ) -> PathAttr k a -> PathAttr j a
 firstPatchAttr f (PAttr k a) = PAttr (f k) a
@@ -178,9 +178,10 @@ applyTable l i = errorWithStackTrace (show (l,i))
 
 
 getPK (TB1 i) = getPKM i
-getPKM (m, k) = Set.fromList (concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(_kvpk m)) (  _kvvalues (runIdentity $ getCompose k)))))
+getPKM (m, k) = (concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(_kvpk m)) (  _kvvalues (runIdentity $ getCompose k)))))
 
 getPKAttr (m, k) = traComp (concat . F.toList . (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(_kvpk m))   )) k
+getAttr (m, k) = traComp (concat . F.toList) k
 
 travPath f p (PatchSet i) = foldl f p i
 travPath f p i = f p i

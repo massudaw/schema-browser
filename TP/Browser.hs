@@ -133,7 +133,7 @@ poller db plugs = do
                   tdInput i =  isJust  $ testTable i (fst f)
                   tdOutput1 i =   not $ isJust  $ testTable i (snd f)
               let elem inf  = fmap catMaybes .  mapM (\inp -> do
-                          o  <- elemp inf (Just inp)
+                          o  <- catchPluginException inf a n (getPK inp)    (elemp inf (Just inp))
                           let diff =   join $ (\i j -> diffUpdateAttr   (unTB1 i ) (unTB1 j)) <$>  o <*> Just inp
                           maybe (return Nothing )  (\i -> updateModAttr inf (unTB1 $ fromJust o) (unTB1 inp) (lookTable inf a )) diff )
 
@@ -162,7 +162,7 @@ setup e args w = void $ do
   be <- stepper [] (unions $ fmap snd e)
   pollRes <- UI.div # sink UI.text (show <$> be)
   return w # set title (host bstate <> " - " <>  dbn bstate)
-  nav  <- buttonSetUI (pure "Editor" ) ["Editor","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  nav  <- buttonSetUI (pure "Editor" ) ["Editor","Changes","Exception"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   chooserDiv <- UI.div # set children  (chooserItens <> [ getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
@@ -172,6 +172,9 @@ setup e args w = void $ do
       case nav of
         "Changes" -> do
             dash <- dashBoardAll inf
+            element body # set UI.children [dash] # set UI.class_ "row"
+        "Exception" -> do
+            dash <- exceptionAll inf
             element body # set UI.children [dash] # set UI.class_ "row"
         "Editor" -> do
             let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
@@ -267,12 +270,6 @@ tableList table inf tb1 = do
 -}
 
 
-
-dashBoard inf = do
-  els :: [(Text,Vector.Vector (Binary BSL.ByteString))] <-
-    liftIO $ query (rootconn inf) "SELECT table_name,array_agg(modification_data) from metadata.modification_table WHERE schema_name = ? group by table_name" (Only $ schemaName inf)
-  UI.div  # set items ( (\(b,v)-> panel (translatedName $ lookTable inf b)  $ fmap (\(Binary d) -> ( (UI.div # showModDiv ((B.decode d :: TBIdx Text Showable))))) v ) <$> els)
-
 attrLine i e   = do
   let nonRec = tableNonrec i
       attr i (k,v) = set  (strAttr (T.unpack $ keyValue k)) (renderShowable v) i
@@ -294,7 +291,7 @@ chooserTable inf e kitems i = do
       liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
   tbChooser <- UI.div # set children [filterInp,getElement bset] # set UI.class_ "col-xs-2"
-  nav  <- buttonSetUI (pure "Editor") ["Editor","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  nav  <- buttonSetUI (pure "Editor") ["Editor","Exception","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   header <- UI.h1 # sink text (T.unpack . translatedName .  justError "no table " . flip M.lookup (pkMap inf) <$> facts bBset ) # set UI.class_ "col-xs-7"
   chooserDiv <- UI.div # set children  [header ,getElement nav] # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
@@ -307,7 +304,10 @@ chooserTable inf e kitems i = do
   mapUITEvent body (\(nav,table)->
       case nav of
         "Changes" -> do
-            dash <- dashBoardAllTable (tableName $ justError "no table " $ M.lookup table (pkMap inf)) inf
+            dash <- dashBoardAllTable inf (justError "no table " $ M.lookup table (pkMap inf))
+            element body # set UI.children [dash]
+        "Exception" -> do
+            dash <- exceptionAllTable inf (justError "no table " $ M.lookup table (pkMap inf))
             element body # set UI.children [dash]
         "Editor" -> do
             span <- viewerKey inf table
@@ -315,6 +315,7 @@ chooserTable inf e kitems i = do
         ) $ liftA2 (,) (triding nav) bBset
   subnet <- UI.div # set children [chooserDiv,body] # set UI.class_ "col-xs-10"
   UI.div # set children [tbChooser, subnet ]  # set UI.class_ "row"
+
 
 viewerKey
   ::
@@ -364,9 +365,9 @@ viewerKey inf key = mdo
   insertDivBody <- UI.div # set children [insertDiv,last cru]# set UI.class_ "row"
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset , filterInp,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row"
-  tdswhere <- mapTEvent (traverse (selectQueryWherePK fromRecord (conn inf) (unTB1 $ tableView  (tableMap inf) table) "=" )) (fmap (F.toList . getPK) <$> tds)
-  e <- UI.div # sink text (show <$> facts tdswhere)
-  UI.div # set children ([itemSelec,e,insertDivBody ] )
+  -- tdswhere <- mapTEvent (traverse (selectQueryWherePK fromRecord (conn inf) (unTB1 $ tableView  (tableMap inf) table) "=" )) (fmap (F.toList . getPK) <$> tds)
+  -- e <- UI.div # sink text (show <$> facts tdswhere)
+  UI.div # set children ([itemSelec,insertDivBody ] )
 
 
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k

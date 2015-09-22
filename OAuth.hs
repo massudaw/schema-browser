@@ -13,7 +13,6 @@ import Network.HTTP.Conduit  -- (httpLbs,parseUrl,withManager,responseBody,(..))
 import Control.Applicative
 import Control.Monad.IO.Class
 import Data.Monoid
-import Postgresql
 import Data.Maybe
 import Query
 import Schema

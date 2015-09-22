@@ -13,6 +13,7 @@ import Control.Monad.IO.Class
 import qualified Data.Binary as B
 import GHC.Stack
 import Data.Monoid
+import Data.Bifunctor(first)
 import Utils
 import Control.Exception
 import System.Time.Extra
@@ -86,7 +87,11 @@ data InformationSchema
   , mvarMap :: MVar (Map Table ({-R.Event [TB1 Showable], R.Handler [TB1 Showable], -} MVar  [TB1 Showable], R.Tidings [TB1 Showable]))
   , conn :: Connection
   , rootconn :: Connection
+  , metaschema :: Maybe InformationSchema
   }
+
+meta inf = maybe inf id (metaschema inf)
+
 
 type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 
@@ -142,7 +147,10 @@ keyTables conn userconn (schema ,user) = do
                                 in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
        let (i1,i2,i3) = (keyMap, M.fromList $ filter (not.S.null .fst)  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
        mvar <- newMVar M.empty
-       return  $ InformationSchema schema user i1 i2 i3 M.empty mvar  userconn conn
+       metaschema <- if (schema /= "metadata")
+          then Just <$> keyTables  conn userconn ("metadata",user)
+          else return Nothing
+       return  $ InformationSchema schema user i1 i2 i3 M.empty mvar  userconn conn metaschema
 
 addRec i j
   | i == j = RecJoin
@@ -189,11 +197,12 @@ newKey name ty p = do
   return $ Key name Nothing    p Nothing un ty
 
 
-catchPluginException :: InformationSchema -> Text -> Text -> IO (Maybe a) -> IO (Maybe a)
-catchPluginException inf pname tname i = do
+catchPluginException :: InformationSchema -> Text -> Text -> [(Key, FTB Showable)] -> IO (Maybe a) -> IO (Maybe a)
+catchPluginException inf pname tname idx i = do
   i `catch` (\e  -> do
                 t <- getCurrentTime
-                execute (rootconn inf) "INSERT INTO metadata.plugin_exception (schema_name,table_name,plugin_name,exception,instant) values(?,?,?,?,?)" (schemaName inf,pname,tname,show (e :: SomeException) ,t )
+                print (t,e)
+                execute (rootconn inf) "INSERT INTO metadata.plugin_exception (username,schema_name,table_name,plugin_name,exception,data_index,instant) values(?,?,?,?,?,?,?)" (username inf , schemaName inf,pname,tname,show (e :: SomeException) ,Binary (B.encode (fmap (first keyValue) idx) ), t )
                 return Nothing )
 
 
@@ -210,6 +219,7 @@ logTableModification inf (TableModification Nothing table i) = do
 
 
 withInf d s f = withConn d (f <=< (\conn -> keyTables conn conn (s,"postgres")))
+
 withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres")) )
 
 

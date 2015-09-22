@@ -82,8 +82,8 @@ data KVMetadata k
   }deriving(Eq,Ord,Show,Generic)
 
 kvMetaFullName m = _kvschema m <> "." <> _kvname m
-
-filterTB1 f (TB1 (m ,i)) = TB1 (m , mapComp (filterKV f) i)
+filterTB1 f = fmap (filterTB1' f)
+filterTB1' f ((m ,i)) = (m , mapComp (filterKV f) i)
 mapTB1  f (TB1 (m, i))  =  TB1 (m ,mapComp (mapKV f) i )
 mapKV f (KV  n) =  KV  (fmap f n)
 filterKV i (KV n) =  KV $ Map.fromList $ L.filter (i . snd) $ Map.toList  n
@@ -93,7 +93,6 @@ findTB1  i (TB1 (m, j) )  = mapComp (Compose . findKV i) j
 
 findTB1'  i (TB1 (m, j) )  = Map.lookup  i (_kvvalues $ runIdentity $ getCompose j  )
 findTB1'  i (LeftTB1  j )  = join $ findTB1' i <$> j
-
 
 
 mapTBF f (Attr i k) = (Attr i k )

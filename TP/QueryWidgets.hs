@@ -121,7 +121,7 @@ pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
   details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (mapValue (const ())) <$> facts tdInput)
   out <- UI.div # set children [headerP,details]
   let ecv = (facts oldItems <@ UI.click headerP)
-  pgOut <- mapEvent (catchPluginException inf n t . action inf) (ecv)
+  pgOut <- mapEvent (\v -> catchPluginException inf n t (getPK $ justError "ewfew"  v) . action inf $ v)  ecv
   return (out, (snd f ,   pgOut ))
 
 {-
@@ -345,7 +345,7 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
   (e2,h2) <- liftIO $ newEvent
   (ediff ,hdiff) <- liftIO $ newEvent
   (evdiff ,hvdiff) <- liftIO $ newEvent
-  nav  <- buttonSetUI open ["None","Editor","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonSetUI open ["None","Exception","Editor","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-4 pull-right"
   let table = lookPK inf (S.fromList $ fmap _relOrigin $ findPK $ ftb)
   let fun "Editor"= do
@@ -372,9 +372,9 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
               (liftIO . h2)
           UI.div # set children [listBody,panelItems]
       fun "Changes" = do
-            -- idx <- currentValue (facts preoldItems)
-            -- dash <- maybe UI.div (dashBoardAllTableIndex inf (tableName $ table ) . getPK ) idx
-            UI.div # sink0 items (maybe [] (pure . dashBoardAllTableIndex inf (tableName $ table ). getPK )   <$> facts preoldItems )
+            UI.div # sink0 items (maybe [] (pure . dashBoardAllTableIndex . (inf,table,) . getPK )   <$> facts preoldItems )
+      fun "Exception" = do
+            UI.div # sink0 items (maybe [] (pure . exceptionAllTableIndex . (inf,table,). getPK )   <$> facts preoldItems )
       fun i = UI.div
   sub <- UI.div # sink items  (pure .fun <$> facts (triding nav)) # set UI.class_ "row"
   cv <- currentValue (facts preoldItems)
@@ -960,23 +960,74 @@ tbInsertEdit inf  f@(FKT pk rel2  t2) =
 
 tbInsertEdit inf j = return $ Identity j
 
-dashBoardAll  inf = do
-  els  <-
-    liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,data_index,modification_data from metadata.modification_table WHERE schema_name = ? order by modification_id desc limit 100 " (Only $ schemaName inf)
-  renderChangesTable inf els
+rendererHeaderUI k v = const (renderer k) v
+  where renderer k = UI.th # set items [UI.div # set text (T.unpack $ keyValue k ) , UI.div # set text (T.unpack $ showTy id (keyType k)) ]
 
-renderChangesTable :: InformationSchema ->  [(Int,LocalTime,Text,Text,Binary BSL.ByteString,Binary BSL.ByteString)] -> UI Element
-renderChangesTable inf els =  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,bidx,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b), (\(Binary d) -> ( either (\i-> UI.td # set UI.text (show i)) (\(_,_,i ) -> UI.td# showModDiv (i:: S.Set (Text ,FTB Showable) ))  (B.decodeOrFail d ))) bidx,  (\(Binary d) -> ( either (\i-> UI.td # set UI.text (show i)) (\(_,_,i ) -> UI.td# showModDiv (i:: [PathAttr Text Showable] ))  (B.decodeOrFail d ))) v] ) <$> els)
+rendererShowableUI k  v= renderer (keyValue k) v
+  where renderer "modification_data" (SBinary i ) = ( either (\i-> UI.td # set UI.text (show i)) (\(_,_,i ) -> UI.td # set items (showPatch <$> (i:: [PathAttr Text Showable]) ))  (B.decodeOrFail (BSL.fromStrict i) ))
+        renderer "data_index" (SBinary i ) = (either (\i-> UI.td # set UI.text (show i)) (\(_,_,i ) -> UI.td # set items (showIndex <$> (i:: [((Text ,FTB Showable) )])))  (B.decodeOrFail (BSL.fromStrict i) ))
+        renderer k i = UI.td # set text (renderPrim i)
+        showPatch l = UI.div # set text (show $ fmap renderPrim l)
+        showIndex l = UI.div # set text (show $ renderShowable <$> l)
 
-dashBoardAllTable  table inf = do
-  els <-
-    liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,data_index,modification_data from metadata.modification_table WHERE schema_name = ? AND  table_name = ?  order by modification_id desc limit 100 " (schemaName inf,table)
-  renderChangesTable inf els
 
-dashBoardAllTableIndex  inf table idx = do
-  els <-
-    liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,data_index,modification_data from metadata.modification_table WHERE schema_name = ? AND  table_name = ?  AND data_index = ? order by modification_id desc limit 100 " (schemaName inf,table, Binary (B.encode (S.map (first keyValue) idx) ))
-  renderChangesTable inf els
+renderMetaHeader :: (Key -> a -> (UI Element) ) -> InformationSchema -> TBData Key a -> TBData Key  (UI Element)
+renderMetaHeader rend inf = mapFAttr (\(Attr k v) -> Attr k (rend  k <$> v ))
+    where
+          mapFAttr f (a,kv) = (a,mapComp (KV . fmap (mapComp f )  .  _kvvalues)  kv)
+            where match i@(Attr k v) = f i
+                  match i@(FKT l rel t) = FKT (mapComp f  <$> l ) rel (fmap (renderMetaHeader rend inf) t )
+                  match i@(IT l t) = IT l (fmap (renderMetaHeader rend inf) t )
+
+{-
+renderMetaTable :: UI Element -> InformationSchema -> TBData Key Showable -> TBData Key  (UI Element)
+renderMetaTable el inf = mapFAttr (\(Attr k v) -> Attr k (renderer (keyValue k) <$> v))
+    where
+          renderer "modification_data" (SBinary i ) = ( either (\i-> el # set UI.text (show i)) (\(_,_,i ) -> el # set items (showPatch <$> (i:: [PathAttr Text Showable]) ))  (B.decodeOrFail (BSL.fromStrict i) ))
+          renderer "data_index" (SBinary i ) = (either (\i-> el # set UI.text (show i)) (\(_,_,i ) -> el # set items (showIndex <$> (i:: [((Text ,FTB Showable) )])))  (B.decodeOrFail (BSL.fromStrict i) ))
+          renderer k i = el # set text (renderPrim i)
+          mapFAttr f (a,kv) = (a,mapComp (KV . fmap (mapComp f )  .  _kvvalues)  kv)
+            where match i@(Attr k v) = f i
+                  match i@(FKT l rel t) = FKT (mapComp f  <$> l ) rel (fmap (renderMetaTable el inf) t )
+                  match i@(IT l t) = IT l (fmap (renderMetaTable el inf) t )
+          showPatch l = UI.div # set text (show $ fmap renderPrim l)
+          showIndex l = UI.div # set text (show $ renderShowable <$> l)
+-}
+
+testUI e = startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" })  $ \w ->  do
+              els <- e
+              getBody w #+ [els]
+              return ()
+
+dashBoardAll inf = metaAllTableIndex inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ) ]
+
+exceptionAll inf = metaAllTableIndex inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ) ]
+
+
+exceptionAllTable inf table = metaAllTableIndex inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ) ]
+
+dashBoardAllTable  inf table = metaAllTableIndex inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ) ]
+
+
+exceptionAllTableIndex e@(inf,table,index) =   metaAllTableIndex inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ),("data_index",TB1 $ SBinary $ BSL.toStrict $ B.encode $ fmap (first keyValue)index) ]
+
+dashBoardAllTableIndex e@(inf,table,index) =   metaAllTableIndex inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ),("data_index",TB1 $ SBinary $ BSL.toStrict $ B.encode $ fmap (first keyValue)index) ]
+
+
+
+metaAllTableIndex inf metaname env =   do
+  let modtable = lookTable (meta inf) tname
+      tname = metaname
+      modtablei = tableView (tableMap $ meta inf) modtable
+      envK = fmap (first (lookKey (meta inf) tname)) env
+  out <- reverse <$> selectQueryWhere (rootconn inf) (unTB1 modtablei) "=" envK
+  let
+      filterRec = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList (fst <$> envK ))) . S.fromList . fmap _relOrigin.  keyattr )
+      h = UI.tr # set UI.class_ "row" # set items (F.toList . snd $  renderMetaHeader rendererHeaderUI inf (filterRec $ unTlabel' $ unTB1 modtablei) )
+      i = (\i -> UI.tr # set UI.class_ "row" #  set items i) .  F.toList . snd . renderMetaHeader rendererShowableUI inf <$> out
+      t = UI.table # set UI.class_ "table table-bordered table-striped" # set items (h:i)
+  t
+
 
 
 

@@ -31,7 +31,6 @@ import Utils
 import Schema
 import Data.Char (toLower)
 import PandocRenderer
-import Postgresql
 import Data.Maybe
 import Data.Functor.Identity
 import Control.Applicative
@@ -55,7 +54,6 @@ import Data.Text.Lazy (Text)
 import qualified Data.Set as S
 
 
-import Database.PostgreSQL.Simple
 import qualified Data.Map as M
 import Data.String
 
@@ -66,6 +64,7 @@ import Crea
 lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" (fst renderProjectPricingA )  ( snd renderProjectPricingA )
 lplugContract = BoundedPlugin2 "Contrato" "pricing" (fst renderProjectContract )  ( snd renderProjectContract )
 lplugReport = BoundedPlugin2 "Relatório " "pricing" (fst renderProjectReport )  ( snd renderProjectReport )
+
 
 
 siapi2Plugin = BoundedPlugin2  pname tname (staticP url) elemp
@@ -81,7 +80,7 @@ siapi2Plugin = BoundedPlugin2  pname tname (staticP url) elemp
       atR "andamentos" (proc t -> do
         odxR "andamento_date" -<  t
         odxR "andamento_description" -<  t) -< t
-      b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else liftIO (siapi2  i j)  )) -<  (liftA2 (,) protocolo ano )
+      b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else liftIO (siapi2  i j >> error "siapi2 test error")  )) -<  (liftA2 (,) protocolo ano )
       let ao bv  = Just $ tblist   [iat bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
           convertAndamento [da,des] =  tblist $ fmap attrT  $  ([("andamento_date",TB1 . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))])
@@ -444,7 +443,7 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
               odxR "municipio" -< t
               odxR "bairro" -< t
 
-testPlugin  db sch p = withConnInf db sch (\inf -> do
+{- testPlugin  db sch p = withConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup (_bounds p) (tableMap inf))
                                            bds = _arrowbounds p
                                            rpd = accessTB  (fst bds <> snd bds) (markDelayed True rp)
@@ -454,6 +453,6 @@ testPlugin  db sch p = withConnInf db sch (\inf -> do
                                        return $ q
                                            )
 
+-}
 
-
-plugList = [lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}{-queryCNPJStatefull,queryCPFStatefull,-}queryArtAndamento]
+plugList = [lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}queryCNPJStatefull,queryCPFStatefull,queryArtAndamento]
