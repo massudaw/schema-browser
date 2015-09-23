@@ -342,12 +342,7 @@ readQuotedText ix =  do
 testEscaped2 =parseOnly startQuoted  "\"\"<!DOCTYPE HTML PUBLIC \\\\\"\"-//W3C//DTD HTML 4.01//EN\\\\\"\" \\\\\"\"http://www.w3.org/TR/html4/strict.dtd\\\\\"\">\\\\r\\\\n<HTML><HEAD><TITLE>N\\\\227o \\\\233 poss\\\\237vel exibir a p\\\\225gina</TITLE>\\\\r\\\\n<META HTTP-EQUIV=\\\\\"\"Content-Type\\\\\"\" Content=\\\\\"\"text/html; charset=windows-1252\\\\\"\">\\\\r\\\\n<STYLE type=\\\\\"\"text/css\\\\\"\">\\\\r\\\\n  BODY { font: 8pt/12pt verdana }\\\\r\\\\n  H1 { font: 13pt/15pt verdana }\\\\r\\\\n  H2 { font: 8pt/12pt verdana }\\\\r\\\\n  A:link { color: red }\\\\r\\\\n  A:visited { color: maroon }\\\\r\\\\n</STYLE>\\\\r\\\\n</HEAD><BODY><TABLE width=500 border=0 cellspacing=10><TR><TD>\\\\r\\\\n\\\\r\\\\n<h1>N\\\\227o \\\\233 poss\\\\237vel exibir a p\\\\225gina</h1>\\\\r\\\\nN\\\\227o \\\\233 poss\\\\237vel processar a solicita\\\\231\\\\227o neste momento. \\\\tO volume de tr\\\\225fego \\\\233 superior \\\\224 capacidade configurada no site.\\\\r\\\\n<hr>\\\\r\\\\n<p>Tente o seguinte:</p>\\\\r\\\\n<ul>\\\\r\\\\n<li>Clique no bot\\\\227o <a href=\\\\\"\"javascript:location.reload()\\\\\"\">Atualizar</a> ou tente novamente mais tarde.</li>\\\\r\\\\n<li>Se o erro persistir, contate o administrador do site para inform\\\\225-lo de que esse erro continua a ocorrer nesta URL.</li>\\\\r\\\\n</ul>\\\\r\\\\n<h2>Erro HTTP 500.13 - Erro do servidor: o servidor Web est\\\\225 muito ocupado.<br>IIS (Servi\\\\231os de Informa\\\\231\\\\245es da Internet)</h2>\\\\r\\\\n<hr>\\\\r\\\\n<p>Informa\\\\231\\\\245es t\\\\233cnicas (para equipe de suporte)</p>\\\\r\\\\n<ul>\\\\r\\\\n<li>V\\\\225 para <a href=\\\\\"\"http://go.microsoft.com/fwlink/?linkid=8180\\\\\"\">Servi\\\\231os de suporte t\\\\233cnico da Microsoft</a> e execute uma pesquisa de t\\\\237tulo com as palavras <b>HTTP</b> e <b>500</b>.</li>\\\\r\\\\n<li>Abra a <b>Ajuda do IIS</b>, que pode ser acessada no <B>Gerenciador do IIS</B> (inetmgr), e procure pelos t\\\\243picos <b>Monitorando e ajustando o desempenho de aplicativos da Web</b>, <b>Monitoramento de desempenho e ferramentas de escalabilidade</b> e <b>Sobre mensagens de erro personalizadas</b>.</li>\\\\r\\\\n</ul>\\\\r\\\\n\\\\r\\\\n</TD></TR></TABLE></BODY></HTML>\\\\r\\\\n\"\""
 testEscape = parseOnly startQuoted "\"\" <font face=\\\\\"\"Arial\\\\\"\" size=2>\\\\n<p>Microsoft OLE DB Provider for ODBC Drivers</font> <font face=\\\\\"\"Arial\\\\\"\" size=2>erro '80004005'</font>\\\\n<p>\\\\n<font face=\\\\\"\"Arial\\\\\"\" size=2>[IBM][CLI Driver][AS] SQL0104N  Um token inesperado &quot;&lt;&quot; foi encontrado ap&#243;s &quot;&quot;.  Os tokens esperados podem incluir:  &quot;( + - ? : DAY INF NAN NOT RID ROW RRN CASE CAST CHAR DATE DAYS&quot;.  SQLSTATE=42601\\\\r\\\\n</font>\\\\n<p>\\\\n<font face=\\\\\"\"Arial\\\\\"\" size=2>/sistemas/saces/classe/pacote_geral01.asp</font><font face=\\\\\"\"Arial\\\\\"\" size=2>, line 95</font> \"\""
 
-quotedRec :: Int -> (Int -> Parser a)  -> Parser a
-quotedRec i  pint =   (takeWhile (== '\\') >>  char '\"') *> inner <* ( takeWhile (=='\\') >> char '\"'  )
-  where inner = quotedRec (i+1) pint <|> p
-        p = pint i
 
-plainsInd i = (char '\\' >> return "") <|> plains (fmap (replicate i '\"' <>)  [")",",","}"])
 
 
 doublequoted :: Parser a -> Parser a
@@ -560,8 +555,6 @@ diffInterval = (do
     [d,h,m,s] -> secondsToDiffTime (round $ d *3600*24 + h * 3600 + (60  ) * m + s)
     v -> errorWithStackTrace $ show v)
 
-plains :: [String] -> Parser BS.ByteString
-plains delims = BS.takeWhile (/='\\') . BS.pack <$> manyTill' anyChar (   foldr1 (<|>) $  lookAhead .string . BS.pack <$> delims)
 
 plain' :: String -> Parser BS.ByteString
 plain' delim = takeWhile1 (notInClass (delim ))
@@ -651,7 +644,7 @@ insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
         return path
     where
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
-      attrs =  createAttr <$> i
+      attrs =  concat $ nonRefTB . createAttr <$> i
       serial f =  filter (all (isSerial .keyType) .f)
       direct f = filter (not.all (isSerial.keyType) .f)
       serialAttr = serial (fmap _relOrigin .keyattri) attrs
@@ -680,7 +673,7 @@ updatePatch
 updatePatch conn kv old  t =
     execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk ) >> return patch
   where
-    patch  = justError ("cant diff states" <> show (kv,old)) $ difftable (tableNonRef' old) (tableNonRef' kv)
+    patch  = justError ("cant diff states" <> show (kv,old)) $ difftable old kv
     kold = getPKM old
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> F.toList kold

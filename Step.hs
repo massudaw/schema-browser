@@ -240,6 +240,7 @@ checkField (Nested (IProd _ l) nt ) t@(TB1 (m,v))
     case runIdentity $ getCompose $ i  of
          IT l  i -> Compose . Identity <$> (IT l  <$> checkTable nt i)
          FKT a   c  d -> Compose . Identity <$> (FKT a  c <$>  checkTable nt d)
+         Attr k v -> Nothing
          v -> errorWithStackTrace (show (v,l))
 checkField  (IProd b l) t@(TB1 (m,v))
   = do

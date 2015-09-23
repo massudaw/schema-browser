@@ -19,8 +19,11 @@ module Types where
 
 -- import Warshal
 import Control.Lens.TH
+import qualified Control.Lens as Le
 import Data.Functor.Apply
 import Data.Bifunctor
+import Safe
+import Data.Maybe
 import GHC.Generics
 import Data.Binary (Binary)
 import Data.Vector.Binary
@@ -51,8 +54,52 @@ import qualified Data.Set as Set
 import Control.Monad.State
 import Data.Text.Lazy(Text)
 
+import Debug.Trace
 import Data.Unique
 
+
+isSerial (KSerial _) = True
+isSerial _ = False
+
+isPrim (Primitive i) = True
+isPrim i = False
+
+isOptional (KOptional _) = True
+isOptional _ = False
+
+isArray :: KType i -> Bool
+isArray (KArray _) = True
+isArray (KOptional i) = isArray i
+isArray _ = False
+
+unArray (ArrayTB1 s) =  s
+unArray o  = errorWithStackTrace $ "unArray no pattern " <> show o
+
+unSOptional (LeftTB1 i) = i
+unSOptional i = traceShow ("unSOptional No Pattern Match SOptional-" <> show i) (Just i)
+
+unSDelayed (DelayedTB1 i) = i
+unSDelayed i = traceShow ("unSDelayed No Pattern Match" <> show i) Nothing
+
+unSSerial (SerialTB1 i) = i
+unSSerial i = traceShow ("unSSerial No Pattern Match SSerial-" <> show i) Nothing
+
+unRSOptional (LeftTB1 i) = join $ fmap unRSOptional i
+unRSOptional i = traceShow ("unRSOptional No Pattern Match SOptional-" <> show i) Nothing
+
+unRSOptional2 (LeftTB1 i) = join $ unRSOptional2 <$> i
+unRSOptional2 i   = Just i
+
+unRSOptional' (LeftTB1 i) = join $ unRSOptional' <$> i
+unRSOptional' (SerialTB1 i )  = join $ unRSOptional' <$> i
+unRSOptional' i   = Just i
+
+
+
+showableDef (KOptional i) = Just $ LeftTB1 (showableDef i)
+showableDef (KSerial i) = Just $ SerialTB1 (showableDef i)
+showableDef (KArray i ) = Nothing -- Just (SComposite Vector.empty)
+showableDef i = Nothing
 
 
 
@@ -548,6 +595,11 @@ tableNonRef' (m,n)  = (m, mapComp (KV . rebuildTable . _kvvalues) n)
     nonRef (FKT i _ _ ) = concat (overComp nonRef <$> i)
     nonRef it@(IT j k ) = [(IT  j (tableNonRef k )) ]
 
+nonRefTB :: Ord k => TB Identity k a -> [(TB Identity ) k a]
+nonRefTB (Attr k v ) = [Attr k v]
+nonRefTB (FKT i _ _ ) = concat (overComp nonRefTB <$> i)
+nonRefTB it@(IT j k ) = [(IT  j (tableNonRef k )) ]
+
 
 addDefault
   :: Functor g => Compose g (TB f) d a
@@ -629,7 +681,167 @@ isInline _ = False
 
 unTB1 (TB1 i) = i
 
+-- Intersections and relations
+
+keyAttr (Attr i _ ) = i
+keyAttr i = errorWithStackTrace $ "cant find keyattr " <> (show i)
+
+unAttr (Attr _ i) = i
+unAttr i = errorWithStackTrace $ "cant find attr" <> (show i)
+
+textToPrim "character varying" = PText
+textToPrim "name" = PText
+textToPrim "varchar" = PText
+textToPrim "text" = PText
+textToPrim "bytea" = PBinary
+textToPrim "pdf" = PMime "application/pdf"
+textToPrim "ofx" = PMime "application/x-ofx"
+textToPrim "jpg" = PMime "image/jpg"
+textToPrim "character" = PText
+textToPrim "char" = PText
+textToPrim "double precision" = PDouble
+textToPrim "numeric" = PDouble
+textToPrim "float8" = PDouble
+textToPrim "int4" = PInt
+textToPrim "cnpj" = PCnpj
+textToPrim "sql_identifier" =  PText
+textToPrim "cpf" = PCpf
+textToPrim "int8" = PInt
+textToPrim "integer" = PInt
+textToPrim "bigint" = PInt
+textToPrim "cardinal_number" = PInt
+textToPrim "boolean" = PBoolean
+textToPrim "smallint" = PInt
+textToPrim "timestamp without time zone" = PTimestamp
+textToPrim "timestamp with time zone" = PTimestamp
+textToPrim "interval" = PInterval
+textToPrim "date" = PDate
+textToPrim "time" = PDayTime
+textToPrim "time with time zone" = PDayTime
+textToPrim "time without time zone" = PDayTime
+textToPrim "POINT" = PPosition
+textToPrim "LINESTRING" = PLineString
+textToPrim "box3d" = PBounding
+textToPrim i = error $ "no case for type " <> T.unpack i
+
+
+intersectPred p@(Primitive _) op  (KInterval i) j (IntervalTB1 l )  | p == i =  Interval.member j l
+intersectPred p@(KInterval j) "<@" (KInterval i) (IntervalTB1 k)  (IntervalTB1  l)  =  Interval.isSubsetOf k  l
+intersectPred p@(KInterval j) "@>" (KInterval i) (IntervalTB1 k)  (IntervalTB1 l) =  flip Interval.isSubsetOf k l
+intersectPred p@(KInterval j) "=" (KInterval i) (IntervalTB1 k)  (IntervalTB1 l)   =  k == l
+intersectPred p@(KArray j) "<@" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  Set.fromList (F.toList k) `Set.isSubsetOf` Set.fromList  (F.toList l)
+intersectPred p@(KArray j) "@>" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  Set.fromList (F.toList l) `Set.isSubsetOf` Set.fromList  (F.toList k)
+intersectPred p@(KArray j) "=" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  k == l
+intersectPred p@(Primitive _) op (KArray i) j (ArrayTB1 l )  | p == i =  elem j l
+intersectPred p1@(Primitive _) op  p2@(Primitive _) j l   | p1 == p2 =  case op of
+                                                                             "=" -> j ==  l
+                                                                             "<" -> j < l
+                                                                             ">" -> j > l
+                                                                             ">=" -> j >= l
+                                                                             "<=" -> j <= l
+                                                                             "/=" -> j /= l
+
+intersectPred p1 op  (KSerial p2) j (SerialTB1 l)   | p1 == p2 =  maybe False (j ==) l
+intersectPred p1 op (KOptional p2) j (LeftTB1 l)   | p1 == p2 =  maybe False (j ==) l
+intersectPred p1@(KOptional i ) op p2 (LeftTB1 j) l  =  maybe False id $ fmap (\m -> intersectPred i op p2 m l) j
+intersectPred p1 op p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
+
+interPoint
+  :: (Ord a ,Show a) => [Rel (FKey (KType Text))]
+     -> [TB Identity (FKey (KType Text)) a]
+     -> [TB Identity (FKey (KType Text)) a]
+     -> Bool
+interPoint ks i j = (\i -> if L.null i then False else  all id  i)$  catMaybes $ fmap (\(Rel l op  m) -> {-justError "interPoint wrong fields" $-}  liftA2 (intersectPredTuple  op) (L.find ((==l).keyAttr ) i )   (L.find ((==m).keyAttr ) j)) ks
+
+intersectPredTuple  op = (\i j-> intersectPred (textToPrim <$> keyType (keyAttr i)) op  (textToPrim <$> keyType (keyAttr j)) (unAttr i) (unAttr j))
+
+nonRefAttr l = concat $  fmap (uncurry Attr) . aattr <$> ( l )
+
 makeLenses ''KV
 makeLenses ''TB
 makeLenses ''Rel
+
+--
+--- Attr Cons/Uncons
+--
+unIndexItens ::  Int -> Int -> Maybe (TB Identity  Key Showable) -> Maybe (TB Identity  Key Showable)
+unIndexItens ix o =  join . fmap (unIndex (ix+ o) )
+
+unIndex :: Show a => Int -> TB Identity Key a -> Maybe (TB Identity Key a )
+unIndex o (Attr k (ArrayTB1 v)) = Attr (unKArray k) <$> atMay v o
+unIndex o (IT na (ArrayTB1 j))
+  =  IT  na <$>  atMay j o
+unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> [mapComp (firstTB unKArray) li]) (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi ) <$> join (traComp (traFAttr (indexArray o))  <$> l) <*> atMay m o
+  where
+    l = L.find (all (isArray.keyType) . fmap _relOrigin . keyattr)  els
+    nonl = L.filter (not .all (isArray.keyType) . fmap _relOrigin . keyattr) els
+    indexArray ix s =  atMay (unArray s) ix
+unIndex o i = errorWithStackTrace (show (o,i))
+
+unLeftKey :: (Ord b,Show b) => TB Identity Key b -> TB Identity Key b
+unLeftKey (Attr k v ) = (Attr (unKOptional k) v)
+unLeftKey (IT na (LeftTB1 (Just tb1))) = IT na tb1
+unLeftKey i@(IT na (TB1  _ )) = i
+unLeftKey (FKT ilk rel  (LeftTB1 (Just tb1))) = (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOrigin unKOptional <$> rel) tb1)
+unLeftKey i@(FKT ilk rel  (TB1  _ )) = i
+unLeftKey i = errorWithStackTrace (show i)
+
+unLeftItens  :: Show a => TB Identity  Key a -> Maybe (TB Identity  Key a )
+unLeftItens = unLeftTB
+  where
+    unLeftTB (Attr k v)
+      = Attr (unKOptional k) <$> unSOptional v
+    unLeftTB (IT na (LeftTB1 l))
+      = IT (mapComp (firstTB unKOptional) na) <$>  l
+    unLeftTB i@(IT na (TB1 (_,l)))
+      = Just i
+    unLeftTB (FKT ifk rel  (LeftTB1 tb))
+      = (\ik -> FKT ik  (Le.over relOrigin unKOptional <$> rel))
+          <$> traverse ( traComp (traFAttr unSOptional) . mapComp (firstTB unKOptional )  ) ifk
+          <*>  tb
+    unLeftTB i@(FKT ifk rel  (TB1  _ )) = Just i
+    unLeftTB i = errorWithStackTrace (show i)
+
+
+
+attrOptional :: TB Identity Key Showable ->  (TB Identity  Key Showable)
+attrOptional (Attr k v) =  Attr (kOptional k) (LeftTB1 . Just $ v)
+attrOptional (FKT ifk rel  tb)  = FKT (tbOptional <$> ifk) (Le.over relOrigin kOptional <$> rel) (LeftTB1 (Just tb))
+  where tbOptional = mapComp (firstTB kOptional) . mapComp (mapFAttr (LeftTB1 . Just))
+attrOptional (IT na j) = IT  na (LeftTB1 (Just j))
+
+leftItens :: TB Identity Key a -> Maybe (TB Identity  Key Showable) -> Maybe (TB Identity  Key Showable)
+leftItens tb@(Attr k _ ) =  maybe emptyAttr (Just .attrOptional)
+  where emptyAttr = Attr k <$> (showableDef (keyType k))
+leftItens tb@(IT na _ ) =   Just . maybe  emptyIT attrOptional
+  where emptyIT = IT  na  (LeftTB1 Nothing)
+leftItens tb@(FKT ilk rel _) = Just . maybe  emptyFKT attrOptional
+  where emptyFKT = FKT (mapComp (mapFAttr (const (LeftTB1 Nothing))) <$> ilk) rel (LeftTB1 Nothing)
+
+
+attrArray back@(Attr  _ _) oldItems  = (\tb -> Attr (_tbattrkey back) (ArrayTB1 tb)) $ _tbattr <$> oldItems
+attrArray back@(FKT _ _ _) oldItems  = (\(lc,tb) ->  FKT [Compose $ Identity $ Attr (_relOrigin $  head $ keyattr (head lc )) (ArrayTB1 $ head . kattr  <$> lc)] (_fkrelation back) (ArrayTB1 tb  ) )  $ unzip $ (\(FKT [lc] rel tb ) -> (lc , tb)) <$> oldItems
+attrArray back@(IT _ _) oldItems  = (\tb ->  IT  (_ittableName back) (ArrayTB1 tb  ) )  $ (\(IT _ tb ) -> tb) <$> oldItems
+
+keyOptional (k,v) = (kOptional k ,LeftTB1 $ Just v)
+
+unKeyOptional (k  ,(LeftTB1 v) ) = fmap (unKOptional k,) v
+
+kOptional (Key a  c m n d e) = Key a  c m  n d (KOptional e)
+kDelayed (Key a  c m n d e) = Key a  c m  n d (KDelayed e)
+
+unKOptional ((Key a  c m n d (KOptional e))) = (Key a  c m n d e )
+unKOptional ((Key a  c m n d (e@(Primitive _)))) = (Key a  c m n d e )
+unKOptional i = errorWithStackTrace ("unKOptional" <> show i)
+
+unKDelayed ((Key a  c m n d (KDelayed e))) = (Key a  c m n d e )
+unKDelayed i = errorWithStackTrace ("unKDelayed" <> show i)
+
+unKArray (Key a  c d m n (KArray e)) = Key a  c d  m n e
+unKArray (Key a  c d m n e) = Key a  c d  m n e
+
+
+
+
+
 

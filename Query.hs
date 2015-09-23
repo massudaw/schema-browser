@@ -59,61 +59,6 @@ import GHC.Stack
 import Types
 
 
-textToPrim "character varying" = PText
-textToPrim "name" = PText
-textToPrim "varchar" = PText
-textToPrim "text" = PText
-textToPrim "bytea" = PBinary
-textToPrim "pdf" = PMime "application/pdf"
-textToPrim "ofx" = PMime "application/x-ofx"
-textToPrim "jpg" = PMime "image/jpg"
-textToPrim "character" = PText
-textToPrim "char" = PText
-textToPrim "double precision" = PDouble
-textToPrim "numeric" = PDouble
-textToPrim "float8" = PDouble
-textToPrim "int4" = PInt
-textToPrim "cnpj" = PCnpj
-textToPrim "sql_identifier" =  PText
-textToPrim "cpf" = PCpf
-textToPrim "int8" = PInt
-textToPrim "integer" = PInt
-textToPrim "bigint" = PInt
-textToPrim "cardinal_number" = PInt
-textToPrim "boolean" = PBoolean
-textToPrim "smallint" = PInt
-textToPrim "timestamp without time zone" = PTimestamp
-textToPrim "timestamp with time zone" = PTimestamp
-textToPrim "interval" = PInterval
-textToPrim "date" = PDate
-textToPrim "time" = PDayTime
-textToPrim "time with time zone" = PDayTime
-textToPrim "time without time zone" = PDayTime
-textToPrim "POINT" = PPosition
-textToPrim "LINESTRING" = PLineString
-textToPrim "box3d" = PBounding
-textToPrim i = error $ "no case for type " <> T.unpack i
-
-
-isSerial (KSerial _) = True
-isSerial _ = False
-
-isPrim (Primitive i) = True
-isPrim i = False
-
-isOptional (KOptional _) = True
-isOptional _ = False
-
-isArray :: KType i -> Bool
-isArray (KArray _) = True
-isArray (KOptional i) = isArray i
-isArray _ = False
-
-
-showableDef (KOptional i) = Just $ LeftTB1 (showableDef i)
-showableDef (KSerial i) = Just $ SerialTB1 (showableDef i)
-showableDef (KArray i ) = Nothing -- Just (SComposite Vector.empty)
-showableDef i = Nothing
 
 transformKey (KSerial i)  (KOptional j) (SerialTB1 v)  | i == j = LeftTB1  v
 transformKey (KOptional i)  (KSerial j) (LeftTB1 v)  | i == j = SerialTB1 v
@@ -194,27 +139,6 @@ getPrim (KInterval j) =  getPrim j
 inner b l m = l <> b <> m
 
 -- Operators
-intersectPred p@(Primitive _) op  (KInterval i) j (IntervalTB1 l )  | p == i =  Interval.member j l
-intersectPred p@(KInterval j) "<@" (KInterval i) (IntervalTB1 k)  (IntervalTB1  l)  =  Interval.isSubsetOf k  l
-intersectPred p@(KInterval j) "@>" (KInterval i) (IntervalTB1 k)  (IntervalTB1 l) =  flip Interval.isSubsetOf k l
-intersectPred p@(KInterval j) "=" (KInterval i) (IntervalTB1 k)  (IntervalTB1 l)   =  k == l
-intersectPred p@(KArray j) "<@" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  S.fromList (F.toList k) `S.isSubsetOf` S.fromList  (F.toList l)
-intersectPred p@(KArray j) "@>" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  S.fromList (F.toList l) `S.isSubsetOf` S.fromList  (F.toList k)
-intersectPred p@(KArray j) "=" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  k == l
-intersectPred p@(Primitive _) op (KArray i) j (ArrayTB1 l )  | p == i =  elem j l
-intersectPred p1@(Primitive _) op  p2@(Primitive _) j l   | p1 == p2 =  case op of
-                                                                             "=" -> j ==  l
-                                                                             "<" -> j < l
-                                                                             ">" -> j > l
-                                                                             ">=" -> j >= l
-                                                                             "<=" -> j <= l
-                                                                             "/=" -> j /= l
-
-intersectPred p1 op  (KSerial p2) j (SerialTB1 l)   | p1 == p2 =  maybe False (j ==) l
-intersectPred p1 op (KOptional p2) j (LeftTB1 l)   | p1 == p2 =  maybe False (j ==) l
-intersectPred p1@(KOptional i ) op p2 (LeftTB1 j) l  =  maybe False id $ fmap (\m -> intersectPred i op p2 m l) j
-intersectPred p1 op p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
-
 pkOp (KOptional j ) i  (LeftTB1 l) k  = maybe False id (pkOp i j k <$> l)
 pkOp (KSerial j ) i  (SerialTB1 l) k  = maybe False id (pkOp i j k <$> l)
 pkOp i (KOptional j ) k (LeftTB1 l) = maybe False id (pkOp i j k <$> l)
@@ -301,22 +225,7 @@ createTable r@(Raw sch _ _ _ tbl _ _ pk _ fk attr) = "CREATE TABLE " <> rawFullN
     renderFK (Path origin _  end) = ""
 
 
-keyOptional (k,v) = (kOptional k ,LeftTB1 $ Just v)
 
-unKeyOptional (k  ,(LeftTB1 v) ) = fmap (unKOptional k,) v
-
-kOptional (Key a  c m n d e) = Key a  c m  n d (KOptional e)
-kDelayed (Key a  c m n d e) = Key a  c m  n d (KDelayed e)
-
-unKOptional ((Key a  c m n d (KOptional e))) = (Key a  c m n d e )
-unKOptional ((Key a  c m n d (e@(Primitive _)))) = (Key a  c m n d e )
-unKOptional i = errorWithStackTrace ("unKOptional" <> show i)
-
-unKDelayed ((Key a  c m n d (KDelayed e))) = (Key a  c m n d e )
-unKDelayed i = errorWithStackTrace ("unKDelayed" <> show i)
-
-unKArray (Key a  c d m n (KArray e)) = Key a  c d  m n e
-unKArray (Key a  c d m n e) = Key a  c d  m n e
 -- unKArray (Key a  c d m (KOptional (KArray e) )) = Key a  c d m e
 
 
@@ -426,8 +335,6 @@ rootPaths' invSchema r = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,
   return ( tb , selectQuery tb )
 
 -- keyAttr :: Show b  => TB Identity b a -> b
-keyAttr (Attr i _ ) = i
-keyAttr i = errorWithStackTrace $ "cant find keyattr " <> (show i)
 
 
 selectQuery t = "SELECT " <> explodeRow t <> " FROM " <> expandTable t <> expandQuery False  t
@@ -616,8 +523,6 @@ recurseTB invSchema  nextT nextLeft ksn@(TB1 (m, kv) ) =  TB1 . (m,) <$>
 
 
 
-unAttr (Attr _ i) = i
-unAttr i = errorWithStackTrace $ "cant find attr" <> (show i)
 
 mkKey i = do
   (c,m) <- snd <$> get
@@ -766,25 +671,6 @@ overLabel f = Compose .  Identity . f . labelValue  .getCompose
 inf' = (\(ER.Finite i) -> i) . Interval.lowerBound
 sup' = (\(ER.Finite i) -> i) . Interval.upperBound
 
-
-unSOptional (LeftTB1 i) = i
-unSOptional i = traceShow ("unSOptional No Pattern Match SOptional-" <> show i) (Just i)
-
-unSDelayed (DelayedTB1 i) = i
-unSDelayed i = traceShow ("unSDelayed No Pattern Match" <> show i) Nothing
-
-unSSerial (SerialTB1 i) = i
-unSSerial i = traceShow ("unSSerial No Pattern Match SSerial-" <> show i) Nothing
-
-unRSOptional (LeftTB1 i) = join $ fmap unRSOptional i
-unRSOptional i = traceShow ("unRSOptional No Pattern Match SOptional-" <> show i) Nothing
-
-unRSOptional2 (LeftTB1 i) = join $ unRSOptional2 <$> i
-unRSOptional2 i   = Just i
-
-unRSOptional' (LeftTB1 i) = join $ unRSOptional' <$> i
-unRSOptional' (SerialTB1 i )  = join $ unRSOptional' <$> i
-unRSOptional' i   = Just i
 
 _unTB1 (TB1 (m,i) ) =  i
 _unTB1 (LeftTB1 (Just i )) = _unTB1 i

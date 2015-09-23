@@ -22,7 +22,7 @@ import qualified Data.Text.Lazy as T
 
 
 opt f v = LeftTB1 $  f <$> v
-serial f v = DelayedTB1 $ f <$> v
+serial f v = SerialTB1 $ f <$> v
 txt = TB1 . SText . T.pack
 frac = TB1 . SDouble
 tzone  = TB1 . STimestamp . zonedTimeToLocalTime

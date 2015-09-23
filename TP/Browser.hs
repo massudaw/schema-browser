@@ -291,7 +291,7 @@ chooserTable inf e kitems i = do
       liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
   tbChooser <- UI.div # set children [filterInp,getElement bset] # set UI.class_ "col-xs-2"
-  nav  <- buttonSetUI (pure "Editor") ["Editor","Exception","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  nav  <- buttonSetUI (pure "Editor") ["Viewer","Editor","Exception","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   header <- UI.h1 # sink text (T.unpack . translatedName .  justError "no table " . flip M.lookup (pkMap inf) <$> facts bBset ) # set UI.class_ "col-xs-7"
   chooserDiv <- UI.div # set children  [header ,getElement nav] # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
@@ -299,7 +299,7 @@ chooserTable inf e kitems i = do
 
   mapM (\(t,ediff) -> traverse (\ table -> do
       (tmvar,vpt)  <- liftIO $ eventTable inf table
-      onEvent ( ((\i j -> foldl applyTable i (fmap (PAtom .tableDiff) j) ) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar)) (M.lookup t (tableMap inf))  ) e
+      onEvent ( ((\i j -> foldl applyTable i (fmap (PAtom .tableDiff) j) ) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar . fmap unTB1 )) (M.lookup t (tableMap inf))  ) e
 
   mapUITEvent body (\(nav,table)->
       case nav of
@@ -312,9 +312,20 @@ chooserTable inf e kitems i = do
         "Editor" -> do
             span <- viewerKey inf table
             element body # set UI.children [span]
+        "Viewer" -> do
+            span <- viewer inf table
+            element body # set UI.children [span]
         ) $ liftA2 (,) (triding nav) bBset
   subnet <- UI.div # set children [chooserDiv,body] # set UI.class_ "col-xs-10"
   UI.div # set children [tbChooser, subnet ]  # set UI.class_ "row"
+
+viewer inf key = do
+  let
+      table = fromJust  $ M.lookup key $ pkMap inf
+
+  (tmvar,vpt)  <- liftIO $ eventTable inf table
+  let tview = unTlabel' $ unTB1  $ tableView (tableMap inf) table
+  UI.div # sink items (pure .renderTable inf (tableNonRef' tview) .   fmap (tableNonRef'.unTB1) <$> facts vpt)
 
 
 viewerKey
@@ -350,14 +361,13 @@ viewerKey inf key = mdo
   let tds = tidings prop evsel
 
   (cru,ediff,pretdi) <- crudUITable inf plugList  (pure "Editor")  res3 [] [] (allRec' (tableMap inf) table) tds
+  diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (runDBM inf . flip applyTB1' j ) i) <$> facts pretdi <@> ediff
   let
-     diffUp :: Event ([Maybe (TB1 Showable)])
-     diffUp =  fmap pure $ (\i j -> flip applyTB1 j <$> i) <$> facts pretdi <@> ediff
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $userSelection itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
   inisort <- currentValue (facts tsort)
   res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (($) <$> facts tsort <@> rumors vpt) ,rumors tsort ])
-  onEvent ( ((\i j -> foldl applyTable i (expandPSet j)) <$> res2 <@> ediff)) (liftIO .  putMVar tmvar)
+  onEvent ( ((\i j -> foldl applyTable i (expandPSet j)) <$> res2 <@> ediff)) (liftIO .  putMVar tmvar. fmap unTB1)
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK)  <$> facts tds) # set UI.class_ "col-xs-8"

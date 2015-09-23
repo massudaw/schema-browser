@@ -1,9 +1,10 @@
-{-# LANGUAGE RankNTypes, TupleSections,BangPatterns,OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts,ConstraintKinds,TypeFamilies,RankNTypes, TupleSections,BangPatterns,OverloadedStrings #-}
 
 
 module Schema where
 
 import Types
+import Debug.Trace
 import Data.Unique
 import qualified Data.Foldable as F
 -- import Step
@@ -17,12 +18,13 @@ import Data.Bifunctor(first)
 import Utils
 import Control.Exception
 import System.Time.Extra
+import Control.Monad.Reader
 
 import Data.Functor.Identity
 import Database.PostgreSQL.Simple
 import Data.Time
 
-import Data.Traversable(traverse)
+import Data.Traversable(sequenceA,traverse)
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 
@@ -84,7 +86,7 @@ data InformationSchema
   , pkMap :: Map (Set Key) Table
   , tableMap :: Map Text Table
   , pluginsMap :: Map (Text,Text,Text) Key
-  , mvarMap :: MVar (Map Table ({-R.Event [TB1 Showable], R.Handler [TB1 Showable], -} MVar  [TB1 Showable], R.Tidings [TB1 Showable]))
+  , mvarMap :: MVar (Map (KVMetadata Key) ({-R.Event [TB1 Showable], R.Handler [TB1 Showable], -} MVar  [TBData Key Showable], R.Tidings [TBData Key Showable]))
   , conn :: Connection
   , rootconn :: Connection
   , metaschema :: Maybe InformationSchema
@@ -127,7 +129,7 @@ keyTables conn userconn (schema ,user) = do
           readTT :: Text ->  TableType
           readTT "BASE TABLE" = ReadWrite
           readTT "VIEW" = ReadOnly
-          readTT i =  error $ T.unpack i
+          readTT i =  errorWithStackTrace  $ T.unpack i
        authorization <- queryAuthorization conn schema user
        descMap <- M.fromList . fmap  (\(t,cs)-> (t,fmap (\c -> (\(Just i) -> i) $ M.lookup (t,c) keyMap) (V.toList cs)) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
        transMap <- M.fromList   <$> query conn "SELECT table_name,translation FROM metadata.table_name_translation WHERE schema_name = ? " (Only schema)
@@ -157,27 +159,36 @@ addRec i j
   | otherwise = id
 
 
+liftTable' :: InformationSchema -> Text -> TBData Text a -> TBData Key a
+liftTable' inf tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapComp (liftField inf tname) <$> (M.mapKeys (S.map (fmap (lookKey inf tname))) i)) v
+            where
+                  ta = lookTable inf tname
+
+
+fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
+
+fixPatchAttr inf t p@(PAttr _ _ ) =  p
+fixPatchAttr inf t p@(PInline _ _ ) =  p
+fixPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa) (tableMeta $ lookTable inf tname2) b
+    where (Path _ (FKJoinTable _ rel tname2 ) _) = justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+          ta = lookTable inf tname
+
 liftKeys
   :: InformationSchema
      -> Text
      -> FTB1 Identity Text a
      -> FTB1 Identity Key a
-liftKeys inf tname tb
-  = liftTable tname tb
-  where
-        liftTable' tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapComp (liftField tname) <$> (M.mapKeys (S.map (fmap (lookKey inf tname))) i)) v
-            where
-                  ta = lookTable inf tname
-        liftTable tname = fmap (liftTable' tname)
+liftKeys inf tname = fmap (liftTable' inf tname)
 
-        liftField :: Text -> TB Identity Text a -> TB Identity Key a
-        liftField tname (Attr t v) = Attr (lookKey inf tname t) v
-        liftField tname (FKT ref  rel2 tb) = FKT (mapComp (liftField tname) <$> ref)   ( rel) (liftTable tname2 tb)
-            where (Path _ (FKJoinTable _ rel tname2 ) _) = justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
-                  ta = lookTable inf tname
-        liftField tname (IT rel tb) = IT (mapComp (liftField tname ) rel) (liftTable tname2 tb)
-            where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
-                  ta = lookTable inf tname
+
+liftField :: InformationSchema -> Text -> TB Identity Text a -> TB Identity Key a
+liftField inf tname (Attr t v) = Attr (lookKey inf tname t) v
+liftField inf tname (FKT ref  rel2 tb) = FKT (mapComp (liftField inf tname) <$> ref)   ( rel) (liftKeys inf tname2 tb)
+    where (Path _ (FKJoinTable _ rel tname2 ) _) = justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+          ta = lookTable inf tname
+liftField inf tname (IT rel tb) = IT (mapComp (liftField inf tname ) rel) (liftKeys inf tname2 tb)
+    where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
+          ta = lookTable inf tname
 
 
 withConn s action =  do
@@ -213,7 +224,7 @@ logTableModification
 logTableModification inf (TableModification Nothing table i) = do
   time <- getCurrentTime
   let ltime =  utcToLocalTime utc $ time
-      (m,pidx,pdata) = firstPatch keyValue  i
+      (_,pidx,pdata) = firstPatch keyValue  i
   [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index,modification_data,schema_name) VALUES (?,?,?,?,?,?) returning modification_id "  (username inf ,ltime,rawName table, Binary (B.encode pidx)  , Binary  (B.encode pdata) , schemaName inf)
   return (TableModification id table i )
 
@@ -247,25 +258,35 @@ selectAll inf table   = liftIO $ do
       print (tableName table,t)
       return v
 
-eventTable inf table = do
-    let mvar = mvarMap inf
+dbTable mvar table = do
     mmap <- takeMVar mvar
     (mtable,td) <- case (M.lookup table mmap ) of
          Just (i,td) -> do
            putMVar mvar mmap
            return (i,td)
+         Nothing -> errorWithStackTrace ("no table " <> show table)
+    return (mtable,td)
+
+
+eventTable inf table = do
+    let mvar = mvarMap inf
+    mmap <- takeMVar mvar
+    (mtable,td) <- case (M.lookup (tableMeta table) mmap ) of
+         Just (i,td) -> do
+           putMVar mvar mmap
+           return (i,td)
          Nothing -> do
            res <- selectAll  inf table
-           mnew <- newMVar res
+           mnew <- newMVar (fmap unTB1 res)
            (e,h) <- R.newEvent
            ini <- readMVar mnew
            forkIO $ forever $ do
               h =<< takeMVar mnew
            bh <- R.stepper ini e
            let td = (R.tidings bh e)
-           putMVar mvar (M.insert table (mnew,td) mmap)
+           putMVar mvar (M.insert (tableMeta table) (mnew,td) mmap)
            return (mnew,td)
-    return (mtable,td)
+    return (mtable,fmap TB1 <$> td)
 
 
 
@@ -309,6 +330,59 @@ loadDelayed inf t@(k,v) values@(ks,vs)
     delayedattrs = concat $ fmap (keyValue . (\(Inline i ) -> i)) .  F.toList <$> M.keys filteredAttrs
     filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (_kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs)
 
+applyAttr' :: (Show a,Ord a ,a~ Index a)  =>  TB Identity Key a  -> PathAttr Key a -> DBM Key a (TB Identity Key a)
+applyAttr' (Attr k i) (PAttr _ p)  = return $ Attr k (applyShowable i p)
+applyAttr' (FKT k rel i) (PFK _ p m b )  =  do
+                            let ref =  F.toList $ M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList k)
+                                edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
+                            tbs <- atTable m
+                            return $ traceShow (ref,k) $ FKT ref rel (maybe (joinRel rel (fmap unTB ref) tbs) id b)
+applyAttr' (IT k i) (PInline _   p)  = IT k <$> (applyFTBM (fmap pure $ createTB1) applyRecord' i p)
+applyAttr' i j = errorWithStackTrace (show ("applyAttr'" :: String,i,j))
+
+applyRecord'
+  :: (Index a~ a ,Show a , Ord a ) =>
+    TBData Key a
+     -> TBIdx Key a
+     -> DBM Key a (TBData Key a)
+applyRecord' t@((m, v)) (_ ,_  , k)  = fmap (m,) $ traComp (fmap KV . sequenceA . M.mapWithKey (\key vi -> foldl  (\i j -> i >>= edit key j ) (return vi) k  ) . _kvvalues ) v
+  where edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  traComp (flip applyAttr' k ) v else return v
+        edit  key  k@(PInline s _ ) v = if (_relOrigin $ head $ F.toList $ key) == s then  traComp (flip applyAttr' k ) v else return v
+        edit  key  k@(PFK rel s _ _ ) v = if  key == S.fromList rel then  traComp (flip applyAttr' k ) v else return v
+applyTB1'
+  :: (Index a~ a ,Show a , Ord a ) =>
+    TB2 Key a
+     -> PathFTB (TBIdx Key a)
+     -> DBM Key a (TB2 Key a)
+applyTB1' = applyFTBM (fmap pure $ createTB1) applyRecord'
+
+createAttr' :: (Ord a ,Show a ,Index a ~ a) => PathAttr Key a -> DBM Key a (TB Identity Key a)
+createAttr' (PAttr  k s  ) = return $ Attr k  (createShowable s)
+createAttr' (PInline k s ) = return $ IT (_tb $ Attr k (TB1 ())) (createFTB createTB1 s)
+createAttr' (PFK rel k s b ) = do
+      let ref = (_tb . createAttr <$> k)
+      tbs <- atTable s
+      return $ FKT ref rel (maybe (joinRel rel (fmap unTB ref) tbs) id b)
+createAttr' i = errorWithStackTrace (show i)
+
+createTB1'
+  :: (Index a~ a ,Show a , Ord a  ) =>
+     (Index (TBData Key a )) ->
+     DBM Key a (KVMetadata Key , Compose Identity  (KV (Compose Identity  (TB Identity))) Key  a)
+createTB1' (m ,s ,k)  = fmap (m ,)  $ fmap (_tb .KV . mapFromTBList ) . traverse (fmap _tb . createAttr') $  k
+createTB1'  i = errorWithStackTrace (show i)
 
 
 
+type Database k v = MVar (Map (KVMetadata k) (MVar [TBData k v],R.Tidings [TBData k v]))
+type DBM k v = ReaderT (Database k v) IO
+
+atTable ::  KVMetadata Key -> DBM Key v [TBData Key v]
+atTable k = do
+  i <- ask
+  (m,c)<- liftIO$ dbTable i k
+  liftIO $ R.currentValue (R.facts c)
+
+test inf i j = runDBM inf (applyTB1' i j)
+runDBM inf m = do
+    runReaderT m (mvarMap inf)
