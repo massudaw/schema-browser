@@ -190,7 +190,6 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             restrictConstraint = filter ((\v -> maybe False  (v `S.isSubsetOf`)   pkset) . S.fromList . getRelOrigin  .fst) constr
             convertConstr :: SelTBConstraint
             convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> (constr   . justError "no backref" . backFKRef relTable (getRelOrigin f) . Just )) j ) <$>  restrictConstraint
-            ftdi = fmap (runIdentity . getCompose ) <$>  tbi
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return (fmap (runIdentity . getCompose ) <$>  tbi)) (fmap Just . filterJust . snd <$>  pfks )
         tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks wl (ftdi ) i
         dv <- UI.div #  set UI.class_ "col-xs-12"# set children [l,getElement tds]
@@ -214,7 +213,7 @@ tbCase inf pgs constr a@(Attr i _ ) wl plugItens preoldItems = do
             tbi = oldItems
             evs  = ( fmap ( join . fmap ( fmap (runIdentity .  getCompose ) . fmap snd . getCompose . runIdentity . getCompose  . findTB1 (((== [i])  . fmap _relOrigin . keyattr )))) <$>  (fmap snd thisPlugs))
         tds <- attrUITable tbi evs a
-        dv <- UI.div #  set UI.class_ ("col-xs-" <> show ( fst $ attrSize a) )# set children [l,getElement tds]
+        dv <- UI.div # set UI.style [("margin-bottom","3px")] # set UI.class_ ("col-xs-" <> show ( fst $ attrSize a) )# set children [l,getElement tds]
         paintEdit l (facts (triding tds)) (facts oldItems)
         return $ TrivialWidget (triding tds) dv
 
@@ -346,7 +345,7 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
   (e2,h2) <- liftIO $ newEvent
   (ediff ,hdiff) <- liftIO $ newEvent
   (evdiff ,hvdiff) <- liftIO $ newEvent
-  nav  <- buttonSetUI open ["None","Exception","Editor","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonSetUI open ["None","Exception","Editor","Change"] (\i -> set UI.text i . set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-4 pull-right"
   let table = lookPK inf (S.fromList $ fmap _relOrigin $ findPK $ ftb)
   let fun "Editor"= do
@@ -373,7 +372,7 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
           onEvent (rumors tableb)
               (liftIO . h2)
           UI.div # set children [listBody,panelItems]
-      fun "Changes" = do
+      fun "Change" = do
             UI.div # sink0 items (maybe [] (pure . dashBoardAllTableIndex . (inf,table,) . getPK )   <$> facts preoldItems )
       fun "Exception" = do
             UI.div # sink0 items (maybe [] (pure . exceptionAllTableIndex . (inf,table,). getPK )   <$> facts preoldItems )
@@ -425,7 +424,7 @@ processPanelTable inf attrsB res table oldItemsi = do
          set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table )) #
   -- Delete when isValid
          sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip contains j) i  ) (facts oldItemsi ) res))
-  let    spMap = fmap split . mapEvent id
+  let
          crudEdi (Just (TB1 i)) (Just (TB1 j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $difftable i  g) $ transaction inf $ fullDiffEdit inf   i j
          crudIns  (Just (TB1 j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> insertMod inf j table
          crudDel (Just (TB1 j))  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> deleteMod inf j table
@@ -585,8 +584,6 @@ buildPrim tdi i = case i of
          z -> do
             oneInput tdi []
   where
-    justCase i j@(Just _) = j
-    justCase i Nothing = i
     oneInput :: Tidings (Maybe Showable) -> [Element] ->  UI (TrivialWidget (Maybe Showable))
     oneInput tdi elem = do
             let f = facts tdi
@@ -889,8 +886,6 @@ tbInsertEdit inf  f@(FKT pk rel2  t2) =
         ArrayTB1 l ->
            fmap (fmap (attrArray f)) $ fmap Tra.sequenceA $ Tra.traverse (\ix ->   tbInsertEdit inf $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. length l - 1 ]
 
-tbInsertEdit inf j = return $ Identity j
-
 rendererHeaderUI k v = const (renderer k) v
   where renderer k = UI.div # set items [UI.div # set text (T.unpack $ keyValue k ) , UI.div # set text (T.unpack $ showTy id (keyType k)) ]
 
@@ -943,7 +938,7 @@ metaAllTableIndex inf metaname env =   do
       tname = metaname
       modtablei = tableView (tableMap $ meta inf) modtable
       envK = fmap (first (lookKey (meta inf) tname)) env
-  out <- selectQueryWhere (rootconn inf) (unTB1 modtablei) "=" envK
+  out <- reverse <$> selectQueryWhere (rootconn inf) (unTB1 modtablei) "=" envK
   let
       filterRec = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList (fst <$> envK ))) . S.fromList . fmap _relOrigin.  keyattr )
   renderTable inf  (filterRec (unTlabel' $ unTB1 modtablei)) out

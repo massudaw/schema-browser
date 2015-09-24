@@ -127,12 +127,15 @@ compactTB1 i = fmap (\((i,j),p)-> (i,j,concat p)) $  groupSplit2 (\(i,j,_) -> (i
 compactAttr :: (Ord a , Show a, Ord b ,Show b) => [PathAttr a b ] -> [PathAttr a b ]
 compactAttr  i =  fmap recover .  groupSplit2 projectors pathProj $ i
   where
-    pathProj (PAttr i j)  = Right j
+    pathProj (PAttr i j)  = Right (Right j)
     pathProj (PInline i j)  = Left j
-    projectors (PAttr i j ) =  i
-    projectors (PInline i j) = i
-    recover (i,j) = PAttr i (last $ rights j)
-    recover (i,j) = PInline i (last  $lefts j)
+    pathProj (PFK i p _ j)  = Right (Left p)
+    projectors (PAttr i j ) =  Left i
+    projectors (PInline i j) = Left i
+    projectors (PFK i _ m j) = Right (i,m,j)
+    recover (Left i,j) = PAttr i (justError "cant compact" $ compactPatches $ rights $ rights j)
+    recover (Left i,j) = PInline i (justError "cant compact" $ compactPatches $lefts j)
+    recover (Right (i,m,j) ,l) = PFK i (compactAttr $ concat $ lefts $ rights l) m j
 
 
 

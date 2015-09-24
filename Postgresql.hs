@@ -322,25 +322,37 @@ parseRecord  (me,m) = (char '('  *> (do
 
 
 
-startQuoted =  do
-  i <- lookAhead (takeWhile (inClass "\\\""))
-  readQuotedText (BS.length i)
+startQuoted p =  do
+  let backquote = string "\""  <|> string "\\\\" <|> string "\\"
+  i <- lookAhead (many backquote )
+  readQuoted (L.length i) p
 
-readQuotedText 0 = plain' ",)}"
-readQuotedText ix =  do
-    i <- Tra.sequence (replicate ix backquote  )
-    v <- ( liftA2 (\i j  -> i <> BS.concat  j ) (scapedText ix)  (many1 (liftA2 (<>) (fmap requote (readQuotedText (ix +1))) (scapedText ix )))   <|> scapedText ix )
-    _ <-  string (BS.concat i)
-    return v
+
+startQuotedText =  do
+  let backquote = string "\""  <|> string "\\\\" <|> string "\\"
+  i <- lookAhead (many backquote )
+  readQuotedText (L.length i)
+
+readText 0 = plain' ",)}"
+readText ix =  ( liftA2 (\i j  -> i <> BS.concat  j ) (scapedText ix)  (many1 (liftA2 (<>) (fmap requote (readQuotedText (ix +1))) (scapedText ix )))   <|> scapedText ix )
       where backquote = string "\""  <|> string "\\\\" <|> string "\\"
             requote t = "\"" <> t <> "\""
             scapedText ix = liftA2 (<>) (plain0' "\\\"") (BS.intercalate "" <$> ( many ((<>) <$> choice (escapedItem  ix <$>  escapes) <*>  plain0' "\\\"")))
-
               where
                 escapes = [("n","\n"),("r","\r"),("t","\t"),("224","\224"),("225","\225"),("227","\227"),("233","\233"),("237","\237"),("243","\243"),("245","\245"),("231","\231")]
                 escapedItem ix (c, o)  = Tra.sequence (replicate ix (char '\\'))  >> string c >> return o
-testEscaped2 =parseOnly startQuoted  "\"\"<!DOCTYPE HTML PUBLIC \\\\\"\"-//W3C//DTD HTML 4.01//EN\\\\\"\" \\\\\"\"http://www.w3.org/TR/html4/strict.dtd\\\\\"\">\\\\r\\\\n<HTML><HEAD><TITLE>N\\\\227o \\\\233 poss\\\\237vel exibir a p\\\\225gina</TITLE>\\\\r\\\\n<META HTTP-EQUIV=\\\\\"\"Content-Type\\\\\"\" Content=\\\\\"\"text/html; charset=windows-1252\\\\\"\">\\\\r\\\\n<STYLE type=\\\\\"\"text/css\\\\\"\">\\\\r\\\\n  BODY { font: 8pt/12pt verdana }\\\\r\\\\n  H1 { font: 13pt/15pt verdana }\\\\r\\\\n  H2 { font: 8pt/12pt verdana }\\\\r\\\\n  A:link { color: red }\\\\r\\\\n  A:visited { color: maroon }\\\\r\\\\n</STYLE>\\\\r\\\\n</HEAD><BODY><TABLE width=500 border=0 cellspacing=10><TR><TD>\\\\r\\\\n\\\\r\\\\n<h1>N\\\\227o \\\\233 poss\\\\237vel exibir a p\\\\225gina</h1>\\\\r\\\\nN\\\\227o \\\\233 poss\\\\237vel processar a solicita\\\\231\\\\227o neste momento. \\\\tO volume de tr\\\\225fego \\\\233 superior \\\\224 capacidade configurada no site.\\\\r\\\\n<hr>\\\\r\\\\n<p>Tente o seguinte:</p>\\\\r\\\\n<ul>\\\\r\\\\n<li>Clique no bot\\\\227o <a href=\\\\\"\"javascript:location.reload()\\\\\"\">Atualizar</a> ou tente novamente mais tarde.</li>\\\\r\\\\n<li>Se o erro persistir, contate o administrador do site para inform\\\\225-lo de que esse erro continua a ocorrer nesta URL.</li>\\\\r\\\\n</ul>\\\\r\\\\n<h2>Erro HTTP 500.13 - Erro do servidor: o servidor Web est\\\\225 muito ocupado.<br>IIS (Servi\\\\231os de Informa\\\\231\\\\245es da Internet)</h2>\\\\r\\\\n<hr>\\\\r\\\\n<p>Informa\\\\231\\\\245es t\\\\233cnicas (para equipe de suporte)</p>\\\\r\\\\n<ul>\\\\r\\\\n<li>V\\\\225 para <a href=\\\\\"\"http://go.microsoft.com/fwlink/?linkid=8180\\\\\"\">Servi\\\\231os de suporte t\\\\233cnico da Microsoft</a> e execute uma pesquisa de t\\\\237tulo com as palavras <b>HTTP</b> e <b>500</b>.</li>\\\\r\\\\n<li>Abra a <b>Ajuda do IIS</b>, que pode ser acessada no <B>Gerenciador do IIS</B> (inetmgr), e procure pelos t\\\\243picos <b>Monitorando e ajustando o desempenho de aplicativos da Web</b>, <b>Monitoramento de desempenho e ferramentas de escalabilidade</b> e <b>Sobre mensagens de erro personalizadas</b>.</li>\\\\r\\\\n</ul>\\\\r\\\\n\\\\r\\\\n</TD></TR></TABLE></BODY></HTML>\\\\r\\\\n\"\""
-testEscape = parseOnly startQuoted "\"\" <font face=\\\\\"\"Arial\\\\\"\" size=2>\\\\n<p>Microsoft OLE DB Provider for ODBC Drivers</font> <font face=\\\\\"\"Arial\\\\\"\" size=2>erro '80004005'</font>\\\\n<p>\\\\n<font face=\\\\\"\"Arial\\\\\"\" size=2>[IBM][CLI Driver][AS] SQL0104N  Um token inesperado &quot;&lt;&quot; foi encontrado ap&#243;s &quot;&quot;.  Os tokens esperados podem incluir:  &quot;( + - ? : DAY INF NAN NOT RID ROW RRN CASE CAST CHAR DATE DAYS&quot;.  SQLSTATE=42601\\\\r\\\\n</font>\\\\n<p>\\\\n<font face=\\\\\"\"Arial\\\\\"\" size=2>/sistemas/saces/classe/pacote_geral01.asp</font><font face=\\\\\"\"Arial\\\\\"\" size=2>, line 95</font> \"\""
+
+
+readQuotedText ix = readQuoted ix readText
+
+readQuoted 0 p = p 0
+readQuoted ix p =  do
+    i <- Tra.sequence (replicate ix backquote  )
+    v <- p ix
+    _ <-  string (BS.concat i)
+    return v
+      where backquote = string "\""  <|> string "\\\\" <|> string "\\"
+
 
 
 
@@ -354,10 +366,10 @@ testStr = "(8504801,\"SALPICAO \",99,\"NAO SE APLICA\",1,\"Salad, chicken (\"\"m
 testString3 = "\"StatusCodeException (Status {statusCode = 500, statusMessage = \"\"Internal Server Error\"\"}) [(\"\"Date\"\",\"\"Fri, 04 Sep 2015 20:34:49 GMT\"\"),(\"\"Server\"\",\"\"Microsoft-IIS/6.0\"\"),(\"\"MicrosoftOfficeWebServer\"\",\"\"5.0_Pub\"\"),(\"\"X-Powered-By\"\",\"\"ASP.NET\"\"),(\"\"Content-Length\"\",\"\"527\"\"),(\"\"Content-Type\"\",\"\"text/html; Charset=iso-8859-1\"\"),(\"\"Expires\"\",\"\"Sat, 15 May 1999 21:00:00 GMT\"\"),(\"\"Cache-control\"\",\"\"private\"\"),(\"\"X-Response-Body-Start\"\",\"\" <font face=\\\\\"\"Arial\\\\\"\" size=2>\\\\n<p>Microsoft OLE DB Provider for ODBC Drivers</font> <font face=\\\\\"\"Arial\\\\\"\" size=2>erro '80004005'</font>\\\\n<p>\\\\n<font face=\\\\\"\"Arial\\\\\"\" size=2>[IBM][CLI Driver][AS] SQL0104N  Um token inesperado &quot;&lt;&quot; foi encontrado ap&#243;s &quot;&quot;.  Os tokens esperados podem incluir:  &quot;( + - ? : DAY INF NAN NOT RID ROW RRN CASE CAST CHAR DATE DAYS&quot;.  SQLSTATE=42601\\\\r\\\\n</font>\\\\n<p>\\\\n<font face=\\\\\"\"Arial\\\\\"\" size=2>/sistemas/saces/classe/pacote_geral01.asp</font><font face=\\\\\"\"Arial\\\\\"\" size=2>, line 95</font> \"\"),(\"\"X-Request-URL\"\",\"\"POST http://www2.goiania.go.gov.br:80/sistemas/saces/asp/saces00005a1.asp\"\")] (CJ {expose = [Cookie {cookie_name = \"\"ASPSESSIONIDASQBRSTC\"\", cookie_value = \"\"FJDGMJKAJIGAICINDDHBNBOB\"\", cookie_expiry_time = 3015-01-05 00:00:00 UTC, cookie_domain = \"\"www2.goiania.go.gov.br\"\", cookie_path = \"\"/\"\", cookie_creation_time = 2015-09-04 20:34:48.13491 UTC, cookie_last_access_time = 2015-09-04 20:34:48.135013 UTC, cookie_persistent = False, cookie_host_only = True, cookie_secure_only = False, cookie_http_only = False}]})\""
 
 testString = "9292,\"Salad, chicken (\"\"mayo\"\" dressing), with egg, chicken, breast, skin removed before cooking,  mayo type dressing, real,  regular, commercial, salt regular\",\"NAO SE APLICA\",\"Cactus pads (nopales), cooked, boiled\",\"Receita de Ambrosia digitada no NDS 0 fonte \"\"Culin\195\161ria Goiana\"\"\""
-testString2 = "\"Receita de Ambrosia digitada no NDS 0 fonte \"\"Culin\195\161ria Goiana\"\"\""
+testString2 = "\\\\\"\"PROJETO DEVOLVIDO AO CBM AP\195\147S CORRE\195\135\195\131O\\\\\"\""
 ptestString = (parseOnly (unIntercalateAtto (parsePrim <$> [PText,PText,PText,PText,PText]) (char ',') )) testString
 ptestString2 = (parseOnly (unIntercalateAtto (parsePrim <$> [PText]) (char ',') )) testString2
-ptestString3 = (parseOnly (startQuoted )) testString3
+ptestString3 = (parseOnly (startQuotedText )) testString3
 
 parsePrim
   :: KPrim
@@ -366,8 +378,8 @@ parsePrim
 parsePrim i =  do
    case i of
         PBinary ->  let
-              pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}" <* takeWhile (=='\\'))
-                in doublequoted  pr <|> pr
+              pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}")
+                in doublequoted pr <|> pr
         PMime  _ -> let
               pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}" <* takeWhile (=='\\'))
                 in doublequoted  pr <|> pr
@@ -375,7 +387,7 @@ parsePrim i =  do
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
         PText -> let
-            dec = ( startQuoted <|> doublequoted (plain' "\\\"")  <|> plain' ",)}" <|>  (const "''" <$> string "\"\"" ) )
+            dec =  startQuotedText <|> const "" <$> string"\"\""
               in    (fmap SText $ join $ either (fail.traceShowId . show)  (return . T.fromStrict)  . TE.decodeUtf8' <$> dec) <|> (SText . T.fromStrict  . TE.decodeLatin1 <$> dec )
         PCnpj -> parsePrim PText
         PCpf -> parsePrim PText

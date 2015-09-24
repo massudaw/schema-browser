@@ -162,7 +162,7 @@ setup e args w = void $ do
   be <- stepper [] (unions $ fmap snd e)
   pollRes <- UI.div # sink UI.text (show <$> be)
   return w # set title (host bstate <> " - " <>  dbn bstate)
-  nav  <- buttonSetUI (pure "Editor" ) ["Editor","Changes","Exception"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  nav  <- buttonSetUI (pure "Nav" ) ["Nav","Change","Exception"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   chooserDiv <- UI.div # set children  (chooserItens <> [ getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
@@ -170,13 +170,13 @@ setup e args w = void $ do
   mapEvent (traverse (\inf -> liftIO$ swapMVar  (mvarMap inf) M.empty)) (rumors evDB)
   mapUITEvent body (traverse (\(nav,inf)->
       case nav of
-        "Changes" -> do
+        "Change" -> do
             dash <- dashBoardAll inf
             element body # set UI.children [dash] # set UI.class_ "row"
         "Exception" -> do
             dash <- exceptionAll inf
             element body # set UI.children [dash] # set UI.class_ "row"
-        "Editor" -> do
+        "Nav" -> do
             let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
             span <- chooserTable  inf e k (table bstate)
             element body # set UI.children [span,pollRes]# set UI.class_ "row"  )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
@@ -291,7 +291,7 @@ chooserTable inf e kitems i = do
       liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
   tbChooser <- UI.div # set children [filterInp,getElement bset] # set UI.class_ "col-xs-2"
-  nav  <- buttonSetUI (pure "Editor") ["Viewer","Editor","Exception","Changes"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  nav  <- buttonSetUI (pure "Nav") ["Viewer","Nav","Exception","Change"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   header <- UI.h1 # sink text (T.unpack . translatedName .  justError "no table " . flip M.lookup (pkMap inf) <$> facts bBset ) # set UI.class_ "col-xs-7"
   chooserDiv <- UI.div # set children  [header ,getElement nav] # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
@@ -303,13 +303,13 @@ chooserTable inf e kitems i = do
 
   mapUITEvent body (\(nav,table)->
       case nav of
-        "Changes" -> do
+        "Change" -> do
             dash <- dashBoardAllTable inf (justError "no table " $ M.lookup table (pkMap inf))
             element body # set UI.children [dash]
         "Exception" -> do
             dash <- exceptionAllTable inf (justError "no table " $ M.lookup table (pkMap inf))
             element body # set UI.children [dash]
-        "Editor" -> do
+        "Nav" -> do
             span <- viewerKey inf table
             element body # set UI.children [span]
         "Viewer" -> do
