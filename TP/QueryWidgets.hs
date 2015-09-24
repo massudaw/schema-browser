@@ -650,6 +650,7 @@ offsetField  init eve  max = mdo
      offsetT = tidings offsetB cev
   return (TrivialWidget offsetT offparen)
 
+
 backFKRef
   :: (Show (f Key ),Show a, Functor f) =>
      M.Map Key Key
@@ -739,12 +740,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
       res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [fmap const (($) <$> facts sortList <@> rumors vpt) , rumors sortList])
       onEvent ((\i j -> foldl' applyTable i (expandPSet j)) <$> res2 <@> ediff)  (liftIO .  putMVar tmvar  . fmap unTB1 )
       let
-        {-reorderPK l = fmap (\i -> justError ("reorder wrong" <> show (ifk,l))  $ L.find ((== i).fst) l )  (keyAttr . unTB <$> ifk)
-        lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
-          where knm =  M.lookup ko relTable
-          -}
         box = TrivialWidget (tidings st sel) (getElement itemList)
-
         fksel =  fmap (\box ->  FKT (backFKRef  relTable  (fmap (keyAttr .unTB )ifk)   box) rel box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> triding box)
       element box # set UI.class_ "col-xs-5"
       element filterInp # set UI.class_ "col-xs-3"
