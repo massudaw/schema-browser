@@ -332,11 +332,11 @@ loadDelayed inf t@(k,v) values@(ks,vs)
 
 applyAttr' :: (Show a,Ord a ,a~ Index a)  =>  TB Identity Key a  -> PathAttr Key a -> DBM Key a (TB Identity Key a)
 applyAttr' (Attr k i) (PAttr _ p)  = return $ Attr k (applyShowable i p)
-applyAttr' (FKT k rel i) (PFK _ p m b )  =  do
-                            let ref =  F.toList $ M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList k)
-                                edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
+applyAttr' sfkt@(FKT iref rel i) (PFK _ p m b )  =  do
+                            let ref =  F.toList $ M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList iref)
+                                edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (  flip applyAttr k . traceShow (k,v)) v else v
                             tbs <- atTable m
-                            return $ traceShow (ref,k) $ FKT ref rel (maybe (joinRel rel (fmap unTB ref) tbs) id b)
+                            return $ FKT ref rel (maybe (joinRel rel (fmap unTB ref) tbs) id b)
 applyAttr' (IT k i) (PInline _   p)  = IT k <$> (applyFTBM (fmap pure $ createTB1) applyRecord' i p)
 applyAttr' i j = errorWithStackTrace (show ("applyAttr'" :: String,i,j))
 

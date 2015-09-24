@@ -657,10 +657,11 @@ insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
     where
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
       attrs =  concat $ nonRefTB . createAttr <$> i
-      serial f =  filter (all (isSerial .keyType) .f)
-      direct f = filter (not.all (isSerial.keyType) .f)
-      serialAttr = serial (fmap _relOrigin .keyattri) attrs
-      directAttr = direct (fmap _relOrigin . keyattri) attrs
+      testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
+      serial f =  filter (all testSerial  .f)
+      direct f = filter (not.all testSerial .f)
+      serialAttr = serial (aattri) attrs
+      directAttr = direct ( aattri) attrs
       projKey = fmap (keyValue ._relOrigin) . concat . fmap keyattri
       serialTB = reclist' t (fmap _tb  serialAttr)
 

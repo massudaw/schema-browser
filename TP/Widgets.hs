@@ -263,7 +263,7 @@ buttonDivSet :: Eq a => [a] -> Tidings (Maybe a) ->  (a -> String) ->  (a -> UI 
 buttonDivSet ks binit h  el = mdo
   buttons <- mapM (buttonString h bv ) ks
   dv <- UI.div # set children (fst <$> buttons)
-  let evs = foldl' (unionWith const) (filterJust $ rumors binit) (snd <$> buttons)
+  let evs = foldl (unionWith const) (filterJust $ rumors binit) (snd <$> buttons)
   v <- currentValue (facts binit)
   bv <- stepper (maybe (head ks) id v) evs
   return (TrivialWidget (tidings bv evs) dv)

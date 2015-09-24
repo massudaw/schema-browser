@@ -125,17 +125,6 @@ pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
   pgOut <- mapEvent (\v -> catchPluginException inf n t (getPK $ justError "ewfew"  v) . action inf $ v)  ecv
   return (out, (snd f ,   pgOut ))
 
-{-
-plugTags inf oldItems (StatefullPlugin n t f action _) = UI.div
-plugTags inf bres (BoundedPlugin2 n t f action) = do
-  let tdInput = filter (isJust .  (flip testTable  (fst f))) <$>  bres
-      tdOutput = filter (not . isJust . (flip testTable (snd f))) <$> tdInput
-  headerP <- UI.button # set text (T.unpack n)
-  let ecv = tdOutput <@ UI.click headerP
-  pgOut <- mapEvent (mapM (\inp -> catchPluginException inf n t . maybe (return Nothing )  (\i -> updateModAttr inf i inp (lookTable inf t)) =<< action inf (Just  inp))  ) ecv
-  el <- UI.div # sink UI.text ((\i o t-> T.unpack n <> " (" <>  show (length o) <> "/" <> show (length i) <> "/" <> show (length t) <> ")" ) <$> tdInput <*> tdOutput <*> bres)
-  UI.div # set children [headerP,el]
--}
 
 lorder lo lref = allMaybes $ fmap (\k -> L.find (\i-> fst i == k ) lref) lo
 
@@ -193,7 +182,7 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return (fmap (runIdentity . getCompose ) <$>  tbi)) (fmap Just . filterJust . snd <$>  pfks )
         tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks wl (ftdi ) i
         dv <- UI.div #  set UI.class_ "col-xs-12"# set children [l,getElement tds]
-        paintEdit l (facts (fmap tbrefM <$> triding tds)) (fmap tbrefM <$> facts oldItems)
+        paintEdit l (fmap tbrefM <$> facts (triding tds)) (fmap tbrefM . traceShowId <$> facts oldItems)
         return $ TrivialWidget (triding tds) dv
 
 tbCase inf pgs constr i@(IT na tb1 ) wl plugItens oldItems  = do
@@ -380,7 +369,6 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
   sub <- UI.div # sink items  (pure .fun <$> facts (triding nav)) # set UI.class_ "row"
   cv <- currentValue (facts preoldItems)
   bh2 <- stepper  cv (unionWith const e2  (rumors preoldItems))
-  -- subnet <- UI.div # set children [header,sub] # set UI.class_ "col-xs-10"
   return ([getElement nav,sub], ediff ,tidings bh2 (unionWith const e2  (rumors preoldItems)))
 
 
@@ -754,7 +742,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
         lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
           where knm =  M.lookup ko relTable
         box = TrivialWidget (tidings st sel) (getElement itemList)
-        fksel =  (\box -> fmap (\ibox -> FKT (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . catMaybes . fmap lookFKsel $ ibox) rel (fromJust box) ) .  fmap (concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1) $ box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> triding box)
+        fksel =  (\box -> fmap (\ibox -> FKT (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . catMaybes . traceShowId . fmap lookFKsel $ ibox) rel (fromJust box) ) .  fmap (concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1) $ box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> triding box)
       element box # set UI.class_ "col-xs-5"
       element filterInp # set UI.class_ "col-xs-3"
       fk <- UI.div # set  children [getElement box,filterInp,head celem]  # set UI.class_ "row"
@@ -880,7 +868,7 @@ tbInsertEdit inf  f@(FKT pk rel2  t2) =
    case t2 of
         t@(TB1 (_,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           Identity . (\tb -> FKT   (fromMaybe pk  $ backFKRef relTable  (keyAttr .unTB <$> pk) (Just tb) ) rel2 tb ) <$> fullInsert inf t
+           Identity . (\tb -> FKT   (traceShow ("source ref",pk) $ justError "cant back fk " $ backFKRef relTable  (keyAttr .unTB <$> pk) (Just tb) ) rel2 tb ) <$> fullInsert inf t
         LeftTB1 i ->
            maybe (return (Identity f) ) (fmap (fmap attrOptional) . tbInsertEdit inf) (unLeftItens f)
         ArrayTB1 l ->

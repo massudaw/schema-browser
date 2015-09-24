@@ -298,7 +298,7 @@ importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
       let ao :: TB2 Text Showable
           ao =  LeftTB1 $ ArrayTB1 . fmap (tblist . fmap attrT ) <$>  b
           ref :: [Compose Identity (TB Identity ) Text(Showable)]
-          ref = [attrT  ("statements",LeftTB1 $ join $ fmap (ArrayTB1 ). allMaybes . fmap (M.lookup "fitid" . M.fromList ) <$> b)]
+          ref = [attrT  ("statements",LeftTB1 $ join $ fmap (ArrayTB1 ).   allMaybes . fmap (join . fmap unSSerial . M.lookup "fitid" . M.fromList ) <$> b)]
           tbst :: (Maybe (TB2 Text (Showable)))
           tbst = Just $ tblist [_tb $ FKT ref [Rel "statements" "=" "fitid",Rel "account" "=" "account"] ao]
       returnA -< tbst

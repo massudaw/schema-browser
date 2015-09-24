@@ -221,7 +221,7 @@ applyRecord
 applyRecord t@((m, v)) (_ ,_  , k)  = (m ,mapComp (KV . Map.mapWithKey (\key vi -> foldl  (edit key) vi k  ) . _kvvalues ) v)
   where edit  key v k@(PAttr  s _)  = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
         edit  key v k@(PInline s _ ) = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
-        edit  key v k@(PFK rel _  _ _ ) = if traceShow (key == Set.fromList rel ,k ) $  key == Set.fromList rel  then  mapComp (flip applyAttr k ) v else v
+        edit  key v k@(PFK rel _  _ _ ) = if   key == Set.fromList rel  then  mapComp (flip applyAttr k ) v else v
 
 patchTB1 :: (Show a , Ord a ,a ~ Index a ,Show k,Ord k) => TBData k  a -> Index (TBData k  a)
 patchTB1 (m, k)  = (m  ,(getPKM (m,k)) ,  F.toList $ patchAttr  . unTB <$> (unKV k))
@@ -258,7 +258,7 @@ joinRel rel ref table
 
 applyAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k a -> TB Identity k a
 applyAttr (Attr k i) (PAttr _ p)  = Attr k (applyShowable i p)
-applyAttr (FKT k rel  i) (PFK _ p _ b )  = traceShow (ref,k) $ FKT ref  rel  i
+applyAttr (FKT k rel  i) (PFK _ p _ b )  =  FKT ref  rel  (maybe i id b)
   where
               ref =  F.toList $ Map.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList (concat $ traComp nonRefTB <$>  k))
               edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
@@ -341,7 +341,7 @@ instance Applicative Interval.Extended where
   (Interval.Finite i) <*> (Interval.Finite j) =  Interval.Finite $ i j
 
 applyOptM
-  :: (t ~ Index a ,Monad m ,Applicative m,Ord a) =>
+  :: (t ~ Index a ,Show a, Show t,Monad m ,Applicative m,Ord a) =>
      (t -> m a)
      -> (a -> t -> m a)-> Maybe (FTB a) -> Maybe (PathFTB t) -> m (Maybe (FTB a))
 applyOptM  pr a i  o = case i of
@@ -350,7 +350,7 @@ applyOptM  pr a i  o = case i of
                             Just j -> traverse (createFTBM pr) o
                       Just _ -> sequenceA $ applyFTBM pr a <$> i <*> o
 applyOpt
-  :: Ord a =>
+  :: (Show a,Ord a,Show t) =>
      (t -> a)
      -> (a -> t -> a)-> Maybe (FTB a) -> Maybe (PathFTB t) ->  (Maybe (FTB a))
 applyOpt  pr a i  o = case i of
@@ -359,7 +359,7 @@ applyOpt  pr a i  o = case i of
                             Just j -> createFTB pr <$> o
                       Just _ -> applyFTB pr a <$> i <*> o
 applyFTBM
-  :: (Monad m,Applicative m ,Ord a , t ~ Index a) =>
+  :: (Show t,Show a,Monad m,Applicative m ,Ord a , t ~ Index a) =>
   (t -> m a) -> (a -> t -> m a) -> FTB a -> PathFTB t -> m (FTB a)
 applyFTBM pr a (LeftTB1 i ) op@(POpt o) = LeftTB1 <$>  applyOptM pr a i o
 applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
@@ -377,10 +377,11 @@ applyFTBM pr a (IntervalTB1 i) (PInter b p)
         else (Interval.<..<) <$> pure (lowerBound i)  <*> traverse (flip (applyFTBM pr a) p ) (upperBound i)
 applyFTBM pr a (TB1 i) (PAtom p)  =  TB1 <$> a i p
 applyFTBM pr a  b (PatchSet l ) = foldl (\i j -> i >>= flip (applyFTBM pr a) j  ) (pure b) l
+applyFTBM _ _ a b = errorWithStackTrace ("applyFTB: " <> show (a,b))
 
 
 applyFTB
-  :: Ord a =>
+  :: (Show a,Show t,Ord a) =>
   (t -> a) -> (a -> t -> a) -> FTB a -> PathFTB t -> FTB a
 applyFTB pr a (LeftTB1 i ) op@(POpt o) = LeftTB1 $ applyOpt pr a i o
 applyFTB pr a (ArrayTB1 i ) (PIdx ix o) = case o of
@@ -398,6 +399,7 @@ applyFTB pr a (IntervalTB1 i) (PInter b p)
         else lowerBound i Interval.<..<  fmap (flip (applyFTB pr a) p ) (upperBound i)
 applyFTB pr a (TB1 i) (PAtom p)  =  TB1 $ a i p
 applyFTB pr a  b (PatchSet l ) = foldl (applyFTB pr a ) b l
+applyFTB _ _ a b = errorWithStackTrace ("applyFTB: " <> show (a,b))
 
 -- createFTB :: (Index a  ->  a) -> PathFTB (Index a) -> a
 createFTB p (POpt i ) = LeftTB1 (createFTB p <$> i)
@@ -420,9 +422,11 @@ createFTBM p (PAtom i )  = TB1 <$>  p i
 
 
 instance Monoid (FTB a) where
- mappend (LeftTB1 i) (LeftTB1 j) = LeftTB1 (i <> j)
+ mappend (LeftTB1 i) (LeftTB1 j) = LeftTB1 (j)
  mappend (ArrayTB1 i) (ArrayTB1 j) = ArrayTB1 (i <> j)
- -- mappend (PatchSet i) (PatchSet j) = PatchSet (i <> j)
+ mappend (DelayedTB1 i) (DelayedTB1 j) = DelayedTB1 (j)
+ mappend (SerialTB1 i) (SerialTB1 j) = SerialTB1 (j)
+ mappend (TB1 i) (TB1 j) = TB1 j
 
 imap f = map (uncurry f) . zip [0..]
 
