@@ -178,11 +178,11 @@ tbCase inf pgs constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
 
             restrictConstraint = filter ((\v -> maybe False  (v `S.isSubsetOf`)   pkset) . S.fromList . getRelOrigin  .fst) constr
             convertConstr :: SelTBConstraint
-            convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> (constr   . justError "no backref" . backFKRef relTable (getRelOrigin f) . Just )) j ) <$>  restrictConstraint
+            convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> (constr   .  backFKRef relTable (getRelOrigin f)  )) j ) <$>  restrictConstraint
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return (fmap (runIdentity . getCompose ) <$>  tbi)) (fmap Just . filterJust . snd <$>  pfks )
         tds <- fkUITable inf pgs (convertConstr <> nonInjConstr ) pfks wl (ftdi ) i
         dv <- UI.div #  set UI.class_ "col-xs-12"# set children [l,getElement tds]
-        paintEdit l (fmap tbrefM <$> facts (triding tds)) (fmap tbrefM . traceShowId <$> facts oldItems)
+        paintEdit l (fmap tbrefM <$> facts (triding tds)) (fmap tbrefM  <$> facts oldItems)
         return $ TrivialWidget (triding tds) dv
 
 tbCase inf pgs constr i@(IT na tb1 ) wl plugItens oldItems  = do
@@ -421,12 +421,8 @@ processPanelTable inf attrsB res table oldItemsi = do
   diffEdi <- mapEvent id $ crudEdi <$> facts oldItemsi <*> attrsB <@ UI.click editB
   diffDel <- mapEvent id $ crudDel <$> facts (fmap tableNonRef <$> oldItemsi) <@ UI.click deleteB
   diffIns <- mapEvent id $ crudIns <$>  attrsB <@ UI.click insertB
-  bd <- stepper [] (unions [])
-  diffs <- stepper [] (unions [diffEdi,diffIns,diffDel])
-  diffOut <- UI.span # sink UI.text (show <$> diffs)
-  errorOut <- UI.span # sink UI.text (L.intercalate "," <$> bd)
-  transaction <- UI.span# set children [insertB,editB,deleteB,errorOut,diffOut]
-  return (transaction , fmap (head) $ unions $ fmap filterJust [diffEdi,diffIns,diffDel] )
+  transaction <- UI.span# set children [insertB,editB,deleteB]
+  return (transaction , fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffDel] )
 
 
 
@@ -654,10 +650,15 @@ offsetField  init eve  max = mdo
      offsetT = tidings offsetB cev
   return (TrivialWidget offsetT offparen)
 
-
-backFKRef relTable ifk box = fmap (\ibox -> (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . catMaybes . fmap lookFKsel $  ibox) ) .    fmap (concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1) $ box
+backFKRef
+  :: (Show (f Key ),Show a, Functor f) =>
+     M.Map Key Key
+     -> f Key
+     -> TB2 Key a
+     -> f (Compose Identity (TB f1) Key a)
+backFKRef relTable ifk = fmap (_tb . uncurry Attr). reorderPK . catMaybes . fmap lookFKsel . concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1
   where
-        reorderPK l = fmap (\i -> justError (show ("reorder wrong", ifk , l,i))  $ L.find ((== i).fst) l )  ( ifk)
+        reorderPK l = fmap (\i -> justError (show ("reorder wrong", ifk , l,i))  $ L.find ((== i).fst) l )  ifk
         lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
           where knm =  M.lookup ko relTable
 
@@ -738,11 +739,13 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
       res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [fmap const (($) <$> facts sortList <@> rumors vpt) , rumors sortList])
       onEvent ((\i j -> foldl' applyTable i (expandPSet j)) <$> res2 <@> ediff)  (liftIO .  putMVar tmvar  . fmap unTB1 )
       let
-        reorderPK l = fmap (\i -> justError ("reorder wrong" <> show (ifk,l))  $ L.find ((== i).fst) l )  (keyAttr . unTB <$> ifk)
+        {-reorderPK l = fmap (\i -> justError ("reorder wrong" <> show (ifk,l))  $ L.find ((== i).fst) l )  (keyAttr . unTB <$> ifk)
         lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
           where knm =  M.lookup ko relTable
+          -}
         box = TrivialWidget (tidings st sel) (getElement itemList)
-        fksel =  (\box -> fmap (\ibox -> FKT (fmap (\ i -> _tb $ Attr (fst i ) (snd i) ). reorderPK . catMaybes . traceShowId . fmap lookFKsel $ ibox) rel (fromJust box) ) .  fmap (concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1) $ box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> triding box)
+
+        fksel =  fmap (\box ->  FKT (backFKRef  relTable  (fmap (keyAttr .unTB )ifk)   box) rel box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> triding box)
       element box # set UI.class_ "col-xs-5"
       element filterInp # set UI.class_ "col-xs-3"
       fk <- UI.div # set  children [getElement box,filterInp,head celem]  # set UI.class_ "row"
@@ -868,7 +871,7 @@ tbInsertEdit inf  f@(FKT pk rel2  t2) =
    case t2 of
         t@(TB1 (_,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           Identity . (\tb -> FKT   (traceShow ("source ref",pk) $ justError "cant back fk " $ backFKRef relTable  (keyAttr .unTB <$> pk) (Just tb) ) rel2 tb ) <$> fullInsert inf t
+           Identity . (\tb -> FKT ( backFKRef relTable  (keyAttr .unTB <$> pk) tb) rel2 tb ) <$> fullInsert inf t
         LeftTB1 i ->
            maybe (return (Identity f) ) (fmap (fmap attrOptional) . tbInsertEdit inf) (unLeftItens f)
         ArrayTB1 l ->
