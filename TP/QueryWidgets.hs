@@ -152,8 +152,6 @@ attrSize (Attr k _ ) = go  (keyType k)
                        i -> (3,1)
 
 
-forceDefaultType (Just i ) = renderPrim i
-forceDefaultType Nothing = ""
 
 
 getRelOrigin =  fmap _relOrigin . concat . fmap keyattr
@@ -567,7 +565,7 @@ buildPrim tdi i = case i of
     oneInput tdi elem = do
             let f = facts tdi
             v <- currentValue f
-            inputUI <- UI.input # sink0 UI.value (forceDefaultType   <$> f)
+            inputUI <- UI.input # sink0 UI.value (maybe "" renderPrim <$> f)
             let pke = unionWith const  (rumors tdi) (readPrim i <$> UI.valueChange inputUI)
             pk <- stepper v  pke
             let pkt = tidings pk pke

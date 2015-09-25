@@ -325,25 +325,29 @@ viewer inf key = mdo
       table = fromJust  $ M.lookup key $ pkMap inf
       tableSt = (tableView  (tableMap inf) table)
   itemList <- UI.div
+  b <- checkedWidget (pure True)
   let pageSize = 20
   offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) (pure 10 )
   let
+      dir True = "<"
+      dir False = ">"
+      dir2 True  = Desc
+      dir2 False = Asc
       nearest :: Tidings ((Int,Maybe (Int,TB2 Key Showable)))
       nearest = (\p o  -> (o,) $ safeHead $ filter ((<=0) .(\i -> i -o) .  fst) $ reverse  $ L.sortBy (comparing ((\i -> (i - o)). fst )) p) <$>  (M.toList <$> pg)  <#> (triding offset)
-  let makeQ = ((\(o,i) -> fmap (o,) $ paginate (conn inf) (unTB1 $ tableView  (tableMap inf) table) "<" (fmap (const Desc) <$> (F.toList . getPK $ unTlabel tableSt) )  ((*pageSize) $ maybe o ((o-) . fst) i ) pageSize (fmap (F.toList . getPK.snd )i) ))
-  tdswhere <- mapEvent makeQ (rumors nearest)
+  let makeQ = ((\b (o,i) -> fmap (o,) $ paginate (conn inf) (unTB1 $ tableView  (tableMap inf) table) (dir b) (fmap (const (dir2 b)) <$> (F.toList . getPK $ unTlabel tableSt) )  ((*pageSize) $ maybe o ((o-) . fst) i ) pageSize (fmap (F.toList . getPK.snd )i) ))
+  tdswhere <- mapEvent id $ makeQ <$> facts (triding b ) <@> (rumors nearest)
   let
       addT = (\(c,td) -> M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)) <$> tdswhere
-      addH = (\(c,td) -> M.insert (c)  <$>  (fmap TB1 $ safeHead td)) <$> tdswhere
-  pg <- accumB M.empty (unionWith (.) (filterJust $ addT) (filterJust $ addH)  )
+  pg <- accumB M.empty (unionWith (.) (const (const M.empty) <$> rumors (triding b)) (filterJust addT))
   ini <- currentValue (facts nearest)
-  iniQ <- liftIO$ makeQ ini
+  iniQ <- liftIO$ makeQ True ini
   tdswhereb <- stepper  (snd iniQ) (fmap snd tdswhere)
   let tview = unTlabel' $ unTB1  $ tableView (tableMap inf) table
   element itemList # sink items (pure .renderTable inf (tableNonRef' tview) .   fmap (tableNonRef') <$> tdswhereb)
   tableOff <- UI.div # sink text (show . fmap getPK <$> pg)
   nearestOff <- UI.div # sink text (show . fmap (fmap (fmap getPK)) <$> facts nearest )
-  UI.div # set children [getElement offset,nearestOff,tableOff,itemList]
+  UI.div # set children [getElement offset,getElement b,nearestOff,tableOff,itemList]
 
 
 viewerKey

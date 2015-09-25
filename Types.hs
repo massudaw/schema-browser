@@ -627,11 +627,7 @@ kattri (IT _  i ) =  recTB i
 aattr = aattri . runIdentity . getCompose
 aattri (Attr k i ) = [(k,i)]
 aattri (FKT i  _ _ ) =  (L.concat $ aattr  <$> i)
-aattri (IT _  i ) =  recTB i
-  where recTB (TB1 (_, i) ) =  concat $ fmap aattr (F.toList $ _kvvalues $ runIdentity $ getCompose i)
-        recTB (ArrayTB1 i ) = concat $ fmap recTB i
-        recTB (LeftTB1 i ) = concat $ F.toList $ fmap recTB i
-        recTB (DelayedTB1 i ) = concat $ F.toList $ fmap recTB i
+aattri (IT _ _) = []
 
 
 
