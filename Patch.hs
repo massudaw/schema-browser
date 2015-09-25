@@ -130,17 +130,17 @@ compactAttr  i =  fmap recover .  groupSplit2 projectors pathProj $ i
     pathProj (PAttr i j)  = Right (Right j)
     pathProj (PInline i j)  = Left j
     pathProj (PFK i p _ j)  = Right (Left p)
-    projectors (PAttr i j ) =  Left i
-    projectors (PInline i j) = Left i
+    projectors (PAttr i j ) =  Left (Right i)
+    projectors (PInline i j) = Left (Left i)
     projectors (PFK i _ m j) = Right (i,m,j)
-    recover (Left i,j) = PAttr i (justError "cant compact" $ compactPatches $ rights $ rights j)
-    recover (Left i,j) = PInline i (justError "cant compact" $ compactPatches $lefts j)
+    recover (Left (Right i),j) = PAttr i (justError "cant comapct pattr" $ compactPatches $ rights $ rights j)
+    recover (Left (Left i),j) = PInline i (justError "cant compact pinline" $ compactPatches $lefts j)
     recover (Right (i,m,j) ,l) = PFK i (compactAttr $ concat $ lefts $ rights l) m j
 
 
 
 compactPatches :: (Ord a ,Show a)=> [PathFTB  a] -> Maybe (PathFTB  a)
-compactPathces [] = Nothing
+compactPatches [] = Nothing
 compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . concat . fmap expandPSet $ i
   where
     pathProj (PIdx _ i) = i
