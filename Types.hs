@@ -113,6 +113,12 @@ data Path a b
 data KV f k a
   = KV {_kvvalues :: Map (Set (Rel k)) (f k a)  }deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
 
+showOrder Asc = "ASC"
+showOrder Desc = "DESC"
+data Order
+  = Asc
+  | Desc
+
 
 type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Identity))) k a )
 type TB3Data  f k a = (KVMetadata k,Compose f (KV (Compose f (TB f ))) k a )

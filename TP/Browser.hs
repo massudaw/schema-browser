@@ -32,6 +32,7 @@ import Schema
 import Patch
 import Data.Char (toLower)
 import Postgresql
+import PostgresQuery
 import Data.Maybe
 import Data.Functor.Identity
 import Reactive.Threepenny
@@ -291,7 +292,7 @@ chooserTable inf e kitems i = do
       liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
   tbChooser <- UI.div # set children [filterInp,getElement bset] # set UI.class_ "col-xs-2"
-  nav  <- buttonSetUI (pure "Nav") ["Viewer","Nav","Exception","Change"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  nav  <- buttonSetUI (pure "Viewer") ["Viewer","Nav","Exception","Change"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   header <- UI.h1 # sink text (T.unpack . translatedName .  justError "no table " . flip M.lookup (pkMap inf) <$> facts bBset ) # set UI.class_ "col-xs-7"
   chooserDiv <- UI.div # set children  [header ,getElement nav] # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
@@ -319,13 +320,30 @@ chooserTable inf e kitems i = do
   subnet <- UI.div # set children [chooserDiv,body] # set UI.class_ "col-xs-10"
   UI.div # set children [tbChooser, subnet ]  # set UI.class_ "row"
 
-viewer inf key = do
+viewer inf key = mdo
   let
       table = fromJust  $ M.lookup key $ pkMap inf
-
-  (tmvar,vpt)  <- liftIO $ eventTable inf table
+      tableSt = (tableView  (tableMap inf) table)
+  itemList <- UI.div
+  let pageSize = 20
+  offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) (pure 10 )
+  let
+      nearest :: Tidings ((Int,Maybe (Int,TB2 Key Showable)))
+      nearest = (\p o  -> (o,) $ safeHead $ filter ((<=0) .(\i -> i -o) .  fst) $ reverse  $ L.sortBy (comparing ((\i -> (i - o)). fst )) p) <$>  (M.toList <$> pg)  <#> (triding offset)
+  let makeQ = ((\(o,i) -> fmap (o,) $ paginate (conn inf) (unTB1 $ tableView  (tableMap inf) table) "<" (fmap (const Desc) <$> (F.toList . getPK $ unTlabel tableSt) )  ((*pageSize) $ maybe o ((o-) . fst) i ) pageSize (fmap (F.toList . getPK.snd )i) ))
+  tdswhere <- mapEvent makeQ (rumors nearest)
+  let
+      addT = (\(c,td) -> M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)) <$> tdswhere
+      addH = (\(c,td) -> M.insert (c)  <$>  (fmap TB1 $ safeHead td)) <$> tdswhere
+  pg <- accumB M.empty (unionWith (.) (filterJust $ addT) (filterJust $ addH)  )
+  ini <- currentValue (facts nearest)
+  iniQ <- liftIO$ makeQ ini
+  tdswhereb <- stepper  (snd iniQ) (fmap snd tdswhere)
   let tview = unTlabel' $ unTB1  $ tableView (tableMap inf) table
-  UI.div # sink items (pure .renderTable inf (tableNonRef' tview) .   fmap (tableNonRef'.unTB1) <$> facts vpt)
+  element itemList # sink items (pure .renderTable inf (tableNonRef' tview) .   fmap (tableNonRef') <$> tdswhereb)
+  tableOff <- UI.div # sink text (show . fmap getPK <$> pg)
+  nearestOff <- UI.div # sink text (show . fmap (fmap (fmap getPK)) <$> facts nearest )
+  UI.div # set children [getElement offset,nearestOff,tableOff,itemList]
 
 
 viewerKey
@@ -375,8 +393,6 @@ viewerKey inf key = mdo
   insertDivBody <- UI.div # set children [insertDiv,last cru]# set UI.class_ "row"
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset , filterInp,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row"
-  -- tdswhere <- mapTEvent (traverse (selectQueryWherePK fromRecord (conn inf) (unTB1 $ tableView  (tableMap inf) table) "=" )) (fmap (F.toList . getPK) <$> tds)
-  -- e <- UI.div # sink text (show <$> facts tdswhere)
   UI.div # set children ([itemSelec,insertDivBody ] )
 
 
