@@ -417,7 +417,7 @@ createFTBM p (PDelayed i ) = DelayedTB1 <$> (traverse (createFTBM p ) i)
 createFTBM p (PIdx ix o ) = ArrayTB1 .pure .justError "" <$> (traverse (createFTBM p) o)
 createFTBM p (PInter b o ) = errorWithStackTrace "interval"
 createFTBM p (PAtom i )  = TB1 <$>  p i
--- createFTBM p (PatchSet l) = foldl1 mappend (createFTBM p <$> traceShow "createFTBM PatchSet" l)
+createFTBM p (PatchSet l) = foldl1 (liftA2 mappend) (createFTBM p <$>  l)
 
 
 
