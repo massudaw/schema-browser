@@ -59,12 +59,14 @@ insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
       attrs =  concat $ nonRefTB . createAttr <$> i
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
-      serial f =  filter (all testSerial  .f)
-      direct f = filter (not.all testSerial .f)
-      serialAttr = serial (aattri) attrs
-      directAttr = direct ( aattri) attrs
+      serial f =  filter (all1 testSerial  .f)
+      direct f = filter (not.all1 testSerial .f)
+      serialAttr = serial aattri attrs
+      directAttr = direct aattri attrs
       projKey = fmap (keyValue ._relOrigin) . concat . fmap keyattri
       serialTB = reclist' t (fmap _tb  serialAttr)
+      all1 f [] = False
+      all1 f i = all f i
 
 
 
@@ -149,12 +151,12 @@ paginate  conn t rel order off size Nothing = do
 paginate  conn t rel order off size (Just kold) = do
         liftIO$ print que
         liftIO $ queryWith (fromRecord (unTlabel' t) ) conn que koldPk
-  where pred = " WHERE " <> T.intercalate " AND " (equality . label . getCompose <$> fmap (labelValue.getCompose) (getPKAttr $ joinNonRef' t))
+  where pred = " WHERE ROW(" <> T.intercalate " ," (equality . label . getCompose <$> fmap (labelValue.getCompose) (getPKAttr $ joinNonRef' t)) <> ")" <> rel   <> " ROW (" <> T.intercalate " ," (const "?" . label . getCompose <$> fmap (labelValue.getCompose) (getPKAttr $ joinNonRef' t))  <> ")"
         offsetQ = " OFFSET " <> T.pack (show off)
         limitQ = " LIMIT " <> T.pack (show size)
         orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) <$> lookLabels t order)
         que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred <> orderQ <> offsetQ <> limitQ
-        equality k = k <> rel   <> "?"
+        equality k = k
         koldPk :: [TB Identity Key Showable ]
         koldPk = (\(Attr k _) -> Attr k (justError ("no value for key " <> show k) $ M.lookup k (M.fromList kold)) ) <$> fmap (labelValue .getCompose.labelValue.getCompose) (getPKAttr $ joinNonRef' t)
 
