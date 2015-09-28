@@ -18,6 +18,7 @@ import Step
 import Location
 import Plugins
 import TP.Widgets
+import SortList
 import TP.QueryWidgets
 import Control.Monad.Reader
 import Control.Concurrent
@@ -292,7 +293,7 @@ chooserTable inf e kitems i = do
       liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
   tbChooser <- UI.div # set children [filterInp,getElement bset] # set UI.class_ "col-xs-2"
-  nav  <- buttonSetUI (pure "Viewer") ["Viewer","Nav","Exception","Change"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  nav  <- buttonSetUI (pure "Nav") ["Viewer","Nav","Exception","Change"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   header <- UI.h1 # sink text (T.unpack . translatedName .  justError "no table " . flip M.lookup (pkMap inf) <$> facts bBset ) # set UI.class_ "col-xs-7"
   chooserDiv <- UI.div # set children  [header ,getElement nav] # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
@@ -327,7 +328,7 @@ viewer inf key = mdo
   itemList <- UI.div
   b <- checkedWidget (pure True)
   let pageSize = 20
-  offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) (pure 10 )
+  offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) (pure $ maybe 100 (ceiling . (/pageSize). fromIntegral) $ M.lookup table (tableSize inf ) )
   let
       dir True = "<"
       dir False = ">"
@@ -369,11 +370,12 @@ viewerKey inf key = mdo
   el <- filterUI  inf (allRec' (tableMap inf)  table)
   let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
       sortSet =  F.toList . tableKeys . tableNonRef . allRec' (tableMap inf ) $ table
-  sortList  <- multiListBox (pure sortSet) (pure $ F.toList key ) (pure (line . show))
+  sortList <- selectUI sortSet ((,True) <$> F.toList key) conv
+  element sortList # set UI.style [("overflow-y","scroll"),("height","200px")]
   asc <- checkedWidget (pure True)
   let
      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  . _unTB1 )
-     tsort = sorting <$> triding asc <*> multiUserSelection sortList
+     tsort = sorting <$> (triding sortList)
      res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 (_, kv) ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $  keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
   let pageSize = 20
   itemList <- listBox ((\o -> L.take pageSize . L.drop (o*pageSize))<$> triding offset <*>res3) (tidings st never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)

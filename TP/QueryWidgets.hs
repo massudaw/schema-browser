@@ -716,7 +716,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList .    _unTB1
           sortList :: Tidings ([TB1 Showable] -> [TB1 Showable])
-          sortList =  sorting  <$> pure True <*> pure (fmap _relTarget rel)
+          sortList =  sorting  <$> pure (fmap ((,True)._relTarget) rel)
       itemList <- listBox ((Nothing:) <$>  fmap (fmap Just) res3) (tidings (fmap Just <$> st) never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
       let evsel = unionWith const (rumors tdi) (rumors $ join <$> userSelection itemList)
@@ -770,10 +770,17 @@ strAttr :: String -> WriteAttr Element String
 strAttr name = mkWriteAttr (set' (attr name))
 
 
-sorting :: Bool -> [Key] -> [TB1 Showable]-> [TB1 Showable]
-sorting b ss  =  L.sortBy (ifApply b flip (comparing (filterTB1 (not . S.null . (`S.intersection` (S.fromList ss) ). S.fromList . fmap _relOrigin .keyattr ))  ))
-  where ifApply True i =  i
-        ifApply False _ = id
+data AscDesc a
+  = AscW a
+  | DescW a
+  deriving(Eq)
+
+instance Ord a => Ord (AscDesc a) where
+  compare (AscW a ) (AscW b) =  compare a b
+  compare (DescW a ) (DescW b) = compare (Down a ) (Down b)
+
+sorting :: [(Key,Bool)] -> [TB1 Showable]-> [TB1 Showable]
+sorting ss  =  L.sortBy (comparing   (fmap (\(i,e) -> if i then DescW e  else AscW e ) . F.toList .M.intersectionWith (,) (M.fromList ss) . M.fromList . concat . fmap aattr  . F.toList . _kvvalues . unTB . snd . unTB1 )  )
 
 deleteMod :: InformationSchema ->  TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
 deleteMod inf j@(meta,_) table = do

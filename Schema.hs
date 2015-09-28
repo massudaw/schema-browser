@@ -85,6 +85,7 @@ data InformationSchema
   , keyMap :: Map (Text,Text) Key
   , pkMap :: Map (Set Key) Table
   , tableMap :: Map Text Table
+  , tableSize :: Map Table Int
   , pluginsMap :: Map (Text,Text,Text) Key
   , mvarMap :: MVar (Map (KVMetadata Key) ({-R.Event [TB1 Showable], R.Handler [TB1 Showable], -} MVar  [TBData Key Showable], R.Tidings [TBData Key Showable]))
   , conn :: Connection
@@ -108,6 +109,7 @@ queryAuthorization conn schema user = do
     return $ M.fromList $ convert <$> sq
   where aq = "select table_name,authorizations from metadata.authorization where table_schema = ? and grantee = ? "
 
+tableSizes = "SELECT c.relname,c.reltuples::bigint AS estimate FROM   pg_class c JOIN   pg_namespace n ON c.relkind = 'r' and n.oid = c.relnamespace WHERE n.nspname = ? "
 
 fromShowable2 i@(Primitive "character varying") v = fromShowable i $  BS.drop 1 (BS.init v)
 fromShowable2 i@(Primitive "text") v = fromShowable i $  BS.drop 1 (BS.init v)
@@ -148,11 +150,12 @@ keyTables conn userconn (schema ,user) = do
                                   attr = S.difference ({-S.filter (not. isKEither.keyType)  $ -}(\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> pks)
                                 in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
        let (i1,i2,i3) = (keyMap, M.fromList $ filter (not.S.null .fst)  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
+       sizeMapt <- M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t i3 ) <$> query conn tableSizes (Only schema)
        mvar <- newMVar M.empty
        metaschema <- if (schema /= "metadata")
           then Just <$> keyTables  conn userconn ("metadata",user)
           else return Nothing
-       return  $ InformationSchema schema user i1 i2 i3 M.empty mvar  userconn conn metaschema
+       return  $ InformationSchema schema user i1 i2 i3 sizeMapt M.empty mvar  userconn conn metaschema
 
 addRec i j
   | i == j = RecJoin

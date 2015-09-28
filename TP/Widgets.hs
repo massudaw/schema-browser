@@ -34,7 +34,7 @@ data TrivialWidget a =
 
 
 -- Generate a accum the behaviour and generate the ahead of promised event
-accumT :: MonadIO m => a -> Event (a -> a) -> m (Tidings a)
+accumT :: MonadIO m => a -> Event (a ->a) -> m (Tidings a)
 accumT e ev = do
   b <- accumB e ev
   return $ tidings b (flip ($) <$> b <@> ev)

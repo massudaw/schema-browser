@@ -181,7 +181,7 @@ data FKey a
     , keyStatic :: Maybe (FTB Showable)
     , keyFastUnique :: ! Unique
     , keyType :: ! a
-    }
+    }deriving(Generic)
 
 instance (Functor f ,Bifunctor g)  => Bifunctor (Compose f g ) where
   first f  = Compose . fmap (first f) . getCompose
@@ -200,6 +200,7 @@ data Rel k
 deriving instance Generic (Identity a)
 
 
+instance Binary a => Binary (KType a)
 instance (Binary (f (g k a)) ) => Binary (Compose f g k a )
 instance (Binary (f k a) ,Binary k ) => Binary (KV f k a)
 instance Binary k => Binary (Rel k)
@@ -326,7 +327,7 @@ data KType a
    | KOptional (KType a)
    | KDelayed (KType a)
    | KTable [KType a]
-   deriving(Eq,Ord,Functor)
+   deriving(Eq,Ord,Functor,Generic)
 
 
 instance Show (KType KPrim) where
