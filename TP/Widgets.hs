@@ -39,25 +39,13 @@ accumT e ev = do
   b <- accumB e ev
   return $ tidings b (flip ($) <$> b <@> ev)
 
-foldrTds ::  Applicative  f => (b -> a -> a ) -> f a -> [f b] -> f a
-foldrTds fun  =  foldr (liftA2 fun)
-
-fmapTds ::  Tidings a  -> (a -> a -> a ) -> [Event  a] -> Tidings a
-fmapTds e fun l =   tidings (facts e) $ (\li ii ->  foldr fun li ii) <$> facts e <@> unions  (rumors e: l)
-
-applyTds ::  Tidings a  ->  Event  (a -> a) -> Tidings a
-applyTds e l =   tidings (facts e) $ (flip ($)) <$> facts e <@> unionWith const (const <$> rumors e) l
-
-foldTds ::  Tidings a  ->  [Event  (a -> a)] -> Tidings a
-foldTds =  foldl' applyTds
-
 
 evalUI el f  = getWindow el >>= \w -> runUI w f
 
 accumTds :: MonadIO m => Tidings a -> Event (a -> a) -> m (Tidings a)
 accumTds e l = do
-	ve <- currentValue (facts e)
-	accumT ve $ concatenate <$> unions ([l,const <$> rumors e ])
+  ve <- currentValue (facts e)
+  accumT ve $ concatenate <$> unions ([l,const <$> rumors e ])
 
 
 accumTs :: MonadIO m => a -> [Event (a -> a)] -> m (Tidings a)
@@ -128,7 +116,7 @@ mapDynEvent f x = do
   return $ TrivialWidget (tidings bh e) sub
 
 
-
+mapEvent :: (a -> IO a1) -> Event a -> UI (Event a1)
 mapEvent f x = do
   (e,h) <- liftIO $ newEvent
   onEvent x (\i -> liftIO . forkIO $ (f i)  >>= h)
@@ -142,37 +130,7 @@ mapTEvent f x = do
   be <- liftIO $ f i
   t <- stepper be e
   return $ tidings t e
-{-
-mapT :: MonadIO m => (a -> IO b) -> Tidings a -> m (Tidings b)
-mapT f x =  do
-  let ev = unsafeMapIO f $ rumors x
-  c <- currentValue  (facts x)
-  b <- liftIO $ f c
-  bh <- stepper  b ev
-  return $ tidings bh (bh <@ rumors x)
--}
 
-insdel :: (Ord a,Ord b,Monoid b,Show a,Show b) => Behavior (Map a b) -> UI (TrivialWidget (Map a b))
-insdel binsK =do
-  add <- UI.button # set text "Save"
-  remove <- UI.button # set text "Delete"
-  res <- filterWB (UI.click add) (UI.click remove) binsK
-  out <- UI.div # set children [getElement res,add,remove]
-  return $ TrivialWidget (triding res ) out
-    where
-    filterWB emap erem bkin = mdo
-      let
-          insB =  M.unionWith mappend <$> bkin
-          delB = foldr (.) id . fmap M.delete <$> bsel2
-          recAdd = insB <@ emap
-          recDel =  (facts delB) <@ erem
-      recT <- accumTs M.empty  [recAdd,recDel]
-      let sk i =  set text (show i)
-      resSpan <- multiListBox  (fmap M.toList recT) (pure []) (pure sk)
-      element resSpan # set (attr "size") "10" # set style [("width","400px")]
-      let bsel2 = fmap fst <$> multiUserSelection resSpan
-      -- Return the triding
-      return $ TrivialWidget recT (getElement resSpan)
 
 
 -- Style show/hide

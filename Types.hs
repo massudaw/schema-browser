@@ -356,8 +356,8 @@ instance Ord Key where
    compare i j = compare (keyFastUnique i) (keyFastUnique j)
 
 instance Show Key where
-   -- show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
-   show k = T.unpack $ showKey k
+   show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
+   -- show k = T.unpack $ showKey k
 
 showKey k  =   maybe (keyValue k) id  (keyTranslation k) {-<> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k)-} <>  "::"   <> showTy id (keyType k)
 
