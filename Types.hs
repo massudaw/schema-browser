@@ -118,6 +118,7 @@ showOrder Desc = "DESC"
 data Order
   = Asc
   | Desc
+  deriving(Show)
 
 
 type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Identity))) k a )

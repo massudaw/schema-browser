@@ -139,7 +139,7 @@ selectQueryWhere  conn t rel kold =  do
         koldPk :: [TB Identity Key Showable ]
         koldPk = catMaybes $ (\(Attr k _) -> Attr k <$> ( M.lookup k (M.fromList kold)) ) <$> fmap (labelValue .getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)
 
-paginate  conn t rel order off size Nothing = do
+paginate  conn t order off size Nothing = do
         liftIO$ print que
         liftIO $ queryWith_ (fromRecord (unTlabel' t) ) conn que
   where
@@ -148,21 +148,27 @@ paginate  conn t rel order off size Nothing = do
         orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) <$> lookLabels t order)
         que = fromString $ T.unpack $ selectQuery (TB1 t) <> orderQ <> offsetQ <> limitQ
 
-paginate  conn t rel order off size (Just kold) = do
+paginate  conn t order off size (Just kold) = do
         liftIO$ print que
-        liftIO $ queryWith (fromRecord (unTlabel' t) ) conn que koldPk
-  where pred = " WHERE ROW(" <> T.intercalate " ," (equality . label . getCompose <$> fmap (labelValue.getCompose) (getPKAttr $ joinNonRef' t)) <> ")" <> rel   <> " ROW (" <> T.intercalate " ," (const "?" . label . getCompose <$> fmap (labelValue.getCompose) (getPKAttr $ joinNonRef' t))  <> ")"
+        liftIO $ queryWith (fromRecord (unTlabel' t) ) conn que (koldPk <> reverse koldPk)
+  where pred = " WHERE " <> generateComparison (lookLabels t order)
         offsetQ = " OFFSET " <> T.pack (show off)
         limitQ = " LIMIT " <> T.pack (show size)
         orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) <$> lookLabels t order)
         que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred <> orderQ <> offsetQ <> limitQ
-        equality k = k
         koldPk :: [TB Identity Key Showable ]
-        koldPk = (\(Attr k _) -> Attr k (justError ("no value for key " <> show k) $ M.lookup k (M.fromList kold)) ) <$> fmap (labelValue .getCompose.labelValue.getCompose) (getPKAttr $ joinNonRef' t)
+        koldPk = catMaybes $ (\(Attr k _) -> Attr k <$>(  M.lookup k (M.fromList kold)))  <$> fmap (labelValue .getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)
 
-lookLabels t kold  =  label' <$> fmap (getCompose.labelValue.getCompose) (getPKAttr $ joinNonRef' t)
-    where label' (Labeled l (Attr k _)) =  (l,) (justError ("no value for key " <> show k) $ M.lookup k (M.fromList kold))
-          label' (Unlabeled (Attr k _)) = (keyValue k,(justError ("no value for key " <> show k) $ M.lookup k (M.fromList kold)) )
+lookLabels t kold  =  catMaybes $ label' <$> fmap (getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)
+    where label' (Labeled l (Attr k _)) =  (l,) <$>  ( M.lookup k (M.fromList kold))
+          label' (Unlabeled (Attr k _)) = (keyValue k,) <$> ( M.lookup k (M.fromList kold))
 
 
 
+generateSort v = T.intercalate "," (generateSort' <$> v)
+generateSort' (k,v) =  k <> " " <>   showOrder v
+
+generateComparison [] = "false"
+generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "?" <> " then " <>  generateComparison xs <> " else " <> k <>  dir v <> "?" <>" end"
+  where dir Asc = ">"
+        dir Desc = "<"

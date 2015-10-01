@@ -293,7 +293,7 @@ chooserTable inf e kitems i = do
       liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
   tbChooser <- UI.div # set children [filterInp,getElement bset] # set UI.class_ "col-xs-2"
-  nav  <- buttonSetUI (pure "Nav") ["Viewer","Nav","Exception","Change"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  nav  <- buttonSetUI (pure "Viewer") ["Viewer","Nav","Exception","Change"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   header <- UI.h1 # sink text (T.unpack . translatedName .  justError "no table " . flip M.lookup (pkMap inf) <$> facts bBset ) # set UI.class_ "col-xs-7"
   chooserDiv <- UI.div # set children  [header ,getElement nav] # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
@@ -324,31 +324,36 @@ chooserTable inf e kitems i = do
 viewer inf key = mdo
   let
       table = fromJust  $ M.lookup key $ pkMap inf
-      tableSt = (tableView  (tableMap inf) table)
+      sortSet =  F.toList . tableKeys . tableNonRef . allRec' (tableMap inf ) $ table
+      tableSt = tableView  (tableMap inf) table
   itemList <- UI.div
-  b <- checkedWidget (pure True)
   let pageSize = 20
   offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) (pure $ maybe 100 (ceiling . (/pageSize). fromIntegral) $ M.lookup table (tableSize inf ) )
-  let
-      dir True = "<"
-      dir False = ">"
+  sortList <- selectUI sortSet ((,True) <$> F.toList key) UI.tr UI.th conv
+  let makeQ = ((\slist (o,i) -> fmap (o,) $ paginate (conn inf) (unTB1 tableSt)  (fmap dir2 <$> slist)  ((*pageSize) $ maybe o ((o-) . fst) i ) pageSize (fmap (L.filter (flip elem (fmap fst slist).fst) . getAttr' . snd )i) ))
       dir2 True  = Desc
       dir2 False = Asc
-      nearest :: Tidings ((Int,Maybe (Int,TB2 Key Showable)))
-      nearest = (\p o  -> (o,) $ safeHead $ filter ((<=0) .(\i -> i -o) .  fst) $ reverse  $ L.sortBy (comparing ((\i -> (i - o)). fst )) p) <$>  (M.toList <$> pg)  <#> (triding offset)
-  let makeQ = ((\b (o,i) -> fmap (o,) $ paginate (conn inf) (unTB1 $ tableView  (tableMap inf) table) (dir b) (fmap (const (dir2 b)) <$> (F.toList . getPK $ unTlabel tableSt) )  ((*pageSize) $ maybe o ((o-) . fst) i ) pageSize (fmap (F.toList . getPK.snd )i) ))
-  tdswhere <- mapEvent id $ makeQ <$> facts (triding b ) <@> (rumors nearest)
-  let
-      addT = (\(c,td) -> M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)) <$> tdswhere
-  pg <- accumB M.empty (unionWith (.) (const (const M.empty) <$> rumors (triding b)) (filterJust addT))
-  ini <- currentValue (facts nearest)
-  iniQ <- liftIO$ makeQ True ini
-  tdswhereb <- stepper  (snd iniQ) (fmap snd tdswhere)
-  let tview = unTlabel' $ unTB1  $ tableView (tableMap inf) table
-  element itemList # sink items (pure .renderTable inf (tableNonRef' tview) .   fmap (tableNonRef') <$> tdswhereb)
-  tableOff <- UI.div # sink text (show . fmap getPK <$> pg)
-  nearestOff <- UI.div # sink text (show . fmap (fmap (fmap getPK)) <$> facts nearest )
-  UI.div # set children [getElement offset,getElement b,nearestOff,tableOff,itemList]
+      nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))
+      nearest' p o =  (o,) $ safeHead $ filter ((<=0) .(\i -> i -o) .  fst) $ reverse  $ L.sortBy (comparing ((\i -> (i - o)). fst )) (M.toList p)
+      addT (c,td) = M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)
+      ini = (nearest' M.empty 0)
+      iniSort = ((,True) <$> F.toList key)
+  iniQ <- liftIO$ makeQ iniSort ini
+  do
+    rec
+      let
+          event1 , event2 :: Event (IO (Int,[TBData Key Showable]))
+          event1 = (\(j,k) i  -> makeQ i (nearest' j k )) <$>  facts ((,) <$> pure M.empty <*> triding offset ) <@> rumors (triding sortList)
+          event2 = (\(j,i) k  -> makeQ i (nearest' j k )) <$>  facts ((,) <$> pg <*> triding sortList) <@> rumors (triding offset )
+      tdswhere <- mapEvent id (unionWith const event1 event2)
+      pg <- accumT M.empty  (unionWith (flip (.)) ((pure (const M.empty ) <@ event1)) (filterJust (addT <$> tdswhere )))
+
+    tdswherebi <- stepper  (snd iniQ) ( fmap snd tdswhere)
+    let tdswhereb =  tdswherebi -- sorting' <$> facts (triding  sortList ) <*> tdswherebi
+        tview = unTlabel' . unTB1  $tableSt
+    element itemList # sink items (pure . renderTableNoHeader (return $ getElement sortList) inf (tableNonRef' tview) . fmap tableNonRef' <$> tdswhereb)
+    tableOff <- UI.div # sink text (show . fmap getPK <$> facts pg)
+    UI.div # set children [getElement offset, tableOff,itemList]
 
 
 viewerKey
@@ -370,12 +375,12 @@ viewerKey inf key = mdo
   el <- filterUI  inf (allRec' (tableMap inf)  table)
   let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
       sortSet =  F.toList . tableKeys . tableNonRef . allRec' (tableMap inf ) $ table
-  sortList <- selectUI sortSet ((,True) <$> F.toList key) conv
+  sortList <- selectUI sortSet ((,True) <$> F.toList key) UI.div UI.div conv
   element sortList # set UI.style [("overflow-y","scroll"),("height","200px")]
   asc <- checkedWidget (pure True)
   let
      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  . _unTB1 )
-     tsort = sorting <$> (triding sortList)
+     tsort = sorting <$> triding sortList
      res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 (_, kv) ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $  keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
   let pageSize = 20
   itemList <- listBox ((\o -> L.take pageSize . L.drop (o*pageSize))<$> triding offset <*>res3) (tidings st never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)

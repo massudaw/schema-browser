@@ -779,8 +779,10 @@ instance Ord a => Ord (AscDesc a) where
   compare (AscW a ) (AscW b) =  compare a b
   compare (DescW a ) (DescW b) = compare (Down a ) (Down b)
 
-sorting :: [(Key,Bool)] -> [TB1 Showable]-> [TB1 Showable]
-sorting ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i),e) -> (ix,if i then DescW e  else AscW e) ) . F.toList .M.intersectionWith (,) (M.fromList (zipWith (\i (k,v) -> (k ,(i,v))) [0..] ss)) . M.fromList . concat . fmap aattr  . F.toList . _kvvalues . unTB . snd . unTB1 )  )
+sorting' :: [(Key,Bool)] -> [TBData Key Showable]-> [TBData Key Showable]
+sorting' ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i),e) -> (ix,if i then DescW e  else AscW e) ) . F.toList .M.intersectionWith (,) (M.fromList (zipWith (\i (k,v) -> (k ,(i,v))) [0..] ss)) . M.fromList . concat . fmap aattr  . F.toList . _kvvalues . unTB . snd )  )
+
+sorting k = fmap TB1 . sorting' k . fmap unTB1
 
 deleteMod :: InformationSchema ->  TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
 deleteMod inf j@(meta,_) table = do
@@ -928,11 +930,16 @@ metaAllTableIndex inf metaname env =   do
       filterRec = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList (fst <$> envK ))) . S.fromList . fmap _relOrigin.  keyattr )
   renderTable inf  (filterRec (unTlabel' $ unTB1 modtablei)) out
 
+renderTableNoHeader header inf modtablei out = do
+  let
+      body o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader UI.td rendererShowableUI inf $ o)
+  header # set UI.class_ "row"
+  UI.table # set UI.class_ "table table-bordered table-striped" # set items (header :(body <$> out))
+
 renderTable  inf modtablei out =  do
   let
       header = UI.tr # set UI.class_ "row" # set items (foldMetaHeader UI.th rendererHeaderUI inf $ modtablei)
-      body o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader UI.td rendererShowableUI inf $ o)
-  UI.table # set UI.class_ "table table-bordered table-striped" # set items (header :(body <$> out))
+  renderTableNoHeader header inf modtablei out
 
 
 

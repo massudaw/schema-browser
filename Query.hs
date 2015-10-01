@@ -494,7 +494,6 @@ tbFilter pred (LeftTB1 (Just i)) = tbFilter pred i
 tbFilter pred (ArrayTB1 ([i])) = tbFilter pred i
 tbFilter pred (DelayedTB1 (Just i)) = tbFilter pred i
 
-f = errorWithStackTrace ""
 
 recurseTB :: Map Text Table -> Table -> Bool -> TB3 (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3 (Labeled Text) Key ())
 recurseTB invSchema  nextT nextLeft ksn@(TB1 (m, kv) ) =  TB1 . (m,) <$>

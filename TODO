@@ -3,6 +3,10 @@ BUGS
 
 NEW FEATURES
 
+Improved Row Selector
+-- sort selector for paginate
+-- fix paginate ordered comparison  product
+
 Improve Types
 -- Remove TB1 and use TBData instead
 

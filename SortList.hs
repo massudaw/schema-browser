@@ -43,9 +43,9 @@ item ix t = do
   return $ TrivialWidget (tidings t (read <$> UI.valueChange dr) ) dr
 
 
-slot :: (Int -> Behavior a -> UI (TrivialWidget a)) -> Int -> Behavior a -> UI (Element,(Event (Int,Int),Event (Int,a)))
-slot iteme ix el = do
-    eld <- UI.div # set droppable True
+slot :: UI Element -> (Int -> Behavior a -> UI (TrivialWidget a)) -> Int -> Behavior a -> UI (Element,(Event (Int,Int),Event (Int,a)))
+slot slote iteme ix el = do
+    eld <- slote # set droppable True
     let eh = read <$> UI.drop eld
     TrivialWidget v i  <- iteme ix  el
     element i # set draggable True # set dragData (show ix)
@@ -54,10 +54,10 @@ slot iteme ix el = do
 
 
 
-list :: (Int -> Behavior a -> UI (TrivialWidget a)) -> [a] -> UI (TrivialWidget [a])
-list iteme els = mdo
+list :: UI Element -> UI Element -> (Int -> Behavior a -> UI (TrivialWidget a)) -> [a] -> UI (TrivialWidget [a])
+list liste slote iteme els = mdo
     let size = length els
-    slots <- mapM (\ix -> slot iteme ix (fromJust . M.lookup ix <$> facts res )) [0..size - 1]
+    slots <- mapM (\ix -> slot slote iteme ix (fromJust . M.lookup ix <$> facts res )) [0..size - 1]
     let  evs = head <$> (unions $ fst . snd <$> slots)
          ev2  = uncurry M.insert . head <$> (unions $ snd . snd <$> slots)
          swapKey (ixnew,ix) m =  M.insert ix elnew . M.insert ixnew el $ m
@@ -66,17 +66,17 @@ list iteme els = mdo
               elnew = fromJust $ M.lookup ixnew m
          evres = unionWith (.)(swapKey  <$> evs) ev2
     res <- accumT (M.fromList $ zip [0..] els)  evres
-    el <- UI.div # set children (fst <$> slots )
+    el <- liste # set children (fst <$> slots )
     return $ TrivialWidget (F.toList <$> res ) el
 
 
-selectUI :: Eq a => [a] -> [(a,Bool)] -> ((a,Maybe Bool) -> String) -> UI (TrivialWidget [(a,Bool)])
-selectUI l sel conv = do
-    tds <- list (sortItem conv) ((\i j -> fmap (\e -> (e,)  $ fmap snd $  L.find ((==e).fst) j) i ) l sel)
+selectUI :: Eq a => [a] -> [(a,Bool)] -> UI Element -> UI Element -> ((a,Maybe Bool) -> String) -> UI (TrivialWidget [(a,Bool)])
+selectUI l sel liste slote conv = do
+    tds <- list liste slote (sortItem conv) ((\i j -> fmap (\e -> (e,)  $ fmap snd $  L.find ((==e).fst) j) i ) l sel)
     return $ TrivialWidget (fmap (second fromJust). filter (isJust .snd) <$>  triding tds) (getElement tds)
 
 
 test = testUI (return $ do
-        ui <- selectUI [1,2,3,4,5,6] [(1,True)] conv
+        ui <- selectUI [1,2,3,4,5,6] [(1,True)] UI.div UI.div conv
         out <- UI.div # sink text (show <$> facts (triding ui))
         UI.div # set children  [getElement ui,out] )
