@@ -883,14 +883,16 @@ rendererShowableUI k  v= renderer (keyValue k) v
         showPatch l = UI.div # set text (show $ fmap renderPrim l)
         showIndex l = UI.div # set text (show $ renderShowable <$> l)
 
-foldMetaHeader :: UI Element -> (Key -> a -> (UI Element)) -> InformationSchema -> TBData Key a -> [UI Element]
-foldMetaHeader el rend inf = mapFAttr (\(Attr k v) -> hideLong (F.toList $ rend  k <$> v ))
+foldMetaHeader = foldMetaHeader' []
+
+foldMetaHeader' :: [Key] -> UI Element -> (Key -> a -> (UI Element)) -> InformationSchema -> TBData Key a -> [UI Element]
+foldMetaHeader' order el rend inf = mapFAttr order (\(Attr k v) -> hideLong (F.toList $ rend  k <$> v ))
     where
-          mapFAttr f (a,kv) = concat $ (F.toList . fmap (match.unTB )  .  _kvvalues)  $ unTB kv
-            where match i@(Attr k v) = [f i]
-                  match i@(FKT l rel t) = (f . unTB  <$> l )
-                  match i@(IT l t) = [hideLong (concat $ F.toList $ fmap (foldMetaHeader UI.div rend inf) t)]
-          hideLong (! l) = do
+          mapFAttr order f (a,kv) = fmap snd. L.sortBy (comparing ((flip L.elemIndex order).  fst) ). concat $ (  fmap (match.unTB ) .  F.toList .  _kvvalues)  $ unTB kv
+            where match i@(Attr k v) = [(k,f i)]
+                  match i@(FKT l rel t) = ((\k -> (_relOrigin $ head $ keyattr k ,). f . unTB  $ k)<$> l )
+                  match i@(IT l t) = [(_relOrigin $ head $ keyattr l,hideLong ( concat $ F.toList $ fmap (foldMetaHeader  UI.div rend inf) t))]
+          hideLong l = do
             elemD <- el
             if length l > 1
               then do
@@ -930,16 +932,34 @@ metaAllTableIndex inf metaname env =   do
       filterRec = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList (fst <$> envK ))) . S.fromList . fmap _relOrigin.  keyattr )
   renderTable inf  (filterRec (unTlabel' $ unTB1 modtablei)) out
 
+renderTableNoHeader' header inf modtablei out = do
+  let
+      body o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader UI.td rendererShowableUI inf $ o)
+  header # set UI.class_ "row"
+  UI.table # set UI.class_ "table table-bordered table-striped" # sink items ( ( (header :) . fmap body <$> out))
+
+renderTableNoHeaderSort sort header inf modtablei out = do
+  let
+      body o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader' sort UI.td rendererShowableUI inf $ o)
+  header # set UI.class_ "row"
+  UI.table # set UI.class_ "table table-bordered table-striped" # set items (header :(body <$> out))
+
+
 renderTableNoHeader header inf modtablei out = do
   let
       body o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader UI.td rendererShowableUI inf $ o)
   header # set UI.class_ "row"
   UI.table # set UI.class_ "table table-bordered table-striped" # set items (header :(body <$> out))
 
+renderTable'  inf modtablei out =  do
+  let
+      header = UI.tr # set UI.class_ "row" # set items (foldMetaHeader UI.th rendererHeaderUI inf $ modtablei)
+  renderTableNoHeader' header inf modtablei out
+
 renderTable  inf modtablei out =  do
   let
       header = UI.tr # set UI.class_ "row" # set items (foldMetaHeader UI.th rendererHeaderUI inf $ modtablei)
-  renderTableNoHeader header inf modtablei out
+  renderTableNoHeader  header inf modtablei out
 
 
 

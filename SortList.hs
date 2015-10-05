@@ -3,19 +3,14 @@ module SortList where
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.DragNDrop as UI
 import Graphics.UI.Threepenny.Core
-import Control.Applicative
-import Control.Monad
 import Data.Bifunctor
 import Data.Maybe
 import qualified Data.Map as M
 import TP.Widgets
 import Data.Monoid
-import Data.Binary
 import qualified Data.List as L
-import Debug.Trace
 import qualified Data.Foldable as F
 
-import qualified Data.ByteString.Lazy.Char8 as BS
 
 testUI e = startGUI (defaultConfig { tpPort = Just 10000 , tpStatic = Just "static", tpCustomHTML = Just "index.html" })  $ \w ->  do
               els <- e
@@ -70,10 +65,12 @@ list liste slote iteme els = mdo
     return $ TrivialWidget (F.toList <$> res ) el
 
 
-selectUI :: Eq a => [a] -> [(a,Bool)] -> UI Element -> UI Element -> ((a,Maybe Bool) -> String) -> UI (TrivialWidget [(a,Bool)])
+filterOrd = fmap (second fromJust) . filter (isJust .snd)
+
+selectUI :: Eq a => [a] -> [(a,Bool)] -> UI Element -> UI Element -> ((a,Maybe Bool) -> String) -> UI (TrivialWidget [(a,Maybe Bool)])
 selectUI l sel liste slote conv = do
     tds <- list liste slote (sortItem conv) ((\i j -> fmap (\e -> (e,)  $ fmap snd $  L.find ((==e).fst) j) i ) l sel)
-    return $ TrivialWidget (fmap (second fromJust). filter (isJust .snd) <$>  triding tds) (getElement tds)
+    return $ TrivialWidget (triding tds) (getElement tds)
 
 
 test = testUI (return $ do

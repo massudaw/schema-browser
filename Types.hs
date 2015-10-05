@@ -118,7 +118,7 @@ showOrder Desc = "DESC"
 data Order
   = Asc
   | Desc
-  deriving(Show)
+  deriving(Eq,Ord,Show,Generic)
 
 
 type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Identity))) k a )
@@ -131,7 +131,8 @@ data KVMetadata k
   , _kvpk :: Set k
   , _kvdesc :: [k]
   , _kvuniques :: [Set k]
-  , _kvattrs :: Set k
+  , _kvorder :: [(k,Order)]
+  , _kvattrs :: [k]
   , _kvdelayed :: Set k
   }deriving(Eq,Ord,Show,Generic)
 
@@ -201,6 +202,7 @@ data Rel k
 deriving instance Generic (Identity a)
 
 
+instance Binary Order
 instance Binary a => Binary (KType a)
 instance (Binary (f (g k a)) ) => Binary (Compose f g k a )
 instance (Binary (f k a) ,Binary k ) => Binary (KV f k a)
@@ -234,7 +236,7 @@ type TB1 a = TB2 Key a
 type TB2 k a = TB3 Identity k a
 type TB3 f k a = FTB1 f k a
 
-mapKVMeta f (KVMetadata tn sch s j m k l ) =KVMetadata tn sch (Set.map f s) (map f j) (map (Set.map f) m ) (Set.map f k) (Set.map f l)
+mapKVMeta f (KVMetadata tn sch s j m o k l ) =KVMetadata tn sch (Set.map f s) (map f j) (map (Set.map f) m ) (fmap (first f) o) (map f k) (Set.map f l)
 
 
 filterKey' f ((m ,k) ) = (m,) . mapComp (\(KV kv) -> KV $ Map.filterWithKey f kv )  $  k
@@ -545,7 +547,7 @@ instance Monad (Labeled Text) where
   Unlabeled i >>= j = j i
   Labeled t i >>= j = case j i of
                     Unlabeled i -> Labeled t i
-                    Labeled t0 i -> Labeled (t <> "." <> t0) i
+                    Labeled t0 i -> Labeled t  i
 
 mapFromTBList :: Ord k => [Compose Identity (TB Identity) k  a] -> Map (Set (Rel k) ) (Compose Identity ( TB Identity ) k  a)
 mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),i))
@@ -586,7 +588,7 @@ joinNonRef' (m,n)  = (m, mapComp (rebuildTable . _kvvalues) n)
     nonRef (Attr k v ) = [Compose . return $ Attr k v]
     nonRef (FKT i _ _ ) = tra
         where tra = concat ( fmap compJoin   . traComp  nonRef <$> i)
-    -- nonRef it@(IT j k ) = [return $ (IT  j (joinNonRef k )) ]
+    nonRef it@(IT j k ) = [] -- [return $ (IT  j (joinNonRef' <$> k )) ]
     --
 
 
@@ -643,13 +645,13 @@ traComp f =  fmap Compose. traverse f . getCompose
 
 concatComp  =  Compose . concat . fmap getCompose
 
-tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (uniqueConstraint t)(rawAttrs t) (rawDelayed t)
+tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (uniqueConstraint t)[] (F.toList $ rawAttrs t) (rawDelayed t)
 
 tbmap :: Ord k => Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
-tbmap = TB1 . (KVMetadata "" ""  Set.empty [] [] Set.empty Set.empty,) . Compose . Identity . KV
+tbmap = TB1 . (kvempty,) . Compose . Identity . KV
 
 tbmapPK :: Ord k => Set k -> Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
-tbmapPK pk = TB1 . (KVMetadata "" ""  pk  [] [] Set.empty Set.empty,) . Compose . Identity . KV
+tbmapPK pk = TB1 . (kvempty,) . Compose . Identity . KV
 
 tblist :: Ord k => [Compose Identity  (TB Identity) k a] -> TB3 Identity k a
 tblist = tbmap . mapFromTBList
@@ -663,7 +665,7 @@ tblist' t  = TB1 . (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 reclist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TBData Key a
 reclist' t  = (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 
-kvempty  = KVMetadata "" ""  Set.empty [] [] Set.empty Set.empty
+kvempty  = KVMetadata "" ""  Set.empty [] []  [] [] Set.empty
 
 instance Ord a => Ord (Interval.Interval a ) where
   compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)

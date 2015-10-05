@@ -127,7 +127,7 @@ poller db plugs = do
           then do
               execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
               print ("START " <>T.unpack n <> " - " <> show startTime  ::String)
-              let rpt = tableView  (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
+              let rpt = tableView (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
                   rpd = accessTB ( fst f <> snd f) rpt
                   rp = selectQuery rpd
               listRes <- queryWith_ (fromAttr (unTlabel rpd )) conn  (fromString $ T.unpack $ rp)
@@ -293,7 +293,7 @@ chooserTable inf e kitems i = do
       liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
   tbChooser <- UI.div # set children [filterInp,getElement bset] # set UI.class_ "col-xs-2"
-  nav  <- buttonSetUI (pure "Viewer") ["Viewer","Nav","Exception","Change"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  nav  <- buttonSetUI (pure "Nav") ["Viewer","Nav","Exception","Change"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   header <- UI.h1 # sink text (T.unpack . translatedName .  justError "no table " . flip M.lookup (pkMap inf) <$> facts bBset ) # set UI.class_ "col-xs-7"
   chooserDiv <- UI.div # set children  [header ,getElement nav] # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
@@ -325,35 +325,36 @@ viewer inf key = mdo
   let
       table = fromJust  $ M.lookup key $ pkMap inf
       sortSet =  F.toList . tableKeys . tableNonRef . allRec' (tableMap inf ) $ table
-      tableSt = tableView  (tableMap inf) table
+      tableSt2 = tableViewNR (tableMap inf) table
   itemList <- UI.div
   let pageSize = 20
   offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) (pure $ maybe 100 (ceiling . (/pageSize). fromIntegral) $ M.lookup table (tableSize inf ) )
   sortList <- selectUI sortSet ((,True) <$> F.toList key) UI.tr UI.th conv
-  let makeQ = ((\slist (o,i) -> fmap (o,) $ paginate (conn inf) (unTB1 tableSt)  (fmap dir2 <$> slist)  ((*pageSize) $ maybe o ((o-) . fst) i ) pageSize (fmap (L.filter (flip elem (fmap fst slist).fst) . getAttr' . snd )i) ))
+  let makeQ = ((\slist (o,i) -> fmap ((o,).(slist,)) $ paginate (conn inf) (unTB1 tableSt2)  (fmap dir2 <$> (filterOrd slist))  ((*pageSize) $ maybe o ((o-) . fst) i ) pageSize (fmap (L.filter (flip elem (fmap fst (filterOrd slist)).fst) . getAttr' . snd )i) ))
       dir2 True  = Desc
       dir2 False = Asc
       nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))
       nearest' p o =  (o,) $ safeHead $ filter ((<=0) .(\i -> i -o) .  fst) $ reverse  $ L.sortBy (comparing ((\i -> (i - o)). fst )) (M.toList p)
-      addT (c,td) = M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)
-      ini = (nearest' M.empty 0)
-      iniSort = ((,True) <$> F.toList key)
+      addT (c,(s,td)) = M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)
+      ini = nearest' iniPg 0
+      iniPg =  M.empty
+      iniSort = ((,Just True) <$> F.toList key)
   iniQ <- liftIO$ makeQ iniSort ini
   do
     rec
       let
-          event1 , event2 :: Event (IO (Int,[TBData Key Showable]))
-          event1 = (\(j,k) i  -> makeQ i (nearest' j k )) <$>  facts ((,) <$> pure M.empty <*> triding offset ) <@> rumors (triding sortList)
-          event2 = (\(j,i) k  -> makeQ i (nearest' j k )) <$>  facts ((,) <$> pg <*> triding sortList) <@> rumors (triding offset )
+          event1 , event2 :: Event (IO (Int,([(Key,Maybe Bool)],[TBData Key Showable])))
+          event1 = (\(j,k) i  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pure iniPg <*> triding offset) <@> rumors (triding sortList)
+          event2 = (\(j,i) k  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pg <*> triding sortList) <@> rumors (triding offset)
       tdswhere <- mapEvent id (unionWith const event1 event2)
-      pg <- accumT M.empty  (unionWith (flip (.)) ((pure (const M.empty ) <@ event1)) (filterJust (addT <$> tdswhere )))
-
-    tdswherebi <- stepper  (snd iniQ) ( fmap snd tdswhere)
-    let tdswhereb =  tdswherebi -- sorting' <$> facts (triding  sortList ) <*> tdswherebi
-        tview = unTlabel' . unTB1  $tableSt
-    element itemList # sink items (pure . renderTableNoHeader (return $ getElement sortList) inf (tableNonRef' tview) . fmap tableNonRef' <$> tdswhereb)
-    tableOff <- UI.div # sink text (show . fmap getPK <$> facts pg)
-    UI.div # set children [getElement offset, tableOff,itemList]
+      pg <- accumT iniPg (unionWith (flip (.)) ((pure (const iniPg ) <@ event1)) (filterJust (addT <$> tdswhere )))
+    tdswhereb <- stepper (snd iniQ) (fmap snd tdswhere)
+    let
+        tview = unTlabel' . unTB1  $tableSt2
+        ordtoBool Asc = False
+        ordtoBool Desc = True
+    element itemList # sink items ((\(slist ,tb)-> pure . renderTableNoHeaderSort  (fmap fst slist) (return $ getElement sortList) inf (tableNonRef' tview) . fmap tableNonRef' $ tb )<$>   tdswhereb )
+    UI.div # set children [getElement offset, itemList]
 
 
 viewerKey
@@ -380,7 +381,7 @@ viewerKey inf key = mdo
   asc <- checkedWidget (pure True)
   let
      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  . _unTB1 )
-     tsort = sorting <$> triding sortList
+     tsort = sorting . filterOrd <$> triding sortList
      res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 (_, kv) ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $  keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
   let pageSize = 20
   itemList <- listBox ((\o -> L.take pageSize . L.drop (o*pageSize))<$> triding offset <*>res3) (tidings st never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
@@ -402,7 +403,7 @@ viewerKey inf key = mdo
   title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK)  <$> facts tds) # set UI.class_ "col-xs-8"
   insertDiv <- UI.div # set children [title,head cru] # set UI.class_ "row"
   insertDivBody <- UI.div # set children [insertDiv,last cru]# set UI.class_ "row"
-  itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset , filterInp,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"
+  itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset ,filterInp ,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row"
   UI.div # set children ([itemSelec,insertDivBody ] )
 
