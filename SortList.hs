@@ -66,6 +66,8 @@ list liste slote iteme els = mdo
 
 
 filterOrd = fmap (second fromJust) . filter (isJust .snd)
+selSort l sel = ((\i j -> fmap (\e -> (e,)  $ fmap snd $  L.find ((==e).fst) j) i ) l sel)
+
 
 selectUI :: Eq a => [a] -> [(a,Bool)] -> UI Element -> UI Element -> ((a,Maybe Bool) -> String) -> UI (TrivialWidget [(a,Maybe Bool)])
 selectUI l sel liste slote conv = do

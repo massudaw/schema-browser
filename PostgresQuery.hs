@@ -142,26 +142,23 @@ selectQueryWhere  conn t rel kold =  do
         koldPk = catMaybes $ (\(Attr k _) -> Attr k <$> ( M.lookup k (M.fromList kold)) ) <$> fmap (labelValue .getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)
 
 
-paginate conn t order off size Nothing = do
-        liftIO$ print que
-        liftIO $ queryWith_ (fromRecord (unTlabel' t) ) conn que
-  where
-        limitQ = " LIMIT " <> T.pack (show size)
-        offsetQ = " OFFSET " <> T.pack (show off)
-        orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) .  first (justLabel t) <$> order)
-        que = fromString $ T.unpack $ selectQuery (TB1 t) <> orderQ <> offsetQ <> limitQ
-
-paginate conn t order off size (Just koldpre) = do
-        liftIO$ print que
-        liftIO $ queryWith (fromRecord (unTlabel' t) ) conn que (koldPk <> reverse koldPk)
+paginate conn t order off size k = do
+    liftIO $ uncurry (queryWith (fromRecord (unTlabel' t) ) conn) $
+     case k of
+          (Just koldpre) ->
+            let
+              que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred <> orderQ <> offsetQ <> limitQ
+              koldPk :: [TB Identity Key Showable]
+              koldPk =  uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) koldpre
+            in (que,koldPk <> reverse koldPk)
+          Nothing ->
+            let
+              que = fromString $ T.unpack $ selectQuery (TB1 t) <> orderQ <> offsetQ <> limitQ
+            in (que,[])
   where pred = " WHERE " <> generateComparison (first (justLabel t) <$> order)
         offsetQ = " OFFSET " <> T.pack (show off)
         limitQ = " LIMIT " <> T.pack (show size)
-        orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first ( justLabel  t) <$> order)
-        que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred <> orderQ <> offsetQ <> limitQ
-        koldPk :: [TB Identity Key Showable]
-        koldPk =  uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) kold
-        kold = koldpre
+        orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first (justLabel t) <$> order)
 
 paginateView conn  (View  tree order proj  (off,size,origin)) = paginate conn tree  order off size origin
 
@@ -183,14 +180,6 @@ getLabels t k =  M.lookup  k (mapLabels label' t)
 mapLabels label' t =  M.fromList $ fmap (label'. getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)
 
 
-
-
--- Look for renamed labels
-
-lookLabels t kold  =  catMaybes $ label' <$> fmap (getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)
-    where label' (Labeled l (Attr k _)) =  (l,) <$>  ( M.lookup k (M.fromList kold))
-          label' (Unlabeled (Attr k _)) = (keyValue k,) <$> ( M.lookup k (M.fromList kold))
-
 -- Generate SORT Order
 
 generateSort v = T.intercalate "," (generateSort' <$> v)
@@ -199,6 +188,6 @@ generateSort' (k,v) =  k <> " " <>   showOrder v
 -- Generate Comparison Operator
 
 generateComparison [] = "false"
-generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "?" <> " then " <>  generateComparison xs <> " else " <> k <>  dir v <> "?" <>" end"
+generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is null  then " <>  generateComparison xs <> " else " <> k <>  dir v <> "?" <>" end"
   where dir Asc = ">"
         dir Desc = "<"

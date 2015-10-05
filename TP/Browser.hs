@@ -253,24 +253,7 @@ applyUI el f = (\a-> getWindow el >>= \w -> runUI w (f a))
 tableNonRec k  =  F.toList $  tableNonRef  k
 
 
-{-
-panel t els = UI.div # set items ( UI.h2 # set text (T.unpack t  ) : [UI.div # set items (F.toList els)])
-showModDiv i =  set UI.style [("display","flex")] . set items (showMod i)
-showMod i  = [UI.div # line (show i) ]
--- showMod (EditTB i j) = [showFKE j , operator  "| ~ |" , showFKE' i]
--- showMod (InsertTB j) = [UI.div , operator "| + |" , showFKE j]
--- showMod (DeleteTB j) = [showFKE j , operator "| - |" , UI.div]
--}
 operator op = UI.div # set text op  # set UI.style [("margin-left","3px"),("margin-right","3px")]
-
-
-{-
-tableList table inf tb1 = do
-  els :: [(Int,LocalTime,Text,Text,(Binary BSL.ByteString))] <-
-    liftIO $ query (rootconn inf) "SELECT modification_id,modification_time,username,table_name,modification_data from metadata.modification_table WHERE schema_name = ? AND  table_name = ?  order by modification_id desc limit 100 " (schemaName inf,table)
-  UI.table # set UI.class_ "table table-bordered table-striped" # set items ( (\(mid,mda,u,b,v)-> UI.tr# set UI.class_ "row" # set items [UI.td # set text (show mid) , UI.td# set text (show mda),UI.td # set text (T.unpack u), UI.td # set text (T.unpack $ translatedName $ lookTable inf b),   (\(Binary d) -> ( either (\i-> UI.td) (\(_,_,i ) -> UI.td# showModDiv (i:: Modification Text Showable))  (B.decodeOrFail d ))) v] ) <$> els)
--}
-
 
 attrLine i e   = do
   let nonRec = tableNonrec i
@@ -321,24 +304,25 @@ chooserTable inf e kitems i = do
   subnet <- UI.div # set children [chooserDiv,body] # set UI.class_ "col-xs-10"
   UI.div # set children [tbChooser, subnet ]  # set UI.class_ "row"
 
-viewer inf key = mdo
+viewer inf key = do
   let
       table = fromJust  $ M.lookup key $ pkMap inf
       sortSet =  F.toList . tableKeys . tableNonRef . allRec' (tableMap inf ) $ table
       tableSt2 = tableViewNR (tableMap inf) table
   itemList <- UI.div
   let pageSize = 20
+      iniPg =  M.empty
+      iniSort = selSort sortSet ((,True) <$> F.toList key)
   offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) (pure $ maybe 100 (ceiling . (/pageSize). fromIntegral) $ M.lookup table (tableSize inf ) )
   sortList <- selectUI sortSet ((,True) <$> F.toList key) UI.tr UI.th conv
-  let makeQ = ((\slist (o,i) -> fmap ((o,).(slist,)) $ paginate (conn inf) (unTB1 tableSt2)  (fmap dir2 <$> (filterOrd slist))  ((*pageSize) $ maybe o ((o-) . fst) i ) pageSize (fmap (L.filter (flip elem (fmap fst (filterOrd slist)).fst) . getAttr' . snd )i) ))
+  let makeQ slist (o,i) = fmap ((o,).(slist,)) $ paginate (conn inf) (unTB1 tableSt2)  (fmap dir2 <$> (filterOrd slist))  ((*pageSize) $ maybe o ((o-) . fst) kold ) pageSize (snd <$> kold)
+          where kold = join $ fmap (traverse (allMaybes . fmap (traverse unSOptional') . L.filter (flip elem (fmap fst (filterOrd slist)).fst) . getAttr'  )) i
       dir2 True  = Desc
       dir2 False = Asc
       nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))
       nearest' p o =  (o,) $ safeHead $ filter ((<=0) .(\i -> i -o) .  fst) $ reverse  $ L.sortBy (comparing ((\i -> (i - o)). fst )) (M.toList p)
-      addT (c,(s,td)) = M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)
       ini = nearest' iniPg 0
-      iniPg =  M.empty
-      iniSort = ((,Just True) <$> F.toList key)
+      addT (c,(s,td)) = M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)
   iniQ <- liftIO$ makeQ iniSort ini
   do
     rec
