@@ -50,7 +50,7 @@ insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
         liftIO $ print iquery
         out <-  fmap head $ liftIO $ queryWith (f (mapRecord (const ()) serialTB )) conn (fromString  iquery ) directAttr
         let Just (_,_ ,gen) = difftable serialTB out
-        return $ (m,s,compactAttr (i <> gen))
+        return $ (m,getPKM out ,compactAttr (i <> gen))
       else do
         let
           iquery = T.unpack prequery
@@ -125,7 +125,6 @@ selectQueryWherePK f conn t rel kold =  do
 
 selectQueryWhere
   :: (MonadIO m ,Functor m )
---      => (TBData Key () -> FR.RowParser (TBData Key Showable ))
      => Connection
      -> TB3Data (Labeled Text) Key ()
      -> Text
@@ -142,25 +141,30 @@ selectQueryWhere  conn t rel kold =  do
         koldPk = catMaybes $ (\(Attr k _) -> Attr k <$> ( M.lookup k (M.fromList kold)) ) <$> fmap (labelValue .getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)
 
 
-paginate conn t order off size k = do
-    liftIO $ uncurry (queryWith (fromRecord (unTlabel' t) ) conn) $
-     case k of
+paginate conn t order off size k eqpred = do
+    let (que,attr) = case k of
           (Just koldpre) ->
             let
               que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred <> orderQ <> offsetQ <> limitQ
               koldPk :: [TB Identity Key Showable]
               koldPk =  uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) koldpre
-            in (que,koldPk <> reverse koldPk)
+            in (que,koldPk <> tail (reverse koldPk) <> eqpk )
           Nothing ->
             let
-              que = fromString $ T.unpack $ selectQuery (TB1 t) <> orderQ <> offsetQ <> limitQ
-            in (que,[])
-  where pred = " WHERE " <> generateComparison (first (justLabel t) <$> order)
+              que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred <> orderQ <> offsetQ <> limitQ
+            in (que,eqpk)
+    liftIO $ print (que,attr)
+    liftIO $ uncurry (queryWith (fromRecord (unTlabel' t) ) conn) (que,attr)
+  where pred = maybe "" (const " WHERE ") (k <> eqpred) <> T.intercalate " AND " (maybe [] (const $ pure $ generateComparison (first (justLabel t) <$> order)) k <> (maybe [] pure $ eqquery <$> eqpred))
+        equality k = k <> " = " <> "?"
+        eqquery eqpred = T.intercalate " AND " (equality . justLabel t . fst <$> eqpred )
+        eqpk :: [TB Identity Key Showable]
+        eqpk =  maybe [] (fmap (uncurry Attr ) . L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst))) eqpred
         offsetQ = " OFFSET " <> T.pack (show off)
         limitQ = " LIMIT " <> T.pack (show size)
         orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first (justLabel t) <$> order)
 
-paginateView conn  (View  tree order proj  (off,size,origin)) = paginate conn tree  order off size origin
+paginateView conn  (View  tree order proj  (off,size,origin)) = paginate conn tree  order off size origin Nothing
 
 data View
   = View
@@ -187,7 +191,9 @@ generateSort' (k,v) =  k <> " " <>   showOrder v
 
 -- Generate Comparison Operator
 
-generateComparison [] = "false"
+generateComparison ((k,v):[]) = k <>  dir v <> "?"
+  where dir Asc = ">"
+        dir Desc = "<"
 generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is null  then " <>  generateComparison xs <> " else " <> k <>  dir v <> "?" <>" end"
   where dir Asc = ">"
         dir Desc = "<"

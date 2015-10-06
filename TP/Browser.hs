@@ -244,9 +244,6 @@ databaseChooser sargs = do
 
 
 
-unSOptional' (LeftTB1 i ) = i
-unSOptional' (SerialTB1 i )  = i
-unSOptional' i   = Just i
 
 applyUI el f = (\a-> getWindow el >>= \w -> runUI w (f a))
 
@@ -298,49 +295,11 @@ chooserTable inf e kitems i = do
             span <- viewerKey inf table
             element body # set UI.children [span]
         "Viewer" -> do
-            span <- viewer inf table
+            span <- viewer inf (justError "no table with pk" $ M.lookup table (pkMap inf)) Nothing
             element body # set UI.children [span]
         ) $ liftA2 (,) (triding nav) bBset
   subnet <- UI.div # set children [chooserDiv,body] # set UI.class_ "col-xs-10"
   UI.div # set children [tbChooser, subnet ]  # set UI.class_ "row"
-
-viewer inf key = do
-  let
-      table = fromJust  $ M.lookup key $ pkMap inf
-      sortSet =  F.toList . tableKeys . tableNonRef . allRec' (tableMap inf ) $ table
-      tableSt2 = tableViewNR (tableMap inf) table
-  itemList <- UI.div
-  let pageSize = 20
-      iniPg =  M.empty
-      iniSort = selSort sortSet ((,True) <$> F.toList key)
-  offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) (pure $ maybe 100 (ceiling . (/pageSize). fromIntegral) $ M.lookup table (tableSize inf ) )
-  sortList <- selectUI sortSet ((,True) <$> F.toList key) UI.tr UI.th conv
-  let makeQ slist (o,i) = fmap ((o,).(slist,)) $ paginate (conn inf) (unTB1 tableSt2)  (fmap dir2 <$> (filterOrd slist))  ((*pageSize) $ maybe o ((o-) . fst) kold ) pageSize (snd <$> kold)
-          where kold = join $ fmap (traverse (allMaybes . fmap (traverse unSOptional') . L.filter (flip elem (fmap fst (filterOrd slist)).fst) . getAttr'  )) i
-      dir2 True  = Desc
-      dir2 False = Asc
-      nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))
-      nearest' p o =  (o,) $ safeHead $ filter ((<=0) .(\i -> i -o) .  fst) $ reverse  $ L.sortBy (comparing ((\i -> (i - o)). fst )) (M.toList p)
-      ini = nearest' iniPg 0
-      addT (c,(s,td)) = M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)
-  iniQ <- liftIO$ makeQ iniSort ini
-  do
-    rec
-      let
-          event1 , event2 :: Event (IO (Int,([(Key,Maybe Bool)],[TBData Key Showable])))
-          event1 = (\(j,k) i  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pure iniPg <*> triding offset) <@> rumors (triding sortList)
-          event2 = (\(j,i) k  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pg <*> triding sortList) <@> rumors (triding offset)
-      tdswhere <- mapEvent id (unionWith const event1 event2)
-      pg <- accumT iniPg (unionWith (flip (.)) ((pure (const iniPg ) <@ event1)) (filterJust (addT <$> tdswhere )))
-    tdswhereb <- stepper (snd iniQ) (fmap snd tdswhere)
-    let
-        tview = unTlabel' . unTB1  $tableSt2
-        ordtoBool Asc = False
-        ordtoBool Desc = True
-    element itemList # sink items ((\(slist ,tb)-> pure . renderTableNoHeaderSort  (fmap fst slist) (return $ getElement sortList) inf (tableNonRef' tview) . fmap tableNonRef' $ tb )<$>   tdswhereb )
-    UI.div # set children [getElement offset, itemList]
-
-
 viewerKey
   ::
       InformationSchema -> S.Set Key -> UI Element
@@ -394,9 +353,6 @@ viewerKey inf key = mdo
 
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
 
-tableKeys (TB1  (_,k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
-tableKeys (LeftTB1 (Just i)) = tableKeys i
-tableKeys (ArrayTB1 [i]) = tableKeys i
 
 tableAttrs (TB1  (_,k)) = concat $ fmap aattr (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
 tableAttrs (LeftTB1 (Just i)) = tableAttrs i

@@ -171,7 +171,9 @@ liftTable' inf tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapCom
 fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
 
 fixPatchAttr inf t p@(PAttr _ _ ) =  p
-fixPatchAttr inf t p@(PInline _ _ ) =  p
+fixPatchAttr inf tname p@(PInline rel e ) =  PInline rel (fmap (\(_,o,v)-> (tableMeta $ lookTable inf tname2,o,fmap (fixPatchAttr  inf tname2 )v)) e)
+    where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (keyValue rel)) )  (F.toList$ rawFKS  ta)
+          ta = lookTable inf tname
 fixPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa) (tableMeta $ lookTable inf tname2) b
     where (Path _ (FKJoinTable _ rel tname2 ) _) = justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
@@ -228,7 +230,7 @@ logTableModification inf (TableModification Nothing table i) = do
   time <- getCurrentTime
   let ltime =  utcToLocalTime utc $ time
       (_,pidx,pdata) = firstPatch keyValue  i
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index,modification_data,schema_name) VALUES (?,?,?,?,?,?) returning modification_id "  (username inf ,ltime,rawName table, Binary (B.encode pidx)  , Binary  (B.encode pdata) , schemaName inf)
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (username inf ,ltime,rawName table, Binary (B.encode pidx)  , Binary  .B.encode <$> V.fromList pdata , schemaName inf)
   return (TableModification id table i )
 
 

@@ -2,6 +2,7 @@
 module TP.QueryWidgets where
 
 import RuntimeTypes
+import SortList
 import Data.Functor.Identity
 import Control.Monad.Writer
 import Control.Monad
@@ -877,7 +878,7 @@ rendererHeaderUI k v = const (renderer k) v
   where renderer k = UI.div # set items [UI.div # set text (T.unpack $ keyValue k ) , UI.div # set text (T.unpack $ showTy id (keyType k)) ]
 
 rendererShowableUI k  v= renderer (keyValue k) v
-  where renderer "modification_data" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> UI.div# set items (showPatch <$> (i:: [PathAttr Text Showable]) ))  (B.decodeOrFail (BSL.fromStrict i))
+  where renderer "modification_data" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> showPatch (i:: PathAttr Text Showable) )  (B.decodeOrFail (BSL.fromStrict i))
         renderer "data_index" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> UI.div # set items (showIndex <$> (i:: [((Text ,FTB Showable) )])))  (B.decodeOrFail (BSL.fromStrict i))
         renderer k i = UI.div # set text (renderPrim i)
         showPatch l = UI.div # set text (show $ fmap renderPrim l)
@@ -906,31 +907,68 @@ testUI e = startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Ju
               getBody w #+ [els]
               return ()
 
-dashBoardAll inf = metaAllTableIndex inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ) ]
-
-exceptionAll inf = metaAllTableIndex inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ) ]
-
-
-exceptionAllTable inf table = metaAllTableIndex inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ) ]
-
-dashBoardAllTable  inf table = metaAllTableIndex inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ) ]
-
-
-exceptionAllTableIndex e@(inf,table,index) =   metaAllTableIndex inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ),("data_index",TB1 $ SBinary $ BSL.toStrict $ B.encode $ fmap (first keyValue)index) ]
-
-dashBoardAllTableIndex e@(inf,table,index) =   metaAllTableIndex inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ),("data_index",TB1 $ SBinary $ BSL.toStrict $ B.encode $ fmap (first keyValue)index) ]
-
-
-
-metaAllTableIndex inf metaname env =   do
+metaAllTableIndexV inf metaname env =   do
   let modtable = lookTable (meta inf) tname
       tname = metaname
       modtablei = tableView (tableMap $ meta inf) modtable
       envK = fmap (first (lookKey (meta inf) tname)) env
-  out <- reverse <$> selectQueryWhere (rootconn inf) (unTB1 modtablei) "=" envK
+  viewer (meta inf) modtable (Just envK)
+
+dashBoardAllTable  inf table = metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ) ]
+exceptionAllTable inf table = metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ) ]
+
+dashBoardAll inf = metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ) ]
+
+exceptionAll inf = metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ) ]
+
+
+
+viewer inf table env = do
   let
-      filterRec = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList (fst <$> envK ))) . S.fromList . fmap _relOrigin.  keyattr )
-  renderTable inf  (filterRec (unTlabel' $ unTB1 modtablei)) out
+      envK = concat $ maybeToList env
+      filterStatic =filter (not . flip L.elem (fmap fst envK))
+      key = filterStatic $ F.toList $ rawPK table
+      sortSet =  filterStatic . F.toList . tableKeys . tableNonRef . allRec' (tableMap inf ) $ table
+      tableSt2 =   tableViewNR (tableMap inf) table
+  itemList <- UI.div
+  let pageSize = 20
+      iniPg =  M.empty
+      iniSort = selSort sortSet ((,True) <$>  key)
+  offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) (pure $ maybe 100 (ceiling . (/pageSize). fromIntegral) $ M.lookup table (tableSize inf ) )
+  sortList <- selectUI sortSet ((,True) <$> key) UI.tr UI.th conv
+  let makeQ slist (o,i) = fmap ((o,).(slist,)) $ paginate (conn inf) (unTB1 tableSt2)  (fmap dir2 <$> (filterOrd slist))  ((*pageSize) $ maybe o ((o-) . fst) kold ) pageSize (snd <$> kold) env
+          where kold = join $ fmap (traverse (allMaybes . fmap (traverse unSOptional') . L.filter (flip elem (fmap fst (filterOrd slist)).fst) . getAttr'  )) i
+      dir2 True  = Desc
+      dir2 False = Asc
+      nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))
+      nearest' p o =  (o,) $ safeHead $ filter ((<=0) .(\i -> i -o) .  fst) $ reverse  $ L.sortBy (comparing ((\i -> (i - o)). fst )) (M.toList p)
+      ini = nearest' iniPg 0
+      addT (c,(s,td)) = M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)
+  iniQ <- liftIO$ makeQ iniSort ini
+  do
+    rec
+      let
+          event1 , event2 :: Event (IO (Int,([(Key,Maybe Bool)],[TBData Key Showable])))
+          event1 = (\(j,k) i  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pure iniPg <*> triding offset) <@> rumors (triding sortList)
+          event2 = (\(j,i) k  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pg <*> triding sortList) <@> rumors (triding offset)
+      tdswhere <- mapEvent id (unionWith const event1 event2)
+      pg <- accumT iniPg (unionWith (flip (.)) ((pure (const iniPg ) <@ event1)) (filterJust (addT <$> tdswhere )))
+    tdswhereb <- stepper (snd iniQ) (fmap snd tdswhere)
+    let
+        tview = unTlabel' . unTB1  $tableSt2
+        ordtoBool Asc = False
+        ordtoBool Desc = True
+    element itemList # sink items ((\(slist ,tb)-> pure . renderTableNoHeaderSort  (fmap fst slist) (return $ getElement sortList) inf (tableNonRef' tview) .  fmap tableNonRef' . fmap ((filterRec (concat $ maybeToList env))) $ tb )  <$>   tdswhereb )
+    UI.div # set children [getElement offset, itemList]
+
+
+
+exceptionAllTableIndex e@(inf,table,index) =   metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ),("data_index",TB1 $ SBinary $ BSL.toStrict $ B.encode $ fmap (first keyValue)index) ]
+
+dashBoardAllTableIndex e@(inf,table,index) =   metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ),("data_index",TB1 $ SBinary $ BSL.toStrict $ B.encode $ fmap (first keyValue)index) ]
+
+
+filterRec envK = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList (fst <$> envK ))) . S.fromList . fmap _relOrigin.  keyattr )
 
 renderTableNoHeader' header inf modtablei out = do
   let
