@@ -141,20 +141,23 @@ selectQueryWhere  conn t rel kold =  do
         koldPk = catMaybes $ (\(Attr k _) -> Attr k <$> ( M.lookup k (M.fromList kold)) ) <$> fmap (labelValue .getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)
 
 
-paginate conn t order off size k eqpred = do
+paginate conn t order page off size k eqpred = do
     let (que,attr) = case k of
           (Just koldpre) ->
             let
-              que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred <> orderQ <> offsetQ <> limitQ
+              que =  selectQuery (TB1 t) <> pred <> orderQ
               koldPk :: [TB Identity Key Showable]
               koldPk =  uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) koldpre
             in (que,koldPk <> tail (reverse koldPk) <> eqpk )
           Nothing ->
             let
-              que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred <> orderQ <> offsetQ <> limitQ
+              que =  selectQuery (TB1 t) <> pred <> orderQ
             in (que,eqpk)
-    liftIO $ print (que,attr)
-    liftIO $ uncurry (queryWith (fromRecord (unTlabel' t) ) conn) (que,attr)
+    let quec = fromString $ T.unpack $ "SELECT *,count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
+    print (quec,attr)
+    v <- uncurry (queryWith (withCount (fromRecord (unTlabel' t)) ) conn) (quec,attr)
+    print (maybe 0 (\c->((page)*size)+ c - off ) $ safeHead ( fmap snd v :: [Int]))
+    return ((maybe 0 (\c->((page)*size)+ c - off ) $ safeHead ( fmap snd v :: [Int])), fmap fst v)
   where pred = maybe "" (const " WHERE ") (k <> eqpred) <> T.intercalate " AND " (maybe [] (const $ pure $ generateComparison (first (justLabel t) <$> order)) k <> (maybe [] pure $ eqquery <$> eqpred))
         equality k = k <> " = " <> "?"
         eqquery eqpred = T.intercalate " AND " (equality . justLabel t . fst <$> eqpred )
@@ -164,14 +167,14 @@ paginate conn t order off size k eqpred = do
         limitQ = " LIMIT " <> T.pack (show size)
         orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first (justLabel t) <$> order)
 
-paginateView conn  (View  tree order proj  (off,size,origin)) = paginate conn tree  order off size origin Nothing
+paginateView conn  (View  tree order proj  (page,off,size,origin)) = paginate conn tree  order page off size origin Nothing
 
 data View
   = View
   { tree :: TB3Data (Labeled Text) Key ()
   , viewOrder :: [(Key,Order)]
   , viewProjection :: [Key]
-  , pagination :: (Int,Int,Maybe [(Key,FTB Showable)])
+  , pagination :: (Int,Int,Int,Maybe [(Key,FTB Showable)])
   }
 
 justLabel t =  justError "cant find label" .getLabels t

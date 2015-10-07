@@ -923,7 +923,7 @@ exceptionAll inf = metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1
 
 
 
-viewer inf table env = do
+viewer inf table env = mdo
   let
       envK = concat $ maybeToList env
       filterStatic =filter (not . flip L.elem (fmap fst envK))
@@ -934,32 +934,34 @@ viewer inf table env = do
   let pageSize = 20
       iniPg =  M.empty
       iniSort = selSort sortSet ((,True) <$>  key)
-  offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) (pure $ maybe 100 (ceiling . (/pageSize). fromIntegral) $ M.lookup table (tableSize inf ) )
+
   sortList <- selectUI sortSet ((,True) <$> key) UI.tr UI.th conv
-  let makeQ slist (o,i) = fmap ((o,).(slist,)) $ paginate (conn inf) (unTB1 tableSt2)  (fmap dir2 <$> (filterOrd slist))  ((*pageSize) $ maybe o ((o-) . fst) kold ) pageSize (snd <$> kold) env
+  let makeQ slist (o,i) = fmap ((o,).(slist,)) $ paginate (conn inf) (unTB1 tableSt2)  (fmap dir2 <$> (filterOrd slist)) o ((*pageSize) $ maybe o ((o-) . fst) kold ) pageSize (snd <$> kold) env
           where kold = join $ fmap (traverse (allMaybes . fmap (traverse unSOptional') . L.filter (flip elem (fmap fst (filterOrd slist)).fst) . getAttr'  )) i
       dir2 True  = Desc
       dir2 False = Asc
       nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))
       nearest' p o =  (o,) $ safeHead $ filter ((<=0) .(\i -> i -o) .  fst) $ reverse  $ L.sortBy (comparing ((\i -> (i - o)). fst )) (M.toList p)
       ini = nearest' iniPg 0
-      addT (c,(s,td)) = M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)
+      addT (c,(s,(cou,td))) = M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)
   iniQ <- liftIO$ makeQ iniSort ini
-  do
-    rec
-      let
-          event1 , event2 :: Event (IO (Int,([(Key,Maybe Bool)],[TBData Key Showable])))
-          event1 = (\(j,k) i  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pure iniPg <*> triding offset) <@> rumors (triding sortList)
-          event2 = (\(j,i) k  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pg <*> triding sortList) <@> rumors (triding offset)
-      tdswhere <- mapEvent id (unionWith const event1 event2)
-      pg <- accumT iniPg (unionWith (flip (.)) ((pure (const iniPg ) <@ event1)) (filterJust (addT <$> tdswhere )))
-    tdswhereb <- stepper (snd iniQ) (fmap snd tdswhere)
-    let
-        tview = unTlabel' . unTB1  $tableSt2
-        ordtoBool Asc = False
-        ordtoBool Desc = True
-    element itemList # sink items ((\(slist ,tb)-> pure . renderTableNoHeaderSort  (fmap fst slist) (return $ getElement sortList) inf (tableNonRef' tview) .  fmap tableNonRef' . fmap ((filterRec (concat $ maybeToList env))) $ tb )  <$>   tdswhereb )
-    UI.div # set children [getElement offset, itemList]
+  offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) (ceiling . (/pageSize). fromIntegral <$> offsetTotal)
+  let
+      event1 , event2 :: Event (IO (Int,([(Key,Maybe Bool)],(Int,[TBData Key Showable]))))
+      event1 = (\(j,k) i  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pure iniPg <*> triding offset) <@> rumors (triding sortList)
+      event2 = (\(j,i) k  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pg <*> triding sortList) <@> rumors (triding offset)
+      evs = (unionWith const event1 event2)
+  tdswhere <- mapEvent id evs
+  offsetTotal <- stepper (fst $ snd $ snd $ iniQ) (fmap (fst . snd .snd ) tdswhere)
+  pg <- accumT ((fromJust  $addT iniQ ) M.empty ) (unionWith (flip (.)) ((pure (const iniPg ) <@ event1)) (filterJust (addT <$> tdswhere )))
+
+  tdswhereb <- stepper (snd iniQ) (fmap snd tdswhere)
+  let
+      tview = unTlabel' . unTB1  $tableSt2
+      ordtoBool Asc = False
+      ordtoBool Desc = True
+  element itemList # sink items ((\(slist ,(coun,tb))-> pure . renderTableNoHeaderSort  (fmap fst slist) (return $ getElement sortList) inf (tableNonRef' tview) .  fmap tableNonRef' . fmap ((filterRec (concat $ maybeToList env))) $ tb )  <$>   tdswhereb )
+  UI.div # set children [getElement offset, itemList]
 
 
 

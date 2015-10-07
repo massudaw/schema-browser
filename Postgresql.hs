@@ -619,6 +619,11 @@ fromRecord foldable = do
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
 
 
+withCount value = do
+  v <- value
+  c <- FR.field
+  return (v,c)
+
 fromAttr foldable = do
     let parser  = parseLabeledTable foldable
     FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
