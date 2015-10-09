@@ -21,7 +21,12 @@ button.buttonSet:disabled{
   background-color:lightgray
   
 }
-
+button.buttonSet{
+  white-space:normal!important;
+ 
+    word-wrap: break-word
+  
+}
 a.btn {
   display: inline-block;
   color: #666;

@@ -240,7 +240,7 @@ eiTable inf pgs constr tname refs plmods ftb@(TB1 (m,k) ) oldItems = do
       tableb :: Tidings (Maybe (TB1 Showable))
       tableb  = fmap (TB1 . (tableMeta table,) . Compose . Identity . KV . mapFromTBList . fmap _tb) . Tra.sequenceA <$> Tra.sequenceA (triding .snd <$> fks)
       initialSum = (join . fmap (\(TB1 (n,  j) ) ->    safeHead $ catMaybes  (fmap (Compose . Identity. fmap (const ()) ) . unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)) ))<$>   oldItems)
-  chk  <- buttonDivSet (F.toList (_kvvalues $ unTB k))  initialSum (show . fmap _relOrigin.keyattr ) (\i -> UI.button # set text (L.intercalate "," $ fmap (show._relOrigin) $ keyattr $ i) )
+  chk  <- buttonDivSet (F.toList (_kvvalues $ unTB k))  initialSum  (\i -> UI.button # set text (L.intercalate "," $ fmap (show._relOrigin) $ keyattr $ i) )
   sequence $ (\(ix,el) -> element  el # sink0 UI.style (noneShow <$> ((==keyattri ix) .keyattr <$> facts (triding chk) ))) <$> fks
   let
       resei = liftA2 (\c -> fmap (\t@(TB1 (m, k)) -> TB1 . (m,) . Compose $ Identity $ KV (M.mapWithKey  (\k v -> if k == S.fromList (keyattr c) then maybe (addDefault (fmap (const ()) v)) (const v) (unOptionalAttr $ unTB  v) else addDefault (fmap (const ()) v)) (_kvvalues $ unTB k)))) (triding chk) tableb
@@ -328,7 +328,7 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
   (e2,h2) <- liftIO $ newEvent
   (ediff ,hdiff) <- liftIO $ newEvent
   (evdiff ,hvdiff) <- liftIO $ newEvent
-  nav  <- buttonSetUI open ["None","Exception","Editor","Change"] (\i -> set UI.text i . set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonDivSet ["None","Exception","Editor","Change"] (fmap Just open) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-4 pull-right"
   let table = lookPK inf (S.fromList $ fmap _relOrigin $ findPK $ ftb)
   let fun "Editor"= do
@@ -880,6 +880,7 @@ rendererHeaderUI k v = const (renderer k) v
 rendererShowableUI k  v= renderer (keyValue k) v
   where renderer "modification_data" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> showPatch (i:: PathAttr Text Showable) )  (B.decodeOrFail (BSL.fromStrict i))
         renderer "data_index" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> UI.div # set items (showIndex <$> (i:: [((Text ,FTB Showable) )])))  (B.decodeOrFail (BSL.fromStrict i))
+        renderer "val" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> UI.div # set items ([showPatch (i:: (FTB Showable) )] ))  (B.decodeOrFail (BSL.fromStrict i))
         renderer k i = UI.div # set text (renderPrim i)
         showPatch l = UI.div # set text (show $ fmap renderPrim l)
         showIndex l = UI.div # set text (show $ renderShowable <$> l)
@@ -907,11 +908,13 @@ testUI e = startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Ju
               getBody w #+ [els]
               return ()
 
-metaAllTableIndexV inf metaname env =   do
+metaAllTableIndexV inf metaname env = metaAllTableIndexA inf metaname (fmap (uncurry Attr ) env)
+metaAllTableIndexA inf metaname env =   do
   let modtable = lookTable (meta inf) tname
       tname = metaname
       modtablei = tableView (tableMap $ meta inf) modtable
-      envK = fmap (first (lookKey (meta inf) tname)) env
+      envK :: [(Text,(TB Identity Key Showable))]
+      envK = fmap (("=",).liftField (meta inf) tname) env
   viewer (meta inf) modtable (Just envK)
 
 dashBoardAllTable  inf table = metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ) ]
@@ -921,12 +924,44 @@ dashBoardAll inf = metaAllTableIndexV inf "modification_table" [("schema_name",T
 
 exceptionAll inf = metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ) ]
 
+sortFilter :: [Key] -> [(Key,Bool)] -> [(Key,(Text,Text))] -> UI Element -> UI Element -> ((Key,Maybe Bool) -> String) -> UI (TrivialWidget [(Key,Maybe Bool,Maybe (String,FTB Showable))])
+sortFilter l sel fil liste slote conv = do
+    tds <- list liste slote (sortFilterUI conv) ((\i j -> fmap (\e -> (e,,Nothing)  $ fmap snd $  L.find ((==e).fst) j) i ) l sel)
+    return $ TrivialWidget (triding tds) (getElement tds)
 
+validOp = ["&&","<@","@>","<",">","=","/=","<=",">="]
+readValid = (\v -> if elem v validOp then Just v else Nothing)
+
+sortFilterUI conv ix bh  = do
+  let
+      step t = case t of
+              Just True -> Just False
+              Just False -> Nothing
+              Nothing -> Just True
+  dv <- UI.div # sink text ((\(a,b,_) -> conv (a,b) )<$> bh)
+  op <- UI.input # set UI.style [("width","50px")]
+  vf <- UI.input # set UI.style [("width","80px")]
+  fi <- UI.button # set text "go"
+  let opE = UI.valueChange op
+      vfE =  UI.valueChange vf
+  opB <- stepper "" opE
+  vfB <- stepper "" vfE
+  let
+      ev0 = flip (\(l,t,op,vf)-> const (l,step t,op,vf)) <$>  UI.click dv
+      ev1 = flip (\(l,t,op,vf) opn -> (l,t,(readValid opn) ,vf)) <$>  opB <@ UI.click fi
+      ev2 = flip (\(l,t,op,vf) vfn -> (l,t,op , (readType (textToPrim <$>  keyType l) vfn))) <$>  vfB <@ UI.click fi
+  block <- UI.div # set children [dv,op,vf,fi]
+  return $ TrivialWidget (tidings bh ((\ini@(l,t,op) f -> (\(l,t,op,v) -> (l , t ,liftA2 (,) op v)) $ f (l,t,fmap fst op , fmap snd op) ) <$> bh <@> (concatenate <$> unions [ev0,ev1,ev2]) )) block
+
+
+
+nonEmpty [] = Nothing
+nonEmpty i = Just i
 
 viewer inf table env = mdo
   let
       envK = concat $ maybeToList env
-      filterStatic =filter (not . flip L.elem (fmap fst envK))
+      filterStatic =filter (not . flip L.elem (fmap (_relOrigin . head . keyattri  . snd) envK))
       key = filterStatic $ F.toList $ rawPK table
       sortSet =  filterStatic . F.toList . tableKeys . tableNonRef . allRec' (tableMap inf ) $ table
       tableSt2 =   tableViewNR (tableMap inf) table
@@ -935,9 +970,11 @@ viewer inf table env = mdo
       iniPg =  M.empty
       iniSort = selSort sortSet ((,True) <$>  key)
 
-  sortList <- selectUI sortSet ((,True) <$> key) UI.tr UI.th conv
-  let makeQ slist (o,i) = fmap ((o,).(slist,)) $ paginate (conn inf) (unTB1 tableSt2)  (fmap dir2 <$> (filterOrd slist)) o ((*pageSize) $ maybe o ((o-) . fst) kold ) pageSize (snd <$> kold) env
+  sortList <- sortFilter sortSet ((,True) <$> key) []  UI.tr UI.th conv
+  let makeQ slist' (o,i) = fmap ((o,).(slist,)) $ paginate (conn inf) (unTB1 tableSt2)  (fmap dir2 <$> (filterOrd slist)) o ((*pageSize) $ maybe o ((o-) . fst) kold ) pageSize (snd <$> kold) (nonEmpty envK <> flist )
           where kold = join $ fmap (traverse (allMaybes . fmap (traverse unSOptional') . L.filter (flip elem (fmap fst (filterOrd slist)).fst) . getAttr'  )) i
+                slist = fmap (\(i,j,_) -> (i,j)) slist'
+                flist = nonEmpty $ catMaybes $ fmap (\(i,_,j) -> second (Attr i) . first T.pack <$> j) slist'
       dir2 True  = Desc
       dir2 False = Asc
       nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))
@@ -945,7 +982,7 @@ viewer inf table env = mdo
       ini = nearest' iniPg 0
       addT (c,(s,(cou,td))) = M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)
   iniQ <- liftIO$ makeQ iniSort ini
-  offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) (ceiling . (/pageSize). fromIntegral <$> offsetTotal)
+  offset <- offsetField 0 (never ) (ceiling . (/pageSize). fromIntegral <$> offsetTotal)
   let
       event1 , event2 :: Event (IO (Int,([(Key,Maybe Bool)],(Int,[TBData Key Showable]))))
       event1 = (\(j,k) i  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pure iniPg <*> triding offset) <@> rumors (triding sortList)
@@ -960,17 +997,27 @@ viewer inf table env = mdo
       tview = unTlabel' . unTB1  $tableSt2
       ordtoBool Asc = False
       ordtoBool Desc = True
-  element itemList # sink items ((\(slist ,(coun,tb))-> pure . renderTableNoHeaderSort  (fmap fst slist) (return $ getElement sortList) inf (tableNonRef' tview) .  fmap tableNonRef' . fmap ((filterRec (concat $ maybeToList env))) $ tb )  <$>   tdswhereb )
+  element itemList # set items ( pure . renderTableNoHeaderSort2   (return $ getElement sortList) inf (tableNonRef' tview) $   fmap (fmap tableNonRef' . fmap ((filterRec (fmap (_relOrigin . head .keyattri . snd ) $ concat $ maybeToList env)))) . (\(slist ,(coun,tb))-> (fmap fst slist,tb))  <$>   tdswhereb )
+
   UI.div # set children [getElement offset, itemList]
 
 
 
-exceptionAllTableIndex e@(inf,table,index) =   metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ),("data_index",TB1 $ SBinary $ BSL.toStrict $ B.encode $ fmap (first keyValue)index) ]
+exceptionAllTableIndex e@(inf,table,index) =   metaAllTableIndexA inf "plugin_exception" envA
+  where
+        envA = [Attr "schema_name" (TB1 $ SText (schemaName inf))
+              , Attr "table_name" (TB1 $ SText (tableName table))
+              , IT (_tb $ Attr "data_index2" (TB1 () ) ) (ArrayTB1 $  fmap ((\(i,j) -> tblist $ fmap _tb [Attr "key" (TB1 $ SText i) ,Attr "val" (TB1 (SDynamic j))]). first keyValue)index) ]
 
-dashBoardAllTableIndex e@(inf,table,index) =   metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ),("data_index",TB1 $ SBinary $ BSL.toStrict $ B.encode $ fmap (first keyValue)index) ]
+
+dashBoardAllTableIndex e@(inf,table,index) =   metaAllTableIndexA inf "modification_table" envA -- [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ),("data_index2",TB1 $ SBinary $ BSL.toStrict $ B.encode $ fmap (first keyValue)index) ]
+  where
+        envA = [Attr "schema_name" (TB1 $ SText (schemaName inf))
+              , Attr "table_name" (TB1 $ SText (tableName table))
+              , IT (_tb $ Attr "data_index2" (TB1 () ) ) (ArrayTB1 $  fmap ((\(i,j) -> tblist $ fmap _tb [Attr "key" (TB1 $ SText i) ,Attr "val" (TB1 (SDynamic j))]). first keyValue)index) ]
 
 
-filterRec envK = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList (fst <$> envK ))) . S.fromList . fmap _relOrigin.  keyattr )
+filterRec envK = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList envK )) . S.fromList . fmap _relOrigin.  keyattr )
 
 renderTableNoHeader' header inf modtablei out = do
   let
@@ -982,14 +1029,23 @@ renderTableNoHeaderSort sort header inf modtablei out = do
   let
       body o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader' sort UI.td rendererShowableUI inf $ o)
   header # set UI.class_ "row"
-  UI.table # set UI.class_ "table table-bordered table-striped" # set items (header :(body <$> out))
+  tbody <- UI.div # set items (body <$> out)
+  UI.table # set UI.class_ "table table-bordered table-striped" # set items [header ,return tbody ]
+
+renderTableNoHeaderSort2 header inf modtablei out = do
+  let
+      body sort o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader' sort UI.td rendererShowableUI inf $ o)
+  header # set UI.class_ "row"
+  UI.table # set UI.class_ "table table-bordered table-striped" # sink items ((\(i,l)-> header : fmap (body i) l )<$> out)
+
 
 
 renderTableNoHeader header inf modtablei out = do
   let
       body o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader UI.td rendererShowableUI inf $ o)
   header # set UI.class_ "row"
-  UI.table # set UI.class_ "table table-bordered table-striped" # set items (header :(body <$> out))
+  tbody <- UI.div # set items (body <$> out)
+  UI.table # set UI.class_ "table table-bordered table-striped" # set items [header ,return tbody ]
 
 renderTable'  inf modtablei out =  do
   let

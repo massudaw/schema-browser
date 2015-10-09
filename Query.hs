@@ -97,6 +97,7 @@ renderPrim (SBounding a ) = show a
 renderPrim (SDate a) = show a
 renderPrim (SDayTime a) = show a
 renderPrim (SBinary _) = show "<Binary>"
+renderPrim (SDynamic s) = renderShowable s
 renderPrim (SPosition a) = show a
 renderPrim (SPInterval a) = show a
 
@@ -343,12 +344,19 @@ rootPaths' invSchema r = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,
 -- keyAttr :: Show b  => TB Identity b a -> b
 
 
+allAttr (TB1 (_,i)) = all (isAttr .labelValue . getCompose) $ F.toList $ _kvvalues (labelValue $ getCompose i)
+    where isAttr (Attr _ _ ) = True
+          isAttr _ = False
+
 selectQuery t = "SELECT " <> explodeRow t <> " FROM " <> expandTable t <> expandQuery False  t
 
 expandQuery left (DelayedTB1 (Just t)) = ""--  expandQuery left t
 expandQuery left t@(TB1 (meta, m))
     = foldr1 mappend (expandJoin left (F.toList (_kvvalues . labelValue . getCompose $ m) ) .getCompose <$> F.toList (_kvvalues . labelValue . getCompose $ m))
 
+tableType (ArrayTB1 [i]) = tableType i <> "[]"
+tableType (LeftTB1 (Just i)) = tableType i
+tableType (TB1 (m,_)) = kvMetaFullName  m
 
 expandJoin :: Bool -> [Compose (Labeled Text) (TB (Labeled Text)) Key ()] -> Labeled Text (TB (Labeled Text) Key ()) -> Text
 expandJoin left env (Unlabeled (IT i (LeftTB1 (Just tb) )))
@@ -356,7 +364,7 @@ expandJoin left env (Unlabeled (IT i (LeftTB1 (Just tb) )))
 expandJoin left env (Labeled l (IT i (LeftTB1 (Just tb) )))
     = expandJoin True env $ Labeled l (IT i tb)
 expandJoin left env (Labeled l (IT i (ArrayTB1 [tb] )))
-    = jt <> " JOIN LATERAL (SELECT array_agg(" <> explodeRow  tb  <> "  order by arrrow ) as " <> l <> " FROM  (SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> tname  <> ") as arr) as arr ) " <> label tas <> expandQuery left tb <> " )  as " <>  label tas <> " ON true"
+    = jt <> " JOIN LATERAL (SELECT array_agg(" <> (if allAttr tb then explodeRow tb <> " :: " <> tableType tb else explodeRow  tb ) <> "  order by arrrow ) as " <> l <> " FROM  (SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> tname  <> ") as arr) as arr ) " <> label tas <> expandQuery left tb <> " )  as " <>  label tas <> " ON true"
         where
           tas = getTas tb
           getTas (DelayedTB1 (Just tb))  = getTas tb

@@ -102,7 +102,7 @@ main = do
     )  sorted
   -}
 
-  e <- poller (argsToState (tail args) )  [queryArtAndamento,siapi2Plugin,siapi3Plugin ]
+  e <- poller (argsToState (tail args) )  [siapi2Plugin,siapi3Plugin ]
 
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e $ tail args)
   print "Finish"
@@ -162,9 +162,8 @@ setup e args w = void $ do
   (evDB,chooserItens) <- databaseChooser bstate
   body <- UI.div
   be <- stepper [] (unions $ fmap snd e)
-  pollRes <- UI.div # sink UI.text (show <$> be)
   return w # set title (host bstate <> " - " <>  dbn bstate)
-  nav  <- buttonSetUI (pure "Nav" ) ["Nav","Change","Exception"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  nav  <- buttonDivSet  ["Nav","Change","Exception"] (pure $ Just "Nav" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   chooserDiv <- UI.div # set children  (chooserItens <> [ getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
@@ -181,7 +180,7 @@ setup e args w = void $ do
         "Nav" -> do
             let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
             span <- chooserTable  inf e k (table bstate)
-            element body # set UI.children [span,pollRes]# set UI.class_ "row"  )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
+            element body # set UI.children [span]# set UI.class_ "row"  )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
 
 
 connRoot dname = (fromString $ "host=" <> host dname <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname <> " sslmode= require" )
@@ -265,15 +264,18 @@ chooserTable inf e kitems i = do
 
   i :: [(Text,Int)] <- liftIO $ query (rootconn inf) (fromString "SELECT table_name,usage from metadata.ordering where schema_name = ?") (Only (schemaName inf))
   let orderMap = Just $ M.fromList  i
-  bset <- buttonFSet  (L.sortBy (flip $  comparing (\ pkset -> liftA2 M.lookup  (fmap rawName . flip M.lookup (pkMap inf) $ pkset ) orderMap)) kitems)  initKey ((\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> i) ))<$> filterInpBh) (\i -> case M.lookup i (pkMap inf) of
+  let renderLabel = (\i -> case M.lookup i (pkMap inf) of
                                        Just t -> T.unpack (translatedName t)
                                        Nothing -> show i )
+      filterLabel = ((\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> renderLabel i) ))<$> filterInpBh)
+  bset <- buttonDivSet (L.sortBy (flip $  comparing (\ pkset -> liftA2 M.lookup  (fmap rawName . flip M.lookup (pkMap inf) $ pkset ) orderMap)) kitems)  initKey  (\k -> UI.button # set UI.text (renderLabel k) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow  . ($k) <$> filterLabel ))
   let bBset = triding bset
   onEvent (rumors bBset) (\ i ->
       liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
         )
-  tbChooser <- UI.div # set children [filterInp,getElement bset] # set UI.class_ "col-xs-2"
-  nav  <- buttonSetUI (pure "Nav") ["Viewer","Nav","Exception","Change"] (\i -> set UI.text i . set UI.class_ "buttonSet btn btn-default pull-right")
+  tbChooserI <- UI.div # set children [filterInp,getElement bset]  # set UI.style [("height","600px"),("overflow","auto"),("height","99%")]
+  tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","600px"),("overflow","hidden")] # set children [tbChooserI]
+  nav  <- buttonDivSet ["Viewer","Nav","Exception","Change"] (pure $ Just "Nav")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   header <- UI.h1 # sink text (T.unpack . translatedName .  justError "no table " . flip M.lookup (pkMap inf) <$> facts bBset ) # set UI.class_ "col-xs-7"
   chooserDiv <- UI.div # set children  [header ,getElement nav] # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
@@ -298,8 +300,9 @@ chooserTable inf e kitems i = do
             span <- viewer inf (justError "no table with pk" $ M.lookup table (pkMap inf)) Nothing
             element body # set UI.children [span]
         ) $ liftA2 (,) (triding nav) bBset
-  subnet <- UI.div # set children [chooserDiv,body] # set UI.class_ "col-xs-10"
+  subnet <- UI.div # set children [chooserDiv,body] # set UI.class_ "row col-xs-10" # set UI.style [("height","600px"),("overflow","auto")]
   UI.div # set children [tbChooser, subnet ]  # set UI.class_ "row"
+
 viewerKey
   ::
       InformationSchema -> S.Set Key -> UI Element
@@ -357,8 +360,6 @@ tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
 tableAttrs (TB1  (_,k)) = concat $ fmap aattr (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
 tableAttrs (LeftTB1 (Just i)) = tableAttrs i
 tableAttrs (ArrayTB1 [i]) = tableAttrs i
-
-validOp = ["&&","<@","@>","<",">","=","/=","<=",">="]
 
 
 filterCase inf t@(Attr k _ ) = do

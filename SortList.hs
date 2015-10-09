@@ -21,6 +21,7 @@ type SortList a = [(a,Maybe Bool)]
 
 conv (l,t) = show l <>  " " <> maybe "" (\b -> if b then "Desc" else "Asc") t
 
+
 sortItem conv ix bh  = do
   let
       step t = case t of
@@ -66,7 +67,9 @@ list liste slote iteme els = mdo
 
 
 filterOrd = fmap (second fromJust) . filter (isJust .snd)
-selSort l sel = ((\i j -> fmap (\e -> (e,)  $ fmap snd $  L.find ((==e).fst) j) i ) l sel)
+selSort l sel = ((\i j -> fmap (\e -> (e,,Nothing)  $ fmap snd $  L.find ((==e).fst) j) i ) l sel)
+
+
 
 
 selectUI :: Eq a => [a] -> [(a,Bool)] -> UI Element -> UI Element -> ((a,Maybe Bool) -> String) -> UI (TrivialWidget [(a,Maybe Bool)])

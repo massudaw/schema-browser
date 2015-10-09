@@ -14,7 +14,7 @@ import Control.Monad.IO.Class
 import qualified Data.Binary as B
 import GHC.Stack
 import Data.Monoid
-import Data.Bifunctor(first)
+import Data.Bifunctor(second,first)
 import Utils
 import Control.Exception
 import System.Time.Extra
@@ -218,7 +218,7 @@ catchPluginException inf pname tname idx i = do
   i `catch` (\e  -> do
                 t <- getCurrentTime
                 print (t,e)
-                execute (rootconn inf) "INSERT INTO metadata.plugin_exception (username,schema_name,table_name,plugin_name,exception,data_index,instant) values(?,?,?,?,?,?,?)" (username inf , schemaName inf,pname,tname,show (e :: SomeException) ,Binary (B.encode (fmap (first keyValue) idx) ), t )
+                execute (rootconn inf) "INSERT INTO metadata.plugin_exception (username,schema_name,table_name,plugin_name,exception,data_index2,instant) values(?,?,?,?,?,?,?)" (username inf , schemaName inf,pname,tname,show (e :: SomeException) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) . first keyValue) idx) ), t )
                 return Nothing )
 
 
@@ -230,7 +230,7 @@ logTableModification inf (TableModification Nothing table i) = do
   time <- getCurrentTime
   let ltime =  utcToLocalTime utc $ time
       (_,pidx,pdata) = firstPatch keyValue  i
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (username inf ,ltime,rawName table, Binary (B.encode pidx)  , Binary  .B.encode <$> V.fromList pdata , schemaName inf)
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index2,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (username inf ,ltime,rawName table, V.fromList (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) pidx )) , Binary  .B.encode <$> V.fromList pdata , schemaName inf)
   return (TableModification id table i )
 
 

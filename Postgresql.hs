@@ -8,6 +8,7 @@ import Query
 import GHC.Stack
 import Patch
 import Debug.Trace
+import qualified Data.Binary as B
 import Data.Functor.Identity
 import Data.Scientific hiding(scientific)
 import Data.Bits
@@ -40,6 +41,7 @@ import qualified Data.List as L
 import qualified Data.Vector as Vector
 import qualified Data.Interval as Interval
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Lazy.Char8 as BSL
 
 import Data.Monoid
 import Prelude hiding (takeWhile)
@@ -56,6 +58,7 @@ import Database.PostgreSQL.Simple.FromField hiding(Binary,Identity)
 -- import Database.PostgreSQL.Simple.FromField (fromField,typeOid,typoid,TypeInfo,rngsubtype,typdelim,Conversion,Field,FromField)
 import qualified Database.PostgreSQL.Simple.ToField as TF
 import qualified Database.PostgreSQL.Simple.FromRow as FR
+import qualified Database.PostgreSQL.Simple.ToRow as TR
 import Database.PostgreSQL.Simple
 -- import Data.GraphViz (preview)
 import Blaze.ByteString.Builder(fromByteString)
@@ -88,18 +91,19 @@ instance (TF.ToField a , TF.ToField (UnQuoted (a))) => TF.ToField (FTB a) where
 instance  TF.ToField (TB Identity Key Showable)  where
   toField (Attr _  i) = TF.toField i
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT n (TB1 (m,i))) = TF.toField (TBRecord  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . _tbattrkey) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
+  toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . _tbattrkey) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
-  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\(TB1 (m,i) ) -> (TBRecord  (kvMetaFullName  m ) $  fmap (runIdentity . getCompose ) $ F.toList  $ _kvvalues $ unTB i ) ) <$> is
+  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\(TB1 (m,i) ) -> (TBRecord2  (kvMetaFullName  m ) $  fmap (runIdentity . getCompose ) $ F.toList  $ _kvvalues $ unTB i ) ) <$> is
   toField e = errorWithStackTrace (show e)
 
 
 
-instance TF.ToField a => TF.ToField (TBRecord a) where
-  toField (TBRecord s l) =  TF.Many   (TF.Plain (fromByteString "ROW(") : L.intercalate [TF.Plain $ fromChar ','] (fmap (pure.TF.toField) l) <> [TF.Plain (fromByteString $ ") :: " <>  BS.pack (T.unpack s) )] )
+instance TR.ToRow a => TF.ToField (TBRecord2 a) where
+  toField (TBRecord2 s l) =  TF.Many   (TF.Plain (fromByteString "ROW(") : L.intercalate [TF.Plain $ fromChar ','] (fmap pure. TR.toRow  $ l) <> [TF.Plain (fromByteString $ ") :: " <>  BS.pack (T.unpack s) )] )
 
 
-data TBRecord a = TBRecord Text [a]
+
+data TBRecord2 a = TBRecord2 Text a
 
 instance TF.ToField (UnQuoted Showable) where
   toField (UnQuoted (STimestamp i )) = TF.Plain $ localTimestampToBuilder (Finite i)
@@ -155,6 +159,7 @@ intervalBuilder i =  TF.Many [TF.Plain $ fromByteString ("\'"  <> lbd (snd $ Int
           ubd True = "]"
           ubd False =")"
 
+
 instance TF.ToField Showable where
   toField (SText t) = TF.toField t
   toField (SNumeric t) = TF.toField t
@@ -172,6 +177,7 @@ instance TF.ToField Showable where
   toField (SBoolean t) = TF.toField t
   -- toField (SDelayed t) = TF.toField t
   toField (SBinary t) = TF.toField (Binary t)
+  toField (SDynamic t) = TF.toField (Binary (B.encode t))
 
 
 defaultType t =
@@ -186,15 +192,15 @@ readTypeOpt t (Just i) = readType t i
 
 readType t = case t of
     Primitive i -> fmap TB1 <$> readPrim i
-    KOptional i -> opt (readType i)
-    -- KSerial i -> opt (readType i)
+    KOptional i -> opt LeftTB1 (readType i)
+    KSerial i -> opt SerialTB1 (readType i)
     KArray i  -> parseArray (readType i)
-    -- KInterval i -> inter (readType i)
+    --KInterval i -> inter (readType i)
   where
-      opt f "" =  Just $ LeftTB1 Nothing
-      opt f i = fmap (LeftTB1 .Just) $ f i
+      opt c f "" =  Just $ c Nothing
+      opt c f i = fmap (c .Just) $ f i
       parseArray f i =   fmap ArrayTB1 $  allMaybes $ fmap f $ unIntercalate (=='\n') i
-      -- inter f = (\(i,j)-> fmap SInterval $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
+      -- inter f = (\(i,j)-> IntervalTB1 $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
 
 readPrim t =
   case t of
@@ -210,11 +216,13 @@ readPrim t =
      PPosition -> readPosition
      PBoolean -> readBoolean
      PLineString -> readLineString
+     PBinary -> readText
   where
       readInt = nonEmpty (fmap SNumeric . readMaybe)
       readBoolean = nonEmpty (fmap SBoolean . readMaybe)
       readDouble = nonEmpty (fmap SDouble. readMaybe)
       readText = nonEmpty (\i-> fmap SText . readMaybe $  "\"" <> i <> "\"")
+      readBin = nonEmpty (\i-> fmap (SBinary . BS.pack ) . readMaybe $  "\"" <> i <> "\"")
       readCnpj = nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cnpjValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
       readCpf = nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cpfValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
       readDate =  fmap (SDate . localDay . fst) . strptime "%Y-%m-%d"
@@ -377,6 +385,9 @@ parsePrim
 -- parsePrim i | traceShow i False = error ""
 parsePrim i =  do
    case i of
+        PDynamic ->  let
+              pr = SDynamic . B.decode . BSL.fromStrict . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}")
+                in doublequoted pr <|> pr
         PBinary ->  let
               pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}")
                 in doublequoted pr <|> pr

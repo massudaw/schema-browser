@@ -158,16 +158,19 @@ paginate conn t order page off size k eqpred = do
     v <- uncurry (queryWith (withCount (fromRecord (unTlabel' t)) ) conn) (quec,attr)
     print (maybe 0 (\c->((page)*size)+ c - off ) $ safeHead ( fmap snd v :: [Int]))
     return ((maybe 0 (\c->((page)*size)+ c - off ) $ safeHead ( fmap snd v :: [Int])), fmap fst v)
-  where pred = maybe "" (const " WHERE ") (k <> eqpred) <> T.intercalate " AND " (maybe [] (const $ pure $ generateComparison (first (justLabel t) <$> order)) k <> (maybe [] pure $ eqquery <$> eqpred))
-        equality k = k <> " = " <> "?"
-        eqquery eqpred = T.intercalate " AND " (equality . justLabel t . fst <$> eqpred )
+  where pred = maybe "" (const " WHERE ") (fmap (fmap snd)   k <> fmap (concat . fmap  (fmap TB1 .F.toList . snd)) eqpred) <> T.intercalate " AND " (maybe [] (const $ pure $ generateComparison (first (justLabel t) <$> order)) k <> (maybe [] pure $ eqquery <$> eqpred))
+        equality (pred,k) = inattr k <> pred <> "?"
+        eqquery :: [(Text,TB Identity Key a)] -> Text
+        eqquery eqpred = T.intercalate " AND " (equality . second (firstTB (justLabel t)) <$> eqpred)
         eqpk :: [TB Identity Key Showable]
-        eqpk =  maybe [] (fmap (uncurry Attr ) . L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst))) eqpred
+        eqpk =  maybe [] ( L.sortBy (comparing ((`L.elemIndex` (fmap fst order)). inattr )))  (fmap snd <$> eqpred)
         offsetQ = " OFFSET " <> T.pack (show off)
         limitQ = " LIMIT " <> T.pack (show size)
         orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first (justLabel t) <$> order)
 
-paginateView conn  (View  tree order proj  (page,off,size,origin)) = paginate conn tree  order page off size origin Nothing
+-- paginateView conn  (View  tree order proj  (page,off,size,origin)) = paginate conn tree  order page off size origin Nothing
+
+inattr = _relOrigin . head . keyattri
 
 data View
   = View
@@ -177,11 +180,18 @@ data View
   , pagination :: (Int,Int,Int,Maybe [(Key,FTB Showable)])
   }
 
+justLabel :: TB3Data (Labeled Text ) Key () -> Key -> Text
 justLabel t =  justError "cant find label" .getLabels t
+
+-- tableType :: TB1 () -> Text
+
 
 getLabels t k =  M.lookup  k (mapLabels label' t)
     where label' (Labeled l (Attr k _)) =  (k,l )
+          label' (Labeled l (IT k tb )) = (lattr k, l <> " :: " <> tableType tb)
           label' (Unlabeled (Attr k _)) = (k,keyValue k)
+          label' (Unlabeled (IT k _)) = (lattr k,keyValue $ lattr k )
+          lattr =_tbattrkey . labelValue .getCompose
 
 
 mapLabels label' t =  M.fromList $ fmap (label'. getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)

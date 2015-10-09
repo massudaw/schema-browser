@@ -284,11 +284,11 @@ firstTB f (FKT k  m  i) = FKT  (fmap (mapComp (firstTB f) ) k)  (fmap f  <$> m) 
 
 data FTB a
   = TB1 a
-  | LeftTB1  (Maybe (FTB a))
-  | SerialTB1 (Maybe (FTB a))
-  | IntervalTB1 (Interval.Interval (FTB a))
-  | DelayedTB1 (Maybe (FTB a))
-  | ArrayTB1 [(FTB a)]
+  | LeftTB1  ! (Maybe (FTB a))
+  | SerialTB1 !(Maybe (FTB a))
+  | IntervalTB1 !(Interval.Interval (FTB a))
+  | DelayedTB1 !(Maybe (FTB a))
+  | ArrayTB1 ![(FTB a)]
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable,Generic)
 
 instance Applicative FTB where
@@ -322,6 +322,8 @@ data KPrim
    | PCpf
    | PBinary
    | PLineString
+   -- Dynamic Showable Type
+   | PDynamic
    deriving(Show,Eq,Ord)
 
 
@@ -419,6 +421,7 @@ data Showable
   | SDate !Day
   | SDayTime !TimeOfDay
   | SBinary !BS.ByteString
+  | SDynamic ! (FTB Showable)
   deriving(Ord,Eq,Show,Generic)
 
 
@@ -593,7 +596,7 @@ joinNonRef' (m,n)  = (m, mapComp (rebuildTable . _kvvalues) n)
     nonRef (Attr k v ) = [Compose . return $ Attr k v]
     nonRef (FKT i _ _ ) = tra
         where tra = concat ( fmap compJoin   . traComp  nonRef <$> i)
-    nonRef it@(IT j k ) = [] -- [return $ (IT  j (joinNonRef' <$> k )) ]
+    nonRef it@(IT j k ) =  [Compose . return $ (IT  j k ) ]
     --
 
 
@@ -702,6 +705,7 @@ unAttr i = errorWithStackTrace $ "cant find attr" <> (show i)
 
 textToPrim "character varying" = PText
 textToPrim "name" = PText
+textToPrim "dynamic" = PDynamic
 textToPrim "varchar" = PText
 textToPrim "text" = PText
 textToPrim "bytea" = PBinary

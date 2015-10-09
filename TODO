@@ -12,6 +12,9 @@ Improve Types
 
 Make delayed fields not used by plugins
 
+Counting query size
+-- when offset is bigger them the number of rows to count we cant retrieve the count to estimate size
+
 Reversible Patch
 -- make reverse apply patch
 -- implement reversible patch data type 
