@@ -306,6 +306,8 @@ reflexiveRel ks
 isInlineRel (Inline _ ) =  True
 isInlineRel i = False
 
+isRecRel (RecJoin _ ) =  True
+isRecrel i = False
 
 isPathReflexive (FKJoinTable _ ks _)
   = all id $ fmap (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
@@ -327,25 +329,25 @@ allRec' i t = unTlabel $ tableView  i t
 
 tableView  invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   (t,ks) <- labelTable r
-  tb <- recurseTB invSchema (rawFKS r) False ks
+  tb <- recurseTB invSchema (rawFKS r) False False ks
   return  tb
 
 tableViewNR invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   (t,ks) <- labelTable r
-  tb <- recurseTB invSchema (S.filter (all isInlineRel. F.toList .pathRelRel)$ rawFKS r) False ks
+  tb <- recurseTB invSchema (S.filter (all isInlineRel. F.toList .pathRelRel)$ rawFKS r) False False ks
   return  tb
 
 
 rootPaths' invSchema r = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   (t,ks) <- labelTable r
-  tb <- recurseTB invSchema (rawFKS r ) False ks
+  tb <- recurseTB invSchema (rawFKS r ) False False ks
   return ( tb , selectQuery tb )
 
--- keyAttr :: Show b  => TB Identity b a -> b
 
-
-allAttr (TB1 (_,i)) = all (isAttr .labelValue . getCompose) $ F.toList $ _kvvalues (labelValue $ getCompose i)
+allAttr i =  all allAttr' $ F.toList i
+allAttr' (_,i) = all (isAttr .labelValue . getCompose) $ F.toList $ _kvvalues (labelValue $ getCompose i)
     where isAttr (Attr _ _ ) = True
+          isAttr (IT k e)  = allAttr e
           isAttr _ = False
 
 selectQuery t = "SELECT " <> explodeRow t <> " FROM " <> expandTable t <> expandQuery False  t
@@ -395,8 +397,10 @@ expandJoin left env (Unlabeled (FKT _ rel tb))
   = jt <> " JOIN " <> expandTable tb <> " ON " <> joinOnPredicate rel (fmap getCompose $ concat $ fmap nonRef env) (fmap getCompose $ F.toList (tableAttr tb)) <> expandQuery left tb
     where
       jt = if left then " LEFT" else ""
+expandJoin left env (Labeled l (RecRel _ t)) = expandJoin left env (Labeled l t)
+expandJoin left env (Unlabeled (RecRel _ t)) = expandJoin left env (Unlabeled t)
 
-expandJoin left env i = errorWithStackTrace (show i)
+expandJoin left env i = errorWithStackTrace (show ("expandJoin",i))
 
 joinOnPredicate :: [Rel Key] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> Text
 joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectionOp (keyType . keyAttr . labelValue $ l) op (keyType . keyAttr . labelValue $ r) (label l)  (label r )) <$> fkm
@@ -406,7 +410,7 @@ joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectio
 loadOnlyDescriptions (TB1 (kv ,m) ) = _kvpk kv
 
 recursePath
-  :: Bool
+  :: Bool-> Bool
      -> [(Set (Rel Key), Labeled Text (TB (Labeled Text) Key ()))]
      -> [(Set (Rel Key), Labeled Text (TB (Labeled Text) Key ()))]
      -> Map Text Table
@@ -414,7 +418,7 @@ recursePath
      -> State
           ((Int, Map Int Table), (Int, Map Int Key))
           (Compose (Labeled Text) (TB (Labeled Text)) Key ())
-recursePath isLeft vacc ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
+recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
     | isArrayRel ifk  {-&& not (isArrayRel e )-}=   do
           tas <- tname nextT
           let knas = Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique) (Primitive "integer" )
@@ -437,10 +441,11 @@ recursePath isLeft vacc ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
         mapArray i =  if isArrayRel ifk then ArrayTB1 [i] else i
         mapOpt i = if isLeftRel ifk then  LeftTB1 $ Just  i else i
         nextT = justError ("recursepath lookIT "  <> show t <> " " <> show invSchema) (M.lookup t invSchema)
-        fun =  recurseTB invSchema (rawFKS nextT) nextLeft
+        fun =  recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
-
-recursePath isLeft vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
+recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(RecJoin f) e)
+    = mapComp (RecRel ( S.toList $ pathRelRel (Path ifk f e))  ) <$> (recursePath isLeft True vacc ksbn invSchema (Path ifk f e))
+recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
     | S.size ifk   < S.size e =   do
           (t,ksn) <- labelTable nextT
           tb <-fun ksn
@@ -464,7 +469,34 @@ recursePath isLeft vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
         nextLeft = any (isKOptional.keyType) (S.toList ifk) || isLeft
         mapArray i =  if isArrayRel ifk then ArrayTB1 [i] else i
         mapOpt i = if isLeftRel  ifk then  LeftTB1 $ Just  i else i
-        fun =   recurseTB invSchema (rawFKS nextT) nextLeft
+        fun =   recurseTB invSchema (rawFKS nextT) nextLeft isRec
+
+recurseTB :: Map Text Table -> Set (Path (Set Key ) SqlOperation ) -> Bool -> Bool -> TB3 (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3 (Labeled Text) Key ())
+recurseTB invSchema  fks' nextLeft isRec ksn@(TB1 (m, kv) ) =  TB1 . (m,) <$>
+    (\kv -> case kv of
+      (Compose (Labeled l kv )) -> do
+         i <- fun kv
+         return (Compose (Labeled l i));
+      (Compose (Unlabeled kv)) -> do
+         i<- fun kv
+         return (Compose (Unlabeled i))) kv
+    where
+      fun =  (\kv -> do
+          let
+              fks = if isRec then S.filter (not .isRecRel .pathRel) fks' else fks'
+              items = _kvvalues kv
+              fkSet:: S.Set Key
+              fkSet =  S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter (isPathReflexive . pathRel) $ S.toList fks
+              nonFKAttrs :: [(S.Set (Rel Key) ,TBLabel  ())]
+              nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
+          pt <- foldl (\acc  fk ->  do
+                  vacc <- acc
+                  i <- fmap (pathRelRel fk,) . recursePath nextLeft isRec vacc ( (M.toList $  fmap getCompose items )) invSchema $ fk
+                  return (fmap getCompose i:vacc)
+                  ) (return []) $ P.sortBy (P.comparing pathRelRel) (F.toList $ fks )
+          return (   KV $ M.fromList $ nonFKAttrs <> (fmap (fmap Compose ) pt)))
+
+
 
 isLeftRel ifk = any (isKOptional.keyType) (S.toList ifk)
 isArrayRel ifk = any (isArray.keyType) (S.toList ifk)
@@ -473,6 +505,7 @@ pathRelRel :: Path (Set Key ) SqlOperation -> Set (Rel Key)
 pathRelRel (Path _ (FKJoinTable _ rel  _ ) _ ) = S.fromList rel
 pathRelRel (Path r (FKInlineTable  _   )  _ ) = S.map Inline r
 pathRelRel (Path r (FKEitherField _    )  _ ) = S.map Inline r
+pathRelRel (Path r (RecJoin (FKInlineTable _    ))  _ ) = S.map Inline r
 
 pathRel (Path _ rel _ ) = rel
 pathRelRef (Path ifk _ _ ) = ifk
@@ -507,31 +540,6 @@ tbFilter pred (TB1 i) = tbFilter' pred i
 tbFilter pred (LeftTB1 (Just i)) = tbFilter pred i
 tbFilter pred (ArrayTB1 ([i])) = tbFilter pred i
 tbFilter pred (DelayedTB1 (Just i)) = tbFilter pred i
-
-
-recurseTB :: Map Text Table -> Set (Path (Set Key ) SqlOperation ) -> Bool -> TB3 (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3 (Labeled Text) Key ())
-recurseTB invSchema  fks nextLeft ksn@(TB1 (m, kv) ) =  TB1 . (m,) <$>
-    (\kv -> case kv of
-      (Compose (Labeled l kv )) -> do
-         i <- fun kv
-         return (Compose (Labeled l i));
-      (Compose (Unlabeled kv)) -> do
-         i<- fun kv
-         return (Compose (Unlabeled i))) kv
-    where
-      fun =  (\kv -> do
-          let
-              items = _kvvalues kv
-              fkSet:: S.Set Key
-              fkSet =  S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter (isPathReflexive . pathRel) $ S.toList fks
-              nonFKAttrs :: [(S.Set (Rel Key) ,TBLabel  ())]
-              nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
-          pt <- foldl (\acc  fk ->  do
-                  vacc <- acc
-                  i <- fmap (pathRelRel fk,) . recursePath nextLeft vacc ( (M.toList $  fmap getCompose items )) invSchema $ fk
-                  return (fmap getCompose i:vacc)
-                  ) (return []) $ P.sortBy (P.comparing pathRelRel) (F.toList $ fks )
-          return (   KV $ M.fromList $ nonFKAttrs <> (fmap (fmap Compose ) pt)))
 
 
 
@@ -643,6 +651,8 @@ explodeDelayed block assoc leaf (Labeled l (Attr k  _ ))
   | otherwise =  leaf (isArray (keyType k)) l
 explodeDelayed block assoc leaf (Unlabeled (Attr k  _ )) = leaf (isArray (keyType k))  (keyValue k)
 
+explodeDelayed block assoc leaf (Labeled l (RecRel n t )) =  explodeDelayed   block assoc leaf (Labeled l t)
+explodeDelayed block assoc leaf (Unlabeled (RecRel n t )) =  explodeDelayed   block assoc leaf (Unlabeled t)
 explodeDelayed block assoc leaf (Unlabeled (IT  n t )) =  explodeRow'  block assoc leaf t
 explodeDelayed block assoc leaf (Labeled l (IT  _ tb  )) = l
 explodeDelayed block assoc leaf (Labeled l (FKT i  _ tb  )) = case i of
@@ -666,6 +676,8 @@ isTB1Delayed _ = False
 unTlabel' ((m,kv) )  = (m,) $ overLabel (\(KV kv) -> KV $ fmap (Compose . Identity .unlabel.getCompose ) $   kv) kv
 unTlabel  = fmap unTlabel'
 
+unlabel (Labeled l (RecRel tn t) ) =  RecRel tn $ unlabel (Labeled l t)
+unlabel (Unlabeled (RecRel tn t) ) = RecRel tn $ unlabel (Unlabeled t)
 unlabel (Labeled l (IT tn t) ) = (IT (relabel tn) (unTlabel t ))
 unlabel (Unlabeled (IT tn t) ) = (IT (relabel tn) (unTlabel t ))
 unlabel (Labeled l (FKT i fkrel t) ) = (FKT (fmap relabel i) fkrel (unTlabel  t ))

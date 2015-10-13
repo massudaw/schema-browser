@@ -199,6 +199,32 @@ tbCase inf pgs constr a@(Attr i _ ) wl plugItens preoldItems = do
         dv <- UI.div # set UI.style [("margin-bottom","3px")] # set UI.class_ ("col-xs-" <> show ( fst $ attrSize a) )# set children [l,getElement tds]
         paintEdit l (facts (triding tds)) (facts oldItems)
         return $ TrivialWidget (triding tds) dv
+tbCase inf pgs constr a@(RecRel i (IT l tb) ) wl plugItens preoldItems = do
+      TrivialWidget btr bel <- checkedWidget (isJust <$> preoldItems)
+      (ev,h) <- liftIO $ newEvent
+      inipre <- currentValue  (facts preoldItems)
+      let fun True = do
+              initpre <- currentValue (facts preoldItems)
+              initpreOldB <- stepper initpre (rumors preoldItems)
+              TrivialWidget btre bel <- fmap (fmap (RecRel i)) <$> tbCase inf pgs constr (IT l ( recOverAttr a tb)) wl plugItens (tidings initpreOldB (rumors preoldItems) )
+
+              onEvent (rumors btre) (liftIO . h )
+              UI.div # set children [bel]
+          fun False = do
+              UI.div
+      sub <- UI.div # sink items  (pure .fun <$> facts btr ) # set UI.class_ "row"
+      element bel  # set UI.class_ "row"
+      out <- UI.div # set children [bel,sub]# set UI.class_ "row"
+      binipre <- stepper  inipre (unionWith const ev (rumors preoldItems))
+      return (TrivialWidget  (tidings binipre (unionWith const (rumors preoldItems) ev)) out)
+
+
+reactimateUI nav fun oldItems = do
+  (e2,h2) <- liftIO $ newEvent
+  sub <- UI.div # sink items  (pure .fun h2 <$> facts (triding nav)) # set UI.class_ "row"
+  cv <- currentValue (facts oldItems)
+  bh2 <- stepper  cv e2
+  return (sub, tidings bh2 e2)
 
 
 
@@ -313,6 +339,8 @@ lookPK inf pk =
             case  M.lookup pk  (pkMap inf) of
                  Just table -> table
                  i -> errorWithStackTrace (show pk)
+
+
 crudUITable
   ::
      InformationSchema
@@ -879,8 +907,6 @@ rendererHeaderUI k v = const (renderer k) v
 
 rendererShowableUI k  v= renderer (keyValue k) v
   where renderer "modification_data" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> showPatch (i:: PathAttr Text Showable) )  (B.decodeOrFail (BSL.fromStrict i))
-        renderer "data_index" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> UI.div # set items (showIndex <$> (i:: [((Text ,FTB Showable) )])))  (B.decodeOrFail (BSL.fromStrict i))
-        renderer "val" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> UI.div # set items ([showPatch (i:: (FTB Showable) )] ))  (B.decodeOrFail (BSL.fromStrict i))
         renderer k i = UI.div # set text (renderPrim i)
         showPatch l = UI.div # set text (show $ fmap renderPrim l)
         showIndex l = UI.div # set text (show $ renderShowable <$> l)

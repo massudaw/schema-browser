@@ -118,7 +118,8 @@ fromShowable2 i v = fromShowable i v
 keyTables :: Connection -> Connection -> (Text ,Text)-> IO InformationSchema
 keyTables conn userconn (schema ,user) = do
        uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from information_schema.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
-       res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty . BS.pack . T.unpack <$>  (join $ listToMaybe. T.splitOn "::" <$> n) ) ty )  (createType  schema (t,c,j,k,l,m,n,d,z,b)) )) <$>  query conn "select ta.table_name,o.column_name,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name , st.table_name is not null from information_schema.tables ta natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name    left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column left join metadata.sum_table st on st.schema_name = udt_schema and ('_' || st.table_name = udt_name OR st.table_name = udt_name)   where table_schema = ?"  (Only schema)
+       -- res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty . BS.pack . T.unpack <$>  (join $ listToMaybe. T.splitOn "::" <$> n) ) ty )  (createType  schema (t,c,j,k,l,m,n,d,z,b)) )) <$>  query conn "select ta.table_name,o.column_name,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name , st.table_name is not null from information_schema.tables ta natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name    left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column left join metadata.sum_table st on st.schema_name = udt_schema and ('_' || st.table_name = udt_name OR st.table_name = udt_name)   where table_schema = ?"  (Only schema)
+       res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty . BS.pack . T.unpack <$>  (join $ listToMaybe. T.splitOn "::" <$> n) ) ty )  (createType  schema (t,c,j,k,l,m,n,d,z,b)) )) <$>  query conn "select ta.table_name,o.column_name,data_type,udt_schema,udt_name,is_nullable,column_default, null ,domain_name , st.table_name is not null from information_schema.tables ta natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name     left join metadata.sum_table st on st.schema_name = udt_schema and ('_' || st.table_name = udt_name OR st.table_name = udt_name)   where table_schema = ?"  (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
           keyMap = M.fromList keyList
@@ -196,9 +197,6 @@ liftField inf tname (IT rel tb) = IT (mapComp (liftField inf tname ) rel) (liftK
           ta = lookTable inf tname
 
 
-withConn s action =  do
-  conn <- liftIO $connectPostgreSQL $ "user=postgres password=queijo dbname=" <> fromString (T.unpack s)
-  action conn
 
 lookTable :: InformationSchema -> Text -> Table
 lookTable inf t = justError ("no table: " <> T.unpack t) $ M.lookup t (tableMap inf)
@@ -220,6 +218,9 @@ catchPluginException inf pname tname idx i = do
                 print (t,e)
                 execute (rootconn inf) "INSERT INTO metadata.plugin_exception (username,schema_name,table_name,plugin_name,exception,data_index2,instant) values(?,?,?,?,?,?,?)" (username inf , schemaName inf,pname,tname,show (e :: SomeException) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) . first keyValue) idx) ), t )
                 return Nothing )
+
+
+
 
 
 logTableModification
@@ -249,6 +250,7 @@ testParse db sch q = withConnInf db sch (\inf -> do
                                        return $ q
                                            )
 
+testMetaQuery q = testParse "test" "metadata"  q
 testFireMetaQuery q = testParse "incendio" "metadata"  q
 testFireQuery q = testParse "incendio" "incendio"  q
 testNutrition q = testParse "incendio" "nutrition"  q

@@ -170,7 +170,6 @@ paginate conn t order page off size k eqpred = do
 
 -- paginateView conn  (View  tree order proj  (page,off,size,origin)) = paginate conn tree  order page off size origin Nothing
 
-inattr = _relOrigin . head . keyattri
 
 data View
   = View

@@ -1,11 +1,13 @@
-{-# LANGUAGE ConstraintKinds,TypeFamilies ,DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,ScopedTypeVariables,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+{-# LANGUAGE DeriveDataTypeable,ConstraintKinds,TypeFamilies ,DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,ScopedTypeVariables,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 module Postgresql where
 import Types
 import Data.Ord
 import Control.Monad
+import Data.Typeable
 import Utils
 import Query
 import GHC.Stack
+import Data.Typeable
 import Patch
 import Debug.Trace
 import qualified Data.Binary as B
@@ -91,7 +93,7 @@ instance (TF.ToField a , TF.ToField (UnQuoted (a))) => TF.ToField (FTB a) where
 instance  TF.ToField (TB Identity Key Showable)  where
   toField (Attr _  i) = TF.toField i
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . _tbattrkey) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
+  toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . inattr ) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
   toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\(TB1 (m,i) ) -> (TBRecord2  (kvMetaFullName  m ) $  fmap (runIdentity . getCompose ) $ F.toList  $ _kvvalues $ unTB i ) ) <$> is
   toField e = errorWithStackTrace (show e)
@@ -102,6 +104,45 @@ instance TR.ToRow a => TF.ToField (TBRecord2 a) where
   toField (TBRecord2 s l) =  TF.Many   (TF.Plain (fromByteString "ROW(") : L.intercalate [TF.Plain $ fromChar ','] (fmap pure. TR.toRow  $ l) <> [TF.Plain (fromByteString $ ") :: " <>  BS.pack (T.unpack s) )] )
 
 
+testRecord conn = do
+  res  <- queryWith_ (parseField $ parseRow (parseShowable  <$> [Primitive PText,Primitive PText,KOptional $ Primitive PText, KOptional $ Primitive PText,KOptional $ Primitive PText] )) conn "select ROW(\'ioj\',\'ewfe\',null,null,null) "
+  print (res :: [[FTB Showable]])
+
+
+test = do
+  let s1 = (Just "(\"{\"\"(,,\\\\\"\"({pk_column},{=},{id},2)\\\\\"\")\"\",\"\"(,\\\\\"\"(sel_column,attr_ref,1)\\\\\"\",)\"\",\"\"(attr,,)\"\"}\")")
+      s2 = (Just "(\"{\"\"(,,\\\\\"\"({pk_column},{=},{id},2)\\\\\"\")\"\",\"\"(attr,,)\"\"}\")")
+  i <- pathParser undefined s1
+  print (i :: PathArray )
+instance  F.FromField PathArray where
+  fromField =  pathParser
+
+pathParser t f = do
+  let
+    attPath = do
+       LeftTB1 attr <- traceShow "attr" (parseShowable  (KOptional $ Primitive PText) )
+       return $ (\(TB1 (SText attr)) ->  AttrPath attr) <$> attr
+    itPath = do
+       it <- traceShow "it" $ (Just <$> doublequoted (parseRow ( parseShowable  <$> [Primitive PText,Primitive PText , Primitive PInt]))) <|> return Nothing
+       return $ (\[TB1 (SText attr),TB1 (SText tb) ,TB1 (SNumeric ref)]  ->  ITPath attr tb ) <$> it
+    fkPath = do
+       it <- traceShow "fk" $(Just <$> doublequoted (parseRow ( parseShowable  <$> [KArray $ Primitive PText,KArray $Primitive PText ,  KArray $Primitive PText, Primitive PInt,Primitive PText]))) <|> return Nothing
+       let unText  (TB1 (SText attr))  = attr
+       return $ (\[ArrayTB1 or ,ArrayTB1 rel , ArrayTB1 tar ,TB1 (SNumeric ref) ,TB1 (SText tb)]  ->  FKTPath (unText <$> or) (unText <$> rel ) (unText <$> tar)  tb ) <$> it
+
+  parserFieldAtto (fmap PathArray $  fmap head $ parseRow [doublequoted $ parseArray  $ fmap (head . catMaybes ) $ doublequoted (parseRow  ([attPath,itPath,fkPath ]))] ) t f
+
+newtype PathArray = PathArray [PathRel Text Text ] deriving(Show,Typeable)
+data PathRel b a
+  = AttrPath a
+  | ITPath a b -- (PathRel b a)
+  | FKTPath [a] [Text] [a]  b -- (PathRel b a)
+  deriving (Eq,Ord,Show,Typeable)
+
+
+testref conn = do
+  res  <- query_ conn "select table_schema,table_name,array_agg from metadata.record_path"
+  print (res :: [(Text,Text,Vector.Vector (PathArray ))])
 
 data TBRecord2 a = TBRecord2 Text a
 
@@ -295,6 +336,10 @@ parseAttr (Attr i _ ) = do
   s<- parseShowable (textToPrim <$> keyType i) <?> show i
   return $  Attr i s
 
+
+parseAttr (RecRel k (IT v j) ) = do
+  parseAttr  (IT v (fmap (fmap (mapComp (\(KV i) -> traceShow (k,i) $ KV $ M.insert (S.fromList k) (Compose $ Identity (RecRel k $ IT v j) ) i ))) j))
+
 parseAttr (IT na j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j -- <|>  return ((,SOptional Nothing) <$> j)
   return $ IT  na mj
@@ -327,6 +372,10 @@ parseLabeledTable (TB1 (me,m)) = (char '('  *> (do
 parseRecord  (me,m) = (char '('  *> (do
   im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (M.toList (_kvvalues $ unTB m)) ) (char ',')
   return (me,Compose $ Identity $  KV (M.fromList im) )) <*  char ')' )
+
+parseRow els  = (char '('  *> (do
+  im <- unIntercalateAtto (traceShow "row" els ) (char ',')
+  traceShow "outrow" $ return  im) <*  char ')' )
 
 
 
@@ -382,7 +431,7 @@ ptestString3 = (parseOnly (startQuotedText )) testString3
 parsePrim
   :: KPrim
        -> Parser Showable
--- parsePrim i | traceShow i False = error ""
+parsePrim i | traceShow i False = error ""
 parsePrim i =  do
    case i of
         PDynamic ->  let
@@ -591,28 +640,6 @@ parseInter token = do
     rb <- (char ']' >> return True ) <|> (char ')' >> return False )
     return [(lb,ER.Finite i),(rb,ER.Finite j)]
 
-range :: Char -> Parser (Interval.Interval ArrayFormat)
-range delim = (\[i,j]-> Interval.Interval i j ) . fmap swap  <$>  parseInter (strings <|>arrays)
-
-  where
-        strings = sepBy1 (Quoted <$> quoted <|> Plain <$> plain' ",;[](){}\"" ) (char delim)
-        arrays  = sepBy1 (Arrays.Array <$> array ';') (char delim)
-                -- NB: Arrays seem to always be delimited by commas.
-
-
-fromArray :: (FromField a)
-          => TypeInfo -> Field -> Parser (Conversion (Interval.Interval a))
-fromArray typeInfo f = Tra.sequence . (parseIt <$>) <$> range delim
-  where
-    delim = typdelim (rngsubtype typeInfo)
-    fElem = f{ typeOid = typoid (rngsubtype typeInfo) }
-
-    parseIt item =
-        fromField f' $ if item' == "NULL" then Nothing else Just item'
-      where
-        item' = fmt delim item
-        f' | Arrays.Array _ <- item = f
-           | otherwise              = fElem
 
 instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
@@ -625,6 +652,17 @@ fromShowable ty v =
 fromRecord foldable = do
     let parser  = parseRecord foldable
     FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
+                               (Right (Just r ) ) -> return r
+                               Right Nothing -> error (show j )
+                               Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
+
+parseField parser = do
+    FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
+                               (Right (Just r ) ) -> return r
+                               Right Nothing -> error (show j )
+                               Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
+
+parserFieldAtto parser = (\i j -> case traverse (parseOnly  parser )  j of
                                (Right (Just r ) ) -> return r
                                Right Nothing -> error (show j )
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
@@ -642,3 +680,6 @@ fromAttr foldable = do
                                Right Nothing -> error (show j )
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
 
+withConn s action =  do
+  conn <- liftIO $connectPostgreSQL $ "user=massudaw password=queijo host=localhost port=5433 dbname=" <> fromString (T.unpack s)
+  action conn

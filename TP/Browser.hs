@@ -69,6 +69,7 @@ import Control.Arrow
 data BrowserState
   = BrowserState
   {host :: String
+  ,port :: String
   ,dbn :: String
   ,user :: String
   ,pass :: String
@@ -77,9 +78,9 @@ data BrowserState
   }
 
 
-argsToState  [h,d,u,p,s,t] = BrowserState h d  u p (Just s) (Just t )
-argsToState  [h,d,u,p,s] = BrowserState h d  u p  (Just s)  Nothing
-argsToState  [h,d,u,p] = BrowserState h d  u p Nothing Nothing
+argsToState  [h,ph,d,u,p,s,t] = BrowserState h ph d  u p (Just s) (Just t )
+argsToState  [h,ph,d,u,p,s] = BrowserState h ph d  u p  (Just s)  Nothing
+argsToState  [h,ph,d,u,p] = BrowserState h ph d  u p Nothing Nothing
 
 main :: IO ()
 main = do
@@ -183,13 +184,13 @@ setup e args w = void $ do
             element body # set UI.children [span]# set UI.class_ "row"  )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
 
 
-connRoot dname = (fromString $ "host=" <> host dname <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname <> " sslmode= require" )
+connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname ) -- <> " sslmode= require" )
 listDBS ::  BrowserState -> IO (Text,(Connection,[Text]))
 listDBS dname = do
   connMeta <- connectPostgreSQL (connRoot dname)
   dbs :: [Only Text]<- query_  connMeta "SELECT datname FROM pg_database  WHERE datistemplate = false"
   map <- (\db -> do
-        connDb <- connectPostgreSQL ((fromString $ "host=" <> host dname <>" user=" <> user dname <> " dbname=" ) <> toStrict (encodeUtf8 db) <> (fromString $ " password=" <> pass dname <> " sslmode= require") )
+        connDb <- connectPostgreSQL ((fromString $ "host=" <> host dname <> " port=" <> port dname <>" user=" <> user dname <> " dbname=" ) <> toStrict (encodeUtf8 db) <> (fromString $ " password=" <> pass dname )) --  <> " sslmode= require") )
         schemas :: [Only Text] <- query_  connDb "SELECT schema_name from information_schema.schemata"
         return (db,(connDb,filter (not . (`elem` ["information_schema","pg_catalog","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas))) (T.pack $ dbn dname)
   return map
@@ -233,15 +234,13 @@ databaseChooser sargs = do
   let login = liftA2 (liftA2 (,)) (widT) ( dbsWT )
       formLogin = form login (UI.click load)
   let genSchema ((user,pass),(dbN,(dbConn,schemaN))) = do
-        conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> toStrict ( encodeUtf8 dbN )<> " sslmode= require")
+        conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> toStrict ( encodeUtf8 dbN ) ) -- <> " sslmode= require")
         execute_ conn "set bytea_output='hex'"
         keyTables dbConn conn (schemaN,T.pack user)
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   chooserT <-  mapTEvent (traverse genSchema) formLogin
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schema , getElement dbsW]
   return $ (chooserT,(widE <> [schemaSel ,load]))
-
-
 
 
 applyUI el f = (\a-> getWindow el >>= \w -> runUI w (f a))
