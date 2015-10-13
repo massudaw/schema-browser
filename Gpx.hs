@@ -5,7 +5,6 @@ module Gpx
 import Types
 -- import Query
 import Data.Monoid
-import Schema
 import Data.String
 import Database.PostgreSQL.Simple
 import Control.Applicative
@@ -64,9 +63,9 @@ getPoint = atTag "trkpt" >>>
 file :: Showable
 file = "/home/massudaw/2014-08-27-1653.gpx"
 
-lookupKeys inf t l = fmap (\(k,s)-> (maybe (error ("no key: " <> show k ) ) id $ M.lookup (t,k) (keyMap inf),s)) l
+-- lookupKeys inf t l = fmap (\(k,s)-> (maybe (error ("no key: " <> show k ) ) id $ M.lookup (t,k) (keyMap inf),s)) l
 
-withFields k t l = (l, maybe (error $ "noTable" ) id $  M.lookup t (tableMap k))
+-- withFields k t l = (l, maybe (error $ "noTable" ) id $  M.lookup t (tableMap k))
 
 
 

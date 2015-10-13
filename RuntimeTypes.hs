@@ -2,18 +2,39 @@
 module RuntimeTypes where
 
 import Control.Concurrent
-import Schema
+-- import Schema
 import Types
 import Control.Arrow
 import Data.Text.Lazy
 import Control.Monad.IO.Class
 -- import Step
 
+import qualified Data.Map as M
+import qualified Data.Set as S
+import qualified Reactive.Threepenny as R
+import Database.PostgreSQL.Simple
+import Data.Map (Map)
+import Data.Set (Set)
 import Control.Monad.Reader
 import Data.Foldable
 import Data.Traversable
 
 data Parser m s a b = P (s,s) (m a b) deriving Functor
+
+data InformationSchema
+  = InformationSchema
+  { schemaName :: Text
+  , username :: Text
+  , keyMap :: Map (Text,Text) Key
+  , pkMap :: Map (Set Key) Table
+  , tableMap :: Map Text Table
+  , tableSize :: Map Table Int
+  , pluginsMap :: Map (Text,Text,Text) Key
+  , mvarMap :: MVar (Map (KVMetadata Key) ({-R.Event [TB1 Showable], R.Handler [TB1 Showable], -} MVar  [TBData Key Showable], R.Tidings [TBData Key Showable]))
+  , conn :: Connection
+  , rootconn :: Connection
+  , metaschema :: Maybe InformationSchema
+  }
 
 data Plugins
   =  StatefullPlugin

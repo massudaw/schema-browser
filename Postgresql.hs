@@ -96,6 +96,7 @@ instance  TF.ToField (TB Identity Key Showable)  where
   toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . inattr ) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
   toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\(TB1 (m,i) ) -> (TBRecord2  (kvMetaFullName  m ) $  fmap (runIdentity . getCompose ) $ F.toList  $ _kvvalues $ unTB i ) ) <$> is
+  toField (RecRel k ix t) = TF.toField t
   toField e = errorWithStackTrace (show e)
 
 
@@ -337,8 +338,8 @@ parseAttr (Attr i _ ) = do
   return $  Attr i s
 
 
-parseAttr (RecRel k (IT v j) ) = do
-  parseAttr  (IT v (fmap (fmap (mapComp (\(KV i) -> traceShow (k,i) $ KV $ M.insert (S.fromList k) (Compose $ Identity (RecRel k $ IT v j) ) i ))) j))
+parseAttr (RecRel k ix (IT v j) ) = do
+  parseAttr  (IT v (fmap (fmap (mapComp (\(KV i) -> traceShow (k,i) $ KV $ M.insert (S.fromList k) (Compose $ Identity (RecRel k (ix+1) $ IT v j) ) i ))) j))
 
 parseAttr (IT na j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j -- <|>  return ((,SOptional Nothing) <$> j)

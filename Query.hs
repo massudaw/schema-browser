@@ -188,11 +188,13 @@ attrValue i = errorWithStackTrace $ " no attr value instance " <> show i
 attrType :: (Ord a,Show a) => TB Identity Key a -> KType Text
 attrType (Attr i _)= keyType i
 attrType (IT i _) = overComp attrType i
+attrType (RecRel i  ix k) = attrType k
 attrType i = errorWithStackTrace $ " no attr value instance " <> show i
 
 attrValueName :: (Ord a,Show a) => TB Identity Key a -> Text
 attrValueName (Attr i _ )= keyValue i
 attrValueName (IT i  _) = overComp attrValueName i
+attrValueName (RecRel i  ix k) = attrValueName k
 attrValueName i = errorWithStackTrace $ " no attr value instance " <> show i
 
 type TBValue = TB1 (Key,Showable)
@@ -397,8 +399,8 @@ expandJoin left env (Unlabeled (FKT _ rel tb))
   = jt <> " JOIN " <> expandTable tb <> " ON " <> joinOnPredicate rel (fmap getCompose $ concat $ fmap nonRef env) (fmap getCompose $ F.toList (tableAttr tb)) <> expandQuery left tb
     where
       jt = if left then " LEFT" else ""
-expandJoin left env (Labeled l (RecRel _ t)) = expandJoin left env (Labeled l t)
-expandJoin left env (Unlabeled (RecRel _ t)) = expandJoin left env (Unlabeled t)
+expandJoin left env (Labeled l (RecRel _ ix t)) = expandJoin left env (Labeled l t)
+expandJoin left env (Unlabeled (RecRel _ ix t)) = expandJoin left env (Unlabeled t)
 
 expandJoin left env i = errorWithStackTrace (show ("expandJoin",i))
 
@@ -444,7 +446,7 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
         fun =  recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
 recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(RecJoin f) e)
-    = mapComp (RecRel ( S.toList $ pathRelRel (Path ifk f e))  ) <$> (recursePath isLeft True vacc ksbn invSchema (Path ifk f e))
+    = mapComp (RecRel ( S.toList $ pathRelRel (Path ifk f e)) 0   ) <$> (recursePath isLeft True vacc ksbn invSchema (Path ifk f e))
 recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
     | S.size ifk   < S.size e =   do
           (t,ksn) <- labelTable nextT
@@ -651,8 +653,8 @@ explodeDelayed block assoc leaf (Labeled l (Attr k  _ ))
   | otherwise =  leaf (isArray (keyType k)) l
 explodeDelayed block assoc leaf (Unlabeled (Attr k  _ )) = leaf (isArray (keyType k))  (keyValue k)
 
-explodeDelayed block assoc leaf (Labeled l (RecRel n t )) =  explodeDelayed   block assoc leaf (Labeled l t)
-explodeDelayed block assoc leaf (Unlabeled (RecRel n t )) =  explodeDelayed   block assoc leaf (Unlabeled t)
+explodeDelayed block assoc leaf (Labeled l (RecRel n ix t )) =  explodeDelayed   block assoc leaf (Labeled l t)
+explodeDelayed block assoc leaf (Unlabeled (RecRel n ix t )) =  explodeDelayed   block assoc leaf (Unlabeled t)
 explodeDelayed block assoc leaf (Unlabeled (IT  n t )) =  explodeRow'  block assoc leaf t
 explodeDelayed block assoc leaf (Labeled l (IT  _ tb  )) = l
 explodeDelayed block assoc leaf (Labeled l (FKT i  _ tb  )) = case i of
@@ -676,8 +678,8 @@ isTB1Delayed _ = False
 unTlabel' ((m,kv) )  = (m,) $ overLabel (\(KV kv) -> KV $ fmap (Compose . Identity .unlabel.getCompose ) $   kv) kv
 unTlabel  = fmap unTlabel'
 
-unlabel (Labeled l (RecRel tn t) ) =  RecRel tn $ unlabel (Labeled l t)
-unlabel (Unlabeled (RecRel tn t) ) = RecRel tn $ unlabel (Unlabeled t)
+unlabel (Labeled l (RecRel tn ix t) ) =  RecRel tn ix $ unlabel (Labeled l t)
+unlabel (Unlabeled (RecRel tn ix t) ) = RecRel tn ix $ unlabel (Unlabeled t)
 unlabel (Labeled l (IT tn t) ) = (IT (relabel tn) (unTlabel t ))
 unlabel (Unlabeled (IT tn t) ) = (IT (relabel tn) (unTlabel t ))
 unlabel (Labeled l (FKT i fkrel t) ) = (FKT (fmap relabel i) fkrel (unTlabel  t ))

@@ -23,6 +23,7 @@ import Control.Monad.Reader
 import Data.Functor.Identity
 import Database.PostgreSQL.Simple
 import Data.Time
+import RuntimeTypes
 
 import Data.Traversable(sequenceA,traverse)
 import Data.Vector (Vector)
@@ -78,20 +79,7 @@ serial Nothing t = t
 nullable "YES" t = KOptional t
 nullable "NO" t = t
 
-data InformationSchema
-  = InformationSchema
-  { schemaName :: Text
-  , username :: Text
-  , keyMap :: Map (Text,Text) Key
-  , pkMap :: Map (Set Key) Table
-  , tableMap :: Map Text Table
-  , tableSize :: Map Table Int
-  , pluginsMap :: Map (Text,Text,Text) Key
-  , mvarMap :: MVar (Map (KVMetadata Key) ({-R.Event [TB1 Showable], R.Handler [TB1 Showable], -} MVar  [TBData Key Showable], R.Tidings [TBData Key Showable]))
-  , conn :: Connection
-  , rootconn :: Connection
-  , metaschema :: Maybe InformationSchema
-  }
+
 
 meta inf = maybe inf id (metaschema inf)
 
@@ -171,9 +159,12 @@ liftTable' inf tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapCom
 
 fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
 
+unRecRel (RecJoin l) = l
+unRecRel l = l
+
 fixPatchAttr inf t p@(PAttr _ _ ) =  p
 fixPatchAttr inf tname p@(PInline rel e ) =  PInline rel (fmap (\(_,o,v)-> (tableMeta $ lookTable inf tname2,o,fmap (fixPatchAttr  inf tname2 )v)) e)
-    where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (keyValue rel)) )  (F.toList$ rawFKS  ta)
+    where Just (FKInlineTable tname2) = fmap (unRecRel.pathRel) $ L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (keyValue rel)) )  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 fixPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa) (tableMeta $ lookTable inf tname2) b
     where (Path _ (FKJoinTable _ rel tname2 ) _) = justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
@@ -190,7 +181,7 @@ liftKeys inf tname = fmap (liftTable' inf tname)
 liftField :: InformationSchema -> Text -> TB Identity Text a -> TB Identity Key a
 liftField inf tname (Attr t v) = Attr (lookKey inf tname t) v
 liftField inf tname (FKT ref  rel2 tb) = FKT (mapComp (liftField inf tname) <$> ref)   ( rel) (liftKeys inf tname2 tb)
-    where (Path _ (FKJoinTable _ rel tname2 ) _) = justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+    where (FKJoinTable _ rel tname2 ) = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 liftField inf tname (IT rel tb) = IT (mapComp (liftField inf tname ) rel) (liftKeys inf tname2 tb)
     where Just (Path _ (FKInlineTable tname2 ) _) = L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
@@ -231,8 +222,8 @@ logTableModification inf (TableModification Nothing table i) = do
   time <- getCurrentTime
   let ltime =  utcToLocalTime utc $ time
       (_,pidx,pdata) = firstPatch keyValue  i
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index2,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (username inf ,ltime,rawName table, V.fromList (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) pidx )) , Binary  .B.encode <$> V.fromList pdata , schemaName inf)
-  return (TableModification id table i )
+  -- [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index2,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (username inf ,ltime,rawName table, V.fromList (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) pidx )) , Binary  .B.encode <$> V.fromList pdata , schemaName inf)
+  return (TableModification (Just 0) table i )
 
 
 withInf d s f = withConn d (f <=< (\conn -> keyTables conn conn (s,"postgres")))

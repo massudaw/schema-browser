@@ -199,21 +199,20 @@ tbCase inf pgs constr a@(Attr i _ ) wl plugItens preoldItems = do
         dv <- UI.div # set UI.style [("margin-bottom","3px")] # set UI.class_ ("col-xs-" <> show ( fst $ attrSize a) )# set children [l,getElement tds]
         paintEdit l (facts (triding tds)) (facts oldItems)
         return $ TrivialWidget (triding tds) dv
-tbCase inf pgs constr a@(RecRel i (IT l tb) ) wl plugItens preoldItems = do
+tbCase inf pgs constr a@(RecRel i ix (IT l tb) ) wl plugItens preoldItems = do
       TrivialWidget btr bel <- checkedWidget (isJust <$> preoldItems)
       (ev,h) <- liftIO $ newEvent
       inipre <- currentValue  (facts preoldItems)
       let fun True = do
               initpre <- currentValue (facts preoldItems)
               initpreOldB <- stepper initpre (rumors preoldItems)
-              TrivialWidget btre bel <- fmap (fmap (RecRel i)) <$> tbCase inf pgs constr (IT l ( recOverAttr a tb)) wl plugItens (tidings initpreOldB (rumors preoldItems) )
+              TrivialWidget btre bel <- {-fmap (fmap (RecRel i ix )) <$> -}tbCase inf pgs constr (IT l ( recOverAttr a tb)) wl plugItens (tidings initpreOldB (rumors preoldItems) )
 
               onEvent (rumors btre) (liftIO . h )
               UI.div # set children [bel]
           fun False = do
               UI.div
       sub <- UI.div # sink items  (pure .fun <$> facts btr ) # set UI.class_ "row"
-      element bel  # set UI.class_ "row"
       out <- UI.div # set children [bel,sub]# set UI.class_ "row"
       binipre <- stepper  inipre (unionWith const ev (rumors preoldItems))
       return (TrivialWidget  (tidings binipre (unionWith const (rumors preoldItems) ev)) out)
@@ -890,6 +889,7 @@ tbDiffEdit inf i j
   | i == j =  return (Identity j)
   | otherwise = tbInsertEdit inf  j
 
+tbInsertEdit inf  (RecRel k1 ix k2) =  {-fmap (RecRel k1 ix )<$> -} tbInsertEdit inf k2
 tbInsertEdit inf  j@(Attr k1 k2) = return $ Identity  (Attr k1 k2)
 tbInsertEdit inf  (IT k2 t2) = Identity . IT k2 <$> noInsert inf t2
 tbInsertEdit inf  f@(FKT pk rel2  t2) =

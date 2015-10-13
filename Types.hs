@@ -232,7 +232,7 @@ data TB f k a
     , _fkrelation :: ! [Rel k]
     , _fkttable ::  ! (FTB1 f  k a)
     }
-  | RecRel [Rel k]  (TB f k a)
+  | RecRel [Rel k]  Int (TB f k a)
   deriving(Functor,Foldable,Traversable,Generic)
 
 deriving instance (Eq (f (TB f k a )), Eq (f (TB f k () )) , Eq ( (FTB1 f  k a )) ,Eq a , Eq k ) => Eq (TB f k a)
@@ -281,7 +281,7 @@ secondKV  f (KV m ) = KV . fmap (second f ) $ m
 
 firstTB :: (Ord k, Functor f) => (c -> k) -> TB f c a -> TB f k a
 firstTB f (Attr k i) = Attr (f k) i
-firstTB f (RecRel k i) = RecRel (fmap f<$> k) (firstTB f i)
+firstTB f (RecRel k ix i) = RecRel (fmap f<$> k) ix (firstTB f i)
 firstTB f (IT k i) = IT (mapComp (firstTB f) k) ((mapKey f) i)
 firstTB f (FKT k  m  i) = FKT  (fmap (mapComp (firstTB f) ) k)  (fmap f  <$> m) ((mapKey f) i)
 
@@ -568,7 +568,7 @@ keyattr = keyattri . runIdentity . getCompose
 keyattri (Attr i  _ ) = [Inline i]
 keyattri (FKT i  rel _ ) = rel
 keyattri (IT i  _ ) =  keyattr i
-keyattri (RecRel k i ) =  keyattri i
+keyattri (RecRel k _ i ) =  keyattri i
 
 -- tableAttr :: (Traversable f ,Ord k) => TB3 f k () -> [Compose f (TB f) k ()]
 -- tableAttr (ArrayTB1 i) = tableAttr <$> i
@@ -583,8 +583,8 @@ nonRef (Compose (Unlabeled  ((FKT i  _ _ )))) = concat (nonRef <$> i)
 nonRef (Compose (Labeled _ ((FKT i  _ _ )))) = concat (nonRef <$> i)
 nonRef (Compose (Unlabeled (IT j k ))) = nonRef j
 nonRef (Compose (Labeled _ (IT j k ))) = nonRef j
-nonRef (Compose (Labeled l (RecRel j k ))) = nonRef (Compose $ Labeled l k)
-nonRef (Compose (Unlabeled (RecRel _ k ))) = nonRef (Compose $ Unlabeled k)
+nonRef (Compose (Labeled l (RecRel j _ k ))) = nonRef (Compose $ Labeled l k)
+nonRef (Compose (Unlabeled (RecRel _ _ k ))) = nonRef (Compose $ Unlabeled k)
 
 -- nonRef i = errorWithStackTrace (show i)
 
@@ -620,7 +620,7 @@ tableNonRef' (m,n)  = (m, mapComp (KV . rebuildTable . _kvvalues) n)
     nonRef (Attr k v ) = [Attr k v]
     nonRef (FKT i _ _ ) = concat (overComp nonRef <$> i)
     nonRef it@(IT j k ) = [(IT  j (tableNonRef k )) ]
-    nonRef it@(RecRel j k ) = [(RecRel j (head $ nonRef k ))]
+    nonRef it@(RecRel j ix k ) = [(RecRel j ix (head $ nonRef k ))]
 
 nonRefTB :: Ord k => TB Identity k a -> [(TB Identity ) k a]
 nonRefTB (Attr k v ) = [Attr k v]
@@ -870,7 +870,7 @@ tableKeys (TB1  (_,k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _k
 tableKeys (LeftTB1 (Just i)) = tableKeys i
 tableKeys (ArrayTB1 [i]) = tableKeys i
 
-recOverAttr (RecRel k attr)  j = (fmap (fmap (mapComp (\(KV i) ->  KV $ Map.insert (Set.fromList k) (Compose $ Identity (RecRel k attr) ) i ))) j)
+recOverAttr (RecRel k ix attr)  j = (fmap (fmap (mapComp (\(KV i) ->  KV $ Map.insert (Set.fromList k) (Compose $ Identity (RecRel k (ix+1) attr) ) i ))) j)
 
 
 
