@@ -199,14 +199,20 @@ tbCase inf pgs constr a@(Attr i _ ) wl plugItens preoldItems = do
         dv <- UI.div # set UI.style [("margin-bottom","3px")] # set UI.class_ ("col-xs-" <> show ( fst $ attrSize a) )# set children [l,getElement tds]
         paintEdit l (facts (triding tds)) (facts oldItems)
         return $ TrivialWidget (triding tds) dv
-tbCase inf pgs constr a@(RecRel i ix (IT l tb) ) wl plugItens preoldItems = do
-      TrivialWidget btr bel <- checkedWidget (isJust <$> preoldItems)
+
+
+
+
+tbRecCase k inf pgs constr a@(IT l tb) wl plugItens preoldItems' = do
+      let preoldItems = emptyIT <$> preoldItems'
+          emptyIT = Just . maybe (IT l (LeftTB1 Nothing)) id
+      TrivialWidget btr bel <- checkedWidget (isJust <$> preoldItems')
       (ev,h) <- liftIO $ newEvent
       inipre <- currentValue  (facts preoldItems)
       let fun True = do
               initpre <- currentValue (facts preoldItems)
               initpreOldB <- stepper initpre (rumors preoldItems)
-              TrivialWidget btre bel <- {-fmap (fmap (RecRel i ix )) <$> -}tbCase inf pgs constr (IT l ( recOverAttr a tb)) wl plugItens (tidings initpreOldB (rumors preoldItems) )
+              TrivialWidget btre bel <- tbCase inf pgs constr (IT l ( recOverAttr  k a tb)) wl plugItens (tidings initpreOldB (rumors preoldItems) )
 
               onEvent (rumors btre) (liftIO . h )
               UI.div # set children [bel]
@@ -297,7 +303,7 @@ uiTable
      -> TB1 ()
      -> Tidings (Maybe (TB1 Showable))
      -> UI (Element,Tidings (Maybe (TB1 Showable)))
-uiTable inf pgs constr tname refs plmods ftb@(TB1 (m,k) ) oldItems = do
+uiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItems = do
   let
       Just table = M.lookup tname  (tableMap inf)
 
@@ -306,7 +312,10 @@ uiTable inf pgs constr tname refs plmods ftb@(TB1 (m,k) ) oldItems = do
 
   fks <- foldl' (\jm (l,m)  -> do
             w <- jm
-            wn <- (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $  refs)
+            wn <- if L.elem l (S.fromList <$> _kvrecrels meta)
+                then (tbRecCase l inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $  refs)
+
+                else (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $  refs)
             return (w <> [(unTB m,wn)])
         ) (return []) (P.sortBy (P.comparing fst ) . M.toList . unTBMap $ ftb)
   let
@@ -484,8 +493,8 @@ indexItens s tb@(FKT ifk rel _) offsetT fks oldItems  = bres
 
 indexItens s tb@(IT na _) offsetT items oldItems  = bres
    where bres2 = fmap (fmap _fkttable) <$> takeArray items
-         emptyFKT = Just . maybe [] (unSComposite . _fkttable)
-         bres = (\o -> liftA2 (\l m -> IT   na (ArrayTB1 $ splitArray s o m l ))) <$> offsetT <*> bres2 <*> (emptyFKT <$> oldItems)
+         emptyIT = Just . maybe [] (unSComposite . _fkttable)
+         bres = (\o -> liftA2 (\l m -> IT   na (ArrayTB1 $ splitArray s o m l ))) <$> offsetT <*> bres2 <*> (emptyIT <$> oldItems)
 
 attrUITable
   :: Tidings (Maybe (TB Identity Key Showable))
@@ -889,7 +898,6 @@ tbDiffEdit inf i j
   | i == j =  return (Identity j)
   | otherwise = tbInsertEdit inf  j
 
-tbInsertEdit inf  (RecRel k1 ix k2) =  {-fmap (RecRel k1 ix )<$> -} tbInsertEdit inf k2
 tbInsertEdit inf  j@(Attr k1 k2) = return $ Identity  (Attr k1 k2)
 tbInsertEdit inf  (IT k2 t2) = Identity . IT k2 <$> noInsert inf t2
 tbInsertEdit inf  f@(FKT pk rel2  t2) =

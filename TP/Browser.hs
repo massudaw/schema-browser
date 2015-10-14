@@ -14,8 +14,6 @@ import Query
 import Types
 import qualified Data.Binary as B
 import Step
--- import Graph
-import Location
 import Plugins
 import TP.Widgets
 import SortList

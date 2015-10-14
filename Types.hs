@@ -106,6 +106,19 @@ showableDef (KSerial i) = Just $ SerialTB1 (showableDef i)
 showableDef (KArray i ) = Nothing -- Just (SComposite Vector.empty)
 showableDef i = Nothing
 
+isRecRel (RecJoin _ ) =  True
+isRecRel i = False
+
+pathRel (Path _ rel _ ) = rel
+pathRelRef (Path ifk _ _ ) = ifk
+pathRelStore (Path _ _ ifk ) = ifk
+
+pathRelRel :: Path (Set Key ) SqlOperation -> Set (Rel Key)
+pathRelRel (Path _ (FKJoinTable _ rel  _ ) _ ) = Set.fromList rel
+pathRelRel (Path r (FKInlineTable  _   )  _ ) = Set.map Inline r
+pathRelRel (Path r (FKEitherField _    )  _ ) = Set.map Inline r
+pathRelRel (Path r (RecJoin rel )  a ) = pathRelRel (Path r rel a)
+
 
 
 data Compose f g k a = Compose {getCompose :: f (g k a) } deriving (Functor,Foldable,Traversable,Ord,Eq,Show,Generic)
@@ -140,6 +153,7 @@ data KVMetadata k
   , _kvorder :: [(k,Order)]
   , _kvattrs :: [k]
   , _kvdelayed :: Set k
+  , _kvrecrels :: [[Rel k]]
   }deriving(Eq,Ord,Show,Generic)
 
 kvMetaFullName m = _kvschema m <> "." <> _kvname m
@@ -214,7 +228,7 @@ instance (Binary (f (g k a)) ) => Binary (Compose f g k a )
 instance (Binary (f k a) ,Binary k ) => Binary (KV f k a)
 instance Binary k => Binary (Rel k)
 instance Binary a => Binary (Identity a)
-instance (Binary (f (KV (Compose f (TB f)) g k)) , Binary (f (TB f g ())) ,Binary (f (TB f g k)), Binary k ,Binary g) => Binary (TB f g k )
+instance (Binary (f (KV (Compose f (TB f)) g k)) , Binary (f (KV (Compose f (TB f)) g ())) , Binary (f (TB f g ())) ,Binary (f (TB f g k)), Binary k ,Binary g) => Binary (TB f g k )
 instance Binary a => Binary (FTB a)
 instance Binary k => Binary (KVMetadata k )
 
@@ -232,18 +246,17 @@ data TB f k a
     , _fkrelation :: ! [Rel k]
     , _fkttable ::  ! (FTB1 f  k a)
     }
-  | RecRel [Rel k]  Int (TB f k a)
   deriving(Functor,Foldable,Traversable,Generic)
 
-deriving instance (Eq (f (TB f k a )), Eq (f (TB f k () )) , Eq ( (FTB1 f  k a )) ,Eq a , Eq k ) => Eq (TB f k a)
-deriving instance (Ord (f (TB f k a )), Ord (f (TB f k () )) , Ord ( (FTB1 f  k a )) ,Ord a , Ord k ) => Ord (TB f k a)
-deriving instance (Show (f (TB f k a )), Show (f (TB f k () )) , Show ( (FTB1 f k a )) ,Show (FTB a),Show a , Show k ) =>Show (TB f k a)
+deriving instance (Eq (f (TB f k a )), Eq (f (KV (Compose f (TB f)) k ())) ,Eq (f (TB f k () )) , Eq ( (FTB1 f  k a )) ,Eq a , Eq k ) => Eq (TB f k a)
+deriving instance (Ord (f (TB f k a )), Ord (f (KV (Compose f (TB f)) k ())), Ord (f (TB f k () )) , Ord ( (FTB1 f  k a )) ,Ord a , Ord k ) => Ord (TB f k a)
+deriving instance (Show (f (TB f k a )), Show (f (KV (Compose f (TB f)) k ())),Show (f (TB f k () )) , Show ( (FTB1 f k a )) ,Show (FTB a),Show a , Show k ) =>Show (TB f k a)
 
 type TB1 a = TB2 Key a
 type TB2 k a = TB3 Identity k a
 type TB3 f k a = FTB1 f k a
 
-mapKVMeta f (KVMetadata tn sch s j m o k l ) =KVMetadata tn sch (Set.map f s) (map f j) (map (Set.map f) m ) (fmap (first f) o) (map f k) (Set.map f l)
+mapKVMeta f (KVMetadata tn sch s j m o k l r ) =KVMetadata tn sch (Set.map f s) (map f j) (map (Set.map f) m ) (fmap (first f) o) (map f k) (Set.map f l) (fmap (fmap f ) <$> r)
 
 
 filterKey' f ((m ,k) ) = (m,) . mapComp (\(KV kv) -> KV $ Map.filterWithKey f kv )  $  k
@@ -281,7 +294,6 @@ secondKV  f (KV m ) = KV . fmap (second f ) $ m
 
 firstTB :: (Ord k, Functor f) => (c -> k) -> TB f c a -> TB f k a
 firstTB f (Attr k i) = Attr (f k) i
-firstTB f (RecRel k ix i) = RecRel (fmap f<$> k) ix (firstTB f i)
 firstTB f (IT k i) = IT (mapComp (firstTB f) k) ((mapKey f) i)
 firstTB f (FKT k  m  i) = FKT  (fmap (mapComp (firstTB f) ) k)  (fmap f  <$> m) ((mapKey f) i)
 
@@ -568,7 +580,6 @@ keyattr = keyattri . runIdentity . getCompose
 keyattri (Attr i  _ ) = [Inline i]
 keyattri (FKT i  rel _ ) = rel
 keyattri (IT i  _ ) =  keyattr i
-keyattri (RecRel k _ i ) =  keyattri i
 
 -- tableAttr :: (Traversable f ,Ord k) => TB3 f k () -> [Compose f (TB f) k ()]
 -- tableAttr (ArrayTB1 i) = tableAttr <$> i
@@ -583,8 +594,6 @@ nonRef (Compose (Unlabeled  ((FKT i  _ _ )))) = concat (nonRef <$> i)
 nonRef (Compose (Labeled _ ((FKT i  _ _ )))) = concat (nonRef <$> i)
 nonRef (Compose (Unlabeled (IT j k ))) = nonRef j
 nonRef (Compose (Labeled _ (IT j k ))) = nonRef j
-nonRef (Compose (Labeled l (RecRel j _ k ))) = nonRef (Compose $ Labeled l k)
-nonRef (Compose (Unlabeled (RecRel _ _ k ))) = nonRef (Compose $ Unlabeled k)
 
 -- nonRef i = errorWithStackTrace (show i)
 
@@ -604,8 +613,6 @@ joinNonRef' (m,n)  = (m, mapComp (rebuildTable . _kvvalues) n)
     nonRef (FKT i _ _ ) = tra
         where tra = concat ( fmap compJoin   . traComp  nonRef <$> i)
     nonRef it@(IT j k ) =  [Compose . return $ (IT  j k ) ]
-    -- nonRef it@(RecRel  j k ) =  [Compose . return $ (IT  j k ) ]
-    --
 
 
 
@@ -620,7 +627,6 @@ tableNonRef' (m,n)  = (m, mapComp (KV . rebuildTable . _kvvalues) n)
     nonRef (Attr k v ) = [Attr k v]
     nonRef (FKT i _ _ ) = concat (overComp nonRef <$> i)
     nonRef it@(IT j k ) = [(IT  j (tableNonRef k )) ]
-    nonRef it@(RecRel j ix k ) = [(RecRel j ix (head $ nonRef k ))]
 
 nonRefTB :: Ord k => TB Identity k a -> [(TB Identity ) k a]
 nonRefTB (Attr k v ) = [Attr k v]
@@ -662,7 +668,9 @@ traComp f =  fmap Compose. traverse f . getCompose
 
 concatComp  =  Compose . concat . fmap getCompose
 
-tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (uniqueConstraint t)[] (F.toList $ rawAttrs t) (rawDelayed t)
+tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (uniqueConstraint t)[] (F.toList $ rawAttrs t) (rawDelayed t) rec
+  where rec = fmap (F.toList. pathRelRel )$ filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
+
 
 tbmap :: Ord k => Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
 tbmap = TB1 . (kvempty,) . Compose . Identity . KV
@@ -682,7 +690,7 @@ tblist' t  = TB1 . (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 reclist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TBData Key a
 reclist' t  = (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 
-kvempty  = KVMetadata "" ""  Set.empty [] []  [] [] Set.empty
+kvempty  = KVMetadata "" ""  Set.empty [] []  [] [] Set.empty []
 
 instance Ord a => Ord (Interval.Interval a ) where
   compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)
@@ -870,8 +878,10 @@ tableKeys (TB1  (_,k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _k
 tableKeys (LeftTB1 (Just i)) = tableKeys i
 tableKeys (ArrayTB1 [i]) = tableKeys i
 
-recOverAttr (RecRel k ix attr)  j = (fmap (fmap (mapComp (\(KV i) ->  KV $ Map.insert (Set.fromList k) (Compose $ Identity (RecRel k (ix+1) attr) ) i ))) j)
+recOverAttr k attr  j = (fmap (fmap (mapComp (\(KV i) ->  KV $ Map.insert k (_tb attr ) i ))) j)
 
+recOverAttr' k  = Map.alter (fmap (mapComp (\v -> (Le.over fkttable (recOverAttr k v) )    v))) k
+-- recOverAttr' i j = errorWithStackTrace (show i)
 
 
 

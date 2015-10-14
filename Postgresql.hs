@@ -96,7 +96,7 @@ instance  TF.ToField (TB Identity Key Showable)  where
   toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . inattr ) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
   toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (\(TB1 (m,i) ) -> (TBRecord2  (kvMetaFullName  m ) $  fmap (runIdentity . getCompose ) $ F.toList  $ _kvvalues $ unTB i ) ) <$> is
-  toField (RecRel k ix t) = TF.toField t
+  -- toField (RecRel k ix t) = TF.toField t
   toField e = errorWithStackTrace (show e)
 
 
@@ -121,13 +121,13 @@ instance  F.FromField PathArray where
 pathParser t f = do
   let
     attPath = do
-       LeftTB1 attr <- traceShow "attr" (parseShowable  (KOptional $ Primitive PText) )
+       LeftTB1 attr <-  (parseShowable  (KOptional $ Primitive PText) )
        return $ (\(TB1 (SText attr)) ->  AttrPath attr) <$> attr
     itPath = do
-       it <- traceShow "it" $ (Just <$> doublequoted (parseRow ( parseShowable  <$> [Primitive PText,Primitive PText , Primitive PInt]))) <|> return Nothing
+       it <-  (Just <$> doublequoted (parseRow ( parseShowable  <$> [Primitive PText,Primitive PText , Primitive PInt]))) <|> return Nothing
        return $ (\[TB1 (SText attr),TB1 (SText tb) ,TB1 (SNumeric ref)]  ->  ITPath attr tb ) <$> it
     fkPath = do
-       it <- traceShow "fk" $(Just <$> doublequoted (parseRow ( parseShowable  <$> [KArray $ Primitive PText,KArray $Primitive PText ,  KArray $Primitive PText, Primitive PInt,Primitive PText]))) <|> return Nothing
+       it <- (Just <$> doublequoted (parseRow ( parseShowable  <$> [KArray $ Primitive PText,KArray $Primitive PText ,  KArray $Primitive PText, Primitive PInt,Primitive PText]))) <|> return Nothing
        let unText  (TB1 (SText attr))  = attr
        return $ (\[ArrayTB1 or ,ArrayTB1 rel , ArrayTB1 tar ,TB1 (SNumeric ref) ,TB1 (SText tb)]  ->  FKTPath (unText <$> or) (unText <$> rel ) (unText <$> tar)  tb ) <$> it
 
@@ -338,9 +338,6 @@ parseAttr (Attr i _ ) = do
   return $  Attr i s
 
 
-parseAttr (RecRel k ix (IT v j) ) = do
-  parseAttr  (IT v (fmap (fmap (mapComp (\(KV i) -> traceShow (k,i) $ KV $ M.insert (S.fromList k) (Compose $ Identity (RecRel k (ix+1) $ IT v j) ) i ))) j))
-
 parseAttr (IT na j) = do
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j -- <|>  return ((,SOptional Nothing) <$> j)
   return $ IT  na mj
@@ -366,17 +363,15 @@ parseLabeledTable (ArrayTB1 [t]) =
 parseLabeledTable (DelayedTB1 (Just tb) ) =  string "t" >>  return (DelayedTB1  Nothing) -- <$> parseLabeledTable tb
 parseLabeledTable (LeftTB1 (Just i )) =
   LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapKey makeOpt i) >> return Nothing) <|> return Nothing )
-parseLabeledTable (TB1 (me,m)) = (char '('  *> (do
-  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> M.toList (_kvvalues $ unTB m) ) (char ',')
-  return (TB1 (me,Compose $ Identity $  KV (M.fromList im) ))) <*  char ')' )
+parseLabeledTable  tb1 = traverse parseRecord  $ tb1
 
 parseRecord  (me,m) = (char '('  *> (do
-  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (M.toList (_kvvalues $ unTB m)) ) (char ',')
+  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (M.toList (foldr recOverAttr'  (_kvvalues $ unTB m) (fmap S.fromList $ _kvrecrels me))) ) (char ',')
   return (me,Compose $ Identity $  KV (M.fromList im) )) <*  char ')' )
 
 parseRow els  = (char '('  *> (do
-  im <- unIntercalateAtto (traceShow "row" els ) (char ',')
-  traceShow "outrow" $ return  im) <*  char ')' )
+  im <- unIntercalateAtto (els ) (char ',')
+  return  im) <*  char ')' )
 
 
 
@@ -432,7 +427,7 @@ ptestString3 = (parseOnly (startQuotedText )) testString3
 parsePrim
   :: KPrim
        -> Parser Showable
-parsePrim i | traceShow i False = error ""
+-- parsePrim i | traceShow i False = error ""
 parsePrim i =  do
    case i of
         PDynamic ->  let

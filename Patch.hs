@@ -275,7 +275,7 @@ diffAttr :: PatchConstr k a  => TB Identity k a -> TB Identity k a -> Maybe (Pat
 diffAttr (Attr k i) (Attr l m ) = fmap (PAttr k) (diffShowable i m)
 diffAttr (IT k i) (IT _ l) = fmap (PInline (_relOrigin $ head $ keyattr k ) ) (diffTB1 i l)
 diffAttr (FKT  k _ i) (FKT m rel b) = (\l m -> if L.null l then Nothing else Just ( PFK rel l m  (Just b))) (catMaybes $ zipWith (\i j -> diffAttr (unTB i) (unTB j)) k m  ) kvempty
-diffAttr (RecRel k ix i) (RecRel k2 ix2 o ) =  PRec k ix <$> (diffAttr i o)
+-- diffAttr (RecRel k ix i) (RecRel k2 ix2 o ) =  PRec k ix <$> (diffAttr i o)
 
 patchAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a)
 patchAttr a@(Attr k v) = PAttr k  (patchFTB id v)
