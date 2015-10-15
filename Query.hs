@@ -278,6 +278,7 @@ expandTable (DelayedTB1 (Just tb)) = expandTable tb
 expandTable tb = errorWithStackTrace (show tb)
 
 
+
 isPairReflexive (Primitive i ) op (KInterval (Primitive j)) | i == j = False
 isPairReflexive (Primitive j) op  (KArray (Primitive i) )  | i == j = False
 isPairReflexive (KInterval i) op (KInterval j)
@@ -348,7 +349,23 @@ allAttr' (_,i) = all (isAttr .labelValue . getCompose) $ F.toList $ _kvvalues (l
           isAttr (IT k e)  = allAttr e
           isAttr _ = False
 
-selectQuery t = "SELECT " <> explodeRow t <> " FROM " <> expandTable t <> expandQuery False  t
+
+expandRecTable t = query
+    where
+      query  = "WITH RECURSIVE tree(" <> T.intercalate "," (tnonRec <> ["k2","rec"]) <> ") as ( SELECT " <> T.intercalate "," (tnonRec<> ["k2","null :: record"]) <>" FROM " <> expandTable t <> " WHERE " <> rec <> " is null UNION ALL " <> " SELECT " <> T.intercalate "," (fmap ((pret <> ".") <>) tnonRec <> [rec,"sg"]) <> " FROM tree sg JOIN " <> expandTable t <> " ON " <> rec <> " = sg." <> id  <> ") select tree from tree"
+      pret = label $ getCompose $ snd (unTB1 t)
+      rec = pret <> "." <> "k2"
+      id = "k1"
+      tnonRec :: [Text]
+      tnonRec =  explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const (const id) :: Bool -> Text -> Text ) . getCompose <$> m
+        where m = F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
+      tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ _kvrecrels m)) <$> t
+
+
+selectQuery t
+  | not $ L.null $ _kvrecrels (fst $ unTB1 t )  =   expandRecTable t
+  | otherwise = "SELECT " <> explodeRow t <> " FROM " <> expandTable t <> expandQuery False  t
+
 
 expandQuery left (DelayedTB1 (Just t)) = ""--  expandQuery left t
 expandQuery left t@(TB1 (meta, m))
@@ -467,8 +484,9 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) 
         mapOpt i = if isLeftRel  ifk then  LeftTB1 $ Just  i else i
         fun =   recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
+
 recurseTB :: Map Text Table -> Set (Path (Set Key ) SqlOperation ) -> Bool -> Bool -> TB3Data (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3Data (Labeled Text) Key ())
-recurseTB invSchema  fks' nextLeft isRec ((m, kv) ) =  (m,) <$>
+recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (m,) <$>
     (\kv -> case kv of
       (Compose (Labeled l kv )) -> do
          i <- fun kv
@@ -482,7 +500,7 @@ recurseTB invSchema  fks' nextLeft isRec ((m, kv) ) =  (m,) <$>
               fks = if isRec then S.filter (not .isRecRel .pathRel) fks' else fks'
               items = _kvvalues kv
               fkSet:: S.Set Key
-              fkSet =  S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter (isPathReflexive . pathRel) $ S.toList fks
+              fkSet =  S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter (isPathReflexive . pathRel) $ S.toList fks'
               nonFKAttrs :: [(S.Set (Rel Key) ,TBLabel  ())]
               nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
           pt <- foldl (\acc  fk ->  do
@@ -521,6 +539,7 @@ tbAttr :: (Functor f,Ord k) =>  TB3 f k a ->  Compose f (KV  (Compose f (TB f ))
 tbAttr  =  tbFilter  (\kv k -> not (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv <> (S.fromList (_kvdesc kv ))) ))
 
 tbFilter' pred (kv,item) =  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item
+tbFilterE  pred (kv,item) =  (kv,mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item)
 
 tbFilter :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbFilter pred (TB1 i) = tbFilter' pred i

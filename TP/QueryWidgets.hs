@@ -201,7 +201,26 @@ tbCase inf pgs constr a@(Attr i _ ) wl plugItens preoldItems = do
         return $ TrivialWidget (triding tds) dv
 
 
+tbRecCase k inf pgs constr a@(FKT rel l tb) wl plugItens preoldItems' = do
+      let preoldItems = emptyIT <$> preoldItems'
+          emptyIT = Just . maybe (FKT (fmap (mapComp (mapFAttr (const (LeftTB1 Nothing)))) rel) l (LeftTB1 Nothing)) id
+      TrivialWidget btr bel <- checkedWidget (isJust <$> preoldItems')
+      (ev,h) <- liftIO $ newEvent
+      inipre <- currentValue  (facts preoldItems)
+      let fun True = do
+              initpre <- currentValue (facts preoldItems)
+              initpreOldB <- stepper initpre (rumors preoldItems)
+              TrivialWidget btre bel <- tbCase inf pgs constr (FKT rel l ( recOverAttr  k a tb)) wl plugItens (tidings initpreOldB (rumors preoldItems) )
 
+              onEvent (rumors btre) (liftIO . h )
+              UI.div # set children [bel]
+          fun False = do
+              UI.div
+      sub <- UI.div # sink items  (pure .fun <$> facts btr ) # set UI.class_ "row"
+      bel2<- UI.div # set children [bel] # set UI.class_ "row"
+      out <- UI.div # set children [bel2,sub]# set UI.class_ "row"
+      binipre <- stepper  inipre (unionWith const ev (rumors preoldItems))
+      return (TrivialWidget  (tidings binipre (unionWith const (rumors preoldItems) ev)) out)
 
 tbRecCase k inf pgs constr a@(IT l tb) wl plugItens preoldItems' = do
       let preoldItems = emptyIT <$> preoldItems'
@@ -219,7 +238,8 @@ tbRecCase k inf pgs constr a@(IT l tb) wl plugItens preoldItems' = do
           fun False = do
               UI.div
       sub <- UI.div # sink items  (pure .fun <$> facts btr ) # set UI.class_ "row"
-      out <- UI.div # set children [bel,sub]# set UI.class_ "row"
+      bel2<- UI.div # set children [bel] # set UI.class_ "row"
+      out <- UI.div # set children [bel2,sub]# set UI.class_ "row"
       binipre <- stepper  inipre (unionWith const ev (rumors preoldItems))
       return (TrivialWidget  (tidings binipre (unionWith const (rumors preoldItems) ev)) out)
 

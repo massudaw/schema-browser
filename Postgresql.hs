@@ -332,7 +332,7 @@ unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
 unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverse ( traComp (traFAttr unSOptional) . (mapComp (firstTB unKOptional)) ) i)  j
 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
---parseAttr i | traceShow i False = error ""
+parseAttr i | traceShow i False = error ""
 parseAttr (Attr i _ ) = do
   s<- parseShowable (textToPrim <$> keyType i) <?> show i
   return $  Attr i s
