@@ -586,6 +586,7 @@ keyattri (IT i  _ ) =  keyattr i
 -- tableAttr (LeftTB1 i ) = tableAttr<$> i
 tableAttr (DelayedTB1 (Just tb)) = tableAttr tb
 tableAttr (TB1 (m ,(Compose (Labeled _ (KV  n)))) ) =   concat  $ F.toList (nonRef <$> n)
+tableAttr (TB1 (m ,(Compose (Unlabeled (KV  n)))) ) =   concat  $ F.toList (nonRef <$> n)
 
 nonRef :: (Ord f,Show k ,Show f,Ord k) => Compose (Labeled f ) (TB (Labeled f) ) k () -> [Compose (Labeled f ) (TB (Labeled f) ) k ()]
 nonRef i@(Compose (Labeled _ (Attr _ _ ))) =[i]
