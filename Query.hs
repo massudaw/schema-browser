@@ -387,12 +387,12 @@ expandRecTable tbase
        where
          closebase ="select " <> T.intercalate "," tbpk  <> ",iter," <> T.intercalate "," nonrec <> ",null :: record from " <> pret <>"open natural join (select " <> T.intercalate "," tbpk  <> ",max(iter) as iter from " <> pret <>"open group by " <> T.intercalate "," tbpk  <> ") as max"
          closerec ="select c." <> T.intercalate "," tbpk  <> ",o.iter," <> T.intercalate "," (fmap ("o." <>) nonrec) <> ",row(" <>attrs "c." <>" )   from " <> pret <>"close c join " <> pret <>"open o on o." <> T.intercalate "," tbpk  <> "= c." <> T.intercalate "," tbpk  <> " and c.iter -1 = o.iter"
-     top = rret <> " as (select " <> T.intercalate "," tbpk  <> "," <> attrsf "" <> " from " <> pret <>"close where iter = 0)"
+     top = rret <> " as (select " <>  attrsf "" <> " from " <> pret <> "close natural join " <> expandBaseTable tbase <>" where iter = 0)"
      rret = (label $ getCompose $ snd (unTB1 tbase))
      pret = (label $ getCompose $ snd (unTB1 t))
 
      attrs pre =  T.intercalate "," (fmap (pre <>) $ nonrec <> [tRec])
-     attrsf pre =  T.intercalate "," (fmap (pre <>) $ nonrec <> [tRec <> " as " <> tRecf ])
+     attrsf pre =  T.intercalate "," (filter (/= tRecf) nonrecb <> (fmap (pre <>) $ nonrec <> [tRec <> " as " <> tRecf ]))
      nonrec =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id  )) . getCompose <$> m
         where m = F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
               tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ _kvrecrels m)) <$> t
@@ -405,7 +405,9 @@ expandRecTable tbase
         where m =  F.toList $ _kvvalues $ labelValue $ getCompose $  tbPK $ tbase
      tfilpk  =  tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ _kvrecrels m)) <$> v
      tnfil =   tbFilterE (\m e -> S.member e (S.fromList $ fmap S.fromList $ _kvrecrels m)) <$> t
-     trnfil =   tbFilterE (\m e -> S.member e (S.fromList $ fmap S.fromList $ _kvrecrels m)) <$> tbase
+     nonrecb =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id  )) . getCompose <$> m
+        where m = F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
+              trfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ _kvrecrels m)) <$> tbase
     in
         tell [open,close,top]
   | otherwise = tell [query]
