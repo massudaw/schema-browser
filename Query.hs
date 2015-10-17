@@ -273,6 +273,21 @@ labelTable i = do
    name <- Tra.traverse (\k-> (S.singleton (Inline k),) <$> kname t k ) (tableToKV i)
    return (t, (tableMeta i,) $ Compose $ Labeled (label t) $ KV $ M.fromList $ fmap Compose <$> name)
 
+expandInlineTable ::  Text -> TB3  (Labeled Text) Key  () ->  Text
+expandInlineTable pre tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =
+   let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name)  <> ") as " <> t
+       name =  tableAttr tb
+       aliasKeys (Labeled  a (Attr n    _ ))  =  "(" <> pre <> ")." <> keyValue n <> " as " <> a
+   in query
+
+expandInlineArrayTable ::  Text -> TB3  (Labeled Text) Key  () ->  Text
+expandInlineArrayTable pre tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =
+   let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name)  <> ",row_number() over () as arrrow FROM UNNEST(" <> pre  <> ") as ix ) "
+       name =  tableAttr tb
+       aliasKeys (Labeled  a (Attr n    _ ))  =  "(ix)." <> keyValue n <> " as " <> a
+   in query
+
+
 expandBaseTable ::  TB3  (Labeled Text) Key  () ->  Text
 expandBaseTable tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =
    let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name) <> " FROM " <> aliasTable <> ") as " <> t
@@ -371,7 +386,7 @@ expandRecTable t
     let
      open = pret <> "open(rid,iter," <> attrs "" <> ") as ("  <> openbase <> " union all " <> openrec <> ")"
        where
-          openbase = "select row_number() over (),0," <> attrs "" <> " FROM " <> expandBaseTable t
+          openbase = "select row_number() over (),0," <> attrs "" <> " FROM " <> expandBaseTable t -- <> head (snd (runWriter (expandQuery True t)))
           openrec = "select rid,iter +1,(" <> tRec <> ").* from " <> pret <>"open  where " <> T.intercalate " AND " (fmap (<> " is not null ") tpk)
      close = pret <> "close(rid,iter," <> attrs  "" <>") as ( " <> closebase <> " union all " <> closerec <>  ")"
        where
@@ -431,6 +446,7 @@ tableType (ArrayTB1 [i]) = tableType i <> "[]"
 tableType (LeftTB1 (Just i)) = tableType i
 tableType (TB1 (m,_)) = kvMetaFullName  m
 
+
 expandJoin :: Bool -> [Compose (Labeled Text) (TB (Labeled Text)) Key ()] -> Labeled Text (TB (Labeled Text) Key ()) -> Writer [Text] Text
 expandJoin left env (Unlabeled (IT i (LeftTB1 (Just tb) )))
     = expandJoin True env $ Unlabeled (IT i tb)
@@ -439,15 +455,18 @@ expandJoin left env (Labeled l (IT i (LeftTB1 (Just tb) )))
 expandJoin left env (Labeled l (IT i (ArrayTB1 [tb] )))
     = do
     tjoin <- expandQuery left tb
-    return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> (if allAttr tb then explodeRow tb <> " :: " <> tableType tb else explodeRow  tb ) <> "  order by arrrow ) as " <> l <> " FROM  (SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> tname  <> ") as arr) as arr ) " <> label tas <> tjoin <> " )  as " <>  label tas <> " ON true"
+    return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> (explodeRow tb <> (if allAttr tb then  " :: " <> tableType tb else "") ) <> "  order by arrrow ) as " <> l <> " FROM " <> expandInlineArrayTable tname tb <> label tas <> tjoin <> " )  as " <>  label tas <> " ON true"
         where
           tas = getTas tb
           getTas (DelayedTB1 (Just tb))  = getTas tb
           getTas (TB1  (_,Compose tas)) = tas
           tname = label $ getCompose i
           jt = if left then " LEFT" else ""
-expandJoin left env (Labeled l (IT i tb)) = expandQuery left tb
-expandJoin left env (Unlabeled  (IT _ tb )) = expandQuery left tb
+expandJoin left env (Unlabeled (IT i tb)) =  do
+     ttable <- expandTable tb
+     tjoin <- expandQuery left tb
+     return $ " JOIN LATERAL "<> expandInlineTable (label $ getCompose i) tb  <> " ON true"   <>  tjoin
+expandJoin left env (Labeled _ (IT _ tb )) = expandQuery left tb
 expandJoin left env (Labeled _ (Attr _ _ )) = return ""
 expandJoin left env (Unlabeled  (Attr _ _ )) = return ""
 expandJoin left env (Unlabeled (FKT i rel (LeftTB1 (Just tb)))) = expandJoin True env (Unlabeled (FKT i rel tb))
@@ -507,14 +526,14 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
           let knas = Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique) (Primitive "integer" )
           kas <- kname tas  knas
           let
-              ksn = preLabelTable ( label tas )  nextT
+          (_,ksn) <-  labelTable  nextT
           tb <- fun ksn
           let
               ref = (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) $ head (S.toList ifk )
           return $  Compose $ Labeled (label $ kas) $ IT ref   (mapOpt $ mapArray $ TB1 tb )
     | otherwise = do
           let tbname = head $ fmap (\i -> label . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (S.toList ifk )
-              ksn = preLabelTable tbname   nextT
+          (t,ksn) <-  labelTable nextT
           tb <-fun ksn
           lab <- if isTableRec (TB1 tb)
             then do
