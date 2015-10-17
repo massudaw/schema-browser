@@ -12,6 +12,13 @@ Improve Types
 
 Make delayed fields not used by plugins
 
+InlinableRec
+-- when some base table has a recursive inlinable field we need to 
+open the table reach the recursive attr, perform a with recursive query
+with field and index tagging , then recover the base table
+
+
+
 Counting query size
 -- when offset is bigger them the number of rows to count we cant retrieve the count to estimate size
 

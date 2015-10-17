@@ -82,8 +82,6 @@ justError e  _ = errorWithStackTrace e
 
 groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
 
-
-
 htmlToPdf art html = do
     let
       output = (BSC.unpack art) <> ".pdf"
@@ -109,4 +107,10 @@ allMaybes i = if F.all isJust i
         then Just $ fmap (justError "wrong invariant allMaybes") i
         else Nothing
 
+unIntercalate :: ( Char -> Bool) -> String -> [String]
+unIntercalate pred s                 =  case dropWhile pred s of
+                                "" -> []
+                                s' -> w : unIntercalate pred s''
+                                      where (w, s'') =
+                                             break pred s'
 
