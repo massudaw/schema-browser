@@ -377,27 +377,27 @@ allAttr' (_,i) = all (isAttr .labelValue . getCompose) $ F.toList $ _kvvalues (l
 
 
 expandRecTable tbase
-  | isFilled (getInlineRec' (head $ F.toList tbase)) = -- all (all isInlineRel) (_kvrecrels $ fst (unTB1 t)) =
+  | isFilled (getInlineRec' (head $ F.toList tbase)) =
     let
      top = do
         res <- mapM with (getInlineRec' (head $ F.toList tbase))
-        let nonrec = fmap (\(_,i,_) -> i) res
-            pret = fmap (\(i,_,_) -> i) res
-            tRecf = fmap (\(_,_,i) -> i) res
-        tell [rret <> " as (select " <>  attrsf "" nonrec tRecf <> " from " <> T.intercalate " natural join " (fmap (<> "close")  pret )<> " natural join " <> expandBaseTable tbase <>" where iter = 0)"]
+        let
+            pret = fmap (\(i,_) -> i) res
+            tRecf = fmap (\(_,i) -> i) res
+        tell [rret <> " as (select " <>  attrsf "" tRecf <> " from " <> T.intercalate " natural join " (expandBaseTable tbase : fmap (<> "close")  pret ) <>" where iter = 0)"]
      rret = (label $ getCompose $ snd (unTB1 tbase))
-     attrsf pre nonrec tRecf =  T.intercalate "," (filter (not . (`L.elem` fmap snd tRecf) ) nonrecb <> (fmap (pre <>) $ concat nonrec <>  (fmap (\(tRec ,tRecf)-> tRec <> " as " <> tRecf) tRecf  )))
+     attrsf pre tRecf =  T.intercalate "," (filter (not . (`L.elem` fmap snd tRecf) ) nonrecb <> (fmap (pre <>) $ (fmap (\(tRec ,tRecf)-> "ROW(" <> T.intercalate "," tRec <> ") as " <> tRecf) tRecf  )))
       where
        nonrecb =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id  )) . getCompose <$> m
               where m = F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
                     trfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ _kvrecrels m)) <$> tbase
-     with inlineEl  = tell [open,close] >> return (pret, nonrec,(tRec,tRecf))
+     with inlineEl  = tell [open,close] >> return (pret,(nonrec <> [tRec] ,tRecf))
        where
          tr = _fkttable . unComp $ inlineEl
          t = TB1 (head $ F.toList tr)
          open = pret <> "open(" <> T.intercalate "," tbpk  <> ",iter," <> attrs "" <> ") as ("  <> openbase <> " union all " <> openrec <> ")"
            where
-              openbase = "select row_number() over (),0," <> attrs "" <> " FROM " <> expandBaseTable tbase <> (fst (runWriter ((expandJoin True [] .getCompose ) inlineEl)))
+              openbase = "select " <> T.intercalate "," tbpk  <>" ,0," <> attrs "" <> " FROM " <> expandBaseTable tbase <> (fst (runWriter ((expandJoin True [] .getCompose ) inlineEl)))
               openrec = "select " <> T.intercalate "," tbpk  <> ",iter +1,(" <> tRec <> ").* from " <> pret <>"open " <> head (fst (runWriter (Tra.traverse (expandJoin True [] .getCompose ) (getInlineRec t )))) <> "   where " <> T.intercalate " AND " (fmap (<> " is not null ") tpk)
          close = pret <> "close(" <> T.intercalate "," tbpk  <> ",iter," <> attrs  "" <>") as ( " <> closebase <> " union all " <> closerec <>  ")"
            where
@@ -418,7 +418,7 @@ expandRecTable tbase
             where m =  F.toList $ _kvvalues $ labelValue $ getCompose $  tbPK $ tbase
          tfilpk  =  tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ _kvrecrels m)) <$> v
          tnfil =   tbFilterE (\m e -> S.member e (S.fromList $ fmap S.fromList $ _kvrecrels m)) <$> t
-    in top -- mapM_ with (getInlineRec' (head $ F.toList tbase))
+    in top
   | otherwise = tell [query]
     where
       t = tbase
