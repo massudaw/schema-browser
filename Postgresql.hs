@@ -675,7 +675,10 @@ fromAttr foldable = do
                                Right Nothing -> error (show j )
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
 
-withConn s action =  do
+withTestConn s action  = do
   conn <- liftIO $connectPostgreSQL $ "user=massudaw password=queijo host=localhost port=5433 dbname=" <> fromString (T.unpack s)
-  -- conn <- liftIO $connectPostgreSQL $ "user=postgres password=queijo host=localhost port=5432 dbname=" <> fromString (T.unpack s)
+  action conn
+
+withConn s action =  do
+  conn <- liftIO $connectPostgreSQL $ "user=postgres password=queijo host=localhost port=5432 dbname=" <> fromString (T.unpack s)
   action conn

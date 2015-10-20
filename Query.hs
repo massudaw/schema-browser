@@ -417,9 +417,8 @@ expandInlineRecursive tbase =
          tnfil =   tbFilterE (\m e -> S.member e (S.fromList $ fmap S.fromList $ head $ _kvrecrels m)) <$> t
     in top
 
-expandFKRecursive tbase =
+expandFKRecursive t=
     let
-      t = tbase
       query  = tname <> "(" <> T.intercalate "," (tnonRec <> tRec <> [l]) <> ") as ( SELECT " <> T.intercalate "," (tnonRec<> tRec <> ["null :: record"]) <>" FROM (select * from " <> expandBaseTable t <>  (fst (runWriter (expandQuery' False (fmap unlabelIT $ TB1 tnonRecA)))) <> ") as " <> tname <> " WHERE " <> (pret <> (head tRec)) <> " is null UNION ALL " <> " SELECT " <> T.intercalate "," (fmap (pret  <>) ( tnonRec <> tRec) <> ["ROW(" <> T.intercalate "," (fmap ("sg."<> )  tRec2 ) <> "," <> explodeRowSg itv <> ")" ]) <> " FROM "<> tname <> " sg JOIN (SELECT * FROM " <> expandBaseTable t <>  (fst (runWriter (expandQuery' False (fmap unlabelIT $TB1 tnonRecA)))) <> ") as " <> tname  <>  " ON " <> head ((pret <>) <$> tRec) <> " = sg." <> (head tpk) <> ")"
       top = tbasen <> " as (select " <> T.intercalate "," tRec2 <> "," <> (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id) itv  ) <> " as " <> lit <> " from " <> tname <> ") "
       pret = tname <> "."
@@ -639,7 +638,7 @@ recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (m,) <$>
                   let relFk =pathRelRel fk
                       lastItem =  L.filter cond isRec
                       cond (_,l) = L.length l == 1  && ((== relFk ). S.fromList. last $ l)
-                  if L.length lastItem <= 2
+                  if L.length lastItem < 2
                   then  do
                     i <- fmap (relFk,) . recursePath nextLeft ( fmap (L.drop 1 ) <$> L.filter (\(_,i) -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) isRec) vacc ( (M.toList $  fmap getCompose items )) invSchema $ fk
                     return (fmap getCompose i:vacc)

@@ -255,19 +255,26 @@ logTableModification inf (TableModification Nothing table i) = do
 withInf d s f = withConn d (f <=< (\conn -> keyTables conn conn (s,"postgres")))
 
 withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres")) )
+withTestConnInf d s f = withTestConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres")) )
+
+testParse' db sch q = withTestConnInf db sch (\inf -> do
+                                       let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
+                                           rpd = rp -- forceDesc True (markDelayed True rp)
+                                           rpq = selectQuery rpd
+                                       q <- queryWith_ (fromRecord (unTB1 $ unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
+                                       return $ q
+                                           )
 
 
 testParse db sch q = withConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                            rpd = rp -- forceDesc True (markDelayed True rp)
                                            rpq = selectQuery rpd
-                                       print rpd
-                                       print rpq
                                        q <- queryWith_ (fromRecord (unTB1 $ unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
                                            )
 
-testMetaQuery q = testParse "test" "metadata"  q
+testMetaQuery q = testParse' "test" "metadata"  q
 testFireMetaQuery q = testParse "incendio" "metadata"  q
 testFireQuery q = testParse "incendio" "incendio"  q
 testNutrition q = testParse "incendio" "nutrition"  q
@@ -358,7 +365,7 @@ applyAttr' :: (Show a,Ord a ,a~ Index a)  =>  TB Identity Key a  -> PathAttr Key
 applyAttr' (Attr k i) (PAttr _ p)  = return $ Attr k (applyShowable i p)
 applyAttr' sfkt@(FKT iref rel i) (PFK _ p m b )  =  do
                             let ref =  F.toList $ M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList iref)
-                                edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (  flip applyAttr k . traceShow (k,v)) v else v
+                                edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (  flip applyAttr k  ) v else v
                             tbs <- atTable m
                             return $ FKT ref rel (maybe (joinRel rel (fmap unTB ref) tbs) id b)
 applyAttr' (IT k i) (PInline _   p)  = IT k <$> (applyFTBM (fmap pure $ createTB1) applyRecord' i p)

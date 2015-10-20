@@ -969,7 +969,7 @@ recOverAttr (k:xs) attr = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap
 
 recOverAttr' tag   =   go tag
   where
-    go (k:[]) = Map.alter (fmap (mapComp (\v -> (Le.over fkttable (fmap (fmap (mapComp ( KV . recOverAttr tag (traceShow(v,tag) v) . _kvvalues ))))) v))) k
+    go (k:[]) = Map.alter (fmap (mapComp (\v -> (Le.over fkttable (fmap (fmap (mapComp ( KV . recOverAttr tag ( v) . _kvvalues ))))) v))) k
     go (k:xs) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (\(KV i) -> KV (go xs i) )))) ))) k
 -- recOverAttr' i j = errorWithStackTrace (show i)
 
