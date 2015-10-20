@@ -151,27 +151,29 @@ keyTables conn userconn (schema ,user) = do
 addRecInit :: Map Text Table -> Map Text Table
 addRecInit m = fmap recOverFKS m
   where
-        recOverFKS t  = t {rawFKS = S.map path (rawFKS t) }
+        recOverFKS t  = t {rawFKS = S.map (traceShowId .path. traceShow (tableName t)) (rawFKS t) }
           where
                 path p@(Path k rel tr) =
                     Path k (case rel of
-                      FKInlineTable nt  -> case openPath S.empty [] p of
+                      FKInlineTable nt  -> case  L.filter (not .L.null) $ openPath S.empty [] p of
                               [] -> if nt == tableName t then  RecJoin [] (FKInlineTable nt) else FKInlineTable nt
                               e -> RecJoin e (FKInlineTable nt)
-                      FKJoinTable a b nt -> case openPath S.empty [] p of
+                      FKJoinTable a b nt -> case L.filter (not .L.null) $  openPath S.empty [] p of
                               [] -> if nt == tableName t then  RecJoin [] (FKJoinTable a b nt) else FKJoinTable a b nt
                               e -> RecJoin e (FKJoinTable a b nt)
                       ) tr
 
                 openPath ts p (Path _(FKInlineTable nt) l)
-                  | nt == tableName t = p
-                  | S.member nt ts = []
-                  | otherwise = openTable (S.insert nt ts) p nt
+                  | nt == tableName t = [p]
+                  | S.member nt ts = traceShow ("endit",nt,tableName t ,ts) []
+                  | otherwise = openTable (S.insert nt ts) (traceShow ("in",ts ,p)p) nt
                 openPath ts p (Path _(FKJoinTable _ _ nt) _)
-                  | nt == tableName t = p
-                  | S.member nt ts = []
-                  | otherwise = openTable (S.insert nt ts) p nt
-                openTable t p nt  =  concat $ fmap (\pa-> openPath t ( p <> [F.toList (pathRelRel pa)]) pa) fsk
+                  | nt == tableName t = [p]
+                  | S.member nt ts = traceShow ("endfk",nt,tableName t ,ts) []
+                  | otherwise = openTable (S.insert nt ts) (traceShow ("fk",ts,p) p) nt
+                openTable t p nt  =  do
+                        ix <- fmap (\pa-> openPath t ( p  <>  [F.toList (pathRelRel pa)] ) pa) fsk
+                        return (concat (L.filter (not.L.null) ix))
                   where Just tb = M.lookup nt m
                         fsk = F.toList $ rawFKS tb
 
@@ -261,6 +263,9 @@ testParse' db sch q = withTestConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                            rpd = rp -- forceDesc True (markDelayed True rp)
                                            rpq = selectQuery rpd
+                                       print $ tableMeta $ lookTable inf q
+                                       print rp
+                                       print rpq
                                        q <- queryWith_ (fromRecord (unTB1 $ unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
                                            )
@@ -270,6 +275,9 @@ testParse db sch q = withConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                            rpd = rp -- forceDesc True (markDelayed True rp)
                                            rpq = selectQuery rpd
+                                       print $ tableMeta $ lookTable inf q
+                                       print rp
+                                       print rpq
                                        q <- queryWith_ (fromRecord (unTB1 $ unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
                                            )

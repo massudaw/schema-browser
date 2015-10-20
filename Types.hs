@@ -118,8 +118,10 @@ pathRelRel (Path r (FKInlineTable  _   )  _ ) = Set.map Inline r
 pathRelRel (Path r (FKEitherField _    )  _ ) = Set.map Inline r
 pathRelRel (Path r (RecJoin l rel )  a ) =  pathRelRel (Path r rel a)
 
-pathRelRel' :: Path (Set Key ) SqlOperation -> [Set (Rel Key)]
-pathRelRel' (Path r (RecJoin l rel )  a ) = pathRelRel (Path r rel a) : fmap (Set.fromList) l
+pathRelRel' :: Path (Set Key ) SqlOperation -> [[Set (Rel Key)]]
+pathRelRel' (Path r (RecJoin l rel )  a )
+  | L.null l =  [[pathRelRel (Path r rel a)]]
+  | otherwise = fmap (pathRelRel (Path r rel a) :)  $ fmap (fmap (Set.fromList)) l
 
 
 
@@ -451,7 +453,7 @@ data Showable
 data SqlOperation
   = FetchTable Text
   | FKJoinTable Text [Rel Key] Text
-  | RecJoin [[Rel Key]] SqlOperation
+  | RecJoin [[[Rel Key]]] SqlOperation
   | FKInlineTable Text
   | FKEitherField Text
   deriving(Eq,Ord,Show)
@@ -753,7 +755,7 @@ traComp f =  fmap Compose. traverse f . getCompose
 concatComp  =  Compose . concat . fmap getCompose
 
 tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (uniqueConstraint t)[] (F.toList $ rawAttrs t) (rawDelayed t) rec
-  where rec = fmap (fmap F.toList. pathRelRel' )$ filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
+  where rec = concat $ fmap (fmap (fmap F.toList). pathRelRel' )$ filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
 
 
 tbmap :: Ord k => Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a

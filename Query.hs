@@ -123,7 +123,7 @@ isKOptional (Primitive _) = False
 isKOptional (InlineTable _ _) = False
 isKOptional (KArray i)  = isKOptional i
 isKOptional (KEither _ _) = False
-isKOptional i = errorWithStackTrace (show i)
+isKOptional i = errorWithStackTrace (show ("isKOptional",i))
 
 
 
@@ -261,8 +261,8 @@ expandBaseTable ::  TB3  (Labeled Text) Key  () ->  Text
 expandBaseTable tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =
    let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name) <> " FROM " <> aliasTable <> ") as " <> t
        name =  tableAttr tb
-       aliasTable = kvMetaFullName meta
-       aliasKeys (Labeled  a (Attr n    _ ))  =  keyValue n <> " as " <> a
+       aliasTable = kvMetaFullName meta <> " as " <> t
+       aliasKeys (Labeled  a (Attr n    _ ))  =  t <> "." <> keyValue n <> " as " <> a
    in query
 
 unComp :: (Show (g k a) ,F.Foldable f ) => Compose f g k a -> g k a
@@ -433,9 +433,11 @@ expandFKRecursive t=
       tpk =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> m
         where m =  F.toList $  _kvvalues $ labelValue $ getCompose $   tfilpk
       tRec =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
-        where l = case  labelValue $ getCompose $ justError "nolist" $ safeHead $ flattenRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t) of
-                    FKT l _ i -> l
-                    i -> errorWithStackTrace (show i)
+        where l = case   getCompose $ justError "nolist" $  safeHead $ L.filter (isFKT .labelValue .getCompose) $ flattenRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t) of
+                    Labeled _ (FKT l _ i) -> l
+                    Labeled l i -> errorWithStackTrace (show ("trec",l,i))
+              isFKT (FKT _ _ _) = True
+              isFKT i = False
       tRec2 =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
           where l = F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
       (lit,itv) =   case getCompose $ head $ F.toList $   _kvvalues $ labelValue $ getCompose $  snd $    unTB1 tnfil of
@@ -614,7 +616,10 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) 
         fun =   recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
 recursePath isLeft isRec vacc ksbn invSchema jo@(Path ifk (RecJoin l f) e)
-    = recursePath isLeft (fmap (\(b,c) -> if L.null c then (b,b) else (b,c)) $ isRec <> [(fmap S.toList $ pathRelRel' jo ,l)]) vacc ksbn invSchema (Path ifk f e)
+    = recursePath isLeft (fmap (\(b,c) -> if L.null c then (b,b) else (b,c)) $ isRec <>  path ) vacc ksbn invSchema (Path ifk f e)
+      where path
+              | L.null l =  fmap (,[]) (fmap (fmap S.toList) $ pathRelRel' jo )
+              | otherwise = (zipWith (,) (fmap (fmap S.toList) $ pathRelRel' jo ) l)
 
 recurseTB :: Map Text Table -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TB3Data (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3Data (Labeled Text) Key ())
 recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (m,) <$>
@@ -839,7 +844,7 @@ sup' = (\(ER.Finite i) -> i) . Interval.upperBound
 _unTB1 (TB1 (m,i) ) =  i
 _unTB1 (LeftTB1 (Just i )) = _unTB1 i
 _unTB1 (DelayedTB1 (Just i )) = _unTB1 i
-_unTB1 i =  errorWithStackTrace $ show i
+_unTB1 i =  errorWithStackTrace $ show ("untb1",i)
 
 instance P.Poset (FKey (KType Text))where
   compare  = (\i j -> case compare (i) (j) of
