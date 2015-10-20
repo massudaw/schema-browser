@@ -12,36 +12,29 @@
 
 import Query
 import Types
-import qualified Data.Binary as B
 import Step
 import Plugins
 import TP.Widgets
 import SortList
+import Prelude hiding (head)
 import TP.QueryWidgets
 import Control.Monad.Reader
 import Control.Concurrent
 import Data.Functor.Apply
 import System.Environment
-import Debug.Trace
 import Data.Ord
 import Control.Exception
-import Data.Time.Parse
 import Utils
 import Schema
 import Patch
 import Data.Char (toLower)
 import Postgresql
-import PostgresQuery
 import Data.Maybe
 import Data.Functor.Identity
 import Reactive.Threepenny
 import Data.Traversable (traverse)
-import qualified Data.Traversable as Tra
-import Data.Time.LocalTime
 import qualified Data.List as L
-import qualified Data.Vector as Vector
 import qualified Data.ByteString.Char8 as BS
-import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.Time
 
 import RuntimeTypes

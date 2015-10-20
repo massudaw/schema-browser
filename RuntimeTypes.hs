@@ -9,8 +9,6 @@ import Data.Text.Lazy
 import Control.Monad.IO.Class
 -- import Step
 
-import qualified Data.Map as M
-import qualified Data.Set as S
 import qualified Reactive.Threepenny as R
 import Database.PostgreSQL.Simple
 import Data.Map (Map)

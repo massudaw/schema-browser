@@ -7,8 +7,6 @@ import Data.Typeable
 import Utils
 import Query
 import GHC.Stack
-import Data.Typeable
-import Patch
 import Debug.Trace
 import qualified Data.Binary as B
 import Data.Functor.Identity
@@ -22,7 +20,7 @@ import Data.Time.Clock
 import qualified Data.Char as Char
 -- import Schema
 import Data.String
-import Data.Attoparsec.Combinator (choice,lookAhead)
+import Data.Attoparsec.Combinator (lookAhead)
 
 import Control.Applicative
 import Control.Monad.IO.Class
@@ -32,7 +30,6 @@ import Text.Read hiding (choice)
 import qualified Data.ExtendedReal as ER
 import qualified Data.ByteString.Base16 as B16
 import Data.Time.Parse
-import           Database.PostgreSQL.Simple.Arrays as Arrays
 import           Database.PostgreSQL.Simple.Types as PGTypes
 import           Data.Attoparsec.ByteString.Char8 hiding (Result)
 import Data.Traversable (traverse)
@@ -46,7 +43,7 @@ import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 
 import Data.Monoid
-import Prelude hiding (takeWhile)
+import Prelude hiding (takeWhile,head)
 
 
 import qualified Data.Foldable as F
@@ -114,6 +111,7 @@ test = do
   let s1 = (Just "(\"{\"\"(,,\\\\\"\"({pk_column},{=},{id},2)\\\\\"\")\"\",\"\"(,\\\\\"\"(sel_column,attr_ref,1)\\\\\"\",)\"\",\"\"(attr,,)\"\"}\")")
       s2 = (Just "(\"{\"\"(,,\\\\\"\"({pk_column},{=},{id},2)\\\\\"\")\"\",\"\"(attr,,)\"\"}\")")
   i <- pathParser undefined s1
+  i <- pathParser undefined s2
   print (i :: PathArray )
 instance  F.FromField PathArray where
   fromField =  pathParser
@@ -258,7 +256,7 @@ readPrim t =
      PPosition -> readPosition
      PBoolean -> readBoolean
      PLineString -> readLineString
-     PBinary -> readText
+     PBinary -> readBin
   where
       readInt = nonEmpty (fmap SNumeric . readMaybe)
       readBoolean = nonEmpty (fmap SBoolean . readMaybe)
@@ -334,7 +332,7 @@ unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverse 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
 -- parseAttr i | traceShow i False = error ""
 parseAttr (Attr i _ ) = do
-  s<- parseShowable (textToPrim <$> keyType i) <?> show i
+  s<- parseShowable (textToPrim <$> keyType  i) <?> show i
   return $  Attr i s
 
 
@@ -362,11 +360,11 @@ parseLabeledTable (ArrayTB1 [t]) =
   ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> parseArray (parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey makeOpt t))  >>  return (fail "")  ) )
 parseLabeledTable (DelayedTB1 (Just tb) ) =  string "t" >>  return (DelayedTB1  Nothing) -- <$> parseLabeledTable tb
 parseLabeledTable (LeftTB1 (Just i )) =
-  LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapKey makeOpt i) >> return Nothing) <|> return Nothing )
+  LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapTable (LeftTB1 . Just) <$>  mapKey makeOpt i) >> return Nothing) <|> return Nothing )
 parseLabeledTable  tb1 = traverse parseRecord  $ tb1
 
 parseRecord  (me,m) = (char '('  *> (do
-  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (M.toList (foldr recOverAttr'  (_kvvalues $ unTB m) (fmap S.fromList $ _kvrecrels me))) ) (char ',')
+  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (M.toList (foldr recOverAttr'  (_kvvalues $ unTB m) (fmap (fmap S.fromList ) $ _kvrecrels  me))) ) (char ',')
   return (me,Compose $ Identity $  KV (M.fromList im) )) <*  char ')' )
 
 parseRow els  = (char '('  *> (do
@@ -374,6 +372,7 @@ parseRow els  = (char '('  *> (do
   return  im) <*  char ')' )
 
 
+inattr = _relOrigin . head . keyattri
 
 startQuoted p =  do
   let backquote = string "\""  <|> string "\\\\" <|> string "\\"
@@ -678,4 +677,5 @@ fromAttr foldable = do
 
 withConn s action =  do
   conn <- liftIO $connectPostgreSQL $ "user=massudaw password=queijo host=localhost port=5433 dbname=" <> fromString (T.unpack s)
+  -- conn <- liftIO $connectPostgreSQL $ "user=postgres password=queijo host=localhost port=5432 dbname=" <> fromString (T.unpack s)
   action conn

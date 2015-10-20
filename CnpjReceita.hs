@@ -36,6 +36,7 @@ import Debug.Trace
 import Step
 import RuntimeTypes
 import Control.Monad.Reader
+import Prelude hiding (head)
 
 
 getInp :: [TL.Text] -> TB1 Showable -> Maybe BSC.ByteString

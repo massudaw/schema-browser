@@ -5,9 +5,9 @@ module Schema where
 
 import Types
 import Debug.Trace
+import Prelude hiding (head)
 import Data.Unique
 import qualified Data.Foldable as F
--- import Step
 import Data.Maybe
 import Data.String
 import Control.Monad.IO.Class
@@ -29,7 +29,6 @@ import Data.Traversable(sequenceA,traverse)
 import Data.Vector (Vector)
 import qualified Data.Vector as V
 
-import Control.Monad
 import Control.Applicative
 import qualified Data.List as L
 import qualified Data.Map as M
@@ -129,26 +128,53 @@ keyTables conn userconn (schema ,user) = do
        res <- lookupKey3 <$> query conn "SELECT t.table_name,pks FROM metadata.tables t left join metadata.pks  p on p.schema_name = t.schema_name and p.table_name = t.table_name where t.schema_name = ?" (Only schema) :: IO [(Text,Vector Key )]
        resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM information_schema.tables where table_schema = ? " (Only schema) :: IO (Map Text TableType)
        let lookFk t k =V.toList $ lookupKey2 (fmap (t,) k)
-       fks <- M.fromListWith S.union . fmap (\i@(tp,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) (addRec tp tc $ FKJoinTable tp (zipWith3 (\a b c -> Rel a b c) (lookFk tp kp ) (V.toList rel) (lookFk tc kc)) tc) (S.fromList $ F.toList $ justError "no pk found" $ M.lookup tc (M.fromList res) ))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation ) )))
+       fks <- M.fromListWith S.union . fmap (\i@(tp,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) ( FKJoinTable tp (zipWith3 (\a b c -> Rel a b c) (lookFk tp kp ) (V.toList rel) (lookFk tc kc)) tc) (S.fromList $ F.toList $ justError "no pk found" $ M.lookup tc (M.fromList res) ))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation ) )))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  M.toList keyMap :: Map Text (Set Key)
-           pks =  (\(c,pksl)-> let
+           i3l =  (\(c,pksl)-> let
                                   pks = S.fromList $ F.toList pksl
-                                  inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (addRec c (inlineName t) $  FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
-                                  eitherFK =  fmap (\k -> (\t -> Path (S.singleton k ) (addRec c (inlineName t) $  FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isKEither .keyType ) .  S.toList <$> M.lookup c all
-                                  -- eitherFK =   M.lookup c eitherMap
-                                  attr = S.difference ({-S.filter (not. isKEither.keyType)  $ -}(\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> pks)
-                                in (pks ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Set Key,Table)]
-       let (i1,i2,i3) = (keyMap, M.fromList $ filter (not.S.null .fst)  pks,M.fromList $ fmap (\(_,t)-> (tableName t ,t)) pks)
-       sizeMapt <- M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t i3 ) <$> query conn tableSizes (Only schema)
+                                  inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
+                                  eitherFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isKEither .keyType ) .  S.toList <$> M.lookup c all
+                                  attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> pks)
+                                in (c ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Text,Table)]
+       let
+           i3 = addRecInit $ M.fromList i3l
+           (i1,pks) = (keyMap, M.fromList $ fmap (\(_,t)-> (rawPK t ,t)) $ M.toList i3 )
+           i2 =  M.filterWithKey (\k _ -> not.S.null $ k )  pks
+       sizeMapt <- M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t  i3 ) <$> query conn tableSizes (Only schema)
        mvar <- newMVar M.empty
        metaschema <- if (schema /= "metadata")
           then Just <$> keyTables  conn userconn ("metadata",user)
           else return Nothing
-       return  $ InformationSchema schema user i1 i2 i3 sizeMapt M.empty mvar  userconn conn metaschema
+       return  $ InformationSchema schema user i1 i2  i3 sizeMapt M.empty mvar  userconn conn metaschema
 
-addRec i j
-  | i == j = RecJoin
-  | otherwise = id
+
+addRecInit :: Map Text Table -> Map Text Table
+addRecInit m = fmap recOverFKS m
+  where
+        recOverFKS t  = t {rawFKS = S.map path (rawFKS t) }
+          where
+                path p@(Path k rel tr) =
+                    Path k (case rel of
+                      FKInlineTable nt  -> case openPath S.empty [] p of
+                              [] -> if nt == tableName t then  RecJoin [] (FKInlineTable nt) else FKInlineTable nt
+                              e -> RecJoin e (FKInlineTable nt)
+                      FKJoinTable a b nt -> case openPath S.empty [] p of
+                              [] -> if nt == tableName t then  RecJoin [] (FKJoinTable a b nt) else FKJoinTable a b nt
+                              e -> RecJoin e (FKJoinTable a b nt)
+                      ) tr
+
+                openPath ts p (Path _(FKInlineTable nt) l)
+                  | nt == tableName t = p
+                  | S.member nt ts = []
+                  | otherwise = openTable (S.insert nt ts) p nt
+                openPath ts p (Path _(FKJoinTable _ _ nt) _)
+                  | nt == tableName t = p
+                  | S.member nt ts = []
+                  | otherwise = openTable (S.insert nt ts) p nt
+                openTable t p nt  =  concat $ fmap (\pa-> openPath t ( p <> [F.toList (pathRelRel pa)]) pa) fsk
+                  where Just tb = M.lookup nt m
+                        fsk = F.toList $ rawFKS tb
+
 
 
 liftTable' :: InformationSchema -> Text -> TBData Text a -> TBData Key a
@@ -159,7 +185,7 @@ liftTable' inf tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapCom
 
 fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
 
-unRecRel (RecJoin l) = l
+unRecRel (RecJoin _ l) = l
 unRecRel l = l
 
 fixPatchAttr inf t p@(PAttr _ _ ) =  p
@@ -167,7 +193,7 @@ fixPatchAttr inf tname p@(PInline rel e ) =  PInline rel (fmap (\(_,o,v)-> (tabl
     where Just (FKInlineTable tname2) = fmap (unRecRel.pathRel) $ L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (keyValue rel)) )  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 fixPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa) (tableMeta $ lookTable inf tname2) b
-    where (FKJoinTable _ rel tname2 )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+    where (FKJoinTable _ _ tname2 )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 
 liftKeys
@@ -222,8 +248,8 @@ logTableModification inf (TableModification Nothing table i) = do
   time <- getCurrentTime
   let ltime =  utcToLocalTime utc $ time
       (_,pidx,pdata) = firstPatch keyValue  i
-  -- [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index2,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (username inf ,ltime,rawName table, V.fromList (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) pidx )) , Binary  .B.encode <$> V.fromList pdata , schemaName inf)
-  return (TableModification (Just 0) table i )
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index2,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (username inf ,ltime,rawName table, V.fromList (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) pidx )) , Binary  .B.encode <$> V.fromList pdata , schemaName inf)
+  return (TableModification (Just id) table i )
 
 
 withInf d s f = withConn d (f <=< (\conn -> keyTables conn conn (s,"postgres")))
@@ -368,7 +394,6 @@ createTB1'
      (Index (TBData Key a )) ->
      DBM Key a (KVMetadata Key , Compose Identity  (KV (Compose Identity  (TB Identity))) Key  a)
 createTB1' (m ,s ,k)  = fmap (m ,)  $ fmap (_tb .KV . mapFromTBList ) . traverse (fmap _tb . createAttr') $  k
-createTB1'  i = errorWithStackTrace (show i)
 
 
 

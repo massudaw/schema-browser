@@ -1,33 +1,27 @@
 {-# LANGUAGE Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,TupleSections,FlexibleInstances, DeriveFunctor  #-}
 module Step where
 
-import qualified Data.Bifunctor as B
 import Types
 import RuntimeTypes
 import Query
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Maybe
-import Data.Foldable (Foldable,toList)
-import Data.Maybe (isJust)
-import Data.Traversable (Traversable)
+import Data.Foldable (toList)
 import Control.Applicative
 import qualified Data.Text.Lazy as T
 import Data.Text.Lazy (Text)
 -- import Warshal
 import Data.Functor.Identity
 import Data.String
-import Data.Set (Set)
 import qualified Data.List as L
-import qualified Data.Vector as Vector
 
 
-import Debug.Trace
 import Control.Monad.Reader
 import GHC.Stack
 import Control.Arrow
 import Control.Category (Category(..),id)
-import Prelude hiding((.),id)
+import Prelude hiding((.),id,head)
 import Data.Monoid
 import qualified Data.Bifunctor as BF
 import Utils
@@ -241,7 +235,6 @@ checkField (Nested (IProd _ l) nt ) t@(TB1 (m,v))
          IT l  i -> Compose . Identity <$> (IT l  <$> checkTable nt i)
          FKT a   c  d -> Compose . Identity <$> (FKT a  c <$>  checkTable nt d)
          Attr k v -> Nothing
-         v -> errorWithStackTrace (show (v,l))
 checkField  (IProd b l) t@(TB1 (m,v))
   = do
     let
@@ -350,7 +343,6 @@ accessTB i t = go t
         DelayedTB1 (Just j) -> go j
         TB1 (m,k) -> TB1   (m,mapComp (\m -> KV $ M.mapWithKey  modify (_kvvalues $ m)) k )
           where modify k =  mapComp (\v -> maybe v (flip accessAT v) $ findOne i (S.map (keyValue. _relOrigin) k))
-accessTB l t = errorWithStackTrace (show (l,t))
 
 accessAT (Nested (IProd b t) r) at
     = case at of

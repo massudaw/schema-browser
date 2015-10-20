@@ -21,46 +21,25 @@ import Data.Functor.Apply
 import Data.Bifunctor
 import Data.Maybe
 import GHC.Generics
-import Control.Concurrent
 import Data.Either
 import Data.Binary (Binary)
-import qualified Reactive.Threepenny as R
 import Data.Functor.Identity
 import Utils
 import Data.Traversable(traverse,sequenceA)
-import Data.Vector(Vector)
-import qualified Data.Vector as Vector
-import Data.Functor.Classes
 import Data.Foldable (Foldable)
 import qualified Data.Foldable as F
 import qualified Data.Interval as Interval
-import Data.Interval (lowerBound,upperBound,(<..<))
+import Data.Interval (lowerBound,upperBound)
 import Data.Monoid hiding (Product)
-
-import qualified Data.Text.Lazy as T
-import qualified Data.ByteString as BS
-
 
 import GHC.Stack
 
-import Data.Traversable(Traversable)
-import Database.PostgreSQL.Simple.Time
-
-import Debug.Trace
-import Data.Time
-import Data.Time.Clock.POSIX
-import Control.Monad
 import GHC.Exts
 import Control.Applicative
 import qualified Data.List as L
-import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Set (Set)
 import qualified Data.Set as Set
-import Control.Monad.State
-import Data.Text.Lazy(Text)
 
-import Data.Unique
 
 
 {-
@@ -164,7 +143,7 @@ compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . 
     recover (PIdDelayed , j ) = PDelayed (compact j)
     recover (PIdInter i , j ) = PInter i (justError "no patch inter" $ compact j)
     recover (PIdAtom , j ) = justError "can't be empty " $ patchSet (catMaybes j)
-    recover i = errorWithStackTrace (show i)
+    -- recover i = errorWithStackTrace (show i)
     compact j = join $ compactPatches <$> Just (catMaybes j)
 
 
@@ -211,7 +190,7 @@ createTB1
      (Index (TBData d a )) ->
      (KVMetadata d , Compose Identity  (KV (Compose Identity  (TB Identity))) d a)
 createTB1 (m ,s ,k)  = (m , _tb .KV . mapFromTBList . fmap (_tb . createAttr) $  k)
-createTB1  i = errorWithStackTrace (show i)
+--createTB1  i = errorWithStackTrace (show i)
 
 
 
@@ -425,6 +404,7 @@ createFTBM p (PatchSet l) = foldl1 (liftA2 mappend) (createFTBM p <$>  l)
 
 
 instance Monoid (FTB a) where
+ mempty = LeftTB1 Nothing
  mappend (LeftTB1 i) (LeftTB1 j) = LeftTB1 (j)
  mappend (ArrayTB1 i) (ArrayTB1 j) = ArrayTB1 (i <> j)
  mappend (DelayedTB1 i) (DelayedTB1 j) = DelayedTB1 (j)

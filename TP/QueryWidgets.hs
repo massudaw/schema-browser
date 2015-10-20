@@ -40,6 +40,7 @@ import Query
 import Postgresql
 import PostgresQuery
 import Data.Maybe
+import Prelude hiding (head)
 import Data.Time
 import qualified Data.Vector as V
 import Data.Functor.Apply
@@ -202,15 +203,16 @@ tbCase inf pgs constr a@(Attr i _ ) wl plugItens preoldItems = do
 
 
 tbRecCase k inf pgs constr a@(FKT rel l tb) wl plugItens preoldItems' = do
-      let preoldItems = emptyIT <$> preoldItems'
-          emptyIT = Just . maybe (FKT (fmap (mapComp (mapFAttr (const (LeftTB1 Nothing)))) rel) l (LeftTB1 Nothing)) id
+      let preoldItems = emptyFKT tb <$> preoldItems'
+          emptyFKT (TB1 _ ) = maybe Nothing (Just. id)
+          emptyFKT (LeftTB1 _ )= Just . maybe (FKT (fmap (mapComp (mapFAttr (const (LeftTB1 Nothing)))) rel) l (LeftTB1 Nothing)) id
       TrivialWidget btr bel <- checkedWidget (isJust <$> preoldItems')
       (ev,h) <- liftIO $ newEvent
       inipre <- currentValue  (facts preoldItems)
       let fun True = do
               initpre <- currentValue (facts preoldItems)
               initpreOldB <- stepper initpre (rumors preoldItems)
-              TrivialWidget btre bel <- tbCase inf pgs constr (FKT rel l ( recOverAttr  k a tb)) wl plugItens (tidings initpreOldB (rumors preoldItems) )
+              TrivialWidget btre bel <- tbCase inf pgs constr (FKT rel l  tb) wl plugItens (tidings initpreOldB (rumors preoldItems) )
 
               onEvent (rumors btre) (liftIO . h )
               UI.div # set children [bel]
@@ -222,16 +224,18 @@ tbRecCase k inf pgs constr a@(FKT rel l tb) wl plugItens preoldItems' = do
       binipre <- stepper  inipre (unionWith const ev (rumors preoldItems))
       return (TrivialWidget  (tidings binipre (unionWith const (rumors preoldItems) ev)) out)
 
+
 tbRecCase k inf pgs constr a@(IT l tb) wl plugItens preoldItems' = do
-      let preoldItems = emptyIT <$> preoldItems'
-          emptyIT = Just . maybe (IT l (LeftTB1 Nothing)) id
+      let preoldItems = emptyIT tb  <$> preoldItems'
+          emptyIT (TB1 _ ) = maybe Nothing (Just. id)
+          emptyIT (LeftTB1 _) = Just . maybe (IT l (LeftTB1 Nothing)) id
       TrivialWidget btr bel <- checkedWidget (isJust <$> preoldItems')
       (ev,h) <- liftIO $ newEvent
       inipre <- currentValue  (facts preoldItems)
       let fun True = do
               initpre <- currentValue (facts preoldItems)
               initpreOldB <- stepper initpre (rumors preoldItems)
-              TrivialWidget btre bel <- tbCase inf pgs constr (IT l ( recOverAttr  k a tb)) wl plugItens (tidings initpreOldB (rumors preoldItems) )
+              TrivialWidget btre bel <- tbCase inf pgs constr (IT l  tb) wl plugItens (tidings initpreOldB (rumors preoldItems) )
 
               onEvent (rumors btre) (liftIO . h )
               UI.div # set children [bel]
@@ -277,7 +281,7 @@ eiTable
      -> TB1 ()
      -> Tidings (Maybe (TB1 Showable))
      -> UI (Element,Tidings (Maybe (TB1 Showable)))
-eiTable inf pgs constr tname refs plmods ftb@(TB1 (m,k) ) oldItems = do
+eiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItems = do
   let
       Just table = M.lookup tname  (tableMap inf)
   res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds ) pgs)
@@ -286,7 +290,7 @@ eiTable inf pgs constr tname refs plmods ftb@(TB1 (m,k) ) oldItems = do
             w <- jm
             wn <- (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) refs)
             return (w <> [(unTB m,wn)])
-        ) (return []) (P.sortBy (P.comparing fst ) . M.toList . unTBMap $ ftb)
+        ) (return []) (P.sortBy (P.comparing fst ) . M.toList $ foldr recOverAttr' (unTBMap $ ftb) (fmap S.fromList <$> _kvrecrels meta))
   let
       tableb :: Tidings (Maybe (TB1 Showable))
       tableb  = fmap (TB1 . (tableMeta table,) . Compose . Identity . KV . mapFromTBList . fmap _tb) . Tra.sequenceA <$> Tra.sequenceA (triding .snd <$> fks)
@@ -332,12 +336,13 @@ uiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItems = do
 
   fks <- foldl' (\jm (l,m)  -> do
             w <- jm
-            wn <- if L.elem l (S.fromList <$> _kvrecrels meta)
-                then (tbRecCase l inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $  refs)
+            let el = L.find ((l==) . head ) (fmap S.fromList <$> ( _kvrecrels meta))
+            wn <- if isJust el
+                then (tbRecCase el  inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $  refs)
 
                 else (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $  refs)
             return (w <> [(unTB m,wn)])
-        ) (return []) (P.sortBy (P.comparing fst ) . M.toList . unTBMap $ ftb)
+        ) (return []) (P.sortBy (P.comparing fst ) . M.toList $ foldr recOverAttr' (unTBMap $ ftb) (fmap S.fromList <$> _kvrecrels meta) )
   let
       tableb :: Tidings (Maybe (TB1 Showable))
       tableb  = fmap (TB1 .(tableMeta table,) . Compose . Identity . KV . mapFromTBList . fmap _tb) . Tra.sequenceA <$> Tra.sequenceA (triding .snd <$> fks)
@@ -1051,7 +1056,7 @@ viewer inf table env = mdo
       tview = unTlabel' . unTB1  $tableSt2
       ordtoBool Asc = False
       ordtoBool Desc = True
-  element itemList # set items ( pure . renderTableNoHeaderSort2   (return $ getElement sortList) inf (tableNonRef' tview) $   fmap (fmap tableNonRef' . fmap ((filterRec (fmap (_relOrigin . head .keyattri . snd ) $ concat $ maybeToList env)))) . (\(slist ,(coun,tb))-> (fmap fst slist,tb))  <$>   tdswhereb )
+  element itemList # set items ( pure . renderTableNoHeaderSort2   (return $ getElement sortList) inf (tableNonRef' tview) $   fmap (fmap tableNonRef' . fmap ((filterRec' (fmap (_relOrigin . head .keyattri . snd ) $ concat $ maybeToList env)))) . (\(slist ,(coun,tb))-> (fmap fst slist,tb))  <$>   tdswhereb )
 
   UI.div # set children [getElement offset, itemList]
 
@@ -1071,7 +1076,7 @@ dashBoardAllTableIndex e@(inf,table,index) =   metaAllTableIndexA inf "modificat
               , IT (_tb $ Attr "data_index2" (TB1 () ) ) (ArrayTB1 $  fmap ((\(i,j) -> tblist $ fmap _tb [Attr "key" (TB1 $ SText i) ,Attr "val" (TB1 (SDynamic j))]). first keyValue)index) ]
 
 
-filterRec envK = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList envK )) . S.fromList . fmap _relOrigin.  keyattr )
+filterRec' envK = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList envK )) . S.fromList . fmap _relOrigin.  keyattr )
 
 renderTableNoHeader' header inf modtablei out = do
   let

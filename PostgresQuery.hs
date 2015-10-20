@@ -22,7 +22,7 @@ import Data.Maybe
 import qualified Data.List as L
 
 import Data.Monoid
-import Prelude hiding (takeWhile)
+import Prelude hiding (takeWhile,head)
 
 
 import qualified Data.Foldable as F
