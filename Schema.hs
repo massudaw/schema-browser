@@ -156,21 +156,21 @@ addRecInit m = fmap recOverFKS m
                 path p@(Path k rel tr) =
                     Path k (case rel of
                       FKInlineTable nt  -> case  L.filter (not .L.null) $ openPath S.empty [] p of
-                              [] -> if nt == tableName t then  RecJoin [] (FKInlineTable nt) else FKInlineTable nt
-                              e -> RecJoin e (FKInlineTable nt)
+                              [] -> if nt == tableName t then  RecJoin (MutRec []) (FKInlineTable nt) else FKInlineTable nt
+                              e -> RecJoin (MutRec e) (FKInlineTable nt)
                       FKJoinTable a b nt -> case L.filter (not .L.null) $  openPath S.empty [] p of
-                              [] -> if nt == tableName t then  RecJoin [] (FKJoinTable a b nt) else FKJoinTable a b nt
-                              e -> RecJoin e (FKJoinTable a b nt)
+                              [] -> if nt == tableName t then  RecJoin (MutRec []) (FKJoinTable a b nt) else FKJoinTable a b nt
+                              e -> RecJoin (MutRec e) (FKJoinTable a b nt)
                       ) tr
 
-                openPath ts p (Path _(FKInlineTable nt) l)
+                openPath ts p pa@(Path _(FKInlineTable nt) l)
                   | nt == tableName t = [p]
-                  | S.member nt ts = traceShow ("endit",nt,tableName t ,ts) []
-                  | otherwise = openTable (S.insert nt ts) (traceShow ("in",ts ,p)p) nt
-                openPath ts p (Path _(FKJoinTable _ _ nt) _)
+                  | S.member (nt,pa) ts = traceShow ("endit",nt,tableName t ,ts) []
+                  | otherwise = openTable (S.insert (nt,pa) ts) (traceShow ("in",ts ,p)p) nt
+                openPath ts p pa@(Path _(FKJoinTable _ _ nt) _)
                   | nt == tableName t = [p]
-                  | S.member nt ts = traceShow ("endfk",nt,tableName t ,ts) []
-                  | otherwise = openTable (S.insert nt ts) (traceShow ("fk",ts,p) p) nt
+                  | S.member (nt,pa) ts = traceShow ("endfk",nt,tableName t ,ts) []
+                  | otherwise = openTable (S.insert (nt,pa) ts) (traceShow ("fk",ts,p) p) nt
                 openTable t p nt  =  do
                         ix <- fmap (\pa-> openPath t ( p  <>  [F.toList (pathRelRel pa)] ) pa) fsk
                         return (concat (L.filter (not.L.null) ix))
@@ -323,7 +323,10 @@ eventTable inf table = do
               h =<< takeMVar mnew
            bh <- R.stepper ini e
            let td = (R.tidings bh e)
-           putMVar mvar (M.insert (tableMeta table) (mnew,td) mmap)
+           if (rawTableType table == ReadWrite)
+              then  putMVar mvar (M.insert (tableMeta table) (mnew,td) mmap)
+              else putMVar mvar  mmap
+
            return (mnew,td)
     return (mtable,fmap TB1 <$> td)
 
@@ -385,8 +388,8 @@ applyRecord'
      -> TBIdx Key a
      -> DBM Key a (TBData Key a)
 applyRecord' t@((m, v)) (_ ,_  , k)  = fmap (m,) $ traComp (fmap KV . sequenceA . M.mapWithKey (\key vi -> foldl  (\i j -> i >>= edit key j ) (return vi) k  ) . _kvvalues ) v
-  where edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  traComp (flip applyAttr' k ) v else return v
-        edit  key  k@(PInline s _ ) v = if (_relOrigin $ head $ F.toList $ key) == s then  traComp (flip applyAttr' k ) v else return v
+  where edit  key  k@(PAttr  s _) v = if (head $ F.toList $ key) == Inline s then  traComp (flip applyAttr' k ) v else return v
+        edit  key  k@(PInline s _ ) v = if (head $ F.toList $ key) == Inline s then  traComp (flip applyAttr' k ) v else return v
         edit  key  k@(PFK rel s _ _ ) v = if  key == S.fromList rel then  traComp (flip applyAttr' k ) v else return v
 applyTB1'
   :: (Index a~ a ,Show a , Ord a ) =>
