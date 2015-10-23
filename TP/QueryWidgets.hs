@@ -476,7 +476,9 @@ processPanelTable inf attrsB res table oldItemsi = do
   diffEdi <- mapEvent id $ crudEdi <$> facts oldItemsi <*> attrsB <@ UI.click editB
   diffDel <- mapEvent id $ crudDel <$> facts (fmap tableNonRef <$> oldItemsi) <@ UI.click deleteB
   diffIns <- mapEvent id $ crudIns <$>  attrsB <@ UI.click insertB
-  transaction <- UI.span# set children [insertB,editB,deleteB]
+  transaction <- UI.span #
+         set children [insertB,editB,deleteB] #
+         set UI.style (noneShowSpan (ReadWrite ==  rawTableType table ))
   return (transaction , fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffDel] )
 
 
