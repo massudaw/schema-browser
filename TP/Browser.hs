@@ -271,9 +271,10 @@ chooserTable inf e kitems i = do
   chooserDiv <- UI.div # set children  [header ,getElement nav] # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
   body <- UI.div # set UI.class_ "row"
 
-  mapM (\(t,ediff) -> traverse (\ table -> do
+  {-mapM (\(t,ediff) -> traverse (\ table -> do
       (tmvar,vpt)  <- liftIO $ eventTable inf table
       onEvent ( ((\i j -> foldl applyTable i (fmap (PAtom .tableDiff) j) ) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar . fmap unTB1 )) (M.lookup t (tableMap inf))  ) e
+      -}
 
   mapUITEvent body (\(nav,table)->
       case nav of

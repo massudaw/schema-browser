@@ -387,7 +387,7 @@ expandInlineRecursive tbase =
       where
        nonrecb =  explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id  ) . getCompose <$> m
               where m = F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
-                    tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ concat  $maybeToList $ safeHead $ _kvrecrels m)) <$> tbase
+                    tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec  $ _kvrecrels m)) <$> tbase
      with inlineEl  = tell [open,close] >> return (pret,(nonrec <> [tRec] ,tRecf))
        where
          tr = _fkttable . unComp $ inlineEl
@@ -405,7 +405,7 @@ expandInlineRecursive tbase =
          attrs pre =  T.intercalate "," (fmap (pre <>) $ nonrec <> [tRec])
          nonrec =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id  )) . getCompose <$> m
             where m = F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
-                  tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ head $ _kvrecrels m)) <$> t
+                  tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec  $ _kvrecrels m)) <$> t
          tRec =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose $ l
          tRecf  =  label $ getCompose $ inlineEl
          IT l v =  labelValue $ getCompose $ head $ concat $ F.toList $  labelValue $ getCompose $  snd $  joinNonRef' $  unTB1 tnfil
@@ -413,9 +413,45 @@ expandInlineRecursive tbase =
             where m =  F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ head $ F.toList $ tfilpk
          tbpk =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> m
             where m =  F.toList $ _kvvalues $ labelValue $ getCompose $  tbPK $ tbase
-         tfilpk  =  tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ head $ _kvrecrels m)) <$> v
-         tnfil =   tbFilterE (\m e -> S.member e (S.fromList $ fmap S.fromList $ head $ _kvrecrels m)) <$> t
+         tfilpk  =  tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec $  _kvrecrels m)) <$> v
+         tnfil =   tbFilterE (\m e -> S.member e (S.fromList $ fmap S.fromList $ topRec $ _kvrecrels m)) <$> t
     in top
+
+
+topRec = join . join . fmap unMutRec
+{-
+expandFKMutRecursive t=
+    let
+      query  =  tname <> "(" <> T.intercalate "," (tnonRec <> tRec <> (label <$> l)) <> ") as  ( SELECT "  <> T.intercalate "," (tnonRec<> tRec <> ["null :: record"]) <>" FROM (select * from " <> expandBaseTable t <>  (fst (runWriter (expandQuery' False (fmap unlabelIT $ TB1 tnonRecA)))) <> ") as " <> tname <> " WHERE " <> (pret <> (head tRec)) <> " is null UNION ALL " <> " SELECT " <> T.intercalate "," (fmap (pret  <>) ( tnonRec <> tRec) <> ["ROW(" <> T.intercalate "," (fmap ("sg."<> )  tRec2 ) <> "," <> explodeRowSg itv <> ")" ]) <> " FROM "<> tname <> " sg JOIN (SELECT * FROM " <> expandBaseTable t <>  (fst (runWriter (expandQuery' False (fmap unlabelIT $TB1 tnonRecA)))) <> ") as " <> tname  <>  " ON " <> head ((pret <>) <$> tRec) <> " = sg." <> (head tpk) <> ")"
+      top = tbasen <> " as (select " <> T.intercalate "," tRec2 <> "," <> (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id) itv  ) <> " as " <> lit <> " from " <> tname <> ") "
+      pret = tname <> "."
+
+      explodeRowSg = explodeDelayed  (\i -> "ROW(" <> i <> ")")  "," (const ("sg." <> ))
+      tname = (label $ getCompose $ snd (unTB1 t)) <> "pre"
+      tbasen = (label $ getCompose $ snd (unTB1 t))
+      tnonRec ,tRec :: [Text]
+      tnonRec =  (explodeDelayed id   "," (const id  )) . getCompose <$> m
+        where m = flattenNonRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t)
+      tnonRecA =  (unTB1 t)
+      tpk =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> m
+        where m =  F.toList $  _kvvalues $ labelValue $ getCompose $   tfilpk
+      tRec =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
+        where l = concat $ fmap (_tbref .labelValue . getCompose )   . L.filter (isFKT .labelValue .getCompose) $ flattenRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t)
+              isFKT (FKT _ _ _) = True
+              isFKT i = False
+      tRec2 =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
+          where l = F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
+      (lit,itv) =   case getCompose $ head $ F.toList $   _kvvalues $ labelValue $ getCompose $  snd $    unTB1 tnfil of
+                                      Labeled lit (IT i itv) -> (lit,Unlabeled $ IT i (unlabelIT <$> itv))
+                                      Labeled lit (FKT ref rel  itv) -> (lit,Labeled lit( FKT ref rel itv))
+
+
+      l = fmap getCompose $   flattenRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t)
+      tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec $ _kvrecrels m)) <$> t
+      tfilpk =   tbPK  t
+      tnfil =   tbFilterE (\m e -> S.member e (S.fromList $ fmap S.fromList $ topRec $ _kvrecrels m)) <$> t
+    in tell [query,top]
+-}
 
 expandFKRecursive t=
     let
@@ -435,7 +471,7 @@ expandFKRecursive t=
       tRec =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
         where l = case   getCompose $ justError "nolist" $  safeHead $ L.filter (isFKT .labelValue .getCompose) $ flattenRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t) of
                     Labeled _ (FKT l _ i) -> l
-                    Labeled l i -> errorWithStackTrace (show ("trec",l,i))
+                    Labeled l i -> errorWithStackTrace (show ("trec"::String,l,i))
               isFKT (FKT _ _ _) = True
               isFKT i = False
       tRec2 =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
@@ -446,9 +482,9 @@ expandFKRecursive t=
 
 
       Labeled l _ = getCompose $ justError "nolist" $ safeHead $ flattenRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t)
-      tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ head $ _kvrecrels m)) <$> t
+      tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec $ _kvrecrels m)) <$> t
       tfilpk =   tbPK  t
-      tnfil =   tbFilterE (\m e -> S.member e (S.fromList $ fmap S.fromList $ head $ _kvrecrels m)) <$> t
+      tnfil =   tbFilterE (\m e -> S.member e (S.fromList $ fmap S.fromList $ topRec $ _kvrecrels m)) <$> t
     in tell [query,top]
 
 tlabel t = (label $ getCompose $ snd (unTB1 t))
@@ -616,10 +652,10 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) 
         fun =   recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
 recursePath isLeft isRec vacc ksbn invSchema jo@(Path ifk (RecJoin l f) e)
-    = recursePath isLeft (fmap (\(b,c) -> if L.null c then (b,b) else (b,c)) $ isRec <>  path ) vacc ksbn invSchema (Path ifk f e)
+    = recursePath isLeft (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec <>  [path] ) vacc ksbn invSchema (Path ifk f e)
       where path
-              | L.null l =  fmap (,[]) (fmap (fmap S.toList) $ pathRelRel' jo )
-              | otherwise = (zipWith (,) (fmap (fmap S.toList) $ pathRelRel' jo ) l)
+              | L.null (unMutRec l) = (fmap (fmap S.toList) $ pathRelRel' jo, MutRec [[]] )
+              | otherwise = (fmap (fmap S.toList) $ pathRelRel' jo , l)
 
 recurseTB :: Map Text Table -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TB3Data (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3Data (Labeled Text) Key ())
 recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (m,) <$>
@@ -642,17 +678,19 @@ recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (m,) <$>
                   vacc <- acc
                   let relFk =pathRelRel fk
                       lastItem =  L.filter cond isRec
-                      cond (_,l) = L.length l == 1  && ((== relFk ). S.fromList. last $ l)
+                      cond (_,l) = mAny (\l-> L.length l == 1  && ((== relFk ). S.fromList. last $ l)) l
                   if L.length lastItem < 2
                   then  do
-                    i <- fmap (relFk,) . recursePath nextLeft ( fmap (L.drop 1 ) <$> L.filter (\(_,i) -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) isRec) vacc ( (M.toList $  fmap getCompose items )) invSchema $ fk
+                    i <- fmap (relFk,) . recursePath nextLeft ( fmap (fmap (L.drop 1 ))  <$> L.filter (\(_,i) -> mAny (\i -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) i ) isRec) vacc ( (M.toList $  fmap getCompose items )) invSchema $ fk
                     return (fmap getCompose i:vacc)
                   else return vacc
                   ) (return []) $ P.sortBy (P.comparing pathRelRel) (F.toList $ fks' )
           return (   KV $ M.fromList $ nonFKAttrs <> (fmap (fmap Compose ) pt)))
 
+mAny f (MutRec i) = L.any f i
 
-type RecState k = [([[Rel k]],[[Rel k]])]
+
+type RecState k = [(MutRec [[Rel k]],MutRec [[Rel k]])]
 
 isLeftRel ifk = any (isKOptional.keyType) (S.toList ifk)
 isArrayRel ifk = any (isArray.keyType) (S.toList ifk)
@@ -844,7 +882,7 @@ sup' = (\(ER.Finite i) -> i) . Interval.upperBound
 _unTB1 (TB1 (m,i) ) =  i
 _unTB1 (LeftTB1 (Just i )) = _unTB1 i
 _unTB1 (DelayedTB1 (Just i )) = _unTB1 i
-_unTB1 i =  errorWithStackTrace $ show ("untb1",i)
+_unTB1 i =  errorWithStackTrace $ show ("untb1":: String,i)
 
 instance P.Poset (FKey (KType Text))where
   compare  = (\i j -> case compare (i) (j) of
