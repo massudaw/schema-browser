@@ -977,20 +977,28 @@ tableKeys (ArrayTB1 [i]) = tableKeys i
 
 -- recOverAttr :: Ord k => [Set(Rel k)] -> TB Identity k a -> (Map (Set (Rel k )) (Compose Identity (TB Identity) k a ) -> Map (Set (Rel k )) (Compose Identity (TB Identity) k a ))
 recOverAttr (k:[]) attr =  Map.insert k (_tb attr )
-recOverAttr (k:xs) attr = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . recOverAttr xs (attr) . _kvvalues )))))))  k
+recOverAttr (k:xs) attr = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . recOverAttr xs attr . _kvvalues )))))))  k
 
-recOverMAttr' tag tar  =   go tag
+recOverMAttr' :: [Set (Rel Key)] -> [[Set (Rel Key)]] -> Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b ) ->Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b )
+recOverMAttr' tag tar  m =   foldr go m tar
   where
-    go (k:[]) = Map.alter (fmap (mapComp (\v -> (Le.over fkttable (fmap (fmap (mapComp ( KV . flip (foldr (\m -> recOverAttr m ( v) )) tar  . _kvvalues ))))) v))) k
+    go (k:[]) = Map.alter (fmap (mapComp (\_ -> (Le.over fkttable (fmap (fmap (mapComp ( KV .  recOverAttr tag  v   . _kvvalues ))))) v))) k
     go (k:xs) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (\(KV i) -> KV (go xs i) )))) ))) k
+
+    v = gt tag m
+    gt (k:[]) = unTB . fromJust  . Map.lookup k
+    gt (k:xs) = gt xs . _kvvalues . unTB . snd . head .F.toList. _fkttable . unTB  . fromJust . Map.lookup k
+
 -- recOverAttr' i j = errorWithStackTrace (show i)
 
-
+{-
 recOverAttr' tag   =   go tag
   where
     go (k:[]) = Map.alter (fmap (mapComp (\v -> (Le.over fkttable (fmap (fmap (mapComp ( KV . recOverAttr tag ( v) . _kvvalues ))))) v))) k
     go (k:xs) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (\(KV i) -> KV (go xs i) )))) ))) k
 -- recOverAttr' i j = errorWithStackTrace (show i)
 
-
+-}
+replaceRecRel :: Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b ) -> [MutRec [Set (Rel Key) ]] -> Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b )
+replaceRecRel = foldr (\(MutRec l) v  -> foldr (\a -> recOverMAttr' a l )   v l)
 
