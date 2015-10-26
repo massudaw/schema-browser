@@ -118,8 +118,10 @@ pathRelRel (Path r (FKInlineTable  _   )  _ ) = Set.map Inline r
 pathRelRel (Path r (FKEitherField _    )  _ ) = Set.map Inline r
 pathRelRel (Path r (RecJoin l rel )  a ) =  pathRelRel (Path r rel a)
 
-pathRelRel' :: Path (Set Key ) SqlOperation -> [Set (Rel Key)]
-pathRelRel' (Path r (RecJoin l rel )  a ) = pathRelRel (Path r rel a) : fmap (Set.fromList) l
+pathRelRel' :: Path (Set Key ) SqlOperation -> MutRec [Set (Rel Key)]
+pathRelRel' (Path r (RecJoin l rel )  a )
+  | L.null (unMutRec l) =  MutRec [[pathRelRel (Path r rel a)]]
+  | otherwise = fmap ((pathRelRel (Path r rel a) :) . fmap (Set.fromList)) l
 
 
 
@@ -145,6 +147,7 @@ data Order
 type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Identity))) k a )
 type TB3Data  f k a = (KVMetadata k,Compose f (KV (Compose f (TB f ))) k a )
 
+
 data KVMetadata k
   = KVMetadata
   { _kvname :: Text
@@ -155,7 +158,7 @@ data KVMetadata k
   , _kvorder :: [(k,Order)]
   , _kvattrs :: [k]
   , _kvdelayed :: Set k
-  , _kvrecrels :: [[[Rel k]]]
+  , _kvrecrels :: [MutRec [[Rel k]]]
   }deriving(Eq,Ord,Show,Generic)
 
 kvMetaFullName m = _kvschema m <> "." <> _kvname m
@@ -258,12 +261,14 @@ type TB1 a = TB2 Key a
 type TB2 k a = TB3 Identity k a
 type TB3 f k a = FTB1 f k a
 
-mapKVMeta f (KVMetadata tn sch s j m o k l r ) =KVMetadata tn sch (Set.map f s) (map f j) (map (Set.map f) m ) (fmap (first f) o) (map f k) (Set.map f l) (fmap (fmap (fmap f) ) <$> r)
+mapKVMeta f (KVMetadata tn sch s j m o k l r ) =KVMetadata tn sch (Set.map f s) (map f j) (map (Set.map f) m ) (fmap (first f) o) (map f k) (Set.map f l) (fmap (fmap (fmap (fmap f)) ) <$> r)
 
 
 filterKey' f ((m ,k) ) = (m,) . mapComp (\(KV kv) -> KV $ Map.filterWithKey f kv )  $  k
 filterKey f = fmap f
 
+
+newtype MutRec a = MutRec {unMutRec ::  [a] }deriving(Eq,Ord,Show,Functor,Foldable,Generic,Binary)
 
 traFAttr :: (Traversable g ,Applicative f) => ( FTB a -> f (FTB a) ) -> TB g k a -> f (TB g k a)
 traFAttr f (Attr i v)  = Attr i <$> f v
@@ -448,14 +453,18 @@ data Showable
   deriving(Ord,Eq,Show,Generic)
 
 
+
 data SqlOperation
   = FetchTable Text
   | FKJoinTable Text [Rel Key] Text
-  | RecJoin [[Rel Key]] SqlOperation
+  | RecJoin (MutRec [[Rel Key]])  SqlOperation
   | FKInlineTable Text
   | FKEitherField Text
   deriving(Eq,Ord,Show)
 
+fkTargetTable (FKJoinTable t r tn) = tn
+fkTargetTable (FKInlineTable tn) = tn
+fkTargetTable (RecJoin t tn) = fkTargetTable tn
 
 data TableType
    = ReadOnly
@@ -641,12 +650,12 @@ flattenMap (m,n)  = (concat . fmap nonRef . F.toList . _kvvalues) (head . F.toLi
     nonRef (Compose (Labeled l it@(IT j k ))) =   concat $ flattenMap <$> (F.toList k  )
     nonRef (Compose (Unlabeled it@(IT j k ))) =   concat $ flattenMap <$> (F.toList k  )
 
-flattenNonRec ::  Ord k => [[[Rel k]]] -> TB3Data (Labeled Text) k a -> [Compose (Labeled Text) (TB (Labeled Text) )  k a]
-flattenNonRec rels (m,n)  = (concat . fmap (\r -> if pred rels r then nonRef (fmap (L.drop 1)   (L.filter (\rel -> keyattr r == head rel ) rels )) r  else []  ) . F.toList . _kvvalues) (head . F.toList $  getCompose n)
+flattenNonRec ::  Ord k => [MutRec [[Rel k]]] -> TB3Data (Labeled Text) k a -> [Compose (Labeled Text) (TB (Labeled Text) )  k a]
+flattenNonRec rels (m,n)  = (concat . fmap (\r -> if pred rels r then nonRef (fmap (L.drop 1) <$>   (L.filter (\(MutRec rel) -> L.any (\rel -> keyattr r == head rel )rel) rels )) r  else []  ) . F.toList . _kvvalues) (head . F.toList $  getCompose n)
   where
     -- compJoin :: Monad f => Compose f (Compose f g ) k  a -> Compose f g k a
-    pred rs v = not $ L.any (\r ->  L.length r == 1 && last r == keyattr  v  ) rs
-    nonRef :: (Ord k) => [[[Rel k]]] -> Compose (Labeled Text) (TB (Labeled Text)) k a ->  [Compose (Labeled Text) (TB (Labeled Text) )  k a]
+    pred rs v = not $ L.any (\(MutRec r) ->  L.any (\r -> L.length r == 1 && last r == keyattr  v ) r ) rs
+    nonRef :: (Ord k) => [MutRec [[Rel k]]] -> Compose (Labeled Text) (TB (Labeled Text)) k a ->  [Compose (Labeled Text) (TB (Labeled Text) )  k a]
     nonRef r (Compose (Labeled l (Attr k v ))) = [Compose (Labeled l ( Attr k v))]
     nonRef r (Compose (Labeled l (FKT i _ k ))) = tra
         where tra = i <> concat  (flattenNonRec r <$> (F.toList k))
@@ -655,13 +664,13 @@ flattenNonRec rels (m,n)  = (concat . fmap (\r -> if pred rels r then nonRef (fm
     nonRef r (Compose (Labeled l it@(IT j k ))) =   concat $ flattenNonRec r <$> (F.toList k  )
     nonRef r (Compose (Unlabeled it@(IT j k ))) =   concat $ flattenNonRec r <$> (F.toList k  )
 
-flattenRec ::  (Show a, Show k ,Ord k) => [[[Rel k]]] -> TB3Data (Labeled Text) k a -> [Compose (Labeled Text) (TB (Labeled Text) )  k a]
-flattenRec rels (m,n)  = (concat . fmap (\r -> if pred rels r then nonRef (fmap (L.drop 1)   (L.filter (\rel -> keyattr r == head rel ) rels )) r  else []  ) . F.toList . _kvvalues) (head . F.toList $  getCompose n)
+flattenRec ::  (Show a, Show k ,Ord k) => [MutRec [[Rel k]]] -> TB3Data (Labeled Text) k a -> [Compose (Labeled Text) (TB (Labeled Text) )  k a]
+flattenRec rels (m,n)  = (concat . fmap (\r -> if pred rels r then nonRef (fmap (L.drop 1)   <$> (L.filter (\(MutRec rel) -> L.any (\rel -> keyattr r == head rel ) rel ) rels )) r  else []  ) . F.toList . _kvvalues) (head . F.toList $  getCompose n)
   where
     -- compJoin :: Monad f => Compose f (Compose f g ) k  a -> Compose f g k a
-    pred rs v = L.any (\r ->   head r == keyattr  v  ) rs
-    nonRef :: (Show a, Show k,Ord k) => [[[Rel k]]] -> Compose (Labeled Text) (TB (Labeled Text)) k a ->  [Compose (Labeled Text) (TB (Labeled Text) )  k a]
-    nonRef r  v | concat (concat r) == []  = [v]
+    pred rs v = L.any (\(MutRec r) ->   L.any (\r -> head r == keyattr  v ) r  ) rs
+    nonRef :: (Show a, Show k,Ord k) => [MutRec [[Rel k]]] -> Compose (Labeled Text) (TB (Labeled Text)) k a ->  [Compose (Labeled Text) (TB (Labeled Text) )  k a]
+    nonRef r  v | concat (concat (concat (fmap unMutRec r))) == []  = [v]
     nonRef r (Compose (Labeled l (Attr k v ))) = [Compose (Labeled l ( Attr k v))]
     nonRef r (Compose (Labeled l (FKT i _ k ))) = tra
         where tra = i <> concat  (flattenRec r <$> (F.toList k))
@@ -670,21 +679,21 @@ flattenRec rels (m,n)  = (concat . fmap (\r -> if pred rels r then nonRef (fmap 
     nonRef r (Compose (Labeled l it@(IT j k ))) =   concat $ flattenRec r <$> (F.toList k  )
     nonRef r (Compose (Unlabeled it@(IT j k ))) =   concat $ flattenRec r <$> (F.toList k  )
 
-filterRec ::  (Functor f,Show a, Show k ,Ord k) => [[[Rel k]]] -> TB3Data f k a -> TB3Data f k a
-filterRec rels (m,n)  = (m, mapComp (KV . fmap (mapComp (nonRef (L.drop 1 <$> rels))) . Map.filterWithKey (\k _ -> pred rels  k ) . _kvvalues )  n  )
+filterRec ::  (Functor f,Show a, Show k ,Ord k) => [MutRec [[Rel k]]] -> TB3Data f k a -> TB3Data f k a
+filterRec rels (m,n)  = (m, mapComp (KV . fmap (mapComp (nonRef (fmap (L.drop 1) <$> rels))) . Map.filterWithKey (\k _ -> pred rels  k ) . _kvvalues )  n  )
   where
-    pred rs v = L.any (\r ->   Set.fromList (head r) == v  ) rs
-    nonRef :: (Functor f,Show a, Show k,Ord k) => [[[Rel k]]] -> TB f k a ->  TB f   k a
-    nonRef r  v | concat (concat r) == []  = v
+    pred rs v = L.any (\(MutRec r) ->  L.any (\r ->   Set.fromList (head r) == v ) r ) rs
+    nonRef :: (Functor f,Show a, Show k,Ord k) => [MutRec [[Rel k]]] -> TB f k a ->  TB f   k a
+    nonRef r  v | concat (concat (concat (fmap unMutRec r))) == []  = v
     nonRef r (FKT i rel k) = FKT i rel (filterRec r <$> k)
     nonRef r (IT j k ) =   IT j (filterRec r <$> k )
     nonRef r i = i
 
-filterNonRec ::  (Functor f,Show a, Show k ,Ord k) => [[[Rel k]]] -> TB3Data f k a -> TB3Data f k a
-filterNonRec rels (m,n)  = (m, mapComp (KV . fmap (mapComp (nonRef (L.drop 1 <$> rels))) . Map.filterWithKey (\k _ -> pred rels  k ) . _kvvalues )  n  )
+filterNonRec ::  (Functor f,Show a, Show k ,Ord k) => [MutRec [[Rel k]]] -> TB3Data f k a -> TB3Data f k a
+filterNonRec rels (m,n)  = (m, mapComp (KV . fmap (mapComp (nonRef (fmap (L.drop 1) <$> rels))) . Map.filterWithKey (\k _ -> pred rels  k ) . _kvvalues )  n  )
   where
-    pred rs v = not $ L.any (\r ->  L.length r == 1 && Set.fromList (last r) == v  ) rs
-    nonRef :: (Functor f,Show a, Show k,Ord k) => [[[Rel k]]] -> TB f k a ->  TB f   k a
+    pred rs v = not $ L.any (\(MutRec r) ->  L.any (\r -> L.length r == 1 && Set.fromList (last r) == v) r   ) rs
+    nonRef :: (Functor f,Show a, Show k,Ord k) => [MutRec [[Rel k]]] -> TB f k a ->  TB f   k a
     nonRef r (FKT i rel k) = FKT i rel (filterNonRec r <$> k)
     nonRef r (IT j k ) =   IT j (filterNonRec r <$> k )
     nonRef r i = i
@@ -752,8 +761,12 @@ traComp f =  fmap Compose. traverse f . getCompose
 
 concatComp  =  Compose . concat . fmap getCompose
 
-tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (uniqueConstraint t)[] (F.toList $ rawAttrs t) (rawDelayed t) rec
-  where rec = fmap (fmap F.toList. pathRelRel' )$ filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
+tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (uniqueConstraint t)[] (F.toList $ rawAttrs t) (rawDelayed t) (paths' <> paths)
+  where rec = filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
+        same = filter ((tableName t ==). fkTargetTable . pathRel) rec
+        notsame = filter (not . (tableName t ==). fkTargetTable . pathRel) rec
+        paths = fmap (fmap (fmap F.toList). pathRelRel' ) notsame
+        paths' = (\i -> if L.null i then [] else [MutRec i]) $ fmap ((head .unMutRec). fmap (fmap F.toList). pathRelRel' ) same
 
 
 tbmap :: Ord k => Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
@@ -964,14 +977,28 @@ tableKeys (ArrayTB1 [i]) = tableKeys i
 
 -- recOverAttr :: Ord k => [Set(Rel k)] -> TB Identity k a -> (Map (Set (Rel k )) (Compose Identity (TB Identity) k a ) -> Map (Set (Rel k )) (Compose Identity (TB Identity) k a ))
 recOverAttr (k:[]) attr =  Map.insert k (_tb attr )
-recOverAttr (k:xs) attr = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . recOverAttr xs (attr) . _kvvalues )))))))  k
+recOverAttr (k:xs) attr = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . recOverAttr xs attr . _kvvalues )))))))  k
 
+recOverMAttr' :: [Set (Rel Key)] -> [[Set (Rel Key)]] -> Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b ) ->Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b )
+recOverMAttr' tag tar  m =   foldr go m tar
+  where
+    go (k:[]) = Map.alter (fmap (mapComp (\_ -> (Le.over fkttable (fmap (fmap (mapComp ( KV .  recOverAttr tag  v   . _kvvalues ))))) v))) k
+    go (k:xs) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (\(KV i) -> KV (go xs i) )))) ))) k
 
+    v = gt tag m
+    gt (k:[]) = unTB . fromJust  . Map.lookup k
+    gt (k:xs) = gt xs . _kvvalues . unTB . snd . head .F.toList. _fkttable . unTB  . fromJust . Map.lookup k
+
+-- recOverAttr' i j = errorWithStackTrace (show i)
+
+{-
 recOverAttr' tag   =   go tag
   where
     go (k:[]) = Map.alter (fmap (mapComp (\v -> (Le.over fkttable (fmap (fmap (mapComp ( KV . recOverAttr tag ( v) . _kvvalues ))))) v))) k
     go (k:xs) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (\(KV i) -> KV (go xs i) )))) ))) k
 -- recOverAttr' i j = errorWithStackTrace (show i)
 
-
+-}
+replaceRecRel :: Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b ) -> [MutRec [Set (Rel Key) ]] -> Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b )
+replaceRecRel = foldr (\(MutRec l) v  -> foldr (\a -> recOverMAttr' a l )   v l)
 

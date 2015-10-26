@@ -277,8 +277,8 @@ paintEdit e b i  = element e # sink0 UI.style ((\ m n -> pure . ("background-col
           | isJust i  && isNothing j  = "green"
           | isNothing i  && isNothing j = "red"
           | isNothing i && isJust j  = "purple"
-          | i /= j = "yellow"
-          -- | i /= j = traceShow (i,j) "yellow"
+          -- | i /= j = "yellow"
+          | i /= j = traceShow (i,j) "yellow"
           | i == j = "blue"
           | otherwise = "green"
 

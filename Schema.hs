@@ -151,29 +151,34 @@ keyTables conn userconn (schema ,user) = do
 addRecInit :: Map Text Table -> Map Text Table
 addRecInit m = fmap recOverFKS m
   where
-        recOverFKS t  = t {rawFKS = S.map path (rawFKS t) }
+        recOverFKS t  = t {rawFKS = S.map (traceShowId .path. traceShow (tableName t)) (rawFKS t) }
           where
-                path p@(Path k rel tr) =
+                path pini@(Path k rel tr) =
                     Path k (case rel of
-                      FKInlineTable nt  -> case openPath S.empty [] p of
-                              [] -> if nt == tableName t then  RecJoin [] (FKInlineTable nt) else FKInlineTable nt
-                              e -> RecJoin e (FKInlineTable nt)
-                      FKJoinTable a b nt -> case openPath S.empty [] p of
-                              [] -> if nt == tableName t then  RecJoin [] (FKJoinTable a b nt) else FKJoinTable a b nt
-                              e -> RecJoin e (FKJoinTable a b nt)
+                      FKInlineTable nt  -> case  L.filter (not .L.null) $ openPath S.empty [] pini of
+                              [] -> if nt == tableName t then  RecJoin (MutRec []) (FKInlineTable nt) else FKInlineTable nt
+                              e -> RecJoin (MutRec e) (FKInlineTable nt)
+                      FKJoinTable a b nt -> case L.filter (not .L.null) $  openPath S.empty [] pini of
+                              [] -> if nt == tableName t then  RecJoin (MutRec []) (FKJoinTable a b nt) else FKJoinTable a b nt
+                              e -> RecJoin (MutRec e) (FKJoinTable a b nt)
                       ) tr
-
-                openPath ts p (Path _(FKInlineTable nt) l)
-                  | nt == tableName t = p
-                  | S.member nt ts = []
-                  | otherwise = openTable (S.insert nt ts) p nt
-                openPath ts p (Path _(FKJoinTable _ _ nt) _)
-                  | nt == tableName t = p
-                  | S.member nt ts = []
-                  | otherwise = openTable (S.insert nt ts) p nt
-                openTable t p nt  =  concat $ fmap (\pa-> openPath t ( p <> [F.toList (pathRelRel pa)]) pa) fsk
-                  where Just tb = M.lookup nt m
-                        fsk = F.toList $ rawFKS tb
+                    where
+                      openPath ts p pa@(Path _(FKInlineTable nt) l)
+                        | pini  == pa = [p]
+                        | S.member pa ts = traceShow ("endit",nt,tableName t ,ts) []
+                        | otherwise = openTable (S.insert pa ts) (traceShow ("in",ts ,p)p) nt
+                      openPath ts p pa@(Path _(FKJoinTable _ _ nt) _)
+                        | pini == pa  = [p]
+                        | S.member pa ts = traceShow ("endfk",nt,tableName t ,ts) []
+                        | otherwise = openTable (S.insert pa ts) (traceShow ("fk",ts,p) p) nt
+                      openTable t p nt  =  do
+                              let cons pa
+                                    | pa == pini = p
+                                    | otherwise = p <> [F.toList (pathRelRel pa)]
+                              ix <- fmap (\pa-> openPath t ( cons pa ) pa) fsk
+                              return (concat (L.filter (not.L.null) ix))
+                        where Just tb = M.lookup nt m
+                              fsk = F.toList $ rawFKS tb
 
 
 
@@ -261,6 +266,9 @@ testParse' db sch q = withTestConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                            rpd = rp -- forceDesc True (markDelayed True rp)
                                            rpq = selectQuery rpd
+                                       print $ tableMeta $ lookTable inf q
+                                       print rp
+                                       print rpq
                                        q <- queryWith_ (fromRecord (unTB1 $ unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
                                            )
@@ -270,6 +278,9 @@ testParse db sch q = withConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                            rpd = rp -- forceDesc True (markDelayed True rp)
                                            rpq = selectQuery rpd
+                                       print $ tableMeta $ lookTable inf q
+                                       print rp
+                                       print rpq
                                        q <- queryWith_ (fromRecord (unTB1 $ unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
                                            )
@@ -315,7 +326,11 @@ eventTable inf table = do
               h =<< takeMVar mnew
            bh <- R.stepper ini e
            let td = (R.tidings bh e)
-           putMVar mvar (M.insert (tableMeta table) (mnew,td) mmap)
+           -- Dont
+           if (rawTableType table == ReadWrite)
+              then  putMVar mvar (M.insert (tableMeta table) (mnew,td) mmap)
+              else putMVar mvar  mmap
+
            return (mnew,td)
     return (mtable,fmap TB1 <$> td)
 
@@ -377,8 +392,8 @@ applyRecord'
      -> TBIdx Key a
      -> DBM Key a (TBData Key a)
 applyRecord' t@((m, v)) (_ ,_  , k)  = fmap (m,) $ traComp (fmap KV . sequenceA . M.mapWithKey (\key vi -> foldl  (\i j -> i >>= edit key j ) (return vi) k  ) . _kvvalues ) v
-  where edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  traComp (flip applyAttr' k ) v else return v
-        edit  key  k@(PInline s _ ) v = if (_relOrigin $ head $ F.toList $ key) == s then  traComp (flip applyAttr' k ) v else return v
+  where edit  key  k@(PAttr  s _) v = if (head $ F.toList $ key) == Inline s then  traComp (flip applyAttr' k ) v else return v
+        edit  key  k@(PInline s _ ) v = if (head $ F.toList $ key) == Inline s then  traComp (flip applyAttr' k ) v else return v
         edit  key  k@(PFK rel s _ _ ) v = if  key == S.fromList rel then  traComp (flip applyAttr' k ) v else return v
 applyTB1'
   :: (Index a~ a ,Show a , Ord a ) =>

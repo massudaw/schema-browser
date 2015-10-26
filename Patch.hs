@@ -190,7 +190,6 @@ createTB1
      (Index (TBData d a )) ->
      (KVMetadata d , Compose Identity  (KV (Compose Identity  (TB Identity))) d a)
 createTB1 (m ,s ,k)  = (m , _tb .KV . mapFromTBList . fmap (_tb . createAttr) $  k)
---createTB1  i = errorWithStackTrace (show i)
 
 
 
@@ -200,8 +199,8 @@ applyRecord
      -> TBIdx d a
      -> TBData d a
 applyRecord t@((m, v)) (_ ,_  , k)  = (m ,mapComp (KV . Map.mapWithKey (\key vi -> foldl  (edit key) vi k  ) . _kvvalues ) v)
-  where edit  key v k@(PAttr  s _)  = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
-        edit  key v k@(PInline s _ ) = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
+  where edit  key v k@(PAttr  s _)  = if (head $ F.toList $ key) == Inline s then  mapComp (flip applyAttr k ) v else v
+        edit  key v k@(PInline s _ ) = if (head $ F.toList $ key) == Inline s then  mapComp (flip applyAttr k ) v else v
         edit  key v k@(PFK rel _  _ _ ) = if   key == Set.fromList rel  then  mapComp (flip applyAttr k ) v else v
 
 patchTB1 :: (Show a , Ord a ,a ~ Index a ,Show k,Ord k) => TBData k  a -> Index (TBData k  a)

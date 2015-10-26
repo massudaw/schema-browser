@@ -202,7 +202,7 @@ tbCase inf pgs constr a@(Attr i _ ) wl plugItens preoldItems = do
         return $ TrivialWidget (triding tds) dv
 
 
-tbRecCase k inf pgs constr a@(FKT rel l tb) wl plugItens preoldItems' = do
+tbRecCase inf pgs constr a@(FKT rel l tb) wl plugItens preoldItems' = do
       let preoldItems = emptyFKT tb <$> preoldItems'
           emptyFKT (TB1 _ ) = maybe Nothing (Just. id)
           emptyFKT (LeftTB1 _ )= Just . maybe (FKT (fmap (mapComp (mapFAttr (const (LeftTB1 Nothing)))) rel) l (LeftTB1 Nothing)) id
@@ -225,7 +225,7 @@ tbRecCase k inf pgs constr a@(FKT rel l tb) wl plugItens preoldItems' = do
       return (TrivialWidget  (tidings binipre (unionWith const (rumors preoldItems) ev)) out)
 
 
-tbRecCase k inf pgs constr a@(IT l tb) wl plugItens preoldItems' = do
+tbRecCase  inf pgs constr a@(IT l tb) wl plugItens preoldItems' = do
       let preoldItems = emptyIT tb  <$> preoldItems'
           emptyIT (TB1 _ ) = maybe Nothing (Just. id)
           emptyIT (LeftTB1 _) = Just . maybe (IT l (LeftTB1 Nothing)) id
@@ -290,7 +290,7 @@ eiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItems = do
             w <- jm
             wn <- (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) refs)
             return (w <> [(unTB m,wn)])
-        ) (return []) (P.sortBy (P.comparing fst ) . M.toList $ foldr recOverAttr' (unTBMap $ ftb) (fmap S.fromList <$> _kvrecrels meta))
+        ) (return []) (P.sortBy (P.comparing fst ) . M.toList $ replaceRecRel (unTBMap $ ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta))
   let
       tableb :: Tidings (Maybe (TB1 Showable))
       tableb  = fmap (TB1 . (tableMeta table,) . Compose . Identity . KV . mapFromTBList . fmap _tb) . Tra.sequenceA <$> Tra.sequenceA (triding .snd <$> fks)
@@ -336,13 +336,13 @@ uiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItems = do
 
   fks <- foldl' (\jm (l,m)  -> do
             w <- jm
-            let el = L.find ((l==) . head ) (fmap S.fromList <$> ( _kvrecrels meta))
-            wn <- if isJust el
-                then (tbRecCase el  inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $  refs)
+            let el =  L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> ( _kvrecrels meta))
+            wn <- if el
+                then (tbRecCase   inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $  refs)
 
                 else (tbCase inf pgs  constr (unTB m) w plugmods ) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $  refs)
             return (w <> [(unTB m,wn)])
-        ) (return []) (P.sortBy (P.comparing fst ) . M.toList $ foldr recOverAttr' (unTBMap $ ftb) (fmap S.fromList <$> _kvrecrels meta) )
+        ) (return []) (P.sortBy (P.comparing fst ) . M.toList $ replaceRecRel  (unTBMap $ ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta) )
   let
       tableb :: Tidings (Maybe (TB1 Showable))
       tableb  = fmap (TB1 .(tableMeta table,) . Compose . Identity . KV . mapFromTBList . fmap _tb) . Tra.sequenceA <$> Tra.sequenceA (triding .snd <$> fks)
@@ -476,7 +476,9 @@ processPanelTable inf attrsB res table oldItemsi = do
   diffEdi <- mapEvent id $ crudEdi <$> facts oldItemsi <*> attrsB <@ UI.click editB
   diffDel <- mapEvent id $ crudDel <$> facts (fmap tableNonRef <$> oldItemsi) <@ UI.click deleteB
   diffIns <- mapEvent id $ crudIns <$>  attrsB <@ UI.click insertB
-  transaction <- UI.span# set children [insertB,editB,deleteB]
+  transaction <- UI.span #
+         set children [insertB,editB,deleteB] #
+         set UI.style (noneShowSpan (ReadWrite ==  rawTableType table ))
   return (transaction , fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffDel] )
 
 
@@ -714,7 +716,7 @@ backFKRef
      -> f (Compose Identity (TB f1) Key a)
 backFKRef relTable ifk = fmap (_tb . uncurry Attr). reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1
   where
-        reorderPK l = fmap (\i -> justError (show ("reorder wrong", ifk ,relTable , l,i))  $ L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
+        reorderPK l = fmap (\i -> justError (show ("reorder wrong" :: String, ifk ,relTable , l,i))  $ L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
         lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
           where knm =  M.lookup ko relTable
 
