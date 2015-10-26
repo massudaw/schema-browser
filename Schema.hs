@@ -153,29 +153,32 @@ addRecInit m = fmap recOverFKS m
   where
         recOverFKS t  = t {rawFKS = S.map (traceShowId .path. traceShow (tableName t)) (rawFKS t) }
           where
-                path p@(Path k rel tr) =
+                path pini@(Path k rel tr) =
                     Path k (case rel of
-                      FKInlineTable nt  -> case  L.filter (not .L.null) $ openPath S.empty [] p of
+                      FKInlineTable nt  -> case  L.filter (not .L.null) $ openPath S.empty [] pini of
                               [] -> if nt == tableName t then  RecJoin (MutRec []) (FKInlineTable nt) else FKInlineTable nt
                               e -> RecJoin (MutRec e) (FKInlineTable nt)
-                      FKJoinTable a b nt -> case L.filter (not .L.null) $  openPath S.empty [] p of
+                      FKJoinTable a b nt -> case L.filter (not .L.null) $  openPath S.empty [] pini of
                               [] -> if nt == tableName t then  RecJoin (MutRec []) (FKJoinTable a b nt) else FKJoinTable a b nt
                               e -> RecJoin (MutRec e) (FKJoinTable a b nt)
                       ) tr
-
-                openPath ts p pa@(Path _(FKInlineTable nt) l)
-                  | nt == tableName t = [p]
-                  | S.member (nt,pa) ts = traceShow ("endit",nt,tableName t ,ts) []
-                  | otherwise = openTable (S.insert (nt,pa) ts) (traceShow ("in",ts ,p)p) nt
-                openPath ts p pa@(Path _(FKJoinTable _ _ nt) _)
-                  | nt == tableName t = [p]
-                  | S.member (nt,pa) ts = traceShow ("endfk",nt,tableName t ,ts) []
-                  | otherwise = openTable (S.insert (nt,pa) ts) (traceShow ("fk",ts,p) p) nt
-                openTable t p nt  =  do
-                        ix <- fmap (\pa-> openPath t ( p  <>  [F.toList (pathRelRel pa)] ) pa) fsk
-                        return (concat (L.filter (not.L.null) ix))
-                  where Just tb = M.lookup nt m
-                        fsk = F.toList $ rawFKS tb
+                    where
+                      openPath ts p pa@(Path _(FKInlineTable nt) l)
+                        | pini  == pa = [p]
+                        | S.member pa ts = traceShow ("endit",nt,tableName t ,ts) []
+                        | otherwise = openTable (S.insert pa ts) (traceShow ("in",ts ,p)p) nt
+                      openPath ts p pa@(Path _(FKJoinTable _ _ nt) _)
+                        | pini == pa  = [p]
+                        | S.member pa ts = traceShow ("endfk",nt,tableName t ,ts) []
+                        | otherwise = openTable (S.insert pa ts) (traceShow ("fk",ts,p) p) nt
+                      openTable t p nt  =  do
+                              let cons pa
+                                    | pa == pini = p
+                                    | otherwise = p <> [F.toList (pathRelRel pa)]
+                              ix <- fmap (\pa-> openPath t ( cons pa ) pa) fsk
+                              return (concat (L.filter (not.L.null) ix))
+                        where Just tb = M.lookup nt m
+                              fsk = F.toList $ rawFKS tb
 
 
 
@@ -323,6 +326,7 @@ eventTable inf table = do
               h =<< takeMVar mnew
            bh <- R.stepper ini e
            let td = (R.tidings bh e)
+           -- Dont
            if (rawTableType table == ReadWrite)
               then  putMVar mvar (M.insert (tableMeta table) (mnew,td) mmap)
               else putMVar mvar  mmap

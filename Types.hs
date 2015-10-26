@@ -453,6 +453,7 @@ data Showable
   deriving(Ord,Eq,Show,Generic)
 
 
+
 data SqlOperation
   = FetchTable Text
   | FKJoinTable Text [Rel Key] Text
@@ -461,6 +462,9 @@ data SqlOperation
   | FKEitherField Text
   deriving(Eq,Ord,Show)
 
+fkTargetTable (FKJoinTable t r tn) = tn
+fkTargetTable (FKInlineTable tn) = tn
+fkTargetTable (RecJoin t tn) = fkTargetTable tn
 
 data TableType
    = ReadOnly
@@ -757,8 +761,12 @@ traComp f =  fmap Compose. traverse f . getCompose
 
 concatComp  =  Compose . concat . fmap getCompose
 
-tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (uniqueConstraint t)[] (F.toList $ rawAttrs t) (rawDelayed t) rec
-  where rec = fmap (fmap (fmap F.toList). pathRelRel' )$ filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
+tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (uniqueConstraint t)[] (F.toList $ rawAttrs t) (rawDelayed t) (paths' <> paths)
+  where rec = filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
+        same = filter ((tableName t ==). fkTargetTable . pathRel) rec
+        notsame = filter (not . (tableName t ==). fkTargetTable . pathRel) rec
+        paths = fmap (fmap (fmap F.toList). pathRelRel' ) notsame
+        paths' = (\i -> if L.null i then [] else [MutRec i]) $ fmap ((head .unMutRec). fmap (fmap F.toList). pathRelRel' ) same
 
 
 tbmap :: Ord k => Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
@@ -970,6 +978,12 @@ tableKeys (ArrayTB1 [i]) = tableKeys i
 -- recOverAttr :: Ord k => [Set(Rel k)] -> TB Identity k a -> (Map (Set (Rel k )) (Compose Identity (TB Identity) k a ) -> Map (Set (Rel k )) (Compose Identity (TB Identity) k a ))
 recOverAttr (k:[]) attr =  Map.insert k (_tb attr )
 recOverAttr (k:xs) attr = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . recOverAttr xs (attr) . _kvvalues )))))))  k
+
+recOverMAttr' tag tar  =   go tag
+  where
+    go (k:[]) = Map.alter (fmap (mapComp (\v -> (Le.over fkttable (fmap (fmap (mapComp ( KV . flip (foldr (\m -> recOverAttr m ( v) )) tar  . _kvvalues ))))) v))) k
+    go (k:xs) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (\(KV i) -> KV (go xs i) )))) ))) k
+-- recOverAttr' i j = errorWithStackTrace (show i)
 
 
 recOverAttr' tag   =   go tag

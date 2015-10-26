@@ -364,7 +364,7 @@ parseLabeledTable (LeftTB1 (Just i )) =
 parseLabeledTable  tb1 = traverse parseRecord  $ tb1
 
 parseRecord  (me,m) = (char '('  *> (do
-  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (M.toList (foldr recOverAttr'  (_kvvalues $ unTB m) (fmap (fmap S.fromList .head .unMutRec ) $ _kvrecrels  me))) ) (char ',')
+  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (M.toList (foldr (\i@(MutRec l) v  -> foldr (\a b -> recOverMAttr' a l b)   v l)  (_kvvalues $ unTB m) (fmap (fmap (fmap S.fromList) ) $ _kvrecrels  me))) ) (char ',')
   return (me,Compose $ Identity $  KV (M.fromList im) )) <*  char ')' )
 
 parseRow els  = (char '('  *> (do
