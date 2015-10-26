@@ -164,12 +164,12 @@ addRecInit m = fmap recOverFKS m
                       ) tr
                     where
                       openPath ts p pa@(Path _(FKInlineTable nt) l)
-                        | pini  == pa = [p]
-                        | S.member pa ts = traceShow ("endit",nt,tableName t ,ts) []
+                        | nt == tableName t = [p]
+                        | S.member pa ts =  []
                         | otherwise = openTable (S.insert pa ts) (traceShow ("in",ts ,p)p) nt
                       openPath ts p pa@(Path _(FKJoinTable _ _ nt) _)
-                        | pini == pa  = [p]
-                        | S.member pa ts = traceShow ("endfk",nt,tableName t ,ts) []
+                        | nt == tableName t  = [p]
+                        | S.member pa ts =  []
                         | otherwise = openTable (S.insert pa ts) (traceShow ("fk",ts,p) p) nt
                       openTable t p nt  =  do
                               let cons pa
