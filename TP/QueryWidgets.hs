@@ -6,6 +6,7 @@ import SortList
 import Data.Functor.Identity
 import Control.Monad.Writer
 import Control.Monad
+import SchemaQuery
 import qualified Data.Binary as B
 import Control.Concurrent
 import qualified Data.Poset as P
@@ -475,7 +476,7 @@ processPanelTable inf attrsB res table oldItemsi = do
          sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip contains j) i  ) (facts oldItemsi ) res))
   let
          crudEdi (Just (TB1 i)) (Just (TB1 j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $difftable i  g) $ transaction inf $ fullDiffEdit inf   i j
-         crudIns  (Just (TB1 j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> insertMod inf j table
+         crudIns  (Just (TB1 j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf (fullDiffInsert inf j)
          crudDel (Just (TB1 j))  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> deleteMod inf j table
 
 
@@ -714,18 +715,6 @@ offsetField  init eve  max = mdo
   return (TrivialWidget offsetT offparen)
 
 
-backFKRef
-  :: (Show (f Key ),Show a, Functor f) =>
-     M.Map Key Key
-     -> f Key
-     -> TB2 Key a
-     -> f (Compose Identity (TB f1) Key a)
-backFKRef relTable ifk = fmap (_tb . uncurry Attr). reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1
-  where
-        reorderPK l = fmap (\i -> justError (show ("reorder wrong" :: String, ifk ,relTable , l,i))  $ L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
-        lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
-          where knm =  M.lookup ko relTable
-
 
 tbrefM i@(FKT _  _ _)  =  _tbref i
 tbrefM j = [Compose $ Identity $ j ]
@@ -854,94 +843,6 @@ sorting' ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i)
 
 sorting k = fmap TB1 . sorting' k . fmap unTB1
 
-deleteMod :: InformationSchema ->  TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
-deleteMod inf j@(meta,_) table = do
-  let patch =  (tableMeta table, getPKM j,[])
-  deletePatch (conn inf)  patch table
-  Just <$> logTableModification inf (TableModification Nothing table patch)
-
---
---  MultiTransaction Postgresql insertOperation
---
-
-type TransactionM = WriterT [TableModification (TBIdx Key Showable)] IO
-
-fullInsert inf = Tra.traverse (fullInsert' inf )
-
-fullInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-fullInsert' inf ((k1,v1) )  = do
-   let proj = _kvvalues . unTB
-   ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
-   (m,t) <- liftIO $ eventTable inf (lookTable inf (_kvname k1))
-   l <- currentValue (facts t)
-   if  isJust $ L.find ((==tbPK (tableNonRef (TB1 ret))). tbPK . tableNonRef ) l
-      then do
-        return ret
-      else do
-        i@(Just (TableModification _ _ tb))  <- liftIO $ insertMod inf ret (lookTable inf (_kvname k1))
-        tell (maybeToList i)
-        return $ createTB1 tb
-
-
-noInsert inf = Tra.traverse (noInsert' inf)
-
-noInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-noInsert' inf (k1,v1)   = do
-   let proj = _kvvalues . unTB
-   (k1,) . Compose . Identity . KV <$>  Tra.sequence (fmap (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1))
-
-
-insertMod :: InformationSchema ->  TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
-insertMod inf j  table = do
-  let patch = patchTB1 j
-  kvn <- insertPatch fromRecord (conn  inf) patch table
-  let mod =  TableModification Nothing table kvn
-  Just <$> logTableModification inf mod
-
-
-transaction :: InformationSchema -> TransactionM a -> IO a
-transaction inf log = withTransaction (conn inf) $ do
-  (md,mods)  <- runWriterT log
-  let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
-  Tra.traverse (\(k,v) -> do
-    (m,t) <- eventTable inf k
-    l <- currentValue (facts t)
-    let lf = foldl' (\i p -> applyTable  i (PAtom p)) l v
-    putMVar m (fmap unTB1 lf)
-    ) (M.toList aggr)
-  return md
-
-fullDiffEdit :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-fullDiffEdit inf old@((k1,v1) ) (k2,v2) = do
-   let proj = _kvvalues . unTB
-   edn <- (k2,) . Compose . Identity . KV <$>  Tra.sequence (M.intersectionWith (\i j -> Compose <$>  tbDiffEdit inf  (unTB i) (unTB j) ) (proj v1 ) (proj v2))
-   mod <- liftIO $ updateModAttr inf edn old (lookTable inf (_kvname k2))
-   tell (maybeToList mod)
-   return edn
-
-updateModAttr :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
-updateModAttr inf kv old table = do
-  patch <- updatePatch (conn  inf) kv  old  table
-  let mod =  TableModification Nothing table patch
-  Just <$> logTableModification inf mod
-
-
-tbDiffEdit :: InformationSchema -> TB Identity Key Showable -> TB Identity Key Showable -> TransactionM (Identity (TB Identity Key  Showable))
-tbDiffEdit inf i j
-  | i == j =  return (Identity j)
-  | otherwise = tbInsertEdit inf  j
-
-tbInsertEdit inf  j@(Attr k1 k2) = return $ Identity  (Attr k1 k2)
-tbInsertEdit inf  (IT k2 t2) = Identity . IT k2 <$> noInsert inf t2
-tbInsertEdit inf  f@(FKT pk rel2  t2) =
-   case t2 of
-        t@(TB1 (_,l)) -> do
-           let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           Identity . (\tb -> FKT ( backFKRef relTable  (keyAttr .unTB <$> pk) tb) rel2 tb ) <$> fullInsert inf t
-        LeftTB1 i ->
-           maybe (return (Identity f) ) (fmap (fmap attrOptional) . tbInsertEdit inf) (unLeftItens f)
-        ArrayTB1 l ->
-           fmap (fmap (attrArray f)) $ fmap Tra.sequenceA $ Tra.traverse (\ix ->   tbInsertEdit inf $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. length l - 1 ]
 
 rendererHeaderUI k v = const (renderer k) v
   where renderer k = UI.div # set items [UI.div # set text (T.unpack $ keyValue k ) , UI.div # set text (T.unpack $ showTy id (keyType k)) ]

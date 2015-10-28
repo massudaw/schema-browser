@@ -476,41 +476,6 @@ expandFKMutRecursive t=
       tnfil =   tbFilterE (\m e -> S.member e (S.fromList $ fmap S.fromList $ topRec $ _kvrecrels m)) <$> t
     in tell [query,top]
 
-
-expandFKRecursive t=
-    let
-      query  = tname <> "(" <> T.intercalate "," (tnonRec <> tRec <> [l]) <> ") as ( SELECT " <> T.intercalate "," (tnonRec<> tRec <> ["null :: record"]) <>" FROM (select * from " <> expandBaseTable t <>  (fst (runWriter (expandQuery' False (fmap unlabelIT $ TB1 tnonRecA)))) <> ") as " <> tname <> " WHERE " <> (pret <> (head tRec)) <> " is null UNION ALL " <> " SELECT " <> T.intercalate "," (fmap (pret  <>) ( tnonRec <> tRec) <> ["ROW(" <> T.intercalate "," (fmap ("sg."<> )  tRec2 ) <> "," <> explodeRowSg itv <> ")" ]) <> " FROM "<> tname <> " sg JOIN (SELECT * FROM " <> expandBaseTable t <>  (fst (runWriter (expandQuery' False (fmap unlabelIT $TB1 tnonRecA)))) <> ") as " <> tname  <>  " ON " <> head ((pret <>) <$> tRec) <> " = sg." <> (head tpk) <> ")"
-      top = tbasen <> " as (select " <> T.intercalate "," tRec2 <> "," <> (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id) itv  ) <> " as " <> lit <> " from " <> tname <> ") "
-      pret = tname <> "."
-
-      explodeRowSg = explodeDelayed  (\i -> "ROW(" <> i <> ")")  "," (const ("sg." <> ))
-      tname = (label $ getCompose $ snd (unTB1 t)) <> "pre"
-      tbasen = (label $ getCompose $ snd (unTB1 t))
-      tnonRec ,tRec :: [Text]
-      tnonRec =  (explodeDelayed id   "," (const id  )) . getCompose <$> m
-        where m = flattenNonRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t)
-      tnonRecA =  (unTB1 t)
-      tpk =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> m
-        where m =  F.toList $  _kvvalues $ labelValue $ getCompose $   tfilpk
-      tRec =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
-        where l = case   getCompose $ justError "nolist" $  safeHead $ L.filter (isFKT .labelValue .getCompose) $ flattenRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t) of
-                    Labeled _ (FKT l _ i) -> l
-                    Labeled l i -> errorWithStackTrace (show ("trec"::String,l,i))
-              isFKT (FKT _ _ _) = True
-              isFKT i = False
-      tRec2 =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
-          where l = F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
-      (lit,itv) =   case getCompose $ head $ F.toList $   _kvvalues $ labelValue $ getCompose $  snd $    unTB1 tnfil of
-                                      Labeled lit (IT i itv) -> (lit,Unlabeled $ IT i (unlabelIT <$> itv))
-                                      Labeled lit (FKT ref rel  itv) -> (lit,Labeled lit( FKT ref rel itv))
-
-
-      Labeled l _ = getCompose $ justError "nolist" $ safeHead $ flattenRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t)
-      tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec $ _kvrecrels m)) <$> t
-      tfilpk =   tbPK  t
-      tnfil =   tbFilterE (\m e -> S.member e (S.fromList $ fmap S.fromList $ topRec $ _kvrecrels m)) <$> t
-    in tell [query,top]
-
 tlabel t = (label $ getCompose $ snd (unTB1 t))
 
 selectQuery t = if L.null (snd withDecl )
@@ -932,5 +897,17 @@ relabelT p l =  fmap (relabelT' p l)
 
 relabelT' :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB3Data f k a -> TB3Data p k a
 relabelT' p l (m ,Compose j) =  (m,Compose $ l (KV $ fmap (Compose.  l . relabeling p l . p . getCompose ) (_kvvalues $ p j)))
+
+backFKRef
+  :: (Show (f Key ),Show a, Functor f) =>
+     M.Map Key Key
+     -> f Key
+     -> TB2 Key a
+     -> f (Compose Identity (TB f1) Key a)
+backFKRef relTable ifk = fmap (_tb . uncurry Attr). reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1
+  where
+        reorderPK l = fmap (\i -> justError (show ("reorder wrong" :: String, ifk ,relTable , l,i))  $ L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
+        lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
+          where knm =  M.lookup ko relTable
 
 

@@ -209,3 +209,7 @@ generateComparison ((k,v):[]) = k <>  dir v <> "?"
 generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is null  then " <>  generateComparison xs <> " else " <> k <>  dir v <> "?" <>" end"
   where dir Asc = ">"
         dir Desc = "<"
+
+
+
+

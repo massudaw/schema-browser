@@ -15,6 +15,7 @@ import Types
 import Step
 import Plugins
 import TP.Widgets
+import SchemaQuery
 import SortList
 import Prelude hiding (head)
 import TP.QueryWidgets
@@ -129,7 +130,7 @@ poller db plugs = do
               let elem inf  = fmap catMaybes .  mapM (\inp -> do
                           o  <- catchPluginException inf a n (getPK inp)    (elemp inf (Just inp))
                           let diff =   join $ (\i j -> diffUpdateAttr   (unTB1 i ) (unTB1 j)) <$>  o <*> Just inp
-                          maybe (return Nothing )  (\i -> updateModAttr inf (unTB1 $ fromJust o) (unTB1 inp) (lookTable inf a )) diff )
+                          maybe (return Nothing )  (\i -> updateMod inf (unTB1 $ fromJust o) (unTB1 inp) (lookTable inf a )) diff )
 
               i <- elem inf evb
               handler i
