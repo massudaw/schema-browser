@@ -266,9 +266,9 @@ testParse' db sch q = withTestConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                            rpd = rp -- forceDesc True (markDelayed True rp)
                                            rpq = selectQuery rpd
-                                       {-print $ tableMeta $ lookTable inf q
+                                       print $ tableMeta $ lookTable inf q
                                        print rp
-                                       print rpq-}
+                                       print rpq
                                        q <- queryWith_ (fromRecord (unTB1 $ unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
                                            )

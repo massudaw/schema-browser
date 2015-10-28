@@ -386,28 +386,31 @@ expandInlineRecursive tbase =
             tRecf = fmap (\(_,i) -> i) res
         tell [rret <> " as (select " <>  attrsf tRecf <> " from " <> T.intercalate " natural join " (expandBaseTable tbase : fmap (<> "close") pret) <> " where iter = 0)"]
      rret = (label $ getCompose $ snd (unTB1 tbase))
-     attrsf tRecf =  T.intercalate "," (filter (not . (`L.elem` fmap snd tRecf) ) nonrecb <> ((fmap (\(tRec ,tRecf)-> "ROW(" <> T.intercalate "," tRec <> ") as " <> tRecf) tRecf  )))
+     attrsf tRecf =  T.intercalate "," (map (\e -> maybe e explode $ L.find ((e == ).snd) tRecf)  nonrecb )
       where
+       explode = (\(tRec ,tRecf)-> "ROW(" <> T.intercalate "," (F.toList tRec) <> ") as " <> tRecf)
        nonrecb =  explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id  ) . getCompose <$> m
               where m = F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
                     tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec  $ _kvrecrels m)) <$> tbase
-     with inlineEl  = tell [open,close] >> return (pret,(nonrec <> [tRec] ,tRecf))
+     with inlineEl  = tell [open,close] >> return (pret,(M.insert (S.fromList $ keyattri (labelValue $ getCompose $ inlineEl)) tRec  nonrecM  ,tRecf))
        where
          tr = _fkttable . unComp $ inlineEl
          t = TB1 (head $ F.toList tr)
          open = pret <> "open(" <> T.intercalate "," tbpk  <> ",iter," <> attrs "" <> ") as ("  <> openbase <> " union all " <> openrec <> ")"
            where
               openbase = "select " <> T.intercalate "," tbpk  <>" ,0," <> attrs "" <> " FROM " <> expandBaseTable tbase <> (fst (runWriter ((expandJoin True [] . Unlabeled. labelValue.  getCompose ) inlineEl)))
-              openrec = "select " <> T.intercalate "," tbpk  <> ",iter +1,(" <> tRec <> ").* from " <> pret <>"open " <> head (fst (runWriter (Tra.traverse (expandJoin True [] .Unlabeled. labelValue.getCompose ) (getInlineRec t )))) <> "   where " <> T.intercalate " AND " (fmap (<> " is not null ") tpk)
+              openrec = "select " <> T.intercalate "," tbpk  <> ",iter +1, (" <> label (getCompose $snd $ unTB1 v) <> ").* from " <> pret <>"open " <> head (fst (runWriter (Tra.traverse (expandJoin True [] .Unlabeled. labelValue.getCompose ) (getInlineRec t )))) <> "   where " <> T.intercalate " AND " (fmap (<> " is not null ") tpk)
          close = pret <> "close(" <> T.intercalate "," tbpk  <> ",iter," <> attrs  "" <>") as ( " <> closebase <> " union all " <> closerec <>  ")"
            where
-             closebase ="select " <> T.intercalate "," tbpk  <> ",iter," <> T.intercalate "," nonrec <> ",null :: record from " <> pret <>"open natural join (select " <> T.intercalate "," tbpk  <> ",max(iter) as iter from " <> pret <>"open group by " <> T.intercalate "," tbpk  <> ") as max"
-             closerec ="select c." <> T.intercalate "," tbpk  <> ",o.iter," <> T.intercalate "," (fmap ("o." <>) nonrec) <> ",row(" <>attrs "c." <>" )   from " <> pret <>"close c join " <> pret <>"open o on o." <> T.intercalate "," tbpk  <> "= c." <> T.intercalate "," tbpk  <> " and c.iter -1 = o.iter"
+             closebase ="select " <> T.intercalate "," tbpk  <> ",iter," <> T.intercalate "," (F.toList $ M.insert recKey ("null :: record") nonrecM ) <> " from " <> pret <>"open natural join (select " <> T.intercalate "," tbpk  <> ",max(iter) as iter from " <> pret <>"open group by " <> T.intercalate "," tbpk  <> ") as max"
+             closerec ="select c." <> T.intercalate "," tbpk  <> ",o.iter," <> T.intercalate "," (F.toList $ M.insert recKey ("row(" <>attrs "c." <>" )") $ fmap ("o." <>) nonrecM) <> " from " <> pret <>"close c join " <> pret <>"open o on o." <> T.intercalate "," tbpk  <> "= c." <> T.intercalate "," tbpk  <> " and c.iter -1 = o.iter"
          pret = (label $ getCompose $ snd (unTB1 t))
 
-         attrs pre =  T.intercalate "," (fmap (pre <>) $ nonrec <> [tRec])
-         nonrec =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id  )) . getCompose <$> m
-            where m = F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
+         recKey = (S.fromList $ keyattri (labelValue $ getCompose $ inlineEl))
+         attrs pre =  T.intercalate "," (fmap (pre <>) $ F.toList (M.insert  recKey tRec  nonrecM ))
+         nonrec = F.toList nonrecM
+         nonrecM =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id  )) . getCompose <$> m
+            where m =  _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
                   tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec  $ _kvrecrels m)) <$> t
          tRec =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose $ l
          tRecf  =  label $ getCompose $ inlineEl
