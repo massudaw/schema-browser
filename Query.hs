@@ -282,11 +282,8 @@ getInlineRec' tb = L.filter (\i -> match $  unComp i) $ attrs
 expandTable ::  TB3  (Labeled Text) Key  () -> Writer [Text] Text
 expandTable (DelayedTB1 (Just tb)) = expandTable tb
 expandTable tb
-  | L.any (\(MutRec i ) -> L.length i > 1) $  _kvrecrels (fst $ unTB1 tb) = do
-      expandFKMutRecursive tb
-      return $tlabel tb
   | isTableRec tb = do
-      expandFKRecursive tb
+      expandFKMutRecursive tb
       return $ tlabel tb
   | isFilled (getInlineRec tb) = do
       expandInlineRecursive tb
@@ -341,17 +338,20 @@ allRec'
 allRec' i t = unTlabel $ tableView  i t
 
 tableView  invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
+  when (S.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r ) <> " the pk is null")
   (t,ks) <- labelTable r
   tb <- recurseTB invSchema (rawFKS r) False [] ks
   return  $ TB1 tb
 
 tableViewNR invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
+  when (S.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r )<> " the pk is null")
   (t,ks) <- labelTable r
   tb <- recurseTB invSchema (S.filter (all isInlineRel. F.toList .pathRelRel)$ rawFKS r) False [] ks
   return  $ TB1 tb
 
 
 rootPaths' invSchema r = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
+  when (S.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r )<> " the pk is null")
   (t,ks) <- labelTable r
   tb <- recurseTB invSchema (rawFKS r ) False [] ks
   return ( TB1 tb , selectQuery $ TB1 tb )
@@ -439,7 +439,7 @@ expandFKMutRecursive t=
           where tn = "t" <> T.pack (show l)
       recwhere l =  "(" <> (tn <> head tnonRec <> " is not null and " ) <> T.intercalate " and " (fmap (\i -> tn <> "f" <> i <> " is null ")  tRec) <> ")"
           where tn = "t" <> T.pack (show l) <> "."
-      recwhere2 l =  "(" <> T.intercalate " and " ((\i -> tn i <> head tnonRec <> " is null " ) <$> idx)  <> " and " <> T.intercalate " and " (fmap (\i -> tn l <> "f" <> i <> " is not null ")  tRec) <> ")"
+      recwhere2 l =  "(" <> T.intercalate " and " (((\i -> tn i <> head tnonRec <> " is null " ) <$> idx)   <>  (fmap (\i -> tn l <> "f" <> i <> " is not null ")  tRec)) <> ")"
           where tn l = "t" <> T.pack (show l) <> "."
                 idx= L.delete l [0..length tRec -1]
       recwhere3 l =  "(" <> tn l  <> head tnonRec <> " is not null and "    <> T.intercalate " or " (fmap (\i -> tn l <> "f" <> i <> " is not null ")  tRec) <> ")"

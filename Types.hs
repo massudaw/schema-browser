@@ -394,8 +394,8 @@ instance Ord Key where
    compare i j = compare (keyFastUnique i) (keyFastUnique j)
 
 instance Show Key where
-   -- show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
-   show k = T.unpack $ showKey k
+   show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
+   -- show k = T.unpack $ showKey k
 
 showKey k  =   maybe (keyValue k) id  (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::"   <> showTy id (keyType k)
 
@@ -982,10 +982,10 @@ recOverAttr (k:xs) attr = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap
 recOverMAttr' :: [Set (Rel Key)] -> [[Set (Rel Key)]] -> Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b ) ->Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b )
 recOverMAttr' tag tar  m =   foldr go m tar
   where
-    go (k:[]) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . recOverAttr tag  v . _kvvalues ))))) )) k
+    go (k:[]) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . recOverAttr tag  recv . _kvvalues ))))) )) k
+      where recv = gt tag m
     go (k:xs) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . go xs . _kvvalues )))) ))) k
 
-    v = gt tag m
     gt (k:[]) = unTB . fromJust  . Map.lookup k
     gt (k:xs) = gt xs . _kvvalues . unTB . snd . head .F.toList. _fkttable . unTB  . fromJust . Map.lookup k
 

@@ -151,7 +151,7 @@ keyTables conn userconn (schema ,user) = do
 addRecInit :: Map Text Table -> Map Text Table
 addRecInit m = fmap recOverFKS m
   where
-        recOverFKS t  = t {rawFKS = S.map (traceShowId .path. traceShow (tableName t)) (rawFKS t) }
+        recOverFKS t  = t {rawFKS = S.map path  (rawFKS t) }
           where
                 path pini@(Path k rel tr) =
                     Path k (case rel of
@@ -166,11 +166,11 @@ addRecInit m = fmap recOverFKS m
                       openPath ts p pa@(Path _(FKInlineTable nt) l)
                         | nt == tableName t = [p]
                         | S.member pa ts =  []
-                        | otherwise = openTable (S.insert pa ts) (traceShow ("in",ts ,p)p) nt
+                        | otherwise = openTable (S.insert pa ts) p nt
                       openPath ts p pa@(Path _(FKJoinTable _ _ nt) _)
                         | nt == tableName t  = [p]
                         | S.member pa ts =  []
-                        | otherwise = openTable (S.insert pa ts) (traceShow ("fk",ts,p) p) nt
+                        | otherwise = openTable (S.insert pa ts)  p nt
                       openTable t p nt  =  do
                               let cons pa
                                     | pa == pini = p
@@ -266,9 +266,9 @@ testParse' db sch q = withTestConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                            rpd = rp -- forceDesc True (markDelayed True rp)
                                            rpq = selectQuery rpd
-                                       print $ tableMeta $ lookTable inf q
+                                       {-print $ tableMeta $ lookTable inf q
                                        print rp
-                                       print rpq
+                                       print rpq-}
                                        q <- queryWith_ (fromRecord (unTB1 $ unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
                                            )
@@ -278,9 +278,9 @@ testParse db sch q = withConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
                                            rpd = rp -- forceDesc True (markDelayed True rp)
                                            rpq = selectQuery rpd
-                                       print $ tableMeta $ lookTable inf q
-                                       print rp
-                                       print rpq
+                                       -- print $ tableMeta $ lookTable inf q
+                                       -- print rp
+                                       -- print rpq
                                        q <- queryWith_ (fromRecord (unTB1 $ unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
                                            )
@@ -327,7 +327,7 @@ eventTable inf table = do
            bh <- R.stepper ini e
            let td = (R.tidings bh e)
            -- Dont
-           if (rawTableType table == ReadWrite)
+           if True -- (rawTableType table == ReadWrite)
               then  putMVar mvar (M.insert (tableMeta table) (mnew,td) mmap)
               else putMVar mvar  mmap
 
