@@ -22,8 +22,10 @@ import qualified Data.Aeson as JSON
 
 import Safe
 
+import Prelude hiding (head)
 
 import Debug.Trace
+import Utils
 
 instance Widget (TrivialWidget  a) where
     getElement (TrivialWidget t e) = e
@@ -189,7 +191,7 @@ rangeBoxes fkbox bp = do
   rangeInit <- listBox bp (const <$> pure Nothing <*> fkbox) (pure id) (pure (set text . show ))
   rangeEnd <- listBox bp (const <$> pure Nothing <*> fkbox) (pure id) (pure (UI.set text . show ))
   range <- UI.div # set children (getElement <$> [rangeInit,rangeEnd])
-  return $ RangeBox (  liftA2 interval'' <$> (userSelection rangeInit) <*> (userSelection rangeEnd)) range
+  return $ RangeBox (  liftA2 interval'' <$> (triding rangeInit) <*> (triding rangeEnd)) range
 
 instance Widget (RangeBox a) where
   getElement = _rangeElement
@@ -200,7 +202,7 @@ buttonDivSet ks binit   el = mdo
   dv <- UI.div # set children (fst <$> buttons)
   let evs = foldl (unionWith const) (filterJust $ rumors binit) (snd <$> buttons)
   v <- currentValue (facts binit)
-  bv <- stepper (maybe (head ks) id v) evs
+  bv <- stepper (maybe (justError "no head" $ safeHead ks) id v) evs
   return (TrivialWidget (tidings bv evs) dv)
     where
       buttonString   bv k = do
@@ -238,7 +240,7 @@ checkedWidgetM init = do
 
 wrapListBox l p f q = do
   o <- listBox l p f q
-  return $ TrivialWidget (userSelection o ) (getElement o)
+  return $ TrivialWidget (triding o ) (getElement o)
 
 optionalListBox' l o  s = mdo
   ol <- UI.listBox ((Nothing:) <$>  fmap (fmap Just) l) (fmap Just <$> st) (maybe UI.div <$> s)
@@ -250,7 +252,7 @@ optionalListBox' l o  s = mdo
 
 optionalListBox l o f s = do
   o <- listBox ((Nothing:) <$>  fmap (fmap Just) l) (fmap Just <$> o) f s
-  return $TrivialWidget  (fmap join $ userSelection o)(getElement o)
+  return $TrivialWidget  (fmap join $ triding o)(getElement o)
 
 interval'' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
 
@@ -339,7 +341,7 @@ listBox :: forall a. Ord a
     -> Tidings (Maybe a)         -- ^ selected item
     -> Tidings ([a] -> [a])      -- ^ view list to list transform (filter,sort)
     -> Tidings (a -> UI Element -> UI Element) -- ^ display for an item
-    -> UI (ListBox a)
+    -> UI (TrivialWidget (Maybe a))
 listBox bitems bsel bfilter bdisplay = do
     list <- UI.select # set UI.class_ "selectpicker"
     let bindices :: Tidings [a]
@@ -369,7 +371,7 @@ listBox bitems bsel bfilter bdisplay = do
         _selectionLB = tidings (facts bsel) eindexes
         _elementLB   = list
 
-    return ListBox {..}
+    return $ TrivialWidget _selectionLB _elementLB
 
 at_ :: [a] -> Int -> Either String a
 at_ xs o | o < 0 = Left $ "index must not be negative, index=" ++ show o

@@ -78,13 +78,14 @@ db = DB "usda" "postgres" "queijo" "localhost" "5432"
 -- Wrap new instances without quotes delimiting primitive values
 newtype UnQuoted a = UnQuoted {unQuoted :: a}
 
-instance (TF.ToField a , TF.ToField (UnQuoted (a))) => TF.ToField (FTB a) where
+instance (Show a,TF.ToField a , TF.ToField (UnQuoted (a))) => TF.ToField (FTB a) where
   toField (LeftTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
   toField (SerialTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
   toField (DelayedTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
   toField (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   is
   toField (IntervalTB1 is ) = TF.toField  $ fmap (\(TB1 i ) -> i) is
   toField (TB1 i) = TF.toField i
+  toField i = errorWithStackTrace (show i)
 
 
 instance  TF.ToField (TB Identity Key Showable)  where
@@ -192,6 +193,8 @@ instance TF.ToField (UnQuoted a) => TF.ToField (Interval.Interval a) where
 
 instance TF.ToField (UnQuoted a) => TF.ToField (UnQuoted (Interval.Extended a )) where
   toField (UnQuoted (ER.Finite i)) = TF.toField (UnQuoted i)
+  toField (UnQuoted (ER.NegInf )) = TF.Plain (fromByteString "null")
+  toField (UnQuoted (ER.PosInf )) = TF.Plain (fromByteString "null")
 
 intervalBuilder i =  TF.Many [TF.Plain $ fromByteString ("\'"  <> lbd (snd $ Interval.lowerBound' i)) ,  TF.toField $  (UnQuoted $ Interval.lowerBound i) , TF.Plain $ fromChar ',' , TF.toField  (UnQuoted $ Interval.upperBound i) , TF.Plain $ fromByteString (ubd (snd $ Interval.upperBound' i) <> "\'")]
     where lbd True  =  "["
@@ -330,7 +333,7 @@ unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
 unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverse ( traComp (traFAttr unSOptional) . (mapComp (firstTB unKOptional)) ) i)  j
 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
-parseAttr i | traceShow i False = error ""
+-- parseAttr i | traceShow i False = error ""
 parseAttr (Attr i _ ) = do
   s<- parseShowable (textToPrim <$> keyType  i) <?> show i
   return $  Attr i s
@@ -426,7 +429,7 @@ ptestString3 = (parseOnly (startQuotedText )) testString3
 parsePrim
   :: KPrim
        -> Parser Showable
-parsePrim i | traceShow i False = error ""
+-- parsePrim i | traceShow i False = error ""
 parsePrim i =  do
    case i of
         PDynamic ->  let

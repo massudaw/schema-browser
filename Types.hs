@@ -22,6 +22,7 @@ import qualified Control.Lens as Le
 import Data.Functor.Apply
 import Data.Bifunctor
 import Safe
+import Prelude hiding(head)
 import Data.Maybe
 import GHC.Generics
 import Data.Binary (Binary)
@@ -50,12 +51,15 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
+import qualified Data.Set as  S
 import Control.Monad.State
 import Data.Text.Lazy(Text)
 
 import Debug.Trace
 import Data.Unique
 
+head [] = errorWithStackTrace "no head error"
+head l = L.head l
 
 isSerial (KSerial _) = True
 isSerial _ = False
@@ -112,13 +116,13 @@ pathRel (Path _ rel _ ) = rel
 pathRelRef (Path ifk _ _ ) = ifk
 pathRelStore (Path _ _ ifk ) = ifk
 
-pathRelRel :: Path (Set Key ) SqlOperation -> Set (Rel Key)
+pathRelRel :: Ord k => Path (Set k ) (SqlOperationK k) -> Set (Rel k)
 pathRelRel (Path _ (FKJoinTable _ rel  _ ) _ ) = Set.fromList rel
 pathRelRel (Path r (FKInlineTable  _   )  _ ) = Set.map Inline r
 pathRelRel (Path r (FKEitherField _    )  _ ) = Set.map Inline r
 pathRelRel (Path r (RecJoin l rel )  a ) =  pathRelRel (Path r rel a)
 
-pathRelRel' :: Path (Set Key ) SqlOperation -> MutRec [Set (Rel Key)]
+pathRelRel' :: Ord k => Path (Set k ) (SqlOperationK k) -> MutRec [Set (Rel k )]
 pathRelRel' (Path r (RecJoin l rel )  a )
   | L.null (unMutRec l) =  MutRec [[pathRelRel (Path r rel a)]]
   | otherwise = fmap ((pathRelRel (Path r rel a) :) . fmap (Set.fromList)) l
@@ -454,10 +458,11 @@ data Showable
 
 
 
-data SqlOperation
+type SqlOperation = SqlOperationK Key
+data SqlOperationK k
   = FetchTable Text
-  | FKJoinTable Text [Rel Key] Text
-  | RecJoin (MutRec [[Rel Key]])  SqlOperation
+  | FKJoinTable Text [Rel k ] Text
+  | RecJoin (MutRec [[Rel k ]])  (SqlOperationK k)
   | FKInlineTable Text
   | FKEitherField Text
   deriving(Eq,Ord,Show)
@@ -472,18 +477,21 @@ data TableType
    | ReadWrite
    deriving(Eq,Ord,Show)
 
-data Table
+type Table = TableK Key
+
+mapTableK f (Raw  s tt tr de rn  un ra rp rd rf rat ) = Raw s tt tr (S.map f de) rn (fmap (S.map f) un) ra (S.map f rp) (fmap f rd) S.empty  (S.map f rat)
+data TableK k
     =  Raw { rawSchema :: Text
            , rawTableType :: TableType
            , rawTranslation :: Maybe Text
-           , rawDelayed :: (Set Key)
+           , rawDelayed :: (Set k)
            , rawName :: Text
-           , uniqueConstraint :: [Set Key]
+           , uniqueConstraint :: [Set k]
            , rawAuthorization :: [Text]
-           , rawPK :: (Set Key)
-           , rawDescription :: [Key]
-           , rawFKS ::  (Set (Path (Set Key) (SqlOperation )))
-           , rawAttrs :: (Set Key)
+           , rawPK :: (Set k)
+           , rawDescription :: [k]
+           , rawFKS ::  (Set (Path (Set k) (SqlOperationK k )))
+           , rawAttrs :: (Set k)
            }
      deriving(Eq,Ord)
 
@@ -664,13 +672,13 @@ flattenNonRec rels (m,n)  = (concat . fmap (\r -> if pred rels r then nonRef (fm
     nonRef r (Compose (Labeled l it@(IT j k ))) =   concat $ flattenNonRec r <$> (F.toList k  )
     nonRef r (Compose (Unlabeled it@(IT j k ))) =   concat $ flattenNonRec r <$> (F.toList k  )
 
-flattenRec ::  (Show a, Show k ,Ord k) => [MutRec [[Rel k]]] -> TB3Data (Labeled Text) k a -> [Compose (Labeled Text) (TB (Labeled Text) )  k a]
-flattenRec rels (m,n)  = (concat . fmap (\r -> if pred rels r then nonRef (fmap (L.drop 1)   <$> (L.filter (\(MutRec rel) -> L.any (\rel -> keyattr r == head rel ) rel ) rels )) r  else []  ) . F.toList . _kvvalues) (head . F.toList $  getCompose n)
+flattenRec ::  (Show a, Show k ,Ord k) => [MutRec [Set (Rel k)]] -> TB3Data (Labeled Text) k a -> [Compose (Labeled Text) (TB (Labeled Text) )  k a]
+flattenRec rels (m,n)  = (concat . fmap (\r -> if pred rels r then nonRef (fmap (L.drop 1)   <$> (L.filter (\(MutRec rel) -> L.any (\rel -> Set.fromList (keyattr r ) == head rel ) rel ) rels )) r  else []  ) . F.toList . _kvvalues) (head . F.toList $  getCompose n)
   where
     -- compJoin :: Monad f => Compose f (Compose f g ) k  a -> Compose f g k a
-    pred rs v = L.any (\(MutRec r) ->   L.any (\r -> head r == keyattr  v ) r  ) rs
-    nonRef :: (Show a, Show k,Ord k) => [MutRec [[Rel k]]] -> Compose (Labeled Text) (TB (Labeled Text)) k a ->  [Compose (Labeled Text) (TB (Labeled Text) )  k a]
-    nonRef r  v | concat (concat (concat (fmap unMutRec r))) == []  = [v]
+    pred rs v = L.any (\(MutRec r) ->   L.any (\r -> head r == Set.fromList (keyattr  v )) r  ) rs
+    nonRef :: (Show a, Show k,Ord k) => [MutRec [Set (Rel k)]] -> Compose (Labeled Text) (TB (Labeled Text)) k a ->  [Compose (Labeled Text) (TB (Labeled Text) )  k a]
+    nonRef r  v | concat (fmap Set.toList $ concat (concat (fmap unMutRec r))) == []  = [v]
     nonRef r (Compose (Labeled l (Attr k v ))) = [Compose (Labeled l ( Attr k v))]
     nonRef r (Compose (Labeled l (FKT i _ k ))) = tra
         where tra = i <> concat  (flattenRec r <$> (F.toList k))
@@ -761,6 +769,7 @@ traComp f =  fmap Compose. traverse f . getCompose
 
 concatComp  =  Compose . concat . fmap getCompose
 
+tableMeta :: Ord k => TableK k -> KVMetadata k
 tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (uniqueConstraint t)[] (F.toList $ rawAttrs t) (rawDelayed t) (paths' <> paths)
   where rec = filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
         same = filter ((tableName t ==). fkTargetTable . pathRel) rec
@@ -781,7 +790,7 @@ tblist = tbmap . mapFromTBList
 tblistPK :: Ord k => Set k -> [Compose Identity  (TB Identity) k a] -> TB3 Identity k a
 tblistPK s = tbmapPK s . mapFromTBList
 
-tblist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TB3 Identity Key a
+tblist' :: Ord k => TableK k -> [Compose Identity  (TB Identity) k a] -> TB3 Identity k a
 tblist' t  = TB1 . (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 
 reclist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TBData Key a
@@ -829,6 +838,7 @@ textToPrim "ofx" = PMime "application/x-ofx"
 textToPrim "jpg" = PMime "image/jpg"
 textToPrim "character" = PText
 textToPrim "char" = PText
+textToPrim "bpchar" = PText
 textToPrim "double precision" = PDouble
 textToPrim "numeric" = PDouble
 textToPrim "float8" = PDouble
@@ -841,9 +851,12 @@ textToPrim "integer" = PInt
 textToPrim "bigint" = PInt
 textToPrim "cardinal_number" = PInt
 textToPrim "boolean" = PBoolean
+textToPrim "bool" = PBoolean
 textToPrim "smallint" = PInt
 textToPrim "timestamp without time zone" = PTimestamp
 textToPrim "timestamp with time zone" = PTimestamp
+textToPrim "timestamptz" = PTimestamp
+textToPrim "timestamp" = PTimestamp
 textToPrim "interval" = PInterval
 textToPrim "date" = PDate
 textToPrim "time" = PDayTime
@@ -901,7 +914,7 @@ unIndex :: Show a => Int -> TB Identity Key a -> Maybe (TB Identity Key a )
 unIndex o (Attr k (ArrayTB1 v)) = Attr (unKArray k) <$> atMay v o
 unIndex o (IT na (ArrayTB1 j))
   =  IT  na <$>  atMay j o
-unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> [mapComp (firstTB unKArray) li]) (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi ) <$> join (traComp (traFAttr (indexArray o))  <$> l) <*> atMay m o
+unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> fmap (mapComp (firstTB unKArray) )li) (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi ) <$> (maybe (Just []) (Just .pure ) (join (traComp (traFAttr (indexArray o))  <$> l))) <*> (atMay m o)
   where
     l = L.find (all (isArray.keyType) . fmap _relOrigin . keyattr)  els
     nonl = L.filter (not .all (isArray.keyType) . fmap _relOrigin . keyattr) els

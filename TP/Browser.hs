@@ -10,7 +10,9 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 
+module TP.Browser where
 import Query
+import Debug.Trace
 import Types
 import Step
 import Plugins
@@ -66,7 +68,7 @@ data BrowserState
   ,user :: String
   ,pass :: String
   ,schema :: Maybe String
-  ,table :: Maybe String
+  ,tablename :: Maybe String
   }
 
 
@@ -74,9 +76,9 @@ argsToState  [h,ph,d,u,p,s,t] = BrowserState h ph d  u p (Just s) (Just t )
 argsToState  [h,ph,d,u,p,s] = BrowserState h ph d  u p  (Just s)  Nothing
 argsToState  [h,ph,d,u,p] = BrowserState h ph d  u p Nothing Nothing
 
-main :: IO ()
-main = do
-  args <- getArgs
+browser :: IO ()
+browser = do
+  m:args <- getArgs
   --let schema = "public"
   --conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
   {-
@@ -104,7 +106,7 @@ poller db plugs = do
   let poll (BoundedPlugin2 n a f elemp) =  do
         (e:: Event [TableModification (TBIdx Key Showable) ] ,handler) <- newEvent
         conn <- connectPostgreSQL (connRoot db)
-        inf <- keyTables conn  conn (T.pack $ dbn db, T.pack $ user db)
+        inf <- keyTables conn  conn (T.pack $ dbn db, T.pack $ user db) postgresOps
         tp  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
         let t = case  tp of
               [Only i] -> Just i :: Maybe UTCTime
@@ -172,7 +174,7 @@ setup e args w = void $ do
             element body # set UI.children [dash] # set UI.class_ "row"
         "Nav" -> do
             let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
-            span <- chooserTable  inf e k (table bstate)
+            span <- chooserTable  inf e k (tablename bstate)
             element body # set UI.children [span]# set UI.class_ "row"  )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
 
 
@@ -218,8 +220,8 @@ databaseChooser sargs = do
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
   dbsW <- listBox (pure $ (\(i,(c,j)) -> (i,) . (c,) <$> j) $ dbs ) (pure dbsInit  ) (pure id) (pure (line . show . snd . fmap snd ))
   schema <- flabel # set UI.text "schema"
-  cc <- currentValue (facts $ userSelection dbsW)
-  let dbsWE = rumors $ userSelection dbsW
+  cc <- currentValue (facts $ triding dbsW)
+  let dbsWE = rumors $ triding dbsW
   dbsWB <- stepper cc dbsWE
   let dbsWT  = tidings dbsWB dbsWE
   load <- UI.button # set UI.text "Connect" # set UI.class_ "col-xs-1" # sink UI.enabled (facts (isJust <$> dbsWT) )
@@ -228,7 +230,7 @@ databaseChooser sargs = do
   let genSchema ((user,pass),(dbN,(dbConn,schemaN))) = do
         conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> toStrict ( encodeUtf8 dbN ) ) -- <> " sslmode= require")
         execute_ conn "set bytea_output='hex'"
-        keyTables dbConn conn (schemaN,T.pack user)
+        keyTables dbConn conn (schemaN,T.pack user) postgresOps
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   chooserT <-  mapTEvent (traverse genSchema) formLogin
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schema , getElement dbsW]
@@ -253,7 +255,7 @@ chooserTable inf e kitems i = do
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
-  i :: [(Text,Int)] <- liftIO $ query (rootconn inf) (fromString "SELECT table_name,usage from metadata.ordering where schema_name = ?") (Only (schemaName inf))
+  i <- maybe (return ([] :: [(Text,Int)] ))  (\i -> liftIO $ query (rootconn i) (fromString "SELECT table_name,usage from metadata.ordering where schema_name = ?") (Only (schemaName inf))) (metaschema inf)
   let orderMap = Just $ M.fromList  i
   let renderLabel = (\i -> case M.lookup i (pkMap inf) of
                                        Just t -> T.unpack (translatedName t)
@@ -262,8 +264,7 @@ chooserTable inf e kitems i = do
   bset <- buttonDivSet (L.sortBy (flip $  comparing (\ pkset -> liftA2 M.lookup  (fmap rawName . flip M.lookup (pkMap inf) $ pkset ) orderMap)) kitems)  initKey  (\k -> UI.button # set UI.text (renderLabel k) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow  . ($k) <$> filterLabel ))
   let bBset = triding bset
   onEvent (rumors bBset) (\ i ->
-      liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )
-        )
+      when (isJust (metaschema inf)) $  void (liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )))
   tbChooserI <- UI.div # set children [filterInp,getElement bset]  # set UI.style [("height","600px"),("overflow","auto"),("height","99%")]
   tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","600px"),("overflow","hidden")] # set children [tbChooserI]
   nav  <- buttonDivSet ["Viewer","Nav","Exception","Change"] (pure $ Just "Nav")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")
@@ -324,18 +325,18 @@ viewerKey inf key = mdo
   let pageSize = 20
   itemList <- listBox ((\o -> L.take pageSize . L.drop (o*pageSize))<$> triding offset <*>res3) (tidings st never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
   offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) ((\i -> (L.length i `div` pageSize) ) <$> facts res3)
-  let evsel =  unionWith const (rumors (userSelection itemList)) (rumors tdi)
+  let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
   prop <- stepper cv evsel
   let tds = tidings prop evsel
 
   (cru,ediff,pretdi) <- crudUITable inf plugList  (pure "Editor")  res3 [] [] (allRec' (tableMap inf) table) tds
-  diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (runDBM inf . flip applyTB1' j ) i) <$> facts pretdi <@> ediff
+  diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip applyTB1 j ) i) <$> facts pretdi <@> ediff
   let
-     sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $userSelection itemList  ,rumors tdi]),diffUp]
+     sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
   inisort <- currentValue (facts tsort)
   res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (($) <$> facts tsort <@> rumors vpt) ,rumors tsort ])
-  onEvent ( ((\i j -> foldl applyTable i (expandPSet j)) <$> res2 <@> ediff)) (liftIO .  putMVar tmvar. fmap unTB1)
+  onEvent ( ((\i j -> foldl applyTable i (traceShowId $ expandPSet j)) <$> res2 <@> ediff)) (liftIO .  putMVar tmvar. fmap unTB1)
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK)  <$> facts tds) # set UI.class_ "col-xs-8"
@@ -367,7 +368,7 @@ filterUI inf (LeftTB1 (Just i))  =  filterUI inf i
 filterUI inf (ArrayTB1 [i])  = filterUI inf i
 filterUI inf t@(TB1 (k,v)) = do
   el <- listBox (pure (fmap (first (S.map _relOrigin)) $  M.toList (_kvvalues $ runIdentity $ getCompose v) )) (pure Nothing) (pure id) (pure (\i j -> j # set text (show (T.intercalate "," $ keyValue <$> S.toList (fst i)) )))
-  elv <- mapDynEvent (maybe emptyUI  (filterCase inf . unTB . fmap (const ()) . snd )) (TrivialWidget (userSelection el) (getElement el))
+  elv <- mapDynEvent (maybe emptyUI  (filterCase inf . unTB . fmap (const ()) . snd )) (TrivialWidget (triding el) (getElement el))
   out <- UI.div # sink UI.text (show <$> facts (triding elv))
   TrivialWidget (triding elv) <$> UI.div # set children [getElement el , getElement elv,out]
 

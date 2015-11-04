@@ -23,6 +23,7 @@ import qualified Data.ByteString.Lazy as BS
 import qualified Data.Foldable as F
 
 import qualified Data.Map as M
+import qualified Reactive.Threepenny as R
 import Schema
 import System.IO
 import Data.Functor.Identity

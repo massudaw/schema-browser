@@ -1,4 +1,4 @@
 :set  -XOverloadedStrings
 :set -fwarn-unused-binds -fwarn-unused-imports
 :set -isrc
-:set args 8023 localhost incendio postgres queijo incendio pricing 
+:set args 8023 localhost 5432 incendio postgres queijo incendio pricing 

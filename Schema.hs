@@ -49,35 +49,16 @@ import Patch
 import qualified Data.ByteString.Char8 as BS
 
 
-createType :: Text ->  (Text,Text,Text,Text,Text,Text,Maybe Text,Maybe Text,Maybe Text,Bool) -> KType Text
-createType _ (t,c,"tsrange",_,_,n,def,_,_,_) =  (nullable n $ KInterval $ Primitive "timestamp without time zone")
-createType _ (t,c,"tstzrange",_,_,n,def,_,_,_) =  (nullable n $ KInterval $ Primitive "timestamp with time zone")
-createType _ (t,c,"daterange",_,_,n,def,_,_,_) =  (nullable n $ KInterval $ Primitive "date")
-createType _ (t,c,"int4range",_,_,n,def,_,_,_) = (nullable n $ KInterval $ Primitive "int4")
-createType _ (t,c,"numrange",_,_,n,def,_,_,_) =  (nullable n $ KInterval $ Primitive "numeric")
-createType _ (t,c,"USER-DEFINED",_,"floatrange",n,def,_,_,_) =  (nullable n $ KInterval $ Primitive "double precision")
-createType _ (t,c,"USER-DEFINED",_,"trange",n,def,_,_,_) =  (nullable n $ KInterval $ Primitive "time")
--- Table columns Primitive
-createType s (t,c,"USER-DEFINED",udtschema ,udtname,n,def,_,_,False) |  udtschema == s = (nullable n $ InlineTable  udtschema udtname )
-createType s (t,c,"USER-DEFINED",udtschema ,udtname,n,def,_,_,True) |  udtschema == s = (nullable n $ KEither udtschema udtname )
-createType s (t,c,"ARRAY",udtschema ,udtname,n,def,_,_,False) | udtschema == s = (nullable n $ KArray $ InlineTable  udtschema $T.drop 1 udtname )
-createType s (t,c,"ARRAY",udtschema ,udtname,n,def,_,_,True) | udtschema == s = (nullable n $ KArray $ KEither udtschema $T.drop 1 udtname )
-createType _ (t,c,"ARRAY",_,i,n,def,p,_,_) = (nullable n $ KArray $ (Primitive (T.tail i)))
-createType _ (t,c,_,_,"geometry",n,def,p,_,_) =  (nullable n $ Primitive $ (\(Just i) -> i) p)
-createType _ (t,c,_,_,"box3d",n,def,p,_,_) =  (nullable n $ Primitive $  "box3d")
-createType _ (t,c,ty,_,_,n,def,_,Just "pdf" ,_) =(serial def . nullable n $ KDelayed $ Primitive "pdf" )
-createType _ (t,c,ty,_,_,n,def,_,Just "jpg" ,_) = (serial def . nullable n $ KDelayed $ Primitive "jpg" )
-createType _ (t,c,ty,_,_,n,def,_,Just "ofx" ,_) = (serial def . nullable n $ KDelayed $ Primitive "ofx" )
-createType _ (t,c,ty,_,_,n,def,_,Just dom ,_) = (serial def . nullable n $ Primitive dom)
-createType _ (t,c,ty,_,_,n,def,_,_,_) =(serial def . nullable n $ Primitive ty)
---createType un v = error $ show v
-
-serial (Just xs ) t = if T.isPrefixOf  "nextval" xs then KSerial t else t
-serial Nothing t = t
-
-nullable "YES" t = KOptional t
-nullable "NO" t = t
-
+createType :: (Bool,Bool,Bool,Bool,Bool,Bool,Text,Text) -> KType Text
+createType  (isNull,isArray,isRange,isDef,isSum,isComp,tysch,tyname)
+  = comp base
+  where
+    add i v = if i then v else id
+    comp = add isNull KOptional . add isArray KArray . add isRange KInterval . add isDef KSerial
+    base
+      | isComp && isSum =  KEither tysch tyname
+      | isComp =  InlineTable tysch tyname
+      | otherwise = Primitive tyname
 
 
 meta inf = maybe inf id (metaschema inf)
@@ -102,11 +83,11 @@ fromShowable2 i@(Primitive "character varying") v = fromShowable i $  BS.drop 1 
 fromShowable2 i@(Primitive "text") v = fromShowable i $  BS.drop 1 (BS.init v)
 fromShowable2 i v = fromShowable i v
 
-keyTables :: Connection -> Connection -> (Text ,Text)-> IO InformationSchema
-keyTables conn userconn (schema ,user) = do
+testSerial  =((=="nextval"). fst . T.break(=='('))
+keyTables :: Connection -> Connection -> (Text ,Text)-> SchemaEditor ->  IO InformationSchema
+keyTables conn userconn (schema ,user) ops = do
        uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from information_schema.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
-       -- res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty . BS.pack . T.unpack <$>  (join $ listToMaybe. T.splitOn "::" <$> n) ) ty )  (createType  schema (t,c,j,k,l,m,n,d,z,b)) )) <$>  query conn "select ta.table_name,o.column_name,data_type,udt_schema,udt_name,is_nullable,column_default, type,domain_name , st.table_name is not null from information_schema.tables ta natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name    left join   public.geometry_columns on o.table_schema = f_table_schema  and o.column_name = f_geometry_column left join metadata.sum_table st on st.schema_name = udt_schema and ('_' || st.table_name = udt_name OR st.table_name = udt_name)   where table_schema = ?"  (Only schema)
-       res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty . BS.pack . T.unpack <$>  (join $ listToMaybe. T.splitOn "::" <$> n) ) ty )  (createType  schema (t,c,j,k,l,m,n,d,z,b)) )) <$>  query conn "select ta.table_name,o.column_name,data_type,udt_schema,udt_name,is_nullable,column_default, null ,domain_name , st.table_name is not null from information_schema.tables ta natural join information_schema.columns  o left join metadata.table_translation t on o.column_name = t.column_name     left join metadata.sum_table st on st.schema_name = udt_schema and ('_' || st.table_name = udt_name OR st.table_name = udt_name)   where table_schema = ?"  (Only schema)
+       res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty . BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,l,maybe False testSerial m,n,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_range,col_def,is_sum,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
           keyMap = M.fromList keyList
@@ -143,9 +124,9 @@ keyTables conn userconn (schema ,user) = do
        sizeMapt <- M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t  i3 ) <$> query conn tableSizes (Only schema)
        mvar <- newMVar M.empty
        metaschema <- if (schema /= "metadata")
-          then Just <$> keyTables  conn userconn ("metadata",user)
+          then Just <$> keyTables  conn userconn ("metadata",user) ops
           else return Nothing
-       return  $ InformationSchema schema user i1 i2  i3 sizeMapt M.empty mvar  userconn conn metaschema
+       return  $ InformationSchema schema user Nothing i1 i2  i3 sizeMapt M.empty mvar  userconn conn metaschema ops
 
 
 addRecInit :: Map Text Table -> Map Text Table
@@ -257,10 +238,11 @@ logTableModification inf (TableModification Nothing table i) = do
   return (TableModification (Just id) table i )
 
 
-withInf d s f = withConn d (f <=< (\conn -> keyTables conn conn (s,"postgres")))
+withInf d s f = withConn d (f <=< (\conn -> keyTables conn conn (s,"postgres") undefined ))
 
-withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres")) )
-withTestConnInf d s f = withTestConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres")) )
+withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres") undefined ) )
+
+withTestConnInf d s f = withTestConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres") undefined ) )
 
 testParse' db sch q = withTestConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
@@ -291,14 +273,7 @@ testFireQuery q = testParse "incendio" "incendio"  q
 testNutrition q = testParse "incendio" "nutrition"  q
 testAcademia q = testParse "academia" "academia"  q
 
-selectAll inf table   = liftIO $ do
-      let
-          tb =  tableView (tableMap inf) table
-          tbf = tb -- forceDesc True (markDelayed True tb)
-      print (tableName table,selectQuery tbf )
-      (t,v) <- duration  $ queryWith_  (fromAttr (unTlabel tbf)) (conn inf)(fromString $ T.unpack $ selectQuery $ tbf)
-      print (tableName table,t)
-      return v
+
 
 dbTable mvar table = do
     mmap <- takeMVar mvar
@@ -310,40 +285,15 @@ dbTable mvar table = do
     return (mtable,td)
 
 
-eventTable inf table = do
-    let mvar = mvarMap inf
-    mmap <- takeMVar mvar
-    (mtable,td) <- case (M.lookup (tableMeta table) mmap ) of
-         Just (i,td) -> do
-           putMVar mvar mmap
-           return (i,td)
-         Nothing -> do
-           res <- selectAll  inf table
-           mnew <- newMVar (fmap unTB1 res)
-           (e,h) <- R.newEvent
-           ini <- readMVar mnew
-           forkIO $ forever $ do
-              h =<< takeMVar mnew
-           bh <- R.stepper ini e
-           let td = (R.tidings bh e)
-           -- Dont
-           if True -- (rawTableType table == ReadWrite)
-              then  putMVar mvar (M.insert (tableMeta table) (mnew,td) mmap)
-              else putMVar mvar  mmap
-
-           return (mnew,td)
-    return (mtable,fmap TB1 <$> td)
-
-
-
+{-
 testLoadDelayed inf t = do
    let table = lookTable inf t
        tb = tableView (tableMap inf) table
    print tb
    res  <- queryWith_ (fromAttr (unTlabel tb)) (conn inf) (fromString $ T.unpack $ selectQuery tb )
    mapM (loadDelayed inf (unTB1 $ unTlabel tb ). unTB1 ) res
+   -}
 
-testFireQueryLoad t  = withConnInf "incendio" "incendio" (flip testLoadDelayed t)
 
 mergeTB1 (TB1  (m,Compose k) ) (TB1  (m2,Compose k2) )
   | m == m2 = TB1  (m,Compose $ liftA2 (<>) k k2)
@@ -355,27 +305,6 @@ ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
 
 -- Load optional not  loaded delayed values
 -- and merge to older values
-loadDelayed :: InformationSchema -> TBData Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
-loadDelayed inf t@(k,v) values@(ks,vs)
-  | S.null $ _kvdelayed k = return Nothing
-  | L.null delayedattrs  = return Nothing
-  | otherwise = do
-       let
-           whr = T.intercalate " AND " ((\i-> (keyValue i) <>  " = ?") <$> S.toList (_kvpk k) )
-           table = justError "no table" $ M.lookup (_kvpk k) (pkMap inf)
-           delayedTB1 =  (ks,) . _tb $ KV ( filteredAttrs)
-           delayed =  mapKey' (kOptional . ifDelayed . ifOptional) (mapValue' (const ()) delayedTB1)
-           str = "SELECT " <> explodeRecord (relabelT' runIdentity Unlabeled delayed) <> " FROM " <> showTable table <> " WHERE " <> whr
-       print str
-       is <- queryWith (fromRecord delayed) (conn inf) (fromString $ T.unpack str) (fmap unTB $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK' (tableNonRef' values))
-       case is of
-            [] -> errorWithStackTrace "empty query"
-            [i] ->return $ fmap (\(i,j,a) -> (i,getPKM (ks,vs),a)) $ difftable delayedTB1(mapKey' (kOptional.kDelayed.unKOptional) . mapFValue' (LeftTB1 . Just . DelayedTB1 .  unSOptional ) $ i  )
-            _ -> errorWithStackTrace "multiple result query"
-  where
-    delayedattrs = concat $ fmap (keyValue . (\(Inline i ) -> i)) .  F.toList <$> M.keys filteredAttrs
-    filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (_kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs)
-
 applyAttr' :: (Show a,Ord a ,a~ Index a)  =>  TB Identity Key a  -> PathAttr Key a -> DBM Key a (TB Identity Key a)
 applyAttr' (Attr k i) (PAttr _ p)  = return $ Attr k (applyShowable i p)
 applyAttr' sfkt@(FKT iref rel i) (PFK _ p m b )  =  do

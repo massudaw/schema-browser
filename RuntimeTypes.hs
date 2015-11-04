@@ -7,15 +7,20 @@ import Types
 import Control.Arrow
 import Data.Text.Lazy
 import Control.Monad.IO.Class
+import Patch
+import Control.Monad.Writer
 -- import Step
 
 import qualified Reactive.Threepenny as R
 import Database.PostgreSQL.Simple
+import Data.Functor.Identity
 import Data.Map (Map)
 import Data.Set (Set)
 import Control.Monad.Reader
 import Data.Foldable
 import Data.Traversable
+import Data.IORef
+import Network.Google.OAuth2
 
 data Parser m s a b = P (s,s) (m a b) deriving Functor
 
@@ -23,6 +28,7 @@ data InformationSchema
   = InformationSchema
   { schemaName :: Text
   , username :: Text
+  , token :: Maybe (IORef OAuth2Tokens)
   , keyMap :: Map (Text,Text) Key
   , pkMap :: Map (Set Key) Table
   , tableMap :: Map Text Table
@@ -32,6 +38,7 @@ data InformationSchema
   , conn :: Connection
   , rootconn :: Connection
   , metaschema :: Maybe InformationSchema
+  , schemaOps :: SchemaEditor
   }
 
 data Plugins
@@ -57,6 +64,18 @@ data Plugins
   , _bounds :: Text
   , _arrow :: ArrowReader
   }
+
+type TransactionM = WriterT [TableModification (TBIdx Key Showable)] IO
+
+data SchemaEditor
+  = SchemaEditor
+  { editEd  :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
+  , insertEd :: InformationSchema -> TBData Key Showable -> TransactionM  (Maybe (TableModification (TBIdx Key Showable)))
+  , deleteEd :: InformationSchema ->  TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
+  , listEd :: InformationSchema -> Table -> IO [TB2 Key Showable]
+  , getEd :: InformationSchema -> Table -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
+  }
+
 
 {-
 data  PollingPlugins fi fo

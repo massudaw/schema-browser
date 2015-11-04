@@ -16,9 +16,9 @@ build-type:          Simple
 cabal-version:       >=1.10
 
 executable threepenny-layer
-  main-is:             TP/Browser.hs
-  ghc-options:         -O0 -threaded  -fcontext-stack=50
-  -- ghc-options:         -threaded -rtsopts -fprof-auto -caf-all -fcontext-stack=50
+  main-is:             TP/Main.hs
+  --ghc-options:         -O0 -threaded  -fcontext-stack=50
+  ghc-options:         -threaded -rtsopts -fprof-auto -caf-all -fcontext-stack=50
   -- other-modules:       
   other-extensions:    TupleSections, BangPatterns, OverloadedStrings, RecursiveDo, FlexibleInstances, RankNTypes, NoMonomorphismRestriction, UndecidableInstances, FlexibleContexts, ExistentialQuantification, DeriveDataTypeable, DeriveFunctor, DeriveFoldable, DeriveTraversable, GeneralizedNewtypeDeriving, ScopedTypeVariables, Arrows
   build-depends:       scientific,blaze-builder,base >=4.7 && <4.8
@@ -57,6 +57,7 @@ executable threepenny-layer
    ,old-locale
    ,data-interval
    ,extended-reals
+   ,lens-aeson
    -- Incendio Module
    -- ,incendio
    -- ,diagrams-lib

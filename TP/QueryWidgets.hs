@@ -143,7 +143,7 @@ attrSize (Attr k _ ) = go  (keyType k)
                 KInterval l -> let (i1,i2) = go l in (i1*2,i2)
                 (Primitive i) ->
                   case textToPrim i of
-                       PInt -> (2,1)
+                       PInt -> (3,1)
                        PText-> (3,1)
                        PDate -> (3,1)
                        PTimestamp -> (3,1)
@@ -400,12 +400,16 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
   element nav # set UI.class_ "col-xs-4 pull-right"
   let table = lookPK inf (S.fromList $ fmap _relOrigin $ findPK $ ftb)
   let fun "Editor"= do
+          let
+            getItem :: TB2 Key Showable -> IO (Maybe (TBIdx Key Showable))
+            getItem  =  (getEd $ schemaOps inf) inf table . unTB1
+            -- getItem = loadDelayed inf (unTB1 ftb) . unTB1
           preoldItens <- currentValue (facts preoldItems)
-          loadedItens <- liftIO$ join <$> traverse (loadDelayed inf (unTB1 ftb) . unTB1 ) preoldItens
-          maybe (return ()) (\j -> liftIO  (hvdiff  =<< traverse (\i -> runDBM inf $ applyTB1'  i (PAtom j) ) preoldItens) )  loadedItens
-          loadedItensEv <- mapEvent (fmap join <$> traverse (loadDelayed inf (unTB1 ftb) . unTB1 )) (rumors preoldItems)
+          loadedItens <- liftIO$ join <$> traverse getItem preoldItens
+          maybe (return ()) (\j -> liftIO  (hvdiff  =<< traverse (\i -> return $ applyTB1  i (PAtom j) ) preoldItens) )  loadedItens
+          loadedItensEv <- mapEvent (fmap join <$> traverse getItem ) (rumors preoldItems)
           let oldItemsE =  fmap head $ unions [ evdiff, rumors preoldItems  ]
-          ini2 <- liftIO $(maybe (return preoldItens) (\j -> traverse (\i -> runDBM inf $ applyTB1' i (PAtom j) ) preoldItens ) loadedItens)
+          ini2 <- liftIO $(maybe (return preoldItens) (\j -> traverse (\i -> return $ applyTB1 i (PAtom j) ) preoldItens ) loadedItens)
           oldItemsB <- stepper  ini2 oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
               deleteCurrent e l =  maybe l (flip (L.deleteBy (onBin pkOpSet (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK ))) l) e
@@ -418,7 +422,7 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
           let diff =unionWith const tdiff   (filterJust loadedItensEv)
           onEvent (PAtom <$> diff)
               (liftIO . hdiff)
-          onEvent (unsafeMapIO (fmap Just) $ (\i j -> runDBM inf $ maybe (fmap  TB1$  createTB1' j) (flip applyTB1' (PAtom j)  ) i) <$> facts oldItems <@> diff )
+          onEvent (unsafeMapIO (fmap Just) $ (\i j -> return  $ maybe (TB1$  createTB1 j) (flip applyTB1 (PAtom j)  ) i) <$> facts oldItems <@> diff )
               (liftIO . hvdiff )
           onEvent (rumors tableb)
               (liftIO . h2)
@@ -475,9 +479,9 @@ processPanelTable inf attrsB res table oldItemsi = do
   -- Delete when isValid
          sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip contains j) i  ) (facts oldItemsi ) res))
   let
-         crudEdi (Just (TB1 i)) (Just (TB1 j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $difftable i  g) $ transaction inf $ fullDiffEdit inf   i j
-         crudIns  (Just (TB1 j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf (fullDiffInsert inf j)
-         crudDel (Just (TB1 j))  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> deleteMod inf j table
+         crudEdi (Just (TB1 i)) (Just (TB1 j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $traceShowId $ difftable i  g) $ transaction inf $ (editEd $ schemaOps inf) inf   i j
+         crudIns  (Just (TB1 j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf ((insertEd $ schemaOps inf) inf j)
+         crudDel (Just (TB1 j))  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> (deleteEd $ schemaOps inf) inf j table
 
 
   diffEdi <- mapEvent id $ crudEdi <$> facts oldItemsi <*> attrsB <@ UI.click editB
@@ -543,7 +547,7 @@ attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ (KArray _) ) v) = mdo
             let wheel = fmap negate $ mousewheel offsetDiv
             TrivialWidget offsetT offset <- offsetField 0  wheel (maybe 0 (length . (\(ArrayTB1 l ) -> l) . _tbattr) <$> facts bres)
             let arraySize = 8
-            widgets <- mapM (\ix  -> attrUITable (unIndexItens ix  <$> offsetT <*> tAttr' ) ((unIndexItens ix  <$> facts offsetT <@> ) <$>  evs) (Attr (unKArray i) v  ) ) [0..arraySize -1 ]
+            widgets <- mapM (\ix -> attrUITable (unIndexItens ix  <$> offsetT <*> tAttr' ) ((unIndexItens ix  <$> facts offsetT <@> ) <$>  evs) (Attr (unKArray i) v  ) ) [0..arraySize -1 ]
 
             sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (tail $ getElement <$> widgets) (triding <$> widgets)
             let
@@ -776,16 +780,23 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList .    _unTB1
           sortList :: Tidings ([TB1 Showable] -> [TB1 Showable])
           sortList =  sorting  <$> pure (fmap ((,True)._relTarget) rel)
-      itemList <- listBox ((Nothing:) <$>  fmap (fmap Just) res3) (tidings (fmap Just <$> st) never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+      itemList <- if L.null ifk|| ReadWrite /= rawTableType table
+        then
+           TrivialWidget (Just . fmap _fkttable <$> oldItems ) <$>
+              (UI.div #
+                set UI.style [("border","1px solid gray")] #
+                sink items (pure . maybe UI.div showFKE  .traceShowId . fmap _fkttable<$> facts oldItems ))
+        else
+           listBox ((Nothing:) <$>  fmap (fmap Just) res3) (tidings (fmap Just <$> st) never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
-      let evsel = unionWith const (rumors tdi) (rumors $ join <$> userSelection itemList)
+      let evsel = (if L.null ifk || ReadWrite /= rawTableType table then id else unionWith const (rumors tdi) ) (rumors $ join <$> triding itemList)
       prop <- stepper cv evsel
       let ptds = tidings prop evsel
       tds <- foldr (\i j ->updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap _fkttable.filterJust . snd <$>  plmods)
-      (celem,ediff,pretdi) <-crudUITable inf pgs  (pure "None") res3 staticold (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  tds
+      (celem,ediff,pretdi) <-crudUITable inf pgs  (pure "None") res3 staticold (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  (tds)
       diffUp <-  mapEvent (fmap pure) $ (\i j -> traverse (runDBM inf .  flip applyTB1' j ) i) <$> facts pretdi <@> ediff
       let
-          sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> userSelection itemList), rumors tdi]),diffUp]
+          sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> triding itemList), if L.null ifk || ReadWrite /= rawTableType table then never else rumors tdi]),diffUp]
       st <- stepper cv sel
       inisort <- currentValue (facts sortList)
       res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [fmap const (($) <$> facts sortList <@> rumors vpt) , rumors sortList])
@@ -794,9 +805,13 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
         fksel =  fmap (\box ->  FKT (backFKRef  relTable  (fmap (keyAttr .unTB )ifk)   box) rel box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> tidings st sel)
       element itemList # set UI.class_ "col-xs-5"
       element filterInp # set UI.class_ "col-xs-3"
-      fk <- UI.div # set  children [getElement itemList ,filterInp,head celem]  # set UI.class_ "row"
+      fk <- if L.null ifk || ReadWrite /= rawTableType table
+          then
+            UI.div # set  children [getElement itemList ,head celem]  # set UI.class_ "row"
+          else
+            UI.div # set  children [getElement itemList ,filterInp,head celem]  # set UI.class_ "row"
       subnet <- UI.div # set children [fk,last celem] # set UI.class_ "col-xs-12"
-      return $ TrivialWidget fksel subnet
+      return $ TrivialWidget (if L.null ifk || ReadWrite /= rawTableType table  then oldItems  else fksel ) subnet
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk rel  (DelayedTB1 (Just tb1 ))) = do
     tr <- fkUITable inf pgs constr  plmods  wl oldItems  (FKT  ilk  rel tb1)
     return $ tr

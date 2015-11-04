@@ -27,7 +27,7 @@ import qualified Data.Text as TE
 
 import Database.PostgreSQL.Simple.Time
 
-import Prelude hiding ((.),id)
+import Prelude hiding ((.),id,head)
 import Control.Category
 
 import Debug.Trace

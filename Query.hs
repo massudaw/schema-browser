@@ -18,6 +18,7 @@
 module Query where
 
 import Data.Functor.Apply
+import Data.Bifunctor
 import Data.Unique
 import Data.Functor.Identity
 import Data.Ord
@@ -54,8 +55,6 @@ import GHC.Stack
 import Types
 
 
-head [] = errorWithStackTrace "no head error"
-head l = L.head l
 
 transformKey (KSerial i)  (KOptional j) (SerialTB1 v)  | i == j = LeftTB1  v
 transformKey (KOptional i)  (KSerial j) (LeftTB1 v)  | i == j = SerialTB1 v
@@ -104,6 +103,7 @@ showInterval f (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> f
   where
     ocl j = if j then "[" else "("
     ocr j = if j then "]" else ")"
+showInterval f i = show i -- errorWithStackTrace (show i)
 
 
 renderAliasedKey (v ,(t,k)) a = rawName t <> "." <> keyValue k <> " AS " <> a
@@ -298,6 +298,7 @@ isPairReflexive (KInterval i) op (KInterval j)
 isPairReflexive (Primitive i ) op (Primitive j) | i == j = True
 isPairReflexive (KOptional i ) op  j = isPairReflexive i op j
 isPairReflexive i op (KSerial j) = isPairReflexive i op j
+isPairReflexive (KSerial i) op j = isPairReflexive i op j
 isPairReflexive (KArray i )  op  (KArray j)
   | i == j  && op == "<@" = False
   | i == j  && op == "=" = True
@@ -318,9 +319,13 @@ reflexiveRel ks
 isInlineRel (Inline _ ) =  True
 isInlineRel i = False
 
+isReflexive (Path i r@(FKJoinTable _ ks _ )  t)
+  |  not (t `S.isSubsetOf` (S.fromList $ fmap _relTarget ks ))  = False
+  |  otherwise = isPathReflexive  r
+isReflexive (Path _ l _ ) = isPathReflexive l
 
 isPathReflexive (FKJoinTable _ ks _)
-  = all id $ fmap (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
+  | otherwise   = all id $ fmap (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
 isPathReflexive (FKInlineTable _)= True
 isPathReflexive (FKEitherField _ )= False
 isPathReflexive (RecJoin _ i ) = isPathReflexive i
@@ -403,12 +408,13 @@ expandInlineRecursive tbase =
          close = pret <> "close(" <> T.intercalate "," tbpk  <> ",iter," <> attrs  "" <>") as ( " <> closebase <> " union all " <> closerec <>  ")"
            where
              closebase ="select " <> T.intercalate "," tbpk  <> ",iter," <> T.intercalate "," (F.toList $ M.insert recKey ("null :: record") nonrecM ) <> " from " <> pret <>"open natural join (select " <> T.intercalate "," tbpk  <> ",max(iter) as iter from " <> pret <>"open group by " <> T.intercalate "," tbpk  <> ") as max"
-             closerec ="select c." <> T.intercalate "," tbpk  <> ",o.iter," <> T.intercalate "," (F.toList $ M.insert recKey ("row(" <>attrs "c." <>" )") $ fmap ("o." <>) nonrecM) <> " from " <> pret <>"close c join " <> pret <>"open o on o." <> T.intercalate "," tbpk  <> "= c." <> T.intercalate "," tbpk  <> " and c.iter -1 = o.iter"
+             closerec ="select c." <> T.intercalate "," tbpk  <> ",o.iter," <> T.intercalate "," (F.toList $ M.insert recKey ("row(" <>attrs "c." <>" )") $ fmap ("o." <>) nonrecM) <> " from " <> pret <>"close c join " <> pret <>"open o on " <> joinPk tbpk <> " and c.iter -1 = o.iter"
+
          pret = (label $ getCompose $ snd (unTB1 t))
 
+         joinPk  tbpk = "(" <> T.intercalate "," (fmap ("o." <>)  tbpk ) <>  ")=(" <> T.intercalate "," (fmap ("c." <>)  tbpk  )<> ")"
          recKey = (S.fromList $ keyattri (labelValue $ getCompose $ inlineEl))
          attrs pre =  T.intercalate "," (fmap (pre <>) $ F.toList (M.insert  recKey tRec  nonrecM ))
-         nonrec = F.toList nonrecM
          nonrecM =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id  )) . getCompose <$> m
             where m =  _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
                   tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec  $ _kvrecrels m)) <$> t
@@ -428,7 +434,7 @@ topRec = join . join . fmap unMutRec
 
 expandFKMutRecursive t=
     let
-      query  =  tname <> "(" <> T.intercalate "," (tnonRec <> tRec <> (("f"<>) <$>  tRec ) <> (label <$> l)) <> ") as  ( SELECT "  <> T.intercalate "," (tnonRec<> tRec <> tRec <> (const "null :: record" <$> l)) <>" FROM (select * from " <> expandBaseTable t <>  (fst (runWriter (expandQuery' False (fmap unlabelIT $ TB1 tnonRecA)))) <> ") as " <> tname <> " UNION ALL " <> recpart <> ")"
+      query  =  tname <> "(" <> T.intercalate "," (tnonRec <> tRec <> (("f"<>) <$>  tRec ) <> (label <$> l)) <> ") as  ( SELECT "  <> T.intercalate "," (tnonRec<> tRec <> tRec <> (const "null :: record" <$> l)) <>" FROM (select * from " <> expandBaseTable t <>  (fst (runWriter (expandQuery' False (fmap unlabelIT $ TB1 $(first (\t -> t {_kvrecrels =[] }  )) tnonRecA)))) <> ") as " <> tname <> " UNION ALL " <> recpart <> ")"
       recpart = "(SELECT " <> T.intercalate "," (fmap ("sg." <>) ( tnonRec <> tRec) <> (fmap recflags idx) <> (recfield <$> idx) ) <> " FROM "<> tname <> " sg " <> T.concat (recpoint <$> idx ) <> " WHERE " <> T.intercalate " OR "(recwhere <$> idx ) <> " UNION ALL " <> recpart2 <> ")"
           where idx= [0..length tRec -1]
       recpart2 = "SELECT sg.* FROM "<> tname <> " sg " <> T.concat (recpoint <$> idx) <> " WHERE " <> T.intercalate " OR " (T.intercalate " and " (recwhere3 <$> idx) : (recwhere2 <$> idx))
@@ -462,8 +468,8 @@ expandFKMutRecursive t=
       tnonRecA =  (unTB1 t)
       tpk =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> m
         where m =  F.toList $  _kvvalues $ labelValue $ getCompose $   tfilpk
-      tRec =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
-        where l = concat $ fmap (_tbref .labelValue . getCompose )   . L.filter (isFKT .labelValue .getCompose) $ flattenRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t)
+      tRec =   (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
+        where l = concat $ fmap (_tbref .labelValue . getCompose ).  L.filter (isFKT .labelValue .getCompose) $ flattenRec (fmap (fmap (fmap S.fromList)) $_kvrecrels $ fst $ unTB1 t) (unTB1 t)
               isFKT (FKT _ _ _) = True
               isFKT i = False
       tRec2 =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
@@ -473,7 +479,7 @@ expandFKMutRecursive t=
                                       Labeled lit (FKT ref rel  itv) -> (lit,Labeled lit( FKT ref rel itv))) $ F.toList $   _kvvalues $ labelValue $ getCompose $  snd $ unTB1 tnfil
 
 
-      l = fmap getCompose $   flattenRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t)
+      l = fmap getCompose $   flattenRec (fmap (fmap (fmap S.fromList)) $ _kvrecrels $ fst $ unTB1 t) (unTB1 t)
       tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec $ _kvrecrels m)) <$> t
       tfilpk =   tbPK  t
       tnfil =   tbFilterE (\m e -> S.member e (S.fromList $ fmap S.fromList $ topRec $ _kvrecrels m)) <$> t
@@ -511,7 +517,7 @@ expandJoin left env (Labeled l (IT i (LeftTB1 (Just tb) )))
 expandJoin left env (Labeled l (IT i (ArrayTB1 [tb] )))
     = do
     tjoin <- expandQuery left tb
-    return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> (explodeRow tb <> (if allAttr tb then  " :: " <> tableType tb else "") ) <> "  order by arrrow ) as " <> l <> " FROM " <> expandInlineArrayTable tname tb <> label tas <> tjoin <> " )  as " <>  label tas <> " ON true"
+    return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> (explodeRow tb {-<> (if allAttr tb then  " :: " <> tableType tb else "")-} ) <> "  order by arrrow ) as " <> l <> " FROM " <> expandInlineArrayTable tname tb <> label tas <> tjoin <> " )  as " <>  label tas <> " ON true"
         where
           tas = getTas tb
           getTas (DelayedTB1 (Just tb))  = getTas tb
@@ -535,12 +541,12 @@ expandJoin left env (Labeled l (FKT _ ks (ArrayTB1 [tb])))
     return $ jt <> " JOIN LATERAL (select * from ( SELECT " <>  query  <> "  ) as " <>  label tas  <>  (if left then "" else " WHERE " <> l <> " is not null " ) <> " ) as " <>  label tas <> " ON true "
       where
           hasArray (Just _)  =  do
-            ttable <- expandTable tb
+            ttable <- expandTable (fmap (first (\t -> t {_kvrecrels = []})) tb)
             tjoin <- expandQuery left tb
-            return $ "array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (justError "no array in rel" $ L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) (fmap getCompose $ concat $ fmap nonRef env)))  <> ") as arr) as z1 "  <> jt  <> " JOIN " <> ttable <> " ON " <>  label (head $ look  [ _relTarget $ justError "no array in rel" $ L.find (isArray. keyType . _relOrigin ) ks] (fmap getCompose $ F.toList   (tableAttr tb))) <> " = arr " <> nonArrayJoin  <> " ) as z1 " <> tjoin
+            return $ "array_agg(" <> explodeRow  tb <> " order by arrrow) as " <> l <> " FROM ( SELECT * FROM (SELECT *,row_number() over () as arrrow FROM UNNEST(" <> label (justError "no array rn rel" $ L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) (fmap getCompose $ concat $ fmap nonRef env)))  <> ") as arr) as z1 "  <> jt  <> " JOIN " <> ttable <> " ON " <>  label (head $ look  [ _relTarget $ justError "no array in rel" $ L.find (isArray. keyType . _relOrigin ) ks] (fmap getCompose $ F.toList   (tableAttr tb))) <> " = arr " <> nonArrayJoin  <> " ) as z1 " <> tjoin
           hasArray Nothing =   do
-            tjoin <- expandQuery left tb
             ttable <- expandTable tb
+            tjoin <- expandQuery left tb
             return $ "array_agg(" <> explodeRow  tb <> " ) as " <> l <> " FROM " <> ttable <>   tjoin <> " WHERE true " <>  nonArrayJoin
           nonArrayJoin = if L.null nonArrayRel then "" else " AND " <> joinOnPredicate nonArrayRel (fmap getCompose $ concat $ fmap nonRef  env ) (fmap getCompose $ F.toList   (tableAttr tb))
             where
@@ -647,7 +653,7 @@ recursePath isLeft isRec vacc ksbn invSchema jo@(Path ifk (RecJoin l f) e)
     = recursePath isLeft (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec  ) vacc ksbn invSchema (Path ifk f e)
 
 recurseTB :: Map Text Table -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TB3Data (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3Data (Labeled Text) Key ())
-recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (m,) <$>
+recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else m {_kvrecrels = []} ,) <$>
     (\kv -> case kv of
       (Compose (Labeled l kv )) -> do
          i <- fun kv
@@ -660,7 +666,7 @@ recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (m,) <$>
           let
               items = _kvvalues kv
               fkSet:: S.Set Key
-              fkSet =  S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter (isPathReflexive . pathRel) $ S.toList fks'
+              fkSet =  traceShowId $ S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ S.toList fks'
               nonFKAttrs :: [(S.Set (Rel Key) ,TBLabel  ())]
               nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
           pt <- foldl (\acc  fk ->  do

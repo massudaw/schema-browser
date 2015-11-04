@@ -29,10 +29,11 @@ import Data.Traversable(traverse,sequenceA)
 import Data.Foldable (Foldable)
 import qualified Data.Foldable as F
 import qualified Data.Interval as Interval
-import Data.Interval (lowerBound,upperBound)
+import Data.Interval (interval,lowerBound',upperBound')
 import Data.Monoid hiding (Product)
 
 import GHC.Stack
+import Debug.Trace
 
 import GHC.Exts
 import Control.Applicative
@@ -40,6 +41,7 @@ import qualified Data.List as L
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
+import Prelude hiding(head)
 
 
 {-
@@ -57,7 +59,7 @@ data PathFTB   a
   | PDelayed (Maybe (PathFTB a))
   | PSerial (Maybe (PathFTB a))
   | PIdx Int (Maybe (PathFTB a))
-  | PInter Bool (PathFTB a)
+  | PInter Bool (PathFTB a,Bool)
   | PatchSet [PathFTB a]
   | PAtom a
   deriving(Show,Eq,Ord,Functor,Generic,Foldable)
@@ -127,7 +129,7 @@ compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . 
     pathProj (POpt  i) = i
     pathProj (PSerial i) = i
     pathProj (PDelayed i) = i
-    pathProj (PInter _ i) = Just i
+    pathProj p@(PInter _ i) = Just (p)
     pathProj i@(PAtom _  ) = Just i
     pathProj i = errorWithStackTrace (show i)
     projectors (PIdx i _ ) = PIdIdx i
@@ -141,7 +143,7 @@ compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . 
     recover (PIdOpt , j ) = POpt  (compact j)
     recover (PIdSerial , j ) = PSerial (compact j)
     recover (PIdDelayed , j ) = PDelayed (compact j)
-    recover (PIdInter i , j ) = PInter i (justError "no patch inter" $ compact j)
+    recover (PIdInter i ,  j ) = justError "no patch inter" $ compact j
     recover (PIdAtom , j ) = justError "can't be empty " $ patchSet (catMaybes j)
     -- recover i = errorWithStackTrace (show i)
     compact j = join $ compactPatches <$> Just (catMaybes j)
@@ -157,10 +159,10 @@ groupSplit2 f g = fmap (\i-> (f $ head i , g <$> i)) . groupWith f
 
 applyTable
   ::  PatchConstr k a  => [FTB1 Identity k a ] -> PathFTB  (TBIdx k a )-> [FTB1 Identity k a ]
-applyTable l pidx@(PAtom (m,i, p) ) =  case L.find (\tb -> getPK tb == i ) l  of
+applyTable l pidx@(PAtom patom@(m,i, p) ) =  case L.find (\tb -> getPK tb == i ) l  of
                   Just _ ->  catMaybes $ L.map (\tb@(TB1 (m, k)) -> if  getPK tb ==  i  then (case p of
                                                 [] ->  Nothing
-                                                ps -> Just $ TB1 $ applyRecord (m,k) (m,i,p)
+                                                ps -> Just $ TB1 $ applyRecord (m,k) (patom)
                                               ) else  (Just tb )) l
                   Nothing -> (createFTB createTB1  pidx) : l
 applyTable l i = errorWithStackTrace (show (l,i))
@@ -192,16 +194,20 @@ createTB1
 createTB1 (m ,s ,k)  = (m , _tb .KV . mapFromTBList . fmap (_tb . createAttr) $  k)
 
 
+pattrKey (PAttr s _ ) = Set.singleton $ Inline s
+pattrKey (PInline s _ ) = Set.singleton $ Inline s
+pattrKey (PFK s _ _ _ ) = Set.fromList s
+
 
 applyRecord
-  :: (Index a~ a ,Show a , Ord a ,Show d, Ord d  ) =>
+   :: (Index a~ a ,Show a , Ord a ,Show d, Ord d  ) =>
     TBData d a
      -> TBIdx d a
      -> TBData d a
-applyRecord t@((m, v)) (_ ,_  , k)  = (m ,mapComp (KV . Map.mapWithKey (\key vi -> foldl  (edit key) vi k  ) . _kvvalues ) v)
-  where edit  key v k@(PAttr  s _)  = if (head $ F.toList $ key) == Inline s then  mapComp (flip applyAttr k ) v else v
-        edit  key v k@(PInline s _ ) = if (head $ F.toList $ key) == Inline s then  mapComp (flip applyAttr k ) v else v
-        edit  key v k@(PFK rel _  _ _ ) = if   key == Set.fromList rel  then  mapComp (flip applyAttr k ) v else v
+applyRecord t@((m, v)) (_ ,_  , k)  = (m ,mapComp (KV . flip (foldr (\p m -> Map.alter (\v -> Just $ maybe (_tb $ createAttr p) (mapComp (flip applyAttr p )) v   ) (pattrKey p) m)) k  . _kvvalues ) v)
+  where edit  v k@(PAttr  s _)  =  mapComp (flip applyAttr k ) v
+        edit  v k@(PInline s _ ) =  mapComp (flip applyAttr k ) v
+        edit  v k@(PFK rel _  _ _ ) =   mapComp (flip applyAttr k ) v
 
 patchTB1 :: (Show a , Ord a ,a ~ Index a ,Show k,Ord k) => TBData k  a -> Index (TBData k  a)
 patchTB1 (m, k)  = (m  ,(getPKM (m,k)) ,  F.toList $ patchAttr  . unTB <$> (unKV k))
@@ -210,7 +216,7 @@ difftable
   ::  (a ~ Index a, Ord a , Show a,Show k , Ord k) => TBData k a -> TBData k a
      -> Maybe (Index (TBData k a ))
 difftable (m, v) (n, o) = if L.null attrs then Nothing else Just  (m, (getPKM (m,v)), attrs)
-    where attrs = catMaybes $ F.toList  $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j)) (unKV v) (unKV o)
+    where attrs = catMaybes $ F.toList  $ traceShowId $ Map.mergeWithKey (\_ i j -> Just $ diffAttr (unTB i) (unTB j)) (const Map.empty ) (fmap (Just. patchAttr . unTB) ) (unKV v) (unKV o)
 
 diffTB1 :: (a ~ Index a ,Ord a, Show a, Ord k ,Show k) =>  TB2 k a -> TB2  k  a -> Maybe (PathFTB   (Index (TBData k a )) )
 diffTB1 = diffFTB patchTB1  difftable
@@ -276,6 +282,7 @@ diffShowable = diffFTB id diffPrim
 applyShowable ::  (Show a,Ord a ,a ~ Index a) => FTB a ->  PathFTB   (Index a)  -> FTB a
 applyShowable = applyFTB id (flip const )
 
+createShowable :: (a ~ Index a,Ord a )=>  PathFTB (Index a) -> FTB a
 createShowable = createFTB id
 
 diffPrim :: (Eq a ,a ~ Index a) => a -> a -> Maybe (Index a)
@@ -291,6 +298,7 @@ patchFTB p (LeftTB1 j )  = POpt (patchFTB p <$> j)
 patchFTB p (ArrayTB1 j )  = justError "can't be empty" $  patchSet   $ zipWith (\i m ->  PIdx i  (Just m) ) [0..]  (F.toList $ patchFTB p <$> j)
 patchFTB p (DelayedTB1 j ) = PDelayed (patchFTB p <$> j)
 patchFTB p (SerialTB1 j ) = PSerial (patchFTB p <$> j)
+patchFTB p (IntervalTB1 j ) =  PatchSet [PInter True (first (patchFTB p . unFinite ) $  Interval.lowerBound' j) , PInter False (first (patchFTB p . unFinite ) $ Interval.upperBound' j)]
 patchFTB p (TB1 j) = PAtom $ p j
 -- patchFTB p i = errorWithStackTrace (show i)
 
@@ -310,7 +318,8 @@ diffFTB p d (SerialTB1 i) (SerialTB1 j) = fmap PSerial $ diffOpt p d i j
 diffFTB p d (DelayedTB1 i) (DelayedTB1 j) = fmap PDelayed $ diffOpt p d i j
 diffFTB p d (IntervalTB1 i) (IntervalTB1 j)
   | i == j = Nothing
-  | otherwise =  patchSet $  catMaybes   [fmap (PInter False) (diffFTB p d (unFinite $ Interval.lowerBound i) (unFinite $ Interval.lowerBound j) ),fmap (PInter True) (  diffFTB p d (unFinite $ Interval.upperBound i) (unFinite $ Interval.upperBound j) )]
+  | otherwise =  patchSet $  catMaybes   [match True (lowerBound' i ) (lowerBound' j) ,match False (upperBound' i ) (upperBound' j) ]
+    where match f i j = fmap (PInter f . (,snd $  j)) (maybe (if snd j == snd i then Nothing  else Just $ patchFTB p (unFinite $ fst $ j)) Just $ diffFTB p d (unFinite $ fst $  i) (unFinite $ fst $  j) )
 
 diffFTB p d (TB1 i) (TB1  j) = fmap PAtom $ d i j
 diffFTB p d  i j = errorWithStackTrace (show (i,j))
@@ -331,7 +340,7 @@ applyOptM  pr a i  o = case i of
                             Just j -> traverse (createFTBM pr) o
                       Just _ -> sequenceA $ applyFTBM pr a <$> i <*> o
 applyOpt
-  :: (Show a,Ord a,Show t) =>
+  :: (t ~ Index a,Show a,Ord a,Show t) =>
      (t -> a)
      -> (a -> t -> a)-> Maybe (FTB a) -> Maybe (PathFTB t) ->  (Maybe (FTB a))
 applyOpt  pr a i  o = case i of
@@ -352,17 +361,17 @@ applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                                       else errorWithStackTrace $ "ix bigger than next elem" <> show (ix, length i)
 applyFTBM pr a (SerialTB1 i ) (PSerial o) = SerialTB1 <$>  applyOptM pr a i o
 applyFTBM pr a (DelayedTB1 i ) (PDelayed o) = DelayedTB1 <$>  applyOptM pr a i o
-applyFTBM pr a (IntervalTB1 i) (PInter b p)
+applyFTBM pr a (IntervalTB1 i) (PInter b (p,l))
     = IntervalTB1 <$> if b
-        then (Interval.<..<) <$> traverse (flip (applyFTBM pr a) p) (lowerBound i) <*> pure (upperBound i)
-        else (Interval.<..<) <$> pure (lowerBound i)  <*> traverse (flip (applyFTBM pr a) p ) (upperBound i)
+        then (Interval.interval) <$> fmap (,l) (traverse ( flip (applyFTBM pr a) p) (fst $ lowerBound' i)) <*> pure (upperBound' i)
+        else (Interval.interval) <$> pure (lowerBound' i)  <*> fmap (,l)  (traverse ( flip (applyFTBM pr a) p ) (fst $ upperBound' i))
 applyFTBM pr a (TB1 i) (PAtom p)  =  TB1 <$> a i p
 applyFTBM pr a  b (PatchSet l ) = foldl (\i j -> i >>= flip (applyFTBM pr a) j  ) (pure b) l
 applyFTBM _ _ a b = errorWithStackTrace ("applyFTB: " <> show (a,b))
 
 
 applyFTB
-  :: (Show a,Show t,Ord a) =>
+  :: (t ~ Index a ,Show a,Show t,Ord a) =>
   (t -> a) -> (a -> t -> a) -> FTB a -> PathFTB t -> FTB a
 applyFTB pr a (LeftTB1 i ) op@(POpt o) = LeftTB1 $ applyOpt pr a i o
 applyFTB pr a (ArrayTB1 i ) (PIdx ix o) = case o of
@@ -374,20 +383,20 @@ applyFTB pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                                       else errorWithStackTrace $ "ix bigger than next elem" <> show (ix, length i)
 applyFTB pr a (SerialTB1 i ) (PSerial o) = SerialTB1 $  applyOpt pr a i o
 applyFTB pr a (DelayedTB1 i ) (PDelayed o) = DelayedTB1 $  applyOpt pr a i o
-applyFTB pr a (IntervalTB1 i) (PInter b p)
+applyFTB pr a (IntervalTB1 i) (PInter b (p,l))
     = IntervalTB1 $ if b
-        then fmap (flip (applyFTB pr a) p) (lowerBound i)  Interval.<..<  upperBound i
-        else lowerBound i Interval.<..<  fmap (flip (applyFTB pr a) p ) (upperBound i)
+        then interval (second (const l) $ first (fmap (flip (applyFTB pr a) p)) (lowerBound' i))    (upperBound' i)
+        else interval (lowerBound' i) (second (const l) $ first (fmap (flip (applyFTB pr a) p )) (upperBound' i))
 applyFTB pr a (TB1 i) (PAtom p)  =  TB1 $ a i p
 applyFTB pr a  b (PatchSet l ) = foldl (applyFTB pr a ) b l
 applyFTB _ _ a b = errorWithStackTrace ("applyFTB: " <> show (a,b))
 
--- createFTB :: (Index a  ->  a) -> PathFTB (Index a) -> a
+createFTB :: Ord a => (Index a  ->  a) -> PathFTB (Index a) -> FTB a
 createFTB p (POpt i ) = LeftTB1 (createFTB p <$> i)
 createFTB p (PSerial i ) = SerialTB1 (createFTB p <$> i)
 createFTB p (PDelayed i ) = DelayedTB1 (createFTB p <$> i)
 createFTB p (PIdx ix o ) = ArrayTB1 (fromJust  $  pure . createFTB p <$> o)
-createFTB p (PInter b o ) = errorWithStackTrace "interval"
+createFTB p (PInter b o ) = IntervalTB1 $ if b then interval (first (Interval.Finite . createFTB p ) o) (Interval.PosInf,False) else  interval  (Interval.NegInf,False) ( first (Interval.Finite . createFTB p) o)
 createFTB p (PAtom i )  = TB1 $ p i
 createFTB p (PatchSet l) = foldl1 mappend (createFTB p <$> l)
 
@@ -396,15 +405,16 @@ createFTBM p (POpt i ) = LeftTB1 <$> (traverse (createFTBM p) i)
 createFTBM p (PSerial i ) = SerialTB1 <$>  (traverse (createFTBM p ) i)
 createFTBM p (PDelayed i ) = DelayedTB1 <$> (traverse (createFTBM p ) i)
 createFTBM p (PIdx ix o ) = ArrayTB1 .pure .justError "" <$> (traverse (createFTBM p) o)
-createFTBM p (PInter b o ) = errorWithStackTrace "interval"
+-- createFTBM p (PInter b o ) = IntervalTB1 $ if b then interval (first (fmap Interval.Finite . createFTBM p ) o) (Interval.PosInf,False) else  interval  (Interval.NegInf,False) ( first (fmap Interval.Finite . createFTBM p) o)
 createFTBM p (PAtom i )  = TB1 <$>  p i
 createFTBM p (PatchSet l) = foldl1 (liftA2 mappend) (createFTBM p <$>  l)
 
 
 
-instance Monoid (FTB a) where
+instance (Ord a )=> Monoid (FTB a) where
  mempty = LeftTB1 Nothing
  mappend (LeftTB1 i) (LeftTB1 j) = LeftTB1 (j)
+ mappend (IntervalTB1 i) (IntervalTB1 j) = IntervalTB1 ( i `Interval.intersection` j)
  mappend (ArrayTB1 i) (ArrayTB1 j) = ArrayTB1 (i <> j)
  mappend (DelayedTB1 i) (DelayedTB1 j) = DelayedTB1 (j)
  mappend (SerialTB1 i) (SerialTB1 j) = SerialTB1 (j)

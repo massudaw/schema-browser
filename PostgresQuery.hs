@@ -91,7 +91,7 @@ updatePatch
 updatePatch conn kv old  t =
     execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk ) >> return patch
   where
-    patch  = justError ("cant diff states" <> show (kv,old)) $ difftable old kv
+    patch  = justError ("cant diff states" <> (concat $ zipWith differ (show kv) (show old))) $ difftable old kv
     kold = getPKM old
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> F.toList kold
@@ -103,6 +103,7 @@ updatePatch conn kv old  t =
     isM :: TBData Key  Showable
     isM =  justError ("cant diff befor update" <> show (kv,old)) $ diffUpdateAttr kv old
 
+differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 
 
 selectQueryWherePK
