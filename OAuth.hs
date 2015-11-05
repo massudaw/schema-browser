@@ -9,13 +9,16 @@ import Network.Google.OAuth2 (formUrl, exchangeCode, refreshTokens,
                               OAuth2Client(..), OAuth2Tokens(..))
 import Network.Google (toAccessToken,makeRequest, doRequest)
 import Network.Google.Contacts(listContacts)
-import Network.HTTP.Conduit  hiding (host)-- (httpLbs,parseUrl,withManager,responseBody,(..))
+import Network.HTTP.Conduit  hiding (port,host)-- (httpLbs,parseUrl,withManager,responseBody,(..))
 import Control.Lens hiding (get,delete,set,(#),element,children)
 import Control.Applicative
 import qualified Data.Set as S
 import qualified Data.Foldable as F
 import Control.Monad.IO.Class
 import Data.Monoid
+import Data.Biapplicative
+import GHC.Stack
+import Data.String
 import Control.Concurrent
 import Data.Unique
 import Data.Maybe
@@ -34,6 +37,7 @@ import qualified Data.Vector as V
 import Safe
 import Utils
 import Patch
+import Database.PostgreSQL.Simple
 
 import Types
 import Data.IORef
@@ -41,6 +45,7 @@ import RuntimeTypes
 import Control.Monad
 import qualified Data.Map as M
 import qualified Data.ByteString.Lazy.Char8 as BL
+import qualified Data.ByteString.Char8 as BS
 import Debug.Trace
 import SchemaQuery
 import qualified Graphics.UI.Threepenny as UI
@@ -54,21 +59,9 @@ import Data.List (find,intercalate)
 file   = "./tokens.txt"
 --
 
-{-
-pluginContact inf = do
-  v <- liftIO $ pluginContactGoogle
-  let project l = (emails l :  phones l : names l )
-        where
-          names = catMaybes . concat . maybeToList .   fmap (projectContact inf ) . filterChildName ((=="name").qName)
-          emails = projectEmail inf . filterChildrenName ((=="email").qName)
-
-          phones = projectPhone inf  . filterChildrenName ((=="phoneNumber").qName)
-  return $ project <$> (filterChildrenName ((=="entry") . qName) v)
--}
-
 gmailScope = "https://www.googleapis.com/auth/gmail.modify"
 
-pluginContactGoogle = do
+pluginContactGoogle args = do
   Just cid <- lookupEnv "CLIENT_ID"
   Just secret <- lookupEnv "CLIENT_SECRET"
   -- Ask for permission to read/write your fusion tables:
@@ -99,27 +92,30 @@ pluginContactGoogle = do
     writeIORef tokenRef tokens2
     threadDelay (1000*1000*60*10)
 
-  gsch <- gmailSchema  tokenRef
-  m:args <- getArgs
-  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setupOAuth  gsch $ tail args)
+  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setupOAuth  tokenRef $ tail args)
 
 listTable inf table = do
-  tok <- readIORef (fromJust $ token inf)
-  c <- return . fmap (convertAttrs table ) . maybe [] (\i -> (i :: Value) ^.. key ( T.toStrict $ rawName table ) . values) . decode =<< simpleHttpHeader [("GData-Version","3.0")] ("https://www.googleapis.com/gmail/v1/users/"<> T.unpack (username inf ) <> "/" <> T.unpack (rawName table ) <> "?access_token=" ++ ( accessToken tok ))
+  tok <- readIORef (snd $fromJust $ token inf)
+  let user = fst $ fromJust $ token inf
+  c <- return . fmap (convertAttrs (tableMap inf) table ) . maybe [] (\i -> (i :: Value) ^.. key ( T.toStrict $ rawName table ) . values) . decode =<< simpleHttpHeader [("GData-Version","3.0")] ("https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?access_token=" ++ ( accessToken tok ))
   --fmap catMaybes $ mapM (getTable inf table . getPK) (take 5 c)
   return  c
 
 getTable inf table pk = do
-  tok <- readIORef (fromJust $ token inf)
-  c <- return . fmap (traceShowId . convertAttrs table .traceShowId ) . fmap (\i -> (i :: Value)  ) . decode =<< simpleHttpHeader [("GData-Version","3.0")] (traceShowId $ "https://www.googleapis.com/gmail/v1/users/"<> T.unpack (username inf ) <> "/" <> T.unpack (rawName table ) <> "/" <>  intercalate "," ( renderShowable . snd <$> pk ) <> "?access_token=" ++ ( accessToken tok))
+  tok <- readIORef (snd $ fromJust $ token inf)
+  let user = fst $ fromJust $ token inf
+  c <- return . fmap (traceShowId . convertAttrs (tableMap inf) table .traceShowId ) . fmap (\i -> (i :: Value)  ) . decode =<< simpleHttpHeader [("GData-Version","3.0")] (traceShowId $ "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "/" <>  intercalate "," ( renderShowable . snd <$> pk ) <> "?access_token=" ++ ( accessToken tok))
   return $  c
 
 getDiffTable inf table  j = fmap (join . fmap (difftable j. unTB1) ) $ getTable  inf table . getPK $ TB1 j
 
 setupOAuth
-      :: InformationSchema -> [String] -> Window -> UI ()
-setupOAuth  gsch args w = void $ do
+      :: IORef OAuth2Tokens -> [String] -> Window -> UI ()
+setupOAuth  tokenRef args w = void $ do
   let bstate = argsToState args
+      dname = bstate
+  connDB <- liftIO$ connectPostgreSQL ((fromString $ "host=" <> host dname <> " port=" <> port dname <>" user=" <> user dname <> " dbname=" ) <> (BS.pack $ dbn dname) <> (fromString $ " password=" <> pass dname )) --  <> " sslmode= require") )
+  gsch <- liftIO $keyTables connDB connDB ("gmail",T.pack $ user dname  ) (Just ("wesley.massuda@gmail.com",tokenRef)) gmailOps
   body <- UI.div
   return w # set title (host bstate <> " - " <>  dbn bstate)
   nav  <- buttonDivSet  ["Nav","Change","Exception"] (pure $ Just "Nav" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
@@ -141,6 +137,7 @@ setupOAuth  gsch args w = void $ do
             span <- chooserTable  inf ([])  k (tablename bstate)
             element body # set UI.children [span]# set UI.class_ "row"  )) $ liftA2 (\i -> fmap (i,)) (triding nav) (pure $ Just gsch)
 
+gmailOps = (SchemaEditor undefined undefined undefined listTable getDiffTable )
 
 
 gmailSchema  token = do
@@ -151,7 +148,7 @@ gmailSchema  token = do
     keyMap = M.fromList $ concat  $ fmap (\t -> fmap (\k -> ((tableName t, keyValue k),k)) $ F.toList (rawAttrs t)) (F.toList tmap)
     pks = M.fromList $ fmap (\(_,t)-> (rawPK t ,t)) $ M.toList tmap
     i2 =  M.filterWithKey (\k _ -> not.S.null $ k )  pks
-  return $ InformationSchema "gmail"  "wesley.massuda@gmail.com" (Just token) keyMap (traceShowId i2) tmap M.empty M.empty  mvar (error "no conn") (error "no conn")Nothing (SchemaEditor undefined undefined undefined listTable getDiffTable )
+  return $ InformationSchema "gmail"  "wesley.massuda@gmail.com" (Just token) keyMap (traceShowId i2) tmap M.empty M.empty  mvar (error "no conn") (error "no conn")Nothing
 
 genKey k un =  Key n Nothing 0 Nothing  un (( fuType (T.unpack fu )) (if T.length ty > 0 then  ty else "text"))
   where (n,tyfu) = T.break (':'==) k
@@ -165,41 +162,37 @@ genKey k un =  Key n Nothing 0 Nothing  un (( fuType (T.unpack fu )) (if T.lengt
           | otherwise = T.tail i
 
 
-
 genTable t pk desc l  = do
     keys <- mapM (\l -> genKey l <$> newUnique) l
-    return $ (mapTableK (\k -> fromJust $ find ((==k).keyValue) keys) ( Raw "gmail" ReadWrite Nothing S.empty t [] [] (S.singleton pk) desc S.empty S.empty))  {rawAttrs = S.fromList keys}
+    return $ (mapTableK (\k -> fromJust $ find ((==k).keyValue) keys) ( Raw "gmail" ReadWrite Nothing S.empty t [] [] (S.singleton pk) desc S.empty S.empty S.empty))  {rawAttrs = S.fromList keys}
 
 messages = genTable "messages" "id"  [] ["id","threadId","labelIds:text:[]","snippet","historyId:bigint","internalDate:integer","sizeEstimate:integer:*"]
 payload = genTable "message_payload" "partId" [] ["partId","mimeType","filename","headers","body","parts:"]
 labels = genTable "labels" "id"  ["name"] ["id","name","messageListVisibility","labelListVisibility","type"]
 threads = genTable "threads" "id"  ["snippet"] ["id","historyId","snippet"]
--- history = genTable "history" "id"  [] ["id"]
 drafts = genTable "drafts" "id"  [] ["id","message"]
 
 
 
-convertAttrs :: Table -> Value -> TB2 Key Showable
-convertAttrs  tb i =   tblist' tb $  Compose . Identity <$> catMaybes (kid <$> S.toList (rawAttrs tb))
+convertAttrs :: M.Map Text Table ->  Table -> Value -> TB2 Key Showable
+convertAttrs  inf tb i =   tblist' tb $  Compose . Identity <$> catMaybes (kid <$> (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb ))
   where
-    kid  k =  fmap (Types.Attr k ). funO  (keyType k) $ (i ^? ( key (T.toStrict $ keyValue k))  )
-    fun (Primitive i) v = join $ fmap TB1 . readPrim (textToPrim i) . TS.unpack <$> (v ^? _String)
-    fun (KArray i) v = Just . ArrayTB1. fmap (fromJust . fun i) $ (v ^.. values )
-    funO (KOptional i) v = Just . maybe (LeftTB1 Nothing) LeftTB1 . fmap ( fun i) $ v
-    funO i v = join $ fmap (fun i) v
+    kid  k =  either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) . funO  (keyType k) $ (i ^? ( key (T.toStrict $ keyValue k))  )
+    fun :: KType Text -> Value -> Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable))
+    fun (Primitive i) v = Right $ join $ fmap TB1 . readPrim (textToPrim i) . TS.unpack <$> (v ^? _String)
+    fun (KArray i) v = bimap  (Just . ArrayTB1) (Just . ArrayTB1) .   biTrav (bimap fromJust fromJust . fun i) $ (v ^.. values )
+    fun (InlineTable i  m ) v = Left $ Just $ ( convertAttrs inf   (fromJust $ M.lookup m inf ) v)
+    fun i v = errorWithStackTrace (show (i,v))
+    funO ::  KType Text -> Maybe Value -> Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable))
+    funO (KOptional i) v = fmap (Just . maybe (LeftTB1 Nothing) LeftTB1 ). traverse ( fun i) $ v
+    funO i v = fmap join $ traverse (fun i) v
 
 
-convertPK :: Table -> Value -> TB2 Key Showable
-convertPK tb i =   tblist' tb $  Compose . Identity <$> catMaybes (kid <$> S.toList (rawPK tb))
-  where
-    kid  k =  fmap (Types.Attr k ). funO  (keyType k) $ (i ^? ( key (T.toStrict $ keyValue k))  )
-    fun (Primitive i) v = join $ fmap TB1 . readPrim (textToPrim i) . TS.unpack <$> (v ^? _String)
-    fun (KArray i) v = Just . ArrayTB1. fmap (fromJust . fun i) $ (v ^.. values )
-    funO (KOptional i) v = Just . maybe (LeftTB1 Nothing) LeftTB1 . fmap ( fun i) $ v
-    funO i v = join $ fmap (fun i) v
+instance Biapplicative Either where
+  Right f  <<*>> Right g  = Right $ f  g
+  Left f  <<*>> Left g  = Left $ f  g
 
-
-
+biTrav f (x:xs) = biliftA2 (:) (:) (f x) (biTrav f xs)
 
 -- simpleHttp' :: MonadIO m => (HeaderName,BL.ByteString) -> String -> m BL.ByteString
 simpleHttpHeader headers url = liftIO $ withManager $ \man -> do

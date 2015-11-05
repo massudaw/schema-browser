@@ -127,7 +127,7 @@ isKOptional i = errorWithStackTrace (show ("isKOptional",i))
 
 
 
-getPrim i@(Primitive _ ) = textToPrim <$> i
+getPrim i@(Primitive _ ) = i
 getPrim (KOptional j) =  getPrim j
 getPrim (KDelayed j) =  getPrim j
 getPrim (KSerial j) =  getPrim j
@@ -149,6 +149,7 @@ pkOp a b c d = errorWithStackTrace (show (a,b,c,d))
 pkOpSet i l = (\i -> if L.null i then False else L.all id i) $ zipWith (\(a,b) (c,d)-> pkOp (keyType a)  (keyType c) b d) (L.sortBy (comparing fst ) i) (L.sortBy (comparing fst) l)
 
 
+intersectionOp :: KType KPrim -> Text -> KType KPrim -> (Text -> Text -> Text)
 intersectionOp (KOptional i) op (KOptional j) = intersectionOp i op j
 intersectionOp i op (KOptional j) = intersectionOp i op j
 intersectionOp (KOptional i) op j = intersectionOp i op j
@@ -161,7 +162,7 @@ intersectionOp i op (KInterval j)
     | getPrim i == getPrim j = inner "<@"
     | otherwise = errorWithStackTrace $ "wrong type intersectionOp " <> show i <> " /= " <> show j
 intersectionOp (KArray i ) op  j
-    | fmap textToPrim i == getPrim j = (\j i -> i <> " IN (select * from unnest("<> j <> ") ) ")
+    | i == getPrim j = (\j i -> i <> " IN (select * from unnest("<> j <> ") ) ")
     | otherwise = errorWithStackTrace $ "wrong type intersectionOp {*} - * " <> show i <> " /= " <> show j
 intersectionOp j op (KArray i )
     | getPrim i == getPrim j = (\i j  -> i <> " IN (select * from unnest("<> j <> ") ) ")
@@ -207,7 +208,7 @@ dropTable r= "DROP TABLE "<> rawFullName r
 
 rawFullName = showTable
 
-createTable r@(Raw sch _ _ _ tbl _ _ pk _ fk attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
+createTable r@(Raw sch _ _ _ tbl _ _ pk _ fk inv attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
   where
     commands = (renderAttr <$> S.toList attr ) <> [renderPK] <> fmap renderFK (S.toList fk)
     renderAttr k = keyValue k <> " " <> renderTy (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
@@ -570,7 +571,7 @@ expandJoin left env (Labeled l (FKT i rel tb)) =  foldr1 (liftA2 mappend) $ (exp
 expandJoin left env i = errorWithStackTrace (show ("expandJoin",i))
 
 joinOnPredicate :: [Rel Key] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> Text
-joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectionOp (keyType . keyAttr . labelValue $ l) op (keyType . keyAttr . labelValue $ r) (label l)  (label r )) <$> fkm
+joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectionOp (fmap textToPrim . keyType . keyAttr . labelValue $ l) op (fmap textToPrim .keyType . keyAttr . labelValue $ r) (label l)  (label r )) <$> fkm
     where fkm  = (\rel -> Rel (look (_relOrigin rel ) m) (_relOperator rel) (look (_relTarget rel ) n)) <$>  ks
           look ki i = justError ("missing FK on " <> show (ki,ks ,keyAttr . labelValue <$> i )) $ (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
 
@@ -919,4 +920,52 @@ backFKRef relTable ifk = fmap (_tb . uncurry Attr). reorderPK .  concat . fmap a
         lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
           where knm =  M.lookup ko relTable
 
+postgresPrim =
+  [("character varying",PText)
+  ,("name",PText)
+  ,("character_data",PText)
+  ,("varchar",PText)
+  ,("text",PText)
+  ,("character",PText)
+  ,("char",PText)
+  ,("bpchar",PText)
+  ,("sql_identifier" , PText)
+  ,("bytea",PBinary)
+  ,("pdf",PMime "application/pdf")
+  ,("ofx",PMime "application/x-ofx")
+  ,("jpg",PMime "image/jpg")
+  ,("dynamic",PDynamic)
+  ,("double precision",PDouble)
+  ,("numeric",PDouble)
+  ,("float8",PDouble)
+  ,("int4",PInt)
+  ,("cnpj",PCnpj)
+  ,("cpf",PCpf)
+  ,("int8",PInt)
+  ,("integer",PInt)
+  ,("bigint",PInt)
+  ,("cardinal_number",PInt)
+  ,("smallint",PInt)
+  ,("boolean",PBoolean)
+  ,("bool",PBoolean)
+  ,("timestamptz",PTimestamp)
+  ,("timestamp",PTimestamp)
+  ,("timestamp with time zone",PTimestamp)
+  ,("timestamp without time zone",PTimestamp)
+  ,("interval", PInterval)
+  ,("date" ,PDate)
+  ,("time",PDayTime)
+  ,("time with time zone" , PDayTime)
+  ,("time without time zone" , PDayTime)
+  ,("POINT",PPosition)
+  ,("LINESTRING",PLineString)
+  ,("box3d",PBounding)
+  ]
 
+textToPrim :: Text -> KPrim
+textToPrim i = case  M.lookup i (M.fromList postgresPrim) of
+    Just k -> k
+    Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
+
+
+interPointPost rel ref tar = interPoint (fmap (fmap (fmap (fmap textToPrim))) rel) (fmap (firstTB (fmap (fmap textToPrim))) ref) (fmap (firstTB (fmap (fmap textToPrim))) tar)

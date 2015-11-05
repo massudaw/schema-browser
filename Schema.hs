@@ -19,6 +19,7 @@ import Utils
 import Control.Exception
 import System.Time.Extra
 import Control.Monad.Reader
+import qualified Control.Lens as Le
 
 import Data.Functor.Identity
 import Database.PostgreSQL.Simple
@@ -28,6 +29,8 @@ import RuntimeTypes
 import Data.Traversable(sequenceA,traverse)
 import Data.Vector (Vector)
 import qualified Data.Vector as V
+import Data.IORef
+import Network.Google.OAuth2
 
 import Control.Applicative
 import qualified Data.List as L
@@ -84,9 +87,9 @@ fromShowable2 i@(Primitive "text") v = fromShowable i $  BS.drop 1 (BS.init v)
 fromShowable2 i v = fromShowable i v
 
 testSerial  =((=="nextval"). fst . T.break(=='('))
-keyTables :: Connection -> Connection -> (Text ,Text)-> SchemaEditor ->  IO InformationSchema
-keyTables conn userconn (schema ,user) ops = do
-       uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from information_schema.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
+keyTables :: Connection -> Connection -> (Text ,Text)-> Maybe (Text,IORef OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
+keyTables conn userconn (schema ,user) oauth ops = do
+       uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from metadata.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
        res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty . BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,l,maybe False testSerial m,n,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_range,col_def,is_sum,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
@@ -107,7 +110,7 @@ keyTables conn userconn (schema ,user) ops = do
        uniqueConstrMap <- M.fromListWith (++) . fmap (fmap pure)   <$> query conn "SELECT table_name,pks FROM metadata.unique_sets WHERE schema_name = ? " (Only schema)
 
        res <- lookupKey3 <$> query conn "SELECT t.table_name,pks FROM metadata.tables t left join metadata.pks  p on p.schema_name = t.schema_name and p.table_name = t.table_name where t.schema_name = ?" (Only schema) :: IO [(Text,Vector Key )]
-       resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM information_schema.tables where table_schema = ? " (Only schema) :: IO (Map Text TableType)
+       resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM metadata.tables where schema_name = ? " (Only schema) :: IO (Map Text TableType)
        let lookFk t k =V.toList $ lookupKey2 (fmap (t,) k)
        fks <- M.fromListWith S.union . fmap (\i@(tp,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) ( FKJoinTable tp (zipWith3 (\a b c -> Rel a b c) (lookFk tp kp ) (V.toList rel) (lookFk tc kc)) tc) (S.fromList $ F.toList $ justError "no pk found" $ M.lookup tc (M.fromList res) ))) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation ) )))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  M.toList keyMap :: Map Text (Set Key)
@@ -116,7 +119,7 @@ keyTables conn userconn (schema ,user) ops = do
                                   inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
                                   eitherFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isKEither .keyType ) .  S.toList <$> M.lookup c all
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> pks)
-                                in (c ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) attr )) <$> res :: [(Text,Table)]
+                                in (c ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK <> fmap S.fromList eitherFK   ) S.empty attr )) <$> res :: [(Text,Table)]
        let
            i3 = addRecInit $ M.fromList i3l
            (i1,pks) = (keyMap, M.fromList $ fmap (\(_,t)-> (rawPK t ,t)) $ M.toList i3 )
@@ -124,9 +127,9 @@ keyTables conn userconn (schema ,user) ops = do
        sizeMapt <- M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t  i3 ) <$> query conn tableSizes (Only schema)
        mvar <- newMVar M.empty
        metaschema <- if (schema /= "metadata")
-          then Just <$> keyTables  conn userconn ("metadata",user) ops
+          then Just <$> keyTables  conn userconn ("metadata",user) oauth ops
           else return Nothing
-       return  $ InformationSchema schema user Nothing i1 i2  i3 sizeMapt M.empty mvar  userconn conn metaschema ops
+       return  $ InformationSchema schema user oauth i1 i2  i3 sizeMapt M.empty mvar  userconn conn metaschema ops
 
 
 addRecInit :: Map Text Table -> Map Text Table
@@ -238,11 +241,11 @@ logTableModification inf (TableModification Nothing table i) = do
   return (TableModification (Just id) table i )
 
 
-withInf d s f = withConn d (f <=< (\conn -> keyTables conn conn (s,"postgres") undefined ))
+withInf d s f = withConn d (f <=< (\conn -> keyTables conn conn (s,"postgres") Nothing undefined ))
 
-withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres") undefined ) )
+withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres") Nothing undefined ) )
 
-withTestConnInf d s f = withTestConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres") undefined ) )
+withTestConnInf d s f = withTestConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres") Nothing undefined ) )
 
 testParse' db sch q = withTestConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
@@ -356,6 +359,14 @@ atTable k = do
   i <- ask
   (m,c)<- liftIO$ dbTable i k
   liftIO $ R.currentValue (R.facts c)
+
+joinRel :: (Ord a ,Show a) => [Rel Key] -> [TB Identity Key a] -> [TBData Key a] -> FTB (TBData Key a)
+joinRel rel ref table
+  | L.all (isOptional .keyType) origin = LeftTB1 $ fmap (flip (joinRel (Le.over relOrigin unKOptional <$> rel ) ) table) (traverse unLeftItens ref )
+  | L.any (isArray.keyType) origin = ArrayTB1 $ fmap (flip (joinRel (Le.over relOrigin unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError "". unIndex i $ (head ref)) [0..])
+  | otherwise = TB1 $ justError "" $ L.find (\(_,i)-> interPointPost rel ref (nonRefAttr  $ F.toList $ _kvvalues $ unTB  i) ) table
+      where origin = fmap _relOrigin rel
+
 
 test inf i j = runDBM inf (applyTB1' i j)
 runDBM inf m = do

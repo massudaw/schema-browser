@@ -106,7 +106,7 @@ poller db plugs = do
   let poll (BoundedPlugin2 n a f elemp) =  do
         (e:: Event [TableModification (TBIdx Key Showable) ] ,handler) <- newEvent
         conn <- connectPostgreSQL (connRoot db)
-        inf <- keyTables conn  conn (T.pack $ dbn db, T.pack $ user db) postgresOps
+        inf <- keyTables conn  conn (T.pack $ dbn db, T.pack $ user db) Nothing postgresOps
         tp  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
         let t = case  tp of
               [Only i] -> Just i :: Maybe UTCTime
@@ -228,9 +228,9 @@ databaseChooser sargs = do
   let login = liftA2 (liftA2 (,)) (widT) ( dbsWT )
       formLogin = form login (UI.click load)
   let genSchema ((user,pass),(dbN,(dbConn,schemaN))) = do
-        conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> toStrict ( encodeUtf8 dbN ) ) -- <> " sslmode= require")
+        conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> (BS.pack $  dbn sargs) ) -- <> " sslmode= require")
         execute_ conn "set bytea_output='hex'"
-        keyTables dbConn conn (schemaN,T.pack user) postgresOps
+        keyTables dbConn conn (schemaN,T.pack user) Nothing postgresOps
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   chooserT <-  mapTEvent (traverse genSchema) formLogin
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schema , getElement dbsW]

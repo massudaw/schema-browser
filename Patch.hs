@@ -232,15 +232,6 @@ patchSet i
 
 intersectFKT rel i l = L.find (\(_,l) -> interPoint rel i (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) l
 
-joinRel :: (Ord a ,Show a) => [Rel Key] -> [TB Identity Key a] -> [TBData Key a] -> FTB (TBData Key a)
-joinRel rel ref table
-  | L.all (isOptional .keyType) origin = LeftTB1 $ fmap (flip (joinRel (Le.over relOrigin unKOptional <$> rel ) ) table) (traverse unLeftItens ref )
-  | L.any (isArray.keyType) origin = ArrayTB1 $ fmap (flip (joinRel (Le.over relOrigin unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError "". unIndex i $ (head ref)) [0..])
-  | otherwise = TB1 $ justError "" $ L.find (\(_,i)-> interPoint rel ref (nonRefAttr  $ F.toList $ _kvvalues $ unTB  i) ) table
-      where origin = fmap _relOrigin rel
-
-
-
 
 applyAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k a -> TB Identity k a
 applyAttr (Attr k i) (PAttr _ p)  = Attr k (applyShowable i p)

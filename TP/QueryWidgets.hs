@@ -167,7 +167,7 @@ tbCase hasLab inf pgs constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattr .Compose . Identity .fst) wl
             nonInjConstr :: SelTBConstraint
-            nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 (_,l)) -> maybe True id $ (\ j -> not $ interPoint rel ( nonRefAttr $ fmap (Compose . Identity)  [j]) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) <$> j ).triding) <$>  nonInjRefs
+            nonInjConstr = first (pure . Compose . Identity ) .fmap (fmap (\j (TB1 (_,l)) -> maybe True id $ (\ j -> not $ interPointPost rel ( nonRefAttr $ fmap (Compose . Identity)  [j]) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) <$> j ).triding) <$>  nonInjRefs
             tbi = fmap (Compose . Identity)  <$> oldItems
             thisPlugs = filter (hasProd (isNested ((IProd True $ fmap (keyValue._relOrigin) (keyattri i) ))) .  fst) plugItens
             pfks =  first (uNest . justError "No nested Prod IT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> ( thisPlugs)
@@ -588,6 +588,7 @@ buildUI i  tdi = case i of
             paintBorder subcomposed (facts td ) (facts tdi)
             return $ TrivialWidget td subcomposed
          (Primitive i ) -> fmap (fmap TB1) <$> buildPrim (fmap (\(TB1 i )-> i) <$> tdi) i
+         i -> errorWithStackTrace (show i)
 
 buildPrim :: Tidings (Maybe Showable) -> KPrim -> UI (TrivialWidget (Maybe Showable))
 buildPrim tdi i = case i of
@@ -767,7 +768,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           unRKOptional (Key a b d n m (KOptional c)) = Key a b d n m c
           unRKOptional (Key a b d n m c) = Key a b d n m c
       let
-          search = (\i j -> join $ fmap (\k-> L.find (\(TB1 (kv,l) )->  interPoint (filter (flip S.member (_kvpk kv) . _relTarget) rel) k  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList . _kvvalues . unTB $ l)) ) i) $ j )
+          search = (\i j -> join $ fmap (\k-> L.find (\(TB1 (kv,l) )->  interPointPost (filter (flip S.member (_kvpk kv) . _relTarget) rel) k  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList . _kvvalues . unTB $ l)) ) i) $ j )
           vv :: Tidings (Maybe [TB Identity Key Showable])
           vv =   liftA2 (<>) iold2  ftdi2
       cvres <- currentValue (facts vv)
@@ -780,7 +781,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList .    _unTB1
           sortList :: Tidings ([TB1 Showable] -> [TB1 Showable])
           sortList =  sorting  <$> pure (fmap ((,True)._relTarget) rel)
-      itemList <- if L.null ifk|| ReadWrite /= rawTableType table
+      itemList <- if L.null ifk -- || ReadWrite /= rawTableType table
         then
            TrivialWidget (Just . fmap _fkttable <$> oldItems ) <$>
               (UI.div #
@@ -789,14 +790,14 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
         else
            listBox ((Nothing:) <$>  fmap (fmap Just) res3) (tidings (fmap Just <$> st) never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
-      let evsel = (if L.null ifk || ReadWrite /= rawTableType table then id else unionWith const (rumors tdi) ) (rumors $ join <$> triding itemList)
+      let evsel = (if L.null ifk {-|| ReadWrite /= rawTableType table -}then id else unionWith const (rumors tdi) ) (rumors $ join <$> triding itemList)
       prop <- stepper cv evsel
       let ptds = tidings prop evsel
       tds <- foldr (\i j ->updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap _fkttable.filterJust . snd <$>  plmods)
       (celem,ediff,pretdi) <-crudUITable inf pgs  (pure "None") res3 staticold (fmap (fmap (fmap _fkttable)) <$> plmods)  tb1  (tds)
       diffUp <-  mapEvent (fmap pure) $ (\i j -> traverse (runDBM inf .  flip applyTB1' j ) i) <$> facts pretdi <@> ediff
       let
-          sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> triding itemList), if L.null ifk || ReadWrite /= rawTableType table then never else rumors tdi]),diffUp]
+          sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> triding itemList), if L.null ifk {-|| ReadWrite /= rawTableType table -} then never else rumors tdi]),diffUp]
       st <- stepper cv sel
       inisort <- currentValue (facts sortList)
       res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [fmap const (($) <$> facts sortList <@> rumors vpt) , rumors sortList])
@@ -805,13 +806,13 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
         fksel =  fmap (\box ->  FKT (backFKRef  relTable  (fmap (keyAttr .unTB )ifk)   box) rel box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> tidings st sel)
       element itemList # set UI.class_ "col-xs-5"
       element filterInp # set UI.class_ "col-xs-3"
-      fk <- if L.null ifk || ReadWrite /= rawTableType table
+      fk <- if L.null ifk {-|| ReadWrite /= rawTableType table-}
           then
             UI.div # set  children [getElement itemList ,head celem]  # set UI.class_ "row"
           else
             UI.div # set  children [getElement itemList ,filterInp,head celem]  # set UI.class_ "row"
       subnet <- UI.div # set children [fk,last celem] # set UI.class_ "col-xs-12"
-      return $ TrivialWidget (if L.null ifk || ReadWrite /= rawTableType table  then oldItems  else fksel ) subnet
+      return $ TrivialWidget (if L.null ifk {-|| ReadWrite /= rawTableType table  -} then oldItems  else fksel ) subnet
 fkUITable inf pgs constr plmods  wl oldItems  tb@(FKT ilk rel  (DelayedTB1 (Just tb1 ))) = do
     tr <- fkUITable inf pgs constr  plmods  wl oldItems  (FKT  ilk  rel tb1)
     return $ tr

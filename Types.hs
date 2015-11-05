@@ -212,7 +212,7 @@ data FKey a
     , keyStatic :: Maybe (FTB Showable)
     , keyFastUnique :: ! Unique
     , keyType :: ! a
-    }deriving(Generic)
+    }deriving(Functor,Generic)
 
 instance (Functor f ,Bifunctor g)  => Bifunctor (Compose f g ) where
   first f  = Compose . fmap (first f) . getCompose
@@ -390,18 +390,18 @@ showTy f (KTable i) = "t"
 -- showTy f i = errorWithStackTrace ("no ty for " <> show   i)
 
 
-instance Eq Key where
+instance Eq (FKey a) where
    k == l = keyFastUnique k == keyFastUnique l
    k /= l = keyFastUnique k /= keyFastUnique l
 
-instance Ord Key where
+instance Ord (FKey a) where
    compare i j = compare (keyFastUnique i) (keyFastUnique j)
 
-instance Show Key where
+instance Show a => Show (FKey a)where
    show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
    -- show k = T.unpack $ showKey k
 
-showKey k  =   maybe (keyValue k) id  (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::"   <> showTy id (keyType k)
+showKey k  =   maybe (keyValue k) id  (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::"   <> T.pack (show (keyType k))
 
 
 instance Binary a => Binary (Interval.Extended a) where
@@ -479,7 +479,7 @@ data TableType
 
 type Table = TableK Key
 
-mapTableK f (Raw  s tt tr de rn  un ra rp rd rf rat ) = Raw s tt tr (S.map f de) rn (fmap (S.map f) un) ra (S.map f rp) (fmap f rd) S.empty  (S.map f rat)
+mapTableK f (Raw  s tt tr de rn  un ra rp rd rf inv rat ) = Raw s tt tr (S.map f de) rn (fmap (S.map f) un) ra (S.map f rp) (fmap f rd) S.empty  S.empty (S.map f rat)
 data TableK k
     =  Raw { rawSchema :: Text
            , rawTableType :: TableType
@@ -491,6 +491,7 @@ data TableK k
            , rawPK :: (Set k)
            , rawDescription :: [k]
            , rawFKS ::  (Set (Path (Set k) (SqlOperationK k )))
+           , rawInvFKS ::  (Set (Path (Set k) (SqlOperationK k)))
            , rawAttrs :: (Set k)
            }
      deriving(Eq,Ord)
@@ -827,46 +828,6 @@ keyAttr i = errorWithStackTrace $ "cant find keyattr " <> (show i)
 unAttr (Attr _ i) = i
 unAttr i = errorWithStackTrace $ "cant find attr" <> (show i)
 
-textToPrim "character varying" = PText
-textToPrim "name" = PText
-textToPrim "dynamic" = PDynamic
-textToPrim "varchar" = PText
-textToPrim "text" = PText
-textToPrim "bytea" = PBinary
-textToPrim "pdf" = PMime "application/pdf"
-textToPrim "ofx" = PMime "application/x-ofx"
-textToPrim "jpg" = PMime "image/jpg"
-textToPrim "character" = PText
-textToPrim "char" = PText
-textToPrim "bpchar" = PText
-textToPrim "double precision" = PDouble
-textToPrim "numeric" = PDouble
-textToPrim "float8" = PDouble
-textToPrim "int4" = PInt
-textToPrim "cnpj" = PCnpj
-textToPrim "sql_identifier" =  PText
-textToPrim "cpf" = PCpf
-textToPrim "int8" = PInt
-textToPrim "integer" = PInt
-textToPrim "bigint" = PInt
-textToPrim "cardinal_number" = PInt
-textToPrim "boolean" = PBoolean
-textToPrim "bool" = PBoolean
-textToPrim "smallint" = PInt
-textToPrim "timestamp without time zone" = PTimestamp
-textToPrim "timestamp with time zone" = PTimestamp
-textToPrim "timestamptz" = PTimestamp
-textToPrim "timestamp" = PTimestamp
-textToPrim "interval" = PInterval
-textToPrim "date" = PDate
-textToPrim "time" = PDayTime
-textToPrim "time with time zone" = PDayTime
-textToPrim "time without time zone" = PDayTime
-textToPrim "POINT" = PPosition
-textToPrim "LINESTRING" = PLineString
-textToPrim "box3d" = PBounding
-textToPrim i = error $ "no case for type " <> T.unpack i
-
 
 intersectPred p@(Primitive _) op  (KInterval i) j (IntervalTB1 l )  | p == i =  Interval.member j l
 intersectPred p@(KInterval j) "<@" (KInterval i) (IntervalTB1 k)  (IntervalTB1  l)  =  Interval.isSubsetOf k  l
@@ -890,13 +851,13 @@ intersectPred p1@(KOptional i ) op p2 (LeftTB1 j) l  =  maybe False id $ fmap (\
 intersectPred p1 op p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
 
 interPoint
-  :: (Ord a ,Show a) => [Rel (FKey (KType Text))]
-     -> [TB Identity (FKey (KType Text)) a]
-     -> [TB Identity (FKey (KType Text)) a]
+  :: (Ord a ,Show a) => [Rel (FKey (KType KPrim))]
+     -> [TB Identity (FKey (KType KPrim)) a]
+     -> [TB Identity (FKey (KType KPrim)) a]
      -> Bool
 interPoint ks i j = (\i -> if L.null i then False else  all id  i)$  catMaybes $ fmap (\(Rel l op  m) -> {-justError "interPoint wrong fields" $-}  liftA2 (intersectPredTuple  op) (L.find ((==l).keyAttr ) i )   (L.find ((==m).keyAttr ) j)) ks
 
-intersectPredTuple  op = (\i j-> intersectPred (textToPrim <$> keyType (keyAttr i)) op  (textToPrim <$> keyType (keyAttr j)) (unAttr i) (unAttr j))
+intersectPredTuple  op = (\i j-> intersectPred ( keyType (keyAttr i)) op  (keyType (keyAttr j)) (unAttr i) (unAttr j))
 
 nonRefAttr l = concat $  fmap (uncurry Attr) . aattr <$> ( l )
 
