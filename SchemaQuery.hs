@@ -81,7 +81,7 @@ eventTable inf table = do
               else putMVar mvar  mmap
 
            return (mnew,td)
-    return (mtable,fmap TB1 <$> td)
+    return (mtable,fmap TB1 .traceShowId <$> td)
 
 
 

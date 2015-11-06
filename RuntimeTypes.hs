@@ -34,7 +34,7 @@ data InformationSchema
   , tableMap :: Map Text Table
   , tableSize :: Map Table Int
   , pluginsMap :: Map (Text,Text,Text) Key
-  , mvarMap :: MVar (Map (KVMetadata Key) ({-R.Event [TB1 Showable], R.Handler [TB1 Showable], -} MVar  [TBData Key Showable], R.Tidings [TBData Key Showable]))
+  , mvarMap :: MVar (Map (KVMetadata Key) ( MVar  [TBData Key Showable], R.Tidings [TBData Key Showable]))
   , conn :: Connection
   , rootconn :: Connection
   , metaschema :: Maybe InformationSchema

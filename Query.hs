@@ -433,6 +433,7 @@ expandInlineRecursive tbase =
 
 topRec = join . join . fmap unMutRec
 
+
 expandFKMutRecursive t=
     let
       query  =  tname <> "(" <> T.intercalate "," (tnonRec <> tRec <> (("f"<>) <$>  tRec ) <> (label <$> l)) <> ") as  ( SELECT "  <> T.intercalate "," (tnonRec<> tRec <> tRec <> (const "null :: record" <$> l)) <>" FROM (select * from " <> expandBaseTable t <>  (fst (runWriter (expandQuery' False (fmap unlabelIT $ TB1 $(first (\t -> t {_kvrecrels =[] }  )) tnonRecA)))) <> ") as " <> tname <> " UNION ALL " <> recpart <> ")"
@@ -667,7 +668,7 @@ recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else
           let
               items = _kvvalues kv
               fkSet:: S.Set Key
-              fkSet =  traceShowId $ S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ S.toList fks'
+              fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ S.toList fks'
               nonFKAttrs :: [(S.Set (Rel Key) ,TBLabel  ())]
               nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
           pt <- foldl (\acc  fk ->  do

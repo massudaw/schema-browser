@@ -87,8 +87,8 @@ fromShowable2 i@(Primitive "text") v = fromShowable i $  BS.drop 1 (BS.init v)
 fromShowable2 i v = fromShowable i v
 
 testSerial  =((=="nextval"). fst . T.break(=='('))
-keyTables :: Connection -> Connection -> (Text ,Text)-> Maybe (Text,IORef OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
-keyTables conn userconn (schema ,user) oauth ops = do
+keyTables :: MVar (Map Text InformationSchema )-> MVar (Map (KVMetadata Key) ( MVar  [TBData Key Showable], R.Tidings [TBData Key Showable])) -> Connection -> Connection -> (Text ,Text)-> Maybe (Text,IORef OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
+keyTables schemaVar mvar conn userconn (schema ,user) oauth ops = maybe (do
        uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from metadata.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
        res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty . BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,l,maybe False testSerial m,n,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_range,col_def,is_sum,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema)
        let
@@ -125,11 +125,14 @@ keyTables conn userconn (schema ,user) oauth ops = do
            (i1,pks) = (keyMap, M.fromList $ fmap (\(_,t)-> (rawPK t ,t)) $ M.toList i3 )
            i2 =  M.filterWithKey (\k _ -> not.S.null $ k )  pks
        sizeMapt <- M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t  i3 ) <$> query conn tableSizes (Only schema)
-       mvar <- newMVar M.empty
        metaschema <- if (schema /= "metadata")
-          then Just <$> keyTables  conn userconn ("metadata",user) oauth ops
+          then Just <$> keyTables  schemaVar mvar conn userconn ("metadata",user) oauth ops
           else return Nothing
-       return  $ InformationSchema schema user oauth i1 i2  i3 sizeMapt M.empty mvar  userconn conn metaschema ops
+       let inf = InformationSchema schema user oauth i1 i2  i3 sizeMapt M.empty mvar  userconn conn metaschema ops
+       var <- takeMVar schemaVar
+       putMVar schemaVar (M.insert schema inf var)
+       return inf
+       ) (return ) . (M.lookup schema ) =<< readMVar schemaVar
 
 
 addRecInit :: Map Text Table -> Map Text Table
@@ -241,11 +244,15 @@ logTableModification inf (TableModification Nothing table i) = do
   return (TableModification (Just id) table i )
 
 
-withInf d s f = withConn d (f <=< (\conn -> keyTables conn conn (s,"postgres") Nothing undefined ))
+keyTables' con rcon s i j = do
+  sch <- newMVar M.empty
+  tables <- newMVar M.empty
+  keyTables sch tables con rcon s i j
+withInf d s f = withConn d (f <=< (\conn -> keyTables' conn conn (s,"postgres") Nothing undefined ))
 
-withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres") Nothing undefined ) )
+withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables'  conn conn (s,"postgres") Nothing undefined ) )
 
-withTestConnInf d s f = withTestConn d (\conn ->  f =<< liftIO ( keyTables  conn conn (s,"postgres") Nothing undefined ) )
+withTestConnInf d s f = withTestConn d (\conn ->  f =<< liftIO ( keyTables'  conn conn (s,"postgres") Nothing undefined ) )
 
 testParse' db sch q = withTestConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))

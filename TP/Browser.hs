@@ -97,16 +97,18 @@ browser = do
     )  sorted
   -}
 
-  e <- poller (argsToState (tail args) )  [siapi2Plugin,siapi3Plugin ]
 
-  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e $ tail args)
+  mvar <- newMVar M.empty --mapEvent (traverse (\inf -> liftIO$ swapMVar  (mvarMap inf) M.empty)) (rumors evDB)
+  smvar <- newMVar M.empty
+  e <- poller smvar mvar (argsToState (tail args) )  [siapi2Plugin,siapi3Plugin ]
+  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e mvar smvar $ tail args)
   print "Finish"
 
-poller db plugs = do
+poller schm dbm db plugs = do
   let poll (BoundedPlugin2 n a f elemp) =  do
         (e:: Event [TableModification (TBIdx Key Showable) ] ,handler) <- newEvent
         conn <- connectPostgreSQL (connRoot db)
-        inf <- keyTables conn  conn (T.pack $ dbn db, T.pack $ user db) Nothing postgresOps
+        inf <- keyTables  schm dbm conn  conn (T.pack $ dbn db, T.pack $ user db) Nothing postgresOps
         tp  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
         let t = case  tp of
               [Only i] -> Just i :: Maybe UTCTime
@@ -117,7 +119,7 @@ poller db plugs = do
           [t :: Only UTCTime]  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
           startTime <- getCurrentTime
           let intervalsec = fromIntegral $ 60*d
-              d = 60
+              d = 60 :: Int
           if  diffUTCTime startTime  (unOnly t) >  intervalsec
           then do
               execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
@@ -151,10 +153,10 @@ poller db plugs = do
 
 
 setup
-     :: [(Text,Event [TableModification (TBIdx Key Showable)])] -> [String] -> Window -> UI ()
-setup e args w = void $ do
+     :: [(Text,Event [TableModification (TBIdx Key Showable)])] -> MVar (M.Map (KVMetadata Key) ( MVar  [TBData Key Showable], Tidings [TBData Key Showable])) ->  MVar (M.Map Text  InformationSchema) ->  [String] -> Window -> UI ()
+setup e mvar smvar args w = void $ do
   let bstate = argsToState args
-  (evDB,chooserItens) <- databaseChooser bstate
+  (evDB,chooserItens) <- databaseChooser mvar smvar bstate
   body <- UI.div
   be <- stepper [] (unions $ fmap snd e)
   return w # set title (host bstate <> " - " <>  dbn bstate)
@@ -163,7 +165,6 @@ setup e args w = void $ do
   chooserDiv <- UI.div # set children  (chooserItens <> [ getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
   getBody w #+ [element container]
-  mapEvent (traverse (\inf -> liftIO$ swapMVar  (mvarMap inf) M.empty)) (rumors evDB)
   mapUITEvent body (traverse (\(nav,inf)->
       case nav of
         "Change" -> do
@@ -214,7 +215,7 @@ instance Eq Connection where
 
 form td ev =  tidings (facts td ) (facts td <@ ev )
 
-databaseChooser sargs = do
+databaseChooser mvar smvar sargs = do
   dbs <- liftIO $ listDBS  sargs
   let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,) . (,T.pack s) . fst $ snd $ dbs ) $ ( schema sargs)
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
@@ -230,7 +231,7 @@ databaseChooser sargs = do
   let genSchema ((user,pass),(dbN,(dbConn,schemaN))) = do
         conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> (BS.pack $  dbn sargs) ) -- <> " sslmode= require")
         execute_ conn "set bytea_output='hex'"
-        keyTables dbConn conn (schemaN,T.pack user) Nothing postgresOps
+        keyTables smvar mvar dbConn conn (schemaN,T.pack user) Nothing postgresOps
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   chooserT <-  mapTEvent (traverse genSchema) formLogin
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schema , getElement dbsW]
@@ -336,7 +337,7 @@ viewerKey inf key = mdo
   st <- stepper cv sel
   inisort <- currentValue (facts tsort)
   res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (($) <$> facts tsort <@> rumors vpt) ,rumors tsort ])
-  onEvent ( ((\i j -> foldl applyTable i (traceShowId $ expandPSet j)) <$> res2 <@> ediff)) (liftIO .  putMVar tmvar. fmap unTB1)
+  onEvent ( ((\i j -> foldl applyTable i (expandPSet j)) <$> res2 <@> ediff)) (liftIO .  putMVar tmvar. fmap unTB1)
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK)  <$> facts tds) # set UI.class_ "col-xs-8"
