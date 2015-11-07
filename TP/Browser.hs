@@ -314,7 +314,7 @@ viewerKey inf key = mdo
   filterInp <- UI.input
   filterInpBh <- stepper "" (UI.valueChange filterInp)
   el <- filterUI  inf (allRec' (tableMap inf)  table)
-  let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
+  let filterInpT = tidings filterInpBh (diffEvent filterInpBh (UI.valueChange filterInp))
       sortSet =  F.toList . tableKeys . tableNonRef . allRec' (tableMap inf ) $ table
   sortList <- selectUI sortSet ((,True) <$> F.toList key) UI.div UI.div conv
   element sortList # set UI.style [("overflow-y","scroll"),("height","200px")]
@@ -322,22 +322,26 @@ viewerKey inf key = mdo
   let
      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  . _unTB1 )
      tsort = sorting . filterOrd <$> triding sortList
-     res3 = flip (maybe id (\(_,constr) ->  L.filter (\e@(TB1 (_, kv) ) -> intersectPredTuple (fst constr) (snd constr)  .  unTB . justError "cant find attr" . M.lookup (S.fromList $  keyattr  (Compose $ Identity $ snd constr) ) $ _kvvalues  $ unTB$ kv ))) <$> res2 <#> triding el
+     filtering res = (\t -> filter (filteringPred t ) )<$> filterInpT  <*> res
+  inisort <- currentValue (facts tsort)
+
+  res3 <- mapT0Event (inisort vp) return (tsort <*> (filtering $ tidings res2 (rumors vpt) ))
   let pageSize = 20
-  itemList <- listBox ((\o -> L.take pageSize . L.drop (o*pageSize))<$> triding offset <*>res3) (tidings st never) (pure id) ((\l -> (\i -> (set UI.style (noneShow $ filteringPred l i)) . attrLine i)) <$> filterInpT)
+  itemList <- listBox (paging <*> res3) (tidings st sel ) (pure id) ( pure attrLine )
+  let
+     paging  = (\o -> L.take pageSize . L.drop (o*pageSize))<$> triding offset
   offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) ((\i -> (L.length i `div` pageSize) ) <$> facts res3)
   let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
-  prop <- stepper cv evsel
-  let tds = tidings prop evsel
+  prop <- stepper cv (diffEvent st evsel)
+  let tds = tidings prop (diffEvent st evsel)
 
-  (cru,ediff,pretdi) <- crudUITable inf plugList  (pure "Editor")  res3 [] [] (allRec' (tableMap inf) table) tds
+  (cru,ediff,pretdi) <- crudUITable inf plugList  (pure "Editor")  (tidings res2 never)[] [] (allRec' (tableMap inf) table) tds
   diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip applyTB1 j ) i) <$> facts pretdi <@> ediff
   let
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
-  inisort <- currentValue (facts tsort)
-  res2 <- accumB (inisort vp) (fmap concatenate $ unions [fmap const (($) <$> facts tsort <@> rumors vpt) ,rumors tsort ])
-  onEvent ( ((\i j -> foldl applyTable i (expandPSet j)) <$> res2 <@> ediff)) (liftIO .  putMVar tmvar. fmap unTB1)
+  res2 <- stepper (inisort vp) (rumors vpt)
+  onEvent ( ((\i j -> foldl applyTable i (expandPSet j)) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar. fmap unTB1)
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK)  <$> facts tds) # set UI.class_ "col-xs-8"

@@ -83,7 +83,7 @@ pluginContactGoogle args = do
       writeFile file (show tokens2)
   accessTok <- fmap read (readFile file)
   tokenRef <- newIORef accessTok
-  forkIO $ do
+  forkIO $ forever $ do
     tokens <- readIORef tokenRef
     putStrLn $ "Try refresh token" <> show (accessToken tokens)
     tokens2 <- refreshTokens client  tokens

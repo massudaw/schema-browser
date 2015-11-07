@@ -124,14 +124,17 @@ mapEvent f x = do
   onEvent x (\i -> liftIO . forkIO $ (f i)  >>= h)
   return  e
 
-
-
-mapTEvent f x = do
+mapT0Event i f x = do
   e <- mapEvent f (rumors x)
-  i <- currentValue (facts x)
   be <- liftIO $ f i
   t <- stepper be e
   return $ tidings t e
+
+
+
+mapTEvent f x = do
+  i <- currentValue (facts x)
+  mapT0Event i f x
 
 
 
@@ -279,8 +282,8 @@ paintEdit e b i  = element e # sink0 UI.style ((\ m n -> pure . ("background-col
           | isJust i  && isNothing j  = "green"
           | isNothing i  && isNothing j = "red"
           | isNothing i && isJust j  = "purple"
-          -- | i /= j = "yellow"
-          | i /= j = trace (concat $ fmap differ $   zip  (show i ) ( show j)) "yellow"
+          | i /= j = "yellow"
+          -- | i /= j = trace (concat $ fmap differ $   zip  (show i ) ( show j)) "yellow"
           | i == j = "blue"
           | otherwise = "green"
 differ = (\(i,j) -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
@@ -289,8 +292,8 @@ paintBorder e b i  = element e # sink0 UI.style ((\ m n -> (:[("border-style","s
           | isJust i  && isNothing j  = "green"
           | isNothing i  && isNothing j = "red"
           | isNothing i && isJust j  = "purple"
-          -- | i /= j = "yellow"
-          | i /= j = trace (concat $ zipWith (\i j -> if i == j then "_" else "(" <> [i] <> "|" <> [j] <> ")" ) (show i ) ( show j)) "yellow"
+          | i /= j = "yellow"
+          -- | i /= j = trace (concat $ zipWith (\i j -> if i == j then "_" else "(" <> [i] <> "|" <> [j] <> ")" ) (show i ) ( show j)) "yellow"
           | i == j = "blue"
           | otherwise = "green"
 
@@ -351,11 +354,11 @@ listBox bitems bsel bfilter bdisplay = do
 
     -- animate output selection
     let
-        bindex   = lookupIndex <$> facts bitems <*> facts bsel
+        bindex   = lookupIndex <$> bitems <*> bsel
         lookupIndex indices Nothing    = Nothing
         lookupIndex indices (Just sel) = L.findIndex (== sel)  indices
 
-    element list # sink UI.selection bindex
+    element list # sink UI.selection (facts bindex)
 
 
     -- changing the display won't change the current selection
@@ -365,8 +368,6 @@ listBox bitems bsel bfilter bdisplay = do
     -- user selection
     let
         eindexes = (\l i -> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <@> UI.selectionChange list
-    let
-        ev =  eindexes -- unionWith const eindexes (rumors bsel)
     let
         _selectionLB = tidings (facts bsel) eindexes
         _elementLB   = list

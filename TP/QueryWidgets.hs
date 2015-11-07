@@ -419,7 +419,7 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
               unConstraints = (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  (tableNonRef ftb) , flip (unConstraint un) <$> (deleteCurrent <$> oldItems <*>bres))) <$> _kvuniques m
           (listBody,tableb) <- uiTable inf pgs ( (tpkConstraint: unConstraints)) (_kvname m) refs pmods ftb oldItems
           (panelItems,tdiff)<- processPanelTable inf  (facts tableb) (facts bres) table oldItems
-          let diff =unionWith const tdiff   (filterJust loadedItensEv)
+          let diff = unionWith const tdiff   (filterJust loadedItensEv)
           onEvent (PAtom <$> diff)
               (liftIO . hdiff)
           onEvent (unsafeMapIO (fmap Just) $ (\i j -> return  $ maybe (TB1$  createTB1 j) (flip applyTB1 (PAtom j)  ) i) <$> facts oldItems <@> diff )
@@ -536,12 +536,13 @@ indexItens s tb@(IT na _) offsetT items oldItems  = bres
          bres = (\o -> liftA2 (\l m -> IT   na (ArrayTB1 $ splitArray s o m l ))) <$> offsetT <*> bres2 <*> (emptyIT <$> oldItems)
 
 diffEvent b ev = filterJust $ (\i j -> if i == j then Nothing else Just j ) <$> b <@> ev
+notdiffEvent b ev = filterJust $ (\i j -> if i /= j then Nothing else Just j ) <$> b <@> ev
 
 dynHandler hand val ix (l,old)= do
         (ev,h) <- liftIO $ newEvent
         let idyn True  =  do
               tds <- hand ix
-              ini <- currentValue ( facts $ triding tds)
+              ini <- currentValue (facts $ triding tds)
               liftIO $ h ini
               onEvent (rumors $ triding tds) (liftIO . h)
               return (getElement tds)
@@ -549,8 +550,10 @@ dynHandler hand val ix (l,old)= do
         el <- UI.div # sink items (pure . idyn  <$> old )
         iniv <- currentValue (facts $ val ix)
         bend <- stepper iniv ev
+        let notProp = filterE isNothing $ notdiffEvent bend  (ev)
+        bend2 <- stepper iniv  (diffEvent bend  ev)
         bendn <- stepper (isJust iniv ) (diffEvent (fmap isJust bend ) (fmap isJust ev))
-        return $ ((TrivialWidget (tidings bend ev) el):l , bendn )
+        return $ ((TrivialWidget (tidings bend2 (bend2 <@ notProp )) el):l , bendn )
 
 attrUITable
   :: Tidings (Maybe (TB Identity Key Showable))
@@ -568,7 +571,6 @@ attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ (KArray _) ) v) = mdo
 
             let dyn = dynHandler (\ix -> attrUITable (unIndexItens ix  <$> offsetT <*> tAttr')  ((unIndexItens ix  <$> facts offsetT <@> ) <$>  evs) (Attr (unKArray i) v  )) (\ix -> unIndexItens ix  <$> offsetT <*> tAttr')
             widgets <- reverse. fst <$> foldl (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
-            sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow . isJust <$> facts t)) (tail $ getElement <$> widgets) (triding <$> widgets)
             let
               bres = indexItens arraySize  attr offsetT (triding <$> widgets) tAttr'
             element offsetDiv # set children (fmap getElement widgets)
@@ -709,7 +711,6 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
 
       let tds = triding <$> items
           es = getElement <$> items
-      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow <$> facts t)) es  (pure True : (fmap isJust <$>  tds ))
       let bres = indexItens arraySize tb offsetT (triding <$>  items ) oldItems
       element dv  # set children (offset : (getElement <$> items))
       return $ TrivialWidget bres dv
