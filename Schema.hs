@@ -87,6 +87,8 @@ fromShowable2 i@(Primitive "text") v = fromShowable i $  BS.drop 1 (BS.init v)
 fromShowable2 i v = fromShowable i v
 
 testSerial  =((=="nextval"). fst . T.break(=='('))
+
+
 keyTables :: MVar (Map Text InformationSchema )-> MVar (Map (KVMetadata Key) ( MVar  [TBData Key Showable], R.Tidings [TBData Key Showable])) -> Connection -> Connection -> (Text ,Text)-> Maybe (Text,IORef OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
 keyTables schemaVar mvar conn userconn (schema ,user) oauth ops = maybe (do
        uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from metadata.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)

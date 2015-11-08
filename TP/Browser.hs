@@ -25,6 +25,9 @@ import Control.Monad.Reader
 import Control.Concurrent
 import Data.Functor.Apply
 import System.Environment
+import Network.Google.OAuth2 (formUrl, exchangeCode, refreshTokens,
+                              OAuth2Client(..), OAuth2Tokens(..))
+import Data.IORef
 import Data.Ord
 import Control.Exception
 import Utils
@@ -57,6 +60,7 @@ import Database.PostgreSQL.Simple
 import qualified Data.Map as M
 import Data.String
 
+import OAuth
 
 import Control.Arrow
 
@@ -97,11 +101,11 @@ browser = do
     )  sorted
   -}
 
-
+  tokenRef <- oauthpoller
   mvar <- newMVar M.empty --mapEvent (traverse (\inf -> liftIO$ swapMVar  (mvarMap inf) M.empty)) (rumors evDB)
   smvar <- newMVar M.empty
   e <- poller smvar mvar (argsToState (tail args) )  [siapi2Plugin,siapi3Plugin ]
-  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e mvar smvar $ tail args)
+  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e mvar smvar tokenRef $ tail args)
   print "Finish"
 
 poller schm dbm db plugs = do
@@ -153,10 +157,10 @@ poller schm dbm db plugs = do
 
 
 setup
-     :: [(Text,Event [TableModification (TBIdx Key Showable)])] -> MVar (M.Map (KVMetadata Key) ( MVar  [TBData Key Showable], Tidings [TBData Key Showable])) ->  MVar (M.Map Text  InformationSchema) ->  [String] -> Window -> UI ()
-setup e mvar smvar args w = void $ do
+     :: [(Text,Event [TableModification (TBIdx Key Showable)])] -> MVar (M.Map (KVMetadata Key) ( MVar  [TBData Key Showable], Tidings [TBData Key Showable])) ->  MVar (M.Map Text  InformationSchema) ->  IORef OAuth2Tokens -> [String] -> Window -> UI ()
+setup e mvar smvar tokenRef args w = void $ do
   let bstate = argsToState args
-  (evDB,chooserItens) <- databaseChooser mvar smvar bstate
+  (evDB,chooserItens) <- databaseChooser mvar smvar tokenRef bstate
   body <- UI.div
   be <- stepper [] (unions $ fmap snd e)
   return w # set title (host bstate <> " - " <>  dbn bstate)
@@ -186,8 +190,8 @@ listDBS dname = do
   dbs :: [Only Text]<- query_  connMeta "SELECT datname FROM pg_database  WHERE datistemplate = false"
   map <- (\db -> do
         connDb <- connectPostgreSQL ((fromString $ "host=" <> host dname <> " port=" <> port dname <>" user=" <> user dname <> " dbname=" ) <> toStrict (encodeUtf8 db) <> (fromString $ " password=" <> pass dname )) --  <> " sslmode= require") )
-        schemas :: [Only Text] <- query_  connDb "SELECT schema_name from information_schema.schemata"
-        return (db,(connDb,filter (not . (`elem` ["information_schema","pg_catalog","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas))) (T.pack $ dbn dname)
+        schemas :: [Only Text] <- query_  connDb "SELECT name from metadata.schema "
+        return (db,(connDb,filter (not . (`elem` ["information_schema","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas))) (T.pack $ dbn dname)
   return map
 
 loginWidget userI passI =  do
@@ -215,7 +219,7 @@ instance Eq Connection where
 
 form td ev =  tidings (facts td ) (facts td <@ ev )
 
-databaseChooser mvar smvar sargs = do
+databaseChooser mvar smvar tokenRef sargs = do
   dbs <- liftIO $ listDBS  sargs
   let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,) . (,T.pack s) . fst $ snd $ dbs ) $ ( schema sargs)
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
@@ -231,7 +235,9 @@ databaseChooser mvar smvar sargs = do
   let genSchema ((user,pass),(dbN,(dbConn,schemaN))) = do
         conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> (BS.pack $  dbn sargs) ) -- <> " sslmode= require")
         execute_ conn "set bytea_output='hex'"
-        keyTables smvar mvar dbConn conn (schemaN,T.pack user) Nothing postgresOps
+        case schemaN of
+          "gmail" ->  keyTables smvar mvar dbConn conn (schemaN,T.pack $ user ) (Just ("wesley.massuda@gmail.com",tokenRef)) gmailOps
+          i -> keyTables smvar mvar dbConn conn (schemaN,T.pack user) Nothing postgresOps
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   chooserT <-  mapTEvent (traverse genSchema) formLogin
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schema , getElement dbsW]

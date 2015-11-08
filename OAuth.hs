@@ -54,7 +54,6 @@ import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core
 import TP.Widgets
 import TP.QueryWidgets
-import TP.Browser
 import Data.List (null,find,intercalate)
 
 --
@@ -63,7 +62,7 @@ file   = "./tokens.txt"
 
 gmailScope = "https://www.googleapis.com/auth/gmail.modify"
 
-pluginContactGoogle args = do
+oauthpoller = do
   Just cid <- lookupEnv "CLIENT_ID"
   Just secret <- lookupEnv "CLIENT_SECRET"
   -- Ask for permission to read/write your fusion tables:
@@ -93,10 +92,9 @@ pluginContactGoogle args = do
     writeFile file (show tokens2)
     writeIORef tokenRef tokens2
     threadDelay (1000*1000*60*10)
+  return tokenRef
 
-  mvar <- newMVar M.empty
-  smvar <- newMVar M.empty
-  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setupOAuth  tokenRef mvar smvar $ tail args)
+
 
 listTable inf table = do
   tok <- liftIO$ readIORef (snd $fromJust $ token inf)
@@ -116,69 +114,8 @@ getTable inf  tb pk
 
 getDiffTable inf table  j = fmap (join . fmap (difftable j. unTB1) ) $ getTable  inf table $ TB1 j
 
-setupOAuth
-      :: IORef OAuth2Tokens -> MVar (M.Map (KVMetadata Key) ( MVar  [TBData Key Showable], Tidings [TBData Key Showable])) -> MVar (M.Map Text InformationSchema ) -> [String] -> Window -> UI ()
-setupOAuth  tokenRef mvar smvar args w = void $ do
-  let bstate = argsToState args
-      dname = bstate
-  connDB <- liftIO$ connectPostgreSQL ((fromString $ "host=" <> host dname <> " port=" <> port dname <>" user=" <> user dname <> " dbname=" ) <> (BS.pack $ dbn dname) <> (fromString $ " password=" <> pass dname )) --  <> " sslmode= require") )
-  gsch <- liftIO $keyTables smvar mvar connDB connDB ("gmail",T.pack $ user dname  ) (Just ("wesley.massuda@gmail.com",tokenRef)) gmailOps
-  body <- UI.div
-  return w # set title (host bstate <> " - " <>  dbn bstate)
-  nav  <- buttonDivSet  ["Nav","Change","Exception"] (pure $ Just "Nav" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
-  element nav # set UI.class_ "col-xs-5"
-  chooserDiv <- UI.div # set children  ([ getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
-  container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
-  getBody w #+ [element container]
-  -- (traverse (\inf -> liftIO$ swapMVar  (mvarMap inf) M.empty)) (Just gsch )
-  mapUITEvent body (traverse (\(nav,inf)->
-      case nav of
-        "Change" -> do
-            dash <- dashBoardAll inf
-            element body # set UI.children [dash] # set UI.class_ "row"
-        "Exception" -> do
-            dash <- exceptionAll inf
-            element body # set UI.children [dash] # set UI.class_ "row"
-        "Nav" -> do
-            let k = M.keys  (pkMap inf )
-            span <- chooserTable  inf ([])  k (tablename bstate)
-            element body # set UI.children [span]# set UI.class_ "row"  )) $ liftA2 (\i -> fmap (i,)) (triding nav) (pure $ Just gsch)
 
 gmailOps = (SchemaEditor undefined undefined undefined listTable getDiffTable )
-
-{-
-gmailSchema  token = do
-  tbs <- sequence [messages,threads,labels,drafts]
-  let
-    tmap = (M.fromList $ (\i -> (tableName i,i) ) <$> tbs  )
-    keyMap = M.fromList $ concat  $ fmap (\t -> fmap (\k -> ((tableName t, keyValue k),k)) $ F.toList (rawAttrs t)) (F.toList tmap)
-    pks = M.fromList $ fmap (\(_,t)-> (rawPK t ,t)) $ M.toList tmap
-    i2 =  M.filterWithKey (\k _ -> not.S.null $ k )  pks
-  return $ InformationSchema "gmail"  "wesley.massuda@gmail.com" (Just token) keyMap (traceShowId i2) tmap M.empty M.empty  mvar (error "no conn") (error "no conn")Nothing
-genKey k un =  Key n Nothing 0 Nothing  un (( fuType (T.unpack fu )) (if T.length ty > 0 then  ty else "text"))
-  where (n,tyfu) = T.break (':'==) k
-        (ty,fu') = T.break(':'==) (safeTail tyfu)
-        fu = safeTail fu'
-        fuType ('[':']':xs) i = KArray (fuType xs i )
-        fuType ('*':xs) i = KOptional (fuType xs i)
-        fuType ("") i = Primitive i
-        safeTail i
-          | T.null i = ""
-          | otherwise = T.tail i
-
-
-genTable t pk desc l  = do
-    keys <- mapM (\l -> genKey l <$> newUnique) l
-    return $ (mapTableK (\k -> fromJust $ find ((==k).keyValue) keys) ( Raw "gmail" ReadWrite Nothing S.empty t [] [] (S.singleton pk) desc S.empty S.empty S.empty))  {rawAttrs = S.fromList keys}
-
-messages = genTable "messages" "id"  [] ["id","threadId","labelIds:text:[]","snippet","historyId:bigint","internalDate:integer","sizeEstimate:integer:*"]
-payload = genTable "message_payload" "partId" [] ["partId","mimeType","filename","headers","body","parts:"]
-labels = genTable "labels" "id"  ["name"] ["id","name","messageListVisibility","labelListVisibility","type"]
-threads = genTable "threads" "id"  ["snippet"] ["id","historyId","snippet"]
-drafts = genTable "drafts" "id"  [] ["id","message"]
-
--}
-
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
@@ -215,8 +152,8 @@ convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (trav
                mergeFun = do
                           (l,r) <- liftA2 (,) funL funR
                           return $ case (l,r) of
-                            (Left (Just i),Right j) -> traceShowId $ Left (Just i)
-                            (Left i ,j ) -> traceShowId $j
+                            (Left (Just i),Right j) -> Left (Just i)
+                            (Left i ,j ) -> j
               in  join . fmap  patt $  mergeFun
       | otherwise =  fmap (either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) ) . funO  ( keyType k)  $ (iv ^? ( key (T.toStrict $ keyValue k))  )
 
