@@ -182,7 +182,7 @@ drafts = genTable "drafts" "id"  [] ["id","message"]
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
-lbackRef (TB1 t) = snd $ Prelude.head $ getPK  (TB1 t)
+lbackRef (TB1 t) = snd $ Types.head $ getPK  (TB1 t)
 
 convertAttrs :: InformationSchema -> M.Map Text Table ->  Table -> Value -> TransactionM (TB2 Key Showable)
 convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb ))
@@ -204,8 +204,20 @@ convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (trav
                     (traverse (\v -> do
                         tell (TableModification Nothing (lookTable infsch trefname ) . patchTB1 <$> F.toList v)
                         return $ FKT [Compose .Identity . Types.Attr  k $ (lbackRef    v) ]  fk v))
-                    (traverse (\v -> return $ FKT [Compose .Identity . Types.Attr  k $ v ] fk (ArrayTB1 [] )) )
-              in  join . fmap  patt . funO  (exchange trefname $ keyType k) $   (iv  ^? ( key (T.toStrict $ keyValue  k ))  )
+                    (traverse (\v -> do
+                            let ref = [Compose .Identity . Types.Attr  k $ v ]
+                            tbs <- liftIO $ runDBM infsch (atTable (tableMeta $ lookTable infsch trefname))
+                            return $ FKT ref fk (joinRel fk (fmap unTB ref) tbs) ))
+
+                        -- return $ FKT [Compose .Identity . Types.Attr  k $ v ] fk (ArrayTB1 [] )) )
+               funL = funO  (exchange trefname $ keyType k) $   (iv  ^? ( key (T.toStrict $ keyValue  k ))  )
+               funR = funO  (keyType k) $   (iv  ^? ( key (T.toStrict $ keyValue  k ))  )
+               mergeFun = do
+                          (l,r) <- liftA2 (,) funL funR
+                          return $ case (l,r) of
+                            (Left (Just i),Right j) -> traceShowId $ Left (Just i)
+                            (Left i ,j ) -> traceShowId $j
+              in  join . fmap  patt $  mergeFun
       | otherwise =  fmap (either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) ) . funO  ( keyType k)  $ (iv ^? ( key (T.toStrict $ keyValue k))  )
 
     fun :: KType Text -> Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
@@ -215,8 +227,11 @@ convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (trav
           PInt -> Just . SNumeric . round <$> (v ^? _Number)
           PDouble -> Just . SDouble . realToFrac  <$> (v ^? _Number)
           PBinary -> readPrim (textToPrim i) . TS.unpack  <$> (v ^? _String)
-    fun (KArray i) v = (\l -> if null l then return (typ i) else fmap (bimap  (Just . ArrayTB1) (Just . ArrayTB1)) .   biTrav (fmap (bimap (justError "bimap") (justError "bimap")) . fun i) $ l ) $ (v ^.. values )
-    fun (InlineTable i  m ) v = Left . Just <$>  convertAttrs infsch inf   (justError "no look" $  M.lookup m inf ) v
+    fun (KArray i) v = (\l -> if null l then return (typ i) else fmap (bimap  nullArr  nullArr) .   biTrav (fun i) $ l ) $ (v ^.. values )
+        where nullArr lm = if null l then Nothing else Just (ArrayTB1 l)
+                where l = catMaybes lm
+    fun (InlineTable i  m ) v = Left . tbNull <$>  convertAttrs infsch inf   (justError "no look" $  M.lookup m inf ) v
+        where  tbNull tb = if null (getAttr' tb) then Nothing else Just  tb
     fun i v = errorWithStackTrace (show (i,v))
 
     funO ::  KType Text -> Maybe Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
