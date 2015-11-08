@@ -401,13 +401,13 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
   let table = lookPK inf (S.fromList $ fmap _relOrigin $ findPK $ ftb)
   let fun "Editor"= do
           let
-            getItem :: TB2 Key Showable -> IO (Maybe (TBIdx Key Showable))
+            getItem :: TB2 Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
             getItem  =  (getEd $ schemaOps inf) inf table . unTB1
             -- getItem = loadDelayed inf (unTB1 ftb) . unTB1
           preoldItens <- currentValue (facts preoldItems)
-          loadedItens <- liftIO$ join <$> traverse getItem preoldItens
-          maybe (return ()) (\j -> liftIO  (hvdiff  =<< traverse (\i -> return $ applyTB1  i (PAtom j) ) preoldItens) )  loadedItens
-          loadedItensEv <- mapEvent (fmap join <$> traverse getItem ) (rumors preoldItems)
+          loadedItens <- liftIO$ join <$> traverse (transaction inf  . getItem) preoldItens
+          maybe (return ()) (\j -> liftIO  (hvdiff  =<< traverse (\i -> runDBM inf $  applyTB1'  i (PAtom j) ) preoldItens) )  loadedItens
+          loadedItensEv <- mapEvent (fmap join <$> traverse (transaction inf . getItem )) (rumors preoldItems)
           let oldItemsE =  fmap head $ unions [ evdiff, rumors preoldItems  ]
           ini2 <- liftIO $(maybe (return preoldItens) (\j -> traverse (\i -> return $ applyTB1 i (PAtom j) ) preoldItens ) loadedItens)
           oldItemsB <- stepper  ini2 oldItemsE
@@ -767,7 +767,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
           rr = tablePKSet tb1
           table = justError "no table found" $ M.lookup (S.map _relOrigin rr) $ pkMap inf
-      (tmvar,vpt)  <- liftIO $ eventTable inf table
+      (tmvar,vpt)  <- liftIO $ transaction inf $ eventTable inf table
       res <- currentValue (facts vpt)
       let
           -- Find non injective part of reference

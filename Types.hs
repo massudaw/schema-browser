@@ -211,14 +211,14 @@ data FKey a
     , keyPosition :: Int
     , keyStatic :: Maybe (FTB Showable)
     , keyFastUnique :: ! Unique
-    , keyType :: ! a
+    , _keyTypes :: ! a
     }deriving(Functor,Generic)
 
 instance (Functor f ,Bifunctor g)  => Bifunctor (Compose f g ) where
   first f  = Compose . fmap (first f) . getCompose
   second f = Compose . fmap (second f) . getCompose
 
-
+keyType = _keyTypes
 data Rel k
   = Inline  {_relOrigin :: k}
   | Rel
@@ -864,6 +864,7 @@ nonRefAttr l = concat $  fmap (uncurry Attr) . aattr <$> ( l )
 makeLenses ''KV
 makeLenses ''TB
 makeLenses ''Rel
+makeLenses ''FKey
 
 --
 --- Attr Cons/Uncons

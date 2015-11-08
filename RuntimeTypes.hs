@@ -72,8 +72,8 @@ data SchemaEditor
   { editEd  :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
   , insertEd :: InformationSchema -> TBData Key Showable -> TransactionM  (Maybe (TableModification (TBIdx Key Showable)))
   , deleteEd :: InformationSchema ->  TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
-  , listEd :: InformationSchema -> Table -> IO [TB2 Key Showable]
-  , getEd :: InformationSchema -> Table -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
+  , listEd :: InformationSchema -> Table -> TransactionM [TB2 Key Showable]
+  , getEd :: InformationSchema -> Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   }
 
 

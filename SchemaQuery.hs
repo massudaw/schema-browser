@@ -61,31 +61,37 @@ selectAll inf table = liftIO $ do
 
 eventTable inf table = do
     let mvar = mvarMap inf
-    mmap <- takeMVar mvar
+    -- print "Take MVar"
+    mmap <- liftIO$ takeMVar mvar
+    -- print "Look MVar"
     (mtable,td) <- case (M.lookup (tableMeta table) mmap ) of
          Just (i,td) -> do
-           putMVar mvar mmap
+           -- print "Put MVar"
+           liftIO $ putMVar mvar mmap
            return (i,td)
          Nothing -> do
            res <- (listEd $ schemaOps inf ) inf table
-           mnew <- newMVar (fmap unTB1 res)
-           (e,h) <- R.newEvent
-           ini <- readMVar mnew
-           forkIO $ forever $ do
-              h =<< takeMVar mnew
-           bh <- R.stepper ini e
+           -- liftIO $ print "New MVar"
+           mnew <- liftIO$ newMVar (fmap unTB1 res)
+           (e,h) <- liftIO $R.newEvent
+           -- print "Read MVar"
+           ini <- liftIO$ readMVar mnew
+           liftIO$ forkIO $ forever $ do
+              (h =<< takeMVar mnew ) >> print "Take MVar"
+           bh <- liftIO$ R.stepper ini e
            let td = (R.tidings bh e)
            -- Dont
-           if True -- (rawTableType table == ReadWrite)
+           -- print "Put MVar"
+           liftIO$ if True -- (rawTableType table == ReadWrite)
               then  putMVar mvar (M.insert (tableMeta table) (mnew,td) mmap)
               else putMVar mvar  mmap
 
            return (mnew,td)
-    return (mtable,fmap TB1 .traceShowId <$> td)
+    return (mtable,fmap TB1 <$> td)
 
 
 
-postgresOps = SchemaEditor fullDiffEdit fullDiffInsert deleteMod selectAll (\inf table -> loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))
+postgresOps = SchemaEditor fullDiffEdit fullDiffInsert deleteMod selectAll (\inf table -> liftIO . loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))
 
 fullInsert inf = Tra.traverse (fullInsert' inf )
 
@@ -93,7 +99,7 @@ fullInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData
 fullInsert' inf ((k1,v1) )  = do
    let proj = _kvvalues . unTB
    ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
-   (m,t) <- liftIO $ eventTable inf (lookTable inf (_kvname k1))
+   (m,t) <- eventTable inf (lookTable inf (_kvname k1))
    l <- currentValue (facts t)
    if  isJust $ L.find ((==tbPK (tableNonRef (TB1 ret))). tbPK . tableNonRef ) l
       then do
@@ -121,15 +127,21 @@ insertMod inf j  table = do
 
 
 transaction :: InformationSchema -> TransactionM a -> IO a
-transaction inf log = withTransaction (conn inf) $ do
+transaction inf log = {-withTransaction (conn inf) $-} do
+  -- print "Transaction Run Log"
   (md,mods)  <- runWriterT log
+  -- print "Transaction Update"
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
   Tra.traverse (\(k,v) -> do
-    (m,t) <- eventTable inf k
+    -- print "GetTable"
+    (m,t) <- transaction inf $  eventTable inf k
+    -- print "ReadValue"
     l <- currentValue (facts t)
     let lf = foldl' (\i p -> applyTable  i (PAtom p)) l v
+    -- print "PutValue"
     putMVar m (fmap unTB1 lf)
     ) (M.toList aggr)
+  --print "Transaction Finish"
   return md
 
 

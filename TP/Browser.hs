@@ -304,7 +304,7 @@ viewerKey inf key = mdo
   let
       table = fromJust  $ M.lookup key $ pkMap inf
 
-  (tmvar,vpt)  <- liftIO $ eventTable inf table
+  (tmvar,vpt)  <- liftIO $ transaction inf $ eventTable inf table
   vp <- currentValue (facts vpt)
 
   let
@@ -330,7 +330,7 @@ viewerKey inf key = mdo
   itemList <- listBox (paging <*> res3) (tidings st sel ) (pure id) ( pure attrLine )
   let
      paging  = (\o -> L.take pageSize . L.drop (o*pageSize))<$> triding offset
-  offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) ((\i -> (L.length i `div` pageSize) ) <$> facts res3)
+  offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) ((\i -> (L.length i `div` pageSize) +  1 ) <$> facts res3)
   let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
   prop <- stepper cv (diffEvent st evsel)
   let tds = tidings prop (diffEvent st evsel)

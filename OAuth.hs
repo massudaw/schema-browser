@@ -17,6 +17,8 @@ import qualified Data.Foldable as F
 import Control.Monad.IO.Class
 import Data.Monoid
 import Data.Biapplicative
+import Patch
+import Control.Monad.Writer hiding (pass)
 import GHC.Stack
 import Data.String
 import Control.Concurrent
@@ -97,19 +99,22 @@ pluginContactGoogle args = do
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setupOAuth  tokenRef mvar smvar $ tail args)
 
 listTable inf table = do
-  tok <- readIORef (snd $fromJust $ token inf)
+  tok <- liftIO$ readIORef (snd $fromJust $ token inf)
   let user = fst $ fromJust $ token inf
-  c <- return . fmap (convertAttrs (tableMap inf) table ) . maybe [] (\i -> (i :: Value) ^.. key ( T.toStrict $ rawName table ) . values) . decode =<< simpleHttpHeader [("GData-Version","3.0")] ("https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?maxResults=20&access_token=" ++ ( accessToken tok ))
-  --fmap catMaybes $ mapM (getTable inf table . getPK) (take 5 c)
-  return  $ traceShowId c
+  c <- traverse (convertAttrs inf (tableMap inf) table .traceShowId ) . maybe [] (\i -> (i :: Value) ^.. key ( T.toStrict $ rawName table ) . values) . decode =<< simpleHttpHeader [("GData-Version","3.0")] (traceShowId $ "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?maxResults=20&access_token=" ++ ( accessToken tok ))
+  return   c
 
-getTable inf table pk = do
-  tok <- readIORef (snd $ fromJust $ token inf)
-  let user = fst $ fromJust $ token inf
-  c <- return . fmap (convertAttrs (tableMap inf) table ) . fmap (\i -> (i :: Value)  ) . decode =<< simpleHttpHeader [("GData-Version","3.0")] (traceShowId $ "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "/" <>  intercalate "," ( renderShowable . snd <$> pk ) <> "?access_token=" ++ ( accessToken tok))
-  return $  c
+getKeyAttr (TB1 (m, k)) = (concat (fmap keyattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
-getDiffTable inf table  j = fmap (join . fmap (difftable j. unTB1) ) $ getTable  inf table . getPK $ TB1 j
+getTable inf  tb pk
+  | S.fromList (fmap _relOrigin (getKeyAttr pk) ) ==  S.fromList (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb ) = return Nothing
+  | otherwise = do
+    tok <- liftIO $readIORef (snd $ fromJust $ token inf)
+    let user = fst $ fromJust $ token inf
+    c <- traverse (convertAttrs inf (tableMap inf) tb ) . fmap (\i -> (i :: Value)  ) . decode =<< (liftIO $ simpleHttpHeader [("GData-Version","3.0")] (traceShowId $ "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName tb ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK pk ) <> "?access_token=" ++ ( accessToken tok)))
+    return $  c
+
+getDiffTable inf table  j = fmap (join . fmap (difftable j. unTB1) ) $ getTable  inf table $ TB1 j
 
 setupOAuth
       :: IORef OAuth2Tokens -> MVar (M.Map (KVMetadata Key) ( MVar  [TBData Key Showable], Tidings [TBData Key Showable])) -> MVar (M.Map Text InformationSchema ) -> [String] -> Window -> UI ()
@@ -175,23 +180,48 @@ drafts = genTable "drafts" "id"  [] ["id","message"]
 -}
 
 
-convertAttrs :: M.Map Text Table ->  Table -> Value -> TB2 Key Showable
-convertAttrs  inf tb i =   tblist' tb $  Compose . Identity <$> catMaybes (kid <$> (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb ))
+lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
+lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
+lbackRef (TB1 t) = snd $ Prelude.head $ getPK  (TB1 t)
+
+convertAttrs :: InformationSchema -> M.Map Text Table ->  Table -> Value -> TransactionM (TB2 Key Showable)
+convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb ))
   where
-    kid  k =  either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) . funO  (keyType k) $ (i ^? ( key (T.toStrict $ keyValue k))  )
-    fun :: KType Text -> Value -> Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable))
-    fun (Primitive i) v = Right $ fmap TB1 $ join $
+    pathOrigin (Path i _ _ ) = i
+    isFKJoinTable (Path _ (FKJoinTable _ _ _) i) = True
+    isFKJoinTable _ = False
+    kid :: Key -> TransactionM (Maybe (TB Identity Key Showable))
+    kid  k
+      | S.member k (S.unions $ map pathOrigin $ filter isFKJoinTable $ F.toList $rawFKS tb)
+            = let
+               fks = justError "" (find ((== S.singleton k). pathOrigin) (F.toList (rawFKS tb)))
+               (FKJoinTable _ _ trefname ) = pathRel fks
+               fk =  F.toList $  pathRelRel fks
+               exchange tname (KArray i)  = KArray (exchange tname i)
+               exchange tname (KOptional i)  = KOptional (exchange tname i)
+               exchange tname (Primitive i) = InlineTable "gmail" tname
+               patt = either
+                    (traverse (\v -> do
+                        tell (TableModification Nothing (lookTable infsch trefname ) . patchTB1 <$> F.toList v)
+                        return $ FKT [Compose .Identity . Types.Attr  k $ (lbackRef    v) ]  fk v))
+                    (traverse (\v -> return $ FKT [Compose .Identity . Types.Attr  k $ v ] fk (ArrayTB1 [] )) )
+              in  join . fmap  patt . funO  (exchange trefname $ keyType k) $   (iv  ^? ( key (T.toStrict $ keyValue  k ))  )
+      | otherwise =  fmap (either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) ) . funO  ( keyType k)  $ (iv ^? ( key (T.toStrict $ keyValue k))  )
+
+    fun :: KType Text -> Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
+    fun (Primitive i) v = return $ Right $ fmap TB1 $ join $
         case textToPrim i of
           PText -> readPrim (textToPrim i) . TS.unpack <$> (v ^? _String)
           PInt -> Just . SNumeric . round <$> (v ^? _Number)
           PDouble -> Just . SDouble . realToFrac  <$> (v ^? _Number)
           PBinary -> readPrim (textToPrim i) . TS.unpack  <$> (v ^? _String)
-    fun (KArray i) v = (\l -> if null l then (typ i) else bimap  (Just . ArrayTB1) (Just . ArrayTB1) .   biTrav (bimap fromJust fromJust . fun i) $ l ) $ (v ^.. values )
-    fun (InlineTable i  m ) v = Left $ Just $ ( convertAttrs inf   (fromJust $ M.lookup m inf ) v)
+    fun (KArray i) v = (\l -> if null l then return (typ i) else fmap (bimap  (Just . ArrayTB1) (Just . ArrayTB1)) .   biTrav (fmap (bimap (justError "bimap") (justError "bimap")) . fun i) $ l ) $ (v ^.. values )
+    fun (InlineTable i  m ) v = Left . Just <$>  convertAttrs infsch inf   (justError "no look" $  M.lookup m inf ) v
     fun i v = errorWithStackTrace (show (i,v))
-    funO ::  KType Text -> Maybe Value -> Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable))
-    funO (KOptional i) v =  bimap (Just . LeftTB1) (Just . LeftTB1) . maybe (typ i) (fun i) $ v
-    funO i v = fmap join $ traverse (fun i) v
+
+    funO ::  KType Text -> Maybe Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
+    funO (KOptional i) v =  fmap (bimap (Just . LeftTB1) (Just . LeftTB1)) . maybe (return $ typ i) (fun i) $ v
+    funO i v = maybe (return $typ i) (fun i) v
 
     typ (KArray i ) = typ i
     typ (Primitive _ ) = Right Nothing
@@ -202,10 +232,11 @@ instance Biapplicative Either where
   Right f  <<*>> Right g  = Right $ f  g
   Left f  <<*>> Left g  = Left $ f  g
 
-biTravM f (Just x) = bimap pure pure  (f x)
+-- biTravM f (Just x) = bimap pure pure  (f x)
 
-biTrav f (x:[]) = bimap pure pure  (f x)
-biTrav f (x:xs) = biliftA2 (:) (:) (f x) (biTrav f xs)
+biTrav :: Applicative m => (c -> m (Either a b) ) -> [c] -> m (Either [a] [b])
+biTrav f (x:[]) = bimap (pure) (pure)  <$> (f x)
+biTrav f (x:xs) = liftA2 (biliftA2 (:) (:)) (f x) (biTrav f xs)
 biTrav f [] = errorWithStackTrace "cant be empty"
 
 -- simpleHttp' :: MonadIO m => (HeaderName,BL.ByteString) -> String -> m BL.ByteString
