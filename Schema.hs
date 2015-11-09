@@ -89,7 +89,8 @@ fromShowable2 i v = fromShowable i v
 testSerial  =((=="nextval"). fst . T.break(=='('))
 
 
-keyTables :: MVar (Map Text InformationSchema )-> MVar (Map (KVMetadata Key) ( MVar  [TBData Key Showable], R.Tidings [TBData Key Showable])) -> Connection -> Connection -> (Text ,Text)-> Maybe (Text,IORef OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
+
+keyTables :: MVar (Map Text InformationSchema )-> MVar (Map (KVMetadata Key) DBVar ) -> Connection -> Connection -> (Text ,Text)-> Maybe (Text,IORef OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
 keyTables schemaVar mvar conn userconn (schema ,user) oauth ops = maybe (do
        uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from metadata.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
        res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty . BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,l,maybe False testSerial m,n,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_range,col_def,is_sum,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema)
@@ -360,14 +361,14 @@ createTB1' (m ,s ,k)  = fmap (m ,)  $ fmap (_tb .KV . mapFromTBList ) . traverse
 
 
 
-type Database k v = MVar (Map (KVMetadata k) (MVar [TBData k v],R.Tidings [TBData k v]))
+type Database k v = MVar (Map (KVMetadata k) (DBVar2 k v) )
 type DBM k v = ReaderT (Database k v) IO
 
 atTable ::  KVMetadata Key -> DBM Key v [TBData Key v]
 atTable k = do
   i <- ask
   (m,c)<- liftIO$ dbTable i k
-  liftIO $ R.currentValue (R.facts c)
+  fmap snd $ liftIO $ R.currentValue (R.facts c)
 
 joinRel :: (Ord a ,Show a) => [Rel Key] -> [TB Identity Key a] -> [TBData Key a] -> FTB (TBData Key a)
 joinRel rel ref table
@@ -377,6 +378,6 @@ joinRel rel ref table
       where origin = fmap _relOrigin rel
 
 
-test inf i j = runDBM inf (applyTB1' i j)
+-- test inf i j = runDBM inf (applyTB1' i j)
 runDBM inf m = do
     runReaderT m (mvarMap inf)

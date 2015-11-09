@@ -931,6 +931,7 @@ postgresPrim =
   ,("char",PText)
   ,("bpchar",PText)
   ,("sql_identifier" , PText)
+  ,("base64url",PText)
   ,("bytea",PBinary)
   ,("pdf",PMime "application/pdf")
   ,("ofx",PMime "application/x-ofx")

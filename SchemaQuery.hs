@@ -59,7 +59,10 @@ selectAll inf table = liftIO $ do
       print (tableName table,t)
       return v
 
-eventTable inf table = do
+eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> TransactionM DBVar -- (MVar (M.Map Int PageToken , [TBData Key Showable]), R.Tidings (M.Map Int PageToken , [TB2 Key Showable]))
+
+estLength page size resL est = fromMaybe 0 page * fromMaybe 20 size  +  est
+eventTable inf table page size = do
     let mvar = mvarMap inf
     -- print "Take MVar"
     mmap <- liftIO$ takeMVar mvar
@@ -67,18 +70,21 @@ eventTable inf table = do
     (mtable,td) <- case (M.lookup (tableMeta table) mmap ) of
          Just (i,td) -> do
            -- print "Put MVar"
+           ((sq,mp),reso) <- liftIO$ currentValue (facts td)
+           when (traceShow (table,sq,mp,page,size) $maybe False (\p->not $ M.member (p+1) mp) page  && sq >  L.length reso  && isJust (join $ flip M.lookup mp <$> page )) $ do
+             (res,nextToken ,s ) <- (listEd $ schemaOps inf ) inf table (join $ flip M.lookup mp <$> page ) size
+             liftIO$ putMVar i ((estLength page size res s  ,maybe mp (\v -> M.insert (fromMaybe 0 page +1 ) v  mp)  nextToken) ,reso <> (unTB1 <$> res))
            liftIO $ putMVar mvar mmap
            return (i,td)
          Nothing -> do
-           res <- (listEd $ schemaOps inf ) inf table
+           (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing size
            -- liftIO $ print "New MVar"
-           mnew <- liftIO$ newMVar (fmap unTB1 res)
+           let ini = ((estLength page size res s ,maybe M.empty (M.singleton 1) p) ,fmap unTB1 res)
+           mnew <- liftIO$ newMVar ini
            (e,h) <- liftIO $R.newEvent
-           -- print "Read MVar"
-           ini <- liftIO$ readMVar mnew
+           bh <- liftIO$ R.stepper ini  e
            liftIO$ forkIO $ forever $ do
-              (h =<< takeMVar mnew ) >> print "Take MVar"
-           bh <- liftIO$ R.stepper ini e
+              (h =<< takeMVar mnew ) -- >> print "Take MVar"
            let td = (R.tidings bh e)
            -- Dont
            -- print "Put MVar"
@@ -87,11 +93,11 @@ eventTable inf table = do
               else putMVar mvar  mmap
 
            return (mnew,td)
-    return (mtable,fmap TB1 <$> td)
+    return (mtable, td)
 
 
 
-postgresOps = SchemaEditor fullDiffEdit fullDiffInsert deleteMod selectAll (\inf table -> liftIO . loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))
+postgresOps = SchemaEditor fullDiffEdit fullDiffInsert deleteMod (\i j p g -> (,Nothing,0) <$> selectAll i j ) (\inf table -> liftIO . loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))
 
 fullInsert inf = Tra.traverse (fullInsert' inf )
 
@@ -99,9 +105,9 @@ fullInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData
 fullInsert' inf ((k1,v1) )  = do
    let proj = _kvvalues . unTB
    ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
-   (m,t) <- eventTable inf (lookTable inf (_kvname k1))
-   l <- currentValue (facts t)
-   if  isJust $ L.find ((==tbPK (tableNonRef (TB1 ret))). tbPK . tableNonRef ) l
+   (m,t) <- eventTable inf (lookTable inf (_kvname k1)) Nothing Nothing
+   (_,l) <- currentValue (facts t)
+   if  isJust $ L.find ((==tbPK (tableNonRef (TB1  ret))). tbPK . tableNonRef . TB1  ) l
       then do
         return ret
       else do
@@ -134,12 +140,12 @@ transaction inf log = {-withTransaction (conn inf) $-} do
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
   Tra.traverse (\(k,v) -> do
     -- print "GetTable"
-    (m,t) <- transaction inf $  eventTable inf k
+    (m,t) <- transaction inf $  eventTable inf k Nothing Nothing
     -- print "ReadValue"
-    l <- currentValue (facts t)
-    let lf = foldl' (\i p -> applyTable  i (PAtom p)) l v
+    (mp,l) <- currentValue (facts t)
+    let lf = foldl' (\i p -> applyTable  i (PAtom p)) (fmap TB1 l) v
     -- print "PutValue"
-    putMVar m (fmap unTB1 lf)
+    putMVar m (mp,fmap unTB1 lf)
     ) (M.toList aggr)
   --print "Transaction Finish"
   return md

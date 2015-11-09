@@ -715,9 +715,9 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
       element dv  # set children (offset : (getElement <$> items))
       return $ TrivialWidget bres dv
 
-offsetField  init eve  max = mdo
+offsetField  init eve  max = do
   offsetL <- UI.span # set text "Offset: "
-  offset <- UI.input # set UI.style [("width","50px")] # sink UI.value (show <$> offsetB)
+  offset <- UI.input # set UI.style [("width","50px")]
   leng <- UI.span # sink text (("Size: " ++) .show  <$> max )
   offparen <- UI.div # set children [offsetL,offset,leng]
 
@@ -726,16 +726,19 @@ offsetField  init eve  max = mdo
       saturate m i j
           | m == 0 = 0
           | i + j < 0  = 0
-          | i + j > m -1  = m -1
+          | i + j > m - 1  = m - 1
           | otherwise = i + j
       diff o m inc
         | saturate m inc o /= o = Just (saturate m inc )
         | otherwise = Nothing
 
-  let
+  (offsetB ,ev2) <- mdo
+    let
       filt = ( filterJust $ diff <$> offsetB <*> max <@> ev  )
       ev2 = (fmap concatenate $ unions [fmap const offsetE,filt ])
-  offsetB <- accumB init ev2
+    offsetB <- accumB init ev2
+    return (offsetB,ev2)
+  element offset # sink UI.value (show <$> offsetB)
   let
      cev = flip ($) <$> offsetB <@> ev2
      offsetT = tidings offsetB cev
@@ -767,8 +770,8 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
           rr = tablePKSet tb1
           table = justError "no table found" $ M.lookup (S.map _relOrigin rr) $ pkMap inf
-      (tmvar,vpt)  <- liftIO $ transaction inf $ eventTable inf table
-      res <- currentValue (facts vpt)
+      (tmvar,vpt)  <- liftIO $ transaction inf $ eventTable inf table Nothing Nothing
+      (_,res) <- fmap (fmap TB1 ) <$> currentValue (facts vpt)
       let
           -- Find non injective part of reference
           ftdi = oldItems
@@ -822,8 +825,8 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> triding itemList), if L.null ifk {-|| ReadWrite /= rawTableType table -} then never else rumors tdi]),diffUp]
       st <- stepper cv sel
       inisort <- currentValue (facts sortList)
-      res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [fmap const (($) <$> facts sortList <@> rumors vpt) , rumors sortList])
-      onEvent ((\i j -> foldl' applyTable i (expandPSet j)) <$> res2 <@> ediff)  (liftIO .  putMVar tmvar  . fmap unTB1 )
+      res2  <-  accumB (inisort res ) (fmap concatenate $ unions $ [fmap const (($) <$> facts sortList <@> (fmap TB1 .snd <$> rumors vpt)) , rumors sortList])
+      -- onEvent ((\i j -> foldl' applyTable i (expandPSet j)) <$> res2 <@> ediff)  (liftIO .  putMVar tmvar  . (M.empty,) . fmap unTB1 )
       let
         fksel =  fmap (\box ->  FKT (backFKRef  relTable  (fmap (keyAttr .unTB )ifk)   box) rel box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> pretdi <*> tidings st sel)
       element itemList # set UI.class_ "col-xs-5"

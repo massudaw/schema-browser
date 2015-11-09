@@ -157,7 +157,7 @@ poller schm dbm db plugs = do
 
 
 setup
-     :: [(Text,Event [TableModification (TBIdx Key Showable)])] -> MVar (M.Map (KVMetadata Key) ( MVar  [TBData Key Showable], Tidings [TBData Key Showable])) ->  MVar (M.Map Text  InformationSchema) ->  IORef OAuth2Tokens -> [String] -> Window -> UI ()
+     :: [(Text,Event [TableModification (TBIdx Key Showable)])] -> MVar (M.Map (KVMetadata Key) DBVar ) ->  MVar (M.Map Text  InformationSchema) ->  IORef OAuth2Tokens -> [String] -> Window -> UI ()
 setup e mvar smvar tokenRef args w = void $ do
   let bstate = argsToState args
   (evDB,chooserItens) <- databaseChooser mvar smvar tokenRef bstate
@@ -236,7 +236,7 @@ databaseChooser mvar smvar tokenRef sargs = do
         conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> (BS.pack $  dbn sargs) ) -- <> " sslmode= require")
         execute_ conn "set bytea_output='hex'"
         case schemaN of
-          "gmail" ->  keyTables smvar mvar dbConn conn (schemaN,T.pack $ user ) (Just ("wesley.massuda@gmail.com",tokenRef)) gmailOps
+          "gmail" ->  keyTables smvar mvar dbConn conn (schemaN,T.pack $ user ) (Just ("me",tokenRef)) gmailOps
           i -> keyTables smvar mvar dbConn conn (schemaN,T.pack user) Nothing postgresOps
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   chooserT <-  mapTEvent (traverse genSchema) formLogin
@@ -280,10 +280,10 @@ chooserTable inf e kitems i = do
   chooserDiv <- UI.div # set children  [header ,getElement nav] # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
   body <- UI.div # set UI.class_ "row"
 
-  {-mapM (\(t,ediff) -> traverse (\ table -> do
-      (tmvar,vpt)  <- liftIO $ eventTable inf table
-      onEvent ( ((\i j -> foldl applyTable i (fmap (PAtom .tableDiff) j) ) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar . fmap unTB1 )) (M.lookup t (tableMap inf))  ) e
-      -}
+  mapM (\(t,ediff) -> traverse (\ table -> do
+      (tmvar,vpt)  <- liftIO $ transaction inf $eventTable inf table Nothing Nothing
+      onEvent ( ((\(m,i) j -> (m,foldl applyTable (fmap TB1 i) (fmap (PAtom .tableDiff) j)) ) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar . fmap (fmap unTB1) )) (M.lookup t (tableMap inf))  ) e
+
 
   mapUITEvent body (\(nav,table)->
       case nav of
@@ -310,8 +310,8 @@ viewerKey inf key = mdo
   let
       table = fromJust  $ M.lookup key $ pkMap inf
 
-  (tmvar,vpt)  <- liftIO $ transaction inf $ eventTable inf table
-  vp <- currentValue (facts vpt)
+  (tmvar,vpt)  <- liftIO $ transaction inf $ eventTable inf table (Just 0) (Just  20)
+  vp <- fmap (fmap TB1 ) <$> currentValue (facts vpt)
 
   let
       tdi = pure Nothing
@@ -328,26 +328,32 @@ viewerKey inf key = mdo
   let
      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  . _unTB1 )
      tsort = sorting . filterOrd <$> triding sortList
-     filtering res = (\t -> filter (filteringPred t ) )<$> filterInpT  <*> res
+     filtering res = (\t -> fmap (filter (filteringPred t )) )<$> filterInpT  <*> res
+     pageSize = 20
+     lengthPage = (\((s,m),i) -> (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0 )
   inisort <- currentValue (facts tsort)
-
-  res3 <- mapT0Event (inisort vp) return (tsort <*> (filtering $ tidings res2 (rumors vpt) ))
-  let pageSize = 20
-  itemList <- listBox (paging <*> res3) (tidings st sel ) (pure id) ( pure attrLine )
+  (offset,res3)<- mdo
+    offset <- offsetField 0 (never ) (lengthPage <$> facts res3)
+    res3 <- mapT0Event (fmap inisort vp) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ tidings res2 (fmap (fmap TB1) <$> rumors vpt) ) )
+    return (offset, res3)
+  onEvent (rumors $ triding offset) $ (\i -> liftIO $ transaction inf $ eventTable  inf table  (Just i) (Just 20))
   let
-     paging  = (\o -> L.take pageSize . L.drop (o*pageSize))<$> triding offset
-  offset <- offsetField 0 (negate <$> mousewheel (getElement itemList)) ((\i -> (L.length i `div` pageSize) +  1 ) <$> facts res3)
+    paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )<$> triding offset
+  page <- currentValue (facts paging)
+  res4 <- mapT0Event (page $ fmap inisort vp) return (paging <*> res3)
+  itemList <- listBox (fmap snd res4) (tidings st sel ) (pure id) ( pure attrLine )
+
   let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
   prop <- stepper cv (diffEvent st evsel)
   let tds = tidings prop (diffEvent st evsel)
 
-  (cru,ediff,pretdi) <- crudUITable inf plugList  (pure "Editor")  (tidings res2 never)[] [] (allRec' (tableMap inf) table) tds
+  (cru,ediff,pretdi) <- crudUITable inf plugList  (pure "Editor")  (tidings (fmap snd res2) never)[] [] (allRec' (tableMap inf) table) tds
   diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip applyTB1 j ) i) <$> facts pretdi <@> ediff
   let
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
-  res2 <- stepper (inisort vp) (rumors vpt)
-  onEvent ( ((\i j -> foldl applyTable i (expandPSet j)) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar. fmap unTB1)
+  res2 <- stepper (fmap inisort vp) (fmap (fmap TB1) <$> rumors vpt)
+  onEvent ( ((\(m,i) j -> (m,foldl applyTable (fmap TB1 i) (expandPSet j))) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar. fmap (fmap unTB1))
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK)  <$> facts tds) # set UI.class_ "col-xs-8"

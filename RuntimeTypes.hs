@@ -34,12 +34,15 @@ data InformationSchema
   , tableMap :: Map Text Table
   , tableSize :: Map Table Int
   , pluginsMap :: Map (Text,Text,Text) Key
-  , mvarMap :: MVar (Map (KVMetadata Key) ( MVar  [TBData Key Showable], R.Tidings [TBData Key Showable]))
+  , mvarMap :: MVar (Map (KVMetadata Key) (DBVar ))
   , conn :: Connection
   , rootconn :: Connection
   , metaschema :: Maybe InformationSchema
   , schemaOps :: SchemaEditor
   }
+
+type DBVar2 k v = ( MVar  ((Int,Map Int PageToken),[TBData k v ]), R.Tidings ((Int,Map Int PageToken ),[TBData k v ]))
+type DBVar = DBVar2 Key Showable
 
 data Plugins
   =  StatefullPlugin
@@ -67,12 +70,18 @@ data Plugins
 
 type TransactionM = WriterT [TableModification (TBIdx Key Showable)] IO
 
+data PageToken
+  = Index Int
+  | NextToken Text
+  deriving(Eq,Ord,Show)
+
+
 data SchemaEditor
   = SchemaEditor
   { editEd  :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
   , insertEd :: InformationSchema -> TBData Key Showable -> TransactionM  (Maybe (TableModification (TBIdx Key Showable)))
   , deleteEd :: InformationSchema ->  TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
-  , listEd :: InformationSchema -> Table -> TransactionM [TB2 Key Showable]
+  , listEd :: InformationSchema -> Table -> Maybe PageToken -> Maybe Int -> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
   , getEd :: InformationSchema -> Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   }
 
