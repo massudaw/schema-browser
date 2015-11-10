@@ -1,8 +1,9 @@
-{-# LANGUAGE Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,TupleSections,FlexibleInstances, DeriveFunctor  #-}
+{-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,TupleSections,FlexibleInstances, DeriveFunctor  #-}
 module Step where
 
 import Types
 import RuntimeTypes
+import Control.Monad.Reader
 import Query
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -36,6 +37,7 @@ instance Show (a -> Maybe Showable) where
 
 instance Show (a -> String) where
   show _ = ""
+
 {-
 data FKEdit
   = FKEInsertGenerated
@@ -68,11 +70,11 @@ data StepPlan a
 liftParser (P i j) = (P i ((\l -> Kleisli $  return <$> l ) $ j ) )
 liftParserR (P i j) = (P i ((\(Kleisli  l) -> Kleisli $  return  <$> l ) $ j ) )
 
-dynP (P s d) = d
+dynP ~(P s d) = d
 
 dynPK =  runKleisli . dynP
 
-staticP (P s d) = s
+staticP ~(P s d) = s
 
 liftReturn = Kleisli . (return <$> )
 
@@ -129,36 +131,46 @@ atAny k ps = P (nest fsum,nest ssum ) (Kleisli (\i -> local (indexTB1 ind)$foldr
     ssum = filter (/= Many [])$ fmap (\(P s _ )-> snd s ) ps
     asum = fmap (\(P s (Kleisli j) ) -> j ) ps
 
+nest _ (Many []) = Many []
+nest _ (ISum [] ) = ISum []
+nest ind (Many [Rec ix i])  = Many . pure . Nested ind $ Rec ix i
+nest ind  (Many j) = Many . pure . Nested ind $ Many j
+nest ind (ISum i) = Many . pure . Nested ind $ ISum i
+
 atRA
   :: (KeyString t2,
       MonadReader (Maybe (FTB1 Identity t2 Showable)) m, Ord t2) =>
      String
      -> Parser (Kleisli m) (Access Text) t t1
      -> Parser (Kleisli m) (Access Text) t [t1]
-atRA i (P s (Kleisli j) )  =  P (BF.second nest . BF.first nest $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
+atRA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
   where ind = splitIndex True i
-        nest (Many []) = Many []
-        nest (ISum [] ) = ISum []
-        nest (Many j) = Many . pure . Nested ind $ Many j
-        nest (ISum i) = Many . pure . Nested ind $ ISum i
 
 unLeftTB1 = join . fmap (\v -> case v of
                (LeftTB1 i ) -> i
                i@(TB1 _ ) -> Just i)
 
-atR i (P s (Kleisli j) )  =  P (BF.second nest . BF.first nest $ s) (Kleisli (\i -> local (unLeftTB1 . indexTB1 ind) (j i )  ))
+atR i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> local (unLeftTB1 . indexTB1 ind) (j i )  ))
   where ind = splitIndex True i
-        nest (Many []) = Many []
-        nest (ISum [] ) = ISum []
-        nest (Many j) = Many . pure . Nested ind $ Many j
-        nest (ISum i) = Many . pure . Nested ind $ ISum i
 
-at i (P s j)  =  P (BF.second nest  . BF.first nest  $ s)  (j . arr (indexTB1 ind )  )
+
+at i (P s j)  =  P (BF.second ( nest  ind) . BF.first (nest  ind) $ s)  (j . arr (indexTB1 ind )  )
   where ind = splitIndex True i
-        nest (Many [] ) = Many []
-        nest (ISum [] ) = ISum []
-        nest (Many i) = Many . pure . Nested ind $ Many i
-        nest (ISum i) = Many . pure . Nested ind $ ISum i
+
+messages
+  :: (k ~ Text
+      , m ~ Reader (Maybe (FTB (KVMetadata k, Compose Identity (KV (Compose Identity (TB Identity))) k Showable)))
+      , KeyString k,Applicative m, Show k, Ord k) =>
+     Parser
+       (Kleisli m) (Access Text) () [Maybe (FTB Showable, FTB Showable)]
+messages = name 0 $ proc t -> do
+          enc <- liftA2 (liftA2 (,)) (atR "body"  (idxR "data")) (idxR "mimeType") -< ()
+          part <- atRA "parts"
+              (call 0 messages ) -< ()
+          returnA -< ([enc ])
+
+name  i (P (Many l,Many v) d)=  P (Rec i (Many l) ,  Rec i (Many v) )  d
+call  i ~(P _ d) = P (Many[Point i],Many [Point i] ) d
 
 idx = indexTableInter False
 idxT = indexTableInter True
@@ -226,7 +238,15 @@ firstCI f = mapComp (firstTB f)
 
 findAttr l v = justError ("checkField error finding key: " <> T.unpack (T.intercalate "," l) ) $ M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB v
 
+replace ix i (Nested k nt) = Nested k (replace ix i nt)
+replace ix i (Many nt) = Many (fmap (replace ix i) nt )
+replace ix i (Many nt) = Many (fmap (replace ix i) nt )
 
+replace ix i (Point p)
+  | ix == p = Rec ix i
+  | otherwise = (Point p)
+
+checkField (Point ix) t = Nothing
 checkField (Nested (IProd _ l) nt ) t@(TB1 (m,v))
   = do
     let
@@ -253,6 +273,9 @@ checkField i j = errorWithStackTrace (show (i,j))
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
 checkTable l (LeftTB1 j) = join $ fmap (checkTable l) j
 checkTable l (DelayedTB1 j) = join $ fmap (checkTable l) j
+checkTable (Rec ix i) t = checkTable (replace ix i i ) t
+checkTable (Many [m@(Many l)]) t = checkTable m t
+checkTable (Many [m@(Rec _ _ )]) t = checkTable m t
 checkTable (Many l) t@(TB1 (m,v)) =
   fmap (TB1 . (m,) . Compose . Identity . KV . mapFromTBList ) . allMaybes $ flip checkField t <$> l
 

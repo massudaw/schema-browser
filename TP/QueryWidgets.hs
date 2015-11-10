@@ -115,6 +115,18 @@ pluginUI oinf initItems (StatefullPlugin n tname tf fresh (WrappedCall init ac )
   element el # sink UI.style (noneShow <$> facts tdInput)
   return (el ,  (  ((\(_,o,_,_) -> fmap rumors o)$ last freshUI ) ))
 
+pluginUI inf oldItems (PurePlugin n t f action) = do
+  overwrite <- checkedWidget (pure False)
+  let tdInput = join . fmap (flip testTable  (fst f)) <$>  oldItems
+      tdOutput = join . fmap (flip testTable (snd f)) <$> oldItems
+  v <- currentValue (facts oldItems)
+  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+  bh <- stepper False (unionWith const (const True <$> UI.hover headerP ) (const False <$> UI.leave headerP))
+  details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (mapValue (const ())) <$> facts tdInput)
+  out <- UI.div # set children [headerP,details]
+  pgOut <- mapEvent (\v -> catchPluginException inf n t (getPK $ justError "ewfew"  v) . return . action inf $ v)  (rumors oldItems)
+  return (out, (snd f ,   pgOut ))
+
 
 pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
   overwrite <- checkedWidget (pure False)
@@ -152,6 +164,8 @@ attrSize (Attr k _ ) = go  (keyType k)
                                     "image/jpg" ->  (4,8)
                                     "application/pdf" ->  (6,8)
                                     "application/x-ofx" ->  (6,8)
+                                    "plain/text" ->  (6,8)
+                                    i  ->  (6,8)
                        i -> (3,1)
 
 
@@ -649,6 +663,7 @@ buildPrim tdi i = case i of
            let fty = case mime of
                 "application/pdf" -> ("iframe","src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
                 "application/x-ofx" -> ("textarea","value",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+                "plain/text" -> ("textarea","value",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
                 "image/jpg" -> ("img","src",maybe "" binarySrc ,[])
            f <- pdfFrame fty (facts tdi2) # sink0 UI.style (noneShow . isJust <$> facts tdi2)
            fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]

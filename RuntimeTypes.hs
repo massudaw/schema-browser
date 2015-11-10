@@ -2,14 +2,12 @@
 module RuntimeTypes where
 
 import Control.Concurrent
--- import Schema
 import Types
 import Control.Arrow
 import Data.Text.Lazy
 import Control.Monad.IO.Class
 import Patch
 import Control.Monad.Writer
--- import Step
 
 import qualified Reactive.Threepenny as R
 import Database.PostgreSQL.Simple
@@ -57,6 +55,12 @@ data Plugins
   , _bounds :: Text
   , _arrowbounds :: (Access Text,Access Text)
   , _boundedAction2 :: InformationSchema -> (Maybe (TB1 Showable)) -> IO (Maybe (TB1 Showable))
+  }
+  | PurePlugin
+  { _name :: Text
+  , _bounds :: Text
+  , _arrowbounds :: (Access Text,Access Text)
+  , _action :: InformationSchema -> Maybe (TB1 Showable) -> Maybe (TB1 Showable)
   }
   | SequentialPlugin
   { _name :: Text
@@ -109,8 +113,11 @@ data Access a
   = IProd Bool [a]
   | ISum  [Access a]
   | Nested (Access a) (Access a)
+  | Rec Int (Access a)
+  | Point Int
   | Many [Access a]
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
 
-
 type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))
+type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) m )) (Access Text) () (Maybe (TB2  Text Showable))
+

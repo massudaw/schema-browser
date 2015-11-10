@@ -59,9 +59,9 @@ selectAll inf table = liftIO $ do
       print (tableName table,t)
       return v
 
-eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> TransactionM DBVar -- (MVar (M.Map Int PageToken , [TBData Key Showable]), R.Tidings (M.Map Int PageToken , [TB2 Key Showable]))
-
 estLength page size resL est = fromMaybe 0 page * fromMaybe 20 size  +  est
+
+eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> TransactionM DBVar
 eventTable inf table page size = do
     let mvar = mvarMap inf
     -- print "Take MVar"
@@ -97,7 +97,7 @@ eventTable inf table page size = do
 
 
 
-postgresOps = SchemaEditor fullDiffEdit fullDiffInsert deleteMod (\i j p g -> (,Nothing,0) <$> selectAll i j ) (\inf table -> liftIO . loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))
+postgresOps = SchemaEditor fullDiffEdit fullDiffInsert deleteMod (\i j p g -> (\i -> (i,Nothing,L.length i)) <$> selectAll i j ) (\inf table -> liftIO . loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))
 
 fullInsert inf = Tra.traverse (fullInsert' inf )
 

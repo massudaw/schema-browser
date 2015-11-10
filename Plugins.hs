@@ -42,6 +42,7 @@ import qualified Data.Vector as Vector
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.Time
+import qualified Data.ByteString.Base64.URL as B64Url
 
 import RuntimeTypes
 import Data.Monoid hiding (Product(..))
@@ -254,6 +255,37 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
                   b <- runReaderT (dynPK   url $ ())  (Just inp)
                   return $ liftKeys inf tname  <$> b )
 
+encodeMessage = PurePlugin "Encode Email" tname (staticP url) elem
+  where
+    tname = "message_payload"
+    messages = name 0 $ proc t -> do
+          enc <- liftA2 (liftA2 (,)) (atR "body"  (idxR "data")) (idxR "mimeType") -< ()
+          part <- atRA "parts"
+                    (call 0 messages ) -< ()
+          returnA -< (enc : concat part)
+    url :: ArrowReaderM Identity
+    url = proc t -> do
+          enc <- atR "body"
+                  (idxR "data") -< ()
+          part <- atRA "parts"
+                  (proc t -> do
+                    messages -< t
+                   ) -< ()
+
+          let res = map (decoder'. fst ) $  filter (\(d,TB1 (SText m)) -> T.isInfixOf "text/plain" m) $ catMaybes (concat part)
+          odxR "message" -< ()
+          returnA -< Just . tblist . pure . _tb  $  (Attr "message" (LeftTB1 $ fmap ArrayTB1 $ ifNull $ catMaybes (join ( fmap decoder' enc) : res) ))
+
+    ifNull i = if L.null i then  Nothing else Just i
+    decoder (SText i) = {-either (const Nothing) -}  (Just . SBinary) . B64Url.decodeLenient . BS.pack . T.unpack $ i
+    decoder' (TB1 i) = fmap TB1 $ decoder i
+    decoder' (LeftTB1 i) =  (join $ fmap decoder' i)
+    elem inf = maybe Nothing (\inp -> runIdentity $ do
+                      b <- runReaderT (dynPK   url $ ())  (Just inp)
+                      return $  liftKeys inf tname  <$> b
+                            )
+
+
 pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname (staticP url) elem
   where
     tname = "servico_venda"
@@ -455,4 +487,4 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
 
 -}
 
-plugList = [lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}queryCNPJStatefull,queryCPFStatefull,queryArtAndamento]
+plugList = [encodeMessage ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}queryCNPJStatefull,queryCPFStatefull,queryArtAndamento]
