@@ -216,7 +216,7 @@ difftable
   ::  (a ~ Index a, Ord a , Show a,Show k , Ord k) => TBData k a -> TBData k a
      -> Maybe (Index (TBData k a ))
 difftable (m, v) (n, o) = if L.null attrs then Nothing else Just  (m, (getPKM (m,v)), attrs)
-    where attrs = catMaybes $ F.toList  $ traceShowId $ Map.mergeWithKey (\_ i j -> Just $ diffAttr (unTB i) (unTB j)) (const Map.empty ) (fmap (Just. patchAttr . unTB) ) (unKV v) (unKV o)
+    where attrs = catMaybes $ F.toList  $ Map.mergeWithKey (\_ i j -> Just $ diffAttr (unTB i) (unTB j)) (const Map.empty ) (fmap (Just. patchAttr . unTB) ) (unKV v) (unKV o)
 
 diffTB1 :: (a ~ Index a ,Ord a, Show a, Ord k ,Show k) =>  TB2 k a -> TB2  k  a -> Maybe (PathFTB   (Index (TBData k a )) )
 diffTB1 = diffFTB patchTB1  difftable

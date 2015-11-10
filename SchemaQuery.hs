@@ -71,7 +71,7 @@ eventTable inf table page size = do
          Just (i,td) -> do
            -- print "Put MVar"
            ((sq,mp),reso) <- liftIO$ currentValue (facts td)
-           when (traceShow (table,sq,mp,page,size) $maybe False (\p->not $ M.member (p+1) mp) page  && sq >  L.length reso  && isJust (join $ flip M.lookup mp <$> page )) $ do
+           when (maybe False (\p->not $ M.member (p+1) mp) page  && sq >  L.length reso  && isJust (join $ flip M.lookup mp <$> page )) $ do
              (res,nextToken ,s ) <- (listEd $ schemaOps inf ) inf table (join $ flip M.lookup mp <$> page ) size
              liftIO$ putMVar i ((estLength page size res s  ,maybe mp (\v -> M.insert (fromMaybe 0 page +1 ) v  mp)  nextToken) ,reso <> (unTB1 <$> res))
            liftIO $ putMVar mvar mmap

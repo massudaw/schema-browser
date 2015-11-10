@@ -136,6 +136,7 @@ nest _ (ISum [] ) = ISum []
 nest ind (Many [Rec ix i])  = Many . pure . Nested ind $ Rec ix i
 nest ind  (Many j) = Many . pure . Nested ind $ Many j
 nest ind (ISum i) = Many . pure . Nested ind $ ISum i
+nest ind (Rec ix i) = Many . pure . Nested ind $(Rec ix i)
 
 atRA
   :: (KeyString t2,
@@ -226,8 +227,7 @@ logTableInter b l =
 indexTB1 (IProd _ l) t
   = do
     (TB1  (m,v)) <- t
-    let
-        i = justError ("indexTB1 error finding key: " <> T.unpack (T.intercalate (","::Text) l :: Text) ) $  M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin))$ _kvvalues $ unTB v
+    i <-   M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin))$ _kvvalues $ unTB v
     case runIdentity $ getCompose $i  of
          Attr _ l -> Nothing
          FKT l  _ j -> return j
@@ -236,21 +236,21 @@ indexTB1 (IProd _ l) t
 
 firstCI f = mapComp (firstTB f)
 
-findAttr l v = justError ("checkField error finding key: " <> T.unpack (T.intercalate "," l) ) $ M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB v
+findAttr l v =  M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB v
 
 replace ix i (Nested k nt) = Nested k (replace ix i nt)
 replace ix i (Many nt) = Many (fmap (replace ix i) nt )
-replace ix i (Many nt) = Many (fmap (replace ix i) nt )
-
 replace ix i (Point p)
   | ix == p = Rec ix i
   | otherwise = (Point p)
+replace ix i v = v
+-- replace ix i v= errorWithStackTrace (show (ix,i,v))
 
 checkField (Point ix) t = Nothing
 checkField (Nested (IProd _ l) nt ) t@(TB1 (m,v))
   = do
     let
-        i = findAttr l v
+    i <- findAttr l v
     case runIdentity $ getCompose $ i  of
          IT l  i -> Compose . Identity <$> (IT l  <$> checkTable nt i)
          FKT a   c  d -> Compose . Identity <$> (FKT a  c <$>  checkTable nt d)
@@ -258,7 +258,7 @@ checkField (Nested (IProd _ l) nt ) t@(TB1 (m,v))
 checkField  (IProd b l) t@(TB1 (m,v))
   = do
     let
-        i = findAttr l v
+    i <-  findAttr l v
     Compose . Identity <$> case runIdentity $ getCompose $ i  of
          Attr k v -> fmap (Attr k ) . (\i -> if b then  unRSOptional' i else Just i ) $ v
          i -> errorWithStackTrace ( show (l,i))

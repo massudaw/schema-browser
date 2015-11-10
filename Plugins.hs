@@ -257,7 +257,7 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
 
 encodeMessage = PurePlugin "Encode Email" tname (staticP url) elem
   where
-    tname = "message_payload"
+    tname = "messages"
     messages = name 0 $ proc t -> do
           enc <- liftA2 (liftA2 (,)) (atR "body"  (idxR "data")) (idxR "mimeType") -< ()
           part <- atRA "parts"
@@ -265,16 +265,10 @@ encodeMessage = PurePlugin "Encode Email" tname (staticP url) elem
           returnA -< (enc : concat part)
     url :: ArrowReaderM Identity
     url = proc t -> do
-          enc <- atR "body"
-                  (idxR "data") -< ()
-          part <- atRA "parts"
-                  (proc t -> do
-                    messages -< t
-                   ) -< ()
-
-          let res = map (decoder'. fst ) $  filter (\(d,TB1 (SText m)) -> T.isInfixOf "text/plain" m) $ catMaybes (concat part)
+          enc <- atR "payload" (messages) -< ()
+          let res = map (decoder'. fst ) $  filter (\(d,TB1 (SText m)) -> T.isInfixOf "text/plain" m) $ catMaybes (enc )
           odxR "message" -< ()
-          returnA -< Just . tblist . pure . _tb  $  (Attr "message" (LeftTB1 $ fmap ArrayTB1 $ ifNull $ catMaybes (join ( fmap decoder' enc) : res) ))
+          returnA -< Just . tblist . pure . _tb  $  (Attr "message" (LeftTB1 $ fmap ArrayTB1 $ ifNull $ catMaybes res))
 
     ifNull i = if L.null i then  Nothing else Just i
     decoder (SText i) = {-either (const Nothing) -}  (Just . SBinary) . B64Url.decodeLenient . BS.pack . T.unpack $ i

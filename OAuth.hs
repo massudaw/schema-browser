@@ -101,7 +101,7 @@ listTable inf table page maxResults= do
   let user = fst $ fromJust $ token inf
   decoded <- decode <$> simpleHttpHeader [("GData-Version","3.0")] (traceShowId $ "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok ))
   c <- traverse (convertAttrs inf (tableMap inf) table ) . maybe [] (\i -> (i :: Value) ^.. key ( T.toStrict $ rawName table ) . values) $ decoded
-  return (c, fmap (NextToken . T.fromStrict) $ fromJust decoded ^? key "nextPageToken" . _String , {-length c +-} (traceShowId $ maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
+  return (c, fmap (NextToken . T.fromStrict) $ fromJust decoded ^? key "nextPageToken" . _String , {-length c +-} (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
 
 getKeyAttr (TB1 (m, k)) = (concat (fmap keyattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
