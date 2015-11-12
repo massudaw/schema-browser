@@ -121,7 +121,7 @@ mapDynEvent f x = do
 mapEvent :: (a -> IO a1) -> Event a -> UI (Event a1)
 mapEvent f x = do
   (e,h) <- liftIO $ newEvent
-  onEvent x (\i -> liftIO . forkIO $ (f i)  >>= h)
+  onEvent x (\i -> liftIO $ (f i)  >>= h)
   return  e
 
 mapT0Event i f x = do

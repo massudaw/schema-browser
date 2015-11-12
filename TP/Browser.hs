@@ -344,7 +344,7 @@ viewerKey inf key = mdo
 
   let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
   prop <- stepper cv (diffEvent st evsel)
-  let tds = tidings prop (diffEvent st evsel)
+  let tds = tidings prop (diffEvent prop  evsel)
 
   (cru,ediff,pretdi) <- crudUITable inf plugList  (pure "Editor")  (tidings (fmap snd res2) never)[] [] (allRec' (tableMap inf) table) tds
   diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip applyTB1 j ) i) <$> facts pretdi <@> ediff

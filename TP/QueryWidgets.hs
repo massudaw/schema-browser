@@ -124,7 +124,7 @@ pluginUI inf oldItems (PurePlugin n t f action) = do
   out <- UI.div # set children [headerP,details]
   ini <- currentValue (facts oldItems)
   kk <- stepper ini (diffEvent (facts oldItems) (rumors oldItems))
-  pgOut <- mapTEvent (\v -> catchPluginException inf n t (getPK $ justError "ewfew"  v) . return . action inf $ v)  (tidings kk $diffEvent kk (rumors oldItems))
+  pgOut <- mapTEvent (\v -> catchPluginException inf n t (getPK $ justError "ewfew"  v) . return . action inf $ trace "iter plugin" v)  (tidings kk $diffEvent kk (rumors oldItems))
   return (out, (snd f ,   pgOut ))
 
 
