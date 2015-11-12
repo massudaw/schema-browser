@@ -40,8 +40,8 @@ import Data.Map (Map)
 import Data.Set (Set)
 import Control.Concurrent
 
-import Data.Text.Lazy(Text)
-import qualified Data.Text.Lazy as T
+import Data.Text (Text)
+import qualified Data.Text as T
 
 import qualified Reactive.Threepenny as R
 
@@ -88,11 +88,14 @@ fromShowable2 i v = fromShowable i v
 
 testSerial  =((=="nextval"). fst . T.break(=='('))
 
-
+readFModifier :: Text -> FieldModifier
+readFModifier "read" = FRead
+readFModifier "edit" = FPatch
+readFModifier "write" = FWrite
 
 keyTables :: MVar (Map Text InformationSchema )-> MVar (Map (KVMetadata Key) DBVar ) -> Connection -> Connection -> (Text ,Text)-> Maybe (Text,IORef OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
 keyTables schemaVar mvar conn userconn (schema ,user) oauth ops = maybe (do
-       uniqueMap <- join $ mapM (\(t,c,op,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,translation from metadata.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
+       uniqueMap <- join $ mapM (\(t,c,op,mod,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr (V.toList $ fmap readFModifier mod) op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,field_modifiers,translation from metadata.tables natural join metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
        res2 <- fmap ( (\i@(t,c,j,k,l,m,n,d,z,b)-> (t,) $ (\ty -> (justError "no unique" $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty . BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,l,maybe False testSerial m,n,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_range,col_def,is_sum,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
@@ -167,7 +170,7 @@ addRecInit m = fmap recOverFKS m
                                     | otherwise = p <> [F.toList (pathRelRel pa)]
                               ix <- fmap (\pa-> openPath t ( cons pa ) pa) fsk
                               return (concat (L.filter (not.L.null) ix))
-                        where Just tb = M.lookup nt m
+                        where tb = justError ("no table" <> show (nt,m)) $ M.lookup nt m
                               fsk = F.toList $ rawFKS tb
 
 
@@ -220,7 +223,7 @@ lookFresh inf n tname i = justError "no freshKey" $ M.lookup (n,tname,i) (plugin
 
 newKey name ty p = do
   un <- newUnique
-  return $ Key name Nothing    p Nothing un ty
+  return $ Key name Nothing    [] p Nothing un ty
 
 
 catchPluginException :: InformationSchema -> Text -> Text -> [(Key, FTB Showable)] -> IO (Maybe a) -> IO (Maybe a)

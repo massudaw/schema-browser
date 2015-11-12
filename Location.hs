@@ -11,7 +11,7 @@ import Data.Monoid
 
 import Data.ExtendedReal
 import Data.Interval
-import qualified Data.Text.Lazy as TL
+import qualified Data.Text as TL
 
 import qualified Data.List as L
 
@@ -26,7 +26,7 @@ import Control.Monad.Reader
 import Step
 
 import qualified Data.Text as T
-import Data.Text.Lazy
+import Data.Text
 import Data.Aeson
 import Control.Arrow
 import Control.Monad.Trans.Maybe

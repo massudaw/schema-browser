@@ -78,6 +78,15 @@ cutEvent ev b = do
  nbev <- stepper v nev
  return  $tidings nbev nev
 
+updateTEvent :: MonadIO m =>  (a -> Maybe a) -> Tidings a -> Tidings a -> m (Tidings a)
+updateTEvent validate ev b = do
+ v <- currentValue (facts b)
+ evi <- currentValue (facts ev)
+ let nev = unionWith const (filterJust (validate <$> rumors ev)) (rumors b)
+ nbev <- stepper (maybe evi id (validate v)) nev
+ return  $tidings nbev nev
+
+
 updateEvent :: MonadIO m =>  (a -> Maybe a) -> Event a -> Tidings a -> m (Tidings a)
 updateEvent validate ev b = do
  v <- currentValue (facts b)
@@ -86,26 +95,17 @@ updateEvent validate ev b = do
  return  $tidings nbev nev
 
 
+diffEvent b ev = filterJust $ (\i j -> if i == j then Nothing else Just j ) <$> b <@> ev
+notdiffEvent b ev = filterJust $ (\i j -> if i /= j then Nothing else Just j ) <$> b <@> ev
 
-addEvent :: MonadIO m => Event a -> Tidings a -> m (Tidings a)
+addEvent :: (Eq a,MonadIO m) => Event a -> Tidings a -> m (Tidings a)
 addEvent ev b = do
  v <- currentValue (facts b)
  let nev = unionWith const (rumors b) ev
- nbev <- stepper v nev
- return  $tidings nbev nev
+ nbev <- stepper v (diffEvent (facts b) nev)
+ return  $tidings nbev (diffEvent nbev nev)
 
 mapUITEvent body f  = mapTEvent (\i -> evalUI body $ f i )
-
-{-
-mapUITEvent body f x = do
-  (e,h) <- liftIO $ newEvent
-  onEvent (rumors x) (\i -> liftIO . forkIO $ (evalUI body $  f i)  >>= h)
-  i <- currentValue (facts x)
-  be <- liftIO $ evalUI body $ f i
-  t <- stepper be e
-  return $ tidings t e
-
--}
 
 mapDynEvent f x = do
   t <- mapUITEvent (getElement x) f (triding x)
@@ -228,8 +228,9 @@ checkedWidget init = do
   let e = unionWith const (rumors init) (UI.checkedChange i)
   v <- currentValue (facts init)
   b <- stepper v e
+  bh <- stepper v (diffEvent  b e)
   dv <- UI.span # set children [i] # set UI.style [("margin","2px")]
-  return $ TrivialWidget  (tidings b e) dv
+  return $ TrivialWidget  (tidings bh (diffEvent bh e)) dv
 
 checkedWidgetM :: Tidings (Maybe Bool) -> UI (TrivialWidget (Maybe Bool))
 checkedWidgetM init = do

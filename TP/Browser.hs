@@ -49,10 +49,9 @@ import Graphics.UI.Threepenny.Core hiding (get,delete)
 import Data.Monoid hiding (Product(..))
 
 import qualified Data.Foldable as F
-import qualified Data.Text.Lazy as T
-import Data.ByteString.Lazy(toStrict)
-import Data.Text.Lazy.Encoding
-import Data.Text.Lazy (Text)
+import qualified Data.Text as T
+import Data.Text.Encoding (encodeUtf8)
+import Data.Text (Text)
 import qualified Data.Set as S
 
 
@@ -189,7 +188,7 @@ listDBS dname = do
   connMeta <- connectPostgreSQL (connRoot dname)
   dbs :: [Only Text]<- query_  connMeta "SELECT datname FROM pg_database  WHERE datistemplate = false"
   map <- (\db -> do
-        connDb <- connectPostgreSQL ((fromString $ "host=" <> host dname <> " port=" <> port dname <>" user=" <> user dname <> " dbname=" ) <> toStrict (encodeUtf8 db) <> (fromString $ " password=" <> pass dname )) --  <> " sslmode= require") )
+        connDb <- connectPostgreSQL ((fromString $ "host=" <> host dname <> " port=" <> port dname <>" user=" <> user dname <> " dbname=" ) <> (encodeUtf8 db) <> (fromString $ " password=" <> pass dname )) --  <> " sslmode= require") )
         schemas :: [Only Text] <- query_  connDb "SELECT name from metadata.schema "
         return (db,(connDb,filter (not . (`elem` ["information_schema","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas))) (T.pack $ dbn dname)
   return map

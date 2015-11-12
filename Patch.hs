@@ -291,7 +291,6 @@ patchFTB p (DelayedTB1 j ) = PDelayed (patchFTB p <$> j)
 patchFTB p (SerialTB1 j ) = PSerial (patchFTB p <$> j)
 patchFTB p (IntervalTB1 j ) =  PatchSet [PInter True (first (patchFTB p . unFinite ) $  Interval.lowerBound' j) , PInter False (first (patchFTB p . unFinite ) $ Interval.upperBound' j)]
 patchFTB p (TB1 j) = PAtom $ p j
--- patchFTB p i = errorWithStackTrace (show i)
 
 diffOpt :: (Ord a,Show a) => (a -> Index a ) -> (a -> a -> Maybe (Index a)) ->  Maybe (FTB a) -> Maybe (FTB a) -> Maybe (Maybe (PathFTB    (Index a)))
 diffOpt p d i j

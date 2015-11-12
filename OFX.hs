@@ -18,7 +18,7 @@ import RuntimeTypes
 -}
 import Data.Time
 import Types
-import qualified Data.Text.Lazy as T
+import qualified Data.Text as T
 
 
 opt f v = LeftTB1 $  f <$> v

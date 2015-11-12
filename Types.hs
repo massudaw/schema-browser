@@ -37,7 +37,7 @@ import Data.Foldable (Foldable)
 import qualified Data.Foldable as F
 import qualified Data.Interval as Interval
 import Data.Monoid hiding (Product)
-import qualified Data.Text.Lazy as T
+import qualified Data.Text as T
 import qualified Data.ByteString as BS
 import GHC.Stack
 import Data.Traversable(Traversable,traverse)
@@ -53,7 +53,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Set as  S
 import Control.Monad.State
-import Data.Text.Lazy(Text)
+import Data.Text (Text)
 
 import Debug.Trace
 import Data.Unique
@@ -208,6 +208,7 @@ data FKey a
     = Key
     { keyValue :: ! Text
     , keyTranslation :: ! (Maybe Text)
+    , keyModifier :: [FieldModifier]
     , keyPosition :: Int
     , keyStatic :: Maybe (FTB Showable)
     , keyFastUnique :: ! Unique
@@ -470,6 +471,12 @@ data SqlOperationK k
 fkTargetTable (FKJoinTable t r tn) = tn
 fkTargetTable (FKInlineTable tn) = tn
 fkTargetTable (RecJoin t tn) = fkTargetTable tn
+
+data FieldModifier
+   = FRead
+   | FWrite
+   | FPatch
+   deriving(Eq,Ord,Show)
 
 data TableType
    = ReadOnly
@@ -933,18 +940,18 @@ keyOptional (k,v) = (kOptional k ,LeftTB1 $ Just v)
 
 unKeyOptional (k  ,(LeftTB1 v) ) = fmap (unKOptional k,) v
 
-kOptional (Key a  c m n d e) = Key a  c m  n d (KOptional e)
-kDelayed (Key a  c m n d e) = Key a  c m  n d (KDelayed e)
+kOptional = Le.over keyTypes KOptional
+kDelayed = Le.over keyTypes KDelayed
 
-unKOptional ((Key a  c m n d (KOptional e))) = (Key a  c m n d e )
-unKOptional ((Key a  c m n d (e@(Primitive _)))) = (Key a  c m n d e )
+unKOptional (Key a  v c m n d (KOptional e)) = (Key a  v c m n d e )
+unKOptional (Key a  v c m n d (e@(Primitive _))) = (Key a  v c m n d e )
 unKOptional i = errorWithStackTrace ("unKOptional" <> show i)
 
-unKDelayed ((Key a  c m n d (KDelayed e))) = (Key a  c m n d e )
+unKDelayed (Key v a  c m n d (KDelayed e)) = (Key v a  c m n d e )
 unKDelayed i = errorWithStackTrace ("unKDelayed" <> show i)
 
-unKArray (Key a  c d m n (KArray e)) = Key a  c d  m n e
-unKArray (Key a  c d m n e) = Key a  c d  m n e
+unKArray (Key a v c d m n (KArray e)) = Key a v  c d  m n e
+unKArray (Key a v c d m n e) = Key a  v c d  m n e
 
 tableKeys (TB1  (_,k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
 tableKeys (LeftTB1 (Just i)) = tableKeys i

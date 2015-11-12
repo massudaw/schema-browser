@@ -47,9 +47,9 @@ import Prelude hiding (takeWhile,head)
 
 
 import qualified Data.Foldable as F
-import qualified Data.Text.Lazy as T
+import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
-import Data.Text.Lazy (Text)
+import Data.Text (Text)
 import qualified Data.Set as S
 import Database.PostgreSQL.Simple.Time
 import qualified Database.PostgreSQL.Simple.FromField as F
@@ -360,10 +360,10 @@ tryquoted i = doublequoted i <|> i
 -- we have overlap between maybe and list so we allow only nonempty lists
 parseLabeledTable :: TB2 Key () -> Parser (TB2 Key Showable)
 parseLabeledTable (ArrayTB1 [t]) =
-  ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> parseArray (parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey makeOpt t))  >>  return (fail "")  ) )
+  ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> parseArray (parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey kOptional t))  >>  return (fail "")  ) )
 parseLabeledTable (DelayedTB1 (Just tb) ) =  string "t" >>  return (DelayedTB1  Nothing) -- <$> parseLabeledTable tb
 parseLabeledTable (LeftTB1 (Just i )) =
-  LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapTable (LeftTB1 . Just) <$>  mapKey makeOpt i) >> return Nothing) <|> return Nothing )
+  LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapTable (LeftTB1 . Just) <$>  mapKey kOptional i) >> return Nothing) <|> return Nothing )
 parseLabeledTable  tb1 = traverse parseRecord  $ tb1
 
 parseRecord  (me,m) = (char '('  *> (do
@@ -446,7 +446,7 @@ parsePrim i =  do
         PDouble -> SDouble <$> pg_double
         PText -> let
             dec =  startQuotedText <|> const "" <$> string"\"\""
-              in    (fmap SText $ join $ either (fail. show)  (return . T.fromStrict)  . TE.decodeUtf8' <$> dec) <|> (SText . T.fromStrict  . TE.decodeLatin1 <$> dec )
+              in    (fmap SText $ join $ either (fail. show)  (return)  . TE.decodeUtf8' <$> dec) <|> (SText   . TE.decodeLatin1 <$> dec )
         PCnpj -> parsePrim PText
         PCpf -> parsePrim PText
         PInterval ->

@@ -19,6 +19,7 @@ import Data.Monoid
 import Data.Biapplicative
 import Patch
 import Control.Monad.Writer hiding (pass)
+import System.Time.Extra
 import GHC.Stack
 import Data.String
 import Control.Concurrent
@@ -29,9 +30,9 @@ import Query
 import Data.Aeson.Lens
 import Schema
 import Postgresql
-import qualified Data.Text.Lazy as T
+import qualified Data.Text as T
 import qualified Data.Text as TS
-import Data.Text.Lazy (Text)
+import Data.Text (Text)
 import Text.XML.Light.Types
 import Text.XML.Light.Proc
 import Data.Aeson
@@ -46,8 +47,6 @@ import Data.IORef
 import RuntimeTypes
 import Control.Monad
 import qualified Data.Map as M
-import qualified Data.ByteString.Lazy.Char8 as BL
-import qualified Data.ByteString.Char8 as BS
 import Debug.Trace
 import SchemaQuery
 import qualified Graphics.UI.Threepenny as UI
@@ -99,9 +98,12 @@ oauthpoller = do
 listTable inf table page maxResults= do
   tok <- liftIO$ readIORef (snd $fromJust $ token inf)
   let user = fst $ fromJust $ token inf
-  decoded <- decode <$> simpleHttpHeader [("GData-Version","3.0")] (traceShowId $ "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok ))
-  c <- traverse (convertAttrs inf (tableMap inf) table ) . maybe [] (\i -> (i :: Value) ^.. key ( T.toStrict $ rawName table ) . values) $ decoded
-  return (c, fmap (NextToken . T.fromStrict) $ fromJust decoded ^? key "nextPageToken" . _String , {-length c +-} (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
+  decoded <- liftIO $ do
+      (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] (traceShowId $ "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok ))
+      print ("list",table,t)
+      return  d
+  c <-  traverse (convertAttrs inf (tableMap inf) table ) . maybe [] (\i -> (i :: Value) ^.. key (  rawName table ) . values) $ decoded
+  return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , {-length c +-} (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
 
 getKeyAttr (TB1 (m, k)) = (concat (fmap keyattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
@@ -110,8 +112,11 @@ getTable inf  tb pk
   | otherwise = do
     tok <- liftIO $readIORef (snd $ fromJust $ token inf)
     let user = fst $ fromJust $ token inf
-    c <- traverse (convertAttrs inf (tableMap inf) tb ) . fmap (\i -> (i :: Value)  ) . decode =<< (liftIO $ simpleHttpHeader [("GData-Version","3.0")] (traceShowId $ "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName tb ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK pk ) <> "?access_token=" ++ ( accessToken tok)))
-    return $  c
+    decoded <- liftIO $ do
+        (t,v) <- duration (simpleHttpHeader [("GData-Version","3.0")] (traceShowId $ "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName tb ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK pk ) <> "?access_token=" ++ ( accessToken tok)))
+        print ("get",tb,getPK pk,t)
+        return $ decode v
+    traverse (convertAttrs inf (tableMap inf) tb ) . fmap (\i -> (i :: Value)  ) $  decoded
 
 getDiffTable inf table  j = fmap (join . fmap (difftable j. unTB1) ) $ getTable  inf table $ TB1 j
 
@@ -148,27 +153,29 @@ convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (trav
                             return $ FKT ref fk (joinRel fk (fmap unTB ref) tbs) ))
 
                         -- return $ FKT [Compose .Identity . Types.Attr  k $ v ] fk (ArrayTB1 [] )) )
-               funL = funO  (exchange trefname $ keyType k) $   (iv  ^? ( key (T.toStrict $ keyValue  k ))  )
-               funR = funO  (keyType k) $   (iv  ^? ( key (T.toStrict $ keyValue  k ))  )
+               funL = funO  (exchange trefname $ keyType k) $   (iv  ^? ( key (keyValue  k ))  )
+               funR = funO  (keyType k) $   (iv  ^? ( key (keyValue  k ))  )
                mergeFun = do
                           (l,r) <- liftA2 (,) funL funR
                           return $ case (l,r) of
                             (Left (Just i),Right j) -> Left (Just i)
                             (Left i ,j ) -> j
               in  join . fmap  patt $  mergeFun
-      | otherwise =  fmap (either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) ) . funO  ( keyType k)  $ (iv ^? ( key (T.toStrict $ keyValue k))  )
+      | otherwise =  fmap (either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) ) . funO  ( keyType k)  $ (iv ^? ( key ( keyValue k))  )
 
     fun :: KType Text -> Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
     fun (Primitive i) v = return $ Right $ fmap TB1 $ join $
         case textToPrim i of
-          PText -> readPrim (textToPrim i) . TS.unpack <$> (v ^? _String)
+          PText -> readPrim (textToPrim i) . T.unpack <$> (v ^? _String)
           PInt -> Just . SNumeric . round <$> (v ^? _Number)
           PDouble -> Just . SDouble . realToFrac  <$> (v ^? _Number)
-          PBinary -> readPrim (textToPrim i) . TS.unpack  <$> (v ^? _String)
+          PBinary -> readPrim (textToPrim i) . T.unpack  <$> (v ^? _String)
     fun (KArray i) v = (\l -> if null l then return (typ i) else fmap (bimap  nullArr  nullArr) .   biTrav (fun i) $ l ) $ (v ^.. values )
         where nullArr lm = if null l then Nothing else Just (ArrayTB1 l)
                 where l = catMaybes lm
     fun (InlineTable i  m ) v = Left . tbNull <$>  convertAttrs infsch inf   (justError "no look" $  M.lookup m inf ) v
+        where  tbNull tb = if null (getAttr' tb) then Nothing else Just  tb
+    fun (KEither i  m ) v = Left . tbNull <$>  convertAttrs infsch inf   (justError "no look" $  M.lookup m inf ) v
         where  tbNull tb = if null (getAttr' tb) then Nothing else Just  tb
     fun i v = errorWithStackTrace (show (i,v))
 
@@ -179,6 +186,7 @@ convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (trav
     typ (KArray i ) = typ i
     typ (Primitive _ ) = Right Nothing
     typ (InlineTable _ _ ) = Left Nothing
+    typ (KEither _ _ ) = Left Nothing
 
 
 instance Biapplicative Either where

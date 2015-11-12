@@ -26,8 +26,8 @@ import Prelude hiding (takeWhile,head)
 
 
 import qualified Data.Foldable as F
-import qualified Data.Text.Lazy as T
-import Data.Text.Lazy (Text)
+import qualified Data.Text as T
+import Data.Text (Text)
 import qualified Data.Set as S
 import qualified Database.PostgreSQL.Simple.ToField as TF
 import qualified Database.PostgreSQL.Simple.FromRow as FR

@@ -17,6 +17,7 @@
 
 module Query where
 
+import qualified Control.Lens as Le
 import Data.Functor.Apply
 import Data.Bifunctor
 import Data.Unique
@@ -30,7 +31,7 @@ import Data.Maybe
 import qualified Data.Interval as Interval
 import Data.Monoid hiding (Product)
 
-import qualified Data.Text.Lazy as T
+import qualified Data.Text as T
 import qualified Data.ExtendedReal as ER
 
 import Utils
@@ -49,7 +50,7 @@ import Data.Set (Set)
 import Data.Map (Map)
 import Control.Monad.State
 import Control.Monad.Writer
-import Data.Text.Lazy(Text)
+import Data.Text (Text)
 import GHC.Stack
 
 import Types
@@ -578,6 +579,8 @@ joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectio
 
 loadOnlyDescriptions (TB1 (kv ,m) ) = _kvpk kv
 
+dumbKey n = Key n  Nothing [] 0 Nothing (unsafePerformIO newUnique) (Primitive "integer" )
+
 recursePath
   :: Bool->  RecState Key
      -> [(Set (Rel Key), Labeled Text (TB (Labeled Text) Key ()))]
@@ -590,7 +593,7 @@ recursePath
 recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
     | isArrayRel ifk  {-&& not (isArrayRel e )-}=   do
           tas <- tname nextT
-          let knas = Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique) (Primitive "integer" )
+          let knas = dumbKey (rawName nextT)
           kas <- kname tas  knas
           let
           (_,ksn) <-  labelTable  nextT
@@ -604,7 +607,7 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
           lab <- if isTableRec' tb
             then do
               tas <- tname nextT
-              let knas = (Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique)  (Primitive "integer" ))
+              let knas = dumbKey (rawName nextT)
               kas <- kname tas  knas
               return $ Labeled (label kas)
             else return  Unlabeled
@@ -623,14 +626,14 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) 
           (t,ksn) <- labelTable nextT
           tb <-fun ksn
           tas <- tname nextT
-          let knas = (Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique)  (Primitive "integer" ))
+          let knas = dumbKey(rawName nextT)
           kas <- kname tas  knas
           return $ Compose $ Labeled (label $ kas) (FKT [] ks  (mapOpt $ ArrayTB1 [ TB1 tb]  ))
     | isArrayRel ifk && not (isArrayRel e) =   do
           (t,ksn) <- labelTable nextT
           tb <-fun ksn
           tas <- tname nextT
-          let knas = (Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique)  (Primitive "integer" ))
+          let knas = dumbKey (rawName nextT)
           kas <- kname tas  knas
           return $ Compose $ Labeled (label $ kas) (FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> (filter (\i -> not $ S.member i (S.unions $ fmap fst vacc)) $  filterReflexive ks) ))  ks  (mapOpt $ mapArray $ TB1 tb  ))
     | otherwise = do
@@ -639,7 +642,7 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) 
           lab <- if not  . L.null $ isRec
             then do
               tas <- tname nextT
-              let knas = (Key (rawName nextT) Nothing 0 Nothing (unsafePerformIO newUnique)  (Primitive "integer" ))
+              let knas = dumbKey (rawName nextT)
               kas <- kname tas  knas
               return $ Labeled (label kas)
             else return  Unlabeled
@@ -655,7 +658,7 @@ recursePath isLeft isRec vacc ksbn invSchema jo@(Path ifk (RecJoin l f) e)
     = recursePath isLeft (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec  ) vacc ksbn invSchema (Path ifk f e)
 
 recurseTB :: Map Text Table -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TB3Data (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3Data (Labeled Text) Key ())
-recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else m {_kvrecrels = []} ,) <$>
+recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else m  ,) <$>
     (\kv -> case kv of
       (Compose (Labeled l kv )) -> do
          i <- fun kv
@@ -800,7 +803,7 @@ forceDAttr v = go v
       i -> i
 
 
-alterKeyType f (Key a b c d m e) = (Key a b c d m (f e))
+alterKeyType f  = Le.over keyTypes f
 
 recurseDel False a@(Attr k v) = a
 recurseDel True a@(Attr k v) = Attr (alterKeyType makeDelayed k ) v
@@ -887,7 +890,6 @@ instance P.Poset (FKey (KType Text))where
                       LT -> P.LT
                       GT -> P.GT )
 
-makeOpt (Key a  c d m n ty) = (Key a  c d m n (KOptional ty))
 
 
 inlineName (KOptional i) = inlineName i
@@ -936,7 +938,8 @@ postgresPrim =
   ,("pdf",PMime "application/pdf")
   ,("ofx",PMime "application/x-ofx")
   ,("jpg",PMime "image/jpg")
-  ,("email",PMime "plain/text")
+  ,("email",PMime "text/plain")
+  ,("html",PMime "text/html")
   ,("dynamic",PDynamic)
   ,("double precision",PDouble)
   ,("numeric",PDouble)

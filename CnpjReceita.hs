@@ -23,7 +23,7 @@ import qualified Data.ByteString.Lazy.Char8 as BSLC
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Text as T
 import qualified Data.Traversable as Tra
-import qualified Data.Text.Lazy as TL
+import qualified Data.Text as TL
 
 import qualified Data.Vector as V
 import Safe

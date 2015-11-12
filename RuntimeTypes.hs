@@ -4,7 +4,7 @@ module RuntimeTypes where
 import Control.Concurrent
 import Types
 import Control.Arrow
-import Data.Text.Lazy
+import Data.Text
 import Control.Monad.IO.Class
 import Patch
 import Control.Monad.Writer
@@ -90,23 +90,10 @@ data SchemaEditor
   }
 
 
-{-
-data  PollingPlugins fi fo
-  = BoundedPollingPlugins
-  { _pollingName :: Text
-  , _pollingTime :: Int
-  , _pollingBounds :: (Text,(Access Text,Access Text))
-  , _pollingBoundedAction :: InformationSchema ->  fi -> fo
-  }
--}
-
-
 data WrappedCall =  forall m . MonadIO m =>  WrappedCall
       { runCall ::  forall a . m a -> IO a
       , stepsCall :: [InformationSchema -> MVar (Maybe (TB1 Showable))  -> (Maybe (TB1 Showable) -> m ()) -> m () ]
       }
-
-
 
 
 data Access a

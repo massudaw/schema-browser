@@ -15,6 +15,7 @@ import Query
 import Types
 import qualified Data.Binary as B
 import Step
+import Data.Tuple
 import Location
 import PrefeituraSNFSE
 import Siapi3
@@ -48,10 +49,10 @@ import RuntimeTypes
 import Data.Monoid hiding (Product(..))
 
 import qualified Data.Foldable as F
-import qualified Data.Text.Lazy as T
+import qualified Data.Text as T
 import Data.ByteString.Lazy(toStrict)
 import Data.Text.Lazy.Encoding
-import Data.Text.Lazy (Text)
+import Data.Text (Text)
 import qualified Data.Set as S
 
 
@@ -254,7 +255,7 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
     elem inf = maybe (return Nothing) (\inp -> do
                   b <- runReaderT (dynPK   url $ ())  (Just inp)
                   return $ liftKeys inf tname  <$> b )
-
+{-
 encodeMessage = PurePlugin "Encode Email" tname (staticP url) elem
   where
     tname = "messages"
@@ -263,19 +264,64 @@ encodeMessage = PurePlugin "Encode Email" tname (staticP url) elem
           part <- atRA "parts"
                     (call 0 messages ) -< ()
           returnA -< (enc : concat part)
+    --mixed = (fmap (const () ) $ liftA2 (,) (odxR "plain")  (odxR "html") )
+    mixed = name 1 (fmap (const () ) $ liftA3 (,,) (odxR "plain")  (odxR "html") (call 1 mixed))
     url :: ArrowReaderM Identity
     url = proc t -> do
-          enc <- atR "payload" (messages) -< ()
-          let res = map (decoder'. fst ) $  filter (\(d,TB1 (SText m)) -> T.isInfixOf "text/plain" m) $ catMaybes (enc )
-          odxR "message" -< ()
-          returnA -< Just . tblist . pure . _tb  $  (Attr "message" (LeftTB1 $ fmap ArrayTB1 $ ifNull $ catMaybes res))
+          res <- catMaybes .map (join . fmap (traverse decoder' . swap))<$> atR "payload" messages -< ()
+          atR "message" mixed -< ()
+          let
+            getMime mime =   fmap snd . filter (\(TB1 (SText m),d) -> T.isInfixOf mime m)
+          let mimeTable (TB1 (SText mime),v)
+                | T.isInfixOf "text/plain" mime || T.isInfixOf "plain/text" mime =  Just $ tb "plain"
+                | T.isInfixOf "text/html" mime =  Just $ tb "html"
+                | otherwise =Nothing
+                where tb n  =  tblist . pure . _tb . Attr n $ (LeftTB1 . Just $ v)
+
+          returnA -< Just . tblist . pure . _tb . IT (attrT  ("message",TB1 ()) ) . LeftTB1 $ L.head .traceShowId .catMaybes . fmap mimeTable <$>  (ifNull res)
 
     ifNull i = if L.null i then  Nothing else Just i
-    decoder (SText i) = {-either (const Nothing) -}  (Just . SBinary) . B64Url.decodeLenient . BS.pack . T.unpack $ i
+    decoder (SText i) =  (Just . SBinary) . B64Url.decodeLenient . BS.pack . T.unpack $ i
     decoder' (TB1 i) = fmap TB1 $ decoder i
     decoder' (LeftTB1 i) =  (join $ fmap decoder' i)
     elem inf = maybe Nothing (\inp -> runIdentity $ do
                       b <- runReaderT (dynPK   url $ ())  (Just inp)
+                      return $  liftKeys inf tname  <$> b
+                            )
+-}
+encodeMessage = PurePlugin "Encode Email" tname (staticP url) elem
+  where
+    tname = "messages"
+    messages = name 0 $ proc t -> do
+          enc <- liftA2 ((,)) (idxR "mimeType") (atR "body"  (join . traverse decoder' <$> (idxR "data")))  -< ()
+          part <- atRA "parts"
+                    (call 0 messages) -< ()
+          let mimeTable (TB1 (SText mime),v) next
+                | T.isInfixOf "text/plain" mime || T.isInfixOf "plain/text" mime =  Just $ tb "plain"
+                | T.isInfixOf "text/html" mime =  Just $ tb "html"
+                | T.isInfixOf "application/pgp-signature" mime =  Just $ tb "plain"
+                | T.isInfixOf "multipart/alternative" mime =  last <$> (ifNull . catMaybes $ next)
+                | T.isInfixOf "multipart" mime =   Just  $ tbmix (catMaybes next)
+                | otherwise =Nothing
+                where tb n  =  tblist . pure . _tb . Attr n $ (LeftTB1 $  v)
+                      tbmix l = tblist . pure . _tb . IT (attrT  ("mixed",TB1 ()) ) . LeftTB1 $ ArrayTB1 <$>  (ifNull l )
+          returnA -<  (maybe Nothing (flip mimeTable part )  $ (\(i,j) -> fmap (,j) i) enc)
+    mixed =  name 1 (proc t ->  do
+                liftA3 (,,) (odxR "plain") (atR "mixed" (call 1 mixed)) (odxR "html") -< ()
+                returnA -< ()
+                )
+    url :: ArrowReaderM Identity
+    url = proc t -> do
+          res <-  atR "payload" messages -< ()
+          atR "message" mixed -< ()
+          returnA -< Just . tblist . pure . _tb . IT (attrT  ("message",TB1 ()) ) . LeftTB1 $  res
+
+    ifNull i = if L.null i then  Nothing else Just i
+    decoder (SText i) =  (Just . SBinary) . B64Url.decodeLenient . BS.pack . T.unpack $ i
+    decoder' (TB1 i) = fmap TB1 $ decoder i
+    decoder' (LeftTB1 i) =  (join $ fmap decoder' i)
+    elem inf = maybe Nothing (\inp -> runIdentity $ do
+                      b <- runReaderT (dynPK   url $ ())  ( Just inp)
                       return $  liftKeys inf tname  <$> b
                             )
 

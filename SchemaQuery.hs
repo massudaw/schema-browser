@@ -38,7 +38,7 @@ import Database.PostgreSQL.Simple
 import Schema
 import qualified Reactive.Threepenny as R
 import System.Time.Extra
-import qualified Data.Text.Lazy as T
+import qualified Data.Text as T
 
 --
 --  MultiTransaction Postgresql insertOperation

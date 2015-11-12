@@ -10,8 +10,8 @@ import qualified Data.Set as S
 import Data.Maybe
 import Data.Foldable (toList)
 import Control.Applicative
-import qualified Data.Text.Lazy as T
-import Data.Text.Lazy (Text)
+import qualified Data.Text as T
+import Data.Text (Text)
 -- import Warshal
 import Data.Functor.Identity
 import Data.String
