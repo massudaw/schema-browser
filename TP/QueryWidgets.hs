@@ -9,6 +9,7 @@ import Control.Monad
 import SchemaQuery
 import qualified Data.Binary as B
 import Control.Concurrent
+import Data.Unique
 import qualified Data.Poset as P
 import Reactive.Threepenny
 import Data.Either
@@ -233,7 +234,6 @@ tbRecCase hasLab inf pgs constr a@(FKT rel l tb) wl plugItens preoldItems' = do
       check <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return preoldItems) (fmap snd plugItens )
       TrivialWidget btr bel <- checkedWidget  (isJust <$> check )
       (ev,h) <- liftIO $ newEvent
-      inipre <- currentValue  (facts preoldItems)
       let fun True = do
               initpre <- currentValue (facts preoldItems)
               initpreOldB <- stepper initpre (rumors preoldItems)
@@ -246,6 +246,7 @@ tbRecCase hasLab inf pgs constr a@(FKT rel l tb) wl plugItens preoldItems' = do
       sub <- UI.div # sink items  (pure .fun <$> facts btr ) # set UI.class_ "row"
       bel2<- UI.div # set children [bel] # set UI.class_ "row"
       out <- UI.div # set children [bel2,sub]# set UI.class_ "row"
+      inipre <- currentValue  (facts preoldItems)
       binipre <- stepper  inipre (unionWith const ev (rumors preoldItems))
       return (TrivialWidget  (tidings binipre (unionWith const (rumors preoldItems) ev)) out)
 
@@ -254,7 +255,7 @@ tbRecCase hasLab  inf pgs constr a@(IT l tb) wl plugItens preoldItems' = do
       let preoldItems = emptyIT tb  <$> preoldItems'
           emptyIT (TB1 _ ) = maybe Nothing (Just. id)
           emptyIT (LeftTB1 _) = Just . maybe (IT l (LeftTB1 Nothing)) id
-      check <- foldr (\i j ->  updateTEvent  (fmap unLeftItens  ) i =<< j) (return preoldItems) (fmap snd plugItens )
+      check <- foldr (\i j ->  updateTEvent  (fmap Just ) i =<< j) (return $ join . fmap unLeftItens  <$> preoldItems) (fmap (fmap (join . fmap unLeftItens) . snd) plugItens )
       TrivialWidget btr bel <- checkedWidget  (isJust <$> check)
       (ev,h) <- liftIO $ newEvent
       inipre <- currentValue  (facts preoldItems)
@@ -315,6 +316,10 @@ eiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItems = do
       repl (Rec  ix v ) = (replace ix v v)
       repl (Many[(Rec  ix v )]) = (replace ix v v)
       repl v = v
+  oldItemsPlug <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return oldItems ) (fmap snd plugmods)
+  let
+      initialSum = join . fmap (\(TB1 (n,  j) ) ->    fmap keyattr $ safeHead $ catMaybes  $ (fmap (Compose . Identity. fmap (const ()) ) . unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)))) <$> oldItemsPlug
+  chk  <- buttonDivSet (F.toList (_kvvalues $ unTB k))  (join . fmap (\i -> M.lookup (S.fromList i) (_kvvalues (unTB k))) <$> initialSum ) (\i -> UI.button # set text (L.intercalate "," $ fmap (show._relOrigin) $ keyattr $ i) # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default")
   fks <- foldl' (\jm (l,m)  -> do
             w <- jm
             let el =  L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> ( _kvrecrels meta))
@@ -328,8 +333,6 @@ eiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItems = do
   let
       tableb :: Tidings (Maybe (TB1 Showable))
       tableb  = fmap (TB1 . (tableMeta table,) . Compose . Identity . KV . mapFromTBList . fmap _tb) .   Tra.sequenceA <$> Tra.sequenceA (triding .snd <$> fks)
-      initialSum = join . fmap (\(TB1 (n,  j) ) ->    fmap keyattr $ safeHead $ catMaybes  $ (fmap (Compose . Identity. fmap (const ()) ) . unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)))) <$> tableb
-  chk  <- buttonDivSet (F.toList (_kvvalues $ unTB k))  (join . fmap (\i -> M.lookup (S.fromList i) (_kvvalues (unTB k))) <$> initialSum ) (\i -> UI.button # set text (L.intercalate "," $ fmap (show._relOrigin) $ keyattr $ i) # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default")
   sequence $ (\(ix,el) -> element  el # sink0 UI.style (noneShow <$> ((==keyattri ix) .keyattr <$> facts (triding chk) ))) <$> fks
   let
       resei = liftA2 (\c -> fmap (\t@(TB1 (m, k)) -> TB1 . (m,) . Compose $ Identity $ KV (M.mapWithKey  (\k v -> if k == S.fromList (keyattr c) then maybe (addDefault (fmap (const ()) v)) (const v) (unOptionalAttr $ unTB  v) else addDefault (fmap (const ()) v)) (_kvvalues $ unTB k)))) (triding chk) tableb
@@ -347,7 +350,6 @@ eiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItems = do
     # set children (plugins  <> [listBody])
     # set style [("margin-left","10px"),("border","2px"),("border-color","gray"),("border-style","solid")]
     -- # (if rawTableType table == ReadOnly then   sink0 UI.style (noneShow . isJust <$> facts oldItems ) else id )
-    # (if rawTableType table == ReadOnly then   sink0 UI.style (noneShow . isJust . join . fmap (\m@(TB1 (_,l)) -> if all (isNothing.unOptionalAttr.unTB) (F.toList $ _kvvalues $ unTB l) then Nothing else Just m) <$> facts tableb ) else id )
   -- return (body, resei)
   return (body, join . fmap (\m@(TB1 (_,l)) -> if all (isNothing.unOptionalAttr.unTB) (F.toList $ _kvvalues $ unTB l) then Nothing else Just m) <$> resei)
 
@@ -364,9 +366,13 @@ uiTable
      -> TB1 ()
      -> Tidings (Maybe (TB1 Showable))
      -> UI (Element,Tidings (Maybe (TB1 Showable)))
-uiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItems = do
+uiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItemspre = do
   let
       Just table = M.lookup tname  (tableMap inf)
+
+  iniOld <- currentValue (facts oldItemspre )
+  old2 <- stepper iniOld (diffEvent (facts oldItemspre ) (rumors oldItemspre))
+  let oldItems = tidings old2 (diffEvent old2 (rumors oldItemspre))
 
   res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds ) pgs)
   let plugmods = first repl <$> ((snd <$> res) <> plmods)
@@ -379,7 +385,7 @@ uiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItems = do
             let el =  L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> ( _kvrecrels meta))
                 plugattr = indexPluginAttr (unTB m) plugmods
             wn <- if el
-                then (tbRecCase   True inf pgs  constr (unTB m) w plugattr) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $  refs)
+                then traceShow l (tbRecCase True inf pgs  constr (unTB m) w plugattr) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $  refs)
 
                 else (tbCase True inf pgs  constr (unTB m) w plugattr) $ maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattr . Compose . Identity .fst) $  refs)
 
@@ -436,12 +442,13 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
   nav  <- buttonDivSet ["None","Editor"{-,"Exception","Change"-}] (fmap Just open) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-4 pull-right"
   let table = lookPK inf (S.fromList $ fmap _relOrigin $ findPK $ ftb)
-  let fun "Editor"= do
+  preoldItens <- currentValue (facts preoldItems)
+  bvdiff <- stepper  preoldItens evdiff
+  let fun "Editor" = do
           let
             getItem :: TB2 Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
             getItem  =  (getEd $ schemaOps inf) inf table . unTB1
-            -- getItem = loadDelayed inf (unTB1 ftb) . unTB1
-          preoldItens <- currentValue (facts preoldItems)
+          preoldItens <- currentValue (bvdiff )
           loadedItens <- liftIO$ join <$> traverse (transaction inf  . getItem) preoldItens
           maybe (return ()) (\j -> liftIO  (hvdiff  =<< traverse (\i -> runDBM inf $  applyTB1'  i (PAtom j) ) preoldItens) )  loadedItens
           loadedItensEv <- mapEvent (fmap join <$> traverse (transaction inf . getItem )) (rumors preoldItems)
@@ -459,7 +466,7 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
           let diff = unionWith const tdiff   (filterJust loadedItensEv)
           onEvent (PAtom <$> diff)
               (liftIO . hdiff)
-          onEvent (unsafeMapIO (fmap Just) $ (\i j -> return  $ maybe (TB1$  createTB1 j) (flip applyTB1 (PAtom j)  ) i) <$> facts oldItems <@> diff )
+          onEvent ((\i j -> Just $ maybe (TB1$  createTB1 j) (flip applyTB1 (PAtom j)  ) i) <$> facts oldItems <@> diff )
               (liftIO . hvdiff )
           onEvent (rumors tableb)
               (liftIO . h2)
@@ -575,9 +582,11 @@ indexItens s tb@(IT na _) offsetT items oldItems  = bres
 
 dynHandler hand val ix (l,old)= do
         (ev,h) <- liftIO $ newEvent
+        un <- liftIO$ newUnique
         let idyn True  =  do
               tds <- hand ix
               ini <- currentValue (facts $ triding tds)
+              liftIO$ print (hashUnique un,ix)
               liftIO $ h ini
               onEvent (rumors $ triding tds) (liftIO . h)
               return (getElement tds)
@@ -745,12 +754,16 @@ iUITable inf pgs plmods oldItems  tb@(IT na (ArrayTB1 [tb1]))
       let wheel = fmap negate $ mousewheel dv
           arraySize = 4
       (TrivialWidget offsetT offset) <- offsetField 0 wheel (maybe 0 (length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
-      let dyn = dynHandler (\ix -> iUITable inf pgs
+      items <- mapM (\ix -> iUITable inf pgs
+                (fmap (unIndexItens  ix <$> offsetT <*> )  <$> plmods)
+                (unIndexItens ix <$> offsetT <*>   oldItems)
+                (IT  na tb1) ) [0..(arraySize -1)]
+      {-let dyn = dynHandler (\ix -> traceShow ix $ iUITable inf pgs
                 (fmap (unIndexItens  ix <$> offsetT <*> )  <$> plmods)
                 (unIndexItens ix <$> offsetT <*>   oldItems)
                 (IT  na tb1)) (\ix-> unIndexItens ix <$> offsetT <*>   oldItems)
       items <- reverse. fst <$> foldl (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
-
+-}
       let tds = triding <$> items
           es = getElement <$> items
       let bres = indexItens arraySize tb offsetT (triding <$>  items ) oldItems

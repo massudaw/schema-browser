@@ -42,7 +42,7 @@ accumT e ev = do
   return $ tidings b (flip ($) <$> b <@> ev)
 
 
-evalUI el f  = getWindow el >>= \w -> runUI w f
+evalUI el f = getWindow el >>= flip runUI f
 
 accumTds :: MonadIO m => Tidings a -> Event (a -> a) -> m (Tidings a)
 accumTds e l = do
@@ -107,21 +107,22 @@ addEvent ev b = do
 
 mapUITEvent body f  = mapTEvent (\i -> evalUI body $ f i )
 
+mapUIEvent body f = mapEvent (\i -> evalUI body $ f i)
 mapDynEvent f x = do
   t <- mapUITEvent (getElement x) f (triding x)
   sub <- UI.div # sink items (pure. element  <$> facts t )
   (e,h) <- liftIO $ newEvent
-  onEvent (rumors t) (\x-> onEvent (rumors . triding $ x) (liftIO .  h) )
+  onEvent (rumors t) (\x-> onEvent (rumors . triding $ x) (liftIOLater .  h) )
   v <- currentValue (facts t)
   i <- currentValue (facts (triding v))
   bh <- stepper i e
   return $ TrivialWidget (tidings bh e) sub
 
 
-mapEvent :: (a -> IO a1) -> Event a -> UI (Event a1)
+mapEvent :: (a -> IO b) -> Event a -> UI (Event b)
 mapEvent f x = do
   (e,h) <- liftIO $ newEvent
-  onEvent x (\i -> liftIO $ (f i)  >>= h)
+  onEvent x (\i -> liftIOLater . void . forkIO $ (f i)  >>= h)
   return  e
 
 mapT0Event i f x = do
@@ -277,7 +278,7 @@ testPointInRange ui = do
 
 unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w -> runUI w (f a))
 
-paint e b = element e # sink UI.style (greenRed . isJust <$> b)
+-- paint e b = element e # sink UI.style (greenRed . isJust <$> b)
 paintEdit e b i  = element e # sink0 UI.style ((\ m n -> pure . ("background-color",) $ cond  m n ) <$> b <*> i )
   where cond i j
           | isJust i  && isNothing j  = "green"

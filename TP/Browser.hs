@@ -343,8 +343,8 @@ viewerKey inf key = mdo
   itemList <- listBox (fmap snd res4) (tidings st sel ) (pure id) ( pure attrLine )
 
   let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
-  prop <- stepper cv (diffEvent st evsel)
-  let tds = tidings prop (diffEvent prop  evsel)
+  prop <- stepper cv evsel
+  let tds = tidings prop evsel
 
   (cru,ediff,pretdi) <- crudUITable inf plugList  (pure "Editor")  (tidings (fmap snd res2) never)[] [] (allRec' (tableMap inf) table) tds
   diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip applyTB1 j ) i) <$> facts pretdi <@> ediff
@@ -361,6 +361,8 @@ viewerKey inf key = mdo
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset ,filterInp ,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row"
   UI.div # set children ([itemSelec,insertDivBody ] )
+
+testWidget ui = do startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = Just 8000 })  (\w -> getBody w #+ [ui] >> return ())
 
 
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
