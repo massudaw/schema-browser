@@ -125,17 +125,19 @@ mapEvent f x = do
   onEvent x (\i -> liftIOLater . void . forkIO $ (f i)  >>= h)
   return  e
 
-mapT0Event i f x = do
-  e <- mapEvent f (rumors x)
-  be <- liftIO $ f i
+mapT0Event i f x = fst <$> mapT0EventFin i f x
+
+mapT0EventFin i f x = do
+  (e,fin) <- mapEventFin f (rumors x)
+  be <-  liftIO $ f i
   t <- stepper be e
-  return $ tidings t e
+  return $ (tidings t e,fin)
 
+mapTEvent f x = fst <$> mapTEventFin f x
 
-
-mapTEvent f x = do
+mapTEventFin f x = do
   i <- currentValue (facts x)
-  mapT0Event i f x
+  mapT0EventFin i f x
 
 
 
