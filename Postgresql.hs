@@ -53,6 +53,7 @@ import Data.Text (Text)
 import qualified Data.Set as S
 import Database.PostgreSQL.Simple.Time
 import qualified Database.PostgreSQL.Simple.FromField as F
+import Database.PostgreSQL.Simple.FromRow (field)
 import Database.PostgreSQL.Simple.FromField hiding(Binary,Identity)
 -- import Database.PostgreSQL.Simple.FromField (fromField,typeOid,typoid,TypeInfo,rngsubtype,typdelim,Conversion,Field,FromField)
 import qualified Database.PostgreSQL.Simple.ToField as TF
@@ -664,6 +665,12 @@ parserFieldAtto parser = (\i j -> case traverse (parseOnly  parser )  j of
                                (Right (Just r ) ) -> return r
                                Right Nothing -> error (show j )
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
+
+instance (FromField a, FromField b, FromField c, FromField d, FromField e,
+          FromField f, FromField g, FromField h, FromField i, FromField j,FromField k) =>
+    FromRow (a,b,c,d,e,f,g,h,i,j,k) where
+    fromRow = (,,,,,,,,,,) <$> field <*> field <*> field <*> field <*> field
+                          <*> field <*> field <*> field <*> field <*> field <*> field
 
 
 withCount value = do
