@@ -29,7 +29,7 @@ import Data.Ord
 import OFX
 import Data.Time.Parse
 import Utils
-import Schema
+-- import Schema
 import Data.Char (toLower)
 import PandocRenderer
 import Data.Maybe
