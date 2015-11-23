@@ -10,9 +10,9 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 
-module TP.Browser where
+module Main where
+
 import Query
-import Debug.Trace
 import Types
 import Step
 import Plugins
@@ -79,8 +79,9 @@ argsToState  [h,ph,d,u,p,s,t] = BrowserState h ph d  u p (Just s) (Just t )
 argsToState  [h,ph,d,u,p,s] = BrowserState h ph d  u p  (Just s)  Nothing
 argsToState  [h,ph,d,u,p] = BrowserState h ph d  u p Nothing Nothing
 
-browser :: IO ()
-browser = do
+
+main :: IO ()
+main = do
   m:args <- getArgs
   --let schema = "public"
   --conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
@@ -101,7 +102,7 @@ browser = do
   -}
 
   tokenRef <- oauthpoller
-  mvar <- newMVar M.empty --mapEvent (traverse (\inf -> liftIO$ swapMVar  (mvarMap inf) M.empty)) (rumors evDB)
+  mvar <- newMVar M.empty
   smvar <- newMVar M.empty
   e <- poller smvar mvar (argsToState (tail args) )  [siapi2Plugin,siapi3Plugin ]
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e mvar smvar tokenRef $ tail args)
@@ -132,8 +133,8 @@ poller schm dbm db plugs = do
                   rp = selectQuery rpd
               listRes <- queryWith_ (fromAttr (unTlabel rpd )) conn  (fromString $ T.unpack $ rp)
               let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
-                  tdInput i =  isJust  $ testTable i (fst f)
-                  tdOutput1 i =   not $ isJust  $ testTable i (snd f)
+                  tdInput i =  isJust  $ checkTable  (fst f) i
+                  tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
               let elem inf  = fmap catMaybes .  mapM (\inp -> do
                           o  <- catchPluginException inf a n (getPK inp)    (elemp inf (Just inp))
                           let diff =   join $ (\i j -> diffUpdateAttr   (unTB1 i ) (unTB1 j)) <$>  o <*> Just inp
@@ -216,7 +217,9 @@ instance Eq Connection where
   i == j = True
 
 
+form :: Tidings a -> Event b -> Tidings a
 form td ev =  tidings (facts td ) (facts td <@ ev )
+
 
 databaseChooser mvar smvar tokenRef sargs = do
   dbs <- liftIO $ listDBS  sargs
@@ -324,6 +327,7 @@ viewerKey inf key = mdo
   sortList <- selectUI sortSet ((,True) <$> F.toList key) UI.div UI.div conv
   element sortList # set UI.style [("overflow-y","scroll"),("height","200px")]
   asc <- checkedWidget (pure True)
+  updateBtn <- UI.button # set text "Update"
   let
      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  . _unTB1 )
      tsort = sorting . filterOrd <$> triding sortList
@@ -344,7 +348,7 @@ viewerKey inf key = mdo
 
   let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
   prop <- stepper cv evsel
-  let tds = tidings prop evsel
+  let tds = tidings prop (diffEvent  prop evsel)
 
   (cru,ediff,pretdi) <- crudUITable inf plugList  (pure "Editor")  (tidings (fmap snd res2) never)[] [] (allRec' (tableMap inf) table) tds
   diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip applyTB1 j ) i) <$> facts pretdi <@> ediff
@@ -353,6 +357,10 @@ viewerKey inf key = mdo
   st <- stepper cv sel
   res2 <- stepper (fmap inisort vp) (fmap (fmap TB1) <$> rumors vpt)
   onEvent ( ((\(m,i) j -> (m,foldl applyTable (fmap TB1 i) (expandPSet j))) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar. fmap (fmap unTB1))
+  onEvent (facts vpt <@ UI.click updateBtn ) (\(oi,oj) -> do
+              let up =  (updateEd (schemaOps inf) ) inf table (L.maximumBy (comparing (getPK.TB1)) oj ) Nothing (Just 20)
+              (l,i,j) <- liftIO $  transaction inf up
+              liftIO .  putMVar tmvar. fmap (fmap unTB1)  $ (oi , (TB1 <$> oj) <>  l ) )
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK)  <$> facts tds) # set UI.class_ "col-xs-8"
@@ -360,7 +368,7 @@ viewerKey inf key = mdo
   insertDivBody <- UI.div # set children [insertDiv,last cru]# set UI.class_ "row"
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset ,filterInp ,getElement sortList,getElement asc, getElement el] ) # set UI.class_ "col-xs-3"
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row"
-  UI.div # set children ([itemSelec,insertDivBody ] )
+  UI.div # set children ([updateBtn,itemSelec,insertDivBody ] )
 
 testWidget ui = do startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = Just 8000 })  (\w -> getBody w #+ [ui] >> return ())
 

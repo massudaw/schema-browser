@@ -98,6 +98,68 @@ siapi2Plugin = BoundedPlugin2  pname tname (staticP url) elemp
     tailEmpty [] = []
     tailEmpty i  = tail i
 
+cnpjCaptcha = BoundedPlugin2 pname tname (staticP url ) elemp
+  where
+    pname , tname :: Text
+    pname = "CNPJ Captcha"
+    tname = "owner"
+    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    url :: ArrowReader
+    url = proc t -> do
+      sess <- act (\_ -> lift  initSess ) -< ()
+      cap <- act (\sess -> lift (getCaptchaCnpj sess)) -< sess
+      odxR "sess" -< ()
+      odxR "captchaViewer" -< ()
+      returnA -< Just $ tblist [attrT  ("sess", TB1 (SSession sess)) ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
+    elemp inf = maybe (return Nothing) (geninf inf)
+    geninf inf inp = do
+            b <- runReaderT (dynPK url $ () ) (Just inp)
+            return $ liftKeys inf tname  <$> b
+
+cnpjForm = BoundedPlugin2 pname tname (staticP url ) elemp
+  where
+    pname , tname :: Text
+    pname = "CNPJ Form"
+    tname = "owner"
+    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    url :: ArrowReader
+    url = proc t -> do
+      cap <-  idxK "captchaInput" -< ()
+      cnpj <-  atR "ir_reg" (idxK "cnpj_number") -< ()
+      sess <- idxK "sess" -< ()
+      html :: Maybe [(String,String)] <- act (\(TB1 (SSession sess),TB1 (SText cap),TB1 (SText cnpj))  -> fmap join $ lift  (getCnpjForm sess (BS.pack $ T.unpack cap) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,cnpj)
+
+      arrowS -< ()
+      returnA -<   join $ convertHtml . (M.fromListWith (++) . fmap (fmap pure )) <$> html
+    elemp inf = maybe (return Nothing) (geninf inf)
+    geninf inf inp = do
+            b <- runReaderT (dynPK url $ () ) (Just inp)
+            return $ liftKeys inf tname  <$> b
+    arrowS = proc t -> do
+              idxR "captchaInput" -< t
+              odxR "owner_name" -< t
+              odxR "address"-< t
+              odxR "atividade_principal" -< ()
+              odxR "atividades_secundarias" -< ()
+              atR "atividades_secundarias" cnae -< t
+              atR "atividade_principal" cnae -< t
+              atR "address"  addrs -< t
+              returnA -< Nothing
+      where
+          cnae = proc t -> do
+              odxR "id" -< t
+              odxR "description" -< t
+          addrs = proc t -> do
+              odxR "logradouro" -< t
+              odxR "number " -< t
+              odxR "uf" -< t
+              odxR "cep" -< t
+              odxR "complemento" -< t
+              odxR "municipio" -< t
+              odxR "bairro" -< t
+
+
+
 
 analiseProjeto = BoundedPlugin2 pname tname (staticP url ) elemp
   where
@@ -471,49 +533,13 @@ queryArtAndamento = BoundedPlugin2 pname tname (staticP url) elemp
                    return $  liftKeys inf tname  <$> b)
 
 
-queryCPFStatefull =  StatefullPlugin "CPF Receita" "owner" [staticP arrowF,staticP arrowS]   [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] cpfCall
-    where
-      arrowF ,arrowS :: ArrowReader
-      arrowF = proc t -> do
-              atAny "ir_reg" [idxR "cpf_number"] -< t
-              odxR "captchaViewer" -< t
-              returnA -< Nothing
-      arrowS = proc t -> do
-              idxR "captchaInput" -< t
-              odxR "owner_name" -< t
-              returnA -< Nothing
-
-
 queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
-  [staticP arrowF ,staticP arrowS ]
-  [[("captchaViewer",Primitive "jpg") ],[("captchaInput",Primitive "character varying")]] wrapplug
-    where arrowF ,arrowS :: ArrowReader
+  [[("captchaViewer",Primitive "jpg"),("sess",Primitive "session")],[("captchaInput",Primitive "character varying")]] [cnpjCaptcha,cnpjForm]
+    where arrowF :: ArrowReader
           arrowF = proc t -> do
             atAny "ir_reg" [idxR "cnpj_number"] -< t
             odxR "captchaViewer"-< t
             returnA -< Nothing
-          arrowS = proc t -> do
-              idxR "captchaInput" -< t
-              odxR "owner_name" -< t
-              odxR "address"-< t
-              odxR "atividade_principal" -< ()
-              odxR "atividades_secundarias" -< ()
-              atR "atividades_secundarias" cnae -< t
-              atR "atividade_principal" cnae -< t
-              atR "address"  addrs -< t
-              returnA -< Nothing
-
-          cnae = proc t -> do
-              odxR "id" -< t
-              odxR "description" -< t
-          addrs = proc t -> do
-              odxR "logradouro" -< t
-              odxR "number " -< t
-              odxR "uf" -< t
-              odxR "cep" -< t
-              odxR "complemento" -< t
-              odxR "municipio" -< t
-              odxR "bairro" -< t
 
 {- testPlugin  db sch p = withConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup (_bounds p) (tableMap inf))
@@ -527,4 +553,4 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
 
 -}
 
-plugList = [encodeMessage ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}queryCNPJStatefull,queryCPFStatefull,queryArtAndamento]
+plugList = [encodeMessage ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,,queryCPFStatefull, -}queryCNPJStatefull, queryArtAndamento]

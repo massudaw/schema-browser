@@ -6,7 +6,6 @@ import Types
 -- import Query
 import Data.Monoid
 import Data.String
-import Database.PostgreSQL.Simple
 import Control.Applicative
 import Data.Interval (interval)
 import qualified Data.ExtendedReal as ER

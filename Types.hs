@@ -20,6 +20,7 @@ module Types where
 import Control.Lens.TH
 import qualified Control.Lens as Le
 import Data.Functor.Apply
+import qualified Network.Wreq.Session as Sess
 import Data.Bifunctor
 import Safe
 import Prelude hiding(head)
@@ -36,6 +37,7 @@ import Data.Functor.Classes
 import Data.Foldable (Foldable)
 import qualified Data.Foldable as F
 import qualified Data.Interval as Interval
+import qualified Data.ExtendedReal as ER
 import Data.Monoid hiding (Product)
 import qualified Data.Text as T
 import qualified Data.ByteString as BS
@@ -148,6 +150,7 @@ data Order
   deriving(Eq,Ord,Show,Generic)
 
 
+type Column k a = TB Identity k a
 type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Identity))) k a )
 type TB3Data  f k a = (KVMetadata k,Compose f (KV (Compose f (TB f ))) k a )
 
@@ -163,8 +166,10 @@ data KVMetadata k
   , _kvattrs :: [k]
   , _kvdelayed :: Set k
   , _kvrecrels :: [MutRec [[Rel k]]]
-  }deriving(Eq,Ord,Show,Generic)
+  }deriving(Eq,Ord,Generic)
 
+instance Show k => Show (KVMetadata k) where
+  show k = T.unpack (_kvname k)
 kvMetaFullName m = _kvschema m <> "." <> _kvname m
 filterTB1 f = fmap (filterTB1' f)
 filterTB1' f ((m ,i)) = (m , mapComp (filterKV f) i)
@@ -355,7 +360,7 @@ data KPrim
    | PCpf
    | PBinary
    | PLineString
-   -- Dynamic Showable Type
+   | PSession
    | PDynamic
    deriving(Show,Eq,Ord)
 
@@ -399,7 +404,7 @@ instance Ord (FKey a) where
    compare i j = compare (keyFastUnique i) (keyFastUnique j)
 
 instance Show a => Show (FKey a)where
-   show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
+   show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k) <> "::"   <> T.pack (show (keyType k))
    -- show k = T.unpack $ showKey k
 
 showKey k  =   maybe (keyValue k) id  (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::"   <> T.pack (show (keyType k))
@@ -455,9 +460,18 @@ data Showable
   | SDayTime !TimeOfDay
   | SBinary !BS.ByteString
   | SDynamic ! (FTB Showable)
+  | SSession !Sess.Session
   deriving(Ord,Eq,Show,Generic)
 
+instance Eq Sess.Session where
+   i==  j = True
 
+instance Ord Sess.Session where
+  compare i j = compare 1 2
+
+instance Binary Sess.Session where
+  put i = return ()
+  get = error ""
 
 type SqlOperation = SqlOperationK Key
 data SqlOperationK k
@@ -914,6 +928,38 @@ unLeftItens = unLeftTB
     unLeftTB i@(FKT ifk rel  (TB1  _ )) = Just i
     unLeftTB i = errorWithStackTrace (show i)
 
+renderShowable :: FTB Showable -> String
+renderShowable (LeftTB1 i ) = maybe "" renderShowable i
+renderShowable (DelayedTB1 i ) =  maybe "<NotLoaded>" (\i -> "<Loaded| " <> renderShowable i <> "|>") i
+renderShowable (SerialTB1 i ) = maybe "" renderShowable i
+renderShowable (ArrayTB1 i)  = L.intercalate "," $ F.toList $ fmap renderShowable i
+renderShowable (IntervalTB1 i)  = showInterval renderShowable i
+  where
+    showInterval f i | i == Interval.empty = show i
+    showInterval f (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> f i <> "," <> f l <> ocr m
+      where
+        ocl j = if j then "[" else "("
+        ocr j = if j then "]" else ")"
+    showInterval f i = show i -- errorWithStackTrace (show i)
+
+
+renderShowable (TB1  i) = renderPrim i
+
+renderPrim :: Showable -> String
+renderPrim (SText a) = T.unpack a
+renderPrim (SNumeric a) = show a
+renderPrim (SBoolean a) = show a
+renderPrim (SDouble a) = show a
+renderPrim (STimestamp a) = show a
+renderPrim (SLineString a ) = show a
+renderPrim (SBounding a ) = show a
+renderPrim (SDate a) = show a
+renderPrim (SDayTime a) = show a
+renderPrim (SBinary _) = show "<Binary>"
+renderPrim (SDynamic s) = renderShowable s
+renderPrim (SPosition a) = show a
+renderPrim (SPInterval a) = show a
+
 
 
 attrOptional :: TB Identity Key Showable ->  (TB Identity  Key Showable)
@@ -932,7 +978,7 @@ leftItens tb@(FKT ilk rel _) = Just . maybe  emptyFKT attrOptional
 
 
 attrArray back@(Attr  k _) oldItems  = (\tb -> Attr k (ArrayTB1 tb)) $ (\(Attr _ v) -> v) <$> oldItems
-attrArray back@(FKT _ _ _) oldItems  = (\(lc,tb) ->  FKT [Compose $ Identity $ Attr (_relOrigin $  head $ keyattr (head lc )) (ArrayTB1 $ head . kattr  <$> lc)] (_fkrelation back) (ArrayTB1 tb  ) )  $ unzip $ (\(FKT [lc] rel tb ) -> (lc , tb)) <$> oldItems
+attrArray back@(FKT _ _ _) oldItems  = (\(lc,tb) ->  FKT [Compose $ Identity $ Attr (kArray $ _relOrigin $  head $ keyattr (head lc )) (ArrayTB1 $ concat  $  kattr  <$> lc)] (_fkrelation back) (ArrayTB1 tb  ) )  $ unzip $ (\(FKT [lc] rel tb ) -> (lc , tb)) <$> oldItems
 attrArray back@(IT _ _) oldItems  = (\tb ->  IT  (_ittableName back) (ArrayTB1 tb  ) )  $ (\(IT _ tb ) -> tb) <$> oldItems
 
 
@@ -941,6 +987,7 @@ keyOptional (k,v) = (kOptional k ,LeftTB1 $ Just v)
 unKeyOptional (k  ,(LeftTB1 v) ) = fmap (unKOptional k,) v
 
 kOptional = Le.over keyTypes KOptional
+kArray = Le.over keyTypes KArray
 kDelayed = Le.over keyTypes KDelayed
 
 unKOptional (Key a  v c m n d (KOptional e)) = (Key a  v c m n d e )

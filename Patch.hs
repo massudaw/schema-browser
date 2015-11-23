@@ -23,6 +23,7 @@ import Data.Maybe
 import GHC.Generics
 import Data.Either
 import Data.Binary (Binary)
+import Data.Ord
 import Data.Functor.Identity
 import Utils
 import Data.Traversable(traverse,sequenceA)
@@ -67,6 +68,7 @@ data PathFTB   a
 type family Index k
 type instance Index Showable = Showable
 type instance Index (TBData k a ) =  TBIdx k a
+type instance Index (TB Identity k a ) =  PathAttr k a
 
 type PatchConstr k a = (a ~ Index a, Ord a , Show a,Show k , Ord k)
 
@@ -159,6 +161,7 @@ groupSplit2 f g = fmap (\i-> (f $ head i , g <$> i)) . groupWith f
 
 applyTable
   ::  PatchConstr k a  => [FTB1 Identity k a ] -> PathFTB  (TBIdx k a )-> [FTB1 Identity k a ]
+applyTable l pidx@(PAtom patom@(m,i, []) ) = L.filter (\tb -> getPK tb /= i ) l
 applyTable l pidx@(PAtom patom@(m,i, p) ) =  case L.find (\tb -> getPK tb == i ) l  of
                   Just _ ->  catMaybes $ L.map (\tb@(TB1 (m, k)) -> if  getPK tb ==  i  then (case p of
                                                 [] ->  Nothing
@@ -169,7 +172,7 @@ applyTable l i = errorWithStackTrace (show (l,i))
 
 
 getPK (TB1 i) = getPKM i
-getPKM (m, k) = (concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(_kvpk m)) (  _kvvalues (runIdentity $ getCompose k)))))
+getPKM (m, k) = (L.sortBy (comparing fst) $ concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(_kvpk m)) (  _kvvalues (runIdentity $ getCompose k)))))
 getAttr'  (TB1 (m, k)) = (concat (fmap aattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
 getPKAttr (m, k) = traComp (concat . F.toList . (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(_kvpk m))   )) k

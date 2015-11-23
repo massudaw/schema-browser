@@ -46,9 +46,8 @@ data Plugins
   =  StatefullPlugin
   { _name ::  Text
   , _bounds :: Text
-  , _statebounds :: [(Access Text,Access Text)]
   , _statevar :: [[(Text,KType Text)]]
-  , _statefullAction :: WrappedCall
+  , _statefullAction :: [Plugins]
   }
   | BoundedPlugin2
   { _name :: Text
@@ -86,14 +85,10 @@ data SchemaEditor
   , insertEd :: InformationSchema -> TBData Key Showable -> TransactionM  (Maybe (TableModification (TBIdx Key Showable)))
   , deleteEd :: InformationSchema ->  TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
   , listEd :: InformationSchema -> Table -> Maybe PageToken -> Maybe Int -> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
+  , updateEd :: InformationSchema -> Table -> TBData Key Showable -> Maybe PageToken -> Maybe Int -> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
   , getEd :: InformationSchema -> Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   }
 
-
-data WrappedCall =  forall m . MonadIO m =>  WrappedCall
-      { runCall ::  forall a . m a -> IO a
-      , stepsCall :: [InformationSchema -> MVar (Maybe (TB1 Showable))  -> (Maybe (TB1 Showable) -> m ()) -> m () ]
-      }
 
 
 data Access a

@@ -97,7 +97,7 @@ eventTable inf table page size = do
 
 
 
-postgresOps = SchemaEditor fullDiffEdit fullDiffInsert deleteMod (\i j p g -> (\i -> (i,Nothing,L.length i)) <$> selectAll i j ) (\inf table -> liftIO . loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))
+postgresOps = SchemaEditor fullDiffEdit fullDiffInsert deleteMod (\i j p g -> (\i -> (i,Nothing,L.length i)) <$> selectAll i j ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))
 
 fullInsert inf = Tra.traverse (fullInsert' inf )
 

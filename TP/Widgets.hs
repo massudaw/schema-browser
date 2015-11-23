@@ -286,8 +286,8 @@ paintEdit e b i  = element e # sink0 UI.style ((\ m n -> pure . ("background-col
           | isJust i  && isNothing j  = "green"
           | isNothing i  && isNothing j = "red"
           | isNothing i && isJust j  = "purple"
-          | i /= j = "yellow"
-          -- | i /= j = trace (concat $ fmap differ $   zip  (show i ) ( show j)) "yellow"
+          -- | i /= j = "yellow"
+          | i /= j = trace (concat $ fmap differ $   zip  (show i ) ( show j)) "yellow"
           | i == j = "blue"
           | otherwise = "green"
 differ = (\(i,j) -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )

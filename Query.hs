@@ -75,37 +75,6 @@ description  = rawDescription
 
 atTables f t = f t
 
-renderShowable :: FTB Showable -> String
-renderShowable (LeftTB1 i ) = maybe "" renderShowable i
-renderShowable (DelayedTB1 i ) =  maybe "<NotLoaded>" (\i -> "<Loaded| " <> renderShowable i <> "|>") i
-renderShowable (SerialTB1 i ) = maybe "" renderShowable i
-renderShowable (ArrayTB1 i)  = intercalate "," $ F.toList $ fmap renderShowable i
-renderShowable (IntervalTB1 i)  = showInterval renderShowable i
-renderShowable (TB1  i) = renderPrim i
-
-renderPrim :: Showable -> String
-renderPrim (SText a) = T.unpack a
-renderPrim (SNumeric a) = show a
-renderPrim (SBoolean a) = show a
-renderPrim (SDouble a) = show a
-renderPrim (STimestamp a) = show a
-renderPrim (SLineString a ) = show a
-renderPrim (SBounding a ) = show a
-renderPrim (SDate a) = show a
-renderPrim (SDayTime a) = show a
-renderPrim (SBinary _) = show "<Binary>"
-renderPrim (SDynamic s) = renderShowable s
-renderPrim (SPosition a) = show a
-renderPrim (SPInterval a) = show a
-
-
-showInterval f i | i == Interval.empty = show i
-showInterval f (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> f i <> "," <> f l <> ocr m
-  where
-    ocl j = if j then "[" else "("
-    ocr j = if j then "]" else ")"
-showInterval f i = show i -- errorWithStackTrace (show i)
-
 
 renderAliasedKey (v ,(t,k)) a = rawName t <> "." <> keyValue k <> " AS " <> a
 
@@ -147,7 +116,7 @@ pkOp (KInterval i) (KInterval j) (IntervalTB1 k) (IntervalTB1 l)| i == j  = not 
 pkOp (Primitive i ) (Primitive j ) k l  | i == j = k == l
 pkOp a b c d = errorWithStackTrace (show (a,b,c,d))
 
-pkOpSet i l = (\i -> if L.null i then False else L.all id i) $ zipWith (\(a,b) (c,d)-> pkOp (keyType a)  (keyType c) b d) (L.sortBy (comparing fst ) i) (L.sortBy (comparing fst) l)
+pkOpSet i l = (\i -> if L.null i then False else L.all id i) $ zipWith (\(a,b) (c,d)->  pkOp (keyType a)  (keyType c) b d) (L.sortBy (comparing fst ) i) (L.sortBy (comparing fst) l)
 
 
 intersectionOp :: KType KPrim -> Text -> KType KPrim -> (Text -> Text -> Text)
@@ -696,9 +665,9 @@ isLeftRel ifk = any (isKOptional.keyType) (S.toList ifk)
 isArrayRel ifk = any (isArray.keyType) (S.toList ifk)
 
 
-eitherDescPK :: (Functor f,Ord k) =>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
+eitherDescPK :: (Functor f,F.Foldable f,Ord k) =>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
 eitherDescPK i@(TB1 (kv, _)  )
-  | not ( null ( _kvdesc kv) ) =  tbDesc i
+  | not ( null ( _kvdesc kv) ) =  if L.null (F.toList $ tbDesc i) then tbPK i else tbDesc i
   | otherwise = tbPK i
 
 
@@ -707,6 +676,7 @@ tbDesc  =  tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ 
 
 tbPK :: (Functor f,Ord k)=>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
 tbPK = tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv ) ))
+
 
 tbPK' :: (Ord k)=>TBData k a -> Compose Identity  (KV  (Compose Identity (TB Identity  ))) k a
 tbPK' = tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv ) ))
@@ -934,6 +904,7 @@ postgresPrim =
   ,("bpchar",PText)
   ,("sql_identifier" , PText)
   ,("base64url",PText)
+  ,("session",PSession)
   ,("bytea",PBinary)
   ,("pdf",PMime "application/pdf")
   ,("ofx",PMime "application/x-ofx")

@@ -295,12 +295,27 @@ indexTable l (LeftTB1 j) = join $ fmap (indexTable l) j
 indexTable (IProd _ l) t@(TB1 (m,v))
   = do
     let finder = L.find (L.any (==l). L.permutations .fmap _relOrigin. keyattr. firstCI keyString )
-        i = justError ("indexTable error finding key: " <> T.unpack (T.intercalate "," l) <> show t ) $ finder (toList $ _kvvalues $ unTB v )
+    i <- finder (toList $ _kvvalues $ unTB v )
     case runIdentity $ getCompose $ i  of
          Attr k l -> return (k,l)
 indexTable l (ArrayTB1 j) =  liftA2 (,) ((head <$> fmap (fmap fst) i) ) ( (\i -> ArrayTB1   i ) <$> fmap (fmap snd) i)
        where i =   T.traverse  (indexTable l) j
 indexTable i j = errorWithStackTrace (show (i,j))
+
+hasProd :: (Access Text -> Bool) -> Access Text ->  Bool
+hasProd p (Many i) = any p i
+hasProd p i = False
+
+findProd :: (Access Text -> Bool) -> Access Text -> Maybe (Access Text)
+findProd p (Many i) = L.find p i
+findProd p i = Nothing
+
+isNested :: Access Text -> Access Text -> Bool
+isNested p (Nested pn i) =  p == pn
+isNested p i =  False
+
+uNest :: Access Text -> Access Text
+uNest (Nested pn i) = i
 
 
 

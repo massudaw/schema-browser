@@ -94,34 +94,58 @@ oauthpoller = do
   return tokenRef
 
 
+updateTable inf table reference page maxResults
+  | tableName table == "history" = do
+    tok <- liftIO$ readIORef (snd $fromJust $ token inf)
+    let user = fst $ fromJust $ token inf
+    decoded <- liftIO $ do
+        let req =  "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?" <> "startHistoryId=" <> intercalate "," ( renderShowable . snd <$> getPK (TB1 reference) ) <> "&"<> maybe "" (\(NextToken s) ->  T.unpack s <> "pageToken=" <> T.unpack s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok )
+        print  req
+        (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
+        print ("update",table,t)
+        print d
+        return  d
+    c <-  traverse (convertAttrs inf (tableMap inf) table ) . maybe [] (\i -> (i :: Value) ^.. key (  rawName table ) . values) $ decoded
+    return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , {-length c +-} (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
+  | otherwise = return ([], Nothing,0)
 
-listTable inf table page maxResults= do
-  tok <- liftIO$ readIORef (snd $fromJust $ token inf)
-  let user = fst $ fromJust $ token inf
-  decoded <- liftIO $ do
-      (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] (traceShowId $ "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok ))
-      print ("list",table,t)
-      return  d
-  c <-  traverse (convertAttrs inf (tableMap inf) table ) . maybe [] (\i -> (i :: Value) ^.. key (  rawName table ) . values) $ decoded
-  return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , {-length c +-} (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
+
+
+
+listTable inf table page maxResults
+  | tableName table == "history" = return ([],Nothing , 0)
+  | otherwise = do
+    tok <- liftIO$ readIORef (snd $fromJust $ token inf)
+    let user = fst $ fromJust $ token inf
+    decoded <- liftIO $ do
+        let req =  "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok )
+        print  req
+        (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
+        print ("list",table,t)
+        return  d
+    c <-  traverse (convertAttrs inf (tableMap inf) table ) . maybe [] (\i -> (i :: Value) ^.. key (  rawName table ) . values) $ decoded
+    return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , {-length c +-} (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
 
 getKeyAttr (TB1 (m, k)) = (concat (fmap keyattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
 getTable inf  tb pk
+  | tableName tb == "history" = return  Nothing
   | S.fromList (fmap _relOrigin (getKeyAttr pk) ) ==  S.fromList (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb ) = return Nothing
   | otherwise = do
     tok <- liftIO $readIORef (snd $ fromJust $ token inf)
     let user = fst $ fromJust $ token inf
     decoded <- liftIO $ do
-        (t,v) <- duration (simpleHttpHeader [("GData-Version","3.0")] (traceShowId $ "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName tb ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK pk ) <> "?access_token=" ++ ( accessToken tok)))
+        let req = "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName tb ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK pk ) <> "?access_token=" ++ ( accessToken tok)
+        (t,v) <- duration
+            (simpleHttpHeader [("GData-Version","3.0")] req )
         print ("get",tb,getPK pk,t)
         return $ decode v
-    traverse (convertAttrs inf (tableMap inf) tb ) . fmap (\i -> (i :: Value)  ) $  decoded
+    traverse (convertAttrs inf (tableMap inf) tb ) .  fmap (\i -> (i :: Value)  ) $  decoded
 
 getDiffTable inf table  j = fmap (join . fmap (difftable j. unTB1) ) $ getTable  inf table $ TB1 j
 
 
-gmailOps = (SchemaEditor undefined undefined undefined listTable getDiffTable )
+gmailOps = (SchemaEditor undefined undefined undefined listTable updateTable getDiffTable )
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
@@ -131,36 +155,38 @@ convertAttrs :: InformationSchema -> M.Map Text Table ->  Table -> Value -> Tran
 convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb ))
   where
     pathOrigin (Path i _ _ ) = i
-    isFKJoinTable (Path _ (FKJoinTable _ _ _) i) = True
+    isFKJoinTable (Path _ (FKJoinTable _ _ _) _) = True
+    isFKJoinTable (Path i (RecJoin _ j  ) k) = isFKJoinTable (Path i j k)
     isFKJoinTable _ = False
+    fkFields = S.unions $ map pathOrigin $ filter isFKJoinTable $  F.toList $rawFKS tb
     kid :: Key -> TransactionM (Maybe (TB Identity Key Showable))
     kid  k
-      | S.member k (S.unions $ map pathOrigin $ filter isFKJoinTable $ F.toList $rawFKS tb)
+      | S.member k fkFields
             = let
                fks = justError "" (find ((== S.singleton k). pathOrigin) (F.toList (rawFKS tb)))
-               (FKJoinTable _ _ trefname ) = pathRel fks
+               (FKJoinTable _ _ trefname ) = unRecRel $ pathRel fks
+               vk = iv  ^? ( key (keyValue  k))
                fk =  F.toList $  pathRelRel fks
                exchange tname (KArray i)  = KArray (exchange tname i)
                exchange tname (KOptional i)  = KOptional (exchange tname i)
                exchange tname (Primitive i) = InlineTable "gmail" tname
+               exchange tname o@(InlineTable s i) = o
                patt = either
                     (traverse (\v -> do
                         tell (TableModification Nothing (lookTable infsch trefname ) . patchTB1 <$> F.toList v)
                         return $ FKT [Compose .Identity . Types.Attr  k $ (lbackRef    v) ]  fk v))
                     (traverse (\v -> do
-                            let ref = [Compose .Identity . Types.Attr  k $ v ]
-                            tbs <- liftIO $ runDBM infsch (atTable (tableMeta $ lookTable infsch trefname))
-                            return $ FKT ref fk (joinRel fk (fmap unTB ref) tbs) ))
-
-                        -- return $ FKT [Compose .Identity . Types.Attr  k $ v ] fk (ArrayTB1 [] )) )
-               funL = funO  (exchange trefname $ keyType k) $   (iv  ^? ( key (keyValue  k ))  )
-               funR = funO  (keyType k) $   (iv  ^? ( key (keyValue  k ))  )
+                        let ref = [Compose .Identity . Types.Attr  k $ v ]
+                        tbs <- liftIO$ runDBM infsch (atTable (tableMeta $ lookTable infsch trefname))
+                        FKT ref fk <$> (joinRelT fk  (fmap unTB ref) (lookTable infsch trefname) tbs )))
+               funL = funO  (exchange trefname $ keyType k) vk
+               funR = funO  (keyType k) vk
                mergeFun = do
                           (l,r) <- liftA2 (,) funL funR
                           return $ case (l,r) of
                             (Left (Just i),Right j) -> Left (Just i)
                             (Left i ,j ) -> j
-              in  join . fmap  patt $  mergeFun
+              in  join . fmap  patt $   mergeFun
       | otherwise =  fmap (either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) ) . funO  ( keyType k)  $ (iv ^? ( key ( keyValue k))  )
 
     fun :: KType Text -> Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))

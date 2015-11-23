@@ -4,6 +4,7 @@
 module Schema where
 
 import Types
+import Control.Monad.Writer
 import Debug.Trace
 import Prelude hiding (head)
 import Data.Unique
@@ -180,12 +181,13 @@ liftTable' inf tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapCom
             where
                   ta = lookTable inf tname
 
-
+fixPatch :: InformationSchema -> Text -> Index (TBData Key a) -> Index (TBData Key a)
 fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
 
 unRecRel (RecJoin _ l) = l
 unRecRel l = l
 
+fixPatchAttr :: InformationSchema -> Text -> Index (Column Key a) -> Index (Column Key a)
 fixPatchAttr inf t p@(PAttr _ _ ) =  p
 fixPatchAttr inf tname p@(PInline rel e ) =  PInline rel (fmap (\(_,o,v)-> (tableMeta $ lookTable inf tname2,o,fmap (fixPatchAttr  inf tname2 )v)) e)
     where Just (FKInlineTable tname2) = fmap (unRecRel.pathRel) $ L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (keyValue rel)) )  (F.toList$ rawFKS  ta)
@@ -202,7 +204,7 @@ liftKeys
 liftKeys inf tname = fmap (liftTable' inf tname)
 
 
-liftField :: InformationSchema -> Text -> TB Identity Text a -> TB Identity Key a
+liftField :: InformationSchema -> Text -> Column Text a -> Column Key a
 liftField inf tname (Attr t v) = Attr (lookKey inf tname t) v
 liftField inf tname (FKT ref  rel2 tb) = FKT (mapComp (liftField inf tname) <$> ref)   ( rel) (liftKeys inf tname2 tb)
     where (FKJoinTable _ rel tname2 ) = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
@@ -223,7 +225,7 @@ lookFresh inf n tname i = justError "no freshKey" $ M.lookup (n,tname,i) (plugin
 
 newKey name ty p = do
   un <- newUnique
-  return $ Key name Nothing    [] p Nothing un ty
+  return $ Key name Nothing    [FRead,FWrite] p Nothing un ty
 
 
 catchPluginException :: InformationSchema -> Text -> Text -> [(Key, FTB Showable)] -> IO (Maybe a) -> IO (Maybe a)
@@ -292,23 +294,18 @@ testAcademia q = testParse "academia" "academia"  q
 
 
 dbTable mvar table = do
-    mmap <- takeMVar mvar
-    (mtable,td) <- case (M.lookup table mmap ) of
-         Just (i,td) -> do
-           putMVar mvar mmap
-           return (i,td)
-         Nothing -> errorWithStackTrace ("no table " <> show table)
-    return (mtable,td)
+    mmapm <- tryTakeMVar mvar
+    case mmapm of
+        Just mmap ->
+          case (M.lookup table mmap ) of
+               Just (i,td) -> do
+                  putMVar mvar mmap
+                  return $ Just (i,td)
+               Nothing -> do
+                  putMVar mvar mmap
+                  return Nothing
+        Nothing -> return Nothing
 
-
-{-
-testLoadDelayed inf t = do
-   let table = lookTable inf t
-       tb = tableView (tableMap inf) table
-   print tb
-   res  <- queryWith_ (fromAttr (unTlabel tb)) (conn inf) (fromString $ T.unpack $ selectQuery tb )
-   mapM (loadDelayed inf (unTB1 $ unTlabel tb ). unTB1 ) res
-   -}
 
 
 mergeTB1 (TB1  (m,Compose k) ) (TB1  (m2,Compose k2) )
@@ -321,7 +318,7 @@ ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
 
 -- Load optional not  loaded delayed values
 -- and merge to older values
-applyAttr' :: (Show a,Ord a ,a~ Index a)  =>  TB Identity Key a  -> PathAttr Key a -> DBM Key a (TB Identity Key a)
+applyAttr' :: (Show a,Ord a ,a~ Index a)  =>  Column Key a  -> PathAttr Key a -> DBM Key a (Column Key a)
 applyAttr' (Attr k i) (PAttr _ p)  = return $ Attr k (applyShowable i p)
 applyAttr' sfkt@(FKT iref rel i) (PFK _ p m b )  =  do
                             let ref =  F.toList $ M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList iref)
@@ -347,7 +344,7 @@ applyTB1'
      -> DBM Key a (TB2 Key a)
 applyTB1' = applyFTBM (fmap pure $ createTB1) applyRecord'
 
-createAttr' :: (Ord a ,Show a ,Index a ~ a) => PathAttr Key a -> DBM Key a (TB Identity Key a)
+createAttr' :: (Ord a ,Show a ,Index a ~ a) => PathAttr Key a -> DBM Key a (Column Key a)
 createAttr' (PAttr  k s  ) = return $ Attr k  (createShowable s)
 createAttr' (PInline k s ) = return $ IT (_tb $ Attr k (TB1 ())) (createFTB createTB1 s)
 createAttr' (PFK rel k s b ) = do
@@ -370,17 +367,39 @@ type DBM k v = ReaderT (Database k v) IO
 atTable ::  KVMetadata Key -> DBM Key v [TBData Key v]
 atTable k = do
   i <- ask
-  (m,c)<- liftIO$ dbTable i k
-  fmap snd $ liftIO $ R.currentValue (R.facts c)
+  k <- liftIO$ dbTable i k
+  maybe (return []) (\(m,c)-> fmap snd $ liftIO $ R.currentValue (R.facts c)) k
 
-joinRel :: (Ord a ,Show a) => [Rel Key] -> [TB Identity Key a] -> [TBData Key a] -> FTB (TBData Key a)
+joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  [TBData Key Showable] -> TransactionM ( FTB (TBData Key Showable))
+joinRelT rel ref tb table
+  | L.all (isOptional .keyType) origin = fmap LeftTB1 $ traverse (\ref->  joinRelT (Le.over relOrigin unKOptional <$> rel ) ref  tb table) (traverse unLeftItens ref )
+  | L.any (isArray.keyType) origin = fmap ArrayTB1 $ traverse (\ref -> joinRelT (Le.over relOrigin unKArray <$> rel ) ref  tb table ) (fmap (\i -> pure $ justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(L.length (unArray $ unAttr $ head ref) - 1)])
+  | otherwise = maybe (tell (TableModification Nothing tb . patchTB1 <$> F.toList tbcreate) >> return tbcreate ) (return .TB1) tbel
+      where origin = fmap _relOrigin rel
+            tbcreate = tblist' tb (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )
+            relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
+            tbel = L.find (\(_,i)-> interPointPost rel ref (nonRefAttr  $ F.toList $ _kvvalues $ unTB  i) ) table
+
+
+joinRel :: (Ord a ,Show a) => [Rel Key] -> [Column Key a] -> [TBData Key a] -> FTB (TBData Key a)
 joinRel rel ref table
   | L.all (isOptional .keyType) origin = LeftTB1 $ fmap (flip (joinRel (Le.over relOrigin unKOptional <$> rel ) ) table) (traverse unLeftItens ref )
   | L.any (isArray.keyType) origin = ArrayTB1 $ fmap (flip (joinRel (Le.over relOrigin unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(L.length (unArray $ unAttr $ head ref) - 1)])
-  | otherwise = TB1 $ justError "" $ L.find (\(_,i)-> interPointPost rel ref (nonRefAttr  $ F.toList $ _kvvalues $ unTB  i) ) table
+  | otherwise = maybe (tblist (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )) TB1 tbel
       where origin = fmap _relOrigin rel
+            relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
+            tbel = L.find (\(_,i)-> interPointPost rel ref (nonRefAttr  $ F.toList $ _kvvalues $ unTB  i) ) table
 
 
 -- test inf i j = runDBM inf (applyTB1' i j)
 runDBM inf m = do
     runReaderT m (mvarMap inf)
+
+
+lookPK :: InformationSchema -> (Set Key) -> Table
+lookPK inf pk =
+      case  M.lookup pk  (pkMap inf) of
+           Just table -> table
+           i -> errorWithStackTrace (show pk)
+
+
