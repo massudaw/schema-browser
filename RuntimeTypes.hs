@@ -42,28 +42,25 @@ data InformationSchema
 type DBVar2 k v = ( MVar  ((Int,Map Int PageToken),[TBData k v ]), R.Tidings ((Int,Map Int PageToken ),[TBData k v ]))
 type DBVar = DBVar2 Key Showable
 
-data Plugins
+type Plugins = FPlugins Text
+data FPlugins k
   =  StatefullPlugin
   { _name ::  Text
   , _bounds :: Text
   , _statevar :: [[(Text,KType Text)]]
-  , _statefullAction :: [Plugins]
+  , _statefullAction :: [FPlugins k ]
   }
   | BoundedPlugin2
   { _name :: Text
   , _bounds :: Text
   , _arrowbounds :: (Access Text,Access Text)
-  , _boundedAction2 :: InformationSchema -> (Maybe (TB1 Showable)) -> IO (Maybe (TB1 Showable))
+  , _boundedAction2 :: InformationSchema -> (Maybe (TB2 k  Showable)) -> IO (Maybe (TB2 k Showable))
   }
   | PurePlugin
   { _name :: Text
   , _bounds :: Text
   , _arrowbounds :: (Access Text,Access Text)
-  , _action :: InformationSchema -> Maybe (TB1 Showable) -> Maybe (TB1 Showable)
-  }
-  | SequentialPlugin
-  { _name :: Text
-  , _splugs :: [ Plugins]
+  , _action :: InformationSchema -> Maybe (TB2 k Showable) -> Maybe (TB2 k Showable)
   }
   | ArrowPlugin
   { _name :: Text
@@ -100,6 +97,6 @@ data Access a
   | Many [Access a]
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
 
-type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))
-type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TB1 Showable)) m )) (Access Text) () (Maybe (TB2  Text Showable))
+type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TB2 Text Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))
+type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TB2 Text Showable)) m )) (Access Text) () (Maybe (TB2  Text Showable))
 

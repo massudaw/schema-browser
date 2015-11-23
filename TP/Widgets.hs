@@ -287,9 +287,11 @@ paintEdit e b i  = element e # sink0 UI.style ((\ m n -> pure . ("background-col
           | isNothing i  && isNothing j = "red"
           | isNothing i && isJust j  = "purple"
           -- | i /= j = "yellow"
-          | i /= j = trace (concat $ fmap differ $   zip  (show i ) ( show j)) "yellow"
+          | i /= j = trace ((concat $ fmap differ $   zip  si sj) <> L.drop (L.length sj) si  <> L.drop (L.length si) sj ) "yellow"
           | i == j = "blue"
           | otherwise = "green"
+              where si = show i
+                    sj = show j
 differ = (\(i,j) -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 paintBorder e b i  = element e # sink0 UI.style ((\ m n -> (:[("border-style","solid"),("border-width","1px")]).("border-color",) $ cond  m n ) <$> b <*> i )
   where cond i j

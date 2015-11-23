@@ -94,7 +94,7 @@ siapi2Plugin = BoundedPlugin2  pname tname (staticP url) elemp
 
     elemp inf = maybe (return Nothing) (\inp -> do
                               b <- runReaderT (dynPK url $ () ) (Just inp)
-                              return $ liftKeys inf tname   <$> b)
+                              return  b)
     tailEmpty [] = []
     tailEmpty i  = tail i
 
@@ -114,7 +114,7 @@ cnpjCaptcha = BoundedPlugin2 pname tname (staticP url ) elemp
     elemp inf = maybe (return Nothing) (geninf inf)
     geninf inf inp = do
             b <- runReaderT (dynPK url $ () ) (Just inp)
-            return $ liftKeys inf tname  <$> b
+            return  b
 
 cnpjForm = BoundedPlugin2 pname tname (staticP url ) elemp
   where
@@ -134,7 +134,7 @@ cnpjForm = BoundedPlugin2 pname tname (staticP url ) elemp
     elemp inf = maybe (return Nothing) (geninf inf)
     geninf inf inp = do
             b <- runReaderT (dynPK url $ () ) (Just inp)
-            return $ liftKeys inf tname  <$> b
+            return  b
     arrowS = proc t -> do
               idxR "captchaInput" -< t
               odxR "owner_name" -< t
@@ -181,7 +181,7 @@ analiseProjeto = BoundedPlugin2 pname tname (staticP url ) elemp
     elemp inf = maybe (return Nothing) (geninf inf)
     geninf inf inp = do
             b <- runReaderT (dynPK url $ () ) (Just inp)
-            return $ liftKeys inf tname  <$> b
+            return  b
 
 
 
@@ -217,7 +217,7 @@ siapi3Plugin  = BoundedPlugin2 pname tname  (staticP url) elemp
     elemp inf = maybe (return Nothing) (geninf inf)
     geninf inf inp = do
             b <- runReaderT (dynPK url $ () ) (Just inp)
-            return $ liftKeys inf tname  <$> b
+            return b
 
 bool = TB1 . SBoolean
 num = TB1 . SNumeric
@@ -316,7 +316,7 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
 
     elem inf = maybe (return Nothing) (\inp -> do
                   b <- runReaderT (dynPK   url $ ())  (Just inp)
-                  return $ liftKeys inf tname  <$> b )
+                  return  b )
 {-
 encodeMessage = PurePlugin "Encode Email" tname (staticP url) elem
   where
@@ -384,7 +384,7 @@ encodeMessage = PurePlugin "Encode Email" tname (staticP url) elem
     decoder' (LeftTB1 i) =  (join $ fmap decoder' i)
     elem inf = maybe Nothing (\inp -> runIdentity $ do
                       b <- runReaderT (dynPK   url $ ())  ( Just inp)
-                      return $  liftKeys inf tname  <$> b
+                      return   b
                             )
 
 
@@ -401,7 +401,7 @@ pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname (staticP url) elem
 
     elem inf = maybe (return Nothing) (\inp -> do
                       b <- runReaderT (dynPK   url $ ())  (Just inp)
-                      return $  liftKeys inf tname  <$> b
+                      return b
                             )
 
 
@@ -438,7 +438,7 @@ importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
       returnA -< tbst
     elem inf = maybe (return Nothing) (\inp -> do
                 b <- runReaderT (dynPK url ()) (Just inp)
-                return $ liftKeys inf  tname  <$> b)
+                return $ b)
 
 
 notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" tname (staticP url) elem
@@ -459,7 +459,7 @@ notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" tname (staticP url) elem
       returnA -< ao
     elem inf = maybe (return Nothing) (\inp -> do
                               b <- runReaderT (dynPK url  ()) (Just inp)
-                              return $ liftKeys inf tname  <$> b
+                              return $ b
                             )
 
 queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" tname (staticP url) elem
@@ -481,7 +481,7 @@ queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" tname (staticP url) ele
       returnA -< ao
     elem inf = maybe (return Nothing) (\inp -> do
                               b <- runReaderT (dynPK url  $ ()) (Just inp)
-                              return $ liftKeys inf tname . traceShowId <$> b
+                              return $ b
                             )
 
 
@@ -506,7 +506,7 @@ queryArtBoletoCrea = BoundedPlugin2  pname tname (staticP url) elem
     elem inf
        = maybe (return Nothing) (\inp -> do
                             b <- runReaderT (dynPK url $ () ) (Just inp)
-                            return $ liftKeys inf tname <$> b )
+                            return $ b )
 
 
 
@@ -530,7 +530,7 @@ queryArtAndamento = BoundedPlugin2 pname tname (staticP url) elemp
     elemp inf
           = maybe (return Nothing) (\inp -> do
                    b <- runReaderT (dynPK url $ () )  (Just inp)
-                   return $  liftKeys inf tname  <$> b)
+                   return $  b)
 
 
 queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
@@ -553,4 +553,5 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
 
 -}
 
+plugList :: [Plugins]
 plugList = [encodeMessage ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,,queryCPFStatefull, -}queryCNPJStatefull, queryArtAndamento]

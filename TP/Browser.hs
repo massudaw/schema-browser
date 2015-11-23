@@ -104,7 +104,7 @@ main = do
   tokenRef <- oauthpoller
   mvar <- newMVar M.empty
   smvar <- newMVar M.empty
-  e <- poller smvar mvar (argsToState (tail args) )  [siapi2Plugin,siapi3Plugin ]
+  e <- poller smvar mvar (argsToState (tail args))  [siapi2Plugin,siapi3Plugin ]
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e mvar smvar tokenRef $ tail args)
   print "Finish"
 
@@ -136,7 +136,7 @@ poller schm dbm db plugs = do
                   tdInput i =  isJust  $ checkTable  (fst f) i
                   tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
               let elem inf  = fmap catMaybes .  mapM (\inp -> do
-                          o  <- catchPluginException inf a n (getPK inp)    (elemp inf (Just inp))
+                          o  <- fmap (liftKeys inf a) <$> catchPluginException inf a n (getPK inp)    ( elemp inf (Just $ mapKey keyValue inp))
                           let diff =   join $ (\i j -> diffUpdateAttr   (unTB1 i ) (unTB1 j)) <$>  o <*> Just inp
                           maybe (return Nothing )  (\i -> updateMod inf (unTB1 $ fromJust o) (unTB1 inp) (lookTable inf a )) diff )
 

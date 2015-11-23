@@ -116,13 +116,13 @@ pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
            ) (_arrowbounds <$> ac ) freshKeys
   el <- UI.div # set UI.children (headerP : (concat $ fmap (\(_,_,o,i)-> concat $ [fmap getElement o ,[getElement i]]) freshUI ))
   o <- foldl' (\unoldM (f,((h,htidings,loui,inp),action))  -> unoldM >>= (\unoldItems -> do
-      let oldItems = liftA2 (\i j  -> mergeTB1 i j ) <$>  unoldItems <*> triding inp
+      let oldItems = liftA2 (\i j  -> mergeTB1 i j ) <$>  unoldItems <*> fmap (fmap (mapKey keyValue)) (triding inp)
       e <- mapTEvent  (action inf) oldItems
-      liftIO  . h =<< currentValue (facts e)
-      onEvent (rumors e) (liftIO . h)
-      return  (liftA2 mergeTB1 <$> oldItems <*> e ) ))  (return trinp) ( zip (_arrowbounds <$> ac ) $ zip freshUI (_boundedAction2 <$> ac) )
+      liftIO  . h =<< currentValue (fmap (liftKeys inf tname )<$> facts e)
+      onEvent (rumors e) (liftIO . h . fmap (liftKeys inf tname ))
+      return  (liftA2 mergeTB1 <$> oldItems <*> e ) ))  (return $fmap (fmap (mapKey keyValue)) trinp) ( zip (_arrowbounds <$> ac ) $ zip freshUI (_boundedAction2 <$> ac) )
   element el # sink UI.style (noneShow <$> facts tdInput)
-  return (el ,  (  ((\(_,o,_,_) -> o)$ last freshUI ) ))
+  return (el ,   (  ((\(_,o,_,_) -> o)$ last freshUI ) ))
 
 pluginUI inf oldItems (PurePlugin n t f action) = do
   let tdInput = join . fmap (checkTable (fst f)) <$>  oldItems
@@ -133,8 +133,8 @@ pluginUI inf oldItems (PurePlugin n t f action) = do
   out <- UI.div # set children [headerP,details]
   ini <- currentValue (facts oldItems)
   kk <- stepper ini (diffEvent (facts oldItems) (rumors oldItems))
-  pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . return . action inf $ trace "iter plugin" v)  (tidings kk $diffEvent kk (rumors oldItems))
-  return (out, (snd f ,   pgOut ))
+  pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . return . action inf $  fmap (mapKey keyValue) v)  (tidings kk $diffEvent kk (rumors oldItems))
+  return (out, (snd f ,   fmap (liftKeys inf t) <$> pgOut ))
 
 pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
   overwrite <- checkedWidget (pure False)
@@ -149,8 +149,8 @@ pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
   vo <- currentValue (facts tdOutput)
   vi <- currentValue (facts tdInput)
   bcv <- stepper (maybe vi (const Nothing) vo) ecv
-  pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . action inf $ v)  (tidings bcv ecv)
-  return (out, (snd f ,   pgOut ))
+  pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . action inf $ fmap (mapKey keyValue) v)  (tidings bcv ecv)
+  return (out, (snd f ,   fmap (liftKeys inf t )<$> pgOut ))
 
 
 attrSize :: TB Identity Key b -> (Int,Int)
@@ -330,7 +330,7 @@ eiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItems = do
       tableb  = fmap (TB1 . (tableMeta table,) . Compose . Identity . KV . mapFromTBList . fmap _tb) .   Tra.sequenceA <$> Tra.sequenceA (triding .snd <$> fks)
   let
       initialSum = join . fmap (\(TB1 (n,  j) ) ->    fmap keyattr $ safeHead $ catMaybes  $ (fmap (Compose . Identity. fmap (const ()) ) . unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)))) <$> oldItemsPlug
-      sumButtom i =  UI.button # set text (L.intercalate "," $ fmap (show._relOrigin) $ keyattr $ i) # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default"
+      sumButtom i =  flabel # set text (L.intercalate "," $ fmap (show._relOrigin) $ keyattr $ i) # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default"
   chk  <- buttonDivSet (F.toList (_kvvalues $ unTB k))  (join . fmap (\i -> M.lookup (S.fromList i) (_kvvalues (unTB k))) <$> initialSum ) sumButtom
   sequence $ (\(kix,el) -> element  el # sink0 UI.style (noneShow <$> ((==keyattri kix) .keyattr <$> facts (triding chk) ))) <$> fks
   let
@@ -706,8 +706,8 @@ buildPrim tdi i = case i of
             let f = facts tdi
             v <- currentValue f
             inputUI <- UI.input # sink0 UI.value (maybe "" renderPrim <$> f)
-            let pke = unionWith const  (rumors tdi) (readPrim i <$> UI.valueChange inputUI)
-            pk <- stepper v  (diffEvent (facts tdi) pke)
+            let pke = unionWith const   (readPrim i <$> UI.valueChange inputUI) (rumors tdi)
+            pk <- stepper v  pke
             let pkt = tidings pk (diffEvent pk pke)
             sp <- UI.div # set children (inputUI : elem)
             paintBorder sp (facts pkt) (facts tdi)
@@ -799,7 +799,7 @@ isReadOnly (IT k _ ) =   (isReadOnly $ unTB k)
 fkUITable
   ::
   InformationSchema
-  -> [Plugins]
+  -> [Plugins ]
   -- Plugin Modifications
   -> SelTBConstraint
   -> [(Access Text,Tidings (Maybe (TB Identity Key Showable)))]

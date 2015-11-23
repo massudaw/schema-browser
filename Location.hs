@@ -18,7 +18,6 @@ import qualified Data.List as L
 -- import Query
 
 import Types
-import Schema
 import RuntimeTypes
 import Control.Monad.IO.Class
 import Control.Monad.Reader
@@ -99,5 +98,5 @@ queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address" (staticP open  )  el
       element inf
           = maybe (return Nothing) (\inp -> do
                    b <- runReaderT (dynPK open ()) (Just inp)
-                   return $ mapKey (lookKey inf "address")  <$> b)
+                   return $  b)
 

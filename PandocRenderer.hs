@@ -24,7 +24,6 @@ import qualified Data.Foldable as F
 
 import qualified Data.Map as M
 import qualified Reactive.Threepenny as R
-import Schema
 import System.IO
 import Data.Functor.Identity
 
@@ -34,31 +33,6 @@ import Control.Arrow
 import Data.Monoid
 import Data.Text.Lazy(Text)
 
-{-
-renderFireProjectReport conn _ inputs = (,pure Nothing) <$> element
-  where
-      varMap input = M.fromList $ (\(i,j)-> (keyValue i,j)) <$> input
-      var env str = maybe "" fromString (renderShowable <$> M.lookup str (varMap env) )
-      arrayVar env str = bulletList . concat . maybeToList $ join  (cshow <$> M.lookup str (varMap env) )
-        where
-          cshow (SComposite a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
-          cshow (SOptional a ) =  join $ fmap cshow a
-      -- myDoc :: Pandoc
-      myDoc env = setTitle "Project Report" $ doc $
-         bulletList [
-               plain ("Propietário : " <> vr "owner_name"),
-               plain ("Local: " <> vr "municipio" <> "-" <> vr "uf"),
-               plain ("Endereço: " <> vr "logradouro" <> ", " <> vr "number" <> " " <>   vr "complemento")
-                  ]
-        where
-          vr = var env
-      element = do
-             template <- liftIO $ readFile "raw.template"
-             pdfTidings <- joinTEvent   ( maybe (return (Left "")) ( makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template } . myDoc) <$>  inputs)
-             mkElement "iframe" # sink UI.src ( fmap (\i -> "data:application/pdf;base64," <> i) $ fmap (either BS.unpack (BS.unpack.BS64.encode)) $ facts pdfTidings) # set style [("width","100%"),("height","300px")]
-            --UI.div # sink html (maybe ""  (writeHtmlString def . myDoc) <$> facts inputs)
-            --
-            -}
 
 setFooter ,setT :: Blocks -> Pandoc -> Pandoc
 setFooter = setMeta "footer"
@@ -103,7 +77,7 @@ renderProjectContract = (staticP myDoc , element )
           returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "contract" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict . either id id ) outdoc
       element inf = maybe (return Nothing) (\inp -> do
                               b <- runReaderT (dynPK myDoc $ ()) (Just inp)
-                              return $ liftKeys inf tname <$> b)
+                              return $ b)
 
 
 renderProjectReport = (staticP myDoc , element )
@@ -132,7 +106,7 @@ renderProjectReport = (staticP myDoc , element )
           returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "report" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict . either id id ) outdoc
       element inf = maybe (return Nothing) (\inp -> do
                               b <- runReaderT (dynPK myDoc $ ()) (Just inp)
-                              return $ liftKeys inf tname <$> b)
+                              return $ b)
 
 
 renderProjectPricingA = (staticP myDoc , element )
@@ -190,7 +164,7 @@ renderProjectPricingA = (staticP myDoc , element )
           returnA -<  (Just .  tbmap .mapFromTBList . pure . Compose. Identity . Attr "orcamento" . LeftTB1 . Just . DelayedTB1 .Just . TB1 . SBinary .  BS.toStrict . either id id ) outdoc
       element inf = maybe (return Nothing) (\inp -> do
                               b <- runReaderT (dynPK myDoc ()) (Just inp)
-                              return $ liftKeys inf tname  <$> b)
+                              return $ b)
 
 
 
