@@ -92,7 +92,6 @@ isKOptional (KInterval i) = isKOptional i
 isKOptional (Primitive _) = False
 isKOptional (InlineTable _ _) = False
 isKOptional (KArray i)  = isKOptional i
-isKOptional (KEither _ _) = False
 isKOptional i = errorWithStackTrace (show ("isKOptional",i))
 
 
@@ -178,7 +177,7 @@ dropTable r= "DROP TABLE "<> rawFullName r
 
 rawFullName = showTable
 
-createTable r@(Raw sch _ _ _ tbl _ _ pk _ fk inv attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
+createTable r@(Raw sch _ _ _ _ tbl _ _ pk _ fk inv attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
   where
     commands = (renderAttr <$> S.toList attr ) <> [renderPK] <> fmap renderFK (S.toList fk)
     renderAttr k = keyValue k <> " " <> renderTy (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
@@ -296,15 +295,10 @@ isReflexive (Path i r@(FKJoinTable _ ks _ )  t)
 isReflexive (Path _ l _ ) = isPathReflexive l
 
 isPathReflexive (FKJoinTable _ ks _)
-  | otherwise   = all id $ fmap (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
+  | otherwise   = all id $ fmap (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) (traceShowId ks)
 isPathReflexive (FKInlineTable _)= True
-isPathReflexive (FKEitherField _ )= False
 isPathReflexive (RecJoin _ i ) = isPathReflexive i
 
-isPathEither (FKJoinTable _ ks _) = False
-isPathEither (FKInlineTable _)= False
-isPathEither (FKEitherField _ )= True
-isPathEither (RecJoin _ i ) = isPathEither i
 
 
 allRec'
@@ -865,7 +859,6 @@ instance P.Poset (FKey (KType Text))where
 inlineName (KOptional i) = inlineName i
 inlineName (KArray a ) = inlineName a
 inlineName (InlineTable _ i) = i
-inlineName (KEither _ i) = i
 
 inlineFullName (KOptional i) = inlineFullName i
 inlineFullName (KArray a ) = inlineFullName a

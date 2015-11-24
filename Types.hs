@@ -121,7 +121,6 @@ pathRelStore (Path _ _ ifk ) = ifk
 pathRelRel :: Ord k => Path (Set k ) (SqlOperationK k) -> Set (Rel k)
 pathRelRel (Path _ (FKJoinTable _ rel  _ ) _ ) = Set.fromList rel
 pathRelRel (Path r (FKInlineTable  _   )  _ ) = Set.map Inline r
-pathRelRel (Path r (FKEitherField _    )  _ ) = Set.map Inline r
 pathRelRel (Path r (RecJoin l rel )  a ) =  pathRelRel (Path r rel a)
 
 pathRelRel' :: Ord k => Path (Set k ) (SqlOperationK k) -> MutRec [Set (Rel k )]
@@ -368,7 +367,6 @@ data KPrim
 data KType a
    = Primitive a
    | InlineTable {- schema -} Text {- tablename -} Text
-   | KEither {- schema -} Text {- tablename -} Text
    | KSerial (KType a)
    | KArray (KType a)
    | KInterval (KType a)
@@ -386,7 +384,6 @@ instance Show (KType Text) where
 
 showTy f (Primitive i ) = f i
 showTy f (InlineTable s i ) = "[" <>  fromString (T.unpack $ s <> "." <>  i) <> "]"
-showTy f (KEither s i ) = "|" <>  fromString (T.unpack $ s <> "." <>  i) <> "|"
 showTy f (KArray i) = "{" <>  showTy f i <> "}"
 showTy f (KOptional i) = showTy f i <> "*"
 showTy f (KInterval i) = "(" <>  showTy f i <> ")"
@@ -479,7 +476,6 @@ data SqlOperationK k
   | FKJoinTable Text [Rel k ] Text
   | RecJoin (MutRec [[Rel k ]])  (SqlOperationK k)
   | FKInlineTable Text
-  | FKEitherField Text
   deriving(Eq,Ord,Show)
 
 fkTargetTable (FKJoinTable t r tn) = tn
@@ -500,12 +496,13 @@ data TableType
 
 type Table = TableK Key
 
-mapTableK f (Raw  s tt tr de rn  un ra rp rd rf inv rat ) = Raw s tt tr (S.map f de) rn (fmap (S.map f) un) ra (S.map f rp) (fmap f rd) S.empty  S.empty (S.map f rat)
+mapTableK f (Raw  s tt tr de is rn  un ra rp rd rf inv rat ) = Raw s tt tr (S.map f de) is rn (fmap (S.map f) un) ra (S.map f rp) (fmap f rd) S.empty  S.empty (S.map f rat)
 data TableK k
     =  Raw { rawSchema :: Text
            , rawTableType :: TableType
            , rawTranslation :: Maybe Text
            , rawDelayed :: (Set k)
+           , rawIsSum :: Bool
            , rawName :: Text
            , uniqueConstraint :: [Set k]
            , rawAuthorization :: [Text]
@@ -828,10 +825,6 @@ instance Ord k => Monoid (KV f k a) where
   mappend (KV i ) (KV j)   =    KV (Map.union i  j)
 
 unKV = _kvvalues . unTB
-isKEither (KOptional i ) = isKEither i
-isKEither (KArray i ) = isKEither i
-isKEither (KEither _ i) = True
-isKEither _ = False
 
 isInline (KOptional i ) = isInline i
 isInline (KArray i ) = isInline i

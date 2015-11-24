@@ -15,7 +15,6 @@ import qualified Data.Text as TL
 
 import qualified Data.List as L
 
--- import Query
 
 import Types
 import RuntimeTypes

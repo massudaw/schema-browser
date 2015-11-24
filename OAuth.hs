@@ -201,8 +201,6 @@ convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (trav
                 where l = catMaybes lm
     fun (InlineTable i  m ) v = Left . tbNull <$>  convertAttrs infsch inf   (justError "no look" $  M.lookup m inf ) v
         where  tbNull tb = if null (getAttr' tb) then Nothing else Just  tb
-    fun (KEither i  m ) v = Left . tbNull <$>  convertAttrs infsch inf   (justError "no look" $  M.lookup m inf ) v
-        where  tbNull tb = if null (getAttr' tb) then Nothing else Just  tb
     fun i v = errorWithStackTrace (show (i,v))
 
     funO ::  KType Text -> Maybe Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
@@ -212,7 +210,6 @@ convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (trav
     typ (KArray i ) = typ i
     typ (Primitive _ ) = Right Nothing
     typ (InlineTable _ _ ) = Left Nothing
-    typ (KEither _ _ ) = Left Nothing
 
 
 instance Biapplicative Either where
