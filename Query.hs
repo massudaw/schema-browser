@@ -295,7 +295,7 @@ isReflexive (Path i r@(FKJoinTable _ ks _ )  t)
 isReflexive (Path _ l _ ) = isPathReflexive l
 
 isPathReflexive (FKJoinTable _ ks _)
-  | otherwise   = all id $ fmap (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) (traceShowId ks)
+  | otherwise   = all id $ fmap (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
 isPathReflexive (FKInlineTable _)= True
 isPathReflexive (RecJoin _ i ) = isPathReflexive i
 
