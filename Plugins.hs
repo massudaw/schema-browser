@@ -533,8 +533,9 @@ queryArtAndamento = BoundedPlugin2 pname tname (staticP url) elemp
                    return $  b)
 
 
+atPrim s g = Primitive (AtomicPrim (s,g))
 queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
-  [[("captchaViewer",Primitive "jpg"),("sess",Primitive "session")],[("captchaInput",Primitive "character varying")]] [cnpjCaptcha,cnpjForm]
+  [[("captchaViewer",atPrim "public" "jpg"),("sess",atPrim "gmaiL" "session")],[("captchaInput",atPrim "pg_catalog" "character varying")]] [cnpjCaptcha,cnpjForm]
     where arrowF :: ArrowReader
           arrowF = proc t -> do
             atAny "ir_reg" [idxR "cnpj_number"] -< t

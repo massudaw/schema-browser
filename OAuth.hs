@@ -169,8 +169,8 @@ convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (trav
                fk =  F.toList $  pathRelRel fks
                exchange tname (KArray i)  = KArray (exchange tname i)
                exchange tname (KOptional i)  = KOptional (exchange tname i)
-               exchange tname (Primitive i) = InlineTable "gmail" tname
-               exchange tname o@(InlineTable s i) = o
+               exchange tname (Primitive (AtomicPrim i) ) = Primitive $ RecordPrim ("gmail", tname)
+               exchange tname (Primitive (RecordPrim i) ) = Primitive $ RecordPrim i
                patt = either
                     (traverse (\v -> do
                         tell (TableModification Nothing (lookTable infsch trefname ) . patchTB1 <$> F.toList v)
@@ -189,27 +189,28 @@ convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (trav
               in  join . fmap  patt $   mergeFun
       | otherwise =  fmap (either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) ) . funO  ( keyType k)  $ (iv ^? ( key ( keyValue k))  )
 
-    fun :: KType Text -> Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
-    fun (Primitive i) v = return $ Right $ fmap TB1 $ join $
+    fun :: KType (Prim (Text,Text) (Text,Text))-> Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
+    fun (Primitive i) v =
         case textToPrim i of
-          PText -> readPrim (textToPrim i) . T.unpack <$> (v ^? _String)
-          PInt -> Just . SNumeric . round <$> (v ^? _Number)
-          PDouble -> Just . SDouble . realToFrac  <$> (v ^? _Number)
-          PBinary -> readPrim (textToPrim i) . T.unpack  <$> (v ^? _String)
+          AtomicPrim k -> return $ Right $ fmap TB1 $ join $ case k of
+            PText -> readPrim k . T.unpack <$> (v ^? _String)
+            PInt -> Just . SNumeric . round <$> (v ^? _Number)
+            PDouble -> Just . SDouble . realToFrac  <$> (v ^? _Number)
+            PBinary -> readPrim k . T.unpack  <$> (v ^? _String)
+          RecordPrim (i,m) ->  Left . tbNull <$>  convertAttrs infsch inf   (justError "no look" $  M.lookup m inf ) v
+                where  tbNull tb = if null (getAttr' tb) then Nothing else Just  tb
     fun (KArray i) v = (\l -> if null l then return (typ i) else fmap (bimap  nullArr  nullArr) .   biTrav (fun i) $ l ) $ (v ^.. values )
         where nullArr lm = if null l then Nothing else Just (ArrayTB1 l)
                 where l = catMaybes lm
-    fun (InlineTable i  m ) v = Left . tbNull <$>  convertAttrs infsch inf   (justError "no look" $  M.lookup m inf ) v
-        where  tbNull tb = if null (getAttr' tb) then Nothing else Just  tb
     fun i v = errorWithStackTrace (show (i,v))
 
-    funO ::  KType Text -> Maybe Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
+    funO ::  KType (Prim (Text,Text) (Text,Text))-> Maybe Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
     funO (KOptional i) v =  fmap (bimap (Just . LeftTB1) (Just . LeftTB1)) . maybe (return $ typ i) (fun i) $ v
     funO i v = maybe (return $typ i) (fun i) v
 
     typ (KArray i ) = typ i
-    typ (Primitive _ ) = Right Nothing
-    typ (InlineTable _ _ ) = Left Nothing
+    typ (Primitive (AtomicPrim i ) ) = Right Nothing
+    typ (Primitive (RecordPrim i ) ) = Left Nothing
 
 
 instance Biapplicative Either where

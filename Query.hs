@@ -90,9 +90,8 @@ isKOptional (KOptional i) = True
 isKOptional (KSerial i) = isKOptional i
 isKOptional (KInterval i) = isKOptional i
 isKOptional (Primitive _) = False
-isKOptional (InlineTable _ _) = False
 isKOptional (KArray i)  = isKOptional i
-isKOptional i = errorWithStackTrace (show ("isKOptional",i))
+-- isKOptional i = errorWithStackTrace (show ("isKOptional",i))
 
 
 
@@ -118,7 +117,7 @@ pkOp a b c d = errorWithStackTrace (show (a,b,c,d))
 pkOpSet i l = (\i -> if L.null i then False else L.all id i) $ zipWith (\(a,b) (c,d)->  pkOp (keyType a)  (keyType c) b d) (L.sortBy (comparing fst ) i) (L.sortBy (comparing fst) l)
 
 
-intersectionOp :: KType KPrim -> Text -> KType KPrim -> (Text -> Text -> Text)
+intersectionOp :: (Eq b,Show (KType (Prim KPrim b ))) => KType (Prim KPrim b)-> Text -> KType (Prim KPrim b)-> (Text -> Text -> Text)
 intersectionOp (KOptional i) op (KOptional j) = intersectionOp i op j
 intersectionOp i op (KOptional j) = intersectionOp i op j
 intersectionOp (KOptional i) op j = intersectionOp i op j
@@ -152,7 +151,7 @@ attrValue :: (Ord a,Show a) => TB Identity Key a -> FTB a
 attrValue (Attr _  v)= v
 attrValue i = errorWithStackTrace $ " no attr value instance " <> show i
 
-attrType :: (Ord a,Show a) => TB Identity Key a -> KType Text
+attrType :: (Ord a,Show a) => TB Identity Key a -> KType (Prim (Text,Text) (Text,Text))
 attrType (Attr i _)= keyType i
 attrType (IT i _) = overComp attrType i
 attrType i = errorWithStackTrace $ " no attr value instance " <> show i
@@ -187,7 +186,7 @@ createTable r@(Raw sch _ _ _ _ tbl _ _ pk _ fk inv attr) = "CREATE TABLE " <> ra
     renderTy (KInterval ty) = renderTy ty <> ""
     renderTy (KArray ty) = renderTy ty <> "[] "
     renderTy (Primitive ty ) = ty
-    renderTy (InlineTable s ty ) = s <> "." <> ty
+    -- renderTy (InlineTable s ty ) = s <> "." <> ty
     renderPK = "CONSTRAINT " <> tbl <> "_PK PRIMARY KEY (" <>  renderKeySet pk <> ")"
     renderFK (Path origin (FKJoinTable _ ks table) end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
     renderFK (Path origin _  end) = ""
@@ -542,7 +541,7 @@ joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectio
 
 loadOnlyDescriptions (TB1 (kv ,m) ) = _kvpk kv
 
-dumbKey n = Key n  Nothing [] 0 Nothing (unsafePerformIO newUnique) (Primitive "integer" )
+dumbKey n = Key n  Nothing [] 0 Nothing (unsafePerformIO newUnique) (Primitive (AtomicPrim ("pg_catalog","integer") ))
 
 recursePath
   :: Bool->  RecState Key
@@ -858,11 +857,11 @@ instance P.Poset (FKey (KType Text))where
 
 inlineName (KOptional i) = inlineName i
 inlineName (KArray a ) = inlineName a
-inlineName (InlineTable _ i) = i
+inlineName (Primitive (RecordPrim (s, i)) ) = i
 
 inlineFullName (KOptional i) = inlineFullName i
 inlineFullName (KArray a ) = inlineFullName a
-inlineFullName (InlineTable s i) = s <> "." <> i
+inlineFullName (Primitive (RecordPrim (s, i)) ) = s <> "." <> i
 
 relabeling :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB f k a -> TB p k a
 relabeling p l (Attr k i ) = (Attr k i)
@@ -885,6 +884,7 @@ backFKRef relTable ifk = fmap (_tb . uncurry Attr). reorderPK .  concat . fmap a
         reorderPK l = fmap (\i -> justError (show ("reorder wrong" :: String, ifk ,relTable , l,i))  $ L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
         lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
           where knm =  M.lookup ko relTable
+
 
 postgresPrim =
   [("character varying",PText)
@@ -932,10 +932,11 @@ postgresPrim =
   ,("box3d",PBounding)
   ]
 
-textToPrim :: Text -> KPrim
-textToPrim i = case  M.lookup i (M.fromList postgresPrim) of
-    Just k -> k
+textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)
+textToPrim (AtomicPrim (s,i)) = case  M.lookup i (M.fromList postgresPrim) of
+    Just k -> AtomicPrim k
     Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
+textToPrim (RecordPrim i) =  (RecordPrim i)
 
 
 interPointPost rel ref tar = interPoint (fmap (fmap (fmap (fmap textToPrim))) rel) (fmap (firstTB (fmap (fmap textToPrim))) ref) (fmap (firstTB (fmap (fmap textToPrim))) tar)

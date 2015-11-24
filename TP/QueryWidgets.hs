@@ -70,7 +70,7 @@ generateFresh = do
 
 
 
-createFresh :: Text -> Text -> Map (Text,Text) Key -> Text -> KType Text -> IO (Map (Text,Text) Key)
+createFresh :: Text -> Text -> Map (Text,Text) Key -> Text -> KType (Prim (Text,Text) (Text,Text))-> IO (Map (Text,Text) Key)
 createFresh n tname pmap i ty  =  do
   k <- newKey i ty 0
   return $ M.insert (tname,i) k pmap
@@ -164,7 +164,7 @@ attrSize (Attr k _ ) = go  (keyType k)
                 KArray l -> let (i1,i2) = go l in (i1+1,i2*8)
                 KInterval l -> let (i1,i2) = go l in (i1*2,i2)
                 (Primitive i) ->
-                  case textToPrim i of
+                  case (\(AtomicPrim i) -> i) $ textToPrim i of
                        PInt -> (3,1)
                        PText-> (3,1)
                        PDate -> (3,1)
@@ -221,15 +221,14 @@ tbCase hasLab inf pgs constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
         return $ TrivialWidget (triding tds) dv
 tbCase hasLab inf pgs constr i@(IT na tb1 ) wl plugItens oldItems  = do
         l <- flabel # set text (show $ keyAttr .unTB $ na )# set UI.style (noneShowSpan hasLab)
-
         let tbi = fmap (Compose . Identity ) <$> oldItems
         tds <- iUITable inf pgs plugItens (fmap (runIdentity . getCompose ) <$>  tbi) i
         dv <- UI.div #  set UI.class_ "col-xs-12" # set children [l,getElement tds]
         paintEdit l (facts (triding tds)) (facts oldItems)
         return $ TrivialWidget (triding tds) dv
 tbCase hasLab inf pgs constr a@(Attr i _ ) wl plugItens preoldItems = do
-        l <- flabel # set text (show i)# set UI.style (noneShowSpan hasLab)
-        let oldItems = maybe (preoldItems) (\v-> fmap (maybe (Just (Attr i v )) Just ) preoldItems  ) (keyStatic i)
+        l <- flabel # set text (show i) # set UI.style (noneShowSpan hasLab)
+        let oldItems = maybe preoldItems (\v-> fmap (maybe (Just (Attr i v )) Just ) preoldItems  ) (traceShowId $ keyStatic i)
             tbi = oldItems
         tds <- attrUITable tbi (fmap snd plugItens ) a
         dv <- UI.div # set UI.style [("margin-bottom","3px")] # set UI.class_ ("col-xs-" <> show ( fst $ attrSize a) )# set children [l,getElement tds]
@@ -456,7 +455,6 @@ processPanelTable inf attrsB res table oldItemsi = do
 
 showFKE v =  UI.div # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec $  v)
 
-showFKE' v =  UI.div # set text (L.take 100 $ L.intercalate "," $ F.toList $ _unTB1 $ mapValue renderPrim $   v)
 
 showFK = (pure ((\v j ->j  # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec  $ v))))
 
@@ -546,7 +544,7 @@ attrUITable  tAttr' evs attr@(Attr i _ ) = do
               $ void (element attrUI # sink UI.style (noneShow . isJust <$> facts insertT ))
       return $ TrivialWidget insertT  (getElement attrUI)
 
-buildUI :: KType KPrim -> Tidings (Maybe (FTB Showable)) -> UI (TrivialWidget (Maybe (FTB Showable)))
+buildUI :: KType (Prim KPrim (Text,Text))-> Tidings (Maybe (FTB Showable)) -> UI (TrivialWidget (Maybe (FTB Showable)))
 buildUI i  tdi = case i of
          (KSerial ti) -> do
            tdnew <- fmap (Just . SerialTB1 ) <$> buildUI ti ( join . fmap unSSerial <$> tdi)
@@ -570,7 +568,7 @@ buildUI i  tdi = case i of
             let td = (\m n -> fmap IntervalTB1 $  join . fmap (\i-> if Interval.null i then Nothing else Just i) $ liftF2 interval m n) <$> (liftA2 (,) <$> triding inf  <*> triding lbd) <*> (liftA2 (,) <$> triding sup <*> triding ubd)
             paintBorder subcomposed (facts td ) (facts tdi)
             return $ TrivialWidget td subcomposed
-         (Primitive i ) -> fmap (fmap TB1) <$> buildPrim (fmap (\(TB1 i )-> i) <$> tdi) i
+         (Primitive (AtomicPrim i) ) -> fmap (fmap TB1) <$> buildPrim (fmap (\(TB1 i )-> i) <$> tdi) i
          i -> errorWithStackTrace (show i)
 
 buildPrim :: Tidings (Maybe Showable) -> KPrim -> UI (TrivialWidget (Maybe Showable))
@@ -858,7 +856,7 @@ sorting k = fmap TB1 . sorting' k . fmap unTB1
 
 
 rendererHeaderUI k v = const (renderer k) v
-  where renderer k = UI.div # set items [UI.div # set text (T.unpack $ keyValue k ) , UI.div # set text (T.unpack $ showTy id (keyType k)) ]
+  where renderer k = UI.div # set items [UI.div # set text (T.unpack $ keyValue k ) , UI.div # set text ( showTy show (keyType k)) ]
 
 rendererShowableUI k  v= renderer (keyValue k) v
   where renderer "modification_data" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> showPatch (i:: PathAttr Text Showable) )  (B.decodeOrFail (BSL.fromStrict i))

@@ -205,7 +205,7 @@ data Labeled l v
 instance (Show f) =>  Show1 (Labeled f  ) where
   showsPrec1 = showsPrec
 
-type Key = FKey (KType Text)
+type Key = FKey (KType  (Prim (Text,Text) (Text,Text)))
 
 data FKeyPath j
 data FKey a
@@ -363,10 +363,14 @@ data KPrim
    | PDynamic
    deriving(Show,Eq,Ord)
 
+data Prim a b
+  = AtomicPrim a
+  | RecordPrim b
+  deriving(Eq,Ord,Show)
 
 data KType a
    = Primitive a
-   | InlineTable {- schema -} Text {- tablename -} Text
+   -- | InlineTable {- schema -} Text {- tablename -} Text
    | KSerial (KType a)
    | KArray (KType a)
    | KInterval (KType a)
@@ -375,15 +379,17 @@ data KType a
    | KTable [KType a]
    deriving(Eq,Ord,Functor,Generic)
 
-
-instance Show (KType KPrim) where
+instance Show (KType KPrim ) where
   show =  showTy show
 
-instance Show (KType Text) where
-  show = T.unpack . showTy id
+instance Show (KType (Prim KPrim (Text,Text))) where
+  show =  showTy show
+
+instance Show (KType (Prim (Text,Text) (Text,Text))) where
+  show = T.unpack . showTy (T.pack . show)
 
 showTy f (Primitive i ) = f i
-showTy f (InlineTable s i ) = "[" <>  fromString (T.unpack $ s <> "." <>  i) <> "]"
+-- showTy f (InlineTable s i ) = "[" <>  fromString (T.unpack $ s <> "." <>  i) <> "]"
 showTy f (KArray i) = "{" <>  showTy f i <> "}"
 showTy f (KOptional i) = showTy f i <> "*"
 showTy f (KInterval i) = "(" <>  showTy f i <> ")"
@@ -828,7 +834,7 @@ unKV = _kvvalues . unTB
 
 isInline (KOptional i ) = isInline i
 isInline (KArray i ) = isInline i
-isInline (InlineTable _ i) = True
+isInline (Primitive (RecordPrim _ ) ) = True
 isInline _ = False
 
 unTB1 i = head . F.toList $ i
@@ -865,9 +871,9 @@ intersectPred p1@(KOptional i ) op p2 (LeftTB1 j) l  =  maybe False id $ fmap (\
 intersectPred p1 op p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
 
 interPoint
-  :: (Ord a ,Show a) => [Rel (FKey (KType KPrim))]
-     -> [TB Identity (FKey (KType KPrim)) a]
-     -> [TB Identity (FKey (KType KPrim)) a]
+  :: (Ord a ,Show a) => [Rel (FKey (KType (Prim KPrim (Text,Text))))]
+     -> [TB Identity (FKey (KType (Prim KPrim (Text,Text)))) a]
+     -> [TB Identity (FKey (KType (Prim KPrim (Text,Text)))) a]
      -> Bool
 interPoint ks i j = (\i -> if L.null i then False else  all id  i)$  catMaybes $ fmap (\(Rel l op  m) -> {-justError "interPoint wrong fields" $-}  liftA2 (intersectPredTuple  op) (L.find ((==l).keyAttr ) i )   (L.find ((==m).keyAttr ) j)) ks
 

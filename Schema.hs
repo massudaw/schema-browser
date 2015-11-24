@@ -53,15 +53,15 @@ import Patch
 import qualified Data.ByteString.Char8 as BS
 
 
-createType :: (Bool,Bool,Bool,Bool,Bool,Bool,Text,Text) -> KType Text
+createType :: (Bool,Bool,Bool,Bool,Bool,Bool,Text,Text) -> KType (Prim (Text,Text) (Text,Text))
 createType  (isNull,isArray,isDelayed,isRange,isDef,isComp,tysch,tyname)
-  = comp base
+  = comp (Primitive base)
   where
     add i v = if i then v else id
     comp = add isNull KOptional . add isArray KArray . add isRange KInterval . add isDef KSerial . add isDelayed KDelayed
     base
-      | isComp =  InlineTable tysch tyname
-      | otherwise = Primitive tyname
+      | isComp =  RecordPrim (tysch ,tyname)
+      | otherwise = AtomicPrim (tysch ,tyname)
 
 
 meta inf = maybe inf id (metaschema inf)
@@ -82,8 +82,8 @@ queryAuthorization conn schema user = do
 
 tableSizes = "SELECT c.relname,c.reltuples::bigint AS estimate FROM   pg_class c JOIN   pg_namespace n ON c.relkind = 'r' and n.oid = c.relnamespace WHERE n.nspname = ? "
 
-fromShowable2 i@(Primitive "character varying") v = fromShowable i $  BS.drop 1 (BS.init v)
-fromShowable2 i@(Primitive "text") v = fromShowable i $  BS.drop 1 (BS.init v)
+fromShowable2 i@(Primitive (AtomicPrim (_, "character varying"))) v = fromShowable i $  BS.drop 1 (BS.init v)
+fromShowable2 i@(Primitive (AtomicPrim (_,"text"))) v = fromShowable i $  BS.drop 1 (BS.init v)
 fromShowable2 i v = fromShowable i v
 
 testSerial  =((=="nextval"). fst . T.break(=='('))
@@ -96,7 +96,7 @@ readFModifier "write" = FWrite
 keyTables :: MVar (Map Text InformationSchema )-> MVar (Map (KVMetadata Key) DBVar ) -> Connection -> Connection -> (Text ,Text)-> Maybe (Text,IORef OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
 keyTables schemaVar mvar conn userconn (schema ,user) oauth ops = maybe (do
        uniqueMap <- join $ mapM (\(t,c,op,mod,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr (V.toList $ fmap readFModifier mod) op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,field_modifiers,translation from  metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
-       res2 <- fmap ( (\i@(t,c,j,k,del,l,m,d,z,b)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty . BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,del,l,maybe False testSerial m,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_delayed,is_range,col_def,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema)
+       res2 <- fmap ( (\i@(t,c,j,k,del,l,m,d,z,b)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,del,l,maybe False testSerial m,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_delayed,is_range,col_def,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema) -- :: IO [((Text,Text),Key)]
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
           keyMap = M.fromList keyList

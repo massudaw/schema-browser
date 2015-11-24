@@ -47,7 +47,7 @@ data FPlugins k
   =  StatefullPlugin
   { _name ::  Text
   , _bounds :: Text
-  , _statevar :: [[(Text,KType Text)]]
+  , _statevar :: [[(Text,KType (Prim (Text,Text) (Text,Text)))]]
   , _statefullAction :: [FPlugins k ]
   }
   | BoundedPlugin2
