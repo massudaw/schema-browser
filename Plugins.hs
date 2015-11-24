@@ -98,16 +98,16 @@ siapi2Plugin = BoundedPlugin2  pname tname (staticP url) elemp
     tailEmpty [] = []
     tailEmpty i  = tail i
 
-cnpjCaptcha = BoundedPlugin2 pname tname (staticP url ) elemp
+cpfCaptcha = BoundedPlugin2 pname tname (staticP url ) elemp
   where
     pname , tname :: Text
-    pname = "CNPJ Captcha"
+    pname = "CPF Captcha"
     tname = "owner"
-    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
     url :: ArrowReader
     url = proc t -> do
       sess <- act (\_ -> lift  initSess ) -< ()
-      cap <- act (\sess -> lift (getCaptchaCnpj sess)) -< sess
+      cap <- act (\sess -> lift (getCaptchaCpf sess)) -< sess
+      atR "ir_reg" (idxK"cpf_number") -<()
       odxR "sess" -< ()
       odxR "captchaViewer" -< ()
       returnA -< Just $ tblist [attrT  ("sess", TB1 (SSession sess)) ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
@@ -116,12 +116,65 @@ cnpjCaptcha = BoundedPlugin2 pname tname (staticP url ) elemp
             b <- runReaderT (dynPK url $ () ) (Just inp)
             return  b
 
+cnpjCaptcha = BoundedPlugin2 pname tname (staticP url ) elemp
+  where
+    pname , tname :: Text
+    pname = "CNPJ Captcha"
+    tname = "owner"
+    url :: ArrowReader
+    url = proc t -> do
+      sess <- act (\_ -> lift  initSess ) -< ()
+      cap <- act (\sess -> lift (getCaptchaCnpj sess)) -< sess
+      atR "ir_reg" (idxK"cnpj_number") -<()
+      odxR "sess" -< ()
+      odxR "captchaViewer" -< ()
+      returnA -< Just $ tblist [attrT  ("sess", TB1 (SSession sess)) ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
+    elemp inf = maybe (return Nothing) (geninf inf)
+    geninf inf inp = do
+            b <- runReaderT (dynPK url $ () ) (Just inp)
+            return  b
+
+renderDay d =  paddedm day <> paddedm month <> show year
+  where (year,month,day) = toGregorian d
+        paddedm m = (if m < 10 then "0" else "" ) <> show m
+
+cpfForm = BoundedPlugin2 pname tname (staticP url ) elemp
+  where
+    pname , tname :: Text
+    pname = "CPF Form"
+    tname = "owner"
+    url :: ArrowReader
+    url = proc t -> do
+      cap <-  idxK "captchaInput" -< ()
+      nascimento <-  idxK "nascimento" -< ()
+      cnpj <-  atR "ir_reg" (idxK "cpf_number") -< ()
+      sess <- idxK "sess" -< ()
+      html <- act (\(TB1 (SSession sess),TB1 (SText cap),TB1 (SDate nascimento),TB1 (SText cnpj))  -> lift  (getCpfForm sess (BS.pack $ T.unpack cap) (BS.pack $ renderDay nascimento ) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,nascimento,cnpj)
+      arrowS -< ()
+      returnA -<   join .join $ fmap convertCPF .  traceShowId <$> html
+    elemp inf = maybe (return Nothing) (geninf inf)
+    geninf inf inp = do
+            b <- runReaderT (dynPK url $ () ) (Just inp)
+            return  b
+    arrowS = proc t -> do
+              odxR "owner_name" -< t
+              returnA -< Nothing
+
+atPrim s g = Primitive (AtomicPrim (s,g))
+queryCPFStatefull = StatefullPlugin "CPF Receita" "owner"
+  [[("captchaViewer",atPrim "public" "jpg"),("sess",atPrim "gmail" "session")],[("nascimento",atPrim "pg_catalog" "date"),("captchaInput",atPrim "pg_catalog" "character varying")]] [cpfCaptcha,cpfForm]
+
+
+queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
+  [[("captchaViewer",atPrim "public" "jpg"),("sess",atPrim "gmail" "session")],[("captchaInput",atPrim "pg_catalog" "character varying")]] [cnpjCaptcha,cnpjForm]
+
+
+
 cnpjForm = BoundedPlugin2 pname tname (staticP url ) elemp
   where
     pname , tname :: Text
     pname = "CNPJ Form"
     tname = "owner"
-    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
     url :: ArrowReader
     url = proc t -> do
       cap <-  idxK "captchaInput" -< ()
@@ -533,15 +586,6 @@ queryArtAndamento = BoundedPlugin2 pname tname (staticP url) elemp
                    return $  b)
 
 
-atPrim s g = Primitive (AtomicPrim (s,g))
-queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
-  [[("captchaViewer",atPrim "public" "jpg"),("sess",atPrim "gmaiL" "session")],[("captchaInput",atPrim "pg_catalog" "character varying")]] [cnpjCaptcha,cnpjForm]
-    where arrowF :: ArrowReader
-          arrowF = proc t -> do
-            atAny "ir_reg" [idxR "cnpj_number"] -< t
-            odxR "captchaViewer"-< t
-            returnA -< Nothing
-
 {- testPlugin  db sch p = withConnInf db sch (\inf -> do
                                        let rp = tableView (tableMap inf) (fromJust $ M.lookup (_bounds p) (tableMap inf))
                                            bds = _arrowbounds p
@@ -555,4 +599,4 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
 -}
 
 plugList :: [Plugins]
-plugList = [encodeMessage ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,,queryCPFStatefull, -}queryCNPJStatefull, queryArtAndamento]
+plugList = [encodeMessage ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]

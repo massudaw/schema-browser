@@ -84,7 +84,8 @@ pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
   window <- askWindow
   let tdInput = if L.null ls then pure True else (isJust . join . fmap (checkTable bds )  <$>   initItems)
       bds@(Many ls) = fst $ _arrowbounds $ head ac
-  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (facts tdInput)
+  headerP <- UI.button # set UI.class_ "col-xs-2" # set text (T.unpack n) # sink UI.enabled (facts tdInput)
+  headerDiv <- UI.div # set UI.class_ "row" # set children [headerP]
   trinp <- cutEvent (UI.click headerP) initItems
   m <- liftIO $  foldl' (\i (kn,kty) -> (\m -> createFresh  n tname m kn kty) =<< i ) (return $ keyMap oinf) (concat fresh)
   let inf = oinf {keyMap =  m}
@@ -94,9 +95,10 @@ pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
       (h,t :: Tidings (Maybe (TB1 Showable)) ) <- liftIO $ generateFresh
       elems <- mapM (\fresh -> do
         let hasF l = hasProd (== IProd True [ keyValue fresh] ) l
+        let attrB pre a = tbCase True inf [] []  a [] [] pre
         case  (hasF input , hasF output)  of
-             (True,False)-> Right <$> attrUITable (const Nothing <$> trinp) [] (Attr fresh (TB1 ()) )
-             (False,True)->  Left <$> attrUITable (fmap (\v ->  runIdentity . getCompose . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ v ) <$> t) [] (Attr (fresh) (TB1 ()) )
+             (True,False)-> Right <$> attrB (const Nothing <$> trinp)  (Attr fresh (TB1 ()) )
+             (False,True)->  Left <$> attrB (fmap (\v ->  runIdentity . getCompose . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ v ) <$> t)  (Attr (fresh) (TB1 ()) )
              (True,True)-> errorWithStackTrace $ "circular reference " <> show fresh
              (False,False)-> errorWithStackTrace $ "unreferenced variable "<> show fresh
            ) freshs
@@ -107,13 +109,17 @@ pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
          then
           TrivialWidget trinp <$> UI.div
          else do
-          inpPost <- UI.button # set UI.text "Submit"
+          inpPost <- UI.button # set UI.class_ "col-xs-2" # set UI.text "Submit"
           trinp <- cutEvent (UI.click inpPost) inp
           ei <- UI.div # set UI.children ((fmap getElement $ rights elems ) <> [inpPost])
           return $ TrivialWidget trinp ei
       return (h,(output,t),(lefts elems) ,ei )
            ) (_arrowbounds <$> ac ) freshKeys
-  el <- UI.div # set UI.children (headerP : (concat $ fmap (\(_,_,o,i)-> concat $ [fmap getElement o ,[getElement i]]) freshUI ))
+  lines <- mapM (\(_,_,o,i)-> do
+      j<- UI.div # set UI.class_ "row" # set children [getElement i]
+      k <- UI.div # set UI.class_ "row" # set children (fmap getElement o)
+      return [j,k]) freshUI
+  el <- UI.div # set UI.children (headerDiv : concat lines )
   o <- foldl' (\unoldM (f,((h,htidings,loui,inp),action))  -> unoldM >>= (\unoldItems -> do
       let oldItems = liftA2 (\i j  -> mergeTB1 i j ) <$>  unoldItems <*> fmap (fmap (mapKey keyValue)) (triding inp)
       e <- mapTEvent  (action inf) oldItems

@@ -124,7 +124,7 @@ listTable inf table page maxResults
         print ("list",table,t)
         return  d
     c <-  traverse (convertAttrs inf (tableMap inf) table ) . maybe [] (\i -> (i :: Value) ^.. key (  rawName table ) . values) $ decoded
-    return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , {-length c +-} (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
+    return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
 
 getKeyAttr (TB1 (m, k)) = (concat (fmap keyattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
@@ -169,8 +169,9 @@ convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (trav
                fk =  F.toList $  pathRelRel fks
                exchange tname (KArray i)  = KArray (exchange tname i)
                exchange tname (KOptional i)  = KOptional (exchange tname i)
-               exchange tname (Primitive (AtomicPrim i) ) = Primitive $ RecordPrim ("gmail", tname)
-               exchange tname (Primitive (RecordPrim i) ) = Primitive $ RecordPrim i
+               exchange tname (Primitive i ) = Primitive $ case i of
+                        AtomicPrim _ -> RecordPrim ("gmail", tname)
+                        RecordPrim i -> RecordPrim i
                patt = either
                     (traverse (\v -> do
                         tell (TableModification Nothing (lookTable infsch trefname ) . patchTB1 <$> F.toList v)
@@ -209,8 +210,11 @@ convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (trav
     funO i v = maybe (return $typ i) (fun i) v
 
     typ (KArray i ) = typ i
-    typ (Primitive (AtomicPrim i ) ) = Right Nothing
-    typ (Primitive (RecordPrim i ) ) = Left Nothing
+    typ (KOptional i ) = typ i
+    typ (KSerial i ) = typ i
+    typ (Primitive i ) = case i of
+        AtomicPrim _ -> Right Nothing
+        RecordPrim _ -> Left Nothing
 
 
 instance Biapplicative Either where

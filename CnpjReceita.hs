@@ -39,68 +39,28 @@ import RuntimeTypes
 import Control.Monad.Reader
 import Prelude hiding (head)
 
-{-
-getInp :: [TL.Text] -> TB1 Showable -> Maybe BSC.ByteString
-getInp l (TB1  (k,Compose (Identity kv )))  = join . fmap (fmap (BSL.toStrict . BSLC.pack . TL.unpack . (\(TB1 (SText t))-> t )) . join . fmap unRSOptional' . cc . runIdentity . getCompose  )  .  M.lookup (S.fromList l) . M.mapKeys (S.map (keyString._relOrigin)) $ _kvvalues kv
-  where -- cc (TBEither _ l ) = join $fmap (cc.unTB) l
-        cc (Attr _ l ) = Just l
-
-cpfCall = WrappedCall initCnpj [getCaptchaCpf',getCpf']
-
-getCaptchaCpf' ::
-     InformationSchema -> MVar (Maybe (TB1  Showable)) ->   (Maybe (TB1 (Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
-getCaptchaCpf' inf i  handler = do
-  rv <- ask
-  liftIO $ forkIO $ runReaderT  (forever $ do
-      mvar <- liftIO $takeMVar i
-      out <- ( fmap join . Tra.traverse getCaptchaCpfShowable  $ mvar)
-      let nkey = lookFresh inf "CPF Receita" "owner" "captchaViewer"
-      handler . fmap (tbmap . mapFromTBList . pure . Compose. Identity . Attr nkey   . TB1 . SBinary  . BSL.toStrict ) $ out
-      return ()) rv
-  return ()
 
 
-getCaptchaCpf cgc_cpf  = do
-     session <- ask
-     liftIO $ do
+
+
+
+getCaptchaCpf session = do
        print cpfhome
-       r <-  Sess.getWith (defaults & param "cpf" .~ [T.pack $ BSC.unpack cgc_cpf]) session  cpfhome
+       r <-  Sess.getWith (defaults ) session  cpfhome
        print cpfcaptcha
-       (^? responseBody) <$> (Sess.get session $ cpfcaptcha)
-getCaptchaCpfShowable tinput =
-      let input = tinput
-      in fmap join $ Tra.sequence $  fmap getCaptchaCpf  (getInp ["cpf_number","cnpj_number"] input)
+       (fmap BSL.toStrict . (^? responseBody)) <$> (Sess.get session $ cpfcaptcha)
 
 
-getCpf' ::
-     InformationSchema -> MVar (Maybe (TB1 ( Showable))) ->   (Maybe (TB1 (Showable)) -> ReaderT Sess.Session IO () ) -> ReaderT Sess.Session IO ()
-getCpf'  inf i  handler = do
-  rv <- ask
-  liftIO $ forkIO $ runReaderT (forever $ do
-      mvar <- liftIO $ takeMVar i
-      outM <- fmap (join . fmap headMay.join) . Tra.traverse getCpfShowable $  mvar
-      maybe (return ()) (\out-> do
-          let attr i = Compose . Identity .  Attr ( lookKey inf "owner" i)
-          handler . Just $ (tbmap . mapFromTBList . pure . attr "owner_name" . LeftTB1 .Just . TB1 . SText . TL.pack  $ out )
-          return ()) outM ) rv
-  return ()
+convertCPF out = Just $ (tbmap . mapFromTBList . pure . attr "owner_name" . LeftTB1 .Just . TB1 . SText . TL.pack  $ out )
+  where attr k =  _tb . Attr k
 
-getCpfShowable tinput = fmap join $ Tra.sequence $  liftA2 getCpf (getInp ["captchaInput"] input ) (getInp ["cpf_number","cnpj_number"] input)
-  where input = tinput
-getCpf captcha cgc_cpf = do
-    session <- ask
-    liftIO $ do
+getCpfForm session captcha nascimento cgc_cpf = do
           print cpfpost
-          pr <- traverse (Sess.post session (cpfpost) . protocolocpfForm cgc_cpf ) (Just $  captcha  )
+          pr <- traverse (Sess.post session (cpfpost) . traceShowId .protocolocpfForm nascimento cgc_cpf ) (Just $  captcha  )
           traverse (BSL.writeFile "cpf_name.html") (join $ fmap (^? responseBody)  pr)
-          traverse (readCpfName . BSLC.unpack ) (fromJust pr ^? responseBody)
+          traverse (readCpfName . traceShowId . BSLC.unpack ) (fromJust pr ^? responseBody)
 
 
-initCnpj   =  (\i -> do
-  let
-      man  = opensslManagerSettings context
-  withOpenSSL $ Sess.withSessionWith man i) . runReaderT
--}
 
 initSess =  do
   let
@@ -150,25 +110,25 @@ getCnpjForm session captcha cgc_cpf = do
           traverse (readHtmlReceita . BSLC.unpack . traceShowId ) (fromJust pr ^? responseBody)
 
 
-protocolocpfForm :: BS.ByteString -> BS.ByteString -> [FormParam]
-protocolocpfForm cgc_cpf captcha
-                     = [
-                       "txtCPF"    := cgc_cpf
+protocolocpfForm :: BS.ByteString -> BS.ByteString -> BS.ByteString -> [FormParam]
+protocolocpfForm nascimento cgc_cpf captcha
+                     = ["tempTxtNascimento"    := nascimento
+                       ,"tempTxtCPF"    := cgc_cpf
                        ,"txtTexto_captcha_serpro_gov_br" := captcha
-                       ,"Enviar" := ("Consultar" :: BS.ByteString)
+                       ,"temptxtTexto_captcha_serpro_gov_br" := captcha
                        ]
 
 protocolocnpjForm :: BS.ByteString -> BS.ByteString -> [FormParam]
 protocolocnpjForm cgc_cpf captcha
-                     = traceShowId ["origem"  := ("comprovante"::BS.ByteString)
+                     = ["origem"  := ("comprovante"::BS.ByteString)
                        ,"cnpj"    := cgc_cpf
                        ,"txtTexto_captcha_serpro_gov_br" := captcha
                        ,"submit1" := ("Consultar" :: BS.ByteString)
                        ,"search_type" := ("cnpj" :: BS.ByteString)
                        ]
-cpfhome  ="http://www.receita.fazenda.gov.br/Aplicacoes/ATCTA/cpf/ConsultaPublica.asp"
-cpfcaptcha = "http://www.receita.fazenda.gov.br/Aplicacoes/ATCTA/cpf/captcha/gerarCaptcha.asp"
-cpfpost = "http://www.receita.fazenda.gov.br/Aplicacoes/ATCTA/cpf/ConsultaPublicaExibir.asp"
+cpfhome  ="http://www.receita.fazenda.gov.br/aplicacoes/atcta/cpf/consultapublica.asp"
+cpfcaptcha = "http://www.receita.fazenda.gov.br/aplicacoes/atcta/cpf/captcha/gerarcaptcha.asp"
+cpfpost = "http://www.receita.fazenda.gov.br/aplicacoes/atcta/cpf/ConsultaPublicaExibir.asp"
 
 cnpjhome  ="http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/cnpjreva_solicitacao.asp"
 cnpjcaptcha = "http://www.receita.fazenda.gov.br/pessoajuridica/cnpj/cnpjreva/captcha/gerarCaptcha.asp"

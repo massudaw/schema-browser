@@ -71,9 +71,9 @@ file = "/home/massudaw/2014-08-27-1653.gpx"
 readCpfName file = do
   let
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
-        >>> ( is "span" >>> hasAttrValue "class" ("clConteudoDados"==) /> ( hasText ("Nome da Pessoa"  `L.isInfixOf`)) >>> getText )
+        >>> ( is "span" >>> hasAttrValue "class" ("clConteudoDados"==) >>> listA (getChildren >>> deep getText ))
   l <- runX arr
-  return  $ trim . L.drop 1 . L.dropWhile (/=':') <$> L.nub l
+  return  $ fmap (trim.last) $ L.find (\i -> L.isInfixOf  "Nome da" (head i)) $  L.filter (not.L.null ) $ L.nub l
 
 
 readHtmlReceita file = do
