@@ -138,6 +138,16 @@ nest ind  (Many j) = Many . pure . Nested ind $ Many j
 nest ind (ISum i) = Many . pure . Nested ind $ ISum i
 nest ind (Rec ix i) = Many . pure . Nested ind $(Rec ix i)
 
+atMA
+  :: (KeyString t2,
+      MonadReader (Maybe (FTB1 Identity t2 Showable)) m, Ord t2) =>
+     String
+     -> Parser (Kleisli m) (Access Text) t t1
+     -> Parser (Kleisli m) (Access Text) t [t1]
+atMA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
+  where ind = splitIndex False i
+
+
 atRA
   :: (KeyString t2,
       MonadReader (Maybe (FTB1 Identity t2 Showable)) m, Ord t2) =>
@@ -158,20 +168,11 @@ atR i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) 
 at i (P s j)  =  P (BF.second ( nest  ind) . BF.first (nest  ind) $ s)  (j . arr (indexTB1 ind )  )
   where ind = splitIndex True i
 
-messages
-  :: (k ~ Text
-      , m ~ Reader (Maybe (FTB (KVMetadata k, Compose Identity (KV (Compose Identity (TB Identity))) k Showable)))
-      , KeyString k,Applicative m, Show k, Ord k) =>
-     Parser
-       (Kleisli m) (Access Text) () [Maybe (FTB Showable, FTB Showable)]
-messages = name 0 $ proc t -> do
-          enc <- liftA2 (liftA2 (,)) (atR "body"  (idxR "data")) (idxR "mimeType") -< ()
-          part <- atRA "parts"
-              (call 0 messages ) -< ()
-          returnA -< ([enc ])
+nameI  i (P (Many l,Many v) d)=  P (Rec i (Many l) ,  (Many v) )  d
+callI  i ~(P _ d) = P (Many[Point i],Many [] ) d
 
-name  i (P (Many l,Many v) d)=  P (Rec i (Many l) ,  Rec i (Many v) )  d
-call  i ~(P _ d) = P (Many[Point i],Many [Point i] ) d
+nameO  i (P (Many l,Many v) d)=  P (Many l ,  Rec i (Many v) )  d
+callO  i ~(P _ d) = P (Many[],Many [Point i] ) d
 
 idx = indexTableInter False
 idxT = indexTableInter True
@@ -247,7 +248,7 @@ replace ix i v = v
 -- replace ix i v= errorWithStackTrace (show (ix,i,v))
 
 checkField (Point ix) t = Nothing
-checkField (Nested (IProd _ l) nt ) t@(TB1 (m,v))
+checkField (Nested (IProd b l) nt ) t@(TB1 (m,v))
   = do
     let
     i <- findAttr l v
@@ -271,8 +272,8 @@ checkField i j = errorWithStackTrace (show (i,j))
 
 
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
-checkTable l (LeftTB1 j) = join $ fmap (checkTable l) j
-checkTable l (DelayedTB1 j) = join $ fmap (checkTable l) j
+checkTable l (LeftTB1 j) = Just$ LeftTB1 $  join $ fmap (checkTable l) j
+checkTable l (DelayedTB1 j) = Just $ DelayedTB1 $ join $ fmap (checkTable l) j
 checkTable (Rec ix i) t = checkTable (replace ix i i ) t
 checkTable (Many [m@(Many l)]) t = checkTable m t
 checkTable (Many [m@(Rec _ _ )]) t = checkTable m t

@@ -64,10 +64,13 @@ createType  (isNull,isArray,isDelayed,isRange,isDef,isComp,tysch,tyname)
       | otherwise = AtomicPrim (tysch ,tyname)
 
 
+recoverFields :: InformationSchema -> Table -> FKey (KType (Prim KPrim  (Text,Text))) -> FKey (KType (Prim PGType PGRecord))
+recoverFields inf t v = map
+  where map = justError "notype" $ M.lookup (rawName t ,keyValue v)  (keyMap inf)
+
 meta inf = maybe inf id (metaschema inf)
 
 
-type TableSchema = (Map (Text,Text) Key,Map (Set Key) Table,Map Text Table)
 
 foreignKeys :: Query
 foreignKeys = "select origin_table_name,target_table_name,origin_fks,target_fks,rel_fks from metadata.fks where origin_schema_name = target_schema_name  and  target_schema_name = ?"
@@ -96,7 +99,7 @@ readFModifier "write" = FWrite
 keyTables :: MVar (Map Text InformationSchema )-> MVar (Map (KVMetadata Key) DBVar ) -> Connection -> Connection -> (Text ,Text)-> Maybe (Text,IORef OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
 keyTables schemaVar mvar conn userconn (schema ,user) oauth ops = maybe (do
        uniqueMap <- join $ mapM (\(t,c,op,mod,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr (V.toList $ fmap readFModifier mod) op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,field_modifiers,translation from  metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
-       res2 <- fmap ( (\i@(t,c,j,k,del,l,m,d,z,b)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,del,l,maybe False testSerial m,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_delayed,is_range,col_def,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema) -- :: IO [((Text,Text),Key)]
+       res2 <- fmap ( (\i@(t,c,j,k,del,l,m,d,z,b)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,del,l,maybe False testSerial m,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_delayed,is_range,col_def,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
           keyMap = M.fromList keyList
@@ -123,7 +126,6 @@ keyTables schemaVar mvar conn userconn (schema ,user) oauth ops = maybe (do
            i3l =  (\(c,(pksl,is_sum))-> let
                                   pks = S.fromList $ F.toList pksl
                                   inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
-                                  -- eitherFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) S.empty ) $ keyType k ) .  filter (isKEither .keyType ) .  S.toList <$> M.lookup c all
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> pks)
                                 in (c ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK ) S.empty attr )) <$> res :: [(Text,Table)]
        let
@@ -140,7 +142,7 @@ keyTables schemaVar mvar conn userconn (schema ,user) oauth ops = maybe (do
        return inf
        ) (return ) . (M.lookup schema ) =<< readMVar schemaVar
 
-
+-- Search for recursive cycles and tag the tables
 addRecInit :: Map Text Table -> Map Text Table
 addRecInit m = fmap recOverFKS m
   where
@@ -209,7 +211,7 @@ liftField inf tname (FKT ref  rel2 tb) = FKT (mapComp (liftField inf tname) <$> 
     where (FKJoinTable _ rel tname2 ) = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 liftField inf tname (IT rel tb) = IT (mapComp (liftField inf tname ) rel) (liftKeys inf tname2 tb)
-    where Just ((FKInlineTable tname2 ) ) =fmap (unRecRel.pathRel ) $  L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
+    where ((FKInlineTable tname2 ) ) =(unRecRel.pathRel ) $ justError (show (rel ,rawFKS ta)) $ L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 
 
@@ -234,9 +236,6 @@ catchPluginException inf pname tname idx i = do
                 print (t,e)
                 execute (rootconn inf) "INSERT INTO metadata.plugin_exception (username,schema_name,table_name,plugin_name,exception,data_index2,instant) values(?,?,?,?,?,?,?)" (username inf , schemaName inf,pname,tname,show (e :: SomeException) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) . first keyValue) idx) ), t )
                 return Nothing )
-
-
-
 
 
 logTableModification
@@ -306,6 +305,10 @@ dbTable mvar table = do
         Nothing -> return Nothing
 
 
+mergeCreate (Just i) (Just j) = Just $ mergeTB1 i j
+mergeCreate Nothing (Just i) = Just i
+mergeCreate (Just i)  Nothing = Just i
+mergeCreate Nothing Nothing = Nothing
 
 mergeTB1 (TB1  (m,Compose k) ) (TB1  (m2,Compose k2) )
   | m == m2 = TB1  (m,Compose $ liftA2 (<>) k k2)
@@ -313,6 +316,7 @@ mergeTB1 (TB1  (m,Compose k) ) (TB1  (m2,Compose k2) )
 
 ifOptional i = if isKOptional (keyType i) then unKOptional i else i
 ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
+
 
 
 -- Load optional not  loaded delayed values
@@ -336,6 +340,7 @@ applyRecord' t@((m, v)) (_ ,_  , k)  = fmap (m,) $ traComp (fmap KV . sequenceA 
   where edit  key  k@(PAttr  s _) v = if (head $ F.toList $ key) == Inline s then  traComp (flip applyAttr' k ) v else return v
         edit  key  k@(PInline s _ ) v = if (head $ F.toList $ key) == Inline s then  traComp (flip applyAttr' k ) v else return v
         edit  key  k@(PFK rel s _ _ ) v = if  key == S.fromList rel then  traComp (flip applyAttr' k ) v else return v
+
 applyTB1'
   :: (Index a~ a ,Show a , Ord a ) =>
     TB2 Key a

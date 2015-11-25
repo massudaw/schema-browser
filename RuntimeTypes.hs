@@ -62,11 +62,9 @@ data FPlugins k
   , _arrowbounds :: (Access Text,Access Text)
   , _action :: InformationSchema -> Maybe (TB2 k Showable) -> Maybe (TB2 k Showable)
   }
-  | ArrowPlugin
-  { _name :: Text
-  , _bounds :: Text
-  , _arrow :: ArrowReader
-  }
+
+pluginAction (BoundedPlugin2 _ _ _ a ) = a
+pluginAction (PurePlugin _ _ _ a) = fmap (fmap return) a
 
 type TransactionM = WriterT [TableModification (TBIdx Key Showable)] IO
 
@@ -80,7 +78,7 @@ data SchemaEditor
   = SchemaEditor
   { editEd  :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
   , insertEd :: InformationSchema -> TBData Key Showable -> TransactionM  (Maybe (TableModification (TBIdx Key Showable)))
-  , deleteEd :: InformationSchema ->  TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
+  , deleteEd :: InformationSchema -> TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
   , listEd :: InformationSchema -> Table -> Maybe PageToken -> Maybe Int -> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
   , updateEd :: InformationSchema -> Table -> TBData Key Showable -> Maybe PageToken -> Maybe Int -> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
   , getEd :: InformationSchema -> Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))

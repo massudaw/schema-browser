@@ -29,18 +29,12 @@ import qualified Data.Text as TL
 import qualified Data.Vector as V
 import Safe
 import Types
--- import Query
 import Utils
--- import Schema
 import Gpx
 import Debug.Trace
-import Step
 import RuntimeTypes
 import Control.Monad.Reader
 import Prelude hiding (head)
-
-
-
 
 
 
@@ -59,7 +53,6 @@ getCpfForm session captcha nascimento cgc_cpf = do
           pr <- traverse (Sess.post session (cpfpost) . traceShowId .protocolocpfForm nascimento cgc_cpf ) (Just $  captcha  )
           traverse (BSL.writeFile "cpf_name.html") (join $ fmap (^? responseBody)  pr)
           traverse (readCpfName . traceShowId . BSLC.unpack ) (fromJust pr ^? responseBody)
-
 
 
 initSess =  do

@@ -1,7 +1,9 @@
 {-# LANGUAGE TupleSections,OverloadedStrings #-}
 module OAuth where
 import Control.Monad (unless)
+import Control.Lens
 import System.Info (os)
+import Network.Wreq
 import System.Process (system, rawSystem)
 import System.Exit    (ExitCode(..))
 import System.Directory (doesFileExist)
@@ -9,7 +11,7 @@ import Network.Google.OAuth2 (formUrl, exchangeCode, refreshTokens,
                               OAuth2Client(..), OAuth2Tokens(..))
 import Network.Google (toAccessToken,makeRequest, doRequest)
 import Network.Google.Contacts(listContacts)
-import Network.HTTP.Conduit  hiding (port,host)-- (httpLbs,parseUrl,withManager,responseBody,(..))
+-- import Network.HTTP.Conduit  hiding (port,host)-- (httpLbs,parseUrl,withManager,responseBody,(..))
 import Control.Lens hiding (get,delete,set,(#),element,children)
 import Control.Applicative
 import qualified Data.Set as S
@@ -18,6 +20,7 @@ import Control.Monad.IO.Class
 import Data.Monoid
 import Data.Biapplicative
 import Patch
+import qualified Data.ByteString.Char8 as BS
 import Control.Monad.Writer hiding (pass)
 import System.Time.Extra
 import GHC.Stack
@@ -112,6 +115,7 @@ updateTable inf table reference page maxResults
 
 
 
+
 listTable inf table page maxResults
   | tableName table == "history" = return ([],Nothing , 0)
   | otherwise = do
@@ -128,9 +132,27 @@ listTable inf table page maxResults
 
 getKeyAttr (TB1 (m, k)) = (concat (fmap keyattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
+
+insertTable inf pk
+  | otherwise = do
+    let
+        attrs :: [(Key, FTB Showable)]
+        attrs = filter (any (==FWrite) . keyModifier .fst ) $ getAttr' (TB1 pk)
+    tok <- liftIO $readIORef (snd $ fromJust $ token inf)
+    let user = fst $ fromJust $ token inf
+        table = lookTable inf (_kvname (fst pk))
+    decoded <- liftIO $ do
+        let req = "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (_kvname (fst pk ) ) <>  "?access_token=" ++ ( accessToken tok)
+        (t,v) <- duration
+            (postHeaderJSON [("GData-Version","3.0")] req (traceShowId $ toJSON $ M.fromList $ fmap (\(a,b) -> (keyValue a , renderShowable b)) $ attrs ) )
+        print ("insert",getPK (TB1 pk),t)
+        return $ decode v
+    fmap (TableModification Nothing table . patchTB1 .unTB1) <$> (traverse (convertAttrs inf (tableMap inf) table ) .  fmap (\i -> (i :: Value)  ) $  decoded)
+
+
 getTable inf  tb pk
   | tableName tb == "history" = return  Nothing
-  | S.fromList (fmap _relOrigin (getKeyAttr pk) ) ==  S.fromList (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb ) = return Nothing
+  | S.fromList (fmap _relOrigin (getKeyAttr pk) ) ==  S.fromList (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb) = return Nothing
   | otherwise = do
     tok <- liftIO $readIORef (snd $ fromJust $ token inf)
     let user = fst $ fromJust $ token inf
@@ -145,7 +167,7 @@ getTable inf  tb pk
 getDiffTable inf table  j = fmap (join . fmap (difftable j. unTB1) ) $ getTable  inf table $ TB1 j
 
 
-gmailOps = (SchemaEditor undefined undefined undefined listTable updateTable getDiffTable )
+gmailOps = (SchemaEditor undefined insertTable undefined listTable updateTable getDiffTable )
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
@@ -228,6 +250,15 @@ biTrav f (x:[]) = bimap (pure) (pure)  <$> (f x)
 biTrav f (x:xs) = liftA2 (biliftA2 (:) (:)) (f x) (biTrav f xs)
 biTrav f [] = errorWithStackTrace "cant be empty"
 
+simpleHttpHeader h url = do
+      let opts = defaults  & headers .~ h
+      (^. responseBody ) <$> getWith opts url
+
+postHeaderJSON h url form = do
+      let opts = defaults  & headers .~ h
+      (^. responseBody ) <$> postWith opts url form
+
+{-
 -- simpleHttp' :: MonadIO m => (HeaderName,BL.ByteString) -> String -> m BL.ByteString
 simpleHttpHeader headers url = liftIO $ withManager $ \man -> do
       req <- liftIO $ parseUrl url
@@ -236,3 +267,4 @@ simpleHttpHeader headers url = liftIO $ withManager $ \man -> do
 
 -- setConnectionClose :: Request m -> Request m
 setConnectionClose h req = req{requestHeaders = ("Connection", "close") : (h ++ requestHeaders req)}
+-}

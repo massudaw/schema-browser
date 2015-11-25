@@ -927,16 +927,20 @@ postgresPrim =
   ,("time",PDayTime)
   ,("time with time zone" , PDayTime)
   ,("time without time zone" , PDayTime)
-  ,("POINT",PPosition)
-  ,("LINESTRING",PLineString)
+  ,("POINT3",PPosition)
+  ,("LINESTRING3",PLineString)
   ,("box3d",PBounding)
   ]
+
+type PGType = (Text,Text)
+type PGRecord = (Text,Text)
 
 textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)
 textToPrim (AtomicPrim (s,i)) = case  M.lookup i (M.fromList postgresPrim) of
     Just k -> AtomicPrim k
     Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
 textToPrim (RecordPrim i) =  (RecordPrim i)
+
 
 
 interPointPost rel ref tar = interPoint (fmap (fmap (fmap (fmap textToPrim))) rel) (fmap (firstTB (fmap (fmap textToPrim))) ref) (fmap (firstTB (fmap (fmap textToPrim))) tar)

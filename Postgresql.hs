@@ -95,7 +95,6 @@ instance  TF.ToField (TB Identity Key Showable)  where
   toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . inattr ) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
   toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (TF.toField . IT n) <$> is
-  -- toField (RecRel k ix t) = TF.toField t
   toField e = errorWithStackTrace (show e)
 
 
@@ -104,47 +103,6 @@ instance TR.ToRow a => TF.ToField (TBRecord2 a) where
   toField (TBRecord2 s l) =  TF.Many   (TF.Plain (fromByteString "ROW(") : L.intercalate [TF.Plain $ fromChar ','] (fmap pure. TR.toRow  $ l) <> [TF.Plain (fromByteString $ ") :: " <>  BS.pack (T.unpack s) )] )
 
 
-{-
-testRecord conn = do
-  res  <- queryWith_ (parseField $ parseRow (parseShowable  <$> [Primitive PText,Primitive PText,KOptional $ Primitive PText, KOptional $ Primitive PText,KOptional $ Primitive PText] )) conn "select ROW(\'ioj\',\'ewfe\',null,null,null) "
-  print (res :: [[FTB Showable]])
-
-test = do
-  let s1 = (Just "(\"{\"\"(,,\\\\\"\"({pk_column},{=},{id},2)\\\\\"\")\"\",\"\"(,\\\\\"\"(sel_column,attr_ref,1)\\\\\"\",)\"\",\"\"(attr,,)\"\"}\")")
-      s2 = (Just "(\"{\"\"(,,\\\\\"\"({pk_column},{=},{id},2)\\\\\"\")\"\",\"\"(attr,,)\"\"}\")")
-  i <- pathParser undefined s1
-  i <- pathParser undefined s2
-  print (i :: PathArray )
-instance  F.FromField PathArray where
-  fromField =  pathParser
-
-pathParser t f = do
-  let
-    attPath = do
-       LeftTB1 attr <-  (parseShowable  (KOptional $ Primitive PText) )
-       return $ (\(TB1 (SText attr)) ->  AttrPath attr) <$> attr
-    itPath = do
-       it <-  (Just <$> doublequoted (parseRow ( parseShowable  <$> [Primitive PText,Primitive PText , Primitive PInt]))) <|> return Nothing
-       return $ (\[TB1 (SText attr),TB1 (SText tb) ,TB1 (SNumeric ref)]  ->  ITPath attr tb ) <$> it
-    fkPath = do
-       it <- (Just <$> doublequoted (parseRow ( parseShowable  <$> [KArray $ Primitive (AtomicPrim PText) ,KArray $Primitive (AtomicPrim PText ) ,  KArray $Primitive (AtomicPrim PText), Primitive PInt,Primitive PText]))) <|> return Nothing
-       let unText  (TB1 (SText attr))  = attr
-       return $ (\[ArrayTB1 or ,ArrayTB1 rel , ArrayTB1 tar ,TB1 (SNumeric ref) ,TB1 (SText tb)]  ->  FKTPath (unText <$> or) (unText <$> rel ) (unText <$> tar)  tb ) <$> it
-
-  parserFieldAtto (fmap PathArray $  fmap head $ parseRow [doublequoted $ parseArray  $ fmap (head . catMaybes ) $ doublequoted (parseRow  ([attPath,itPath,fkPath ]))] ) t f
-
-newtype PathArray = PathArray [PathRel Text Text ] deriving(Show,Typeable)
-data PathRel b a
-  = AttrPath a
-  | ITPath a b -- (PathRel b a)
-  | FKTPath [a] [Text] [a]  b -- (PathRel b a)
-  deriving (Eq,Ord,Show,Typeable)
-
-testref conn = do
-  res  <- query_ conn "select table_schema,table_name,array_agg from metadata.record_path"
-  print (res :: [(Text,Text,Vector.Vector (PathArray ))])
-
--}
 data TBRecord2 a = TBRecord2 Text a
 
 instance TF.ToField (UnQuoted Showable) where
@@ -209,17 +167,12 @@ instance TF.ToField Showable where
   toField (SNumeric t) = TF.toField t
   toField (SDate t) = TF.toField t
   toField (SDayTime t) = TF.toField t
-  -- toField (SSerial t) = maybe (TF.Plain $ fromByteString "null") TF.toField t
   toField (STimestamp t) = TF.toField t
   toField (SDouble t) = TF.toField t
-  -- toField (SOptional t) = TF.toField t
-  -- toField (SComposite t) = TF.toField t
-  -- toField (SInterval t) = TF.toField t
   toField (SPosition t) = TF.toField t
   toField (SLineString t) = TF.toField t
   toField (SBounding t) = TF.toField t
   toField (SBoolean t) = TF.toField t
-  -- toField (SDelayed t) = TF.toField t
   toField (SBinary t) = TF.toField (Binary t)
   toField (SDynamic t) = TF.toField (Binary (B.encode t))
 
@@ -395,7 +348,7 @@ readText ix =  ( liftA2 (\i j  -> i <> BS.concat  j ) (scapedText ix)  (many1 (l
             requote t = "\"" <> t <> "\""
             scapedText ix = liftA2 (<>) (plain0' "\\\"") (BS.intercalate "" <$> ( many ((<>) <$> choice (escapedItem  ix <$>  escapes) <*>  plain0' "\\\"")))
               where
-                escapes = [("n","\n"),("r","\r"),("t","\t"),("224","\224"),("225","\225"),("227","\227"),("233","\233"),("237","\237"),("243","\243"),("245","\245"),("231","\231")]
+                escapes = [("n","\n"),("r","\r"),("t","\t"),("137","\137"),("195","\195"),("224","\224"),("225","\225"),("227","\227"),("233","\233"),("237","\237"),("243","\243"),("245","\245"),("231","\231")]
                 escapedItem ix (c, o)  = Tra.sequence (replicate ix (char '\\'))  >> string c >> return o
 
 
@@ -416,17 +369,7 @@ readQuoted ix p =  do
 doublequoted :: Parser a -> Parser a
 doublequoted  p =   (takeWhile (== '\\') >>  char '\"') *>  inner <* ( takeWhile (=='\\') >> char '\"')
   where inner = doublequoted p <|> p
-{-
-testStr = "(8504801,\"SALPICAO \",99,\"NAO SE APLICA\",1,\"Salad, chicken (\"\"mayo\"\" dressing), with egg, chicken, breast, skin removed before cooking,  mayo type dressing, real,  regular, commercial, salt regular\",202.853,14.261,14.414,3.934,0.551,28.293,16.513,0.049,123.926,0.913,202.763,0,173.16,0.044,0.746,15.643,44.841,55.818,0.056,0.16,4.729,7.519,0.338,0.374,20.357,0.349,1.113,3.081,114.279,2.68,4.015,6.351,5.575,0.666,0.07,2.909,2.091)"
 
-testString3 = "\"StatusCodeException (Status {statusCode = 500, statusMessage = \"\"Internal Server Error\"\"}) [(\"\"Date\"\",\"\"Fri, 04 Sep 2015 20:34:49 GMT\"\"),(\"\"Server\"\",\"\"Microsoft-IIS/6.0\"\"),(\"\"MicrosoftOfficeWebServer\"\",\"\"5.0_Pub\"\"),(\"\"X-Powered-By\"\",\"\"ASP.NET\"\"),(\"\"Content-Length\"\",\"\"527\"\"),(\"\"Content-Type\"\",\"\"text/html; Charset=iso-8859-1\"\"),(\"\"Expires\"\",\"\"Sat, 15 May 1999 21:00:00 GMT\"\"),(\"\"Cache-control\"\",\"\"private\"\"),(\"\"X-Response-Body-Start\"\",\"\" <font face=\\\\\"\"Arial\\\\\"\" size=2>\\\\n<p>Microsoft OLE DB Provider for ODBC Drivers</font> <font face=\\\\\"\"Arial\\\\\"\" size=2>erro '80004005'</font>\\\\n<p>\\\\n<font face=\\\\\"\"Arial\\\\\"\" size=2>[IBM][CLI Driver][AS] SQL0104N  Um token inesperado &quot;&lt;&quot; foi encontrado ap&#243;s &quot;&quot;.  Os tokens esperados podem incluir:  &quot;( + - ? : DAY INF NAN NOT RID ROW RRN CASE CAST CHAR DATE DAYS&quot;.  SQLSTATE=42601\\\\r\\\\n</font>\\\\n<p>\\\\n<font face=\\\\\"\"Arial\\\\\"\" size=2>/sistemas/saces/classe/pacote_geral01.asp</font><font face=\\\\\"\"Arial\\\\\"\" size=2>, line 95</font> \"\"),(\"\"X-Request-URL\"\",\"\"POST http://www2.goiania.go.gov.br:80/sistemas/saces/asp/saces00005a1.asp\"\")] (CJ {expose = [Cookie {cookie_name = \"\"ASPSESSIONIDASQBRSTC\"\", cookie_value = \"\"FJDGMJKAJIGAICINDDHBNBOB\"\", cookie_expiry_time = 3015-01-05 00:00:00 UTC, cookie_domain = \"\"www2.goiania.go.gov.br\"\", cookie_path = \"\"/\"\", cookie_creation_time = 2015-09-04 20:34:48.13491 UTC, cookie_last_access_time = 2015-09-04 20:34:48.135013 UTC, cookie_persistent = False, cookie_host_only = True, cookie_secure_only = False, cookie_http_only = False}]})\""
-
-testString = "9292,\"Salad, chicken (\"\"mayo\"\" dressing), with egg, chicken, breast, skin removed before cooking,  mayo type dressing, real,  regular, commercial, salt regular\",\"NAO SE APLICA\",\"Cactus pads (nopales), cooked, boiled\",\"Receita de Ambrosia digitada no NDS 0 fonte \"\"Culin\195\161ria Goiana\"\"\""
-testString2 = "\\\\\"\"PROJETO DEVOLVIDO AO CBM AP\195\147S CORRE\195\135\195\131O\\\\\"\""
-ptestString = (parseOnly (unIntercalateAtto (parsePrim <$> [PText,PText,PText,PText,PText]) (char ',') )) testString
-ptestString2 = (parseOnly (unIntercalateAtto (parsePrim <$> [PText]) (char ',') )) testString2
-ptestString3 = (parseOnly (startQuotedText )) testString3
--}
 
 parsePrim
   :: KPrim
