@@ -16,8 +16,6 @@ module Patch where
 -- import Warshal
 import Types
 import Control.Monad.Reader
-import qualified Control.Lens as Le
-import Data.Functor.Apply
 import Data.Bifunctor
 import Data.Maybe
 import GHC.Generics
@@ -65,10 +63,11 @@ data PathFTB   a
   | PAtom a
   deriving(Show,Eq,Ord,Functor,Generic,Foldable)
 
+
 type family Index k
 type instance Index Showable = Showable
-type instance Index (TBData k a ) =  TBIdx k a
-type instance Index (TB Identity k a ) =  PathAttr k a
+type instance Index (TBData k a) =  TBIdx k (Index a)
+type instance Index (TB Identity k a) =  PathAttr k (Index a)
 
 type PatchConstr k a = (a ~ Index a, Ord a , Show a,Show k , Ord k)
 
@@ -78,7 +77,6 @@ data PathAttr k a
   = PAttr k (PathFTB a)
   | PInline k (PathFTB  (TBIdx k a ))
   | PFK [Rel k] [PathAttr k a] (KVMetadata k) (Maybe (TB2 k a))
-  | PRec [Rel k] Int (PathAttr k a)
   deriving(Show,Eq,Ord,Generic,Foldable,Functor)
 
 instance (Binary k ) => Binary (PathFTB k )
@@ -186,12 +184,12 @@ diffTable l l2 =   catMaybes $ F.toList $ Map.intersectionWith (\i j -> diffTB1 
 
 
 applyTB1
-  :: (Index a~ a ,Show a , Ord a ,Show k , Ord k) =>
+  :: PatchConstr k a =>
        FTB1 Identity k a -> PathFTB   (TBIdx k a ) -> FTB1 Identity k a
 applyTB1 = applyFTB createTB1 applyRecord
 
 createTB1
-  :: (Index a~ a ,Show a , Ord a ,Show d, Ord d ) =>
+  :: PatchConstr d a =>
      (Index (TBData d a )) ->
      (KVMetadata d , Compose Identity  (KV (Compose Identity  (TB Identity))) d a)
 createTB1 (m ,s ,k)  = (m , _tb .KV . mapFromTBList . fmap (_tb . createAttr) $  k)
@@ -203,14 +201,12 @@ pattrKey (PFK s _ _ _ ) = Set.fromList s
 
 
 applyRecord
-   :: (Index a~ a ,Show a , Ord a ,Show d, Ord d  ) =>
+   :: PatchConstr d a =>
     TBData d a
      -> TBIdx d a
      -> TBData d a
 applyRecord t@((m, v)) (_ ,_  , k)  = (m ,mapComp (KV . flip (foldr (\p m -> Map.alter (\v -> Just $ maybe (_tb $ createAttr p) (mapComp (flip applyAttr p )) v   ) (pattrKey p) m)) k  . _kvvalues ) v)
-  where edit  v k@(PAttr  s _)  =  mapComp (flip applyAttr k ) v
-        edit  v k@(PInline s _ ) =  mapComp (flip applyAttr k ) v
-        edit  v k@(PFK rel _  _ _ ) =   mapComp (flip applyAttr k ) v
+  where edit  v k =  mapComp (flip applyAttr k ) v
 
 patchTB1 :: (Show a , Ord a ,a ~ Index a ,Show k,Ord k) => TBData k  a -> Index (TBData k  a)
 patchTB1 (m, k)  = (m  ,(getPKM (m,k)) ,  F.toList $ patchAttr  . unTB <$> (unKV k))
@@ -243,8 +239,6 @@ applyAttr (FKT k rel  i) (PFK _ p _ b )  =  FKT ref  rel  (maybe i id b)
               ref =  F.toList $ Map.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList (concat $ traComp nonRefTB <$>  k))
               edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
 applyAttr (IT k i) (PInline _   p)  = IT k (applyTB1 i p)
---applyAttr (FKT  k rel i) (PKey _ s (p@(PIndex m ix _)))  = FKT k rel  (applyTB1 i p)
--- applyAttr (FKT  k rel i) (PKey b s (p))  = FKT (mapComp (\i -> if Set.fromList (keyattri i)  == s  then applyAttr i (PKey b s (p )) else i ) <$>  k) rel  (applyTB1 i p)
 applyAttr i j = errorWithStackTrace ("applyAttr: " <> show (i,j))
 
 
@@ -253,7 +247,6 @@ diffAttr :: PatchConstr k a  => TB Identity k a -> TB Identity k a -> Maybe (Pat
 diffAttr (Attr k i) (Attr l m ) = fmap (PAttr k) (diffShowable i m)
 diffAttr (IT k i) (IT _ l) = fmap (PInline (_relOrigin $ head $ keyattr k ) ) (diffTB1 i l)
 diffAttr (FKT  k _ i) (FKT m rel b) = (\l m -> if L.null l then Nothing else Just ( PFK rel l m  (Just b))) (catMaybes $ zipWith (\i j -> diffAttr (unTB i) (unTB j)) k m  ) kvempty
--- diffAttr (RecRel k ix i) (RecRel k2 ix2 o ) =  PRec k ix <$> (diffAttr i o)
 
 patchAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a)
 patchAttr a@(Attr k v) = PAttr k  (patchFTB id v)
@@ -266,7 +259,6 @@ createAttr (PAttr  k s  ) = Attr k  (createShowable s)
 createAttr (PInline k s ) = IT (_tb $ Attr k (TB1 ())) (createFTB createTB1 s)
 createAttr (PFK rel k s b ) = FKT (_tb . createAttr <$> k) rel  (justError "cant do ref update" b)
 
-createAttr i = errorWithStackTrace (show i)
 
 
 

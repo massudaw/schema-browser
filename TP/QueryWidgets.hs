@@ -15,9 +15,6 @@ module TP.QueryWidgets (
     line,
     strAttr,
     flabel,
-
-
-
     ) where
 
 import RuntimeTypes
@@ -111,10 +108,11 @@ pluginUI :: InformationSchema
     -> Tidings (Maybe (TB2 Key Showable) )
     -> Plugins
     -> UI (Element ,(Access Text,Tidings (Maybe (TB2 Key Showable))))
-pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
+pluginUI oinf initItems (StatefullPlugin n tname ac) = do
   window <- askWindow
-  let tdInput = if L.null bdsn then pure True else (isJust . join .  fmap (checkTable (Many bdsn))  <$>   initItems)
-      (Many ls) =  fst $ pluginStatic $ head ac
+  let fresh = fmap fst ac
+      tdInput = if L.null bdsn then pure True else (isJust . join .  fmap (checkTable (Many bdsn))  <$>   initItems)
+      (Many ls) =  fst $ pluginStatic $ snd $ head ac
       bdsn = filter (\l->  not $ any  (\v -> l == IProd True [v] || isNested (IProd True [v]) l ) (fmap fst $ head fresh ) ) ls
   headerP <- UI.button # set UI.class_ "col-xs-2" # set text (T.unpack n) # sink UI.enabled (facts tdInput)
   headerDiv <- UI.div # set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]# set UI.class_ "row col-xs-12" # set children [headerP]
@@ -148,7 +146,7 @@ pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
           ei <- UI.div # set UI.children ((fmap getElement $ rights elems ) <> [inpPost])
           return $ TrivialWidget trinp ei
       return (h,(output,t),(lefts elems) ,ei )
-           ) ac  freshKeys
+           ) (fmap snd ac ) freshKeys
   lines <- mapM (\(_,_,o,i)-> do
       j<- UI.div # set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")] # set UI.class_ "row" # set children [getElement i]
       k <- UI.div # set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")] # set UI.class_ "row" # set children (fmap getElement o)
@@ -156,12 +154,13 @@ pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
   el <- UI.div # set UI.children (headerDiv : concat lines )
   o <- foldl' (\unoldM (((h,htidings,loui,inp),ac ))  -> unoldM >>= (\unoldItems -> do
       let
+          f = pluginStatic ac
           action = pluginAction ac
       let oldItems = mergeCreate  <$>  unoldItems <*> fmap (fmap (mapKey keyValue)) (triding inp)
-      e <- mapTEvent  action  oldItems
+      e <- mapTEvent  action  (join . fmap (checkTable (fst f)) <$> oldItems)
       liftIO  . h =<< currentValue (fmap (liftKeys inf tname )<$> facts e)
       onEvent (rumors e) (liftIO . h . fmap (liftKeys inf tname ))
-      return  (mergeCreate <$> oldItems <*> e ) ))  (return $fmap (fmap (mapKey keyValue)) trinp) (zip freshUI ac )
+      return  (mergeCreate <$> oldItems <*> e ) ))  (return $fmap (fmap (mapKey keyValue)) trinp) (zip freshUI (fmap snd ac) )
   element el # sink UI.style (noneShow <$> facts tdInput)
   return (el ,   (  ((\(_,o,_,_) -> o)$ last freshUI ) ))
 
@@ -174,7 +173,7 @@ pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
   bh <- stepper False (unionWith const (const True <$> UI.hover headerP ) (const False <$> UI.leave headerP))
   details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (mapValue (const ())) <$> facts tdInput)
   out <- UI.div # set children [headerP,details]
-  ini <- currentValue (facts tdInput)
+  ini <- currentValue (facts tdInput )
   kk <- stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
   pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . action $  fmap (mapKey keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
   return (out, (snd f ,   fmap (liftKeys inf t) <$> pgOut ))
@@ -201,7 +200,7 @@ pluginUI inf oldItems p@(BoundedPlugin2 n t arrow) = do
 attrSize :: TB Identity Key b -> (Int,Int)
 attrSize (FKT  _  _ _ ) = (12,4)
 attrSize (IT _ _ ) = (12,4)
-attrSize (Attr k _ ) = go  (keyType k)
+attrSize (Attr k _ ) = go  (mapKType $ keyType k)
   where
     go i = case i of
                 KOptional l ->  go l
@@ -210,7 +209,7 @@ attrSize (Attr k _ ) = go  (keyType k)
                 KArray l -> let (i1,i2) = go l in (i1+1,i2*8)
                 KInterval l -> let (i1,i2) = go l in (i1*2,i2)
                 (Primitive i) ->
-                  case (\(AtomicPrim i) -> i) $ textToPrim i of
+                  case (\(AtomicPrim i) -> i) $ i of
                        PInt -> (3,1)
                        PText-> (3,1)
                        PDate -> (3,1)
@@ -591,7 +590,7 @@ attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ _ (KArray _) ) v) = mdo
 attrUITable  tAttr' evs attr@(Attr i _ ) = do
       tdi' <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return tAttr') (evs)
       let tdi = fmap (\(Attr  _ i )-> i) <$>tdi'
-      attrUI <- buildUI (keyModifier i)(textToPrim <$> keyType i) tdi
+      attrUI <- buildUI (keyModifier i)(mapKType $ keyType i) tdi
       let insertT = fmap (Attr i ) <$> (triding attrUI)
       when (isReadOnly attr )
               $ void (element attrUI # sink UI.style (noneShow . isJust <$> facts insertT ))
@@ -979,7 +978,7 @@ sortFilterUI conv ix bh  = do
   let
       ev0 = flip (\(l,t,op,vf)-> const (l,step t,op,vf)) <$>  UI.click dv
       ev1 = flip (\(l,t,op,vf) opn -> (l,t,(readValid opn) ,vf)) <$>  opB <@ UI.click fi
-      ev2 = flip (\(l,t,op,vf) vfn -> (l,t,op , (readType (textToPrim <$>  keyType l) vfn))) <$>  vfB <@ UI.click fi
+      ev2 = flip (\(l,t,op,vf) vfn -> (l,t,op , (readType (mapKType $ keyType l) vfn))) <$>  vfB <@ UI.click fi
   block <- UI.div # set children [dv,op,vf,fi]
   return $ TrivialWidget (tidings bh ((\ini@(l,t,op) f -> (\(l,t,op,v) -> (l , t ,liftA2 (,) op v)) $ f (l,t,fmap fst op , fmap snd op) ) <$> bh <@> (concatenate <$> unions [ev0,ev1,ev2]) )) block
 

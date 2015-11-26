@@ -13,8 +13,6 @@ import Data.Maybe
 import Data.Monoid
 
 import qualified Data.Map as M
-import Data.Functor.Identity
-import Data.Functor.Compose
 import System.Directory
 import System.Process(callCommand)
 import Data.Traversable

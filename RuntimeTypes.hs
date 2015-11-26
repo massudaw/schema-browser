@@ -5,7 +5,6 @@ import Control.Concurrent
 import Types
 import Control.Arrow
 import Data.Text
-import Control.Monad.IO.Class
 import Patch
 import Control.Monad.Writer
 
@@ -32,7 +31,6 @@ data InformationSchema
   , _pkMapL :: Map (Set Key) Table
   , _tableMapL :: Map Text Table
   , tableSize :: Map Table Int
-  , pluginsMap :: Map (Text,Text,Text) Key
   , mvarMap :: MVar (Map (KVMetadata Key) (DBVar ))
   , conn :: Connection
   , rootconn :: Connection
@@ -45,16 +43,17 @@ tableMap = _tableMapL
 keyMap = _keyMapL
 pkMap = _pkMapL
 
-type DBVar2 k v = ( MVar  ((Int,Map Int PageToken),[TBData k v ]), R.Tidings ((Int,Map Int PageToken ),[TBData k v ]))
+type DBVar2 k v = (MVar  ((Int,Map Int PageToken),[TBData k v ]), R.Tidings ((Int,Map Int PageToken ),[TBData k v ]))
 type DBVar = DBVar2 Key Showable
 
 type Plugins = FPlugins Text
+type VarDef = (Text,KType (Prim (Text,Text) (Text,Text)))
+
 data FPlugins k
   =  StatefullPlugin
   { _name ::  Text
   , _bounds :: Text
-  , _statevar :: [[(Text,KType (Prim (Text,Text) (Text,Text)))]]
-  , _statefullAction :: [FPlugins k ]
+  , _statefullAction :: [([VarDef ],FPlugins k) ]
   }
   | BoundedPlugin2
   { _name :: Text
@@ -65,9 +64,8 @@ data FPlugins k
   { _name :: Text
   , _bounds :: Text
   , _arrowPure :: ArrowReaderM Identity
-  -- , _arrowbounds :: (Access Text,Access Text)
-  -- , _action :: Maybe (TB2 k Showable) -> Maybe (TB2 k Showable)
   }
+
 
 pluginStatic (BoundedPlugin2 _ _ a) = staticP a
 pluginStatic (PurePlugin _ _ a) = staticP a

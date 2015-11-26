@@ -136,7 +136,7 @@ keyTables schemaVar mvar conn userconn (schema ,user) oauth ops = maybe (do
        metaschema <- if (schema /= "metadata")
           then Just <$> keyTables  schemaVar mvar conn userconn ("metadata",user) oauth ops
           else return Nothing
-       let inf = InformationSchema schema user oauth i1 i2  i3 sizeMapt M.empty mvar  userconn conn metaschema ops
+       let inf = InformationSchema schema user oauth i1 i2  i3 sizeMapt mvar  userconn conn metaschema ops
        var <- takeMVar schemaVar
        putMVar schemaVar (M.insert schema inf var)
        return inf
@@ -182,13 +182,13 @@ liftTable' inf tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapCom
             where
                   ta = lookTable inf tname
 
-fixPatch :: InformationSchema -> Text -> Index (TBData Key a) -> Index (TBData Key a)
+fixPatch :: a ~ Index a => InformationSchema -> Text -> Index (TBData Key a) -> Index (TBData Key a)
 fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
 
 unRecRel (RecJoin _ l) = l
 unRecRel l = l
 
-fixPatchAttr :: InformationSchema -> Text -> Index (Column Key a) -> Index (Column Key a)
+fixPatchAttr :: a ~ Index a => InformationSchema -> Text -> Index (Column Key a) -> Index (Column Key a)
 fixPatchAttr inf t p@(PAttr _ _ ) =  p
 fixPatchAttr inf tname p@(PInline rel e ) =  PInline rel (fmap (\(_,o,v)-> (tableMeta $ lookTable inf tname2,o,fmap (fixPatchAttr  inf tname2 )v)) e)
     where Just (FKInlineTable tname2) = fmap (unRecRel.pathRel) $ L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (keyValue rel)) )  (F.toList$ rawFKS  ta)
@@ -222,7 +222,6 @@ lookTable inf t = justError ("no table: " <> T.unpack t) $ M.lookup t (tableMap 
 lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k ) $ M.lookup (t,k) (keyMap inf)
 
-lookFresh inf n tname i = justError "no freshKey" $ M.lookup (n,tname,i) (pluginsMap inf)
 
 newKey name ty p = do
   un <- newUnique

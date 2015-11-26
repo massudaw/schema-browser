@@ -12,13 +12,11 @@ import Data.Foldable (toList)
 import Control.Applicative
 import qualified Data.Text as T
 import Data.Text (Text)
--- import Warshal
 import Data.Functor.Identity
 import Data.String
 import qualified Data.List as L
 
 
-import Control.Monad.Reader
 import GHC.Stack
 import Control.Arrow
 import Control.Category (Category(..),id)
@@ -35,8 +33,6 @@ liftParser (P i j) = (P i ((\l -> Kleisli $  return <$> l ) $ j ) )
 liftParserR (P i j) = (P i ((\(Kleisli  l) -> Kleisli $  return  <$> l ) $ j ) )
 
 
-
-
 liftReturn = Kleisli . (return <$> )
 
 instance (Monoid s ,Arrow m)  => Arrow (Parser m s ) where
@@ -47,36 +43,18 @@ instance (Monoid s,Arrow m) => Category (Parser m s ) where
    id = P mempty id
    P (i) (j) . P (l ) (m) = P (i <> l) (j . m  )
 
+instance Applicative m => Applicative (Kleisli m a ) where
+  pure i = Kleisli (const (pure i ))
+  Kleisli f <*> Kleisli j  =  Kleisli  $ (\i -> f i <*> j i )
+
+
 printStatic (P (i) _ ) =  show i
 
 act :: (Monoid s,Monad m) => (a -> m b) ->  Parser (Kleisli m) s a b
 act a = P mempty (Kleisli a )
 
-atO i j = proc t -> do
-  idx i -< t
-  at i j -< t
-
-atI i j = proc t ->do
-  idx i -< t
-  at i j -< t
 
 
-checkOutput i = proc t -> do
-      o <- odx i -< fst t
-      v <- odx i -< snd t
-      returnA -< if isJust o  && fmap snd o == fmap snd v
-         then Nothing
-         else v
-
-
-{-
-test1 = do
-  let testP = atAny "tbtest" [join . fmap unSOptional <$> idxR "ewfew" ,join . fmap unSOptional <$> idxR "ooooo":: Parser (Kleisli (ReaderT (Maybe (TB2 Text Showable)) IO) ) (Access Text) b (Maybe (Showable))]
-      testData = Just (TB1 (KV (PK [] []) [Compose $ Identity $ TBEither "tbtest" [Compose $ Identity $ Attr "ewfew" (),Compose $ Identity $ Attr "ooooo" () ] (Just $ Compose $ Identity $ Attr "ewfew" (SOptional $ Just $ SText "24124"))] ))
-
-  print $ staticP testP
-  print =<< runReaderT (dynPK testP  () ) testData
--}
 
 just (Just i ) (Just j) = Nothing
 just i Nothing = i
@@ -142,11 +120,6 @@ odx = logTableInter False
 odxT = logTableInter True
 
 
-instance Applicative m => Applicative (Kleisli m a ) where
-  pure i = Kleisli (const (pure i ))
-  Kleisli f <*> Kleisli j  =  Kleisli  $ (\i -> f i <*> j i )
-
-
 splitIndex b l = (fmap T.pack . IProd b . unIntercalate (','==) $ l)
 
   -- Obrigatory value with maybe wrapping
@@ -171,9 +144,6 @@ idxR  l =
   let ll = splitIndex True l
    in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTable ll)))
 
-{-indexTableInter
-  :: (Show k ,KeyString k ,Arrow a) =>
-      Bool -> String -> Parser  a (Bool,[[Text]]) (Maybe (TB1 (k, Showable))) (Maybe (k, Showable))-}
 indexTableInter b l =
   let ll = splitIndex b l
    in  P (Many [ll],Many [] ) (arr (join . fmap (indexTable ll)))

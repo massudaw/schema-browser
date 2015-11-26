@@ -282,8 +282,8 @@ reflexiveRel ks
   | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
   | all (isJust . keyStatic . _relOrigin) ks = ( isJust . keyStatic. _relOrigin)
   | any (isJust . keyStatic . _relOrigin) ks = ( isNothing . keyStatic. _relOrigin)
-  | any (\j -> not $ isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks =  const False
-  | otherwise = (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) ))
+  | any (\j -> not $ isPairReflexive (mapKType $ keyType (_relOrigin  j) ) (_relOperator j ) (mapKType $ keyType (_relTarget j) )) ks =  const False
+  | otherwise = (\j-> isPairReflexive (mapKType $ keyType (_relOrigin  j) ) (_relOperator j ) (mapKType $ keyType (_relTarget j) ))
 
 isInlineRel (Inline _ ) =  True
 isInlineRel i = False
@@ -294,7 +294,7 @@ isReflexive (Path i r@(FKJoinTable _ ks _ )  t)
 isReflexive (Path _ l _ ) = isPathReflexive l
 
 isPathReflexive (FKJoinTable _ ks _)
-  | otherwise   = all id $ fmap (\j-> isPairReflexive (textToPrim <$> keyType (_relOrigin  j) ) (_relOperator j ) (textToPrim <$> keyType (_relTarget j) )) ks
+  | otherwise   = all id $ fmap (\j-> isPairReflexive (mapKType $ keyType (_relOrigin  j) ) (_relOperator j ) (mapKType $ keyType (_relTarget j) )) ks
 isPathReflexive (FKInlineTable _)= True
 isPathReflexive (RecJoin _ i ) = isPathReflexive i
 
@@ -535,7 +535,7 @@ expandJoin left env (Labeled l (FKT i rel tb)) =  foldr1 (liftA2 mappend) $ (exp
 expandJoin left env i = errorWithStackTrace (show ("expandJoin",i))
 
 joinOnPredicate :: [Rel Key] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> Text
-joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectionOp (fmap textToPrim . keyType . keyAttr . labelValue $ l) op (fmap textToPrim .keyType . keyAttr . labelValue $ r) (label l)  (label r )) <$> fkm
+joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectionOp (mapKType . keyType . keyAttr . labelValue $ l) op (mapKType .keyType . keyAttr . labelValue $ r) (label l)  (label r )) <$> fkm
     where fkm  = (\rel -> Rel (look (_relOrigin rel ) m) (_relOperator rel) (look (_relTarget rel ) n)) <$>  ks
           look ki i = justError ("missing FK on " <> show (ki,ks ,keyAttr . labelValue <$> i )) $ (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
 
@@ -882,12 +882,15 @@ backFKRef
 backFKRef relTable ifk = fmap (_tb . uncurry Attr). reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1
   where
         reorderPK l = fmap (\i -> justError (show ("reorder wrong" :: String, ifk ,relTable , l,i))  $ L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
-        lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (textToPrim <$> keyType ko ) (textToPrim <$> keyType kn) v)) <$> knm
+        lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (mapKType $ keyType ko ) (mapKType $ keyType kn) v)) <$> knm
           where knm =  M.lookup ko relTable
 
 
 postgresLiftPrim =
-  [(PBounding , KInterval (Primitive PPosition))]
+  [(Primitive (AtomicPrim PBounding ), KInterval (Primitive (AtomicPrim PPosition)))]
+
+postgresLiftPrimConv =
+  [((Primitive (AtomicPrim PBounding ), KInterval (Primitive (AtomicPrim PPosition)) ), ((\(TB1 (SBounding (Bounding i) )) -> IntervalTB1 (fmap   (TB1. SPosition ) i)) , (\(IntervalTB1 i) -> TB1 $ SBounding $ Bounding $ (fmap (\(TB1 (SPosition i)) -> i)) i)))]
 
 postgresPrim =
   [("character varying",PText)
@@ -938,12 +941,39 @@ postgresPrim =
 type PGType = (Text,Text)
 type PGRecord = (Text,Text)
 
+ktypeLift :: Ord b => KType (Prim KPrim b) -> Maybe (KType (Prim KPrim b))
+ktypeLift i = (M.lookup i (M.fromList postgresLiftPrim ))
+
+mapKType i = fromMaybe (fmap textToPrim i) $ ktypeLift (fmap textToPrim i)
+mapKTypeM i = ktypeLift (fmap textToPrim i)
+
 textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)
 textToPrim (AtomicPrim (s,i)) = case  M.lookup i (M.fromList postgresPrim) of
-    Just k -> AtomicPrim k
-    Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
+  Just k -> AtomicPrim k -- $ fromMaybe k (M.lookup k (M.fromList postgresLiftPrim ))
+  Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
 textToPrim (RecordPrim i) =  (RecordPrim i)
 
+preconversion i =  join $ (\t -> M.lookup (i,t) (M.fromList postgresLiftPrimConv)) <$> ktypeLift  i
+
+conversion i = fromMaybe (id,id) $ preconversion i
+
+topconversion v@(KDelayed n ) =   preconversion v <|> fmap lif (topconversion n )
+  where
+    lif (a,b) = ((\(DelayedTB1 i) -> DelayedTB1 (fmap a i)), (\(DelayedTB1 i) -> DelayedTB1 (fmap b  i )))
+topconversion v@(KSerial n ) =   preconversion v <|> fmap lif (topconversion n )
+  where
+    lif (a,b) = ((\(SerialTB1 i) -> SerialTB1 (fmap a i)), (\(SerialTB1 i) -> SerialTB1 (fmap b  i )))
+topconversion v@(KOptional n ) =   preconversion v <|> fmap lif (topconversion n )
+  where
+    lif (a,b) = ((\(LeftTB1 i) -> LeftTB1 (fmap a i)), (\(LeftTB1 i) -> LeftTB1 (fmap b  i )))
+topconversion v@(KArray n) =  preconversion v <|> fmap lif (topconversion n )
+  where
+    lif (a,b) = ((\(ArrayTB1 i) -> ArrayTB1 (fmap a i)), (\(ArrayTB1 i) -> ArrayTB1 (fmap b  i )))
+topconversion v@(KInterval n) =  preconversion v <|> fmap lif (topconversion n )
+  where
+    lif (a,b) = ((\(IntervalTB1 i) -> IntervalTB1 (fmap a i)), (\(IntervalTB1 i) -> IntervalTB1 (fmap b  i )))
+topconversion v@(Primitive i) =  preconversion v
 
 
-interPointPost rel ref tar = interPoint (fmap (fmap (fmap (fmap textToPrim))) rel) (fmap (firstTB (fmap (fmap textToPrim))) ref) (fmap (firstTB (fmap (fmap textToPrim))) tar)
+
+interPointPost rel ref tar = interPoint (fmap (fmap (fmap (mapKType ))) rel) (fmap (firstTB (fmap (mapKType ))) ref) (fmap (firstTB (fmap (mapKType ))) tar)

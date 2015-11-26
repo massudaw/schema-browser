@@ -1,18 +1,13 @@
 {-# LANGUAGE TupleSections,OverloadedStrings #-}
 module OAuth where
-import Control.Monad (unless)
 import Control.Lens
 import System.Info (os)
 import Network.Wreq
-import System.Process (system, rawSystem)
+import System.Process (rawSystem)
 import System.Exit    (ExitCode(..))
 import System.Directory (doesFileExist)
 import Network.Google.OAuth2 (formUrl, exchangeCode, refreshTokens,
                               OAuth2Client(..), OAuth2Tokens(..))
-import Network.Google (toAccessToken,makeRequest, doRequest)
-import Network.Google.Contacts(listContacts)
--- import Network.HTTP.Conduit  hiding (port,host)-- (httpLbs,parseUrl,withManager,responseBody,(..))
-import Control.Lens hiding (get,delete,set,(#),element,children)
 import Control.Applicative
 import qualified Data.Set as S
 import qualified Data.Foldable as F
@@ -20,13 +15,10 @@ import Control.Monad.IO.Class
 import Data.Monoid
 import Data.Biapplicative
 import Patch
-import qualified Data.ByteString.Char8 as BS
 import Control.Monad.Writer hiding (pass)
 import System.Time.Extra
 import GHC.Stack
-import Data.String
 import Control.Concurrent
-import Data.Unique
 import Data.Maybe
 import System.Environment
 import Query
@@ -34,29 +26,16 @@ import Data.Aeson.Lens
 import Schema
 import Postgresql
 import qualified Data.Text as T
-import qualified Data.Text as TS
 import Data.Text (Text)
-import Text.XML.Light.Types
-import Text.XML.Light.Proc
 import Data.Aeson
-import qualified Data.Vector as V
-import Safe
 import Utils
-import Patch
-import Database.PostgreSQL.Simple
 
 import Types
 import Data.IORef
 import RuntimeTypes
-import Control.Monad
 import qualified Data.Map as M
 import Debug.Trace
-import SchemaQuery
-import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Core
-import TP.Widgets
-import TP.QueryWidgets
-import Data.List (null,find,intercalate)
+import Data.List (find,intercalate)
 
 --
 file   = "./tokens.txt"
@@ -202,19 +181,19 @@ convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (trav
                         let ref = [Compose .Identity . Types.Attr  k $ v ]
                         tbs <- liftIO$ runDBM infsch (atTable (tableMeta $ lookTable infsch trefname))
                         FKT ref fk <$> (joinRelT fk  (fmap unTB ref) (lookTable infsch trefname) tbs )))
-               funL = funO  (exchange trefname $ keyType k) vk
-               funR = funO  (keyType k) vk
+               funL = funO  (mapKType $ exchange trefname $ keyType k) vk
+               funR = funO  (mapKType $ keyType k) vk
                mergeFun = do
                           (l,r) <- liftA2 (,) funL funR
                           return $ case (l,r) of
                             (Left (Just i),Right j) -> Left (Just i)
                             (Left i ,j ) -> j
               in  join . fmap  patt $   mergeFun
-      | otherwise =  fmap (either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) ) . funO  ( keyType k)  $ (iv ^? ( key ( keyValue k))  )
+      | otherwise =  fmap (either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) ) . funO  ( mapKType $ keyType k)  $ (iv ^? ( key ( keyValue k))  )
 
-    fun :: KType (Prim (Text,Text) (Text,Text))-> Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
+    fun :: KType (Prim KPrim (Text,Text))-> Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
     fun (Primitive i) v =
-        case textToPrim i of
+        case i of
           AtomicPrim k -> return $ Right $ fmap TB1 $ join $ case k of
             PText -> readPrim k . T.unpack <$> (v ^? _String)
             PInt -> Just . SNumeric . round <$> (v ^? _Number)
@@ -227,7 +206,7 @@ convertAttrs  infsch inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (trav
                 where l = catMaybes lm
     fun i v = errorWithStackTrace (show (i,v))
 
-    funO ::  KType (Prim (Text,Text) (Text,Text))-> Maybe Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
+    funO ::  KType (Prim KPrim (Text,Text))-> Maybe Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
     funO (KOptional i) v =  fmap (bimap (Just . LeftTB1) (Just . LeftTB1)) . maybe (return $ typ i) (fun i) $ v
     funO i v = maybe (return $typ i) (fun i) v
 

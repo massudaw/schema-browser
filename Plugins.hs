@@ -130,11 +130,20 @@ cpfForm = BoundedPlugin2 pname tname url
 
 atPrim s g = Primitive (AtomicPrim (s,g))
 queryCPFStatefull = StatefullPlugin "CPF Receita" "owner"
-  [[("captchaViewer",atPrim "public" "jpg"),("sess",atPrim "gmail" "session")],[("nascimento",atPrim "pg_catalog" "date"),("captchaInput",atPrim "pg_catalog" "character varying")]] [cpfCaptcha,cpfForm]
+  [([("captchaViewer",atPrim "public" "jpg")
+    ,("sess",atPrim "gmail" "session")]
+    ,cpfCaptcha)
+  ,([("nascimento",atPrim "pg_catalog" "date")
+    ,("captchaInput",atPrim "pg_catalog" "character varying")]
+    ,cpfForm)]
 
 
 queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
-  [[("captchaViewer",atPrim "public" "jpg"),("sess",atPrim "gmail" "session")],[("captchaInput",atPrim "pg_catalog" "character varying")]] [cnpjCaptcha,cnpjForm]
+  [([("captchaViewer",atPrim "public" "jpg")
+    ,("sess",atPrim "gmail" "session")]
+    ,cnpjCaptcha)
+  ,([("captchaInput",atPrim "pg_catalog" "character varying")]
+    ,cnpjForm)]
 
 
 
@@ -317,7 +326,7 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  url
 
 
 createEmail = StatefullPlugin "Create Email" "messages"
-  [[("plain",atPrim "gmail" "email")]] [generateEmail]
+  [([("plain",atPrim "gmail" "email")],generateEmail)]
 
 generateEmail = BoundedPlugin2  "Generate Email" tname url
   where
@@ -335,7 +344,8 @@ generateEmail = BoundedPlugin2  "Generate Email" tname url
 
 
 renderEmail = StatefullPlugin "Render Email" "messages"
-  [[("message_viewer",Primitive $ RecordPrim ("gmail","mime"))]] [encodeMessage ]
+  [([("message_viewer",Primitive $ RecordPrim ("gmail","mime"))]
+    ,encodeMessage )]
 
 encodeMessage = PurePlugin "Encode Email" tname url
   where

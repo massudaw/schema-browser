@@ -86,11 +86,13 @@ instance (Show a,TF.ToField a , TF.ToField (UnQuoted (a))) => TF.ToField (FTB a)
   toField (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   is
   toField (IntervalTB1 is ) = TF.toField  $ fmap (\(TB1 i ) -> i) is
   toField (TB1 i) = TF.toField i
-  toField i = errorWithStackTrace (show i)
+  -- toField i = errorWithStackTrace (show i)
 
 
 instance  TF.ToField (TB Identity Key Showable)  where
-  toField (Attr _  i) = TF.toField i
+  toField (Attr k  i) = case  topconversion (textToPrim <$> keyType k) of
+          Just (_,b) -> TF.toField (traceShow "conv" $ traceShowId $ b i)
+          Nothing -> TF.toField (traceShow "no conv"  i)
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
   toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . inattr ) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
@@ -111,7 +113,7 @@ instance TF.ToField (UnQuoted Showable) where
   toField (UnQuoted (SDayTime  i )) = TF.Plain $ timeOfDayToBuilder (i)
   toField (UnQuoted (SDouble i )) =  TF.toField i
   toField (UnQuoted (SNumeric i )) =  TF.toField i
-  toField i = TF.toField i
+  toField (UnQuoted i) = errorWithStackTrace (show i)
 
 instance TF.ToField Position where
   toField = TF.toField . UnQuoted
@@ -287,7 +289,6 @@ unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
 unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverse ( traComp (traFAttr unSOptional) . (mapComp (firstTB unKOptional)) ) i)  j
 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
--- parseAttr i | traceShow i False = error ""
 parseAttr (Attr i _ ) = do
   s<- parseShowable (textToPrim <$> keyType  i) <?> show i
   return $  Attr i s
@@ -452,7 +453,9 @@ parseShowable (KInterval k)=
         return $ IntervalTB1 $ Interval.interval (ER.Finite i,lb) (ER.Finite j,rb)
     in doublequoted inter <|> inter <|> emptyInter
 
-parseShowable (Primitive (AtomicPrim i)) = TB1 <$> parsePrim i
+parseShowable p@(Primitive (AtomicPrim i)) = forw  . TB1 <$> parsePrim i
+  where (forw,_) = conversion p
+
 parseShowable i  = error $  "not implemented " <> show i
 
 pg_double :: Parser Double
@@ -590,7 +593,7 @@ instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
 fromShowable ty v =
-   case parseOnly (parseShowable (textToPrim <$> ty )) v of
+   case parseOnly (parseShowable (mapKType ty )) v of
       Right i -> Just i
       Left l -> Nothing
 
