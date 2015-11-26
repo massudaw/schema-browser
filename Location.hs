@@ -14,7 +14,6 @@ import qualified Data.Text as TL
 
 import qualified Data.List as L
 
-
 import Types
 import RuntimeTypes
 import Control.Monad.IO.Class
@@ -34,24 +33,24 @@ import Control.Monad.Trans.Class
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-{-
 
-queryGeocodeBoundary = BoundedPlugin2 "Google Geocode" "address" (staticP url) element
+
+queryGeocodeBoundary = BoundedPlugin2 "Google Geocode" "address"  url
   where
-    url :: ArrowPlug (Kleisli IO) (Maybe (TB2 Text Showable))
+    url :: ArrowReader
     url = proc t -> do
-      id <- varT "id" -< t
-      log <- varT "logradouro"-< t
-      num <- varN "number"-< t
-      bai <- varN "bairro"-< t
-      mun <- varT "municipio"-< t
-      uf <- varT "uf"-< t
-      odx "geocode" -< t
-      odx "bounding" -< t
+      id <- idxR  "id" -< t
+      log <- idxR "logradouro"-< t
+      num <- idxR "number"-< t
+      bai <- idxR "bairro"-< t
+      mun <- idxR "municipio"-< t
+      uf <- idxR "uf"-< t
+      odxR "geocode" -< t
+      odxR "bounding" -< t
       let im = "http://maps.googleapis.com/maps/api/geocode/json"
           vr =  maybe "" renderShowable
           addr = vr log <> " , " <> vr num <> " - " <>  vr bai<> " , " <> vr mun <> " - " <> vr uf
-      r <- act (\(im,addr)-> runMaybeT $ do
+      r <- act (\(im,addr)-> lift $ runMaybeT $ do
             r <-  lift $ getWith (defaults & param "address" .~ [T.pack addr]  ) $ im
             let dec = join $ decode <$> (r ^? responseBody) :: Maybe Value
                 loc = dec !> "results" !!> 0 !> "geometry" !> "location"
@@ -64,17 +63,16 @@ queryGeocodeBoundary = BoundedPlugin2 "Google Geocode" "address" (staticP url) e
                                         (Nothing , j) -> j
             return [("geocode" ,SPosition p),("bounding", SBounding b)]) -<  (im,addr)
 
-      let tb = TB1 . KV (PK [] []) . fmap (Compose . Identity. ( uncurry Attr ) . second (SOptional. Just )) <$> r
+      let tb =  tblist . fmap (_tb . (uncurry Attr ) . second (LeftTB1 . Just . TB1)) <$> r
       returnA -< tb
-
-    element inf
+    element
           = maybe (return Nothing) (\inp -> do
-                   b <- dynPK url (Just inp)
-                   return $ mapKey (lookKey inf "address")  <$> b)
+                   b <- runReaderT (dynPK url ()) (Just inp)
+                   return $  b)
 
--}
 
-queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address" (staticP open  )  element
+
+queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address" open
   where
       translate :: Text -> Text
       translate "localidade" =  "municipio"
@@ -93,7 +91,7 @@ queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address" (staticP open  )  el
           returnA -< tb
 
       addrs ="http://cep.correiocontrol.com.br/"
-      element inf
+      element
           = maybe (return Nothing) (\inp -> do
                    b <- runReaderT (dynPK open ()) (Just inp)
                    return $  b)

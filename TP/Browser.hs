@@ -109,7 +109,9 @@ main = do
   print "Finish"
 
 poller schm dbm db plugs = do
-  let poll (BoundedPlugin2 n a f elemp) =  do
+  let poll p@(BoundedPlugin2 n a arrow ) =  do
+        let f = pluginStatic p
+            elemp = pluginAction p
         (e:: Event [TableModification (TBIdx Key Showable) ] ,handler) <- newEvent
         conn <- connectPostgreSQL (connRoot db)
         inf <- keyTables  schm dbm conn  conn (T.pack $ dbn db, T.pack $ user db) Nothing postgresOps
@@ -136,7 +138,7 @@ poller schm dbm db plugs = do
                   tdInput i =  isJust  $ checkTable  (fst f) i
                   tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
               let elem inf  = fmap catMaybes .  mapM (\inp -> do
-                          o  <- fmap (liftKeys inf a) <$> catchPluginException inf a n (getPK inp)    ( elemp inf (Just $ mapKey keyValue inp))
+                          o  <- fmap (liftKeys inf a) <$> catchPluginException inf a n (getPK inp)    ( elemp (Just $ mapKey keyValue inp))
                           let diff =   join $ (\i j -> diffUpdateAttr   (unTB1 i ) (unTB1 j)) <$>  o <*> Just inp
                           maybe (return Nothing )  (\i -> updateMod inf (unTB1 $ fromJust o) (unTB1 inp) (lookTable inf a )) diff )
 

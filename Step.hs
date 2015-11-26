@@ -12,11 +12,13 @@ import Data.Foldable (toList)
 import Control.Applicative
 import qualified Data.Text as T
 import Data.Text (Text)
+-- import Warshal
 import Data.Functor.Identity
 import Data.String
 import qualified Data.List as L
 
 
+import Control.Monad.Reader
 import GHC.Stack
 import Control.Arrow
 import Control.Category (Category(..),id)
@@ -32,11 +34,8 @@ deriving instance Functor m => Functor (Kleisli m i )
 liftParser (P i j) = (P i ((\l -> Kleisli $  return <$> l ) $ j ) )
 liftParserR (P i j) = (P i ((\(Kleisli  l) -> Kleisli $  return  <$> l ) $ j ) )
 
-dynP ~(P s d) = d
 
-dynPK =  runKleisli . dynP
 
-staticP ~(P s d) = s
 
 liftReturn = Kleisli . (return <$> )
 
@@ -325,3 +324,30 @@ type ArrowPlug a o = RuntimeTypes.Parser a AccessTag (Maybe (TB1 Showable)) o
 attrT :: (a,FTB b) -> Compose Identity (TB Identity) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
+
+findOne l  e
+  = L.find (\i -> S.fromList (proj i) == e ) $ case l of
+    Many l ->  l
+    ISum l -> l
+  where proj (IProd _ i) = i
+        proj (Nested (IProd _ i) n) = i
+        proj (Many [i]) = proj i
+        proj i = errorWithStackTrace (show i )
+
+accessTB i t = go t
+  where
+      go t = case t of
+        LeftTB1 j ->  LeftTB1 $ go <$> j
+        ArrayTB1 j -> ArrayTB1 $ go <$> j
+        DelayedTB1 (Just j) -> go j
+        TB1 (m,k) -> TB1   (m,mapComp (\m -> KV $ M.mapWithKey  modify (_kvvalues $ m)) k )
+          where modify k =  mapComp (\v -> maybe v (flip accessAT v) $ findOne i (S.map (keyValue. _relOrigin) k))
+
+accessAT (Nested (IProd b t) r) at
+    = case at of
+        IT k v -> IT (mapComp (firstTB (alterKeyType forceDAttr )) k ) (accessTB r v)
+        FKT k rel v -> FKT (mapComp (firstTB (alterKeyType forceDAttr )) <$> k) rel (accessTB r v)
+accessAT (IProd b t) at
+    = case at of
+        Attr k v -> Attr (alterKeyType forceDAttr k ) v
+accessAT (Many [i]) at = accessAT i at

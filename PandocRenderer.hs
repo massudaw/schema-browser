@@ -39,7 +39,7 @@ setFooter = setMeta "footer"
 
 setT = setMeta "title"
 
-renderProjectContract = (staticP myDoc , element )
+renderProjectContract = myDoc
    where
       tname = "pricing"
       var str =  maybe "" fromString . fmap (renderShowable) <$> idxM str
@@ -75,12 +75,9 @@ renderProjectContract = (staticP myDoc , element )
               liftIO$ makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odxR "contract" -< ()
           returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "contract" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict . either id id ) outdoc
-      element inf = maybe (return Nothing) (\inp -> do
-                              b <- runReaderT (dynPK myDoc $ ()) (Just inp)
-                              return $ b)
 
 
-renderProjectReport = (staticP myDoc , element )
+renderProjectReport = myDoc
    where
       tname = "pricing"
       payA = displayPay <$> (maybe (TB1 $ SText "Não Agendado") id <$> idxM "payment_date") <*> idxK "payment_description"  <*> idxK "price"
@@ -104,12 +101,9 @@ renderProjectReport = (staticP myDoc , element )
               liftIO$ makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odxR "report" -< ()
           returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "report" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict . either id id ) outdoc
-      element inf = maybe (return Nothing) (\inp -> do
-                              b <- runReaderT (dynPK myDoc $ ()) (Just inp)
-                              return $ b)
 
 
-renderProjectPricingA = (staticP myDoc , element )
+renderProjectPricingA = myDoc
    where
       tname = "pricing"
       -- var :: Text -> Parser (->) (Access Text) () Inlines
@@ -162,9 +156,6 @@ renderProjectPricingA = (staticP myDoc , element )
               makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odxR "orcamento" -< preenv
           returnA -<  (Just .  tbmap .mapFromTBList . pure . Compose. Identity . Attr "orcamento" . LeftTB1 . Just . DelayedTB1 .Just . TB1 . SBinary .  BS.toStrict . either id id ) outdoc
-      element inf = maybe (return Nothing) (\inp -> do
-                              b <- runReaderT (dynPK myDoc ()) (Just inp)
-                              return $ b)
 
 
 

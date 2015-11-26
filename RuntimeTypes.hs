@@ -59,18 +59,33 @@ data FPlugins k
   | BoundedPlugin2
   { _name :: Text
   , _bounds :: Text
-  , _arrowbounds :: (Access Text,Access Text)
-  , _boundedAction2 :: InformationSchema -> (Maybe (TB2 k  Showable)) -> IO (Maybe (TB2 k Showable))
+  , _arrowIO :: ArrowReaderM IO
   }
   | PurePlugin
   { _name :: Text
   , _bounds :: Text
-  , _arrowbounds :: (Access Text,Access Text)
-  , _action :: InformationSchema -> Maybe (TB2 k Showable) -> Maybe (TB2 k Showable)
+  , _arrowPure :: ArrowReaderM Identity
+  -- , _arrowbounds :: (Access Text,Access Text)
+  -- , _action :: Maybe (TB2 k Showable) -> Maybe (TB2 k Showable)
   }
 
-pluginAction (BoundedPlugin2 _ _ _ a ) = a
-pluginAction (PurePlugin _ _ _ a) = fmap (fmap return) a
+pluginStatic (BoundedPlugin2 _ _ a) = staticP a
+pluginStatic (PurePlugin _ _ a) = staticP a
+pluginAction (BoundedPlugin2 _ _  a ) = fmap join . traverse (dynIO a)
+pluginAction (PurePlugin _ _ a) = fmap join . traverse ((fmap return) (dynPure a ))
+
+staticP ~(P s d) = s
+
+dynIO url inp = do
+    runReaderT (dynPK url ()) (Just inp)
+
+dynPure url inp = runIdentity $ do
+    dynIO url inp
+
+dynP ~(P s d) = d
+
+dynPK =  runKleisli . dynP
+
 
 type TransactionM = WriterT [TableModification (TBIdx Key Showable)] IO
 

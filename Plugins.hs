@@ -64,13 +64,13 @@ import Data.String
 import Control.Arrow
 import Crea
 
-lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" (fst renderProjectPricingA )  ( snd renderProjectPricingA )
-lplugContract = BoundedPlugin2 "Contrato" "pricing" (fst renderProjectContract )  ( snd renderProjectContract )
-lplugReport = BoundedPlugin2 "Relatório " "pricing" (fst renderProjectReport )  ( snd renderProjectReport )
+lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" renderProjectPricingA
+lplugContract = BoundedPlugin2 "Contrato" "pricing" renderProjectContract
+lplugReport = BoundedPlugin2 "Relatório " "pricing" renderProjectReport
 
 
 
-siapi2Plugin = BoundedPlugin2  pname tname (staticP url) elemp
+siapi2Plugin = BoundedPlugin2  pname tname url
   where
     pname ="Siapi2 Andamento"
     tname = "fire_project"
@@ -93,13 +93,10 @@ siapi2Plugin = BoundedPlugin2  pname tname (staticP url) elemp
                             (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
       returnA -< join  (  ao  .  tailEmpty . concat <$> join b)
 
-    elemp inf = maybe (return Nothing) (\inp -> do
-                              b <- runReaderT (dynPK url $ () ) (Just inp)
-                              return  b)
     tailEmpty [] = []
     tailEmpty i  = tail i
 
-cpfCaptcha = BoundedPlugin2 pname tname (staticP url ) elemp
+cpfCaptcha = BoundedPlugin2 pname tname url
   where
     pname , tname :: Text
     pname = "CPF Captcha"
@@ -112,12 +109,8 @@ cpfCaptcha = BoundedPlugin2 pname tname (staticP url ) elemp
       odxR "sess" -< ()
       odxR "captchaViewer" -< ()
       returnA -< Just $ tblist [attrT  ("sess", TB1 (SSession sess)) ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
-    elemp inf = maybe (return Nothing) (geninf inf)
-    geninf inf inp = do
-            b <- runReaderT (dynPK url $ () ) (Just inp)
-            return  b
 
-cnpjCaptcha = BoundedPlugin2 pname tname (staticP url ) elemp
+cnpjCaptcha = BoundedPlugin2 pname tname url
   where
     pname , tname :: Text
     pname = "CNPJ Captcha"
@@ -130,16 +123,12 @@ cnpjCaptcha = BoundedPlugin2 pname tname (staticP url ) elemp
       odxR "sess" -< ()
       odxR "captchaViewer" -< ()
       returnA -< Just $ tblist [attrT  ("sess", TB1 (SSession sess)) ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
-    elemp inf = maybe (return Nothing) (geninf inf)
-    geninf inf inp = do
-            b <- runReaderT (dynPK url $ () ) (Just inp)
-            return  b
 
 renderDay d =  paddedm day <> paddedm month <> show year
   where (year,month,day) = toGregorian d
         paddedm m = (if m < 10 then "0" else "" ) <> show m
 
-cpfForm = BoundedPlugin2 pname tname (staticP url ) elemp
+cpfForm = BoundedPlugin2 pname tname url
   where
     pname , tname :: Text
     pname = "CPF Form"
@@ -153,10 +142,6 @@ cpfForm = BoundedPlugin2 pname tname (staticP url ) elemp
       html <- act (\(TB1 (SSession sess),TB1 (SText cap),TB1 (SDate nascimento),TB1 (SText cnpj))  -> lift  (getCpfForm sess (BS.pack $ T.unpack cap) (BS.pack $ renderDay nascimento ) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,nascimento,cnpj)
       arrowS -< ()
       returnA -<   join .join $ fmap convertCPF .  traceShowId <$> html
-    elemp inf = maybe (return Nothing) (geninf inf)
-    geninf inf inp = do
-            b <- runReaderT (dynPK url $ () ) (Just inp)
-            return  b
     arrowS = proc t -> do
               odxR "owner_name" -< t
               returnA -< Nothing
@@ -171,7 +156,7 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
 
 
 
-cnpjForm = BoundedPlugin2 pname tname (staticP url ) elemp
+cnpjForm = BoundedPlugin2 pname tname url
   where
     pname , tname :: Text
     pname = "CNPJ Form"
@@ -185,10 +170,6 @@ cnpjForm = BoundedPlugin2 pname tname (staticP url ) elemp
 
       arrowS -< ()
       returnA -<   join $ convertHtml . (M.fromListWith (++) . fmap (fmap pure )) <$> html
-    elemp inf = maybe (return Nothing) (geninf inf)
-    geninf inf inp = do
-            b <- runReaderT (dynPK url $ () ) (Just inp)
-            return  b
     arrowS = proc t -> do
               idxR "captchaInput" -< t
               odxR "owner_name" -< t
@@ -215,7 +196,7 @@ cnpjForm = BoundedPlugin2 pname tname (staticP url ) elemp
 
 
 
-analiseProjeto = BoundedPlugin2 pname tname (staticP url ) elemp
+analiseProjeto = BoundedPlugin2 pname tname url
   where
     pname , tname :: Text
     pname = "Cadastro Bombeiro"
@@ -232,14 +213,10 @@ analiseProjeto = BoundedPlugin2 pname tname (staticP url ) elemp
       odxR "protocolo" -< ()
       odxR "ano" -< ()
       returnA -< Nothing
-    elemp inf = maybe (return Nothing) (geninf inf)
-    geninf inf inp = do
-            b <- runReaderT (dynPK url $ () ) (Just inp)
-            return  b
 
 
 
-siapi3Plugin  = BoundedPlugin2 pname tname  (staticP url) elemp
+siapi3Plugin  = BoundedPlugin2 pname tname  url
 
   where
     pname , tname :: Text
@@ -268,10 +245,6 @@ siapi3Plugin  = BoundedPlugin2 pname tname  (staticP url) elemp
           iat bv = Compose . Identity $ (IT (attrT ("andamentos",TB1 ()))
                          (LeftTB1 $ Just $ ArrayTB1 $ reverse $ fmap convertAndamento bv))
       returnA -< join (ao <$> b)
-    elemp inf = maybe (return Nothing) (geninf inf)
-    geninf inf inp = do
-            b <- runReaderT (dynPK url $ () ) (Just inp)
-            return b
 
 bool = TB1 . SBoolean
 num = TB1 . SNumeric
@@ -356,7 +329,7 @@ pagamentoArr =  itR "pagamento" (proc descontado -> do
               returnA -<  tblist [pg ] )
 
 
-gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
+gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  url
   where
     tname = "plano_aluno"
     url :: ArrowReader
@@ -368,15 +341,12 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  (staticP url) elem
           pag <- pagamentoArr -< Just descontado
           returnA -< Just . tblist . pure . _tb  $ pag
 
-    elem inf = maybe (return Nothing) (\inp -> do
-                  b <- runReaderT (dynPK   url $ ())  (Just inp)
-                  return  b )
 
 
 createEmail = StatefullPlugin "Create Email" "messages"
   [[("plain",atPrim "gmail" "email")]] [generateEmail]
 
-generateEmail = BoundedPlugin2  "Generate Email" tname (staticP url ) elem
+generateEmail = BoundedPlugin2  "Generate Email" tname url
   where
     tname ="messages"
     url :: ArrowReader
@@ -390,14 +360,11 @@ generateEmail = BoundedPlugin2  "Generate Email" tname (staticP url ) elem
     buildmessage (TB1 (SBinary mesg ))= TB1 .SText . T.pack . BS.unpack . B64Url.encode .BSL.toStrict <$>  (fmap traceShowId . renderMail' $ Mail (Address Nothing "wesley.massuda@gmail.com") [Address Nothing "wesley.massuda@gmail.com"] [] [] [] [[mail]])
           where mail = (Part "text/plain" None Nothing [] (BSL.fromStrict $   mesg))
 
-    elem inf = maybe (return Nothing) (\inp -> do
-                      b <- runReaderT (dynPK   url $ ())  ( Just inp)
-                      return b)
 
 renderEmail = StatefullPlugin "Render Email" "messages"
   [[("message_viewer",Primitive $ RecordPrim ("gmail","mime"))]] [encodeMessage ]
 
-encodeMessage = PurePlugin "Encode Email" tname (staticP url) elem
+encodeMessage = PurePlugin "Encode Email" tname url
   where
     tname = "messages"
     messages = nameI 0 $ proc t -> do
@@ -428,13 +395,9 @@ encodeMessage = PurePlugin "Encode Email" tname (staticP url) elem
     decoder (SText i) =  (Just . SBinary) . B64Url.decodeLenient . BS.pack . T.unpack $ i
     decoder' (TB1 i) = fmap TB1 $ decoder i
     decoder' (LeftTB1 i) =  (join $ fmap decoder' i)
-    elem inf = maybe Nothing (\inp -> runIdentity $ do
-                      b <- runReaderT (dynPK   url $ ())  ( Just inp)
-                      return   b
-                            )
 
 
-pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname (staticP url) elem
+pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname url
   where
     tname = "servico_venda"
     url :: ArrowReader
@@ -445,13 +408,9 @@ pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname (staticP url) elem
           pag <- pagamentoArr -< Just descontado
           returnA -< Just . tblist . pure . _tb  $ pag
 
-    elem inf = maybe (return Nothing) (\inp -> do
-                      b <- runReaderT (dynPK   url $ ())  (Just inp)
-                      return b
-                            )
 
 
-importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
+importarofx = BoundedPlugin2 "OFX Import" tname  url
   where
     tname = "account_file"
     url :: ArrowReader
@@ -482,12 +441,9 @@ importarofx = BoundedPlugin2 "OFX Import" tname  (staticP url) elem
           tbst :: (Maybe (TB2 Text (Showable)))
           tbst = Just $ tblist [_tb $ FKT ref [Rel "statements" "=" "fitid",Rel "account" "=" "account"] ao]
       returnA -< tbst
-    elem inf = maybe (return Nothing) (\inp -> do
-                b <- runReaderT (dynPK url ()) (Just inp)
-                return $ b)
 
 
-notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" tname (staticP url) elem
+notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" tname url
   where
     tname = "nota"
     varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
@@ -503,12 +459,8 @@ notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" tname (staticP url) elem
       b <- act (fmap join  . traverse (\(i, (j, k,a)) -> liftIO$ prefeituraNota j k a i ) ) -< liftA2 (,) i r
       let ao =  Just $ tblist [attrT ("nota",    LeftTB1 $ fmap (DelayedTB1 .Just . TB1 ) b)]
       returnA -< ao
-    elem inf = maybe (return Nothing) (\inp -> do
-                              b <- runReaderT (dynPK url  ()) (Just inp)
-                              return $ b
-                            )
 
-queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" tname (staticP url) elem
+queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" tname url
   where
     tname = "art"
     varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
@@ -525,13 +477,9 @@ queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" tname (staticP url) ele
       b <- act (fmap join  . fmap traceShowId . traverse (\(i, (j, k,a)) -> liftIO$ creaLoginArt  j k a i ) ) -< liftA2 (,) i r
       let ao =  traceShowId $ Just $ tblist [attrT ("art",    LeftTB1 $ fmap (DelayedTB1 . Just . TB1 ) b)]
       returnA -< ao
-    elem inf = maybe (return Nothing) (\inp -> do
-                              b <- runReaderT (dynPK url  $ ()) (Just inp)
-                              return $ b
-                            )
 
 
-queryArtBoletoCrea = BoundedPlugin2  pname tname (staticP url) elem
+queryArtBoletoCrea = BoundedPlugin2  pname tname url
   where
     pname = "Boleto Art Crea"
     tname = "art"
@@ -549,14 +497,10 @@ queryArtBoletoCrea = BoundedPlugin2  pname tname (staticP url) elem
       b <- act ( traverse (\(i, (j, k,a)) -> lift $ creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
       let ao =  Just $ tblist [attrT ("boleto",   LeftTB1 $ fmap ( DelayedTB1 . Just) $ (TB1 . SBinary. BSL.toStrict) <$> b)]
       returnA -< ao
-    elem inf
-       = maybe (return Nothing) (\inp -> do
-                            b <- runReaderT (dynPK url $ () ) (Just inp)
-                            return $ b )
 
 
 
-queryArtAndamento = BoundedPlugin2 pname tname (staticP url) elemp
+queryArtAndamento = BoundedPlugin2 pname tname url
   where
     tname = "art"
     pname = "Andamento Art Crea"
@@ -573,10 +517,6 @@ queryArtAndamento = BoundedPlugin2 pname tname (staticP url) elemp
           artPayd dm = ("payment_date" ,) . LeftTB1 . join $ (\d -> fmap (TB1 . STimestamp . fst )  $ strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
           artInp inp = Just $ tblist $fmap attrT   $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       returnA -< artInp (traceShowId v)
-    elemp inf
-          = maybe (return Nothing) (\inp -> do
-                   b <- runReaderT (dynPK url $ () )  (Just inp)
-                   return $  b)
 
 
 {- testPlugin  db sch p = withConnInf db sch (\inf -> do
@@ -592,4 +532,4 @@ queryArtAndamento = BoundedPlugin2 pname tname (staticP url) elemp
 -}
 
 plugList :: [Plugins]
-plugList = [createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,{-queryGeocodeBoundary,-}queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]
+plugList = [createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]

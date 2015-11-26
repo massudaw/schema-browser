@@ -102,7 +102,7 @@ pluginUI :: InformationSchema
 pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
   window <- askWindow
   let tdInput = if L.null bdsn then pure True else (isJust . join .  fmap (checkTable (Many bdsn))  <$>   initItems)
-      (Many ls) =  fst $ _arrowbounds $ head ac
+      (Many ls) =  fst $ pluginStatic $ head ac
       bdsn = filter (\l->  not $ any  (\v -> l == IProd True [v] || isNested (IProd True [v]) l ) (fmap fst $ head fresh ) ) ls
   headerP <- UI.button # set UI.class_ "col-xs-2" # set text (T.unpack n) # sink UI.enabled (facts tdInput)
   headerDiv <- UI.div # set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]# set UI.class_ "row col-xs-12" # set children [headerP]
@@ -112,7 +112,7 @@ pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
       freshKeys :: [[Key]]
       freshKeys = fmap (lookKey inf tname . fst ) <$> fresh
   freshUI <- Tra.sequence $   zipWith (\ac freshs -> do
-      let (input,output) = _arrowbounds ac
+      let (input,output) = pluginStatic ac
       (h,t :: Tidings (Maybe (TB1 Showable)) ) <- liftIO $ generateFresh
       elems <- mapM (\fresh -> do
         let prod = IProd True [keyValue fresh]
@@ -142,16 +142,20 @@ pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
       k <- UI.div # set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")] # set UI.class_ "row" # set children (fmap getElement o)
       return [j,k]) freshUI
   el <- UI.div # set UI.children (headerDiv : concat lines )
-  o <- foldl' (\unoldM (f,((h,htidings,loui,inp),action))  -> unoldM >>= (\unoldItems -> do
+  o <- foldl' (\unoldM (((h,htidings,loui,inp),ac ))  -> unoldM >>= (\unoldItems -> do
+      let f = pluginStatic ac
+          action = pluginAction ac
       let oldItems = mergeCreate  <$>  unoldItems <*> fmap (fmap (mapKey keyValue)) (triding inp)
-      e <- mapTEvent  (action inf) oldItems
+      e <- mapTEvent  action  oldItems
       liftIO  . h =<< currentValue (fmap (liftKeys inf tname )<$> facts e)
       onEvent (rumors e) (liftIO . h . fmap (liftKeys inf tname ))
-      return  (mergeCreate <$> oldItems <*> e ) ))  (return $fmap (fmap (mapKey keyValue)) trinp) ( zip (_arrowbounds <$> ac ) $ zip freshUI (pluginAction <$> ac) )
+      return  (mergeCreate <$> oldItems <*> e ) ))  (return $fmap (fmap (mapKey keyValue)) trinp) (zip freshUI ac )
   element el -- # sink UI.style (noneShow <$> facts tdInput)
   return (el ,   (  ((\(_,o,_,_) -> o)$ last freshUI ) ))
 
-pluginUI inf oldItems (PurePlugin n t f action) = do
+pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
+  let f = staticP arrow
+      action = pluginAction   p
   let tdInput = join . fmap (checkTable (fst f)) <$>  oldItems
       tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
   headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
@@ -160,11 +164,13 @@ pluginUI inf oldItems (PurePlugin n t f action) = do
   out <- UI.div # set children [headerP,details]
   ini <- currentValue (facts oldItems)
   kk <- stepper ini (diffEvent (facts oldItems) (rumors oldItems))
-  pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . return . action inf $  fmap (mapKey keyValue) v)  (tidings kk $diffEvent kk (rumors oldItems))
+  pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . action $  fmap (mapKey keyValue) v)  (tidings kk $diffEvent kk (rumors oldItems))
   return (out, (snd f ,   fmap (liftKeys inf t) <$> pgOut ))
 
-pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
+pluginUI inf oldItems p@(BoundedPlugin2 n t arrow) = do
   overwrite <- checkedWidget (pure False)
+  let f = staticP arrow
+      action = pluginAction p
   let tdInput = join . fmap (checkTable (fst f)) <$>  oldItems
       tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
   v <- currentValue (facts oldItems)
@@ -176,7 +182,7 @@ pluginUI inf oldItems (BoundedPlugin2 n t f action) = do
   vo <- currentValue (facts tdOutput)
   vi <- currentValue (facts tdInput)
   bcv <- stepper (maybe vi (const Nothing) vo) ecv
-  pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . action inf $ fmap (mapKey keyValue) v)  (tidings bcv ecv)
+  pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . action $ fmap (mapKey keyValue) v)  (tidings bcv ecv)
   return (out, (snd f ,   fmap (liftKeys inf t )<$> pgOut ))
 
 
