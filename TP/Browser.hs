@@ -102,7 +102,7 @@ main = do
 
   mvar <- newMVar M.empty
   smvar <- newMVar M.empty
-  e <- poller smvar mvar (argsToState (tail args))  plugList
+  e <- poller smvar mvar (argsToState (tail args))  []--plugList
   tokenRef <- oauthpoller
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e mvar smvar tokenRef $ tail args)
   print "Finish"

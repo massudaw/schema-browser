@@ -886,6 +886,9 @@ backFKRef relTable ifk = fmap (_tb . uncurry Attr). reorderPK .  concat . fmap a
           where knm =  M.lookup ko relTable
 
 
+postgresLiftPrim =
+  [(PBounding , KInterval (Primitive PPosition))]
+
 postgresPrim =
   [("character varying",PText)
   ,("name",PText)

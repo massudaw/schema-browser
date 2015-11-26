@@ -162,7 +162,7 @@ pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
       liftIO  . h =<< currentValue (fmap (liftKeys inf tname )<$> facts e)
       onEvent (rumors e) (liftIO . h . fmap (liftKeys inf tname ))
       return  (mergeCreate <$> oldItems <*> e ) ))  (return $fmap (fmap (mapKey keyValue)) trinp) (zip freshUI ac )
-  element el -- # sink UI.style (noneShow <$> facts tdInput)
+  element el # sink UI.style (noneShow <$> facts tdInput)
   return (el ,   (  ((\(_,o,_,_) -> o)$ last freshUI ) ))
 
 pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
@@ -174,9 +174,9 @@ pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
   bh <- stepper False (unionWith const (const True <$> UI.hover headerP ) (const False <$> UI.leave headerP))
   details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (mapValue (const ())) <$> facts tdInput)
   out <- UI.div # set children [headerP,details]
-  ini <- currentValue (facts oldItems)
-  kk <- stepper ini (diffEvent (facts oldItems) (rumors oldItems))
-  pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . action $  fmap (mapKey keyValue) v)  (tidings kk $diffEvent kk (rumors oldItems))
+  ini <- currentValue (facts tdInput)
+  kk <- stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
+  pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . action $  fmap (mapKey keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
   return (out, (snd f ,   fmap (liftKeys inf t) <$> pgOut ))
 
 pluginUI inf oldItems p@(BoundedPlugin2 n t arrow) = do
@@ -667,7 +667,7 @@ buildPrim fm tdi i = case i of
          PMime mime -> do
            let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
            clearB <- UI.button # set UI.text "clear"
-           file <- UI.input # set UI.class_ "file_client" # set UI.type_ "file" # set UI.multiple True
+           file <- UI.input # set UI.class_ "file_client" # set UI.type_ "file" # set UI.multiple True # set UI.style (noneShow $ elem FWrite fm)
            UI.div # sink0 UI.html (pure "<script> $(\".file_client\").on('change',handleFileSelect); </script>")
            tdi2 <- addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fileChange file ) =<< addEvent (const Nothing <$> UI.click clearB) tdi
            let fty = case mime of
@@ -676,7 +676,7 @@ buildPrim fm tdi i = case i of
                 "image/jpg" -> ("img","src",maybe "" binarySrc ,[])
                 "text/plain" -> ("textarea","value",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
                 "text/html" -> ("iframe","srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-           f <- pdfFrame fty (facts tdi2) -- # sink0 UI.style (noneShow . isJust <$> facts tdi2)
+           f <- pdfFrame fty (facts tdi2) # sink0 UI.style (noneShow . isJust <$> facts tdi2)
            fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]
            res <- UI.div # set children [fd,f]
            paintBorder res (facts tdi2) (facts  tdi)
@@ -834,7 +834,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           sortList =  sorting  <$> pure (fmap ((,True)._relTarget) rel)
       itemList <- if isReadOnly tb
         then
-           TrivialWidget (Just . fmap _fkttable <$> oldItems ) <$>
+           TrivialWidget (Just . fmap _fkttable <$> oldItems) <$>
               (UI.div #
                 set UI.style [("border","1px solid gray")] #
                 sink items (pure . maybe UI.div showFKE  . fmap _fkttable<$> facts oldItems ))

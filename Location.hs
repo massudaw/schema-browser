@@ -41,7 +41,7 @@ queryGeocodeBoundary = BoundedPlugin2 "Google Geocode" "address"  url
     url = proc t -> do
       id <- idxR  "id" -< t
       log <- idxR "logradouro"-< t
-      num <- idxR "number"-< t
+      num <- idxM "number"-< t
       bai <- idxR "bairro"-< t
       mun <- idxR "municipio"-< t
       uf <- idxR "uf"-< t
@@ -65,10 +65,6 @@ queryGeocodeBoundary = BoundedPlugin2 "Google Geocode" "address"  url
 
       let tb =  tblist . fmap (_tb . (uncurry Attr ) . second (LeftTB1 . Just . TB1)) <$> r
       returnA -< tb
-    element
-          = maybe (return Nothing) (\inp -> do
-                   b <- runReaderT (dynPK url ()) (Just inp)
-                   return $  b)
 
 
 
@@ -91,8 +87,4 @@ queryCEPBoundary = BoundedPlugin2  "Correios CEP" "address" open
           returnA -< tb
 
       addrs ="http://cep.correiocontrol.com.br/"
-      element
-          = maybe (return Nothing) (\inp -> do
-                   b <- runReaderT (dynPK open ()) (Just inp)
-                   return $  b)
 
