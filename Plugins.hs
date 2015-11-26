@@ -11,28 +11,24 @@
 {-# LANGUAGE NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 module Plugins where
 
-import Query
-import Types
-import qualified Data.Binary as B
-import Step
-import Network.Mail.Mime
-import Data.Tuple
 import Location
 import PrefeituraSNFSE
 import Siapi3
 import CnpjReceita
-import Control.Monad.Reader
-import Control.Concurrent
-import Data.Functor.Apply
-import System.Environment
-import Debug.Trace
-import Data.Ord
 import OFX
-import Data.Time.Parse
-import Utils
--- import Schema
-import Data.Char (toLower)
+import Crea
 import PandocRenderer
+
+import Types
+import Step
+import RuntimeTypes
+import Utils
+
+import Network.Mail.Mime
+import Control.Monad.Reader
+import Data.Functor.Apply
+import Debug.Trace
+import Data.Time.Parse
 import Data.Maybe
 import Data.Functor.Identity
 import Control.Applicative
@@ -40,29 +36,17 @@ import Data.Traversable (traverse)
 import qualified Data.Traversable as Tra
 import Data.Time.LocalTime
 import qualified Data.List as L
-import qualified Data.Vector as Vector
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.Time
 import qualified Data.ByteString.Base64.URL as B64Url
-
-import RuntimeTypes
 import Data.Monoid hiding (Product(..))
-
-import qualified Data.Foldable as F
 import qualified Data.Text as T
-import Data.ByteString.Lazy(toStrict)
-import Data.Text.Lazy.Encoding
 import Data.Text (Text)
-import qualified Data.Set as S
-
-
 import qualified Data.Map as M
 import Data.String
-
-
 import Control.Arrow
-import Crea
+
 
 lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" renderProjectPricingA
 lplugContract = BoundedPlugin2 "Contrato" "pricing" renderProjectContract
@@ -92,7 +76,6 @@ siapi2Plugin = BoundedPlugin2  pname tname url
                             (attrT ("andamentos",TB1 ()))
                             (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
       returnA -< join  (  ao  .  tailEmpty . concat <$> join b)
-
     tailEmpty [] = []
     tailEmpty i  = tail i
 
