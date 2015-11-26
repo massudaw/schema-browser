@@ -12,13 +12,11 @@ import Data.Foldable (toList)
 import Control.Applicative
 import qualified Data.Text as T
 import Data.Text (Text)
--- import Warshal
 import Data.Functor.Identity
 import Data.String
 import qualified Data.List as L
 
 
-import Control.Monad.Reader
 import GHC.Stack
 import Control.Arrow
 import Control.Category (Category(..),id)
@@ -30,42 +28,6 @@ import Utils
 import qualified Data.Traversable as T
 
 deriving instance Functor m => Functor (Kleisli m i )
-
-
-instance Show (a -> Maybe Showable) where
-  show _ = ""
-
-instance Show (a -> String) where
-  show _ = ""
-
-{-
-data FKEdit
-  = FKEInsertGenerated
-  | FKEInsertFind
-  | FKEUpdateAttr
-  | FKEUpdateFK
-  deriving(Show)
-
-data AEdit
-  = AEInsert
-  | AEUpdate
-  deriving(Show)
-
-data TEdit
-  = TInsert
-  | TUpdate
-  | TDelete
-  | TGenerated
-  deriving(Show)
-
-data TablePlan a = TablePlan TEdit Table [StepPlan a]
-data StepPlan a
-  = SPAttr AEdit Key a
-  | SPFK FKEdit (Path (Set Key) (SqlOperation Table)) [StepPlan a]
-  | TBPlan TEdit Table [StepPlan a]
-  deriving(Show,Functor)
--}
-
 
 liftParser (P i j) = (P i ((\l -> Kleisli $  return <$> l ) $ j ) )
 liftParserR (P i j) = (P i ((\(Kleisli  l) -> Kleisli $  return  <$> l ) $ j ) )
@@ -271,8 +233,10 @@ checkField i j = errorWithStackTrace (show (i,j))
 
 
 
--- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
-checkTable l (LeftTB1 j) = Just$ LeftTB1 $  join $ fmap (checkTable l) j
+checkTable l (ArrayTB1 i )
+  | i == []  = Nothing
+  | otherwise =   fmap ArrayTB1 $ allMaybes $ checkTable l <$> i
+checkTable l (LeftTB1 j) = Just $ LeftTB1 $ join $ fmap (checkTable l) j
 checkTable l (DelayedTB1 j) = Just $ DelayedTB1 $ join $ fmap (checkTable l) j
 checkTable (Rec ix i) t = checkTable (replace ix i i ) t
 checkTable (Many [m@(Many l)]) t = checkTable m t
@@ -280,9 +244,6 @@ checkTable (Many [m@(Rec _ _ )]) t = checkTable m t
 checkTable (Many l) t@(TB1 (m,v)) =
   fmap (TB1 . (m,) . Compose . Identity . KV . mapFromTBList ) . allMaybes $ flip checkField t <$> l
 
-checkTable l (ArrayTB1 i )
-  | i == []  = Nothing
-  | otherwise =   fmap ArrayTB1 $ allMaybes $ checkTable l <$> i
 
 checkTable (ISum []) t@(TB1  v)
   = Nothing
@@ -356,38 +317,11 @@ findPK = concat . fmap keyattr  .toList . _kvvalues  . unTB . tbPK
 
 
 
-
 type FunArrowPlug o = RuntimeTypes.Parser (->) AccessTag (Maybe (TB1 Showable)) o
+
 type ArrowPlug a o = RuntimeTypes.Parser a AccessTag (Maybe (TB1 Showable)) o
 
 
 attrT :: (a,FTB b) -> Compose Identity (TB Identity) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
-
-findOne l  e
-  = L.find (\i -> S.fromList (proj i) == e ) $ case l of
-    Many l ->  l
-    ISum l -> l
-  where proj (IProd _ i) = i
-        proj (Nested (IProd _ i) n) = i
-        proj (Many [i]) = proj i
-        proj i = errorWithStackTrace (show i )
-
-accessTB i t = go t
-  where
-      go t = case t of
-        LeftTB1 j ->  LeftTB1 $ go <$> j
-        ArrayTB1 j -> ArrayTB1 $ go <$> j
-        DelayedTB1 (Just j) -> go j
-        TB1 (m,k) -> TB1   (m,mapComp (\m -> KV $ M.mapWithKey  modify (_kvvalues $ m)) k )
-          where modify k =  mapComp (\v -> maybe v (flip accessAT v) $ findOne i (S.map (keyValue. _relOrigin) k))
-
-accessAT (Nested (IProd b t) r) at
-    = case at of
-        IT k v -> IT (mapComp (firstTB (alterKeyType forceDAttr )) k ) (accessTB r v)
-        FKT k rel v -> FKT (mapComp (firstTB (alterKeyType forceDAttr )) <$> k) rel (accessTB r v)
-accessAT (IProd b t) at
-    = case at of
-        Attr k v -> Attr (alterKeyType forceDAttr k ) v
-accessAT (Many [i]) at = accessAT i at

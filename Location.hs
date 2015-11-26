@@ -1,8 +1,7 @@
 {-# LANGUAGE TupleSections,Arrows,OverloadedStrings #-}
 module Location where
+
 import Network.Wreq
-
-
 import Control.Lens
 import Utils
 import Control.Applicative

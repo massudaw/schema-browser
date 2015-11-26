@@ -146,7 +146,7 @@ keyTables schemaVar mvar conn userconn (schema ,user) oauth ops = maybe (do
 addRecInit :: Map Text Table -> Map Text Table
 addRecInit m = fmap recOverFKS m
   where
-        recOverFKS t  = t {rawFKS = S.map path  (rawFKS t) }
+        recOverFKS t  = t Le.& rawFKSL Le.%~ S.map path
           where
                 path pini@(Path k rel tr) =
                     Path k (case rel of
@@ -208,10 +208,10 @@ liftKeys inf tname = fmap (liftTable' inf tname)
 liftField :: InformationSchema -> Text -> Column Text a -> Column Key a
 liftField inf tname (Attr t v) = Attr (lookKey inf tname t) v
 liftField inf tname (FKT ref  rel2 tb) = FKT (mapComp (liftField inf tname) <$> ref)   ( rel) (liftKeys inf tname2 tb)
-    where (FKJoinTable _ rel tname2 ) = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+    where FKJoinTable _ rel tname2  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 liftField inf tname (IT rel tb) = IT (mapComp (liftField inf tname ) rel) (liftKeys inf tname2 tb)
-    where ((FKInlineTable tname2 ) ) =(unRecRel.pathRel ) $ justError (show (rel ,rawFKS ta)) $ L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
+    where FKInlineTable tname2  = unRecRel.pathRel  $ justError (show (rel ,rawFKS ta)) $ L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 
 

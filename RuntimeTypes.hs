@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
+{-# LANGUAGE TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
 module RuntimeTypes where
 
 import Control.Concurrent
@@ -19,6 +19,7 @@ import Data.Foldable
 import Data.Traversable
 import Data.IORef
 import Network.Google.OAuth2
+import Control.Lens.TH
 
 data Parser m s a b = P (s,s) (m a b) deriving Functor
 
@@ -27,9 +28,9 @@ data InformationSchema
   { schemaName :: Text
   , username :: Text
   , token :: Maybe (Text,IORef OAuth2Tokens)
-  , keyMap :: Map (Text,Text) Key
-  , pkMap :: Map (Set Key) Table
-  , tableMap :: Map Text Table
+  , _keyMapL :: Map (Text,Text) Key
+  , _pkMapL :: Map (Set Key) Table
+  , _tableMapL :: Map Text Table
   , tableSize :: Map Table Int
   , pluginsMap :: Map (Text,Text,Text) Key
   , mvarMap :: MVar (Map (KVMetadata Key) (DBVar ))
@@ -38,6 +39,11 @@ data InformationSchema
   , metaschema :: Maybe InformationSchema
   , schemaOps :: SchemaEditor
   }
+
+
+tableMap = _tableMapL
+keyMap = _keyMapL
+pkMap = _pkMapL
 
 type DBVar2 k v = ( MVar  ((Int,Map Int PageToken),[TBData k v ]), R.Tidings ((Int,Map Int PageToken ),[TBData k v ]))
 type DBVar = DBVar2 Key Showable
@@ -98,3 +104,4 @@ data Access a
 type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TB2 Text Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))
 type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TB2 Text Showable)) m )) (Access Text) () (Maybe (TB2  Text Showable))
 
+makeLenses ''InformationSchema

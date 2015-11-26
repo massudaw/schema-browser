@@ -134,7 +134,6 @@ data Compose f g k a = Compose {getCompose :: f (g k a) } deriving (Functor,Fold
 
 data Path a b
   = Path  a  b  a
-  | MultiPath [Path a b]
   deriving(Eq,Ord,Show )
 
 
@@ -514,11 +513,13 @@ data TableK k
            , rawAuthorization :: [Text]
            , rawPK :: (Set k)
            , rawDescription :: [k]
-           , rawFKS ::  (Set (Path (Set k) (SqlOperationK k )))
+           , _rawFKSL ::  (Set (Path (Set k) (SqlOperationK k )))
            , rawInvFKS ::  (Set (Path (Set k) (SqlOperationK k)))
            , rawAttrs :: (Set k)
            }
      deriving(Eq,Ord)
+
+rawFKS = _rawFKSL
 
 instance Show Table where
   show = T.unpack . tableName
@@ -885,6 +886,7 @@ makeLenses ''KV
 makeLenses ''TB
 makeLenses ''Rel
 makeLenses ''FKey
+makeLenses ''TableK
 
 --
 --- Attr Cons/Uncons

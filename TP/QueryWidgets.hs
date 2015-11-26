@@ -18,7 +18,7 @@ import Graphics.UI.Threepenny.Core hiding (delete)
 import Data.String
 import Data.Bifunctor
 import Data.Ord
-import Control.Lens ((^?))
+import Control.Lens ((^?),(&),(.~),(%~))
 import qualified Control.Lens as Le
 import Utils
 import Data.Char
@@ -68,10 +68,23 @@ generateFresh = do
 
 
 
-createFresh :: Text -> Text -> Map (Text,Text) Key -> Text -> KType (Prim (Text,Text) (Text,Text))-> IO (Map (Text,Text) Key)
-createFresh n tname pmap i ty  =  do
-  k <- newKey i ty 0
-  return $ M.insert (tname,i) k pmap
+createFresh :: Text -> InformationSchema -> Text -> KType (Prim (Text,Text) (Text,Text))-> IO InformationSchema
+createFresh  tname inf i ty@(Primitive atom)  =
+  case atom of
+    AtomicPrim _  -> do
+      k <- newKey i ty 0
+      return $ inf
+          & keyMapL %~ (M.insert (tname,i) k )
+
+    RecordPrim (s,t) -> do
+      k <- newKey i ty 0
+      let tableO = lookTable inf tname
+      let tableT = lookTable inf t
+          path = Path (S.singleton k) (FKInlineTable $ inlineName ty ) S.empty
+      return $ inf
+          & tableMapL . Le.ix tname . rawFKSL %~  S.insert path
+          & pkMapL . Le.ix (rawPK tableO) . rawFKSL Le.%~  S.insert path
+          & keyMapL %~ M.insert (tname,i) k
 
 genAttr inf k =
   case keyType k of
@@ -81,20 +94,21 @@ genAttr inf k =
         RecordPrim (l,t) ->
           let table =  lookTable inf  t
           in IT (_tb (Attr k (TB1 ()))) $ unTlabel $ tableView (tableMap inf) table
+
 pluginUI :: InformationSchema
     -> Tidings (Maybe (TB2 Key Showable) )
     -> Plugins
     -> UI (Element ,(Access Text,Tidings (Maybe (TB2 Key Showable))))
 pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
   window <- askWindow
-  let tdInput = if L.null bdsn then pure True else (isJust . join . traceShowId . fmap (checkTable (traceShowId $Many bdsn))  <$>   initItems)
+  let tdInput = if L.null bdsn then pure True else (isJust . join .  fmap (checkTable (Many bdsn))  <$>   initItems)
       (Many ls) =  fst $ _arrowbounds $ head ac
       bdsn = filter (\l->  not $ any  (\v -> l == IProd True [v] || isNested (IProd True [v]) l ) (fmap fst $ head fresh ) ) ls
   headerP <- UI.button # set UI.class_ "col-xs-2" # set text (T.unpack n) # sink UI.enabled (facts tdInput)
   headerDiv <- UI.div # set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]# set UI.class_ "row col-xs-12" # set children [headerP]
   trinp <- cutEvent (UI.click headerP) initItems
-  m <- liftIO $  foldl' (\i (kn,kty) -> (\m -> createFresh  n tname m kn kty) =<< i ) (return $ keyMap oinf) (concat fresh)
-  let inf = oinf {keyMap =  m}
+  inf <- liftIO $  foldl' (\i (kn,kty) -> (\m -> createFresh  tname m kn kty) =<< i ) (return  oinf) (concat fresh)
+  let
       freshKeys :: [[Key]]
       freshKeys = fmap (lookKey inf tname . fst ) <$> fresh
   freshUI <- Tra.sequence $   zipWith (\ac freshs -> do
@@ -105,8 +119,8 @@ pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
             hasRef l = hasProd (\v -> isNested prod v || v == prod) l
         let attrB pre a = tbCase True inf [] []  a [] [] pre
         case  (hasRef input , hasRef output)  of
-             (True,False)-> Right <$> attrB (const Nothing <$> trinp)  (genAttr inf fresh )
-             (False,True)->  Left <$> attrB (fmap (\v ->  runIdentity . getCompose . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ v ) <$> t)  (genAttr inf fresh )
+             (True,False)-> Right <$> attrB (const Nothing <$> trinp)  (genAttr oinf fresh )
+             (False,True)->  Left <$> attrB (fmap (\v ->  runIdentity . getCompose . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ v ) <$> t)  (genAttr oinf fresh )
              (True,True)-> errorWithStackTrace $ "circular reference " <> show fresh
              (False,False)-> errorWithStackTrace $ "unreferenced variable "<> show fresh
            ) freshs
@@ -242,7 +256,7 @@ tbCase hasLab inf pgs constr i@(IT na tb1 ) wl plugItens oldItems  = do
         return $ TrivialWidget (triding tds) dv
 tbCase hasLab inf pgs constr a@(Attr i _ ) wl plugItens preoldItems = do
         l <- flabel # set text (show i) # set UI.style (noneShowSpan hasLab)
-        let oldItems = maybe preoldItems (\v-> fmap (maybe (Just (Attr i v )) Just ) preoldItems  ) (traceShowId $ keyStatic i)
+        let oldItems = maybe preoldItems (\v-> fmap (maybe (Just (Attr i v )) Just ) preoldItems  ) ( keyStatic i)
             tbi = oldItems
         tds <- attrUITable tbi (fmap snd plugItens ) a
         dv <- UI.div # set UI.style [("margin-bottom","3px")] # set UI.class_ ("col-xs-" <> show ( fst $ attrSize a) )# set children [l,getElement tds]
@@ -305,7 +319,7 @@ eiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItems = do
       repl (Rec  ix v ) = (replace ix v v)
       repl (Many[(Rec  ix v )]) = (replace ix v v)
       repl v = v
-  oldItemsPlug <- fmap (fmap traceShowId )<$> foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return oldItems ) (fmap snd plugmods)
+  oldItemsPlug <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return oldItems ) (fmap snd plugmods)
   fks :: [(Column Key () ,TrivialWidget (Maybe (Column Key Showable)))]  <- foldl' (\jm (l,m)  -> do
             w <- jm
             let el =  L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> ( _kvrecrels meta))
@@ -325,7 +339,7 @@ eiTable inf pgs constr tname refs plmods ftb@(TB1 (meta,k) ) oldItems = do
   (listBody,output) <- if rawIsSum table
     then do
       let
-          initialSum = join . fmap (\(TB1 (n,  j) ) ->    fmap keyattr $ safeHead $ catMaybes  $ (fmap (Compose . Identity. fmap (const ()) ) . unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)))) <$> oldItemsPlug
+          initialSum = join . fmap ((\(n,  j) ->    fmap keyattr $ safeHead $ catMaybes  $ (fmap (Compose . Identity. fmap (const ()) ) . unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)))) . unTB1 ) <$> oldItemsPlug
           sumButtom i =  flabel # set text (L.intercalate "," $ fmap (show._relOrigin) $ keyattr $ i) # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default"
       chk  <- buttonDivSet (F.toList (_kvvalues $ unTB k))  (join . fmap (\i -> M.lookup (S.fromList i) (_kvvalues (unTB k))) <$> initialSum ) sumButtom
       sequence $ (\(kix,el) -> element  el # sink0 UI.style (noneShow <$> ((==keyattri kix) .keyattr <$> facts (triding chk) ))) <$> fks
