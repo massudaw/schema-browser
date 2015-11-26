@@ -9,7 +9,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
-module Plugins where
+module Plugins (plugList) where
 
 import Location
 import PrefeituraSNFSE
@@ -34,7 +34,6 @@ import Data.Functor.Identity
 import Control.Applicative
 import Data.Traversable (traverse)
 import qualified Data.Traversable as Tra
-import Data.Time.LocalTime
 import qualified Data.List as L
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -232,14 +231,9 @@ siapi3Plugin  = BoundedPlugin2 pname tname  url
 bool = TB1 . SBoolean
 num = TB1 . SNumeric
 
-lookKey' inf t k = justError ("lookKey' cant find key " <> show k <> " in " <> show t) $  foldr1 mplus $ fmap (\ti -> M.lookup (ti,k) (keyMap inf)) t
-
-eitherToMaybeT (Left i) =  Nothing
-eitherToMaybeT (Right r) =  Just r
 
 
-sdate = SDate . localDay
-stimestamp = STimestamp
+
 
 
 
@@ -287,7 +281,6 @@ instance ToJSON Timeline where
 -}
 
 itR i f = atR i (IT (attrT (fromString i,TB1 ())) <$> f)
-fktR i rel f = atR (L.intercalate "," (fmap fst i)) (FKT (attrT <$> i) rel <$> f)
 
 pagamentoArr
   :: (KeyString a1,
