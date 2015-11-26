@@ -176,8 +176,6 @@ cnpjForm = BoundedPlugin2 pname tname url
               odxR "bairro" -< t
 
 
-
-
 analiseProjeto = BoundedPlugin2 pname tname url
   where
     pname , tname :: Text
@@ -195,7 +193,6 @@ analiseProjeto = BoundedPlugin2 pname tname url
       odxR "protocolo" -< ()
       odxR "ano" -< ()
       returnA -< Nothing
-
 
 
 siapi3Plugin  = BoundedPlugin2 pname tname  url

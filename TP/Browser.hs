@@ -10,7 +10,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 
-module Main where
+module Main (main) where
 
 import Query
 import Types
@@ -25,8 +25,7 @@ import Control.Monad.Reader
 import Control.Concurrent
 import Data.Functor.Apply
 import System.Environment
-import Network.Google.OAuth2 (formUrl, exchangeCode, refreshTokens,
-                              OAuth2Client(..), OAuth2Tokens(..))
+import Network.Google.OAuth2 (OAuth2Tokens(..))
 import Data.IORef
 import Data.Ord
 import Control.Exception
@@ -103,15 +102,17 @@ main = do
 
   mvar <- newMVar M.empty
   smvar <- newMVar M.empty
-  e <- poller smvar mvar (argsToState (tail args))  [siapi2Plugin,siapi3Plugin ]
+  e <- poller smvar mvar (argsToState (tail args))  plugList
   tokenRef <- oauthpoller
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e mvar smvar tokenRef $ tail args)
   print "Finish"
 
 poller schm dbm db plugs = do
-  let poll p@(BoundedPlugin2 n a arrow ) =  do
+  let poll p =  do
         let f = pluginStatic p
             elemp = pluginAction p
+            n = _name p
+            a = _bounds p
         (e:: Event [TableModification (TBIdx Key Showable) ] ,handler) <- newEvent
         conn <- connectPostgreSQL (connRoot db)
         inf <- keyTables  schm dbm conn  conn (T.pack $ dbn db, T.pack $ user db) Nothing postgresOps
@@ -215,14 +216,13 @@ loginWidget userI passI =  do
 instance Ord Connection where
   i < j = 1 < 2
   i <= j = 1 < 2
+
 instance Eq Connection where
   i == j = True
 
 
 form :: Tidings a -> Event b -> Tidings a
 form td ev =  tidings (facts td ) (facts td <@ ev )
-
-
 
 databaseChooser mvar smvar tokenRef sargs = do
   dbs <- liftIO $ listDBS  sargs
@@ -249,12 +249,6 @@ databaseChooser mvar smvar tokenRef sargs = do
   return $ (chooserT,(widE <> [schemaSel ,load]))
 
 
-applyUI el f = (\a-> getWindow el >>= \w -> runUI w (f a))
-
-tableNonRec k  =  F.toList $  tableNonRef  k
-
-
-operator op = UI.div # set text op  # set UI.style [("margin-left","3px"),("margin-right","3px")]
 
 attrLine i e   = do
   let nonRec = tableNonrec i

@@ -1,15 +1,32 @@
 {-# LANGUAGE BangPatterns,FlexibleInstances,OverloadedStrings,ScopedTypeVariables,FlexibleContexts,ExistentialQuantification,TupleSections,LambdaCase,RankNTypes,RecordWildCards,DeriveFunctor,NoMonomorphismRestriction,RecursiveDo #-}
-module TP.QueryWidgets where
+module TP.QueryWidgets (
+    crudUITable,
+    attrUITable,
+    offsetField,
+    sorting,
+    dashBoardAllTable,
+    dashBoardAllTableIndex,
+    dashBoardAll,
+    validOp,
+    viewer,
+    exceptionAllTable,
+    exceptionAllTableIndex,
+    exceptionAll,
+    line,
+    strAttr,
+    flabel,
+
+
+
+    ) where
 
 import RuntimeTypes
 import SortList
 import Data.Functor.Identity
 import Control.Monad.Writer
-import Control.Monad
 import SchemaQuery
 import qualified Data.Binary as B
 import Control.Concurrent
-import Data.Unique
 import qualified Data.Poset as P
 import Reactive.Threepenny
 import Data.Either
@@ -18,7 +35,7 @@ import Graphics.UI.Threepenny.Core hiding (delete)
 import Data.String
 import Data.Bifunctor
 import Data.Ord
-import Control.Lens ((^?),(&),(.~),(%~))
+import Control.Lens ((^?),(&),(%~))
 import qualified Control.Lens as Le
 import Utils
 import Data.Char
@@ -27,11 +44,9 @@ import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
 import Data.Set (Set)
-import Data.Traversable(Traversable,traverse)
+import Data.Traversable(traverse)
 import qualified Data.Traversable as Tra
 import qualified Data.ByteString.Base64 as B64
-import Data.Monoid
-import Safe
 import Data.Interval (interval)
 import qualified Data.ExtendedReal as ER
 import qualified Data.Interval as Interval
@@ -45,7 +60,6 @@ import PostgresQuery
 import Data.Maybe
 import Prelude hiding (head)
 import Data.Time
-import qualified Data.Vector as V
 import Data.Functor.Apply
 import TP.Widgets
 import Schema
@@ -67,7 +81,6 @@ generateFresh = do
   return $ (h,tidings b e)
 
 
-
 createFresh :: Text -> InformationSchema -> Text -> KType (Prim (Text,Text) (Text,Text))-> IO InformationSchema
 createFresh  tname inf i ty@(Primitive atom)  =
   case atom of
@@ -79,7 +92,6 @@ createFresh  tname inf i ty@(Primitive atom)  =
     RecordPrim (s,t) -> do
       k <- newKey i ty 0
       let tableO = lookTable inf tname
-      let tableT = lookTable inf t
           path = Path (S.singleton k) (FKInlineTable $ inlineName ty ) S.empty
       return $ inf
           & tableMapL . Le.ix tname . rawFKSL %~  S.insert path
@@ -143,7 +155,7 @@ pluginUI oinf initItems (StatefullPlugin n tname fresh ac) = do
       return [j,k]) freshUI
   el <- UI.div # set UI.children (headerDiv : concat lines )
   o <- foldl' (\unoldM (((h,htidings,loui,inp),ac ))  -> unoldM >>= (\unoldItems -> do
-      let f = pluginStatic ac
+      let
           action = pluginAction ac
       let oldItems = mergeCreate  <$>  unoldItems <*> fmap (fmap (mapKey keyValue)) (triding inp)
       e <- mapTEvent  action  oldItems
@@ -212,6 +224,7 @@ attrSize (Attr k _ ) = go  (keyType k)
                                     "text/html" ->  (12,8)
                                     i  ->  (6,8)
                        i -> (3,1)
+
 
 indexPluginAttr a@(Attr i _ )  plugItens =  evs
   where
@@ -429,7 +442,6 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
 
 addElemFin e = liftIO . addFin e .pure
 
-tb1Diff f (TB1 (_,k1) ) (TB1 (_,k2)) =  liftF2 f k1 k2
 
 onBin bin p x y = bin (p x) (p y)
 
@@ -902,8 +914,6 @@ sorting' ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i)
 sorting k = fmap TB1 . sorting' k . fmap unTB1
 
 
-rendererHeaderUI k v = const (renderer k) v
-  where renderer k = UI.div # set items [UI.div # set text (T.unpack $ keyValue k ) , UI.div # set text ( showTy show (keyType k)) ]
 
 rendererShowableUI k  v= renderer (keyValue k) v
   where renderer "modification_data" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> showPatch (i:: PathAttr Text Showable) )  (B.decodeOrFail (BSL.fromStrict i))
@@ -928,10 +938,6 @@ foldMetaHeader' order el rend inf = mapFAttr order (\(Attr k v) -> hideLong (F.t
               else return elemD # set items l
 
 
-testUI e = startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" })  $ \w ->  do
-              els <- e
-              getBody w #+ [els]
-              return ()
 
 metaAllTableIndexV inf metaname env = metaAllTableIndexA inf metaname (fmap (uncurry Attr ) env)
 metaAllTableIndexA inf metaname env =   do
@@ -1041,19 +1047,6 @@ dashBoardAllTableIndex e@(inf,table,index) =   metaAllTableIndexA inf "modificat
 
 filterRec' envK = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList envK )) . S.fromList . fmap _relOrigin.  keyattr )
 
-renderTableNoHeader' header inf modtablei out = do
-  let
-      body o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader UI.td rendererShowableUI inf $ o)
-  header # set UI.class_ "row"
-  UI.table # set UI.class_ "table table-bordered table-striped" # sink items ( ( (header :) . fmap body <$> out))
-
-renderTableNoHeaderSort sort header inf modtablei out = do
-  let
-      body o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader' sort UI.td rendererShowableUI inf $ o)
-  header # set UI.class_ "row"
-  tbody <- UI.div # set items (body <$> out)
-  UI.table # set UI.class_ "table table-bordered table-striped" # set items [header ,return tbody ]
-
 renderTableNoHeaderSort2 header inf modtablei out = do
   let
       body sort o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader' sort UI.td rendererShowableUI inf $ o)
@@ -1062,26 +1055,7 @@ renderTableNoHeaderSort2 header inf modtablei out = do
 
 
 
-renderTableNoHeader header inf modtablei out = do
-  let
-      body o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader UI.td rendererShowableUI inf $ o)
-  header # set UI.class_ "row"
-  tbody <- UI.div # set items (body <$> out)
-  UI.table # set UI.class_ "table table-bordered table-striped" # set items [header ,return tbody ]
-
-renderTable'  inf modtablei out =  do
-  let
-      header = UI.tr # set UI.class_ "row" # set items (foldMetaHeader UI.th rendererHeaderUI inf $ modtablei)
-  renderTableNoHeader' header inf modtablei out
-
-renderTable  inf modtablei out =  do
-  let
-      header = UI.tr # set UI.class_ "row" # set items (foldMetaHeader UI.th rendererHeaderUI inf $ modtablei)
-  renderTableNoHeader  header inf modtablei out
 
 
 
-panel t els = UI.div # set items ( UI.h2 # set text (T.unpack t  ) : [UI.div # set items (F.toList els)])
-showModDiv i =  set UI.style [("display","flex")] . set items (showMod i)
-showMod i  = [UI.div # line (show i) ]
 line n =   set  text n
