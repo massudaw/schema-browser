@@ -154,8 +154,8 @@ cnpjForm = BoundedPlugin2 pname tname url
     tname = "owner"
     url :: ArrowReader
     url = proc t -> do
-      cap <-  idxK "captchaInput" -< ()
-      cnpj <-  atR "ir_reg" (idxK "cnpj_number") -< ()
+      cap <- idxK "captchaInput" -< ()
+      cnpj <- atR "ir_reg" (idxK "cnpj_number") -< ()
       sess <- idxK "sess" -< ()
       html :: Maybe [(String,String)] <- act (\(TB1 (SSession sess),TB1 (SText cap),TB1 (SText cnpj))  -> fmap join $ lift  (getCnpjForm sess (BS.pack $ T.unpack cap) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,cnpj)
 

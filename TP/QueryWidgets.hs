@@ -122,8 +122,8 @@ pluginUI oinf initItems (StatefullPlugin n tname ac) = do
   let
       freshKeys :: [[Key]]
       freshKeys = fmap (lookKey inf tname . fst ) <$> fresh
-  freshUI <- foldr (\(ac ,freshs) -> (>>= (\(l,unoldItems)-> do
-      let (input,output) = pluginStatic ac
+  freshUI <- foldl' (\old (aci ,freshs) -> (old >>= (\((l,ole),unoldItems)-> do
+      let (input,output) = pluginStatic aci
       elemsIn <- catMaybes <$> mapM (\fresh -> do
         let prod = IProd True [keyValue fresh]
             hasRef l = hasProd (\v -> isNested prod v || v == prod) l
@@ -134,23 +134,8 @@ pluginUI oinf initItems (StatefullPlugin n tname ac) = do
            ) freshs
       let
         inp :: Tidings (Maybe (TB1 Showable))
-        inp = fmap (tbmap . mapFromTBList) <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap (Compose .Identity )) . triding) elemsIn )
-
-      {-preinp <- if not $ any (\fresh -> hasProd (== IProd True [keyValue fresh]) input)  freshs
-         then
-          TrivialWidget (pure Nothing) <$> UI.div
-         else do
-          inpPost <- UI.button # set UI.class_ "col-xs-2" # set UI.text (T.unpack $ _name ac) # sink UI.enabled (isJust <$> facts inp)
-          trinp <- cutEvent (UI.click inpPost) inp
-          ei <- UI.div # set UI.children ((fmap getElement  elemsIn ) <> [inpPost])
-          return $ TrivialWidget trinp ei
-      let
-          f = pluginStatic ac
-          action = pluginAction ac-}
-      {-let oldItems = fmap (fmap (mapKey keyValue)) $ mergeCreate  <$>  unoldItems <*>  triding preinp
-      e <- mapTEvent  action  (join . fmap (checkTable (fst f)) <$> oldItems)-}
-
-      (preinp,(_,liftedE )) <- pluginUI  inf (mergeCreate  <$>  unoldItems <*>  inp) ac
+        inp = fmap (tbmap . mapFromTBList) . join  . fmap (\i -> if L.null i then Nothing else Just i) <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap (Compose .Identity )) .  triding) elemsIn )
+      (preinp,(_,liftedE )) <- pluginUI  inf (mergeCreate <$>  facts unoldItems <#>  inp) aci
       elemsOut <- catMaybes <$> mapM (\fresh -> do
         let prod = IProd True [keyValue fresh]
             hasRef l = hasProd (\v -> isNested prod v || v == prod) l
@@ -161,12 +146,12 @@ pluginUI oinf initItems (StatefullPlugin n tname ac) = do
 
       let styleUI =  set UI.class_ "row"
             . set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
-      j<- UI.div # styleUI  # set children (preinp: fmap getElement elemsIn)
+      j<- UI.div # styleUI  # set children (fmap getElement elemsIn <> [preinp])
       k <- UI.div # styleUI  # set children (fmap getElement elemsOut)
-      return  (j : k : l , mergeCreate <$> unoldItems <*> liftedE))
-           ) ) (return $  ([],trinp) ) $ zip (fmap snd ac ) freshKeys
-  el <- UI.div  # set children (fst freshUI)
-  return (el ,   (snd $ pluginStatic $ snd $ last ac ,snd freshUI ))
+      return  (( l <> [j , k], liftedE :ole ), mergeCreate <$> unoldItems <*> liftedE  ))
+           ) ) (return $  (([],[]),trinp) ) $ zip (fmap snd ac ) freshKeys
+  el <- UI.div  # set children (fst $fst freshUI)
+  return (el ,   (snd $ pluginStatic $ snd $ last ac ,last $ snd $ fst freshUI ))
 
 pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
   let f = staticP arrow
@@ -189,7 +174,7 @@ pluginUI inf oldItems p@(BoundedPlugin2 n t arrow) = do
   let tdInput = join . fmap (checkTable (fst f)) <$>  oldItems
       tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
   v <- currentValue (facts oldItems)
-  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+  headerP <- UI.button # set text (T.unpack n)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   bh <- stepper False (hoverTip headerP)
   details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (mapValue (const ())) <$> facts tdInput)
   out <- UI.div # set children [headerP,details]

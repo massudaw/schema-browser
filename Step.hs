@@ -137,7 +137,7 @@ idxM  l =
 
 idxK  l =
   let ll = splitIndex True l
-   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . justError "no value found " . join . fmap (unRSOptional' . snd) . join . fmap (indexTable ll)))
+   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . justError ("no value found "  <> show l). join . fmap (unRSOptional' . snd) . join . fmap (indexTable ll)))
 
 
 idxR  l =
