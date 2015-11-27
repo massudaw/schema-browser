@@ -109,49 +109,40 @@ pluginUI :: InformationSchema
     -> Tidings (Maybe (TB2 Key Showable) )
     -> Plugins
     -> UI (Element ,(Access Text,Tidings (Maybe (TB2 Key Showable))))
-pluginUI oinf initItems (StatefullPlugin n tname ac) = do
-  window <- askWindow
-  let fresh = fmap fst ac
-      tdInput = if L.null bdsn then pure True else (isJust . join .  fmap (checkTable (Many bdsn))  <$>   initItems)
-      (Many ls) =  fst $ pluginStatic $ snd $ head ac
-      bdsn = filter (\l->  not $ any  (\v -> l == IProd True [v] || isNested (IProd True [v]) l ) (fmap fst $ head fresh ) ) ls
-  headerP <- UI.button # set UI.class_ "col-xs-2" # set text (T.unpack n) # sink UI.enabled (facts tdInput)
-  headerDiv <- UI.div # set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]# set UI.class_ "row col-xs-12" # set children [headerP]
-  let trinp = initItems
-  inf <- liftIO $  foldl' (\i (kn,kty) -> (\m -> createFresh  tname m kn kty) =<< i ) (return  oinf) (concat fresh)
+pluginUI oinf trinp (StatefullPlugin n tname ac) = do
   let
-      freshKeys :: [[Key]]
-      freshKeys = fmap (lookKey inf tname . fst ) <$> fresh
-  freshUI <- foldl' (\old (aci ,freshs) -> (old >>= (\((l,ole),unoldItems)-> do
-      let (input,output) = pluginStatic aci
-      elemsIn <- catMaybes <$> mapM (\fresh -> do
-        let prod = IProd True [keyValue fresh]
-            hasRef l = hasProd (\v -> isNested prod v || v == prod) l
+      fresh :: [([VarDef],[VarDef])]
+      fresh = fmap fst ac
+  inf <- liftIO $  foldl' (\i (kn,kty) -> (\m -> createFresh  tname m kn kty) =<< i ) (return  oinf) (concat $ fmap fst fresh <> fmap snd fresh )
+  let
+      freshKeys :: [([Key],[Key])]
+      freshKeys = first (fmap lookK ) . second (fmap lookK) <$> fresh
+      lookK = lookKey inf tname . fst
+  freshUI <- foldl' (\old (aci ,(inpfresh,outfresh)) -> (old >>= (\((l,ole),unoldItems)-> do
+
+      elemsIn <- mapM (\fresh -> do
         let attrB pre a = tbCase True inf [] []  a [] [] pre
-        case  hasRef input   of
-             (True)-> Just <$> attrB (const Nothing <$> trinp)  (genAttr oinf fresh )
-             i -> return Nothing
-           ) freshs
+        attrB (const Nothing <$> trinp)  (genAttr oinf fresh )
+           ) inpfresh
       let
         inp :: Tidings (Maybe (TB1 Showable))
         inp = fmap (tbmap . mapFromTBList) . join  . fmap (\i -> if L.null i then Nothing else Just i) <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap (Compose .Identity )) .  triding) elemsIn )
+
       (preinp,(_,liftedE )) <- pluginUI  inf (mergeCreate <$>  facts unoldItems <#>  inp) aci
-      elemsOut <- catMaybes <$> mapM (\fresh -> do
-        let prod = IProd True [keyValue fresh]
-            hasRef l = hasProd (\v -> isNested prod v || v == prod) l
+
+      elemsOut <- mapM (\fresh -> do
         let attrB pre a = tbCase True inf [] []  a [] [] pre
-        case  hasRef output  of
-             True->  Just <$> attrB (fmap (\v ->  runIdentity . getCompose . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ v ) <$> liftedE  )  (genAttr oinf fresh )
-             i -> return Nothing) freshs
+        attrB (fmap (\v ->  runIdentity . getCompose . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ v ) <$> liftedE  )  (genAttr oinf fresh )
+       ) outfresh
 
       let styleUI =  set UI.class_ "row"
             . set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
       j<- UI.div # styleUI  # set children (fmap getElement elemsIn <> [preinp])
       k <- UI.div # styleUI  # set children (fmap getElement elemsOut)
       return  (( l <> [j , k], liftedE :ole ), mergeCreate <$> unoldItems <*> liftedE  ))
-           ) ) (return $  (([],[]),trinp) ) $ zip (fmap snd ac ) freshKeys
-  el <- UI.div  # set children (fst $fst freshUI)
-  return (el ,   (snd $ pluginStatic $ snd $ last ac ,last $ snd $ fst freshUI ))
+           ) ) (return (([],[]),trinp)) $ zip (fmap snd ac) freshKeys
+  el <- UI.div  # set children (fst $ fst freshUI)
+  return (el , (snd $ pluginStatic $ snd $ last ac ,last $ snd $ fst freshUI ))
 
 pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
   let f = staticP arrow

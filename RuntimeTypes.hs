@@ -53,7 +53,7 @@ data FPlugins k
   =  StatefullPlugin
   { _name ::  Text
   , _bounds :: Text
-  , _statefullAction :: [([VarDef ],FPlugins k) ]
+  , _statefullAction :: [(([VarDef ],[VarDef]),FPlugins k) ]
   }
   | BoundedPlugin2
   { _name :: Text
