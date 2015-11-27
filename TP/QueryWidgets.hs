@@ -70,15 +70,7 @@ import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import GHC.Stack
 
-
-
-generateFresh :: IO ( Maybe a -> IO () , Tidings (Maybe a))
-generateFresh = do
-  (e,h) <- liftIO $ newEvent
-  b <- stepper Nothing e
-  return $ (h,tidings b e)
-
-
+--- Plugins Interface Methods
 createFresh :: Text -> InformationSchema -> Text -> KType (Prim (Text,Text) (Text,Text))-> IO InformationSchema
 createFresh  tname inf i ty@(Primitive atom)  =
   case atom of
@@ -165,7 +157,7 @@ pluginUI inf oldItems p@(BoundedPlugin2 n t arrow) = do
   let tdInput = join . fmap (checkTable (fst f)) <$>  oldItems
       tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
   v <- currentValue (facts oldItems)
-  headerP <- UI.button # set text (T.unpack n)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   bh <- stepper False (hoverTip headerP)
   details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (mapValue (const ())) <$> facts tdInput)
   out <- UI.div # set children [headerP,details]
@@ -177,6 +169,23 @@ pluginUI inf oldItems p@(BoundedPlugin2 n t arrow) = do
   return (out, (snd f ,   fmap (liftKeys inf t )<$> pgOut ))
 
 
+indexPluginAttr a@(Attr _ _ )  plugItens =  evs
+  where
+        thisPlugs = filter (hasProd (== IProd True (keyValue . _relOrigin <$> keyattri a)) . fst)  plugItens
+        evs  = fmap ( fmap ( join . fmap ( fmap unTB . fmap snd . getCompose . unTB . findTB1 (((== keyattri a)  . keyattr )))) ) <$>  thisPlugs
+indexPluginAttr  i  plugItens = pfks
+  where
+        thisPlugs = filter (hasProd (isNested ((IProd True $ fmap (keyValue._relOrigin) (keyattri i) ))) .  fst) plugItens
+        pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . unTB . findTB1 ((==keyattri i)  . keyattr )))) <$> ( thisPlugs)
+
+
+getRelOrigin :: [Compose Identity (TB Identity) Key () ] -> [Key]
+getRelOrigin =  fmap _relOrigin . concat . fmap keyattr
+
+
+
+--- Style and Attribute Size
+--
 attrSize :: TB Identity Key b -> (Int,Int)
 attrSize (FKT  _  _ _ ) = (12,4)
 attrSize (IT _ _ ) = (12,4)
@@ -203,25 +212,6 @@ attrSize (Attr k _ ) = go  (mapKType $ keyType k)
                                     "text/html" ->  (12,8)
                                     i  ->  (6,8)
                        i -> (3,1)
-
-
-indexPluginAttr a@(Attr i _ )  plugItens =  evs
-  where
-        thisPlugs = filter (hasProd (== IProd True (keyValue . _relOrigin <$> keyattri a)) . fst)  plugItens
-        evs  = fmap ( fmap ( join . fmap ( fmap (runIdentity .  getCompose ) . fmap snd . getCompose . runIdentity . getCompose  . findTB1 (((== [i])  . fmap _relOrigin . keyattr )))) ) <$>  thisPlugs
-indexPluginAttr  i@(IT na tb1 ) plugItens = pfks
-  where
-        thisPlugs = filter (hasProd (isNested (IProd True (keyValue . _relOrigin <$> keyattri i  ))) . fst) $  plugItens
-        pfks =  first (uNest . justError "No nested Prod IT" . (findProd (isNested (IProd True (keyValue . _relOrigin <$> keyattri i ))))) . second ( fmap ( join .  fmap (fmap (runIdentity . getCompose) . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((== keyattr na).keyattr)))) <$> thisPlugs
-indexPluginAttr  i@(FKT ifk  rel tb1) plugItens = pfks
-  where
-        thisPlugs = filter (hasProd (isNested ((IProd True $ fmap (keyValue._relOrigin) (keyattri i) ))) .  fst) plugItens
-        pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((==keyattr (_tb i))  . keyattr )))) <$> ( thisPlugs)
-
-
-
-getRelOrigin :: [Compose Identity (TB Identity) Key () ] -> [Key]
-getRelOrigin =  fmap _relOrigin . concat . fmap keyattr
 
 
 tbCase :: Bool -> InformationSchema -> [Plugins] -> SelPKConstraint  -> TB Identity Key () -> [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key Showable)))] -> [(Access Text,Tidings (Maybe (TB Identity Key Showable)))]-> Tidings (Maybe (TB Identity Key Showable)) -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
