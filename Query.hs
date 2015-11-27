@@ -944,7 +944,14 @@ type PGRecord = (Text,Text)
 ktypeLift :: Ord b => KType (Prim KPrim b) -> Maybe (KType (Prim KPrim b))
 ktypeLift i = (M.lookup i (M.fromList postgresLiftPrim ))
 
-mapKType i = fromMaybe (fmap textToPrim i) $ ktypeLift (fmap textToPrim i)
+ktypeRec v@(KOptional i) = ktypeLift v <|> ktypeRec i
+ktypeRec v@(KArray i) = ktypeLift v <|> ktypeRec i
+ktypeRec v@(KInterval i) = ktypeLift v <|> ktypeRec i
+ktypeRec v@(KSerial i) = ktypeLift v <|> ktypeRec i
+ktypeRec v@(KDelayed i) = ktypeLift v <|> ktypeRec i
+ktypeRec v@(Primitive i ) = ktypeLift v
+
+mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec (fmap textToPrim i)
 mapKTypeM i = ktypeLift (fmap textToPrim i)
 
 textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)

@@ -164,9 +164,6 @@ cnpjForm = BoundedPlugin2 pname tname url
     arrowS = proc t -> do
               idxR "captchaInput" -< t
               odxR "owner_name" -< t
-              odxR "address"-< t
-              odxR "atividade_principal" -< ()
-              odxR "atividades_secundarias" -< ()
               atR "atividades_secundarias" cnae -< t
               atR "atividade_principal" cnae -< t
               atR "address"  addrs -< t

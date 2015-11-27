@@ -369,7 +369,6 @@ data Prim a b
 
 data KType a
    = Primitive a
-   -- | InlineTable {- schema -} Text {- tablename -} Text
    | KSerial (KType a)
    | KArray (KType a)
    | KInterval (KType a)
@@ -388,7 +387,6 @@ instance Show (KType (Prim (Text,Text) (Text,Text))) where
   show = T.unpack . showTy (T.pack . show)
 
 showTy f (Primitive i ) = f i
--- showTy f (InlineTable s i ) = "[" <>  fromString (T.unpack $ s <> "." <>  i) <> "]"
 showTy f (KArray i) = "{" <>  showTy f i <> "}"
 showTy f (KOptional i) = showTy f i <> "*"
 showTy f (KInterval i) = "(" <>  showTy f i <> ")"
@@ -406,10 +404,9 @@ instance Ord (FKey a) where
    compare i j = compare (keyFastUnique i) (keyFastUnique j)
 
 instance Show a => Show (FKey a)where
-   show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k) <> "::"   <> T.pack (show (keyType k))
-   -- show k = T.unpack $ showKey k
+   show k = T.unpack $ maybe (keyValue k) id (keyTranslation  k)
 
-showKey k  =   maybe (keyValue k) id  (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::"   <> T.pack (show (keyType k))
+showKey k  =   maybe (keyValue k)  (\t -> keyValue k <> "-" <> t ) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::" <> T.pack (show (keyType k) <> "::" <> show (keyModifier k) <> "::" <> show (keyPosition k )  )
 
 
 instance Binary a => Binary (Interval.Extended a) where

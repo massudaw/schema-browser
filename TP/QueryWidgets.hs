@@ -18,6 +18,7 @@ module TP.QueryWidgets (
     ) where
 
 import RuntimeTypes
+import Network.HTTP.Types.URI
 import SortList
 import Data.Functor.Identity
 import Control.Monad.Writer
@@ -116,53 +117,56 @@ pluginUI oinf initItems (StatefullPlugin n tname ac) = do
       bdsn = filter (\l->  not $ any  (\v -> l == IProd True [v] || isNested (IProd True [v]) l ) (fmap fst $ head fresh ) ) ls
   headerP <- UI.button # set UI.class_ "col-xs-2" # set text (T.unpack n) # sink UI.enabled (facts tdInput)
   headerDiv <- UI.div # set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]# set UI.class_ "row col-xs-12" # set children [headerP]
-  trinp <- cutEvent (UI.click headerP) initItems
+  let trinp = initItems
   inf <- liftIO $  foldl' (\i (kn,kty) -> (\m -> createFresh  tname m kn kty) =<< i ) (return  oinf) (concat fresh)
   let
       freshKeys :: [[Key]]
       freshKeys = fmap (lookKey inf tname . fst ) <$> fresh
-  freshUI <- Tra.sequence $   zipWith (\ac freshs -> do
+  freshUI <- foldr (\(ac ,freshs) -> (>>= (\(l,unoldItems)-> do
       let (input,output) = pluginStatic ac
-      (h,t :: Tidings (Maybe (TB1 Showable)) ) <- liftIO $ generateFresh
-      elems <- mapM (\fresh -> do
+      elemsIn <- catMaybes <$> mapM (\fresh -> do
         let prod = IProd True [keyValue fresh]
             hasRef l = hasProd (\v -> isNested prod v || v == prod) l
         let attrB pre a = tbCase True inf [] []  a [] [] pre
-        case  (hasRef input , hasRef output)  of
-             (True,False)-> Right <$> attrB (const Nothing <$> trinp)  (genAttr oinf fresh )
-             (False,True)->  Left <$> attrB (fmap (\v ->  runIdentity . getCompose . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ v ) <$> t)  (genAttr oinf fresh )
-             (True,True)-> errorWithStackTrace $ "circular reference " <> show fresh
-             (False,False)-> errorWithStackTrace $ "unreferenced variable "<> show fresh
+        case  hasRef input   of
+             (True)-> Just <$> attrB (const Nothing <$> trinp)  (genAttr oinf fresh )
+             i -> return Nothing
            ) freshs
       let
         inp :: Tidings (Maybe (TB1 Showable))
-        inp = fmap (tbmap . mapFromTBList) <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap (Compose .Identity )) . triding) (rights elems) )
-      ei <- if not $ any (\fresh -> hasProd (== IProd True [keyValue fresh]) input)  freshs
+        inp = fmap (tbmap . mapFromTBList) <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap (Compose .Identity )) . triding) elemsIn )
+
+      {-preinp <- if not $ any (\fresh -> hasProd (== IProd True [keyValue fresh]) input)  freshs
          then
-          TrivialWidget trinp <$> UI.div
+          TrivialWidget (pure Nothing) <$> UI.div
          else do
           inpPost <- UI.button # set UI.class_ "col-xs-2" # set UI.text (T.unpack $ _name ac) # sink UI.enabled (isJust <$> facts inp)
           trinp <- cutEvent (UI.click inpPost) inp
-          ei <- UI.div # set UI.children ((fmap getElement $ rights elems ) <> [inpPost])
+          ei <- UI.div # set UI.children ((fmap getElement  elemsIn ) <> [inpPost])
           return $ TrivialWidget trinp ei
-      return (h,(output,t),(lefts elems) ,ei )
-           ) (fmap snd ac ) freshKeys
-  lines <- mapM (\(_,_,o,i)-> do
-      j<- UI.div # set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")] # set UI.class_ "row" # set children [getElement i]
-      k <- UI.div # set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")] # set UI.class_ "row" # set children (fmap getElement o)
-      return [j,k]) freshUI
-  el <- UI.div # set UI.children (headerDiv : concat lines )
-  o <- foldl' (\unoldM (((h,htidings,loui,inp),ac ))  -> unoldM >>= (\unoldItems -> do
       let
           f = pluginStatic ac
-          action = pluginAction ac
-      let oldItems = mergeCreate  <$>  unoldItems <*> fmap (fmap (mapKey keyValue)) (triding inp)
-      e <- mapTEvent  action  (join . fmap (checkTable (fst f)) <$> oldItems)
-      liftIO  . h =<< currentValue (fmap (liftKeys inf tname )<$> facts e)
-      onEvent (rumors e) (liftIO . h . fmap (liftKeys inf tname ))
-      return  (mergeCreate <$> oldItems <*> e ) ))  (return $fmap (fmap (mapKey keyValue)) trinp) (zip freshUI (fmap snd ac) )
-  element el # sink UI.style (noneShow <$> facts tdInput)
-  return (el ,   (  ((\(_,o,_,_) -> o)$ last freshUI ) ))
+          action = pluginAction ac-}
+      {-let oldItems = fmap (fmap (mapKey keyValue)) $ mergeCreate  <$>  unoldItems <*>  triding preinp
+      e <- mapTEvent  action  (join . fmap (checkTable (fst f)) <$> oldItems)-}
+
+      (preinp,(_,liftedE )) <- pluginUI  inf (mergeCreate  <$>  unoldItems <*>  inp) ac
+      elemsOut <- catMaybes <$> mapM (\fresh -> do
+        let prod = IProd True [keyValue fresh]
+            hasRef l = hasProd (\v -> isNested prod v || v == prod) l
+        let attrB pre a = tbCase True inf [] []  a [] [] pre
+        case  hasRef output  of
+             True->  Just <$> attrB (fmap (\v ->  runIdentity . getCompose . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ v ) <$> liftedE  )  (genAttr oinf fresh )
+             i -> return Nothing) freshs
+
+      let styleUI =  set UI.class_ "row"
+            . set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
+      j<- UI.div # styleUI  # set children (preinp: fmap getElement elemsIn)
+      k <- UI.div # styleUI  # set children (fmap getElement elemsOut)
+      return  (j : k : l , mergeCreate <$> unoldItems <*> liftedE))
+           ) ) (return $  ([],trinp) ) $ zip (fmap snd ac ) freshKeys
+  el <- UI.div  # set children (fst freshUI)
+  return (el ,   (snd $ pluginStatic $ snd $ last ac ,snd freshUI ))
 
 pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
   let f = staticP arrow
@@ -170,7 +174,7 @@ pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
   let tdInput = join . fmap (checkTable (fst f)) <$>  oldItems
       tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
   headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
-  bh <- stepper False (unionWith const (const True <$> UI.hover headerP ) (const False <$> UI.leave headerP))
+  bh <- stepper False (hoverTip headerP)
   details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (mapValue (const ())) <$> facts tdInput)
   out <- UI.div # set children [headerP,details]
   ini <- currentValue (facts tdInput )
@@ -186,7 +190,7 @@ pluginUI inf oldItems p@(BoundedPlugin2 n t arrow) = do
       tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
   v <- currentValue (facts oldItems)
   headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
-  bh <- stepper False (unionWith const (const True <$> UI.hover headerP ) (const False <$> UI.leave headerP))
+  bh <- stepper False (hoverTip headerP)
   details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (mapValue (const ())) <$> facts tdInput)
   out <- UI.div # set children [headerP,details]
   let ecv = (facts oldItems <@ UI.click headerP)
@@ -207,7 +211,7 @@ attrSize (Attr k _ ) = go  (mapKType $ keyType k)
                 KDelayed l ->  go l
                 KSerial l -> go l
                 KArray l -> let (i1,i2) = go l in (i1+1,i2*8)
-                KInterval l -> let (i1,i2) = go l in (i1*2,i2)
+                KInterval l -> let (i1,i2) = go l in (i1*2 ,i2)
                 (Primitive i) ->
                   case (\(AtomicPrim i) -> i) $ i of
                        PInt -> (3,1)
@@ -274,10 +278,12 @@ tbCase hasLab inf pgs constr i@(IT na tb1 ) wl plugItens oldItems  = do
         return $ TrivialWidget (triding tds) dv
 tbCase hasLab inf pgs constr a@(Attr i _ ) wl plugItens preoldItems = do
         l <- flabel # set text (show i) # set UI.style (noneShowSpan hasLab)
+        bh <- stepper False (hoverTip l)
+        tip <- UI.div # set text (T.unpack $ showKey i) # sink UI.style (noneShow <$> bh)
         let oldItems = maybe preoldItems (\v-> fmap (maybe (Just (Attr i v )) Just ) preoldItems  ) ( keyStatic i)
             tbi = oldItems
         tds <- attrUITable tbi (fmap snd plugItens ) a
-        dv <- UI.div # set UI.style [("margin-bottom","3px")] # set UI.class_ ("col-xs-" <> show ( fst $ attrSize a) )# set children [l,getElement tds]
+        dv <- UI.div # set UI.style [("margin-bottom","3px")] # set UI.class_ ("col-xs-" <> show ( fst $ attrSize a) )# set children [l,tip,getElement tds]
         paintEdit l (facts (triding tds)) (facts oldItems)
         return $ TrivialWidget (triding tds) dv
 
@@ -626,9 +632,10 @@ buildUI km i  tdi = go i tdi
 
 buildPrim :: [FieldModifier] ->Tidings (Maybe Showable) ->   KPrim -> UI (TrivialWidget (Maybe Showable))
 buildPrim fm tdi i = case i of
-         {-(Position) -> do
-            let addrs = (\(SPosition (Position (lon,lat,_)))-> "http://maps.google.com/?output=embed&q=" <> (HTTP.urlEncode $ show lat  <> "," <>  show lon )) <$>  tdi
-            mkElement "iframe" # sink UI.src (maybe "" id <$> facts addrs) # set style [("width","99%"),("height","300px")]-}
+         {-PPosition -> do
+            let addrs = fmap (\(SPosition (Position (lon,lat,_)))-> "http://maps.google.com/?output=embed&q=" <> (urlEncode False $ BSC.pack $show lat  <> "," <>  show lon )) <$>  tdi
+            el <- mkElement "iframe" # sink UI.src (maybe "" BSC.unpack <$> facts addrs) # set style [("width","99%"),("height","300px")]
+            return $ TrivialWidget tdi el-}
          PBoolean -> do
            res <- checkedWidgetM (fmap (\(SBoolean i) -> i) <$> tdi )
            return (fmap SBoolean <$> res)
@@ -932,10 +939,11 @@ foldMetaHeader' order el rend inf = mapFAttr order (\(Attr k v) -> hideLong (F.t
             elemD <- el
             if length l > 1
               then do
-                bh <- stepper False (unionWith const (const True <$> UI.hover elemD ) (const False <$> UI.leave elemD))
+                bh <- stepper False (hoverTip  elemD)
                 element elemD # sink items ((\b -> if not b then take 2  l  <> fmap ( set UI.style (noneShow False)) (drop 2 l) else  l ) <$> bh)
               else return elemD # set items l
 
+hoverTip elemD= unionWith const (const True <$> UI.hover elemD ) (const False <$> UI.leave elemD)
 
 
 metaAllTableIndexV inf metaname env = metaAllTableIndexA inf metaname (fmap (uncurry Attr ) env)

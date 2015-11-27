@@ -193,7 +193,7 @@ checkField  (IProd b l) t@(TB1 (m,v))
     i <-  findAttr l v
     Compose . Identity <$> case runIdentity $ getCompose $ i  of
          Attr k v -> fmap (Attr k ) . (\i -> if b then  unRSOptional' i else Just i ) $ v
-         i -> errorWithStackTrace ( show (l,i))
+         i -> errorWithStackTrace ( show (b,l,i))
 checkField  (ISum []) t@(TB1 v)
   = Nothing
 checkField  (ISum ls) t@(TB1 (m,v) )
