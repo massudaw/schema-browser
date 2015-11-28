@@ -123,7 +123,7 @@ cpfForm = BoundedPlugin2 pname tname url
       sess <- idxK "sess" -< ()
       html <- act (\(TB1 (SSession sess),TB1 (SText cap),TB1 (SDate nascimento),TB1 (SText cnpj))  -> lift  (getCpfForm sess (BS.pack $ T.unpack cap) (BS.pack $ renderDay nascimento ) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,nascimento,cnpj)
       arrowS -< ()
-      returnA -<   join .join $ fmap convertCPF .  traceShowId <$> html
+      returnA -<   join .join $ fmap convertCPF <$> html
     arrowS = proc t -> do
               odxR "owner_name" -< t
               returnA -< Nothing
@@ -162,7 +162,6 @@ cnpjForm = BoundedPlugin2 pname tname url
       arrowS -< ()
       returnA -<   join $ convertHtml . (M.fromListWith (++) . fmap (fmap pure )) <$> html
     arrowS = proc t -> do
-              idxR "captchaInput" -< t
               odxR "owner_name" -< t
               atR "atividades_secundarias" cnae -< t
               atR "atividade_principal" cnae -< t
@@ -336,7 +335,7 @@ generateEmail = BoundedPlugin2  "Generate Email" tname url
           returnA -< Just . tblist . pure . attrT  . ("raw",) . LeftTB1 $  Just   mesg
 
     buildmessage :: FTB Showable -> IO (FTB Showable)
-    buildmessage (TB1 (SBinary mesg ))= TB1 .SText . T.pack . BS.unpack . B64Url.encode .BSL.toStrict <$>  (fmap traceShowId . renderMail' $ Mail (Address Nothing "wesley.massuda@gmail.com") [Address Nothing "wesley.massuda@gmail.com"] [] [] [] [[mail]])
+    buildmessage (TB1 (SBinary mesg ))= TB1 .SText . T.pack . BS.unpack . B64Url.encode .BSL.toStrict <$>  ( renderMail' $ Mail (Address Nothing "wesley.massuda@gmail.com") [Address Nothing "wesley.massuda@gmail.com"] [] [] [] [[mail]])
           where mail = (Part "text/plain" None Nothing [] (BSL.fromStrict $   mesg))
 
 
@@ -348,7 +347,10 @@ encodeMessage = PurePlugin "Encode Email" tname url
   where
     tname = "messages"
     messages = nameI 0 $ proc t -> do
-          enc <- liftA2 ((,)) (idxR "mimeType") (atR "body"  (join . traverse decoder' <$> (idxR "data")))  -< ()
+          enc <- liftA2 ((,))
+                (idxR "mimeType")
+                (atR "body"
+                    (join . traverse decoder' <$> (idxM "data")))  -< ()
           part <- atMA "parts"
                     (callI 0 messages) -< ()
           let mimeTable (TB1 (SText mime),v) next
@@ -362,14 +364,17 @@ encodeMessage = PurePlugin "Encode Email" tname url
                       tbmix l = tblist . pure . _tb . IT (attrT  ("mixed",TB1 ()) ) . LeftTB1 $ ArrayTB1 <$>  (ifNull l )
           returnA -<  (maybe Nothing (flip mimeTable part )  $ (\(i,j) -> fmap (,j) i) enc)
     mixed =  nameO 1 (proc t ->  do
-                liftA3 (,,) (odxR "plain") (atR "mixed" (callO 1 mixed)) (odxR "html") -< ()
+                liftA3 (,,)
+                  (odxR "plain")
+                  (atR "mixed" (callO 1 mixed))
+                  (odxR "html") -< ()
                 returnA -< ()
                 )
     url :: ArrowReaderM Identity
     url = proc t -> do
-          res <-  atR "payload" messages -< ()
+          res <- atR "payload" messages -< ()
           atR "message_viewer" mixed -< ()
-          returnA -< Just . tblist . pure . _tb . IT (attrT  ("message_viewer",TB1 ()) ) . LeftTB1 $  res
+          returnA -< tblist . pure . _tb . IT (attrT  ("message_viewer",TB1 ()) ) <$>  res
 
     ifNull i = if L.null i then  Nothing else Just i
     decoder (SText i) =  (Just . SBinary) . B64Url.decodeLenient . BS.pack . T.unpack $ i
@@ -454,8 +459,8 @@ queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" tname url
                                u <- varTB "crea_user"-< t
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
-      b <- act (fmap join  . fmap traceShowId . traverse (\(i, (j, k,a)) -> liftIO$ creaLoginArt  j k a i ) ) -< liftA2 (,) i r
-      let ao =  traceShowId $ Just $ tblist [attrT ("art",    LeftTB1 $ fmap (DelayedTB1 . Just . TB1 ) b)]
+      b <- act (fmap join  .  traverse (\(i, (j, k,a)) -> liftIO$ creaLoginArt  j k a i ) ) -< liftA2 (,) i r
+      let ao =  Just $ tblist [attrT ("art",    LeftTB1 $ fmap (DelayedTB1 . Just . TB1 ) b)]
       returnA -< ao
 
 
@@ -496,7 +501,7 @@ queryArtAndamento = BoundedPlugin2 pname tname url
       let artVeri dm = ("verified_date" ,) . LeftTB1 . join $(\d ->  fmap (TB1 . STimestamp . fst) $ strptime "%d/%m/%Y %H:%M" ( d !!1) ) <$> dm
           artPayd dm = ("payment_date" ,) . LeftTB1 . join $ (\d -> fmap (TB1 . STimestamp . fst )  $ strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
           artInp inp = Just $ tblist $fmap attrT   $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
-      returnA -< artInp (traceShowId v)
+      returnA -< artInp v
 
 
 {- testPlugin  db sch p = withConnInf db sch (\inf -> do

@@ -1,9 +1,9 @@
 {-# LANGUAGE DeriveDataTypeable,ConstraintKinds,TypeFamilies ,DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,ScopedTypeVariables,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 module Postgresql where
+
 import Types
 import Data.Ord
 import Control.Monad
-import Data.Typeable
 import Utils
 import Query
 import GHC.Stack
@@ -18,7 +18,6 @@ import qualified  Data.Map as M
 import Data.Tuple
 import Data.Time.Clock
 import qualified Data.Char as Char
--- import Schema
 import Data.String
 import Data.Attoparsec.Combinator (lookAhead)
 
@@ -55,12 +54,10 @@ import Database.PostgreSQL.Simple.Time
 import qualified Database.PostgreSQL.Simple.FromField as F
 import Database.PostgreSQL.Simple.FromRow (field)
 import Database.PostgreSQL.Simple.FromField hiding(Binary,Identity)
--- import Database.PostgreSQL.Simple.FromField (fromField,typeOid,typoid,TypeInfo,rngsubtype,typdelim,Conversion,Field,FromField)
 import qualified Database.PostgreSQL.Simple.ToField as TF
 import qualified Database.PostgreSQL.Simple.FromRow as FR
 import qualified Database.PostgreSQL.Simple.ToRow as TR
 import Database.PostgreSQL.Simple
--- import Data.GraphViz (preview)
 import Blaze.ByteString.Builder(fromByteString)
 import Blaze.ByteString.Builder.Char8(fromChar)
 
@@ -91,8 +88,8 @@ instance (Show a,TF.ToField a , TF.ToField (UnQuoted (a))) => TF.ToField (FTB a)
 
 instance  TF.ToField (TB Identity Key Showable)  where
   toField (Attr k  i) = case  topconversion (textToPrim <$> keyType k) of
-          Just (_,b) -> TF.toField (traceShow "conv" $ traceShowId $ b i)
-          Nothing -> TF.toField (traceShow "no conv"  i)
+          Just (_,b) -> TF.toField (b i)
+          Nothing -> TF.toField i
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
   toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . inattr ) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
@@ -233,7 +230,6 @@ readPrim t =
       nonEmpty f ""  = Nothing
       nonEmpty f i  = f i
 
-eitherToMaybe = either (const Nothing) Just
 
 readDigit i
   | Char.isDigit i = Just $ Char.digitToInt i
@@ -526,6 +522,12 @@ box3dParser = do
           return $ case fmap (fmap  realToFrac) res  of
             [m,s] ->  Bounding ((ER.Finite $ makePoint m ,True) `Interval.interval` (ER.Finite $ makePoint s,True))
 
+instance (FromField a, FromField b, FromField c, FromField d, FromField e,
+          FromField f, FromField g, FromField h, FromField i, FromField j,FromField k) =>
+    FromRow (a,b,c,d,e,f,g,h,i,j,k) where
+    fromRow = (,,,,,,,,,,) <$> field <*> field <*> field <*> field <*> field
+                          <*> field <*> field <*> field <*> field <*> field <*> field
+
 
 
 instance F.FromField Position where
@@ -614,12 +616,6 @@ parserFieldAtto parser = (\i j -> case traverse (parseOnly  parser )  j of
                                (Right (Just r ) ) -> return r
                                Right Nothing -> error (show j )
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
-
-instance (FromField a, FromField b, FromField c, FromField d, FromField e,
-          FromField f, FromField g, FromField h, FromField i, FromField j,FromField k) =>
-    FromRow (a,b,c,d,e,f,g,h,i,j,k) where
-    fromRow = (,,,,,,,,,,) <$> field <*> field <*> field <*> field <*> field
-                          <*> field <*> field <*> field <*> field <*> field <*> field
 
 
 withCount value = do

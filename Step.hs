@@ -3,6 +3,7 @@ module Step where
 
 import Types
 import RuntimeTypes
+import Control.Applicative.Lift
 import Control.Monad.Reader
 import Query
 import qualified Data.Map as M
@@ -26,6 +27,7 @@ import qualified Data.Bifunctor as BF
 import Utils
 
 import qualified Data.Traversable as T
+import Data.Traversable (traverse)
 
 deriving instance Functor m => Functor (Kleisli m i )
 
@@ -177,31 +179,74 @@ replace ix i (Point p)
   | otherwise = (Point p)
 replace ix i v = v
 -- replace ix i v= errorWithStackTrace (show (ix,i,v))
+indexField :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
+indexField p@(IProd b l) v = unTB <$> findAttr  l  (snd v)
+indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findAttr l (snd v)
 
+checkField' :: Access Text -> Column Key Showable -> Errors [Access Text] (Column Key Showable)
+checkField' p@(Point ix) _ = failure [p]
+checkField' n@(Nested ix@(IProd b l) nt ) t
+  = case t of
+         IT l i -> IT l  <$> checkTable' nt i
+         FKT a  c d -> FKT a  c <$>  checkTable' nt d
+         Attr k v -> failure [n]
+checkField'  p@(IProd b l) i
+  = case i  of
+      Attr k v -> maybe (failure [p]) (pure) $ fmap (Attr k ) . (\i -> if b then  unRSOptional' i else Just i ) $ v
+      i -> errorWithStackTrace ( show (b,l,i))
+
+
+
+checkField' i j = errorWithStackTrace (show (i,j))
+
+checkTable' :: Access Text -> TB2 Key Showable -> Errors [Access Text] (TB2 Key Showable)
+checkTable' l (ArrayTB1 i )
+  | i == []  = failure [l]
+  | otherwise =   ArrayTB1 <$> traverse (checkTable' l) i
+
+checkTable' l (LeftTB1 j) = LeftTB1 <$> traverse (checkTable' l) j
+checkTable' l (DelayedTB1 j) = DelayedTB1 <$> traverse (checkTable' l) j
+checkTable' (Rec ix i) t = checkTable' (replace ix i i ) t
+checkTable' (Many [m@(Many l)]) t = checkTable' m t
+checkTable' (Many [m@(Rec _ _ )]) t = checkTable' m t
+
+checkTable' (Many l) t@(TB1 (m,v)) =
+  (TB1 . (m,) . _tb . KV . mapFromTBList ) <$> T.traverse (\k -> maybe (failure [k]) (fmap _tb. checkField' k ). indexField  k $ (m,v)) l
+checkTable'  (ISum []) t@(TB1 v)
+  = failure [ISum []]
+checkTable'  f@(ISum ls) t@(TB1 (m,v) )
+  = fmap (tblist . pure . _tb) $ maybe (failure [f]) id  $ listToMaybe . catMaybes $  fmap (\(Many [l]) ->  fmap (checkField' l) . join . fmap ( traFAttr  unRSOptional') $ indexField l $ (m,v)) ls
+
+checkTable l b = eitherToMaybe $ runErrors (checkTable' l b)
+
+
+{-
+checkField :: Access Text -> TB2 Key Showable -> Maybe (Column Key Showable)
 checkField (Point ix) t = Nothing
 checkField (Nested (IProd b l) nt ) t@(TB1 (m,v))
   = do
     let
     i <- findAttr l v
     case runIdentity $ getCompose $ i  of
-         IT l  i -> Compose . Identity <$> (IT l  <$> checkTable nt i)
-         FKT a   c  d -> Compose . Identity <$> (FKT a  c <$>  checkTable nt d)
+         IT l  i -> (IT l  <$> checkTable nt i)
+         FKT a   c  d -> (FKT a  c <$>  checkTable nt d)
          Attr k v -> Nothing
 checkField  (IProd b l) t@(TB1 (m,v))
   = do
     let
     i <-  findAttr l v
-    Compose . Identity <$> case runIdentity $ getCompose $ i  of
+    case runIdentity $ getCompose $ i  of
          Attr k v -> fmap (Attr k ) . (\i -> if b then  unRSOptional' i else Just i ) $ v
          i -> errorWithStackTrace ( show (b,l,i))
 checkField  (ISum []) t@(TB1 v)
   = Nothing
 checkField  (ISum ls) t@(TB1 (m,v) )
-  = foldr1 just $  fmap (\(Many [l]) ->  join $ fmap (traComp ( traFAttr  unRSOptional')) $  checkField l t) ls
+  = foldr1 just $  fmap (\(Many [l]) ->  join $ fmap (( traFAttr  unRSOptional')) $  checkField l t) ls
 checkField i j = errorWithStackTrace (show (i,j))
 
 
 
+checkTable :: Access Text -> TB2 Key Showable -> Maybe (TB2 Key Showable)
 checkTable l (ArrayTB1 i )
   | i == []  = Nothing
   | otherwise =   fmap ArrayTB1 $ allMaybes $ checkTable l <$> i
@@ -211,16 +256,16 @@ checkTable (Rec ix i) t = checkTable (replace ix i i ) t
 checkTable (Many [m@(Many l)]) t = checkTable m t
 checkTable (Many [m@(Rec _ _ )]) t = checkTable m t
 checkTable (Many l) t@(TB1 (m,v)) =
-  fmap (TB1 . (m,) . Compose . Identity . KV . mapFromTBList ) . allMaybes $ flip checkField t <$> l
+  fmap (TB1 . (m,) . _tb . KV . mapFromTBList ) . allMaybes $ fmap _tb. flip checkField t <$> l
 
 
 checkTable (ISum []) t@(TB1  v)
   = Nothing
 checkTable (ISum ls) t@(TB1 (m,v) )
-  = fmap  (TB1 . (m,) . Compose . Identity . KV . mapFromTBList) . (\i -> if L.null i then Nothing else Just i) . catMaybes $ fmap (\(Many [l]) ->  join $ fmap (traComp (traFAttr unRSOptional')) $    checkField l t) ls
+  = fmap  (TB1 . (m,) . Compose . Identity . KV . mapFromTBList) . (\i -> if L.null i then Nothing else Just i) . catMaybes $ fmap (\(Many [l]) ->  join $ fmap (traComp (traFAttr unRSOptional')) $ fmap _tb $    checkField l t) ls
 
 checkTable i j = errorWithStackTrace (show ("checkTable" , i,j))
-
+-}
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
 indexTable l (LeftTB1 j) = join $ fmap (indexTable l) j
 indexTable (IProd _ l) t@(TB1 (m,v))

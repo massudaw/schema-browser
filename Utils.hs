@@ -112,3 +112,4 @@ unIntercalate pred s                 =  case dropWhile pred s of
                                       where (w, s'') =
                                              break pred s'
 
+eitherToMaybe = either (const Nothing) Just

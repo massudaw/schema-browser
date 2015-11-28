@@ -22,6 +22,7 @@ import Network.HTTP.Types.URI
 import SortList
 import Data.Functor.Identity
 import Control.Monad.Writer
+import Control.Applicative.Lift
 import SchemaQuery
 import qualified Data.Binary as B
 import Control.Concurrent
@@ -78,7 +79,6 @@ createFresh  tname inf i ty@(Primitive atom)  =
       k <- newKey i ty 0
       return $ inf
           & keyMapL %~ (M.insert (tname,i) k )
-
     RecordPrim (s,t) -> do
       k <- newKey i ty 0
       let tableO = lookTable inf tname
@@ -88,6 +88,7 @@ createFresh  tname inf i ty@(Primitive atom)  =
           & pkMapL . Le.ix (rawPK tableO) . rawFKSL Le.%~  S.insert path
           & keyMapL %~ M.insert (tname,i) k
 
+genAttr :: InformationSchema -> Key -> Column Key ()
 genAttr inf k =
   case keyType k of
     Primitive p ->
@@ -120,17 +121,17 @@ pluginUI oinf trinp (StatefullPlugin n tname ac) = do
         inp :: Tidings (Maybe (TB1 Showable))
         inp = fmap (tbmap . mapFromTBList) . join  . fmap (\i -> if L.null i then Nothing else Just i) <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap (Compose .Identity )) .  triding) elemsIn )
 
-      (preinp,(_,liftedE )) <- pluginUI  inf (mergeCreate <$>  facts unoldItems <#>  inp) aci
+      (preinp,(_,liftedE )) <- pluginUI  inf (mergeCreate <$>  unoldItems <*>  inp) aci
 
       elemsOut <- mapM (\fresh -> do
         let attrB pre a = tbCase True inf [] []  a [] [] pre
-        attrB (fmap (\v ->  runIdentity . getCompose . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . runIdentity . getCompose . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ v ) <$> liftedE  )  (genAttr oinf fresh )
+        attrB (fmap (\v ->  unTB . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . unTB . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ v )  <$> liftedE  )  (genAttr oinf fresh )
        ) outfresh
 
       let styleUI =  set UI.class_ "row"
             . set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
-      j<- UI.div # styleUI  # set children (fmap getElement elemsIn <> [preinp])
-      k <- UI.div # styleUI  # set children (fmap getElement elemsOut)
+      j<- UI.div # styleUI  # set children (fmap getElement elemsIn <> [preinp])# sink UI.style (noneShow .isJust <$> facts unoldItems)
+      k <- UI.div # styleUI  # set children (fmap getElement elemsOut) -- # sink UI.style (noneShow .isJust <$> facts liftedE  )
       return  (( l <> [j , k], liftedE :ole ), mergeCreate <$> unoldItems <*> liftedE  ))
            ) ) (return (([],[]),trinp)) $ zip (fmap snd ac) freshKeys
   el <- UI.div  # set children (fst $ fst freshUI)
@@ -139,12 +140,13 @@ pluginUI oinf trinp (StatefullPlugin n tname ac) = do
 pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
   let f = staticP arrow
       action = pluginAction   p
-  let tdInput = join . fmap (checkTable (fst f)) <$>  oldItems
+  let tdInputPre = fmap (checkTable' (fst f)) <$>  oldItems
+      tdInput = join . fmap (eitherToMaybe .  runErrors) <$> tdInputPre
       tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
   headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   bh <- stepper False (hoverTip headerP)
-  details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (mapValue (const ())) <$> facts tdInput)
-  out <- UI.div # set children [headerP,details]
+  details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (runErrors .fmap (mapValue (const ()))) <$> facts tdInputPre)
+  out <- UI.div # set children [headerP,details] -- # sink UI.style (noneShow . isJust <$> facts tdInput)
   ini <- currentValue (facts tdInput )
   kk <- stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
   pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . action $  fmap (mapKey keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
@@ -154,21 +156,25 @@ pluginUI inf oldItems p@(BoundedPlugin2 n t arrow) = do
   overwrite <- checkedWidget (pure False)
   let f = staticP arrow
       action = pluginAction p
-  let tdInput = join . fmap (checkTable (fst f)) <$>  oldItems
+  let tdInputPre = fmap (checkTable' (fst f)) <$>  oldItems
+      tdInput = join . fmap (eitherToMaybe .  runErrors) <$> tdInputPre
       tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
   v <- currentValue (facts oldItems)
-  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+  headerP <- UI.button # set text (T.unpack n) {- # sink UI.enabled (isJust <$> facts tdInput) -} # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   bh <- stepper False (hoverTip headerP)
-  details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (mapValue (const ())) <$> facts tdInput)
-  out <- UI.div # set children [headerP,details]
-  let ecv = (facts oldItems <@ UI.click headerP)
+  details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (runErrors . fmap (mapValue (const ())) )<$> facts tdInputPre)
+  out <- UI.div # set children [headerP,details] -- # sink UI.style (noneShow . isJust <$> facts tdInput)
+  let ecv = (facts tdInput <@ UI.click headerP)
   vo <- currentValue (facts tdOutput)
   vi <- currentValue (facts tdInput)
   bcv <- stepper (maybe vi (const Nothing) vo) ecv
   pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . action $ fmap (mapKey keyValue) v)  (tidings bcv ecv)
   return (out, (snd f ,   fmap (liftKeys inf t )<$> pgOut ))
 
-
+indexPluginAttr
+  :: TB Identity (FKey a) ()
+     -> [(Access Text, Tidings (Maybe (TB2  (FKey a) a1)))]
+     -> [(Access Text, Tidings (Maybe (TB Identity (FKey a) a1)))]
 indexPluginAttr a@(Attr _ _ )  plugItens =  evs
   where
         thisPlugs = filter (hasProd (== IProd True (keyValue . _relOrigin <$> keyattri a)) . fst)  plugItens
@@ -179,8 +185,6 @@ indexPluginAttr  i  plugItens = pfks
         pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . unTB . findTB1 ((==keyattri i)  . keyattr )))) <$> ( thisPlugs)
 
 
-getRelOrigin :: [Compose Identity (TB Identity) Key () ] -> [Key]
-getRelOrigin =  fmap _relOrigin . concat . fmap keyattr
 
 
 
@@ -213,6 +217,8 @@ attrSize (Attr k _ ) = go  (mapKType $ keyType k)
                                     i  ->  (6,8)
                        i -> (3,1)
 
+getRelOrigin :: [Compose Identity (TB Identity) Key () ] -> [Key]
+getRelOrigin =  fmap _relOrigin . concat . fmap keyattr
 
 tbCase :: Bool -> InformationSchema -> [Plugins] -> SelPKConstraint  -> TB Identity Key () -> [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key Showable)))] -> [(Access Text,Tidings (Maybe (TB Identity Key Showable)))]-> Tidings (Maybe (TB Identity Key Showable)) -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
 tbCase hasLab inf pgs constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
