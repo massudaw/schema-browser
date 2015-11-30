@@ -14,9 +14,12 @@ module Main (main) where
 
 import Query
 import Types
+import Data.Either
 import Step
+import Control.Lens (traverseOf,_3)
 import Plugins
 import TP.Widgets
+import qualified Data.Vector as V
 import SchemaQuery
 import SortList
 import Prelude hiding (head)
@@ -59,6 +62,7 @@ import qualified Data.Map as M
 import Data.String
 
 import OAuth
+import GHC.Stack
 
 import Control.Arrow
 
@@ -77,11 +81,12 @@ data BrowserState
 argsToState  [h,ph,d,u,p,s,t] = BrowserState h ph d  u p (Just s) (Just t )
 argsToState  [h,ph,d,u,p,s] = BrowserState h ph d  u p  (Just s)  Nothing
 argsToState  [h,ph,d,u,p] = BrowserState h ph d  u p Nothing Nothing
+argsToState i = errorWithStackTrace (show i)
 
 
 main :: IO ()
 main = do
-  m:args <- getArgs
+  args <- getArgs
   --let schema = "public"
   --conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
   {-
@@ -100,80 +105,86 @@ main = do
     )  sorted
   -}
 
-  mvar <- newMVar M.empty
+ --  mvar <- newMVar M.empty
   smvar <- newMVar M.empty
-  e <- poller smvar mvar (argsToState (tail args))  []--plugList
+  e <- poller smvar (argsToState $ tail args)  plugList
   tokenRef <- oauthpoller
-  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e mvar smvar tokenRef $ tail args)
+  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e smvar tokenRef $ tail args)
   print "Finish"
 
-poller schm dbm db plugs = do
-  let poll p =  do
+poller schm db plugs = do
+  conn <- connectPostgreSQL (connRoot db)
+  enabled :: [(Text,Int,Text)]<- query_ conn "SELECT schema_name, poll_period_ms,poll_name from metadata.polling"
+  let poll (schema,intervalms ,p) =  do
         let f = pluginStatic p
             elemp = pluginAction p
-            n = _name p
+            pname = _name p
             a = _bounds p
         (e:: Event [TableModification (TBIdx Key Showable) ] ,handler) <- newEvent
-        conn <- connectPostgreSQL (connRoot db)
-        inf <- keyTables  schm dbm conn  conn (T.pack $ dbn db, T.pack $ user db) Nothing postgresOps
-        tp  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
-        let t = case  tp of
-              [Only i] -> Just i :: Maybe UTCTime
-              [] -> Nothing
-        forkIO $ (maybe (do
-          print $ "Closing conn plugin [" <> T.unpack n <> "] not registered"
-          close conn ) (\_ -> void $ forever $ do
-          [t :: Only UTCTime]  <- query conn "SELECT start_time from metadata.polling where poll_name = ? and table_name = ? and schema_name = ?" (n,a,"incendio" :: String)
-          startTime <- getCurrentTime
-          let intervalsec = fromIntegral $ 60*d
-              d = 60 :: Int
-          if  diffUTCTime startTime  (unOnly t) >  intervalsec
+        pid <- forkIO $ (void $ forever $ do
+          inf <- keyTables  schm conn  conn (schema, T.pack $ user db) Nothing postgresOps
+          [[start,endt]] :: [[UTCTime]]<- query conn "SELECT start_time,end_time from metadata.polling where poll_name = ? and schema_name = ?" (pname,schema)
+          current <- getCurrentTime
+          let intervalsec = intervalms `div` 1000
+          if  diffUTCTime current start  >  fromIntegral intervalsec
           then do
-              execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (startTime,n,a,"incendio" :: String)
-              print ("START " <>T.unpack n <> " - " <> show startTime  ::String)
-              let rpt = tableView (tableMap inf) (fromJust  $ M.lookup  a  $ tableMap inf )
-                  rpd = accessTB ( fst f <> snd f) rpt
-                  rp = selectQuery rpd
-              listRes <- queryWith_ (fromAttr (unTlabel rpd )) conn  (fromString $ T.unpack $ rp)
-              let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
+              execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and schema_name = ?" (current,pname,schema )
+              print ("START " <>T.unpack pname  <> " - " <> show current ::String)
+              (m,listResT) <- transaction inf $ eventTable inf (lookTable inf a) Nothing Nothing
+              (l,listRes) <- currentValue (facts listResT)
+              let evb = filter (\i -> tdInput i  && tdOutput1 i ) (fmap TB1 listRes)
                   tdInput i =  isJust  $ checkTable  (fst f) i
                   tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
-              let elem inf  = fmap catMaybes .  mapM (\inp -> do
-                          o  <- fmap (liftKeys inf a) <$> catchPluginException inf a n (getPK inp)    ( elemp (Just $ mapKey keyValue inp))
-                          let diff =   join $ (\i j -> diffUpdateAttr   (unTB1 i ) (unTB1 j)) <$>  o <*> Just inp
-                          maybe (return Nothing )  (\i -> updateMod inf (unTB1 $ fromJust o) (unTB1 inp) (lookTable inf a )) diff )
 
-              i <- elem inf evb
-              handler i
+              i <-  mapM (\inp -> do
+                  o  <- fmap (fmap (liftKeys inf a)) <$> catchPluginException inf a pname (getPK inp)   (elemp (Just $ mapKey keyValue inp))
+                  traverse (\o -> do
+                    let diff =   join $ (\i j -> diffUpdateAttr   (unTB1 i ) (unTB1 j)) <$>  o <*> Just inp
+                    maybe (return Nothing )  (\i -> updateMod inf (unTB1 $ fromJust (o)) (unTB1 inp) (lookTable inf a )) diff ) o ) $ evb
+              (putMVar m . fmap (fmap unTB1)) (l,foldl applyTable (fmap TB1 listRes) (fmap (PAtom .tableDiff) (catMaybes $ rights i)))
               end <- getCurrentTime
-              print ("END " <>T.unpack n <> " - " <> show end ::String)
-              execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and table_name = ? and schema_name = ?" (end ,n,a,"incendio" :: String)
-              threadDelay (d*1000*1000*60)
+              print ("END " <>T.unpack pname <> " - " <> show end ::String)
+              let polling_log = lookTable (meta inf) "polling_log"
+              (plm,plt) <- transaction (meta inf) $ eventTable (meta inf) polling_log Nothing Nothing
+              let table = tblist $
+                      [ attrT ("poll_name",TB1 (SText pname))
+                      , attrT ("schema_name",TB1 (SText schema))
+                      , _tb $ IT ((attrT ("diffs",LeftTB1 $ Just$ ArrayTB1 $ [TB1 ()]))) (LeftTB1 $ ArrayTB1  <$> (
+                                nonEmpty  $
+                                    tblist . pure .  either (\r -> attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) )) (\r -> attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $ justError "no diff " $ r)) )) <$> i))
+                      , attrT ("start_time",TB1 (STimestamp $ utcToLocalTime utc current))
+                      , attrT ("end_time",LeftTB1 $ Just $ TB1 (STimestamp $ utcToLocalTime utc end))]
+              p <- insertMod (meta inf) (unTB1 $ liftKeys (meta inf) "polling_log" table) polling_log
+              traverse (putMVar plm . fmap (fmap unTB1) ). traverse (\l -> applyTable (fmap TB1 l) <$> (fmap (PAtom. tableDiff ) (p))) =<< currentValue (facts plt)
+              execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and schema_name = ?" (end ,pname,schema)
+              threadDelay (intervalms *1000)
           else do
-              threadDelay (round $ (*1000000) $  diffUTCTime startTime (unOnly t)) ) t )
-            `catch` (\(e :: SomeException )->  do
-                print ("Closing conn [" <> T.unpack n <> "] on exception " <> show e)
-                (close conn))
+              threadDelay (round $ (*1000000) $  diffUTCTime current start ) )
+
         return (a,e)
-  mapM poll  plugs
-
-
+  mapM poll  $ (catMaybes $ fmap (traverseOf _3  (\n -> L.find ((==n ). _name ) plugList)) enabled )
 
 setup
-     :: [(Text,Event [TableModification (TBIdx Key Showable)])] -> MVar (M.Map (KVMetadata Key) DBVar ) ->  MVar (M.Map Text  InformationSchema) ->  IORef OAuth2Tokens -> [String] -> Window -> UI ()
-setup e mvar smvar tokenRef args w = void $ do
+     :: [(Text,Event [TableModification (TBIdx Key Showable)])] ->  MVar (M.Map Text  InformationSchema) ->  IORef OAuth2Tokens -> [String] -> Window -> UI ()
+setup e smvar tokenRef args w = void $ do
   let bstate = argsToState args
-  (evDB,chooserItens) <- databaseChooser mvar smvar tokenRef bstate
+  (evDB,chooserItens) <- databaseChooser smvar tokenRef bstate
   body <- UI.div
   be <- stepper [] (unions $ fmap snd e)
   return w # set title (host bstate <> " - " <>  dbn bstate)
-  nav  <- buttonDivSet  ["Nav","Change","Exception"] (pure $ Just "Nav" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonDivSet  ["Nav","Poll","Change","Exception"] (pure $ Just "Nav" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   chooserDiv <- UI.div # set children  (chooserItens <> [ getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
   getBody w #+ [element container]
   mapUITEvent body (traverse (\(nav,inf)->
       case nav of
+        "Poll" -> do
+            element body #
+              set items
+                  [ metaAllTableIndexV inf "polling" [("schema_name",TB1 $ SText (schemaName inf) ) ]
+                  , metaAllTableIndexV inf "polling_log" [("schema_name",TB1 $ SText (schemaName inf) ) ]] #
+              set UI.class_ "row"
         "Change" -> do
             dash <- dashBoardAll inf
             element body # set UI.children [dash] # set UI.class_ "row"
@@ -202,8 +213,8 @@ loginWidget userI passI =  do
   username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set UI.value (maybe "" id userI)
   passwordl <- flabel # set UI.text "Senha"
   password <- UI.input # set UI.name "password" # set UI.style [("width","142px")] # set UI.type_ "password" # set UI.value (maybe "" id passI)
-  let usernameE = (\i -> if L.null i then Nothing else Just i) <$> UI.valueChange username
-      passwordE = (\i -> if L.null i then Nothing else Just i) <$> UI.valueChange password
+  let usernameE = nonEmpty  <$> UI.valueChange username
+      passwordE = nonEmpty <$> UI.valueChange password
 
   userDiv <- UI.div # set children [usernamel,username] # set UI.class_  "col-xs-2"
   passDiv <- UI.div # set children [passwordl,password] # set UI.class_  "col-xs-2"
@@ -224,7 +235,7 @@ instance Eq Connection where
 form :: Tidings a -> Event b -> Tidings a
 form td ev =  tidings (facts td ) (facts td <@ ev )
 
-databaseChooser mvar smvar tokenRef sargs = do
+databaseChooser smvar tokenRef sargs = do
   dbs <- liftIO $ listDBS  sargs
   let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,) . (,T.pack s) . fst $ snd $ dbs ) $ ( schema sargs)
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
@@ -232,21 +243,23 @@ databaseChooser mvar smvar tokenRef sargs = do
   schema <- flabel # set UI.text "schema"
   cc <- currentValue (facts $ triding dbsW)
   let dbsWE = rumors $ triding dbsW
+  reset <- checkedWidget (pure False)
   dbsWB <- stepper cc dbsWE
   let dbsWT  = tidings dbsWB dbsWE
   load <- UI.button # set UI.text "Connect" # set UI.class_ "col-xs-1" # sink UI.enabled (facts (isJust <$> dbsWT) )
-  let login = liftA2 (liftA2 (,)) (widT) ( dbsWT )
+  let login = liftA3 (\v a b-> fmap (v,) $ liftA2 (,) a b) (triding reset) widT dbsWT
       formLogin = form login (UI.click load)
-  let genSchema ((user,pass),(dbN,(dbConn,schemaN))) = do
+  let genSchema (reset,((user,pass),(dbN,(dbConn,schemaN)))) = do
         conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> (BS.pack $  dbn sargs) ) -- <> " sslmode= require")
         execute_ conn "set bytea_output='hex'"
+        let call = if  reset then keyTablesInit else keyTables
         case schemaN of
-          "gmail" ->  keyTables smvar mvar dbConn conn (schemaN,T.pack $ user ) (Just ("me",tokenRef)) gmailOps
-          i -> keyTables smvar mvar dbConn conn (schemaN,T.pack user) Nothing postgresOps
+          "gmail" ->  call smvar dbConn conn (schemaN,T.pack $ user ) (Just ("me",tokenRef)) gmailOps
+          i -> call smvar dbConn conn (schemaN,T.pack user) Nothing postgresOps
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   chooserT <-  mapTEvent (traverse genSchema) formLogin
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schema , getElement dbsW]
-  return $ (chooserT,(widE <> [schemaSel ,load]))
+  return $ (chooserT,( widE <> (getElement reset : [schemaSel ,load])))
 
 
 attrLine i e   = do

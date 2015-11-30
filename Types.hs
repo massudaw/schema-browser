@@ -759,12 +759,13 @@ nonRefTB it@(IT j k ) = [(IT  j (tableNonRef k )) ]
 
 
 addDefault
-  :: Functor g => Compose g (TB f) d a
-     -> Compose g (TB f) d b
+  :: Functor g => Compose g (TB g) d a
+     -> Compose g (TB g) d b
 addDefault = mapComp def
   where
     def ((Attr k i)) = (Attr k (LeftTB1 Nothing))
     def ((IT  rel j )) = (IT  rel (LeftTB1 Nothing)  )
+    def ((FKT at rel j )) = (FKT (addDefault <$> at) rel (LeftTB1 Nothing)  )
 
 kattr :: Compose Identity (TB Identity  ) k a -> [FTB a]
 kattr = kattri . runIdentity . getCompose

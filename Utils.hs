@@ -113,3 +113,8 @@ unIntercalate pred s                 =  case dropWhile pred s of
                                              break pred s'
 
 eitherToMaybe = either (const Nothing) Just
+
+nonEmpty [] = Nothing
+nonEmpty i = Just i
+
+

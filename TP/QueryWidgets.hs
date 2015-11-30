@@ -4,6 +4,7 @@ module TP.QueryWidgets (
     attrUITable,
     offsetField,
     sorting,
+    metaAllTableIndexV ,
     dashBoardAllTable,
     dashBoardAllTableIndex,
     dashBoardAll,
@@ -119,7 +120,7 @@ pluginUI oinf trinp (StatefullPlugin n tname ac) = do
            ) inpfresh
       let
         inp :: Tidings (Maybe (TB1 Showable))
-        inp = fmap (tbmap . mapFromTBList) . join  . fmap (\i -> if L.null i then Nothing else Just i) <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap (Compose .Identity )) .  triding) elemsIn )
+        inp = fmap (tbmap . mapFromTBList) . join  . fmap nonEmpty <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap (Compose .Identity )) .  triding) elemsIn )
 
       (preinp,(_,liftedE )) <- pluginUI  inf (mergeCreate <$>  unoldItems <*>  inp) aci
 
@@ -131,7 +132,7 @@ pluginUI oinf trinp (StatefullPlugin n tname ac) = do
       let styleUI =  set UI.class_ "row"
             . set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
       j<- UI.div # styleUI  # set children (fmap getElement elemsIn <> [preinp])# sink UI.style (noneShow .isJust <$> facts unoldItems)
-      k <- UI.div # styleUI  # set children (fmap getElement elemsOut) -- # sink UI.style (noneShow .isJust <$> facts liftedE  )
+      k <- UI.div # styleUI  # set children (fmap getElement elemsOut) # sink UI.style (noneShow .isJust <$> facts liftedE  )
       return  (( l <> [j , k], liftedE :ole ), mergeCreate <$> unoldItems <*> liftedE  ))
            ) ) (return (([],[]),trinp)) $ zip (fmap snd ac) freshKeys
   el <- UI.div  # set children (fst $ fst freshUI)
@@ -146,10 +147,10 @@ pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
   headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   bh <- stepper False (hoverTip headerP)
   details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (runErrors .fmap (mapValue (const ()))) <$> facts tdInputPre)
-  out <- UI.div # set children [headerP,details] -- # sink UI.style (noneShow . isJust <$> facts tdInput)
+  out <- UI.div # set children [headerP,details]
   ini <- currentValue (facts tdInput )
   kk <- stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
-  pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . action $  fmap (mapKey keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
+  pgOut <- mapTEvent (\v -> fmap (join . eitherToMaybe ). catchPluginException inf t n (getPK $ justError "ewfew"  v) . action $  fmap (mapKey keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
   return (out, (snd f ,   fmap (liftKeys inf t) <$> pgOut ))
 
 pluginUI inf oldItems p@(BoundedPlugin2 n t arrow) = do
@@ -159,16 +160,15 @@ pluginUI inf oldItems p@(BoundedPlugin2 n t arrow) = do
   let tdInputPre = fmap (checkTable' (fst f)) <$>  oldItems
       tdInput = join . fmap (eitherToMaybe .  runErrors) <$> tdInputPre
       tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
-  v <- currentValue (facts oldItems)
   headerP <- UI.button # set text (T.unpack n) {- # sink UI.enabled (isJust <$> facts tdInput) -} # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   bh <- stepper False (hoverTip headerP)
   details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (runErrors . fmap (mapValue (const ())) )<$> facts tdInputPre)
-  out <- UI.div # set children [headerP,details] -- # sink UI.style (noneShow . isJust <$> facts tdInput)
+  out <- UI.div # set children [headerP,details]
   let ecv = (facts tdInput <@ UI.click headerP)
   vo <- currentValue (facts tdOutput)
   vi <- currentValue (facts tdInput)
   bcv <- stepper (maybe vi (const Nothing) vo) ecv
-  pgOut <- mapTEvent (\v -> catchPluginException inf t n (getPK $ justError "ewfew"  v) . action $ fmap (mapKey keyValue) v)  (tidings bcv ecv)
+  pgOut <- mapTEvent (\v -> fmap (join . eitherToMaybe) . catchPluginException inf t n (getPK $ justError "ewfew"  v) . action $ fmap (mapKey keyValue) v)  (tidings bcv ecv)
   return (out, (snd f ,   fmap (liftKeys inf t )<$> pgOut ))
 
 indexPluginAttr
@@ -963,9 +963,6 @@ sortFilterUI conv ix bh  = do
   return $ TrivialWidget (tidings bh ((\ini@(l,t,op) f -> (\(l,t,op,v) -> (l , t ,liftA2 (,) op v)) $ f (l,t,fmap fst op , fmap snd op) ) <$> bh <@> (concatenate <$> unions [ev0,ev1,ev2]) )) block
 
 
-
-nonEmpty [] = Nothing
-nonEmpty i = Just i
 
 viewer inf table env = mdo
   let

@@ -355,8 +355,8 @@ accessTB i t = go t
         LeftTB1 j ->  LeftTB1 $ go <$> j
         ArrayTB1 j -> ArrayTB1 $ go <$> j
         DelayedTB1 (Just j) -> go j
-        TB1 (m,k) -> TB1   (m,mapComp (\m -> KV $ M.mapWithKey  modify (_kvvalues $ m)) k )
-          where modify k =  mapComp (\v -> maybe v (flip accessAT v) $ findOne i (S.map (keyValue. _relOrigin) k))
+        TB1 (m,k) -> TB1   (m,mapComp (\m -> KV $ {-fmap (justError "") $ M.filterWithKey (\k v -> isJust v) $-} M.mapWithKey  modify (_kvvalues $ m)) k )
+          where modify k =  mapComp (\v ->maybe v (flip accessAT v) $ findOne i (S.map (keyValue. _relOrigin) k))
 
 accessAT (Nested (IProd b t) r) at
     = case at of

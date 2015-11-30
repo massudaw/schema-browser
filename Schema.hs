@@ -96,8 +96,10 @@ readFModifier "read" = FRead
 readFModifier "edit" = FPatch
 readFModifier "write" = FWrite
 
-keyTables :: MVar (Map Text InformationSchema )-> MVar (Map (KVMetadata Key) DBVar ) -> Connection -> Connection -> (Text ,Text)-> Maybe (Text,IORef OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
-keyTables schemaVar mvar conn userconn (schema ,user) oauth ops = maybe (do
+keyTables ,keyTablesInit :: MVar (Map Text InformationSchema )->  Connection -> Connection -> (Text ,Text)-> Maybe (Text,IORef OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
+keyTables schemaVar conn userconn (schema ,user) oauth ops = maybe (keyTablesInit schemaVar conn userconn (schema,user) oauth ops) return  . (M.lookup schema ) =<< readMVar schemaVar
+
+keyTablesInit schemaVar conn userconn (schema,user) oauth ops = do
        uniqueMap <- join $ mapM (\(t,c,op,mod,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr (V.toList $ fmap readFModifier mod) op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,field_modifiers,translation from  metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
        res2 <- fmap ( (\i@(t,c,j,k,del,l,m,d,z,b)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,del,l,maybe False testSerial m,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_delayed,is_range,col_def,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema)
        let
@@ -133,14 +135,15 @@ keyTables schemaVar mvar conn userconn (schema ,user) oauth ops = maybe (do
            (i1,pks) = (keyMap, M.fromList $ fmap (\(_,t)-> (rawPK t ,t)) $ M.toList i3 )
            i2 =  M.filterWithKey (\k _ -> not.S.null $ k )  pks
        sizeMapt <- M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t  i3 ) <$> query conn tableSizes (Only schema)
+       mvar <- newMVar M.empty
        metaschema <- if (schema /= "metadata")
-          then Just <$> keyTables  schemaVar mvar conn userconn ("metadata",user) oauth ops
+          then Just <$> keyTables  schemaVar conn userconn ("metadata",user) oauth ops
           else return Nothing
        let inf = InformationSchema schema user oauth i1 i2  i3 sizeMapt mvar  userconn conn metaschema ops
        var <- takeMVar schemaVar
        putMVar schemaVar (M.insert schema inf var)
        return inf
-       ) (return ) . (M.lookup schema ) =<< readMVar schemaVar
+
 
 -- Search for recursive cycles and tag the tables
 addRecInit :: Map Text Table -> Map Text Table
@@ -228,13 +231,13 @@ newKey name ty p = do
   return $ Key name Nothing    [FRead,FWrite] p Nothing un ty
 
 
-catchPluginException :: InformationSchema -> Text -> Text -> [(Key, FTB Showable)] -> IO (Maybe a) -> IO (Maybe a)
+catchPluginException :: InformationSchema -> Text -> Text -> [(Key, FTB Showable)] -> IO (Maybe a) -> IO (Either Int (Maybe a))
 catchPluginException inf pname tname idx i = do
-  i `catch` (\e  -> do
+  (Right <$> i) `catch` (\e  -> do
                 t <- getCurrentTime
                 print (t,e)
-                execute (rootconn inf) "INSERT INTO metadata.plugin_exception (username,schema_name,table_name,plugin_name,exception,data_index2,instant) values(?,?,?,?,?,?,?)" (username inf , schemaName inf,pname,tname,show (e :: SomeException) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) . first keyValue) idx) ), t )
-                return Nothing )
+                id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (username,schema_name,table_name,plugin_name,exception,data_index2,instant) values(?,?,?,?,?,?,?,?) returning id" (username inf , schemaName inf,pname,tname,show (e :: SomeException) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) . first keyValue) idx) ), t )
+                return (Left (unOnly $ head $id)))
 
 
 logTableModification
@@ -251,8 +254,7 @@ logTableModification inf (TableModification Nothing table i) = do
 
 keyTables' con rcon s i j = do
   sch <- newMVar M.empty
-  tables <- newMVar M.empty
-  keyTables sch tables con rcon s i j
+  keyTables sch con rcon s i j
 withInf d s f = withConn d (f <=< (\conn -> keyTables' conn conn (s,"postgres") Nothing undefined ))
 
 withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables'  conn conn (s,"postgres") Nothing undefined ) )
@@ -394,7 +396,6 @@ joinRel rel ref table
             tbel = L.find (\(_,i)-> interPointPost rel ref (nonRefAttr  $ F.toList $ _kvvalues $ unTB  i) ) table
 
 
--- test inf i j = runDBM inf (applyTB1' i j)
 runDBM inf m = do
     runReaderT m (mvarMap inf)
 

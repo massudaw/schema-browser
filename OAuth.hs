@@ -46,9 +46,8 @@ gmailScope = "https://www.googleapis.com/auth/gmail.modify"
 oauthpoller = do
   Just cid <- lookupEnv "CLIENT_ID"
   Just secret <- lookupEnv "CLIENT_SECRET"
-  -- Ask for permission to read/write your fusion tables:
   let client = OAuth2Client { clientId = cid, clientSecret = secret }
-      permissionUrl = formUrl client ["https://www.googleapis.com/auth/gmail.readonly",gmailScope]
+      permissionUrl = formUrl client [gmailScope]
   b <- doesFileExist file
   unless b $ do
       putStrLn$ "Load this URL: "++show permissionUrl
