@@ -126,7 +126,7 @@ poller schm db plugs = do
           [[start,endt]] :: [[UTCTime]]<- query conn "SELECT start_time,end_time from metadata.polling where poll_name = ? and schema_name = ?" (pname,schema)
           current <- getCurrentTime
           let intervalsec = intervalms `div` 1000
-          if  diffUTCTime current start  >  fromIntegral intervalsec
+          if  True -- diffUTCTime current start  >  fromIntegral intervalsec
           then do
               execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and schema_name = ?" (current,pname,schema )
               print ("START " <>T.unpack pname  <> " - " <> show current ::String)
@@ -149,9 +149,9 @@ poller schm db plugs = do
               let table = tblist $
                       [ attrT ("poll_name",TB1 (SText pname))
                       , attrT ("schema_name",TB1 (SText schema))
-                      , _tb $ IT ((attrT ("diffs",LeftTB1 $ Just$ ArrayTB1 $ [TB1 ()]))) (LeftTB1 $ ArrayTB1  <$> (
-                                nonEmpty  $
-                                    tblist . pure .  either (\r -> attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) )) (\r -> attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $ justError "no diff " $ r)) )) <$> i))
+                      , _tb $ IT (attrT ("diffs",LeftTB1 $ Just$ ArrayTB1 $ [TB1 ()])) (LeftTB1 $ ArrayTB1  <$> (
+                                nonEmpty  . catMaybes $
+                                    fmap (tblist . pure ) .  either (\r ->Just $   attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) )) (fmap (\r -> attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $  r))   ))) <$> i))
                       , attrT ("start_time",TB1 (STimestamp $ utcToLocalTime utc current))
                       , attrT ("end_time",LeftTB1 $ Just $ TB1 (STimestamp $ utcToLocalTime utc end))]
               p <- insertMod (meta inf) (unTB1 $ liftKeys (meta inf) "polling_log" table) polling_log
