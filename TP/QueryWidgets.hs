@@ -770,8 +770,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
           rr = tablePKSet tb1
           table = justError "no table found" $ M.lookup (S.map _relOrigin rr) $ pkMap inf
-      ((tmvar,vpt),_)  <- liftIO $ transaction inf $ eventTable inf table Nothing Nothing [] []
-      res <- fmap (fmap TB1 ) <$> currentValue (facts vpt)
+      ((tmvar,vpt),res)  <- fmap (fmap (fmap TB1) ) <$> (liftIO $ transaction inf $ eventTable inf table Nothing Nothing [] [])
       let
           -- Find non injective part of reference
           ftdi = oldItems

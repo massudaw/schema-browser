@@ -129,8 +129,7 @@ poller schm db plugs = do
           then do
               execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and schema_name = ?" (current,pname,schema )
               print ("START " <>T.unpack pname  <> " - " <> show current ::String)
-              ((m,listResT),_) <- transaction inf $ eventTable inf (lookTable inf a) Nothing Nothing [][]
-              (l,listRes) <- currentValue (facts listResT)
+              ((m,listResT),(l,listRes)) <- transaction inf $ eventTable inf (lookTable inf a) Nothing Nothing [][]
               let evb = filter (\i -> tdInput i  && tdOutput1 i ) (fmap TB1 listRes)
                   tdInput i =  isJust  $ checkTable  (fst f) i
                   tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
@@ -140,7 +139,7 @@ poller schm db plugs = do
                   traverse (\o -> do
                     let diff =   join $ (\i j -> diffUpdateAttr   (unTB1 i ) (unTB1 j)) <$>  o <*> Just inp
                     maybe (return Nothing )  (\i -> updateMod inf (unTB1 $ fromJust (o)) (unTB1 inp) (lookTable inf a )) diff ) o ) $ evb
-              (putMVar m . fmap (fmap unTB1)) (l,foldl applyTable (fmap TB1 listRes) (fmap (PAtom .tableDiff) (catMaybes $ rights i)))
+              (putMVar m . fmap (fmap unTB1)) .  (\(l,listRes) -> (l,foldl applyTable (fmap TB1 listRes) (fmap (PAtom .tableDiff) (catMaybes $ rights i)))) =<< currentValue (facts listResT)
               end <- getCurrentTime
               print ("END " <>T.unpack pname <> " - " <> show end ::String)
               let polling_log = lookTable (meta inf) "polling_log"
@@ -321,8 +320,7 @@ viewerKey inf key = mdo
   let
       table = fromJust  $ M.lookup key $ pkMap inf
 
-  ((tmvar,vpt),_)  <- liftIO $ transaction inf $ eventTable inf table (Just 0) (Just  20) [] []
-  vp <- fmap (fmap TB1 ) <$> currentValue (facts vpt)
+  ((tmvar,vpt),vp)  <- fmap (fmap (fmap TB1) ) <$> (liftIO $ transaction inf $ eventTable inf table (Just 0) (Just  20) [] [])
 
   let
       tdi = pure Nothing
