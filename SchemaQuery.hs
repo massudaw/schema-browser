@@ -134,7 +134,7 @@ eventTable inf table page size presort fixed = do
            -- print "Put MVar"
            return (mnew,td,Just ini)
     iniT <- fromMaybe (liftIO $ currentValue (facts td)) (return <$> ini)
-    return ((mtable, fmap filterfixed <$> td),iniT)
+    return ((mtable, fmap filterfixed <$> td),fmap filterfixed iniT)
 
 
 
