@@ -50,20 +50,25 @@ deleteMod inf j@(meta,_) table = do
   deletePatch (conn inf)  patch table
   Just <$> logTableModification inf (TableModification Nothing table patch)
 
-selectAll inf table = liftIO $ do
+selectAll inf table i  j k = liftIO $ do
       let
+          unref (TableRef i) = i
           tb =  tableView (tableMap inf) table
           tbf = tb -- forceDesc True (markDelayed True tb)
       print (tableName table,selectQuery tbf )
-      (t,v) <- duration  $ queryWith_  (fromAttr (unTlabel tbf)) (conn inf)(fromString $ T.unpack $ selectQuery $ tbf)
+      let m = unTB1 tbf
+      (t,v) <- duration  $ paginate (conn inf) m k 0 0 (maybe 20 id j) (fmap unref i) Nothing
       print (tableName table,t)
       return v
 
 estLength page size resL est = fromMaybe 0 page * fromMaybe 20 size  +  est
 
-eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> TransactionM DBVar
-eventTable inf table page size = do
+eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Order)]
+    -> TransactionM DBVar
+eventTable inf table page size presort = do
     let mvar = mvarMap inf
+        defSort = fmap (,Desc) $ S.toList $ rawPK table
+        sort  = if L.null presort then defSort else presort
     -- print "Take MVar"
     mmap <- liftIO$ takeMVar mvar
     -- print "Look MVar"
@@ -72,12 +77,12 @@ eventTable inf table page size = do
            -- print "Put MVar"
            ((sq,mp),reso) <- liftIO$ currentValue (facts td)
            when (maybe False (\p->not $ M.member (p+1) mp) page  && sq >  L.length reso  && isJust (join $ flip M.lookup mp <$> page )) $ do
-             (res,nextToken ,s ) <- (listEd $ schemaOps inf ) inf table (join $ flip M.lookup mp <$> page ) size
+             (res,nextToken ,s ) <- (listEd $ schemaOps inf ) inf table (join $ flip M.lookup mp <$> page ) size sort
              liftIO$ putMVar i ((estLength page size res s  ,maybe mp (\v -> M.insert (fromMaybe 0 page +1 ) v  mp)  nextToken) ,reso <> (unTB1 <$> res))
            liftIO $ putMVar mvar mmap
            return (i,td)
          Nothing -> do
-           (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing size
+           (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing size sort
            -- liftIO $ print "New MVar"
            let ini = ((estLength page size res s ,maybe M.empty (M.singleton 1) p) ,fmap unTB1 res)
            mnew <- liftIO$ newMVar ini
@@ -97,7 +102,7 @@ eventTable inf table page size = do
 
 
 
-postgresOps = SchemaEditor fullDiffEdit fullDiffInsert deleteMod (\i j p g -> (\i -> (i,Nothing,L.length i)) <$> selectAll i j ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))
+postgresOps = SchemaEditor fullDiffEdit fullDiffInsert deleteMod (\i j p g s -> (\(l,i) -> (fmap TB1 i,Just $ TableRef  (getPK $ TB1 $ last i) ,l)) <$> selectAll i j p g s ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))
 
 fullInsert inf = Tra.traverse (fullInsert' inf )
 
@@ -105,7 +110,7 @@ fullInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData
 fullInsert' inf ((k1,v1) )  = do
    let proj = _kvvalues . unTB
    ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
-   (m,t) <- eventTable inf (lookTable inf (_kvname k1)) Nothing Nothing
+   (m,t) <- eventTable inf (lookTable inf (_kvname k1)) Nothing Nothing []
    (_,l) <- currentValue (facts t)
    if  isJust $ L.find ((==tbPK (tableNonRef (TB1  ret))). tbPK . tableNonRef . TB1  ) l
       then do
@@ -140,7 +145,7 @@ transaction inf log = {-withTransaction (conn inf) $-} do
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
   Tra.traverse (\(k,v) -> do
     -- print "GetTable"
-    (m,t) <- transaction inf $  eventTable inf k Nothing Nothing
+    (m,t) <- transaction inf $  eventTable inf k Nothing Nothing []
     -- print "ReadValue"
     (mp,l) <- currentValue (facts t)
     let lf = foldl' (\i p -> applyTable  i (PAtom p)) (fmap TB1 l) v

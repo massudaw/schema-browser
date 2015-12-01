@@ -43,8 +43,9 @@ tableMap = _tableMapL
 keyMap = _keyMapL
 pkMap = _pkMapL
 
-type DBVar2 k v = (MVar  ((Int,Map Int PageToken),[TBData k v ]), R.Tidings ((Int,Map Int PageToken ),[TBData k v ]))
+type DBVar2 k v = (MVar (Collection k v), R.Tidings (Collection k v))
 type DBVar = DBVar2 Key Showable
+type Collection k v = ((Int,Map Int PageToken),[TBData k v])
 
 type Plugins = FPlugins Text
 type VarDef = (Text,KType (Prim (Text,Text) (Text,Text)))
@@ -88,8 +89,9 @@ dynPK =  runKleisli . dynP
 type TransactionM = WriterT [TableModification (TBIdx Key Showable)] IO
 
 data PageToken
-  = Index Int
+  = PageIndex Int
   | NextToken Text
+  | TableRef [(Key , FTB Showable)]
   deriving(Eq,Ord,Show)
 
 
@@ -98,7 +100,7 @@ data SchemaEditor
   { editEd  :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
   , insertEd :: InformationSchema -> TBData Key Showable -> TransactionM  (Maybe (TableModification (TBIdx Key Showable)))
   , deleteEd :: InformationSchema -> TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
-  , listEd :: InformationSchema -> Table -> Maybe PageToken -> Maybe Int -> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
+  , listEd :: InformationSchema -> Table -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
   , updateEd :: InformationSchema -> Table -> TBData Key Showable -> Maybe PageToken -> Maybe Int -> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
   , getEd :: InformationSchema -> Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   }

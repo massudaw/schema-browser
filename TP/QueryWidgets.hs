@@ -7,12 +7,10 @@ module TP.QueryWidgets (
     metaAllTableIndexV ,
     dashBoardAllTable,
     dashBoardAllTableIndex,
-    dashBoardAll,
     validOp,
     viewer,
     exceptionAllTable,
     exceptionAllTableIndex,
-    exceptionAll,
     line,
     strAttr,
     flabel,
@@ -408,9 +406,9 @@ crudUITable inf pgs open bres refs pmods ftb@(TB1 (m,_) ) preoldItems = do
           addElemFin panelItems fin
           UI.div # set children [listBody,panelItems]
       fun "Change" = do
-            UI.div # sink0 items (maybe [] (pure . dashBoardAllTableIndex . (inf,table,) . getPK )   <$> facts preoldItems )
+            UI.div # sink0 items (maybe [] (pure . dashBoardAllTableIndex . (inf,table,) . getPK ) <$> facts preoldItems )
       fun "Exception" = do
-            UI.div # sink0 items (maybe [] (pure . exceptionAllTableIndex . (inf,table,). getPK )   <$> facts preoldItems )
+            UI.div # sink0 items (maybe [] (pure . exceptionAllTableIndex . (inf,table,). getPK ) <$> facts preoldItems )
       fun i = UI.div
   sub <- UI.div # sink items (pure . fun <$> facts (triding nav)) # set UI.class_ "row"
   cv <- currentValue (facts preoldItems)
@@ -774,7 +772,7 @@ fkUITable inf pgs constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
           rr = tablePKSet tb1
           table = justError "no table found" $ M.lookup (S.map _relOrigin rr) $ pkMap inf
-      (tmvar,vpt)  <- liftIO $ transaction inf $ eventTable inf table Nothing Nothing
+      (tmvar,vpt)  <- liftIO $ transaction inf $ eventTable inf table Nothing Nothing []
       res <- fmap (fmap TB1 ) <$> currentValue (facts vpt)
       let
           -- Find non injective part of reference
@@ -892,7 +890,6 @@ sorting' ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i)
 sorting k = fmap TB1 . sorting' k . fmap unTB1
 
 
-
 rendererShowableUI k  v= renderer (keyValue k) v
   where renderer "modification_data" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> showPatch (i:: PathAttr Text Showable) )  (B.decodeOrFail (BSL.fromStrict i))
         renderer k i = UI.div # set text (renderPrim i)
@@ -964,6 +961,7 @@ sortFilterUI conv ix bh  = do
 
 
 
+viewer :: InformationSchema -> Table -> Maybe [(Text ,Column Key Showable)] -> UI Element
 viewer inf table env = mdo
   let
       envK = concat $ maybeToList env
@@ -977,10 +975,18 @@ viewer inf table env = mdo
       iniSort = selSort sortSet ((,True) <$>  key)
 
   sortList <- sortFilter sortSet ((,True) <$> key) []  UI.tr UI.th conv
-  let makeQ slist' (o,i) = fmap ((o,).(slist,)) $ paginate (conn inf) (unTB1 tableSt2)  (fmap dir2 <$> (filterOrd slist)) o ((*pageSize) $ maybe o ((o-) . fst) kold ) pageSize (snd <$> kold) (nonEmpty envK <> flist )
+
+  let {-makeQ slist' (o,i) = fmap ((o,).(slist,)) $ paginate (conn inf) (unTB1 tableSt2)  (fmap dir2 <$> (filterOrd slist)) o ((*pageSize) $ maybe o ((o-) . fst) kold ) pageSize (snd <$> kold) (nonEmpty envK <> flist )
           where kold = join $ fmap (traverse (allMaybes . fmap (traverse unSOptional') . L.filter (flip elem (fmap fst (filterOrd slist)).fst) . getAttr'  )) i
                 slist = fmap (\(i,j,_) -> (i,j)) slist'
-                flist = nonEmpty $ catMaybes $ fmap (\(i,_,j) -> second (Attr i) . first T.pack <$> j) slist'
+                flist = nonEmpty $ catMaybes $ fmap (\(i,_,j) -> second (Attr i) . first T.pack <$> j) slist'-}
+      makeQ slist' (o,i) = do
+              let slist = fmap (\(i,j,_) -> (i,j)) slist'
+                  ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
+                  paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
+              (m,t) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) (Just pageSize) (fmap (\t -> if t then Desc else Asc ) <$> ordlist)
+              ((size,e),lres) <- currentValue (facts t)
+              return (o,(slist,paging o (size,sorting' ordlist lres)))
       dir2 True  = Desc
       dir2 False = Asc
       nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))
@@ -1014,7 +1020,7 @@ exceptionAllTableIndex e@(inf,table,index) =   metaAllTableIndexA inf "plugin_ex
               , IT (_tb $ Attr "data_index2" (TB1 () ) ) (ArrayTB1 $  fmap ((\(i,j) -> tblist $ fmap _tb [Attr "key" (TB1 $ SText i) ,Attr "val" (TB1 (SDynamic j))]). first keyValue)index) ]
 
 
-dashBoardAllTableIndex e@(inf,table,index) =   metaAllTableIndexA inf "modification_table" envA -- [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ),("data_index2",TB1 $ SBinary $ BSL.toStrict $ B.encode $ fmap (first keyValue)index) ]
+dashBoardAllTableIndex e@(inf,table,index) =   metaAllTableIndexA inf "modification_table" envA
   where
         envA = [Attr "schema_name" (TB1 $ SText (schemaName inf))
               , Attr "table_name" (TB1 $ SText (tableName table))

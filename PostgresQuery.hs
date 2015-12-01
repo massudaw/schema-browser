@@ -105,43 +105,6 @@ updatePatch conn kv old  t =
 
 differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 
-
-selectQueryWherePK
-  :: (MonadIO m ,Functor m ,TF.ToField (TB Identity Key Showable ))
-     => (TBData Key () -> FR.RowParser (TBData Key Showable ))
-     -> Connection
-     -> TB3Data (Labeled Text) Key ()
-     -> Text
-     -> [(Key,FTB Showable )]
-     -> m (TBData Key Showable )
-selectQueryWherePK f conn t rel kold =  do
-        liftIO$ print que
-        liftIO $ head <$> queryWith (f (unTlabel' t) ) conn que koldPk
-  where pred = " WHERE " <> T.intercalate " AND " (equality . label . getCompose <$> fmap (labelValue.getCompose) (getPKAttr $ joinNonRef' t))
-        que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred
-        equality k = k <> rel   <> "?"
-        koldPk :: [TB Identity Key Showable ]
-        koldPk = (\(Attr k _) -> Attr k (justError ("no value for key " <> show k) $ M.lookup k (M.fromList kold)) ) <$> fmap (labelValue .getCompose.labelValue.getCompose) (getPKAttr $ joinNonRef' t)
-
-
-selectQueryWhere
-  :: (MonadIO m ,Functor m )
-     => Connection
-     -> TB3Data (Labeled Text) Key ()
-     -> Text
-     -> [(Key,FTB Showable )]
-     -> m [TBData Key Showable]
-selectQueryWhere  conn t rel kold =  do
-        liftIO$ print que
-        let filterRec = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList (fst <$> kold))) . S.fromList . fmap _relOrigin.  keyattr )
-        liftIO  $ fmap filterRec <$> queryWith (fromRecord ( unTlabel' t) ) conn que koldPk
-  where pred = " WHERE " <> T.intercalate " AND " (equality . label <$> filter ((`S.isSubsetOf` (S.fromList (fst <$> kold))). S.singleton . keyAttr . labelValue ) ( fmap (getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)))
-        que = fromString $ T.unpack $ selectQuery (TB1 t) <> pred
-        equality k = k <> rel   <> "?"
-        koldPk :: [TB Identity Key Showable ]
-        koldPk = catMaybes $ (\(Attr k _) -> Attr k <$> ( M.lookup k (M.fromList kold)) ) <$> fmap (labelValue .getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)
-
-
 paginate conn t order page off size k eqpred = do
     let (que,attr) = case k of
           (Just koldpre) ->
@@ -169,7 +132,6 @@ paginate conn t order page off size k eqpred = do
         limitQ = " LIMIT " <> T.pack (show size)
         orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first (justLabel t) <$> order)
 
--- paginateView conn  (View  tree order proj  (page,off,size,origin)) = paginate conn tree  order page off size origin Nothing
 
 
 data View

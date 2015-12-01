@@ -18,7 +18,6 @@ open the table reach the recursive attr, perform a with recursive query
 with field and index tagging , then recover the base table
 
 
-
 Counting query size
 -- when offset is bigger them the number of rows to count we cant retrieve the count to estimate size
 
@@ -53,10 +52,6 @@ CUSTOM PER TABLE FILTERS
 -- subtyping constraints 
 -- and , or combinators
 
-IMPROVE LEFT ARRAY TREATMENT 
--- Try to change the TB to generalize over LEFTTB1
-ArrayTB1, SOptional , SComposite and maybe other higher kinded
-structures
 
 INDEXED PARTITION
 -- Static indexed tables, relations, schemas,dbs

@@ -105,7 +105,6 @@ main = do
     )  sorted
   -}
 
- --  mvar <- newMVar M.empty
   smvar <- newMVar M.empty
   e <- poller smvar (argsToState $ tail args)  plugList
   tokenRef <- oauthpoller
@@ -125,12 +124,12 @@ poller schm db plugs = do
           inf <- keyTables  schm conn  conn (schema, T.pack $ user db) Nothing postgresOps
           [[start,endt]] :: [[UTCTime]]<- query conn "SELECT start_time,end_time from metadata.polling where poll_name = ? and schema_name = ?" (pname,schema)
           current <- getCurrentTime
-          let intervalsec = intervalms `div` 1000
-          if  True -- diffUTCTime current start  >  fromIntegral intervalsec
+          let intervalsec = intervalms `div` 10^3
+          if  diffUTCTime current start  >  fromIntegral intervalsec
           then do
               execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and schema_name = ?" (current,pname,schema )
               print ("START " <>T.unpack pname  <> " - " <> show current ::String)
-              (m,listResT) <- transaction inf $ eventTable inf (lookTable inf a) Nothing Nothing
+              (m,listResT) <- transaction inf $ eventTable inf (lookTable inf a) Nothing Nothing []
               (l,listRes) <- currentValue (facts listResT)
               let evb = filter (\i -> tdInput i  && tdOutput1 i ) (fmap TB1 listRes)
                   tdInput i =  isJust  $ checkTable  (fst f) i
@@ -145,7 +144,7 @@ poller schm db plugs = do
               end <- getCurrentTime
               print ("END " <>T.unpack pname <> " - " <> show end ::String)
               let polling_log = lookTable (meta inf) "polling_log"
-              (plm,plt) <- transaction (meta inf) $ eventTable (meta inf) polling_log Nothing Nothing
+              (plm,plt) <- transaction (meta inf) $ eventTable (meta inf) polling_log Nothing Nothing []
               let table = tblist $
                       [ attrT ("poll_name",TB1 (SText pname))
                       , attrT ("schema_name",TB1 (SText schema))
@@ -157,9 +156,9 @@ poller schm db plugs = do
               p <- insertMod (meta inf) (unTB1 $ liftKeys (meta inf) "polling_log" table) polling_log
               traverse (putMVar plm . fmap (fmap unTB1) ). traverse (\l -> applyTable (fmap TB1 l) <$> (fmap (PAtom. tableDiff ) (p))) =<< currentValue (facts plt)
               execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and schema_name = ?" (end ,pname,schema)
-              threadDelay (intervalms *1000)
+              threadDelay (intervalms*10^3)
           else do
-              threadDelay (round $ (*1000000) $  diffUTCTime current start ) )
+              threadDelay (round $ (*10^6) $  diffUTCTime current start ) )
 
         return (a,e)
   mapM poll  $ (catMaybes $ fmap (traverseOf _3  (\n -> L.find ((==n ). _name ) plugList)) enabled )
@@ -186,10 +185,10 @@ setup e smvar tokenRef args w = void $ do
                   , metaAllTableIndexV inf "polling_log" [("schema_name",TB1 $ SText (schemaName inf) ) ]] #
               set UI.class_ "row"
         "Change" -> do
-            dash <- dashBoardAll inf
+            dash <- metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ) ]
             element body # set UI.children [dash] # set UI.class_ "row"
         "Exception" -> do
-            dash <- exceptionAll inf
+            dash <- metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ) ]
             element body # set UI.children [dash] # set UI.class_ "row"
         "Nav" -> do
             let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
@@ -292,10 +291,10 @@ chooserTable inf e kitems i = do
   chooserDiv <- UI.div # set children  [header ,getElement nav] # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
   body <- UI.div # set UI.class_ "row"
 
-  mapM (\(t,ediff) -> traverse (\ table -> do
+{-  mapM (\(t,ediff) -> traverse (\ table -> do
       (tmvar,vpt)  <- liftIO $ transaction inf $eventTable inf table Nothing Nothing
       onEvent ( ((\(m,i) j -> (m,foldl applyTable (fmap TB1 i) (fmap (PAtom .tableDiff) j)) ) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar . fmap (fmap unTB1) )) (M.lookup t (tableMap inf))  ) e
-
+-}
 
   mapUITEvent body (\(nav,table)->
       case nav of
@@ -322,7 +321,7 @@ viewerKey inf key = mdo
   let
       table = fromJust  $ M.lookup key $ pkMap inf
 
-  (tmvar,vpt)  <- liftIO $ transaction inf $ eventTable inf table (Just 0) (Just  20)
+  (tmvar,vpt)  <- liftIO $ transaction inf $ eventTable inf table (Just 0) (Just  20) []
   vp <- fmap (fmap TB1 ) <$> currentValue (facts vpt)
 
   let
@@ -349,7 +348,7 @@ viewerKey inf key = mdo
     offset <- offsetField 0 (never ) (lengthPage <$> facts res3)
     res3 <- mapT0Event (fmap inisort vp) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ tidings res2 (fmap (fmap TB1) <$> rumors vpt) ) )
     return (offset, res3)
-  onEvent (rumors $ triding offset) $ (\i -> liftIO $ transaction inf $ eventTable  inf table  (Just i) (Just 20))
+  onEvent (rumors $ triding offset) $ (\i -> liftIO $ transaction inf $ eventTable  inf table  (Just i) (Just 20) [] )
   let
     paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )<$> triding offset
   page <- currentValue (facts paging)
