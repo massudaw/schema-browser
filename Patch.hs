@@ -43,16 +43,6 @@ import qualified Data.Set as Set
 import Prelude hiding(head)
 
 
-{-
-t1 =  tblistPK (Set.singleton "id")  [Compose $ Identity $ Attr "id" (TB1 (SNumeric 2)),Compose $ Identity $ Attr "at1" (LeftTB1 $ Just (ArrayTB1 [TB1 $ SNumeric 1]))]
-t1pk =  TB1 (SNumeric 2)
-p1,p2,p3 :: PathT String
-p1 = PIndex kvempty (Set.singleton ("id",t1pk)) $ Just $ PKey True (Set.fromList [Inline "at1"]) $ (POpt Nothing)
-p2 = PIndex kvempty (Set.singleton ("id",t1pk)) $ Just $ PKey True (Set.fromList [Inline "at1"]) $ (POpt (Just (PIdx 0 (Just $ PAtom $ SNumeric 4))))
-p3 = PIndex kvempty (Set.singleton ("id",t1pk)) $ Just $PKey True (Set.fromList [Inline "at1"]) $ (POpt (Just (PIdx 1 (Just $ PAtom $ SNumeric 5))))
-p4 = PIndex kvempty (Set.singleton ("id",t1pk)) $ Just $PKey True (Set.fromList [Inline "at1"]) $ (POpt (Just (PIdx 1 Nothing )))
--}
-
 data PathFTB   a
   = POpt (Maybe (PathFTB a))
   | PDelayed (Maybe (PathFTB a))
@@ -344,6 +334,7 @@ applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                                 else if ix == length i
                                       then fmap ArrayTB1 $ sequenceA $ fmap pure i <> [createFTBM pr p]
                                       else errorWithStackTrace $ "ix bigger than next elem" <> show (ix, length i)
+
 applyFTBM pr a (SerialTB1 i ) (PSerial o) = SerialTB1 <$>  applyOptM pr a i o
 applyFTBM pr a (DelayedTB1 i ) (PDelayed o) = DelayedTB1 <$>  applyOptM pr a i o
 applyFTBM pr a (IntervalTB1 i) (PInter b (p,l))

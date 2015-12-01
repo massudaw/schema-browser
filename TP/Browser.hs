@@ -21,6 +21,7 @@ import Plugins
 import TP.Widgets
 import qualified Data.Vector as V
 import SchemaQuery
+import PostgresQuery (postgresOps)
 import SortList
 import Prelude hiding (head)
 import TP.QueryWidgets
@@ -138,7 +139,7 @@ poller schm db plugs = do
                   o  <- fmap (fmap (liftKeys inf a)) <$> catchPluginException inf a pname (getPK inp)   (elemp (Just $ mapKey keyValue inp))
                   traverse (\o -> do
                     let diff =   join $ (\i j -> diffUpdateAttr   (unTB1 i ) (unTB1 j)) <$>  o <*> Just inp
-                    maybe (return Nothing )  (\i -> updateMod inf (unTB1 $ fromJust (o)) (unTB1 inp) (lookTable inf a )) diff ) o ) $ evb
+                    maybe (return Nothing )  (\i -> fmap (Just. TableModification Nothing  (lookTable inf a) . patchTB1 )$ transaction inf $ fullDiffEdit  inf (unTB1 $ fromJust (o)) (unTB1 inp) ) diff ) o ) $ evb
               (putMVar m . fmap (fmap unTB1)) .  (\(l,listRes) -> (l,foldl applyTable (fmap TB1 listRes) (fmap (PAtom .tableDiff) (catMaybes $ rights i)))) =<< currentValue (facts listResT)
               end <- getCurrentTime
               print ("END " <>T.unpack pname <> " - " <> show end ::String)
@@ -152,7 +153,7 @@ poller schm db plugs = do
                                     fmap (tblist . pure ) .  either (\r ->Just $   attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) )) (fmap (\r -> attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $  r))   ))) <$> i))
                       , attrT ("start_time",TB1 (STimestamp $ utcToLocalTime utc current))
                       , attrT ("end_time",LeftTB1 $ Just $ TB1 (STimestamp $ utcToLocalTime utc end))]
-              p <- insertMod (meta inf) (unTB1 $ liftKeys (meta inf) "polling_log" table) polling_log
+              p <- transaction inf $ fullDiffInsert  (meta inf) (unTB1 $ liftKeys (meta inf) "polling_log" table)
               traverse (putMVar plm . fmap (fmap unTB1) ). traverse (\l -> applyTable (fmap TB1 l) <$> (fmap (PAtom. tableDiff ) (p))) =<< currentValue (facts plt)
               execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and schema_name = ?" (end ,pname,schema)
               threadDelay (intervalms*10^3)

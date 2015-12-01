@@ -3,8 +3,13 @@ module PostgresQuery where
 import Types
 import Control.Monad
 import Utils
+import GHC.Stack
+import Schema
+import RuntimeTypes
 import Data.Bifunctor
 import Query
+import Control.Monad.Writer
+import System.Time.Extra
 import Patch
 import Debug.Trace
 import Data.Ord
@@ -13,7 +18,6 @@ import qualified  Data.Map as M
 
 import Postgresql
 import Data.Tuple
--- import Schema
 import Data.String
 
 import Control.Applicative
@@ -173,6 +177,83 @@ generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is
   where dir Asc = ">"
         dir Desc = "<"
 
+-- High level db operations
+
+insertMod :: InformationSchema ->  TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+insertMod inf j  = liftIO$ do
+  let patch = patchTB1 j
+      table = lookTable inf (_kvname (fst  j))
+  kvn <- insertPatch fromRecord (conn  inf) patch table
+  let mod =  TableModification Nothing table kvn
+  Just <$> logTableModification inf mod
+
+
+deleteMod :: InformationSchema ->  TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+deleteMod inf j@(meta,_) = liftIO$ do
+  let patch =  (tableMeta table, getPKM j,[])
+      table = lookTable inf (_kvname (fst  j))
+  deletePatch (conn inf)  patch table
+  Just <$> logTableModification inf (TableModification Nothing table patch)
+
+updateMod :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+updateMod inf kv old = liftIO$ do
+  let table = lookTable inf (_kvname (fst  old ))
+  patch <- updatePatch (conn  inf) kv  old  table
+  let mod =  TableModification Nothing table patch
+  Just <$> logTableModification inf mod
+
+selectAll
+  ::
+     InformationSchema
+     -> TableK Key
+     -> Maybe PageToken
+     -> Maybe Int
+     -> [(Key, Order)]
+     -> [(T.Text, Column Key Showable)]
+     -> TransactionM  (Int,
+           [(KVMetadata Key,
+             Compose
+               Identity (KV (Compose Identity (TB Identity))) Key Showable)])
+selectAll inf table i  j k st = do
+      let
+          unref (TableRef i) = i
+          tbf =  tableView (tableMap inf) table
+      liftIO $ print (tableName table,selectQuery tbf )
+      let m = unTB1 tbf
+      (t,v) <- liftIO$ duration  $ paginate (conn inf) m k 0 (maybe 20 id j) (fmap unref i) (nonEmpty st)
+      mapM_ (tellRefs inf  ) (snd v)
+      liftIO$ print (tableName table,t)
+      return v
+
+tellRefs  ::  InformationSchema ->TBData Key Showable ->  TransactionM ()
+tellRefs  inf (m,k) = mapM_ (tellRefsAttr . unTB ) $ F.toList  (_kvvalues $ unTB k)
+  where tellRefsAttr (FKT l k t) = void $ do
+            tell ((\m@(k,v) -> TableModification Nothing (lookTable inf (_kvname k)) . patchTB1 $ m) <$> F.toList t)
+            mapM_ (tellRefs inf) $ F.toList t
+        tellRefsAttr (Attr _ _ ) = return ()
+        tellRefsAttr (IT _ t ) = void $ mapM (tellRefs inf) $ F.toList t
+
+loadDelayed :: InformationSchema -> TBData Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
+loadDelayed inf t@(k,v) values@(ks,vs)
+  | S.null $ _kvdelayed k = return Nothing
+  | L.null delayedattrs  = return Nothing
+  | otherwise = do
+       let
+           whr = T.intercalate " AND " ((\i-> (keyValue i) <>  " = ?") <$> S.toList (_kvpk k) )
+           table = justError "no table" $ M.lookup (_kvpk k) (pkMap inf)
+           delayedTB1 =  (ks,) . _tb $ KV ( filteredAttrs)
+           delayed =  mapKey' (kOptional . ifDelayed . ifOptional) (mapValue' (const ()) delayedTB1)
+           str = "SELECT " <> explodeRecord (relabelT' runIdentity Unlabeled delayed) <> " FROM " <> showTable table <> " WHERE " <> whr
+       print str
+       is <- queryWith (fromRecord delayed) (conn inf) (fromString $ T.unpack str) (fmap unTB $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK' (tableNonRef' values))
+       case is of
+            [] -> errorWithStackTrace "empty query"
+            [i] ->return $ fmap (\(i,j,a) -> (i,getPKM (ks,vs),a)) $ difftable delayedTB1(mapKey' (kOptional.kDelayed.unKOptional) . mapFValue' (LeftTB1 . Just . DelayedTB1 .  unSOptional ) $ i  )
+            _ -> errorWithStackTrace "multiple result query"
+  where
+    delayedattrs = concat $ fmap (keyValue . (\(Inline i ) -> i)) .  F.toList <$> M.keys filteredAttrs
+    filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (_kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs)
 
 
 
+postgresOps = SchemaEditor updateMod insertMod deleteMod (\i j p g s o-> (\(l,i) -> (fmap TB1 i,Just $ TableRef  (filter (flip L.elem (fmap fst s) . fst ) $  getPK $ TB1 $ last i) ,l)) <$> selectAll i j p g s o ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))

@@ -54,7 +54,6 @@ import Data.Text (Text)
 import Types
 import Query
 import Postgresql
-import PostgresQuery
 import Data.Maybe
 import Prelude hiding (head)
 import Data.Time
@@ -460,9 +459,9 @@ processPanelTable inf attrsB res inscrud table oldItemsi = do
   -- Delete when isValid
          sink UI.enabled ( liftA2 (&&) (isJust . fmap tableNonRef <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip contains j) i  ) (facts oldItemsi ) res))
   let
-         crudEdi (Just (TB1 i)) (Just (TB1 j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $difftable i  g) $ transaction inf $ (editEd $ schemaOps inf) inf   i j
-         crudIns (Just (TB1 j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf ((insertEd $ schemaOps inf) inf j)
-         crudDel (Just (TB1 j))  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> (deleteEd $ schemaOps inf) inf j table
+         crudEdi (Just (TB1 i)) (Just (TB1 j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $difftable i  g) $ transaction inf $ fullDiffEdit  inf   i j
+         crudIns (Just (TB1 j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf (fullDiffInsert  inf j)
+         crudDel (Just (TB1 j))  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> transaction inf (( deleteEd $ schemaOps inf) inf j)
 
 
   (diffEdi,ediFin) <- mapEventFin id $ crudEdi <$> facts oldItemsi <*> attrsB <@ UI.click editB

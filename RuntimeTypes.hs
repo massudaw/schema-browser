@@ -98,9 +98,9 @@ data PageToken
 
 data SchemaEditor
   = SchemaEditor
-  { editEd  :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-  , insertEd :: InformationSchema -> TBData Key Showable -> TransactionM  (Maybe (TableModification (TBIdx Key Showable)))
-  , deleteEd :: InformationSchema -> TBData Key Showable -> Table -> IO (Maybe (TableModification (TBIdx Key Showable)))
+  { editEd  :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+  , insertEd :: InformationSchema -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+  , deleteEd :: InformationSchema -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
   , listEd :: InformationSchema -> Table -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> [(Text ,Column Key Showable)]-> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
   , updateEd :: InformationSchema -> Table -> TBData Key Showable -> Maybe PageToken -> Maybe Int -> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
   , getEd :: InformationSchema -> Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
