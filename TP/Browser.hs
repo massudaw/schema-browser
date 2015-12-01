@@ -129,7 +129,7 @@ poller schm db plugs = do
           then do
               execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and schema_name = ?" (current,pname,schema )
               print ("START " <>T.unpack pname  <> " - " <> show current ::String)
-              (m,listResT) <- transaction inf $ eventTable inf (lookTable inf a) Nothing Nothing []
+              ((m,listResT),_) <- transaction inf $ eventTable inf (lookTable inf a) Nothing Nothing [][]
               (l,listRes) <- currentValue (facts listResT)
               let evb = filter (\i -> tdInput i  && tdOutput1 i ) (fmap TB1 listRes)
                   tdInput i =  isJust  $ checkTable  (fst f) i
@@ -144,7 +144,7 @@ poller schm db plugs = do
               end <- getCurrentTime
               print ("END " <>T.unpack pname <> " - " <> show end ::String)
               let polling_log = lookTable (meta inf) "polling_log"
-              (plm,plt) <- transaction (meta inf) $ eventTable (meta inf) polling_log Nothing Nothing []
+              ((plm,plt),_) <- transaction (meta inf) $ eventTable (meta inf) polling_log Nothing Nothing [] []
               let table = tblist $
                       [ attrT ("poll_name",TB1 (SText pname))
                       , attrT ("schema_name",TB1 (SText schema))
@@ -321,7 +321,7 @@ viewerKey inf key = mdo
   let
       table = fromJust  $ M.lookup key $ pkMap inf
 
-  (tmvar,vpt)  <- liftIO $ transaction inf $ eventTable inf table (Just 0) (Just  20) []
+  ((tmvar,vpt),_)  <- liftIO $ transaction inf $ eventTable inf table (Just 0) (Just  20) [] []
   vp <- fmap (fmap TB1 ) <$> currentValue (facts vpt)
 
   let
@@ -342,13 +342,15 @@ viewerKey inf key = mdo
      tsort = sorting . filterOrd <$> triding sortList
      filtering res = (\t -> fmap (filter (filteringPred t )) )<$> filterInpT  <*> res
      pageSize = 20
-     lengthPage = (\((s,m),i) -> (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0 )
+     lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
+        where (s,m) =justError "no empty pages" $  M.lookup [] fixmap
+
   inisort <- currentValue (facts tsort)
   (offset,res3)<- mdo
     offset <- offsetField 0 (never ) (lengthPage <$> facts res3)
     res3 <- mapT0Event (fmap inisort vp) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ tidings res2 (fmap (fmap TB1) <$> rumors vpt) ) )
     return (offset, res3)
-  onEvent (rumors $ triding offset) $ (\i -> liftIO $ transaction inf $ eventTable  inf table  (Just i) (Just 20) [] )
+  onEvent (rumors $ triding offset) $ (\i -> liftIO $ transaction inf $ eventTable  inf table  (Just i) (Just 20) [] [])
   let
     paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )<$> triding offset
   page <- currentValue (facts paging)

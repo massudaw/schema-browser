@@ -13,6 +13,7 @@ module SchemaQuery
   )where
 
 import RuntimeTypes
+import Data.Ord
 import Data.Functor.Identity
 import Control.Monad.Writer
 import Control.Concurrent
@@ -57,17 +58,18 @@ selectAll
      -> Maybe PageToken
      -> Maybe Int
      -> [(Key, Order)]
+     -> [(T.Text, Column Key Showable)]
      -> TransactionM  (Int,
            [(KVMetadata Key,
              Compose
                Identity (KV (Compose Identity (TB Identity))) Key Showable)])
-selectAll inf table i  j k = do
+selectAll inf table i  j k st = do
       let
           unref (TableRef i) = i
           tbf =  tableView (tableMap inf) table
       liftIO $ print (tableName table,selectQuery tbf )
       let m = unTB1 tbf
-      (t,v) <- liftIO$ duration  $ paginate (conn inf) m k 0 (maybe 20 id j) (fmap unref i) Nothing
+      (t,v) <- liftIO$ duration  $ paginate (conn inf) m k 0 (maybe 20 id j) (fmap unref i) (nonEmpty st)
       mapM_ (tellRefs inf  ) (snd v)
       liftIO$ print (tableName table,t)
       return v
@@ -83,46 +85,60 @@ tellRefs  inf (m,k) = mapM_ (tellRefsAttr . unTB ) $ F.toList  (_kvvalues $ unTB
 
 estLength page size resL est = fromMaybe 0 page * fromMaybe 20 size  +  est
 
-eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Order)]
-    -> TransactionM DBVar
-eventTable inf table page size presort = do
+eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
+    -> TransactionM (DBVar,Collection Key Showable)
+eventTable inf table page size presort fixed = do
     let mvar = mvarMap inf
         defSort = fmap (,Desc) $ S.toList $ rawPK table
-        sort  = if L.null presort then defSort else presort
+        sortList  = if L.null presort then defSort else presort
+        fixidx = (L.sort $ snd <$> fixed )
+        filterfixed = filter (\(m,k)->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV k)
     -- print "Take MVar"
     mmap <- liftIO$ takeMVar mvar
     -- print "Look MVar"
-    (mtable,td) <- case (M.lookup (tableMeta table) mmap ) of
+    (mtable,td,ini) <- case (M.lookup (tableMeta table) mmap ) of
          Just (i,td) -> do
-           -- print "Put MVar"
-           ((sq,mp),reso) <- liftIO$ currentValue (facts td)
-           when (maybe False (\p->not $ M.member (p+1) mp) page  && sq >  L.length reso  && isJust (join $ flip M.lookup mp <$> page )) $ do
-             (res,nextToken ,s ) <- (listEd $ schemaOps inf ) inf table (join $ flip M.lookup mp <$> page ) size sort
-             liftIO$ putMVar i ((estLength page size res s  ,maybe mp (\v -> M.insert (fromMaybe 0 page +1 ) v  mp)  nextToken) ,reso <> (unTB1 <$> res))
            liftIO $ putMVar mvar mmap
-           return (i,td)
+           -- print "Put MVar"
+           (fixedmap ,reso) <- liftIO$ currentValue (facts td)
+           let (sq,mp)  = justError "" $ M.lookup fixidx  fixedmap
+
+           ini <- if (isJust (M.lookup fixidx  fixedmap )&& maybe False (\p->not $ M.member (p+1) mp) page  && sq >  L.length (filterfixed reso ) && isJust (join $ flip M.lookup mp <$> page ))
+             then  do
+               (res,nextToken ,s ) <- (listEd $ schemaOps inf ) inf table (join $ flip M.lookup mp <$> page ) size sortList fixed
+               let ini = (M.insert fixidx (estLength page size res s  ,maybe mp (\v -> M.insert (fromMaybe 0 page +1 ) v  mp)  nextToken) fixedmap ,reso <> (unTB1 <$> res))
+               liftIO$ putMVar i ini
+               return $ Just ini
+             else return Nothing
+           ini2 <- if (isNothing (M.lookup fixidx  fixedmap ))
+             then do
+               (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing size sortList fixed
+               let ini = (M.insert fixidx (estLength page size res s ,maybe M.empty (M.singleton (1 :: Int)) p) fixedmap ,L.nub  $ fmap unTB1 res <> reso)
+               liftIO $ putMVar i ini
+               return $ Just ini
+             else return Nothing
+             -- liftIO $ print (fst ini)
+           return (i,td,ini <> ini2)
          Nothing -> do
-           (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing size sort
+           (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing size sortList fixed
            -- liftIO $ print "New MVar"
-           let ini = ((estLength page size res s ,maybe M.empty (M.singleton 1) p) ,fmap unTB1 res)
+           let ini = (M.singleton fixidx (estLength page size res s ,maybe M.empty (M.singleton (1 :: Int)) p) ,fmap unTB1 res)
            mnew <- liftIO$ newMVar ini
            (e,h) <- liftIO $R.newEvent
            bh <- liftIO$ R.stepper ini  e
+           let td = (R.tidings bh e)
+           liftIO$ putMVar mvar (M.insert (tableMeta table) (mnew,td) mmap)
            liftIO$ forkIO $ forever $ do
               (h =<< takeMVar mnew ) -- >> print "Take MVar"
-           let td = (R.tidings bh e)
            -- Dont
            -- print "Put MVar"
-           liftIO$ if True -- (rawTableType table == ReadWrite)
-              then  putMVar mvar (M.insert (tableMeta table) (mnew,td) mmap)
-              else putMVar mvar  mmap
-
-           return (mnew,td)
-    return (mtable, td)
+           return (mnew,td,Just ini)
+    iniT <- fromMaybe (liftIO $ currentValue (facts td)) (return <$> ini)
+    return ((mtable, fmap filterfixed <$> td),iniT)
 
 
 
-postgresOps = SchemaEditor fullDiffEdit fullDiffInsert deleteMod (\i j p g s -> (\(l,i) -> (fmap TB1 i,Just $ TableRef  (getPK $ TB1 $ last i) ,l)) <$> selectAll i j p g s ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))
+postgresOps = SchemaEditor fullDiffEdit fullDiffInsert deleteMod (\i j p g s o-> (\(l,i) -> (fmap TB1 i,Just $ TableRef  (filter (flip L.elem (fmap fst s) . fst ) $  getPK $ TB1 $ last i) ,l)) <$> selectAll i j p g s o ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))
 
 fullInsert inf = Tra.traverse (fullInsert' inf )
 
@@ -130,7 +146,7 @@ fullInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData
 fullInsert' inf ((k1,v1) )  = do
    let proj = _kvvalues . unTB
    ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
-   (m,t) <- eventTable inf (lookTable inf (_kvname k1)) Nothing Nothing []
+   ((m,t),_) <- eventTable inf (lookTable inf (_kvname k1)) Nothing Nothing [] []
    (_,l) <- currentValue (facts t)
    if  isJust $ L.find ((==tbPK (tableNonRef (TB1  ret))). tbPK . tableNonRef . TB1  ) l
       then do
@@ -165,7 +181,7 @@ transaction inf log = {-withTransaction (conn inf) $-} do
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
   Tra.traverse (\(k,v) -> do
     -- print "GetTable"
-    (m,t) <- transaction inf $  eventTable inf k Nothing Nothing []
+    ((m,t),_) <- transaction inf $  eventTable inf k Nothing Nothing [] []
     -- print "ReadValue"
     (mp,l) <- currentValue (facts t)
     let lf = foldl' (\i p -> applyTable  i (PAtom p)) (fmap TB1 l) v
