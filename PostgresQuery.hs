@@ -105,7 +105,7 @@ updatePatch conn kv old  t =
 
 differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 
-paginate conn t order page off size k eqpred = do
+paginate conn t order off size k eqpred = do
     let (que,attr) = case k of
           (Just koldpre) ->
             let
@@ -120,8 +120,8 @@ paginate conn t order page off size k eqpred = do
     let quec = fromString $ T.unpack $ "SELECT *,count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
     print (quec,attr)
     v <- uncurry (queryWith (withCount (fromRecord (unTlabel' t)) ) conn) (quec,attr)
-    print (maybe 0 (\c->((page)*size)+ c - off ) $ safeHead ( fmap snd v :: [Int]))
-    return ((maybe 0 (\c->((page)*size)+ c - off ) $ safeHead ( fmap snd v :: [Int])), fmap fst v)
+    print (maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int]))
+    return ((maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])), fmap fst v)
   where pred = maybe "" (const " WHERE ") (fmap (fmap snd)   k <> fmap (concat . fmap  (fmap TB1 .F.toList . snd)) eqpred) <> T.intercalate " AND " (maybe [] (const $ pure $ generateComparison (first (justLabel t) <$> order)) k <> (maybe [] pure $ eqquery <$> eqpred))
         equality (pred,k) = inattr k <> pred <> "?"
         eqquery :: [(Text,TB Identity Key a)] -> Text

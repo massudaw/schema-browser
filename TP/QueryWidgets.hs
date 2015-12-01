@@ -184,8 +184,6 @@ indexPluginAttr  i  plugItens = pfks
 
 
 
-
-
 --- Style and Attribute Size
 --
 attrSize :: TB Identity Key b -> (Int,Int)

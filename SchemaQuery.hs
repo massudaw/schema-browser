@@ -50,16 +50,36 @@ deleteMod inf j@(meta,_) table = do
   deletePatch (conn inf)  patch table
   Just <$> logTableModification inf (TableModification Nothing table patch)
 
-selectAll inf table i  j k = liftIO $ do
+selectAll
+  ::
+     InformationSchema
+     -> TableK Key
+     -> Maybe PageToken
+     -> Maybe Int
+     -> [(Key, Order)]
+     -> TransactionM  (Int,
+           [(KVMetadata Key,
+             Compose
+               Identity (KV (Compose Identity (TB Identity))) Key Showable)])
+selectAll inf table i  j k = do
       let
           unref (TableRef i) = i
-          tb =  tableView (tableMap inf) table
-          tbf = tb -- forceDesc True (markDelayed True tb)
-      print (tableName table,selectQuery tbf )
+          tbf =  tableView (tableMap inf) table
+      liftIO $ print (tableName table,selectQuery tbf )
       let m = unTB1 tbf
-      (t,v) <- duration  $ paginate (conn inf) m k 0 0 (maybe 20 id j) (fmap unref i) Nothing
-      print (tableName table,t)
+      (t,v) <- liftIO$ duration  $ paginate (conn inf) m k 0 (maybe 20 id j) (fmap unref i) Nothing
+      mapM_ (tellRefs inf  ) (snd v)
+      liftIO$ print (tableName table,t)
       return v
+
+tellRefs  ::  InformationSchema ->TBData Key Showable ->  TransactionM ()
+tellRefs  inf (m,k) = mapM_ (tellRefsAttr . unTB ) $ F.toList  (_kvvalues $ unTB k)
+  where tellRefsAttr (FKT l k t) = void $ do
+            tell ((\m@(k,v) -> TableModification Nothing (lookTable inf (_kvname k)) . patchTB1 $ m) <$> F.toList t)
+            mapM_ (tellRefs inf) $ F.toList t
+        tellRefsAttr (Attr _ _ ) = return ()
+        tellRefsAttr (IT _ t ) = void $ mapM (tellRefs inf) $ F.toList t
+
 
 estLength page size resL est = fromMaybe 0 page * fromMaybe 20 size  +  est
 

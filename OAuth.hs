@@ -92,9 +92,7 @@ updateTable inf table reference page maxResults
 
 
 
-
-
-listTable inf table page maxResults _
+listTable inf table page maxResults sort
   | tableName table == "history" = return ([],Nothing , 0)
   | otherwise = do
     tok <- liftIO$ readIORef (snd $fromJust $ token inf)
