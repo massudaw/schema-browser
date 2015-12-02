@@ -344,6 +344,7 @@ renderEmail = StatefullPlugin "Render Email" "messages"
   [(([],[("message_viewer",Primitive $ RecordPrim ("gmail","mime"))])
     ,encodeMessage )]
 
+
 encodeMessage = PurePlugin "Encode Email" tname url
   where
     tname = "messages"
@@ -351,17 +352,24 @@ encodeMessage = PurePlugin "Encode Email" tname url
           enc <- liftA2 ((,))
                 (idxR "mimeType")
                 (atR "body"
-                    (join . traverse decoder' <$> (idxM "data")))  -< ()
+                    (proc t -> do
+                        d <- join . traverse decoder' <$> (idxM "data") -< ()
+                        m <- atR "attachmentId" (join . traverse decoder' <$> (idxM "data")) -< ()
+                        returnA -< d <> m
+                        ))  -< ()
           part <- atMA "parts"
                     (callI 0 messages) -< ()
           let mimeTable (TB1 (SText mime),v) next
                 | T.isInfixOf "text/plain" mime || T.isInfixOf "plain/text" mime =  Just $ tb "plain"
                 | T.isInfixOf "text/html" mime =  Just $ tb "html"
+                | T.isInfixOf "application/pdf" mime =  Just $ deltb "pdf"
                 | T.isInfixOf "application/pgp-signature" mime =  Just $ tb "plain"
                 | T.isInfixOf "multipart/alternative" mime =  last <$> (ifNull . catMaybes $ next)
                 | T.isInfixOf "multipart" mime =   Just  $ tbmix (catMaybes next)
                 | otherwise =Nothing
-                where tb n  =  tblist . pure . _tb . Attr n $ (LeftTB1 $  v)
+                where
+                      tb n  =  tblist . pure . _tb . Attr n $ (LeftTB1 $  v)
+                      deltb n  =  tblist . pure . _tb . Attr n $ (LeftTB1 $ Just $ DelayedTB1 $    v)
                       tbmix l = tblist . pure . _tb . IT (attrT  ("mixed",TB1 ()) ) . LeftTB1 $ ArrayTB1 <$>  (ifNull l )
           returnA -<  (maybe Nothing (flip mimeTable part )  $ (\(i,j) -> fmap (,j) i) enc)
     mixed =  nameO 1 (proc t ->  do
