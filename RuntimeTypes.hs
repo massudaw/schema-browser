@@ -26,7 +26,7 @@ data InformationSchema
   = InformationSchema
   { schemaName :: Text
   , username :: Text
-  , token :: Maybe (Text,IORef OAuth2Tokens)
+  , token :: Maybe (Text,R.Tidings OAuth2Tokens)
   , _keyMapL :: Map (Text,Text) Key
   , _pkMapL :: Map (Set Key) Table
   , _tableMapL :: Map Text Table

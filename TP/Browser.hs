@@ -13,6 +13,7 @@
 module Main (main) where
 
 import Query
+import Debug.Trace
 import Types
 import Data.Either
 import Step
@@ -30,7 +31,6 @@ import Control.Concurrent
 import Data.Functor.Apply
 import System.Environment
 import Network.Google.OAuth2 (OAuth2Tokens(..))
-import Data.IORef
 import Data.Ord
 import Control.Exception
 import Utils
@@ -108,8 +108,7 @@ main = do
 
   smvar <- newMVar M.empty
   e <- poller smvar (argsToState $ tail args)  plugList
-  tokenRef <- oauthpoller
-  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e smvar tokenRef $ tail args)
+  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup e smvar  (tail args))
   print "Finish"
 
 poller schm db plugs = do
@@ -139,7 +138,7 @@ poller schm db plugs = do
                   o  <- fmap (fmap (liftKeys inf a)) <$> catchPluginException inf a pname (getPK inp)   (elemp (Just $ mapKey keyValue inp))
                   traverse (\o -> do
                     let diff =   join $ (\i j -> diffUpdateAttr   (unTB1 i ) (unTB1 j)) <$>  o <*> Just inp
-                    maybe (return Nothing )  (\i -> fmap (Just. TableModification Nothing  (lookTable inf a) . patchTB1 )$ transaction inf $ fullDiffEdit  inf (unTB1 $ fromJust (o)) (unTB1 inp) ) diff ) o ) $ evb
+                    maybe (return Nothing )  (\i -> transaction inf ${-fmap (Just. TableModification Nothing  (lookTable inf a) . patchTB1 )$-} (editEd $ schemaOps inf) inf (unTB1 $ justError "no test" (o)) (unTB1 inp) ) diff ) o ) $ evb
               (putMVar m . fmap (fmap unTB1)) .  (\(l,listRes) -> (l,foldl applyTable (fmap TB1 listRes) (fmap (PAtom .tableDiff) (catMaybes $ rights i)))) =<< currentValue (facts listResT)
               end <- getCurrentTime
               print ("END " <>T.unpack pname <> " - " <> show end ::String)
@@ -164,10 +163,10 @@ poller schm db plugs = do
   mapM poll  $ (catMaybes $ fmap (traverseOf _3  (\n -> L.find ((==n ). _name ) plugList)) enabled )
 
 setup
-     :: [(Text,Event [TableModification (TBIdx Key Showable)])] ->  MVar (M.Map Text  InformationSchema) ->  IORef OAuth2Tokens -> [String] -> Window -> UI ()
-setup e smvar tokenRef args w = void $ do
+     :: [(Text,Event [TableModification (TBIdx Key Showable)])] ->  MVar (M.Map Text  InformationSchema) ->  [String] -> Window -> UI ()
+setup e smvar args w = void $ do
   let bstate = argsToState args
-  (evDB,chooserItens) <- databaseChooser smvar tokenRef bstate
+  (evDB,chooserItens) <- databaseChooser smvar bstate
   body <- UI.div
   be <- stepper [] (unions $ fmap snd e)
   return w # set title (host bstate <> " - " <>  dbn bstate)
@@ -234,7 +233,7 @@ instance Eq Connection where
 form :: Tidings a -> Event b -> Tidings a
 form td ev =  tidings (facts td ) (facts td <@ ev )
 
-databaseChooser smvar tokenRef sargs = do
+databaseChooser smvar sargs = do
   dbs <- liftIO $ listDBS  sargs
   let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,) . (,T.pack s) . fst $ snd $ dbs ) $ ( schema sargs)
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
@@ -253,7 +252,15 @@ databaseChooser smvar tokenRef sargs = do
         execute_ conn "set bytea_output='hex'"
         let call = if  reset then keyTablesInit else keyTables
         case schemaN of
-          "gmail" ->  call smvar dbConn conn (schemaN,T.pack $ user ) (Just ("me",tokenRef)) gmailOps
+          "gmail" ->  do
+              metainf <- keyTables smvar dbConn conn ("metadata",T.pack $ user ) Nothing postgresOps
+              ((_,tb),_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []  [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  "wesley.massuda@gmail.com"))]
+              let
+                  td :: Tidings OAuth2Tokens
+                  td = fmap (\o -> justError "" . fmap (toOAuth . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $   head $ snd $ o )) tb
+                  toOAuth v = tokenToOAuth (b,d,a,c)
+                    where [a,b,c,d] = fmap TB1 $ F.toList $ snd $ unTB1 v :: [FTB Showable]
+              call smvar dbConn conn (schemaN,T.pack $ user ) (Just ("me",td )) gmailOps
           i -> call smvar dbConn conn (schemaN,T.pack user) Nothing postgresOps
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   chooserT <-  mapTEvent (traverse genSchema) formLogin
@@ -319,7 +326,7 @@ viewerKey
       InformationSchema -> S.Set Key -> UI Element
 viewerKey inf key = mdo
   let
-      table = fromJust  $ M.lookup key $ pkMap inf
+      table = justError "no key" $ M.lookup key $ pkMap inf
 
   ((tmvar,vpt),vp)  <- fmap (fmap (fmap TB1) ) <$> (liftIO $ transaction inf $ eventTable inf table (Just 0) (Just  20) [] [])
 

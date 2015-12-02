@@ -1,6 +1,8 @@
-{-# LANGUAGE TupleSections,OverloadedStrings #-}
-module OAuth where
+{-# LANGUAGE Arrows ,TupleSections,OverloadedStrings #-}
+module OAuth (gmailOps,tokenToOAuth,oauthToToken,oauthpoller) where
 import Control.Lens
+import Control.Arrow
+import Step
 import System.Info (os)
 import Network.Wreq
 import System.Process (rawSystem)
@@ -36,49 +38,52 @@ import RuntimeTypes
 import qualified Data.Map as M
 import Debug.Trace
 import Data.List (find,intercalate)
+import qualified Reactive.Threepenny as R
 
 --
 file   = "./tokens.txt"
 --
-
 gmailScope = "https://www.googleapis.com/auth/gmail.modify"
 
-oauthpoller = do
-  Just cid <- lookupEnv "CLIENT_ID"
-  Just secret <- lookupEnv "CLIENT_SECRET"
-  let client = OAuth2Client { clientId = cid, clientSecret = secret }
-      permissionUrl = formUrl client [gmailScope]
-  b <- doesFileExist file
-  unless b $ do
-      putStrLn$ "Load this URL: "++show permissionUrl
-      case os of
-        "linux"  -> rawSystem "chromium" [permissionUrl]
-        "darwin" -> rawSystem "open"       [permissionUrl]
-        _        -> return ExitSuccess
-      putStrLn "Please paste the verification code: "
-      authcode <- getLine
-      tokens   <- exchangeCode client authcode
-      putStrLn $ "Received access token: " ++ show (accessToken tokens)
-      tokens2  <- refreshTokens client tokens
-      putStrLn $ "As a test, refreshed token: " ++ show (accessToken tokens2)
-      writeFile file (show tokens2)
-  accessTok <- fmap read (readFile file)
-  tokenRef <- newIORef accessTok
-  forkIO $ forever $ do
-    tokens <- readIORef tokenRef
-    putStrLn $ "Try refresh token" <> show (accessToken tokens)
-    tokens2 <- refreshTokens client  tokens
-    putStrLn $ "Refreshed token" <> show (accessToken tokens2)
-    writeFile file (show tokens2)
-    writeIORef tokenRef tokens2
-    threadDelay (1000*1000*60*10)
-  return tokenRef
+
+tokenToOAuth (TB1 (SText t), TB1 (SText r) , TB1 (SDouble i) , TB1 (SText k)) = OAuth2Tokens  (T.unpack t) (T.unpack r) (realToFrac i)  (T.unpack k)
+oauthToToken (OAuth2Tokens  t r i  k)
+  = tblist $ attrT . fmap (LeftTB1 .Just )<$> [("accesstoken",TB1 (SText $ T.pack t)), ("refreshtoken",TB1 $ SText $ T.pack r) , ("expiresin",TB1 (SDouble $realToFrac i)) , ("tokentype",TB1 (SText $ T.pack k))]
+
+liftA4 f  i j k  l= f <$> i <*> j <*> k <*> l
+
+oauthpoller = BoundedPlugin2 "Gmail Login" "google_auth" url
+  where
+    url :: ArrowReader
+    url = proc t -> do
+       user <- idxK "username" -< ()
+       token <- atR "token" (liftA4 (,,,) <$> idxM "accesstoken" <*> idxM "refreshtoken" <*> idxM "expiresin" <*> idxM "tokentype" ) -< ()
+       v <- act (\i -> liftIO$ do
+          Just cid <- lookupEnv "CLIENT_ID"
+          Just secret <- lookupEnv "CLIENT_SECRET"
+          let client = OAuth2Client { clientId = cid, clientSecret = secret }
+              permissionUrl = formUrl client [gmailScope]
+          maybe (do
+              putStrLn$ "Load this URL: "++show permissionUrl
+              case os of
+                "linux"  -> rawSystem "chromium" [permissionUrl]
+                "darwin" -> rawSystem "open"       [permissionUrl]
+                _        -> return ExitSuccess
+              putStrLn "Please paste the verification code: "
+              authcode <- getLine
+              tokens   <- exchangeCode client authcode
+              putStrLn $ "Received access token: " ++ show (accessToken tokens)
+              return tokens) (refreshTokens client) i
+          ) -< tokenToOAuth <$> token
+       token <- atR "token" ((,,,) <$> odxR "accesstoken" <*> odxR "refreshtoken" <*> odxR "expiresin" <*> odxR "tokentype" ) -< ()
+       odxR "refresh" -< ()
+       returnA -< Just . tblist . pure . _tb $ IT (attrT ("token" , LeftTB1 $ Just $ TB1 ())) (LeftTB1 $  oauthToToken <$> Just v )
 
 
 updateTable inf table reference page maxResults
   | tableName table == "history" = do
-    tok <- liftIO$ readIORef (snd $fromJust $ token inf)
-    let user = fst $ fromJust $ token inf
+    tok <- liftIO$ R.currentValue $ R.facts (snd $justError "no token"$ token inf)
+    let user = fst $ justError "no token"$ token inf
     decoded <- liftIO $ do
         let req =  "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?" <> "startHistoryId=" <> intercalate "," ( renderShowable . snd <$> getPK (TB1 reference) ) <> "&"<> maybe "" (\(NextToken s) ->  T.unpack s <> "pageToken=" <> T.unpack s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok )
         print  req
@@ -95,8 +100,8 @@ updateTable inf table reference page maxResults
 listTable inf table page maxResults sort ix
   | tableName table == "history" = return ([],Nothing , 0)
   | otherwise = do
-    tok <- liftIO$ readIORef (snd $fromJust $ token inf)
-    let user = fst $ fromJust $ token inf
+    tok <- liftIO$ R.currentValue $ R.facts (snd $ justError "no token" $ token $  inf)
+    let user = fst $ justError "no token" $ token inf
     decoded <- liftIO $ do
         let req =  "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok )
         print  req
@@ -114,13 +119,13 @@ insertTable inf pk
     let
         attrs :: [(Key, FTB Showable)]
         attrs = filter (any (==FWrite) . keyModifier .fst ) $ getAttr' (TB1 pk)
-    tok <- liftIO $readIORef (snd $ fromJust $ token inf)
-    let user = fst $ fromJust $ token inf
+    tok <- liftIO $R.currentValue $ R.facts (snd $ justError "no token" $ token inf)
+    let user = fst $ justError "no token" $ token inf
         table = lookTable inf (_kvname (fst pk))
     decoded <- liftIO $ do
         let req = "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (_kvname (fst pk ) ) <>  "?access_token=" ++ ( accessToken tok)
         (t,v) <- duration
-            (postHeaderJSON [("GData-Version","3.0")] req (traceShowId $ toJSON $ M.fromList $ fmap (\(a,b) -> (keyValue a , renderShowable b)) $ attrs ) )
+            (postHeaderJSON [("GData-Version","3.0")] req (toJSON $ M.fromList $ fmap (\(a,b) -> (keyValue a , renderShowable b)) $ attrs ) )
         print ("insert",getPK (TB1 pk),t)
         return $ decode v
     fmap (TableModification Nothing table . patchTB1 .unTB1) <$> (traverse (convertAttrs inf (tableMap inf) table ) .  fmap (\i -> (i :: Value)  ) $  decoded)
@@ -130,7 +135,7 @@ getTable inf  tb pk
   | tableName tb == "history" = return  Nothing
   | S.fromList (fmap _relOrigin (getKeyAttr pk) ) ==  S.fromList (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb) = return Nothing
   | otherwise = do
-    tok <- liftIO $readIORef (snd $ fromJust $ token inf)
+    tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
     let user = fst $ fromJust $ token inf
     decoded <- liftIO $ do
         let req = "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName tb ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK pk ) <> "?access_token=" ++ ( accessToken tok)

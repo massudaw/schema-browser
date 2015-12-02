@@ -18,6 +18,7 @@ import CnpjReceita
 import OFX
 import Crea
 import PandocRenderer
+import OAuth
 
 import Types
 import Step
@@ -517,4 +518,4 @@ queryArtAndamento = BoundedPlugin2 pname tname url
 -}
 
 plugList :: [Plugins]
-plugList = [createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]
+plugList = [oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]

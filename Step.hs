@@ -102,6 +102,8 @@ unLeftTB1 = join . fmap (\v -> case v of
                (LeftTB1 i ) -> i
                i@(TB1 _ ) -> Just i)
 
+
+
 atR i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> local (unLeftTB1 . indexTB1 ind) (j i )  ))
   where ind = splitIndex True i
 

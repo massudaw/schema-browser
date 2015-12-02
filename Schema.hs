@@ -96,7 +96,7 @@ readFModifier "read" = FRead
 readFModifier "edit" = FPatch
 readFModifier "write" = FWrite
 
-keyTables ,keyTablesInit :: MVar (Map Text InformationSchema )->  Connection -> Connection -> (Text ,Text)-> Maybe (Text,IORef OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
+keyTables ,keyTablesInit :: MVar (Map Text InformationSchema )->  Connection -> Connection -> (Text ,Text)-> Maybe (Text,R.Tidings OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
 keyTables schemaVar conn userconn (schema ,user) oauth ops = maybe (keyTablesInit schemaVar conn userconn (schema,user) oauth ops) return  . (M.lookup schema ) =<< readMVar schemaVar
 
 keyTablesInit schemaVar conn userconn (schema,user) oauth ops = do
