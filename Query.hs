@@ -303,14 +303,14 @@ isPathReflexive (RecJoin _ i ) = isPathReflexive i
 allRec'
   :: Map Text Table
      -> Table
-     -> TB1 ()
-allRec' i t = unTlabel $ tableView  i t
+     -> TBData Key ()
+allRec' i t = unTlabel' $ tableView  i t
 
 tableView  invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   when (S.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r ) <> " the pk is null")
   (t,ks) <- labelTable r
   tb <- recurseTB invSchema (rawFKS r) False [] ks
-  return  $ TB1 tb
+  return  $ tb
 
 tableViewNR invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   when (S.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r )<> " the pk is null")
@@ -323,7 +323,7 @@ rootPaths' invSchema r = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,
   when (S.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r )<> " the pk is null")
   (t,ks) <- labelTable r
   tb <- recurseTB invSchema (rawFKS r ) False [] ks
-  return ( TB1 tb , selectQuery $ TB1 tb )
+  return ( TB1 tb , selectQuery $ tb )
 
 
 allAttr i =  all allAttr' $ F.toList i
@@ -452,10 +452,11 @@ expandFKMutRecursive t=
 
 tlabel t = (label $ getCompose $ snd (unTB1 t))
 
-selectQuery t = if L.null (snd withDecl )
+selectQuery r = if L.null (snd withDecl )
     then fst withDecl
     else "WITH RECURSIVE " <> T.intercalate "," ( snd withDecl ) <> fst withDecl
   where withDecl = runWriter tableQuery
+        t = TB1 r
         tableQuery = do
             tname <- expandTable t
             tquery <- if isTableRec t || isFilled (getInlineRec t) then return "" else expandQuery False t

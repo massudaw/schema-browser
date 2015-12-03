@@ -802,20 +802,20 @@ tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) 
         paths' = (\i -> if L.null i then [] else [MutRec i]) $ fmap ((head .unMutRec). fmap (fmap F.toList). pathRelRel' ) same
 
 
-tbmap :: Ord k => Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
-tbmap = TB1 . (kvempty,) . Compose . Identity . KV
+tbmap :: Ord k => Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TBData k a
+tbmap = (kvempty,) . Compose . Identity . KV
 
-tbmapPK :: Ord k => Set k -> Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TB3 Identity k a
-tbmapPK pk = TB1 . (kvempty,) . Compose . Identity . KV
+tbmapPK :: Ord k => Set k -> Map (Set (Rel k) ) (Compose Identity  (TB Identity) k a) -> TBData k a
+tbmapPK pk = (kvempty,) . Compose . Identity . KV
 
-tblist :: Ord k => [Compose Identity  (TB Identity) k a] -> TB3 Identity k a
+tblist :: Ord k => [Compose Identity  (TB Identity) k a] -> TBData k a
 tblist = tbmap . mapFromTBList
 
-tblistPK :: Ord k => Set k -> [Compose Identity  (TB Identity) k a] -> TB3 Identity k a
+tblistPK :: Ord k => Set k -> [Compose Identity  (TB Identity) k a] -> TBData k a
 tblistPK s = tbmapPK s . mapFromTBList
 
-tblist' :: Ord k => TableK k -> [Compose Identity  (TB Identity) k a] -> TB3 Identity k a
-tblist' t  = TB1 . (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
+tblist' :: Ord k => TableK k -> [Compose Identity  (TB Identity) k a] -> TBData k a
+tblist' t  = (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 
 reclist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TBData Key a
 reclist' t  = (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
@@ -847,6 +847,7 @@ keyAttr i = errorWithStackTrace $ "cant find keyattr " <> (show i)
 unAttr (Attr _ i) = i
 unAttr i = errorWithStackTrace $ "cant find attr" <> (show i)
 
+srange l m = IntervalTB1 $ Interval.interval (Interval.Finite l,True) (Interval.Finite m ,True)
 
 intersectPred p@(Primitive _) op  (KInterval i) j (IntervalTB1 l )  | p == i =  Interval.member j l
 intersectPred p@(KInterval j) "<@" (KInterval i) (IntervalTB1 k)  (IntervalTB1  l)  =  Interval.isSubsetOf k  l

@@ -38,7 +38,7 @@ import qualified Data.Text as T
 --  MultiTransaction Postgresql insertOperation
 --
 
-estLength page size resL est = fromMaybe 0 page * fromMaybe 20 size  +  est
+estLength page size resL est = fromMaybe 0 page * fromMaybe 200 size  +  est
 
 eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
     -> TransactionM (DBVar,Collection Key Showable)

@@ -36,6 +36,7 @@ data InformationSchema
   , rootconn :: Connection
   , metaschema :: Maybe InformationSchema
   , schemaOps :: SchemaEditor
+  , plugins :: [Plugins ]
   }
 
 
@@ -117,7 +118,7 @@ data Access a
   | Many [Access a]
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
 
-type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TB2 Text Showable)) IO)) (Access Text) () (Maybe (TB2  Text Showable))
-type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TB2 Text Showable)) m )) (Access Text) () (Maybe (TB2  Text Showable))
+type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) IO)) (Access Text) () (Maybe (TBData  Text Showable))
+type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Access Text) () (Maybe (TBData  Text Showable))
 
 makeLenses ''InformationSchema

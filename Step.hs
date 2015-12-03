@@ -63,7 +63,7 @@ just i Nothing = i
 just  Nothing i  = i
 
 
-atAny k ps = P (nest fsum,nest ssum ) (Kleisli (\i -> local (indexTB1 ind)$foldr1 (liftA2 just)  (fmap ($i) asum)))
+atAny k ps = P (nest fsum,nest ssum ) (Kleisli (\i -> local (fmap unTB1 . indexTB1 ind)$foldr1 (liftA2 just)  (fmap ($i) asum)))
   where
     nest [] = Many []
     nest ls = Many [Nested ind $ ISum ls]
@@ -80,22 +80,22 @@ nest ind (ISum i) = Many . pure . Nested ind $ ISum i
 nest ind (Rec ix i) = Many . pure . Nested ind $(Rec ix i)
 
 atMA
-  :: (KeyString t2,
-      MonadReader (Maybe (FTB1 Identity t2 Showable)) m, Ord t2) =>
+  :: (KeyString t2, Show t2,
+      MonadReader (Maybe (TBData t2 Showable)) m, Ord t2) =>
      String
      -> Parser (Kleisli m) (Access Text) t t1
      -> Parser (Kleisli m) (Access Text) t [t1]
-atMA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
+atMA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> unTB1 <$> l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
   where ind = splitIndex False i
 
 
 atRA
-  :: (KeyString t2,
-      MonadReader (Maybe (FTB1 Identity t2 Showable)) m, Ord t2) =>
+  :: (KeyString t2, Show t2,
+      MonadReader (Maybe (TBData t2 Showable)) m, Ord t2) =>
      String
      -> Parser (Kleisli m) (Access Text) t t1
      -> Parser (Kleisli m) (Access Text) t [t1]
-atRA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
+atRA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> unTB1 <$> l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
   where ind = splitIndex True i
 
 unLeftTB1 = join . fmap (\v -> case v of
@@ -103,10 +103,10 @@ unLeftTB1 = join . fmap (\v -> case v of
                i@(TB1 _ ) -> Just i)
 
 
-atM i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> local (unLeftTB1 . indexTB1 ind) (j i )  ))
+atM i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> local (fmap unTB1 . unLeftTB1 . indexTB1 ind) (j i )  ))
   where ind = splitIndex True i
 
-atR i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> local (unLeftTB1 . indexTB1 ind) (j i )  ))
+atR i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> local (fmap unTB1 . unLeftTB1 . indexTB1 ind) (j i )  ))
   where ind = splitIndex True i
 
 
@@ -157,7 +157,7 @@ indexTableInter b l =
 
 logTableInter
   :: (Ord k ,Show k ,KeyString k ,Arrow a) =>
-      Bool -> String -> Parser  a AccessTag (Maybe (TB2 k   Showable)) (Maybe (k, FTB Showable))
+      Bool -> String -> Parser  a AccessTag (Maybe (TBData k   Showable)) (Maybe (k, FTB Showable))
 logTableInter b l =
   let ll = splitIndex b l
    in  P (Many [] ,Many [ll]) (arr (join . fmap (indexTable ll)))
@@ -165,7 +165,7 @@ logTableInter b l =
 
 indexTB1 (IProd _ l) t
   = do
-    (TB1  (m,v)) <- t
+    (m,v) <- t
     i <-   M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin))$ _kvvalues $ unTB v
     case runIdentity $ getCompose $i  of
          Attr _ l -> Nothing
@@ -192,8 +192,8 @@ checkField' :: Access Text -> Column Key Showable -> Errors [Access Text] (Colum
 checkField' p@(Point ix) _ = failure [p]
 checkField' n@(Nested ix@(IProd b l) nt ) t
   = case t of
-         IT l i -> IT l  <$> checkTable' nt i
-         FKT a  c d -> FKT a  c <$>  checkTable' nt d
+         IT l i -> IT l  <$> checkFTB  nt i
+         FKT a  c d -> FKT a  c <$>  checkFTB nt d
          Attr k v -> failure [n]
 checkField'  p@(IProd b l) i
   = case i  of
@@ -204,84 +204,44 @@ checkField'  p@(IProd b l) i
 
 checkField' i j = errorWithStackTrace (show (i,j))
 
-checkTable' :: Access Text -> TB2 Key Showable -> Errors [Access Text] (TB2 Key Showable)
-checkTable' l (ArrayTB1 i )
+checkFTB l (ArrayTB1 i )
   | i == []  = failure [l]
-  | otherwise =   ArrayTB1 <$> traverse (checkTable' l) i
+  | otherwise =   ArrayTB1 <$> traverse (checkFTB  l) i
 
-checkTable' l (LeftTB1 j) = LeftTB1 <$> traverse (checkTable' l) j
-checkTable' l (DelayedTB1 j) = DelayedTB1 <$> traverse (checkTable' l) j
-checkTable' (Rec ix i) t = checkTable' (replace ix i i ) t
-checkTable' (Many [m@(Many l)]) t = checkTable' m t
-checkTable' (Many [m@(Rec _ _ )]) t = checkTable' m t
+checkFTB l (LeftTB1 j) = LeftTB1 <$> traverse (checkFTB  l) j
+checkFTB  l (DelayedTB1 j) = DelayedTB1 <$> traverse (checkFTB l) j
+checkFTB  (Rec ix i) t = checkFTB  (replace ix i i ) t
+checkFTB  (Many [m@(Many l)]) t = checkFTB  m t
+checkFTB  (Many [m@(Rec _ _ )]) t = checkFTB  m t
 
-checkTable' (Many l) t@(TB1 (m,v)) =
-  (TB1 . (m,) . _tb . KV . mapFromTBList ) <$> T.traverse (\k -> maybe (failure [k]) (fmap _tb. checkField' k ). indexField  k $ (m,v)) l
-checkTable'  (ISum []) t@(TB1 v)
+checkFTB f (TB1 k) = TB1 <$> checkTable' f k
+
+checkTable' :: Access Text -> TBData Key Showable -> Errors [Access Text] (TBData Key Showable)
+checkTable'  (ISum []) v
   = failure [ISum []]
-checkTable'  f@(ISum ls) t@(TB1 (m,v) )
+checkTable'  f@(ISum ls) (m,v)
   = fmap (tblist . pure . _tb) $ maybe (failure [f]) id  $ listToMaybe . catMaybes $  fmap (\(Many [l]) ->  fmap (checkField' l) . join . fmap ( traFAttr  unRSOptional') $ indexField l $ (m,v)) ls
+checkTable' (Many l) (m,v) =
+  ( (m,) . _tb . KV . mapFromTBList ) <$> T.traverse (\k -> maybe (failure [k]) (fmap _tb. checkField' k ). indexField  k $ (m,v)) l
+
 
 checkTable l b = eitherToMaybe $ runErrors (checkTable' l b)
 
 
-{-
-checkField :: Access Text -> TB2 Key Showable -> Maybe (Column Key Showable)
-checkField (Point ix) t = Nothing
-checkField (Nested (IProd b l) nt ) t@(TB1 (m,v))
-  = do
-    let
-    i <- findAttr l v
-    case runIdentity $ getCompose $ i  of
-         IT l  i -> (IT l  <$> checkTable nt i)
-         FKT a   c  d -> (FKT a  c <$>  checkTable nt d)
-         Attr k v -> Nothing
-checkField  (IProd b l) t@(TB1 (m,v))
-  = do
-    let
-    i <-  findAttr l v
-    case runIdentity $ getCompose $ i  of
-         Attr k v -> fmap (Attr k ) . (\i -> if b then  unRSOptional' i else Just i ) $ v
-         i -> errorWithStackTrace ( show (b,l,i))
-checkField  (ISum []) t@(TB1 v)
-  = Nothing
-checkField  (ISum ls) t@(TB1 (m,v) )
-  = foldr1 just $  fmap (\(Many [l]) ->  join $ fmap (( traFAttr  unRSOptional')) $  checkField l t) ls
-checkField i j = errorWithStackTrace (show (i,j))
-
-
-
-checkTable :: Access Text -> TB2 Key Showable -> Maybe (TB2 Key Showable)
-checkTable l (ArrayTB1 i )
-  | i == []  = Nothing
-  | otherwise =   fmap ArrayTB1 $ allMaybes $ checkTable l <$> i
-checkTable l (LeftTB1 j) = Just $ LeftTB1 $ join $ fmap (checkTable l) j
-checkTable l (DelayedTB1 j) = Just $ DelayedTB1 $ join $ fmap (checkTable l) j
-checkTable (Rec ix i) t = checkTable (replace ix i i ) t
-checkTable (Many [m@(Many l)]) t = checkTable m t
-checkTable (Many [m@(Rec _ _ )]) t = checkTable m t
-checkTable (Many l) t@(TB1 (m,v)) =
-  fmap (TB1 . (m,) . _tb . KV . mapFromTBList ) . allMaybes $ fmap _tb. flip checkField t <$> l
-
-
-checkTable (ISum []) t@(TB1  v)
-  = Nothing
-checkTable (ISum ls) t@(TB1 (m,v) )
-  = fmap  (TB1 . (m,) . Compose . Identity . KV . mapFromTBList) . (\i -> if L.null i then Nothing else Just i) . catMaybes $ fmap (\(Many [l]) ->  join $ fmap (traComp (traFAttr unRSOptional')) $ fmap _tb $    checkField l t) ls
-
-checkTable i j = errorWithStackTrace (show ("checkTable" , i,j))
--}
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
-indexTable l (LeftTB1 j) = join $ fmap (indexTable l) j
-indexTable (IProd _ l) t@(TB1 (m,v))
+--
+indexFTB l (LeftTB1 j) = join $ fmap (indexFTB l) j
+indexFTB l (ArrayTB1 j) =  liftA2 (,) ((head <$> fmap (fmap fst) i) ) ( (\i -> ArrayTB1   i ) <$> fmap (fmap snd) i)
+       where i =   T.traverse  (indexFTB l) j
+indexFTB l (TB1 i) = indexTable l i
+indexFTB i j = errorWithStackTrace (show (i,j))
+
+indexTable (IProd _ l) t@(m,v)
   = do
     let finder = L.find (L.any (==l). L.permutations .fmap _relOrigin. keyattr. firstCI keyString )
     i <- finder (toList $ _kvvalues $ unTB v )
     case runIdentity $ getCompose $ i  of
          Attr k l -> return (k,l)
-indexTable l (ArrayTB1 j) =  liftA2 (,) ((head <$> fmap (fmap fst) i) ) ( (\i -> ArrayTB1   i ) <$> fmap (fmap snd) i)
-       where i =   T.traverse  (indexTable l) j
-indexTable i j = errorWithStackTrace (show (i,j))
 
 hasProd :: (Access Text -> Bool) -> Access Text ->  Bool
 hasProd p (Many i) = any p i

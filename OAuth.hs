@@ -48,7 +48,7 @@ gmailScope = "https://www.googleapis.com/auth/gmail.modify"
 
 tokenToOAuth (TB1 (SText t), TB1 (SText r) , TB1 (SDouble i) , TB1 (SText k)) = OAuth2Tokens  (T.unpack t) (T.unpack r) (realToFrac i)  (T.unpack k)
 oauthToToken (OAuth2Tokens  t r i  k)
-  = tblist $ attrT . fmap (LeftTB1 .Just )<$> [("accesstoken",TB1 (SText $ T.pack t)), ("refreshtoken",TB1 $ SText $ T.pack r) , ("expiresin",TB1 (SDouble $realToFrac i)) , ("tokentype",TB1 (SText $ T.pack k))]
+  = TB1 $ tblist $ attrT . fmap (LeftTB1 .Just )<$> [("accesstoken",TB1 (SText $ T.pack t)), ("refreshtoken",TB1 $ SText $ T.pack r) , ("expiresin",TB1 (SDouble $realToFrac i)) , ("tokentype",TB1 (SText $ T.pack k))]
 
 liftA4 f  i j k  l= f <$> i <*> j <*> k <*> l
 
@@ -175,7 +175,7 @@ lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
 lbackRef (TB1 t) = snd $ Types.head $ getPK  (TB1 t)
 
 convertAttrs :: InformationSchema -> Maybe (Table,TBData Key Showable) -> M.Map Text Table ->  Table -> Value -> TransactionM (TB2 Key Showable)
-convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb ))
+convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb ))
   where
     pathOrigin (Path i _ _ ) = i
     isFKJoinTable (Path _ (FKJoinTable _ _ _) _) = True
@@ -212,8 +212,7 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
                             tell (TableModification Nothing (lookTable infsch trefname) <$> maybeToList pti)
                             return $ maybe (reftb) (unTB1 . applyTB1 (TB1 reftb) . PAtom) pti) reftb ) getref
                         liftIO$ print patch
-                        --let res = maybe reftb (applyTB1 reftb ) (fmap PAtom patch)
-                        return . FKT ref fk . traceShowId $ patch ))-- (joinRelT fk  (fmap unTB ref) (lookTable infsch trefname) tbs )))
+                        return $ FKT ref fk   patch ))
                funL = funO  True (mapKType $ exchange trefname $ keyType k) vk
                funR = funO  True (mapKType $ keyType k) vk
                mergeFun = do

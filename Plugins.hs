@@ -70,7 +70,7 @@ siapi2Plugin = BoundedPlugin2  pname tname url
       b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else liftIO (siapi2  i j >> error "siapi2 test error")  )) -<  (liftA2 (,) protocolo ano )
       let ao bv  = Just $ tblist   [iat bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
-          convertAndamento [da,des] =  tblist $ fmap attrT  $  ([("andamento_date",TB1 . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))])
+          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))])
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
                             (attrT ("andamentos",TB1 ()))
@@ -161,7 +161,7 @@ cnpjForm = BoundedPlugin2 pname tname url
       html :: Maybe [(String,String)] <- act (\(TB1 (SSession sess),TB1 (SText cap),TB1 (SText cnpj))  -> fmap join $ lift  (getCnpjForm sess (BS.pack $ T.unpack cap) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,cnpj)
 
       arrowS -< ()
-      returnA -<   join $ convertHtml . (M.fromListWith (++) . fmap (fmap pure )) <$> html
+      returnA -<   join $ fmap unTB1 . convertHtml . (M.fromListWith (++) . fmap (fmap pure )) <$> html
     arrowS = proc t -> do
               odxR "owner_name" -< t
               atR "atividades_secundarias" cnae -< t
@@ -224,7 +224,7 @@ siapi3Plugin  = BoundedPlugin2 pname tname  url
           odxR "andamento_status" -<  t) -< ()
 
       b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= 14 then  return Nothing else liftIO $ siapi3  i j k )) -<   (liftA3 (,,) protocolo ano cpf)
-      let convertAndamento [_,da,desc,user,sta] =tblist  $ fmap attrT  $ ([("andamento_date",TB1 .STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
+      let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ fmap attrT  $ ([("andamento_date",TB1 .STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
       let ao  (bv,taxa) =  Just $ tblist  ( [attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
           iat bv = Compose . Identity $ (IT (attrT ("andamentos",TB1 ()))
@@ -287,7 +287,7 @@ itR i f = atR i (IT (attrT (fromString i,TB1 ())) <$> f)
 
 pagamentoArr
   :: (KeyString a1,
-      MonadReader (Maybe (FTB1 Identity a1 Showable)) m, Show a1,
+      MonadReader (Maybe (TBData a1 Showable)) m, Show a1,
       Functor m,Ord a1) =>
      Parser
        (Kleisli m)
@@ -303,9 +303,9 @@ pagamentoArr =  itR "pagamento" (proc descontado -> do
                   odxR "price" -<  ()
                   odxR "scheduled_date" -<  ()
                   let total = maybe 0 fromIntegral  p :: Int
-                  let pagamento = _tb $ FKT ([attrT  ("pagamentos",LeftTB1 (Just $ ArrayTB1  (replicate total (num $ -1) )) )]) [Rel "pagamentos" "=" "id"] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> tblist [attrT ("id",SerialTB1 Nothing),attrT ("description",LeftTB1 $ Just $ TB1 $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",LeftTB1 valorParcela), attrT ("scheduled_date",LeftTB1 pinicio) ]) ([1 .. total])))
+                  let pagamento = _tb $ FKT ([attrT  ("pagamentos",LeftTB1 (Just $ ArrayTB1  (replicate total (num $ -1) )) )]) [Rel "pagamentos" "=" "id"] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> TB1 $ tblist [attrT ("id",SerialTB1 Nothing),attrT ("description",LeftTB1 $ Just $ TB1 $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",LeftTB1 valorParcela), attrT ("scheduled_date",LeftTB1 pinicio) ]) ([1 .. total])))
                   returnA -<  pagamento ) -< (valorParcela,pinicio,p)
-              returnA -<  tblist [pg ] )
+              returnA -<  TB1 $ tblist [pg ] )
 
 
 gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  url
@@ -368,9 +368,9 @@ encodeMessage = PurePlugin "Encode Email" tname url
                 | T.isInfixOf "multipart" mime =   Just  $ tbmix (catMaybes next)
                 | otherwise =Nothing
                 where
-                      tb n  =  tblist . pure . _tb . Attr n $ (LeftTB1 $  v)
-                      deltb n  =  tblist . pure . _tb . Attr n $ (LeftTB1 $ Just $ DelayedTB1 $    v)
-                      tbmix l = tblist . pure . _tb . IT (attrT  ("mixed",TB1 ()) ) . LeftTB1 $ ArrayTB1 <$>  (ifNull l )
+                      tb n  =  TB1 . tblist . pure . _tb . Attr n $ (LeftTB1 $  v)
+                      deltb n  =  TB1 . tblist . pure . _tb . Attr n $ (LeftTB1 $ Just $ DelayedTB1 $    v)
+                      tbmix l = TB1 . tblist . pure . _tb . IT (attrT  ("mixed",TB1 ()) ) . LeftTB1 $ ArrayTB1 <$>  (ifNull l )
           returnA -<  (maybe Nothing (flip mimeTable part )  $ (\(i,j) -> fmap (,j) i) enc)
     mixed =  nameO 1 (proc t ->  do
                 liftA3 (,,)
@@ -429,10 +429,10 @@ importarofx = BoundedPlugin2 "OFX Import" tname  url
         ) -< t
       b <- act (fmap join . traverse (\(TB1 (SText i), (LeftTB1 (Just (DelayedTB1 (Just (TB1 (SBinary r) ))))) , acc ) -> liftIO $ ofxPlugin (T.unpack i) (BS.unpack r) acc )) -< liftA3 (,,) fn i r
       let ao :: TB2 Text Showable
-          ao =  LeftTB1 $ ArrayTB1 . fmap (tblist . fmap attrT ) <$>  b
+          ao =  LeftTB1 $ ArrayTB1 . fmap (TB1 . tblist . fmap attrT ) <$>  b
           ref :: [Compose Identity (TB Identity ) Text(Showable)]
           ref = [attrT  ("statements",LeftTB1 $ join $ fmap (ArrayTB1 ).   allMaybes . fmap (join . fmap unSSerial . M.lookup "fitid" . M.fromList ) <$> b)]
-          tbst :: (Maybe (TB2 Text (Showable)))
+          tbst :: (Maybe (TBData Text (Showable)))
           tbst = Just $ tblist [_tb $ FKT ref [Rel "statements" "=" "fitid",Rel "account" "=" "account"] ao]
       returnA -< tbst
 

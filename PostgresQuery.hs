@@ -113,13 +113,13 @@ paginate conn t order off size k eqpred = do
     let (que,attr) = case k of
           (Just koldpre) ->
             let
-              que =  selectQuery (TB1 t) <> pred <> orderQ
+              que =  selectQuery t <> pred <> orderQ
               koldPk :: [TB Identity Key Showable]
               koldPk =  uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) koldpre
             in (que,koldPk <> tail (reverse koldPk) <> eqpk )
           Nothing ->
             let
-              que =  selectQuery (TB1 t) <> pred <> orderQ
+              que =  selectQuery t <> pred <> orderQ
             in (que,eqpk)
     let quec = fromString $ T.unpack $ "SELECT *,count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
     print (quec,attr)
@@ -207,7 +207,7 @@ selectAll
      InformationSchema
      -> TableK Key
      -> Maybe PageToken
-     -> Maybe Int
+     -> Int
      -> [(Key, Order)]
      -> [(T.Text, Column Key Showable)]
      -> TransactionM  (Int,
@@ -219,8 +219,8 @@ selectAll inf table i  j k st = do
           unref (TableRef i) = i
           tbf =  tableView (tableMap inf) table
       liftIO $ print (tableName table,selectQuery tbf )
-      let m = unTB1 tbf
-      (t,v) <- liftIO$ duration  $ paginate (conn inf) m k 0 (maybe 20 id j) (fmap unref i) (nonEmpty st)
+      let m = tbf
+      (t,v) <- liftIO$ duration  $ paginate (conn inf) m k 0 j (fmap unref i) (nonEmpty st)
       mapM_ (tellRefs inf  ) (snd v)
       liftIO$ print (tableName table,t)
       return v
@@ -256,4 +256,4 @@ loadDelayed inf t@(k,v) values@(ks,vs)
 
 
 
-postgresOps = SchemaEditor updateMod insertMod deleteMod (\i j p g s o-> (\(l,i) -> (fmap TB1 i,Just $ TableRef  (filter (flip L.elem (fmap fst s) . fst ) $  getPK $ TB1 $ last i) ,l)) <$> selectAll i j p g s o ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTB1 $ unTlabel $ tableView (tableMap inf) table ))
+postgresOps = SchemaEditor updateMod insertMod deleteMod (\i j p g s o-> (\(l,i) -> (fmap TB1 i,Just $ TableRef  (filter (flip L.elem (fmap fst s) . fst ) $  getPK $ TB1 $ last i) ,l)) <$> selectAll i j p (fromMaybe 200 g) s o ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ))

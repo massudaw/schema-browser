@@ -146,6 +146,18 @@ expandPSet p = [p]
 groupSplit2 :: Ord b => (a -> b) -> (a -> c ) -> [a] -> [(b ,[c])]
 groupSplit2 f g = fmap (\i-> (f $ head i , g <$> i)) . groupWith f
 
+applyTable'
+  ::  PatchConstr k a  => [TBData k a ] -> TBIdx k a -> [TBData k a]
+applyTable' l patom@(m,i, []) = L.filter (\tb -> getPKM tb /= i ) l
+applyTable' l patom@(m,i, p) =  case L.find (\tb -> getPKM tb == i ) l  of
+                  Just _ ->  catMaybes $ L.map (\tb@(m, k) -> if  getPKM tb ==  i  then (case p of
+                                                [] ->  Nothing
+                                                ps -> Just $ applyRecord (m,k) (patom)
+                                              ) else  (Just tb )) l
+                  Nothing -> createTB1  patom  : l
+applyTable' l i = errorWithStackTrace (show (l,i))
+
+
 
 applyTable
   ::  PatchConstr k a  => [FTB1 Identity k a ] -> PathFTB  (TBIdx k a )-> [FTB1 Identity k a ]

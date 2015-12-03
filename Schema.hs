@@ -96,10 +96,10 @@ readFModifier "read" = FRead
 readFModifier "edit" = FPatch
 readFModifier "write" = FWrite
 
-keyTables ,keyTablesInit :: MVar (Map Text InformationSchema )->  Connection -> Connection -> (Text ,Text)-> Maybe (Text,R.Tidings OAuth2Tokens) -> SchemaEditor ->  IO InformationSchema
-keyTables schemaVar conn userconn (schema ,user) oauth ops = maybe (keyTablesInit schemaVar conn userconn (schema,user) oauth ops) return  . (M.lookup schema ) =<< readMVar schemaVar
+keyTables ,keyTablesInit :: MVar (Map Text InformationSchema )->  Connection -> Connection -> (Text ,Text)-> Maybe (Text,R.Tidings OAuth2Tokens) -> SchemaEditor -> [Plugins] ->  IO InformationSchema
+keyTables schemaVar conn userconn (schema ,user) oauth ops pluglist = maybe (keyTablesInit schemaVar conn userconn (schema,user) oauth ops pluglist ) return  . (M.lookup schema ) =<< readMVar schemaVar
 
-keyTablesInit schemaVar conn userconn (schema,user) oauth ops = do
+keyTablesInit schemaVar conn userconn (schema,user) oauth ops pluglist = do
        uniqueMap <- join $ mapM (\(t,c,op,mod,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr (V.toList $ fmap readFModifier mod) op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,field_modifiers,translation from  metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
        res2 <- fmap ( (\i@(t,c,j,k,del,l,m,d,z,b)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,del,l,maybe False testSerial m,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_delayed,is_range,col_def,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema)
        let
@@ -137,9 +137,9 @@ keyTablesInit schemaVar conn userconn (schema,user) oauth ops = do
        sizeMapt <- M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t  i3 ) <$> query conn tableSizes (Only schema)
        mvar <- newMVar M.empty
        metaschema <- if (schema /= "metadata")
-          then Just <$> keyTables  schemaVar conn userconn ("metadata",user) oauth ops
+          then Just <$> keyTables  schemaVar conn userconn ("metadata",user) oauth ops pluglist
           else return Nothing
-       let inf = InformationSchema schema user oauth i1 i2  i3 sizeMapt mvar  userconn conn metaschema ops
+       let inf = InformationSchema schema user oauth i1 i2  i3 sizeMapt mvar  userconn conn metaschema ops pluglist
        var <- takeMVar schemaVar
        putMVar schemaVar (M.insert schema inf var)
        return inf
@@ -236,7 +236,7 @@ catchPluginException inf pname tname idx i = do
   (Right <$> i) `catch` (\e  -> do
                 t <- getCurrentTime
                 print (t,e)
-                id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (username,schema_name,table_name,plugin_name,exception,data_index2,instant) values(?,?,?,?,?,?,?,?) returning id" (username inf , schemaName inf,pname,tname,show (e :: SomeException) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) . first keyValue) idx) ), t )
+                id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (username,schema_name,table_name,plugin_name,exception,data_index2,instant) values(?,?,?,?,?,?,?,?) returning id" (username inf , schemaName inf,pname,tname,show (e :: SomeException) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value" . second (Binary . B.encode) . first keyValue) idx) ), t )
                 return (Left (unOnly $ head $id)))
 
 
@@ -254,7 +254,7 @@ logTableModification inf (TableModification Nothing table i) = do
 
 keyTables' con rcon s i j = do
   sch <- newMVar M.empty
-  keyTables sch con rcon s i j
+  keyTables sch con rcon s i j []
 withInf d s f = withConn d (f <=< (\conn -> keyTables' conn conn (s,"postgres") Nothing undefined ))
 
 withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables'  conn conn (s,"postgres") Nothing undefined ) )
@@ -268,7 +268,7 @@ testParse' db sch q = withTestConnInf db sch (\inf -> do
                                        print $ tableMeta $ lookTable inf q
                                        print rp
                                        print rpq
-                                       q <- queryWith_ (fromRecord (unTB1 $ unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
+                                       q <- queryWith_ (fromRecord (unTlabel' rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
                                            )
 
@@ -280,7 +280,7 @@ testParse db sch q = withConnInf db sch (\inf -> do
                                        -- print $ tableMeta $ lookTable inf q
                                        -- print rp
                                        -- print rpq
-                                       q <- queryWith_ (fromRecord (unTB1 $ unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
+                                       q <- queryWith_ (fromRecord (unTlabel' rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
                                        return $ q
                                            )
 
@@ -311,9 +311,9 @@ mergeCreate Nothing (Just i) = Just i
 mergeCreate (Just i)  Nothing = Just i
 mergeCreate Nothing Nothing = Nothing
 
-mergeTB1 (TB1  (m,Compose k) ) (TB1  (m2,Compose k2) )
-  | m == m2 = TB1  (m,Compose $ liftA2 (<>) k k2)
-  | otherwise = TB1  (m,Compose $ liftA2 (<>) k k2) -- errorWithStackTrace (show (m,m2))
+mergeTB1 ((m,Compose k) ) ((m2,Compose k2) )
+  | m == m2 = (m,Compose $ liftA2 (<>) k k2)
+  | otherwise = (m,Compose $ liftA2 (<>) k k2) -- errorWithStackTrace (show (m,m2))
 
 ifOptional i = if isKOptional (keyType i) then unKOptional i else i
 ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
@@ -381,7 +381,7 @@ joinRelT rel ref tb table
   | L.any (isArray.keyType) origin = fmap ArrayTB1 $ traverse (\ref -> joinRelT (Le.over relOrigin unKArray <$> rel ) ref  tb table ) (fmap (\i -> pure $ justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(L.length (unArray $ unAttr $ head ref) - 1)])
   | otherwise = maybe (tell (TableModification Nothing tb . patchTB1 <$> F.toList tbcreate) >> return tbcreate ) (return .TB1) tbel
       where origin = fmap _relOrigin rel
-            tbcreate = tblist' tb (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )
+            tbcreate = TB1 $ tblist' tb (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
             tbel = L.find (\(_,i)-> interPointPost rel ref (nonRefAttr  $ F.toList $ _kvvalues $ unTB  i) ) table
 
@@ -390,7 +390,7 @@ joinRel :: (Ord a ,Show a) => [Rel Key] -> [Column Key a] -> [TBData Key a] -> F
 joinRel rel ref table
   | L.all (isOptional .keyType) origin = LeftTB1 $ fmap (flip (joinRel (Le.over relOrigin unKOptional <$> rel ) ) table) (traverse unLeftItens ref )
   | L.any (isArray.keyType) origin = ArrayTB1 $ fmap (flip (joinRel (Le.over relOrigin unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(L.length (unArray $ unAttr $ head ref) - 1)])
-  | otherwise = maybe (tblist (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )) TB1 tbel
+  | otherwise = maybe (TB1 $ tblist (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )) TB1 tbel
       where origin = fmap _relOrigin rel
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
             tbel = L.find (\(_,i)-> interPointPost rel ref (nonRefAttr  $ F.toList $ _kvvalues $ unTB  i) ) table
