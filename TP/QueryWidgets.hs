@@ -84,7 +84,7 @@ createFresh  tname inf i ty@(Primitive atom)  =
           path = Path (S.singleton k) (FKInlineTable $ inlineName ty ) S.empty
       return $ inf
           & tableMapL . Le.ix tname . rawFKSL %~  S.insert path
-          & pkMapL . Le.ix (rawPK tableO) . rawFKSL Le.%~  S.insert path
+          & pkMapL . Le.ix (S.fromList $ rawPK tableO) . rawFKSL Le.%~  S.insert path
           & keyMapL %~ M.insert (tname,i) k
 
 
@@ -375,7 +375,7 @@ crudUITable inf open bres refs pmods ftb@(m,_)  preoldItems = do
   (evdiff ,hvdiff) <- liftIO $ newEvent
   nav  <- buttonDivSet ["None","Editor"{-,"Exception","Change"-}] (fmap Just open) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-4 pull-right"
-  let table = lookPK inf (S.fromList $ fmap _relOrigin $ findPK $ TB1 ftb)
+  let table = lookPK inf (S.fromList $ _kvpk  m )
   let fun "Editor" = do
           let
             getItem :: TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
@@ -793,7 +793,7 @@ fkUITable inf top constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           unRKOptional (Key v a b d n m (KOptional c)) = Key v a b d n m c
           unRKOptional i = i
       let
-          search = (\i j -> join $ fmap (\k-> L.find (\(TB1 (kv,l) )->  interPointPost (filter (flip S.member (_kvpk kv) . _relTarget) rel) k  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList . _kvvalues . unTB $ l)) ) i) $ j )
+          search = (\i j -> join $ fmap (\k-> L.find (\(TB1 (kv,l) )->  interPointPost (filter (flip S.member (S.fromList $ _kvpk kv) . _relTarget) rel) k  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList . _kvvalues . unTB $ l)) ) i) $ j )
           vv :: Tidings (Maybe [TB Identity Key Showable])
           vv =   liftA2 (<>) iold2  ftdi2
       cvres <- currentValue (facts vv)

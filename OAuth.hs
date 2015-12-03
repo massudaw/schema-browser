@@ -134,7 +134,7 @@ insertTable inf pk
 
 
 joinGet inf tablefrom tableref from ref
-  | S.fromList (fmap _relOrigin (getKeyAttr ref) ) ==  S.fromList (S.toList (rawPK tableref <> rawAttrs tableref ) <> rawDescription tableref) = return Nothing
+  | S.fromList (fmap _relOrigin (getKeyAttr ref) ) ==  S.fromList (rawPK tableref <> S.toList (rawAttrs tableref ) <> rawDescription tableref) = return Nothing
   | tableName tableref == "attachments" = do
     tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
     let user = fst $ fromJust $ token inf
@@ -152,7 +152,7 @@ joinGet inf tablefrom tableref from ref
 getTable inf  tb pk
   | tableName tb == "history" = return  Nothing
   | tableName tb == "attachments" = return  Nothing
-  | S.fromList (fmap _relOrigin (getKeyAttr pk) ) ==  S.fromList (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb) = return Nothing
+  | S.fromList (fmap _relOrigin (getKeyAttr pk) ) ==  S.fromList (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb) = return Nothing
   | otherwise = do
     tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
     let user = fst $ fromJust $ token inf
@@ -175,7 +175,7 @@ lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
 lbackRef (TB1 t) = snd $ Types.head $ getPK  (TB1 t)
 
 convertAttrs :: InformationSchema -> Maybe (Table,TBData Key Showable) -> M.Map Text Table ->  Table -> Value -> TransactionM (TB2 Key Showable)
-convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (S.toList (rawPK tb <> rawAttrs tb) <> rawDescription tb ))
+convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb ))
   where
     pathOrigin (Path i _ _ ) = i
     isFKJoinTable (Path _ (FKJoinTable _ _ _) _) = True

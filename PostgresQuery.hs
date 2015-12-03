@@ -239,8 +239,8 @@ loadDelayed inf t@(k,v) values@(ks,vs)
   | L.null delayedattrs  = return Nothing
   | otherwise = do
        let
-           whr = T.intercalate " AND " ((\i-> (keyValue i) <>  " = ?") <$> S.toList (_kvpk k) )
-           table = justError "no table" $ M.lookup (_kvpk k) (pkMap inf)
+           whr = T.intercalate " AND " ((\i-> (keyValue i) <>  " = ?") <$> (_kvpk k) )
+           table = justError "no table" $ M.lookup (S.fromList $ _kvpk k) (pkMap inf)
            delayedTB1 =  (ks,) . _tb $ KV ( filteredAttrs)
            delayed =  mapKey' (kOptional . ifDelayed . ifOptional) (mapValue' (const ()) delayedTB1)
            str = "SELECT " <> explodeRecord (relabelT' runIdentity Unlabeled delayed) <> " FROM " <> showTable table <> " WHERE " <> whr

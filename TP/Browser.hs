@@ -153,13 +153,14 @@ poller schm db plugs = do
               print ("END " <>T.unpack pname <> " - " <> show end ::String)
               let polling_log = lookTable (meta inf) "polling_log"
               ((plm,plt),_) <- transaction (meta inf) $ eventTable (meta inf) polling_log Nothing Nothing [] []
-              let table = tblist $
+              let table = tblist
                       [ attrT ("poll_name",TB1 (SText pname))
                       , attrT ("schema_name",TB1 (SText schema))
                       , _tb $ IT (attrT ("diffs",LeftTB1 $ Just$ ArrayTB1 $ [TB1 ()])) (LeftTB1 $ ArrayTB1  <$> (
                                 nonEmpty  . catMaybes $
                                     fmap (TB1 . tblist . pure ) .  either (\r ->Just $   attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) )) (fmap (\r -> attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $  r))   ))) <$> i))
-                      , attrT ("duration",srange ( TB1 (STimestamp $ utcToLocalTime utc current)) (TB1 (STimestamp $ utcToLocalTime utc end)))]
+                      , attrT ("duration",srange (time current) (time end))]
+                  time  = TB1 . STimestamp . utcToLocalTime utc
               p <- transaction inf $ fullDiffInsert  (meta inf) (liftTable' (meta inf) "polling_log" table)
               traverse (putMVar plm ). traverse (\l -> applyTable' l <$> (fmap tableDiff  p)) =<< currentValue (facts plt)
               execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and schema_name = ?" (end ,pname,schema)
@@ -283,7 +284,7 @@ attrLine i e   = do
 
 
 chooserTable inf kitems i = do
-  let initKey = pure . join $ fmap rawPK . flip M.lookup (tableMap inf) . T.pack <$> i
+  let initKey = pure . join $ fmap (S.fromList .rawPK) . flip M.lookup (tableMap inf) . T.pack <$> i
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
@@ -340,8 +341,8 @@ viewerKey inf key = mdo
   filterInpBh <- stepper "" (UI.valueChange filterInp)
   -- el <- filterUI  inf (allRec' (tableMap inf)  table)
   let filterInpT = tidings filterInpBh (diffEvent filterInpBh (UI.valueChange filterInp))
-      sortSet =  F.toList . tableKeys . TB1 . tableNonRef' . allRec' (tableMap inf ) $ table
-  sortList <- selectUI sortSet ((,True) <$> F.toList key) UI.div UI.div conv
+      sortSet = rawPK table <>  L.filter (not .(`L.elem` rawPK table)) (F.toList . tableKeys . TB1 . tableNonRef' . allRec' (tableMap inf ) $ table)
+  sortList <- selectUI sortSet ((,True) <$> rawPK table ) UI.div UI.div conv
   element sortList # set UI.style [("overflow-y","scroll"),("height","200px")]
   asc <- checkedWidget (pure True)
   updateBtn <- UI.button # set text "Update"

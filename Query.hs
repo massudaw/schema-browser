@@ -187,7 +187,7 @@ createTable r@(Raw sch _ _ _ _ tbl _ _ pk _ fk inv attr) = "CREATE TABLE " <> ra
     renderTy (KArray ty) = renderTy ty <> "[] "
     renderTy (Primitive ty ) = ty
     -- renderTy (InlineTable s ty ) = s <> "." <> ty
-    renderPK = "CONSTRAINT " <> tbl <> "_PK PRIMARY KEY (" <>  renderKeySet pk <> ")"
+    renderPK = "CONSTRAINT " <> tbl <> "_PK PRIMARY KEY (" <>  renderKeySet (S.fromList pk) <> ")"
     renderFK (Path origin (FKJoinTable _ ks table) end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
     renderFK (Path origin _  end) = ""
 
@@ -204,7 +204,7 @@ allKVRec  t@(TB1 (m, e))=  concat $  F.toList (go . unTB <$> (_kvvalues $ unTB $
 
 
 tableToKV r =   do
-   (S.toList (rawPK r)) <> (rawDescription r)  <>(S.toList (rawAttrs r))
+   ((rawPK r)) <> (rawDescription r)  <>(S.toList (rawAttrs r))
 
 labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (Labeled Text Table,TB3Data (Labeled Text)  Key  () )
 labelTable i = do
@@ -307,20 +307,20 @@ allRec'
 allRec' i t = unTlabel' $ tableView  i t
 
 tableView  invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
-  when (S.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r ) <> " the pk is null")
+  when (L.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r ) <> " the pk is null")
   (t,ks) <- labelTable r
   tb <- recurseTB invSchema (rawFKS r) False [] ks
   return  $ tb
 
 tableViewNR invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
-  when (S.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r )<> " the pk is null")
+  when (L.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r )<> " the pk is null")
   (t,ks) <- labelTable r
   tb <- recurseTB invSchema (S.filter (all isInlineRel. F.toList .pathRelRel)$ rawFKS r) False [] ks
   return  $ TB1 tb
 
 
 rootPaths' invSchema r = (\(i,j) -> (unTlabel i,j ) ) $ fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
-  when (S.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r )<> " the pk is null")
+  when (L.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r )<> " the pk is null")
   (t,ks) <- labelTable r
   tb <- recurseTB invSchema (rawFKS r ) False [] ks
   return ( TB1 tb , selectQuery $ tb )
@@ -669,18 +669,18 @@ tbDesc :: (Functor f,Ord k)=>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k 
 tbDesc  =  tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvdesc kv ) ))
 
 tbPK :: (Functor f,Ord k)=>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
-tbPK = tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv ) ))
+tbPK = tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) ))
 
 
 tbPK' :: (Ord k)=>TBData k a -> Compose Identity  (KV  (Compose Identity (TB Identity  ))) k a
-tbPK' = tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv ) ))
+tbPK' = tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) ))
 
 tbUn :: (Functor f,Ord k) =>   Set k -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbUn un (TB1 (kv,item)) =  (\kv ->  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item ) un
   where pred kv k = (S.isSubsetOf (S.map _relOrigin k) kv )
 
 tbAttr :: (Functor f,Ord k) =>  TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
-tbAttr  =  tbFilter  (\kv k -> not (S.isSubsetOf (S.map _relOrigin k) (_kvpk kv <> (S.fromList (_kvdesc kv ))) ))
+tbAttr  =  tbFilter  (\kv k -> not (S.isSubsetOf (S.map _relOrigin k) (S.fromList (_kvpk kv) <> (S.fromList (_kvdesc kv ))) ))
 
 tbFilter' pred (kv,item) =  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item
 tbFilterE  pred (kv,item) =  (kv,mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item)
@@ -725,7 +725,7 @@ tname i = do
   return $ Labeled ("t" <> (T.pack $  show n)) i
 
 
-markDelayed True (TB1 (m,v)) = TB1 . (m,) $ mapComp (KV . M.mapWithKey (\k v -> mapComp (recurseDel (if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then False else True)) v  ). _kvvalues ) v
+markDelayed True (TB1 (m,v)) = TB1 . (m,) $ mapComp (KV . M.mapWithKey (\k v -> mapComp (recurseDel (if S.isSubsetOf (S.map _relOrigin k) ((S.fromList $ _kvpk m) <> (S.fromList $ _kvdesc m) ) then False else True)) v  ). _kvvalues ) v
 markDelayed False (TB1 (m,v)) = TB1 . (m,) $ mapComp (KV . fmap (mapComp (recurseDel False)) . _kvvalues) v
 markDelayed i (LeftTB1 j) = LeftTB1 $ (markDelayed  i)<$> j
 markDelayed i (ArrayTB1 j) = ArrayTB1 $ (markDelayed  i)<$> j
@@ -743,7 +743,7 @@ makeDelayed i  = KDelayed i
 forceDesc rec (ArrayTB1 m ) = ArrayTB1 $ forceDesc rec <$> m
 forceDesc rec (LeftTB1 m ) = LeftTB1 $ forceDesc rec <$> m
 forceDesc rec (DelayedTB1 (Just m) ) = forceDesc rec m
-forceDesc rec (TB1 (m,v)) =  TB1 . (m,) $ mapComp (KV . M.mapWithKey (\k v -> mapComp ((if S.isSubsetOf (S.map _relOrigin k) (_kvpk m <> (S.fromList $ _kvdesc m) ) then forceDel True   else forceDel False  )) v   ). _kvvalues ) v
+forceDesc rec (TB1 (m,v)) =  TB1 . (m,) $ mapComp (KV . M.mapWithKey (\k v -> mapComp ((if S.isSubsetOf (S.map _relOrigin k) (S.fromList (_kvpk m ) <> (S.fromList $ _kvdesc m) ) then forceDel True   else forceDel False  )) v   ). _kvvalues ) v
 forceDel rec t =
             case t of
               Attr k v ->  Attr (alterKeyType forceDAttr k) v

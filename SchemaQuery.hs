@@ -44,7 +44,7 @@ eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Orde
     -> TransactionM (DBVar,Collection Key Showable)
 eventTable inf table page size presort fixed = do
     let mvar = mvarMap inf
-        defSort = fmap (,Desc) $ S.toList $ rawPK table
+        defSort = fmap (,Desc) $  rawPK table
         sortList  = if L.null presort then defSort else presort
         fixidx = (L.sort $ snd <$> fixed )
         filterfixed = filter (\(m,k)->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV k)

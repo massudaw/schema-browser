@@ -157,7 +157,7 @@ data KVMetadata k
   = KVMetadata
   { _kvname :: Text
   , _kvschema :: Text
-  , _kvpk :: Set k
+  , _kvpk :: [k]
   , _kvdesc :: [k]
   , _kvuniques :: [Set k]
   , _kvorder :: [(k,Order)]
@@ -269,7 +269,7 @@ type TB1 a = TB2 Key a
 type TB2 k a = TB3 Identity k a
 type TB3 f k a = FTB1 f k a
 
-mapKVMeta f (KVMetadata tn sch s j m o k l r ) =KVMetadata tn sch (Set.map f s) (map f j) (map (Set.map f) m ) (fmap (first f) o) (map f k) (Set.map f l) (fmap (fmap (fmap (fmap f)) ) <$> r)
+mapKVMeta f (KVMetadata tn sch s j m o k l r ) =KVMetadata tn sch (map f s) (map f j) (map (Set.map f) m ) (fmap (first f) o) (map f k) (Set.map f l) (fmap (fmap (fmap (fmap f)) ) <$> r)
 
 
 filterKey' f ((m ,k) ) = (m,) . mapComp (\(KV kv) -> KV $ Map.filterWithKey f kv )  $  k
@@ -498,7 +498,7 @@ data TableType
 
 type Table = TableK Key
 
-mapTableK f (Raw  s tt tr de is rn  un ra rp rd rf inv rat ) = Raw s tt tr (S.map f de) is rn (fmap (S.map f) un) ra (S.map f rp) (fmap f rd) S.empty  S.empty (S.map f rat)
+mapTableK f (Raw  s tt tr de is rn  un ra rp rd rf inv rat ) = Raw s tt tr (S.map f de) is rn (fmap (S.map f) un) ra (map f rp) (fmap f rd) S.empty  S.empty (S.map f rat)
 data TableK k
     =  Raw { rawSchema :: Text
            , rawTableType :: TableType
@@ -508,7 +508,7 @@ data TableK k
            , rawName :: Text
            , uniqueConstraint :: [Set k]
            , rawAuthorization :: [Text]
-           , rawPK :: (Set k)
+           , rawPK :: [k]
            , rawDescription :: [k]
            , _rawFKSL ::  (Set (Path (Set k) (SqlOperationK k )))
            , rawInvFKS ::  (Set (Path (Set k) (SqlOperationK k)))
@@ -820,7 +820,7 @@ tblist' t  = (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 reclist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TBData Key a
 reclist' t  = (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 
-kvempty  = KVMetadata "" ""  Set.empty [] []  [] [] Set.empty []
+kvempty  = KVMetadata "" ""  [] [] []  [] [] Set.empty []
 
 instance Ord a => Ord (Interval.Interval a ) where
   compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)
