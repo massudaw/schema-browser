@@ -75,6 +75,7 @@ executable threepenny-layer
    ,vector-binary-instances
    ,text-binary
    ,mime-mail
+   ,async
   -- hs-source-dirs:      
 
   default-language:    Haskell2010

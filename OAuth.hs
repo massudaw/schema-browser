@@ -105,7 +105,7 @@ listTable inf table page maxResults sort ix
     tok <- liftIO$ R.currentValue $ R.facts (snd $ justError "no token" $ token $  inf)
     let user = fst $ justError "no token" $ token inf
     decoded <- liftIO $ do
-        let req =  "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok )
+        let req =  "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> ("maxResults=" <> show (maybe 200 id maxResults) <> "&") <> "access_token=" ++ ( accessToken tok )
         print  req
         (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
         print ("list",table,t)
@@ -205,7 +205,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                         liftIO $ print (trefname,"right",v)
                         tbs <- liftIO$ runDBM infsch (atTable (tableMeta $ lookTable infsch trefname))
                         liftIO$ print tbs
-                        reftb <- joinRelT fk (fmap unTB ref) (lookTable infsch trefname) tbs
+                        reftb <- joinRelT fk (fmap unTB ref) (lookTable infsch trefname) (F.toList tbs)
                         liftIO$ print reftb
                         patch <- maybe (return reftb ) (\(tref,getref )-> traverse (\reftb -> do
                             pti <- joinGetDiffTable infsch  tref (lookTable infsch trefname) getref reftb

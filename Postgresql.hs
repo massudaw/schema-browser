@@ -286,7 +286,7 @@ unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverse 
 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
 parseAttr (Attr i _ ) = do
-  s<- parseShowable (textToPrim <$> keyType  i) <?> show i
+  s<- parseShowable (textToPrim <$> keyType  (i)) <?> show i
   return $  Attr i s
 
 
@@ -345,7 +345,7 @@ readText ix =  ( liftA2 (\i j  -> i <> BS.concat  j ) (scapedText ix)  (many1 (l
             requote t = "\"" <> t <> "\""
             scapedText ix = liftA2 (<>) (plain0' "\\\"") (BS.intercalate "" <$> ( many ((<>) <$> choice (escapedItem  ix <$>  escapes) <*>  plain0' "\\\"")))
               where
-                escapes = [("n","\n"),("r","\r"),("t","\t"),("137","\137"),("195","\195"),("224","\224"),("225","\225"),("227","\227"),("233","\233"),("237","\237"),("243","\243"),("245","\245"),("231","\231")]
+                escapes = [("n","\n"),("r","\r"),("t","\t"),("129","\129"),("137","\137"),("167","\167"),("194","\194"),("195","\195"),("224","\224"),("225","\225"),("227","\227"),("233","\233"),("237","\237"),("243","\243"),("245","\245"),("231","\231")]
                 escapedItem ix (c, o)  = Tra.sequence (replicate ix (char '\\'))  >> string c >> return o
 
 

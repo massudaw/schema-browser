@@ -47,28 +47,30 @@ eventTable inf table page size presort fixed = do
         defSort = fmap (,Desc) $  rawPK table
         sortList  = if L.null presort then defSort else presort
         fixidx = (L.sort $ snd <$> fixed )
-        filterfixed = filter (\(m,k)->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV k)
+        filterfixed = case fixed of
+              [] -> id
+              v -> traceShow "pos filter" . M.filterWithKey  (\_ (m,k)->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV k) . traceShow "pre filter"
     -- print "Take MVar"
     mmap <- liftIO$ takeMVar mvar
     -- print "Look MVar"
     (mtable,td,ini) <- case (M.lookup (tableMeta table) mmap ) of
          Just (i,td) -> do
            liftIO $ putMVar mvar mmap
-           -- print "Put MVar"
+           liftIO $ print "Put MVar"
            (fixedmap ,reso) <- liftIO$ currentValue (facts td)
            let (sq,mp)  = justError "" $ M.lookup fixidx  fixedmap
 
-           ini <- if (isJust (M.lookup fixidx  fixedmap )&& maybe False (\p->not $ M.member (p+1) mp) page  && sq >  L.length (filterfixed reso ) && isJust (join $ flip M.lookup mp <$> page ))
+           ini <- if (isJust (M.lookup fixidx  fixedmap )&& maybe False (\p->not $ M.member (p+1) mp) page  && sq >  M.size (filterfixed reso ) && isJust (join $ flip M.lookup mp <$> page ))
              then  do
                (res,nextToken ,s ) <- (listEd $ schemaOps inf ) inf table (join $ flip M.lookup mp <$> page ) size sortList fixed
-               let ini = (M.insert fixidx (estLength page size res s  ,maybe mp (\v -> M.insert (fromMaybe 0 page +1 ) v  mp)  nextToken) fixedmap ,reso <> (unTB1 <$> res))
+               let ini = (M.insert fixidx (estLength page size res s  ,maybe mp (\v -> M.insert (fromMaybe 0 page +1 ) v  mp)  nextToken) fixedmap ,reso <> M.fromList (fmap (\i -> (getPK i,unTB1 i)) res))
                liftIO$ putMVar i ini
                return $ Just ini
              else return Nothing
            ini2 <- if (isNothing (M.lookup fixidx  fixedmap ))
              then do
                (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing size sortList fixed
-               let ini = (M.insert fixidx (estLength page size res s ,maybe M.empty (M.singleton (1 :: Int)) p) fixedmap ,L.nub  $ fmap unTB1 res <> reso)
+               let ini = (M.insert fixidx (estLength page size res s ,maybe M.empty (M.singleton (1 :: Int)) p) fixedmap , M.fromList (fmap (\i -> (getPK i,unTB1 i)) res) <> reso)
                liftIO $ putMVar i ini
                return $ Just ini
              else return Nothing
@@ -77,7 +79,7 @@ eventTable inf table page size presort fixed = do
          Nothing -> do
            (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing size sortList fixed
            -- liftIO $ print "New MVar"
-           let ini = (M.singleton fixidx (estLength page size res s ,maybe M.empty (M.singleton (1 :: Int)) p) ,fmap unTB1 res)
+           let ini = (M.singleton fixidx (estLength page size res s ,maybe M.empty (M.singleton (1 :: Int)) p) ,M.fromList (fmap (\i -> (getPK i,unTB1 i)) res))
            mnew <- liftIO$ newMVar ini
            (e,h) <- liftIO $R.newEvent
            bh <- liftIO$ R.stepper ini  e
@@ -101,7 +103,7 @@ fullInsert' inf ((k1,v1) )  = do
    let proj = _kvvalues . unTB
    ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
    ((m,t),(_,l)) <- eventTable inf (lookTable inf (_kvname k1)) Nothing Nothing [] []
-   if  isJust $ L.find ((==tbPK (tableNonRef (TB1  ret))). tbPK . tableNonRef . TB1  ) l
+   if  isJust $ M.lookup (getPKM ret) l
       then do
         return ret
       else do
@@ -129,9 +131,9 @@ transaction inf log = {-withTransaction (conn inf) $-} do
     -- print "GetTable"
     ((m,t),(mp,l)) <- transaction inf $  eventTable inf k Nothing Nothing [] []
     -- print "ReadValue"
-    let lf = foldl' (\i p -> applyTable  i (PAtom p)) (fmap TB1 l) v
+    let lf = foldl' (\i p -> applyTable'  i p) l v
     -- print "PutValue"
-    putMVar m (mp,fmap unTB1 lf)
+    putMVar m (mp,lf)
     ) (M.toList aggr)
   --print "Transaction Finish"
   return md

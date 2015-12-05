@@ -133,6 +133,10 @@ splitIndex b l = (fmap T.pack . IProd b . unIntercalate (','==) $ l)
 odxR  l =
   let ll = splitIndex True l
    in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTable ll)))
+odxM  l =
+  let ll = splitIndex False l
+   in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTable ll)))
+
 
 -- Optional value with maybe wrapping
 idxM  l =

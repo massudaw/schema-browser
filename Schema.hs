@@ -236,7 +236,7 @@ catchPluginException inf pname tname idx i = do
   (Right <$> i) `catch` (\e  -> do
                 t <- getCurrentTime
                 print (t,e)
-                id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (username,schema_name,table_name,plugin_name,exception,data_index2,instant) values(?,?,?,?,?,?,?,?) returning id" (username inf , schemaName inf,pname,tname,show (e :: SomeException) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value" . second (Binary . B.encode) . first keyValue) idx) ), t )
+                id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (username,schema_name,table_name,plugin_name,exception,data_index2,instant) values(?,?,?,?,?,?,?) returning id" (username inf , schemaName inf,pname,tname,show (e :: SomeException) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value" . second (Binary . B.encode) . first keyValue) idx) ), t )
                 return (Left (unOnly $ head $id)))
 
 
@@ -328,7 +328,7 @@ applyAttr' sfkt@(FKT iref rel i) (PFK _ p m b )  =  do
                             let ref =  F.toList $ M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList iref)
                                 edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (  flip applyAttr k  ) v else v
                             tbs <- atTable m
-                            return $ FKT ref rel (maybe (joinRel rel (fmap unTB ref) tbs) id b)
+                            return $ FKT ref rel (maybe (joinRel rel (fmap unTB ref) (F.toList tbs)) id b)
 applyAttr' (IT k i) (PInline _   p)  = IT k <$> (applyFTBM (fmap pure $ createTB1) applyRecord' i p)
 applyAttr' i j = errorWithStackTrace (show ("applyAttr'" :: String,i,j))
 
@@ -355,7 +355,7 @@ createAttr' (PInline k s ) = return $ IT (_tb $ Attr k (TB1 ())) (createFTB crea
 createAttr' (PFK rel k s b ) = do
       let ref = (_tb . createAttr <$> k)
       tbs <- atTable s
-      return $ FKT ref rel (maybe (joinRel rel (fmap unTB ref) tbs) id b)
+      return $ FKT ref rel (maybe (joinRel rel (fmap unTB ref) (F.toList tbs)) id b)
 createAttr' i = errorWithStackTrace (show i)
 
 createTB1'
@@ -369,11 +369,11 @@ createTB1' (m ,s ,k)  = fmap (m ,)  $ fmap (_tb .KV . mapFromTBList ) . traverse
 type Database k v = MVar (Map (KVMetadata k) (DBVar2 k v) )
 type DBM k v = ReaderT (Database k v) IO
 
-atTable ::  KVMetadata Key -> DBM Key v [TBData Key v]
+atTable ::  KVMetadata Key -> DBM Key v (Map [(Key,FTB Showable)] (TBData Key v))
 atTable k = do
   i <- ask
   k <- liftIO$ dbTable i k
-  maybe (return []) (\(m,c)-> fmap snd $ liftIO $ R.currentValue (R.facts c)) k
+  maybe (return M.empty) (\(m,c)-> fmap snd $ liftIO $ R.currentValue (R.facts c)) k
 
 joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  [TBData Key Showable] -> TransactionM ( FTB (TBData Key Showable))
 joinRelT rel ref tb table

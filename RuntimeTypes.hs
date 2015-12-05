@@ -46,7 +46,7 @@ pkMap = _pkMapL
 
 type DBVar2 k v = (MVar (Collection k v), R.Tidings (Collection k v))
 type DBVar = DBVar2 Key Showable
-type Collection k v = (Map [Column Key Showable] (Int,Map Int PageToken),[TBData k v])
+type Collection k v = (Map [Column Key Showable] (Int,Map Int PageToken),Map [(Key,FTB Showable)] (TBData k v))
 
 type Plugins = FPlugins Text
 type VarDef = (Text,KType (Prim (Text,Text) (Text,Text)))

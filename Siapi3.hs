@@ -2,7 +2,9 @@
 module Siapi3 where
 import Network.Wreq
 import qualified Network.Wreq.Session as Sess
+import Control.Concurrent.Async
 
+import Control.Monad.IO.Class
 
 import OpenSSL.Session (context)
 import Network.HTTP.Client.OpenSSL
@@ -46,13 +48,26 @@ siapi2 protocolo ano = do
           let
             lq2 =  fst .  break (=='&') . concat . tail .  splitL ("php?id=")  .TL.unpack . TL.decodeLatin1   <$>  (lq ^? responseBody)
             addrs_a ="http://siapi.bombeiros.go.gov.br/consulta/consulta_andamento.php"
-          tq <-  traverse (\lq2 -> do
-                          print addrs_a
+          print addrs_a
+          ptq <- async $ traverse (\lq2 -> do
                           getWith (defaults & param "id"  .~ [T.pack lq2]) addrs_a) lq2
           let
-            i =  TL.unpack .  TL.decodeLatin1 <$> (join $ (^? responseBody) <$> tq)
-          traverse readHtml  i
+            addrs_s ="http://siapi.bombeiros.go.gov.br/consulta/consulta_solicitacao.php"
+          print addrs_s
+          ptqs <- async $ traverse (\lq2 -> do
+                          getWith (defaults & param "id"  .~ [T.pack lq2]) addrs_s) lq2
+          (tq,tqs) <- waitBoth ptq ptqs
+          let
+            is =  TL.unpack .  TL.decodeLatin1 <$> (join $ (^? responseBody) <$> tqs)
+            ia =  TL.unpack .  TL.decodeLatin1 <$> (join $ (^? responseBody) <$> tq)
+          vs <- traverse readHtml  is
+          va <- traverse readHtml  ia
+          let rem ts = L.filter (not. all (`elem` "\n\r\t ")) (fmap (L.filter (not .(`elem` "\"\\"))) ts)
+              split4 ts = if L.length ts == 4 then [L.take 2 ts,L.drop 2 ts] else [ts]
+          return (fmap ((\[i,j]-> (i,j)) . L.take 2) . L.filter ((==2) . L.length) . traceShowId . concat .fmap (split4.rem) . concat <$>vs,fmap rem . tailEmpty . concat <$>va)
 
+tailEmpty [] = []
+tailEmpty i  = tail i
 
 siapi3 protocolo ano cgc_cpf = do
     v <- (siapi3Page protocolo ano cgc_cpf)
@@ -75,9 +90,7 @@ protocolocnpjForm prot ano cgc_cpf vv = ["javax.faces.partial.ajax"  := ("true":
 siapiAndamento3Url = "https://siapi3.bombeiros.go.gov.br/paginaInicialWeb.jsf"
 siapiListAndamento3Url = "https://siapi3.bombeiros.go.gov.br/listarAndamentosWeb.jsf"
 
-testSiapi3 = do
-
---   siapi3 "76259" "15" "01476129000133"
-     siapi3 "96660" "15" "13357228000185"
+testSiapi2 = do
+     siapi2 "1" "14"
 
 

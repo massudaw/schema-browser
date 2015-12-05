@@ -13,6 +13,7 @@ module Plugins (plugList) where
 
 import Location
 import PrefeituraSNFSE
+import Data.Tuple
 import Siapi3
 import CnpjReceita
 import OFX
@@ -52,6 +53,49 @@ lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" renderProjectPricingA
 lplugContract = BoundedPlugin2 "Contrato" "pricing" renderProjectContract
 lplugReport = BoundedPlugin2 "Relatório " "pricing" renderProjectReport
 
+siapi2Hack = BoundedPlugin2  pname tname url
+  where
+    pname ="Siapi2 Hack"
+    tname = "hack"
+    value_mapping = [("RAZÃO SOCIAL", "razao_social")
+                    ,("NOME FANTASIA","nome_fantasia")
+                    ,("CNPJ","cpf_cnpj")
+                    ,("LOGRADOURO","logradouro")
+                    ,("BAIRRO","bairro")
+                    ,("NÚMERO","numero")
+                    ,("CIDADE","cidade")
+                    ,("PONTO DE REFERÊNCIA","referencia")
+                    ,("FONE","fone")
+                    ,("REVENDA","revenda")
+                    ,("TIPO DE SERVIÇO","tipo_servico")
+                    ,("DATA DO SERVIÇO","data_servico")
+                    ,("TIPO DE EDIFICAÇÃO","tipo_edi")
+                    ,("ÁREA CONSTRU","area_cons")
+                    ,("VALOR","valor_taxa")
+                    ,("LOCAL DE ATEND","local")
+                    ,("REGIÃO DE ATEN","regiao")]
+    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    url :: ArrowReader
+    url = proc t -> do
+      protocolo <- varTB "protocolo" -< t
+      ano <- varTB "ano" -< t
+      odxR "razao_social" -< ()
+      Tra.traverse (odxM ) (fmap snd value_mapping) -< ()
+      atR "andamentos" (proc t -> do
+        odxR "andamento_date" -<  t
+        odxR "andamento_description" -<  t) -< t
+      b <- act (Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return (Nothing,Nothing) else liftIO (siapi2  i j )  )) -<  (liftA2 (,) protocolo ano )
+      let ao (sv,bv)  = Just $ tblist   $ svt  sv <> [iat $ bv]
+          convertAndamento :: [String] -> TB2 Text (Showable)
+          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))])
+          convertAndamento i = error $ "convertAndamento " <> show i
+          svt bv = catMaybes $ fmap attrT . (\i -> traverse (\k -> fmap snd $ L.find (L.isInfixOf k. fst ) map) (swap i)) <$>  value_mapping
+            where map = fmap (LeftTB1 . Just . TB1 . SText . T.pack ) <$> bv
+          iat bv = _tb  (IT
+                            (attrT ("andamentos",TB1 ()))
+                            (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
+      returnA -< join  (  ao    <$> join (fmap (uncurry (liftA2 (,))) b))
+
 
 
 siapi2Plugin = BoundedPlugin2  pname tname url
@@ -67,7 +111,7 @@ siapi2Plugin = BoundedPlugin2  pname tname url
       atR "andamentos" (proc t -> do
         odxR "andamento_date" -<  t
         odxR "andamento_description" -<  t) -< t
-      b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return Nothing else liftIO (siapi2  i j >> error "siapi2 test error")  )) -<  (liftA2 (,) protocolo ano )
+      b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return (Nothing ,Nothing) else liftIO (siapi2  i j >> error "siapi2 test error")  )) -<  (liftA2 (,) protocolo ano )
       let ao bv  = Just $ tblist   [iat bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
           convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))])
@@ -75,7 +119,7 @@ siapi2Plugin = BoundedPlugin2  pname tname url
           iat bv = Compose . Identity $ (IT
                             (attrT ("andamentos",TB1 ()))
                             (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
-      returnA -< join  (  ao  .  tailEmpty . concat <$> join b)
+      returnA -< join  (  ao  .  tailEmpty . concat <$> join (fmap snd b))
     tailEmpty [] = []
     tailEmpty i  = tail i
 
@@ -199,6 +243,23 @@ analiseProjeto = BoundedPlugin2 pname tname url
       odxR "protocolo" -< ()
       odxR "ano" -< ()
       returnA -< Nothing
+
+siapi3CheckApproval = PurePlugin pname tname  url
+
+  where
+    pname , tname :: Text
+    pname = "Check Approval"
+    tname = "fire_project"
+    url :: ArrowReaderM Identity
+    url = proc t -> do
+      odxR "aproval_date" -< ()
+      v <- catMaybes <$> atRA "andamentos" (
+          liftA2 (,) <$> idxR "andamento_description"  <*> idxR "andamento_date"
+          ) -< ()
+
+      let app = L.find (\(TB1 (SText x),_) -> T.isInfixOf "APROVADO"  x) v
+          tt = L.find ((\(TB1 (SText x)) -> T.isInfixOf "ENTREGUE AO SOLICITANTE APROVADO"  x).fst) v
+      returnA -< Just $ tblist [_tb $ Attr "aproval_date" (LeftTB1 $ fmap snd (liftA2 const app tt))]
 
 
 siapi3Plugin  = BoundedPlugin2 pname tname  url
@@ -526,4 +587,4 @@ queryArtAndamento = BoundedPlugin2 pname tname url
 -}
 
 plugList :: [Plugins]
-plugList = [oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]
+plugList = [siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin ,siapi2Hack, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]

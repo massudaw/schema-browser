@@ -103,6 +103,12 @@ triml = dropWhile (`elem` " \r\n\t")
 trimr :: String -> String
 trimr = reverse . triml . reverse
 
+testSiapi2 = do
+  kk <- BS.readFile "Consulta Solicitação.html"
+  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  putStrLn . unlines . fmap concat . concat =<< readHtml inp
+
+
 testReceita = do
   kk <- BS.readFile "receita.html"
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
@@ -157,7 +163,7 @@ readCreaHistoricoHtml file = fmap tail <$> do
 readHtml file = do
   let
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
-        >>> getTable
+        >>> getTable' (deep getText)
   runX arr
 {-
 exec inputs = do

@@ -38,6 +38,7 @@ import GHC.Exts
 import Control.Applicative
 import qualified Data.List as L
 import qualified Data.Map as Map
+import Data.Map (Map)
 import qualified Data.Set as Set
 
 import Prelude hiding(head)
@@ -147,14 +148,18 @@ groupSplit2 :: Ord b => (a -> b) -> (a -> c ) -> [a] -> [(b ,[c])]
 groupSplit2 f g = fmap (\i-> (f $ head i , g <$> i)) . groupWith f
 
 applyTable'
-  ::  PatchConstr k a  => [TBData k a ] -> TBIdx k a -> [TBData k a]
-applyTable' l patom@(m,i, []) = L.filter (\tb -> getPKM tb /= i ) l
-applyTable' l patom@(m,i, p) =  case L.find (\tb -> getPKM tb == i ) l  of
-                  Just _ ->  catMaybes $ L.map (\tb@(m, k) -> if  getPKM tb ==  i  then (case p of
-                                                [] ->  Nothing
-                                                ps -> Just $ applyRecord (m,k) (patom)
-                                              ) else  (Just tb )) l
-                  Nothing -> createTB1  patom  : l
+  ::  PatchConstr k a  => Map [(k,FTB a)] (TBData k a ) -> TBIdx k a -> Map [(k,FTB a)] (TBData k a )
+applyTable' l patom@(m,i, []) = Map.delete i  l
+applyTable' l patom@(m,i, p) =  case Map.lookup i  l  of
+                  Just v ->  let
+                           el = applyRecord  v patom
+                           pkel = getPKM el
+                          in if pkel == i
+                            then Map.update (\tb -> Just $ applyRecord tb patom) i l
+                            else Map.insert pkel el  . Map.delete i $ l
+                  Nothing -> let
+                      el = createTB1  patom
+                      in Map.insert (getPKM el) el  l
 applyTable' l i = errorWithStackTrace (show (l,i))
 
 
@@ -172,7 +177,8 @@ applyTable l i = errorWithStackTrace (show (l,i))
 
 
 getPK (TB1 i) = getPKM i
-getPKM (m, k) = (L.sortBy (comparing fst) $ concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (runIdentity $ getCompose k)))))
+getPKM (m, k) = concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (unTB k))))
+
 getAttr'  (TB1 (m, k)) = (concat (fmap aattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
 getPKAttr (m, k) = traComp (concat . F.toList . (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m))   )) k

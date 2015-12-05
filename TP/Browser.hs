@@ -8,11 +8,15 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 
 module Main (main) where
 
 import Query
+import Control.Concurrent.Async
+import Data.List (foldl')
 import Debug.Trace
 import Types
 import Data.Either
@@ -116,10 +120,13 @@ plugs schm db plugs = do
   conn <- connectPostgreSQL (connRoot db)
   inf <- keyTables schm conn conn ("metadata",T.pack $ user db ) Nothing postgresOps plugList
   ((m,td),(s,t)) <- transaction inf $ eventTable  inf (lookTable inf "plugins") Nothing Nothing [] []
-  let els = L.filter (not . (`L.elem` t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
+  let els = L.filter (not . (`L.elem` F.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
   p <- transaction inf $ mapM (\table -> fullDiffInsert  (meta inf)  table) els
-  putMVar m (s,foldl applyTable'  t (tableDiff <$> catMaybes p))
+  putMVar m (s,foldl' applyTable'  t (tableDiff <$> catMaybes p))
 
+chuncksOf i  [] = []
+chuncksOf i v = let (h,t) = L.splitAt i v
+              in h : chuncksOf i t
 poller schm db plugs = do
 
   conn <- connectPostgreSQL (connRoot db)
@@ -136,19 +143,37 @@ poller schm db plugs = do
           let intervalsec = intervalms `div` 10^3
           if  diffUTCTime current start  >  fromIntegral intervalsec
           then do
-              execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and schema_name = ?" (current,pname,schema )
               print ("START " <>T.unpack pname  <> " - " <> show current ::String)
-              ((m,listResT),(l,listRes)) <- transaction inf $ eventTable inf (lookTable inf a) Nothing Nothing [][]
-              let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
-                  tdInput i =  isJust  $ checkTable  (fst f) i
-                  tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
 
-              i <-  mapM (\inp -> do
-                  o  <- fmap (fmap (liftTable' inf a)) <$> catchPluginException inf a pname (getPK $ TB1 inp)   (elemp (Just $ mapKey' keyValue inp))
-                  traverse (\o -> do
-                    let diff =   join $ (\i j -> diffUpdateAttr   (i ) (j)) <$>  o <*> Just inp
-                    maybe (return Nothing )  (\i -> transaction inf $ (editEd $ schemaOps inf) inf (justError "no test" o) inp ) diff ) o ) $ evb
-              (putMVar m ) .  (\(l,listRes) -> (l,foldl applyTable' listRes (fmap tableDiff (catMaybes $ rights i)))) =<< currentValue (facts listResT)
+              let fetchSize = 1000
+              ((m,listResT),(l,listRes)) <- transaction inf $ eventTable inf (lookTable inf a) Nothing (Just fetchSize) [][]
+              let sizeL = justError "no coll" $ M.lookup [] l
+                  lengthPage s pageSize  = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
+              i <- concat <$> mapM (\ix -> do
+                  print "pre list"
+                  ((m,listResT),(l,listResAll)) <- transaction inf $ eventTable inf (lookTable inf a) (Just ix) (Just fetchSize) [][]
+                  print "pos list"
+                  let listRes = L.take fetchSize . F.toList $ listResAll
+
+                  let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
+                      tdInput i =  isJust  $ checkTable  (fst f) i
+                      tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
+
+                  i <-  mapConcurrently (mapM (\inp -> do
+                      o  <- fmap (fmap (liftTable' inf a)) <$> catchPluginException inf a pname (getPK $ TB1 inp)   (elemp (Just $ mapKey' keyValue inp))
+                      v <- traverse (\o -> do
+                        let diff =   join $ (\i j -> difftable (j ) (i)) <$>  o <*> Just inp
+                        maybe (return Nothing )  (\i -> transaction inf $ (editEd $ schemaOps inf) inf (justError "no test" o) inp ) diff ) o
+                      traverse (traverse (\p -> putMVar m  .  (\(l,listRes) -> (l,applyTable' listRes (tableDiff p))) =<< currentValue (facts listResT))) v
+                      return v
+                        )
+                    ) $ L.transpose $ chuncksOf 20 evb
+
+                  print "pre log"
+                  (putMVar m ) .  (\(l,listRes) -> (l,foldl' applyTable' listRes (fmap tableDiff (catMaybes $ rights $ concat i)))) =<< currentValue (facts listResT)
+                  print "pos log"
+                  return $ concat i
+                  ) [0..(lengthPage (fst sizeL) fetchSize -1)]
               end <- getCurrentTime
               print ("END " <>T.unpack pname <> " - " <> show end ::String)
               let polling_log = lookTable (meta inf) "polling_log"
@@ -163,6 +188,7 @@ poller schm db plugs = do
                   time  = TB1 . STimestamp . utcToLocalTime utc
               p <- transaction inf $ fullDiffInsert  (meta inf) (liftTable' (meta inf) "polling_log" table)
               traverse (putMVar plm ). traverse (\l -> applyTable' l <$> (fmap tableDiff  p)) =<< currentValue (facts plt)
+              execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and schema_name = ?" (current,pname,schema )
               execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and schema_name = ?" (end ,pname,schema)
               threadDelay (intervalms*10^3)
           else do
@@ -265,7 +291,7 @@ databaseChooser smvar sargs = do
               ((_,tb),_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []  [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  "wesley.massuda@gmail.com"))]
               let
                   td :: Tidings OAuth2Tokens
-                  td = fmap (\o -> justError "" . fmap (toOAuth . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $   head $ snd $ o )) tb
+                  td = fmap (\o -> justError "" . fmap (toOAuth . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $   head $ snd $ o )) (fmap F.toList <$> tb)
                   toOAuth v = tokenToOAuth (b,d,a,c)
                     where [a,b,c,d] = fmap TB1 $ F.toList $ snd $ unTB1 v :: [FTB Showable]
               call smvar dbConn conn (schemaN,T.pack $ user ) (Just ("me",td )) gmailOps plugList
@@ -279,7 +305,7 @@ databaseChooser smvar sargs = do
 attrLine i e   = do
   let nonRec = tableNonrec $ TB1  i
       attr i (k,v) = set  (strAttr (T.unpack $ keyValue k)) (renderShowable v) i
-      attrs   l i  = foldl attr i l
+      attrs   l i  = foldl' attr i l
   attrs (F.toList (tableAttrs$ TB1  i) ) $ line ( L.intercalate "," (fmap renderShowable .  allKVRec  $ TB1 i) <> "  -  " <>  (L.intercalate "," $ fmap (renderPrim ) nonRec)) e
 
 
@@ -357,30 +383,30 @@ viewerKey inf key = mdo
   inisort <- currentValue (facts tsort)
   (offset,res3)<- mdo
     offset <- offsetField 0 (never ) (lengthPage <$> facts res3)
-    res3 <- mapT0Event (fmap inisort vp) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ tidings res2 ( rumors vpt) ) )
+    res3 <- mapT0Event (fmap inisort (fmap F.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap F.toList) $ tidings ( res2) ( rumors vpt) ) )
     return (offset, res3)
   onEvent (rumors $ triding offset) $ (\i -> liftIO $ transaction inf $ eventTable  inf table  (Just $ (i `div` 10)  + 1 ) Nothing  [] [])
   let
     paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )<$> triding offset
   page <- currentValue (facts paging)
-  res4 <- mapT0Event (page $ fmap inisort vp) return (paging <*> res3)
+  res4 <- mapT0Event (page $ fmap inisort (fmap F.toList vp)) return (paging <*> res3)
   itemList <- listBox (fmap snd res4) (tidings st sel ) (pure id) ( pure attrLine )
 
   let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
   prop <- stepper cv evsel
   let tds = tidings prop (diffEvent  prop evsel)
 
-  (cru,ediff,pretdi) <- crudUITable inf (pure "Editor")  (tidings (fmap snd res2) never)[] [] (allRec' (tableMap inf) table) tds
+  (cru,ediff,pretdi) <- crudUITable inf (pure "Editor")  (tidings (fmap (F.toList .snd) res2) never)[] [] (allRec' (tableMap inf) table) tds
   diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip applyRecord j ) i) <$> facts pretdi <@> ediff
   let
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
-  res2 <- stepper (fmap inisort vp) (rumors vpt)
-  onEvent ( ((\(m,i) j -> (m,foldl applyTable' i [j])) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar)
+  res2 <- stepper (vp) (rumors vpt)
+  onEvent ( ((\(m,i) j -> (m,foldl' applyTable' i [j])) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar)
   onEvent (facts vpt <@ UI.click updateBtn ) (\(oi,oj) -> do
-              let up =  (updateEd (schemaOps inf) ) inf table (L.maximumBy (comparing (getPK.TB1)) oj ) Nothing (Just 400)
+              let up =  (updateEd (schemaOps inf) ) inf table (L.maximumBy (comparing (getPK.TB1)) (F.toList oj) ) Nothing (Just 400)
               (l,i,j) <- liftIO $  transaction inf up
-              liftIO .  putMVar tmvar. fmap (fmap unTB1)  $ (oi , (TB1 <$> oj) <>  l ) )
+              liftIO .  putMVar tmvar  $ (oi , oj <> M.fromList ((\i -> (getPK i,unTB1 i) )<$>  l )) )
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK. TB1 )  <$> facts tds) # set UI.class_ "col-xs-8"
@@ -399,23 +425,5 @@ tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
 tableAttrs (TB1  (_,k)) = concat $ fmap aattr (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
 tableAttrs (LeftTB1 (Just i)) = tableAttrs i
 tableAttrs (ArrayTB1 [i]) = tableAttrs i
-{-
-
-
-filterCase inf t@(Attr k _ ) = do
-  opInp <- UI.input # set UI.text "="
-  opBh <- stepper "=" (UI.valueChange opInp)
-  let opT = (\v -> if elem v validOp then Just v else Nothing) <$> tidings opBh (UI.valueChange opInp)
-  elv <- attrUITable (pure Nothing) [] t
-  TrivialWidget (fmap (fmap (t,)) $ liftA2 (liftA2 (,)) opT (triding elv)) <$> UI.div # set children [opInp,getElement elv ]
-filterCase inf (FKT l  _ tb1) =  traverse (filterUI inf) tb1
-filterCase inf (IT _ tb1) = traverse (filterUI inf) tb1
-
-filterUI inf t@(k,v) = do
-  el <- listBox (pure (fmap (first (S.map _relOrigin)) $  M.toList (_kvvalues $ runIdentity $ getCompose v) )) (pure Nothing) (pure id) (pure (\i j -> j # set text (show (T.intercalate "," $ keyValue <$> S.toList (fst i)) )))
-  elv <- mapDynEvent (maybe emptyUI  (filterCase inf . unTB . fmap (const ()) . snd )) (TrivialWidget (triding el) (getElement el))
-  out <- UI.div # sink UI.text (show <$> facts (triding elv))
-  TrivialWidget (triding elv) <$> UI.div # set children [getElement el , getElement elv,out]
-  -}
 
 

@@ -789,7 +789,7 @@ fkUITable inf top constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           ftdi2 :: Tidings (Maybe [TB Identity  Key Showable])
           ftdi2 =   fmap (fmap unTB. tbrefM ) <$> ftdi
           res3 :: Tidings [TB1 Showable]
-          res3 =  foldr (\constr  res2 -> (\el constr -> filter (not. constr. unTB1 ) el)  <$> res2  <*> snd constr ) (tidings (snd <$> res2) never) constr
+          res3 =  foldr (\constr  res2 -> (\el constr -> filter (not. constr. unTB1 ) el)  <$> res2  <*> snd constr ) (tidings (F.toList . snd <$> res2) never) constr
           unRKOptional (Key v a b d n m (KOptional c)) = Key v a b d n m c
           unRKOptional i = i
       let
@@ -800,7 +800,7 @@ fkUITable inf top constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
       filterInp <- UI.input
       filterInpBh <- stepper "" (UI.valueChange filterInp)
       let
-          cv = search (snd res) cvres
+          cv = search (F.toList $ snd res) cvres
           tdi =  search <$> res3 <*> vv
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList .    _unTB1
@@ -826,7 +826,7 @@ fkUITable inf top constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> triding itemList), if isReadOnly tb then never else rumors tdi]),diffUp]
       st <- stepper cv sel
       inisort <- currentValue (facts sortList)
-      res2 <- stepper (fmap inisort res ) (fmap (fmap TB1) <$> rumors vpt)
+      res2 <- stepper res  (fmap (fmap TB1) <$> rumors vpt)
       onEvent ((\(m,i) j -> (m,foldl' applyTable' (fmap unTB1 i) [j])) <$> res2 <@> ediff  )  (liftIO .  putMVar tmvar   )
       let
         fksel =  fmap (\box ->  FKT (backFKRef  relTable  (fmap (keyAttr .unTB )ifk)   box) rel box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> fmap (fmap TB1) pretdi <*> tidings st sel)
@@ -985,7 +985,7 @@ viewer inf table env = mdo
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
               ((m,t),(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> traceShowId ordlist) envK
               let (size,e) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (L.sort $ fmap snd envK) fixmap
-              return (o,(slist,paging o (size,sorting' ordlist lres)))
+              return (o,(slist,paging o (size,sorting' ordlist (F.toList lres))))
       dir2 True  = Desc
       dir2 False = Asc
       nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))
