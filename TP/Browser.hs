@@ -128,7 +128,6 @@ chuncksOf i  [] = []
 chuncksOf i v = let (h,t) = L.splitAt i v
               in h : chuncksOf i t
 poller schm db plugs = do
-
   conn <- connectPostgreSQL (connRoot db)
   enabled :: [(Text,Int,Text)] <- query_ conn "SELECT schema_name, poll_period_ms,poll_name from metadata.polling"
   let poll (schema,intervalms ,p) =  do
@@ -169,9 +168,7 @@ poller schm db plugs = do
                         )
                     ) $ L.transpose $ chuncksOf 20 evb
 
-                  print "pre log"
                   (putMVar m ) .  (\(l,listRes) -> (l,foldl' applyTable' listRes (fmap tableDiff (catMaybes $ rights $ concat i)))) =<< currentValue (facts listResT)
-                  print "pos log"
                   return $ concat i
                   ) [0..(lengthPage (fst sizeL) fetchSize -1)]
               end <- getCurrentTime
