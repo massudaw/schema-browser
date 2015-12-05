@@ -46,7 +46,6 @@ import qualified Data.Text as T
 
 import qualified Reactive.Threepenny as R
 
-
 import Query
 import Postgresql
 import Patch
@@ -135,7 +134,15 @@ keyTablesInit schemaVar conn userconn (schema,user) oauth ops pluglist = do
            (i1,pks) = (keyMap, M.fromList $ fmap (\(_,t)-> (S.fromList$ rawPK t ,t)) $ M.toList i3 )
            i2 =  M.filterWithKey (\k _ -> not.S.null $ k )  pks
        sizeMapt <- M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t  i3 ) <$> query conn tableSizes (Only schema)
-       mvar <- newMVar M.empty
+       varmap <- mapM (\i -> do
+              let ini = ((M.empty,M.empty) :: Collection Key Showable)
+              mnew <-  newMVar ini
+              (e,h) <- liftIO $R.newEvent
+              bh <- R.stepper ini e
+              liftIO$ forkIO $ forever $ do
+                  (h =<< takeMVar mnew )
+              return (tableMeta i,  (mnew,R.tidings bh e))) (F.toList i2)
+       mvar <- newMVar  (M.fromList varmap)
        metaschema <- if (schema /= "metadata")
           then Just <$> keyTables  schemaVar conn userconn ("metadata",user) oauth ops pluglist
           else return Nothing

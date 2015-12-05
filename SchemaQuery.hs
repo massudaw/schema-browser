@@ -39,6 +39,7 @@ import qualified Data.Text as T
 --
 
 defsize = 200
+
 estLength page size resL est = fromMaybe 0 page * fromMaybe defsize size  +  est
 
 eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
@@ -54,44 +55,27 @@ eventTable inf table page size presort fixed = do
               then id
               else
                 M.filterWithKey  (\_ (m,k)->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV k)
-    -- print "Take MVar"
-    mmap <- liftIO$ takeMVar mvar
-    -- print "Look MVar"
-    (mtable,td,ini) <- case (M.lookup (tableMeta table) mmap ) of
-         Just (i,td) -> do
-           liftIO $ putMVar mvar mmap
-           (fixedmap ,reso) <- liftIO$ currentValue (facts td)
-           let (sq,mp)  = justError "cant find filter map" $ M.lookup fixidx  fixedmap
-           ini <- if (isJust (M.lookup fixidx  fixedmap )&& maybe False (\p->not $ M.member (p+1) mp) page  && sq >  M.size (filterfixed reso ) && isJust (join $ flip M.lookup mp . (*pagesize) <$> page ))
+    mmap <- liftIO $ readMVar mvar
+    let (i,td) =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
+    (mtable,td,ini) <- do
+       (fixedmap ,reso) <- liftIO $ currentValue (facts td)
+       ini <- case M.lookup fixidx fixedmap of
+          Just (sq,mp) -> do
+             if (maybe False (\p->not $ M.member (p+1) mp) page
+                && sq >  M.size (filterfixed reso )
+                && isJust (join $ flip M.lookup mp . (*pagesize) <$> page ))
              then  do
                (res,nextToken ,s ) <- (listEd $ schemaOps inf ) inf table (join $ flip M.lookup mp . (*pagesize) <$> page ) size sortList fixed
                let ini = (M.insert fixidx (estLength page size res s  ,maybe mp (\v -> M.insert ((fromMaybe 0 page +1 )*pagesize) v  mp)  nextToken) fixedmap ,reso <> M.fromList (fmap (\i -> (getPK i,unTB1 i)) res))
                liftIO$ putMVar i ini
                return $ Just ini
              else return Nothing
-           ini2 <- if (isNothing (M.lookup fixidx  fixedmap ))
-             then do
-               (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing size sortList fixed
-               let ini = (M.insert fixidx (estLength page size res s ,maybe M.empty (M.singleton pagesize) p) fixedmap , M.fromList (fmap (\i -> (getPK i,unTB1 i)) res) <> reso)
-               liftIO $ putMVar i ini
-               return $ Just ini
-             else return Nothing
-             -- liftIO $ print (fst ini)
-           return (i,td,ini <> ini2)
-         Nothing -> do
-           (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing size sortList fixed
-           -- liftIO $ print "New MVar"
-           let ini = (M.singleton fixidx (estLength page size res s ,maybe M.empty (M.singleton pagesize) p) ,M.fromList (fmap (\i -> (getPK i,unTB1 i)) res))
-           mnew <- liftIO$ newMVar ini
-           (e,h) <- liftIO $R.newEvent
-           bh <- liftIO$ R.stepper ini  e
-           let td = (R.tidings bh e)
-           liftIO$ putMVar mvar (M.insert (tableMeta table) (mnew,td) mmap)
-           liftIO$ forkIO $ forever $ do
-              (h =<< takeMVar mnew ) -- >> print "Take MVar"
-           -- Dont
-           -- print "Put MVar"
-           return (mnew,td,Just ini)
+          Nothing -> do
+             (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing size sortList fixed
+             let ini = (M.insert fixidx (estLength page size res s ,maybe M.empty (M.singleton pagesize) p) fixedmap , M.fromList (fmap (\i -> (getPK i,unTB1 i)) res) <> reso)
+             liftIO $ putMVar i ini
+             return $ Just ini
+       return (i,td,ini)
     iniT <- fromMaybe (liftIO $ currentValue (facts td)) (return <$> ini)
     return ((mtable, fmap filterfixed <$> td),fmap filterfixed iniT)
 

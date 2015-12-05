@@ -118,3 +118,5 @@ nonEmpty [] = Nothing
 nonEmpty i = Just i
 
 
+safeTail [] = []
+safeTail i = tail i

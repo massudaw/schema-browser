@@ -11,6 +11,7 @@ import System.Directory (doesFileExist)
 import Network.Google.OAuth2 (formUrl, exchangeCode, refreshTokens,
                               OAuth2Client(..), OAuth2Tokens(..))
 import Control.Applicative
+import Text
 import qualified Data.Set as S
 import qualified Data.Foldable as F
 import Control.Monad.IO.Class
@@ -26,7 +27,6 @@ import System.Environment
 import Query
 import Data.Aeson.Lens
 import Schema
-import Postgresql
 import qualified Data.Text as T
 import Data.Text (Text)
 import Data.Aeson

@@ -9,6 +9,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+
 module Plugins (plugList) where
 
 import Location
@@ -573,18 +574,6 @@ queryArtAndamento = BoundedPlugin2 pname tname url
           artInp inp = Just $ tblist $fmap attrT   $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       returnA -< artInp v
 
-
-{- testPlugin  db sch p = withConnInf db sch (\inf -> do
-                                       let rp = tableView (tableMap inf) (fromJust $ M.lookup (_bounds p) (tableMap inf))
-                                           bds = _arrowbounds p
-                                           rpd = accessTB  (fst bds <> snd bds) (markDelayed True rp)
-                                           rpq = selectQuery rpd
-                                       print rpq
-                                       q <- queryWith_ (fromAttr (unTlabel rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
-                                       return $ q
-                                           )
-
--}
 
 plugList :: [Plugins]
 plugList = [siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin ,siapi2Hack, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]

@@ -1021,4 +1021,13 @@ recOverMAttr' tag tar  m =   foldr go m tar
 replaceRecRel :: Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b ) -> [MutRec [Set (Rel Key) ]] -> Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b )
 replaceRecRel = foldr (\(MutRec l) v  -> foldr (\a -> recOverMAttr' a l )   v l)
 
+unKOptionalAttr (Attr k i ) = Attr (unKOptional k) i
+unKOptionalAttr (IT  r (LeftTB1 (Just j))  ) = (\j-> IT   r j )    j
+unKOptionalAttr (FKT i  l (LeftTB1 (Just j))  ) = FKT (fmap (mapComp (first unKOptional) ) i)  l j
+
+unOptionalAttr (Attr k i ) = Attr (unKOptional k) <$> unSOptional i
+unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
+unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverse ( traComp (traFAttr unSOptional) . (mapComp (firstTB unKOptional)) ) i)  j
+
+
 

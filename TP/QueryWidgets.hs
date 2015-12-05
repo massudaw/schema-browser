@@ -18,6 +18,7 @@ module TP.QueryWidgets (
     ) where
 
 import RuntimeTypes
+import Text
 import Network.HTTP.Types.URI
 import SortList
 import Data.Functor.Identity
@@ -54,7 +55,6 @@ import Text.Read
 import Data.Text (Text)
 import Types
 import Query
-import Postgresql
 import Data.Maybe
 import Prelude hiding (head)
 import Data.Time
@@ -827,7 +827,7 @@ fkUITable inf top constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
       st <- stepper cv sel
       inisort <- currentValue (facts sortList)
       res2 <- stepper res  (fmap (fmap TB1) <$> rumors vpt)
-      onEvent ((\(m,i) j -> (m,foldl' applyTable' (fmap unTB1 i) [j])) <$> res2 <@> ediff  )  (liftIO .  putMVar tmvar   )
+      onEvent ((\(m,i) j -> (m,foldl' applyTable' (fmap unTB1 i) [j])) <$> res2 <@> ediff  )  (liftIO . putMVar tmvar)
       let
         fksel =  fmap (\box ->  FKT (backFKRef  relTable  (fmap (keyAttr .unTB )ifk)   box) rel box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> fmap (fmap TB1) pretdi <*> tidings st sel)
       element itemList # set UI.class_ "col-xs-5"
@@ -972,14 +972,9 @@ viewer inf table env = mdo
   let pageSize = 20
       iniPg =  M.empty
       iniSort = selSort sortSet ((,True) <$>  key)
-
   sortList <- sortFilter sortSet ((,True) <$> key) []  UI.tr UI.th conv
 
-  let {-makeQ slist' (o,i) = fmap ((o,).(slist,)) $ paginate (conn inf) (unTB1 tableSt2)  (fmap dir2 <$> (filterOrd slist)) o ((*pageSize) $ maybe o ((o-) . fst) kold ) pageSize (snd <$> kold) (nonEmpty envK <> flist )
-          where kold = join $ fmap (traverse (allMaybes . fmap (traverse unSOptional') . L.filter (flip elem (fmap fst (filterOrd slist)).fst) . getAttr'  )) i
-                slist = fmap (\(i,j,_) -> (i,j)) slist'
-                flist = nonEmpty $ catMaybes $ fmap (\(i,_,j) -> second (Attr i) . first T.pack <$> j) slist'-}
-      makeQ slist' (o,i) = do
+  let makeQ slist' (o,i) = do
               let slist = fmap (\(i,j,_) -> (i,j)) slist'
                   ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
