@@ -112,6 +112,11 @@ unIntercalate pred s                 =  case dropWhile pred s of
                                       where (w, s'') =
                                              break pred s'
 
+chuncksOf i  [] = []
+chuncksOf i v = let (h,t) = L.splitAt i v
+              in h : chuncksOf i t
+
+
 eitherToMaybe = either (const Nothing) Just
 
 nonEmpty [] = Nothing

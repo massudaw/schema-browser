@@ -576,4 +576,4 @@ queryArtAndamento = BoundedPlugin2 pname tname url
 
 
 plugList :: [Plugins]
-plugList = [siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin ,siapi2Hack, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]
+plugList = [siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin {-,siapi2Hack-}, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]

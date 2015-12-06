@@ -11,7 +11,6 @@ import qualified Data.Binary as B
 import Data.Functor.Identity
 import Data.Scientific hiding(scientific)
 import Data.Bits
-import Data.Bifunctor
 import qualified  Data.Map as M
 
 import Data.Tuple
@@ -30,7 +29,6 @@ import           Database.PostgreSQL.Simple.Types as PGTypes
 import           Data.Attoparsec.ByteString.Char8 hiding (Result)
 import Data.Traversable (traverse)
 import qualified Data.Traversable  as Tra
--- import Warshal
 import Data.Time.LocalTime
 import qualified Data.List as L
 import qualified Data.Vector as Vector
@@ -58,17 +56,7 @@ import Database.PostgreSQL.Simple
 import Blaze.ByteString.Builder(fromByteString)
 import Blaze.ByteString.Builder.Char8(fromChar)
 
-data DB = DB { dbName :: String
-          , dbUser :: String
-          , dbPassword :: String
-          , dbHost :: String
-          , dbPort :: String
-          }deriving(Show)
 
-renderPostgresqlConn (DB n u p h pt)
-  = "user=" <> u <> " password=" <> p <> " dbname=" <> n
-
-db = DB "usda" "postgres" "queijo" "localhost" "5432"
 
 -- Wrap new instances without quotes delimiting primitive values
 newtype UnQuoted a = UnQuoted {unQuoted :: a}

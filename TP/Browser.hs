@@ -24,7 +24,6 @@ import Step
 import Control.Lens (traverseOf,_3)
 import Plugins
 import TP.Widgets
-import qualified Data.Vector as V
 import SchemaQuery
 import PostgresQuery (postgresOps)
 import SortList
@@ -36,7 +35,6 @@ import Data.Functor.Apply
 import System.Environment
 import Network.Google.OAuth2 (OAuth2Tokens(..))
 import Data.Ord
-import Control.Exception
 import Utils
 import Schema
 import Patch
@@ -69,7 +67,6 @@ import Data.String
 import OAuth
 import GHC.Stack
 
-import Control.Arrow
 
 data BrowserState
   = BrowserState
@@ -116,6 +113,7 @@ main = do
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup smvar  (tail args))
   print "Finish"
 
+
 plugs schm db plugs = do
   conn <- connectPostgreSQL (connRoot db)
   inf <- keyTables schm conn conn ("metadata",T.pack $ user db ) Nothing postgresOps plugList
@@ -124,9 +122,6 @@ plugs schm db plugs = do
   p <- transaction inf $ mapM (\table -> fullDiffInsert  (meta inf)  table) els
   putMVar m (s,foldl' applyTable'  t (tableDiff <$> catMaybes p))
 
-chuncksOf i  [] = []
-chuncksOf i v = let (h,t) = L.splitAt i v
-              in h : chuncksOf i t
 poller schm db plugs = do
   conn <- connectPostgreSQL (connRoot db)
   enabled :: [(Text,Int,Text)] <- query_ conn "SELECT schema_name, poll_period_ms,poll_name from metadata.polling"
@@ -143,7 +138,6 @@ poller schm db plugs = do
           if  diffUTCTime current start  >  fromIntegral intervalsec
           then do
               print ("START " <>T.unpack pname  <> " - " <> show current ::String)
-
               let fetchSize = 1000
               ((m,listResT),(l,listRes)) <- transaction inf $ eventTable inf (lookTable inf a) Nothing (Just fetchSize) [][]
               let sizeL = justError "no coll" $ M.lookup [] l
@@ -166,7 +160,7 @@ poller schm db plugs = do
                       traverse (traverse (\p -> putMVar m  .  (\(l,listRes) -> (l,applyTable' listRes (tableDiff p))) =<< currentValue (facts listResT))) v
                       return v
                         )
-                    ) $ L.transpose $ chuncksOf 20 evb
+                    ) . L.transpose . chuncksOf 20 $ evb
 
                   (putMVar m ) .  (\(l,listRes) -> (l,foldl' applyTable' listRes (fmap tableDiff (catMaybes $ rights $ concat i)))) =<< currentValue (facts listResT)
                   return $ concat i
@@ -362,7 +356,6 @@ viewerKey inf key = mdo
   -- Final Query ListBox
   filterInp <- UI.input
   filterInpBh <- stepper "" (UI.valueChange filterInp)
-  -- el <- filterUI  inf (allRec' (tableMap inf)  table)
   let filterInpT = tidings filterInpBh (diffEvent filterInpBh (UI.valueChange filterInp))
       sortSet = rawPK table <>  L.filter (not .(`L.elem` rawPK table)) (F.toList . tableKeys . TB1 . tableNonRef' . allRec' (tableMap inf ) $ table)
   sortList <- selectUI sortSet ((,True) <$> rawPK table ) UI.div UI.div conv
@@ -375,7 +368,7 @@ viewerKey inf key = mdo
      filtering res = (\t -> fmap (filter (filteringPred t )) )<$> filterInpT  <*> res
      pageSize = 20
      lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
-        where (s,m) =justError "no empty pages" $  M.lookup [] fixmap
+        where (s,_) =justError "no empty pages" $  M.lookup [] fixmap
 
   inisort <- currentValue (facts tsort)
   (offset,res3)<- mdo
@@ -413,7 +406,6 @@ viewerKey inf key = mdo
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row"
   UI.div # set children ([updateBtn,itemSelec,insertDivBody ] )
 
-testWidget ui = do startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = Just 8000 })  (\w -> getBody w #+ [ui] >> return ())
 
 
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k

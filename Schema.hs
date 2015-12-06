@@ -300,17 +300,8 @@ testAcademia q = testParse "academia" "academia"  q
 
 
 dbTable mvar table = do
-    mmapm <- tryTakeMVar mvar
-    case mmapm of
-        Just mmap ->
-          case (M.lookup table mmap ) of
-               Just (i,td) -> do
-                  putMVar mvar mmap
-                  return $ Just (i,td)
-               Nothing -> do
-                  putMVar mvar mmap
-                  return Nothing
-        Nothing -> return Nothing
+    mmap <- readMVar mvar
+    return . justError "no mvar " . M.lookup table $ mmap
 
 
 mergeCreate (Just i) (Just j) = Just $ mergeTB1 i j
@@ -380,7 +371,7 @@ atTable ::  KVMetadata Key -> DBM Key v (Map [(Key,FTB Showable)] (TBData Key v)
 atTable k = do
   i <- ask
   k <- liftIO$ dbTable i k
-  maybe (return M.empty) (\(m,c)-> fmap snd $ liftIO $ R.currentValue (R.facts c)) k
+  (\(m,c)-> fmap snd $ liftIO $ R.currentValue (R.facts c)) k
 
 joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  [TBData Key Showable] -> TransactionM ( FTB (TBData Key Showable))
 joinRelT rel ref tb table
