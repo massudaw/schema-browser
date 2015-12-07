@@ -1044,7 +1044,7 @@ dashBoardAllTableIndex e@(inf,table,index) =   metaAllTableIndexA inf "modificat
               , IT (_tb $ Attr "data_index2" (TB1 () ) ) (ArrayTB1 $  fmap ((\(i,j) -> TB1 $tblist $ fmap _tb [Attr "key" (TB1 $ SText i) ,Attr "val" (TB1 (SDynamic j))]). first keyValue)index) ]
 
 
-filterRec' envK = filterTB1' ( not . (`S.isSubsetOf`  (S.fromList envK )) . S.fromList . fmap _relOrigin.  keyattr )
+filterRec' envK = filterTB1' (not . (`S.isSubsetOf`  (S.fromList envK )) . S.fromList . fmap _relOrigin.  keyattr )
 
 renderTableNoHeaderSort2 header inf modtablei out = do
   let

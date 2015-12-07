@@ -116,6 +116,7 @@ chuncksOf i  [] = []
 chuncksOf i v = let (h,t) = L.splitAt i v
               in h : chuncksOf i t
 
+justLook k = justError ("no key in map" <> show k) . M.lookup k
 
 eitherToMaybe = either (const Nothing) Just
 
