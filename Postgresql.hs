@@ -286,7 +286,7 @@ parsePrim i =  do
           let i = SPInterval <$> diffInterval
            in doublequoted i <|> i
 
-        PTimestamp ->
+        PTimestamp zone ->
              let p =  do
                     i <- fmap (STimestamp  . fst) . strptime "%Y-%m-%d %H:%M:%OS"<$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i

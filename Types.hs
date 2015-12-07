@@ -349,7 +349,7 @@ data KPrim
    | PDouble
    | PDate
    | PDayTime
-   | PTimestamp
+   | PTimestamp (Maybe TimeZone)
    | PInterval
    | PPosition
    | PBounding

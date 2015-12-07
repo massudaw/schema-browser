@@ -20,6 +20,7 @@ module Query where
 import qualified Control.Lens as Le
 import Data.Functor.Apply
 import Data.Bifunctor
+import Data.Time.LocalTime
 import Data.Unique
 import Data.Functor.Identity
 import Data.Ord
@@ -925,10 +926,10 @@ postgresPrim =
   ,("smallint",PInt)
   ,("boolean",PBoolean)
   ,("bool",PBoolean)
-  ,("timestamptz",PTimestamp)
-  ,("timestamp",PTimestamp)
-  ,("timestamp with time zone",PTimestamp)
-  ,("timestamp without time zone",PTimestamp)
+  ,("timestamptz",PTimestamp Nothing)
+  ,("timestamp",PTimestamp (Just utc))
+  ,("timestamp with time zone",PTimestamp Nothing)
+  ,("timestamp without time zone",PTimestamp (Just utc))
   ,("interval", PInterval)
   ,("date" ,PDate)
   ,("time",PDayTime)

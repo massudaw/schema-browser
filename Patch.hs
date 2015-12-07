@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -55,10 +56,40 @@ data PathFTB   a
   deriving(Show,Eq,Ord,Functor,Generic,Foldable)
 
 
-type family Index k
-type instance Index Showable = Showable
-type instance Index (TBData k a) =  TBIdx k (Index a)
-type instance Index (TB Identity k a) =  PathAttr k (Index a)
+class Patch f where
+  type Index k
+  diff :: f -> f -> Maybe (Index f)
+  apply :: f -> Index f -> f
+  create :: Index f -> f
+  patch  :: f -> Index f
+
+instance PatchConstr k a => Patch (TB Identity k a)  where
+  type Index (TB Identity k a) =  PathAttr k (Index a)
+  diff = diffAttr
+  apply = applyAttr
+  create = createAttr
+  patch = patchAttr
+
+instance  PatchConstr k a => Patch (TBData k a)  where
+  type Index (TBData k a) =  TBIdx k (Index a)
+  diff = difftable
+  apply = applyRecord
+  create = createTB1
+  patch = patchTB1
+
+instance (Ord a,Show a,Patch a) => Patch (FTB a ) where
+  type Index (FTB a) =  PathFTB (Index a)
+  diff = diffFTB patch diff
+  apply = applyFTB create apply
+
+
+instance Patch Showable  where
+  type Index Showable = Showable
+  diff _ s = Just s
+  apply _ i = i
+  create = id
+  patch = id
+
 
 type PatchConstr k a = (a ~ Index a, Ord a , Show a,Show k , Ord k)
 
@@ -173,7 +204,7 @@ applyTable l pidx@(PAtom patom@(m,i, p) ) =  case L.find (\tb -> getPK tb == i )
                                                 ps -> Just $ TB1 $ applyRecord (m,k) (patom)
                                               ) else  (Just tb )) l
                   Nothing -> (createFTB createTB1  pidx) : l
-applyTable l i = errorWithStackTrace (show (l,i))
+-- applyTable l i = errorWithStackTrace (show (l,i))
 
 
 getPK (TB1 i) = getPKM i
@@ -216,7 +247,7 @@ applyRecord
 applyRecord t@((m, v)) (_ ,_  , k)  = (m ,mapComp (KV . flip (foldr (\p m -> Map.alter (\v -> Just $ maybe (_tb $ createAttr p) (mapComp (flip applyAttr p )) v   ) (pattrKey p) m)) k  . _kvvalues ) v)
   where edit  v k =  mapComp (flip applyAttr k ) v
 
-patchTB1 :: (Show a , Ord a ,a ~ Index a ,Show k,Ord k) => TBData k  a -> Index (TBData k  a)
+patchTB1 :: PatchConstr k a => TBData k  a -> Index (TBData k  a)
 patchTB1 (m, k)  = (m  ,(getPKM (m,k)) ,  F.toList $ patchAttr  . unTB <$> (unKV k))
 
 difftable
@@ -303,7 +334,7 @@ diffOpt p d i j
     | i /= j = ( liftA2 (diffFTB p d ) i j )
     | otherwise = Nothing
 
-diffFTB :: (Ord a,Show a) => (a -> Index a) -> (a -> a -> Maybe (Index a) ) ->  FTB a -> FTB a -> Maybe (PathFTB   (Index a))
+diffFTB :: (Ord a,Show a) => (a -> Index a) -> (a -> a -> Maybe (Index a) ) ->  FTB a -> FTB a -> Maybe (PathFTB (Index a))
 diffFTB p d (LeftTB1 i) (LeftTB1 j) = POpt <$> diffOpt p d i j
 diffFTB p d (ArrayTB1 i) (ArrayTB1 j) =
     patchSet $  catMaybes $ zipWith (\i -> fmap (PIdx  i)  ) ( [0..]) (F.toList $ (zipWith (\i j ->fmap Just $ diffFTB p d i j ) i j)  <> (const (Just  Nothing) <$> drop (length j  ) i ) <> (Just . Just . patchFTB p <$> drop (length i  ) j ))
@@ -333,7 +364,7 @@ applyOptM  pr a i  o = case i of
                             Just j -> traverse (createFTBM pr) o
                       Just _ -> sequenceA $ applyFTBM pr a <$> i <*> o
 applyOpt
-  :: (t ~ Index a,Show a,Ord a,Show t) =>
+  :: (t ~ Index a,Show a,Ord a) =>
      (t -> a)
      -> (a -> t -> a)-> Maybe (FTB a) -> Maybe (PathFTB t) ->  (Maybe (FTB a))
 applyOpt  pr a i  o = case i of
@@ -365,7 +396,7 @@ applyFTBM _ _ a b = errorWithStackTrace ("applyFTB: " <> show (a,b))
 
 
 applyFTB
-  :: (t ~ Index a ,Show a,Show t,Ord a) =>
+  :: (t ~ Index a ,Show a,Ord a) =>
   (t -> a) -> (a -> t -> a) -> FTB a -> PathFTB t -> FTB a
 applyFTB pr a (LeftTB1 i ) op@(POpt o) = LeftTB1 $ applyOpt pr a i o
 applyFTB pr a (ArrayTB1 i ) (PIdx ix o) = case o of
@@ -383,7 +414,7 @@ applyFTB pr a (IntervalTB1 i) (PInter b (p,l))
         else interval (lowerBound' i) (second (const l) $ first (fmap (flip (applyFTB pr a) p )) (upperBound' i))
 applyFTB pr a (TB1 i) (PAtom p)  =  TB1 $ a i p
 applyFTB pr a  b (PatchSet l ) = foldl (applyFTB pr a ) b l
-applyFTB _ _ a b = errorWithStackTrace ("applyFTB: " <> show (a,b))
+-- applyFTB _ _ a b = errorWithStackTrace ("applyFTB: " <> show (a,b))
 
 createFTB :: Ord a => (Index a  ->  a) -> PathFTB (Index a) -> FTB a
 createFTB p (POpt i ) = LeftTB1 (createFTB p <$> i)

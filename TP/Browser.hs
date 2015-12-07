@@ -369,7 +369,6 @@ viewerKey inf key = mdo
      pageSize = 20
      lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
         where (s,_) =justError "no empty pages" $  M.lookup [] fixmap
-
   inisort <- currentValue (facts tsort)
   (offset,res3)<- mdo
     offset <- offsetField 0 (never ) (lengthPage <$> facts res3)
@@ -392,7 +391,7 @@ viewerKey inf key = mdo
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
   res2 <- stepper (vp) (rumors vpt)
-  onEvent ( ((\(m,i) j -> (m,foldl' applyTable' i [j])) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar)
+  onEvent (((\(m,i) j -> (m,foldl' applyTable' i [j])) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar)
   onEvent (facts vpt <@ UI.click updateBtn ) (\(oi,oj) -> do
               let up =  (updateEd (schemaOps inf) ) inf table (L.maximumBy (comparing (getPK.TB1)) (F.toList oj) ) Nothing (Just 400)
               (l,i,j) <- liftIO $  transaction inf up

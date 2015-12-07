@@ -8,6 +8,7 @@ import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (delete)
 
 import qualified Data.Map as M
+import Data.Time.LocalTime
 import qualified Data.Set as S
 import Data.Map (Map)
 import Data.Monoid
@@ -451,6 +452,13 @@ readFileAttr = mkReadAttr get
     from s = case JSON.fromJSON s of
                   JSON.Success x -> Just x
                   i -> Nothing -- errorWithStackTrace (show i)
+
+
+jsTimeZone :: UI TimeZone
+jsTimeZone  = do
+  fmap ((\ i -> TimeZone (negate i) False "") .from )$ callFunction $ ffi "new Date().getTimezoneOffset()"
+  where
+    from s = let JSON.Success x =JSON.fromJSON s in x
 
 
 selectedMultiple :: Attr Element [Int]
