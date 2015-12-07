@@ -174,10 +174,13 @@ poller schm db plugs = do
                       , attrT ("schema_name",TB1 (SText schema))
                       , _tb $ IT (attrT ("diffs",LeftTB1 $ Just$ ArrayTB1 $ [TB1 ()])) (LeftTB1 $ ArrayTB1  <$> (
                                 nonEmpty  . catMaybes $
-                                    fmap (TB1 . tblist . pure ) .  either (\r ->Just $   attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) )) (fmap (\r -> attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $  r))   ))) <$> i))
+                                    fmap (TB1 . tblist  ) .  either (\r ->Just $ [attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) ),attrT ("modify",LeftTB1 $Nothing)]) (fmap (\r -> [attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $  r))   ),attrT ("except",LeftTB1 $Nothing)])) <$> i))
                       , attrT ("duration",srange (time current) (time end))]
                   time  = TB1 . STimestamp . utcToLocalTime utc
-              p <- transaction inf $ fullDiffInsert  (meta inf) (liftTable' (meta inf) "polling_log" table)
+              p <- transaction (meta inf) $ do
+                  fktable <- loadFKS (meta inf) (liftTable' (meta inf) "polling_log"  table)
+                  liftIO $print ("loaded",fktable)
+                  fullDiffInsert  (meta inf) fktable
               traverse (putMVar plm ). traverse (\l -> Patch.apply l <$> (fmap tableDiff  p)) =<< currentValue (facts plt)
               execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and schema_name = ?" (current,pname,schema )
               execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and schema_name = ?" (end ,pname,schema)
@@ -404,7 +407,6 @@ viewerKey inf key = mdo
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset ,filterInp ,getElement sortList,getElement asc] ) # set UI.class_ "col-xs-3"
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row"
   UI.div # set children ([updateBtn,itemSelec,insertDivBody ] )
-
 
 
 tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k

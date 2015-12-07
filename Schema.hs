@@ -318,6 +318,8 @@ ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
 
 
 
+
+
 -- Load optional not  loaded delayed values
 -- and merge to older values
 applyAttr' :: (Patch a,Show a,Ord a ,a~ Index a)  =>  Column Key a  -> PathAttr Key a -> DBM Key a (Column Key a)

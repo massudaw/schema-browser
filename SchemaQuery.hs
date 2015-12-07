@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings,TupleSections #-}
 module SchemaQuery
   (eventTable
+  ,loadFKS
   ,fullDiffInsert
   ,fullDiffEdit
   ,transaction
@@ -160,4 +161,29 @@ tbInsertEdit inf  f@(FKT pk rel2  t2) =
         ArrayTB1 l ->
            fmap (fmap (attrArray f)) $ fmap Tra.sequenceA $ Tra.traverse (\ix ->   tbInsertEdit inf $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. length l - 1 ]
 
+loadFKS inf table = do
+  let
+    targetTable = lookTable inf (_kvname (fst table))
+    fkSet:: S.Set Key
+    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ S.toList  (rawFKS targetTable)
+    items = unKV . snd  $ table
+    nonFKAttrs :: [(S.Set (Rel Key) ,Column Key Showable)]
+    nonFKAttrs =  fmap (fmap unTB) $M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
+  fks <- catMaybes <$> mapM (loadFK inf table ) (F.toList $ rawFKS targetTable)
+  return  $ tblist' targetTable (fmap _tb $fmap snd nonFKAttrs <> fks )
 
+loadFK :: InformationSchema -> TBData Key Showable -> Path (S.Set Key ) SqlOperation -> TransactionM (Maybe (Column Key Showable))
+loadFK inf table (Path ori (FKJoinTable to rel tt ) tar) = do
+  let targetTable = lookTable inf tt
+  (i,(_,mtable )) <- eventTable inf targetTable Nothing Nothing [] []
+  let
+      relSet = S.fromList $ _relOrigin <$> rel
+      tb  = unTB <$> F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . snd . tableNonRef' $ table))
+      fkref = joinRel  rel tb  (F.toList mtable)
+  return $ Just $ FKT (_tb <$> tb) rel   fkref
+loadFK inf table (Path ori (FKInlineTable to ) tar)   = do
+  let IT rel vt = unTB $ justError "no inline" $ M.lookup (S.map Inline   ori) (unKV .snd $ table)
+  loadVt <- Tra.traverse (loadFKS inf )  vt
+  return (Just $ IT rel loadVt)
+
+loadFK _ _ _ = return Nothing

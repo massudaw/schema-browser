@@ -32,6 +32,7 @@ module TP.QueryWidgets (
     ) where
 
 import RuntimeTypes
+import Data.Bifunctor
 import Text
 import SortList
 import Data.Functor.Identity
@@ -231,6 +232,7 @@ attrSize (Attr k _ ) = go  (mapKType $ keyType k)
 getRelOrigin :: [Compose Identity (TB Identity) Key () ] -> [Key]
 getRelOrigin =  fmap _relOrigin . concat . fmap keyattr
 
+
 labelCase
   :: Column Key ()
   -> Tidings (Maybe (Column Key Showable))
@@ -375,7 +377,7 @@ eiTable inf constr tname refs plmods ftb@(meta,k) oldItems = do
       set style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
   plugins <-  if not (L.null (fst <$> res))
     then do
-      pluginsHeader <- UI.div # set UI.text "Plugins"
+      pluginsHeader <- UI.h4 # set UI.text "Plugins"
       pure <$> UI.div # set children (pluginsHeader : (fst <$> res))
     else do
       return []
@@ -1000,7 +1002,8 @@ viewer inf table env = mdo
               let slist = fmap (\(i,j,_) -> (i,j)) slist'
                   ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
-              ((m,t),(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> traceShowId ordlist) envK
+                  flist = catMaybes $ fmap (\(i,_,j) -> second (Attr i) . first T.pack <$> j) slist'
+              ((m,t),(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> traceShowId ordlist) (envK <> flist)
               let (size,_) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (L.sort $ fmap snd envK) fixmap
               return (o,(slist,paging o (size,sorting' ordlist (F.toList lres))))
       nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))
