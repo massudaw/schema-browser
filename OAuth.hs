@@ -130,7 +130,7 @@ insertTable inf pk
             (postHeaderJSON [("GData-Version","3.0")] req (toJSON $ M.fromList $ fmap (\(a,b) -> (keyValue a , renderShowable b)) $ attrs ) )
         print ("insert",getPK (TB1 pk),t)
         return $ decode v
-    fmap (TableModification Nothing table . patchTB1 .unTB1) <$> (traverse (convertAttrs inf Nothing (tableMap inf) table ) .  fmap (\i -> (i :: Value)  ) $  decoded)
+    fmap (TableModification Nothing table . patch .unTB1) <$> (traverse (convertAttrs inf Nothing (tableMap inf) table ) .  fmap (\i -> (i :: Value)  ) $  decoded)
 
 
 joinGet inf tablefrom tableref from ref
@@ -164,8 +164,8 @@ getTable inf  tb pk
         return $ decode v
     traverse (convertAttrs inf (Just $ (tb,unTB1 pk)) (tableMap inf) tb ) .  fmap (\i -> (i :: Value)  ) $  decoded
 
-getDiffTable inf table  j = fmap (join . fmap (difftable j. unTB1) ) $ getTable  inf table $ TB1 j
-joinGetDiffTable inf table  tableref f j = fmap (join . fmap (difftable j. unTB1)) $ joinGet  inf table tableref (TB1 f) (TB1 j)
+getDiffTable inf table  j = fmap (join . fmap (diff j. unTB1) ) $ getTable  inf table $ TB1 j
+joinGetDiffTable inf table  tableref f j = fmap (join . fmap (diff j. unTB1)) $ joinGet  inf table tableref (TB1 f) (TB1 j)
 
 
 gmailOps = (SchemaEditor undefined insertTable undefined listTable updateTable getDiffTable )
@@ -197,7 +197,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                         RecordPrim i -> RecordPrim i
                patt = either
                     (traverse (\v -> do
-                        tell (TableModification Nothing (lookTable infsch trefname ) . patchTB1 <$> F.toList v)
+                        tell (TableModification Nothing (lookTable infsch trefname ) . patch <$> F.toList v)
                         liftIO $ print (trefname ,"left",v)
                         return $ FKT [Compose .Identity . Types.Attr  k $ (lbackRef    v) ]  fk v))
                     (traverse (\v -> do
@@ -210,7 +210,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                         patch <- maybe (return reftb ) (\(tref,getref )-> traverse (\reftb -> do
                             pti <- joinGetDiffTable infsch  tref (lookTable infsch trefname) getref reftb
                             tell (TableModification Nothing (lookTable infsch trefname) <$> maybeToList pti)
-                            return $ maybe (reftb) (unTB1 . applyTB1 (TB1 reftb) . PAtom) pti) reftb ) getref
+                            return $ maybe (reftb) (unTB1 . apply (TB1 reftb) . PAtom) pti) reftb ) getref
                         liftIO$ print patch
                         return $ FKT ref fk   patch ))
                funL = funO  True (mapKType $ exchange trefname $ keyType k) vk

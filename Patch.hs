@@ -12,7 +12,15 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Patch where
+module Patch
+  (
+  -- Class Patch Interface
+  Compact (..)
+  ,Patch(..)
+  -- Patch Data Types and to be moved methods
+  --
+  , getAttr',getAttr,getPK,getPKM
+  ,PathFTB(..),PathAttr(..),TBIdx,firstPatch,applyFTBM,PatchConstr)where
 
 -- import Warshal
 import Types
@@ -63,6 +71,16 @@ class Patch f where
   create :: Index f -> f
   patch  :: f -> Index f
 
+class Compact f where
+  compact :: [f] -> [f]
+
+instance PatchConstr k a => Patch (Map [(k,FTB a)] (TBData k a )) where
+  type Index (Map [(k,FTB a)] (TBData k a )) = TBIdx k (Index a)
+  apply = applyTable'
+
+instance (PatchConstr k a) => Compact (PathAttr k a) where
+  compact = compactAttr
+
 instance PatchConstr k a => Patch (TB Identity k a)  where
   type Index (TB Identity k a) =  PathAttr k (Index a)
   diff = diffAttr
@@ -76,6 +94,9 @@ instance  PatchConstr k a => Patch (TBData k a)  where
   apply = applyRecord
   create = createTB1
   patch = patchTB1
+
+instance (PatchConstr k a) => Compact (TBIdx k a) where
+  compact = compactTB1
 
 instance (Ord a,Show a,Patch a) => Patch (FTB a ) where
   type Index (FTB a) =  PathFTB (Index a)
@@ -193,18 +214,6 @@ applyTable' l patom@(m,i, p) =  case Map.lookup i  l  of
                       in Map.insert (getPKM el) el  l
 applyTable' l i = errorWithStackTrace (show (l,i))
 
-
-
-applyTable
-  ::  PatchConstr k a  => [FTB1 Identity k a ] -> PathFTB  (TBIdx k a )-> [FTB1 Identity k a ]
-applyTable l pidx@(PAtom patom@(m,i, []) ) = L.filter (\tb -> getPK tb /= i ) l
-applyTable l pidx@(PAtom patom@(m,i, p) ) =  case L.find (\tb -> getPK tb == i ) l  of
-                  Just _ ->  catMaybes $ L.map (\tb@(TB1 (m, k)) -> if  getPK tb ==  i  then (case p of
-                                                [] ->  Nothing
-                                                ps -> Just $ TB1 $ applyRecord (m,k) (patom)
-                                              ) else  (Just tb )) l
-                  Nothing -> (createFTB createTB1  pidx) : l
--- applyTable l i = errorWithStackTrace (show (l,i))
 
 
 getPK (TB1 i) = getPKM i

@@ -403,7 +403,7 @@ crudUITable inf open bres refs pmods ftb@(m,_)  preoldItems = do
           maybe (return ()) (\j -> liftIO  (hvdiff  =<< traverse (\i -> runDBM inf $  applyRecord'  i j ) preoldItens) )  loadedItens
           (loadedItensEv ,fin) <- mapEventFin (fmap join <$> traverse (transaction inf . getItem )) (rumors preoldItems)
           let oldItemsE =  fmap head $ unions [ evdiff, rumors preoldItems  ]
-          ini2 <- liftIO $(maybe (return preoldItens) (\j -> traverse (\i -> return $ applyRecord i j ) preoldItens ) loadedItens)
+          ini2 <- liftIO $(maybe (return preoldItens) (\j -> traverse (\i -> return $ Patch.apply i j ) preoldItens ) loadedItens)
           oldItemsB <- stepper  ini2 oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
               deleteCurrent e l =  maybe l (flip (L.deleteBy (onBin pkOpSet (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbPK . TB1 ))) l) e
@@ -416,7 +416,7 @@ crudUITable inf open bres refs pmods ftb@(m,_)  preoldItems = do
           let diff = unionWith const tdiff   (filterJust loadedItensEv)
           addElemFin panelItems =<<  onEvent diff
               (liftIO . hdiff)
-          addElemFin panelItems =<< onEvent ((\i j -> Just $ maybe (createTB1 j) (flip applyRecord j  ) i) <$> facts oldItems <@> diff )
+          addElemFin panelItems =<< onEvent ((\i j -> Just $ maybe (create j) (flip Patch.apply j  ) i) <$> facts oldItems <@> diff )
               (liftIO . hvdiff )
           addElemFin panelItems =<< onEvent (rumors tableb)
               (liftIO . h2)
@@ -479,7 +479,7 @@ processPanelTable inf attrsB res inscrud table oldItemsi = do
   -- Delete when isValid
          sink UI.enabled ( liftA2 (&&) (isJust . fmap (tableNonRef') <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip contains j) i  ) (facts oldItemsi ) res))
   let
-         crudEdi (Just (i)) (Just (j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $difftable i  g) $ transaction inf $ fullDiffEdit  inf   i j
+         crudEdi (Just (i)) (Just (j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEdit  inf   i j
          crudIns (Just (j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf (fullDiffInsert  inf j)
          crudDel (Just (j))  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> transaction inf (( deleteEd $ schemaOps inf) inf j)
 
@@ -849,7 +849,7 @@ fkUITable inf top constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = 
       st <- stepper cv sel
       inisort <- currentValue (facts sortList)
       res2 <- stepper res  (fmap (fmap TB1) <$> rumors vpt)
-      onEvent ((\(m,i) j -> (m,foldl' applyTable' (fmap unTB1 i) [j])) <$> res2 <@> ediff  )  (liftIO . putMVar tmvar)
+      onEvent ((\(m,i) j -> (m,foldl' Patch.apply (fmap unTB1 i) [j])) <$> res2 <@> ediff  )  (liftIO . putMVar tmvar)
       let
         fksel =  fmap (\box ->  FKT (backFKRef  relTable  (fmap (keyAttr .unTB )ifk)   box) rel box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> fmap (fmap TB1) pretdi <*> tidings st sel)
       element itemList # set UI.class_ "col-xs-5"

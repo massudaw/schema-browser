@@ -120,7 +120,7 @@ plugs schm db plugs = do
   ((m,td),(s,t)) <- transaction inf $ eventTable  inf (lookTable inf "plugins") Nothing Nothing [] []
   let els = L.filter (not . (`L.elem` F.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
   p <- transaction inf $ mapM (\table -> fullDiffInsert  (meta inf)  table) els
-  putMVar m (s,foldl' applyTable'  t (tableDiff <$> catMaybes p))
+  putMVar m (s,foldl' Patch.apply  t (tableDiff <$> catMaybes p))
 
 poller schm db plugs = do
   conn <- connectPostgreSQL (connRoot db)
@@ -155,14 +155,14 @@ poller schm db plugs = do
                   i <-  mapConcurrently (mapM (\inp -> do
                       o  <- fmap (fmap (liftTable' inf a)) <$> catchPluginException inf a pname (getPK $ TB1 inp)   (elemp (Just $ mapKey' keyValue inp))
                       v <- traverse (\o -> do
-                        let diff =   join $ (\i j -> difftable (j ) (i)) <$>  o <*> Just inp
-                        maybe (return Nothing )  (\i -> transaction inf $ (editEd $ schemaOps inf) inf (justError "no test" o) inp ) diff ) o
-                      traverse (traverse (\p -> putMVar m  .  (\(l,listRes) -> (l,applyTable' listRes (tableDiff p))) =<< currentValue (facts listResT))) v
+                        let diff' =   join $ (\i j -> diff (j ) (i)) <$>  o <*> Just inp
+                        maybe (return Nothing )  (\i -> transaction inf $ (editEd $ schemaOps inf) inf (justError "no test" o) inp ) diff' ) o
+                      traverse (traverse (\p -> putMVar m  .  (\(l,listRes) -> (l,Patch.apply listRes (tableDiff p))) =<< currentValue (facts listResT))) v
                       return v
                         )
                     ) . L.transpose . chuncksOf 20 $ evb
 
-                  (putMVar m ) .  (\(l,listRes) -> (l,foldl' applyTable' listRes (fmap tableDiff (catMaybes $ rights $ concat i)))) =<< currentValue (facts listResT)
+                  (putMVar m ) .  (\(l,listRes) -> (l,foldl' Patch.apply listRes (fmap tableDiff (catMaybes $ rights $ concat i)))) =<< currentValue (facts listResT)
                   return $ concat i
                   ) [0..(lengthPage (fst sizeL) fetchSize -1)]
               end <- getCurrentTime
@@ -178,7 +178,7 @@ poller schm db plugs = do
                       , attrT ("duration",srange (time current) (time end))]
                   time  = TB1 . STimestamp . utcToLocalTime utc
               p <- transaction inf $ fullDiffInsert  (meta inf) (liftTable' (meta inf) "polling_log" table)
-              traverse (putMVar plm ). traverse (\l -> applyTable' l <$> (fmap tableDiff  p)) =<< currentValue (facts plt)
+              traverse (putMVar plm ). traverse (\l -> Patch.apply l <$> (fmap tableDiff  p)) =<< currentValue (facts plt)
               execute conn "UPDATE metadata.polling SET start_time = ? where poll_name = ? and schema_name = ?" (current,pname,schema )
               execute conn "UPDATE metadata.polling SET end_time = ? where poll_name = ? and schema_name = ?" (end ,pname,schema)
               threadDelay (intervalms*10^3)
@@ -386,12 +386,12 @@ viewerKey inf key = mdo
   let tds = tidings prop (diffEvent  prop evsel)
 
   (cru,ediff,pretdi) <- crudUITable inf (pure "Editor")  (tidings (fmap (F.toList .snd) res2) never)[] [] (allRec' (tableMap inf) table) tds
-  diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip applyRecord j ) i) <$> facts pretdi <@> ediff
+  diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip Patch.apply j ) i) <$> facts pretdi <@> ediff
   let
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
   res2 <- stepper (vp) (rumors vpt)
-  onEvent (((\(m,i) j -> (m,foldl' applyTable' i [j])) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar)
+  onEvent (((\(m,i) j -> (m,foldl' Patch.apply i [j])) <$> facts vpt <@> ediff)) (liftIO .  putMVar tmvar)
   onEvent (facts vpt <@ UI.click updateBtn ) (\(oi,oj) -> do
               let up =  (updateEd (schemaOps inf) ) inf table (L.maximumBy (comparing (getPK.TB1)) (F.toList oj) ) Nothing (Just 400)
               (l,i,j) <- liftIO $  transaction inf up

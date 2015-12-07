@@ -53,8 +53,8 @@ insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
           iquery = T.unpack $ prequery <> " RETURNING ROW(" <>  T.intercalate "," (projKey serialAttr) <> ")"
         liftIO $ print iquery
         out <-  fmap head $ liftIO $ queryWith (f (mapRecord (const ()) serialTB )) conn (fromString  iquery ) directAttr
-        let Just (_,_ ,gen) = difftable serialTB out
-        return $ (m,getPKM out ,compactAttr (i <> gen))
+        let Just (_,_ ,gen) = diff serialTB out -- :: Maybe (TBIdx Key a)
+        return (m,getPKM out ,compact (i <> gen ) )
       else do
         let
           iquery = T.unpack prequery
@@ -63,7 +63,7 @@ insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
         return path
     where
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
-      attrs =  concat $ nonRefTB . createAttr <$> i
+      attrs =  concat $ nonRefTB . create <$> i
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
       serial f =  filter (all1 testSerial  .f)
       direct f = filter (not.all1 testSerial .f)
@@ -95,7 +95,7 @@ updatePatch
 updatePatch conn kv old  t =
     execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk ) >> return patch
   where
-    patch  = justError ("cant diff states" <> (concat $ zipWith differ (show kv) (show old))) $ difftable old kv
+    patch  = justError ("cant diff states" <> (concat $ zipWith differ (show kv) (show old))) $ diff old kv
     kold = getPKM old
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> F.toList kold
@@ -181,9 +181,9 @@ generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is
 
 insertMod :: InformationSchema ->  TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
 insertMod inf j  = liftIO$ do
-  let patch = patchTB1 j
+  let
       table = lookTable inf (_kvname (fst  j))
-  kvn <- insertPatch fromRecord (conn  inf) patch table
+  kvn <- insertPatch fromRecord (conn  inf) (patch j) table
   let mod =  TableModification Nothing table kvn
   Just <$> logTableModification inf mod
 
@@ -228,7 +228,7 @@ selectAll inf table i  j k st = do
 tellRefs  ::  InformationSchema ->TBData Key Showable ->  TransactionM ()
 tellRefs  inf (m,k) = mapM_ (tellRefsAttr . unTB ) $ F.toList  (_kvvalues $ unTB k)
   where tellRefsAttr (FKT l k t) = void $ do
-            tell ((\m@(k,v) -> TableModification Nothing (lookTable inf (_kvname k)) . patchTB1 $ m) <$> F.toList t)
+            tell ((\m@(k,v) -> TableModification Nothing (lookTable inf (_kvname k)) . patch $ m) <$> F.toList t)
             mapM_ (tellRefs inf) $ F.toList t
         tellRefsAttr (Attr _ _ ) = return ()
         tellRefsAttr (IT _ t ) = void $ mapM (tellRefs inf) $ F.toList t
@@ -248,7 +248,7 @@ loadDelayed inf t@(k,v) values@(ks,vs)
        is <- queryWith (fromRecord delayed) (conn inf) (fromString $ T.unpack str) (fmap unTB $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK' (tableNonRef' values))
        case is of
             [] -> errorWithStackTrace "empty query"
-            [i] ->return $ fmap (\(i,j,a) -> (i,getPKM (ks,vs),a)) $ difftable delayedTB1(mapKey' (kOptional.kDelayed.unKOptional) . mapFValue' (LeftTB1 . Just . DelayedTB1 .  unSOptional ) $ i  )
+            [i] ->return $ fmap (\(i,j,a) -> (i,getPKM (ks,vs),a)) $ diff delayedTB1(mapKey' (kOptional.kDelayed.unKOptional) . mapFValue' (LeftTB1 . Just . DelayedTB1 .  unSOptional ) $ i  )
             _ -> errorWithStackTrace "multiple result query"
   where
     delayedattrs = concat $ fmap (keyValue . (\(Inline i ) -> i)) .  F.toList <$> M.keys filteredAttrs

@@ -95,7 +95,7 @@ fullInsert' inf ((k1,v1) )  = do
       else do
         i@(Just (TableModification _ _ tb))  <- (insertEd $ schemaOps inf) inf ret
         tell (maybeToList i)
-        return $ createTB1 tb
+        return $ create tb
 
 
 noInsert inf = Tra.traverse (noInsert' inf)
@@ -117,7 +117,7 @@ transaction inf log = {-withTransaction (conn inf) $-} do
     -- print "GetTable"
     ((m,t),(mp,l)) <- transaction inf $  eventTable inf k Nothing Nothing [] []
     -- print "ReadValue"
-    let lf = foldl' (\i p -> applyTable'  i p) l v
+    let lf = foldl' (\i p -> Patch.apply   i p) l v
     -- print "PutValue"
     putMVar m (mp,lf)
     ) (M.toList aggr)
