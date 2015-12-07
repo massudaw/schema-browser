@@ -15,6 +15,7 @@
 module Main (main) where
 
 import Query
+import Text
 import Control.Concurrent.Async
 import Data.List (foldl')
 import Debug.Trace

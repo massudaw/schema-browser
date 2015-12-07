@@ -243,7 +243,7 @@ labelCase a old wid = do
     bh <- stepper False (hoverTip l)
     tip <- UI.div #
       set text (show $ fmap showKey  <$> keyattri a) #
-      sink UI.style (noneShow <$> bh)
+      sink0 UI.style (noneShow <$> bh)
     el <- UI.div # set children [l,tip,getElement wid] #
       set UI.class_ ("col-xs-" <> show (fst $ attrSize a))
     paintEdit l (facts (triding wid )) (facts old)

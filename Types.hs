@@ -928,38 +928,6 @@ unLeftItens = unLeftTB
     unLeftTB i@(FKT ifk rel  (TB1  _ )) = Just i
     unLeftTB i = errorWithStackTrace (show i)
 
-renderShowable :: FTB Showable -> String
-renderShowable (LeftTB1 i ) = maybe "" renderShowable i
-renderShowable (DelayedTB1 i ) =  maybe "<NotLoaded>" (\i -> "<Loaded| " <> renderShowable i <> "|>") i
-renderShowable (SerialTB1 i ) = maybe "" renderShowable i
-renderShowable (ArrayTB1 i)  = L.intercalate "," $ F.toList $ fmap renderShowable i
-renderShowable (IntervalTB1 i)  = showInterval renderShowable i
-  where
-    showInterval f i | i == Interval.empty = show i
-    showInterval f (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> f i <> "," <> f l <> ocr m
-      where
-        ocl j = if j then "[" else "("
-        ocr j = if j then "]" else ")"
-    showInterval f i = show i -- errorWithStackTrace (show i)
-
-
-renderShowable (TB1  i) = renderPrim i
-
-renderPrim :: Showable -> String
-renderPrim (SText a) = T.unpack a
-renderPrim (SNumeric a) = show a
-renderPrim (SBoolean a) = show a
-renderPrim (SDouble a) = show a
-renderPrim (STimestamp a) = show a
-renderPrim (SLineString a ) = show a
-renderPrim (SBounding a ) = show a
-renderPrim (SDate a) = show a
-renderPrim (SDayTime a) = show a
-renderPrim (SBinary _) = show "<Binary>"
-renderPrim (SDynamic s) = renderShowable s
-renderPrim (SPosition a) = show a
-renderPrim (SPInterval a) = show a
-
 
 
 attrOptional :: TB Identity Key Showable ->  (TB Identity  Key Showable)

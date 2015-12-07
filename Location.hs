@@ -7,6 +7,7 @@ import Utils
 import Control.Applicative
 import Control.Monad
 import Data.Monoid
+import Text
 
 import Data.ExtendedReal
 import Data.Interval

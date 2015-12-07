@@ -14,6 +14,7 @@ module Plugins (plugList) where
 
 import Location
 import PrefeituraSNFSE
+import Text
 import Data.Tuple
 import Siapi3
 import CnpjReceita
