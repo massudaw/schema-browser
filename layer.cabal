@@ -30,7 +30,6 @@ executable threepenny-layer
    parsec >=3.1 && <3.2
    , hxt >=9.3 && <9.4
    , pandoc == 1.13.2
-   -- , HTTP
    , aeson 
    , pandoc-types
    ,lens
@@ -48,22 +47,15 @@ executable threepenny-layer
    ,tasty-hunit
    , arrows
    -- Google Auth
-   ,handa-gdata > 0.7
+   , handa-gdata > 0.7
    , http-conduit, directory ,process,xml
    ,unordered-containers
    -- Pdf Parser
-   -- ,io-streams,pdf-toolbox-document,pdf-toolbox-core
    -- Interval
    ,old-locale
    ,data-interval
    ,extended-reals
    ,lens-aeson
-   -- Incendio Module
-   -- ,incendio
-   -- ,diagrams-lib
-   -- ,diagrams-svg
-   -- ,ad
-   -- ,blaze-svg
    ,bifunctors
    ,stringsearch
    ,safe
