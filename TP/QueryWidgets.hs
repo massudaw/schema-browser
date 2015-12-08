@@ -150,7 +150,7 @@ pluginUI oinf trinp (StatefullPlugin n tname ac) = do
       return  (( l <> [j , k], ole <> [liftedE] ), mergeCreate <$> unoldItems <*> liftedE  ))
            ) ) (return (([],[]),trinp)) $ zip (fmap snd ac) freshKeys
   el <- UI.div  # set children (fst $ fst freshUI)
-  return (el , (snd $ pluginStatic $ snd $ last ac ,fmap (fmap traceShowId ) $last $ snd $ fst freshUI ))
+  return (el , (snd $ pluginStatic $ snd $ last ac ,last $ snd $ fst freshUI ))
 
 pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
   let f = staticP arrow
@@ -587,7 +587,7 @@ attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ _ (KArray _) ) v) = mdo
             $ void (element composed # sink UI.style (noneShow . isJust <$> facts bres))
           return  $ TrivialWidget  bres composed
 attrUITable  tAttr' evs attr@(Attr i _ ) = do
-      tdi' <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return tAttr') (fmap traceShowId <$> evs)
+      tdi' <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return tAttr') evs
       let tdi = fmap (\(Attr  _ i )-> i) <$>tdi'
       attrUI <- buildUI (keyModifier i)(mapKType $ keyType i) tdi
       let insertT = fmap (Attr i ) <$> (triding attrUI)
@@ -1003,7 +1003,7 @@ viewer inf table env = mdo
                   ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
                   flist = catMaybes $ fmap (\(i,_,j) -> second (Attr i) . first T.pack <$> j) slist'
-              ((m,t),(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> traceShowId ordlist) (envK <> flist)
+              ((m,t),(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (envK <> flist)
               let (size,_) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (L.sort $ fmap snd envK) fixmap
               return (o,(slist,paging o (size,sorting' ordlist (F.toList lres))))
       nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))

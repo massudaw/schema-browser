@@ -511,7 +511,7 @@ data TableK k
            , rawPK :: [k]
            , rawDescription :: [k]
            , _rawFKSL ::  (Set (Path (Set k) (SqlOperationK k )))
-           , rawInvFKS ::  (Set (Path (Set k) (SqlOperationK k)))
+           , _rawInvFKS ::  (Set (Path (Set k) (SqlOperationK k)))
            , rawAttrs :: (Set k)
            }
      deriving(Eq,Ord)

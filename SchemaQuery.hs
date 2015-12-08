@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings,TupleSections #-}
 module SchemaQuery
   (eventTable
+  ,refTable
   ,loadFKS
   ,fullDiffInsert
   ,fullDiffEdit
@@ -42,6 +43,13 @@ import qualified Data.Text as T
 defsize = 200
 
 estLength page size resL est = fromMaybe 0 page * fromMaybe defsize size  +  est
+
+
+refTable :: InformationSchema -> Table -> IO DBVar
+refTable  inf table  = do
+  mmap <- readMVar (mvarMap inf)
+  return $ justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
+
 
 eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
     -> TransactionM (DBVar,Collection Key Showable)

@@ -207,7 +207,7 @@ cnpjForm = BoundedPlugin2 pname tname url
       html :: Maybe [(String,String)] <- act (\(TB1 (SSession sess),TB1 (SText cap),TB1 (SText cnpj))  -> fmap join $ lift  (getCnpjForm sess (BS.pack $ T.unpack cap) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,cnpj)
 
       arrowS -< ()
-      returnA -<   join $ fmap unTB1 . traceShowId . convertHtml . (M.fromListWith (++) . fmap (fmap pure )) <$> html
+      returnA -<   join $ fmap unTB1 .  convertHtml . (M.fromListWith (++) . fmap (fmap pure )) <$> html
     arrowS = proc t -> do
               odxR "owner_name" -< t
               atR "atividades_secundarias" cnae -< t

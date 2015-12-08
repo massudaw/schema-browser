@@ -22,7 +22,6 @@ import Debug.Trace
 import Types
 import Data.Either
 import Step
-import Control.Lens (traverseOf,_3)
 import Plugins
 import TP.Widgets
 import SchemaQuery
@@ -132,7 +131,7 @@ index tb item = snd $ justError ("no item" <> show item) $ indexTable (IProd Tru
 poller schm db plugs = do
   conn <- connectPostgreSQL (connRoot db)
   metas <- keyTables  schm conn  conn ("metadata", T.pack $ user db) Nothing postgresOps plugList
-  (_,(_,polling ))<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
+  ((plm2,plt2),(_,polling))<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
   let
     project tb =  (schema,intervalms,p)
       where
@@ -149,8 +148,7 @@ poller schm db plugs = do
               pname = _name p
               a = _bounds p
           pid <- forkIO $ (void $ forever $ do
-            inf <- keyTables  schm conn  conn (schema, T.pack $ user db) Nothing postgresOps plugList
-            ((plm2,plt2),(_,polling)) <- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
+            (_,polling) <- currentValue (facts plt2)
             let curr = justLook (getPKM tb) polling
                 TB1 (STimestamp startLocal) = index curr "start_time"
                 TB1 (STimestamp endLocal) = index curr "end_time"
@@ -162,6 +160,7 @@ poller schm db plugs = do
             if  diffUTCTime current start  >  fromIntegral intervalsec
             then do
                 putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
+                inf <- keyTables  schm conn  conn (schema, T.pack $ user db) Nothing postgresOps plugList
                 let fetchSize = 1000
                 ((m,listResT),(l,listRes)) <- transaction inf $ eventTable inf (lookTable inf a) Nothing (Just fetchSize) [][]
                 let sizeL = justLook [] l
@@ -190,7 +189,7 @@ poller schm db plugs = do
                 end <- getCurrentTime
                 putStrLn $ "END " <>T.unpack pname <> " - " <> show end
                 let polling_log = lookTable (meta inf) "polling_log"
-                ((plm,plt),_) <- transaction (meta inf) $ eventTable (meta inf) polling_log Nothing Nothing [] []
+                (plm,plt) <-  refTable (meta inf) polling_log
                 let table = tblist
                         [ attrT ("poll_name",TB1 (SText pname))
                         , attrT ("schema_name",TB1 (SText schema))
@@ -381,7 +380,6 @@ viewerKey inf key = mdo
       table = justLook  key $ pkMap inf
 
   ((tmvar,vpt),vp)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
-
   let
       tdi = pure Nothing
   cv <- currentValue (facts tdi)
