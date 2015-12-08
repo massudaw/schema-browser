@@ -147,10 +147,10 @@ pluginUI oinf trinp (StatefullPlugin n tname ac) = do
             . set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
       j<- UI.div # styleUI  # set children (fmap getElement elemsIn <> [preinp])# sink UI.style (noneShow .isJust <$> facts unoldItems)
       k <- UI.div # styleUI  # set children (fmap getElement elemsOut) # sink UI.style (noneShow .isJust <$> facts liftedE  )
-      return  (( l <> [j , k], liftedE :ole ), mergeCreate <$> unoldItems <*> liftedE  ))
+      return  (( l <> [j , k], ole <> [liftedE] ), mergeCreate <$> unoldItems <*> liftedE  ))
            ) ) (return (([],[]),trinp)) $ zip (fmap snd ac) freshKeys
   el <- UI.div  # set children (fst $ fst freshUI)
-  return (el , (snd $ pluginStatic $ snd $ last ac ,last $ snd $ fst freshUI ))
+  return (el , (snd $ pluginStatic $ snd $ last ac ,fmap (fmap traceShowId ) $last $ snd $ fst freshUI ))
 
 pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
   let f = staticP arrow
@@ -182,8 +182,8 @@ pluginUI inf oldItems p@(BoundedPlugin2 n t arrow) = do
   vo <- currentValue (facts tdOutput)
   vi <- currentValue (facts tdInput)
   bcv <- stepper (maybe vi (const Nothing) vo) ecv
-  pgOut <- mapTEvent (\v -> fmap (join . eitherToMaybe) . catchPluginException inf t n (getPKM $ justError "ewfew"  v) . action $ fmap (mapKey' keyValue) v)  (tidings bcv ecv)
-  return (out, (snd f ,   fmap (liftTable' inf t )<$> pgOut ))
+  pgOut <- mapTEvent (\v -> fmap (fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf t n (getPKM $ justError "ewfew"  v) . action $ fmap (mapKey' keyValue) v)  (tidings bcv ecv)
+  return (out, (snd f ,  pgOut ))
 
 indexPluginAttr
   :: TB Identity (FKey a) ()
@@ -587,7 +587,7 @@ attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ _ (KArray _) ) v) = mdo
             $ void (element composed # sink UI.style (noneShow . isJust <$> facts bres))
           return  $ TrivialWidget  bres composed
 attrUITable  tAttr' evs attr@(Attr i _ ) = do
-      tdi' <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return tAttr') (evs)
+      tdi' <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return tAttr') (fmap traceShowId <$> evs)
       let tdi = fmap (\(Attr  _ i )-> i) <$>tdi'
       attrUI <- buildUI (keyModifier i)(mapKType $ keyType i) tdi
       let insertT = fmap (Attr i ) <$> (triding attrUI)

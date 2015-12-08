@@ -188,8 +188,11 @@ addRecInit m = fmap recOverFKS m
 
 
 liftTable' :: InformationSchema -> Text -> TBData Text a -> TBData Key a
-liftTable' inf tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapComp (liftField inf tname) <$> (M.mapKeys (S.map (fmap (lookKey inf tname))) i)) v
+liftTable' inf tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapComp (liftField inf tname) <$> (M.mapKeys (lookRel ) i)) v
             where
+                  lookRel :: Set (Rel Text) -> Set (Rel Key)
+                  lookRel rel = S.map (fmap (\i -> justError "no rel key" $ M.lookup (tname,i) (keyMap inf) <|> M.lookup (reftable,i) (keyMap inf))  ) rel
+                    where reftable = findRefTable inf tname (F.toList rel)
                   ta = lookTable inf tname
 
 fixPatch :: a ~ Index a => InformationSchema -> Text -> Index (TBData Key a) -> Index (TBData Key a)
@@ -205,6 +208,11 @@ fixPatchAttr inf tname p@(PInline rel e ) =  PInline rel (fmap (\(_,o,v)-> (tabl
           ta = lookTable inf tname
 fixPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa) (tableMeta $ lookTable inf tname2) b
     where (FKJoinTable _ _ tname2 )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+          ta = lookTable inf tname
+
+findRefTable inf tname rel2 =  tname2
+
+  where   (FKJoinTable _ _ tname2 )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ _)->  S.map (keyValue) i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 
 liftKeys

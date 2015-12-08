@@ -126,8 +126,8 @@ plugs schm db plugs = do
   putMVar m (s,foldl' Patch.apply  t (tableDiff <$> catMaybes p))
 
 
-
 index tb item = snd $ justError ("no item" <> show item) $ indexTable (IProd True [item]) (tableNonRef' tb)
+
 
 poller schm db plugs = do
   conn <- connectPostgreSQL (connRoot db)
@@ -213,7 +213,6 @@ poller schm db plugs = do
                     return (fktable2,p)
                 traverse (putMVar plm ). traverse (\l -> Patch.apply l <$> (fmap tableDiff  p)) =<< currentValue (facts plt)
                 traverse (putMVar plm2 ). traverse (\l -> Patch.apply l <$> (diff curr p2)) =<< currentValue (facts plt2)
-
                 threadDelay (intervalms*10^3)
             else do
                 threadDelay (round $ (*10^6) $  diffUTCTime current start ) )
