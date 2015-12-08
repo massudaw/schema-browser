@@ -117,7 +117,7 @@ main = do
 plugs schm db plugs = do
   conn <- connectPostgreSQL (connRoot db)
   inf <- keyTables schm conn conn ("metadata",T.pack $ user db ) Nothing postgresOps plugList
-  ((m,td),(s,t)) <- transaction inf $ eventTable  inf (lookTable inf "plugins") Nothing Nothing [] []
+  ((_,m,td),(s,t)) <- transaction inf $ eventTable  inf (lookTable inf "plugins") Nothing Nothing [] []
   let els = L.filter (not . (`L.elem` F.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
   p <-transaction inf $ do
      elsFKS <- mapM (loadFKS inf ) els
@@ -131,7 +131,7 @@ index tb item = snd $ justError ("no item" <> show item) $ indexTable (IProd Tru
 poller schm db plugs = do
   conn <- connectPostgreSQL (connRoot db)
   metas <- keyTables  schm conn  conn ("metadata", T.pack $ user db) Nothing postgresOps plugList
-  ((plm2,plt2),(_,polling))<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
+  ((plm2d,plm2,plt2),(_,polling))<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
   let
     project tb =  (schema,intervalms,p)
       where
@@ -162,11 +162,11 @@ poller schm db plugs = do
                 putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                 inf <- keyTables  schm conn  conn (schema, T.pack $ user db) Nothing postgresOps plugList
                 let fetchSize = 1000
-                ((m,listResT),(l,listRes)) <- transaction inf $ eventTable inf (lookTable inf a) Nothing (Just fetchSize) [][]
+                ((_,m,listResT),(l,listRes)) <- transaction inf $ eventTable inf (lookTable inf a) Nothing (Just fetchSize) [][]
                 let sizeL = justLook [] l
                     lengthPage s pageSize  = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
                 i <- concat <$> mapM (\ix -> do
-                    ((m,listResT),(l,listResAll)) <- transaction inf $ eventTable inf (lookTable inf a) (Just ix) (Just fetchSize) [][]
+                    ((_,m,listResT),(l,listResAll)) <- transaction inf $ eventTable inf (lookTable inf a) (Just ix) (Just fetchSize) [][]
                     let listRes = L.take fetchSize . F.toList $ listResAll
 
                     let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
@@ -189,7 +189,7 @@ poller schm db plugs = do
                 end <- getCurrentTime
                 putStrLn $ "END " <>T.unpack pname <> " - " <> show end
                 let polling_log = lookTable (meta inf) "polling_log"
-                (plm,plt) <-  refTable (meta inf) polling_log
+                (plm2,plm,plt) <-  refTable (meta inf) polling_log
                 let table = tblist
                         [ attrT ("poll_name",TB1 (SText pname))
                         , attrT ("schema_name",TB1 (SText schema))
@@ -210,8 +210,8 @@ poller schm db plugs = do
                     fktable <- loadFKS (meta inf) (liftTable' (meta inf) "polling_log"  table)
                     p <-fullDiffInsert  (meta inf) fktable
                     return (fktable2,p)
-                traverse (putMVar plm ). traverse (\l -> Patch.apply l <$> (fmap tableDiff  p)) =<< currentValue (facts plt)
-                traverse (putMVar plm2 ). traverse (\l -> Patch.apply l <$> (diff curr p2)) =<< currentValue (facts plt2)
+                traverse (putMVar plm2 .pure ) (fmap tableDiff  p)
+                traverse (putMVar plm2d . pure) (maybeToList $ diff curr p2) -- =<< currentValue (facts plt2)
                 threadDelay (intervalms*10^3)
             else do
                 threadDelay (round $ (*10^6) $  diffUTCTime current start ) )
@@ -310,7 +310,7 @@ databaseChooser smvar sargs = do
         case schemaN of
           "gmail" ->  do
               metainf <- keyTables smvar dbConn conn ("metadata",T.pack $ user ) Nothing postgresOps plugList
-              ((_,tb),_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []  [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  "wesley.massuda@gmail.com"))]
+              ((_,_,tb),_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []  [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  "wesley.massuda@gmail.com"))]
               let
                   td :: Tidings OAuth2Tokens
                   td = fmap (\o -> justError "" . fmap (toOAuth . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $   head $ snd $ o )) (fmap F.toList <$> tb)
@@ -379,7 +379,7 @@ viewerKey inf key = mdo
   let
       table = justLook  key $ pkMap inf
 
-  ((tmvar,vpt),vp)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
+  ((_,tmvar,vpt),vp)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
   let
       tdi = pure Nothing
   cv <- currentValue (facts tdi)

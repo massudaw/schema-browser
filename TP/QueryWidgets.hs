@@ -799,7 +799,7 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = mdo
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
           rr = tablePKSet tb1
           table = justError "no table found" $ M.lookup (S.map _relOrigin rr) $ pkMap inf
-      ((tmvar,vpt),res)  <- fmap (fmap (fmap TB1) ) <$> (liftIO $ transaction inf $ eventTable inf table Nothing Nothing [] [])
+      ((_,tmvar,vpt),res)  <- fmap (fmap (fmap TB1) ) <$> (liftIO $ transaction inf $ eventTable inf table Nothing Nothing [] [])
       let
           -- Find non injective part of reference
           ftdi = oldItems
@@ -1003,7 +1003,7 @@ viewer inf table env = mdo
                   ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
                   flist = catMaybes $ fmap (\(i,_,j) -> second (Attr i) . first T.pack <$> j) slist'
-              ((m,t),(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (envK <> flist)
+              ((_,m,t),(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (envK <> flist)
               let (size,_) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (L.sort $ fmap snd envK) fixmap
               return (o,(slist,paging o (size,sorting' ordlist (F.toList lres))))
       nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))

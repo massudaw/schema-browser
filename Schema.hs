@@ -137,11 +137,16 @@ keyTablesInit schemaVar conn userconn (schema,user) oauth ops pluglist = do
        varmap <- mapM (\i -> do
               let ini = ((M.empty,M.empty) :: Collection Key Showable)
               mnew <-  newMVar ini
+              mdiff <-  newMVar []
               (e,h) <- liftIO $R.newEvent
               bh <- R.stepper ini e
               liftIO$ forkIO $ forever $ do
                   (h =<< takeMVar mnew )
-              return (tableMeta i,  (mnew,R.tidings bh e))) (F.toList i2)
+              liftIO$ forkIO $ forever $ do
+                  patches <- takeMVar mdiff
+                  (m,bstate) <- R.currentValue bh
+                  (h . (m,) . foldl apply bstate . traceShowId $ patches )
+              return (tableMeta i,  (mdiff,mnew,R.tidings bh e))) (F.toList i2)
        mvar <- newMVar  (M.fromList varmap)
        metaschema <- if (schema /= "metadata")
           then Just <$> keyTables  schemaVar conn userconn ("metadata",user) oauth ops pluglist
@@ -381,7 +386,7 @@ atTable ::  KVMetadata Key -> DBM Key v (Map [(Key,FTB Showable)] (TBData Key v)
 atTable k = do
   i <- ask
   k <- liftIO$ dbTable i k
-  (\(m,c)-> fmap snd $ liftIO $ R.currentValue (R.facts c)) k
+  (\(_,_,c)-> fmap snd $ liftIO $ R.currentValue (R.facts c)) k
 
 joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  [TBData Key Showable] -> TransactionM ( FTB (TBData Key Showable))
 joinRelT rel ref tb table

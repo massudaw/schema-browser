@@ -65,7 +65,7 @@ eventTable inf table page size presort fixed = do
               else
                 M.filterWithKey  (\_ (m,k)->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV k)
     mmap <- liftIO $ readMVar mvar
-    let (i,td) =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
+    let (mdiff,i,td) =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
     (mtable,td,ini) <- do
        (fixedmap ,reso) <- liftIO $ currentValue (facts td)
        ini <- case M.lookup fixidx fixedmap of
@@ -86,7 +86,7 @@ eventTable inf table page size presort fixed = do
              return $ Just ini
        return (i,td,ini)
     iniT <- fromMaybe (liftIO $ currentValue (facts td)) (return <$> ini)
-    return ((mtable, fmap filterfixed <$> td),fmap filterfixed iniT)
+    return ((mdiff,mtable, fmap filterfixed <$> td),fmap filterfixed iniT)
 
 
 
@@ -97,7 +97,7 @@ fullInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData
 fullInsert' inf ((k1,v1) )  = do
    let proj = _kvvalues . unTB
    ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
-   ((m,t),(_,l)) <- eventTable inf (lookTable inf (_kvname k1)) Nothing Nothing [] []
+   ((_,m,t),(_,l)) <- eventTable inf (lookTable inf (_kvname k1)) Nothing Nothing [] []
    if  isJust $ M.lookup (getPKM ret) l
       then do
         return ret
@@ -124,7 +124,7 @@ transaction inf log = {-withTransaction (conn inf) $-} do
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
   Tra.traverse (\(k,v) -> do
     -- print "GetTable"
-    ((m,t),(mp,l)) <- transaction inf $  eventTable inf k Nothing Nothing [] []
+    ((_,m,t),(mp,l)) <- transaction inf $  eventTable inf k Nothing Nothing [] []
     -- print "ReadValue"
     let lf = foldl' (\i p -> Patch.apply   i p) l v
     -- print "PutValue"

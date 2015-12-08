@@ -44,7 +44,7 @@ tableMap = _tableMapL
 keyMap = _keyMapL
 pkMap = _pkMapL
 
-type DBVar2 k v = (MVar (Collection k v), R.Tidings (Collection k v))
+type DBVar2 k v = (MVar [TBIdx k v],MVar (Collection k v), R.Tidings (Collection k v))
 type DBVar = DBVar2 Key Showable
 type Collection k v = (Map [Column Key Showable] (Int,Map Int PageToken),Map [(Key,FTB Showable)] (TBData k v))
 
