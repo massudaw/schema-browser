@@ -799,7 +799,13 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = mdo
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
           rr = tablePKSet tb1
           table = justError "no table found" $ M.lookup (S.map _relOrigin rr) $ pkMap inf
-      ((_,tmvar,vpt),res)  <- fmap (fmap (fmap TB1) ) <$> (liftIO $ transaction inf $ eventTable inf table Nothing Nothing [] [])
+
+      ((tmvard,tmvar,vpdiff,_),resi)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
+      bres <- accumB resi (flip (foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> rumors vpdiff)
+      let
+          vpt =  tidings bres ((foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> bres <@> rumors vpdiff )
+          res = fmap TB1 <$> resi
+      -- ((tmvard,_,_,vpt),res)  <- fmap (fmap (fmap TB1) ) <$> (liftIO $ transaction inf $ eventTable inf table Nothing Nothing [] [])
       let
           -- Find non injective part of reference
           ftdi = oldItems
@@ -854,7 +860,8 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = mdo
       st <- stepper cv sel
       inisort <- currentValue (facts sortList)
       res2 <- stepper res  (fmap (fmap TB1) <$> rumors vpt)
-      onEvent ((\(m,i) j -> (m,foldl' Patch.apply (fmap unTB1 i) [j])) <$> res2 <@> ediff  )  (liftIO . putMVar tmvar)
+
+      onEvent (pure <$> ediff) (liftIO .  putMVar tmvard)
       let
         fksel =  fmap (\box ->  FKT (backFKRef  relTable  (fmap (keyAttr .unTB )ifk)   box) rel box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> fmap (fmap TB1) pretdi <*> tidings st sel)
       element itemList # set UI.class_ "col-xs-5"
@@ -1003,7 +1010,7 @@ viewer inf table env = mdo
                   ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
                   flist = catMaybes $ fmap (\(i,_,j) -> second (Attr i) . first T.pack <$> j) slist'
-              ((_,m,t),(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (envK <> flist)
+              (_,(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (envK <> flist)
               let (size,_) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (L.sort $ fmap snd envK) fixmap
               return (o,(slist,paging o (size,sorting' ordlist (F.toList lres))))
       nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))

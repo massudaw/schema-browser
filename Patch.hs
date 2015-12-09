@@ -329,7 +329,7 @@ diffPrim i j
 
 patchFTB :: (a -> Index a) -> FTB a -> PathFTB   (Index a)
 patchFTB p (LeftTB1 j )  = POpt (patchFTB p <$> j)
-patchFTB p (ArrayTB1 j )  = justError "can't be empty" $  patchSet   $ zipWith (\i m ->  PIdx i  (Just m) ) [0..]  (F.toList $ patchFTB p <$> j)
+patchFTB p (ArrayTB1 j )  = justError "empty array in arraytb1 patchftb" $  patchSet   $ zipWith (\i m ->  PIdx i  (Just m) ) [0..]  (F.toList $ patchFTB p <$> j)
 patchFTB p (DelayedTB1 j ) = PDelayed (patchFTB p <$> j)
 patchFTB p (SerialTB1 j ) = PSerial (patchFTB p <$> j)
 patchFTB p (IntervalTB1 j ) =  PatchSet [PInter True (first (patchFTB p . unFinite ) $  Interval.lowerBound' j) , PInter False (first (patchFTB p . unFinite ) $ Interval.upperBound' j)]

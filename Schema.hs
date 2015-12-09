@@ -134,19 +134,7 @@ keyTablesInit schemaVar conn userconn (schema,user) oauth ops pluglist = do
            (i1,pks) = (keyMap, M.fromList $ fmap (\(_,t)-> (S.fromList$ rawPK t ,t)) $ M.toList i3 )
            i2 =  M.filterWithKey (\k _ -> not.S.null $ k )  pks
        sizeMapt <- M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t  i3 ) <$> query conn tableSizes (Only schema)
-       varmap <- mapM (\i -> do
-              let ini = ((M.empty,M.empty) :: Collection Key Showable)
-              mnew <-  newMVar ini
-              mdiff <-  newMVar []
-              (e,h) <- liftIO $R.newEvent
-              bh <- R.stepper ini e
-              liftIO$ forkIO $ forever $ do
-                  (h =<< takeMVar mnew )
-              liftIO$ forkIO $ forever $ do
-                  patches <- takeMVar mdiff
-                  (m,bstate) <- R.currentValue bh
-                  (h . (m,) . foldl apply bstate . traceShowId $ patches )
-              return (tableMeta i,  (mdiff,mnew,R.tidings bh e))) (F.toList i2)
+       varmap <- mapM createTableRefs (F.toList i2)
        mvar <- newMVar  (M.fromList varmap)
        metaschema <- if (schema /= "metadata")
           then Just <$> keyTables  schemaVar conn userconn ("metadata",user) oauth ops pluglist
@@ -155,6 +143,27 @@ keyTablesInit schemaVar conn userconn (schema,user) oauth ops pluglist = do
        var <- takeMVar schemaVar
        putMVar schemaVar (M.insert schema inf var)
        return inf
+
+createTableRefs :: Table -> IO (KVMetadata Key,DBVar )
+createTableRefs i = do
+  let ini = (M.empty,M.empty)
+      diffIni :: [TBIdx Key Showable]
+      diffIni = []
+  mnew <-  newMVar ini
+  mdiff <-  newMVar diffIni
+  (e,h) <- liftIO $R.newEvent
+  bh <- R.stepper ini e
+  (ediff,hdiff) <- liftIO $R.newEvent
+  bhdiff <- R.stepper diffIni ediff
+  liftIO$ forkIO $ forever $ do
+      (h =<< takeMVar mnew )
+  liftIO$ forkIO $ forever $ do
+      patches <- takeMVar mdiff
+      (m,bstate) <- R.currentValue bh
+      let edited = L.foldl' apply bstate  patches
+      hdiff patches
+      (h (m,edited))
+  return (tableMeta i,  (mdiff,mnew,R.tidings bhdiff ediff ,R.tidings bh e))
 
 
 -- Search for recursive cycles and tag the tables
@@ -386,7 +395,7 @@ atTable ::  KVMetadata Key -> DBM Key v (Map [(Key,FTB Showable)] (TBData Key v)
 atTable k = do
   i <- ask
   k <- liftIO$ dbTable i k
-  (\(_,_,c)-> fmap snd $ liftIO $ R.currentValue (R.facts c)) k
+  (\(_,_,_,c)-> fmap snd $ liftIO $ R.currentValue (R.facts c)) k
 
 joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  [TBData Key Showable] -> TransactionM ( FTB (TBData Key Showable))
 joinRelT rel ref tb table
