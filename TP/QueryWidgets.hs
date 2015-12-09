@@ -800,7 +800,7 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = mdo
           rr = tablePKSet tb1
           table = justError "no table found" $ M.lookup (S.map _relOrigin rr) $ pkMap inf
 
-      ((tmvard,tmvar,vpdiff,_),resi)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
+      ((DBVar2 tmvard _ _ vpdiff _ _ ),resi)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
       bres <- accumB resi (flip (foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> rumors vpdiff)
       let
           vpt =  tidings bres ((foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> bres <@> rumors vpdiff )

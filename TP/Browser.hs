@@ -194,10 +194,10 @@ databaseChooser smvar sargs = do
         case schemaN of
           "gmail" ->  do
               metainf <- keyTables smvar dbConn conn ("metadata",T.pack $ user ) Nothing postgresOps plugList
-              ((_,_,_,tb),_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []  [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  "wesley.massuda@gmail.com"))]
+              (dbmeta ,_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []  [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  "wesley.massuda@gmail.com"))]
               let
                   td :: Tidings OAuth2Tokens
-                  td = fmap (\o -> justError "" . fmap (toOAuth . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $   head $ snd $ o )) (fmap F.toList <$> tb)
+                  td = fmap (\o -> justError "" . fmap (toOAuth . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $   head $ o )) (F.toList <$> collectionTid dbmeta )
                   toOAuth v = tokenToOAuth (b,d,a,c)
                     where [a,b,c,d] = fmap TB1 $ F.toList $ snd $ unTB1 v :: [FTB Showable]
               call smvar dbConn conn (schemaN,T.pack $ user ) (Just ("me",td )) gmailOps plugList
@@ -263,10 +263,10 @@ viewerKey inf key = mdo
   let
       table = justLook  key $ pkMap inf
 
-  ((tmvard,tmvar,vpdiff,_),vp)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
-  bres <- accumB vp  (flip (foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> rumors vpdiff)
+  (dbtable ,vp)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
+  bres <- accumB vp  (flip (foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> rumors (patchTid dbtable))
   let
-      vpt = tidings bres ((foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> bres <@> rumors vpdiff )
+      vpt = tidings bres ((foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> bres <@> rumors (patchTid dbtable))
       tdi = pure Nothing
   cv <- currentValue (facts tdi)
   -- Final Query ListBox
@@ -290,7 +290,9 @@ viewerKey inf key = mdo
     offset <- offsetField 0 (never ) (lengthPage <$> facts res3)
     res3 <- mapT0Event (fmap inisort (fmap F.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap F.toList) $ tidings ( res2) ( rumors vpt) ) )
     return (offset, res3)
-  onEvent (rumors $ triding offset) $ (\i -> liftIO $ transaction inf $ eventTable  inf table  (Just $ (i `div` 10)  + 1 ) Nothing  [] [])
+  onEvent (rumors $ triding offset) $ (\i ->  liftIO $ do
+    print ("page",(i `div` 10 )   )
+    transaction inf $ eventTable  inf table  (Just $ i `div` 10) Nothing  [] [])
   let
     paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )<$> triding offset
   page <- currentValue (facts paging)
@@ -307,11 +309,11 @@ viewerKey inf key = mdo
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
   res2 <- stepper (vp) (rumors vpt)
-  onEvent (pure <$> ediff) (liftIO .  putMVar tmvard)
+  onEvent (pure <$> ediff) (liftIO .  putMVar (patchVar dbtable))
   onEvent (facts vpt <@ UI.click updateBtn ) (\(oi,oj) -> do
               let up =  (updateEd (schemaOps inf) ) inf table (L.maximumBy (comparing (getPK.TB1)) (F.toList oj) ) Nothing (Just 400)
               (l,i,j) <- liftIO $  transaction inf up
-              liftIO .  putMVar tmvar  $ (oi , oj <> M.fromList ((\i -> (getPK i,unTB1 i) )<$>  l )) )
+              liftIO .  putMVar (collectionVar dbtable) $ (oj <> M.fromList ((\i -> (getPK i,unTB1 i) )<$>  l )) )
 
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK. TB1 )  <$> facts tds) # set UI.class_ "col-xs-8"

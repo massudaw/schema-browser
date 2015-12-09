@@ -71,12 +71,12 @@ import GHC.Stack
 plugs schm db plugs = do
   conn <- connectPostgreSQL (connRoot db)
   inf <- keyTables schm conn conn ("metadata",T.pack $ user db ) Nothing postgresOps plugs
-  ((md,_,_,td),(s,t)) <- transaction inf $ eventTable  inf (lookTable inf "plugins") Nothing Nothing [] []
+  (db ,(s,t)) <- transaction inf $ eventTable  inf (lookTable inf "plugins") Nothing Nothing [] []
   let els = L.filter (not . (`L.elem` F.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
   p <-transaction inf $ do
      elsFKS <- mapM (loadFKS inf ) els
      mapM (\table -> fullDiffInsert  (meta inf)  table) elsFKS
-  putMVar md (tableDiff <$> catMaybes p)
+  putMVar (patchVar db) (tableDiff <$> catMaybes p)
 
 
 
@@ -89,8 +89,8 @@ testPoller plug = do
 poller schm db plugs is_test = do
   conn <- connectPostgreSQL (connRoot db)
   metas <- keyTables  schm conn  conn ("metadata", T.pack $ user db) Nothing postgresOps plugs
-  ((plm2d,_,_,plt2 ),_)<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
-  (_,polling) <- currentValue (facts plt2)
+  (dbpol,_)<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
+  polling <- currentValue (facts (collectionTid dbpol ))
   let
     project tb =  (schema,intervalms,p)
       where
@@ -107,7 +107,7 @@ poller schm db plugs is_test = do
               pname = _name p
               a = _bounds p
           pid <- forkIO $ (void $ forever $ do
-            (_,polling) <- currentValue (facts plt2)
+            polling <- currentValue (facts (collectionTid dbpol) )
             let curr = justLook (getPKM tb) polling
                 TB1 (STimestamp startLocal) = index curr "start_time"
                 TB1 (STimestamp endLocal) = index curr "end_time"
@@ -121,7 +121,7 @@ poller schm db plugs is_test = do
                 putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                 inf <- keyTables  schm conn  conn (schema, T.pack $ user db) Nothing postgresOps plugs
                 let fetchSize = 1000
-                ((mdiff,_,_,_),(l,listRes)) <- transaction inf $ eventTable inf (lookTable inf a) Nothing (Just fetchSize) [][]
+                (dbplug ,(l,listRes)) <- transaction inf $ eventTable inf (lookTable inf a) Nothing (Just fetchSize) [][]
                 let sizeL = justLook [] l
                     lengthPage s pageSize  = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
                 i <- concat <$> mapM (\ix -> do
@@ -137,7 +137,7 @@ poller schm db plugs is_test = do
                         v <- traverse (\o -> do
                           let diff' =   join $ (\i j -> diff (j ) (i)) <$>  o <*> Just inp
                           maybe (return Nothing )  (\i -> transaction inf $ (editEd $ schemaOps inf) inf (justError "no test" o) inp ) diff' ) o
-                        traverse (traverse (putMVar mdiff . pure) . fmap tableDiff) v
+                        traverse (traverse (putMVar (patchVar dbplug). pure) . fmap tableDiff) v
                         return v
                           )
                       ) . L.transpose . chuncksOf 20 $ evb
@@ -146,7 +146,7 @@ poller schm db plugs is_test = do
                 end <- getCurrentTime
                 putStrLn $ "END " <>T.unpack pname <> " - " <> show end
                 let polling_log = lookTable (meta inf) "polling_log"
-                (plmd,_,_,_) <-  refTable (meta inf) polling_log
+                dbplog <-  refTable (meta inf) polling_log
                 let table = tblist
                         [ attrT ("poll_name",TB1 (SText pname))
                         , attrT ("schema_name",TB1 (SText schema))
@@ -167,8 +167,8 @@ poller schm db plugs is_test = do
                     fktable <- loadFKS (meta inf) (liftTable' (meta inf) "polling_log"  table)
                     p <-fullDiffInsert  (meta inf) fktable
                     return (fktable2,p)
-                traverse (putMVar plmd .pure ) (fmap tableDiff  p)
-                traverse (putMVar plm2d . pure) (maybeToList $ diff curr p2)
+                traverse (putMVar (patchVar dbplog) .pure ) (fmap tableDiff  p)
+                traverse (putMVar (patchVar dbpol). pure) (maybeToList $ diff curr p2)
                 threadDelay (intervalms*10^3)
             else do
                 threadDelay (round $ (*10^6) $  diffUTCTime current start ) )

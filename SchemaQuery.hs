@@ -42,7 +42,7 @@ import qualified Data.Text as T
 
 defsize = 200
 
-estLength page size resL est = fromMaybe 0 page * fromMaybe defsize size  +  est
+estLength page size resL est = fromMaybe 0 page * size  +  est
 
 
 refTable :: InformationSchema -> Table -> IO DBVar
@@ -65,30 +65,36 @@ eventTable inf table page size presort fixed = do
               else
                 M.filterWithKey  (\_ (m,k)->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV k)
     mmap <- liftIO $ readMVar mvar
-    let (mdiff,i,tdiff,td) =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
-    (mtable,td,ini) <- do
-       (fixedmap ,reso) <- liftIO $ currentValue (facts td)
+    let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
+    iniT <- do
+       (fixedmap ,reso) <- liftIO $ currentValue (liftA2 (,) (facts (idxTid dbvar) ) (facts (collectionTid dbvar ) ))
        ini <- case M.lookup fixidx fixedmap of
           Just (sq,mp) -> do
-             if (maybe False (\p->not $ M.member (p+1) mp) page
-                && sq >  M.size (filterfixed reso )
-                && isJust (join $ flip M.lookup mp . (*pagesize) <$> page ))
+             liftIO$ putStrLn $ "load existing filter map" <> show (M.size (filterfixed reso), pagesize * (fromMaybe 0 page + 1))
+             liftIO$ print (M.keys mp )
+             if (sq > M.size (filterfixed reso) -- Tabela é maior que a tabela carregada
+                && isJust (join $ flip M.lookup mp . (*pagesize) <$> page ) -- Tem a página no mapa
+                && M.size (filterfixed reso) < pagesize * (fromMaybe 0 page +1) -- O carregado é menor que a página
+               )
              then  do
+               liftIO$ putStrLn "load new page"
                (res,nextToken ,s ) <- (listEd $ schemaOps inf ) inf table (join $ flip M.lookup mp . (*pagesize) <$> page ) size sortList fixed
-               let ini = (M.insert fixidx (estLength page size res s  ,maybe mp (\v -> M.insert ((fromMaybe 0 page +1 )*pagesize) v  mp)  nextToken) fixedmap ,reso <> M.fromList (fmap (\i -> (getPK i,unTB1 i)) res))
-               liftIO$ putMVar i ini
-               return $ Just ini
-             else return Nothing
+               let ini = (M.insert fixidx (estLength page pagesize res s  ,(\v -> M.insert ((fromMaybe 0 page +1 )*pagesize) v  mp) $ justError "no token"    nextToken) fixedmap , M.fromList (fmap (\i -> (getPK i,unTB1 i)) res)<> reso )
+               liftIO $ putMVar (patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )
+               liftIO$ putMVar (idxVar dbvar ) (fst ini)
+               return  ini
+             else return (fixedmap ,reso)
           Nothing -> do
+             liftIO$ putStrLn "create new filter map"
              (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing size sortList fixed
-             let ini = (M.insert fixidx (estLength page size res s ,maybe M.empty (M.singleton pagesize) p) fixedmap , M.fromList (fmap (\i -> (getPK i,unTB1 i)) res) <> reso)
-             liftIO $ putMVar i ini
-             return $ Just ini
-       return (i,td,ini)
-    iniT <- fromMaybe (liftIO $ currentValue (facts td)) (return <$> ini)
-    let tde = fmap filterfixed <$> rumors td
+             let ini = (M.insert fixidx (estLength page pagesize res s ,maybe M.empty (M.singleton pagesize) p) fixedmap , M.fromList (fmap (\i -> (getPK i,unTB1 i)) res) <> reso)
+             liftIO $ putMVar (patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )
+             liftIO$ putMVar (idxVar dbvar ) (fst ini)
+             return ini
+       return ini
+    let tde = fmap filterfixed <$> rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
     tdb  <- stepper (fmap filterfixed iniT) tde
-    return ((mdiff,mtable, tdiff,tidings tdb tde),fmap filterfixed iniT)
+    return (dbvar {collectionTid  = fmap snd $ tidings tdb tde},fmap filterfixed iniT)
 
 
 
@@ -99,7 +105,7 @@ fullInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData
 fullInsert' inf ((k1,v1) )  = do
    let proj = _kvvalues . unTB
    ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
-   ((_,m,_,t),(_,l)) <- eventTable inf (lookTable inf (traceShow (k1,v1) $_kvname k1)) Nothing Nothing [] []
+   (_,(_,l)) <- eventTable inf (lookTable inf (traceShow (k1,v1) $_kvname k1)) Nothing Nothing [] []
    if  isJust $ M.lookup (getPKM ret) l
       then do
         return ret
@@ -126,8 +132,8 @@ transaction inf log = {-withTransaction (conn inf) $-} do
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
   Tra.traverse (\(k,v) -> do
     -- print "GetTable"
-    (mdiff,_,_,t) <- refTable inf k
-    putMVar mdiff v
+    ref <- refTable inf k
+    putMVar (patchVar ref ) v
     ) (M.toList aggr)
   --print "Transaction Finish"
   return md

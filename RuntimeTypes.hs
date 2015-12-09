@@ -6,6 +6,7 @@ import Types
 import Control.Arrow
 import Data.Text
 import Patch
+import Control.Applicative
 import Control.Monad.Writer
 
 import qualified Reactive.Threepenny as R
@@ -56,7 +57,18 @@ tableMap = _tableMapL
 keyMap = _keyMapL
 pkMap = _pkMapL
 
-type DBVar2 k v = (MVar [TBIdx k v],MVar (Collection k v),R.Tidings [TBIdx k v], R.Tidings (Collection k v))
+data DBVar2 k v=
+  DBVar2 { patchVar :: MVar [TBIdx k v]
+  , idxVar :: MVar (Map [Column Key Showable] (Int,Map Int PageToken))
+  , collectionVar :: MVar (Map [(Key,FTB Showable)] (TBData k v))
+  , patchTid :: R.Tidings [TBIdx k v]
+  , idxTid :: R.Tidings (Map [Column Key Showable] (Int,Map Int PageToken))
+  , collectionTid :: R.Tidings (Map [(Key,FTB Showable)] (TBData k v))
+  }
+
+
+idxColTid db =  (,) <$> idxTid db <*> collectionTid db
+
 type DBVar = DBVar2 Key Showable
 type Collection k v = (Map [Column Key Showable] (Int,Map Int PageToken),Map [(Key,FTB Showable)] (TBData k v))
 

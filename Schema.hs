@@ -146,24 +146,29 @@ keyTablesInit schemaVar conn userconn (schema,user) oauth ops pluglist = do
 
 createTableRefs :: Table -> IO (KVMetadata Key,DBVar )
 createTableRefs i = do
-  let ini = (M.empty,M.empty)
+  let
       diffIni :: [TBIdx Key Showable]
       diffIni = []
-  mnew <-  newMVar ini
+  midx <-  newMVar M.empty
+  mnew <-  newMVar M.empty
   mdiff <-  newMVar diffIni
   (e,h) <- liftIO $R.newEvent
-  bh <- R.stepper ini e
+  bh <- R.stepper M.empty e
   (ediff,hdiff) <- liftIO $R.newEvent
   bhdiff <- R.stepper diffIni ediff
+  (eidx ,hidx) <- liftIO $R.newEvent
+  bhidx <- R.stepper M.empty eidx
   liftIO$ forkIO $ forever $ do
-      (h =<< takeMVar mnew )
+      (hidx =<< (takeMVar midx ) )
+  liftIO$ forkIO $ forever $ do
+      (h =<<  takeMVar mnew )
   liftIO$ forkIO $ forever $ do
       patches <- takeMVar mdiff
-      (m,bstate) <- R.currentValue bh
+      bstate <- R.currentValue bh
       let edited = L.foldl' apply bstate  patches
       hdiff patches
-      (h (m,edited))
-  return (tableMeta i,  (mdiff,mnew,R.tidings bhdiff ediff ,R.tidings bh e))
+      (h edited)
+  return (tableMeta i,  DBVar2  mdiff midx mnew (R.tidings bhdiff ediff) (R.tidings bhidx eidx) (R.tidings bh e))
 
 
 -- Search for recursive cycles and tag the tables
@@ -395,7 +400,7 @@ atTable ::  KVMetadata Key -> DBM Key v (Map [(Key,FTB Showable)] (TBData Key v)
 atTable k = do
   i <- ask
   k <- liftIO$ dbTable i k
-  (\(_,_,_,c)-> fmap snd $ liftIO $ R.currentValue (R.facts c)) k
+  (\(DBVar2 _ _ _  _ _ c)-> liftIO $ R.currentValue (R.facts c)) k
 
 joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  [TBData Key Showable] -> TransactionM ( FTB (TBData Key Showable))
 joinRelT rel ref tb table
