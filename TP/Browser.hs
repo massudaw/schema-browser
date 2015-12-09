@@ -135,7 +135,8 @@ testPoller plug = do
 poller schm db plugs is_test = do
   conn <- connectPostgreSQL (connRoot db)
   metas <- keyTables  schm conn  conn ("metadata", T.pack $ user db) Nothing postgresOps plugs
-  ((plm2d,_,_,plt2),(_,polling))<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
+  ((plm2d,_,_,plt2 ),_)<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
+  (_,polling) <- currentValue (facts plt2)
   let
     project tb =  (schema,intervalms,p)
       where

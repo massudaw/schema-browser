@@ -86,7 +86,9 @@ eventTable inf table page size presort fixed = do
              return $ Just ini
        return (i,td,ini)
     iniT <- fromMaybe (liftIO $ currentValue (facts td)) (return <$> ini)
-    return ((mdiff,mtable, tdiff,fmap filterfixed <$> td),fmap filterfixed iniT)
+    let tde = fmap filterfixed <$> rumors td
+    tdb  <- stepper (fmap filterfixed iniT) tde
+    return ((mdiff,mtable, tdiff,tidings tdb tde),fmap filterfixed iniT)
 
 
 
@@ -97,7 +99,7 @@ fullInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData
 fullInsert' inf ((k1,v1) )  = do
    let proj = _kvvalues . unTB
    ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
-   ((_,m,_,t),(_,l)) <- eventTable inf (lookTable inf (_kvname k1)) Nothing Nothing [] []
+   ((_,m,_,t),(_,l)) <- eventTable inf (lookTable inf (traceShow (k1,v1) $_kvname k1)) Nothing Nothing [] []
    if  isJust $ M.lookup (getPKM ret) l
       then do
         return ret

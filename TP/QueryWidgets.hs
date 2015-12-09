@@ -805,7 +805,6 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = mdo
       let
           vpt =  tidings bres ((foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> bres <@> rumors vpdiff )
           res = fmap TB1 <$> resi
-      -- ((tmvard,_,_,vpt),res)  <- fmap (fmap (fmap TB1) ) <$> (liftIO $ transaction inf $ eventTable inf table Nothing Nothing [] [])
       let
           -- Find non injective part of reference
           ftdi = oldItems
