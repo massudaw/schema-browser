@@ -39,6 +39,18 @@ data InformationSchema
   , plugins :: [Plugins ]
   }
 
+data BrowserState
+  = BrowserState
+  {host :: String
+  ,port :: String
+  ,dbn :: String
+  ,user :: String
+  ,pass :: String
+  ,schema :: Maybe String
+  ,tablename :: Maybe String
+  }
+
+
 
 tableMap = _tableMapL
 keyMap = _keyMapL

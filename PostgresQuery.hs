@@ -8,7 +8,7 @@ import Schema
 import RuntimeTypes
 import Data.Bifunctor
 import Query
-import Control.Monad.Writer
+import Control.Monad.Writer hiding (pass)
 import System.Time.Extra
 import Patch
 import Debug.Trace
@@ -253,6 +253,8 @@ loadDelayed inf t@(k,v) values@(ks,vs)
   where
     delayedattrs = concat $ fmap (keyValue . (\(Inline i ) -> i)) .  F.toList <$> M.keys filteredAttrs
     filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (_kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs)
+
+connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname ) -- <> " sslmode= require" )
 
 
 

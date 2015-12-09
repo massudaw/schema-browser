@@ -33,7 +33,6 @@ import Data.Aeson
 import Utils
 
 import Types
-import Data.IORef
 import RuntimeTypes
 import qualified Data.Map as M
 import Debug.Trace

@@ -16,6 +16,7 @@ module Main (main) where
 
 import Query
 import Text
+import Poller
 import Control.Concurrent.Async
 import Data.List (foldl')
 import Debug.Trace
@@ -25,7 +26,7 @@ import Step
 import Plugins
 import TP.Widgets
 import SchemaQuery
-import PostgresQuery (postgresOps)
+import PostgresQuery (postgresOps,connRoot)
 import SortList
 import Prelude hiding (head)
 import TP.QueryWidgets
@@ -68,17 +69,6 @@ import OAuth
 import GHC.Stack
 
 
-data BrowserState
-  = BrowserState
-  {host :: String
-  ,port :: String
-  ,dbn :: String
-  ,user :: String
-  ,pass :: String
-  ,schema :: Maybe String
-  ,tablename :: Maybe String
-  }
-
 
 argsToState  [h,ph,d,u,p,s,t] = BrowserState h ph d  u p (Just s) (Just t )
 argsToState  [h,ph,d,u,p,s] = BrowserState h ph d  u p  (Just s)  Nothing
@@ -114,114 +104,6 @@ main = do
   print "Finish"
 
 
-plugs schm db plugs = do
-  conn <- connectPostgreSQL (connRoot db)
-  inf <- keyTables schm conn conn ("metadata",T.pack $ user db ) Nothing postgresOps plugs
-  ((md,_,_,td),(s,t)) <- transaction inf $ eventTable  inf (lookTable inf "plugins") Nothing Nothing [] []
-  let els = L.filter (not . (`L.elem` F.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
-  p <-transaction inf $ do
-     elsFKS <- mapM (loadFKS inf ) els
-     mapM (\table -> fullDiffInsert  (meta inf)  table) elsFKS
-  putMVar md (tableDiff <$> catMaybes p)
-
-
-index tb item = snd $ justError ("no item" <> show item) $ indexTable (IProd True [item]) (tableNonRef' tb)
-
-
-testPoller plug = do
-  smvar <- newMVar M.empty
-  poller smvar  (BrowserState "localhost" "5432" "incendio" "postgres" "queijo" Nothing Nothing) [plug] True
-
-poller schm db plugs is_test = do
-  conn <- connectPostgreSQL (connRoot db)
-  metas <- keyTables  schm conn  conn ("metadata", T.pack $ user db) Nothing postgresOps plugs
-  ((plm2d,_,_,plt2 ),_)<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
-  (_,polling) <- currentValue (facts plt2)
-  let
-    project tb =  (schema,intervalms,p)
-      where
-        TB1 (SText schema )= index tb "schema_name"
-        TB1 (SNumeric intervalms) = index tb "poll_period_ms"
-        TB1 (SText p) = index tb "poll_name"
-    enabled = F.toList polling
-    poll tb  = do
-      let plug = L.find ((==pname ). _name ) plugs
-          (schema,intervalms ,pname ) = project tb
-      flip traverse plug $ \p -> do
-          let f = pluginStatic p
-              elemp = pluginAction p
-              pname = _name p
-              a = _bounds p
-          pid <- forkIO $ (void $ forever $ do
-            (_,polling) <- currentValue (facts plt2)
-            let curr = justLook (getPKM tb) polling
-                TB1 (STimestamp startLocal) = index curr "start_time"
-                TB1 (STimestamp endLocal) = index curr "end_time"
-                start = localTimeToUTC utc startLocal
-                end = localTimeToUTC utc endLocal
-            current <- getCurrentTime
-            putStrLn $ "LAST RUN " <> show (schema,pname,start,end)
-            let intervalsec = intervalms `div` 10^3
-            if  is_test || diffUTCTime current start  >  fromIntegral intervalsec
-            then do
-                putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
-                inf <- keyTables  schm conn  conn (schema, T.pack $ user db) Nothing postgresOps plugs
-                let fetchSize = 1000
-                ((mdiff,_,_,_),(l,listRes)) <- transaction inf $ eventTable inf (lookTable inf a) Nothing (Just fetchSize) [][]
-                let sizeL = justLook [] l
-                    lengthPage s pageSize  = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
-                i <- concat <$> mapM (\ix -> do
-                    (_,(_,listResAll)) <- transaction inf $ eventTable inf (lookTable inf a) (Just ix) (Just fetchSize) [][]
-                    let listRes = L.take fetchSize . F.toList $ listResAll
-
-                    let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
-                        tdInput i =  isJust  $ checkTable  (fst f) i
-                        tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
-
-                    i <-  mapConcurrently (mapM (\inp -> do
-                        o  <- fmap (fmap (liftTable' inf a)) <$> catchPluginException inf a pname (getPK $ TB1 inp)   (elemp (Just $ mapKey' keyValue inp))
-                        v <- traverse (\o -> do
-                          let diff' =   join $ (\i j -> diff (j ) (i)) <$>  o <*> Just inp
-                          maybe (return Nothing )  (\i -> transaction inf $ (editEd $ schemaOps inf) inf (justError "no test" o) inp ) diff' ) o
-                        traverse (traverse (putMVar mdiff . pure) . fmap tableDiff) v
-                        return v
-                          )
-                      ) . L.transpose . chuncksOf 20 $ evb
-                    return $ concat i
-                    ) [0..(lengthPage (fst sizeL) fetchSize -1)]
-                end <- getCurrentTime
-                putStrLn $ "END " <>T.unpack pname <> " - " <> show end
-                let polling_log = lookTable (meta inf) "polling_log"
-                (plmd,_,_,_) <-  refTable (meta inf) polling_log
-                let table = tblist
-                        [ attrT ("poll_name",TB1 (SText pname))
-                        , attrT ("schema_name",TB1 (SText schema))
-                        , _tb $ IT (attrT ("diffs",LeftTB1 $ Just$ ArrayTB1 $ [TB1 ()])) (LeftTB1 $ ArrayTB1  <$> (
-                                  nonEmpty  . catMaybes $
-                                      fmap (TB1 . tblist  ) .  either (\r ->Just $ [attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) ),attrT ("modify",LeftTB1 $Nothing)]) (fmap (\r -> [attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $  r))   ),attrT ("except",LeftTB1 $Nothing)])) <$> i))
-                        , attrT ("duration",srange (time current) (time end))]
-                    time  = TB1 . STimestamp . utcToLocalTime utc
-                    table2 = tblist
-                        [ attrT ("poll_name",TB1 (SText pname))
-                        , attrT ("schema_name",TB1 (SText schema))
-                        , attrT ("start_time",time current)
-                        , attrT ("end_time",time end)]
-
-                (p2,p) <- transaction (meta inf) $ do
-                    fktable2 <- loadFKS (meta inf) (liftTable' (meta inf) "polling"  table2)
-                    p2 <- fullDiffEdit (meta inf) curr fktable2
-                    fktable <- loadFKS (meta inf) (liftTable' (meta inf) "polling_log"  table)
-                    p <-fullDiffInsert  (meta inf) fktable
-                    return (fktable2,p)
-                traverse (putMVar plmd .pure ) (fmap tableDiff  p)
-                traverse (putMVar plm2d . pure) (maybeToList $ diff curr p2)
-                threadDelay (intervalms*10^3)
-            else do
-                threadDelay (round $ (*10^6) $  diffUTCTime current start ) )
-
-          return ()
-  mapM poll  enabled
-
 setup
      ::  MVar (M.Map Text  InformationSchema) ->  [String] -> Window -> UI ()
 setup smvar args w = void $ do
@@ -254,7 +136,6 @@ setup smvar args w = void $ do
             element body # set UI.children [span]# set UI.class_ "row"  )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
 
 
-connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname ) -- <> " sslmode= require" )
 listDBS ::  BrowserState -> IO (Text,(Connection,[Text]))
 listDBS dname = do
   connMeta <- connectPostgreSQL (connRoot dname)
