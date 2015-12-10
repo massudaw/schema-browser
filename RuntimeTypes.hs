@@ -71,6 +71,7 @@ idxColTid db =  (,) <$> idxTid db <*> collectionTid db
 
 type DBVar = DBVar2 Key Showable
 type Collection k v = (Map [Column Key Showable] (Int,Map Int PageToken),Map [(Key,FTB Showable)] (TBData k v))
+type TableIndex k v = Map [(Key,FTB Showable)] (TBData k v)
 
 type Plugins = FPlugins Text
 type VarDef = (Text,KType (Prim (Text,Text) (Text,Text)))
@@ -126,7 +127,7 @@ data SchemaEditor
   { editEd  :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
   , insertEd :: InformationSchema -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
   , deleteEd :: InformationSchema -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
-  , listEd :: InformationSchema -> Table -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> [(Text ,Column Key Showable)]-> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
+  , listEd :: InformationSchema -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> [(Text ,Column Key Showable)]-> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
   , updateEd :: InformationSchema -> Table -> TBData Key Showable -> Maybe PageToken -> Maybe Int -> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
   , getEd :: InformationSchema -> Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   }

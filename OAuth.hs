@@ -97,7 +97,7 @@ updateTable inf table reference page maxResults
 
 
 
-listTable inf table page maxResults sort ix
+listTable inf table offset page maxResults sort ix
   | tableName table == "history" = return ([],Nothing , 0)
   | tableName table == "attachments" = return ([],Nothing , 0)
   | otherwise = do

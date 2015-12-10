@@ -294,7 +294,7 @@ viewerKey inf key = mdo
     print ("page",(i `div` 10 )   )
     transaction inf $ eventTable  inf table  (Just $ i `div` 10) Nothing  [] [])
   let
-    paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )<$> triding offset
+    paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
   page <- currentValue (facts paging)
   res4 <- mapT0Event (page $ fmap inisort (fmap F.toList vp)) return (paging <*> res3)
   itemList <- listBox (fmap snd res4) (tidings st sel ) (pure id) ( pure attrLine )
@@ -303,7 +303,7 @@ viewerKey inf key = mdo
   prop <- stepper cv evsel
   let tds = tidings prop (diffEvent  prop evsel)
 
-  (cru,ediff,pretdi) <- crudUITable inf (pure "Editor")  (tidings (fmap (F.toList .snd) res2) never)[] [] (allRec' (tableMap inf) table) tds
+  (cru,ediff,pretdi) <- crudUITable inf (pure "Editor")  (tidings (res2) never)[] [] (allRec' (tableMap inf) table) tds
   diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip Patch.apply j ) i) <$> facts pretdi <@> ediff
   let
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]
@@ -330,5 +330,3 @@ tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
 tableAttrs (TB1  (_,k)) = concat $ fmap aattr (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
 tableAttrs (LeftTB1 (Just i)) = tableAttrs i
 tableAttrs (ArrayTB1 [i]) = tableAttrs i
-
-

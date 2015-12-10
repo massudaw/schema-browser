@@ -206,6 +206,7 @@ selectAll
   ::
      InformationSchema
      -> TableK Key
+     -> Int
      -> Maybe PageToken
      -> Int
      -> [(Key, Order)]
@@ -214,13 +215,13 @@ selectAll
            [(KVMetadata Key,
              Compose
                Identity (KV (Compose Identity (TB Identity))) Key Showable)])
-selectAll inf table i  j k st = do
+selectAll inf table offset i  j k st = do
       let
           unref (TableRef i) = i
           tbf =  tableView (tableMap inf) table
       liftIO $ print (tableName table,selectQuery tbf )
       let m = tbf
-      (t,v) <- liftIO$ duration  $ paginate (conn inf) m k 0 j (fmap unref i) (nonEmpty st)
+      (t,v) <- liftIO$ duration  $ paginate (conn inf) m k offset j (fmap unref i) (nonEmpty st)
       mapM_ (tellRefs inf  ) (snd v)
       liftIO$ print (tableName table,t)
       return v
@@ -258,4 +259,4 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 
 
-postgresOps = SchemaEditor updateMod insertMod deleteMod (\i j p g s o-> (\(l,i) -> (fmap TB1 i,Just $ TableRef  (filter (flip L.elem (fmap fst s) . fst ) $  getPK $ TB1 $ last i) ,l)) <$> selectAll i j p (fromMaybe 200 g) s o ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ))
+postgresOps = SchemaEditor updateMod insertMod deleteMod (\i j off p g s o-> (\(l,i) -> (fmap TB1 i,Just $ TableRef  (filter (flip L.elem (fmap fst s) . fst ) $  getPK $ TB1 $ last i) ,l)) <$> selectAll i j (fromMaybe 0 off) p (fromMaybe 200 g) s o ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ))

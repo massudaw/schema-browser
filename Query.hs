@@ -46,6 +46,7 @@ import Control.Applicative
 import Data.List (intercalate)
 import qualified Data.List as L
 import qualified Data.Map as M
+import qualified Data.HashMap.Strict as HM
 import qualified Data.Set as S
 import Data.Set (Set)
 import Data.Map (Map)
@@ -888,14 +889,17 @@ backFKRef relTable ifk = fmap (_tb . uncurry Attr). reorderPK .  concat . fmap a
           where knm =  M.lookup ko relTable
 
 
+postgresLiftPrim :: Ord b => Map (KType (Prim KPrim b)) (KType (Prim KPrim b))
 postgresLiftPrim =
-  [(Primitive (AtomicPrim PBounding ), KInterval (Primitive (AtomicPrim PPosition)))]
+  M.fromList [(Primitive (AtomicPrim PBounding ), KInterval (Primitive (AtomicPrim PPosition)))]
 
+postgresLiftPrimConv :: Ord b => Map (KType (Prim KPrim b),KType (Prim KPrim b))  ( FTB  Showable -> FTB Showable , FTB Showable -> FTB Showable )
 postgresLiftPrimConv =
-  [((Primitive (AtomicPrim PBounding ), KInterval (Primitive (AtomicPrim PPosition)) ), ((\(TB1 (SBounding (Bounding i) )) -> IntervalTB1 (fmap   (TB1. SPosition ) i)) , (\(IntervalTB1 i) -> TB1 $ SBounding $ Bounding $ (fmap (\(TB1 (SPosition i)) -> i)) i)))]
+  M.fromList [((Primitive (AtomicPrim PBounding ), KInterval (Primitive (AtomicPrim PPosition)) ), ((\(TB1 (SBounding (Bounding i) )) -> IntervalTB1 (fmap   (TB1. SPosition ) i)) , (\(IntervalTB1 i) -> TB1 $ SBounding $ Bounding $ (fmap (\(TB1 (SPosition i)) -> i)) i)))]
 
+postgresPrim :: HM.HashMap Text KPrim
 postgresPrim =
-  [("character varying",PText)
+  HM.fromList [("character varying",PText)
   ,("name",PText)
   ,("character_data",PText)
   ,("varchar",PText)
@@ -944,7 +948,7 @@ type PGType = (Text,Text)
 type PGRecord = (Text,Text)
 
 ktypeLift :: Ord b => KType (Prim KPrim b) -> Maybe (KType (Prim KPrim b))
-ktypeLift i = (M.lookup i (M.fromList postgresLiftPrim ))
+ktypeLift i = (M.lookup i  postgresLiftPrim )
 
 ktypeRec v@(KOptional i) = ktypeLift v <|> ktypeRec i
 ktypeRec v@(KArray i) = ktypeLift v <|> ktypeRec i
@@ -957,12 +961,12 @@ mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec (fmap textToPrim i)
 mapKTypeM i = ktypeLift (fmap textToPrim i)
 
 textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)
-textToPrim (AtomicPrim (s,i)) = case  M.lookup i (M.fromList postgresPrim) of
+textToPrim (AtomicPrim (s,i)) = case  HM.lookup i  postgresPrim of
   Just k -> AtomicPrim k -- $ fromMaybe k (M.lookup k (M.fromList postgresLiftPrim ))
   Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
 textToPrim (RecordPrim i) =  (RecordPrim i)
 
-preconversion i =  join $ (\t -> M.lookup (i,t) (M.fromList postgresLiftPrimConv)) <$> ktypeLift  i
+preconversion i =  join $ (\t -> M.lookup (i,t) (postgresLiftPrimConv)) <$> ktypeLift  i
 
 conversion i = fromMaybe (id,id) $ preconversion i
 

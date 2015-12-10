@@ -293,6 +293,7 @@ paintEdit e b i  = element e # sink0 UI.style ((\ m n -> pure . ("background-col
           | otherwise = "green"
               where si = show i
                     sj = show j
+
 differ = (\(i,j) -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 paintBorder e b i  = element e # sink0 UI.style ((\ m n -> (:[("border-style","solid"),("border-width","1px")]).("border-color",) $ cond  m n ) <$> b <*> i )
   where cond i j
