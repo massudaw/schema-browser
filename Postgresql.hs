@@ -220,15 +220,16 @@ parseRow els  = (char '('  *> (do
 inattr = _relOrigin . head . keyattri
 
 startQuoted p =  do
-  let backquote = string "\""  <|> string "\\\\" <|> string "\\"
+--   let backquote = string "\""  <|> string "\\\\" <|> string "\\"
   i <- lookAhead (many backquote )
-  readQuoted (L.length i) p
+  readQuoted ( L.length i) (p)
 
+test4 = "\"StatusCodeException (Status {statusCode = 503, statusMessage = \"\"Service Unavailable\"\"}) [(\"\"Content-Type\"\",\"\"text/html\"\"),(\"\"Server\"\",\"\"Oracle-Web-Cache-11g/11.1.1.6.0 (N;ecid=49638990776402891,0:1)\"\"),(\"\"Content-Length\"\",\"\"402\"\"),(\"\"X-Response-Body-Start\"\",\"\"<!DOCTYPE HTML PUBLIC \\\\\"\"-//IETF//DTD HTML//EN\\\\\"\">\\\\n<html> <head>\\\\n<title>No Response from Application Web Server</title>\\\\n</head>\\\\n\\\\n<body bgcolor=\\\\\"\"white\\\\\"\">\\\\n<font color=\\\\\"\"red\\\\\"\">\\\\n<h1>No Response from Application Web Server</h1>\\\\n</font>\\\\n\\\\nThere was no response from the application web server for the page you requested. <br>Please notify the site's webmaster and try your request again later.\\\\n<hr>\\\\n\\\\n</body> </html>\\\\n\"\"),(\"\"X-Request-URL\"\",\"\"GET https://siapi3.bombeiros.go.gov.br:443/paginaInicialWeb.jsf\"\")] (CJ {expose = []})\""
+test3 = "\\\\\"\"\\\\\"\"FailedConnectionException2 \\\\\"\"\\\\\"\"\\\\\"\"\\\\\"\"accounts.google.com\\\\\"\"\\\\\"\"\\\\\"\"\\\\\"\" 443 True connect: does not exist (Network is unreachable)\\\\\"\"\\\\\"\""
 
 startQuotedText =  do
-  let backquote = string "\""  <|> string "\\\\" <|> string "\\"
   i <- lookAhead (many backquote )
-  readQuotedText (L.length i)
+  readQuotedText (L.length $ traceShowId  i)
 
 readText 0 = plain' ",)}"
 readText ix =  ( liftA2 (\i j  -> i <> BS.concat  j ) (scapedText ix)  (many1 (liftA2 (<>) (fmap requote (readQuotedText (ix +1))) (scapedText ix )))   <|> scapedText ix )
@@ -244,13 +245,15 @@ readQuotedText ix = readQuoted ix readText
 
 readQuoted 0 p = p 0
 readQuoted ix p =  do
-    i <- Tra.sequence (replicate ix backquote  )
+    (i,l) <- sequote ix -- Tra.sequence (replicate ix backquote  )
     v <- p ix
-    _ <-  string (BS.concat i)
-    return v
-      where backquote = string "\""  <|> string "\\\\" <|> string "\\"
+    _ <-  string (BS.concat (i <> l) )
+    return (BS.replicate ((length l `div` ix) -1 ) '"' <> v <> BS.replicate ((length l `div` ix )- 1 ) '"' )
 
 
+sequote ix =  ((,) <$> Tra.sequence (replicate ix backquote  ) <*> many backquote )
+
+backquote = string "\\\\" <|> string "\""  <|> string "\\"
 
 
 
