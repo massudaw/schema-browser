@@ -1,14 +1,21 @@
-{-# LANGUAGE BangPatterns,OverloadedStrings #-}
+{-# LANGUAGE TupleSections,OverloadedStrings #-}
 module Crea where
 
 import Types
+import qualified Data.Map as M
 import Network.Wreq
 import Utils
+import Safe
+import Control.Exception
 -- import QueryWidgets
 -- import Widgets
 import qualified Network.Wreq.Session as Sess
+import Control.Monad
 
 
+import RuntimeTypes
+import PostgresQuery
+import System.Environment
 import OpenSSL.Session (context)
 import Network.HTTP.Client.OpenSSL
 
@@ -22,11 +29,22 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as BSLC
 import qualified Data.ByteString.Lazy as BSL
+import Postgresql
 
 import Gpx
 import Debug.Trace
 
 import Data.ByteString.Search (replace)
+import Database.PostgreSQL.Simple
+
+import Prelude hiding (head)
+
+listTotuple [i] = [([],i)]
+listTotuple [i,j] = [(i,j)]
+listTotuple [i,j,k] = [(i,j),([],k)]
+listTotuple [i,j,k,l] = [(i,j),(k,l)]
+listTotuple i = []
+
 
 creaLogin rnp user pass = do
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
@@ -37,6 +55,15 @@ creaLogin rnp user pass = do
     --form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
     --pr <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
     return (cr ^? responseBody)
+
+creaArtdata rnp user pass art = do
+  withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
+    cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
+    form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
+    _ <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
+    pr <- Sess.get session $ (traceShowId (creaArtQuery (BSC.unpack art) ))
+    let index = fmap ((M.fromList . concat . (fmap listTotuple)) . concat )
+    fmap (index . join .maybeToList) $ traverse (fmap (concat . concat) . readArt . BSLC.unpack) (pr ^? responseBody)
 
 
 creaLoginArt rnp user pass art = do
@@ -61,8 +88,6 @@ creaBoletoArt rnp user pass art = do
     traverse (BSL.writeFile "boleto.pdf") bol
     return (fromJust $ bol ^? responseBody )
 
-
-
 creaConsultaArt rnp user pass art = do
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
     cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
@@ -70,6 +95,17 @@ creaConsultaArt rnp user pass art = do
     (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
     pr <- Sess.get session $ (traceShowId (creaArtHistorico (BSC.unpack art) ))
     concat .concat. maybeToList <$> (traverse readCreaHistoricoHtml $  BSLC.unpack .(replace (fst replacePath ) (snd replacePath ) . (BSL.toStrict  )) <$> (pr ^? responseBody))
+
+
+
+creaSituacaoListPage rnp user pass status page = do
+  withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
+    cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
+    form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
+    (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
+    concat <$> mapM (\ix -> do
+      pr <- Sess.get session $ (traceShowId (creaArtList status ix ))
+      fmap (drop 1) . tail . concat .concat. maybeToList <$> (traverse readCreaHistoricoHtml $  BSLC.unpack .(replace (fst replacePath ) (snd replacePath ) . (BSL.toStrict  )) <$> (pr ^? responseBody))) page
 
 
 
@@ -93,15 +129,39 @@ creaLoginForm npn user pass = ["rnp"  := npn
 
 
 creaArtQuery art = "http://www.crea-go.org.br/art1025/funcoes/form_impressao.php?NUMERO_DA_ART=" <> art
+
 creaArtHistorico art = "http://www.crea-go.org.br/art1025/cadastros/historico_art.php?NUMERO_DA_ART=" <> art
 creaArtBoleto art = "http://www.crea-go.org.br/art1025/cadastros/consulta_boleto_art.php?NUMERO_DA_ART=" <> art
 creaArtGeraBoleto boleto = "http://www.crea-go.org.br/art1025/funcoes/gera_pdf.php?cod_boleto=" <> boleto
 creaTmpBoleto boleto = "http://www.crea-go.org.br/guia/tmp/" <> boleto <> ".pdf"
 
 
+creaArtList situacao page =  "http://www.crea-go.org.br/art1025/cadastros/ajax_lista_arts.php?SITUACAO_DA_ART="<> show situacao <> "&pg=" <> show page
+
+
 
 replacePath :: (BSC.ByteString,BSC.ByteString)
 replacePath = ("/art1025"  , "http://www.crea-go.org.br/art1025")
 
+
+testCrea = do
+  args <- getArgs
+  Just rnp <- lookupEnv "CREA_RNP"
+  Just user <- lookupEnv "CREA_USER"
+  Just pass <- lookupEnv "CREA_PASS"
+  v <- creaArtdata (BSC.pack rnp) (BSC.pack user) (BSC.pack pass) "1020150193681"
+  let
+    contrato :: [M.Map String String] -> Maybe (String,String)
+    contrato v =  liftA2 (,) (join $ M.lookup "Contrato:" <$> v `atMay` 2 )(join $ M.lookup "ART Obra ou serviço" <$> v `atMay` 0 )
+  print (contrato v)
+  return v
+  conn <- connectPostgreSQL (connRoot (argsToState (tail (tail args))))
+  traverse ((`catch` (\e -> return $ traceShow (e :: SomeException ) 0) ) . execute conn "UPDATE incendio.art SET contrato = ? where art_number = ?") (contrato v)
+
+  {-
+  v <- fmap (head ) <$> creaSituacaoListPage (BSC.pack rnp) (BSC.pack user) (BSC.pack pass) 20 [10..16]
+  conn <- connectPostgreSQL (connRoot (argsToState (tail (tail args))))
+  mapM ((`catch` (\e -> return $ traceShow (e :: SomeException ) 0) ) . execute conn "INSERT INTO incendio.art (art_number,crea_register) values (?,?)" . (,rnp) ) v
+  -}
 
 

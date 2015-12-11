@@ -355,7 +355,7 @@ applyAttr' sfkt@(FKT iref rel i) (PFK _ p m b )  =  do
                             let ref =  F.toList $ M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList iref)
                                 edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (  flip apply k  ) v else v
                             tbs <- atTable m
-                            return $ FKT ref rel (maybe (joinRel rel (fmap unTB ref) (F.toList tbs)) id b)
+                            return $ FKT ref rel (maybe (joinRel m rel (fmap unTB ref) (F.toList tbs)) id b)
 applyAttr' (IT k i) (PInline _   p)  = IT k <$> (applyFTBM (fmap pure $ create) applyRecord' i p)
 applyAttr' i j = errorWithStackTrace (show ("applyAttr'" :: String,i,j))
 
@@ -382,7 +382,7 @@ createAttr' (PInline k s ) = return $ IT (_tb $ Attr k (TB1 ())) (create s)
 createAttr' (PFK rel k s b ) = do
       let ref = (_tb . create <$> k)
       tbs <- atTable s
-      return $ FKT ref rel (maybe (joinRel rel (fmap unTB ref) (F.toList tbs)) id b)
+      return $ FKT ref rel (maybe (joinRel s rel (fmap unTB ref) (F.toList tbs)) id b)
 createAttr' i = errorWithStackTrace (show i)
 
 createTB1'
@@ -413,11 +413,11 @@ joinRelT rel ref tb table
             tbel = L.find (\(_,i)-> interPointPost rel ref (nonRefAttr  $ F.toList $ _kvvalues $ unTB  i) ) table
 
 
-joinRel :: (Ord a ,Show a) => [Rel Key] -> [Column Key a] -> [TBData Key a] -> FTB (TBData Key a)
-joinRel rel ref table
-  | L.all (isOptional .keyType) origin = LeftTB1 $ fmap (flip (joinRel (Le.over relOrigin unKOptional <$> rel ) ) table) (traverse unLeftItens ref )
-  | L.any (isArray.keyType) origin = ArrayTB1 $ fmap (flip (joinRel (Le.over relOrigin unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(L.length (unArray $ unAttr $ head ref) - 1)])
-  | otherwise = maybe (TB1 $ tblist (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )) TB1 tbel
+joinRel :: (Ord a ,Show a) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> [TBData Key a] -> FTB (TBData Key a)
+joinRel tb rel ref table
+  | L.all (isOptional .keyType) origin = LeftTB1 $ fmap (flip (joinRel tb (Le.over relOrigin unKOptional <$> rel ) ) table) (traverse unLeftItens ref )
+  | L.any (isArray.keyType) origin = ArrayTB1 $ fmap (flip (joinRel tb (Le.over relOrigin unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(L.length (unArray $ unAttr $ head ref) - 1)])
+  | otherwise = maybe (TB1 $ tblistM tb (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )) TB1 tbel
       where origin = fmap _relOrigin rel
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
             tbel = L.find (\(_,i)-> interPointPost rel ref (nonRefAttr  $ F.toList $ _kvvalues $ unTB  i) ) table

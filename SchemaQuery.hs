@@ -63,7 +63,7 @@ eventTable inf table page size presort fixed = do
             = if L.null fixed
               then id
               else
-                M.filterWithKey  (\_ (m,k)->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV k)
+                M.filterWithKey  (\_ tb ->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV (snd (tableNonRef' tb)))
     mmap <- liftIO $ readMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
     iniT <- do
@@ -193,7 +193,7 @@ loadFK inf table (Path ori (FKJoinTable to rel tt ) tar) = do
   let
       relSet = S.fromList $ _relOrigin <$> rel
       tb  = unTB <$> F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . snd . tableNonRef' $ table))
-      fkref = joinRel  rel tb  (F.toList mtable)
+      fkref = joinRel  (tableMeta targetTable) rel tb  (F.toList mtable)
   return $ Just $ FKT (_tb <$> tb) rel   fkref
 loadFK inf table (Path ori (FKInlineTable to ) tar)   = do
   let IT rel vt = unTB $ justError "no inline" $ M.lookup (S.map Inline   ori) (unKV .snd $ table)

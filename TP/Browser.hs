@@ -70,11 +70,6 @@ import GHC.Stack
 
 
 
-argsToState  [h,ph,d,u,p,s,t] = BrowserState h ph d  u p (Just s) (Just t )
-argsToState  [h,ph,d,u,p,s] = BrowserState h ph d  u p  (Just s)  Nothing
-argsToState  [h,ph,d,u,p] = BrowserState h ph d  u p Nothing Nothing
-argsToState i = errorWithStackTrace (show i)
-
 
 main :: IO ()
 main = do

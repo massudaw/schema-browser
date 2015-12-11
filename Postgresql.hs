@@ -229,7 +229,7 @@ test3 = "\\\\\"\"\\\\\"\"FailedConnectionException2 \\\\\"\"\\\\\"\"\\\\\"\"\\\\
 
 startQuotedText =  do
   i <- lookAhead (many backquote )
-  readQuotedText (L.length $ traceShowId  i)
+  readQuotedText (L.length  i)
 
 readText 0 = plain' ",)}"
 readText ix =  ( liftA2 (\i j  -> i <> BS.concat  j ) (scapedText ix)  (many1 (liftA2 (<>) (fmap requote (readQuotedText (ix +1))) (scapedText ix )))   <|> scapedText ix )

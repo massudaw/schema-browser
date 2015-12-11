@@ -1,6 +1,6 @@
 {-# LANGUAGE Arrows, TupleSections,OverloadedStrings,NoMonomorphismRestriction #-}
 module Gpx
-  (readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readHtmlReceita,readHtml) where
+  (readArt,readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readHtmlReceita,readHtml) where
 
 import Types
 -- import Query
@@ -114,6 +114,12 @@ testReceita = do
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
   readHtmlReceita inp
 
+testCreaArt = do
+  kk <- BS.readFile "art.html"
+  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  readArt inp
+
+
 
 {-
 testCpfName = do
@@ -159,6 +165,11 @@ readCreaHistoricoHtml file = fmap tail <$> do
         >>> getTable'  (deep (trim ^<< getText))
   runX arr
 
+readArt file = do
+  let
+      arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
+        >>> getTable' (getTable' (fmap (trim . filter (not .(`elem` "\r\t\n"))) . filter (not . all (`elem` "\r\t\n " )) ^<< listA (deep getText)))
+  runX arr
 
 readHtml file = do
   let

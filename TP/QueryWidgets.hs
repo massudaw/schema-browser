@@ -278,10 +278,10 @@ tbCase inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> constr   .  backFKRef relTable (getRelOrigin f)  .TB1  ) j ) <$>  restrictConstraint
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . rumors . snd <$>  plugItens )
         fkUITable inf (convertConstr <> nonInjConstr) plugItens wl ftdi i
-tbCase inf _ i@(IT na tb1 ) wl plugItens oldItems  = do
-        iUITable inf plugItens oldItems i
+tbCase inf _ i@(IT na tb1 ) wl plugItens oldItems
+    = iUITable inf plugItens oldItems i
 tbCase inf _ a@(Attr i _ ) wl plugItens preoldItems = do
-        let oldItems = maybe preoldItems (\v-> fmap (maybe (Just (Attr i v )) Just ) preoldItems  ) ( keyStatic i)
+        let oldItems = maybe preoldItems (\v-> fmap (Just . fromMaybe (Attr i v)) preoldItems  ) ( keyStatic i)
         attrUITable oldItems (fmap snd plugItens ) a
 
 emptyRecTable (FKT rel l tb )
@@ -552,26 +552,27 @@ indexItens s tb@(IT na _) offsetT items oldItems  = bres
 
 
 dynHandler hand val ix (l,old)= do
-        (ev,h) <- liftIO $ newEvent
-        let idyn True  =  do
-              tds <- hand ix
-              ini <- currentValue (facts $ triding tds)
-              liftIO $ h ini
-              fin <- onEvent (rumors $ triding tds) (liftIO . h)
-              addElemFin (getElement tds) fin
-              return (getElement tds)
-            idyn False = do
-              liftIO $ h Nothing
-              UI.div
-        el <- UI.div # sink items (pure . idyn  <$> old )
-        iniv <- currentValue (facts $ val ix)
-        bend <- stepper iniv ev
-        let notProp = filterE isNothing $ notdiffEvent bend  (ev)
-        bend2 <- stepper iniv  (diffEvent bend  ev)
-        bendn <- stepper (isJust iniv ) (diffEvent (fmap isJust bend ) (fmap isJust ev))
-        bendn2 <- stepper (isJust iniv ) (diffEvent bendn  (fmap isJust ev))
-        return $ (l <> [TrivialWidget (tidings bend2 (bend2 <@ notProp )) el], bendn2  )
-        -- return $ ((TrivialWidget (tidings bend ev) el):l , bendn2 )
+    (ev,h) <- liftIO $ newEvent
+    let idyn True  =  do
+          tds <- hand ix
+          ini <- currentValue (facts $ triding tds)
+          liftIO $ h ini
+          fin <- onEvent (rumors $ triding tds) (liftIO . h)
+          addElemFin (getElement tds) fin
+          return (getElement tds)
+        idyn False = do
+          liftIO $ h Nothing
+          UI.div
+    el <- UI.div # sink items (pure . idyn  <$> old )
+    iniv <- currentValue (facts $ val ix)
+    bend <- stepper iniv ev
+    let notProp = filterE isNothing $ notdiffEvent bend  (ev)
+    bend2 <- stepper iniv  (diffEvent bend  ev)
+    bendn <- stepper (isJust iniv ) (diffEvent (fmap isJust bend ) (fmap isJust ev))
+    bendn2 <- stepper (isJust iniv ) (diffEvent bendn  (fmap isJust ev))
+    return $ (l <> [TrivialWidget (tidings bend2 (bend2 <@ notProp )) el], bendn2  )
+
+
 
 attrUITable
   :: Tidings (Maybe (TB Identity Key Showable))
@@ -1021,7 +1022,7 @@ viewer inf table env = mdo
                   ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
                   flist = catMaybes $ fmap (\(i,_,j) -> second (Attr i) . first T.pack <$> j) slist'
-              (_,(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (envK <> flist)
+              (_,(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (traceShowId $ envK <> flist)
               let (size,_) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (L.sort $ fmap snd envK) fixmap
               return (o,(slist,paging o (size,sorting' ordlist (F.toList lres))))
       nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))
@@ -1042,7 +1043,7 @@ viewer inf table env = mdo
   tdswhereb <- stepper (snd iniQ) (fmap snd tdswhere)
   let
       tview = unTlabel' . unTB1  $tableSt2
-  element itemList # set items ( pure . renderTableNoHeaderSort2   (return $ getElement sortList) inf (tableNonRef' tview) $   fmap (fmap tableNonRef' . fmap ((filterRec' (fmap (_relOrigin . head .keyattri . snd ) $ concat $ maybeToList env)))) . (\(slist ,(coun,tb))-> (fmap fst slist,tb))  <$>   tdswhereb )
+  element itemList # set items ( pure . renderTableNoHeaderSort2   (return $ getElement sortList) inf (tableNonRef' tview) $   fmap (fmap (filterRec' (fmap (_relOrigin . head .keyattri . snd ) $ concat $ maybeToList env) . tableNonRef')) . (\(slist ,(coun,tb))-> (fmap fst slist,tb))  <$>   tdswhereb )
 
   UI.div # set children [getElement offset, itemList]
 
@@ -1075,4 +1076,3 @@ renderTableNoHeaderSort2 header inf modtablei out = do
 
 
 
-line n =   set  text n

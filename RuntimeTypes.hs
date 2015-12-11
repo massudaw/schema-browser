@@ -20,6 +20,7 @@ import Data.Traversable
 import Data.IORef
 import Network.Google.OAuth2
 import Control.Lens.TH
+import GHC.Stack
 
 data Parser m s a b = P (s,s) (m a b) deriving Functor
 
@@ -131,6 +132,11 @@ data SchemaEditor
   , updateEd :: InformationSchema -> Table -> TBData Key Showable -> Maybe PageToken -> Maybe Int -> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
   , getEd :: InformationSchema -> Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   }
+
+argsToState  [h,ph,d,u,p,s,t] = BrowserState h ph d  u p (Just s) (Just t )
+argsToState  [h,ph,d,u,p,s] = BrowserState h ph d  u p  (Just s)  Nothing
+argsToState  [h,ph,d,u,p] = BrowserState h ph d  u p Nothing Nothing
+argsToState i = errorWithStackTrace (show i)
 
 
 

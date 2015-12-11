@@ -132,12 +132,11 @@ poller schm db plugs is_test = do
                         tdInput i =  isJust  $ checkTable  (fst f) i
                         tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
 
-                    i <-  mapConcurrently (mapM (\inp -> do
-                        o  <- fmap (fmap (liftTable' inf a)) <$> catchPluginException inf a pname (getPK $ TB1 inp)   (elemp (Just $ mapKey' keyValue inp))
-                        v <- traverse (\o -> do
-                          let diff' =   join $ (\i j -> diff (j ) (i)) <$>  o <*> Just inp
-                          maybe (return Nothing )  (\i -> transaction inf $ (editEd $ schemaOps inf) inf (justError "no test" o) inp ) diff' ) o
-                        traverse (traverse (putMVar (patchVar dbplug). pure) . fmap tableDiff) v
+                    i <-  mapConcurrently (mapM (\inp -> catchPluginException inf a pname (getPKM inp) $ do
+                        o  <- fmap (liftTable' inf a) <$>   elemp (Just $ mapKey' keyValue inp)
+                        let diff' =   join $ (\i j -> diff (j ) (i)) <$>  o <*> Just inp
+                        v <- maybe (return Nothing )  (\i -> transaction inf $ (editEd $ schemaOps inf) inf (justError "no test" o) inp ) diff'
+                        (traverse (putMVar (patchVar dbplug). pure) . fmap tableDiff) v
                         return v
                           )
                       ) . L.transpose . chuncksOf 20 $ evb

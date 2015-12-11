@@ -817,6 +817,9 @@ tblistPK s = tbmapPK s . mapFromTBList
 tblist' :: Ord k => TableK k -> [Compose Identity  (TB Identity) k a] -> TBData k a
 tblist' t  = (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 
+tblistM :: Ord k => KVMetadata k -> [Compose Identity  (TB Identity) k a] -> TBData k a
+tblistM t  = (t, ) . Compose . Identity . KV . mapFromTBList
+
 reclist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TBData Key a
 reclist' t  = (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 

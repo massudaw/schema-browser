@@ -488,3 +488,4 @@ pruneTidings chw tds =   tidings chkBH chkAll
     chkBH = (\b e -> if b then e else Nothing ) <$> facts chw <*> facts tds
 
 
+line n =   set  text n
