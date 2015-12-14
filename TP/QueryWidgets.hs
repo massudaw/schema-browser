@@ -69,6 +69,7 @@ import qualified Data.List as L
 import Text.Read
 import Data.Text (Text)
 import Types
+import Types.Index
 import Query
 import Data.Maybe
 import Prelude hiding (head)
