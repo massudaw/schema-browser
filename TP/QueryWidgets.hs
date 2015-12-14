@@ -424,9 +424,14 @@ crudUITable inf open bres refs pmods ftb@(m,_)  preoldItems = do
               deleteCurrent e l =  maybe l (flip M.delete l . getPKM) e
               tpkConstraint :: ([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)
               tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK (TB1 ftb) , flip pkConstraint  <$> (deleteCurrent  <$> oldItems <*> fmap snd bres))
-              unConstraints :: [([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)]
-              unConstraints = (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  (TB1 $ tableNonRef' ftb) , flip (\i -> unConstraint un (tblist i)) <$> fmap (createUn un ) (deleteCurrent <$> oldItems <*> fmap snd bres))) <$> _kvuniques m
-          (listBody,tableb,inscrud) <- eiTable inf   (tpkConstraint: unConstraints) (_kvname m) refs pmods ftb oldItems
+          unConstraints <-  traverse (traverse (traverse (mapTEvent (return) )) ) $ (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un ) (fmap snd bres)))) <$> _kvuniques m
+          let
+              deleteCurrentUn un e l = maybe l ((\v -> G.delete (v, Idex un v) (3,6) l)  ) e
+          unDeleted <- traverse (traverse (traverse (mapTEvent return))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> oldItems <*> o))) unConstraints)
+          let dunConstraints (un,o) = flip (\i -> unConstraint un (tblist i)) <$> o
+              unFinal:: [([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)]
+              unFinal = fmap (fmap (dunConstraints)) unDeleted
+          (listBody,tableb,inscrud) <- eiTable inf   (tpkConstraint: unFinal ) (_kvname m) refs pmods ftb oldItems
           (panelItems,tdiff)<- processPanelTable inf  (facts tableb) (F.toList . snd <$> facts bres) (inscrud) table oldItems
           let diff = unionWith const tdiff   (filterJust loadedItensEv)
           addElemFin panelItems =<<  onEvent diff
@@ -465,9 +470,10 @@ unConstraint u v  = isJust . look (Idex u v)
   where look pk  = safeHead . G.search pk
 
 createUn :: Set Key -> Map b (TBData Key Showable) -> G.GiST TBIndex (TBData Key Showable)
-createUn un   =  fromList .  F.toList
+createUn un   =  fromList .  F.toList . traceShow "createUn"
   where
-    fromList = foldl' (\m v  -> G.insert (v,Idex un  (tableNonRef' v)) (1,1) m) G.empty
+    fromList = foldl'  acc G.empty
+    acc !m v = G.insert (v,Idex un  ( v) ) (3,6) m
 
 
 

@@ -1032,8 +1032,19 @@ tbUn un (TB1 (kv,item)) =  (\kv ->  mapComp (\(KV item)->  KV $ Map.filterWithKe
   where pred kv k = (S.isSubsetOf (S.map _relOrigin k) kv )
 
 
+getPK (TB1 i) = getPKM i
+getPKM (m, k) = L.sortBy (comparing fst) $ concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (unTB k))))
 
-projUn u = (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbUn u .TB1 . tableNonRef')
+getAttr'  (TB1 (m, k)) = L.sortBy (comparing fst) $ (concat (fmap aattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
+
+getPKAttr (m, k) = traComp (concat . F.toList . (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m))   )) k
+getAttr (m, k) = traComp (concat . F.toList) k
+
+
+getUn un (m, k) =  L.sortBy (comparing fst ) $ concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k) un ) (  _kvvalues (unTB k))))
+
+
+projUn u = getUn u
 
 data TBIndex a
   = Idex (Set.Set (Key)) a
@@ -1078,6 +1089,7 @@ diffStr (a:as) (b:bs) = (ord b - ord a) : diffStr as bs
 diffS (SText t) (SText o) = DSText $ diffStr (T.unpack o) (T.unpack t)
 diffS (SDouble t) (SDouble o) = DSDouble $ o -t
 diffS (SNumeric t) (SNumeric o) = DSInt $ o -t
+diffS a b  = errorWithStackTrace (show (a,b))
 
 
 appendDShowable (DSText l ) (DSText j) =  DSText $ zipWith (+) l j <> L.drop (L.length j) l <> L.drop (L.length l ) j

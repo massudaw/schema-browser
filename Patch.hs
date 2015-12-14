@@ -19,7 +19,6 @@ module Patch
   ,Patch(..)
   -- Patch Data Types and to be moved methods
   --
-  , getAttr',getAttr,getPK,getPKM
   ,PathFTB(..),PathAttr(..),TBIdx,firstPatch,applyFTBM,PatchConstr)where
 
 -- import Warshal
@@ -214,15 +213,6 @@ applyTable' l patom@(m,i, p) =  case Map.lookup i  l  of
                       in Map.insert (getPKM el) el  l
 applyTable' l i = errorWithStackTrace (show (l,i))
 
-
-
-getPK (TB1 i) = getPKM i
-getPKM (m, k) = L.sortBy (comparing fst) $concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (unTB k))))
-
-getAttr'  (TB1 (m, k)) = L.sortBy (comparing fst) $(concat (fmap aattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
-
-getPKAttr (m, k) = traComp (concat . F.toList . (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m))   )) k
-getAttr (m, k) = traComp (concat . F.toList) k
 
 travPath f p (PatchSet i) = foldl f p i
 travPath f p i = f p i
