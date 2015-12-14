@@ -1,4 +1,6 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE TypeFamilies#-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE LambdaCase #-}
@@ -17,6 +19,8 @@
 
 module Types where
 
+import Data.Ord
+import Data.Char
 import Control.Lens.TH
 import qualified Control.Lens as Le
 import Data.Functor.Apply
@@ -25,6 +29,7 @@ import Data.Bifunctor
 import Safe
 import Prelude hiding(head)
 import Data.Maybe
+import Data.GiST.GiST as G
 import GHC.Generics
 import Data.Binary (Binary)
 import Data.Vector.Binary
@@ -37,6 +42,7 @@ import Data.Functor.Classes
 import Data.Foldable (Foldable)
 import qualified Data.Foldable as F
 import qualified Data.Interval as Interval
+import Data.Interval (interval,lowerBound',upperBound')
 import qualified Data.ExtendedReal as ER
 import Data.Monoid hiding (Product)
 import qualified Data.Text as T
@@ -282,6 +288,8 @@ traFAttr :: (Traversable g ,Applicative f) => ( FTB a -> f (FTB a) ) -> TB g k a
 traFAttr f (Attr i v)  = Attr i <$> f v
 traFAttr f (IT i v)  = IT i <$> traverse (traFValue f) v
 traFAttr f (FKT  i rel v)  = liftA2 (\a b -> FKT a rel b)  (traverse (traComp (traFAttr f)) i) (traverse (traFValue f) v)
+
+traFValue :: (Traversable g ,Applicative f) => ( FTB a -> f (FTB a) ) -> TB3Data g k a -> f (TB3Data g k a)
 traFValue f (m ,k) =  fmap ((m,)). traComp (fmap KV . traverse (traComp (traFAttr f)) . _kvvalues )  $  k
 
 
@@ -305,6 +313,7 @@ mapTableAttr  f (IT l j ) =  IT l (f  (mapTable f <$> j))
 mapTableAttr  f (FKT l rel j ) =  FKT l rel (f  (mapTable f <$> j))
 mapTableAttr f  i = i
 
+mapKey' :: Ord b => Functor f => (a -> b) -> TB3Data f a c -> TB3Data f b c
 mapKey f = fmap (mapKey' f)
 mapKey' f ((m ,k) ) = (mapKVMeta f m,) . mapComp (firstKV f)  $  k
 
@@ -315,8 +324,8 @@ secondKV  f (KV m ) = KV . fmap (second f ) $ m
 
 firstTB :: (Ord k, Functor f) => (c -> k) -> TB f c a -> TB f k a
 firstTB f (Attr k i) = Attr (f k) i
-firstTB f (IT k i) = IT (mapComp (firstTB f) k) ((mapKey f) i)
-firstTB f (FKT k  m  i) = FKT  (fmap (mapComp (firstTB f) ) k)  (fmap f  <$> m) ((mapKey f) i)
+firstTB f (IT k i) = IT (mapComp (firstTB f) k) (fmap (mapKey' f) i)
+firstTB f (FKT k  m  i) = FKT  (fmap (mapComp (firstTB f) ) k)  (fmap f  <$> m) (fmap (mapKey' f) i)
 
 data FTB a
   = TB1 a
@@ -565,6 +574,10 @@ instance Real a => Real (FTB a) where
 instance Real Showable where
   toRational (SDouble i )=  toRational i
 
+instance RealFrac Showable where
+  properFraction (SDouble i) = second SDouble $ properFraction i --toRational (SDouble i )=  toRational i
+  properFraction (SNumeric j ) = (fromIntegral j,SNumeric 0)
+
 instance Integral a => Integral (FTB a) where
   toInteger (TB1 i) = toInteger i
   quotRem (TB1 i ) (TB1 j ) = (\(l,m) -> (TB1 l , TB1 m)) $ quotRem i j
@@ -585,6 +598,9 @@ instance Num a => Num (FTB a) where
 instance Num Showable where
     SNumeric i +  SNumeric j = SNumeric (i + j)
     SDouble i +  SDouble j = SDouble (i + j)
+    SDouble i + SNumeric j = SDouble $ i +  fromIntegral j
+    SNumeric j  + SDouble i = SDouble $ i +  fromIntegral j
+    v + k = errorWithStackTrace (show (v,k))
     SNumeric i *  SNumeric j = SNumeric (i * j)
     SDouble i *  SDouble j = SDouble (i * j)
     fromInteger i = SDouble $ fromIntegral i
@@ -594,6 +610,7 @@ instance Num Showable where
     abs (SNumeric i) = SNumeric $ abs i
     abs (SDouble i) = SDouble $ abs i
     signum (SNumeric i) = SNumeric $ signum i
+    signum (SDouble i) = SDouble $ signum i
 
 instance Fractional a => Fractional (FTB a) where
   fromRational i = TB1 (fromRational i)
@@ -632,6 +649,8 @@ mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),i))
 
 keyattr :: Foldable f => Compose f (TB f ) k  a -> [Rel k]
 keyattr = keyattri . head . F.toList . getCompose
+
+keyattri :: Foldable f => TB f  k  a -> [Rel k]
 keyattri (Attr i  _ ) = [Inline i]
 keyattri (FKT i  rel _ ) = rel
 keyattri (IT i  _ ) =  keyattr i
@@ -769,6 +788,7 @@ addDefault = mapComp def
 
 kattr :: Compose Identity (TB Identity  ) k a -> [FTB a]
 kattr = kattri . runIdentity . getCompose
+kattri :: Column k a -> [FTB a]
 kattri (Attr _ i ) = [i]
 kattri (FKT i  _ _ ) =  (L.concat $ kattr  <$> i)
 kattri (IT _  i ) =  recTB i
@@ -839,8 +859,7 @@ isInline (KArray i ) = isInline i
 isInline (Primitive (RecordPrim _ ) ) = True
 isInline _ = False
 
-unTB1 i = head . F.toList $ i
-unTB1 i = errorWithStackTrace (show i)
+unTB1 i = fromMaybe (errorWithStackTrace (show ("unTB1",i))) . headMay . F.toList $ i
 
 -- Intersections and relations
 
@@ -868,6 +887,8 @@ intersectPred p1@(Primitive _) op  p2@(Primitive _) j l   | p1 == p2 =  case op 
                                                                              "<=" -> j <= l
                                                                              "/=" -> j /= l
 
+intersectPred (KSerial p1 ) op (KOptional p2 ) (SerialTB1 i )  (LeftTB1 j ) = fromMaybe False $ liftA2 (intersectPred p1 op p2)   i j
+intersectPred (KOptional p1 ) op (KSerial p2 ) (LeftTB1 i )  (SerialTB1 j ) = fromMaybe False $ liftA2 (intersectPred p1 op p2)   i j
 intersectPred p1 op  (KSerial p2) j (SerialTB1 l)   | p1 == p2 =  maybe False (j ==) l
 intersectPred p1 op (KOptional p2) j (LeftTB1 l)   | p1 == p2 =  maybe False (j ==) l
 intersectPred p1@(KOptional i ) op p2 (LeftTB1 j) l  =  maybe False id $ fmap (\m -> intersectPred i op p2 m l) j
@@ -962,6 +983,7 @@ kArray = Le.over keyTypes KArray
 kDelayed = Le.over keyTypes KDelayed
 
 unKOptional (Key a  v c m n d (KOptional e)) = (Key a  v c m n d e )
+unKOptional (Key a  v c m n d (KSerial e)) = (Key a  v c m n d e )
 unKOptional (Key a  v c m n d (e@(Primitive _))) = (Key a  v c m n d e )
 unKOptional i = errorWithStackTrace ("unKOptional" <> show i)
 
@@ -1001,4 +1023,128 @@ unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
 unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverse ( traComp (traFAttr unSOptional) . (mapComp (firstTB unKOptional)) ) i)  j
 
 
+data Predicate a
+  = SPred a
+  deriving(Show,Eq,Ord)
+
+tbUn :: (Functor f,Ord k) =>   Set k -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
+tbUn un (TB1 (kv,item)) =  (\kv ->  mapComp (\(KV item)->  KV $ Map.filterWithKey (\k _ -> pred kv k ) $ item) item ) un
+  where pred kv k = (S.isSubsetOf (S.map _relOrigin k) kv )
+
+
+
+projUn u = (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbUn u .TB1 . tableNonRef')
+
+data TBIndex a
+  = Idex (Set.Set (Key)) a
+  deriving(Eq,Show,Ord,Functor)
+
+instance Predicates TBIndex (TBData Key Showable) where
+  type (Penalty (TBData Key Showable) ) = Penalty [FTB Showable]
+  consistent (Idex i j) (NodeEntry (_,Idex l m  )) = consistent (SPred $ fmap snd $ projUn i  $ j  ) (NodeEntry (undefined,SPred $ fmap snd $ projUn l $ m))
+  consistent (Idex i j) (LeafEntry (_,Idex l m  )) = consistent (SPred $ fmap snd $ projUn i  $ j  ) (LeafEntry (undefined,SPred $ fmap snd $ projUn l $ m))
+  union l  = Idex i (tblist $ fmap (_tb . uncurry Attr) $  zipWith (,) kf projL)
+    where Idex i v = head l
+          proj a = projUn i a
+          kf = fmap fst (proj v)
+          SPred projL = union $ fmap (SPred . fmap snd . proj .(\(Idex _ a) -> a)) l
+
+  penalty i j = penalty (projIdex i ) (projIdex j)
+  pickSplit = pickSplitG
+
+projIdex (Idex i v) = SPred $ fmap snd $ projUn i v
+
+
+
+instance  Predicates Predicate [FTB Showable] where
+  type Penalty [FTB Showable] = [DiffShowable]
+  consistent (SPred l ) (NodeEntry (v,SPred i)) =  all id $ zipWith consistent (SPred <$> l) (NodeEntry  . (undefined,) . SPred <$> i)
+  consistent (SPred l ) (LeafEntry (v,SPred i)) =  all id $ zipWith consistent (SPred <$> l) (LeafEntry . (undefined,) . SPred <$> i)
+  union l = SPred $ fmap (\i -> (\(SPred i) -> i) $ union i )$ L.transpose $ fmap (\(SPred i) -> fmap SPred i ) l
+  penalty (SPred p1) (SPred p2) = zipWith penalty (fmap SPred p1 ) (fmap SPred p2)
+  pickSplit = pickSplitG
+
+data DiffShowable
+  = DSText [Int]
+  | DSDouble Double
+  | DSInt Int
+  deriving(Eq,Ord,Show)
+
+diffStr [] [] = []
+diffStr bs [] = ord <$> bs
+diffStr [] bs = ord <$> bs
+diffStr (a:as) (b:bs) = (ord b - ord a) : diffStr as bs
+
+diffS (SText t) (SText o) = DSText $ diffStr (T.unpack o) (T.unpack t)
+diffS (SDouble t) (SDouble o) = DSDouble $ o -t
+diffS (SNumeric t) (SNumeric o) = DSInt $ o -t
+
+
+appendDShowable (DSText l ) (DSText j) =  DSText $ zipWith (+) l j <> L.drop (L.length j) l <> L.drop (L.length l ) j
+appendDShowable (DSDouble l ) (DSDouble j) =  DSDouble$ l + j
+appendDShowable (DSInt l ) (DSInt j) =  DSInt $ l + j
+appendDShowable a b = errorWithStackTrace (show (a,b))
+
+
+instance Predicates Predicate (FTB Showable) where
+  type Penalty (FTB Showable) = DiffShowable
+  consistent (SPred j@(TB1 _) )  (NodeEntry (_,SPred (IntervalTB1 i) )) = j `Interval.member` i
+  consistent (SPred (IntervalTB1 i) ) (NodeEntry (_,SPred (IntervalTB1 j)  )) = not $ Interval.null $ i `Interval.intersection` j
+  consistent (SPred (IntervalTB1 i) ) (LeafEntry (_,SPred j@(TB1 _) )) = j `Interval.member` i
+  consistent (SPred (IntervalTB1 i) ) (LeafEntry (_,SPred (IntervalTB1 j) )) = j `Interval.isSubsetOf` i
+  consistent (SPred (TB1 i) ) (LeafEntry (_,SPred (TB1 j) )) = i == j
+  consistent (SPred (TB1 i) ) (NodeEntry (_,SPred (TB1 j) )) = i == j
+  consistent i (NodeEntry (_,j))  = errorWithStackTrace (show ("Node",i,j))
+  consistent i (LeafEntry (_,j))  = errorWithStackTrace (show ("Leaf",i,j))
+
+  union  l = SPred (IntervalTB1 (minimum (minP <$> l)  `interval` maximum (maxP <$> l)))
+  pickSplit = pickSplitG
+  penalty p1 p2 =  (notNeg $ (unFin $ fst $ minP p2) `diffS` (unFin $ fst $ minP p1)) `appendDShowable`  (notNeg $ (unFin $ fst $ maxP p1) `diffS` (unFin $ fst $ maxP p2))
+
+notNeg (DSText l)
+  | L.null dp = DSText []
+  | head dp < 0 = DSText []
+  | otherwise = DSText dp
+  where dp =  dropWhile (==0) l
+notNeg (DSDouble l)
+  | l < 0 = DSDouble 0
+  | otherwise = DSDouble l
+notNeg (DSInt l)
+  | l < 0 = DSInt 0
+  | otherwise =  DSInt l
+
+inter a b = IntervalTB1 $ (ER.Finite a,True) `interval` (ER.Finite b,True)
+
+unFin (Interval.Finite (TB1 i) ) = i
+
+minP (SPred (IntervalTB1 i) ) = Interval.lowerBound' i
+minP (SPred i@(TB1 _) ) = (ER.Finite $ i,True)
+maxP (SPred (IntervalTB1 i) ) = Interval.upperBound' i
+maxP (SPred i@(TB1 _) ) = (ER.Finite $ i,True)
+
+
+greatestPenalty :: (Ord (f b) ,Predicates f b ) => Entry f b -> [Entry f b] -> (Penalty b , Entry f b, Entry f b)
+greatestPenalty e es = L.maximumBy (comparing (\(p,_,_) -> p)) [(penalty (entryPredicate e) (entryPredicate e1), e, e1) | e1 <- es]
+
+-- | Implementation of the linear split algorithm taking the minimal fill factor into account
+linearSplit :: (Ord (f b),Predicates f b ) => [Entry f b] -> [Entry f b] ->
+    [Entry f b] -> Int -> ([Entry f b], [Entry f b])
+linearSplit es1 es2 [] _ = (es1,es2)
+linearSplit es1 es2 (e:es) max
+    |length es1 == max  = (es1,es2 ++ (e:es))
+    |length es2 == max  = (es1 ++ (e:es), es2)
+    |otherwise          = if penalty (entryPredicate e) (union $ map entryPredicate es1) >
+                            penalty (entryPredicate e) (union $ map entryPredicate es2)
+                            then linearSplit es1 (e:es2) es max
+                            else linearSplit (e:es1) es2 es max
+
+pickSplitG
+  :: (Predicates f b, Ord (f b)) =>
+     [Entry f b] -> ([Entry f b], [Entry f b])
+pickSplitG es = linearSplit [e1] [e2] [e | e <- L.sortBy (comparing entryPred)  es, entryPred e /= entryPred e1, entryPred e/= entryPred e2] $ (length es + 1) `div` 2
+        -- A tuple containing the two most disparate entries in the list their corresponding penalty penalty
+        where (_, e1, e2) = L.maximumBy (comparing (\(a,_,_) -> a)) [greatestPenalty e es | e <- es]
+
+entryPred (NodeEntry (_,p)) = p
+entryPred (LeafEntry (_,p)) = p
 

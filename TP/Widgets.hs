@@ -449,9 +449,9 @@ selectionMultipleChange el = unsafeMapUI el (const $ UI.get selectedMultiple el)
 readFileAttr :: ReadAttr Element (Maybe String)
 readFileAttr = mkReadAttr get
   where
-    get   el = fmap (join . fmap headMay . from ) $  callFunction $ ffi "readFileInput($(%1))" el
+    get   el = fmap  from  $  callFunction $ ffi "readFileInput($(%1))" el
     from s = case JSON.fromJSON s of
-                  JSON.Success x -> Just x
+                  JSON.Success x -> M.lookup ("filevalue" ::String) x
                   i -> Nothing -- errorWithStackTrace (show i)
 
 

@@ -84,7 +84,8 @@ queryAuthorization conn schema user = do
 
 tableSizes = "SELECT c.relname,c.reltuples::bigint AS estimate FROM   pg_class c JOIN   pg_namespace n ON c.relkind = 'r' and n.oid = c.relnamespace WHERE n.nspname = ? "
 
-fromShowable2 i@(Primitive (AtomicPrim (_, "character varying"))) v = fromShowable i $  BS.drop 1 (BS.init v)
+fromShowable2 i j | traceShow (i,j) False = errorWithStackTrace ""
+fromShowable2 i@(Primitive (AtomicPrim (_,"varchar"))) v = fromShowable i $  BS.drop 1 (BS.init v)
 fromShowable2 i@(Primitive (AtomicPrim (_,"text"))) v = fromShowable i $  BS.drop 1 (BS.init v)
 fromShowable2 i v = fromShowable i v
 
@@ -100,7 +101,7 @@ keyTables schemaVar conn userconn (schema ,user) oauth ops pluglist = maybe (key
 
 keyTablesInit schemaVar conn userconn (schema,user) oauth ops pluglist = do
        uniqueMap <- join $ mapM (\(t,c,op,mod,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr (V.toList $ fmap readFModifier mod) op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,field_modifiers,translation from  metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
-       res2 <- fmap ( (\i@(t,c,j,k,del,l,m,d,z,b)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  ( join $ fromShowable2 ty .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,del,l,maybe False testSerial m,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_delayed,is_range,col_def,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema)
+       res2 <- fmap ( (\i@(t,c,j,k,del,l,m,d,z,b)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  (join $ fromShowable2 ty .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,del,l,maybe False testSerial m,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_delayed,is_range,col_def,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
           keyMap = M.fromList keyList

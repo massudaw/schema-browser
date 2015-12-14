@@ -226,19 +226,20 @@ startQuoted p =  do
 
 test4 = "\"StatusCodeException (Status {statusCode = 503, statusMessage = \"\"Service Unavailable\"\"}) [(\"\"Content-Type\"\",\"\"text/html\"\"),(\"\"Server\"\",\"\"Oracle-Web-Cache-11g/11.1.1.6.0 (N;ecid=49638990776402891,0:1)\"\"),(\"\"Content-Length\"\",\"\"402\"\"),(\"\"X-Response-Body-Start\"\",\"\"<!DOCTYPE HTML PUBLIC \\\\\"\"-//IETF//DTD HTML//EN\\\\\"\">\\\\n<html> <head>\\\\n<title>No Response from Application Web Server</title>\\\\n</head>\\\\n\\\\n<body bgcolor=\\\\\"\"white\\\\\"\">\\\\n<font color=\\\\\"\"red\\\\\"\">\\\\n<h1>No Response from Application Web Server</h1>\\\\n</font>\\\\n\\\\nThere was no response from the application web server for the page you requested. <br>Please notify the site's webmaster and try your request again later.\\\\n<hr>\\\\n\\\\n</body> </html>\\\\n\"\"),(\"\"X-Request-URL\"\",\"\"GET https://siapi3.bombeiros.go.gov.br:443/paginaInicialWeb.jsf\"\")] (CJ {expose = []})\""
 test3 = "\\\\\"\"\\\\\"\"FailedConnectionException2 \\\\\"\"\\\\\"\"\\\\\"\"\\\\\"\"accounts.google.com\\\\\"\"\\\\\"\"\\\\\"\"\\\\\"\" 443 True connect: does not exist (Network is unreachable)\\\\\"\"\\\\\"\""
+test2 = "\"StatusCodeException (Status {statusCode = 404, statusMessage = \"\"Not Found\"\"}) [(\"\"Date\"\",\"\"Tue, 17 Nov 2015 10:25:55 GMT\"\"),(\"\"Server\"\",\"\"Oracle-Fusion-Middleware/11g (11.1.1.6) Apache-Coyote/1.1 Oracle-Web-Cache-11g/11.1.1.6.0 (N;ecid=49287787001941909,0:1)\"\"),(\"\"Content-Length\"\",\"\"0\"\"),(\"\"X-Response-Body-Start\"\",\"\"\"\"),(\"\"X-Request-URL\"\",\"\"GET https://siapi3.bombeiros.go.gov.br:443/paginaInicialWeb.jsf\"\")] (CJ {expose = []})\""
 
 startQuotedText =  do
-  i <- lookAhead (many backquote )
+  i <- lookAhead (many backquote)
   readQuotedText (L.length  i)
 
 readText 0 = plain' ",)}"
 readText ix =  ( liftA2 (\i j  -> i <> BS.concat  j ) (scapedText ix)  (many1 (liftA2 (<>) (fmap requote (readQuotedText (ix +1))) (scapedText ix )))   <|> scapedText ix )
       where
-            requote t = "\"" <> t <> "\""
-            scapedText ix = liftA2 (<>) (plain0' "\\\"") (BS.intercalate "" <$> ( many ((<>) <$> choice (escapedItem  ix <$>  escapes) <*>  plain0' "\\\"")))
-              where
-                escapes = [("n","\n"),("r","\r"),("t","\t"),("129","\129"),("137","\137"),("167","\167"),("194","\194"),("195","\195"),("224","\224"),("225","\225"),("227","\227"),("233","\233"),("237","\237"),("243","\243"),("245","\245"),("231","\231")]
-                escapedItem ix (c, o)  = Tra.sequence (replicate ix (char '\\'))  >> string c >> return o
+        requote t = "\"" <> t <> "\""
+        scapedText ix = liftA2 (<>) (plain0' "\\\"") (BS.intercalate "" <$> ( many ((<>) <$> choice (escapedItem  ix <$>  escapes) <*>  plain0' "\\\"")))
+          where
+            escapes = [("n","\n"),("r","\r"),("t","\t"),("129","\129"),("137","\137"),("167","\167"),("194","\194"),("195","\195"),("224","\224"),("225","\225"),("227","\227"),("233","\233"),("237","\237"),("243","\243"),("245","\245"),("231","\231")]
+            escapedItem ix (c, o)  = Tra.sequence (replicate ix (char '\\'))  >> string c >> return o
 
 
 readQuotedText ix = readQuoted ix readText

@@ -18,9 +18,9 @@ function getOpts(oSelect1) {
 }
 
 function readFileInput (f){
-  var value = [];
+  var value = {};
   if (f[0].files.length == 1 ){
-      value = [f[0].files[0].filevalue];
+      value = f[0].files[0];
   }
   return value;
 }

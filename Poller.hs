@@ -89,8 +89,7 @@ testPoller plug = do
 poller schm db plugs is_test = do
   conn <- connectPostgreSQL (connRoot db)
   metas <- keyTables  schm conn  conn ("metadata", T.pack $ user db) Nothing postgresOps plugs
-  (dbpol,_)<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
-  polling <- currentValue (facts (collectionTid dbpol ))
+  (dbpol,(_,polling))<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
   let
     project tb =  (schema,intervalms,p)
       where
@@ -107,7 +106,7 @@ poller schm db plugs is_test = do
               pname = _name p
               a = _bounds p
           pid <- forkIO $ (void $ forever $ do
-            polling <- currentValue (facts (collectionTid dbpol) )
+            (_,(_,polling))<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
             let curr = justLook (getPKM tb) polling
                 TB1 (STimestamp startLocal) = index curr "start_time"
                 TB1 (STimestamp endLocal) = index curr "end_time"

@@ -42,6 +42,7 @@ import SchemaQuery
 import qualified Data.Binary as B
 import Control.Concurrent
 import qualified Data.Poset as P
+import qualified Data.GiST.GiST as G
 import Reactive.Threepenny
 import Data.Either
 import qualified Graphics.UI.Threepenny as UI
@@ -365,7 +366,7 @@ eiTable inf constr tname refs plmods ftb@(meta,k) oldItems = do
         initialSum = join . fmap ((\(n,  j) ->    fmap keyattr $ safeHead $ catMaybes  $ (fmap (_tb . fmap (const ()) ) . unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)))) ) <$> oldItemsPlug
         sumButtom itb =  do
            let i = unTB itb
-           lab <- labelCase i  (maybe (join . fmap (fmap unTB .  (^?  Le.ix (S.fromList $ keyattri i) ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattri i)==) . keyattri .fst) $  refs)) (justError "no attr" $ M.lookup i $ M.fromList fks)
+           lab <- labelCase i  (maybe (join . fmap (fmap unTB .  (^?  Le.ix (S.fromList $ keyattri i) ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattri i)==) . keyattri .fst) $  refs)) (justError ("no attr" <> show i) $ M.lookup (keyattri i) $ M.mapKeys (keyattri ) $ M.fromList fks)
            element lab #  set UI.class_ "buttonSet btn-xs btn-default"
       chk  <- buttonDivSet (F.toList (_kvvalues $ unTB k))  (join . fmap (\i -> M.lookup (S.fromList i) (_kvvalues (unTB k))) <$> initialSum ) sumButtom
       element chk # set UI.style [("display","inline-flex")]
@@ -424,7 +425,7 @@ crudUITable inf open bres refs pmods ftb@(m,_)  preoldItems = do
               tpkConstraint :: ([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)
               tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK (TB1 ftb) , flip pkConstraint  <$> (deleteCurrent  <$> oldItems <*> fmap snd bres))
               unConstraints :: [([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)]
-              unConstraints = (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  (TB1 $ tableNonRef' ftb) , flip (unConstraint un) <$> fmap (\i -> M.fromList $ fmap (\i -> (projUn un i , i)) $ F.toList i  ) (deleteCurrent <$> oldItems <*> fmap snd bres))) <$> _kvuniques m
+              unConstraints = (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  (TB1 $ tableNonRef' ftb) , flip (\i -> unConstraint un (tblist i)) <$> fmap (createUn un ) (deleteCurrent <$> oldItems <*> fmap snd bres))) <$> _kvuniques m
           (listBody,tableb,inscrud) <- eiTable inf   (tpkConstraint: unConstraints) (_kvname m) refs pmods ftb oldItems
           (panelItems,tdiff)<- processPanelTable inf  (facts tableb) (F.toList . snd <$> facts bres) (inscrud) table oldItems
           let diff = unionWith const tdiff   (filterJust loadedItensEv)
@@ -458,9 +459,18 @@ type SelPKConstraint = [([Compose Identity (TB Identity) Key ()],Tidings PKConst
 type SelTBConstraint = [([Compose Identity (TB Identity) Key ()],Tidings TBConstraint)]
 
 pkConstraint v  = isJust . M.lookup (concat . fmap aattr $ v)
-unConstraint u v  = isJust . M.lookup (concat . fmap aattr $ v )
 
-projUn u = (concat . fmap aattr . F.toList .  _kvvalues . unTB . tbUn u .TB1 . tableNonRef')
+unConstraint :: Set Key -> TBData Key Showable -> G.GiST TBIndex (TBData Key Showable) -> Bool
+unConstraint u v  = isJust . look (Idex u v)
+  where look pk  = safeHead . G.search pk
+
+createUn :: Set Key -> Map b (TBData Key Showable) -> G.GiST TBIndex (TBData Key Showable)
+createUn un   =  fromList .  F.toList
+  where
+    fromList = foldl' (\m v  -> G.insert (v,Idex un  (tableNonRef' v)) (1,1) m) G.empty
+
+
+
 
 processPanelTable
    :: InformationSchema
@@ -684,8 +694,8 @@ buildPrim fm tdi i = case i of
          PMime mime -> do
            let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
            clearB <- UI.button # set UI.text "clear"
-           file <- UI.input # set UI.class_ "file_client" # set UI.type_ "file" # set UI.multiple True # set UI.style (noneShow $ elem FWrite fm)
-           UI.div # sink0 UI.html (pure "<script> $(\".file_client\").on('change',handleFileSelect); </script>")
+           file <- UI.input # set UI.type_ "file" # set UI.multiple True # set UI.style (noneShow $ elem FWrite fm)
+           runFunction$ ffi "$(%1).on('change',handleFileSelect);" file
            tdi2 <- addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fileChange file ) =<< addEvent (const Nothing <$> UI.click clearB) tdi
            let fty = case mime of
                 "application/pdf" -> ("iframe","src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
@@ -844,7 +854,7 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = mdo
       filterInp <- UI.input
       filterInpBh <- stepper "" (UI.valueChange filterInp)
       let
-          cv = search (F.toList $ snd res) cvres
+          cv = search (inisort $ F.toList $ snd res) cvres
           tdi =  search <$> res3 <*> vv
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList .    _unTB1
@@ -857,7 +867,7 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = mdo
                 set UI.style [("border","1px solid gray")] #
                 sink items (pure . maybe UI.div showFKE  . fmap _fkttable<$> facts oldItems ))
         else
-           listBox ((Nothing:) <$>  fmap (fmap Just) res3) (tidings (fmap Just <$> st) never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+           listBox ((Nothing:) . reverse <$>  fmap (fmap Just) res3) (tidings (fmap Just <$> st) never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
       let evsel = (if isReadOnly tb then id else unionWith const (rumors tdi) ) (rumors $ join <$> triding itemList)
       prop <- stepper cv evsel
@@ -906,7 +916,7 @@ fkUITable inf constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) ) = 
            TrivialWidget tr el<- fkUITable inf constr (fmap (unIndexItens  ix <$> offsetT <*> ) <$> plmods) wl (unIndexItens ix <$> offsetT  <*>  oldItems) fkst
            element el # set UI.class_ "col-xs-11"
            TrivialWidget tr <$> UI.div # set UI.children [lb,el] ) (\ix -> unIndexItens ix <$> offsetT  <*>  oldItems)
-     fks <- fst <$> foldl (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
+     fks <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow <$> facts t)) (getElement <$> fks) (pure True : (fmap isJust . triding <$> fks))
      element dv # set children (getElement <$> fks)
      let bres = indexItens arraySize  tb offsetT (triding <$> fks) oldItems
@@ -1048,7 +1058,6 @@ viewer inf table env = mdo
   UI.div # set children [getElement offset, itemList]
 
 
-
 exceptionAllTableIndex e@(inf,table,index) =   metaAllTableIndexA inf "plugin_exception" envA
   where
         envA = [Attr "schema_name" (TB1 $ SText (schemaName inf))
@@ -1070,9 +1079,4 @@ renderTableNoHeaderSort2 header inf modtablei out = do
       body sort o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader' sort UI.td rendererShowableUI inf $ o)
   header # set UI.class_ "row"
   UI.table # set UI.class_ "table table-bordered table-striped" # sink items ((\(i,l)-> header : fmap (body i) l )<$> out)
-
-
-
-
-
 

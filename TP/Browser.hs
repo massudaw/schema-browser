@@ -106,11 +106,15 @@ setup smvar args w = void $ do
   (evDB,chooserItens) <- databaseChooser smvar bstate
   body <- UI.div
   return w # set title (host bstate <> " - " <>  dbn bstate)
+  hoverBoard<-UI.div # set UI.style [("float","left"),("height","100vh"),("width","15px")]
+  let he = const True <$> UI.hover hoverBoard
+  bhe <-stepper True he
+  menu <- checkedWidget (tidings bhe he)
   nav  <- buttonDivSet  ["Nav","Poll","Change","Exception"] (pure $ Just "Nav" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
-  chooserDiv <- UI.div # set children  (chooserItens <> [ getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
+  chooserDiv <- UI.div # set children  ([getElement menu] <> chooserItens <> [getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end"),("height","7vh"),("width","100%")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
-  getBody w #+ [element container]
+  getBody w #+ [element hoverBoard,element container]
   mapUITEvent body (traverse (\(nav,inf)->
       case nav of
         "Poll" -> do
@@ -127,8 +131,13 @@ setup smvar args w = void $ do
             element body # set UI.children [dash] # set UI.class_ "row"
         "Nav" -> do
             let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
-            span <- chooserTable  inf  k (tablename bstate)
-            element body # set UI.children [span]# set UI.class_ "row"  )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
+            [tbChooser,subnet] <- chooserTable  inf  k (tablename bstate)
+            element tbChooser # sink0 UI.style (facts $ noneShow <$> triding menu)
+            let
+                expand True = "col-xs-10"
+                expand False = "col-xs-12"
+            element subnet # sink0 UI.class_ (facts $ expand <$> triding menu)
+            element body # set UI.children [tbChooser,subnet]# set UI.class_ "row" # set UI.style [("display","inline-flex"),("width","100%")] )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
 
 
 listDBS ::  BrowserState -> IO (Text,(Connection,[Text]))
@@ -225,15 +234,15 @@ chooserTable inf kitems i = do
   let bBset = triding bset
   onEvent (rumors bBset) (\ i ->
       when (isJust (metaschema inf)) $  void (liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )))
-  tbChooserI <- UI.div # set children [filterInp,getElement bset]  # set UI.style [("height","600px"),("overflow","auto"),("height","99%")]
-  tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","600px"),("overflow","hidden")] # set children [tbChooserI]
+  tbChooserI <- UI.div # set children [filterInp,getElement bset]  # set UI.style [("height","90vh"),("overflow","auto"),("height","99%")]
+  tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [tbChooserI]
   nav  <- buttonDivSet ["Viewer","Nav","Exception","Change"] (pure $ Just "Nav")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   header <- UI.h1 # sink text (T.unpack . translatedName .  justError "no table " . flip M.lookup (pkMap inf) <$> facts bBset ) # set UI.class_ "col-xs-7"
-  chooserDiv <- UI.div # set children  [header ,getElement nav] # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end")]
-  body <- UI.div # set UI.class_ "row"
+  chooserDiv <- UI.div # set children  [header ,getElement nav]  # set UI.style [("display","flex"),("align-items","flex-end")]
+  body <- UI.div
 
-  mapUITEvent body (\(nav,table)->
+  el <- mapUITEvent body (\(nav,table)->
       case nav of
         "Change" -> do
             dash <- dashBoardAllTable inf (justError "no table " $ M.lookup table (pkMap inf))
@@ -248,8 +257,8 @@ chooserTable inf kitems i = do
             span <- viewer inf (justError "no table with pk" $ M.lookup table (pkMap inf)) Nothing
             element body # set UI.children [span]
         ) $ liftA2 (,) (triding nav) bBset
-  subnet <- UI.div # set children [chooserDiv,body] # set UI.class_ "row col-xs-10" # set UI.style [("height","600px"),("overflow","auto")]
-  UI.div # set children [tbChooser, subnet ]  # set UI.class_ "row"
+  subnet <- UI.div # set children [chooserDiv,body] # set UI.style [("height","90vh"),("overflow","auto")]
+  return [tbChooser, subnet ]
 
 viewerKey
   ::

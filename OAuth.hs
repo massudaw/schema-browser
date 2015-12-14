@@ -1,6 +1,7 @@
 {-# LANGUAGE Arrows ,TupleSections,OverloadedStrings #-}
 module OAuth (gmailOps,tokenToOAuth,oauthToToken,oauthpoller) where
 import Control.Lens
+import Control.Exception
 import Control.Arrow
 import Step
 import System.Info (os)
@@ -62,17 +63,18 @@ oauthpoller = BoundedPlugin2 "Gmail Login" "google_auth" url
           Just secret <- lookupEnv "CLIENT_SECRET"
           let client = OAuth2Client { clientId = cid, clientSecret = secret }
               permissionUrl = formUrl client [gmailScope]
-          maybe (do
-              putStrLn$ "Load this URL: "++show permissionUrl
-              case os of
-                "linux"  -> rawSystem "chromium" [permissionUrl]
-                "darwin" -> rawSystem "open"       [permissionUrl]
-                _        -> return ExitSuccess
-              putStrLn "Please paste the verification code: "
-              authcode <- getLine
-              tokens   <- exchangeCode client authcode
-              putStrLn $ "Received access token: " ++ show (accessToken tokens)
-              return tokens) (refreshTokens client) i
+              requestNew = (do
+                  putStrLn$ "Load this URL: "++ show permissionUrl
+                  case os of
+                    "linux"  -> rawSystem "chromium" [permissionUrl]
+                    "darwin" -> rawSystem "open"       [permissionUrl]
+                    _        -> return ExitSuccess
+                  putStrLn "Please paste the verification code: "
+                  authcode <- getLine
+                  tokens   <- exchangeCode client authcode
+                  putStrLn $ "Received access token: " ++ show (accessToken tokens)
+                  return tokens)
+          maybe requestNew ((`catch` (\e -> traceShow (e :: SomeException) requestNew)) . refreshTokens client) i
           ) -< tokenToOAuth <$> token
        token <- atR "token" ((,,,) <$> odxR "accesstoken" <*> odxR "refreshtoken" <*> odxR "expiresin" <*> odxR "tokentype" ) -< ()
        odxR "refresh" -< ()

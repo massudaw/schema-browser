@@ -2,6 +2,7 @@
 module Crea where
 
 import Types
+import qualified Data.Text as T
 import qualified Data.Map as M
 import Network.Wreq
 import Utils
@@ -13,6 +14,7 @@ import qualified Network.Wreq.Session as Sess
 import Control.Monad
 
 
+import qualified Data.List as L
 import RuntimeTypes
 import PostgresQuery
 import System.Environment
@@ -56,6 +58,7 @@ creaLogin rnp user pass = do
     --pr <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
     return (cr ^? responseBody)
 
+creaArtdata :: BS.ByteString -> BS.ByteString -> BS.ByteString -> BS.ByteString -> IO [ M.Map String String]
 creaArtdata rnp user pass art = do
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
     cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
@@ -139,6 +142,24 @@ creaTmpBoleto boleto = "http://www.crea-go.org.br/guia/tmp/" <> boleto <> ".pdf"
 creaArtList situacao page =  "http://www.crea-go.org.br/art1025/cadastros/ajax_lista_arts.php?SITUACAO_DA_ART="<> show situacao <> "&pg=" <> show page
 
 
+convertArt :: [M.Map String String ]-> TBData T.Text Showable
+convertArt v =
+  tblist $ fmap _tb
+  [numberA "substituida" $ join $ fmap (fmap (L.drop 2 .snd .L.break (== 'à')) .L.find ("Substituição à" `L.isInfixOf`) .  concat . fmap (\(i,j) -> [i,j]) . M.toList ) v `atMay` 0
+  -- ,numberA "contrato" $ at 2 "Contrato:"
+  ,textA "cpf_cnpj" $ filter (not . (`elem` " /-." )) <$> at 2 "CPF/CNPJ:"
+  ,textA "contratante" $  at 2 "Contratante:"
+  ]
+  where at ix k = join $ M.lookup k <$> v `atMay` ix
+        textA k = Attr k . LeftTB1 . fmap (TB1 . SText . T.pack  )
+        numberA k = Attr k . LeftTB1 . join . fmap (fmap (TB1 . SNumeric ). join . fmap clean .readMay )
+          where
+            clean i
+              | i == 0 = Nothing
+              | i < 50 = Nothing
+              | otherwise = Just i
+
+
 
 replacePath :: (BSC.ByteString,BSC.ByteString)
 replacePath = ("/art1025"  , "http://www.crea-go.org.br/art1025")
@@ -149,19 +170,14 @@ testCrea = do
   Just rnp <- lookupEnv "CREA_RNP"
   Just user <- lookupEnv "CREA_USER"
   Just pass <- lookupEnv "CREA_PASS"
-  v <- creaArtdata (BSC.pack rnp) (BSC.pack user) (BSC.pack pass) "1020150193681"
-  let
-    contrato :: [M.Map String String] -> Maybe (String,String)
-    contrato v =  liftA2 (,) (join $ M.lookup "Contrato:" <$> v `atMay` 2 )(join $ M.lookup "ART Obra ou serviço" <$> v `atMay` 0 )
-  print (contrato v)
-  return v
-  conn <- connectPostgreSQL (connRoot (argsToState (tail (tail args))))
-  traverse ((`catch` (\e -> return $ traceShow (e :: SomeException ) 0) ) . execute conn "UPDATE incendio.art SET contrato = ? where art_number = ?") (contrato v)
+  -- v <- creaArtdata (BSC.pack rnp) (BSC.pack user) (BSC.pack pass) "1020150180152"
+  -- conn <- connectPostgreSQL (connRoot (argsToState (tail (tail args))))
+  -- traverse ((`catch` (\e -> return $ traceShow (e :: SomeException ) 0) ) . execute conn "UPDATE incendio.art SET contrato = ? where art_number = ?") (contrato v)
 
-  {-
-  v <- fmap (head ) <$> creaSituacaoListPage (BSC.pack rnp) (BSC.pack user) (BSC.pack pass) 20 [10..16]
+
+  v <- fmap (head ) <$> creaSituacaoListPage (BSC.pack rnp) (BSC.pack user) (BSC.pack pass) 20 [0]
   conn <- connectPostgreSQL (connRoot (argsToState (tail (tail args))))
   mapM ((`catch` (\e -> return $ traceShow (e :: SomeException ) 0) ) . execute conn "INSERT INTO incendio.art (art_number,crea_register) values (?,?)" . (,rnp) ) v
-  -}
+
 
 

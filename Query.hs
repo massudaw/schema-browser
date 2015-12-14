@@ -268,8 +268,9 @@ isPairReflexive (KInterval i) op (KInterval j)
   | i == j && op == "=" = True
 isPairReflexive (Primitive i ) op (Primitive j) | i == j = True
 isPairReflexive (KOptional i ) op  j = isPairReflexive i op j
-isPairReflexive i op (KSerial j) = isPairReflexive i op j
+isPairReflexive i  op (KOptional j) = isPairReflexive i op j
 isPairReflexive (KSerial i) op j = isPairReflexive i op j
+isPairReflexive i op (KSerial j) = isPairReflexive i op j
 isPairReflexive (KArray i )  op  (KArray j)
   | i == j  && op == "<@" = False
   | i == j  && op == "=" = True
@@ -677,10 +678,6 @@ tbPK = tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvp
 tbPK' :: (Ord k)=>TBData k a -> Compose Identity  (KV  (Compose Identity (TB Identity  ))) k a
 tbPK' = tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) ))
 
-tbUn :: (Functor f,Ord k) =>   Set k -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
-tbUn un (TB1 (kv,item)) =  (\kv ->  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item ) un
-  where pred kv k = (S.isSubsetOf (S.map _relOrigin k) kv )
-
 tbAttr :: (Functor f,Ord k) =>  TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbAttr  =  tbFilter  (\kv k -> not (S.isSubsetOf (S.map _relOrigin k) (S.fromList (_kvpk kv) <> (S.fromList (_kvdesc kv ))) ))
 
@@ -930,9 +927,9 @@ postgresPrim =
   ,("smallint",PInt)
   ,("boolean",PBoolean)
   ,("bool",PBoolean)
-  ,("timestamptz",PTimestamp Nothing)
+  ,("timestamptz",PTimestamp (Just utc))
   ,("timestamp",PTimestamp (Just utc))
-  ,("timestamp with time zone",PTimestamp Nothing)
+  ,("timestamp with time zone",PTimestamp (Just utc))
   ,("timestamp without time zone",PTimestamp (Just utc))
   ,("interval", PInterval)
   ,("date" ,PDate)

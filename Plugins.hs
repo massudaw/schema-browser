@@ -20,6 +20,7 @@ import Siapi3
 import CnpjReceita
 import OFX
 import Crea
+import  GHC.Stack
 import PandocRenderer
 import OAuth
 
@@ -261,7 +262,7 @@ siapi3CheckApproval = PurePlugin pname tname  url
 
       let app = L.find (\(TB1 (SText x),_) -> T.isInfixOf "APROVADO"  x) v
           tt = L.find ((\(TB1 (SText x)) -> T.isInfixOf "ENTREGUE AO SOLICITANTE APROVADO"  x).fst) v
-      returnA -< Just $ tblist [_tb $ Attr "aproval_date" (LeftTB1 $ fmap snd (liftA2 const app tt))]
+      returnA -< Just $ tblist [_tb $ Attr "aproval_date" (LeftTB1 $ fmap ((\(TB1 (STimestamp t)) -> TB1 $ SDate (localDay t)) .snd) (liftA2 const app tt))]
 
 
 siapi3Plugin  = BoundedPlugin2 pname tname  url
@@ -490,7 +491,8 @@ importarofx = BoundedPlugin2 "OFX Import" tname  url
         odxR "sic" -< t
         odxR "payeeid" -< t
         ) -< t
-      b <- act (fmap join . traverse (\(TB1 (SText i), (LeftTB1 (Just (DelayedTB1 (Just (TB1 (SBinary r) ))))) , acc ) -> liftIO $ ofxPlugin (T.unpack i) (BS.unpack r) acc )) -< liftA3 (,,) fn i r
+
+      b <- act (fmap join . traverse ofx ) -< liftA3 (,,) fn i r
       let ao :: TB2 Text Showable
           ao =  LeftTB1 $ ArrayTB1 . fmap (TB1 . tblist . fmap attrT ) <$>  b
           ref :: [Compose Identity (TB Identity ) Text(Showable)]
@@ -498,6 +500,9 @@ importarofx = BoundedPlugin2 "OFX Import" tname  url
           tbst :: (Maybe (TBData Text (Showable)))
           tbst = Just $ tblist [_tb $ FKT ref [Rel "statements" "=" "fitid",Rel "account" "=" "account"] ao]
       returnA -< tbst
+    ofx (TB1 (SText i), ((DelayedTB1 (Just (TB1 (SBinary r) )))) , acc )
+      = liftIO $ ofxPlugin (T.unpack i) (BS.unpack r) acc
+    ofx i = errorWithStackTrace (show i)
 
 
 notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" tname url
@@ -516,6 +521,27 @@ notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" tname url
       b <- act (fmap join  . traverse (\(i, (j, k,a)) -> liftIO$ prefeituraNota j k a i ) ) -< liftA2 (,) i r
       let ao =  Just $ tblist [attrT ("nota",    LeftTB1 $ fmap (DelayedTB1 .Just . TB1 ) b)]
       returnA -< ao
+
+queryArtCreaData = BoundedPlugin2 "Art Crea Data" tname url
+  where
+    tname = "art"
+    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    url :: ArrowReader
+    url = proc t -> do
+      i <- varTB "art_number" -< t
+      idxR "payment_date" -<  t
+      odxR "contratante" -< ()
+      odxR "cpf_cnpj" -< ()
+      odxM "substuicao" -< ()
+      r <- atR "crea_register" (proc t -> do
+                               n <- varTB "crea_number" -< t
+                               u <- varTB "crea_user"-< t
+                               p <- varTB "crea_password"-< t
+                               returnA -< liftA3 (, , ) n u p  ) -< t
+      b <- act (  traverse (\(i, (j, k,a)) -> liftIO$ creaArtdata j k a i ) ) -< liftA2 (,) i r
+      let ao =  convertArt <$> b
+      returnA -< ao
+
 
 queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" tname url
   where

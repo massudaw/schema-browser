@@ -68,6 +68,7 @@ executable threepenny-layer
    ,text-binary
    ,mime-mail
    ,async
+   ,GiST
   -- hs-source-dirs:      
 
   default-language:    Haskell2010

@@ -94,8 +94,9 @@ eventTable inf table page size presort fixed = do
              return ini
        return ini
     let tde = fmap filterfixed <$> rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
-    tdb  <- stepper (fmap filterfixed iniT) tde
-    return (dbvar {collectionTid  = fmap snd $ tidings tdb tde},fmap filterfixed iniT)
+    let iniFil = fmap filterfixed iniT
+    tdb  <- stepper iniFil tde
+    return (dbvar {collectionTid  = fmap snd $ tidings tdb tde},iniFil)
 
 
 
