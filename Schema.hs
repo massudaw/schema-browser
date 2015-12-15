@@ -160,15 +160,16 @@ createTableRefs i = do
   (eidx ,hidx) <- liftIO $R.newEvent
   bhidx <- R.stepper M.empty eidx
   liftIO$ forkIO $ forever $ do
-      (hidx =<< (takeMVar midx ) )
+      (hidx =<< (takeMVar midx ))
   liftIO$ forkIO $ forever $ do
       (h =<<  takeMVar mnew )
   liftIO$ forkIO $ forever $ do
       patches <- takeMVar mdiff
       bstate <- R.currentValue bh
-      let edited = L.foldl' apply bstate  patches
-      hdiff patches
-      (h edited)
+      when (not $ L.null patches) $ do
+        let edited = L.foldl' apply bstate  patches
+        hdiff patches
+        (h edited)
   return (tableMeta i,  DBVar2  mdiff midx mnew (R.tidings bhdiff ediff) (R.tidings bhidx eidx) (R.tidings bh e))
 
 

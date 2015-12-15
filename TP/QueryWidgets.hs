@@ -830,16 +830,15 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_) 
           rr = tablePKSet tb1
           table = justError "no table found" $ M.lookup (S.map _relOrigin rr) $ pkMap inf
 
-      ((DBVar2 tmvard _ _ vpdiff _ _ ),resi)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
-      bres <- accumB resi (flip (foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> rumors vpdiff)
+      ((DBVar2 tmvard _ _ vpdiff _ _ ),res)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
+      bres <- accumB res (flip (foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> rumors vpdiff)
       let
           vpt =  tidings bres ((foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> bres <@> rumors vpdiff )
-          res = resi
       let
           -- Find non injective part of reference
           ftdi = oldItems
           oldASet :: Set Key
-          oldASet = traceShowId $ S.fromList $ filter (not .(`L.elem` (concat $ fmap _relOrigin .keyattr <$> ifk )))(_relOrigin <$> rel )
+          oldASet = S.fromList $ filter (not .(`L.elem` (concat $ fmap _relOrigin .keyattr <$> ifk )))(_relOrigin <$> rel )
           replaceKey =  firstTB (\k -> maybe k _relTarget $ L.find ((==k)._relOrigin) $ filter (\i -> keyType (_relOrigin i) == keyType (_relTarget i)) rel)
           nonInj =   S.difference (S.fromList $ fmap  _relOrigin   $ rel) (S.fromList $ getRelOrigin ifk)
           nonInjRefs = filter (flip S.isSubsetOf nonInj . S.fromList . fmap _relOrigin . keyattr . _tb .fst) wl
@@ -852,10 +851,11 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_) 
           ftdi2 :: Tidings (Maybe [TB Identity  Key Showable])
           ftdi2 =   fmap (fmap unTB. tbrefM ) <$> ftdi
           applyConstr =  foldl' (flip (\constr -> M.filterWithKey (\k-> not . constr)))
+          createPKIdx = createUn (S.fromList $ _kvpk m)
           constrT =  Tra.sequenceA $ fmap snd constr
       iniConstr <- currentValue (facts constrT)
       res3 <- mapT0Event (applyConstr (snd res) iniConstr) return $ liftA2 applyConstr (tidings (snd <$> res2) never) constrT
-      gist <- mapTEvent return (createUn (S.fromList $ _kvpk m) <$>  res3 )
+      gist <- mapT0Event (createPKIdx (snd res) ) return (createPKIdx <$>  (tidings (snd <$> res2 ) never))
       let
           unRKOptional (Key v a b d n m (KOptional c)) = Key v a b d n m c
           unRKOptional i = i
@@ -882,7 +882,7 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_) 
                 set UI.style [("border","1px solid gray")] #
                 sink items (pure . maybe UI.div showFKE  . fmap _fkttable<$> facts oldItems ))
         else
-           listBox ((Nothing:) . reverse . F.toList <$>  fmap (fmap (Just )) res3) (tidings (fmap Just <$> st) never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+           listBox ((Nothing:) . reverse . F.toList <$>  fmap (fmap Just) res3) (tidings (fmap Just <$> st) never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
       let evsel = (if isReadOnly tb then id else unionWith const (rumors tdi) ) (rumors $ join <$> triding itemList)
       prop <- stepper cv evsel

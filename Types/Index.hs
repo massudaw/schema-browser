@@ -42,7 +42,7 @@ projUn u v = justError ("cant be optional" <> show (u,getUn u v))  . (traverse (
 
 instance Predicates TBIndex (TBData Key Showable) where
   type (Penalty (TBData Key Showable) ) = Penalty [FTB Showable]
-  consistent (Idex i j) (NodeEntry (_,Idex l m  )) = consistent (SPred $ fmap snd $ traceShowId $projUn i  $ j  ) (NodeEntry (undefined,SPred $ fmap snd $ projUn l $ m))
+  consistent (Idex i j) (NodeEntry (_,Idex l m  )) = consistent (SPred $ fmap snd $ projUn i  $ j  ) (NodeEntry (undefined,SPred $ fmap snd $ projUn l $ m))
   consistent (Idex i j) (LeafEntry (_,Idex l m  )) = consistent (SPred $ fmap snd $ projUn i  $ j  ) (LeafEntry (undefined,SPred $ fmap snd $ projUn l $ m))
   union l  = Idex i (tblist $ fmap (_tb . uncurry Attr) $  zipWith (,) kf projL)
     where Idex i v = head l
