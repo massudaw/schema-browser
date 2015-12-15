@@ -70,6 +70,7 @@ data DiffShowable
   | DSDouble Double
   | DSInt Int
   | DSDiffTime NominalDiffTime
+  | DSDays Integer
   deriving(Eq,Ord,Show)
 
 diffStr [] [] = []
@@ -81,12 +82,15 @@ diffS (SText t) (SText o) = DSText $ diffStr (T.unpack o) (T.unpack t)
 diffS (SDouble t) (SDouble o) = DSDouble $ o -t
 diffS (SNumeric t) (SNumeric o) = DSInt $ o -t
 diffS (STimestamp i ) (STimestamp j) = DSDiffTime (diffUTCTime (localTimeToUTC utc j) (localTimeToUTC utc  i))
+diffS (SDate i ) (SDate j) = DSDays (diffDays j i)
 diffS a b  = errorWithStackTrace (show (a,b))
 
 
 appendDShowable (DSText l ) (DSText j) =  DSText $ zipWith (+) l j <> L.drop (L.length j) l <> L.drop (L.length l ) j
 appendDShowable (DSDouble l ) (DSDouble j) =  DSDouble$ l + j
 appendDShowable (DSInt l ) (DSInt j) =  DSInt $ l + j
+appendDShowable (DSDays l ) (DSDays j) =  DSDays $ l + j
+appendDShowable (DSDiffTime l ) (DSDiffTime j) =  DSDiffTime $ l + j
 appendDShowable a b = errorWithStackTrace (show (a,b))
 
 
@@ -127,6 +131,13 @@ notNeg (DSDouble l)
 notNeg (DSInt l)
   | l < 0 = DSInt 0
   | otherwise =  DSInt l
+notNeg (DSDays l )
+  | l < 0 = DSDays 0
+  | otherwise =  DSDays l
+notNeg (DSDiffTime l )
+  | l < 0 = DSDiffTime 0
+  | otherwise =  DSDiffTime l
+notNeg i = errorWithStackTrace (show i)
 
 inter a b = IntervalTB1 $ (ER.Finite a,True) `interval` (ER.Finite b,True)
 

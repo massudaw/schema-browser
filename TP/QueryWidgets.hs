@@ -810,6 +810,7 @@ isReadOnly (FKT ifk rel _ ) = L.null ifk || all (not . any ((/= FRead)). keyModi
 isReadOnly (Attr k _ ) =  (not . any ((/= FRead)). keyModifier ) k
 isReadOnly (IT k _ ) =   (isReadOnly $ unTB k)
 
+
 fkUITable
   ::
   InformationSchema
@@ -858,16 +859,16 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_) 
       let
           unRKOptional (Key v a b d n m (KOptional c)) = Key v a b d n m c
           unRKOptional i = i
-          relMap = M.fromList $ fmap (\i -> ( _relTarget i, _relOrigin i )) rel
       let
-          searchGist = (\i j -> join $ fmap (\k -> lookGist (Idex (S.fromList $fmap (\k-> justError (show ("nopk",k)) $ M.lookup k relMap) (_kvpk m) ) (tblist $ fmap _tb k))  i)  j )
+          searchGist = (\i j -> join $ fmap (\k -> lookGist (Idex (S.fromList $fmap (\k-> justError (show ("nopk",k)) $ M.lookup k relTable) (_kvpk m) ) (tblist $ fmap _tb k))  i)  j )
           vv :: Tidings (Maybe [TB Identity Key Showable])
           vv =   liftA2 (liftA2 (<>)) iold2  ftdi2
       cvres <- currentValue (facts vv)
       filterInp <- UI.input
       filterInpBh <- stepper "" (UI.valueChange filterInp)
+      iniGist <- currentValue (facts gist)
       let
-          cv = searchGist (createUn (S.fromList $ _kvpk m)$ applyConstr (snd res) iniConstr ) cvres
+          cv = searchGist iniGist cvres
           tdi = searchGist <$> gist <*> vv
       let
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
@@ -881,7 +882,7 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_) 
                 set UI.style [("border","1px solid gray")] #
                 sink items (pure . maybe UI.div showFKE  . fmap _fkttable<$> facts oldItems ))
         else
-           listBox ((Nothing:) . reverse . F.toList<$>  fmap (fmap (Just )) res3) (tidings (fmap Just <$> st) never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+           listBox ((Nothing:) . reverse . F.toList <$>  fmap (fmap (Just )) res3) (tidings (fmap Just <$> st) never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
       let evsel = (if isReadOnly tb then id else unionWith const (rumors tdi) ) (rumors $ join <$> triding itemList)
       prop <- stepper cv evsel
@@ -896,8 +897,6 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_) 
       res2 <- stepper res  (rumors vpt)
 
       fin <- onEvent (pure <$> ediff) (liftIO .  putMVar tmvard)
-      let
-        fksel =  fmap (\box ->  FKT (backFKRef  relTable  (fmap (keyAttr .unTB )ifk)   box) rel (TB1 box) ) <$>  ((\i j -> maybe i Just ( j)  ) <$>  pretdi <*> tidings st sel)
       element itemList # set UI.class_ "col-xs-5"
       element filterInp # set UI.class_ "col-xs-3"
       fk <- if isReadOnly tb
@@ -910,6 +909,8 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_) 
                 void $  element subnet # sink0 UI.style (noneShow . isJust <$> facts oldItems )
       addElemFin (getElement subnet) fin
       addElemFin (getElement subnet) fin2
+      let
+        fksel =  fmap (\box ->  FKT (backFKRef relTable  (fmap (keyAttr .unTB )ifk)   box) rel (TB1 box) ) <$>  ((\i j -> maybe i Just ( j)  ) <$>  pretdi <*> tidings st sel)
       return $ TrivialWidget (if isReadOnly  tb then oldItems  else fksel ) subnet
 fkUITable inf constr plmods  wl oldItems  tb@(FKT ilk rel  (DelayedTB1 (Just tb1 ))) = do
     tr <- fkUITable inf constr  plmods  wl oldItems  (FKT  ilk  rel tb1)
@@ -925,12 +926,15 @@ fkUITable inf constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) ) = 
      (TrivialWidget offsetT offset) <- offsetField 0 (wheel) (maybe 0 (length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      let
          fkst = FKT (mapComp (firstTB unKArray)<$> ifk ) (fmap (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
-     let dyn = dynHandler (\ix-> do
+     let -- dyn = dynHandler  recurse (\ix -> unIndexItens ix <$> offsetT  <*>  oldItems)
+         recurse ix = do
            lb <- UI.div # sink UI.text (show . (+ix) <$> facts offsetT ) # set UI.class_ "col-xs-1"
            TrivialWidget tr el<- fkUITable inf constr (fmap (unIndexItens  ix <$> offsetT <*> ) <$> plmods) wl (unIndexItens ix <$> offsetT  <*>  oldItems) fkst
            element el # set UI.class_ "col-xs-11"
-           TrivialWidget tr <$> UI.div # set UI.children [lb,el] ) (\ix -> unIndexItens ix <$> offsetT  <*>  oldItems)
-     fks <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
+           TrivialWidget tr <$> UI.div # set UI.children [lb,el]
+     -- fks <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
+
+     fks <- mapM recurse [0..arraySize -1 ]
      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow <$> facts t)) (getElement <$> fks) (pure True : (fmap isJust . triding <$> fks))
      element dv # set children (getElement <$> fks)
      let bres = indexItens arraySize  tb offsetT (triding <$> fks) oldItems
