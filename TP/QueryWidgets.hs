@@ -272,14 +272,24 @@ tbCase inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattri .fst) wl
             nonInjConstr :: SelTBConstraint
             nonInjConstr = first (pure . _tb ) .fmap (fmap (\j ((_,l)) -> maybe True id $ (\ j -> not $ interPointPost rel (nonRefAttr  [_tb  j]) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) <$> j ).triding) <$>  nonInjRefs
+
+            -- Move to referenced table unique constraints
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             pkset = fmap S.fromList $ allMaybes $  fmap (\ i ->  M.lookup i relTable) ( fmap _relOrigin $ findPK $ tb1 )
-
             restrictConstraint = filter ((\v -> maybe False  (v `S.isSubsetOf`)   pkset) . S.fromList . getRelOrigin  .fst) constr
             convertConstr :: SelTBConstraint
             convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> constr   .  backFKRef relTable (getRelOrigin f)  ) j ) <$>  restrictConstraint
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . rumors . snd <$>  plugItens )
-        fkUITable inf (convertConstr <> nonInjConstr) plugItens wl ftdi i
+
+        let table = lookTable inf  (_kvname m)
+            m = (fst $ head $ F.toList tb1)
+        ((DBVar2 tmvard _ _ vpdiff _ _ ),res)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
+        bres <- accumB res (flip (foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> rumors vpdiff)
+        let
+            vpt =  tidings bres ((foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> bres <@> rumors vpdiff )
+            createPKIdx = createUn (S.fromList $ _kvpk m)
+        gist <- mapT0Event (createPKIdx (snd res) ) return (createPKIdx <$>  (tidings (snd <$> facts vpt) never))
+        fkUITable inf (convertConstr <> nonInjConstr) (vpt,res,gist,tmvard) plugItens wl ftdi i
 tbCase inf _ i@(IT na tb1 ) wl plugItens oldItems
     = iUITable inf plugItens oldItems i
 tbCase inf _ a@(Attr i _ ) wl plugItens preoldItems = do
@@ -810,12 +820,15 @@ isReadOnly (FKT ifk rel _ ) = L.null ifk || all (not . any ((/= FRead)). keyModi
 isReadOnly (Attr k _ ) =  (not . any ((/= FRead)). keyModifier ) k
 isReadOnly (IT k _ ) =   (isReadOnly $ unTB k)
 
+type RefTables = (Tidings (Collection Key Showable),(Collection Key Showable), Tidings (G.GiST TBIndex  (TBData Key Showable)), MVar [TBIdx Key Showable] )
+
 
 fkUITable
   ::
   InformationSchema
   -- Plugin Modifications
   -> SelTBConstraint
+  -> RefTables
   -> [(Access Text,Tidings (Maybe (TB Identity Key Showable)))]
   -- Same Table References
   -> [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key (Showable))))]
@@ -824,16 +837,11 @@ fkUITable
   -- Static Information about relation
   -> TB Identity Key ()
   -> UI (TrivialWidget(Maybe (TB Identity Key Showable)))
-fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = mdo
+fkUITable inf constr (vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = mdo
       let
+          table = lookTable inf (_kvname m)
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
-          rr = tablePKSet tb1
-          table = justError "no table found" $ M.lookup (S.map _relOrigin rr) $ pkMap inf
 
-      ((DBVar2 tmvard _ _ vpdiff _ _ ),res)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
-      bres <- accumB res (flip (foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> rumors vpdiff)
-      let
-          vpt =  tidings bres ((foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> bres <@> rumors vpdiff )
       let
           -- Find non injective part of reference
           ftdi = oldItems
@@ -851,11 +859,9 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_) 
           ftdi2 :: Tidings (Maybe [TB Identity  Key Showable])
           ftdi2 =   fmap (fmap unTB. tbrefM ) <$> ftdi
           applyConstr =  foldl' (flip (\constr -> M.filterWithKey (\k-> not . constr)))
-          createPKIdx = createUn (S.fromList $ _kvpk m)
           constrT =  Tra.sequenceA $ fmap snd constr
       iniConstr <- currentValue (facts constrT)
-      res3 <- mapT0Event (applyConstr (snd res) iniConstr) return $ liftA2 applyConstr (tidings (snd <$> res2) never) constrT
-      gist <- mapT0Event (createPKIdx (snd res) ) return (createPKIdx <$>  (tidings (snd <$> res2 ) never))
+      res3 <- mapT0Event (applyConstr (snd res) iniConstr) return $ liftA2 applyConstr (tidings (snd <$> facts vpt) never) constrT
       let
           unRKOptional (Key v a b d n m (KOptional c)) = Key v a b d n m c
           unRKOptional i = i
@@ -912,14 +918,14 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_) 
       let
         fksel =  fmap (\box ->  FKT (backFKRef relTable  (fmap (keyAttr .unTB )ifk)   box) rel (TB1 box) ) <$>  ((\i j -> maybe i Just ( j)  ) <$>  pretdi <*> tidings st sel)
       return $ TrivialWidget (if isReadOnly  tb then oldItems  else fksel ) subnet
-fkUITable inf constr plmods  wl oldItems  tb@(FKT ilk rel  (DelayedTB1 (Just tb1 ))) = do
-    tr <- fkUITable inf constr  plmods  wl oldItems  (FKT  ilk  rel tb1)
+fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ilk rel  (DelayedTB1 (Just tb1 ))) = do
+    tr <- fkUITable inf constr  tbrefs plmods  wl oldItems  (FKT  ilk  rel tb1)
     return $ tr
 
-fkUITable inf constr plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb1 ))) = do
-    tr <- fkUITable inf constr (fmap (join . fmap unLeftItens <$>) <$> plmods)  wl (join . fmap unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOrigin unKOptional <$> rel) tb1)
+fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb1 ))) = do
+    tr <- fkUITable inf constr tbrefs (fmap (join . fmap unLeftItens <$>) <$> plmods)  wl (join . fmap unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOrigin unKOptional <$> rel) tb1)
     return $ leftItens tb <$> tr
-fkUITable inf constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) ) = mdo
+fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) ) = mdo
      dv <- UI.div
      let wheel = fmap negate $ mousewheel dv
          arraySize = 8
@@ -929,7 +935,7 @@ fkUITable inf constr plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 [tb1]) ) = 
      let -- dyn = dynHandler  recurse (\ix -> unIndexItens ix <$> offsetT  <*>  oldItems)
          recurse ix = do
            lb <- UI.div # sink UI.text (show . (+ix) <$> facts offsetT ) # set UI.class_ "col-xs-1"
-           TrivialWidget tr el<- fkUITable inf constr (fmap (unIndexItens  ix <$> offsetT <*> ) <$> plmods) wl (unIndexItens ix <$> offsetT  <*>  oldItems) fkst
+           TrivialWidget tr el<- fkUITable inf constr tbrefs (fmap (unIndexItens  ix <$> offsetT <*> ) <$> plmods) wl (unIndexItens ix <$> offsetT  <*>  oldItems) fkst
            element el # set UI.class_ "col-xs-11"
            TrivialWidget tr <$> UI.div # set UI.children [lb,el]
      -- fks <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
