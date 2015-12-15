@@ -277,7 +277,7 @@ tbCase inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
 
             restrictConstraint = filter ((\v -> maybe False  (v `S.isSubsetOf`)   pkset) . S.fromList . getRelOrigin  .fst) constr
             convertConstr :: SelTBConstraint
-            convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> constr   .  backFKRef relTable (getRelOrigin f)  .TB1  ) j ) <$>  restrictConstraint
+            convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> constr   .  backFKRef relTable (getRelOrigin f)  ) j ) <$>  restrictConstraint
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . rumors . snd <$>  plugItens )
         fkUITable inf (convertConstr <> nonInjConstr) plugItens wl ftdi i
 tbCase inf _ i@(IT na tb1 ) wl plugItens oldItems
@@ -427,9 +427,9 @@ crudUITable inf open bres refs pmods ftb@(m,_)  preoldItems = do
               tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK (TB1 ftb) , flip pkConstraint  <$> (deleteCurrent  <$> oldItems <*> fmap snd bres))
           unConstraints <-  traverse (traverse (traverse (mapTEvent (return) )) ) $ (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un ) (fmap snd bres)))) <$> _kvuniques m
           let
-              deleteCurrentUn un e l = maybe l ((\v -> G.delete (v, Idex un v) (3,6) l)  ) e
+              deleteCurrentUn un e l = maybe l ((\v -> G.delete (v, Idex un v) (3,6) l)  ) $  join $ (\e -> if isJust (traverse (traverse unSOptional')  (getUn un e)) then Just e else Nothing ) <$> e
           unDeleted <- traverse (traverse (traverse (mapTEvent return))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> oldItems <*> o))) unConstraints)
-          let dunConstraints (un,o) = flip (\i -> unConstraint un (tblist i)) <$> o
+          let dunConstraints (un,o) = flip (\i ->  maybe (const False )(unConstraint un .tblist ) (traverse (traComp (traFAttr unSOptional')) i ) ) <$> o
               unFinal:: [([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)]
               unFinal = fmap (fmap (dunConstraints)) unDeleted
           (listBody,tableb,inscrud) <- eiTable inf   (tpkConstraint: unFinal ) (_kvname m) refs pmods ftb oldItems
@@ -467,11 +467,12 @@ type SelTBConstraint = [([Compose Identity (TB Identity) Key ()],Tidings TBConst
 pkConstraint v  = isJust . M.lookup (concat . fmap aattr $ v)
 
 unConstraint :: Set Key -> TBData Key Showable -> G.GiST TBIndex (TBData Key Showable) -> Bool
-unConstraint u v  = isJust . look (Idex u v)
-  where look pk  = safeHead . G.search pk
+unConstraint u v m = isJust . lookGist (Idex u v) $ m
+
+lookGist pk  = safeHead . G.search pk
 
 createUn :: Set Key -> Map b (TBData Key Showable) -> G.GiST TBIndex (TBData Key Showable)
-createUn un   =  fromList .  F.toList . traceShow "createUn"
+createUn un   =  fromList .  filter (\i-> isJust $ traverse (traverse unSOptional' ) $ getUn un i ) . F.toList . traceShow ("createUn",un)
   where
     fromList = foldl'  acc G.empty
     acc !m v = G.insert (v,Idex un  ( v) ) (3,6) m
@@ -530,7 +531,7 @@ processPanelTable inf attrsB res inscrud table oldItemsi = do
 
 showFKE v =  UI.div # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec $  v)
 
-showFK = (pure ((\v j ->j  # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec  $ v))))
+showFK = (pure ((\v j ->j  # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec  $ TB1 v))))
 
 tablePKSet  tb1 = S.fromList $ concat $ fmap ( keyattr)  $ F.toList $ _kvvalues $ unTB $ tbPK  tb1
 
@@ -822,7 +823,7 @@ fkUITable
   -- Static Information about relation
   -> TB Identity Key ()
   -> UI (TrivialWidget(Maybe (TB Identity Key Showable)))
-fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = mdo
+fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = mdo
       let
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
           rr = tablePKSet tb1
@@ -832,41 +833,47 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = mdo
       bres <- accumB resi (flip (foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> rumors vpdiff)
       let
           vpt =  tidings bres ((foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> bres <@> rumors vpdiff )
-          res = fmap TB1 <$> resi
+          res = resi
       let
           -- Find non injective part of reference
           ftdi = oldItems
           oldASet :: Set Key
-          oldASet = S.fromList (_relOrigin <$> filterNotReflexive rel )
+          oldASet = traceShowId $ S.fromList $ filter (not .(`L.elem` (concat $ fmap _relOrigin .keyattr <$> ifk )))(_relOrigin <$> rel )
           replaceKey =  firstTB (\k -> maybe k _relTarget $ L.find ((==k)._relOrigin) $ filter (\i -> keyType (_relOrigin i) == keyType (_relTarget i)) rel)
           nonInj =   S.difference (S.fromList $ fmap  _relOrigin   $ rel) (S.fromList $ getRelOrigin ifk)
           nonInjRefs = filter (flip S.isSubsetOf nonInj . S.fromList . fmap _relOrigin . keyattr . _tb .fst) wl
           staticold :: [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key (Showable))))]
-          staticold  =    second (fmap (fmap replaceKey . join . fmap unLeftItens)) . first (replaceKey .unLeftKey) <$>  nonInjRefs
+          staticold  =  second (fmap (fmap replaceKey . join . fmap unLeftItens)) . first (replaceKey .unLeftKey) <$>  nonInjRefs
           iold :: Tidings [Maybe [(Key,FTB Showable)]]
           iold  = Tra.sequenceA $ fmap (fmap ( aattr . _tb ) ) . triding .snd <$> L.filter (\i-> not . S.null $ S.intersection (S.fromList $ fmap _relOrigin $ keyattr . _tb . fst $ i) oldASet) wl
           iold2 :: Tidings (Maybe [TB Identity  Key Showable])
-          iold2 =  join . (fmap (traverse ((traFAttr unRSOptional2 ) . firstTB unRKOptional ))) .  fmap (fmap ( uncurry Attr) . concat) . allMaybes <$> iold
+          iold2 =  join . (fmap (traverse ((traFAttr unRSOptional2 ) . firstTB unRKOptional ))) .  fmap (fmap ( uncurry Attr) . concat) . allMaybesEmpty <$> iold
           ftdi2 :: Tidings (Maybe [TB Identity  Key Showable])
           ftdi2 =   fmap (fmap unTB. tbrefM ) <$> ftdi
-          res3 :: Tidings [TB1 Showable]
-          res3 =  foldr (\constr  res2 -> (\el constr -> filter (not. constr. unTB1 ) el)  <$> res2  <*> snd constr ) (tidings (F.toList . snd <$> res2) never) constr
+          applyConstr =  foldl' (flip (\constr -> M.filterWithKey (\k-> not . constr)))
+          constrT =  Tra.sequenceA $ fmap snd constr
+      iniConstr <- currentValue (facts constrT)
+      res3 <- mapT0Event (applyConstr (snd res) iniConstr) return $ liftA2 applyConstr (tidings (snd <$> res2) never) constrT
+      gist <- mapTEvent return (createUn (S.fromList $ _kvpk m) <$>  res3 )
+      let
           unRKOptional (Key v a b d n m (KOptional c)) = Key v a b d n m c
           unRKOptional i = i
+          relMap = M.fromList $ fmap (\i -> ( _relTarget i, _relOrigin i )) rel
       let
-          search = (\i j -> join $ fmap (\k-> L.find (\(TB1 (kv,l) )->  interPointPost (filter (flip S.member (S.fromList $ _kvpk kv) . _relTarget) rel) k  (concat $ fmap (uncurry Attr) . aattr <$> (F.toList . _kvvalues . unTB $ l)) ) i) $ j )
+          searchGist = (\i j -> join $ fmap (\k -> lookGist (Idex (S.fromList $fmap (\k-> justError (show ("nopk",k)) $ M.lookup k relMap) (_kvpk m) ) (tblist $ fmap _tb k))  i)  j )
           vv :: Tidings (Maybe [TB Identity Key Showable])
-          vv =   liftA2 (<>) iold2  ftdi2
+          vv =   liftA2 (liftA2 (<>)) iold2  ftdi2
       cvres <- currentValue (facts vv)
       filterInp <- UI.input
       filterInpBh <- stepper "" (UI.valueChange filterInp)
       let
-          cv = search (inisort $ F.toList $ snd res) cvres
-          tdi =  search <$> res3 <*> vv
+          cv = searchGist (createUn (S.fromList $ _kvpk m)$ applyConstr (snd res) iniConstr ) cvres
+          tdi = searchGist <$> gist <*> vv
+      let
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
-          filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList .    _unTB1
-          sortList :: Tidings ([TB1 Showable] -> [TB1 Showable])
-          sortList =  sorting  <$> pure (fmap ((,True)._relTarget) rel)
+          filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList . snd
+          sortList :: Tidings ([TBData Key Showable] -> [TBData Key Showable])
+          sortList =  sorting' <$> pure (fmap ((,True)._relTarget) rel)
       itemList <- if isReadOnly tb
         then
            TrivialWidget (Just  <$> tdi ) <$>
@@ -874,23 +881,23 @@ fkUITable inf constr plmods wl  oldItems  tb@(FKT ifk rel tb1@(TB1 _  ) ) = mdo
                 set UI.style [("border","1px solid gray")] #
                 sink items (pure . maybe UI.div showFKE  . fmap _fkttable<$> facts oldItems ))
         else
-           listBox ((Nothing:) . reverse <$>  fmap (fmap Just) res3) (tidings (fmap Just <$> st) never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+           listBox ((Nothing:) . reverse . F.toList<$>  fmap (fmap (Just )) res3) (tidings (fmap Just <$> st) never) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
 
       let evsel = (if isReadOnly tb then id else unionWith const (rumors tdi) ) (rumors $ join <$> triding itemList)
       prop <- stepper cv evsel
       let ptds = tidings prop evsel
-      tds <- foldr (\i j ->updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap _fkttable.filterJust . rumors . snd <$>  plmods)
-      (celem,ediff,pretdi) <-crudUITable inf (pure "None") ( vpt ) staticold (fmap (fmap (fmap (unTB1 . _fkttable))) <$> plmods)  (unTB1 tb1 ) (fmap unTB1 <$> tds)
-      (diffUp,fin2) <-  mapEventFin (fmap pure ) $ (\i j -> traverse (fmap TB1 . runDBM inf .  flip applyRecord' j ) i) <$>  facts pretdi <@> ediff
+      tds <- foldr (\i j ->updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap (unTB1. _fkttable).filterJust . rumors . snd <$>  plmods)
+      (celem,ediff,pretdi) <-crudUITable inf (pure "None") ( vpt ) staticold (fmap (fmap (fmap (unTB1 . _fkttable))) <$> plmods)  tbdata tds
+      (diffUp,fin2) <-  mapEventFin (fmap pure ) $ (\i j -> traverse (runDBM inf .  flip applyRecord' j ) i) <$>  facts pretdi <@> ediff
       let
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> triding itemList), if isReadOnly tb then never else rumors tdi]),diffUp]
       st <- stepper cv sel
       inisort <- currentValue (facts sortList)
-      res2 <- stepper res  (fmap (fmap TB1) <$> rumors vpt)
+      res2 <- stepper res  (rumors vpt)
 
       fin <- onEvent (pure <$> ediff) (liftIO .  putMVar tmvard)
       let
-        fksel =  fmap (\box ->  FKT (backFKRef  relTable  (fmap (keyAttr .unTB )ifk)   box) rel box ) <$>  ((\i j -> maybe i Just ( j)  ) <$> fmap (fmap TB1) pretdi <*> tidings st sel)
+        fksel =  fmap (\box ->  FKT (backFKRef  relTable  (fmap (keyAttr .unTB )ifk)   box) rel (TB1 box) ) <$>  ((\i j -> maybe i Just ( j)  ) <$>  pretdi <*> tidings st sel)
       element itemList # set UI.class_ "col-xs-5"
       element filterInp # set UI.class_ "col-xs-3"
       fk <- if isReadOnly tb
@@ -949,7 +956,6 @@ instance Ord a => Ord (AscDesc a) where
 sorting' :: [(Key,Bool)] -> [TBData Key Showable]-> [TBData Key Showable]
 sorting' ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i),e) -> (ix,if i then DescW e  else AscW e) ) . F.toList .M.intersectionWith (,) (M.fromList (zipWith (\i (k,v) -> (k ,(i,v))) [0..] ss)) . M.fromList . concat . fmap aattr  . F.toList . _kvvalues . unTB . snd )  )
 
-sorting k = fmap TB1 . sorting' k . fmap unTB1
 
 
 rendererShowableUI k  v= renderer (keyValue k) v
@@ -1039,7 +1045,7 @@ viewer inf table env = mdo
                   ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
                   flist = catMaybes $ fmap (\(i,_,j) -> second (Attr i) . first T.pack <$> j) slist'
-              (_,(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (traceShowId $ envK <> flist)
+              (_,(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (envK <> flist)
               let (size,_) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (L.sort $ fmap snd envK) fixmap
               return (o,(slist,paging o (size,sorting' ordlist (F.toList lres))))
       nearest' :: M.Map Int (TB2 Key Showable) -> Int -> ((Int,Maybe (Int,TB2 Key Showable)))

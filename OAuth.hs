@@ -173,7 +173,7 @@ gmailOps = (SchemaEditor undefined insertTable undefined listTable updateTable g
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
-lbackRef (TB1 t) = snd $ Types.head $ getPK  (TB1 t)
+lbackRef (TB1 t) = snd $ Types.head $ getPKM t
 
 convertAttrs :: InformationSchema -> Maybe (Table,TBData Key Showable) -> M.Map Text Table ->  Table -> Value -> TransactionM (TB2 Key Showable)
 convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb ))

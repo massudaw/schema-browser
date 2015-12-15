@@ -877,9 +877,9 @@ backFKRef
   :: (Show (f Key ),Show a, Functor f) =>
      M.Map Key Key
      -> f Key
-     -> TB2 Key a
+     -> TBData  Key a
      -> f (Compose Identity (TB f1) Key a)
-backFKRef relTable ifk = fmap (_tb . uncurry Attr). reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . _unTB1
+backFKRef relTable ifk = fmap (_tb . uncurry Attr). reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . snd
   where
         reorderPK l = fmap (\i -> justError (show ("reorder wrong" :: String, ifk ,relTable , l,i))  $ L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
         lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (mapKType $ keyType ko ) (mapKType $ keyType kn) v)) <$> knm

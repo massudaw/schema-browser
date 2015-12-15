@@ -105,6 +105,13 @@ allMaybes i = if F.all isJust i
         then Just $ fmap (justError "wrong invariant allMaybes") i
         else Nothing
 
+allMaybesEmpty i | F.all (const False) i  = Just []
+allMaybesEmpty  i = if F.all isJust i
+        then Just $ fmap (justError "wrong invariant allMaybes") i
+        else Nothing
+
+
+
 unIntercalate :: ( Char -> Bool) -> String -> [String]
 unIntercalate pred s                 =  case dropWhile pred s of
                                 "" -> []

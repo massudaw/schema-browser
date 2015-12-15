@@ -1041,4 +1041,3 @@ getAttr (m, k) = traComp (concat . F.toList) k
 getUn un (m, k) =  L.sortBy (comparing fst ) $ concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k) un ) (  _kvvalues (unTB k))))
 
 
-projUn u = getUn u
