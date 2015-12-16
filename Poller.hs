@@ -1,71 +1,35 @@
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE Arrows #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE NoMonomorphismRestriction #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
-
 module Poller (poller,plugs) where
 
 import qualified NonEmpty as Non
-import Query
-import Text
 import Control.Concurrent.Async
-import Data.List (foldl')
-import Debug.Trace
 import Types
 import Data.Either
 import Step
-import Plugins
-import TP.Widgets
 import SchemaQuery
 import PostgresQuery (postgresOps,connRoot)
-import SortList
 import Prelude hiding (head)
-import TP.QueryWidgets
 import Control.Monad.Reader
 import Control.Concurrent
 import Data.Functor.Apply
-import System.Environment
-import Network.Google.OAuth2 (OAuth2Tokens(..))
-import Data.Ord
 import Utils
 import Schema
 import Patch
-import Data.Char (toLower)
-import Postgresql
 import Data.Maybe
-import Data.Functor.Identity
 import Reactive.Threepenny
 import Data.Traversable (traverse)
 import qualified Data.List as L
-import qualified Data.ByteString.Char8 as BS
 import Data.Time
 
 import RuntimeTypes
-import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Core hiding (get,delete)
 import Data.Monoid hiding (Product(..))
 
 import qualified Data.Foldable as F
 import qualified Data.Text as T
-import Data.Text.Encoding (encodeUtf8)
-import Data.Text (Text)
-import qualified Data.Set as S
 
 
 import Database.PostgreSQL.Simple
 import qualified Data.Map as M
-import Data.String
 
-import OAuth
 import GHC.Stack
 
 
