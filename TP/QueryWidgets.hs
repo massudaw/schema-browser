@@ -32,13 +32,14 @@ module TP.QueryWidgets (
     ) where
 
 import RuntimeTypes
+import Data.Semigroup hiding (diff)
 import qualified NonEmpty as Non
 import NonEmpty (NonEmpty(..))
 import Data.Bifunctor
 import Text
 import SortList
 import Data.Functor.Identity
-import Control.Monad.Writer
+import Control.Monad.Writer hiding((<>))
 import Control.Applicative.Lift
 import SchemaQuery
 import qualified Data.Binary as B
@@ -551,8 +552,8 @@ tablePKSet  tb1 = S.fromList $ concat $ fmap ( keyattr)  $ F.toList $ _kvvalues 
 
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 
-splitArray :: Int -> Int -> [a] -> [a] -> [a]
-splitArray s o m l = take o m <> l <> drop  (o + s ) m
+splitArray :: Int -> Int -> NonEmpty a -> NonEmpty a -> NonEmpty a
+splitArray s o m l = justError "can't be null" $ ( fmap Non.fromList $ nonEmpty $ Non.take o m )<> Just l <> (fmap Non.fromList $ nonEmpty $Non.drop  (o + s ) m)
 
 takeArray :: Applicative f => NonEmpty (f (Maybe b)) -> f (Maybe (NonEmpty b))
 takeArray a = join . fmap (allMaybes . Non.fromList) . nonEmpty . Non.takeWhile isJust <$> Tra.sequenceA a
@@ -565,24 +566,39 @@ indexItens
      -> NonEmpty (Tidings (Maybe (TB Identity k Showable)))
      -> Tidings (Maybe (TB Identity k Showable))
      -> Tidings (Maybe (TB Identity k Showable))
-indexItens s tb@(Attr k v) offsetT atdcomp atdi =
-            let tdcomp = fmap (fmap _tbattr) <$>  takeArray atdcomp
-                tdi = fmap  _tbattr <$> atdi
-                emptyAttr = fmap unSComposite
-                bres = (\o -> liftA2 (\l m  -> ArrayTB1 (Non.fromList $ splitArray s o (F.toList m) (F.toList l)  ))) <$> offsetT <*> tdcomp <*> (emptyAttr <$> tdi)
-            in fmap (Attr k) <$> bres
-indexItens s tb@(FKT ifk rel _) offsetT fks oldItems  = bres
-  where  bres2 = takeArray (fmap (fmap projFKT )  <$>  fks)
-         bres = (\o l lc -> liftA2 (\l lc  -> constFKT ( Non.fromList $ splitArray s o  (F.toList $ fst <$> lc)  (F.toList $ fst <$>  l),  Non.fromList $ splitArray s o (F.toList $ snd <$> lc ) (F.toList $ snd <$> l)  )) l lc <|> fmap (constFKT . Non.unzip) l  <|> join (fmap (fmap (constFKT . Non.unzip . Non.fromList)  . nonEmpty  . Non.drop o ) lc) ) <$> offsetT <*> bres2 <*> fmap (fmap (fktzip .projFKT)) oldItems
-         constFKT (ref ,tb) = FKT (mapComp (mapFAttr (const (ArrayTB1 ref ))) <$> ifk)   rel (ArrayTB1 tb )
-         projFKT (FKT i  _ j ) = (head $ fmap (unAttr.unTB) $ i,  j)
-         fktzip (ArrayTB1 lc , ArrayTB1 m) = Non.zip lc m
+indexItens s tb@(Attr k v) offsetT atdcomp atdi = fmap constrAttr  <$> bres
+  where
+    tdcomp = fmap (fmap _tbattr) <$>  takeArray atdcomp
+    tdi = fmap  _tbattr <$> atdi
+    emptyAttr = fmap unSComposite
+    constrAttr = Attr k . ArrayTB1
+    bres = attrEditor s <$> offsetT <*> tdcomp <*> (emptyAttr <$> tdi)
+indexItens s tb@(FKT ifk rel _) offsetT fks oldItems  = fmap constFKT <$> bres
+  where
+    bres2 = takeArray (fmap (fmap projFKT )  <$>  fks)
+    bres =  editor <$> offsetT <*> bres2 <*> fmap (fmap (fktzip .projFKT)) oldItems
+    editor o x y =  arrayEditor  merge  create delete x y
+      where
+        merge l lc = (splitArray s o  (fst <$> lc)  (fst <$>  l),  splitArray s o (snd <$> lc ) (snd <$> l))
+        create = Non.unzip
+        delete = fmap (Non.unzip . Non.fromList)  . nonEmpty  . Non.take o
+    constFKT (ref ,tb) = FKT (mapComp (mapFAttr (const (ArrayTB1 ref ))) <$> ifk)   rel (ArrayTB1 tb )
+    projFKT (FKT i  _ j ) = (head $ fmap (unAttr.unTB) $ i,  j)
+    fktzip (ArrayTB1 lc , ArrayTB1 m) = Non.zip lc m
+indexItens s tb@(IT na _) offsetT items oldItems  = fmap constIT <$> bres
+  where
+    bres2 = fmap (fmap _fkttable) <$> takeArray items
+    emptyIT = unSComposite . _fkttable
+    bres =  attrEditor s <$> offsetT <*> bres2 <*> (fmap emptyIT <$> oldItems)
+    constIT = IT   na . ArrayTB1
 
+attrEditor s o x y = arrayEditor merge create delete x y
+  where
+    merge = splitArray s o
+    create = id
+    delete = fmap Non.fromList  . nonEmpty .  Non.take o
 
-indexItens s tb@(IT na _) offsetT items oldItems  = bres
-   where bres2 = fmap (fmap _fkttable) <$> takeArray items
-         emptyIT = fmap (unSComposite . _fkttable)
-         bres = (\o -> liftA2 (\l m -> IT   na (ArrayTB1 $ Non.fromList $ splitArray s o (F.toList m ) (F.toList l) ))) <$> offsetT <*> bres2 <*> (emptyIT <$> oldItems)
+arrayEditor merge create del x y = liftA2 merge  x y <|> fmap create  x <|> join (fmap del y)
 
 
 dynHandler hand val ix (l,old)= do
