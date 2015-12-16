@@ -332,7 +332,7 @@ parsePrim i =  do
     -- = (string "t" >> return (ArrayTB1 $ [ SDelayed Nothing]))
 parseShowable :: KType (Prim KPrim (Text,Text)) -> Parser (FTB Showable)
 parseShowable (KArray i)
-    =  ArrayTB1  . Non.fromList<$> (par <|> doublequoted par)
+    =  join $ fromMaybe (fail "empty list") .  fmap ( return .ArrayTB1  . Non.fromList) . nonEmpty <$> (par <|> doublequoted par)
       where par = char '{'  *>  sepBy (parseShowable i) (char ',') <* char '}'
 parseShowable (KOptional i)
     = LeftTB1 <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
