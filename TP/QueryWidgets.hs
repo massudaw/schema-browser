@@ -20,12 +20,8 @@ module TP.QueryWidgets (
     offsetField,
     sorting',
     metaAllTableIndexV ,
-    dashBoardAllTable,
-    dashBoardAllTableIndex,
     validOp,
     viewer,
-    exceptionAllTable,
-    exceptionAllTableIndex,
     line,
     strAttr,
     flabel,
@@ -552,20 +548,33 @@ tablePKSet  tb1 = S.fromList $ concat $ fmap ( keyattr)  $ F.toList $ _kvvalues 
 
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 
-splitArray :: Int -> Int -> NonEmpty a -> NonEmpty a -> NonEmpty a
-splitArray s o m l = justError "can't be null" $ ( fmap Non.fromList $ nonEmpty $ Non.take o m )<> Just l <> (fmap Non.fromList $ nonEmpty $Non.drop  (o + s ) m)
+----
+-- Fields Array Editing Operations
+----
+
+splitArray
+  :: Int  -- Offset
+  -> Int  -- Inner Block Size
+  -> NonEmpty a  -- FullList
+  -> NonEmpty a  -- Inner Block
+  -> NonEmpty a
+splitArray s o m l
+  = justError "can't be null"  $ (fmap Non.fromList $ nonEmpty $ Non.take o m )<> Just l <> ta
+  where
+    ta = if Non.length l == s then  (fmap Non.fromList $ nonEmpty $Non.drop  (o + s ) m) else Nothing
 
 takeArray :: Applicative f => NonEmpty (f (Maybe b)) -> f (Maybe (NonEmpty b))
 takeArray a = join . fmap (allMaybes . Non.fromList) . nonEmpty . Non.takeWhile isJust <$> Tra.sequenceA a
 
+
 indexItens
-  :: (Ord k ,Show k) =>
-     Int
+  :: (Ord k ,Show k,Show b)
+     => Int
      -> TB Identity k a
      -> Tidings Int
-     -> NonEmpty (Tidings (Maybe (TB Identity k Showable)))
-     -> Tidings (Maybe (TB Identity k Showable))
-     -> Tidings (Maybe (TB Identity k Showable))
+     -> NonEmpty (Tidings (Maybe (TB Identity k b)))
+     -> Tidings (Maybe (TB Identity k b))
+     -> Tidings (Maybe (TB Identity k b ))
 indexItens s tb@(Attr k v) offsetT atdcomp atdi = fmap constrAttr  <$> bres
   where
     tdcomp = fmap (fmap _tbattr) <$>  takeArray atdcomp
@@ -1020,8 +1029,6 @@ metaAllTableIndexA inf metaname env =   do
       envK = fmap (("=",).liftField (meta inf) tname) env
   viewer (meta inf) modtable (Just envK)
 
-dashBoardAllTable  inf table = metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ) ]
-exceptionAllTable inf table = metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName table) ) ]
 
 
 sortFilter :: [Key] -> [(Key,Bool)] -> [(Key,(Text,Text))] -> UI Element -> UI Element -> ((Key,Maybe Bool) -> String) -> UI (TrivialWidget [(Key,Maybe Bool,Maybe (String,FTB Showable))])

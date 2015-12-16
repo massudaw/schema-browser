@@ -70,8 +70,6 @@ import OAuth
 import GHC.Stack
 
 
-
-
 main :: IO ()
 main = do
   args <- getArgs
@@ -225,13 +223,16 @@ chooserTable inf kitems i = do
   chooserDiv <- UI.div # set children  [header ,getElement nav]  # set UI.style [("display","flex"),("align-items","flex-end")]
   body <- UI.div
 
+
   el <- mapUITEvent body (\(nav,table)->
       case nav of
         "Change" -> do
-            dash <- dashBoardAllTable inf (justError "no table " $ M.lookup table (pkMap inf))
+            let tableob = (justError "no table " $ M.lookup table (pkMap inf))
+            dash <- metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName tableob) ) ]
             element body # set UI.children [dash]
         "Exception" -> do
-            dash <- exceptionAllTable inf (justError "no table " $ M.lookup table (pkMap inf))
+            let tableob = (justError "no table " $ M.lookup table (pkMap inf))
+            dash <- metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName tableob) ) ]
             element body # set UI.children [dash]
         "Nav" -> do
             span <- viewerKey inf table
