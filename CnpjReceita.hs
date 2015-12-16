@@ -3,6 +3,7 @@ module CnpjReceita where
 import Network.Wreq
 import qualified Network.Wreq.Session as Sess
 
+import qualified NonEmpty as Non
 
 import OpenSSL.Session (context)
 import Network.HTTP.Client.OpenSSL
@@ -73,7 +74,7 @@ convertHtml out =
             cna  =  attr
             idx  = LeftTB1 . fmap (TB1 . SText . TL.pack . head) . flip M.lookup out
             fk rel i  = Compose . Identity . FKT i rel
-            afk rel i  = Compose . Identity . FKT i rel . LeftTB1 . Just . ArrayTB1
+            afk rel i  = Compose . Identity . FKT i rel . LeftTB1 . Just . ArrayTB1 . Non.fromList
             tb attr = TB1 $ tbmap $ mapFromTBList  attr
             (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (TB1 . SText .TL.filter (not . flip L.elem "-.") . fst) t ,  LeftTB1 $  TB1 . SText .  TL.strip .  TL.drop 3. snd <$>  t)
                 where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)
@@ -92,7 +93,7 @@ convertHtml out =
                               ,attr "uf" (idx "UF")])
                        ,fk [Rel "atividade_principal" "=" "id"] [own "atividade_principal" (LeftTB1 $ Just (pcnae))]
                                   (LeftTB1 $ Just $ tb [cna "id" pcnae,cna "description" pdesc] )
-                       ,afk [(Rel "atividades_secundarias" "=" "id")] [own "atividades_secundarias" (LeftTB1 $ Just $ ArrayTB1 $ fmap fst scnae)]
+                       ,afk [(Rel "atividades_secundarias" "=" "id")] [own "atividades_secundarias" (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ fmap fst scnae)]
                                   ((\(pcnae,pdesc)-> tb [cna "id" pcnae,cna "description" pdesc] ) <$> scnae)]
         in Just  attrs
 

@@ -20,6 +20,8 @@
 module Types where
 
 import Data.Ord
+import qualified NonEmpty as Non
+import NonEmpty (NonEmpty(..))
 import Control.Lens.TH
 import qualified Control.Lens as Le
 import Data.Functor.Apply
@@ -239,6 +241,7 @@ deriving instance Generic (Identity a)
 
 
 instance Binary Order
+instance Binary a => Binary (NonEmpty a) where
 instance Binary a => Binary (KType a)
 instance (Binary (f (g k a)) ) => Binary (Compose f g k a )
 instance (Binary (f k a) ,Binary k ) => Binary (KV f k a)
@@ -330,7 +333,7 @@ data FTB a
   | SerialTB1 !(Maybe (FTB a))
   | IntervalTB1 !(Interval.Interval (FTB a))
   | DelayedTB1 !(Maybe (FTB a))
-  | ArrayTB1 ![(FTB a)]
+  | ArrayTB1 ! (NonEmpty (FTB a))
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable,Generic)
 
 instance Applicative FTB where
@@ -381,7 +384,7 @@ data KType a
    | KOptional (KType a)
    | KDelayed (KType a)
    | KTable [KType a]
-   deriving(Eq,Ord,Functor,Generic)
+   deriving(Eq,Ord,Functor,Generic,Foldable)
 
 instance Show (KType KPrim ) where
   show =  showTy show
@@ -790,7 +793,7 @@ kattri (Attr _ i ) = [i]
 kattri (FKT i  _ _ ) =  (L.concat $ kattr  <$> i)
 kattri (IT _  i ) =  recTB i
   where recTB (TB1 (m, i) ) =  L.concat $ fmap kattr (F.toList $ _kvvalues $ runIdentity $ getCompose i)
-        recTB (ArrayTB1 i ) = L.concat $ fmap recTB i
+        recTB (ArrayTB1 i ) = L.concat $ F.toList $ fmap recTB i
         recTB (LeftTB1 i ) = L.concat $ F.toList $ fmap recTB i
 
 aattr = aattri . runIdentity . getCompose
@@ -856,7 +859,7 @@ isInline (KArray i ) = isInline i
 isInline (Primitive (RecordPrim _ ) ) = True
 isInline _ = False
 
-unTB1 i = fromMaybe (errorWithStackTrace (show ("unTB1",i))) . headMay . F.toList $ i
+unTB1 i = fromMaybe (errorWithStackTrace ("unTB1" <> show i)) . headMay . F.toList $ i
 
 -- Intersections and relations
 
@@ -875,7 +878,7 @@ intersectPred p@(KInterval j) "=" (KInterval i) (IntervalTB1 k)  (IntervalTB1 l)
 intersectPred p@(KArray j) "<@" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  Set.fromList (F.toList k) `Set.isSubsetOf` Set.fromList  (F.toList l)
 intersectPred p@(KArray j) "@>" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  Set.fromList (F.toList l) `Set.isSubsetOf` Set.fromList  (F.toList k)
 intersectPred p@(KArray j) "=" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  k == l
-intersectPred p@(Primitive _) op (KArray i) j (ArrayTB1 l )  | p == i =  elem j l
+intersectPred p@(Primitive _) op (KArray i) j (ArrayTB1 l )  | p == i =  Non.elem j l
 intersectPred p1@(Primitive _) op  p2@(Primitive _) j l   | p1 == p2 =  case op of
                                                                              "=" -> j ==  l
                                                                              "<" -> j < l
@@ -915,14 +918,14 @@ unIndexItens ::  Int -> Int -> Maybe (TB Identity  Key Showable) -> Maybe (TB Id
 unIndexItens ix o =  join . fmap (unIndex (ix+ o) )
 
 unIndex :: Show a => Int -> TB Identity Key a -> Maybe (TB Identity Key a )
-unIndex o (Attr k (ArrayTB1 v)) = Attr (unKArray k) <$> atMay v o
+unIndex o (Attr k (ArrayTB1 v)) = Attr (unKArray k) <$> Non.atMay v o
 unIndex o (IT na (ArrayTB1 j))
-  =  IT  na <$>  atMay j o
-unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> fmap (mapComp (firstTB unKArray) )li) (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi ) <$> (maybe (Just []) (Just .pure ) (join (traComp (traFAttr (indexArray o))  <$> l))) <*> (atMay m o)
+  =  IT  na <$>  Non.atMay j o
+unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> fmap (mapComp (firstTB unKArray) )li) (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi ) <$> (maybe (Just []) (Just .pure ) (join (traComp (traFAttr (indexArray o))  <$> l))) <*> (Non.atMay m o)
   where
     l = L.find (all (isArray.keyType) . fmap _relOrigin . keyattr)  els
     nonl = L.filter (not .all (isArray.keyType) . fmap _relOrigin . keyattr) els
-    indexArray ix s =  atMay (unArray s) ix
+    indexArray ix s =  Non.atMay (unArray s) ix
 unIndex o i = errorWithStackTrace (show (o,i))
 
 unLeftKey :: (Ord b,Show b) => TB Identity Key b -> TB Identity Key b
@@ -966,8 +969,9 @@ leftItens tb@(FKT ilk rel _) = Just . maybe  emptyFKT attrOptional
   where emptyFKT = FKT (mapComp (mapFAttr (const (LeftTB1 Nothing))) <$> ilk) rel (LeftTB1 Nothing)
 
 
+attrArray :: TB Identity Key b -> NonEmpty (TB Identity Key Showable) -> TB Identity Key Showable
 attrArray back@(Attr  k _) oldItems  = (\tb -> Attr k (ArrayTB1 tb)) $ (\(Attr _ v) -> v) <$> oldItems
-attrArray back@(FKT _ _ _) oldItems  = (\(lc,tb) ->  FKT [Compose $ Identity $ Attr (kArray $ _relOrigin $  head $ keyattr (head lc )) (ArrayTB1 $ concat  $  kattr  <$> lc)] (_fkrelation back) (ArrayTB1 tb  ) )  $ unzip $ (\(FKT [lc] rel tb ) -> (lc , tb)) <$> oldItems
+attrArray back@(FKT _ _ _) oldItems  = (\(lc,tb) ->  FKT [Compose $ Identity $ Attr (kArray $ _relOrigin $  head $ keyattr (Non.head lc )) (ArrayTB1 $ head .  kattr  <$> lc)] (_fkrelation back) (ArrayTB1 tb  ) )  $ Non.unzip $ (\(FKT [lc] rel tb ) -> (lc , tb)) <$> oldItems
 attrArray back@(IT _ _) oldItems  = (\tb ->  IT  (_ittableName back) (ArrayTB1 tb  ) )  $ (\(IT _ tb ) -> tb) <$> oldItems
 
 
@@ -992,7 +996,7 @@ unKArray (Key a v c d m n e) = Key a  v c d  m n e
 
 tableKeys (TB1  (_,k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
 tableKeys (LeftTB1 (Just i)) = tableKeys i
-tableKeys (ArrayTB1 [i]) = tableKeys i
+tableKeys (ArrayTB1 (i :| _) ) = tableKeys i
 
 recOverAttr :: Ord k => [Set(Rel k)] -> TB Identity k a -> (Map (Set (Rel k )) (Compose Identity (TB Identity) k a ) -> Map (Set (Rel k )) (Compose Identity (TB Identity) k a ))
 recOverAttr (k:[]) attr = Map.insert k (_tb attr )
@@ -1030,7 +1034,7 @@ tbUn un (TB1 (kv,item)) =  (\kv ->  mapComp (\(KV item)->  KV $ Map.filterWithKe
 
 
 getPK (TB1 i) = getPKM i
-getPKM (m, k) = L.sortBy (comparing fst) $ concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (unTB k))))
+getPKM (m, k) = L.sortBy (comparing fst) $ concat $ F.toList (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (unTB k))))
 
 getAttr'  (TB1 (m, k)) = L.sortBy (comparing fst) $ (concat (fmap aattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 

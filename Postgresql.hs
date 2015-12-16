@@ -3,7 +3,10 @@ module Postgresql where
 
 import Types
 import Data.Ord
+import Data.Either
 import Control.Monad
+import qualified NonEmpty as Non
+import NonEmpty (NonEmpty (..))
 import Query
 import GHC.Stack
 import Debug.Trace
@@ -61,24 +64,28 @@ import Blaze.ByteString.Builder.Char8(fromChar)
 -- Wrap new instances without quotes delimiting primitive values
 newtype UnQuoted a = UnQuoted {unQuoted :: a}
 
-instance (Show a,TF.ToField a , TF.ToField (UnQuoted (a))) => TF.ToField (FTB a) where
+instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Text,a)) where
   toField (LeftTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
   toField (SerialTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
   toField (DelayedTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
-  toField (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   is
-  toField (IntervalTB1 is ) = TF.toField  $ fmap (\(TB1 i ) -> i) is
-  toField (TB1 i) = TF.toField i
+  toField (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   (F.toList is)
+  toField (IntervalTB1 is )
+    | ty == "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $T.unpack $ ty), TF.Plain $ fromByteString "range"]
+    | otherwise  = TF.toField  (tyv)
+    where tyv = fmap (\(TB1 i ) -> snd i) is
+          ty = (\(Interval.Finite i) -> i) $ Interval.lowerBound $ fmap (\(TB1 i ) -> fst i) is
+  toField (TB1 (t,i)) = TF.toField i
   -- toField i = errorWithStackTrace (show i)
 
 
 instance  TF.ToField (TB Identity Key Showable)  where
   toField (Attr k  i) = case  topconversion (textToPrim <$> keyType k) of
-          Just (_,b) -> TF.toField (b i)
-          Nothing -> TF.toField i
+          Just (_,b) -> TF.toField (fmap ( snd $ (\(AtomicPrim i ) -> i)$head $ F.toList $ keyType k,) $ b i)
+          Nothing -> TF.toField (fmap (snd $ (\(AtomicPrim i ) -> i) $ head $ F.toList $ keyType k,) i)
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
   toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (keyPosition . inattr ) ) $ maybe id (flip mappend) attrs $ (runIdentity.getCompose <$> F.toList (_kvvalues $ unTB i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
-  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ (TF.toField . IT n) <$> is
+  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
   toField e = errorWithStackTrace (show e)
 
 
@@ -201,8 +208,8 @@ tryquoted i = doublequoted i <|> i
 -- Note Because the list has a mempty operation when parsing
 -- we have overlap between maybe and list so we allow only nonempty lists
 parseLabeledTable :: TB2 Key () -> Parser (TB2 Key Showable)
-parseLabeledTable (ArrayTB1 [t]) =
-  ArrayTB1 <$> (parseArray (doublequoted $ parseLabeledTable t) <|> parseArray (parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey kOptional t))  >>  return (fail "")  ) )
+parseLabeledTable (ArrayTB1 (t :| _)) =
+  ArrayTB1 . Non.fromList <$> (parseArray (doublequoted $ parseLabeledTable t) <|> parseArray (parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey kOptional t))  >>  return (fail "")  ) )
 parseLabeledTable (DelayedTB1 (Just tb) ) =  string "t" >>  return (DelayedTB1  Nothing) -- <$> parseLabeledTable tb
 parseLabeledTable (LeftTB1 (Just i )) =
   LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapTable (LeftTB1 . Just) <$>  mapKey kOptional i) >> return Nothing) <|> return Nothing )
@@ -324,7 +331,7 @@ parsePrim i =  do
     -- = (string "t" >> return (ArrayTB1 $ [ SDelayed Nothing]))
 parseShowable :: KType (Prim KPrim (Text,Text)) -> Parser (FTB Showable)
 parseShowable (KArray i)
-    =  ArrayTB1  <$> (par <|> doublequoted par)
+    =  ArrayTB1  . Non.fromList<$> (par <|> doublequoted par)
       where par = char '{'  *>  sepBy (parseShowable i) (char ',') <* char '}'
 parseShowable (KOptional i)
     = LeftTB1 <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )

@@ -24,6 +24,8 @@ module Patch
 -- import Warshal
 import Types
 import Control.Monad.Reader
+import Data.Semigroup hiding (diff)
+import qualified NonEmpty as Non
 import Data.Bifunctor
 import Data.Maybe
 import GHC.Generics
@@ -37,7 +39,7 @@ import Data.Foldable (Foldable)
 import qualified Data.Foldable as F
 import qualified Data.Interval as Interval
 import Data.Interval (interval,lowerBound',upperBound')
-import Data.Monoid hiding (Product)
+import Data.Monoid hiding ((<>),Product)
 
 import GHC.Stack
 import Debug.Trace
@@ -317,9 +319,9 @@ diffPrim i j
 
 -- FTB
 
-patchFTB :: (a -> Index a) -> FTB a -> PathFTB   (Index a)
+patchFTB :: Show a => (a -> Index a) -> FTB a -> PathFTB   (Index a)
 patchFTB p (LeftTB1 j )  = POpt (patchFTB p <$> j)
-patchFTB p (ArrayTB1 j )  = justError "empty array in arraytb1 patchftb" $  patchSet   $ zipWith (\i m ->  PIdx i  (Just m) ) [0..]  (F.toList $ patchFTB p <$> j)
+patchFTB p (ArrayTB1 j )  = justError ("empty array in arraytb1 patchftb" <> show j)$  patchSet   $ zipWith (\i m ->  PIdx i  (Just m) ) [0..]  (F.toList $ patchFTB p <$> j)
 patchFTB p (DelayedTB1 j ) = PDelayed (patchFTB p <$> j)
 patchFTB p (SerialTB1 j ) = PSerial (patchFTB p <$> j)
 patchFTB p (IntervalTB1 j ) =  PatchSet [PInter True (first (patchFTB p . unFinite ) $  Interval.lowerBound' j) , PInter False (first (patchFTB p . unFinite ) $ Interval.upperBound' j)]
@@ -336,7 +338,7 @@ diffOpt p d i j
 diffFTB :: (Ord a,Show a) => (a -> Index a) -> (a -> a -> Maybe (Index a) ) ->  FTB a -> FTB a -> Maybe (PathFTB (Index a))
 diffFTB p d (LeftTB1 i) (LeftTB1 j) = POpt <$> diffOpt p d i j
 diffFTB p d (ArrayTB1 i) (ArrayTB1 j) =
-    patchSet $  catMaybes $ zipWith (\i -> fmap (PIdx  i)  ) ( [0..]) (F.toList $ (zipWith (\i j ->fmap Just $ diffFTB p d i j ) i j)  <> (const (Just  Nothing) <$> drop (length j  ) i ) <> (Just . Just . patchFTB p <$> drop (length i  ) j ))
+    patchSet $  catMaybes $ zipWith (\i -> fmap (PIdx  i)  ) ( [0..]) (F.toList  (Non.zipWith (\i j ->fmap Just $ diffFTB p d i j ) i j)  <> (const (Just  Nothing) <$> Non.drop (Non.length j  ) i ) <> (Just . Just . patchFTB p <$> Non.drop (Non.length i  ) j ))
 diffFTB p d (SerialTB1 i) (SerialTB1 j) = fmap PSerial $ diffOpt p d i j
 diffFTB p d (DelayedTB1 i) (DelayedTB1 j) = fmap PDelayed $ diffOpt p d i j
 diffFTB p d (IntervalTB1 i) (IntervalTB1 j)
@@ -376,12 +378,12 @@ applyFTBM
   (t -> m a) -> (a -> t -> m a) -> FTB a -> PathFTB t -> m (FTB a)
 applyFTBM pr a (LeftTB1 i ) op@(POpt o) = LeftTB1 <$>  applyOptM pr a i o
 applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
-                      Nothing -> pure $ ArrayTB1 $ take ix   i
-                      Just p -> if ix <=  length i - 1
-                                then fmap ArrayTB1 $ sequenceA $ imap (\i v -> if i == ix then applyFTBM pr a v p else pure v )  i
-                                else if ix == length i
-                                      then fmap ArrayTB1 $ sequenceA $ fmap pure i <> [createFTBM pr p]
-                                      else errorWithStackTrace $ "ix bigger than next elem" <> show (ix, length i)
+                      Nothing -> pure $ ArrayTB1 $ Non.fromList $ Non.take ix   i
+                      Just p -> if ix <=  Non.length i - 1
+                                then fmap ArrayTB1 $ sequenceA $ Non.imap (\i v -> if i == ix then applyFTBM pr a v p else pure v )  i
+                                else if ix == Non.length i
+                                      then fmap ArrayTB1 $ sequenceA $ fmap pure i <> pure (createFTBM pr p)
+                                      else errorWithStackTrace $ "ix bigger than next elem" <> show (ix, Non.length i)
 
 applyFTBM pr a (SerialTB1 i ) (PSerial o) = SerialTB1 <$>  applyOptM pr a i o
 applyFTBM pr a (DelayedTB1 i ) (PDelayed o) = DelayedTB1 <$>  applyOptM pr a i o
@@ -399,12 +401,12 @@ applyFTB
   (t -> a) -> (a -> t -> a) -> FTB a -> PathFTB t -> FTB a
 applyFTB pr a (LeftTB1 i ) op@(POpt o) = LeftTB1 $ applyOpt pr a i o
 applyFTB pr a (ArrayTB1 i ) (PIdx ix o) = case o of
-                      Nothing -> ArrayTB1 $ take ix   i
-                      Just p -> if ix <=  length i - 1
-                                then ArrayTB1 $ imap (\i v -> if i == ix then applyFTB pr a v p else v )  i
-                                else if ix == length i
-                                      then ArrayTB1 $ i <> [createFTB pr p]
-                                      else errorWithStackTrace $ "ix bigger than next elem" <> show (ix, length i)
+                      Nothing -> ArrayTB1 $ Non.fromList $ Non.take ix   i
+                      Just p -> if ix <=  Non.length i - 1
+                                then ArrayTB1 $ Non.imap (\i v -> if i == ix then applyFTB pr a v p else v )  i
+                                else if ix == Non.length i
+                                      then ArrayTB1 $ i <> pure (createFTB pr p)
+                                      else errorWithStackTrace $ "ix bigger than next elem" <> show (ix, Non.length i)
 applyFTB pr a (SerialTB1 i ) (PSerial o) = SerialTB1 $  applyOpt pr a i o
 applyFTB pr a (DelayedTB1 i ) (PDelayed o) = DelayedTB1 $  applyOpt pr a i o
 applyFTB pr a (IntervalTB1 i) (PInter b (p,l))
@@ -439,7 +441,7 @@ instance (Ord a )=> Monoid (FTB a) where
  mempty = LeftTB1 Nothing
  mappend (LeftTB1 i) (LeftTB1 j) = LeftTB1 (j)
  mappend (IntervalTB1 i) (IntervalTB1 j) = IntervalTB1 ( i `Interval.intersection` j)
- mappend (ArrayTB1 i) (ArrayTB1 j) = ArrayTB1 (i <> j)
+ mappend (ArrayTB1 i) (ArrayTB1 j) = ArrayTB1 (i <>  j)
  mappend (DelayedTB1 i) (DelayedTB1 j) = DelayedTB1 (j)
  mappend (SerialTB1 i) (SerialTB1 j) = SerialTB1 (j)
  mappend (TB1 i) (TB1 j) = TB1 j

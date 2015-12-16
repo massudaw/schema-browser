@@ -1,6 +1,7 @@
 module Text where
 
 import Types
+import qualified NonEmpty as Non
 import Data.Ord
 import Control.Monad
 import Utils
@@ -82,7 +83,7 @@ readType t = case t of
   where
       opt c f "" =  Just $ c Nothing
       opt c f i = fmap (c .Just) $ f i
-      parseArray f i =   fmap ArrayTB1 $  allMaybes $ fmap f $ unIntercalate (=='\n') i
+      parseArray f i =   fmap ArrayTB1 $  allMaybes $ fmap f $ Non.fromList $ unIntercalate (=='\n') i
       -- inter f = (\(i,j)-> IntervalTB1 $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
 
 readPrim t =
@@ -95,7 +96,7 @@ readPrim t =
      PTimestamp zone -> readTimestamp
      PInterval -> readInterval
      PDate-> readDate
-     PDayTime -> readDayTime
+     PDayTime -> \t -> readDayTime t <|> readDayTimeMin t <|> readDayTimeHour t
      PPosition -> readPosition
      PBoolean -> readBoolean
      PLineString -> readLineString
@@ -110,6 +111,8 @@ readPrim t =
       readCpf = traceShowId . nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cpfValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
       readDate =  fmap (SDate . localDay . fst) . strptime "%Y-%m-%d"
       readDayTime =  fmap (SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS"
+      readDayTimeMin =  fmap (SDayTime . localTimeOfDay . fst) . strptime "%H:%M"
+      readDayTimeHour =  fmap (SDayTime . localTimeOfDay . fst) . strptime "%H"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
       readLineString = nonEmpty (fmap SLineString . readMaybe)
       readTimestamp =  fmap (STimestamp  .  fst) . strptime "%Y-%m-%d %H:%M:%OS"

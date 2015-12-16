@@ -14,6 +14,7 @@
 
 module Main (main) where
 
+import NonEmpty (NonEmpty(..))
 import Query
 import Text
 import Poller
@@ -74,24 +75,6 @@ import GHC.Stack
 main :: IO ()
 main = do
   args <- getArgs
-  --let schema = "public"
-  --conn <- connectPostgreSQL "user=postgres password=queijo dbname=usda"
-  {-
-  let sorted = topSortTables (M.elems baseTables)
-
-  print "DROPPING TABLES"
-  traverse (\t -> do
-    execute_ connTest . fromString . T.unpack . dropTable $ t
-    print $ tableName t
-    )  $ reverse  sorted
-
-  print "CREATING TABLES"
-  traverse (\t -> do
-    execute_  connTest . fromString . T.unpack . createTable $ t
-    print $ tableName t
-    )  sorted
-  -}
-
   smvar <- newMVar M.empty
   plugs smvar (argsToState $ tail args)  plugList
   poller smvar (argsToState $ tail args)  plugList False
@@ -333,4 +316,4 @@ tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
 
 tableAttrs (TB1  (_,k)) = concat $ fmap aattr (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
 tableAttrs (LeftTB1 (Just i)) = tableAttrs i
-tableAttrs (ArrayTB1 [i]) = tableAttrs i
+tableAttrs (ArrayTB1 (i:| _)) = tableAttrs i

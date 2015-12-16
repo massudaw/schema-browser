@@ -100,6 +100,7 @@ data Compose2 f g a b = Compose2 { getCompose2 ::  f (g a b)}
 firstComp :: Functor t => (f a c -> g b c) ->  Compose2 t f a c -> Compose2 t g b c
 firstComp f =  Compose2 . fmap  f . getCompose2
 
+allMaybes :: (Functor f,F.Foldable f) => f (Maybe a) -> Maybe (f a)
 allMaybes i | F.all (const False) i  = Nothing
 allMaybes i = if F.all isJust i
         then Just $ fmap (justError "wrong invariant allMaybes") i

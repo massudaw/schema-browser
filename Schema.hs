@@ -4,6 +4,7 @@
 module Schema where
 
 import Types
+import qualified NonEmpty as Non
 import Control.Monad.Writer
 import Debug.Trace
 import Prelude hiding (head)
@@ -407,7 +408,7 @@ atTable k = do
 joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  [TBData Key Showable] -> TransactionM ( FTB (TBData Key Showable))
 joinRelT rel ref tb table
   | L.all (isOptional .keyType) origin = fmap LeftTB1 $ traverse (\ref->  joinRelT (Le.over relOrigin unKOptional <$> rel ) ref  tb table) (traverse unLeftItens ref )
-  | L.any (isArray.keyType) origin = fmap ArrayTB1 $ traverse (\ref -> joinRelT (Le.over relOrigin unKArray <$> rel ) ref  tb table ) (fmap (\i -> pure $ justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(L.length (unArray $ unAttr $ head ref) - 1)])
+  | L.any (isArray.keyType) origin = fmap (ArrayTB1 .Non.fromList)$ traverse (\ref -> joinRelT (Le.over relOrigin unKArray <$> rel ) ref  tb table ) (fmap (\i -> pure $ justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(Non.length (unArray $ unAttr $ head ref) - 1)])
   | otherwise = maybe (tell (TableModification Nothing tb . patch <$> F.toList tbcreate) >> return tbcreate ) (return .TB1) tbel
       where origin = fmap _relOrigin rel
             tbcreate = TB1 $ tblist' tb (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )
@@ -418,7 +419,7 @@ joinRelT rel ref tb table
 joinRel :: (Ord a ,Show a) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> [TBData Key a] -> FTB (TBData Key a)
 joinRel tb rel ref table
   | L.all (isOptional .keyType) origin = LeftTB1 $ fmap (flip (joinRel tb (Le.over relOrigin unKOptional <$> rel ) ) table) (traverse unLeftItens ref )
-  | L.any (isArray.keyType) origin = ArrayTB1 $ fmap (flip (joinRel tb (Le.over relOrigin unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(L.length (unArray $ unAttr $ head ref) - 1)])
+  | L.any (isArray.keyType) origin = ArrayTB1 $ Non.fromList $  fmap (flip (joinRel tb (Le.over relOrigin unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(Non.length (unArray $ unAttr $ head ref) - 1)])
   | otherwise = maybe (TB1 $ tblistM tb (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )) TB1 tbel
       where origin = fmap _relOrigin rel
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel

@@ -12,6 +12,7 @@
 
 module Plugins (plugList) where
 
+import qualified NonEmpty as Non
 import Location
 import PrefeituraSNFSE
 import Text
@@ -96,7 +97,7 @@ siapi2Hack = BoundedPlugin2  pname tname url
             where map = fmap (LeftTB1 . Just . TB1 . SText . T.pack ) <$> bv
           iat bv = _tb  (IT
                             (attrT ("andamentos",TB1 ()))
-                            (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
+                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $  fmap convertAndamento bv))
       returnA -< join  (  ao    <$> join (fmap (uncurry (liftA2 (,))) b))
 
 
@@ -121,7 +122,7 @@ siapi2Plugin = BoundedPlugin2  pname tname url
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
                             (attrT ("andamentos",TB1 ()))
-                            (LeftTB1 $ Just $ ArrayTB1 $ reverse $  fmap convertAndamento bv))
+                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $  reverse $  fmap convertAndamento bv))
       returnA -< join  (  ao  .  tailEmpty . concat <$> join (fmap snd b))
     tailEmpty [] = []
     tailEmpty i  = tail i
@@ -292,7 +293,7 @@ siapi3Plugin  = BoundedPlugin2 pname tname  url
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
       let ao  (bv,taxa) =  Just $ tblist  ( [attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
           iat bv = Compose . Identity $ (IT (attrT ("andamentos",TB1 ()))
-                         (LeftTB1 $ Just $ ArrayTB1 $ reverse $ fmap convertAndamento bv))
+                         (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv))
       returnA -< join (ao <$> b)
 
 bool = TB1 . SBoolean
@@ -367,7 +368,7 @@ pagamentoArr =  itR "pagamento" (proc descontado -> do
                   odxR "price" -<  ()
                   odxR "scheduled_date" -<  ()
                   let total = maybe 0 fromIntegral  p :: Int
-                  let pagamento = _tb $ FKT ([attrT  ("pagamentos",LeftTB1 (Just $ ArrayTB1  (replicate total (num $ -1) )) )]) [Rel "pagamentos" "=" "id"] (LeftTB1 $ Just $ ArrayTB1 ( fmap (\ix -> TB1 $ tblist [attrT ("id",SerialTB1 Nothing),attrT ("description",LeftTB1 $ Just $ TB1 $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",LeftTB1 valorParcela), attrT ("scheduled_date",LeftTB1 pinicio) ]) ([1 .. total])))
+                  let pagamento = _tb $ FKT ([attrT  ("pagamentos",LeftTB1 (Just $ ArrayTB1  $ Non.fromList (replicate total (num $ -1) )) )]) [Rel "pagamentos" "=" "id"] (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList ( fmap (\ix -> TB1 $ tblist [attrT ("id",SerialTB1 Nothing),attrT ("description",LeftTB1 $ Just $ TB1 $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",LeftTB1 valorParcela), attrT ("scheduled_date",LeftTB1 pinicio) ]) ([1 .. total])))
                   returnA -<  pagamento ) -< (valorParcela,pinicio,p)
               returnA -<  TB1 $ tblist [pg ] )
 
@@ -434,7 +435,7 @@ encodeMessage = PurePlugin "Encode Email" tname url
                 where
                       tb n  =  TB1 . tblist . pure . _tb . Attr n $ (LeftTB1 $  v)
                       deltb n  =  TB1 . tblist . pure . _tb . Attr n $ (LeftTB1 $ Just $ DelayedTB1 $    v)
-                      tbmix l = TB1 . tblist . pure . _tb . IT (attrT  ("mixed",TB1 ()) ) . LeftTB1 $ ArrayTB1 <$>  (ifNull l )
+                      tbmix l = TB1 . tblist . pure . _tb . IT (attrT  ("mixed",TB1 ()) ) . LeftTB1 $ ArrayTB1 . Non.fromList <$>  (ifNull l )
           returnA -<  (maybe Nothing (flip mimeTable part )  $ (\(i,j) -> fmap (,j) i) enc)
     mixed =  nameO 1 (proc t ->  do
                 liftA3 (,,)
@@ -494,9 +495,9 @@ importarofx = BoundedPlugin2 "OFX Import" tname  url
 
       b <- act (fmap join . traverse ofx ) -< liftA3 (,,) fn i r
       let ao :: TB2 Text Showable
-          ao =  LeftTB1 $ ArrayTB1 . fmap (TB1 . tblist . fmap attrT ) <$>  b
+          ao =  LeftTB1 $ ArrayTB1 . Non.fromList . fmap (TB1 . tblist . fmap attrT ) <$>  b
           ref :: [Compose Identity (TB Identity ) Text(Showable)]
-          ref = [attrT  ("statements",LeftTB1 $ join $ fmap (ArrayTB1 ).   allMaybes . fmap (join . fmap unSSerial . M.lookup "fitid" . M.fromList ) <$> b)]
+          ref = [attrT  ("statements",LeftTB1 $ join $ fmap (ArrayTB1 .  Non.fromList  ).   allMaybes . fmap (join . fmap unSSerial . M.lookup "fitid" . M.fromList ) <$> b)]
           tbst :: (Maybe (TBData Text (Showable)))
           tbst = Just $ tblist [_tb $ FKT ref [Rel "statements" "=" "fitid",Rel "account" "=" "account"] ao]
       returnA -< tbst

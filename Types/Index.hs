@@ -15,6 +15,7 @@ module Types.Index
 import Types
 import Utils
 import Data.Time
+import qualified NonEmpty as Non
 import Data.Maybe
 import Data.Ord
 import Data.Char
@@ -42,8 +43,8 @@ projUn u v = justError ("cant be optional" <> show (u,getUn u v))  . (traverse (
 
 instance Predicates TBIndex (TBData Key Showable) where
   type (Penalty (TBData Key Showable) ) = Penalty [FTB Showable]
-  consistent (Idex i j) (NodeEntry (_,Idex l m  )) = consistent (SPred $ fmap snd $ projUn i  $ j  ) (NodeEntry (undefined,SPred $ fmap snd $ projUn l $ m))
-  consistent (Idex i j) (LeafEntry (_,Idex l m  )) = consistent (SPred $ fmap snd $ projUn i  $ j  ) (LeafEntry (undefined,SPred $ fmap snd $ projUn l $ m))
+  consistent (Idex i j) (NodeEntry (_,Idex l m )) = consistent (SPred $ fmap snd $ projUn i  $ j  ) (NodeEntry (undefined,SPred $ fmap snd $ projUn l $ m))
+  consistent (Idex i j) (LeafEntry (_,Idex l m )) = consistent (SPred $ fmap snd $ projUn i  $ j  ) (LeafEntry (undefined,SPred $ fmap snd $ projUn l $ m))
   union l  = Idex i (tblist $ fmap (_tb . uncurry Attr) $  zipWith (,) kf projL)
     where Idex i v = head l
           proj a = projUn i a
@@ -64,6 +65,12 @@ instance  Predicates Predicate [FTB Showable] where
   union l = SPred $ fmap (\i -> (\(SPred i) -> i) $ union i )$ L.transpose $ fmap (\(SPred i) -> fmap SPred i ) l
   penalty (SPred p1) (SPred p2) = zipWith penalty (fmap SPred p1 ) (fmap SPred p2)
   pickSplit = pickSplitG
+
+data DiffFTB a
+  = DiffInterval DiffShowable
+  | DiffArray [DiffShowable]
+  deriving(Eq,Ord,Show)
+
 
 data DiffShowable
   = DSText [Int]
@@ -103,14 +110,14 @@ instance Predicates Predicate (FTB Showable) where
   consistent (SPred (IntervalTB1 i) ) (LeafEntry (_,SPred j@(TB1 _) )) = j `Interval.member` i
   consistent (SPred (ArrayTB1 i) ) (NodeEntry (_,SPred (ArrayTB1 j)  )) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
   consistent (SPred (ArrayTB1 i) ) (LeafEntry (_,SPred (ArrayTB1 j)  )) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-  consistent (SPred (ArrayTB1 i) ) (NodeEntry (_,SPred j  )) = all (\i -> consistent   ( SPred i) (NodeEntry (undefined,SPred j))) i
-  consistent (SPred (ArrayTB1 i) ) (LeafEntry (_,SPred j@(TB1 _)  )) = elem  j i
-  consistent (SPred i@(TB1 _) ) (LeafEntry (_,SPred (ArrayTB1 j)  )) = elem  i j
+  consistent (SPred (ArrayTB1 i) ) (NodeEntry (_,SPred j  )) = F.all (\i -> consistent   ( SPred i) (NodeEntry (undefined,SPred j))) i
+  consistent (SPred (ArrayTB1 i) ) (LeafEntry (_,SPred j@(TB1 _)  )) = F.elem  j i
+  consistent (SPred i@(TB1 _) ) (LeafEntry (_,SPred (ArrayTB1 j)  )) = F.elem  i j
   consistent (SPred (LeftTB1 i) ) (LeafEntry (_,SPred j  )) = maybe False (\i -> consistent (SPred i ) (LeafEntry (undefined,SPred j))) i
   consistent (SPred (SerialTB1 i) ) (LeafEntry (_,SPred j  )) = maybe False (\i -> consistent (SPred i ) (LeafEntry (undefined,SPred j))) i
   consistent (SPred j ) (LeafEntry (_,SPred (LeftTB1 i)  )) = maybe False (\i -> consistent (SPred i ) (LeafEntry (undefined,SPred j))) i
   consistent (SPred j ) (LeafEntry (_,SPred (SerialTB1 i)  )) = maybe False (\i -> consistent (SPred i ) (LeafEntry (undefined,SPred j))) i
-  consistent (SPred i@(TB1 _ ) ) (NodeEntry (_,SPred (ArrayTB1 j))) = elem  i j
+  consistent (SPred i@(TB1 _ ) ) (NodeEntry (_,SPred (ArrayTB1 j))) = F.elem  i j
   consistent (SPred (TB1 i) ) (LeafEntry (_,SPred (TB1 j) )) = i == j
   consistent (SPred (TB1 i) ) (NodeEntry (_,SPred (TB1 j) )) = i == j
   consistent i (NodeEntry (_,j))  = errorWithStackTrace (show ("Node",i,j))
@@ -146,12 +153,12 @@ unFin o = errorWithStackTrace (show o)
 
 minP (SPred (IntervalTB1 i) ) = lowerBound' i
 minP (SPred i@(TB1 _) ) = (ER.Finite $ i,True)
-minP (SPred (ArrayTB1 i) ) = (ER.Finite $  L.minimum i,True)
+minP (SPred (ArrayTB1 i) ) = minP$   SPred $ F.minimum i
 minP i = errorWithStackTrace (show i)
 
 maxP (SPred (IntervalTB1 i) ) = upperBound' i
 maxP (SPred i@(TB1 _) ) = (ER.Finite $ i,True)
-maxP (SPred (ArrayTB1 i) ) = (ER.Finite $  L.maximum i,True)
+maxP (SPred (ArrayTB1 i) ) =   maxP $ SPred $ F.maximum i
 maxP i = errorWithStackTrace (show i)
 
 

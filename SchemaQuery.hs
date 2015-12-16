@@ -11,6 +11,7 @@ module SchemaQuery
 
 import RuntimeTypes
 import Data.Ord
+import qualified NonEmpty as Non
 import Data.Functor.Identity
 import Control.Monad.Writer
 import Control.Concurrent
@@ -174,7 +175,7 @@ tbInsertEdit inf  f@(FKT pk rel2  t2) =
         LeftTB1 i ->
            maybe (return (Identity f) ) (fmap (fmap attrOptional) . tbInsertEdit inf) (unLeftItens f)
         ArrayTB1 l ->
-           fmap (fmap (attrArray f)) $ fmap Tra.sequenceA $ Tra.traverse (\ix ->   tbInsertEdit inf $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. length l - 1 ]
+           fmap (fmap (attrArray f .Non.fromList)) $ fmap Tra.sequenceA $ Tra.traverse (\ix ->   tbInsertEdit inf $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. Non.length l - 1 ]
 
 loadFKS inf table = do
   let

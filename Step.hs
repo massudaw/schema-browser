@@ -18,6 +18,7 @@ import Data.String
 import qualified Data.List as L
 
 
+import qualified NonEmpty as Non
 import GHC.Stack
 import Control.Arrow
 import Control.Category (Category(..),id)
@@ -85,7 +86,7 @@ atMA
      String
      -> Parser (Kleisli m) (Access Text) t t1
      -> Parser (Kleisli m) (Access Text) t [t1]
-atMA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> unTB1 <$> l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
+atMA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> unTB1 <$> toList l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
   where ind = splitIndex False i
 
 
@@ -95,7 +96,7 @@ atRA
      String
      -> Parser (Kleisli m) (Access Text) t t1
      -> Parser (Kleisli m) (Access Text) t [t1]
-atRA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> unTB1 <$> l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
+atRA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> unTB1 <$> toList l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
   where ind = splitIndex True i
 
 unLeftTB1 = join . fmap (\v -> case v of
@@ -209,7 +210,6 @@ checkField'  p@(IProd b l) i
 checkField' i j = errorWithStackTrace (show (i,j))
 
 checkFTB l (ArrayTB1 i )
-  | i == []  = failure [l]
   | otherwise =   ArrayTB1 <$> traverse (checkFTB  l) i
 
 checkFTB l (LeftTB1 j) = LeftTB1 <$> traverse (checkFTB  l) j
@@ -235,7 +235,7 @@ checkTable l b = eitherToMaybe $ runErrors (checkTable' l b)
 -- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
 --
 indexFTB l (LeftTB1 j) = join $ fmap (indexFTB l) j
-indexFTB l (ArrayTB1 j) =  liftA2 (,) ((head <$> fmap (fmap fst) i) ) ( (\i -> ArrayTB1   i ) <$> fmap (fmap snd) i)
+indexFTB l (ArrayTB1 j) =  liftA2 (,) ((Non.head <$> fmap (fmap fst) i) ) ( (\i -> ArrayTB1   i ) <$> fmap (fmap snd) i)
        where i =   T.traverse  (indexFTB l) j
 indexFTB l (TB1 i) = indexTable l i
 indexFTB i j = errorWithStackTrace (show (i,j))

@@ -1,5 +1,6 @@
 {-# LANGUAGE Arrows ,TupleSections,OverloadedStrings #-}
 module OAuth (gmailOps,tokenToOAuth,oauthToToken,oauthpoller) where
+import qualified NonEmpty as Non
 import Control.Lens
 import Control.Exception
 import Control.Arrow
@@ -236,7 +237,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
           RecordPrim (i,m) ->  Left . tbNull <$>  convertAttrs infsch (if f then Nothing else getref) inf   (justError "no look" $  M.lookup m inf ) v
                 where  tbNull tb = if null (getAttr' tb) then Nothing else Just  tb
     fun f (KArray i) v = (\l -> if null l then return (typ i) else fmap (bimap  nullArr  nullArr) .   biTrav (fun f i) $ l ) $ (v ^.. values )
-        where nullArr lm = if null l then Nothing else Just (ArrayTB1 l)
+        where nullArr lm = if null l then Nothing else Just (ArrayTB1 $ Non.fromList l)
                 where l = catMaybes lm
     fun f i v = errorWithStackTrace (show (i,v))
 

@@ -18,6 +18,7 @@
 module Query where
 
 import qualified Control.Lens as Le
+import NonEmpty (NonEmpty(..))
 import Data.Functor.Apply
 import Data.Bifunctor
 import Data.Time.LocalTime
@@ -195,10 +196,13 @@ createTable r@(Raw sch _ _ _ _ tbl _ _ pk _ fk inv attr) = "CREATE TABLE " <> ra
 
 
 allKVRec :: Ord f => TB2 f Showable -> [FTB Showable]
-allKVRec (DelayedTB1 i) = maybe mempty allKVRec i
+{-allKVRec (DelayedTB1 i) = maybe mempty allKVRec i
 allKVRec (LeftTB1 i) = maybe mempty allKVRec i
 allKVRec (ArrayTB1 i) = mconcat $ allKVRec <$> i
-allKVRec  t@(TB1 (m, e))=  concat $  F.toList (go . unTB <$> (_kvvalues $ unTB $ eitherDescPK t))
+-}
+
+allKVRec = concat . F.toList . fmap allKVRec'
+allKVRec'  t@(m, e)=  concat $  F.toList (go . unTB <$> (_kvvalues $ unTB $ eitherDescPK t))
   where
         go  (FKT _  _ tb) =  allKVRec  tb
         go  (IT  _ tb) = allKVRec tb
@@ -473,7 +477,7 @@ expandQuery left t@(TB1 (meta, m))
 
 expandQuery' left t@(TB1 (meta, m)) = foldr1 (liftA2 mappend) (expandJoin left (F.toList (_kvvalues . labelValue . getCompose $ m) ) .getCompose <$> F.toList (_kvvalues . labelValue . getCompose $ m))
 
-tableType (ArrayTB1 [i]) = tableType i <> "[]"
+tableType (ArrayTB1 (i :| _ )) = tableType i <> "[]"
 tableType (LeftTB1 (Just i)) = tableType i
 tableType (TB1 (m,_)) = kvMetaFullName  m
 
@@ -483,7 +487,7 @@ expandJoin left env (Unlabeled (IT i (LeftTB1 (Just tb) )))
     = expandJoin True env $ Unlabeled (IT i tb)
 expandJoin left env (Labeled l (IT i (LeftTB1 (Just tb) )))
     = expandJoin True env $ Labeled l (IT i tb)
-expandJoin left env (Labeled l (IT i (ArrayTB1 [tb] )))
+expandJoin left env (Labeled l (IT i (ArrayTB1 (tb :| _ ) )))
     = do
     tjoin <- expandQuery left tb
     return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> (explodeRow tb {-<> (if allAttr tb then  " :: " <> tableType tb else "")-} ) <> "  order by arrrow ) as " <> l <> " FROM " <> expandInlineArrayTable tname tb <> label tas <> tjoin <> " )  as " <>  label tas <> " ON true"
@@ -504,7 +508,7 @@ expandJoin left env (Labeled _ (Attr _ _ )) = return ""
 expandJoin left env (Unlabeled  (Attr _ _ )) = return ""
 expandJoin left env (Unlabeled (FKT i rel (LeftTB1 (Just tb)))) = expandJoin True env (Unlabeled (FKT i rel tb))
 expandJoin left env (Labeled l (FKT i rel (LeftTB1 (Just tb)))) = expandJoin True env (Labeled l (FKT i rel tb))
-expandJoin left env (Labeled l (FKT _ ks (ArrayTB1 [tb])))
+expandJoin left env (Labeled l (FKT _ ks (ArrayTB1 (tb :| _))))
     = do
     query <- hasArray ( L.find (isArray. keyType ._tbattrkey . labelValue )  (look (_relOrigin <$> ks) (fmap getCompose $ concat $ fmap nonRef env)))
     return $ jt <> " JOIN LATERAL (select * from ( SELECT " <>  query  <> "  ) as " <>  label tas  <>  (if left then "" else " WHERE " <> l <> " is not null " ) <> " ) as " <>  label tas <> " ON true "
@@ -582,7 +586,7 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
           return $ ( Compose $ lab $ IT  ref  (mapOpt $ TB1 tb)   )
     where
         nextLeft =  isLeft || isLeftRel ifk
-        mapArray i =  if isArrayRel ifk then ArrayTB1 [i] else i
+        mapArray i =  if isArrayRel ifk then ArrayTB1 $ pure i else i
         mapOpt i = if isLeftRel ifk then  LeftTB1 $ Just  i else i
         nextT = justError ("recursepath lookIT "  <> show t <> " " <> show invSchema) (M.lookup t invSchema)
         fun =  recurseTB invSchema (rawFKS nextT) nextLeft isRec
@@ -594,7 +598,7 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) 
           tas <- tname nextT
           let knas = dumbKey(rawName nextT)
           kas <- kname tas  knas
-          return $ Compose $ Labeled (label $ kas) (FKT [] ks  (mapOpt $ ArrayTB1 [ TB1 tb]  ))
+          return $ Compose $ Labeled (label $ kas) (FKT [] ks  (mapOpt $ ArrayTB1 (pure  $ TB1 tb)  ))
     | isArrayRel ifk && not (isArrayRel e) =   do
           (t,ksn) <- labelTable nextT
           tb <-fun ksn
@@ -616,7 +620,7 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) 
   where
         nextT = (\(Just i)-> i) (M.lookup tn (invSchema))
         nextLeft = any (isKOptional.keyType) (S.toList ifk) || isLeft
-        mapArray i =  if isArrayRel ifk then ArrayTB1 [i] else i
+        mapArray i =  if isArrayRel ifk then ArrayTB1 (pure i) else i
         mapOpt i = if isLeftRel  ifk then  LeftTB1 $ Just  i else i
         fun =   recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
@@ -662,32 +666,34 @@ isLeftRel ifk = any (isKOptional.keyType) (S.toList ifk)
 isArrayRel ifk = any (isArray.keyType) (S.toList ifk)
 
 
-eitherDescPK :: (Functor f,F.Foldable f,Ord k) =>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
-eitherDescPK i@(TB1 (kv, _)  )
-  | not ( null ( _kvdesc kv) ) =  if L.null (F.toList $ tbDesc i) then tbPK i else tbDesc i
-  | otherwise = tbPK i
+eitherDescPK :: (Functor f,F.Foldable f,Ord k) =>TB3Data f k a -> Compose f (KV  (Compose f (TB f ))) k a
+eitherDescPK i@(kv, _)
+  | not ( null ( _kvdesc kv) ) =  if L.null (F.toList desc) then tbPK' i else desc
+  | otherwise = tbPK' i
+    where desc = tbDesc i
 
 
-tbDesc :: (Functor f,Ord k)=>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
-tbDesc  =  tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvdesc kv ) ))
+tbDesc :: (Functor f,Ord k)=>TB3Data f k a -> Compose f (KV  (Compose f (TB f ))) k a
+tbDesc  =  tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvdesc kv ) ))
 
 tbPK :: (Functor f,Ord k)=>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
 tbPK = tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) ))
 
 
-tbPK' :: (Ord k)=>TBData k a -> Compose Identity  (KV  (Compose Identity (TB Identity  ))) k a
+tbPK' :: (Functor f,Ord k)=>TB3Data f k a -> Compose f (KV  (Compose f (TB f ))) k a
 tbPK' = tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) ))
 
 tbAttr :: (Functor f,Ord k) =>  TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbAttr  =  tbFilter  (\kv k -> not (S.isSubsetOf (S.map _relOrigin k) (S.fromList (_kvpk kv) <> (S.fromList (_kvdesc kv ))) ))
 
+tbFilter' :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3Data f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbFilter' pred (kv,item) =  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item
 tbFilterE  pred (kv,item) =  (kv,mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item)
 
 tbFilter :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbFilter pred (TB1 i) = tbFilter' pred i
 tbFilter pred (LeftTB1 (Just i)) = tbFilter pred i
-tbFilter pred (ArrayTB1 ([i])) = tbFilter pred i
+tbFilter pred (ArrayTB1 (i :| _ )) = tbFilter pred i
 tbFilter pred (DelayedTB1 (Just i)) = tbFilter pred i
 
 
@@ -789,7 +795,7 @@ leafDel False i = " case when " <> i <> " is not null then true else null end "
 
 explodeRow' block  assoc  leaf (DelayedTB1 (Just tbd@(TB1 (i,tb)))) = "(true)"
 explodeRow' block assoc leaf (LeftTB1 (Just tb) ) = explodeRow' block assoc leaf tb
-explodeRow' block assoc leaf (ArrayTB1 [tb] ) = explodeRow' block assoc leaf tb
+explodeRow' block assoc leaf (ArrayTB1 (tb:|_) ) = explodeRow' block assoc leaf tb
 explodeRow' block assoc leaf (TB1 i ) = explodeRow'' block assoc leaf i
 
 explodeRow'' block assoc leaf  ((m ,Compose (Unlabeled (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
@@ -811,13 +817,13 @@ explodeDelayed block assoc leaf (Unlabeled (FKT i rel t )) = case i of
 
 isTB1Array (DelayedTB1 (Just tb) ) = isTB1Array tb
 isTB1Array (LeftTB1 (Just tb)) = isTB1Array tb
-isTB1Array (ArrayTB1 [tb]) = True
+isTB1Array (ArrayTB1 (tb:| _ )) = True
 isTB1Array _ = False
 
 
 isTB1Delayed (DelayedTB1 _ ) = True
 isTB1Delayed (LeftTB1 (Just tb)) = isTB1Delayed tb
-isTB1Delayed (ArrayTB1 [tb]) = isTB1Delayed tb
+isTB1Delayed (ArrayTB1 (tb:| _)) = isTB1Delayed tb
 isTB1Delayed _ = False
 
 unTlabel' ((m,kv) )  = (m,) $ overLabel (\(KV kv) -> KV $ fmap (Compose . Identity .unlabel.getCompose ) $   kv) kv
@@ -838,8 +844,11 @@ overLabel f = Compose .  Identity . f . labelValue  .getCompose
 
 
 -- interval' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
-inf' = (\(ER.Finite i) -> i) . Interval.lowerBound
-sup' = (\(ER.Finite i) -> i) . Interval.upperBound
+unFinite (ER.Finite i) = i
+unFinite ER.PosInf = errorWithStackTrace ("posinf")
+unFinite ER.NegInf = errorWithStackTrace ("neginf")
+inf' = unFinite . Interval.lowerBound
+sup' = unFinite . Interval.upperBound
 
 
 _unTB1 (TB1 (m,i) ) =  i
