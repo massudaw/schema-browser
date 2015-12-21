@@ -1,14 +1,8 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies#-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TupleSections #-}
-{-# LANGUAGE OverloadedStrings #-}
 
 module Types.Index
   (TBIndex(..) , toList ,lookup ,fromList ,filter ,module G ) where
@@ -38,11 +32,12 @@ import qualified Data.Set as Set
 import Data.Traversable(traverse)
 import Debug.Trace
 
+
+--- Row Level Predicate
 newtype TBIndex k a
   = Idex [(k,FTB a)]
   deriving(Eq,Show,Ord,Functor)
 
-projUn u v = {-justError ("cant be optional" <> show (u,getUn u v)) . (traverse (traverse unSOptional'))  .  getUn u $-} v
 
 instance Predicates (TBIndex Key Showable) where
   type (Penalty (TBIndex Key Showable)) = Penalty (Predicate [FTB Showable])
@@ -57,14 +52,25 @@ instance Predicates (TBIndex Key Showable) where
 
 projIdex (Idex v) = SPred $ fmap snd $ v
 
+instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
+  mempty = G.empty
+  mappend i j
+    | G.size i < G.size j = ins  j (getEntries i )
+    | otherwise  = ins  i (getEntries j )
+    where ins = foldl' (\j i -> G.insert i (3,6) j)
 
 
+-- Attr List Predicate
 instance  Predicates (Predicate [FTB Showable]) where
   type Penalty (Predicate [FTB Showable] ) = [DiffShowable]
   consistent (SPred l ) (SPred i) =  all id $ zipWith consistent (SPred <$> l) (SPred <$> i)
   union l = SPred $ fmap (\i -> (\(SPred i) -> i) $ union i )$ L.transpose $ fmap (\(SPred i) -> fmap SPred i ) l
   penalty (SPred p1) (SPred p2) = zipWith penalty (fmap SPred p1 ) (fmap SPred p2)
   pickSplit = pickSplitG
+
+
+
+-- Atomic Predicate
 
 data DiffFTB a
   = DiffInterval DiffShowable
@@ -80,11 +86,13 @@ data DiffShowable
   | DSDays Integer
   deriving(Eq,Ord,Show)
 
+diffStr :: String -> String -> [Int]
 diffStr [] [] = []
 diffStr bs [] = ord <$> bs
 diffStr [] bs = ord <$> bs
 diffStr (a:as) (b:bs) = (ord b - ord a) : diffStr as bs
 
+diffS :: Showable -> Showable -> DiffShowable
 diffS (SText t) (SText o) = DSText $ diffStr (T.unpack o) (T.unpack t)
 diffS (SDouble t) (SDouble o) = DSDouble $ o -t
 diffS (SNumeric t) (SNumeric o) = DSInt $ o -t
@@ -93,6 +101,7 @@ diffS (SDate i ) (SDate j) = DSDays (diffDays j i)
 diffS a b  = errorWithStackTrace (show (a,b))
 
 
+appendDShowable :: DiffShowable -> DiffShowable -> DiffShowable
 appendDShowable (DSText l ) (DSText j) =  DSText $ zipWith (+) l j <> L.drop (L.length j) l <> L.drop (L.length l ) j
 appendDShowable (DSDouble l ) (DSDouble j) =  DSDouble$ l + j
 appendDShowable (DSInt l ) (DSInt j) =  DSInt $ l + j
@@ -112,7 +121,6 @@ instance Predicates (Predicate (FTB Showable)) where
   consistent (SPred i@(TB1 _) ) (SPred (ArrayTB1 j)) = F.elem  i j
   consistent (SPred (TB1 i) ) (SPred (TB1 j) ) = i == j
   consistent i j  = errorWithStackTrace (show (i,j))
-
   union  l = SPred (IntervalTB1 (minimum (minP <$> l)  `interval` maximum (maxP <$> l)))
   pickSplit = pickSplitG
   penalty p1 p2 =  (notNeg $ (unFin $ fst $ minP p2) `diffS` (unFin $ fst $ minP p1)) `appendDShowable`  (notNeg $ (unFin $ fst $ maxP p1) `diffS` (unFin $ fst $ maxP p2))
@@ -154,6 +162,10 @@ maxP i = errorWithStackTrace (show i)
 entryPred (NodeEntry (_,p)) = p
 entryPred (LeafEntry (_,p)) = p
 
+
+
+
+-- Higher Level operations
 fromList pred = foldl'  acc G.empty
   where
     acc !m v = G.insert (v,pred v ) (3,6) m
@@ -164,6 +176,3 @@ toList = getData
 
 filter f = foldl' (\m i -> G.insert i (3,6) m) G.empty  . L.filter (f .fst ) . getEntries
 
-instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
-  mempty = G.empty
-  mappend i j = foldl' (\j i -> G.insert i (3,6) j) j  (getEntries i )

@@ -206,23 +206,25 @@ expandPSet p = [p]
 groupSplit2 :: Ord b => (a -> b) -> (a -> c ) -> [a] -> [(b ,[c])]
 groupSplit2 f g = fmap (\i-> (f $ head i , g <$> i)) . groupWith f
 
+notOptional :: [(k , FTB a )] -> [(k,FTB a)]
+notOptional = justError "cant be empty " . traverse (traverse unSOptional' )
 
 applyGiST
   ::  (G.Predicates (G.TBIndex k  a) , PatchConstr k a)  => G.GiST (G.TBIndex k a ) (TBData k a) -> RowPatch k a -> G.GiST (G.TBIndex k a ) (TBData k a)
-applyGiST l patom@(m,i, []) = G.delete (G.Idex i) (3,6)  l
-    where tbpred v = G.Idex  $ justError "" $ (traverse (traverse unSOptional' ) $getUn un v)
+applyGiST l patom@(m,i, []) = G.delete (G.Idex $ notOptional i) (3,6)  l
+    where tbpred v = G.Idex  $ notOptional $ getUn un v
           un = (Set.fromList $ _kvpk m)
-applyGiST l patom@(m,i, p) =  case G.lookup (G.Idex i) l  of
+applyGiST l patom@(m,i, p) =  case G.lookup (G.Idex $ notOptional i) l  of
                   Just v ->  let
                            el = applyRecord  v (m,i,p)
                            pkel = getPKM el
                           in if pkel == i
-                            then G.insert (el,tbpred  el) (3,6) . G.delete (G.Idex i)  (3,6) $ l
-                            else G.insert (el,tbpred  el) (3,6) . G.delete (G.Idex i)  (3,6) $ l
+                            then G.insert (el,tbpred  el) (3,6) . G.delete (G.Idex $ notOptional i)  (3,6) $ l
+                            else G.insert (el,tbpred  el) (3,6) . G.delete (G.Idex $ notOptional i)  (3,6) $ l
                   Nothing -> let
                       el = createTB1  (m,i,p)
                       in G.insert (el,tbpred  el) (3,6)  l
-    where tbpred v = G.Idex  $ justError "invalid key" (traverse (traverse unSOptional' ) $getUn un v)
+    where tbpred v = G.Idex  $ notOptional $getUn un v
           un = (Set.fromList $ _kvpk m)
 
 
