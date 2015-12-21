@@ -73,8 +73,8 @@ data DBVar2 k v=
 idxColTid db =  (,) <$> idxTid db <*> collectionTid db
 
 type DBVar = DBVar2 Key Showable
-type Collection k v = (Map [Column k v] (Int,Map Int PageToken),GiST (TBIndex k(TBData k v )) (TBData k v))
-type TableIndex k v = GiST (TBIndex k (TBData k v )) (TBData k v)
+type Collection k v = (Map [Column k v] (Int,Map Int PageToken),GiST (TBIndex k  v ) (TBData k v))
+type TableIndex k v = GiST (TBIndex k  v ) (TBData k v)
 
 type Plugins = FPlugins Text
 type VarDef = (Text,KType (Prim (Text,Text) (Text,Text)))

@@ -76,8 +76,8 @@ class Patch f where
 class Compact f where
   compact :: [f] -> [f]
 
-instance (G.Predicates (G.TBIndex k  (TBData k a)) , PatchConstr k a) => Patch (G.GiST (G.TBIndex k (TBData k a )) (TBData k a)) where
-  type Index (G.GiST (G.TBIndex k (TBData k a )) (TBData k a)  ) = RowPatch k (Index a)
+instance (G.Predicates (G.TBIndex k  a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex k a ) (TBData k a)) where
+  type Index (G.GiST (G.TBIndex k a ) (TBData k a)  ) = RowPatch k (Index a)
   apply = applyGiST
 
 instance PatchConstr k a => Patch (Map [(k,FTB a)] (TBData k a )) where
@@ -206,30 +206,25 @@ expandPSet p = [p]
 groupSplit2 :: Ord b => (a -> b) -> (a -> c ) -> [a] -> [(b ,[c])]
 groupSplit2 f g = fmap (\i-> (f $ head i , g <$> i)) . groupWith f
 
-pkToRP m = tblistM m . fmap (_tb.uncurry Attr)
 
 applyGiST
-  ::  (G.Predicates (G.TBIndex k  (TBData k a)) , PatchConstr k a)  => G.GiST (G.TBIndex k (TBData k a )) (TBData k a) -> RowPatch k a -> G.GiST (G.TBIndex k (TBData k a )) (TBData k a)
-applyGiST l patom@(m,i, []) = G.delete (pkToRP m i,tbpred $ pkToRP m i) (3,6)  l
-    where tbpred v = G.Idex un  $ tblist $ fmap (_tb . uncurry Attr ) $ justError "" $ (traverse (traverse unSOptional' ) $getUn un v)
+  ::  (G.Predicates (G.TBIndex k  a) , PatchConstr k a)  => G.GiST (G.TBIndex k a ) (TBData k a) -> RowPatch k a -> G.GiST (G.TBIndex k a ) (TBData k a)
+applyGiST l patom@(m,i, []) = G.delete (G.Idex i) (3,6)  l
+    where tbpred v = G.Idex  $ justError "" $ (traverse (traverse unSOptional' ) $getUn un v)
           un = (Set.fromList $ _kvpk m)
-applyGiST l patom@(m,i, p) =  case G.lookup (tbpred  $ pkToRP m i) l  of
+applyGiST l patom@(m,i, p) =  case G.lookup (G.Idex i) l  of
                   Just v ->  let
                            el = applyRecord  v (m,i,p)
                            pkel = getPKM el
                           in if pkel == i
-                            then G.insert (el,tbpred  el) (3,6) . G.delete (pkToRP m i ,tbpred $ pkToRP m i)  (3,6) $ l
-                            else G.insert (el,tbpred  el) (3,6) . G.delete (pkToRP m i ,tbpred $ pkToRP m i)  (3,6) $ l
+                            then G.insert (el,tbpred  el) (3,6) . G.delete (G.Idex i)  (3,6) $ l
+                            else G.insert (el,tbpred  el) (3,6) . G.delete (G.Idex i)  (3,6) $ l
                   Nothing -> let
                       el = createTB1  (m,i,p)
                       in G.insert (el,tbpred  el) (3,6)  l
-    where tbpred v = G.Idex un  $ tblist $ fmap (_tb . uncurry Attr ) $ justError "" $ (traverse (traverse unSOptional' ) $getUn un v)
+    where tbpred v = G.Idex  $ justError "invalid key" (traverse (traverse unSOptional' ) $getUn un v)
           un = (Set.fromList $ _kvpk m)
-{-
-createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key) (TBData Key Showable)
-createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un i ) .  traceShow ("createUn",un)
-  where transPred v = G.Idex un $ tblist $ fmap (_tb . uncurry Attr ) $ justError "" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
--}
+
 
 applyTable'
   ::  PatchConstr k a  => Map [(k,FTB a)] (TBData k a ) -> TBIdx k a -> Map [(k,FTB a)] (TBData k a )

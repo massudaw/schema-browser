@@ -52,11 +52,11 @@ refTable  inf table  = do
   mmap <- readMVar (mvarMap inf)
   return $ justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
 
-tbpred un v = G.Idex un  $ tblist $ fmap (_tb . uncurry Attr ) $ justError "" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
+tbpred un v = G.Idex $  justError "" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
 
-createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key(TBData Key Showable )) (TBData Key Showable)
+createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key Showable) (TBData Key Showable)
 createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un i ) .  traceShow ("createUn",un)
-  where transPred v = G.Idex un $ tblist $ fmap (_tb . uncurry Attr ) $ justError "" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
+  where transPred v = G.Idex $ justError "invalid pred" (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
 
 eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
     -> TransactionM (DBVar,Collection Key Showable)

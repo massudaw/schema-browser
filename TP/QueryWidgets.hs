@@ -86,7 +86,7 @@ type TBConstraint = TBData Key Showable -> Bool
 type SelPKConstraint = [([Compose Identity (TB Identity) Key ()],Tidings PKConstraint)]
 type SelTBConstraint = [([Compose Identity (TB Identity) Key ()],Tidings TBConstraint)]
 
-type RefTables = (Tidings (Collection Key Showable),(Collection Key Showable), Tidings (G.GiST (G.TBIndex  Key (TBData Key Showable)) (TBData Key Showable)), MVar [TBIdx Key Showable] )
+type RefTables = (Tidings (Collection Key Showable),(Collection Key Showable), Tidings (G.GiST (G.TBIndex  Key Showable) (TBData Key Showable)), MVar [TBIdx Key Showable] )
 
 --- Plugins Interface Methods
 createFresh :: Text -> InformationSchema -> Text -> KType (Prim (Text,Text) (Text,Text))-> IO InformationSchema
@@ -259,12 +259,11 @@ labelCase a old wid = do
 
 refTables inf table = do
         ((DBVar2 tmvard _ _ vpdiff _ _ ),res)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
-        bres <- accumB res (flip (foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> rumors vpdiff)
+        let update = foldl'(flip (\p-> fmap (flip Patch.apply p)))
+        bres <- accumB res (flip update <$> rumors vpdiff)
         let
-            vpt =  tidings bres ((foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> bres <@> rumors vpdiff )
-            createPKIdx = createUn (S.fromList $ _kvpk (tableMeta table))
-        gist <- mapT0Event (createPKIdx (snd res) ) return (createPKIdx <$>  (tidings (snd <$> facts vpt) never))
-        return (vpt,res,gist,tmvard)
+            vpt =  tidings bres (update <$> bres <@> rumors vpdiff )
+        return (vpt,res,fmap snd vpt,tmvard)
 
 
 tbCase
@@ -437,7 +436,7 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
           ini2 <- liftIO $(maybe (return preoldItens) (\j -> traverse (\i -> return $ Patch.apply i j ) preoldItens ) loadedItens)
           oldItemsB <- stepper  ini2 oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
-              deleteCurrentUn un e l = maybe l ((\v -> G.delete (v,tbpred un v) (3,6) l)  ) $  join $ (\e -> if isJust (traverse (traverse unSOptional')  (getUn un e)) then Just e else Nothing ) <$> e
+              deleteCurrentUn un e l = maybe l ((\v -> G.delete (tbpred un v) (3,6) l)  ) $  join $ (\e -> if isJust (traverse (traverse unSOptional')  (getUn un e)) then Just e else Nothing ) <$> e
               tpkConstraint :: ([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)
               tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK (TB1 ftb) , (\i l -> unConstraint (S.fromList $ _kvpk m) (tblist l ) i  ) <$> (deleteCurrentUn  (S.fromList $ _kvpk m) <$> oldItems <*> fmap snd bres))
           unConstraints <-  traverse (traverse (traverse (mapTEvent return ))) $ (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un ) (fmap snd bres)))) <$> _kvuniques m
@@ -472,17 +471,17 @@ addElemFin e = liftIO . addFin e .pure
 onBin bin p x y = bin (p x) (p y)
 
 
-unConstraint :: Set Key -> TBData Key Showable -> G.GiST (G.TBIndex Key(TBData Key Showable)) (TBData Key Showable) -> Bool
+unConstraint :: Set Key -> TBData Key Showable -> G.GiST (G.TBIndex Key Showable) (TBData Key Showable) -> Bool
 unConstraint un v m = isJust . lookGist un v $ m
 
 lookGist un pk  = safeHead . G.search (tbpred un pk)
 
 
-tbpred un v = G.Idex un  $ tblist $ fmap (_tb . uncurry Attr ) $ justError "" $ (traverse (traverse unSOptional' ) $getUn un v)
+tbpred un v = G.Idex $ justError "" $ (traverse (traverse unSOptional' ) $getUn un v)
 
-createUn :: Set Key -> G.GiST (G.TBIndex Key(TBData Key Showable)) (TBData Key Showable) -> G.GiST (G.TBIndex Key(TBData Key Showable)) (TBData Key Showable)
+createUn :: Set Key -> G.GiST (G.TBIndex Key(Showable)) (TBData Key Showable) -> G.GiST (G.TBIndex Key(Showable)) (TBData Key Showable)
 createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ traverse (traverse unSOptional' ) $ getUn un i ) . G.toList . traceShow ("createUn",un)
-  where transPred v = G.Idex un $ tblist $ fmap (_tb . uncurry Attr ) $ justError "" $ (traverse (traverse unSOptional' ) $getUn un v)
+  where transPred v = tbpred un v
 
 
 

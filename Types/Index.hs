@@ -38,33 +38,30 @@ import qualified Data.Set as Set
 import Data.Traversable(traverse)
 import Debug.Trace
 
-data TBIndex k a
-  = Idex (Set.Set k ) a
+newtype TBIndex k a
+  = Idex [(k,FTB a)]
   deriving(Eq,Show,Ord,Functor)
 
-projUn u v = {-justError ("cant be optional" <> show (u,getUn u v)) . (traverse (traverse unSOptional'))  .-}  getUn u $ v
+projUn u v = {-justError ("cant be optional" <> show (u,getUn u v)) . (traverse (traverse unSOptional'))  .  getUn u $-} v
 
-instance Predicates (TBIndex Key (TBData Key Showable)) where
-  type (Penalty (TBIndex Key (TBData Key Showable))) = Penalty (Predicate [FTB Showable])
-  consistent (Idex i j) (NodeEntry (_,Idex l m )) = consistent (SPred $ fmap snd $ projUn i  $ j  ) (NodeEntry (undefined,SPred $ fmap snd $ projUn l $ m))
-  consistent (Idex i j) (LeafEntry (_,Idex l m )) = consistent (SPred $ fmap snd $ projUn i  $ j  ) (LeafEntry (undefined,SPred $ fmap snd $ projUn l $ m))
-  union l  = Idex i (tblist $ fmap (_tb . uncurry Attr) $  zipWith (,) kf projL)
-    where Idex i v = head l
-          proj a = projUn i a
-          kf = fmap fst (proj v)
-          SPred projL = union $ fmap (SPred . fmap snd . proj .(\(Idex _ a) -> a)) l
+instance Predicates (TBIndex Key Showable) where
+  type (Penalty (TBIndex Key Showable)) = Penalty (Predicate [FTB Showable])
+  consistent (Idex j) (Idex  m ) = consistent (SPred $ fmap snd $  j) (SPred $ fmap snd $ m)
+  union l  = Idex (zipWith (,) kf projL)
+    where Idex  v = head l
+          kf = fmap fst v
+          SPred projL = union $ fmap (SPred . fmap snd . (\(Idex  a) -> a)) l
 
   penalty i j = penalty (projIdex i ) (projIdex j)
   pickSplit = pickSplitG
 
-projIdex (Idex i v) = SPred $ fmap snd $ projUn i v
+projIdex (Idex v) = SPred $ fmap snd $ v
 
 
 
 instance  Predicates (Predicate [FTB Showable]) where
   type Penalty (Predicate [FTB Showable] ) = [DiffShowable]
-  consistent (SPred l ) (NodeEntry (v,SPred i)) =  all id $ zipWith consistent (SPred <$> l) (NodeEntry  . (undefined,) . SPred <$> i)
-  consistent (SPred l ) (LeafEntry (v,SPred i)) =  all id $ zipWith consistent (SPred <$> l) (LeafEntry . (undefined,) . SPred <$> i)
+  consistent (SPred l ) (SPred i) =  all id $ zipWith consistent (SPred <$> l) (SPred <$> i)
   union l = SPred $ fmap (\i -> (\(SPred i) -> i) $ union i )$ L.transpose $ fmap (\(SPred i) -> fmap SPred i ) l
   penalty (SPred p1) (SPred p2) = zipWith penalty (fmap SPred p1 ) (fmap SPred p2)
   pickSplit = pickSplitG
@@ -106,25 +103,15 @@ appendDShowable a b = errorWithStackTrace (show (a,b))
 
 instance Predicates (Predicate (FTB Showable)) where
   type Penalty (Predicate (FTB Showable)) = DiffShowable
-  consistent (SPred j@(TB1 _) )  (NodeEntry (_,SPred (IntervalTB1 i) )) = j `Interval.member` i
-  consistent (SPred j@(TB1 _) )  (LeafEntry (_,SPred (IntervalTB1 i) )) = j `Interval.member` i
-  consistent (SPred (IntervalTB1 i) ) (NodeEntry (_,SPred (IntervalTB1 j)  )) = not $ Interval.null $ i `Interval.intersection` j
-  consistent (SPred (IntervalTB1 i) ) (LeafEntry (_,SPred (IntervalTB1 j) )) = j `Interval.isSubsetOf` i
-  consistent (SPred (IntervalTB1 i) ) (LeafEntry (_,SPred j@(TB1 _) )) = j `Interval.member` i
-  consistent (SPred (ArrayTB1 i) ) (NodeEntry (_,SPred (ArrayTB1 j)  )) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-  consistent (SPred (ArrayTB1 i) ) (LeafEntry (_,SPred (ArrayTB1 j)  )) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-  consistent (SPred (ArrayTB1 i) ) (NodeEntry (_,SPred j  )) = F.all (\i -> consistent   ( SPred i) (NodeEntry (undefined,SPred j))) i
-  consistent (SPred (ArrayTB1 i) ) (LeafEntry (_,SPred j@(TB1 _)  )) = F.elem  j i
-  consistent (SPred i@(TB1 _) ) (LeafEntry (_,SPred (ArrayTB1 j)  )) = F.elem  i j
-  consistent (SPred (LeftTB1 i) ) (LeafEntry (_,SPred j  )) = maybe False (\i -> consistent (SPred i ) (LeafEntry (undefined,SPred j))) i
-  consistent (SPred (SerialTB1 i) ) (LeafEntry (_,SPred j  )) = maybe False (\i -> consistent (SPred i ) (LeafEntry (undefined,SPred j))) i
-  consistent (SPred j ) (LeafEntry (_,SPred (LeftTB1 i)  )) = maybe False (\i -> consistent (SPred i ) (LeafEntry (undefined,SPred j))) i
-  consistent (SPred j ) (LeafEntry (_,SPred (SerialTB1 i)  )) = maybe False (\i -> consistent (SPred i ) (LeafEntry (undefined,SPred j))) i
-  consistent (SPred i@(TB1 _ ) ) (NodeEntry (_,SPred (ArrayTB1 j))) = F.elem  i j
-  consistent (SPred (TB1 i) ) (LeafEntry (_,SPred (TB1 j) )) = i == j
-  consistent (SPred (TB1 i) ) (NodeEntry (_,SPred (TB1 j) )) = i == j
-  consistent i (NodeEntry (_,j))  = errorWithStackTrace (show ("Node",i,j))
-  consistent i (LeafEntry (_,j))  = errorWithStackTrace (show ("Leaf",i,j))
+  consistent (SPred j@(TB1 _) )  (SPred (IntervalTB1 i) ) = j `Interval.member` i
+  consistent (SPred (IntervalTB1 i) ) (SPred (IntervalTB1 j) ) = j `Interval.isSubsetOf` i
+  consistent (SPred (IntervalTB1 i) ) (SPred j@(TB1 _) ) = j `Interval.member` i
+  consistent (SPred (ArrayTB1 i) ) (SPred (ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
+  consistent (SPred (ArrayTB1 i) ) (SPred j  ) = F.all (\i -> consistent   ( SPred i) (SPred j)) i
+  consistent (SPred (ArrayTB1 i) ) (SPred j@(TB1 _)) = F.elem  j i
+  consistent (SPred i@(TB1 _) ) (SPred (ArrayTB1 j)) = F.elem  i j
+  consistent (SPred (TB1 i) ) (SPred (TB1 j) ) = i == j
+  consistent i j  = errorWithStackTrace (show (i,j))
 
   union  l = SPred (IntervalTB1 (minimum (minP <$> l)  `interval` maximum (maxP <$> l)))
   pickSplit = pickSplitG
@@ -177,6 +164,6 @@ toList = getData
 
 filter f = foldl' (\m i -> G.insert i (3,6) m) G.empty  . L.filter (f .fst ) . getEntries
 
-instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  a) where
+instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
   mempty = G.empty
   mappend i j = foldl' (\j i -> G.insert i (3,6) j) j  (getEntries i )

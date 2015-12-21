@@ -79,7 +79,7 @@ poller schm db plugs is_test = do
           pid <- forkIO $ (void $ forever $ do
             (_,(_,polling))<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
             let curr = justError "" $ G.lookup (tbpred tb) polling
-                tbpred = G.Idex (S.fromList $ rawPK $ lookTable metas "polling" )
+                tbpred = G.Idex . getPKM
                 TB1 (STimestamp startLocal) = index curr "start_time"
                 TB1 (STimestamp endLocal) = index curr "end_time"
                 start = localTimeToUTC utc startLocal
