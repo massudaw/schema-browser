@@ -1,29 +1,17 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE Arrows #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE BangPatterns #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE NoMonomorphismRestriction #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+{-# LANGUAGE OverloadedStrings ,TupleSections #-}
 
 module Main (main) where
 
 import NonEmpty (NonEmpty(..))
 import Query
 import Text
+import qualified Types.Index as G
 import Poller
-import Control.Concurrent.Async
 import Data.List (foldl')
 import Debug.Trace
 import Types
-import Data.Either
-import Step
 import Plugins
 import TP.Widgets
 import SchemaQuery
@@ -48,7 +36,6 @@ import Reactive.Threepenny
 import Data.Traversable (traverse)
 import qualified Data.List as L
 import qualified Data.ByteString.Char8 as BS
-import Data.Time
 
 import RuntimeTypes
 import qualified Graphics.UI.Threepenny as UI
@@ -182,7 +169,7 @@ databaseChooser smvar sargs = do
               (dbmeta ,_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []  [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  "wesley.massuda@gmail.com"))]
               let
                   td :: Tidings OAuth2Tokens
-                  td = fmap (\o -> justError "" . fmap (toOAuth . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $   head $ o )) (F.toList <$> collectionTid dbmeta )
+                  td = fmap (\o -> justError "" . fmap (toOAuth . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $   head $ o )) (G.toList <$> collectionTid dbmeta )
                   toOAuth v = tokenToOAuth (b,d,a,c)
                     where [a,b,c,d] = fmap TB1 $ F.toList $ snd $ unTB1 v :: [FTB Showable]
               call smvar dbConn conn (schemaN,T.pack $ user ) (Just ("me",td )) gmailOps plugList
@@ -251,10 +238,9 @@ viewerKey inf key = mdo
   let
       table = justLook  key $ pkMap inf
 
-  (dbtable ,vp)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
-  bres <- accumB vp  (flip (foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> rumors (patchTid dbtable))
+  (dbtable ,_)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
+  reftb@(vpt,vp,gist,_) <- refTables inf table
   let
-      vpt = tidings bres ((foldl' (\ e  p-> fmap (flip Patch.apply p) e)) <$> bres <@> rumors (patchTid dbtable))
       tdi = pure Nothing
   cv <- currentValue (facts tdi)
   -- Final Query ListBox
@@ -276,7 +262,7 @@ viewerKey inf key = mdo
   inisort <- currentValue (facts tsort)
   (offset,res3)<- mdo
     offset <- offsetField 0 (never ) (lengthPage <$> facts res3)
-    res3 <- mapT0Event (fmap inisort (fmap F.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap F.toList) $ tidings ( res2) ( rumors vpt) ) )
+    res3 <- mapT0Event (fmap inisort (fmap G.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap G.toList) $ tidings ( res2) ( rumors vpt) ) )
     return (offset, res3)
   onEvent (rumors $ triding offset) $ (\i ->  liftIO $ do
     print ("page",(i `div` 10 )   )
@@ -284,25 +270,25 @@ viewerKey inf key = mdo
   let
     paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
   page <- currentValue (facts paging)
-  res4 <- mapT0Event (page $ fmap inisort (fmap F.toList vp)) return (paging <*> res3)
+  res4 <- mapT0Event (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
   itemList <- listBox (fmap snd res4) (tidings st sel ) (pure id) ( pure attrLine )
 
   let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
   prop <- stepper cv evsel
   let tds = tidings prop (diffEvent  prop evsel)
 
-  (cru,ediff,pretdi) <- crudUITable inf (pure "Editor")  (tidings (res2) never)[] [] (allRec' (tableMap inf) table) tds
+  (cru,ediff,pretdi) <- crudUITable inf (pure "Editor")  reftb [] [] (allRec' (tableMap inf) table) tds
   diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip Patch.apply j ) i) <$> facts pretdi <@> ediff
   let
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
   res2 <- stepper (vp) (rumors vpt)
   onEvent (pure <$> ediff) (liftIO .  putMVar (patchVar dbtable))
-  onEvent (facts vpt <@ UI.click updateBtn ) (\(oi,oj) -> do
-              let up =  (updateEd (schemaOps inf) ) inf table (L.maximumBy (comparing (getPK.TB1)) (F.toList oj) ) Nothing (Just 400)
+  {-onEvent (facts vpt <@ UI.click updateBtn ) (\(oi,oj) -> do
+              let up =  (updateEd (schemaOps inf) ) inf table (L.maximumBy (comparing (getPK.TB1)) (F.toList oj)) Nothing (Just 400)
               (l,i,j) <- liftIO $  transaction inf up
               liftIO .  putMVar (collectionVar dbtable) $ (oj <> M.fromList ((\i -> (getPK i,unTB1 i) )<$>  l )) )
-
+-}
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK. TB1 )  <$> facts tds) # set UI.class_ "col-xs-8"
   insertDiv <- UI.div # set children [title,head cru] # set UI.class_ "row"

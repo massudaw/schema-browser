@@ -1,10 +1,16 @@
-module Poller (poller,plugs) where
+{-# LANGUAGE OverloadedStrings #-}
+module Poller
+  (poller
+  ,plugs
+  ) where
 
 import qualified NonEmpty as Non
 import Control.Concurrent.Async
 import Types
+import qualified Types.Index as G
 import Data.Either
 import Step
+import qualified Data.Set as S
 import SchemaQuery
 import PostgresQuery (postgresOps,connRoot)
 import Prelude hiding (head)
@@ -37,7 +43,7 @@ plugs schm db plugs = do
   conn <- connectPostgreSQL (connRoot db)
   inf <- keyTables schm conn conn ("metadata",T.pack $ user db ) Nothing postgresOps plugs
   (db ,(s,t)) <- transaction inf $ eventTable  inf (lookTable inf "plugins") Nothing Nothing [] []
-  let els = L.filter (not . (`L.elem` F.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
+  let els = L.filter (not . (`L.elem` G.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
   p <-transaction inf $ do
      elsFKS <- mapM (loadFKS inf ) els
      mapM (\table -> fullDiffInsert  (meta inf)  table) elsFKS
@@ -61,7 +67,7 @@ poller schm db plugs is_test = do
         TB1 (SText schema )= index tb "schema_name"
         TB1 (SNumeric intervalms) = index tb "poll_period_ms"
         TB1 (SText p) = index tb "poll_name"
-    enabled = F.toList polling
+    enabled = G.toList polling
     poll tb  = do
       let plug = L.find ((==pname ). _name ) plugs
           (schema,intervalms ,pname ) = project tb
@@ -72,7 +78,8 @@ poller schm db plugs is_test = do
               a = _bounds p
           pid <- forkIO $ (void $ forever $ do
             (_,(_,polling))<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
-            let curr = justLook (getPKM tb) polling
+            let curr = justError "" $ G.lookup (tbpred tb) polling
+                tbpred = G.Idex (S.fromList $ rawPK $ lookTable metas "polling" )
                 TB1 (STimestamp startLocal) = index curr "start_time"
                 TB1 (STimestamp endLocal) = index curr "end_time"
                 start = localTimeToUTC utc startLocal
@@ -90,7 +97,7 @@ poller schm db plugs is_test = do
                     lengthPage s pageSize  = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
                 i <- concat <$> mapM (\ix -> do
                     (_,(_,listResAll)) <- transaction inf $ eventTable inf (lookTable inf a) (Just ix) (Just fetchSize) [][]
-                    let listRes = L.take fetchSize . F.toList $ listResAll
+                    let listRes = L.take fetchSize . G.toList $ listResAll
 
                     let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
                         tdInput i =  isJust  $ checkTable  (fst f) i

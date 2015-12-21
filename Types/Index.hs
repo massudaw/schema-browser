@@ -1,5 +1,6 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies#-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE DeriveFoldable #-}
@@ -10,18 +11,20 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Types.Index
-  (TBIndex(..) ) where
+  (TBIndex(..) , toList ,lookup ,fromList ,filter ,module G ) where
 
+import Data.GiST.RTree (pickSplitG)
 import Types
 import Utils
 import Data.Time
 import qualified NonEmpty as Non
 import Data.Maybe
 import Data.Ord
+import Data.Foldable (foldl')
 import Data.Char
 import qualified Data.Foldable as F
 import Data.Functor.Apply
-import Prelude hiding(head)
+import Prelude hiding(head,lookup,filter)
 import Data.GiST.GiST as G
 import qualified Data.Interval as Interval
 import Data.Interval (interval,lowerBound',upperBound')
@@ -35,14 +38,14 @@ import qualified Data.Set as Set
 import Data.Traversable(traverse)
 import Debug.Trace
 
-data TBIndex a
-  = Idex (Set.Set Key) a
+data TBIndex k a
+  = Idex (Set.Set k ) a
   deriving(Eq,Show,Ord,Functor)
 
-projUn u v = justError ("cant be optional" <> show (u,getUn u v))  . (traverse (traverse unSOptional')) . getUn u $ v
+projUn u v = {-justError ("cant be optional" <> show (u,getUn u v)) . (traverse (traverse unSOptional'))  .-}  getUn u $ v
 
-instance Predicates TBIndex (TBData Key Showable) where
-  type (Penalty (TBData Key Showable) ) = Penalty [FTB Showable]
+instance Predicates (TBIndex Key (TBData Key Showable)) where
+  type (Penalty (TBIndex Key (TBData Key Showable))) = Penalty (Predicate [FTB Showable])
   consistent (Idex i j) (NodeEntry (_,Idex l m )) = consistent (SPred $ fmap snd $ projUn i  $ j  ) (NodeEntry (undefined,SPred $ fmap snd $ projUn l $ m))
   consistent (Idex i j) (LeafEntry (_,Idex l m )) = consistent (SPred $ fmap snd $ projUn i  $ j  ) (LeafEntry (undefined,SPred $ fmap snd $ projUn l $ m))
   union l  = Idex i (tblist $ fmap (_tb . uncurry Attr) $  zipWith (,) kf projL)
@@ -58,8 +61,8 @@ projIdex (Idex i v) = SPred $ fmap snd $ projUn i v
 
 
 
-instance  Predicates Predicate [FTB Showable] where
-  type Penalty [FTB Showable] = [DiffShowable]
+instance  Predicates (Predicate [FTB Showable]) where
+  type Penalty (Predicate [FTB Showable] ) = [DiffShowable]
   consistent (SPred l ) (NodeEntry (v,SPred i)) =  all id $ zipWith consistent (SPred <$> l) (NodeEntry  . (undefined,) . SPred <$> i)
   consistent (SPred l ) (LeafEntry (v,SPred i)) =  all id $ zipWith consistent (SPred <$> l) (LeafEntry . (undefined,) . SPred <$> i)
   union l = SPred $ fmap (\i -> (\(SPred i) -> i) $ union i )$ L.transpose $ fmap (\(SPred i) -> fmap SPred i ) l
@@ -101,8 +104,8 @@ appendDShowable (DSDiffTime l ) (DSDiffTime j) =  DSDiffTime $ l + j
 appendDShowable a b = errorWithStackTrace (show (a,b))
 
 
-instance Predicates Predicate (FTB Showable) where
-  type Penalty (FTB Showable) = DiffShowable
+instance Predicates (Predicate (FTB Showable)) where
+  type Penalty (Predicate (FTB Showable)) = DiffShowable
   consistent (SPred j@(TB1 _) )  (NodeEntry (_,SPred (IntervalTB1 i) )) = j `Interval.member` i
   consistent (SPred j@(TB1 _) )  (LeafEntry (_,SPred (IntervalTB1 i) )) = j `Interval.member` i
   consistent (SPred (IntervalTB1 i) ) (NodeEntry (_,SPred (IntervalTB1 j)  )) = not $ Interval.null $ i `Interval.intersection` j
@@ -161,29 +164,19 @@ maxP (SPred i@(TB1 _) ) = (ER.Finite $ i,True)
 maxP (SPred (ArrayTB1 i) ) =   maxP $ SPred $ F.maximum i
 maxP i = errorWithStackTrace (show i)
 
-
-greatestPenalty :: (Ord (f b) ,Predicates f b ) => Entry f b -> [Entry f b] -> (Penalty b , Entry f b, Entry f b)
-greatestPenalty e es = L.maximumBy (comparing (\(p,_,_) -> p)) [(penalty (entryPredicate e) (entryPredicate e1), e, e1) | e1 <- es]
-
--- | Implementation of the linear split algorithm taking the minimal fill factor into account
-linearSplit :: (Ord (f b),Predicates f b ) => [Entry f b] -> [Entry f b] ->
-    [Entry f b] -> Int -> ([Entry f b], [Entry f b])
-linearSplit es1 es2 [] _ = (es1,es2)
-linearSplit es1 es2 (e:es) max
-    |length es1 == max  = (es1,es2 ++ (e:es))
-    |length es2 == max  = (es1 ++ (e:es), es2)
-    |otherwise          = if penalty (entryPredicate e) (union $ map entryPredicate es1) >
-                            penalty (entryPredicate e) (union $ map entryPredicate es2)
-                            then linearSplit es1 (e:es2) es max
-                            else linearSplit (e:es1) es2 es max
-
-pickSplitG
-  :: (Predicates f b, Ord (f b)) =>
-     [Entry f b] -> ([Entry f b], [Entry f b])
-pickSplitG es = linearSplit [e1] [e2] [e | e <- L.sortBy (comparing entryPred)  es, entryPred e /= entryPred e1, entryPred e/= entryPred e2] $ (length es + 1) `div` 2
-        -- A tuple containing the two most disparate entries in the list their corresponding penalty penalty
-        where (_, e1, e2) = L.maximumBy (comparing (\(a,_,_) -> a)) [greatestPenalty e es | e <- es]
-
 entryPred (NodeEntry (_,p)) = p
 entryPred (LeafEntry (_,p)) = p
 
+fromList pred = foldl'  acc G.empty
+  where
+    acc !m v = G.insert (v,pred v ) (3,6) m
+
+lookup pk  = safeHead . G.search pk
+
+toList = getData
+
+filter f = foldl' (\m i -> G.insert i (3,6) m) G.empty  . L.filter (f .fst ) . getEntries
+
+instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  a) where
+  mempty = G.empty
+  mappend i j = foldl' (\j i -> G.insert i (3,6) j) j  (getEntries i )

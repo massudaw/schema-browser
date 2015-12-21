@@ -108,17 +108,6 @@ getPrim (KInterval j) =  getPrim j
 inner b l m = l <> b <> m
 
 -- Operators
-pkOp (KOptional j ) i  (LeftTB1 l) k  = maybe False id (pkOp i j k <$> l)
-pkOp (KSerial j ) i  (SerialTB1 l) k  = maybe False id (pkOp i j k <$> l)
-pkOp i (KOptional j ) k (LeftTB1 l) = maybe False id (pkOp i j k <$> l)
-pkOp i (KSerial j ) k (SerialTB1 l) = maybe False id (pkOp i j k <$> l)
-pkOp (KArray i) (KArray j) (ArrayTB1 k) (ArrayTB1 l) | i == j = not $ S.null $ S.intersection (S.fromList (F.toList k)) (S.fromList (F.toList  l ))
-pkOp (KInterval i) (KInterval j) (IntervalTB1 k) (IntervalTB1 l)| i == j  = not $ Interval.null $ Interval.intersection  k l
-pkOp (Primitive i ) (Primitive j ) k l  | i == j = k == l
-pkOp a b c d = errorWithStackTrace (show (a,b,c,d))
-
-pkOpSet i l = (\i -> if L.null i then False else L.all id i) $ zipWith (\(a,b) (c,d)->  pkOp (keyType a)  (keyType c) b d) (L.sortBy (comparing fst ) i) (L.sortBy (comparing fst) l)
-
 
 intersectionOp :: (Eq b,Show (KType (Prim KPrim b ))) => KType (Prim KPrim b)-> Text -> KType (Prim KPrim b)-> (Text -> Text -> Text)
 intersectionOp (KOptional i) op (KOptional j) = intersectionOp i op j

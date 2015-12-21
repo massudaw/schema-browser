@@ -4,6 +4,7 @@ import qualified NonEmpty as Non
 import Control.Lens
 import Control.Exception
 import Control.Arrow
+import qualified Types.Index as G
 import Step
 import System.Info (os)
 import Network.Wreq
@@ -207,7 +208,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                         liftIO $ print (trefname,"right",v)
                         tbs <- liftIO$ runDBM infsch (atTable (tableMeta $ lookTable infsch trefname))
                         liftIO$ print tbs
-                        reftb <- joinRelT fk (fmap unTB ref) (lookTable infsch trefname) (F.toList tbs)
+                        reftb <- joinRelT fk (fmap unTB ref) (lookTable infsch trefname) (G.toList tbs)
                         liftIO$ print reftb
                         patch <- maybe (return reftb ) (\(tref,getref )-> traverse (\reftb -> do
                             pti <- joinGetDiffTable infsch  tref (lookTable infsch trefname) getref reftb

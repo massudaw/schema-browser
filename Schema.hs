@@ -4,6 +4,7 @@
 module Schema where
 
 import Types
+import qualified Types.Index as G
 import qualified NonEmpty as Non
 import Control.Monad.Writer
 import Debug.Trace
@@ -152,10 +153,10 @@ createTableRefs i = do
       diffIni :: [TBIdx Key Showable]
       diffIni = []
   midx <-  newMVar M.empty
-  mnew <-  newMVar M.empty
+  mnew <-  newMVar G.empty
   mdiff <-  newMVar diffIni
   (e,h) <- liftIO $R.newEvent
-  bh <- R.stepper M.empty e
+  bh <- R.stepper G.empty e
   (ediff,hdiff) <- liftIO $R.newEvent
   bhdiff <- R.stepper diffIni ediff
   (eidx ,hidx) <- liftIO $R.newEvent
@@ -358,7 +359,7 @@ applyAttr' sfkt@(FKT iref rel i) (PFK _ p m b )  =  do
                             let ref =  F.toList $ M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList iref)
                                 edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (  flip apply k  ) v else v
                             tbs <- atTable m
-                            return $ FKT ref rel (maybe (joinRel m rel (fmap unTB ref) (F.toList tbs)) id b)
+                            return $ FKT ref rel (maybe (joinRel m rel (fmap unTB ref) (G.toList tbs)) id b)
 applyAttr' (IT k i) (PInline _   p)  = IT k <$> (applyFTBM (fmap pure $ create) applyRecord' i p)
 applyAttr' i j = errorWithStackTrace (show ("applyAttr'" :: String,i,j))
 
@@ -385,7 +386,7 @@ createAttr' (PInline k s ) = return $ IT (_tb $ Attr k (TB1 ())) (create s)
 createAttr' (PFK rel k s b ) = do
       let ref = (_tb . create <$> k)
       tbs <- atTable s
-      return $ FKT ref rel (maybe (joinRel s rel (fmap unTB ref) (F.toList tbs)) id b)
+      return $ FKT ref rel (maybe (joinRel s rel (fmap unTB ref) (G.toList tbs)) id b)
 createAttr' i = errorWithStackTrace (show i)
 
 createTB1'
@@ -399,7 +400,10 @@ createTB1' (m ,s ,k)  = fmap (m ,)  $ fmap (_tb .KV . mapFromTBList ) . traverse
 type Database k v = MVar (Map (KVMetadata k) (DBVar2 k v) )
 type DBM k v = ReaderT (Database k v) IO
 
-atTable ::  KVMetadata Key -> DBM Key v (Map [(Key,FTB Showable)] (TBData Key v))
+atTable ::  (MonadReader
+                (MVar (Map (KVMetadata k) (DBVar2 k a)))
+                (ReaderT (Database k v) IO) , Ord k )
+        => KVMetadata k -> DBM k v (TableIndex k a )
 atTable k = do
   i <- ask
   k <- liftIO$ dbTable i k

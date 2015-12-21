@@ -21,6 +21,7 @@ import Data.IORef
 import Network.Google.OAuth2
 import Control.Lens.TH
 import GHC.Stack
+import Types.Index
 
 data Parser m s a b = P (s,s) (m a b) deriving Functor
 
@@ -59,20 +60,21 @@ keyMap = _keyMapL
 pkMap = _pkMapL
 
 data DBVar2 k v=
-  DBVar2 { patchVar :: MVar [TBIdx k v]
-  , idxVar :: MVar (Map [Column Key Showable] (Int,Map Int PageToken))
-  , collectionVar :: MVar (Map [(Key,FTB Showable)] (TBData k v))
+  DBVar2
+  { patchVar :: MVar [TBIdx k v]
+  , idxVar :: MVar (Map [Column k v ] (Int,Map Int PageToken))
+  , collectionVar :: MVar (TableIndex k v)
   , patchTid :: R.Tidings [TBIdx k v]
-  , idxTid :: R.Tidings (Map [Column Key Showable] (Int,Map Int PageToken))
-  , collectionTid :: R.Tidings (Map [(Key,FTB Showable)] (TBData k v))
+  , idxTid :: R.Tidings (Map [Column k v ] (Int,Map Int PageToken))
+  , collectionTid :: R.Tidings (TableIndex k v )
   }
 
 
 idxColTid db =  (,) <$> idxTid db <*> collectionTid db
 
 type DBVar = DBVar2 Key Showable
-type Collection k v = (Map [Column Key Showable] (Int,Map Int PageToken),Map [(Key,FTB Showable)] (TBData k v))
-type TableIndex k v = Map [(Key,FTB Showable)] (TBData k v)
+type Collection k v = (Map [Column k v] (Int,Map Int PageToken),GiST (TBIndex k(TBData k v )) (TBData k v))
+type TableIndex k v = GiST (TBIndex k (TBData k v )) (TBData k v)
 
 type Plugins = FPlugins Text
 type VarDef = (Text,KType (Prim (Text,Text) (Text,Text)))

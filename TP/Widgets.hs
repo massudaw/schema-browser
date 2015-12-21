@@ -487,5 +487,9 @@ pruneTidings chw tds =   tidings chkBH chkAll
     chkAll = unionWith const chkEvent chkBehaviour
     chkBH = (\b e -> if b then e else Nothing ) <$> facts chw <*> facts tds
 
+strAttr :: String -> WriteAttr Element String
+strAttr name = mkWriteAttr (set' (attr name))
+
+flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 
 line n =   set  text n

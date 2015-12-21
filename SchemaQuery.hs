@@ -28,6 +28,7 @@ import Debug.Trace
 import GHC.Stack
 import Types
 import Query
+import qualified Types.Index as G
 import Data.Maybe
 import Prelude hiding (head)
 import Data.Foldable (foldl')
@@ -51,6 +52,11 @@ refTable  inf table  = do
   mmap <- readMVar (mvarMap inf)
   return $ justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
 
+tbpred un v = G.Idex un  $ tblist $ fmap (_tb . uncurry Attr ) $ justError "" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
+
+createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key(TBData Key Showable )) (TBData Key Showable)
+createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un i ) .  traceShow ("createUn",un)
+  where transPred v = G.Idex un $ tblist $ fmap (_tb . uncurry Attr ) $ justError "" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
 
 eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
     -> TransactionM (DBVar,Collection Key Showable)
@@ -64,23 +70,22 @@ eventTable inf table page size presort fixed = do
             = if L.null fixed
               then id
               else
-                M.filterWithKey  (\_ tb ->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV (snd (tableNonRef' tb)))
+                id -- M.filterWithKey  (\_ tb ->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV (snd (tableNonRef' tb)))
     mmap <- liftIO $ readMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
     iniT <- do
        (fixedmap ,reso) <- liftIO $ currentValue (liftA2 (,) (facts (idxTid dbvar) ) (facts (collectionTid dbvar ) ))
        ini <- case M.lookup fixidx fixedmap of
           Just (sq,mp) -> do
-             liftIO$ putStrLn $ "load existing filter map" <> show (M.size (filterfixed reso), pagesize * (fromMaybe 0 page + 1))
-             liftIO$ print (M.keys mp )
-             if (sq > M.size (filterfixed reso) -- Tabela é maior que a tabela carregada
-                && M.size (filterfixed reso) < pagesize * (fromMaybe 0 page +1) -- O carregado é menor que a página
+             liftIO$ putStrLn $ "load existing filter map" <> show (G.size (filterfixed reso), pagesize * (fromMaybe 0 page + 1))
+             if (sq > G.size (filterfixed reso) -- Tabela é maior que a tabela carregada
+                && G.size (filterfixed reso) < pagesize * (fromMaybe 0 page +1) -- O carregado é menor que a página
                )
              then do
                    liftIO$ putStrLn "load offseted new page"
                    let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                    (res,nextToken ,s ) <- (listEd $ schemaOps inf) inf table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
-                   let ini = (M.insert fixidx (estLength page pagesize res s  ,(\v -> M.insert ((fromMaybe 0 page +1 )*pagesize) v  mp) $ justError "no token"    nextToken) fixedmap , M.fromList (fmap (\i -> (getPK i,unTB1 i)) res)<> reso )
+                   let ini = (M.insert fixidx (estLength page pagesize res s  ,(\v -> M.insert ((fromMaybe 0 page +1 )*pagesize) v  mp) $ justError "no token"    nextToken) fixedmap , createUn (S.fromList $ rawPK table)  (fmap unTB1 res)<> reso )
                    liftIO $ putMVar (patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )
                    liftIO$ putMVar (idxVar dbvar ) (fst ini)
                    return  ini
@@ -89,7 +94,7 @@ eventTable inf table page size presort fixed = do
           Nothing -> do
              liftIO$ putStrLn "create new filter map"
              (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing Nothing size sortList fixed
-             let ini = (M.insert fixidx (estLength page pagesize res s ,maybe M.empty (M.singleton pagesize) p) fixedmap , M.fromList (fmap (\i -> (getPK i,unTB1 i)) res) <> reso)
+             let ini = (M.insert fixidx (estLength page pagesize res s ,maybe M.empty (M.singleton pagesize) p) fixedmap , createUn (S.fromList $ rawPK table)    (fmap (\i -> (unTB1 i)) res) <> reso)
              liftIO $ putMVar (patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )
              liftIO$ putMVar (idxVar dbvar ) (fst ini)
              return ini
@@ -109,7 +114,7 @@ fullInsert' inf ((k1,v1) )  = do
    let proj = _kvvalues . unTB
    ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
    (_,(_,l)) <- eventTable inf (lookTable inf (traceShow (k1,v1) $_kvname k1)) Nothing Nothing [] []
-   if  isJust $ M.lookup (getPKM ret) l
+   if  isJust $ G.lookup (tbpred (S.fromList $ _kvpk k1)  ret) l
       then do
         return ret
       else do
@@ -195,7 +200,7 @@ loadFK inf table (Path ori (FKJoinTable to rel tt ) tar) = do
   let
       relSet = S.fromList $ _relOrigin <$> rel
       tb  = unTB <$> F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . snd . tableNonRef' $ table))
-      fkref = joinRel  (tableMeta targetTable) rel tb  (F.toList mtable)
+      fkref = joinRel  (tableMeta targetTable) rel tb  (G.toList mtable)
   return $ Just $ FKT (_tb <$> tb) rel   fkref
 loadFK inf table (Path ori (FKInlineTable to ) tar)   = do
   let IT rel vt = unTB $ justError "no inline" $ M.lookup (S.map Inline   ori) (unKV .snd $ table)

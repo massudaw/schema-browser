@@ -23,6 +23,7 @@ module Patch
 
 -- import Warshal
 import Types
+import qualified Types.Index as G
 import Control.Monad.Reader
 import Data.Semigroup hiding (diff)
 import qualified NonEmpty as Non
@@ -75,6 +76,10 @@ class Patch f where
 class Compact f where
   compact :: [f] -> [f]
 
+instance (G.Predicates (G.TBIndex k  (TBData k a)) , PatchConstr k a) => Patch (G.GiST (G.TBIndex k (TBData k a )) (TBData k a)) where
+  type Index (G.GiST (G.TBIndex k (TBData k a )) (TBData k a)  ) = RowPatch k (Index a)
+  apply = applyGiST
+
 instance PatchConstr k a => Patch (Map [(k,FTB a)] (TBData k a )) where
   type Index (Map [(k,FTB a)] (TBData k a )) = TBIdx k (Index a)
   apply = applyTable'
@@ -116,6 +121,7 @@ instance Patch Showable  where
 type PatchConstr k a = (a ~ Index a, Ord a , Show a,Show k , Ord k)
 
 type TBIdx  k a = (KVMetadata k, [(k ,FTB a )],[PathAttr k a])
+type RowPatch k a = TBIdx k a -- (KVMetadata k, TBData k a ,[PathAttr k a])
 
 data PathAttr k a
   = PAttr k (PathFTB a)
@@ -200,6 +206,31 @@ expandPSet p = [p]
 groupSplit2 :: Ord b => (a -> b) -> (a -> c ) -> [a] -> [(b ,[c])]
 groupSplit2 f g = fmap (\i-> (f $ head i , g <$> i)) . groupWith f
 
+pkToRP m = tblistM m . fmap (_tb.uncurry Attr)
+
+applyGiST
+  ::  (G.Predicates (G.TBIndex k  (TBData k a)) , PatchConstr k a)  => G.GiST (G.TBIndex k (TBData k a )) (TBData k a) -> RowPatch k a -> G.GiST (G.TBIndex k (TBData k a )) (TBData k a)
+applyGiST l patom@(m,i, []) = G.delete (pkToRP m i,tbpred $ pkToRP m i) (3,6)  l
+    where tbpred v = G.Idex un  $ tblist $ fmap (_tb . uncurry Attr ) $ justError "" $ (traverse (traverse unSOptional' ) $getUn un v)
+          un = (Set.fromList $ _kvpk m)
+applyGiST l patom@(m,i, p) =  case G.lookup (tbpred  $ pkToRP m i) l  of
+                  Just v ->  let
+                           el = applyRecord  v (m,i,p)
+                           pkel = getPKM el
+                          in if pkel == i
+                            then G.insert (el,tbpred  el) (3,6) . G.delete (pkToRP m i ,tbpred $ pkToRP m i)  (3,6) $ l
+                            else G.insert (el,tbpred  el) (3,6) . G.delete (pkToRP m i ,tbpred $ pkToRP m i)  (3,6) $ l
+                  Nothing -> let
+                      el = createTB1  (m,i,p)
+                      in G.insert (el,tbpred  el) (3,6)  l
+    where tbpred v = G.Idex un  $ tblist $ fmap (_tb . uncurry Attr ) $ justError "" $ (traverse (traverse unSOptional' ) $getUn un v)
+          un = (Set.fromList $ _kvpk m)
+{-
+createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key) (TBData Key Showable)
+createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un i ) .  traceShow ("createUn",un)
+  where transPred v = G.Idex un $ tblist $ fmap (_tb . uncurry Attr ) $ justError "" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
+-}
+
 applyTable'
   ::  PatchConstr k a  => Map [(k,FTB a)] (TBData k a ) -> TBIdx k a -> Map [(k,FTB a)] (TBData k a )
 applyTable' l patom@(m,i, []) = Map.delete i  l
@@ -269,7 +300,6 @@ patchSet i
             normalize i = [i]
 
 
-intersectFKT rel i l = L.find (\(_,l) -> interPoint rel i (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) l
 
 
 applyAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k a -> TB Identity k a
