@@ -80,11 +80,11 @@ import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import GHC.Stack
 
-type PKConstraint = [Compose Identity (TB Identity ) Key Showable] -> Bool
+type PKConstraint = [TB Identity  Key Showable] -> Bool
 type TBConstraint = TBData Key Showable -> Bool
 
-type SelPKConstraint = [([Compose Identity (TB Identity) Key ()],Tidings PKConstraint)]
-type SelTBConstraint = [([Compose Identity (TB Identity) Key ()],Tidings TBConstraint)]
+type SelPKConstraint = [([TB Identity Key ()],Tidings PKConstraint)]
+type SelTBConstraint = [([TB Identity Key ()],Tidings TBConstraint)]
 
 type RefTables = (Tidings (Collection Key Showable),(Collection Key Showable), Tidings (G.GiST (G.TBIndex  Key Showable) (TBData Key Showable)), MVar [TBIdx Key Showable] )
 
@@ -234,8 +234,8 @@ attrSize (Attr k _ ) = go  (mapKType $ keyType k)
                                     i  ->  (6,8)
                        i -> (3,1)
 
-getRelOrigin :: [Compose Identity (TB Identity) Key () ] -> [Key]
-getRelOrigin =  fmap _relOrigin . concat . fmap keyattr
+getRelOrigin :: [TB Identity Key () ] -> [Key]
+getRelOrigin =  fmap _relOrigin . concat . fmap keyattri
 
 
 labelCase
@@ -276,11 +276,11 @@ tbCase
   -> UI (TrivialWidget (Maybe (TB Identity Key Showable)))
 tbCase inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
         let
-            oldItems = maybe preoldItems (\v -> if L.null v then preoldItems else fmap (maybe (Just (FKT (fmap  (_tb . uncurry Attr)  v) rel (DelayedTB1 Nothing) )) Just ) preoldItems  ) (Tra.traverse (\k -> fmap (k,) . keyStatic $ k ) ( getRelOrigin ifk))
-            nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin ifk)
+            oldItems = maybe preoldItems (\v -> if L.null v then preoldItems else fmap (maybe (Just (FKT (fmap  (_tb . uncurry Attr)  v) rel (DelayedTB1 Nothing) )) Just ) preoldItems  ) (Tra.traverse (\k -> fmap (k,) . keyStatic $ k ) ( getRelOrigin $ fmap unTB ifk))
+            nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin $ fmap unTB ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattri .fst) wl
             nonInjConstr :: SelTBConstraint
-            nonInjConstr = first (pure . _tb ) .fmap (fmap (\j ((_,l)) -> maybe True id $ (\ j -> not $ interPointPost rel (nonRefAttr  [_tb  j]) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) <$> j ).triding) <$>  nonInjRefs
+            nonInjConstr = first (pure ) .fmap (fmap (\j ((_,l)) -> maybe True id $ (\ j -> not $ interPointPost rel (nonRefAttr  [_tb  j]) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) <$> j ).triding) <$>  nonInjRefs
 
             -- Move to referenced table unique constraints
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
@@ -436,11 +436,12 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
           oldItemsB <- stepper  ini2 oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
               deleteCurrentUn un e l =   maybe l (\v -> G.delete (G.Idex v) (3,6) l) $  join $ (\e -> traverse (traverse unSOptional')  (getUn un e) ) <$> e
-              tpkConstraint = (F.toList $ _kvvalues $ unTB $ tbPK (TB1 ftb) , (S.fromList $ _kvpk m, ( fmap snd bres)))
-          unConstraints <-  traverse (traverse (traverse (mapTEvent return ))) $ (\un -> (F.toList $ _kvvalues $ unTB $ tbUn un  (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un ) (fmap snd bres)))) <$> _kvuniques m
+              tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbPK (TB1 ftb) , (S.fromList $ _kvpk m, ( fmap snd bres)))
+          unConstraints <-  traverse (traverse (traverse (mapTEvent return ))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn un  (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un ) (fmap snd bres)))) <$> _kvuniques m
           unDeleted <- traverse (traverse (traverse (mapTEvent return))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> oldItems <*> o))) (tpkConstraint:unConstraints))
-          let dunConstraints (un,o) = flip (\i ->  maybe (const False )(unConstraint un .tblist ) (traverse (traComp (traFAttr unSOptional')) i ) ) <$> o
-              unFinal:: [([Compose Identity (TB Identity) Key ()], Tidings PKConstraint)]
+          let
+              dunConstraints (un,o) = flip (\i ->  maybe (const False ) (unConstraint un .tblist' table . fmap _tb ) (traverse (traFAttr unSOptional' ) i ) ) <$> o
+              unFinal:: [([TB Identity Key ()], Tidings PKConstraint)]
               unFinal = fmap (fmap dunConstraints) unDeleted
           (listBody,tableb,inscrud) <- eiTable inf   unFinal  refs pmods ftb oldItems
           (panelItems,tdiff)<- processPanelTable inf  (facts tableb) reftb  (inscrud) table oldItems
@@ -872,7 +873,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
           oldASet :: Set Key
           oldASet = S.fromList $ filter (not .(`L.elem` (concat $ fmap _relOrigin .keyattr <$> ifk )))(_relOrigin <$> rel )
           replaceKey =  firstTB (\k -> maybe k _relTarget $ L.find ((==k)._relOrigin) $ filter (\i -> keyType (_relOrigin i) == keyType (_relTarget i)) rel)
-          nonInj =   S.difference (S.fromList $ fmap  _relOrigin   $ rel) (S.fromList $ getRelOrigin ifk)
+          nonInj =   S.difference (S.fromList $ fmap  _relOrigin   $ rel) (S.fromList $ getRelOrigin $ fmap unTB ifk)
           nonInjRefs = filter (flip S.isSubsetOf nonInj . S.fromList . fmap _relOrigin . keyattr . _tb .fst) wl
           staticold :: [(TB Identity Key () ,TrivialWidget (Maybe (TB Identity Key (Showable))))]
           staticold  =  second (fmap (fmap replaceKey . join . fmap unLeftItens)) . first (replaceKey .unLeftKey) <$>  nonInjRefs
@@ -935,7 +936,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
       addElemFin (getElement subnet) fin
       addElemFin (getElement subnet) fin2
       let
-        fksel =  fmap (\box ->  FKT (backFKRef relTable  (fmap (keyAttr .unTB )ifk)   box) rel (TB1 box) ) <$>  ((\i j -> maybe i Just ( j)  ) <$>  pretdi <*> tidings st sel)
+        fksel =  fmap (\box ->  FKT (fmap _tb $ backFKRef relTable  (fmap (keyAttr .unTB )ifk)   box) rel (TB1 box) ) <$>  ((\i j -> maybe i Just ( j)  ) <$>  pretdi <*> tidings st sel)
       return $ TrivialWidget (if isReadOnly  tb then oldItems  else fksel ) subnet
 fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ilk rel  (DelayedTB1 (Just tb1 ))) = do
     tr <- fkUITable inf constr  tbrefs plmods  wl oldItems  (FKT  ilk  rel tb1)
