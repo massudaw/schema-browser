@@ -66,6 +66,12 @@ data PathFTB   a
   deriving(Show,Eq,Ord,Functor,Generic,Foldable)
 
 
+newtype FBPatch p
+  =  FBPatch (p ,p)
+  deriving (Show,Eq,Ord)
+
+
+
 class Patch f where
   type Index k
   diff :: f -> f -> Maybe (Index f)
@@ -79,10 +85,8 @@ class Compact f where
 instance (G.Predicates (G.TBIndex k  a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex k a ) (TBData k a)) where
   type Index (G.GiST (G.TBIndex k a ) (TBData k a)  ) = RowPatch k (Index a)
   apply = applyGiST
+  -- diff = diffGiST
 
-instance PatchConstr k a => Patch (Map [(k,FTB a)] (TBData k a )) where
-  type Index (Map [(k,FTB a)] (TBData k a )) = TBIdx k (Index a)
-  apply = applyTable'
 
 instance (PatchConstr k a) => Compact (PathAttr k a) where
   compact = compactAttr
@@ -228,22 +232,6 @@ applyGiST l patom@(m,i, p) =  case G.lookup (G.Idex $ notOptional i) l  of
           un = (Set.fromList $ _kvpk m)
 
 
-applyTable'
-  ::  PatchConstr k a  => Map [(k,FTB a)] (TBData k a ) -> TBIdx k a -> Map [(k,FTB a)] (TBData k a )
-applyTable' l patom@(m,i, []) = Map.delete i  l
-applyTable' l patom@(m,i, p) =  case Map.lookup i  l  of
-                  Just v ->  let
-                           el = applyRecord  v patom
-                           pkel = getPKM el
-                          in if pkel == i
-                            then Map.update (\tb -> Just $ applyRecord tb patom) i l
-                            else Map.insert pkel el  . Map.delete i $ l
-                  Nothing -> let
-                      el = createTB1  patom
-                      in Map.insert (getPKM el) el  l
-applyTable' l i = errorWithStackTrace (show (l,i))
-
-
 travPath f p (PatchSet i) = foldl f p i
 travPath f p i = f p i
 
@@ -266,6 +254,7 @@ createTB1 (m ,s ,k)  = (m , _tb .KV . mapFromTBList . fmap (_tb . createAttr) $ 
 pattrKey (PAttr s _ ) = Set.singleton $ Inline s
 pattrKey (PInline s _ ) = Set.singleton $ Inline s
 pattrKey (PFK s _ _ _ ) = Set.fromList s
+
 
 
 applyRecord
@@ -372,7 +361,6 @@ diffFTB p d (IntervalTB1 i) (IntervalTB1 j)
   | i == j = Nothing
   | otherwise =  patchSet $  catMaybes   [match True (lowerBound' i ) (lowerBound' j) ,match False (upperBound' i ) (upperBound' j) ]
     where match f i j = fmap (PInter f . (,snd $  j)) (maybe (if snd j == snd i then Nothing  else Just $ patchFTB p (unFinite $ fst $ j)) Just $ diffFTB p d (unFinite $ fst $  i) (unFinite $ fst $  j) )
-
 diffFTB p d (TB1 i) (TB1  j) = fmap PAtom $ d i j
 diffFTB p d  i j = errorWithStackTrace (show (i,j))
 

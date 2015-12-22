@@ -70,7 +70,7 @@ eventTable inf table page size presort fixed = do
             = if L.null fixed
               then id
               else
-                id -- M.filterWithKey  (\_ tb ->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV (snd (tableNonRef' tb)))
+                G.filter (\ tb ->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV (snd (tableNonRef' tb)))
     mmap <- liftIO $ readMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
     iniT <- do
@@ -133,7 +133,7 @@ noInsert' inf (k1,v1)   = do
 
 
 transaction :: InformationSchema -> TransactionM a -> IO a
-transaction inf log = {-withTransaction (conn inf) $-} do
+transaction inf log = withTransaction (conn inf) $ do
   -- print "Transaction Run Log"
   (md,mods)  <- runWriterT log
   -- print "Transaction Update"
