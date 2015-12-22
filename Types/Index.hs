@@ -177,7 +177,7 @@ notNeg (DSText l)
   | L.null dp || head dp < 0 = def
   | otherwise = DSText l
   where dp =  dropWhile (==0) l
-        def = DSText (replicate (L.length l) 0)
+        def = DSText [] -- (replicate (L.length l) 0)
 notNeg (DSDouble l)
   | l < 0 = DSDouble 0
   | otherwise = DSDouble l
