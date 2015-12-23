@@ -5,6 +5,7 @@ module RuntimeTypes where
 import Control.Concurrent
 
 import Types
+import Data.Unique
 import Types.Index
 import Types.Patch
 
@@ -34,6 +35,7 @@ data InformationSchema
   , username :: Text
   , token :: Maybe (Text,R.Tidings OAuth2Tokens)
   , _keyMapL :: Map (Text,Text) Key
+  , _backendKey :: Map Unique PGKey
   , _pkMapL :: Map (Set Key) Table
   , _tableMapL :: Map Text Table
   , tableSize :: Map Table Int
@@ -80,7 +82,7 @@ type Collection k v = (Map [Column k v] (Int,Map Int PageToken),GiST (TBIndex k 
 type TableIndex k v = GiST (TBIndex k  v ) (TBData k v)
 
 type Plugins = FPlugins Text
-type VarDef = (Text,KType (Prim (Text,Text) (Text,Text)))
+type VarDef = (Text,KType CorePrim)
 
 data FPlugins k
   =  StatefullPlugin
@@ -136,7 +138,10 @@ data SchemaEditor
   , listEd :: InformationSchema -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> [(Text ,Column Key Showable)]-> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
   , updateEd :: InformationSchema -> Table -> TBData Key Showable -> Maybe PageToken -> Maybe Int -> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
   , getEd :: InformationSchema -> Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
+  , typeTransform :: PGKey -> CoreKey
   }
+
+typeTrans inf = typeTransform (schemaOps inf)
 
 argsToState  [h,ph,d,u,p,s,t] = BrowserState h ph d  u p (Just s) (Just t )
 argsToState  [h,ph,d,u,p,s] = BrowserState h ph d  u p  (Just s)  Nothing

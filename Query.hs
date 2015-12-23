@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE LambdaCase #-}
@@ -20,6 +18,7 @@ module Query
    topconversion
   ,textToPrim
   ,mapKType
+  ,mapKeyType
   ,conversion
   ,tbPK
   ,alterKeyType
@@ -37,6 +36,9 @@ module Query
   ,interPointPost
   ,PGRecord
   ,PGType
+  ,PGKey
+  ,CoreKey
+  ,CorePrim
   ,backFKRef
   ,filterReflexive
   ,isReflexive
@@ -167,11 +169,11 @@ showTable t  = rawSchema t <> "." <> rawName t
 
 
 
-diffUpdateAttr :: TBData Key Showable -> TBData Key Showable -> Maybe (TBData Key Showable)
+diffUpdateAttr :: (Ord k , Ord a) => TBData k a -> TBData k a -> Maybe (TBData k a )
 diffUpdateAttr  kv kold@(t,_ )  =  fmap ((t,) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . snd . tableNonRef'  $ kv ) (unKV . snd . tableNonRef' $ kold )
 
 
-attrValueName :: (Ord a,Show a) => TB Identity Key a -> Text
+attrValueName :: (Ord a,Ord k, Show k ,Show a) => TB Identity (FKey k) a -> Text
 attrValueName (Attr i _ )= keyValue i
 attrValueName (IT i  _) = overComp attrValueName i
 attrValueName i = errorWithStackTrace $ " no attr value instance " <> show i
@@ -239,8 +241,8 @@ reflexiveRel ks
   | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
   | all (isJust . keyStatic . _relOrigin) ks = ( isJust . keyStatic. _relOrigin)
   | any (isJust . keyStatic . _relOrigin) ks = ( isNothing . keyStatic. _relOrigin)
-  | any (\j -> not $ isPairReflexive (mapKType $ keyType (_relOrigin  j) ) (_relOperator j ) (mapKType $ keyType (_relTarget j) )) ks =  const False
-  | otherwise = (\j-> isPairReflexive (mapKType $ keyType (_relOrigin  j) ) (_relOperator j ) (mapKType $ keyType (_relTarget j) ))
+  | any (\j -> not $ isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) ( keyType (_relTarget j) )) ks =  const False
+  | otherwise = (\j-> isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) (keyType (_relTarget j) ))
 
 isInlineRel (Inline _ ) =  True
 isInlineRel i = False
@@ -251,7 +253,7 @@ isReflexive (Path i r@(FKJoinTable _ ks _ )  t)
 isReflexive (Path _ l _ ) = isPathReflexive l
 
 isPathReflexive (FKJoinTable _ ks _)
-  | otherwise   = all id $ fmap (\j-> isPairReflexive (mapKType $ keyType (_relOrigin  j) ) (_relOperator j ) (mapKType $ keyType (_relTarget j) )) ks
+  | otherwise   = all id $ fmap (\j-> isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) (keyType (_relTarget j) )) ks
 isPathReflexive (FKInlineTable _)= True
 isPathReflexive (RecJoin _ i ) = isPathReflexive i
 
@@ -297,7 +299,7 @@ tableViewNR invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
 tlabel t = (label $ getCompose $ snd (unTB1 t))
 
 
-dumbKey n = Key n  Nothing [] 0 Nothing (unsafePerformIO newUnique) (Primitive (AtomicPrim ("pg_catalog","integer") ))
+dumbKey n = Key n  Nothing [] 0 Nothing (unsafePerformIO newUnique) (Primitive (AtomicPrim PInt ))
 
 recursePath
   :: Bool->  RecState Key
@@ -541,7 +543,7 @@ backFKRef
 backFKRef relTable ifk = fmap (uncurry Attr). reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . snd
   where
         reorderPK l = fmap (\i -> justError (show ("reorder wrong" :: String, ifk ,relTable , l,i))  $ L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
-        lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (mapKType $ keyType ko ) (mapKType $ keyType kn) v)) <$> knm
+        lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (keyType ko ) (keyType kn) v)) <$> knm
           where knm =  M.lookup ko relTable
 
 
@@ -600,9 +602,6 @@ postgresPrim =
   ,("box3d",PBounding)
   ]
 
-type PGType = (Text,Text)
-type PGRecord = (Text,Text)
-
 ktypeLift :: Ord b => KType (Prim KPrim b) -> Maybe (KType (Prim KPrim b))
 ktypeLift i = (M.lookup i  postgresLiftPrim )
 
@@ -613,6 +612,10 @@ ktypeRec v@(KSerial i) = ktypeLift v <|> ktypeRec i
 ktypeRec v@(KDelayed i) = ktypeLift v <|> ktypeRec i
 ktypeRec v@(Primitive i ) = ktypeLift v
 
+mapKeyType :: FKey (KType PGPrim) -> FKey (KType (Prim KPrim (Text,Text)))
+mapKeyType  = fmap mapKType
+
+mapKType :: KType PGPrim -> KType CorePrim
 mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec (fmap textToPrim i)
 
 textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)
@@ -644,4 +647,4 @@ topconversion v@(Primitive i) =  preconversion v
 
 
 
-interPointPost rel ref tar = interPoint (fmap (fmap (fmap (mapKType ))) rel) (fmap (firstTB (fmap (mapKType ))) ref) (fmap (firstTB (fmap (mapKType ))) tar)
+interPointPost rel ref tar = interPoint ( rel) ( ref) (tar)

@@ -177,21 +177,21 @@ cpfForm = BoundedPlugin2 pname tname url
               odxR "owner_name" -< t
               returnA -< Nothing
 
-atPrim s g = Primitive (AtomicPrim (s,g))
+atPrim  p = Primitive (AtomicPrim p )
 queryCPFStatefull = StatefullPlugin "CPF Receita" "owner"
-  [(([],[("captchaViewer",atPrim "public" "jpg")
-    ,("sess",atPrim "gmail" "session")])
+  [(([],[("captchaViewer",atPrim (PMime "image/jpg") )
+    ,("sess",atPrim PSession )])
     ,cpfCaptcha)
-  ,(([("nascimento",atPrim "pg_catalog" "date")
-    ,("captchaInput",atPrim "pg_catalog" "character varying")],[])
+  ,(([("nascimento",atPrim PDate )
+    ,("captchaInput",atPrim PText )],[])
     ,cpfForm)]
 
 
 queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
-  [(([],[("captchaViewer",atPrim "public" "jpg")
-    ,("sess",atPrim "gmail" "session")])
+  [(([],[("captchaViewer",atPrim (PMime "image/jpg") )
+    ,("sess",atPrim PSession )])
     ,cnpjCaptcha)
-  ,(([("captchaInput",atPrim "pg_catalog" "character varying")],[])
+  ,(([("captchaInput",atPrim PText )],[])
     ,cnpjForm)]
 
 
@@ -288,7 +288,7 @@ siapi3Plugin  = BoundedPlugin2 pname tname  url
           odxR "andamento_user" -<  t
           odxR "andamento_status" -<  t) -< ()
 
-      b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= 14 then  return Nothing else liftIO $ siapi3  i j k )) -<   (liftA3 (,,) protocolo ano cpf)
+      b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= (14 :: Int ) then  return Nothing else liftIO $ siapi3  i j k )) -<   (liftA3 (,,) protocolo ano cpf)
       let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ fmap attrT  $ ([("andamento_date",TB1 .STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
       let ao  (bv,taxa) =  Just $ tblist  ( [attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
@@ -388,7 +388,7 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  url
 
 
 createEmail = StatefullPlugin "Create Email" "messages"
-  [(([("plain",atPrim "gmail" "email")],[]),generateEmail)]
+  [(([("plain",atPrim (PMime "plain/text") )],[]),generateEmail)]
 
 generateEmail = BoundedPlugin2  "Generate Email" tname url
   where

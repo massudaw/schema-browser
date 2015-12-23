@@ -126,7 +126,7 @@ expandTable tb
 expandInlineRecursive
   :: MonadWriter [Text] m =>
        TB3
-              (Labeled Text) (FKey (KType (Prim (Text, Text) (Text, Text)))) ()
+              (Labeled Text) Key  ()
                    -> m ()
 expandInlineRecursive tbase =
     let
@@ -181,11 +181,11 @@ topRec = join . join . fmap unMutRec
 expandFKMutRecursive
   :: MonadWriter [Text] m =>
      FTB
-       (KVMetadata (FKey (KType (Prim (Text, Text) (Text, Text)))),
+       (KVMetadata (Key),
         Compose
           (Labeled Text)
           (KV (Compose (Labeled Text) (TB (Labeled Text))))
-          (FKey (KType (Prim (Text, Text) (Text, Text))))
+          Key
           ())
      -> m ()
 expandFKMutRecursive t=
@@ -333,7 +333,7 @@ expandJoin left env (Labeled l (FKT i rel tb)) =  foldr1 (liftA2 mappend) $ (exp
 -- expandJoin left env i = errorWithStackTrace (show ("expandJoin",i))
 
 joinOnPredicate :: [Rel Key] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> Text
-joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectionOp (mapKType . keyType . keyAttr . labelValue $ l) op (mapKType .keyType . keyAttr . labelValue $ r) (label l)  (label r )) <$> fkm
+joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectionOp (keyType . keyAttr . labelValue $ l) op (keyType . keyAttr . labelValue $ r) (label l)  (label r )) <$> fkm
     where fkm  = (\rel -> Rel (look (_relOrigin rel ) m) (_relOperator rel) (look (_relTarget rel ) n)) <$>  ks
           look ki i = justError ("missing FK on " <> show (ki,ks ,keyAttr . labelValue <$> i )) $ (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
 

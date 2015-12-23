@@ -79,7 +79,7 @@ instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Tex
   -- toField i = errorWithStackTrace (show i)
 
 
-instance  TF.ToField (TB Identity Key Showable)  where
+instance  TF.ToField (TB Identity PGKey Showable)  where
   toField (Attr k  i) = case  topconversion (textToPrim <$> keyType k) of
           Just (_,b) -> TF.toField (fmap ( snd $ (\(AtomicPrim i ) -> i)$head $ F.toList $ keyType k,) $ b i)
           Nothing -> TF.toField (fmap (snd $ (\(AtomicPrim i ) -> i) $ head $ F.toList $ keyType k,) i)
@@ -185,7 +185,7 @@ unIntercalateAtto l s = go l
 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
 parseAttr (Attr i _ ) = do
-  s<- parseShowable (textToPrim <$> keyType  i) <?> show i
+  s<- parseShowable (keyType  i) <?> show i
   return $  Attr i s
 
 
@@ -498,7 +498,7 @@ instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
 fromShowable ty v =
-   case parseOnly (parseShowable (mapKType ty )) v of
+   case parseOnly (parseShowable (ty )) v of
       Right i -> Just i
       Left l -> Nothing
 

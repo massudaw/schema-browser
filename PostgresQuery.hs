@@ -41,12 +41,12 @@ import Database.PostgreSQL.Simple
 
 
 insertPatch
-  :: (PatchConstr Key a ,MonadIO m ,Functor m ,TF.ToField (TB Identity Key a ))
-     => (TBData Key () -> FR.RowParser (TBData Key a ))
+  :: (MonadIO m ,Functor m )
+     => (TBData PGKey () -> FR.RowParser (TBData PGKey Showable ))
      -> Connection
-     -> TBIdx Key a
-     -> Table
-     -> m (TBIdx Key a )
+     -> TBIdx PGKey Showable
+     -> TableK PGKey
+     -> m (TBIdx PGKey Showable )
 insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
       then do
         let
@@ -54,7 +54,7 @@ insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
           iquery = T.unpack $ prequery <> " RETURNING ROW(" <>  T.intercalate "," (projKey serialAttr) <> ")"
         liftIO $ print iquery
         out <-  fmap head $ liftIO $ queryWith (f (mapRecord (const ()) serialTB )) conn (fromString  iquery ) directAttr
-        let Just (_,_ ,gen) = diff serialTB out -- :: Maybe (TBIdx Key a)
+        let Just (_,_ ,gen) = diff serialTB out
         return (m,getPKM out ,compact (i <> gen ) )
       else do
         let
@@ -78,8 +78,8 @@ insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
 
 
 deletePatch
-  :: (PatchConstr Key a ,TF.ToField (TB Identity Key  a ) ) =>
-     Connection ->  TBIdx Key a -> Table -> IO (TBIdx Key a)
+  ::
+     Connection ->  TBIdx PGKey Showable -> Table -> IO (TBIdx PGKey Showable)
 deletePatch conn patch@(m ,kold ,_) t = do
     execute conn (fromString $ traceShowId $ T.unpack del) koldPk
     return patch
@@ -91,8 +91,8 @@ deletePatch conn patch@(m ,kold ,_) t = do
 
 
 updatePatch
-  :: TF.ToField (TB Identity Key Showable) =>
-     Connection -> TBData Key Showable -> TBData Key Showable -> Table -> IO (TBIdx Key Showable)
+  ::
+     Connection -> TBData PGKey Showable -> TBData PGKey Showable -> Table -> IO (TBIdx PGKey Showable)
 updatePatch conn kv old  t =
     execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk ) >> return patch
   where
@@ -105,12 +105,12 @@ updatePatch conn kv old  t =
     up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = unTB <$> F.toList  (_kvvalues $ unTB tbskv)
     tbskv = snd isM
-    isM :: TBData Key  Showable
+    isM :: TBData PGKey  Showable
     isM =  justError ("cant diff befor update" <> show (kv,old)) $ diffUpdateAttr kv old
 
 differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 
-paginate conn t order off size k eqpred = do
+paginate inf t order off size k eqpred = do
     let (que,attr) = case k of
           (Just koldpre) ->
             let
@@ -124,7 +124,7 @@ paginate conn t order off size k eqpred = do
             in (que,eqpk)
     let quec = fromString $ T.unpack $ "SELECT *,count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
     print (quec,attr)
-    v <- uncurry (queryWith (withCount (fromRecord (unTlabel' t)) ) conn) (quec,attr)
+    v <- uncurry (queryWith (withCount (fromRecord (unTlabel' t)) ) (conn inf ) ) (quec, fmap (firstTB (recoverFields inf)) attr)
     print (maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int]))
     return ((maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])), fmap fst v)
   where pred = maybe "" (const " WHERE ") (fmap (fmap snd)   k <> fmap (concat . fmap  (fmap TB1 .F.toList . snd)) eqpred) <> T.intercalate " AND " (maybe [] (const $ pure $ generateComparison (first (justLabel t) <$> order)) k <> (maybe [] pure $ eqquery <$> eqpred))
@@ -184,23 +184,24 @@ insertMod :: InformationSchema ->  TBData Key Showable -> TransactionM (Maybe (T
 insertMod inf j  = liftIO$ do
   let
       table = lookTable inf (_kvname (fst  j))
-  kvn <- insertPatch fromRecord (conn  inf) (patch j) table
-  let mod =  TableModification Nothing table kvn
+  kvn <- insertPatch (fmap (mapKey' (recoverFields inf)) . fromRecord . (mapKey' (typeTrans inf))) (conn  inf) (patch $ mapKey' (recoverFields inf) j) (mapTableK (recoverFields inf ) table)
+  let mod =  TableModification Nothing table (firstPatch (typeTrans inf) kvn)
   Just <$> logTableModification inf mod
 
 
 deleteMod :: InformationSchema ->  TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
 deleteMod inf j@(meta,_) = liftIO$ do
-  let patch =  (tableMeta table, getPKM j,[])
+  let
+      patch =  (tableMeta table, getPKM j,[])
       table = lookTable inf (_kvname (fst  j))
-  deletePatch (conn inf)  patch table
-  Just <$> logTableModification inf (TableModification Nothing table patch)
+  deletePatch (conn inf)  (firstPatch (recoverFields inf) patch) table
+  Just <$> logTableModification inf (TableModification Nothing table  patch)
 
 updateMod :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
 updateMod inf kv old = liftIO$ do
   let table = lookTable inf (_kvname (fst  old ))
-  patch <- updatePatch (conn  inf) kv  old  table
-  let mod =  TableModification Nothing table patch
+  patch <- updatePatch (conn  inf) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table
+  let mod =  TableModification Nothing table (firstPatch (typeTrans inf) patch)
   Just <$> logTableModification inf mod
 
 selectAll
@@ -222,7 +223,7 @@ selectAll inf table offset i  j k st = do
           tbf =  tableView (tableMap inf) table
       liftIO $ print (tableName table,selectQuery tbf )
       let m = tbf
-      (t,v) <- liftIO$ duration  $ paginate (conn inf) m k offset j (fmap unref i) (nonEmpty st)
+      (t,v) <- liftIO$ duration  $ paginate inf m k offset j (fmap unref i) (nonEmpty st)
       mapM_ (tellRefs inf  ) (snd v)
       liftIO$ print (tableName table,t)
       return v
@@ -247,7 +248,7 @@ loadDelayed inf t@(k,v) values@(ks,vs)
            delayed =  mapKey' (kOptional . ifDelayed . ifOptional) (mapValue' (const ()) delayedTB1)
            str = "SELECT " <> explodeRecord (relabelT' runIdentity Unlabeled delayed) <> " FROM " <> showTable table <> " WHERE " <> whr
        print str
-       is <- queryWith (fromRecord delayed) (conn inf) (fromString $ T.unpack str) (fmap unTB $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK' (tableNonRef' values))
+       is <- queryWith (fromRecord delayed) (conn inf) (fromString $ T.unpack str) (fmap (firstTB (recoverFields inf) .unTB) $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK' (tableNonRef' values))
        case is of
             [] -> errorWithStackTrace "empty query"
             [i] ->return $ fmap (\(i,j,a) -> (i,getPKM (ks,vs),a)) $ diff delayedTB1(mapKey' (kOptional.kDelayed.unKOptional) . mapFValue' (LeftTB1 . Just . DelayedTB1 .  unSOptional ) $ i  )
@@ -260,4 +261,4 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 
 
-postgresOps = SchemaEditor updateMod insertMod deleteMod (\i j off p g s o-> (\(l,i) -> (fmap TB1 i,Just $ TableRef  (filter (flip L.elem (fmap fst s) . fst ) $  getPK $ TB1 $ last i) ,l)) <$> selectAll i j (fromMaybe 0 off) p (fromMaybe 200 g) s o ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ))
+postgresOps = SchemaEditor updateMod insertMod deleteMod (\i j off p g s o-> (\(l,i) -> (fmap TB1 i,Just $ TableRef  (filter (flip L.elem (fmap fst s) . fst ) $  getPK $ TB1 $ last i) ,l)) <$> selectAll i j (fromMaybe 0 off) p (fromMaybe 200 g) s o ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table )) mapKeyType

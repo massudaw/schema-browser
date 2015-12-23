@@ -171,7 +171,7 @@ getDiffTable inf table  j = fmap (join . fmap (diff j. unTB1) ) $ getTable  inf 
 joinGetDiffTable inf table  tableref f j = fmap (join . fmap (diff j. unTB1)) $ joinGet  inf table tableref (TB1 f) (TB1 j)
 
 
-gmailOps = (SchemaEditor undefined insertTable undefined listTable updateTable getDiffTable )
+gmailOps = (SchemaEditor undefined insertTable undefined listTable updateTable getDiffTable mapKeyType)
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
@@ -217,7 +217,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                         liftIO$ print patch
                         return $ FKT ref fk   patch ))
                funL = funO  True (mapKType $ exchange trefname $ keyType k) vk
-               funR = funO  True (mapKType $ keyType k) vk
+               funR = funO  True ( keyType k) vk
                mergeFun = do
                           (l,r) <- liftA2 (,) funL funR
                           return $ case (l,r) of
@@ -225,7 +225,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                             (Left (Just i),_) -> Left (Just i)
                             (Left i ,j ) -> j
               in  join . fmap  patt $   mergeFun
-      | otherwise =  fmap (either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) ) . funO  False ( mapKType $ keyType k)  $ (iv ^? ( key ( keyValue k))  )
+      | otherwise =  fmap (either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) ) . funO  False (  keyType k)  $ (iv ^? ( key ( keyValue k))  )
 
     fun :: Bool -> KType (Prim KPrim (Text,Text))-> Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
     fun f (Primitive i) v =

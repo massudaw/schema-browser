@@ -82,6 +82,14 @@ isArray (KArray _) = True
 isArray (KOptional i) = isArray i
 isArray _ = False
 
+type PGType = (Text,Text)
+type PGKey = FKey (KType PGPrim )
+type PGRecord = (Text,Text)
+type PGPrim =  Prim PGType PGRecord
+type CorePrim = Prim KPrim (Text,Text)
+type CoreKey = FKey (KType CorePrim)
+
+
 unArray (ArrayTB1 s) =  s
 unArray o  = errorWithStackTrace $ "unArray no pattern " <> show o
 
@@ -211,7 +219,7 @@ data Labeled l v
 instance (Show f) =>  Show1 (Labeled f  ) where
   showsPrec1 = showsPrec
 
-type Key = FKey (KType  (Prim (Text,Text) (Text,Text)))
+type Key = CoreKey -- FKey (KType  (Prim (Text,Text) (Text,Text)))
 
 data FKeyPath j
 data FKey a
@@ -842,7 +850,7 @@ tblist' t  = (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 tblistM :: Ord k => KVMetadata k -> [Compose Identity  (TB Identity) k a] -> TBData k a
 tblistM t  = (t, ) . Compose . Identity . KV . mapFromTBList
 
-reclist' :: Table -> [Compose Identity  (TB Identity) Key a] -> TBData Key a
+reclist' :: Ord k => TableK k  -> [Compose Identity  (TB Identity) k a] -> TBData k a
 reclist' t  = (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 
 kvempty  = KVMetadata "" ""  [] [] []  [] [] Set.empty []
@@ -916,10 +924,10 @@ makeLenses ''TableK
 --
 --- Attr Cons/Uncons
 --
-unIndexItens ::  Int -> Int -> Maybe (TB Identity  Key Showable) -> Maybe (TB Identity  Key Showable)
+unIndexItens :: (Show (KType k),Show a) =>  Int -> Int -> Maybe (TB Identity  (FKey (KType k))  a ) -> Maybe (TB Identity  (FKey (KType k))  a )
 unIndexItens ix o =  join . fmap (unIndex (ix+ o) )
 
-unIndex :: Show a => Int -> TB Identity Key a -> Maybe (TB Identity Key a )
+unIndex :: (Show (KType k),Show a) => Int -> TB Identity (FKey (KType k)) a -> Maybe (TB Identity (FKey (KType k)) a )
 unIndex o (Attr k (ArrayTB1 v)) = Attr (unKArray k) <$> Non.atMay v o
 unIndex o (IT na (ArrayTB1 j))
   =  IT  na <$>  Non.atMay j o
@@ -930,7 +938,7 @@ unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> fmap (mapComp
     indexArray ix s =  Non.atMay (unArray s) ix
 unIndex o i = errorWithStackTrace (show (o,i))
 
-unLeftKey :: (Ord b,Show b) => TB Identity Key b -> TB Identity Key b
+unLeftKey :: (Show (KType k),Ord b,Show b) => TB Identity (FKey (KType k)) b -> TB Identity (FKey (KType k)) b
 unLeftKey (Attr k v ) = (Attr (unKOptional k) v)
 unLeftKey (IT na (LeftTB1 (Just tb1))) = IT na tb1
 unLeftKey i@(IT na (TB1  _ )) = i
@@ -938,7 +946,7 @@ unLeftKey (FKT ilk rel  (LeftTB1 (Just tb1))) = (FKT (mapComp (firstTB unKOption
 unLeftKey i@(FKT ilk rel  (TB1  _ )) = i
 unLeftKey i = errorWithStackTrace (show i)
 
-unLeftItens  :: Show a => TB Identity  Key a -> Maybe (TB Identity  Key a )
+unLeftItens  :: (Show (KType k) , Show a) => TB Identity  (FKey (KType k)) a -> Maybe (TB Identity  (FKey (KType k)) a )
 unLeftItens = unLeftTB
   where
     unLeftTB (Attr k v)
@@ -956,13 +964,13 @@ unLeftItens = unLeftTB
 
 
 
-attrOptional :: TB Identity Key Showable ->  (TB Identity  Key Showable)
+attrOptional :: TB Identity (FKey (KType k))  Showable ->  (TB Identity  (FKey (KType k))  Showable)
 attrOptional (Attr k v) =  Attr (kOptional k) (LeftTB1 . Just $ v)
 attrOptional (FKT ifk rel  tb)  = FKT (tbOptional <$> ifk) (Le.over relOrigin kOptional <$> rel) (LeftTB1 (Just tb))
   where tbOptional = mapComp (firstTB kOptional) . mapComp (mapFAttr (LeftTB1 . Just))
 attrOptional (IT na j) = IT  na (LeftTB1 (Just j))
 
-leftItens :: TB Identity Key a -> Maybe (TB Identity  Key Showable) -> Maybe (TB Identity  Key Showable)
+leftItens :: TB Identity (FKey (KType k)) a -> Maybe (TB Identity  (FKey (KType k)) Showable) -> Maybe (TB Identity  (FKey (KType k)) Showable)
 leftItens tb@(Attr k _ ) =  maybe emptyAttr (Just .attrOptional)
   where emptyAttr = Attr k <$> (showableDef (keyType k))
 leftItens tb@(IT na _ ) =   Just . maybe  emptyIT attrOptional

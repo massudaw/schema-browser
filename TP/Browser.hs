@@ -32,14 +32,14 @@ import Data.Char (toLower)
 import Postgresql
 import Data.Maybe
 import Data.Functor.Identity
-import Reactive.Threepenny
+import Reactive.Threepenny hiding(apply)
 import Data.Traversable (traverse)
 import qualified Data.List as L
 import qualified Data.ByteString.Char8 as BS
 
 import RuntimeTypes
 import qualified Graphics.UI.Threepenny as UI
-import Graphics.UI.Threepenny.Core hiding (get,delete)
+import Graphics.UI.Threepenny.Core hiding (get,delete,apply)
 import Data.Monoid hiding (Product(..))
 
 import qualified Data.Foldable as F
@@ -180,11 +180,8 @@ databaseChooser smvar sargs = do
   return $ (chooserT,( widE <> (getElement reset : [schemaSel ,load])))
 
 
-attrLine i e   = do
-  let nonRec = tableNonrec $ TB1  i
-      attr i (k,v) = set  (strAttr (T.unpack $ keyValue k)) (renderShowable v) i
-      attrs   l i  = foldl' attr i l
-  attrs (F.toList (tableAttrs$ TB1  i) ) $ line ( L.intercalate "," (fmap renderShowable .  allKVRec  $ TB1 i) <> "  -  " <>  (L.intercalate "," $ fmap (renderPrim ) nonRec)) e
+attrLine i   = do
+  line ( L.intercalate "," (fmap renderShowable .  allKVRec  $ TB1 i))
 
 
 chooserTable inf kitems i = do
@@ -278,7 +275,7 @@ viewerKey inf key = mdo
   let tds = tidings prop (diffEvent  prop evsel)
 
   (cru,ediff,pretdi) <- crudUITable inf (pure "Editor")  reftb [] [] (allRec' (tableMap inf) table) tds
-  diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip Patch.apply j ) i) <$> facts pretdi <@> ediff
+  diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip apply j ) i) <$> facts pretdi <@> ediff
   let
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
@@ -298,9 +295,4 @@ viewerKey inf key = mdo
   UI.div # set children ([updateBtn,itemSelec,insertDivBody ] )
 
 
-tableNonrec k  = F.toList .  runIdentity . getCompose  . tbAttr  $ tableNonRef k
 
-
-tableAttrs (TB1  (_,k)) = concat $ fmap aattr (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
-tableAttrs (LeftTB1 (Just i)) = tableAttrs i
-tableAttrs (ArrayTB1 (i:| _)) = tableAttrs i
