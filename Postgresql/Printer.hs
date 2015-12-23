@@ -1,20 +1,5 @@
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE RankNTypes #-}
-
 module Postgresql.Printer
   (selectQuery
   ,tableType
@@ -138,6 +123,11 @@ expandTable tb
 --   final(id,rec_test) join rec_root where iter = 0 and replace rec_field with (row (tag,rec_test))
 --
 
+expandInlineRecursive
+  :: MonadWriter [Text] m =>
+       TB3
+              (Labeled Text) (FKey (KType (Prim (Text, Text) (Text, Text)))) ()
+                   -> m ()
 expandInlineRecursive tbase =
     let
      top = do
@@ -188,7 +178,16 @@ expandInlineRecursive tbase =
 
 topRec = join . join . fmap unMutRec
 
-
+expandFKMutRecursive
+  :: MonadWriter [Text] m =>
+     FTB
+       (KVMetadata (FKey (KType (Prim (Text, Text) (Text, Text)))),
+        Compose
+          (Labeled Text)
+          (KV (Compose (Labeled Text) (TB (Labeled Text))))
+          (FKey (KType (Prim (Text, Text) (Text, Text))))
+          ())
+     -> m ()
 expandFKMutRecursive t=
     let
       query  =  tname <> "(" <> T.intercalate "," (tnonRec <> tRec <> (("f"<>) <$>  tRec ) <> (label <$> l)) <> ") as  ( SELECT "  <> T.intercalate "," (tnonRec<> tRec <> tRec <> (const "null :: record" <$> l)) <>" FROM (select * from " <> expandBaseTable t <>  (fst (runWriter (expandQuery' False (fmap unlabelIT $ TB1 $(first (\t -> t {_kvrecrels =[] }  )) tnonRecA)))) <> ") as " <> tname <> " UNION ALL " <> recpart <> ")"
@@ -239,6 +238,14 @@ expandFKMutRecursive t=
     in tell [query,top]
 
 
+selectQuery
+  :: (KVMetadata Key,
+      Compose
+        (Labeled Text)
+        (KV (Compose (Labeled Text) (TB (Labeled Text))))
+        Key
+        ())
+     -> Text
 selectQuery r = if L.null (snd withDecl )
     then fst withDecl
     else "WITH RECURSIVE " <> T.intercalate "," ( snd withDecl ) <> fst withDecl
