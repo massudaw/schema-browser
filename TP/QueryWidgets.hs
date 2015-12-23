@@ -48,7 +48,6 @@ import Control.Lens ((^?),(&),(%~))
 import qualified Control.Lens as Le
 import Utils
 import Data.Char
-import Patch
 import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
@@ -63,6 +62,7 @@ import qualified Data.List as L
 import Text.Read
 import Data.Text (Text)
 import Types
+import Types.Patch
 import qualified Types.Index as G
 import Query
 import Data.Maybe

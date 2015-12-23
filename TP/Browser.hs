@@ -27,7 +27,7 @@ import Network.Google.OAuth2 (OAuth2Tokens(..))
 import Data.Ord
 import Utils
 import Schema
-import Patch
+import Types.Patch
 import Data.Char (toLower)
 import Postgresql
 import Data.Maybe

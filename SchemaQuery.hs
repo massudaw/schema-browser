@@ -18,7 +18,6 @@ import Control.Concurrent
 import Reactive.Threepenny
 import Data.String
 import Utils
-import Patch
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Traversable as Tra
@@ -27,6 +26,7 @@ import qualified Data.Foldable as F
 import Debug.Trace
 import GHC.Stack
 import Types
+import Types.Patch
 import Query
 import qualified Types.Index as G
 import Data.Maybe

@@ -1,11 +1,15 @@
 {-# LANGUAGE TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
 module RuntimeTypes where
 
+
 import Control.Concurrent
+
 import Types
+import Types.Index
+import Types.Patch
+
 import Control.Arrow
 import Data.Text
-import Patch
 import Control.Applicative
 import Control.Monad.Writer
 
@@ -21,7 +25,6 @@ import Data.IORef
 import Network.Google.OAuth2
 import Control.Lens.TH
 import GHC.Stack
-import Types.Index
 
 data Parser m s a b = P (s,s) (m a b) deriving Functor
 

@@ -20,7 +20,6 @@ import qualified Data.Foldable as F
 import Control.Monad.IO.Class
 import Data.Monoid
 import Data.Biapplicative
-import Patch
 import Control.Monad.Writer hiding (pass)
 import System.Time.Extra
 import GHC.Stack
@@ -36,6 +35,7 @@ import Data.Aeson
 import Utils
 
 import Types
+import Types.Patch
 import RuntimeTypes
 import qualified Data.Map as M
 import Debug.Trace

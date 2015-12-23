@@ -4,8 +4,10 @@
 module Schema where
 
 import Types
-import Postgresql.Printer
+import Types.Patch
 import qualified Types.Index as G
+
+import Postgresql.Printer
 import qualified NonEmpty as Non
 import Control.Monad.Writer
 import Debug.Trace
@@ -51,7 +53,6 @@ import qualified Reactive.Threepenny as R
 
 import Query
 import Postgresql
-import Patch
 import qualified Data.ByteString.Char8 as BS
 
 

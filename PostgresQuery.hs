@@ -12,7 +12,7 @@ import Data.Bifunctor
 import Query
 import Control.Monad.Writer hiding (pass)
 import System.Time.Extra
-import Patch
+import Types.Patch
 import Debug.Trace
 import Data.Ord
 import Data.Functor.Identity

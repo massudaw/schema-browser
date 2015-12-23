@@ -19,7 +19,7 @@ import Control.Concurrent
 import Data.Functor.Apply
 import Utils
 import Schema
-import Patch
+import Types.Patch
 import Data.Maybe
 import Reactive.Threepenny
 import Data.Traversable (traverse)
