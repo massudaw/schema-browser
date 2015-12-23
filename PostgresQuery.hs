@@ -39,7 +39,6 @@ import qualified Database.PostgreSQL.Simple.ToField as TF
 import qualified Database.PostgreSQL.Simple.FromRow as FR
 import Database.PostgreSQL.Simple
 
-
 insertPatch
   :: (MonadIO m ,Functor m )
      => (TBData PGKey () -> FR.RowParser (TBData PGKey Showable ))

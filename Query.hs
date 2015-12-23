@@ -15,12 +15,7 @@
 
 module Query
   (
-   topconversion
-  ,textToPrim
-  ,mapKType
-  ,mapKeyType
-  ,conversion
-  ,tbPK
+  tbPK
   ,alterKeyType
   ,forceDAttr
   ,rawFullName
@@ -546,104 +541,6 @@ backFKRef relTable ifk = fmap (uncurry Attr). reorderPK .  concat . fmap aattr .
         lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (keyType ko ) (keyType kn) v)) <$> knm
           where knm =  M.lookup ko relTable
 
-
-postgresLiftPrim :: Ord b => Map (KType (Prim KPrim b)) (KType (Prim KPrim b))
-postgresLiftPrim =
-  M.fromList [(Primitive (AtomicPrim PBounding ), KInterval (Primitive (AtomicPrim PPosition)))]
-
-postgresLiftPrimConv :: Ord b => Map (KType (Prim KPrim b),KType (Prim KPrim b))  ( FTB  Showable -> FTB Showable , FTB Showable -> FTB Showable )
-postgresLiftPrimConv =
-  M.fromList [((Primitive (AtomicPrim PBounding ), KInterval (Primitive (AtomicPrim PPosition)) ), ((\(TB1 (SBounding (Bounding i) )) -> IntervalTB1 (fmap   (TB1. SPosition ) i)) , (\(IntervalTB1 i) -> TB1 $ SBounding $ Bounding $ (fmap (\(TB1 (SPosition i)) -> i)) i)))]
-
-postgresPrim :: HM.HashMap Text KPrim
-postgresPrim =
-  HM.fromList [("character varying",PText)
-  ,("name",PText)
-  ,("character_data",PText)
-  ,("varchar",PText)
-  ,("text",PText)
-  ,("character",PText)
-  ,("char",PText)
-  ,("bpchar",PText)
-  ,("sql_identifier" , PText)
-  ,("base64url",PText)
-  ,("session",PSession)
-  ,("bytea",PBinary)
-  ,("pdf",PMime "application/pdf")
-  ,("ofx",PMime "application/x-ofx")
-  ,("jpg",PMime "image/jpg")
-  ,("email",PMime "text/plain")
-  ,("html",PMime "text/html")
-  ,("dynamic",PDynamic)
-  ,("double precision",PDouble)
-  ,("numeric",PDouble)
-  ,("float8",PDouble)
-  ,("int4",PInt)
-  ,("cnpj",PCnpj)
-  ,("cpf",PCpf)
-  ,("int8",PInt)
-  ,("integer",PInt)
-  ,("bigint",PInt)
-  ,("cardinal_number",PInt)
-  ,("smallint",PInt)
-  ,("boolean",PBoolean)
-  ,("bool",PBoolean)
-  ,("timestamptz",PTimestamp (Just utc))
-  ,("timestamp",PTimestamp (Just utc))
-  ,("timestamp with time zone",PTimestamp (Just utc))
-  ,("timestamp without time zone",PTimestamp (Just utc))
-  ,("interval", PInterval)
-  ,("date" ,PDate)
-  ,("time",PDayTime)
-  ,("time with time zone" , PDayTime)
-  ,("time without time zone" , PDayTime)
-  ,("POINT3",PPosition)
-  ,("LINESTRING3",PLineString)
-  ,("box3d",PBounding)
-  ]
-
-ktypeLift :: Ord b => KType (Prim KPrim b) -> Maybe (KType (Prim KPrim b))
-ktypeLift i = (M.lookup i  postgresLiftPrim )
-
-ktypeRec v@(KOptional i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KArray i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KInterval i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KSerial i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KDelayed i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(Primitive i ) = ktypeLift v
-
-mapKeyType :: FKey (KType PGPrim) -> FKey (KType (Prim KPrim (Text,Text)))
-mapKeyType  = fmap mapKType
-
-mapKType :: KType PGPrim -> KType CorePrim
-mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec (fmap textToPrim i)
-
-textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)
-textToPrim (AtomicPrim (s,i)) = case  HM.lookup i  postgresPrim of
-  Just k -> AtomicPrim k -- $ fromMaybe k (M.lookup k (M.fromList postgresLiftPrim ))
-  Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
-textToPrim (RecordPrim i) =  (RecordPrim i)
-
-preconversion i =  join $ (\t -> M.lookup (i,t) (postgresLiftPrimConv)) <$> ktypeLift  i
-
-conversion i = fromMaybe (id,id) $ preconversion i
-
-topconversion v@(KDelayed n ) =   preconversion v <|> fmap lif (topconversion n )
-  where
-    lif (a,b) = ((\(DelayedTB1 i) -> DelayedTB1 (fmap a i)), (\(DelayedTB1 i) -> DelayedTB1 (fmap b  i )))
-topconversion v@(KSerial n ) =   preconversion v <|> fmap lif (topconversion n )
-  where
-    lif (a,b) = ((\(SerialTB1 i) -> SerialTB1 (fmap a i)), (\(SerialTB1 i) -> SerialTB1 (fmap b  i )))
-topconversion v@(KOptional n ) =   preconversion v <|> fmap lif (topconversion n )
-  where
-    lif (a,b) = ((\(LeftTB1 i) -> LeftTB1 (fmap a i)), (\(LeftTB1 i) -> LeftTB1 (fmap b  i )))
-topconversion v@(KArray n) =  preconversion v <|> fmap lif (topconversion n )
-  where
-    lif (a,b) = ((\(ArrayTB1 i) -> ArrayTB1 (fmap a i)), (\(ArrayTB1 i) -> ArrayTB1 (fmap b  i )))
-topconversion v@(KInterval n) =  preconversion v <|> fmap lif (topconversion n )
-  where
-    lif (a,b) = ((\(IntervalTB1 i) -> IntervalTB1 (fmap a i)), (\(IntervalTB1 i) -> IntervalTB1 (fmap b  i )))
-topconversion v@(Primitive i) =  preconversion v
 
 
 

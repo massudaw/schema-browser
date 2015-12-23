@@ -7,6 +7,7 @@ import Control.Arrow
 import qualified Types.Index as G
 import Step
 import System.Info (os)
+import Postgresql (mapKeyType)
 import Network.Wreq
 import System.Process (rawSystem)
 import System.Exit    (ExitCode(..))
@@ -216,7 +217,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                             return $ maybe (reftb) (unTB1 . apply (TB1 reftb) . PAtom) pti) reftb ) getref
                         liftIO$ print patch
                         return $ FKT ref fk   patch ))
-               funL = funO  True (mapKType $ exchange trefname $ keyType k) vk
+               funL = funO  True (exchange trefname $ keyType k) vk
                funR = funO  True ( keyType k) vk
                mergeFun = do
                           (l,r) <- liftA2 (,) funL funR
