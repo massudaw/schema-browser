@@ -12,7 +12,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module Patch
+module Types.Patch
   (
   -- Class Patch Interface
   Compact (..)
