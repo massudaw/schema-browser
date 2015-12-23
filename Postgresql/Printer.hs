@@ -57,9 +57,11 @@ import Types
 
 
 
+dropTable :: Table -> Text
 dropTable r= "DROP TABLE "<> rawFullName r
 
 
+-- createTable :: Table -> Text
 createTable r@(Raw sch _ _ _ _ tbl _ _ pk _ fk inv attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
   where
     commands = (renderAttr <$> S.toList attr ) <> [renderPK] <> fmap renderFK (S.toList fk)
@@ -107,6 +109,7 @@ getInlineRec' tb = L.filter (\i -> match $  unComp i) $ attrs
         match (Attr _ _ ) = False
         match (IT _ i ) = isTableRec i
         match (FKT _ _ i ) = False
+
 
 expandTable ::  TB3  (Labeled Text) Key  () -> Writer [Text] Text
 expandTable (DelayedTB1 (Just tb)) = expandTable tb
@@ -248,6 +251,8 @@ selectQuery r = if L.null (snd withDecl )
 
 isFilled =  not . L.null
 
+expandQuery left (ArrayTB1 (t:| _) ) =  expandQuery left t
+expandQuery left (LeftTB1 (Just t)) =  expandQuery left t
 expandQuery left (DelayedTB1 (Just t)) = return ""--  expandQuery left t
 expandQuery left t@(TB1 (meta, m))
 --    | isTableRec t  || isFilled (getInlineRec t)  = return "" -- expandTable t
@@ -261,6 +266,8 @@ tableType (TB1 (m,_)) = kvMetaFullName  m
 
 
 expandJoin :: Bool -> [Compose (Labeled Text) (TB (Labeled Text)) Key ()] -> Labeled Text (TB (Labeled Text) Key ()) -> Writer [Text] Text
+expandJoin left env (Unlabeled  (IT i (LeftTB1 (Just tb) )))
+    = expandJoin True env $ Unlabeled (IT i tb)
 expandJoin left env (Labeled l (IT i (LeftTB1 (Just tb) )))
     = expandJoin True env $ Labeled l (IT i tb)
 expandJoin left env (Labeled l (IT i (ArrayTB1 (tb :| _ ) )))
