@@ -1,16 +1,7 @@
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE RankNTypes #-}
 
 module Query
@@ -185,12 +176,9 @@ rawFullName = showTable
 
 
 allKVRec :: Ord f => TB2 f Showable -> [FTB Showable]
-{-allKVRec (DelayedTB1 i) = maybe mempty allKVRec i
-allKVRec (LeftTB1 i) = maybe mempty allKVRec i
-allKVRec (ArrayTB1 i) = mconcat $ allKVRec <$> i
--}
-
 allKVRec = concat . F.toList . fmap allKVRec'
+
+allKVRec' :: Ord k => TBData k  Showable -> [FTB Showable]
 allKVRec'  t@(m, e)=  concat $  F.toList (go . unTB <$> (_kvvalues $ unTB $ eitherDescPK t))
   where
         go  (FKT _  _ tb) =  allKVRec  tb
