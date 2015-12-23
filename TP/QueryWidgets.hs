@@ -467,17 +467,15 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
 addElemFin e = liftIO . addFin e .pure
 
 
-onBin bin p x y = bin (p x) (p y)
-
 
 unConstraint :: Set Key -> TBData Key Showable -> G.GiST (G.TBIndex Key Showable) (TBData Key Showable) -> Bool
 unConstraint un v m = isJust . lookGist un v $ m
 
 lookGist un pk  = safeHead . G.search (tbpred un pk)
 
-
-tbpred un v = tbjust  $ (traverse (traverse unSOptional' ) $getUn un v)
-tbjust = G.Idex . justError ""
+tbpred un  = tbjust  . traverse (traverse unSOptional') .getUn un
+  where
+    tbjust = G.Idex . justError "cant be empty"
 
 createUn :: Set Key -> G.GiST (G.TBIndex Key(Showable)) (TBData Key Showable) -> G.GiST (G.TBIndex Key(Showable)) (TBData Key Showable)
 createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ traverse (traverse unSOptional' ) $ getUn un i ) . G.toList . traceShow ("createUn",un)
@@ -1030,25 +1028,25 @@ validOp = ["&&","<@","@>","<",">","=","/=","<=",">="]
 readValid = (\v -> if elem v validOp then Just v else Nothing)
 
 sortFilterUI conv ix bh  = do
-  let
-      step t = case t of
-              Just True -> Just False
-              Just False -> Nothing
-              Nothing -> Just True
-  dv <- UI.div # sink text ((\(a,b,_) -> conv (a,b) )<$> bh)
-  op <- UI.input # set UI.style [("width","50px")]
-  vf <- UI.input # set UI.style [("width","80px")]
-  fi <- UI.button # set text "go"
-  let opE = UI.valueChange op
-      vfE =  UI.valueChange vf
-  opB <- stepper "" opE
-  vfB <- stepper "" vfE
-  let
-      ev0 = flip (\(l,t,op,vf)-> const (l,step t,op,vf)) <$>  UI.click dv
-      ev1 = flip (\(l,t,op,vf) opn -> (l,t,(readValid opn) ,vf)) <$>  opB <@ UI.click fi
-      ev2 = flip (\(l,t,op,vf) vfn -> (l,t,op , (readType (mapKType $ keyType l) vfn))) <$>  vfB <@ UI.click fi
-  block <- UI.div # set children [dv,op,vf,fi]
-  return $ TrivialWidget (tidings bh ((\ini@(l,t,op) f -> (\(l,t,op,v) -> (l , t ,liftA2 (,) op v)) $ f (l,t,fmap fst op , fmap snd op) ) <$> bh <@> (concatenate <$> unions [ev0,ev1,ev2]) )) block
+    let
+        step t = case t of
+                Just True -> Just False
+                Just False -> Nothing
+                Nothing -> Just True
+    dv <- UI.div # sink text ((\(a,b,_) -> conv (a,b) )<$> bh)
+    op <- UI.input # set UI.style [("width","50px")]
+    vf <- UI.input # set UI.style [("width","80px")]
+    fi <- UI.button # set text "go"
+    let opE = UI.valueChange op
+        vfE =  UI.valueChange vf
+    opB <- stepper "" opE
+    vfB <- stepper "" vfE
+    let
+        ev0 = flip (\(l,t,op,vf)-> const (l,step t,op,vf)) <$>  UI.click dv
+        ev1 = flip (\(l,t,op,vf) opn -> (l,t,(readValid opn) ,vf)) <$>  opB <@ UI.click fi
+        ev2 = flip (\(l,t,op,vf) vfn -> (l,t,op , (readType (mapKType $ keyType l) vfn))) <$>  vfB <@ UI.click fi
+    block <- UI.div # set children [dv,op,vf,fi]
+    return $ TrivialWidget (tidings bh ((\ini@(l,t,op) f -> (\(l,t,op,v) -> (l , t ,liftA2 (,) op v)) $ f (l,t,fmap fst op , fmap snd op) ) <$> bh <@> (concatenate <$> unions [ev0,ev1,ev2]) )) block
 
 
 

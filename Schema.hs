@@ -4,6 +4,7 @@
 module Schema where
 
 import Types
+import Postgresql.Printer
 import qualified Types.Index as G
 import qualified NonEmpty as Non
 import Control.Monad.Writer

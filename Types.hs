@@ -92,6 +92,8 @@ unSOptional' (LeftTB1 i ) = i
 unSOptional' (SerialTB1 i )  = i
 unSOptional' i   = Just i
 
+unSComposite (ArrayTB1 i) = i
+unSComposite i = errorWithStackTrace ("unSComposite " <> show i)
 
 unSDelayed (DelayedTB1 i) = i
 unSDelayed i = traceShow ("unSDelayed No Pattern Match" <> show i) Nothing
@@ -1044,4 +1046,12 @@ getAttr (m, k) = traComp (concat . F.toList) k
 
 getUn un (m, k) =  L.sortBy (comparing fst ) $ concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k) un ) (  _kvvalues (unTB k))))
 
+
+inlineName (KOptional i) = inlineName i
+inlineName (KArray a ) = inlineName a
+inlineName (Primitive (RecordPrim (s, i)) ) = i
+
+inlineFullName (KOptional i) = inlineFullName i
+inlineFullName (KArray a ) = inlineFullName a
+inlineFullName (Primitive (RecordPrim (s, i)) ) = s <> "." <> i
 

@@ -1,7 +1,9 @@
 {-# LANGUAGE ConstraintKinds,TypeFamilies ,DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,ScopedTypeVariables,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 module PostgresQuery where
+
 import Types
 import Control.Monad
+import Postgresql.Printer
 import Utils
 import GHC.Stack
 import Schema
@@ -36,7 +38,6 @@ import qualified Data.Set as S
 import qualified Database.PostgreSQL.Simple.ToField as TF
 import qualified Database.PostgreSQL.Simple.FromRow as FR
 import Database.PostgreSQL.Simple
--- import Data.GraphViz (preview)
 
 
 insertPatch
