@@ -262,7 +262,7 @@ labelCase inf a old wid = do
     return $ TrivialWidget (triding wid) el
 
 refTables inf table = do
-        ((DBVar2 tmvard _ _ vpdiff _ _ ),res)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
+        ((DBVar2 tmvard _  vpdiff _ _ ),res)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
         let update = foldl'(flip (\p-> fmap (flip apply p)))
         bres <- accumB res (flip update <$> rumors vpdiff)
         let

@@ -84,14 +84,13 @@ topconversion v@(KInterval n) =  preconversion v <|> fmap lif (topconversion n )
 topconversion v@(Primitive i) =  preconversion v
 
 
-postgresLiftPrim :: Ord b => Map (KType (Prim KPrim b)) (KType (Prim KPrim b))
-postgresLiftPrim =
-  M.fromList [(Primitive (AtomicPrim PBounding ), KInterval (Primitive (AtomicPrim PPosition)))]
 
 postgresLiftPrimConv :: Ord b => Map (KType (Prim KPrim b),KType (Prim KPrim b))  ( FTB  Showable -> FTB Showable , FTB Showable -> FTB Showable )
 postgresLiftPrimConv =
   M.fromList [((Primitive (AtomicPrim PBounding ), KInterval (Primitive (AtomicPrim PPosition)) ), ((\(TB1 (SBounding (Bounding i) )) -> IntervalTB1 (fmap   (TB1. SPosition ) i)) , (\(IntervalTB1 i) -> TB1 $ SBounding $ Bounding $ (fmap (\(TB1 (SPosition i)) -> i)) i)))]
 
+postgresLiftPrim :: Ord b => Map (KType (Prim KPrim b)) (KType (Prim KPrim b))
+postgresLiftPrim = M.fromList $ M.keys postgresLiftPrimConv
 
 postgresPrim :: HM.HashMap Text KPrim
 postgresPrim =

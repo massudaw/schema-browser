@@ -63,8 +63,22 @@ main = do
   smvar <- newMVar M.empty
   plugs smvar (argsToState $ tail args)  plugList
   poller smvar (argsToState $ tail args)  plugList False
+
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup smvar  (tail args))
   print "Finish"
+
+addStats schema = do
+  let metaschema = meta schema
+  varmap <- liftIO$ readMVar ( mvarMap schema)
+  let stats = lookTable metaschema "table_stats"
+  (dbpol,(_,polling))<- liftIO$ transaction metaschema $ eventTable metaschema stats  Nothing Nothing [] []
+  let
+    -- row :: Text ->  Int -> TBData Text Showable
+    row t s ls = tblist . fmap _tb $ [Attr "schema_name" (TB1 (SText (schemaName schema ) )), Attr "table_name" (TB1 (SText t)) , Attr "size" (TB1 (SNumeric s)), Attr "loadedsize" (TB1 (SNumeric ls)) ]
+    lrow t dyn st = liftTable' metaschema "table_stats" . row t (maybe (G.size dyn) (maximum .fmap fst ) $  nonEmpty $  F.toList st) $ (G.size dyn)
+    lookdiff tb row =  maybe (Just $ patch row ) (flip diff row) (G.lookup (G.Idex (getPKM row)) tb)
+  mapM_ (\(m,var)->
+    onEventIO ( lookdiff <$> facts (collectionTid dbpol ) <@> rumors (lrow (_kvname m) <$> collectionTid  var  <*> idxTid var)  ) (traverse (putMVar (patchVar dbpol) . pure))) ({-filter ((/="table_stats"). _kvname . fst) $ -} M.toList  varmap)
 
 
 setup
@@ -78,7 +92,7 @@ setup smvar args w = void $ do
   let he = const True <$> UI.hover hoverBoard
   bhe <-stepper True he
   menu <- checkedWidget (tidings bhe he)
-  nav  <- buttonDivSet  ["Nav","Poll","Change","Exception"] (pure $ Just "Nav" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonDivSet  ["Nav","Poll","Stats","Change","Exception"] (pure $ Just "Nav" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   chooserDiv <- UI.div # set children  ([getElement menu] <> chooserItens <> [getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end"),("height","7vh"),("width","100%")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
@@ -93,6 +107,9 @@ setup smvar args w = void $ do
               set UI.class_ "row"
         "Change" -> do
             dash <- metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ) ]
+            element body # set UI.children [dash] # set UI.class_ "row"
+        "Stats" -> do
+            dash <- metaAllTableIndexV inf "table_stats" [("schema_name",TB1 $ SText (schemaName inf) ) ]
             element body # set UI.children [dash] # set UI.class_ "row"
         "Exception" -> do
             dash <- metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ) ]
@@ -163,7 +180,7 @@ databaseChooser smvar sargs = do
         conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> (BS.pack $  dbn sargs) ) -- <> " sslmode= require")
         execute_ conn "set bytea_output='hex'"
         let call = if  reset then keyTablesInit else keyTables
-        case schemaN of
+        schm <- case schemaN of
           "gmail" ->  do
               metainf <- keyTables smvar dbConn conn ("metadata",T.pack $ user ) Nothing postgresOps plugList
               (dbmeta ,_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []  [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  "wesley.massuda@gmail.com"))]
@@ -174,6 +191,8 @@ databaseChooser smvar sargs = do
                     where [a,b,c,d] = fmap TB1 $ F.toList $ snd $ unTB1 v :: [FTB Showable]
               call smvar dbConn conn (schemaN,T.pack $ user ) (Just ("me",td )) gmailOps plugList
           i -> call smvar dbConn conn (schemaN,T.pack user) Nothing postgresOps plugList
+        addStats schm
+        return schm
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   chooserT <-  mapTEvent (traverse genSchema) formLogin
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schema , getElement dbsW]
@@ -222,6 +241,9 @@ chooserTable inf kitems i = do
             span <- viewerKey inf table
             element body # set UI.children [span]
         "Viewer" -> do
+            span <- viewer inf (justError "no table with pk" $ M.lookup table (pkMap inf)) Nothing
+            element body # set UI.children [span]
+        "Stats" -> do
             span <- viewer inf (justError "no table with pk" $ M.lookup table (pkMap inf)) Nothing
             element body # set UI.children [span]
         ) $ liftA2 (,) (triding nav) bBset

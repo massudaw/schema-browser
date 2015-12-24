@@ -388,7 +388,7 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  url
 
 
 createEmail = StatefullPlugin "Create Email" "messages"
-  [(([("plain",atPrim (PMime "plain/text") )],[]),generateEmail)]
+  [(([("plain",atPrim (PMime "text/plain") )],[]),generateEmail)]
 
 generateEmail = BoundedPlugin2  "Generate Email" tname url
   where

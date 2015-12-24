@@ -4,10 +4,11 @@ import qualified NonEmpty as Non
 import Control.Lens
 import Control.Exception
 import Control.Arrow
+import qualified Data.HashMap.Strict as HM
+import Data.Time
 import qualified Types.Index as G
 import Step
 import System.Info (os)
-import Postgresql (mapKeyType)
 import Network.Wreq
 import System.Process (rawSystem)
 import System.Exit    (ExitCode(..))
@@ -39,6 +40,7 @@ import Types
 import Types.Patch
 import RuntimeTypes
 import qualified Data.Map as M
+import Data.Map (Map)
 import Debug.Trace
 import Data.List (find,intercalate)
 import qualified Reactive.Threepenny as R
@@ -284,3 +286,74 @@ simpleHttpHeader headers url = liftIO $ withManager $ \man -> do
 -- setConnectionClose :: Request m -> Request m
 setConnectionClose h req = req{requestHeaders = ("Connection", "close") : (h ++ requestHeaders req)}
 -}
+
+preconversion i =  join $ (\t -> M.lookup (i,t) (gmailLiftPrimConv )) <$> ktypeLift  i
+
+conversion i = fromMaybe (id,id) $ preconversion i
+
+topconversion v@(KDelayed n ) =   preconversion v <|> fmap lif (topconversion n )
+  where
+    lif (a,b) = ((\(DelayedTB1 i) -> DelayedTB1 (fmap a i)), (\(DelayedTB1 i) -> DelayedTB1 (fmap b  i )))
+topconversion v@(KSerial n ) =   preconversion v <|> fmap lif (topconversion n )
+  where
+    lif (a,b) = ((\(SerialTB1 i) -> SerialTB1 (fmap a i)), (\(SerialTB1 i) -> SerialTB1 (fmap b  i )))
+topconversion v@(KOptional n ) =   preconversion v <|> fmap lif (topconversion n )
+  where
+    lif (a,b) = ((\(LeftTB1 i) -> LeftTB1 (fmap a i)), (\(LeftTB1 i) -> LeftTB1 (fmap b  i )))
+topconversion v@(KArray n) =  preconversion v <|> fmap lif (topconversion n )
+  where
+    lif (a,b) = ((\(ArrayTB1 i) -> ArrayTB1 (fmap a i)), (\(ArrayTB1 i) -> ArrayTB1 (fmap b  i )))
+topconversion v@(KInterval n) =  preconversion v <|> fmap lif (topconversion n )
+  where
+    lif (a,b) = ((\(IntervalTB1 i) -> IntervalTB1 (fmap a i)), (\(IntervalTB1 i) -> IntervalTB1 (fmap b  i )))
+topconversion v@(Primitive i) =  preconversion v
+
+-- Type Conversions
+--
+gmailLiftPrim :: Ord b => Map (KType (Prim KPrim b)) (KType (Prim KPrim b))
+gmailLiftPrim =
+  M.fromList []
+
+gmailLiftPrimConv :: Ord b => Map (KType (Prim KPrim b),KType (Prim KPrim b))  ( FTB  Showable -> FTB Showable , FTB Showable -> FTB Showable )
+gmailLiftPrimConv =
+  M.fromList []
+
+
+gmailPrim :: HM.HashMap Text KPrim
+gmailPrim =
+  HM.fromList
+  [("text",PText)
+  ,("pdf",PMime "application/pdf")
+  ,("ofx",PMime "application/x-ofx")
+  ,("jpg",PMime "image/jpg")
+  ,("email",PMime "text/plain")
+  ,("html",PMime "text/html")
+  ,("double precision",PDouble)
+  ,("integer",PInt)
+  ,("boolean",PBoolean)
+  ,("base64url",PText)
+  ]
+
+ktypeLift :: Ord b => KType (Prim KPrim b) -> Maybe (KType (Prim KPrim b))
+ktypeLift i = (M.lookup i  gmailLiftPrim )
+
+ktypeRec v@(KOptional i) = ktypeLift v <|> ktypeRec i
+ktypeRec v@(KArray i) = ktypeLift v <|> ktypeRec i
+ktypeRec v@(KInterval i) = ktypeLift v <|> ktypeRec i
+ktypeRec v@(KSerial i) = ktypeLift v <|> ktypeRec i
+ktypeRec v@(KDelayed i) = ktypeLift v <|> ktypeRec i
+ktypeRec v@(Primitive i ) = ktypeLift v
+
+mapKeyType :: FKey (KType PGPrim) -> FKey (KType (Prim KPrim (Text,Text)))
+mapKeyType  = fmap mapKType
+
+mapKType :: KType PGPrim -> KType CorePrim
+mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec (fmap textToPrim i)
+
+textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)
+textToPrim (AtomicPrim (s,i)) = case  HM.lookup i  gmailPrim of
+  Just k -> AtomicPrim k
+  Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
+textToPrim (RecordPrim i) =  (RecordPrim i)
+
+

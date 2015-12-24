@@ -88,7 +88,7 @@ queryAuthorization conn schema user = do
 
 tableSizes = "SELECT c.relname,c.reltuples::bigint AS estimate FROM   pg_class c JOIN   pg_namespace n ON c.relkind = 'r' and n.oid = c.relnamespace WHERE n.nspname = ? "
 
-fromShowable2 i j | traceShow (i,j) False = errorWithStackTrace ""
+-- fromShowable2 i j | traceShow (i,j) False = errorWithStackTrace ""
 fromShowable2 i@(Primitive (AtomicPrim PText )) v = fromShowable i $  BS.drop 1 (BS.init v)
 fromShowable2 i v = fromShowable i v
 
@@ -144,6 +144,7 @@ keyTablesInit schemaVar conn userconn (schema,user) oauth ops pluglist = do
        metaschema <- if (schema /= "metadata")
           then Just <$> keyTables  schemaVar conn userconn ("metadata",user) oauth ops pluglist
           else return Nothing
+
        let inf = InformationSchema schema user oauth i1 (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  i2  i3 sizeMapt mvar  userconn conn metaschema ops pluglist
        var <- takeMVar schemaVar
        putMVar schemaVar (M.insert schema inf var)
@@ -155,26 +156,19 @@ createTableRefs i = do
       diffIni :: [TBIdx Key Showable]
       diffIni = []
   midx <-  newMVar M.empty
-  mnew <-  newMVar G.empty
   mdiff <-  newMVar diffIni
-  (e,h) <- liftIO $R.newEvent
-  bh <- R.stepper G.empty e
   (ediff,hdiff) <- liftIO $R.newEvent
+  bh <- R.accumB G.empty (flip (L.foldl' apply) <$> ediff )
   bhdiff <- R.stepper diffIni ediff
   (eidx ,hidx) <- liftIO $R.newEvent
   bhidx <- R.stepper M.empty eidx
   liftIO$ forkIO $ forever $ do
       (hidx =<< (takeMVar midx ))
   liftIO$ forkIO $ forever $ do
-      (h =<<  takeMVar mnew )
-  liftIO$ forkIO $ forever $ do
       patches <- takeMVar mdiff
-      bstate <- R.currentValue bh
       when (not $ L.null patches) $ do
-        let edited = L.foldl' apply bstate  patches
         hdiff patches
-        (h edited)
-  return (tableMeta i,  DBVar2  mdiff midx mnew (R.tidings bhdiff ediff) (R.tidings bhidx eidx) (R.tidings bh e))
+  return (tableMeta i,  DBVar2  mdiff midx (R.tidings bhdiff ediff) (R.tidings bhidx eidx) (R.tidings bh (L.foldl' apply  <$> bh R.<@> ediff )))
 
 
 -- Search for recursive cycles and tag the tables
@@ -292,45 +286,6 @@ logTableModification inf (TableModification Nothing table i) = do
   return (TableModification (Just id) table i )
 
 
-keyTables' con rcon s i j = do
-  sch <- newMVar M.empty
-  keyTables sch con rcon s i j []
-withInf d s f = withConn d (f <=< (\conn -> keyTables' conn conn (s,"postgres") Nothing undefined ))
-
-withConnInf d s f = withConn d (\conn ->  f =<< liftIO ( keyTables'  conn conn (s,"postgres") Nothing undefined ) )
-
-withTestConnInf d s f = withTestConn d (\conn ->  f =<< liftIO ( keyTables'  conn conn (s,"postgres") Nothing undefined ) )
-
-testParse' db sch q = withTestConnInf db sch (\inf -> do
-                                       let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
-                                           rpd = rp -- forceDesc True (markDelayed True rp)
-                                           rpq = selectQuery rpd
-                                       print $ tableMeta $ lookTable inf q
-                                       print rp
-                                       print rpq
-                                       q <- queryWith_ (fromRecord (unTlabel' rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
-                                       return $ q
-                                           )
-
-
-testParse db sch q = withConnInf db sch (\inf -> do
-                                       let rp = tableView (tableMap inf) (fromJust $ M.lookup q (tableMap inf))
-                                           rpd = rp -- forceDesc True (markDelayed True rp)
-                                           rpq = selectQuery rpd
-                                       -- print $ tableMeta $ lookTable inf q
-                                       -- print rp
-                                       -- print rpq
-                                       q <- queryWith_ (fromRecord (unTlabel' rpd) ) (conn  inf) (fromString $ T.unpack $ rpq)
-                                       return $ q
-                                           )
-
-testMetaQuery q = testParse' "test" "metadata"  q
-testFireMetaQuery q = testParse "incendio" "metadata"  q
-testFireQuery q = testParse "incendio" "incendio"  q
-testNutrition q = testParse "incendio" "nutrition"  q
-testAcademia q = testParse "academia" "academia"  q
-
-
 
 dbTable mvar table = do
     mmap <- readMVar mvar
@@ -409,7 +364,7 @@ atTable ::  (MonadReader
 atTable k = do
   i <- ask
   k <- liftIO$ dbTable i k
-  (\(DBVar2 _ _ _  _ _ c)-> liftIO $ R.currentValue (R.facts c)) k
+  (\(DBVar2 _ _   _ _ c)-> liftIO $ R.currentValue (R.facts c)) k
 
 joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  [TBData Key Showable] -> TransactionM ( FTB (TBData Key Showable))
 joinRelT rel ref tb table

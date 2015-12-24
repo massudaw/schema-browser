@@ -55,7 +55,7 @@ refTable  inf table  = do
 tbpred un v = G.Idex $  justError "" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
 
 createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key Showable) (TBData Key Showable)
-createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un i ) .  traceShow ("createUn",un)
+createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un i )
   where transPred v = G.Idex $ justError "invalid pred" (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
 
 eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
@@ -113,7 +113,7 @@ fullInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData
 fullInsert' inf ((k1,v1) )  = do
    let proj = _kvvalues . unTB
    ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
-   (_,(_,l)) <- eventTable inf (lookTable inf (traceShow (k1,v1) $_kvname k1)) Nothing Nothing [] []
+   (_,(_,l)) <- eventTable inf (lookTable inf (_kvname k1)) Nothing Nothing [] []
    if  isJust $ G.lookup (tbpred (S.fromList $ _kvpk k1)  ret) l
       then do
         return ret
@@ -133,7 +133,7 @@ noInsert' inf (k1,v1)   = do
 
 
 transaction :: InformationSchema -> TransactionM a -> IO a
-transaction inf log = withTransaction (conn inf) $ do
+transaction inf log = do -- withTransaction (conn inf) $ do
   -- print "Transaction Run Log"
   (md,mods)  <- runWriterT log
   -- print "Transaction Update"

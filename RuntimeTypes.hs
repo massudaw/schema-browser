@@ -68,7 +68,6 @@ data DBVar2 k v=
   DBVar2
   { patchVar :: MVar [TBIdx k v]
   , idxVar :: MVar (Map [Column k v ] (Int,Map Int PageToken))
-  , collectionVar :: MVar (TableIndex k v)
   , patchTid :: R.Tidings [TBIdx k v]
   , idxTid :: R.Tidings (Map [Column k v ] (Int,Map Int PageToken))
   , collectionTid :: R.Tidings (TableIndex k v )
