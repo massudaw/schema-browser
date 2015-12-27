@@ -249,7 +249,9 @@ data Rel k
 
 deriving instance Generic (Identity a)
 
-
+instance Binary Sess.Session where
+  put i = return ()
+  get = error ""
 instance Binary Order
 instance Binary a => Binary (NonEmpty a) where
 instance Binary a => Binary (KType a)
@@ -260,6 +262,36 @@ instance Binary a => Binary (Identity a)
 instance (Binary (f (KV (Compose f (TB f)) g k)) , Binary (f (KV (Compose f (TB f)) g ())) , Binary (f (TB f g ())) ,Binary (f (TB f g k)), Binary k ,Binary g) => Binary (TB f g k )
 instance Binary a => Binary (FTB a)
 instance Binary k => Binary (KVMetadata k )
+
+instance Binary a => Binary (Interval.Extended a) where
+  put (Interval.Finite a ) = B.put a
+  get = Interval.Finite <$> B.get
+instance Binary a => Binary ( Interval.Interval a)  where
+  put (Interval.Interval i j ) = B.put i >> B.put j
+  get = liftA2 Interval.Interval B.get B.get
+
+
+instance Binary Position
+instance Binary Bounding
+instance Binary LineString
+instance Binary Showable
+instance Binary DiffTime where
+  put i = B.put (round  (realToFrac i :: Double) :: Int )
+  get  = secondsToDiffTime <$> B.get
+
+instance Binary LocalTime where
+  put i = B.put (realToFrac $ utcTimeToPOSIXSeconds $ localTimeToUTC utc i :: Double)
+  get = utcToLocalTime utc . posixSecondsToUTCTime . realToFrac <$> (B.get :: B.Get Double)
+
+instance Binary Day where
+  put (ModifiedJulianDay i ) = B.put i
+  get = ModifiedJulianDay <$> B.get
+
+instance Binary TimeOfDay where
+  put i = B.put (timeOfDayToTime  i )
+  get = timeToTimeOfDay  <$> B.get
+
+
 
 data TB f k a
   = Attr
@@ -427,42 +459,12 @@ instance Show a => Show (FKey a)where
 
 showKey k  =   maybe (keyValue k)  (\t -> keyValue k <> "-" <> t ) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::" <> T.pack (show (keyType k) <> "::" <> show (keyModifier k) <> "::" <> show (keyPosition k )  )
 
-
-instance Binary a => Binary (Interval.Extended a) where
-  put (Interval.Finite a ) = B.put a
-  get = Interval.Finite <$> B.get
-instance Binary a => Binary ( Interval.Interval a)  where
-  put (Interval.Interval i j ) = B.put i >> B.put j
-  get = liftA2 Interval.Interval B.get B.get
-
-
-instance Binary Position
-instance Binary Bounding
-instance Binary LineString
-
 newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read,Generic)
 
 newtype Bounding = Bounding (Interval.Interval Position) deriving(Eq,Ord,Typeable,Show,Generic)
 
 newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,Read,Generic)
 
-instance Binary Showable
-
-instance Binary DiffTime where
-  put i = B.put (round  (realToFrac i :: Double) :: Int )
-  get  = secondsToDiffTime <$> B.get
-
-instance Binary LocalTime where
-  put i = B.put (realToFrac $ utcTimeToPOSIXSeconds $ localTimeToUTC utc i :: Double)
-  get = utcToLocalTime utc . posixSecondsToUTCTime . realToFrac <$> (B.get :: B.Get Double)
-
-instance Binary Day where
-  put (ModifiedJulianDay i ) = B.put i
-  get = ModifiedJulianDay <$> B.get
-
-instance Binary TimeOfDay where
-  put i = B.put (timeOfDayToTime  i )
-  get = timeToTimeOfDay  <$> B.get
 
 data Showable
   = SText !Text
@@ -486,10 +488,6 @@ instance Eq Sess.Session where
 
 instance Ord Sess.Session where
   compare i j = compare 1 2
-
-instance Binary Sess.Session where
-  put i = return ()
-  get = error ""
 
 type SqlOperation = SqlOperationK Key
 data SqlOperationK k

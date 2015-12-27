@@ -9,9 +9,11 @@ import Query
 import Text
 import qualified Types.Index as G
 import Poller
+import Data.Bifunctor (first)
 import Data.List (foldl')
 import Debug.Trace
 import Types
+import SchemaQuery
 import Plugins
 import TP.Widgets
 import SchemaQuery
@@ -61,24 +63,15 @@ main :: IO ()
 main = do
   args <- getArgs
   smvar <- newMVar M.empty
-  plugs smvar (argsToState $ tail args)  plugList
-  poller smvar (argsToState $ tail args)  plugList False
+  let db = argsToState (tail args)
+  -- Load Metadata
+  conn <- connectPostgreSQL (connRoot db)
+  metas <- keyTables  smvar conn  conn ("metadata", T.pack $ user db) Nothing postgresOps plugList
+  plugs smvar db plugList
+  poller smvar db plugList False
 
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup smvar  (tail args))
   print "Finish"
-
-addStats schema = do
-  let metaschema = meta schema
-  varmap <- liftIO$ readMVar ( mvarMap schema)
-  let stats = lookTable metaschema "table_stats"
-  (dbpol,(_,polling))<- liftIO$ transaction metaschema $ eventTable metaschema stats  Nothing Nothing [] []
-  let
-    -- row :: Text ->  Int -> TBData Text Showable
-    row t s ls = tblist . fmap _tb $ [Attr "schema_name" (TB1 (SText (schemaName schema ) )), Attr "table_name" (TB1 (SText t)) , Attr "size" (TB1 (SNumeric s)), Attr "loadedsize" (TB1 (SNumeric ls)) ]
-    lrow t dyn st = liftTable' metaschema "table_stats" . row t (maybe (G.size dyn) (maximum .fmap fst ) $  nonEmpty $  F.toList st) $ (G.size dyn)
-    lookdiff tb row =  maybe (Just $ patch row ) (flip diff row) (G.lookup (G.Idex (getPKM row)) tb)
-  mapM_ (\(m,var)->
-    onEventIO ( lookdiff <$> facts (collectionTid dbpol ) <@> rumors (lrow (_kvname m) <$> collectionTid  var  <*> idxTid var)  ) (traverse (putMVar (patchVar dbpol) . pure))) ({-filter ((/="table_stats"). _kvname . fst) $ -} M.toList  varmap)
 
 
 setup
@@ -180,7 +173,7 @@ databaseChooser smvar sargs = do
         conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> (BS.pack $  dbn sargs) ) -- <> " sslmode= require")
         execute_ conn "set bytea_output='hex'"
         let call = if  reset then keyTablesInit else keyTables
-        schm <- case schemaN of
+        case schemaN of
           "gmail" ->  do
               metainf <- keyTables smvar dbConn conn ("metadata",T.pack $ user ) Nothing postgresOps plugList
               (dbmeta ,_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []  [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  "wesley.massuda@gmail.com"))]
@@ -191,8 +184,6 @@ databaseChooser smvar sargs = do
                     where [a,b,c,d] = fmap TB1 $ F.toList $ snd $ unTB1 v :: [FTB Showable]
               call smvar dbConn conn (schemaN,T.pack $ user ) (Just ("me",td )) gmailOps plugList
           i -> call smvar dbConn conn (schemaN,T.pack user) Nothing postgresOps plugList
-        addStats schm
-        return schm
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   chooserT <-  mapTEvent (traverse genSchema) formLogin
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schema , getElement dbsW]
@@ -203,18 +194,23 @@ attrLine i   = do
   line ( L.intercalate "," (fmap renderShowable .  allKVRec  $ TB1 i))
 
 
+lookAttr k (_,m) = M.lookup (S.singleton (Inline k)) (unKV m)
+
 chooserTable inf kitems i = do
   let initKey = pure . join $ fmap (S.fromList .rawPK) . flip M.lookup (tableMap inf) . T.pack <$> i
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
-  i <- maybe (return ([] :: [(Text,Int)] ))  (\i -> liftIO $ query (rootconn i) (fromString "SELECT table_name,usage from metadata.ordering where schema_name = ?") (Only (schemaName inf))) (metaschema inf)
-  let orderMap = Just $ M.fromList  i
+  (orddb ,(_,orderMap)) <- liftIO $ transaction (meta inf) $ eventTable  (meta inf) (lookTable (meta inf) "ordering" ) (Just 0) Nothing [] []  -- [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
   let renderLabel = (\i -> case M.lookup i (pkMap inf) of
                                        Just t -> T.unpack (translatedName t)
                                        Nothing -> show i )
       filterLabel = ((\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> renderLabel i) ))<$> filterInpBh)
-  bset <- buttonDivSet (L.sortBy (flip $  comparing (\ pkset -> liftA2 M.lookup  (fmap rawName . flip M.lookup (pkMap inf) $ pkset ) orderMap)) kitems)  initKey  (\k -> UI.button # set UI.text (renderLabel k) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow . ($k) <$> filterLabel ))
+      tableUsage orderMap pkset = (lookAttr (lookKey (meta inf) "ordering" "usage" )) $ justError ("no value" <> show (pkset,pk)) $ G.lookup  (G.Idex (first (lookKey (meta inf ) "ordering") <$> pk )) orderMap
+          where  pk = [("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
+  liftIO $ print orderMap
+  -- liftIO $ print (L.sortBy (flip $ comparing tableUsage) kitems )
+  bset <- buttonDivSetT kitems (tableUsage <$> collectionTid orddb ) initKey  (\k -> UI.button # set UI.text (renderLabel k) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow . ($k) <$> filterLabel ))
   let bBset = triding bset
   onEvent (rumors bBset) (\ i ->
       when (isJust (metaschema inf)) $  void (liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )))
@@ -302,7 +298,7 @@ viewerKey inf key = mdo
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
   res2 <- stepper (vp) (rumors vpt)
-  onEvent (pure <$> ediff) (liftIO .  putMVar (patchVar dbtable))
+  onEvent (pure <$> ediff) (liftIO .  putPatch (patchVar dbtable))
   {-onEvent (facts vpt <@ UI.click updateBtn ) (\(oi,oj) -> do
               let up =  (updateEd (schemaOps inf) ) inf table (L.maximumBy (comparing (getPK.TB1)) (F.toList oj)) Nothing (Just 400)
               (l,i,j) <- liftIO $  transaction inf up

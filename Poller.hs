@@ -47,7 +47,7 @@ plugs schm db plugs = do
   p <-transaction inf $ do
      elsFKS <- mapM (loadFKS inf ) els
      mapM (\table -> fullDiffInsert  (meta inf)  table) elsFKS
-  putMVar (patchVar db) (tableDiff <$> catMaybes p)
+  putPatch (patchVar db) (tableDiff <$> catMaybes p)
 
 
 
@@ -107,7 +107,7 @@ poller schm db plugs is_test = do
                         o  <- fmap (liftTable' inf a) <$>   elemp (Just $ mapKey' keyValue inp)
                         let diff' =   join $ (\i j -> diff (j ) (i)) <$>  o <*> Just inp
                         v <- maybe (return Nothing )  (\i -> transaction inf $ (editEd $ schemaOps inf) inf (justError "no test" o) inp ) diff'
-                        (traverse (putMVar (patchVar dbplug). pure) . fmap tableDiff) v
+                        (traverse (putPatch (patchVar dbplug). pure) . fmap tableDiff) v
                         return v
                           )
                       ) . L.transpose . chuncksOf 20 $ evb
@@ -137,8 +137,8 @@ poller schm db plugs is_test = do
                     fktable <- loadFKS (meta inf) (liftTable' (meta inf) "polling_log"  table)
                     p <-fullDiffInsert  (meta inf) fktable
                     return (fktable2,p)
-                traverse (putMVar (patchVar dbplog) .pure ) (fmap tableDiff  p)
-                traverse (putMVar (patchVar dbpol). pure) (maybeToList $ diff curr p2)
+                traverse (putPatch (patchVar dbplog) .pure ) (fmap tableDiff  p)
+                traverse (putPatch (patchVar dbpol). pure) (maybeToList $ diff curr p2)
                 threadDelay (intervalms*10^3)
             else do
                 threadDelay (round $ (*10^6) $  diffUTCTime current start ) )

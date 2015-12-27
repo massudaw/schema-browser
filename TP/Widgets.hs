@@ -3,6 +3,7 @@ module TP.Widgets where
 
 
 import Control.Monad
+import Data.Ord
 import Reactive.Threepenny
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (delete)
@@ -108,7 +109,6 @@ addEvent ev b = do
 
 mapUITEvent body f  = mapTEvent (\i -> evalUI body $ f i )
 
-mapUIEvent body f = mapEvent (\i -> evalUI body $ f i)
 mapDynEvent f x = do
   t <- mapUITEvent (getElement x) f (triding x)
   sub <- UI.div # sink items (pure. element  <$> facts t )
@@ -120,10 +120,10 @@ mapDynEvent f x = do
   return $ TrivialWidget (tidings bh e) sub
 
 
-mapEvent :: (a -> IO b) -> Event a -> UI (Event b)
-mapEvent f x = do
+mapEvent :: MonadIO m => (a -> IO b) -> Event a -> m (Event b)
+mapEvent f x = liftIO$ do
   (e,h) <- liftIO $ newEvent
-  onEvent x (\i -> liftIOLater . void . forkIO $ (f i)  >>= h)
+  onEventIO x (\i -> void . forkIO $ (f i)  >>= h)
   return  e
 
 mapT0Event i f x = fst <$> mapT0EventFin i f x
@@ -202,6 +202,21 @@ rangeBoxes fkbox bp = do
 
 instance Widget (RangeBox a) where
   getElement = _rangeElement
+
+buttonDivSetT :: (Ord b ,Eq a) => [a] -> Tidings (a -> b) -> Tidings (Maybe a)  ->  (a -> UI Element ) -> UI (TrivialWidget a)
+buttonDivSetT ks sort binit   el = mdo
+  buttons <- mapM (buttonString  bv ) ks
+  dv <- UI.div # sink children ((\f -> fmap (fst.snd) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$> facts sort )
+  let evs = foldl (unionWith const) (filterJust $ rumors binit) (snd .snd <$> buttons)
+  v <- currentValue (facts binit)
+  bv <- stepper (maybe (justError "no head" $ safeHead ks) id v) evs
+  return (TrivialWidget (tidings bv evs) dv)
+    where
+      buttonString   bv k = do
+        b <- el k # sink UI.enabled (not . (k==) <$> bv)
+        let ev = pure k <@ UI.click  b
+        return (k,(b,ev))
+
 
 buttonDivSet :: Eq a => [a] -> Tidings (Maybe a)  ->  (a -> UI Element ) -> UI (TrivialWidget a)
 buttonDivSet ks binit   el = mdo

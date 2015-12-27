@@ -7,7 +7,12 @@ import Control.Concurrent
 import Types
 import Data.Unique
 import Types.Index
+import Control.Concurrent.STM.TQueue
+import Control.Concurrent.STM
 import Types.Patch
+import qualified NonEmpty as Non
+import Utils
+import qualified Data.Text as T
 
 import Control.Arrow
 import Data.Text
@@ -18,6 +23,7 @@ import qualified Reactive.Threepenny as R
 import Database.PostgreSQL.Simple
 import Data.Functor.Identity
 import Data.Map (Map)
+import qualified Data.Map as M
 import Data.Set (Set)
 import Control.Monad.Reader
 import Data.Foldable
@@ -66,7 +72,7 @@ pkMap = _pkMapL
 
 data DBVar2 k v=
   DBVar2
-  { patchVar :: MVar [TBIdx k v]
+  { patchVar :: TQueue [TBIdx k v]
   , idxVar :: MVar (Map [Column k v ] (Int,Map Int PageToken))
   , patchTid :: R.Tidings [TBIdx k v]
   , idxTid :: R.Tidings (Map [Column k v ] (Int,Map Int PageToken))
@@ -147,6 +153,14 @@ argsToState  [h,ph,d,u,p,s] = BrowserState h ph d  u p  (Just s)  Nothing
 argsToState  [h,ph,d,u,p] = BrowserState h ph d  u p Nothing Nothing
 argsToState i = errorWithStackTrace (show i)
 
+lookTable :: InformationSchema -> Text -> Table
+lookTable inf t = justError ("no table: " <> T.unpack t) $ M.lookup t (tableMap inf)
+
+lookKey :: InformationSchema -> Text -> Text -> Key
+lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k ) $ M.lookup (t,k) (keyMap inf)
+
+
+putPatch m = atomically . writeTQueue m -- . force
 
 
 data Access a
@@ -162,3 +176,4 @@ type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) IO))
 type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Access Text) () (Maybe (TBData  Text Showable))
 
 makeLenses ''InformationSchema
+

@@ -33,7 +33,7 @@ import Data.Maybe
 import Prelude hiding (head)
 import Data.Foldable (foldl')
 import Database.PostgreSQL.Simple
-import Schema
+-- import Schema
 import qualified Reactive.Threepenny as R
 import System.Time.Extra
 import qualified Data.Text as T
@@ -77,25 +77,26 @@ eventTable inf table page size presort fixed = do
        (fixedmap ,reso) <- liftIO $ currentValue (liftA2 (,) (facts (idxTid dbvar) ) (facts (collectionTid dbvar ) ))
        ini <- case M.lookup fixidx fixedmap of
           Just (sq,mp) -> do
-             liftIO$ putStrLn $ "load existing filter map" <> show (G.size (filterfixed reso), pagesize * (fromMaybe 0 page + 1))
-             if (sq > G.size (filterfixed reso) -- Tabela é maior que a tabela carregada
-                && G.size (filterfixed reso) < pagesize * (fromMaybe 0 page +1) -- O carregado é menor que a página
-               )
+             liftIO$ putStrLn $ "load existing filter map" <> show (sq,G.size (filterfixed reso), pagesize * (fromMaybe 0 page + 1))
+             if ( sq > G.size (filterfixed reso) -- Tabela é maior que a tabela carregada
+                && sq > pagesize * (fromMaybe 0 page + 1) -- Tabela é maior que a página
+                && pagesize * (fromMaybe 0 page +1) > G.size (filterfixed reso)  ) -- O carregado é menor que a página
              then do
                    liftIO$ putStrLn "load offseted new page"
                    let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                    (res,nextToken ,s ) <- (listEd $ schemaOps inf) inf table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
                    let ini = (M.insert fixidx (estLength page pagesize res s  ,(\v -> M.insert ((fromMaybe 0 page +1 )*pagesize) v  mp) $ justError "no token"    nextToken) fixedmap , createUn (S.fromList $ rawPK table)  (fmap unTB1 res)<> reso )
-                   liftIO $ putMVar (patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )
+                   liftIO $ putPatch (patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )
                    liftIO$ putMVar (idxVar dbvar ) (fst ini)
                    return  ini
-                   --return (fixedmap,reso)
-             else return (fixedmap ,reso)
+             else do
+               liftIO$ putStrLn "load offseted existing page"
+               return (fixedmap ,reso)
           Nothing -> do
              liftIO$ putStrLn "create new filter map"
              (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing Nothing size sortList fixed
              let ini = (M.insert fixidx (estLength page pagesize res s ,maybe M.empty (M.singleton pagesize) p) fixedmap , createUn (S.fromList $ rawPK table)    (fmap (\i -> (unTB1 i)) res) <> reso)
-             liftIO $ putMVar (patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )
+             liftIO $ putPatch (patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )
              liftIO$ putMVar (idxVar dbvar ) (fst ini)
              return ini
        return ini
@@ -141,7 +142,7 @@ transaction inf log = do -- withTransaction (conn inf) $ do
   Tra.traverse (\(k,v) -> do
     -- print "GetTable"
     ref <- refTable inf k
-    putMVar (patchVar ref ) v
+    putPatch (patchVar ref ) v
     ) (M.toList aggr)
   --print "Transaction Finish"
   return md

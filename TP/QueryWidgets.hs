@@ -75,6 +75,7 @@ import Step
 import qualified Data.Foldable as F
 import Data.Foldable (foldl')
 import Debug.Trace
+import Control.Concurrent.STM.TQueue
 import qualified Data.Text as T
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -86,7 +87,7 @@ type TBConstraint = TBData CoreKey Showable -> Bool
 type SelPKConstraint = [([Column CoreKey ()],Tidings PKConstraint)]
 type SelTBConstraint = [([Column CoreKey ()],Tidings TBConstraint)]
 
-type RefTables = (Tidings (Collection CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  CoreKey Showable) (TBData CoreKey Showable)), MVar [TBIdx CoreKey Showable] )
+type RefTables = (Tidings (Collection CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  CoreKey Showable) (TBData CoreKey Showable)), TQueue [TBIdx CoreKey Showable] )
 
 --- Plugins Interface Methods
 createFresh :: Text -> InformationSchema -> Text -> KType CorePrim -> IO InformationSchema
@@ -925,7 +926,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> triding itemList), if isReadOnly tb then never else rumors tdi]),diffUp]
       st <- stepper cv sel
 
-      fin <- onEvent (pure <$> ediff) (liftIO .  putMVar tmvard)
+      fin <- onEvent (pure <$> ediff) (liftIO .  putPatch tmvard)
       element itemList # set UI.class_ "col-xs-5"
       element filterInp # set UI.class_ "col-xs-3"
       fk <- if isReadOnly tb

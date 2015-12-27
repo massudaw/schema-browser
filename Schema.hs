@@ -4,6 +4,10 @@
 module Schema where
 
 import Types
+import SchemaQuery
+import Control.Concurrent.STM.TQueue
+import Control.Concurrent.STM
+import TP.Widgets(mapTEvent)
 import Types.Patch
 import qualified Types.Index as G
 
@@ -144,31 +148,40 @@ keyTablesInit schemaVar conn userconn (schema,user) oauth ops pluglist = do
        metaschema <- if (schema /= "metadata")
           then Just <$> keyTables  schemaVar conn userconn ("metadata",user) oauth ops pluglist
           else return Nothing
-
        let inf = InformationSchema schema user oauth i1 (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  i2  i3 sizeMapt mvar  userconn conn metaschema ops pluglist
-       var <- takeMVar schemaVar
-       putMVar schemaVar (M.insert schema inf var)
+       var <- modifyMVar_  schemaVar   (return . M.insert schema inf )
+       addStats inf
        return inf
 
-createTableRefs :: Table -> IO (KVMetadata Key,DBVar )
+takeMany mvar = go . (:[]) =<< readTQueue mvar
+  where
+    go v = do
+      i <- isEmptyTQueue mvar
+      if i
+        then return  (reverse v)
+        else go . (:v) =<< readTQueue mvar
+
+createTableRefs :: Table -> IO (KVMetadata Key,DBVar)
 createTableRefs i = do
+  t <- getCurrentTime
   let
       diffIni :: [TBIdx Key Showable]
       diffIni = []
   midx <-  newMVar M.empty
-  mdiff <-  newMVar diffIni
-  (ediff,hdiff) <- liftIO $R.newEvent
+  mdiff <-  atomically $ newTQueue
+  (ediff,hdiff) <- liftIO $ R.newEvent
   bh <- R.accumB G.empty (flip (L.foldl' apply) <$> ediff )
+  let bh2 = (R.tidings bh (L.foldl' apply  <$> bh R.<@> ediff ))
   bhdiff <- R.stepper diffIni ediff
-  (eidx ,hidx) <- liftIO $R.newEvent
+  (eidx ,hidx) <- liftIO $ R.newEvent
   bhidx <- R.stepper M.empty eidx
   liftIO$ forkIO $ forever $ do
-      (hidx =<< (takeMVar midx ))
-  liftIO$ forkIO $ forever $ do
-      patches <- takeMVar mdiff
-      when (not $ L.null patches) $ do
-        hdiff patches
-  return (tableMeta i,  DBVar2  mdiff midx (R.tidings bhdiff ediff) (R.tidings bhidx eidx) (R.tidings bh (L.foldl' apply  <$> bh R.<@> ediff )))
+      hidx =<< takeMVar midx
+  liftIO$ forkIO $ forever $ (do
+      patches <- atomically $ takeMany mdiff
+      when (not $ L.null $ concat patches) $ do
+        (void $ forkIO $ hdiff (concat patches)`catch` (\e -> print (i ,e :: SomeException)) ) ) `catch` (\e -> print (i ,e :: SomeException))
+  return (tableMeta i,  DBVar2  mdiff midx (R.tidings bhdiff ediff) (R.tidings bhidx eidx) bh2 )
 
 
 -- Search for recursive cycles and tag the tables
@@ -251,13 +264,6 @@ liftField inf tname (IT rel tb) = IT (mapComp (liftField inf tname ) rel) (liftK
     where FKInlineTable tname2  = unRecRel.pathRel  $ justError (show (rel ,rawFKS ta)) $ L.find (\r@(Path i _ _)->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 
-
-
-lookTable :: InformationSchema -> Text -> Table
-lookTable inf t = justError ("no table: " <> T.unpack t) $ M.lookup t (tableMap inf)
-
-lookKey :: InformationSchema -> Text -> Text -> Key
-lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k ) $ M.lookup (t,k) (keyMap inf)
 
 
 newKey name ty p = do
@@ -376,15 +382,24 @@ joinRelT rel ref tb table
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
             tbel = L.find (\(_,i)-> interPointPost rel ref (nonRefAttr  $ F.toList $ _kvvalues $ unTB  i) ) table
 
+addStats schema = do
+  let metaschema = meta schema
+  varmap <- liftIO$ readMVar ( mvarMap schema)
+  let stats = lookTable metaschema "table_stats"
+  (dbpol,(_,polling))<- liftIO$ transaction metaschema $ eventTable metaschema stats  Nothing Nothing [] []
+  let
+    row t s ls = tblist . fmap _tb $ [Attr "schema_name" (TB1 (SText (schemaName schema ) )), Attr "table_name" (TB1 (SText t)) , Attr "size" (TB1 (SNumeric s)), Attr "loadedsize" (TB1 (SNumeric ls)) ]
+    lrow t dyn st = liftTable' metaschema "table_stats" . row t (maybe (G.size dyn) (maximum .fmap fst ) $  nonEmpty $  F.toList st) $ (G.size dyn)
+    lookdiff tb row =  maybe (Just $ patch row ) (flip diff row) (G.lookup (G.Idex (getPKM row)) tb)
+  mapM_ (\(m,var)-> do
+    let event = R.filterJust $ lookdiff <$> R.facts (collectionTid dbpol ) R.<@> (flip (lrow (_kvname m)) <$>  R.facts (idxTid var ) R.<@> R.rumors (collectionTid  var ) )
+    R.onEventIO event (\i -> do
+      -- print ("putPatch" ,_kvname m)
+      putPatch (patchVar dbpol) . pure  $ i
+      -- print ("placedPatch",_kvname m)
+      )) (M.toList  varmap)
+  return  schema
 
-joinRel :: (Ord a ,Show a) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> [TBData Key a] -> FTB (TBData Key a)
-joinRel tb rel ref table
-  | L.all (isOptional .keyType) origin = LeftTB1 $ fmap (flip (joinRel tb (Le.over relOrigin unKOptional <$> rel ) ) table) (traverse unLeftItens ref )
-  | L.any (isArray.keyType) origin = ArrayTB1 $ Non.fromList $  fmap (flip (joinRel tb (Le.over relOrigin unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(Non.length (unArray $ unAttr $ head ref) - 1)])
-  | otherwise = maybe (TB1 $ tblistM tb (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )) TB1 tbel
-      where origin = fmap _relOrigin rel
-            relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
-            tbel = L.find (\(_,i)-> interPointPost rel ref (nonRefAttr  $ F.toList $ _kvvalues $ unTB  i) ) table
 
 
 runDBM inf m = do
