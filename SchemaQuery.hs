@@ -52,7 +52,7 @@ refTable  inf table  = do
   mmap <- readMVar (mvarMap inf)
   return $ justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
 
-tbpred un v = G.Idex $  justError "" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
+tbpred un v = G.Idex $ justError "" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
 
 createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key Showable) (TBData Key Showable)
 createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un i )

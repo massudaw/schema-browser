@@ -281,7 +281,7 @@ catchPluginException inf pname tname idx i = do
 
 
 logTableModification
-  :: (B.Binary a ,Ord a) =>
+  :: (B.Binary a ,Ord a, Ord (Index a)) =>
      InformationSchema
      -> TableModification (TBIdx Key a)  -> IO (TableModification (TBIdx Key a))
 logTableModification inf (TableModification Nothing table i) = do
@@ -316,20 +316,20 @@ ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
 
 -- Load optional not  loaded delayed values
 -- and merge to older values
-applyAttr' :: (Patch a,Show a,Ord a ,a~ Index a)  =>  Column Key a  -> PathAttr Key a -> DBM Key a (Column Key a)
+applyAttr' :: (Patch a,Show a,Ord a ,Show (Index a))  =>  Column Key a  -> PathAttr Key (Index a) -> DBM Key a (Column Key a)
 applyAttr' (Attr k i) (PAttr _ p)  = return $ Attr k (apply i p)
 applyAttr' sfkt@(FKT iref rel i) (PFK _ p m b )  =  do
                             let ref =  F.toList $ M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList iref)
                                 edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (  flip apply k  ) v else v
                             tbs <- atTable m
-                            return $ FKT ref rel (maybe (joinRel m rel (fmap unTB ref) (G.toList tbs)) id b)
+                            return $ FKT ref rel (maybe (joinRel m rel (fmap unTB ref) (G.toList tbs)) id (fmap create b))
 applyAttr' (IT k i) (PInline _   p)  = IT k <$> (applyFTBM (fmap pure $ create) applyRecord' i p)
-applyAttr' i j = errorWithStackTrace (show ("applyAttr'" :: String,i,j))
+-- applyAttr' i j = errorWithStackTrace (show ("applyAttr'" :: String,i,j))
 
 applyRecord'
-  :: (Patch a,Index a~ a ,Show a , Ord a ) =>
+  :: (Patch a,Show a ,Show (Index a), Ord a ) =>
     TBData Key a
-     -> TBIdx Key a
+     -> TBIdx Key (Index a)
      -> DBM Key a (TBData Key a)
 applyRecord' t@((m, v)) (_ ,_  , k)  = fmap (m,) $ traComp (fmap KV . sequenceA . M.mapWithKey (\key vi -> foldl  (\i j -> i >>= edit key j ) (return vi) k  ) . _kvvalues ) v
   where edit  key  k@(PAttr  s _) v = if (head $ F.toList $ key) == Inline s then  traComp (flip applyAttr' k ) v else return v
@@ -343,14 +343,14 @@ applyTB1'
      -> DBM Key a (TB2 Key a)
 applyTB1' = applyFTBM (fmap pure $ create) applyRecord'
 
-createAttr' :: (Patch a,Ord a ,Show a ,Index a ~ a) => PathAttr Key a -> DBM Key a (Column Key a)
+createAttr' :: (Patch a,Ord a ,Show a ) => PathAttr Key (Index a) -> DBM Key a (Column Key a)
 createAttr' (PAttr  k s  ) = return $ Attr k  (create s)
 createAttr' (PInline k s ) = return $ IT (_tb $ Attr k (TB1 ())) (create s)
 createAttr' (PFK rel k s b ) = do
       let ref = (_tb . create <$> k)
       tbs <- atTable s
-      return $ FKT ref rel (maybe (joinRel s rel (fmap unTB ref) (G.toList tbs)) id b)
-createAttr' i = errorWithStackTrace (show i)
+      return $ FKT ref rel (maybe (joinRel s rel (fmap unTB ref) (G.toList tbs)) id (create <$> b))
+-- createAttr' i = errorWithStackTrace (show i)
 
 createTB1'
   :: (Patch a,Index a~ a ,Show a , Ord a  ) =>
