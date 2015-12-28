@@ -2,6 +2,7 @@
 module PostgresQuery where
 
 import Types
+import Safe
 import Control.Monad
 import Postgresql.Printer
 import Utils
@@ -242,11 +243,9 @@ selectAll inf table offset i  j k st = do
       let
           unref (TableRef i) = i
           tbf =  tableView (tableMap inf) table
-      liftIO $ print (tableName table,selectQuery tbf )
       let m = tbf
       (t,v) <- liftIO$ duration  $ paginate inf m k offset j (fmap unref i) (nonEmpty st)
       mapM_ (tellRefs inf  ) (snd v)
-      liftIO$ print (tableName table,t)
       return v
 
 tellRefs  ::  InformationSchema ->TBData Key Showable ->  TransactionM ()
@@ -282,4 +281,4 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 
 
-postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\i j off p g s o-> (\(l,i) -> (fmap TB1 i,Just $ TableRef  (filter (flip L.elem (fmap fst s) . fst ) $  getPK $ TB1 $ last i) ,l)) <$> selectAll i j (fromMaybe 0 off) p (fromMaybe 200 g) s o ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table )) mapKeyType
+postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\i j off p g s o-> (\(l,i) -> (fmap TB1 i,(TableRef . filter (flip L.elem (fmap fst s) . fst ) .  getPK . TB1 <$> lastMay i) ,l)) <$> selectAll i j (fromMaybe 0 off) p (fromMaybe 200 g) s o ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table )) mapKeyType

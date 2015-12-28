@@ -178,7 +178,7 @@ createTableRefs i = do
   liftIO$ forkIO $ forever $ (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
-        (void $ forkIO $ hdiff (concat patches)`catch` (\e -> print (i ,e :: SomeException)) ) ) `catch` (\e -> print (i ,e :: SomeException))
+        (void $ forkIO $ hdiff (concat patches)) ) `catch` (\e -> print (i ,e :: SomeException))
   return (tableMeta i,  DBVar2  mdiff midx (R.tidings bhdiff ediff) (R.tidings bhidx eidx) bh2 )
 
 

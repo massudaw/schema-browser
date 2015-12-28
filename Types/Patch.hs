@@ -71,7 +71,6 @@ newtype FBPatch p
   deriving (Show,Eq,Ord)
 
 
-
 class Patch f where
   type Index k
   diff :: f -> f -> Maybe (Index f)

@@ -8,15 +8,12 @@ import Network.Wreq
 import Utils
 import Safe
 import Control.Exception
--- import QueryWidgets
--- import Widgets
 import qualified Network.Wreq.Session as Sess
 import Control.Monad
 
 
 import qualified Data.List as L
 import RuntimeTypes
-import PostgresQuery
 import System.Environment
 import OpenSSL.Session (context)
 import Network.HTTP.Client.OpenSSL
@@ -31,13 +28,11 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as BSLC
 import qualified Data.ByteString.Lazy as BSL
-import Postgresql
 
 import Gpx
 import Debug.Trace
 
 import Data.ByteString.Search (replace)
-import Database.PostgreSQL.Simple
 
 import Prelude hiding (head)
 
@@ -164,7 +159,7 @@ convertArt v =
 replacePath :: (BSC.ByteString,BSC.ByteString)
 replacePath = ("/art1025"  , "http://www.crea-go.org.br/art1025")
 
-
+{-
 testCrea = do
   args <- getArgs
   Just rnp <- lookupEnv "CREA_RNP"
@@ -178,6 +173,6 @@ testCrea = do
   v <- fmap (head ) <$> creaSituacaoListPage (BSC.pack rnp) (BSC.pack user) (BSC.pack pass) 20 [0]
   conn <- connectPostgreSQL (connRoot (argsToState (tail (tail args))))
   mapM ((`catch` (\e -> return $ traceShow (e :: SomeException ) 0) ) . execute conn "INSERT INTO incendio.art (art_number,crea_register) values (?,?)" . (,rnp) ) v
-
+-}
 
 

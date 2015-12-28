@@ -205,11 +205,11 @@ instance Widget (RangeBox a) where
 
 buttonDivSetT :: (Ord b ,Eq a) => [a] -> Tidings (a -> b) -> Tidings (Maybe a)  ->  (a -> UI Element ) -> UI (TrivialWidget a)
 buttonDivSetT ks sort binit   el = mdo
-  buttons <- mapM (buttonString  bv ) ks
-  dv <- UI.div # sink children ((\f -> fmap (fst.snd) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$> facts sort )
+  buttons <- mapM (buttonString  bv)  ks
+  dv <- UI.div # sink0 children ((\f -> fmap (fst.snd) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$> facts sort )
   let evs = foldl (unionWith const) (filterJust $ rumors binit) (snd .snd <$> buttons)
   v <- currentValue (facts binit)
-  bv <- stepper (maybe (justError "no head" $ safeHead ks) id v) evs
+  bv <- stepper (maybe (justError "no head" $ safeHead (ks)) id v) evs
   return (TrivialWidget (tidings bv evs) dv)
     where
       buttonString   bv k = do

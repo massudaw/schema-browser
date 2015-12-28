@@ -55,8 +55,8 @@ refTable  inf table  = do
 tbpred un v = G.Idex $ justError "" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
 
 createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key Showable) (TBData Key Showable)
-createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un i )
-  where transPred v = G.Idex $ justError "invalid pred" (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
+createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un (tableNonRef' i) )
+  where transPred v = G.Idex $ justError "invalid pred" (Tra.traverse (Tra.traverse unSOptional' ) $getUn un (tableNonRef' v))
 
 eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
     -> TransactionM (DBVar,Collection Key Showable)
@@ -75,14 +75,14 @@ eventTable inf table page size presort fixed = do
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
     iniT <- do
        (fixedmap ,reso) <- liftIO $ currentValue (liftA2 (,) (facts (idxTid dbvar) ) (facts (collectionTid dbvar ) ))
-       ini <- case M.lookup fixidx fixedmap of
+       case M.lookup fixidx fixedmap of
           Just (sq,mp) -> do
-             liftIO$ putStrLn $ "load existing filter map" <> show (sq,G.size (filterfixed reso), pagesize * (fromMaybe 0 page + 1))
+             liftIO$ putStrLn $ "load existing filter map" <> show (table,sq,G.size (filterfixed reso), pagesize * (fromMaybe 0 page + 1))
              if ( sq > G.size (filterfixed reso) -- Tabela é maior que a tabela carregada
                 && sq > pagesize * (fromMaybe 0 page + 1) -- Tabela é maior que a página
                 && pagesize * (fromMaybe 0 page +1) > G.size (filterfixed reso)  ) -- O carregado é menor que a página
              then do
-                   liftIO$ putStrLn "load offseted new page"
+                   liftIO$ putStrLn $ "load offseted new page" <> show table
                    let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                    (res,nextToken ,s ) <- (listEd $ schemaOps inf) inf table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
                    let ini = (M.insert fixidx (estLength page pagesize res s  ,(\v -> M.insert ((fromMaybe 0 page +1 )*pagesize) v  mp) $ justError "no token"    nextToken) fixedmap , createUn (S.fromList $ rawPK table)  (fmap unTB1 res)<> reso )
@@ -90,18 +90,18 @@ eventTable inf table page size presort fixed = do
                    liftIO$ putMVar (idxVar dbvar ) (fst ini)
                    return  ini
              else do
-               liftIO$ putStrLn "load offseted existing page"
+               liftIO$ putStrLn $ "load offseted existing page" <> show table
                return (fixedmap ,reso)
           Nothing -> do
-             liftIO$ putStrLn "create new filter map"
+             liftIO$ putStrLn $ "create new filter map" <> show table
              (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing Nothing size sortList fixed
              let ini = (M.insert fixidx (estLength page pagesize res s ,maybe M.empty (M.singleton pagesize) p) fixedmap , createUn (S.fromList $ rawPK table)    (fmap (\i -> (unTB1 i)) res) <> reso)
              liftIO $ putPatch (patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )
              liftIO$ putMVar (idxVar dbvar ) (fst ini)
              return ini
-       return ini
     let tde = fmap filterfixed <$> rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
     let iniFil = fmap filterfixed iniT
+    liftIO $ print iniFil
     tdb  <- stepper iniFil tde
     return (dbvar {collectionTid  = fmap snd $ tidings tdb tde},iniFil)
 
@@ -135,16 +135,12 @@ noInsert' inf (k1,v1)   = do
 
 transaction :: InformationSchema -> TransactionM a -> IO a
 transaction inf log = do -- withTransaction (conn inf) $ do
-  -- print "Transaction Run Log"
   (md,mods)  <- runWriterT log
-  -- print "Transaction Update"
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
   Tra.traverse (\(k,v) -> do
-    -- print "GetTable"
     ref <- refTable inf k
     putPatch (patchVar ref ) v
     ) (M.toList aggr)
-  --print "Transaction Finish"
   return md
 
 
