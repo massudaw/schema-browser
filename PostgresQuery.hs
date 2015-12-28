@@ -88,6 +88,20 @@ deletePatch conn patch@(m ,kold ,_) t = do
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     del = "DELETE FROM " <> rawFullName t <>   pred
 
+applyPatch
+  ::
+     Connection -> TBIdx PGKey Showable -> IO (TBIdx PGKey Showable)
+applyPatch conn patch@(m,kold,skv)  =
+    execute conn (fromString $ traceShowId $ T.unpack up)  (fmap attrPatchValue skv <> koldPk ) >> return patch
+  where
+    equality k = k <> "="  <> "?"
+    koldPk = uncurry Attr <$> F.toList kold
+    attrPatchName (PAttr k _) = keyValue k
+    attrPatchValue (PAttr  k v) = Attr k (create v) :: TB Identity PGKey Showable
+    pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> F.toList kold)
+    setter = " SET " <> T.intercalate "," (equality .   attrPatchName <$> skv   )
+    up = "UPDATE " <> kvfullname m <> setter <>  pred
+
 
 updatePatch
   ::
@@ -203,6 +217,14 @@ updateMod inf kv old = liftIO$ do
   let mod =  TableModification Nothing table (firstPatch (typeTrans inf) patch)
   Just <$> logTableModification inf mod
 
+patchMod :: InformationSchema -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+patchMod inf patch@(m,_,_) = liftIO$ do
+  let table = lookTable inf (_kvname m )
+  patch <- applyPatch (conn  inf) (firstPatch (recoverFields inf ) patch )
+  let mod =  TableModification Nothing table (firstPatch (typeTrans inf) patch)
+  Just <$> logTableModification inf mod
+
+
 selectAll
   ::
      InformationSchema
@@ -260,4 +282,4 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 
 
-postgresOps = SchemaEditor updateMod insertMod deleteMod (\i j off p g s o-> (\(l,i) -> (fmap TB1 i,Just $ TableRef  (filter (flip L.elem (fmap fst s) . fst ) $  getPK $ TB1 $ last i) ,l)) <$> selectAll i j (fromMaybe 0 off) p (fromMaybe 200 g) s o ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table )) mapKeyType
+postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\i j off p g s o-> (\(l,i) -> (fmap TB1 i,Just $ TableRef  (filter (flip L.elem (fmap fst s) . fst ) $  getPK $ TB1 $ last i) ,l)) <$> selectAll i j (fromMaybe 0 off) p (fromMaybe 200 g) s o ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table )) mapKeyType

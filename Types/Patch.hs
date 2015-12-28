@@ -105,18 +105,20 @@ instance  PatchConstr k a => Patch (TBData k a)  where
   create = createTB1
   patch = patchTB1
 
--- instance (PatchConstr k a) => Compact (TBIdx k a) where
--- compact = compactTB1
+instance PatchConstr k a => Compact (TBIdx k a) where
+  compact = compactTB1
 
 instance (Ord a,Show a,Patch a) => Patch (FTB a ) where
   type Index (FTB a) =  PathFTB (Index a)
   diff = diffFTB patch diff
   apply = applyFTB create apply
+  create = createFTB create
+  patch = patchFTB patch
 
 
 instance Patch Showable  where
   type Index Showable = Showable
-  diff _ s = Just s
+  diff  = diffPrim
   apply _ i = i
   create = id
   patch = id
@@ -189,14 +191,14 @@ compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . 
     pathProj (PDelayed i) = i
     pathProj p@(PInter _ i) = Just (p)
     pathProj i@(PAtom _  ) = Just i
-    pathProj i = errorWithStackTrace (show i)
+    -- pathProj i = errorWithStackTrace (show i)
     projectors (PIdx i _ ) = PIdIdx i
     projectors (POpt _  ) = PIdOpt
     projectors (PSerial _  ) = PIdSerial
     projectors (PDelayed _  ) = PIdDelayed
     projectors (PInter b _  ) = PIdInter b
     projectors (PAtom _  ) =  PIdAtom
-    projectors i = errorWithStackTrace (show i)
+    -- projectors i = errorWithStackTrace (show i)
     recover (PIdIdx i, j ) = PIdx i  (compact j)
     recover (PIdOpt , j ) = POpt  (compact j)
     recover (PIdSerial , j ) = PSerial (compact j)
@@ -332,12 +334,12 @@ applyShowable = applyFTB create apply
 createShowable :: (Ord a ,Patch a)=>  PathFTB (Index a) -> FTB a
 createShowable = createFTB create
 
-{-
+
 diffPrim :: (Eq a ,a ~ Index a) => a -> a -> Maybe (Index a)
 diffPrim i j
   | i == j = Nothing
   | otherwise = Just  j
--}
+
 
 -- FTB
 

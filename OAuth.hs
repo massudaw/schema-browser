@@ -174,7 +174,7 @@ getDiffTable inf table  j = fmap (join . fmap (diff j. unTB1) ) $ getTable  inf 
 joinGetDiffTable inf table  tableref f j = fmap (join . fmap (diff j. unTB1)) $ joinGet  inf table tableref (TB1 f) (TB1 j)
 
 
-gmailOps = (SchemaEditor undefined insertTable undefined listTable updateTable getDiffTable mapKeyType)
+gmailOps = (SchemaEditor undefined undefined insertTable undefined listTable updateTable getDiffTable mapKeyType)
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t

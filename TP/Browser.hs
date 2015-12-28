@@ -201,7 +201,7 @@ chooserTable inf kitems i = do
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
-  (orddb ,(_,orderMap)) <- liftIO $ transaction (meta inf) $ eventTable  (meta inf) (lookTable (meta inf) "ordering" ) (Just 0) Nothing [] []  -- [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+  (orddb ,(_,orderMap)) <- liftIO $ transaction (meta inf) $ eventTable  (meta inf) (lookTable (meta inf) "ordering" ) (Just 0) Nothing []    [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
   let renderLabel = (\i -> case M.lookup i (pkMap inf) of
                                        Just t -> T.unpack (translatedName t)
                                        Nothing -> show i )
@@ -209,11 +209,16 @@ chooserTable inf kitems i = do
       tableUsage orderMap pkset = (lookAttr (lookKey (meta inf) "ordering" "usage" )) $ justError ("no value" <> show (pkset,pk)) $ G.lookup  (G.Idex (first (lookKey (meta inf ) "ordering") <$> pk )) orderMap
           where  pk = [("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
   liftIO $ print orderMap
-  -- liftIO $ print (L.sortBy (flip $ comparing tableUsage) kitems )
   bset <- buttonDivSetT kitems (tableUsage <$> collectionTid orddb ) initKey  (\k -> UI.button # set UI.text (renderLabel k) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow . ($k) <$> filterLabel ))
   let bBset = triding bset
-  onEvent (rumors bBset) (\ i ->
-      when (isJust (metaschema inf)) $  void (liftIO $ execute (rootconn inf) (fromString $ "UPDATE  metadata.ordering SET usage = usage + 1 where table_name = ? AND schema_name = ? ") (( fmap rawName $ M.lookup i (pkMap inf)) ,  schemaName inf )))
+      incClick pkset orderMap =  (fst field , getPKM field ,[patch $ fmap (+ (SNumeric 1)) (unTB usage )]) :: TBIdx Key Showable
+          where  pk = [("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
+                 field =   justError ("no value" <> show (pkset,pk)) $ G.lookup  (G.Idex (first (lookKey (meta inf ) "ordering") <$> pk )) orderMap
+                 usage = justError "nopk " $ (lookAttr (lookKey (meta inf) "ordering" "usage" ))  field
+  liftIO$ onEventIO (flip incClick <$> facts (collectionTid orddb) <@> rumors bBset)
+    (\p -> do
+      _ <- transaction inf $ (patchEd $ schemaOps (meta inf)) (meta inf) p
+      putPatch (patchVar orddb) [p] )
   tbChooserI <- UI.div # set children [filterInp,getElement bset]  # set UI.style [("height","90vh"),("overflow","auto"),("height","99%")]
   tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [tbChooserI]
   nav  <- buttonDivSet ["Viewer","Nav","Exception","Change"] (pure $ Just "Nav")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")

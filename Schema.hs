@@ -156,10 +156,8 @@ keyTablesInit schemaVar conn userconn (schema,user) oauth ops pluglist = do
 takeMany mvar = go . (:[]) =<< readTQueue mvar
   where
     go v = do
-      i <- isEmptyTQueue mvar
-      if i
-        then return  (reverse v)
-        else go . (:v) =<< readTQueue mvar
+      i <- tryReadTQueue mvar
+      maybe (return (reverse v )) (go . (:v)) i
 
 createTableRefs :: Table -> IO (KVMetadata Key,DBVar)
 createTableRefs i = do
@@ -176,7 +174,7 @@ createTableRefs i = do
   (eidx ,hidx) <- liftIO $ R.newEvent
   bhidx <- R.stepper M.empty eidx
   liftIO$ forkIO $ forever $ do
-      hidx =<< takeMVar midx
+      forkIO . hidx =<< takeMVar midx
   liftIO$ forkIO $ forever $ (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
@@ -390,7 +388,7 @@ addStats schema = do
   let
     row t s ls = tblist . fmap _tb $ [Attr "schema_name" (TB1 (SText (schemaName schema ) )), Attr "table_name" (TB1 (SText t)) , Attr "size" (TB1 (SNumeric s)), Attr "loadedsize" (TB1 (SNumeric ls)) ]
     lrow t dyn st = liftTable' metaschema "table_stats" . row t (maybe (G.size dyn) (maximum .fmap fst ) $  nonEmpty $  F.toList st) $ (G.size dyn)
-    lookdiff tb row =  maybe (Just $ patch row ) (flip diff row) (G.lookup (G.Idex (getPKM row)) tb)
+    lookdiff tb row =  maybe (Just $ patch row ) (\old ->  diff old row ) (G.lookup (G.Idex (getPKM row)) tb)
   mapM_ (\(m,var)-> do
     let event = R.filterJust $ lookdiff <$> R.facts (collectionTid dbpol ) R.<@> (flip (lrow (_kvname m)) <$>  R.facts (idxTid var ) R.<@> R.rumors (collectionTid  var ) )
     R.onEventIO event (\i -> do

@@ -168,6 +168,7 @@ type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Ident
 type TB3Data  f k a = (KVMetadata k,Compose f (KV (Compose f (TB f ))) k a )
 
 
+kvfullname m = _kvschema m <> "." <> _kvname m
 data KVMetadata k
   = KVMetadata
   { _kvname :: Text
