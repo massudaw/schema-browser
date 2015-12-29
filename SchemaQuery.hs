@@ -77,7 +77,6 @@ eventTable inf table page size presort fixed = do
        (fixedmap ,reso) <- liftIO $ currentValue (liftA2 (,) (facts (idxTid dbvar) ) (facts (collectionTid dbvar ) ))
        case M.lookup fixidx fixedmap of
           Just (sq,mp) -> do
-             liftIO$ putStrLn $ "load existing filter map" <> show (table,sq,G.size (filterfixed reso), pagesize * (fromMaybe 0 page + 1))
              if ( sq > G.size (filterfixed reso) -- Tabela é maior que a tabela carregada
                 && sq > pagesize * (fromMaybe 0 page + 1) -- Tabela é maior que a página
                 && pagesize * (fromMaybe 0 page +1) > G.size (filterfixed reso)  ) -- O carregado é menor que a página
@@ -101,7 +100,6 @@ eventTable inf table page size presort fixed = do
              return ini
     let tde = fmap filterfixed <$> rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
     let iniFil = fmap filterfixed iniT
-    liftIO $ print iniFil
     tdb  <- stepper iniFil tde
     return (dbvar {collectionTid  = fmap snd $ tidings tdb tde},iniFil)
 

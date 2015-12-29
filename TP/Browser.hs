@@ -201,14 +201,14 @@ chooserTable inf kitems i = do
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
-  (orddb ,(_,orderMap)) <- liftIO $ transaction (meta inf) $ eventTable  (meta inf) (lookTable (meta inf) "ordering" ) (Just 0) Nothing [] [] --     [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+  (orddb ,(_,orderMap)) <- liftIO $ transaction (meta inf) $ eventTable  (meta inf) (lookTable (meta inf) "ordering" ) (Just 0) Nothing []      [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
   let renderLabel = (\i -> case M.lookup i (pkMap inf) of
                                        Just t -> T.unpack (translatedName t)
                                        Nothing -> show i )
-      filterLabel = ((\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> renderLabel i) ))<$> filterInpBh)
+      filterLabel = (\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> renderLabel i) ))<$> filterInpBh
       tableUsage orderMap pkset = (lookAttr (lookKey (meta inf) "ordering" "usage" )) $ justError ("no value" <> show (pkset,pk,orderMap)) $ G.lookup  (G.Idex (first (lookKey (meta inf ) "ordering") <$> pk )) orderMap
           where  pk = [("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
-  bset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap )) kitems ) (tableUsage <$> collectionTid orddb ) initKey  (\k -> UI.button # set UI.text (renderLabel k) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow . ($k) <$> filterLabel ))
+  bset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap )) kitems) (tableUsage <$> collectionTid orddb ) initKey  (\k -> UI.button # set UI.text (renderLabel k) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow . ($k) <$> filterLabel ))
   let bBset = triding bset
       incClick pkset orderMap =  (fst field , getPKM field ,[patch $ fmap (+ (SNumeric 1)) (unTB usage )]) :: TBIdx Key Showable
           where  pk = [("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
@@ -257,8 +257,8 @@ viewerKey inf key = mdo
   let
       table = justLook  key $ pkMap inf
 
-  (dbtable ,_)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
-  reftb@(vpt,vp,gist,_) <- refTables inf table
+  -- (dbtable ,_)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
+  reftb@(vpt,vp,gist,var ) <- refTables inf table
   let
       tdi = pure Nothing
   cv <- currentValue (facts tdi)
@@ -302,7 +302,7 @@ viewerKey inf key = mdo
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]
   st <- stepper cv sel
   res2 <- stepper (vp) (rumors vpt)
-  onEvent (pure <$> ediff) (liftIO .  putPatch (patchVar dbtable))
+  onEvent (pure <$> ediff) (liftIO .  putPatch var )
   {-onEvent (facts vpt <@ UI.click updateBtn ) (\(oi,oj) -> do
               let up =  (updateEd (schemaOps inf) ) inf table (L.maximumBy (comparing (getPK.TB1)) (F.toList oj)) Nothing (Just 400)
               (l,i,j) <- liftIO $  transaction inf up
