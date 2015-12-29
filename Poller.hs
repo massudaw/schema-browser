@@ -55,7 +55,7 @@ index tb item = snd $ justError ("no item" <> show item) $ indexTable (IProd Tru
 
 testPoller plug = do
   smvar <- newMVar M.empty
-  poller smvar  (BrowserState "localhost" "5432" "incendio" "postgres" "queijo" Nothing Nothing) [plug] True
+  poller smvar  (BrowserState "localhost" "5432" "incendio" "postgres" "queijo" Nothing Nothing Nothing ) [plug] True
 
 poller schm db plugs is_test = do
   conn <- connectPostgreSQL (connRoot db)

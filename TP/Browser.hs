@@ -109,7 +109,7 @@ setup smvar args w = void $ do
             element body # set UI.children [dash] # set UI.class_ "row"
         "Nav" -> do
             let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
-            [tbChooser,subnet] <- chooserTable  inf  k (tablename bstate)
+            [tbChooser,subnet] <- chooserTable  inf  k (tablename bstate) bstate
             element tbChooser # sink0 UI.style (facts $ noneShow <$> triding menu)
             let
                 expand True = "col-xs-10"
@@ -196,7 +196,7 @@ attrLine i   = do
 
 lookAttr k (_,m) = M.lookup (S.singleton (Inline k)) (unKV m)
 
-chooserTable inf kitems i = do
+chooserTable inf kitems i bstate = do
   let initKey = pure . join $ fmap (S.fromList .rawPK) . flip M.lookup (tableMap inf) . T.pack <$> i
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
@@ -238,7 +238,7 @@ chooserTable inf kitems i = do
             dash <- metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName tableob) ) ]
             element body # set UI.children [dash]
         "Nav" -> do
-            span <- viewerKey inf table
+            span <- viewerKey inf table bstate
             element body # set UI.children [span]
         "Viewer" -> do
             span <- viewer inf (justError "no table with pk" $ M.lookup table (pkMap inf)) Nothing
@@ -252,15 +252,15 @@ chooserTable inf kitems i = do
 
 viewerKey
   ::
-      InformationSchema -> S.Set Key -> UI Element
-viewerKey inf key = mdo
+      InformationSchema -> S.Set Key -> BrowserState-> UI Element
+viewerKey inf key bstate = mdo
   let
       table = justLook  key $ pkMap inf
-
-  -- (dbtable ,_)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
   reftb@(vpt,vp,gist,var ) <- refTables inf table
+
   let
-      tdi = pure Nothing
+      tdiv = join $ fmap (tblist' table  ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table)) ) <$> rowpk bstate
+      tdi = (\i -> join $ traverse (\v -> G.lookup  (G.Idex (justError "" $ traverse (traverse unSOptional' ) $getPKM  v)) (snd i) ) tdiv  ) <$> vpt
   cv <- currentValue (facts tdi)
   -- Final Query ListBox
   filterInp <- UI.input
