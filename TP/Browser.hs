@@ -99,7 +99,6 @@ deleteClient metainf clientId = do
   putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))],[])]
 
 
--- editClient :: InformationSchema -> Maybe InformationSchema -> Maybe Table -> Maybe [(Key,FTB Showable)] -> Integer -> UTCTime -> IO ()
 editClient metainf inf table tdi clientId now = do
   (dbmeta ,(_,ccli)) <- transaction metainf $ eventTable metainf (lookTable metainf "clients" ) Nothing Nothing [] []
   let cli :: Maybe (TBData Key Showable)
@@ -158,7 +157,7 @@ setup smvar args w = void $ do
             element body # set UI.children [dash] # set UI.class_ "row"
         "Browser" -> do
             let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
-            [tbChooser,subnet] <- chooserTable  inf  k cliTid  bstate cli
+            [tbChooser,subnet] <- chooserTable  inf  k cliTid  cli
             element tbChooser # sink0 UI.style (facts $ noneShow <$> triding menu)
             let
                 expand True = "col-xs-10"
@@ -245,7 +244,7 @@ attrLine i   = do
 
 lookAttr k (_,m) = M.lookup (S.singleton (Inline k)) (unKV m)
 
-chooserTable inf kitems cliTid bstate cli = do
+chooserTable inf kitems cliTid cli = do
   iv   <- currentValue (facts cliTid)
   let lookT iv = let  i = join $  unLeftItens . unTB <$> lookAttr (lookKey (meta inf) "clients" "table") iv
                 in fmap (\(Attr _ (TB1 (SText t))) -> t) i
@@ -318,7 +317,6 @@ viewerKey inf key cli cliTid = mdo
   reftb@(vpt,vp,gist,var ) <- refTables inf table
 
   let
-      -- tdiv = join $ fmap (tblist' table  ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table)) ) . F.toList <$> rowpk bstate
       tdip = (\i -> join $ traverse (\v -> G.lookup  (G.Idex (justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) (join $ lookPK <$> iv) ) <$> vpt
       tdi = if Just (tableName table) == join (lookT <$> iv) then tdip else pure Nothing
   cv <- currentValue (facts tdi)
