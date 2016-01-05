@@ -99,7 +99,7 @@ deleteClient metainf clientId = do
   putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))],[])]
 
 
-editClient :: InformationSchema -> Maybe InformationSchema -> Maybe Table -> Maybe [(Key,FTB Showable)] -> Integer -> UTCTime -> IO (Maybe())
+-- editClient :: InformationSchema -> Maybe InformationSchema -> Maybe Table -> Maybe [(Key,FTB Showable)] -> Integer -> UTCTime -> IO ()
 editClient metainf inf table tdi clientId now = do
   (dbmeta ,(_,ccli)) <- transaction metainf $ eventTable metainf (lookTable metainf "clients" ) Nothing Nothing [] []
   let cli :: Maybe (TBData Key Showable)
@@ -109,14 +109,14 @@ editClient metainf inf table tdi clientId now = do
       lrow :: Maybe (Index (TBData Key Showable))
       lrow = maybe (Just $ patch new ) (flip diff new )  cli
   traverse (putPatch (patchVar dbmeta ) . pure ) lrow
+  return dbmeta
 
 addClient clientId metainf inf table dbdata =  do
     now <- getCurrentTime
     let
       tdi = fmap getPKM $ join $ (\inf table -> fmap (tblist' table ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table))  ). F.toList) <$>  inf  <*> table <*> rowpk dbdata
-    editClient metainf inf table tdi clientId now
-    return clientId
-
+    dbmeta <- editClient metainf inf table tdi clientId now
+    return (clientId, getClient metainf clientId <$> collectionTid dbmeta)
 
 
 setup
@@ -125,7 +125,7 @@ setup smvar args w = void $ do
   metainf <- justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
   let bstate = argsToState args
   inf <- liftIO$ traverse (\i -> keyTables  smvar (conn metainf) (conn metainf) (T.pack i, T.pack $ user bstate) Nothing postgresOps plugList) $ schema  bstate
-  cli <- liftIO $ addClient (sToken w ) metainf inf ((\t inf -> lookTable inf . T.pack $ t) <$> tablename bstate  <*> inf  ) bstate
+  (cli,cliTid) <- liftIO $ addClient (sToken w ) metainf inf ((\t inf -> lookTable inf . T.pack $ t) <$> tablename bstate  <*> inf  ) bstate
   (evDB,chooserItens) <- databaseChooser smvar bstate
   body <- UI.div
   return w # set title (host bstate <> " - " <>  dbn bstate)
@@ -133,7 +133,7 @@ setup smvar args w = void $ do
   let he = const True <$> UI.hover hoverBoard
   bhe <-stepper True he
   menu <- checkedWidget (tidings bhe he)
-  nav  <- buttonDivSet  ["Nav","Poll","Stats","Change","Exception"] (pure $ Just "Nav" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonDivSet  ["Browser","Poll","Stats","Change","Exception"] (pure $ Just "Browser" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   chooserDiv <- UI.div # set children  ([getElement menu] <> chooserItens <> [getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end"),("height","7vh"),("width","100%")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
@@ -156,9 +156,9 @@ setup smvar args w = void $ do
         "Exception" -> do
             dash <- metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ) ]
             element body # set UI.children [dash] # set UI.class_ "row"
-        "Nav" -> do
+        "Browser" -> do
             let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
-            [tbChooser,subnet] <- chooserTable  inf  k (tablename bstate) bstate cli
+            [tbChooser,subnet] <- chooserTable  inf  k cliTid  bstate cli
             element tbChooser # sink0 UI.style (facts $ noneShow <$> triding menu)
             let
                 expand True = "col-xs-10"
@@ -245,8 +245,11 @@ attrLine i   = do
 
 lookAttr k (_,m) = M.lookup (S.singleton (Inline k)) (unKV m)
 
-chooserTable inf kitems i bstate cli = do
-  let initKey = pure . join $ fmap (S.fromList .rawPK) . flip M.lookup (tableMap inf) . T.pack <$> i
+chooserTable inf kitems cliTid bstate cli = do
+  iv   <- currentValue (facts cliTid)
+  let lookT iv = let  i = join $  unLeftItens . unTB <$> lookAttr (lookKey (meta inf) "clients" "table") iv
+                in fmap (\(Attr _ (TB1 (SText t))) -> t) i
+  let initKey = pure . join $ fmap (S.fromList .rawPK) . flip M.lookup (tableMap inf) <$> join (lookT <$> iv)
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
@@ -269,14 +272,14 @@ chooserTable inf kitems i bstate cli = do
       putPatch (patchVar orddb) [p] )
   tbChooserI <- UI.div # set children [filterInp,getElement bset]  # set UI.style [("height","90vh"),("overflow","auto"),("height","99%")]
   tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [tbChooserI]
-  nav  <- buttonDivSet ["Viewer","Nav","Exception","Change"] (pure $ Just "Nav")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonDivSet ["Viewer","Browser","Exception","Change"] (pure $ Just "Browser")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   header <- UI.h1 # sink text (T.unpack . translatedName .  justError "no table " . flip M.lookup (pkMap inf) <$> facts bBset ) # set UI.class_ "col-xs-7"
   chooserDiv <- UI.div # set children  [header ,getElement nav]  # set UI.style [("display","flex"),("align-items","flex-end")]
   body <- UI.div
 
 
-  liftIO $ onEventIO (rumors  bBset) (\i -> void . editClient (meta inf) (Just inf) (M.lookup i (pkMap inf)) Nothing cli =<< getCurrentTime )
+  -- liftIO $ currentValue (facts bBset) >>= (\i -> void . editClient (meta inf) (Just inf) (M.lookup i (pkMap inf)) Nothing cli =<< getCurrentTime )
   el <- mapUITEvent body (\(nav,table)->
       case nav of
         "Change" -> do
@@ -287,8 +290,8 @@ chooserTable inf kitems i bstate cli = do
             let tableob = (justError "no table " $ M.lookup table (pkMap inf))
             dash <- metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName tableob) ) ]
             element body # set UI.children [dash]
-        "Nav" -> do
-            span <- viewerKey inf table cli bstate
+        "Browser" -> do
+            span <- viewerKey inf table cli cliTid
             element body # set UI.children [span]
         "Viewer" -> do
             span <- viewer inf (justError "no table with pk" $ M.lookup table (pkMap inf)) Nothing
@@ -302,17 +305,22 @@ chooserTable inf kitems i bstate cli = do
 
 viewerKey
   ::
-      InformationSchema -> S.Set Key -> Integer -> BrowserState-> UI Element
-viewerKey inf key cli bstate = mdo
+      InformationSchema -> S.Set Key -> Integer -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
+viewerKey inf key cli cliTid = mdo
+  iv   <- currentValue (facts cliTid)
+  let lookT iv = let  i = join $  unLeftItens . unTB <$> lookAttr (lookKey (meta inf) "clients" "table") iv
+                in fmap (\(Attr _ (TB1 (SText t))) -> t) i
+      lookPK iv = let  i = join $  unLeftItens . unTB <$> lookAttr (lookKey (meta inf) "clients" "data_index") iv
+                       unKey t = liftA2 (,) (join $ (\(Attr _ (TB1 (SText i)))-> flip (lookKey inf ) i <$> lookT iv ) . unTB <$> lookAttr (lookKey  (meta inf) "key_value" "key") t  )( (\(Attr _ (TB1 (SDynamic i)))-> i) . unTB <$> lookAttr (lookKey (meta inf) "key_value" "val") t )
+                in fmap (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
   let
       table = justLook  key $ pkMap inf
   reftb@(vpt,vp,gist,var ) <- refTables inf table
 
-
   let
-      tdiv = join $ fmap (tblist' table  ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table)) ) . F.toList <$> rowpk bstate
-      tdip = (\i -> join $ traverse (\v -> G.lookup  (G.Idex (justError "" $ traverse (traverse unSOptional' ) $getPKM  v)) (snd i) ) tdiv  ) <$> vpt
-      tdi = if Just (T.unpack $ tableName table) == tablename bstate then tdip else pure Nothing
+      -- tdiv = join $ fmap (tblist' table  ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table)) ) . F.toList <$> rowpk bstate
+      tdip = (\i -> join $ traverse (\v -> G.lookup  (G.Idex (justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) (join $ lookPK <$> iv) ) <$> vpt
+      tdi = if Just (tableName table) == join (lookT <$> iv) then tdip else pure Nothing
   cv <- currentValue (facts tdi)
   -- Final Query ListBox
   filterInp <- UI.input

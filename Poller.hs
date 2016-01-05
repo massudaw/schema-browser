@@ -61,6 +61,7 @@ poller schm db plugs is_test = do
   conn <- connectPostgreSQL (connRoot db)
   metas <- keyTables  schm conn  conn ("metadata", T.pack $ user db) Nothing postgresOps plugs
   (dbpol,(_,polling))<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
+  threadDelay 1000000
   let
     project tb =  (schema,intervalms,p)
       where

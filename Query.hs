@@ -181,7 +181,7 @@ allKVRec :: Ord f => TB2 f Showable -> [FTB Showable]
 allKVRec = concat . F.toList . fmap allKVRec'
 
 allKVRec' :: Ord k => TBData k  Showable -> [FTB Showable]
-allKVRec'  t@(m, e)=  concat $  F.toList (go . unTB <$> (_kvvalues $ unTB $ eitherDescPK t))
+allKVRec'  t@(m, e)=  concat $ fmap snd $ L.sortBy (comparing (\i -> maximum $ (`L.elemIndex` _kvdesc m)  <$> (fmap _relOrigin $ F.toList $fst i) ))  $ M.toList (go . unTB <$> (_kvvalues $ unTB $ eitherDescPK t))
   where
         go  (FKT _  _ tb) =  allKVRec  tb
         go  (IT  _ tb) = allKVRec tb
