@@ -7,11 +7,9 @@ import Types
 import SchemaQuery
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM
-import TP.Widgets(mapTEvent)
 import Types.Patch
 import qualified Types.Index as G
 
-import Postgresql.Printer
 import qualified NonEmpty as Non
 import Control.Monad.Writer
 import Debug.Trace
@@ -19,15 +17,12 @@ import Prelude hiding (head)
 import Data.Unique
 import qualified Data.Foldable as F
 import Data.Maybe
-import Data.String
-import Control.Monad.IO.Class
 import qualified Data.Binary as B
 import GHC.Stack
 import Data.Monoid
 import Data.Bifunctor(second,first)
 import Utils
 import Control.Exception
-import System.Time.Extra
 import Control.Monad.Reader
 import qualified Control.Lens as Le
 
@@ -39,7 +34,6 @@ import RuntimeTypes
 import Data.Traversable(sequenceA,traverse)
 import Data.Vector (Vector)
 import qualified Data.Vector as V
-import Data.IORef
 import Network.Google.OAuth2
 
 import Control.Applicative
@@ -167,18 +161,18 @@ createTableRefs i = do
       diffIni = []
   midx <-  newMVar M.empty
   mdiff <-  atomically $ newTQueue
-  (ediff,hdiff) <- liftIO $ R.newEvent
+  (ediff,hdiff) <- R.newEvent
   bh <- R.accumB G.empty (flip (L.foldl' apply) <$> ediff )
   let bh2 = (R.tidings bh (L.foldl' apply  <$> bh R.<@> ediff ))
   bhdiff <- R.stepper diffIni ediff
-  (eidx ,hidx) <- liftIO $ R.newEvent
+  (eidx ,hidx) <- R.newEvent
   bhidx <- R.stepper M.empty eidx
-  liftIO$ forkIO $ forever $ do
+  forkIO $ forever $ do
       forkIO . hidx =<< takeMVar midx
-  liftIO$ forkIO $ forever $ (do
+  forkIO $ forever $ (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
-        (void $ forkIO $ hdiff (concat patches)) ) `catch` (\e -> print (i ,e :: SomeException))
+        (void $ forkIO $ hdiff (concat patches))`catch` (\e -> print ("hdiff",i ,e :: SomeException) )) `catch` (\e -> print (i ,e :: SomeException))
   return (tableMeta i,  DBVar2  mdiff midx (R.tidings bhdiff ediff) (R.tidings bhidx eidx) bh2 )
 
 
@@ -268,6 +262,7 @@ newKey name ty p = do
   un <- newUnique
   return $ Key name Nothing    [FRead,FWrite] p Nothing un ty
 
+-- dataIndex = V.fromList .  fmap (TBRecord2 "metadata.key_value" . second (Binary . B.encode) . first keyValue) . getPKM
 
 catchPluginException :: InformationSchema -> Text -> Text -> [(Key, FTB Showable)] -> IO (Maybe a) -> IO (Either Int (Maybe a))
 catchPluginException inf pname tname idx i = do
@@ -382,9 +377,9 @@ joinRelT rel ref tb table
 
 addStats schema = do
   let metaschema = meta schema
-  varmap <- liftIO$ readMVar ( mvarMap schema)
+  varmap <- readMVar ( mvarMap schema)
   let stats = lookTable metaschema "table_stats"
-  (dbpol,(_,polling))<- liftIO$ transaction metaschema $ eventTable metaschema stats  Nothing Nothing [] []
+  (dbpol,(_,polling))<- transaction metaschema $ eventTable metaschema stats  Nothing Nothing [] []
   let
     row t s ls = tblist . fmap _tb $ [Attr "schema_name" (TB1 (SText (schemaName schema ) )), Attr "table_name" (TB1 (SText t)) , Attr "size" (TB1 (SNumeric s)), Attr "loadedsize" (TB1 (SNumeric ls)) ]
     lrow t dyn st = liftTable' metaschema "table_stats" . row t (maybe (G.size dyn) (maximum .fmap fst ) $  nonEmpty $  F.toList st) $ (G.size dyn)

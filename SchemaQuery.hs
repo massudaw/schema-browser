@@ -81,7 +81,7 @@ eventTable inf table page size presort fixed = do
                 && sq > pagesize * (fromMaybe 0 page + 1) -- Tabela é maior que a página
                 && pagesize * (fromMaybe 0 page +1) > G.size (filterfixed reso)  ) -- O carregado é menor que a página
              then do
-                   liftIO$ putStrLn $ "load offseted new page" <> show table
+                   liftIO$ putStrLn $ "new page " <> show table
                    let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                    (res,nextToken ,s ) <- (listEd $ schemaOps inf) inf table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
                    let ini = (M.insert fixidx (estLength page pagesize res s  ,(\v -> M.insert ((fromMaybe 0 page +1 )*pagesize) v  mp) $ justError "no token"    nextToken) fixedmap , createUn (S.fromList $ rawPK table)  (fmap unTB1 res)<> reso )
@@ -89,10 +89,10 @@ eventTable inf table page size presort fixed = do
                    liftIO$ putMVar (idxVar dbvar ) (fst ini)
                    return  ini
              else do
-               liftIO$ putStrLn $ "load offseted existing page" <> show table
+               liftIO$ putStrLn $ "existing page " <> show table
                return (fixedmap ,reso)
           Nothing -> do
-             liftIO$ putStrLn $ "create new filter map" <> show table
+             liftIO$ putStrLn $ "new map " <> show table
              (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing Nothing size sortList fixed
              let ini = (M.insert fixidx (estLength page pagesize res s ,maybe M.empty (M.singleton pagesize) p) fixedmap , createUn (S.fromList $ rawPK table)    (fmap (\i -> (unTB1 i)) res) <> reso)
              liftIO $ putPatch (patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )

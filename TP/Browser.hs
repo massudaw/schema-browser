@@ -5,7 +5,11 @@
 module Main (main) where
 
 import NonEmpty (NonEmpty(..))
+import qualified NonEmpty as Non
+import Data.Unique
+import qualified Data.Binary as B
 import Query
+import Data.Time
 import Text
 import qualified Types.Index as G
 import Poller
@@ -38,6 +42,7 @@ import Reactive.Threepenny hiding(apply)
 import Data.Traversable (traverse)
 import qualified Data.List as L
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Lazy as BSL
 
 import RuntimeTypes
 import qualified Graphics.UI.Threepenny as UI
@@ -73,11 +78,48 @@ main = do
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup smvar  (tail args))
   print "Finish"
 
+updateClient metainf inf table tdi clientId now =
+    let
+      row = tblist . fmap _tb
+            $ [ Attr "clientid" (TB1 (SNumeric (hashUnique clientId )))
+              , Attr "creation_time" (TB1 (STimestamp (utcToLocalTime utc now)))
+              , Attr "schema" (LeftTB1 $ TB1 . SText .  schemaName <$> inf )
+              , Attr "table" (LeftTB1 $ TB1 . SText .  tableName <$>table)
+              , IT (_tb (Attr "data_index"  (TB1 ()))) (LeftTB1 $ ArrayTB1 . Non.fromList .   fmap (\(i,j) -> TB1 $ tblist $ fmap _tb [Attr "key" (TB1 . SText  $ keyValue i) ,Attr "val" (TB1 . SDynamic $  j) ]) <$>tdi )
+              ]
+      lrow = liftTable' metainf "clients" row
+    in lrow
+
+getClient metainf clientId ccli = G.lookup (G.Idex [(lookKey metainf "clients" "clientid",TB1 (SNumeric (hashUnique clientId)))]) ccli :: Maybe (TBData Key Showable)
+
+editClient :: InformationSchema -> Maybe InformationSchema -> Maybe Table -> Maybe [(Key,FTB Showable)] -> Unique -> UTCTime -> IO (Maybe())
+editClient metainf inf table tdi clientId now = do
+  (dbmeta ,(_,ccli)) <- transaction metainf $ eventTable metainf (lookTable metainf "clients" ) Nothing Nothing [] []
+  let cli :: Maybe (TBData Key Showable)
+      cli = getClient metainf clientId ccli
+      new :: TBData Key Showable
+      new = updateClient metainf inf table tdi clientId now
+      lrow :: Maybe (Index (TBData Key Showable))
+      lrow = maybe (Just $ patch new ) (flip diff new )  cli
+  traverse (putPatch (patchVar dbmeta ) . pure ) lrow
+
+addClient metainf inf table dbdata =  do
+    clientId <- newUnique
+    now <- getCurrentTime
+    let
+      tdi = fmap getPKM $ join $ (\inf table -> fmap (tblist' table ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table))  ). F.toList) <$>  inf  <*> table <*> rowpk dbdata
+    editClient metainf inf table tdi clientId now
+    return clientId
+
+
 
 setup
      ::  MVar (M.Map Text  InformationSchema) ->  [String] -> Window -> UI ()
 setup smvar args w = void $ do
+  metainf <- justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
   let bstate = argsToState args
+  inf <- liftIO$ traverse (\i -> keyTables  smvar (conn metainf) (conn metainf) (T.pack i, T.pack $ user bstate) Nothing postgresOps plugList) $ schema  bstate
+  cli <- liftIO $ addClient metainf inf ((\t inf -> lookTable inf . T.pack $ t) <$> tablename bstate  <*> inf  ) bstate
   (evDB,chooserItens) <- databaseChooser smvar bstate
   body <- UI.div
   return w # set title (host bstate <> " - " <>  dbn bstate)
@@ -102,14 +144,15 @@ setup smvar args w = void $ do
             dash <- metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ) ]
             element body # set UI.children [dash] # set UI.class_ "row"
         "Stats" -> do
-            dash <- metaAllTableIndexV inf "table_stats" [("schema_name",TB1 $ SText (schemaName inf) ) ]
-            element body # set UI.children [dash] # set UI.class_ "row"
+            stats <- metaAllTableIndexV inf "table_stats" [("schema_name",TB1 $ SText (schemaName inf) ) ]
+            clients <- metaAllTableIndexV inf "clients" [("schema",LeftTB1 $ Just $ TB1 $ SText (schemaName inf) ) ]
+            element body # set UI.children [stats,clients] # set UI.class_ "row"
         "Exception" -> do
             dash <- metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ) ]
             element body # set UI.children [dash] # set UI.class_ "row"
         "Nav" -> do
             let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
-            [tbChooser,subnet] <- chooserTable  inf  k (tablename bstate) bstate
+            [tbChooser,subnet] <- chooserTable  inf  k (tablename bstate) bstate cli
             element tbChooser # sink0 UI.style (facts $ noneShow <$> triding menu)
             let
                 expand True = "col-xs-10"
@@ -159,7 +202,7 @@ databaseChooser smvar sargs = do
   dbs <- liftIO $ listDBS  sargs
   let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,) . (,T.pack s) . fst $ snd $ dbs ) $ ( schema sargs)
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
-  dbsW <- listBox (pure $ (\(i,(c,j)) -> (i,) . (c,) <$> j) $ dbs ) (pure dbsInit  ) (pure id) (pure (line . show . snd . fmap snd ))
+  dbsW <- listBox (pure $ (\(i,(c,j)) -> (i,) . (c,) <$> j) $ dbs ) (pure dbsInit) (pure id) (pure (line . show . snd . fmap snd ))
   schema <- flabel # set UI.text "schema"
   cc <- currentValue (facts $ triding dbsW)
   let dbsWE = rumors $ triding dbsW
@@ -196,7 +239,7 @@ attrLine i   = do
 
 lookAttr k (_,m) = M.lookup (S.singleton (Inline k)) (unKV m)
 
-chooserTable inf kitems i bstate = do
+chooserTable inf kitems i bstate cli = do
   let initKey = pure . join $ fmap (S.fromList .rawPK) . flip M.lookup (tableMap inf) . T.pack <$> i
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
@@ -227,6 +270,7 @@ chooserTable inf kitems i bstate = do
   body <- UI.div
 
 
+  liftIO $ onEventIO (rumors  bBset) (\i -> void . editClient (meta inf) (Just inf) (M.lookup i (pkMap inf)) Nothing cli =<< getCurrentTime )
   el <- mapUITEvent body (\(nav,table)->
       case nav of
         "Change" -> do
@@ -238,7 +282,7 @@ chooserTable inf kitems i bstate = do
             dash <- metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName tableob) ) ]
             element body # set UI.children [dash]
         "Nav" -> do
-            span <- viewerKey inf table bstate
+            span <- viewerKey inf table cli bstate
             element body # set UI.children [span]
         "Viewer" -> do
             span <- viewer inf (justError "no table with pk" $ M.lookup table (pkMap inf)) Nothing
@@ -252,15 +296,17 @@ chooserTable inf kitems i bstate = do
 
 viewerKey
   ::
-      InformationSchema -> S.Set Key -> BrowserState-> UI Element
-viewerKey inf key bstate = mdo
+      InformationSchema -> S.Set Key -> Unique -> BrowserState-> UI Element
+viewerKey inf key cli bstate = mdo
   let
       table = justLook  key $ pkMap inf
   reftb@(vpt,vp,gist,var ) <- refTables inf table
 
+
   let
-      tdiv = join $ fmap (tblist' table  ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table)) ) <$> rowpk bstate
-      tdi = (\i -> join $ traverse (\v -> G.lookup  (G.Idex (justError "" $ traverse (traverse unSOptional' ) $getPKM  v)) (snd i) ) tdiv  ) <$> vpt
+      tdiv = join $ fmap (tblist' table  ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table)) ) . F.toList <$> rowpk bstate
+      tdip = (\i -> join $ traverse (\v -> G.lookup  (G.Idex (justError "" $ traverse (traverse unSOptional' ) $getPKM  v)) (snd i) ) tdiv  ) <$> vpt
+      tdi = if Just (T.unpack $ tableName table) == tablename bstate then tdip else pure Nothing
   cv <- currentValue (facts tdi)
   -- Final Query ListBox
   filterInp <- UI.input
@@ -293,6 +339,7 @@ viewerKey inf key bstate = mdo
   itemList <- listBox (fmap snd res4) (tidings st sel ) (pure id) ( pure attrLine )
 
   let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
+  liftIO $ onEventIO (evsel ) (\i -> void . editClient (meta inf) (Just inf) (Just table ) (getPKM <$> i) cli =<< getCurrentTime )
   prop <- stepper cv evsel
   let tds = tidings prop (diffEvent  prop evsel)
 

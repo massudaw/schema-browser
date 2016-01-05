@@ -700,6 +700,7 @@ buildPrim fm tdi i = case i of
          PBoolean -> do
            res <- checkedWidgetM (fmap (\(SBoolean i) -> i) <$> tdi )
            return (fmap SBoolean <$> res)
+
          PTimestamp dbzone -> do
             cliZone <- jsTimeZone
             itime <- liftIO $  getCurrentTime
