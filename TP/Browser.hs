@@ -75,13 +75,15 @@ main = do
   plugs smvar db plugList
   poller smvar db plugList False
 
-  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup smvar  (tail args))
+  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup smvar  (tail args)) (\w ->  liftIO $ do
+          print "delete client"
+          deleteClient metas (sToken w) )
   print "Finish"
 
 updateClient metainf inf table tdi clientId now =
     let
       row = tblist . fmap _tb
-            $ [ Attr "clientid" (TB1 (SNumeric (hashUnique clientId )))
+            $ [ Attr "clientid" (TB1 (SNumeric (fromInteger clientId )))
               , Attr "creation_time" (TB1 (STimestamp (utcToLocalTime utc now)))
               , Attr "schema" (LeftTB1 $ TB1 . SText .  schemaName <$> inf )
               , Attr "table" (LeftTB1 $ TB1 . SText .  tableName <$>table)
@@ -90,9 +92,14 @@ updateClient metainf inf table tdi clientId now =
       lrow = liftTable' metainf "clients" row
     in lrow
 
-getClient metainf clientId ccli = G.lookup (G.Idex [(lookKey metainf "clients" "clientid",TB1 (SNumeric (hashUnique clientId)))]) ccli :: Maybe (TBData Key Showable)
+getClient metainf clientId ccli = G.lookup (G.Idex [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))]) ccli :: Maybe (TBData Key Showable)
 
-editClient :: InformationSchema -> Maybe InformationSchema -> Maybe Table -> Maybe [(Key,FTB Showable)] -> Unique -> UTCTime -> IO (Maybe())
+deleteClient metainf clientId = do
+  (dbmeta ,(_,ccli)) <- transaction metainf $ eventTable metainf (lookTable metainf "clients" ) Nothing Nothing [] []
+  putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))],[])]
+
+
+editClient :: InformationSchema -> Maybe InformationSchema -> Maybe Table -> Maybe [(Key,FTB Showable)] -> Integer -> UTCTime -> IO (Maybe())
 editClient metainf inf table tdi clientId now = do
   (dbmeta ,(_,ccli)) <- transaction metainf $ eventTable metainf (lookTable metainf "clients" ) Nothing Nothing [] []
   let cli :: Maybe (TBData Key Showable)
@@ -103,8 +110,7 @@ editClient metainf inf table tdi clientId now = do
       lrow = maybe (Just $ patch new ) (flip diff new )  cli
   traverse (putPatch (patchVar dbmeta ) . pure ) lrow
 
-addClient metainf inf table dbdata =  do
-    clientId <- newUnique
+addClient clientId metainf inf table dbdata =  do
     now <- getCurrentTime
     let
       tdi = fmap getPKM $ join $ (\inf table -> fmap (tblist' table ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table))  ). F.toList) <$>  inf  <*> table <*> rowpk dbdata
@@ -119,7 +125,7 @@ setup smvar args w = void $ do
   metainf <- justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
   let bstate = argsToState args
   inf <- liftIO$ traverse (\i -> keyTables  smvar (conn metainf) (conn metainf) (T.pack i, T.pack $ user bstate) Nothing postgresOps plugList) $ schema  bstate
-  cli <- liftIO $ addClient metainf inf ((\t inf -> lookTable inf . T.pack $ t) <$> tablename bstate  <*> inf  ) bstate
+  cli <- liftIO $ addClient (sToken w ) metainf inf ((\t inf -> lookTable inf . T.pack $ t) <$> tablename bstate  <*> inf  ) bstate
   (evDB,chooserItens) <- databaseChooser smvar bstate
   body <- UI.div
   return w # set title (host bstate <> " - " <>  dbn bstate)
@@ -296,7 +302,7 @@ chooserTable inf kitems i bstate cli = do
 
 viewerKey
   ::
-      InformationSchema -> S.Set Key -> Unique -> BrowserState-> UI Element
+      InformationSchema -> S.Set Key -> Integer -> BrowserState-> UI Element
 viewerKey inf key cli bstate = mdo
   let
       table = justLook  key $ pkMap inf
