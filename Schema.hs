@@ -67,7 +67,7 @@ createType  (isNull,isArray,isDelayed,isRange,isDef,isComp,tysch,tyname)
 
 recoverFields :: InformationSchema -> FKey (KType (Prim KPrim  (Text,Text))) -> FKey (KType (Prim PGType PGRecord))
 recoverFields inf v = map
-  where map = justError "notype" $ M.lookup (keyFastUnique v)  (_backendKey inf )
+  where map = justError ("notype" <> T.unpack (showKey v)) $ M.lookup (keyFastUnique v)  (backendsKey inf )
 
 meta inf = maybe inf id (metaschema inf)
 
@@ -251,9 +251,10 @@ fixPatchAttr inf t p@(PAttr _ _ ) =  p
 fixPatchAttr inf tname p@(PInline rel e ) =  PInline rel (fmap (\(_,o,v)-> (tableMeta $ lookTable inf tname2,o,fmap (fixPatchAttr  inf tname2 )v)) e)
     where Just (FKInlineTable (_,tname2)) = fmap (unRecRel.pathRel) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (keyValue rel)) )  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
-fixPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa) (tableMeta $ lookTable inf tname2) b
-    where (FKJoinTable  _ (_,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+fixPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa) (tableMeta $ lookTable rinf tname2) b
+    where (FKJoinTable  _ (schname,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
+          rinf = fromMaybe inf (M.lookup schname (depschema inf))
 
 findRefTable inf tname rel2 =  tname2
 
@@ -270,8 +271,9 @@ liftKeys inf tname = fmap (liftTable' inf tname)
 
 liftField :: InformationSchema -> Text -> Column Text a -> Column Key a
 liftField inf tname (Attr t v) = Attr (lookKey inf tname t) v
-liftField inf tname (FKT ref  rel2 tb) = FKT (mapComp (liftField inf tname) <$> ref)   ( rel) (liftKeys inf tname2 tb)
-    where FKJoinTable  rel (_,tname2)  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+liftField inf tname (FKT ref  rel2 tb) = FKT (mapComp (liftField inf tname) <$> ref)   ( rel) (liftKeys rinf tname2 tb)
+    where FKJoinTable  rel (schname,tname2)  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+          rinf = fromMaybe inf (M.lookup schname (depschema inf))
           ta = lookTable inf tname
 liftField inf tname (IT rel tb) = IT (mapComp (liftField inf tname ) rel) (liftKeys inf tname2 tb)
     where FKInlineTable (_,tname2)  = unRecRel.pathRel  $ justError (show (rel ,rawFKS ta)) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)

@@ -61,20 +61,25 @@ createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (T
 
 -- tableLoader :: InformationSchema -> Table -> TransactionM (Collection Key Showable)
 eventTable = tableLoader
+
 tableLoader inf table page size presort fixed   =  do
     let base (Path _ (FKJoinTable i j  ) ) = fst j == schemaName inf
         base i = True
         remoteFKS = S.filter (not .base )  (_rawFKSL table)
-        getAtt (m ,k ) = F.toList . _kvvalues . unTB $ k
+        getAtt i (m ,k ) = filter (( `S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues . unTB $ k
     (db,o) <- eventTable' inf (table {_rawFKSL = S.filter base  (_rawFKSL table)}) page size presort fixed
     res <- foldl (\m (Path _ (FKJoinTable i j ))  -> m >>= (\m -> do
         let rinf = justError "no schema" $ M.lookup ((fst j))  (depschema inf)
-        (db,(_,tb)) <- tableLoader rinf (lookSTable inf j) page size presort fixed
+            table = (lookTable rinf $ snd j)
+        (db,(_,tb)) <- tableLoader rinf table  page size presort fixed
         let
+            tar = S.fromList $ fmap _relOrigin i
             joinFK :: TBData Key Showable -> Column Key Showable
-            joinFK m  = FKT (getAtt m) i (joinRel (tableMeta table) i (fmap unTB $ getAtt m) tb)
+            joinFK m  = FKT taratt i (traceShow (i ,tar,taratt ) $ joinRel (tableMeta table ) i (fmap unTB $ taratt ) tb)
+              where
+                    taratt = getAtt tar m
             addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
-            addAttr r (m,i) = (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r) i)  ) i )
+            addAttr r (m,i) = (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` tar   ) i )) i )
         return ((\i -> addAttr  (joinFK i) i) <$> m)) )  (return $ snd o) (S.toList remoteFKS)
     return $ (db,(fst o ,res))
 
@@ -195,9 +200,10 @@ tbInsertEdit inf  j@(Attr k1 k2) = return $ Identity  (Attr k1 k2)
 tbInsertEdit inf  (IT k2 t2) = Identity . IT k2 <$> noInsert inf t2
 tbInsertEdit inf  f@(FKT pk rel2  t2) =
    case t2 of
-        t@(TB1 (_,l)) -> do
+        t@(TB1 (m,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           Identity . (\tb -> FKT ( fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> pk) (unTB1 tb)) rel2 tb ) <$> fullInsert inf t
+           let rinf  = fromMaybe inf (M.lookup (_kvschema m) (depschema inf))
+           Identity . (\tb -> FKT ( fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> pk) (unTB1 tb)) rel2 tb ) <$> fullInsert rinf t
         LeftTB1 i ->
            maybe (return (Identity f) ) (fmap (fmap attrOptional) . tbInsertEdit inf) (unLeftItens f)
         ArrayTB1 l ->

@@ -54,6 +54,8 @@ data InformationSchema
   , plugins :: [Plugins ]
   }
 
+backendsKey s = _backendKey s <> Prelude.foldl mappend mempty (fmap (backendsKey .snd)$ M.toList $ depschema s)
+
 data Auth
   = PostAuth Connection
   | OAuthAuth (Maybe (Text,R.Tidings OAuth2Tokens))
