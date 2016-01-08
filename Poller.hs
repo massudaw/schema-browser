@@ -39,9 +39,9 @@ import qualified Data.Map as M
 import GHC.Stack
 
 
-plugs schm db plugs = do
+plugs schm authmap db plugs = do
   conn <- connectPostgreSQL (connRoot db)
-  inf <- keyTables schm conn conn ("metadata",T.pack $ user db ) Nothing postgresOps plugs
+  inf <- keyTables schm conn ("metadata",T.pack $ user db ) authmap plugs
   (db ,(s,t)) <- transaction inf $ eventTable  inf (lookTable inf "plugins") Nothing Nothing [] []
   let els = L.filter (not . (`L.elem` G.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
   p <-transaction inf $ do
@@ -55,11 +55,11 @@ index tb item = snd $ justError ("no item" <> show item) $ indexTable (IProd Tru
 
 testPoller plug = do
   smvar <- newMVar M.empty
-  poller smvar  (BrowserState "localhost" "5432" "incendio" "postgres" "queijo" Nothing Nothing Nothing ) [plug] True
+  poller smvar  undefined (BrowserState "localhost" "5432" "incendio" "postgres" "queijo" Nothing Nothing Nothing ) [plug] True
 
-poller schm db plugs is_test = do
+poller schm authmap db plugs is_test = do
   conn <- connectPostgreSQL (connRoot db)
-  metas <- keyTables  schm conn  conn ("metadata", T.pack $ user db) Nothing postgresOps plugs
+  metas <- keyTables  schm conn  ("metadata", T.pack $ user db) authmap plugs
   (dbpol,(_,polling))<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
   threadDelay 1000000
   let
@@ -91,7 +91,7 @@ poller schm db plugs is_test = do
             if  is_test || diffUTCTime current start  >  fromIntegral intervalsec
             then do
                 putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
-                inf <- keyTables  schm conn  conn (schema, T.pack $ user db) Nothing postgresOps plugs
+                inf <- keyTables  schm conn  (schema, T.pack $ user db) authmap plugs
                 let fetchSize = 1000
                 (dbplug ,(l,listRes)) <- transaction inf $ eventTable inf (lookTable inf a) Nothing (Just fetchSize) [][]
                 let sizeL = justLook [] l

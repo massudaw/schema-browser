@@ -35,23 +35,33 @@ import GHC.Stack
 
 data Parser m s a b = P (s,s) (m a b) deriving Functor
 
+
 data InformationSchema
   = InformationSchema
   { schemaName :: Text
   , username :: Text
-  , token :: Maybe (Text,R.Tidings OAuth2Tokens)
+  , authtoken :: Auth
   , _keyMapL :: Map (Text,Text) Key
   , _backendKey :: Map Unique PGKey
   , _pkMapL :: Map (Set Key) Table
   , _tableMapL :: Map Text Table
   , tableSize :: Map Table Int
   , mvarMap :: MVar (Map (KVMetadata Key) (DBVar ))
-  , conn :: Connection
   , rootconn :: Connection
   , metaschema :: Maybe InformationSchema
+  , depschema :: Map Text InformationSchema
   , schemaOps :: SchemaEditor
   , plugins :: [Plugins ]
   }
+
+data Auth
+  = PostAuth Connection
+  | OAuthAuth (Maybe (Text,R.Tidings OAuth2Tokens))
+
+token s = case authtoken s of
+      OAuthAuth i -> i
+conn s = case authtoken s of
+      PostAuth i -> i
 
 data BrowserState
   = BrowserState
@@ -67,7 +77,9 @@ data BrowserState
 
 
 
-tableMap = _tableMapL
+tableMap :: InformationSchema -> Map Text (Map Text Table)
+tableMap s = M.singleton (schemaName s) (_tableMapL s ) <> Prelude.foldl mappend mempty (fmap tableMap  (fmap snd $ M.toList $ depschema s))
+
 keyMap = _keyMapL
 pkMap = _pkMapL
 
@@ -158,7 +170,10 @@ argsToState  [h,ph,d,u,p] = BrowserState h ph d  u p Nothing Nothing Nothing
 argsToState i = errorWithStackTrace (show i)
 
 lookTable :: InformationSchema -> Text -> Table
-lookTable inf t = justError ("no table: " <> T.unpack t) $ M.lookup t (tableMap inf)
+lookTable inf t = justError ("no table: " <> T.unpack t) $ M.lookup t (_tableMapL inf)
+
+lookSTable :: InformationSchema -> (Text,Text) -> Table
+lookSTable inf (s,t) = justError ("no table: " <> T.unpack t) $ join $ M.lookup t <$> M.lookup s (tableMap inf)
 
 lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k ) $ M.lookup (t,k) (keyMap inf)

@@ -30,6 +30,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Control.Monad.Writer
 import Data.Text (Text)
+import GHC.Stack
 
 import Types
 
@@ -59,8 +60,8 @@ createTable r@(Raw sch _ _ _ _ tbl _ _ pk _ fk inv attr) = "CREATE TABLE " <> ra
     renderTy (Primitive ty ) = ty
     -- renderTy (InlineTable s ty ) = s <> "." <> ty
     renderPK = "CONSTRAINT " <> tbl <> "_PK PRIMARY KEY (" <>  renderKeySet (S.fromList pk) <> ")"
-    renderFK (Path origin (FKJoinTable _ ks table) end) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
-    renderFK (Path origin _  end) = ""
+    -- renderFK (Path origin (FKJoinTable  ks (_,table)) ) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
+    renderFK (Path origin _  ) = ""
 
 
 
@@ -70,6 +71,8 @@ expandInlineTable pre tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =
        name =  tableAttr tb
        aliasKeys (Labeled  a (Attr n    _ ))  =  "(" <> pre <> ")." <> keyValue n <> " as " <> a
    in query
+expandInlineTable pre tb = errorWithStackTrace (show (pre,tb))
+
 
 expandInlineArrayTable ::  Text -> TB3  (Labeled Text) Key  () ->  Text
 expandInlineArrayTable pre tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =

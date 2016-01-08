@@ -98,6 +98,7 @@ unSOptional i = traceShow ("unSOptional No Pattern Match SOptional-" <> show i) 
 
 unSOptional' (LeftTB1 i ) = i
 unSOptional' (SerialTB1 i )  = i
+unSOptional' (DelayedTB1 i )  = i
 unSOptional' i   = Just i
 
 unSComposite (ArrayTB1 i) = i
@@ -129,27 +130,26 @@ showableDef i = Nothing
 isRecRel (RecJoin _ _ ) =  True
 isRecRel i = False
 
-pathRel (Path _ rel _ ) = rel
-pathRelRef (Path ifk _ _ ) = ifk
-pathRelStore (Path _ _ ifk ) = ifk
+pathRel (Path _ rel  ) = rel
+pathRelRef (Path ifk _  ) = ifk
 
 pathRelRel :: Ord k => Path (Set k ) (SqlOperationK k) -> Set (Rel k)
-pathRelRel (Path _ (FKJoinTable _ rel  _ ) _ ) = Set.fromList rel
-pathRelRel (Path r (FKInlineTable  _   )  _ ) = Set.map Inline r
-pathRelRel (Path r (RecJoin l rel )  a ) =  pathRelRel (Path r rel a)
+pathRelRel (Path _ (FKJoinTable  rel   _ )  ) = Set.fromList rel
+pathRelRel (Path r (FKInlineTable  _  )   ) = Set.map Inline r
+pathRelRel (Path r (RecJoin l rel )   ) =  pathRelRel (Path r rel )
 
 pathRelRel' :: Ord k => Path (Set k ) (SqlOperationK k) -> MutRec [Set (Rel k )]
-pathRelRel' (Path r (RecJoin l rel )  a )
-  | L.null (unMutRec l) =  MutRec [[pathRelRel (Path r rel a)]]
-  | otherwise = fmap ((pathRelRel (Path r rel a) :) . fmap (Set.fromList)) l
+pathRelRel' (Path r (RecJoin l rel )   )
+  | L.null (unMutRec l) =  MutRec [[pathRelRel (Path r rel )]]
+  | otherwise = fmap ((pathRelRel (Path r rel ) :) . fmap (Set.fromList)) l
 
 
 
 data Compose f g k a = Compose {getCompose :: f (g k a) } deriving (Functor,Foldable,Traversable,Ord,Eq,Show,Generic)
 
 data Path a b
-  = Path  a  b  a
-  deriving(Eq,Ord,Show )
+  = Path  a  b
+  deriving(Eq,Ord,Show ,Functor)
 
 
 data KV f k a
@@ -492,14 +492,13 @@ instance Ord Sess.Session where
 
 type SqlOperation = SqlOperationK Key
 data SqlOperationK k
-  = FetchTable Text
-  | FKJoinTable Text [Rel k ] Text
+  = FKJoinTable [Rel k] (Text,Text)
   | RecJoin (MutRec [[Rel k ]])  (SqlOperationK k)
-  | FKInlineTable Text
+  | FKInlineTable (Text,Text)
   deriving(Eq,Ord,Show)
 
-fkTargetTable (FKJoinTable t r tn) = tn
-fkTargetTable (FKInlineTable tn) = tn
+fkTargetTable (FKJoinTable  r tn) = snd tn
+fkTargetTable (FKInlineTable tn) = snd tn
 fkTargetTable (RecJoin t tn) = fkTargetTable tn
 
 data FieldModifier
@@ -1056,7 +1055,7 @@ getUn un (m, k) =  L.sortBy (comparing fst ) $ concat (fmap aattr $ F.toList $ (
 
 inlineName (KOptional i) = inlineName i
 inlineName (KArray a ) = inlineName a
-inlineName (Primitive (RecordPrim (s, i)) ) = i
+inlineName (Primitive (RecordPrim (s, i)) ) = (s,i)
 
 inlineFullName (KOptional i) = inlineFullName i
 inlineFullName (KArray a ) = inlineFullName a

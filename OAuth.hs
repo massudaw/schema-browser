@@ -98,7 +98,7 @@ updateTable inf table reference page maxResults
         print ("update",table,t)
         print d
         return  d
-    c <-  traverse (convertAttrs inf Nothing (tableMap inf) table ) . maybe [] (\i -> (i :: Value) ^.. key (  rawName table ) . values) $ decoded
+    c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) table ) . maybe [] (\i -> (i :: Value) ^.. key (  rawName table ) . values) $ decoded
     return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , {-length c +-} (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
   | otherwise = return ([], Nothing,0)
 
@@ -116,7 +116,7 @@ listTable inf table offset page maxResults sort ix
         (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
         print ("list",table,t)
         return  d
-    c <-  traverse (convertAttrs inf Nothing (tableMap inf) table ) . maybe [] (\i -> (i :: Value) ^.. key (  rawName table ) . values) $ decoded
+    c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) table ) . maybe [] (\i -> (i :: Value) ^.. key (  rawName table ) . values) $ decoded
     return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
 
 getKeyAttr (TB1 (m, k)) = (concat (fmap keyattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
@@ -136,7 +136,7 @@ insertTable inf pk
             (postHeaderJSON [("GData-Version","3.0")] req (toJSON $ M.fromList $ fmap (\(a,b) -> (keyValue a , renderShowable b)) $ attrs ) )
         print ("insert",getPK (TB1 pk),t)
         return $ decode v
-    fmap (TableModification Nothing table . patch .unTB1) <$> (traverse (convertAttrs inf Nothing (tableMap inf) table ) .  fmap (\i -> (i :: Value)  ) $  decoded)
+    fmap (TableModification Nothing table . patch .unTB1) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table ) .  fmap (\i -> (i :: Value)  ) $  decoded)
 
 
 joinGet inf tablefrom tableref from ref
@@ -150,7 +150,7 @@ joinGet inf tablefrom tableref from ref
                 (simpleHttpHeader [("GData-Version","3.0")] req )
         print ("joinGet",tablefrom,tableref ,getPK from, getPK ref ,t)
         return $ decode v
-    traverse (convertAttrs inf (Just $ (tableref,unTB1 ref)) (tableMap inf) tableref ) .  fmap (\i -> (i :: Value)  ) $  decoded
+    traverse (convertAttrs inf (Just $ (tableref,unTB1 ref)) (_tableMapL inf) tableref ) .  fmap (\i -> (i :: Value)  ) $  decoded
   | otherwise = return Nothing
 
 
@@ -168,7 +168,7 @@ getTable inf  tb pk
             (simpleHttpHeader [("GData-Version","3.0")] req )
         print ("get",tb,getPK pk,t)
         return $ decode v
-    traverse (convertAttrs inf (Just $ (tb,unTB1 pk)) (tableMap inf) tb ) .  fmap (\i -> (i :: Value)  ) $  decoded
+    traverse (convertAttrs inf (Just $ (tb,unTB1 pk)) (_tableMapL inf) tb ) .  fmap (\i -> (i :: Value)  ) $  decoded
 
 getDiffTable inf table  j = fmap (join . fmap (diff j. unTB1) ) $ getTable  inf table $ TB1 j
 joinGetDiffTable inf table  tableref f j = fmap (join . fmap (diff j. unTB1)) $ joinGet  inf table tableref (TB1 f) (TB1 j)
@@ -183,9 +183,9 @@ lbackRef (TB1 t) = snd $ Types.head $ getPKM t
 convertAttrs :: InformationSchema -> Maybe (Table,TBData Key Showable) -> M.Map Text Table ->  Table -> Value -> TransactionM (TB2 Key Showable)
 convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb ))
   where
-    pathOrigin (Path i _ _ ) = i
-    isFKJoinTable (Path _ (FKJoinTable _ _ _) _) = True
-    isFKJoinTable (Path i (RecJoin _ j  ) k) = isFKJoinTable (Path i j k)
+    pathOrigin (Path i _  ) = i
+    isFKJoinTable (Path _ (FKJoinTable  _ _)) = True
+    isFKJoinTable (Path i (RecJoin _ j  ) ) = isFKJoinTable (Path i j )
     isFKJoinTable _ = False
     fkFields = S.unions $ map pathOrigin $ filter isFKJoinTable $  F.toList $rawFKS tb
     kid :: Key -> TransactionM (Maybe (TB Identity Key Showable))
@@ -193,7 +193,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
       | S.member k fkFields
             = let
                fks = justError "" (find ((== S.singleton k). pathOrigin) (F.toList (rawFKS tb)))
-               (FKJoinTable _ _ trefname ) = unRecRel $ pathRel fks
+               (FKJoinTable  _ (_,trefname) ) = unRecRel $ pathRel fks
                vk = iv  ^? ( key (keyValue  k))
                fk =  F.toList $  pathRelRel fks
                exchange tname (KArray i)  = KArray (exchange tname i)
@@ -204,20 +204,15 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                patt = either
                     (traverse (\v -> do
                         tell (TableModification Nothing (lookTable infsch trefname ) . patch <$> F.toList v)
-                        liftIO $ print (trefname ,"left",v)
                         return $ FKT [Compose .Identity . Types.Attr  k $ (lbackRef    v) ]  fk v))
                     (traverse (\v -> do
                         let ref = [Compose .Identity . Types.Attr  k $ v]
-                        liftIO $ print (trefname,"right",v)
                         tbs <- liftIO$ runDBM infsch (atTable (tableMeta $ lookTable infsch trefname))
-                        liftIO$ print tbs
-                        reftb <- joinRelT fk (fmap unTB ref) (lookTable infsch trefname) (G.toList tbs)
-                        liftIO$ print reftb
+                        reftb <- joinRelT fk (fmap unTB ref) (lookTable infsch trefname) tbs
                         patch <- maybe (return reftb ) (\(tref,getref )-> traverse (\reftb -> do
                             pti <- joinGetDiffTable infsch  tref (lookTable infsch trefname) getref reftb
                             tell (TableModification Nothing (lookTable infsch trefname) <$> maybeToList pti)
                             return $ maybe (reftb) (unTB1 . apply (TB1 reftb) . PAtom) pti) reftb ) getref
-                        liftIO$ print patch
                         return $ FKT ref fk   patch ))
                funL = funO  True (exchange trefname $ keyType k) vk
                funR = funO  True ( keyType k) vk

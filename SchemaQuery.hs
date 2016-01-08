@@ -58,9 +58,35 @@ createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key Showable
 createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un (tableNonRef' i) )
   where transPred v = G.Idex $ justError "invalid pred" (Tra.traverse (Tra.traverse unSOptional' ) $getUn un (tableNonRef' v))
 
-eventTable :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
+
+-- tableLoader :: InformationSchema -> Table -> TransactionM (Collection Key Showable)
+eventTable = tableLoader
+tableLoader inf table page size presort fixed   =  do
+    let base (Path _ (FKJoinTable i j  ) ) = fst j == schemaName inf
+        base i = True
+        remoteFKS = S.filter (not .base )  (_rawFKSL table)
+        getAtt (m ,k ) = F.toList . _kvvalues . unTB $ k
+    (db,o) <- eventTable' inf (table {_rawFKSL = S.filter base  (_rawFKSL table)}) page size presort fixed
+    res <- foldl (\m (Path _ (FKJoinTable i j ))  -> m >>= (\m -> do
+        let rinf = justError "no schema" $ M.lookup ((fst j))  (depschema inf)
+        (db,(_,tb)) <- tableLoader rinf (lookSTable inf j) page size presort fixed
+        let
+            joinFK :: TBData Key Showable -> Column Key Showable
+            joinFK m  = FKT (getAtt m) i (joinRel (tableMeta table) i (fmap unTB $ getAtt m) tb)
+            addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
+            addAttr r (m,i) = (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r) i)  ) i )
+        return ((\i -> addAttr  (joinFK i) i) <$> m)) )  (return $ snd o) (S.toList remoteFKS)
+    return $ (db,(fst o ,res))
+
+
+
+
+
+
+
+eventTable' :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
     -> TransactionM (DBVar,Collection Key Showable)
-eventTable inf table page size presort fixed = do
+eventTable' inf table page size presort fixed = do
     let mvar = mvarMap inf
         defSort = fmap (,Desc) $  rawPK table
         sortList  = if L.null presort then defSort else presort
@@ -136,7 +162,7 @@ transaction inf log = do -- withTransaction (conn inf) $ do
   (md,mods)  <- runWriterT log
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
   Tra.traverse (\(k,v) -> do
-    ref <- refTable inf k
+    ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ M.lookup ((rawSchema k ))  (depschema inf) ) k
     putPatch (patchVar ref ) v
     ) (M.toList aggr)
   return md
@@ -189,15 +215,15 @@ loadFKS inf table = do
   return  $ tblist' targetTable (fmap _tb $fmap snd nonFKAttrs <> fks )
 
 loadFK :: InformationSchema -> TBData Key Showable -> Path (S.Set Key ) SqlOperation -> TransactionM (Maybe (Column Key Showable))
-loadFK inf table (Path ori (FKJoinTable to rel tt ) tar) = do
+loadFK inf table (Path ori (FKJoinTable rel (st,tt) ) ) = do
   let targetTable = lookTable inf tt
   (i,(_,mtable )) <- eventTable inf targetTable Nothing Nothing [] []
   let
       relSet = S.fromList $ _relOrigin <$> rel
       tb  = unTB <$> F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . snd . tableNonRef' $ table))
-      fkref = joinRel  (tableMeta targetTable) rel tb  (G.toList mtable)
+      fkref = joinRel  (tableMeta targetTable) rel tb  mtable
   return $ Just $ FKT (_tb <$> tb) rel   fkref
-loadFK inf table (Path ori (FKInlineTable to ) tar)   = do
+loadFK inf table (Path ori (FKInlineTable to ) )   = do
   let IT rel vt = unTB $ justError "no inline" $ M.lookup (S.map Inline   ori) (unKV .snd $ table)
   loadVt <- Tra.traverse (loadFKS inf )  vt
   return (Just $ IT rel loadVt)

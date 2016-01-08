@@ -9,6 +9,7 @@ module Query
   tbPK
   ,joinRel
   ,alterKeyType
+  ,searchGist
   ,forceDAttr
   ,rawFullName
   ,unComp
@@ -83,6 +84,7 @@ import Data.Text (Text)
 import GHC.Stack
 
 import Types
+import qualified Types.Index as G
 
 
 
@@ -232,12 +234,12 @@ reflexiveRel ks
 isInlineRel (Inline _ ) =  True
 isInlineRel i = False
 
-isReflexive (Path i r@(FKJoinTable _ ks _ )  t)
-  |  not (t `S.isSubsetOf` (S.fromList $ fmap _relTarget ks ))  = False
+isReflexive (Path i r@(FKJoinTable  ks  _ )  )
+  -- |  not (t `S.isSubsetOf` (S.fromList $ fmap _relTarget ks ))  = False
   |  otherwise = isPathReflexive  r
-isReflexive (Path _ l _ ) = isPathReflexive l
+isReflexive (Path _ l  ) = isPathReflexive l
 
-isPathReflexive (FKJoinTable _ ks _)
+isPathReflexive (FKJoinTable  ks _)
   | otherwise   = all id $ fmap (\j-> isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) (keyType (_relTarget j) )) ks
 isPathReflexive (FKInlineTable _)= True
 isPathReflexive (RecJoin _ i ) = isPathReflexive i
@@ -245,7 +247,7 @@ isPathReflexive (RecJoin _ i ) = isPathReflexive i
 
 
 allRec'
-  :: Map Text Table
+  :: Map Text (Map Text Table)
      -> Table
      -> TBData Key ()
 allRec' i t = unTlabel' $ tableView  i t
@@ -290,12 +292,12 @@ recursePath
   :: Bool->  RecState Key
      -> [(Set (Rel Key), Labeled Text (TB (Labeled Text) Key ()))]
      -> [(Set (Rel Key), Labeled Text (TB (Labeled Text) Key ()))]
-     -> Map Text Table
+     -> Map Text (Map Text Table)
      -> Path (Set Key) SqlOperation
      -> State
           ((Int, Map Int Table), (Int, Map Int Key))
           (Compose (Labeled Text) (TB (Labeled Text)) Key ())
-recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
+recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKInlineTable (s,t) ) )
     | isArrayRel ifk  {-&& not (isArrayRel e )-}=   do
           tas <- tname nextT
           let knas = dumbKey (rawName nextT)
@@ -323,10 +325,10 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKInlineTable t ) e)
         nextLeft =  isLeft || isLeftRel ifk
         mapArray i =  if isArrayRel ifk then ArrayTB1 $ pure i else i
         mapOpt i = if isLeftRel ifk then  LeftTB1 $ Just  i else i
-        nextT = justError ("recursepath lookIT "  <> show t <> " " <> show invSchema) (M.lookup t invSchema)
+        nextT = justError ("recursepath lookIT "  <> show t <> " " <> show invSchema) (join $ M.lookup t <$> M.lookup s invSchema)
         fun =  recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
-recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) e)
+recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn,tn)) )
     | S.size ifk   < S.size e =   do
           (t,ksn) <- labelTable nextT
           tb <-fun ksn
@@ -353,16 +355,17 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable w ks tn) 
             else return  Unlabeled
           return $ Compose $ lab $ FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks)))  ks (mapOpt $ TB1 tb)
   where
-        nextT = (\(Just i)-> i) (M.lookup tn (invSchema))
+        nextT = (\(Just i)-> i) (join $ M.lookup tn <$> (M.lookup sn invSchema))
+        e = S.fromList $ rawPK nextT
         nextLeft = any (isKOptional.keyType) (S.toList ifk) || isLeft
         mapArray i =  if isArrayRel ifk then ArrayTB1 (pure i) else i
         mapOpt i = if isLeftRel  ifk then  LeftTB1 $ Just  i else i
         fun =   recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
-recursePath isLeft isRec vacc ksbn invSchema jo@(Path ifk (RecJoin l f) e)
-    = recursePath isLeft (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec  ) vacc ksbn invSchema (Path ifk f e)
+recursePath isLeft isRec vacc ksbn invSchema jo@(Path ifk (RecJoin l f) )
+    = recursePath isLeft (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec  ) vacc ksbn invSchema (Path ifk f )
 
-recurseTB :: Map Text Table -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TB3Data (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3Data (Labeled Text) Key ())
+recurseTB :: Map Text (Map Text Table) -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TB3Data (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3Data (Labeled Text) Key ())
 recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else m  ,) <$>
     (\kv -> case kv of
       (Compose (Labeled l kv )) -> do
@@ -531,15 +534,27 @@ backFKRef relTable ifk = fmap (uncurry Attr). reorderPK .  concat . fmap aattr .
         lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (keyType ko ) (keyType kn) v)) <$> knm
           where knm =  M.lookup ko relTable
 
+lookGist un pk  = safeHead . G.search (tbpred un pk)
 
-joinRel :: (Ord a ,Show a) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> [TBData Key a] -> FTB (TBData Key a)
+tbpred un  = tbjust  . Tra.traverse (Tra.traverse unSOptional') .getUn un
+  where
+    tbjust = G.Idex . justError "cant be empty"
+
+
+searchGist relTable m = (\i -> join . fmap (\k -> lookGist (S.fromList $fmap (\k-> justError (" no pk " <> show (k,relTable)) $ M.lookup k relTable) (_kvpk m) ) (tblistM m $ fmap _tb k)  i)  )
+
+joinRel :: (Ord a ,Show a,G.Predicates (G.TBIndex Key a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex Key a) (TBData Key a) -> FTB (TBData Key a)
 joinRel tb rel ref table
-  | L.all (isOptional .keyType) origin = LeftTB1 $ fmap (flip (joinRel tb (Le.over relOrigin unKOptional <$> rel ) ) table) (Tra.traverse unLeftItens ref )
-  | L.any (isArray.keyType) origin = ArrayTB1 $ Non.fromList $  fmap (flip (joinRel tb (Le.over relOrigin unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(Non.length (unArray $ unAttr $ head ref) - 1)])
-  | otherwise = maybe (TB1 $ tblistM tb (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )) TB1 tbel
+  | L.all (isOptional .keyType) origin
+    = LeftTB1 $ fmap (flip (joinRel tb (Le.over relOrigin unKOptional <$> rel ) ) table) (Tra.traverse unLeftItens ref )
+  | L.any (isArray.keyType) origin
+    = ArrayTB1 $ Non.fromList $  fmap (flip (joinRel tb (Le.over relOrigin unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(Non.length (unArray $ unAttr $ head ref) - 1)])
+  | otherwise
+    = maybe (TB1 $ tblistM tb (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )) TB1 tbel
       where origin = fmap _relOrigin rel
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
-            tbel = L.find (\(_,i)-> interPointPost rel ref (nonRefAttr  $ F.toList $ _kvvalues $ unTB  i) ) table
+            invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
+            tbel = searchGist  invrelMap tb table (Just ref)
 
 
 

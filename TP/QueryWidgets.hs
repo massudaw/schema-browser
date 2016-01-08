@@ -100,7 +100,7 @@ createFresh  tname inf i ty@(Primitive atom)  =
     RecordPrim (s,t) -> do
       k <- newKey i ty 0
       let tableO = lookTable inf tname
-          path = Path (S.singleton k) (FKInlineTable $ inlineName ty ) S.empty
+          path = Path (S.singleton k) (FKInlineTable $ inlineName ty )
       return $ inf
           & tableMapL . Le.ix tname . rawFKSL %~  S.insert path
           & pkMapL . Le.ix (S.fromList $ rawPK tableO) . rawFKSL Le.%~  S.insert path
@@ -263,6 +263,7 @@ labelCase inf a old wid = do
     return $ TrivialWidget (triding wid) el
 
 refTables inf table = do
+        let
         ((DBVar2 tmvard _  vpdiff _ _ ),res)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
         let update = foldl'(flip (\p-> fmap (flip apply p)))
         bres <- accumB res (flip update <$> rumors vpdiff)
@@ -281,7 +282,7 @@ tbCase
   -> UI (TrivialWidget (Maybe (Column CoreKey Showable)))
 tbCase inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
         let
-            oldItems = maybe preoldItems (\v -> if L.null v then preoldItems else fmap (maybe (Just (FKT (fmap  (_tb . uncurry Attr)  v) rel (DelayedTB1 Nothing) )) Just ) preoldItems  ) (Tra.traverse (\k -> fmap (k,) . keyStatic $ k ) ( getRelOrigin $ fmap unTB ifk))
+            oldItems = maybe preoldItems (\v -> if L.null v then preoldItems else fmap (maybe (Just (FKT (fmap  (_tb . uncurry Attr)  v) rel (SerialTB1 Nothing) )) Just ) preoldItems  ) (Tra.traverse (\k -> fmap (k,) . keyStatic $ k ) ( getRelOrigin $ fmap unTB ifk))
             nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin $ fmap unTB ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattri .fst) wl
             nonInjConstr :: SelTBConstraint
@@ -295,10 +296,12 @@ tbCase inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> constr   .  backFKRef relTable (getRelOrigin f)  ) j ) <$>  restrictConstraint
         ftdi <- foldr (\i j -> updateEvent  Just  i =<< j)  (return oldItems) (fmap Just . filterJust . rumors . snd <$>  plugItens )
 
-        let table = lookTable inf  (_kvname m)
-            m = (fst $ head $ F.toList tb1)
-        ref <- refTables inf   table
-        fkUITable inf (convertConstr <> nonInjConstr)  ref plugItens wl ftdi i
+        let
+          rinf = fromMaybe inf $ M.lookup (_kvschema m) (depschema inf)
+          table = lookTable rinf  (_kvname m)
+          m = (fst $ head $ F.toList tb1)
+        ref <- refTables rinf   table
+        fkUITable rinf (convertConstr <> nonInjConstr)  ref plugItens wl ftdi i
 tbCase inf _ i@(IT na tb1 ) wl plugItens oldItems
     = iUITable inf plugItens oldItems i
 tbCase inf _ a@(Attr i _ ) wl plugItens preoldItems = do
@@ -477,7 +480,7 @@ addElemFin e = liftIO . addFin e .pure
 unConstraint :: Set CoreKey -> TBData CoreKey Showable -> G.GiST (G.TBIndex CoreKey Showable) (TBData CoreKey Showable) -> Bool
 unConstraint un v m = isJust . lookGist un v $ m
 
-lookGist un pk  = safeHead . G.search (tbpred un pk)
+lookGist un pk  = G.lookup (tbpred un pk)
 
 tbpred un  = tbjust  . traverse (traverse unSOptional') .getUn un
   where
@@ -895,7 +898,6 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
       presort <-mapTEvent return (sortList <*> fmap (G.toList . snd ) vpt)
       res3 <- mapTEvent return (liftA2 applyConstr presort constrT)
       let
-          searchGist = (\i -> join . fmap (\k -> lookGist (S.fromList $fmap (\k-> justError ("nopk" <> show k) $ M.lookup k relTable) (_kvpk m) ) (tblistM m $ fmap _tb k)  i)  )
           vv :: Tidings (Maybe [TB Identity CoreKey Showable])
           vv =   liftA2 (liftA2 (<>)) iold2  ftdi2
       cvres <- currentValue (facts vv)
@@ -903,8 +905,8 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
       filterInpBh <- stepper "" (UI.valueChange filterInp)
       iniGist <- currentValue (facts gist)
       let
-          cv = searchGist iniGist cvres
-          tdi = searchGist <$> gist <*> vv
+          cv = searchGist relTable m iniGist cvres
+          tdi = searchGist relTable m <$> gist <*> vv
       let
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList . snd

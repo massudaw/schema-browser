@@ -55,7 +55,6 @@ import Data.Text.Encoding (encodeUtf8)
 import Data.Text (Text)
 import qualified Data.Set as S
 
-
 import Database.PostgreSQL.Simple
 import qualified Data.Map as M
 import Data.String
@@ -67,16 +66,18 @@ import GHC.Stack
 main :: IO ()
 main = do
   args <- getArgs
+  print "Start"
   smvar <- newMVar M.empty
   let db = argsToState (tail args)
   -- Load Metadata
   conn <- connectPostgreSQL (connRoot db)
-  metas <- keyTables  smvar conn  conn ("metadata", T.pack $ user db) Nothing postgresOps plugList
-  plugs smvar db plugList
-  poller smvar db plugList False
+  let amap = authMap smvar db (user db , pass db )
+  metas <- keyTables  smvar conn  ("metadata", T.pack $ user db) amap plugList
+  plugs smvar amap db plugList
+  poller smvar amap db plugList False
 
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup smvar  (tail args)) (\w ->  liftIO $ do
-          print "delete client"
+          print ("delete client" <> show (sToken w))
           deleteClient metas (sToken w) )
   print "Finish"
 
@@ -123,7 +124,8 @@ setup
 setup smvar args w = void $ do
   metainf <- justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
   let bstate = argsToState args
-  inf <- liftIO$ traverse (\i -> keyTables  smvar (conn metainf) (conn metainf) (T.pack i, T.pack $ user bstate) Nothing postgresOps plugList) $ schema  bstate
+  let amap = authMap smvar bstate (user bstate , pass bstate)
+  inf <- liftIO$ traverse (\i -> loadSchema smvar (T.pack i) (conn metainf) (user bstate)  amap ) $ schema  bstate
   (cli,cliTid) <- liftIO $ addClient (sToken w ) metainf inf ((\t inf -> lookTable inf . T.pack $ t) <$> tablename bstate  <*> inf  ) bstate
   (evDB,chooserItens) <- databaseChooser smvar bstate
   body <- UI.div
@@ -203,6 +205,26 @@ instance Eq Connection where
 form :: Tidings a -> Event b -> Tidings a
 form td ev =  tidings (facts td ) (facts td <@ ev )
 
+
+authMap smvar sargs (user,pass) schemaN =
+      case schemaN of
+          "gmail" ->  do
+              metainf <- justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
+              (dbmeta ,_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []  [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  "wesley.massuda@gmail.com"))]
+              let
+                  td :: Tidings OAuth2Tokens
+                  td = fmap (\o -> justError "" . fmap (toOAuth . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $   head $ o )) (G.toList <$> collectionTid dbmeta )
+                  toOAuth v = tokenToOAuth (b,d,a,c)
+                    where [a,b,c,d] = fmap TB1 $ F.toList $ snd $ unTB1 v :: [FTB Showable]
+              return (OAuthAuth (Just ("me",td )), gmailOps)
+          i ->  do
+            conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack (user )<> " password=" <> BS.pack (pass ) <> " dbname=" <> (BS.pack $  dbn sargs) ) -- <> " sslmode= require")
+            execute_ conn "set bytea_output='hex'"
+            return (PostAuth conn, postgresOps)
+
+loadSchema smvar schemaN dbConn user authMap  =  do
+    keyTables smvar dbConn (schemaN,T.pack $ user) authMap plugList
+
 databaseChooser smvar sargs = do
   dbs <- liftIO $ listDBS  sargs
   let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,) . (,T.pack s) . fst $ snd $ dbs ) $ ( schema sargs)
@@ -220,18 +242,8 @@ databaseChooser smvar sargs = do
   let genSchema (reset,((user,pass),(dbN,(dbConn,schemaN)))) = do
         conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> (BS.pack $  dbn sargs) ) -- <> " sslmode= require")
         execute_ conn "set bytea_output='hex'"
-        let call = if  reset then keyTablesInit else keyTables
-        case schemaN of
-          "gmail" ->  do
-              metainf <- keyTables smvar dbConn conn ("metadata",T.pack $ user ) Nothing postgresOps plugList
-              (dbmeta ,_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []  [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  "wesley.massuda@gmail.com"))]
-              let
-                  td :: Tidings OAuth2Tokens
-                  td = fmap (\o -> justError "" . fmap (toOAuth . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $   head $ o )) (G.toList <$> collectionTid dbmeta )
-                  toOAuth v = tokenToOAuth (b,d,a,c)
-                    where [a,b,c,d] = fmap TB1 $ F.toList $ snd $ unTB1 v :: [FTB Showable]
-              call smvar dbConn conn (schemaN,T.pack $ user ) (Just ("me",td )) gmailOps plugList
-          i -> call smvar dbConn conn (schemaN,T.pack user) Nothing postgresOps plugList
+        let auth = authMap smvar sargs (user,pass)
+        loadSchema smvar schemaN conn  user auth
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   chooserT <-  mapTEvent (traverse genSchema) formLogin
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schema , getElement dbsW]
@@ -248,7 +260,7 @@ chooserTable inf kitems cliTid cli = do
   iv   <- currentValue (facts cliTid)
   let lookT iv = let  i = join $  unLeftItens . unTB <$> lookAttr (lookKey (meta inf) "clients" "table") iv
                 in fmap (\(Attr _ (TB1 (SText t))) -> t) i
-  let initKey = pure . join $ fmap (S.fromList .rawPK) . flip M.lookup (tableMap inf) <$> join (lookT <$> iv)
+  let initKey = pure . join $ fmap (S.fromList .rawPK) . flip M.lookup (_tableMapL inf) <$> join (lookT <$> iv)
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
@@ -257,13 +269,13 @@ chooserTable inf kitems cliTid cli = do
                                        Just t -> T.unpack (translatedName t)
                                        Nothing -> show i )
       filterLabel = (\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> renderLabel i) ))<$> filterInpBh
-      tableUsage orderMap pkset = (lookAttr (lookKey (meta inf) "ordering" "usage" )) $ justError ("no value" <> show (pkset,pk,orderMap)) $ G.lookup  (G.Idex (first (lookKey (meta inf ) "ordering") <$> pk )) orderMap
-          where  pk = [("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
-  bset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap )) kitems) (tableUsage <$> collectionTid orddb ) initKey  (\k -> UI.button # set UI.text (renderLabel k) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow . ($k) <$> filterLabel ))
+      tableUsage orderMap pkset = lookAttr (lookKey (meta inf) "ordering" "usage" ) $ justError ("no value" <> show (pkset,pk,orderMap)) $ G.lookup  (G.Idex ( pk )) orderMap
+          where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$> [("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
+  bset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap )) kitems) (tableUsage <$> collectionTid orddb ) initKey  (\k -> UI.button  ) (\k e -> e # set UI.text (renderLabel k) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow . ($k) <$> filterLabel ))
   let bBset = triding bset
       incClick pkset orderMap =  (fst field , getPKM field ,[patch $ fmap (+ (SNumeric 1)) (unTB usage )]) :: TBIdx Key Showable
-          where  pk = [("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
-                 field =   justError ("no value" <> show (pkset,pk)) $ G.lookup  (G.Idex (first (lookKey (meta inf ) "ordering") <$> pk )) orderMap
+          where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$>[("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
+                 field =   justError ("no value" <> show (pkset,pk)) $ G.lookup  (G.Idex  pk ) orderMap
                  usage = justError "nopk " $ (lookAttr (lookKey (meta inf) "ordering" "usage" ))  field
   liftIO$ onEventIO (flip incClick <$> facts (collectionTid orddb) <@> rumors bBset)
     (\p -> do
@@ -278,7 +290,6 @@ chooserTable inf kitems cliTid cli = do
   body <- UI.div
 
 
-  -- liftIO $ currentValue (facts bBset) >>= (\i -> void . editClient (meta inf) (Just inf) (M.lookup i (pkMap inf)) Nothing cli =<< getCurrentTime )
   el <- mapUITEvent body (\(nav,table)->
       case nav of
         "Change" -> do
@@ -338,7 +349,7 @@ viewerKey inf key cli cliTid = mdo
         where (s,_) = justLook [] fixmap
   inisort <- currentValue (facts tsort)
   (offset,res3)<- mdo
-    offset <- offsetField 0 (never ) (lengthPage <$> facts res3)
+    offset <- offsetField 0 never (lengthPage <$> facts res3)
     res3 <- mapT0Event (fmap inisort (fmap G.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap G.toList) $ tidings ( res2) ( rumors vpt) ) )
     return (offset, res3)
   onEvent (rumors $ triding offset) $ (\i ->  liftIO $ do
@@ -362,11 +373,6 @@ viewerKey inf key cli cliTid = mdo
   st <- stepper cv sel
   res2 <- stepper (vp) (rumors vpt)
   onEvent (pure <$> ediff) (liftIO .  putPatch var )
-  {-onEvent (facts vpt <@ UI.click updateBtn ) (\(oi,oj) -> do
-              let up =  (updateEd (schemaOps inf) ) inf table (L.maximumBy (comparing (getPK.TB1)) (F.toList oj)) Nothing (Just 400)
-              (l,i,j) <- liftIO $  transaction inf up
-              liftIO .  putMVar (collectionVar dbtable) $ (oj <> M.fromList ((\i -> (getPK i,unTB1 i) )<$>  l )) )
--}
   element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK. TB1 )  <$> facts tds) # set UI.class_ "col-xs-8"
   insertDiv <- UI.div # set children [title,head cru] # set UI.class_ "row"
