@@ -152,12 +152,12 @@ data PathTID
 
 
 firstPatch :: (Ord a ,Ord k , Ord (Index a), Ord j ) => (k -> j ) -> TBIdx k a -> TBIdx j a
-firstPatch f (i,j,k) = (mapKVMeta f i , fmap (first f) j ,fmap (firstPatchAttr f) k)
+firstPatch f (i,j,k) = (fmap f i , fmap (first f) j ,fmap (firstPatchAttr f) k)
 
 firstPatchAttr :: (Ord k , Ord j ,Ord a ,Ord (Index a)) => (k -> j ) -> PathAttr k a -> PathAttr j a
 firstPatchAttr f (PAttr k a) = PAttr (f k) a
 firstPatchAttr f (PInline k a) = PInline (f k) (fmap (firstPatch f) a)
-firstPatchAttr f (PFK rel k a  b ) = PFK (fmap (fmap f) rel)  (fmap (firstPatchAttr f) k) (mapKVMeta f a) (fmap (firstPatch f) <$> b)
+firstPatchAttr f (PFK rel k a  b ) = PFK (fmap (fmap f) rel)  (fmap (firstPatchAttr f) k) (fmap f a) (fmap (firstPatch f) <$> b)
 
 
 compactionLaw t l = diffTB1 t (foldl applyTB1 t l ) == compactPatches l

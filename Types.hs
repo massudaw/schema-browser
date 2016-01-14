@@ -173,14 +173,15 @@ data KVMetadata k
   = KVMetadata
   { _kvname :: Text
   , _kvschema :: Text
+  , _kvscopes  :: [k]
   , _kvpk :: [k]
   , _kvdesc :: [k]
-  , _kvuniques :: [Set k]
+  , _kvuniques :: [[k]]
   , _kvorder :: [(k,Order)]
   , _kvattrs :: [k]
-  , _kvdelayed :: Set k
+  , _kvdelayed :: [k]
   , _kvrecrels :: [MutRec [[Rel k]]]
-  }deriving(Eq,Ord,Generic)
+  }deriving(Eq,Ord,Functor,Foldable,Generic)
 
 instance Show k => Show (KVMetadata k) where
   show k = T.unpack (_kvname k)
@@ -318,7 +319,6 @@ type TB1 a = TB2 Key a
 type TB2 k a = TB3 Identity k a
 type TB3 f k a = FTB1 f k a
 
-mapKVMeta f (KVMetadata tn sch s j m o k l r ) =KVMetadata tn sch (map f s) (map f j) (map (Set.map f) m ) (fmap (first f) o) (map f k) (Set.map f l) (fmap (fmap (fmap (fmap f)) ) <$> r)
 
 
 filterKey' f ((m ,k) ) = (m,) . mapComp (\(KV kv) -> KV $ Map.filterWithKey f kv )  $  k
@@ -358,7 +358,7 @@ mapTableAttr f  i = i
 
 mapKey' :: Ord b => Functor f => (a -> b) -> TB3Data f a c -> TB3Data f b c
 mapKey f = fmap (mapKey' f)
-mapKey' f ((m ,k) ) = (mapKVMeta f m,) . mapComp (firstKV f)  $  k
+mapKey' f ((m ,k) ) = (fmap f m,) . mapComp (firstKV f)  $  k
 
 
 
@@ -515,7 +515,7 @@ data TableType
 
 type Table = TableK Key
 
-mapTableK f (Raw  s tt tr de is rn  un ra rp rd rf inv rat ) = Raw s tt tr (S.map f de) is rn (fmap (S.map f) un) ra (map f rp) (fmap f rd) S.empty  S.empty (S.map f rat)
+mapTableK f (Raw  s tt tr de is rn  un ra rsc rp rd rf inv rat ) = Raw s tt tr (S.map f de) is rn (fmap (S.map f) un) ra (map f rsc ) (map f rp) (fmap f rd) S.empty  S.empty (S.map f rat)
 data TableK k
     =  Raw { rawSchema :: Text
            , rawTableType :: TableType
@@ -525,6 +525,7 @@ data TableK k
            , rawName :: Text
            , uniqueConstraint :: [Set k]
            , rawAuthorization :: [Text]
+           , _rawScope :: [k]
            , rawPK :: [k]
            , rawDescription :: [k]
            , _rawFKSL ::  (Set (Path (Set k) (SqlOperationK k )))
@@ -822,7 +823,7 @@ traComp f =  fmap Compose. traverse f . getCompose
 concatComp  =  Compose . concat . fmap getCompose
 
 tableMeta :: Ord k => TableK k -> KVMetadata k
-tableMeta t = KVMetadata (rawName t) (rawSchema t) (rawPK t) (rawDescription t) (uniqueConstraint t)[] (F.toList $ rawAttrs t) (rawDelayed t) (paths' <> paths)
+tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawDescription t) (fmap F.toList $ uniqueConstraint t) [] (F.toList $ rawAttrs t) (F.toList $ rawDelayed t) (paths' <> paths)
   where rec = filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
         same = filter ((tableName t ==). fkTargetTable . pathRel) rec
         notsame = filter (not . (tableName t ==). fkTargetTable . pathRel) rec
@@ -851,7 +852,7 @@ tblistM t  = (t, ) . Compose . Identity . KV . mapFromTBList
 reclist' :: Ord k => TableK k  -> [Compose Identity  (TB Identity) k a] -> TBData k a
 reclist' t  = (tableMeta t, ) . Compose . Identity . KV . mapFromTBList
 
-kvempty  = KVMetadata "" ""  [] [] []  [] [] Set.empty []
+kvempty  = KVMetadata "" ""  [] [] [] [] [] [] [] []
 
 instance Ord a => Ord (Interval.Interval a ) where
   compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)

@@ -168,14 +168,14 @@ setup smvar args w = void $ do
             element body # set UI.children [tbChooser,subnet]# set UI.class_ "row" # set UI.style [("display","inline-flex"),("width","100%")] )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
 
 
-listDBS ::  BrowserState -> IO (Text,(Connection,[Text]))
+listDBS ::  BrowserState -> IO (Text,[Text])
 listDBS dname = do
   connMeta <- connectPostgreSQL (connRoot dname)
   dbs :: [Only Text]<- query_  connMeta "SELECT datname FROM pg_database  WHERE datistemplate = false"
   map <- (\db -> do
         connDb <- connectPostgreSQL ((fromString $ "host=" <> host dname <> " port=" <> port dname <>" user=" <> user dname <> " dbname=" ) <> (encodeUtf8 db) <> (fromString $ " password=" <> pass dname )) --  <> " sslmode= require") )
         schemas :: [Only Text] <- query_  connDb "SELECT name from metadata.schema "
-        return (db,(connDb,filter (not . (`elem` ["information_schema","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas))) (T.pack $ dbn dname)
+        return (db,(filter (not . (`elem` ["information_schema","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas))) (T.pack $ dbn dname)
   return map
 
 loginWidget userI passI =  do
@@ -186,20 +186,14 @@ loginWidget userI passI =  do
   let usernameE = nonEmpty  <$> UI.valueChange username
       passwordE = nonEmpty <$> UI.valueChange password
 
-  userDiv <- UI.div # set children [usernamel,username] # set UI.class_  "col-xs-2"
-  passDiv <- UI.div # set children [passwordl,password] # set UI.class_  "col-xs-2"
+  userDiv <- UI.div # set children [usernamel,username] # set UI.class_  "col-xs-5"
+  passDiv <- UI.div # set children [passwordl,password] # set UI.class_  "col-xs-5"
   usernameB <- stepper userI usernameE
   passwordB <- stepper passI passwordE
   let usernameT = tidings usernameB usernameE
       passwordT = tidings passwordB passwordE
   return $ ((liftA2 (liftA2 (,)) usernameT passwordT) ,[userDiv,passDiv])
 
-instance Ord Connection where
-  i < j = 1 < 2
-  i <= j = 1 < 2
-
-instance Eq Connection where
-  i == j = True
 
 
 form :: Tidings a -> Event b -> Tidings a
@@ -208,46 +202,81 @@ form td ev =  tidings (facts td ) (facts td <@ ev )
 
 authMap smvar sargs (user,pass) schemaN =
       case schemaN of
-          "gmail" ->  do
-              metainf <- justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
-              (dbmeta ,_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []  [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  "wesley.massuda@gmail.com"))]
-              let
-                  td :: Tidings OAuth2Tokens
-                  td = fmap (\o -> justError "" . fmap (toOAuth . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $   head $ o )) (G.toList <$> collectionTid dbmeta )
-                  toOAuth v = tokenToOAuth (b,d,a,c)
-                    where [a,b,c,d] = fmap TB1 $ F.toList $ snd $ unTB1 v :: [FTB Showable]
-              return (OAuthAuth (Just ("me",td )), gmailOps)
+          "gmail" ->  oauth False
+          "tasks" ->  oauth True
           i ->  do
-            conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack (user )<> " password=" <> BS.pack (pass ) <> " dbname=" <> (BS.pack $  dbn sargs) ) -- <> " sslmode= require")
+            conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack (user )<> " password=" <> BS.pack (pass ) <> " dbname=" <> (BS.pack $  dbn sargs) )
             execute_ conn "set bytea_output='hex'"
             return (PostAuth conn, postgresOps)
+    where oauth tag = do
+              user <- justError "no google user" <$> lookupEnv "GOOGLE_USER"
+              metainf <- justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
+              (dbmeta ,_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []   [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  $ T.pack user ))]
+              let
+                  td :: Tidings (OAuth2Tokens)
+                  td = (\o -> let
+                            token = justError "" . fmap (toOAuth . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $ head o )
+                            in token) . G.toList <$> collectionTid dbmeta
+                  toOAuth v = case fmap TB1 $ F.toList $ snd $ unTB1 v :: [FTB Showable] of
+                            [a,b,c,d] -> tokenToOAuth (b,d,a,c)
+                            i -> errorWithStackTrace ("no token" <> show i)
+              return (OAuthAuth (Just (if tag then "@me" else T.pack user,td )), gmailOps)
 
 loadSchema smvar schemaN dbConn user authMap  =  do
     keyTables smvar dbConn (schemaN,T.pack $ user) authMap plugList
 
 databaseChooser smvar sargs = do
   dbs <- liftIO $ listDBS  sargs
-  let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,) . (,T.pack s) . fst $ snd $ dbs ) $ ( schema sargs)
-  (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
-  dbsW <- listBox (pure $ (\(i,(c,j)) -> (i,) . (c,) <$> j) $ dbs ) (pure dbsInit) (pure id) (pure (line . show . snd . fmap snd ))
-  schema <- flabel # set UI.text "schema"
+  let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,T.pack s) ) $ ( schema sargs)
+  dbsW <- listBox (pure $ (\((c,j)) -> (c,) <$> j) $ dbs ) (pure dbsInit) (pure id) (pure (line . show . snd  ))
+  schemaEl <- flabel # set UI.text "schema"
   cc <- currentValue (facts $ triding dbsW)
   let dbsWE = rumors $ triding dbsW
-  reset <- checkedWidget (pure False)
   dbsWB <- stepper cc dbsWE
   let dbsWT  = tidings dbsWB dbsWE
-  load <- UI.button # set UI.text "Connect" # set UI.class_ "col-xs-1" # sink UI.enabled (facts (isJust <$> dbsWT) )
-  let login = liftA3 (\v a b-> fmap (v,) $ liftA2 (,) a b) (triding reset) widT dbsWT
-      formLogin = form login (UI.click load)
-  let genSchema (reset,((user,pass),(dbN,(dbConn,schemaN)))) = do
-        conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user <> " password=" <> BS.pack pass <> " dbname=" <> (BS.pack $  dbn sargs) ) -- <> " sslmode= require")
-        execute_ conn "set bytea_output='hex'"
-        let auth = authMap smvar sargs (user,pass)
-        loadSchema smvar schemaN conn  user auth
+  (schemaE,schemaH) <- liftIO newEvent
+  metainf <- justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
+  let genSchema (db,schemaN)
+        | schemaN  `L.elem` ["gmail","tasks"]  =  do
+              userEnv <- liftIO$ lookupEnv "GOOGLE_USER"
+              liftIO $ print userEnv
+              usernamel <- flabel # set UI.text "Usuário"
+              username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set value (fromMaybe "" userEnv)
+              let usernameE = nonEmpty  <$> UI.valueChange username
+
+              usernameB <- stepper userEnv usernameE
+              let usernameT = tidings usernameB usernameE
+
+              load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-4" # sink UI.enabled (facts (isJust <$> dbsWT) )
+              liftIO $ onEventIO (usernameB <@ (UI.click load)) $ traverse (\ v ->do
+                let auth = authMap smvar sargs (user sargs ,pass sargs )
+                inf <- loadSchema smvar schemaN (rootconn metainf) v auth
+                schemaH $ Just inf)
+              user <- UI.div # set children [usernamel,username] # set UI.class_ "col-xs-8"
+              UI.div # set children [user ,load]
+
+        | otherwise   = do
+            (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
+            load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-2" # sink UI.enabled (facts (isJust <$> dbsWT) )
+            let login =   widT
+                formLogin = form login (UI.click load)
+            liftIO$ onEventIO (rumors formLogin)
+              (traverse (\(user,pass)-> do
+                let auth = authMap smvar sargs (user,pass)
+                inf <- loadSchema smvar schemaN (rootconn metainf) user auth
+                schemaH $ Just inf
+                ))
+
+            UI.div # set children (widE <> [load])
+
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
-  chooserT <-  mapTEvent (traverse genSchema) formLogin
-  schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schema , getElement dbsW]
-  return $ (chooserT,( widE <> (getElement reset : [schemaSel ,load])))
+  authBox <- UI.div # sink items (maybeToList . fmap genSchema <$> facts dbsWT) # set UI.class_ "col-xs-5" # set UI.style [("border", "gray solid 2px")]
+  let auth = authMap smvar sargs (user sargs ,pass sargs )
+  inf <- traverse (\i -> liftIO $loadSchema smvar (T.pack i ) (rootconn metainf) (user sargs) auth) (schema sargs)
+  chooserB  <- stepper inf schemaE
+  let chooserT = tidings chooserB schemaE
+  schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schemaEl , getElement dbsW]
+  return $ (chooserT,[schemaSel ]<>  [authBox] )
 
 
 attrLine i   = do

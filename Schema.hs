@@ -111,8 +111,8 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
           backendkeyMap = M.fromList keyList
           keyMap = fmap (typeTransform ops ) $ M.fromList keyList
-          lookupKey3 :: (Functor f) => f (Text,Maybe (Vector Text),Bool) -> f (Text,(Vector Key,Bool))
-          lookupKey3 = fmap  (\(t,c,b)-> (t,(maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap)) c,b)) )
+          lookupKey3 :: (Functor f) => f (Text,Maybe (Vector Text),Maybe (Vector Text),Bool) -> f (Text,(Vector Key,Vector Key,Bool))
+          lookupKey3 = fmap  (\(t,c,s,b)-> (t,(maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap)) c,maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap)) s,b)) )
           lookupKey2 :: Functor f => f (Text,Text) -> f Key
           lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) keyMap )
           lookupKey ::  (Text,Text) ->  Key
@@ -126,7 +126,7 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
        transMap <- M.fromList   <$> query conn "SELECT table_name,translation FROM metadata.table_name_translation WHERE schema_name = ? " (Only schema)
        uniqueConstrMap <- M.fromListWith (++) . fmap (fmap pure)   <$> query conn "SELECT table_name,pks FROM metadata.unique_sets WHERE schema_name = ? " (Only schema)
 
-       res <- lookupKey3 <$> query conn "SELECT t.table_name,pks,is_sum FROM metadata.tables t left join metadata.pks  p on p.schema_name = t.schema_name and p.table_name = t.table_name where t.schema_name = ?" (Only schema)
+       res <- lookupKey3 <$> query conn "SELECT t.table_name,pks,scopes,is_sum FROM metadata.tables t left join metadata.pks  p on p.schema_name = t.schema_name and p.table_name = t.table_name where t.schema_name = ?" (Only schema)
        resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM metadata.tables where schema_name = ? " (Only schema) :: IO (Map Text TableType)
 
        let
@@ -147,11 +147,11 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
 
 
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  M.toList keyMap :: Map Text (Set Key)
-           i3l =  (\(c,(pksl,is_sum))-> let
+           i3l =  (\(c,(pksl,scp,is_sum))-> let
                                   pks = F.toList pksl
                                   inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> S.fromList pks)
-                                in (c ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK ) S.empty attr )) <$> res :: [(Text,Table)]
+                                in (c ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ M.lookup c fks    <> fmap S.fromList inlineFK ) S.empty attr )) <$> res :: [(Text,Table)]
        let
            i3 = addRecInit (M.singleton schema (M.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $ M.fromList i3l
            (i1,pks) = (keyMap, M.fromList $ fmap (\(_,t)-> (S.fromList$ rawPK t ,t)) $ M.toList i3 )
@@ -164,7 +164,7 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
           else return Nothing
        let inf = InformationSchema schema user oauth i1 (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  i2  i3 sizeMapt mvar  conn metaschema  rsch ops pluglist
        var <- modifyMVar_  schemaVar   (return . M.insert schema inf )
-       addStats inf
+       -- addStats inf
        return inf
 
 takeMany mvar = go . (:[]) =<< readTQueue mvar
@@ -187,8 +187,9 @@ createTableRefs i = do
   bhdiff <- R.stepper diffIni ediff
   (eidx ,hidx) <- R.newEvent
   bhidx <- R.stepper M.empty eidx
-  forkIO $ forever $ do
+  forkIO $ forever $ (do
       forkIO . hidx =<< takeMVar midx
+      return () ) `catch` (\e -> print ("block",i ,e :: SomeException))
   forkIO $ forever $ (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do

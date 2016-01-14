@@ -75,7 +75,7 @@ tableLoader inf table page size presort fixed   =  do
         let
             tar = S.fromList $ fmap _relOrigin i
             joinFK :: TBData Key Showable -> Column Key Showable
-            joinFK m  = FKT taratt i (traceShow (i ,tar,taratt ) $ joinRel (tableMeta table ) i (fmap unTB $ taratt ) tb)
+            joinFK m  = FKT taratt i (joinRel (tableMeta table ) i (fmap unTB $ taratt ) tb)
               where
                     taratt = getAtt tar m
             addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable

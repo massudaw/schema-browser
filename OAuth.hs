@@ -3,9 +3,11 @@ module OAuth (gmailOps,tokenToOAuth,oauthToToken,oauthpoller) where
 import qualified NonEmpty as Non
 import Control.Lens
 import Control.Exception
+import qualified Data.ByteString.Lazy.Char8 as BS
 import Control.Arrow
 import qualified Data.HashMap.Strict as HM
 import Data.Time
+import Prelude hiding (head)
 import qualified Types.Index as G
 import Step
 import System.Info (os)
@@ -50,6 +52,7 @@ file   = "./tokens.txt"
 --
 gmailScope = "https://www.googleapis.com/auth/gmail.modify"
 
+taskscope = "https://www.googleapis.com/auth/tasks"
 
 tokenToOAuth (TB1 (SText t), TB1 (SText r) , TB1 (SDouble i) , TB1 (SText k)) = OAuth2Tokens  (T.unpack t) (T.unpack r) (realToFrac i)  (T.unpack k)
 oauthToToken (OAuth2Tokens  t r i  k)
@@ -67,11 +70,11 @@ oauthpoller = BoundedPlugin2 "Gmail Login" "google_auth" url
           Just cid <- lookupEnv "CLIENT_ID"
           Just secret <- lookupEnv "CLIENT_SECRET"
           let client = OAuth2Client { clientId = cid, clientSecret = secret }
-              permissionUrl = formUrl client [gmailScope]
+              permissionUrl = formUrl client [gmailScope,taskscope]
               requestNew = (do
                   putStrLn$ "Load this URL: "++ show permissionUrl
                   case os of
-                    "linux"  -> rawSystem "chromium" [permissionUrl]
+                    "linux"  -> rawSystem "firefox" [permissionUrl]
                     "darwin" -> rawSystem "open"       [permissionUrl]
                     _        -> return ExitSuccess
                   putStrLn "Please paste the verification code: "
@@ -86,13 +89,15 @@ oauthpoller = BoundedPlugin2 "Gmail Login" "google_auth" url
        returnA -< Just . tblist . pure . _tb $ IT (attrT ("token" , LeftTB1 $ Just $ TB1 ())) (LeftTB1 $  oauthToToken <$> Just v )
 
 
+url s u = "https://www.googleapis.com/" <> T.unpack s <> "/v1/users/"<> T.unpack u <> "/"
+urlT s u = "https://www.googleapis.com/" <> T.unpack s <> "/v1/"
 
 updateTable inf table reference page maxResults
   | tableName table == "history" = do
     tok <- liftIO$ R.currentValue $ R.facts (snd $justError "no token"$ token inf)
     let user = fst $ justError "no token"$ token inf
     decoded <- liftIO $ do
-        let req =  "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?" <> "startHistoryId=" <> intercalate "," ( renderShowable . snd <$> getPK (TB1 reference) ) <> "&"<> maybe "" (\(NextToken s) ->  T.unpack s <> "pageToken=" <> T.unpack s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok )
+        let req =  url (schemaName inf) user  <> T.unpack (rawName table ) <> "?" <> "startHistoryId=" <> intercalate "," ( renderShowable . snd <$> getPK (TB1 reference) ) <> "&"<> maybe "" (\(NextToken s) ->  T.unpack s <> "pageToken=" <> T.unpack s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok )
         print  req
         (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
         print ("update",table,t)
@@ -107,16 +112,30 @@ updateTable inf table reference page maxResults
 listTable inf table offset page maxResults sort ix
   | tableName table == "history" = return ([],Nothing , 0)
   | tableName table == "attachments" = return ([],Nothing , 0)
+  | not $ null $ _rawScope table = do
+      liftIO $ print $ table
+      let [sref] = filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope table)) (S.toList $ rawFKS table)
+          stable = (\(Path _ (FKJoinTable rel t)) -> t) sref
+ --  | tableName table == "tasks" = do
+      let fromtable = (lookTable inf $ snd stable)
+      (l,i,j) <- listTable inf fromtable offset page maxResults sort ix
+      ix <- mapM (\i -> do
+          (l,i,s) <- joinList  inf fromtable sref i table
+          return l ) l
+      return (concat ix ,i ,j)
+
   | otherwise = do
     tok <- liftIO$ R.currentValue $ R.facts (snd $ justError "no token" $ token $  inf)
     let user = fst $ justError "no token" $ token inf
     decoded <- liftIO $ do
-        let req =  "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> ("maxResults=" <> show (maybe 200 id maxResults) <> "&") <> "access_token=" ++ ( accessToken tok )
+        let req =  url (schemaName inf) user <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> ("maxResults=" <> show (maybe 200 id maxResults) <> "&") <> "access_token=" ++ ( accessToken tok )
         print  req
         (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
+        print d
         print ("list",table,t)
         return  d
-    c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) table ) . maybe [] (\i -> (i :: Value) ^.. key (  rawName table ) . values) $ decoded
+    let idx = if schemaName inf == "tasks" then "items" else rawName table
+    c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) table ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
     return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
 
 getKeyAttr (TB1 (m, k)) = (concat (fmap keyattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
@@ -131,7 +150,7 @@ insertTable inf pk
     let user = fst $ justError "no token" $ token inf
         table = lookTable inf (_kvname (fst pk))
     decoded <- liftIO $ do
-        let req = "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (_kvname (fst pk ) ) <>  "?access_token=" ++ ( accessToken tok)
+        let req = url (schemaName inf) user <> T.unpack (_kvname (fst pk ) ) <>  "?access_token=" ++ ( accessToken tok)
         (t,v) <- duration
             (postHeaderJSON [("GData-Version","3.0")] req (toJSON $ M.fromList $ fmap (\(a,b) -> (keyValue a , renderShowable b)) $ attrs ) )
         print ("insert",getPK (TB1 pk),t)
@@ -141,29 +160,55 @@ insertTable inf pk
 
 joinGet inf tablefrom tableref from ref
   | S.fromList (fmap _relOrigin (getKeyAttr ref) ) ==  S.fromList (rawPK tableref <> S.toList (rawAttrs tableref ) <> rawDescription tableref) = return Nothing
-  | tableName tableref == "attachments" = do
+  | tableName tableref == "attachments" || not ( null $ _rawScope tableref )= do
     tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
     let user = fst $ fromJust $ token inf
     decoded <- liftIO $ do
-        let req = "https://www.googleapis.com/gmail/v1/users/" <> T.unpack user <> "/" <> T.unpack (rawName tablefrom) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK from ) <> "/" <> T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK ref ) <> "?access_token=" ++ ( accessToken tok)
+        let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  url (schemaName inf) user) <> T.unpack (rawName tablefrom) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK from ) <> "/" <> T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK ref ) <> "?access_token=" ++ ( accessToken tok)
+        print req
         (t,v) <- duration
                 (simpleHttpHeader [("GData-Version","3.0")] req )
-        print ("joinGet",tablefrom,tableref ,getPK from, getPK ref ,t)
+        print ("joinGet",tablefrom,tableref ,getPK from, getPK ref ,t,v)
         return $ decode v
     traverse (convertAttrs inf (Just $ (tableref,unTB1 ref)) (_tableMapL inf) tableref ) .  fmap (\i -> (i :: Value)  ) $  decoded
   | otherwise = return Nothing
+
+joinList inf tablefrom (Path _ (FKJoinTable rel stable)) from tableref
+  | tableName tableref == "tasks" = do
+      tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
+      let user = fst $ fromJust $ token inf
+      decoded <- liftIO $ do
+          let req = urlT (schemaName inf) user  <> T.unpack (rawName tablefrom) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK from ) <> "/" <> T.unpack (rawName tableref ) <>  "?access_token=" ++ ( accessToken tok)
+          (t,v) <- duration
+                  (simpleHttpHeader [("GData-Version","3.0")] req )
+          print ("joinList",tablefrom,tableref ,getPK from, t)
+          return $ decode v
+      let idx = if schemaName inf == "tasks" then "items" else rawName tableref
+          relMap = M.fromList $ fmap (\rel -> (_relTarget rel ,_relOrigin rel) ) rel
+          refAttr = (_tb $ FKT (fmap _tb $ concat $ F.toList $ backFKRef relMap (_relOrigin <$> rel) <$> from) rel (from))
+      c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) tableref ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
+      let addAttr refAttr (m ,t ) = (m, mapComp (\(KV i) -> KV  $ M.insert (S.fromList $ keyattr refAttr ) refAttr i ) t)
+      return (fmap (addAttr refAttr) <$>  c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
+  | otherwise = return ([],Nothing ,0)
+
 
 
 
 getTable inf  tb pk
   | tableName tb == "history" = return  Nothing
   | tableName tb == "attachments" = return  Nothing
+  | not $ null $ _rawScope tb = do
+      liftIO $ print $ tb
+      let [sref] = filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope tb )) (S.toList $ rawFKS tb )
+          (Path spk  (FKJoinTable rel stable)) =  sref
+      let fromtable = (lookTable inf $ snd stable)
+      joinGet inf fromtable  tb  ( _fkttable $ unTB $ head $ F.toList $  _kvvalues $ unTB $  tbUn spk pk)  pk
   | S.fromList (fmap _relOrigin (getKeyAttr pk) ) ==  S.fromList (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb) = return Nothing
   | otherwise = do
     tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
     let user = fst $ fromJust $ token inf
     decoded <- liftIO $ do
-        let req = "https://www.googleapis.com/gmail/v1/users/"<> T.unpack user <> "/" <> T.unpack (rawName tb ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK pk ) <> "?access_token=" ++ ( accessToken tok)
+        let req = url (schemaName inf) user <>  T.unpack (rawName tb ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK pk ) <> "?access_token=" ++ ( accessToken tok)
         (t,v) <- duration
             (simpleHttpHeader [("GData-Version","3.0")] req )
         print ("get",tb,getPK pk,t)
@@ -225,11 +270,14 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
               in  join . fmap  patt $   mergeFun
       | otherwise =  fmap (either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) ) . funO  False (  keyType k)  $ (iv ^? ( key ( keyValue k))  )
 
+    resultToMaybe (Success i) = Just i
+    resultToMaybe (Error i ) = Nothing
     fun :: Bool -> KType (Prim KPrim (Text,Text))-> Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
     fun f (Primitive i) v =
         case i of
           AtomicPrim k -> return $ Right $ fmap TB1 $ join $ case k of
             PText -> readPrim k . T.unpack <$> (v ^? _String)
+            PTimestamp _ -> fmap (STimestamp . utcToLocalTime utc) . resultToMaybe . fromJSON <$> Just v
             PInt -> Just . SNumeric . round <$> (v ^? _Number)
             PDouble -> Just . SDouble . realToFrac  <$> (v ^? _Number)
             PBinary -> readPrim k . T.unpack  <$> (v ^? _String)
@@ -318,6 +366,7 @@ gmailPrim :: HM.HashMap Text KPrim
 gmailPrim =
   HM.fromList
   [("text",PText)
+  ,("datetime",PTimestamp (Just utc) )
   ,("pdf",PMime "application/pdf")
   ,("ofx",PMime "application/x-ofx")
   ,("jpg",PMime "image/jpg")
