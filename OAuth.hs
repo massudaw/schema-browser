@@ -90,7 +90,16 @@ oauthpoller = BoundedPlugin2 "Gmail Login" "google_auth" url
 
 
 url s u = "https://www.googleapis.com/" <> T.unpack s <> "/v1/users/"<> T.unpack u <> "/"
-urlT s u = "https://www.googleapis.com/" <> T.unpack s <> "/v1/"
+
+urlJ :: Text -> TableK Key -> FTB (TBData Key Showable ) -> String
+urlJ s j pk
+  | tableName j == "google_auth" = prefix <> "users/@me/"
+  | otherwise = prefix <>  T.unpack (rawName j ) <> "/" <>  intercalate "," (renderShowable . snd <$> getPK pk)  <> "/"
+  where prefix = "https://www.googleapis.com/" <> T.unpack s <> "/v1/"
+
+urlT s u
+  | s == "lists" = "https://www.googleapis.com/" <> T.unpack s <> "/v1/" <> "users/@me/"
+  | otherwise = "https://www.googleapis.com/" <> T.unpack s <> "/v1/"
 
 updateTable inf table reference page maxResults
   | tableName table == "history" = do
@@ -112,15 +121,16 @@ updateTable inf table reference page maxResults
 listTable inf table offset page maxResults sort ix
   | tableName table == "history" = return ([],Nothing , 0)
   | tableName table == "attachments" = return ([],Nothing , 0)
-  | not $ null $ _rawScope table = do
-      liftIO $ print $ table
-      let [sref] = filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope table)) (S.toList $ rawFKS table)
+  | not  (null $ _rawScope table ) && not (S.null (rawFKS table) )= do
+      liftIO $ print $ (table,_rawScope table,rawFKS table,rawAttrs table)
+      let [sref] =  filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope table)) (S.toList $ rawFKS table)
           stable = (\(Path _ (FKJoinTable rel t)) -> t) sref
- --  | tableName table == "tasks" = do
-      let fromtable = (lookTable inf $ snd stable)
-      (l,i,j) <- listTable inf fromtable offset page maxResults sort ix
+      let fromtable = (lookSTable inf $ stable)
+          rinf = fromMaybe inf $ M.lookup (fst stable) (depschema inf)
+          defSort = fmap (,Desc) $  rawPK fromtable
+      (l,i,j) <- (listEd (schemaOps rinf) ) rinf  fromtable offset page maxResults defSort []
       ix <- mapM (\i -> do
-          (l,i,s) <- joinList  inf fromtable sref i table
+          (l,i,s) <- joinList inf fromtable sref i table
           return l ) l
       return (concat ix ,i ,j)
 
@@ -174,11 +184,11 @@ joinGet inf tablefrom tableref from ref
   | otherwise = return Nothing
 
 joinList inf tablefrom (Path _ (FKJoinTable rel stable)) from tableref
-  | tableName tableref == "tasks" = do
+  | otherwise = do
       tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
       let user = fst $ fromJust $ token inf
       decoded <- liftIO $ do
-          let req = urlT (schemaName inf) user  <> T.unpack (rawName tablefrom) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK from ) <> "/" <> T.unpack (rawName tableref ) <>  "?access_token=" ++ ( accessToken tok)
+          let req = urlJ (schemaName inf) tablefrom from  <> T.unpack (rawName tableref) <>  "?access_token=" ++ ( accessToken tok)
           (t,v) <- duration
                   (simpleHttpHeader [("GData-Version","3.0")] req )
           print ("joinList",tablefrom,tableref ,getPK from, t)
@@ -189,7 +199,6 @@ joinList inf tablefrom (Path _ (FKJoinTable rel stable)) from tableref
       c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) tableref ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
       let addAttr refAttr (m ,t ) = (m, mapComp (\(KV i) -> KV  $ M.insert (S.fromList $ keyattr refAttr ) refAttr i ) t)
       return (fmap (addAttr refAttr) <$>  c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
-  | otherwise = return ([],Nothing ,0)
 
 
 
@@ -198,8 +207,8 @@ getTable inf  tb pk
   | tableName tb == "history" = return  Nothing
   | tableName tb == "attachments" = return  Nothing
   | not $ null $ _rawScope tb = do
-      liftIO $ print $ tb
-      let [sref] = filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope tb )) (S.toList $ rawFKS tb )
+      liftIO $ print $ (tb,_rawScope tb)
+      let [sref] = filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope tb )) (traceShowId $S.toList $ rawFKS tb )
           (Path spk  (FKJoinTable rel stable)) =  sref
       let fromtable = (lookTable inf $ snd stable)
       joinGet inf fromtable  tb  ( _fkttable $ unTB $ head $ F.toList $  _kvvalues $ unTB $  tbUn spk pk)  pk

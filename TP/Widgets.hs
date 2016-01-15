@@ -203,16 +203,16 @@ rangeBoxes fkbox bp = do
 instance Widget (RangeBox a) where
   getElement = _rangeElement
 
-buttonDivSetT :: (Ord b ,Eq a) => [a] -> Tidings (a -> b) -> Tidings (Maybe a) ->  (a -> UI Element ) -> (a -> UI Element  -> UI Element ) -> UI (TrivialWidget a)
+buttonDivSetT :: (Ord b ,Eq a) => [a] -> Tidings (a -> b) -> Tidings (Maybe a) ->  (a -> UI Element ) -> (a -> UI Element  -> UI Element ) -> UI (TrivialWidget (Maybe a))
 buttonDivSetT ks sort binit   el st = mdo
-  buttons <- mapM (buttonString  bv)  ks
-  dv <- UI.div # sink items ((\f -> fmap (\ (k,(v,_)) -> st k (element v) # sink UI.enabled (not . (k==) <$> bv)) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$>  facts sort )
+  buttons <- mapM (buttonString  )  ks
+  dv <- UI.div # sink items ((\f -> fmap (\ (k,(v,_)) -> st k (element v) # sink UI.enabled (not . (Just k==) <$> bv)) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$>  facts sort )
   let evs = foldl (unionWith const) (filterJust $ rumors binit) (snd .snd <$> buttons)
   v <- currentValue (facts binit)
-  bv <- stepper (maybe (justError "no head" $ safeHead (ks)) id v) evs
-  return (TrivialWidget (tidings bv evs) dv)
+  bv <- stepper  v  (Just <$> evs)
+  return (TrivialWidget (tidings bv (Just <$> evs)) dv)
     where
-      buttonString   bv k = do
+      buttonString   k = do
         b <- el k
         let ev = pure k <@ UI.click  b
         return (k,(b,ev))

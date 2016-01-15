@@ -162,7 +162,7 @@ data View
   }
 
 justLabel :: TB3Data (Labeled Text ) Key () -> Key -> Text
-justLabel t =  justError "cant find label" .getLabels t
+justLabel t k =  justError ("cant find label"  <> show k <> " - " <> show t).getLabels t $ k
 
 -- tableType :: TB1 () -> Text
 

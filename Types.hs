@@ -495,7 +495,7 @@ data SqlOperationK k
   = FKJoinTable [Rel k] (Text,Text)
   | RecJoin (MutRec [[Rel k ]])  (SqlOperationK k)
   | FKInlineTable (Text,Text)
-  deriving(Eq,Ord,Show)
+  deriving(Eq,Ord,Show,Functor)
 
 fkTargetTable (FKJoinTable  r tn) = snd tn
 fkTargetTable (FKInlineTable tn) = snd tn
@@ -515,7 +515,9 @@ data TableType
 
 type Table = TableK Key
 
-mapTableK f (Raw  s tt tr de is rn  un ra rsc rp rd rf inv rat ) = Raw s tt tr (S.map f de) is rn (fmap (S.map f) un) ra (map f rsc ) (map f rp) (fmap f rd) S.empty  S.empty (S.map f rat)
+mapTableK f (Raw  s tt tr de is rn  un ra rsc rp rd rf inv rat ) = Raw s tt tr (S.map f de) is rn (fmap (S.map f) un) ra (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf )(S.map (mapPath f )  inv) (S.map f rat)
+  where mapPath f (Path i j ) = Path (S.map f i) (fmap f j)
+
 data TableK k
     =  Raw { rawSchema :: Text
            , rawTableType :: TableType
@@ -532,12 +534,10 @@ data TableK k
            , _rawInvFKS ::  (Set (Path (Set k) (SqlOperationK k)))
            , rawAttrs :: (Set k)
            }
-     deriving(Eq,Ord)
+     deriving(Eq,Ord,Show)
 
 rawFKS = _rawFKSL
 
-instance Show Table where
-  show = T.unpack . tableName
 
 
 tableName = rawName

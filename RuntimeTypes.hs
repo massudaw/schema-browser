@@ -8,6 +8,7 @@ import Types
 import Data.Unique
 import Types.Index
 import Control.Concurrent.STM.TQueue
+import Control.Concurrent.STM.TMVar
 import Control.Concurrent.STM
 import Types.Patch
 import qualified NonEmpty as Non
@@ -46,7 +47,7 @@ data InformationSchema
   , _pkMapL :: Map (Set Key) Table
   , _tableMapL :: Map Text Table
   , tableSize :: Map Table Int
-  , mvarMap :: MVar (Map (KVMetadata Key) (DBVar ))
+  , mvarMap :: TMVar (Map (KVMetadata Key) (DBVar ))
   , rootconn :: Connection
   , metaschema :: Maybe InformationSchema
   , depschema :: Map Text InformationSchema
@@ -88,7 +89,7 @@ pkMap = _pkMapL
 data DBVar2 k v=
   DBVar2
   { patchVar :: TQueue [TBIdx k v]
-  , idxVar :: MVar (Map [Column k v ] (Int,Map Int PageToken))
+  , idxVar :: TMVar (Map [Column k v ] (Int,Map Int PageToken))
   , patchTid :: R.Tidings [TBIdx k v]
   , idxTid :: R.Tidings (Map [Column k v ] (Int,Map Int PageToken))
   , collectionTid :: R.Tidings (TableIndex k v )

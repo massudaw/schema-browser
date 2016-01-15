@@ -250,7 +250,7 @@ databaseChooser smvar sargs = do
               load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-4" # sink UI.enabled (facts (isJust <$> dbsWT) )
               liftIO $ onEventIO (usernameB <@ (UI.click load)) $ traverse (\ v ->do
                 let auth = authMap smvar sargs (user sargs ,pass sargs )
-                inf <- loadSchema smvar schemaN (rootconn metainf) v auth
+                inf <- loadSchema smvar schemaN (rootconn metainf) (user sargs)  auth
                 schemaH $ Just inf)
               user <- UI.div # set children [usernamel,username] # set UI.class_ "col-xs-8"
               UI.div # set children [user ,load]
@@ -306,20 +306,20 @@ chooserTable inf kitems cliTid cli = do
           where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$>[("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
                  field =   justError ("no value" <> show (pkset,pk)) $ G.lookup  (G.Idex  pk ) orderMap
                  usage = justError "nopk " $ (lookAttr (lookKey (meta inf) "ordering" "usage" ))  field
-  liftIO$ onEventIO (flip incClick <$> facts (collectionTid orddb) <@> rumors bBset)
-    (\p -> do
+  liftIO$ onEventIO ((\i j -> flip incClick i <$> j)<$> facts (collectionTid orddb) <@> rumors bBset)
+    (traverse (\p -> do
       _ <- transaction inf $ (patchEd $ schemaOps (meta inf)) (meta inf) p
-      putPatch (patchVar orddb) [p] )
+      putPatch (patchVar orddb) [p] ))
   tbChooserI <- UI.div # set children [filterInp,getElement bset]  # set UI.style [("height","90vh"),("overflow","auto"),("height","99%")]
   tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [tbChooserI]
   nav  <- buttonDivSet ["Viewer","Browser","Exception","Change"] (pure $ Just "Browser")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
-  header <- UI.h1 # sink text (T.unpack . translatedName .  justError "no table " . flip M.lookup (pkMap inf) <$> facts bBset ) # set UI.class_ "col-xs-7"
+  header <- UI.h1 # sink text (maybe "" (T.unpack . translatedName) . join . fmap (flip M.lookup (pkMap inf)) <$> facts bBset ) # set UI.class_ "col-xs-7"
   chooserDiv <- UI.div # set children  [header ,getElement nav]  # set UI.style [("display","flex"),("align-items","flex-end")]
   body <- UI.div
 
 
-  el <- mapUITEvent body (\(nav,table)->
+  el <- mapUITEvent body (maybe UI.div (\(nav,table)->
       case nav of
         "Change" -> do
             let tableob = (justError "no table " $ M.lookup table (pkMap inf))
@@ -338,7 +338,7 @@ chooserTable inf kitems cliTid cli = do
         "Stats" -> do
             span <- viewer inf (justError "no table with pk" $ M.lookup table (pkMap inf)) Nothing
             element body # set UI.children [span]
-        ) $ liftA2 (,) (triding nav) bBset
+        )) $ liftA2 (\i j -> (i,) <$> j)  (triding nav) bBset
   subnet <- UI.div # set children [chooserDiv,body] # set UI.style [("height","90vh"),("overflow","auto")]
   return [tbChooser, subnet ]
 

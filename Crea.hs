@@ -22,6 +22,8 @@ import Control.Lens
 import Control.Applicative
 import Data.Maybe
 import Data.Monoid
+import Control.Concurrent.STM.TMVar
+import Control.Concurrent.STM.TQueue
 
 
 import qualified Data.ByteString as BS
