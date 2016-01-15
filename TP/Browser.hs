@@ -2,25 +2,19 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE OverloadedStrings ,TupleSections #-}
 
-module Main (main) where
+module TP.Browser where
 
-import NonEmpty (NonEmpty(..))
 import qualified NonEmpty as Non
-import Data.Unique
-import qualified Data.Binary as B
 import Query
 import Data.Time
 import Text
 import qualified Types.Index as G
-import Poller
 import Data.Bifunctor (first)
-import Data.List (foldl')
 import Debug.Trace
 import Types
 import SchemaQuery
 import Plugins
 import TP.Widgets
-import SchemaQuery
 import PostgresQuery (postgresOps,connRoot)
 import SortList
 import Prelude hiding (head)
@@ -37,12 +31,10 @@ import Types.Patch
 import Data.Char (toLower)
 import Postgresql
 import Data.Maybe
-import Data.Functor.Identity
 import Reactive.Threepenny hiding(apply)
 import Data.Traversable (traverse)
 import qualified Data.List as L
 import qualified Data.ByteString.Char8 as BS
-import qualified Data.ByteString.Lazy as BSL
 
 import RuntimeTypes
 import qualified Graphics.UI.Threepenny as UI
@@ -62,25 +54,6 @@ import Data.String
 import OAuth
 import GHC.Stack
 
-
-main :: IO ()
-main = do
-  args <- getArgs
-  print "Start"
-  smvar <- newMVar M.empty
-  let db = argsToState (tail args)
-  -- Load Metadata
-  conn <- connectPostgreSQL (connRoot db)
-  let amap = authMap smvar db (user db , pass db )
-  metas <- keyTables  smvar conn  ("metadata", T.pack $ user db) amap plugList
-  plugs smvar amap db plugList
-  poller smvar amap db plugList False
-
-  startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup smvar  (tail args)) (\w ->  liftIO $ do
-          print ("delete client" <> show (sToken w))
-          deleteClient metas (sToken w) )
-  print "Finish"
-
 updateClient metainf inf table tdi clientId now =
     let
       row = tblist . fmap _tb
@@ -96,12 +69,12 @@ updateClient metainf inf table tdi clientId now =
 getClient metainf clientId ccli = G.lookup (G.Idex [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))]) ccli :: Maybe (TBData Key Showable)
 
 deleteClient metainf clientId = do
-  (dbmeta ,(_,ccli)) <- transaction metainf $ eventTable metainf (lookTable metainf "clients" ) Nothing Nothing [] []
+  (dbmeta ,(_,ccli)) <- transaction metainf $ eventTable (lookTable metainf "clients" ) Nothing Nothing [] []
   putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))],[])]
 
 
 editClient metainf inf table tdi clientId now = do
-  (dbmeta ,(_,ccli)) <- transaction metainf $ eventTable metainf (lookTable metainf "clients" ) Nothing Nothing [] []
+  (dbmeta ,(_,ccli)) <- transaction metainf $ eventTable (lookTable metainf "clients" ) Nothing Nothing [] []
   let cli :: Maybe (TBData Key Showable)
       cli = getClient metainf clientId ccli
       new :: TBData Key Showable
@@ -127,7 +100,7 @@ setup smvar args w = void $ do
   let amap = authMap smvar bstate (user bstate , pass bstate)
   inf <- liftIO$ traverse (\i -> loadSchema smvar (T.pack i) (conn metainf) (user bstate)  amap ) $ schema  bstate
   (cli,cliTid) <- liftIO $ addClient (sToken w ) metainf inf ((\t inf -> lookTable inf . T.pack $ t) <$> tablename bstate  <*> inf  ) bstate
-  (evDB,chooserItens) <- databaseChooser smvar bstate
+  (evDB,chooserItens) <- databaseChooser smvar metainf bstate
   body <- UI.div
   return w # set title (host bstate <> " - " <>  dbn bstate)
   hoverBoard<-UI.div # set UI.style [("float","left"),("height","100vh"),("width","15px")]
@@ -168,14 +141,14 @@ setup smvar args w = void $ do
             element body # set UI.children [tbChooser,subnet]# set UI.class_ "row" # set UI.style [("display","inline-flex"),("width","100%")] )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
 
 
-listDBS ::  BrowserState -> IO (Text,[Text])
-listDBS dname = do
+listDBS ::  InformationSchema -> BrowserState -> IO (Tidings (Text,[Text]))
+listDBS metainf dname = do
   connMeta <- connectPostgreSQL (connRoot dname)
   dbs :: [Only Text]<- query_  connMeta "SELECT datname FROM pg_database  WHERE datistemplate = false"
   map <- (\db -> do
-        connDb <- connectPostgreSQL ((fromString $ "host=" <> host dname <> " port=" <> port dname <>" user=" <> user dname <> " dbname=" ) <> (encodeUtf8 db) <> (fromString $ " password=" <> pass dname )) --  <> " sslmode= require") )
-        schemas :: [Only Text] <- query_  connDb "SELECT name from metadata.schema "
-        return (db,(filter (not . (`elem` ["information_schema","pg_temp_1","pg_toast_temp_1","pg_toast","public"])) $ fmap unOnly schemas))) (T.pack $ dbn dname)
+        (dbvar ,(_,schemasTB)) <- transaction metainf $  eventTable (lookTable metainf "schema") Nothing Nothing [] []
+        let schemas schemaTB = fmap ((\(Attr _ (TB1 (SText s)) ) -> s) .unTB . lookAttr' metainf "name") $ F.toList  schemasTB
+        return ( (db,).schemas  <$> collectionTid dbvar)) (T.pack $ dbn dname)
   return map
 
 loginWidget userI passI =  do
@@ -196,6 +169,7 @@ loginWidget userI passI =  do
 
 
 
+
 form :: Tidings a -> Event b -> Tidings a
 form td ev =  tidings (facts td ) (facts td <@ ev )
 
@@ -210,8 +184,8 @@ authMap smvar sargs (user,pass) schemaN =
             return (PostAuth conn, postgresOps)
     where oauth tag = do
               user <- justError "no google user" <$> lookupEnv "GOOGLE_USER"
-              metainf <- justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
-              (dbmeta ,_) <- transaction metainf $ eventTable metainf (lookTable metainf "google_auth") Nothing Nothing []   [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  $ T.pack user ))]
+              metainf <- metaInf smvar
+              (dbmeta ,_) <- transaction metainf $ eventTable (lookTable metainf "google_auth") Nothing Nothing []   [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  $ T.pack user ))]
               let
                   td :: Tidings (OAuth2Tokens)
                   td = (\o -> let
@@ -225,17 +199,17 @@ authMap smvar sargs (user,pass) schemaN =
 loadSchema smvar schemaN dbConn user authMap  =  do
     keyTables smvar dbConn (schemaN,T.pack $ user) authMap plugList
 
-databaseChooser smvar sargs = do
-  dbs <- liftIO $ listDBS  sargs
+databaseChooser smvar metainf sargs = do
+  dbs <- liftIO $ listDBS  metainf sargs
   let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,T.pack s) ) $ ( schema sargs)
-  dbsW <- listBox (pure $ (\((c,j)) -> (c,) <$> j) $ dbs ) (pure dbsInit) (pure id) (pure (line . show . snd  ))
+  dbsW <- listBox ((\((c,j)) -> (c,) <$> j) <$> dbs ) (pure dbsInit) (pure id) (pure (line . T.unpack. snd  ))
   schemaEl <- flabel # set UI.text "schema"
   cc <- currentValue (facts $ triding dbsW)
   let dbsWE = rumors $ triding dbsW
   dbsWB <- stepper cc dbsWE
   let dbsWT  = tidings dbsWB dbsWE
   (schemaE,schemaH) <- liftIO newEvent
-  metainf <- justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
+  metainf <- liftIO $ metaInf smvar
   let genSchema (db,schemaN)
         | schemaN  `L.elem` ["gmail","tasks"]  =  do
               userEnv <- liftIO$ lookupEnv "GOOGLE_USER"
@@ -245,7 +219,6 @@ databaseChooser smvar sargs = do
               let usernameE = nonEmpty  <$> UI.valueChange username
 
               usernameB <- stepper userEnv usernameE
-              let usernameT = tidings usernameB usernameE
 
               load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-4" # sink UI.enabled (facts (isJust <$> dbsWT) )
               liftIO $ onEventIO (usernameB <@ (UI.click load)) $ traverse (\ v ->do
@@ -285,6 +258,10 @@ attrLine i   = do
 
 lookAttr k (_,m) = M.lookup (S.singleton (Inline k)) (unKV m)
 
+lookAttr' inf k (i,m) = err $  M.lookup (S.singleton (Inline (lookKey inf (_kvname i) k))) (unKV m)
+    where
+      err= justError ("no attr " <> show k <> " for table " <> show (_kvname i))
+
 chooserTable inf kitems cliTid cli = do
   iv   <- currentValue (facts cliTid)
   let lookT iv = let  i = join $  unLeftItens . unTB <$> lookAttr (lookKey (meta inf) "clients" "table") iv
@@ -293,7 +270,7 @@ chooserTable inf kitems cliTid cli = do
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
-  (orddb ,(_,orderMap)) <- liftIO $ transaction (meta inf) $ eventTable  (meta inf) (lookTable (meta inf) "ordering" ) (Just 0) Nothing []      [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+  (orddb ,(_,orderMap)) <- liftIO $ transaction (meta inf) $ eventTable  (lookTable (meta inf) "ordering" ) (Just 0) Nothing []      [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
   let renderLabel = (\i -> case M.lookup i (pkMap inf) of
                                        Just t -> T.unpack (translatedName t)
                                        Nothing -> show i )
@@ -354,7 +331,7 @@ viewerKey inf key cli cliTid = mdo
                 in fmap (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
   let
       table = justLook  key $ pkMap inf
-  reftb@(vpt,vp,gist,var ) <- refTables inf table
+  reftb@(vpt,vp,_ ,var ) <- refTables inf table
 
   let
       tdip = (\i -> join $ traverse (\v -> G.lookup  (G.Idex (justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) (join $ lookPK <$> iv) ) <$> vpt
@@ -383,7 +360,7 @@ viewerKey inf key cli cliTid = mdo
     return (offset, res3)
   onEvent (rumors $ triding offset) $ (\i ->  liftIO $ do
     print ("page",(i `div` 10 )   )
-    transaction inf $ eventTable  inf table  (Just $ i `div` 10) Nothing  [] [])
+    transaction inf $ eventTable  table  (Just $ i `div` 10) Nothing  [] [])
   let
     paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
   page <- currentValue (facts paging)

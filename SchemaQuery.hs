@@ -14,6 +14,7 @@ import Data.Ord
 import qualified NonEmpty as Non
 import Data.Functor.Identity
 import Control.Monad.Writer
+import Control.Monad.Reader
 import Control.Concurrent
 import Control.Concurrent.STM
 import Control.Concurrent.STM.TVar
@@ -65,16 +66,17 @@ createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (T
 -- tableLoader :: InformationSchema -> Table -> TransactionM (Collection Key Showable)
 eventTable = tableLoader
 
-tableLoader inf table page size presort fixed   =  do
+tableLoader table page size presort fixed   =  do
+    inf <- ask
     let base (Path _ (FKJoinTable i j  ) ) = fst j == schemaName inf
         base i = True
         remoteFKS = S.filter (not .base )  (_rawFKSL table)
         getAtt i (m ,k ) = filter (( `S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues . unTB $ k
-    (db,o) <- eventTable' inf (table {_rawFKSL = S.filter base  (_rawFKSL table)}) page size presort fixed
+    (db,o) <- eventTable' (table {_rawFKSL = S.filter base  (_rawFKSL table)}) page size presort fixed
     res <- foldl (\m (Path _ (FKJoinTable i j ))  -> m >>= (\m -> do
         let rinf = justError "no schema" $ M.lookup ((fst j))  (depschema inf)
             table = (lookTable rinf $ snd j)
-        (db,(_,tb)) <- tableLoader rinf table  page size presort fixed
+        (db,(_,tb)) <- local (const rinf) (tableLoader table  page size presort fixed)
         let
             tar = S.fromList $ fmap _relOrigin i
             joinFK :: TBData Key Showable -> Column Key Showable
@@ -92,9 +94,10 @@ tableLoader inf table page size presort fixed   =  do
 
 
 
-eventTable' :: InformationSchema -> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
+eventTable' :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
     -> TransactionM (DBVar,Collection Key Showable)
-eventTable' inf table page size presort fixed = do
+eventTable' table page size presort fixed = do
+    inf <- ask
     let mvar = mvarMap inf
         defSort = fmap (,Desc) $  rawPK table
         sortList  = if L.null presort then defSort else presort
@@ -142,13 +145,14 @@ eventTable' inf table page size presort fixed = do
 
 
 
-fullInsert inf = Tra.traverse (fullInsert' inf )
+fullInsert = Tra.traverse (fullInsert')
 
-fullInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-fullInsert' inf ((k1,v1) )  = do
+fullInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
+fullInsert' ((k1,v1) )  = do
+   inf <- ask
    let proj = _kvvalues . unTB
    ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
-   (_,(_,l)) <- eventTable inf (lookTable inf (_kvname k1)) Nothing Nothing [] []
+   (_,(_,l)) <- eventTable (lookTable inf (_kvname k1)) Nothing Nothing [] []
    if  isJust $ G.lookup (tbpred (S.fromList $ _kvpk k1)  ret) l
       then do
         return ret
@@ -169,7 +173,7 @@ noInsert' inf (k1,v1)   = do
 
 transaction :: InformationSchema -> TransactionM a -> IO a
 transaction inf log = do -- withTransaction (conn inf) $ do
-  (md,mods)  <- runWriterT log
+  (md,mods)  <- runWriterT (runReaderT log inf )
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
   Tra.traverse (\(k,v) -> do
     ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ M.lookup ((rawSchema k ))  (depschema inf) ) k
@@ -178,16 +182,18 @@ transaction inf log = do -- withTransaction (conn inf) $ do
   return md
 
 
-fullDiffEdit :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-fullDiffEdit inf old@((k1,v1) ) (k2,v2) = do
+fullDiffEdit :: TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
+fullDiffEdit old@((k1,v1) ) (k2,v2) = do
+   inf <- ask
    let proj = _kvvalues . unTB
    edn <- (k2,) . Compose . Identity . KV <$>  Tra.sequence (M.intersectionWith (\i j -> Compose <$>  tbDiffEdit inf  (unTB i) (unTB j) ) (proj v1 ) (proj v2))
    mod <- (editEd $ schemaOps inf)   inf edn old
    --tell (maybeToList mod)
    return edn
 
-fullDiffInsert :: InformationSchema -> TBData Key Showable -> TransactionM  (Maybe (TableModification (TBIdx Key Showable)))
-fullDiffInsert inf  (k2,v2) = do
+fullDiffInsert :: TBData Key Showable -> TransactionM  (Maybe (TableModification (TBIdx Key Showable)))
+fullDiffInsert (k2,v2) = do
+   inf <- ask
    let proj = _kvvalues . unTB
    edn <- (k2,) . Compose . Identity . KV <$>  Tra.sequence ((\ j -> Compose <$>  tbInsertEdit inf   (unTB j) ) <$>  (proj v2))
    mod <- (insertEd $ schemaOps inf) inf edn
@@ -208,13 +214,14 @@ tbInsertEdit inf  f@(FKT pk rel2  t2) =
         t@(TB1 (m,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
            let rinf  = fromMaybe inf (M.lookup (_kvschema m) (depschema inf))
-           Identity . (\tb -> FKT ( fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> pk) (unTB1 tb)) rel2 tb ) <$> fullInsert rinf t
+           local (const rinf) (Identity . (\tb -> FKT ( fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> pk) (unTB1 tb)) rel2 tb ) <$> fullInsert t)
         LeftTB1 i ->
            maybe (return (Identity f) ) (fmap (fmap attrOptional) . tbInsertEdit inf) (unLeftItens f)
         ArrayTB1 l ->
            fmap (fmap (attrArray f .Non.fromList)) $ fmap Tra.sequenceA $ Tra.traverse (\ix ->   tbInsertEdit inf $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. Non.length l - 1 ]
 
-loadFKS inf table = do
+loadFKS table = do
+  inf <- ask
   let
     targetTable = lookTable inf (_kvname (fst table))
     fkSet:: S.Set Key
@@ -222,21 +229,22 @@ loadFKS inf table = do
     items = unKV . snd  $ table
     nonFKAttrs :: [(S.Set (Rel Key) ,Column Key Showable)]
     nonFKAttrs =  fmap (fmap unTB) $M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
-  fks <- catMaybes <$> mapM (loadFK inf table ) (F.toList $ rawFKS targetTable)
+  fks <- catMaybes <$> mapM (loadFK table ) (F.toList $ rawFKS targetTable)
   return  $ tblist' targetTable (fmap _tb $fmap snd nonFKAttrs <> fks )
 
-loadFK :: InformationSchema -> TBData Key Showable -> Path (S.Set Key ) SqlOperation -> TransactionM (Maybe (Column Key Showable))
-loadFK inf table (Path ori (FKJoinTable rel (st,tt) ) ) = do
+loadFK :: TBData Key Showable -> Path (S.Set Key ) SqlOperation -> TransactionM (Maybe (Column Key Showable))
+loadFK table (Path ori (FKJoinTable rel (st,tt) ) ) = do
+  inf <- ask
   let targetTable = lookTable inf tt
-  (i,(_,mtable )) <- eventTable inf targetTable Nothing Nothing [] []
+  (i,(_,mtable )) <- eventTable targetTable Nothing Nothing [] []
   let
       relSet = S.fromList $ _relOrigin <$> rel
       tb  = unTB <$> F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . snd . tableNonRef' $ table))
       fkref = joinRel  (tableMeta targetTable) rel tb  mtable
   return $ Just $ FKT (_tb <$> tb) rel   fkref
-loadFK inf table (Path ori (FKInlineTable to ) )   = do
+loadFK table (Path ori (FKInlineTable to ) )   = do
   let IT rel vt = unTB $ justError "no inline" $ M.lookup (S.map Inline   ori) (unKV .snd $ table)
-  loadVt <- Tra.traverse (loadFKS inf )  vt
+  loadVt <- Tra.traverse (loadFKS )  vt
   return (Just $ IT rel loadVt)
 
-loadFK _ _ _ = return Nothing
+loadFK  _ _ = return Nothing

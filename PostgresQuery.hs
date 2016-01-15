@@ -1,4 +1,4 @@
-{-# LANGUAGE ConstraintKinds,TypeFamilies ,DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,ScopedTypeVariables,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+{-# LANGUAGE TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
 module PostgresQuery where
 
 import Types
@@ -24,11 +24,9 @@ import Data.Tuple
 import Data.String
 
 import Control.Applicative
-import Control.Monad.IO.Class
 import Data.Maybe
 import qualified Data.List as L
 
-import Data.Monoid
 import Prelude hiding (takeWhile,head)
 
 
@@ -36,7 +34,6 @@ import qualified Data.Foldable as F
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Set as S
-import qualified Database.PostgreSQL.Simple.ToField as TF
 import qualified Database.PostgreSQL.Simple.FromRow as FR
 import Database.PostgreSQL.Simple
 

@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings , NoMonomorphismRestriction #-}
 module Poller
   (poller
   ,plugs
@@ -10,14 +10,11 @@ import Types
 import qualified Types.Index as G
 import Data.Either
 import Step
-import qualified Data.Set as S
 import SchemaQuery
-import PostgresQuery (postgresOps,connRoot)
 import Prelude hiding (head)
 import Control.Monad.Reader
 import Control.Concurrent
 import Data.Functor.Apply
-import Control.Concurrent.STM.TMVar
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM
 import Utils
@@ -32,24 +29,21 @@ import Data.Time
 import RuntimeTypes
 import Data.Monoid hiding (Product(..))
 
-import qualified Data.Foldable as F
 import qualified Data.Text as T
 
 
-import Database.PostgreSQL.Simple
 import qualified Data.Map as M
 
-import GHC.Stack
 
 
 plugs schm authmap db plugs = do
-  inf <- justError "no meta" . M.lookup "metadata" <$> readMVar schm
+  inf <- metaInf schm
   let conn = rootconn inf
-  (db ,(s,t)) <- transaction inf $ eventTable  inf (lookTable inf "plugins") Nothing Nothing [] []
+  (db ,(s,t)) <- transaction inf $ eventTable  (lookTable inf "plugins") Nothing Nothing [] []
   let els = L.filter (not . (`L.elem` G.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
   p <-transaction inf $ do
-     elsFKS <- mapM (loadFKS inf ) els
-     mapM (\table -> fullDiffInsert  (meta inf)  table) elsFKS
+     elsFKS <- mapM loadFKS  els
+     mapM (\table -> fullDiffInsert    table) elsFKS
   putPatch (patchVar db) (tableDiff <$> catMaybes p)
 
 
@@ -71,9 +65,9 @@ checkTime polling tb = do
     return $ (start,end,curr,current)
 
 poller schm authmap db plugs is_test = do
-  metas <- justError "no meta" . M.lookup "metadata" <$> readMVar schm
+  metas <- metaInf schm
   let conn = rootconn (metas)
-  (dbpol,(_,polling))<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
+  (dbpol,(_,polling))<- transaction metas $ eventTable (lookTable metas "polling")  Nothing Nothing [] []
   let
     project tb =  (schema,intervalms,p)
       where
@@ -98,11 +92,11 @@ poller schm authmap db plugs is_test = do
                   then do
                       putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let fetchSize = 1000
-                      (dbplug ,(l,listRes)) <- transaction inf $ eventTable inf (lookTable inf a) Nothing (Just fetchSize) [][]
+                      (dbplug ,(l,listRes)) <- transaction inf $ eventTable (lookTable inf a) Nothing (Just fetchSize) [][]
                       let sizeL = justLook [] l
                           lengthPage s pageSize  = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
                       i <- concat <$> mapM (\ix -> do
-                          (_,(_,listResAll)) <- transaction inf $ eventTable inf (lookTable inf a) (Just ix) (Just fetchSize) [][]
+                          (_,(_,listResAll)) <- transaction inf $ eventTable (lookTable inf a) (Just ix) (Just fetchSize) [][]
                           let listRes = L.take fetchSize . G.toList $ listResAll
 
                           let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
@@ -122,8 +116,8 @@ poller schm authmap db plugs is_test = do
                           ) [0..(lengthPage (fst sizeL) fetchSize -1)]
                       end <- getCurrentTime
                       putStrLn $ "END " <>T.unpack pname <> " - " <> show end
-                      let polling_log = lookTable (meta inf) "polling_log"
-                      dbplog <-  refTable (meta inf) polling_log
+                      let polling_log = lookTable metas "polling_log"
+                      dbplog <-  refTable metas polling_log
                       let table = tblist
                               [ attrT ("poll_name",TB1 (SText pname))
                               , attrT ("schema_name",TB1 (SText schema))
@@ -138,11 +132,11 @@ poller schm authmap db plugs is_test = do
                               , attrT ("start_time",time current)
                               , attrT ("end_time",time end)]
 
-                      (p2,p) <- transaction (meta inf) $ do
-                          fktable2 <- loadFKS (meta inf) (liftTable' (meta inf) "polling"  table2)
-                          p2 <- fullDiffEdit (meta inf) curr fktable2
-                          fktable <- loadFKS (meta inf) (liftTable' (meta inf) "polling_log"  table)
-                          p <-fullDiffInsert  (meta inf) fktable
+                      (p2,p) <- transaction metas  $ do
+                          fktable2 <- loadFKS  (liftTable' (meta inf) "polling"  table2)
+                          p2 <- fullDiffEdit curr fktable2
+                          fktable <- loadFKS  (liftTable' (meta inf) "polling_log"  table)
+                          p <-fullDiffInsert  fktable
                           return (fktable2,p)
                       atomically $ do
                         traverse (writeTQueue (patchVar dbplog) .pure ) (fmap tableDiff  p)
@@ -152,7 +146,7 @@ poller schm authmap db plugs is_test = do
                       threadDelay (round $ (*10^6) $  diffUTCTime current start )
 
           pid <- forkIO $ (void $ iter polling >> (forever $  do
-              (_,(_,polling))<- transaction metas $ eventTable metas (lookTable metas "polling")  Nothing Nothing [] []
+              (_,(_,polling))<- transaction metas $ eventTable (lookTable metas "polling")  Nothing Nothing [] []
               iter polling ))
           return ()
   mapM poll  enabled

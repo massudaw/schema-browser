@@ -264,7 +264,7 @@ labelCase inf a old wid = do
 
 refTables inf table = do
         let
-        ((DBVar2 tmvard _  vpdiff _ _ ),res)  <-  (liftIO $ transaction inf $ eventTable inf table (Just 0) Nothing  [] [])
+        ((DBVar2 tmvard _  vpdiff _ _ ),res)  <-  (liftIO $ transaction inf $ eventTable table (Just 0) Nothing  [] [])
         let update = foldl'(flip (\p-> fmap (flip apply p)))
         bres <- accumB res (flip update <$> rumors vpdiff)
         let
@@ -526,8 +526,8 @@ processPanelTable inf attrsB reftb@(res,_,gist,_) inscrud table oldItemsi = do
   -- Delete when isValid
          sink UI.enabled ( liftA2 (&&) (isJust . fmap (tableNonRef') <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (facts oldItemsi ) (facts gist ) ))
   let
-         crudEdi (Just (i)) (Just (j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEdit  inf   i j
-         crudIns (Just (j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf (fullDiffInsert  inf j)
+         crudEdi (Just (i)) (Just (j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEdit  i j
+         crudIns (Just (j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
          crudDel (Just (j))  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> transaction inf (( deleteEd $ schemaOps inf) inf j)
   (diffEdi,ediFin) <- mapEventFin id $ crudEdi <$> facts oldItemsi <*> attrsB <@ UI.click editB
   (diffDel,delFin ) <- mapEventFin id $ crudDel <$> facts (fmap tableNonRef' <$> oldItemsi) <@ UI.click deleteB
@@ -1078,7 +1078,7 @@ viewer inf table env = mdo
                   ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
                   flist = catMaybes $ fmap (\(i,_,j) -> second (Attr i) . first T.pack <$> j) slist'
-              (_,(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  inf table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (envK <> flist)
+              (_,(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (envK <> flist)
               let (size,_) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (L.sort $ fmap snd envK) fixmap
               return (o,(slist,paging o (size,sorting' ordlist (G.toList lres))))
       nearest' :: M.Map Int (TB2 CoreKey Showable) -> Int -> ((Int,Maybe (Int,TB2 CoreKey Showable)))

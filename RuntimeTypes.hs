@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
+{-# LANGUAGE OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
 module RuntimeTypes where
 
 
@@ -36,6 +36,8 @@ import GHC.Stack
 
 data Parser m s a b = P (s,s) (m a b) deriving Functor
 
+metaInf :: MVar (Map Text InformationSchema ) -> IO InformationSchema
+metaInf smvar = justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
 
 data InformationSchema
   = InformationSchema
@@ -141,7 +143,7 @@ dynP ~(P s d) = d
 dynPK =  runKleisli . dynP
 
 
-type TransactionM = WriterT [TableModification (TBIdx Key Showable)] IO
+type TransactionM = ReaderT InformationSchema (WriterT [TableModification (TBIdx Key Showable)] IO)
 
 
 data PageToken
