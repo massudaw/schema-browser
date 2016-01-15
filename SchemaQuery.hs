@@ -15,31 +15,20 @@ import qualified NonEmpty as Non
 import Data.Functor.Identity
 import Control.Monad.Writer
 import Control.Monad.Reader
-import Control.Concurrent
 import Control.Concurrent.STM
-import Control.Concurrent.STM.TVar
-import Control.Concurrent.STM.TQueue
 import Reactive.Threepenny
-import Data.String
 import Utils
 import qualified Data.Map as M
 import qualified Data.Set as S
 import qualified Data.Traversable as Tra
 import qualified Data.List as L
 import qualified Data.Foldable as F
-import Debug.Trace
-import GHC.Stack
 import Types
 import Types.Patch
 import Query
 import qualified Types.Index as G
 import Data.Maybe
 import Prelude hiding (head)
-import Data.Foldable (foldl')
-import Database.PostgreSQL.Simple
--- import Schema
-import qualified Reactive.Threepenny as R
-import System.Time.Extra
 import qualified Data.Text as T
 
 --
@@ -120,7 +109,7 @@ eventTable' table page size presort fixed = do
              then do
                    liftIO$ putStrLn $ "new page " <> show table
                    let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
-                   (res,nextToken ,s ) <- (listEd $ schemaOps inf) inf table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
+                   (res,nextToken ,s ) <- (listEd $ schemaOps inf) table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
                    let ini = (M.insert fixidx (estLength page pagesize res s  ,(\v -> M.insert ((fromMaybe 0 page +1 )*pagesize) v  mp) $ justError "no token"    nextToken) fixedmap , createUn (S.fromList $ rawPK table)  (fmap unTB1 res)<> reso )
                    liftIO $ atomically $ do
                      writeTQueue (patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )
@@ -131,7 +120,7 @@ eventTable' table page size presort fixed = do
                return (fixedmap ,reso)
           Nothing -> do
              liftIO$ putStrLn $ "new map " <> show table
-             (res,p,s) <- (listEd $ schemaOps inf ) inf table Nothing Nothing size sortList fixed
+             (res,p,s) <- (listEd $ schemaOps inf ) table Nothing Nothing size sortList fixed
              let ini = (M.insert fixidx (estLength page pagesize res s ,maybe M.empty (M.singleton pagesize) p) fixedmap , createUn (S.fromList $ rawPK table)    (fmap (\i -> (unTB1 i)) res) <> reso)
              liftIO $ atomically $ do
                writeTQueue(patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )
@@ -151,23 +140,23 @@ fullInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
 fullInsert' ((k1,v1) )  = do
    inf <- ask
    let proj = _kvvalues . unTB
-   ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1)
+   ret <-  (k1,) . Compose . Identity . KV <$>  Tra.traverse (\j -> Compose <$>  tbInsertEdit (unTB j) )  (proj v1)
    (_,(_,l)) <- eventTable (lookTable inf (_kvname k1)) Nothing Nothing [] []
    if  isJust $ G.lookup (tbpred (S.fromList $ _kvpk k1)  ret) l
       then do
         return ret
       else do
-        i@(Just (TableModification _ _ tb))  <- (insertEd $ schemaOps inf) inf ret
+        i@(Just (TableModification _ _ tb))  <- (insertEd $ schemaOps inf) ret
         tell (maybeToList i)
         return $ create tb
 
 
-noInsert inf = Tra.traverse (noInsert' inf)
+noInsert = Tra.traverse (noInsert' )
 
-noInsert' :: InformationSchema -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-noInsert' inf (k1,v1)   = do
+noInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
+noInsert' (k1,v1)   = do
    let proj = _kvvalues . unTB
-   (k1,) . Compose . Identity . KV <$>  Tra.sequence (fmap (\j -> Compose <$>  tbInsertEdit inf   (unTB j) )  (proj v1))
+   (k1,) . Compose . Identity . KV <$>  Tra.sequence (fmap (\j -> Compose <$>  tbInsertEdit (unTB j) )  (proj v1))
 
 
 
@@ -186,8 +175,8 @@ fullDiffEdit :: TBData Key Showable -> TBData Key Showable -> TransactionM  (TBD
 fullDiffEdit old@((k1,v1) ) (k2,v2) = do
    inf <- ask
    let proj = _kvvalues . unTB
-   edn <- (k2,) . Compose . Identity . KV <$>  Tra.sequence (M.intersectionWith (\i j -> Compose <$>  tbDiffEdit inf  (unTB i) (unTB j) ) (proj v1 ) (proj v2))
-   mod <- (editEd $ schemaOps inf)   inf edn old
+   edn <- (k2,) . Compose . Identity . KV <$>  Tra.sequence (M.intersectionWith (\i j -> Compose <$>  tbDiffEdit (unTB i) (unTB j) ) (proj v1 ) (proj v2))
+   mod <- (editEd $ schemaOps inf)   edn old
    --tell (maybeToList mod)
    return edn
 
@@ -195,30 +184,29 @@ fullDiffInsert :: TBData Key Showable -> TransactionM  (Maybe (TableModification
 fullDiffInsert (k2,v2) = do
    inf <- ask
    let proj = _kvvalues . unTB
-   edn <- (k2,) . Compose . Identity . KV <$>  Tra.sequence ((\ j -> Compose <$>  tbInsertEdit inf   (unTB j) ) <$>  (proj v2))
-   mod <- (insertEd $ schemaOps inf) inf edn
+   edn <- (k2,) . Compose . Identity . KV <$>  Tra.sequence ((\ j -> Compose <$>  tbInsertEdit (unTB j) ) <$>  (proj v2))
+   mod <- (insertEd $ schemaOps inf) edn
    -- tell (maybeToList mod)
    return mod
 
 
 
-tbDiffEdit :: InformationSchema -> TB Identity Key Showable -> TB Identity Key Showable -> TransactionM (Identity (TB Identity Key  Showable))
-tbDiffEdit inf i j
+tbDiffEdit :: TB Identity Key Showable -> TB Identity Key Showable -> TransactionM (Identity (TB Identity Key  Showable))
+tbDiffEdit i j
   | i == j =  return (Identity j)
-  | otherwise = tbInsertEdit inf  j
+  | otherwise = tbInsertEdit j
 
-tbInsertEdit inf  j@(Attr k1 k2) = return $ Identity  (Attr k1 k2)
-tbInsertEdit inf  (IT k2 t2) = Identity . IT k2 <$> noInsert inf t2
-tbInsertEdit inf  f@(FKT pk rel2  t2) =
+tbInsertEdit j@(Attr k1 k2) = return $ Identity  (Attr k1 k2)
+tbInsertEdit (IT k2 t2) = Identity . IT k2 <$> noInsert t2
+tbInsertEdit f@(FKT pk rel2  t2) =
    case t2 of
         t@(TB1 (m,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           let rinf  = fromMaybe inf (M.lookup (_kvschema m) (depschema inf))
-           local (const rinf) (Identity . (\tb -> FKT ( fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> pk) (unTB1 tb)) rel2 tb ) <$> fullInsert t)
+           local (\inf -> fromMaybe inf (M.lookup (_kvschema m) (depschema inf))) (Identity . (\tb -> FKT ( fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> pk) (unTB1 tb)) rel2 tb ) <$> fullInsert t)
         LeftTB1 i ->
-           maybe (return (Identity f) ) (fmap (fmap attrOptional) . tbInsertEdit inf) (unLeftItens f)
+           maybe (return (Identity f) ) (fmap (fmap attrOptional) . tbInsertEdit ) (unLeftItens f)
         ArrayTB1 l ->
-           fmap (fmap (attrArray f .Non.fromList)) $ fmap Tra.sequenceA $ Tra.traverse (\ix ->   tbInsertEdit inf $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. Non.length l - 1 ]
+           fmap (fmap (attrArray f .Non.fromList)) $ fmap Tra.sequenceA $ Tra.traverse (\ix ->   tbInsertEdit $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. Non.length l - 1 ]
 
 loadFKS table = do
   inf <- ask

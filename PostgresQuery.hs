@@ -6,6 +6,7 @@ import Safe
 import Control.Monad
 import Postgresql.Printer
 import Utils
+import Control.Monad.Reader
 import GHC.Stack
 import Schema
 import RuntimeTypes
@@ -191,42 +192,49 @@ generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is
 
 -- High level db operations
 
-insertMod :: InformationSchema ->  TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
-insertMod inf j  = liftIO$ do
-  let
+insertMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+insertMod j  = do
+  inf <- ask
+  liftIO $ do
+    let
       table = lookTable inf (_kvname (fst  j))
-  kvn <- insertPatch (fmap (mapKey' (recoverFields inf)) . fromRecord . (mapKey' (typeTrans inf))) (conn  inf) (patch $ mapKey' (recoverFields inf) j) (mapTableK (recoverFields inf ) table)
-  let mod =  TableModification Nothing table (firstPatch (typeTrans inf) kvn)
-  Just <$> logTableModification inf mod
+    kvn <- insertPatch (fmap (mapKey' (recoverFields inf)) . fromRecord . (mapKey' (typeTrans inf))) (conn  inf) (patch $ mapKey' (recoverFields inf) j) (mapTableK (recoverFields inf ) table)
+    let mod =  TableModification Nothing table (firstPatch (typeTrans inf) kvn)
+    Just <$> logTableModification inf mod
 
 
-deleteMod :: InformationSchema ->  TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
-deleteMod inf j@(meta,_) = liftIO$ do
-  let
+deleteMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+deleteMod j@(meta,_) = do
+  inf <- ask
+  liftIO $  do
+    let
       patch =  (tableMeta table, getPKM j,[])
       table = lookTable inf (_kvname (fst  j))
-  deletePatch (conn inf)  (firstPatch (recoverFields inf) patch) table
-  Just <$> logTableModification inf (TableModification Nothing table  patch)
+    deletePatch (conn inf)  (firstPatch (recoverFields inf) patch) table
+    Just <$> logTableModification inf (TableModification Nothing table  patch)
 
-updateMod :: InformationSchema -> TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
-updateMod inf kv old = liftIO$ do
-  let table = lookTable inf (_kvname (fst  old ))
-  patch <- updatePatch (conn  inf) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table
-  let mod =  TableModification Nothing table (firstPatch (typeTrans inf) patch)
-  Just <$> logTableModification inf mod
+updateMod :: TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+updateMod kv old = do
+  inf <- ask
+  liftIO$ do
+    let table = lookTable inf (_kvname (fst  old ))
+    patch <- updatePatch (conn  inf) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table
+    let mod =  TableModification Nothing table (firstPatch (typeTrans inf) patch)
+    Just <$> logTableModification inf mod
 
-patchMod :: InformationSchema -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
-patchMod inf patch@(m,_,_) = liftIO$ do
-  let table = lookTable inf (_kvname m )
-  patch <- applyPatch (conn  inf) (firstPatch (recoverFields inf ) patch )
-  let mod =  TableModification Nothing table (firstPatch (typeTrans inf) patch)
-  Just <$> logTableModification inf mod
+patchMod :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+patchMod patch@(m,_,_) = do
+  inf <- ask
+  liftIO $ do
+    let table = lookTable inf (_kvname m )
+    patch <- applyPatch (conn  inf) (firstPatch (recoverFields inf ) patch )
+    let mod =  TableModification Nothing table (firstPatch (typeTrans inf) patch)
+    Just <$> logTableModification inf mod
 
 
 selectAll
   ::
-     InformationSchema
-     -> TableK Key
+     TableK Key
      -> Int
      -> Maybe PageToken
      -> Int
@@ -236,22 +244,26 @@ selectAll
            [(KVMetadata Key,
              Compose
                Identity (KV (Compose Identity (TB Identity))) Key Showable)])
-selectAll inf table offset i  j k st = do
+selectAll table offset i  j k st = do
+      inf <- ask
       let
           unref (TableRef i) = i
           tbf =  tableView (tableMap inf) table
       let m = tbf
       (t,v) <- liftIO$ duration  $ paginate inf m k offset j (fmap unref i) (nonEmpty st)
-      mapM_ (tellRefs inf  ) (snd v)
+      mapM_ (tellRefs ) (snd v)
       return v
 
-tellRefs  ::  InformationSchema ->TBData Key Showable ->  TransactionM ()
-tellRefs  inf (m,k) = mapM_ (tellRefsAttr . unTB ) $ F.toList  (_kvvalues $ unTB k)
-  where tellRefsAttr (FKT l k t) = void $ do
+tellRefs  ::  TBData Key Showable ->  TransactionM ()
+tellRefs  (m,k) = do
+    inf <- ask
+    let
+        tellRefsAttr (FKT l k t) = void $ do
             tell ((\m@(k,v) -> TableModification Nothing (lookTable inf (_kvname k)) . patch $ m) <$> F.toList t)
-            mapM_ (tellRefs inf) $ F.toList t
+            mapM_ (tellRefs ) $ F.toList t
         tellRefsAttr (Attr _ _ ) = return ()
-        tellRefsAttr (IT _ t ) = void $ mapM (tellRefs inf) $ F.toList t
+        tellRefsAttr (IT _ t ) = void $ mapM (tellRefs ) $ F.toList t
+    mapM_ (tellRefsAttr . unTB ) $ F.toList  (_kvvalues $ unTB k)
 
 loadDelayed :: InformationSchema -> TBData Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
 loadDelayed inf t@(k,v) values@(ks,vs)
@@ -278,4 +290,6 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 
 
-postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\i j off p g s o-> (\(l,i) -> (fmap TB1 i,(TableRef . filter (flip L.elem (fmap fst s) . fst ) .  getPK . TB1 <$> lastMay i) ,l)) <$> selectAll i j (fromMaybe 0 off) p (fromMaybe 200 g) s o ) (\_ _ _ _ _ -> return ([],Nothing,0)) (\inf table -> liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table )) mapKeyType
+postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (fmap TB1 i,(TableRef . filter (flip L.elem (fmap fst s) . fst ) .  getPK . TB1 <$> lastMay i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o ) (\ _ _ _ _ -> return ([],Nothing,0)) (\table j -> do
+    inf <- ask
+    liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ) $ j ) mapKeyType

@@ -5,6 +5,7 @@ import Control.Lens
 import Control.Exception
 import qualified Data.ByteString.Lazy.Char8 as BS
 import Control.Arrow
+import Control.Monad.Reader
 import qualified Data.HashMap.Strict as HM
 import Data.Time
 import Prelude hiding (head)
@@ -101,8 +102,9 @@ urlT s u
   | s == "lists" = "https://www.googleapis.com/" <> T.unpack s <> "/v1/" <> "users/@me/"
   | otherwise = "https://www.googleapis.com/" <> T.unpack s <> "/v1/"
 
-updateTable inf table reference page maxResults
+updateTable table reference page maxResults
   | tableName table == "history" = do
+    inf <- ask
     tok <- liftIO$ R.currentValue $ R.facts (snd $justError "no token"$ token inf)
     let user = fst $ justError "no token"$ token inf
     decoded <- liftIO $ do
@@ -118,23 +120,25 @@ updateTable inf table reference page maxResults
 
 
 
-listTable inf table offset page maxResults sort ix
+listTable table offset page maxResults sort ix
   | tableName table == "history" = return ([],Nothing , 0)
   | tableName table == "attachments" = return ([],Nothing , 0)
   | not  (null $ _rawScope table ) && not (S.null (rawFKS table) )= do
+      inf <- ask
       liftIO $ print $ (table,_rawScope table,rawFKS table,rawAttrs table)
       let [sref] =  filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope table)) (S.toList $ rawFKS table)
           stable = (\(Path _ (FKJoinTable rel t)) -> t) sref
       let fromtable = (lookSTable inf $ stable)
           rinf = fromMaybe inf $ M.lookup (fst stable) (depschema inf)
           defSort = fmap (,Desc) $  rawPK fromtable
-      (l,i,j) <- (listEd (schemaOps rinf) ) rinf  fromtable offset page maxResults defSort []
+      (l,i,j) <- local (const rinf) $ (listEd (schemaOps rinf) ) fromtable offset page maxResults defSort []
       ix <- mapM (\i -> do
-          (l,i,s) <- joinList inf fromtable sref i table
+          (l,i,s) <- joinList fromtable sref i table
           return l ) l
       return (concat ix ,i ,j)
 
   | otherwise = do
+    inf <- ask
     tok <- liftIO$ R.currentValue $ R.facts (snd $ justError "no token" $ token $  inf)
     let user = fst $ justError "no token" $ token inf
     decoded <- liftIO $ do
@@ -151,8 +155,9 @@ listTable inf table offset page maxResults sort ix
 getKeyAttr (TB1 (m, k)) = (concat (fmap keyattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
 
-insertTable inf pk
+insertTable pk
   | otherwise = do
+    inf <- ask
     let
         attrs :: [(Key, FTB Showable)]
         attrs = filter (any (==FWrite) . keyModifier .fst ) $ getAttr' (TB1 pk)
@@ -168,9 +173,10 @@ insertTable inf pk
     fmap (TableModification Nothing table . patch .unTB1) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table ) .  fmap (\i -> (i :: Value)  ) $  decoded)
 
 
-joinGet inf tablefrom tableref from ref
+joinGet tablefrom tableref from ref
   | S.fromList (fmap _relOrigin (getKeyAttr ref) ) ==  S.fromList (rawPK tableref <> S.toList (rawAttrs tableref ) <> rawDescription tableref) = return Nothing
   | tableName tableref == "attachments" || not ( null $ _rawScope tableref )= do
+    inf <- ask
     tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
     let user = fst $ fromJust $ token inf
     decoded <- liftIO $ do
@@ -183,8 +189,9 @@ joinGet inf tablefrom tableref from ref
     traverse (convertAttrs inf (Just $ (tableref,unTB1 ref)) (_tableMapL inf) tableref ) .  fmap (\i -> (i :: Value)  ) $  decoded
   | otherwise = return Nothing
 
-joinList inf tablefrom (Path _ (FKJoinTable rel stable)) from tableref
+joinList tablefrom (Path _ (FKJoinTable rel stable)) from tableref
   | otherwise = do
+      inf <- ask
       tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
       let user = fst $ fromJust $ token inf
       decoded <- liftIO $ do
@@ -203,17 +210,19 @@ joinList inf tablefrom (Path _ (FKJoinTable rel stable)) from tableref
 
 
 
-getTable inf  tb pk
+getTable tb pk
   | tableName tb == "history" = return  Nothing
   | tableName tb == "attachments" = return  Nothing
   | not $ null $ _rawScope tb = do
+      inf <- ask
       liftIO $ print $ (tb,_rawScope tb)
       let [sref] = filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope tb )) (traceShowId $S.toList $ rawFKS tb )
           (Path spk  (FKJoinTable rel stable)) =  sref
       let fromtable = (lookTable inf $ snd stable)
-      joinGet inf fromtable  tb  ( _fkttable $ unTB $ head $ F.toList $  _kvvalues $ unTB $  tbUn spk pk)  pk
+      joinGet fromtable  tb  ( _fkttable $ unTB $ head $ F.toList $  _kvvalues $ unTB $  tbUn spk pk)  pk
   | S.fromList (fmap _relOrigin (getKeyAttr pk) ) ==  S.fromList (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb) = return Nothing
   | otherwise = do
+    inf <- ask
     tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
     let user = fst $ fromJust $ token inf
     decoded <- liftIO $ do
@@ -224,8 +233,8 @@ getTable inf  tb pk
         return $ decode v
     traverse (convertAttrs inf (Just $ (tb,unTB1 pk)) (_tableMapL inf) tb ) .  fmap (\i -> (i :: Value)  ) $  decoded
 
-getDiffTable inf table  j = fmap (join . fmap (diff j. unTB1) ) $ getTable  inf table $ TB1 j
-joinGetDiffTable inf table  tableref f j = fmap (join . fmap (diff j. unTB1)) $ joinGet  inf table tableref (TB1 f) (TB1 j)
+getDiffTable table  j = fmap (join . fmap (diff j. unTB1) ) $ getTable  table $ TB1 j
+joinGetDiffTable table  tableref f j = fmap (join . fmap (diff j. unTB1)) $ joinGet table tableref (TB1 f) (TB1 j)
 
 
 gmailOps = (SchemaEditor undefined undefined insertTable undefined listTable updateTable getDiffTable mapKeyType)
@@ -264,7 +273,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                         tbs <- liftIO$ runDBM infsch (atTable (tableMeta $ lookTable infsch trefname))
                         reftb <- joinRelT fk (fmap unTB ref) (lookTable infsch trefname) tbs
                         patch <- maybe (return reftb ) (\(tref,getref )-> traverse (\reftb -> do
-                            pti <- joinGetDiffTable infsch  tref (lookTable infsch trefname) getref reftb
+                            pti <- joinGetDiffTable tref (lookTable infsch trefname) getref reftb
                             tell (TableModification Nothing (lookTable infsch trefname) <$> maybeToList pti)
                             return $ maybe (reftb) (unTB1 . apply (TB1 reftb) . PAtom) pti) reftb ) getref
                         return $ FKT ref fk   patch ))

@@ -7,7 +7,6 @@ import Types
 import SchemaQuery
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM
-import Control.Concurrent.STM.TMVar
 import Types.Patch
 import qualified Types.Index as G
 
@@ -20,7 +19,6 @@ import qualified Data.Foldable as F
 import Data.Maybe
 import qualified Data.Binary as B
 import GHC.Stack
-import Data.Monoid
 import Data.Bifunctor(second,first)
 import Utils
 import Control.Exception
@@ -35,7 +33,6 @@ import RuntimeTypes
 import Data.Traversable(sequenceA,traverse)
 import Data.Vector (Vector)
 import qualified Data.Vector as V
-import Network.Google.OAuth2
 
 import Control.Applicative
 import qualified Data.List as L

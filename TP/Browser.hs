@@ -29,7 +29,6 @@ import Utils
 import Schema
 import Types.Patch
 import Data.Char (toLower)
-import Postgresql
 import Data.Maybe
 import Reactive.Threepenny hiding(apply)
 import Data.Traversable (traverse)
@@ -43,13 +42,11 @@ import Data.Monoid hiding (Product(..))
 
 import qualified Data.Foldable as F
 import qualified Data.Text as T
-import Data.Text.Encoding (encodeUtf8)
 import Data.Text (Text)
 import qualified Data.Set as S
 
 import Database.PostgreSQL.Simple
 import qualified Data.Map as M
-import Data.String
 
 import OAuth
 import GHC.Stack
@@ -270,7 +267,7 @@ chooserTable inf kitems cliTid cli = do
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
-  (orddb ,(_,orderMap)) <- liftIO $ transaction (meta inf) $ eventTable  (lookTable (meta inf) "ordering" ) (Just 0) Nothing []      [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+  (orddb ,(_,orderMap)) <- liftIO $ transaction  (meta inf) $ eventTable  (lookTable (meta inf) "ordering" ) (Just 0) Nothing []      [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
   let renderLabel = (\i -> case M.lookup i (pkMap inf) of
                                        Just t -> T.unpack (translatedName t)
                                        Nothing -> show i )
@@ -285,7 +282,7 @@ chooserTable inf kitems cliTid cli = do
                  usage = justError "nopk " $ (lookAttr (lookKey (meta inf) "ordering" "usage" ))  field
   liftIO$ onEventIO ((\i j -> flip incClick i <$> j)<$> facts (collectionTid orddb) <@> rumors bBset)
     (traverse (\p -> do
-      _ <- transaction inf $ (patchEd $ schemaOps (meta inf)) (meta inf) p
+      _ <- transaction (meta inf ) $ (patchEd $ schemaOps (meta inf)) p
       putPatch (patchVar orddb) [p] ))
   tbChooserI <- UI.div # set children [filterInp,getElement bset]  # set UI.style [("height","90vh"),("overflow","auto"),("height","99%")]
   tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [tbChooserI]

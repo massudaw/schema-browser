@@ -106,7 +106,7 @@ poller schm authmap db plugs is_test = do
                           i <-  mapConcurrently (mapM (\inp -> catchPluginException inf a pname (getPKM inp) $ do
                               o  <- fmap (liftTable' inf a) <$>   elemp (Just $ mapKey' keyValue inp)
                               let diff' =   join $ (\i j -> diff (j ) (i)) <$>  o <*> Just inp
-                              v <- maybe (return Nothing )  (\i -> transaction inf $ (editEd $ schemaOps inf) inf (justError "no test" o) inp ) diff'
+                              v <- maybe (return Nothing )  (\i -> transaction inf $ (editEd $ schemaOps inf) (justError "no test" o) inp ) diff'
                               print "patch"
                               (traverse (putPatch (patchVar dbplug). pure) . fmap tableDiff) v
                               return v
