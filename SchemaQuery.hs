@@ -1,6 +1,12 @@
 {-# LANGUAGE OverloadedStrings,TupleSections #-}
 module SchemaQuery
   (eventTable
+  ,selectFrom
+  ,updateFrom
+  ,patchFrom
+  ,insertFrom
+  ,getFrom
+  ,deleteFrom
   ,refTable
   ,loadFKS
   ,fullDiffInsert
@@ -54,6 +60,25 @@ createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (T
 
 -- tableLoader :: InformationSchema -> Table -> TransactionM (Collection Key Showable)
 eventTable = tableLoader
+
+selectFrom t a b c d = do
+  inf <- ask
+  eventTable (lookTable inf t) a b c d
+updateFrom  a  b = do
+  inf <- ask
+  (editEd $ schemaOps inf)  a b
+patchFrom  a   = do
+  inf <- ask
+  (patchEd $ schemaOps inf)  a
+insertFrom  a   = do
+  inf <- ask
+  (insertEd $ schemaOps inf)  a
+getFrom  a   b = do
+  inf <- ask
+  (getEd $ schemaOps inf)  a b
+deleteFrom  a   = do
+  inf <- ask
+  (deleteEd $ schemaOps inf)  a
 
 tableLoader table page size presort fixed   =  do
     inf <- ask
@@ -146,7 +171,7 @@ fullInsert' ((k1,v1) )  = do
       then do
         return ret
       else do
-        i@(Just (TableModification _ _ tb))  <- (insertEd $ schemaOps inf) ret
+        i@(Just (TableModification _ _ tb))  <- insertFrom  ret
         tell (maybeToList i)
         return $ create tb
 
@@ -176,8 +201,8 @@ fullDiffEdit old@((k1,v1) ) (k2,v2) = do
    inf <- ask
    let proj = _kvvalues . unTB
    edn <- (k2,) . Compose . Identity . KV <$>  Tra.sequence (M.intersectionWith (\i j -> Compose <$>  tbDiffEdit (unTB i) (unTB j) ) (proj v1 ) (proj v2))
-   mod <- (editEd $ schemaOps inf)   edn old
-   --tell (maybeToList mod)
+   mod <- updateFrom   edn old
+   tell (maybeToList mod)
    return edn
 
 fullDiffInsert :: TBData Key Showable -> TransactionM  (Maybe (TableModification (TBIdx Key Showable)))
@@ -185,8 +210,8 @@ fullDiffInsert (k2,v2) = do
    inf <- ask
    let proj = _kvvalues . unTB
    edn <- (k2,) . Compose . Identity . KV <$>  Tra.sequence ((\ j -> Compose <$>  tbInsertEdit (unTB j) ) <$>  (proj v2))
-   mod <- (insertEd $ schemaOps inf) edn
-   -- tell (maybeToList mod)
+   mod <- insertFrom  edn
+   tell (maybeToList mod)
    return mod
 
 

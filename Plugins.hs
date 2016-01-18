@@ -277,9 +277,10 @@ siapi3Plugin  = BoundedPlugin2 pname tname  url
     url = proc t -> do
       protocolo <- varTB "protocolo" -< ()
       ano <- varTB "ano" -< ()
-      cpf <- atR "id_owner,id_contact"
+      cpf <- atR "id_project"
+              $ atR "id_owner,id_contact"
                 $ atR "id_owner"
-                    $ atAny "ir_reg" [varTB "cpf_number",varTB "cnpj_number"] -< t
+                  $ atAny "ir_reg" [varTB "cpf_number",varTB "cnpj_number"] -< t
       odxR "taxa_paga" -< ()
       odxR "aproval_date" -< ()
       atR "andamentos" (proc t -> do

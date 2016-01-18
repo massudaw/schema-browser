@@ -534,6 +534,11 @@ data TableK k
            , _rawInvFKS ::  (Set (Path (Set k) (SqlOperationK k)))
            , rawAttrs :: (Set k)
            }
+     | Union
+          { rawSchema :: Text
+          , rawName :: Text
+          , unionList :: [(TableK k)]
+          }
      deriving(Eq,Ord,Show)
 
 rawFKS = _rawFKSL

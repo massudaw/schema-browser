@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,TupleSections,FlexibleInstances, DeriveFunctor  #-}
+{-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveFunctor  #-}
 module Step where
 
 import Types
@@ -38,15 +38,15 @@ liftParserR (P i j) = (P i ((\(Kleisli  l) -> Kleisli $  return  <$> l ) $ j ) )
 
 liftReturn = Kleisli . (return <$> )
 
-instance (Monoid s ,Arrow m)  => Arrow (Parser m s ) where
+instance (Monoid s ,Arrow m)  => Arrow (Parser m s) where
   arr f = (P mempty (arr f ))
   first (P s d )  = P s (first d )
 
-instance (Monoid s,Arrow m) => Category (Parser m s ) where
+instance (Monoid s,Arrow m) => Category (Parser m s) where
    id = P mempty id
    P (i) (j) . P (l ) (m) = P (i <> l) (j . m  )
 
-instance Applicative m => Applicative (Kleisli m a ) where
+instance Applicative m => Applicative (Kleisli m a) where
   pure i = Kleisli (const (pure i ))
   Kleisli f <*> Kleisli j  =  Kleisli  $ (\i -> f i <*> j i )
 
@@ -261,8 +261,6 @@ isNested p i =  False
 
 uNest :: Access Text -> Access Text
 uNest (Nested pn i) = i
-
-
 
 type AccessTag = (Access Text)
 

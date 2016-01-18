@@ -1,6 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE OverloadedStrings ,TupleSections #-}
 
 module TP.Browser where
 
@@ -66,12 +65,12 @@ updateClient metainf inf table tdi clientId now =
 getClient metainf clientId ccli = G.lookup (G.Idex [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))]) ccli :: Maybe (TBData Key Showable)
 
 deleteClient metainf clientId = do
-  (dbmeta ,(_,ccli)) <- transaction metainf $ eventTable (lookTable metainf "clients" ) Nothing Nothing [] []
+  (dbmeta ,(_,ccli)) <- transaction metainf $ selectFrom "clients"  Nothing Nothing [] []
   putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))],[])]
 
 
 editClient metainf inf table tdi clientId now = do
-  (dbmeta ,(_,ccli)) <- transaction metainf $ eventTable (lookTable metainf "clients" ) Nothing Nothing [] []
+  (dbmeta ,(_,ccli)) <- transaction metainf $ selectFrom "clients"  Nothing Nothing [] []
   let cli :: Maybe (TBData Key Showable)
       cli = getClient metainf clientId ccli
       new :: TBData Key Showable
@@ -88,6 +87,7 @@ addClient clientId metainf inf table dbdata =  do
     dbmeta <- editClient metainf inf table tdi clientId now
     return (clientId, getClient metainf clientId <$> collectionTid dbmeta)
 
+idex inf t v = G.Idex $ L.sortBy (comparing fst ) $ first (lookKey inf t  ) <$> v
 
 setup
      ::  MVar (M.Map Text  InformationSchema) ->  [String] -> Window -> UI ()
@@ -109,7 +109,9 @@ setup smvar args w = void $ do
   chooserDiv <- UI.div # set children  ([getElement menu] <> chooserItens <> [getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end"),("height","7vh"),("width","100%")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
   getBody w #+ [element hoverBoard,element container]
-  mapUITEvent body (traverse (\(nav,inf)->
+
+  (authorization,_) <- liftIO$ transaction metainf $ selectFrom "authorization" Nothing Nothing [] []
+  mapUITEvent body (traverse (\(nav,autho,inf)->
       case nav of
         "Poll" -> do
             element body #
@@ -128,22 +130,20 @@ setup smvar args w = void $ do
             dash <- metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ) ]
             element body # set UI.children [dash] # set UI.class_ "row"
         "Browser" -> do
-            let k = M.keys $  M.filter (not. null. rawAuthorization) $   (pkMap inf )
+            let k = M.keys $  M.filter (\t -> isJust $ G.lookup (idex  metainf "authorization"  [("table_schema", TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText $ tableName t),("grantee",TB1 $ SText $ username inf)]) autho) $   (pkMap inf )
             [tbChooser,subnet] <- chooserTable  inf  k cliTid  cli
             element tbChooser # sink0 UI.style (facts $ noneShow <$> triding menu)
             let
                 expand True = "col-xs-10"
                 expand False = "col-xs-12"
             element subnet # sink0 UI.class_ (facts $ expand <$> triding menu)
-            element body # set UI.children [tbChooser,subnet]# set UI.class_ "row" # set UI.style [("display","inline-flex"),("width","100%")] )) $ liftA2 (\i -> fmap (i,)) (triding nav) evDB
+            element body # set UI.children [tbChooser,subnet]# set UI.class_ "row" # set UI.style [("display","inline-flex"),("width","100%")] )) $ liftA3 (\i j -> fmap (i,j,)) (triding nav) (collectionTid authorization) evDB
 
 
 listDBS ::  InformationSchema -> BrowserState -> IO (Tidings (Text,[Text]))
 listDBS metainf dname = do
-  connMeta <- connectPostgreSQL (connRoot dname)
-  dbs :: [Only Text]<- query_  connMeta "SELECT datname FROM pg_database  WHERE datistemplate = false"
   map <- (\db -> do
-        (dbvar ,(_,schemasTB)) <- transaction metainf $  eventTable (lookTable metainf "schema") Nothing Nothing [] []
+        (dbvar ,(_,schemasTB)) <- transaction metainf $  selectFrom "schema" Nothing Nothing [] []
         let schemas schemaTB = fmap ((\(Attr _ (TB1 (SText s)) ) -> s) .unTB . lookAttr' metainf "name") $ F.toList  schemasTB
         return ( (db,).schemas  <$> collectionTid dbvar)) (T.pack $ dbn dname)
   return map
@@ -182,7 +182,7 @@ authMap smvar sargs (user,pass) schemaN =
     where oauth tag = do
               user <- justError "no google user" <$> lookupEnv "GOOGLE_USER"
               metainf <- metaInf smvar
-              (dbmeta ,_) <- transaction metainf $ eventTable (lookTable metainf "google_auth") Nothing Nothing []   [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  $ T.pack user ))]
+              (dbmeta ,_) <- transaction metainf $ selectFrom "google_auth" Nothing Nothing []   [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  $ T.pack user ))]
               let
                   td :: Tidings (OAuth2Tokens)
                   td = (\o -> let
@@ -267,14 +267,17 @@ chooserTable inf kitems cliTid cli = do
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
 
-  (orddb ,(_,orderMap)) <- liftIO $ transaction  (meta inf) $ eventTable  (lookTable (meta inf) "ordering" ) (Just 0) Nothing []      [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+  (translation,_) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] []
+  let selTable = join . fmap (flip M.lookup (pkMap inf) )
+      lookDesc = (\i j -> maybe (T.unpack $ maybe "" rawName j)  ((\(Attr _ v) -> renderShowable v). unTB .  lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,TB1 $ SText $ schemaName inf),("table_name",TB1 $ SText (maybe ""  tableName j))]) i ) <$> collectionTid translation
+  (orddb ,(_,orderMap)) <- liftIO $ transaction  (meta inf) $ selectFrom "ordering"  (Just 0) Nothing []      [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
   let renderLabel = (\i -> case M.lookup i (pkMap inf) of
                                        Just t -> T.unpack (translatedName t)
                                        Nothing -> show i )
       filterLabel = (\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> renderLabel i) ))<$> filterInpBh
       tableUsage orderMap pkset = lookAttr (lookKey (meta inf) "ordering" "usage" ) $ justError ("no value" <> show (pkset,pk,orderMap)) $ G.lookup  (G.Idex ( pk )) orderMap
           where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$> [("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
-  bset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap )) kitems) (tableUsage <$> collectionTid orddb ) initKey  (\k -> UI.button  ) (\k e -> e # set UI.text (renderLabel k) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow . ($k) <$> filterLabel ))
+  bset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap )) kitems) (tableUsage <$> collectionTid orddb ) initKey  (\k -> UI.button  ) (\k e -> e # sink UI.text (facts $ lookDesc  <*> pure (selTable $ Just k)) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow . ($k) <$> filterLabel ))
   let bBset = triding bset
       incClick pkset orderMap =  (fst field , getPKM field ,[patch $ fmap (+ (SNumeric 1)) (unTB usage )]) :: TBIdx Key Showable
           where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$>[("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
@@ -282,13 +285,14 @@ chooserTable inf kitems cliTid cli = do
                  usage = justError "nopk " $ (lookAttr (lookKey (meta inf) "ordering" "usage" ))  field
   liftIO$ onEventIO ((\i j -> flip incClick i <$> j)<$> facts (collectionTid orddb) <@> rumors bBset)
     (traverse (\p -> do
-      _ <- transaction (meta inf ) $ (patchEd $ schemaOps (meta inf)) p
+      _ <- transaction (meta inf ) $ patchFrom  p
       putPatch (patchVar orddb) [p] ))
+
   tbChooserI <- UI.div # set children [filterInp,getElement bset]  # set UI.style [("height","90vh"),("overflow","auto"),("height","99%")]
   tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [tbChooserI]
   nav  <- buttonDivSet ["Viewer","Browser","Exception","Change"] (pure $ Just "Browser")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
-  header <- UI.h1 # sink text (maybe "" (T.unpack . translatedName) . join . fmap (flip M.lookup (pkMap inf)) <$> facts bBset ) # set UI.class_ "col-xs-7"
+  header <- UI.h1 # sink text (facts $ lookDesc <*>(selTable  <$> bBset)) # set UI.class_ "col-xs-7"
   chooserDiv <- UI.div # set children  [header ,getElement nav]  # set UI.style [("display","flex"),("align-items","flex-end")]
   body <- UI.div
 

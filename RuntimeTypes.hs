@@ -186,6 +186,8 @@ lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpac
 
 putPatch m = atomically . writeTQueue m -- . force
 
+data TableOperation  c a
+  = TUnion (c a) (c a)
 
 data Access a
   = IProd Bool [a]

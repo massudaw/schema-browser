@@ -99,6 +99,8 @@ readFModifier "write" = FWrite
 keyTables ,keyTablesInit :: MVar (Map Text InformationSchema )->  Connection -> (Text ,Text) -> (Text -> IO (Auth , SchemaEditor)) -> [Plugins] ->  IO InformationSchema
 keyTables schemaVar conn (schema ,user) authMap pluglist = maybe (keyTablesInit schemaVar conn (schema,user) authMap pluglist ) return  . (M.lookup schema ) =<< readMVar schemaVar
 
+
+
 keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
        (oauth,ops ) <- authMap schema
        uniqueMap <- join $ mapM (\(t,c,op,mod,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr (V.toList $ fmap readFModifier mod) op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,field_modifiers,translation from  metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
@@ -108,7 +110,7 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
           backendkeyMap = M.fromList keyList
           keyMap = fmap (typeTransform ops ) $ M.fromList keyList
           lookupKey3 :: (Functor f) => f (Text,Maybe (Vector Text),Maybe (Vector Text),Bool) -> f (Text,(Vector Key,Vector Key,Bool))
-          lookupKey3 = fmap  (\(t,c,s,b)-> (t,(maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap)) c,maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap)) s,b)) )
+          lookupKey3 = fmap  (\(t,c,s,b)-> (t,(maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci <> " " <> T.unpack t ) $ M.lookup (t,ci) keyMap)) c,maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap)) s,b)) )
           lookupKey2 :: Functor f => f (Text,Text) -> f Key
           lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) keyMap )
           lookupKey ::  (Text,Text) ->  Key
@@ -155,13 +157,19 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
            i3 = addRecInit (M.singleton schema (M.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $ M.fromList i3l
            (i1,pks) = (keyMap, M.fromList $ fmap (\(_,t)-> (S.fromList$ rawPK t ,t)) $ M.toList i3 )
            i2 =  M.filterWithKey (\k _ -> not.S.null $ k )  pks
-       sizeMapt <- M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t  i3 ) <$> query conn tableSizes (Only schema)
+           unionQ = "select schema_name,table_name,inputs from metadata.table_union where schema_name = ?"
+           unionT (s,n,l) = (n ,Union s n ((\t -> justLook t i3 )<$>  F.toList l ))
+       ures <- query conn unionQ (Only schema) :: IO [(Text,Text,Vector Text)]
+       let
+           i3u = foldr (uncurry M.insert) i3 (unionT <$> ures)
+           i2u = foldr (uncurry M.insert) i2 (first (justError "no union table" . fmap (\(i,_,_) ->S.fromList $ F.toList i) . flip M.lookup (M.fromList res)) . unionT <$> ures)
+       sizeMapt <- M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t i3u ) <$> query conn tableSizes (Only schema)
        varmap <- mapM createTableRefs (F.toList i2)
        mvar <- atomically $ newTMVar  (M.fromList varmap)
        metaschema <- if (schema /= "metadata")
           then Just <$> keyTables  schemaVar conn ("metadata",user) authMap pluglist
           else return Nothing
-       let inf = InformationSchema schema user oauth i1 (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  i2  i3 sizeMapt mvar  conn metaschema  rsch ops pluglist
+       let inf = InformationSchema schema user oauth i1 (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  i2u  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist
        var <- modifyMVar_  schemaVar   (return . M.insert schema inf )
        addStats inf
        return inf

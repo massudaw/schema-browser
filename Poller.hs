@@ -38,13 +38,11 @@ import qualified Data.Map as M
 
 plugs schm authmap db plugs = do
   inf <- metaInf schm
-  let conn = rootconn inf
-  (db ,(s,t)) <- transaction inf $ eventTable  (lookTable inf "plugins") Nothing Nothing [] []
-  let els = L.filter (not . (`L.elem` G.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
-  p <-transaction inf $ do
-     elsFKS <- mapM loadFKS  els
-     mapM (\table -> fullDiffInsert    table) elsFKS
-  putPatch (patchVar db) (tableDiff <$> catMaybes p)
+  transaction inf  $ do
+      (db ,(_,t)) <- selectFrom "plugins"  Nothing Nothing [] []
+      let els = L.filter (not . (`L.elem` G.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
+      elsFKS <- mapM loadFKS  els
+      mapM fullDiffInsert  elsFKS
 
 
 
@@ -66,8 +64,8 @@ checkTime polling tb = do
 
 poller schm authmap db plugs is_test = do
   metas <- metaInf schm
-  let conn = rootconn (metas)
-  (dbpol,(_,polling))<- transaction metas $ eventTable (lookTable metas "polling")  Nothing Nothing [] []
+  let conn = rootconn metas
+  (dbpol,(_,polling))<- transaction metas $ selectFrom "polling" Nothing Nothing [] []
   let
     project tb =  (schema,intervalms,p)
       where
@@ -88,28 +86,25 @@ poller schm authmap db plugs is_test = do
                   (start,end,curr,current) <- checkTime polling tb
                   putStrLn $ "LAST RUN " <> show (schema,pname,start,end)
                   let intervalsec = intervalms `div` 10^3
-                  if  True -- is_test || diffUTCTime current start  >  fromIntegral intervalsec
+                  if  is_test || diffUTCTime current start  >  fromIntegral intervalsec
                   then do
                       putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let fetchSize = 1000
-                      (dbplug ,(l,listRes)) <- transaction inf $ eventTable (lookTable inf a) Nothing (Just fetchSize) [][]
+                      (dbplug ,(l,listRes)) <- transaction inf $ selectFrom a  Nothing (Just fetchSize) [][]
                       let sizeL = justLook [] l
                           lengthPage s pageSize  = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
                       i <- concat <$> mapM (\ix -> do
-                          (_,(_,listResAll)) <- transaction inf $ eventTable (lookTable inf a) (Just ix) (Just fetchSize) [][]
+                          (_,(_,listResAll)) <- transaction inf $ selectFrom a  (Just ix) (Just fetchSize) [][]
                           let listRes = L.take fetchSize . G.toList $ listResAll
 
                           let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
                               tdInput i =  isJust  $ checkTable  (fst f) i
                               tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
 
-                          i <-  mapConcurrently (mapM (\inp -> catchPluginException inf a pname (getPKM inp) $ do
-                              o  <- fmap (liftTable' inf a) <$>   elemp (Just $ mapKey' keyValue inp)
+                          i <-  mapConcurrently (mapM (\inp -> catchPluginException inf a pname (getPKM inp) $ transaction inf $ do
+                              o  <- fmap (liftTable' inf a) <$>   liftIO ( elemp (Just $ mapKey' keyValue inp))
                               let diff' =   join $ (\i j -> diff (j ) (i)) <$>  o <*> Just inp
-                              v <- maybe (return Nothing )  (\i -> transaction inf $ (editEd $ schemaOps inf) (justError "no test" o) inp ) diff'
-                              print "patch"
-                              (traverse (putPatch (patchVar dbplug). pure) . fmap tableDiff) v
-                              return v
+                              maybe (return Nothing )  (\i -> updateFrom (justError "no test" o) inp ) diff'
                                 )
                             ) . L.transpose . chuncksOf 20 $ evb
                           return $ concat i
@@ -133,20 +128,17 @@ poller schm authmap db plugs is_test = do
                               , attrT ("end_time",time end)]
 
                       (p2,p) <- transaction metas  $ do
-                          fktable2 <- loadFKS  (liftTable' (meta inf) "polling"  table2)
+                          fktable2 <- loadFKS  (liftTable' metas "polling"  table2)
                           p2 <- fullDiffEdit curr fktable2
-                          fktable <- loadFKS  (liftTable' (meta inf) "polling_log"  table)
+                          fktable <- loadFKS  (liftTable' metas  "polling_log"  table)
                           p <-fullDiffInsert  fktable
                           return (fktable2,p)
-                      atomically $ do
-                        traverse (writeTQueue (patchVar dbplog) .pure ) (fmap tableDiff  p)
-                        traverse (writeTQueue (patchVar dbpol). pure) (maybeToList $ diff curr p2)
                       threadDelay (intervalms*10^3)
                   else do
                       threadDelay (round $ (*10^6) $  diffUTCTime current start )
 
           pid <- forkIO $ (void $ iter polling >> (forever $  do
-              (_,(_,polling))<- transaction metas $ eventTable (lookTable metas "polling")  Nothing Nothing [] []
+              (_,(_,polling))<- transaction metas $ selectFrom "polling"   Nothing Nothing [] []
               iter polling ))
           return ()
   mapM poll  enabled

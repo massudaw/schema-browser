@@ -206,12 +206,14 @@ insertMod j  = do
 deleteMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
 deleteMod j@(meta,_) = do
   inf <- ask
-  liftIO $  do
+  log <- liftIO $  do
     let
       patch =  (tableMeta table, getPKM j,[])
       table = lookTable inf (_kvname (fst  j))
     deletePatch (conn inf)  (firstPatch (recoverFields inf) patch) table
     Just <$> logTableModification inf (TableModification Nothing table  patch)
+  tell  (maybeToList log)
+  return log
 
 updateMod :: TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
 updateMod kv old = do
