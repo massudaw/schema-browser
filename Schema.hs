@@ -125,7 +125,7 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
        transMap <- M.fromList   <$> query conn "SELECT table_name,translation FROM metadata.table_name_translation WHERE schema_name = ? " (Only schema)
        uniqueConstrMap <- M.fromListWith (++) . fmap (fmap pure)   <$> query conn "SELECT table_name,pks FROM metadata.unique_sets WHERE schema_name = ? " (Only schema)
 
-       res <- lookupKey3 <$> query conn "SELECT t.table_name,pks,scopes,is_sum FROM metadata.tables t left join metadata.pks  p on p.schema_name = t.schema_name and p.table_name = t.table_name where t.schema_name = ?" (Only schema)
+       res <- lookupKey3 <$> query conn "SELECT t.table_name,pks,scopes,s.table_name is not null FROM metadata.tables t left join metadata.pks  p on p.schema_name = t.schema_name and p.table_name = t.table_name left join metadata.sum_table s on s.schema_name = t.schema_name and t.table_name = s.table_name where t.schema_name = ?" (Only schema)
        resTT <- fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM metadata.tables where schema_name = ? " (Only schema) :: IO (Map Text TableType)
 
        let
@@ -196,7 +196,7 @@ createTableRefsUnion inf m i  = do
   let
       patchUni = fmap concat $ R.unions $ R.rumors . patchTid .(justError "no table union" . flip M.lookup m) . tableMeta <$>  (rawUnion i)
       patch =  fmap patchunion <$> patchUni
-      patchunion  = liftPatch inf (tableName i ) .firstPatch keyValue
+      patchunion  = {-(\i -> traceShow (create i :: TBData Key Showable) i ) .-} liftPatch inf (tableName i ) .firstPatch keyValue
   R.onEventIO patch (hdiff)
   bh <- R.accumB G.empty (flip (L.foldl' apply) <$> patch )
   let bh2 = (R.tidings bh (L.foldl' apply  <$> bh R.<@> patch ))
@@ -331,7 +331,7 @@ applyAttr' sfkt@(FKT iref rel i) (PFK _ p m b )  =  do
                             let ref =  F.toList $ M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList iref)
                                 edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (  flip apply k  ) v else v
                             tbs <- atTable m
-                            return $ FKT ref rel (maybe (joinRel m rel (fmap unTB ref) ( tbs)) id (fmap create b))
+                            return $ FKT ref rel (maybe (joinRel m rel (fmap unTB ref) ( tbs)) id (Just $ create b))
 applyAttr' (IT k i) (PInline _   p)  = IT k <$> (applyFTBM (fmap pure $ create) applyRecord' i p)
 -- applyAttr' i j = errorWithStackTrace (show ("applyAttr'" :: String,i,j))
 
@@ -358,7 +358,7 @@ createAttr' (PInline k s ) = return $ IT (_tb $ Attr k (TB1 ())) (create s)
 createAttr' (PFK rel k s b ) = do
       let ref = (_tb . create <$> k)
       tbs <- atTable s
-      return $ FKT ref rel (maybe (joinRel s rel (fmap unTB ref) ( tbs)) id (create <$> b))
+      return $ FKT ref rel (maybe (joinRel s rel (fmap unTB ref) ( tbs)) id (Just $ create b))
 -- createAttr' i = errorWithStackTrace (show i)
 
 createTB1'

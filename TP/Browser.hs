@@ -309,12 +309,12 @@ chooserTable inf kitems cliTid cli = do
             element body # set UI.children [dash]
         "Browser" -> do
             let buttonStyle k e = e # sink UI.text (facts $ lookDesc  <*> pure (Just k)) # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShowSpan . ($k) <$> filterLabel)
-
                 tableK = justLook table (pkMap inf)
             prebset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap )) (tableK : (rawUnion tableK ))) (tableUsage <$> collectionTid orddb ) (pure (Just tableK)) (\k -> UI.button  ) buttonStyle
             els <- UI.div
             span <- mapUITEvent body (maybe UI.div  (\t -> viewerKey inf t cli cliTid)) (triding prebset)
             element els # sink UI.children (pure <$> facts span)
+            element prebset  # set UI.style (noneShow . not $ L.null (rawUnion tableK))
             element body # set UI.children [getElement prebset,els]
         "Viewer" -> do
             span <- viewer inf (justLook table (pkMap inf)) Nothing
@@ -351,7 +351,6 @@ viewerKey inf table cli cliTid = mdo
   sortList <- selectUI sortSet ((,True) <$> rawPK table ) UI.div UI.div conv
   element sortList # set UI.style [("overflow-y","scroll"),("height","200px")]
   asc <- checkedWidget (pure True)
-  updateBtn <- UI.button # set text "Update"
   let
      filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  .snd )
      tsort = sorting' . filterOrd <$> triding sortList
@@ -391,7 +390,7 @@ viewerKey inf table cli cliTid = mdo
   insertDivBody <- UI.div # set children [insertDiv,last cru]# set UI.class_ "row"
   itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset ,filterInp ,getElement sortList,getElement asc] ) # set UI.class_ "col-xs-3"
   itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row"
-  UI.div # set children ([updateBtn,itemSelec,insertDivBody ] )
+  UI.div # set children ([itemSelec,insertDivBody ] )
 
 
 
