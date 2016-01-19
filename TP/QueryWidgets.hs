@@ -431,7 +431,7 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
   (evdiff ,hvdiff) <- liftIO $ newEvent
   nav  <- buttonDivSet ["None","Editor"{-,"Exception","Change"-}] (fmap Just open) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-4 pull-right"
-  let table = lookPK inf (S.fromList $ _kvpk  m )
+  let table = lookTable inf ( _kvname  m )
   let fun "Editor" = do
           let
             getItem :: TBData CoreKey Showable -> TransactionM (Maybe (TBIdx CoreKey Showable))

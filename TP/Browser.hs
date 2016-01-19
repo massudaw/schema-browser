@@ -271,13 +271,13 @@ chooserTable inf kitems cliTid cli = do
   let selTable = join . fmap (flip M.lookup (pkMap inf) )
       lookDesc = (\i j -> maybe (T.unpack $ maybe "" rawName j)  ((\(Attr _ v) -> renderShowable v). unTB .  lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,TB1 $ SText $ schemaName inf),("table_name",TB1 $ SText (maybe ""  tableName j))]) i ) <$> collectionTid translation
   (orddb ,(_,orderMap)) <- liftIO $ transaction  (meta inf) $ selectFrom "ordering"  (Just 0) Nothing []      [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
-  let renderLabel = (\i -> case M.lookup i (pkMap inf) of
-                                       Just t -> T.unpack (translatedName t)
-                                       Nothing -> show i )
+  let renderLabel i = T.unpack (translatedName i)
       filterLabel = (\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> renderLabel i) ))<$> filterInpBh
-      tableUsage orderMap pkset = lookAttr (lookKey (meta inf) "ordering" "usage" ) $ justError ("no value" <> show (pkset,pk,orderMap)) $ G.lookup  (G.Idex ( pk )) orderMap
-          where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$> [("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
-  bset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap )) kitems) (tableUsage <$> collectionTid orddb ) initKey  (\k -> UI.button  ) (\k e -> e # sink UI.text (facts $ lookDesc  <*> pure (selTable $ Just k)) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow . ($k) <$> filterLabel ))
+      tableUsage orderMap table = lookAttr (lookKey (meta inf) "ordering" "usage" ) $ justError ("no value" <> show (table,pk,orderMap)) $ G.lookup  (G.Idex ( pk )) orderMap
+          where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$> [("table_name",TB1 . SText . rawName $ table ), ("schema_name",TB1 $ SText (schemaName inf))]
+      buttonStyle k e = e # sink UI.text (facts $ lookDesc  <*> pure (selTable $ Just k)) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow . ($ justLook   k (pkMap inf)) <$> filterLabel )
+
+  bset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap . flip justLook   (pkMap inf))) kitems) ((\i j -> tableUsage i ( justLook   j (pkMap inf) )) <$> collectionTid orddb ) initKey  (\k -> UI.button  ) buttonStyle
   let bBset = triding bset
       incClick pkset orderMap =  (fst field , getPKM field ,[patch $ fmap (+ (SNumeric 1)) (unTB usage )]) :: TBIdx Key Showable
           where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$>[("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
@@ -308,10 +308,16 @@ chooserTable inf kitems cliTid cli = do
             dash <- metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName tableob) ) ]
             element body # set UI.children [dash]
         "Browser" -> do
-            span <- viewerKey inf table cli cliTid
-            element body # set UI.children [span]
+            let buttonStyle k e = e # sink UI.text (facts $ lookDesc  <*> pure (Just k)) # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShowSpan . ($k) <$> filterLabel)
+
+                tableK = justLook table (pkMap inf)
+            prebset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap )) (tableK : (rawUnion tableK ))) (tableUsage <$> collectionTid orddb ) (pure (Just tableK)) (\k -> UI.button  ) buttonStyle
+            els <- UI.div
+            span <- mapUITEvent body (maybe UI.div  (\t -> viewerKey inf t cli cliTid)) (triding prebset)
+            element els # sink UI.children (pure <$> facts span)
+            element body # set UI.children [getElement prebset,els]
         "Viewer" -> do
-            span <- viewer inf (justError "no table with pk" $ M.lookup table (pkMap inf)) Nothing
+            span <- viewer inf (justLook table (pkMap inf)) Nothing
             element body # set UI.children [span]
         "Stats" -> do
             span <- viewer inf (justError "no table with pk" $ M.lookup table (pkMap inf)) Nothing
@@ -322,8 +328,8 @@ chooserTable inf kitems cliTid cli = do
 
 viewerKey
   ::
-      InformationSchema -> S.Set Key -> Integer -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
-viewerKey inf key cli cliTid = mdo
+      InformationSchema -> Table -> Integer -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
+viewerKey inf table cli cliTid = mdo
   iv   <- currentValue (facts cliTid)
   let lookT iv = let  i = join $  unLeftItens . unTB <$> lookAttr (lookKey (meta inf) "clients" "table") iv
                 in fmap (\(Attr _ (TB1 (SText t))) -> t) i
@@ -331,7 +337,6 @@ viewerKey inf key cli cliTid = mdo
                        unKey t = liftA2 (,) (join $ (\(Attr _ (TB1 (SText i)))-> flip (lookKey inf ) i <$> lookT iv ) . unTB <$> lookAttr (lookKey  (meta inf) "key_value" "key") t  )( (\(Attr _ (TB1 (SDynamic i)))-> i) . unTB <$> lookAttr (lookKey (meta inf) "key_value" "val") t )
                 in fmap (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
   let
-      table = justLook  key $ pkMap inf
   reftb@(vpt,vp,_ ,var ) <- refTables inf table
 
   let

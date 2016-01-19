@@ -48,7 +48,7 @@ dropTable r= "DROP TABLE "<> rawFullName r
 
 
 -- createTable :: Table -> Text
-createTable r@(Raw sch _ _ _ _ tbl _ _ _ pk _ fk inv attr) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
+createTable r@(Raw sch _ _ _ _ tbl _ _ _ pk _ fk inv attr _) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
   where
     commands = (renderAttr <$> S.toList attr ) <> [renderPK] <> fmap renderFK (S.toList fk)
     renderAttr k = keyValue k <> " " <> renderTy (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"

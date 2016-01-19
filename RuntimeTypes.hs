@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
+{-# LANGUAGE TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
 module RuntimeTypes where
 
 
@@ -6,6 +6,7 @@ import Control.Concurrent
 
 import Types
 import Data.Unique
+import Data.Maybe
 import Types.Index
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM.TMVar
@@ -15,6 +16,7 @@ import qualified NonEmpty as Non
 import Utils
 import qualified Data.Text as T
 
+import qualified Data.List as L
 import Control.Arrow
 import Data.Text
 import Control.Applicative
@@ -25,9 +27,10 @@ import Database.PostgreSQL.Simple
 import Data.Functor.Identity
 import Data.Map (Map)
 import qualified Data.Map as M
+import qualified Data.Set as S
 import Data.Set (Set)
 import Control.Monad.Reader
-import Data.Foldable
+import qualified Data.Foldable as F
 import Data.Traversable
 import Data.IORef
 import Network.Google.OAuth2
@@ -196,10 +199,74 @@ data Access a
   | Rec Int (Access a)
   | Point Int
   | Many [Access a]
-  deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
+  deriving(Show,Eq,Ord,Functor,F.Foldable,Traversable)
 
 type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) IO)) (Access Text) () (Maybe (TBData  Text Showable))
 type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Access Text) () (Maybe (TBData  Text Showable))
+
+liftTable' :: InformationSchema -> Text -> TBData Text a -> TBData Key a
+liftTable' inf tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapComp (liftField inf tname) <$> (M.mapKeys (lookRel ) i)) v
+            where
+                  lookRel :: Set (Rel Text) -> Set (Rel Key)
+                  lookRel rel = S.map (fmap (\i -> justError "no rel key" $ M.lookup (tname,i) (keyMap inf) <|> M.lookup (reftable,i) (keyMap inf))  ) rel
+                    where reftable = findRefTable inf tname (F.toList rel)
+                  ta = lookTable inf tname
+
+
+liftKeys
+  :: InformationSchema
+     -> Text
+     -> FTB1 Identity Text a
+     -> FTB1 Identity Key a
+liftKeys inf tname = fmap (liftTable' inf tname)
+
+findRefTable inf tname rel2 =  tname2
+
+  where   (FKJoinTable  _ (_,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map (keyValue) i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+          ta = lookTable inf tname
+
+
+
+liftField :: InformationSchema -> Text -> Column Text a -> Column Key a
+liftField inf tname (Attr t v) = Attr (lookKey inf tname t) v
+liftField inf tname (FKT ref  rel2 tb) = FKT (mapComp (liftField inf tname) <$> ref)   ( rel) (liftKeys rinf tname2 tb)
+    where FKJoinTable  rel (schname,tname2)  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+          rinf = fromMaybe inf (M.lookup schname (depschema inf))
+          ta = lookTable inf tname
+liftField inf tname (IT rel tb) = IT (mapComp (liftField inf tname ) rel) (liftKeys inf tname2 tb)
+    where FKInlineTable (_,tname2)  = unRecRel.pathRel  $ justError (show (rel ,rawFKS ta)) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (keyattr rel))  (F.toList$ rawFKS  ta)
+          ta = lookTable inf tname
+
+liftPatch :: a ~ Index a => InformationSchema -> Text -> TBIdx Text a -> TBIdx Key a
+liftPatch inf t (i , k ,p) = (fmap (lookKey inf t ) i,first (lookKey inf t ) <$> k,fmap (liftPatchAttr inf t) p)
+
+
+liftPatchAttr :: a ~ Index a => InformationSchema -> Text -> PathAttr Text a -> Index (Column Key a)
+liftPatchAttr inf t p@(PAttr k v ) =  PAttr (lookKey inf t k)  v
+liftPatchAttr inf tname p@(PInline rel e ) =  PInline ( lookKey inf tname rel) ((liftPatch inf tname2 ) <$>  e)
+    where Just (FKInlineTable (_,tname2)) = fmap (unRecRel.pathRel) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (rel)) )  (F.toList$ rawFKS  ta)
+          ta = lookTable inf tname
+liftPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel (fmap (liftPatchAttr inf tname) pa) (tableMeta $ lookTable rinf tname2) (fmap (liftPatch rinf tname2 ) <$> b)
+    where (FKJoinTable  rel (schname,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+          ta = lookTable inf tname
+          rinf = fromMaybe inf (M.lookup schname (depschema inf))
+
+
+fixPatch :: a ~ Index a => InformationSchema -> Text -> Index (TBData Key a) -> Index (TBData Key a)
+fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
+
+
+fixPatchAttr :: a ~ Index a => InformationSchema -> Text -> Index (Column Key a) -> Index (Column Key a)
+fixPatchAttr inf t p@(PAttr _ _ ) =  p
+fixPatchAttr inf tname p@(PInline rel e ) =  PInline rel (fmap (\(_,o,v)-> (tableMeta $ lookTable inf tname2,o,fmap (fixPatchAttr  inf tname2 )v)) e)
+    where Just (FKInlineTable (_,tname2)) = fmap (unRecRel.pathRel) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (keyValue rel)) )  (F.toList$ rawFKS  ta)
+          ta = lookTable inf tname
+fixPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa) (tableMeta $ lookTable rinf tname2) b
+    where (FKJoinTable  _ (schname,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+          ta = lookTable inf tname
+          rinf = fromMaybe inf (M.lookup schname (depschema inf))
+
+
 
 makeLenses ''InformationSchema
 

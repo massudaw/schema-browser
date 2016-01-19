@@ -515,35 +515,48 @@ data TableType
 
 type Table = TableK Key
 
-mapTableK f (Raw  s tt tr de is rn  un ra rsc rp rd rf inv rat ) = Raw s tt tr (S.map f de) is rn (fmap (S.map f) un) ra (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf )(S.map (mapPath f )  inv) (S.map f rat)
+mapTableK f (Raw  s tt tr de is rn  un ra rsc rp rd rf inv rat u ) = Raw s tt tr (S.map f de) is rn (fmap (S.map f) un) ra (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf )(S.map (mapPath f )  inv) (S.map f rat) (mapTableK f <$> u)
   where mapPath f (Path i j ) = Path (S.map f i) (fmap f j)
 
 data TableK k
-    =  Raw { rawSchema :: Text
+    =  Raw { _rawSchemaL :: Text
            , rawTableType :: TableType
            , rawTranslation :: Maybe Text
            , rawDelayed :: (Set k)
            , rawIsSum :: Bool
-           , rawName :: Text
+           , _rawNameL :: Text
            , uniqueConstraint :: [Set k]
            , rawAuthorization :: [Text]
            , _rawScope :: [k]
-           , rawPK :: [k]
-           , rawDescription :: [k]
+           , _rawPKL :: [k]
+           , _rawDescriptionL :: [k]
            , _rawFKSL ::  (Set (Path (Set k) (SqlOperationK k )))
            , _rawInvFKS ::  (Set (Path (Set k) (SqlOperationK k)))
            , rawAttrs :: (Set k)
+           , rawUnion :: [TableK k ]
            }
      | Union
-          { rawSchema :: Text
-          , rawName :: Text
+          { origin :: TableK k
           , unionList :: [(TableK k)]
           }
      deriving(Eq,Ord,Show)
 
 rawFKS = _rawFKSL
 
+unRecRel (RecJoin _ l) = l
+unRecRel l = l
 
+
+
+
+rawPK  (Union i _ ) = _rawPKL i
+rawPK  i  = _rawPKL i
+rawDescription (Union i _ ) = _rawDescriptionL i
+rawDescription  i  = _rawDescriptionL i
+rawName (Union i _) = _rawNameL i
+rawName i  = _rawNameL i
+rawSchema (Union i _) = _rawSchemaL i
+rawSchema i  = _rawSchemaL i
 
 tableName = rawName
 translatedName tb =  maybe (rawName tb) id (rawTranslation tb )
@@ -828,6 +841,7 @@ traComp f =  fmap Compose. traverse f . getCompose
 concatComp  =  Compose . concat . fmap getCompose
 
 tableMeta :: Ord k => TableK k -> KVMetadata k
+tableMeta (Union s l ) =  tableMeta s
 tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawDescription t) (fmap F.toList $ uniqueConstraint t) [] (F.toList $ rawAttrs t) (F.toList $ rawDelayed t) (paths' <> paths)
   where rec = filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
         same = filter ((tableName t ==). fkTargetTable . pathRel) rec

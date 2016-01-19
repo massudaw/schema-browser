@@ -16,6 +16,7 @@ module SchemaQuery
   )where
 
 import RuntimeTypes
+import Debug.Trace
 import Data.Ord
 import qualified NonEmpty as Non
 import Data.Functor.Identity
@@ -80,7 +81,19 @@ deleteFrom  a   = do
   inf <- ask
   (deleteEd $ schemaOps inf)  a
 
-tableLoader table page size presort fixed   =  do
+
+tableLoader table  page size presort fixed
+  | not $ L.null $ rawUnion table  = do
+    i <- mapM (\t -> tableLoader t page size presort fixed)  (rawUnion table)
+    inf <- ask
+    let mvar = mvarMap inf
+    mmap <- liftIO $ atomically $ readTMVar mvar
+    let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )
+        projunion :: TBData Key Showable -> TBData Key Showable
+        projunion  = liftTable' inf (tableName table ) .mapKey' keyValue
+    let o = foldr (\(j) (m) -> ((j <> m ))) (M.empty,G.empty) (fmap (fmap projunion) . snd <$> i)
+    return $ (dbvar,o)
+  | otherwise  =  do
     inf <- ask
     let base (Path _ (FKJoinTable i j  ) ) = fst j == schemaName inf
         base i = True
@@ -132,7 +145,7 @@ eventTable' table page size presort fixed = do
                 && sq > pagesize * (fromMaybe 0 page + 1) -- Tabela é maior que a página
                 && pagesize * (fromMaybe 0 page +1) > G.size (filterfixed reso)  ) -- O carregado é menor que a página
              then do
-                   liftIO$ putStrLn $ "new page " <> show table
+                   liftIO$ putStrLn $ "new page " <> show (tableName table)
                    let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                    (res,nextToken ,s ) <- (listEd $ schemaOps inf) table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
                    let ini = (M.insert fixidx (estLength page pagesize res s  ,(\v -> M.insert ((fromMaybe 0 page +1 )*pagesize) v  mp) $ justError "no token"    nextToken) fixedmap , createUn (S.fromList $ rawPK table)  (fmap unTB1 res)<> reso )
@@ -141,10 +154,10 @@ eventTable' table page size presort fixed = do
                      putTMVar (idxVar dbvar ) (fst ini)
                    return  ini
              else do
-               liftIO$ putStrLn $ "existing page " <> show table
+               liftIO$ putStrLn $ "existing page " <> show (tableName table)
                return (fixedmap ,reso)
           Nothing -> do
-             liftIO$ putStrLn $ "new map " <> show table
+             liftIO$ putStrLn $ "new map " <> show (tableName table)
              (res,p,s) <- (listEd $ schemaOps inf ) table Nothing Nothing size sortList fixed
              let ini = (M.insert fixidx (estLength page pagesize res s ,maybe M.empty (M.singleton pagesize) p) fixedmap , createUn (S.fromList $ rawPK table)    (fmap (\i -> (unTB1 i)) res) <> reso)
              liftIO $ atomically $ do
