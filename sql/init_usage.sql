@@ -3,7 +3,7 @@
 update 
  pg_attribute set attnotnull = 't'
 from pg_class 
- , metadata.view_pk   where attrelid = oid and attname in (select unnest(pks)) and table_name = pg_class.relname and attnotnull = 'f'
+ , metadata.view_pk   where attrelid = oid and attname in (select unnest(pks)) and table_name = pg_class.relname and attnotnull = 'f';
 
 
 -- UPDATE NOT NULL METADATA VIEW FIELDS
@@ -12,15 +12,15 @@ from pg_class
 update  
  pg_attribute  set attnotnull = 't' 
   from pg_class 
-    where attrelid = oid and array[attname :: text] <@ ARRAY['is_nullable','is_array','is_range','field_modifiers','ordinal_position'] and array[relname ::text] <@ ARRAY['columns','catalog_columns'] and attnotnull = 'f'
+    where attrelid = oid and array[attname :: text] <@ ARRAY['is_nullable','is_array','is_range','field_modifiers','ordinal_position'] and array[relname ::text] <@ ARRAY['columns','catalog_columns'] and attnotnull = 'f';
     
 update  
  pg_attribute  set attnotnull = 't' 
   from pg_class 
-    where attrelid = oid and array[attname :: text] <@ ARRAY['table_type'] and array[relname ::text] <@ ARRAY['tables','catalog_tables'] and attnotnull = 'f'
+    where attrelid = oid and array[attname :: text] <@ ARRAY['table_type'] and array[relname ::text] <@ ARRAY['tables','catalog_tables'] and attnotnull = 'f';
 
 
     update  
  pg_attribute  set attnotnull = 't' 
   from pg_class 
-    where attrelid = oid and array[attname :: text] <@ ARRAY['rel_fks'] and array[relname ::text] <@ ARRAY['fks','catalog_fks'] and attnotnull = 'f'
+    where attrelid = oid and array[attname :: text] <@ ARRAY['rel_fks'] and array[relname ::text] <@ ARRAY['fks','catalog_fks'] and attnotnull = 'f';

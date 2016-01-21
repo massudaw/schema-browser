@@ -359,8 +359,10 @@ viewerKey inf table cli cliTid = mdo
      lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
         where (s,_) = justLook [] fixmap
   inisort <- currentValue (facts tsort)
+  itemListEl <- UI.select # set UI.class_ "col-xs-9" {- # set UI.multiple True  -} #  set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
+  let wheel = negate <$> mousewheel itemListEl
   (offset,res3)<- mdo
-    offset <- offsetField 0 never (lengthPage <$> facts res3)
+    offset <- offsetField 0 wheel  (lengthPage <$> facts res3)
     res3 <- mapT0Event (fmap inisort (fmap G.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap G.toList) $ tidings ( res2) ( rumors vpt) ) )
     return (offset, res3)
   onEvent (rumors $ triding offset) $ (\i ->  liftIO $ do
@@ -370,8 +372,7 @@ viewerKey inf table cli cliTid = mdo
     paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
   page <- currentValue (facts paging)
   res4 <- mapT0Event (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
-  itemList <- listBox (fmap snd res4) (tidings st sel ) (pure id) ( pure attrLine )
-
+  itemList <- listBoxEl itemListEl (fmap snd res4) (tidings st sel ) (pure id) ( pure attrLine )
   let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
   liftIO $ onEventIO (evsel ) (\i -> void . editClient (meta inf) (Just inf) (Just table ) (getPKM <$> i) cli =<< getCurrentTime )
   prop <- stepper cv evsel
@@ -384,7 +385,6 @@ viewerKey inf table cli cliTid = mdo
   st <- stepper cv sel
   res2 <- stepper (vp) (rumors vpt)
   onEvent (pure <$> ediff) (liftIO .  putPatch var )
-  element itemList # set UI.multiple True # set UI.style [("width","70%"),("height","350px")] # set UI.class_ "col-xs-9"
   title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK. TB1 )  <$> facts tds) # set UI.class_ "col-xs-8"
   insertDiv <- UI.div # set children [title,head cru] # set UI.class_ "row"
   insertDivBody <- UI.div # set children [insertDiv,last cru]# set UI.class_ "row"

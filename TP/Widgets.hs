@@ -359,17 +359,25 @@ userSelection = _selectionLB
 multiUserSelection :: MultiListBox a -> Tidings [a]
 multiUserSelection = _selectionMLB
 
-setLookup x s = if S.member x s then Just x else Nothing
+selectItem = mdo
+  pan <- UI.div # sink text (fromMaybe "NO VALUE " <$>  facts (triding v))
+  sel <-  UI.select # set UI.size "3"
+  bh <- stepper False (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange sel ))
+  element sel # sink UI.style (noneShow <$> bh)
+  element pan # sink UI.style (noneShow . not <$> bh)
+  v <- listBoxEl sel (pure ["A","B","C"]) (tidings lb  never) (pure id) (pure(\v -> set UI.text (show v)))
+  lb <- stepper (Just "A") (rumors (triding  v))
+  UI.div # set children [pan,sel]
 
--- | Create a 'ListBox'.
-listBox :: forall a. Ord a
-    => Tidings [a]               -- ^ list of items
+setLookup x s = if S.member x s then Just x else Nothing
+listBoxEl :: forall a. Ord a
+    => Element
+    -> Tidings [a]               -- ^ list of items
     -> Tidings (Maybe a)         -- ^ selected item
     -> Tidings ([a] -> [a])      -- ^ view list to list transform (filter,sort)
     -> Tidings (a -> UI Element -> UI Element) -- ^ display for an item
     -> UI (TrivialWidget (Maybe a))
-listBox bitems bsel bfilter bdisplay = do
-    list <- UI.select # set UI.class_ "selectpicker"
+listBoxEl list bitems bsel bfilter bdisplay = do
     let bindices :: Tidings [a]
         bindices =  bfilter <*> bitems
     -- animate output items
@@ -396,6 +404,18 @@ listBox bitems bsel bfilter bdisplay = do
         _elementLB   = list
 
     return $ TrivialWidget _selectionLB _elementLB
+
+
+-- | Create a 'ListBox'.
+listBox :: forall a. Ord a
+    => Tidings [a]               -- ^ list of items
+    -> Tidings (Maybe a)         -- ^ selected item
+    -> Tidings ([a] -> [a])      -- ^ view list to list transform (filter,sort)
+    -> Tidings (a -> UI Element -> UI Element) -- ^ display for an item
+    -> UI (TrivialWidget (Maybe a))
+listBox bitems bsel bfilter bdisplay = do
+    list <- UI.select
+    listBoxEl  list bitems bsel bfilter bdisplay
 
 at_ :: [a] -> Int -> Either String a
 at_ xs o | o < 0 = Left $ "index must not be negative, index=" ++ show o
@@ -504,6 +524,12 @@ pruneTidings chw tds =   tidings chkBH chkAll
 
 strAttr :: String -> WriteAttr Element String
 strAttr name = mkWriteAttr (set' (attr name))
+
+testWidget e = startGUI (defaultConfig { tpPort = Just 10000 , tpStatic = Just "static", tpCustomHTML = Just "index.html" })  ( \w ->  do
+              els <- e
+              getBody w #+ [els]
+              return ()) (\w -> (return ()))
+
 
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 

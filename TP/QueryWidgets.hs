@@ -250,15 +250,19 @@ labelCase
   -> UI (TrivialWidget (Maybe (Column CoreKey Showable)))
 labelCase inf a old wid = do
     l <- flabel # set text (show $ _relOrigin <$> keyattri a)
-    bh <- stepper False (hoverTip l)
-    tip <- UI.div #
-      set text (show $ fmap showKey  <$> keyattri a) #
-      sink0 UI.style (noneShow <$> bh)
-    patch <- UI.div #
+    tip <- UI.div
+    patch <- UI.div
+    hl <- UI.div # set children [l,tip,patch]
+    el <- UI.div #
+      set children [hl,getElement wid] #
+      set UI.class_ ("col-xs-" <> show (fst $  attrSize a))
+    bh <- stepper False (hoverTip2 l hl)
+    element patch #
       sink text (liftA2 (\bh -> if bh then id else const "") bh (facts $ fmap ( show . join) $ liftA2 diff <$> triding wid <*> old)) #
       sink0 UI.style (noneShow <$> bh)
-    el <- UI.div # set children [l,tip,patch,getElement wid] #
-      set UI.class_ ("col-xs-" <> show (fst $  attrSize (  a)))
+    element tip #
+      set text (show $ fmap showKey  <$> keyattri a) #
+      sink0 UI.style (noneShow <$> bh)
     paintEdit l (facts (triding wid )) (facts old)
     return $ TrivialWidget (triding wid) el
 
@@ -895,34 +899,64 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
           constrT =  Tra.sequenceA $ fmap snd constr
           sortList :: Tidings ([TBData CoreKey Showable] -> [TBData CoreKey Showable])
           sortList =  sorting' <$> pure (fmap ((,True)._relTarget) rel)
-      presort <-mapTEvent return (sortList <*> fmap (G.toList . snd ) vpt)
-      res3 <- mapTEvent return (liftA2 applyConstr presort constrT)
+      presort <-mapTEvent return (fmap  <$> sortList <*> fmap (fmap G.toList ) vpt)
       let
           vv :: Tidings (Maybe [TB Identity CoreKey Showable])
           vv =   liftA2 (liftA2 (<>)) iold2  ftdi2
       cvres <- currentValue (facts vv)
-      filterInp <- UI.input
+      filterInp <- UI.input # set UI.class_ "col-xs-3"
       filterInpBh <- stepper "" (UI.valueChange filterInp)
       iniGist <- currentValue (facts gist)
+      iniVpt <- currentValue (facts vpt)
+
+      itemListEl <- UI.select #  set UI.class_ "col-xs-5" # set UI.size "21" # set UI.style [("position","absolute"),("z-index","999")]
+      let wheel = negate <$> mousewheel itemListEl
       let
+          pageSize = 20
+          lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
+            where (s,_) = justLook [] fixmap
           cv = searchGist relTable m iniGist cvres
           tdi = searchGist relTable m <$> gist <*> vv
       let
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList . snd
+      (offset,res3)<- mdo
+        offset <- offsetField 0 wheel  (lengthPage <$> facts res3)
+
+        res3 <- mapTEvent return (liftA2 (\ (a,i) j -> (a,applyConstr i j) ) presort constrT)
+        -- res3 <- mapT0Event ((fmap G.toList vp)) return ( (\f i -> fmap f i)<$> (filtering $ fmap (fmap G.toList) $ tidings ( res2) ( rumors vpt) ) )
+        return (offset, res3)
+      onEvent (rumors $ triding offset) $ (\i ->  liftIO $ do
+        print ("page",(i `div` 10 )   )
+        transaction inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` 10) Nothing  [] [])
+      let
+        paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
+      page <- currentValue (facts paging)
+      res4 <- mapT0Event (page $ (fmap G.toList iniVpt )) return (paging <*> res3)
+
       itemList <- if isReadOnly tb
         then
            TrivialWidget (Just  <$> tdi ) <$>
               (UI.div #
-                set UI.style [("border","1px solid gray")] #
-                sink items (pure . maybe UI.div showFKE  . fmap _fkttable<$> facts oldItems ))
-        else
-           listBox ((Nothing:) . fmap Just <$>    res3 ) (tidings (fmap Just <$> facts tdi) (fmap Just <$> rumors tdi)) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+                set UI.style [("border","1px solid gray"),("height","20px")] #
+                sink items (pure . maybe UI.div showFKE  . fmap _fkttable<$> facts oldItems ) #  set UI.class_ "col-xs-5" )
+        else do
+          pan <- UI.div #  set UI.class_ "col-xs-5"
+          let sel  = itemListEl
+          bh <- stepper False (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange sel ))
+          element sel # sink UI.style (noneShow <$> bh)
+          element filterInp # sink UI.style (noneShow <$> bh)
+          element pan -- # sink UI.style (noneShow . not <$> bh)
+          -- grid <- UI.div # set children [pan]#  set UI.class_ "col-xs-5"
+          lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) . snd  <$>    res4 ) (tidings (fmap Just <$> facts tdi) (fmap Just <$> rumors tdi)) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+          return (TrivialWidget  (triding lbox) pan )
+
 
       let evsel = (if isReadOnly tb then id else unionWith const (rumors tdi) ) (rumors $ join <$> triding itemList)
       prop <- stepper cv evsel
       let ptds = tidings prop evsel
       tds <- foldr (\i j ->updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap (unTB1. _fkttable).filterJust . rumors . snd <$>  plmods)
+      element itemList #  sink text (maybe "" (\v -> (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec $  TB1 v))<$>  facts (tds )) # set UI.style [("border","1px solid gray"),("height","20px")]
       (celem,ediff,pretdi) <-crudUITable inf (pure "None") reftb staticold (fmap (fmap (fmap (unTB1 . _fkttable))) <$> plmods)  tbdata tds
       (diffUp,fin2) <-  mapEventFin (fmap pure ) $ (\i j -> traverse (runDBM inf .  flip applyRecord' j ) i) <$>  facts pretdi <@> ediff
       let
@@ -930,14 +964,12 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
       st <- stepper cv sel
 
       fin <- onEvent (pure <$> ediff) (liftIO .  putPatch tmvard)
-      element itemList # set UI.class_ "col-xs-5"
-      element filterInp # set UI.class_ "col-xs-3"
       fk <- if isReadOnly tb
           then
             UI.div # set  children [getElement itemList ,head celem]  # set UI.class_ "row"
           else
-            UI.div # set  children [getElement itemList ,filterInp,head celem]  # set UI.class_ "row"
-      subnet <- UI.div # set children [fk,last celem] # set UI.class_ "col-xs-12"
+            UI.div # set  children [getElement itemList , itemListEl , filterInp, head celem]  # set UI.class_ "row"
+      subnet <- UI.div # set children [fk , last celem] # set UI.class_ "col-xs-12"
       when (isReadOnly tb  ) $
                 void $  element subnet # sink0 UI.style (noneShow . isJust <$> facts oldItems )
       addElemFin (getElement subnet) fin
@@ -1016,6 +1048,7 @@ foldMetaHeader' order el rend inf = mapFAttr order (\(Attr k v) -> hideLong (F.t
               else return elemD # set items l
 
 hoverTip elemD= unionWith const (const True <$> UI.hover elemD ) (const False <$> UI.leave elemD)
+hoverTip2 elemIn elemOut = unionWith const (const True <$> UI.hover elemIn ) (const False <$> UI.leave elemOut)
 
 
 metaAllTableIndexV inf metaname env = metaAllTableIndexA inf metaname (fmap (uncurry Attr ) env)
