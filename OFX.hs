@@ -10,12 +10,7 @@ import System.Exit
 import qualified Data.Map as M
 import Control.Applicative
 
-{-
-import Step
-import Control.Monad
-import Control.Arrow
-import RuntimeTypes
--}
+
 import Data.Time
 import Types
 import qualified Data.Text as T

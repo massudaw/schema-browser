@@ -909,7 +909,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
       iniGist <- currentValue (facts gist)
       iniVpt <- currentValue (facts vpt)
 
-      itemListEl <- UI.select #  set UI.class_ "col-xs-5" # set UI.size "21" # set UI.style [("position","absolute"),("z-index","999")]
+      itemListEl <- UI.select #  set UI.class_ "col-xs-5" # set UI.size "21" # set UI.style [("position","absolute"),("z-index","999"),("bottom","0px")]
       let wheel = negate <$> mousewheel itemListEl
       let
           pageSize = 20
@@ -923,7 +923,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
       (offset,res3)<- mdo
         offset <- offsetField 0 wheel  (lengthPage <$> facts res3)
 
-        res3 <- mapTEvent return (liftA2 (\ (a,i) j -> (a,applyConstr i j) ) presort constrT)
+        res3 <- mapTEvent return ((\i -> fmap (filter (filtering i))) <$> filterInpT <*> (liftA2 (\ (a,i) j -> (a,applyConstr i j) ) presort constrT))
         -- res3 <- mapT0Event ((fmap G.toList vp)) return ( (\f i -> fmap f i)<$> (filtering $ fmap (fmap G.toList) $ tidings ( res2) ( rumors vpt) ) )
         return (offset, res3)
       onEvent (rumors $ triding offset) $ (\i ->  liftIO $ do
@@ -945,10 +945,10 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
           let sel  = itemListEl
           bh <- stepper False (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange sel ))
           element sel # sink UI.style (noneShow <$> bh)
-          element filterInp # sink UI.style (noneShow <$> bh)
-          element pan -- # sink UI.style (noneShow . not <$> bh)
-          -- grid <- UI.div # set children [pan]#  set UI.class_ "col-xs-5"
-          lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) . snd  <$>    res4 ) (tidings (fmap Just <$> facts tdi) (fmap Just <$> rumors tdi)) (pure id) ((\i j -> maybe id (\l  ->   (set UI.style (noneShow $ filtering j l  ) ) . i  l ) )<$> showFK <*> filterInpT)
+          -- element filterInp # sink UI.style (noneShow <$> bh)
+
+          onChanges bh (\_ -> if True then runFunction$ ffi "$(%1).focus();alert('focus');" filterInp else return ())
+          lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) . snd  <$>    res4 ) (tidings (fmap Just <$> facts tdi) (fmap Just <$> rumors tdi)) (pure id) ((\i j -> maybe id (\l  ->    i  l ) )<$> showFK <*> filterInpT)
           return (TrivialWidget  (triding lbox) pan )
 
 

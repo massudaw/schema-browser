@@ -456,7 +456,7 @@ instance Ord (FKey a) where
    compare i j = compare (keyFastUnique i) (keyFastUnique j)
 
 instance Show a => Show (FKey a)where
-   show k = (T.unpack $ maybe (keyValue k) id (keyTranslation  k)) <> (show $ hashUnique $ keyFastUnique k)
+   show k = (T.unpack $ maybe (keyValue k) id (keyTranslation  k)) -- <> (show $ hashUnique $ keyFastUnique k)
 
 showKey k  =   maybe (keyValue k)  (\t -> keyValue k <> "-" <> t ) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::" <> T.pack (show (keyType k) <> "::" <> show (keyModifier k) <> "::" <> show (keyPosition k )  )
 
