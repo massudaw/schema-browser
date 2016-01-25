@@ -69,8 +69,7 @@ deleteClient metainf clientId = do
   putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))],[])]
 
 
-editClient metainf inf table tdi clientId now = do
-  (dbmeta ,(_,ccli)) <- transaction metainf $ selectFrom "clients"  Nothing Nothing [] []
+editClient metainf inf dbmeta ccli  table tdi clientId now = do
   let cli :: Maybe (TBData Key Showable)
       cli = getClient metainf clientId ccli
       new :: TBData Key Showable
@@ -78,13 +77,13 @@ editClient metainf inf table tdi clientId now = do
       lrow :: Maybe (Index (TBData Key Showable))
       lrow = maybe (Just $ patch new ) (flip diff new )  cli
   traverse (putPatch (patchVar dbmeta ) . pure ) lrow
-  return dbmeta
 
 addClient clientId metainf inf table dbdata =  do
     now <- getCurrentTime
     let
       tdi = fmap getPKM $ join $ (\inf table -> fmap (tblist' table ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table))  ). F.toList) <$>  inf  <*> table <*> rowpk dbdata
-    dbmeta <- editClient metainf inf table tdi clientId now
+    (dbmeta ,(_,ccli)) <- transaction metainf $ selectFrom "clients"  Nothing Nothing [] []
+    editClient metainf inf dbmeta ccli table tdi clientId now
     return (clientId, getClient metainf clientId <$> collectionTid dbmeta)
 
 idex inf t v = G.Idex $ L.sortBy (comparing fst ) $ first (lookKey inf t  ) <$> v
@@ -377,7 +376,8 @@ viewerKey inf table cli cliTid = mdo
   res4 <- mapT0Event (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
   itemList <- listBoxEl itemListEl (fmap snd res4) (tidings st sel ) (pure id) ( pure attrLine )
   let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
-  liftIO $ onEventIO (evsel ) (\i -> void . editClient (meta inf) (Just inf) (Just table ) (getPKM <$> i) cli =<< getCurrentTime )
+  (dbmeta ,(_,_)) <- liftIO$ transaction (meta inf) $ selectFrom "clients"  Nothing Nothing [] (fmap (liftField (meta inf) "clients") <$> [("=",  uncurry Attr $("schema",LeftTB1 $ Just $TB1 $ SText (schemaName inf) )), ("=",Attr "table" $ LeftTB1 $ Just $ TB1 $ SText (tableName table))])
+  liftIO $ onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) (Just inf) dbmeta  ccli (Just table ) (getPKM <$> i) cli =<< getCurrentTime )
   prop <- stepper cv evsel
   let tds = tidings prop (diffEvent  prop evsel)
 
