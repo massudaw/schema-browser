@@ -87,7 +87,7 @@ oauthpoller = BoundedPlugin2 "Gmail Login" "google_auth" url
           ) -< tokenToOAuth <$> token
        token <- atR "token" ((,,,) <$> odxR "accesstoken" <*> odxR "refreshtoken" <*> odxR "expiresin" <*> odxR "tokentype" ) -< ()
        odxR "refresh" -< ()
-       returnA -< Just . tblist . pure . _tb $ IT (attrT ("token" , LeftTB1 $ Just $ TB1 ())) (LeftTB1 $  oauthToToken <$> Just v )
+       returnA -< Just . tblist . pure . _tb $ IT "token" (LeftTB1 $  oauthToToken <$> Just v )
 
 
 url s u = "https://www.googleapis.com/" <> T.unpack s <> "/v1/users/"<> T.unpack u <> "/"
@@ -286,7 +286,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                             (Left (Just i),_) -> Left (Just i)
                             (Left i ,j ) -> j
               in  join . fmap  patt $   mergeFun
-      | otherwise =  fmap (either ((\v-> IT (_tb $ Types.Attr k (fmap (const ()) v)) v)  <$> ) (Types.Attr k<$>) ) . funO  False (  keyType k)  $ (iv ^? ( key ( keyValue k))  )
+      | otherwise =  fmap (either ((\v-> IT ( k) v)  <$> ) (Types.Attr k<$>) ) . funO  False (  keyType k)  $ (iv ^? ( key ( keyValue k))  )
 
     resultToMaybe (Success i) = Just i
     resultToMaybe (Error i ) = Nothing

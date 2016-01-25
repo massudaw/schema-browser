@@ -326,7 +326,7 @@ accessTB i t = go t
 
 accessAT (Nested (IProd b t) r) at
     = case at of
-        IT k v -> IT (mapComp (firstTB (alterKeyType forceDAttr )) k ) (accessTB r v)
+        IT k v -> IT (alterKeyType forceDAttr  k ) (accessTB r v)
         FKT k rel v -> FKT (mapComp (firstTB (alterKeyType forceDAttr )) <$> k) rel (accessTB r v)
 accessAT i@(IProd b t) at
     = case at of

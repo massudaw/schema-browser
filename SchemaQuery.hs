@@ -154,7 +154,7 @@ eventTable' table page size presort fixed = do
                      putTMVar (idxVar dbvar ) (fst ini)
                    return  ini
              else do
-               liftIO$ putStrLn $ "existing page " <> show (tableName table)
+               -- liftIO$ putStrLn $ "existing page " <> show (tableName table)
                return (fixedmap ,reso)
           Nothing -> do
              liftIO$ putStrLn $ "new map " <> show (tableName table)

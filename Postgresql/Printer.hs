@@ -65,18 +65,18 @@ createTable r@(Raw sch _ _ _ _ tbl _ _ _ pk _ fk inv attr _) = "CREATE TABLE " <
 
 
 
-expandInlineTable ::  Text -> TB3  (Labeled Text) Key  () ->  Text
-expandInlineTable pre tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =
-   let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name)  <> ") as " <> t
+expandInlineTable ::  TB3  (Labeled Text) Key  () ->  Text
+expandInlineTable tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =
+   let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name)  <> ") as it" <> t
        name =  tableAttr tb
-       aliasKeys (Labeled  a (Attr n    _ ))  =  "(" <> pre <> ")." <> keyValue n <> " as " <> a
+       aliasKeys (Labeled  a (Attr n    _ ))  =  "(" <> t <> ")." <> keyValue n <> " as " <> a
    in query
-expandInlineTable pre tb = errorWithStackTrace (show (pre,tb))
+expandInlineTable tb = errorWithStackTrace (show tb)
 
 
-expandInlineArrayTable ::  Text -> TB3  (Labeled Text) Key  () ->  Text
-expandInlineArrayTable pre tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =
-   let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name)  <> ",row_number() over () as arrrow FROM UNNEST(" <> pre  <> ") as ix ) "
+expandInlineArrayTable ::  TB3  (Labeled Text) Key  () ->  Text
+expandInlineArrayTable tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =
+   let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name)  <> ",row_number() over () as arrrow FROM UNNEST(" <> t <> ") as ix ) it" <> t
        name =  tableAttr tb
        aliasKeys (Labeled  a (Attr n    _ ))  =  "(ix)." <> keyValue n <> " as " <> a
    in query
@@ -87,6 +87,7 @@ expandBaseTable tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =
        name =  tableAttr tb
        aliasTable = kvMetaFullName meta <> " as " <> t
        aliasKeys (Labeled  a (Attr n    _ ))  =  t <> "." <> keyValue n <> " as " <> a
+       aliasKeys i = ""
    in query
 
 
@@ -167,7 +168,7 @@ expandInlineRecursive tbase =
          nonrecM =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id  )) . getCompose <$> m
             where m =  _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
                   tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec  $ _kvrecrels m)) <$> t
-         tRec =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose $ l
+         tRec =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) $ Labeled (label $ getCompose $ snd $head $ F.toList v) (Attr l (TB1 ()))
          tRecf  =  label $ getCompose $ inlineEl
          IT l v =  labelValue $ getCompose $ head $ concat $ F.toList $  labelValue $ getCompose $  snd $  joinNonRef' $  unTB1 tnfil
          tpk =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> m
@@ -280,19 +281,18 @@ expandJoin left env (Unlabeled  (IT i (LeftTB1 (Just tb) )))
     = expandJoin True env $ Unlabeled (IT i tb)
 expandJoin left env (Labeled l (IT i (LeftTB1 (Just tb) )))
     = expandJoin True env $ Labeled l (IT i tb)
-expandJoin left env (Labeled l (IT i (ArrayTB1 (tb :| _ ) )))
+expandJoin left env (Labeled l (IT _ (ArrayTB1 (tb :| _ ) )))
     = do
     tjoin <- expandQuery left tb
-    return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> (explodeRow tb {-<> (if allAttr tb then  " :: " <> tableType tb else "")-} ) <> "  order by arrrow ) as " <> l <> " FROM " <> expandInlineArrayTable tname tb <> label tas <> tjoin <> " )  as " <>  label tas <> " ON true"
+    return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> (explodeRow tb {-<> (if allAttr tb then  " :: " <> tableType tb else "")-} ) <> "  order by arrrow ) as " <> l <> " FROM " <> expandInlineArrayTable tb <> tjoin <> " )  as " <>  label tas <> " ON true"
         where
           tas = getTas tb
           getTas (DelayedTB1 (Just tb))  = getTas tb
           getTas (TB1  (_,Compose tas)) = tas
-          tname = label $ getCompose i
           jt = if left then " LEFT" else ""
-expandJoin left env (Unlabeled (IT i tb)) =  do
+expandJoin left env (Unlabeled (IT _ tb)) =  do
      tjoin <- expandQuery left tb
-     return $ " JOIN LATERAL "<> expandInlineTable (label $ getCompose i) tb  <> " ON true "   <>  tjoin
+     return $ " JOIN LATERAL "<> expandInlineTable  tb  <> " ON true "   <>  tjoin
 expandJoin left env (Labeled _ (IT i tb )) = return ""
      -- expandQuery left tb
      -- tjoin <- expandQuery left tb

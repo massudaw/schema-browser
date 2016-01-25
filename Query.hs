@@ -165,7 +165,7 @@ diffUpdateAttr  kv kold@(t,_ )  =  fmap ((t,) . _tb . KV ) .  allMaybesMap  $ li
 
 attrValueName :: (Ord a,Ord k, Show k ,Show a) => TB Identity (FKey k) a -> Text
 attrValueName (Attr i _ )= keyValue i
-attrValueName (IT i  _) = overComp attrValueName i
+attrValueName (IT i  _) = keyValue i
 attrValueName i = errorWithStackTrace $ " no attr value instance " <> show i
 
 
@@ -192,6 +192,12 @@ allKVRec'  t@(m, e)=  concat $ fmap snd $ L.sortBy (comparing (\i -> maximum $ (
 
 tableToKV r =   do
    ((rawPK r)) <> (rawDescription r)  <>(S.toList (rawAttrs r))
+
+prelabelTable :: Text -> Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (Labeled Text Table,TB3Data (Labeled Text)  Key  () )
+prelabelTable pre i = do
+   name <- Tra.traverse (\k-> (S.singleton (Inline k),) <$> kname (Labeled pre i)  k ) (tableToKV i)
+   return (Labeled pre i, (tableMeta i,) $ Compose $ Labeled pre $ KV $ M.fromList $ fmap Compose <$> name)
+
 
 labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (Labeled Text Table,TB3Data (Labeled Text)  Key  () )
 labelTable i = do
@@ -299,17 +305,19 @@ recursePath
           (Compose (Labeled Text) (TB (Labeled Text)) Key ())
 recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKInlineTable (s,t) ) )
     | isArrayRel ifk  {-&& not (isArrayRel e )-}=   do
+          let
+              ref = (\i -> justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) $ head (S.toList ifk )
           tas <- tname nextT
           let knas = dumbKey (rawName nextT)
           kas <- kname tas  knas
           let
-          (_,ksn) <-  labelTable  nextT
+          (_,ksn) <-  prelabelTable  (label ref) nextT
           tb <- fun ksn
-          let
-              ref = (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) $ head (S.toList ifk )
-          return $  Compose $ Labeled (label $ kas) $ IT ref   (mapOpt $ mapArray $ TB1 tb )
+          return $  Compose $ Labeled ("it" <> (label $ kas ) ) $ IT (head (S.toList ifk))   (mapOpt $ mapArray $ TB1 tb )
     | otherwise = do
-          (_,ksn) <-  labelTable nextT
+          let
+            ref = (\i -> justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) $ head (S.toList ifk )
+          (_,ksn) <-  prelabelTable  (label ref) nextT
           tb <-fun ksn
           lab <- if isTableRec' tb
             then do
@@ -318,9 +326,7 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKInlineTable (s,t) )
               kas <- kname tas  knas
               return $ Labeled (label kas)
             else return  Unlabeled
-          let
-            ref = (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) $ head (S.toList ifk )
-          return $ ( Compose $ lab $ IT  ref  (mapOpt $ TB1 tb)   )
+          return $ ( Compose $ lab $ IT  (head (S.toList ifk)) (mapOpt $ TB1 tb)   )
     where
         nextLeft =  isLeft || isLeftRel ifk
         mapArray i =  if isArrayRel ifk then ArrayTB1 $ pure i else i
@@ -484,8 +490,8 @@ alterKeyType f  = Le.over keyTypes f
 unTlabel' ((m,kv) )  = (m,) $ overLabel (\(KV kv) -> KV $ fmap (Compose . Identity .unlabel.getCompose ) $   kv) kv
 unTlabel  = fmap unTlabel'
 
-unlabel (Labeled l (IT tn t) ) = (IT (relabel tn) (unTlabel t ))
-unlabel (Unlabeled (IT tn t) ) = (IT (relabel tn) (unTlabel t ))
+unlabel (Labeled l (IT tn t) ) = (IT tn (unTlabel t ))
+unlabel (Unlabeled (IT tn t) ) = (IT tn (unTlabel t ))
 unlabel (Labeled l (FKT i fkrel t) ) = (FKT (fmap relabel i) fkrel (unTlabel  t ))
 unlabel (Unlabeled (FKT i fkrel t) ) = (FKT (fmap relabel i) fkrel (unTlabel t))
 unlabel (Labeled l (Attr k i )) = Attr k i
@@ -514,7 +520,7 @@ instance P.Poset (FKey (KType Text))where
 
 relabeling :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB f k a -> TB p k a
 relabeling p l (Attr k i ) = (Attr k i)
-relabeling p l (IT i tb ) = IT ((Compose.  l . relabeling p l . p . getCompose ) i) (relabelT p l tb)
+relabeling p l (IT i tb ) = IT i (relabelT p l tb)
 
 relabelT :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB3 f k a -> TB3 p k a
 relabelT p l =  fmap (relabelT' p l)

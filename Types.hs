@@ -301,7 +301,7 @@ data TB f k a
     ,_tbattr :: ! (FTB a)
     }
   | IT -- Inline Table
-    { _ittableName :: ! (Compose f (TB f ) k ())
+    { _ittableName :: ! k
     , _fkttable ::  ! (FTB1 f  k a)
     }
   | FKT -- Foreign Table
@@ -367,7 +367,7 @@ secondKV  f (KV m ) = KV . fmap (second f ) $ m
 
 firstTB :: (Ord k, Functor f) => (c -> k) -> TB f c a -> TB f k a
 firstTB f (Attr k i) = Attr (f k) i
-firstTB f (IT k i) = IT (mapComp (firstTB f) k) (fmap (mapKey' f) i)
+firstTB f (IT k i) = IT (f k) (fmap (mapKey' f) i)
 firstTB f (FKT k  m  i) = FKT  (fmap (mapComp (firstTB f) ) k)  (fmap f  <$> m) (fmap (mapKey' f) i)
 
 data FTB a
@@ -680,7 +680,7 @@ keyattr = keyattri . head . F.toList . getCompose
 keyattri :: Foldable f => TB f  k  a -> [Rel k]
 keyattri (Attr i  _ ) = [Inline i]
 keyattri (FKT i  rel _ ) = rel
-keyattri (IT i  _ ) =  keyattr i
+keyattri (IT i  _ ) =  [Inline i]
 
 -- tableAttr :: (Traversable f ,Ord k) => TB3 f k () -> [Compose f (TB f) k ()]
 -- tableAttr (ArrayTB1 i) = tableAttr <$> i
@@ -694,8 +694,8 @@ nonRef i@(Compose (Labeled _ (Attr _ _ ))) =[i]
 nonRef i@(Compose (Unlabeled  (Attr _ _ ))) =[i]
 nonRef (Compose (Unlabeled  ((FKT i  _ _ )))) = concat (nonRef <$> i)
 nonRef (Compose (Labeled _ ((FKT i  _ _ )))) = concat (nonRef <$> i)
-nonRef (Compose (Unlabeled (IT j k ))) = nonRef j
-nonRef (Compose (Labeled _ (IT j k ))) = nonRef j
+nonRef j@(Compose (Unlabeled (IT k v ))) = [Compose (Labeled (label $ getCompose $ snd $ head $ F.toList v) (Attr k (TB1 ()))) ]
+nonRef j@(Compose (Labeled _ (IT k v ))) = [Compose (Labeled (label $ getCompose $ snd $ head $ F.toList v) (Attr k (TB1 ()))) ]
 
 -- nonRef i = errorWithStackTrace (show i)
 
@@ -970,7 +970,7 @@ unLeftItens = unLeftTB
     unLeftTB (Attr k v)
       = Attr (unKOptional k) <$> unSOptional v
     unLeftTB (IT na (LeftTB1 l))
-      = IT (mapComp (firstTB unKOptional) na) <$>  l
+      = IT (unKOptional na) <$>  l
     unLeftTB i@(IT na (TB1 (_,l)))
       = Just i
     unLeftTB (FKT ifk rel  (LeftTB1 tb))

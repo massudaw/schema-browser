@@ -307,18 +307,18 @@ applyAttr (IT k i) (PInline _   p)  = IT k (applyTB1 i p)
 
 diffAttr :: PatchConstr k a  => TB Identity k a -> TB Identity k a -> Maybe (PathAttr k  (Index a))
 diffAttr (Attr k i) (Attr l m ) = fmap (PAttr k) (diffShowable i m)
-diffAttr (IT k i) (IT _ l) = fmap (PInline (_relOrigin $ head $ keyattr k ) ) (diffTB1 i l)
+diffAttr (IT k i) (IT _ l) = fmap (PInline k  ) (diffTB1 i l)
 diffAttr (FKT  k _ i) (FKT m rel b) = (\l m -> if L.null l then Nothing else Just ( PFK rel l m  (patch b))) (catMaybes $ zipWith (\i j -> diffAttr (unTB i) (unTB j)) k m  ) kvempty
 
 patchAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a)
 patchAttr a@(Attr k v) = PAttr k  (patchFTB patch v)
-patchAttr a@(IT k v) = PInline (_relOrigin $ head $ (keyattr k)) (patchFTB patchTB1 v)
+patchAttr a@(IT k v) = PInline k (patchFTB patchTB1 v)
 patchAttr a@(FKT k rel v) = PFK rel (patchAttr . unTB <$> k) kvempty (patch v)
 
 -- createAttr (PatchSet l) = concat $ fmap createAttr l
 createAttr :: PatchConstr k a  => PathAttr k (Index a) -> TB Identity k a
 createAttr (PAttr  k s  ) = Attr k  (createShowable s)
-createAttr (PInline k s ) = IT (_tb $ Attr k (TB1 ())) (createFTB createTB1 s)
+createAttr (PInline k s ) = IT k (createFTB createTB1 s)
 createAttr (PFK rel k s b ) = FKT (_tb . createAttr <$> k) rel  (createFTB  createTB1   b)
 
 

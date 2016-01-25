@@ -98,7 +98,7 @@ siapi2Hack = BoundedPlugin2  pname tname url
           svt bv = catMaybes $ fmap attrT . (\i -> traverse (\k -> fmap snd $ L.find (L.isInfixOf k. fst ) map) (swap i)) <$>  value_mapping
             where map = fmap (LeftTB1 . Just . TB1 . SText . T.pack ) <$> bv
           iat bv = _tb  (IT
-                            (attrT ("andamentos",TB1 ()))
+                            "andamentos"
                             (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $  fmap convertAndamento bv))
       returnA -< join  (  ao    <$> join (fmap (uncurry (liftA2 (,))) b))
 
@@ -123,7 +123,7 @@ siapi2Plugin = BoundedPlugin2  pname tname url
           convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))])
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
-                            (attrT ("andamentos",TB1 ()))
+                            "andamentos"
                             (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $  reverse $  fmap convertAndamento bv))
       returnA -< join  (  ao  .  tailEmpty . concat <$> join (fmap snd b))
     tailEmpty [] = []
@@ -250,8 +250,10 @@ analiseProjeto = BoundedPlugin2 pname tname url
       odxR "ano" -< ()
       returnA -< Nothing
 
+
 doubleP s = (\(TB1 (SDouble ar)) -> ar) <$> idxK s
 intP s = (\(TB1 (SNumeric ar)) -> ar) <$> idxK s
+doubleA s =  (\(ArrayTB1 i) -> fmap (\(TB1 (SDouble v)) -> v)  i) <$> idxK s
 
 areaDesign = PurePlugin pname tname  url
 
@@ -263,10 +265,10 @@ areaDesign = PurePlugin pname tname  url
     url = proc t -> do
       odxR "densidade"  -< ()
       (ar,a) <-  (,) <$> doubleP "area_operacao" <*> doubleP "altura_armazenamento"  -< ()
-      poly <- atR "classe" ((\(ArrayTB1 i) -> (\x -> sum $ zipWith (\j i -> realToFrac (unTB1 i) * x^j ) [0..] (F.toList i))) <$> idxK "curva") -< ()
+      poly <- atR "classe" ((\i -> (\x -> sum $ zipWith (\j i -> i * x^j ) [0..] (F.toList i))) <$> doubleA "curva") -< ()
       let
           af = (nbrFig3 a/100) * solve ar poly
-      returnA -< Just $ tblist [_tb $ Attr "densidade" (LeftTB1 $ Just $ (TB1 . SDouble) $ traceShowId af)] -- [ Rel "densidade" "<@" "densidade"] (LeftTB1 $ Nothing)]
+      returnA -< Just $ tblist [_tb $ Attr "densidade" (LeftTB1 $ Just $ (TB1 . SDouble) $ traceShowId af)]
 
 
 
@@ -317,15 +319,12 @@ siapi3Plugin  = BoundedPlugin2 pname tname  url
       let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ fmap attrT  $ ([("andamento_date",TB1 .STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
           convertAndamento i = error $ "convertAndamento2015 :  " <> show i
       let ao  (bv,taxa) =  Just $ tblist  ( [attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
-          iat bv = Compose . Identity $ (IT (attrT ("andamentos",TB1 ()))
+          iat bv = Compose . Identity $ (IT "andamentos"
                          (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv))
       returnA -< join (ao <$> b)
 
 bool = TB1 . SBoolean
 num = TB1 . SNumeric
-
-
-
 
 
 
@@ -373,7 +372,7 @@ instance ToJSON Timeline where
           tti  = formatTime defaultTimeLocale "%Y/%m/%d %H:%M:%S"
 -}
 
-itR i f = atR i (IT (attrT (fromString i,TB1 ())) <$> f)
+itR i f = atR i (IT (fromString i)<$> f)
 
 pagamentoArr
   :: (KeyString a1,
@@ -460,7 +459,7 @@ encodeMessage = PurePlugin "Encode Email" tname url
                 where
                       tb n  =  TB1 . tblist . pure . _tb . Attr n $ (LeftTB1 $  v)
                       deltb n  =  TB1 . tblist . pure . _tb . Attr n $ (LeftTB1 $ Just $ DelayedTB1 $    v)
-                      tbmix l = TB1 . tblist . pure . _tb . IT (attrT  ("mixed",TB1 ()) ) . LeftTB1 $ ArrayTB1 . Non.fromList <$>  (ifNull l )
+                      tbmix l = TB1 . tblist . pure . _tb . IT "mixed" . LeftTB1 $ ArrayTB1 . Non.fromList <$>  (ifNull l )
           returnA -<  (maybe Nothing (flip mimeTable part )  $ (\(i,j) -> fmap (,j) i) enc)
     mixed =  nameO 1 (proc t ->  do
                 liftA3 (,,)
@@ -473,7 +472,7 @@ encodeMessage = PurePlugin "Encode Email" tname url
     url = proc t -> do
           res <- atR "payload" messages -< ()
           atR "message_viewer" mixed -< ()
-          returnA -< tblist . pure . _tb . IT (attrT  ("message_viewer",TB1 ()) ) <$>  res
+          returnA -< tblist . pure . _tb . IT "message_viewer"  <$>  res
 
     ifNull i = if L.null i then  Nothing else Just i
     decoder (SText i) =  (Just . SBinary) . B64Url.decodeLenient . BS.pack . T.unpack $ i

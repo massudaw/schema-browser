@@ -57,7 +57,7 @@ updateClient metainf inf table tdi clientId now =
               , Attr "creation_time" (TB1 (STimestamp (utcToLocalTime utc now)))
               , Attr "schema" (LeftTB1 $ TB1 . SText .  schemaName <$> inf )
               , Attr "table" (LeftTB1 $ TB1 . SText .  tableName <$>table)
-              , IT (_tb (Attr "data_index"  (TB1 ()))) (LeftTB1 $ ArrayTB1 . Non.fromList .   fmap (\(i,j) -> TB1 $ tblist $ fmap _tb [Attr "key" (TB1 . SText  $ keyValue i) ,Attr "val" (TB1 . SDynamic $  j) ]) <$>tdi )
+              , IT "data_index"   (LeftTB1 $ ArrayTB1 . Non.fromList .   fmap (\(i,j) -> TB1 $ tblist $ fmap _tb [Attr "key" (TB1 . SText  $ keyValue i) ,Attr "val" (TB1 . SDynamic $  j) ]) <$>tdi )
               ]
       lrow = liftTable' metainf "clients" row
     in lrow

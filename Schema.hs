@@ -354,7 +354,7 @@ applyTB1' = applyFTBM (fmap pure $ create) applyRecord'
 
 createAttr' :: (Patch a,Ord a ,Show a ,G.Predicates (G.TBIndex Key a)) => PathAttr Key (Index a) -> DBM Key a (Column Key a)
 createAttr' (PAttr  k s  ) = return $ Attr k  (create s)
-createAttr' (PInline k s ) = return $ IT (_tb $ Attr k (TB1 ())) (create s)
+createAttr' (PInline k s ) = return $ IT k (create s)
 createAttr' (PFK rel k s b ) = do
       let ref = (_tb . create <$> k)
       tbs <- atTable s

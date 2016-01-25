@@ -115,7 +115,7 @@ genAttr inf k =
         AtomicPrim l -> Attr k (TB1 ())
         RecordPrim (l,t) ->
           let table =  lookTable inf  t
-          in IT (_tb (Attr k (TB1 ()))) $ TB1 $  unTlabel' $ tableView (tableMap inf) table
+          in IT k $ TB1 $  unTlabel' $ tableView (tableMap inf) table
 
 pluginUI :: InformationSchema
     -> Tidings (Maybe (TBData CoreKey Showable) )
@@ -855,7 +855,7 @@ tbrefM j = [_tb  j ]
 
 isReadOnly (FKT ifk rel _ ) = L.null ifk || all (not . any ((/= FRead)). keyModifier . _relOrigin) rel
 isReadOnly (Attr k _ ) =  (not . any ((/= FRead)). keyModifier ) k
-isReadOnly (IT k _ ) =   (isReadOnly $ unTB k)
+isReadOnly (IT k _ ) =   (not . any ((/= FRead)). keyModifier ) k
 
 
 
@@ -938,7 +938,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
            TrivialWidget (Just  <$> tdi ) <$>
               (UI.div #
                 set UI.style [("border","1px solid gray"),("height","20px")] #
-                sink items (pure . maybe UI.div showFKE  . fmap _fkttable<$> facts oldItems ) #  set UI.class_ "col-xs-5" )
+                sink items (pure . maybe UI.div showFKE . fmap _fkttable<$> facts oldItems ) #  set UI.class_ "col-xs-5" )
         else do
           pan <- UI.div #  set UI.class_ "col-xs-5"
           let sel  = itemListEl
@@ -1038,7 +1038,7 @@ foldMetaHeader' order el rend inf = mapFAttr order (\(Attr k v) -> hideLong (F.t
           mapFAttr order f (a,kv) = fmap snd. L.sortBy (comparing ((flip L.elemIndex order).  fst) ). concat $ (  fmap (match.unTB ) .  F.toList .  _kvvalues)  $ unTB kv
             where match i@(Attr k v) = [(k,f i)]
                   match i@(FKT l rel t) = ((\k -> (_relOrigin $ head $ keyattr k ,). f . unTB  $ k)<$> l )
-                  match i@(IT l t) = [(_relOrigin $ head $ keyattr l,hideLong ( concat $ F.toList $ fmap (foldMetaHeader  UI.div rend inf) t))]
+                  match i@(IT l t) = [( l,hideLong ( concat $ F.toList $ fmap (foldMetaHeader  UI.div rend inf) t))]
           hideLong l = do
             elemD <- el
             if length l > 1
@@ -1141,14 +1141,14 @@ exceptionAllTableIndex e@(inf,table,index) =   metaAllTableIndexA inf "plugin_ex
   where
         envA = [Attr "schema_name" (TB1 $ SText (schemaName inf))
               , Attr "table_name" (TB1 $ SText (tableName table))
-              , IT (_tb $ Attr "data_index2" (TB1 () ) ) (ArrayTB1 $  fmap ((\(i,j) -> TB1 $tblist $ fmap _tb [Attr "key" (TB1 $ SText i) ,Attr "val" (TB1 (SDynamic j))]). first keyValue)index) ]
+              , IT ( "data_index2" ) (ArrayTB1 $  fmap ((\(i,j) -> TB1 $tblist $ fmap _tb [Attr "key" (TB1 $ SText i) ,Attr "val" (TB1 (SDynamic j))]). first keyValue)index) ]
 
 
 dashBoardAllTableIndex e@(inf,table,index) =   metaAllTableIndexA inf "modification_table" envA
   where
         envA = [Attr "schema_name" (TB1 $ SText (schemaName inf))
               , Attr "table_name" (TB1 $ SText (tableName table))
-              , IT (_tb $ Attr "data_index2" (TB1 () ) ) (ArrayTB1 $  fmap ((\(i,j) -> TB1 $tblist $ fmap _tb [Attr "key" (TB1 $ SText i) ,Attr "val" (TB1 (SDynamic j))]). first keyValue)index) ]
+              , IT "data_index2" (ArrayTB1 $  fmap ((\(i,j) -> TB1 $tblist $ fmap _tb [Attr "key" (TB1 $ SText i) ,Attr "val" (TB1 (SDynamic j))]). first keyValue)index) ]
 
 
 filterRec' envK = filterTB1' (not . (`S.isSubsetOf`  (S.fromList envK )) . S.fromList . fmap _relOrigin.  keyattr )

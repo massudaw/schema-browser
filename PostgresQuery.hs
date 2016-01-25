@@ -167,9 +167,9 @@ justLabel t k =  justError ("cant find label"  <> show k <> " - " <> show t).get
 
 getLabels t k =  M.lookup  k (mapLabels label' t)
     where label' (Labeled l (Attr k _)) =  (k,l )
-          label' (Labeled l (IT k tb )) = (lattr k, l <> " :: " <> tableType tb)
+          label' (Labeled l (IT k tb )) = (k, l <> " :: " <> tableType tb)
           label' (Unlabeled (Attr k _)) = (k,keyValue k)
-          label' (Unlabeled (IT k _)) = (lattr k,keyValue $ lattr k )
+          label' (Unlabeled (IT k v)) = (k, label $ getCompose $ snd (head (F.toList v))  )
           lattr =_tbattrkey . labelValue .getCompose
 
 
