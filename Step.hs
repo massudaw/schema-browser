@@ -203,11 +203,10 @@ checkField' n@(Nested ix@(IProd b l) nt ) t
 checkField'  p@(IProd b l) i
   = case i  of
       Attr k v -> maybe (failure [p]) (pure) $ fmap (Attr k ) . (\i -> if b then  unRSOptional' i else Just i ) $ v
+      FKT a c d -> (\i -> FKT i c d) <$> (traverse (traComp (checkField' p) )  a )
       i -> errorWithStackTrace ( show (b,l,i))
-
-
-
 checkField' i j = errorWithStackTrace (show (i,j))
+
 
 checkFTB l (ArrayTB1 i )
   | otherwise =   ArrayTB1 <$> traverse (checkFTB  l) i
@@ -221,7 +220,7 @@ checkFTB  (Many [m@(Rec _ _ )]) t = checkFTB  m t
 checkFTB f (TB1 k) = TB1 <$> checkTable' f k
 
 checkTable' :: Access Text -> TBData Key Showable -> Errors [Access Text] (TBData Key Showable)
-checkTable'  (ISum []) v
+checkTable' (ISum []) v
   = failure [ISum []]
 checkTable'  f@(ISum ls) (m,v)
   = fmap (tblist . pure . _tb) $ maybe (failure [f]) id  $ listToMaybe . catMaybes $  fmap (\(Many [l]) ->  fmap (checkField' l) . join . fmap ( traFAttr  unRSOptional') $ indexField l $ (m,v)) ls
@@ -329,7 +328,8 @@ accessAT (Nested (IProd b t) r) at
     = case at of
         IT k v -> IT (mapComp (firstTB (alterKeyType forceDAttr )) k ) (accessTB r v)
         FKT k rel v -> FKT (mapComp (firstTB (alterKeyType forceDAttr )) <$> k) rel (accessTB r v)
-accessAT (IProd b t) at
+accessAT i@(IProd b t) at
     = case at of
         Attr k v -> Attr (alterKeyType forceDAttr k ) v
+        (FKT a r t) -> FKT (mapComp (accessAT i ) <$> a )  r t
 accessAT (Many [i]) at = accessAT i at

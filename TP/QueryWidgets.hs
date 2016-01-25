@@ -164,7 +164,7 @@ pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
       tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
   headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   bh <- stepper False (hoverTip headerP)
-  details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (runErrors .fmap (mapValue' (const ()))) <$> facts tdInputPre)
+  details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (runErrors ) <$> facts tdInputPre)
   out <- UI.div # set children [headerP,details]
   ini <- currentValue (facts tdInput )
   kk <- stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
@@ -909,7 +909,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
       iniGist <- currentValue (facts gist)
       iniVpt <- currentValue (facts vpt)
 
-      itemListEl <- UI.select #  set UI.class_ "col-xs-5" # set UI.size "21" # set UI.style [("position","absolute"),("z-index","999"),("bottom","0px")]
+      itemListEl <- UI.select #  set UI.class_ "col-xs-5" # set UI.size "21" # set UI.style ([("position","absolute"),("z-index","999"),("bottom","0px")] <> noneShow False)
       let wheel = negate <$> mousewheel itemListEl
       let
           pageSize = 20
@@ -924,7 +924,6 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
         offset <- offsetField 0 wheel  (lengthPage <$> facts res3)
 
         res3 <- mapTEvent return ((\i -> fmap (filter (filtering i))) <$> filterInpT <*> (liftA2 (\ (a,i) j -> (a,applyConstr i j) ) presort constrT))
-        -- res3 <- mapT0Event ((fmap G.toList vp)) return ( (\f i -> fmap f i)<$> (filtering $ fmap (fmap G.toList) $ tidings ( res2) ( rumors vpt) ) )
         return (offset, res3)
       onEvent (rumors $ triding offset) $ (\i ->  liftIO $ do
         print ("page",(i `div` 10 )   )
@@ -945,9 +944,10 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
           let sel  = itemListEl
           bh <- stepper False (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange sel ))
           element sel # sink UI.style (noneShow <$> bh)
-          -- element filterInp # sink UI.style (noneShow <$> bh)
-
-          onChanges bh (\_ -> if True then runFunction$ ffi "$(%1).focus();alert('focus');" filterInp else return ())
+          element filterInp # set UI.style (noneShow False)
+          onChanges bh (\v -> do
+              element filterInp # set UI.style (noneShow v)
+              if True then runFunction$ ffi "$(%1).focus();" filterInp else return ())
           lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) . snd  <$>    res4 ) (tidings (fmap Just <$> facts tdi) (fmap Just <$> rumors tdi)) (pure id) ((\i j -> maybe id (\l  ->    i  l ) )<$> showFK <*> filterInpT)
           return (TrivialWidget  (triding lbox) pan )
 

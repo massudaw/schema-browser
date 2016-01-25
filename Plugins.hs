@@ -17,6 +17,7 @@ import Location
 import PrefeituraSNFSE
 import Text
 import Data.Tuple
+import Incendio
 import Siapi3
 import CnpjReceita
 import OFX
@@ -51,6 +52,7 @@ import Data.Text (Text)
 import qualified Data.Map as M
 import Data.String
 import Control.Arrow
+import qualified Data.Foldable as F
 
 
 lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" renderProjectPricingA
@@ -248,6 +250,27 @@ analiseProjeto = BoundedPlugin2 pname tname url
       odxR "ano" -< ()
       returnA -< Nothing
 
+doubleP s = (\(TB1 (SDouble ar)) -> ar) <$> idxK s
+intP s = (\(TB1 (SNumeric ar)) -> ar) <$> idxK s
+
+areaDesign = PurePlugin pname tname  url
+
+  where
+    pname , tname :: Text
+    pname = "Area Design"
+    tname = "deposito"
+    url :: ArrowReaderM Identity
+    url = proc t -> do
+      odxR "densidade"  -< ()
+      (ar,a) <-  (,) <$> doubleP "area_operacao" <*> doubleP "altura_armazenamento"  -< ()
+      poly <- atR "classe" ((\(ArrayTB1 i) -> (\x -> sum $ zipWith (\j i -> realToFrac (unTB1 i) * x^j ) [0..] (F.toList i))) <$> idxK "curva") -< ()
+      let
+          af = (nbrFig3 a/100) * solve ar poly
+      returnA -< Just $ tblist [_tb $ Attr "densidade" (LeftTB1 $ Just $ (TB1 . SDouble) $ traceShowId af)] -- [ Rel "densidade" "<@" "densidade"] (LeftTB1 $ Nothing)]
+
+
+
+
 siapi3CheckApproval = PurePlugin pname tname  url
 
   where
@@ -264,6 +287,7 @@ siapi3CheckApproval = PurePlugin pname tname  url
       let app = L.find (\(TB1 (SText x),_) -> T.isInfixOf "APROVADO"  x) v
           tt = L.find ((\(TB1 (SText x)) -> T.isInfixOf "ENTREGUE AO SOLICITANTE APROVADO"  x).fst) v
       returnA -< Just $ tblist [_tb $ Attr "aproval_date" (LeftTB1 $ fmap ((\(TB1 (STimestamp t)) -> TB1 $ SDate (localDay t)) .snd) (liftA2 const app tt))]
+
 
 
 siapi3Plugin  = BoundedPlugin2 pname tname  url
@@ -605,4 +629,4 @@ queryArtAndamento = BoundedPlugin2 pname tname url
 
 
 plugList :: [Plugins]
-plugList = [siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin {-,siapi2Hack-}, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]
+plugList = [areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin {-,siapi2Hack-}, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]

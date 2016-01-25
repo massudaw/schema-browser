@@ -41,6 +41,8 @@ executable threepenny-layer
    ,HsOpenSSL
    ,http-client-tls
    ,http-client-openssl
+   ,hmatrix
+   ,hmatrix-gsl
    ,base64-bytestring
    ,semigroupoids
    ,tasty
