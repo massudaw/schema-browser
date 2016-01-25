@@ -84,8 +84,8 @@ deleteFrom  a   = do
 
 tableLoader table  page size presort fixed
   | not $ L.null $ rawUnion table  = do
-    i <- mapM (\t -> tableLoader t page size presort fixed)  (rawUnion table)
     inf <- ask
+    i <- mapM (\t -> tableLoader t page size presort (fmap (liftField inf (tableName t) . firstTB  keyValue)  <$> fixed))  (rawUnion table)
     let mvar = mvarMap inf
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )

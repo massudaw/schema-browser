@@ -110,8 +110,7 @@ setup smvar args w = void $ do
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
   getBody w #+ [element hoverBoard,element container]
 
-  (authorization,_) <- liftIO$ transaction metainf $ selectFrom "authorization" Nothing Nothing [] []
-  mapUITEvent body (traverse (\(nav,autho,inf)->
+  mapUITEvent body (traverse (\(nav,inf)->
       case nav of
         "Poll" -> do
             element body #
@@ -130,14 +129,13 @@ setup smvar args w = void $ do
             dash <- metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ) ]
             element body # set UI.children [dash] # set UI.class_ "row"
         "Browser" -> do
-            let k = M.keys $  M.filter (\t -> isJust $ G.lookup (idex  metainf "authorization"  [("table_schema", TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText $ tableName t),("grantee",TB1 $ SText $ username inf)]) autho) $   (pkMap inf )
-            [tbChooser,subnet] <- chooserTable  inf  k cliTid  cli
+            [tbChooser,subnet] <- chooserTable  inf   cliTid  cli
             element tbChooser # sink0 UI.style (facts $ noneShow <$> triding menu)
             let
                 expand True = "col-xs-10"
                 expand False = "col-xs-12"
             element subnet # sink0 UI.class_ (facts $ expand <$> triding menu)
-            element body # set UI.children [tbChooser,subnet]# set UI.class_ "row" # set UI.style [("display","inline-flex"),("width","100%")] )) $ liftA3 (\i j -> fmap (i,j,)) (triding nav) (collectionTid authorization) evDB
+            element body # set UI.children [tbChooser,subnet]# set UI.class_ "row" # set UI.style [("display","inline-flex"),("width","100%")] )) $ liftA2 (\i  -> fmap (i,)) (triding nav)  evDB
 
 
 listDBS ::  InformationSchema -> BrowserState -> IO (Tidings (Text,[Text]))
@@ -259,23 +257,28 @@ lookAttr' inf k (i,m) = err $  M.lookup (S.singleton (Inline (lookKey inf (_kvna
     where
       err= justError ("no attr " <> show k <> " for table " <> show (_kvname i))
 
-chooserTable inf kitems cliTid cli = do
+chooserTable inf cliTid cli = do
   iv   <- currentValue (facts cliTid)
   let lookT iv = let  i = join $  unLeftItens . unTB <$> lookAttr (lookKey (meta inf) "clients" "table") iv
                 in fmap (\(Attr _ (TB1 (SText t))) -> t) i
   let initKey = pure . join $ fmap (S.fromList .rawPK) . flip M.lookup (_tableMapL inf) <$> join (lookT <$> iv)
+      kitems = M.keys (pkMap inf)
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
-
-  (translation,_) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] []
+  (translation,_) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+  (authorization,_) <- liftIO$ transaction (meta inf) $ selectFrom "authorization" Nothing Nothing [] [("=",liftField (meta inf) "authorization" $ uncurry Attr $("table_schema",TB1 $ SText (schemaName inf) ))]
+  (orddb ,(_,orderMap)) <- liftIO $ transaction  (meta inf) $ selectFrom "ordering"  (Just 0) Nothing []    [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
   let selTable = join . fmap (flip M.lookup (pkMap inf) )
       lookDesc = (\i j -> maybe (T.unpack $ maybe "" rawName j)  ((\(Attr _ v) -> renderShowable v). unTB .  lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,TB1 $ SText $ schemaName inf),("table_name",TB1 $ SText (maybe ""  tableName j))]) i ) <$> collectionTid translation
-  (orddb ,(_,orderMap)) <- liftIO $ transaction  (meta inf) $ selectFrom "ordering"  (Just 0) Nothing []      [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+      authorize =  (\autho t -> isJust $ G.lookup (idex  (meta inf) "authorization"  [("table_schema", TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText $ tableName t),("grantee",TB1 $ SText $ username inf)]) autho)  <$> collectionTid authorization
   let renderLabel i = T.unpack (translatedName i)
       filterLabel = (\j -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> renderLabel i) ))<$> filterInpBh
       tableUsage orderMap table = lookAttr (lookKey (meta inf) "ordering" "usage" ) $ justError ("no value" <> show (table,pk,orderMap)) $ G.lookup  (G.Idex ( pk )) orderMap
           where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$> [("table_name",TB1 . SText . rawName $ table ), ("schema_name",TB1 $ SText (schemaName inf))]
-      buttonStyle k e = e # sink UI.text (facts $ lookDesc  <*> pure (selTable $ Just k)) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow . ($ justLook   k (pkMap inf)) <$> filterLabel )
+      buttonStyle k e = e # sink UI.text (facts $ lookDesc  <*> pure (selTable $ Just k)) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow  <$> visible)
+        where tb =  justLook   k (pkMap inf)
+              visible  = (\i j -> i tb && j tb  ) <$> filterLabel <*> facts authorize
+
 
   bset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap . flip justLook   (pkMap inf))) kitems) ((\i j -> tableUsage i ( justLook   j (pkMap inf) )) <$> collectionTid orddb ) initKey  (\k -> UI.button  ) buttonStyle
   let bBset = triding bset
@@ -359,7 +362,7 @@ viewerKey inf table cli cliTid = mdo
      lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
         where (s,_) = justLook [] fixmap
   inisort <- currentValue (facts tsort)
-  itemListEl <- UI.select # set UI.class_ "col-xs-9" {- # set UI.multiple True  -} #  set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
+  itemListEl <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
   let wheel = negate <$> mousewheel itemListEl
   (offset,res3)<- mdo
     offset <- offsetField 0 wheel  (lengthPage <$> facts res3)

@@ -298,10 +298,10 @@ instance Binary TimeOfDay where
 data TB f k a
   = Attr
     { _tbattrkey :: ! k
-    ,_tbattr :: ! (FTB a)
+    , _tbattr :: ! (FTB a)
     }
   | IT -- Inline Table
-    { _ittableName :: ! k
+    { _tbattrkey :: ! k
     , _fkttable ::  ! (FTB1 f  k a)
     }
   | FKT -- Foreign Table
@@ -1000,7 +1000,7 @@ leftItens tb@(FKT ilk rel _) = Just . maybe  emptyFKT attrOptional
 attrArray :: TB Identity Key b -> NonEmpty (TB Identity Key Showable) -> TB Identity Key Showable
 attrArray back@(Attr  k _) oldItems  = (\tb -> Attr k (ArrayTB1 tb)) $ (\(Attr _ v) -> v) <$> oldItems
 attrArray back@(FKT _ _ _) oldItems  = (\(lc,tb) ->  FKT [Compose $ Identity $ Attr (kArray $ _relOrigin $  head $ keyattr (Non.head lc )) (ArrayTB1 $ head .  kattr  <$> lc)] (_fkrelation back) (ArrayTB1 tb  ) )  $ Non.unzip $ (\(FKT [lc] rel tb ) -> (lc , tb)) <$> oldItems
-attrArray back@(IT _ _) oldItems  = (\tb ->  IT  (_ittableName back) (ArrayTB1 tb  ) )  $ (\(IT _ tb ) -> tb) <$> oldItems
+attrArray back@(IT _ _) oldItems  = (\tb ->  IT  (_tbattrkey back) (ArrayTB1 tb  ) )  $ (\(IT _ tb ) -> tb) <$> oldItems
 
 
 keyOptional (k,v) = (kOptional k ,LeftTB1 $ Just v)
