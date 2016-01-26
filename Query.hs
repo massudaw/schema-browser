@@ -38,7 +38,7 @@ module Query
   ,tbPK'
   ,relabelT'
   ,mAny
-  ,allKVRec
+  ,allKVRec'
   ,allRec'
   ,tableViewNR
   ,inf'
@@ -547,7 +547,12 @@ tbpred un  = tbjust  . Tra.traverse (Tra.traverse unSOptional') .getUn un
     tbjust = G.Idex . justError "cant be empty"
 
 
-searchGist relTable m = (\i -> join . fmap (\k -> lookGist (S.fromList $fmap (\k-> justError (" no pk " <> show (k,relTable)) $ M.lookup k relTable) (_kvpk m) ) (tblistM m $ fmap _tb k)  i)  )
+searchGist relTable m gist =  join . fmap (\k -> lookGist (S.fromList $fmap (\k-> justError (" no pk " <> show (k,relTable)) $ M.lookup k relTable) (_kvpk m) ) k  gist)
+  where
+     lookGist un pk  = safeHead . G.search (tbpred un pk)
+     tbpred un  = tbjust  . Tra.traverse (Tra.traverse unSOptional') .filter ((`S.member` un). fst ) . concat .fmap aattri
+        where
+          tbjust = G.Idex . justError "cant be empty"
 
 joinRel :: (Ord a ,Show a,G.Predicates (G.TBIndex Key a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex Key a) (TBData Key a) -> FTB (TBData Key a)
 joinRel tb rel ref table

@@ -16,6 +16,7 @@ module SchemaQuery
   )where
 
 import RuntimeTypes
+import Control.Concurrent.Async
 import Debug.Trace
 import Data.Ord
 import qualified NonEmpty as Non
@@ -82,16 +83,18 @@ deleteFrom  a   = do
   (deleteEd $ schemaOps inf)  a
 
 
+mergeDBRef  = (\(j,i) (m,l) -> ((M.unionWith (\(a,b) (c,d) -> (a+c,b<>d))  j  m , i <>  l )))
+
 tableLoader table  page size presort fixed
   | not $ L.null $ rawUnion table  = do
     inf <- ask
-    i <- mapM (\t -> tableLoader t page size presort (fmap (liftField inf (tableName t) . firstTB  keyValue)  <$> fixed))  (rawUnion table)
+    i <- liftIO $ mapConcurrently (\t -> transaction inf $  tableLoader t page size presort (fmap (liftField inf (tableName t) . firstTB  keyValue)  <$> fixed))  (rawUnion table)
     let mvar = mvarMap inf
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )
         projunion :: TBData Key Showable -> TBData Key Showable
         projunion  = liftTable' inf (tableName table ) .mapKey' keyValue
-    let o = foldr (\(j) (m) -> ((j <> m ))) (M.empty,G.empty) (fmap (fmap projunion) . snd <$> i)
+    let o = foldr mergeDBRef  (M.empty,G.empty) (fmap (fmap projunion) . snd <$> i)
     return $ (dbvar,o)
   | otherwise  =  do
     inf <- ask

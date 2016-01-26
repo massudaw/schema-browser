@@ -157,7 +157,7 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
            unionQ = "select schema_name,table_name,inputs from metadata.table_union where schema_name = ?"
        ures <- query conn unionQ (Only schema) :: IO [(Text,Text,Vector Text)]
        let
-           i3 = addRecInit (M.singleton schema (M.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $ M.fromList i3l
+           i3 = {-addRecInit (M.singleton schema (M.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $ -} M.fromList i3l
            pks = M.fromList $ fmap (\(_,t)-> (S.fromList$ rawPK t ,t)) $ M.toList i3
            i2 =   M.filterWithKey (\k _ -> not.S.null $ k )  pks
            unionT (s,n,l) = (n ,(\t -> t { rawUnion =  ((\t -> justLook t i3 )<$>  F.toList l )} ))
@@ -295,9 +295,10 @@ logTableModification
      -> TableModification (TBIdx Key a)  -> IO (TableModification (TBIdx Key a))
 logTableModification inf (TableModification Nothing table i) = do
   time <- getCurrentTime
+
   let ltime =  utcToLocalTime utc $ time
       (_,pidx,pdata) = firstPatch keyValue  i
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index2,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (username inf ,ltime,rawName table, V.fromList (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) pidx )) , Binary  .B.encode <$> V.fromList pdata , schemaName inf)
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index2,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (username inf ,ltime,rawName table, V.fromList <$> nonEmpty (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) pidx )) , Binary  .B.encode <$> V.fromList pdata , schemaName inf)
   return (TableModification (Just id) table i )
 
 

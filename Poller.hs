@@ -30,8 +30,6 @@ import RuntimeTypes
 import Data.Monoid hiding (Product(..))
 
 import qualified Data.Text as T
-
-
 import qualified Data.Map as M
 
 
