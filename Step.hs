@@ -18,7 +18,6 @@ import Data.String
 import qualified Data.List as L
 
 
-import qualified NonEmpty as Non
 import GHC.Stack
 import Control.Arrow
 import Control.Category (Category(..),id)
@@ -33,11 +32,6 @@ import Debug.Trace
 
 deriving instance Functor m => Functor (Kleisli m i )
 
-liftParser (P i j) = (P i ((\l -> Kleisli $  return <$> l ) $ j ) )
-liftParserR (P i j) = (P i ((\(Kleisli  l) -> Kleisli $  return  <$> l ) $ j ) )
-
-
-liftReturn = Kleisli . (return <$> )
 
 instance (Monoid s ,Arrow m)  => Arrow (Parser m s) where
   arr f = (P mempty (arr f ))
@@ -52,7 +46,6 @@ instance Applicative m => Applicative (Kleisli m a) where
   Kleisli f <*> Kleisli j  =  Kleisli  $ (\i -> f i <*> j i )
 
 
-printStatic (P (i) _ ) =  show i
 
 act :: (Monoid s,Monad m) => (a -> m b) ->  Parser (Kleisli m) s a b
 act a = P mempty (Kleisli a )
@@ -105,16 +98,11 @@ unLeftTB1 = join . fmap (\v -> case v of
                i@(TB1 _ ) -> Just i)
 
 
-atM i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> local (fmap unTB1 . unLeftTB1 . indexTB1 ind) (j i )  ))
-  where ind = splitIndex True i
-
 atR i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> local (fmap unTB1 . unLeftTB1 . indexTB1 ind) (j i )  ))
   where ind = splitIndex True i
 
 
 
-at i (P s j)  =  P (BF.second ( nest  ind) . BF.first (nest  ind) $ s)  (j . arr (indexTB1 ind )  )
-  where ind = splitIndex True i
 
 nameI  i (P (Many l,Many v) d)=  P (Rec i (Many l) ,  (Many v) )  d
 callI  i ~(P _ d) = P (Many[Point i],Many [] ) d
@@ -122,11 +110,6 @@ callI  i ~(P _ d) = P (Many[Point i],Many [] ) d
 nameO  i (P (Many l,Many v) d)=  P (Many l ,  Rec i (Many v) )  d
 callO  i ~(P _ d) = P (Many[],Many [Point i] ) d
 
-idx = indexTableInter False
-idxT = indexTableInter True
-
-odx = logTableInter False
-odxT = logTableInter True
 
 
 splitIndex b l = (fmap T.pack . IProd b . unIntercalate (','==) $ l)
@@ -157,16 +140,7 @@ idxR  l =
   let ll = splitIndex True l
    in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
 
-indexTableInter b l =
-  let ll = splitIndex b l
-   in  P (Many [ll],Many [] ) (arr (join . fmap (indexTable ll)))
 
-logTableInter
-  :: (Ord k ,Show k ,KeyString k ,Arrow a) =>
-      Bool -> String -> Parser  a AccessTag (Maybe (TBData k   Showable)) (Maybe (k, FTB Showable))
-logTableInter b l =
-  let ll = splitIndex b l
-   in  P (Many [] ,Many [ll]) (arr (join . fmap (indexTable ll)))
 
 
 indexTB1 (IProd _ l) t
@@ -233,13 +207,6 @@ checkTable' (Many l) (m,v) =
 checkTable l b = eitherToMaybe $ runErrors (checkTable' l b)
 
 
--- indexTable :: [[Text]] -> TB1 (Key,Showable) -> Maybe (Key,Showable)
---
-indexFTB l (LeftTB1 j) = join $ fmap (indexFTB l) j
-indexFTB l (ArrayTB1 j) =  liftA2 (,) ((Non.head <$> fmap (fmap fst) i) ) ( (\i -> ArrayTB1   i ) <$> fmap (fmap snd) i)
-       where i =   T.traverse  (indexFTB l) j
-indexFTB l (TB1 i) = indexTable l i
-indexFTB i j = errorWithStackTrace (show (i,j))
 
 indexTableAttr (IProd _ l) t@(m,v)
   = do
@@ -274,7 +241,6 @@ isNested p i =  False
 uNest :: Access Text -> Access Text
 uNest (Nested pn i) = i
 
-type AccessTag = (Access Text)
 
 class KeyString i where
   keyString :: i -> Text
@@ -310,15 +276,11 @@ findPK = concat . fmap keyattr  .toList . _kvvalues  . unTB . tbPK
 
 
 
-type FunArrowPlug o = RuntimeTypes.Parser (->) AccessTag (Maybe (TB1 Showable)) o
-
-type ArrowPlug a o = RuntimeTypes.Parser a AccessTag (Maybe (TB1 Showable)) o
-
 
 attrT :: (a,FTB b) -> Compose Identity (TB Identity) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
-
+{-
 findOne l  e
   = L.find (\i -> S.fromList (proj i) == e ) $ case l of
     Many l ->  l
@@ -346,3 +308,4 @@ accessAT i@(IProd b t) at
         Attr k v -> Attr (alterKeyType forceDAttr k ) v
         (FKT a r t) -> FKT (mapComp (accessAT i ) <$> a )  r t
 accessAT (Many [i]) at = accessAT i at
+-}
