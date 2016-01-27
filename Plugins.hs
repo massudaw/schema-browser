@@ -268,7 +268,44 @@ areaDesign = PurePlugin pname tname  url
       poly <- atR "classe" ((\i -> (\x -> sum $ zipWith (\j i -> i * x^j ) [0..] (F.toList i))) <$> doubleA "curva") -< ()
       let
           af = (nbrFig3 a/100) * solve ar poly
-      returnA -< Just $ tblist [_tb $ Attr "densidade" (LeftTB1 $ Just $ (TB1 . SDouble) $ traceShowId af)]
+      returnA -< Just $ tblist [_tb $ Attr "densidade" (LeftTB1 $ Just $ (TB1 . SDouble) $ af)]
+
+designDeposito = StatefullPlugin "Design Deposito" "deposito"
+  [(([],[
+    ("minimal_flow",atPrim PDouble)])
+    ,minimalDesign)]
+
+minimalDesign = PurePlugin pname tname  url
+
+  where
+    pname , tname :: Text
+    pname = "Minimal Design"
+    tname = "deposito"
+    url :: ArrowReaderM Identity
+    url = proc t -> do
+      d <- doubleP "densidade"  -< ()
+      a <- doubleP "area_operacao"  -< ()
+      odxR  "minimal_flow" -< ()
+      let af = d * a * 60
+      returnA -< Just $ tblist [_tb $ Attr "minimal_flow" ((TB1 . SDouble)  af)]
+
+
+
+
+siapi3Taxa = PurePlugin pname tname  url
+
+  where
+    pname , tname :: Text
+    pname = "Protocolar Processo"
+    tname = "fire_project"
+    url :: ArrowReaderM Identity
+    url = proc t -> do
+      odxR "report" -< ()
+      v <- atR "id_project" (
+          (,) <$> atR "endereço" ((,,) <$> idxK "cep" <*> idxK "quadra" <*> idxK "lote")
+              <*> atR "owner,contact" ((,) <$> idxK "owner_name" <*> atAny "ir_reg" [idxR "cnpj_number" ,idxR "cpf_number"] ))  -< ()
+
+      returnA -< Just $ tblist [_tb $ Attr "page" (TB1 $ SText (T.pack $ show v))]
 
 
 
@@ -374,15 +411,6 @@ instance ToJSON Timeline where
 
 itR i f = atR i (IT (fromString i)<$> f)
 
-pagamentoArr
-  :: (KeyString a1,
-      MonadReader (Maybe (TBData a1 Showable)) m, Show a1,
-      Functor m,Ord a1) =>
-     Parser
-       (Kleisli m)
-       (Access Text)
-       (Maybe (FTB Showable))
-       ((TB Identity Text Showable))
 pagamentoArr =  itR "pagamento" (proc descontado -> do
               pinicio <- idxR "inicio"-< ()
               p <- idxR "vezes" -< ()
@@ -628,4 +656,4 @@ queryArtAndamento = BoundedPlugin2 pname tname url
 
 
 plugList :: [Plugins]
-plugList = [areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin {-,siapi2Hack-}, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]
+plugList = [designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin {-,siapi2Hack-}, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]

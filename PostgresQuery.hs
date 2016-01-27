@@ -139,12 +139,13 @@ paginate inf t order off size k eqpred = do
     v <- uncurry (queryWith (withCount (fromRecord (unTlabel' t)) ) (conn inf ) ) (quec, fmap (firstTB (recoverFields inf)) attr)
     print (maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int]))
     return ((maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])), fmap fst v)
-  where pred = maybe "" (const " WHERE ") (fmap (fmap snd)   k <> fmap (concat . fmap  (fmap TB1 .F.toList . snd)) eqpred) <> T.intercalate " AND " (maybe [] (const $ pure $ generateComparison (first (justLabel t) <$> order)) k <> (maybe [] pure $ eqquery <$> eqpred))
-        equality (pred,k) = inattr k <> pred <> "?"
+  where pred = maybe "" (const " WHERE ") (fmap (fmap snd)   k <> fmap (concat . fmap  (fmap TB1 .F.toList . snd)) eqspred) <> T.intercalate " AND " (maybe [] (const $ pure $ generateComparison (first (justLabel t) <$> order)) k <> (maybe [] pure $ eqquery <$> eqspred))
+        equality (pred,k) = " ? " <> pred <> inattr k
         eqquery :: [(Text,TB Identity Key a)] -> Text
         eqquery eqpred = T.intercalate " AND " (equality . second (firstTB (justLabel t)) <$> eqpred)
+        eqspred = L.sortBy (comparing ((`L.elemIndex` (fmap fst order)). inattr .snd) )  <$> eqpred
         eqpk :: [TB Identity Key Showable]
-        eqpk =  maybe [] ( L.sortBy (comparing ((`L.elemIndex` (fmap fst order)). inattr )))  (fmap snd <$> eqpred)
+        eqpk =  maybe [] id   (fmap snd <$> eqspred)
         offsetQ = " OFFSET " <> T.pack (show off)
         limitQ = " LIMIT " <> T.pack (show size)
         orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first (justLabel t) <$> order)

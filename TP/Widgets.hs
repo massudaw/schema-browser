@@ -286,6 +286,7 @@ onkey :: Element -> (Int -> Maybe Int ) -> Event String
 onkey el f = unsafeMapUI el (const $ UI.get value el) (filterJust $ f . read1 <$> domEvent "keydown" el)
 
 onEnter el = onkey el (\case {13-> Just 13; i -> Nothing})
+onEsc el = onkey el (\case {27 -> Just 27; i -> Nothing})
 
 
 testPointInRange ui = do

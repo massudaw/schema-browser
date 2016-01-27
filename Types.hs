@@ -94,7 +94,7 @@ unArray (ArrayTB1 s) =  s
 unArray o  = errorWithStackTrace $ "unArray no pattern " <> show o
 
 unSOptional (LeftTB1 i) = i
-unSOptional i = traceShow ("unSOptional No Pattern Match SOptional-" <> show i) (Just i)
+unSOptional i = (Just i)-- traceShow ("unSOptional No Pattern Match SOptional-" <> show i) (Just i)
 
 unSOptional' (LeftTB1 i ) = i
 unSOptional' (SerialTB1 i )  = i

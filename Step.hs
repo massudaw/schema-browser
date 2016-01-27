@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveFunctor  #-}
-module Step where
+module Step (idxR,idxK,act,odxR,nameO,nameI,callI,atAny,atMA,callO,odxM,idxM,atR,atRA,attrT,findPK,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexTable) where
 
 import Types
 import RuntimeTypes
@@ -29,6 +29,7 @@ import Utils
 
 import qualified Data.Traversable as T
 import Data.Traversable (traverse)
+import Debug.Trace
 
 deriving instance Functor m => Functor (Kleisli m i )
 
@@ -133,28 +134,28 @@ splitIndex b l = (fmap T.pack . IProd b . unIntercalate (','==) $ l)
   -- Obrigatory value with maybe wrapping
 odxR  l =
   let ll = splitIndex True l
-   in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTable ll)))
+   in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
 odxM  l =
   let ll = splitIndex False l
-   in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTable ll)))
+   in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
 
 
 -- Optional value with maybe wrapping
 idxM  l =
   let ll = splitIndex False l
-   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . join . fmap (unRSOptional' . snd) . join  . fmap (indexTable ll)))
+   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . join . fmap (unRSOptional' . snd) . join  . fmap (indexTableAttr ll)))
 
 -- Obrigatory value without maybe wrapping
 
 
 idxK  l =
   let ll = splitIndex True l
-   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . justError ("no value found "  <> show l). join . fmap (unRSOptional' . snd) . join . fmap (indexTable ll)))
+   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (\ v -> return . justError ("no value found "  <> show (ll,v)). join . fmap (unRSOptional' . snd) . join . fmap (indexTableAttr ll)$ v) )
 
 
 idxR  l =
   let ll = splitIndex True l
-   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTable ll)))
+   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
 
 indexTableInter b l =
   let ll = splitIndex b l
@@ -180,7 +181,8 @@ indexTB1 (IProd _ l) t
 
 firstCI f = mapComp (firstTB f)
 
-findAttr l v =  M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB v
+findFK  l v =  M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB v
+findAttr l v =  M.lookup (S.fromList $ fmap Inline l) $ M.mapKeys (S.map (fmap keyString)) $ _kvvalues $ unTB v
 
 replace ix i (Nested k nt) = Nested k (replace ix i nt)
 replace ix i (Many nt) = Many (fmap (replace ix i) nt )
@@ -191,7 +193,7 @@ replace ix i v = v
 -- replace ix i v= errorWithStackTrace (show (ix,i,v))
 indexField :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
 indexField p@(IProd b l) v = unTB <$> findAttr  l  (snd v)
-indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findAttr l (snd v)
+indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findFK l (snd v)
 
 checkField' :: Access Text -> Column Key Showable -> Errors [Access Text] (Column Key Showable)
 checkField' p@(Point ix) _ = failure [p]
@@ -239,12 +241,23 @@ indexFTB l (ArrayTB1 j) =  liftA2 (,) ((Non.head <$> fmap (fmap fst) i) ) ( (\i 
 indexFTB l (TB1 i) = indexTable l i
 indexFTB i j = errorWithStackTrace (show (i,j))
 
+indexTableAttr (IProd _ l) t@(m,v)
+  = do
+    let finder = fmap (firstCI keyString ) . M.lookup (S.fromList $ fmap Inline l) . M.mapKeys (S.map (fmap keyString))
+    i <- finder (_kvvalues $ unTB v )
+    case runIdentity $ getCompose $ i  of
+         Attr k l -> return (k,l)
+         i ->  errorWithStackTrace (show i)
+
+
 indexTable (IProd _ l) t@(m,v)
   = do
     let finder = L.find (L.any (==l). L.permutations .fmap _relOrigin. keyattr. firstCI keyString )
     i <- finder (toList $ _kvvalues $ unTB v )
     case runIdentity $ getCompose $ i  of
          Attr k l -> return (k,l)
+         FKT [v] _ _  -> safeHead $ aattr v
+         i ->  errorWithStackTrace (show i)
 
 hasProd :: (Access Text -> Bool) -> Access Text ->  Bool
 hasProd p (Many i) = any p i

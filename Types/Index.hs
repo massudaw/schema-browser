@@ -92,8 +92,7 @@ instance Affine Showable where
 instance Predicates (TBIndex Key Showable) where
   type (Penalty (TBIndex Key Showable)) = Penalty ([FTB Showable])
   consistent (Idex j) (Idex  m )
-    | all (uncurry (==)) $ zip (fmap (keyValue . fst) j )  (fmap (keyValue.fst) m) = consistent (fmap snd $  j) (fmap snd $ m)
-    | otherwise = traceShow (show (fmap fst j ,fmap fst m)) $ consistent (fmap snd $  j) (fmap snd $ m)
+     = consistent (fmap snd $  j) (fmap snd $ m)
   union l  = Idex (zipWith (,) kf projL)
     where Idex  v = head l
           kf = fmap fst v

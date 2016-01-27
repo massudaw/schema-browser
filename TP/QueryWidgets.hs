@@ -450,7 +450,7 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
           let oldItems = tidings oldItemsB oldItemsE
               deleteCurrentUn un e l =   maybe l (\v -> G.delete (G.Idex v) (3,6) l) $  join $ (\e -> traverse (traverse unSOptional')  (getUn un e) ) <$> e
               tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbPK (TB1 ftb) , (S.fromList $ _kvpk m, ( fmap snd bres)))
-          unConstraints <-  traverse (traverse (traverse (mapTEvent return ))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn un  (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un ) (fmap snd bres)))) <$> fmap S.fromList (_kvuniques m)
+          unConstraints <-  traverse (traverse (traverse (mapTEvent return ))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn un  (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un . G.toList ) (fmap snd bres)))) <$> fmap S.fromList (_kvuniques m)
           unDeleted <- traverse (traverse (traverse (mapTEvent return))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> oldItems <*> o))) (tpkConstraint:unConstraints))
           let
               dunConstraints (un,o) = flip (\i ->  maybe (const False ) (unConstraint un .tblist' table . fmap _tb ) (traverse (traFAttr unSOptional' ) i ) ) <$> o
@@ -489,11 +489,11 @@ lookGist un pk  = G.lookup (tbpred un pk)
 tbpred un  = tbjust  . traverse (traverse unSOptional') .getUn un
   where
     tbjust = G.Idex . justError "cant be empty"
-
+{-
 createUn :: Set CoreKey -> G.GiST (G.TBIndex CoreKey(Showable)) (TBData CoreKey Showable) -> G.GiST (G.TBIndex CoreKey(Showable)) (TBData CoreKey Showable)
 createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ traverse (traverse unSOptional' ) $ getUn un i ) . G.toList
   where transPred v = tbpred un v
-
+-}
 
 
 processPanelTable
@@ -840,8 +840,8 @@ offsetField  initT eve  max = do
   (offsetB ,ev2) <- mdo
     let
       filt = ( filterJust $ diff <$> offsetB <*> max <@> ev  )
-      ev2 = (fmap concatenate $ unions [fmap const (rumors initT),fmap const offsetE,filt ])
-    offsetB <- accumB init ev2
+      ev2 = (fmap concatenate $ unions [fmap const offsetE,filt ])
+    offsetB <- accumB init ( unionWith (.) ( fmap const (rumors initT)) ev2)
     return (offsetB,ev2)
   element offset # sink UI.value (show <$> offsetB)
   let
@@ -883,13 +883,14 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
           ftdi = oldItems
           unRKOptional (Key v a b d n m (KOptional c)) = Key v a b d n m c
           unRKOptional i = i
-          replaceKey =  firstTB (\k -> maybe k _relTarget $ L.find ((==k)._relOrigin) $ filter (\i -> keyType (_relOrigin i) == keyType (_relTarget i)) rel)
+          replaceKey =  firstTB (\k -> justError "no key" $ fmap _relTarget $ L.find ((==k)._relOrigin) $  rel)
+          replaceRel a =  (fst $ search (_relOrigin $ head $ keyattri a),  firstTB (\k  -> snd $ search k ) a)
+            where  search  k = let v = justError "no key" $ L.find ((==k)._relOrigin)  rel in (_relOperator v , _relTarget v)
           nonInj =   S.difference (S.fromList $ fmap  _relOrigin   $ rel) (S.fromList $ getRelOrigin $ fmap unTB ifk)
-      liftIO$ print ((S.fromList $ fmap  _relOrigin   $ rel), nonInj, (S.fromList $ getRelOrigin $ fmap unTB ifk))
       let
           nonInjRefs = filter (flip S.isSubsetOf nonInj . S.fromList . fmap _relOrigin . keyattr . _tb .fst) wl
           staticold :: [(TB Identity CoreKey () ,TrivialWidget (Maybe (TB Identity CoreKey (Showable))))]
-          staticold  =  second (fmap (fmap replaceKey . join . fmap unLeftItens)) . first (replaceKey .unLeftKey) <$>  nonInjRefs
+          staticold  =  second (fmap (fmap replaceKey . join . fmap unLeftItens)) . first (replaceKey .unLeftKey) <$> (filter (all (\i ->not (isInlineRel i ) && keyType (_relOrigin i) == keyType (_relTarget i)). keyattri.fst ) nonInjRefs)
           iold :: Tidings [Maybe [(CoreKey,FTB Showable)]]
           iold  = Tra.sequenceA $ fmap (fmap ( aattr . _tb ) ) . triding .snd <$> nonInjRefs
           iold2 :: Tidings (Maybe [TB Identity CoreKey Showable])
@@ -902,7 +903,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
           sortList =  sorting' <$> pure (fmap ((,True)._relTarget) rel)
       let
           vv :: Tidings (Maybe [TB Identity CoreKey Showable])
-          vv =   fmap (L.sortBy (comparing (keyattri . replaceKey))) <$>  liftA2 (liftA2 (\i j -> traceShow (i,j,i<> j) $  i <> j )) iold2  ftdi2
+          vv =   fmap (L.sortBy (comparing (keyattri . replaceKey))) <$>  liftA2 (liftA2 (<> )) iold2  ftdi2
       cvres <- currentValue (facts vv)
       filterInp <- UI.input # set UI.class_ "col-xs-3"
       filterInpBh <- stepper "" (UI.valueChange filterInp)
@@ -916,17 +917,26 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
             where (s,_) = justLook [] fixmap
           cv = searchGist relTable m iniGist cvres
           tdi = (searchGist relTable m <$> gist <*> vv)
-      liftIO $print (iniGist ,cvres)
       let
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList . snd
       presort <-mapTEvent return (fmap  <$> sortList <*> fmap (fmap G.toList ) vpt)
+      -- Filter and paginate
       (offset,res3)<- do
         res3 <- mapTEvent return ((\i -> fmap (filter (filtering i))) <$> filterInpT <*> (liftA2 (\ (a,i) j -> (a,applyConstr i j) ) presort constrT))
+        element itemListEl # sink UI.size (show . (\i -> if i > 21 then 21 else i) . length .snd <$> facts res3)
         offset <- offsetField ((\i j -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i (snd j) ) i )<$> tdi <*> res3) wheel  (lengthPage <$> facts res3)
         return (offset, res3)
-      onEvent (rumors $ triding offset) $ (\i ->  liftIO $ do
-        transaction inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` 10) Nothing  [] [])
+      -- Load not found items
+      onEvent (filterE (\(a,b,c) ->  isJust a &&   isJust b && isNothing c)  $ rumors $ (,,) <$> iold2 <*> vv  <*> tdi)  $ (\(o,_,_) ->
+        traverse (\o -> liftIO $ do
+        when (all (/="<@") (fmap (fst . replaceRel) $ traceShow ("gist",searchGist relTable m iniGist (Just $ (L.sortBy (comparing (keyattri . replaceKey))) o),(L.sortBy (comparing (keyattri . replaceKey)))o,iniGist) o)) $ do
+          transaction inf $ eventTable  (lookTable inf (_kvname m)) Nothing Nothing  [] (L.sortBy (comparing (keyattri.snd)) $fmap (replaceRel)  o)
+          return () ) o)
+      -- Load offseted items
+      onEvent (filterE (isJust . fst) $ (,) <$> facts iold2 <@> rumors (triding offset)) $ (\(o,i) ->  traverse (\o -> liftIO $ do
+        transaction inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` 10) Nothing  [] (fmap (("=",).replaceKey)  o)) o  )
+      -- Select page
       let
         paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
       res4 <- mapTEvent  return (paging <*> res3)
@@ -940,7 +950,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
         else do
           pan <- UI.div #  set UI.class_ "col-xs-5"
           let sel  = itemListEl
-          bh <- stepper False (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange sel ))
+          bh <- stepper False (unionWith const (const False <$> onEsc filterInp ) (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange sel )))
           element sel # sink UI.style (noneShow <$> bh)
           element filterInp # set UI.style (noneShow False)
           element offset # set UI.style (noneShow False)
@@ -987,7 +997,7 @@ fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just
 fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1:| _)) ) = mdo
      dv <- UI.div
      let wheel = fmap negate $ mousewheel dv
-         arraySize = 4
+         arraySize = 8
      (TrivialWidget offsetT offset) <- offsetField (pure 0) never (maybe 0 (Non.length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      let
          fkst = FKT (mapComp (firstTB unKArray)<$> ifk ) (fmap (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
@@ -997,9 +1007,9 @@ fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1
            TrivialWidget tr el<- fkUITable inf constr tbrefs (fmap (unIndexItens  ix <$> offsetT <*> ) <$> plmods) wl (unIndexItens ix <$> offsetT  <*>  oldItems) fkst
            element el # set UI.class_ "col-xs-11"
            TrivialWidget tr <$> UI.div # set UI.children [lb,el]
-     -- fks <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
+     fks <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
 
-     fks <- mapM recurse [0..arraySize -1 ]
+--      fks <- mapM recurse [0..arraySize -1 ]
      sequence $ zipWith (\e t -> element e # sink0 UI.style (noneShow <$> facts t)) (getElement <$> fks) (pure True : (fmap isJust . triding <$> fks))
      element dv # set children (getElement <$> fks)
      let bres = indexItens arraySize  tb offsetT (Non.fromList $ triding <$> fks) oldItems

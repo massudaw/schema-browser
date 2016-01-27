@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings,TupleSections #-}
 module SchemaQuery
   (eventTable
+  ,createUn
   ,selectFrom
   ,updateFrom
   ,patchFrom
@@ -57,7 +58,7 @@ tbpred un v = G.Idex $ justError "" $ (Tra.traverse (Tra.traverse unSOptional' )
 
 createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key Showable) (TBData Key Showable)
 createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un (tableNonRef' i) )
-  where transPred v = G.Idex $ justError "invalid pred" (Tra.traverse (Tra.traverse unSOptional' ) $getUn un (tableNonRef' v))
+  where transPred v = G.Idex $ L.sortBy ( comparing fst ) $ justError "invalid pred" (Tra.traverse (Tra.traverse unSOptional' ) $getUn un (tableNonRef' v))
 
 
 -- tableLoader :: InformationSchema -> Table -> TransactionM (Collection Key Showable)
