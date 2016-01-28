@@ -8,14 +8,14 @@ import qualified NonEmpty as Non
 import Control.Concurrent.Async
 import Types
 import qualified Types.Index as G
+import Step.Client (indexTable)
 import Data.Either
-import Step
+import Step.Host
 import SchemaQuery
 import Prelude hiding (head)
 import Control.Monad.Reader
 import Control.Concurrent
 import Data.Functor.Apply
-import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM
 import Utils
 import Schema

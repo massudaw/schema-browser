@@ -27,7 +27,7 @@ import PandocRenderer
 import OAuth
 
 import Types
-import Step
+import Step.Client
 import RuntimeTypes
 import Utils
 
@@ -272,7 +272,7 @@ areaDesign = PurePlugin pname tname  url
 
 designDeposito = StatefullPlugin "Design Deposito" "deposito"
   [(([],[
-    ("minimal_flow",atPrim PDouble)])
+    ("minimal_flow",atPrim PDouble), ("min_sprinkler_count",atPrim PInt)])
     ,minimalDesign)]
 
 minimalDesign = PurePlugin pname tname  url
@@ -285,9 +285,12 @@ minimalDesign = PurePlugin pname tname  url
     url = proc t -> do
       d <- doubleP "densidade"  -< ()
       a <- doubleP "area_operacao"  -< ()
+      asp <- atR "densidade" (doubleP "area") -< ()
       odxR  "minimal_flow" -< ()
-      let af = d * a * 60
-      returnA -< Just $ tblist [_tb $ Attr "minimal_flow" ((TB1 . SDouble)  af)]
+      odxR  "min_sprinkler_count" -< ()
+      let af = d * fromIntegral msc * asp * 60
+          msc = ceiling $ a / asp
+      returnA -< Just $ tblist $ _tb <$> [Attr "minimal_flow" ((TB1 . SDouble)  af),  (Attr "min_sprinkler_count" . TB1 . SNumeric ) msc]
 
 
 

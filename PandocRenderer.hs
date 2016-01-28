@@ -29,7 +29,7 @@ import Data.Functor.Identity
 import Text
 
 import Control.Monad.Reader
-import Step
+import Step.Client
 import Control.Arrow
 import Data.Monoid
 import Data.Text.Lazy(Text)

@@ -20,7 +20,7 @@ import RuntimeTypes
 import Control.Monad.IO.Class
 import Control.Monad.Reader
 
-import Step
+import Step.Client
 
 import qualified Data.Text as T
 import Data.Text

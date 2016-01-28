@@ -4,16 +4,11 @@ module Gpx
 
 import Types
 -- import Query
-import Data.Monoid
 import Data.String
 import Control.Applicative
-import Data.Interval (interval)
-import qualified Data.ExtendedReal as ER
 
 import Data.Maybe
-import Data.Text.Lazy (unpack)
 import Text.Read
-import qualified Data.Map as M
 import Data.Time.Parse
 import Text.XML.HXT.Core
 
@@ -24,7 +19,6 @@ import qualified Data.ByteString as BS
 import qualified Data.Text.Encoding as TE
 import qualified Data.Text as TE
 
-import Database.PostgreSQL.Simple.Time
 
 import Prelude hiding ((.),id,head)
 import Control.Category

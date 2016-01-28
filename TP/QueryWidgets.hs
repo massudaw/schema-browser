@@ -71,7 +71,7 @@ import Data.Time
 import Data.Functor.Apply
 import TP.Widgets
 import Schema
-import Step
+import Step.Host
 import qualified Data.Foldable as F
 import Data.Foldable (foldl')
 import Debug.Trace
@@ -133,7 +133,9 @@ pluginUI oinf trinp (StatefullPlugin n tname ac) = do
   freshUI <- foldl' (\old (aci ,(inpfresh,outfresh)) -> (old >>= (\((l,ole),unoldItems)-> do
 
       elemsIn <- mapM (\fresh -> do
-        let attrB pre a = tbCase  inf  []  a [] [] pre
+        let attrB pre a = do
+              wn <-  tbCase  inf  []  a [] [] pre
+              labelCase inf a  pre wn
         attrB (const Nothing <$> trinp)  (genAttr oinf fresh )
            ) inpfresh
       let
@@ -143,7 +145,9 @@ pluginUI oinf trinp (StatefullPlugin n tname ac) = do
       (preinp,(_,liftedE )) <- pluginUI  inf (mergeCreate <$>  unoldItems <*>  inp) aci
 
       elemsOut <- mapM (\fresh -> do
-        let attrB pre a = tbCase  inf  []  a [] [] pre
+        let attrB pre a = do
+              wn <-  tbCase  inf  []  a [] [] pre
+              labelCase inf a  pre wn
         attrB (fmap (\v ->  unTB . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . unTB . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ TB1 v )  <$> liftedE  )  (genAttr oinf fresh )
        ) outfresh
 

@@ -1081,3 +1081,7 @@ inlineFullName (KOptional i) = inlineFullName i
 inlineFullName (KArray a ) = inlineFullName a
 inlineFullName (Primitive (RecordPrim (s, i)) ) = s <> "." <> i
 
+attrT :: (a,FTB b) -> Compose Identity (TB Identity) a b
+attrT (i,j) = Compose . Identity $ Attr i j
+
+

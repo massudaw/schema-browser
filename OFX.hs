@@ -1,13 +1,10 @@
 {-# LANGUAGE OverloadedStrings, Arrows ,RecordWildCards#-}
 module OFX where
-import System.Environment
 import Text.Parsec
-import Text.PrettyPrint
 import Data.OFX
 import System.IO
 import System.Exit
 
-import qualified Data.Map as M
 import Control.Applicative
 
 
