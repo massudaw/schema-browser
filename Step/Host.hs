@@ -46,19 +46,19 @@ indexField :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
 indexField p@(IProd b l) v = unTB <$> findAttr  l  (snd v)
 indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findFK l (snd v)
 
-checkField' :: Access Text -> Column Key Showable -> Errors [Access Text] (Column Key Showable)
-checkField' p@(Point ix) _ = failure [p]
-checkField' n@(Nested ix@(IProd b l) nt ) t
+checkField :: Access Text -> Column Key Showable -> Errors [Access Text] (Column Key Showable)
+checkField p@(Point ix) _ = failure [p]
+checkField n@(Nested ix@(IProd b l) nt ) t
   = case t of
          IT l i -> IT l  <$> checkFTB  nt i
-         FKT a  c d -> FKT a  c <$>  checkFTB nt d
+         FKT a  c d -> FKT a  c <$> (if not b then maybe (failure [n]) (checkFTB nt) $ unRSOptional' d else checkFTB nt d  )
          Attr k v -> failure [n]
-checkField'  p@(IProd b l) i
+checkField  p@(IProd b l) i
   = case i  of
       Attr k v -> maybe (failure [p]) (pure) $ fmap (Attr k ) . (\i -> if b then  unRSOptional' i else Just i ) $ v
-      FKT a c d -> (\i -> FKT i c d) <$> (traverse (traComp (checkField' p) )  a )
+      FKT a c d -> (\i -> FKT i c d) <$> (traverse (traComp (checkField p) )  a )
       i -> errorWithStackTrace ( show (b,l,i))
-checkField' i j = errorWithStackTrace (show (i,j))
+checkField i j = errorWithStackTrace (show (i,j))
 
 
 checkFTB l (ArrayTB1 i )
@@ -76,9 +76,9 @@ checkTable' :: Access Text -> TBData Key Showable -> Errors [Access Text] (TBDat
 checkTable' (ISum []) v
   = failure [ISum []]
 checkTable'  f@(ISum ls) (m,v)
-  = fmap (tblist . pure . _tb) $ maybe (failure [f]) id  $ listToMaybe . catMaybes $  fmap (\(Many [l]) ->  fmap (checkField' l) . join . fmap ( traFAttr  unRSOptional') $ indexField l $ (m,v)) ls
+  = fmap (tblist . pure . _tb) $ maybe (failure [f]) id  $ listToMaybe . catMaybes $  fmap (\(Many [l]) ->  fmap (checkField l) . join . fmap ( traFAttr  unRSOptional') $ indexField l $ (m,v)) ls
 checkTable' (Many l) (m,v) =
-  ( (m,) . _tb . KV . mapFromTBList ) <$> T.traverse (\k -> maybe (failure [k]) (fmap _tb. checkField' k ). indexField  k $ (m,v)) l
+  ( (m,) . _tb . KV . mapFromTBList ) <$> T.traverse (\k -> maybe (failure [k]) (fmap _tb. checkField k ). indexField  k $ (m,v)) l
 
 
 checkTable l b = eitherToMaybe $ runErrors (checkTable' l b)

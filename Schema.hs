@@ -157,7 +157,7 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
            unionQ = "select schema_name,table_name,inputs from metadata.table_union where schema_name = ?"
        ures <- query conn unionQ (Only schema) :: IO [(Text,Text,Vector Text)]
        let
-           i3 = {-addRecInit (M.singleton schema (M.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $ -} M.fromList i3l
+           i3 = addRecInit (M.singleton schema (M.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $  M.fromList i3l
            pks = M.fromList $ fmap (\(_,t)-> (S.fromList$ rawPK t ,t)) $ M.toList i3
            i2 =   M.filterWithKey (\k _ -> not.S.null $ k )  pks
            unionT (s,n,l) = (n ,(\t -> t { rawUnion =  ((\t -> justLook t i3 )<$>  F.toList l )} ))

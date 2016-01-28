@@ -1,5 +1,5 @@
 {-# LANGUAGE Arrows,OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Client (module Step.Common,idxR,idxK,act,odxR,nameO,nameI,callI,atAny,atMA,callO,odxM,idxM,atR,atRA,attrT,indexTable) where
+module Step.Client (module Step.Common,idxR,idxK,act,odxR,nameO,nameI,callI,atAny,atMA,callO,odxM,idxM,atR,atK,atRA,attrT,indexTable) where
 
 import Types
 import Step.Common
@@ -75,9 +75,13 @@ unLeftTB1 = join . fmap (\v -> case v of
                (LeftTB1 i ) -> i
                i@(TB1 _ ) -> Just i)
 
+at b i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> local (fmap unTB1 . unLeftTB1 . indexTB1 ind) (j i )  ))
+  where ind = splitIndex b i
 
-atR i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> local (fmap unTB1 . unLeftTB1 . indexTB1 ind) (j i )  ))
-  where ind = splitIndex True i
+
+atK = at False
+atR = at True
+
 
 
 

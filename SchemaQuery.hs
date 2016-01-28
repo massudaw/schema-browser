@@ -97,6 +97,25 @@ tableLoader table  page size presort fixed
         projunion  = liftTable' inf (tableName table ) .mapKey' keyValue
     let o = foldr mergeDBRef  (M.empty,G.empty) (fmap (fmap projunion) . snd <$> i)
     return $ (dbvar,o)
+  | not  (null $ _rawScope table ) && not (S.null (rawFKS table) )= do
+      inf <- ask
+      liftIO $ print $ (table,_rawScope table,rawFKS table,rawAttrs table)
+      let [sref] =  filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope table)) (S.toList $ rawFKS table)
+          stable = (\(Path _ (FKJoinTable rel t)) -> t) sref
+      let mvar = mvarMap inf
+      mmap <- liftIO $ atomically $ readTMVar mvar
+      let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )
+      let
+          rinf = fromMaybe inf $ M.lookup (fst stable) (depschema inf)
+          fromtable = (lookTable rinf $ snd stable)
+          defSort = fmap (,Desc) $  rawPK fromtable
+      (l,i) <- local (const rinf) $ tableLoader  fromtable page  size defSort []
+      ix <- mapM (\i -> do
+          (l,v) <- joinTable [(fromtable ,unTB1 i,sref)] table page size presort fixed
+          return v ) (F.toList i)
+      return (dbvar ,foldr mergeDBRef  (M.empty,G.empty) ix )
+
+
   | otherwise  =  do
     inf <- ask
     let base (Path _ (FKJoinTable i j  ) ) = fst j == schemaName inf
@@ -121,6 +140,55 @@ tableLoader table  page size presort fixed
 
 
 
+
+
+joinTable :: [(Table,TBData Key Showable,Path (S.Set Key ) SqlOperation )]-> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
+    -> TransactionM (DBVar,Collection Key Showable)
+joinTable reflist table page size presort fixed = do
+    inf <- ask
+    let mvar = mvarMap inf
+        defSort = fmap (,Desc) $  rawPK table
+        sortList  = if L.null presort then defSort else presort
+        fixidx = (L.sort $ snd <$> fixed )
+        pagesize = maybe defsize id size
+        filterfixed
+            = if L.null fixed
+              then id
+              else
+                G.filter (\ tb ->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV (snd (tableNonRef' tb)))
+    mmap <- liftIO $ atomically $ readTMVar mvar
+    let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
+    iniT <- do
+       (fixedmap ,reso) <- liftIO $ currentValue (liftA2 (,) (facts (idxTid dbvar) ) (facts (collectionTid dbvar ) ))
+       case M.lookup fixidx fixedmap of
+          Just (sq,mp) -> do
+             if ( sq > G.size (filterfixed reso) -- Tabela é maior que a tabela carregada
+                && sq > pagesize * (fromMaybe 0 page + 1) -- Tabela é maior que a página
+                && pagesize * (fromMaybe 0 page +1) > G.size (filterfixed reso)  ) -- O carregado é menor que a página
+             then do
+                   liftIO$ putStrLn $ "new page " <> show (tableName table)
+                   let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
+                   (res,nextToken ,s ) <- (joinListEd $ schemaOps inf) reflist table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
+                   let ini = (M.insert fixidx (estLength page pagesize res s  ,(\v -> M.insert ((fromMaybe 0 page +1 )*pagesize) v  mp) $ justError "no token"    nextToken) fixedmap , createUn (S.fromList $ rawPK table)  (fmap unTB1 res)<> reso )
+                   liftIO $ atomically $ do
+                     writeTQueue (patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )
+                     putTMVar (idxVar dbvar ) (fst ini)
+                   return  ini
+             else do
+               -- liftIO$ putStrLn $ "existing page " <> show (tableName table)
+               return (fixedmap ,reso)
+          Nothing -> do
+             liftIO$ putStrLn $ "new map " <> show (tableName table)
+             (res,p,s) <- (joinListEd $ schemaOps inf) reflist  table Nothing Nothing size sortList fixed
+             let ini = (M.insert fixidx (estLength page pagesize res s ,maybe M.empty (M.singleton pagesize) p) fixedmap , createUn (S.fromList $ rawPK table)    (fmap (\i -> (unTB1 i)) res) <> reso)
+             liftIO $ atomically $ do
+               writeTQueue(patchVar dbvar ) (F.toList $ patch . unTB1 <$> res )
+               putTMVar (idxVar dbvar ) (fst ini)
+             return ini
+    let tde = fmap filterfixed <$> rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
+    let iniFil = fmap filterfixed iniT
+    tdb  <- stepper iniFil tde
+    return (dbvar {collectionTid  = fmap snd $ tidings tdb tde},iniFil)
 
 
 

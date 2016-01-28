@@ -24,7 +24,7 @@ import OFX
 import Crea
 import  GHC.Stack
 import PandocRenderer
-import OAuth
+import OAuthClient
 
 import Types
 import Step.Client
@@ -107,7 +107,7 @@ siapi2Hack = BoundedPlugin2  pname tname url
 siapi2Plugin = BoundedPlugin2  pname tname url
   where
     pname ="Siapi2 Andamento"
-    tname = "fire_project"
+    tname = "siapi3"
     varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
     url :: ArrowReader
     url = proc t -> do
@@ -303,12 +303,12 @@ siapi3Taxa = PurePlugin pname tname  url
     tname = "fire_project"
     url :: ArrowReaderM Identity
     url = proc t -> do
-      odxR "report" -< ()
+      atR "protocolo,ano" ((,) <$> odxR "ano" <*> odxR "protocolo") -< ()
       v <- atR "id_project" (
-          (,) <$> atR "endereço" ((,,) <$> idxK "cep" <*> idxK "quadra" <*> idxK "lote")
-              <*> atR "owner,contact" ((,) <$> idxK "owner_name" <*> atAny "ir_reg" [idxR "cnpj_number" ,idxR "cpf_number"] ))  -< ()
+          (,) <$> atK "address" ((,,) <$> idxK "cep" <*> idxK "quadra" <*> idxK "lotes")
+              <*> atR "id_owner,id_contact" (atR "id_owner" ((,) <$> idxK "owner_name" <*> atAny "ir_reg" [idxR "cnpj_number" ,idxR "cpf_number"] )))  -< ()
 
-      returnA -< Just $ tblist [_tb $ Attr "page" (TB1 $ SText (T.pack $ show v))]
+      returnA -< Nothing -- Just $ tblist [_tb $ Attr "protocolo" (TB1 $ SText (T.pack $ show v))]
 
 
 
@@ -318,7 +318,7 @@ siapi3CheckApproval = PurePlugin pname tname  url
   where
     pname , tname :: Text
     pname = "Check Approval"
-    tname = "fire_project"
+    tname = "siapi3"
     url :: ArrowReaderM Identity
     url = proc t -> do
       odxR "aproval_date" -< ()
@@ -339,29 +339,32 @@ siapi3Plugin  = BoundedPlugin2 pname tname  url
     pname = "Siapi3 Andamento"
     tname = "fire_project"
     varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    tobs  =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional'
     url :: ArrowReader
     url = proc t -> do
-      protocolo <- varTB "protocolo" -< ()
-      ano <- varTB "ano" -< ()
       cpf <- atR "id_project"
               $ atR "id_owner,id_contact"
                 $ atR "id_owner"
                   $ atAny "ir_reg" [varTB "cpf_number",varTB "cnpj_number"] -< t
-      odxR "taxa_paga" -< ()
-      odxR "aproval_date" -< ()
-      atR "andamentos" (proc t -> do
-          odxR "andamento_date" -<  t
-          odxR "andamento_description" -<  t
-          odxR "andamento_user" -<  t
-          odxR "andamento_status" -<  t) -< ()
+      v <- atR "protocolo,ano" (proc cpf -> do
+        protocolo <- idxR "protocolo" -< ()
+        ano <- idxR "ano" -< ()
+        odxR "taxa_paga" -< ()
+        odxR "aproval_date" -< ()
+        atR "andamentos" (proc t -> do
+            odxR "andamento_date" -<  t
+            odxR "andamento_description" -<  t
+            odxR "andamento_user" -<  t
+            odxR "andamento_status" -<  t) -< ()
 
-      b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= (14 :: Int ) then  return Nothing else liftIO $ siapi3  i j k )) -<   (liftA3 (,,) protocolo ano cpf)
-      let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ fmap attrT  $ ([("andamento_date",TB1 .STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
-          convertAndamento i = error $ "convertAndamento2015 :  " <> show i
-      let ao  (bv,taxa) =  Just $ tblist  ( [attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
-          iat bv = Compose . Identity $ (IT "andamentos"
-                         (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv))
-      returnA -< join (ao <$> b)
+        b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= (14 :: Int ) then  return Nothing else liftIO $ siapi3  i j k )) -<   (liftA3 (,,) (tobs $ protocolo ) (tobs $ ano ) cpf)
+        let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ fmap attrT  $ ([("andamento_date",TB1 .STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
+            convertAndamento i = error $ "convertAndamento2015 :  " <> show i
+        let ao  (bv,taxa) =  Just $ tblist  ( [attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
+            iat bv = Compose . Identity $ (IT "andamentos"
+                           (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv))
+        returnA -< (\i -> FKT (_tb <$> [Attr "ano" (LeftTB1 $ ano) ,Attr "protocolo" (LeftTB1 $ protocolo)]) [Rel "protocolo" "=" "protocolo" ,Rel "ano" "=" "ano"] (TB1 i)) <$> join (ao <$> b)) -< cpf
+      returnA -< tblist  . pure . _tb  <$> v
 
 bool = TB1 . SBoolean
 num = TB1 . SNumeric

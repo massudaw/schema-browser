@@ -295,4 +295,4 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (fmap TB1 i,(TableRef . filter (flip L.elem (fmap fst s) . fst ) .  getPK . TB1 <$> lastMay i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o ) (\ _ _ _ _ -> return ([],Nothing,0)) (\table j -> do
     inf <- ask
-    liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ) $ j ) mapKeyType
+    liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ) $ j ) mapKeyType undefined

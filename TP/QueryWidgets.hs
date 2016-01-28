@@ -166,9 +166,10 @@ pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
   let tdInputPre = fmap (checkTable' (fst f)) <$>  oldItems
       tdInput = join . fmap (eitherToMaybe .  runErrors) <$> tdInputPre
       tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
-  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
-  bh <- stepper False (hoverTip headerP)
-  details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (runErrors ) <$> facts tdInputPre)
+  headerP <- UI.button # set text (T.unpack n) {- # sink UI.enabled (isJust <$> facts tdInput) -} # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+  details <-UI.div
+  bh <- stepper False (hoverTip2 headerP details )
+  element details # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (runErrors ) <$> facts tdInputPre)
   out <- UI.div # set children [headerP,details]
   ini <- currentValue (facts tdInput )
   kk <- stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
@@ -184,8 +185,9 @@ pluginUI inf oldItems p@(BoundedPlugin2 n t arrow) = do
       tdInput = join . fmap (eitherToMaybe .  runErrors) <$> tdInputPre
       tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
   headerP <- UI.button # set text (T.unpack n) {- # sink UI.enabled (isJust <$> facts tdInput) -} # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
-  bh <- stepper False (hoverTip headerP)
-  details <-UI.div # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (runErrors . fmap (mapValue' (const ())) )<$> facts tdInputPre)
+  details <-UI.div
+  bh <- stepper False (hoverTip2 headerP details)
+  element details # sink UI.style (noneShow <$> bh) # sink UI.text (show . fmap (runErrors . fmap (mapValue' (const ())) )<$> facts tdInputPre)
   out <- UI.div # set children [headerP,details]
   let ecv = (facts tdInput <@ UI.click headerP)
   vo <- currentValue (facts tdOutput)
@@ -885,20 +887,19 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
       let
           -- Find non injective part of reference
           ftdi = oldItems
-          unRKOptional (Key v a b d n m (KOptional c)) = Key v a b d n m c
-          unRKOptional i = i
-          replaceKey =  firstTB (\k -> justError "no key" $ fmap _relTarget $ L.find ((==k)._relOrigin) $  rel)
+          replaceKey =  firstTB (\k -> maybe k id  $ fmap _relTarget $ L.find ((==k)._relOrigin) $  rel)
           replaceRel a =  (fst $ search (_relOrigin $ head $ keyattri a),  firstTB (\k  -> snd $ search k ) a)
-            where  search  k = let v = justError "no key" $ L.find ((==k)._relOrigin)  rel in (_relOperator v , _relTarget v)
+            where  search  k = let v = justError ("no key" <> show k )$ L.find ((==k)._relOrigin)  rel in (_relOperator v , _relTarget v)
           nonInj =   S.difference (S.fromList $ fmap  _relOrigin   $ rel) (S.fromList $ getRelOrigin $ fmap unTB ifk)
       let
           nonInjRefs = filter (flip S.isSubsetOf nonInj . S.fromList . fmap _relOrigin . keyattr . _tb .fst) wl
           staticold :: [(TB Identity CoreKey () ,TrivialWidget (Maybe (TB Identity CoreKey (Showable))))]
           staticold  =  second (fmap (fmap replaceKey . join . fmap unLeftItens)) . first (replaceKey .unLeftKey) <$> (filter (all (\i ->not (isInlineRel i ) && keyType (_relOrigin i) == keyType (_relTarget i)). keyattri.fst ) nonInjRefs)
-          iold :: Tidings [Maybe [(CoreKey,FTB Showable)]]
-          iold  = Tra.sequenceA $ fmap (fmap ( aattr . _tb ) ) . triding .snd <$> nonInjRefs
           iold2 :: Tidings (Maybe [TB Identity CoreKey Showable])
-          iold2 =  fmap (L.sortBy (comparing (keyattri . replaceKey))) . join . fmap (traverse unLeftItens ) .  fmap (fmap ( uncurry Attr) . concat) . allMaybesEmpty <$> iold
+          iold2 =  join . fmap (traverse unLeftItens ) .  fmap (fmap ( uncurry Attr) . concat) . allMaybesEmpty <$> iold
+            where
+              iold :: Tidings [Maybe [(CoreKey,FTB Showable)]]
+              iold  = Tra.sequenceA $ fmap (fmap ( aattr . _tb ) ) . triding .snd <$> nonInjRefs
           ftdi2 :: Tidings (Maybe [TB Identity CoreKey Showable])
           ftdi2 =   fmap (fmap unTB. tbrefM ) <$> ftdi
           applyConstr m l =  filter (foldl' (\l constr ->  liftA2 (&&) l (not <$> constr) ) (pure (True))  l) m
@@ -932,9 +933,9 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
         offset <- offsetField ((\i j -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i (snd j) ) i )<$> tdi <*> res3) wheel  (lengthPage <$> facts res3)
         return (offset, res3)
       -- Load not found items
-      onEvent (filterE (\(a,b,c) ->  isJust a &&   isJust b && isNothing c)  $ rumors $ (,,) <$> iold2 <*> vv  <*> tdi)  $ (\(o,_,_) ->
+      onEvent (filterE (\(a,b,c) ->  isJust a &&   isJust b && isNothing c)  $ rumors $ (,,) <$> iold2 <*> ftdi2 <*> tdi)  $ (\(o,_,_) ->
         traverse (\o -> liftIO $ do
-        when (all (/="<@") (fmap (fst . replaceRel) $ traceShow ("gist",searchGist relTable m iniGist (Just $ (L.sortBy (comparing (keyattri . replaceKey))) o),(L.sortBy (comparing (keyattri . replaceKey)))o,iniGist) o)) $ do
+        when (all (/="<@") (fmap (fst . replaceRel)   o)) $ do
           transaction inf $ eventTable  (lookTable inf (_kvname m)) Nothing Nothing  [] (L.sortBy (comparing (keyattri.snd)) $fmap (replaceRel)  o)
           return () ) o)
       -- Load offseted items
@@ -1000,7 +1001,7 @@ fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just
     return $ leftItens tb <$> tr
 fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1:| _)) ) = mdo
      dv <- UI.div
-     let wheel = fmap negate $ mousewheel dv
+     let -- wheel = fmap negate $ mousewheel dv
          arraySize = 8
      (TrivialWidget offsetT offset) <- offsetField (pure 0) never (maybe 0 (Non.length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      let

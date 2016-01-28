@@ -48,6 +48,7 @@ import Database.PostgreSQL.Simple
 import qualified Data.Map as M
 
 import OAuth
+import OAuthClient
 import GHC.Stack
 
 updateClient metainf inf table tdi clientId now =

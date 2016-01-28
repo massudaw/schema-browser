@@ -1,5 +1,5 @@
 {-# LANGUAGE Arrows ,TupleSections,OverloadedStrings #-}
-module OAuth (gmailOps,tokenToOAuth,oauthToToken,oauthpoller) where
+module OAuth (gmailOps) where
 import qualified NonEmpty as Non
 import Control.Lens
 import Control.Exception
@@ -9,7 +9,6 @@ import Control.Monad.Reader
 import qualified Data.HashMap.Strict as HM
 import Data.Time
 import Prelude hiding (head)
-import Step.Client
 import System.Info (os)
 import Network.Wreq
 import System.Process (rawSystem)
@@ -50,55 +49,17 @@ import qualified Reactive.Threepenny as R
 --
 file   = "./tokens.txt"
 --
-gmailScope = "https://www.googleapis.com/auth/gmail.modify"
-
-taskscope = "https://www.googleapis.com/auth/tasks"
-
-tokenToOAuth (TB1 (SText t), TB1 (SText r) , TB1 (SDouble i) , TB1 (SText k)) = OAuth2Tokens  (T.unpack t) (T.unpack r) (realToFrac i)  (T.unpack k)
-oauthToToken (OAuth2Tokens  t r i  k)
-  = TB1 $ tblist $ attrT . fmap (LeftTB1 .Just )<$> [("accesstoken",TB1 (SText $ T.pack t)), ("refreshtoken",TB1 $ SText $ T.pack r) , ("expiresin",TB1 (SDouble $realToFrac i)) , ("tokentype",TB1 (SText $ T.pack k))]
-
-liftA4 f  i j k  l= f <$> i <*> j <*> k <*> l
-
-oauthpoller = BoundedPlugin2 "Gmail Login" "google_auth" url
-  where
-    url :: ArrowReader
-    url = proc t -> do
-       user <- idxK "username" -< ()
-       token <- atR "token" (liftA4 (,,,) <$> idxM "accesstoken" <*> idxM "refreshtoken" <*> idxM "expiresin" <*> idxM "tokentype" ) -< ()
-       v <- act (\i -> liftIO$ do
-          Just cid <- lookupEnv "CLIENT_ID"
-          Just secret <- lookupEnv "CLIENT_SECRET"
-          let client = OAuth2Client { clientId = cid, clientSecret = secret }
-              permissionUrl = formUrl client [gmailScope,taskscope]
-              requestNew = (do
-                  putStrLn$ "Load this URL: "++ show permissionUrl
-                  case os of
-                    "linux"  -> rawSystem "firefox" [permissionUrl]
-                    "darwin" -> rawSystem "open"       [permissionUrl]
-                    _        -> return ExitSuccess
-                  putStrLn "Please paste the verification code: "
-                  authcode <- getLine
-                  tokens   <- exchangeCode client authcode
-                  putStrLn $ "Received access token: " ++ show (accessToken tokens)
-                  return tokens)
-          maybe requestNew ((`catch` (\e -> traceShow (e :: SomeException) requestNew)) . refreshTokens client) i
-          ) -< tokenToOAuth <$> token
-       token <- atR "token" ((,,,) <$> odxR "accesstoken" <*> odxR "refreshtoken" <*> odxR "expiresin" <*> odxR "tokentype" ) -< ()
-       odxR "refresh" -< ()
-       returnA -< Just . tblist . pure . _tb $ IT "token" (LeftTB1 $  oauthToToken <$> Just v )
-
 
 url s u = "https://www.googleapis.com/" <> T.unpack s <> "/v1/users/"<> T.unpack u <> "/"
 
 urlJ :: Text -> TableK Key -> FTB (TBData Key Showable ) -> String
 urlJ s j pk
-  | tableName j == "google_auth" = prefix <> "users/@me/"
+  | tableName j == "google_auth" = prefix <> "users/me/"
   | otherwise = prefix <>  T.unpack (rawName j ) <> "/" <>  intercalate "," (renderShowable . snd <$> getPK pk)  <> "/"
   where prefix = "https://www.googleapis.com/" <> T.unpack s <> "/v1/"
 
 urlT s u
-  | s == "lists" = "https://www.googleapis.com/" <> T.unpack s <> "/v1/" <> "users/@me/"
+  | s == "lists" = "https://www.googleapis.com/" <> T.unpack s <> "/v1/" <> "users/me/"
   | otherwise = "https://www.googleapis.com/" <> T.unpack s <> "/v1/"
 
 updateTable table reference page maxResults
@@ -108,10 +69,8 @@ updateTable table reference page maxResults
     let user = fst $ justError "no token"$ token inf
     decoded <- liftIO $ do
         let req =  url (schemaName inf) user  <> T.unpack (rawName table ) <> "?" <> "startHistoryId=" <> intercalate "," ( renderShowable . snd <$> getPK (TB1 reference) ) <> "&"<> maybe "" (\(NextToken s) ->  T.unpack s <> "pageToken=" <> T.unpack s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok )
-        print  req
         (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
         print ("update",table,t)
-        print d
         return  d
     c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) table ) . maybe [] (\i -> (i :: Value) ^.. key (  rawName table ) . values) $ decoded
     return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , {-length c +-} (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
@@ -122,20 +81,6 @@ updateTable table reference page maxResults
 listTable table offset page maxResults sort ix
   | tableName table == "history" = return ([],Nothing , 0)
   | tableName table == "attachments" = return ([],Nothing , 0)
-  | not  (null $ _rawScope table ) && not (S.null (rawFKS table) )= do
-      inf <- ask
-      liftIO $ print $ (table,_rawScope table,rawFKS table,rawAttrs table)
-      let [sref] =  filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope table)) (S.toList $ rawFKS table)
-          stable = (\(Path _ (FKJoinTable rel t)) -> t) sref
-      let fromtable = (lookSTable inf $ stable)
-          rinf = fromMaybe inf $ M.lookup (fst stable) (depschema inf)
-          defSort = fmap (,Desc) $  rawPK fromtable
-      (l,i,j) <- local (const rinf) $ (listEd (schemaOps rinf) ) fromtable offset page maxResults defSort []
-      ix <- mapM (\i -> do
-          (l,i,s) <- joinList fromtable sref i table
-          return l ) l
-      return (concat ix ,i ,j)
-
   | otherwise = do
     inf <- ask
     tok <- liftIO$ R.currentValue $ R.facts (snd $ justError "no token" $ token $  inf)
@@ -144,7 +89,6 @@ listTable table offset page maxResults sort ix
         let req =  url (schemaName inf) user <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> ("maxResults=" <> show (maybe 200 id maxResults) <> "&") <> "access_token=" ++ ( accessToken tok )
         print  req
         (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
-        print d
         print ("list",table,t)
         return  d
     let idx = if schemaName inf == "tasks" then "items" else rawName table
@@ -179,29 +123,29 @@ joinGet tablefrom tableref from ref
     tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
     let user = fst $ fromJust $ token inf
     decoded <- liftIO $ do
-        let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  url (schemaName inf) user) <> T.unpack (rawName tablefrom) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK from ) <> "/" <> T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK ref ) <> "?access_token=" ++ ( accessToken tok)
+        let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  urlJ (schemaName inf) tablefrom from )  <>  T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK ref ) <> "?access_token=" ++ ( accessToken tok)
         print req
         (t,v) <- duration
                 (simpleHttpHeader [("GData-Version","3.0")] req )
-        print ("joinGet",tablefrom,tableref ,getPK from, getPK ref ,t,v)
+        print ("joinGet",tablefrom,tableref ,getPK from, getPK ref ,t)
         return $ decode v
     traverse (convertAttrs inf (Just $ (tableref,unTB1 ref)) (_tableMapL inf) tableref ) .  fmap (\i -> (i :: Value)  ) $  decoded
   | otherwise = return Nothing
 
-joinList tablefrom (Path _ (FKJoinTable rel stable)) from tableref
+joinList [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))] tableref offset page maxResults sort ix
   | otherwise = do
       inf <- ask
       tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
       let user = fst $ fromJust $ token inf
       decoded <- liftIO $ do
-          let req = urlJ (schemaName inf) tablefrom from  <> T.unpack (rawName tableref) <>  "?access_token=" ++ ( accessToken tok)
+          let req = urlJ (schemaName inf) tablefrom (TB1 from  )<> T.unpack (rawName tableref) <>  "?access_token=" ++ ( accessToken tok)
           (t,v) <- duration
                   (simpleHttpHeader [("GData-Version","3.0")] req )
-          print ("joinList",tablefrom,tableref ,getPK from, t)
+          print ("joinList",tablefrom,tableref ,getPKM from, t)
           return $ decode v
       let idx = if schemaName inf == "tasks" then "items" else rawName tableref
           relMap = M.fromList $ fmap (\rel -> (_relTarget rel ,_relOrigin rel) ) rel
-          refAttr = (_tb $ FKT (fmap _tb $ concat $ F.toList $ backFKRef relMap (_relOrigin <$> rel) <$> from) rel (from))
+          refAttr = (_tb $ FKT (fmap _tb $ concat $ F.toList $ backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
       c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) tableref ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
       let addAttr refAttr (m ,t ) = (m, mapComp (\(KV i) -> KV  $ M.insert (S.fromList $ keyattr refAttr ) refAttr i ) t)
       return (fmap (addAttr refAttr) <$>  c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
@@ -215,9 +159,9 @@ getTable tb pk
   | not $ null $ _rawScope tb = do
       inf <- ask
       liftIO $ print $ (tb,_rawScope tb)
-      let [sref] = filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope tb )) (traceShowId $S.toList $ rawFKS tb )
+      let [sref] = filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope tb )) (S.toList $ rawFKS tb )
           (Path spk  (FKJoinTable rel stable)) =  sref
-      let fromtable = (lookTable inf $ snd stable)
+      let fromtable = (lookSTable inf $ stable)
       joinGet fromtable  tb  ( _fkttable $ unTB $ head $ F.toList $  _kvvalues $ unTB $  tbUn spk pk)  pk
   | S.fromList (fmap _relOrigin (getKeyAttr pk) ) ==  S.fromList (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb) = return Nothing
   | otherwise = do
@@ -236,7 +180,7 @@ getDiffTable table  j = fmap (join . fmap (diff j. unTB1) ) $ getTable  table $ 
 joinGetDiffTable table  tableref f j = fmap (join . fmap (diff j. unTB1)) $ joinGet table tableref (TB1 f) (TB1 j)
 
 
-gmailOps = (SchemaEditor undefined undefined insertTable undefined listTable updateTable getDiffTable mapKeyType)
+gmailOps = (SchemaEditor undefined undefined insertTable undefined listTable updateTable getDiffTable mapKeyType joinList )
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
@@ -254,7 +198,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
     kid  k
       | S.member k fkFields
             = let
-               fks = justError "" (find ((== S.singleton k). pathOrigin) (F.toList (rawFKS tb)))
+               fks = justError "" (find ((S.singleton k `S.isSubsetOf` ). pathOrigin) (F.toList (rawFKS tb)))
                (FKJoinTable  _ (_,trefname) ) = unRecRel $ pathRel fks
                vk = iv  ^? ( key (keyValue  k))
                fk =  F.toList $  pathRelRel fks
