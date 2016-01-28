@@ -5,6 +5,7 @@ module RuntimeTypes where
 import Control.Concurrent
 
 import Types
+import Step.Common
 import Data.Unique
 import Data.Maybe
 import Types.Index
@@ -37,7 +38,6 @@ import Network.Google.OAuth2
 import Control.Lens.TH
 import GHC.Stack
 
-data Parser m s a b = P (s,s) (m a b) deriving Functor
 
 metaInf :: MVar (Map Text InformationSchema ) -> IO InformationSchema
 metaInf smvar = justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
@@ -191,18 +191,6 @@ putPatch m = atomically . writeTQueue m -- . force
 
 data TableOperation  c a
   = TUnion (c a) (c a)
-
-data Access a
-  = IProd Bool [a]
-  | ISum  [Access a]
-  | Nested (Access a) (Access a)
-  | Rec Int (Access a)
-  | Point Int
-  | Many [Access a]
-  deriving(Show,Eq,Ord,Functor,F.Foldable,Traversable)
-
-type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) IO)) (Access Text) () (Maybe (TBData  Text Showable))
-type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Access Text) () (Maybe (TBData  Text Showable))
 
 liftTable' :: InformationSchema -> Text -> TBData Text a -> TBData Key a
 liftTable' inf tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapFromTBList $ mapComp (liftField inf tname) <$> F.toList i) v

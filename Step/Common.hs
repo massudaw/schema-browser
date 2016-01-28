@@ -1,8 +1,7 @@
 {-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveFunctor  #-}
-module Step.Common (KeyString(..)) where
+module Step.Common (Parser(..),Access(..),ArrowReaderM,ArrowReader,KeyString(..)) where
 
 import Types
-import RuntimeTypes
 import Control.Monad.Reader
 import Control.Applicative
 import Data.Text (Text)
@@ -13,6 +12,23 @@ import Control.Arrow
 import Control.Category (Category(..),id)
 import Prelude hiding((.),id,head)
 import Data.Monoid
+import Data.Foldable(Foldable)
+import Data.Traversable(Traversable)
+
+data Access a
+  = IProd Bool [a]
+  | ISum  [Access a]
+  | Nested (Access a) (Access a)
+  | Rec Int (Access a)
+  | Point Int
+  | Many [Access a]
+  deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
+
+data Parser m s a b = P (s,s) (m a b) deriving Functor
+
+type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) IO)) (Access Text) () (Maybe (TBData  Text Showable))
+type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Access Text) () (Maybe (TBData  Text Showable))
+
 
 
 deriving instance Functor m => Functor (Kleisli m i )

@@ -1,9 +1,8 @@
-{-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveFunctor  #-}
-module Step.Client (idxR,idxK,act,odxR,nameO,nameI,callI,atAny,atMA,callO,odxM,idxM,atR,atRA,attrT,indexTable) where
+{-# LANGUAGE Arrows,OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
+module Step.Client (module Step.Common,idxR,idxK,act,odxR,nameO,nameI,callI,atAny,atMA,callO,odxM,idxM,atR,atRA,attrT,indexTable) where
 
 import Types
 import Step.Common
-import RuntimeTypes
 import Control.Monad.Reader
 import qualified Data.Map as M
 import qualified Data.Set as S

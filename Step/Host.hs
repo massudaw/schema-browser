@@ -1,8 +1,7 @@
-{-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveFunctor  #-}
-module Step.Host (attrT,findPK,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable') where
+{-# LANGUAGE OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
+module Step.Host (module Step.Common,attrT,findPK,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable') where
 
 import Types
-import RuntimeTypes
 import Control.Applicative.Lift
 import Control.Monad.Reader
 import Query
