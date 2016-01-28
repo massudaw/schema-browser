@@ -15,33 +15,33 @@ Data browser generated with schema information
 
 # Code Organization:
 
-Backends 
-  -- Postgresql
-    -- Query  (String concat)
-    -- Insert (Postgresql-simple)
-    -- Parser (Custom)
-  -- OAuth
-    -- Query  (String concat)
-    -- Insert (Not implemented)
-    -- Parser (JSON)
+## Backends 
+### Postgresql
+    - Query  (String concat)
+    - Insert (Postgresql-simple)
+    - Parser (Custom)
+## Google API 
+    - Query  (String concat)
+    - Insert (Not implemented)
+    - Parser (JSON)
 
-Core ADT 
-  Types
-  Indexes
-  Patches
+## Core ADT 
+ - Types
+ - Indexes
+ - Patches
 
-Runtime Data
-  RuntimeTypes (Runtime ADT)
-  Schema      (Schema metadata)
-  SchemaQuery (Backend independent Query)
+## Runtime Data
+ - RuntimeTypes (Runtime ADT)
+ - Schema      (Schema metadata)
+ - SchemaQuery (Backend independent Query)
 
-UI
-  QueryWidgets  (Generate generic UI)
-  Browsera (Main App)
+## UI
+ - QueryWidgets  (Generate generic UI)
+ - Browsera (Main App)
 
-Plugins 
-  Step Module  (Arrow Plugin DSL)
-  Plugins  (Defined Plugins)
+## Plugins 
+ - Step Module  (Arrow Plugin DSL)
+ - Plugins  (Defined Plugins)
 
 
 
