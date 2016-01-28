@@ -8,9 +8,7 @@ module PandocRenderer where
 import Debug.Trace
 import Text.Pandoc.Options
 import Types
-import RuntimeTypes
 import Text.Pandoc.PDF
-import Utils
 
 import Control.Monad
 import Text.Pandoc.Writers.LaTeX
@@ -22,8 +20,6 @@ import Data.Maybe
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Foldable as F
 
-import qualified Data.Map as M
-import qualified Reactive.Threepenny as R
 import System.IO
 import Data.Functor.Identity
 import Text
@@ -32,7 +28,6 @@ import Control.Monad.Reader
 import Step.Client
 import Control.Arrow
 import Data.Monoid
-import Data.Text.Lazy(Text)
 
 
 setFooter ,setT :: Blocks -> Pandoc -> Pandoc

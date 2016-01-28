@@ -33,7 +33,6 @@ import Data.Set (Set)
 import Control.Monad.Reader
 import qualified Data.Foldable as F
 import Data.Traversable
-import Data.IORef
 import Network.Google.OAuth2
 import Control.Lens.TH
 import GHC.Stack

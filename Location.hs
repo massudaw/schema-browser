@@ -28,7 +28,6 @@ import Data.Aeson
 import Control.Arrow
 import Control.Monad.Trans.Maybe
 import Debug.Trace
-import Control.Monad.Trans.Class
 
 
 import qualified Data.Map as M

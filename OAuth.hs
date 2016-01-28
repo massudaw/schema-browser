@@ -9,7 +9,6 @@ import Control.Monad.Reader
 import qualified Data.HashMap.Strict as HM
 import Data.Time
 import Prelude hiding (head)
-import qualified Types.Index as G
 import Step.Client
 import System.Info (os)
 import Network.Wreq
