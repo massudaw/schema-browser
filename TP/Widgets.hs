@@ -24,7 +24,6 @@ import qualified Data.Aeson as JSON
 
 import Safe
 
-import Prelude hiding (head)
 
 import Debug.Trace
 import Utils

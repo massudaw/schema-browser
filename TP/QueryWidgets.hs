@@ -309,7 +309,7 @@ tbCase inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
         let
           rinf = fromMaybe inf $ M.lookup (_kvschema m) (depschema inf)
           table = lookTable rinf  (_kvname m)
-          m = (fst $ head $ F.toList tb1)
+          m = (fst $ unTB1 tb1)
         ref <- refTables rinf   table
         fkUITable rinf (convertConstr <> nonInjConstr)  ref plugItens wl ftdi i
 tbCase inf _ i@(IT na tb1 ) wl plugItens oldItems
@@ -919,7 +919,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
       let
           pageSize = 20
           lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
-            where (s,_) = justLook [] fixmap
+            where (s,_) = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup [] fixmap
           cv = searchGist relTable m iniGist cvres
           tdi = (searchGist relTable m <$> gist <*> vv)
       let

@@ -15,9 +15,11 @@ module SchemaQuery
   ,transaction
   ,backFKRef
   )where
+import Graphics.UI.Threepenny.Core (mapEventFin)
 
 import RuntimeTypes
 import Control.Concurrent.Async
+import qualified Data.Poset as P
 import Debug.Trace
 import Data.Ord
 import qualified NonEmpty as Non
@@ -37,7 +39,6 @@ import Types.Patch
 import Query
 import qualified Types.Index as G
 import Data.Maybe
-import Prelude hiding (head)
 import qualified Data.Text as T
 
 --
@@ -86,6 +87,20 @@ deleteFrom  a   = do
 
 mergeDBRef  = (\(j,i) (m,l) -> ((M.unionWith (\(a,b) (c,d) -> (a+c,b<>d))  j  m , i <>  l )))
 
+mapT0EventFin i f x = do
+  (e,fin) <- mapEventFin f (rumors x)
+  be <-  liftIO $ f i
+  t <- stepper be e
+  return $ (tidings t e,fin)
+
+mapTEvent f x = fst <$> mapTEventFin f x
+
+mapTEventFin f x = do
+  i <- currentValue (facts x)
+  mapT0EventFin i f x
+
+
+
 tableLoader table  page size presort fixed
   | not $ L.null $ rawUnion table  = do
     inf <- ask
@@ -99,7 +114,6 @@ tableLoader table  page size presort fixed
     return $ (dbvar,o)
   | not  (null $ _rawScope table ) && not (S.null (rawFKS table) )= do
       inf <- ask
-      liftIO $ print $ (table,_rawScope table,rawFKS table,rawAttrs table)
       let [sref] =  filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope table)) (S.toList $ rawFKS table)
           stable = (\(Path _ (FKJoinTable rel t)) -> t) sref
       let mvar = mvarMap inf
@@ -111,6 +125,7 @@ tableLoader table  page size presort fixed
           defSort = fmap (,Desc) $  rawPK fromtable
       (l,i) <- local (const rinf) $ tableLoader  fromtable page  size defSort []
       ix <- mapM (\i -> do
+          liftIO$ print i
           (l,v) <- joinTable [(fromtable ,unTB1 i,sref)] table page size presort fixed
           return v ) (F.toList i)
       return (dbvar ,foldr mergeDBRef  (M.empty,G.empty) ix )
@@ -123,20 +138,21 @@ tableLoader table  page size presort fixed
         remoteFKS = S.filter (not .base )  (_rawFKSL table)
         getAtt i (m ,k ) = filter (( `S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues . unTB $ k
     (db,o) <- eventTable' (table {_rawFKSL = S.filter base  (_rawFKSL table)}) page size presort fixed
-    res <- foldl (\m (Path _ (FKJoinTable i j ))  -> m >>= (\m -> do
-        let rinf = justError "no schema" $ M.lookup ((fst j))  (depschema inf)
-            table = (lookTable rinf $ snd j)
-        (db,(_,tb)) <- local (const rinf) (tableLoader table  page size presort fixed)
-        let
-            tar = S.fromList $ fmap _relOrigin i
-            joinFK :: TBData Key Showable -> Column Key Showable
-            joinFK m  = FKT taratt i (joinRel (tableMeta table ) i (fmap unTB $ taratt ) tb)
-              where
-                    taratt = getAtt tar m
-            addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
-            addAttr r (m,i) = (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` tar   ) i )) i )
-        return ((\i -> addAttr  (joinFK i) i) <$> m)) )  (return $ snd o) (S.toList remoteFKS)
-    return $ (db,(fst o ,res))
+    let getFKS  v = foldl (\m (Path _ (FKJoinTable i j ))  -> m >>= (\m -> do
+          let rinf = justError "no schema" $ M.lookup ((fst j))  (depschema inf)
+              table = (lookTable rinf $ snd j)
+          (db,(_,tb)) <- local (const rinf) (tableLoader table  page size presort fixed)
+          let
+              tar = S.fromList $ fmap _relOrigin i
+              joinFK :: TBData Key Showable -> Column Key Showable
+              joinFK m  = FKT taratt i (joinRel (tableMeta table ) i (fmap unTB $ taratt ) tb)
+                where
+                      taratt = getAtt tar (tableNonRef' m)
+              addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
+              addAttr r (m,i) = (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` tar   ) i )) i )
+          return ((\i -> addAttr  (joinFK i) i) <$> m)) )  (return v) $ P.sortBy (P.comparing pathRelRel)  (S.toList remoteFKS)
+    res <- getFKS (snd o)
+    return $ (db  ,(fst o ,res))
 
 
 
@@ -144,11 +160,12 @@ tableLoader table  page size presort fixed
 
 joinTable :: [(Table,TBData Key Showable,Path (S.Set Key ) SqlOperation )]-> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
     -> TransactionM (DBVar,Collection Key Showable)
-joinTable reflist table page size presort fixed = do
+joinTable reflist table page size presort prefixed = do
     inf <- ask
     let mvar = mvarMap inf
         defSort = fmap (,Desc) $  rawPK table
         sortList  = if L.null presort then defSort else presort
+        fixed = concat ((\(_,i,_)-> fmap (("=",). uncurry  Attr ) $ getPKM i) <$> reflist ) <> prefixed
         fixidx = (L.sort $ snd <$> fixed )
         pagesize = maybe defsize id size
         filterfixed

@@ -561,7 +561,7 @@ joinRel tb rel ref table
   | L.any (isArray.keyType) origin
     = ArrayTB1 $ Non.fromList $  fmap (flip (joinRel tb (Le.over relOrigin unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(Non.length (unArray $ unAttr $ head ref) - 1)])
   | otherwise
-    = maybe (TB1 $ tblistM tb (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )) TB1 tbel
+    = maybe (TB1 $ tblistM tb (_tb . firstTB (\k -> fromMaybe k  $ M.lookup k relMap ) <$> ref )) TB1 tbel
       where origin = fmap _relOrigin rel
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
             invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel

@@ -1,5 +1,5 @@
 {-# LANGUAGE Arrows ,TupleSections,OverloadedStrings #-}
-module OAuthClient (oauthpoller,tokenToOAuth) where
+module OAuthClient (oauthpoller,transToken,tokenToOAuth,oauthToToken) where
 import Control.Exception
 import qualified Data.Text as T
 import Control.Arrow
@@ -15,6 +15,7 @@ import Control.Applicative
 import System.Environment
 
 import Types
+import Data.Traversable
 import RuntimeTypes
 import Debug.Trace
 
@@ -28,12 +29,17 @@ oauthToToken (OAuth2Tokens  t r i  k)
 
 liftA4 f  i j k  l= f <$> i <*> j <*> k <*> l
 
+tableToToken = atR "token" (fmap tokenToOAuth <$> (liftA4 (,,,) <$> idxM "accesstoken" <*> idxM "refreshtoken" <*> idxM "expiresin" <*> idxM "tokentype" ))
+
+transToken :: (Show k ,KeyString k ,Applicative m ,Monad m) => Maybe (TBData k Showable ) -> m (Maybe (OAuth2Tokens))
+transToken = fmap join . traverse ((fmap return) (dynPure   $ atR "token" (fmap tokenToOAuth <$> (liftA4 (,,,) <$> idxM "accesstoken" <*> idxM "refreshtoken" <*> idxM "expiresin" <*> idxM "tokentype" )) ))
+
 oauthpoller = BoundedPlugin2 "Gmail Login" "google_auth" url
   where
     url :: ArrowReader
     url = proc t -> do
        user <- idxK "username" -< ()
-       token <- atR "token" (liftA4 (,,,) <$> idxM "accesstoken" <*> idxM "refreshtoken" <*> idxM "expiresin" <*> idxM "tokentype" ) -< ()
+       token <- tableToToken  -< ()
        v <- act (\i -> liftIO$ do
           Just cid <- lookupEnv "CLIENT_ID"
           Just secret <- lookupEnv "CLIENT_SECRET"
@@ -42,7 +48,7 @@ oauthpoller = BoundedPlugin2 "Gmail Login" "google_auth" url
               requestNew = (do
                   putStrLn$ "Load this URL: "++ show permissionUrl
                   case os of
-                    "linux"  -> rawSystem "firefox" [permissionUrl]
+                    "linux"  -> rawSystem "chromium" [permissionUrl]
                     "darwin" -> rawSystem "open"       [permissionUrl]
                     _        -> return ExitSuccess
                   putStrLn "Please paste the verification code: "
@@ -51,7 +57,7 @@ oauthpoller = BoundedPlugin2 "Gmail Login" "google_auth" url
                   putStrLn $ "Received access token: " ++ show (accessToken tokens)
                   return tokens)
           maybe requestNew ((`catch` (\e -> traceShow (e :: SomeException) requestNew)) . refreshTokens client) i
-          ) -< tokenToOAuth <$> token
+          ) -< token
        token <- atR "token" ((,,,) <$> odxR "accesstoken" <*> odxR "refreshtoken" <*> odxR "expiresin" <*> odxR "tokentype" ) -< ()
        odxR "refresh" -< ()
        returnA -< Just . tblist . pure . _tb $ IT "token" (LeftTB1 $  oauthToToken <$> Just v )

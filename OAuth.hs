@@ -17,6 +17,7 @@ import System.Directory (doesFileExist)
 import Network.Google.OAuth2 (formUrl, exchangeCode, refreshTokens,
                               OAuth2Client(..), OAuth2Tokens(..))
 import Control.Applicative
+import OAuthClient
 import Text
 import qualified Data.Set as S
 import qualified Data.Foldable as F
@@ -54,7 +55,7 @@ url s u = "https://www.googleapis.com/" <> T.unpack s <> "/v1/users/"<> T.unpack
 
 urlJ :: Text -> TableK Key -> FTB (TBData Key Showable ) -> String
 urlJ s j pk
-  | tableName j == "google_auth" = prefix <> "users/me/"
+  | tableName j == "google_auth" = prefix <> "users/" <>  intercalate "," (renderShowable . snd <$> getPK pk)  <> "/"
   | otherwise = prefix <>  T.unpack (rawName j ) <> "/" <>  intercalate "," (renderShowable . snd <$> getPK pk)  <> "/"
   where prefix = "https://www.googleapis.com/" <> T.unpack s <> "/v1/"
 
@@ -136,8 +137,10 @@ joinGet tablefrom tableref from ref
 joinList [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))] tableref offset page maxResults sort ix
   | otherwise = do
       inf <- ask
-      tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
-      let user = fst $ fromJust $ token inf
+      pretok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
+      let user =  fromJust $ token inf
+          tok = if tableName tablefrom  == "google_auth" then  justError (" no token " <> show from) transTok else pretok
+          transTok  = runIdentity $ transToken (Just from)
       decoded <- liftIO $ do
           let req = urlJ (schemaName inf) tablefrom (TB1 from  )<> T.unpack (rawName tableref) <>  "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> ("maxResults=" <> show (maybe defsize id maxResults) <> "&")  <> "access_token=" ++ ( accessToken tok)
           print req
