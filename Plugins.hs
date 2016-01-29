@@ -272,7 +272,7 @@ areaDesign = PurePlugin pname tname  url
 
 designDeposito = StatefullPlugin "Design Deposito" "deposito"
   [(([],[
-    ("minimal_flow",atPrim PDouble), ("min_sprinkler_count",atPrim PInt)])
+    ("minimal_flow",atPrim PDouble), ("min_sprinkler_count",atPrim PInt),("min_supply_volume",atPrim PDouble)])
     ,minimalDesign)]
 
 minimalDesign = PurePlugin pname tname  url
@@ -286,11 +286,17 @@ minimalDesign = PurePlugin pname tname  url
       d <- doubleP "densidade"  -< ()
       a <- doubleP "area_operacao"  -< ()
       asp <- atR "densidade" (doubleP "area") -< ()
+      tdur <- atR "altura_armazenamento,classe" (doubleP "tempo") -< ()
       odxR  "minimal_flow" -< ()
       odxR  "min_sprinkler_count" -< ()
+      odxR  "min_supply_volume" -< ()
       let af = d * fromIntegral msc * asp * 60
           msc = ceiling $ a / asp
-      returnA -< Just $ tblist $ _tb <$> [Attr "minimal_flow" ((TB1 . SDouble)  af),  (Attr "min_sprinkler_count" . TB1 . SNumeric ) msc]
+          msv =  tdur * af *60
+      returnA -< Just $ tblist $ _tb <$>
+            [ Attr "min_supply_volume" ((TB1 . SDouble)  msv)
+            , Attr "minimal_flow" ((TB1 . SDouble)  af)
+            , (Attr "min_sprinkler_count" . TB1 . SNumeric ) msc]
 
 
 
