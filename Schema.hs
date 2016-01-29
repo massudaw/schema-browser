@@ -132,7 +132,6 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
         schemaForeign :: Query
         schemaForeign = "select target_schema_name from metadata.fks where origin_schema_name = ? and target_schema_name <> origin_schema_name"
        rslist <- query conn  schemaForeign (Only schema)
-       print rslist
        rsch <- M.fromList <$> mapM (\(Only s) -> (s,) <$> keyTables  schemaVar conn (s,user) authMap pluglist) rslist
        let lookFk t k = V.toList $ lookupKey2 (fmap (t,) k)
            lookRFk s t k = V.toList $ lookupKey2 (fmap (t,) k)
@@ -146,7 +145,6 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
           foreignKeys :: Query
           foreignKeys = "select origin_table_name,target_schema_name,target_table_name,origin_fks,target_fks,rel_fks from metadata.fks where origin_schema_name = ?"
        fks <- M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) ( FKJoinTable (zipWith3 (\a b c -> Rel a b c) (lookFk tp kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation ) )))
-       print fks
 
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  M.toList keyMap :: Map Text (Set Key)
            i3l =  (\(c,(pksl,scp,is_sum))-> let
@@ -298,7 +296,7 @@ logTableModification inf (TableModification Nothing table i) = do
 
   let ltime =  utcToLocalTime utc $ time
       (_,pidx,pdata) = firstPatch keyValue  i
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index2,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (username inf ,ltime,rawName table, V.fromList <$> nonEmpty (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) pidx )) , Binary  .B.encode <$> V.fromList pdata , schemaName inf)
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index2,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (username inf ,ltime,rawName table, V.fromList <$> nonEmpty (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) pidx )) , fmap (Binary  . B.encode ) . V.fromList <$> nonEmpty pdata , schemaName inf)
   return (TableModification (Just id) table i )
 
 

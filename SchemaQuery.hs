@@ -44,7 +44,7 @@ import qualified Data.Text as T
 --  MultiTransaction Postgresql insertOperation
 --
 
-defsize = 200
+defsize = 100
 
 estLength page size resL est = fromMaybe 0 page * size  +  est
 
@@ -166,7 +166,7 @@ joinTable reflist table page size presort fixed = do
                 && sq > pagesize * (fromMaybe 0 page + 1) -- Tabela é maior que a página
                 && pagesize * (fromMaybe 0 page +1) > G.size (filterfixed reso)  ) -- O carregado é menor que a página
              then do
-                   liftIO$ putStrLn $ "new page " <> show (tableName table)
+                   liftIO$ putStrLn $ "new page " <> show (tableName table,pagesize,(G.size (filterfixed reso)),sq)
                    let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                    (res,nextToken ,s ) <- (joinListEd $ schemaOps inf) reflist table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
                    let ini = (M.insert fixidx (estLength page pagesize res s  ,(\v -> M.insert ((fromMaybe 0 page +1 )*pagesize) v  mp) $ justError "no token"    nextToken) fixedmap , createUn (S.fromList $ rawPK table)  (fmap unTB1 res)<> reso )

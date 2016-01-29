@@ -46,10 +46,6 @@ plugs schm authmap db plugs = do
 
 index tb item = snd $ justError ("no item" <> show item) $ indexTable (IProd True [item]) (tableNonRef' tb)
 
-testPoller plug = do
-  smvar <- newMVar M.empty
-  poller smvar  undefined (BrowserState "localhost" "5432" "incendio" "postgres" "queijo" Nothing Nothing Nothing ) [plug] True
-
 checkTime polling tb = do
     let curr = justError (show $ tbpred tb) $ G.lookup (tbpred tb) polling
         tbpred = G.Idex . getPKM

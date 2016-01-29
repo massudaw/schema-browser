@@ -53,4 +53,17 @@ main = do
           deleteClient metas (sToken w) )
   print "Finish Server"
 
+testPoller plug = do
+  let bstate = (BrowserState "localhost" "5432" "incendio" "postgres" "queijo" Nothing Nothing Nothing )
+      db = bstate
+  smvar <- newMVar M.empty
+  conn <- connectPostgreSQL (connRoot db)
+  let
+    amap = authMap smvar db (user db , pass db )
+  print "Load Metadata"
+  metas <- keyTables  smvar conn  ("metadata", T.pack $ user db) amap plugList
+
+
+  poller smvar  undefined bstate [plug] True
+
 

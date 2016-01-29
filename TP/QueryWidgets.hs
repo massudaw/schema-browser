@@ -929,8 +929,8 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
       -- Filter and paginate
       (offset,res3)<- do
         res3 <- mapTEvent return ((\i -> fmap (filter (filtering i))) <$> filterInpT <*> (liftA2 (\ (a,i) j -> (a,applyConstr i j) ) presort constrT))
-        element itemListEl # sink UI.size (show . (\i -> if i > 21 then 21 else i) . length .snd <$> facts res3)
-        offset <- offsetField ((\i j -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i (snd j) ) i )<$> tdi <*> res3) wheel  (lengthPage <$> facts res3)
+        element itemListEl # sink UI.size (show . (\i -> if i > 21 then 21 else (i +1 )) . length .snd <$> facts res3)
+        offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i (snd j) ) i )<$> facts res3 <#> (fmap (unTB1._fkttable )<$> oldItems)) wheel  (lengthPage <$> facts res3)
         return (offset, res3)
       -- Load not found items
       onEvent (filterE (\(a,b,c) ->  isJust a &&   isJust b && isNothing c)  $ rumors $ (,,) <$> iold2 <*> ftdi2 <*> tdi)  $ (\(o,_,_) ->
@@ -940,7 +940,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
           return () ) o)
       -- Load offseted items
       onEvent (filterE (isJust . fst) $ (,) <$> facts iold2 <@> rumors (triding offset)) $ (\(o,i) ->  traverse (\o -> liftIO $ do
-        transaction inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` 10) Nothing  [] (fmap (("=",).replaceKey)  o)) o  )
+        transaction inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` 5) Nothing  [] (fmap (("=",).replaceKey)  o)) o  )
       -- Select page
       let
         paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset

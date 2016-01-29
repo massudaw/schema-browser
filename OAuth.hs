@@ -62,6 +62,7 @@ urlT s u
   | s == "lists" = "https://www.googleapis.com/" <> T.unpack s <> "/v1/" <> "users/me/"
   | otherwise = "https://www.googleapis.com/" <> T.unpack s <> "/v1/"
 
+defsize = 100
 updateTable table reference page maxResults
   | tableName table == "history" = do
     inf <- ask
@@ -86,7 +87,7 @@ listTable table offset page maxResults sort ix
     tok <- liftIO$ R.currentValue $ R.facts (snd $ justError "no token" $ token $  inf)
     let user = fst $ justError "no token" $ token inf
     decoded <- liftIO $ do
-        let req =  url (schemaName inf) user <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> ("maxResults=" <> show (maybe 200 id maxResults) <> "&") <> "access_token=" ++ ( accessToken tok )
+        let req =  url (schemaName inf) user <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> ("maxResults=" <> show (maybe defsize id maxResults) <> "&") <> "access_token=" ++ ( accessToken tok )
         print  req
         (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
         print ("list",table,t)
@@ -138,7 +139,8 @@ joinList [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))] tableref offset page
       tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
       let user = fst $ fromJust $ token inf
       decoded <- liftIO $ do
-          let req = urlJ (schemaName inf) tablefrom (TB1 from  )<> T.unpack (rawName tableref) <>  "?access_token=" ++ ( accessToken tok)
+          let req = urlJ (schemaName inf) tablefrom (TB1 from  )<> T.unpack (rawName tableref) <>  "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> ("maxResults=" <> show (maybe defsize id maxResults) <> "&")  <> "access_token=" ++ ( accessToken tok)
+          print req
           (t,v) <- duration
                   (simpleHttpHeader [("GData-Version","3.0")] req )
           print ("joinList",tablefrom,tableref ,getPKM from, t)
