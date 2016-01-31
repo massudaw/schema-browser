@@ -117,13 +117,34 @@ insertTable pk
         return $ decode v
     fmap (TableModification Nothing table . patch .unTB1) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table ) .  fmap (\i -> (i :: Value)  ) $  decoded)
 
+lookOrigin  k (i,m) = unTB $ err $  find (( k == ). S.fromList . fmap _relOrigin. keyattr ) (F.toList $  unKV m)
+    where
+      err= justError ("no attr " <> show k <> " for table " <> show (_kvname i))
+
 
 joinGet tablefrom tableref from ref
   | S.fromList (fmap _relOrigin (getKeyAttr ref) ) ==  S.fromList (rawPK tableref <> S.toList (rawAttrs tableref ) <> rawDescription tableref) = return Nothing
-  | tableName tableref == "attachments" || not ( null $ _rawScope tableref )= do
+  |  not $ null $ _rawScope tableref = do
     inf <- ask
-    tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
+
+    pretok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
     let user = fst $ fromJust $ token inf
+        tok = if tableName tablefrom  == "google_auth" then  justError (" no token " <> show from) transTok else pretok
+        transTok  = runIdentity $ transToken (Just $ unTB1 from)
+    decoded <- liftIO $ do
+        let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  urlJ (schemaName inf) tablefrom from )  <>  T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK ref ) <> "?access_token=" ++ ( accessToken tok)
+        print req
+        (t,v) <- duration
+                (simpleHttpHeader [("GData-Version","3.0")] req )
+        print ("joinGet",tablefrom,tableref ,getPK from, getPK ref ,t)
+        return $ decode v
+    traverse (convertAttrs inf (Just $ (tableref,unTB1 ref)) (_tableMapL inf) tableref ) .  fmap (\i -> (i :: Value)  ) $  decoded
+  | tableName tableref == "attachments"  = do
+    inf <- ask
+    pretok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
+    let user = fst $ fromJust $ token inf
+        tok = if tableName tablefrom  == "google_auth" then  justError (" no token " <> show from) transTok else pretok
+        transTok  = runIdentity $ transToken (Just $ unTB1 from)
     decoded <- liftIO $ do
         let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  urlJ (schemaName inf) tablefrom from )  <>  T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK ref ) <> "?access_token=" ++ ( accessToken tok)
         print req
@@ -163,11 +184,13 @@ getTable tb pk
   | tableName tb == "attachments" = return  Nothing
   | not $ null $ _rawScope tb = do
       inf <- ask
-      liftIO $ print $ (tb,_rawScope tb)
+      liftIO $ print $ (tb,_rawScope tb,rawFKS tb)
       let [sref] = filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope tb )) (S.toList $ rawFKS tb )
+      let
           (Path spk  (FKJoinTable rel stable)) =  sref
+          tableScope = _fkttable $ lookOrigin  spk (unTB1 pk)
       let fromtable = (lookSTable inf $ stable)
-      joinGet fromtable  tb  ( _fkttable $ unTB $ head $ F.toList $  _kvvalues $ unTB $  tbUn spk pk)  pk
+      joinGet fromtable  tb  tableScope  pk
   | S.fromList (fmap _relOrigin (getKeyAttr pk) ) ==  S.fromList (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb) = return Nothing
   | otherwise = do
     inf <- ask
@@ -219,11 +242,14 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                     (traverse (\v -> do
                         let ref = [Compose .Identity . Types.Attr  k $ v]
                         tbs <- liftIO$ runDBM infsch (atTable (tableMeta $ lookTable infsch trefname))
-                        reftb <- joinRelT fk (fmap unTB ref) (lookTable infsch trefname) tbs
-                        patch <- maybe (return reftb ) (\(tref,getref )-> traverse (\reftb -> do
+                        let reftb = joinRel2 (tableMeta $ lookTable infsch trefname) fk (fmap unTB ref)  tbs
+                        reftbT <- joinRelT  fk (fmap unTB ref) ( lookTable infsch trefname) tbs
+                        liftIO$ print reftb
+                        patch <- maybe (  (\(tref,getref )-> traverse (\reftb -> do
+                            liftIO$ print "cascade join get"
                             pti <- joinGetDiffTable tref (lookTable infsch trefname) getref reftb
                             tell (TableModification Nothing (lookTable infsch trefname) <$> maybeToList pti)
-                            return $ maybe (reftb) (unTB1 . apply (TB1 reftb) . PAtom) pti) reftb ) getref
+                            return $ maybe (reftb) (unTB1 . apply (TB1 reftb) . PAtom) pti) reftbT  ) $ justError "no ref"  getref) return reftb
                         return $ FKT ref fk   patch ))
                funL = funO  True (exchange trefname $ keyType k) vk
                funR = funO  True ( keyType k) vk

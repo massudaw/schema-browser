@@ -887,6 +887,7 @@ isInline (KArray i ) = isInline i
 isInline (Primitive (RecordPrim _ ) ) = True
 isInline _ = False
 
+unTB1 :: Show a=> FTB a -> a
 unTB1 i = fromMaybe (errorWithStackTrace ("unTB1" <> show i)) . headMay . F.toList $ i
 
 -- Intersections and relations

@@ -56,7 +56,9 @@ oauthpoller = BoundedPlugin2 "Gmail Login" "google_auth" url
                   tokens   <- exchangeCode client authcode
                   putStrLn $ "Received access token: " ++ show (accessToken tokens)
                   return tokens)
-          maybe requestNew ((`catch` (\e -> traceShow (e :: SomeException) requestNew)) . refreshTokens client) i
+          tokens  <- maybe requestNew ((`catch` (\e -> traceShow (e :: SomeException) requestNew)) . refreshTokens client) i
+          putStrLn $ "New Token: " ++  show (accessToken tokens)
+          return tokens
           ) -< token
        token <- atR "token" ((,,,) <$> odxR "accesstoken" <*> odxR "refreshtoken" <*> odxR "expiresin" <*> odxR "tokentype" ) -< ()
        odxR "refresh" -< ()

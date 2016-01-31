@@ -361,7 +361,7 @@ viewerKey inf table cli cliTid = mdo
      filtering res = (\t -> fmap (filter (filteringPred t )) )<$> filterInpT  <*> res
      pageSize = 20
      lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
-        where (s,_) = justLook [] fixmap
+        where (s,_)  = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup [] fixmap
   inisort <- currentValue (facts tsort)
   itemListEl <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
   let wheel = negate <$> mousewheel itemListEl
@@ -383,7 +383,7 @@ viewerKey inf table cli cliTid = mdo
   prop <- stepper cv evsel
   let tds = tidings prop (diffEvent  prop evsel)
 
-  (cru,ediff,pretdi) <- crudUITable inf (pure "Editor")  reftb [] [] (allRec' (tableMap inf) table) tds
+  (cru,ediff,pretdi) <- crudUITable inf (pure "Editor")  reftb [] [] (allRec' (tableMap inf) table) (tds)
   diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip apply j ) i) <$> facts pretdi <@> ediff
   let
      sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]

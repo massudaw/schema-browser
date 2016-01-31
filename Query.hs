@@ -8,6 +8,7 @@ module Query
   (
   tbPK
   ,joinRel
+  ,joinRel2
   ,alterKeyType
   ,searchGist
   ,forceDAttr
@@ -566,6 +567,20 @@ joinRel tb rel ref table
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
             invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
             tbel = searchGist  invrelMap tb table (Just ref)
+
+joinRel2 :: (Ord a ,Show a,G.Predicates (G.TBIndex Key a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex Key a) (TBData Key a) -> Maybe (FTB (TBData Key a))
+joinRel2 tb rel ref table
+  | L.all (isOptional .keyType) origin
+    = fmap LeftTB1  $ fmap (flip (joinRel2 tb (Le.over relOrigin unKOptional <$> rel ) ) table) (Tra.traverse unLeftItens ref )
+  | L.any (isArray.keyType) origin
+    = fmap (ArrayTB1 .  Non.fromList ) $Tra.sequenceA   $ fmap (flip (joinRel2 tb (Le.over relOrigin unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(Non.length (unArray $ unAttr $ head ref) - 1)])
+  | otherwise
+    =  TB1 <$> tbel
+      where origin = fmap _relOrigin rel
+            relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
+            invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
+            tbel = searchGist  invrelMap tb table (Just ref)
+
 
 
 
