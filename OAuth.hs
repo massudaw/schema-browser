@@ -244,12 +244,10 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                         tbs <- liftIO$ runDBM infsch (atTable (tableMeta $ lookTable infsch trefname))
                         let reftb = joinRel2 (tableMeta $ lookTable infsch trefname) fk (fmap unTB ref)  tbs
                         reftbT <- joinRelT  fk (fmap unTB ref) ( lookTable infsch trefname) tbs
-                        liftIO$ print reftb
-                        patch <- maybe (  (\(tref,getref )-> traverse (\reftb -> do
-                            liftIO$ print "cascade join get"
+                        patch <- maybe (maybe (return reftbT)   (\(tref,getref )-> traverse (\reftb -> do
                             pti <- joinGetDiffTable tref (lookTable infsch trefname) getref reftb
                             tell (TableModification Nothing (lookTable infsch trefname) <$> maybeToList pti)
-                            return $ maybe (reftb) (unTB1 . apply (TB1 reftb) . PAtom) pti) reftbT  ) $ justError "no ref"  getref) return reftb
+                            return $ maybe (reftb) (unTB1 . apply (TB1 reftb) . PAtom) pti) reftbT  )    getref) return reftb
                         return $ FKT ref fk   patch ))
                funL = funO  True (exchange trefname $ keyType k) vk
                funR = funO  True ( keyType k) vk

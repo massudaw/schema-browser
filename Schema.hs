@@ -303,7 +303,7 @@ logTableModification inf (TableModification Nothing table i) = do
 
 dbTable mvar table = do
     mmap <- atomically $readTMVar mvar
-    return . justError "no mvar " . M.lookup table $ mmap
+    return . justError ("no mvar " <> show table) . M.lookup table $ mmap
 
 
 mergeCreate (Just i) (Just j) = Just $ mergeTB1 i j
@@ -329,7 +329,7 @@ applyAttr' (Attr k i) (PAttr _ p)  = return $ Attr k (apply i p)
 applyAttr' sfkt@(FKT iref rel i) (PFK _ p m b )  =  do
                             let ref =  F.toList $ M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList iref)
                                 edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (  flip apply k  ) v else v
-                            tbs <- atTable m
+                            tbs <- atTableS (_kvschema m) m
                             return $ FKT ref rel (maybe (joinRel m rel (fmap unTB ref) ( tbs)) id (Just $ create b))
 applyAttr' (IT k i) (PInline _   p)  = IT k <$> (applyFTBM (fmap pure $ create) applyRecord' i p)
 -- applyAttr' i j = errorWithStackTrace (show ("applyAttr'" :: String,i,j))
@@ -356,7 +356,7 @@ createAttr' (PAttr  k s  ) = return $ Attr k  (create s)
 createAttr' (PInline k s ) = return $ IT k (create s)
 createAttr' (PFK rel k s b ) = do
       let ref = (_tb . create <$> k)
-      tbs <- atTable s
+      tbs <- atTableS (_kvschema s) s
       return $ FKT ref rel (maybe (joinRel s rel (fmap unTB ref) ( tbs)) id (Just $ create b))
 -- createAttr' i = errorWithStackTrace (show i)
 
@@ -368,16 +368,18 @@ createTB1' (m ,s ,k)  = fmap (m ,)  $ fmap (_tb .KV . mapFromTBList ) . traverse
 
 
 
-type Database k v = TMVar (Map (KVMetadata k) (DBVar2 k v) )
+type Database k v = InformationSchemaKV k v
 type DBM k v = ReaderT (Database k v) IO
 
-atTable ::  (MonadReader
-                (TMVar (Map (KVMetadata k) (DBVar2 k a)))
-                (ReaderT (Database k v) IO) , Ord k )
-        => KVMetadata k -> DBM k v (TableIndex k a )
+atTableS s  k = do
+  i <- ask
+  k <- liftIO$ dbTable (mvarMap $ fromMaybe i (M.lookup s (depschema i))) k
+  (\(DBVar2 _ _   _ _ c)-> liftIO $ R.currentValue (R.facts c)) k
+
+
 atTable k = do
   i <- ask
-  k <- liftIO$ dbTable i k
+  k <- liftIO$ dbTable (mvarMap i) k
   (\(DBVar2 _ _   _ _ c)-> liftIO $ R.currentValue (R.facts c)) k
 
 joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  G.GiST (G.TBIndex Key Showable) (TBData Key Showable) -> TransactionM ( FTB (TBData Key Showable))
@@ -410,7 +412,7 @@ addStats schema = do
 
 
 runDBM inf m = do
-    runReaderT m (mvarMap inf)
+    runReaderT m inf
 
 
 lookPK :: InformationSchema -> (Set Key) -> Table

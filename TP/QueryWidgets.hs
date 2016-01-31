@@ -973,7 +973,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods wl  oldItems  tb@(FKT if
       tds <- foldr (\i j ->updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap (unTB1. _fkttable).filterJust . rumors . snd <$>  plmods)
       element itemList #  sink text (maybe "" (\v -> (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v))<$>  facts (ptds )) # set UI.style [("border","1px solid gray"),("height","20px")]
       (celem,ediff,pretdi) <-crudUITable inf (pure "None") reftb staticold (fmap (fmap (fmap (unTB1 . _fkttable))) <$> plmods)  tbdata tds
-      (diffUp,fin2) <-  mapEventFin (fmap pure ) $ (\i j -> traverse (runDBM inf .  flip applyRecord' j ) i) <$>  facts pretdi <@> ediff
+      (diffUp,fin2) <-  mapEventFin (fmap pure ) $ (\i j -> traverse (runDBM inf .  flip applyRecord' (fixPatch inf (_kvname m) j) ) i) <$>  facts pretdi <@> ediff
       let
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> triding itemList), if isReadOnly tb then never else rumors tdi]),diffUp]
       st <- stepper cv sel

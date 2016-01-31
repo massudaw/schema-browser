@@ -41,20 +41,22 @@ import GHC.Stack
 metaInf :: MVar (Map Text InformationSchema ) -> IO InformationSchema
 metaInf smvar = justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
 
-data InformationSchema
+
+type InformationSchema = InformationSchemaKV Key Showable
+data InformationSchemaKV k v
   = InformationSchema
   { schemaName :: Text
   , username :: Text
   , authtoken :: Auth
-  , _keyMapL :: Map (Text,Text) Key
+  , _keyMapL :: Map (Text,Text) k
   , _backendKey :: Map Unique PGKey
-  , _pkMapL :: Map (Set Key) Table
+  , _pkMapL :: Map (Set k ) Table
   , _tableMapL :: Map Text Table
   , tableSize :: Map Table Int
-  , mvarMap :: TMVar (Map (KVMetadata Key) (DBVar ))
+  , mvarMap :: TMVar (Map (KVMetadata k) (DBVar2 k v ))
   , rootconn :: Connection
-  , metaschema :: Maybe InformationSchema
-  , depschema :: Map Text InformationSchema
+  , metaschema :: Maybe (InformationSchemaKV k v)
+  , depschema :: Map Text (InformationSchemaKV k v)
   , schemaOps :: SchemaEditor
   , plugins :: [Plugins ]
   }
@@ -253,6 +255,5 @@ fixPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel2 (fmap (fixPatchAttr inf 
           rinf = fromMaybe inf (M.lookup schname (depschema inf))
 
 
-
-makeLenses ''InformationSchema
+makeLenses ''InformationSchemaKV
 
