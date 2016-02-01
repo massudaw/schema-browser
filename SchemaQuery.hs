@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings,TupleSections #-}
+{-# LANGUAGE FlexibleContexts,OverloadedStrings,TupleSections #-}
 module SchemaQuery
   (eventTable
   ,createUn

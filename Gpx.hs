@@ -1,9 +1,8 @@
-{-# LANGUAGE Arrows, TupleSections,OverloadedStrings,NoMonomorphismRestriction #-}
+{-# LANGUAGE Arrows, TupleSections,OverloadedStrings ,NoMonomorphismRestriction #-}
 module Gpx
   (readArt,readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readHtmlReceita,readHtml) where
 
 import Types
--- import Query
 import Data.String
 import Control.Applicative
 
@@ -20,22 +19,24 @@ import qualified Data.Text.Encoding as TE
 import qualified Data.Text as TE
 
 
-import Prelude hiding ((.),id,head)
+import Prelude hiding ((.),id,head,elem)
+import qualified Prelude as Prelude
 import Control.Category
 
 import Debug.Trace
 
+elem :: Char -> String -> Bool
+elem = Prelude.elem
 
 atTag tag = deep (isElem >>> hasName tag)
 
-text = getChildren >>> getText
 
 
 
 getTable :: ArrowXml a => a XmlTree [[String]]
 getTable =  atTag "table"  >>> listA (rows >>> listA cols) where
         rows = getChildren >>> hasName "tr"
-        cols = atTag "td" />   (( getChildren >>> getText) <+> (hasText ( not .all (`elem` " \t\r\n")) >>>  getText))
+        cols = atTag "td" />   (( getChildren >>> getText) <+> (hasText ( not .all (`elem` (" \t\r\n" :: String))) >>>  getText))
 
 getTable' :: ArrowXml a => a XmlTree b  -> a XmlTree [[b]]
 getTable' b=  atTag "table"  >>> listA (rows >>> listA cols) where
@@ -44,7 +45,7 @@ getTable' b=  atTag "table"  >>> listA (rows >>> listA cols) where
 
 
 is x = deep (isElem >>> hasName x)
-
+{-
 getPoint = atTag "trkpt" >>>
   proc x -> do
     lat <- getAttrValue "lat"  -< x
@@ -52,7 +53,7 @@ getPoint = atTag "trkpt" >>>
     ele <- text <<< atTag "ele" -< x
     time <- text <<< atTag "time" -< x
     returnA -< [SPosition $ Position (read lat,read lon,read ele),STimestamp $  fromJust $ fmap fst  $ strptime "%Y-%m-%dT%H:%M:%SZ" time ]
-
+-}
 file :: Showable
 file = "/home/massudaw/2014-08-27-1653.gpx"
 
@@ -113,9 +114,9 @@ testCreaArt = do
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
   readArt inp
 
-
-
 {-
+
+
 testCpfName = do
   kk <- BS.readFile "cpf_name.html"
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
@@ -164,6 +165,7 @@ readArt file = do
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
         >>> getTable' (getTable' (fmap (trim . filter (not .(`elem` "\r\t\n"))) . filter (not . all (`elem` "\r\t\n " )) ^<< listA (deep getText)))
   runX arr
+
 
 readHtml file = do
   let

@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
+{-# LANGUAGE FlexibleContexts,TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
 module PostgresQuery where
 
 import Types

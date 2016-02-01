@@ -36,6 +36,7 @@ import Control.Monad.Reader
 import Data.Functor.Apply
 import Debug.Trace
 import Data.Time.Parse
+import Prelude hiding (elem)
 import Data.Maybe
 import Data.Functor.Identity
 import Control.Applicative
@@ -93,7 +94,7 @@ siapi2Hack = BoundedPlugin2  pname tname url
       b <- act (Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return (Nothing,Nothing) else liftIO (siapi2  i j )  )) -<  (liftA2 (,) protocolo ano )
       let ao (sv,bv)  = Just $ tblist   $ svt  sv <> [iat $ bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
-          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))])
+          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
           convertAndamento i = error $ "convertAndamento " <> show i
           svt bv = catMaybes $ fmap attrT . (\i -> traverse (\k -> fmap snd $ L.find (L.isInfixOf k. fst ) map) (swap i)) <$>  value_mapping
             where map = fmap (LeftTB1 . Just . TB1 . SText . T.pack ) <$> bv
@@ -120,12 +121,13 @@ siapi2Plugin = BoundedPlugin2  pname tname url
       b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return (Nothing ,Nothing) else liftIO (siapi2  i j >> error "siapi2 test error")  )) -<  (liftA2 (,) protocolo ano )
       let ao bv  = Just $ tblist   [iat bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
-          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`L.elem` "\n\r\t")) $ T.pack  des))])
+          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
                             "andamentos"
                             (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $  reverse $  fmap convertAndamento bv))
-      returnA -< join  (  ao  .  tailEmpty . concat <$> join (fmap snd b))
+      returnA -< join  (  ao  .  tailEmpty . join <$> join (fmap snd b))
+    tailEmpty :: [a] -> [a]
     tailEmpty [] = []
     tailEmpty i  = tail i
 
@@ -375,8 +377,8 @@ siapi3Plugin  = BoundedPlugin2 pname tname  url
 bool = TB1 . SBoolean
 num = TB1 . SNumeric
 
-
-
+elem :: Char -> String -> Bool
+elem = L.elem
 
 
 {-
