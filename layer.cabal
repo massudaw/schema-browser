@@ -19,7 +19,43 @@ executable threepenny-layer
   main-is:             Main.hs
   -- ghc-options:         -O2 -threaded  -fcontext-stack=50
   ghc-options:         -O -threaded -rtsopts -fprof-auto -fprof-cafs -caf-all -fcontext-stack=50
-  -- other-modules:       
+  other-modules:       
+    CnpjReceita
+    Crea
+    Data.Poset
+    Data.Poset.Instances
+    Data.Poset.Internal
+    Gpx
+    Incendio
+    Location
+    NonEmpty
+    OAuth
+    OAuthClient
+    OFX
+    PandocRenderer
+    Plugins
+    Poller
+    PostgresQuery
+    Postgresql
+    Postgresql.Printer
+    PrefeituraSNFSE
+    Query
+    RuntimeTypes
+    Schema
+    SchemaQuery
+    Siapi3
+    SortList
+    Step.Client
+    Step.Common
+    Step.Host
+    TP.Browser
+    TP.QueryWidgets
+    TP.Widgets
+    Text
+    Types
+    Types.Index
+    Types.Patch
+    Utils
   extensions: TupleSections,OverloadedStrings
   build-depends:       scientific,blaze-builder,base ==4.8.*
    , postgresql-simple >=0.4 && <0.5
