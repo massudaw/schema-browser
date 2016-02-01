@@ -240,19 +240,18 @@ liftPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel (fmap (liftPatchAttr inf
           rinf = fromMaybe inf (M.lookup schname (depschema inf))
 
 
-fixPatch :: a ~ Index a => InformationSchema -> Text -> Index (TBData Key a) -> Index (TBData Key a)
+fixPatch ::  a ~ Index a => InformationSchema -> Text -> TBIdx Key a  -> TBIdx Key a
 fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
-
-
-fixPatchAttr :: a ~ Index a => InformationSchema -> Text -> Index (Column Key a) -> Index (Column Key a)
-fixPatchAttr inf t p@(PAttr _ _ ) =  p
-fixPatchAttr inf tname p@(PInline rel e ) =  PInline rel (fmap (\(_,o,v)-> (tableMeta $ lookTable inf tname2,o,fmap (fixPatchAttr  inf tname2 )v)) e)
-    where Just (FKInlineTable (_,tname2)) = fmap (unRecRel.pathRel) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (keyValue rel)) )  (F.toList$ rawFKS  ta)
-          ta = lookTable inf tname
-fixPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa) (tableMeta $ lookTable rinf tname2) b
-    where (FKJoinTable  _ (schname,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
-          ta = lookTable inf tname
-          rinf = fromMaybe inf (M.lookup schname (depschema inf))
+  where
+    fixPatchAttr ::  InformationSchema -> Text -> PathAttr Key a -> PathAttr Key a
+    fixPatchAttr inf t p@(PAttr _ _ ) =  p
+    fixPatchAttr inf tname p@(PInline rel e ) =  PInline rel (fmap (\(_,o,v)-> (tableMeta $ lookTable inf tname2,o,fmap (fixPatchAttr  inf tname2 )v)) e)
+        where Just (FKInlineTable (_,tname2)) = fmap (unRecRel.pathRel) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (keyValue rel)) )  (F.toList$ rawFKS  ta)
+              ta = lookTable inf tname
+    fixPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa) (tableMeta $ lookTable rinf tname2) b
+        where (FKJoinTable  _ (schname,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+              ta = lookTable inf tname
+              rinf = fromMaybe inf (M.lookup schname (depschema inf))
 
 
 makeLenses ''InformationSchemaKV

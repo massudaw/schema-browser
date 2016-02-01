@@ -1,0 +1,20 @@
+flags:
+  strptime:
+    split-base: true
+  threepenny-gui:
+    rebug: false
+    buildexamples: false
+packages:
+- '.'
+- threepenny-gui-0.4.2.0/
+- data-interval/
+- strptime-1.0.10/
+- handa-gdata-0.7.0.3/
+- GiST-0.0.1/
+- ofx-0.4.0.4/
+- http-client-openssl-0.2.0.1/
+- extended-reals-0.2.1.0/
+- wreq-0.4.0.0/
+- websockets-snap-0.9.2.0/
+extra-deps: []
+resolver: lts-3.8

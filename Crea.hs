@@ -144,7 +144,7 @@ convertArt v =
   tblist $ fmap _tb
   [numberA "substituida" $ join $ fmap (fmap (L.drop 2 .snd .L.break (== 'à')) .L.find ("Substituição à" `L.isInfixOf`) .  concat . fmap (\(i,j) -> [i,j]) . M.toList ) v `atMay` 0
   -- ,numberA "contrato" $ at 2 "Contrato:"
-  ,textA "cpf_cnpj" $ filter (not . (`elem` " /-." )) <$> at 2 "CPF/CNPJ:"
+  ,textA "cpf_cnpj" $ filter (not . (`L.elem` (" /-." ::String))) <$> at 2 "CPF/CNPJ:"
   ,textA "contratante" $  at 2 "Contratante:"
   ]
   where at ix k = join $ M.lookup k <$> v `atMay` ix

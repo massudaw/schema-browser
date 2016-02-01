@@ -62,7 +62,7 @@ siapi2 protocolo ano = do
             ia =  TL.unpack .  TL.decodeLatin1 <$> (join $ (^? responseBody) <$> tq)
           vs <- traverse readHtml  is
           va <- traverse readHtml  ia
-          let rem ts = L.filter (not. all (`elem` "\n\r\t ")) (fmap (L.filter (not .(`elem` "\"\\"))) ts)
+          let rem ts = L.filter (not. all (`elem` ("\n\r\t " :: String))) (fmap (L.filter (not .(`elem` ("\"\\" :: String)))) ts)
               split4 ts = if L.length ts == 4 then [L.take 2 ts,L.drop 2 ts] else [ts]
           return (fmap ((\[i,j]-> (i,j)) . L.take 2) . L.filter ((==2) . L.length) . traceShowId . concat .fmap (split4.rem) . concat <$>vs,fmap rem . tailEmpty . concat <$>va)
 
@@ -90,7 +90,5 @@ protocolocnpjForm prot ano cgc_cpf vv = ["javax.faces.partial.ajax"  := ("true":
 siapiAndamento3Url = "https://siapi3.bombeiros.go.gov.br/paginaInicialWeb.jsf"
 siapiListAndamento3Url = "https://siapi3.bombeiros.go.gov.br/listarAndamentosWeb.jsf"
 
-testSiapi2 = do
-     siapi2 "1" "14"
 
 

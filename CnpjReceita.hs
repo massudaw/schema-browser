@@ -35,7 +35,7 @@ import Gpx
 import Debug.Trace
 import RuntimeTypes
 import Control.Monad.Reader
-import Prelude hiding (head)
+import Prelude hiding (elem,head)
 
 
 
@@ -76,9 +76,9 @@ convertHtml out =
             fk rel i  = Compose . Identity . FKT i rel
             afk rel i  = Compose . Identity . FKT i rel . LeftTB1 . Just . ArrayTB1 . Non.fromList
             tb attr = TB1 $ tbmap $ mapFromTBList  attr
-            (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (TB1 . SText .TL.filter (not . flip L.elem "-.") . fst) t ,  justError " no description" $  TB1 . SText .  TL.strip .  TL.drop 3. snd <$>  t)
+            (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (TB1 . SText .TL.filter (not . flip L.elem ("-." :: String)) . fst) t ,  justError " no description" $  TB1 . SText .  TL.strip .  TL.drop 3. snd <$>  t)
                 where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)
-            scnae = filter ((/=(TB1 (SText "Não Informada"))).fst) $ fmap (\t -> ((TB1 . SText .TL.filter (not . flip L.elem "-.") . fst) t ,    (TB1 . SText .TL.strip . TL.drop 3 .  snd ) t)) ts
+            scnae = filter ((/=(TB1 (SText "Não Informada"))).fst) $ fmap (\t -> ((TB1 . SText .TL.filter (not . flip L.elem ("-." :: String)) . fst) t ,    (TB1 . SText .TL.strip . TL.drop 3 .  snd ) t)) ts
                 where ts = join . maybeToList $ fmap (TL.breakOn " - " .  TL.pack ) <$> (M.lookup "CÓDIGO E DESCRIÇÃO DAS ATIVIDADES ECONÔMICAS SECUNDÁRIAS" out)
             attrs = tb [ own "owner_name" (idx "NOME EMPRESARIAL")
                        , fk [Rel "address" "=" "id"] [own "address" (LeftTB1 $ Just $ TB1 $ SNumeric (-1)) ]

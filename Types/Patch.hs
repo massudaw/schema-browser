@@ -72,7 +72,7 @@ newtype FBPatch p
 
 
 class Patch f where
-  type Index k
+  type Index f
   diff :: f -> f -> Maybe (Index f)
   apply :: f -> Index f -> f
   create :: Index f -> f

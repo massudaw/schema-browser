@@ -249,7 +249,6 @@ data Rel k
   }
   deriving(Eq,Show,Ord,Functor,Foldable,Generic)
 
-deriving instance Generic (Identity a)
 
 instance Binary Sess.Session where
   put i = return ()
@@ -838,7 +837,6 @@ mapComp f =  Compose. fmap  f . getCompose
 traComp :: (Applicative k ,Traversable t ,Functor t )=> (f c a -> k (g d b)) ->  Compose t f c a -> k (Compose t g d b)
 traComp f =  fmap Compose. traverse f . getCompose
 
-concatComp  =  Compose . concat . fmap getCompose
 
 tableMeta :: Ord k => TableK k -> KVMetadata k
 tableMeta (Union s l ) =  tableMeta s

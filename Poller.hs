@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings , NoMonomorphismRestriction #-}
+{-# LANGUAGE FlexibleContexts,OverloadedStrings , NoMonomorphismRestriction #-}
 module Poller
   (poller
   ,plugs
