@@ -8,6 +8,7 @@ import qualified NonEmpty as Non
 import Control.Concurrent.Async
 import Types
 import qualified Types.Index as G
+import Control.Monad.Writer
 import Step.Client (indexTable)
 import Data.Either
 import Step.Host
@@ -84,7 +85,7 @@ poller schm authmap db plugs is_test = do
                   then do
                       putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let fetchSize = 1000
-                      (dbplug ,(l,listRes)) <- transaction inf $ selectFrom a  Nothing (Just fetchSize) [][]
+                      (_ ,(l,_ )) <- transaction inf $ selectFrom a  Nothing (Just fetchSize) [][]
                       let sizeL = justLook [] l
                           lengthPage s pageSize  = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
                       i <- concat <$> mapM (\ix -> do
@@ -98,7 +99,12 @@ poller schm authmap db plugs is_test = do
                           i <-  mapConcurrently (mapM (\inp -> catchPluginException inf a pname (getPKM inp) $ transaction inf $ do
                               o  <- fmap (liftTable' inf a) <$>   liftIO ( elemp (Just $ mapKey' keyValue inp))
                               let diff' =   join $ (\i j -> diff (j ) (i)) <$>  o <*> Just inp
-                              maybe (return Nothing )  (\i -> updateFrom (justError "no test" o) inp ) diff'
+                              maybe (return Nothing )  (\i -> do
+                                 p <- updateFrom (justError "no test" o) inp
+                                 tell (maybeToList p)
+                                 return p
+                                 ) diff'
+
                                 )
                             ) . L.transpose . chuncksOf 20 $ evb
                           return $ concat i
