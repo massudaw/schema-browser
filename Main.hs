@@ -64,6 +64,6 @@ testPoller plug = do
   metas <- keyTables  smvar conn  ("metadata", T.pack $ user db) amap plugList
 
 
-  poller smvar  undefined bstate [plug] True
+  poller smvar  (\_ -> return (undefined ,undefined)) bstate [plug] True
 
 
