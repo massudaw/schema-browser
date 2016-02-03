@@ -603,7 +603,7 @@ indexItens s tb@(FKT ifk rel _) offsetT fks oldItems  = fmap constFKT <$> bres
         create = Non.unzip
         delete = fmap (Non.unzip . Non.fromList)  . nonEmpty  . Non.take o
     constFKT (ref ,tb) = FKT (mapComp (mapFAttr (const (ArrayTB1 ref ))) <$> ifk)   rel (ArrayTB1 tb )
-    projFKT (FKT i  _ j ) = (head $ fmap (unAttr.unTB) $ i,  j)
+    projFKT (FKT i  _ j ) = (head $ fmap (unAttr.unTB ) $ i,  j)
     fktzip (ArrayTB1 lc , ArrayTB1 m) = Non.zip lc m
 indexItens s tb@(IT na _) offsetT items oldItems  = fmap constIT <$> bres
   where
@@ -752,6 +752,14 @@ buildPrim fm tdi i = case i of
            let ev = if elem FWrite fm then unionWith const (rumors tdi) (Just . SBinary . BSC.pack <$> UI.valueChange f) else rumors tdi
            step <- stepper  ini ev
            return (TrivialWidget (tidings step ev) f)
+         PMime "application/dwg" -> do
+           let fty = ("div","value",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+           ini <- currentValue (facts tdi)
+           f <- pdfFrame fty (facts tdi) # sink UI.style (noneShow . (\i -> isJust i || elem FWrite fm) <$> facts tdi)
+           runFunction $ ffi "adskViewerWidget().Init(%1,false);" f
+           let ev = if elem FWrite fm then unionWith const (rumors tdi) (Just . SBinary . BSC.pack <$> UI.valueChange f) else rumors tdi
+           step <- stepper  ini ev
+           return (TrivialWidget (tidings step ev) f)
          PMime mime -> do
            let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
            clearB <- UI.button # set UI.text "clear"
@@ -762,6 +770,8 @@ buildPrim fm tdi i = case i of
                 "application/pdf" -> ("iframe","src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
                 "application/x-ofx" -> ("textarea","value",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
                 "image/jpg" -> ("img","src",maybe "" binarySrc ,[])
+                "image/png" -> ("img","src",maybe "" binarySrc ,[])
+                "image/bmp" -> ("img","src",maybe "" binarySrc ,[])
                 "text/html" -> ("iframe","srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
            f <- pdfFrame fty (facts tdi2) # sink0 UI.style (noneShow . isJust <$> facts tdi2)
            fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]

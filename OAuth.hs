@@ -56,6 +56,7 @@ url s u = "https://www.googleapis.com/" <> T.unpack s <> "/v1/users/"<> T.unpack
 urlJ :: Text -> TableK Key -> FTB (TBData Key Showable ) -> String
 urlJ s j pk
   | tableName j == "google_auth" = prefix <> "users/" <>  intercalate "," (renderShowable . snd <$> getPK pk)  <> "/"
+  | tableName j == "messages"  =  prefix <> "users/me/" <>  T.unpack (rawName j ) <> "/" <>  intercalate "," (renderShowable . snd <$> getPK pk)  <> "/"
   | otherwise = prefix <>  T.unpack (rawName j ) <> "/" <>  intercalate "," (renderShowable . snd <$> getPK pk)  <> "/"
   where prefix = "https://www.googleapis.com/" <> T.unpack s <> "/v1/"
 
@@ -84,18 +85,18 @@ listTable table offset page maxResults sort ix
   | tableName table == "history" = return ([],Nothing , 0)
   | tableName table == "attachments" = return ([],Nothing , 0)
   | otherwise = do
-    inf <- ask
-    tok <- liftIO$ R.currentValue $ R.facts (snd $ justError "no token" $ token $  inf)
-    let user = fst $ justError "no token" $ token inf
-    decoded <- liftIO $ do
-        let req =  url (schemaName inf) user <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> ("maxResults=" <> show (maybe defsize id maxResults) <> "&") <> "access_token=" ++ ( accessToken tok )
-        print  req
-        (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
-        print ("list",table,t)
-        return  d
-    let idx = if schemaName inf == "tasks" then "items" else rawName table
-    c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) table ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
-    return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
+      inf <- ask
+      tok <- liftIO$ R.currentValue $ R.facts (snd $ justError "no token" $ token $  inf)
+      let user = fst $ justError "no token" $ token inf
+      decoded <- liftIO $ do
+          let req =  url (schemaName inf) user <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> ("maxResults=" <> show (maybe defsize id maxResults) <> "&") <> "access_token=" ++ ( accessToken tok )
+          print  req
+          (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
+          print ("list",table,t)
+          return  d
+      let idx = if schemaName inf == "tasks" then "items" else rawName table
+      c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) table ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
+      return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
 
 getKeyAttr (TB1 (m, k)) = (concat (fmap keyattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
@@ -133,12 +134,12 @@ joinGet tablefrom tableref from ref
         transTok  = runIdentity $ transToken (Just $ unTB1 from)
     decoded <- liftIO $ do
         let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  urlJ (schemaName inf) tablefrom from )  <>  T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK ref ) <> "?access_token=" ++ ( accessToken tok)
-        print req
+        print $ "joinGet " <> req
         (t,v) <- duration
                 (simpleHttpHeader [("GData-Version","3.0")] req )
         print ("joinGet",tablefrom,tableref ,getPK from, getPK ref ,t)
         return $ decode v
-    traverse (convertAttrs inf (Just $ (tableref,unTB1 ref)) (_tableMapL inf) tableref ) .  fmap (\i -> (i :: Value)  ) $  decoded
+    traverse (convertAttrs inf (Just $ (unTB1 ref)) (_tableMapL inf) tableref ) .  fmap (\i -> (i :: Value)  ) $  decoded
   | tableName tableref == "attachments"  = do
     inf <- ask
     pretok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
@@ -150,9 +151,8 @@ joinGet tablefrom tableref from ref
         print req
         (t,v) <- duration
                 (simpleHttpHeader [("GData-Version","3.0")] req )
-        print ("joinGet",tablefrom,tableref ,getPK from, getPK ref ,t)
         return $ decode v
-    traverse (convertAttrs inf (Just $ (tableref,unTB1 ref)) (_tableMapL inf) tableref ) .  fmap (\i -> (i :: Value)  ) $  decoded
+    traverse (convertAttrs inf (Just $ (unTB1 ref)) (_tableMapL inf) tableref ) .  fmap (\i -> (i :: Value)  ) $  decoded
   | otherwise = return Nothing
 
 joinList [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))] tableref offset page maxResults sort ix
@@ -202,7 +202,7 @@ getTable tb pk
             (simpleHttpHeader [("GData-Version","3.0")] req )
         print ("get",tb,getPK pk,t)
         return $ decode v
-    traverse (convertAttrs inf (Just $ (tb,unTB1 pk)) (_tableMapL inf) tb ) .  fmap (\i -> (i :: Value)  ) $  decoded
+    traverse (convertAttrs inf (Just $ (unTB1 pk)) (_tableMapL inf) tb ) .  fmap (\i -> (i :: Value)  ) $  decoded
 
 getDiffTable table  j = fmap (join . fmap (diff j. unTB1) ) $ getTable  table $ TB1 j
 joinGetDiffTable table  tableref f j = fmap (join . fmap (diff j. unTB1)) $ joinGet table tableref (TB1 f) (TB1 j)
@@ -214,7 +214,9 @@ lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
 lbackRef (TB1 t) = snd $ Types.head $ getPKM t
 
-convertAttrs :: InformationSchema -> Maybe (Table,TBData Key Showable) -> M.Map Text Table ->  Table -> Value -> TransactionM (TB2 Key Showable)
+lookMTable inf m = lookSTable inf (_kvschema m,_kvname m)
+
+convertAttrs :: InformationSchema -> Maybe (TBData Key Showable) -> M.Map Text Table ->  Table -> Value -> TransactionM (TB2 Key Showable)
 convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb ))
   where
     pathOrigin (Path i _  ) = i
@@ -222,7 +224,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
     isFKJoinTable (Path i (RecJoin _ j  ) ) = isFKJoinTable (Path i j )
     isFKJoinTable _ = False
     fkFields = S.unions $ map pathOrigin $ filter isFKJoinTable $  F.toList $rawFKS tb
-    kid :: Key -> TransactionM (Maybe (TB Identity Key Showable))
+    kid :: Key ->   TransactionM (Maybe (TB Identity Key Showable))
     kid  k
       | S.member k fkFields
             = let
@@ -230,6 +232,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                (FKJoinTable  _ (_,trefname) ) = unRecRel $ pathRel fks
                vk = iv  ^? ( key (keyValue  k))
                fk =  F.toList $  pathRelRel fks
+               treftable = (lookTable infsch trefname)
                exchange tname (KArray i)  = KArray (exchange tname i)
                exchange tname (KOptional i)  = KOptional (exchange tname i)
                exchange tname (Primitive i ) = Primitive $ case i of
@@ -237,17 +240,23 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                         RecordPrim i -> RecordPrim i
                patt = either
                     (traverse (\v -> do
-                        tell (TableModification Nothing (lookTable infsch trefname ) . patch <$> F.toList v)
+                        tell (TableModification Nothing (lookTable infsch trefname ) . patch <$> F.toList (v))
                         return $ FKT [Compose .Identity . Types.Attr  k $ (lbackRef    v) ]  fk v))
                     (traverse (\v -> do
-                        let ref = [Compose .Identity . Types.Attr  k $ v]
-                        tbs <- liftIO$ runDBM infsch (atTable (tableMeta $ lookTable infsch trefname))
-                        let reftb = joinRel2 (tableMeta $ lookTable infsch trefname) fk (fmap unTB ref)  tbs
+                        let ref = [_tb $ Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd <$> maybeToList (tableNonRef' <$> getref))
+                        tbs <- liftIO $ runDBM infsch (atTable (tableMeta $ lookTable infsch trefname))
+                        let reftb = join $ fmap unSOptional $ joinRel2 (tableMeta $ lookTable infsch trefname) fk (fmap unTB ref)  tbs
                         reftbT <- joinRelT  fk (fmap unTB ref) ( lookTable infsch trefname) tbs
-                        patch <- maybe (maybe (return reftbT)   (\(tref,getref )-> traverse (\reftb -> do
-                            pti <- joinGetDiffTable tref (lookTable infsch trefname) getref reftb
-                            tell (TableModification Nothing (lookTable infsch trefname) <$> maybeToList pti)
-                            return $ maybe (reftb) (unTB1 . apply (TB1 reftb) . PAtom) pti) reftbT  )    getref) return reftb
+                        patch <- maybe (maybe (return reftbT)   (\getref -> traverse (\reftb -> do
+                            let scoped
+                                  | null (_rawScope treftable) = getref
+                                  | otherwise =
+                                      case (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ F.toList . unKV .snd $ getref) of
+                                        [i] -> unTB1 (_fkttable (unTB i))
+
+                            pti <- joinGetDiffTable (lookMTable infsch (fst scoped)) treftable scoped reftb
+                            tell (TableModification Nothing treftable <$> maybeToList pti)
+                            return $ maybe (reftb) (unTB1 . apply (TB1 reftb) . PAtom) pti) reftbT  )    getref) return (reftb)
                         return $ FKT ref fk   patch ))
                funL = funO  True (exchange trefname $ keyType k) vk
                funR = funO  True ( keyType k) vk
@@ -257,7 +266,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
                             (Left (Just i),Right (Just j)) -> Right (Just j)
                             (Left (Just i),_) -> Left (Just i)
                             (Left i ,j ) -> j
-              in  join . fmap  patt $   mergeFun
+              in  join . fmap  patt $    mergeFun
       | otherwise =  fmap (either ((\v-> IT ( k) v)  <$> ) (Types.Attr k<$>) ) . funO  False (  keyType k)  $ (iv ^? ( key ( keyValue k))  )
 
     resultToMaybe (Success i) = Just i
@@ -358,8 +367,11 @@ gmailPrim =
   [("text",PText)
   ,("datetime",PTimestamp (Just utc) )
   ,("pdf",PMime "application/pdf")
+  ,("dwg",PMime "application/dwg")
   ,("ofx",PMime "application/x-ofx")
   ,("jpg",PMime "image/jpg")
+  ,("png",PMime "image/png")
+  ,("bmp",PMime "image/bmp")
   ,("email",PMime "text/plain")
   ,("html",PMime "text/html")
   ,("double precision",PDouble)

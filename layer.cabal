@@ -57,7 +57,10 @@ executable threepenny-layer
     Types.Patch
     Utils
   extensions: TupleSections,OverloadedStrings
-  build-depends:       scientific,blaze-builder,base ==4.8.*
+  build-depends:
+     scientific
+   , blaze-builder
+   , base ==4.8.*
    , postgresql-simple >=0.4 && <0.5
    , postgresql-libpq
    , vector >=0.10 && <0.11

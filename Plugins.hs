@@ -18,6 +18,7 @@ import PrefeituraSNFSE
 import Text
 import Data.Tuple
 import Incendio
+import DWGPreview
 import Siapi3
 import CnpjReceita
 import OFX
@@ -481,7 +482,7 @@ encodeMessage = PurePlugin "Encode Email" tname url
     tname = "messages"
     messages = nameI 0 $ proc t -> do
           enc <- liftA2 ((,))
-                (idxR "mimeType")
+                ((\i j -> (,j ) <$> i) <$> idxR "mimeType" <*> idxM "filename" )
                 (atR "body"
                     (proc t -> do
                         d <- join . traverse decoder' <$> (idxM "data") -< ()
@@ -490,16 +491,24 @@ encodeMessage = PurePlugin "Encode Email" tname url
                         ))  -< ()
           part <- atMA "parts"
                     (callI 0 messages) -< ()
-          let mimeTable (TB1 (SText mime),v) next
+          let mimeTable ((TB1 (SText mime),filenameM),v) next
                 | T.isInfixOf "text/plain" mime || T.isInfixOf "plain/text" mime =  Just $ tb "plain"
                 | T.isInfixOf "text/html" mime =  Just $ tb "html"
                 | T.isInfixOf "application/pdf" mime =  Just $ deltb "pdf"
+                | T.isInfixOf "application/octet-stream" mime =
+                      case T.drop (T.length filename - 3 ) filename of
+                         "dwg" -> (\v -> case (\(TB1 (SBinary i )) ->  preview $ BSL.fromStrict i) $ v of
+                                    Right l -> tbv "png" (Just $ TB1 (SBinary $ BSL.toStrict $l))
+                                    Left l -> tbv "bmp" (Just $ TB1 (SBinary $ BSL.toStrict $l))) <$> v
+                         i -> traceShow i Nothing
                 | T.isInfixOf "application/pgp-signature" mime =  Just $ tb "plain"
                 | T.isInfixOf "multipart/alternative" mime =  last <$> (ifNull . catMaybes $ next)
                 | T.isInfixOf "multipart" mime =   Just  $ tbmix (catMaybes next)
                 | otherwise =Nothing
                 where
+                      Just (TB1 (SText filename ))= filenameM
                       tb n  =  TB1 . tblist . pure . _tb . Attr n $ (LeftTB1 $  v)
+                      tbv n v  =  TB1 . tblist . pure . _tb . Attr n $ (LeftTB1 $  v)
                       deltb n  =  TB1 . tblist . pure . _tb . Attr n $ (LeftTB1 $ Just $ DelayedTB1 $    v)
                       tbmix l = TB1 . tblist . pure . _tb . IT "mixed" . LeftTB1 $ ArrayTB1 . Non.fromList <$>  (ifNull l )
           returnA -<  (maybe Nothing (flip mimeTable part )  $ (\(i,j) -> fmap (,j) i) enc)

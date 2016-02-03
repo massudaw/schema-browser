@@ -251,7 +251,6 @@ attrLine i   = do
   line ( L.intercalate "," (fmap renderShowable .  allKVRec'  $ i))
 
 
-lookAttr k (_,m) = fmap unTB $ M.lookup (S.singleton (Inline k)) (unKV m)
 
 lookAttr' inf k (i,m) = unTB $ err $  M.lookup (S.singleton (Inline (lookKey inf (_kvname i) k))) (unKV m)
     where
@@ -259,14 +258,14 @@ lookAttr' inf k (i,m) = unTB $ err $  M.lookup (S.singleton (Inline (lookKey inf
 
 chooserTable inf cliTid cli = do
   iv   <- currentValue (facts cliTid)
-  let lookT iv = let  i = join $  unLeftItens <$> lookAttr (lookKey (meta inf) "clients" "table") iv
+  let lookT iv = let  i = unLeftItens $ lookAttr' (meta inf)  "table" iv
                 in fmap (\(Attr _ (TB1 (SText t))) -> t) i
   let initKey = pure . join $ fmap (S.fromList .rawPK) . flip M.lookup (_tableMapL inf) <$> join (lookT <$> iv)
       kitems = M.keys (pkMap inf)
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
   -- Load Metadata Tables
-  (orddb ,(_,orderMap)) <- liftIO $ transaction  (meta inf) $ selectFrom "ordering"  (Just 0) Nothing []    [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+  (orddb ,(_,orderMap)) <- liftIO $ transaction  (meta inf) $ selectFrom "ordering"  Nothing Nothing [] [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
   (translation,_) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
   (authorization,_) <- liftIO$ transaction (meta inf) $ selectFrom "authorization" Nothing Nothing [] [("=",liftField (meta inf) "authorization" $ uncurry Attr $("grantee",TB1 $ SText (username inf) )), ("=",liftField (meta inf) "authorization" $ uncurry Attr $("table_schema",TB1 $ SText (schemaName inf) ))]
 
@@ -275,7 +274,7 @@ chooserTable inf cliTid cli = do
       authorize =  (\autho t -> isJust $ G.lookup (idex  (meta inf) "authorization"  [("table_schema", TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText $ tableName t),("grantee",TB1 $ SText $ username inf)]) autho)  <$> collectionTid authorization
   let
       filterLabel = (\j d -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> d (Just i)) ))<$> filterInpBh <*> facts lookDesc
-      tableUsage orderMap table = maybe (Right 0) (Left ) . fmap (lookAttr (lookKey (meta inf) "ordering" "usage" )) $  G.lookup  (G.Idex ( pk )) orderMap
+      tableUsage orderMap table = maybe (Right 0) (Left ) . fmap (lookAttr' (meta inf)  "usage" ) $  G.lookup  (G.Idex ( pk )) orderMap
           where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$> [("table_name",TB1 . SText . rawName $ table ), ("schema_name",TB1 $ SText (schemaName inf))]
       buttonStyle k e = e # sink UI.text (facts $ lookDesc  <*> pure (selTable $ Just k)) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow  <$> visible)
         where tb =  justLook   k (pkMap inf)
@@ -284,11 +283,14 @@ chooserTable inf cliTid cli = do
 
   bset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap . flip justLook   (pkMap inf))) kitems) ((\i j -> tableUsage i ( justLook   j (pkMap inf) )) <$> collectionTid orddb ) initKey  (\k -> UI.button  ) buttonStyle
   let bBset = triding bset
-      incClick pkset orderMap =  (fst field , getPKM field ,[patch $ fmap (+ (SNumeric 1)) (usage )]) :: TBIdx Key Showable
-          where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$>[("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
-                 field =   justError ("no value" <> show (pkset,pk)) $ G.lookup  (G.Idex  pk ) orderMap
-                 usage = justError "nopk " $ (lookAttr (lookKey (meta inf) "ordering" "usage" ))  field
-  liftIO$ onEventIO ((\i j -> flip incClick i <$> j)<$> facts (collectionTid orddb) <@> rumors bBset)
+      ordRow pkset orderMap =  field
+          where
+            field =  G.lookup  (G.Idex  pk ) orderMap
+            pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$>[("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
+      incClick field =  (fst field , getPKM field ,[patch $ fmap (+ (SNumeric 1)) (usage )]) :: TBIdx Key Showable
+          where
+                 usage = lookAttr' (meta inf ) "usage"   field
+  liftIO$ onEventIO ((\i j -> incClick <$> join ( flip ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
     (traverse (\p -> do
       _ <- transaction (meta inf ) $ patchFrom  p
       putPatch (patchVar orddb) [p] ))
@@ -335,10 +337,10 @@ viewerKey
       InformationSchema -> Table -> Integer -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
 viewerKey inf table cli cliTid = mdo
   iv   <- currentValue (facts cliTid)
-  let lookT iv = let  i = join $  unLeftItens <$> lookAttr (lookKey (meta inf) "clients" "table") iv
+  let lookT iv = let  i = unLeftItens $ lookAttr' (meta inf)  "table" iv
                 in fmap (\(Attr _ (TB1 (SText t))) -> t) i
-      lookPK iv = let  i = join $  unLeftItens <$> lookAttr (lookKey (meta inf) "clients" "data_index") iv
-                       unKey t = liftA2 (,) (join $ (\(Attr _ (TB1 (SText i)))-> flip (lookKey inf ) i <$> lookT iv ) <$> lookAttr (lookKey  (meta inf) "key_value" "key") t  )( (\(Attr _ (TB1 (SDynamic i)))-> i) <$> lookAttr (lookKey (meta inf) "key_value" "val") t )
+      lookPK iv = let  i = unLeftItens $ lookAttr' (meta inf)  "data_index" iv
+                       unKey t = liftA2 (,) ((\(Attr _ (TB1 (SText i)))-> flip (lookKey inf ) i <$> lookT iv ) $ lookAttr' (meta inf)  "key" t  )( pure $ (\(Attr _ (TB1 (SDynamic i)))-> i) $ lookAttr'  (meta inf)  "val" t )
                 in fmap (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
   let
   reftb@(vpt,vp,_ ,var ) <- refTables inf table
