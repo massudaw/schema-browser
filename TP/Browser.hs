@@ -188,7 +188,7 @@ authMap smvar sargs (user,pass) schemaN =
                             in token) . G.toList <$> collectionTid dbmeta
                   toOAuth v = case fmap TB1 $ F.toList $ snd $ unTB1 v :: [FTB Showable] of
                             [a,b,c,d] -> tokenToOAuth (b,d,a,c)
-                            i -> errorWithStackTrace ("no token" <> show i)
+                            i -> errorWithStackTrace ("wrong token" <> show i)
               return (OAuthAuth (Just (if tag then "@me" else T.pack user,td )), gmailOps)
 
 loadSchema smvar schemaN dbConn user authMap  =  do

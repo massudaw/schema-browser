@@ -1,5 +1,6 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts,OverloadedStrings #-}
 import TP.Browser
+import Control.Concurrent.STM
 import Poller
 import Plugins
 import PostgresQuery (connRoot)
@@ -9,6 +10,7 @@ import Control.Monad.Reader
 import Control.Concurrent
 import System.Environment
 import Utils
+import qualified Types.Index as G
 import Schema
 
 import RuntimeTypes
@@ -20,7 +22,13 @@ import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Internal
 import qualified Data.Map as M
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BSL
+import RuntimeTypes
+import Types
+import Data.Binary (encode,decode)
+import System.Directory
 
+import qualified Reactive.Threepenny as R
 
 
 main :: IO ()
@@ -52,6 +60,8 @@ main = do
           print ("delete client" <> show (sToken w))
           deleteClient metas (sToken w) )
   print "Finish Server"
+  dumpSnapshot smvar
+  print "Dump State"
 
 testPoller plug = do
   let bstate = (BrowserState "localhost" "5432" "incendio" "postgres" "queijo" Nothing Nothing Nothing )

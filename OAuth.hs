@@ -71,7 +71,7 @@ updateTable table reference page maxResults
     tok <- liftIO$ R.currentValue $ R.facts (snd $justError "no token"$ token inf)
     let user = fst $ justError "no token"$ token inf
     decoded <- liftIO $ do
-        let req =  url (schemaName inf) user  <> T.unpack (rawName table ) <> "?" <> "startHistoryId=" <> intercalate "," ( renderShowable . snd <$> getPK (TB1 reference) ) <> "&"<> maybe "" (\(NextToken s) ->  T.unpack s <> "pageToken=" <> T.unpack s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok )
+        let req =  url (schemaName inf) user  <> T.unpack (rawName table ) <> "?" <> "startHistoryId=" <> intercalate "," ( renderShowable . snd <$> getPK (TB1 reference) ) <> "&"<> maybe "" (\s ->  "pageToken=" <> readToken s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok )
         (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
         print ("update",table,t)
         return  d
@@ -80,6 +80,8 @@ updateTable table reference page maxResults
   | otherwise = return ([], Nothing,0)
 
 
+readToken (HeadToken) = ""
+readToken (NextToken i) = T.unpack i
 
 listTable table offset page maxResults sort ix
   | tableName table == "history" = return ([],Nothing , 0)
@@ -89,7 +91,7 @@ listTable table offset page maxResults sort ix
       tok <- liftIO$ R.currentValue $ R.facts (snd $ justError "no token" $ token $  inf)
       let user = fst $ justError "no token" $ token inf
       decoded <- liftIO $ do
-          let req =  url (schemaName inf) user <> T.unpack (rawName table ) <> "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> ("maxResults=" <> show (maybe defsize id maxResults) <> "&") <> "access_token=" ++ ( accessToken tok )
+          let req =  url (schemaName inf) user <> T.unpack (rawName table ) <> "?" <> maybe "" (\s -> "pageToken=" <> readToken s <> "&") page  <> ("maxResults=" <> show (maybe defsize id maxResults) <> "&") <> "access_token=" ++ ( accessToken tok )
           print  req
           (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
           print ("list",table,t)
@@ -116,7 +118,7 @@ insertTable pk
             (postHeaderJSON [("GData-Version","3.0")] req (toJSON $ M.fromList $ fmap (\(a,b) -> (keyValue a , renderShowable b)) $ attrs ) )
         print ("insert",getPK (TB1 pk),t)
         return $ decode v
-    fmap (TableModification Nothing table . patch .unTB1) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table ) .  fmap (\i -> (i :: Value)  ) $  decoded)
+    fmap (TableModification Nothing table . patch ) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table ) .  fmap (\i -> (i :: Value)  ) $  decoded)
 
 lookOrigin  k (i,m) = unTB $ err $  find (( k == ). S.fromList . fmap _relOrigin. keyattr ) (F.toList $  unKV m)
     where
@@ -163,7 +165,7 @@ joinList [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))] tableref offset page
           tok = if tableName tablefrom  == "google_auth" then  justError (" no token " <> show from) transTok else pretok
           transTok  = runIdentity $ transToken (Just from)
       decoded <- liftIO $ do
-          let req = urlJ (schemaName inf) tablefrom (TB1 from  )<> T.unpack (rawName tableref) <>  "?" <> maybe "" (\(NextToken s) -> "pageToken=" <> T.unpack s <> "&") page  <> ("maxResults=" <> show (maybe defsize id maxResults) <> "&")  <> "access_token=" ++ ( accessToken tok)
+          let req = urlJ (schemaName inf) tablefrom (TB1 from  )<> T.unpack (rawName tableref) <>  "?" <> maybe "" (\s -> "pageToken=" <> readToken s <> "&") page  <> ("maxResults=" <> show (maybe defsize id maxResults) <> "&")  <> "access_token=" ++ ( accessToken tok)
           print req
           (t,v) <- duration
                   (simpleHttpHeader [("GData-Version","3.0")] req )
@@ -174,7 +176,7 @@ joinList [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))] tableref offset page
           refAttr = (_tb $ FKT (fmap _tb $ concat $ F.toList $ backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
       c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) tableref ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
       let addAttr refAttr (m ,t ) = (m, mapComp (\(KV i) -> KV  $ M.insert (S.fromList $ keyattr refAttr ) refAttr i ) t)
-      return (fmap (addAttr refAttr) <$>  c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
+      return ((addAttr refAttr) <$>  c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
 
 
 
@@ -204,8 +206,8 @@ getTable tb pk
         return $ decode v
     traverse (convertAttrs inf (Just $ (unTB1 pk)) (_tableMapL inf) tb ) .  fmap (\i -> (i :: Value)  ) $  decoded
 
-getDiffTable table  j = fmap (join . fmap (diff j. unTB1) ) $ getTable  table $ TB1 j
-joinGetDiffTable table  tableref f j = fmap (join . fmap (diff j. unTB1)) $ joinGet table tableref (TB1 f) (TB1 j)
+getDiffTable table  j = fmap (join . fmap (diff j ) ) $ getTable  table $ TB1 j
+joinGetDiffTable table  tableref f j = fmap (join . fmap (diff j)) $ joinGet table tableref (TB1 f) (TB1 j)
 
 
 gmailOps = (SchemaEditor undefined undefined insertTable undefined listTable updateTable getDiffTable mapKeyType joinList )
@@ -216,8 +218,8 @@ lbackRef (TB1 t) = snd $ Types.head $ getPKM t
 
 lookMTable inf m = lookSTable inf (_kvschema m,_kvname m)
 
-convertAttrs :: InformationSchema -> Maybe (TBData Key Showable) -> M.Map Text Table ->  Table -> Value -> TransactionM (TB2 Key Showable)
-convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb ))
+convertAttrs :: InformationSchema -> Maybe (TBData Key Showable) -> M.Map Text Table ->  Table -> Value -> TransactionM (TBData Key Showable)
+convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb ))
   where
     pathOrigin (Path i _  ) = i
     isFKJoinTable (Path _ (FKJoinTable  _ _)) = True
@@ -280,7 +282,7 @@ convertAttrs  infsch getref inf tb iv =   TB1 . tblist' tb .  fmap _tb  . catMay
             PInt -> Just . SNumeric . round <$> (v ^? _Number)
             PDouble -> Just . SDouble . realToFrac  <$> (v ^? _Number)
             PBinary -> readPrim k . T.unpack  <$> (v ^? _String)
-          RecordPrim (i,m) ->  Left . tbNull <$>  convertAttrs infsch (if f then Nothing else getref) inf   (justError "no look" $  M.lookup m inf ) v
+          RecordPrim (i,m) ->  Left . tbNull . TB1 <$>  convertAttrs infsch (if f then Nothing else getref) inf   (justError "no look" $  M.lookup m inf ) v
                 where  tbNull tb = if null (getAttr' tb) then Nothing else Just  tb
     fun f (KArray i) v = (\l -> if null l then return (typ i) else fmap (bimap  nullArr  nullArr) .   biTrav (fun f i) $ l ) $ (v ^.. values )
         where nullArr lm = if null l then Nothing else Just (ArrayTB1 $ Non.fromList l)

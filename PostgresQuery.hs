@@ -250,10 +250,11 @@ selectAll
 selectAll table offset i  j k st = do
       inf <- ask
       let
-          unref (TableRef i) = i
+          unref (TableRef i) = Just i
+          unref (HeadToken ) = Nothing
           tbf =  tableView (tableMap inf) table
       let m = tbf
-      (t,v) <- liftIO$ duration  $ paginate inf m k offset j (fmap unref i) (nonEmpty st)
+      (t,v) <- liftIO$ duration  $ paginate inf m k offset j (join $ fmap unref i) (nonEmpty st)
       mapM_ (tellRefs ) (snd v)
       return v
 
@@ -293,6 +294,6 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 
 
-postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (fmap TB1 i,(TableRef . filter (flip L.elem (fmap fst s) . fst ) .  getPK . TB1 <$> lastMay i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o ) (\ _ _ _ _ -> return ([],Nothing,0)) (\table j -> do
+postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef . filter (flip L.elem (fmap fst s) . fst ) .  getPKM <$> lastMay i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o ) (\ _ _ _ _ -> return ([],Nothing,0)) (\table j -> do
     inf <- ask
     liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ) $ j ) mapKeyType undefined

@@ -824,7 +824,7 @@ iUITable inf plmods oldItems  tb@(IT na (ArrayTB1 (tb1 :| _)))
       dv <- UI.div
       let wheel = fmap negate $ mousewheel dv
           arraySize = 8
-      (TrivialWidget offsetT offset) <- offsetField (pure 0) wheel (maybe 0 (Non.length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
+      (TrivialWidget offsetT offset) <- offsetField (pure 0) never (maybe 0 (Non.length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
       let unIndexEl ix = (unIndexItens  ix <$> offsetT <*> )
       let dyn = dynHandler (\ix -> iUITable inf
                 (fmap (unIndexEl  ix) <$> plmods)

@@ -60,6 +60,7 @@ executable threepenny-layer
   build-depends:
      scientific
    , blaze-builder
+   , zlib
    , base ==4.8.*
    , postgresql-simple >=0.4 && <0.5
    , postgresql-libpq

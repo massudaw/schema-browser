@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
+{-# LANGUAGE DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
 module RuntimeTypes where
 
 
@@ -6,8 +6,10 @@ import Control.Concurrent
 
 import Types
 import Step.Common
+import GHC.Generics
 import Data.Unique
 import Data.Maybe
+import Data.Binary
 import Types.Index
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM.TMVar
@@ -24,7 +26,7 @@ import Control.Applicative
 import Control.Monad.Writer
 
 import qualified Reactive.Threepenny as R
-import Database.PostgreSQL.Simple
+import Database.PostgreSQL.Simple hiding (Binary)
 import Data.Functor.Identity
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -95,9 +97,9 @@ pkMap = _pkMapL
 data DBVar2 k v=
   DBVar2
   { patchVar :: TQueue [TBIdx k v]
-  , idxVar :: TMVar (Map [Column k v ] (Int,Map Int PageToken))
+  , idxVar :: TMVar (Map [Column k v ] (Int,Map Int (PageTokenF k v)))
   , patchTid :: R.Tidings [TBIdx k v]
-  , idxTid :: R.Tidings (Map [Column k v ] (Int,Map Int PageToken))
+  , idxTid :: R.Tidings (Map [Column k v ] (Int,Map Int (PageTokenF k v)))
   , collectionTid :: R.Tidings (TableIndex k v )
   }
 
@@ -105,7 +107,7 @@ data DBVar2 k v=
 idxColTid db =  (,) <$> idxTid db <*> collectionTid db
 
 type DBVar = DBVar2 Key Showable
-type Collection k v = (Map [Column k v] (Int,Map Int PageToken),GiST (TBIndex k  v ) (TBData k v))
+type Collection k v = (Map [Column k v] (Int,Map Int (PageTokenF k v)),GiST (TBIndex k  v ) (TBData k v))
 type TableIndex k v = GiST (TBIndex k  v ) (TBData k v)
 
 type Plugins = FPlugins Text
@@ -149,13 +151,22 @@ dynPK =  runKleisli . dynP
 
 type TransactionM = ReaderT InformationSchema (WriterT [TableModification (TBIdx Key Showable)] IO)
 
+type PageToken = PageTokenF Key Showable
 
-data PageToken
+deriving instance (Binary v,Binary k) => Binary (PageTokenF k v)
+
+data PageTokenF k v
   = PageIndex Int
   | NextToken Text
-  | TableRef [(Key , FTB Showable)]
-  deriving(Eq,Ord,Show)
+  | TableRef [(k, FTB v)]
+  | HeadToken
+  deriving(Eq,Ord,Show,Generic)
 
+pageFirst :: (a -> b) -> PageTokenF a v -> PageTokenF b v
+pageFirst f (TableRef i) = TableRef $ first f <$> i
+pageFirst _ (NextToken i) = NextToken i
+pageFirst _ (PageIndex i) = PageIndex i
+pageFirst _ HeadToken =HeadToken
 
 data SchemaEditor
   = SchemaEditor
@@ -163,11 +174,11 @@ data SchemaEditor
   , patchEd :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
   , insertEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
   , deleteEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
-  , listEd :: Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> [(Text ,Column Key Showable)]-> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
-  , updateEd :: Table -> TBData Key Showable -> Maybe PageToken -> Maybe Int -> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
+  , listEd :: Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> [(Text ,Column Key Showable)]-> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
+  , updateEd :: Table -> TBData Key Showable -> Maybe PageToken -> Maybe Int -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   , getEd :: Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   , typeTransform :: PGKey -> CoreKey
-  , joinListEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> [(Text ,Column Key Showable)]-> TransactionM ([TB2 Key Showable],Maybe PageToken,Int)
+  , joinListEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> [(Text ,Column Key Showable)]-> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   }
 
 typeTrans inf = typeTransform (schemaOps inf)

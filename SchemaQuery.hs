@@ -155,8 +155,8 @@ tableLoader table  page size presort fixed
                     addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
                     addAttr r (m,i) = (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` tar && F.all isInlineRel k   ) i )) i )
                 return ((\i -> addAttr  (joinFK i) i) <$> m)) )  (return v) $ P.sortBy (P.comparing pathRelRel)  (S.toList remoteFKS)
-          res <- getFKS (unTB1 <$> res)
-          return (TB1 <$>res,x,o )) table page size presort fixed
+          res <- getFKS (res)
+          return (res,x,o )) table page size presort fixed
 
 
 
@@ -192,23 +192,23 @@ pageTable method table page size presort fixed = do
     iniT <- do
        (fixedmap ,reso) <- liftIO $ currentValue (liftA2 (,) (facts (idxTid dbvar) ) (facts (collectionTid dbvar ) ))
        let pageidx = (fromMaybe 0 page +1) * pagesize
-       i <- case  fromMaybe (10000000,M.empty ) $ M.lookup fixidx fixedmap of
+       i <- case  fromMaybe (10000000,M.empty ) $ traceShow (tableName table,fixidx,fixedmap) $ M.lookup fixidx fixedmap of
           (sq,mp) -> do
              if ( sq > G.size (filterfixed reso) -- Tabela é maior que a tabela carregada
                 && sq > pagesize * (fromMaybe 0 page + 1) -- Tabela é maior que a página
                 && pagesize * (fromMaybe 0 page +1) > G.size (filterfixed reso)  ) -- O carregado é menor que a página
              then do
-                   liftIO$ putStrLn $ "new page " <> show (tableName table)
-                   let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
-                   (res,nextToken ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
-                   let
-                       token = justError "no token" nextToken
-                       index = (estLength page pagesize res s, M.insert pageidx token mp)
-                   return  (index,res)
+               liftIO$ putStrLn $ "new page " <> show (tableName table)
+               let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
+               (res,nextToken ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
+               let
+                   token =  nextToken
+                   index = (estLength page pagesize res s, maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token$ mp)
+               return  (index,res)
              else do
                return ((sq,mp),[])
-       let nidx =  M.insert fixidx (fst i) fixedmap
-           ndata = unTB1 <$> snd i
+       let nidx =  traceShowId $ M.insert fixidx (fst i) fixedmap
+           ndata = snd i
        liftIO $ atomically $ do
          writeTQueue (patchVar dbvar) (F.toList $ patch  <$> ndata )
          putTMVar (idxVar dbvar ) nidx

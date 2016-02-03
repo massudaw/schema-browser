@@ -3,11 +3,14 @@
 
 module Schema where
 
+import Data.String
 import Types
+import Codec.Compression.GZip
 import Data.Tuple
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM
 import Types.Patch
+import System.Directory
 import qualified Types.Index as G
 
 import SchemaQuery
@@ -51,6 +54,7 @@ import qualified Reactive.Threepenny as R
 import Query
 import Postgresql
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Lazy as BSL
 
 
 createType :: (Bool,Bool,Bool,Bool,Bool,Bool,Text,Text) -> KType (Prim (Text,Text) (Text,Text))
@@ -163,15 +167,17 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
            i3u = foldr (uncurry M.adjust. swap ) i3 (unionT <$> ures)
            i2u = foldr (uncurry M.adjust. swap) i2 (first (justError "no union table" . fmap (\(i,_,_) ->S.fromList $ F.toList i) . flip M.lookup (M.fromList res)) . unionT <$> ures)
        sizeMapt <- M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t i3u ) <$> query conn tableSizes (Only schema)
-       varmap <- mapM createTableRefs (filter (L.null . rawUnion) $ F.toList i2u)
-       let preinf = InformationSchema schema user oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  i2u  i3u sizeMapt undefined conn undefined rsch ops pluglist
-       varmapU <- mapM (createTableRefsUnion preinf (M.fromList varmap)) (filter (not . L.null . rawUnion) $ F.toList i2u)
-       mvar <- atomically $ newTMVar  (M.fromList $ varmap <> varmapU)
+
        metaschema <- if (schema /= "metadata")
           then Just <$> keyTables  schemaVar conn ("metadata",user) authMap pluglist
           else return Nothing
 
+       mvar <- atomically $ newTMVar  M.empty
        let inf = InformationSchema schema user oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.filterWithKey (\k v -> not $ L.elem (tableName v ) (concat $ fmap (\(_,_,n) -> F.toList n) ures)) $ i2u)  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist
+       varmap <- mapM (createTableRefs inf) (filter (L.null . rawUnion) $ F.toList i2u)
+       let preinf = InformationSchema schema user oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  i2u  i3u sizeMapt undefined conn undefined rsch ops pluglist
+       varmapU <- mapM (createTableRefsUnion preinf (M.fromList varmap)) (filter (not . L.null . rawUnion) $ F.toList i2u)
+       atomically $ takeTMVar mvar >> putTMVar mvar  (M.fromList $ varmap <> varmapU)
        var <- modifyMVar_  schemaVar   (return . M.insert schema inf )
        addStats inf
        return inf
@@ -188,15 +194,16 @@ createTableRefsUnion inf m i  = do
   let
       diffIni :: [TBIdx Key Showable]
       diffIni = []
-  midx <-  atomically$ newTMVar M.empty
   mdiff <-  atomically $ newTQueue
+  (iv,v) <- readTable inf "dump" (schemaName inf) (i)
   (patch,hdiff) <- R.newEvent
   let
       patchUni = fmap concat $ R.unions $ R.rumors . patchTid .(justError "no table union" . flip M.lookup m) . tableMeta <$>  (rawUnion i)
       patch =  fmap patchunion <$> patchUni
       patchunion  = {-(\i -> traceShow (create i :: TBData Key Showable) i ) .-} liftPatch inf (tableName i ) .firstPatch keyValue
   R.onEventIO patch (hdiff)
-  bh <- R.accumB G.empty (flip (L.foldl' apply) <$> patch )
+  midx <-  atomically$ newTMVar iv
+  bh <- R.accumB v (flip (L.foldl' apply) <$> patch )
   let bh2 = (R.tidings bh (L.foldl' apply  <$> bh R.<@> patch ))
   bhdiff <- R.stepper diffIni patch
   (eidx ,hidx) <- R.newEvent
@@ -212,20 +219,21 @@ createTableRefsUnion inf m i  = do
   return (tableMeta i,  DBVar2  mdiff midx (R.tidings bhdiff patch) (R.tidings bhidx eidx) bh2 )
 
 
-createTableRefs :: Table -> IO (KVMetadata Key,DBVar)
-createTableRefs i = do
+createTableRefs :: InformationSchema -> Table -> IO (KVMetadata Key,DBVar)
+createTableRefs inf i = do
   t <- getCurrentTime
   let
       diffIni :: [TBIdx Key Showable]
       diffIni = []
-  midx <-  atomically$ newTMVar M.empty
   mdiff <-  atomically $ newTQueue
   (ediff,hdiff) <- R.newEvent
-  bh <- R.accumB G.empty (flip (L.foldl' apply) <$> ediff )
+  (iv,v) <- readTable inf "dump" (schemaName inf) (i)
+  midx <-  atomically$ newTMVar iv
+  bh <- R.accumB v (flip (L.foldl' apply) <$> ediff )
   let bh2 = (R.tidings bh (L.foldl' apply  <$> bh R.<@> ediff ))
   bhdiff <- R.stepper diffIni ediff
   (eidx ,hidx) <- R.newEvent
-  bhidx <- R.stepper M.empty eidx
+  bhidx <- R.stepper (M.singleton [] (G.size v,M.empty)) eidx
   forkIO $ forever $ (do
       forkIO . hidx =<< atomically (takeTMVar midx)
       return () ) `catch` (\e -> print ("block",tableName i ,e :: SomeException))
@@ -420,5 +428,40 @@ lookPK inf pk =
       case  M.lookup pk  (pkMap inf) of
            Just table -> table
            i -> errorWithStackTrace (show pk)
+
+
+dumpSnapshot :: MVar (M.Map T.Text InformationSchema ) -> IO ()
+dumpSnapshot smvar = do
+  smap <- readMVar smvar
+  mapM (uncurry writeSchema) (M.toList smap)
+  return ()
+
+writeSchema s v = do
+  tmap <- atomically $ readTMVar $ mvarMap v
+  let sdir = "dump/"<> (fromString $ T.unpack s)
+  hasDir <- doesDirectoryExist sdir
+  when (not hasDir ) $  createDirectory sdir
+  mapM (uncurry (writeTable sdir) )(M.toList tmap)
+
+writeTable s t v = do
+  let tname = s <> "/" <> (fromString $ T.unpack (_kvname t))
+  iv <- R.currentValue $ R.facts $ collectionTid v
+  iidx <- R.currentValue $ R.facts $ idxTid v
+  let sidx = first (fmap (firstTB keyValue)) . fmap (fmap (fmap (pageFirst keyValue))) <$> M.toList iidx
+      sdata = fmap (mapKey' keyValue) $ G.toList $ iv
+  print (t,sidx)
+  when (not (L.null sdata) )$
+      BSL.writeFile tname (compress $ B.encode $ (sidx,sdata))
+
+readTable :: InformationSchema -> Text -> Text -> Table -> IO (Collection Key Showable)
+readTable inf r s t  = do
+  let tname = fromString $ T.unpack $ r <> "/" <> s <> "/" <> tableName t
+  has <- doesFileExist tname
+  if has
+    then do
+       print tname
+       f <- (Right . decompress . BSL.fromStrict <$> BS.readFile tname ) `catch` (\e -> return $ Left (show (e :: SomeException )))
+       return $  either (const (M.empty ,G.empty)) (\f -> either (const (M.empty,G.empty)) (\(_,_,(m,g)) -> (M.mapKeys (fmap (liftField inf (tableName t) )) $ fmap (fmap ((pageFirst (lookKey inf (tableName t))))) <$> m,createUn (S.fromList $ rawPK t) . fmap (liftTable' inf (tableName t)) $ g )) $ B.decodeOrFail f) f
+    else return (M.empty ,G.empty)
 
 
