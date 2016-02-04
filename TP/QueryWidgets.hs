@@ -317,7 +317,7 @@ tbCase inf _ i@(IT na tb1 ) wl plugItens oldItems
 tbCase inf _ a@(Attr i _ ) wl plugItens preoldItems = do
         let oldItems = maybe preoldItems (\v-> fmap (Just . fromMaybe (Attr i v)) preoldItems  ) ( keyStatic i)
         v <- attrUITable oldItems (fmap snd plugItens ) a
-        return (fmap (firstTB (const i)) <$> v)
+        return (fmap (firstTB (const i))  <$> v)
 
 emptyRecTable (FKT rel l tb )
     = case tb of
@@ -574,8 +574,8 @@ splitArray s o m l
   where
     ta = if Non.length l == s then  (fmap Non.fromList $ nonEmpty $Non.drop  (o + s ) m) else Nothing
 
-takeArray :: Applicative f => NonEmpty (f (Maybe b)) -> f (Maybe (NonEmpty b))
-takeArray a = join . fmap (allMaybes . Non.fromList) . nonEmpty . Non.takeWhile isJust <$> Tra.sequenceA a
+takeArray :: (Show b,Applicative f ) => NonEmpty (f (Maybe b)) -> f (Maybe (NonEmpty b))
+takeArray a = fmap (Non.fromList) . nonEmpty .fmap (justError "is nothing" ). Non.takeWhile isJust <$> Tra.sequenceA a
 
 
 indexItens
@@ -588,7 +588,7 @@ indexItens
      -> Tidings (Maybe (TB Identity k b ))
 indexItens s tb@(Attr k v) offsetT atdcomp atdi = fmap constrAttr  <$> bres
   where
-    tdcomp = fmap (fmap _tbattr) <$>  takeArray atdcomp
+    tdcomp = fmap (fmap _tbattr ) <$>  takeArray atdcomp
     tdi = fmap  _tbattr <$> atdi
     emptyAttr = fmap unSComposite
     constrAttr = Attr k . ArrayTB1
@@ -655,14 +655,14 @@ attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ _ (KOptional _) ) v) = do
 attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ _ (KArray _) ) v) = mdo
           offsetDiv  <- UI.div
           let wheel = fmap negate $ mousewheel offsetDiv
-          TrivialWidget offsetT offset <- offsetField (pure 0)  wheel (maybe 0 (Non.length . (\(ArrayTB1 l ) -> l) . _tbattr) <$> facts bres)
+          TrivialWidget offsetT offset <- offsetField (pure 0)  never (maybe 0 (Non.length . (\(ArrayTB1 l ) -> l) . _tbattr) <$> facts bres)
           let arraySize = 8
           let dyn = dynHandler (\ix -> attrUITable (unIndexItens ix  <$> offsetT <*> tAttr')  ((unIndexItens ix  <$> offsetT <*> ) <$>  evs) (Attr (unKArray i) v  )) (\ix -> unIndexItens ix  <$> offsetT <*> tAttr')
           widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
+--      fks <- mapM recurse [0..arraySize -1 ]
           let
             bres = indexItens arraySize  attr offsetT (Non.fromList $ triding <$> widgets) tAttr'
           element offsetDiv # set children (fmap getElement widgets)
-          paintBorder offsetDiv (facts bres ) (facts tAttr' )
           composed <- UI.span # set children [offset , offsetDiv]
           when (isReadOnly attr )
             $ void (element composed # sink UI.style (noneShow . isJust <$> facts bres))
@@ -857,7 +857,7 @@ offsetField  initT eve  max = do
     let
       filt = ( filterJust $ diff <$> offsetB <*> max <@> ev  )
       ev2 = (fmap concatenate $ unions [fmap const offsetE,filt ])
-    offsetB <- accumB init ( unionWith (.) ( fmap const (rumors initT)) ev2)
+    offsetB <- accumB 0 (  ev2)
     return (offsetB,ev2)
   element offset # sink UI.value (show <$> offsetB)
   let

@@ -1,4 +1,4 @@
-{-# LANGUAGE Arrows ,TupleSections,OverloadedStrings #-}
+{-# LANGUAGE FlexibleContexts ,Arrows ,TupleSections,OverloadedStrings #-}
 module OAuth (gmailOps) where
 import qualified NonEmpty as Non
 import Control.Lens
@@ -65,7 +65,8 @@ urlT s u
   | otherwise = "https://www.googleapis.com/" <> T.unpack s <> "/v1/"
 
 defsize = 100
-updateTable table reference page maxResults
+
+{- updateTable table reference page maxResults
   | tableName table == "history" = do
     inf <- ask
     tok <- liftIO$ R.currentValue $ R.facts (snd $justError "no token"$ token inf)
@@ -78,7 +79,7 @@ updateTable table reference page maxResults
     c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) table ) . maybe [] (\i -> (i :: Value) ^.. key (  rawName table ) . values) $ decoded
     return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , {-length c +-} (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
   | otherwise = return ([], Nothing,0)
-
+-}
 
 readToken (HeadToken) = ""
 readToken (NextToken i) = T.unpack i
@@ -124,16 +125,21 @@ lookOrigin  k (i,m) = unTB $ err $  find (( k == ). S.fromList . fmap _relOrigin
     where
       err= justError ("no attr " <> show k <> " for table " <> show (_kvname i))
 
+getToken tablefrom from = do
+  inf <- ask
+  pretok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
+  let user = fst $ fromJust $ token inf
+      tok = if tableName tablefrom  == "google_auth" then  justError (" no token " <> show from) transTok else pretok
+      transTok  = runIdentity $ transToken (Just $ unTB1 from)
+  return tok
+
 
 joinGet tablefrom tableref from ref
   | S.fromList (fmap _relOrigin (getKeyAttr ref) ) ==  S.fromList (rawPK tableref <> S.toList (rawAttrs tableref ) <> rawDescription tableref) = return Nothing
   |  not $ null $ _rawScope tableref = do
     inf <- ask
 
-    pretok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
-    let user = fst $ fromJust $ token inf
-        tok = if tableName tablefrom  == "google_auth" then  justError (" no token " <> show from) transTok else pretok
-        transTok  = runIdentity $ transToken (Just $ unTB1 from)
+    tok <- getToken tablefrom from
     decoded <- liftIO $ do
         let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  urlJ (schemaName inf) tablefrom from )  <>  T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK ref ) <> "?access_token=" ++ ( accessToken tok)
         print $ "joinGet " <> req
@@ -144,10 +150,7 @@ joinGet tablefrom tableref from ref
     traverse (convertAttrs inf (Just $ (unTB1 ref)) (_tableMapL inf) tableref ) .  fmap (\i -> (i :: Value)  ) $  decoded
   | tableName tableref == "attachments"  = do
     inf <- ask
-    pretok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
-    let user = fst $ fromJust $ token inf
-        tok = if tableName tablefrom  == "google_auth" then  justError (" no token " <> show from) transTok else pretok
-        transTok  = runIdentity $ transToken (Just $ unTB1 from)
+    tok <- getToken tablefrom from
     decoded <- liftIO $ do
         let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  urlJ (schemaName inf) tablefrom from )  <>  T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK ref ) <> "?access_token=" ++ ( accessToken tok)
         print req
@@ -160,10 +163,7 @@ joinGet tablefrom tableref from ref
 joinList [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))] tableref offset page maxResults sort ix
   | otherwise = do
       inf <- ask
-      pretok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
-      let user =  fromJust $ token inf
-          tok = if tableName tablefrom  == "google_auth" then  justError (" no token " <> show from) transTok else pretok
-          transTok  = runIdentity $ transToken (Just from)
+      tok <- getToken tablefrom (TB1 from)
       decoded <- liftIO $ do
           let req = urlJ (schemaName inf) tablefrom (TB1 from  )<> T.unpack (rawName tableref) <>  "?" <> maybe "" (\s -> "pageToken=" <> readToken s <> "&") page  <> ("maxResults=" <> show (maybe defsize id maxResults) <> "&")  <> "access_token=" ++ ( accessToken tok)
           print req
@@ -210,7 +210,7 @@ getDiffTable table  j = fmap (join . fmap (diff j ) ) $ getTable  table $ TB1 j
 joinGetDiffTable table  tableref f j = fmap (join . fmap (diff j)) $ joinGet table tableref (TB1 f) (TB1 j)
 
 
-gmailOps = (SchemaEditor undefined undefined insertTable undefined listTable updateTable getDiffTable mapKeyType joinList )
+gmailOps = (SchemaEditor undefined undefined insertTable undefined listTable getDiffTable mapKeyType joinList )
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
@@ -320,16 +320,6 @@ postHeaderJSON h url form = do
       let opts = defaults  & headers .~ h
       (^. responseBody ) <$> postWith opts url form
 
-{-
--- simpleHttp' :: MonadIO m => (HeaderName,BL.ByteString) -> String -> m BL.ByteString
-simpleHttpHeader headers url = liftIO $ withManager $ \man -> do
-      req <- liftIO $ parseUrl url
-      responseBody <$> httpLbs (setConnectionClose headers req) man
-
-
--- setConnectionClose :: Request m -> Request m
-setConnectionClose h req = req{requestHeaders = ("Connection", "close") : (h ++ requestHeaders req)}
--}
 
 preconversion i =  join $ (\t -> M.lookup (i,t) (gmailLiftPrimConv )) <$> ktypeLift  i
 

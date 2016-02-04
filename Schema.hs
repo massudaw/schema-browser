@@ -200,7 +200,7 @@ createTableRefsUnion inf m i  = do
   let
       patchUni = fmap concat $ R.unions $ R.rumors . patchTid .(justError "no table union" . flip M.lookup m) . tableMeta <$>  (rawUnion i)
       patch =  fmap patchunion <$> patchUni
-      patchunion  = {-(\i -> traceShow (create i :: TBData Key Showable) i ) .-} liftPatch inf (tableName i ) .firstPatch keyValue
+      patchunion  = liftPatch inf (tableName i ) .firstPatch keyValue
   R.onEventIO patch (hdiff)
   midx <-  atomically$ newTMVar iv
   bh <- R.accumB v (flip (L.foldl' apply) <$> patch )
@@ -449,7 +449,6 @@ writeTable s t v = do
   iidx <- R.currentValue $ R.facts $ idxTid v
   let sidx = first (fmap (firstTB keyValue)) . fmap (fmap (fmap (pageFirst keyValue))) <$> M.toList iidx
       sdata = fmap (mapKey' keyValue) $ G.toList $ iv
-  print (t,sidx)
   when (not (L.null sdata) )$
       BSL.writeFile tname (compress $ B.encode $ (sidx,sdata))
 
@@ -459,7 +458,6 @@ readTable inf r s t  = do
   has <- doesFileExist tname
   if has
     then do
-       print tname
        f <- (Right . decompress . BSL.fromStrict <$> BS.readFile tname ) `catch` (\e -> return $ Left (show (e :: SomeException )))
        return $  either (const (M.empty ,G.empty)) (\f -> either (const (M.empty,G.empty)) (\(_,_,(m,g)) -> (M.mapKeys (fmap (liftField inf (tableName t) )) $ fmap (fmap ((pageFirst (lookKey inf (tableName t))))) <$> m,createUn (S.fromList $ rawPK t) . fmap (liftTable' inf (tableName t)) $ g )) $ B.decodeOrFail f) f
     else return (M.empty ,G.empty)

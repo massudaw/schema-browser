@@ -23,6 +23,7 @@ import Schema
 import Types.Patch
 import Data.Maybe
 import Reactive.Threepenny
+import Debug.Trace
 import Data.Traversable (traverse)
 import qualified Data.List as L
 import Data.Time
@@ -96,17 +97,18 @@ poller schm authmap db plugs is_test = do
                               tdInput i =  isJust  $ checkTable  (fst f) i
                               tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
 
-                          i <-  mapConcurrently (mapM (\inp -> catchPluginException inf a pname (getPKM inp) $ transaction inf $ do
-                              o  <- fmap (liftTable' inf a) <$>   liftIO ( elemp (Just $ mapKey' keyValue inp))
-                              let diff' =   join $ (\i j -> diff (j ) (i)) <$>  o <*> Just inp
-                              maybe (return Nothing )  (\i -> do
-                                 p <- updateFrom (justError "no test" o) inp
-                                 tell (maybeToList p)
-                                 return p
+                          i <-  mapM (mapM (\inp -> catchPluginException inf a pname (getPKM inp) $ transaction inf $ do
+                              ov  <- fmap (liftTable' inf a) <$>   liftIO ( elemp (Just $ mapKey' keyValue inp))
+                              let c = ov
+                              let diff' = join $ diff <$> Just inp <*> c
+                              liftIO$ print diff'
+                              v <- maybe (return Nothing )  (\i -> do
+                                 p <- fullDiffEdit inp (justError "no test" c)
+                                 tell [TableModification (Just 10)(lookTable inf a) i ]
+                                 return $ Just (TableModification (Just 10) (lookTable inf a)i )
                                  ) diff'
-
-                                )
-                            ) . L.transpose . chuncksOf 20 $ evb
+                              return v)
+                            ) .  chuncksOf 20 $ evb
                           return $ concat i
                           ) [0..(lengthPage (fst sizeL) fetchSize -1)]
                       end <- getCurrentTime
@@ -127,17 +129,17 @@ poller schm authmap db plugs is_test = do
                               , attrT ("start_time",time current)
                               , attrT ("end_time",time end)]
 
-                      (p2,p) <- transaction metas  $ do
+                      {-(p2,p) <- transaction metas  $ do
                           fktable2 <- loadFKS  (liftTable' metas "polling"  table2)
                           p2 <- fullDiffEdit curr fktable2
                           fktable <- loadFKS  (liftTable' metas  "polling_log"  table)
                           p <-fullDiffInsert  fktable
-                          return (fktable2,p)
+                          return (fktable2,p)-}
                       threadDelay (intervalms*10^3)
                   else do
                       threadDelay (round $ (*10^6) $  diffUTCTime current start )
 
-          pid <- forkIO $ (void $ iter polling >> (forever $  do
+          pid <- forkIO (void $ iter polling >> (forever $  do
               (_,(_,polling))<- transaction metas $ selectFrom "polling"   Nothing Nothing [] []
               iter polling ))
           return ()

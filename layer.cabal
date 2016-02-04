@@ -56,7 +56,7 @@ executable threepenny-layer
     Types.Index
     Types.Patch
     Utils
-  extensions: TupleSections,OverloadedStrings
+  default-extensions: TupleSections,OverloadedStrings
   build-depends:
      scientific
    , blaze-builder

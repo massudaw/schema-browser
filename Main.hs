@@ -53,27 +53,16 @@ main = do
   plugs smvar amap db plugList
 
   print "Load Polling Process"
-  poller smvar amap db plugList False
+  poller smvar amap db [siapi3Plugin]True
 
   print "Load GUI Server"
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup smvar  (tail args)) (\w ->  liftIO $ do
           print ("delete client" <> show (sToken w))
           deleteClient metas (sToken w) )
   print "Finish Server"
+  print "Start Dump State"
   dumpSnapshot smvar
-  print "Dump State"
+  print "Finish Dump State"
 
-testPoller plug = do
-  let bstate = (BrowserState "localhost" "5432" "incendio" "postgres" "queijo" Nothing Nothing Nothing )
-      db = bstate
-  smvar <- newMVar M.empty
-  conn <- connectPostgreSQL (connRoot db)
-  let
-    amap = authMap smvar db (user db , pass db )
-  print "Load Metadata"
-  metas <- keyTables  smvar conn  ("metadata", T.pack $ user db) amap plugList
-
-
-  poller smvar  (\_ -> return (undefined ,undefined)) bstate [plug] True
-
-
+  getLine
+  return ()

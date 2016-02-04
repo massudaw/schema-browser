@@ -30,7 +30,6 @@ import qualified Data.List as L
 
 import Prelude hiding (takeWhile,head)
 
-
 import qualified Data.Foldable as F
 import qualified Data.Text as T
 import Data.Text (Text)
@@ -51,9 +50,9 @@ insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
           iquery :: String
           iquery = T.unpack $ prequery <> " RETURNING ROW(" <>  T.intercalate "," (projKey serialAttr) <> ")"
         liftIO $ print iquery
-        out <-  fmap head $ liftIO $ queryWith (f (mapRecord (const ()) serialTB )) conn (fromString  iquery ) directAttr
-        let Just (_,_ ,gen) = diff serialTB out
-        return (m,getPKM out ,compact (i <> gen ) )
+        out <-  fmap safeHead $ liftIO $ queryWith (f (mapRecord (const ()) serialTB )) conn (fromString  iquery ) directAttr
+        let Just (_,_ ,gen) =  join $ diff serialTB <$> out
+        return (m,getPKM (justError "no out insert" out) ,compact (i <> gen ) )
       else do
         let
           iquery = T.unpack prequery
@@ -112,7 +111,7 @@ updatePatch conn kv old  t =
     kold = getPKM old
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> F.toList kold
-    pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> F.toList kold)
+    pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst .traceShowId <$> F.toList kold)
     setter = " SET " <> T.intercalate "," (equality .   attrValueName <$> skv   )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = unTB <$> F.toList  (_kvvalues $ unTB tbskv)
@@ -170,7 +169,7 @@ getLabels t k =  M.lookup  k (mapLabels label' t)
     where label' (Labeled l (Attr k _)) =  (k,l )
           label' (Labeled l (IT k tb )) = (k, l <> " :: " <> tableType tb)
           label' (Unlabeled (Attr k _)) = (k,keyValue k)
-          label' (Unlabeled (IT k v)) = (k, label $ getCompose $ snd (head (F.toList v))  )
+          label' (Unlabeled (IT k v)) = (k, label $ getCompose $ snd (justError "no it label" $ safeHead (F.toList v))  )
           lattr =_tbattrkey . labelValue .getCompose
 
 
@@ -294,6 +293,6 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 
 
-postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef . filter (flip L.elem (fmap fst s) . fst ) .  getPKM <$> lastMay i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o ) (\ _ _ _ _ -> return ([],Nothing,0)) (\table j -> do
+postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef . filter (flip L.elem (fmap fst s) . fst ) .  getPKM <$> lastMay i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o )  (\table j -> do
     inf <- ask
     liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ) $ j ) mapKeyType undefined

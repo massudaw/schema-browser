@@ -250,8 +250,6 @@ databaseChooser smvar metainf sargs = do
 attrLine i   = do
   line ( L.intercalate "," (fmap renderShowable .  allKVRec'  $ i))
 
-
-
 lookAttr' inf k (i,m) = unTB $ err $  M.lookup (S.singleton (Inline (lookKey inf (_kvname i) k))) (unKV m)
     where
       err= justError ("no attr " <> show k <> " for table " <> show (_kvname i))

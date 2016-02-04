@@ -213,7 +213,7 @@ expandPSet (PatchSet l ) =  l
 expandPSet p = [p]
 
 groupSplit2 :: Ord b => (a -> b) -> (a -> c ) -> [a] -> [(b ,[c])]
-groupSplit2 f g = fmap (\i-> (f $ head i , g <$> i)) . groupWith f
+groupSplit2 f g = fmap (\i-> (f $ justError "cant group" $ safeHead i , g <$> i)) . groupWith f
 
 notOptional :: [(k , FTB a )] -> [(k,FTB a)]
 notOptional = justError "cant be empty " . traverse (traverse unSOptional' )
@@ -278,7 +278,7 @@ difftable
   ::  (PatchConstr k a  , Show a,Show k ) => TBData k a -> TBData k a
      -> Maybe (Index (TBData k a ))
 difftable (m, v) (n, o) = if L.null attrs then Nothing else Just  (m, fmap (fmap patch ) <$> (getPKM (m,v)), attrs)
-    where attrs = catMaybes $ F.toList  $ Map.mergeWithKey (\_ i j -> Just $ diffAttr (unTB i) (unTB j)) (const Map.empty ) (fmap (Just. patchAttr . unTB) ) (unKV v) (unKV o)
+    where attrs = catMaybes $ F.toList  $ Map.mergeWithKey (\_ i j -> Just $ diffAttr (unTB  i) (unTB j)) (const Map.empty ) (fmap (Just. patchAttr . unTB) ) (unKV v) (unKV $  o)
 
 diffTB1 :: (PatchConstr k a ) =>  TB2 k a -> TB2  k  a -> Maybe (PathFTB   (Index (TBData k a )) )
 diffTB1 = diffFTB patchTB1  difftable
@@ -286,7 +286,7 @@ diffTB1 = diffFTB patchTB1  difftable
 
 patchSet i
   | L.length i == 0 = Nothing
-  | L.length i == 1 = Just$ head i
+  | L.length i == 1 = safeHead i
   | otherwise = Just $ PatchSet (concat $ normalize <$> i)
       where normalize (PatchSet i) = concat $ fmap normalize i
             normalize i = [i]
@@ -299,7 +299,7 @@ applyAttr (Attr k i) (PAttr _ p)  = Attr k (applyShowable i p)
 applyAttr (FKT k rel  i) (PFK _ p _ b )  =  FKT ref  rel  (create b)
   where
               ref =  F.toList $ Map.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList (concat $ traComp nonRefTB <$>  k))
-              edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
+              edit  key  k@(PAttr  s _) v = if (_relOrigin $ justError "no key" $ safeHead $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
 applyAttr (IT k i) (PInline _   p)  = IT k (applyTB1 i p)
 -- applyAttr i j = errorWithStackTrace ("applyAttr: " <> show (i,j))
 
