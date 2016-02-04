@@ -286,7 +286,7 @@ newKey name ty p = do
   return $ Key name Nothing    [FRead,FWrite] p Nothing un ty
 
 
-catchPluginException :: InformationSchema -> Text -> Text -> [(Key, FTB Showable)] -> IO (Maybe a) -> IO (Either Int (Maybe a))
+catchPluginException :: InformationSchema -> Text -> Text -> [(Key, FTB Showable)] -> IO (a) -> IO (Either Int (a))
 catchPluginException inf pname tname idx i = do
   (Right <$> i) `catch` (\e  -> do
                 t <- getCurrentTime

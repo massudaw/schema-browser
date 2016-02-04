@@ -97,18 +97,17 @@ poller schm authmap db plugs is_test = do
                               tdInput i =  isJust  $ checkTable  (fst f) i
                               tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
 
-                          i <-  mapM (mapM (\inp -> catchPluginException inf a pname (getPKM inp) $ transaction inf $ do
+                          i <-  mapConcurrently (mapM (\inp -> catchPluginException inf a pname (getPKM inp) $ transactionLog inf $ do
                               ov  <- fmap (liftTable' inf a) <$>   liftIO ( elemp (Just $ mapKey' keyValue inp))
                               let c = ov
                               let diff' = join $ diff <$> Just inp <*> c
                               liftIO$ print diff'
-                              v <- maybe (return Nothing )  (\i -> do
+                              maybe (return () )  (\i -> do
                                  p <- fullDiffEdit inp (justError "no test" c)
-                                 tell [TableModification (Just 10)(lookTable inf a) i ]
-                                 return $ Just (TableModification (Just 10) (lookTable inf a)i )
+                                 return ()
                                  ) diff'
-                              return v)
-                            ) .  chuncksOf 20 $ evb
+                              )
+                            ) . L.transpose .  chuncksOf 20 $ evb
                           return $ concat i
                           ) [0..(lengthPage (fst sizeL) fetchSize -1)]
                       end <- getCurrentTime
@@ -119,8 +118,8 @@ poller schm authmap db plugs is_test = do
                               [ attrT ("poll_name",TB1 (SText pname))
                               , attrT ("schema_name",TB1 (SText schema))
                               , _tb $ IT "diffs" (LeftTB1 $ ArrayTB1  . Non.fromList <$> (
-                                        nonEmpty  . catMaybes $
-                                            fmap (TB1 . tblist  ) .  either (\r ->Just $ [attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) ),attrT ("modify",LeftTB1 $Nothing)]) (fmap (\r -> [attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $  r))   ),attrT ("except",LeftTB1 $Nothing)])) <$> i))
+                                        nonEmpty  . concat . catMaybes $
+                                            fmap (fmap (TB1 . tblist  )) .  either (\r ->Just $ pure $ [attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) ),attrT ("modify",LeftTB1 $Nothing)]) (Just . fmap (\r -> [attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $  r))   ),attrT ("except",LeftTB1 $Nothing)])) <$> i))
                               , attrT ("duration",srange (time current) (time end))]
                           time  = TB1 . STimestamp . utcToLocalTime utc
                           table2 = tblist
@@ -129,12 +128,12 @@ poller schm authmap db plugs is_test = do
                               , attrT ("start_time",time current)
                               , attrT ("end_time",time end)]
 
-                      {-(p2,p) <- transaction metas  $ do
+                      (p2,p) <- transaction metas  $ do
                           fktable2 <- loadFKS  (liftTable' metas "polling"  table2)
                           p2 <- fullDiffEdit curr fktable2
                           fktable <- loadFKS  (liftTable' metas  "polling_log"  table)
-                          p <-fullDiffInsert  fktable
-                          return (fktable2,p)-}
+                          p <-fullDiffInsert  (liftTable' metas  "polling_log"  table)
+                          return (fktable2,p)
                       threadDelay (intervalms*10^3)
                   else do
                       threadDelay (round $ (*10^6) $  diffUTCTime current start )

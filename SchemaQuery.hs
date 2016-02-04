@@ -14,6 +14,7 @@ module SchemaQuery
   ,fullDiffEdit
   ,transaction
   ,backFKRef
+  ,transactionLog
   )where
 import Graphics.UI.Threepenny.Core (mapEventFin)
 
@@ -247,6 +248,16 @@ noInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
 noInsert' (k1,v1)   = do
    let proj = _kvvalues . unTB
    (k1,) . _tb . KV <$>  Tra.sequence (fmap (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1))
+
+transactionLog :: InformationSchema -> TransactionM a -> IO [TableModification (TBIdx Key Showable)]
+transactionLog inf log = do -- withTransaction (conn inf) $ do
+  (md,mods)  <- runWriterT (runReaderT log inf )
+  let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [TableModification id t f] m) M.empty mods
+  Tra.traverse (\(k,v) -> do
+    ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ M.lookup ((rawSchema k ))  (depschema inf) ) k
+    putPatch (patchVar ref ) $ (\(TableModification _ _ p) -> p) <$> v
+    ) (M.toList aggr)
+  return $ concat $ F.toList aggr
 
 
 

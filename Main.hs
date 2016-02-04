@@ -42,7 +42,8 @@ main = do
 
   print "Initialize Sql Script"
   f <- BS.readFile "sql/init_usage.sql"
-  exec conn f
+  i <- exec conn f
+  print i
   let
     amap = authMap smvar db (user db , pass db )
 
@@ -53,7 +54,7 @@ main = do
   plugs smvar amap db plugList
 
   print "Load Polling Process"
-  poller smvar amap db [siapi3Plugin]True
+  poller smvar amap db plugList False
 
   print "Load GUI Server"
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup smvar  (tail args)) (\w ->  liftIO $ do
@@ -64,5 +65,5 @@ main = do
   dumpSnapshot smvar
   print "Finish Dump State"
 
-  getLine
+  -- getLine
   return ()

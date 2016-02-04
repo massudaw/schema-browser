@@ -564,15 +564,18 @@ showFK = (pure ((\v j ->j  # set text (L.take 50 $ L.intercalate "," $ fmap rend
 ----
 
 splitArray
-  :: Int  -- Offset
+  :: Show a => Int  -- Offset
   -> Int  -- Inner Block Size
   -> NonEmpty a  -- FullList
   -> NonEmpty a  -- Inner Block
   -> NonEmpty a
 splitArray s o m l
-  = justError "can't be null"  $ (fmap Non.fromList $ nonEmpty $ Non.take o m )<> Just l <> ta
+  =  res
   where
     ta = if Non.length l == s then  (fmap Non.fromList $ nonEmpty $Non.drop  (o + s ) m) else Nothing
+    pre = (fmap Non.fromList $ nonEmpty $ Non.take o m )
+    res = justError "can't be null"  $ pre <> Just l <> ta
+
 
 takeArray :: (Show b,Applicative f ) => NonEmpty (f (Maybe b)) -> f (Maybe (NonEmpty b))
 takeArray a = fmap (Non.fromList) . nonEmpty .fmap (justError "is nothing" ). Non.takeWhile isJust <$> Tra.sequenceA a
@@ -592,7 +595,7 @@ indexItens s tb@(Attr k v) offsetT atdcomp atdi = fmap constrAttr  <$> bres
     tdi = fmap  _tbattr <$> atdi
     emptyAttr = fmap unSComposite
     constrAttr = Attr k . ArrayTB1
-    bres = attrEditor s <$> offsetT <*> tdcomp <*> (emptyAttr <$> tdi)
+    bres = attrEditor s <$> offsetT <*>  (emptyAttr <$> tdi) <*> tdcomp
 indexItens s tb@(FKT ifk rel _) offsetT fks oldItems  = fmap constFKT <$> bres
   where
     bres2 = takeArray (fmap (fmap projFKT )  <$>  fks)
@@ -609,7 +612,7 @@ indexItens s tb@(IT na _) offsetT items oldItems  = fmap constIT <$> bres
   where
     bres2 = fmap (fmap _fkttable) <$> takeArray items
     emptyIT = unSComposite . _fkttable
-    bres =  attrEditor s <$> offsetT <*> bres2 <*> (fmap emptyIT <$> oldItems)
+    bres =  attrEditor s <$> offsetT <*> (fmap emptyIT <$> oldItems) <*> bres2
     constIT = IT   na . ArrayTB1
 
 attrEditor s o x y = arrayEditor merge create delete x y
