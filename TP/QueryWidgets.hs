@@ -35,7 +35,6 @@ import Control.Monad.Writer hiding((<>))
 import Control.Applicative.Lift
 import SchemaQuery
 import qualified Data.Binary as B
-import Control.Concurrent
 import qualified Data.Poset as P
 import qualified Data.GiST.GiST as G
 import Reactive.Threepenny hiding (apply)
@@ -52,7 +51,6 @@ import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
 import Data.Set (Set)
-import Data.Traversable(traverse)
 import qualified Data.Traversable as Tra
 import qualified Data.ByteString.Base64 as B64
 import Data.Interval (interval)
@@ -121,10 +119,11 @@ pluginUI :: InformationSchema
     -> Tidings (Maybe (TBData CoreKey Showable) )
     -> Plugins
     -> UI (Element ,(Access Text,Tidings (Maybe (TBData CoreKey Showable))))
-pluginUI oinf trinp (StatefullPlugin n tname ac) = do
+pluginUI oinf trinp (FPlugins n tname (StatefullPlugin ac)) = do
   let
       fresh :: [([VarDef],[VarDef])]
       fresh = fmap fst ac
+  b <- UI.button # set UI.text (T.unpack n)
   inf <- liftIO $  foldl' (\i (kn,kty) -> (\m -> createFresh  tname m kn kty) =<< i ) (return  oinf) (concat $ fmap fst fresh <> fmap snd fresh )
   let
       freshKeys :: [([CoreKey],[CoreKey])]
@@ -142,7 +141,7 @@ pluginUI oinf trinp (StatefullPlugin n tname ac) = do
         inp :: Tidings (Maybe (TBData CoreKey Showable))
         inp = fmap (tbmap . mapFromTBList) . join  . fmap nonEmpty <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap _tb) .  triding) elemsIn )
 
-      (preinp,(_,liftedE )) <- pluginUI  inf (mergeCreate <$>  unoldItems <*>  inp) aci
+      (preinp,(_,liftedE )) <- pluginUI  inf (mergeCreate <$>  unoldItems <*>  inp) (FPlugins "Enviar" tname aci)
 
       elemsOut <- mapM (\fresh -> do
         let attrB pre a = do
@@ -157,10 +156,10 @@ pluginUI oinf trinp (StatefullPlugin n tname ac) = do
       k <- UI.div # styleUI  # set children (fmap getElement elemsOut) # sink UI.style (noneShow .isJust <$> facts liftedE  )
       return  (( l <> [j , k], ole <> [liftedE] ), mergeCreate <$> unoldItems <*> liftedE  ))
            ) ) (return (([],[]),trinp)) $ zip (fmap snd ac) freshKeys
-  el <- UI.div  # set children (fst $ fst freshUI)
-  return (el , (snd $ pluginStatic $ snd $ last ac ,last $ snd $ fst freshUI ))
+  el <- UI.div  # set children (b: (fst $ fst freshUI))
+  return (el , (snd $ pluginStatic' $ snd $ last ac ,last $ snd $ fst freshUI ))
 
-pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
+pluginUI inf oldItems p@(FPlugins n t (PurePlugin arrow )) = do
   let f = staticP arrow
       action = pluginAction   p
   let tdInputPre = fmap (checkTable' (fst f)) <$>  oldItems
@@ -177,7 +176,7 @@ pluginUI inf oldItems p@(PurePlugin n t arrow ) = do
   addElemFin out fin
   return (out, (snd f ,   fmap (liftTable' inf t) <$> pgOut ))
 
-pluginUI inf oldItems p@(BoundedPlugin2 n t arrow) = do
+pluginUI inf oldItems p@(FPlugins n t (BoundedPlugin2 arrow)) = do
   overwrite <- checkedWidget (pure False)
   let f = staticP arrow
       action = pluginAction p
@@ -485,22 +484,14 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
 
 addElemFin e = liftIO . addFin e .pure
 
-
-
 unConstraint :: Set CoreKey -> TBData CoreKey Showable -> G.GiST (G.TBIndex CoreKey Showable) (TBData CoreKey Showable) -> Bool
 unConstraint un v m = isJust . lookGist un v $ m
 
 lookGist un pk  = G.lookup (tbpred un pk)
-
-tbpred un  = tbjust  . traverse (traverse unSOptional') .getUn un
   where
-    tbjust = G.Idex . justError "cant be empty"
-{-
-createUn :: Set CoreKey -> G.GiST (G.TBIndex CoreKey(Showable)) (TBData CoreKey Showable) -> G.GiST (G.TBIndex CoreKey(Showable)) (TBData CoreKey Showable)
-createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ traverse (traverse unSOptional' ) $ getUn un i ) . G.toList
-  where transPred v = tbpred un v
--}
-
+    tbpred un  = tbjust  . traverse (traverse unSOptional') .getUn un
+      where
+        tbjust = G.Idex . justError "cant be empty"
 
 processPanelTable
    :: InformationSchema
@@ -536,7 +527,7 @@ processPanelTable inf attrsB reftb@(res,_,gist,_) inscrud table oldItemsi = do
   -- Delete when isValid
          sink UI.enabled ( liftA2 (&&) (isJust . fmap (tableNonRef') <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (facts oldItemsi ) (facts gist ) ))
   let
-         crudEdi (Just (i)) (Just (j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEdit  i j
+         crudEdi (Just (i)) (Just (j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEditInsert  i j
          crudIns (Just (j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
          crudDel (Just (j))  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> transaction inf (deleteFrom j)
   (diffEdi,ediFin) <- mapEventFin id $ crudEdi <$> facts oldItemsi <*> attrsB <@ UI.click editB
@@ -589,30 +580,25 @@ indexItens
      -> NonEmpty (Tidings (Maybe (TB Identity k b)))
      -> Tidings (Maybe (TB Identity k b))
      -> Tidings (Maybe (TB Identity k b ))
-indexItens s tb@(Attr k v) offsetT atdcomp atdi = fmap constrAttr  <$> bres
+indexItens s tb@(Attr k v) offsetT inner old = fmap constrAttr  <$> bres
   where
-    tdcomp = fmap (fmap _tbattr ) <$>  takeArray atdcomp
-    tdi = fmap  _tbattr <$> atdi
-    emptyAttr = fmap unSComposite
+    tdcomp = fmap (fmap _tbattr ) <$>  takeArray inner
+    tdi = fmap  (unSComposite . _tbattr) <$> old
     constrAttr = Attr k . ArrayTB1
-    bres = attrEditor s <$> offsetT <*>  (emptyAttr <$> tdi) <*> tdcomp
-indexItens s tb@(FKT ifk rel _) offsetT fks oldItems  = fmap constFKT <$> bres
+    bres = attrEditor s <$> offsetT <*>  tdi <*> tdcomp
+indexItens s tb@(FKT ifk rel _) offsetT inner old = fmap constFKT  <$> bres
   where
-    bres2 = takeArray (fmap (fmap projFKT )  <$>  fks)
-    bres =  editor <$> offsetT <*> bres2 <*> fmap (fmap (fktzip .projFKT)) oldItems
-    editor o x y =  arrayEditor  merge  create delete x y
-      where
-        merge l lc = (splitArray s o  (fst <$> lc)  (fst <$>  l),  splitArray s o (snd <$> lc ) (snd <$> l))
-        create = Non.unzip
-        delete = fmap (Non.unzip . Non.fromList)  . nonEmpty  . Non.take o
-    constFKT (ref ,tb) = FKT (mapComp (mapFAttr (const (ArrayTB1 ref ))) <$> ifk)   rel (ArrayTB1 tb )
+    bres2 = fmap (fmap projFKT )  <$> takeArray  inner
+    bres =  attrEditor s <$> offsetT <*> fmap (fmap (fktzip .projFKT)) old <*> bres2
+    constFKT a = FKT (mapComp (mapFAttr (const (ArrayTB1 ref ))) <$> ifk)   rel (ArrayTB1 tb )
+      where (ref,tb) = Non.unzip a
     projFKT (FKT i  _ j ) = (head $ fmap (unAttr.unTB ) $ i,  j)
     fktzip (ArrayTB1 lc , ArrayTB1 m) = Non.zip lc m
-indexItens s tb@(IT na _) offsetT items oldItems  = fmap constIT <$> bres
+indexItens s tb@(IT na _) offsetT inner old = fmap constIT <$> bres
   where
-    bres2 = fmap (fmap _fkttable) <$> takeArray items
+    bres2 = fmap (fmap _fkttable) <$> takeArray inner
     emptyIT = unSComposite . _fkttable
-    bres =  attrEditor s <$> offsetT <*> (fmap emptyIT <$> oldItems) <*> bres2
+    bres =  attrEditor s <$> offsetT <*> (fmap emptyIT <$> old) <*> bres2
     constIT = IT   na . ArrayTB1
 
 attrEditor s o x y = arrayEditor merge create delete x y
@@ -620,8 +606,7 @@ attrEditor s o x y = arrayEditor merge create delete x y
     merge = splitArray s o
     create = id
     delete = fmap Non.fromList  . nonEmpty .  Non.take o
-
-arrayEditor merge create del x y = liftA2 merge  x y <|> fmap create  x <|> join (fmap del y)
+    arrayEditor merge create del x y = liftA2 merge  x y <|> fmap create  x <|> join (fmap del y)
 
 
 dynHandler hand val ix (l,old)= do
@@ -657,12 +642,11 @@ attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ _ (KOptional _) ) v) = do
       return (leftItens attr <$> res)
 attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ _ (KArray _) ) v) = mdo
           offsetDiv  <- UI.div
-          let wheel = fmap negate $ mousewheel offsetDiv
+          -- let wheel = fmap negate $ mousewheel offsetDiv
           TrivialWidget offsetT offset <- offsetField (pure 0)  never (maybe 0 (Non.length . (\(ArrayTB1 l ) -> l) . _tbattr) <$> facts bres)
           let arraySize = 8
           let dyn = dynHandler (\ix -> attrUITable (unIndexItens ix  <$> offsetT <*> tAttr')  ((unIndexItens ix  <$> offsetT <*> ) <$>  evs) (Attr (unKArray i) v  )) (\ix -> unIndexItens ix  <$> offsetT <*> tAttr')
           widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
---      fks <- mapM recurse [0..arraySize -1 ]
           let
             bres = indexItens arraySize  attr offsetT (Non.fromList $ triding <$> widgets) tAttr'
           element offsetDiv # set children (fmap getElement widgets)
@@ -825,7 +809,7 @@ iUITable inf pmods oldItems  tb@(IT na (LeftTB1 (Just tb1))) = do
 iUITable inf plmods oldItems  tb@(IT na (ArrayTB1 (tb1 :| _)))
     = mdo
       dv <- UI.div
-      let wheel = fmap negate $ mousewheel dv
+      let -- wheel = fmap negate $ mousewheel dv
           arraySize = 8
       (TrivialWidget offsetT offset) <- offsetField (pure 0) never (maybe 0 (Non.length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> facts bres )
       let unIndexEl ix = (unIndexItens  ix <$> offsetT <*> )

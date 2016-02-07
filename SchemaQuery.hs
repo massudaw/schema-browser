@@ -12,6 +12,7 @@ module SchemaQuery
   ,loadFKS
   ,fullDiffInsert
   ,fullDiffEdit
+  ,fullDiffEditInsert
   ,transaction
   ,backFKRef
   ,transactionLog
@@ -271,13 +272,22 @@ transaction inf log = do -- withTransaction (conn inf) $ do
     ) (M.toList aggr)
   return md
 
+fullDiffEditInsert :: TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
+fullDiffEditInsert old@((k1,v1) ) (k2,v2) = do
+   inf <- ask
+   let proj = _kvvalues . unTB
+   edn <- (k2,) . _tb . KV <$>  Tra.sequence (M.intersectionWith (\i j -> _tb <$>  tbDiffEditInsert (unTB i) (unTB j) ) (proj v1 ) (proj v2))
+   when (isJust $ diff (tableNonRef' old) (tableNonRef' edn) ) $ do
+      mod <- updateFrom   edn old
+      tell (maybeToList mod)
+   return edn
+
 
 fullDiffEdit :: TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
 fullDiffEdit old@((k1,v1) ) (k2,v2) = do
    inf <- ask
    let proj = _kvvalues . unTB
    edn <- (k2,) . _tb . KV <$>  Tra.sequence (M.intersectionWith (\i j -> _tb <$>  tbDiffEdit (unTB i) (unTB j) ) (proj v1 ) (proj v2))
-   liftIO $ putStrLn  $ "diffEdit" <> show ( diff (tableNonRef' old) (tableNonRef' edn))
    when (isJust $ diff (tableNonRef' old) (tableNonRef' edn) ) $ do
       mod <- updateFrom   edn old
       tell (maybeToList mod)
@@ -293,6 +303,10 @@ fullDiffInsert (k2,v2) = do
    return mod
 
 
+tbDiffEditInsert :: Column Key Showable -> Column Key Showable -> TransactionM (Column Key  Showable)
+tbDiffEditInsert i j
+  | i == j =  return j
+  | otherwise = tbInsertEdit  j
 
 tbDiffEdit :: Column Key Showable -> Column Key Showable -> TransactionM (Column Key  Showable)
 tbDiffEdit i j

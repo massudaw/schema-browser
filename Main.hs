@@ -1,16 +1,13 @@
 {-# LANGUAGE FlexibleContexts,OverloadedStrings #-}
 import TP.Browser
-import Control.Concurrent.STM
 import Poller
 import Plugins
 import PostgresQuery (connRoot)
-import Data.String
 import Prelude hiding (head)
 import Control.Monad.Reader
 import Control.Concurrent
 import System.Environment
 import Utils
-import qualified Types.Index as G
 import Schema
 
 import RuntimeTypes
@@ -22,13 +19,7 @@ import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Internal
 import qualified Data.Map as M
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Lazy as BSL
-import RuntimeTypes
-import Types
-import Data.Binary (encode,decode)
-import System.Directory
 
-import qualified Reactive.Threepenny as R
 
 
 main :: IO ()
@@ -62,7 +53,7 @@ main = do
           deleteClient metas (sToken w) )
   print "Finish Server"
   print "Start Dump State"
-  dumpSnapshot smvar
+  -- dumpSnapshot smvar
   print "Finish Dump State"
 
   -- getLine

@@ -57,11 +57,11 @@ import Control.Arrow
 import qualified Data.Foldable as F
 
 
-lplugOrcamento = BoundedPlugin2 "Orçamento" "pricing" renderProjectPricingA
-lplugContract = BoundedPlugin2 "Contrato" "pricing" renderProjectContract
-lplugReport = BoundedPlugin2 "Relatório " "pricing" renderProjectReport
+lplugOrcamento = FPlugins "Orçamento" "pricing" $ BoundedPlugin2 renderProjectPricingA
+lplugContract = FPlugins "Contrato" "pricing" $ BoundedPlugin2 renderProjectContract
+lplugReport = FPlugins "Relatório " "pricing" $ BoundedPlugin2 renderProjectReport
 
-siapi2Hack = BoundedPlugin2  pname tname url
+siapi2Hack = FPlugins pname tname $ BoundedPlugin2  url
   where
     pname ="Siapi2 Hack"
     tname = "hack"
@@ -106,7 +106,7 @@ siapi2Hack = BoundedPlugin2  pname tname url
 
 
 
-siapi2Plugin = BoundedPlugin2  pname tname url
+siapi2Plugin = FPlugins pname tname $ BoundedPlugin2  url
   where
     pname ="Siapi2 Andamento"
     tname = "siapi3"
@@ -132,11 +132,8 @@ siapi2Plugin = BoundedPlugin2  pname tname url
     tailEmpty [] = []
     tailEmpty i  = tail i
 
-cpfCaptcha = BoundedPlugin2 pname tname url
+cpfCaptcha = BoundedPlugin2 url
   where
-    pname , tname :: Text
-    pname = "CPF Captcha"
-    tname = "owner"
     url :: ArrowReader
     url = proc t -> do
       sess <- act (\_ -> lift  initSess ) -< ()
@@ -146,11 +143,8 @@ cpfCaptcha = BoundedPlugin2 pname tname url
       odxR "captchaViewer" -< ()
       returnA -< Just $ tblist [attrT  ("sess", TB1 (SSession sess)) ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
 
-cnpjCaptcha = BoundedPlugin2 pname tname url
+cnpjCaptcha = BoundedPlugin2 url
   where
-    pname , tname :: Text
-    pname = "CNPJ Captcha"
-    tname = "owner"
     url :: ArrowReader
     url = proc t -> do
       sess <- act (\_ -> lift  initSess ) -< ()
@@ -164,7 +158,7 @@ renderDay d =  paddedm day <> paddedm month <> show year
   where (year,month,day) = toGregorian d
         paddedm m = (if m < 10 then "0" else "" ) <> show m
 
-cpfForm = BoundedPlugin2 pname tname url
+cpfForm = BoundedPlugin2 url
   where
     pname , tname :: Text
     pname = "CPF Form"
@@ -183,7 +177,7 @@ cpfForm = BoundedPlugin2 pname tname url
               returnA -< Nothing
 
 atPrim  p = Primitive (AtomicPrim p )
-queryCPFStatefull = StatefullPlugin "CPF Receita" "owner"
+queryCPFStatefull = FPlugins "CPF Receita" "owner" $ StatefullPlugin
   [(([],[("captchaViewer",atPrim (PMime "image/jpg") )
     ,("sess",atPrim PSession )])
     ,cpfCaptcha)
@@ -192,7 +186,7 @@ queryCPFStatefull = StatefullPlugin "CPF Receita" "owner"
     ,cpfForm)]
 
 
-queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
+queryCNPJStatefull = FPlugins "CNPJ Receita" "owner" $ StatefullPlugin
   [(([],[("captchaViewer",atPrim (PMime "image/jpg") )
     ,("sess",atPrim PSession )])
     ,cnpjCaptcha)
@@ -201,7 +195,7 @@ queryCNPJStatefull = StatefullPlugin "CNPJ Receita" "owner"
 
 
 
-cnpjForm = BoundedPlugin2 pname tname url
+cnpjForm = BoundedPlugin2 url
   where
     pname , tname :: Text
     pname = "CNPJ Form"
@@ -235,7 +229,7 @@ cnpjForm = BoundedPlugin2 pname tname url
               odxR "bairro" -< t
 
 
-analiseProjeto = BoundedPlugin2 pname tname url
+analiseProjeto = FPlugins pname tname $ BoundedPlugin2 url
   where
     pname , tname :: Text
     pname = "Cadastro Bombeiro"
@@ -258,7 +252,7 @@ doubleP s = (\(TB1 (SDouble ar)) -> ar) <$> idxK s
 intP s = (\(TB1 (SNumeric ar)) -> ar) <$> idxK s
 doubleA s =  (\(ArrayTB1 i) -> fmap (\(TB1 (SDouble v)) -> v)  i) <$> idxK s
 
-areaDesign = PurePlugin pname tname  url
+areaDesign = FPlugins pname tname $ PurePlugin  url
 
   where
     pname , tname :: Text
@@ -273,17 +267,29 @@ areaDesign = PurePlugin pname tname  url
           af = (nbrFig3 a/100) * solve ar poly
       returnA -< Just $ tblist [_tb $ Attr "densidade" (LeftTB1 $ Just $ (TB1 . SDouble) $ af)]
 
-designDeposito = StatefullPlugin "Design Deposito" "deposito"
+designDeposito = FPlugins "Design Deposito" "deposito" $ StatefullPlugin
   [(([],[
     ("minimal_flow",atPrim PDouble), ("min_sprinkler_count",atPrim PInt),("min_supply_volume",atPrim PDouble)])
     ,minimalDesign)]
 
-minimalDesign = PurePlugin pname tname  url
-
+subdivision = FPlugins "Minimal Sprinkler" "sprinkler" $ StatefullPlugin
+  [(([],[("min_regions",atPrim PInt)]), PurePlugin url)]
   where
     pname , tname :: Text
-    pname = "Minimal Design"
-    tname = "deposito"
+    pname = "Minimal Subdivision"
+    tname = "sprinkler"
+    url :: ArrowReaderM Identity
+    url = proc t -> do
+      asp <- atR "project" (atR "dados_projeto" (doubleP "area")) -< ()
+      tdur <- atR "risk" (doubleP "area_limit") -< ()
+      odxR "min_regions" -< ()
+      returnA -< Just $ tblist $ _tb <$>
+         [Attr "min_regions" ((TB1 . SNumeric )  (ceiling $ asp/tdur))]
+
+
+
+minimalDesign = PurePlugin url
+  where
     url :: ArrowReaderM Identity
     url = proc t -> do
       d <- doubleP "densidade"  -< ()
@@ -304,7 +310,7 @@ minimalDesign = PurePlugin pname tname  url
 
 
 
-siapi3Taxa = PurePlugin pname tname  url
+siapi3Taxa = FPlugins pname tname  $ PurePlugin url
 
   where
     pname , tname :: Text
@@ -320,9 +326,40 @@ siapi3Taxa = PurePlugin pname tname  url
       returnA -< Nothing -- Just $ tblist [_tb $ Attr "protocolo" (TB1 $ SText (T.pack $ show v))]
 
 
+retencaoServicos = FPlugins pname tname  $ PurePlugin url
+  where
+    pname , tname :: Text
+    pname = "Retencao Nota"
+    tname = "nota"
+    url :: ArrowReaderM Identity
+    url = proc t -> do
+      odxR "pis_retido" -< ()
+      odxR "csll_retido" -< ()
+      odxR "irpj_retido" -< ()
+      odxR "cofins_retido" -< ()
+      odxR "issqn_retido" -< ()
+      v <- atK "id_payment" (
+          doubleP "price"
+          ) -< ()
+      let pis =  0.0065 * v
+          cofins = 0.03 * v
+          csll = 0.01 * v
+          irpj = 0.015 * v
+          issqn = 0.05 * v
+      returnA -< Just $ tblist $
+          _tb <$> [att "pis_retido" pis
+          ,att "cofins_retido" cofins
+          ,att "csll_retido" csll
+          ,att "irpj_retido" irpj
+          ,att "issqn_retido" issqn
+          ]
 
 
-siapi3CheckApproval = PurePlugin pname tname  url
+    att i v =   Attr i (TB1 (SDouble v))
+
+
+
+siapi3CheckApproval = FPlugins pname tname  $ PurePlugin url
 
   where
     pname , tname :: Text
@@ -341,7 +378,7 @@ siapi3CheckApproval = PurePlugin pname tname  url
 
 
 
-siapi3Plugin  = BoundedPlugin2 pname tname  url
+siapi3Plugin  = FPlugins pname tname  $ BoundedPlugin2 url
 
   where
     pname , tname :: Text
@@ -440,7 +477,7 @@ pagamentoArr =  itR "pagamento" (proc descontado -> do
               returnA -<  TB1 $ tblist [pg ] )
 
 
-gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  url
+gerarPagamentos = FPlugins "Gerar Pagamento" tname  $ BoundedPlugin2 url
   where
     tname = "plano_aluno"
     url :: ArrowReader
@@ -454,10 +491,10 @@ gerarPagamentos = BoundedPlugin2 "Gerar Pagamento" tname  url
 
 
 
-createEmail = StatefullPlugin "Create Email" "messages"
-  [(([("plain",atPrim (PMime "text/plain") )],[]),generateEmail)]
+createEmail = FPlugins  "Create Email" "messages"
+  $ StatefullPlugin [(([("plain",atPrim (PMime "text/plain") )],[]),generateEmail)]
 
-generateEmail = BoundedPlugin2  "Generate Email" tname url
+generateEmail = BoundedPlugin2   url
   where
     tname ="messages"
     url :: ArrowReader
@@ -472,14 +509,13 @@ generateEmail = BoundedPlugin2  "Generate Email" tname url
           where mail = (Part "text/plain" None Nothing [] (BSL.fromStrict $   mesg))
 
 
-renderEmail = StatefullPlugin "Render Email" "messages"
+renderEmail = FPlugins  "Render Email" "messages" $ StatefullPlugin
   [(([],[("message_viewer",Primitive $ RecordPrim ("gmail","mime"))])
     ,encodeMessage )]
 
 
-encodeMessage = PurePlugin "Encode Email" tname url
+encodeMessage = PurePlugin url
   where
-    tname = "messages"
     messages = nameI 0 $ proc t -> do
           enc <- liftA2 ((,))
                 ((\i j -> (,j ) <$> i) <$> idxR "mimeType" <*> idxM "filename" )
@@ -531,7 +567,7 @@ encodeMessage = PurePlugin "Encode Email" tname url
     decoder' (LeftTB1 i) =  (join $ fmap decoder' i)
 
 
-pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname url
+pagamentoServico = FPlugins "Gerar Pagamento" tname $ BoundedPlugin2 url
   where
     tname = "servico_venda"
     url :: ArrowReader
@@ -544,7 +580,7 @@ pagamentoServico = BoundedPlugin2 "Gerar Pagamento" tname url
 
 
 
-importarofx = BoundedPlugin2 "OFX Import" tname  url
+importarofx = FPlugins "OFX Import" tname  $ BoundedPlugin2 url
   where
     tname = "account_file"
     url :: ArrowReader
@@ -581,7 +617,7 @@ importarofx = BoundedPlugin2 "OFX Import" tname  url
     ofx i = errorWithStackTrace (show i)
 
 
-notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" tname url
+notaPrefeitura = FPlugins "Nota Prefeitura" tname $ BoundedPlugin2 url
   where
     tname = "nota"
     varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
@@ -598,7 +634,7 @@ notaPrefeitura = BoundedPlugin2 "Nota Prefeitura" tname url
       let ao =  Just $ tblist [attrT ("nota",    LeftTB1 $ fmap (DelayedTB1 .Just . TB1 ) b)]
       returnA -< ao
 
-queryArtCreaData = BoundedPlugin2 "Art Crea Data" tname url
+queryArtCreaData = FPlugins "Art Crea Data" tname $ BoundedPlugin2 url
   where
     tname = "art"
     varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
@@ -619,7 +655,7 @@ queryArtCreaData = BoundedPlugin2 "Art Crea Data" tname url
       returnA -< ao
 
 
-queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" tname url
+queryArtCrea = FPlugins "Documento Final Art Crea" tname $ BoundedPlugin2 url
   where
     tname = "art"
     varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
@@ -638,7 +674,7 @@ queryArtCrea = BoundedPlugin2 "Documento Final Art Crea" tname url
       returnA -< ao
 
 
-queryArtBoletoCrea = BoundedPlugin2  pname tname url
+queryArtBoletoCrea = FPlugins pname tname $ BoundedPlugin2  url
   where
     pname = "Boleto Art Crea"
     tname = "art"
@@ -649,17 +685,17 @@ queryArtBoletoCrea = BoundedPlugin2  pname tname url
       idxR "verified_date" -< t
       odxR "boleto" -< t
       r <- atR "crea_register" (proc t -> do
-                               n <- varTB "crea_number" -< t
-                               u <- varTB "crea_user"-< t
-                               p <- varTB "crea_password"-< t
-                               returnA -< liftA3 (, , ) n u p  ) -< t
+               n <- varTB "crea_number" -< t
+               u <- varTB "crea_user"-< t
+               p <- varTB "crea_password"-< t
+               returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act ( traverse (\(i, (j, k,a)) -> lift $ creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
       let ao =  Just $ tblist [attrT ("boleto",   LeftTB1 $ fmap ( DelayedTB1 . Just) $ (TB1 . SBinary. BSL.toStrict) <$> b)]
       returnA -< ao
 
 
 
-queryArtAndamento = BoundedPlugin2 pname tname url
+queryArtAndamento = FPlugins tname pname $  BoundedPlugin2 url
   where
     tname = "art"
     pname = "Andamento Art Crea"
@@ -679,4 +715,4 @@ queryArtAndamento = BoundedPlugin2 pname tname url
 
 
 plugList :: [Plugins]
-plugList = [designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin {-,siapi2Hack-}, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]
+plugList = [subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin {-,siapi2Hack-}, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]

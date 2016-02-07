@@ -113,28 +113,25 @@ type TableIndex k v = GiST (TBIndex k  v ) (TBData k v)
 type Plugins = FPlugins Text
 type VarDef = (Text,KType CorePrim)
 
-data FPlugins k
-  =  StatefullPlugin
-  { _name ::  Text
-  , _bounds :: Text
-  , _statefullAction :: [(([VarDef ],[VarDef]),FPlugins k) ]
-  }
-  | BoundedPlugin2
-  { _name :: Text
-  , _bounds :: Text
-  , _arrowIO :: ArrowReaderM IO
-  }
-  | PurePlugin
-  { _name :: Text
-  , _bounds :: Text
-  , _arrowPure :: ArrowReaderM Identity
-  }
+data FPlugins k =
+    FPlugins
+      { _name  :: Text
+      , _bounds :: Text
+      , _plugAction :: FPlugAction k
+      }
+data FPlugAction k
+  = StatefullPlugin [(([VarDef ],[VarDef]),FPlugAction k) ]
+  | BoundedPlugin2  ( ArrowReaderM IO)
+  | PurePlugin (ArrowReaderM Identity)
 
 
-pluginStatic (BoundedPlugin2 _ _ a) = staticP a
-pluginStatic (PurePlugin _ _ a) = staticP a
-pluginAction (BoundedPlugin2 _ _  a ) = fmap join . traverse (dynIO a)
-pluginAction (PurePlugin _ _ a) = fmap join . traverse ((fmap return) (dynPure a ))
+pluginStatic = pluginStatic' . _plugAction
+pluginAction = pluginAction' . _plugAction
+
+pluginStatic' (BoundedPlugin2  a) = staticP a
+pluginStatic' (PurePlugin  a) = staticP a
+pluginAction' (BoundedPlugin2   a ) = fmap join . traverse (dynIO a)
+pluginAction' (PurePlugin  a) = fmap join . traverse ((fmap return) (dynPure a ))
 
 staticP ~(P s d) = s
 
