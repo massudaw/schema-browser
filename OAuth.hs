@@ -66,21 +66,6 @@ urlT s u
 
 defsize = 100
 
-{- updateTable table reference page maxResults
-  | tableName table == "history" = do
-    inf <- ask
-    tok <- liftIO$ R.currentValue $ R.facts (snd $justError "no token"$ token inf)
-    let user = fst $ justError "no token"$ token inf
-    decoded <- liftIO $ do
-        let req =  url (schemaName inf) user  <> T.unpack (rawName table ) <> "?" <> "startHistoryId=" <> intercalate "," ( renderShowable . snd <$> getPK (TB1 reference) ) <> "&"<> maybe "" (\s ->  "pageToken=" <> readToken s <> "&") page  <> maybe "" (\i -> "maxResults=" <> show i <> "&") maxResults <> "access_token=" ++ ( accessToken tok )
-        (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
-        print ("update",table,t)
-        return  d
-    c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) table ) . maybe [] (\i -> (i :: Value) ^.. key (  rawName table ) . values) $ decoded
-    return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , {-length c +-} (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
-  | otherwise = return ([], Nothing,0)
--}
-
 readToken (HeadToken) = ""
 readToken (NextToken i) = T.unpack i
 
@@ -103,6 +88,29 @@ listTable table offset page maxResults sort ix
 
 getKeyAttr (TB1 (m, k)) = (concat (fmap keyattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
+deleteRow pk
+  | otherwise = do
+    inf <- ask
+    let
+    tok <- liftIO $R.currentValue $ R.facts (snd $ justError "no token" $ token inf)
+    let user = fst $ justError "no token" $ token inf
+        table = lookTable inf (_kvname (fst pk))
+    decoded <- liftIO $ do
+        -- let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  urlJ (schemaName inf) tablefrom from )  <>  T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> notScoped ( getPK ref) ) <> "?access_token=" ++ ( accessToken tok)
+        let req = url (schemaName inf) user <> T.unpack (_kvname (fst pk ) ) <> "/" <> ( intercalate "," ( renderShowable . snd <$> notScoped (getPKM pk )))<>  "?access_token=" ++ ( accessToken tok)
+            notScoped  = filter (not . (`elem` (_rawScope (lookTable inf (_kvname (fst pk))))).fst)
+        (t,v) <- duration
+            -- $ "DELETE" <> show req
+            (deleteRequest [("GData-Version","3.0")] req)
+        print ("delete",getPKM pk ,t)
+        return v
+    liftIO $print decoded
+    let p = if BS.null decoded  then
+            Just $ TableModification Nothing table  (fst pk , getPKM pk, [])
+            else Nothing
+    tell (maybeToList p)
+    return p
+
 
 insertTable pk
   | otherwise = do
@@ -118,8 +126,9 @@ insertTable pk
         (t,v) <- duration
             (postHeaderJSON [("GData-Version","3.0")] req (toJSON $ M.fromList $ fmap (\(a,b) -> (keyValue a , renderShowable b)) $ attrs ) )
         print ("insert",getPK (TB1 pk),t)
-        return $ decode v
-    fmap (TableModification Nothing table . patch ) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table ) .  fmap (\i -> (i :: Value)  ) $  decoded)
+        return $ decode $ v
+    liftIO $ print decoded
+    fmap (TableModification Nothing table . patch . mergeTB1 pk ) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table) .  fmap (\i -> (i :: Value)  ) $  decoded)
 
 lookOrigin  k (i,m) = unTB $ err $  find (( k == ). S.fromList . fmap _relOrigin. keyattr ) (F.toList $  unKV m)
     where
@@ -141,8 +150,9 @@ joinGet tablefrom tableref from ref
 
     tok <- getToken tablefrom from
     decoded <- liftIO $ do
-        let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  urlJ (schemaName inf) tablefrom from )  <>  T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK ref ) <> "?access_token=" ++ ( accessToken tok)
-        print $ "joinGet " <> req
+        let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  urlJ (schemaName inf) tablefrom from )  <>  T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> notScoped ( getPK ref) ) <> "?access_token=" ++ ( accessToken tok)
+            notScoped  = filter (not . (`elem` (_rawScope tableref)).fst)
+        print  req
         (t,v) <- duration
                 (simpleHttpHeader [("GData-Version","3.0")] req )
         print ("joinGet",tablefrom,tableref ,getPK from, getPK ref ,t)
@@ -210,7 +220,7 @@ getDiffTable table  j = fmap (join . fmap (diff j ) ) $ getTable  table $ TB1 j
 joinGetDiffTable table  tableref f j = fmap (join . fmap (diff j)) $ joinGet table tableref (TB1 f) (TB1 j)
 
 
-gmailOps = (SchemaEditor undefined undefined insertTable undefined listTable getDiffTable mapKeyType joinList )
+gmailOps = (SchemaEditor undefined undefined insertTable deleteRow listTable getDiffTable mapKeyType joinList )
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
@@ -291,6 +301,7 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
 
     funO :: Bool -> KType (Prim KPrim (Text,Text))-> Maybe Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
     funO f (KOptional i) v =  fmap (bimap (Just . LeftTB1  ) (Just . LeftTB1)) . maybe (return $ typ i) (fun f i) $ v
+    funO f (KSerial i) v =  fmap (bimap (Just . SerialTB1 ) (Just . SerialTB1 )) . maybe (return $ typ i) (fun f i) $ v
     funO f i v = maybe (return $typ i) (fun f i) v
 
     typ (KArray i ) = typ i
@@ -315,6 +326,10 @@ biTrav f [] = errorWithStackTrace "cant be empty"
 simpleHttpHeader h url = do
       let opts = defaults  & headers .~ h
       (^. responseBody ) <$> getWith opts url
+
+deleteRequest h url = do
+      let opts = defaults  & headers .~ h
+      (^. responseBody ) <$> deleteWith opts url
 
 postHeaderJSON h url form = do
       let opts = defaults  & headers .~ h
