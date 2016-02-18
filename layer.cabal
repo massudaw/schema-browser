@@ -18,7 +18,7 @@ cabal-version:       >=1.10
 executable threepenny-layer
   main-is:             Main.hs
   -- ghc-options:         -O2 -threaded  -fcontext-stack=50
-  ghc-options:         -O -threaded -rtsopts -fprof-auto -fprof-cafs -caf-all -fcontext-stack=50
+  ghc-options:         -O0 -threaded -rtsopts -fprof-auto -fprof-cafs -caf-all -fcontext-stack=50
   other-modules:       
     CnpjReceita
     Crea

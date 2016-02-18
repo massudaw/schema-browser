@@ -35,6 +35,7 @@ import qualified Data.List as L
 import qualified Data.ByteString.Char8 as BS
 
 import RuntimeTypes
+import OAuthClient
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (get,delete,apply)
 import Data.Monoid hiding (Product(..))
@@ -119,8 +120,28 @@ setup smvar args w = void $ do
                   , metaAllTableIndexV inf "polling_log" [("schema_name",TB1 $ SText (schemaName inf) ) ]] #
               set UI.class_ "row"
         "Change" -> do
-            dash <- metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ) ]
-            element body # set UI.children [dash] # set UI.class_ "row"
+            case schemaName inf of
+              "gmail" -> do
+                b <- UI.button # set text "sync"
+                (dbvar,(m,t))  <- liftIO$ transaction inf $ selectFrom "history" Nothing Nothing [] []
+                itemListEl <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
+                itemListEl2 <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
+                do
+                  ((DBVar2 tmvard _  vpdiff _ _ ),res) <- liftIO$ transaction inf $ syncFrom (lookTable inf "history") Nothing Nothing [] []
+                  let update = F.foldl'(flip (\p-> fmap (flip apply p)))
+                  bres <- accumB ((M.empty,G.empty) :: Collection Key Showable) (flip update <$> rumors vpdiff)
+                  let
+                    vpt =  tidings bres (  update <$> bres <@> rumors vpdiff )
+                  --listBoxEl itemListEl (concat . fmap (runReader (dynPK readHistory $ () ) . Just . mapKey' keyValue) . G.toList . snd  <$> vpt)  (pure Nothing) (pure id) ( pure (\i j -> UI.div # set text (show i)))
+                  listBoxEl itemListEl2 ( G.toList . snd  <$> vpt)  (pure Nothing) (pure id) ( pure attrLine )
+                element body # set children [itemListEl,itemListEl2]
+
+
+
+
+              i -> do
+                dash <- metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ) ]
+                element body # set UI.children [dash] # set UI.class_ "row"
         "Stats" -> do
             stats <- metaAllTableIndexV inf "table_stats" [("schema_name",TB1 $ SText (schemaName inf) ) ]
             clients <- metaAllTableIndexV inf "clients" [("schema",LeftTB1 $ Just $ TB1 $ SText (schemaName inf) ) ]

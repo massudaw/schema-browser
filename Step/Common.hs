@@ -1,11 +1,12 @@
 {-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveFunctor  #-}
-module Step.Common (Parser(..),Access(..),ArrowReaderM,ArrowReader,KeyString(..)) where
+module Step.Common (PluginTable,Parser(..),Access(..),ArrowReaderM,ArrowReader,KeyString(..)) where
 
 import Types
 import Control.Monad.Reader
 import Control.Applicative
 import Data.Text (Text)
 import Data.String
+import Data.Functor.Identity
 
 
 import Control.Arrow
@@ -27,6 +28,8 @@ data Access a
 data Parser m s a b = P (s,s) (m a b) deriving Functor
 
 type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) IO)) (Access Text) () (Maybe (TBData  Text Showable))
+type PluginTable v = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) Identity)) (Access Text) () v
+
 type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Access Text) () (Maybe (TBData  Text Showable))
 
 

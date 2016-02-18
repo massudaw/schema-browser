@@ -175,6 +175,7 @@ data SchemaEditor
   , getEd :: Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   , typeTransform :: PGKey -> CoreKey
   , joinListEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> [(Text ,Column Key Showable)]-> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
+  , joinSyncEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )] -> [(Text ,Column Key Showable)]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> [(Text ,Column Key Showable)]-> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   }
 
 typeTrans inf = typeTransform (schemaOps inf)

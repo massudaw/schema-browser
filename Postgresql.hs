@@ -641,3 +641,5 @@ withTestConn s action  = do
 withConn s action =  do
   conn <- liftIO $connectPostgreSQL $ "user=postgres password=queijo host=localhost port=5432 dbname=" <> fromString (T.unpack s)
   action conn
+
+

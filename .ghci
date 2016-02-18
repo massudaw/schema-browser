@@ -2,3 +2,4 @@
 :set -fwarn-unused-binds -fwarn-unused-imports
 :set -isrc
 :set args mode 8023 localhost 5432 incendio postgres queijo metadata view_fks 
+:set -j8

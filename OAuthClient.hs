@@ -1,5 +1,9 @@
-{-# LANGUAGE Arrows ,TupleSections,OverloadedStrings #-}
-module OAuthClient (oauthpoller,transToken,tokenToOAuth,oauthToToken) where
+{-# LANGUAGE TypeFamilies,FlexibleContexts ,Arrows ,TupleSections,OverloadedStrings #-}
+module OAuthClient (readHistory ,oauthpoller,transToken,tokenToOAuth,oauthToToken) where
+import Data.Maybe
+import Utils
+import Types.Patch
+import Data.Monoid
 import Control.Exception
 import qualified Data.Text as T
 import Control.Arrow
@@ -34,6 +38,7 @@ tableToToken = atR "token" (fmap tokenToOAuth <$> (liftA4 (,,,) <$> idxM "access
 transToken :: (Show k ,KeyString k ,Applicative m ,Monad m) => Maybe (TBData k Showable ) -> m (Maybe (OAuth2Tokens))
 transToken = fmap join . traverse ((fmap return) (dynPure   $ atR "token" (fmap tokenToOAuth <$> (liftA4 (,,,) <$> idxM "accesstoken" <*> idxM "refreshtoken" <*> idxM "expiresin" <*> idxM "tokentype" )) ))
 
+oauthpoller :: Plugins
 oauthpoller = FPlugins "Gmail Login" "google_auth" (BoundedPlugin2 url)
   where
     url :: ArrowReader
@@ -63,5 +68,17 @@ oauthpoller = FPlugins "Gmail Login" "google_auth" (BoundedPlugin2 url)
        token <- atR "token" ((,,,) <$> odxR "accesstoken" <*> odxR "refreshtoken" <*> odxR "expiresin" <*> odxR "tokentype" ) -< ()
        odxR "refresh" -< ()
        returnA -< Just . tblist . pure . _tb $ IT "token" (LeftTB1 $  oauthToToken <$> Just v )
+
+
+readHistory :: PluginTable (Maybe (TBData T.Text Showable))
+readHistory = proc x -> do
+  madded <- atMA "user,messagesAdded->messages" (tb) -< ()
+  mdeleted <- atMA "user,messagesDeleted->messages" (idxM "id")  -< ()
+  -- labelAdded <- atA "labelsAdded"  ((,) <$> idxK "id" <*> idxK "labels")  -< ()
+  -- labelDeleted <- atA "messagesDeleted"   -< ()
+  let patchDel i = (kvempty ,  [("id",i)] , [])
+      patchCreate i = firstPatch keyString $ patch i
+  odxR "showpatch" -< ()
+  returnA -< Just $ tblist $ _tb <$> [Attr "showpatch" (TB1 $ SText $ T.pack $ show $ (patchDel <$> catMaybes mdeleted) <>  (patchCreate <$> catMaybes madded))]
 
 

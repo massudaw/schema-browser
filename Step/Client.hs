@@ -1,5 +1,5 @@
 {-# LANGUAGE Arrows,OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Client (module Step.Common,idxR,idxK,act,odxR,nameO,nameI,callI,atAny,atMA,callO,odxM,idxM,atR,atK,atRA,attrT,indexTable) where
+module Step.Client (module Step.Common,idxR,idxK,act,odxR,nameO,nameI,callI,atAny,atMA,callO,odxM,idxM,atR,atK,atRA,attrT,tb,indexTable) where
 
 import Types
 import Step.Common
@@ -112,6 +112,9 @@ idxM  l =
 
 -- Obrigatory value without maybe wrapping
 
+
+tb :: MonadReader  a m => Parser (Kleisli m) (Access Text) t a
+tb = P (Many [] , Many []) (Kleisli (const ask ))
 
 idxK  l =
   let ll = splitIndex True l

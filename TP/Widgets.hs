@@ -2,6 +2,7 @@
 module TP.Widgets where
 
 
+import GHC.Stack
 import Control.Monad
 import Data.Ord
 import Reactive.Threepenny
@@ -279,13 +280,26 @@ optionalListBox l o f s = do
 interval'' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
 
 
-read1 (EventData (Just s:_)) = read s
+read1 (EventData v@(Just s:_)) = read s
+read1 (EventData i )  = errorWithStackTrace $show i
 
-onkey :: Element -> (Int -> Maybe Int ) -> Event String
-onkey el f = unsafeMapUI el (const $ UI.get value el) (filterJust $ f . read1 <$> domEvent "keydown" el)
+readBool "true" = Just True
+readBool "false" = Just False
+readBool i = Nothing
 
-onEnter el = onkey el (\case {13-> Just 13; i -> Nothing})
-onEsc el = onkey el (\case {27 -> Just 27; i -> Nothing})
+readMouse :: EventData -> Maybe (Int,Bool,Bool,Bool)
+readMouse (EventData v@(Just i:Just a:Just b :Just c:_)) = traceShow (i,a,b,c) $traceShowId $  (,,,) <$> readMay i<*>readBool a<*> readBool b <*>readBool c
+readMouse (EventData i )  = errorWithStackTrace $show i
+
+onkey :: Element -> ((Int,Bool,Bool,Bool) -> Bool) -> Event String
+onkey el f = unsafeMapUI el (const $ UI.get value el) (filterE f $ filterJust $ readMouse <$> domEvent "keydown" el)
+
+onAltEnter el = onkey el (\case{(13,False,True,False)-> True ; i -> False})
+onAltE el = onkey el (\case{(13,False,True,False)-> True ; i -> False})
+onAltI el = onkey el (\case{(13,False,True,False)-> True ; i -> False})
+onAltD el = onkey el (\case{(13,False,True,False)-> True ; i -> False})
+onEnter el = onkey el (\case {(13,_,_,_)-> True; i -> False})
+onEsc el = onkey el (\case {(27,_,_,_) -> True ; i -> False})
 
 
 testPointInRange ui = do

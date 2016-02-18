@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts,OverloadedStrings #-}
 import TP.Browser
+import System.Process (rawSystem)
 import Poller
 import Plugins
 import PostgresQuery (connRoot)
@@ -48,13 +49,12 @@ main = do
   poller smvar amap db plugList False
 
   print "Load GUI Server"
+  forkIO $ threadDelay 100000 >> rawSystem "chromium" ["http://localhost:8025"] >> return ()
   startGUI (defaultConfig { tpStatic = Just "static", tpCustomHTML = Just "index.html" , tpPort = fmap read $ safeHead args })  (setup smvar  (tail args)) (\w ->  liftIO $ do
           print ("delete client" <> show (sToken w))
           deleteClient metas (sToken w) )
   print "Finish Server"
   print "Start Dump State"
-  -- dumpSnapshot smvar
   print "Finish Dump State"
 
-  -- getLine
   return ()

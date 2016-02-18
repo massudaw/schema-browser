@@ -695,7 +695,7 @@ queryArtBoletoCrea = FPlugins pname tname $ BoundedPlugin2  url
 
 
 
-queryArtAndamento = FPlugins tname pname $  BoundedPlugin2 url
+queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
   where
     tname = "art"
     pname = "Andamento Art Crea"
@@ -715,4 +715,4 @@ queryArtAndamento = FPlugins tname pname $  BoundedPlugin2 url
 
 
 plugList :: [Plugins]
-plugList = [subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin {-,siapi2Hack-}, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]
+plugList = [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin {-,siapi2Hack-}, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]

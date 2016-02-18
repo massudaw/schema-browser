@@ -105,6 +105,20 @@ keyTables ,keyTablesInit :: MVar (Map Text InformationSchema )->  Connection -> 
 keyTables schemaVar conn (schema ,user) authMap pluglist = maybe (keyTablesInit schemaVar conn (schema,user) authMap pluglist ) return  . (M.lookup schema ) =<< readMVar schemaVar
 
 
+extendedRel :: Map (Text,Text) Key -> Text -> Text -> Text -> Key -> Rel Key
+extendedRel inf t a b c =  snd access $ (lrel (fst access))
+
+    where path :: [Text]
+          path = T.splitOn "->" a
+          lrel :: Text -> Rel Key
+          lrel t =  Rel (justLook (t ,  last path) inf ) b c
+          access :: (Text, Rel Key -> Rel Key)
+          access = foldl cons  (t,id) (init path)
+            where
+              cons (t,j) i = (snd $ inlineName $ keyType  k ,j . RelAccess k )
+                where
+                  k :: Key
+                  k = justLook (t,i) inf
 
 keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
        (oauth,ops ) <- authMap schema
@@ -148,14 +162,18 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
        let
           foreignKeys :: Query
           foreignKeys = "select origin_table_name,target_schema_name,target_table_name,origin_fks,target_fks,rel_fks from metadata.fks where origin_schema_name = ?"
+          exforeignKeys :: Query
+          exforeignKeys = "select origin_table_name,target_schema_name,target_table_name,origin_fks,target_fks,rel_fks from metadata.extended_view_fks where origin_schema_name = ?"
        fks <- M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) ( FKJoinTable (zipWith3 (\a b c -> Rel a b c) (lookFk tp kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn foreignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation ) )))
+       efks <- M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp (head . T.splitOn "->" <$> kp)) ( FKJoinTable (zipWith3 (\a b c -> extendedRel keyMap tp a b c)  (V.toList kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn exforeignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation ) )))
+
 
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  M.toList keyMap :: Map Text (Set Key)
            i3l =  (\(c,(pksl,scp,is_sum))-> let
                                   pks = F.toList pksl
                                   inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> S.fromList pks)
-                                in (c ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ (M.lookup c fks )<> fmap S.fromList inlineFK ) S.empty attr [])) <$> res :: [(Text,Table)]
+                                in (c ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ (M.lookup c efks )<>(M.lookup c fks )<> fmap S.fromList inlineFK ) S.empty attr [])) <$> res :: [(Text,Table)]
            unionQ = "select schema_name,table_name,inputs from metadata.table_union where schema_name = ?"
        ures <- query conn unionQ (Only schema) :: IO [(Text,Text,Vector Text)]
        let
@@ -392,11 +410,11 @@ atTable k = do
 
 joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  G.GiST (G.TBIndex Key Showable) (TBData Key Showable) -> TransactionM ( FTB (TBData Key Showable))
 joinRelT rel ref tb table
-  | L.all (isOptional .keyType) origin = fmap LeftTB1 $ traverse (\ref->  joinRelT (Le.over relOrigin unKOptional <$> rel ) ref  tb table) (traverse unLeftItens ref )
-  | L.any (isArray.keyType) origin = fmap (ArrayTB1 .Non.fromList)$ traverse (\ref -> joinRelT (Le.over relOrigin unKArray <$> rel ) ref  tb table ) (fmap (\i -> pure $ justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(Non.length (unArray $ unAttr $ head ref) - 1)])
+  | L.all (isOptional .keyType) origin = fmap LeftTB1 $ traverse (\ref->  joinRelT (Le.over relOri unKOptional <$> rel ) ref  tb table) (traverse unLeftItens ref )
+  | L.any (isArray.keyType) origin = fmap (ArrayTB1 .Non.fromList)$ traverse (\ref -> joinRelT (Le.over relOri unKArray <$> rel ) ref  tb table ) (fmap (\i -> pure $ justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(Non.length (unArray $ unAttr $ head ref) - 1)])
   | otherwise = maybe (tell (TableModification Nothing tb . patch <$> F.toList tbcreate) >> return tbcreate ) (return .TB1) tbel
       where origin = fmap _relOrigin rel
-            tbcreate = TB1 $ tblist' tb (_tb . firstTB (\k -> justError "no rel key" $ M.lookup k relMap ) <$> ref )
+            tbcreate = TB1 $ tblist' tb (_tb . firstTB (\k -> fromMaybe k  $ M.lookup k relMap ) <$> ref )
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
             invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
             tbel = searchGist  invrelMap (tableMeta tb) table (Just ref)

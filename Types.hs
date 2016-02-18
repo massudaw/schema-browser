@@ -240,15 +240,33 @@ instance (Functor f ,Bifunctor g)  => Bifunctor (Compose f g ) where
   second f = Compose . fmap (second f) . getCompose
 
 keyType = _keyTypes
+
 data Rel k
-  = Inline  {_relOrigin :: k}
+  = Inline
+  {_relOri :: k
+  }
   | Rel
-  { _relOrigin :: k
+  { _relOri :: k
   , _relOperator:: Text
-  , _relTarget :: k
+  , _relTip :: k
+  }
+  | RelAccess
+  { _relOri :: k
+  , _relAccess :: (Rel k)
   }
   deriving(Eq,Show,Ord,Functor,Foldable,Generic)
 
+
+_relTarget (Rel _ _ i ) =  i
+_relTarget (RelAccess _ i) = _relTarget i
+_relTarget i = errorWithStackTrace (show i)
+
+_relOrigin (Rel i _ _) = i
+_relOrigin (Inline i) = i
+_relOrigin (RelAccess _ i) = _relOrigin i
+_relRoot  (Rel i _ _ ) = i
+_relRoot  (Inline i  ) = i
+_relRoot  (RelAccess i _ ) = i
 
 instance Binary Sess.Session where
   put i = return ()
@@ -494,6 +512,7 @@ data SqlOperationK k
   = FKJoinTable [Rel k] (Text,Text)
   | RecJoin (MutRec [[Rel k ]])  (SqlOperationK k)
   | FKInlineTable (Text,Text)
+  | FKExtendedJoinTable [Rel k] (Text,Text)
   deriving(Eq,Ord,Show,Functor)
 
 fkTargetTable (FKJoinTable  r tn) = snd tn
@@ -921,12 +940,16 @@ intersectPred p1 op (KOptional p2) j (LeftTB1 l)   | p1 == p2 =  maybe False (j 
 intersectPred p1@(KOptional i ) op p2 (LeftTB1 j) l  =  maybe False id $ fmap (\m -> intersectPred i op p2 m l) j
 intersectPred p1 op p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
 
+
+accessRel (Rel l op m) to tt = liftA2 (,op,) (L.find ((==l).keyAttr ) to ) (L.find ((==m).keyAttr ) tt)
+accessRel (RelAccess l m) to tt = join $ flip (accessRel m ) tt .fmap unTB . F.toList . unKV . snd . unTB1 . _fkttable <$> L.find ((==l).keyAttr ) to
+
 interPoint
   :: (Ord a ,Show a) => [Rel (FKey (KType (Prim KPrim (Text,Text))))]
      -> [TB Identity (FKey (KType (Prim KPrim (Text,Text)))) a]
      -> [TB Identity (FKey (KType (Prim KPrim (Text,Text)))) a]
      -> Bool
-interPoint ks i j = (\i -> if L.null i then False else  all id  i)$  catMaybes $ fmap (\(Rel l op  m) -> {-justError "interPoint wrong fields" $-}  liftA2 (intersectPredTuple  op) (L.find ((==l).keyAttr ) i )   (L.find ((==m).keyAttr ) j)) ks
+interPoint ks i j = (\i-> if L.null i then False else  all id  i)$  catMaybes $ fmap (\rel -> fmap (\(i,op,j) -> intersectPredTuple op i j ) $ accessRel rel i j ) ks
 
 intersectPredTuple  op = (\i j-> intersectPred ( keyType (keyAttr i)) op  (keyType (keyAttr j)) (unAttr i) (unAttr j))
 
@@ -948,7 +971,7 @@ unIndex :: (Show (KType k),Show a) => Int -> TB Identity (FKey (KType k)) a -> M
 unIndex o (Attr k (ArrayTB1 v)) = Attr (unKArray k) <$> Non.atMay v o
 unIndex o (IT na (ArrayTB1 j))
   =  IT  na <$>  Non.atMay j o
-unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> fmap (mapComp (firstTB unKArray) )li) (Le.over relOrigin (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi ) <$> (maybe (Just []) (Just .pure ) (join (traComp (traFAttr (indexArray o))  <$> l))) <*> (Non.atMay m o)
+unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (nonl <> fmap (mapComp (firstTB unKArray) )li) (Le.over relOri (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi ) <$> (maybe (Just []) (Just .pure ) (join (traComp (traFAttr (indexArray o))  <$> l))) <*> (Non.atMay m o)
   where
     l = L.find (all (isArray.keyType) . fmap _relOrigin . keyattr)  els
     nonl = L.filter (not .all (isArray.keyType) . fmap _relOrigin . keyattr) els
@@ -959,7 +982,7 @@ unLeftKey :: (Show (KType k),Ord b,Show b) => TB Identity (FKey (KType k)) b -> 
 unLeftKey (Attr k v ) = (Attr (unKOptional k) v)
 unLeftKey (IT na (LeftTB1 (Just tb1))) = IT na tb1
 unLeftKey i@(IT na (TB1  _ )) = i
-unLeftKey (FKT ilk rel  (LeftTB1 (Just tb1))) = (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOrigin unKOptional <$> rel) tb1)
+unLeftKey (FKT ilk rel  (LeftTB1 (Just tb1))) = (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOri unKOptional <$> rel) tb1)
 unLeftKey i@(FKT ilk rel  (TB1  _ )) = i
 unLeftKey i = errorWithStackTrace (show i)
 
@@ -973,7 +996,7 @@ unLeftItens = unLeftTB
     unLeftTB i@(IT na (TB1 (_,l)))
       = Just i
     unLeftTB (FKT ifk rel  (LeftTB1 tb))
-      = (\ik -> FKT ik  (Le.over relOrigin unKOptional <$> rel))
+      = (\ik -> FKT ik  (Le.over relOri unKOptional <$> rel))
           <$> traverse ( traComp (traFAttr unSOptional) . mapComp (firstTB unKOptional )  ) ifk
           <*>  tb
     unLeftTB i@(FKT ifk rel  (TB1  _ )) = Just i
@@ -983,7 +1006,7 @@ unLeftItens = unLeftTB
 
 attrOptional :: TB Identity (FKey (KType k))  Showable ->  (TB Identity  (FKey (KType k))  Showable)
 attrOptional (Attr k v) =  Attr (kOptional k) (LeftTB1 . Just $ v)
-attrOptional (FKT ifk rel  tb)  = FKT (tbOptional <$> ifk) (Le.over relOrigin kOptional <$> rel) (LeftTB1 (Just tb))
+attrOptional (FKT ifk rel  tb)  = FKT (tbOptional <$> ifk) (Le.over relOri kOptional <$> rel) (LeftTB1 (Just tb))
   where tbOptional = mapComp (firstTB kOptional) . mapComp (mapFAttr (LeftTB1 . Just))
 attrOptional (IT na j) = IT  na (LeftTB1 (Just j))
 

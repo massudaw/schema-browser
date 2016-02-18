@@ -6,6 +6,7 @@ module SchemaQuery
   ,updateFrom
   ,patchFrom
   ,insertFrom
+  ,syncFrom
   ,getFrom
   ,deleteFrom
   ,refTable
@@ -14,7 +15,6 @@ module SchemaQuery
   ,fullDiffEdit
   ,fullDiffEditInsert
   ,transaction
-  ,backFKRef
   ,transactionLog
   )where
 import Graphics.UI.Threepenny.Core (mapEventFin)
@@ -73,6 +73,33 @@ eventTable = tableLoader
 selectFrom t a b c d = do
   inf <- ask
   eventTable (lookTable inf t) a b c d
+syncFrom t page size presort fixed = do
+  let table = t
+  inf <- ask
+  let sref =  case filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope table)) (S.toList $ rawFKS table) of
+            [sref] -> sref
+            i ->  errorWithStackTrace ("no sref " <> show sref)
+      Path kref (FKJoinTable rel stable ) =  sref
+  let mvar = mvarMap inf
+  mmap <- liftIO $ atomically $ readTMVar mvar
+  let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )
+  let
+      rinf = fromMaybe inf $ M.lookup (fst stable) (depschema inf)
+      fromtable = (lookTable rinf $ snd stable)
+      defSort = fmap (,Desc) $  rawPK t
+  (l,i) <- local (const rinf) $ tableLoader fromtable Nothing Nothing []  []
+  let
+  ix <- mapM (\i -> do
+      let
+          fil = [("=", FKT ( _tb <$> backPathRef sref i) rel (TB1 i) )]
+      (_,t) <- selectFrom "history" Nothing Nothing defSort fil
+      let latest = fmap (("=",) . uncurry Attr). getPKM   $ ( L.maximumBy (comparing getPKM) $ G.toList $ snd t)
+      (joinSyncTable  [(fromtable ,i,sref)] table page size presort fil . F.toList  ) latest
+      ) $ F.toList (snd i)
+
+  return (dbvar ,foldr mergeDBRef  (M.empty,G.empty) $ fmap snd $ ix )
+
+
 updateFrom  a  b = do
   inf <- ask
   (editEd $ schemaOps inf)  a b
@@ -92,17 +119,17 @@ deleteFrom  a   = do
 
 mergeDBRef  = (\(j,i) (m,l) -> ((M.unionWith (\(a,b) (c,d) -> (a+c,b<>d))  j  m , i <>  l )))
 
-mapT0EventFin i f x = do
-  (e,fin) <- mapEventFin f (rumors x)
-  be <-  liftIO $ f i
-  t <- stepper be e
-  return $ (tidings t e,fin)
-
 mapTEvent f x = fst <$> mapTEventFin f x
 
 mapTEventFin f x = do
   i <- currentValue (facts x)
   mapT0EventFin i f x
+
+mapT0EventFin i f x = do
+  (e,fin) <- mapEventFin f (rumors x)
+  be <-  liftIO $ f i
+  t <- stepper be e
+  return $ (tidings t e,fin)
 
 
 
@@ -119,7 +146,9 @@ tableLoader table  page size presort fixed
     return $ (dbvar,o)
   | not  (null $ _rawScope table ) && not (S.null (rawFKS table) )= do
       inf <- ask
-      let [sref] =  filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope table)) (S.toList $ rawFKS table)
+      let sref =  case filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope table)) (S.toList $ rawFKS table) of
+                [sref] -> sref
+                i ->  errorWithStackTrace ("no sref " <> show sref)
           Path kref (FKJoinTable rel stable ) =  sref
       let mvar = mvarMap inf
       mmap <- liftIO $ atomically $ readTMVar mvar
@@ -145,7 +174,7 @@ tableLoader table  page size presort fixed
         base i = True
         remoteFKS = S.filter (not .base )  (_rawFKSL table)
         getAtt i (m ,k ) = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues . unTB $ k
-    pageTable (\table page size presort fixed v -> do
+    pageTable False (\table page size presort fixed v -> do
           (res ,x ,o) <-  (listEd $ schemaOps inf) (table {_rawFKSL = S.filter base  (_rawFKSL table)}) page size presort fixed v
           let getFKS  v = foldl (\m (Path _ (FKJoinTable i j ))  -> m >>= (\m -> do
                 let rinf = justError "no schema" $ M.lookup ((fst j))  (depschema inf)
@@ -165,22 +194,27 @@ tableLoader table  page size presort fixed
 
 
 
+{-joinSyncTable :: [(Table,TBData Key Showable,Path (S.Set Key ) SqlOperation )]-> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
+    -> TransactionM (DBVar,Collection Key Showable)-}
+joinSyncTable reflist  a b c d f e =
+    ask >>= (\ inf -> pageTable True ((joinSyncEd $ schemaOps inf) reflist e ) a b c d f )
+
 
 
 joinTable :: [(Table,TBData Key Showable,Path (S.Set Key ) SqlOperation )]-> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
     -> TransactionM (DBVar,Collection Key Showable)
 joinTable reflist  a b c d e =
-    ask >>= (\ inf -> pageTable ((joinListEd $ schemaOps inf) reflist) a b c d e )
+    ask >>= (\ inf -> pageTable False ((joinListEd $ schemaOps inf) reflist) a b c d e )
 
 
 eventTable' :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> [(T.Text, Column Key Showable)]
     -> TransactionM (DBVar,Collection Key Showable)
 eventTable' a b c d e = do
     inf <- ask
-    pageTable (listEd $ schemaOps inf) a b c d e
+    pageTable False (listEd $ schemaOps inf) a b c d e
 
 
-pageTable method table page size presort fixed = do
+pageTable flag method table page size presort fixed = do
     inf <- ask
     let mvar = mvarMap inf
         defSort = fmap (,Desc) $  rawPK table
@@ -191,7 +225,7 @@ pageTable method table page size presort fixed = do
             = if L.null fixed
               then id
               else
-                G.filter (\ tb ->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV (snd (tableNonRef' tb)))
+                G.filter (\ tb ->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) fixed)) $ unKV (snd (tb)))
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
     iniT <- do
@@ -199,7 +233,7 @@ pageTable method table page size presort fixed = do
        let pageidx = (fromMaybe 0 page +1) * pagesize
        i <- case  fromMaybe (10000000,M.empty ) $  M.lookup fixidx fixedmap of
           (sq,mp) -> do
-             if ( sq > G.size (filterfixed reso) -- Tabela é maior que a tabela carregada
+             if flag || ( sq > G.size (filterfixed reso) -- Tabela é maior que a tabela carregada
                 && sq > pagesize * (fromMaybe 0 page + 1) -- Tabela é maior que a página
                 && pagesize * (fromMaybe 0 page +1) > G.size (filterfixed reso)  ) -- O carregado é menor que a página
              then do

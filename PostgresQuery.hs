@@ -162,7 +162,6 @@ data View
 justLabel :: TB3Data (Labeled Text ) Key () -> Key -> Text
 justLabel t k =  justError ("cant find label"  <> show k <> " - " <> show t).getLabels t $ k
 
--- tableType :: TB1 () -> Text
 
 
 getLabels t k =  M.lookup  k (mapLabels label' t)
@@ -295,4 +294,4 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef . filter (flip L.elem (fmap fst s) . fst ) .  getPKM <$> lastMay i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o )  (\table j -> do
     inf <- ask
-    liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ) $ j ) mapKeyType undefined
+    liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined
