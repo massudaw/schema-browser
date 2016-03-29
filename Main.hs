@@ -32,10 +32,6 @@ main = do
   -- Load Metadata
   conn <- connectPostgreSQL (connRoot db)
 
-  print "Initialize Sql Script"
-  f <- BS.readFile "sql/init_usage.sql"
-  i <- exec conn f
-  print i
   let
     amap = authMap smvar db (user db , pass db )
 

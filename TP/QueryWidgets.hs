@@ -880,6 +880,13 @@ fkUITable
   -- Static Information about relation
   -> Column CoreKey ()
   -> UI (TrivialWidget(Maybe (Column CoreKey Showable)))
+fkUITable inf constr tbrefs plmods  ref@wl oldItems  tb@(FKT ilk rel  tb1@(TB1 _) )
+  | L.any isAccessRel rel = do
+    let rela = L.filter isAccessRel rel
+        derel ilk = fmap (_tb . flip unRel  (unTB <$> ilk)) rela
+        reln = unRels <$> rel
+    tr <- fkUITable inf constr tbrefs  plmods  (first  (\(FKT ifk rel tb1) -> FKT (derel ifk) reln tb1). second (fmap (\(FKT ilk rel tb1)-> FKT (derel ilk) reln tb1 )<$>)  <$> wl) (fmap (\(FKT ilk reln tb1)-> FKT (derel ilk) reln tb1)<$> oldItems)  (FKT (derel ilk) reln tb1)
+    return  tr
 fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = mdo
       let
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
@@ -911,7 +918,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
       filterInpBh <- stepper "" (UI.valueChange filterInp)
       iniGist <- currentValue (facts gist)
 
-      itemListEl <- UI.select #  set UI.class_ "col-xs-5" # set UI.size "21" # set UI.style ([("position","absolute"),("z-index","999"),("bottom","0px")] <> noneShow False)
+      itemListEl <- UI.select #  set UI.class_ "col-xs-5" # set UI.size "21" # set UI.style ([("position","absolute"),("z-index","999"),("top","22px")] <> noneShow False)
       let wheel = negate <$> mousewheel itemListEl
       let
           pageSize = 20
@@ -992,13 +999,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
 fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb1 ))) = do
     tr <- fkUITable inf constr (tbrefs) (fmap (join . fmap unLeftItens <$>) <$> plmods)  (first unLeftKey . second (join . fmap unLeftItens <$>) <$> wl) (join . fmap unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOri unKOptional <$> rel) tb1)
     return $ leftItens tb <$> tr
-{-fkUITable inf constr tbrefs plmods  ref@wl oldItems  tb@(FKT ilk rel  (TB1 tb1) )
-  | L.any isAccessRel rel = do
-    let rela = L.filter isAccessRel rel
-        unRel (RelAccess k l) = (l, ,  . index F.toList . unKV . snd . unTB1 . fmap _fkttable . index <$>  ilk )
-          index = L.find ((==[Inline k]).  keyattri )
-    tr <- fkUITable inf constr (tbrefs) (fmap (join . fmap unLeftItens <$>) <$> plmods)  (first unLeftKey . second (join . fmap unLeftItens <$>) <$> wl) (join . fmap unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOri unKOptional <$> rel) tb1)
-    return $ leftItens tb <$> tr-}
+
 fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1:| _)) ) = mdo
      dv <- UI.div
      let -- wheel = fmap negate $ mousewheel dv
@@ -1023,6 +1024,17 @@ fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1
 pdfFrame (elem,sr , call,st) pdf = mkElement (elem ) UI.# sink0 (strAttr sr) (call <$> pdf)  UI.# UI.set style (st)
 
 
+unRels (RelAccess l k) =  unRels k
+unRels k = k
+
+unRel :: Show a =>Rel Key -> [Column Key a ] -> Column Key a
+unRel (Rel k _ _ ) ilk =  index  ilk
+  where
+     index = justError "no index" . L.find ((==[Inline k]).  keyattri )
+unRel (RelAccess k l)  ilk = unRel l nref
+   where
+     nref = (fmap unTB . F.toList . unKV . snd . unTB1 . _fkttable . index $  ilk )
+     index = justError "no index" . L.find ((==[Inline k]).  keyattri )
 
 data AscDesc a
   = AscW a

@@ -372,7 +372,7 @@ siapi3CheckApproval = FPlugins pname tname  $ PurePlugin url
           liftA2 (,) <$> idxR "andamento_description"  <*> idxR "andamento_date"
           ) -< ()
 
-      let app = L.find (\(TB1 (SText x),_) -> T.isInfixOf "APROVADO"  x) v
+      let app = L.find (\(TB1 (SText x),_) -> "APROVADO" ==   x) v
           tt = L.find ((\(TB1 (SText x)) -> T.isInfixOf "ENTREGUE AO SOLICITANTE APROVADO"  x).fst) v
       returnA -< Just $ tblist [_tb $ Attr "aproval_date" (LeftTB1 $ fmap ((\(TB1 (STimestamp t)) -> TB1 $ SDate (localDay t)) .snd) (liftA2 const app tt))]
 
@@ -397,7 +397,7 @@ siapi3Plugin  = FPlugins pname tname  $ BoundedPlugin2 url
         ano <- idxR "ano" -< ()
         odxR "taxa_paga" -< ()
         odxR "aproval_date" -< ()
-        atR "andamentos" (proc t -> do
+        atR "a[(l,nn,el)ondamentos" (proc t -> do
             odxR "andamento_date" -<  t
             odxR "andamento_description" -<  t
             odxR "andamento_user" -<  t
