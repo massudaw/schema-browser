@@ -19,6 +19,7 @@ module TP.QueryWidgets (
     refTables,
     offsetField,
     sorting',
+    tableIndexA,
     metaAllTableIndexV ,
     viewer,
     ) where
@@ -746,7 +747,6 @@ buildPrim fm tdi i = case i of
            let fty = ("div","value",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
            ini <- currentValue (facts tdi)
            f <- pdfFrame fty (facts tdi) # sink UI.style (noneShow . (\i -> isJust i || elem FWrite fm) <$> facts tdi)
-         --   runFunction $ ffi "adskViewerWidget().Init(%1,false);" f
            let ev = if elem FWrite fm then unionWith const (rumors tdi) (Just . SBinary . BSC.pack <$> UI.valueChange f) else rumors tdi
            step <- stepper  ini ev
            return (TrivialWidget (tidings step ev) f)
@@ -1077,6 +1077,16 @@ hoverTip2 elemIn elemOut = unionWith const (const True <$> UI.hover elemIn ) (co
 
 
 metaAllTableIndexV inf metaname env = metaAllTableIndexA inf metaname (fmap (uncurry Attr ) env)
+
+tableIndexA inf metaname env =   do
+  let modtable = lookTable inf tname
+      tname = metaname
+      envK :: [(Text,(TB Identity CoreKey Showable))]
+      envK = fmap (("=",).liftField inf tname) env
+  viewer inf modtable (Just envK)
+
+
+
 metaAllTableIndexA inf metaname env =   do
   let modtable = lookTable (meta inf) tname
       tname = metaname

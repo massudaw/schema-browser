@@ -203,6 +203,24 @@ rangeBoxes fkbox bp = do
 instance Widget (RangeBox a) where
   getElement = _rangeElement
 
+checkDivSetT :: (Ord b ,Eq a) => [a] -> Tidings (a -> b) -> Tidings [a] ->  (a -> UI Element ) -> (a -> UI Element  -> UI Element ) -> UI (TrivialWidget [a])
+checkDivSetT ks sort binit   el st = mdo
+  buttons <- mapM (buttonString  )  ks
+  dv <- UI.div # sink items ((\f -> fmap (\ (k,(v,_)) -> st k (element v) # sink UI.checked (elem k <$> bv)) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$>  facts sort )
+  let
+    -- evs :: Event ([a] -> [a])
+    evs = unionWith const (const <$> rumors binit) (foldr (unionWith (.)) never $ fmap (\(i,b) -> if b then (i:) else L.delete i) . snd .snd <$> buttons)
+  v <- currentValue (facts binit)
+  bv <- accumB v  evs
+  return (TrivialWidget (tidings bv (flip ($) <$> bv <@> evs) ) dv)
+    where
+      buttonString   k = do
+        v <- currentValue (facts binit)
+        b <- el k # set UI.checked  (elem k v )
+        let ev = (k,)<$>UI.checkedChange b
+        return (k,(b,ev))
+
+
 buttonDivSetT :: (Ord b ,Eq a) => [a] -> Tidings (a -> b) -> Tidings (Maybe a) ->  (a -> UI Element ) -> (a -> UI Element  -> UI Element ) -> UI (TrivialWidget (Maybe a))
 buttonDivSetT ks sort binit   el st = mdo
   buttons <- mapM (buttonString  )  ks

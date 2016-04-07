@@ -4,8 +4,10 @@
 module TP.Browser where
 
 import qualified NonEmpty as Non
+import qualified Data.Text.Encoding as TE
 import Query
 import Data.Time
+import qualified Data.Aeson as A
 import Text
 import qualified Types.Index as G
 import Data.Bifunctor (first)
@@ -33,6 +35,7 @@ import Reactive.Threepenny hiding(apply)
 import Data.Traversable (traverse)
 import qualified Data.List as L
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.Lazy.Char8 as BSL
 
 import RuntimeTypes
 import OAuthClient
@@ -90,6 +93,10 @@ addClient clientId metainf inf table dbdata =  do
 
 idex inf t v = G.Idex $ L.sortBy (comparing fst ) $ first (lookKey inf t  ) <$> v
 
+calendarCreate cal def evs= runFunction $ ffi "$(%1).fullCalendar({header: { left: 'prev,next today',center: 'title',right: 'month,basicWeek,basicDay'},defaultDate: %2,lang: 'pt-br',editable: true,eventLimit: true,events: JSON.parse(%3) });" cal def evs
+
+
+
 setup
      ::  MVar (M.Map Text  InformationSchema) ->  [String] -> Window -> UI ()
 setup smvar args w = void $ do
@@ -105,7 +112,7 @@ setup smvar args w = void $ do
   let he = const True <$> UI.hover hoverBoard
   bhe <-stepper True he
   menu <- checkedWidget (tidings bhe he)
-  nav  <- buttonDivSet  ["Browser","Poll","Stats","Change","Exception"] (pure $ Just "Browser" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonDivSet  ["Event","Browser","Poll","Stats","Change","Exception"] (pure $ Just "Browser" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   chooserDiv <- UI.div # set children  ([getElement menu] <> chooserItens <> [getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end"),("height","7vh"),("width","100%")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
@@ -113,6 +120,42 @@ setup smvar args w = void $ do
 
   mapUITEvent body (traverse (\(nav,inf)->
       case nav of
+        "Event" -> do
+
+            (_,(_,tmap)) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+            (_,(_,dmap )) <- liftIO $ transaction  (meta inf) $ selectFrom "table_description" Nothing Nothing [] [("=",liftField (meta inf) "table_description" $ uncurry Attr $("table_schema",TB1 $ SText (schemaName inf) ))]
+            (evdb,(_,evMap )) <- liftIO $ transaction  (meta inf) $ selectFrom "event" Nothing Nothing [] [("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+            dashes <- mapM (\e -> do
+                let t@(Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" e
+                    s@(Attr _ (TB1 (SText sname))) = lookAttr' (meta inf) "schema_name" e
+
+                    lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,TB1 $ SText $ schemaName inf),("table_name",TB1 $ SText tname )]) i ) $ tmap
+                    -- d = G.lookup (tblist' (lookTable (meta inf) "description" ) (_tb<$> [t,s])) dmap
+                    (Attr _ (TB1 (SText efield )))= lookAttr' (meta inf) "event" e
+                    (Attr _ (TB1 (SText c )))= lookAttr' (meta inf) "color" e
+
+                (evdb,(_,tmap )) <- liftIO $ transaction  inf $ selectFrom tname Nothing Nothing [] []
+                let v = F.toList evMap
+                    proj r = M.fromList $ [("start",T.pack $ L.intercalate "" $ fmap renderPrim $F.toList $ lookAttr' inf efield r) , ("title",(T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("color" , c)] :: M.Map Text Text
+
+                return ((lookDesc,c),filter ((/="").fromJust . M.lookup "start") $proj <$> G.toList tmap)) ( G.toList evMap)
+
+            iday <- liftIO getCurrentTime
+            -- legend <- UI.ul # set items ((\(t,c) ->UI.li # set UI.class_ "list-group-item" # set  text  t # set UI.style [("background-color",T.unpack c)] )  <$> L.nub (fst <$> dashes)) # set UI.class_ "list-group"
+            let allTags = (L.nub (fst <$> dashes))
+            legend <- checkDivSetT  (L.nub (fst <$> dashes)) (pure id) (pure (L.nub (fst <$> dashes))) (\b -> UI.input # set UI.type_ "checkbox") (\(t,c) b -> UI.div # set items [UI.div # set items [b], UI.div  #  set  text  t # set UI.style [("background-color",T.unpack c)]] # set UI.style [("display","-webkit-box")] )
+            calendar <- UI.div
+            element body # set children [getElement legend,calendar]
+            let calFun = (\selected -> do
+                    innerCalendar <-UI.div
+                    element calendar # set children [innerCalendar]
+                    calendarCreate innerCalendar (show iday) (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  (concat $fmap snd (filter (flip L.elem (selected) . fst) dashes)))
+                    return () )
+
+            calFun allTags
+            onEvent (rumors (triding legend)) calFun
+            return body
+
         "Poll" -> do
             element body #
               set items
