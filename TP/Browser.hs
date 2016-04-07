@@ -143,7 +143,7 @@ setup smvar args w = void $ do
             iday <- liftIO getCurrentTime
             -- legend <- UI.ul # set items ((\(t,c) ->UI.li # set UI.class_ "list-group-item" # set  text  t # set UI.style [("background-color",T.unpack c)] )  <$> L.nub (fst <$> dashes)) # set UI.class_ "list-group"
             let allTags = (L.nub (fst <$> dashes))
-            legend <- checkDivSetT  (L.nub (fst <$> dashes)) (pure id) (pure (L.nub (fst <$> dashes))) (\b -> UI.input # set UI.type_ "checkbox") (\(t,c) b -> UI.div # set items [UI.div # set items [b], UI.div  #  set  text  t # set UI.style [("background-color",T.unpack c)]] # set UI.style [("display","-webkit-box")] )
+            legend <- checkDivSetT  (L.nub (fst <$> dashes)) (pure id) (pure (L.nub (fst <$> dashes))) (\b -> UI.input # set UI.type_ "checkbox") (\(t,c) b -> UI.div # set items [UI.div # set items [b], UI.div  #  set  text  t ] # set UI.style [("display","-webkit-box"),("background-color",T.unpack c),("color","white")])
             calendar <- UI.div
             element body # set children [getElement legend,calendar]
             let calFun = (\selected -> do
