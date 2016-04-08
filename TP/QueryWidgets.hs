@@ -465,7 +465,7 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
           (listBody,tableb,inscrud) <- eiTable inf   unFinal  refs pmods ftb oldItems
           (panelItems,tdiff)<- processPanelTable listBody inf  (facts tableb) reftb  (inscrud) table oldItems
           let diff = unionWith const tdiff   (filterJust loadedItensEv)
-          addElemFin panelItems =<<  onEvent (filterJust loadedItensEv)
+          addElemFin panelItems =<<  onEvent diff
               (liftIO . hdiff)
           addElemFin panelItems =<< onEvent ((\i j -> Just $ maybe (create j) (flip apply j  ) i) <$> facts oldItems <@> diff )
               (liftIO . hvdiff )
@@ -958,16 +958,16 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
                 sink items (pure . maybe UI.div showFKE . fmap (unTB1 ._fkttable) <$> facts oldItems ) #  set UI.class_ "col-xs-5" )
         else do
           pan <- UI.div #  set UI.class_ "col-xs-5"
-          let sel  = itemListEl
-          bh <- stepper False (unionWith const (const False <$> onEsc filterInp ) (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange sel )))
-          element sel # sink UI.style (noneShow <$> bh)
+          let isel  = itemListEl
+          bh <- stepper False (unionWith const (const False <$> onEsc filterInp ) (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange isel )))
+          element isel # sink UI.style (noneShow <$> bh)
           element filterInp # set UI.style (noneShow False)
           element offset # set UI.style (noneShow False)
           onChanges bh (\v -> do
               element filterInp # set UI.style (noneShow v)
               element offset # set UI.style (noneShow v)
               if True then runFunction$ ffi "$(%1).focus();" filterInp else return ())
-          lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) . snd  <$>    res4 ) (tidings (fmap Just <$> facts tdi) (fmap Just <$> rumors tdi)) (pure id) ((\i -> maybe id (\l  ->    i  l ) )<$> showFK )
+          lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) . snd  <$>    res4 ) (tidings (fmap Just <$> st ) (fmap Just <$> sel )) (pure id) ((\i -> maybe id (\l  ->    i  l ) )<$> showFK )
           return (TrivialWidget  (triding lbox) pan )
 
 
@@ -994,7 +994,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
       addElemFin (getElement subnet) fin
       addElemFin (getElement subnet) fin2
       let
-        fksel =  fmap (\box ->  FKT (fmap _tb $ backFKRef relTable  (fmap (keyAttr .unTB )ifk)   box) rel (TB1 box) ) <$>  ((\i j -> maybe i Just ( j)  ) <$>  pretdi <*> tidings st sel)
+        fksel =  fmap (\box ->  FKT (fmap _tb $ backFKRef relTable  (fmap (keyAttr .unTB )ifk)   box) rel (TB1 box) ) <$>  ((\i -> maybe i Just) <$>  pretdi <*> tidings st sel)
       return $ TrivialWidget (if isReadOnly  tb then oldItems  else fksel ) subnet
 fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb1 ))) = do
     tr <- fkUITable inf constr (tbrefs) (fmap (join . fmap unLeftItens <$>) <$> plmods)  (first unLeftKey . second (join . fmap unLeftItens <$>) <$> wl) (join . fmap unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOri unKOptional <$> rel) tb1)

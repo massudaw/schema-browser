@@ -123,9 +123,7 @@ setup smvar args w = void $ do
   mapUITEvent body (traverse (\(nav,inf)->
       case nav of
         "Event" -> do
-
             (_,(_,tmap)) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
-            (_,(_,dmap )) <- liftIO $ transaction  (meta inf) $ selectFrom "table_description" Nothing Nothing [] [("=",liftField (meta inf) "table_description" $ uncurry Attr $("table_schema",TB1 $ SText (schemaName inf) ))]
             (evdb,(_,evMap )) <- liftIO $ transaction  (meta inf) $ selectFrom "event" Nothing Nothing [] [("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
             dashes <- mapM (\e -> do
                 let t@(Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" e
@@ -142,8 +140,6 @@ setup smvar args w = void $ do
                 let v = F.toList evMap
                     projf  r efield = M.fromList $ [("start",T.pack $ L.intercalate "" $ fmap renderPrim $F.toList $ lookAttr' inf efield r) , ("title",(T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("color" , c),("field", efield )] :: M.Map Text Text
                     proj r = projf r <$> F.toList efields
-
-
                 return ((lookDesc,c),filter ((/="").fromJust . M.lookup "start") $concat $ proj <$> G.toList tmap)) ( G.toList evMap)
 
             iday <- liftIO getCurrentTime
@@ -159,18 +155,16 @@ setup smvar args w = void $ do
             legend <- checkDivSetT  allTags  (pure id) (pure allTags) (\_ -> UI.input # set UI.type_ "checkbox") legendStyle
             element legend
             calendar <- UI.div # set UI.class_ "col-xs-10"
-            sidebar <- UI.div # set children[filterInp , getElement legend] #  set UI.class_ "col-xs-2"
+            sidebar <- UI.div # set children [filterInp , getElement legend] #  set UI.class_ "col-xs-2"
             element body # set children [sidebar,calendar]
             let calFun = (\selected -> do
                     innerCalendar <-UI.div
                     element calendar # set children [innerCalendar]
                     calendarCreate innerCalendar (show iday) (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  (concat $fmap snd (filter (flip L.elem (selected) . fst) dashes)))
                     return () )
-
             calFun allTags
             onEvent (rumors (triding legend)) calFun
             return body
-
         "Poll" -> do
             element body #
               set items
