@@ -19,7 +19,9 @@ module TP.QueryWidgets (
     refTables,
     offsetField,
     sorting',
+    lookAttr',
     tableIndexA,
+    idex,
     metaAllTableIndexV ,
     viewer,
     ) where
@@ -1195,3 +1197,8 @@ renderTableNoHeaderSort2 header inf modtablei out = do
   UI.table # set UI.class_ "table table-bordered table-striped" # sink items ((\(i,l)-> header : fmap (body i) l )<$> out)
 
 
+lookAttr' inf k (i,m) = unTB $ err $  M.lookup (S.singleton (Inline (lookKey inf (_kvname i) k))) (unKV m)
+    where
+      err= justError ("no attr " <> show k <> " for table " <> show (_kvname i))
+
+idex inf t v = G.Idex $ L.sortBy (comparing fst ) $ first (lookKey inf t  ) <$> v
