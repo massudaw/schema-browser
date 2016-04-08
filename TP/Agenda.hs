@@ -7,7 +7,6 @@ module TP.Agenda where
 
 import qualified Data.Interval as Interval
 import Data.Time.Calendar.WeekDate
-import qualified NonEmpty as Non
 import Data.Char
 import qualified Data.Text.Encoding as TE
 import Query
@@ -15,35 +14,20 @@ import Data.Time
 import qualified Data.Aeson as A
 import Text
 import qualified Types.Index as G
-import Data.Bifunctor (first)
 import Debug.Trace
 import Types
 import SchemaQuery
-import Plugins
 import TP.Widgets
-import PostgresQuery (postgresOps,connRoot)
-import SortList
 import Prelude hiding (head)
 import TP.QueryWidgets
 import Control.Monad.Reader
-import Control.Concurrent
-import Data.Functor.Apply
-import System.Environment
-import Network.Google.OAuth2 (OAuth2Tokens(..))
-import Data.Ord
-import Utils
 import Schema
-import Types.Patch
-import Data.Char (toLower)
 import Data.Maybe
 import Reactive.Threepenny hiding(apply)
-import Data.Traversable (traverse)
 import qualified Data.List as L
-import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 
 import RuntimeTypes
-import OAuthClient
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (get,delete,apply)
 import Data.Monoid hiding (Product(..))
@@ -51,9 +35,7 @@ import Data.Monoid hiding (Product(..))
 import qualified Data.Foldable as F
 import qualified Data.Text as T
 import Data.Text (Text)
-import qualified Data.Set as S
 
-import Database.PostgreSQL.Simple
 import qualified Data.Map as M
 calendarCreate m cal def evs= runFunction $ ffi "$(%1).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: %2,lang: 'pt-br',editable: true,eventLimit: true,events: JSON.parse(%3), defaultView : %4 });" cal def evs m
 
@@ -61,14 +43,14 @@ eventWidget inf body = do
     (_,(_,tmap)) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
     (evdb,(_,evMap )) <- liftIO $ transaction  (meta inf) $ selectFrom "event" Nothing Nothing [] [("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
     dashes <- mapM (\e -> do
-        let t@(Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" e
+        let (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" e
             lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
 
             (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "event" e
             (Attr _ color )= lookAttr' (meta inf) "color" e
 
         (evdb,(_,tmap )) <- liftIO $ transaction  inf $ selectFrom tname Nothing Nothing [] []
-        let v = F.toList evMap
+        let
             convField (Attr _ (IntervalTB1 i )) = [("start", (\(Interval.Finite i) -> i)$ Interval.lowerBound i),("end",(\(Interval.Finite i) -> i)$ Interval.upperBound i)]
             convField (Attr _ v) = [("start",v)]
             projf  r efield@(TB1 (SText field))  = M.fromList $ convField (lookAttr' inf field r) <> [ ("title",TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("color" , color),("field", efield )] :: M.Map Text (FTB Showable)

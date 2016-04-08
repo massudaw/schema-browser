@@ -5,15 +5,11 @@
 
 module TP.Browser where
 
-import qualified Data.Interval as Interval
 import TP.Agenda
-import Data.Time.Calendar.WeekDate
 import qualified NonEmpty as Non
 import Data.Char
-import qualified Data.Text.Encoding as TE
 import Query
 import Data.Time
-import qualified Data.Aeson as A
 import Text
 import qualified Types.Index as G
 import Data.Bifunctor (first)
@@ -22,26 +18,22 @@ import Types
 import SchemaQuery
 import Plugins
 import TP.Widgets
-import PostgresQuery (postgresOps,connRoot)
+import PostgresQuery (postgresOps)
 import SortList
 import Prelude hiding (head)
 import TP.QueryWidgets
 import Control.Monad.Reader
 import Control.Concurrent
-import Data.Functor.Apply
 import System.Environment
 import Network.Google.OAuth2 (OAuth2Tokens(..))
 import Data.Ord
 import Utils
 import Schema
 import Types.Patch
-import Data.Char (toLower)
 import Data.Maybe
 import Reactive.Threepenny hiding(apply)
-import Data.Traversable (traverse)
 import qualified Data.List as L
 import qualified Data.ByteString.Char8 as BS
-import qualified Data.ByteString.Lazy.Char8 as BSL
 
 import RuntimeTypes
 import OAuthClient
@@ -58,7 +50,6 @@ import Database.PostgreSQL.Simple
 import qualified Data.Map as M
 
 import OAuth
-import OAuthClient
 import GHC.Stack
 
 updateClient metainf inf table tdi clientId now =
