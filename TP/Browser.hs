@@ -1,9 +1,14 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module TP.Browser where
 
+import qualified Data.Interval as Interval
+import Data.Time.Calendar.WeekDate
 import qualified NonEmpty as Non
+import Data.Char
 import qualified Data.Text.Encoding as TE
 import Query
 import Data.Time
@@ -73,6 +78,14 @@ deleteClient metainf clientId = do
   (dbmeta ,(_,ccli)) <- transaction metainf $ selectFrom "clients"  Nothing Nothing [] []
   putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))],[])]
 
+instance A.ToJSON a => A.ToJSON (FTB a ) where
+  toJSON (TB1 i) = A.toJSON i
+  toJSON (LeftTB1 i) = fromMaybe (A.toJSON ("" ::String)) (A.toJSON <$> i)
+
+instance A.ToJSON Showable where
+  toJSON (SText i ) = A.toJSON i
+  toJSON i = A.toJSON (renderPrim i)
+
 
 editClient metainf inf dbmeta ccli  table tdi clientId now = do
   let cli :: Maybe (TBData Key Showable)
@@ -93,8 +106,92 @@ addClient clientId metainf inf table dbdata =  do
 
 idex inf t v = G.Idex $ L.sortBy (comparing fst ) $ first (lookKey inf t  ) <$> v
 
-calendarCreate cal def evs= runFunction $ ffi "$(%1).fullCalendar({header: { left: 'prev,next today',center: 'title',right: 'month,basicWeek,basicDay'},defaultDate: %2,lang: 'pt-br',editable: true,eventLimit: true,events: JSON.parse(%3) });" cal def evs
+calendarCreate m cal def evs= runFunction $ ffi "$(%1).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: %2,lang: 'pt-br',editable: true,eventLimit: true,events: JSON.parse(%3), defaultView : %4 });" cal def evs m
 
+eventWidget inf body = do
+    (_,(_,tmap)) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+    (evdb,(_,evMap )) <- liftIO $ transaction  (meta inf) $ selectFrom "event" Nothing Nothing [] [("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+    dashes <- mapM (\e -> do
+        let t@(Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" e
+
+            lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
+
+            (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "event" e
+            (Attr _ color )= lookAttr' (meta inf) "color" e
+
+        (evdb,(_,tmap )) <- liftIO $ transaction  inf $ selectFrom tname Nothing Nothing [] []
+        let v = F.toList evMap
+            convField (Attr _ (IntervalTB1 i )) = [("start", (\(Interval.Finite i) -> i)$ Interval.lowerBound i),("end",(\(Interval.Finite i) -> i)$ Interval.upperBound i)]
+            convField (Attr _ v) = [("start",v)]
+            projf  r efield@(TB1 (SText field))  = M.fromList $ convField (lookAttr' inf field r) <> [ ("title",TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("color" , color),("field", efield )] :: M.Map Text (FTB Showable)
+            proj r = projf r <$> F.toList efields
+        return ((lookDesc,color),filter (isJust . join . fmap unSOptional . M.lookup "start") $concat $ proj <$> G.toList tmap)) ( G.toList evMap)
+
+    iday <- liftIO getCurrentTime
+    filterInp <- UI.input # set UI.style [("width","100%")]
+    filterInpBh <- stepper "" (UI.valueChange filterInp)
+    let allTags =  (fst <$> dashes)
+        filterLabel d = (\j ->  L.isInfixOf (toLower <$> j) (toLower <$> d)) <$> filterInpBh
+        legendStyle (t,c) b
+              =  UI.div
+              # set items [UI.div # set items [b], UI.div # set text  t ]
+              # sink0 UI.style (mappend [("background-color",renderShowable c),("color","white")]. noneDisplay "-webkit-box" <$> filterLabel t)
+
+    legend <- checkDivSetT  allTags  (pure id) (pure allTags) (\_ -> UI.input # set UI.type_ "checkbox") legendStyle
+    let buttonStyle k e = e # set UI.text (fromJust $ M.lookup k transRes)# set UI.class_ "btn-xs btn-default buttonSet"
+          where transRes = M.fromList [("month","Mês"),("week","Semana"),("day","Dia")]
+        defView = "month"
+        viewList = ["month","day","week"] :: [String]
+        transMode _ "month" = "month"
+        transMode True i = "agenda" <> capitalize i
+        transMode False i = "basic" <> capitalize i
+        capitalize (i:xs) = toUpper i : xs
+        capitalize [] = []
+
+    resolution <- fmap (fromMaybe defView) <$> buttonDivSetT  viewList (pure id) (pure $ Just defView ) (const UI.button)  buttonStyle
+
+    next <- UI.button  # set text ">"
+    today <- UI.button # set text "Hoje"
+    prev <- UI.button  # set text "<"
+
+    agenda <- mdo
+      agenda <- UI.button # sink text ((\b -> if b then "Agenda" else "Basic") <$> agB)
+      let agE = pure not <@ UI.click agenda
+      agB <- accumB False agE
+      return $ TrivialWidget (tidings agB (flip ($) <$> agB <@> agE)) agenda
+
+    current <- UI.div # set children [prev,today,next]
+    let
+      resRange b "month" d =  d {utctDay = addGregorianMonthsClip (if b then -1 else 1 )  (utctDay d)}
+      resRange b "day" d = d {utctDay =addDays (if b then -1 else 1 ) (utctDay d)}
+      resRange b "week" d = d {utctDay =addDays (if b then -7 else 7 ) (utctDay d)}
+    let currentE = (concatenate <$> unions  [resRange False  <$> facts (triding resolution) <@ UI.click next ,resRange True   <$> facts (triding resolution) <@ UI.click prev , const (const iday) <$> UI.click today ])
+    increment <- accumB iday  currentE
+
+    calendar <- UI.div # set UI.class_ "col-xs-10"
+    sidebar <- UI.div # set children [getElement agenda,current,getElement resolution,filterInp , getElement legend] #  set UI.class_ "col-xs-2"
+    element body # set children [sidebar,calendar]
+    let calFun (agenda,iday,res ,selected) = do
+            innerCalendar <-UI.div
+            element calendar # set children [innerCalendar]
+            let
+
+              inRange "day" d (SDate c)=   d == c
+              inRange "week" d (SDate c)=    oy == cy && ow == cw
+                where
+                  (oy,ow,_) = toWeekDate d
+                  (cy,cw,_) = toWeekDate c
+              inRange "month" d (SDate c)=   oy == cy && od == cd
+                where
+                  (oy,od,_) = toGregorian d
+                  (cy,cd,_) = toGregorian c
+              inRange m d (STimestamp c)=   inRange m d (SDate (utctDay (localTimeToUTC utc c)))
+
+            calendarCreate (transMode agenda res) innerCalendar (show iday) (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  (filter (inRange res (utctDay iday ) . unTB1 . fromJust . join . fmap unSOptional. M.lookup "start"  ) $ concat $fmap snd ( filter (flip L.elem (selected) . fst) dashes)))
+            return ()
+    calFun (False,iday,defView, allTags)
+    onEvent (rumors $ (,,,) <$> triding agenda <*> tidings increment (flip ($) <$> increment <@> currentE) <*>(triding resolution) <*> (triding legend)) calFun
+    return body
 
 
 txt = TB1 . SText
@@ -123,48 +220,7 @@ setup smvar args w = void $ do
   mapUITEvent body (traverse (\(nav,inf)->
       case nav of
         "Event" -> do
-            (_,(_,tmap)) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
-            (evdb,(_,evMap )) <- liftIO $ transaction  (meta inf) $ selectFrom "event" Nothing Nothing [] [("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
-            dashes <- mapM (\e -> do
-                let t@(Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" e
-                    s@(Attr _ (TB1 (SText sname))) = lookAttr' (meta inf) "schema_name" e
-
-                    lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
-
-                    efields = fmap (\(TB1 (SText e)) -> e)  efield
-                      where
-                        (Attr _ (ArrayTB1 efield ))= lookAttr' (meta inf) "event" e
-                    (Attr _ (TB1 (SText c )))= lookAttr' (meta inf) "color" e
-
-                (evdb,(_,tmap )) <- liftIO $ transaction  inf $ selectFrom tname Nothing Nothing [] []
-                let v = F.toList evMap
-                    projf  r efield = M.fromList $ [("start",T.pack $ L.intercalate "" $ fmap renderPrim $F.toList $ lookAttr' inf efield r) , ("title",(T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("color" , c),("field", efield )] :: M.Map Text Text
-                    proj r = projf r <$> F.toList efields
-                return ((lookDesc,c),filter ((/="").fromJust . M.lookup "start") $concat $ proj <$> G.toList tmap)) ( G.toList evMap)
-
-            iday <- liftIO getCurrentTime
-
-            filterInp <- UI.input # set UI.style [("width","100%")]
-            filterInpBh <- stepper "" (UI.valueChange filterInp)
-            let allTags =  (fst <$> dashes)
-                filterLabel d = (\j ->  L.isInfixOf (toLower <$> j) (toLower <$> d)) <$> filterInpBh
-                legendStyle (t,c) b
-                      =  UI.div
-                      # set items [UI.div # set items [b], UI.div # set text  t ]
-                      # sink0 UI.style (mappend [("background-color",T.unpack c),("color","white")]. noneDisplay "-webkit-box" <$> filterLabel t)
-            legend <- checkDivSetT  allTags  (pure id) (pure allTags) (\_ -> UI.input # set UI.type_ "checkbox") legendStyle
-            element legend
-            calendar <- UI.div # set UI.class_ "col-xs-10"
-            sidebar <- UI.div # set children [filterInp , getElement legend] #  set UI.class_ "col-xs-2"
-            element body # set children [sidebar,calendar]
-            let calFun = (\selected -> do
-                    innerCalendar <-UI.div
-                    element calendar # set children [innerCalendar]
-                    calendarCreate innerCalendar (show iday) (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  (concat $fmap snd (filter (flip L.elem (selected) . fst) dashes)))
-                    return () )
-            calFun allTags
-            onEvent (rumors (triding legend)) calFun
-            return body
+            eventWidget inf body
         "Poll" -> do
             element body #
               set items
