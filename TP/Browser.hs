@@ -97,6 +97,8 @@ calendarCreate cal def evs= runFunction $ ffi "$(%1).fullCalendar({header: { lef
 
 
 
+txt = TB1 . SText
+
 setup
      ::  MVar (M.Map Text  InformationSchema) ->  [String] -> Window -> UI ()
 setup smvar args w = void $ do
@@ -129,23 +131,36 @@ setup smvar args w = void $ do
                 let t@(Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" e
                     s@(Attr _ (TB1 (SText sname))) = lookAttr' (meta inf) "schema_name" e
 
-                    lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,TB1 $ SText $ schemaName inf),("table_name",TB1 $ SText tname )]) i ) $ tmap
-                    -- d = G.lookup (tblist' (lookTable (meta inf) "description" ) (_tb<$> [t,s])) dmap
-                    (Attr _ (TB1 (SText efield )))= lookAttr' (meta inf) "event" e
+                    lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
+
+                    efields = fmap (\(TB1 (SText e)) -> e)  efield
+                      where
+                        (Attr _ (ArrayTB1 efield ))= lookAttr' (meta inf) "event" e
                     (Attr _ (TB1 (SText c )))= lookAttr' (meta inf) "color" e
 
                 (evdb,(_,tmap )) <- liftIO $ transaction  inf $ selectFrom tname Nothing Nothing [] []
                 let v = F.toList evMap
-                    proj r = M.fromList $ [("start",T.pack $ L.intercalate "" $ fmap renderPrim $F.toList $ lookAttr' inf efield r) , ("title",(T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("color" , c)] :: M.Map Text Text
+                    projf  r efield = M.fromList $ [("start",T.pack $ L.intercalate "" $ fmap renderPrim $F.toList $ lookAttr' inf efield r) , ("title",(T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("color" , c),("field", efield )] :: M.Map Text Text
+                    proj r = projf r <$> F.toList efields
 
-                return ((lookDesc,c),filter ((/="").fromJust . M.lookup "start") $proj <$> G.toList tmap)) ( G.toList evMap)
+
+                return ((lookDesc,c),filter ((/="").fromJust . M.lookup "start") $concat $ proj <$> G.toList tmap)) ( G.toList evMap)
 
             iday <- liftIO getCurrentTime
-            -- legend <- UI.ul # set items ((\(t,c) ->UI.li # set UI.class_ "list-group-item" # set  text  t # set UI.style [("background-color",T.unpack c)] )  <$> L.nub (fst <$> dashes)) # set UI.class_ "list-group"
-            let allTags = (L.nub (fst <$> dashes))
-            legend <- checkDivSetT  (L.nub (fst <$> dashes)) (pure id) (pure (L.nub (fst <$> dashes))) (\b -> UI.input # set UI.type_ "checkbox") (\(t,c) b -> UI.div # set items [UI.div # set items [b], UI.div  #  set  text  t ] # set UI.style [("display","-webkit-box"),("background-color",T.unpack c),("color","white")])
-            calendar <- UI.div
-            element body # set children [getElement legend,calendar]
+
+            filterInp <- UI.input # set UI.style [("width","100%")]
+            filterInpBh <- stepper "" (UI.valueChange filterInp)
+            let allTags =  (fst <$> dashes)
+                filterLabel d = (\j ->  L.isInfixOf (toLower <$> j) (toLower <$> d)) <$> filterInpBh
+                legendStyle (t,c) b
+                      =  UI.div
+                      # set items [UI.div # set items [b], UI.div # set text  t ]
+                      # sink0 UI.style (mappend [("background-color",T.unpack c),("color","white")]. noneDisplay "-webkit-box" <$> filterLabel t)
+            legend <- checkDivSetT  allTags  (pure id) (pure allTags) (\_ -> UI.input # set UI.type_ "checkbox") legendStyle
+            element legend
+            calendar <- UI.div # set UI.class_ "col-xs-10"
+            sidebar <- UI.div # set children[filterInp , getElement legend] #  set UI.class_ "col-xs-2"
+            element body # set children [sidebar,calendar]
             let calFun = (\selected -> do
                     innerCalendar <-UI.div
                     element calendar # set children [innerCalendar]

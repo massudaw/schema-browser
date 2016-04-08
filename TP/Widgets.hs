@@ -143,14 +143,14 @@ mapTEventFin f x = do
 
 
 -- Style show/hide
-noneShow True = [("display","block")]
-noneShow False = [("display","none")]
+noneShow = noneDisplay "block"
 
-noneShowFlex True = [("display","inline-flex")]
-noneShowFlex False = [("display","none")]
+noneShowFlex = noneDisplay "inline-flex"
 
-noneShowSpan True = [("display","inline")]
-noneShowSpan False = [("display","none")]
+noneShowSpan = noneDisplay "inline"
+
+noneDisplay e True = [("display",e)]
+noneDisplay e False = [("display","none")]
 
 -- Background Style green/red
 
