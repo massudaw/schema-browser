@@ -108,3 +108,6 @@ option[vencimento^="-"]:before
     content:   attr(vencimento  float);
     
 }
+
+
+#map { height: 580px; }

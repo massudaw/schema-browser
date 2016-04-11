@@ -47,3 +47,45 @@ function handleFileSelect(evt) {
     }
   }
 
+function createMap (ref,posj,nej,swj,features){
+  var points = JSON.parse(features);
+      pos = JSON.parse(posj);
+      
+  mymap = L.map(ref);
+  if (pos == null) {
+      navigator.geolocation.getCurrentPosition(function(position) {
+      mymap.setView([position.coords.latitude, position.coords.longitude], 12);
+    }, function() {
+      handleLocationError(true, map.getCenter());
+    });
+  }else {
+      ne = JSON.parse(nej);
+      sw  = JSON.parse(swj);
+    mymap.fitBounds([ne,sw]);
+  }
+
+  points.map (function (l){ l.map (function (p){ L.circle(p.position,p.size,{color:p.color}).addTo(mymap);})})
+	var osmUrl='http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+	var osmAttrib='Map data © <a href="http://openstreetmap.org">OpenStreetMap</a> contributors';
+	var osm = L.tileLayer(osmUrl, { maxZoom: 18, attribution: osmAttrib}).addTo(mymap);	
+}
+
+
+function handleLocationError(browserHasGeolocation, pos) {
+  alert(browserHasGeolocation ?
+                        'Error: The Geolocation service failed.' :
+                        'Error: Your browser doesn\'t support geolocation.');
+}
+
+
+function clientHandlers(){
+  return {'moveend': function(el,elid,eventType,sendEvent){
+    mymap.on(eventType,function(e) {
+    var bounds = mymap.getBounds();
+    var center =bounds.getCenter();
+    var sw=bounds.getSouthWest();
+    var ne=bounds.getNorthEast();
+    sendEvent(elid,eventType,[center.lat,center.lng,ne.lat,ne.lng,sw.lat,sw.lng].map(function(e){return e.toString()}));
+    return true;
+    });
+  }}}

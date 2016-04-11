@@ -6,6 +6,7 @@
 module TP.Browser where
 
 import TP.Agenda
+import TP.Map
 import qualified NonEmpty as Non
 import Data.Char
 import Query
@@ -104,7 +105,7 @@ setup smvar args w = void $ do
   let he = const True <$> UI.hover hoverBoard
   bhe <-stepper True he
   menu <- checkedWidget (tidings bhe he)
-  nav  <- buttonDivSet  ["Event","Browser","Poll","Stats","Change","Exception"] (pure $ Just "Browser" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonDivSet  ["Map","Event","Browser","Poll","Stats","Change","Exception"] (pure $ Just "Map" )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   chooserDiv <- UI.div # set children  ([getElement menu] <> chooserItens <> [getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end"),("height","7vh"),("width","100%")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
@@ -112,6 +113,8 @@ setup smvar args w = void $ do
 
   mapUITEvent body (traverse (\(nav,inf)->
       case nav of
+        "Map" -> do
+            mapWidget inf body
         "Event" -> do
             eventWidget inf body
         "Poll" -> do

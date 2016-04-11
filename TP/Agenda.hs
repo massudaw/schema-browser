@@ -42,17 +42,19 @@ calendarCreate m cal def evs= runFunction $ ffi "$(%1).fullCalendar({header: { l
 eventWidget inf body = do
     (_,(_,tmap)) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
     (evdb,(_,evMap )) <- liftIO $ transaction  (meta inf) $ selectFrom "event" Nothing Nothing [] [("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+    cliZone <- jsTimeZone
     dashes <- mapM (\e -> do
         let (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" e
             lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
-
             (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "event" e
             (Attr _ color )= lookAttr' (meta inf) "color" e
-
         (evdb,(_,tmap )) <- liftIO $ transaction  inf $ selectFrom tname Nothing Nothing [] []
         let
-            convField (Attr _ (IntervalTB1 i )) = [("start", (\(Interval.Finite i) -> i)$ Interval.lowerBound i),("end",(\(Interval.Finite i) -> i)$ Interval.upperBound i)]
-            convField (Attr _ v) = [("start",v)]
+            toLocalTime = fmap to
+              where to (STimestamp i )  = STimestamp $  utcToLocalTime cliZone $ localTimeToUTC utc i
+                    to (SDate i ) = SDate i
+            convField (Attr _ (IntervalTB1 i )) = [("start", toLocalTime $ (\(Interval.Finite i) -> i)$ Interval.lowerBound i),("end",toLocalTime $ (\(Interval.Finite i) -> i)$ Interval.upperBound i)]
+            convField (Attr _ v) = [("start",toLocalTime $v)]
             projf  r efield@(TB1 (SText field))  = M.fromList $ convField (lookAttr' inf field r) <> [ ("title",TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("color" , color),("field", efield )] :: M.Map Text (FTB Showable)
             proj r = projf r <$> F.toList efields
         return ((lookDesc,color),filter (isJust . join . fmap unSOptional . M.lookup "start") $concat $ proj <$> G.toList tmap)) ( G.toList evMap)
@@ -94,12 +96,13 @@ eventWidget inf body = do
       resRange b "month" d =  d {utctDay = addGregorianMonthsClip (if b then -1 else 1 )  (utctDay d)}
       resRange b "day" d = d {utctDay =addDays (if b then -1 else 1 ) (utctDay d)}
       resRange b "week" d = d {utctDay =addDays (if b then -7 else 7 ) (utctDay d)}
-    let currentE = (concatenate <$> unions  [resRange False  <$> facts (triding resolution) <@ UI.click next ,resRange True   <$> facts (triding resolution) <@ UI.click prev , const (const iday) <$> UI.click today ])
+      currentE = concatenate <$> unions  [resRange False  <$> facts (triding resolution) <@ UI.click next
+                                       ,resRange True   <$> facts (triding resolution) <@ UI.click prev , const (const iday) <$> UI.click today ]
     increment <- accumB iday  currentE
-
     calendar <- UI.div # set UI.class_ "col-xs-10"
     sidebar <- UI.div # set children [getElement agenda,current,getElement resolution,filterInp , getElement legend] #  set UI.class_ "col-xs-2"
     element body # set children [sidebar,calendar]
+
     let calFun (agenda,iday,res ,selected) = do
             innerCalendar <-UI.div
             element calendar # set children [innerCalendar]
@@ -114,12 +117,17 @@ eventWidget inf body = do
                 where
                   (oy,od,_) = toGregorian d
                   (cy,cd,_) = toGregorian c
-              inRange m d (STimestamp c)=   inRange m d (SDate (utctDay (localTimeToUTC utc c)))
+              inRange m d (STimestamp c)=   inRange m d (SDate (localDay (utcToLocalTime cliZone $ localTimeToUTC utc c)))
 
             calendarCreate (transMode agenda res) innerCalendar (show iday) (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  (filter (inRange res (utctDay iday ) . unTB1 . fromJust . join . fmap unSOptional. M.lookup "start"  ) $ concat $fmap snd ( filter (flip L.elem (selected) . fst) dashes)))
             return ()
     calFun (False,iday,defView, allTags)
-    onEvent (rumors $ (,,,) <$> triding agenda <*> tidings increment (flip ($) <$> increment <@> currentE) <*>(triding resolution) <*> (triding legend)) calFun
+    onEvent (rumors $ (,,,)
+        <$> triding agenda
+        <*> tidings increment (flip ($) <$> increment <@> currentE)
+        <*> triding resolution
+        <*> triding legend
+        ) calFun
     return body
 
 txt = TB1. SText

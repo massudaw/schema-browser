@@ -46,7 +46,6 @@ queryGeocodeBoundary = FPlugins "Google Geocode" "address"  $ BoundedPlugin2 url
       mun <- idxR "municipio"-< t
       uf <- idxR "uf"-< t
       odxR "geocode" -< t
-      odxR "bounding" -< t
       let im = "http://maps.googleapis.com/maps/api/geocode/json"
           vr =  maybe "" renderShowable
           addr = vr log <> " , " <> vr num <> " - " <>  vr bai<> " , " <> vr mun <> " - " <> vr uf
@@ -61,7 +60,7 @@ queryGeocodeBoundary = FPlugins "Google Geocode" "address"  $ BoundedPlugin2 url
             b <- MaybeT $ return $ case (fmap IntervalTB1 $ fmap (fmap (TB1 . SPosition))$  (\i j -> interval (Finite i ,True) (Finite j ,True))<$> getPos (bounds !> "southwest") <*> getPos (bounds !> "northeast"), fmap IntervalTB1 $ fmap (fmap (TB1 . SPosition) )$ (\i j -> interval (Finite i ,True) (Finite j ,True))<$> getPos (viewport !> "southwest") <*> getPos (viewport !> "northeast")) of
                                         (i@(Just _), _ ) -> i
                                         (Nothing , j) -> j
-            return [("geocode" ,TB1 $ SPosition p),("bounding", b)]) -<  (im,addr)
+            return [("geocode" ,TB1 $ SPosition p)]) -<  (im,addr)
 
       let tb =  tblist . fmap (_tb . (uncurry Attr ) . second (LeftTB1 . Just )) <$> r
       returnA -< tb

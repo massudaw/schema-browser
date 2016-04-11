@@ -1,8 +1,9 @@
 {-# LANGUAGE OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Host (module Step.Common,attrT,findPK,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable') where
+module Step.Host (module Step.Common,attrT,findPK,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexFieldRec) where
 
 import Types
 import Control.Applicative.Lift
+import qualified Data.Foldable  as F
 import Control.Monad.Reader
 import Query
 import qualified Data.Map as M
@@ -45,6 +46,11 @@ replace ix i v = v
 indexField :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
 indexField p@(IProd b l) v = unTB <$> findAttr  l  (snd v)
 indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findFK l (snd v)
+
+indexFieldRec :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
+indexFieldRec p@(IProd b l) v = unTB <$> findAttr  l  (snd v)
+indexFieldRec n@(Nested ix@(IProd b l) (Many[nt]) ) v = join $ join $ fmap (indexFieldRec nt) . listToMaybe . F.toList . _fkttable.  unTB <$> findFK l (snd v)
+
 
 checkField :: Access Text -> Column Key Showable -> Errors [Access Text] (Column Key Showable)
 checkField p@(Point ix) _ = failure [p]
