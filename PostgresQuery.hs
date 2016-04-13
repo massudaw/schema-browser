@@ -199,7 +199,8 @@ insertMod j  = do
       table = lookTable inf (_kvname (fst  j))
     kvn <- insertPatch (fmap (mapKey' (recoverFields inf)) . fromRecord . (mapKey' (typeTrans inf))) (conn  inf) (patch $ mapKey' (recoverFields inf) j) (mapTableK (recoverFields inf ) table)
     let mod =  TableModification Nothing table (firstPatch (typeTrans inf) kvn)
-    Just <$> logTableModification inf mod
+    --Just <$> logTableModification inf mod
+    return $ Just  mod
 
 
 deleteMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
@@ -210,9 +211,10 @@ deleteMod j@(meta,_) = do
       patch =  (tableMeta table, getPKM j,[])
       table = lookTable inf (_kvname (fst  j))
     deletePatch (conn inf)  (firstPatch (recoverFields inf) patch) table
-    Just <$> logTableModification inf (TableModification Nothing table  patch)
-  tell  (maybeToList log)
-  return log
+    -- Just <$> logTableModification inf (TableModification Nothing table  patch)
+    return (TableModification Nothing table  patch)
+  tell  (maybeToList $ Just log)
+  return $ Just log
 
 updateMod :: TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
 updateMod kv old = do
@@ -221,7 +223,8 @@ updateMod kv old = do
     let table = lookTable inf (_kvname (fst  old ))
     patch <- updatePatch (conn  inf) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table
     let mod =  TableModification Nothing table (firstPatch (typeTrans inf) patch)
-    Just <$> logTableModification inf mod
+    -- Just <$> logTableModification inf mod
+    return $ Just mod
 
 patchMod :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
 patchMod patch@(m,_,_) = do
@@ -230,7 +233,8 @@ patchMod patch@(m,_,_) = do
     let table = lookTable inf (_kvname m )
     patch <- applyPatch (conn  inf) (firstPatch (recoverFields inf ) patch )
     let mod =  TableModification Nothing table (firstPatch (typeTrans inf) patch)
-    Just <$> logTableModification inf mod
+    -- Just <$> logTableModification inf mod
+    return (Just mod)
 
 
 selectAll
@@ -294,4 +298,4 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef . filter (flip L.elem (fmap fst s) . fst ) .  getPKM <$> lastMay i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o )  (\table j -> do
     inf <- ask
-    liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined
+    liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined logTableModification

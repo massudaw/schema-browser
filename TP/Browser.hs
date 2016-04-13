@@ -272,8 +272,6 @@ databaseChooser smvar metainf sargs = do
   return $ (chooserT,[schemaSel ]<>  [authBox] )
 
 
-attrLine i   = do
-  line ( L.intercalate "," (fmap renderShowable .  allKVRec'  $ i))
 
 chooserTable inf cliTid cli = do
   iv   <- currentValue (facts cliTid)

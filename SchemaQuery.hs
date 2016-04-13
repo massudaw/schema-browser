@@ -50,7 +50,7 @@ import qualified Data.Text as T
 --  MultiTransaction Postgresql insertOperation
 --
 
-defsize = 100
+defsize = 200
 
 estLength page size resL est = fromMaybe 0 page * size  +  est
 
@@ -296,13 +296,25 @@ transactionLog inf log = do -- withTransaction (conn inf) $ do
 
 
 
+transactionNoLog :: InformationSchema -> TransactionM a -> IO a
+transactionNoLog inf log = do -- withTransaction (conn inf) $ do
+  (md,mods)  <- runWriterT (runReaderT log inf )
+  let aggr = foldr (\tm@(TableModification id t f) m -> M.insertWith mappend t [tm] m) M.empty mods
+  Tra.traverse (\(k,v) -> do
+    ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ M.lookup ((rawSchema k ))  (depschema inf) ) k
+    putPatch (patchVar ref ) $ (\(TableModification id t f)-> f) <$>v
+    ) (M.toList aggr)
+  return md
+
+
 transaction :: InformationSchema -> TransactionM a -> IO a
 transaction inf log = do -- withTransaction (conn inf) $ do
   (md,mods)  <- runWriterT (runReaderT log inf )
-  let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [f] m) M.empty mods
+  let aggr = foldr (\tm@(TableModification id t f) m -> M.insertWith mappend t [tm] m) M.empty mods
   Tra.traverse (\(k,v) -> do
     ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ M.lookup ((rawSchema k ))  (depschema inf) ) k
-    putPatch (patchVar ref ) v
+    nm <- mapM (logger (schemaOps inf) inf) v
+    putPatch (patchVar ref ) $ (\(TableModification id t f)-> f) <$> nm
     ) (M.toList aggr)
   return md
 

@@ -2,6 +2,7 @@
 module Location where
 
 import Network.Wreq
+import System.Environment
 import Control.Lens
 import Utils
 import Control.Applicative
@@ -28,7 +29,10 @@ import Data.Aeson
 import Control.Arrow
 import Control.Monad.Trans.Maybe
 import Debug.Trace
+import qualified Network.Wreq.Session as Sess
 
+import OpenSSL.Session (context)
+import Network.HTTP.Client.OpenSSL
 
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -42,15 +46,20 @@ queryGeocodeBoundary = FPlugins "Google Geocode" "address"  $ BoundedPlugin2 url
       id <- idxR  "id" -< t
       log <- idxR "logradouro"-< t
       num <- idxM "number"-< t
+      cep <- idxM "cep"-< t
       bai <- idxR "bairro"-< t
       mun <- idxR "municipio"-< t
       uf <- idxR "uf"-< t
       odxR "geocode" -< t
-      let im = "http://maps.googleapis.com/maps/api/geocode/json"
+      let im = "https://maps.googleapis.com/maps/api/geocode/json"
           vr =  maybe "" renderShowable
-          addr = vr log <> " , " <> vr num <> " - " <>  vr bai<> " , " <> vr mun <> " - " <> vr uf
+          addr =    "Brasil, "<> vr cep <> ", "<>  vr mun <> " - " <>  vr uf <> ", " <> vr log <> "," <> vr num  <> " - " <> vr bai
       r <- act (\(im,addr)-> lift $ runMaybeT $ do
-            r <-  lift $ getWith (defaults & param "address" .~ [T.pack addr]  ) $ im
+            lift $ print (im,addr)
+            key <- lift $ justError "no key" <$> lookupEnv "GOOGLE_SERVER_KEY"
+            r <-  lift $ withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) (\sess -> do
+                    Sess.getWith (defaults & param "address" .~ [T.pack addr]  & param "key" .~ [T.pack key] ) sess $ im)
+            lift $ print r
             let dec = join $ decode <$> (r ^? responseBody) :: Maybe Value
                 loc = dec !> "results" !!> 0 !> "geometry" !> "location"
                 bounds = dec !> "results" !!> 0 !> "geometry" !> "bounds"
@@ -80,7 +89,7 @@ queryCEPBoundary = FPlugins "Correios CEP" "address" $ BoundedPlugin2  open
           odxR "uf" -< t
           odxR "logradouro" -< t
           r <- (act (  liftIO . traverse (\input -> do
-                       v <- get . traceShowId .  (\i-> addrs <> (L.filter (not . flip elem (",.-" :: String)) i) <> ".json")  . TL.unpack $ input
+                       v <- get . (\i-> addrs <> (L.filter (not . flip elem (",.-" :: String)) i) <> ".json")  . TL.unpack $ input
                        return $ ( \i -> fmap (L.filter ((/="").snd) . M.toList ) $ join $ fmap decode (i ^? responseBody)  ) v ))) -< (\(TB1 (SText t))-> t) <$> Just i
           let tb = tbmap . M.fromList .  fmap ( (\i -> (S.singleton (Inline $ fst i) ,). Compose . Identity $ Attr (fst i ) (snd i)). first translate. second (LeftTB1 . Just . TB1 . SText)) <$> join r
           returnA -< tb

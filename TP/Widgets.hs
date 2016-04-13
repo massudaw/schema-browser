@@ -306,7 +306,7 @@ readBool "false" = Just False
 readBool i = Nothing
 
 readMouse :: EventData -> Maybe (Int,Bool,Bool,Bool)
-readMouse (EventData v@(Just i:Just a:Just b :Just c:_)) = traceShow (i,a,b,c) $traceShowId $  (,,,) <$> readMay i<*>readBool a<*> readBool b <*>readBool c
+readMouse (EventData v@(Just i:Just a:Just b :Just c:_)) =   (,,,) <$> readMay i<*>readBool a<*> readBool b <*>readBool c
 readMouse (EventData i )  = errorWithStackTrace $show i
 
 onkey :: Element -> ((Int,Bool,Bool,Bool) -> Bool) -> Event String

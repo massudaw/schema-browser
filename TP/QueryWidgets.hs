@@ -23,6 +23,7 @@ module TP.QueryWidgets (
     tableIndexA,
     idex,
     metaAllTableIndexV ,
+    attrLine,
     viewer,
     ) where
 
@@ -1054,6 +1055,7 @@ sorting' ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i)
 
 rendererShowableUI k  v= renderer (keyValue k) v
   where renderer "modification_data" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> showPatch (i:: PathAttr Text Showable) )  (B.decodeOrFail (BSL.fromStrict i))
+        renderer "exception" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> UI.div # set UI.text (T.unpack i))  (B.decodeOrFail (BSL.fromStrict i))
         renderer k i = UI.div # set text (renderPrim i)
         showPatch l = UI.div # set text (show $ fmap renderPrim l)
 
@@ -1202,3 +1204,6 @@ lookAttr' inf k (i,m) = unTB $ err $  M.lookup (S.singleton (Inline (lookKey inf
       err= justError ("no attr " <> show k <> " for table " <> show (_kvname i))
 
 idex inf t v = G.Idex $ L.sortBy (comparing fst ) $ first (lookKey inf t  ) <$> v
+
+attrLine i   = do
+  line ( L.intercalate "," (fmap renderShowable .  allKVRec'  $ i))

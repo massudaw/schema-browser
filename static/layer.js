@@ -64,7 +64,12 @@ function createMap (ref,posj,nej,swj,features){
     mymap.fitBounds([ne,sw]);
   }
 
-  points.map (function (l){ l.map (function (p){ L.circle(p.position,p.size,{color:p.color}).addTo(mymap);})})
+  points.map (function (l){ l.map (function (p){ 
+    var popup = L.popup()
+          .setLatLng(p.position)
+              .setContent(p.title);
+    
+    L.circle(p.position,p.size,{color:p.color}).addTo(mymap).bindPopup(popup);})})
 	var osmUrl='http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 	var osmAttrib='Map data © <a href="http://openstreetmap.org">OpenStreetMap</a> contributors';
 	var osm = L.tileLayer(osmUrl, { maxZoom: 18, attribution: osmAttrib}).addTo(mymap);	
@@ -78,6 +83,11 @@ function handleLocationError(browserHasGeolocation, pos) {
 }
 
 
+function createAgenda(el,date,evs,view){
+$(el).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: date,lang: 'pt-br',editable: true,eventLimit: true,events: JSON.parse(evs), defaultView : view ,eventDrop : el.eventDrop , eventResize: el.eventResize, drop : el.drop, droppable:true});
+
+};
+
 function clientHandlers(){
   return {'moveend': function(el,elid,eventType,sendEvent){
     mymap.on(eventType,function(e) {
@@ -88,4 +98,27 @@ function clientHandlers(){
     sendEvent(elid,eventType,[center.lat,center.lng,ne.lat,ne.lng,sw.lat,sw.lng].map(function(e){return e.toString()}));
     return true;
     });
-  }}}
+    }
+   ,'eventDrop' : function(el,elid,eventType,sendEvent){
+      el.eventDrop =  function(e,delta,revert) {
+      sendEvent(elid,eventType,[e.id,(new Date(e.start)).toISOString(),e.end === null ? null : new Date(e.end).toISOString()].filter(function(e) {return e !== null}).map(function(e){return  e.toString()}));
+      return true;
+      }; 
+      }
+   ,'eventResize' : function(el,elid,eventType,sendEvent){
+      el.eventResize =  function(e,delta,revert) {
+      sendEvent(elid,eventType,[e.id,e == null ? null :new Date (e.start).toISOString(),e.end == null ? null:new Date (e.end).toISOString() ].filter(function(e) {return e !== null}).map(function(e){return e.toString()}));
+      return true;
+      }; 
+      }
+   
+   ,'externalDrop' : function(el,elid,eventType,sendEvent){
+      el.drop =  function(e,revert) {
+      var evdata = $(this).data('event');
+      sendEvent(elid,eventType,[evdata.id,e == null ? null :new Date (e).toISOString() ].filter(function(e) {return e !== null}).map(function(e){return e.toString()}));
+      return true;
+      }; 
+      }
+   }
+
+};

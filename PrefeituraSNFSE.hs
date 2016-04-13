@@ -33,6 +33,14 @@ siapi3Page protocolo ano cgc_cpf nota = do
     file <- htmlToPdf (nota <> protocolo) html
     return $ Just $ SBinary  file
 
+notaXML protocolo ano cgc_cpf nota = do
+  withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
+    Sess.get session $ prefeituraLoginCookie
+    pr <- Sess.post session prefeituraLoginFormUrl (prefeituraForm protocolo ano cgc_cpf)
+    r <- Sess.get session $ (BSC.unpack $ prefeituraConsultaXML nota)
+    return $ SBinary  . BSL.toStrict <$> ( r  ^? responseBody)
+
+prefeituraNotaXML =  notaXML
 
 prefeituraNota protocolo ano cgc_cpf nota = do
     siapi3Page protocolo ano cgc_cpf nota
@@ -43,9 +51,13 @@ prefeituraForm inscricao user pass  = [ "txt_nr_inscricao" := inscricao
                                   , "txt_info_senha" := pass
                                   ]
 
+prefeituraConsultaXML nota = "http://www3.goiania.go.gov.br/sistemas/snfse/asp/snfse00200w2.asp?nota=" <> nota
+
 prefeituraLoginCookie = "http://www3.goiania.go.gov.br/sistemas/saces/asp/saces00000f5.asp?sigla=snfse"
 prefeituraLoginFormUrl ="http://www3.goiania.go.gov.br/sistemas/saces/asp/saces00005a1.asp"
 prefeituraConsutalNota nota = "http://www3.goiania.go.gov.br/sistemas/snfse/asp/snfse00200w0.asp?nota=" <> nota
 
 
+
+test = notaXML "1553542" "1" "denise17" "101"
 

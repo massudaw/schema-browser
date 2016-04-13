@@ -173,9 +173,9 @@ instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Tex
   toField (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   (F.toList is)
   toField (IntervalTB1 is )
     | ty == "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $T.unpack $ ty), TF.Plain $ fromByteString "range"]
-    | otherwise  = TF.toField  (tyv)
+    | otherwise  = TF.toField  tyv
     where tyv = fmap (\(TB1 i ) -> snd i) is
-          ty = (\(Interval.Finite i) -> i) $ Interval.lowerBound $ fmap (\(TB1 i ) -> fst i) is
+          ty = (\(Interval.Finite i) -> i) $ traceShowId $ Interval.lowerBound $ fmap (\(TB1 i ) -> fst i) is
   toField (TB1 (t,i)) = TF.toField i
   -- toField i = errorWithStackTrace (show i)
 
