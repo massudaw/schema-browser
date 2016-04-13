@@ -87,13 +87,15 @@ function handleLocationError(browserHasGeolocation, pos) {
 
 
 function createAgenda(el,date,evs,view){
-$(el).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: date,lang: 'pt-br',editable: true,eventLimit: true, defaultView : view ,eventDrop : el.eventDrop , eventResize: el.eventResize, drop : el.drop, droppable:true});
+  $(el).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: date,lang: 'pt-br',editable: true,eventLimit: true, defaultView : view ,eventDrop : el.eventDrop , eventResize: el.eventResize, drop : el.drop, droppable:true});
 
 };
 
-function addSource(el,source){
- $(el).fullCalendar('addEventSource',JSON.parse(source));
+function addSource(el,table,source){
+  $(el).fullCalendar('removeEvents',function(e) { return e.table ==table});
+  $(el).fullCalendar('addEventSource',JSON.parse(source));
 }
+
 function clientHandlers(){
   return {'moveend': function(el,elid,eventType,sendEvent){
     el.mymap.on(eventType,function(e) {

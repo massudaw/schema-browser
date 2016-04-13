@@ -50,7 +50,7 @@ import Data.Text (Text)
 
 import qualified Data.Map as M
 calendarCreate m cal def evs= runFunction $ ffi "createAgenda(%1,%2,%3,%4)"  cal def evs m
-calendarAddSource cal evs= runFunction $ ffi "addSource(%1,%2)"  cal evs
+calendarAddSource cal t evs= runFunction $ ffi "addSource(%1,%2,%3)"  cal t evs
 
 eventWidget inf body = do
     (_,(_,tmap)) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
@@ -69,7 +69,7 @@ eventWidget inf body = do
             convField (Attr k (LeftTB1 i)) =  concat $ fmap maybeToList $ traverse convField (Attr k <$> i)
             convField (Attr _ v) = [("start",toLocalTime $v)]
             convField i = errorWithStackTrace (show i)
-            projf  r efield@(TB1 (SText field))  = M.fromList $ convField (lookAttr' inf field r) <> [("id", TB1 $ SText $ writePK r efield   ),("title",TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("color" , color),("field", efield )] :: M.Map Text (FTB Showable)
+            projf  r efield@(TB1 (SText field))  = M.fromList $ convField (lookAttr' inf field r) <> [("id", TB1 $ SText $ writePK r efield   ),("title",TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield )] :: M.Map Text (FTB Showable)
             proj r = projf r <$> F.toList efields
         return ((lookDesc,(color,tname,efields)), fmap (\i -> if isJust . join . fmap unSOptional . M.lookup "start" $ i then Left i else Right i ) .concat . fmap proj  . G.toList <$> collectionTid evdb  )) ( G.toList evMap)
 
@@ -155,10 +155,10 @@ eventWidget inf body = do
             onEvent evs (liftIO . transaction inf . mapM (\i -> do
                         patchFrom i >>= traverse (tell . pure )))
             calHand innerCalendar  =<< currentValue   (facts visible)
-            mapM ( mapUITEvent calendar (
+            mapM (\((_,(_,t,_)),s)->  mapUITEvent calendar (
                       (\i -> do
-                      calendarAddSource innerCalendar  ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  . filter (inRange res (utctDay iday ) . unTB1 . fromJust . join . fmap unSOptional. M.lookup "start"  ) . lefts $ i)))
-                      )) ( snd <$> selectedData)
+                      calendarAddSource innerCalendar  (T.unpack t) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  . filter (inRange res (utctDay iday ) . unTB1 . fromJust . join . fmap unSOptional. M.lookup "start"  ) . lefts $ i)))
+                      ) s ) selectedData
             mapM (\(k,el) -> do
               traverse (\t -> do
                 element  el
