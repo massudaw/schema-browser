@@ -38,11 +38,11 @@ import qualified Data.Map as M
 
 plugs schm authmap db plugs = do
   inf <- metaInf schm
-  transaction inf  $ do
+  transactionNoLog inf  $ do
       (db ,(_,t)) <- selectFrom "plugins"  Nothing Nothing [] $ LegacyPredicate[]
       let els = L.filter (not . (`L.elem` G.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
       elsFKS <- mapM loadFKS  els
-      mapM fullDiffInsert  elsFKS
+      liftIO $ transaction inf $ mapM fullDiffInsert  elsFKS
 
 
 
@@ -61,7 +61,7 @@ checkTime polling tb = do
 poller schm authmap db plugs is_test = do
   metas <- metaInf schm
   let conn = rootconn metas
-  (dbpol,(_,polling))<- transaction metas $ selectFrom "polling" Nothing Nothing [] $ LegacyPredicate[]
+  (dbpol,(_,polling))<- transactionNoLog metas $ selectFrom "polling" Nothing Nothing [] $ LegacyPredicate[]
   let
     project tb =  (schema,intervalms,p)
       where
@@ -86,11 +86,11 @@ poller schm authmap db plugs is_test = do
                   then do
                       putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let fetchSize = 1000
-                      (_ ,(l,_ )) <- transaction inf $ selectFrom a  Nothing (Just fetchSize) []$ LegacyPredicate[]
+                      (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  Nothing (Just fetchSize) []$ LegacyPredicate[]
                       let sizeL = justLook ( LegacyPredicate[]) l
                           lengthPage s pageSize  = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
                       i <- concat <$> mapM (\ix -> do
-                          (_,(_,listResAll)) <- transaction inf $ selectFrom a  (Just ix) (Just fetchSize) []$ LegacyPredicate[]
+                          (_,(_,listResAll)) <- transactionNoLog inf $ selectFrom a  (Just ix) (Just fetchSize) []$ LegacyPredicate[]
                           let listRes = L.take fetchSize . G.toList $ listResAll
 
                           let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
@@ -128,7 +128,7 @@ poller schm authmap db plugs is_test = do
                               , attrT ("start_time",time current)
                               , attrT ("end_time",time end)]
 
-                      (p2,p) <- transaction metas  $ do
+                      (p2,p) <- transactionNoLog metas  $ do
                           fktable2 <- loadFKS  (liftTable' metas "polling"  table2)
                           p2 <- fullDiffEdit curr fktable2
                           fktable <- loadFKS  (liftTable' metas  "polling_log"  table)
@@ -139,7 +139,7 @@ poller schm authmap db plugs is_test = do
                       threadDelay (round $ (*10^6) $  diffUTCTime current start )
 
           pid <- forkIO (void $ iter polling >> (forever $  do
-              (_,(_,polling))<- transaction metas $ selectFrom "polling"   Nothing Nothing [] $ LegacyPredicate []
+              (_,(_,polling))<- transactionNoLog metas $ selectFrom "polling"   Nothing Nothing [] $ LegacyPredicate []
               iter polling ))
           return ()
   mapM poll  enabled

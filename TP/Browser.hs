@@ -68,7 +68,7 @@ updateClient metainf inf table tdi clientId now =
 getClient metainf clientId ccli = G.lookup (G.Idex [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))]) ccli :: Maybe (TBData Key Showable)
 
 deleteClient metainf clientId = do
-  (dbmeta ,(_,ccli)) <- transaction metainf $ selectFrom "clients"  Nothing Nothing [] $ LegacyPredicate []
+  (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing [] $ LegacyPredicate []
   putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))],[])]
 
 editClient metainf inf dbmeta ccli  table tdi clientId now = do
@@ -84,7 +84,7 @@ addClient clientId metainf inf table dbdata =  do
     now <- getCurrentTime
     let
       tdi = fmap getPKM $ join $ (\inf table -> fmap (tblist' table ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table))  ). F.toList) <$>  inf  <*> table <*> rowpk dbdata
-    (dbmeta ,(_,ccli)) <- transaction metainf $ selectFrom "clients"  Nothing Nothing [] $ LegacyPredicate []
+    (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing [] $ LegacyPredicate []
     editClient metainf inf dbmeta ccli table tdi clientId now
     return (clientId, getClient metainf clientId <$> collectionTid dbmeta)
 
@@ -127,11 +127,11 @@ setup smvar args w = void $ do
             case schemaName inf of
               "gmail" -> do
                 b <- UI.button # set text "sync"
-                (dbvar,(m,t))  <- liftIO$ transaction inf $ selectFrom "history" Nothing Nothing [] $ LegacyPredicate []
+                (dbvar,(m,t))  <- liftIO$ transactionNoLog inf $ selectFrom "history" Nothing Nothing [] $ LegacyPredicate []
                 itemListEl <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
                 itemListEl2 <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
                 do
-                  ((DBVar2 tmvard _  vpdiff _ _ ),res) <- liftIO$ transaction inf $ syncFrom (lookTable inf "history") Nothing Nothing [] []
+                  ((DBVar2 tmvard _  vpdiff _ _ ),res) <- liftIO$ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] []
                   let update = F.foldl'(flip (\p-> fmap (flip apply p)))
                   bres <- accumB ((M.empty,G.empty) :: Collection Key Showable) (flip update <$> rumors vpdiff)
                   let
@@ -166,7 +166,7 @@ setup smvar args w = void $ do
 listDBS ::  InformationSchema -> BrowserState -> IO (Tidings (Text,[Text]))
 listDBS metainf dname = do
   map <- (\db -> do
-        (dbvar ,(_,schemasTB)) <- transaction metainf $  selectFrom "schema" Nothing Nothing [] $ LegacyPredicate []
+        (dbvar ,(_,schemasTB)) <- transactionNoLog metainf $  selectFrom "schema" Nothing Nothing [] $ LegacyPredicate []
         let schemas schemaTB = fmap ((\(Attr _ (TB1 (SText s)) ) -> s) .lookAttr' metainf "name") $ F.toList  schemasTB
         return ( (db,).schemas  <$> collectionTid dbvar)) (T.pack $ dbn dname)
   return map
@@ -205,7 +205,7 @@ authMap smvar sargs (user,pass) schemaN =
     where oauth tag = do
               user <- justError "no google user" <$> lookupEnv "GOOGLE_USER"
               metainf <- metaInf smvar
-              (dbmeta ,_) <- transaction metainf $ selectFrom "google_auth" Nothing Nothing []   $ LegacyPredicate [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  $ T.pack user ))]
+              (dbmeta ,_) <- transactionNoLog metainf $ selectFrom "google_auth" Nothing Nothing []   $ LegacyPredicate [("=",liftField metainf "google_auth" $ Attr "username" (TB1 $ SText  $ T.pack user ))]
               let
                   td :: Tidings (OAuth2Tokens)
                   td = (\o -> let
@@ -282,9 +282,9 @@ chooserTable inf cliTid cli = do
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
   -- Load Metadata Tables
-  (orddb ,(_,orderMap)) <- liftIO $ transaction  (meta inf) $ selectFrom "ordering"  Nothing Nothing [] $ LegacyPredicate [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
-  (translation,_) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] $LegacyPredicate [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
-  (authorization,_) <- liftIO$ transaction (meta inf) $ selectFrom "authorization" Nothing Nothing [] $ LegacyPredicate [("=",liftField (meta inf) "authorization" $ uncurry Attr $("grantee",TB1 $ SText (username inf) )), ("=",liftField (meta inf) "authorization" $ uncurry Attr $("table_schema",TB1 $ SText (schemaName inf) ))]
+  (orddb ,(_,orderMap)) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "ordering"  Nothing Nothing [] $ LegacyPredicate [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+  (translation,_) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] $LegacyPredicate [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+  (authorization,_) <- liftIO$ transactionNoLog (meta inf) $ selectFrom "authorization" Nothing Nothing [] $ LegacyPredicate [("=",liftField (meta inf) "authorization" $ uncurry Attr $("grantee",TB1 $ SText (username inf) )), ("=",liftField (meta inf) "authorization" $ uncurry Attr $("table_schema",TB1 $ SText (schemaName inf) ))]
 
   let selTable = join . fmap (flip M.lookup (pkMap inf) )
       lookDesc = (\i j -> maybe (T.unpack $ maybe "" rawName j)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,TB1 $ SText $ schemaName inf),("table_name",TB1 $ SText (maybe ""  tableName j))]) i ) <$> collectionTid translation
@@ -309,7 +309,7 @@ chooserTable inf cliTid cli = do
                  usage = lookAttr' (meta inf ) "usage"   field
   liftIO$ onEventIO ((\i j -> incClick <$> join ( flip ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
     (traverse (\p -> do
-      _ <- transaction (meta inf ) $ patchFrom  p
+      _ <- transactionNoLog (meta inf ) $ patchFrom  p
       putPatch (patchVar orddb) [p] ))
 
   tbChooserI <- UI.div # set children [filterInp,getElement bset]  # set UI.style [("height","90vh"),("overflow","auto"),("height","99%")]
@@ -390,14 +390,14 @@ viewerKey inf table cli cliTid = mdo
     return (offset, res3)
   onEvent (rumors $ triding offset) $ (\i ->  liftIO $ do
     print ("page",(i `div` 10 )   )
-    transaction inf $ eventTable  table  (Just $ i `div` 10) Nothing  [] $ LegacyPredicate [])
+    transactionNoLog inf $ eventTable  table  (Just $ i `div` 10) Nothing  [] $ LegacyPredicate [])
   let
     paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
   page <- currentValue (facts paging)
   res4 <- mapT0Event (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
   itemList <- listBoxEl itemListEl (fmap snd res4) (tidings st sel ) (pure id) ( pure attrLine )
   let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
-  (dbmeta ,(_,_)) <- liftIO$ transaction (meta inf) $ selectFrom "clients"  Nothing Nothing [] (LegacyPredicate $ (fmap (liftField (meta inf) "clients") <$> [("=",  uncurry Attr $("schema",LeftTB1 $ Just $TB1 $ SText (schemaName inf) )), ("=",Attr "table" $ LeftTB1 $ Just $ TB1 $ SText (tableName table))]))
+  (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFrom "clients"  Nothing Nothing [] (LegacyPredicate $ (fmap (liftField (meta inf) "clients") <$> [("=",  uncurry Attr $("schema",LeftTB1 $ Just $TB1 $ SText (schemaName inf) )), ("=",Attr "table" $ LeftTB1 $ Just $ TB1 $ SText (tableName table))]))
   liftIO $ onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) (Just inf) dbmeta  ccli (Just table ) (getPKM <$> i) cli =<< getCurrentTime )
   prop <- stepper cv evsel
   let tds = tidings prop (diffEvent  prop evsel)

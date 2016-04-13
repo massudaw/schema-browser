@@ -17,6 +17,7 @@ module SchemaQuery
   ,fullDiffEditInsert
   ,transaction
   ,transactionLog
+  ,transactionNoLog
   )where
 import Graphics.UI.Threepenny.Core (mapEventFin)
 
@@ -152,7 +153,7 @@ tableLoader :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicat
 tableLoader table  page size presort fixed
   | not $ L.null $ rawUnion table  = do
     inf <- ask
-    i <- liftIO $ mapConcurrently (\t -> transaction inf $  tableLoader t page size presort (rebaseKey inf t  fixed))  (rawUnion table)
+    i <- liftIO $ mapConcurrently (\t -> transactionNoLog inf $  tableLoader t page size presort (rebaseKey inf t  fixed))  (rawUnion table)
     let mvar = mvarMap inf
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )

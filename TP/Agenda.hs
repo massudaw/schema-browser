@@ -53,8 +53,8 @@ calendarCreate m cal def evs= runFunction $ ffi "createAgenda(%1,%2,%3,%4)"  cal
 calendarAddSource cal t evs= runFunction $ ffi "addSource(%1,%2,%3)"  cal t evs
 
 eventWidget inf body = do
-    (_,(_,tmap)) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
-    (evdb,(_,evMap )) <- liftIO $ transaction  (meta inf) $ selectFrom "event" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
+    (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
+    (evdb,(_,evMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
     cliZone <- jsTimeZone
     dashes <- liftIO $ mapConcurrently (\e -> do
         let (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" e
@@ -179,7 +179,7 @@ eventWidget inf body = do
     liftIO$ addFin calendar [fin]
 
     liftIO $mapM (\(tdesc ,(_,tname,fields))-> do
-        mapTEvent  ((\i ->  forkIO $ void $ transaction  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList fields))) rangeT
+        mapTEvent  ((\i ->  forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList fields))) rangeT
       ) allTags
     return body
 

@@ -423,7 +423,7 @@ addStats schema = do
   let metaschema = meta schema
   varmap <- atomically $ readTMVar ( mvarMap schema)
   let stats = lookTable metaschema "table_stats"
-  (dbpol,(_,polling))<- transaction metaschema $ eventTable stats  Nothing Nothing [] (LegacyPredicate [])
+  (dbpol,(_,polling))<- transactionNoLog metaschema $ eventTable stats  Nothing Nothing [] (LegacyPredicate [])
   let
     row t s ls = tblist . fmap _tb $ [Attr "schema_name" (TB1 (SText (schemaName schema ) )), Attr "table_name" (TB1 (SText t)) , Attr "size" (TB1 (SNumeric s)), Attr "loadedsize" (TB1 (SNumeric ls)) ]
     lrow t dyn st = liftTable' metaschema "table_stats" . row t (maybe (G.size dyn) (maximum .fmap fst ) $  nonEmpty $  F.toList st) $ (G.size dyn)

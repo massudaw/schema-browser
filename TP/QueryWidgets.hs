@@ -277,7 +277,7 @@ labelCase inf a old wid = do
 
 refTables inf table = do
         let
-        ((DBVar2 tmvard _  vpdiff _ _ ),res)  <-  (liftIO $ transaction inf $ eventTable table (Just 0) Nothing  [] (LegacyPredicate []))
+        ((DBVar2 tmvard _  vpdiff _ _ ),res)  <-  (liftIO $ transactionNoLog inf $ eventTable table (Just 0) Nothing  [] (LegacyPredicate []))
         let update = foldl'(flip (\p-> fmap (flip apply p)))
         bres <- accumB res (flip update <$> rumors vpdiff)
         let
@@ -450,9 +450,9 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
             getItem :: TBData CoreKey Showable -> TransactionM (Maybe (TBIdx CoreKey Showable))
             getItem  =  getFrom table
           preoldItens <- currentValue (facts preoldItems)
-          loadedItens <- liftIO$ join <$> traverse (transaction inf  . getItem) preoldItens
+          loadedItens <- liftIO$ join <$> traverse (transactionNoLog inf  . getItem) preoldItens
           maybe (return ()) (\j -> liftIO  (hvdiff  =<< traverse (\i -> runDBM inf $  applyRecord'  i j ) preoldItens) )  loadedItens
-          (loadedItensEv ,fin) <- mapEventFin (fmap join <$> traverse (transaction inf . getItem )) (rumors preoldItems)
+          (loadedItensEv ,fin) <- mapEventFin (fmap join <$> traverse (transactionNoLog inf . getItem )) (rumors preoldItems)
           let oldItemsE =  fmap head $ unions [ evdiff, rumors preoldItems  ]
           ini2 <- liftIO $(maybe (return preoldItens) (\j -> traverse (\i -> return $ apply i j ) preoldItens ) loadedItens)
           oldItemsB <- stepper  ini2 oldItemsE
@@ -943,11 +943,11 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
       onEvent (filterE (\(a,b,c) ->  isJust a &&   isJust b && isNothing c)  $ rumors $ (,,) <$> iold2 <*> ftdi2 <*> tdi)  $ (\(o,_,_) ->
         traverse (\o -> liftIO $ do
         when (all (/="<@") (fmap (fst . replaceRel)   o)) $ do
-          transaction inf $ eventTable  (lookTable inf (_kvname m)) Nothing Nothing  [] (LegacyPredicate $ L.sortBy (comparing (keyattri.snd)) $fmap (replaceRel)  o)
+          transactionNoLog inf $ eventTable  (lookTable inf (_kvname m)) Nothing Nothing  [] (LegacyPredicate $ L.sortBy (comparing (keyattri.snd)) $fmap (replaceRel)  o)
           return () ) o)
       -- Load offseted items
       onEvent (filterE (isJust . fst) $ (,) <$> facts iold2 <@> rumors (triding offset)) $ (\(o,i) ->  traverse (\o -> liftIO $ do
-        transaction inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` 5) Nothing  [] (LegacyPredicate $ fmap (("=",).replaceKey)  o)) o  )
+        transactionNoLog inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` 5) Nothing  [] (LegacyPredicate $ fmap (("=",).replaceKey)  o)) o  )
       -- Select page
       let
         paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
@@ -1150,7 +1150,7 @@ viewer inf table env = mdo
                   ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
                   flist = catMaybes $ fmap (\(i,_,j) -> second (Attr i) . first T.pack <$> j) slist'
-              (_,(fixmap,lres)) <- liftIO $ transaction inf $ eventTable  table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (LegacyPredicate $ envK <> flist)
+              (_,(fixmap,lres)) <- liftIO $ transactionNoLog inf $ eventTable  table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (LegacyPredicate $ envK <> flist)
               let (size,_) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (LegacyPredicate $ L.sortBy (comparing snd) envK) fixmap
               return (o,(slist,paging o (size,sorting' ordlist (G.toList lres))))
       nearest' :: M.Map Int (TB2 CoreKey Showable) -> Int -> ((Int,Maybe (Int,TB2 CoreKey Showable)))
