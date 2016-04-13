@@ -97,17 +97,22 @@ pkMap = _pkMapL
 data DBVar2 k v=
   DBVar2
   { patchVar :: TQueue [TBIdx k v]
-  , idxVar :: TMVar (Map [Column k v ] (Int,Map Int (PageTokenF k v)))
+  , idxVar :: TMVar (Map WherePredicate (Int,Map Int (PageTokenF k v)))
   , patchTid :: R.Tidings [TBIdx k v]
-  , idxTid :: R.Tidings (Map [Column k v ] (Int,Map Int (PageTokenF k v)))
+  , idxTid :: R.Tidings (Map WherePredicate (Int,Map Int (PageTokenF k v)))
   , collectionTid :: R.Tidings (TableIndex k v )
   }
 
 
 idxColTid db =  (,) <$> idxTid db <*> collectionTid db
 
+data WherePredicate
+  = LegacyPredicate [(T.Text,Column Key Showable)]
+  | WherePredicate [(Access T.Text ,T.Text,FTB Showable )]
+  deriving (Show,Eq,Ord)
+
 type DBVar = DBVar2 Key Showable
-type Collection k v = (Map [Column k v] (Int,Map Int (PageTokenF k v)),GiST (TBIndex k  v ) (TBData k v))
+type Collection k v = (Map WherePredicate (Int,Map Int (PageTokenF k v)),GiST (TBIndex k  v ) (TBData k v))
 type TableIndex k v = GiST (TBIndex k  v ) (TBData k v)
 
 type Plugins = FPlugins Text
@@ -171,11 +176,11 @@ data SchemaEditor
   , patchEd :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
   , insertEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
   , deleteEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
-  , listEd :: Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> [(Text ,Column Key Showable)]-> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
+  , listEd :: Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   , getEd :: Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   , typeTransform :: PGKey -> CoreKey
-  , joinListEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> [(Text ,Column Key Showable)]-> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
-  , joinSyncEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )] -> [(Text ,Column Key Showable)]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> [(Text ,Column Key Showable)]-> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
+  , joinListEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
+  , joinSyncEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )] -> [(Text ,Column Key Showable)]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   ,logger :: InformationSchema -> TableModification (TBIdx Key Showable)  -> IO (TableModification (TBIdx Key Showable))
   }
 

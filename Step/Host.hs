@@ -1,8 +1,9 @@
 {-# LANGUAGE OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Host (module Step.Common,attrT,findPK,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexFieldRec) where
+module Step.Host (module Step.Common,attrT,findPK,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexFieldRec,indexer,indexPred) where
 
 import Types
 import Control.Applicative.Lift
+import Data.Monoid
 import qualified Data.Foldable  as F
 import Control.Monad.Reader
 import Query
@@ -11,11 +12,12 @@ import qualified Data.Set as S
 import Data.Maybe
 import Data.Foldable (toList)
 import Control.Applicative
-import Data.Text (Text)
+import Data.Text (Text,splitOn)
 import qualified Data.List as L
 
 
 import Step.Common
+import qualified Data.Interval as I
 import GHC.Stack
 import Control.Category (Category(..),id)
 import Prelude hiding((.),id,head)
@@ -43,6 +45,27 @@ replace ix i (Point p)
   | otherwise = (Point p)
 replace ix i v = v
 -- replace ix i v= errorWithStackTrace (show (ix,i,v))
+
+indexPred (Many i ,eq,v) r = all (\i -> indexPred (i,eq,v) r) i
+indexPred (n@(Nested k nt ) ,eq,v) r
+  = case  indexField n r of
+    Nothing -> errorWithStackTrace ("cant find attr" <> show n)
+    Just i ->  recPred $ indexPred (nt , eq ,v) <$> _fkttable  i
+  where
+    recPred (SerialTB1 i) = maybe False recPred i
+    recPred (LeftTB1 i) = maybe False recPred i
+    recPred (TB1 i ) = i
+    recPred (ArrayTB1 i) = all recPred (F.toList i)
+indexPred (a@(IProd _ _),eq,v) r =
+  case indexField a r of
+    Nothing ->  errorWithStackTrace ("cant find attr" <> show a)
+    Just (Attr _ rv) ->
+      case eq of
+        "=" -> rv == v
+        "<@" -> case v of
+                  IntervalTB1 l -> I.member  rv l
+        i -> errorWithStackTrace ("Operator not implemented " <> i )
+
 indexField :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
 indexField p@(IProd b l) v = unTB <$> findAttr  l  (snd v)
 indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findFK l (snd v)
@@ -108,36 +131,6 @@ uNest (Nested pn i) = i
 
 findPK = concat . fmap keyattr  .toList . _kvvalues  . unTB . tbPK
 
+indexer field = foldr (\i j -> Nested  (IProd True i) (Many [j]) ) (IProd True (last vec)) (init vec )
+  where vec = splitOn "," <$> splitOn ":" field
 
-
-
-
-{-
-findOne l  e
-  = L.find (\i -> S.fromList (proj i) == e ) $ case l of
-    Many l ->  l
-    ISum l -> l
-  where proj (IProd _ i) = i
-        proj (Nested (IProd _ i) n) = i
-        proj (Many [i]) = proj i
-        proj i = errorWithStackTrace (show i )
-
-accessTB i t = go t
-  where
-      go t = case t of
-        LeftTB1 j ->  LeftTB1 $ go <$> j
-        ArrayTB1 j -> ArrayTB1 $ go <$> j
-        DelayedTB1 (Just j) -> go j
-        TB1 (m,k) -> TB1   (m,mapComp (\m -> KV $ {-fmap (justError "") $ M.filterWithKey (\k v -> isJust v) $-} M.mapWithKey  modify (_kvvalues $ m)) k )
-          where modify k =  mapComp (\v ->maybe v (flip accessAT v) $ findOne i (S.map (keyValue. _relOrigin) k))
-
-accessAT (Nested (IProd b t) r) at
-    = case at of
-        IT k v -> IT (alterKeyType forceDAttr  k ) (accessTB r v)
-        FKT k rel v -> FKT (mapComp (firstTB (alterKeyType forceDAttr )) <$> k) rel (accessTB r v)
-accessAT i@(IProd b t) at
-    = case at of
-        Attr k v -> Attr (alterKeyType forceDAttr k ) v
-        (FKT a r t) -> FKT (mapComp (accessAT i ) <$> a )  r t
-accessAT (Many [i]) at = accessAT i at
--}

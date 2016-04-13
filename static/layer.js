@@ -47,32 +47,35 @@ function handleFileSelect(evt) {
     }
   }
 
-function createMap (ref,posj,nej,swj,features){
+function createLayers (ref,posj,nej,swj,features){
   var points = JSON.parse(features);
+  ref.layer.clearLayers();
+  layers = points.map (function (l){ l.map (function (p){ 
+  var popup = L.popup()
+        .setLatLng(p.position)
+            .setContent(p.title + '\n' + p.position.toString());
+  ref.layer.addLayer(L.circle(p.position,p.size,{color:p.color}).bindPopup(popup));})})
+}
+function createMap (ref,posj,nej,swj,features){
       pos = JSON.parse(posj);
       
-  mymap = L.map(ref);
+  ref.mymap = L.map(ref);
   if (pos == null) {
       navigator.geolocation.getCurrentPosition(function(position) {
-      mymap.setView([position.coords.latitude, position.coords.longitude], 12);
+      ref.mymap.setView([position.coords.latitude, position.coords.longitude], 12);
     }, function() {
       handleLocationError(true, map.getCenter());
     });
   }else {
       ne = JSON.parse(nej);
       sw  = JSON.parse(swj);
-    mymap.fitBounds([ne,sw]);
+    ref.mymap.fitBounds([ne,sw]);
   }
-
-  points.map (function (l){ l.map (function (p){ 
-    var popup = L.popup()
-          .setLatLng(p.position)
-              .setContent(p.title);
-    
-    L.circle(p.position,p.size,{color:p.color}).addTo(mymap).bindPopup(popup);})})
+  ref.layer= L.layerGroup().addTo(ref.mymap);
+  
 	var osmUrl='http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 	var osmAttrib='Map data © <a href="http://openstreetmap.org">OpenStreetMap</a> contributors';
-	var osm = L.tileLayer(osmUrl, { maxZoom: 18, attribution: osmAttrib}).addTo(mymap);	
+	var osm = L.tileLayer(osmUrl, { maxZoom: 18, attribution: osmAttrib}).addTo(ref.mymap);	
 }
 
 
@@ -84,18 +87,21 @@ function handleLocationError(browserHasGeolocation, pos) {
 
 
 function createAgenda(el,date,evs,view){
-$(el).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: date,lang: 'pt-br',editable: true,eventLimit: true,events: JSON.parse(evs), defaultView : view ,eventDrop : el.eventDrop , eventResize: el.eventResize, drop : el.drop, droppable:true});
+$(el).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: date,lang: 'pt-br',editable: true,eventLimit: true, defaultView : view ,eventDrop : el.eventDrop , eventResize: el.eventResize, drop : el.drop, droppable:true});
 
 };
 
+function addSource(el,source){
+ $(el).fullCalendar('addEventSource',JSON.parse(source));
+}
 function clientHandlers(){
   return {'moveend': function(el,elid,eventType,sendEvent){
-    mymap.on(eventType,function(e) {
-    var bounds = mymap.getBounds();
+    el.mymap.on(eventType,function(e) {
+    var bounds = el.mymap.getBounds();
     var center =bounds.getCenter();
     var sw=bounds.getSouthWest();
     var ne=bounds.getNorthEast();
-    sendEvent(elid,eventType,[center.lat,center.lng,ne.lat,ne.lng,sw.lat,sw.lng].map(function(e){return e.toString()}));
+    sendEvent(elid,eventType,[center.lat,center.lng,0,ne.lat,ne.lng,0,sw.lat,sw.lng,0].map(function(e){return e.toString()}));
     return true;
     });
     }

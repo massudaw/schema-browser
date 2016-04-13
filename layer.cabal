@@ -23,7 +23,7 @@ library
     Types.Index
     Types.Patch
     Utils
-  default-extensions: TupleSections,OverloadedStrings
+  default-extensions: TupleSections,OverloadedStrings 
   hs-source-dirs: src
   build-depends:
      scientific

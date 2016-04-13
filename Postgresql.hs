@@ -125,9 +125,9 @@ postgresPrim =
   ,("smallint",PInt)
   ,("boolean",PBoolean)
   ,("bool",PBoolean)
-  ,("timestamptz",PTimestamp (Just utc))
+  ,("timestamptz",PTimestamp Nothing )
   ,("timestamp",PTimestamp (Just utc))
-  ,("timestamp with time zone",PTimestamp (Just utc))
+  ,("timestamp with time zone",PTimestamp Nothing )
   ,("timestamp without time zone",PTimestamp (Just utc))
   ,("interval", PInterval)
   ,("date" ,PDate)
@@ -173,9 +173,12 @@ instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Tex
   toField (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   (F.toList is)
   toField (IntervalTB1 is )
     | ty == "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $T.unpack $ ty), TF.Plain $ fromByteString "range"]
+    | ty == "POINT3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
     | otherwise  = TF.toField  tyv
     where tyv = fmap (\(TB1 i ) -> snd i) is
-          ty = (\(Interval.Finite i) -> i) $ traceShowId $ Interval.lowerBound $ fmap (\(TB1 i ) -> fst i) is
+          ty = unFinite $ traceShowId $ Interval.lowerBound $ fmap (\(TB1 i ) -> fst i) is
+          unFinite (Interval.Finite i) = i
+          unFinite i = errorWithStackTrace (show i)
   toField (TB1 (t,i)) = TF.toField i
   -- toField i = errorWithStackTrace (show i)
 
@@ -204,6 +207,7 @@ instance TF.ToField (UnQuoted Showable) where
   toField (UnQuoted (SDayTime  i )) = TF.Plain $ timeOfDayToBuilder (i)
   toField (UnQuoted (SDouble i )) =  TF.toField i
   toField (UnQuoted (SNumeric i )) =  TF.toField i
+  toField (UnQuoted (SPosition i )) =  TF.toField i
   toField (UnQuoted i) = errorWithStackTrace (show i)
 
 instance TF.ToField Position where

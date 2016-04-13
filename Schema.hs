@@ -251,7 +251,7 @@ createTableRefs inf i = do
   let bh2 = (R.tidings bh (L.foldl' apply  <$> bh R.<@> ediff ))
   bhdiff <- R.stepper diffIni ediff
   (eidx ,hidx) <- R.newEvent
-  bhidx <- R.stepper (M.singleton [] (G.size v,M.empty)) eidx
+  bhidx <- R.stepper (M.singleton (LegacyPredicate []) (G.size v,M.empty)) eidx
   forkIO $ forever $ (do
       forkIO . hidx =<< atomically (takeTMVar midx)
       return () ) `catch` (\e -> print ("block",tableName i ,e :: SomeException))
@@ -423,7 +423,7 @@ addStats schema = do
   let metaschema = meta schema
   varmap <- atomically $ readTMVar ( mvarMap schema)
   let stats = lookTable metaschema "table_stats"
-  (dbpol,(_,polling))<- transaction metaschema $ eventTable stats  Nothing Nothing [] []
+  (dbpol,(_,polling))<- transaction metaschema $ eventTable stats  Nothing Nothing [] (LegacyPredicate [])
   let
     row t s ls = tblist . fmap _tb $ [Attr "schema_name" (TB1 (SText (schemaName schema ) )), Attr "table_name" (TB1 (SText t)) , Attr "size" (TB1 (SNumeric s)), Attr "loadedsize" (TB1 (SNumeric ls)) ]
     lrow t dyn st = liftTable' metaschema "table_stats" . row t (maybe (G.size dyn) (maximum .fmap fst ) $  nonEmpty $  F.toList st) $ (G.size dyn)
@@ -465,10 +465,13 @@ writeTable s t v = do
   let tname = s <> "/" <> (fromString $ T.unpack (_kvname t))
   iv <- R.currentValue $ R.facts $ collectionTid v
   iidx <- R.currentValue $ R.facts $ idxTid v
+  {-
   let sidx = first (fmap (firstTB keyValue)) . fmap (fmap (fmap (pageFirst keyValue))) <$> M.toList iidx
       sdata = fmap (mapKey' keyValue) $ G.toList $ iv
   when (not (L.null sdata) )$
       BSL.writeFile tname (compress $ B.encode $ (sidx,sdata))
+      -}
+  return ()
 
 readTable :: InformationSchema -> Text -> Text -> Table -> IO (Collection Key Showable)
 readTable inf r s t  = do
@@ -476,8 +479,10 @@ readTable inf r s t  = do
   has <- doesFileExist tname
   if has
     then do
-       f <- (Right . decompress . BSL.fromStrict <$> BS.readFile tname ) `catch` (\e -> return $ Left (show (e :: SomeException )))
-       return $  either (const (M.empty ,G.empty)) (\f -> either (const (M.empty,G.empty)) (\(_,_,(m,g)) -> (M.mapKeys (fmap (liftField inf (tableName t) )) $ fmap (fmap ((pageFirst (lookKey inf (tableName t))))) <$> m,createUn (S.fromList $ rawPK t) . fmap (liftTable' inf (tableName t)) $ g )) $ B.decodeOrFail f) f
-    else return (M.empty ,G.empty)
+      return (M.empty ,G.empty)
+  --     f <- (Right . decompress . BSL.fromStrict <$> BS.readFile tname ) `catch` (\e -> return $ Left (show (e :: SomeException )))
+--        return $  either (const (M.empty ,G.empty)) (\f -> either (const (M.empty,G.empty)) (\(_,_,(m,g)) -> (M.mapKeys (fmap (liftField inf (tableName t) )) $ fmap (fmap ((pageFirst (lookKey inf (tableName t))))) <$> m,createUn (S.fromList $ rawPK t) . fmap (liftTable' inf (tableName t)) $ g )) $ B.decodeOrFail f) f
+    else
+      return (M.empty ,G.empty)
 
 

@@ -2,11 +2,14 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module TP.Agenda where
 
 import GHC.Stack
+import Step.Host
 import qualified Data.Interval as Interval
+import Control.Concurrent
 import Types.Patch
 import Control.Arrow
 import Data.Either
@@ -16,6 +19,7 @@ import Control.Monad.Writer
 import Data.Time.Calendar.WeekDate
 import Data.Char
 import qualified Data.Text.Encoding as TE
+import Control.Concurrent.Async
 import Safe
 import Query
 import Data.Time
@@ -46,19 +50,19 @@ import Data.Text (Text)
 
 import qualified Data.Map as M
 calendarCreate m cal def evs= runFunction $ ffi "createAgenda(%1,%2,%3,%4)"  cal def evs m
+calendarAddSource cal evs= runFunction $ ffi "addSource(%1,%2)"  cal evs
 
 eventWidget inf body = do
-    (_,(_,tmap)) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
-    (evdb,(_,evMap )) <- liftIO $ transaction  (meta inf) $ selectFrom "event" Nothing Nothing [] [("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+    (_,(_,tmap)) <- liftIO $ transaction (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
+    (evdb,(_,evMap )) <- liftIO $ transaction  (meta inf) $ selectFrom "event" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
     cliZone <- jsTimeZone
-    dashes <- mapM (\e -> do
+    dashes <- liftIO $ mapConcurrently (\e -> do
         let (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" e
             lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
             (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "event" e
             (Attr _ color )= lookAttr' (meta inf) "color" e
-        (evdb,(_,tmap )) <- liftIO $ transaction  inf $ selectFrom tname Nothing Nothing [] []
-        let
-            toLocalTime = fmap to
+        evdb <- refTable inf  (lookTable inf tname )
+        let toLocalTime = fmap to
               where to (STimestamp i )  = STimestamp $  utcToLocalTime cliZone $ localTimeToUTC utc i
                     to (SDate i ) = SDate i
             convField (Attr _ (IntervalTB1 i )) = [("start", toLocalTime $ unFinite $ Interval.lowerBound i),("end",toLocalTime $ unFinite $ Interval.upperBound i)]
@@ -67,7 +71,7 @@ eventWidget inf body = do
             convField i = errorWithStackTrace (show i)
             projf  r efield@(TB1 (SText field))  = M.fromList $ convField (lookAttr' inf field r) <> [("id", TB1 $ SText $ writePK r efield   ),("title",TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("color" , color),("field", efield )] :: M.Map Text (FTB Showable)
             proj r = projf r <$> F.toList efields
-        return ((lookDesc,color), fmap (\i -> if isJust . join . fmap unSOptional . M.lookup "start" $ i then Left i else Right i ) .concat . fmap proj  . G.toList <$> collectionTid evdb  )) ( G.toList evMap)
+        return ((lookDesc,(color,tname,efields)), fmap (\i -> if isJust . join . fmap unSOptional . M.lookup "start" $ i then Left i else Right i ) .concat . fmap proj  . G.toList <$> collectionTid evdb  )) ( G.toList evMap)
 
     iday <- liftIO getCurrentTime
     filterInp <- UI.input # set UI.style [("width","100%")]
@@ -77,18 +81,17 @@ eventWidget inf body = do
       (i,) <$> UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")]) allTags
     let
         filterLabel d = (\j ->  L.isInfixOf (toLower <$> j) (toLower <$> d)) <$> filterInpBh
-        legendStyle (t,c) b
+        legendStyle k@(t,(c,_,_)) b
             =  mdo
               expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
               let evc = UI.checkedChange expand
               evb <- stepper False evc
-              missing <- (element $ fromJust $ M.lookup (t,c) (M.fromList itemListEl2)) # sink UI.style (noneShow <$> evb)
+              missing <- (element $ fromJust $ M.lookup k (M.fromList itemListEl2)) # sink UI.style (noneShow <$> evb)
               header <- UI.div
                 # set items [b # set UI.class_"col-xs-1", UI.div # set text  t # set UI.class_ "col-xs-10", element expand ]
                 # sink0 UI.style (mappend [("background-color",renderShowable c),("color","white")]. noneDisplay "-webkit-box" <$> filterLabel t)
               UI.div # set children [header,missing]
                 # sink0 UI.style (mappend [("background-color",renderShowable c),("color","white")]. noneShow <$> filterLabel t)
-
     legend <- checkDivSetT  allTags  (pure id) (pure allTags) (\_ -> UI.input # set UI.type_ "checkbox") legendStyle
     let buttonStyle k e = e # set UI.text (fromJust $ M.lookup k transRes)# set UI.class_ "btn-xs btn-default buttonSet"
           where transRes = M.fromList [("month","Mês"),("week","Semana"),("day","Dia")]
@@ -119,13 +122,13 @@ eventWidget inf body = do
       currentE = concatenate <$> unions  [resRange False  <$> facts (triding resolution) <@ UI.click next
                                        ,resRange True   <$> facts (triding resolution) <@ UI.click prev , const (const iday) <$> UI.click today ]
     increment <- accumB iday  currentE
+    let incrementT =  tidings increment (flip ($) <$> increment <@> currentE)
+        rangeT = (\r d -> Interval.interval (Interval.Finite $ resRange True r d,True) (Interval.Finite $ resRange False r d,True))<$> triding resolution <*>  incrementT
     calendar <- UI.div # set UI.class_ "col-xs-10"
     sidebar <- UI.div # set children ([getElement agenda,current,getElement resolution,filterInp , getElement legend]<> (snd <$> itemListEl2)) #  set UI.class_ "col-xs-2"
     element body # set children [sidebar,calendar]
 
     let calFun (agenda,iday,res ,selected) = do
-            innerCalendar <-UI.div
-            element calendar # set children [innerCalendar]
             let
 
               inRange "day" d (SDate c)=   d == c
@@ -138,20 +141,24 @@ eventWidget inf body = do
                   (oy,od,_) = toGregorian d
                   (cy,cd,_) = toGregorian c
               inRange m d (STimestamp c)=   inRange m d (SDate (localDay (utcToLocalTime utc $ localTimeToUTC cliZone c)))
+            let
+                visible =  mergeData selectedData
+                mergeData selectedData = fmap  concat $ foldr (liftA2 (:)) (pure []) $ snd <$> selectedData
+                selectedData = filter (flip L.elem (selected) . fst) dashes
+                calHand innerCalendar  visible = calendarCreate (transMode agenda res) innerCalendar (show iday) (T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  . filter (inRange res (utctDay iday ) . unTB1 . fromJust . join . fmap unSOptional. M.lookup "start"  ) . lefts   $ visible )
+            innerCalendar  <- UI.div
+            element calendar # set children [innerCalendar]
             let evd = eventDrop innerCalendar
             let evr = eventResize innerCalendar
             let evdd = eventDragDrop innerCalendar
                 evs =  fmap (makePatch cliZone . first (readPK inf . T.pack))<$> unions [evr,evdd,evd]
             onEvent evs (liftIO . transaction inf . mapM (\i -> do
-                          patchFrom i >>= traverse (tell . pure )))
-            let
-                visible =  mergeData selectedData
-                mergeData selectedData = fmap  concat $ foldr (liftA2 (:)) (pure []) $ snd <$> selectedData
-                selectedData = filter (flip L.elem (selected) . fst) dashes
-                calHand = (\visible -> calendarCreate (transMode agenda res) innerCalendar (show iday) (T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  . filter (inRange res (utctDay iday ) . unTB1 . fromJust . join . fmap unSOptional. M.lookup "start"  ) . lefts   $ visible ))
-            (liftIO $ currentValue (facts visible)) >>= calHand
-            onEvent (rumors visible ) calHand
-
+                        patchFrom i >>= traverse (tell . pure )))
+            calHand innerCalendar  =<< currentValue   (facts visible)
+            mapM ( mapUITEvent calendar (
+                      (\i -> do
+                      calendarAddSource innerCalendar  ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  . filter (inRange res (utctDay iday ) . unTB1 . fromJust . join . fmap unSOptional. M.lookup "start"  ) . lefts $ i)))
+                      )) ( snd <$> selectedData)
             mapM (\(k,el) -> do
               traverse (\t -> do
                 element  el
@@ -162,13 +169,16 @@ eventWidget inf body = do
                                  return dv
                                  ) . rights <$> facts t))  $ M.lookup k (M.fromList selectedData) ) itemListEl2
             return ()
-    calFun (False,iday,defView, allTags)
-    onEvent (rumors $ (,,,)
+    mapUITEvent body calFun ((,,,)
         <$> triding agenda
-        <*> tidings increment (flip ($) <$> increment <@> currentE)
+        <*> incrementT
         <*> triding resolution
         <*> triding legend
-        ) calFun
+        )
+
+    liftIO $mapM (\(tdesc ,(_,tname,fields))-> do
+        mapTEvent  ((\i ->  forkIO $ void $ transaction  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList fields))) rangeT
+      ) allTags
     return body
 
 txt = TB1. SText
@@ -183,7 +193,7 @@ makePatch zone ((t,pk,k), a) = (tableMeta t , pk, PAttr k <$>  (ty  (keyType k)$
        ty (KInterval k )  (Left i )=  [PatchSet $ (fmap (PInter True . (,True)). (ty k.Right . unFinite) $ Interval.lowerBound i) <>  (fmap (PInter False . (,True)). (ty k.Right .unFinite ) $ Interval.upperBound i)]
        ty (Primitive p ) (Right r )= pure .PAtom . cast p $ r
        cast (AtomicPrim PDate ) = SDate . utctDay
-       cast (AtomicPrim (PTimestamp l)) = STimestamp . utcToLocalTime utc .localTimeToUTC zone . utcToLocalTime utc . traceShowId
+       cast (AtomicPrim (PTimestamp l)) = STimestamp . utcToLocalTime utc .localTimeToUTC zone . utcToLocalTime utc
 
 unFinite (Interval.Finite i ) = i
 unFinite (i ) = errorWithStackTrace (show i)
@@ -209,7 +219,7 @@ instance A.ToJSON Showable where
 type DateChange  =  (String,Either (Interval UTCTime ) UTCTime)
 
 -- readPosition:: EventData -> Maybe DateChange
-readPosition (EventData v@(Just i:Just a:Just e :_)) =  (,) <$> Just i <*> ((\i j -> traceShow (a,e) $ traceShowId $ Left $ Interval.interval (Interval.Finite i,True) (Interval.Finite j,True))<$> parseISO8601 a <*> parseISO8601 e)
+readPosition (EventData v@(Just i:Just a:Just e :_)) =  (,) <$> Just i <*> ((\i j ->  Left $ Interval.interval (Interval.Finite i,True) (Interval.Finite j,True))<$> parseISO8601 a <*> parseISO8601 e)
 readPosition (EventData v@(Just i:Just a:_)) =   (,) <$> Just i <*> (Right <$> parseISO8601 a )
 readPosition (EventData v) = Nothing
 

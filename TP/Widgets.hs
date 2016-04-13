@@ -108,6 +108,7 @@ addEvent ev b = do
  return  $tidings nbev (diffEvent nbev nev)
 
 mapUITEvent body f  = mapTEvent (\i -> evalUI body $ f i )
+mapUITEventFin body f  = mapTEventFin (\i -> evalUI body $ f i )
 
 mapDynEvent f x = do
   t <- mapUITEvent (getElement x) f (triding x)
