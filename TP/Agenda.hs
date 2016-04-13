@@ -152,13 +152,14 @@ eventWidget inf body = do
             let evr = eventResize innerCalendar
             let evdd = eventDragDrop innerCalendar
                 evs =  fmap (makePatch cliZone . first (readPK inf . T.pack))<$> unions [evr,evdd,evd]
-            onEvent evs (liftIO . transaction inf . mapM (\i -> do
+            fin <- onEvent evs (liftIO . transaction inf . mapM (\i -> do
                         patchFrom i >>= traverse (tell . pure )))
             calHand innerCalendar  =<< currentValue   (facts visible)
-            mapM (\((_,(_,t,_)),s)->  mapUITEvent calendar (
+            fins <- mapM (\((_,(_,t,_)),s)->  fmap snd $ mapUITEventFin innerCalendar (
                       (\i -> do
                       calendarAddSource innerCalendar  (T.unpack t) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  . filter (inRange res (utctDay iday ) . unTB1 . fromJust . join . fmap unSOptional. M.lookup "start"  ) . lefts $ i)))
                       ) s ) selectedData
+            liftIO $ addFin innerCalendar (fin:fins)
             mapM (\(k,el) -> do
               traverse (\t -> do
                 element  el
@@ -169,12 +170,13 @@ eventWidget inf body = do
                                  return dv
                                  ) . rights <$> facts t))  $ M.lookup k (M.fromList selectedData) ) itemListEl2
             return ()
-    mapUITEvent body calFun ((,,,)
+    (_,fin) <- mapUITEventFin calendar calFun ((,,,)
         <$> triding agenda
         <*> incrementT
         <*> triding resolution
         <*> triding legend
         )
+    liftIO$ addFin calendar [fin]
 
     liftIO $mapM (\(tdesc ,(_,tname,fields))-> do
         mapTEvent  ((\i ->  forkIO $ void $ transaction  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList fields))) rangeT
