@@ -113,7 +113,7 @@ updatePatch conn kv old  t =
     kold = getPKM old
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> F.toList kold
-    pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst .traceShowId <$> F.toList kold)
+    pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> F.toList kold)
     setter = " SET " <> T.intercalate "," (equality .   attrValueName <$> skv   )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = unTB <$> F.toList  (_kvvalues $ unTB tbskv)

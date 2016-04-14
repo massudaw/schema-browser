@@ -176,7 +176,7 @@ instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Tex
     | ty == "POINT3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
     | otherwise  = TF.toField  tyv
     where tyv = fmap (\(TB1 i ) -> snd i) is
-          ty = unFinite $ traceShowId $ Interval.lowerBound $ fmap (\(TB1 i ) -> fst i) is
+          ty = unFinite $  Interval.lowerBound $ fmap (\(TB1 i ) -> fst i) is
           unFinite (Interval.Finite i) = i
           unFinite i = errorWithStackTrace (show i)
   toField (TB1 (t,i)) = TF.toField i

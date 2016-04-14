@@ -114,15 +114,14 @@ setup smvar args w = void $ do
   mapUITEvent body (traverse (\(nav,inf)->
       case nav of
         "Map" -> do
-            mapWidget inf body
+            mapWidget inf body# set UI.style [("width","100%")]
         "Event" -> do
-            eventWidget inf body
+            eventWidget inf body # set UI.style [("width","100%")]
         "Poll" -> do
             element body #
               set items
                   [ metaAllTableIndexV inf "polling" [("schema_name",TB1 $ SText (schemaName inf) ) ]
-                  , metaAllTableIndexV inf "polling_log" [("schema_name",TB1 $ SText (schemaName inf) ) ]] #
-              set UI.class_ "row"
+                  , metaAllTableIndexV inf "polling_log" [("schema_name",TB1 $ SText (schemaName inf) ) ]]
         "Change" -> do
             case schemaName inf of
               "gmail" -> do
@@ -145,14 +144,14 @@ setup smvar args w = void $ do
 
               i -> do
                 dash <- metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ) ]
-                element body # set UI.children [dash] # set UI.class_ "row"
+                element body # set UI.children [dash]
         "Stats" -> do
             stats <- metaAllTableIndexV inf "table_stats" [("schema_name",TB1 $ SText (schemaName inf) ) ]
             clients <- metaAllTableIndexV inf "clients" [("schema",LeftTB1 $ Just $ TB1 $ SText (schemaName inf) ) ]
-            element body # set UI.children [stats,clients] # set UI.class_ "row"
+            element body # set UI.children [stats,clients]
         "Exception" -> do
             dash <- metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ) ]
-            element body # set UI.children [dash] # set UI.class_ "row"
+            element body # set UI.children [dash]
         "Browser" -> do
             [tbChooser,subnet] <- chooserTable  inf   cliTid  cli
             element tbChooser # sink0 UI.style (facts $ noneShow <$> triding menu)
@@ -160,7 +159,7 @@ setup smvar args w = void $ do
                 expand True = "col-xs-10"
                 expand False = "col-xs-12"
             element subnet # sink0 UI.class_ (facts $ expand <$> triding menu)
-            element body # set UI.children [tbChooser,subnet]# set UI.class_ "row" # set UI.style [("display","inline-flex"),("width","100%")] )) $ liftA2 (\i  -> fmap (i,)) (triding nav)  evDB
+            element body # set UI.children [tbChooser,subnet]#  set UI.style [("display","inline-flex"),("width","100%")] )) $ liftA2 (\i  -> fmap (i,)) (triding nav)  evDB
 
 
 listDBS ::  InformationSchema -> BrowserState -> IO (Tidings (Text,[Text]))
