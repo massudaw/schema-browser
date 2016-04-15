@@ -46,20 +46,22 @@ insertPatch
      -> TBIdx PGKey Showable
      -> TableK PGKey
      -> m (TBIdx PGKey Showable )
-insertPatch f conn path@(m ,s,i ) t =  if not $ L.null serialAttr
+insertPatch f conn path@(m ,s,i ) t =  liftIO$ if not $ L.null serialAttr
       then do
         let
           iquery :: String
           iquery = T.unpack $ prequery <> " RETURNING ROW(" <>  T.intercalate "," (projKey serialAttr) <> ")"
-        liftIO $ print iquery
+        print iquery
         out <-  fmap safeHead $ liftIO $ queryWith (f (mapRecord (const ()) serialTB )) conn (fromString  iquery ) directAttr
+        print out
         let Just (_,_ ,gen) =  join $ diff serialTB <$> out
-        return (m,getPKM (justError "no out insert" out) ,compact (i <> gen ) )
+            comp = compact (i <> gen)
+        return (m,getPKM (justError "no out insert" out) ,comp )
       else do
         let
           iquery = T.unpack prequery
-        liftIO $ print iquery
-        liftIO $ execute  conn (fromString  iquery ) directAttr
+        print iquery
+        execute  conn (fromString  iquery ) directAttr
         return path
     where
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
@@ -152,10 +154,10 @@ paginate inf t order off size koldpre wherepred = do
                   eqpk =  (fmap snd <$> eqspred)
                   eqpred = nonEmpty lpred
                 in (eqquery <$> eqspred , eqpk)
-              WherePredicate wpred ->
+              WherePredicate (OrColl wpred) ->
                 let
                   eqpk = fmap (\(a,_,e) -> Attr (fst (indexFieldL a t)) e)<$> nonEmpty wpred
-                in (fmap (\(a,e,i) ->
+                in (pure . (\i -> " (" <> i <> ") ") . T.intercalate " OR " . fmap (\(a,e,i) ->
                      let idx = indexFieldL a t
                      in snd idx <> " " <> e  <> " ? " <> inferParamType e (keyType $ fst idx)  )<$> nonEmpty wpred , eqpk )
 
@@ -264,7 +266,8 @@ insertMod j  = do
     let
       table = lookTable inf (_kvname (fst  j))
     kvn <- insertPatch (fmap (mapKey' (recoverFields inf)) . fromRecord . (mapKey' (typeTrans inf))) (conn  inf) (patch $ mapKey' (recoverFields inf) j) (mapTableK (recoverFields inf ) table)
-    let mod =  TableModification Nothing table (firstPatch (typeTrans inf) kvn)
+    print ("posinsert",kvn)
+    let mod =  TableModification Nothing table (firstPatch (typeTrans inf) $ kvn)
     --Just <$> logTableModification inf mod
     return $ Just  mod
 

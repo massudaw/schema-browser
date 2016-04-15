@@ -135,13 +135,8 @@ setup smvar args w = void $ do
                   bres <- accumB ((M.empty,G.empty) :: Collection Key Showable) (flip update <$> rumors vpdiff)
                   let
                     vpt =  tidings bres (  update <$> bres <@> rumors vpdiff )
-                  --listBoxEl itemListEl (concat . fmap (runReader (dynPK readHistory $ () ) . Just . mapKey' keyValue) . G.toList . snd  <$> vpt)  (pure Nothing) (pure id) ( pure (\i j -> UI.div # set text (show i)))
                   listBoxEl itemListEl2 ( G.toList . snd  <$> vpt)  (pure Nothing) (pure id) ( pure attrLine )
                 element body # set children [itemListEl,itemListEl2]
-
-
-
-
               i -> do
                 dash <- metaAllTableIndexV inf "modification_table" [("schema_name",TB1 $ SText (schemaName inf) ) ]
                 element body # set UI.children [dash]

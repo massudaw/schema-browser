@@ -65,13 +65,15 @@ eventWidget inf body = do
         let toLocalTime = fmap to
               where to (STimestamp i )  = STimestamp $  utcToLocalTime cliZone $ localTimeToUTC utc i
                     to (SDate i ) = SDate i
-            convField (Attr _ (IntervalTB1 i )) = [("start", toLocalTime $ unFinite $ Interval.lowerBound i),("end",toLocalTime $ unFinite $ Interval.upperBound i)]
-            convField (Attr k (LeftTB1 i)) =  concat $ fmap maybeToList $ traverse convField (Attr k <$> i)
-            convField (Attr _ v) = [("start",toLocalTime $v)]
+            convField ((IntervalTB1 i )) = [("start", toLocalTime $ unFinite $ Interval.lowerBound i),("end",toLocalTime $ unFinite $ Interval.upperBound i)]
+            convField (LeftTB1 i) = concat $   convField <$> maybeToList i
+            convField (v) = [("start",toLocalTime $v)]
             convField i = errorWithStackTrace (show i)
-            projf  r efield@(TB1 (SText field))  = M.fromList $ convField (lookAttr' inf field r) <> [("id", TB1 $ SText $ writePK r efield   ),("title",TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield )] :: M.Map Text (FTB Showable)
-            proj r = projf r <$> F.toList efields
-        return ((lookDesc,(color,tname,efields)), fmap (\i -> if isJust . join . fmap unSOptional . M.lookup "start" $ i then Left i else Right i ) .concat . fmap proj  . G.toList <$> collectionTid evdb  )) ( G.toList evMap)
+            projf  r efield@(TB1 (SText field))  = (if (isJust . unSOptional $ attr) then Left else Right) (M.fromList $ convField attr  <> [("id", TB1 $ SText $ writePK r efield   ),("title",TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield )] :: M.Map Text (FTB Showable))
+                  where attr  = attrValue $ lookAttr' inf field r
+            proj r = (TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  projf r <$> F.toList efields
+            attrValue (Attr k v) = v
+        return ((lookDesc,(color,tname,efields)), fmap proj  . G.toList <$> collectionTid evdb  )) ( G.toList evMap)
 
     iday <- liftIO getCurrentTime
     filterInp <- UI.input # set UI.style [("width","100%")]
@@ -91,7 +93,7 @@ eventWidget inf body = do
                 # set items [b # set UI.class_"col-xs-1", UI.div # set text  t # set UI.class_ "col-xs-10", element expand ]
                 # sink0 UI.style (mappend [("background-color",renderShowable c),("color","white")]. noneDisplay "-webkit-box" <$> filterLabel t)
               UI.div # set children [header,missing]
-                # sink0 UI.style (mappend [("background-color",renderShowable c),("color","white")]. noneShow <$> filterLabel t)
+                # sink0 UI.style (mappend [("border","solid black 1px"),("background-color",renderShowable c),("color","white")]. noneShow <$> filterLabel t)
     legend <- checkDivSetT  allTags  (pure id) (pure allTags) (\_ -> UI.input # set UI.type_ "checkbox") legendStyle
     let buttonStyle k e = e # set UI.text (fromJust $ M.lookup k transRes)# set UI.class_ "btn-xs btn-default buttonSet"
           where transRes = M.fromList [("month","Mês"),("week","Semana"),("day","Dia")]
@@ -145,7 +147,7 @@ eventWidget inf body = do
                 visible =  mergeData selectedData
                 mergeData selectedData = fmap  concat $ foldr (liftA2 (:)) (pure []) $ snd <$> selectedData
                 selectedData = filter (flip L.elem (selected) . fst) dashes
-                calHand innerCalendar  visible = calendarCreate (transMode agenda res) innerCalendar (show iday) (T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  . filter (inRange res (utctDay iday ) . unTB1 . fromJust . join . fmap unSOptional. M.lookup "start"  ) . lefts   $ visible )
+                calHand innerCalendar  visible = calendarCreate (transMode agenda res) innerCalendar (show iday) (T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  . filter (inRange res (utctDay iday ) . unTB1 . fromJust . M.lookup "start") . concat .fmap (lefts  .snd)  $ visible )
             innerCalendar  <- UI.div
             element calendar # set children [innerCalendar]
             let evd = eventDrop innerCalendar
@@ -157,18 +159,21 @@ eventWidget inf body = do
             calHand innerCalendar  =<< currentValue   (facts visible)
             fins <- mapM (\((_,(_,t,_)),s)->  fmap snd $ mapUITEventFin innerCalendar (
                       (\i -> do
-                      calendarAddSource innerCalendar  (T.unpack t) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  . filter (inRange res (utctDay iday ) . unTB1 . fromJust . join . fmap unSOptional. M.lookup "start"  ) . lefts $ i)))
+                      calendarAddSource innerCalendar  (T.unpack t) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  . filter (inRange res (utctDay iday ) . unTB1 . fromJust .  M.lookup "start"  ) . concat . fmap (lefts.snd) $ i)))
                       ) s ) selectedData
             liftIO $ addFin innerCalendar (fin:fins)
             mapM (\(k,el) -> do
               traverse (\t -> do
                 element  el
-                  # sink items (fmap (\i -> do
-                                 dv <-  UI.div # set text (maybe ""  renderShowable $ M.lookup "title"i) # set UI.style (maybeToList $ ("background-color",) . renderShowable<$>  M.lookup "color" i)
-                                 runFunction $ ffi "$(%1).data('event', {title: %2 ,id:%3, color :%4 ,stick: false })" dv  (maybe ""  renderShowable $ M.lookup "title" i) (maybe ""  renderShowable $ M.lookup "id" i) (maybe ""  renderShowable $ M.lookup "color" i)
-                                 runFunction $ ffi "$(%1).draggable({zIndex : 999,revert:true,revertDuration:0})" dv
-                                 return dv
-                                 ) . rights <$> facts t))  $ M.lookup k (M.fromList selectedData) ) itemListEl2
+                  # sink items (fmap (\(t,i) -> do
+                         h<- UI.div # set text (renderShowable t)
+                         b <- UI.div # set items (fmap (\i->do
+                           dv <-  UI.div # set text ((maybe "" renderShowable  $M.lookup "field" i )) # set UI.style ([("border","solid black 1px"),("padding-left","10px")]<> (maybeToList $ ("background-color",) . renderShowable<$>  M.lookup "color" i))
+                           runFunction $ ffi "$(%1).data('event', {title: %2 ,id:%3, color :%4 ,stick: false })" dv  (maybe ""  renderShowable $ M.lookup "title" i) (maybe ""  renderShowable $ M.lookup "id" i) (maybe ""  renderShowable $ M.lookup "color" i)
+                           runFunction $ ffi "$(%1).draggable({ helper: 'clone',scroll:false,appendTo: 'body' ,'z-index' : 999,revert:true,revertDuration:0})" dv
+                           return dv) i)
+                         UI.div # set children [h,b] # set UI.style [("border","dotted 1px black")]
+                          ) . filter (not .L.null .snd) . fmap (fmap rights) <$> facts t) # set UI.style [("border","solid 1px black")])  $ M.lookup k (M.fromList selectedData) ) itemListEl2
             return ()
     (_,fin) <- mapUITEventFin calendar calFun ((,,,)
         <$> triding agenda
@@ -179,7 +184,7 @@ eventWidget inf body = do
     liftIO$ addFin calendar [fin]
 
     liftIO $mapM (\(tdesc ,(_,tname,fields))-> do
-        mapTEvent  ((\i ->  forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList fields))) rangeT
+        mapTEvent  ((\i ->  forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ OrColl $ (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList fields))) rangeT
       ) allTags
     return body
 

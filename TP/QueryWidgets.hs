@@ -534,8 +534,8 @@ processPanelTable lbox inf attrsB reftb@(res,_,gist,_) inscrud table oldItemsi =
   -- Delete when isValid
          sink UI.enabled ( liftA2 (&&) (isJust . fmap (tableNonRef') <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (facts oldItemsi ) (facts gist ) ))
   let
-         crudEdi (Just (i)) (Just (j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEditInsert  i j
-         crudIns (Just (j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
+         crudEdi (Just (i)) (Just (j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $diff i  g) $ trace "after edit " transaction inf $ fullDiffEditInsert  i j
+         crudIns (Just (j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) ) . (trace "after transaction ") <$> transaction inf ((trace "after insert ") <$> fullDiffInsert  j)
          crudDel (Just (j))  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> transaction inf (deleteFrom j)
   (diffEdi,ediFin) <- mapEventFin id $ crudEdi <$> facts oldItemsi <*> attrsB <@ UI.click editB
   (diffDel,delFin ) <- mapEventFin id $ crudDel <$> facts oldItemsi <@ UI.click deleteB

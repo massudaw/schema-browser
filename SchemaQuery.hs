@@ -308,11 +308,13 @@ transactionLog :: InformationSchema -> TransactionM a -> IO [TableModification (
 transactionLog inf log = do -- withTransaction (conn inf) $ do
   (md,mods)  <- runWriterT (runReaderT log inf )
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [TableModification id t f] m) M.empty mods
-  Tra.traverse (\(k,v) -> do
+  agg2 <- Tra.traverse (\(k,v) -> do
     ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ M.lookup ((rawSchema k ))  (depschema inf) ) k
-    putPatch (patchVar ref ) $ (\(TableModification _ _ p) -> p) <$> v
+    nm <- mapM (logger (schemaOps inf) inf) v
+    putPatch (patchVar ref ) $ (\(TableModification _ _ p) -> p) <$> nm
+    return nm
     ) (M.toList aggr)
-  return $ concat $ F.toList aggr
+  return $ concat $ agg2
 
 
 
@@ -363,9 +365,9 @@ fullDiffInsert :: TBData Key Showable -> TransactionM  (Maybe (TableModification
 fullDiffInsert (k2,v2) = do
    inf <- ask
    let proj = _kvvalues . unTB
-   edn <- (k2,) . _tb . KV <$>  Tra.sequence ((\ j -> _tb <$>  tbInsertEdit (unTB j) ) <$>  (proj v2))
-   mod <- insertFrom  edn
-   tell (maybeToList mod)
+   edn <- (k2,) . _tb . KV <$>  Tra.sequence ((\ j -> _tb <$>  tbInsertEdit ( unTB j) ) <$>  (proj v2))
+   mod <- insertFrom  (edn)
+   tell (maybeToList $mod)
    return mod
 
 
@@ -401,7 +403,7 @@ tbInsertEdit f@(FKT pk rel2  t2) =
    case t2 of
         t@(TB1 (m,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           local (\inf -> fromMaybe inf (M.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> pk) (unTB1 tb)) rel2 tb ) <$> fullInsert t)
+           local (\inf -> fromMaybe inf (M.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> pk) (unTB1 tb)) rel2 tb ) <$> fullInsert ( t))
         LeftTB1 i ->
            maybe (return f ) ((fmap attrOptional) . tbInsertEdit ) (unLeftItens f)
         ArrayTB1 l ->

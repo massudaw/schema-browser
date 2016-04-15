@@ -77,9 +77,6 @@ meta inf = maybe inf id (metaschema inf)
 
 
 
-
-
-
 queryAuthorization :: Connection -> Text -> Text -> IO (Map Text [Text])
 queryAuthorization conn schema user = do
     sq <- query conn aq (schema,user)
@@ -229,11 +226,11 @@ createTableRefsUnion inf m i  = do
 
   forkIO $ forever $ (do
       forkIO . hidx =<< atomically (takeTMVar midx)
-      return () ) `catch` (\e -> print ("block",tableName i ,e :: SomeException))
+      return () ) `catch` (\e -> print ("block index",tableName i ,e :: SomeException))
   forkIO $ forever $ (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
-        (void $ hdiff (concat patches))) `catch` (\e -> print ("block",tableName i ,e :: SomeException))
+        (void $ hdiff (concat patches))) `catch` (\e -> print ("block data",tableName i ,e :: SomeException))
   return (tableMeta i,  DBVar2  mdiff midx (R.tidings bhdiff patch) (R.tidings bhidx eidx) bh2 )
 
 
@@ -254,11 +251,11 @@ createTableRefs inf i = do
   bhidx <- R.stepper (M.singleton (LegacyPredicate []) (G.size v,M.empty)) eidx
   forkIO $ forever $ (do
       forkIO . hidx =<< atomically (takeTMVar midx)
-      return () ) `catch` (\e -> print ("block",tableName i ,e :: SomeException))
+      return () ) `catch` (\e -> print ("block index",tableName i ,e :: SomeException))
   forkIO $ forever $ (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
-        (void $ hdiff (concat patches))) `catch` (\e -> print ("block",tableName i ,e :: SomeException))
+        (void $ hdiff (concat patches))) `catch` (\e -> print ("block data ",tableName i ,e :: SomeException))
   return (tableMeta i,  DBVar2  mdiff midx (R.tidings bhdiff ediff) (R.tidings bhidx eidx) bh2 )
 
 

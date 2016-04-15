@@ -182,7 +182,7 @@ compactAttr  i =  fmap recover .  groupSplit2 projectors pathProj $ i
 
 compactPatches :: (Ord a ,Show a)=> [PathFTB  a] -> Maybe (PathFTB  a)
 compactPatches [] = Nothing
-compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . concat . fmap expandPSet $ i
+compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . concat . fmap expandPSet $ traceShowId i
   where
     pathProj (PIdx _ i) = i
     pathProj (POpt  i) = i
@@ -202,7 +202,7 @@ compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . 
     recover (PIdOpt , j ) = POpt  (compact j)
     recover (PIdSerial , j ) = PSerial (compact j)
     recover (PIdDelayed , j ) = PDelayed (compact j)
-    recover (PIdInter i ,  j ) = justError "no patch inter" $ compact j
+    recover (PIdInter i ,  j ) = justError "no patch inter" $ patchSet (catMaybes j)
     recover (PIdAtom , j ) = justError "can't be empty " $ patchSet (catMaybes j)
     -- recover i = errorWithStackTrace (show i)
     compact j = join $ compactPatches <$> Just (catMaybes j)
