@@ -56,6 +56,7 @@ function createLayers (ref,posj,nej,swj,features){
             .setContent(p.title + '\n' + p.position.toString());
   ref.layer.addLayer(L.circle(p.position,p.size,{color:p.color}).bindPopup(popup));})})
 }
+
 function createMap (ref,posj,nej,swj,features){
       pos = JSON.parse(posj);
       
@@ -87,8 +88,46 @@ function handleLocationError(browserHasGeolocation, pos) {
 
 
 function createAgenda(el,date,evs,view){
-  $(el).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: date,lang: 'pt-br',editable: true,eventLimit: true, defaultView : view ,eventDrop : el.eventDrop , eventResize: el.eventResize, drop : el.drop, droppable:true});
+  	var date = new Date();
+	var d = date.getDate();
+	var m = date.getMonth();
+	var y = date.getFullYear();
 
+	  $(el).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: date,lang: 'pt-br',editable: true,eventLimit: true, defaultView : view ,eventDrop : el.eventDrop , eventResize: el.eventResize, drop : el.drop, droppable:true ,eventClick: function(data, event, view) {
+  var content = '<h3>'+data.title+'</h3>' + 
+      '<p><b>Start:</b> '+data.start+'<br />' + 
+      (data.end && '<p><b>End:</b> '+data.end+'</p>' || '');
+  if (el.opentip != null ){
+    $('.qtip').each(function(){
+        $(this).data('qtip').destroy();
+    })
+  }
+  var tooltip = $('<div/>').qtip({
+		prerender: true,
+		content: {
+			text: ' ',
+			title: {
+				button: true
+			}
+		},
+		position: {
+			my: 'bottom center',
+			at: 'top center',
+			target: 'mouse',
+			adjust: {
+				mouse: false,
+				scroll: false
+			}
+		},
+		show: false,
+		hide: false,
+		style: 'qtip-light'
+	}).qtip('api');
+
+  tooltip.set({'content.text': content
+              }).reposition(event).show(event);
+  el.opentip = tooltip;
+          }});
 };
 
 function addSource(el,table,source){

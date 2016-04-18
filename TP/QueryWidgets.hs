@@ -762,9 +762,9 @@ buildPrim fm tdi i = case i of
            let fty = case mime of
                 "application/pdf" -> ("iframe","src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
                 "application/x-ofx" -> ("textarea","value",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-                "image/jpg" -> ("img","src",maybe "" binarySrc ,[])
-                "image/png" -> ("img","src",maybe "" binarySrc ,[])
-                "image/bmp" -> ("img","src",maybe "" binarySrc ,[])
+                "image/jpg" -> ("img","src",maybe "" binarySrc ,[("max-height","200px")])
+                "image/png" -> ("img","src",maybe "" binarySrc ,[("max-height","200px")])
+                "image/bmp" -> ("img","src",maybe "" binarySrc ,[("max-height","200px")])
                 "text/html" -> ("iframe","srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
            f <- pdfFrame fty (facts tdi2) # sink0 UI.style (noneShow . isJust <$> facts tdi2)
            fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]

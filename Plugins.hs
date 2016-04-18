@@ -252,6 +252,34 @@ doubleP s = (\(TB1 (SDouble ar)) -> ar) <$> idxK s
 intP s = (\(TB1 (SNumeric ar)) -> ar) <$> idxK s
 doubleA s =  (\(ArrayTB1 i) -> fmap (\(TB1 (SDouble v)) -> v)  i) <$> idxK s
 
+germinacao = FPlugins pname tname $ PurePlugin  url
+
+  where
+    pname , tname :: Text
+    pname = "previsao = plantio + periodo_germinacao"
+    tname = "plantio"
+    url :: ArrowReaderM Identity
+    url = proc t -> do
+      plant <- idxR "plantio"  -< ()
+      poly <- atR "planta" (idxR "periodo_germinacao" ) -< ()
+      odxR "previsao_germinacao" -< ()
+      returnA -< (\(TB1 (SDate d)) (IntervalTB1 i)  -> tblist [_tb $ Attr "previsao_germinacao" (LeftTB1 $ Just $ IntervalTB1 $ ((\(TB1 i) -> TB1 $ SDate$  addDays  (fromIntegral i)d ) <$>   i))] ) <$> plant <*> poly
+
+preparoInsumo = FPlugins pname tname $ PurePlugin  url
+
+  where
+    pname , tname :: Text
+    pname = "previsao = producao + periodo_preparo"
+    tname = "insumo_producao"
+    url :: ArrowReaderM Identity
+    url = proc t -> do
+      plant <- idxR "producao"  -< ()
+      poly <- atR "insumo" (idxR "periodo_preparo" ) -< ()
+      odxR "previsao_preparo" -< ()
+      returnA -< (\(TB1 (SDate d)) (IntervalTB1 i)  -> tblist [_tb $ Attr "previsao_preparo" (LeftTB1 $ Just $ IntervalTB1 $ ((\(TB1 i) -> TB1 $ SDate$  addDays  (fromIntegral i)d ) <$>   i))] ) <$> plant <*> poly
+
+
+
 areaDesign = FPlugins pname tname $ PurePlugin  url
 
   where
@@ -379,7 +407,6 @@ siapi3CheckApproval = FPlugins pname tname  $ PurePlugin url
 
 
 siapi3Plugin  = FPlugins pname tname  $ BoundedPlugin2 url
-
   where
     pname , tname :: Text
     pname = "Siapi3 Andamento"
@@ -715,4 +742,4 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
 
 
 plugList :: [Plugins]
-plugList = [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin {-,siapi2Hack-}, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento]
+plugList = [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin {-,siapi2Hack-}, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo]
