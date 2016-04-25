@@ -25,13 +25,9 @@ function readFileInput (f){
   return value;
 }
 function handleFileSelect(evt) {
-
     var files = evt.target.files; // FileList object
-
     // Loop through the FileList and render image files as thumbnails.
     for (var i = 0, f; f = files[i]; i++) {
-
-
       var reader = new FileReader();
 
       // Closure to capture the file information.
@@ -58,8 +54,7 @@ function createLayers (ref,posj,nej,swj,features){
 }
 
 function createMap (ref,posj,nej,swj,features){
-      pos = JSON.parse(posj);
-      
+  pos = JSON.parse(posj);
   ref.mymap = L.map(ref);
   if (pos == null) {
       navigator.geolocation.getCurrentPosition(function(position) {
@@ -73,10 +68,10 @@ function createMap (ref,posj,nej,swj,features){
     ref.mymap.fitBounds([ne,sw]);
   }
   ref.layer= L.layerGroup().addTo(ref.mymap);
-  
-	var osmUrl='http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-	var osmAttrib='Map data © <a href="http://openstreetmap.org">OpenStreetMap</a> contributors';
-	var osm = L.tileLayer(osmUrl, { maxZoom: 18, attribution: osmAttrib}).addTo(ref.mymap);	
+
+  var osmUrl='http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+  var osmAttrib='Map data © <a href="http://openstreetmap.org">OpenStreetMap</a> contributors';
+  var osm = L.tileLayer(osmUrl, { maxZoom: 18, attribution: osmAttrib}).addTo(ref.mymap);	
 }
 
 
@@ -87,13 +82,13 @@ function handleLocationError(browserHasGeolocation, pos) {
 }
 
 
-function createAgenda(el,date,evs,view){
-  	var date = new Date();
-	var d = date.getDate();
-	var m = date.getMonth();
-	var y = date.getFullYear();
+function createAgenda(el,tdate,evs,view){
+  var date = new Date(tdate);
+  var d = date.getDate();
+  var m = date.getMonth();
+  var y = date.getFullYear();
 
-	  $(el).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: date,lang: 'pt-br',editable: true,eventLimit: true, defaultView : view ,eventDrop : el.eventDrop , eventResize: el.eventResize, drop : el.drop, droppable:true ,eventClick: function(data, event, view) {
+  $(el).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: date,lang: 'pt-br',editable: true,eventLimit: true, defaultView : view ,eventDrop : el.eventDrop , eventResize: el.eventResize, drop : el.drop, droppable:true ,eventClick: function(data, event, view) {
   var content = '<h3>'+data.title+'</h3>' + 
       '<p><b>Start:</b> '+data.start+'<br />' + 
       (data.end && '<p><b>End:</b> '+data.end+'</p>' || '');
@@ -103,26 +98,26 @@ function createAgenda(el,date,evs,view){
     })
   }
   var tooltip = $('<div/>').qtip({
-		prerender: true,
-		content: {
-			text: ' ',
-			title: {
-				button: true
-			}
-		},
-		position: {
-			my: 'bottom center',
-			at: 'top center',
-			target: 'mouse',
-			adjust: {
-				mouse: false,
-				scroll: false
-			}
-		},
-		show: false,
-		hide: false,
-		style: 'qtip-light'
-	}).qtip('api');
+    prerender: true,
+    content: {
+      text: ' ',
+      title: {
+        button: true
+      }
+    },
+    position: {
+      my: 'bottom center',
+      at: 'top center',
+      target: 'mouse',
+      adjust: {
+        mouse: false,
+        scroll: false
+      }
+    },
+    show: false,
+    hide: false,
+    style: 'qtip-light'
+  }).qtip('api');
 
   tooltip.set({'content.text': content
               }).reposition(event).show(event);
@@ -158,7 +153,6 @@ function clientHandlers(){
       return true;
       }; 
       }
-   
    ,'externalDrop' : function(el,elid,eventType,sendEvent){
       el.drop =  function(e,revert) {
       var evdata = $(this).data('event');

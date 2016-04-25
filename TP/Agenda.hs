@@ -184,7 +184,7 @@ eventWidget inf body = do
     liftIO$ addFin calendar [fin]
 
     liftIO $mapM (\(tdesc ,(_,tname,fields))-> do
-        mapTEvent  ((\i ->  forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ OrColl $ (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList fields))) rangeT
+        mapTEvent  ((\i ->  forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ OrColl $ PrimColl . (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList fields))) rangeT
       ) allTags
     return body
 

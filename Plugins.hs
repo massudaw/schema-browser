@@ -88,11 +88,11 @@ siapi2Hack = FPlugins pname tname $ BoundedPlugin2  url
       protocolo <- varTB "protocolo" -< t
       ano <- varTB "ano" -< t
       odxR "razao_social" -< ()
-      Tra.traverse (odxM ) (fmap snd value_mapping) -< ()
+      Tra.traverse odxM (L.delete "razao_social" $ snd <$> value_mapping) -< ()
       atR "andamentos" (proc t -> do
         odxR "andamento_date" -<  t
         odxR "andamento_description" -<  t) -< t
-      b <- act (Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return (Nothing,Nothing) else liftIO (siapi2  i j )  )) -<  (liftA2 (,) protocolo ano )
+      b <- act (Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return (Nothing,Nothing) else liftIO (siapi2  i (j) )  )) -<  (liftA2 (,) protocolo ano )
       let ao (sv,bv)  = Just $ tblist   $ svt  sv <> [iat $ bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
           convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
@@ -742,4 +742,4 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
 
 
 plugList :: [Plugins]
-plugList = [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin {-,siapi2Hack-}, importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo]
+plugList = [siapi2Hack] -- [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo]

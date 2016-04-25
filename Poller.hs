@@ -82,16 +82,18 @@ poller schm authmap db plugs is_test = do
                   (start,end,curr,current) <- checkTime polling tb
                   putStrLn $ "LAST RUN " <> show (schema,pname,start,end)
                   let intervalsec = intervalms `div` 10^3
-                  if  is_test || diffUTCTime current start  >  fromIntegral intervalsec
+                  if  True -- is_test || diffUTCTime current start  >  fromIntegral intervalsec
                   then do
                       putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
-                      let fetchSize = 1000
-                      (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  Nothing (Just fetchSize) []$ LegacyPredicate[]
-                      let sizeL = justLook ( LegacyPredicate[]) l
+                      let fetchSize = 5000
+                          pred = (WherePredicate $ AndColl[ genPredicate True (fst f) , genPredicate False (snd f)] )
+                      (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  Nothing (Just fetchSize) []  pred
+                      threadDelay 10000
+                      let sizeL = justLook pred  l
                           lengthPage s pageSize  = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
                       i <- concat <$> mapM (\ix -> do
-                          (_,(_,listResAll)) <- transactionNoLog inf $ selectFrom a  (Just ix) (Just fetchSize) []$ LegacyPredicate[]
-                          let listRes = L.take fetchSize . G.toList $ listResAll
+                          (_,(_,listResAll)) <- transactionNoLog inf $ selectFrom a  (Just ix) (Just fetchSize) [] pred
+                          let listRes = L.take fetchSize . G.toList $  listResAll
 
                           let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
                               tdInput i =  isJust  $ checkTable  (fst f) i
@@ -107,7 +109,7 @@ poller schm authmap db plugs is_test = do
                                  return ()
                                  ) diff'
                               )
-                            ) . L.transpose .  chuncksOf 20 $ evb
+                            ) . L.transpose .  chuncksOf 25 $ evb
                           return $ concat i
                           ) [0..(lengthPage (fst sizeL) fetchSize -1)]
                       end <- getCurrentTime

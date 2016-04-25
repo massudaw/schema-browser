@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Host (module Step.Common,attrT,findPK,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexFieldRec,indexer,indexPred) where
+module Step.Host (module Step.Common,attrT,findPK,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexFieldRec,indexer,indexPred,genPredicate) where
 
 import Types
 import Control.Applicative.Lift
@@ -61,10 +61,17 @@ indexPred (a@(IProd _ _),eq,v) r =
     Nothing ->  errorWithStackTrace ("cant find attr" <> show a)
     Just (Attr _ rv) ->
       case eq of
+        "is not null" -> isJust $ unSOptional' rv
+        "is null" -> isNothing $ unSOptional' rv
         "=" -> rv == v
         "<@" -> case v of
                   IntervalTB1 l -> I.member  rv l
+                  i -> errorWithStackTrace ("Param not implemented " <> show i )
         i -> errorWithStackTrace ("Operator not implemented " <> i )
+    Just (IT _ rv) ->
+      case eq of
+        "is not null" -> isJust $ unSOptional' rv
+        "is null" -> isNothing $ unSOptional' rv
 
 indexField :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
 indexField p@(IProd b l) v = unTB <$> findAttr  l  (snd v)
@@ -74,6 +81,10 @@ indexFieldRec :: Access Text -> TBData Key Showable -> Maybe (Column Key Showabl
 indexFieldRec p@(IProd b l) v = unTB <$> findAttr  l  (snd v)
 indexFieldRec n@(Nested ix@(IProd b l) (Many[nt]) ) v = join $ join $ fmap (indexFieldRec nt) . listToMaybe . F.toList . _fkttable.  unTB <$> findFK l (snd v)
 
+genPredicate i (Many l) = AndColl (genPredicate i <$> l)
+genPredicate i (IProd b l) = AndColl $ catMaybes $ (\l -> if b then Just $ PrimColl (IProd b [l],if i then "is not null" else "is null" ,LeftTB1 Nothing) else Nothing ) <$> l
+genPredicate i (Nested p l ) = AndColl [genPredicate i p ]
+genPredicate _ i = errorWithStackTrace (show i)
 
 checkField :: Access Text -> Column Key Showable -> Errors [Access Text] (Column Key Showable)
 checkField p@(Point ix) _ = failure [p]
@@ -111,6 +122,7 @@ checkTable' (Many l) (m,v) =
 
 
 checkTable l b = eitherToMaybe $ runErrors (checkTable' l b)
+
 
 
 

@@ -600,7 +600,7 @@ indexItens s tb@(FKT ifk rel _) offsetT inner old = fmap constFKT  <$> bres
     constFKT a = FKT (mapComp (mapFAttr (const (ArrayTB1 ref ))) <$> ifk)   rel (ArrayTB1 tb )
       where (ref,tb) = Non.unzip a
     projFKT (FKT i  _ j ) = (head $ fmap (unAttr.unTB ) $ i,  j)
-    fktzip (ArrayTB1 lc , ArrayTB1 m) = traceShow (lc,m ,Non.zip lc m) Non.zip lc m
+    fktzip (ArrayTB1 lc , ArrayTB1 m) =  Non.zip lc m
 indexItens s tb@(IT na _) offsetT inner old = fmap constIT <$> bres
   where
     bres2 = fmap (fmap _fkttable) <$> takeArray inner
@@ -700,10 +700,13 @@ buildUI km i  tdi = go i tdi
 
 buildPrim :: [FieldModifier] ->Tidings (Maybe Showable) ->   KPrim -> UI (TrivialWidget (Maybe Showable))
 buildPrim fm tdi i = case i of
-         {-PPosition -> do
-              let addrs = fmap (\(SPosition (Position (lon,lat,_)))-> "http://maps.google.com/?output=embed&q=" <> (urlEncode False $ BSC.pack $show lat  <> "," <>  show lon )) <$>  tdi
-            el <- mkElement "iframe" # sink UI.src (maybe "" BSC.unpack <$> facts addrs) # set style [("width","99%"),("height","300px")]
-            return $ TrivialWidget tdi el-}
+         PPosition -> do
+            lon <- buildPrim fm (fmap (\(SPosition (Position (lon,_,_))) -> SDouble lon ) <$> tdi) PDouble
+            lat <- buildPrim fm (fmap (\(SPosition (Position (_,lat,_))) -> SDouble lat ) <$> tdi) PDouble
+            alt <- buildPrim fm (fmap (\(SPosition (Position (_,_,alt))) -> SDouble alt ) <$> tdi) PDouble
+            let res = liftA3 (\(SDouble a)(SDouble b) (SDouble c) -> SPosition (Position (a,b,c))) <$> triding lon <*> triding lat <*> triding alt
+            composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children (getElement <$> [lon,lat,alt])
+            return $ TrivialWidget res composed
          PBoolean -> do
            res <- checkedWidgetM (fmap (\(SBoolean i) -> i) <$> tdi )
            return (fmap SBoolean <$> res)

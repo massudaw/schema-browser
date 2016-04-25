@@ -275,6 +275,18 @@ tableType (ArrayTB1 (i :| _ )) = tableType i <> "[]"
 tableType (LeftTB1 (Just i)) = tableType i
 tableType (TB1 (m,_)) = kvMetaFullName  m
 
+unLB (Compose (Labeled _ l)) = l
+unLB (Compose (Unlabeled  l)) = l
+
+allAttr :: FTB  (KVMetadata Key,
+                      Compose
+                        (Labeled Text)
+                        (KV (Compose (Labeled Text) (TB (Labeled Text))))
+                        Key
+                        ()) -> Bool
+allAttr (TB1 (i,k)) = F.all (isAttr . unLB ) (_kvvalues $ unLB  k)
+  where isAttr (Attr _ _) = True
+        isAttr _ = False
 
 expandJoin :: Bool -> [Compose (Labeled Text) (TB (Labeled Text)) Key ()] -> Labeled Text (TB (Labeled Text) Key ()) -> Writer [Text] Text
 expandJoin left env (Unlabeled  (IT i (LeftTB1 (Just tb) )))
@@ -284,7 +296,7 @@ expandJoin left env (Labeled l (IT i (LeftTB1 (Just tb) )))
 expandJoin left env (Labeled l (IT _ (ArrayTB1 (tb :| _ ) )))
     = do
     tjoin <- expandQuery left tb
-    return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> (explodeRow tb {-<> (if allAttr tb then  " :: " <> tableType tb else "")-} ) <> "  order by arrrow ) as " <> l <> " FROM " <> expandInlineArrayTable tb <> tjoin <> " )  as " <>  label tas <> " ON true"
+    return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> (explodeRow tb <> (if allAttr tb then  " :: " <> tableType tb else "") ) <> "  order by arrrow ) as " <> l <> " FROM " <> expandInlineArrayTable tb <> tjoin <> " )  as " <>  label tas <> " ON true"
         where
           tas = getTas tb
           getTas (DelayedTB1 (Just tb))  = getTas tb

@@ -6,6 +6,7 @@ module Schema where
 import Data.String
 import Types
 import Codec.Compression.GZip
+import Step.Common
 import Data.Tuple
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM

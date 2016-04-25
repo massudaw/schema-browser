@@ -51,9 +51,7 @@ insertPatch f conn path@(m ,s,i ) t =  liftIO$ if not $ L.null serialAttr
         let
           iquery :: String
           iquery = T.unpack $ prequery <> " RETURNING ROW(" <>  T.intercalate "," (projKey serialAttr) <> ")"
-        print iquery
         out <-  fmap safeHead $ liftIO $ queryWith (f (mapRecord (const ()) serialTB )) conn (fromString  iquery ) directAttr
-        print out
         let Just (_,_ ,gen) =  join $ diff serialTB <$> out
             comp = compact (i <> gen)
         return (m,getPKM (justError "no out insert" out) ,comp )
@@ -132,10 +130,11 @@ paginate inf t order off size koldpre wherepred = do
               que =  selectQuery t <> pred <> orderQ
             in (que, ordevalue <>  predvalue )
     let quec = fromString $ T.unpack $ "SELECT *,count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
+    print quec
     v <- uncurry (queryWith (withCount (fromRecord (unTlabel' t)) ) (conn inf ) ) (quec, maybe [] (fmap (firstTB (recoverFields inf)))  attr)
     print (maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int]))
     return ((maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])), fmap fst v)
-  where pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  (orderquery <> predquery)
+  where pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  ( orderquery <> predquery)
         equality (pred,k) = " ? " <> pred <> inattr k
         (orderquery , ordevalue) =
           let
@@ -154,17 +153,33 @@ paginate inf t order off size koldpre wherepred = do
                   eqpk =  (fmap snd <$> eqspred)
                   eqpred = nonEmpty lpred
                 in (eqquery <$> eqspred , eqpk)
-              WherePredicate (OrColl wpred) ->
-                let
-                  eqpk = fmap (\(a,_,e) -> Attr (fst (indexFieldL a t)) e)<$> nonEmpty wpred
-                in (pure . (\i -> " (" <> i <> ") ") . T.intercalate " OR " . fmap (\(a,e,i) ->
-                     let idx = indexFieldL a t
-                     in snd idx <> " " <> e  <> " ? " <> inferParamType e (keyType $ fst idx)  )<$> nonEmpty wpred , eqpk )
+              WherePredicate wpred -> printPred t wpred
 
 
         offsetQ = " OFFSET " <> T.pack (show off)
         limitQ = " LIMIT " <> T.pack (show size)
         orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first (justLabel t) <$> order)
+
+printPred :: TB3Data (Labeled Text)  Key b ->  BoolCollection (Access Text,Text,FTB Showable) -> (Maybe [Text],Maybe [Column Key Showable])
+printPred t (PrimColl (a,e,i)) =
+                     let idx = indexFieldL a t
+                         opvalue i@"is not null" =  i
+                         opvalue i@"is null" =  i
+                         opvalue  i = i <> " ? " <> inferParamType e (keyType $ fst idx)
+                         opparam "is not null" =  Nothing
+                         opparam "is null" =  Nothing
+                         opparam _ = Just $ Attr (fst idx ) i
+
+                     in (Just $ pure $ snd idx <> " " <> opvalue e ,pure <$> opparam e )
+printPred t (OrColl wpred) =
+                let
+                  w = unzip . fmap (printPred  t) <$> nonEmpty wpred
+                in (pure . (\i -> " (" <> i <> ") ") . T.intercalate " OR " <$> join (nonEmpty. concat . catMaybes . fst <$> w) , concat . catMaybes . snd <$> w )
+printPred t (AndColl wpred) =
+                let
+                  w = unzip . fmap (printPred  t) <$> nonEmpty wpred
+                in (pure . (\i -> " (" <> i <> ") ") . T.intercalate " AND " <$>  join (nonEmpty . concat . catMaybes .fst <$> w) , concat . catMaybes . snd <$> w )
+
 
 inferParamType e (KOptional i) = inferParamType e i
 inferParamType "<@" (Primitive (AtomicPrim PDate )) = ":: daterange"
@@ -266,7 +281,6 @@ insertMod j  = do
     let
       table = lookTable inf (_kvname (fst  j))
     kvn <- insertPatch (fmap (mapKey' (recoverFields inf)) . fromRecord . (mapKey' (typeTrans inf))) (conn  inf) (patch $ mapKey' (recoverFields inf) j) (mapTableK (recoverFields inf ) table)
-    print ("posinsert",kvn)
     let mod =  TableModification Nothing table (firstPatch (typeTrans inf) $ kvn)
     --Just <$> logTableModification inf mod
     return $ Just  mod

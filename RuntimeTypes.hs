@@ -106,16 +106,6 @@ data DBVar2 k v=
 
 idxColTid db =  (,) <$> idxTid db <*> collectionTid db
 
-data BoolCollection a
- = AndColl [a]
- | OrColl [a]
- deriving(Show,Eq,Ord,Functor,Foldable)
-
-data WherePredicate
-  = LegacyPredicate [(T.Text,Column Key Showable)]
-  | WherePredicate (BoolCollection (Access T.Text ,T.Text,FTB Showable ))
-  deriving (Show,Eq,Ord)
-
 type DBVar = DBVar2 Key Showable
 type Collection k v = (Map WherePredicate (Int,Map Int (PageTokenF k v)),GiST (TBIndex k  v ) (TBData k v))
 type TableIndex k v = GiST (TBIndex k  v ) (TBData k v)

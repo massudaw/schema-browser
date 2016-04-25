@@ -9,6 +9,7 @@ import TP.Agenda
 import TP.Map
 import qualified NonEmpty as Non
 import Data.Char
+import Step.Common
 import Query
 import Data.Time
 import Text
@@ -277,7 +278,7 @@ chooserTable inf cliTid cli = do
   filterInpBh <- stepper "" (UI.valueChange filterInp)
   -- Load Metadata Tables
   (orddb ,(_,orderMap)) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "ordering"  Nothing Nothing [] $ LegacyPredicate [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
-  (translation,_) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] $LegacyPredicate [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
+  (translation,_) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] $ LegacyPredicate [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
   (authorization,_) <- liftIO$ transactionNoLog (meta inf) $ selectFrom "authorization" Nothing Nothing [] $ LegacyPredicate [("=",liftField (meta inf) "authorization" $ uncurry Attr $("grantee",TB1 $ SText (username inf) )), ("=",liftField (meta inf) "authorization" $ uncurry Attr $("table_schema",TB1 $ SText (schemaName inf) ))]
 
   let selTable = join . fmap (flip M.lookup (pkMap inf) )
