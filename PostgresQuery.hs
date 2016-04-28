@@ -123,7 +123,6 @@ updatePatch conn kv old  t =
 
 differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 
-
 paginate inf t order off size koldpre wherepred = do
     let (que,attr) =
             let
@@ -138,12 +137,12 @@ paginate inf t order off size koldpre wherepred = do
         equality (pred,k) = " ? " <> pred <> inattr k
         (orderquery , ordevalue) =
           let
-            oq = fmap (const $ pure $ generateComparison (first (justLabel t) <$> order)) koldpre
+            oq = (const $ pure $ generateComparison (first (justLabel t) <$> order)) <$> koldpre
             koldPk :: Maybe [TB Identity Key Showable]
             koldPk =  (\k -> uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) k ) <$> koldpre
             pkParam =  koldPk <> (tail .reverse <$> koldPk)
           in (oq,pkParam)
-        (predquery , predvalue ) = case wherepred of
+        (predquery , predvalue ) = case traceShowId wherepred of
               LegacyPredicate lpred ->
                 let
                   eqquery :: [(Text,TB Identity Key a)] -> [Text]
@@ -160,17 +159,17 @@ paginate inf t order off size koldpre wherepred = do
         limitQ = " LIMIT " <> T.pack (show size)
         orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first (justLabel t) <$> order)
 
-printPred :: TB3Data (Labeled Text)  Key b ->  BoolCollection (Access Text,Text,FTB Showable) -> (Maybe [Text],Maybe [Column Key Showable])
+printPred :: Show b => TB3Data (Labeled Text)  Key b ->  BoolCollection (Access Text,Text,FTB Showable) -> (Maybe [Text],Maybe [Column Key Showable])
 printPred t (PrimColl (a,e,i)) =
                      let idx = indexFieldL a t
-                         opvalue i@"is not null" =  i
-                         opvalue i@"is null" =  i
-                         opvalue  i = i <> " ? " <> inferParamType e (keyType $ fst idx)
+                         opvalue i@"is not null" =  [i]
+                         opvalue i@"is null" =  [i]
+                         opvalue  i = (\v -> i <> " ? " <> inferParamType e (keyType (fst v))) <$> idx
                          opparam "is not null" =  Nothing
                          opparam "is null" =  Nothing
-                         opparam _ = Just $ Attr (fst idx ) i
+                         opparam _ = Just $ flip Attr i .fst <$> (idx )
 
-                     in (Just $ pure $ snd idx <> " " <> opvalue e ,pure <$> opparam e )
+                     in (Just $ zipWith (\i j -> i <> " " <> j) (snd <$> idx) (opvalue e) ,opparam e )
 printPred t (OrColl wpred) =
                 let
                   w = unzip . fmap (printPred  t) <$> nonEmpty wpred
@@ -209,36 +208,17 @@ findAttrL l v =  M.lookup (S.fromList $ fmap Inline l) $ M.mapKeys (S.map (fmap 
 unLB (Compose (Labeled l v )) = v
 unLB (Compose (Unlabeled v )) = v
 
-{-
-replace ix i (Nested k nt) = Nested k (replace ix i nt)
-replace ix i (Many nt) = Many (fmap (replace ix i) nt )
-replace ix i (Point p)
-  | ix == p = Rec ix i
-  | otherwise = (Point p)
-replace ix i v = v
--- replace ix i v= errorWithStackTrace (show (ix,i,v))
-indexPred (Many i ,eq,v) r = all (\i -> indexPred (i,eq,v) r) i
-indexPred (n@(Nested k nt ) ,eq,v) r
-  = case  indexField n r of
-    Nothing -> errorWithStackTrace ("cant find attr" <> show n)
-    Just i ->  recPred $ indexPred (nt , eq ,v) <$> _fkttable  i
-  where
-    recPred (SerialTB1 i) = maybe False recPred i
-    recPred (LeftTB1 i) = maybe False recPred i
-    recPred (TB1 i ) = i
-    recPred (ArrayTB1 i) = all recPred (F.toList i)
-indexPred (a@(IProd _ _),eq,v) r =
-  case indexField a r of
-    Nothing ->  errorWithStackTrace ("cant find attr" <> show a)
-    Just (Attr _ rv) ->
-      case eq of
-        "=" -> rv == v
-        i -> errorWithStackTrace ("Operator not implemented " <> i )
--}
+indexFieldL :: Show a => Access Text -> TB3Data (Labeled Text) Key a -> [(Key,Text)]
+indexFieldL p@(IProd b l) v = case  findAttrL  l  (snd v) of
+                                Just i -> [utlabel i]
+                                Nothing -> case unLB<$>  findFKL l (snd v) of
+                                    Just (FKT ref _ _) ->  (\l -> utlabel . justError ("no attr" <> show (ref,l)) . L.find ((==[l]).  fmap (keyValue . _relOrigin). keyattr ) $ ref ) <$>l
+                                    Nothing -> errorWithStackTrace ("no fkt" <> show (p,snd v))
 
-indexFieldL :: Access Text -> TB3Data (Labeled Text) Key a -> (Key,Text)
-indexFieldL p@(IProd b l) v = utlabel $ justError "no prod" $ findAttrL  l  (snd v)
-indexFieldL n@(Nested ix@(IProd b l) (Many[nt]) ) v = justError "no table on nested" $ fmap (indexFieldL nt) . listToMaybe . F.toList . _fkttable.  unLB $ justError "no nested" $ findFKL l (snd v)
+indexFieldL n@(Nested ix@(IProd b l) nt) v =  concat . fmap (indexFieldL nt) .  F.toList . _fkttable.  unLB $ justError "no nested" $ findFKL l (snd v)
+indexFieldL (Many nt ) v =  concat $ flip indexFieldL v <$> nt
+indexFieldL (ISum nt ) v =  concat $ flip indexFieldL v <$> nt
+indexFieldL i v = errorWithStackTrace (show (i,v))
 
 utlabel = tlabel' . getCompose
 

@@ -64,7 +64,8 @@ refTable  inf table  = do
   mmap <- atomically $ readTMVar (mvarMap inf)
   return $ justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
 
-tbpred un v = G.Idex $ justError "" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
+
+tbpredM un v = G.Idex <$> (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
 
 createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key Showable) (TBData Key Showable)
 createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un (tableNonRef' i) )
@@ -288,7 +289,7 @@ fullInsert' ((k1,v1) )  = do
    let proj = _kvvalues . unTB
    ret <-  (k1,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
    (_,(_,l)) <- eventTable (lookTable inf (_kvname k1)) Nothing Nothing [] (LegacyPredicate [])
-   if  isJust $ G.lookup (tbpred (S.fromList $ _kvpk k1)  ret) l
+   if  isJust $ join $ flip G.lookup l <$> tbpredM (S.fromList $ _kvpk k1)  ret
       then do
         return ret
       else do

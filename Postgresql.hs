@@ -99,6 +99,7 @@ postgresPrim =
   ,("character_data",PText)
   ,("varchar",PText)
   ,("text",PText)
+  ,("address",PAddress)
   ,("character",PText)
   ,("char",PText)
   ,("bpchar",PText)
@@ -322,7 +323,7 @@ parseLabeledTable (LeftTB1 (Just i )) =
 parseLabeledTable  tb1 = traverse parseRecord  $ tb1
 
 parseRecord  (me,m) = (char '('  *> (do
-  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (M.toList (replaceRecRel  (_kvvalues $ unTB m) (fmap (fmap (fmap S.fromList) ) $ _kvrecrels  me))) ) (char ',')
+  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr.snd)) $M.toList (replaceRecRel  (_kvvalues $ unTB m) (fmap (fmap (fmap S.fromList) ) $ _kvrecrels  me))) ) (char ',')
   return (me,Compose $ Identity $  KV (M.fromList im) )) <*  char ')' )
 
 parseRow els  = (char '('  *> (do
@@ -385,6 +386,7 @@ parsePrim i =  do
         PDynamic ->  let
               pr = SDynamic . B.decode . BSL.fromStrict . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}")
                 in doublequoted pr <|> pr
+        PAddress ->  parsePrim PText
         PBinary ->  let
               pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}")
                 in doublequoted pr <|> pr

@@ -314,9 +314,10 @@ onkey :: Element -> ((Int,Bool,Bool,Bool) -> Bool) -> Event String
 onkey el f = unsafeMapUI el (const $ UI.get value el) (filterE f $ filterJust $ readMouse <$> domEvent "keydown" el)
 
 onAltEnter el = onkey el (\case{(13,False,True,False)-> True ; i -> False})
-onAltE el = onkey el (\case{(13,False,True,False)-> True ; i -> False})
-onAltI el = onkey el (\case{(13,False,True,False)-> True ; i -> False})
-onAltD el = onkey el (\case{(13,False,True,False)-> True ; i -> False})
+onAltE el = onkey el (\case{(69,False,True,False)-> True ; i -> False})
+onAltU el = onkey el (\case{(85,False,True,False)-> True ; i -> False})
+onAltI el = onkey el (\case{(73,False,True,False)-> True ; i -> False})
+onAltD el = onkey el (\case{(68,False,True,False)-> True ; i -> False})
 onEnter el = onkey el (\case {(13,_,_,_)-> True; i -> False})
 onEsc el = onkey el (\case {(27,_,_,_) -> True ; i -> False})
 

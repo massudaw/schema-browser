@@ -419,12 +419,12 @@ siapi3Plugin  = FPlugins pname tname  $ BoundedPlugin2 url
               $ atR "id_owner,id_contact"
                 $ atR "id_owner"
                   $ atAny "ir_reg" [varTB "cpf_number",varTB "cnpj_number"] -< t
-      v <- atR "protocolo,ano" (proc cpf -> do
+      v <- atMR "protocolo,ano" (proc cpf -> do
         protocolo <- idxR "protocolo" -< ()
         ano <- idxR "ano" -< ()
         odxR "taxa_paga" -< ()
         odxR "aproval_date" -< ()
-        atR "a[(l,nn,el)ondamentos" (proc t -> do
+        atR "andamentos" (proc t -> do
             odxR "andamento_date" -<  t
             odxR "andamento_description" -<  t
             odxR "andamento_user" -<  t
@@ -742,4 +742,4 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
 
 
 plugList :: [Plugins]
-plugList = [siapi2Hack] -- [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo]
+plugList = {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo]

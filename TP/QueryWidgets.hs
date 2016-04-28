@@ -84,9 +84,11 @@ import qualified Data.ByteString.Lazy.Char8 as BSL
 import GHC.Stack
 
 type PKConstraint = [Column CoreKey Showable] -> Bool
+
 type TBConstraint = TBData CoreKey Showable -> Bool
 
 type SelPKConstraint = [([Column CoreKey ()],Tidings PKConstraint)]
+
 type SelTBConstraint = [([Column CoreKey ()],Tidings TBConstraint)]
 
 type RefTables = (Tidings (Collection CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  CoreKey Showable) (TBData CoreKey Showable)), TQueue [TBIdx CoreKey Showable] )
@@ -236,6 +238,7 @@ attrSize (Attr k _ ) = go  (keyType k)
                        PDate -> (3,1)
                        PTimestamp _ -> (3,1)
                        PDayTime -> (3,1)
+                       PAddress -> (12,8)
                        PMime m -> case m of
                                     "image/jpg" ->  (4,8)
                                     "application/pdf" ->  (6,8)
@@ -247,7 +250,6 @@ attrSize (Attr k _ ) = go  (keyType k)
 
 getRelOrigin :: [Column k () ] -> [k ]
 getRelOrigin =  fmap _relOrigin . concat . fmap keyattri
-
 
 
 
@@ -514,32 +516,36 @@ processPanelTable lbox inf attrsB reftb@(res,_,gist,_) inscrud table oldItemsi =
         where ix = (S.fromList $ _kvpk (tableMeta table))
               refM = traverse (traverse unSOptional') (getPKM ref)
 
+  let insertEnabled = liftA2 (&&) (isJust . fmap (tableNonRef') <$> facts inscrud ) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (facts inscrud ) (facts gist ))
   insertB <- UI.button #
           set text "INSERT" #
           set UI.class_ "buttonSet" #
           set UI.style (noneShowSpan ("INSERT" `elem` rawAuthorization table ))  #
   -- Insert when isValid
-          sink UI.enabled (liftA2 (&&) (isJust . fmap (tableNonRef') <$> facts inscrud ) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (facts inscrud ) (facts gist )))
+          sink UI.enabled insertEnabled
+  let editEnabled = liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . snd . tableNonRef' )<$> attrsB) (fmap (_kvvalues . unTB .  snd .tableNonRef' )<$> facts oldItemsi)) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) attrsB  (facts gist) )
   editB <- UI.button #
          set text "EDIT" #
          set UI.class_ "buttonSet"#
          set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table )) #
   -- Edit when any persistent field has changed
-         sink UI.enabled (liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . snd . tableNonRef' )<$> attrsB) (fmap (_kvvalues . unTB .  snd .tableNonRef' )<$> facts oldItemsi)) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) attrsB  (facts gist) ))
+         sink UI.enabled editEnabled
 
+  let deleteEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (facts oldItemsi ) (facts gist ))
   deleteB <- UI.button #
          set text "DELETE" #
          set UI.class_ "buttonSet"#
          set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table )) #
   -- Delete when isValid
-         sink UI.enabled ( liftA2 (&&) (isJust . fmap (tableNonRef') <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (facts oldItemsi ) (facts gist ) ))
+         sink UI.enabled deleteEnabled
   let
+         filterKey enabled k = const () <$> filterApply (const <$> enabled) (k )
          crudEdi (Just (i)) (Just (j)) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $diff i  g) $ trace "after edit " transaction inf $ fullDiffEditInsert  i j
          crudIns (Just (j))   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) ) . (trace "after transaction ") <$> transaction inf ((trace "after insert ") <$> fullDiffInsert  j)
          crudDel (Just (j))  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> transaction inf (deleteFrom j)
-  (diffEdi,ediFin) <- mapEventFin id $ crudEdi <$> facts oldItemsi <*> attrsB <@ UI.click editB
+  (diffEdi,ediFin) <- mapEventFin id $ crudEdi <$> facts oldItemsi <*> attrsB <@ (unionWith const (UI.click editB) (filterKey editEnabled ( onAltU lbox)))
   (diffDel,delFin ) <- mapEventFin id $ crudDel <$> facts oldItemsi <@ UI.click deleteB
-  (diffIns,insFin) <- mapEventFin id $ crudIns <$> facts inscrud <@ (unionWith const (UI.click insertB) (const () <$> onAltEnter lbox))
+  (diffIns,insFin) <- mapEventFin id $ crudIns <$> facts inscrud <@ (unionWith const (UI.click insertB) (filterKey  insertEnabled (onAltI lbox)))
   addElemFin insertB insFin
   addElemFin deleteB delFin
   addElemFin editB   ediFin
@@ -756,6 +762,21 @@ buildPrim fm tdi i = case i of
            let ev = if elem FWrite fm then unionWith const (rumors tdi) (Just . SBinary . BSC.pack <$> UI.valueChange f) else rumors tdi
            step <- stepper  ini ev
            return (TrivialWidget (tidings step ev) f)
+         PAddress -> do
+           let binarySrc = (\(SText i) -> "https://drive.google.com/embeddedfolderview?id=" <> T.unpack i <> "#grid")
+
+           i <- UI.input  # sink UI.value ( maybe "" (\(SText t) -> T.unpack t) <$> facts tdi)
+           let tdie = unionWith const (Just .SText . T.pack <$> UI.valueChange i) (rumors tdi)
+           vi <- currentValue (facts tdi)
+           tdib <- stepper   vi tdie
+           let tdi2 = tidings tdib tdie
+           let fty = ("iframe","src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
+           f <- pdfFrame fty (facts tdi2) # sink0 UI.style (noneShow . isJust <$> facts tdi2)
+           fd <- UI.div # set UI.style [("display","inline-flex")] # set children [i]
+           res <- UI.div # set children [fd,f]
+           paintBorder res (facts tdi2) (facts  tdi)
+           return (TrivialWidget tdi2 res)
+
          PMime mime -> do
            let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
            clearB <- UI.button # set UI.text "clear"

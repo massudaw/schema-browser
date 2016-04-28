@@ -44,12 +44,11 @@ replace ix i (Point p)
   | ix == p = Rec ix i
   | otherwise = (Point p)
 replace ix i v = v
--- replace ix i v= errorWithStackTrace (show (ix,i,v))
 
 indexPred (Many i ,eq,v) r = all (\i -> indexPred (i,eq,v) r) i
 indexPred (n@(Nested k nt ) ,eq,v) r
   = case  indexField n r of
-    Nothing -> errorWithStackTrace ("cant find attr" <> show n)
+    Nothing -> errorWithStackTrace ("cant find attr" <> show (n,nt))
     Just i ->  recPred $ indexPred (nt , eq ,v) <$> _fkttable  i
   where
     recPred (SerialTB1 i) = maybe False recPred i
@@ -58,7 +57,7 @@ indexPred (n@(Nested k nt ) ,eq,v) r
     recPred (ArrayTB1 i) = all recPred (F.toList i)
 indexPred (a@(IProd _ _),eq,v) r =
   case indexField a r of
-    Nothing ->  errorWithStackTrace ("cant find attr" <> show a)
+    Nothing ->  errorWithStackTrace ("cant find attr" <> show (a,eq,v,r))
     Just (Attr _ rv) ->
       case eq of
         "is not null" -> isJust $ unSOptional' rv
@@ -72,19 +71,31 @@ indexPred (a@(IProd _ _),eq,v) r =
       case eq of
         "is not null" -> isJust $ unSOptional' rv
         "is null" -> isNothing $ unSOptional' rv
+    Just (FKT _ _ rv) ->
+      case eq of
+        "is not null" -> isJust $ unSOptional' rv
+        "is null" -> isNothing $ unSOptional' rv
 
 indexField :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
-indexField p@(IProd b l) v = unTB <$> findAttr  l  (snd v)
+indexField p@(IProd b l) v = case unTB <$> findAttr  l  (snd v) of
+                               Nothing -> case unTB <$>  findFK l (snd v) of
+                                  Just (FKT ref _ _) ->  unTB <$> ((\l ->  L.find ((==[l]).  fmap (keyValue . _relOrigin). keyattr ) $ ref ) $ head l)
+                                  Nothing -> Nothing
+                               i -> i
 indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findFK l (snd v)
 
 indexFieldRec :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
 indexFieldRec p@(IProd b l) v = unTB <$> findAttr  l  (snd v)
 indexFieldRec n@(Nested ix@(IProd b l) (Many[nt]) ) v = join $ join $ fmap (indexFieldRec nt) . listToMaybe . F.toList . _fkttable.  unTB <$> findFK l (snd v)
 
-genPredicate i (Many l) = AndColl (genPredicate i <$> l)
-genPredicate i (IProd b l) = AndColl $ catMaybes $ (\l -> if b then Just $ PrimColl (IProd b [l],if i then "is not null" else "is null" ,LeftTB1 Nothing) else Nothing ) <$> l
-genPredicate i (Nested p l ) = AndColl [genPredicate i p ]
+genPredicate i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
+genPredicate i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
+genPredicate i (IProd b l) =  (\l -> if b then Just $ PrimColl (IProd b l,if i then "is not null" else "is null" ,LeftTB1 Nothing) else Nothing ) $ l
+genPredicate i n@(Nested p l ) = genPredicate i p -- AndColl <$> liftA2 (\i  j -> [i,j]) (genPredicate i p)  ( genNestedPredicate p i l)
 genPredicate _ i = errorWithStackTrace (show i)
+
+genNestedPredicate n i v = fmap (\(a,b,c) -> (Nested n a , b ,c)) <$> genPredicate i v
+
 
 checkField :: Access Text -> Column Key Showable -> Errors [Access Text] (Column Key Showable)
 checkField p@(Point ix) _ = failure [p]

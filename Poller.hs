@@ -85,8 +85,8 @@ poller schm authmap db plugs is_test = do
                   if  True -- is_test || diffUTCTime current start  >  fromIntegral intervalsec
                   then do
                       putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
-                      let fetchSize = 5000
-                          pred = (WherePredicate $ AndColl[ genPredicate True (fst f) , genPredicate False (snd f)] )
+                      let fetchSize = 500
+                          pred =  (WherePredicate $ AndColl (catMaybes [ genPredicate True (fst f) , genPredicate False (snd f)]) )
                       (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  Nothing (Just fetchSize) []  pred
                       threadDelay 10000
                       let sizeL = justLook pred  l
@@ -109,7 +109,7 @@ poller schm authmap db plugs is_test = do
                                  return ()
                                  ) diff'
                               )
-                            ) . L.transpose .  chuncksOf 25 $ evb
+                            ) . L.transpose .  chuncksOf 20 $ evb
                           return $ concat i
                           ) [0..(lengthPage (fst sizeL) fetchSize -1)]
                       end <- getCurrentTime

@@ -10,6 +10,7 @@ module Postgresql.Printer
   where
 
 import Query
+import Data.Ord
 import NonEmpty (NonEmpty(..))
 import Data.Functor.Apply
 import Data.Bifunctor
@@ -296,7 +297,7 @@ expandJoin left env (Labeled l (IT i (LeftTB1 (Just tb) )))
 expandJoin left env (Labeled l (IT _ (ArrayTB1 (tb :| _ ) )))
     = do
     tjoin <- expandQuery left tb
-    return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> (explodeRow tb <> (if allAttr tb then  " :: " <> tableType tb else "") ) <> "  order by arrrow ) as " <> l <> " FROM " <> expandInlineArrayTable tb <> tjoin <> " )  as " <>  label tas <> " ON true"
+    return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> explodeRow tb <> (if allAttr tb then  " :: " <> tableType tb else "")  <> "  order by arrrow ) as " <> l <> " FROM " <> expandInlineArrayTable tb <> tjoin <> " )  as " <>  label tas <> " ON true"
         where
           tas = getTas tb
           getTas (DelayedTB1 (Just tb))  = getTas tb
@@ -370,8 +371,8 @@ explodeRow' block assoc leaf (LeftTB1 (Just tb) ) = explodeRow' block assoc leaf
 explodeRow' block assoc leaf (ArrayTB1 (tb:|_) ) = explodeRow' block assoc leaf tb
 explodeRow' block assoc leaf (TB1 i ) = explodeRow'' block assoc leaf i
 
-explodeRow'' block assoc leaf  ((m ,Compose (Unlabeled (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
-explodeRow'' block assoc leaf  ((m ,Compose (Labeled l (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ F.toList  tb  ))
+explodeRow'' block assoc leaf  ((m ,Compose (Unlabeled (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr))$F.toList  tb  ))
+explodeRow'' block assoc leaf  ((m ,Compose (Labeled l (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr))$ F.toList  tb  ))
 
 explodeDelayed block assoc leaf (Labeled l (Attr k  _ ))
   | isKDelayed (keyType k) = leafDel (isArray (keyType k)) l

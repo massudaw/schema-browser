@@ -414,6 +414,7 @@ type FTB1 f k a = FTB (KVMetadata k, Compose f (KV (Compose f (TB f))) k a)
 data KPrim
    = PText
    | PBoolean
+   | PAddress
    | PInt
    | PDouble
    | PDate
