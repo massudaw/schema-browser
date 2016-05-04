@@ -361,11 +361,13 @@ retencaoServicos = FPlugins pname tname  $ PurePlugin url
     tname = "nota"
     url :: ArrowReaderM Identity
     url = proc t -> do
+      TB1 (SBoolean hasIssqn )<- idxK "issqn_substituicao" -< ()
       odxR "pis_retido" -< ()
       odxR "csll_retido" -< ()
       odxR "irpj_retido" -< ()
       odxR "cofins_retido" -< ()
       odxR "issqn_retido" -< ()
+      odxR "valor_liquido" -< ()
       v <- atK "id_payment" (
           doubleP "price"
           ) -< ()
@@ -373,13 +375,14 @@ retencaoServicos = FPlugins pname tname  $ PurePlugin url
           cofins = 0.03 * v
           csll = 0.01 * v
           irpj = 0.015 * v
-          issqn = 0.05 * v
+          issqn = if hasIssqn then 0.05 * v else 0
       returnA -< Just $ tblist $
           _tb <$> [att "pis_retido" pis
           ,att "cofins_retido" cofins
           ,att "csll_retido" csll
           ,att "irpj_retido" irpj
           ,att "issqn_retido" issqn
+          ,att "valor_liquido" (v - pis - cofins - csll - irpj - issqn)
           ]
 
 

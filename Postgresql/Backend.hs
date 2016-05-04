@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleContexts,TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
-module PostgresQuery where
+module Postgresql.Backend where
 
 import Types
 import Step.Common
@@ -7,6 +7,7 @@ import Step.Host
 import Safe
 import Control.Monad
 import Postgresql.Printer
+import Postgresql.Parser
 import Utils
 import Control.Monad.Reader
 import GHC.Stack
@@ -22,7 +23,6 @@ import Data.Ord
 import Data.Functor.Identity
 import qualified  Data.Map as M
 
-import Postgresql
 import Data.Tuple
 import Data.String
 

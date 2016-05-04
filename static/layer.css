@@ -90,6 +90,8 @@ a.btn.btn-red {
     border-color: rgba(0,0,0,0.9);
   }
 
+tr:nth-child(even) {background-color: #f2f2f2}
+table,td,th{border:1px gray solid}
 
 ul.navlist > li
 {

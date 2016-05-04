@@ -82,7 +82,7 @@ poller schm authmap db plugs is_test = do
                   (start,end,curr,current) <- checkTime polling tb
                   putStrLn $ "LAST RUN " <> show (schema,pname,start,end)
                   let intervalsec = intervalms `div` 10^3
-                  if  True -- is_test || diffUTCTime current start  >  fromIntegral intervalsec
+                  if  is_test || diffUTCTime current start  >  fromIntegral intervalsec
                   then do
                       putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let fetchSize = 500

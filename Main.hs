@@ -3,7 +3,7 @@ import TP.Browser
 import System.Process (rawSystem)
 import Poller
 import Plugins
-import PostgresQuery (connRoot)
+import Postgresql.Backend (connRoot)
 import Prelude hiding (head)
 import Control.Monad.Reader
 import Control.Concurrent

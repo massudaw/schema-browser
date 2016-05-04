@@ -94,8 +94,8 @@ executable threepenny-layer
     PandocRenderer
     Plugins
     Poller
-    PostgresQuery
-    Postgresql
+    Postgresql.Backend
+    Postgresql.Parser
     Postgresql.Printer
     PrefeituraSNFSE
     RuntimeTypes

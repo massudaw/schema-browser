@@ -5,6 +5,7 @@
 
 module TP.Browser where
 
+import TP.Account
 import TP.Agenda
 import TP.Map
 import qualified NonEmpty as Non
@@ -20,7 +21,7 @@ import Types
 import SchemaQuery
 import Plugins
 import TP.Widgets
-import PostgresQuery (postgresOps)
+import Postgresql.Backend (postgresOps)
 import SortList
 import Prelude hiding (head)
 import TP.QueryWidgets
@@ -106,7 +107,7 @@ setup smvar args w = void $ do
   let he = const True <$> UI.hover hoverBoard
   bhe <-stepper True he
   menu <- checkedWidget (tidings bhe he)
-  nav  <- buttonDivSet  ["Map","Event","Browser","Poll","Stats","Change","Exception"] (pure $ Just (head args) )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonDivSet  ["Map","Account","Agenda","Browser","Poll","Stats","Change","Exception"] (pure $ Just (head args) )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
   chooserDiv <- UI.div # set children  ([getElement menu] <> chooserItens <> [getElement nav ] ) # set UI.class_ "row" # set UI.style [("display","flex"),("align-items","flex-end"),("height","7vh"),("width","100%")]
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
@@ -116,8 +117,10 @@ setup smvar args w = void $ do
       case nav of
         "Map" -> do
             mapWidget inf body# set UI.style [("width","100%")]
-        "Event" -> do
+        "Agenda" -> do
             eventWidget inf body # set UI.style [("width","100%")]
+        "Account" -> do
+            accountWidget inf body # set UI.style [("width","100%")]
         "Poll" -> do
             element body #
               set items
@@ -276,33 +279,34 @@ chooserTable inf cliTid cli = do
       kitems = M.keys (pkMap inf)
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (UI.valueChange filterInp)
+  let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
   -- Load Metadata Tables
-  (orddb ,(_,orderMap)) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "ordering"  Nothing Nothing [] $ LegacyPredicate [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
-  (translation,_) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] $ LegacyPredicate [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]
-  (authorization,_) <- liftIO$ transactionNoLog (meta inf) $ selectFrom "authorization" Nothing Nothing [] $ LegacyPredicate [("=",liftField (meta inf) "authorization" $ uncurry Attr $("grantee",TB1 $ SText (username inf) )), ("=",liftField (meta inf) "authorization" $ uncurry Attr $("table_schema",TB1 $ SText (schemaName inf) ))]
+  (orddb ,authorization,translation) <- liftIO $ transactionNoLog  (meta inf) $
+      (,,) <$> (fst <$> (selectFrom "ordering"  Nothing Nothing [] $ LegacyPredicate [("=",liftField (meta inf) "ordering" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]))
+             <*> (fst <$>   (selectFrom "authorization" Nothing Nothing [] $ LegacyPredicate [("=",liftField (meta inf) "authorization" $ uncurry Attr $("grantee",TB1 $ SText (username inf) )), ("=",liftField (meta inf) "authorization" $ uncurry Attr $("table_schema",TB1 $ SText (schemaName inf) ))]))
+             <*> (fst <$>  (selectFrom "table_name_translation" Nothing Nothing [] $ LegacyPredicate [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))]))
 
   let selTable = join . fmap (flip M.lookup (pkMap inf) )
-      lookDesc = (\i j -> maybe (T.unpack $ maybe "" rawName j)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,TB1 $ SText $ schemaName inf),("table_name",TB1 $ SText (maybe ""  tableName j))]) i ) <$> collectionTid translation
+      lookDesc = (\i j -> maybe (T.unpack $ maybe "" rawName j)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,TB1 $ SText $ schemaName inf),("table_name",TB1 $ SText (maybe ""  tableName j))]) i) <$> collectionTid translation
       authorize =  (\autho t -> isJust $ G.lookup (idex  (meta inf) "authorization"  [("table_schema", TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText $ tableName t),("grantee",TB1 $ SText $ username inf)]) autho)  <$> collectionTid authorization
   let
-      filterLabel = (\j d -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> d (Just i)) ))<$> filterInpBh <*> facts lookDesc
+      filterLabel = (\j d -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> d (Just i))))<$> filterInpT <*> lookDesc
       tableUsage orderMap table = maybe (Right 0) (Left ) . fmap (lookAttr' (meta inf)  "usage" ) $  G.lookup  (G.Idex ( pk )) orderMap
           where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$> [("table_name",TB1 . SText . rawName $ table ), ("schema_name",TB1 $ SText (schemaName inf))]
-      buttonStyle k e = e # sink UI.text (facts $ lookDesc  <*> pure (selTable $ Just k)) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShow  <$> visible)
+      buttonStyle k e = e # sink0 UI.text (facts $ lookDesc  <*> pure (selTable $ Just k)) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink0 UI.style (noneShow   <$> facts visible)
         where tb =  justLook   k (pkMap inf)
-              visible  = (\i j -> i tb && j tb  ) <$> filterLabel <*> facts authorize
+              visible  = (\i j -> i tb && j tb) <$> filterLabel <*> authorize
 
-
-  bset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap . flip justLook   (pkMap inf))) kitems) ((\i j -> tableUsage i ( justLook   j (pkMap inf) )) <$> collectionTid orddb ) initKey  (\k -> UI.button  ) buttonStyle
+  bset <- buttonDivSetT kitems ((\i j -> tableUsage i ( justLook j (pkMap inf))) <$> collectionTid orddb ) initKey  (const UI.button) buttonStyle
   let bBset = triding bset
-      ordRow pkset orderMap =  field
+      ordRow orderMap pkset =  field
           where
-            field =  G.lookup  (G.Idex  pk ) orderMap
-            pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$>[("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
-      incClick field =  (fst field , getPKM field ,[patch $ fmap (+ (SNumeric 1)) (usage )]) :: TBIdx Key Showable
+            field =  G.lookup (G.Idex pk) orderMap
+            pk = L.sortBy (comparing fst) $ first (lookKey (meta inf ) "ordering") <$>[("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
+      incClick field =  (fst field , getPKM field ,[patch $ fmap (+ (SNumeric 1)) (usage )])
           where
                  usage = lookAttr' (meta inf ) "usage"   field
-  liftIO$ onEventIO ((\i j -> incClick <$> join ( flip ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
+  liftIO$ onEventIO ((\i j -> incClick <$> join (ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
     (traverse (\p -> do
       _ <- transactionNoLog (meta inf ) $ patchFrom  p
       putPatch (patchVar orddb) [p] ))
@@ -311,7 +315,7 @@ chooserTable inf cliTid cli = do
   tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [tbChooserI]
   nav  <- buttonDivSet ["Viewer","Browser","Exception","Change"] (pure $ Just "Browser")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5"
-  header <- UI.h1 # sink text (facts $ lookDesc <*>(selTable  <$> bBset)) # set UI.class_ "col-xs-7"
+  header <- UI.h1 # sink0 text (facts $ lookDesc <*>(selTable  <$> bBset)) # set UI.class_ "col-xs-7"
   chooserDiv <- UI.div # set children  [header ,getElement nav]  # set UI.style [("display","flex"),("align-items","flex-end")]
   body <- UI.div
 
@@ -326,9 +330,9 @@ chooserTable inf cliTid cli = do
             dash <- metaAllTableIndexV inf "plugin_exception" [("schema_name",TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText (tableName tableob) ) ]
             element body # set UI.children [dash]
         "Browser" -> do
-            let buttonStyle k e = e # sink UI.text (facts $ lookDesc  <*> pure (Just k)) # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShowSpan . ($k) <$> filterLabel)
+            let buttonStyle k e = e # sink UI.text (facts $ lookDesc  <*> pure (Just k)) # set UI.class_ "btn-xs btn-default buttonSet" # sink UI.style (noneShowSpan . ($k) <$> facts filterLabel)
                 tableK = justLook table (pkMap inf)
-            prebset <- buttonDivSetT (L.sortBy (flip $ comparing (tableUsage orderMap )) (tableK : (rawUnion tableK ))) (tableUsage <$> collectionTid orddb ) (pure (Just tableK)) (\k -> UI.button  ) buttonStyle
+            prebset <- buttonDivSetT ((tableK : (rawUnion tableK ))) (tableUsage <$> collectionTid orddb ) (pure (Just tableK)) (\k -> UI.button  ) buttonStyle
             els <- UI.div
             span <- mapUITEvent body (maybe UI.div  (\t -> viewerKey inf t cli cliTid)) (triding prebset)
             element els # sink UI.children (pure <$> facts span)
@@ -368,16 +372,15 @@ viewerKey inf table cli cliTid = mdo
       sortSet = rawPK table <>  L.filter (not .(`L.elem` rawPK table)) (F.toList . tableKeys . TB1 . tableNonRef' . allRec' (tableMap inf ) $ table)
   sortList <- selectUI sortSet ((,True) <$> rawPK table ) UI.div UI.div conv
   element sortList # set UI.style [("overflow-y","scroll"),("height","200px")]
-  asc <- checkedWidget (pure True)
   let
-     filteringPred i = (T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  .snd )
+     filteringPred i = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  .snd
      tsort = sorting' . filterOrd <$> triding sortList
      filtering res = (\t -> fmap (filter (filteringPred t )) )<$> filterInpT  <*> res
      pageSize = 20
      lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
         where (s,_)  = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup (LegacyPredicate []) fixmap
   inisort <- currentValue (facts tsort)
-  itemListEl <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
+  itemListEl <- UI.select # set UI.class_ "col-xs-6" # set UI.style [("width","100%")] # set UI.size "21"
   let wheel = negate <$> mousewheel itemListEl
   (offset,res3)<- mdo
     offset <- offsetField (pure 0) wheel  (lengthPage <$> facts res3)
@@ -390,25 +393,32 @@ viewerKey inf table cli cliTid = mdo
     paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
   page <- currentValue (facts paging)
   res4 <- mapT0Event (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
-  itemList <- listBoxEl itemListEl (fmap snd res4) (tidings st sel ) (pure id) ( pure attrLine )
-  let evsel =  unionWith const (rumors (triding itemList)) (rumors tdi)
+  itemList <- listBoxEl itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (fmap Just <$> tidings st sel ) (pure id) (pure (maybe id attrLine))
+  let evsel =  rumors (fmap join  $ triding itemList) -- (rumors tdi)
   (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFrom "clients"  Nothing Nothing [] (LegacyPredicate $ (fmap (liftField (meta inf) "clients") <$> [("=",  uncurry Attr $("schema",LeftTB1 $ Just $TB1 $ SText (schemaName inf) )), ("=",Attr "table" $ LeftTB1 $ Just $ TB1 $ SText (tableName table))]))
   liftIO $ onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) (Just inf) dbmeta  ccli (Just table ) (getPKM <$> i) cli =<< getCurrentTime )
   prop <- stepper cv evsel
-  let tds = tidings prop (diffEvent  prop evsel)
+  let tds = tidings prop evsel
 
-  (cru,ediff,pretdi) <- crudUITable inf (pure "Editor")  reftb [] [] (allRec' (tableMap inf) table) (tds)
+  (cru,ediff,pretdi) <- crudUITable inf (pure "Editor")  reftb [] [] (allRec' (tableMap inf) table) tds
   diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip apply j ) i) <$> facts pretdi <@> ediff
   let
-     sel = filterJust $ fmap (safeHead . concat) $ unions $ [(unions  [rumors  $triding itemList  ,rumors tdi]),diffUp]
+     sel = filterJust $ safeHead . concat <$> unions [ diffUp,unions [rumors  $ fmap join (triding itemList) ]]
   st <- stepper cv sel
   res2 <- stepper (vp) (rumors vpt)
   onEvent (pure <$> ediff) (liftIO .  putPatch var )
-  title <- UI.h4  #  sink text ( maybe "" (L.intercalate "," . fmap (renderShowable .snd) . F.toList . getPK. TB1 )  <$> facts tds) # set UI.class_ "col-xs-8"
+  title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine i  )  <$> st) # set UI.class_ "col-xs-8"
+  expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked filterEnabled# set UI.class_ "col-xs-1"
+  let evc = UI.checkedChange expand
+  filterEnabled <- stepper False evc
   insertDiv <- UI.div # set children [title,head cru] # set UI.class_ "row"
-  insertDivBody <- UI.div # set children [insertDiv,last cru]# set UI.class_ "row"
-  itemSel <- UI.ul # set items ((\i -> UI.li # set children [ i]) <$> [getElement offset ,filterInp ,getElement sortList,getElement asc] ) # set UI.class_ "col-xs-3"
-  itemSelec <- UI.div # set children [getElement itemList, itemSel] # set UI.class_ "row"
+  insertDivBody <- UI.div # set children [insertDiv,last cru]# set UI.class_ "col-xs-6"
+  element sortList # sink UI.style  (noneShow <$> filterEnabled) # set UI.class_ "col-xs-4"
+  element offset # set UI.class_ "col-xs-4"
+  element filterInp # set UI.class_ "col-xs-3"
+  element itemList # set UI.class_ "row"
+  itemSel <- UI.div # set children ( [expand , filterInp, getElement offset ,getElement sortList] ) # set UI.class_ "row"
+  itemSelec <- UI.div # set children [itemSel,getElement itemList] # set UI.class_ "col-xs-6"
   UI.div # set children ([itemSelec,insertDivBody ] )
 
 

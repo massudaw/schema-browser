@@ -90,7 +90,7 @@ function createAgenda(el,tdate,evs,view){
 
   $(el).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: date,lang: 'pt-br',editable: true,eventLimit: true, defaultView : view ,eventDrop : el.eventDrop , eventResize: el.eventResize, drop : el.drop, droppable:true ,eventClick: function(data, event, view) {
   var content = '<h3>'+data.title+'</h3>' + 
-      '<p><b>Start:</b> '+data.start+'<br />' + 
+      '<p><b>'+ data.field +':</b> '+new Date(data.start).toString()+'<br />' + 
       (data.end && '<p><b>End:</b> '+data.end+'</p>' || '');
   if (el.opentip != null ){
     $('.qtip').each(function(){

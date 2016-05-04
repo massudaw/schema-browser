@@ -53,7 +53,7 @@ import qualified Data.Text as T
 import qualified Reactive.Threepenny as R
 
 import Query
-import Postgresql
+import Postgresql.Parser
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as BSL
 

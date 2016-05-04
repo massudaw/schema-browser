@@ -1,5 +1,5 @@
 {-# LANGUAGE DeriveDataTypeable,ConstraintKinds,TypeFamilies ,DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,ScopedTypeVariables,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
-module Postgresql where
+module Postgresql.Parser where
 
 import qualified Data.HashMap.Strict as HM
 import Data.Map (Map)

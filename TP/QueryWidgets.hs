@@ -947,13 +947,11 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
 
       itemListEl <- UI.select #  set UI.class_ "col-xs-5" # set UI.size "21" # set UI.style ([("position","absolute"),("z-index","999"),("top","22px")] <> noneShow False)
       let wheel = negate <$> mousewheel itemListEl
-      let
           pageSize = 20
           lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
             where (s,_) = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup (LegacyPredicate []) fixmap
           cv = searchGist relTable m iniGist cvres
           tdi = (searchGist relTable m <$> gist <*> vv)
-      let
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList . snd
       presort <-mapTEvent return (fmap  <$> sortList <*> fmap (fmap G.toList ) vpt)
@@ -1008,7 +1006,6 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
       let
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> triding itemList), if isReadOnly tb then never else rumors tdi]),diffUp]
       st <- stepper cv sel
-
       fin <- onEvent (pure <$> ediff) (liftIO .  putPatch tmvard)
       fk <- if isReadOnly tb
           then
@@ -1034,7 +1031,7 @@ fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1
      (TrivialWidget offsetT offset) <- offsetField (pure 0) never (maybe 0 (Non.length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      let
          fkst = FKT (mapComp (firstTB unKArray)<$> ifk ) (fmap (Le.over relOri (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
-     let dyn = dynHandler  recurse (\ix -> unIndexItens ix <$> offsetT  <*>  oldItems)
+         dyn = dynHandler  recurse (\ix -> unIndexItens ix <$> offsetT  <*>  oldItems)
          recurse ix = do
            lb <- UI.div # sink UI.text (show . (+ix) <$> facts offsetT ) # set UI.class_ "col-xs-1"
            TrivialWidget tr el<- fkUITable inf constr tbrefs (fmap (unIndexItens  ix <$> offsetT <*> ) <$> plmods) wl (unIndexItens ix <$> offsetT  <*>  oldItems) fkst
