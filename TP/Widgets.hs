@@ -299,16 +299,21 @@ optionalListBox l o f s = do
 interval'' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
 
 
-read1 (EventData v@(Just s:_)) = read s
-read1 (EventData i )  = errorWithStackTrace $show i
+read1 s = unsafeFromJSON s
+-- read1 (EventData i )  = errorWithStackTrace $show i
 
 readBool "true" = Just True
 readBool "false" = Just False
 readBool i = Nothing
 
 readMouse :: EventData -> Maybe (Int,Bool,Bool,Bool)
-readMouse (EventData v@(Just i:Just a:Just b :Just c:_)) =   (,,,) <$> readMay i<*>readBool a<*> readBool b <*>readBool c
-readMouse (EventData i )  = errorWithStackTrace $show i
+readMouse v  =   traceShowId $ (,,,) <$> readMay i<*>readMay a<*> readMay b <*>readMay c
+  where
+      readMay i = case JSON.fromJSON $ traceShowId i of
+                    JSON.Success i -> Just i
+                    i -> Nothing
+      [i,a,b,c] :: [JSON.Value] = unsafeFromJSON (traceShowId v)
+-- readMouse i = errorWithStackTrace $show i
 
 onkey :: Element -> ((Int,Bool,Bool,Bool) -> Bool) -> Event String
 onkey el f = unsafeMapUI el (const $ UI.get value el) (filterE f $ filterJust $ readMouse <$> domEvent "keydown" el)
@@ -323,7 +328,7 @@ onEsc el = onkey el (\case {(27,_,_,_) -> True ; i -> False})
 
 
 testPointInRange ui = do
-  startGUI defaultConfig {tpPort = Just 8000} (\w -> do
+  startGUI defaultConfig {jsPort = Just 8000} (\w -> do
                       e1 <- ui
                       getBody w #+ [element e1]
                       return () )
@@ -540,7 +545,7 @@ selectedMultiple = mkReadWriteAttr get set
 
 
 mousewheel :: Element -> Event Int
-mousewheel = fmap ((\i -> if i > 0 then 1 else -1) . read1 ) . domEvent "wheel"
+mousewheel = fmap ((\i -> if (i :: Int) > 0 then 1 else -1) .  unsafeFromJSON. traceShowId ) . domEvent "wheel"
 
 sink0 attr uiv ui =  do
   v <- currentValue uiv
@@ -559,10 +564,10 @@ pruneTidings chw tds =   tidings chkBH chkAll
 strAttr :: String -> WriteAttr Element String
 strAttr name = mkWriteAttr (set' (attr name))
 
-testWidget e = startGUI (defaultConfig { tpPort = Just 10000 , tpStatic = Just "static", tpCustomHTML = Just "index.html" })  ( \w ->  do
+testWidget e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "static", jsCustomHTML = Just "index.html" })  {-( \w ->  do
               els <- e
               getBody w #+ [els]
-              return ()) (\w -> (return ()))
+              return ()) (\w -> (return ()))-}
 
 
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])

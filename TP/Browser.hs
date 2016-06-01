@@ -99,7 +99,7 @@ setup smvar args w = void $ do
   let bstate = argsToState (tail args)
   let amap = authMap smvar bstate (user bstate , pass bstate)
   inf <- liftIO$ traverse (\i -> loadSchema smvar (T.pack i) (conn metainf) (user bstate)  amap ) $ schema  bstate
-  (cli,cliTid) <- liftIO $ addClient (sToken w ) metainf inf ((\t inf -> lookTable inf . T.pack $ t) <$> tablename bstate  <*> inf  ) bstate
+  (cli,cliTid) <- liftIO $ addClient (0) metainf inf ((\t inf -> lookTable inf . T.pack $ t) <$> tablename bstate  <*> inf  ) bstate
   (evDB,chooserItens) <- databaseChooser smvar metainf bstate
   body <- UI.div
   return w # set title (host bstate <> " - " <>  dbn bstate)

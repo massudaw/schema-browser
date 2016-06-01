@@ -125,7 +125,7 @@ executable threepenny-layer
    , cereal >=0.4 && <0.5
    , base16-bytestring >=0.1 && <0.2
    , strptime >=1.0 && <1.1
-   , threepenny-gui == 0.4.2.0.1
+   , threepenny-gui 
    , attoparsec >=0.12.1.4 && <0.13
    , time >=1.4.1 && <1.6
    , transformers >=0.4 && <0.7
@@ -155,7 +155,7 @@ executable threepenny-layer
    ,tasty-hunit
    , arrows
    -- Google Auth
-   , handa-gdata > 0.7 
+   , handa-gdata 
    , http-conduit, directory ,process,xml
    ,unordered-containers
    -- Pdf Parser

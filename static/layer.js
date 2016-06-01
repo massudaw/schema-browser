@@ -131,32 +131,32 @@ function addSource(el,table,source){
 }
 
 function clientHandlers(){
-  return {'moveend': function(el,elid,eventType,sendEvent){
+  return {'moveend': function(el,eventType,sendEvent){
     el.mymap.on(eventType,function(e) {
     var bounds = el.mymap.getBounds();
     var center =bounds.getCenter();
     var sw=bounds.getSouthWest();
     var ne=bounds.getNorthEast();
-    sendEvent(elid,eventType,[center.lat,center.lng,0,ne.lat,ne.lng,0,sw.lat,sw.lng,0].map(function(e){return e.toString()}));
+    sendEvent([center.lat,center.lng,0,ne.lat,ne.lng,0,sw.lat,sw.lng,0].map(function(e){return e.toString()}));
     return true;
     });
     }
-   ,'eventDrop' : function(el,elid,eventType,sendEvent){
+   ,'eventDrop' : function(el,eventType,sendEvent){
       el.eventDrop =  function(e,delta,revert) {
-      sendEvent(elid,eventType,[e.id,(new Date(e.start)).toISOString(),e.end === null ? null : new Date(e.end).toISOString()].filter(function(e) {return e !== null}).map(function(e){return  e.toString()}));
+      sendEvent([e.id,(new Date(e.start)).toISOString(),e.end === null ? null : new Date(e.end).toISOString()].filter(function(e) {return e !== null}).map(function(e){return  e.toString()}));
       return true;
       }; 
       }
-   ,'eventResize' : function(el,elid,eventType,sendEvent){
+   ,'eventResize' : function(el,eventType,sendEvent){
       el.eventResize =  function(e,delta,revert) {
-      sendEvent(elid,eventType,[e.id,e == null ? null :new Date (e.start).toISOString(),e.end == null ? null:new Date (e.end).toISOString() ].filter(function(e) {return e !== null}).map(function(e){return e.toString()}));
+      sendEvent([e.id,e == null ? null :new Date (e.start).toISOString(),e.end == null ? null:new Date (e.end).toISOString() ].filter(function(e) {return e !== null}).map(function(e){return e.toString()}));
       return true;
       }; 
       }
-   ,'externalDrop' : function(el,elid,eventType,sendEvent){
+   ,'externalDrop' : function(el,eventType,sendEvent){
       el.drop =  function(e,revert) {
       var evdata = $(this).data('event');
-      sendEvent(elid,eventType,[evdata.id,e == null ? null :new Date (e).toISOString() ].filter(function(e) {return e !== null}).map(function(e){return e.toString()}));
+      sendEvent([evdata.id,e == null ? null :new Date (e).toISOString() ].filter(function(e) {return e !== null}).map(function(e){return e.toString()}));
       return true;
       }; 
       }

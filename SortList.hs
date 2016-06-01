@@ -12,10 +12,10 @@ import qualified Data.List as L
 import qualified Data.Foldable as F
 
 
-testUI e = startGUI (defaultConfig { tpPort = Just 10000 , tpStatic = Just "static", tpCustomHTML = Just "index.html" })  $ \w ->  do
+testUI e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "static", jsCustomHTML = Just "index.html" })  {-$ \w ->  do
               els <- e
               getBody w #+ [els]
-              return ()
+              return ()-}
 
 type SortList a = [(a,Maybe Bool)]
 
@@ -78,7 +78,7 @@ selectUI l sel liste slote conv = do
     return $ TrivialWidget (triding tds) (getElement tds)
 
 
-test = testUI (return $ do
+test = testUI (do
         ui <- selectUI [1,2,3,4,5,6] [(1,True)] UI.div UI.div conv
         out <- UI.div # sink text (show <$> facts (triding ui))
         UI.div # set children  [getElement ui,out] )

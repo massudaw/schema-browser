@@ -226,9 +226,9 @@ instance A.ToJSON Showable where
 type DateChange  =  (String,Either (Interval UTCTime ) UTCTime)
 
 -- readPosition:: EventData -> Maybe DateChange
-readPosition (EventData v@(Just i:Just a:Just e :_)) =  (,) <$> Just i <*> ((\i j ->  Left $ Interval.interval (Interval.Finite i,True) (Interval.Finite j,True))<$> parseISO8601 a <*> parseISO8601 e)
-readPosition (EventData v@(Just i:Just a:_)) =   (,) <$> Just i <*> (Right <$> parseISO8601 a )
-readPosition (EventData v) = Nothing
+readPosition  v =
+ ( let [i,a,e]  = unsafeFromJSON v
+   in (,) <$> Just i <*> ((\i j ->  Left $ Interval.interval (Interval.Finite i,True) (Interval.Finite j,True))<$> parseISO8601 a <*> parseISO8601 e)) <|>  (let [i,a] = unsafeFromJSON v in (,) <$> Just i <*> (Right <$> parseISO8601 a ))
 
 
 eventDrop :: Element -> Event DateChange
