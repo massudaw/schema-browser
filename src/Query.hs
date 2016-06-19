@@ -11,7 +11,6 @@ module Query
   ,joinRel2
   ,alterKeyType
   ,searchGist
-  ,forceDAttr
   ,rawFullName
   ,unComp
   ,isTableRec
@@ -484,20 +483,7 @@ tname i = do
 
 
 
-
-forceDAttr v = go v
-  where
-    go v = case v of
-      (KOptional i) -> KOptional $ go i
-      (KArray i ) -> KArray $ go i
-      (KDelayed i ) -> i
-      i -> i
-
-
 alterKeyType f  = Le.over keyTypes f
-
-
-
 
 
 unTlabel' ((m,kv) )  = (m,) $ overLabel (\(KV kv) -> KV $ fmap (Compose . Identity .unlabel.getCompose ) $   kv) kv

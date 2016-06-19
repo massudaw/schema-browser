@@ -182,8 +182,9 @@ data SchemaEditor
 typeTrans inf = typeTransform (schemaOps inf)
 
 
-argsToState  [h,ph,d,u,p,s,t,o] = BrowserState h ph d  u p (Just s) (Just t ) (Just ( Non.fromList . fmap (fmap (T.drop 1) . T.break (=='=') )$ T.split (==',') (T.pack o)))
-argsToState  [h,ph,d,u,p,s,t] = BrowserState h ph d  u p (Just s) (Just t ) Nothing
+argsToState  [h,ph,d,u,p,s,m,t,o] = BrowserState h ph d  u p (Just s) (Just t ) (Just ( Non.fromList . fmap (fmap (T.drop 1) . T.break (=='=') )$ T.split (==',') (T.pack o)))
+argsToState  [h,ph,d,u,p,s,m,t] = BrowserState h ph d  u p (Just s) (Just t ) Nothing
+argsToState  [h,ph,d,u,p,s,m] = BrowserState h ph d  u p  (Just s)  Nothing Nothing
 argsToState  [h,ph,d,u,p,s] = BrowserState h ph d  u p  (Just s)  Nothing Nothing
 argsToState  [h,ph,d,u,p] = BrowserState h ph d  u p Nothing Nothing Nothing
 argsToState i = errorWithStackTrace (show i)
@@ -200,8 +201,6 @@ lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpac
 
 putPatch m = atomically . writeTQueue m -- . force
 
-data TableOperation  c a
-  = TUnion (c a) (c a)
 
 liftTable' :: InformationSchema -> Text -> TBData Text a -> TBData Key a
 liftTable' inf tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapFromTBList $ mapComp (liftField inf tname) <$> F.toList i) v

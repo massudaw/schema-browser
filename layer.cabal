@@ -90,6 +90,7 @@ executable threepenny-layer
     Location
     OAuth
     OAuthClient
+    DWGPreview
     OFX
     PandocRenderer
     Plugins
@@ -109,6 +110,9 @@ executable threepenny-layer
     TP.Browser
     TP.QueryWidgets
     TP.Widgets
+    TP.Agenda
+    TP.Map
+    TP.Account
     Text
   default-extensions: TupleSections,OverloadedStrings
   build-depends:

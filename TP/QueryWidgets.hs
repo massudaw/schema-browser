@@ -468,7 +468,7 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
               unFinal:: [([Column CoreKey ()], Tidings PKConstraint)]
               unFinal = fmap (fmap dunConstraints) unDeleted
           (listBody,tableb,inscrud) <- eiTable inf   unFinal  refs pmods ftb oldItems
-          (panelItems,tdiff)<- processPanelTable listBody inf  (facts tableb) reftb  (inscrud) table oldItems
+          (panelItems,tdiff)<- processPanelTable listBody inf  (facts tableb) reftb  inscrud table oldItems
           let diff = unionWith const tdiff   (filterJust loadedItensEv)
           addElemFin panelItems =<<  onEvent diff
               (liftIO . hdiff)
@@ -917,7 +917,6 @@ fkUITable inf constr tbrefs plmods  ref@wl oldItems  tb@(FKT ilk rel  tb1@(TB1 _
 fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = mdo
       let
           relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
-
       let
           -- Find non injective part of reference
           ftdi = oldItems

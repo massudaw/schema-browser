@@ -28,7 +28,7 @@ main = do
   args <- getArgs
   print "Start Server"
   smvar   <- newMVar M.empty
-  let db = argsToState (tail (tail args))
+  let db = argsToState (tail args)
   -- Load Metadata
   conn <- connectPostgreSQL (connRoot db)
 

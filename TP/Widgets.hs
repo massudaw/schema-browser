@@ -307,12 +307,12 @@ readBool "false" = Just False
 readBool i = Nothing
 
 readMouse :: EventData -> Maybe (Int,Bool,Bool,Bool)
-readMouse v  =   traceShowId $ (,,,) <$> readMay i<*>readMay a<*> readMay b <*>readMay c
+readMouse v  =   (,,,) <$> readMay i<*>readMay a<*> readMay b <*>readMay c
   where
-      readMay i = case JSON.fromJSON $ traceShowId i of
+      readMay i = case JSON.fromJSON $ i of
                     JSON.Success i -> Just i
                     i -> Nothing
-      [i,a,b,c] :: [JSON.Value] = unsafeFromJSON (traceShowId v)
+      [i,a,b,c] :: [JSON.Value] = unsafeFromJSON (v)
 -- readMouse i = errorWithStackTrace $show i
 
 onkey :: Element -> ((Int,Bool,Bool,Bool) -> Bool) -> Event String
@@ -545,7 +545,7 @@ selectedMultiple = mkReadWriteAttr get set
 
 
 mousewheel :: Element -> Event Int
-mousewheel = fmap ((\i -> if (i :: Int) > 0 then 1 else -1) .  unsafeFromJSON. traceShowId ) . domEvent "wheel"
+mousewheel = fmap ((\i -> if (i :: Int) > 0 then 1 else -1) .  unsafeFromJSON ) . domEvent "wheel"
 
 sink0 attr uiv ui =  do
   v <- currentValue uiv

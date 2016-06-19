@@ -21,6 +21,7 @@ module SchemaQuery
   )where
 import Graphics.UI.Threepenny.Core (mapEventFin)
 
+import Data.Either
 import RuntimeTypes
 import Control.Concurrent.Async
 import Step.Host
@@ -54,7 +55,7 @@ import qualified Data.Text as T
 --  MultiTransaction Postgresql insertOperation
 --
 
-defsize = 100
+defsize = 200
 
 estLength page size resL est = fromMaybe 0 page * size  +  est
 
@@ -74,17 +75,14 @@ createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (T
 
 -- tableLoader :: InformationSchema -> Table -> TransactionM (Collection Key Showable)
 
-eventTable :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicate
-    -> TransactionM (DBVar,Collection Key Showable)
-eventTable = tableLoader
 
 selectFromA t a b c d = do
   inf <- ask
-  eventTable (lookTable inf t) a b c d
+  tableLoader (lookTable inf t) a b c d
 
 selectFrom t a b c d = do
   inf <- ask
-  eventTable (lookTable inf t) a b c d
+  tableLoader (lookTable inf t) a b c d
 
 syncFrom t page size presort fixed = do
   let table = t
@@ -152,6 +150,7 @@ rebaseKey inf t  (LegacyPredicate fixed ) = LegacyPredicate $ fmap (liftField in
 tableLoader :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicate
     -> TransactionM (DBVar,Collection Key Showable)
 tableLoader table  page size presort fixed
+  -- Union Tables
   | not $ L.null $ rawUnion table  = do
     inf <- ask
     i <- liftIO $ mapConcurrently (\t -> transactionNoLog inf $  tableLoader t page size presort (rebaseKey inf t  fixed))  (rawUnion table)
@@ -162,6 +161,7 @@ tableLoader table  page size presort fixed
         projunion  = liftTable' inf (tableName table ) .mapKey' keyValue
     let o = foldr mergeDBRef  (M.empty,G.empty) (fmap (fmap projunion) . snd <$> i)
     return $ (dbvar,o)
+  -- (Scoped || Partitioned) Tables
   | not  (null $ _rawScope table ) && not (S.null (rawFKS table) )= do
       inf <- ask
       let sref =  case filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope table)) (S.toList $ rawFKS table) of
@@ -186,29 +186,37 @@ tableLoader table  page size presort fixed
           (l,v) <- joinTable [(fromtable ,i,sref)] table page size presort fixed
           return v ) $ F.toList (snd i)
       return (dbvar ,foldr mergeDBRef  (M.empty,G.empty) ix )
+  -- Primitive Tables
   | otherwise  =  do
     inf <- ask
     let base (Path _ (FKJoinTable i j  ) ) = fst j == schemaName inf
         base i = True
         remoteFKS = S.filter (not .base )  (_rawFKSL table)
         getAtt i (m ,k ) = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues . unTB $ k
+    liftIO$ putStrLn $ "loadTable " <> show (tableName table)
     pageTable False (\table page size presort fixed v -> do
-          (res ,x ,o) <-  (listEd $ schemaOps inf) (table {_rawFKSL = S.filter base  (_rawFKSL table)}) page size presort fixed v
+          (res ,x ,o) <- (listEd $ schemaOps inf) (table {_rawFKSL = S.filter base  (_rawFKSL table)}) page size presort fixed v
           let getFKS  v = foldl (\m (Path _ (FKJoinTable i j ))  -> m >>= (\m -> do
                 let rinf = justError "no schema" $ M.lookup ((fst j))  (depschema inf)
                     table = (lookTable rinf $ snd j)
+                liftIO $ putStrLn $ "loadForeign table" <> show (tableName table)
                 (db,(_,tb)) <- local (const rinf) (tableLoader table  Nothing Nothing [] (LegacyPredicate []))
                 let
                     tar = S.fromList $ fmap _relOrigin i
-                    joinFK :: TBData Key Showable -> Column Key Showable
-                    joinFK m  = FKT taratt i (joinRel (tableMeta table ) i (fmap unTB $ taratt ) tb)
+                    joinFK :: TBData Key Showable -> Either [Compose Identity (TB Identity)  Key Showable] (Column Key Showable)
+                    joinFK m  = maybe (Left taratt) Right $ FKT taratt i <$> joinRel2 (tableMeta table ) i (fmap unTB $ taratt ) tb
                       where
                             taratt = getAtt tar (tableNonRef' m)
                     addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
                     addAttr r (m,i) = (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` tar && F.all isInlineRel k   ) i )) i )
-                return ((\i -> addAttr  (joinFK i) i) <$> m)) )  (return v) $ P.sortBy (P.comparing pathRelRel)  (S.toList remoteFKS)
-          res <- getFKS (res)
-          return (res,x,o )) table page size presort fixed
+                    joined = (\i -> do
+                       fk <- joinFK i
+                       return $ addAttr  fk i) <$> m
+                liftIO $ putStrLn $ "reloadForeign table" <> show (tableName table) <> " - " <> show (lefts joined)
+                fetched <-traverse (\pred -> local (const rinf) $  tableLoader table Nothing Nothing []  (WherePredicate (AndColl pred))) $ traverse (\k -> (\ v -> traceShowId $ (PrimColl (IProd True [ keyValue ._relOrigin  $ k], "IN", ArrayTB1 (Non.fromList v)))) <$> ( nonEmpty $ catMaybes $  fmap (_tbattr .unTB) . L.find ((== [k]) . keyattr ) <$> traceShowId (lefts joined) ))  i
+                return (rights  joined)) )  (return v) $ P.sortBy (P.comparing pathRelRel)  (S.toList remoteFKS)
+          resFKS <- getFKS res
+          return (resFKS,x,o )) table page size presort fixed
 
 
 
@@ -222,6 +230,8 @@ joinTable :: [(Table,TBData Key Showable,Path (S.Set Key ) SqlOperation )]-> Tab
 joinTable reflist  a b c d e =
     ask >>= (\ inf -> pageTable False ((joinListEd $ schemaOps inf) reflist) a b c d e )
 
+
+eventTable = tableLoader
 
 eventTable' :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicate
     -> TransactionM (DBVar,Collection Key Showable)
@@ -288,7 +298,7 @@ fullInsert' ((k1,v1) )  = do
    inf <- ask
    let proj = _kvvalues . unTB
    ret <-  (k1,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
-   (_,(_,l)) <- eventTable (lookTable inf (_kvname k1)) Nothing Nothing [] (LegacyPredicate [])
+   (_,(_,l)) <- tableLoader (lookTable inf (_kvname k1)) Nothing Nothing [] (LegacyPredicate [])
    if  isJust $ join $ flip G.lookup l <$> tbpredM (S.fromList $ _kvpk k1)  ret
       then do
         return ret
@@ -427,7 +437,7 @@ loadFK :: TBData Key Showable -> Path (S.Set Key ) SqlOperation -> TransactionM 
 loadFK table (Path ori (FKJoinTable rel (st,tt) ) ) = do
   inf <- ask
   let targetTable = lookTable inf tt
-  (i,(_,mtable )) <- eventTable targetTable Nothing Nothing [] (LegacyPredicate [])
+  (i,(_,mtable )) <- tableLoader targetTable Nothing Nothing [] (LegacyPredicate [])
   let
       relSet = S.fromList $ _relOrigin <$> rel
       tb  = unTB <$> F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . snd . tableNonRef' $ table))
