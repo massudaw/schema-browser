@@ -21,12 +21,13 @@ module SchemaQuery
   )where
 import Graphics.UI.Threepenny.Core (mapEventFin)
 
-import Data.Either
 import RuntimeTypes
-import Control.Concurrent.Async
 import Step.Host
 import Step.Common
 
+import Data.Time
+import Data.Either
+import Control.Concurrent.Async
 import Control.Monad.Trans.Maybe
 import qualified Data.Poset as P
 import Debug.Trace
@@ -102,7 +103,7 @@ syncFrom t page size presort fixed = do
   let
   ix <- mapM (\i -> do
       let
-          fil = [("=", FKT ( _tb <$> backPathRef sref i) rel (TB1 i) )]
+          fil = [("=", FKT ( kvlist $ _tb <$> backPathRef sref i) rel (TB1 i) )]
       (_,t) <- selectFrom "history" Nothing Nothing defSort (LegacyPredicate fil)
       let latest = fmap (("=",) . uncurry Attr). getPKM   $ ( L.maximumBy (comparing getPKM) $ G.toList $ snd t)
       (joinSyncTable  [(fromtable ,i,sref)] table page size presort (LegacyPredicate fil). F.toList ) (latest)
@@ -193,8 +194,9 @@ tableLoader table  page size presort fixed
         base i = True
         remoteFKS = S.filter (not .base )  (_rawFKSL table)
         getAtt i (m ,k ) = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues . unTB $ k
-    liftIO$ putStrLn $ "loadTable " <> show (tableName table)
-    pageTable False (\table page size presort fixed v -> do
+    liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
+    li <- liftIO getCurrentTime
+    o <- pageTable False (\table page size presort fixed v -> do
           (res ,x ,o) <- (listEd $ schemaOps inf) (table {_rawFKSL = S.filter base  (_rawFKSL table)}) page size presort fixed v
           let getFKS  v = foldl (\m (Path _ (FKJoinTable i j ))  -> m >>= (\m -> do
                 let rinf = justError "no schema" $ M.lookup ((fst j))  (depschema inf)
@@ -204,7 +206,7 @@ tableLoader table  page size presort fixed
                 let
                     tar = S.fromList $ fmap _relOrigin i
                     joinFK :: TBData Key Showable -> Either [Compose Identity (TB Identity)  Key Showable] (Column Key Showable)
-                    joinFK m  = maybe (Left taratt) Right $ FKT taratt i <$> joinRel2 (tableMeta table ) i (fmap unTB $ taratt ) tb
+                    joinFK m  = maybe (Left taratt) Right $ FKT (kvlist taratt) i <$> joinRel2 (tableMeta table ) i (fmap unTB $ taratt ) tb
                       where
                             taratt = getAtt tar (tableNonRef' m)
                     addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
@@ -217,6 +219,10 @@ tableLoader table  page size presort fixed
                 return (rights  joined)) )  (return v) $ P.sortBy (P.comparing pathRelRel)  (S.toList remoteFKS)
           resFKS <- getFKS res
           return (resFKS,x,o )) table page size presort fixed
+    lf <- liftIO getCurrentTime
+
+    liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
+    return o
 
 
 
@@ -232,13 +238,6 @@ joinTable reflist  a b c d e =
 
 
 eventTable = tableLoader
-
-eventTable' :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicate
-    -> TransactionM (DBVar,Collection Key Showable)
-eventTable' a b c d e = do
-    inf <- ask
-    pageTable False (listEd $ schemaOps inf) a b c d e
-
 
 predNull (WherePredicate i) = L.null i
 predNull (LegacyPredicate i) = L.null i
@@ -399,7 +398,7 @@ tbEdit g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) =
    case (a2,t2) of
         (TB1 o@(om,ol),TB1 t@(m,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           local (\inf -> fromMaybe inf (M.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> pk) (unTB1 tb)) rel2 tb ) . TB1  <$> fullDiffEdit o t)
+           local (\inf -> fromMaybe inf (M.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( kvlist $ fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb)) rel2 tb ) . TB1  <$> fullDiffEdit o t)
         (LeftTB1  _ ,LeftTB1 _) ->
            maybe (return f ) (fmap attrOptional) $ liftA2 tbEdit (unLeftItens g) (unLeftItens f)
         (ArrayTB1 o,ArrayTB1 l) ->
@@ -414,7 +413,7 @@ tbInsertEdit f@(FKT pk rel2  t2) =
    case t2 of
         t@(TB1 (m,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           local (\inf -> fromMaybe inf (M.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> pk) (unTB1 tb)) rel2 tb ) <$> fullInsert ( t))
+           local (\inf -> fromMaybe inf (M.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( kvlist $ fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb)) rel2 tb ) <$> fullInsert ( t))
         LeftTB1 i ->
            maybe (return f ) ((fmap attrOptional) . tbInsertEdit ) (unLeftItens f)
         ArrayTB1 l ->
@@ -442,7 +441,7 @@ loadFK table (Path ori (FKJoinTable rel (st,tt) ) ) = do
       relSet = S.fromList $ _relOrigin <$> rel
       tb  = unTB <$> F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . snd . tableNonRef' $ table))
       fkref = joinRel  (tableMeta targetTable) rel tb  mtable
-  return $ Just $ FKT (_tb <$> tb) rel   fkref
+  return $ Just $ FKT (kvlist $ _tb <$> tb) rel   fkref
 loadFK table (Path ori (FKInlineTable to ) )   = do
   runMaybeT $ do
     IT rel vt  <- MaybeT . return $ unTB <$> M.lookup (S.map Inline   ori) (unKV .snd $ table)

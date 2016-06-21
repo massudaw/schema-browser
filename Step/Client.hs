@@ -160,6 +160,6 @@ indexTable (IProd _ l) t@(m,v)
     i <- finder (toList $ _kvvalues $ unTB v )
     case runIdentity $ getCompose $ i  of
          Attr k l -> return (k,l)
-         FKT [v] _ _  -> safeHead $ aattr v
+         FKT v _ _  -> safeHead $ aattr (head $ unkvlist v)
          i ->  errorWithStackTrace (show i)
 

@@ -227,7 +227,7 @@ expandFKMutRecursive t=
         where m = flattenNonRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t)
       tnonRecA =  (unTB1 t)
       tRec =   (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
-        where l = concat $ fmap (_tbref .labelValue . getCompose ).  L.filter (isFKT .labelValue .getCompose) $ flattenRec (fmap (fmap (fmap S.fromList)) $_kvrecrels $ fst $ unTB1 t) (unTB1 t)
+        where l = concat $ fmap (unkvlist . _tbref .labelValue . getCompose ).  L.filter (isFKT .labelValue .getCompose) $ flattenRec (fmap (fmap (fmap S.fromList)) $_kvrecrels $ fst $ unTB1 t) (unTB1 t)
               isFKT (FKT _ _ _) = True
               isFKT i = False
       tRec2 =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
@@ -345,7 +345,7 @@ expandJoin left env (Unlabeled (FKT _ rel tb)) = do
     where
       jt = if left then " LEFT" else ""
 
-expandJoin left env (Labeled l (FKT i rel tb)) =  foldr1 (liftA2 mappend) $ (expandJoin left env . getCompose ) <$> i
+expandJoin left env (Labeled l (FKT i rel tb)) =  foldr1 (liftA2 mappend) $ (expandJoin left env . getCompose ) <$> unkvlist i
 -- expandJoin left env i = errorWithStackTrace (show ("expandJoin",i))
 
 joinOnPredicate :: [Rel Key] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> Text
@@ -381,10 +381,10 @@ explodeDelayed block assoc leaf (Unlabeled (Attr k  _ )) = leaf (isArray (keyTyp
 
 explodeDelayed block assoc leaf (Unlabeled (IT  n t )) =  explodeRow'  block assoc leaf t
 explodeDelayed block assoc leaf (Labeled l (IT  _ tb  )) = leaf False l
-explodeDelayed block assoc leaf (Labeled l (FKT i  _ tb  )) = case i of
+explodeDelayed block assoc leaf (Labeled l (FKT i  _ tb  )) = case unkvlist i of
              [] -> leaf False l
              i -> T.intercalate assoc (F.toList $ (explodeDelayed block assoc leaf . getCompose ) <$> i) <> assoc <> leaf False l
-explodeDelayed block assoc leaf (Unlabeled (FKT i rel t )) = case i of
+explodeDelayed block assoc leaf (Unlabeled (FKT i rel t )) = case unkvlist i of
              [] -> explodeRow' block assoc leaf t
              i -> T.intercalate assoc (F.toList $ (explodeDelayed block assoc leaf .getCompose) <$> i) <> assoc <> explodeRow' block assoc leaf t
 

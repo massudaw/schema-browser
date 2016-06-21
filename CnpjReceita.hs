@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleContexts,TupleSections,LambdaCase,OverloadedStrings #-}
-module CnpjReceita where
+module CnpjReceita (getCaptchaCpf,getCaptchaCnpj,getCnpjForm,convertCPF,initSess,getCpfForm,convertHtml)where
 import Network.Wreq
 import qualified Network.Wreq.Session as Sess
 
@@ -73,8 +73,8 @@ convertHtml out =
             attr i = Compose . Identity .  Attr  i
             cna  =  attr
             idx  = LeftTB1 . fmap (TB1 . SText . TL.pack . head) . flip M.lookup out
-            fk rel i  = Compose . Identity . FKT i rel
-            afk rel i  = Compose . Identity . FKT i rel . LeftTB1 . Just . ArrayTB1 . Non.fromList
+            fk rel i  = Compose . Identity . FKT (kvlist i )rel
+            afk rel i  = fk rel i  . LeftTB1 . Just . ArrayTB1 . Non.fromList
             tb attr = TB1 $ tbmap $ mapFromTBList  attr
             (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (TB1 . SText .TL.filter (not . flip L.elem ("-." :: String)) . fst) t ,  justError " no description" $  TB1 . SText .  TL.strip .  TL.drop 3. snd <$>  t)
                 where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)

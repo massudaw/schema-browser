@@ -300,14 +300,14 @@ parseAttr (IT na j) = do
   return $ IT  na mj
 
 parseAttr (FKT l rel j ) = do
-  ml <- if L.null l
+  ml <- if L.null (unkvlist l)
      then return []
      else do
-       ml <- unIntercalateAtto (traComp parseAttr <$> l) (char ',')
+       ml <- unIntercalateAtto (traComp parseAttr <$> unkvlist l) (char ',')
        char ','
        return ml
   mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j
-  return $  FKT ml rel  mj
+  return $  FKT (kvlist ml )rel  mj
 
 parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 

@@ -224,7 +224,7 @@ findRefTable inf tname rel2 =  tname2
 
 liftField :: InformationSchema -> Text -> Column Text a -> Column Key a
 liftField inf tname (Attr t v) = Attr (lookKey inf tname t) v
-liftField inf tname (FKT ref  rel2 tb) = FKT (mapComp (liftField inf tname) <$> ref)   ( rel) (liftKeys rinf tname2 tb)
+liftField inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (lookKey inf tname ) (mapComp (liftField inf tname) ) ref)   ( rel) (liftKeys rinf tname2 tb)
     where FKJoinTable  rel (schname,tname2)  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
           rinf = fromMaybe inf (M.lookup schname (depschema inf))
           ta = lookTable inf tname

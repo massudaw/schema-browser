@@ -82,7 +82,7 @@ syncHistory [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))]  ix table offset 
           return  d
       let idx = if schemaName inf == "tasks" then "items" else rawName table
           relMap = M.fromList $ fmap (\rel -> (_relTarget rel ,_relOrigin rel) ) rel
-          refAttr = (_tb $ FKT (fmap _tb $ concat $ F.toList $ backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
+          refAttr = (_tb $ FKT (kvlist $ fmap _tb $ concat $ F.toList $ backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
           addAttr refAttr (m ,t ) = (m, mapComp (\(KV i) -> KV  $ M.insert (S.fromList $ keyattr refAttr ) refAttr i ) t)
       c <-  traverse (convertAttrs inf (Just $ tblist [refAttr]) (_tableMapL inf) table ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
       return ((addAttr refAttr) <$>  c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
@@ -221,7 +221,7 @@ joinList [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))] tableref offset page
           return $ decode v
       let idx = if schemaName inf == "tasks" then "items" else rawName tableref
           relMap = M.fromList $ fmap (\rel -> (_relTarget rel ,_relOrigin rel) ) rel
-          refAttr = (_tb $ FKT (fmap _tb $ concat $ F.toList $ backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
+          refAttr = (_tb $ FKT (kvlist $ fmap _tb $ concat $ F.toList $ backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
       c <-  traverse (convertAttrs inf (Just $ tblist [refAttr]) (_tableMapL inf) tableref ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
       let addAttr refAttr (m ,t ) = (m, mapComp (\(KV i) -> KV  $ M.insert (S.fromList $ keyattr refAttr ) refAttr i ) t)
       return ((addAttr refAttr) <$>  c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
@@ -296,10 +296,10 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
                                 relMap = M.fromList $ fmap (\rel -> (_relOrigin rel ,_relTarget rel) ) rel
                                 nv  = flip mergeTB1 transrefs  <$> v
                             tell (TableModification Nothing (lookTable infsch trefname ) . patch <$> F.toList (nv))
-                            return $ FKT [Compose .Identity . Types.Attr  k $ (lbackRef    nv) ]  fk nv
+                            return $ FKT (kvlist [Compose .Identity . Types.Attr  k $ (lbackRef    nv) ])  fk nv
                           Nothing ->  do
                             tell (TableModification Nothing (lookTable infsch trefname ) . patch <$> F.toList (v))
-                            return $ FKT [Compose .Identity . Types.Attr  k $ (lbackRef    v) ]  fk v))
+                            return $ FKT (kvlist [Compose .Identity . Types.Attr  k $ (lbackRef    v) ])  fk v))
                     (traverse (\v -> do
                         let ref = [_tb $ Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd <$> maybeToList (tableNonRef' <$> getref))
                             refTB = [_tb $ Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd <$> maybeToList (getref))
@@ -316,7 +316,7 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
                             pti <- joinGetDiffTable (lookMTable infsch (fst scoped)) treftable scoped reftb
                             tell (TableModification Nothing treftable <$> maybeToList pti)
                             return $ maybe (reftb) (unTB1 . apply (TB1 reftb) . PAtom) pti) reftbT ) getref) return (reftb)
-                        return $ FKT ref fk   patch ))
+                        return $ FKT (kvlist ref ) fk   patch ))
                funL = funO  True (exchange trefname $ keyType k) vk
                funR = funO  True ( keyType k) vk
                mergeFun = do

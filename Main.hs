@@ -45,7 +45,7 @@ main = do
   poller smvar amap db plugList False
 
   print "Load GUI Server"
-  forkIO $ threadDelay 100000 >> rawSystem "chromium" ["http://localhost:8025"] >> return ()
+  forkIO $ threadDelay 50000 >> rawSystem "chromium" ["http://localhost:8025"] >> return ()
   startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" , jsPort = fmap read $ safeHead args })  (setup smvar  (tail args)) {-(\w ->  liftIO $ do
           print ("delete client" <> show (sToken w))
           deleteClient metas (sToken w) )-}

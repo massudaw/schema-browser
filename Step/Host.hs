@@ -79,7 +79,7 @@ indexPred (a@(IProd _ _),eq,v) r =
 indexField :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
 indexField p@(IProd b l) v = case unTB <$> findAttr  l  (snd v) of
                                Nothing -> case unTB <$>  findFK l (snd v) of
-                                  Just (FKT ref _ _) ->  unTB <$> ((\l ->  L.find ((==[l]).  fmap (keyValue . _relOrigin). keyattr ) $ ref ) $ head l)
+                                  Just (FKT ref _ _) ->  unTB <$> ((\l ->  L.find ((==[l]).  fmap (keyValue . _relOrigin). keyattr ) $ unkvlist ref ) $ head l)
                                   Nothing -> Nothing
                                i -> i
 indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findFK l (snd v)
@@ -107,7 +107,7 @@ checkField n@(Nested ix@(IProd b l) nt ) t
 checkField  p@(IProd b l) i
   = case i  of
       Attr k v -> maybe (failure [p]) (pure) $ fmap (Attr k ) . (\i -> if b then  unRSOptional' i else Just i ) $ v
-      FKT a c d -> (\i -> FKT i c d) <$> (traverse (traComp (checkField p) )  a )
+      FKT a c d -> (\i -> FKT i c d) <$> (traverseKV (traComp (checkField p) )  a )
       i -> errorWithStackTrace ( show (b,l,i))
 checkField i j = errorWithStackTrace (show (i,j))
 

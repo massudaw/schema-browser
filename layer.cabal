@@ -155,8 +155,6 @@ executable threepenny-layer
    ,hmatrix-gsl
    ,base64-bytestring
    ,semigroupoids
-   ,tasty
-   ,tasty-hunit
    , arrows
    -- Google Auth
    , handa-gdata 
@@ -172,7 +170,6 @@ executable threepenny-layer
    ,stringsearch
    ,safe
    ,async
-   ,tasty
    ,void
    ,extra
    ,binary

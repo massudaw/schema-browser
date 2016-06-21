@@ -351,10 +351,10 @@ ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
 applyAttr' :: (Patch a,Show a,Ord a ,Show (Index a),G.Predicates (G.TBIndex Key a))  =>  Column Key a  -> PathAttr Key (Index a) -> DBM Key a (Column Key a)
 applyAttr' (Attr k i) (PAttr _ p)  = return $ Attr k (apply i p)
 applyAttr' sfkt@(FKT iref rel i) (PFK _ p m b )  =  do
-                            let ref =  F.toList $ M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList iref)
+                            let ref =  M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (_kvvalues iref)
                                 edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (  flip apply k  ) v else v
                             tbs <- atTableS (_kvschema m) m
-                            return $ FKT ref rel (maybe (joinRel m rel (fmap unTB ref) ( tbs)) id (Just $ create b))
+                            return $ FKT (KV ref ) rel (maybe (joinRel m rel (fmap unTB $ F.toList ref) ( tbs)) id (Just $ create b))
 applyAttr' (IT k i) (PInline _   p)  = IT k <$> (applyFTBM (fmap pure $ create) applyRecord' i p)
 -- applyAttr' i j = errorWithStackTrace (show ("applyAttr'" :: String,i,j))
 
@@ -381,7 +381,7 @@ createAttr' (PInline k s ) = return $ IT k (create s)
 createAttr' (PFK rel k s b ) = do
       let ref = (_tb . create <$> k)
       tbs <- atTableS (_kvschema s) s
-      return $ FKT ref rel (maybe (joinRel s rel (fmap unTB ref) ( tbs)) id (Just $ create b))
+      return $ FKT (kvlist ref) rel (maybe (joinRel s rel (fmap unTB ref) ( tbs)) id (Just $ create b))
 -- createAttr' i = errorWithStackTrace (show i)
 
 createTB1'

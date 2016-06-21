@@ -439,7 +439,7 @@ siapi3Plugin  = FPlugins pname tname  $ BoundedPlugin2 url
         let ao  (bv,taxa) =  Just $ tblist  ( [_tb $ Attr "ano" (justError "ano" ano) ,_tb $ Attr "protocolo" (justError "protocolo"protocolo), attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
             iat bv = Compose . Identity $ (IT "andamentos"
                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv))
-        returnA -< (\i -> FKT (_tb <$> [Attr "ano" (LeftTB1 $ ano) ,Attr "protocolo" (LeftTB1 $ protocolo)]) [Rel "protocolo" "=" "protocolo" ,Rel "ano" "=" "ano"] (LeftTB1 $ Just $ TB1 i)) <$> join (ao <$> b)) -< cpf
+        returnA -< (\i -> FKT (kvlist $ _tb <$> [Attr "ano" (LeftTB1 $ ano) ,Attr "protocolo" (LeftTB1 $ protocolo)]) [Rel "protocolo" "=" "protocolo" ,Rel "ano" "=" "ano"] (LeftTB1 $ Just $ TB1 i)) <$> join (ao <$> b)) -< cpf
       returnA -< tblist  . pure . _tb  <$> v
 
 bool = TB1 . SBoolean
@@ -502,7 +502,7 @@ pagamentoArr =  itR "pagamento" (proc descontado -> do
                   odxR "price" -<  ()
                   odxR "scheduled_date" -<  ()
                   let total = maybe 0 fromIntegral  p :: Int
-                  let pagamento = _tb $ FKT ([attrT  ("pagamentos",LeftTB1 (Just $ ArrayTB1  $ Non.fromList (replicate total (num $ -1) )) )]) [Rel "pagamentos" "=" "id"] (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList ( fmap (\ix -> TB1 $ tblist [attrT ("id",SerialTB1 Nothing),attrT ("description",LeftTB1 $ Just $ TB1 $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",LeftTB1 valorParcela), attrT ("scheduled_date",LeftTB1 pinicio) ]) ([1 .. total])))
+                  let pagamento = _tb $ FKT (kvlist [attrT  ("pagamentos",LeftTB1 (Just $ ArrayTB1  $ Non.fromList (replicate total (num $ -1) )) )]) [Rel "pagamentos" "=" "id"] (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList ( fmap (\ix -> TB1 $ tblist [attrT ("id",SerialTB1 Nothing),attrT ("description",LeftTB1 $ Just $ TB1 $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",LeftTB1 valorParcela), attrT ("scheduled_date",LeftTB1 pinicio) ]) ([1 .. total])))
                   returnA -<  pagamento ) -< (valorParcela,pinicio,p)
               returnA -<  TB1 $ tblist [pg ] )
 
@@ -640,7 +640,7 @@ importarofx = FPlugins "OFX Import" tname  $ BoundedPlugin2 url
           ref :: [Compose Identity (TB Identity ) Text(Showable)]
           ref = [attrT  ("statements",LeftTB1 $ join $ fmap (ArrayTB1 .  Non.fromList  ).   allMaybes . fmap (join . fmap unSSerial . M.lookup "fitid" . M.fromList ) <$> b)]
           tbst :: (Maybe (TBData Text (Showable)))
-          tbst = Just $ tblist [_tb $ FKT ref [Rel "statements" "=" "fitid",Rel "account" "=" "account"] ao]
+          tbst = Just $ tblist [_tb $ FKT (kvlist ref) [Rel "statements" "=" "fitid",Rel "account" "=" "account"] ao]
       returnA -< tbst
     ofx (TB1 (SText i), ((DelayedTB1 (Just (TB1 (SBinary r) )))) , acc )
       = liftIO $ ofxPlugin (T.unpack i) (BS.unpack r) acc

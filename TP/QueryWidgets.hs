@@ -297,8 +297,8 @@ tbCase
   -> UI (TrivialWidget (Maybe (Column CoreKey Showable)))
 tbCase inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
         let
-            oldItems =  maybe preoldItems (\v -> if L.null v then preoldItems else fmap (maybe (Just (FKT (fmap  (_tb . uncurry Attr)  v) rel (SerialTB1 Nothing) )) Just ) preoldItems  ) (Tra.traverse (\k -> fmap (k,) . keyStatic $ k ) ( getRelOrigin $ fmap unTB ifk))
-            nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin $ fmap unTB ifk)
+            oldItems =  maybe preoldItems (\v -> if L.null v then preoldItems else fmap (maybe (Just (FKT (kvlist $ fmap  (_tb . uncurry Attr)  v) rel (SerialTB1 Nothing) )) Just ) preoldItems  ) (Tra.traverse (\k -> fmap (k,) . keyStatic $ k ) ( getRelOrigin $ fmap unTB $ unkvlist ifk))
+            nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin $ fmap unTB $ unkvlist ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattri .fst) wl
             nonInjConstr :: SelTBConstraint
             nonInjConstr = first (pure ) .fmap (fmap (\j ((_,l)) -> maybe True id $ (\ j -> not $ interPointPost rel (nonRefAttr  [_tb  j]) (nonRefAttr  $ F.toList $ _kvvalues $ unTB  l) ) <$> j ).triding) <$>  nonInjRefs
@@ -326,7 +326,7 @@ tbCase inf _ a@(Attr i _ ) wl plugItens preoldItems = do
 
 emptyRecTable (FKT rel l tb )
     = case tb of
-          (LeftTB1 _ ) ->  Just . fromMaybe (FKT (fmap (mapComp (mapFAttr (const (LeftTB1 Nothing)))) rel) l (LeftTB1 Nothing))
+          (LeftTB1 _ ) ->  Just . fromMaybe (FKT (mapKV (mapComp (mapFAttr (const (LeftTB1 Nothing)))) rel) l (LeftTB1 Nothing))
           i -> id
 emptyRecTable (IT l tb)
     = case tb of
@@ -421,12 +421,11 @@ eiTable inf constr refs plmods ftb@(meta,k) oldItems = do
       set style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
   plugins <-  if not (L.null (fst <$> res))
     then do
-      pluginsHeader <- UI.h4 # set UI.text "Plugins"
-      pure <$> UI.div # set children (pluginsHeader : (fst <$> res))
+      pure <$> UI.div # set children (fst <$> res)
     else do
       return []
   body <- UI.div #
-     set children (plugins  <> [listBody]) #
+     set children (plugins  <> pure listBody) #
      set style [("margin-left","10px"),("border","2px"),("border-color","gray"),("border-style","solid")]
   return (body, output,tableIns)
 
@@ -485,7 +484,7 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
       fun "Raw" = do
             UI.div # sink0 text (show <$> facts preoldItems)
       fun i = UI.div
-  sub <- UI.div # sink items (pure . fun <$> facts (triding nav)) # set UI.class_ "row"
+  sub <- UI.div # sink items (pure . fun <$> facts (triding nav))
   cv <- currentValue (facts preoldItems)
   bh2 <- stepper  cv (unionWith const e2  (rumors preoldItems))
   return ([getElement nav,sub], ediff ,tidings bh2 (unionWith const e2  (rumors preoldItems)))
@@ -603,9 +602,9 @@ indexItens s tb@(FKT ifk rel _) offsetT inner old = fmap constFKT  <$> bres
   where
     bres2 = fmap (fmap projFKT )  <$> takeArray  inner
     bres =  attrEditor s <$> offsetT <*> fmap (fmap (fktzip .projFKT)) old <*> bres2
-    constFKT a = FKT (mapComp (mapFAttr (const (ArrayTB1 ref ))) <$> ifk)   rel (ArrayTB1 tb )
+    constFKT a = FKT (mapKV (mapComp (mapFAttr (const (ArrayTB1 ref ))) ) ifk)   rel (ArrayTB1 tb )
       where (ref,tb) = Non.unzip a
-    projFKT (FKT i  _ j ) = (head $ fmap (unAttr.unTB ) $ i,  j)
+    projFKT (FKT i  _ j ) = (head $ fmap (unAttr.unTB ) $ unkvlist i,  j)
     fktzip (ArrayTB1 lc , ArrayTB1 m) =  Non.zip lc m
 indexItens s tb@(IT na _) offsetT inner old = fmap constIT <$> bres
   where
@@ -802,7 +801,7 @@ buildPrim fm tdi i = case i of
     oneInput tdi elem = do
             let f = facts tdi
             v <- currentValue f
-            inputUI <- UI.input # sink0 UI.value (maybe "" renderPrim <$> f)
+            inputUI <- UI.input # sink0 UI.value (maybe "" renderPrim <$> f)# set UI.style [("width","100%")]
             let pke = unionWith const (readPrim i <$> UI.valueChange inputUI) (rumors tdi)
             pk <- stepper v  pke
             let pkt = tidings pk (diffEvent pk pke)
@@ -883,11 +882,11 @@ offsetField  initT eve  max = do
   return (TrivialWidget offsetT offparen)
 
 
-tbrefM i@(FKT _  _ _)  =  L.sort $_tbref i
+tbrefM i@(FKT _  _ _)  =  L.sort $ unkvlist $_tbref i
 tbrefM j = [_tb  j ]
 
 
-isReadOnly (FKT ifk rel _ ) = L.null ifk || all (not . any ((/= FRead)). keyModifier . _relOrigin) rel
+isReadOnly (FKT ifk rel _ ) = L.null (unkvlist ifk ) || all (not . any ((/= FRead)). keyModifier . _relOrigin) rel
 isReadOnly (Attr k _ ) =  (not . any ((/= FRead)). keyModifier ) k
 isReadOnly (IT k _ ) =   (not . any ((/= FRead)). keyModifier ) k
 
@@ -910,9 +909,9 @@ fkUITable
 fkUITable inf constr tbrefs plmods  ref@wl oldItems  tb@(FKT ilk rel  tb1@(TB1 _) )
   | L.any isAccessRel rel = do
     let rela = L.filter isAccessRel rel
-        derel ilk = fmap (_tb . flip unRel  (unTB <$> ilk)) rela
+        derel ilk = kvlist $ fmap (_tb . flip unRel  (unTB <$> unkvlist ilk)) rela
         reln = unRels <$> rel
-    tr <- fkUITable inf constr tbrefs  plmods  (first  (\(FKT ifk rel tb1) -> FKT (derel ifk) reln tb1). second (fmap (\(FKT ilk rel tb1)-> FKT (derel ilk) reln tb1 )<$>)  <$> wl) (fmap (\(FKT ilk reln tb1)-> FKT (derel ilk) reln tb1)<$> oldItems)  (FKT (derel ilk) reln tb1)
+    tr <- fkUITable inf constr tbrefs  plmods  (first  (\(FKT ifk rel tb1) -> FKT (derel ifk) reln tb1). second (fmap (\(FKT ilk rel tb1)-> FKT (derel ilk) reln tb1 )<$>)  <$> wl) (fmap (\(FKT ilk reln tb1)-> FKT (derel  ilk) reln tb1)<$> oldItems)  (FKT (derel ilk) reln tb1)
     return  tr
 fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = mdo
       let
@@ -1017,10 +1016,10 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
       addElemFin (getElement subnet) fin
       addElemFin (getElement subnet) fin2
       let
-        fksel =  fmap (\box ->  FKT (fmap _tb $ backFKRef relTable  (fmap (keyAttr .unTB )ifk)   box) rel (TB1 box) ) <$>  ((\i -> maybe i Just) <$>  pretdi <*> tidings st sel)
+        fksel =  fmap (\box ->  FKT (kvlist $ fmap _tb $ backFKRef relTable  (fmap (keyAttr .unTB ) $ unkvlist ifk)   box) rel (TB1 box) ) <$>  ((\i -> maybe i Just) <$>  pretdi <*> tidings st sel)
       return $ TrivialWidget (if isReadOnly  tb then oldItems  else fksel ) subnet
 fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb1 ))) = do
-    tr <- fkUITable inf constr (tbrefs) (fmap (join . fmap unLeftItens <$>) <$> plmods)  (first unLeftKey . second (join . fmap unLeftItens <$>) <$> wl) (join . fmap unLeftItens  <$> oldItems)  (FKT (mapComp (firstTB unKOptional) <$> ilk) (Le.over relOri unKOptional <$> rel) tb1)
+    tr <- fkUITable inf constr (tbrefs) (fmap (join . fmap unLeftItens <$>) <$> plmods)  (first unLeftKey . second (join . fmap unLeftItens <$>) <$> wl) (join . fmap unLeftItens  <$> oldItems)  (FKT (mapKV (mapComp (firstTB unKOptional) ) ilk ) (Le.over relOri unKOptional <$> rel) tb1)
     return $ leftItens tb <$> tr
 
 fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1:| _)) ) = mdo
@@ -1029,7 +1028,7 @@ fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1
          arraySize = 8
      (TrivialWidget offsetT offset) <- offsetField (pure 0) never (maybe 0 (Non.length . (\(FKT _  _ (ArrayTB1 l) ) -> l)) <$> facts bres)
      let
-         fkst = FKT (mapComp (firstTB unKArray)<$> ifk ) (fmap (Le.over relOri (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
+         fkst = FKT (mapKV (mapComp (firstTB unKArray)) ifk ) (fmap (Le.over relOri (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
          dyn = dynHandler  recurse (\ix -> unIndexItens ix <$> offsetT  <*>  oldItems)
          recurse ix = do
            lb <- UI.div # sink UI.text (show . (+ix) <$> facts offsetT ) # set UI.class_ "col-xs-1"
@@ -1086,7 +1085,7 @@ foldMetaHeader' order el rend inf = mapFAttr order (\(Attr k v) -> hideLong (F.t
     where
           mapFAttr order f (a,kv) = fmap snd. L.sortBy (comparing ((flip L.elemIndex order).  fst) ). concat $ (  fmap (match.unTB ) .  F.toList .  _kvvalues)  $ unTB kv
             where match i@(Attr k v) = [(k,f i)]
-                  match i@(FKT l rel t) = ((\k -> (_relOrigin $ head $ keyattr k ,). f . unTB  $ k)<$> l )
+                  match i@(FKT l rel t) = ((\k -> (_relOrigin $ head $ keyattr k ,). f . unTB  $ k)<$> unkvlist l )
                   match i@(IT l t) = [( l,hideLong ( concat $ F.toList $ fmap (foldMetaHeader  UI.div rend inf) t))]
           hideLong l = do
             elemD <- el

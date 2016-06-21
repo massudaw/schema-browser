@@ -212,7 +212,7 @@ indexFieldL :: Show a => Access Text -> TB3Data (Labeled Text) Key a -> [(Key,Te
 indexFieldL p@(IProd b l) v = case  findAttrL  l  (snd v) of
                                 Just i -> [utlabel i]
                                 Nothing -> case unLB<$>  findFKL l (snd v) of
-                                    Just (FKT ref _ _) ->  (\l -> utlabel . justError ("no attr" <> show (ref,l)) . L.find ((==[l]).  fmap (keyValue . _relOrigin). keyattr ) $ ref ) <$>l
+                                    Just (FKT ref _ _) ->  (\l -> utlabel . justError ("no attr" <> show (ref,l)) . L.find ((==[l]).  fmap (keyValue . _relOrigin). keyattr ) $ unkvlist ref ) <$>l
                                     Nothing -> errorWithStackTrace ("no fkt" <> show (p,snd v))
 
 indexFieldL n@(Nested ix@(IProd b l) nt) v =  concat . fmap (indexFieldL nt) .  F.toList . _fkttable.  unLB $ justError "no nested" $ findFKL l (snd v)

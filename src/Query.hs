@@ -347,7 +347,7 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn,t
           tas <- tname nextT
           let knas = dumbKey (rawName nextT)
           kas <- kname tas  knas
-          return $ Compose $ Labeled (label $ kas) (FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton i) . S.map _relOrigin . fst )$ ksbn ) (_relRoot <$> (filter (\i -> not $ S.member i (S.unions $ fmap fst vacc)) $  filterReflexive ks) ))  ks  (mapOpt $ mapArray $ TB1 tb  ))
+          return $ Compose $ Labeled (label $ kas) (FKT (kvlist $ fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton i) . S.map _relOrigin . fst )$ ksbn ) (_relRoot <$> (filter (\i -> not $ S.member i (S.unions $ fmap fst vacc)) $  filterReflexive ks) ))  ks  (mapOpt $ mapArray $ TB1 tb  ))
     | otherwise = do
           (t,ksn) <- labelTable nextT
           tb@(m,Compose r)  <-fun ksn
@@ -358,7 +358,7 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn,t
               kas <- kname tas  knas
               return $ Labeled (label kas)
             else return  Unlabeled
-          return $ Compose $ lab $ FKT (fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks)))  ks (mapOpt $ TB1 tb)
+          return $ Compose $ lab $ FKT (kvlist $ fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks)))  ks (mapOpt $ TB1 tb)
   where
         nextT = (\(Just i)-> i) (join $ M.lookup tn <$> (M.lookup sn invSchema))
         e = S.fromList $ rawPK nextT
@@ -491,8 +491,8 @@ unTlabel  = fmap unTlabel'
 
 unlabel (Labeled l (IT tn t) ) = (IT tn (unTlabel t ))
 unlabel (Unlabeled (IT tn t) ) = (IT tn (unTlabel t ))
-unlabel (Labeled l (FKT i fkrel t) ) = (FKT (fmap relabel i) fkrel (unTlabel  t ))
-unlabel (Unlabeled (FKT i fkrel t) ) = (FKT (fmap relabel i) fkrel (unTlabel t))
+unlabel (Labeled l (FKT i fkrel t) ) = (FKT (mapKV relabel i) fkrel (unTlabel  t ))
+unlabel (Unlabeled (FKT i fkrel t) ) = (FKT (mapKV relabel i) fkrel (unTlabel t))
 unlabel (Labeled l (Attr k i )) = Attr k i
 
 relabel = Compose . Identity . unlabel.getCompose
