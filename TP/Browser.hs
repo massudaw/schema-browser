@@ -72,7 +72,7 @@ getClient metainf clientId ccli = G.lookup (G.Idex $ M.fromList [(lookKey metain
 
 deleteClient metainf clientId = do
   (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing [] $ LegacyPredicate []
-  putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))],[])]
+  putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , G.Idex $ M.fromList [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))],[])]
 
 editClient metainf inf dbmeta ccli  table tdi clientId now = do
   let cli :: Maybe (TBData Key Showable)
@@ -86,7 +86,7 @@ editClient metainf inf dbmeta ccli  table tdi clientId now = do
 addClient clientId metainf inf table dbdata =  do
     now <- getCurrentTime
     let
-      tdi = fmap getPKM $ join $ (\inf table -> fmap (tblist' table ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table))  ). F.toList) <$>  inf  <*> table <*> rowpk dbdata
+      tdi = fmap (M.toList .getPKM) $ join $ (\inf table -> fmap (tblist' table ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table))  ). F.toList) <$>  inf  <*> table <*> rowpk dbdata
     (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing [] $ LegacyPredicate []
     editClient metainf inf dbmeta ccli table tdi clientId now
     return (clientId, getClient metainf clientId <$> collectionTid dbmeta)
@@ -321,7 +321,7 @@ chooserTable inf cliTid cli = do
           where
             field =  G.lookup (G.Idex $ M.fromList pk) orderMap
             pk = L.sortBy (comparing fst) $ first (lookKey (meta inf ) "ordering") <$>[("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
-      incClick field =  (fst field , getPKM field ,[patch $ fmap (+ (SNumeric 1)) (usage )])
+      incClick field =  (fst field , G.getIndex field ,[patch $ fmap (+ (SNumeric 1)) (usage )])
           where
                  usage = lookAttr' (meta inf ) "usage"   field
   liftIO$ onEventIO ((\i j -> fmap (incClick) <$> (ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
@@ -411,7 +411,7 @@ viewerKey inf table cli layout cliTid = mdo
   itemList <- listBoxEl itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (fmap Just <$> tidings st sel ) (pure id) (pure (maybe id attrLine))
   let evsel =  rumors (fmap join  $ triding itemList)
   (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFrom "clients"  Nothing Nothing [] (LegacyPredicate $ (fmap (liftField (meta inf) "clients") <$> [("=",  uncurry Attr $("schema",LeftTB1 $ Just $TB1 $ SText (schemaName inf) )), ("=",Attr "table" $ LeftTB1 $ Just $ TB1 $ SText (tableName table))]))
-  liftIO $ onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) (Just inf) dbmeta  ccli (Just table ) (getPKM <$> i) cli =<< getCurrentTime )
+  liftIO $ onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) (Just inf) dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< getCurrentTime )
   prop <- stepper cv evsel
   let tds = tidings prop evsel
 

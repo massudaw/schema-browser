@@ -191,10 +191,10 @@ eventWidget inf body = do
 txt = TB1. SText
 
 writePK :: TBData Key Showable -> FTB Showable ->  Text
-writePK r efield = (\i -> _kvname (fst r) <> "->"  <> i <>  "->" <> T.pack (renderShowable efield ))$T.intercalate  ","  $ fmap ((\(i,j) -> keyValue i <> "=" <> T.pack (renderShowable j))) $ getPKM r
+writePK r efield = (\i -> _kvname (fst r) <> "->"  <> i <>  "->" <> T.pack (renderShowable efield ))$T.intercalate  ","  $ fmap ((\(i,j) -> keyValue i <> "=" <> T.pack (renderShowable j))) $ M.toList $ getPKM r
 
 makePatch :: TimeZone -> ((Table,[(Key ,FTB Showable)],Key),Either (Interval UTCTime ) UTCTime ) -> TBIdx Key Showable
-makePatch zone ((t,pk,k), a) = (tableMeta t , pk, PAttr k <$>  (ty  (keyType k)$   a))
+makePatch zone ((t,pk,k), a) = (tableMeta t , G.Idex $ M.fromList pk, PAttr k <$>  (ty  (keyType k)$   a))
  where ty (KOptional k )  i = fmap (POpt . Just)   . ty k $ i
        ty (KSerial k )  i = fmap (PSerial . Just )  . ty k $ i
        ty (KInterval k )  (Left i )=  [PatchSet $ (fmap (PInter True . (,True)). (ty k.Right . unFinite) $ Interval.lowerBound i) <>  (fmap (PInter False . (,True)). (ty k.Right .unFinite ) $ Interval.upperBound i)]

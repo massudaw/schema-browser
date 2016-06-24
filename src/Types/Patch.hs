@@ -125,7 +125,7 @@ instance Patch Showable  where
 
 type PatchConstr k a = (Patch a , Ord a , Show a,Show k , Ord k)
 
-type TBIdx  k a = (KVMetadata k, [(k ,FTB a )],[PathAttr k a])
+type TBIdx  k a = (KVMetadata k, G.TBIndex  k a ,[PathAttr k a])
 type RowPatch k a = TBIdx k a -- (KVMetadata k, TBData k a ,[PathAttr k a])
 
 
@@ -152,7 +152,7 @@ data PathTID
 
 
 firstPatch :: (Ord a ,Ord k , Ord (Index a), Ord j ) => (k -> j ) -> TBIdx k a -> TBIdx j a
-firstPatch f (i,j,k) = (fmap f i , fmap (first f) j ,fmap (firstPatchAttr f) k)
+firstPatch f (i,j,k) = (fmap f i , G.mapKeys f j ,fmap (firstPatchAttr f) k)
 
 firstPatchAttr :: (Ord k , Ord j ,Ord a ,Ord (Index a)) => (k -> j ) -> PathAttr k a -> PathAttr j a
 firstPatchAttr f (PAttr k a) = PAttr (f k) a
@@ -215,27 +215,27 @@ expandPSet p = [p]
 groupSplit2 :: Ord b => (a -> b) -> (a -> c ) -> [a] -> [(b ,[c])]
 groupSplit2 f g = fmap (\i-> (f $ justError "cant group" $ safeHead i , g <$> i)) . groupWith f
 
-notOptional :: [(k , FTB a )] -> [(k,FTB a)]
-notOptional = justError "cant be empty " . traverse (traverse unSOptional' )
+notOptional :: G.TBIndex k a -> G.TBIndex k a -- [(k , FTB a )] -> [(k,FTB a)]
+notOptional (G.Idex m) = G.Idex   . justError "cant be empty " . traverse unSOptional'  $ m
 
 applyGiST
   ::  (G.Predicates (G.TBIndex k  a) , PatchConstr k a)  => G.GiST (G.TBIndex k a ) (TBData k a) -> RowPatch k (Index a) -> G.GiST (G.TBIndex k a ) (TBData k a)
-applyGiST l patom@(m,i, []) = G.delete (G.Idex $ Map.fromList $ notOptional (fmap (fmap create) <$> i)) (3,6)  l
-    where tbpred v = G.Idex  $ Map.fromList $ notOptional $ getUn un v
+applyGiST l patom@(m,i, []) = G.delete (create <$> notOptional i) (3,6)  l
+    where tbpred v = notOptional $ G.Idex  $ Map.fromList $  getUn un v
           un = (Set.fromList $ _kvpk m)
-applyGiST l patom@(m,ipa, p) =  case G.lookup (G.Idex $ Map.fromList $ notOptional i) l  of
+applyGiST l patom@(m,ipa, p) =  case G.lookup (notOptional i) l  of
                   Just v ->  let
                            el = applyRecord  v patom
-                           pkel = getPKM el
+                           pkel = G.Idex $ getPKM el
                           in if pkel == i
-                            then G.insert (el,tbpred  el) (3,6) . G.delete (G.Idex $ Map.fromList $ notOptional i)  (3,6) $ l
-                            else G.insert (el,tbpred  el) (3,6) . G.delete (G.Idex $ Map.fromList $notOptional i)  (3,6) $ l
+                            then G.insert (el,tbpred  el) (3,6) . G.delete (notOptional i)  (3,6) $ l
+                            else G.insert (el,tbpred  el) (3,6) . G.delete (notOptional i)  (3,6) $ l
                   Nothing -> let
                       el = createTB1  patom
                       in G.insert (el,tbpred  el) (3,6)  l
-    where tbpred v = G.Idex  $ Map.fromList $ notOptional $getUn un v
+    where tbpred v = notOptional $ G.Idex  $ Map.fromList $ getUn un v
           un = (Set.fromList $ _kvpk m)
-          i = fmap (fmap create) <$> ipa
+          i = fmap create  ipa
 
 
 travPath f p (PatchSet i) = foldl f p i
@@ -272,12 +272,12 @@ applyRecord t@((m, v)) (_ ,_  , k)  = (m ,mapComp (KV . flip (foldr (\p m -> Map
   where edit  v k =  mapComp (flip applyAttr k ) v
 
 patchTB1 :: PatchConstr k a => TBData k  a -> TBIdx k  (Index a)
-patchTB1 (m, k)  = (m  ,fmap (fmap patch) <$> (getPKM (m,k)) ,  F.toList $ patchAttr  . unTB <$> (unKV k))
+patchTB1 (m, k)  = (m  ,G.Idex $ fmap patch <$> getPKM (m,k) ,  F.toList $ patchAttr  . unTB <$> (unKV k))
 
 difftable
   ::  (PatchConstr k a  , Show a,Show k ) => TBData k a -> TBData k a
      -> Maybe (Index (TBData k a ))
-difftable (m, v) (n, o) = if L.null attrs then Nothing else Just  (m, fmap (fmap patch ) <$> (getPKM (m,v)), attrs)
+difftable old@(m, v) (n, o) = if L.null attrs then Nothing else Just  (m,   G.Idex $ fmap patch  <$> getPKM old , attrs)
     where attrs = catMaybes $ F.toList  $ Map.mergeWithKey (\_ i j -> Just $ diffAttr (unTB  i) (unTB j)) (const Map.empty ) (fmap (Just. patchAttr . unTB) ) (unKV v) (unKV $  o)
 
 diffTB1 :: (PatchConstr k a ) =>  TB2 k a -> TB2  k  a -> Maybe (PathFTB   (Index (TBData k a )) )

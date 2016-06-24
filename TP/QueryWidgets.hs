@@ -178,7 +178,7 @@ pluginUI inf oldItems p@(FPlugins n t (PurePlugin arrow )) = do
   out <- UI.div # set children [headerP,details]
   ini <- currentValue (facts tdInput )
   kk <- stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
-  (pgOut ,fin) <- mapTEventFin (\v -> fmap (join . eitherToMaybe ). catchPluginException inf t n (getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
+  (pgOut ,fin) <- mapTEventFin (\v -> fmap (join . eitherToMaybe ). catchPluginException inf t n (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
   addElemFin out fin
   return (out, (snd f ,   fmap (liftTable' inf t) <$> pgOut ))
 
@@ -198,7 +198,7 @@ pluginUI inf oldItems p@(FPlugins n t (BoundedPlugin2 arrow)) = do
   vo <- currentValue (facts tdOutput)
   vi <- currentValue (facts tdInput)
   bcv <- stepper (Nothing {-maybe vi (const Nothing) vo-}) ecv
-  (pgOut ,fin) <- mapTEventFin (\v -> fmap (fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf t n (getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v)  (tidings bcv ecv)
+  (pgOut ,fin) <- mapTEventFin (\v -> fmap (fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf t n (M.toList $ getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v)  (tidings bcv ecv)
   addElemFin out fin
   return (out, (snd f ,  pgOut ))
 
@@ -478,9 +478,9 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
           addElemFin panelItems fin
           UI.div # set children [listBody,panelItems]
       fun "Change" = do
-            UI.div # sink0 items (maybe [] (pure . dashBoardAllTableIndex . (inf,table,) . Non.fromList . getPKM ) <$> facts preoldItems )
+            UI.div # sink0 items (maybe [] (pure . dashBoardAllTableIndex . (inf,table,) . Non.fromList . M.toList . getPKM ) <$> facts preoldItems )
       fun "Exception" = do
-            UI.div # sink0 items (maybe [] (pure . exceptionAllTableIndex . (inf,table,). Non.fromList .getPKM ) <$> facts preoldItems )
+            UI.div # sink0 items (maybe [] (pure . exceptionAllTableIndex . (inf,table,). Non.fromList . M.toList . getPKM ) <$> facts preoldItems )
       fun "Raw" = do
             UI.div # sink0 text (show <$> facts preoldItems)
       fun i = UI.div
@@ -513,7 +513,7 @@ processPanelTable lbox inf attrsB reftb@(res,_,gist,_) inscrud table oldItemsi =
   let
       containsGist ref map = if isJust refM then isJust (lookGist ix ref map) else False
         where ix = (S.fromList $ _kvpk (tableMeta table))
-              refM = traverse (traverse unSOptional') (getPKM ref)
+              refM = traverse unSOptional' (getPKM ref)
 
   let insertEnabled = liftA2 (&&) (isJust . fmap (tableNonRef') <$> facts inscrud ) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (facts inscrud ) (facts gist ))
   insertB <- UI.button #
@@ -882,7 +882,7 @@ offsetField  initT eve  max = do
   return (TrivialWidget offsetT offparen)
 
 
-tbrefM i@(FKT _  _ _)  =  L.sort $ unkvlist $_tbref i
+tbrefM i@(FKT _  _ _)  =  unkvlist $_tbref i
 tbrefM j = [_tb  j ]
 
 

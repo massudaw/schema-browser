@@ -10,7 +10,7 @@ import GHC.Generics
 import Data.Unique
 import Data.Maybe
 import Data.Binary
-import Types.Index
+import Types.Index as G
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM.TMVar
 import Control.Concurrent.STM
@@ -233,7 +233,7 @@ liftField inf tname (IT rel tb) = IT (lookKey inf tname  rel) (liftKeys inf tnam
           ta = lookTable inf tname
 
 liftPatch :: a ~ Index a => InformationSchema -> Text -> TBIdx Text a -> TBIdx Key a
-liftPatch inf t (_ , k ,p) = (tableMeta ta ,first (lookKey inf t ) <$> k,fmap (liftPatchAttr inf t) p)
+liftPatch inf t (_ , k ,p) = (tableMeta ta ,G.mapKeys (lookKey inf t )  k,fmap (liftPatchAttr inf t) p)
   where ta = lookTable inf t
 
 

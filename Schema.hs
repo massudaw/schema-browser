@@ -319,8 +319,8 @@ logTableModification inf (TableModification Nothing table i) = do
   time <- getCurrentTime
 
   let ltime =  utcToLocalTime utc $ time
-      (_,pidx,pdata) = firstPatch keyValue  i
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index2,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (username inf ,ltime,rawName table, V.fromList <$> nonEmpty (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) pidx )) , fmap (Binary  . B.encode ) . V.fromList <$> nonEmpty pdata , schemaName inf)
+      (_,G.Idex pidx,pdata) = firstPatch keyValue  i
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index2,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (username inf ,ltime,rawName table, V.fromList <$> nonEmpty (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) (M.toList pidx) )) , fmap (Binary  . B.encode ) . V.fromList <$> nonEmpty pdata , schemaName inf)
   return (TableModification (Just id) table i )
 
 
@@ -425,7 +425,7 @@ addStats schema = do
   let
     row t s ls = tblist . fmap _tb $ [Attr "schema_name" (TB1 (SText (schemaName schema ) )), Attr "table_name" (TB1 (SText t)) , Attr "size" (TB1 (SNumeric s)), Attr "loadedsize" (TB1 (SNumeric ls)) ]
     lrow t dyn st = liftTable' metaschema "table_stats" . row t (maybe (G.size dyn) (maximum .fmap fst ) $  nonEmpty $  F.toList st) $ (G.size dyn)
-    lookdiff tb row =  maybe (Just $ patch row ) (\old ->  diff old row ) (G.lookup (G.Idex (M.fromList $ getPKM row)) tb)
+    lookdiff tb row =  maybe (Just $ patch row ) (\old ->  diff old row ) (G.lookup (G.Idex (getPKM row)) tb)
   mapM_ (\(m,var)-> do
     let event = R.filterJust $ lookdiff <$> R.facts (collectionTid dbpol ) R.<@> (flip (lrow (_kvname m)) <$>  R.facts (idxTid var ) R.<@> R.rumors (collectionTid  var ) )
     R.onEventIO event (\i -> do

@@ -3,6 +3,7 @@ module OAuth (gmailOps) where
 import qualified NonEmpty as Non
 import Control.Lens
 import Control.Exception
+import qualified Types.Index as G
 import qualified Data.ByteString.Lazy.Char8 as BS
 import Control.Arrow
 import Control.Monad.Reader
@@ -55,9 +56,9 @@ url s u = "https://www.googleapis.com/" <> T.unpack s <> "/v1/users/"<> T.unpack
 
 urlJ :: Text -> TableK Key -> FTB (TBData Key Showable ) -> String
 urlJ s j pk
-  | tableName j == "google_auth" = prefix <> "users/" <>  intercalate "," (renderShowable . snd <$> getPK pk)  <> "/"
-  | tableName j == "messages"  =  prefix <> "users/me/" <>  T.unpack (rawName j ) <> "/" <>  intercalate "," (renderShowable . snd <$> getPK pk)  <> "/"
-  | otherwise = prefix <>  T.unpack (rawName j ) <> "/" <>  intercalate "," (renderShowable . snd <$> getPK pk)  <> "/"
+  | tableName j == "google_auth" = prefix <> "users/" <>  intercalate "," (renderShowable <$> F.toList ( getPK pk))  <> "/"
+  | tableName j == "messages"  =  prefix <> "users/me/" <>  T.unpack (rawName j ) <> "/" <>  intercalate "," (renderShowable <$> F.toList (getPK pk))  <> "/"
+  | otherwise = prefix <>  T.unpack (rawName j ) <> "/" <>  intercalate "," (renderShowable <$> F.toList (getPK pk) )  <> "/"
   where prefix = "https://www.googleapis.com/" <> T.unpack s <> "/v1/"
 
 urlT s u
@@ -116,7 +117,7 @@ urlPath  s m
           | j == "google_auth" = "users" <>  "/" <> ref
           | otherwise =  T.unpack j  <> "/" <> ref
             where j = _kvname (fst v)
-                  ref = intercalate "," (renderShowable . snd <$> getPKM v)
+                  ref = intercalate "," (renderShowable  <$> F.toList (getPKM v))
 
 
 deleteRow pk
@@ -128,7 +129,7 @@ deleteRow pk
     let user = fst $ justError "no token" $ token inf
         table = lookTable inf (_kvname (fst pk))
     decoded <- liftIO $ do
-        let req = urlPath (schemaName inf)  scoped  <> "/" <> T.unpack (_kvname (fst pk ) ) <> "/" <> ( intercalate "," ( renderShowable . snd <$> notScoped (getPKM pk )))<>  "?access_token=" ++ ( accessToken tok)
+        let req = urlPath (schemaName inf)  scoped  <> "/" <> T.unpack (_kvname (fst pk ) ) <> "/" <> ( intercalate "," ( renderShowable . snd <$> notScoped (M.toList $ getPKM pk )))<>  "?access_token=" ++ ( accessToken tok)
             notScoped  = filter (not . (`elem` (_rawScope (lookTable inf (_kvname (fst pk))))).fst)
         (t,v) <- duration
             -- $ "DELETE" <> show req
@@ -137,7 +138,7 @@ deleteRow pk
         return v
     liftIO $print decoded
     let p = if BS.null decoded  then
-            Just $ TableModification Nothing table  (fst pk , getPKM pk, [])
+            Just $ TableModification Nothing table  (fst pk , G.Idex $ getPKM pk, [])
             else Nothing
     tell (maybeToList p)
     return p
@@ -188,7 +189,7 @@ joinGet tablefrom tableref from ref
 
     tok <- getToken  [unTB1 from]
     decoded <- liftIO $ do
-        let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  urlJ (schemaName inf) tablefrom from )  <>  T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> notScoped ( getPK ref) ) <> "?access_token=" ++ ( accessToken tok)
+        let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  urlJ (schemaName inf) tablefrom from )  <>  T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> notScoped ( M.toList $ getPK ref) ) <> "?access_token=" ++ ( accessToken tok)
             notScoped  = filter (not . (`elem` (_rawScope tableref)).fst)
         print  req
         (t,v) <- duration
@@ -200,7 +201,7 @@ joinGet tablefrom tableref from ref
     inf <- ask
     tok <- getToken [ unTB1 from]
     decoded <- liftIO $ do
-        let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  urlJ (schemaName inf) tablefrom from )  <>  T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK ref ) <> "?access_token=" ++ ( accessToken tok)
+        let req = (if tableName tableref == "tasks" then urlT (schemaName inf) user  else  urlJ (schemaName inf) tablefrom from )  <>  T.unpack (rawName tableref ) <> "/" <>  intercalate "," ( renderShowable <$> F.toList (getPK ref ) ) <> "?access_token=" ++ ( accessToken tok)
         print req
         (t,v) <- duration
                 (simpleHttpHeader [("GData-Version","3.0")] req )
@@ -245,7 +246,7 @@ getTable tb pk
     tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
     let user = fst $ fromJust $ token inf
     decoded <- liftIO $ do
-        let req = url (schemaName inf) user <>  T.unpack (rawName tb ) <> "/" <>  intercalate "," ( renderShowable . snd <$> getPK pk ) <> "?access_token=" ++ ( accessToken tok)
+        let req = url (schemaName inf) user <>  T.unpack (rawName tb ) <> "/" <>  intercalate "," ( renderShowable <$> F.toList (getPK pk )) <> "?access_token=" ++ ( accessToken tok)
         (t,v) <- duration
             (simpleHttpHeader [("GData-Version","3.0")] req )
         print ("get",tb,getPK pk,t)
@@ -260,7 +261,7 @@ gmailOps = (SchemaEditor undefined undefined insertTable deleteRow listTable get
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
-lbackRef (TB1 t) = snd $ Types.head $ getPKM t
+lbackRef (TB1 t) = snd $ Types.head $ M.toList $ getPKM t
 
 lookMTable inf m = lookSTable inf (_kvschema m,_kvname m)
 

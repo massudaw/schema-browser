@@ -1097,7 +1097,7 @@ tbUn un (TB1 (kv,item)) =  (\kv ->  mapComp (\(KV item)->  KV $ Map.filterWithKe
 
 
 getPK (TB1 i) = getPKM i
-getPKM (m, k) = L.sortBy (comparing fst) $ concat $ F.toList (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (unTB k))))
+getPKM (m, k) = Map.fromList $  concat $ F.toList (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (unTB k))))
 
 getAttr'  (TB1 (m, k)) = L.sortBy (comparing fst) $ (concat (fmap aattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 

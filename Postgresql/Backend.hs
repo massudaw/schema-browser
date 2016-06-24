@@ -2,6 +2,7 @@
 module Postgresql.Backend where
 
 import Types
+import qualified Types.Index as G
 import Step.Common
 import Step.Host
 import Safe
@@ -54,7 +55,7 @@ insertPatch f conn path@(m ,s,i ) t =  liftIO$ if not $ L.null serialAttr
         out <-  fmap safeHead $ liftIO $ queryWith (f (mapRecord (const ()) serialTB )) conn (fromString  iquery ) directAttr
         let Just (_,_ ,gen) =  join $ diff serialTB <$> out
             comp = compact (i <> gen)
-        return (m,getPKM (justError "no out insert" out) ,comp )
+        return (m, G.getIndex (justError "no out insert" out) ,comp )
       else do
         let
           iquery = T.unpack prequery
@@ -79,26 +80,26 @@ insertPatch f conn path@(m ,s,i ) t =  liftIO$ if not $ L.null serialAttr
 deletePatch
   ::
      Connection ->  TBIdx PGKey Showable -> Table -> IO (TBIdx PGKey Showable)
-deletePatch conn patch@(m ,kold ,_) t = do
+deletePatch conn patch@(m ,G.Idex kold ,_) t = do
     execute conn (fromString $ traceShowId $ T.unpack del) koldPk
     return patch
   where
     equality k = attrValueName k <> "="  <> "?"
-    koldPk = uncurry Attr <$> F.toList kold
+    koldPk = uncurry Attr <$> M.toList kold
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     del = "DELETE FROM " <> rawFullName t <>   pred
 
 applyPatch
   ::
      Connection -> TBIdx PGKey Showable -> IO (TBIdx PGKey Showable)
-applyPatch conn patch@(m,kold,skv)  =
+applyPatch conn patch@(m,G.Idex kold,skv)  =
     execute conn (fromString $ traceShowId $ T.unpack up)  (fmap attrPatchValue skv <> koldPk ) >> return patch
   where
     equality k = k <> "="  <> "?"
-    koldPk = uncurry Attr <$> F.toList kold
+    koldPk = uncurry Attr <$> M.toList kold
     attrPatchName (PAttr k _) = keyValue k
     attrPatchValue (PAttr  k v) = Attr k (create v) :: TB Identity PGKey Showable
-    pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> F.toList kold)
+    pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> M.toList kold)
     setter = " SET " <> T.intercalate "," (equality .   attrPatchName <$> skv   )
     up = "UPDATE " <> kvfullname m <> setter <>  pred
 
@@ -110,10 +111,10 @@ updatePatch conn kv old  t =
     execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk ) >> return patch
   where
     patch  = justError ("cant diff states" <> (concat $ zipWith differ (show kv) (show old))) $ diff old kv
-    kold = getPKM old
+    kold = M.toList $ getPKM old
     equality k = k <> "="  <> "?"
-    koldPk = uncurry Attr <$> F.toList kold
-    pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> F.toList kold)
+    koldPk = uncurry Attr <$> kold
+    pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> kold)
     setter = " SET " <> T.intercalate "," (equality .   attrValueName <$> skv   )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = unTB <$> F.toList  (_kvvalues $ unTB tbskv)
@@ -271,7 +272,7 @@ deleteMod j@(meta,_) = do
   inf <- ask
   log <- liftIO $  do
     let
-      patch =  (tableMeta table, getPKM j,[])
+      patch =  (tableMeta table, G.getIndex  j,[])
       table = lookTable inf (_kvname (fst  j))
     deletePatch (conn inf)  (firstPatch (recoverFields inf) patch) table
     -- Just <$> logTableModification inf (TableModification Nothing table  patch)
@@ -349,7 +350,7 @@ loadDelayed inf t@(k,v) values@(ks,vs)
        is <- queryWith (fromRecord delayed) (conn inf) (fromString $ T.unpack str) (fmap (firstTB (recoverFields inf) .unTB) $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK' (tableNonRef' values))
        case is of
             [] -> errorWithStackTrace "empty query"
-            [i] ->return $ fmap (\(i,j,a) -> (i,getPKM (ks,vs),a)) $ diff delayedTB1(mapKey' (kOptional.kDelayed.unKOptional) . mapFValue' (LeftTB1 . Just . DelayedTB1 .  unSOptional ) $ i  )
+            [i] ->return $ fmap (\(i,j,a) -> (i,G.getIndex (ks,vs),a)) $ diff delayedTB1(mapKey' (kOptional.kDelayed.unKOptional) . mapFValue' (LeftTB1 . Just . DelayedTB1 .  unSOptional ) $ i  )
             _ -> errorWithStackTrace "multiple result query"
   where
     delayedattrs = concat $ fmap (keyValue . (\(Inline i ) -> i)) .  F.toList <$> M.keys filteredAttrs
@@ -359,6 +360,6 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 
 
-postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef . filter (flip L.elem (fmap fst s) . fst ) .  getPKM <$> lastMay i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o )  (\table j -> do
+postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef . filter (flip L.elem (fmap fst s) . fst ) .  M.toList . getPKM <$> lastMay i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o )  (\table j -> do
     inf <- ask
     liftIO . loadDelayed inf (unTlabel' $ tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined logTableModification

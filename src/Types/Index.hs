@@ -1,15 +1,18 @@
 {-# LANGUAGE TypeFamilies#-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Types.Index
-  (TBIndex(..) , toList ,lookup ,fromList ,filter ,module G ) where
+  (TBIndex(..) , toList ,lookup ,fromList ,filter ,mapKeys ,getIndex ,module G ) where
 
 import Data.GiST.RTree (pickSplitG)
+import Data.Binary
 import Data.Semigroup
+import GHC.Generics
 import Types
 import Utils
 import Data.Time
@@ -37,7 +40,13 @@ import qualified Data.Map as M
 --- Row Level Predicate
 newtype TBIndex k a
   = Idex (Map k (FTB a))
-  deriving(Eq,Show,Ord,Functor)
+  deriving(Eq,Show,Ord,Functor,Generic)
+
+instance (Binary a, Binary k)  => Binary (TBIndex  k a)
+
+mapKeys f (Idex i ) = Idex $ M.mapKeys f i
+getIndex :: Ord k => TBData k a -> TBIndex k a
+getIndex = Idex . getPKM
 
 instance Semigroup DiffShowable where
   (<>) = appendDShowable

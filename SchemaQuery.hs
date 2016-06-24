@@ -71,7 +71,7 @@ tbpredM un v = G.Idex . M.fromList <$> (Tra.traverse (Tra.traverse unSOptional' 
 
 createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key Showable) (TBData Key Showable)
 createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un (tableNonRef' i) )
-  where transPred v = G.Idex $ M.fromList $ L.sortBy ( comparing fst ) $ justError "invalid pred" (Tra.traverse (Tra.traverse unSOptional' ) $getUn un (tableNonRef' v))
+  where transPred v = G.Idex $ M.fromList $ justError "invalid pred" (Tra.traverse (Tra.traverse unSOptional' ) $getUn un (tableNonRef' v))
 
 
 -- tableLoader :: InformationSchema -> Table -> TransactionM (Collection Key Showable)
@@ -105,7 +105,7 @@ syncFrom t page size presort fixed = do
       let
           fil = [("=", FKT ( kvlist $ _tb <$> backPathRef sref i) rel (TB1 i) )]
       (_,t) <- selectFrom "history" Nothing Nothing defSort (LegacyPredicate fil)
-      let latest = fmap (("=",) . uncurry Attr). getPKM   $ ( L.maximumBy (comparing getPKM) $ G.toList $ snd t)
+      let latest = fmap (("=",) . uncurry Attr). M.toList . getPKM   $ ( L.maximumBy (comparing getPKM) $ G.toList $ snd t)
       (joinSyncTable  [(fromtable ,i,sref)] table page size presort (LegacyPredicate fil). F.toList ) (latest)
       ) $ F.toList (snd i)
 

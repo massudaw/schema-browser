@@ -3,6 +3,7 @@ module OAuthClient (readHistory ,oauthpoller,transToken,tokenToOAuth,oauthToToke
 import Data.Maybe
 import Utils
 import Types.Patch
+import Types.Index as G
 import Data.Monoid
 import Control.Exception
 import qualified Data.Text as T
@@ -10,6 +11,7 @@ import Control.Arrow
 import Control.Monad.Reader
 import Prelude hiding (head)
 import Step.Client
+import qualified Data.Map as M
 import System.Info (os)
 import System.Process (rawSystem)
 import System.Exit    (ExitCode(..))
@@ -76,7 +78,7 @@ readHistory = proc x -> do
   mdeleted <- atMA "user,messagesDeleted->messages" (idxM "id")  -< ()
   -- labelAdded <- atA "labelsAdded"  ((,) <$> idxK "id" <*> idxK "labels")  -< ()
   -- labelDeleted <- atA "messagesDeleted"   -< ()
-  let patchDel i = (kvempty ,  [("id",i)] , [])
+  let patchDel i = (kvempty ,  G.Idex $ M.fromList [("id",i)] , [])
       patchCreate i = firstPatch keyString $ patch i
   odxR "showpatch" -< ()
   returnA -< Just $ tblist $ _tb <$> [Attr "showpatch" (TB1 $ SText $ T.pack $ show $ (patchDel <$> catMaybes mdeleted) <>  (patchCreate <$> catMaybes madded))]
