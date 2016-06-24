@@ -68,7 +68,7 @@ updateClient metainf inf table tdi clientId now =
       lrow = liftTable' metainf "clients" row
     in lrow
 
-getClient metainf clientId ccli = G.lookup (G.Idex [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))]) ccli :: Maybe (TBData Key Showable)
+getClient metainf clientId ccli = G.lookup (G.Idex $ M.fromList [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))]) ccli :: Maybe (TBData Key Showable)
 
 deleteClient metainf clientId = do
   (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing [] $ LegacyPredicate []
@@ -306,7 +306,7 @@ chooserTable inf cliTid cli = do
       authorize =  (\autho t -> isJust $ G.lookup (idex  (meta inf) "authorization"  [("table_schema", TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText $ tableName t),("grantee",TB1 $ SText $ username inf)]) autho)  <$> collectionTid authorization
   let
       filterLabel = (\j d -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> d (Just i))))<$> filterInpT <*> lookDesc
-      tableUsage orderMap table = maybe (Right 0) (Left ) . fmap (lookAttr' (meta inf)  "usage" ) $  G.lookup  (G.Idex ( pk )) orderMap
+      tableUsage orderMap table = maybe (Right 0) (Left ) . fmap (lookAttr' (meta inf)  "usage" ) $  G.lookup  (G.Idex ( M.fromList pk )) orderMap
           where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$> [("table_name",TB1 . SText . rawName $ table ), ("schema_name",TB1 $ SText (schemaName inf))]
       buttonStyle k e = do
           label <- UI.div # sink0 UI.text (facts $ lookDesc  <*> pure (selTable $ Just k)) # set UI.style [("width","100%")] # set UI.class_ "btn-xs btn-default buttonSet" # sink0 UI.style (noneShow   <$> facts visible)
@@ -319,7 +319,7 @@ chooserTable inf cliTid cli = do
   let bBset = triding bset
       ordRow orderMap pkset =  field
           where
-            field =  G.lookup (G.Idex pk) orderMap
+            field =  G.lookup (G.Idex $ M.fromList pk) orderMap
             pk = L.sortBy (comparing fst) $ first (lookKey (meta inf ) "ordering") <$>[("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
       incClick field =  (fst field , getPKM field ,[patch $ fmap (+ (SNumeric 1)) (usage )])
           where
@@ -377,7 +377,7 @@ viewerKey inf table cli layout cliTid = mdo
   reftb@(vpt,vp,_ ,var ) <- refTables inf table
 
   let
-      tdip = (\i -> join $ traverse (\v -> G.lookup  (G.Idex (justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) (join $ lookPK <$> iv) ) <$> vpt
+      tdip = (\i -> join $ traverse (\v -> G.lookup  (G.Idex (M.fromList $ justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) (join $ lookPK <$> iv) ) <$> vpt
       tdi = if Just (tableName table) == join (lookT <$> iv) then tdip else pure Nothing
   cv <- currentValue (facts tdi)
   -- Final Query ListBox

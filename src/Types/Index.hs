@@ -29,12 +29,14 @@ import Debug.Trace
 import qualified Data.List as L
 import qualified Data.Set as Set
 import Data.GiST.BTree
+import Data.Map (Map)
+import qualified Data.Map as M
 
 
 
 --- Row Level Predicate
 newtype TBIndex k a
-  = Idex [(k,FTB a)]
+  = Idex (Map k (FTB a))
   deriving(Eq,Show,Ord,Functor)
 
 instance Semigroup DiffShowable where
@@ -90,18 +92,17 @@ instance Affine Showable where
   addition i j = errorWithStackTrace (show (i,j))
 
 instance Predicates (TBIndex Key Showable) where
-  type (Penalty (TBIndex Key Showable)) = Penalty ([FTB Showable])
+  type (Penalty (TBIndex Key Showable)) = Penalty (Map Key (FTB Showable))
   consistent (Idex j) (Idex  m )
-     = consistent (fmap snd $  j) (fmap snd $ m)
-  union l  = Idex (zipWith (,) kf projL)
-    where Idex  v = head l
-          kf = fmap fst v
-          projL = union $ fmap (fmap snd . (\(Idex  a) -> a)) l
+     = consistent j m
+  union l  = Idex   projL
+    where
+          projL = union  (fmap (\(Idex i) -> i)l)
 
-  penalty i j = penalty (projIdex i ) (projIdex j)
+  penalty (Idex i ) (Idex j) = penalty i j
   pickSplit = pickSplitG
 
-projIdex (Idex v) = fmap snd $ v
+projIdex (Idex v) = F.toList v
 
 instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
   mempty = G.empty
@@ -112,11 +113,11 @@ instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
 
 
 -- Attr List Predicate
-instance  Predicates [FTB Showable] where
-  type Penalty ([FTB Showable] ) = [DiffShowable]
-  consistent (l ) (i) =  all id $ zipWith consistent (l) (i)
-  union l = fmap (\i ->  union i )$ L.transpose $  l
-  penalty (p1) (p2) = zipWith penalty p1  p2
+instance  Predicates (Map Key (FTB Showable)) where
+  type Penalty (Map Key (FTB Showable )) = [DiffShowable]
+  consistent (l ) (i) =  all id $ zipWith consistent (F.toList l) (F.toList i)
+  union l = foldl1 (M.intersectionWith (\i j -> union [i,j]) ) l
+  penalty p1 p2 = zipWith penalty (F.toList p1 ) (F.toList  p2)
   pickSplit = pickSplitG
 
 

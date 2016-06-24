@@ -50,7 +50,7 @@ index tb item = snd $ justError ("no item" <> show item) $ indexTable (IProd Tru
 
 checkTime polling tb = do
     let curr = justError (show $ tbpred tb) $ G.lookup (tbpred tb) polling
-        tbpred = G.Idex . getPKM
+        tbpred = G.Idex . M.fromList . getPKM
         TB1 (STimestamp startLocal) = index curr "start_time"
         TB1 (STimestamp endLocal) = index curr "end_time"
         start = localTimeToUTC utc startLocal
@@ -99,15 +99,11 @@ poller schm authmap db plugs is_test = do
                               tdInput i =  isJust  $ checkTable  (fst f) i
                               tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
 
-                          i <-  mapConcurrently (mapM (\inp -> catchPluginException inf a pname (getPKM inp) $ transactionLog inf $ do
-                              ov  <- fmap (liftTable' inf a) <$>   liftIO ( elemp (Just $ mapKey' keyValue inp))
-                              let c = ov
-                              let diff' = join $ diff <$> Just inp <*> c
-                              liftIO$ print diff'
-                              maybe (return () )  (\i -> do
-                                 p <- fullDiffEdit inp (justError "no test" c)
-                                 return ()
-                                 ) diff'
+                          i <-  mapM (mapM (\inp -> catchPluginException inf a pname (getPKM inp) $ transactionLog inf $ do
+                              ovm  <- fmap (liftTable' inf a) <$> liftIO (elemp (Just $ mapKey' keyValue inp))
+                              maybe (return ()) (\ov-> do
+                                   p <- fullDiffEdit inp ov
+                                   return ()) ovm
                               )
                             ) . L.transpose .  chuncksOf 20 $ evb
                           return $ concat i

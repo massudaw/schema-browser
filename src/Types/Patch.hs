@@ -220,20 +220,20 @@ notOptional = justError "cant be empty " . traverse (traverse unSOptional' )
 
 applyGiST
   ::  (G.Predicates (G.TBIndex k  a) , PatchConstr k a)  => G.GiST (G.TBIndex k a ) (TBData k a) -> RowPatch k (Index a) -> G.GiST (G.TBIndex k a ) (TBData k a)
-applyGiST l patom@(m,i, []) = G.delete (G.Idex $ notOptional (fmap (fmap create) <$> i)) (3,6)  l
-    where tbpred v = G.Idex  $ notOptional $ getUn un v
+applyGiST l patom@(m,i, []) = G.delete (G.Idex $ Map.fromList $ notOptional (fmap (fmap create) <$> i)) (3,6)  l
+    where tbpred v = G.Idex  $ Map.fromList $ notOptional $ getUn un v
           un = (Set.fromList $ _kvpk m)
-applyGiST l patom@(m,ipa, p) =  case G.lookup (G.Idex $ notOptional i) l  of
+applyGiST l patom@(m,ipa, p) =  case G.lookup (G.Idex $ Map.fromList $ notOptional i) l  of
                   Just v ->  let
                            el = applyRecord  v patom
                            pkel = getPKM el
                           in if pkel == i
-                            then G.insert (el,tbpred  el) (3,6) . G.delete (G.Idex $ notOptional i)  (3,6) $ l
-                            else G.insert (el,tbpred  el) (3,6) . G.delete (G.Idex $ notOptional i)  (3,6) $ l
+                            then G.insert (el,tbpred  el) (3,6) . G.delete (G.Idex $ Map.fromList $ notOptional i)  (3,6) $ l
+                            else G.insert (el,tbpred  el) (3,6) . G.delete (G.Idex $ Map.fromList $notOptional i)  (3,6) $ l
                   Nothing -> let
                       el = createTB1  patom
                       in G.insert (el,tbpred  el) (3,6)  l
-    where tbpred v = G.Idex  $ notOptional $getUn un v
+    where tbpred v = G.Idex  $ Map.fromList $ notOptional $getUn un v
           un = (Set.fromList $ _kvpk m)
           i = fmap (fmap create) <$> ipa
 
@@ -298,7 +298,7 @@ applyAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a) -> TB I
 applyAttr (Attr k i) (PAttr _ p)  = Attr k (applyShowable i p)
 applyAttr (FKT k rel  i) (PFK _ p _ b )  =  FKT ref  rel  (create b)
   where
-              ref =  kvlist $ F.toList $ Map.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList (concat $ traComp nonRefTB <$>  unkvlist k))
+              ref =  KV$  Map.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList (concat $ traComp nonRefTB <$>  unkvlist k))
               edit  key  k@(PAttr  s _) v = if (_relOrigin $ justError "no key" $ safeHead $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
 applyAttr (IT k i) (PInline _   p)  = IT k (applyTB1 i p)
 -- applyAttr i j = errorWithStackTrace ("applyAttr: " <> show (i,j))
@@ -308,7 +308,7 @@ applyAttr (IT k i) (PInline _   p)  = IT k (applyTB1 i p)
 diffAttr :: PatchConstr k a  => TB Identity k a -> TB Identity k a -> Maybe (PathAttr k  (Index a))
 diffAttr (Attr k i) (Attr l m ) = fmap (PAttr k) (diffShowable i m)
 diffAttr (IT k i) (IT _ l) = fmap (PInline k  ) (diffTB1 i l)
-diffAttr (FKT  k _ i) (FKT m rel b) = (\l m -> if L.null l then Nothing else Just ( PFK rel l m  (patch b))) (catMaybes $ zipWith (\i j -> diffAttr (unTB i) (unTB j)) (unkvlist k) (unkvlist m)  ) kvempty
+diffAttr (FKT  k _ i) (FKT m rel b) = (\l m -> if L.null l then Nothing else Just (PFK rel l m  (patch b))) (catMaybes $ F.toList $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j)) (_kvvalues k) (_kvvalues m)  ) kvempty
 
 patchAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a)
 patchAttr a@(Attr k v) = PAttr k  (patchFTB patch v)

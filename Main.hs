@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts,OverloadedStrings #-}
+module Main where
 import TP.Browser
 import System.Process (rawSystem)
 import Poller
@@ -46,7 +47,8 @@ main = do
 
   print "Load GUI Server"
   forkIO $ threadDelay 50000 >> rawSystem "chromium" ["http://localhost:8025"] >> return ()
-  startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" , jsPort = fmap read $ safeHead args })  (setup smvar  (tail args)) {-(\w ->  liftIO $ do
+  startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" , jsPort = fmap read $ safeHead args })  (setup smvar  (tail args))
+      {-(\w ->  liftIO $ do
           print ("delete client" <> show (sToken w))
           deleteClient metas (sToken w) )-}
   print "Finish Server"

@@ -458,7 +458,7 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
           ini2 <- liftIO $(maybe (return preoldItens) (\j -> traverse (\i -> return $ apply i j ) preoldItens ) loadedItens)
           oldItemsB <- stepper  ini2 oldItemsE
           let oldItems = tidings oldItemsB oldItemsE
-              deleteCurrentUn un e l =   maybe l (\v -> G.delete (G.Idex v) (3,6) l) $  join $ (\e -> traverse (traverse unSOptional')  (getUn un e) ) <$> e
+              deleteCurrentUn un e l =   maybe l (\v -> G.delete (G.Idex $ M.fromList v) (3,6) l) $  join $ (\e -> traverse (traverse unSOptional')  (getUn un e) ) <$> e
               tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbPK (TB1 ftb) , (S.fromList $ _kvpk m, ( fmap snd bres)))
           unConstraints <-  traverse (traverse (traverse (mapTEvent return ))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn un  (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un . G.toList ) (fmap snd bres)))) <$> fmap S.fromList (_kvuniques m)
           unDeleted <- traverse (traverse (traverse (mapTEvent return))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> oldItems <*> o))) (tpkConstraint:unConstraints))
@@ -498,7 +498,7 @@ lookGist un pk  = G.lookup (tbpred un pk)
   where
     tbpred un  = tbjust  . traverse (traverse unSOptional') .getUn un
       where
-        tbjust = G.Idex . justError "cant be empty"
+        tbjust = G.Idex . M.fromList . justError "cant be empty"
 
 processPanelTable
    :: Element
@@ -1222,7 +1222,7 @@ lookAttr' inf k (i,m) = unTB $ err $  M.lookup (S.singleton (Inline (lookKey inf
     where
       err= justError ("no attr " <> show k <> " for table " <> show (_kvname i))
 
-idex inf t v = G.Idex $ L.sortBy (comparing fst ) $ first (lookKey inf t  ) <$> v
+idex inf t v = G.Idex $ M.fromList  $ first (lookKey inf t  ) <$> v
 
 attrLine i   = do
   line ( L.intercalate "," (fmap renderShowable .  allKVRec'  $ i))
