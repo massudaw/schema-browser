@@ -151,14 +151,14 @@ pathRelRel' (Path r (RecJoin l rel )   )
 
 
 
-data Compose f g k a = Compose {getCompose :: f (g k a) } deriving (Functor,Foldable,Traversable,Ord,Eq,Show,Generic)
+newtype Compose f g k a = Compose {getCompose :: f (g k a) } deriving (Functor,Foldable,Traversable,Ord,Eq,Show,Generic)
 
 data Path a b
   = Path  a  b
   deriving(Eq,Ord,Show ,Functor)
 
 
-data KV f k a
+newtype KV f k a
   = KV {_kvvalues :: Map (Set (Rel k)) (f k a)  }deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
 
 showOrder Asc = "ASC"
@@ -234,7 +234,6 @@ instance (Show f) =>  Show1 (Labeled f  ) where
 
 type Key = CoreKey -- FKey (KType  (Prim (Text,Text) (Text,Text)))
 
-data FKeyPath j
 data FKey a
     = Key
     { keyValue :: ! Text
@@ -367,7 +366,7 @@ traFValue f (m ,k) =  fmap ((m,)). traComp (fmap KV . traverse (traComp (traFAtt
 
 mapFAttr f (Attr i v)  = (Attr i (f v))
 mapFAttr f (IT i v)  = IT i (mapFValue f v)
-mapFAttr f (FKT  i rel v)  = FKT (kvlist $ mapComp (mapFAttr f) <$> unkvlist i) rel  (mapFValue f v)
+mapFAttr f (FKT  i rel v)  = FKT (mapKV (mapComp (mapFAttr f) ) i) rel  (mapFValue f v)
 
 mapFValue f = fmap (mapFValue' f)
 mapFValue' f ((m ,k) ) = (m,) . mapComp (KV . fmap (mapComp (mapFAttr f)) . _kvvalues )  $  k
@@ -1020,7 +1019,7 @@ unLeftItens = unLeftTB
 
 attrOptional :: TB Identity (FKey (KType k))  Showable ->  (TB Identity  (FKey (KType k))  Showable)
 attrOptional (Attr k v) =  Attr (kOptional k) (LeftTB1 . Just $ v)
-attrOptional (FKT ifk rel  tb)  = FKT (kvlist $ tbOptional <$> unkvlist ifk) (Le.over relOri kOptional <$> rel) (LeftTB1 (Just tb))
+attrOptional (FKT ifk rel  tb)  = FKT (mapKV tbOptional ifk) (Le.over relOri kOptional <$> rel) (LeftTB1 (Just tb))
   where tbOptional = mapComp (firstTB kOptional) . mapComp (mapFAttr (LeftTB1 . Just))
 attrOptional (IT na j) = IT  na (LeftTB1 (Just j))
 
@@ -1031,7 +1030,7 @@ leftItens tb@(IT na _ ) =   Just . maybe  emptyIT attrOptional
   where emptyIT = IT  na  (LeftTB1 Nothing)
 leftItens tb@(FKT ilk rel _) = Just . maybe  emptyFKT attrOptional
   where
-      emptyFKT = FKT (kvlist $ mapComp (mapFAttr (const (LeftTB1 Nothing))) <$> unkvlist ilk) rel (LeftTB1 Nothing)
+      emptyFKT = FKT (mapKV (mapComp (mapFAttr (const (LeftTB1 Nothing)))) ilk) rel (LeftTB1 Nothing)
 
 -- mapkvlist f =  kvlist . f . unkvlist
 
@@ -1091,9 +1090,6 @@ unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
 unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverseKV ( traComp (traFAttr unSOptional) . (mapComp (firstTB unKOptional)) ) i)  j
 
 
-data Predicate a
-  = SPred a
-  deriving(Show,Eq,Ord)
 
 tbUn :: (Functor f,Ord k) =>   Set k -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbUn un (TB1 (kv,item)) =  (\kv ->  mapComp (\(KV item)->  KV $ Map.filterWithKey (\k _ -> pred kv k ) $ item) item ) un
