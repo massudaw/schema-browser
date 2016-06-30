@@ -3,16 +3,13 @@
 *.txt
 *.css
 *.js
-GiST*
-extended-reals*
-data-interval*
-wreq*
-handa-gdata*
-http-client-*
-ofx-*
-strptime*
-websockets-snap*
-threepenny*
+deps
+cabal.config
+cabal.sandbox.config
+js
+dist
+*.prof
+.cabal-sandbox
 .stack-work
 
 

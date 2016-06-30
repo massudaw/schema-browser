@@ -135,7 +135,8 @@ paginate inf t order off size koldpre wherepred = do
     print (maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int]))
     return ((maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])), fmap fst v)
   where pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  ( orderquery <> predquery)
-        equality (pred,k) = " ? " <> pred <> inattr k
+        equality ("IN",k) = inattr k <> " IN " <> " (select unnest(?) )"
+        equality (i,k) = " ? " <> i <> inattr k
         (orderquery , ordevalue) =
           let
             oq = (const $ pure $ generateComparison (first (justLabel t) <$> order)) <$> koldpre

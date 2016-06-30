@@ -9,6 +9,7 @@ import Control.Arrow
 import Control.Monad.Reader
 import qualified Data.HashMap.Strict as HM
 import Data.Time
+import Data.Time.Clock.POSIX
 import Prelude hiding (head)
 import System.Info (os)
 import Network.Wreq
@@ -149,7 +150,7 @@ insertTable pk
     inf <- ask
     let
         attrs :: [(Key, FTB Showable)]
-        attrs = filter (any (==FWrite) . keyModifier .fst ) $ getAttr' (TB1 pk)
+        attrs = filter (any (==FWrite) . keyModifier .fst ) $ getAttr' pk
     let
       scoped  = fmap (unTB1 ._fkttable . unTB) $ filter ((`elem` (_rawScope (lookTable inf (_kvname (fst pk))))) . _relOrigin . head . keyattr ) (F.toList $ unKV $snd $ pk)
     tok <- getToken scoped
@@ -334,13 +335,14 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
     fun :: Bool -> KType (Prim KPrim (Text,Text))-> Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
     fun f (Primitive i) v =
         case i of
-          AtomicPrim k -> return $ Right $ fmap TB1 $ join $ case k of
-            PText -> readPrim k . T.unpack <$> (v ^? _String)
-            PTimestamp _ -> fmap (STimestamp . utcToLocalTime utc) . resultToMaybe . fromJSON <$> Just v
-            PInt -> Just . SNumeric . round <$> (v ^? _Number)
-            PDouble -> Just . SDouble . realToFrac  <$> (v ^? _Number)
-            PBinary -> readPrim k . T.unpack  <$> (v ^? _String)
-          RecordPrim (i,m) ->  Left . tbNull . TB1 <$>  convertAttrs infsch (if f then Nothing else getref) inf   (justError "no look" $  M.lookup m inf ) v
+          AtomicPrim k -> return $ Right $ fmap TB1 $ case k of
+            PText -> join $ readPrim k . T.unpack <$> (v ^? _String)
+            PTimestamp _ ->
+                (fmap (STimestamp . utcToLocalTime utc) . resultToMaybe . fromJSON $ v ) <|> (STimestamp . utcToLocalTime utc . posixSecondsToUTCTime.realToFrac . (/10^3). read . T.unpack  <$> (v ^? _String))
+            PInt ->  (SNumeric . round <$> (v ^? _Number)) <|> (SNumeric . round .read . T.unpack <$> ( v^? _String))
+            PDouble -> SDouble . realToFrac  <$> (v ^? _Number)
+            PBinary -> join  $ readPrim k . T.unpack  <$> (v ^? _String)
+          RecordPrim (i,m) ->  Left .fmap TB1 .  tbNull <$>  convertAttrs infsch (if f then Nothing else getref) inf   (justError "no look" $  M.lookup m inf ) v
                 where  tbNull tb = if null (getAttr' tb) then Nothing else Just  tb
     fun f (KArray i) v = (\l -> if null l then return (typ i) else fmap (bimap  nullArr  nullArr) .   biTrav (fun f i) $ l ) $ (v ^.. values )
         where nullArr lm = if null l then Nothing else Just (ArrayTB1 $ Non.fromList l)
@@ -421,6 +423,7 @@ gmailPrim =
   HM.fromList
   [("text",PText)
   ,("datetime",PTimestamp (Just utc) )
+  ,("timestamp",PTimestamp (Just utc) )
   ,("pdf",PMime "application/pdf")
   ,("dwg",PMime "application/dwg")
   ,("ofx",PMime "application/x-ofx")

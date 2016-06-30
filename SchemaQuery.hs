@@ -179,7 +179,7 @@ tableLoader table  page size presort fixed
       (l,i) <- local (const rinf) $ tableLoader  fromtable page  size defSort (LegacyPredicate [])
       let
           filtered ::  [TBData Key Showable]
-          filtered =  (if L.null prefix then id else L.filter  (\i -> L.filter ((`S.member` kref).fst) (getAttr' (TB1 i)) == prefix )) $ F.toList (snd i)
+          filtered =  (if L.null prefix then id else L.filter  (\i -> L.filter ((`S.member` kref).fst) (getAttr' i) == prefix )) $ F.toList (snd i)
             where prefix =  case fixed  of
                         LegacyPredicate fixed -> L.filter ((`S.member` kref) . fst ) (concat $ fmap (aattri. snd) fixed)
                         WherePredicate fixed -> errorWithStackTrace "not implemented" -- L.filter ((`S.member` kref) . fst ) (concat $ fmap (aattri. snd) fixed)

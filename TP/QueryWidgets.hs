@@ -20,6 +20,7 @@ module TP.QueryWidgets (
     offsetField,
     sorting',
     lookAttr',
+    lookAttrM,
     tableIndexA,
     idex,
     metaAllTableIndexV ,
@@ -267,13 +268,13 @@ labelCase inf a old wid = do
     el <- UI.div #
       set children [hl,getElement wid] #
       set UI.class_ ("col-xs-" <> show (fst $  attrSize a))
-    bh <- stepper False (hoverTip2 l hl)
+    {- bh <- stepper False (hoverTip2 l hl)
     element patch #
       sink text (liftA2 (\bh -> if bh then id else const "") bh (facts $ fmap ( show . join) $ liftA2 diff <$> triding wid <*> old)) #
       sink0 UI.style (noneShow <$> bh)
     element tip #
       set text (show $ fmap showKey  <$> keyattri a) #
-      sink0 UI.style (noneShow <$> bh)
+      sink0 UI.style (noneShow <$> bh)-}
     paintEdit l (facts (triding wid )) (facts old)
     return $ TrivialWidget (triding wid) el
 
@@ -426,7 +427,7 @@ eiTable inf constr refs plmods ftb@(meta,k) oldItems = do
       return []
   body <- UI.div #
      set children (plugins  <> pure listBody) #
-     set style [("margin-left","10px"),("border","2px"),("border-color","gray"),("border-style","solid")]
+     set style [("margin-left","0px"),("border","2px"),("border-color","gray"),("border-style","solid")]
   return (body, output,tableIns)
 
 
@@ -443,10 +444,10 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
   (e2,h2) <- liftIO $ newEvent
   (ediff ,hdiff) <- liftIO $ newEvent
   (evdiff ,hvdiff) <- liftIO $ newEvent
-  nav  <- buttonDivSet ["None","Editor","Raw"{-,"Exception","Change"-}] (fmap Just open) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default pull-right")
-  element nav # set UI.class_ "col-xs-4 pull-right"
+  nav  <- buttonDivSet ["+","-"{-,"Exception","Change"-}] (fmap Just open) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  element nav # set UI.class_ "col-xs-3 pull-right"
   let table = lookTable inf ( _kvname  m )
-  let fun "Editor" = do
+  let fun "+" = do
           let
             getItem :: TBData CoreKey Showable -> TransactionM (Maybe (TBIdx CoreKey Showable))
             getItem  =  getFrom table
@@ -999,7 +1000,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
       let ptds = tidings prop evsel
       tds <- foldr (\i j ->updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap (unTB1. _fkttable).filterJust . rumors . snd <$>  plmods)
       element itemList #  sink text (maybe "" (\v -> (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v))<$>  facts (ptds )) # set UI.style [("border","1px solid gray"),("height","20px")]
-      (celem,ediff,pretdi) <-crudUITable inf (pure "None") reftb staticold (fmap (fmap (fmap (unTB1 . _fkttable))) <$> plmods)  tbdata tds
+      (celem,ediff,pretdi) <-crudUITable inf (pure "-") reftb staticold (fmap (fmap (fmap (unTB1 . _fkttable))) <$> plmods)  tbdata tds
       (diffUp,fin2) <-  mapEventFin (fmap pure ) $ (\i j -> traverse (runDBM inf .  flip applyRecord' (fixPatch inf (_kvname m) j) ) i) <$>  facts pretdi <@> ediff
       let
           sel = filterJust $ fmap (safeHead.concat) $ unions $ [(unions  [(rumors $ join <$> triding itemList), if isReadOnly tb then never else rumors tdi]),diffUp]
@@ -1012,7 +1013,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
             UI.div # set  children [getElement itemList , itemListEl , filterInp,getElement offset, head celem]  # set UI.class_ "row"
       subnet <- UI.div # set children [fk , last celem] # set UI.class_ "col-xs-12"
       when (isReadOnly tb  ) $
-                void $  element subnet # sink0 UI.style (noneShow . isJust <$> facts oldItems )
+                void $  element subnet # sink0 UI.style (noneShow . isJust <$> facts oldItems ) # set UI.class_ "row"
       addElemFin (getElement subnet) fin
       addElemFin (getElement subnet) fin2
       let
@@ -1217,6 +1218,10 @@ renderTableNoHeaderSort2 header inf modtablei out = do
   header # set UI.class_ "row"
   UI.table # set UI.class_ "table table-bordered table-striped" # sink items ((\(i,l)-> header : fmap (body i) l )<$> out)
 
+
+lookAttrM  inf k (i,m) = unTB <$> M.lookup (S.singleton (Inline (lookKey inf (_kvname i) k))) (unKV m)
+    where
+      err= justError ("no attr " <> show k <> " for table " <> show (_kvname i))
 
 lookAttr' inf k (i,m) = unTB $ err $  M.lookup (S.singleton (Inline (lookKey inf (_kvname i) k))) (unKV m)
     where

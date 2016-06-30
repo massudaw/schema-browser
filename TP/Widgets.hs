@@ -204,12 +204,22 @@ rangeBoxes fkbox bp = do
 instance Widget (RangeBox a) where
   getElement = _rangeElement
 
+checkDivSetTGen :: (Ord a,Ord b ,Eq a,Ord c) => [a] -> Tidings (a -> b) -> Tidings (Map a [c]) ->  (a -> UI (a,((Element,[Element]),Event (a,([c],[c]))))) -> (a -> (Element  , [Element])-> UI Element ) -> UI (TrivialWidget (Map a [c]))
+checkDivSetTGen ks sort binit   el st = mdo
+  buttons <- mapM el  ks
+  dv <- UI.div # sink items ((\f -> fmap (\ (k,(v,_)) -> st k (v) ) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$>  facts sort )
+  let
+    evs = unionWith const (const <$> rumors binit) (foldr (unionWith (.)) never $ fmap (\(i,(ab,db)) -> (if L.null ab then id else M.alter (Just . maybe ab (L.nub . mappend ab) ) i)  . (if L.null db then id else M.alter (join . fmap ((\i -> if L.null i then Nothing else Just i) . flip (foldr L.delete)  db )) i)  ) . snd .snd <$> buttons)
+  v <- currentValue (facts binit)
+  bv <- accumB v  evs
+  return (TrivialWidget (tidings bv (flip ($) <$> bv <@> evs) ) dv)
+
+
 checkDivSetT :: (Ord b ,Eq a) => [a] -> Tidings (a -> b) -> Tidings [a] ->  (a -> UI Element ) -> (a -> UI Element  -> UI Element ) -> UI (TrivialWidget [a])
 checkDivSetT ks sort binit   el st = mdo
   buttons <- mapM (buttonString  )  ks
   dv <- UI.div # sink items ((\f -> fmap (\ (k,(v,_)) -> st k (element v) # sink UI.checked (elem k <$> bv)) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$>  facts sort )
   let
-    -- evs :: Event ([a] -> [a])
     evs = unionWith const (const <$> rumors binit) (foldr (unionWith (.)) never $ fmap (\(i,b) -> if b then (i:) else L.delete i) . snd .snd <$> buttons)
   v <- currentValue (facts binit)
   bv <- accumB v  evs
@@ -267,7 +277,7 @@ checkedWidget init = do
   v <- currentValue (facts init)
   b <- stepper v e
   bh <- stepper v (diffEvent  b e)
-  dv <- UI.span # set children [i] # set UI.style [("margin","2px")]
+  dv <- UI.span # set children [i] # set UI.style [("padding","2px")]
   return $ TrivialWidget  (tidings bh (diffEvent bh e)) dv
 
 checkedWidgetM :: Tidings (Maybe Bool) -> UI (TrivialWidget (Maybe Bool))
@@ -276,7 +286,7 @@ checkedWidgetM init = do
   let e = unionWith const (rumors init) (Just <$>  UI.checkedChange i)
   v <- currentValue (facts init)
   b <- stepper v e
-  dv <- UI.span # set children [i] # set UI.style [("margin","2px")]
+  dv <- UI.span # set children [i] # set UI.style [("padding","2px")]
   return $ TrivialWidget  (tidings b e) dv
 
 

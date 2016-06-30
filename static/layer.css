@@ -8,6 +8,13 @@ a { text-decoration: none; margin: 0 10px; }
   text-align: center;
 }
 
+.header {
+    color: white;
+    background-color: black;
+    border-radius: 10px;
+    padding: 5px;
+}
+
 .row {
   margin-right: -5px;
   margin-left: -5px;
@@ -113,3 +120,9 @@ option[vencimento^="-"]:before
 
 
 #map { height: 580px; }
+
+h1 { 
+  margin-top :10px;
+  margin-bottom:10px; 
+}
+
