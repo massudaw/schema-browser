@@ -8,6 +8,19 @@ a { text-decoration: none; margin: 0 10px; }
   text-align: center;
 }
 
+.table-list-item > div {
+ width: 100%;
+ }
+
+.table-list-item {
+ border: solid black 1px;
+}
+
+.fixed-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .header {
     color: white;
     background-color: black;

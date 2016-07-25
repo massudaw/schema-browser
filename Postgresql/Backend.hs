@@ -347,7 +347,6 @@ loadDelayed inf t@(k,v) values@(ks,vs)
            delayedTB1 =  (ks,) . _tb $ KV ( filteredAttrs)
            delayed =  mapKey' (kOptional . ifDelayed . ifOptional) (mapValue' (const ()) delayedTB1)
            str = "SELECT " <> explodeRecord (relabelT' runIdentity Unlabeled delayed) <> " FROM " <> showTable table <> " WHERE " <> whr
-       print str
        is <- queryWith (fromRecord delayed) (conn inf) (fromString $ T.unpack str) (fmap (firstTB (recoverFields inf) .unTB) $ F.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK' (tableNonRef' values))
        case is of
             [] -> errorWithStackTrace "empty query"

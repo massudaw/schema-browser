@@ -9,6 +9,11 @@ function setOpts(oSelect,selVals) {
   }
 }
 
+function fireCurrentPosition(el){
+
+// Dispatch/Trigger/Fire the event
+$(el).trigger('currentPosition',[]);
+}
 
 function getOpts(oSelect1) {
   var oSelect = oSelect1[0]
@@ -53,6 +58,7 @@ function createLayers (ref,posj,nej,swj,features){
   ref.layer.addLayer(L.circle(p.position,p.size,{color:p.color}).bindPopup(popup));})})
 }
 
+
 function createMap (ref,posj,nej,swj,features){
   pos = JSON.parse(posj);
   ref.mymap = L.map(ref);
@@ -82,7 +88,7 @@ function handleLocationError(browserHasGeolocation, pos) {
 }
 
 
-function createAgenda(el,tdate,evs,view){
+function createAgenda(el,tdate,view){
   var date = new Date(tdate);
   var d = date.getDate();
   var m = date.getMonth();
@@ -123,7 +129,12 @@ function createAgenda(el,tdate,evs,view){
               }).reposition(event).show(event);
   el.opentip = tooltip;
           }});
+  $(el).fullCalendar('render');
 };
+
+function renderCal(el){
+  $(el).fullCalendar('render');
+}
 
 function addSource(el,table,source){
   $(el).fullCalendar('removeEvents',function(e) { return e.table ==table});
@@ -160,6 +171,21 @@ function clientHandlers(){
       return true;
       }; 
       }
+   ,'currentPosition' : function(el,eventType ,sendEvent){
+    $(el).bind(eventType,function(){
+      navigator.geolocation.getCurrentPosition(function(position) {
+        el.mymap.setView([position.coords.latitude, position.coords.longitude], 12);
+        var bounds = el.mymap.getBounds();
+        var center =bounds.getCenter();
+        var sw=bounds.getSouthWest();
+        var ne=bounds.getNorthEast();
+        sendEvent([center.lat,center.lng,0,ne.lat,ne.lng,0,sw.lat,sw.lng,0].map(function(e){return e.toString()}));
+
+    }, function() {
+      handleLocationError(true, map.getCenter());
+    });
+    });
    }
 
+}
 };

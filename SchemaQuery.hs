@@ -255,7 +255,7 @@ pageTable flag method table page size presort fixed = do
               else
                 case fixed of
                   WherePredicate pred -> G.filter (\tb ->F.all  (\(a,e,v) -> indexPred  (a,T.unpack e ,v) tb) pred )
-                  LegacyPredicate pred -> G.filter (\tb ->F.all id $ M.intersectionWith (\i j -> L.sort (nonRefTB (unTB i)) == L.sort ( nonRefTB (unTB j)) ) (mapFromTBList (fmap (_tb .snd) pred )) $ unKV (snd (tb)))
+                  LegacyPredicate pred -> G.filter (\tb ->F.all id $ M.intersectionWith (\i j -> fromMaybe False $ liftA2 G.consistent (traverse unSOptional  $ M.fromList $ ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB i))) (traverse unSOptional  $M.fromList ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB j))) ) (mapFromTBList (fmap (_tb .snd) pred )) $ unKV (snd (tb)))
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
     iniT <- do

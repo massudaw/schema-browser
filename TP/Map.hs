@@ -8,6 +8,7 @@ module TP.Map where
 import Step.Host
 import GHC.Stack
 import Control.Concurrent
+import Control.Lens ((^.),_1,_2)
 import Safe
 import Control.Concurrent.Async
 import qualified Data.Interval as Interval
@@ -51,7 +52,7 @@ calendarCreate el Nothing evs= runFunction $ ffi "createMap (%1,null,null,null,%
 calendarCreate el (Just (p,ne,sw)) evs= runFunction $ ffi "createMap (%1,%2,%3,%4,%5)" el (show p) (show ne) (show sw) evs
 
 
-mapWidget inf body = do
+mapWidget body sel inf = do
     (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] (LegacyPredicate [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
     (evdb,(_,evMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "geo" Nothing Nothing [] (LegacyPredicate [("=",liftField (meta inf) "geo" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
     cliZone <- jsTimeZone
@@ -76,29 +77,34 @@ mapWidget inf body = do
     filterInpBh <- stepper "" (UI.valueChange filterInp)
     let allTags =  (fst <$> dashes)
         filterLabel d = (\j ->  L.isInfixOf (toLower <$> j) (toLower <$> d)) <$> filterInpBh
-        legendStyle (t,(c,_,_)) b
-              =  UI.div
-              # set items [UI.div # set items [b], UI.div # set text  t ]
-              # sink0 UI.style (mappend [("background-color",renderShowable c),("color","white")]. noneDisplay "-webkit-box" <$> filterLabel t)
+        legendStyle table (b,_)
+            =  do
+              let item = M.lookup (tableName (fromJust $ M.lookup table (pkMap inf))) (M.fromList  $ fmap (\i@(t,(a,b,c))-> (b,i)) allTags)
+              maybe (UI.div) (\(k@(t,(c,_,_))) ->
+                UI.div # set items [UI.div
+                  # set items [element b # set UI.class_ "col-xs-1", UI.div # set text  t #  set UI.class_ "fixed-label col-xs-11" # set UI.style [("background-color",renderShowable c)] ]
+                  # set UI.style [("background-color",renderShowable c)]]) item
 
-    legend <- checkDivSetT  allTags  (pure id) (pure allTags) (\_ -> UI.input # set UI.type_ "checkbox") legendStyle
 
 
     cpos <- UI.div
+    bcpos <- UI.button # set text "Localização Atual"
     calendar <- UI.div # set UI.class_ "col-xs-10"
-    sidebar <- UI.div # set children [ cpos,filterInp ,getElement legend] #  set UI.class_ "col-xs-2"
+    sidebar <- UI.div # set children [bcpos,cpos]#  set UI.class_ "col-xs-2"
     element body # set children [sidebar,calendar]
-
     (e,h) <- liftIO$ newEvent
     positionB <- stepper Nothing (Just <$>e)
     element cpos # sink text (show <$> positionB)
     let
-      calFun (selected) = do
+      calFun selected = do
         innerCalendar <-UI.div # set UI.id_ "map"
+        pb <- currentValue positionB
         element calendar # set children [innerCalendar]
-        calendarCreate  innerCalendar (Nothing :: Maybe ([Double],[Double],[Double]))("[]"::String)
+        calendarCreate  innerCalendar pb ("[]"::String)
         let ev = moveend innerCalendar
-        fin <- onEvent ev (liftIO .h )
+        fin <- onEvent ev (liftIO . h )
+        onEvent (UI.click bcpos) (\_ -> runFunction $ ffi "fireCurrentPosition(%1)" innerCalendar)
+        liftIO$ onEventIO (currentPosition innerCalendar ) (liftIO. h .traceShowId )
         liftIO $ addFin innerCalendar [fin]
         let
           pruneBounds positionB r= isJust $ join $ (\pos (_,ne,sw) -> if Interval.member pos ( Interval.interval (makePos sw) (makePos ne)) then Just pos else  Nothing)<$> (HM.lookup "position" r) <*>  positionB
@@ -109,22 +115,27 @@ mapWidget inf body = do
         liftIO$ addFin innerCalendar [fin]
         return ()
     pb <- currentValue positionB
-    (_,fin) <- mapUITEventFin calendar calFun (triding legend)
+    (_,fin) <- mapUITEventFin calendar calFun (((\i j -> filter (flip L.elem (tableName <$> concat (F.toList i)) .  (^. _2._2)) j )<$> sel <*> pure allTags))
     liftIO$ addFin calendar [fin]
-    mapM (\(_,(_,tname,fields))-> do
-        mapTEvent  (traverse (\(_,ne,sw) ->  liftIO$ forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ OrColl $ PrimColl . (,"<@",(IntervalTB1 $ Interval.interval (makePos sw) (makePos ne))) . indexer . T.pack . renderShowable <$> F.toList fields))) (tidings positionB (Just <$> e))
+    liftIO $ mapConcurrently (\(_,(_,tname,fields))-> do
+        mapTEvent  (traverse (\(_,ne,sw) ->  forkIO $ void $ transactionNoLog  inf $ selectFromA tname Nothing Nothing [] (WherePredicate $ OrColl $ PrimColl . (,"<@",(IntervalTB1 $ Interval.interval (makePos sw) (makePos ne))) . indexer . T.pack . renderShowable <$> F.toList fields))) (tidings positionB (Just <$> e))
       ) allTags
-    return body
+    return (legendStyle,dashes)
 
 makePos [b,a,z] = (Interval.Finite $ TB1 $ SPosition (Position (a,b,z)),True)
+makePos i = errorWithStackTrace (show i)
 
 txt = TB1. SText
 
 readPosition:: EventData -> Maybe ([Double],[Double],[Double])
 readPosition (v) = (,,) <$> readP i a z <*> readP ni na nz <*>readP si sa sz
-  where readP i a z = (\i j z-> [i,j, z]) <$> readMay i<*> readMay a <*> readMay z
-        [i,a,z,ni,na,nz,si,sa,sz] = unsafeFromJSON v
+  where
+     [i,a,z,ni,na,nz,si,sa,sz] = unsafeFromJSON v
 
+readP i a z = (\i j z-> [i,j, z]) <$> readMay i<*> readMay a <*> readMay z
+
+currentPosition :: Element -> Event ([Double],[Double],[Double])
+currentPosition el = filterJust $ readPosition<$>  domEvent "currentPosition" el
 
 moveend :: Element -> Event ([Double],[Double],[Double])
 moveend el = filterJust $ readPosition <$>  domEvent "moveend" el

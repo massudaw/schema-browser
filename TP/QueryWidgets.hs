@@ -24,6 +24,7 @@ module TP.QueryWidgets (
     tableIndexA,
     idex,
     metaAllTableIndexV ,
+    metaAllTableIndexOp ,
     attrLine,
     viewer,
     ) where
@@ -1107,7 +1108,15 @@ tableIndexA inf metaname env =   do
       tname = metaname
       envK :: [(Text,(TB Identity CoreKey Showable))]
       envK = fmap (("=",).liftField inf tname) env
-  viewer inf modtable (Just envK)
+  viewer inf modtable (envK)
+
+
+metaAllTableIndexOp inf metaname env =   do
+  let modtable = lookTable (meta inf) tname
+      tname = metaname
+      envK :: [(Text,(TB Identity CoreKey Showable))]
+      envK = fmap (fmap (liftField (meta inf) tname. (uncurry Attr) )) env
+  viewer (meta inf) modtable (envK)
 
 
 
@@ -1116,7 +1125,7 @@ metaAllTableIndexA inf metaname env =   do
       tname = metaname
       envK :: [(Text,(TB Identity CoreKey Showable))]
       envK = fmap (("=",).liftField (meta inf) tname) env
-  viewer (meta inf) modtable (Just envK)
+  viewer (meta inf) modtable (envK)
 
 
 
@@ -1151,10 +1160,9 @@ sortFilterUI conv ix bh  = do
 
 
 
-viewer :: InformationSchema -> Table -> Maybe [(Text ,Column CoreKey Showable)] -> UI Element
-viewer inf table env = mdo
+viewer :: InformationSchema -> Table -> [(Text ,Column CoreKey Showable)] -> UI Element
+viewer inf table envK = mdo
   let
-      envK = concat $ maybeToList env
       filterStatic =filter (not . flip L.elem (fmap (_relOrigin . head . keyattri  . snd) envK))
       key = filterStatic $ F.toList $ rawPK table
       sortSet =  filterStatic . F.toList . tableKeys . tableNonRef . TB1 . allRec' (tableMap inf ) $ table
@@ -1191,7 +1199,7 @@ viewer inf table env = mdo
   tdswhereb <- stepper (snd iniQ) (fmap snd tdswhere)
   let
       tview = unTlabel' . unTB1  $tableSt2
-  element itemList # set items ( pure . renderTableNoHeaderSort2   (return $ getElement sortList) inf (tableNonRef' tview) $   fmap (fmap (filterRec' (fmap (_relOrigin . head .keyattri . snd ) $ concat $ maybeToList env) . tableNonRef')) . (\(slist ,(coun,tb))-> (fmap fst slist,tb))  <$>   tdswhereb )
+  element itemList # set items ( pure . renderTableNoHeaderSort2   (return $ getElement sortList) inf (tableNonRef' tview) $   fmap (fmap (filterRec' (fmap (_relOrigin . head .keyattri . snd ) $ envK) . tableNonRef')) . (\(slist ,(coun,tb))-> (fmap fst slist,tb))  <$>   tdswhereb )
 
   UI.div # set children [getElement offset, itemList]
 

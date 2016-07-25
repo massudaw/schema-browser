@@ -121,6 +121,20 @@ mapDynEvent f x = do
   return $ TrivialWidget (tidings bh e) sub
 
 
+joinT :: Tidings (Tidings a) -> IO (Tidings a)
+joinT i = do
+  ev <- joinE (fmap rumors $ rumors i)
+  let current = unionWith const ev (unsafeMapIO currentValue (facts <$> rumors i))
+  vi <- currentValue . facts =<< currentValue (facts i)
+  bh <- stepper vi current
+  return $ tidings bh current
+
+joinE :: Event (Event a) ->  IO (Event a)
+joinE i = do
+  (e,h) <- newEvent
+  onEventIO  i (\i -> void (onEventIO i (\v -> void . forkIO $ h v)))
+  return e
+
 mapEvent :: MonadIO m => (a -> IO b) -> Event a -> m (Event b)
 mapEvent f x = liftIO$ do
   (e,h) <- liftIO $ newEvent
@@ -130,8 +144,8 @@ mapEvent f x = liftIO$ do
 mapT0Event i f x = fst <$> mapT0EventFin i f x
 
 mapT0EventFin i f x = do
-  (e,fin) <- mapEventFin f (rumors x)
   be <-  liftIO $ f i
+  (e,fin) <- mapEventFin f (rumors x)
   t <- stepper be e
   return $ (tidings t e,fin)
 
@@ -204,10 +218,10 @@ rangeBoxes fkbox bp = do
 instance Widget (RangeBox a) where
   getElement = _rangeElement
 
-checkDivSetTGen :: (Ord a,Ord b ,Eq a,Ord c) => [a] -> Tidings (a -> b) -> Tidings (Map a [c]) ->  (a -> UI (a,((Element,[Element]),Event (a,([c],[c]))))) -> (a -> (Element  , [Element])-> UI Element ) -> UI (TrivialWidget (Map a [c]))
+checkDivSetTGen :: (Ord a,Ord b ,Eq a,Ord c) => [a] -> Tidings (a -> b) -> Tidings (Map a [c]) ->  (a -> UI (a,((Element,[Element]),Event (a,([c],[c]))))) -> Tidings (a -> (Element  , [Element])-> UI Element ) -> UI (TrivialWidget (Map a [c]))
 checkDivSetTGen ks sort binit   el st = mdo
   buttons <- mapM el  ks
-  dv <- UI.div # sink items ((\f -> fmap (\ (k,(v,_)) -> st k (v) ) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$>  facts sort )
+  dv <- UI.div # sink items ((\sti f -> fmap (\ (k,(v,_)) -> sti k (v) ) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$>  facts st <*> facts sort )
   let
     evs = unionWith const (const <$> rumors binit) (foldr (unionWith (.)) never $ fmap (\(i,(ab,db)) -> (if L.null ab then id else M.alter (Just . maybe ab (L.nub . mappend ab) ) i)  . (if L.null db then id else M.alter (join . fmap ((\i -> if L.null i then Nothing else Just i) . flip (foldr L.delete)  db )) i)  ) . snd .snd <$> buttons)
   v <- currentValue (facts binit)

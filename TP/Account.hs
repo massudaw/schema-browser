@@ -9,6 +9,7 @@ module TP.Account where
 import GHC.Stack
 import Data.Ord
 import Step.Host
+import Control.Lens (_1,_2,(^.))
 import qualified Data.Interval as Interval
 import Control.Concurrent
 import Types.Patch
@@ -51,9 +52,44 @@ import Data.Text (Text)
 
 import qualified Data.Map as M
 
+resRange b "month" d =  d {utctDay = addGregorianMonthsClip (if b then -1 else 1 )  (utctDay d)}
+resRange b "day" d = d {utctDay =addDays (if b then -1 else 1 ) (utctDay d)}
+resRange b "week" d = d {utctDay =addDays (if b then -7 else 7 ) (utctDay d)}
+
+calendarSelector = do
+    let buttonStyle k e = e # set UI.text (fromJust $ M.lookup k transRes)# set UI.class_ "btn-xs btn-default buttonSet"
+          where transRes = M.fromList [("month","Mês"),("week","Semana"),("day","Dia")]
+        defView = "month"
+        viewList = ["month","day","week"] :: [String]
+        transMode _ "month" = "month"
+        transMode True i = "agenda" <> capitalize i
+        transMode False i = "basic" <> capitalize i
+        capitalize (i:xs) = toUpper i : xs
+        capitalize [] = []
+
+    iday <- liftIO getCurrentTime
+    resolution <- fmap (fromMaybe defView) <$> buttonDivSetT  viewList (pure id) (pure $ Just defView ) (const UI.button)  buttonStyle
+
+    next <- UI.button  # set text ">"
+    today <- UI.button # set text "Hoje"
+    prev <- UI.button  # set text "<"
+    agenda <- mdo
+      agenda <- UI.button # sink text ((\b -> if b then "Agenda" else "Basic") <$> agB)
+      let agE = pure not <@ UI.click agenda
+      agB <- accumB False agE
+      return $ TrivialWidget (tidings agB (flip ($) <$> agB <@> agE)) agenda
+
+    current <- UI.div # set children [prev,today,next]
+    let
+      currentE = concatenate <$> unions  [resRange False  <$> facts (triding resolution) <@ UI.click next
+                                       ,resRange True   <$> facts (triding resolution) <@ UI.click prev , const (const iday) <$> UI.click today ]
+    increment <- accumB iday  currentE
+    let incrementT =  tidings increment (flip ($) <$> increment <@> currentE)
+    sidebar <- UI.div # set children [getElement agenda,current,getElement resolution] #  set UI.class_ "col-xs-2"
+    return (sidebar,(,,) <$> triding agenda <*> incrementT <*> triding resolution)
 
 
-accountWidget inf body = do
+accountWidget body sel inf = do
     (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
     (evdb,(_,emap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
     (evdb,(_,aMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "accounts" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "accounts" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
@@ -79,62 +115,28 @@ accountWidget inf body = do
             attrValue (Attr k v) = v
         return ((lookDesc,(color,tname,efields,afields)), fmap proj  . G.toList <$> collectionTid evdb  )) ( G.toList aMap)
 
-    iday <- liftIO getCurrentTime
-    filterInp <- UI.input # set UI.style [("width","100%")]
-    filterInpBh <- stepper "" (UI.valueChange filterInp)
     let allTags =  (fst <$> dashes)
     itemListEl2 <- mapM (\i ->
       (i,) <$> UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")]) allTags
     let
-        filterLabel d = (\j-> L.isInfixOf (toLower <$> j) (toLower <$> d)) <$> filterInpBh
-        legendStyle k@(t,(c,_,_,_)) b
-            =  mdo
-              expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
-              let evc = UI.checkedChange expand
-              evb <- stepper False evc
-              missing <- (element $ fromJust $ M.lookup k (M.fromList itemListEl2)) # sink UI.style (noneShow <$> evb)
-              header <- UI.div
-                # set items [b # set UI.class_"col-xs-1", UI.div # set text  t # set UI.class_ "col-xs-10", element expand ]
-                # sink0 UI.style (mappend [("background-color",renderShowable c),("color","white")]. noneDisplay "-webkit-box" <$> filterLabel t)
-              UI.div # set children [header,missing]
-                # sink0 UI.style (mappend [("border","solid black 1px"),("background-color",renderShowable c),("color","white")]. noneShow <$> filterLabel t)
-    legend <- checkDivSetT  allTags  (pure id) (pure allTags) (\_ -> UI.input # set UI.type_ "checkbox") legendStyle
-    let buttonStyle k e = e # set UI.text (fromJust $ M.lookup k transRes)# set UI.class_ "btn-xs btn-default buttonSet"
-          where transRes = M.fromList [("month","Mês"),("week","Semana"),("day","Dia")]
-        defView = "month"
-        viewList = ["month","day","week"] :: [String]
-        transMode _ "month" = "month"
-        transMode True i = "agenda" <> capitalize i
-        transMode False i = "basic" <> capitalize i
-        capitalize (i:xs) = toUpper i : xs
-        capitalize [] = []
+        legendStyle table (b,_)
+            =  do
+              let item = M.lookup (tableName (fromJust $ M.lookup table (pkMap inf))) (M.fromList  $ fmap (\i@(t,(a,b,_,c))-> (b,i)) allTags)
+              maybe UI.div (\k@(t,(c,_,_,_)) ->   mdo
+                expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
+                let evc = UI.checkedChange expand
+                evb <- stepper False evc
+                missing <- (element $ fromJust $ M.lookup k (M.fromList itemListEl2)) # sink UI.style (noneShow <$> evb)
+                header <- UI.div
+                  # set items [element b # set UI.class_"col-xs-1", UI.div # set text  t # set UI.class_ "col-xs-10", element expand ]
+                  # set UI.style [("background-color",renderShowable c)]
+                UI.div # set children [header,missing]) item
 
-    resolution <- fmap (fromMaybe defView) <$> buttonDivSetT  viewList (pure id) (pure $ Just defView ) (const UI.button)  buttonStyle
-
-    next <- UI.button  # set text ">"
-    today <- UI.button # set text "Hoje"
-    prev <- UI.button  # set text "<"
-    agenda <- mdo
-      agenda <- UI.button # sink text ((\b -> if b then "Agenda" else "Basic") <$> agB)
-      let agE = pure not <@ UI.click agenda
-      agB <- accumB False agE
-      return $ TrivialWidget (tidings agB (flip ($) <$> agB <@> agE)) agenda
-
-    current <- UI.div # set children [prev,today,next]
-    let
-      resRange b "month" d =  d {utctDay = addGregorianMonthsClip (if b then -1 else 1 )  (utctDay d)}
-      resRange b "day" d = d {utctDay =addDays (if b then -1 else 1 ) (utctDay d)}
-      resRange b "week" d = d {utctDay =addDays (if b then -7 else 7 ) (utctDay d)}
-      currentE = concatenate <$> unions  [resRange False  <$> facts (triding resolution) <@ UI.click next
-                                       ,resRange True   <$> facts (triding resolution) <@ UI.click prev , const (const iday) <$> UI.click today ]
-    increment <- accumB iday  currentE
-    let incrementT =  tidings increment (flip ($) <$> increment <@> currentE)
-        rangeT = (\r d -> Interval.interval (Interval.Finite $ resRange True r d,True) (Interval.Finite $ resRange False r d,True))<$> triding resolution <*>  incrementT
+    (sidebar,calendarSelT) <- calendarSelector
     calendar <- UI.div # set UI.class_ "col-xs-10"
-    sidebar <- UI.div # set children ([getElement agenda,current,getElement resolution,filterInp , getElement legend]<> (snd <$> itemListEl2)) #  set UI.class_ "col-xs-2"
     element body # set children [sidebar,calendar]
 
-    let calFun (agenda,iday,res ,selected) = do
+    let calFun ((agenda,iday,res ),selected) = do
             let
 
               inRange "day" d (SDate c)=   d == c
@@ -186,18 +188,18 @@ accountWidget inf body = do
                        UI.div # set children [h,b] # set UI.style [("border","dotted 1px black")]
                         ) . filter (not .L.null .snd) . fmap (fmap rights) <$> facts t) # set UI.style [("border","solid 1px black")])  $ M.lookup k (M.fromList selectedData) ) itemListEl2
             return ()
-    (_,fin) <- mapUITEventFin calendar calFun ((,,,)
-        <$> triding agenda
-        <*> incrementT
-        <*> triding resolution
-        <*> triding legend
+    (_,fin) <- mapUITEventFin calendar calFun ((,)
+        <$> calendarSelT
+        <*> ((\i j -> filter (flip L.elem (tableName <$> concat (F.toList i)) .  (^. _2._2)) j )<$> sel <*> pure allTags)
         )
     liftIO$ addFin calendar [fin]
 
     liftIO $mapM (\(tdesc ,(_,tname,efields,afields))-> do
-        mapTEvent  ((\i ->  forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ OrColl $ PrimColl . (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList efields))) rangeT
+        mapTEvent  ((\(_,incrementT,resolution) ->  do
+                   let i = (\r d -> Interval.interval (Interval.Finite $ resRange True r d,True) (Interval.Finite $ resRange False r d,True)) resolution   incrementT
+                   forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ OrColl $ PrimColl . (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList efields))) calendarSelT
       ) allTags
-    return body
+    return (legendStyle,dashes)
 
 txt = TB1. SText
 

@@ -55,5 +55,4 @@ main = do
   print "Start Dump State"
   print "Finish Dump State"
 
-  getLine
   return ()
