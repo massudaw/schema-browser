@@ -170,8 +170,9 @@ printPred t (PrimColl (a,e,i)) =
                          opparam "is not null" =  Nothing
                          opparam "is null" =  Nothing
                          opparam _ = Just $ flip Attr i .fst <$> (idx )
+                         result =  ( Just $ zipWith (\i j -> i <> " " <> j) (snd <$> idx) (opvalue e) ,opparam e )
 
-                     in (Just $ zipWith (\i j -> i <> " " <> j) (snd <$> idx) (opvalue e) ,opparam e )
+                     in  traceShow result result
 printPred t (OrColl wpred) =
                 let
                   w = unzip . fmap (printPred  t) <$> nonEmpty wpred
@@ -213,11 +214,18 @@ unLB (Compose (Unlabeled v )) = v
 indexFieldL :: Show a => Access Text -> TB3Data (Labeled Text) Key a -> [(Key,Text)]
 indexFieldL p@(IProd b l) v = case  findAttrL  l  (snd v) of
                                 Just i -> [utlabel i]
-                                Nothing -> case unLB<$>  findFKL l (snd v) of
-                                    Just (FKT ref _ _) ->  (\l -> utlabel . justError ("no attr" <> show (ref,l)) . L.find ((==[l]).  fmap (keyValue . _relOrigin). keyattr ) $ unkvlist ref ) <$>l
-                                    Nothing -> errorWithStackTrace ("no fkt" <> show (p,snd v))
+                                Nothing -> case getCompose $ fromMaybe (errorWithStackTrace ("no fkt" <> show (p,snd v))) $  findFKL l (snd v) of
+                                    Unlabeled i ->
+                                      case i  of
+                                        (FKT ref _ _) ->  (\l -> utlabel . justError ("no attr" <> show (ref,l)) . L.find ((==[l]).  fmap (keyValue . _relOrigin). keyattr ) $ unkvlist ref ) <$>l
+                                        i -> errorWithStackTrace "no fk"
 
-indexFieldL n@(Nested ix@(IProd b l) nt) v =  concat . fmap (indexFieldL nt) .  F.toList . _fkttable.  unLB $ justError "no nested" $ findFKL l (snd v)
+                                    Labeled _ _ -> [] -- Don't support filtering from labeled queries yet
+
+indexFieldL n@(Nested ix@(IProd b l) nt) v
+  =  case getCompose $ justError "no nested" $ findFKL l (snd v) of
+     Unlabeled i -> concat . fmap (indexFieldL nt) .  F.toList . _fkttable $ i
+     Labeled _ _ -> []
 indexFieldL (Many nt ) v =  concat $ flip indexFieldL v <$> nt
 indexFieldL (ISum nt ) v =  concat $ flip indexFieldL v <$> nt
 indexFieldL i v = errorWithStackTrace (show (i,v))

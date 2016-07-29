@@ -3,6 +3,7 @@ module Step.Host (module Step.Common,attrT,findPK,isNested,findProd,replace,uNes
 
 import Types
 import Control.Applicative.Lift
+import Debug.Trace
 import Data.Monoid
 import qualified Data.Foldable  as F
 import Control.Monad.Reader
@@ -64,7 +65,8 @@ indexPred (a@(IProd _ _),eq,v) r =
         "is null" -> isNothing $ unSOptional' rv
         "=" -> rv == v
         "<@" -> case v of
-                  IntervalTB1 l -> I.member  rv l
+                  IntervalTB1 l ->  maybe False (flip I.member  l) (unSOptional' rv)
+
                   i -> errorWithStackTrace ("Param not implemented " <> show i )
         i -> errorWithStackTrace ("Operator not implemented " <> i )
     Just (IT _ rv) ->
@@ -84,9 +86,13 @@ indexField p@(IProd b l) v = case unTB <$> findAttr  l  (snd v) of
                                i -> i
 indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findFK l (snd v)
 
-indexFieldRec :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
-indexFieldRec p@(IProd b l) v = unTB <$> findAttr  l  (snd v)
-indexFieldRec n@(Nested ix@(IProd b l) (Many[nt]) ) v = join $ join $ fmap (indexFieldRec nt) . listToMaybe . F.toList . _fkttable.  unTB <$> findFK l (snd v)
+joinFTB (LeftTB1 i) =  LeftTB1 $ fmap joinFTB i
+joinFTB (ArrayTB1 i) =  ArrayTB1 $ fmap joinFTB i
+joinFTB (TB1 i) =  i
+
+indexFieldRec :: Access Text -> TBData Key Showable -> Maybe (FTB Showable)
+indexFieldRec p@(IProd b l) v = _tbattr . unTB <$> findAttr  l  (snd v)
+indexFieldRec n@(Nested ix@(IProd b l) (Many[nt]) ) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK l (snd v)
 
 genPredicate i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
 genPredicate i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)

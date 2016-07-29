@@ -48,14 +48,34 @@ function handleFileSelect(evt) {
     }
   }
 
-function createLayers (ref,posj,nej,swj,features){
+function createLayer(ref,tname,posj,nej,swj,features){
   var points = JSON.parse(features);
-  ref.layer.clearLayers();
-  layers = points.map (function (l){ l.map (function (p){ 
-  var popup = L.popup()
+  if (ref.layer[tname] == null )
+  {
+    ref.layer[tname] = L.layerGroup().addTo(ref.mymap)
+  }
+  else {
+    ref.layer[tname].clearLayers();
+  }
+  var layer = ref.layer[tname];
+  layers = points.map(function (p){ 
+  var feature ;
+  if (p.position.constructor === Array && p.position[1].constructor ===Array ){
+   latlonA = p.position.map(function(l){
+     return L.latLng(l[0],l[1]);
+   })
+   layer.addLayer(L.polyline(latlonA,{color:p.color}));
+   layer.addLayer(L.circle(latlonA[0],p.size/3,{color:p.color}));
+   layer.addLayer(L.circle(latlonA[1],p.size,{color:p.color}));
+  }
+  else{
+   feature = L.circle(p.position,p.size,{color:p.color}).bindPopup(popup); 
+   var popup = L.popup()
         .setLatLng(p.position)
             .setContent(p.title + '\n' + p.position.toString());
-  ref.layer.addLayer(L.circle(p.position,p.size,{color:p.color}).bindPopup(popup));})})
+  layer.addLayer(feature);
+  }
+  })
 }
 
 
@@ -64,7 +84,10 @@ function createMap (ref,posj,nej,swj,features){
   ref.mymap = L.map(ref);
   if (pos == null) {
       navigator.geolocation.getCurrentPosition(function(position) {
-      ref.mymap.setView([position.coords.latitude, position.coords.longitude], 12);
+      var mtorad = 0.00000898315
+      var mcdis = 4000*mtorad
+      var bounds = L.latLngBounds([position.coords.latitude + mcdis , position.coords.longitude + mcdis],[position.coords.latitude - mcdis , position.coords.longitude - mcdis]);
+      setPosition(ref,[position.coords.latitude, position.coords.longitude],bounds.getSouthWest(),bounds.getNorthEast());
     }, function() {
       handleLocationError(true, map.getCenter());
     });
@@ -73,7 +96,7 @@ function createMap (ref,posj,nej,swj,features){
       sw  = JSON.parse(swj);
     ref.mymap.fitBounds([ne,sw]);
   }
-  ref.layer= L.layerGroup().addTo(ref.mymap);
+  ref.layer={}
 
   var osmUrl='http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
   var osmAttrib='Map data © <a href="http://openstreetmap.org">OpenStreetMap</a> contributors';
@@ -141,6 +164,13 @@ function addSource(el,table,source){
   $(el).fullCalendar('addEventSource',JSON.parse(source));
 }
 
+function setPosition(el, center,sw,ne){
+  el.mymap.fitBounds([
+          sw,
+          ne
+  ]);
+}
+
 function clientHandlers(){
   return {'moveend': function(el,eventType,sendEvent){
     el.mymap.on(eventType,function(e) {
@@ -174,8 +204,9 @@ function clientHandlers(){
    ,'currentPosition' : function(el,eventType ,sendEvent){
     $(el).bind(eventType,function(){
       navigator.geolocation.getCurrentPosition(function(position) {
-        el.mymap.setView([position.coords.latitude, position.coords.longitude], 12);
-        var bounds = el.mymap.getBounds();
+        var mtorad = 0.00000898315
+        var mcdis = 4000*mtorad
+        var bounds = L.latLngBounds([position.coords.latitude + mcdis , position.coords.longitude + mcdis],[position.coords.latitude - mcdis , position.coords.longitude - mcdis]);
         var center =bounds.getCenter();
         var sw=bounds.getSouthWest();
         var ne=bounds.getNorthEast();

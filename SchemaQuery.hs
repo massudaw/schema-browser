@@ -18,6 +18,7 @@ module SchemaQuery
   ,transaction
   ,transactionLog
   ,transactionNoLog
+  ,filterfixed
   )where
 import Graphics.UI.Threepenny.Core (mapEventFin)
 
@@ -215,7 +216,7 @@ tableLoader table  page size presort fixed
                        fk <- joinFK i
                        return $ addAttr  fk i) <$> m
                 liftIO $ putStrLn $ "reloadForeign table" <> show (tableName table) <> " - " <> show (lefts joined)
-                fetched <-traverse (\pred -> local (const rinf) $  tableLoader table Nothing Nothing []  (WherePredicate (AndColl pred))) $ traverse (\k -> (\ v -> traceShowId $ (PrimColl (IProd True [ keyValue ._relOrigin  $ k], "IN", ArrayTB1 (Non.fromList v)))) <$> ( nonEmpty $ catMaybes $  fmap (_tbattr .unTB) . L.find ((== [k]) . keyattr ) <$> traceShowId (lefts joined) ))  i
+                fetched <-traverse (\pred -> local (const rinf) $  tableLoader table Nothing Nothing []  (WherePredicate (AndColl pred))) $ traverse (\k -> (\ v ->  (PrimColl (IProd True [ keyValue ._relOrigin  $ k], "IN", ArrayTB1 (Non.fromList v)))) <$> ( nonEmpty $ catMaybes $  fmap (_tbattr .unTB) . L.find ((== [k]) . keyattr ) <$> (lefts joined) ))  i
                 return (rights  joined)) )  (return v) $ P.sortBy (P.comparing pathRelRel)  (S.toList remoteFKS)
           resFKS <- getFKS res
           return (resFKS,x,o )) table page size presort fixed
@@ -241,6 +242,14 @@ eventTable = tableLoader
 
 predNull (WherePredicate i) = L.null i
 predNull (LegacyPredicate i) = L.null i
+
+filterfixed fixed
+  = if predNull fixed
+              then id
+              else
+                case fixed of
+                  WherePredicate pred -> G.filter (\tb ->F.all  (\(a,e,v) ->  indexPred  (a,T.unpack e ,v) tb) pred )
+                  LegacyPredicate pred -> G.filter (\tb ->F.all id $ M.intersectionWith (\i j -> fromMaybe False $ liftA2 G.consistent (traverse unSOptional  $ M.fromList $ ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB i))) (traverse unSOptional  $M.fromList ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB j))) ) (mapFromTBList (fmap (_tb .snd) pred )) $ unKV (snd (tb)))
 
 pageTable flag method table page size presort fixed = do
     inf <- ask

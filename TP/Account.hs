@@ -52,44 +52,8 @@ import Data.Text (Text)
 
 import qualified Data.Map as M
 
-resRange b "month" d =  d {utctDay = addGregorianMonthsClip (if b then -1 else 1 )  (utctDay d)}
-resRange b "day" d = d {utctDay =addDays (if b then -1 else 1 ) (utctDay d)}
-resRange b "week" d = d {utctDay =addDays (if b then -7 else 7 ) (utctDay d)}
 
-calendarSelector = do
-    let buttonStyle k e = e # set UI.text (fromJust $ M.lookup k transRes)# set UI.class_ "btn-xs btn-default buttonSet"
-          where transRes = M.fromList [("month","Mês"),("week","Semana"),("day","Dia")]
-        defView = "month"
-        viewList = ["month","day","week"] :: [String]
-        transMode _ "month" = "month"
-        transMode True i = "agenda" <> capitalize i
-        transMode False i = "basic" <> capitalize i
-        capitalize (i:xs) = toUpper i : xs
-        capitalize [] = []
-
-    iday <- liftIO getCurrentTime
-    resolution <- fmap (fromMaybe defView) <$> buttonDivSetT  viewList (pure id) (pure $ Just defView ) (const UI.button)  buttonStyle
-
-    next <- UI.button  # set text ">"
-    today <- UI.button # set text "Hoje"
-    prev <- UI.button  # set text "<"
-    agenda <- mdo
-      agenda <- UI.button # sink text ((\b -> if b then "Agenda" else "Basic") <$> agB)
-      let agE = pure not <@ UI.click agenda
-      agB <- accumB False agE
-      return $ TrivialWidget (tidings agB (flip ($) <$> agB <@> agE)) agenda
-
-    current <- UI.div # set children [prev,today,next]
-    let
-      currentE = concatenate <$> unions  [resRange False  <$> facts (triding resolution) <@ UI.click next
-                                       ,resRange True   <$> facts (triding resolution) <@ UI.click prev , const (const iday) <$> UI.click today ]
-    increment <- accumB iday  currentE
-    let incrementT =  tidings increment (flip ($) <$> increment <@> currentE)
-    sidebar <- UI.div # set children [getElement agenda,current,getElement resolution] #  set UI.class_ "col-xs-2"
-    return (sidebar,(,,) <$> triding agenda <*> incrementT <*> triding resolution)
-
-
-accountWidget body sel inf = do
+accountWidget body calendarSelT sel inf = do
     (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
     (evdb,(_,emap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
     (evdb,(_,aMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "accounts" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "accounts" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
@@ -132,9 +96,8 @@ accountWidget body sel inf = do
                   # set UI.style [("background-color",renderShowable c)]
                 UI.div # set children [header,missing]) item
 
-    (sidebar,calendarSelT) <- calendarSelector
     calendar <- UI.div # set UI.class_ "col-xs-10"
-    element body # set children [sidebar,calendar]
+    element body # set children [calendar]
 
     let calFun ((agenda,iday,res ),selected) = do
             let

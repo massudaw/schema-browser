@@ -55,7 +55,7 @@ import qualified Data.Map as M
 calendarCreate m cal def = runFunction $ ffi "createAgenda(%1,%2,%3)"  cal def m
 calendarAddSource cal t evs= runFunction $ ffi "addSource(%1,%2,%3)"  cal t evs
 
-eventWidget body itemListEl2 sel inf cliZone = do
+eventWidget body calendarSelT sel inf cliZone = do
     dashes <- liftIO $ do
       (_,(_,tmap)) <- transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
       (evdb,(_,evMap )) <- transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
@@ -82,6 +82,8 @@ eventWidget body itemListEl2 sel inf cliZone = do
     filterInp <- UI.input # set UI.style [("width","100%")]
     filterInpBh <- stepper "" (UI.valueChange filterInp)
     let allTags =  (fst <$> dashes)
+    itemListEl2 <- mapM (\i ->
+      (i,) <$> UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")]) allTags
     let
         filterLabel d = (\j ->  L.isInfixOf (toLower <$> j) (toLower <$> d)) <$> filterInpBh
         legendStyle  table (b,_)
@@ -91,50 +93,22 @@ eventWidget body itemListEl2 sel inf cliZone = do
                 expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
                 let evc = UI.checkedChange expand
                 evb <- stepper False evc
-                missing <- (element $ fromJust $ M.lookup (k^. _2._2) (M.fromList $ first (tableName  . fromJust . flip M.lookup (pkMap inf))<$> itemListEl2)) # sink UI.style (noneShow <$> evb)
+                missing <- (element $ fromJust $ M.lookup k (M.fromList $  itemListEl2)) # sink UI.style (noneShow <$> evb)
                 header <- UI.div
                   # set items [element b # set UI.class_"col-xs-1", UI.div # set text  t # set UI.class_ "col-xs-10", element expand ]
                   # set UI.style [("background-color",renderShowable c)]
                 UI.div # set children [header,missing]
                   ) item
-    let buttonStyle k e = e # set UI.text (fromJust $ M.lookup k transRes)# set UI.class_ "btn-xs btn-default buttonSet"
-          where transRes = M.fromList [("month","Mês"),("week","Semana"),("day","Dia")]
-        defView = "month"
-        viewList = ["month","day","week"] :: [String]
-        transMode _ "month" = "month"
-        transMode True i = "agenda" <> capitalize i
-        transMode False i = "basic" <> capitalize i
-        capitalize (i:xs) = toUpper i : xs
-        capitalize [] = []
-
-    resolution <- fmap (fromMaybe defView) <$> buttonDivSetT  viewList (pure id) (pure $ Just defView ) (const UI.button)  buttonStyle
-
-    next <- UI.button  # set text ">"
-    today <- UI.button # set text "Hoje"
-    prev <- UI.button  # set text "<"
-    agenda <- mdo
-      agenda <- UI.button # sink text ((\b -> if b then "Agenda" else "Basic") <$> agB)
-      let agE = pure not <@ UI.click agenda
-      agB <- accumB False agE
-      return $ TrivialWidget (tidings agB (flip ($) <$> agB <@> agE)) agenda
-
-    current <- UI.div # set children [prev,today,next]
-    let
-      resRange b "month" d =  d {utctDay = addGregorianMonthsClip (if b then -1 else 1 )  (utctDay d)}
-      resRange b "day" d = d {utctDay =addDays (if b then -1 else 1 ) (utctDay d)}
-      resRange b "week" d = d {utctDay =addDays (if b then -7 else 7 ) (utctDay d)}
-      currentE = concatenate <$> unions  [resRange False  <$> facts (triding resolution) <@ UI.click next
-                                       ,resRange True   <$> facts (triding resolution) <@ UI.click prev , const (const iday) <$> UI.click today ]
-    increment <- accumB iday  currentE
-    let incrementT =  tidings increment (flip ($) <$> increment <@> currentE)
-        rangeT = (\r d -> Interval.interval (Interval.Finite $ resRange True r d,True) (Interval.Finite $ resRange False r d,True))<$> triding resolution <*>  incrementT
-    sidebar <- UI.div # set children ([getElement agenda,current,getElement resolution]<> (snd <$> itemListEl2)) #  set UI.class_ "col-xs-2"
-
     calendar <- UI.div # set UI.class_ "col-xs-10"
-    element body # set children [sidebar,calendar]
-    let calFun (mode,day,res,selected) = mdo
+    element body # set children [calendar]
+    let calFun ((agenda,day,res),selected) = mdo
             let
-
+              capitalize (i:xs) = toUpper i : xs
+              capitalize [] = []
+              transMode _ "month" = "month"
+              transMode True i = "agenda" <> capitalize i
+              transMode False i = "basic" <> capitalize i
+              mode = transMode agenda res
               inRange "day" d (SDate c)=   d == c
               inRange "week" d (SDate c)=    oy == cy && ow == cw
                 where
@@ -163,8 +137,8 @@ eventWidget body itemListEl2 sel inf cliZone = do
                       calendarAddSource innerCalendar  (T.unpack t) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  . filter (inRange res (utctDay day ) . unTB1 . fromJust .  M.lookup "start"  ) . concat . fmap (lefts.snd) $ i)))
                       ) s ) selectedData
             liftIO $ addFin innerCalendar (fin:fins)
-            mapM (\(ki,el) -> do
-              let k =   L.find (\i -> (i ^. _2._2) == tableName (justError "no lookup" (M.lookup ki (pkMap inf))) )(fst <$> dashes)
+            mapM (\(k,el) -> do
+              -- let k =   L.find (\i -> (i ^. _2._2) == tableName (justError "no lookup" (M.lookup ki (pkMap inf))) )(fst <$> dashes)
               traverse (\t -> do
                 element  el
                   # sink items (fmap (\(t,i) -> do
@@ -175,21 +149,22 @@ eventWidget body itemListEl2 sel inf cliZone = do
                            runFunction $ ffi "$(%1).draggable({ helper: 'clone',scroll:false,appendTo: 'body' ,'z-index' : 999,revert:true,revertDuration:0})" dv
                            return dv) i)
                          UI.div # set children [h,b] # set UI.style [("border","dotted 1px black")]
-                          ) . filter (not .L.null .snd) . fmap (fmap rights) <$> facts t) # set UI.style [("border","solid 1px black")])  $ join $ flip M.lookup  (M.fromList selectedData) <$> k) itemListEl2
+                          ) . filter (not .L.null .snd) . fmap (fmap rights) <$> facts t) # set UI.style [("border","solid 1px black")])  $ join $ flip M.lookup  (M.fromList selectedData) <$> Just k) itemListEl2
 
             return innerCalendar
 
-    let inpCal = ((,,,)
-          <$> (transMode <$> triding agenda <*> triding resolution)
-          <*> incrementT
-          <*> triding resolution
+    let inpCal = ((,)
+          <$>  calendarSelT
           <*> ((\i j -> filter (flip L.elem (tableName <$> concat (F.toList i)) .  (^. _2._2)) j )<$> sel <*> pure allTags)
           )
     (bh,fin) <- mapUITEventFin calendar calFun inpCal
 
     liftIO $ do
       mapConcurrently (\(tdesc ,(_,tname,fields))-> do
-          mapTEvent  ((\i ->  forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ OrColl $ PrimColl . (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList fields))) rangeT
+          mapTEvent  ((\(_,incrementT,resolution) ->  do
+                   let i = (\r d -> Interval.interval (Interval.Finite $ resRange True r d,True) (Interval.Finite $ resRange False r d,True)) resolution   incrementT
+
+                   forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ OrColl $ PrimColl . (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList fields))) calendarSelT
         ) allTags
     return  (legendStyle , dashes )
 

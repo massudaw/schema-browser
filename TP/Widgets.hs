@@ -3,6 +3,7 @@ module TP.Widgets where
 
 
 import GHC.Stack
+import Control.Monad.Writer
 import Control.Monad
 import Data.Ord
 import Reactive.Threepenny
@@ -595,5 +596,17 @@ testWidget e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "
 
 
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
+
+mapUIFinalizerT
+  :: MonadWriter [IO ()] (WriterT [IO a] UI) =>
+     Element
+     -> (b -> WriterT [(IO a)] UI b1)
+     -> Tidings b
+     -> WriterT [(IO a)] UI (Tidings b1)
+mapUIFinalizerT el m inp = do
+  (out , fin) <- lift $ mapUITEventFin el (\i ->runWriterT $ m i) inp
+  fine <- lift $ onEvent (facts (snd <$> out) <@ rumors inp ) (liftIO . sequence  )
+  tell [fin,fine]
+  return (fst <$> out)
 
 line n =   set  text n

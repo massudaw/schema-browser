@@ -125,11 +125,12 @@ setup smvar args w = void $ do
         lookT iv = let  i = unLeftItens $ lookAttr' (meta inf)  "table" iv
                       in fmap (\(Attr _ (TB1 (SText t))) -> t) i
     iniKey <-currentValue (facts initKey)
-    (itemListEl2,lookDesc,bset) <- tableChooser inf  kitems (fst <$> tfilter) (snd <$> tfilter)  (pure (schemaName inf)) (pure (username inf)) (pure iniKey)
+    (lookDesc,bset) <- tableChooser inf  kitems (fst <$> tfilter) (snd <$> tfilter)  (pure (schemaName inf)) (pure (username inf)) (pure iniKey)
     bd <- UI.div  # set UI.class_ "col-xs-10"
-    tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [getElement bset]# sink0 UI.style (facts $ noneShow <$> triding menu)
+    (sidebar,calendarT) <- calendarSelector
+    tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [sidebar,getElement bset]# sink0 UI.style (facts $ noneShow <$> triding menu)
     element body # set children [tbChooser,bd]
-    (tfilter ,_)<- mapUITEventFin bd (\nav-> do
+    (tfilter ,_) <- mapUITEventFin bd (\nav-> do
         bdo <- UI.div
         element bd # set children [bdo]
         let
@@ -154,13 +155,13 @@ setup smvar args w = void $ do
         case nav of
           "Map" -> do
               element bdo  # set UI.style [("width","100%")]
-              fmap ((\i j -> elem (tableName j) i) . fmap (^._1._2._2)) <$> mapWidget bdo (triding bset) inf
+              fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$> mapWidget bdo calendarT undefined (triding bset) inf
           "Agenda" -> do
               cliZone <- jsTimeZone
-              fmap ((\i j -> elem (tableName j) i) . fmap (^._1._2._2)) <$>  eventWidget bdo itemListEl2 (triding bset) inf cliZone
+              fmap ((\i j -> elem (tableName j) i) . fmap (^._1._2._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
           "Account" -> do
               element bdo  # set UI.style [("width","100%")]
-              fmap ((\i j -> elem (tableName j) i) . fmap (^._1._2._2)) <$> accountWidget bdo (triding bset) inf
+              fmap ((\i j -> elem (tableName j) i) . fmap (^._1._2._2)) <$> accountWidget bdo calendarT (triding bset) inf
           "Metadata" -> do
               let metaOpts = ["Poll","Stats","Change","Exception"]
                   iniOpts = join $ fmap (\i -> if elem i metaOpts then Just i else Nothing)$  args `atMay`  7
@@ -353,8 +354,6 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
       -- Usage Count
       tableUsage orderMap table = maybe (Right 0) (Left ) . fmap (lookAttr' (meta inf)  "usage" ) $  G.lookup  (G.Idex ( M.fromList pk )) orderMap
           where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$> [("table_name",TB1 . SText . rawName $ table ), ("schema_name",TB1 $ SText (schemaName inf))]
-  itemListEl2 <- mapM (\i ->
-      (i,) <$> UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")]) tables
   bset <- mdo
     let
 
@@ -390,7 +389,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
 
   tableHeader <- UI.h3 # set text "Table"
   tbChooserI <- UI.div # set children [tableHeader,filterInp,getElement bset]  # set UI.style [("height","90vh"),("overflow","auto"),("height","99%")]
-  return $ (itemListEl2, lookDesc,TrivialWidget ((\f -> M.mapKeys (fmap (f. selTable) ))<$> lookDesc <*> (M.mapKeys (\i-> (i,i))  <$>triding bset)) tbChooserI)
+  return $ (lookDesc,TrivialWidget ((\f -> M.mapKeys (fmap (f. selTable) ))<$> lookDesc <*> (M.mapKeys (\i-> (i,i))  <$>triding bset)) tbChooserI)
 
 
 
