@@ -126,13 +126,14 @@ mapWidget body calendarT positionT sel inf = do
     fin <- execWriterT $ mapUIFinalizerT calendar calFun calInp
     liftIO$ addFin calendar fin
     return (legendStyle,dashes)
+
 makePos [b,a,z] = (Interval.Finite $ TB1 $ SPosition (Position (a,b,z)),True)
 makePos i = errorWithStackTrace (show i)
 
 
-predicate evfields geofields  ((_,sw,ne),(agenda,resolution,incrementT))  = WherePredicate (AndColl [time,geo])
+predicate evfields geofields  ((_,ne,sw),(agenda,incrementT,resolution))  = WherePredicate (AndColl [time,geo])
   where
-    time = OrColl $ PrimColl . (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> concat (fmap F.toList evfields)
+    time = OrColl $ PrimColl . (,"<@",(IntervalTB1 $ fmap (TB1 . STimestamp.  utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> concat (fmap F.toList evfields)
     geo = OrColl $ PrimColl . (,"<@",(IntervalTB1 $ Interval.interval (makePos sw) (makePos ne))) . indexer . T.pack . renderShowable <$> F.toList geofields
     i = (\r d -> Interval.interval (Interval.Finite $ resRange True r d,True) (Interval.Finite $ resRange False r d,True)) resolution   incrementT
 
