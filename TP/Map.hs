@@ -14,7 +14,7 @@ import Control.Concurrent
 import Control.Lens ((^.),_1,_2)
 import Safe
 import Control.Concurrent.Async
-import qualified Data.Interval as Interval
+import Data.Interval as Interval
 import Data.Time.Calendar.WeekDate
 import qualified Data.Vector as V
 import Data.Char
@@ -115,27 +115,19 @@ mapWidget body calendarT positionT sel inf = do
         fin <- mapM (\((_,(_,tname,fields,efields,proj))) -> do
           let filterInp =  liftA2 (,) positionT  calendarT
           mapUIFinalizerT innerCalendar (\(positionB,calT)-> do
-            let pred = predicate efields fields (fromJust $ positionB,calT)
+            let pred = predicate efields (Just fields ) (positionB,Just calT)
             (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA tname Nothing Nothing [] pred
             mapUIFinalizerT innerCalendar (\i -> lift $ createLayers innerCalendar tname positionB (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) (collectionTid v)
             ) filterInp
           ) selected
 
         return ()
-    let calInp = (((\i j -> filter (flip L.elem (tableName <$> concat (F.toList i)) .  (^. _2._2)) j )<$> sel <*> pure dashes))
+    let calInp = (\i j -> filter (flip L.elem (tableName <$> concat (F.toList i)) .  (^. _2._2)) j )<$> sel <*> pure dashes
     fin <- execWriterT $ mapUIFinalizerT calendar calFun calInp
     liftIO$ addFin calendar fin
     return (legendStyle,dashes)
 
-makePos [b,a,z] = (Interval.Finite $ TB1 $ SPosition (Position (a,b,z)),True)
-makePos i = errorWithStackTrace (show i)
 
-
-predicate evfields geofields  ((_,ne,sw),(agenda,incrementT,resolution))  = WherePredicate (AndColl [time,geo])
-  where
-    time = OrColl $ PrimColl . (,"<@",(IntervalTB1 $ fmap (TB1 . STimestamp.  utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> concat (fmap F.toList evfields)
-    geo = OrColl $ PrimColl . (,"<@",(IntervalTB1 $ Interval.interval (makePos sw) (makePos ne))) . indexer . T.pack . renderShowable <$> F.toList geofields
-    i = (\r d -> Interval.interval (Interval.Finite $ resRange True r d,True) (Interval.Finite $ resRange False r d,True)) resolution   incrementT
 
 
 txt = TB1. SText

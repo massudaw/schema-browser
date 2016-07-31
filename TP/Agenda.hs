@@ -8,6 +8,7 @@ module TP.Agenda where
 
 import GHC.Stack
 import Step.Host
+import TP.View
 import qualified Data.Interval as Interval
 import Control.Concurrent
 import Utils
@@ -138,7 +139,6 @@ eventWidget body calendarSelT sel inf cliZone = do
                       ) s ) selectedData
             liftIO $ addFin innerCalendar (fin:fins)
             mapM (\(k,el) -> do
-              -- let k =   L.find (\i -> (i ^. _2._2) == tableName (justError "no lookup" (M.lookup ki (pkMap inf))) )(fst <$> dashes)
               traverse (\t -> do
                 element  el
                   # sink items (fmap (\(t,i) -> do
@@ -161,10 +161,9 @@ eventWidget body calendarSelT sel inf cliZone = do
 
     liftIO $ do
       mapConcurrently (\(tdesc ,(_,tname,fields))-> do
-          mapTEvent  ((\(_,incrementT,resolution) ->  do
-                   let i = (\r d -> Interval.interval (Interval.Finite $ resRange True r d,True) (Interval.Finite $ resRange False r d,True)) resolution   incrementT
+          mapTEvent  (\cal@(_,incrementT,resolution) ->  do
 
-                   forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ OrColl $ PrimColl . (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList fields))) calendarSelT
+                   forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing []  (WherePredicate $ timePred fields  cal)) calendarSelT
         ) allTags
     return  (legendStyle , dashes )
 
@@ -193,14 +192,6 @@ readPK  inf s = (tb,pk,editField)
         editField = lookKey inf t f
         pksk = rawPK tb
 
-instance A.ToJSON a => A.ToJSON (FTB a ) where
-  toJSON (TB1 i) = A.toJSON i
-  toJSON (LeftTB1 i) = fromMaybe (A.toJSON ("" ::String)) (A.toJSON <$> i)
-  toJSON (SerialTB1 i)  =  fromMaybe (A.toJSON ("" ::String)) (A.toJSON <$> i)
-
-instance A.ToJSON Showable where
-  toJSON (SText i ) = A.toJSON i
-  toJSON i = A.toJSON (renderPrim i)
 
 
 type DateChange  =  (String,Either (Interval UTCTime ) UTCTime)

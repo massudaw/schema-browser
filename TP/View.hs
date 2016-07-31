@@ -7,12 +7,20 @@
 module TP.View where
 
 import qualified Data.Aeson as A
+import Control.Applicative
+import GHC.Stack
+import NonEmpty
 import qualified Data.Foldable as F
 import Types
 import Data.Maybe
 import qualified Data.Vector as V
 import Text
+import RuntimeTypes
+import Step.Common
+import Step.Host
+import Data.Time
 import Query
+import Data.Interval as Interval
 import qualified Data.Text as T
 
 instance A.ToJSON a =>
@@ -30,5 +38,31 @@ instance A.ToJSON Showable where
             , A.String $ T.pack (show y)
             , A.String $ T.pack (show z)]
     toJSON i = A.toJSON (renderPrim i)
+
+geoPred geofields (_,ne,sw) = geo
+  where
+    geo = OrColl $ PrimColl . (,"<@",(IntervalTB1 $ Interval.interval (makePos sw) (makePos ne))) . indexer . T.pack . renderShowable <$> F.toList geofields
+
+timePred evfields (_,incrementT,resolution)  = time
+  where
+    time = OrColl $ PrimColl . (,"<@",(IntervalTB1 $ fmap (TB1 . STimestamp.  utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList evfields
+    i = (\r d -> Interval.interval (Interval.Finite $ resRange True r d,True) (Interval.Finite $ resRange False r d,True)) resolution   incrementT
+predicate ::
+     Maybe (NonEmpty (FTB Showable))
+     -> Maybe (NonEmpty (FTB Showable))
+     -> (Maybe(t, [Double], [Double]),
+         Maybe (t1, UTCTime, String ))
+     -> WherePredicate
+
+
+predicate evfields geofields (i,j) = WherePredicate $ AndColl $ catMaybes [liftA2 geoPred geofields i ,liftA2 timePred evfields j ]
+
+
+resRange b "month" d =  d {utctDay = addGregorianMonthsClip (if b then -1 else 1 )  (utctDay d)}
+resRange b "day" d = d {utctDay =addDays (if b then -1 else 1 ) (utctDay d)}
+resRange b "week" d = d {utctDay =addDays (if b then -7 else 7 ) (utctDay d)}
+
+makePos [b,a,z] = (Interval.Finite $ TB1 $ SPosition (Position (a,b,z)),True)
+makePos i = errorWithStackTrace (show i)
 
 

@@ -7,6 +7,7 @@
 module TP.Account where
 
 import GHC.Stack
+import TP.View
 import Data.Ord
 import Step.Host
 import Control.Lens (_1,_2,(^.))
@@ -157,10 +158,11 @@ accountWidget body calendarSelT sel inf = do
         )
     liftIO$ addFin calendar [fin]
 
-    liftIO $mapM (\(tdesc ,(_,tname,efields,afields))-> do
-        mapTEvent  ((\(_,incrementT,resolution) ->  do
-                   let i = (\r d -> Interval.interval (Interval.Finite $ resRange True r d,True) (Interval.Finite $ resRange False r d,True)) resolution   incrementT
-                   forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ OrColl $ PrimColl . (,"<@",(IntervalTB1 $ fmap (TB1 . SDate . localDay . utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList efields))) calendarSelT
+    liftIO $ mapM (\(tdesc ,(_,tname,efields,afields))-> do
+      mapTEvent
+        (\cal ->  do
+          forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing [] (WherePredicate $ timePred efields cal ))
+        calendarSelT
       ) allTags
     return (legendStyle,dashes)
 
@@ -188,15 +190,6 @@ readPK  inf s = (tb,pk,editField)
         tb = lookTable inf t
         editField = lookKey inf t f
         pksk = rawPK tb
-
-instance A.ToJSON a => A.ToJSON (FTB a ) where
-  toJSON (TB1 i) = A.toJSON i
-  toJSON (LeftTB1 i) = fromMaybe (A.toJSON ("" ::String)) (A.toJSON <$> i)
-  toJSON (SerialTB1 i)  =  fromMaybe (A.toJSON ("" ::String)) (A.toJSON <$> i)
-
-instance A.ToJSON Showable where
-  toJSON (SText i ) = A.toJSON i
-  toJSON i = A.toJSON (renderPrim i)
 
 
 type DateChange  =  (String,Either (Interval UTCTime ) UTCTime)

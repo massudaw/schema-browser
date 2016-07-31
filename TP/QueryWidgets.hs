@@ -28,10 +28,10 @@ module TP.QueryWidgets (
     attrLine,
     viewer,
     calendarSelector,
-    resRange,
     ) where
 
 import RuntimeTypes
+import TP.View
 import Data.Semigroup hiding (diff)
 import qualified NonEmpty as Non
 import NonEmpty (NonEmpty(..))
@@ -1243,9 +1243,6 @@ attrLine i   = do
   line ( L.intercalate "," (fmap renderShowable .  allKVRec'  $ i))
 
 
-resRange b "month" d =  d {utctDay = addGregorianMonthsClip (if b then -1 else 1 )  (utctDay d)}
-resRange b "day" d = d {utctDay =addDays (if b then -1 else 1 ) (utctDay d)}
-resRange b "week" d = d {utctDay =addDays (if b then -7 else 7 ) (utctDay d)}
 
 calendarSelector = do
     let buttonStyle k e = e # set UI.text (fromJust $ M.lookup k transRes)# set UI.class_ "btn-xs btn-default buttonSet"
