@@ -7,6 +7,7 @@
 module TP.View where
 
 import qualified Data.Aeson as A
+import Debug.Trace
 import Data.Semigroup
 import Control.Arrow (first)
 import Control.Applicative
@@ -15,6 +16,9 @@ import GHC.Stack
 import NonEmpty
 import qualified Data.Foldable as F
 import Types
+import Types.Patch
+import qualified Types.Index as G
+import Utils
 import Data.Maybe
 import qualified Data.Vector as V
 import Text
@@ -48,10 +52,17 @@ geoPred geofields (_,ne,sw) = geo
 
 timePred evfields (_,incrementT,resolution)  = time
   where
-    time = OrColl $ PrimColl . (,"<@",(IntervalTB1 $ fmap (TB1 . STimestamp.  utcToLocalTime utc )i)) . indexer . T.pack . renderShowable <$> F.toList evfields
+    time = OrColl $  timeField <$> F.toList evfields
+    timeField f = PrimColl . (,"<@",(IntervalTB1 $ fmap (ref  (keyType f)) i )) $  indexer (keyValue f)
+    ref f = case f of
+                Primitive (AtomicPrim PDate )-> (TB1 . SDate .  localDay . utcToLocalTime utc )
+                Primitive (AtomicPrim (PTimestamp  _ )) -> (TB1 . STimestamp .  utcToLocalTime utc )
+                KOptional i ->  ref i
+                KSerial i -> ref i
+
     i = (\r d -> Interval.interval (Interval.Finite $ resRange True r d,True) (Interval.Finite $ resRange False r d,True)) resolution   incrementT
 predicate ::
-     Maybe (NonEmpty (FTB Showable))
+     Maybe (NonEmpty Key)
      -> Maybe (NonEmpty (FTB Showable))
      -> (Maybe(t, [Double], [Double]),
          Maybe (t1, UTCTime, String ))
@@ -80,5 +91,15 @@ readPK  inf s = (tb,pk,editField)
         editField = lookKey inf t f
         pksk = rawPK tb
 
+
+
+makePatch :: TimeZone -> ((Table,[(Key ,FTB Showable)],Key),Either (Interval UTCTime ) UTCTime ) -> TBIdx Key Showable
+makePatch zone ((t,pk,k), a) = (tableMeta t , G.Idex $ M.fromList pk, PAttr k <$>  (ty  (keyType k)$   a))
+ where ty (KOptional k )  i = fmap (POpt . Just)   . ty k $ i
+       ty (KSerial k )  i = fmap (PSerial . Just )  . ty k $ i
+       ty (KInterval k )  (Left i )=  [PatchSet $ (fmap (PInter True . (,True)). (ty k.Right . unFinite) $ Interval.lowerBound i) <>  (fmap (PInter False . (,True)). (ty k.Right .unFinite ) $ Interval.upperBound i)]
+       ty (Primitive p ) (Right r )= pure .PAtom . cast p $ r
+       cast (AtomicPrim PDate ) = SDate . utctDay
+       cast (AtomicPrim (PTimestamp l)) = STimestamp . utcToLocalTime utc .localTimeToUTC zone . utcToLocalTime utc
 
 

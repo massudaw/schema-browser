@@ -6,6 +6,7 @@
 module TP.Browser where
 
 import TP.Account
+import Control.Monad.Writer (runWriterT)
 import TP.Agenda
 import Control.Lens (_1,_2,(^.),over)
 import TP.Map
@@ -130,10 +131,10 @@ setup smvar args w = void $ do
     (sidebar,calendarT) <- calendarSelector
     tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [sidebar,getElement bset]# sink0 UI.style (facts $ noneShow <$> triding menu)
     element body # set children [tbChooser,bd]
-    (tfilter ,_) <- mapUITEventFin bd (\nav-> do
-        bdo <- UI.div
-        element bd # set children [bdo]
-        let
+    (tfilter ,fin) <- runWriterT $ mapUIFinalizerT bd (\nav-> do
+      bdo <- lift$ UI.div
+      lift $ element bd # set children [bdo]
+      let
           selTable = flip M.lookup (pkMap inf)
           buttonStyle k (e,sub) = mdo
             let tableK = fromJust (selTable k)
@@ -152,17 +153,17 @@ setup smvar args w = void $ do
             UI.div # set children [top,prebset] # set UI.style [("width","100%")]
             where
               tb =  justLook   k (pkMap inf)
-        case nav of
-          "Map" -> do
-              element bdo  # set UI.style [("width","100%")]
-              fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$> mapWidget bdo calendarT undefined (triding bset) inf
-          "Agenda" -> do
-              cliZone <- jsTimeZone
-              fmap ((\i j -> elem (tableName j) i) . fmap (^._1._2._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
-          "Account" -> do
-              element bdo  # set UI.style [("width","100%")]
-              fmap ((\i j -> elem (tableName j) i) . fmap (^._1._2._2)) <$> accountWidget bdo calendarT (triding bset) inf
-          "Metadata" -> do
+      case nav of
+        "Map" -> do
+          lift $ element bdo  # set UI.style [("width","100%")]
+          fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$> mapWidget bdo calendarT undefined (triding bset) inf
+        "Agenda" -> lift $ do
+          cliZone <- jsTimeZone
+          fmap ((\i j -> elem (tableName j) i) . fmap (^._1._2._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
+        "Account" -> do
+          lift $ element bdo  # set UI.style [("width","100%")]
+          fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$> accountWidget bdo calendarT (triding bset) inf
+        "Metadata" -> lift $ do
               let metaOpts = ["Poll","Stats","Change","Exception"]
                   iniOpts = join $ fmap (\i -> if elem i metaOpts then Just i else Nothing)$  args `atMay`  7
                   displayOpts  i =  UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right"
@@ -209,11 +210,11 @@ setup smvar args w = void $ do
                     ) ((,) <$> triding metanav <*> triding bset)
               return bdo
               return  ((buttonStyle,const True))
-          "Browser" -> do
+        "Browser" -> lift $ do
               subels <- chooserTable  inf  bset cliTid  cli
               element bdo  # set children  subels # set UI.style [("height","90vh"),("overflow","auto")]
               return  ((buttonStyle, const True))
-          i -> errorWithStackTrace (show i)
+        i -> errorWithStackTrace (show i)
          )  (triding nav)
     return tfilter
       ) )  evDB

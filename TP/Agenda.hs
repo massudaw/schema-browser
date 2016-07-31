@@ -163,21 +163,11 @@ eventWidget body calendarSelT sel inf cliZone = do
       mapConcurrently (\(tdesc ,(_,tname,fields))-> do
           mapTEvent  (\cal@(_,incrementT,resolution) ->  do
 
-                   forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing []  (WherePredicate $ timePred fields  cal)) calendarSelT
+                   forkIO $ void $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing []  (WherePredicate $ timePred ((\(TB1 (SText v))->  lookKey inf tname v) <$> fields ) cal)) calendarSelT
         ) allTags
     return  (legendStyle , dashes )
 
 txt = TB1. SText
-
-makePatch :: TimeZone -> ((Table,[(Key ,FTB Showable)],Key),Either (Interval UTCTime ) UTCTime ) -> TBIdx Key Showable
-makePatch zone ((t,pk,k), a) = (tableMeta t , G.Idex $ M.fromList pk, PAttr k <$>  (ty  (keyType k)$   a))
- where ty (KOptional k )  i = fmap (POpt . Just)   . ty k $ i
-       ty (KSerial k )  i = fmap (PSerial . Just )  . ty k $ i
-       ty (KInterval k )  (Left i )=  [PatchSet $ (fmap (PInter True . (,True)). (ty k.Right . unFinite) $ Interval.lowerBound i) <>  (fmap (PInter False . (,True)). (ty k.Right .unFinite ) $ Interval.upperBound i)]
-       ty (Primitive p ) (Right r )= pure .PAtom . cast p $ r
-       cast (AtomicPrim PDate ) = SDate . utctDay
-       cast (AtomicPrim (PTimestamp l)) = STimestamp . utcToLocalTime utc .localTimeToUTC zone . utcToLocalTime utc
-
 
 
 type DateChange  =  (String,Either (Interval UTCTime ) UTCTime)
