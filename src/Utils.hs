@@ -9,6 +9,7 @@ import  Data.Aeson
 import qualified Data.Vector as V
 import GHC.Stack
 import GHC.Exts
+import Data.Interval as Interval
 import Data.Maybe
 import Data.Monoid
 
@@ -134,3 +135,8 @@ nonEmpty i = Just i
 
 safeTail [] = []
 safeTail i = tail i
+
+unFinite :: Interval.Extended a -> a
+unFinite (Interval.Finite i ) = i
+unFinite (i ) = errorWithStackTrace "not finite"
+

@@ -371,7 +371,6 @@ diffFTB p d (IntervalTB1 i) (IntervalTB1 j)
 diffFTB p d (TB1 i) (TB1  j) = fmap PAtom $ d i j
 diffFTB p d  i j = errorWithStackTrace (show (i,j))
 
-unFinite (Interval.Finite i ) =  i
 
 instance Applicative Interval.Extended where
   pure i = Interval.Finite i

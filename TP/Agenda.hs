@@ -169,9 +169,6 @@ eventWidget body calendarSelT sel inf cliZone = do
 
 txt = TB1. SText
 
-writePK :: TBData Key Showable -> FTB Showable ->  Text
-writePK r efield = (\i -> _kvname (fst r) <> "->"  <> i <>  "->" <> T.pack (renderShowable efield ))$T.intercalate  ","  $ fmap ((\(i,j) -> keyValue i <> "=" <> T.pack (renderShowable j))) $ M.toList $ getPKM r
-
 makePatch :: TimeZone -> ((Table,[(Key ,FTB Showable)],Key),Either (Interval UTCTime ) UTCTime ) -> TBIdx Key Showable
 makePatch zone ((t,pk,k), a) = (tableMeta t , G.Idex $ M.fromList pk, PAttr k <$>  (ty  (keyType k)$   a))
  where ty (KOptional k )  i = fmap (POpt . Just)   . ty k $ i
@@ -180,17 +177,6 @@ makePatch zone ((t,pk,k), a) = (tableMeta t , G.Idex $ M.fromList pk, PAttr k <$
        ty (Primitive p ) (Right r )= pure .PAtom . cast p $ r
        cast (AtomicPrim PDate ) = SDate . utctDay
        cast (AtomicPrim (PTimestamp l)) = STimestamp . utcToLocalTime utc .localTimeToUTC zone . utcToLocalTime utc
-
-unFinite (Interval.Finite i ) = i
-unFinite (i ) = errorWithStackTrace (show i)
-
-readPK :: InformationSchema -> Text -> (Table,[(Key ,FTB Showable)],Key)
-readPK  inf s = (tb,pk,editField)
-  where [t,pks,f] = T.splitOn "->"  s
-        pk = (\(k,v) -> (k,fromJust  $ readType (keyType k) (T.unpack $ T.drop 1 v))) . first (\k -> fromJust $ L.find ((k==).keyValue)pksk).  T.break ('='==) <$> T.splitOn "," pks
-        tb = lookTable inf t
-        editField = lookKey inf t f
-        pksk = rawPK tb
 
 
 

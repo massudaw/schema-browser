@@ -7,7 +7,10 @@
 module TP.View where
 
 import qualified Data.Aeson as A
+import Data.Semigroup
+import Control.Arrow (first)
 import Control.Applicative
+import qualified Data.Map as M
 import GHC.Stack
 import NonEmpty
 import qualified Data.Foldable as F
@@ -64,5 +67,18 @@ resRange b "week" d = d {utctDay =addDays (if b then -7 else 7 ) (utctDay d)}
 
 makePos [b,a,z] = (Interval.Finite $ TB1 $ SPosition (Position (a,b,z)),True)
 makePos i = errorWithStackTrace (show i)
+
+writePK :: TBData Key Showable -> FTB Showable ->  T.Text
+writePK r efield = (\i -> _kvname (fst r) <> "->"  <> i <>  "->" <> T.pack (renderShowable efield ))$T.intercalate  ","  $ fmap ((\(i,j) -> keyValue i <> "=" <> T.pack (renderShowable j))) $ M.toList $ getPKM r
+
+
+readPK :: InformationSchema -> T.Text -> (Table,[(Key ,FTB Showable)],Key)
+readPK  inf s = (tb,pk,editField)
+  where [t,pks,f] = T.splitOn "->"  s
+        pk = (\(k,v) -> (k,fromJust  $ readType (keyType k) (T.unpack $ T.drop 1 v))) . first (\k -> fromJust $ F.find ((k==).keyValue)pksk).  T.break ('='==) <$> T.splitOn "," pks
+        tb = lookTable inf t
+        editField = lookKey inf t f
+        pksk = rawPK tb
+
 
 

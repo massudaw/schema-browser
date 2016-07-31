@@ -9,6 +9,7 @@ module TP.Account where
 import GHC.Stack
 import TP.View
 import Data.Ord
+import Utils
 import Step.Host
 import Control.Lens (_1,_2,(^.))
 import qualified Data.Interval as Interval
@@ -122,12 +123,6 @@ accountWidget body calendarSelT sel inf = do
             innerCalendarSet <- M.fromList <$> mapM (\((_,(_,i,_,_)),s) -> (i,) <$> UI.table)  selectedData
             innerCalendar  <- UI.div # set children (F.toList innerCalendarSet)
             element calendar # set children [innerCalendar]
-            let evd = eventDrop innerCalendar
-            let evr = eventResize innerCalendar
-            let evdd = eventDragDrop innerCalendar
-                evs =  fmap (makePatch cliZone . first (readPK inf . T.pack))<$> unions [evr,evdd,evd]
-            fin <- onEvent evs (liftIO . transaction inf . mapM (\i -> do
-                        patchFrom i >>= traverse (tell . pure )))
             calHand innerCalendar  =<< currentValue   (facts visible)
             fins <- mapM (\((cap,(_,t,_,_)),s)->  fmap snd $ mapUITEventFin (fromJust $ M.lookup t innerCalendarSet) (
                       (\i -> do
@@ -138,7 +133,7 @@ accountWidget body calendarSelT sel inf = do
                           dat = L.sortBy (comparing (M.lookup "start")) $filter (inRange res (utctDay iday ) . unTB1 . fromJust . M.lookup "start") . concat .fmap (lefts  .snd)  $ i
                       element (fromJust $ M.lookup t innerCalendarSet) # set items (caption:header:body))
                       ) s ) selectedData
-            liftIO $ addFin innerCalendar (fin:fins)
+            liftIO $ addFin innerCalendar (fins)
             mapM (\(k,el) -> do
               traverse (\t -> do
                 element  el
@@ -168,45 +163,4 @@ accountWidget body calendarSelT sel inf = do
 
 txt = TB1. SText
 
-writePK :: TBData Key Showable -> FTB Showable ->  Text
-writePK r efield = (\i -> _kvname (fst r) <> "->"  <> i <>  "->" <> T.pack (renderShowable efield ))$T.intercalate  ","  $ fmap ((\(i,j) -> keyValue i <> "=" <> T.pack (renderShowable j))) $ M.toList $ getPKM r
-
-makePatch :: TimeZone -> ((Table,[(Key ,FTB Showable)],Key),Either (Interval UTCTime ) UTCTime ) -> TBIdx Key Showable
-makePatch zone ((t,pk,k), a) = (tableMeta t , G.Idex $ M.fromList pk, PAttr k <$>  (ty  (keyType k)$   a))
- where ty (KOptional k )  i = fmap (POpt . Just)   . ty k $ i
-       ty (KSerial k )  i = fmap (PSerial . Just )  . ty k $ i
-       ty (KInterval k )  (Left i )=  [PatchSet $ (fmap (PInter True . (,True)). (ty k.Right . unFinite) $ Interval.lowerBound i) <>  (fmap (PInter False . (,True)). (ty k.Right .unFinite ) $ Interval.upperBound i)]
-       ty (Primitive p ) (Right r )= pure .PAtom . cast p $ r
-       cast (AtomicPrim PDate ) = SDate . utctDay
-       cast (AtomicPrim (PTimestamp l)) = STimestamp . utcToLocalTime utc .localTimeToUTC zone . utcToLocalTime utc
-
-unFinite (Interval.Finite i ) = i
-unFinite (i ) = errorWithStackTrace (show i)
-
-readPK :: InformationSchema -> Text -> (Table,[(Key ,FTB Showable)],Key)
-readPK  inf s = (tb,pk,editField)
-  where [t,pks,f] = T.splitOn "->"  s
-        pk = (\(k,v) -> (k,fromJust  $ readType (keyType k) (T.unpack $ T.drop 1 v))) . first (\k -> fromJust $ L.find ((k==).keyValue)pksk).  T.break ('='==) <$> T.splitOn "," pks
-        tb = lookTable inf t
-        editField = lookKey inf t f
-        pksk = rawPK tb
-
-
-type DateChange  =  (String,Either (Interval UTCTime ) UTCTime)
-
--- readPosition:: EventData -> Maybe DateChange
-readPosition  v =
- ( let [i,a,e]  = unsafeFromJSON v
-   in (,) <$> Just i <*> ((\i j ->  Left $ Interval.interval (Interval.Finite i,True) (Interval.Finite j,True))<$> parseISO8601 a <*> parseISO8601 e)) <|>  (let [i,a] = unsafeFromJSON v in (,) <$> Just i <*> (Right <$> parseISO8601 a ))
-
-
-
-eventDrop :: Element -> Event DateChange
-eventDrop el = filterJust $ readPosition <$>  domEvent "eventDrop" el
-
-eventDragDrop :: Element -> Event DateChange
-eventDragDrop el = filterJust $ readPosition <$>  domEvent "externalDrop" el
-
-eventResize :: Element -> Event DateChange
-eventResize el = filterJust $ readPosition <$>  domEvent "eventResize" el
 

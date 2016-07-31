@@ -504,9 +504,7 @@ overLabel f = Compose .  Identity . f . labelValue  .getCompose
 
 
 -- interval' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
-unFinite (ER.Finite i) = i
-unFinite ER.PosInf = errorWithStackTrace ("posinf")
-unFinite ER.NegInf = errorWithStackTrace ("neginf")
+
 inf' = unFinite . Interval.lowerBound
 sup' = unFinite . Interval.upperBound
 
