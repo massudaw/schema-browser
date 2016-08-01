@@ -1274,6 +1274,6 @@ calendarSelector = do
     increment <- accumB iday  currentE
     let incrementT =  tidings increment (flip ($) <$> increment <@> currentE)
     sidebar <- UI.div # set children [getElement agenda,current,getElement resolution]
-    return (sidebar,(,,) <$> triding agenda <*> incrementT <*> triding resolution)
+    return (sidebar,(triding agenda ,incrementT,triding resolution))
 
 

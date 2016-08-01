@@ -32,7 +32,6 @@ main = do
   let db = argsToState (tail args)
   -- Load Metadata
   conn <- connectPostgreSQL (connRoot db)
-
   let
     amap = authMap smvar db (user db , pass db )
 

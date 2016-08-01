@@ -54,7 +54,9 @@ import Data.Text (Text)
 import qualified Data.Map as M
 
 
-accountWidget body calendarSelT sel inf = do
+accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
+    let calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
+
     (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
     (_,(_,emap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
     (_,(_,aMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "accounts" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "accounts" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])

@@ -120,18 +120,20 @@ setup smvar args w = void $ do
     expand False = "col-xs-12"
   element body # sink0 UI.class_ (facts $ expand <$> triding menu)
   getBody w #+ [element hoverBoard,element container]
-  mapUITEvent body (traverse (\inf-> mdo
+  fin <- runWriterT $ mapUIFinalizerT body (traverse (\inf-> mdo
     let kitems = M.keys (pkMap inf)
         initKey = (\iv -> maybeToList . join $ fmap (S.fromList .rawPK) . flip M.lookup (_tableMapL inf) <$> join (lookT <$> iv)) <$> cliTid
         lookT iv = let  i = unLeftItens $ lookAttr' (meta inf)  "table" iv
                       in fmap (\(Attr _ (TB1 (SText t))) -> t) i
-    iniKey <-currentValue (facts initKey)
-    (lookDesc,bset) <- tableChooser inf  kitems (fst <$> tfilter) (snd <$> tfilter)  (pure (schemaName inf)) (pure (username inf)) (pure iniKey)
-    bd <- UI.div  # set UI.class_ "col-xs-10"
-    (sidebar,calendarT) <- calendarSelector
-    tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [sidebar,getElement bset]# sink0 UI.style (facts $ noneShow <$> triding menu)
-    element body # set children [tbChooser,bd]
-    (tfilter ,fin) <- runWriterT $ mapUIFinalizerT bd (\nav-> do
+    iniKey <-lift$ currentValue (facts initKey)
+    (lookDesc,bset) <- lift$ tableChooser inf  kitems (fst <$> tfilter) (snd <$> tfilter)  (pure (schemaName inf)) (pure (username inf)) (pure iniKey)
+
+    posSel <- positionSel
+    bd <- lift $ UI.div  # set UI.class_ "col-xs-10"
+    (sidebar,calendarT) <- lift $ calendarSelector
+    tbChooser <- lift$ UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [sidebar,posSel ^._1,getElement bset]# sink0 UI.style (facts $ noneShow <$> triding menu)
+    lift $ element body # set children [tbChooser,bd]
+    tfilter <-  mapUIFinalizerT bd (\nav-> do
       bdo <- lift$ UI.div
       lift $ element bd # set children [bdo]
       let
@@ -156,10 +158,11 @@ setup smvar args w = void $ do
       case nav of
         "Map" -> do
           lift $ element bdo  # set UI.style [("width","100%")]
-          fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$> mapWidget bdo calendarT undefined (triding bset) inf
-        "Agenda" -> lift $ do
-          cliZone <- jsTimeZone
-          fmap ((\i j -> elem (tableName j) i) . fmap (^._1._2._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
+          fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$> mapWidget bdo calendarT posSel (triding bset) inf
+        "Agenda" -> do
+          lift $ element bdo  # set UI.style [("width","100%")]
+          cliZone <- lift $ jsTimeZone
+          fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
         "Account" -> do
           lift $ element bdo  # set UI.style [("width","100%")]
           fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$> accountWidget bdo calendarT (triding bset) inf
@@ -210,9 +213,9 @@ setup smvar args w = void $ do
                     ) ((,) <$> triding metanav <*> triding bset)
               return bdo
               return  ((buttonStyle,const True))
-        "Browser" -> lift $ do
+        "Browser" -> do
               subels <- chooserTable  inf  bset cliTid  cli
-              element bdo  # set children  subels # set UI.style [("height","90vh"),("overflow","auto")]
+              lift $ element bdo  # set children  subels # set UI.style [("height","90vh"),("overflow","auto")]
               return  ((buttonStyle, const True))
         i -> errorWithStackTrace (show i)
          )  (triding nav)
@@ -371,7 +374,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
       visible  k = (\i j k-> i tb && j tb && k tb ) <$> filterLabel <*> authorize <*> tableFilter
         where
           tb =  justLook   k (pkMap inf)
-    bset <- checkDivSetTGen tables ((\i j -> tableUsage i (justLook j (pkMap inf))) <$> collectionTid orddb ) (M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i) . fromJust . selTable $ e ) <$> iniTables) buttonString ((\lg i j -> lg i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle)
+    bset <- checkDivSetTGen tables ((\i j -> tableUsage i (justLook j (pkMap inf))) <$> collectionTid orddb) (M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i) . fromJust . selTable $ e ) <$> iniTables) buttonString ((\lg i j -> lg i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle)
     return bset
   let
       bBset = M.keys <$> triding bset
@@ -382,15 +385,15 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
       incClick field =  (fst field , G.getIndex field ,[patch $ fmap (+SNumeric 1) usage])
           where
             usage = lookAttr' (meta inf ) "usage"   field
-  liftIO$ onEventIO ((\i j -> fmap incClick <$> (ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
+              {-onEventFin ((\i j -> fmap incClick <$> (ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
     (traverse (traverse (\p -> do
       _ <- transactionNoLog (meta inf ) $ patchFrom  p
-      putPatch (patchVar orddb) [p] )))
+      putPatch (patchVar orddb) [p] )))-}
 
 
   tableHeader <- UI.h3 # set text "Table"
   tbChooserI <- UI.div # set children [tableHeader,filterInp,getElement bset]  # set UI.style [("height","90vh"),("overflow","auto"),("height","99%")]
-  return $ (lookDesc,TrivialWidget ((\f -> M.mapKeys (fmap (f. selTable) ))<$> lookDesc <*> (M.mapKeys (\i-> (i,i))  <$>triding bset)) tbChooserI)
+  return $ (lookDesc,TrivialWidget ((\f -> M.mapKeys (fmap (f. selTable) ))<$> facts lookDesc <#> (M.mapKeys (\i-> (i,i))  <$>triding bset)) tbChooserI)
 
 
 
@@ -400,18 +403,21 @@ selectFromTable t a b c p = do
   selectFrom  t a b c (LegacyPredicate $ fmap (liftField (meta inf) t) <$>p)
 
 chooserTable inf bset cliTid cli = do
-  let bBset = triding bset
-  nav  <- buttonDivSet ["Browser"] (pure $ Just "Browser")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")
-  element nav # set UI.class_ "col-xs-11"
-  layout <- checkedWidget (pure False)
-  body <- UI.div
-  el <- mapUITEvent body (\l -> mapM (\(nav,((table,desc),sub))-> do
-      header <- UI.h3
+  let
+    bBset = triding bset
+
+  nav  <- lift $ buttonDivSet ["Browser"] (pure $ Just "Browser")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  lift $ element nav # set UI.class_ "col-xs-11"
+  layout <- lift $ checkedWidget (pure False)
+  body <- lift$  UI.div
+  el <- mapUIFinalizerT body (\l -> mapM (\(nav,((table,desc),sub))-> do
+    header <- lift $ UI.h3
         # set UI.class_ "header"
         # set text desc
-      let layFacts i =  if i then ("col-xs-" <> (show $  (12`div`length l))) else "row"
-          layFacts2 i =  if i then ("col-xs-" <> (show $  6)) else "row"
-      body <- case nav of
+    let layFacts i =  if i then ("col-xs-" <> (show $  (12`div`length l))) else "row"
+        layFacts2 i =  if i then ("col-xs-" <> (show $  6)) else "row"
+
+    body <- lift $ case nav of
         "Browser" -> do
             let selTable = flip M.lookup (pkMap inf)
             if L.length sub == 1
@@ -425,11 +431,10 @@ chooserTable inf bset cliTid cli = do
                   UI.div # set children [l,b]
                   ) sub
               UI.div # set children els
-      UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFacts <$> triding layout)# set UI.style [("border","2px dotted gray")]
+    lift $ UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFacts <$> triding layout)# set UI.style [("border","2px dotted gray")]
         ) l) $ liftA2 (\i j -> (i,) <$> j)  (triding nav) (M.toList <$> bBset)
-  element body # sink0 UI.children (facts el) # set UI.class_ "col-xs-12"
-  element layout  # set UI.class_ "col-xs-1"
-
+  lift $ element body # sink0 UI.children (facts el) # set UI.class_ "col-xs-12"
+  lift $ element layout  # set UI.class_ "col-xs-1"
   return [getElement layout ,getElement nav ,body]
 
 viewerKey

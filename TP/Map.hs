@@ -55,7 +55,8 @@ calendarCreate el Nothing evs= runFunction $ ffi "createMap (%1,null,null,null,%
 calendarCreate el (Just (p,ne,sw)) evs= runFunction $ ffi "createMap (%1,%2,%3,%4,%5)" el (show p) (show ne) (show sw) evs
 
 
-mapWidget body calendarT positionT sel inf = do
+mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
+    let calendarT = (\(a,b) c -> (a,b,c)) <$> ((,)<$> facts agendaT <*> facts incrementT )<#> resolutionT
     (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] (LegacyPredicate [("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
     (evdb,(_,evMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "geo" Nothing Nothing [] (LegacyPredicate [("=",liftField (meta inf) "geo" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
     (_,(_,eventMap )) <- liftIO$ transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
@@ -90,31 +91,22 @@ mapWidget body calendarT positionT sel inf = do
 
 
 
-    cpos <-lift$ UI.div
-    bcpos <-lift$ UI.button # set text "Localização Atual"
     calendar <-lift$ UI.div # set UI.class_ "col-xs-10"
-    sidebar <-lift$ UI.div # set children [bcpos,cpos]#  set UI.class_ "col-xs-2"
-    lift$ element body # set children [sidebar,calendar]
-    (e,h) <- liftIO$ newEvent
-    positionB <- lift $ stepper Nothing (Just <$>e)
-    lift$ onEvent (UI.click bcpos) (\_ -> runFunction $ ffi "fireCurrentPosition(%1)" bcpos)
-    liftIO $ onEventIO (currentPosition bcpos ) (liftIO. h )
-    lift $ element cpos # sink text (show <$> positionB)
+    lift$ element body # set children [calendar]
+
     let
-      positionT = tidings positionB (Just <$> e)
       calFun selected = do
         innerCalendar <-lift $ UI.div # set UI.id_ "map"
-        finpos <- lift $ onEvent (currentPosition bcpos) (\(c,sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3,%4)" innerCalendar c sw ne)
-        tell [finpos]
-        pb <- lift $ currentValue positionB
+        onEventFT (cposE) (\(c,sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3,%4)" innerCalendar c sw ne)
+        pb <- lift $ currentValue (facts positionT)
         lift $ element calendar # set children [innerCalendar]
         lift $ calendarCreate  innerCalendar pb ("[]"::String)
-        fin <- lift$ onEvent (moveend innerCalendar) (liftIO . h )
-        tell [fin]
+        onEventFT (moveend innerCalendar) (liftIO . h )
         let
         fin <- mapM (\((_,(_,tname,fields,efields,proj))) -> do
           let filterInp =  liftA2 (,) positionT  calendarT
           mapUIFinalizerT innerCalendar (\(positionB,calT)-> do
+            liftIO $ print (positionB,calT)
             let pred = predicate (fmap (\(TB1 (SText v))->  lookKey inf tname v) <$>efields )(Just $  fields ) (positionB,Just calT)
             (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA tname Nothing Nothing [] pred
             mapUIFinalizerT innerCalendar (\i -> lift $ createLayers innerCalendar tname positionB (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) (collectionTid v)
@@ -126,6 +118,16 @@ mapWidget body calendarT positionT sel inf = do
     _ <- mapUIFinalizerT calendar calFun calInp
     return (legendStyle,dashes)
 
+positionSel = do
+    cpos <-lift$ UI.div
+    bcpos <-lift$ UI.button # set text "Localização Atual"
+    sidebar <-lift$ UI.div # set children [bcpos,cpos]#  set UI.class_ "col-xs-2"
+    (e,h) <- liftIO$ newEvent
+    positionB <- lift $ stepper Nothing (Just <$>e)
+    onEventFT (UI.click bcpos) (\_ -> runFunction $ ffi "fireCurrentPosition(%1)" bcpos)
+    onEventFT (currentPosition bcpos ) (liftIO. h )
+    lift $ element cpos # sink text (show <$> positionB)
+    return (sidebar,currentPosition bcpos, h,tidings positionB (Just <$> e))
 
 
 

@@ -597,6 +597,14 @@ testWidget e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "
 
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 
+onEventFT
+  :: MonadWriter [IO ()] (WriterT [IO c] UI) =>
+    Event a ->  (a -> UI b) -> WriterT [(IO c)] UI  ()
+onEventFT e h = do
+  fin <- lift $ onEvent e h
+  tell [fin]
+  return ()
+
 mapUIFinalizerT
   :: MonadWriter [IO ()] (WriterT [IO a] UI) =>
      Element
