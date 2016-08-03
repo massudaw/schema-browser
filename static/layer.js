@@ -69,10 +69,10 @@ function createLayer(ref,tname,posj,nej,swj,features){
    layer.addLayer(L.circle(latlonA[1],p.size,{color:p.color}));
   }
   else{
-   feature = L.circle(p.position,p.size,{color:p.color}).bindPopup(popup); 
-   var popup = L.popup()
+  var popup = L.popup()
         .setLatLng(p.position)
             .setContent(p.title + '\n' + p.position.toString());
+  feature = L.circle(p.position,p.size,{color:p.color}).bindPopup(popup); 
   layer.addLayer(feature);
   }
   })

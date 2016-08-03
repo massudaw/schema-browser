@@ -7,7 +7,11 @@
 module TP.View where
 
 import qualified Data.Aeson as A
+import Safe
 import Debug.Trace
+import Data.Maybe
+import qualified Graphics.UI.Threepenny as UI
+import Graphics.UI.Threepenny.Core hiding (get,delete,apply)
 import Data.Semigroup
 import Control.Arrow (first)
 import Control.Applicative
@@ -59,8 +63,13 @@ timePred evfields (_,incrementT,resolution) = time
   where
     time = OrColl $ timeField <$> F.toList evfields
     timeField f =
-        PrimColl . (, "<@", (IntervalTB1 $ fmap (ref (keyType f)) i)) $
+      PrimColl . (, op (keyType f), (IntervalTB1 $ fmap (ref (keyType f)) i)) $
         indexer (keyValue f)
+    op f = case f of
+             KInterval i -> "&&"
+             KOptional i -> op i
+             KSerial i -> op i
+             Primitive i -> "<@"
     ref f =
         case f of
             Primitive (AtomicPrim PDate) ->
@@ -69,7 +78,8 @@ timePred evfields (_,incrementT,resolution) = time
                 (TB1 . STimestamp . utcToLocalTime utc)
             KOptional i -> ref i
             KSerial i -> ref i
-            i -> errorWithStackTrace (show i)
+            KInterval i -> ref i
+            v -> errorWithStackTrace (show v)
     i =
         (\r d ->
               Interval.interval
@@ -163,3 +173,12 @@ makePatch zone ((t,pk,k),a) =
     cast (AtomicPrim (PTimestamp l)) =
         STimestamp .
         utcToLocalTime utc . localTimeToUTC zone . utcToLocalTime utc
+
+readPosition:: EventData -> Maybe ([Double],[Double],[Double])
+readPosition (v) = (,,) <$> readP i a z <*> readP ni na nz <*>readP si sa sz
+  where
+     [i,a,z,ni,na,nz,si,sa,sz] = unsafeFromJSON v
+     readP i a z = (\i j z-> [i,j, z]) <$> readMay i<*> readMay a <*> readMay z
+
+currentPosition :: Element -> Event ([Double],[Double],[Double])
+currentPosition el = filterJust $ readPosition<$>  domEvent "currentPosition" el

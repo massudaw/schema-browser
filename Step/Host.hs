@@ -64,6 +64,8 @@ indexPred (a@(IProd _ _),eq,v) r =
         "is not null" -> isJust $ unSOptional' rv
         "is null" -> isNothing $ unSOptional' rv
         "=" -> rv == v
+        "&&" -> case v of
+                  IntervalTB1 l ->  maybe False (not. I.null . flip I.intersection l. (\(IntervalTB1 i) -> i)) (unSOptional' rv)
         "<@" -> case v of
                   IntervalTB1 l ->  maybe False (flip I.member  l) (unSOptional' rv)
 

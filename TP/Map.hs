@@ -118,30 +118,10 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
     _ <- mapUIFinalizerT calendar calFun calInp
     return (legendStyle,dashes)
 
-positionSel = do
-    cpos <-lift$ UI.div
-    bcpos <-lift$ UI.button # set text "Localização Atual"
-    sidebar <-lift$ UI.div # set children [bcpos,cpos]#  set UI.class_ "col-xs-2"
-    (e,h) <- liftIO$ newEvent
-    positionB <- lift $ stepper Nothing (Just <$>e)
-    onEventFT (UI.click bcpos) (\_ -> runFunction $ ffi "fireCurrentPosition(%1)" bcpos)
-    onEventFT (currentPosition bcpos ) (liftIO. h )
-    lift $ element cpos # sink text (show <$> positionB)
-    return (sidebar,currentPosition bcpos, h,tidings positionB (Just <$> e))
-
 
 
 txt = TB1. SText
 
-readPosition:: EventData -> Maybe ([Double],[Double],[Double])
-readPosition (v) = (,,) <$> readP i a z <*> readP ni na nz <*>readP si sa sz
-  where
-     [i,a,z,ni,na,nz,si,sa,sz] = unsafeFromJSON v
-
-readP i a z = (\i j z-> [i,j, z]) <$> readMay i<*> readMay a <*> readMay z
-
-currentPosition :: Element -> Event ([Double],[Double],[Double])
-currentPosition el = filterJust $ readPosition<$>  domEvent "currentPosition" el
 
 moveend :: Element -> Event ([Double],[Double],[Double])
 moveend el = filterJust $ readPosition <$>  domEvent "moveend" el

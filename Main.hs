@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts,OverloadedStrings #-}
 module Main where
-import TP.Browser
+import TP.Main
 import System.Process (rawSystem)
 import Poller
 import Plugins

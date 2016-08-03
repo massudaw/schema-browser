@@ -26,7 +26,7 @@ import qualified Data.Text.Encoding as TE
 import Control.Concurrent.Async
 import Safe
 import Query
-import Data.Time
+import Data.Time hiding(readTime)
 import qualified Data.Aeson as A
 import Text
 import qualified Types.Index as G
@@ -162,7 +162,7 @@ txt = TB1. SText
 type DateChange = (String, Either (Interval UTCTime) UTCTime)
 
 -- readPosition:: EventData -> Maybe DateChange
-readPosition v =
+readTime v =
     (let [i,a,e] = unsafeFromJSON v
      in (,) <$> Just i <*>
         ((\i j ->
@@ -176,10 +176,10 @@ readPosition v =
      in (,) <$> Just i <*> (Right <$> parseISO8601 a))
 
 eventDrop :: Element -> Event DateChange
-eventDrop el = filterJust $ readPosition <$> domEvent "eventDrop" el
+eventDrop el = filterJust $ readTime <$> domEvent "eventDrop" el
 
 eventDragDrop :: Element -> Event DateChange
-eventDragDrop el = filterJust $ readPosition <$> domEvent "externalDrop" el
+eventDragDrop el = filterJust $ readTime <$> domEvent "externalDrop" el
 
 eventResize :: Element -> Event DateChange
-eventResize el = filterJust $ readPosition <$> domEvent "eventResize" el
+eventResize el = filterJust $ readTime <$> domEvent "eventResize" el

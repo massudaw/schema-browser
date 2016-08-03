@@ -114,8 +114,8 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
               mapUIFinalizerT innerCalendar
                 (lift . (\i -> do
                   let caption =  UI.caption # set text cap
-                      header = UI.tr # set items [UI.th # set text "Date" , UI.th # set text "Title" ,UI.th # set text "Commodity"]
-                      row i = UI.tr # set items [UI.td # set text (maybe "" renderShowable $ M.lookup "start" i), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)]
+                      header = UI.tr # set items [UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>  fields) , UI.th # set text "Title" ,UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>efields) ]
+                      row i = UI.tr # set items [UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)]
                       body = fmap row dat
                       dat =  concat .fmap (lefts . snd .proj)  $ G.toList i
                   element (fromJust $ M.lookup t innerCalendarSet) # set items (caption:header:body))

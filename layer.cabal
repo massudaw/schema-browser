@@ -107,7 +107,9 @@ executable threepenny-layer
     Step.Client
     Step.Common
     Step.Host
+    TP.Main
     TP.Browser
+    TP.Selector
     TP.QueryWidgets
     TP.Widgets
     TP.Agenda

@@ -483,4 +483,19 @@ readTable inf r s t  = do
     else
       return (M.empty ,G.empty)
 
+selectFromTable :: Text
+									 -> Maybe Int
+									 -> Maybe Int
+									 -> [(Key, Order)]
+									 -> [(Text, Column Text Showable)]
+									 -> ReaderT
+												InformationSchema
+												(WriterT
+													 [TableModification (TBIdx Key Showable)] IO)
+												(DBVar, Collection Key Showable)
+
+selectFromTable t a b c p = do
+  inf  <- ask
+  selectFrom  t a b c (LegacyPredicate $ fmap (liftField (meta inf) t) <$>p)
+
 
