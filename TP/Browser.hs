@@ -5,7 +5,6 @@
 
 module TP.Browser where
 
-import TP.View
 import Control.Monad.Writer (runWriterT)
 import Control.Lens (_1,_2,(^.),over)
 import Safe

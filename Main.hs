@@ -17,7 +17,6 @@ import Graphics.UI.Threepenny.Core hiding (get,delete,apply)
 import Data.Monoid hiding (Product(..))
 
 import qualified Data.Text as T
-import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Internal
 import qualified Data.Map as M
 import qualified Data.ByteString as BS

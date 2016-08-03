@@ -17,18 +17,14 @@ import Safe
 import qualified NonEmpty as Non
 import Data.Char
 import Step.Common
-import Query
 import Data.Time
-import Text
 import qualified Types.Index as G
-import Data.Bifunctor (first)
 import Debug.Trace
 import Types
 import SchemaQuery
 import Plugins
 import TP.Widgets
 import Postgresql.Backend (postgresOps)
-import SortList
 import Prelude hiding (head)
 import TP.QueryWidgets
 import Control.Monad.Reader
