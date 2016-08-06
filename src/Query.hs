@@ -51,6 +51,8 @@ module Query
   )
   where
 
+import Data.Tuple(swap)
+import Control.Arrow (first)
 import qualified Control.Lens as Le
 import NonEmpty (NonEmpty(..))
 import qualified NonEmpty as Non
@@ -540,18 +542,25 @@ backFKRef relTable ifk = fmap (uncurry Attr). reorderPK .  concat . fmap aattr .
         lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (keyType ko ) (keyType kn) v)) <$> knm
           where knm =  M.lookup ko relTable
 
-lookGist un pk  = safeHead . G.search (tbpred un pk)
 
 tbpred un  = tbjust  . Tra.traverse (Tra.traverse unSOptional') .getUn un
   where
     tbjust = G.Idex . M.fromList .  justError "cant be empty"
 
-
+searchGist ::
+  (Functor t,  Ord k,  Show k,
+   Foldable t, G.Predicates (G.TBIndex k a1)) =>
+  M.Map k k
+  -> KVMetadata k
+  -> G.GiST (G.TBIndex k a1) a
+  -> Maybe (t (TB Data.Functor.Identity.Identity k a1))
+  -> Maybe a
 searchGist relTable m gist =  join . fmap (\k -> lookGist (S.fromList $fmap (\k-> justError (" no pk " <> show (k,relTable)) $ M.lookup k relTable) (_kvpk m) ) k  gist)
   where
      lookGist un pk  = safeHead . G.search (tbpred un pk)
-     tbpred un  = tbjust  . Tra.traverse (Tra.traverse unSOptional') .filter ((`S.member` un). fst ) . concat .fmap aattri
+     tbpred un  = tbjust  . Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  relTable ))).  filter ((`S.member` un). fst ) . concat .fmap aattri
         where
+          flipTable = M.fromList . fmap swap .M.toList
           tbjust = G.Idex . M.fromList . justError "cant be empty"
 
 joinRel :: (Ord a ,Show a,G.Predicates (G.TBIndex Key a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex Key a) (TBData Key a) -> FTB (TBData Key a)

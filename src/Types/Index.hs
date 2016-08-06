@@ -7,7 +7,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Types.Index
-  (TBIndex(..) , toList ,lookup ,fromList ,filter ,mapKeys ,getIndex ,module G ) where
+  (DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,mapKeys ,getIndex ,module G ) where
 
 import Data.GiST.RTree (pickSplitG)
 import Data.Binary
@@ -123,10 +123,12 @@ instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
 
 -- Attr List Predicate
 instance  Predicates (Map Key (FTB Showable)) where
-  type Penalty (Map Key (FTB Showable )) = [DiffShowable]
-  consistent (l ) (i) =  all id $ zipWith consistent (F.toList l) (F.toList i)
+  type Penalty (Map Key (FTB Showable )) = (Map Key DiffShowable)
+  consistent l i =  if F.null (if a == F.toList b then  b else traceShow (a,l,b,i) b) then False else F.all id b
+    where a =  zipWith consistent (F.toList l) (F.toList i)
+          b =  M.intersectionWith consistent (M.mapKeys keyValue l) (M.mapKeys keyValue i)
   union l = foldl1 (M.intersectionWith (\i j -> union [i,j]) ) l
-  penalty p1 p2 = zipWith penalty (F.toList p1 ) (F.toList  p2)
+  penalty p1 p2 = M.intersectionWith penalty p1 p2
   pickSplit = pickSplitG
 
 

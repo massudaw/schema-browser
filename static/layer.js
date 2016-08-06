@@ -64,9 +64,15 @@ function createLayer(ref,tname,posj,nej,swj,features){
    latlonA = p.position.map(function(l){
      return L.latLng(l[0],l[1]);
    })
+   var popup0 = L.popup()
+        .setLatLng(latlonA[0])
+            .setContent(p.title + '\n' + p.position[0]);
+   var popup1 = L.popup()
+        .setLatLng(latlonA[1])
+            .setContent(p.title + '\n' + p.position[1]);
    layer.addLayer(L.polyline(latlonA,{color:p.color}));
-   layer.addLayer(L.circle(latlonA[0],p.size/3,{color:p.color}));
-   layer.addLayer(L.circle(latlonA[1],p.size,{color:p.color}));
+   layer.addLayer(L.circle(latlonA[0],p.size/3,{color:p.color}).bindPopup(popup0));
+   layer.addLayer(L.circle(latlonA[1],p.size,{color:p.color}).bindPopup(popup1));
   }
   else{
   var popup = L.popup()

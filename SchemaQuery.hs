@@ -248,8 +248,13 @@ filterfixed fixed
               then id
               else
                 case fixed of
-                  WherePredicate pred -> G.filter (\tb ->F.all  (\(a,e,v) ->  indexPred  (a,T.unpack e ,v) tb) pred )
+                  WherePredicate pred -> G.filter (\tb ->allPred  (\(a,e,v) ->  indexPred  (a,T.unpack e ,v) tb) pred )
                   LegacyPredicate pred -> G.filter (\tb ->F.all id $ M.intersectionWith (\i j -> fromMaybe False $ liftA2 G.consistent (traverse unSOptional  $ M.fromList $ ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB i))) (traverse unSOptional  $M.fromList ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB j))) ) (mapFromTBList (fmap (_tb .snd) pred )) $ unKV (snd (tb)))
+  where
+    allPred pred (AndColl i ) =F.all (allPred  pred) i
+    allPred pred (OrColl i ) =F.any (allPred  pred) i
+    allPred pred i = F.all pred i
+
 
 pageTable flag method table page size presort fixed = do
     inf <- ask
@@ -258,13 +263,7 @@ pageTable flag method table page size presort fixed = do
         sortList  = if L.null presort then defSort else presort
         fixidx = fixed
         pagesize = maybe defsize id size
-        filterfixed
-            = if predNull fixed
-              then id
-              else
-                case fixed of
-                  WherePredicate pred -> G.filter (\tb ->F.all  (\(a,e,v) -> indexPred  (a,T.unpack e ,v) tb) pred )
-                  LegacyPredicate pred -> G.filter (\tb ->F.all id $ M.intersectionWith (\i j -> fromMaybe False $ liftA2 G.consistent (traverse unSOptional  $ M.fromList $ ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB i))) (traverse unSOptional  $M.fromList ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB j))) ) (mapFromTBList (fmap (_tb .snd) pred )) $ unKV (snd (tb)))
+        ffixed = filterfixed fixed
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
     iniT <- do
@@ -272,9 +271,9 @@ pageTable flag method table page size presort fixed = do
        let pageidx = (fromMaybe 0 page +1) * pagesize
        i <- case  fromMaybe (10000000,M.empty ) $  M.lookup fixidx fixedmap of
           (sq,mp) -> do
-             if flag || ( sq > G.size (filterfixed reso) -- Tabela é maior que a tabela carregada
+             if flag || ( sq > G.size (ffixed reso) -- Tabela é maior que a tabela carregada
                 && sq > pagesize * (fromMaybe 0 page + 1) -- Tabela é maior que a página
-                && pagesize * (fromMaybe 0 page +1) > G.size (filterfixed reso)  ) -- O carregado é menor que a página
+                && pagesize * (fromMaybe 0 page +1) > G.size (ffixed reso)  ) -- O carregado é menor que a página
              then do
                liftIO$ putStrLn $ "new page " <> show (tableName table)
                let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
@@ -291,8 +290,8 @@ pageTable flag method table page size presort fixed = do
          writeTQueue (patchVar dbvar) (F.toList $ patch  <$> ndata )
          putTMVar (idxVar dbvar ) nidx
        return (nidx, createUn (S.fromList $ rawPK table) ndata <> reso)
-    let tde = fmap filterfixed <$> rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
-    let iniFil = fmap filterfixed iniT
+    let tde = fmap ffixed <$> rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
+    let iniFil = fmap ffixed iniT
     tdb  <- stepper iniFil tde
     return (dbvar {collectionTid  = fmap snd $ tidings tdb tde},iniFil)
 

@@ -296,7 +296,7 @@ parseAttr (Attr i _ ) = do
 
 
 parseAttr (IT na j) = do
-  mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j -- <|>  return ((,SOptional Nothing) <$> j)
+  mj <- tryquoted (parseLabeledTable j) -- <|>  return ((,SOptional Nothing) <$> j)
   return $ IT  na mj
 
 parseAttr (FKT l rel j ) = do
@@ -306,12 +306,14 @@ parseAttr (FKT l rel j ) = do
        ml <- unIntercalateAtto (traComp parseAttr <$> unkvlist l) (char ',')
        char ','
        return ml
-  mj <- doublequoted (parseLabeledTable j) <|> parseLabeledTable j
+  mj <- tryquoted (parseLabeledTable j)
   return $  FKT (kvlist ml )rel  mj
 
 parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
 
+tryquoted :: Parser b -> Parser b
 tryquoted i = doublequoted i <|> i
+
 -- Note Because the list has a mempty operation when parsing
 -- we have overlap between maybe and list so we allow only nonempty lists
 parseLabeledTable :: TB2 Key () -> Parser (TB2 Key Showable)
@@ -374,7 +376,7 @@ backquote = string "\\\\" <|> string "\""  <|> string "\\"
 
 doublequoted :: Parser a -> Parser a
 doublequoted  p =   (takeWhile (== '\\') >>  char '\"') *>  inner <* ( takeWhile (=='\\') >> char '\"')
-  where inner = doublequoted p <|> p
+  where inner = tryquoted p
 
 
 parsePrim
@@ -385,14 +387,14 @@ parsePrim i =  do
    case i of
         PDynamic ->  let
               pr = SDynamic . B.decode . BSL.fromStrict . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}")
-                in doublequoted pr <|> pr
+           in tryquoted pr
         PAddress ->  parsePrim PText
         PBinary ->  let
               pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}")
-                in doublequoted pr <|> pr
+           in tryquoted pr
         PMime  _ -> let
               pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}" <* takeWhile (=='\\'))
-                in doublequoted  pr <|> pr
+           in tryquoted pr
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
@@ -403,23 +405,23 @@ parsePrim i =  do
         PCpf -> parsePrim PText
         PInterval ->
           let i = SPInterval <$> diffInterval
-           in doublequoted i <|> i
+           in tryquoted i
 
         PTimestamp zone ->
              let p =  do
                     i <- fmap (STimestamp  . fst) . strptime "%Y-%m-%d %H:%M:%OS"<$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i
-                 in p <|> doublequoted p
+                 in tryquoted p
         PDayTime ->
              let p =  do
                     i <- fmap (SDayTime . localTimeOfDay .  fst) . strptime "%H:%M:%OS"<$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i
-                 in p <|> doublequoted p
+                 in tryquoted p
         PDate ->
              let p = do
                     i <- fmap (SDate . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i
-                 in p <|> doublequoted p
+                 in tryquoted p
         PPosition -> do
           s <- plain' "\",)}"
           case  Sel.runGet getPosition (fst $ B16.decode s)of
@@ -432,14 +434,14 @@ parsePrim i =  do
               i -> case i of
                 Right i -> pure $ SLineString i
                 Left e -> fail e
-        PBounding -> SBounding <$> ((doublequoted box3dParser ) <|> box3dParser)
+        PBounding -> SBounding <$> tryquoted box3dParser
 
 
 -- parseShowable (KArray (KDelayed i))
     -- = (string "t" >> return (ArrayTB1 $ [ SDelayed Nothing]))
 parseShowable :: KType (Prim KPrim (Text,Text)) -> Parser (FTB Showable)
 parseShowable (KArray i)
-    =  join $ fromMaybe (fail "empty list") .  fmap ( return .ArrayTB1  . Non.fromList) . nonEmpty <$> (par <|> doublequoted par)
+  =  join $ fromMaybe (fail "empty list") .  fmap ( return .ArrayTB1  . Non.fromList) . nonEmpty <$> tryquoted par
       where par = char '{'  *>  sepBy (parseShowable i) (char ',') <* char '}'
 parseShowable (KOptional i)
     = LeftTB1 <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
@@ -457,7 +459,7 @@ parseShowable (KInterval k)=
         j <- parseShowable k
         rb <- (char ']' >> return True) <|> (char ')' >> return False )
         return $ IntervalTB1 $ Interval.interval (ER.Finite i,lb) (ER.Finite j,rb)
-    in doublequoted inter <|> inter <|> emptyInter
+     in tryquoted  inter <|> emptyInter
 
 parseShowable p@(Primitive (AtomicPrim i)) = forw  . TB1 <$> parsePrim i
   where (forw,_) = conversion p
@@ -580,7 +582,7 @@ diffInterval = (do
   res  <- diffIntervalLayout
   return $ case res  of
     [s] ->  secondsToDiffTime (round s)
-    [m,s] ->  secondsToDiffTime (round $  (60 ) * m + s)
+    [m,s] ->  secondsToDiffTime (round $  60 * m + s)
     [h,m,s] ->  secondsToDiffTime (round $ h * 3600 + (60 ) * m + s)
     [d,h,m,s] -> secondsToDiffTime (round $ d *3600*24 + h * 3600 + (60  ) * m + s)
     v -> errorWithStackTrace $ show v)

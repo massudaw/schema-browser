@@ -2,13 +2,17 @@
 module Step.Common (PluginTable,Parser(..),Access(..),ArrowReaderM,ArrowReader,KeyString(..),BoolCollection(..),WherePredicate(..)) where
 
 import Types
+import Types.Index
 import Control.Monad.Reader
 import Control.Applicative
 import Data.Text (Text)
 import Data.String
 import Data.Functor.Identity
 import qualified Data.Text as T
+import qualified Data.Map as M
 
+import Data.GiST.GiST as G
+import qualified Data.Foldable as F
 
 import Control.Arrow
 import Control.Category (Category(..),id)
@@ -38,6 +42,19 @@ data BoolCollection a
  | OrColl [BoolCollection a]
  | PrimColl a
  deriving(Show,Eq,Ord,Functor,Foldable)
+
+instance Predicates (Text,FTB Showable) where
+  type Penalty (Text,FTB Showable) = DiffShowable
+  consistent (i,a) (j,b)
+    | i == j = consistent a b
+    | otherwise = False
+
+instance Predicates WherePredicate where
+  type Penalty WherePredicate = [DiffShowable]
+  consistent (WherePredicate c1) (WherePredicate (c2 ))  = F.all id $ M.intersectionWith consistent (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
+    where projKey (a,b,c) =  (a,(b,c))
+  consistent (WherePredicate c1) (WherePredicate (c2 ))  = F.all id $ M.intersectionWith consistent (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
+    where projKey (a,b,c) =  (a,(b,c))
 
 data WherePredicate
   = LegacyPredicate [(T.Text,Column Key Showable)]

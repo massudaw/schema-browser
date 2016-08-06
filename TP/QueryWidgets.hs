@@ -952,7 +952,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
           lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
             where (s,_) = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup (LegacyPredicate []) fixmap
           cv = searchGist relTable m iniGist cvres
-          tdi = (searchGist relTable m <$> gist <*> vv)
+          tdi = searchGist relTable m <$> gist <*> vv
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList . snd
       presort <-mapTEvent return (fmap  <$> sortList <*> fmap (fmap G.toList ) vpt)

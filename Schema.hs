@@ -137,7 +137,7 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
           readTT "VIEW" = ReadOnly
           readTT i =  errorWithStackTrace  $ T.unpack i
        authorization <- queryAuthorization conn schema user
-       descMap <- M.fromList . fmap  (\(t,cs)-> (t,fmap (\c -> (\(Just i) -> i) $ M.lookup (t,c) keyMap) (V.toList cs)) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
+       descMap <- M.fromList . fmap  (\(t,cs)-> (t,fmap (\c -> justError (show (t,c)) $ M.lookup (t,c) keyMap) (V.toList cs)) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
        transMap <- M.fromList   <$> query conn "SELECT table_name,translation FROM metadata.table_name_translation WHERE schema_name = ? " (Only schema)
        uniqueConstrMap <- M.fromListWith (++) . fmap (fmap pure)   <$> query conn "SELECT table_name,pks FROM metadata.unique_sets WHERE schema_name = ? " (Only schema)
 

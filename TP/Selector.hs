@@ -73,7 +73,8 @@ calendarSelector = do
                                        ,resRange True   <$> facts (triding resolution) <@ UI.click prev , const (const iday) <$> UI.click today ]
     increment <- accumB iday  currentE
     let incrementT =  tidings increment (flip ($) <$> increment <@> currentE)
-    currentOutput <- UI.div # sink text (show <$> facts incrementT )
+
+    currentOutput <- UI.div # sink text (fmap show $ (\i j -> (resRange False i j ,resRange True i j))<$>  facts (triding resolution) <*> facts incrementT )
     sidebar <- UI.div # set children [getElement agenda,current,getElement resolution,currentOutput ]
     return (sidebar,(triding agenda ,incrementT,triding resolution))
 
