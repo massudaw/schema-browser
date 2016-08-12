@@ -249,7 +249,7 @@ filterfixed fixed
               else
                 case fixed of
                   WherePredicate pred -> G.filter (\tb ->allPred  (\(a,e,v) ->  indexPred  (a,T.unpack e ,v) tb) pred )
-                  LegacyPredicate pred -> G.filter (\tb ->F.all id $ M.intersectionWith (\i j -> fromMaybe False $ liftA2 G.consistent (traverse unSOptional  $ M.fromList $ ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB i))) (traverse unSOptional  $M.fromList ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB j))) ) (mapFromTBList (fmap (_tb .snd) pred )) $ unKV (snd (tb)))
+                  LegacyPredicate pred -> G.filter (\tb ->(\i -> if F.null i then False else F.all id i )$ M.intersectionWith (\i j -> fromMaybe False $ liftA2 G.consistent (traverse unSOptional  $ M.fromList $ ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB i))) (traverse unSOptional  $M.fromList ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB j))) ) (mapFromTBList (fmap (_tb .snd) pred )) (unKV (snd tb)))
   where
     allPred pred (AndColl i ) =F.all (allPred  pred) i
     allPred pred (OrColl i ) =F.any (allPred  pred) i
@@ -304,15 +304,16 @@ fullInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
 fullInsert' ((k1,v1) )  = do
    inf <- ask
    let proj = _kvvalues . unTB
+       tb  = (lookTable inf (_kvname k1))
    ret <-  (k1,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
-   (_,(_,l)) <- tableLoader (lookTable inf (_kvname k1)) Nothing Nothing [] (LegacyPredicate [])
-   if  isJust $ join $ flip G.lookup l <$> tbpredM (S.fromList $ _kvpk k1)  ret
+   (_,(_,l)) <- tableLoader  tb Nothing Nothing [] (LegacyPredicate [])
+   if  (isNothing $ join $ flip G.lookup l <$> tbpredM (S.fromList $ _kvpk k1)  ret ) && rawTableType tb == ReadWrite
       then do
-        return ret
-      else do
         i@(Just (TableModification _ _ tb))  <- insertFrom  ret
         tell (maybeToList i)
         return $ create tb
+      else do
+        return ret
 
 
 noInsert = Tra.traverse (noInsert' )

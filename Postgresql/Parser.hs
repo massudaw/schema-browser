@@ -110,6 +110,7 @@ postgresPrim =
   ,("pdf",PMime "application/pdf")
   ,("ofx",PMime "application/x-ofx")
   ,("jpg",PMime "image/jpg")
+  ,("png",PMime "image/png")
   ,("email",PMime "text/plain")
   ,("html",PMime "text/html")
   ,("dynamic",PDynamic)

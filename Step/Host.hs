@@ -82,10 +82,11 @@ indexPred (a@(IProd _ _),eq,v) r =
 
 indexField :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
 indexField p@(IProd b l) v = case unTB <$> findAttr  l  (snd v) of
-                               Nothing -> case unTB <$>  findFK l (snd v) of
-                                  Just (FKT ref _ _) ->  unTB <$> ((\l ->  L.find ((==[l]).  fmap (keyValue . _relOrigin). keyattr ) $ unkvlist ref ) $ head l)
+                               Nothing -> case unTB <$>  findFK l (snd $ v) of
+                                  Just (FKT ref _ _) ->  unTB <$> ((\l ->  L.find ((==[l]). fmap (keyValue . _relOrigin). keyattr ) $ unkvlist ref ) $head l)
                                   Nothing -> Nothing
                                i -> i
+
 indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findFK l (snd v)
 
 joinFTB (LeftTB1 i) =  LeftTB1 $ fmap joinFTB i

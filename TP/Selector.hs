@@ -110,7 +110,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
       -- Text Filter
       filterLabel = (\j d -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> d (Just i))))<$> filterInpT <*> lookDesc
       -- Usage Count
-      tableUsage orderMap table = maybe (Right 0) (Left ) . fmap (lookAttr' (meta inf)  "usage" ) $  G.lookup  (G.Idex ( M.fromList pk )) orderMap
+      tableUsage orderMap table selection = maybe (Right 0) (Left .(L.elem table (lookPK inf <$> M.keys selection),)) . fmap (lookAttr' (meta inf)  "usage" ) $  G.lookup  (G.Idex ( M.fromList pk )) orderMap
           where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$> [("table_name",TB1 . SText . rawName $ table ), ("schema_name",TB1 $ SText (schemaName inf))]
   bset <- mdo
     let
@@ -128,7 +128,8 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
       visible  k = (\i j k-> i tb && j tb && k tb ) <$> filterLabel <*> authorize <*> tableFilter
         where
           tb =  justLook   k (pkMap inf)
-    bset <- checkDivSetTGen tables ((\i j -> tableUsage i (justLook j (pkMap inf))) <$> collectionTid orddb) (M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i) . fromJust . selTable $ e ) <$> iniTables) buttonString ((\lg i j -> lg i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle)
+
+    bset <- checkDivSetTGen tables ((\i k j -> tableUsage i (justLook j (pkMap inf)) k ) <$> collectionTid orddb <*> triding bset) (M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i) . fromJust . selTable $ e ) <$> iniTables) buttonString ((\lg i j -> lg i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle)
     return bset
   let
       bBset = M.keys <$> triding bset
@@ -144,9 +145,9 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
       _ <- transactionNoLog (meta inf ) $ patchFrom  p
       putPatch (patchVar orddb) [p] )))-}
 
-
-  tableHeader <- UI.h3 # set text "Table"
-  tbChooserI <- UI.div # set children [tableHeader,filterInp,getElement bset]  # set UI.style [("height","90vh"),("overflow","auto"),("height","99%")]
+  element bset # set UI.style [("overflow","auto"),("height","99%")]
+  tableHeader <- UI.h4 # set text "Table"
+  tbChooserI <- UI.div # set children [tableHeader,filterInp,getElement bset]  # set UI.style [("height","50vh")]
   return $ (lookDesc,TrivialWidget ((\f -> M.mapKeys (fmap (f. selTable) ))<$> facts lookDesc <#> (M.mapKeys (\i-> (i,i))  <$>triding bset)) tbChooserI)
 
 

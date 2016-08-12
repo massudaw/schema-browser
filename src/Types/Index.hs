@@ -124,8 +124,9 @@ instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
 -- Attr List Predicate
 instance  Predicates (Map Key (FTB Showable)) where
   type Penalty (Map Key (FTB Showable )) = (Map Key DiffShowable)
-  consistent l i =  if F.null  b then False else F.all id b
+  consistent l i =  if M.null b then False else (if F.all id a /= F.all id b then traceShow (a,b,l,i) else id ) F.all id b
     where
+          a =  M.intersectionWith consistent l i
           b =  M.intersectionWith consistent (M.mapKeys keyValue l) (M.mapKeys keyValue i)
   union l = foldl1 (M.intersectionWith (\i j -> union [i,j]) ) l
   penalty p1 p2 = M.intersectionWith penalty p1 p2

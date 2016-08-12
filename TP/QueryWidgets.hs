@@ -20,6 +20,7 @@ module TP.QueryWidgets (
     offsetField,
     sorting',
     lookAttr',
+    lookAttrs',
     lookAttrM,
     tableIndexA,
     idex,
@@ -480,12 +481,6 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
               (liftIO . h2)
           addElemFin panelItems fin
           UI.div # set children [listBody,panelItems]
-      fun "Change" = do
-            UI.div # sink0 items (maybe [] (pure . dashBoardAllTableIndex . (inf,table,) . Non.fromList . M.toList . getPKM ) <$> facts preoldItems )
-      fun "Exception" = do
-            UI.div # sink0 items (maybe [] (pure . exceptionAllTableIndex . (inf,table,). Non.fromList . M.toList . getPKM ) <$> facts preoldItems )
-      fun "Raw" = do
-            UI.div # sink0 text (show <$> facts preoldItems)
       fun i = UI.div
   sub <- UI.div # sink items (pure . fun <$> facts (triding nav))
   cv <- currentValue (facts preoldItems)
@@ -718,7 +713,6 @@ buildPrim fm tdi i = case i of
          PBoolean -> do
            res <- checkedWidgetM (fmap (\(SBoolean i) -> i) <$> tdi )
            return (fmap SBoolean <$> res)
-
          PTimestamp dbzone -> do
             cliZone <- jsTimeZone
             itime <- liftIO $  getCurrentTime
@@ -728,7 +722,6 @@ buildPrim fm tdi i = case i of
                  maptime f (STimestamp i) = STimestamp (f i)
                  toLocal = maptime  (utcToLocalTime cliZone . localTimeToUTC utc)
                  fromLocal = maptime (utcToLocalTime utc .localTimeToUTC cliZone)
-
             tdi2 <- addEvent newEv  (fmap toLocal <$> tdi)
             fmap (fmap fromLocal) <$> oneInput tdi2 [timeButton]
          PDate -> do
@@ -778,7 +771,6 @@ buildPrim fm tdi i = case i of
            res <- UI.div # set children [fd,f]
            paintBorder res (facts tdi2) (facts  tdi)
            return (TrivialWidget tdi2 res)
-
          PMime mime -> do
            let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
            clearB <- UI.button # set UI.text "clear"
@@ -1232,9 +1224,15 @@ lookAttrM  inf k (i,m) = unTB <$> M.lookup (S.singleton (Inline (lookKey inf (_k
     where
       err= justError ("no attr " <> show k <> " for table " <> show (_kvname i))
 
-lookAttr' inf k (i,m) = unTB $ err $  M.lookup (S.singleton (Inline (lookKey inf (_kvname i) k))) (unKV m)
+lookAttrs' inf k (i,m) = unTB $ err $  M.lookup ((S.fromList (lookKey inf (_kvname i) <$> k))) ta
     where
-      err= justError ("no attr " <> show k <> " for table " <> show (_kvname i))
+      ta = M.mapKeys (S.map _relOrigin) (unKV m)
+      err= justError ("no attr " <> show k <> " for table " <> show (_kvname i,M.keys ta ))
+
+lookAttr' inf k (i,m) = unTB $ err $  M.lookup (S.singleton ((lookKey inf (_kvname i) k))) ta
+    where
+      ta = M.mapKeys (S.map _relOrigin) (unKV m)
+      err= justError ("no attr " <> show k <> " for table " <> show (_kvname i,M.keys ta))
 
 idex inf t v = G.Idex $ M.fromList  $ first (lookKey inf t  ) <$> v
 

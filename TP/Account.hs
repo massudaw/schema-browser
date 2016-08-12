@@ -55,14 +55,17 @@ import qualified Data.Map as M
 
 
 accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
-    let calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
+    let
+      calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
+      schemaPred = WherePredicate $ AndColl [PrimColl (IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf))]
 
-    (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
-    (_,(_,emap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
-    (_,(_,aMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "accounts" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "accounts" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
+    (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] schemaPred
+    (_,(_,emap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] schemaPred
+    (_,(_,aMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "accounts" Nothing Nothing [] schemaPred
     cliZone <- lift jsTimeZone
     let dashes = fmap (\e ->
-          let Attr _ (TB1 (SText tname)) = lookAttr' (meta inf) "table_name" e
+          let
+              (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema_name","table_name"] e
               lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
               (Attr _ (ArrayTB1 efields )) =lookAttr' (meta inf)  "event" $ fromJust $ G.lookup (idex (meta inf) "event" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )])  emap
               (Attr _ (ArrayTB1 afields ))= lookAttr' (meta inf) "account" e
@@ -116,8 +119,15 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
                   let caption =  UI.caption # set text cap
                       header = UI.tr # set items [UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>  fields) , UI.th # set text "Title" ,UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>efields) ]
                       row i = UI.tr # set items [UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)]
-                      body = fmap row dat
+                      body = (fmap row dat ) <> if L.null dat then [] else [totalrow totalval]
                       dat =  concat .fmap (lefts . snd .proj)  $ G.toList i
+
+                      totalval = M.fromList [("start",mindate),("end",maxdate),("title",TB1 $ SText "Total") ,("commodity", totalcom)]
+                        where
+                          totalcom = traceShowId $ sum $ traceShowId $ justError "no" .M.lookup "commodity" <$> dat
+                          mindate = minimum $ justError "no" . M.lookup "start" <$> dat
+                          maxdate = maximum $ justError "no" . M.lookup "start" <$> dat
+                      totalrow i = UI.tr # set items  (fmap (\i -> i # set UI.style [("border","solid 2px")] )[UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)] ) # set UI.style [("border","solid 2px")]
                   element (fromJust $ M.lookup t innerCalendarSet) # set items (caption:header:body))
                 ) (collectionTid v)
                 )calendarSelT

@@ -56,12 +56,16 @@ calendarCreate m cal def = runFunction $ ffi "createAgenda(%1,%2,%3)" cal def m
 calendarAddSource cal t evs = runFunction $ ffi "addSource(%1,%2,%3)" cal t evs
 
 eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
-    let calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
+    let
+      calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
+      schemaPred = WherePredicate $ AndColl [PrimColl (IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf))]
+
     dashes <- liftIO $ do
-      (_,(_,tmap)) <- transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "table_name_translation" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
-      (evdb,(_,evMap )) <- transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] (LegacyPredicate[("=",liftField (meta inf) "event" $ uncurry Attr $("schema_name",TB1 $ SText (schemaName inf) ))])
+      (_,(_,tmap)) <- transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] schemaPred
+      (evdb,(_,evMap )) <- transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] schemaPred
       return $ fmap (\e ->
-        let (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" e
+        let
+            (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema_name","table_name"] e
             lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
             (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "event" e
             (Attr _ color )= lookAttr' (meta inf) "color" e

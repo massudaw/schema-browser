@@ -409,10 +409,23 @@ data FTB a
 
 instance Applicative FTB where
   pure = TB1
+  TB1 i <*> TB1 j = TB1 $ i  j
+
   LeftTB1 i <*> LeftTB1 j = LeftTB1 $ liftA2 (<*>) i j
+  i <*> LeftTB1 j = LeftTB1 $ fmap (i <*>)  j
+  LeftTB1 i <*> j = LeftTB1 $ fmap (<*>j)  i
+
   DelayedTB1 i <*> DelayedTB1 j = DelayedTB1 $ liftA2 (<*>) i j
+  i <*> DelayedTB1 j = DelayedTB1 $ fmap (i <*>)  j
+  DelayedTB1 i <*> j = DelayedTB1 $ fmap (<*>j)  i
+
   SerialTB1 i <*> SerialTB1 j = SerialTB1 $ liftA2 (<*>) i j
+  i <*> SerialTB1 j = SerialTB1 $ fmap (i <*>)  j
+  SerialTB1 i <*> j = SerialTB1 $ fmap (<*>j)  i
+
   ArrayTB1 i <*> ArrayTB1 j = ArrayTB1 $ liftA2 (<*>) i j
+  i <*> ArrayTB1 j = ArrayTB1 $ fmap (i <*>)  j
+  ArrayTB1  i <*> j = ArrayTB1 $ fmap (<*>j)  i
 
 deriving instance Functor Interval.Interval
 deriving instance Foldable Interval.Interval
@@ -629,6 +642,7 @@ instance Real a => Real (FTB a) where
   toRational (TB1 i )=  toRational i
 
 instance Real Showable where
+  toRational (SNumeric i )=  toRational i
   toRational (SDouble i )=  toRational i
 
 instance RealFrac Showable where
@@ -645,12 +659,12 @@ instance Integral Showable where
 
 
 instance Num a => Num (FTB a) where
-    TB1 i + TB1 j = TB1 (i + j)
-    TB1 i - TB1 j = TB1 (i - j)
-    TB1 i * TB1 j = TB1 (i * j)
-    abs (TB1 i)  = TB1 (abs i )
-    signum (TB1 i)  = TB1 (signum i )
-    fromInteger i  = TB1 (fromInteger i )
+  i + j = liftA2 (+) i  j
+  i - j = liftA2 (-) i j
+  i * j = liftA2 (*) i  j
+  abs i  = fmap abs i
+  signum i  = signum <$> i
+  fromInteger i  = TB1 (fromInteger i )
 
 instance Num Showable where
     SNumeric i +  SNumeric j = SNumeric (i + j)
@@ -671,7 +685,7 @@ instance Num Showable where
 
 instance Fractional a => Fractional (FTB a) where
   fromRational i = TB1 (fromRational i)
-  recip (TB1 i) = TB1 $ recip i
+  recip i = fmap recip i
 
 instance Fractional Showable where
   fromRational i = SDouble (fromRational i)
