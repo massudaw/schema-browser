@@ -276,7 +276,7 @@ pageTable flag method table page size presort fixed = do
           (sq,mp) -> do
              if flag || (sq > G.size freso -- Tabela é maior que a tabela carregada
                 && pageidx  > G.size freso ) -- O carregado é menor que a página
-               && (isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixidx fixedmap)  -- Carregando
+               && (isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixidx fixedmap)  -- Ignora quando página já esta carregando
                    &&  not (S.member (fixidx,pageidx) idxVL))
              then do
                liftIO $ atomically $ do
@@ -296,8 +296,8 @@ pageTable flag method table page size presort fixed = do
        let nidx =  M.insert fixidx (fst i) fixedmap
            ndata = snd i
        liftIO $ atomically $ do
-         writeTQueue (patchVar dbvar) (F.toList $ patch  <$> ndata )
-         putTMVar (idxVar dbvar ) nidx
+         when (L.length ndata > 0) $ writeTQueue (patchVar dbvar) (F.toList $ patch  <$> ndata )
+         when (isNothing ((join $ fmap (M.lookup pageidx . snd) $ M.lookup fixidx fixedmap))) $ putTMVar (idxVar dbvar ) nidx
        return (nidx, if L.length ndata > 0 then createUn (S.fromList $ rawPK table) ndata <> reso else reso)
     let tde = fmap ffixed <$> rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
     let iniFil = fmap ffixed iniT
