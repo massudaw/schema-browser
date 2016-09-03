@@ -38,7 +38,7 @@ main = do
   metas <- keyTables  smvar conn  ("metadata", T.pack $ user db) amap plugList
 
   print "Load Plugins"
-  plugs smvar amap db plugList
+  -- plugs smvar amap db plugList
 
   print "Load Polling Process"
   poller smvar amap db plugList False

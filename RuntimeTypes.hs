@@ -98,6 +98,7 @@ data DBVar2 k v=
   DBVar2
   { patchVar :: TQueue [TBIdx k v]
   , idxVar :: TMVar (Map WherePredicate (Int,Map Int (PageTokenF k v)))
+  , idxVarLoad :: TMVar (S.Set (WherePredicate ,Int))
   , patchTid :: R.Tidings [TBIdx k v]
   , idxTid :: R.Tidings (Map WherePredicate (Int,Map Int (PageTokenF k v)))
   , collectionTid :: R.Tidings (TableIndex k v )

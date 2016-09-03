@@ -219,6 +219,7 @@ createTableRefsUnion inf m i  = do
       patchunion  = liftPatch inf (tableName i ) .firstPatch keyValue
   R.onEventIO patch (hdiff)
   midx <-  atomically$ newTMVar iv
+  midxLoad <-  atomically$ newTMVar S.empty
   bh <- R.accumB v (flip (L.foldl' apply) <$> patch )
   let bh2 = (R.tidings bh (L.foldl' apply  <$> bh R.<@> patch ))
   bhdiff <- R.stepper diffIni patch
@@ -232,7 +233,7 @@ createTableRefsUnion inf m i  = do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
         (void $ hdiff (concat patches))) `catch` (\e -> print ("block data",tableName i ,e :: SomeException))
-  return (tableMeta i,  DBVar2  mdiff midx (R.tidings bhdiff patch) (R.tidings bhidx eidx) bh2 )
+  return (tableMeta i,  DBVar2  mdiff midx midxLoad (R.tidings bhdiff patch) (R.tidings bhidx eidx) bh2 )
 
 
 createTableRefs :: InformationSchema -> Table -> IO (KVMetadata Key,DBVar)
@@ -245,6 +246,7 @@ createTableRefs inf i = do
   (ediff,hdiff) <- R.newEvent
   (iv,v) <- readTable inf "dump" (schemaName inf) (i)
   midx <-  atomically$ newTMVar iv
+  midxLoad <-  atomically $ newTMVar S.empty
   let applyP = (\l v ->  L.foldl' (\j  i -> apply j i  ) v l  )
   bh <- R.accumB v ( (\i v -> applyP i v)<$> ediff )
   let bh2 = (R.tidings bh ( flip applyP  <$> bh R.<@> ediff ))
@@ -258,7 +260,7 @@ createTableRefs inf i = do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
         (void $ hdiff (concat patches))) `catch` (\e -> print ("block data ",tableName i ,e :: SomeException))
-  return (tableMeta i,  DBVar2  mdiff midx (R.tidings bhdiff ediff) (R.tidings bhidx eidx) bh2 )
+  return (tableMeta i,  DBVar2  mdiff midx midxLoad (R.tidings bhdiff ediff) (R.tidings bhidx eidx) bh2 )
 
 
 -- Search for recursive cycles and tag the tables
@@ -399,13 +401,13 @@ type DBM k v = ReaderT (Database k v) IO
 atTableS s  k = do
   i <- ask
   k <- liftIO$ dbTable (mvarMap $ fromMaybe i (M.lookup s (depschema i))) k
-  (\(DBVar2 _ _   _ _ c)-> liftIO $ R.currentValue (R.facts c)) k
+  liftIO $ R.currentValue (R.facts (collectionTid k))
 
 
 atTable k = do
   i <- ask
   k <- liftIO$ dbTable (mvarMap i) k
-  (\(DBVar2 _ _   _ _ c)-> liftIO $ R.currentValue (R.facts c)) k
+  liftIO $ R.currentValue (R.facts (collectionTid k))
 
 joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  G.GiST (G.TBIndex Key Showable) (TBData Key Showable) -> TransactionM ( FTB (TBData Key Showable))
 joinRelT rel ref tb table

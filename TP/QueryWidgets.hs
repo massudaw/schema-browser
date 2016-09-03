@@ -283,7 +283,7 @@ labelCase inf a old wid = do
 
 refTables inf table = do
         let
-        ((DBVar2 tmvard _  vpdiff _ _ ),res)  <-  (liftIO $ transactionNoLog inf $ eventTable table (Just 0) Nothing  [] (LegacyPredicate []))
+        ((DBVar2 tmvard _   _ vpdiff _ _ ),res)  <-  (liftIO $ transactionNoLog inf $ eventTable table (Just 0) Nothing  [] (LegacyPredicate []))
         let update = foldl'(flip (\p-> fmap (flip apply p)))
         bres <- accumB res (flip update <$> rumors vpdiff)
         let

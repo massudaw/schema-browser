@@ -267,15 +267,23 @@ pageTable flag method table page size presort fixed = do
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
     iniT <- do
-       (fixedmap ,reso) <- liftIO $ currentValue (liftA2 (,) (facts (idxTid dbvar) ) (facts (collectionTid dbvar ) ))
+       fixedmap  <- liftIO $ currentValue (facts (idxTid dbvar))
+       idxVL<- liftIO$ atomically $readTMVar (idxVarLoad dbvar)
+       reso <- liftIO $ currentValue (facts (collectionTid dbvar ))
        let pageidx = (fromMaybe 0 page +1) * pagesize
+           freso = ffixed reso
        i <- case  fromMaybe (10000000,M.empty ) $  M.lookup fixidx fixedmap of
           (sq,mp) -> do
-             if flag || ( sq > G.size (ffixed reso) -- Tabela é maior que a tabela carregada
-                                                    -- && sq > pagesize * (fromMaybe 0 page + 1) -- Tabela é maior que a página
-                && pagesize * (fromMaybe 0 page +1) > G.size (ffixed reso)  ) -- O carregado é menor que a página
+             if flag || (sq > G.size freso -- Tabela é maior que a tabela carregada
+                && pageidx  > G.size freso ) -- O carregado é menor que a página
+               && (isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixidx fixedmap)  -- Carregando
+                   &&  not (S.member (fixidx,pageidx) idxVL))
              then do
-               liftIO$ putStrLn $ "new page " <> show (tableName table,sq, pagesize*(fromMaybe 0 page + 1), G.size (ffixed reso),page, pagesize)
+               liftIO $ atomically $ do
+                 v <- takeTMVar (idxVarLoad dbvar)
+                 putTMVar (idxVarLoad dbvar) (S.insert (fixidx,pageidx) v)
+
+               liftIO$ putStrLn $ "new page " <> show (tableName table,sq, pageidx, G.size freso,page, pagesize)
                let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                (res,nextToken ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
                let
@@ -283,14 +291,14 @@ pageTable flag method table page size presort fixed = do
                    index = (estLength page pagesize res s, maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token$ mp)
                return  (index,res)
              else do
-               liftIO$ putStrLn $ "keep page " <> show (tableName table,sq, pagesize*(fromMaybe 0 page + 1), G.size (ffixed reso),page, pagesize)
+               liftIO$ putStrLn $ "keep page " <> show (tableName table,sq, pageidx, G.size freso,page, pagesize)
                return ((sq,mp),[])
        let nidx =  M.insert fixidx (fst i) fixedmap
            ndata = snd i
        liftIO $ atomically $ do
          writeTQueue (patchVar dbvar) (F.toList $ patch  <$> ndata )
          putTMVar (idxVar dbvar ) nidx
-       return (nidx, createUn (S.fromList $ rawPK table) ndata <> reso)
+       return (nidx, if L.length ndata > 0 then createUn (S.fromList $ rawPK table) ndata <> reso else reso)
     let tde = fmap ffixed <$> rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
     let iniFil = fmap ffixed iniT
     tdb  <- stepper iniFil tde
