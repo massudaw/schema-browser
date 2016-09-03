@@ -950,7 +950,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
         return (offset, res3)
       -- Load offseted items
       onEvent (filterE (isJust . fst) $ (,) <$> facts iold2 <@> rumors (triding offset)) $ (\(o,i) ->  traverse (\o -> liftIO $ do
-          transactionNoLog inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` 5) Nothing  [] (LegacyPredicate $ fmap (("=",).replaceKey)  o)) o  )
+        transactionNoLog inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (LegacyPredicate $ fmap (("=",).replaceKey)  o)) o  )
 
       -- Select page
       let

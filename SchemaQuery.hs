@@ -262,7 +262,7 @@ pageTable flag method table page size presort fixed = do
         defSort = fmap (,Desc) $  rawPK table
         sortList  = if L.null presort then defSort else presort
         fixidx = fixed
-        pagesize = maybe defsize id size
+        pagesize = maybe (opsPageSize $ schemaOps inf)id size
         ffixed = filterfixed fixed
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
@@ -272,10 +272,10 @@ pageTable flag method table page size presort fixed = do
        i <- case  fromMaybe (10000000,M.empty ) $  M.lookup fixidx fixedmap of
           (sq,mp) -> do
              if flag || ( sq > G.size (ffixed reso) -- Tabela é maior que a tabela carregada
-                && sq > pagesize * (fromMaybe 0 page + 1) -- Tabela é maior que a página
+                                                    -- && sq > pagesize * (fromMaybe 0 page + 1) -- Tabela é maior que a página
                 && pagesize * (fromMaybe 0 page +1) > G.size (ffixed reso)  ) -- O carregado é menor que a página
              then do
-               liftIO$ putStrLn $ "new page " <> show (tableName table)
+               liftIO$ putStrLn $ "new page " <> show (tableName table,sq, pagesize*(fromMaybe 0 page + 1), G.size (ffixed reso),page, pagesize)
                let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                (res,nextToken ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
                let
@@ -283,6 +283,7 @@ pageTable flag method table page size presort fixed = do
                    index = (estLength page pagesize res s, maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token$ mp)
                return  (index,res)
              else do
+               liftIO$ putStrLn $ "keep page " <> show (tableName table,sq, pagesize*(fromMaybe 0 page + 1), G.size (ffixed reso),page, pagesize)
                return ((sq,mp),[])
        let nidx =  M.insert fixidx (fst i) fixedmap
            ndata = snd i
