@@ -10,6 +10,7 @@ import Types
 import qualified Types.Index as G
 import Control.Monad.Writer
 import Step.Client (indexTable)
+import Graphics.UI.Threepenny.Timer
 import Data.Either
 import Step.Host
 import SchemaQuery
@@ -73,6 +74,7 @@ poller schm authmap db plugs is_test = do
       let plug = L.find ((==pname ). _name ) plugs
           (schema,intervalms ,pname ) = project tb
       inf <- keyTables  schm conn  (schema, T.pack $ user db) authmap plugs
+      (startP,_,_,current) <- checkTime polling tb
       flip traverse plug $ \p -> do
           let f = pluginStatic p
               elemp = pluginAction p
@@ -80,10 +82,9 @@ poller schm authmap db plugs is_test = do
               a = _bounds p
           let iter polling = do
                   (start,end,curr,current) <- checkTime polling tb
-                  putStrLn $ "LAST RUN " <> show (schema,pname,start,end)
+                  putStrLn $ "LAST RUN " <> show (schema,pname,current,start,end)
                   let intervalsec = intervalms `div` 10^3
-                  if  is_test || diffUTCTime current start  >  fromIntegral intervalsec
-                  then do
+                  when (is_test || diffUTCTime current start  >  fromIntegral intervalsec) $ do
                       putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let fetchSize = 500
                           pred =  (WherePredicate $ AndColl (catMaybes [ genPredicate True (fst f) , genPredicate False (snd f)]) )
@@ -123,7 +124,7 @@ poller schm authmap db plugs is_test = do
                           table2 = tblist
                               [ attrT ("poll_name",TB1 (SText pname))
                               , attrT ("schema_name",TB1 (SText schema))
-                              , attrT ("start_time",time current)
+                              , traceShowId $ attrT ("start_time",time current)
                               , attrT ("end_time",time end)]
 
                       (p2,p) <- transactionNoLog metas  $ do
@@ -132,13 +133,15 @@ poller schm authmap db plugs is_test = do
                           fktable <- loadFKS  (liftTable' metas  "polling_log"  table)
                           p <-fullDiffInsert  (liftTable' metas  "polling_log"  table)
                           return (fktable2,p)
-                      threadDelay (intervalms*10^3)
-                  else do
-                      threadDelay (round $ (*10^6) $  diffUTCTime current start )
+                      return ()
 
-          pid <- forkIO (void $ iter polling >> (forever $  do
-              (_,(_,polling))<- transactionNoLog metas $ selectFrom "polling"   Nothing Nothing [] $ LegacyPredicate []
-              iter polling ))
+          pid <- forkIO (void $ do
+              putStrLn ("Start Poller: " <> T.unpack pname )
+              -- iter polling
+              tm <- timer intervalms
+              print (intervalms,diffUTCTime current startP,(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))
+              forkIO (void $  threadDelay (max 0 (10^3*(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))) >> putStrLn ("Timer Start" <> T.unpack pname) >> start tm)
+              onEventIO (unionWith const (rumors $ collectionTid dbpol ) (facts ( collectionTid dbpol )<@ tick tm)) iter )
           return ()
   mapM poll  enabled
 

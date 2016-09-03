@@ -245,8 +245,9 @@ createTableRefs inf i = do
   (ediff,hdiff) <- R.newEvent
   (iv,v) <- readTable inf "dump" (schemaName inf) (i)
   midx <-  atomically$ newTMVar iv
-  bh <- R.accumB v (flip (L.foldl' apply) <$> ediff )
-  let bh2 = (R.tidings bh (L.foldl' apply  <$> bh R.<@> ediff ))
+  let applyP = (\l v ->  L.foldl' (\j  i -> apply j i  ) v l  )
+  bh <- R.accumB v ( (\i v -> applyP i v)<$> ediff )
+  let bh2 = (R.tidings bh ( flip applyP  <$> bh R.<@> ediff ))
   bhdiff <- R.stepper diffIni ediff
   (eidx ,hidx) <- R.newEvent
   bhidx <- R.stepper (M.singleton (LegacyPredicate []) (G.size v,M.empty)) eidx

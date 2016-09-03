@@ -109,12 +109,15 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
               transMode _ "month" = "month"
               transMode True i = "agenda" <> capitalize i
               transMode False i = "basic" <> capitalize i
-            innerCalendar  <- lift $ UI.div # set UI.style [("min-height","400px")]
-            lift $ element calendar # set children [innerCalendar]
+            innerCalendar  <- lift $ UI.div
+            sel <- lift UI.div
+            calendarFrame <- lift $ UI.div # set children [innerCalendar] # set UI.style [("height","450px"),("overflow","auto")]
+            lift $ element calendar # set children [calendarFrame,sel]
             lift $ calendarCreate (transMode agenda resolution) innerCalendar (show incrementT)
             onEventFT (UI.hover innerCalendar) (const $ do
                     runFunction $ ffi "$(%1).fullCalendar('render')" innerCalendar )
             let
+              evc = eventClick innerCalendar
               evd = eventDrop innerCalendar
               evr = eventResize innerCalendar
               evdd = eventDragDrop innerCalendar
@@ -122,15 +125,23 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
             onEventFT evs (liftIO . transaction inf . mapM
                   (\i -> do
                      patchFrom i >>= traverse (tell . pure )))
-            mapM (\(cap,(_,t,fields,proj))->  do
+            edits <- mapM (\(cap,(_,t,fields,proj))->  do
                 let pred = WherePredicate $ timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
                     fieldKey (TB1 (SText v))=  lookKey inf t v
                 (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
+                let evsel = (\j (tev,pk,_) -> if tableName tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (collectionTid v) <@> fmap (readPK inf . T.pack ) evc
+                reftb <- refTables inf (lookTable inf t)
+                tdib <- stepper Nothing (join <$> evsel)
+                let tdi = tidings tdib (join <$> evsel)
+                (el,_,_) <- lift $ crudUITable inf (pure "+")  reftb [] [] (allRec' (tableMap inf) $ lookTable inf t)  tdi
+                onEventFT evsel (liftIO .print)
                 mapUIFinalizerT innerCalendar
                   (lift . (\i -> do
                     calendarAddSource innerCalendar  (T.unpack t) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .  concat . fmap (lefts.snd) $ fmap proj $ G.toList i)))
                   ) (collectionTid v)
+                lift $ UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
                 ) selected
+            lift $ element sel # set children (edits)
 
             {-fins <- mapM (\((_,(_,t,_)),s)->  fmap snd $ mapUIFinalizerT innerCalendar (
                       lift  $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing []  (WherePredicate $ timePred ((\(TB1 (SText v))->  lookKey inf tname v) <$> fields ) cal)) calendarSelT
@@ -166,18 +177,20 @@ txt = TB1. SText
 type DateChange = (String, Either (Interval UTCTime) UTCTime)
 
 -- readPosition:: EventData -> Maybe DateChange
-readTime v =
-    (let [i,a,e] = unsafeFromJSON v
-     in (,) <$> Just i <*>
-        ((\i j ->
-               Left $
-               Interval.interval
-                   (Interval.Finite i, True)
-                   (Interval.Finite j, True)) <$>
-         parseISO8601 a <*>
-         parseISO8601 e)) <|>
-    (let [i,a] = unsafeFromJSON v
-     in (,) <$> Just i <*> (Right <$> parseISO8601 a))
+readTime v = case unsafeFromJSON v of
+
+        [i,a,e]  -> (,) <$> Just i <*>
+          ((\i j ->
+                 Left $
+                 Interval.interval
+                     (Interval.Finite i, True)
+                     (Interval.Finite j, True)) <$>
+           parseISO8601 a <*>
+           parseISO8601 e)
+        [i,a] -> (,) <$> Just i <*> (Right <$> parseISO8601 a)
+
+eventClick:: Element -> Event String
+eventClick el = fmap fst $ filterJust $ readTime <$> domEvent "eventClick" el
 
 eventDrop :: Element -> Event DateChange
 eventDrop el = filterJust $ readTime <$> domEvent "eventDrop" el

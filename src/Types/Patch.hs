@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -75,6 +76,7 @@ class Patch f where
   type Index f
   diff :: f -> f -> Maybe (Index f)
   apply :: f -> Index f -> f
+  applyIfChange :: f -> Index f -> Maybe f
   create :: Index f -> f
   patch  :: f -> Index f
 
@@ -84,6 +86,7 @@ class Compact f where
 instance (G.Predicates (G.TBIndex k  a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex k a ) (TBData k a)) where
   type Index (G.GiST (G.TBIndex k a ) (TBData k a)  ) = RowPatch k (Index a)
   apply = applyGiST
+  applyIfChange = applyGiSTChange
   -- diff = diffGiST
 
 
@@ -94,6 +97,7 @@ instance PatchConstr k a => Patch (TB Identity k a)  where
   type Index (TB Identity k a) =  PathAttr k (Index a)
   diff = diffAttr
   apply = applyAttr
+  applyIfChange = applyAttrChange
   create = createAttr
   patch = patchAttr
 
@@ -101,6 +105,7 @@ instance  PatchConstr k a => Patch (TBData k a)  where
   type Index (TBData k a) =  TBIdx k (Index a)
   diff = difftable
   apply = applyRecord
+  applyIfChange = applyRecordChange
   create = createTB1
   patch = patchTB1
 
@@ -111,6 +116,7 @@ instance (Ord a,Show a,Patch a) => Patch (FTB a ) where
   type Index (FTB a) =  PathFTB (Index a)
   diff = diffFTB patch diff
   apply = applyFTB create apply
+  applyIfChange = applyIfChange'
   create = createFTB create
   patch = patchFTB patch
 
@@ -119,6 +125,7 @@ instance Patch Showable  where
   type Index Showable = Showable
   diff  = diffPrim
   apply _ i = i
+  applyIfChange i j = if i == j then Nothing else Just j
   create = id
   patch = id
 
@@ -182,7 +189,7 @@ compactAttr  i =  fmap recover .  groupSplit2 projectors pathProj $ i
 
 compactPatches :: (Ord a ,Show a)=> [PathFTB  a] -> Maybe (PathFTB  a)
 compactPatches [] = Nothing
-compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . concat . fmap expandPSet $ traceShowId i
+compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . concat . fmap expandPSet $ i
   where
     pathProj (PIdx _ i) = i
     pathProj (POpt  i) = i
@@ -215,8 +222,28 @@ expandPSet p = [p]
 groupSplit2 :: Ord b => (a -> b) -> (a -> c ) -> [a] -> [(b ,[c])]
 groupSplit2 f g = fmap (\i-> (f $ justError "cant group" $ safeHead i , g <$> i)) . groupWith f
 
-notOptional :: G.TBIndex k a -> G.TBIndex k a -- [(k , FTB a )] -> [(k,FTB a)]
+notOptional :: G.TBIndex k a -> G.TBIndex k a
 notOptional (G.Idex m) = G.Idex   . justError "cant be empty " . traverse unSOptional'  $ m
+
+applyGiSTChange
+  ::  (G.Predicates (G.TBIndex k  a) , PatchConstr k a)  => G.GiST (G.TBIndex k a ) (TBData k a) -> RowPatch k (Index a) -> Maybe (G.GiST (G.TBIndex k a ) (TBData k a))
+applyGiSTChange l patom@(m,i, []) = Just $ G.delete (create <$> notOptional i) (3,6)  l
+    where tbpred v = notOptional $ G.Idex  $ Map.fromList $  getUn un v
+          un = (Set.fromList $ _kvpk m)
+applyGiSTChange l patom@(m,ipa, p) =  case G.lookup (notOptional i) l  of
+                  Just v ->
+                        do
+                          let val =  applyIfChange v patom
+                          el <- if isNothing val then trace "no change" val else val
+                          let pkel = G.Idex $ getPKM el
+                          Just $ G.insert (el,tbpred  el) (3,6) . G.delete (notOptional i)  (3,6) $ l
+                  Nothing -> let
+                      el = createTB1  patom
+                   in Just $ G.insert (el,tbpred  el) (3,6)  l
+    where tbpred v = notOptional $ G.Idex  $ Map.fromList $ getUn un v
+          un = (Set.fromList $ _kvpk m)
+          i = fmap create  ipa
+
 
 applyGiST
   ::  (G.Predicates (G.TBIndex k  a) , PatchConstr k a)  => G.GiST (G.TBIndex k a ) (TBData k a) -> RowPatch k (Index a) -> G.GiST (G.TBIndex k a ) (TBData k a)
@@ -227,9 +254,7 @@ applyGiST l patom@(m,ipa, p) =  case G.lookup (notOptional i) l  of
                   Just v ->  let
                            el = applyRecord  v patom
                            pkel = G.Idex $ getPKM el
-                          in if pkel == i
-                            then G.insert (el,tbpred  el) (3,6) . G.delete (notOptional i)  (3,6) $ l
-                            else G.insert (el,tbpred  el) (3,6) . G.delete (notOptional i)  (3,6) $ l
+                          in G.insert (el,tbpred  el) (3,6) . G.delete (notOptional i)  (3,6) $ l
                   Nothing -> let
                       el = createTB1  patom
                       in G.insert (el,tbpred  el) (3,6)  l
@@ -262,6 +287,18 @@ pattrKey (PInline s _ ) = Set.singleton $ Inline s
 pattrKey (PFK s _ _ _ ) = Set.fromList s
 
 
+applyRecordChange
+   :: PatchConstr d a =>
+    TBData d a
+     -> TBIdx d (Index a)
+     -> Maybe (TBData d a)
+applyRecordChange t@((m, v)) (_ ,_  , k)  = fmap ((m ,)  ) $  traComp  (foldedit k) ( v)
+  where
+    foldedit k v0 =  fmap KV $ foldr  edit (Just $ _kvvalues v0) k
+    edit  p m = Map.insert (pattrKey p) <$> maybe (Just $ _tb $ createAttr p) (traComp (flip applyIfChange p)) attr  <*> m
+      where attr = join $ Map.lookup (pattrKey p)  <$> m
+
+
 
 applyRecord
    :: PatchConstr d a =>
@@ -292,6 +329,15 @@ patchSet i
             normalize i = [i]
 
 
+applyAttrChange :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a) -> Maybe (TB Identity k a)
+applyAttrChange (Attr k i) (PAttr _ p)  = Attr k <$> (applyIfChange i p)
+applyAttrChange (FKT k rel  i) (PFK _ p _ b )  =  (\i -> FKT i rel  (create b)) <$> foldedit p k
+  where
+    foldedit k v0 =  fmap KV $ foldr  edit (Just $ _kvvalues v0) k
+    edit  p m = Map.insert (pattrKey p) <$> maybe (Just $ _tb $ createAttr p) (traComp (flip applyIfChange p)) attr  <*> m
+      where attr = join $ Map.lookup (pattrKey p)  <$> m
+
+applyAttrChange (IT k i) (PInline _   p)  = IT k <$> (applyIfChange i p)
 
 
 applyAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a) -> TB Identity k a
@@ -301,6 +347,7 @@ applyAttr (FKT k rel  i) (PFK _ p _ b )  =  FKT ref  rel  (create b)
               ref =  KV$  Map.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList (concat $ traComp nonRefTB <$>  unkvlist k))
               edit  key  k@(PAttr  s _) v = if (_relOrigin $ justError "no key" $ safeHead $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
 applyAttr (IT k i) (PInline _   p)  = IT k (applyTB1 i p)
+
 -- applyAttr i j = errorWithStackTrace ("applyAttr: " <> show (i,j))
 
 
@@ -376,8 +423,13 @@ instance Applicative Interval.Extended where
   pure i = Interval.Finite i
   (Interval.Finite i) <*> (Interval.Finite j) =  Interval.Finite $ i j
 
+applyIfChange'
+  :: (Patch a, Ord a ) =>
+     FTB a -> PathFTB (Index a) -> Maybe (FTB a)
+applyIfChange' = applyFTBM (Just . create) applyIfChange
+
 applyOptM
-  :: (Show a, Show (Index a),Monad m ,Applicative m,Ord a) =>
+  :: (Monad m ,Applicative m,Ord a) =>
      (Index a -> m a)
      -> (a -> Index a -> m a)-> Maybe (FTB a) -> Maybe (PathFTB (Index a)) -> m (Maybe (FTB a))
 applyOptM  pr a i  o = case i of
@@ -386,7 +438,7 @@ applyOptM  pr a i  o = case i of
                             Just j -> traverse (createFTBM pr) o
                       Just _ -> sequenceA $ applyFTBM pr a <$> i <*> o
 applyOpt
-  :: (Show a,Ord a) =>
+  :: (Ord a) =>
      (Index a -> a)
      -> (a -> Index a  -> a)-> Maybe (FTB a) -> Maybe (PathFTB (Index a)) ->  (Maybe (FTB a))
 applyOpt  pr a i  o = case i of
@@ -395,8 +447,8 @@ applyOpt  pr a i  o = case i of
                             Just j -> createFTB pr <$> o
                       Just _ -> applyFTB pr a <$> i <*> o
 applyFTBM
-  :: (Show t,Show a,Monad m,Applicative m ,Ord a , t ~ Index a) =>
-  (t -> m a) -> (a -> t -> m a) -> FTB a -> PathFTB t -> m (FTB a)
+  :: (Monad m,Applicative m ,Ord a ) =>
+    (Index a -> m a) -> (a -> Index a -> m a) -> FTB a -> PathFTB (Index a) -> m (FTB a)
 applyFTBM pr a (LeftTB1 i ) op@(POpt o) = LeftTB1 <$>  applyOptM pr a i o
 applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                       Nothing -> pure $ ArrayTB1 $ Non.fromList $ Non.take ix   i
@@ -404,7 +456,7 @@ applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                                 then fmap ArrayTB1 $ sequenceA $ Non.imap (\i v -> if i == ix then applyFTBM pr a v p else pure v )  i
                                 else if ix == Non.length i
                                       then fmap ArrayTB1 $ sequenceA $ fmap pure i <> pure (createFTBM pr p)
-                                      else errorWithStackTrace $ "ix bigger than next elem" <> show (ix, Non.length i)
+                                      else errorWithStackTrace $ "ix bigger than next elem"
 
 applyFTBM pr a (SerialTB1 i ) (PSerial o) = SerialTB1 <$>  applyOptM pr a i o
 applyFTBM pr a (DelayedTB1 i ) (PDelayed o) = DelayedTB1 <$>  applyOptM pr a i o
@@ -414,11 +466,11 @@ applyFTBM pr a (IntervalTB1 i) (PInter b (p,l))
         else (Interval.interval) <$> pure (lowerBound' i)  <*> fmap (,l)  (traverse ( flip (applyFTBM pr a) p ) (fst $ upperBound' i))
 applyFTBM pr a (TB1 i) (PAtom p)  =  TB1 <$> a i p
 applyFTBM pr a  b (PatchSet l ) = foldl (\i j -> i >>= flip (applyFTBM pr a) j  ) (pure b) l
-applyFTBM _ _ a b = errorWithStackTrace ("applyFTB: " <> show (a,b))
+applyFTBM _ _ a b = errorWithStackTrace ("applyFTB: " )
 
 
 applyFTB
-  :: (Show a,Ord a) =>
+  :: (Ord a) =>
   (Index a  -> a) -> (a -> Index a -> a) -> FTB a -> PathFTB (Index a) -> FTB a
 applyFTB pr a (LeftTB1 i ) op@(POpt o) = LeftTB1 $ applyOpt pr a i o
 applyFTB pr a (ArrayTB1 i ) (PIdx ix o) = case o of
@@ -427,7 +479,7 @@ applyFTB pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                                 then ArrayTB1 $ Non.imap (\i v -> if i == ix then applyFTB pr a v p else v )  i
                                 else if ix == Non.length i
                                       then ArrayTB1 $ i <> pure (createFTB pr p)
-                                      else errorWithStackTrace $ "ix bigger than next elem" <> show (ix, Non.length i)
+                                      else errorWithStackTrace $ "ix bigger than next elem"
 applyFTB pr a (SerialTB1 i ) (PSerial o) = SerialTB1 $  applyOpt pr a i o
 applyFTB pr a (DelayedTB1 i ) (PDelayed o) = DelayedTB1 $  applyOpt pr a i o
 applyFTB pr a (IntervalTB1 i) (PInter b (p,l))
@@ -436,7 +488,7 @@ applyFTB pr a (IntervalTB1 i) (PInter b (p,l))
         else interval (lowerBound' i) (second (const l) $ first (fmap (flip (applyFTB pr a) p )) (upperBound' i))
 applyFTB pr a (TB1 i) (PAtom p)  =  TB1 $ a i p
 applyFTB pr a  b (PatchSet l ) = foldl (applyFTB pr a ) b l
-applyFTB _ _ a b = errorWithStackTrace ("applyFTB: " <> show (a))
+applyFTB _ _ a b = errorWithStackTrace ("applyFTB: " )
 
 createFTB :: Ord a => (Index a  ->  a) -> PathFTB (Index a) -> FTB a
 createFTB p (POpt i ) = LeftTB1 (createFTB p <$> i)

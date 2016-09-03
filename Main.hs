@@ -52,5 +52,4 @@ main = do
   print "Finish Server"
   print "Start Dump State"
   print "Finish Dump State"
-
   return ()

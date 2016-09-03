@@ -447,7 +447,7 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
   (e2,h2) <- liftIO $ newEvent
   (ediff ,hdiff) <- liftIO $ newEvent
   (evdiff ,hvdiff) <- liftIO $ newEvent
-  nav  <- buttonDivSet ["+","-"{-,"Exception","Change"-}] (fmap Just open) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonDivSet ["+","-"] (fmap Just open) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-3 pull-right"
   let table = lookTable inf ( _kvname  m )
   let fun "+" = do
@@ -491,12 +491,6 @@ addElemFin e = liftIO . addFin e .pure
 
 unConstraint :: Set CoreKey -> TBData CoreKey Showable -> G.GiST (G.TBIndex CoreKey Showable) (TBData CoreKey Showable) -> Bool
 unConstraint un v m = isJust . lookGist un v $ m
-
-lookGist un pk  = G.lookup (tbpred un pk)
-  where
-    tbpred un  = tbjust  . traverse (traverse unSOptional') .getUn un
-      where
-        tbjust = G.Idex . M.fromList . justError "cant be empty"
 
 processPanelTable
    :: Element
@@ -954,15 +948,10 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
         element itemListEl # sink UI.size (show . (\i -> if i > 21 then 21 else (i +1 )) . length .snd <$> facts res3)
         offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i (snd j) ) i )<$> facts res3 <#> (fmap (unTB1._fkttable )<$> oldItems)) wheel  (lengthPage <$> facts res3)
         return (offset, res3)
-      -- Load not found items
-      onEvent (filterE (\(a,b,c) ->  isJust a &&   isJust b && isNothing c)  $ rumors $ (,,) <$> iold2 <*> ftdi2 <*> tdi)  $ (\(o,_,_) ->
-        traverse (\o -> liftIO $ do
-        when (all (/="<@") (fmap (fst . replaceRel)   o)) $ do
-          transactionNoLog inf $ eventTable  (lookTable inf (_kvname m)) Nothing Nothing  [] (LegacyPredicate $ L.sortBy (comparing (keyattri.snd)) $fmap (replaceRel)  o)
-          return () ) o)
       -- Load offseted items
       onEvent (filterE (isJust . fst) $ (,) <$> facts iold2 <@> rumors (triding offset)) $ (\(o,i) ->  traverse (\o -> liftIO $ do
-        transactionNoLog inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` 5) Nothing  [] (LegacyPredicate $ fmap (("=",).replaceKey)  o)) o  )
+          transactionNoLog inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` 5) Nothing  [] (LegacyPredicate $ fmap (("=",).replaceKey)  o)) o  )
+
       -- Select page
       let
         paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset

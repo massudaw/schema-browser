@@ -124,39 +124,7 @@ function createAgenda(el,tdate,view){
   var y = date.getFullYear();
 
   $(el).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: date,lang: 'pt-br',editable: true,eventLimit: true, defaultView : view ,eventDrop : el.eventDrop , eventResize: el.eventResize, drop : el.drop, droppable:true ,eventClick: function(data, event, view) {
-  var content = '<h3>'+data.title+'</h3>' + 
-      '<p><b>'+ data.field +':</b> '+new Date(data.start).toString()+'<br />' + 
-      (data.end && '<p><b>End:</b> '+data.end+'</p>' || '');
-  if (el.opentip != null ){
-    $('.qtip').each(function(){
-        $(this).data('qtip').destroy();
-    })
-  }
-  var tooltip = $('<div/>').qtip({
-    prerender: true,
-    content: {
-      text: ' ',
-      title: {
-        button: true
-      }
-    },
-    position: {
-      my: 'bottom center',
-      at: 'top center',
-      target: 'mouse',
-      adjust: {
-        mouse: false,
-        scroll: false
-      }
-    },
-    show: false,
-    hide: false,
-    style: 'qtip-light'
-  }).qtip('api');
-
-  tooltip.set({'content.text': content
-              }).reposition(event).show(event);
-  el.opentip = tooltip;
+  el.eventClick(data,event,view);
           }});
   $(el).fullCalendar('render');
 };
@@ -187,7 +155,13 @@ function clientHandlers(){
     sendEvent([center.lat,center.lng,0,ne.lat,ne.lng,0,sw.lat,sw.lng,0].map(function(e){return e.toString()}));
     return true;
     });
-    }
+  }
+   ,'eventClick' : function(el,eventType,sendEvent){
+      el.eventClick=  function(e,delta,revert) {
+      sendEvent([e.id,(new Date(e.start)).toISOString(),e.end === null ? null : new Date(e.end).toISOString()].filter(function(e) {return e !== null}).map(function(e){return  e.toString()}));
+      return true;
+      }; 
+      }
    ,'eventDrop' : function(el,eventType,sendEvent){
       el.eventDrop =  function(e,delta,revert) {
       sendEvent([e.id,(new Date(e.start)).toISOString(),e.end === null ? null : new Date(e.end).toISOString()].filter(function(e) {return e !== null}).map(function(e){return  e.toString()}));

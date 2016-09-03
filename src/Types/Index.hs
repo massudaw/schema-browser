@@ -124,9 +124,8 @@ instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
 -- Attr List Predicate
 instance  Predicates (Map Key (FTB Showable)) where
   type Penalty (Map Key (FTB Showable )) = (Map Key DiffShowable)
-  consistent l i =  if M.null b then False else (if F.all id a /= F.all id b then traceShow (a,b,l,i) else id ) F.all id b
+  consistent l i =  if M.null b then False else  F.all id b
     where
-          a =  M.intersectionWith consistent l i
           b =  M.intersectionWith consistent (M.mapKeys keyValue l) (M.mapKeys keyValue i)
   union l = foldl1 (M.intersectionWith (\i j -> union [i,j]) ) l
   penalty p1 p2 = M.intersectionWith penalty p1 p2
@@ -162,6 +161,7 @@ data DiffShowable
 
 instance Predicates (FTB Showable) where
   type Penalty (FTB Showable) = DiffShowable
+  consistent (j@(TB1 _) )  (SerialTB1 (Just i))  = consistent j  i
   consistent (j@(TB1 _) )  ((IntervalTB1 i) ) = j `Interval.member` i
   consistent (i@(TB1 _) ) ((ArrayTB1 j)) = F.elem  i j
   consistent ((TB1 i) ) ((TB1 j) ) = i == j
@@ -171,7 +171,8 @@ instance Predicates (FTB Showable) where
   -- consistent ((ArrayTB1 i) ) ((ArrayTB1 j)  ) = not $ Set.null $ Set.fromList (F.toList i) `Set.intersection` Set.fromList  (F.toList j)
   consistent ((ArrayTB1 i) ) ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
   consistent ((ArrayTB1 i) ) (j@(TB1 _)) = F.elem  j i
-  consistent ((ArrayTB1 i) ) (j  ) = F.all (\i -> consistent   ( i) (j)) i
+  consistent ((ArrayTB1 i) ) (j  ) = F.all (\i -> consistent i j) i
+  consistent   ((SerialTB1 (Just i)) ) (j@(TB1 _) )= consistent i j
   consistent i j  = errorWithStackTrace (show (i,j))
   union  l = (IntervalTB1 (minimum (minP <$> l)  `interval` maximum (maxP <$> l)))
   pickSplit = pickSplitG

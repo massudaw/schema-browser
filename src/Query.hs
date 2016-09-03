@@ -18,6 +18,7 @@ module Query
   ,intersectionOp
   ,isKDelayed
   ,isKOptional
+  ,lookGist
   ,tlabel
   ,tableView
   ,unTlabel'
@@ -589,6 +590,12 @@ joinRel2 tb rel ref table
             invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
             tbel = searchGist  invrelMap tb table (Just ref)
 
+
+lookGist un pk  = G.lookup (tbpred un pk)
+  where
+    tbpred un  = tbjust  . traverse (traverse unSOptional') .getUn un
+      where
+        tbjust = G.Idex . M.fromList . justError "cant be empty"
 
 
 

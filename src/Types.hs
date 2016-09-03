@@ -25,6 +25,7 @@ import NonEmpty (NonEmpty(..))
 import Control.Lens.TH
 import qualified Control.Lens as Le
 import Data.Functor.Apply
+import Utils
 import qualified Network.Wreq.Session as Sess
 import Data.Bifunctor
 import Safe
@@ -1134,3 +1135,5 @@ attrT :: (a,FTB b) -> Compose Identity (TB Identity) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
 
+-- notOptional :: k a -> G.TBIndex k a
+notOptionalPK m =  justError "cant be empty " . traverse unSOptional'  $ m

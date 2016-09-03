@@ -68,7 +68,7 @@ refTable  inf table  = do
   return $ justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
 
 
-tbpredM un v = G.Idex . M.fromList <$> (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
+tbpredM un v = G.Idex . M.fromList $ fromJust $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
 
 createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key Showable) (TBData Key Showable)
 createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un (tableNonRef' i) )
@@ -249,7 +249,7 @@ filterfixed fixed
               else
                 case fixed of
                   WherePredicate pred -> G.filter (\tb ->allPred  (\(a,e,v) ->  indexPred  (a,T.unpack e ,v) tb) pred )
-                  LegacyPredicate pred -> G.filter (\tb ->(\i -> if F.null i then False else F.all id i )$ M.intersectionWith (\i j -> fromMaybe False $ liftA2 G.consistent (traverse unSOptional  $ M.fromList $ ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB i))) (traverse unSOptional  $M.fromList ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB j))) ) (mapFromTBList (fmap (_tb .snd) pred )) (unKV (snd tb)))
+                  LegacyPredicate pred -> G.filter (\tb ->(\i -> if F.null i then False else F.all id i )$ M.intersectionWith (\i j -> fromMaybe False $ liftA2 G.consistent (traverse unSOptional  $ M.fromList $ ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB i))) (traverse unSOptional  $M.fromList ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB j)))) (mapFromTBList (fmap (_tb .snd) pred )) (unKV (snd tb)))
   where
     allPred pred (AndColl i ) =F.all (allPred  pred) i
     allPred pred (OrColl i ) =F.any (allPred  pred) i
@@ -307,7 +307,7 @@ fullInsert' ((k1,v1) )  = do
        tb  = (lookTable inf (_kvname k1))
    ret <-  (k1,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
    (_,(_,l)) <- tableLoader  tb Nothing Nothing [] (LegacyPredicate [])
-   if  (isNothing $ join $ flip G.lookup l <$> tbpredM (S.fromList $ _kvpk k1)  ret ) && rawTableType tb == ReadWrite
+   if  (isNothing $ flip G.lookup l $ tbpredM (S.fromList $ _kvpk k1)  ret ) && rawTableType tb == ReadWrite
       then do
         i@(Just (TableModification _ _ tb))  <- insertFrom  ret
         tell (maybeToList i)
