@@ -32,6 +32,8 @@ module TP.QueryWidgets (
 
 import RuntimeTypes
 import TP.View
+import Data.Tuple
+import Types.Patch
 import Data.Semigroup hiding (diff)
 import qualified NonEmpty as Non
 import NonEmpty (NonEmpty(..))
@@ -572,6 +574,15 @@ splitArray s o m l
     res = justError "can't be null"  $ pre <> Just l <> ta
 
 
+takeArrayEd :: (Show b) => NonEmpty (Tidings (Editor b)) -> Tidings (Editor (NonEmpty b))
+takeArrayEd a = fmap (Non.fromList) . nonEmpty .F.toList <$> Tra.sequenceA a
+  where nonEmpty i
+          | F.all isKeep i = Keep
+          | F.all isDelete i = Delete
+          | L.null (filterDiff i)  = Create
+          | L.length (filterDiff i) > 0  = Diff (filterDiff i)
+
+
 takeArray :: (Show b,Applicative f ) => NonEmpty (f (Maybe b)) -> f (Maybe (NonEmpty b))
 takeArray a = fmap (Non.fromList) . nonEmpty .fmap (justError "is nothing" ). Non.takeWhile isJust <$> Tra.sequenceA a
 
@@ -641,31 +652,99 @@ attrUITable
      -> [Tidings (Maybe (TB Identity CoreKey Showable))]
      -> TB Identity CoreKey ()
      -> UI (TrivialWidget (Maybe (TB Identity CoreKey Showable)))
-attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ _ (KOptional _) ) v) = do
-      res <- attrUITable (join . fmap unLeftItens <$> tAttr') (fmap (join. fmap unLeftItens ) <$>  evs) (Attr (unKOptional i) v)
-      return (leftItens attr <$> res)
-attrUITable tAttr' evs attr@(Attr i@(Key _ _ _ _ _ _ (KArray _) ) v) = mdo
-          offsetDiv  <- UI.div
-          -- let wheel = fmap negate $ mousewheel offsetDiv
-          TrivialWidget offsetT offset <- offsetField (pure 0)  never (maybe 0 (Non.length . (\(ArrayTB1 l ) -> l) . _tbattr) <$> facts bres)
-          let arraySize = 8
-          let dyn = dynHandler (\ix -> attrUITable (unIndexItens ix  <$> offsetT <*> tAttr')  ((unIndexItens ix  <$> offsetT <*> ) <$>  evs) (Attr (unKArray i) v  )) (\ix -> unIndexItens ix  <$> offsetT <*> tAttr')
-          widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
-          let
-            bres = indexItens arraySize  attr offsetT (Non.fromList $ triding <$> widgets) tAttr'
-          element offsetDiv # set children (fmap getElement widgets)
-          composed <- UI.span # set children [offset , offsetDiv]
-          when (isReadOnly attr )
-            $ void (element composed # sink UI.style (noneShow . isJust <$> facts bres))
-          return  $ TrivialWidget  bres composed
 attrUITable  tAttr' evs attr@(Attr i _ ) = do
       tdi' <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return tAttr') evs
       let tdi = fmap (\(Attr  _ i )-> i) <$>tdi'
-      attrUI <- buildUI (keyModifier i) (keyType i) tdi
-      let insertT = fmap (Attr i ) <$> (triding attrUI)
+      attrUI <- buildUIDiff (keyModifier i) (keyType i) tdi
+      let insertT = fmap (Attr i ) <$> (recoverEdit <$> tdi <*> triding attrUI  )
       when (isReadOnly attr )
               $ void (element attrUI # sink UI.style (noneShow . isJust <$> facts insertT ))
       return $ TrivialWidget insertT  (getElement attrUI)
+
+
+maybeEdit v id (Diff i) =  id i
+maybeEdit v id _  = v
+
+buildUIDiff:: [FieldModifier] -> KType (Prim KPrim (Text,Text))-> Tidings (Maybe (FTB Showable)) -> UI (TrivialWidget (Editor (Index (FTB Showable))))
+buildUIDiff km i  tdi = go i tdi
+  where
+    go i tdi = case i of
+         (KArray ti ) -> mdo
+            offsetDiv  <- UI.div
+            -- let wheel = fmap negate $ mousewheel offsetDiv
+
+            TrivialWidget offsetT offset <- offsetField (pure 0)  never (maybe 0 (Non.length .unArray) <$> (recoverEdit <$> facts tdi <*> facts bres))
+            let arraySize = 8
+                tdi2  = fmap unArray <$> tdi
+
+            -- let dyn = dynHandler (\ix -> go  ti  ((\ o v -> Non.atMay v (o + ix) ) <$> offsetT <*> tdi2)  ) (\ix -> (\o v -> Non.atMay v (o + ix)) <$> offsetT <*> tdi2)
+            -- widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
+
+            widgets <- mapM (\ix -> go ti ((\ o v -> join $ flip Non.atMay (o + ix) <$> v ) <$> offsetT <*> tdi2) ) [0..arraySize -1 ]
+            let
+              widgets2 = Tra.sequenceA (  zipWith (\i j -> (i,) <$> j) [0..] $( triding <$> widgets) )
+              reduceA  o i
+                | F.all isKeep (snd <$> i) = Keep
+                | F.all (\i -> isCreate i || isDelete i) (snd <$> i) = Delete
+                | otherwise = reduceDiff $ (\(ix,v) -> treatA (o+ix)v) <$> i
+              treatA a (Diff v) = Diff $ PIdx a  (Just v)
+              treatA a Delete = Diff $ PIdx a Nothing
+              treatA _ Keep = Keep
+              treatA _ Create = Create
+              bres = reduceA  <$> offsetT <*>  widgets2
+            element offsetDiv # set children (fmap getElement widgets)
+            composed <- UI.span # set children [offset , offsetDiv]
+            return  $ TrivialWidget  (bres) composed
+         (KOptional ti) -> do
+           tdnew <- go ti ( join . fmap unSOptional' <$> tdi)
+           retUI <- UI.div # set children [getElement tdnew]
+           -- Delete equals create
+           let test Create = Diff $ POpt Nothing
+               test Delete = Diff $ POpt Nothing
+               test Keep = Keep
+               test (Diff i ) = Diff (POpt (Just  i))
+
+
+           return $ TrivialWidget ( test <$> triding tdnew ) retUI
+         (KSerial ti) -> do
+           tdnew <- go ti ( join . fmap unSSerial <$> tdi)
+           retUI <- UI.div # set children [getElement tdnew]
+           -- Delete equals create
+           let test Create = Diff $ PSerial Nothing
+               test Delete = Diff $ PSerial Nothing
+               test Keep = Keep
+               test (Diff i ) = Diff (PSerial (Just  i))
+
+           return $ TrivialWidget ( test <$> triding tdnew ) retUI
+         (KDelayed ti) -> do
+           tdnew <-  go ti (join . fmap unSDelayed <$> tdi)
+           retUI <- UI.div# set children [getElement tdnew]
+           let test Create = Create
+               test Delete = Delete
+               test Keep = Keep
+               test (Diff i ) = Diff (PDelayed (Just  i))
+
+           return $ TrivialWidget (test <$> triding tdnew  ) retUI
+         (KInterval ti) -> do
+            let unInterval f (IntervalTB1 i ) = f i
+                unInterval _ i = errorWithStackTrace (show i)
+            inf <- go ti (fmap (unInterval inf' ) <$> tdi)
+            sup <- go ti (fmap (unInterval sup')  <$> tdi)
+            lbd <- fmap Diff <$> checkedWidget (maybe False id . fmap (\(IntervalTB1 i) -> snd . Interval.lowerBound' $i) <$> tdi)
+            ubd <- fmap Diff<$> checkedWidget (maybe False id .fmap (\(IntervalTB1 i) -> snd . Interval.upperBound' $i) <$> tdi)
+            composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
+            subcomposed <- UI.div # set UI.children [composed]
+            return $ TrivialWidget ( (\i j -> reduceDiff $ [i,j])<$> (liftA2 (\i j -> PInter False (j,i))<$>  triding lbd <*> triding inf) <*> (liftA2 (\i j -> PInter True (j,i)) <$> triding ubd <*> triding sup)) subcomposed
+         (Primitive (AtomicPrim i) ) -> do
+            pinp <- fmap (fmap TB1) <$> buildPrim km (fmap (\(TB1 i )-> i) <$> tdi) i
+            return $ TrivialWidget (editor <$> tdi <*> triding pinp) (getElement pinp)
+         i -> errorWithStackTrace (show i)
+
+reduceDiff :: [Editor (PathFTB a) ] -> Editor (PathFTB a)
+reduceDiff i
+  | F.all isKeep i = Keep
+  | F.all isDelete i = Delete
+  | otherwise = patchEditor $ filterDiff i
 
 buildUI :: [FieldModifier] -> KType (Prim KPrim (Text,Text))-> Tidings (Maybe (FTB Showable)) -> UI (TrivialWidget (Maybe (FTB Showable)))
 buildUI km i  tdi = go i tdi

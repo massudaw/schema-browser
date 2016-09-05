@@ -19,6 +19,18 @@ module Types.Patch
   Compact (..)
   ,Patch(..)
   -- Patch Data Types and to be moved methods
+  ,patchSet
+
+  ,editor
+  ,recoverEdit
+  ,Editor(..)
+  ,filterDiff
+  ,isDiff
+  ,isKeep
+  ,isCreate
+  ,isDelete
+  ,patchEditor
+  ,joinEditor
   --
   ,PathFTB(..),PathAttr(..),TBIdx,firstPatch,applyFTBM,PatchConstr)where
 
@@ -54,6 +66,67 @@ import Data.Map (Map)
 import qualified Data.Set as Set
 
 import Prelude hiding(head)
+
+filterDiff  = fmap (\(Diff i ) -> i) . filter isDiff
+
+isDiff i@(Diff _) = True
+isDiff i = False
+isKeep i@(Keep) = True
+isKeep i = False
+isDelete  i@(Delete) = True
+isDelete i = False
+isCreate i@(Create) = True
+isCreate i = False
+
+joinEditor (Diff i ) = i
+joinEditor Keep  = Keep
+joinEditor Delete = Delete
+joinEditor Create = Create
+
+patchEditor i
+  | L.length i == 0 = Keep
+  | L.length i == 1 = maybe Keep Diff $ safeHead i
+  | otherwise = Diff $ PatchSet (concat $ normalize <$> i)
+      where normalize (PatchSet i) = concat $ fmap normalize i
+            normalize i = [i]
+
+
+
+
+recoverEdit (Just i) Keep = Just i
+recoverEdit (Just i) Delete = Nothing
+recoverEdit (Just i) Create = (Just i)
+recoverEdit (Just i)(Diff j ) = Just $ apply i j
+recoverEdit Nothing (Diff j ) = Just $ create j
+recoverEdit Nothing Keep = Nothing
+recoverEdit Nothing Create = Nothing
+recoverEdit Nothing Delete = Nothing
+recoverEdit _ _ = errorWithStackTrace "no edit"
+
+
+editor (Just i) Nothing = Delete
+editor (Just i) (Just j) = maybe Keep Diff df
+    where df = diff i j
+editor Nothing (Just j) = Diff (patch j)
+editor Nothing Nothing = Create
+
+data Editor  a
+  = Diff a
+  | Delete
+  | Keep
+  | Create
+  deriving(Eq,Ord,Functor,Show)
+
+instance Applicative Editor where
+  pure = Diff
+  Diff a <*> Diff b = Diff $ a  b
+  Delete <*> i = Delete
+  i <*> Delete  = Delete
+  Keep <*> i = Keep
+  i <*> Keep = Keep
+  Create <*> i = Create
+  i <*> Create = Create
+
 
 
 data PathFTB   a

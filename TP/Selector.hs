@@ -140,10 +140,11 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
       incClick field =  (fst field , G.getIndex field ,[patch $ fmap (+SNumeric 1) usage])
           where
             usage = lookAttr' (meta inf ) "usage"   field
-              {-onEventFin ((\i j -> fmap incClick <$> (ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
+
+  liftIO $ onEventIO ((\i j -> fmap incClick <$> (ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
     (traverse (traverse (\p -> do
       _ <- transactionNoLog (meta inf ) $ patchFrom  p
-      putPatch (patchVar orddb) [p] )))-}
+      putPatch (patchVar orddb) [p] )))
 
   element bset # set UI.style [("overflow","auto"),("height","99%")]
   tableHeader <- UI.h4 # set text "Table"

@@ -134,7 +134,6 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
                 tdib <- stepper Nothing (join <$> evsel)
                 let tdi = tidings tdib (join <$> evsel)
                 (el,_,_) <- lift $ crudUITable inf (pure "+")  reftb [] [] (allRec' (tableMap inf) $ lookTable inf t)  tdi
-                onEventFT evsel (liftIO .print)
                 mapUIFinalizerT innerCalendar
                   (lift . (\i -> do
                     calendarAddSource innerCalendar  (T.unpack t) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .  concat . fmap (lefts.snd) $ fmap proj $ G.toList i)))
