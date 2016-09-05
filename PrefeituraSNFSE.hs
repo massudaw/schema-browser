@@ -29,7 +29,7 @@ siapi3Page protocolo ano cgc_cpf nota = do
     pr <- Sess.post session (traceShowId prefeituraLoginFormUrl) (prefeituraForm protocolo ano cgc_cpf)
     print (pr ^? responseBody)
     r <- Sess.get session $ traceShowId $ (BSC.unpack $ prefeituraConsutalNota nota)
-    let html =  (replace ("/sistemas/"::BS.ByteString) ("http://www3.goiania.go.gov.br/sistemas/"::BS.ByteString). BSL.toStrict ) <$> (r ^? responseBody)
+    let html =  (replace ("/sistemas/"::BS.ByteString) ("http://www11.goiania.go.gov.br/sistemas/"::BS.ByteString). BSL.toStrict ) <$> (r ^? responseBody)
     file <- htmlToPdf (nota <> protocolo) html
     return $ Just $ SBinary  file
 
@@ -51,11 +51,11 @@ prefeituraForm inscricao user pass  = [ "txt_nr_inscricao" := inscricao
                                   , "txt_info_senha" := pass
                                   ]
 
-prefeituraConsultaXML nota = "http://www3.goiania.go.gov.br/sistemas/snfse/asp/snfse00200w2.asp?nota=" <> nota
+prefeituraConsultaXML nota = "http://www11.goiania.go.gov.br/sistemas/snfse/asp/snfse00200w2.asp?nota=" <> nota
 
-prefeituraLoginCookie = "http://www3.goiania.go.gov.br/sistemas/saces/asp/saces00000f5.asp?sigla=snfse"
-prefeituraLoginFormUrl ="http://www3.goiania.go.gov.br/sistemas/saces/asp/saces00005a1.asp"
-prefeituraConsutalNota nota = "http://www3.goiania.go.gov.br/sistemas/snfse/asp/snfse00200w0.asp?nota=" <> nota
+prefeituraLoginCookie = "http://www11.goiania.go.gov.br/sistemas/saces/asp/saces00000f5.asp?sigla=snfse"
+prefeituraLoginFormUrl ="http://www11.goiania.go.gov.br/sistemas/saces/asp/saces00005a1.asp"
+prefeituraConsutalNota nota = "http://www11.goiania.go.gov.br/sistemas/snfse/asp/snfse00200w0.asp?nota=" <> nota
 
 
 
