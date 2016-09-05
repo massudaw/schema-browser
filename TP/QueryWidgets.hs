@@ -574,14 +574,6 @@ splitArray s o m l
     res = justError "can't be null"  $ pre <> Just l <> ta
 
 
-takeArrayEd :: (Show b) => NonEmpty (Tidings (Editor b)) -> Tidings (Editor (NonEmpty b))
-takeArrayEd a = fmap (Non.fromList) . nonEmpty .F.toList <$> Tra.sequenceA a
-  where nonEmpty i
-          | F.all isKeep i = Keep
-          | F.all isDelete i = Delete
-          | L.null (filterDiff i)  = Create
-          | L.length (filterDiff i) > 0  = Diff (filterDiff i)
-
 
 takeArray :: (Show b,Applicative f ) => NonEmpty (f (Maybe b)) -> f (Maybe (NonEmpty b))
 takeArray a = fmap (Non.fromList) . nonEmpty .fmap (justError "is nothing" ). Non.takeWhile isJust <$> Tra.sequenceA a
@@ -672,25 +664,19 @@ buildUIDiff km i  tdi = go i tdi
          (KArray ti ) -> mdo
             offsetDiv  <- UI.div
             -- let wheel = fmap negate $ mousewheel offsetDiv
-
             TrivialWidget offsetT offset <- offsetField (pure 0)  never (maybe 0 (Non.length .unArray) <$> (recoverEdit <$> facts tdi <*> facts bres))
             let arraySize = 8
                 tdi2  = fmap unArray <$> tdi
-
-            -- let dyn = dynHandler (\ix -> go  ti  ((\ o v -> Non.atMay v (o + ix) ) <$> offsetT <*> tdi2)  ) (\ix -> (\o v -> Non.atMay v (o + ix)) <$> offsetT <*> tdi2)
-            -- widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
-
             widgets <- mapM (\ix -> go ti ((\ o v -> join $ flip Non.atMay (o + ix) <$> v ) <$> offsetT <*> tdi2) ) [0..arraySize -1 ]
             let
               widgets2 = Tra.sequenceA (  zipWith (\i j -> (i,) <$> j) [0..] $( triding <$> widgets) )
               reduceA  o i
                 | F.all isKeep (snd <$> i) = Keep
-                | F.all (\i -> isCreate i || isDelete i) (snd <$> i) = Delete
+                | F.all (\i -> isDelete i) (snd <$> i) = Delete
                 | otherwise = reduceDiff $ (\(ix,v) -> treatA (o+ix)v) <$> i
               treatA a (Diff v) = Diff $ PIdx a  (Just v)
               treatA a Delete = Diff $ PIdx a Nothing
               treatA _ Keep = Keep
-              treatA _ Create = Create
               bres = reduceA  <$> offsetT <*>  widgets2
             element offsetDiv # set children (fmap getElement widgets)
             composed <- UI.span # set children [offset , offsetDiv]
@@ -699,7 +685,7 @@ buildUIDiff km i  tdi = go i tdi
            tdnew <- go ti ( join . fmap unSOptional' <$> tdi)
            retUI <- UI.div # set children [getElement tdnew]
            -- Delete equals create
-           let test Create = Diff $ POpt Nothing
+           let
                test Delete = Diff $ POpt Nothing
                test Keep = Keep
                test (Diff i ) = Diff (POpt (Just  i))
@@ -710,7 +696,7 @@ buildUIDiff km i  tdi = go i tdi
            tdnew <- go ti ( join . fmap unSSerial <$> tdi)
            retUI <- UI.div # set children [getElement tdnew]
            -- Delete equals create
-           let test Create = Diff $ PSerial Nothing
+           let
                test Delete = Diff $ PSerial Nothing
                test Keep = Keep
                test (Diff i ) = Diff (PSerial (Just  i))
@@ -719,7 +705,7 @@ buildUIDiff km i  tdi = go i tdi
          (KDelayed ti) -> do
            tdnew <-  go ti (join . fmap unSDelayed <$> tdi)
            retUI <- UI.div# set children [getElement tdnew]
-           let test Create = Create
+           let
                test Delete = Delete
                test Keep = Keep
                test (Diff i ) = Diff (PDelayed (Just  i))
