@@ -10,7 +10,8 @@ import Types
 import qualified Types.Index as G
 import Control.Monad.Writer
 import Step.Client (indexTable)
-import Graphics.UI.Threepenny.Timer
+import Data.Interval(Extended(..),interval,upperBound,lowerBound)
+import Graphics.UI.Threepenny.Timer hiding(interval)
 import Data.Either
 import Step.Host
 import SchemaQuery
@@ -20,6 +21,7 @@ import Control.Concurrent
 import Data.Functor.Apply
 import Control.Concurrent.STM
 import Utils
+import TP.Widgets (diffEvent)
 import Schema
 import Types.Patch
 import Data.Maybe
@@ -49,11 +51,11 @@ plugs schm authmap db plugs = do
 
 index tb item = snd $ justError ("no item" <> show item) $ indexTable (IProd True [item]) (tableNonRef' tb)
 
-checkTime polling tb = do
-    let curr = justError (show $ tbpred tb) $ G.lookup (tbpred tb) polling
-        tbpred = G.Idex . getPKM
-        TB1 (STimestamp startLocal) = index curr "start_time"
-        TB1 (STimestamp endLocal) = index curr "end_time"
+checkTime curr = do
+    let
+        IntervalTB1 time_inter = index curr "time"
+        TB1 (STimestamp startLocal) = unFinite $ lowerBound time_inter
+        TB1 (STimestamp endLocal) = unFinite $ upperBound time_inter
         start = localTimeToUTC utc startLocal
         end = localTimeToUTC utc endLocal
     current <- getCurrentTime
@@ -73,25 +75,29 @@ poller schm authmap db plugs is_test = do
     poll tb  = do
       let plug = L.find ((==pname ). _name ) plugs
           (schema,intervalms ,pname ) = project tb
+          indexRow polling = justError (show $ tbpred tb) $ G.lookup (tbpred tb) polling
+          tbpred = G.Idex . getPKM
       inf <- keyTables  schm conn  (schema, T.pack $ user db) authmap plugs
-      (startP,_,_,current) <- checkTime polling tb
+      (startP,_,_,current) <- checkTime (indexRow polling )
       flip traverse plug $ \p -> do
           let f = pluginStatic p
               elemp = pluginAction p
               pname = _name p
               a = _bounds p
           let iter polling = do
-                  (start,end,curr,current) <- checkTime polling tb
+                  (start,end,curr,current) <- checkTime polling
                   putStrLn $ "LAST RUN " <> show (schema,pname,current,start,end)
                   let intervalsec = intervalms `div` 10^3
                   when (is_test || diffUTCTime current start  >  fromIntegral intervalsec) $ do
                       putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
-                      let fetchSize = 500
+                      let fetchSize = 200
                           pred =  (WherePredicate $ AndColl (catMaybes [ genPredicate True (fst f) , genPredicate False (snd f)]) )
-                      (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  Nothing (Just fetchSize) []  pred
+                      (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  (Just 0) (Just fetchSize) []  pred
                       threadDelay 10000
                       let sizeL = justLook pred  l
-                          lengthPage s pageSize  = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
+                          lengthPage s pageSize  =  traceShow (res,pageSize,s) res
+                            where
+                              res = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
                       i <- concat <$> mapM (\ix -> do
                           (_,(_,listResAll)) <- transactionNoLog inf $ selectFrom a  (Just ix) (Just fetchSize) [] pred
                           let listRes = L.take fetchSize . G.toList $  listResAll
@@ -124,8 +130,8 @@ poller schm authmap db plugs is_test = do
                           table2 = tblist
                               [ attrT ("poll_name",TB1 (SText pname))
                               , attrT ("schema_name",TB1 (SText schema))
-                              , traceShowId $ attrT ("start_time",time current)
-                              , attrT ("end_time",time end)]
+                              , attrT ("time",IntervalTB1 (interval (Finite $ time current,True) (Finite $ time end,True)))
+                              ]
 
                       (p2,p) <- transactionNoLog metas  $ do
                           fktable2 <- loadFKS  (liftTable' metas "polling"  table2)
@@ -141,7 +147,13 @@ poller schm authmap db plugs is_test = do
               tm <- timer intervalms
               print (intervalms,diffUTCTime current startP,(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))
               forkIO (void $  threadDelay (max 0 (10^3*(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))) >> putStrLn ("Timer Start" <> T.unpack pname) >> start tm)
-              onEventIO (unionWith const (rumors $ collectionTid dbpol ) (facts ( collectionTid dbpol )<@ tick tm)) iter )
+              let
+                  evIter = indexRow <$> (unionWith const (rumors $ collectionTid dbpol ) (facts ( collectionTid dbpol )<@ tick tm))
+
+              bhIter <- stepper (indexRow  polling) evIter
+              let  evDiffIter = diffEvent bhIter evIter
+
+              onEventIO  evDiffIter iter )
           return ()
   mapM poll  enabled
 
