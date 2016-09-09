@@ -248,8 +248,9 @@ createTableRefs inf i = do
   midx <-  atomically$ newTMVar iv
   midxLoad <-  atomically $ newTMVar S.empty
   let applyP = (\l v ->  L.foldl' (\j  i -> apply j i  ) v l  )
-  bh <- R.accumB v ( (\i v -> applyP i v)<$> ediff )
-  let bh2 = (R.tidings bh ( flip applyP  <$> bh R.<@> ediff ))
+      evdiff = applyP <$> ediff
+  bh <- R.accumB v evdiff
+  let bh2 = R.tidings bh (flip ($) <$> bh R.<@> evdiff )
   bhdiff <- R.stepper diffIni ediff
   (eidx ,hidx) <- R.newEvent
   bhidx <- R.stepper (M.singleton (LegacyPredicate []) (G.size v,M.empty)) eidx

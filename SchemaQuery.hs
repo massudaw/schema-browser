@@ -59,7 +59,7 @@ import qualified Data.Text as T
 
 defsize = 200
 
-estLength page size resL est = fromMaybe 0 page * size  +  est
+estLength page size est = fromMaybe 0 page * size  +  est
 
 
 refTable :: InformationSchema -> Table -> IO DBVar
@@ -283,12 +283,12 @@ pageTable flag method table page size presort fixed = do
                  v <- takeTMVar (idxVarLoad dbvar)
                  putTMVar (idxVarLoad dbvar) (S.insert (fixidx,pageidx) v)
 
-               liftIO$ putStrLn $ "new page " <> show (tableName table,sq, pageidx, G.size freso,page, pagesize)
                let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
+               liftIO$ putStrLn $ "new page " <> show (tableName table,sq, pageidx, G.size freso,page, pagesize,pagetoken)
                (res,nextToken ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
                let
                    token =  nextToken
-                   index = (estLength page pagesize res s, maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token$ mp)
+                   index = (estLength page pagesize s, maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token$ mp)
                return  (index,res)
              else do
                liftIO$ putStrLn $ "keep page " <> show (tableName table,sq, pageidx, G.size freso,page, pagesize)

@@ -321,14 +321,13 @@ tbCase inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
           table = lookTable rinf  (_kvname m)
           m = (fst $ unTB1 tb1)
         ref <- refTables rinf   table
-        -- let mergeRefs = liftA2 (\i (FKT r rel t) -> FKT (r <> fmap _tb i) rel t ) <$> fmap Tra.sequenceA (Tra.sequenceA (fmap (triding.snd) nonInjRefs )) <*> ftdi
         fkUITable rinf (convertConstr <> nonInjConstr) ref plugItens nonInjRefs ftdi i
 tbCase inf _ i@(IT na tb1 ) wl plugItens oldItems
     = iUITable inf plugItens oldItems i
 tbCase inf _ a@(Attr i _ ) wl plugItens preoldItems = do
         let oldItems = maybe preoldItems (\v-> fmap (Just . fromMaybe (Attr i v)) preoldItems  ) ( keyStatic i)
-        v <- attrUITable oldItems (fmap snd plugItens ) a
-        return (fmap (firstTB (const i))  <$> v)
+        tdi <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return oldItems ) (fmap snd plugItens )
+        attrUITable tdi a
 
 emptyRecTable (FKT rel l tb )
     = case tb of
@@ -641,16 +640,12 @@ dynHandler hand val ix (l,old)= do
 
 attrUITable
   :: Tidings (Maybe (TB Identity CoreKey Showable))
-     -> [Tidings (Maybe (TB Identity CoreKey Showable))]
      -> TB Identity CoreKey ()
      -> UI (TrivialWidget (Maybe (TB Identity CoreKey Showable)))
-attrUITable  tAttr' evs attr@(Attr i _ ) = do
-      tdi' <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return tAttr') evs
-      let tdi = fmap (\(Attr  _ i )-> i) <$>tdi'
-      attrUI <- buildUIDiff (keyModifier i) (keyType i) tdi
-      let insertT = fmap (Attr i ) <$> (recoverEdit <$> tdi <*> triding attrUI  )
-      when (isReadOnly attr )
-              $ void (element attrUI # sink UI.style (noneShow . isJust <$> facts insertT ))
+attrUITable  tAttr attr@(Attr i _ ) = do
+      let tdiv = fmap _tbattr <$> tAttr
+      attrUI <- buildUIDiff (keyModifier i) (keyType i)  tdiv
+      let insertT = fmap (Attr i ) <$> (recoverEdit <$> tdiv <*> triding attrUI  )
       return $ TrivialWidget insertT  (getElement attrUI)
 
 
@@ -673,7 +668,7 @@ buildUIDiff km i  tdi = go i tdi
               reduceA  o i
                 | F.all isKeep (snd <$> i) = Keep
                 | F.all (\i -> isDelete i) (snd <$> i) = Delete
-                | otherwise = reduceDiff $ (\(ix,v) -> treatA (o+ix)v) <$> i
+                | otherwise = patchEditor $ filterDiff $ (\(ix,v) -> treatA (o+ix)v) <$> i
               treatA a (Diff v) = Diff $ PIdx a  (Just v)
               treatA a Delete = Diff $ PIdx a Nothing
               treatA _ Keep = Keep
@@ -720,7 +715,7 @@ buildUIDiff km i  tdi = go i tdi
             ubd <- fmap Diff<$> checkedWidget (maybe False id .fmap (\(IntervalTB1 i) -> snd . Interval.upperBound' $i) <$> tdi)
             composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
             subcomposed <- UI.div # set UI.children [composed]
-            return $ TrivialWidget ( (\i j -> reduceDiff $ [i,j])<$> (liftA2 (\i j -> PInter False (j,i))<$>  triding lbd <*> triding inf) <*> (liftA2 (\i j -> PInter True (j,i)) <$> triding ubd <*> triding sup)) subcomposed
+            return $ TrivialWidget ( fmap traceShowId $ (\i j -> traceShowId $ reduceDiff $ [i,j])<$> (fmap traceShowId $ liftA2 (\i j -> PInter True (j,i))<$>  triding lbd <*> triding inf) <*> (fmap traceShowId $ liftA2 (\i j -> PInter False (j,i)) <$> triding ubd <*> triding sup)) subcomposed
          (Primitive (AtomicPrim i) ) -> do
             pinp <- fmap (fmap TB1) <$> buildPrim km (fmap (\(TB1 i )-> i) <$> tdi) i
             return $ TrivialWidget (editor <$> tdi <*> triding pinp) (getElement pinp)

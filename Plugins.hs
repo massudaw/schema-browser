@@ -386,7 +386,7 @@ retencaoServicos = FPlugins pname tname  $ PurePlugin url
           ]
 
 
-    att i v =   Attr i (TB1 (SDouble v))
+    att i v =   Attr i (LeftTB1 $ Just $ TB1 (SDouble v))
 
 
 

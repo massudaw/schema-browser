@@ -4,6 +4,7 @@ import Text.Parsec
 import Data.OFX
 import System.IO
 import System.Exit
+import Debug.Trace
 
 import Control.Applicative
 
@@ -21,8 +22,8 @@ tzone  = TB1 . STimestamp . zonedTimeToLocalTime
 
 i =: j = (i,j)
 
-convertTrans acc (Transaction {..})  =
-    ["fitid" =: serial txt (Just txFITID)
+convertTrans acc (Transaction {..})  = traceShowId $
+    ["fitid" =: serial txt (if txFITID == "0" then Nothing else Just txFITID)
     ,"memo" =:  opt txt txMEMO
     ,"trntype" =: txt (tail $ show txTRNTYPE )
     ,"dtposted" =: tzone txDTPOSTED
