@@ -130,7 +130,7 @@ poller schm authmap db plugs is_test = do
                           table2 = tblist
                               [ attrT ("poll_name",TB1 (SText pname))
                               , attrT ("schema_name",TB1 (SText schema))
-                              , attrT ("time",IntervalTB1 (interval (Finite $ time current,True) (Finite $ time end,True)))
+                              , attrT ("time",srange (time current) (time end))
                               ]
 
                       (p2,p) <- transactionNoLog metas  $ do
@@ -146,7 +146,7 @@ poller schm authmap db plugs is_test = do
               -- iter polling
               tm <- timer intervalms
               print (intervalms,diffUTCTime current startP,(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))
-              forkIO (void $  threadDelay (max 0 (10^3*(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))) >> putStrLn ("Timer Start" <> T.unpack pname) >> start tm)
+              forkIO (void $  threadDelay (max 0 (10^3*(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))) >> putStrLn ("Timer Start" <> T.unpack pname) >> start tm>> iter (indexRow polling))
               let
                   evIter = indexRow <$> (unionWith const (rumors $ collectionTid dbpol ) (facts ( collectionTid dbpol )<@ tick tm))
 

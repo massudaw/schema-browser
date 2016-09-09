@@ -710,8 +710,9 @@ buildUIDiff km i  tdi = go i tdi
             let unInterval f (IntervalTB1 i ) = f i
                 unInterval _ i = errorWithStackTrace (show i)
             inf <- go ti (fmap (unInterval inf' ) <$> tdi)
-            sup <- go ti (fmap (unInterval sup')  <$> tdi)
             lbd <- fmap Diff <$> checkedWidget (maybe False id . fmap (\(IntervalTB1 i) -> snd . Interval.lowerBound' $i) <$> tdi)
+
+            sup <- go ti (fmap (unInterval sup')  <$> tdi)
             ubd <- fmap Diff<$> checkedWidget (maybe False id .fmap (\(IntervalTB1 i) -> snd . Interval.upperBound' $i) <$> tdi)
             composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
             subcomposed <- UI.div # set UI.children [composed]
