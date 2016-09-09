@@ -79,12 +79,19 @@ readType t = case t of
     KOptional i -> opt LeftTB1 (readType i)
     KSerial i -> opt SerialTB1 (readType i)
     KArray i  -> parseArray (readType i)
-    --KInterval i -> inter (readType i)
+    KInterval i -> inter (readType i)
   where
       opt c f "" =  Just $ c Nothing
       opt c f i = fmap (c .Just) $ f i
       parseArray f i =   fmap ArrayTB1 $  allMaybes $ fmap f $ Non.fromList $ unIntercalate (=='\n') i
-      -- inter f = (\(i,j)-> IntervalTB1 $ join $ Interval.interval <$> (f i) <*> (f $ safeTail j) )  .  break (==',')
+      inter f v = (\(i,j)-> fmap IntervalTB1 $  Interval.interval <$> fmap ((,lbnd).Interval.Finite) (f i) <*> fmap ((,ubnd).Interval.Finite) (f $ tail j) )  .  break (==',') . tail . init $ v
+        where lbnd = case head v of
+                        '(' -> False
+                        '[' -> True
+              ubnd = case last v of
+                        ')' -> False
+                        ']' -> True
+
 
 readPrim t =
   case t of
