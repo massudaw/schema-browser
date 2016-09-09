@@ -89,12 +89,12 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
     let
         legendStyle  table (b,_)
             =  do
-              let item = M.lookup (tableName (fromJust $ M.lookup table (pkMap inf))) (M.fromList  $ fmap (\i@(t,(a,b,c,_))-> (b,i)) allTags)
+              let item = M.lookup (tableName (justError ("no table" <> show table)$ M.lookup table (pkMap inf))) (M.fromList  $ fmap (\i@(t,(a,b,c,_))-> (b,i)) allTags)
               maybe (UI.div) (\(k@(t,(c,tname,_,_))) -> mdo
                 expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
                 let evc = UI.checkedChange expand
                 evb <- stepper False evc
-                missing <- (element $ fromJust $ M.lookup tname  (M.fromList $  itemListEl2)) # sink UI.style (noneShow <$> evb)
+                missing <- (element $ justError ("no table" <> show tname)$ M.lookup tname  (M.fromList $  itemListEl2)) # sink UI.style (noneShow <$> evb)
                 header <- UI.div
                   # set items [element b # set UI.class_"col-xs-1", UI.div # set text  t # set UI.class_ "col-xs-10", element expand ]
                   # set UI.style [("background-color",renderShowable c)]

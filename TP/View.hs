@@ -7,6 +7,7 @@
 module TP.View where
 
 import qualified Data.Aeson as A
+import Utils
 import Safe
 import Debug.Trace
 import Data.Maybe
@@ -132,7 +133,7 @@ writePK r efield =
     (\i ->
           _kvname (fst r) <> "->" <> i <> "->" <>
           T.pack (renderShowable efield)) $
-    T.intercalate "," $
+    T.intercalate ",," $
     fmap
         ((\(i,j) ->
                keyValue i <> "=" <> T.pack (renderShowable j))) $
@@ -144,12 +145,12 @@ readPK inf s = (tb, pk, editField)
     [t,pks,f] = T.splitOn "->" s
     pk =
         (\(k,v) ->
-              (k, fromJust $ readType (keyType k) (T.unpack $ T.drop 1 v))) .
+          (k, justError ("cant read" <> show (k,v)) $ readType (keyType k) (T.unpack $ T.drop 1 v))) .
         first
             (\k ->
-                  fromJust $ F.find ((k ==) . keyValue) pksk) .
+              justError ("cant find " <> show (k,pksk)) $ F.find ((k ==) . keyValue) pksk) .
         T.break ('=' ==) <$>
-        T.splitOn "," pks
+        T.splitOn ",," pks
     tb = lookTable inf t
     editField = lookKey inf t f
     pksk = rawPK tb
