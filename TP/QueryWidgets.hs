@@ -716,7 +716,7 @@ buildUIDiff km i  tdi = go i tdi
             ubd <- fmap Diff<$> checkedWidget (maybe False id .fmap (\(IntervalTB1 i) -> snd . Interval.upperBound' $i) <$> tdi)
             composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
             subcomposed <- UI.div # set UI.children [composed]
-            return $ TrivialWidget ( fmap traceShowId $ (\i j -> traceShowId $ reduceDiff $ [i,j])<$> (fmap traceShowId $ liftA2 (\i j -> PInter True (j,i))<$>  triding lbd <*> triding inf) <*> (fmap traceShowId $ liftA2 (\i j -> PInter False (j,i)) <$> triding ubd <*> triding sup)) subcomposed
+            return $ TrivialWidget ( (\i j -> reduceDiff $ [i,j])<$> (liftA2 (\i j -> PInter True (j,i))<$>  triding lbd <*> triding inf) <*> (liftA2 (\i j -> PInter False (j,i)) <$> triding ubd <*> triding sup)) subcomposed
          (Primitive (AtomicPrim i) ) -> do
             pinp <- fmap (fmap TB1) <$> buildPrim km (fmap (\(TB1 i )-> i) <$> tdi) i
             return $ TrivialWidget (editor <$> tdi <*> triding pinp) (getElement pinp)
@@ -728,33 +728,6 @@ reduceDiff i
   | F.all isDelete i = Delete
   | otherwise = patchEditor $ filterDiff i
 
-buildUI :: [FieldModifier] -> KType (Prim KPrim (Text,Text))-> Tidings (Maybe (FTB Showable)) -> UI (TrivialWidget (Maybe (FTB Showable)))
-buildUI km i  tdi = go i tdi
-  where go i tdi = case i of
-         (KSerial ti) -> do
-           tdnew <- fmap (Just . SerialTB1 ) <$> go ti ( join . fmap unSSerial <$> tdi)
-           retUI <- UI.div # set children [getElement tdnew]
-           paintBorder retUI (facts $ triding tdnew) (facts tdi)
-           return $ TrivialWidget (triding tdnew ) retUI
-         (KDelayed ti) -> do
-           tdnew <- fmap (maybe Nothing (Just .DelayedTB1 . Just)  ) <$> go ti (join . fmap unSDelayed <$> tdi)
-           retUI <- UI.div# set children [getElement tdnew]
-           paintBorder retUI (facts $ triding tdnew) (facts tdi)
-           return $ TrivialWidget (triding tdnew ) retUI
-         (KInterval ti) -> do
-            let unInterval f (IntervalTB1 i ) = f i
-                unInterval _ i = errorWithStackTrace (show i)
-            inf <- fmap (fmap ER.Finite) <$> go ti (fmap (unInterval inf' ) <$> tdi)
-            sup <- fmap (fmap ER.Finite) <$> go ti (fmap (unInterval sup')  <$> tdi)
-            lbd <- fmap Just <$> checkedWidget (maybe False id . fmap (\(IntervalTB1 i) -> snd . Interval.lowerBound' $i) <$> tdi)
-            ubd <- fmap Just <$> checkedWidget (maybe False id .fmap (\(IntervalTB1 i) -> snd . Interval.upperBound' $i) <$> tdi)
-            composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
-            subcomposed <- UI.div # set UI.children [composed]
-            let td = (\m n -> fmap IntervalTB1 $  join . fmap (\i-> if Interval.null i then Nothing else Just i) $ liftF2 interval m n) <$> (liftA2 (,) <$> triding inf  <*> triding lbd) <*> (liftA2 (,) <$> triding sup <*> triding ubd)
-            paintBorder subcomposed (facts td ) (facts tdi)
-            return $ TrivialWidget td subcomposed
-         (Primitive (AtomicPrim i) ) -> fmap (fmap TB1) <$> buildPrim km (fmap (\(TB1 i )-> i) <$> tdi) i
-         i -> errorWithStackTrace (show i)
 
 buildPrim :: [FieldModifier] ->Tidings (Maybe Showable) ->   KPrim -> UI (TrivialWidget (Maybe Showable))
 buildPrim fm tdi i = case i of

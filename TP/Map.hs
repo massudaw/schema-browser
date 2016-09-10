@@ -74,7 +74,7 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
               (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "geo" e
               (Attr _ color )= lookAttr' (meta inf) "color" e
               (Attr _ size )= lookAttr' (meta inf) "size" e
-              projf  r efield@(TB1 (SText field))  = fmap (\i ->  HM.fromList $ i <> [("title"::Text , TB1 $ SText $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)),("size", size),("color",  color)]) $ join $ convField <$> indexFieldRec (indexer field) r
+              projf  r efield@(TB1 (SText field))  = fmap (\i ->  HM.fromList $ i <> [("title"::Text , TB1 $ SText $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)),("size", size),("color",  color)]) $ join $ convField  <$> indexFieldRec (indexer field) r
               proj r = projf r <$> F.toList efields
               convField (ArrayTB1 v) = Just $ [("position",ArrayTB1 v)]
               convField (LeftTB1 v) = join $ convField  <$> v
@@ -110,8 +110,8 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
         fin <- mapM (\((_,(_,tname,fields,efields,proj))) -> do
           let filterInp =  liftA2 (,) positionT  calendarT
           mapUIFinalizerT innerCalendar (\(positionB,calT)-> do
-            liftIO $ print (positionB,calT)
             let pred = predicate (fmap (\(TB1 (SText v))->  lookKey inf tname v) <$>efields )(Just $  fields ) (positionB,Just calT)
+            liftIO $ print (positionB,calT,pred)
             (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA tname Nothing Nothing [] pred
             mapUIFinalizerT innerCalendar (\i -> lift $ createLayers innerCalendar tname positionB (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) (collectionTid v)
             ) filterInp

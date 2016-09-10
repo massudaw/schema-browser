@@ -30,6 +30,12 @@ data Access a
   | Many [Access a]
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
 
+data WherePredicate
+  = LegacyPredicate [(T.Text,Column Key Showable)]
+  | WherePredicate (BoolCollection (Access T.Text ,T.Text,FTB Showable ))
+  deriving (Show,Eq,Ord)
+
+
 data Parser m s a b = P (s,s) (m a b) deriving Functor
 
 type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) IO)) (Access Text) () (Maybe (TBData  Text Showable))
@@ -55,11 +61,6 @@ instance Predicates WherePredicate where
     where projKey (a,b,c) =  (a,(b,c))
   consistent (WherePredicate c1) (WherePredicate (c2 ))  = F.all id $ M.intersectionWith consistent (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
     where projKey (a,b,c) =  (a,(b,c))
-
-data WherePredicate
-  = LegacyPredicate [(T.Text,Column Key Showable)]
-  | WherePredicate (BoolCollection (Access T.Text ,T.Text,FTB Showable ))
-  deriving (Show,Eq,Ord)
 
 
 

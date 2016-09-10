@@ -54,7 +54,7 @@ instance A.ToJSON Showable where
 geoPred geofields (_,ne,sw) = geo
   where
     geo =
-      traceShowId $ OrColl $
+      OrColl $
         PrimColl .
         (, "<@", (IntervalTB1 $ Interval.interval (makePos sw) (makePos ne))) .
         indexer . T.pack . renderShowable <$>

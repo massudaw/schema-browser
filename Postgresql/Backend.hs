@@ -127,140 +127,19 @@ differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 paginate inf t order off size koldpre wherepred = do
     let (que,attr) =
             let
-              que =  selectQuery t <> pred <> orderQ
-            in (que, ordevalue <>  predvalue )
+              que =  selectQuery t koldpre order wherepred
+            in que
     let quec = fromString $ T.unpack $ "SELECT *,count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
     print quec
     v <- uncurry (queryWith (withCount (fromRecord (unTlabel' t)) ) (conn inf ) ) (quec, maybe [] (fmap (firstTB (recoverFields inf)))  attr)
     print (maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int]))
     return ((maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])), fmap fst v)
-  where pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  ( orderquery <> predquery)
-        equality ("IN",k) = inattr k <> " IN " <> " (select unnest(?) )"
-        equality (i,k) = " ? " <> i <> inattr k
-        (orderquery , ordevalue) =
-          let
-            oq = (const $ pure $ generateComparison (first (justLabel t) <$> order)) <$> koldpre
-            koldPk :: Maybe [TB Identity Key Showable]
-            koldPk =  (\k -> uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) k ) <$> koldpre
-            pkParam =  koldPk <> (tail .reverse <$> koldPk)
-          in (oq,pkParam)
-        (predquery , predvalue ) = case traceShowId wherepred of
-              LegacyPredicate lpred ->
-                let
-                  eqquery :: [(Text,TB Identity Key a)] -> [Text]
-                  eqquery eqpred =  (equality . second (firstTB (justLabel t)) <$> eqpred)
-                  eqspred = L.sortBy (comparing ((`L.elemIndex` (fmap fst order)). inattr .snd) )  <$> eqpred
-                  eqpk :: Maybe [TB Identity Key Showable]
-                  eqpk =  (fmap snd <$> eqspred)
-                  eqpred = nonEmpty lpred
-                in (eqquery <$> eqspred , eqpk)
-              WherePredicate wpred -> printPred t wpred
-
+  where
 
         offsetQ = " OFFSET " <> T.pack (show off)
         limitQ = " LIMIT " <> T.pack (show size)
-        orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first (justLabel t) <$> order)
-
-printPred :: Show b => TB3Data (Labeled Text)  Key b ->  BoolCollection (Access Text,Text,FTB Showable) -> (Maybe [Text],Maybe [Column Key Showable])
-printPred t (PrimColl (a,e,i)) =
-                     let idx = indexFieldL a t
-                         opvalue i@"is not null" =  [i]
-                         opvalue i@"is null" =  [i]
-                         opvalue  i = (\v -> i <> " ? " <> inferParamType e (keyType (fst v))) <$> idx
-                         opparam "is not null" =  Nothing
-                         opparam "is null" =  Nothing
-                         opparam _ = Just $ flip Attr i .fst <$> (idx )
-                         result =  ( Just $ zipWith (\i j -> i <> " " <> j) (snd <$> idx) (opvalue e) ,opparam e )
-
-                     in  traceShow result result
-printPred t (OrColl wpred) =
-                let
-                  w = unzip . fmap (printPred  t) <$> nonEmpty wpred
-                in (pure . (\i -> " (" <> i <> ") ") . T.intercalate " OR " <$> join (nonEmpty. concat . catMaybes . fst <$> w) , concat . catMaybes . snd <$> w )
-printPred t (AndColl wpred) =
-                let
-                  w = unzip . fmap (printPred  t) <$> nonEmpty wpred
-                in (pure . (\i -> " (" <> i <> ") ") . T.intercalate " AND " <$>  join (nonEmpty . concat . catMaybes .fst <$> w) , concat . catMaybes . snd <$> w )
 
 
-inferParamType e (KOptional i) = inferParamType e i
-inferParamType "<@" (Primitive (AtomicPrim PDate )) = ":: daterange"
-inferParamType "<@" (Primitive (AtomicPrim PPosition )) = ":: point3range"
-inferParamType "<@" (Primitive (AtomicPrim (PTimestamp i ) )) = case i of
-                                                                  Just i -> ":: tsrange"
-                                                                  Nothing -> ":: tstzrange"
-inferParamType _ _ = ""
-
-
-data View
-  = View
-  { tree :: TB3Data (Labeled Text) Key ()
-  , viewOrder :: [(Key,Order)]
-  , viewProjection :: [Key]
-  , pagination :: (Int,Int,Int,Maybe [(Key,FTB Showable)])
-  }
-
-justLabel :: TB3Data (Labeled Text ) Key () -> Key -> Text
-justLabel t k =  justError ("cant find label"  <> show k <> " - " <> show t).getLabels t $ k
-
-
-
-findFKL  l v =  M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unLB v
-findAttrL l v =  M.lookup (S.fromList $ fmap Inline l) $ M.mapKeys (S.map (fmap keyString)) $ _kvvalues $ unLB v
-
-unLB (Compose (Labeled l v )) = v
-unLB (Compose (Unlabeled v )) = v
-
-indexFieldL :: Show a => Access Text -> TB3Data (Labeled Text) Key a -> [(Key,Text)]
-indexFieldL p@(IProd b l) v = case  findAttrL  l  (snd v) of
-                                Just i -> [utlabel i]
-                                Nothing -> case getCompose $ fromMaybe (errorWithStackTrace ("no fkt" <> show (p,snd v))) $  findFKL l (snd v) of
-                                    Unlabeled i ->
-                                      case i  of
-                                        (FKT ref _ _) ->  (\l -> utlabel . justError ("no attr" <> show (ref,l)) . L.find ((==[l]).  fmap (keyValue . _relOrigin). keyattr ) $ unkvlist ref ) <$>l
-                                        i -> errorWithStackTrace "no fk"
-
-                                    Labeled _ _ -> [] -- Don't support filtering from labeled queries yet
-
-indexFieldL n@(Nested ix@(IProd b l) nt) v
-  =  case getCompose $ justError "no nested" $ findFKL l (snd v) of
-     Unlabeled i -> concat . fmap (indexFieldL nt) .  F.toList . _fkttable $ i
-     Labeled _ _ -> []
-indexFieldL (Many nt ) v =  concat $ flip indexFieldL v <$> nt
-indexFieldL (ISum nt ) v =  concat $ flip indexFieldL v <$> nt
-indexFieldL i v = errorWithStackTrace (show (i,v))
-
-utlabel = tlabel' . getCompose
-
-tlabel' (Labeled l (Attr k _)) =  (k,l)
-tlabel' (Labeled l (IT k tb )) =  (k,l <> " :: " <> tableType tb)
-tlabel' (Unlabeled (Attr k _)) = (k,keyValue k)
-tlabel' (Unlabeled (IT k v)) =  (k,label $ getCompose $ snd (justError "no it label" $ safeHead (F.toList v)))
-
-
-getLabels t k =  M.lookup  k (mapLabels label' t)
-    where label' (Labeled l (Attr k _)) =  (k,l )
-          label' (Labeled l (IT k tb )) = (k, l <> " :: " <> tableType tb)
-          label' (Unlabeled (Attr k _)) = (k,keyValue k)
-          label' (Unlabeled (IT k v)) = (k, label $ getCompose $ snd (justError "no it label" $ safeHead (F.toList v))  )
-
-
-mapLabels label' t =  M.fromList $ fmap (label'. getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)
-
-
--- Generate SORT Order
-
-generateSort v = T.intercalate "," (generateSort' <$> v)
-generateSort' (k,v) =  k <> " " <>   showOrder v
-
--- Generate Comparison Operator
-
-generateComparison ((k,v):[]) = k <>  dir v <> "?"
-  where dir Asc = ">"
-        dir Desc = "<"
-generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is null  then " <>  generateComparison xs <> " else " <> k <>  dir v <> "?" <>" end"
-  where dir Asc = ">"
-        dir Desc = "<"
 
 -- High level db operations
 

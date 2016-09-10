@@ -10,7 +10,9 @@ module Postgresql.Printer
   where
 
 import Query
+import Debug.Trace
 import Data.Ord
+import Step.Common
 import NonEmpty (NonEmpty(..))
 import Data.Functor.Apply
 import Data.Bifunctor
@@ -26,6 +28,7 @@ import Utils
 import Prelude hiding (head)
 import Control.Monad
 import Control.Applicative
+import Data.Functor.Identity
 import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
@@ -250,16 +253,49 @@ selectQuery
         (KV (Compose (Labeled Text) (TB (Labeled Text))))
         Key
         ())
-     -> Text
-selectQuery r = if L.null (snd withDecl )
+    -> Maybe [(Key, FTB Showable)]
+     -> [(Key, Order)]
+     -> WherePredicate
+     -> (Text,Maybe [TB Identity Key Showable])
+selectQuery t koldpre order wherepred = (,ordevalue <> predvalue) $ if L.null (snd withDecl )
     then fst withDecl
     else "WITH RECURSIVE " <> T.intercalate "," ( snd withDecl ) <> fst withDecl
   where withDecl = runWriter tableQuery
-        t = TB1 r
         tableQuery = do
-            tname <- expandTable t
-            tquery <- if isTableRec t || isFilled (getInlineRec t) then return "" else expandQuery False t
-            return $ "SELECT " <> explodeRow t <> " FROM " <>  tname <>  tquery
+            tname <- expandTable (TB1 t)
+            tquery <- if isTableRec (TB1 t) || isFilled (getInlineRec (TB1 t)) then return "" else expandQuery False (TB1 t)
+            return $ "SELECT " <> explodeRow (TB1 t) <> " FROM " <>  tname <>  tquery <> pred <> orderQ
+        (predquery , predvalue ) = case traceShowId wherepred of
+              LegacyPredicate lpred ->
+                let
+                  eqquery :: [(Text,TB Identity Key a)] -> [Text]
+                  eqquery eqpred =  (equality . second (firstTB (justLabel t)) <$> eqpred)
+                  eqspred = L.sortBy (comparing ((`L.elemIndex` (fmap fst order)). inattr .snd) )  <$> eqpred
+                  eqpk :: Maybe [TB Identity Key Showable]
+                  eqpk =  (fmap snd <$> eqspred)
+                  eqpred = nonEmpty lpred
+                in (eqquery <$> eqspred , eqpk)
+              WherePredicate wpred -> printPred t wpred
+        pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  ( orderquery <> predquery)
+        equality ("IN",k) = inattr k <> " IN " <> " (select unnest(?) )"
+        equality (i,k) = " ? " <> i <> inattr k
+        (orderquery , ordevalue) =
+          let
+            oq = (const $ pure $ generateComparison (first (justLabel t) <$> order)) <$> koldpre
+            koldPk :: Maybe [TB Identity Key Showable]
+            koldPk =  (\k -> uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) k ) <$> koldpre
+            pkParam =  koldPk <> (tail .reverse <$> koldPk)
+          in (oq,pkParam)
+        orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first (justLabel t) <$> order)
+
+generateComparison ((k,v):[]) = k <>  dir v <> "?"
+  where dir Asc = ">"
+        dir Desc = "<"
+generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is null  then " <>  generateComparison xs <> " else " <> k <>  dir v <> "?" <>" end"
+  where dir Asc = ">"
+        dir Desc = "<"
+
+
 
 isFilled =  not . L.null
 
@@ -389,5 +425,100 @@ explodeDelayed block assoc leaf (Unlabeled (FKT i rel t )) = case unkvlist i of
              i -> T.intercalate assoc (F.toList $ (explodeDelayed block assoc leaf .getCompose) <$> i) <> assoc <> explodeRow' block assoc leaf t
 
 
+printPred :: Show b => TB3Data (Labeled Text)  Key b ->  BoolCollection (Access Text,Text,FTB Showable) -> (Maybe [Text],Maybe [Column Key Showable])
+printPred t (PrimColl (a,e,i)) = (Just $ catMaybes $ fmap fst idx,Just $ catMaybes $ fmap snd idx)
+  where
+    idx = indexFieldL (e,i) a t
+
+printPred t (OrColl wpred) =
+                let
+                  w = unzip . fmap (printPred  t) <$> nonEmpty wpred
+                in (pure . (\i -> " (" <> i <> ") ") . T.intercalate " OR " <$> join (nonEmpty. concat . catMaybes . fst <$> w) , concat . catMaybes . snd <$> w )
+printPred t (AndColl wpred) =
+                let
+                  w = unzip . fmap (printPred  t) <$> nonEmpty wpred
+                in (pure . (\i -> " (" <> i <> ") ") . T.intercalate " AND " <$>  join (nonEmpty . concat . catMaybes .fst <$> w) , concat . catMaybes . snd <$> w )
+
+
+inferParamType e (KOptional i) = inferParamType e i
+inferParamType "<@" (Primitive (AtomicPrim PDate )) = ":: daterange"
+inferParamType "<@" (Primitive (AtomicPrim PPosition )) = ":: point3range"
+inferParamType "<@" (Primitive (AtomicPrim (PTimestamp i ) )) = case i of
+                                                                  Just i -> ":: tsrange"
+                                                                  Nothing -> ":: tstzrange"
+inferParamType _ _ = ""
+
+
+justLabel :: TB3Data (Labeled Text ) Key () -> Key -> Text
+justLabel t k =  justError ("cant find label"  <> show k <> " - " <> show t).getLabels t $ k
+
+
+
+findFKL  l v =  M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unLB v
+findAttrL l v =  M.lookup (S.fromList $ fmap Inline l) $ M.mapKeys (S.map (fmap keyString)) $ _kvvalues $ unLB v
+
+indexFieldL
+    :: Show a
+    => (Text, FTB Showable)
+    -> Access Text
+    -> TB3Data (Labeled Text) Key a
+    -> [(Maybe Text, Maybe (TB Identity Key Showable))]
+indexFieldL e p@(IProd b l) v =
+    case findAttrL l (snd v) of
+        Just i -> [utlabel e i]
+        Nothing ->
+            case getCompose $
+                 fromMaybe (errorWithStackTrace ("no fkt" <> show (p, snd v))) $
+                 findFKL l (snd v) of
+                Unlabeled i ->
+                    case i of
+                        (FKT ref _ _) ->
+                            (\l ->
+                                  utlabel e .
+                                  justError ("no attr" <> show (ref, l)) .
+                                  L.find
+                                      ((== [l]) .
+                                       fmap (keyValue . _relOrigin) . keyattr) $
+                                  unkvlist ref) <$>
+                            l
+                        i -> errorWithStackTrace "no fk"
+    -- Don't support filtering from labeled queries yet just check if not null for all predicates
+    -- TODO: proper check  accessing the term
+                Labeled i _ -> [(Just (i <> " is not null"), Nothing)]
+indexFieldL e n@(Nested ix@(IProd b l) nt) v =
+    case getCompose $ justError "no nested" $ findFKL l (snd v) of
+        Unlabeled i ->
+            concat . fmap (indexFieldL e nt) . F.toList . _fkttable $ i
+        Labeled i _ -> [(Just (i <> " is not null"), Nothing)]
+indexFieldL e (Many nt) v = concat $ flip (indexFieldL e) v <$> nt
+indexFieldL e (ISum nt) v = concat $ flip (indexFieldL e) v <$> nt
+indexFieldL e i v = errorWithStackTrace (show (i, v))
+
+utlabel (e,i) a = result
+  where
+    idx = tlabel' . getCompose $ a
+    opvalue  i@"is not null" =  i
+    opvalue i@"is null" =  i
+    opvalue  i = (\v -> i <> " ? " <> inferParamType e (keyType (fst v))) $ idx
+    opparam "is not null" =  Nothing
+    opparam "is null" =  Nothing
+    opparam _ = Just $ flip Attr i .fst $ (idx )
+    result =  ( Just $ (\i j -> i <> " " <> j) (snd $ idx) (opvalue e) ,opparam e )
+
+
+tlabel' (Labeled l (Attr k _)) =  (k,l)
+tlabel' (Labeled l (IT k tb )) =  (k,l <> " :: " <> tableType tb)
+tlabel' (Unlabeled (Attr k _)) = (k,keyValue k)
+tlabel' (Unlabeled (IT k v)) =  (k,label $ getCompose $ snd (justError "no it label" $ safeHead (F.toList v)))
+
+
+getLabels t k =  M.lookup  k (mapLabels label' t)
+    where label' (Labeled l (Attr k _)) =  (k,l )
+          label' (Labeled l (IT k tb )) = (k, l <> " :: " <> tableType tb)
+          label' (Unlabeled (Attr k _)) = (k,keyValue k)
+          label' (Unlabeled (IT k v)) = (k, label $ getCompose $ snd (justError "no it label" $ safeHead (F.toList v))  )
+
+
+mapLabels label' t =  M.fromList $ fmap (label'. getCompose.labelValue.getCompose) (getAttr $ joinNonRef' t)
 
 

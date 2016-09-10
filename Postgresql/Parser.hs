@@ -334,7 +334,6 @@ parseRow els  = (char '('  *> (do
   return  im) <*  char ')' )
 
 
-inattr = _relOrigin . head . keyattri
 
 startQuoted p =  do
 --   let backquote = string "\""  <|> string "\\\\" <|> string "\\"

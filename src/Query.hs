@@ -10,6 +10,7 @@ module Query
   ,joinRel
   ,joinRel2
   ,alterKeyType
+  ,inattr
   ,searchGist
   ,rawFullName
   ,unComp
@@ -598,5 +599,8 @@ lookGist un pk  = G.lookup (tbpred un pk)
         tbjust = G.Idex . M.fromList . justError "cant be empty"
 
 
+
+inattr :: TB Identity b a -> b
+inattr = _relOrigin . head . keyattri
 
 interPointPost rel ref tar = interPoint ( rel) ( ref) (tar)
