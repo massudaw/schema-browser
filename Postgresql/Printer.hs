@@ -504,12 +504,10 @@ utlabel (e,i) a = result
     opparam "is null" =  Nothing
     opparam _ = Just $ flip Attr i .fst $ (idx )
     result =  ( Just $ (\i j -> i <> " " <> j) (snd $ idx) (opvalue e) ,opparam e )
-
-
-tlabel' (Labeled l (Attr k _)) =  (k,l)
-tlabel' (Labeled l (IT k tb )) =  (k,l <> " :: " <> tableType tb)
-tlabel' (Unlabeled (Attr k _)) = (k,keyValue k)
-tlabel' (Unlabeled (IT k v)) =  (k,label $ getCompose $ snd (justError "no it label" $ safeHead (F.toList v)))
+    tlabel' (Labeled l (Attr k _)) =  (k,l)
+    tlabel' (Labeled l (IT k tb )) =  (k,l <> " :: " <> tableType tb)
+    tlabel' (Unlabeled (Attr k _)) = (k,keyValue k)
+    tlabel' (Unlabeled (IT k v)) =  (k,label $ getCompose $ snd (justError "no it label" $ safeHead (F.toList v)))
 
 
 getLabels t k =  M.lookup  k (mapLabels label' t)

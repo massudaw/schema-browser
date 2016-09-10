@@ -74,7 +74,7 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
               (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "geo" e
               (Attr _ color )= lookAttr' (meta inf) "color" e
               (Attr _ size )= lookAttr' (meta inf) "size" e
-              projf  r efield@(TB1 (SText field))  = fmap (\i ->  HM.fromList $ i <> [("title"::Text , TB1 $ SText $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)),("size", size),("color",  color)]) $ join $ convField  <$> indexFieldRec (indexer field) r
+              projf  r efield@(TB1 (SText field))  = fmap (\i ->  HM.fromList $ i <> [("id", TB1 $ SText $ writePK r efield   ),("title"::Text , TB1 $ SText $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)),("size", size),("color",  color)]) $ join $ convField  <$> indexFieldRec (indexer field) r
               proj r = projf r <$> F.toList efields
               convField (ArrayTB1 v) = Just $ [("position",ArrayTB1 v)]
               convField (LeftTB1 v) = join $ convField  <$> v
@@ -100,23 +100,35 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
 
     let
       calFun selected = do
-        innerCalendar <-lift $ UI.div # set UI.id_ "map"
+        innerCalendar <-lift $ UI.div # set UI.id_ "map" # set UI.style [("heigth","450px")]
+        let
+          evc = eventClick innerCalendar
+        liftIO$ onEventIO evc putStrLn
         onEventFT (cposE) (\(c,sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3,%4)" innerCalendar c sw ne)
         pb <- lift $ currentValue (facts positionT)
-        lift $ element calendar # set children [innerCalendar]
+        editor <- lift UI.div
+        lift $ element calendar # set children [innerCalendar,editor]
         lift $ calendarCreate  innerCalendar pb ("[]"::String)
         onEventFT (moveend innerCalendar) (liftIO . h )
-        let
         fin <- mapM (\((_,(_,tname,fields,efields,proj))) -> do
           let filterInp =  liftA2 (,) positionT  calendarT
+              t = tname
           mapUIFinalizerT innerCalendar (\(positionB,calT)-> do
             let pred = predicate (fmap (\(TB1 (SText v))->  lookKey inf tname v) <$>efields )(Just $  fields ) (positionB,Just calT)
-            liftIO $ print (positionB,calT,pred)
+               --  pred = WherePredicate $ timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
+               -- fieldKey (TB1 (SText v))=  lookKey inf t v
             (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA tname Nothing Nothing [] pred
+            reftb <- refTables inf (lookTable inf t)
+            let evsel = (\j (tev,pk,_) -> if tableName tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (collectionTid v) <@> fmap (readPK inf . T.pack ) evc
+            tdib <- stepper Nothing (join <$> evsel)
+            let tdi = tidings tdib (join <$> evsel)
+            (el,_,_) <- lift $ crudUITable inf (pure "+")  reftb [] [] (allRec' (tableMap inf) $ lookTable inf t)  tdi
             mapUIFinalizerT innerCalendar (\i -> lift $ createLayers innerCalendar tname positionB (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) (collectionTid v)
+            lift $ UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
             ) filterInp
           ) selected
-
+        let els = foldr (liftA2 (:)) (pure []) fin
+        lift$ element editor  # sink children (facts els)
         return ()
     let calInp = (\i j -> filter (flip L.elem (tableName <$> concat (F.toList i)) .  (^. _2._2)) j )<$> sel <*> pure dashes
     _ <- mapUIFinalizerT calendar calFun calInp
@@ -125,6 +137,14 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
 
 
 txt = TB1. SText
+
+
+readMapPK v = case unsafeFromJSON v of
+
+        [i]  -> Just i
+
+eventClick:: Element -> Event String
+eventClick el = filterJust $ readMapPK <$> domEvent "mapEventClick" el
 
 
 moveend :: Element -> Event ([Double],[Double],[Double])

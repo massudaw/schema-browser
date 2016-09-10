@@ -59,6 +59,7 @@ function createLayer(ref,tname,posj,nej,swj,features){
   }
   var layer = ref.layer[tname];
   layers = points.map(function (p){ 
+  
   var feature ;
   if (p.position.constructor === Array && p.position[1].constructor ===Array ){
    latlonA = p.position.map(function(l){
@@ -70,15 +71,22 @@ function createLayer(ref,tname,posj,nej,swj,features){
    var popup1 = L.popup()
         .setLatLng(latlonA[1])
             .setContent(p.title + '\n' + p.position[1]);
-   layer.addLayer(L.polyline(latlonA,{color:p.color}));
-   layer.addLayer(L.circle(latlonA[0],p.size/3,{color:p.color}).bindPopup(popup0));
-   layer.addLayer(L.circle(latlonA[1],p.size,{color:p.color}).bindPopup(popup1));
+   var line =  L.polyline(latlonA,{color:p.color});
+   line.on('click',function(e ){ref.eventClick(p,e);});
+   layer.addLayer(line);
+   var head = L.circle(latlonA[0],p.size/3,{color:p.color});
+   head.on('click',function(e ){ref.eventClick(p,e);});
+   layer.addLayer(head);
+   var tail = L.circle(latlonA[1],p.size/4,{color:p.color});
+   tail.on('click',function(e ){ref.eventClick(p,e);});
+   layer.addLayer(tail);
   }
   else{
   var popup = L.popup()
         .setLatLng(p.position)
             .setContent(p.title + '\n' + p.position.toString());
-  feature = L.circle(p.position,p.size,{color:p.color}).bindPopup(popup); 
+  feature = L.circle(p.position,p.size,{color:p.color}); 
+  feature.on('click',function(e ){ref.eventClick(p,e);});
   layer.addLayer(feature);
   }
   })
@@ -178,6 +186,12 @@ function clientHandlers(){
       el.drop =  function(e,revert) {
       var evdata = $(this).data('event');
       sendEvent([evdata.id,e == null ? null :new Date (e).toISOString() ].filter(function(e) {return e !== null}).map(function(e){return e.toString()}));
+      return true;
+      }; 
+      }
+   ,'mapEventClick' : function(el,eventType,sendEvent){
+      el.eventClick=  function(e,pos) {
+      sendEvent([e.id].filter(function(e) {return e !== null}).map(function(e){return  e.toString()}));
       return true;
       }; 
       }

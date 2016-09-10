@@ -129,8 +129,8 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
                 let pred = WherePredicate $ timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
                     fieldKey (TB1 (SText v))=  lookKey inf t v
                 (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
-                let evsel = (\j (tev,pk,_) -> if tableName tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (collectionTid v) <@> fmap (readPK inf . T.pack ) evc
                 reftb <- refTables inf (lookTable inf t)
+                let evsel = (\j (tev,pk,_) -> if tableName tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (collectionTid v) <@> fmap (readPK inf . T.pack ) evc
                 tdib <- stepper Nothing (join <$> evsel)
                 let tdi = tidings tdib (join <$> evsel)
                 (el,_,_) <- lift $ crudUITable inf (pure "+")  reftb [] [] (allRec' (tableMap inf) $ lookTable inf t)  tdi
