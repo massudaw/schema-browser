@@ -5,6 +5,7 @@ import Types
 import Control.Applicative.Lift
 import Debug.Trace
 import Data.Monoid
+import Data.Functor.Identity
 import qualified Data.Foldable  as F
 import Control.Monad.Reader
 import Query
@@ -38,6 +39,12 @@ import Data.Traversable (traverse)
 
 findFK  l v =  M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB v
 findAttr l v =  M.lookup (S.fromList $ fmap Inline l) $ M.mapKeys (S.map (fmap keyString)) $ _kvvalues $ unTB v
+findFKLAttr :: Show a => [Text] -> (TB3Data Identity Key a) -> Maybe (Compose Identity  (TB Identity) Key a)
+findFKLAttr l v =   case fmap  (fmap unTB )$ L.find (\(k,v) -> not $ L.null $ L.intersect l (S.toList k) ) $ M.toList $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB (snd v) of
+                      Just (k,(FKT a _ _ )) ->   L.find (\i -> not $ L.null $ L.intersect l $ fmap (keyValue._relOrigin) $ keyattr $ i ) (F.toList $ _kvvalues $a)
+                      Just (k ,i) -> errorWithStackTrace (show (l,k,i))
+                      Nothing -> errorWithStackTrace (show l)
+
 
 replace ix i (Nested k nt) = Nested k (replace ix i nt)
 replace ix i (Many nt) = Many (fmap (replace ix i) nt )
@@ -87,7 +94,9 @@ indexField :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
 indexField p@(IProd b l) v = case unTB <$> findAttr  l  (snd v) of
                                Nothing -> case unTB <$>  findFK l (snd $ v) of
                                   Just (FKT ref _ _) ->  unTB <$> ((\l ->  L.find ((==[l]). fmap (keyValue . _relOrigin). keyattr ) $ unkvlist ref ) $head l)
-                                  Nothing -> Nothing
+                                  Nothing -> case findFKLAttr l v  of
+                                               i -> unTB <$> i
+
                                i -> i
 
 indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findFK l (snd v)
