@@ -79,20 +79,20 @@ calendarSelector = do
     return (sidebar,(triding agenda ,incrementT,triding resolution))
 
 positionSel = do
-    cpos <-lift$ UI.div
-    bcpos <-lift$ UI.button # set text "Localização Atual"
-    sidebar <-lift$ UI.div # set children [bcpos,cpos]
+    cpos <-UI.div
+    bcpos <-UI.button # set text "Localização Atual"
+    sidebar <-UI.div # set children [bcpos,cpos]
     (e,h) <- liftIO$ newEvent
-    positionB <- lift $ stepper Nothing (Just <$>e)
+    positionB <- stepper Nothing (Just <$>e)
     onEventFT (UI.click bcpos) (\_ -> runFunction $ ffi "fireCurrentPosition(%1)" bcpos)
     onEventFT (currentPosition bcpos ) (liftIO. h )
-    lift $ element cpos # sink text (show <$> positionB)
-    return (sidebar,currentPosition bcpos, h,tidings positionB (Just <$> e))
+    element cpos # sink text (show <$> positionB)
+    return (sidebar,currentPosition bcpos, h,tidings positionB (diffEvent positionB  (Just <$> e)))
 
 tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables = do
   let
-      pred =  fmap (uncurry Attr)<$> [("IN",("schema_name",ArrayTB1 $ TB1 . SText <$> iniSchemas ))]
-      authPred =  fmap (uncurry Attr )<$> [("IN",  ("grantee",ArrayTB1 $ TB1 . SText <$> iniUsers )), ("IN",("table_schema",ArrayTB1 $ TB1 . SText <$> iniSchemas  ))]
+      pred =  [(IProd True ["schema_name"],"IN",ArrayTB1 $ TB1 . SText <$> iniSchemas )]
+      authPred =  [(IProd True ["grantee"],"IN",  ArrayTB1 $ TB1 . SText <$> iniUsers ), (IProd True ["table_schema"],"IN",ArrayTB1 $ TB1 . SText <$> iniSchemas  )]
   (orddb ,authorization,translation) <- liftIO $ transactionNoLog  (meta inf) $
       (,,) <$> (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred ))
            <*> (fst <$> (selectFromTable "authorization" Nothing Nothing [] authPred   ))
@@ -141,7 +141,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
           where
             usage = lookAttr' (meta inf ) "usage"   field
 
-  liftIO $ onEventIO ((\i j -> fmap incClick <$> (ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
+  ui $ onEventIO ((\i j -> fmap incClick <$> (ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
     (traverse (traverse (\p -> do
       _ <- transactionNoLog (meta inf ) $ patchFrom  p
       putPatch (patchVar orddb) [p] )))

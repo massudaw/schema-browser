@@ -217,9 +217,9 @@ createTableRefsUnion inf m i  = do
       patchUni = fmap concat $ R.unions $ R.rumors . patchTid .(justError "no table union" . flip M.lookup m) . tableMeta <$>  (rawUnion i)
       patch =  fmap patchunion <$> patchUni
       patchunion  = liftPatch inf (tableName i ) .firstPatch keyValue
-  R.onEventIO patch (hdiff)
+  R.runDynamic $ R.onEventIO patch (hdiff)
   midx <-  atomically$ newTMVar iv
-  midxLoad <-  atomically$ newTMVar S.empty
+  midxLoad <-  atomically$ newTMVar G.empty
   bh <- R.accumB v (flip (L.foldl' apply) <$> patch )
   let bh2 = (R.tidings bh (L.foldl' apply  <$> bh R.<@> patch ))
   bhdiff <- R.stepper diffIni patch
@@ -246,14 +246,14 @@ createTableRefs inf i = do
   (ediff,hdiff) <- R.newEvent
   (iv,v) <- readTable inf "dump" (schemaName inf) (i)
   midx <-  atomically$ newTMVar iv
-  midxLoad <-  atomically $ newTMVar S.empty
+  midxLoad <-  atomically $ newTMVar G.empty
   let applyP = (\l v ->  L.foldl' (\j  i -> apply j i  ) v l  )
       evdiff = applyP <$> ediff
   bh <- R.accumB v evdiff
   let bh2 = R.tidings bh (flip ($) <$> bh R.<@> evdiff )
   bhdiff <- R.stepper diffIni ediff
   (eidx ,hidx) <- R.newEvent
-  bhidx <- R.stepper (M.singleton (LegacyPredicate []) (G.size v,M.empty)) eidx
+  bhidx <- R.stepper (M.singleton mempty (G.size v,M.empty)) eidx
   forkIO $ forever $ (do
       forkIO . hidx =<< atomically (takeTMVar midx)
       return () ) `catch` (\e -> print ("block index",tableName i ,e :: SomeException))
@@ -425,14 +425,14 @@ addStats schema = do
   let metaschema = meta schema
   varmap <- atomically $ readTMVar ( mvarMap schema)
   let stats = lookTable metaschema "table_stats"
-  (dbpol,(_,polling))<- transactionNoLog metaschema $ eventTable stats  Nothing Nothing [] (LegacyPredicate [])
+  (dbpol,(_,polling))<- transactionNoLog metaschema $ eventTable stats  Nothing Nothing [] mempty
   let
     row t s ls = tblist . fmap _tb $ [Attr "schema_name" (TB1 (SText (schemaName schema ) )), Attr "table_name" (TB1 (SText t)) , Attr "size" (TB1 (SNumeric s)), Attr "loadedsize" (TB1 (SNumeric ls)) ]
     lrow t dyn st = liftTable' metaschema "table_stats" . row t (maybe (G.size dyn) (maximum .fmap fst ) $  nonEmpty $  F.toList st) $ (G.size dyn)
     lookdiff tb row =  maybe (Just $ patch row ) (\old ->  diff old row ) (G.lookup (G.Idex (getPKM row)) tb)
   mapM_ (\(m,var)-> do
     let event = R.filterJust $ lookdiff <$> R.facts (collectionTid dbpol ) R.<@> (flip (lrow (_kvname m)) <$>  R.facts (idxTid var ) R.<@> R.rumors (collectionTid  var ) )
-    R.onEventIO event (\i -> do
+    R.runDynamic $ R.onEventIO event (\i -> do
       putPatch (patchVar dbpol) . pure  $ i
       )) (M.toList  varmap)
   return  schema
@@ -491,7 +491,7 @@ selectFromTable :: Text
 									 -> Maybe Int
 									 -> Maybe Int
 									 -> [(Key, Order)]
-									 -> [(Text, Column Text Showable)]
+          -> [(Access Text, Text ,FTB Showable)]
 									 -> ReaderT
 												InformationSchema
 												(WriterT
@@ -500,6 +500,6 @@ selectFromTable :: Text
 
 selectFromTable t a b c p = do
   inf  <- ask
-  selectFrom  t a b c (LegacyPredicate $ fmap (liftField (meta inf) t) <$>p)
+  selectFrom  t a b c (WherePredicate $ AndColl $ PrimColl <$> p)
 
 

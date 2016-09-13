@@ -70,6 +70,9 @@ indexPred (a@(IProd _ _),eq,v) r =
                   IntervalTB1 l ->  maybe False (flip I.member  l) (unSOptional' rv)
 
                   i -> errorWithStackTrace ("Param not implemented " <> show i )
+
+        "IN" ->case v of
+                 ArrayTB1 i -> F.elem rv i
         i -> errorWithStackTrace ("Operator not implemented " <> i )
     Just (IT _ rv) ->
       case eq of

@@ -63,7 +63,7 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
     (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] schemaPred
     (_,(_,evMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "geo" Nothing Nothing [] schemaPred
     (_,(_,eventMap )) <- liftIO$ transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] schemaPred
-    cliZone <- lift $ jsTimeZone
+    cliZone <- jsTimeZone
     let dashes = (\e ->
           let
               (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema_name","table_name"] e
@@ -94,43 +94,44 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
                   # set UI.style [("background-color",renderShowable c)]]) item
 
 
+    mapOpen <- liftIO getCurrentTime
 
-    calendar <-lift$ UI.div # set UI.class_ "col-xs-10"
-    lift$ element body # set children [calendar]
+    calendar <-UI.div # set UI.class_ "col-xs-10"
+    element body # set children [calendar]
 
     let
       calFun selected = do
-        innerCalendar <-lift $ UI.div # set UI.id_ "map" # set UI.style [("heigth","450px")]
+        innerCalendar <-UI.div # set UI.id_ "map" # set UI.style [("heigth","450px")]
         let
           evc = eventClick innerCalendar
-        liftIO$ onEventIO evc putStrLn
-        onEventFT (cposE) (\(c,sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3,%4)" innerCalendar c sw ne)
-        pb <- lift $ currentValue (facts positionT)
-        editor <- lift UI.div
-        lift $ element calendar # set children [innerCalendar,editor]
-        lift $ calendarCreate  innerCalendar pb ("[]"::String)
-        onEventFT (moveend innerCalendar) (liftIO . h )
+        onEvent cposE (\(c,sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3,%4)" innerCalendar c sw ne)
+        pb <- currentValue (facts positionT)
+        editor <- UI.div
+        element calendar # set children [innerCalendar,editor]
+        calendarCreate  innerCalendar pb ("[]"::String)
+        onEvent (moveend innerCalendar) (liftIO . h .traceShowId )
         fin <- mapM (\((_,(_,tname,fields,efields,proj))) -> do
           let filterInp =  liftA2 (,) positionT  calendarT
               t = tname
           mapUIFinalizerT innerCalendar (\(positionB,calT)-> do
-            let pred = predicate (fmap (\(TB1 (SText v))->  lookKey inf tname v) <$>efields )(Just $  fields ) (positionB,Just calT)
-               --  pred = WherePredicate $ timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
-               -- fieldKey (TB1 (SText v))=  lookKey inf t v
-            (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA tname Nothing Nothing [] pred
-            reftb <- refTables inf (lookTable inf t)
-            let evsel = (\j (tev,pk,_) -> if tableName tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (collectionTid v) <@> fmap (readPK inf . T.pack ) evc
+            liftIO $ putStrLn ("query layer" <> show (tname,positionB))
+            let pred = predicate (fmap (\(TB1 (SText v))->  lookKey inf tname v) <$>efields ) (Just $  fields ) (positionB,Just calT)
+            reftb <- refTables' inf (lookTable inf t) (Just 0) pred
+            let v = fmap snd $ reftb ^. _1
+            let evsel = (\j (tev,pk,_) -> if tableName tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
             tdib <- stepper Nothing (join <$> evsel)
             let tdi = tidings tdib (join <$> evsel)
-            (el,_,_) <- lift $ crudUITable inf (pure "+")  reftb [] [] (allRec' (tableMap inf) $ lookTable inf t)  tdi
-            mapUIFinalizerT innerCalendar (\i -> lift $ createLayers innerCalendar tname positionB (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) (collectionTid v)
-            lift $ UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
+            (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi) reftb [] [] (allRec' (tableMap inf) $ lookTable inf t)  tdi
+            mapUIFinalizerT innerCalendar (\i -> do
+              liftIO $ putStrLn ("regen layer" <> show (tname,mapOpen,positionB))
+              createLayers innerCalendar tname positionB (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) v
+            UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
             ) filterInp
           ) selected
         let els = foldr (liftA2 (:)) (pure []) fin
-        lift$ element editor  # sink children (facts els)
+        element editor  # sink children (facts els)
         return ()
-    let calInp = (\i j -> filter (flip L.elem (tableName <$> concat (F.toList i)) .  (^. _2._2)) j )<$> sel <*> pure dashes
+    let calInp = (\i -> filter (flip L.elem (tableName <$> concat (F.toList i)) .  (^. _2._2)) dashes  )<$> sel
     _ <- mapUIFinalizerT calendar calFun calInp
     return (legendStyle,dashes)
 
@@ -140,7 +141,6 @@ txt = TB1. SText
 
 
 readMapPK v = case unsafeFromJSON v of
-
         [i]  -> Just i
 
 eventClick:: Element -> Event String

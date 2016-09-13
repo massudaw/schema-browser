@@ -65,12 +65,6 @@ function createLayer(ref,tname,posj,nej,swj,features){
    latlonA = p.position.map(function(l){
      return L.latLng(l[0],l[1]);
    })
-   var popup0 = L.popup()
-        .setLatLng(latlonA[0])
-            .setContent(p.title + '\n' + p.position[0]);
-   var popup1 = L.popup()
-        .setLatLng(latlonA[1])
-            .setContent(p.title + '\n' + p.position[1]);
    var line =  L.polyline(latlonA,{color:p.color});
    line.on('click',function(e ){ref.eventClick(p,e);});
    layer.addLayer(line);
@@ -82,9 +76,6 @@ function createLayer(ref,tname,posj,nej,swj,features){
    layer.addLayer(tail);
   }
   else{
-  var popup = L.popup()
-        .setLatLng(p.position)
-            .setContent(p.title + '\n' + p.position.toString());
   feature = L.circle(p.position,p.size,{color:p.color}); 
   feature.on('click',function(e ){ref.eventClick(p,e);});
   layer.addLayer(feature);

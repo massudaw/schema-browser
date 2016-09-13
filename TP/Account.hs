@@ -62,7 +62,7 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
     (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] schemaPred
     (_,(_,emap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] schemaPred
     (_,(_,aMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "accounts" Nothing Nothing [] schemaPred
-    cliZone <- lift jsTimeZone
+    cliZone <- jsTimeZone
     let dashes = fmap (\e ->
           let
               (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema_name","table_name"] e
@@ -85,7 +85,7 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
            in (lookDesc,(color,tname,efields,afields,proj))  ) ( G.toList aMap)
 
     let allTags =  dashes
-    itemListEl2 <- lift $ mapM (\i ->
+    itemListEl2 <- mapM (\i ->
       (i^. _2 ._2,) <$> UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")]) dashes
     let
         legendStyle table (b,_)
@@ -101,21 +101,21 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
                   # set UI.style [("background-color",renderShowable c)]
                 UI.div # set children [header,missing]) item
 
-    calendar <- lift $ UI.div # set UI.class_ "col-xs-10"
-    lift $ element body # set children [calendar]
+    calendar <- UI.div # set UI.class_ "col-xs-10"
+    element body # set children [calendar]
 
     let
       calFun selected = do
-          innerCalendarSet <- lift $ M.fromList <$> mapM (\((_,(_,i,_,_,_))) -> (i,) <$> UI.table)  selected
-          innerCalendar  <- lift $ UI.div # set children (F.toList innerCalendarSet)
-          lift $ element calendar # set children [innerCalendar]
+          innerCalendarSet <- M.fromList <$> mapM (\((_,(_,i,_,_,_))) -> (i,) <$> UI.table)  selected
+          innerCalendar  <- UI.div # set children (F.toList innerCalendarSet)
+          element calendar # set children [innerCalendar]
           _ <- mapM (\(cap,(_,t,fields,efields,proj))->  mapUIFinalizerT (fromJust $ M.lookup t innerCalendarSet)
             (\calT -> do
               let pred = WherePredicate $ timePred (fieldKey <$> fields ) calT
                   fieldKey (TB1 (SText v))=  lookKey inf t v
               (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
               mapUIFinalizerT innerCalendar
-                (lift . (\i -> do
+                ((\i -> do
                   let caption =  UI.caption # set text cap
                       header = UI.tr # set items [UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>  fields) , UI.th # set text "Title" ,UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>efields) ]
                       row i = UI.tr # set items [UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)]

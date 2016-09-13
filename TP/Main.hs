@@ -85,22 +85,22 @@ setup smvar args w = void $ do
     expand False = "col-xs-12"
   element body # sink0 UI.class_ (facts $ expand <$> triding menu)
   getBody w #+ [element hoverBoard,element container]
-  fin <- runWriterT $ mapUIFinalizerT body (traverse (\inf-> mdo
+  mapUIFinalizerT body (traverse (\inf-> mdo
     let kitems = M.keys (pkMap inf)
         initKey = (\iv -> maybeToList . join $ fmap (S.fromList .rawPK) . flip M.lookup (_tableMapL inf) <$> join (lookT <$> iv)) <$> cliTid
         lookT iv = let  i = unLeftItens $ lookAttr' (meta inf)  "table" iv
                       in fmap (\(Attr _ (TB1 (SText t))) -> t) i
-    iniKey <-lift$ currentValue (facts initKey)
-    (lookDesc,bset) <- lift$ tableChooser inf  kitems (fst <$> tfilter) (snd <$> tfilter)  (pure (schemaName inf)) (pure (username inf)) (pure iniKey)
+    iniKey <-currentValue (facts initKey)
+    (lookDesc,bset) <- tableChooser inf  kitems (fst <$> tfilter) (snd <$> tfilter)  (pure (schemaName inf)) (pure (username inf)) (pure iniKey)
 
     posSel <- positionSel
-    bd <- lift $ UI.div  # set UI.class_ "col-xs-10"
-    (sidebar,calendarT) <- lift $ calendarSelector
-    tbChooser <- lift$ UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [sidebar,posSel ^._1,getElement bset]# sink0 UI.style (facts $ noneShow <$> triding menu)
-    lift $ element body # set children [tbChooser,bd]
+    bd <- UI.div  # set UI.class_ "col-xs-10"
+    (sidebar,calendarT) <- calendarSelector
+    tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [sidebar,posSel ^._1,getElement bset]# sink0 UI.style (facts $ noneShow <$> triding menu)
+    element body # set children [tbChooser,bd]
     tfilter <-  mapUIFinalizerT bd (\nav-> do
-      bdo <- lift$ UI.div
-      lift $ element bd # set children [bdo]
+      bdo <- UI.div
+      element bd # set children [bdo]
       let
           selTable = flip M.lookup (pkMap inf)
           buttonStyle k (e,sub) = mdo
@@ -122,16 +122,16 @@ setup smvar args w = void $ do
               tb =  justLook   k (pkMap inf)
       case nav of
         "Map" -> do
-          lift $ element bdo  # set UI.style [("width","100%")]
+          element bdo  # set UI.style [("width","100%")]
           fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$> mapWidget bdo calendarT posSel (triding bset) inf
         "Agenda" -> do
-          lift $ element bdo  # set UI.style [("width","100%")]
-          cliZone <- lift $ jsTimeZone
+          element bdo  # set UI.style [("width","100%")]
+          cliZone <- jsTimeZone
           fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
         "Account" -> do
-          lift $ element bdo  # set UI.style [("width","100%")]
+          element bdo  # set UI.style [("width","100%")]
           fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$> accountWidget bdo calendarT (triding bset) inf
-        "Metadata" -> lift $ do
+        "Metadata" -> do
               let metaOpts = ["Poll","Stats","Change","Exception"]
                   iniOpts = join $ fmap (\i -> if elem i metaOpts then Just i else Nothing)$  args `atMay`  7
                   displayOpts  i =  UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right"
@@ -143,13 +143,13 @@ setup smvar args w = void $ do
                 "Poll" -> do
                     element metabody #
                       set items
-                          [ metaAllTableIndexV inf "polling" [("schema_name",TB1 $ SText (schemaName inf) ) ]
-                          , metaAllTableIndexV inf "polling_log" [("schema_name",TB1 $ SText (schemaName inf) ) ]]
+                          [ metaAllTableIndexV inf "polling" [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ]
+                          , metaAllTableIndexV inf "polling_log" [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ]]
                 "Change" -> do
                     case schemaName inf of
                       "gmail" -> do
                         b <- UI.button # set text "sync"
-                        (dbvar,(m,t))  <- liftIO$ transactionNoLog inf $ selectFrom "history" Nothing Nothing [] $ LegacyPredicate []
+                        (dbvar,(m,t))  <- liftIO$ transactionNoLog inf $ selectFrom "history" Nothing Nothing []  mempty
                         itemListEl <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
                         itemListEl2 <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
                         do
@@ -162,16 +162,16 @@ setup smvar args w = void $ do
                         element metabody # set children [itemListEl,itemListEl2]
                       i -> do
                         let selTable = flip M.lookup (pkMap inf)
-                        let pred = [("=",("schema_name",TB1 $ SText (schemaName inf) )) ] <> if M.null tables then [] else [ ("IN",("table_name",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables))))]
+                        let pred = [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],"IN",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables)))]
                         dash <- metaAllTableIndexOp inf "modification_table" pred
                         element metabody # set UI.children [dash]
                 "Stats" -> do
-                    let pred = [("=",("schema_name",TB1 $ SText (schemaName inf) )) ] <> if M.null tables then [] else [ ("IN",("table_name",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables))))]
+                    let pred = [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],"IN",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables)))]
                     stats <- metaAllTableIndexOp inf "table_stats" pred
-                    clients <- metaAllTableIndexOp inf "clients"$  [("=",("schema",LeftTB1 $ Just $ TB1 $ SText (schemaName inf) )) ]<> if M.null tables then [] else [ ("IN",("table",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables))))]
+                    clients <- metaAllTableIndexOp inf "clients"$  [(IProd True ["schema"],"=",LeftTB1 $ Just $ TB1 $ SText (schemaName inf) ) ]<> if M.null tables then [] else [ (IProd True ["table"],"IN",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables)))]
                     element metabody # set UI.children [stats,clients]
                 "Exception" -> do
-                    let pred = [("=",("schema_name",TB1 $ SText (schemaName inf) )) ] <> if M.null tables then [] else [ ("IN",("table_name",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables))))]
+                    let pred = [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],"IN",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables)))]
                     dash <- metaAllTableIndexOp inf "plugin_exception" pred
                     element metabody # set UI.children [dash]
                 i -> errorWithStackTrace (show i)
@@ -180,7 +180,7 @@ setup smvar args w = void $ do
               return  ((buttonStyle,const True))
         "Browser" -> do
               subels <- chooserTable  inf  bset cliTid  cli
-              lift $ element bdo  # set children  subels # set UI.style [("height","90vh"),("overflow","auto")]
+              element bdo  # set children  subels # set UI.style [("height","90vh"),("overflow","auto")]
               return  ((buttonStyle, const True))
         i -> errorWithStackTrace (show i)
          )  (triding nav)
@@ -193,7 +193,7 @@ setup smvar args w = void $ do
 listDBS ::  InformationSchema -> BrowserState -> IO (Tidings (Text,[Text]))
 listDBS metainf dname = do
   map <- (\db -> do
-        (dbvar ,(_,schemasTB)) <- transactionNoLog metainf $  selectFrom "schema" Nothing Nothing [] $ LegacyPredicate []
+        (dbvar ,(_,schemasTB)) <- transactionNoLog metainf $  selectFrom "schema" Nothing Nothing [] mempty
         let schemas schemaTB = fmap ((\(Attr _ (TB1 (SText s)) ) -> s) .lookAttr' metainf "name") $ F.toList  schemasTB
         return ((db,).schemas  <$> collectionTid dbvar)) (T.pack $ dbn dname)
   return map
@@ -232,7 +232,7 @@ authMap smvar sargs (user,pass) schemaN =
     where oauth tag = do
               user <- justError "no google user" <$> lookupEnv "GOOGLE_USER"
               metainf <- metaInf smvar
-              (dbmeta ,_) <- transactionNoLog metainf $ selectFromTable "google_auth" Nothing Nothing [] [("=", Attr "username" (TB1 $ SText  $ T.pack user ))]
+              (dbmeta ,_) <- transactionNoLog metainf $ selectFromTable "google_auth" Nothing Nothing [] [(IProd True ["username"],"=", (TB1 $ SText  $ T.pack user ))]
               let
                   td :: Tidings (OAuth2Tokens)
                   td = (\o -> let
@@ -268,7 +268,7 @@ databaseChooser smvar metainf sargs = do
               usernameB <- stepper userEnv usernameE
 
               load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-4" # sink UI.enabled (facts (isJust <$> dbsWT) )
-              liftIO $ onEventIO (usernameB <@ (UI.click load)) $ traverse (\ v ->do
+              ui $ onEventIO (usernameB <@ (UI.click load)) $ traverse (\ v ->do
                 let auth = authMap smvar sargs (user sargs ,pass sargs )
                 inf <- loadSchema smvar schemaN (rootconn metainf) (user sargs)  auth
                 schemaH $ Just inf)
@@ -280,7 +280,7 @@ databaseChooser smvar metainf sargs = do
             load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-2" # sink UI.enabled (facts (isJust <$> dbsWT) )
             let login =   widT
                 formLogin = form login (UI.click load)
-            liftIO$ onEventIO (rumors formLogin)
+            ui$ onEventIO (rumors formLogin)
               (traverse (\(user,pass)-> do
                 let auth = authMap smvar sargs (user,pass)
                 inf <- loadSchema smvar schemaN (rootconn metainf) user auth

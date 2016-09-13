@@ -42,7 +42,7 @@ import qualified Data.Map as M
 plugs schm authmap db plugs = do
   inf <- metaInf schm
   transactionNoLog inf  $ do
-      (db ,(_,t)) <- selectFrom "plugins"  Nothing Nothing [] $ LegacyPredicate[]
+      (db ,(_,t)) <- selectFrom "plugins"  Nothing Nothing [] $ mempty
       let els = L.filter (not . (`L.elem` G.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
       elsFKS <- mapM loadFKS  els
       liftIO $ transaction inf $ mapM fullDiffInsert  elsFKS
@@ -64,7 +64,7 @@ checkTime curr = do
 poller schm authmap db plugs is_test = do
   metas <- metaInf schm
   let conn = rootconn metas
-  (dbpol,(_,polling))<- transactionNoLog metas $ selectFrom "polling" Nothing Nothing [] $ LegacyPredicate[]
+  (dbpol,(_,polling))<- transactionNoLog metas $ selectFrom "polling" Nothing Nothing [] $ mempty
   let
     project tb =  (schema,intervalms,p)
       where
@@ -153,7 +153,7 @@ poller schm authmap db plugs is_test = do
               bhIter <- stepper (indexRow  polling) evIter
               let  evDiffIter = diffEvent bhIter evIter
 
-              onEventIO  evDiffIter iter )
+              runDynamic $onEventIO  evDiffIter (liftIO . iter) )
           return ()
   mapM poll  enabled
 

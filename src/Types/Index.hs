@@ -7,8 +7,10 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Types.Index
-  (DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,mapKeys ,getIndex ,module G ) where
+  (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,mapKeys ,getIndex ,pickSplitG ,minP,maxP,unFin,module G ) where
 
+import Data.Maybe
+import Control.Applicative
 import Data.GiST.RTree (pickSplitG)
 import Data.Binary
 import Data.Semigroup
@@ -23,6 +25,7 @@ import qualified Data.Foldable as F
 import Data.Functor.Apply
 import Prelude hiding(head,lookup,filter)
 import Data.GiST.GiST as G
+import Data.GiST.BTree (Predicate(..))
 import qualified Data.Interval as Interval
 import Data.Interval (interval,lowerBound',upperBound',lowerBound,upperBound)
 import qualified Data.ExtendedReal as ER
@@ -62,11 +65,15 @@ instance Semigroup DiffShowable where
 
 class Affine f where
   type Tangent f
+  loga :: f -> Tangent f
+  expa :: Tangent f -> f
   subtraction :: f -> f -> Tangent f
   addition :: f -> Tangent f -> f
 
 instance Affine String where
   type Tangent String = [Int]
+  loga = fmap ord
+  expa = fmap chr
   subtraction = diffStr
     where
       diffStr :: String -> String -> [Int]
@@ -82,8 +89,21 @@ instance Affine String where
       addStr (a:as) (b:bs) = chr (ord a + b) : addStr as bs
 
 
+
 instance Affine Showable where
   type Tangent Showable = DiffShowable
+  loga (SText t) =  DSText $ loga (T.unpack t)
+  loga (SDouble t) =  DSDouble $ t
+  loga (SNumeric t) =  DSInt $ t
+  loga (SDate t) =  DSDays  (diffDays  t (ModifiedJulianDay 0))
+  loga (STimestamp t) =  DSDiffTime (diffUTCTime (localTimeToUTC utc t) (UTCTime (ModifiedJulianDay 0) 0))
+  loga i = errorWithStackTrace (show i)
+  expa (DSText t) =  SText $ T.pack $ expa t
+  expa (DSDouble t) =  SDouble $ t
+  expa (DSInt t) =  SNumeric $ t
+  expa (DSDays t) =  SDate $ addDays t (ModifiedJulianDay 0)
+  expa (DSDiffTime t) =  STimestamp $ utcToLocalTime utc $ addUTCTime  t (UTCTime (ModifiedJulianDay 0) 0)
+  expa i = errorWithStackTrace (show i)
   subtraction = diffS
     where
       diffS :: Showable -> Showable -> DiffShowable
@@ -126,9 +146,9 @@ instance  Predicates (Map Key (FTB Showable)) where
   type Penalty (Map Key (FTB Showable )) = (Map Key DiffShowable)
   consistent l i =  if M.null b then False else  F.all id b
     where
-          b =  M.intersectionWith consistent (M.mapKeys keyValue l) (M.mapKeys keyValue i)
+      b =  M.intersectionWith consistent (M.mapKeys keyValue l) (M.mapKeys keyValue i)
   union l = foldl1 (M.intersectionWith (\i j -> union [i,j]) ) l
-  penalty p1 p2 = M.intersectionWith penalty p1 p2
+  penalty p1 p2 = M.mergeWithKey (\_ i j -> Just $penalty i j ) (fmap (loga .unFin . fst .minP)) (fmap (loga . unFin . fst . minP))  p1 p2
   pickSplit = pickSplitG
 
 
@@ -137,7 +157,7 @@ instance  Predicates (Map Key (FTB Showable)) where
 
 data DiffFTB a
   = DiffInterval (DiffFTB a,DiffFTB a)
-  | DiffArray [DiffFTB a]
+  -- | DiffArray [DiffFTB a]
   deriving(Eq,Ord,Show)
 
 instance Affine a => Affine (ER.Extended a) where
@@ -161,6 +181,11 @@ data DiffShowable
 
 instance Predicates (FTB Showable) where
   type Penalty (FTB Showable) = DiffShowable
+  type Query (FTB Showable) = (FTB Showable , T.Text)
+  consistent (LeftTB1 Nothing) (LeftTB1 Nothing)     = True
+  consistent (LeftTB1 (Just i)) (LeftTB1 (Just j) )    = consistent j  i
+  consistent (LeftTB1 (Just i)) (j@(TB1 _) )    = consistent j  i
+  consistent (j@(TB1 _) )  (LeftTB1 (Just i))  = consistent j  i
   consistent (j@(TB1 _) )  (SerialTB1 (Just i))  = consistent j  i
   consistent (j@(TB1 _) )  ((IntervalTB1 i) ) = j `Interval.member` i
   consistent (i@(TB1 _) ) ((ArrayTB1 j)) = F.elem  i j
@@ -174,8 +199,34 @@ instance Predicates (FTB Showable) where
   consistent ((ArrayTB1 i) ) (j  ) = F.all (\i -> consistent i j) i
   consistent   ((SerialTB1 (Just i)) ) (j@(TB1 _) )= consistent i j
   consistent i j  = errorWithStackTrace (show (i,j))
+
+  match  (_,"is not null")  j   = True
+  match  (_,"is null")  j   = False
+  match  (_,"is null")  (LeftTB1 j)   = isNothing j
+  match  v  (LeftTB1 j)   = fromMaybe False (match v <$> j)
+  match  (LeftTB1 j ,v)  i   = fromMaybe False ((\a -> match (a,v) i) <$> j)
+  match  (LeftTB1 i,"=")  (LeftTB1 j)   = fromMaybe False $ liftA2 match ((,"=") <$> i) j
+  match  ((ArrayTB1 j) ,"IN") i  = F.elem i j
+  match  (TB1 i,"=") (TB1 j)   = i == j
+  match  ((ArrayTB1 i) ,"<@") ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
+  match  ((ArrayTB1 j) ,"IN") ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
+  match  ((ArrayTB1 j),"@>" ) ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
+  match (j@(TB1 _),"<@") (ArrayTB1 i) = F.elem j i
+  match (j@(TB1 _),"=")(ArrayTB1 i) = F.elem j i
+  match ((ArrayTB1 i) ,"@>") j@(TB1 _)   = F.elem j i
+  match ((ArrayTB1 i) ,"=")j@(TB1 _)   = F.elem j i
+  match ((ArrayTB1 i) ,"@>") j   = F.all (\i -> match (i,"<@") j) i
+  match (IntervalTB1 i ,"<@") j@(TB1 _)  = j `Interval.member` i
+  match (j@(TB1 _ ),"@>") (IntervalTB1 i)  = j `Interval.member` i
+  match (IntervalTB1 i ,"@>") (IntervalTB1 j)  = j `Interval.isSubsetOf` i
+  match (IntervalTB1 j ,"<@") (IntervalTB1 i)  = j `Interval.isSubsetOf` i
+  match (IntervalTB1 j ,"&&") (IntervalTB1 i)  = Interval.null $ j `Interval.intersection` i
+  match i j = errorWithStackTrace ("no match = " <> show (i,j))
+
   union  l = (IntervalTB1 (minimum (minP <$> l)  `interval` maximum (maxP <$> l)))
+
   pickSplit = pickSplitG
+
   penalty p1 p2 =  (notNeg $ (unFin $ fst $ minP p2) `subtraction`  (unFin $ fst $ minP p1)) <>  (notNeg $ (unFin $ fst $ maxP p1) `subtraction` (unFin $ fst $ maxP p2))
 
 intervalAdd (IntervalTB1 i ) (DiffInterval (off,wid))

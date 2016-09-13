@@ -65,7 +65,7 @@ updateClient metainf inf table tdi clientId now =
 getClient metainf clientId ccli = G.lookup (G.Idex $ M.fromList [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))]) ccli :: Maybe (TBData Key Showable)
 
 deleteClient metainf clientId = do
-  (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing [] $ LegacyPredicate []
+  (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing [] $ mempty
   putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , G.Idex $ M.fromList [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))],[])]
 
 editClient metainf inf dbmeta ccli  table tdi clientId now = do
@@ -81,7 +81,7 @@ addClient clientId metainf inf table dbdata =  do
     now <- getCurrentTime
     let
       tdi = fmap (M.toList .getPKM) $ join $ (\inf table -> fmap (tblist' table ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table))  ). F.toList) <$>  inf  <*> table <*> rowpk dbdata
-    (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing [] $ LegacyPredicate []
+    (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing [] $ mempty
     editClient metainf inf dbmeta ccli table tdi clientId now
     return (clientId, getClient metainf clientId <$> collectionTid dbmeta)
 
@@ -92,18 +92,18 @@ chooserTable inf bset cliTid cli = do
   let
     bBset = triding bset
 
-  nav  <- lift $ buttonDivSet ["Browser"] (pure $ Just "Browser")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")
-  lift $ element nav # set UI.class_ "col-xs-11"
-  layout <- lift $ checkedWidget (pure False)
-  body <- lift$  UI.div
+  nav  <- buttonDivSet ["Browser"] (pure $ Just "Browser")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  element nav # set UI.class_ "col-xs-11"
+  layout <- checkedWidget (pure False)
+  body <- UI.div
   el <- mapUIFinalizerT body (\l -> mapM (\(nav,((table,desc),sub))-> do
-    header <- lift $ UI.h3
+    header <- UI.h3
         # set UI.class_ "header"
         # set text desc
     let layFacts i =  if i then ("col-xs-" <> (show $  (12`div`length l))) else "row"
         layFacts2 i =  if i then ("col-xs-" <> (show $  6)) else "row"
 
-    body <- lift $ case nav of
+    body <- case nav of
         "Browser" -> do
             let selTable = flip M.lookup (pkMap inf)
             if L.length sub == 1
@@ -117,10 +117,10 @@ chooserTable inf bset cliTid cli = do
                   UI.div # set children [l,b]
                   ) sub
               UI.div # set children els
-    lift $ UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFacts <$> triding layout)# set UI.style [("border","2px dotted gray")]
+    UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFacts <$> triding layout)# set UI.style [("border","2px dotted gray")]
         ) l) $ liftA2 (\i j -> (i,) <$> j)  (triding nav) (M.toList <$> bBset)
-  lift $ element body # sink0 UI.children (facts el) # set UI.class_ "col-xs-12"
-  lift $ element layout  # set UI.class_ "col-xs-1"
+  element body # sink0 UI.children (facts el) # set UI.class_ "col-xs-12"
+  element layout  # set UI.class_ "col-xs-1"
   return [getElement layout ,getElement nav ,body]
 
 viewerKey
@@ -153,29 +153,29 @@ viewerKey inf table cli layout cliTid = mdo
      filtering res = (\t -> fmap (filter (filteringPred t )) )<$> filterInpT  <*> res
      pageSize = 20
      lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
-        where (s,_)  = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup (LegacyPredicate []) fixmap
+        where (s,_)  = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
   inisort <- currentValue (facts tsort)
   itemListEl <- UI.select # set UI.class_ "col-xs-6" # set UI.style [("width","100%")] # set UI.size "21"
   let wheel = negate <$> mousewheel itemListEl
   (offset,res3)<- mdo
     offset <- offsetField (pure 0) wheel  (lengthPage <$> facts res3)
-    res3 <- mapT0Event (fmap inisort (fmap G.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap G.toList) $ tidings ( res2) ( rumors vpt) ) )
+    res3 <- ui $ mapT0EventDyn (fmap inisort (fmap G.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap G.toList) $ tidings ( res2) ( rumors vpt) ) )
     return (offset, res3)
   onEvent (rumors $ triding offset) $ (\i ->  liftIO $ do
-    transactionNoLog inf $ eventTable  table  (Just $ i `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  [] $ LegacyPredicate [])
+    transactionNoLog inf $ eventTable  table  (Just $ i `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  [] $ mempty)
   let
     paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
   page <- currentValue (facts paging)
-  res4 <- mapT0Event (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
+  res4 <- ui $ mapT0EventDyn (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
   itemList <- listBoxEl itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (fmap Just <$> tidings st sel ) (pure id) (pure (maybe id attrLine))
   let evsel =  rumors (fmap join  $ triding itemList)
-  (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] ([("=",  uncurry Attr $("schema",LeftTB1 $ Just $TB1 $ SText (schemaName inf) )), ("=",Attr "table" $ LeftTB1 $ Just $ TB1 $ SText (tableName table))])
-  liftIO $ onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) (Just inf) dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< getCurrentTime )
+  (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] ([(IProd True ["schema"],"=",  LeftTB1 $ Just $TB1 $ SText (schemaName inf) ), (IProd True ["table"],"=",LeftTB1 $ Just $ TB1 $ SText (tableName table))])
+  ui $onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) (Just inf) dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< getCurrentTime )
   prop <- stepper cv evsel
   let tds = tidings prop evsel
 
   (cru,ediff,pretdi) <- crudUITable inf (pure "+")  reftb [] [] (allRec' (tableMap inf) table) tds
-  diffUp <-  mapEvent (fmap pure)  $ (\i j -> traverse (return . flip apply j ) i) <$> facts pretdi <@> ediff
+  diffUp <-  ui $ mapEvent (fmap pure)  $ (\i j -> traverse (return . flip apply j ) i) <$> facts pretdi <@> ediff
   let
      sel = filterJust $ safeHead . concat <$> unions [ diffUp,unions [rumors  $ fmap join (triding itemList) ]]
   st <- stepper cv sel

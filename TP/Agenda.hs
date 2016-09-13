@@ -14,7 +14,7 @@ import Control.Concurrent
 import Utils
 import Types.Patch
 import Control.Arrow
-import Control.Lens ((^.), _1, _2, _3)
+import Control.Lens ((^.), _1, mapped,_2, _3)
 import qualified Data.List as L
 import Data.Either
 import Data.Interval (Interval(..))
@@ -84,7 +84,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
 
     iday <- liftIO getCurrentTime
     let allTags =  dashes
-    itemListEl2 <- lift $ mapM (\i ->
+    itemListEl2 <- mapM (\i ->
       (i ^. _2._2 ,) <$> UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")]) allTags
     let
         legendStyle  table (b,_)
@@ -100,8 +100,8 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
                   # set UI.style [("background-color",renderShowable c)]
                 UI.div # set children [header,missing]
                   ) item
-    calendar <- lift $ UI.div # set UI.class_ "col-xs-10"
-    lift $ element body # set children [calendar]
+    calendar <- UI.div # set UI.class_ "col-xs-10"
+    element body # set children [calendar]
     let calFun (agenda,resolution,incrementT,selected) = mdo
             let
               capitalize (i:xs) = toUpper i : xs
@@ -109,11 +109,11 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
               transMode _ "month" = "month"
               transMode True i = "agenda" <> capitalize i
               transMode False i = "basic" <> capitalize i
-            innerCalendar  <- lift $ UI.div
-            sel <- lift UI.div
-            calendarFrame <- lift $ UI.div # set children [innerCalendar] # set UI.style [("height","450px"),("overflow","auto")]
-            lift $ element calendar # set children [calendarFrame,sel]
-            lift $ calendarCreate (transMode agenda resolution) innerCalendar (show incrementT)
+            innerCalendar  <- UI.div
+            sel <- UI.div
+            calendarFrame <- UI.div # set children [innerCalendar] # set UI.style [("height","450px"),("overflow","auto")]
+            element calendar # set children [calendarFrame,sel]
+            calendarCreate (transMode agenda resolution) innerCalendar (show incrementT)
             onEventFT (UI.hover innerCalendar) (const $ do
                     runFunction $ ffi "$(%1).fullCalendar('render')" innerCalendar )
             let
@@ -128,19 +128,20 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
             edits <- mapM (\(cap,(_,t,fields,proj))->  do
                 let pred = WherePredicate $ timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
                     fieldKey (TB1 (SText v))=  lookKey inf t v
-                (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
-                reftb <- refTables inf (lookTable inf t)
-                let evsel = (\j (tev,pk,_) -> if tableName tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (collectionTid v) <@> fmap (readPK inf . T.pack ) evc
+                -- (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
+                reftb <- refTables' inf (lookTable inf t) Nothing pred
+                let v = fmap snd $ reftb ^. _1
+                let evsel = (\j (tev,pk,_) -> if tableName tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
                 tdib <- stepper Nothing (join <$> evsel)
                 let tdi = tidings tdib (join <$> evsel)
-                (el,_,_) <- lift $ crudUITable inf (pure "+")  reftb [] [] (allRec' (tableMap inf) $ lookTable inf t)  tdi
+                (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi)  reftb [] [] (allRec' (tableMap inf) $ lookTable inf t)  tdi
                 mapUIFinalizerT innerCalendar
-                  (lift . (\i -> do
+                  ((\i -> do
                     calendarAddSource innerCalendar  (T.unpack t) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .  concat . fmap (lefts.snd) $ fmap proj $ G.toList i)))
-                  ) (collectionTid v)
-                lift $ UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
+                  ) (v)
+                UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
                 ) selected
-            lift $ element sel # set children (edits)
+            element sel # set children (edits)
 
             {-fins <- mapM (\((_,(_,t,_)),s)->  fmap snd $ mapUIFinalizerT innerCalendar (
                       lift  $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing []  (WherePredicate $ timePred ((\(TB1 (SText v))->  lookKey inf tname v) <$> fields ) cal)) calendarSelT

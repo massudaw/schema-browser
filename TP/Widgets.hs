@@ -4,6 +4,7 @@ module TP.Widgets where
 
 import GHC.Stack
 import Control.Monad.Writer
+import qualified Control.Monad.Trans.Writer as Writer
 import Control.Monad
 import Data.Ord
 import Reactive.Threepenny
@@ -45,7 +46,9 @@ accumT e ev = do
   return $ tidings b (flip ($) <$> b <@> ev)
 
 
-evalUI el f = getWindow el >>= flip runUI f
+evalUI el f = liftIO (getWindow el) >>= \w ->  runUI w f
+
+evalDyn el f = getWindow el >>= \w -> fmap fst $ runDynamic $ runUI w f
 
 accumTds :: MonadIO m => Tidings a -> Event (a -> a) -> m (Tidings a)
 accumTds e l = do
@@ -67,12 +70,11 @@ adEvent ne t = do
 
 
 
-liftEvent :: MonadIO m => Event (Maybe a) -> (MVar (Maybe a) -> m void) -> m ()
+liftEvent :: Event (Maybe a) -> (MVar (Maybe a) -> IO  void) -> Dynamic ()
 liftEvent e h = do
-    ivar <- liftIO $ newEmptyMVar
-    liftIO $ register e (void .  maybe (return ()) ( putMVar ivar .Just )  )
-    h  ivar
-    return ()
+  ivar <- liftIO$ newEmptyMVar
+  register e (void .  maybe (return ()) ( putMVar ivar .Just )  )
+  return ()
 
 cutEvent :: MonadIO m => Event b -> Tidings a -> m (Tidings a)
 cutEvent ev b = do
@@ -108,41 +110,35 @@ addEvent ev b = do
  nbev <- stepper v (diffEvent (facts b) nev)
  return  $tidings nbev (diffEvent nbev nev)
 
-mapUITEvent body f  = mapTEvent (\i -> evalUI body $ f i )
-mapUITEventFin body f  = mapTEventFin (\i -> evalUI body $ f i )
-
-mapDynEvent f x = do
-  t <- mapUITEvent (getElement x) f (triding x)
-  sub <- UI.div # sink items (pure. element  <$> facts t )
-  (e,h) <- liftIO $ newEvent
-  onEvent (rumors t) (\x-> onEvent (rumors . triding $ x) (liftIOLater .  h) )
-  v <- currentValue (facts t)
-  i <- currentValue (facts (triding v))
-  bh <- stepper i e
-  return $ TrivialWidget (tidings bh e) sub
+mapUITEvent body f  = mapTEvent (\i -> evalDyn body $ f i )
+mapUITEventFin body f  = mapTEventFin (\i -> evalDyn body $ f i )
 
 
-joinT :: Tidings (Tidings a) -> IO (Tidings a)
-joinT i = do
-  ev <- joinE (fmap rumors $ rumors i)
-  let current = unionWith const ev (unsafeMapIO currentValue (facts <$> rumors i))
-  vi <- currentValue . facts =<< currentValue (facts i)
-  bh <- stepper vi current
-  return $ tidings bh current
 
-joinE :: Event (Event a) ->  IO (Event a)
-joinE i = do
-  (e,h) <- newEvent
-  onEventIO  i (\i -> void (onEventIO i (\v -> void . forkIO $ h v)))
-  return e
-
-mapEvent :: MonadIO m => (a -> IO b) -> Event a -> m (Event b)
-mapEvent f x = liftIO$ do
+mapEvent :: (a -> IO b) -> Event a -> Dynamic (Event b)
+mapEvent f x = do
   (e,h) <- liftIO $ newEvent
   onEventIO x (\i -> void . forkIO $ (f i)  >>= h)
   return  e
 
 mapT0Event i f x = fst <$> mapT0EventFin i f x
+
+mapTEventDyn f x = do
+  i <- currentValue  (facts x)
+  mapT0EventDyn i f x
+
+mapT0EventDyn :: a -> (a -> Dynamic b) -> Tidings a -> Dynamic (Tidings b)
+mapT0EventDyn i f x = mdo
+  (be,v) <- liftIO$ runDynamic $ f i
+  (e,finmap) <- liftIO$ runDynamic $ mapEventDyn (\(a,b) -> liftIO (sequence (reverse $ zipWith (\i -> traceShow ("Finalizer",i) ) [0..] a)) >>  f b) ((,)<$> (snd <$> t) <@> rumors x)
+  t <- stepper (be,v) e
+  let finall = do
+        (_,fin) <- currentValue t
+        sequence fin
+        sequence finmap
+        return ()
+  Writer.tell [finall]
+  return $ tidings (fst <$>t) (fst <$> e)
 
 mapT0EventFin i f x = do
   be <-  liftIO $ f i
@@ -358,7 +354,7 @@ testPointInRange ui = do
                       getBody w #+ [element e1]
                       return () )
 
-unsafeMapUI el f = unsafeMapIO (\a -> getWindow el >>= \w -> runUI w (f a))
+unsafeMapUI el f = unsafeMapIO (\a -> evalDyn el (f a))
 
 -- paint e b = element e # sink UI.style (greenRed . isJust <$> b)
 paintEdit e b i  = element e # sink0 UI.style ((\ m n -> pure . ("background-color",) $ cond  m n ) <$> b <*> i )
@@ -598,26 +594,18 @@ testWidget e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 
 onEventFT
-  :: MonadWriter [IO ()] (WriterT [IO c] UI) =>
-    Event a ->  (a -> UI b) -> WriterT [(IO c)] UI  ()
+  :: Event a ->  (a -> UI b) -> UI  ()
 onEventFT e h = do
-  fin <- lift $ onEvent e h
-  tell [fin]
+  fin <- onEvent e h
   return ()
 
 mapUIFinalizerT
-  :: MonadWriter [IO ()] (WriterT [IO a] UI) =>
-     Element
-     -> (b -> WriterT [(IO a)] UI b1)
+  :: Element
+     -> (b -> UI b1)
      -> Tidings b
-     -> WriterT [(IO a)] UI (Tidings b1)
-mapUIFinalizerT el m inp = do
-  (out , fin) <- lift $ mapUITEventFin el (\i ->runWriterT $ m i) inp
-  fine <- lift $ onEvent (facts (snd <$> out) <@ rumors inp ) (liftIO . sequence  )
-  tell [fin,fine]
-  return (fst <$> out)
+     -> UI (Tidings b1)
+mapUIFinalizerT el m inp = ui $ do
+  mapTEventDyn (\i -> evalUI el  $ m i) inp
 
 line n =   set  text n
-
-
 

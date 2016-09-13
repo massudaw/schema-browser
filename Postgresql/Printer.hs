@@ -266,7 +266,7 @@ selectQuery t koldpre order wherepred = (,ordevalue <> predvalue) $ if L.null (s
             tquery <- if isTableRec (TB1 t) || isFilled (getInlineRec (TB1 t)) then return "" else expandQuery False (TB1 t)
             return $ "SELECT " <> explodeRow (TB1 t) <> " FROM " <>  tname <>  tquery <> pred <> orderQ
         (predquery , predvalue ) = case traceShowId wherepred of
-              LegacyPredicate lpred ->
+                                     {-  LegacyPredicate lpred ->
                 let
                   eqquery :: [(Text,TB Identity Key a)] -> [Text]
                   eqquery eqpred =  (equality . second (firstTB (justLabel t)) <$> eqpred)
@@ -274,7 +274,7 @@ selectQuery t koldpre order wherepred = (,ordevalue <> predvalue) $ if L.null (s
                   eqpk :: Maybe [TB Identity Key Showable]
                   eqpk =  (fmap snd <$> eqspred)
                   eqpred = nonEmpty lpred
-                in (eqquery <$> eqspred , eqpk)
+                in (eqquery <$> eqspred , eqpk)-}
               WherePredicate wpred -> printPred t wpred
         pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  ( orderquery <> predquery)
         equality ("IN",k) = inattr k <> " IN " <> " (select unnest(?) )"
@@ -499,6 +499,7 @@ utlabel (e,i) a = result
     idx = tlabel' . getCompose $ a
     opvalue  i@"is not null" =  i
     opvalue i@"is null" =  i
+    opvalue "IN"  = (\v -> " IN(" <> " select unnest( ? " <> inferParamType e (keyType (fst v)) <> "))") $ idx
     opvalue  i = (\v -> i <> " ? " <> inferParamType e (keyType (fst v))) $ idx
     opparam "is not null" =  Nothing
     opparam "is null" =  Nothing

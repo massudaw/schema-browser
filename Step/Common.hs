@@ -3,6 +3,8 @@ module Step.Common (PluginTable,Parser(..),Access(..),ArrowReaderM,ArrowReader,K
 
 import Types
 import Types.Index
+import Data.GiST.BTree as G
+import Data.Tuple
 import Control.Monad.Reader
 import Control.Applicative
 import Data.Text (Text)
@@ -31,9 +33,13 @@ data Access a
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
 
 data WherePredicate
-  = LegacyPredicate [(T.Text,Column Key Showable)]
-  | WherePredicate (BoolCollection (Access T.Text ,T.Text,FTB Showable ))
+  -- = LegacyPredicate [(T.Text,Column Key Showable)]
+  = WherePredicate (BoolCollection (Access T.Text ,T.Text,FTB Showable ))
   deriving (Show,Eq,Ord)
+
+instance Monoid WherePredicate where
+  mempty = WherePredicate (AndColl [])
+  mappend (WherePredicate i) (WherePredicate  j) = WherePredicate (AndColl [i,j])
 
 
 data Parser m s a b = P (s,s) (m a b) deriving Functor
@@ -49,18 +55,30 @@ data BoolCollection a
  | PrimColl a
  deriving(Show,Eq,Ord,Functor,Foldable)
 
-instance Predicates (Text,FTB Showable) where
-  type Penalty (Text,FTB Showable) = DiffShowable
-  consistent (i,a) (j,b)
-    | i == j = consistent a b
-    | otherwise = False
+instance Predicates (WherePredicate,G.Predicate Int) where
+  type Penalty (WherePredicate ,G.Predicate Int)= ([DiffShowable],Int)
+  type Query (WherePredicate ,G.Predicate Int)= (WherePredicate ,G.Predicate Int)
+  consistent (c1,i) (c2,j) = consistent c1 c2 && consistent i j
+  penalty (c1,i) (c2,j) = (penalty c1 c2 ,penalty i j)
+  match  (c1,i) (c2,j) = match c1 c2 && match i j
+  union i  = (union (fst <$> i), union (snd <$> i))
+  pickSplit = pickSplitG
 
 instance Predicates WherePredicate where
   type Penalty WherePredicate = [DiffShowable]
-  consistent (WherePredicate c1) (WherePredicate (c2 ))  = F.all id $ M.intersectionWith consistent (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
+  type Query WherePredicate = WherePredicate
+  consistent (WherePredicate c1) (WherePredicate c2)  = F.all id $ M.mergeWithKey (\_ i j -> Just $ consistent (snd i) (snd j)) (const False <$>) (const False <$>) (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
     where projKey (a,b,c) =  (a,(b,c))
-  consistent (WherePredicate c1) (WherePredicate (c2 ))  = F.all id $ M.intersectionWith consistent (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
+
+  match (WherePredicate c1) (WherePredicate c2)  = F.all id $ M.mergeWithKey (\_ i j -> Just $ match (swap i) (snd j)) (const False <$>) (const False <$>) (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
     where projKey (a,b,c) =  (a,(b,c))
+
+  penalty (WherePredicate c1) (WherePredicate c2) =F.toList $ M.mergeWithKey (\_ i j -> Just $ penalty  (snd i) (snd j) ) (fmap (loga .unFin . fst .minP. (\(a,c) -> c))) (fmap (loga . unFin . fst . minP. (\(a,c) -> c))) (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
+    where projKey (a,b,c) =  (a,(b,c))
+  pickSplit = pickSplitG
+  union l = WherePredicate $ AndColl $ fmap (\(k,(a,b))-> PrimColl(k,a,b))$ M.toList $ foldl1 ( M.mergeWithKey (\_ i j -> Just $ pairunion [i,j]) (fmap id) (fmap id) ) ((\(WherePredicate pr ) -> M.fromList .fmap projKey  . F.toList $ pr)<$> l)
+    where projKey (a,b,c) =  (a,(b,c))
+          pairunion i = (head $ fst <$> i,union $ snd <$> i)
 
 
 
