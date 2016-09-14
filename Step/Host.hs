@@ -43,7 +43,7 @@ findFKLAttr :: Show a => [Text] -> (TB3Data Identity Key a) -> Maybe (Compose Id
 findFKLAttr l v =   case fmap  (fmap unTB )$ L.find (\(k,v) -> not $ L.null $ L.intersect l (S.toList k) ) $ M.toList $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB (snd v) of
                       Just (k,(FKT a _ _ )) ->   L.find (\i -> not $ L.null $ L.intersect l $ fmap (keyValue._relOrigin) $ keyattr $ i ) (F.toList $ _kvvalues $a)
                       Just (k ,i) -> errorWithStackTrace (show (l,k,i))
-                      Nothing -> errorWithStackTrace (show l)
+                      Nothing -> Nothing
 
 
 replace ix i (Nested k nt) = Nested k (replace ix i nt)
@@ -94,8 +94,7 @@ indexField :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
 indexField p@(IProd b l) v = case unTB <$> findAttr  l  (snd v) of
                                Nothing -> case unTB <$>  findFK l (snd $ v) of
                                   Just (FKT ref _ _) ->  unTB <$> ((\l ->  L.find ((==[l]). fmap (keyValue . _relOrigin). keyattr ) $ unkvlist ref ) $head l)
-                                  Nothing -> case findFKLAttr l v  of
-                                               i -> unTB <$> i
+                                  Nothing -> unTB <$> findFKLAttr l v
 
                                i -> i
 
