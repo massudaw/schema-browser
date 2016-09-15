@@ -174,6 +174,27 @@ type Column k a = TB Identity k a
 type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Identity))) k a )
 type TB3Data  f k a = (KVMetadata k,Compose f (KV (Compose f (TB f ))) k a )
 
+data Access a
+  = IProd Bool [a]
+  | ISum  [Access a]
+  | Nested (Access a) (Access a)
+  | Rec Int (Access a)
+  | Point Int
+  | Many [Access a]
+  deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
+
+data BoolCollection a
+ = AndColl [BoolCollection a]
+ | OrColl [BoolCollection a]
+ | PrimColl a
+ deriving(Show,Eq,Ord,Functor,Foldable)
+
+type WherePredicate = TBPredicate Text Showable
+
+data TBPredicate k a
+  = WherePredicate (BoolCollection (Access k ,T.Text,FTB a ))
+  deriving (Show,Eq,Ord)
+
 
 kvfullname m = _kvschema m <> "." <> _kvname m
 data KVMetadata k
@@ -972,15 +993,6 @@ intersectPred p1 op p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <
 accessRel (Rel l op m) to tt = liftA2 (,op,) (L.find ((==l).keyAttr ) to ) (L.find ((==m).keyAttr ) tt)
 accessRel (RelAccess l m) to tt = join $ flip (accessRel m ) tt .fmap unTB . F.toList . unKV . snd . unTB1 . _fkttable <$> L.find ((==l).keyAttr ) to
 
-interPoint
-  :: (Ord a ,Show a) => [Rel (FKey (KType (Prim KPrim (Text,Text))))]
-     -> [TB Identity (FKey (KType (Prim KPrim (Text,Text)))) a]
-     -> [TB Identity (FKey (KType (Prim KPrim (Text,Text)))) a]
-     -> Bool
-interPoint ks i j = (\i-> if L.null i then False else  all id  i)$  catMaybes $ fmap (\rel -> fmap (\(i,op,j) -> intersectPredTuple op i j ) $ accessRel rel i j ) ks
-
-intersectPredTuple  op = (\i j-> intersectPred ( keyType (keyAttr i)) op  (keyType (keyAttr j)) (unAttr i) (unAttr j))
-
 nonRefAttr l = concat $  fmap (uncurry Attr) . aattr <$> ( l )
 
 makeLenses ''KV
@@ -1137,3 +1149,18 @@ attrT (i,j) = Compose . Identity $ Attr i j
 
 -- notOptional :: k a -> G.TBIndex k a
 notOptionalPK m =  justError "cant be empty " . traverse unSOptional'  $ m
+
+tbPK :: (Functor f,Ord k)=>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
+tbPK = tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) ))
+
+tbFilter :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
+tbFilter pred (TB1 i) = tbFilter' pred i
+tbFilter pred (LeftTB1 (Just i)) = tbFilter pred i
+tbFilter pred (ArrayTB1 (i :| _ )) = tbFilter pred i
+tbFilter pred (DelayedTB1 (Just i)) = tbFilter pred i
+
+
+
+tbFilter' :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3Data f k a ->  Compose f (KV  (Compose f (TB f ))) k a
+tbFilter' pred (kv,item) =  mapComp (\(KV item)->  KV $ Map.filterWithKey (\k _ -> pred kv k ) $ item) item
+

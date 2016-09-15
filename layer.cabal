@@ -23,6 +23,9 @@ library
     Types.Index
     Types.Patch
     Utils
+    Step.Client
+    Step.Common
+    Step.Host
   default-extensions: TupleSections,OverloadedStrings 
   hs-source-dirs: src
   build-depends:
@@ -103,9 +106,6 @@ executable threepenny-layer
     SchemaQuery
     Siapi3
     SortList
-    Step.Client
-    Step.Common
-    Step.Host
     TP.Main
     TP.Browser
     TP.Selector

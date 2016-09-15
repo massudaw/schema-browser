@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts,OverloadedStrings,TupleSections #-}
+{-# LANGUAGE TypeFamilies,FlexibleContexts,OverloadedStrings,TupleSections #-}
 module SchemaQuery
   (eventTable
   ,createUn
@@ -102,7 +102,7 @@ syncFrom t page size presort fixed = do
       rinf = fromMaybe inf $ M.lookup (fst stable) (depschema inf)
       fromtable = (lookTable rinf $ snd stable)
       defSort = fmap (,Desc) $  rawPK t
-  (l,i) <- local (const rinf) $ tableLoader fromtable Nothing Nothing []  mempty
+  (l,i) <- local (const rinf) $ tableLoader fromtable Nothing Nothing []  fixed
   let
   ix <- mapM (\i -> do
       let
@@ -237,7 +237,7 @@ filterfixed fixed
               then id
               else
                 case fixed of
-                  WherePredicate pred -> G.filter (\tb ->allPred  (\(a,e,v) ->  indexPred  (a,T.unpack e ,v) tb) pred )
+                  WherePredicate pred -> G.filter' (\tb ->allPred  (\(a,e,v) ->  indexPred  (a,T.unpack e ,v) tb) pred ).  G.query fixed
                   -- LegacyPredicate pred -> G.filter (\tb ->(\i -> if F.null i then False else F.all id i )$ M.intersectionWith (\i j -> fromMaybe False $ liftA2 G.consistent (traverse unSOptional  $ M.fromList $ ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB i))) (traverse unSOptional  $M.fromList ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB j)))) (mapFromTBList (fmap (_tb .snd) pred )) (unKV (snd tb)))
   where
     allPred pred (AndColl i ) =F.all (allPred  pred) i
@@ -252,7 +252,7 @@ pageTable flag method table page size presort fixed = do
         sortList  = if L.null presort then defSort else presort
         fixidx = fixed
         pagesize = maybe (opsPageSize $ schemaOps inf)id size
-        ffixed = filterfixed fixed
+        ffixed = filterfixed  fixed
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
     iniT <- do

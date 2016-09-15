@@ -436,8 +436,6 @@ eitherDescPK i@(kv, _)
 tbDesc :: (Functor f,Ord k)=>TB3Data f k a -> Compose f (KV  (Compose f (TB f ))) k a
 tbDesc  =  tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvdesc kv ) ))
 
-tbPK :: (Functor f,Ord k)=>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
-tbPK = tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) ))
 
 
 tbPK' :: (Functor f,Ord k)=>TB3Data f k a -> Compose f (KV  (Compose f (TB f ))) k a
@@ -446,15 +444,8 @@ tbPK' = tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _k
 tbAttr :: (Functor f,Ord k) =>  TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbAttr  =  tbFilter  (\kv k -> not (S.isSubsetOf (S.map _relOrigin k) (S.fromList (_kvpk kv) <> (S.fromList (_kvdesc kv ))) ))
 
-tbFilter' :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3Data f k a ->  Compose f (KV  (Compose f (TB f ))) k a
-tbFilter' pred (kv,item) =  mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item
 tbFilterE  pred (kv,item) =  (kv,mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item)
 
-tbFilter :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
-tbFilter pred (TB1 i) = tbFilter' pred i
-tbFilter pred (LeftTB1 (Just i)) = tbFilter pred i
-tbFilter pred (ArrayTB1 (i :| _ )) = tbFilter pred i
-tbFilter pred (DelayedTB1 (Just i)) = tbFilter pred i
 
 
 
@@ -604,3 +595,14 @@ inattr :: TB Identity b a -> b
 inattr = _relOrigin . head . keyattri
 
 interPointPost rel ref tar = interPoint ( rel) ( ref) (tar)
+
+interPoint
+  :: (Ord a ,Show a) => [Rel (FKey (KType (Prim KPrim (Text,Text))))]
+     -> [TB Identity (FKey (KType (Prim KPrim (Text,Text)))) a]
+     -> [TB Identity (FKey (KType (Prim KPrim (Text,Text)))) a]
+     -> Bool
+interPoint ks i j = (\i-> if L.null i then False else  all id  i)$  catMaybes $ fmap (\rel -> fmap (\(i,op,j) -> intersectPredTuple op i j ) $ accessRel rel i j ) ks
+
+intersectPredTuple  op = (\i j-> intersectPred ( keyType (keyAttr i)) op  (keyType (keyAttr j)) (unAttr i) (unAttr j))
+
+

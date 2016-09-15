@@ -155,7 +155,7 @@ setup smvar args w = void $ do
                         itemListEl <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
                         itemListEl2 <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
                         do
-                          ((DBVar2 tmvard _   _ vpdiff _ _ ),res) <- liftIO$ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] []
+                          ((DBVar2 tmvard _   _ vpdiff _ _ ),res) <- liftIO$ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] mempty
                           let update = F.foldl'(flip (\p-> fmap (flip apply p)))
                           bres <- accumB ((M.empty,G.empty) :: Collection Key Showable) (flip update <$> rumors vpdiff)
                           let

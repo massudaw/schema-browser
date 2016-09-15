@@ -7,11 +7,14 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Types.Index
-  (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,mapKeys ,getIndex ,pickSplitG ,minP,maxP,unFin,module G ) where
+  (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,filter',mapKeys ,getIndex ,pickSplitG ,minP,maxP,unFin,module G ) where
 
 import Data.Maybe
+import Data.Functor.Identity
+import Step.Host
 import Control.Applicative
 import Data.GiST.RTree (pickSplitG)
+import Data.Tuple (swap)
 import Data.Binary
 import Data.Semigroup
 import GHC.Generics
@@ -61,6 +64,32 @@ instance Semigroup DiffShowable where
       appendDShowable (DSDays l ) (DSDays j) =  DSDays $ l + j
       appendDShowable (DSDiffTime l ) (DSDiffTime j) =  DSDiffTime $ l + j
       appendDShowable a b = errorWithStackTrace (show (a,b))
+
+instance Predicates (WherePredicate,Predicate Int) where
+  type Penalty (WherePredicate ,Predicate Int)= ([DiffShowable],Int)
+  type Query (WherePredicate ,Predicate Int)= (WherePredicate ,Predicate Int)
+  consistent (c1,i) (c2,j) = consistent c1 c2 && consistent i j
+  penalty (c1,i) (c2,j) = (penalty c1 c2 ,penalty i j)
+  match  (c1,i) (c2,j) = match c1 c2 && match i j
+  union i  = (union (fst <$> i), union (snd <$> i))
+  pickSplit = pickSplitG
+
+instance Predicates WherePredicate where
+  type Penalty WherePredicate = [DiffShowable]
+  type Query WherePredicate = WherePredicate
+  consistent (WherePredicate c1) (WherePredicate c2)  = F.all id $ M.mergeWithKey (\_ i j -> Just $ consistent (snd i) (snd j)) (const False <$>) (const False <$>) (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
+    where projKey (a,b,c) =  (a,(b,c))
+
+  match (WherePredicate c1) (WherePredicate c2)  = F.all id $ M.mergeWithKey (\_ i j -> Just $ match (swap i) (snd j)) (const False <$>) (const False <$>) (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
+    where projKey (a,b,c) =  (a,(b,c))
+
+  penalty (WherePredicate c1) (WherePredicate c2) =F.toList $ M.mergeWithKey (\_ i j -> Just $ penalty  (snd i) (snd j) ) (fmap (loga .unFin . fst .minP. (\(a,c) -> c))) (fmap (loga . unFin . fst . minP. (\(a,c) -> c))) (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
+    where projKey (a,b,c) =  (a,(b,c))
+  pickSplit = pickSplitG
+  union l = WherePredicate $ AndColl $ fmap (\(k,(a,b))-> PrimColl(k,a,b))$ M.toList $ foldl1 ( M.mergeWithKey (\_ i j -> Just $ pairunion [i,j]) (fmap id) (fmap id) ) ((\(WherePredicate pr ) -> M.fromList .fmap projKey  . F.toList $ pr)<$> l)
+    where projKey (a,b,c) =  (a,(b,c))
+          pairunion i = (head $ fst <$> i,union $ snd <$> i)
+
 
 
 class Affine f where
@@ -122,8 +151,10 @@ instance Affine Showable where
 
 instance Predicates (TBIndex Key Showable) where
   type (Penalty (TBIndex Key Showable)) = Penalty (Map Key (FTB Showable))
+  type Query (TBIndex Key Showable) = TBPredicate T.Text Showable
   consistent (Idex j) (Idex  m )
      = consistent j m
+  match (WherePredicate l)  (Idex v) =  match (WherePredicate l) v
   union l  = Idex   projL
     where
           projL = union  (fmap (\(Idex i) -> i)l)
@@ -143,7 +174,14 @@ instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
 
 -- Attr List Predicate
 instance  Predicates (Map Key (FTB Showable)) where
-  type Penalty (Map Key (FTB Showable )) = (Map Key DiffShowable)
+  type Penalty (Map Key (FTB Showable )) = Map Key DiffShowable
+  type Query (Map Key (FTB Showable )) = TBPredicate T.Text Showable
+  match (WherePredicate a )  v=  go a
+    where
+      go (AndColl l) = F.all go l
+      go (OrColl l ) = F.any go  l
+      -- Index the field and if not found return true to row filtering pass
+      go (PrimColl (i,op,c)) = maybe True (match (c,op)) (fmap _tbattr $ indexField i (undefined,Compose $Identity $ KV (M.mapKeys (Set.singleton .Inline) $ M.mapWithKey (\k v -> Compose $ Identity $ Attr k v) v)) )
   consistent l i =  if M.null b then False else  F.all id b
     where
       b =  M.intersectionWith consistent (M.mapKeys keyValue l) (M.mapKeys keyValue i)
@@ -223,7 +261,11 @@ instance Predicates (FTB Showable) where
   match (IntervalTB1 j ,"&&") (IntervalTB1 i)  = Interval.null $ j `Interval.intersection` i
   match i j = errorWithStackTrace ("no match = " <> show (i,j))
 
-  union  l = (IntervalTB1 (minimum (minP <$> l)  `interval` maximum (maxP <$> l)))
+  union  l
+    | mi == ma = unFinite $ fst $ mi
+    | otherwise =  IntervalTB1 (  mi `interval` ma )
+    where mi = minimum (minP <$> l)
+          ma = maximum (maxP <$> l)
 
   pickSplit = pickSplitG
 
@@ -287,4 +329,5 @@ lookup pk  = safeHead . G.search pk
 toList = getData
 
 filter f = foldl' (\m i -> G.insert i (3,6) m) G.empty  . L.filter (f .fst ) . getEntries
+filter' f = foldl' (\m i -> G.insert i (3,6) m) G.empty  . L.filter (f .fst )
 

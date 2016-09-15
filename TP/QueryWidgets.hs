@@ -332,10 +332,11 @@ tbCaseDiff
   :: InformationSchema
   -> SelPKConstraint
   -> Column CoreKey ()
+  -> [(Column CoreKey () ,TrivialWidget (Editor (Index (Column CoreKey Showable))))]
   -> [(Access Text,Tidings (Maybe (Column CoreKey Showable)))]
   -> Tidings (Maybe (Column CoreKey Showable))
   -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
-tbCaseDiff inf constr i@(FKT ifk  rel tb1) plugItens preoldItems = do
+tbCaseDiff inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
         let
             oldItems =  maybe preoldItems (\v -> if L.null v then preoldItems else fmap (maybe (Just (FKT (kvlist $ fmap  (_tb . uncurry Attr)  v) rel (SerialTB1 Nothing) )) Just ) preoldItems  ) (Tra.traverse (\k -> fmap (k,) . keyStatic $ k ) ( getRelOrigin $ fmap unTB $ unkvlist ifk))
             nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin $ fmap unTB $ unkvlist ifk)
@@ -358,9 +359,9 @@ tbCaseDiff inf constr i@(FKT ifk  rel tb1) plugItens preoldItems = do
         v <- fkUITable rinf (convertConstr ) ref plugItens [] ftdi i
         return $ TrivialWidget  (editor <$> triding v <*> ftdi) (getElement v)
 
-tbCaseDiff inf _ i@(IT na tb1 ) plugItens oldItems
+tbCaseDiff inf _ i@(IT na tb1 ) wl plugItens oldItems
     = iUITableDiff inf plugItens oldItems i
-tbCaseDiff inf _ a@(Attr i _ ) plugItens preoldItems = do
+tbCaseDiff inf _ a@(Attr i _ ) wl plugItens preoldItems = do
         let oldItems = maybe preoldItems (\v-> fmap (Just . fromMaybe (Attr i v)) preoldItems  ) ( keyStatic i)
         tdi <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return oldItems ) (fmap snd plugItens )
         let tdiv = fmap _tbattr <$> tdi
@@ -397,7 +398,7 @@ tbCase inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
           table = lookTable rinf  (_kvname m)
           m = (fst $ unTB1 tb1)
         ref <- refTables rinf   table
-        fkUITable rinf (convertConstr ) ref plugItens nonInjRefs ftdi i
+        fkUITable rinf (convertConstr <> nonInjConstr) ref plugItens nonInjRefs ftdi i
 tbCase inf _ i@(IT na tb1 ) wl plugItens oldItems
     = iUITable inf plugItens oldItems i
 tbCase inf _ a@(Attr i _ ) wl plugItens preoldItems = do
@@ -463,7 +464,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) oldItems = do
                 aref = maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( triding . snd) (L.find (((keyattr m)==) . keyattri .fst) $  refs)
             wn <- (if el
                     then tbCaseDiff -- tbRecCase
-                    else tbCaseDiff ) inf constr (unTB m)  plugattr aref
+                    else tbCaseDiff ) inf constr (unTB m)  w plugattr aref
             lab <- if
               rawIsSum table
               then return wn
@@ -493,7 +494,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) oldItems = do
           keypattr (PInline i _) = [Inline i]
           keypattr (PFK  l _ _ _) = l
           resei :: Tidings (Editor (Index (TBData CoreKey Showable)))
-          resei = (\j -> fmap (\(m,i,l)  -> (m,i,L.filter ((== keyattr j) . keypattr ) l)) ) <$> triding chk <*> tableb
+          resei = (\j -> fmap (\(m,i,l)  -> (m,i,L.filter ((== keyattr j) . keypattr) l))) <$> triding chk <*> tableb
       listBody <- UI.div #  set children (getElement chk : F.toList (getElement .snd <$> fks))
       return (listBody, resei)
     else  do
@@ -620,11 +621,12 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
               dunConstraints (un,o) = flip (\i ->  maybe (const False ) (unConstraint un .tblist' table . fmap _tb ) (traverse (traFAttr unSOptional' ) i ) ) <$> o
               unFinal:: [([Column CoreKey ()], Tidings PKConstraint)]
               unFinal = fmap (fmap dunConstraints) unDeleted
-          -- (listBody,tableb,inscrud) <- eiTable inf   unFinal  refs pmods ftb oldItems
-          (listBody,tablebdiff,inscruddiff) <- eiTableDiff inf   unFinal  refs pmods ftb oldItems
+          (listBody,tableb,inscrud) <- eiTable inf   unFinal  refs pmods ftb oldItems
+            {-(listBody,tablebdiff,inscruddiff) <- eiTableDiff inf   unFinal  refs pmods ftb oldItems
           let
             tableb = recoverEdit <$> oldItems <*> tablebdiff
             inscrud = recoverEdit <$> oldItems <*>inscruddiff
+-}
 
           (panelItems,tdiff)<- processPanelTable listBody inf  (facts tableb) reftb  inscrud table oldItems
           let diff = unionWith const tdiff   (filterJust loadedItensEv)
@@ -825,26 +827,29 @@ buildUIDiff km i  tdi = go i tdi
             composed <- UI.span # set children [offset , offsetDiv]
             return  $ TrivialWidget  (bres) composed
          (KOptional ti) -> do
-           tdnew <- go ti ( join . fmap unSOptional' <$> tdi)
+           let pretdi = ( join . fmap unSOptional' <$> tdi)
+           tdnew <- go ti pretdi
            retUI <- UI.div # set children [getElement tdnew]
            -- Delete equals create
            let
-               test Delete = Diff $ POpt Nothing
-               test Keep = Keep
-               test (Diff i ) = Diff (POpt (Just  i))
+               test Delete  _ = Diff $ POpt Nothing
+               test Keep Nothing = Diff$ POpt Nothing
+               test Keep _ = Keep
+               test (Diff i ) _ = Diff (POpt (Just  i))
 
 
-           return $ TrivialWidget ( test <$> triding tdnew ) retUI
+           return $ TrivialWidget ( test <$> triding tdnew  <*> tdi ) retUI
          (KSerial ti) -> do
            tdnew <- go ti ( join . fmap unSSerial <$> tdi)
            retUI <- UI.div # set children [getElement tdnew]
            -- Delete equals create
            let
-               test Delete = Diff $ PSerial Nothing
-               test Keep = Keep
-               test (Diff i ) = Diff (PSerial (Just  i))
+               test Delete _ = Diff $ PSerial Nothing
+               test Keep Nothing = Diff $ PSerial Nothing
+               test Keep _ = Keep
+               test (Diff i ) _ = Diff (PSerial (Just  i))
 
-           return $ TrivialWidget ( test <$> triding tdnew ) retUI
+           return $ TrivialWidget ( test <$> triding tdnew <*> tdi) retUI
          (KDelayed ti) -> do
            tdnew <-  go ti (join . fmap unSDelayed <$> tdi)
            retUI <- UI.div# set children [getElement tdnew]

@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Host (module Step.Common,attrT,findPK,findFK,findAttr,findFKAttr,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexFieldRec,indexer,indexPred,genPredicate) where
+module Step.Host (module Step.Common,attrT,findPK,findFK,findAttr,findFKAttr,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexField,indexFieldRec,indexer,indexPred,genPredicate) where
 
 import Types
 import Control.Applicative.Lift
@@ -8,7 +8,6 @@ import Data.Monoid
 import Data.Functor.Identity
 import qualified Data.Foldable  as F
 import Control.Monad.Reader
-import Query
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Maybe
