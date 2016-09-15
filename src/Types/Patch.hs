@@ -102,7 +102,7 @@ editor (Just i) Nothing = Delete
 editor (Just i) (Just j) = maybe Keep Diff df
     where df = diff i j
 editor Nothing (Just j) = Diff (patch j)
-editor Nothing Nothing = Delete
+editor Nothing Nothing = Keep
 
 data Editor  a
   = Diff a

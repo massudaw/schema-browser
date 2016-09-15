@@ -12,6 +12,7 @@ module Postgresql.Printer
 import Query
 import Debug.Trace
 import Data.Ord
+import Step.Host (findFK,findAttr,findFKAttr)
 import Step.Common
 import NonEmpty (NonEmpty(..))
 import Data.Functor.Apply
@@ -454,14 +455,6 @@ justLabel t k =  justError ("cant find label"  <> show k <> " - " <> show t).get
 
 
 
-findFKLAttr :: Show a => [Text] -> (TB3Data (Labeled Text) Key a) -> Maybe (Compose (Labeled Text) (TB (Labeled Text )) Key a)
-findFKLAttr l v =   case fmap  (fmap unLB )$ L.find (\(k,v) -> not $ L.null $ L.intersect l (S.toList k) ) $ M.toList $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unLB (snd v) of
-                      Just (k,(FKT a _ _ )) ->   L.find (\i -> not $ L.null $ L.intersect l $ fmap (keyValue._relOrigin) $ keyattr $ i ) (F.toList $ _kvvalues $a)
-                      Just (k ,i) -> errorWithStackTrace (show (l,k,i))
-                      Nothing -> errorWithStackTrace (show l)
-
-findFKL  l v =  M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unLB v
-findAttrL l v =  M.lookup (S.fromList $ fmap Inline l) $ M.mapKeys (S.map (fmap keyString)) $ _kvvalues $ unLB v
 
 indexFieldL
     :: Show a
@@ -470,11 +463,11 @@ indexFieldL
     -> TB3Data (Labeled Text) Key a
     -> [(Maybe Text, Maybe (TB Identity Key Showable))]
 indexFieldL e p@(IProd b l) v =
-    case findAttrL l (snd v) of
+    case findAttr l v of
         Just i -> [utlabel e i]
         Nothing ->
             case
-                   fmap getCompose $ findFKL l (snd v) of
+                   fmap getCompose $ findFK l v of
 
                 Just (Unlabeled i) ->
                     case i of
@@ -491,12 +484,12 @@ indexFieldL e p@(IProd b l) v =
     -- Don't support filtering from labeled queries yet just check if not null for all predicates
     -- TODO: proper check  accessing the term
                 Just (Labeled i _) -> [(Just (i <> " is not null"), Nothing)]
-                Nothing -> case findFKLAttr l v of
+                Nothing -> case findFKAttr l v of
                              Just i -> [utlabel e   i]
                              Nothing  -> errorWithStackTrace "no fk attr"
 
 indexFieldL e n@(Nested ix@(IProd b l) nt) v =
-    case getCompose $ justError "no nested" $ findFKL l (snd v) of
+    case getCompose $ justError "no nested" $ findFK l v of
         Unlabeled i ->
             concat . fmap (indexFieldL e nt) . F.toList . _fkttable $ i
         Labeled i _ -> [(Just (i <> " is not null"), Nothing)]

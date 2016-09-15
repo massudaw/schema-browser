@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Host (module Step.Common,attrT,findPK,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexFieldRec,indexer,indexPred,genPredicate) where
+module Step.Host (module Step.Common,attrT,findPK,findFK,findAttr,findFKAttr,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexFieldRec,indexer,indexPred,genPredicate) where
 
 import Types
 import Control.Applicative.Lift
@@ -33,16 +33,18 @@ import Data.Traversable (traverse)
 
 
 
+unF i = L.head (F.toList (getCompose i))
 
+findFK :: (Foldable f ,Show a) => [Text] -> (TB3Data f Key a) -> Maybe (Compose f (TB f ) Key a)
+findFK  l v =  M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unF (snd v)
 
+findAttr :: (Foldable f ,Show a) => [Text] -> (TB3Data f Key a) -> Maybe (Compose f (TB f ) Key a)
+findAttr l v =  M.lookup (S.fromList $ fmap Inline l) $ M.mapKeys (S.map (fmap keyString)) $ _kvvalues $ unF (snd v)
 
-
-findFK  l v =  M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB v
-findAttr l v =  M.lookup (S.fromList $ fmap Inline l) $ M.mapKeys (S.map (fmap keyString)) $ _kvvalues $ unTB v
-findFKLAttr :: Show a => [Text] -> (TB3Data Identity Key a) -> Maybe (Compose Identity  (TB Identity) Key a)
-findFKLAttr l v =   case fmap  (fmap unTB )$ L.find (\(k,v) -> not $ L.null $ L.intersect l (S.toList k) ) $ M.toList $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unTB (snd v) of
+findFKAttr :: (Foldable f ,Show a) => [Text] -> (TB3Data f Key a) -> Maybe (Compose f (TB f ) Key a)
+findFKAttr l v =   case fmap  (fmap unF )$ L.find (\(k,v) -> not $ L.null $ L.intersect l (S.toList k) ) $ M.toList $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unF (snd v) of
                       Just (k,(FKT a _ _ )) ->   L.find (\i -> not $ L.null $ L.intersect l $ fmap (keyValue._relOrigin) $ keyattr $ i ) (F.toList $ _kvvalues $a)
-                      Just (k ,i) -> errorWithStackTrace (show (l,k,i))
+                      Just (k ,i) -> errorWithStackTrace (show l)
                       Nothing -> Nothing
 
 
@@ -91,22 +93,22 @@ indexPred (a@(IProd _ _),eq,v) r =
         "is null" -> isNothing $ unSOptional' rv
 
 indexField :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
-indexField p@(IProd b l) v = case unTB <$> findAttr  l  (snd v) of
-                               Nothing -> case unTB <$>  findFK l (snd $ v) of
+indexField p@(IProd b l) v = case unTB <$> findAttr  l  v of
+                               Nothing -> case unTB <$>  findFK l (v) of
                                   Just (FKT ref _ _) ->  unTB <$> ((\l ->  L.find ((==[l]). fmap (keyValue . _relOrigin). keyattr ) $ unkvlist ref ) $head l)
-                                  Nothing -> unTB <$> findFKLAttr l v
+                                  Nothing -> unTB <$> findFKAttr l v
 
                                i -> i
 
-indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findFK l (snd v)
+indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findFK l v
 
 joinFTB (LeftTB1 i) =  LeftTB1 $ fmap joinFTB i
 joinFTB (ArrayTB1 i) =  ArrayTB1 $ fmap joinFTB i
 joinFTB (TB1 i) =  i
 
 indexFieldRec :: Access Text -> TBData Key Showable -> Maybe (FTB Showable)
-indexFieldRec p@(IProd b l) v = _tbattr . unTB <$> findAttr  l  (snd v)
-indexFieldRec n@(Nested ix@(IProd b l) (Many[nt]) ) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK l (snd v)
+indexFieldRec p@(IProd b l) v = _tbattr . unTB <$> findAttr  l  v
+indexFieldRec n@(Nested ix@(IProd b l) (Many[nt]) ) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK l v
 
 genPredicate i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
 genPredicate i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)

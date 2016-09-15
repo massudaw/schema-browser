@@ -81,7 +81,7 @@ addClient clientId metainf inf table dbdata =  do
     now <- getCurrentTime
     let
       tdi = fmap (M.toList .getPKM) $ join $ (\inf table -> fmap (tblist' table ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table))  ). F.toList) <$>  inf  <*> table <*> rowpk dbdata
-    (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing [] $ mempty
+    (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing []  mempty
     editClient metainf inf dbmeta ccli table tdi clientId now
     return (clientId, getClient metainf clientId <$> collectionTid dbmeta)
 

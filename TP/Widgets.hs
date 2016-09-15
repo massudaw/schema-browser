@@ -59,7 +59,6 @@ accumTds e l = do
 accumTs :: MonadIO m => a -> [Event (a -> a)] -> m (Tidings a)
 accumTs e = accumT e . foldr1 (unionWith (.))
 
-joinTEvent = mapTEvent id
 
 adEvent :: Event a -> Tidings a -> UI (Tidings a)
 adEvent ne t = do
@@ -110,10 +109,9 @@ addEvent ev b = do
  nbev <- stepper v (diffEvent (facts b) nev)
  return  $tidings nbev (diffEvent nbev nev)
 
-mapUITEvent body f  = mapTEvent (\i -> evalDyn body $ f i )
-mapUITEventFin body f  = mapTEventFin (\i -> evalDyn body $ f i )
 
 
+mapEventFin f = fmap (fmap fst).ui . mapEventDyn (liftIO . f)
 
 mapEvent :: (a -> IO b) -> Event a -> Dynamic (Event b)
 mapEvent f x = do
@@ -121,7 +119,6 @@ mapEvent f x = do
   onEventIO x (\i -> void . forkIO $ (f i)  >>= h)
   return  e
 
-mapT0Event i f x = fst <$> mapT0EventFin i f x
 
 mapTEventDyn f x = do
   i <- currentValue  (facts x)
@@ -140,17 +137,7 @@ mapT0EventDyn i f x = mdo
   Writer.tell [finall]
   return $ tidings (fst <$>t) (fst <$> e)
 
-mapT0EventFin i f x = do
-  be <-  liftIO $ f i
-  (e,fin) <- mapEventFin f (rumors x)
-  t <- stepper be e
-  return $ (tidings t e,fin)
 
-mapTEvent f x = fst <$> mapTEventFin f x
-
-mapTEventFin f x = do
-  i <- currentValue (facts x)
-  mapT0EventFin i f x
 
 
 
@@ -256,6 +243,22 @@ buttonDivSetT ks sort binit   el st = mdo
         b <- el k
         let ev = pure k <@ UI.click  b
         return (k,(b,ev))
+
+buttonDivSetFun :: Eq a => [a] -> Tidings (Maybe a)  ->  (a -> UI Element ) -> UI (TrivialWidget a)
+buttonDivSetFun ks binit   el = mdo
+  buttons <- mapM (buttonString  bv ) ks
+  dv <- UI.div # set children (fst <$> buttons)
+  let evs = foldl (unionWith const) (filterJust $ rumors binit) (snd <$> buttons)
+  v <- currentValue (facts binit)
+  bv <- stepper (maybe (justError "no head" $ safeHead ks) id v) evs
+  return (TrivialWidget (tidings bv evs) dv)
+    where
+      buttonString   bv k = do
+        b <- el k # sink UI.enabled (not . (k==) <$> bv)
+        let ev = pure k <@ UI.click  b
+        return (b,ev)
+
+
 
 
 buttonDivSet :: Eq a => [a] -> Tidings (Maybe a)  ->  (a -> UI Element ) -> UI (TrivialWidget a)

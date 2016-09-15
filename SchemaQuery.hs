@@ -20,7 +20,7 @@ module SchemaQuery
   ,transactionNoLog
   ,filterfixed
   )where
-import Graphics.UI.Threepenny.Core (mapEventFin)
+import Graphics.UI.Threepenny.Core (mapEventDyn)
 
 import RuntimeTypes
 import Step.Host
@@ -133,19 +133,6 @@ deleteFrom  a   = do
 
 
 mergeDBRef  = (\(j,i) (m,l) -> ((M.unionWith (\(a,b) (c,d) -> (a+c,b<>d))  j  m , i <>  l )))
-
-mapTEvent f x = fst <$> mapTEventFin f x
-
-mapTEventFin f x = do
-  i <- currentValue (facts x)
-  mapT0EventFin i f x
-
-mapT0EventFin i f x = do
-  (e,fin) <- mapEventFin f (rumors x)
-  be <-  liftIO $ f i
-  t <- stepper be e
-  return $ (tidings t e,fin)
-
 
 
 --rebaseKey inf t  (LegacyPredicate fixed ) = LegacyPredicate $ fmap (liftField inf (tableName t) . firstTB  keyValue)  <$> fixed

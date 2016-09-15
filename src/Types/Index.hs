@@ -261,11 +261,13 @@ notNeg (DSDiffTime l )
 unFin (Interval.Finite (TB1 i) ) = i
 unFin o = errorWithStackTrace (show o)
 
+minP (LeftTB1 (Just i) ) = minP i
 minP ((IntervalTB1 i) ) = lowerBound' i
 minP (i@(TB1 _) ) = (ER.Finite $ i,True)
 minP ((ArrayTB1 i) ) = minP$   F.minimum i
 minP i = errorWithStackTrace (show i)
 
+maxP (LeftTB1 (Just i) ) = minP i
 maxP ((IntervalTB1 i) ) = upperBound' i
 maxP (i@(TB1 _) ) = (ER.Finite $ i,True)
 maxP ((ArrayTB1 i) ) =   maxP $  F.maximum i
