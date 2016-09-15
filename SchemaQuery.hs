@@ -238,7 +238,6 @@ filterfixed fixed
               else
                 case fixed of
                   WherePredicate pred -> G.filter' (\tb ->allPred  (\(a,e,v) ->  indexPred  (a,T.unpack e ,v) tb) pred ).  G.query fixed
-                  -- LegacyPredicate pred -> G.filter (\tb ->(\i -> if F.null i then False else F.all id i )$ M.intersectionWith (\i j -> fromMaybe False $ liftA2 G.consistent (traverse unSOptional  $ M.fromList $ ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB i))) (traverse unSOptional  $M.fromList ( (\(Attr k v)-> (k,v))<$> nonRefTB (unTB j)))) (mapFromTBList (fmap (_tb .snd) pred )) (unKV (snd tb)))
   where
     allPred pred (AndColl i ) =F.all (allPred  pred) i
     allPred pred (OrColl i ) =F.any (allPred  pred) i

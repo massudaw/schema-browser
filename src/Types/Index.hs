@@ -256,8 +256,9 @@ instance Predicates (FTB Showable) where
   match ((ArrayTB1 i) ,"@>") j   = F.all (\i -> match (i,"<@") j) i
   match (IntervalTB1 i ,"<@") j@(TB1 _)  = j `Interval.member` i
   match (j@(TB1 _ ),"@>") (IntervalTB1 i)  = j `Interval.member` i
-  match (IntervalTB1 i ,"@>") (IntervalTB1 j)  = j `Interval.isSubsetOf` i
-  match (IntervalTB1 j ,"<@") (IntervalTB1 i)  = j `Interval.isSubsetOf` i
+  match (j@(TB1 _ ),"=")(IntervalTB1 i)  = j `Interval.member` i
+  match (IntervalTB1 i ,"<@") (IntervalTB1 j)  = j `Interval.isSubsetOf` i
+  match (IntervalTB1 j ,"@>") (IntervalTB1 i)  = j `Interval.isSubsetOf` i
   match (IntervalTB1 j ,"&&") (IntervalTB1 i)  = Interval.null $ j `Interval.intersection` i
   match i j = errorWithStackTrace ("no match = " <> show (i,j))
 
