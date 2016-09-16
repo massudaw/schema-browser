@@ -1334,7 +1334,7 @@ tableIndexA inf metaname env =   do
 metaAllTableIndexA inf metaname env =   do
   let modtable = lookTable (meta inf) tname
       tname = metaname
-  viewer (meta inf) modtable (Le.over (_1) (liftAccess inf tname)  <$> env)
+  viewer (meta inf) modtable (Le.over (_1) (liftAccess (meta inf)tname)  <$> env)
 
 
 
@@ -1413,20 +1413,6 @@ viewer inf table envK = mdo
   UI.div # set children [getElement offset, itemList]
 
 
-exceptionAllTableIndex e@(inf,table,index) =   metaAllTableIndexA inf "plugin_exception" envA
-  where
-    envA = [(IProd True["schema_name"],"=" ,TB1 $ SText (schemaName inf))
-           ,(IProd True ["table_name"],"=", TB1 $ SText (tableName table))]
-              -- , IT ( "data_index2" ) (ArrayTB1 $  fmap ((\(i,j) -> TB1 $tblist $ fmap _tb [Attr "key" (TB1 $ SText i) ,Attr "val" (TB1 (SDynamic j))]). first keyValue)index) ]
-
-
-dashBoardAllTableIndex e@(inf,table,index) =   metaAllTableIndexA inf "modification_table" envA
-  where
-    envA = [(IProd True ["schema_name"],"=" ,TB1 $ SText (schemaName inf))
-           ,(IProd True["schema_name"],"=" ,TB1 $ SText (tableName table))
-               ]
-              -- , IT "data_index2" (ArrayTB1 $  fmap ((\(i,j) -> TB1 $tblist $ fmap _tb [Attr "key" (TB1 $ SText i) ,Attr "val" (TB1 (SDynamic j))]). first keyValue)index) ]
-
 
 
 renderTableNoHeaderSort2 header inf modtablei out = do
@@ -1440,7 +1426,7 @@ lookAttrM  inf k (i,m) = unTB <$> M.lookup (S.singleton (Inline (lookKey inf (_k
     where
       err= justError ("no attr " <> show k <> " for table " <> show (_kvname i))
 
-lookAttrs' inf k (i,m) = unTB $ err $  M.lookup ((S.fromList (lookKey inf (_kvname i) <$> k))) ta
+lookAttrs' inf k (i,m) = unTB $ err $  M.lookup (S.fromList (lookKey inf (_kvname i) <$> k)) ta
     where
       ta = M.mapKeys (S.map _relOrigin) (unKV m)
       err= justError ("no attr " <> show k <> " for table " <> show (_kvname i,M.keys ta ))

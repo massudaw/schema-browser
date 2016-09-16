@@ -38,7 +38,7 @@ main = do
     amap = authMap smvar db (user db , pass db )
 
   print "Load Metadata"
-  metas <- keyTables  smvar conn  ("metadata", T.pack $ user db) amap plugList
+  (metas ,_)<- runDynamic $keyTables  smvar conn  ("metadata", T.pack $ user db) amap plugList
 
   print "Load Plugins"
   plugs smvar amap db plugList

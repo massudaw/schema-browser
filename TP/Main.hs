@@ -67,7 +67,7 @@ setup smvar args w = void $ do
   metainf <- justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
   let bstate = argsToState args
   let amap = authMap smvar bstate (user bstate , pass bstate)
-  inf <- liftIO$ traverse (\i -> loadSchema smvar (T.pack i) (conn metainf) (user bstate)  amap ) $ schema  bstate
+  inf <- ui $ traverse (\i -> loadSchema smvar (T.pack i) (conn metainf) (user bstate)  amap ) $ schema  bstate
   (cli,cliTid) <- liftIO $ addClient (fromIntegral $ hashUnique $ wId w) metainf inf ((\t inf -> lookTable inf . T.pack $ t) <$> tablename bstate  <*> inf  ) bstate
   (evDB,chooserItens) <- databaseChooser smvar metainf bstate
   body <- UI.div# set UI.class_ "col-xs-12"
@@ -270,10 +270,10 @@ databaseChooser smvar metainf sargs = do
               usernameB <- stepper userEnv usernameE
 
               load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-4" # sink UI.enabled (facts (isJust <$> dbsWT) )
-              ui $ onEventIO (usernameB <@ (UI.click load)) $ traverse (\ v ->do
+              ui$ mapEventDyn  ( traverse (\ v ->do
                 let auth = authMap smvar sargs (user sargs ,pass sargs )
                 inf <- loadSchema smvar schemaN (rootconn metainf) (user sargs)  auth
-                schemaH $ Just inf)
+                liftIO$schemaH $ Just inf))(usernameB <@ (UI.click load))
               user <- UI.div # set children [usernamel,username] # set UI.class_ "col-xs-8"
               UI.div # set children [user ,load]
 
@@ -282,19 +282,19 @@ databaseChooser smvar metainf sargs = do
             load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-2" # sink UI.enabled (facts (isJust <$> dbsWT) )
             let login =   widT
                 formLogin = form login (UI.click load)
-            ui$ onEventIO (rumors formLogin)
+            ui$ mapTEventDyn
               (traverse (\(user,pass)-> do
                 let auth = authMap smvar sargs (user,pass)
                 inf <- loadSchema smvar schemaN (rootconn metainf) user auth
-                schemaH $ Just inf
-                ))
+                liftIO$schemaH $ Just inf
+                ))(formLogin)
 
             UI.div # set children (widE <> [load])
 
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   authBox <- UI.div # sink items (maybeToList . fmap genSchema <$> facts dbsWT) # set UI.class_ "col-xs-4" # set UI.style [("border", "gray solid 2px")]
   let auth = authMap smvar sargs (user sargs ,pass sargs )
-  inf <- traverse (\i -> liftIO $loadSchema smvar (T.pack i ) (rootconn metainf) (user sargs) auth) (schema sargs)
+  inf <- ui $traverse (\i -> loadSchema smvar (T.pack i ) (rootconn metainf) (user sargs) auth) (schema sargs)
   chooserB  <- stepper inf schemaE
   let chooserT = tidings chooserB schemaE
   element authBox  # sink UI.style (facts $ (\a b -> noneShow $  fromMaybe True $  liftA2 (\(db,sc) (csch) -> if sc == (schemaName csch )then False else True ) a b )<$>    dbsWT <*> chooserT )

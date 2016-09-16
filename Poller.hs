@@ -77,7 +77,8 @@ poller schm authmap db plugs is_test = do
           (schema,intervalms ,pname ) = project tb
           indexRow polling = justError (show $ tbpred tb) $ G.lookup (tbpred tb) polling
           tbpred = G.Idex . getPKM
-      inf <- keyTables  schm conn  (schema, T.pack $ user db) authmap plugs
+
+      (inf ,_)<- runDynamic $keyTables  schm conn  (schema, T.pack $ user db) authmap plugs
       (startP,_,_,current) <- checkTime (indexRow polling )
       flip traverse plug $ \p -> do
           let f = pluginStatic p
@@ -103,8 +104,8 @@ poller schm authmap db plugs is_test = do
                           let listRes = L.take fetchSize . G.toList $  listResAll
 
                           let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
-                              tdInput i =  isJust  $ checkTable  (lookKey inf a <$> fst f) i
-                              tdOutput1 i =  not $ isJust  $ checkTable  (lookKey inf a <$> snd f) i
+                              tdInput i =  isJust  $ checkTable  (liftAccess inf a $ fst f) i
+                              tdOutput1 i =  not $ isJust  $ checkTable  (liftAccess inf a $ snd f) i
 
                           i <-  mapConcurrently (mapM (\inp -> catchPluginException inf a pname (M.toList $ getPKM inp) $ transactionLog inf $ do
                               ovm  <- fmap (liftTable' inf a) <$> liftIO (elemp (Just $ mapKey' keyValue inp))

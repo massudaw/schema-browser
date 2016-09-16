@@ -199,7 +199,7 @@ lookSTable :: InformationSchema -> (Text,Text) -> Table
 lookSTable inf (s,t) = justError ("no table: " <> T.unpack t) $ join $ M.lookup t <$> M.lookup s (tableMap inf)
 
 lookKey :: InformationSchema -> Text -> Text -> Key
-lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k ) $ HM.lookup (t,k) (keyMap inf)
+lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k  <> show (HM.toList (keyMap inf))) $ HM.lookup (t,k) (keyMap inf)
 
 
 putPatch m = atomically . writeTQueue m -- . force
