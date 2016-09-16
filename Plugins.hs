@@ -221,7 +221,7 @@ cnpjForm = BoundedPlugin2 url
               odxR "description" -< t
           addrs = proc t -> do
               odxR "logradouro" -< t
-              odxR "number " -< t
+              odxR "number" -< t
               odxR "uf" -< t
               odxR "cep" -< t
               odxR "complemento" -< t

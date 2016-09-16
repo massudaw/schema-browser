@@ -222,7 +222,8 @@ instance Predicates (FTB Showable) where
   type Query (FTB Showable) = (FTB Showable , T.Text)
   consistent (LeftTB1 Nothing) (LeftTB1 Nothing)     = True
   consistent (LeftTB1 (Just i)) (LeftTB1 (Just j) )    = consistent j  i
-  consistent (LeftTB1 (Just i)) (j@(TB1 _) )    = consistent j  i
+  consistent (LeftTB1 (Just i)) j     = consistent j  i
+  consistent i (LeftTB1 (Just j))     = consistent i  j
   consistent (j@(TB1 _) )  (LeftTB1 (Just i))  = consistent j  i
   consistent (j@(TB1 _) )  (SerialTB1 (Just i))  = consistent j  i
   consistent (j@(TB1 _) )  ((IntervalTB1 i) ) = j `Interval.member` i

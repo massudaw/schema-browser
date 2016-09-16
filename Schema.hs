@@ -507,7 +507,7 @@ selectFromTable t a b c p = do
   selectFrom  t a b c (WherePredicate $ AndColl $ fmap (lookAccess inf t). PrimColl <$> p)
 
 liftAccess :: InformationSchema -> Text -> Access Text  -> Access Key
-liftAccess inf tname (ISum i) =  Many $ fmap (liftAccess inf tname)  i
+liftAccess inf tname (ISum i) =  ISum $ fmap (liftAccess inf tname)  i
 liftAccess inf tname (Many i) =  Many $ fmap (liftAccess inf tname)  i
 liftAccess inf tname (IProd b l) = IProd b $ fmap (lookKey inf tname) l
 liftAccess inf tname (Nested i c) = Nested ref (liftAccess inf (snd l) c)

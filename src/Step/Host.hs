@@ -100,6 +100,7 @@ indexField p@(IProd b l) v = case unTB <$> findAttr  l  v of
                                i -> i
 
 indexField n@(Nested ix@(IProd b l) nt ) v = unTB <$> findFK l v
+indexField i _= errorWithStackTrace (show i)
 
 joinFTB (LeftTB1 i) =  LeftTB1 $ fmap joinFTB i
 joinFTB (ArrayTB1 i) =  ArrayTB1 $ fmap joinFTB i
