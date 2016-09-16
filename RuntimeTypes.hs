@@ -30,6 +30,7 @@ import Database.PostgreSQL.Simple hiding (Binary)
 import Data.Functor.Identity
 import Data.Map (Map)
 import qualified Data.Map as M
+import qualified Data.HashMap.Strict as HM
 import qualified Data.Set as S
 import Data.Set (Set)
 import Control.Monad.Reader
@@ -50,7 +51,7 @@ data InformationSchemaKV k v
   { schemaName :: Text
   , username :: Text
   , authtoken :: Auth
-  , _keyMapL :: Map (Text,Text) k
+  , _keyMapL :: HM.HashMap (Text,Text) k
   , _backendKey :: Map Unique PGKey
   , _pkMapL :: Map (Set k ) Table
   , _tableMapL :: Map Text Table
@@ -198,7 +199,7 @@ lookSTable :: InformationSchema -> (Text,Text) -> Table
 lookSTable inf (s,t) = justError ("no table: " <> T.unpack t) $ join $ M.lookup t <$> M.lookup s (tableMap inf)
 
 lookKey :: InformationSchema -> Text -> Text -> Key
-lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k ) $ M.lookup (t,k) (keyMap inf)
+lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k ) $ HM.lookup (t,k) (keyMap inf)
 
 
 putPatch m = atomically . writeTQueue m -- . force

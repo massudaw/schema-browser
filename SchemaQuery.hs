@@ -29,6 +29,7 @@ import qualified Data.GiST.BTree as G
 import Step.Common
 
 import Data.Time
+import Control.Lens as Le
 import Data.Either
 import Control.Concurrent.Async
 import Control.Monad.Trans.Maybe
@@ -44,6 +45,7 @@ import Control.Concurrent.STM
 import Reactive.Threepenny
 import Utils
 import qualified Data.Map as M
+import qualified Data.HashMap.Strict as HM
 import qualified Data.Set as S
 import qualified Data.Traversable as Tra
 import qualified Data.List as L
@@ -136,7 +138,7 @@ mergeDBRef  = (\(j,i) (m,l) -> ((M.unionWith (\(a,b) (c,d) -> (a+c,b<>d))  j  m 
 
 
 --rebaseKey inf t  (LegacyPredicate fixed ) = LegacyPredicate $ fmap (liftField inf (tableName t) . firstTB  keyValue)  <$> fixed
-rebaseKey inf t  (WherePredicate fixed ) = WherePredicate fixed
+rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $( Le.over Le._1 (fmap (lookKey inf (tableName t).keyValue))) <$> fixed
 
 tableLoader :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicate
     -> TransactionM (DBVar,Collection Key Showable)
@@ -190,7 +192,7 @@ tableLoader table  page size presort fixed
                                     let li = F.toList l
                                         test f (Nested (IProd _ p) _ ,_,_)  = p == f
                                         test v f = False
-                                     in WherePredicate $ AndColl $ fmap PrimColl $ L.filter (test (keyValue._relOrigin <$>  i) ) li
+                                     in WherePredicate $ AndColl $ fmap PrimColl $ L.filter (test (_relOrigin <$>  i) ) li
                 liftIO $ putStrLn $ "loadForeign table" <> show (tableName table)
                 (db,(_,tb)) <- local (const rinf) (tableLoader table  Nothing Nothing []  predicate)
                 let
@@ -205,7 +207,7 @@ tableLoader table  page size presort fixed
                        fk <- joinFK i
                        return $ addAttr  fk i) <$> m
                 liftIO $ putStrLn $ "reloadForeign table" <> show (tableName table) <> " - " <> show (lefts joined)
-                fetched <-traverse (\pred -> local (const rinf) $  tableLoader table Nothing Nothing []  (WherePredicate (AndColl pred))) $ traverse (\k -> (\ v ->  (PrimColl (IProd True [ keyValue ._relOrigin  $ k], "IN", ArrayTB1 (Non.fromList v)))) <$> ( nonEmpty $ catMaybes $  fmap (_tbattr .unTB) . L.find ((== [k]) . keyattr ) <$> (lefts joined) ))  i
+                fetched <-traverse (\pred -> local (const rinf) $  tableLoader table Nothing Nothing []  (WherePredicate (AndColl pred))) $ traverse (\k -> (\ v ->  (PrimColl (IProd True [ _relOrigin  $ k], "IN", ArrayTB1 (Non.fromList v)))) <$> ( nonEmpty $ catMaybes $  fmap (_tbattr .unTB) . L.find ((== [k]) . keyattr ) <$> (lefts joined) ))  i
                 return (rights  joined)) )  (return v) $ P.sortBy (P.comparing pathRelRel)  (S.toList remoteFKS)
           resFKS <- getFKS res
           return (resFKS,x,o )) table page size presort fixed

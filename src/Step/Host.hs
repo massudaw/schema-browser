@@ -34,15 +34,15 @@ import Data.Traversable (traverse)
 
 unF i = L.head (F.toList (getCompose i))
 
-findFK :: (Foldable f ,Show a) => [Text] -> (TB3Data f Key a) -> Maybe (Compose f (TB f ) Key a)
-findFK  l v =  M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unF (snd v)
+findFK :: (Foldable f ,Show a) => [Key] -> (TB3Data f Key a) -> Maybe (Compose f (TB f ) Key a)
+findFK  l v =  M.lookup (S.fromList l) $M.mapKeys (S.map ( _relOrigin)) $ _kvvalues $ unF (snd v)
 
-findAttr :: (Foldable f ,Show a) => [Text] -> (TB3Data f Key a) -> Maybe (Compose f (TB f ) Key a)
-findAttr l v =  M.lookup (S.fromList $ fmap Inline l) $ M.mapKeys (S.map (fmap keyString)) $ _kvvalues $ unF (snd v)
+findAttr :: (Foldable f ,Show a) => [Key] -> (TB3Data f Key a) -> Maybe (Compose f (TB f ) Key a)
+findAttr l v =  M.lookup (S.fromList $ fmap Inline l) $  _kvvalues $ unF (snd v)
 
-findFKAttr :: (Foldable f ,Show a) => [Text] -> (TB3Data f Key a) -> Maybe (Compose f (TB f ) Key a)
-findFKAttr l v =   case fmap  (fmap unF )$ L.find (\(k,v) -> not $ L.null $ L.intersect l (S.toList k) ) $ M.toList $ M.mapKeys (S.map (keyString. _relOrigin)) $ _kvvalues $ unF (snd v) of
-                      Just (k,(FKT a _ _ )) ->   L.find (\i -> not $ L.null $ L.intersect l $ fmap (keyValue._relOrigin) $ keyattr $ i ) (F.toList $ _kvvalues $a)
+findFKAttr :: (Foldable f ,Show a) => [Key] -> (TB3Data f Key a) -> Maybe (Compose f (TB f ) Key a)
+findFKAttr l v =   case fmap  (fmap unF )$ L.find (\(k,v) -> not $ L.null $ L.intersect l (S.toList k) ) $ M.toList $ M.mapKeys (S.map ( _relOrigin)) $ _kvvalues $ unF (snd v) of
+                      Just (k,(FKT a _ _ )) ->   L.find (\i -> not $ L.null $ L.intersect l $ fmap (_relOrigin) $ keyattr $ i ) (F.toList $ _kvvalues $a)
                       Just (k ,i) -> errorWithStackTrace (show l)
                       Nothing -> Nothing
 
@@ -91,10 +91,10 @@ indexPred (a@(IProd _ _),eq,v) r =
         "is not null" -> isJust $ unSOptional' rv
         "is null" -> isNothing $ unSOptional' rv
 
-indexField :: Access Text -> TBData Key Showable -> Maybe (Column Key Showable)
+indexField :: Access Key -> TBData Key Showable -> Maybe (Column Key Showable)
 indexField p@(IProd b l) v = case unTB <$> findAttr  l  v of
                                Nothing -> case unTB <$>  findFK l (v) of
-                                  Just (FKT ref _ _) ->  unTB <$> ((\l ->  L.find ((==[l]). fmap (keyValue . _relOrigin). keyattr ) $ unkvlist ref ) $head l)
+                                  Just (FKT ref _ _) ->  unTB <$> ((\l ->  L.find ((==[l]). fmap ( _relOrigin). keyattr ) $ unkvlist ref ) $head l)
                                   Nothing -> unTB <$> findFKAttr l v
 
                                i -> i
@@ -105,7 +105,7 @@ joinFTB (LeftTB1 i) =  LeftTB1 $ fmap joinFTB i
 joinFTB (ArrayTB1 i) =  ArrayTB1 $ fmap joinFTB i
 joinFTB (TB1 i) =  i
 
-indexFieldRec :: Access Text -> TBData Key Showable -> Maybe (FTB Showable)
+indexFieldRec :: Access Key-> TBData Key Showable -> Maybe (FTB Showable)
 indexFieldRec p@(IProd b l) v = _tbattr . unTB <$> findAttr  l  v
 indexFieldRec n@(Nested ix@(IProd b l) (Many[nt]) ) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK l v
 
@@ -118,7 +118,7 @@ genPredicate _ i = errorWithStackTrace (show i)
 genNestedPredicate n i v = fmap (\(a,b,c) -> (Nested n a , b ,c)) <$> genPredicate i v
 
 
-checkField :: Access Text -> Column Key Showable -> Errors [Access Text] (Column Key Showable)
+checkField :: Access Key -> Column Key Showable -> Errors [Access Key] (Column Key Showable)
 checkField p@(Point ix) _ = failure [p]
 checkField n@(Nested ix@(IProd b l) nt ) t
   = case t of
@@ -144,7 +144,7 @@ checkFTB  (Many [m@(Rec _ _ )]) t = checkFTB  m t
 
 checkFTB f (TB1 k) = TB1 <$> checkTable' f k
 
-checkTable' :: Access Text -> TBData Key Showable -> Errors [Access Text] (TBData Key Showable)
+checkTable' :: Access Key -> TBData Key Showable -> Errors [Access Key] (TBData Key Showable)
 checkTable' (ISum []) v
   = failure [ISum []]
 checkTable'  f@(ISum ls) (m,v)
@@ -158,19 +158,19 @@ checkTable l b = eitherToMaybe $ runErrors (checkTable' l b)
 
 
 
-hasProd :: (Access Text -> Bool) -> Access Text ->  Bool
+hasProd :: (Access Key -> Bool) -> Access Key ->  Bool
 hasProd p (Many i) = any p i
 hasProd p i = False
 
-findProd :: (Access Text -> Bool) -> Access Text -> Maybe (Access Text)
+findProd :: (Access Key -> Bool) -> Access Key -> Maybe (Access Key)
 findProd p (Many i) = L.find p i
 findProd p i = Nothing
 
-isNested :: Access Text -> Access Text -> Bool
+isNested :: Access Key -> Access Key -> Bool
 isNested p (Nested pn i) =  p == pn
 isNested p i =  False
 
-uNest :: Access Text -> Access Text
+uNest :: Access Key -> Access Key
 uNest (Nested pn i) = i
 
 findPK = concat . fmap keyattr  .toList . _kvvalues  . unTB . tbPK

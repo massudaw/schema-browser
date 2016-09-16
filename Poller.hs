@@ -91,7 +91,7 @@ poller schm authmap db plugs is_test = do
                   when (is_test || diffUTCTime current start  >  fromIntegral intervalsec) $ do
                       putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let fetchSize = 200
-                          pred =  (WherePredicate $ AndColl (catMaybes [ genPredicate True (fst f) , genPredicate False (snd f)]) )
+                          pred =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicate True (fst f) , genPredicate False (snd f)])
                       (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  (Just 0) (Just fetchSize) []  pred
                       threadDelay 10000
                       let sizeL = justLook pred  l
@@ -103,8 +103,8 @@ poller schm authmap db plugs is_test = do
                           let listRes = L.take fetchSize . G.toList $  listResAll
 
                           let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
-                              tdInput i =  isJust  $ checkTable  (fst f) i
-                              tdOutput1 i =   not $ isJust  $ checkTable  (snd f) i
+                              tdInput i =  isJust  $ checkTable  (lookKey inf a <$> fst f) i
+                              tdOutput1 i =  not $ isJust  $ checkTable  (lookKey inf a <$> snd f) i
 
                           i <-  mapConcurrently (mapM (\inp -> catchPluginException inf a pname (M.toList $ getPKM inp) $ transactionLog inf $ do
                               ovm  <- fmap (liftTable' inf a) <$> liftIO (elemp (Just $ mapKey' keyValue inp))

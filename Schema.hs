@@ -41,6 +41,7 @@ import qualified Data.Vector as V
 
 import Control.Applicative
 import qualified Data.List as L
+import qualified Data.HashMap.Strict as HM
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
@@ -103,20 +104,20 @@ keyTables ,keyTablesInit :: MVar (Map Text InformationSchema )->  Connection -> 
 keyTables schemaVar conn (schema ,user) authMap pluglist = maybe (keyTablesInit schemaVar conn (schema,user) authMap pluglist ) return  . (M.lookup schema ) =<< readMVar schemaVar
 
 
-extendedRel :: Map (Text,Text) Key -> Text -> Text -> Text -> Key -> Rel Key
+extendedRel :: HM.HashMap (Text,Text) Key -> Text -> Text -> Text -> Key -> Rel Key
 extendedRel inf t a b c =  snd access $ (lrel (fst access))
 
     where path :: [Text]
           path = T.splitOn "->" a
           lrel :: Text -> Rel Key
-          lrel t =  Rel (justLook (t ,  last path) inf ) b c
+          lrel t =  Rel (justError "no key" $ HM.lookup (t ,  last path) inf ) b c
           access :: (Text, Rel Key -> Rel Key)
           access = foldl cons  (t,id) (init path)
             where
               cons (t,j) i = (snd $ inlineName $ keyType  k ,j . RelAccess k )
                 where
                   k :: Key
-                  k = justLook (t,i) inf
+                  k = justError "no key" $HM.lookup (t,i) inf
 
 keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
        (oauth,ops ) <- authMap schema
@@ -125,19 +126,19 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
           backendkeyMap = M.fromList keyList
-          keyMap = fmap (typeTransform ops ) $ M.fromList keyList
+          keyMap = fmap (typeTransform ops ) $ HM.fromList keyList
           lookupKey3 :: (Functor f) => f (Text,Maybe (Vector Text),Maybe (Vector Text),Bool) -> f (Text,(Vector Key,Vector Key,Bool))
-          lookupKey3 = fmap  (\(t,c,s,b)-> (t,(maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci <> " " <> T.unpack t ) $ M.lookup (t,ci) keyMap)) c,maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci) $ M.lookup (t,ci) keyMap)) s,b)) )
+          lookupKey3 = fmap  (\(t,c,s,b)-> (t,(maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci <> " " <> T.unpack t ) $ HM.lookup (t,ci) keyMap)) c,maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci) $ HM.lookup (t,ci) keyMap)) s,b)) )
           lookupKey2 :: Functor f => f (Text,Text) -> f Key
-          lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) keyMap )
+          lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ HM.lookup ( (t,c)) keyMap )
           lookupKey ::  (Text,Text) ->  Key
-          lookupKey = (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) keyMap )
+          lookupKey = (\(t,c)-> justError ("nokey" <> show (t,c)) $ HM.lookup ( (t,c)) keyMap )
           readTT :: Text ->  TableType
           readTT "BASE TABLE" = ReadWrite
           readTT "VIEW" = ReadOnly
           readTT i =  errorWithStackTrace  $ T.unpack i
        authorization <- queryAuthorization conn schema user
-       descMap <- M.fromList . fmap  (\(t,cs)-> (t,fmap (\c -> justError (show (t,c)) $ M.lookup (t,c) keyMap) (V.toList cs)) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
+       descMap <- M.fromList . fmap  (\(t,cs)-> (t,fmap (\c -> justError (show (t,c)) $ HM.lookup (t,c) keyMap) (V.toList cs)) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
        transMap <- M.fromList   <$> query conn "SELECT table_name,translation FROM metadata.table_name_translation WHERE schema_name = ? " (Only schema)
        uniqueConstrMap <- M.fromListWith (++) . fmap (fmap pure)   <$> query conn "SELECT table_name,pks FROM metadata.unique_sets WHERE schema_name = ? " (Only schema)
 
@@ -153,7 +154,7 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
            lookRFk s t k = V.toList $ lookupKey2 (fmap (t,) k)
             where
               lookupKey2 :: Functor f => f (Text,Text) -> f Key
-              lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ M.lookup ( (t,c)) map)
+              lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ HM.lookup ( (t,c)) map)
                 where map
                         | s == schema = keyMap
                         | otherwise = _keyMapL (justError "no schema" $ M.lookup s rsch)
@@ -166,7 +167,7 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
        efks <- M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp (head . T.splitOn "->" <$> kp)) ( FKJoinTable (zipWith3 (\a b c -> extendedRel keyMap tp a b c)  (V.toList kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn exforeignKeys (Only schema) :: IO (Map Text (Set (Path (Set Key) (SqlOperation ) )))
 
 
-       let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ M.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  M.toList keyMap :: Map Text (Set Key)
+       let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ HM.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  HM.toList keyMap :: Map Text (Set Key)
            i3l =  (\(c,(pksl,scp,is_sum))-> let
                                   pks = F.toList pksl
                                   inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
@@ -488,18 +489,32 @@ readTable inf r s t  = do
       return (M.empty ,G.empty)
 
 selectFromTable :: Text
-									 -> Maybe Int
-									 -> Maybe Int
-									 -> [(Key, Order)]
-          -> [(Access Text, Text ,FTB Showable)]
-									 -> ReaderT
-												InformationSchema
-												(WriterT
-													 [TableModification (TBIdx Key Showable)] IO)
-												(DBVar, Collection Key Showable)
-
+ -> Maybe Int
+ -> Maybe Int
+ -> [(Key, Order)]
+ -> [(Access Text , Text ,FTB Showable)]
+ -> ReaderT
+      InformationSchema
+      (WriterT
+         [TableModification (TBIdx Key Showable)] IO)
+      (DBVar, Collection Key Showable)
 selectFromTable t a b c p = do
   inf  <- ask
-  selectFrom  t a b c (WherePredicate $ AndColl $ PrimColl <$> p)
+  selectFrom  t a b c (WherePredicate $ AndColl $ fmap (lookAccess inf t). PrimColl <$> p)
 
+liftAccess :: InformationSchema -> Text -> Access Text  -> Access Key
+liftAccess inf tname (Many i) =  Many $ fmap (liftAccess inf tname)  i
+liftAccess inf tname (IProd b l) = IProd b $ fmap (lookKey inf tname) l
+liftAccess inf tname (Nested i c) = Nested ref (liftAccess inf (snd l) c)
+  where
+    ref@(IProd _ refk) = liftAccess inf tname i
+    tb = lookTable inf tname
+    n = justError "no fk" $ L.find (\i -> S.fromList refk == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
+    l = case n of
+          (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
+          (Path _ rel@(FKInlineTable  l  ) ) ->  l
+
+
+lookAccess :: InformationSchema -> Text -> (Access Text , Text ,FTB Showable) -> (Access Key , Text ,FTB Showable)
+lookAccess inf tname l = Le.over (Le._1) (liftAccess inf tname)  l
 

@@ -58,11 +58,11 @@ calendarCreate el (Just (p,ne,sw)) evs= runFunction $ ffi "createMap (%1,%2,%3,%
 mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
     let
       calendarT = (\(a,b) c -> (a,b,c)) <$> ((,)<$> facts agendaT <*> facts incrementT )<#> resolutionT
-      schemaPred = WherePredicate $ AndColl [PrimColl (IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf))]
+      schemaPred = [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf))]
 
-    (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] schemaPred
-    (_,(_,evMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "geo" Nothing Nothing [] schemaPred
-    (_,(_,eventMap )) <- liftIO$ transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] schemaPred
+    (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
+    (_,(_,evMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred
+    (_,(_,eventMap )) <- liftIO$ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
     cliZone <- jsTimeZone
     let dashes = (\e ->
           let
@@ -74,7 +74,7 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
               (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "geo" e
               (Attr _ color )= lookAttr' (meta inf) "color" e
               (Attr _ size )= lookAttr' (meta inf) "size" e
-              projf  r efield@(TB1 (SText field))  = fmap (\i ->  HM.fromList $ i <> [("id", TB1 $ SText $ writePK r efield   ),("title"::Text , TB1 $ SText $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)),("size", size),("color",  color)]) $ join $ convField  <$> indexFieldRec (indexer field) r
+              projf  r efield@(TB1 (SText field))  = fmap (\i ->  HM.fromList $ i <> [("id", TB1 $ SText $ writePK r efield   ),("title"::Text , TB1 $ SText $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)),("size", size),("color",  color)]) $ join $ convField  <$> indexFieldRec (liftAccess inf tname $ indexer field) r
               proj r = projf r <$> F.toList efields
               convField (ArrayTB1 v) = Just $ [("position",ArrayTB1 v)]
               convField (LeftTB1 v) = join $ convField  <$> v
@@ -115,8 +115,8 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
               t = tname
           mapUIFinalizerT innerCalendar (\(positionB,calT)-> do
             liftIO $ putStrLn ("query layer" <> show (tname,positionB))
-            let pred = predicate (fmap (\(TB1 (SText v))->  lookKey inf tname v) <$>efields ) (Just $  fields ) (positionB,Just calT)
-            reftb <- refTables' inf (lookTable inf t) (Just 0) pred
+            let pred = lookAccess inf tname <$> predicate (fmap (\(TB1 (SText v))->  lookKey inf tname v) <$>efields ) (Just $  fields ) (positionB,Just calT)
+            reftb <- refTables' inf (lookTable inf t) (Just 0) (WherePredicate pred)
             let v = fmap snd $ reftb ^. _1
             let evsel = (\j (tev,pk,_) -> if tableName tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
             tdib <- stepper Nothing (join <$> evsel)

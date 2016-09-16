@@ -151,7 +151,7 @@ instance Affine Showable where
 
 instance Predicates (TBIndex Key Showable) where
   type (Penalty (TBIndex Key Showable)) = Penalty (Map Key (FTB Showable))
-  type Query (TBIndex Key Showable) = TBPredicate T.Text Showable
+  type Query (TBIndex Key Showable) = TBPredicate Key Showable
   consistent (Idex j) (Idex  m )
      = consistent j m
   match (WherePredicate l)  (Idex v) =  match (WherePredicate l) v
@@ -175,7 +175,7 @@ instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
 -- Attr List Predicate
 instance  Predicates (Map Key (FTB Showable)) where
   type Penalty (Map Key (FTB Showable )) = Map Key DiffShowable
-  type Query (Map Key (FTB Showable )) = TBPredicate T.Text Showable
+  type Query (Map Key (FTB Showable )) = TBPredicate Key Showable
   match (WherePredicate a )  v=  go a
     where
       go (AndColl l) = F.all go l

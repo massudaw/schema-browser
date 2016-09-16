@@ -93,9 +93,8 @@ predicate
     :: Maybe (NonEmpty Key)
     -> Maybe (NonEmpty (FTB Showable))
     -> (Maybe (t, [Double], [Double]), Maybe (t1, UTCTime, String))
-    -> WherePredicate
+    -> BoolCollection (Access T.Text,T.Text ,FTB Showable)
 predicate evfields geofields (i,j) =
-    WherePredicate $
     AndColl $
     catMaybes [liftA2 geoPred geofields i, liftA2 timePred evfields j]
 

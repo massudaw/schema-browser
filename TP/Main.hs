@@ -145,8 +145,8 @@ setup smvar args w = void $ do
                 "Poll" -> do
                     element metabody #
                       set items
-                          [ metaAllTableIndexV inf "polling" [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ]
-                          , metaAllTableIndexV inf "polling_log" [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ]]
+                          [ metaAllTableIndexA inf "polling" [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ]
+                          , metaAllTableIndexA inf "polling_log" [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ]]
                 "Change" -> do
                     case schemaName inf of
                       "gmail" -> do
@@ -165,16 +165,16 @@ setup smvar args w = void $ do
                       i -> do
                         let selTable = flip M.lookup (pkMap inf)
                         let pred = [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],"IN",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables)))]
-                        dash <- metaAllTableIndexOp inf "modification_table" pred
+                        dash <- metaAllTableIndexA inf "modification_table" pred
                         element metabody # set UI.children [dash]
                 "Stats" -> do
                     let pred = [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],"IN",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables)))]
-                    stats <- metaAllTableIndexOp inf "table_stats" pred
-                    clients <- metaAllTableIndexOp inf "clients"$  [(IProd True ["schema"],"=",LeftTB1 $ Just $ TB1 $ SText (schemaName inf) ) ]<> if M.null tables then [] else [ (IProd True ["table"],"IN",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables)))]
+                    stats <- metaAllTableIndexA inf "table_stats" pred
+                    clients <- metaAllTableIndexA inf "clients"$  [(IProd True ["schema"],"=",LeftTB1 $ Just $ TB1 $ SText (schemaName inf) ) ]<> if M.null tables then [] else [ (IProd True ["table"],"IN",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables)))]
                     element metabody # set UI.children [stats,clients]
                 "Exception" -> do
                     let pred = [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],"IN",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables)))]
-                    dash <- metaAllTableIndexOp inf "plugin_exception" pred
+                    dash <- metaAllTableIndexA inf "plugin_exception" pred
                     element metabody # set UI.children [dash]
                 i -> errorWithStackTrace (show i)
                     ) ((,) <$> triding metanav <*> triding bset)

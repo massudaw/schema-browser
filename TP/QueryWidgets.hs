@@ -25,8 +25,7 @@ module TP.QueryWidgets (
     lookAttrM,
     tableIndexA,
     idex,
-    metaAllTableIndexV ,
-    metaAllTableIndexOp ,
+    metaAllTableIndexA ,
     attrLine,
     viewer,
     ) where
@@ -55,11 +54,12 @@ import Graphics.UI.Threepenny.Core hiding (apply,delete)
 import Graphics.UI.Threepenny.Internal (ui)
 import Data.String
 import Data.Ord
-import Control.Lens ((^?),(&),(%~))
+import Control.Lens (_1,over,(^?),(&),(%~))
 import qualified Control.Lens as Le
 import Utils
 import Data.Char
 import qualified Data.Map as M
+import qualified Data.HashMap.Strict as HM
 import Data.Map (Map)
 import qualified Data.Set as S
 import Data.Set (Set)
@@ -108,7 +108,7 @@ createFresh  tname inf i ty@(Primitive atom)  =
     AtomicPrim _  -> do
       k <- newKey i ty 0
       return $ inf
-          & keyMapL %~ (M.insert (tname,i) k )
+          & keyMapL %~ (HM.insert (tname,i) k )
     RecordPrim (s,t) -> do
       k <- newKey i ty 0
       let tableO = lookTable inf tname
@@ -116,7 +116,7 @@ createFresh  tname inf i ty@(Primitive atom)  =
       return $ inf
           & tableMapL . Le.ix tname . rawFKSL %~  S.insert path
           & pkMapL . Le.ix (S.fromList $ rawPK tableO) . rawFKSL Le.%~  S.insert path
-          & keyMapL %~ M.insert (tname,i) k
+          & keyMapL %~ HM.insert (tname,i) k
 
 
 genAttr :: InformationSchema -> CoreKey -> Column CoreKey ()
@@ -132,7 +132,7 @@ genAttr inf k =
 pluginUI :: InformationSchema
     -> Tidings (Maybe (TBData CoreKey Showable) )
     -> Plugins
-    -> UI (Element ,(Access Text,Tidings (Maybe (TBData CoreKey Showable))))
+    -> UI (Element ,(Access Key,Tidings (Maybe (TBData CoreKey Showable))))
 pluginUI oinf trinp (FPlugins n tname (StatefullPlugin ac)) = do
   let
       fresh :: [([VarDef],[VarDef])]
@@ -171,10 +171,10 @@ pluginUI oinf trinp (FPlugins n tname (StatefullPlugin ac)) = do
       return  (( l <> [j , k], ole <> [liftedE] ), mergeCreate <$> unoldItems <*> liftedE  ))
            ) ) (return (([],[]),trinp)) $ zip (fmap snd ac) freshKeys
   el <- UI.div  # set children (b: (fst $ fst freshUI))
-  return (el , (snd $ pluginStatic' $ snd $ last ac ,last $ snd $ fst freshUI ))
+  return (el , (liftAccess inf tname  $snd $ pluginStatic' $ snd $ last ac ,last $ snd $ fst freshUI ))
 
 pluginUI inf oldItems p@(FPlugins n t (PurePlugin arrow )) = do
-  let f = staticP arrow
+  let f =second (liftAccess inf t ). first (liftAccess  inf t ) $ staticP arrow
       action = pluginAction   p
   let tdInputPre = fmap (checkTable' (fst f)) <$>  oldItems
       tdInput = join . fmap (eitherToMaybe .  runErrors) <$> tdInputPre
@@ -191,7 +191,7 @@ pluginUI inf oldItems p@(FPlugins n t (PurePlugin arrow )) = do
 
 pluginUI inf oldItems p@(FPlugins n t (BoundedPlugin2 arrow)) = do
   overwrite <- checkedWidget (pure False)
-  let f = staticP arrow
+  let f = second (liftAccess inf t ). first (liftAccess inf t ) $ staticP arrow
       action = pluginAction p
   let tdInputPre = fmap (checkTable' (fst f)) <$>  oldItems
       tdInput = join . fmap (eitherToMaybe .  runErrors) <$> tdInputPre
@@ -209,17 +209,17 @@ pluginUI inf oldItems p@(FPlugins n t (BoundedPlugin2 arrow)) = do
   return (out, (snd f ,  pgOut ))
 
 indexPluginAttr
-  :: Column (FKey a) ()
-     -> [(Access Text, Tidings (Maybe (TBData (FKey a) a1)))]
-     -> [(Access Text, Tidings (Maybe (Column (FKey a) a1)))]
+  :: Column Key ()
+  -> [(Access Key, Tidings (Maybe (TBData Key a1)))]
+  -> [(Access Key, Tidings (Maybe (Column Key a1)))]
 indexPluginAttr a@(Attr _ _ )  plugItens =  evs
   where
-        thisPlugs = filter (hasProd (== IProd True (keyValue . _relOrigin <$> keyattri a)) . fst)  plugItens
+        thisPlugs = filter (hasProd (== IProd True ( _relOrigin <$> keyattri a)) . fst)  plugItens
         evs  = fmap ( fmap ( join . fmap ( fmap unTB . fmap snd . getCompose . unTB . findTB1 (((== keyattri a)  . keyattr )) . TB1 )) ) <$>  thisPlugs
 indexPluginAttr  i  plugItens = pfks
   where
-        thisPlugs = filter (hasProd (isNested ((IProd True $ fmap (keyValue._relOrigin) (keyattri i) ))) .  fst) plugItens
-        pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested((IProd True $ fmap (keyValue . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . unTB . findTB1 ((==keyattri i)  . keyattr ) . TB1 ))) <$> ( thisPlugs)
+        thisPlugs = filter (hasProd (isNested ((IProd True $ fmap (_relOrigin) (keyattri i) ))) .  fst) plugItens
+        pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested((IProd True $ fmap ( _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . unTB . findTB1 ((==keyattri i)  . keyattr ) . TB1 ))) <$> ( thisPlugs)
 
 
 
@@ -333,7 +333,7 @@ tbCaseDiff
   -> SelPKConstraint
   -> Column CoreKey ()
   -> [(Column CoreKey () ,TrivialWidget (Editor (Index (Column CoreKey Showable))))]
-  -> [(Access Text,Tidings (Maybe (Column CoreKey Showable)))]
+  -> [(Access Key,Tidings (Maybe (Column CoreKey Showable)))]
   -> Tidings (Maybe (Column CoreKey Showable))
   -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
 tbCaseDiff inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
@@ -375,7 +375,7 @@ tbCase
   -> SelPKConstraint
   -> Column CoreKey ()
   -> [(Column CoreKey () ,TrivialWidget (Maybe (Column CoreKey Showable)))]
-  -> [(Access Text,Tidings (Maybe (Column CoreKey Showable)))]
+  -> [(Access Key,Tidings (Maybe (Column CoreKey Showable)))]
   -> Tidings (Maybe (Column CoreKey Showable))
   -> UI (TrivialWidget (Maybe (Column CoreKey Showable)))
 tbCase inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
@@ -415,7 +415,7 @@ emptyRecTable (IT l tb)
           (LeftTB1 _) -> Just . fromMaybe (IT l (LeftTB1 Nothing))
           i -> id
 
-tbRecCase ::  InformationSchema ->  SelPKConstraint  -> Column CoreKey () -> [(Column CoreKey () ,TrivialWidget (Maybe (Column CoreKey Showable)))] -> [(Access Text,Tidings (Maybe (Column CoreKey Showable)))]-> Tidings (Maybe (Column CoreKey Showable)) -> UI (TrivialWidget (Maybe (Column CoreKey Showable)))
+tbRecCase ::  InformationSchema ->  SelPKConstraint  -> Column CoreKey () -> [(Column CoreKey () ,TrivialWidget (Maybe (Column CoreKey Showable)))] -> [(Access Key,Tidings (Maybe (Column CoreKey Showable)))]-> Tidings (Maybe (Column CoreKey Showable)) -> UI (TrivialWidget (Maybe (Column CoreKey Showable)))
 tbRecCase inf constr a wl plugItens preoldItems' = do
       let preoldItems = emptyRecTable  a <$> preoldItems'
       check <- foldr (\i j ->  updateTEvent  (fmap Just ) i =<< j) (return $ join . fmap unLeftItens  <$> preoldItems) (fmap (fmap (join . fmap unLeftItens) . snd) plugItens )
@@ -444,7 +444,7 @@ eiTableDiff
   :: InformationSchema
      -> SelPKConstraint
      -> [(Column CoreKey () ,TrivialWidget (Maybe (Column CoreKey Showable)))]
-     -> [(Access Text,Tidings (Maybe (TBData CoreKey Showable)))]
+     -> [(Access Key,Tidings (Maybe (TBData CoreKey Showable)))]
      -> TBData CoreKey ()
      -> Tidings (Maybe (TBData CoreKey Showable))
      -> UI (Element,Tidings (Editor (Index (TBData CoreKey Showable))),Tidings (Editor (Index (TBData CoreKey Showable))))
@@ -519,7 +519,7 @@ eiTable
   :: InformationSchema
      -> SelPKConstraint
      -> [(Column CoreKey () ,TrivialWidget (Maybe (Column CoreKey Showable)))]
-     -> [(Access Text,Tidings (Maybe (TBData CoreKey Showable)))]
+     -> [(Access Key ,Tidings (Maybe (TBData CoreKey Showable)))]
      -> TBData CoreKey ()
      -> Tidings (Maybe (TBData CoreKey Showable))
      -> UI (Element,Tidings (Maybe (TBData CoreKey Showable)),Tidings (Maybe (TBData CoreKey Showable)))
@@ -590,7 +590,7 @@ crudUITable
    -> Tidings String
    -> RefTables
    -> [(TB Identity CoreKey () ,TrivialWidget (Maybe (TB Identity CoreKey Showable)))]
-   -> [(Access Text,Tidings (Maybe (TBData CoreKey Showable)))]
+   -> [(Access Key,Tidings (Maybe (TBData CoreKey Showable)))]
    -> TBData CoreKey ()
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> UI ([Element],Event (TBIdx CoreKey Showable ) ,Tidings (Maybe (TBData CoreKey Showable)))
@@ -988,7 +988,7 @@ buildPrim fm tdi i = case i of
 iUITableDiff
   :: InformationSchema
   -- Plugin Modifications
-  -> [(Access Text,Tidings (Maybe (Column CoreKey (Showable))))]
+  -> [(Access Key,Tidings (Maybe (Column CoreKey (Showable))))]
   -- Selected Item
   -> Tidings (Maybe (Column CoreKey Showable))
   -- Static Information about relation
@@ -1044,7 +1044,7 @@ iUITableDiff inf pmods oldItems  (IT na  tb1)
 iUITable
   :: InformationSchema
   -- Plugin Modifications
-  -> [(Access Text,Tidings (Maybe (Column CoreKey (Showable))))]
+  -> [(Access Key,Tidings (Maybe (Column CoreKey (Showable))))]
   -- Selected Item
   -> Tidings (Maybe (Column CoreKey Showable))
   -- Static Information about relation
@@ -1127,7 +1127,7 @@ fkUITable
   -- Plugin Modifications
   -> SelTBConstraint
   -> RefTables
-  -> [(Access Text,Tidings (Maybe (Column CoreKey Showable)))]
+  -> [(Access Key,Tidings (Maybe (Column CoreKey Showable)))]
   -- Same Table References
   -> [(Column CoreKey () ,TrivialWidget (Maybe (Column CoreKey (Showable))))]
   -- Relation Event
@@ -1321,7 +1321,6 @@ hoverTip elemD= unionWith const (const True <$> UI.hover elemD ) (const False <$
 hoverTip2 elemIn elemOut = unionWith const (const True <$> UI.hover elemIn ) (const False <$> UI.leave elemOut)
 
 
-metaAllTableIndexV inf metaname env = metaAllTableIndexA inf metaname env
 
 tableIndexA inf metaname env =   do
   let modtable = lookTable inf tname
@@ -1329,17 +1328,13 @@ tableIndexA inf metaname env =   do
   viewer inf modtable env
 
 
-metaAllTableIndexOp inf metaname env =   do
-  let modtable = lookTable (meta inf) tname
-      tname = metaname
-  viewer (meta inf) modtable env
 
 
 
 metaAllTableIndexA inf metaname env =   do
   let modtable = lookTable (meta inf) tname
       tname = metaname
-  viewer (meta inf) modtable env
+  viewer (meta inf) modtable (Le.over (_1) (liftAccess inf tname)  <$> env)
 
 
 
@@ -1374,10 +1369,10 @@ sortFilterUI conv ix bh  = do
 
 
 
-viewer :: InformationSchema -> Table -> [(Access Text,Text ,FTB Showable)] -> UI Element
+viewer :: InformationSchema -> Table -> [(Access Key ,Text ,FTB Showable)] -> UI Element
 viewer inf table envK = mdo
   let
-      filterStatic =filter (not . flip L.elem (concat $ fmap (F.toList . (Le.view Le._1)) envK). keyValue )
+      filterStatic =filter (not . flip L.elem (concat $ fmap (F.toList . (Le.view Le._1)) envK))
       key = filterStatic $ F.toList $ rawPK table
       sortSet =  filterStatic . F.toList . tableKeys . tableNonRef . TB1 . allRec' (tableMap inf ) $ table
       tableSt2 =   tableViewNR (tableMap inf) table
@@ -1391,7 +1386,7 @@ viewer inf table envK = mdo
               let slist = fmap (\(i,j,_) -> (i,j)) slist'
                   ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
-                  flist = catMaybes $ fmap (\(i,_,j) -> (\(op,v) -> (IProd True [keyValue i],T.pack op,v)) <$> j) slist'
+                  flist = catMaybes $ fmap (\(i,_,j) -> (\(op,v) -> (IProd True [i],T.pack op,v)) <$> j) slist'
               (_,(fixmap,lres)) <- liftIO $ transactionNoLog inf $ eventTable  table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (WherePredicate $ AndColl $ fmap PrimColl $envK <> flist)
               let (size,_) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (WherePredicate$AndColl $ fmap PrimColl $  envK) fixmap
               return (o,(slist,paging o (size,sorting' ordlist (G.toList lres))))

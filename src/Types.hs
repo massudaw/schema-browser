@@ -189,7 +189,7 @@ data BoolCollection a
  | PrimColl a
  deriving(Show,Eq,Ord,Functor,Foldable)
 
-type WherePredicate = TBPredicate Text Showable
+type WherePredicate = TBPredicate Key Showable
 
 data TBPredicate k a
   = WherePredicate (BoolCollection (Access k ,T.Text,FTB a ))
@@ -223,7 +223,7 @@ mapBothKV k f (KV  n) =  KV  (Map.mapKeys (S.map (fmap k )) $ fmap f n)
 mapKV f (KV  n) =  KV  (fmap f n)
 
 traverseKV f (KV  n) =  KV  <$> traverse f n
-filterKV i (KV n) =  KV $ Map.fromList $ L.filter (i . snd) $ Map.toList  n
+filterKV i (KV n) =  KV $ Map.filterWithKey (\k ->  i. snd) n
 findKV i (KV  n) =  L.find (i . snd) $Map.toList  n
 findTB1  i (TB1 (m, j) )  = mapComp (Compose . findKV i) j
 -- findTB1  l (LeftTB1  j )  = join $ findTB1  l <$> j -- errorWithStackTrace (show m)
@@ -1126,7 +1126,7 @@ tbUn un (TB1 (kv,item)) =  (\kv ->  mapComp (\(KV item)->  KV $ Map.filterWithKe
 getPK (TB1 i) = getPKM i
 getPKM (m, k) = Map.fromList $  concat $ F.toList (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (unTB k))))
 
-getAttr'  (m, k) = L.sortBy (comparing fst) $ (concat (fmap aattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
+getAttr'  (m, k) =  (concat (fmap aattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
 getPKAttr (m, k) = traComp (concat . F.toList . (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m))   )) k
 getAttr (m, k) = traComp (concat . F.toList) k

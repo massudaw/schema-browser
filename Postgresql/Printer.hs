@@ -426,7 +426,7 @@ explodeDelayed block assoc leaf (Unlabeled (FKT i rel t )) = case unkvlist i of
              i -> T.intercalate assoc (F.toList $ (explodeDelayed block assoc leaf .getCompose) <$> i) <> assoc <> explodeRow' block assoc leaf t
 
 
-printPred :: Show b => TB3Data (Labeled Text)  Key b ->  BoolCollection (Access Text,Text,FTB Showable) -> (Maybe [Text],Maybe [Column Key Showable])
+printPred :: Show b => TB3Data (Labeled Text)  Key b ->  BoolCollection (Access Key ,Text,FTB Showable) -> (Maybe [Text],Maybe [Column Key Showable])
 printPred t (PrimColl (a,e,i)) = (Just $ catMaybes $ fmap fst idx,Just $ catMaybes $ fmap snd idx)
   where
     idx = indexFieldL (e,i) a t
@@ -459,7 +459,7 @@ justLabel t k =  justError ("cant find label"  <> show k <> " - " <> show t).get
 indexFieldL
     :: Show a
     => (Text, FTB Showable)
-    -> Access Text
+    -> Access Key
     -> TB3Data (Labeled Text) Key a
     -> [(Maybe Text, Maybe (TB Identity Key Showable))]
 indexFieldL e p@(IProd b l) v =
@@ -477,7 +477,7 @@ indexFieldL e p@(IProd b l) v =
                                   justError ("no attr" <> show (ref, l)) .
                                   L.find
                                       ((== [l]) .
-                                       fmap (keyValue . _relOrigin) . keyattr) $
+                                       fmap (_relOrigin) . keyattr) $
                                   unkvlist ref) <$>
                             l
                         i -> errorWithStackTrace "no fk"
@@ -486,7 +486,7 @@ indexFieldL e p@(IProd b l) v =
                 Just (Labeled i _) -> [(Just (i <> " is not null"), Nothing)]
                 Nothing -> case findFKAttr l v of
                              Just i -> [utlabel e   i]
-                             Nothing  -> errorWithStackTrace "no fk attr"
+                             Nothing  -> errorWithStackTrace ("no fk attr" <> show (l,v))
 
 indexFieldL e n@(Nested ix@(IProd b l) nt) v =
     case getCompose $ justError "no nested" $ findFK l v of

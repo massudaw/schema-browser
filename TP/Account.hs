@@ -57,11 +57,11 @@ import qualified Data.Map as M
 accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
     let
       calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
-      schemaPred = WherePredicate $ AndColl [PrimColl (IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf))]
+      schemaPred = [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf))]
 
-    (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] schemaPred
-    (_,(_,emap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] schemaPred
-    (_,(_,aMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFrom "accounts" Nothing Nothing [] schemaPred
+    (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
+    (_,(_,emap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
+    (_,(_,aMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFromTable "accounts" Nothing Nothing [] schemaPred
     cliZone <- jsTimeZone
     let dashes = fmap (\e ->
           let
@@ -111,7 +111,7 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
           element calendar # set children [innerCalendar]
           _ <- mapM (\(cap,(_,t,fields,efields,proj))->  mapUIFinalizerT (fromJust $ M.lookup t innerCalendarSet)
             (\calT -> do
-              let pred = WherePredicate $ timePred (fieldKey <$> fields ) calT
+              let pred = WherePredicate $ lookAccess inf t <$> timePred (fieldKey <$> fields ) calT
                   fieldKey (TB1 (SText v))=  lookKey inf t v
               (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
               mapUIFinalizerT innerCalendar

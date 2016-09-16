@@ -58,11 +58,11 @@ calendarAddSource cal t evs = runFunction $ ffi "addSource(%1,%2,%3)" cal t evs
 eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
     let
       calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
-      schemaPred = WherePredicate $ AndColl [PrimColl (IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf))]
+      schemaPred =  [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf))]
 
     dashes <- liftIO $ do
-      (_,(_,tmap)) <- transactionNoLog (meta inf) $ selectFrom "table_name_translation" Nothing Nothing [] schemaPred
-      (evdb,(_,evMap )) <- transactionNoLog  (meta inf) $ selectFrom "event" Nothing Nothing [] schemaPred
+      (_,(_,tmap)) <- transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
+      (evdb,(_,evMap )) <- transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
       return $ fmap (\e ->
         let
             (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema_name","table_name"] e
@@ -126,7 +126,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
                   (\i -> do
                      patchFrom i >>= traverse (tell . pure )))
             edits <- mapM (\(cap,(_,t,fields,proj))->  do
-                let pred = WherePredicate $ timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
+                let pred = WherePredicate $ lookAccess inf t<$> timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
                     fieldKey (TB1 (SText v))=  lookKey inf t v
                 -- (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
                 reftb <- refTables' inf (lookTable inf t) Nothing pred
