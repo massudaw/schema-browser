@@ -1,3 +1,7 @@
+function updateColor(el,c){
+  el._jscLinkedInstance.fromString(c);
+}
+
 function setOpts(oSelect,selVals) {
   var opt, i = 0;
   while (opt = oSelect[0][i++]) {
@@ -156,7 +160,7 @@ function clientHandlers(){
     });
   }
    ,'onchange':function(el,eventType,sendEvent){
-      $(el).on(':change',function(i){
+      $(el).on('change',function(i){
         sendEvent([]);})
       return true;
    }

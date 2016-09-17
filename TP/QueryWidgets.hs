@@ -974,12 +974,13 @@ buildPrim fm tdi i = case i of
          PColor -> do
             let f = facts tdi
             v <- currentValue f
-            inputUI <- UI.input # set UI.class_ "jscolor" # sink0 UI.value (maybe "" renderPrim <$> f)# set UI.style [("width","100%")]
+            inputUI <- UI.input # set UI.class_ "jscolor" # sink0 UI.value (maybe "FFFFFF" renderPrim <$> f)# set UI.style [("width","100%")]
             let pke = unionWith const (readPrim i <$> UI.onChangeE inputUI) (rumors tdi)
             pk <- stepper v  pke
             let pkt = tidings pk (diffEvent pk pke)
             sp <- UI.div # set UI.children [inputUI ]
             runFunction$ ffi "new jscolor(%1)" inputUI
+            onChanges f (\f -> runFunction $ ffi "updateColor(%1,%2)" inputUI (maybe "FFFFFF" renderPrim  f))
             paintBorder sp (facts pkt) (facts tdi)
             return $ TrivialWidget pkt sp
 

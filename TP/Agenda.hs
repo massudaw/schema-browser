@@ -67,7 +67,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
         let
             (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema_name","table_name"] e
             lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
-            Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess inf "event" $ IProd True ["event"]) e
+            Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"event" $ IProd True ["event"]) e
             (Attr _ color )= lookAttr' (meta inf) "color" e
             toLocalTime = fmap to
               where to (STimestamp i )  = STimestamp $  utcToLocalTime cliZone $ localTimeToUTC utc i
@@ -76,11 +76,11 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
             convField (LeftTB1 i) = concat $   convField <$> maybeToList i
             convField (v) = [("start",toLocalTime $v)]
             convField i = errorWithStackTrace (show i)
-            projf  r efield@(TB1 (SText field))  = (if (isJust $ join $  unSOptional <$> attr) then Left else Right) (M.fromList $ concat (convField <$> maybeToList attr  ) <> [("id", TB1 $ SText $ writePK r efield   ),("title",TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield )] :: M.Map Text (FTB Showable))
+            projf  r efield@(TB1 (SText field))  = (if (isJust $ join $  unSOptional <$> attr) then Left else Right) (M.fromList $ concat (convField <$> maybeToList attr  ) <> [("id", TB1 $ SText $ writePK r efield   ),("title",TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",TB1 (SText tname)),("color" , TB1 $ SText $ T.pack $ "#" <> renderShowable color ),("field", efield )] :: M.Map Text (FTB Showable))
                   where attr  = attrValue <$> lookAttrM inf field r
             proj r = (TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  projf r <$> F.toList efields
             attrValue (Attr k v) = v
-        in (lookDesc,(color,tname,efields,proj))) ( G.toList evMap)
+        in (lookDesc,(TB1 $ SText $ T.pack $ "#" <> renderShowable color ,tname,efields,proj))) ( G.toList evMap)
 
     iday <- liftIO getCurrentTime
     let allTags =  dashes
