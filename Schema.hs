@@ -220,9 +220,8 @@ createTableRefsUnion inf m i  = do
   (patch,hdiff) <- R.newEvent
   let
       patchUni = fmap concat $ R.unions $ R.rumors . patchTid .(justError "no table union" . flip M.lookup m) . tableMeta <$>  (rawUnion i)
-      patch =  fmap patchunion <$> patchUni
       patchunion  = liftPatch inf (tableName i ) .firstPatch keyValue
-  R.onEventIO patch (hdiff)
+  R.onEventIO patchUni (hdiff. fmap patchunion)
   midx <-  liftIO$ atomically$ newTMVar iv
   midxLoad <-  liftIO$ atomically$ newTMVar G.empty
   bh <- R.accumBDyn v (flip (L.foldl' apply) <$> patch )

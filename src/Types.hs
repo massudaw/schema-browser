@@ -475,6 +475,7 @@ data KPrim
    | PBinary
    | PLineString
    | PSession
+   | PColor
    | PDynamic
    deriving(Show,Eq,Ord)
 
@@ -520,7 +521,7 @@ instance Ord (FKey a) where
    compare i j = compare (keyFastUnique i) (keyFastUnique j)
 
 instance Show a => Show (FKey a)where
-   show k = (T.unpack $ maybe (keyValue k) id (keyTranslation  k)) -- <> (show $ hashUnique $ keyFastUnique k)
+  show k = (T.unpack $ maybe (keyValue k) id (keyTranslation  k)) <> "::" <> (show $ hashUnique $ keyFastUnique k)
 
 showKey k  =   maybe (keyValue k)  (\t -> keyValue k <> "-" <> t ) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::" <> T.pack (show (keyType k) <> "::" <> show (keyModifier k) <> "::" <> show (keyPosition k )  )
 
@@ -1126,7 +1127,7 @@ tbUn un (TB1 (kv,item)) =  (\kv ->  mapComp (\(KV item)->  KV $ Map.filterWithKe
 getPK (TB1 i) = getPKM i
 getPKM (m, k) = Map.fromList $  concat $ F.toList (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (unTB k))))
 
-getAttr'  (m, k) =  (concat (fmap aattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
+getAttr'  (m, k) =  L.sortBy (comparing fst) (concat (fmap aattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
 getPKAttr (m, k) = traComp (concat . F.toList . (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m))   )) k
 getAttr (m, k) = traComp (concat . F.toList) k

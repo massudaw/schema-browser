@@ -96,6 +96,7 @@ readType t = case t of
 readPrim t =
   case t of
      PText -> readText
+     PColor-> readText
      PCnpj -> readCnpj
      PCpf-> readCpf
      PDouble ->  readDouble

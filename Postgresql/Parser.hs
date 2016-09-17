@@ -134,6 +134,7 @@ postgresPrim =
   ,("interval", PInterval)
   ,("date" ,PDate)
   ,("time",PDayTime)
+  ,("color",PColor)
   ,("time with time zone" , PDayTime)
   ,("time without time zone" , PDayTime)
   ,("POINT3",PPosition)
@@ -398,6 +399,9 @@ parsePrim i =  do
         PInt ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
+        PColor -> let
+            dec =  startQuotedText <|> const "" <$> string"\"\""
+              in    (fmap SText $ join $ either (fail. show)  (return)  . TE.decodeUtf8' <$> dec) <|> (SText   . TE.decodeLatin1 <$> dec )
         PText -> let
             dec =  startQuotedText <|> const "" <$> string"\"\""
               in    (fmap SText $ join $ either (fail. show)  (return)  . TE.decodeUtf8' <$> dec) <|> (SText   . TE.decodeLatin1 <$> dec )

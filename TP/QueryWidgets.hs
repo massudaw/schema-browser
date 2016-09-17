@@ -242,6 +242,7 @@ attrSize (Attr k _ ) = go  (keyType k)
                        PInt -> (3,1)
                        PText-> (3,1)
                        PDate -> (3,1)
+                       PColor-> (3,1)
                        PTimestamp _ -> (3,1)
                        PDayTime -> (3,1)
                        PAddress -> (12,8)
@@ -398,7 +399,7 @@ tbCase inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
           table = lookTable rinf  (_kvname m)
           m = (fst $ unTB1 tb1)
         ref <- refTables rinf   table
-        fkUITable rinf (convertConstr <> nonInjConstr) ref plugItens nonInjRefs ftdi i
+        fkUITable rinf (convertConstr ) ref plugItens nonInjRefs ftdi i
 tbCase inf _ i@(IT na tb1 ) wl plugItens oldItems
     = iUITable inf plugItens oldItems i
 tbCase inf _ a@(Attr i _ ) wl plugItens preoldItems = do
@@ -475,7 +476,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) oldItems = do
   let
       sequenceTable :: [(Column CoreKey () ,TrivialWidget (Editor (Index (Column CoreKey Showable))))] -> Tidings (Editor (Index (TBData CoreKey Showable)))
       sequenceTable fks = (\old difs -> (\ i -> if L.null i then Keep else (fmap (tableMeta table , maybe (G.Idex M.empty)G.getIndex old,) . Tra.sequenceA . fmap Diff) i) . filterDiff $ difs) <$> oldItems <*> Tra.sequenceA (triding .snd <$> fks)
-      tableb =  fmap traceShowId $ sequenceTable fks
+      tableb =  sequenceTable fks
 
       tableIns = sequenceTable $ filter (any (elem FWrite . keyModifier . _relOrigin) . keyattri . fst) fks
   (listBody,output) <- if rawIsSum table
@@ -700,7 +701,7 @@ processPanelTable lbox inf attrsB reftb@(res,_,gist,_) inscrud table oldItemsi =
 
 
 
-showFKE v =  UI.div # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v)
+showFKE v =  UI.div # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v) # set UI.class_ "fixed-label"
 
 showFK = (pure ((\v j ->j  # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec'  v))))
 
@@ -965,11 +966,24 @@ buildPrim fm tdi i = case i of
                 "image/png" -> ("img","src",maybe "" binarySrc ,[("max-height","200px")])
                 "image/bmp" -> ("img","src",maybe "" binarySrc ,[("max-height","200px")])
                 "text/html" -> ("iframe","srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-           f <- pdfFrame fty (facts tdi2) # sink0 UI.style (noneShow . isJust <$> facts tdi2)
+           f <- pdfFrame fty (facts tdi2) # sink0 UI.style (noneShow. isJust <$> facts tdi2)
            fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]
            res <- UI.div # set children [fd,f]
            paintBorder res (facts tdi2) (facts  tdi)
            return (TrivialWidget tdi2 res)
+         PColor -> do
+            let f = facts tdi
+            v <- currentValue f
+            inputUI <- UI.input # set UI.class_ "jscolor" # sink0 UI.value (maybe "" renderPrim <$> f)# set UI.style [("width","100%")]
+            let pke = unionWith const (readPrim i <$> UI.onChangeE inputUI) (rumors tdi)
+            pk <- stepper v  pke
+            let pkt = tidings pk (diffEvent pk pke)
+            sp <- UI.div # set UI.children [inputUI ]
+            runFunction$ ffi "new jscolor(%1)" inputUI
+            paintBorder sp (facts pkt) (facts tdi)
+            return $ TrivialWidget pkt sp
+
+
          z -> do
             oneInput tdi []
   where
@@ -1027,6 +1041,7 @@ iUITableDiff inf pmods oldItems  (IT na  tb1)
         widgets <- mapM (\ix -> go tb1 (fmap (fmap (((\ o v -> join $ flip Non.atMay (o + ix) <$> v ) <$> offsetT <*>))) pltdi2)   ((\ o v -> join $ flip Non.atMay (o + ix) <$> v ) <$> offsetT <*> tdi2) ) [0..arraySize -1 ]
         let
           widgets2 = Tra.sequenceA (  zipWith (\i j -> (i,) <$> j) [0..] $( triding <$> widgets) )
+
           reduceA  o i
             | F.all isKeep (snd <$> i) = Keep
             | F.all (\i -> isDelete i) (snd <$> i) = Delete
@@ -1172,7 +1187,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
       filterInpBh <- stepper "" (UI.valueChange filterInp)
       iniGist <- currentValue (facts gist)
 
-      itemListEl <- UI.select #  set UI.class_ "col-xs-5" # set UI.size "21" # set UI.style ([("position","absolute"),("z-index","999"),("top","22px")] <> noneShow False)
+      itemListEl <- UI.select #  set UI.class_ "col-xs-5 fixed-label" # set UI.size "21" # set UI.style ([("position","absolute"),("z-index","999"),("top","22px")] <> noneShow False)
       let wheel = negate <$> mousewheel itemListEl
           pageSize = 20
           lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
@@ -1181,16 +1196,23 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
           tdi = searchGist relTable m <$> gist <*> vv
           filterInpT = tidings filterInpBh (UI.valueChange filterInp)
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList . snd
-      presort <- ui $ mapTEventDyn return (fmap  <$> sortList <*> fmap (fmap G.toList ) vpt)
+          predicatefk o = (WherePredicate $AndColl $ fmap ((\(Attr k v) -> PrimColl(IProd True [k],"=",v)).replaceKey)  o)
+          preindex = (\i -> maybe id (\i -> fmap (filterfixed (predicatefk i)))i ) <$>iold2 <*>vpt
+      presort <- ui $ mapTEventDyn return (fmap  <$> sortList <*> fmap (fmap G.toList ) preindex)
       -- Filter and paginate
       (offset,res3)<- do
-        res3 <- ui$ mapTEventDyn return ((\i -> fmap (filter (filtering i))) <$> filterInpT <*> (liftA2 (\ (a,i) j -> (a,applyConstr i j) ) presort constrT))
+        let constr = presort -- liftA2 (\ (a,i) j -> (a,applyConstr i j) ) presort constrT
+
+        res3 <- ui$ mapTEventDyn return ((\i -> fmap (filter (filtering i))) <$> filterInpT <*> constr)
         element itemListEl # sink UI.size (show . (\i -> if i > 21 then 21 else (i +1 )) . length .snd <$> facts res3)
         offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i (snd j) ) i )<$> facts res3 <#> (fmap (unTB1._fkttable )<$> oldItems)) wheel  (lengthPage <$> facts res3)
         return (offset, res3)
       -- Load offseted items
-      -- onEvent (filterE (isJust . fst) $ (,) <$> facts iold2 <@> rumors (triding offset)) $ (\(o,i) ->  traverse (\o -> liftIO $ do
-        -- transactionNoLog inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (LegacyPredicate $ fmap (("=",).replaceKey)  o)) o  )
+      onEvent (filterE (isJust . fst) $ (,) <$> facts iold2 <@> rumors (triding offset)) $ (\(o,i) ->  traverse (\o -> liftIO $ do
+        transactionNoLog inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (WherePredicate $AndColl $ fmap ((\(Attr k v) -> PrimColl(IProd True [k],"=",v)).replaceKey)  o)) o  )
+
+      onEvent (filterE (\(a,b,c)->isJust c && isNothing a ) $ (,,) <$> facts tdi <*> facts (triding offset)<@> diffEvent (facts iold2)(rumors iold2) ) $ (\(v0,i,o) ->  traverse (\o -> liftIO $ do
+        transactionNoLog inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (WherePredicate $AndColl $ fmap ((\(Attr k v) -> PrimColl(IProd True [k],"=",v)).replaceKey)  o)) o  )
 
       -- Select page
       let
@@ -1202,9 +1224,9 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
            TrivialWidget (Just  <$> tdi ) <$>
               (UI.div #
                 set UI.style [("border","1px solid gray"),("height","20px")] #
-                sink items (pure . maybe UI.div showFKE . fmap (unTB1 ._fkttable) <$> facts oldItems ) #  set UI.class_ "col-xs-5" )
+                sink items (pure . maybe UI.div showFKE . fmap (unTB1 ._fkttable) <$> facts oldItems ) #  set UI.class_ "col-xs-5 fixed-label" )
         else do
-          pan <- UI.div #  set UI.class_ "col-xs-5"
+          pan <- UI.div #  set UI.class_ "col-xs-5 fixed-label"
           let isel  = itemListEl
           bh <- stepper False (unionWith const (const False <$> onEsc filterInp ) (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange isel )))
           element isel # sink UI.style (noneShow <$> bh)

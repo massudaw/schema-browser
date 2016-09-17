@@ -151,9 +151,13 @@ tableLoader table  page size presort fixed
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )
         projunion :: TBData Key Showable -> TBData Key Showable
-        projunion  = liftTable' inf (tableName table ) .mapKey' keyValue
-    let o = foldr mergeDBRef  (M.empty,G.empty) (fmap (fmap projunion) . snd <$> i)
-    return $ (dbvar,o)
+        projunion  i = res
+            where
+              res = liftTable' inf (tableName table ) .mapKey' keyValue $i
+
+        o = foldr mergeDBRef  (M.empty,G.empty) (fmap (createUn (S.fromList$ rawPK table).fmap projunion.G.toList) . snd <$>i )
+
+    return $ (dbvar, o)
   -- (Scoped || Partitioned) Tables
   | not  (null $ _rawScope table ) && not (S.null (rawFKS table) )= do
       inf <- ask

@@ -169,7 +169,7 @@ viewerKey inf table cli layout cliTid = mdo
   res4 <- ui $ mapT0EventDyn (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
   itemList <- listBoxEl itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (fmap Just <$> tidings st sel ) (pure id) (pure (maybe id attrLine))
   let evsel =  rumors (fmap join  $ triding itemList)
-  (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] ([(IProd True ["schema"],"=",  LeftTB1 $ Just $TB1 $ SText (schemaName inf) ), (IProd True ["table"],"=",LeftTB1 $ Just $ TB1 $ SText (tableName table))])
+  (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] ([(IProd True ["schema"],"=",  TB1 $ SText (schemaName inf) ), (IProd True ["table"],"=", TB1 $ SText (tableName table))])
   ui $onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) (Just inf) dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< getCurrentTime )
   prop <- stepper cv evsel
   let tds = tidings prop evsel

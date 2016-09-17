@@ -82,14 +82,13 @@ renderProjectReport = myDoc
       myDoc = proc preenv -> do
           pdoc <- (proc env -> do
               pay <- atRA "pagamentos" $ payA -< ()
-              art <- atR "id_project" $ atR "art" $ atR "tag_art,pagamento" $ payA-< ()
               dare <- atR "id_project" $ atR "tag_taxa,taxa_dare" $ payA -< ()
               returnA -<   (setT ( para $ "Contrato de Prestação de Serviços / nº  " ) $ doc $
                      orderedList [
                        para "Pagamento" <>
                           bulletList pay <>
                        para "Despesas" <>
-                          bulletList [art,dare] <>
+                          bulletList [dare] <>
                           plain "As despesas referentes a cópias dos projetos e taxas para aprovação não estão inclusas no orçamento e são por conta do Contratante"
                         ])) -< ()
           outdoc <- act (\i -> do

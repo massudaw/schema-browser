@@ -59,7 +59,7 @@ import qualified Data.Foldable as F
 
 lplugOrcamento = FPlugins "Orçamento" "pricing" $ BoundedPlugin2 renderProjectPricingA
 lplugContract = FPlugins "Contrato" "pricing" $ BoundedPlugin2 renderProjectContract
-lplugReport = FPlugins "Relatório " "pricing" $ BoundedPlugin2 renderProjectReport
+lplugReport = FPlugins "Relatório" "pricing" $ BoundedPlugin2 renderProjectReport
 
 siapi2Hack = FPlugins pname tname $ BoundedPlugin2  url
   where
@@ -745,4 +745,4 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
 
 
 plugList :: [Plugins]
-plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugContract ,lplugOrcamento ,lplugReport,siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo]
+plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,{- lplugContract ,lplugOrcamento ,lplugReport,-}siapi3Plugin ,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo]

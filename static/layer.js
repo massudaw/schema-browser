@@ -155,6 +155,11 @@ function clientHandlers(){
     return true;
     });
   }
+   ,'onchange':function(el,eventType,sendEvent){
+      $(el).on(':change',function(i){
+        sendEvent([]);})
+      return true;
+   }
    ,'eventClick' : function(el,eventType,sendEvent){
       el.eventClick=  function(e,delta,revert) {
       sendEvent([e.id,(new Date(e.start)).toISOString(),e.end === null ? null : new Date(e.end).toISOString()].filter(function(e) {return e !== null}).map(function(e){return  e.toString()}));

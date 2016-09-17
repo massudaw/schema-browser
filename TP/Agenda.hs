@@ -67,7 +67,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
         let
             (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema_name","table_name"] e
             lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
-            (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "event" e
+            Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess inf "event" $ IProd True ["event"]) e
             (Attr _ color )= lookAttr' (meta inf) "color" e
             toLocalTime = fmap to
               where to (STimestamp i )  = STimestamp $  utcToLocalTime cliZone $ localTimeToUTC utc i

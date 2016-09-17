@@ -92,6 +92,7 @@ import Data.Text (Text)
 import GHC.Stack
 
 import Types
+import Debug.Trace
 import qualified Types.Index as G
 
 
@@ -541,7 +542,7 @@ tbpred un  = tbjust  . Tra.traverse (Tra.traverse unSOptional') .getUn un
     tbjust = G.Idex . M.fromList .  justError "cant be empty"
 
 searchGist ::
-  (Functor t,  Ord k,  Show k,
+  (Functor t,  Show a ,Show a1,Ord k,  Show k,
    Foldable t, G.Predicates (G.TBIndex k a1)) =>
   M.Map k k
   -> KVMetadata k
@@ -550,8 +551,8 @@ searchGist ::
   -> Maybe a
 searchGist relTable m gist =  join . fmap (\k -> lookGist (S.fromList $fmap (\k-> justError (" no pk " <> show (k,relTable)) $ M.lookup k relTable) (_kvpk m) ) k  gist)
   where
-     lookGist un pk  = safeHead . G.search (tbpred un pk)
-     tbpred un  = tbjust  . Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  relTable ))).  filter ((`S.member` un). fst ) . concat .fmap aattri
+    lookGist un pk  = safeHead . G.search (tbpred un pk)
+    tbpred un  = tbjust  . Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  relTable ))).  filter ((`S.member` un). fst ) . concat .fmap aattri
         where
           flipTable = M.fromList . fmap swap .M.toList
           tbjust = G.Idex . M.fromList . justError "cant be empty"
