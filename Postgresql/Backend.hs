@@ -97,10 +97,10 @@ applyPatch conn patch@(m,G.Idex kold,skv)  =
   where
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> M.toList kold
-    attrPatchName (PAttr k _) = keyValue k
+    attrPatchName (PAttr k _) = keyValue k <> "=" <> "?"
     attrPatchValue (PAttr  k v) = Attr k (create v) :: TB Identity PGKey Showable
     pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> M.toList kold)
-    setter = " SET " <> T.intercalate "," (equality .   attrPatchName <$> skv   )
+    setter = " SET " <> T.intercalate "," (   attrPatchName <$> skv   )
     up = "UPDATE " <> kvfullname m <> setter <>  pred
 
 

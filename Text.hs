@@ -39,8 +39,10 @@ renderShowable (ArrayTB1 i)  = L.intercalate "," $ F.toList $ fmap renderShowabl
 renderShowable (IntervalTB1 i)  = showInterval renderShowable i
   where
     showInterval f i | i == Interval.empty = show i
-    showInterval f (Interval.Interval (ER.Finite i,j) (ER.Finite l,m) ) = ocl j <> f i <> "," <> f l <> ocr m
+    showInterval f (Interval.Interval (i,j) (l,m) ) = ocl j <> showFin  i <> "," <> showFin  l <> ocr m
       where
+        showFin (ER.Finite i) = f i
+        showFin i = ""
         ocl j = if j then "[" else "("
         ocr j = if j then "]" else ")"
     showInterval f i = show i -- errorWithStackTrace (show i)

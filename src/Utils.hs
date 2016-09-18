@@ -136,7 +136,7 @@ nonEmpty i = Just i
 safeTail [] = []
 safeTail i = tail i
 
-unFinite :: Interval.Extended a -> a
-unFinite (Interval.Finite i ) = i
-unFinite (i ) = errorWithStackTrace "not finite"
+unFinite :: Interval.Extended a -> Maybe a
+unFinite (Interval.Finite i ) = Just i
+unFinite i  = Nothing -- errorWithStackTrace "not finite"
 

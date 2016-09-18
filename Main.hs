@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleContexts,OverloadedStrings #-}
 module Main where
 import TP.Main
-import TP.Browser(deleteClient)
+import TP.Browser(addServer,deleteServer,deleteClient)
 import Data.Unique
 import System.Process (rawSystem)
 import Poller
@@ -39,6 +39,7 @@ main = do
 
   print "Load Metadata"
   (metas ,_)<- runDynamic $keyTables  smvar conn  ("metadata", T.pack $ user db) amap plugList
+  ref <- addServer metas
 
   print "Load Plugins"
   plugs smvar amap db plugList
@@ -52,6 +53,8 @@ main = do
       (\w ->  do
         print ("delete client" <> show (hashUnique $ wId w))
         deleteClient metas (fromIntegral $ hashUnique $ wId w) )
+
+  traverse (deleteServer metas) ref
   print "Finish Server"
   print "Start Dump State"
   print "Finish Dump State"

@@ -2,6 +2,8 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module TP.Browser where
 
@@ -39,6 +41,8 @@ import RuntimeTypes
 import OAuthClient
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (get,delete,apply)
+import qualified Data.ExtendedReal as ER
+import qualified Data.Interval as Interval
 import Data.Monoid hiding (Product(..))
 
 import qualified Data.Foldable as F
@@ -49,6 +53,25 @@ import qualified Data.Set as S
 import qualified Data.Map as M
 
 import GHC.Stack
+
+updateServer metainf now = liftTable' metainf "server" row
+  where
+    row = tblist . fmap _tb
+            $ [ Attr "serverid" (SerialTB1 Nothing)
+              , Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
+              ]
+
+addServer inf =  do
+    now <- getCurrentTime
+    let
+      obj = updateServer inf now
+    transaction inf $ insertFrom obj
+
+deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
+  now <- getCurrentTime
+  let pt = (tableMeta (lookTable inf "server") , ref ,[PAttr (lookKey inf "server" "up_time") (PInter False ((PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
+  transaction inf $ updateFrom   (create $(a,ref,compact $c <> [PAttr (lookKey inf "server" "up_time") (PInter False ((PAtom (STimestamp (utcToLocalTime utc now)) , False)))]))(create o)
+
 
 updateClient metainf inf table tdi clientId now =
     let

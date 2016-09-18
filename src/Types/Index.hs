@@ -201,7 +201,9 @@ data DiffFTB a
 instance Affine a => Affine (ER.Extended a) where
   type Tangent (ER.Extended a) = Tangent a
   subtraction (ER.Finite i) (ER.Finite j)=  subtraction i j
+  subtraction i j=  errorWithStackTrace " no subtraction"
   addition (ER.Finite i) j =  ER.Finite (addition i j)
+  addition i j=  errorWithStackTrace " no subtraction"
 
 instance (Fractional (DiffFTB (Tangent a)) ,Affine a ,Ord a) => Affine (FTB a) where
   type Tangent (FTB a) = DiffFTB (Tangent a)
@@ -254,17 +256,17 @@ instance Predicates (FTB Showable) where
   match (j@(TB1 _),"=")(ArrayTB1 i) = F.elem j i
   match ((ArrayTB1 i) ,"@>") j@(TB1 _)   = F.elem j i
   match ((ArrayTB1 i) ,"=")j@(TB1 _)   = F.elem j i
-  match ((ArrayTB1 i) ,"@>") j   = F.all (\i -> match (i,"<@") j) i
+  match ((ArrayTB1 i) ,"@>") j   = F.all (\i -> match (i,"@>") j) i
   match (IntervalTB1 i ,"<@") j@(TB1 _)  = j `Interval.member` i
   match (j@(TB1 _ ),"@>") (IntervalTB1 i)  = j `Interval.member` i
   match (j@(TB1 _ ),"=")(IntervalTB1 i)  = j `Interval.member` i
   match (IntervalTB1 i ,"<@") (IntervalTB1 j)  = j `Interval.isSubsetOf` i
   match (IntervalTB1 j ,"@>") (IntervalTB1 i)  = j `Interval.isSubsetOf` i
-  match (IntervalTB1 j ,"&&") (IntervalTB1 i)  = Interval.null $ j `Interval.intersection` i
+  match (IntervalTB1 j ,"&&") (IntervalTB1 i)  = not $ Interval.null $ j `Interval.intersection` i
   match i j = errorWithStackTrace ("no match = " <> show (i,j))
 
   union  l
-    | mi == ma = unFinite $ fst $ mi
+    | mi == ma = justError "cant be inf" $unFinite $ fst $ mi
     | otherwise =  IntervalTB1 (  mi `interval` ma )
     where mi = minimum (minP <$> l)
           ma = maximum (maxP <$> l)

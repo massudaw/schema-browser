@@ -67,13 +67,13 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
           let
               (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema_name","table_name"] e
               lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
-              (Attr _ (ArrayTB1 efields )) =lookAttr' (meta inf)  "event" $ fromJust $ G.lookup (idex (meta inf) "event" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )])  emap
+              Just (Attr _ (ArrayTB1 efields )) =indexField  (liftAccess (meta inf) "event" $ IProd True ["event"]) $ fromJust $ G.lookup (idex (meta inf) "event" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )])  emap
               (Attr _ (ArrayTB1 afields ))= lookAttr' (meta inf) "account" e
               (Attr _ color )= lookAttr' (meta inf) "color" e
               toLocalTime = fmap to
                 where to (STimestamp i )  = STimestamp $  utcToLocalTime cliZone $ localTimeToUTC utc i
                       to (SDate i ) = SDate i
-              convField ((IntervalTB1 i )) = [("start", toLocalTime $ unFinite $ Interval.lowerBound i),("end",toLocalTime $ unFinite $ Interval.upperBound i)]
+              convField ((IntervalTB1 i )) = catMaybes [fmap (("start",). toLocalTime )$ unFinite $ Interval.lowerBound i,fmap (("end",).toLocalTime )$ unFinite $ Interval.upperBound i]
               convField (LeftTB1 i) = concat $   convField <$> maybeToList i
               convField (v) = [("start",toLocalTime $v)]
               convField i = errorWithStackTrace (show i)

@@ -175,13 +175,11 @@ instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Tex
   toField (DelayedTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
   toField (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   (F.toList is)
   toField (IntervalTB1 is )
-    | ty == "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $T.unpack $ ty), TF.Plain $ fromByteString "range"]
-    | ty == "POINT3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
+    | ty == Just "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $maybe "" T.unpack $ ty), TF.Plain $ fromByteString "range"]
+    | ty == Just "POINT3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
     | otherwise  = TF.toField  tyv
     where tyv = fmap (\(TB1 i ) -> snd i) is
           ty = unFinite $  Interval.lowerBound $ fmap (\(TB1 i ) -> fst i) is
-          unFinite (Interval.Finite i) = i
-          unFinite i = errorWithStackTrace (show i)
   toField (TB1 (t,i)) = TF.toField i
   -- toField i = errorWithStackTrace (show i)
 
@@ -252,8 +250,8 @@ instance TF.ToField (UnQuoted a) => TF.ToField (Interval.Interval a) where
 
 instance TF.ToField (UnQuoted a) => TF.ToField (UnQuoted (Interval.Extended a )) where
   toField (UnQuoted (ER.Finite i)) = TF.toField (UnQuoted i)
-  toField (UnQuoted (ER.NegInf )) = TF.Plain (fromByteString "null")
-  toField (UnQuoted (ER.PosInf )) = TF.Plain (fromByteString "null")
+  toField (UnQuoted (ER.NegInf )) = TF.Plain (fromByteString "")
+  toField (UnQuoted (ER.PosInf )) = TF.Plain (fromByteString "")
 
 intervalBuilder i =  TF.Many [TF.Plain $ fromByteString ("\'"  <> lbd (snd $ Interval.lowerBound' i)) ,  TF.toField $  (UnQuoted $ Interval.lowerBound i) , TF.Plain $ fromChar ',' , TF.toField  (UnQuoted $ Interval.upperBound i) , TF.Plain $ fromByteString (ubd (snd $ Interval.upperBound' i) <> "\'")]
     where lbd True  =  "["
@@ -458,11 +456,11 @@ parseShowable (KInterval k)=
       emptyInter = const (IntervalTB1 Interval.empty) <$> string "empty"
       inter = do
         lb <- (char '[' >> return True ) <|> (char '(' >> return False )
-        i <- parseShowable k
+        i <- (ER.Finite <$> parseShowable k) <|>  return ER.NegInf
         char ','
-        j <- parseShowable k
+        j <- (ER.Finite <$> parseShowable k) <|> return ER.PosInf
         rb <- (char ']' >> return True) <|> (char ')' >> return False )
-        return $ IntervalTB1 $ Interval.interval (ER.Finite i,lb) (ER.Finite j,rb)
+        return $ IntervalTB1 $ Interval.interval (i,lb) (j,rb)
      in tryquoted  inter <|> emptyInter
 
 parseShowable p@(Primitive (AtomicPrim i)) = forw  . TB1 <$> parsePrim i

@@ -163,10 +163,10 @@ makePatch zone ((t,pk,k),a) =
     ty (KOptional k) i = fmap (POpt . Just) . ty k $ i
     ty (KSerial k) i = fmap (PSerial . Just) . ty k $ i
     ty (KInterval k) (Left i) =
-        [ PatchSet $
-          (fmap (PInter True . (, True)) . (ty k . Right . unFinite) $
+      [ PatchSet $ catMaybes $
+        (fmap (fmap (PInter True . (, True))) . (traverse (ty k . Right) . unFinite) $
            Interval.lowerBound i) <>
-          (fmap (PInter False . (, True)) . (ty k . Right . unFinite) $
+             (fmap (fmap (PInter False . (, True))) . (traverse (ty k . Right ). unFinite) $
            Interval.upperBound i)]
     ty (Primitive p) (Right r) = pure . PAtom . cast p $ r
     cast (AtomicPrim PDate) = SDate . utctDay

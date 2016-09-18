@@ -35,6 +35,7 @@ module Types.Patch
 
 -- import Warshal
 import Types
+import Data.Tuple
 import qualified Types.Index as G
 import Control.Monad.Reader
 import Data.Semigroup hiding (diff)
@@ -458,7 +459,7 @@ patchFTB p (LeftTB1 j )  = POpt (patchFTB p <$> j)
 patchFTB p (ArrayTB1 j )  = justError ("empty array in arraytb1 patchftb" <> show j)$  patchSet   $ zipWith (\i m ->  PIdx i  (Just m) ) [0..]  (F.toList $ patchFTB p <$> j)
 patchFTB p (DelayedTB1 j ) = PDelayed (patchFTB p <$> j)
 patchFTB p (SerialTB1 j ) = PSerial (patchFTB p <$> j)
-patchFTB p (IntervalTB1 j ) =  PatchSet [PInter True (first (patchFTB p . unFinite ) $  Interval.lowerBound' j) , PInter False (first (patchFTB p . unFinite ) $ Interval.upperBound' j)]
+patchFTB p (IntervalTB1 j ) =  PatchSet $ catMaybes  [PInter True <$> (fmap swap $ traverse (fmap (patchFTB p ). unFinite ) $ swap $  Interval.lowerBound' j) , PInter False <$> (fmap swap $ traverse (fmap (patchFTB p ). unFinite ) $ swap $ Interval.upperBound' j)]
 patchFTB p (TB1 j) = PAtom $ p j
 
 diffOpt :: (Ord a,Show a) => (a -> Index a ) -> (a -> a -> Maybe (Index a)) ->  Maybe (FTB a) -> Maybe (FTB a) -> Maybe (Maybe (PathFTB    (Index a)))
@@ -478,7 +479,7 @@ diffFTB p d (DelayedTB1 i) (DelayedTB1 j) = fmap PDelayed $ diffOpt p d i j
 diffFTB p d (IntervalTB1 i) (IntervalTB1 j)
   | i == j = Nothing
   | otherwise =  patchSet $  catMaybes   [match True (lowerBound' i ) (lowerBound' j) ,match False (upperBound' i ) (upperBound' j) ]
-    where match f i j = fmap (PInter f . (,snd $  j)) (maybe (if snd j == snd i then Nothing  else Just $ patchFTB p (unFinite $ fst $ j)) Just $ diffFTB p d (unFinite $ fst $  i) (unFinite $ fst $  j) )
+    where match f i j = fmap (PInter f . (,snd $  j)) (maybe (if snd j == snd i then Nothing  else patchFTB p <$> (unFinite $ fst $ j))  Just $ join $ liftA2 (diffFTB p d) (unFinite $ fst $  i) (unFinite $ fst $  j) )
 diffFTB p d (TB1 i) (TB1  j) = fmap PAtom $ d i j
 diffFTB p d  i j = errorWithStackTrace (show (i,j))
 

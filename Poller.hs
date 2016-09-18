@@ -54,8 +54,8 @@ index tb item = snd $ justError ("no item" <> show item) $ indexTable (IProd Tru
 checkTime curr = do
     let
         IntervalTB1 time_inter = index curr "time"
-        TB1 (STimestamp startLocal) = unFinite $ lowerBound time_inter
-        TB1 (STimestamp endLocal) = unFinite $ upperBound time_inter
+        TB1 (STimestamp startLocal) = justError "cant be null "$ unFinite $ lowerBound time_inter
+        TB1 (STimestamp endLocal) = justError "cant be null" $unFinite $ upperBound time_inter
         start = localTimeToUTC utc startLocal
         end = localTimeToUTC utc endLocal
     current <- getCurrentTime

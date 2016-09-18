@@ -863,10 +863,10 @@ buildUIDiff km i  tdi = go i tdi
          (KInterval ti) -> do
             let unInterval f (IntervalTB1 i ) = f i
                 unInterval _ i = errorWithStackTrace (show i)
-            inf <- go ti (fmap (unInterval inf' ) <$> tdi)
+            inf <- go ti (join.fmap (unInterval inf' ) <$> tdi)
             lbd <- fmap Diff <$> checkedWidget (maybe False id . fmap (\(IntervalTB1 i) -> snd . Interval.lowerBound' $i) <$> tdi)
 
-            sup <- go ti (fmap (unInterval sup')  <$> tdi)
+            sup <- go ti (join.fmap (unInterval sup')  <$> tdi)
             ubd <- fmap Diff<$> checkedWidget (maybe False id .fmap (\(IntervalTB1 i) -> snd . Interval.upperBound' $i) <$> tdi)
             composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
             subcomposed <- UI.div # set UI.children [composed]
@@ -1202,7 +1202,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
       presort <- ui $ mapTEventDyn return (fmap  <$> sortList <*> fmap (fmap G.toList ) preindex)
       -- Filter and paginate
       (offset,res3)<- do
-        let constr = presort -- liftA2 (\ (a,i) j -> (a,applyConstr i j) ) presort constrT
+        let constr = liftA2 (\ (a,i) j -> (a,applyConstr i j) ) presort constrT
 
         res3 <- ui$ mapTEventDyn return ((\i -> fmap (filter (filtering i))) <$> filterInpT <*> constr)
         element itemListEl # sink UI.size (show . (\i -> if i > 21 then 21 else (i +1 )) . length .snd <$> facts res3)
