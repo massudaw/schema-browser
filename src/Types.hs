@@ -967,34 +967,8 @@ unAttr i = errorWithStackTrace $ "cant find attr" <> (show i)
 
 srange l m = IntervalTB1 $ Interval.interval (Interval.Finite l,True) (Interval.Finite m ,True)
 
-intersectPred p@(Primitive _) op  (KInterval i) j (IntervalTB1 l )  | p == i =  Interval.member j l
-intersectPred p@(KInterval j) "<@" (KInterval i) (IntervalTB1 k)  (IntervalTB1  l)  =  Interval.isSubsetOf k  l
-intersectPred p@(KInterval j) "@>" (KInterval i) (IntervalTB1 k)  (IntervalTB1 l) =  flip Interval.isSubsetOf k l
-intersectPred p@(KInterval j) "=" (KInterval i) (IntervalTB1 k)  (IntervalTB1 l)   =  k == l
-intersectPred p@(KArray j) "<@" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  Set.fromList (F.toList k) `Set.isSubsetOf` Set.fromList  (F.toList l)
-intersectPred p@(KArray j) "@>" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  Set.fromList (F.toList l) `Set.isSubsetOf` Set.fromList  (F.toList k)
-intersectPred p@(KArray j) "=" (KArray i) (ArrayTB1 k)  (ArrayTB1 l )   =  k == l
-intersectPred p@(Primitive _) op (KArray i) j (ArrayTB1 l )  | p == i =  Non.elem j l
-intersectPred p1@(Primitive _) op  p2@(Primitive _) j l   | p1 == p2 =  case op of
-                                                                             "=" -> j ==  l
-                                                                             "<" -> j < l
-                                                                             ">" -> j > l
-                                                                             ">=" -> j >= l
-                                                                             "<=" -> j <= l
-                                                                             "/=" -> j /= l
-
-intersectPred (KSerial p1 ) op (KOptional p2 ) (SerialTB1 i )  (LeftTB1 j ) = fromMaybe False $ liftA2 (intersectPred p1 op p2)   i j
-intersectPred (KOptional p1 ) op (KSerial p2 ) (LeftTB1 i )  (SerialTB1 j ) = fromMaybe False $ liftA2 (intersectPred p1 op p2)   i j
-intersectPred p1 op  (KSerial p2) j (SerialTB1 l)   | p1 == p2 =  maybe False (j ==) l
-intersectPred p1 op (KOptional p2) j (LeftTB1 l)   | p1 == p2 =  maybe False (j ==) l
-intersectPred p1@(KOptional i ) op p2 (LeftTB1 j) l  =  maybe False id $ fmap (\m -> intersectPred i op p2 m l) j
-intersectPred p1 op p2 j l   = error ("intersectPred = " <> show p1 <> show p2 <>  show j <> show l)
 
 
-accessRel (Rel l op m) to tt = liftA2 (,op,) (L.find ((==l).keyAttr ) to ) (L.find ((==m).keyAttr ) tt)
-accessRel (RelAccess l m) to tt = join $ flip (accessRel m ) tt .fmap unTB . F.toList . unKV . snd . unTB1 . _fkttable <$> L.find ((==l).keyAttr ) to
-
-nonRefAttr l = concat $  fmap (uncurry Attr) . aattr <$> ( l )
 
 makeLenses ''KV
 makeLenses ''TB

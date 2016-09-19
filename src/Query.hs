@@ -23,7 +23,6 @@ module Query
   ,tlabel
   ,tableView
   ,unTlabel'
-  ,interPointPost
   ,PGRecord
   ,PGType
   ,PGKey
@@ -595,15 +594,6 @@ lookGist un pk  = G.lookup (tbpred un pk)
 inattr :: TB Identity b a -> b
 inattr = _relOrigin . head . keyattri
 
-interPointPost rel ref tar = interPoint ( rel) ( ref) (tar)
 
-interPoint
-  :: (Ord a ,Show a) => [Rel (FKey (KType (Prim KPrim (Text,Text))))]
-     -> [TB Identity (FKey (KType (Prim KPrim (Text,Text)))) a]
-     -> [TB Identity (FKey (KType (Prim KPrim (Text,Text)))) a]
-     -> Bool
-interPoint ks i j = (\i-> if L.null i then False else  all id  i)$  catMaybes $ fmap (\rel -> fmap (\(i,op,j) -> intersectPredTuple op i j ) $ accessRel rel i j ) ks
-
-intersectPredTuple  op = (\i j-> intersectPred ( keyType (keyAttr i)) op  (keyType (keyAttr j)) (unAttr i) (unAttr j))
 
 
