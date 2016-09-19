@@ -479,7 +479,12 @@ diffFTB p d (DelayedTB1 i) (DelayedTB1 j) = fmap PDelayed $ diffOpt p d i j
 diffFTB p d (IntervalTB1 i) (IntervalTB1 j)
   | i == j = Nothing
   | otherwise =  patchSet $  catMaybes   [match True (lowerBound' i ) (lowerBound' j) ,match False (upperBound' i ) (upperBound' j) ]
-    where match f i j = fmap (PInter f . (,snd $  j)) (maybe (if snd j == snd i then Nothing  else patchFTB p <$> (unFinite $ fst $ j))  Just $ join $ liftA2 (diffFTB p d) (unFinite $ fst $  i) (unFinite $ fst $  j) )
+    where match f i j = fmap (PInter f . (,snd $  j)) (maybe (if snd j == snd i then Nothing  else patchFTB p <$> (unFinite $ fst $ j))  Just $ diffExtended (unFinite $ fst $  i) (unFinite $ fst $  j) )
+          diffExtended Nothing (Just i) = Just $ patchFTB p i
+          diffExtended (Just i ) (Just j) = diffFTB p d i j
+          diffExtended Nothing Nothing = Nothing
+          diffExtended (Just i ) Nothing = Nothing
+
 diffFTB p d (TB1 i) (TB1  j) = fmap PAtom $ d i j
 diffFTB p d  i j = errorWithStackTrace (show (i,j))
 
@@ -549,8 +554,11 @@ applyFTB pr a (SerialTB1 i ) (PSerial o) = SerialTB1 $  applyOpt pr a i o
 applyFTB pr a (DelayedTB1 i ) (PDelayed o) = DelayedTB1 $  applyOpt pr a i o
 applyFTB pr a (IntervalTB1 i) (PInter b (p,l))
     = IntervalTB1 $ if b
-        then interval (second (const l) $ first (fmap (flip (applyFTB pr a) p)) (lowerBound' i))    (upperBound' i)
-        else interval (lowerBound' i) (second (const l) $ first (fmap (flip (applyFTB pr a) p )) (upperBound' i))
+        then interval (second (const l) $ first (mapExtended p) (lowerBound' i))    (upperBound' i)
+        else interval (lowerBound' i) (second (const l) $ first (mapExtended  p ) (upperBound' i))
+  where
+    mapExtended p (Interval.Finite i) = Interval.Finite $ applyFTB pr a i p
+    mapExtended p _ =Interval.Finite $ createFTB pr  p
 applyFTB pr a (TB1 i) (PAtom p)  =  TB1 $ a i p
 applyFTB pr a  b (PatchSet l ) = foldl (applyFTB pr a ) b l
 applyFTB _ _ a b = errorWithStackTrace ("applyFTB: " )

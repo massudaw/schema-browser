@@ -1,8 +1,12 @@
 {-# LANGUAGE FlexibleContexts,OverloadedStrings #-}
 module Main where
 import TP.Main
-import TP.Browser(addServer,deleteServer,deleteClient)
+import TP.Browser(addServer,deleteServer,deleteClient,addClientLogin,deleteClientLogin)
 import Data.Unique
+import Types
+import qualified Types.Index as G
+import qualified Data.Foldable as F
+import TP.QueryWidgets(lookAttr')
 import System.Process (rawSystem)
 import Poller
 import Plugins
@@ -50,9 +54,14 @@ main = do
   print "Load GUI Server"
   forkIO $ threadDelay 50000 >> rawSystem "chromium" ["http://localhost:8025"] >> return ()
   startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" , jsPort = fmap read $ safeHead args })  (setup smvar  (tail args))
+      (do
+        Just (TableModification _ _ (_,G.Idex c,_)) <- addClientLogin metas
+        let [(SerialTB1 (Just (TB1 (SNumeric i))))] = F.toList c
+        return i )
       (\w ->  do
-        print ("delete client" <> show (hashUnique $ wId w))
-        deleteClient metas (fromIntegral $ hashUnique $ wId w) )
+        print ("delete client" <> show (wId w))
+        deleteClientLogin metas (wId w)
+        deleteClient metas (fromIntegral $ wId w) )
 
   traverse (deleteServer metas) ref
   print "Finish Server"

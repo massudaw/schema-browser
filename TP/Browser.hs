@@ -7,7 +7,7 @@
 
 module TP.Browser where
 
-import Control.Monad.Writer (runWriterT)
+import Control.Monad.Writer (runWriterT,tell)
 import Control.Lens (_1,_2,(^.),over)
 import Safe
 import qualified NonEmpty as Non
@@ -54,23 +54,53 @@ import qualified Data.Map as M
 
 import GHC.Stack
 
-updateServer metainf now = liftTable' metainf "server" row
+clientCreate metainf now = liftTable' metainf "client_login" row
+  where
+    row = tblist . fmap _tb
+            $ [ Attr "id" (SerialTB1 Nothing)
+              , Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
+              ]
+
+serverCreate metainf now = liftTable' metainf "server" row
   where
     row = tblist . fmap _tb
             $ [ Attr "serverid" (SerialTB1 Nothing)
               , Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
               ]
 
+addClientLogin inf =  transaction inf $ do
+    now <- liftIO$ getCurrentTime
+    let
+      obj = clientCreate inf now
+    i@(Just (TableModification _ _ tb))  <-  insertFrom obj
+    tell (maybeToList i)
+    return i
+
+attrIdex l =  G.Idex $ M.fromList $ fmap (\(Attr i k) -> (i,k)) l
+
+deleteClientLogin inf i= do
+  now <- getCurrentTime
+  (_,(_,tb)) <- transactionNoLog inf $ selectFrom "client_login"  Nothing Nothing [] $ mempty
+  let
+    pk = Attr (lookKey inf "client_login" "id") (TB1 (SNumeric i))
+    old = justError ("no row " <> show (attrIdex [pk]) ) $ G.lookup (attrIdex [pk]) tb
+    pt = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
+
+  transaction inf $ do
+    v <- updateFrom   (apply old pt ) old
+    tell (maybeToList v)
+    return v
+
 addServer inf =  do
     now <- getCurrentTime
     let
-      obj = updateServer inf now
+      obj = serverCreate inf now
     transaction inf $ insertFrom obj
 
 deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
   now <- getCurrentTime
   let pt = (tableMeta (lookTable inf "server") , ref ,[PAttr (lookKey inf "server" "up_time") (PInter False ((PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
-  transaction inf $ updateFrom   (create $(a,ref,compact $c <> [PAttr (lookKey inf "server" "up_time") (PInter False ((PAtom (STimestamp (utcToLocalTime utc now)) , False)))]))(create o)
+  transaction inf $ updateFrom (apply (create o) pt) (create o)
 
 
 updateClient metainf inf table tdi clientId now =

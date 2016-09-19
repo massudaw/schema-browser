@@ -97,7 +97,11 @@ applyPatch conn patch@(m,G.Idex kold,skv)  =
   where
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> M.toList kold
-    attrPatchName (PAttr k _) = keyValue k <> "=" <> "?"
+    attrPatchName (PAttr k p ) = keyValue k <> "=" <> nestP(keyValue k) p
+      where nestP k (PInter True (b,j)) = "lowerI(" <> k <> "," <> "?" <>" ," <> (T.pack $show j)<> ")"
+            nestP k (PInter False (b,j)) = "upperI(" <> k <> "," <> "?" <> "," <> (T.pack (show j )) <> ")"
+            nestP k (PatchSet l) = F.foldl' nestP k  l
+            nestP k i = "?"
     attrPatchValue (PAttr  k v) = Attr k (create v) :: TB Identity PGKey Showable
     pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> M.toList kold)
     setter = " SET " <> T.intercalate "," (   attrPatchName <$> skv   )
