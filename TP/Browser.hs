@@ -97,8 +97,23 @@ addServer inf =  do
       obj = serverCreate inf now
     transaction inf $ insertFrom obj
 
+idexToPred (G.Idex  i) = head $ (\(k,a)-> (IProd True [k],"@>",a)) <$>  M.toList  i
+
 deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
   now <- getCurrentTime
+  (_,(_,tb)) <- transactionNoLog inf $ selectFrom "client_login"  Nothing Nothing [] $ mempty
+  let
+    pk = Attr (lookKey inf "client_login" "up_time") (TB1 (STimestamp (utcToLocalTime utc now)))
+    oldClis =  L.filter (G.indexPred (idexToPred $ attrIdex [pk])) (G.toList tb)
+    pt old = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
+
+  mapM (\(old) -> transaction inf $ do
+    v <- updateFrom   (apply old (pt old)) old
+    tell (maybeToList v)
+    return v) oldClis
+
+
+
   let pt = (tableMeta (lookTable inf "server") , ref ,[PAttr (lookKey inf "server" "up_time") (PInter False ((PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
   transaction inf $ updateFrom (apply (create o) pt) (create o)
 

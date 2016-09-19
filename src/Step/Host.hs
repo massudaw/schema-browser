@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Host (module Step.Common,attrT,findPK,findFK,findAttr,findFKAttr,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexField,indexFieldRec,indexer,indexPred,genPredicate) where
+module Step.Host (module Step.Common,attrT,findPK,findFK,findAttr,findFKAttr,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexField,indexFieldRec,indexer,genPredicate) where
 
 import Types
 import Control.Applicative.Lift
@@ -53,43 +53,6 @@ replace ix i (Point p)
   | ix == p = Rec ix i
   | otherwise = (Point p)
 replace ix i v = v
-
-indexPred (Many i ,eq,v) r = all (\i -> indexPred (i,eq,v) r) i
-indexPred (n@(Nested k nt ) ,eq,v) r
-  = case  indexField n r of
-    Nothing -> errorWithStackTrace ("cant find attr" <> show (n,nt))
-    Just i ->  recPred $ indexPred (nt , eq ,v) <$> _fkttable  i
-  where
-    recPred (SerialTB1 i) = maybe False recPred i
-    recPred (LeftTB1 i) = maybe False recPred i
-    recPred (TB1 i ) = i
-    recPred (ArrayTB1 i) = all recPred (F.toList i)
-indexPred (a@(IProd _ _),eq,v) r =
-  case indexField a r of
-    Nothing ->  errorWithStackTrace ("cant find attr" <> show (a,eq,v,r))
-    Just (Attr _ rv) ->
-      case eq of
-        "is not null" -> isJust $ unSOptional' rv
-        "is null" -> isNothing $ unSOptional' rv
-        "=" -> rv == v
-        "&&" -> case v of
-                  IntervalTB1 l ->  maybe False (not. I.null . flip I.intersection l. (\(IntervalTB1 i) -> i)) (unSOptional' rv)
-        "<@" -> case v of
-                  IntervalTB1 l ->  maybe False (flip I.member  l) (unSOptional' rv)
-
-                  i -> errorWithStackTrace ("Param not implemented " <> show i )
-
-        "IN" ->case v of
-                 ArrayTB1 i -> F.elem rv i
-        i -> errorWithStackTrace ("Operator not implemented " <> i )
-    Just (IT _ rv) ->
-      case eq of
-        "is not null" -> isJust $ unSOptional' rv
-        "is null" -> isNothing $ unSOptional' rv
-    Just (FKT _ _ rv) ->
-      case eq of
-        "is not null" -> isJust $ unSOptional' rv
-        "is null" -> isNothing $ unSOptional' rv
 
 indexField :: Access Key -> TBData Key Showable -> Maybe (Column Key Showable)
 indexField p@(IProd b l) v = case unTB <$> findAttr  l  v of

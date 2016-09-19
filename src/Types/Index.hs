@@ -7,7 +7,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Types.Index
-  (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,filter',mapKeys ,getIndex ,pickSplitG ,minP,maxP,unFin,module G ) where
+  (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,filter',mapKeys ,getIndex ,pickSplitG ,minP,maxP,unFin,queryCheck,indexPred,module G ) where
 
 import Data.Maybe
 import Data.Functor.Identity
@@ -190,6 +190,43 @@ instance  Predicates (Map Key (FTB Showable)) where
   pickSplit = pickSplitG
 
 
+checkPred v (WherePredicate l) = checkPred' v l
+
+checkPred' v (AndColl i ) = F.all  (checkPred' v)i
+checkPred' v (OrColl i ) = F.any (checkPred' v) i
+checkPred' v (PrimColl i) = indexPred i v
+
+indexPred :: (Access Key ,T.Text,FTB Showable) -> TBData Key Showable -> Bool
+indexPred (Many i,eq,v) a= all (\i -> indexPred (i,eq,v) a) i
+indexPred (n@(Nested k nt ) ,eq,v) r
+  = case  indexField n r of
+    Nothing -> errorWithStackTrace ("cant find attr" <> show (n,nt))
+    Just i ->  recPred $ indexPred (nt , eq ,v) <$> _fkttable  i
+  where
+    recPred (SerialTB1 i) = maybe False recPred i
+    recPred (LeftTB1 i) = maybe False recPred i
+    recPred (TB1 i ) = i
+    recPred (ArrayTB1 i) = all recPred (F.toList i)
+indexPred (a@(IProd _ _),eq,v) r =
+  case indexField a r of
+    Nothing ->  errorWithStackTrace ("cant find attr" <> show (a,eq,v,r))
+    Just (Attr _ rv) ->
+      case eq of
+        "is not null" -> isJust $ unSOptional' rv
+        "is null" -> isNothing $ unSOptional' rv
+        i -> match (v,eq) rv
+    Just (IT _ rv) ->
+      case eq of
+        "is not null" -> isJust $ unSOptional' rv
+        "is null" -> isNothing $ unSOptional' rv
+    Just (FKT _ _ rv) ->
+      case eq of
+        "is not null" -> isJust $ unSOptional' rv
+        "is null" -> isNothing $ unSOptional' rv
+
+
+queryCheck :: WherePredicate -> G.GiST (TBIndex Key Showable) (TBData Key Showable) -> G.GiST (TBIndex Key Showable) (TBData Key Showable)
+queryCheck pred = filter' (flip checkPred pred) . G.query pred
 
 -- Atomic Predicate
 

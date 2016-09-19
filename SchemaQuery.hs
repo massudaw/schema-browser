@@ -238,16 +238,10 @@ eventTable = tableLoader
 predNull (WherePredicate i) = L.null i
 -- predNull (LegacyPredicate i) = L.null i
 
-filterfixed fixed
+filterfixed fixed v
   = if predNull fixed
-              then id
-              else
-                case fixed of
-                  WherePredicate pred -> G.filter' (\tb ->allPred  (\(a,e,v) ->  indexPred  (a,T.unpack e ,v) tb) pred ).  G.query fixed
-  where
-    allPred pred (AndColl i ) =F.all (allPred  pred) i
-    allPred pred (OrColl i ) =F.any (allPred  pred) i
-    allPred pred i = F.all pred i
+       then v
+       else G.queryCheck fixed v
 
 
 pageTable flag method table page size presort fixed = do
