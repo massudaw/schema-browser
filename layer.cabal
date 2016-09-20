@@ -83,7 +83,7 @@ library
   default-language:    Haskell2010
 executable threepenny-layer
   main-is:             Main.hs
-  ghc-options:         -threaded -rtsopts -fprof-auto-calls 
+  ghc-options:         -threaded -rtsopts -fprof-auto -fprof-auto-calls
   other-modules:       
     CnpjReceita
     Crea

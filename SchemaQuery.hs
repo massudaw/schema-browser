@@ -72,7 +72,7 @@ refTable  inf table  = do
   return $ justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
 
 
-tbpredM un v = G.Idex . M.fromList $ fromJust $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
+tbpredM un v = G.Idex . M.fromList $ justError "optional pk" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
 
 createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key Showable) (TBData Key Showable)
 createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un (tableNonRef' i) )

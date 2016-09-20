@@ -88,9 +88,11 @@ instance Predicates WherePredicate where
   pickSplit = pickSplitG
   union l = WherePredicate $ AndColl $ fmap (\(k,(a,b))-> PrimColl(k,a,b))$ M.toList $ foldl1 ( M.mergeWithKey (\_ i j -> Just $ pairunion [i,j]) (fmap id) (fmap id) ) ((\(WherePredicate pr ) -> M.fromList .fmap projKey  . F.toList $ pr)<$> l)
     where projKey (a,b,c) =  (a,(b,c))
-          pairunion i = (head $ fst <$> i,union $ snd <$> i)
+          pairunion i = (headS $ fst <$> i,union $ snd <$> i)
 
 
+headS [] = errorWithStackTrace "no head"
+headS i = head i
 
 class Affine f where
   type Tangent f
@@ -178,10 +180,10 @@ instance  Predicates (Map Key (FTB Showable)) where
   type Query (Map Key (FTB Showable )) = TBPredicate Key Showable
   match (WherePredicate a )  v=  go a
     where
+      -- Index the field and if not found return true to row filtering pass
       go (AndColl l) = F.all go l
       go (OrColl l ) = F.any go  l
-      -- Index the field and if not found return true to row filtering pass
-      go (PrimColl (i,op,c)) = maybe True (match (c,op)) (fmap _tbattr $ indexField i (undefined,Compose $Identity $ KV (M.mapKeys (Set.singleton .Inline) $ M.mapWithKey (\k v -> Compose $ Identity $ Attr k v) v)) )
+      go (PrimColl (i,op,c)) = maybe True (\i -> match (c,op) i) (fmap _tbattr $ indexField i (errorWithStackTrace "no meta",Compose $Identity $ KV (M.mapKeys (Set.singleton .Inline) $ M.mapWithKey (\k v -> Compose $ Identity $ Attr k v) v)) )
   consistent l i =  if M.null b then False else  F.all id b
     where
       b =  M.intersectionWith consistent (M.mapKeys keyValue l) (M.mapKeys keyValue i)
@@ -207,6 +209,7 @@ indexPred (n@(Nested k nt ) ,eq,v) r
     recPred (LeftTB1 i) = maybe False recPred i
     recPred (TB1 i ) = i
     recPred (ArrayTB1 i) = all recPred (F.toList i)
+    recPred i = errorWithStackTrace (show i)
 indexPred (a@(IProd _ _),eq,v) r =
   case indexField a r of
     Nothing ->  errorWithStackTrace ("cant find attr" <> show (a,eq,v,r))
@@ -219,10 +222,12 @@ indexPred (a@(IProd _ _),eq,v) r =
       case eq of
         "is not null" -> isJust $ unSOptional' rv
         "is null" -> isNothing $ unSOptional' rv
+        i -> errorWithStackTrace (show i)
     Just (FKT _ _ rv) ->
       case eq of
         "is not null" -> isJust $ unSOptional' rv
         "is null" -> isNothing $ unSOptional' rv
+        i -> errorWithStackTrace (show i)
 
 
 queryCheck :: WherePredicate -> G.GiST (TBIndex Key Showable) (TBData Key Showable) -> G.GiST (TBIndex Key Showable) (TBData Key Showable)
@@ -285,16 +290,26 @@ instance Predicates (FTB Showable) where
   match  (LeftTB1 j ,v)  i   = fromMaybe False ((\a -> match (a,v) i) <$> j)
   match  (LeftTB1 i,"=")  (LeftTB1 j)   = fromMaybe False $ liftA2 match ((,"=") <$> i) j
   match  ((ArrayTB1 j) ,"IN") i  = F.elem i j
-  match  (TB1 i,"=") (TB1 j)   = i == j
+  match  ((ArrayTB1 j) ,"FIN") i  = F.elem i j
+  match  (TB1 i,_) (TB1 j)   = i == j
   match  ((ArrayTB1 i) ,"<@") ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
   match  ((ArrayTB1 j) ,"IN") ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
+  match  ((ArrayTB1 j) ,"FIN") ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
   match  ((ArrayTB1 j),"@>" ) ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
   match (j@(TB1 _),"<@") (ArrayTB1 i) = F.elem j i
   match (j@(TB1 _),"=")(ArrayTB1 i) = F.elem j i
+  match (j@(TB1 _),"FIN")(ArrayTB1 i) = F.elem j i
   match ((ArrayTB1 i) ,"@>") j@(TB1 _)   = F.elem j i
   match ((ArrayTB1 i) ,"=")j@(TB1 _)   = F.elem j i
   match ((ArrayTB1 i) ,"@>") j   = F.all (\i -> match (i,"@>") j) i
   match (IntervalTB1 i ,"<@") j@(TB1 _)  = j `Interval.member` i
+  match (IntervalTB1 i ,"@>") j@(TB1 _)  = j `Interval.member` i
+  match (IntervalTB1 i ,"FIN")j@(TB1 _)  = j `Interval.member` i
+  match (IntervalTB1 i ,"IN")j@(TB1 _)  = j `Interval.member` i
+  match (IntervalTB1 i ,"=")j@(TB1 _)  = j `Interval.member` i
+  match (j@(TB1 _ ),"IN") (IntervalTB1 i)  = j `Interval.member` i
+  match (j@(TB1 _ ),"FIN") (IntervalTB1 i)  = j `Interval.member` i
+  match (j@(TB1 _ ),"<@") (IntervalTB1 i)  = j `Interval.member` i
   match (j@(TB1 _ ),"@>") (IntervalTB1 i)  = j `Interval.member` i
   match (j@(TB1 _ ),"=")(IntervalTB1 i)  = j `Interval.member` i
   match (IntervalTB1 i ,"<@") (IntervalTB1 j)  = j `Interval.isSubsetOf` i
@@ -323,7 +338,7 @@ intervalSub (IntervalTB1 i) (IntervalTB1 j)
 
 
 notNeg (DSText l)
-  | L.null dp || head dp < 0 = def
+  | L.null dp || headS dp < 0 = def
   | otherwise = DSText l
   where dp =  dropWhile (==0) l
         def = DSText [] -- (replicate (L.length l) 0)
@@ -339,6 +354,7 @@ notNeg (DSDays l )
 notNeg (DSDiffTime l )
   | l < 0 = DSDiffTime 0
   | otherwise =  DSDiffTime l
+notNeg i= errorWithStackTrace (show i)
 
 
 unFin (Interval.Finite (TB1 i) ) = i

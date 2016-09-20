@@ -419,7 +419,7 @@ applyAttr (IT k i) (PInline _   p)  = IT k (applyTB1 i p)
 diffAttr :: PatchConstr k a  => TB Identity k a -> TB Identity k a -> Maybe (PathAttr k  (Index a))
 diffAttr (Attr k i) (Attr l m ) = fmap (PAttr k) (diffShowable i m)
 diffAttr (IT k i) (IT _ l) = fmap (PInline k  ) (diffTB1 i l)
-diffAttr (FKT  k _ i) (FKT m rel b) = (\l m -> if L.null l then Nothing else Just (PFK rel l m  (patch b))) (catMaybes $ F.toList $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j)) (_kvvalues k) (_kvvalues m)  ) kvempty
+diffAttr (FKT  k _ i) (FKT m rel b) = (\l m -> Just (PFK rel l m  (patch b))) (catMaybes $ F.toList $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j)) (_kvvalues k) (_kvvalues m)  ) kvempty
 
 patchAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a)
 patchAttr a@(Attr k v) = PAttr k  (patchFTB patch v)

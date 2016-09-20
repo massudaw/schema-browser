@@ -278,8 +278,6 @@ selectQuery t koldpre order wherepred = (,ordevalue <> predvalue) $ if L.null (s
                 in (eqquery <$> eqspred , eqpk)-}
               WherePredicate wpred -> printPred t wpred
         pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  ( orderquery <> predquery)
-        equality ("IN",k) = inattr k <> " IN " <> " (select unnest(?) )"
-        equality (i,k) = " ? " <> i <> inattr k
         (orderquery , ordevalue) =
           let
             oq = (const $ pure $ generateComparison (first (justLabel t) <$> order)) <$> koldpre
@@ -442,6 +440,8 @@ printPred t (AndColl wpred) =
 
 
 inferParamType e (KOptional i) = inferParamType e i
+inferParamType e (KInterval i) = inferParamType e i
+inferParamType "<@" (Primitive (AtomicPrim PDouble )) = ":: double precision"
 inferParamType "<@" (Primitive (AtomicPrim PDate )) = ":: daterange"
 inferParamType "<@" (Primitive (AtomicPrim PPosition )) = ":: point3range"
 inferParamType "<@" (Primitive (AtomicPrim (PTimestamp i ) )) = case i of
@@ -497,17 +497,18 @@ indexFieldL e (Many nt) v = concat $ flip (indexFieldL e) v <$> nt
 indexFieldL e (ISum nt) v = concat $ flip (indexFieldL e) v <$> nt
 indexFieldL e i v = errorWithStackTrace (show (i, v))
 
-utlabel (e,i) a = result
+utlabel (e,value) a = result
   where
     idx = tlabel' . getCompose $ a
-    opvalue  i@"is not null" =  i
-    opvalue i@"is null" =  i
-    opvalue "IN"  = (\v -> " IN(" <> " select unnest( ? " <> inferParamType e (keyType (fst v)) <> "))") $ idx
-    opvalue  i = (\v -> i <> " ? " <> inferParamType e (keyType (fst v))) $ idx
+    opvalue  ref i@"is not null" =  ref <> " " <> i
+    opvalue ref i@"is null" =  ref <> " "<> i
+    opvalue ref "IN"  = (\v -> ref <> " IN(" <> " select unnest( ? " <> inferParamType e (keyType (fst v)) <> "))") $ idx
+    opvalue ref "FIN"  = (\v -> "? " <> inferParamType e (keyType (fst v)) <> " IN(" <> " select unnest( " <> ref <> "))") $ idx
+    opvalue ref  i = (\v ->  " ? " <> inferParamType e (keyType (fst v)) <> i <> ref ) $ idx
     opparam "is not null" =  Nothing
     opparam "is null" =  Nothing
-    opparam _ = Just $ flip Attr i .fst $ (idx )
-    result =  ( Just $ (\i j -> i <> " " <> j) (snd $ idx) (opvalue e) ,opparam e )
+    opparam _ = Just $ Attr (fst idx ) value
+    result =  ( Just $  (opvalue (snd $ idx) e)   ,opparam e )
     tlabel' (Labeled l (Attr k _)) =  (k,l)
     tlabel' (Labeled l (IT k tb )) =  (k,l <> " :: " <> tableType tb)
     tlabel' (Unlabeled (Attr k _)) = (k,keyValue k)

@@ -1077,8 +1077,8 @@ recOverMAttr' tag tar  m =   foldr go m tar
       where recv = gt tag m
     go (k:xs) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . go xs . _kvvalues )))) ))) k
 
-    gt (k:[]) = unTB . fromJust  . Map.lookup k
-    gt (k:xs) = gt xs . _kvvalues . unTB . snd . head .F.toList. _fkttable . unTB  . fromJust . Map.lookup k
+    gt (k:[]) = unTB . justError "no key" . Map.lookup k
+    gt (k:xs) = gt xs . _kvvalues . unTB . snd . head .F.toList. _fkttable . unTB  . justError "no key" . Map.lookup k
 
 replaceRecRel :: Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b ) -> [MutRec [Set (Rel Key) ]] -> Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b )
 replaceRecRel = foldr (\(MutRec l) v  -> foldr (\a -> recOverMAttr' a l )   v l)
