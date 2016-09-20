@@ -536,16 +536,6 @@ createFTB p (PInter b o ) = IntervalTB1 $ if b then interval (first (Interval.Fi
 createFTB p (PAtom i )  = TB1 $ p i
 createFTB p (PatchSet l) = foldl1 mappend (createFTB p <$> l)
 
-createFTBM :: (Applicative m , Ord a ) => (Index a -> m a ) ->  PathFTB (Index a) -> m (FTB a)
-createFTBM p (POpt i ) = LeftTB1 <$> (traverse (createFTBM p) i)
-createFTBM p (PSerial i ) = SerialTB1 <$>  (traverse (createFTBM p ) i)
-createFTBM p (PDelayed i ) = DelayedTB1 <$> (traverse (createFTBM p ) i)
-createFTBM p (PIdx ix o ) = ArrayTB1 .pure .justError "" <$> (traverse (createFTBM p) o)
--- createFTBM p (PInter b o ) = IntervalTB1 $ if b then interval (first (fmap Interval.Finite . createFTBM p ) o) (Interval.PosInf,False) else  interval  (Interval.NegInf,False) ( first (fmap Interval.Finite . createFTBM p) o)
-createFTBM p (PAtom i )  = TB1 <$>  p i
-createFTBM p (PatchSet l) = foldl1 (liftA2 mappend) (createFTBM p <$>  l)
-
-
 
 instance (Ord a )=> Monoid (FTB a) where
  mempty = LeftTB1 Nothing
