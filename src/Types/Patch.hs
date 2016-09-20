@@ -31,7 +31,7 @@ module Types.Patch
   ,patchEditor
   ,joinEditor
   --
-  ,PathFTB(..),PathAttr(..),TBIdx,firstPatch,applyFTBM,PatchConstr)where
+  ,PathFTB(..),PathAttr(..),TBIdx,firstPatch,PatchConstr)where
 
 -- import Warshal
 import Types
@@ -181,7 +181,6 @@ instance (Ord a,Show a,Patch a) => Patch (FTB a ) where
   type Index (FTB a) =  PathFTB (Index a)
   diff = diffFTB patch diff
   apply = applyFTB create apply
-  applyIfChange = applyIfChange'
   create = createFTB create
   patch = patchFTB patch
 
@@ -493,20 +492,7 @@ instance Applicative Interval.Extended where
   pure i = Interval.Finite i
   (Interval.Finite i) <*> (Interval.Finite j) =  Interval.Finite $ i j
 
-applyIfChange'
-  :: (Patch a, Ord a ) =>
-     FTB a -> PathFTB (Index a) -> Maybe (FTB a)
-applyIfChange' = applyFTBM (Just . create) applyIfChange
 
-applyOptM
-  :: (Monad m ,Applicative m,Ord a) =>
-     (Index a -> m a)
-     -> (a -> Index a -> m a)-> Maybe (FTB a) -> Maybe (PathFTB (Index a)) -> m (Maybe (FTB a))
-applyOptM  pr a i  o = case i of
-                      Nothing -> case o of
-                            Nothing -> pure Nothing
-                            Just j -> traverse (createFTBM pr) o
-                      Just _ -> sequenceA $ applyFTBM pr a <$> i <*> o
 applyOpt
   :: (Ord a) =>
      (Index a -> a)
@@ -516,28 +502,6 @@ applyOpt  pr a i  o = case i of
                             Nothing -> Nothing
                             Just j -> createFTB pr <$> o
                       Just _ -> applyFTB pr a <$> i <*> o
-applyFTBM
-  :: (Monad m,Applicative m ,Ord a ) =>
-    (Index a -> m a) -> (a -> Index a -> m a) -> FTB a -> PathFTB (Index a) -> m (FTB a)
-applyFTBM pr a (LeftTB1 i ) op@(POpt o) = LeftTB1 <$>  applyOptM pr a i o
-applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
-                      Nothing -> pure $ ArrayTB1 $ Non.fromList $ Non.take ix   i
-                      Just p -> if ix <=  Non.length i - 1
-                                then fmap ArrayTB1 $ sequenceA $ Non.imap (\i v -> if i == ix then applyFTBM pr a v p else pure v )  i
-                                else if ix == Non.length i
-                                      then fmap ArrayTB1 $ sequenceA $ fmap pure i <> pure (createFTBM pr p)
-                                      else errorWithStackTrace $ "ix bigger than next elem"
-
-applyFTBM pr a (SerialTB1 i ) (PSerial o) = SerialTB1 <$>  applyOptM pr a i o
-applyFTBM pr a (DelayedTB1 i ) (PDelayed o) = DelayedTB1 <$>  applyOptM pr a i o
-applyFTBM pr a (IntervalTB1 i) (PInter b (p,l))
-    = IntervalTB1 <$> if b
-        then (Interval.interval) <$> fmap (,l) (traverse ( flip (applyFTBM pr a) p) (fst $ lowerBound' i)) <*> pure (upperBound' i)
-        else (Interval.interval) <$> pure (lowerBound' i)  <*> fmap (,l)  (traverse ( flip (applyFTBM pr a) p ) (fst $ upperBound' i))
-applyFTBM pr a (TB1 i) (PAtom p)  =  TB1 <$> a i p
-applyFTBM pr a  b (PatchSet l ) = foldl (\i j -> i >>= flip (applyFTBM pr a) j  ) (pure b) l
-applyFTBM _ _ a b = errorWithStackTrace ("applyFTB: " )
-
 
 applyFTB
   :: (Ord a) =>

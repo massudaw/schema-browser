@@ -118,32 +118,39 @@ deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
   transaction inf $ updateFrom (apply (create o) pt) (create o)
 
 
-updateClient metainf inf table tdi clientId now =
+updateClient metainf inf table tdi clientId now = do
+    (_,(_,tb)) <- transactionNoLog metainf $ selectFrom "client_login"  Nothing Nothing [] $ mempty
+    let
+      pk = Attr (lookKey metainf "client_login" "id") (TB1 (SNumeric clientId))
+      old = justError ("no row " <> show (attrIdex [pk]) ) $ G.lookup (attrIdex [pk]) tb
     let
       row = tblist . fmap _tb
-            $ [ Attr "clientid" (TB1 (SNumeric (fromInteger clientId )))
+            $ [ FKT (kvlist [_tb $ Attr "clientid" (TB1 (SNumeric (clientId )))]) [Rel "clientid" "=" "id"] (TB1 $ mapKey' keyValue $ old)
               , Attr "creation_time" (TB1 (STimestamp (utcToLocalTime utc now)))
               , Attr "schema" (LeftTB1 $ TB1 . SText .  schemaName <$> inf )
               , Attr "table" (LeftTB1 $ TB1 . SText .  tableName <$>table)
               , IT "data_index"   (LeftTB1 $ ArrayTB1 . Non.fromList .   fmap (\(i,j) -> TB1 $ tblist $ fmap _tb [Attr "key" (TB1 . SText  $ keyValue i) ,Attr "val" (TB1 . SDynamic $  j) ]) <$>tdi )
               ]
       lrow = liftTable' metainf "clients" row
-    in lrow
+    return lrow
 
-getClient metainf clientId ccli = G.lookup (G.Idex $ M.fromList [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))]) ccli :: Maybe (TBData Key Showable)
+getClient metainf clientId ccli = G.lookup (G.Idex $ M.fromList [(lookKey metainf "clients" "clientid",TB1 (SNumeric (clientId)))]) ccli :: Maybe (TBData Key Showable)
 
 deleteClient metainf clientId = do
   (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing [] $ mempty
-  putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , G.Idex $ M.fromList [(lookKey metainf "clients" "clientid",TB1 (SNumeric (fromInteger clientId)))],[])]
+  putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , G.Idex $ M.fromList [(lookKey metainf "clients" "clientid",TB1 (SNumeric (clientId)))],[])]
 
-editClient metainf inf dbmeta ccli  table tdi clientId now = do
-  let cli :: Maybe (TBData Key Showable)
-      cli = getClient metainf clientId ccli
-      new :: TBData Key Showable
-      new = updateClient metainf inf table tdi clientId now
-      lrow :: Maybe (Index (TBData Key Showable))
-      lrow = maybe (Just $ patch new ) (flip diff new )  cli
-  traverse (putPatch (patchVar dbmeta ) . pure ) lrow
+editClient metainf inf dbmeta ccli  table tdi clientId now
+  | fmap tableName table == Just "client" && fmap schemaName inf == Just "metadata" = return ()
+  | otherwise = do
+    let cli :: Maybe (TBData Key Showable)
+        cli = getClient metainf clientId ccli
+    new <- updateClient metainf inf table tdi clientId now
+    let
+        lrow :: Maybe (Index (TBData Key Showable))
+        lrow = maybe (Just $ patch new ) (flip diff new )  cli
+    traverse (putPatch (patchVar dbmeta ) . pure ) lrow
+    return ()
 
 addClient clientId metainf inf table dbdata =  do
     now <- getCurrentTime
@@ -193,7 +200,7 @@ chooserTable inf bset cliTid cli = do
 
 viewerKey
   ::
-      InformationSchema -> Table -> Integer -> Tidings String -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
+      InformationSchema -> Table -> Int -> Tidings String -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
 viewerKey inf table cli layout cliTid = mdo
   iv   <- currentValue (facts cliTid)
   let lookT iv = let  i = unLeftItens $ lookAttr' (meta inf)  "table" iv

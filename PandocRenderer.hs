@@ -15,7 +15,6 @@ import Text.Pandoc.Writers.LaTeX
 import Text.Pandoc.Builder hiding ((<>))
 import Control.Applicative
 import Data.String
--- import Query
 import Data.Maybe
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Foldable as F

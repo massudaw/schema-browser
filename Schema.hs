@@ -314,7 +314,7 @@ catchPluginException :: InformationSchema -> Text -> Text -> [(Key, FTB Showable
 catchPluginException inf pname tname idx i = do
   (Right <$> i) `catch` (\e  -> do
                 t <- getCurrentTime
-                print (t,e)
+                print (t,e :: SomeException)
                 id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (username,schema_name,table_name,plugin_name,exception,data_index2,instant) values(?,?,?,?,?,?,?) returning id" (username inf , schemaName inf,pname,tname,Binary (B.encode $ show (e :: SomeException)) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value" . second (Binary . B.encode) . first keyValue) idx) ), t )
                 return (Left (unOnly $ head $id)))
 
@@ -349,54 +349,6 @@ mergeTB1 ((m,Compose k) ) ((m2,Compose k2) )
 
 ifOptional i = if isKOptional (keyType i) then unKOptional i else i
 ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
-
-
-
-
-
--- Load optional not  loaded delayed values
--- and merge to older values
-applyAttr' :: (Patch a,Show a,Ord a ,Show (Index a),G.Predicates (G.TBIndex Key a))  =>  Column Key a  -> PathAttr Key (Index a) -> DBM Key a (Column Key a)
-applyAttr' (Attr k i) (PAttr _ p)  = return $ Attr k (apply i p)
-applyAttr' sfkt@(FKT iref rel i) (PFK _ p m b )  =  do
-                            let ref =  M.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (_kvvalues iref)
-                                edit  key  k@(PAttr  s _) v = if (_relOrigin $ head $ F.toList $ key) == s then  mapComp (  flip apply k  ) v else v
-                            tbs <- atTableS (_kvschema m) m
-                            return $ FKT (KV ref ) rel (maybe (joinRel m rel (fmap unTB $ F.toList ref) ( tbs)) id (Just $ create b))
-applyAttr' (IT k i) (PInline _   p)  = IT k <$> (applyFTBM (fmap pure $ create) applyRecord' i p)
--- applyAttr' i j = errorWithStackTrace (show ("applyAttr'" :: String,i,j))
-
-applyRecord'
-  :: (Patch a,Show a ,Show (Index a), Ord a ,G.Predicates (G.TBIndex Key a)) =>
-    TBData Key a
-     -> TBIdx Key (Index a)
-     -> DBM Key a (TBData Key a)
-applyRecord' t@((m, v)) (_ ,_  , k)  = fmap (m,) $ traComp (fmap KV . sequenceA . M.mapWithKey (\key vi -> foldl  (\i j -> i >>= edit key j ) (return vi) k  ) . _kvvalues ) v
-  where edit  key  k@(PAttr  s _) v = if (head $ F.toList $ key) == Inline s then  traComp (flip applyAttr' k ) v else return v
-        edit  key  k@(PInline s _ ) v = if (head $ F.toList $ key) == Inline s then  traComp (flip applyAttr' k ) v else return v
-        edit  key  k@(PFK rel s _ _ ) v = if  key == S.fromList rel then  traComp (flip applyAttr' k ) v else return v
-
-applyTB1'
-  :: (Patch a,Index a~ a ,Show a , Ord a,G.Predicates (G.TBIndex Key a) ) =>
-    TB2 Key a
-     -> PathFTB (TBIdx Key a)
-     -> DBM Key a (TB2 Key a)
-applyTB1' = applyFTBM (fmap pure $ create) applyRecord'
-
-createAttr' :: (Patch a,Ord a ,Show a ,G.Predicates (G.TBIndex Key a)) => PathAttr Key (Index a) -> DBM Key a (Column Key a)
-createAttr' (PAttr  k s  ) = return $ Attr k  (create s)
-createAttr' (PInline k s ) = return $ IT k (create s)
-createAttr' (PFK rel k s b ) = do
-      let ref = (_tb . create <$> k)
-      tbs <- atTableS (_kvschema s) s
-      return $ FKT (kvlist ref) rel (maybe (joinRel s rel (fmap unTB ref) ( tbs)) id (Just $ create b))
--- createAttr' i = errorWithStackTrace (show i)
-
-createTB1'
-  :: (Patch a,Index a~ a ,Show a , Ord a,G.Predicates (G.TBIndex Key a)  ) =>
-     (Index (TBData Key a )) ->
-     DBM Key a (KVMetadata Key , Compose Identity  (KV (Compose Identity  (TB Identity))) Key  a)
-createTB1' (m ,s ,k)  = fmap (m ,)  $ fmap (_tb .KV . mapFromTBList ) . traverse (fmap _tb . createAttr') $  k
 
 
 
