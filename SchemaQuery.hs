@@ -194,7 +194,7 @@ tableLoader table  page size presort fixed
                     predicate = case predtop of
                                   WherePredicate l ->
                                     let li = F.toList l
-                                        test f (Nested (IProd _ p) _ ,_,_)  = p == f
+                                        test f (Nested (IProd _ p) _ ,_)  = p == f
                                         test v f = False
                                      in WherePredicate $ AndColl $ fmap PrimColl $ L.filter (test (_relOrigin <$>  i) ) li
                 liftIO $ putStrLn $ "loadForeign table" <> show (tableName table)
@@ -211,7 +211,7 @@ tableLoader table  page size presort fixed
                        fk <- joinFK i
                        return $ addAttr  fk i) <$> m
                 liftIO $ putStrLn $ "reloadForeign table" <> show (tableName table) <> " - " <> show (lefts joined)
-                fetched <-traverse (\pred -> local (const rinf) $  tableLoader table Nothing Nothing []  (WherePredicate (AndColl pred))) $ traverse (\k -> (\ v ->  (PrimColl (IProd True [ _relOrigin  $ k], "IN", ArrayTB1 (Non.fromList v)))) <$> ( nonEmpty $ catMaybes $  fmap (_tbattr .unTB) . L.find ((== [k]) . keyattr ) <$> (lefts joined) ))  i
+                fetched <-traverse (\pred -> local (const rinf) $  tableLoader table Nothing Nothing []  (WherePredicate (AndColl pred))) $ traverse (\k -> (\ v ->  (PrimColl (IProd True [ _relOrigin  $ k], Left ( ArrayTB1 (Non.fromList v), "IN")))) <$> ( nonEmpty $ catMaybes $  fmap (_tbattr .unTB) . L.find ((== [k]) . keyattr ) <$> (lefts joined) ))  i
                 return (rights  joined)) )  (return v) $ P.sortBy (P.comparing pathRelRel)  (S.toList remoteFKS)
           resFKS <- getFKS res
           return (resFKS,x,o )) table page size presort fixed

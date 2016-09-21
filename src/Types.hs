@@ -191,8 +191,8 @@ data BoolCollection a
 
 type WherePredicate = TBPredicate Key Showable
 
-data TBPredicate k a
-  = WherePredicate (BoolCollection (Access k ,T.Text,FTB a ))
+newtype TBPredicate k a
+  = WherePredicate (BoolCollection (Access k ,Either (FTB a,T.Text) T.Text))
   deriving (Show,Eq,Ord)
 
 
@@ -1139,3 +1139,4 @@ tbFilter pred (DelayedTB1 (Just i)) = tbFilter pred i
 tbFilter' :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3Data f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbFilter' pred (kv,item) =  mapComp (\(KV item)->  KV $ Map.filterWithKey (\k _ -> pred kv k ) $ item) item
 
+txt = TB1 . SText

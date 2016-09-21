@@ -59,7 +59,6 @@ import qualified Data.Map as M
 import OAuth
 import GHC.Stack
 
-txt = TB1 . SText
 
 setup
      ::  MVar (M.Map Text  InformationSchema) ->  [String] -> Window -> UI ()
@@ -88,12 +87,12 @@ setup smvar args w = void $ do
   element body # sink0 UI.class_ (facts $ expand <$> triding menu)
   getBody w #+ [element hoverBoard,element container]
   mapUIFinalizerT body (traverse (\inf-> mdo
-    let kitems = M.keys (pkMap inf)
-        initKey = (\iv -> maybeToList . join $ fmap (S.fromList .rawPK) . flip M.lookup (_tableMapL inf) <$> join (lookT <$> iv)) <$> cliTid
+    let kitems = F.toList (pkMap inf)
+        initKey = (\iv -> maybeToList $ join $ flip M.lookup (_tableMapL inf) <$> join (lookT <$> iv)) <$> cliTid
         lookT iv = let  i = unLeftItens $ lookAttr' (meta inf)  "table" iv
                       in fmap (\(Attr _ (TB1 (SText t))) -> t) i
     iniKey <-currentValue (facts initKey)
-    (lookDesc,bset) <- tableChooser inf  kitems (fst <$> tfilter) (snd <$> tfilter)  (pure (schemaName inf)) (pure (username inf)) (pure iniKey)
+    (lookDesc,bset) <- tableChooser inf  kitems (fst <$> tfilter) (snd <$> tfilter)  ((schemaName inf)) ((username inf)) (pure iniKey)
 
     posSel <- positionSel
     bd <- UI.div  # set UI.class_ "col-xs-10"
@@ -104,14 +103,13 @@ setup smvar args w = void $ do
       bdo <- UI.div
       element bd # set children [bdo]
       let
-          selTable = flip M.lookup (pkMap inf)
           buttonStyle k (e,sub) = mdo
-            let tableK = fromJust (selTable k)
-            label <- UI.div # sink0 UI.text (facts $ lookDesc  <*> pure (selTable k))  # set UI.class_ "fixed-label col-xs-11"
+            let tableK = k
+            label <- UI.div # sink0 UI.text (fmap T.unpack $ facts $ lookDesc  <*> pure k)  # set UI.class_ "fixed-label col-xs-11"
             state <- element e   # sink UI.checked (maybe False (not . L.null) . M.lookup k . M.mapKeys fst <$> facts (triding bset)) # set UI.class_ "col-xs-1"
             subels  <- mapM (\(ki,ei) -> do
               element ei # sink UI.checked (maybe False (elem ki) . M.lookup k. M.mapKeys fst  <$> facts (triding bset)) # set UI.class_ "col-xs-1"
-              label <- UI.div # sink0 UI.text (facts $ lookDesc  <*> pure (Just ki)) # set UI.style [("width","100%")] # set UI.class_ "fixed-label col-xs-11"
+              label <- UI.div # sink0 UI.text (fmap T.unpack $ facts $ lookDesc  <*> pure ki) # set UI.style [("width","100%")] # set UI.class_ "fixed-label col-xs-11"
               UI.div # set children[ei , label]
               ) (zip (rawUnion tableK) sub)
 
@@ -120,8 +118,6 @@ setup smvar args w = void $ do
             top <- UI.div # set children[state, label] # set  UI.class_ "col-xs-12"
             element prebset  # set UI.style (noneShow . not $ L.null (rawUnion tableK))
             UI.div # set children [top,prebset] # set UI.style [("width","100%")]
-            where
-              tb =  justLook   k (pkMap inf)
       case nav of
         "Map" -> do
           element bdo  # set UI.style [("width","100%")]
@@ -129,7 +125,7 @@ setup smvar args w = void $ do
         "Agenda" -> do
           element bdo  # set UI.style [("width","100%")]
           cliZone <- jsTimeZone
-          fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
+          fmap ((\i j -> elem j i) . fmap (^._2._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
         "Account" -> do
           element bdo  # set UI.style [("width","100%")]
           fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$> accountWidget bdo calendarT (triding bset) inf
@@ -145,8 +141,8 @@ setup smvar args w = void $ do
                 "Poll" -> do
                     element metabody #
                       set items
-                          [ metaAllTableIndexA inf "polling" [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ]
-                          , metaAllTableIndexA inf "polling_log" [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ]]
+                          [ metaAllTableIndexA inf "polling" [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") ) ]
+                          , metaAllTableIndexA inf "polling_log" [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") ) ]]
                 "Change" -> do
                     case schemaName inf of
                       "gmail" -> do
@@ -163,17 +159,16 @@ setup smvar args w = void $ do
                           listBoxEl itemListEl2 ( G.toList . snd  <$> vpt)  (pure Nothing) (pure id) ( pure attrLine )
                         element metabody # set children [itemListEl,itemListEl2]
                       i -> do
-                        let selTable = flip M.lookup (pkMap inf)
-                        let pred = [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],"IN",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables)))]
+                        let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),"IN"))]
                         dash <- metaAllTableIndexA inf "modification_table" pred
                         element metabody # set UI.children [dash]
                 "Stats" -> do
-                    let pred = [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],"IN",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables)))]
+                    let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),"IN"))]
                     stats <- metaAllTableIndexA inf "table_stats" pred
-                    clients <- metaAllTableIndexA inf "clients"$  [(IProd True ["schema"],"=",LeftTB1 $ Just $ TB1 $ SText (schemaName inf) ) ]<> if M.null tables then [] else [ (IProd True ["table"],"IN",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables)))]
+                    clients <- metaAllTableIndexA inf "clients"$  [(IProd True ["schema"],Left (LeftTB1 $ Just $ txt (schemaName inf),"=") ) ]<> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),"IN") )]
                     element metabody # set UI.children [stats,clients]
                 "Exception" -> do
-                    let pred = [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],"IN",ArrayTB1 $ TB1 . SText . rawName <$>  Non.fromList (concat (F.toList tables)))]
+                    let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),"IN"))]
                     dash <- metaAllTableIndexA inf "plugin_exception" pred
                     element metabody # set UI.children [dash]
                 i -> errorWithStackTrace (show i)
@@ -234,7 +229,7 @@ authMap smvar sargs (user,pass) schemaN =
     where oauth tag = do
               user <- justError "no google user" <$> lookupEnv "GOOGLE_USER"
               metainf <- metaInf smvar
-              (dbmeta ,_) <- transactionNoLog metainf $ selectFromTable "google_auth" Nothing Nothing [] [(IProd True ["username"],"=", (TB1 $ SText  $ T.pack user ))]
+              (dbmeta ,_) <- transactionNoLog metainf $ selectFromTable "google_auth" Nothing Nothing [] [(IProd True ["username"],Left ((txt  $ T.pack user ),"=") )]
               let
                   td :: Tidings (OAuth2Tokens)
                   td = (\o -> let

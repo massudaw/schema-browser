@@ -57,7 +57,7 @@ import qualified Data.Map as M
 accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
     let
       calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
-      schemaPred = [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf))]
+      schemaPred = [(IProd True ["schema_name"],Left (txt (schemaName inf),"="))]
 
     (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
     (_,(_,emap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
@@ -77,10 +77,10 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
               convField (LeftTB1 i) = concat $   convField <$> maybeToList i
               convField (v) = [("start",toLocalTime $v)]
               convField i = errorWithStackTrace (show i)
-              projf  r efield@(TB1 (SText field)) afield@(TB1 (SText aafield))  = (if (isJust . unSOptional $ attr) then Left else Right) (M.fromList $ convField attr  <> [("id", TB1 $ SText $ writePK r efield   ),("title",TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield ), ("commodity", accattr )] :: M.Map Text (FTB Showable))
+              projf  r efield@(TB1 (SText field)) afield@(TB1 (SText aafield))  = (if (isJust . unSOptional $ attr) then Left else Right) (M.fromList $ convField attr  <> [("id", txt $ writePK r efield   ),("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield ), ("commodity", accattr )] :: M.Map Text (FTB Showable))
                     where attr  = attrValue $ lookAttr' inf field r
                           accattr  = attrValue $ lookAttr' inf aafield r
-              proj r = (TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  zipWith (projf r) ( F.toList efields) (F.toList afields)
+              proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  zipWith (projf r) ( F.toList efields) (F.toList afields)
               attrValue (Attr k v) = v
            in (lookDesc,(color,tname,efields,afields,proj))  ) ( G.toList aMap)
 
@@ -90,7 +90,7 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
     let
         legendStyle table (b,_)
             =  do
-              let item = M.lookup (tableName (fromJust $ M.lookup table (pkMap inf))) (M.fromList  $ fmap (\i@(t,(_,b,_,_,_))-> (b,i)) dashes )
+              let item = M.lookup (tableName table ) (M.fromList  $ fmap (\i@(t,(_,b,_,_,_))-> (b,i)) dashes )
               maybe UI.div (\k@(t,(c,tname,_,_,_)) ->   mdo
                 expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
                 let evc = UI.checkedChange expand
@@ -122,9 +122,9 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
                       body = (fmap row dat ) <> if L.null dat then [] else [totalrow totalval]
                       dat =  concat .fmap (lefts . snd .proj)  $ G.toList i
 
-                      totalval = M.fromList [("start",mindate),("end",maxdate),("title",TB1 $ SText "Total") ,("commodity", totalcom)]
+                      totalval = M.fromList [("start",mindate),("end",maxdate),("title",txt "Total") ,("commodity", totalcom)]
                         where
-                          totalcom = traceShowId $ sum $ traceShowId $ justError "no" .M.lookup "commodity" <$> dat
+                          totalcom = sum $ justError "no" .M.lookup "commodity" <$> dat
                           mindate = minimum $ justError "no" . M.lookup "start" <$> dat
                           maxdate = maximum $ justError "no" . M.lookup "start" <$> dat
                       totalrow i = UI.tr # set items  (fmap (\i -> i # set UI.style [("border","solid 2px")] )[UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)] ) # set UI.style [("border","solid 2px")]
@@ -138,5 +138,4 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
 
     return (legendStyle,dashes)
 
-txt = TB1 . SText
 

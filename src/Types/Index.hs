@@ -10,9 +10,11 @@ module Types.Index
   (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,filter',mapKeys ,getIndex ,pickSplitG ,minP,maxP,unFin,queryCheck,indexPred,module G ) where
 
 import Data.Maybe
+import Control.Arrow (first)
 import Data.Functor.Identity
 import Step.Host
 import Control.Applicative
+import Data.Either
 import Data.GiST.RTree (pickSplitG)
 import Data.Tuple (swap)
 import Data.Binary
@@ -70,25 +72,32 @@ instance Predicates (WherePredicate,Predicate Int) where
   type Query (WherePredicate ,Predicate Int)= (WherePredicate ,Predicate Int)
   consistent (c1,i) (c2,j) = consistent c1 c2 && consistent i j
   penalty (c1,i) (c2,j) = (penalty c1 c2 ,penalty i j)
-  match  (c1,i) (c2,j) = match c1 c2 && match i j
+  match  (c1,i) e (c2,j) = match c1 e c2 && match i e j
   union i  = (union (fst <$> i), union (snd <$> i))
   pickSplit = pickSplitG
 
 instance Predicates WherePredicate where
   type Penalty WherePredicate = [DiffShowable]
   type Query WherePredicate = WherePredicate
-  consistent (WherePredicate c1) (WherePredicate c2)  = F.all id $ M.mergeWithKey (\_ i j -> Just $ consistent (snd i) (snd j)) (const False <$>) (const False <$>) (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
-    where projKey (a,b,c) =  (a,(b,c))
+  consistent (WherePredicate c1) (WherePredicate c2)  = F.all id $ M.mergeWithKey (\_ i j -> Just $ cons i j) (const False <$>) (const False <$>) (M.fromList $F.toList c1) (M.fromList $ F.toList c2)
+    where
+      cons (Left i ) (Left j ) =consistent (fst i) (fst j)
+      cons (Right i ) (Left j ) =False
+      cons (Left i ) (Right j ) =False
+      cons (Right i ) (Right j ) = i == j
 
-  match (WherePredicate c1) (WherePredicate c2)  = F.all id $ M.mergeWithKey (\_ i j -> Just $ match (swap i) (snd j)) (const False <$>) (const False <$>) (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
-    where projKey (a,b,c) =  (a,(b,c))
+  match (WherePredicate c1) e (WherePredicate c2)  = F.all id $ M.mergeWithKey (\_ i j -> Just $ either (match i e.fst) (const False) j  ) (const False <$>) (const False <$>) (M.fromList $ F.toList c1) (M.fromList $  F.toList c2)
 
-  penalty (WherePredicate c1) (WherePredicate c2) =F.toList $ M.mergeWithKey (\_ i j -> Just $ penalty  (snd i) (snd j) ) (fmap (loga .unFin . fst .minP. (\(a,c) -> c))) (fmap (loga . unFin . fst . minP. (\(a,c) -> c))) (M.fromList $fmap projKey  $ F.toList c1) (M.fromList $ fmap projKey $ F.toList c2)
-    where projKey (a,b,c) =  (a,(b,c))
+  penalty (WherePredicate c1) (WherePredicate c2) =F.toList $ M.intersectionWithKey (\_ i j -> cons i j )  (M.fromList $ F.toList c1) (M.fromList $  F.toList c2)
+    where
+      cons (Left i ) (Left j ) =penalty (fst i) (fst j)
+      cons (Right i ) (Left j ) = DSInt 1
+      cons (Left i ) (Right j ) = DSInt (-1)
+      cons (Right i ) (Right j ) = DSInt $ if i == j then 0 else 1
   pickSplit = pickSplitG
-  union l = WherePredicate $ AndColl $ fmap (\(k,(a,b))-> PrimColl(k,a,b))$ M.toList $ foldl1 ( M.mergeWithKey (\_ i j -> Just $ pairunion [i,j]) (fmap id) (fmap id) ) ((\(WherePredicate pr ) -> M.fromList .fmap projKey  . F.toList $ pr)<$> l)
-    where projKey (a,b,c) =  (a,(b,c))
-          pairunion i = (headS $ fst <$> i,union $ snd <$> i)
+  union l = WherePredicate $ AndColl $ fmap (\(k,a)-> PrimColl(k,a))$ M.toList $ foldl1 ( M.mergeWithKey (\_ i j -> Just $ pairunion [i,j]) (fmap id) (fmap id) ) ((\(WherePredicate pr ) -> M.fromList .F.toList $ pr)<$> l)
+    where
+      pairunion i = Left $ (union  $ fmap fst (lefts i),headS $ fmap snd (lefts i ))
 
 
 headS [] = errorWithStackTrace "no head"
@@ -156,7 +165,7 @@ instance Predicates (TBIndex Key Showable) where
   type Query (TBIndex Key Showable) = TBPredicate Key Showable
   consistent (Idex j) (Idex  m )
      = consistent j m
-  match (WherePredicate l)  (Idex v) =  match (WherePredicate l) v
+  match (WherePredicate l)  e (Idex v) =  match (WherePredicate l) e v
   union l  = Idex   projL
     where
           projL = union  (fmap (\(Idex i) -> i)l)
@@ -178,12 +187,12 @@ instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
 instance  Predicates (Map Key (FTB Showable)) where
   type Penalty (Map Key (FTB Showable )) = Map Key DiffShowable
   type Query (Map Key (FTB Showable )) = TBPredicate Key Showable
-  match (WherePredicate a )  v=  go a
+  match (WherePredicate a ) e  v=  go a
     where
       -- Index the field and if not found return true to row filtering pass
       go (AndColl l) = F.all go l
       go (OrColl l ) = F.any go  l
-      go (PrimColl (i,op,c)) = maybe True (\i -> match (c,op) i) (fmap _tbattr $ indexField i (errorWithStackTrace "no meta",Compose $Identity $ KV (M.mapKeys (Set.singleton .Inline) $ M.mapWithKey (\k v -> Compose $ Identity $ Attr k v) v)) )
+      go (PrimColl (i,op)) = maybe True (\i -> match op e  i) (fmap _tbattr $ indexField i (errorWithStackTrace "no meta",Compose $Identity $ KV (M.mapKeys (Set.singleton .Inline) $ M.mapWithKey (\k v -> Compose $ Identity $ Attr k v) v)) )
   consistent l i =  if M.null b then False else  F.all id b
     where
       b =  M.intersectionWith consistent (M.mapKeys keyValue l) (M.mapKeys keyValue i)
@@ -198,40 +207,41 @@ checkPred' v (AndColl i ) = F.all  (checkPred' v)i
 checkPred' v (OrColl i ) = F.any (checkPred' v) i
 checkPred' v (PrimColl i) = indexPred i v
 
-indexPred :: (Access Key ,T.Text,FTB Showable) -> TBData Key Showable -> Bool
-indexPred (Many i,eq,v) a= all (\i -> indexPred (i,eq,v) a) i
-indexPred (n@(Nested k nt ) ,eq,v) r
+indexPred :: (Access Key ,Either (FTB Showable,T.Text) T.Text ) -> TBData Key Showable -> Bool
+indexPred (Many i,eq) a= all (\i -> indexPred (i,eq) a) i
+indexPred (n@(Nested k nt ) ,eq) r
   = case  indexField n r of
     Nothing -> errorWithStackTrace ("cant find attr" <> show (n,nt))
-    Just i ->  recPred $ indexPred (nt , eq ,v) <$> _fkttable  i
+    Just i ->  recPred $ indexPred (nt , eq ) <$> _fkttable  i
   where
     recPred (SerialTB1 i) = maybe False recPred i
     recPred (LeftTB1 i) = maybe False recPred i
     recPred (TB1 i ) = i
     recPred (ArrayTB1 i) = all recPred (F.toList i)
     recPred i = errorWithStackTrace (show i)
-indexPred (a@(IProd _ _),eq,v) r =
+indexPred (a@(IProd _ _),eq) r =
   case indexField a r of
-    Nothing ->  errorWithStackTrace ("cant find attr" <> show (a,eq,v,r))
+    Nothing ->  errorWithStackTrace ("cant find attr" <> show (a,eq,r))
     Just (Attr _ rv) ->
       case eq of
-        "is not null" -> isJust $ unSOptional' rv
-        "is null" -> isNothing $ unSOptional' rv
-        i -> match (v,eq) rv
+        Right "is not null" -> isJust $ unSOptional' rv
+        Right "is null" -> isNothing $ unSOptional' rv
+        i -> match eq Exact rv
     Just (IT _ rv) ->
       case eq of
-        "is not null" -> isJust $ unSOptional' rv
-        "is null" -> isNothing $ unSOptional' rv
+        Right "is not null" -> isJust $ unSOptional' rv
+        Right "is null" -> isNothing $ unSOptional' rv
         i -> errorWithStackTrace (show i)
     Just (FKT _ _ rv) ->
       case eq of
-        "is not null" -> isJust $ unSOptional' rv
-        "is null" -> isNothing $ unSOptional' rv
+        Right "is not null" -> isJust $ unSOptional' rv
+        Right "is null" -> isNothing $ unSOptional' rv
         i -> errorWithStackTrace (show i)
 
 
 queryCheck :: WherePredicate -> G.GiST (TBIndex Key Showable) (TBData Key Showable) -> G.GiST (TBIndex Key Showable) (TBData Key Showable)
-queryCheck pred = filter' (flip checkPred pred) . G.query pred
+queryCheck pred = t1
+  where t1 = filter' (flip checkPred pred) . G.query pred
 
 -- Atomic Predicate
 
@@ -263,7 +273,7 @@ data DiffShowable
 
 instance Predicates (FTB Showable) where
   type Penalty (FTB Showable) = DiffShowable
-  type Query (FTB Showable) = (FTB Showable , T.Text)
+  type Query (FTB Showable) = Either (FTB Showable , T.Text) T.Text
   consistent (LeftTB1 Nothing) (LeftTB1 Nothing)     = True
   consistent (LeftTB1 (Just i)) (LeftTB1 (Just j) )    = consistent j  i
   consistent (LeftTB1 (Just i)) j     = consistent j  i
@@ -277,49 +287,51 @@ instance Predicates (FTB Showable) where
   -- consistent ((IntervalTB1 i) ) ((IntervalTB1 j)) = i `Interval.isSubsetOf` j
   consistent ((IntervalTB1 i) ) (j@(TB1 _) ) = j `Interval.member` i
   -- consistent ((ArrayTB1 i) ) ((ArrayTB1 j)  ) = not $ Set.null $ Set.fromList (F.toList i) `Set.intersection` Set.fromList  (F.toList j)
-  consistent ((ArrayTB1 i) ) ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-  consistent ((ArrayTB1 i) ) (j@(TB1 _)) = F.elem  j i
-  consistent ((ArrayTB1 i) ) (j  ) = F.all (\i -> consistent i j) i
-  consistent   ((SerialTB1 (Just i)) ) (j@(TB1 _) )= consistent i j
+  consistent (ArrayTB1 i)  ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
+  consistent (ArrayTB1 i)  (j@(TB1 _)) = F.elem  j i
+  consistent (ArrayTB1 i)  (j  ) = F.all (\i -> consistent i j) i
+  consistent (SerialTB1 (Just i)) j@(TB1 _) = consistent i j
   consistent i j  = errorWithStackTrace (show (i,j))
 
-  match  (_,"is not null")  j   = True
-  match  (_,"is null")  j   = False
-  match  (_,"is null")  (LeftTB1 j)   = isNothing j
-  match  v  (LeftTB1 j)   = fromMaybe False (match v <$> j)
-  match  (LeftTB1 j ,v)  i   = fromMaybe False ((\a -> match (a,v) i) <$> j)
-  match  (LeftTB1 i,"=")  (LeftTB1 j)   = fromMaybe False $ liftA2 match ((,"=") <$> i) j
-  match  ((ArrayTB1 j) ,"IN") i  = F.elem i j
-  match  ((ArrayTB1 j) ,"FIN") i  = F.elem i j
-  match  (TB1 i,_) (TB1 j)   = i == j
-  match  ((ArrayTB1 i) ,"<@") ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-  match  ((ArrayTB1 j) ,"IN") ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-  match  ((ArrayTB1 j) ,"FIN") ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-  match  ((ArrayTB1 j),"@>" ) ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-  match (j@(TB1 _),"<@") (ArrayTB1 i) = F.elem j i
-  match (j@(TB1 _),"=")(ArrayTB1 i) = F.elem j i
-  match (j@(TB1 _),"FIN")(ArrayTB1 i) = F.elem j i
-  match ((ArrayTB1 i) ,"@>") j@(TB1 _)   = F.elem j i
-  match ((ArrayTB1 i) ,"=")j@(TB1 _)   = F.elem j i
-  match ((ArrayTB1 i) ,"@>") j   = F.all (\i -> match (i,"@>") j) i
-  match (IntervalTB1 i ,"<@") j@(TB1 _)  = j `Interval.member` i
-  match (IntervalTB1 i ,"@>") j@(TB1 _)  = j `Interval.member` i
-  match (IntervalTB1 i ,"FIN")j@(TB1 _)  = j `Interval.member` i
-  match (IntervalTB1 i ,"IN")j@(TB1 _)  = j `Interval.member` i
-  match (IntervalTB1 i ,"=")j@(TB1 _)  = j `Interval.member` i
-  match (j@(TB1 _ ),"IN") (IntervalTB1 i)  = j `Interval.member` i
-  match (j@(TB1 _ ),"FIN") (IntervalTB1 i)  = j `Interval.member` i
-  match (j@(TB1 _ ),"<@") (IntervalTB1 i)  = j `Interval.member` i
-  match (j@(TB1 _ ),"@>") (IntervalTB1 i)  = j `Interval.member` i
-  match (j@(TB1 _ ),"=")(IntervalTB1 i)  = j `Interval.member` i
-  match (IntervalTB1 i ,"<@") (IntervalTB1 j)  = j `Interval.isSubsetOf` i
-  match (IntervalTB1 j ,"@>") (IntervalTB1 i)  = j `Interval.isSubsetOf` i
-  match (IntervalTB1 j ,"&&") (IntervalTB1 i)  = not $ Interval.null $ j `Interval.intersection` i
-  match i j = errorWithStackTrace ("no match = " <> show (i,j))
+  match  (Right "is not null") _  j   = True
+  match  (Right "is null") _   j   = False
+  match  (Right "is null") _   (LeftTB1 j)   = isNothing j
+  match  v  a  (LeftTB1 j)   = fromMaybe False (match v a <$> j)
+  match (Left v) a j  = ma  v a j
+    where
+      ma  (LeftTB1 j ,v) e  i   = fromMaybe False ((\a -> ma (a,v) e i) <$> j)
+      ma  (LeftTB1 i,"=") e   (LeftTB1 j)   = fromMaybe False $ liftA2 (\a b -> ma a e b) ((,"=") <$> i) j
+      ma  ((ArrayTB1 j) ,"IN") _  i  = F.elem i j
+      ma  ((ArrayTB1 j) ,"FIN") _  i  = F.elem i j
+      ma  (TB1 i,_) _  (TB1 j)   = i == j
+      ma  ((ArrayTB1 i) ,"<@") _  ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
+      ma  ((ArrayTB1 j) ,"IN")  _ ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
+      ma  ((ArrayTB1 j) ,"FIN") _  ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
+      ma  ((ArrayTB1 j),"@>" ) _  ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
+      ma (j@(TB1 _),"<@") _  (ArrayTB1 i) = F.elem j i
+      ma (j@(TB1 _),"=") _ (ArrayTB1 i) = F.elem j i
+      ma (j@(TB1 _),"FIN") _ (ArrayTB1 i) = F.elem j i
+      ma ((ArrayTB1 i) ,"@>") _ j@(TB1 _)   = F.elem j i
+      ma ((ArrayTB1 i) ,"=") _ j@(TB1 _)   = F.elem j i
+      ma ((ArrayTB1 i) ,"@>") e j   = F.all (\i -> ma (i,"@>") e j) i
+      ma (IntervalTB1 i ,"<@") _ j@(TB1 _)  = j `Interval.member` i
+      ma (IntervalTB1 i ,"@>") _ j@(TB1 _)  = j `Interval.member` i
+      ma (IntervalTB1 i ,"FIN")_ j@(TB1 _)  = j `Interval.member` i
+      ma (IntervalTB1 i ,"IN") _ j@(TB1 _)  = j `Interval.member` i
+      ma (IntervalTB1 i ,"=") _ j@(TB1 _)  = j `Interval.member` i
+      ma (j@(TB1 _ ),"IN") _ (IntervalTB1 i)  = j `Interval.member` i
+      ma (j@(TB1 _ ),"FIN")_ (IntervalTB1 i)  = j `Interval.member` i
+      ma (j@(TB1 _ ),"<@") _ (IntervalTB1 i)  = j `Interval.member` i
+      ma (j@(TB1 _ ),"@>") _ (IntervalTB1 i)  = j `Interval.member` i
+      ma (j@(TB1 _ ),"=") _ (IntervalTB1 i)  = j `Interval.member` i
+      ma (IntervalTB1 i ,"<@") Exact (IntervalTB1 j)  = j `Interval.isSubsetOf` i
+      ma (IntervalTB1 j ,"@>") Exact (IntervalTB1 i)  = j `Interval.isSubsetOf` i
+      ma (IntervalTB1 j ,"&&") _  (IntervalTB1 i)  = not $ Interval.null $ j `Interval.intersection` i
+      ma (IntervalTB1 i ,_) Intersect (IntervalTB1 j)  = not $ Interval.null $ j `Interval.intersection` i
+      ma i e j = errorWithStackTrace ("no ma = " <> show (i,e,j))
 
   union  l
-    | mi == ma = justError "cant be inf" $unFinite $ fst $ mi
-    | otherwise =  IntervalTB1 (  mi `interval` ma )
+    | otherwise =  IntervalTB1 ( mi `interval` ma )
     where mi = minimum (minP <$> l)
           ma = maximum (maxP <$> l)
 
@@ -371,9 +383,6 @@ maxP ((IntervalTB1 i) ) = upperBound' i
 maxP (i@(TB1 _) ) = (ER.Finite $ i,True)
 maxP ((ArrayTB1 i) ) =   maxP $  F.maximum i
 maxP i = errorWithStackTrace (show i)
-
-
-
 
 
 -- Higher Level operations

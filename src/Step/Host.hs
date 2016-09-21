@@ -75,11 +75,11 @@ indexFieldRec n@(Nested ix@(IProd b l) (Many[nt]) ) v = join $ fmap joinFTB . tr
 
 genPredicate i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
 genPredicate i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
-genPredicate i (IProd b l) =  (\l -> if b then Just $ PrimColl (IProd b l,if i then "is not null" else "is null" ,LeftTB1 Nothing) else Nothing ) $ l
+genPredicate i (IProd b l) =  (\l -> if b then Just $ PrimColl (IProd b l,Right (if i then "is not null" else "is null") ) else Nothing ) $ l
 genPredicate i n@(Nested p l ) = genPredicate i p -- AndColl <$> liftA2 (\i  j -> [i,j]) (genPredicate i p)  ( genNestedPredicate p i l)
 genPredicate _ i = errorWithStackTrace (show i)
 
-genNestedPredicate n i v = fmap (\(a,b,c) -> (Nested n a , b ,c)) <$> genPredicate i v
+genNestedPredicate n i v = fmap (\(a,b) -> (Nested n a , b )) <$> genPredicate i v
 
 
 checkField :: Access Key -> Column Key Showable -> Errors [Access Key] (Column Key Showable)

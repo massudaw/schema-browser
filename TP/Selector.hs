@@ -2,6 +2,7 @@
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module TP.Selector (calendarSelector,positionSel,tableChooser,selectFromTable) where
 
@@ -13,6 +14,7 @@ import qualified NonEmpty as Non
 import Data.Char
 import Step.Common
 import Query
+import Step.Host
 import Data.Time
 import Text
 import qualified Types.Index as G
@@ -89,36 +91,49 @@ positionSel = do
     element cpos # sink text (show <$> positionB)
     return (sidebar,currentPosition bcpos, h,tidings positionB (diffEvent positionB  (Just <$> e)))
 
+lookupAccess inf l f c = join $ fmap (indexField (IProd  True [(lookKey inf (fst c) f)] )) . G.lookup (idex inf (fst c) l) $ snd c
+
+tableChooser :: InformationSchemaKV Key Showable
+                      -> [Table]
+                      -> Tidings (Table -> (Element, [Element]) -> UI Element)
+                      -> Tidings (TableK Key -> Bool)
+                      -> Text
+                      -> Text
+                      -> Tidings [TableK Key]
+                      -> UI
+                           (Tidings (TableK k -> Text),
+                            TrivialWidget (M.Map (TableK Key, Text) [TableK Key]))
 tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables = do
   let
-      pred =  [(IProd True ["schema_name"],"IN",ArrayTB1 $ TB1 . SText <$> iniSchemas )]
-      authPred =  [(IProd True ["grantee"],"IN",  ArrayTB1 $ TB1 . SText <$> iniUsers ), (IProd True ["table_schema"],"IN",ArrayTB1 $ TB1 . SText <$> iniSchemas  )]
+      pred =  [(IProd True ["schema_name"],Left (txt $ iniSchemas,"="))]
+      authPred =  [(IProd True ["grantee"],Left ( txt $ iniUsers,"=")), (IProd True ["table_schema"],Left (txt $ iniSchemas,"="))]
   (orddb ,authorization,translation) <- liftIO $ transactionNoLog  (meta inf) $
-      (,,) <$> (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred ))
-           <*> (fst <$> (selectFromTable "authorization" Nothing Nothing [] authPred   ))
+      (,,) <$> (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred))
+           <*> (fst <$> (selectFromTable "authorization" Nothing Nothing [] authPred))
            <*> (fst <$> (selectFromTable "table_name_translation" Nothing Nothing []  pred ))
   filterInp <- UI.input # set UI.style [("width","100%")]
-  filterInpBh <- stepper "" (UI.valueChange filterInp)
-  let filterInpT = tidings filterInpBh (UI.valueChange filterInp)
+  filterInpBh <- stepper "" (T.pack <$> UI.valueChange filterInp)
+  let filterInpT = tidings filterInpBh (T.pack <$> UI.valueChange filterInp)
 
   let
-      selTable = flip M.lookup (pkMap inf)
       -- Table Description
-      lookDesc = (\i j -> maybe (T.unpack $ maybe "" rawName j)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,TB1 $ SText $ schemaName inf),("table_name",TB1 $ SText (maybe ""  tableName j))]) i) <$> collectionTid translation
+      lookDesc = (\i j -> maybe (rawName j)  (\(Attr _ v )-> T.pack $ renderShowable v) $ lookupAccess  (meta inf) [("schema_name" ,txt $ schemaName inf),("table_name",txt (tableName j))] "translation"  ( "table_name_translation", i )) <$> collectionTid translation
       -- Authorization
-      authorize =  (\autho t -> isJust $ G.lookup (idex  (meta inf) "authorization"  [("table_schema", TB1 $ SText (schemaName inf) ),("table_name",TB1 $ SText $ tableName t),("grantee",TB1 $ SText $ username inf)]) autho)  <$> collectionTid authorization
+      authorize =  (\autho t -> isJust $ G.lookup (idex  (meta inf) "authorization"  [("table_schema", txt (schemaName inf) ),("table_name",txt $ tableName t),("grantee",txt $ username inf)]) autho)  <$> collectionTid authorization
       -- Text Filter
-      filterLabel = (\j d -> (\i -> L.isInfixOf (toLower <$> j) (toLower <$> d (Just i))))<$> filterInpT <*> lookDesc
+      filterLabel = (\j d -> (\i -> T.isInfixOf (T.toLower j) (T.toLower  $ d i)))<$> filterInpT <*> lookDesc
       -- Usage Count
-      tableUsage orderMap table selection = maybe (Right 0) (Left .(L.elem table (lookPK inf <$> M.keys selection),)) . fmap (lookAttr' (meta inf)  "usage" ) $  G.lookup  (G.Idex ( M.fromList pk )) orderMap
-          where  pk = L.sortBy (comparing fst ) $ first (lookKey (meta inf ) "ordering") <$> [("table_name",TB1 . SText . rawName $ table ), ("schema_name",TB1 $ SText (schemaName inf))]
+      tableUsage orderMap table selection = (L.elem table (M.keys selection), maybe (Right 0) (Left . _tbattr) row)
+          where
+            pk = [("table_name",txt . rawName $ table ), ("schema_name",txt (schemaName inf))]
+            row = lookupAccess (meta inf) pk  "usage" ("ordering",orderMap)
   bset <- mdo
     let
 
         buttonString k = do
-          b <- UI.input# set UI.type_ "checkbox"
+          b <- UI.input # set UI.type_ "checkbox"
           let un = rawUnion tableK
-              tableK = fromJust $ selTable k
+              tableK = k
           unions <- mapM (\i -> (i,) <$> UI.input# set UI.type_ "checkbox") un
           let ev = (k,) . (\b -> if b then (if L.null un then [tableK ] else un,[]) else ([],if L.null un then [tableK] else un))<$>UI.checkedChange b
           let evs = foldr (unionWith const) ev $ fmap (k,) .  (\(ki,e) -> (\i-> (if i then ([ki],[]) else ([],[ki]))) <$> UI.checkedChange e  )<$> unions
@@ -127,28 +142,28 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
     let
       visible  k = (\i j k-> i tb && j tb && k tb ) <$> filterLabel <*> authorize <*> tableFilter
         where
-          tb =  justLook   k (pkMap inf)
+          tb =  k
 
-    bset <- checkDivSetTGen tables ((\i k j -> tableUsage i (justLook j (pkMap inf)) k ) <$> collectionTid orddb <*> triding bset) (M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i) . fromJust . selTable $ e ) <$> iniTables) buttonString ((\lg i j -> lg i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle)
+    bset <- checkDivSetTGen tables ((\i k j -> tableUsage i j k ) <$> collectionTid orddb <*> triding bset) (M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i)  $ e ) <$> iniTables) buttonString ((\lg i j -> lg i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle)
     return bset
   let
-      bBset = M.keys <$> triding bset
       ordRow orderMap pkset =  field
           where
             field =  G.lookup (G.Idex $ M.fromList pk) orderMap
-            pk = L.sortBy (comparing fst) $ first (lookKey (meta inf ) "ordering") <$>[("table_name",TB1 . SText . rawName $ justLook   pkset (pkMap inf) ), ("schema_name",TB1 $ SText (schemaName inf))]
+            pk = first (lookKey (meta inf ) "ordering") <$>[("table_name",txt . rawName $ pkset ), ("schema_name",txt (schemaName inf))]
       incClick field =  (fst field , G.getIndex field ,[patch $ fmap (+SNumeric 1) usage])
           where
             usage = lookAttr' (meta inf ) "usage"   field
 
-  ui $ onEventIO ((\i j -> fmap incClick <$> (ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
+  {- ui $ onEventIO ((\i j -> fmap incClick <$> (ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
     (traverse (traverse (\p -> do
       _ <- transactionNoLog (meta inf ) $ patchFrom  p
       putPatch (patchVar orddb) [p] )))
 
+-}
   element bset # set UI.style [("overflow","auto"),("height","99%")]
   tableHeader <- UI.h4 # set text "Table"
   tbChooserI <- UI.div # set children [tableHeader,filterInp,getElement bset]  # set UI.style [("height","50vh")]
-  return $ (lookDesc,TrivialWidget ((\f -> M.mapKeys (fmap (f. selTable) ))<$> facts lookDesc <#> (M.mapKeys (\i-> (i,i))  <$>triding bset)) tbChooserI)
+  return $ (lookDesc,TrivialWidget ((\f -> M.mapKeys (fmap f))<$> lookDesc <*> (M.mapKeys (\i-> (i,i))  <$>triding bset)) tbChooserI)
 
 

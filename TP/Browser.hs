@@ -97,7 +97,7 @@ addServer inf =  do
       obj = serverCreate inf now
     transaction inf $ insertFrom obj
 
-idexToPred (G.Idex  i) = head $ (\(k,a)-> (IProd True [k],"@>",a)) <$>  M.toList  i
+idexToPred (G.Idex  i) = head $ (\(k,a)-> (IProd True [k],Left (a,"@>"))) <$>  M.toList  i
 
 deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
   now <- getCurrentTime
@@ -160,7 +160,6 @@ addClient clientId metainf inf table dbdata =  do
     editClient metainf inf dbmeta ccli table tdi clientId now
     return (clientId, getClient metainf clientId <$> collectionTid dbmeta)
 
-txt = TB1 . SText
 
 
 chooserTable inf bset cliTid cli = do
@@ -174,16 +173,15 @@ chooserTable inf bset cliTid cli = do
   el <- mapUIFinalizerT body (\l -> mapM (\(nav,((table,desc),sub))-> do
     header <- UI.h3
         # set UI.class_ "header"
-        # set text desc
+        # set text (T.unpack desc)
     let layFacts i =  if i then ("col-xs-" <> (show $  (12`div`length l))) else "row"
         layFacts2 i =  if i then ("col-xs-" <> (show $  6)) else "row"
 
     body <- case nav of
         "Browser" -> do
-            let selTable = flip M.lookup (pkMap inf)
             if L.length sub == 1
                then do
-              viewerKey inf (fromJust $ selTable table) cli (layFacts2 . not <$> triding layout) cliTid
+              viewerKey inf table cli (layFacts2 . not <$> triding layout) cliTid
                else do
               els <- mapM (\t -> do
                   l <- UI.h4 #  set text (T.unpack $fromMaybe (rawName t)  $ rawTranslation t) # set UI.class_ "col-xs-12 header"
@@ -244,7 +242,7 @@ viewerKey inf table cli layout cliTid = mdo
   res4 <- ui $ mapT0EventDyn (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
   itemList <- listBoxEl itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (fmap Just <$> tidings st sel ) (pure id) (pure (maybe id attrLine))
   let evsel =  rumors (fmap join  $ triding itemList)
-  (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] ([(IProd True ["schema"],"=",  TB1 $ SText (schemaName inf) ), (IProd True ["table"],"=", TB1 $ SText (tableName table))])
+  (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] ([(IProd True ["schema"],Left (txt (schemaName inf),"=" )), (IProd True ["table"],Left (txt (tableName table),"=") )])
   ui $onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) (Just inf) dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< getCurrentTime )
   prop <- stepper cv evsel
   let tds = tidings prop evsel

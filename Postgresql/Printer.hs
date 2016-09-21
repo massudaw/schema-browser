@@ -424,10 +424,10 @@ explodeDelayed block assoc leaf (Unlabeled (FKT i rel t )) = case unkvlist i of
              i -> T.intercalate assoc (F.toList $ (explodeDelayed block assoc leaf .getCompose) <$> i) <> assoc <> explodeRow' block assoc leaf t
 
 
-printPred :: Show b => TB3Data (Labeled Text)  Key b ->  BoolCollection (Access Key ,Text,FTB Showable) -> (Maybe [Text],Maybe [Column Key Showable])
-printPred t (PrimColl (a,e,i)) = (Just $ catMaybes $ fmap fst idx,Just $ catMaybes $ fmap snd idx)
+printPred :: Show b => TB3Data (Labeled Text)  Key b ->  BoolCollection (Access Key ,Either (FTB Showable,Text) Text ) -> (Maybe [Text],Maybe [Column Key Showable])
+printPred t (PrimColl (a,e)) = (Just $ catMaybes $ fmap fst idx,Just $ catMaybes $ fmap snd idx)
   where
-    idx = indexFieldL (e,i) a t
+    idx = indexFieldL e a t
 
 printPred t (OrColl wpred) =
                 let
@@ -442,9 +442,9 @@ printPred t (AndColl wpred) =
 inferParamType e (KOptional i) = inferParamType e i
 inferParamType e (KInterval i) = inferParamType e i
 inferParamType "<@" (Primitive (AtomicPrim PDouble )) = ":: double precision"
-inferParamType "<@" (Primitive (AtomicPrim PDate )) = ":: daterange"
-inferParamType "<@" (Primitive (AtomicPrim PPosition )) = ":: point3range"
-inferParamType "<@" (Primitive (AtomicPrim (PTimestamp i ) )) = case i of
+inferParamType "@>" (Primitive (AtomicPrim PDate )) = ":: daterange"
+inferParamType "@>" (Primitive (AtomicPrim PPosition )) = ":: point3range"
+inferParamType "@>" (Primitive (AtomicPrim (PTimestamp i ) )) = case i of
                                                                   Just i -> ":: tsrange"
                                                                   Nothing -> ":: tstzrange"
 inferParamType _ _ = ""
@@ -458,7 +458,7 @@ justLabel t k =  justError ("cant find label"  <> show k <> " - " <> show t).get
 
 indexFieldL
     :: Show a
-    => (Text, FTB Showable)
+    => Either (FTB Showable,Text) Text
     -> Access Key
     -> TB3Data (Labeled Text) Key a
     -> [(Maybe Text, Maybe (TB Identity Key Showable))]
@@ -497,22 +497,27 @@ indexFieldL e (Many nt) v = concat $ flip (indexFieldL e) v <$> nt
 indexFieldL e (ISum nt) v = concat $ flip (indexFieldL e) v <$> nt
 indexFieldL e i v = errorWithStackTrace (show (i, v))
 
-utlabel (e,value) a = result
+utlabel (Right  e) a = result
   where
     idx = tlabel' . getCompose $ a
     opvalue  ref i@"is not null" =  ref <> " " <> i
     opvalue ref i@"is null" =  ref <> " "<> i
+    opparam "is not null" =  Nothing
+    opparam "is null" =  Nothing
+    result =  ( Just $  (opvalue (snd $ idx) e)   ,opparam e )
+utlabel (Left (value,e)) a = result
+  where
+    idx = tlabel' . getCompose $ a
     opvalue ref "IN"  = (\v -> ref <> " IN(" <> " select unnest( ? " <> inferParamType e (keyType (fst v)) <> "))") $ idx
     opvalue ref "FIN"  = (\v -> "? " <> inferParamType e (keyType (fst v)) <> " IN(" <> " select unnest( " <> ref <> "))") $ idx
     opvalue ref  i = (\v ->  " ? " <> inferParamType e (keyType (fst v)) <> i <> ref ) $ idx
-    opparam "is not null" =  Nothing
-    opparam "is null" =  Nothing
     opparam _ = Just $ Attr (fst idx ) value
     result =  ( Just $  (opvalue (snd $ idx) e)   ,opparam e )
-    tlabel' (Labeled l (Attr k _)) =  (k,l)
-    tlabel' (Labeled l (IT k tb )) =  (k,l <> " :: " <> tableType tb)
-    tlabel' (Unlabeled (Attr k _)) = (k,keyValue k)
-    tlabel' (Unlabeled (IT k v)) =  (k,label $ getCompose $ snd (justError "no it label" $ safeHead (F.toList v)))
+
+tlabel' (Labeled l (Attr k _)) =  (k,l)
+tlabel' (Labeled l (IT k tb )) =  (k,l <> " :: " <> tableType tb)
+tlabel' (Unlabeled (Attr k _)) = (k,keyValue k)
+tlabel' (Unlabeled (IT k v)) =  (k,label $ getCompose $ snd (justError "no it label" $ safeHead (F.toList v)))
 
 
 getLabels t k =  M.lookup  k (mapLabels label' t)

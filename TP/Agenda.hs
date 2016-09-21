@@ -53,12 +53,12 @@ import qualified Data.Map as M
 
 calendarCreate m cal def = runFunction $ ffi "createAgenda(%1,%2,%3)" cal def m
 
-calendarAddSource cal t evs = runFunction $ ffi "addSource(%1,%2,%3)" cal t evs
+calendarAddSource cal t evs = runFunction $ ffi "addSource(%1,%2,%3)" cal (tableName t) evs
 
 eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
     let
       calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
-      schemaPred =  [(IProd True ["schema_name"],"=",TB1 $ SText (schemaName inf))]
+      schemaPred =  [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") )]
 
     dashes <- liftIO $ do
       (_,(_,tmap)) <- transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
@@ -76,25 +76,22 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
             convField (LeftTB1 i) = concat $   convField <$> maybeToList i
             convField (v) = [("start",toLocalTime $v)]
             convField i = errorWithStackTrace (show i)
-            projf  r efield@(TB1 (SText field))  = (if (isJust $ join $  unSOptional <$> attr) then Left else Right) (M.fromList $ concat (convField <$> maybeToList attr  ) <> [("id", TB1 $ SText $ writePK r efield   ),("title",TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",TB1 (SText tname)),("color" , TB1 $ SText $ T.pack $ "#" <> renderShowable color ),("field", efield )] :: M.Map Text (FTB Showable))
+            projf  r efield@(TB1 (SText field))  = (if (isJust $ join $  unSOptional <$> attr) then Left else Right) (M.fromList $ concat (convField <$> maybeToList attr  ) <> [("id", txt $ writePK r efield   ),("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color ),("field", efield )] :: M.Map Text (FTB Showable))
                   where attr  = attrValue <$> lookAttrM inf field r
-            proj r = (TB1 $ SText (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  projf r <$> F.toList efields
+            proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  projf r <$> F.toList efields
             attrValue (Attr k v) = v
-        in (lookDesc,(TB1 $ SText $ T.pack $ "#" <> renderShowable color ,tname,efields,proj))) ( G.toList evMap)
+         in (lookDesc,(txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,efields,proj))) ( G.toList evMap)
 
     iday <- liftIO getCurrentTime
-    let allTags =  dashes
-    itemListEl2 <- mapM (\i ->
-      (i ^. _2._2 ,) <$> UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")]) allTags
     let
-        legendStyle  table (b,_)
+      legendStyle  table (b,_)
             =  do
-              let item = M.lookup (tableName (justError ("no table" <> show table)$ M.lookup table (pkMap inf))) (M.fromList  $ fmap (\i@(t,(a,b,c,_))-> (b,i)) allTags)
-              maybe (UI.div) (\(k@(t,(c,tname,_,_))) -> mdo
+              let item = M.lookup table (M.fromList  $ fmap (\i@(t,(a,b,c,_))-> (b,i)) dashes)
+              maybe UI.div (\(k@(t,(c,tname,_,_))) -> mdo
                 expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
                 let evc = UI.checkedChange expand
                 evb <- stepper False evc
-                missing <- (element $ justError ("no table" <> show tname)$ M.lookup tname  (M.fromList $  itemListEl2)) # sink UI.style (noneShow <$> evb)
+                missing <- UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")] # sink UI.style (noneShow <$> evb)
                 header <- UI.div
                   # set items [element b # set UI.class_"col-xs-1", UI.div # set text  t # set UI.class_ "col-xs-10", element expand ]
                   # set UI.style [("background-color",renderShowable c)]
@@ -126,18 +123,18 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
                   (\i -> do
                      patchFrom i >>= traverse (tell . pure )))
             edits <- mapM (\(cap,(_,t,fields,proj))->  do
-                let pred = WherePredicate $ lookAccess inf t<$> timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
-                    fieldKey (TB1 (SText v))=  lookKey inf t v
+                let pred = WherePredicate $ lookAccess inf (tableName t)<$> timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
+                    fieldKey (TB1 (SText v))=  lookKey inf (tableName t) v
                 -- (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
-                reftb <- refTables' inf (lookTable inf t) Nothing pred
+                reftb <- refTables' inf t Nothing pred
                 let v = fmap snd $ reftb ^. _1
-                let evsel = (\j (tev,pk,_) -> if tableName tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
+                let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
                 tdib <- stepper Nothing (join <$> evsel)
                 let tdi = tidings tdib (join <$> evsel)
-                (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi)  reftb [] [] (allRec' (tableMap inf) $ lookTable inf t)  tdi
+                (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi)  reftb [] [] (allRec' (tableMap inf) $ t)  tdi
                 mapUIFinalizerT innerCalendar
                   ((\i -> do
-                    calendarAddSource innerCalendar  (T.unpack t) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .  concat . fmap (lefts.snd) $ fmap proj $ G.toList i)))
+                    calendarAddSource innerCalendar  t ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .  concat . fmap (lefts.snd) $ fmap proj $ G.toList i)))
                   ) (v)
                 UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
                 ) selected
@@ -165,13 +162,12 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
 -}
 
     let inpCal =
-          ((\i j -> filter (flip L.elem (tableName <$> concat (F.toList i)) .  (^. _2._2)) j )<$> sel <*> pure allTags)
+          ((\i j -> filter (flip L.elem (concat (F.toList i)) .  (^. _2._2)) j )<$> sel <*> pure dashes)
 
     mapUIFinalizerT calendar calFun ((,,,) <$> agendaT <*> resolutionT <*> incrementT <*> inpCal)
 
     return  (legendStyle , dashes )
 
-txt = TB1. SText
 
 
 type DateChange = (String, Either (Interval UTCTime) UTCTime)

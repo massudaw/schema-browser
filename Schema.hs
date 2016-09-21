@@ -447,7 +447,7 @@ selectFromTable :: Text
  -> Maybe Int
  -> Maybe Int
  -> [(Key, Order)]
- -> [(Access Text , Text ,FTB Showable)]
+ -> [(Access Text , Either (FTB Showable,Text) Text)]
  -> ReaderT
       InformationSchema
       (WriterT
@@ -472,6 +472,6 @@ liftAccess inf tname (Nested i c) = Nested ref (liftAccess inf (snd l) c)
 liftAccess _ _ i = errorWithStackTrace (show i)
 
 
-lookAccess :: InformationSchema -> Text -> (Access Text , Text ,FTB Showable) -> (Access Key , Text ,FTB Showable)
+lookAccess :: InformationSchema -> Text -> (Access Text , Either (FTB Showable,Text) Text) -> (Access Key, Either (FTB Showable,Text) Text)
 lookAccess inf tname l = Le.over (Le._1) (liftAccess inf tname)  l
 

@@ -10,7 +10,7 @@ import Control.Applicative
 
 
 import Data.Time
-import Types
+import Types hiding (txt)
 import qualified Data.Text as T
 
 
