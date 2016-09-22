@@ -13,6 +13,7 @@ import Safe
 import qualified NonEmpty as Non
 import Data.Char
 import Step.Common
+import Step.Host
 import Query
 import Data.Time
 import Text
@@ -118,33 +119,48 @@ deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
   transaction inf $ updateFrom (apply (create o) pt) (create o)
 
 
+opt f = LeftTB1 . fmap f
+
 updateClient metainf inf table tdi clientId now = do
     (_,(_,tb)) <- transactionNoLog metainf $ selectFrom "client_login"  Nothing Nothing [] $ mempty
     let
       pk = Attr (lookKey metainf "client_login" "id") (TB1 (SNumeric clientId))
       old = justError ("no row " <> show (attrIdex [pk]) ) $ G.lookup (attrIdex [pk]) tb
     let
+      time = TB1  . STimestamp . utcToLocalTime utc
+      inter i j  = IntervalTB1 $ Interval.interval (i,True) (j,True)
       row = tblist . fmap _tb
             $ [ FKT (kvlist [_tb $ Attr "clientid" (TB1 (SNumeric (clientId )))]) [Rel "clientid" "=" "id"] (TB1 $ mapKey' keyValue $ old)
-              , Attr "creation_time" (TB1 (STimestamp (utcToLocalTime utc now)))
-              , Attr "schema" (LeftTB1 $ TB1 . SText .  schemaName <$> inf )
-              , Attr "table" (LeftTB1 $ TB1 . SText .  tableName <$>table)
-              , IT "data_index"   (LeftTB1 $ ArrayTB1 . Non.fromList .   fmap (\(i,j) -> TB1 $ tblist $ fmap _tb [Attr "key" (TB1 . SText  $ keyValue i) ,Attr "val" (TB1 . SDynamic $  j) ]) <$>tdi )
+              , Attr "up_time" (inter (Interval.Finite $ time now) Interval.PosInf)
+              , Attr "schema_name" (txt .  schemaName $ inf )
+              , IT "selection"
+                  (LeftTB1 $ (\table -> ArrayTB1 $ Non.fromList [
+                    TB1 $ tblist $ fmap _tb[ Attr "table" (txt .  tableName $ table)
+                                       , Attr "up_time" ( inter (Interval.Finite (time now)) (Interval.PosInf))
+                                       , IT "selection"   (LeftTB1  $ (\tdi -> ArrayTB1 $ Non.fromList [
+                                              TB1 $ tblist $ fmap _tb [
+                                               Attr "up_time" (inter (Interval.Finite $ time now) Interval.PosInf)
+                                              ,IT "data_index"
+                                                  ( ArrayTB1 . Non.fromList .   fmap (\(i,j) -> TB1 $ tblist $ fmap _tb [Attr "key" (txt  $ keyValue i) ,Attr "val" (TB1 . SDynamic $  j) ]) $tdi)]
+                                              ]) <$> tdi)
+                                       ]
+                    ]) <$> table )
               ]
       lrow = liftTable' metainf "clients" row
     return lrow
 
-getClient metainf clientId ccli = G.lookup (G.Idex $ M.fromList [(lookKey metainf "clients" "clientid",TB1 (SNumeric (clientId)))]) ccli :: Maybe (TBData Key Showable)
+num = TB1 . SNumeric
+getClient metainf clientId inf ccli = G.lookup (idex metainf "clients"  [("clientid",num clientId),("schema_name",txt $ schemaName inf)]) ccli :: Maybe (TBData Key Showable)
 
 deleteClient metainf clientId = do
   (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing [] $ mempty
   putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , G.Idex $ M.fromList [(lookKey metainf "clients" "clientid",TB1 (SNumeric (clientId)))],[])]
 
 editClient metainf inf dbmeta ccli  table tdi clientId now
-  | fmap tableName table == Just "client" && fmap schemaName inf == Just "metadata" = return ()
+  | fmap tableName table == Just "client" && schemaName inf == "metadata" = return ()
   | otherwise = do
     let cli :: Maybe (TBData Key Showable)
-        cli = getClient metainf clientId ccli
+        cli = getClient metainf clientId inf ccli
     new <- updateClient metainf inf table tdi clientId now
     let
         lrow :: Maybe (Index (TBData Key Showable))
@@ -152,13 +168,13 @@ editClient metainf inf dbmeta ccli  table tdi clientId now
     traverse (putPatch (patchVar dbmeta ) . pure ) lrow
     return ()
 
-addClient clientId metainf inf table dbdata =  do
+addClient clientId metainf inf table row =  do
     now <- getCurrentTime
     let
-      tdi = fmap (M.toList .getPKM) $ join $ (\inf table -> fmap (tblist' table ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName table))  ). F.toList) <$>  inf  <*> table <*> rowpk dbdata
+      tdi = fmap (M.toList .getPKM) $ join $ (\ t -> fmap (tblist' t ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName t))  ). F.toList) <$>  table <*> row
     (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing []  mempty
     editClient metainf inf dbmeta ccli table tdi clientId now
-    return (clientId, getClient metainf clientId <$> collectionTid dbmeta)
+    return (clientId, getClient metainf clientId inf <$> collectionTid dbmeta)
 
 
 
@@ -201,17 +217,25 @@ viewerKey
       InformationSchema -> Table -> Int -> Tidings String -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
 viewerKey inf table cli layout cliTid = mdo
   iv   <- currentValue (facts cliTid)
-  let lookT iv = let  i = unLeftItens $ lookAttr' (meta inf)  "table" iv
-                in fmap (\(Attr _ (TB1 (SText t))) -> t) i
-      lookPK iv = let  i = unLeftItens $ lookAttr' (meta inf)  "data_index" iv
-                       unKey t = liftA2 (,) ((\(Attr _ (TB1 (SText i)))-> flip (lookKey inf ) i <$> lookT iv ) $ lookAttr' (meta inf)  "key" t  )( pure $ (\(Attr _ (TB1 (SDynamic i)))-> i) $ lookAttr'  (meta inf)  "val" t )
+  let
+      lookT,lookPK :: TBData Key Showable -> Maybe (Int,TBData Key Showable)
+      lookT iv = join $ fmap ((\t -> L.find (\(ix,i)->  G.indexPred (liftAccess inf "clients" $ IProd True ["tables"],Left (txt (tableName table), "=")) i) $ zip [0..] (fmap unTB1 $ F.toList t) ).unArray) (join $ unSOptional <$> i)
+        where
+          i = _fkttable <$> indexField (liftAccess (meta inf) "clients" $ (IProd False ["selection"]) ) iv
+
+      lookPK iv = join $ fmap ((\t -> safeHead  $ zip [0..] (fmap unTB1 $ F.toList t) ). unArray) (join $ unSOptional <$> i)
+        where
+          i = _fkttable <$> indexField (liftAccess (meta inf) "clients_table" $ (IProd False ["selection"]) ) iv
+      lookKV iv = let i = unLeftItens $ lookAttr' (meta inf)  "data_index" iv
+                      unKey t = liftA2 (,) ((\(Attr _ (TB1 (SText i)))-> Just $ lookKey inf  (tableName table) i ) $ lookAttr' (meta inf)  "key" t  )( pure $ (\(Attr _ (TB1 (SDynamic i)))-> i) $ lookAttr'  (meta inf)  "val" t )
                 in fmap (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
+
   let
   reftb@(vpt,vp,_ ,var ) <- refTables inf table
 
   let
-      tdip = (\i -> join $ traverse (\v -> G.lookup  (G.Idex (M.fromList $ justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) (join $ lookPK <$> iv) ) <$> vpt
-      tdi = if Just (tableName table) == join (lookT <$> iv) then tdip else pure Nothing
+      tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (M.fromList $ justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) iv ) <$> vpt <*> tdip
+      tdip = join . fmap (join . fmap (join . fmap (lookKV . snd ). lookPK .snd). lookT ) <$> cliTid
   cv <- currentValue (facts tdi)
   -- Final Query ListBox
   filterInp <- UI.input
@@ -242,8 +266,8 @@ viewerKey inf table cli layout cliTid = mdo
   res4 <- ui $ mapT0EventDyn (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
   itemList <- listBoxEl itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (fmap Just <$> tidings st sel ) (pure id) (pure (maybe id attrLine))
   let evsel =  rumors (fmap join  $ triding itemList)
-  (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] ([(IProd True ["schema"],Left (txt (schemaName inf),"=" )), (IProd True ["table"],Left (txt (tableName table),"=") )])
-  ui $onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) (Just inf) dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< getCurrentTime )
+  (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] [(IProd True ["schema_name"],Left (txt (schemaName inf),"=" ))]
+  ui $onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) inf dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< getCurrentTime )
   prop <- stepper cv evsel
   let tds = tidings prop evsel
 

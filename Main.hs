@@ -35,7 +35,7 @@ main = do
   args <- getArgs
   print "Start Server"
   smvar   <- newMVar M.empty
-  let db = argsToState (tail args)
+  let db = argsToState args
   -- Load Metadata
   conn <- connectPostgreSQL (connRoot db)
   let
@@ -53,7 +53,7 @@ main = do
 
   print "Load GUI Server"
   forkIO $ threadDelay 50000 >> rawSystem "chromium" ["http://localhost:8025"] >> return ()
-  startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" , jsPort = fmap read $ safeHead args })  (setup smvar  (tail args))
+  startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar  args)
       (do
         Just (TableModification _ _ (_,G.Idex c,_)) <- addClientLogin metas
         let [(SerialTB1 (Just (TB1 (SNumeric i))))] = F.toList c

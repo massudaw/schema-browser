@@ -18,6 +18,7 @@ import Safe
 import qualified NonEmpty as Non
 import Data.Char
 import Step.Common
+import Step.Host
 import Data.Time
 import qualified Types.Index as G
 import Debug.Trace
@@ -66,8 +67,8 @@ setup smvar args w = void $ do
   metainf <- justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
   let bstate = argsToState args
   let amap = authMap smvar bstate (user bstate , pass bstate)
-  inf <- ui $ traverse (\i -> loadSchema smvar (T.pack i) (conn metainf) (user bstate)  amap ) $ schema  bstate
-  (cli,cliTid) <- liftIO $ addClient (fromIntegral $ wId w) metainf inf ((\t inf -> lookTable inf . T.pack $ t) <$> tablename bstate  <*> inf  ) bstate
+  inf <- ui $ fmap (justError ("no schema" <> show (schema bstate))) $ traverse (\i -> loadSchema smvar (T.pack i) (conn metainf) (user bstate)  amap ) $ schema  bstate
+  (cli,cliTid) <- liftIO $ addClient (fromIntegral $ wId w) metainf inf ((\t -> lookTable inf . T.pack $ t) <$> tablename bstate  ) (rowpk bstate)
   (evDB,chooserItens) <- databaseChooser smvar metainf bstate
   body <- UI.div# set UI.class_ "col-xs-12"
   return w # set title (host bstate <> " - " <>  dbn bstate)
@@ -88,9 +89,9 @@ setup smvar args w = void $ do
   getBody w #+ [element hoverBoard,element container]
   mapUIFinalizerT body (traverse (\inf-> mdo
     let kitems = F.toList (pkMap inf)
-        initKey = (\iv -> maybeToList $ join $ flip M.lookup (_tableMapL inf) <$> join (lookT <$> iv)) <$> cliTid
-        lookT iv = let  i = unLeftItens $ lookAttr' (meta inf)  "table" iv
-                      in fmap (\(Attr _ (TB1 (SText t))) -> t) i
+        initKey = maybe [] F.toList  . (\iv -> fmap (lookTable inf)  <$> join (lookT <$> iv)) <$> cliTid
+        lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested (IProd False ["selection"]) (IProd True ["table"])) iv
+                    in fmap (\(TB1 (SText t)) -> t) .unArray  <$> join (fmap unSOptional' i)
     iniKey <-currentValue (facts initKey)
     (lookDesc,bset) <- tableChooser inf  kitems (fst <$> tfilter) (snd <$> tfilter)  ((schemaName inf)) ((username inf)) (pure iniKey)
 
@@ -165,7 +166,7 @@ setup smvar args w = void $ do
                 "Stats" -> do
                     let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),"IN"))]
                     stats <- metaAllTableIndexA inf "table_stats" pred
-                    clients <- metaAllTableIndexA inf "clients"$  [(IProd True ["schema"],Left (LeftTB1 $ Just $ txt (schemaName inf),"=") ) ]<> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),"IN") )]
+                    clients <- metaAllTableIndexA inf "clients"$  [(IProd True ["schema_name"],Left (LeftTB1 $ Just $ txt (schemaName inf),"=") ) ]<> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),"IN") )]
                     element metabody # set UI.children [stats,clients]
                 "Exception" -> do
                     let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),"IN"))]

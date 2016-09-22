@@ -72,6 +72,7 @@ joinFTB (TB1 i) =  i
 indexFieldRec :: Access Key-> TBData Key Showable -> Maybe (FTB Showable)
 indexFieldRec p@(IProd b l) v = _tbattr . unTB <$> findAttr  l  v
 indexFieldRec n@(Nested ix@(IProd b l) (Many[nt]) ) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK l v
+indexFieldRec n@(Nested ix@(IProd b l) nt) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK l v
 
 genPredicate i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
 genPredicate i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
