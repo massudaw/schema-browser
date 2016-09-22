@@ -1178,7 +1178,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
           sortList =  sorting' <$> pure (fmap ((,True)._relTarget) rel)
       let
           vv :: Tidings (Maybe [TB Identity CoreKey Showable])
-          vv =   fmap (L.sortBy (comparing (keyattri . replaceKey)))  <$>  liftA2 (<> ) iold2  ftdi2
+          vv =   join . fmap nonEmpty  <$>  liftA2 (<>) iold2  ftdi2
       cvres <- currentValue (facts vv)
       filterInp <- UI.input # set UI.class_ "col-xs-3"
       filterInpBh <- stepper "" (UI.valueChange filterInp)

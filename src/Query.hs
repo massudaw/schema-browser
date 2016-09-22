@@ -550,7 +550,8 @@ searchGist ::
   -> Maybe a
 searchGist relTable m gist =  join . fmap (\k -> lookGist (S.fromList $fmap (\k-> justError (" no pk " <> show (k,relTable)) $ M.lookup k relTable) (_kvpk m) ) k  gist)
   where
-    lookGist un pk  = safeHead . G.search (tbpred un pk)
+    lookGist un pk  v =  if L.length res <= 1  then safeHead res else Nothing
+      where res =  G.search (tbpred un pk) v
     tbpred un  = tbjust  . Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  relTable ))).  filter ((`S.member` un). fst ) . concat .fmap aattri
         where
           flipTable = M.fromList . fmap swap .M.toList

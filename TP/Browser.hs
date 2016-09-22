@@ -219,7 +219,7 @@ viewerKey inf table cli layout cliTid = mdo
   iv   <- currentValue (facts cliTid)
   let
       lookT,lookPK :: TBData Key Showable -> Maybe (Int,TBData Key Showable)
-      lookT iv = join $ fmap ((\t -> L.find (\(ix,i)->  G.indexPred (liftAccess inf "clients" $ IProd True ["tables"],Left (txt (tableName table), "=")) i) $ zip [0..] (fmap unTB1 $ F.toList t) ).unArray) (join $ unSOptional <$> i)
+      lookT iv = join $ fmap ((\t -> L.find (\(ix,i)->  G.indexPred (liftAccess (meta inf) "clients_table" $ IProd True ["table"],Left (txt (tableName table), "=")) i) $ zip [0..] (fmap unTB1 $ F.toList t) ).unArray) (join $ unSOptional <$> i)
         where
           i = _fkttable <$> indexField (liftAccess (meta inf) "clients" $ (IProd False ["selection"]) ) iv
 
