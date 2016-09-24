@@ -573,15 +573,17 @@ joinRel tb rel ref table
 joinRel2 :: (Ord a ,Show a,G.Predicates (G.TBIndex Key a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex Key a) (TBData Key a) -> Maybe (FTB (TBData Key a))
 joinRel2 tb rel ref table
   | L.all (isOptional .keyType) origin
-    = fmap LeftTB1  $ fmap (flip (joinRel2 tb (Le.over relOri unKOptional <$> rel ) ) table) (Tra.traverse unLeftItens ref )
+  = Just $ LeftTB1  $ join $ fmap (flip (joinRel2 tb (Le.over relOri unKOptional <$> rel ) ) table) (Tra.traverse unLeftItens ref )
   | L.any (isArray.keyType) origin
-    = fmap (ArrayTB1 .  Non.fromList ) $Tra.sequenceA   $ fmap (flip (joinRel2 tb (Le.over relOri unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(Non.length (unArray $ unAttr $ head ref) - 1)])
+  = fmap (ArrayTB1 .  Non.fromList ) $Tra.sequenceA   $ traceShowId $ fmap (flip (joinRel2 tb (Le.over relOri unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ justError "no array" $ L.find  (isArray .keyType . _tbattrkey) ref) [0..(Non.length (unArray $ justError " no array" $ L.find  isArrayTB1 $ fmap unAttr $  ref) - 1)])
   | otherwise
     =  TB1 <$> tbel
       where origin = fmap _relOrigin rel
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
             invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
-            tbel = searchGist  invrelMap tb table (Just ref)
+            tbel = searchGist  invrelMap tb table (traceShowId $ Just ref)
+            isArrayTB1 (ArrayTB1 _ ) = True
+            isArrayTB1 _  = False
 
 
 lookGist un pk  = G.lookup (tbpred un pk)

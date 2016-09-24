@@ -11,6 +11,7 @@ import Data.Tuple
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM
 import Types.Patch
+import Control.Monad.RWS
 import System.Directory
 import qualified Types.Index as G
 
@@ -448,10 +449,7 @@ selectFromTable :: Text
  -> Maybe Int
  -> [(Key, Order)]
  -> [(Access Text , Either (FTB Showable,Text) Text)]
- -> ReaderT
-      InformationSchema
-      (WriterT
-         [TableModification (TBIdx Key Showable)] IO)
+ -> TransactionM
       (DBVar, Collection Key Showable)
 selectFromTable t a b c p = do
   inf  <- ask

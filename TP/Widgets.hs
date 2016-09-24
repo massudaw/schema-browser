@@ -539,7 +539,7 @@ infixl 4 <#>
 b <#>  t = tidings ( b <*> facts t ) (b <@> rumors t)
 
 fileChange :: Element -> Event (Maybe String)
-fileChange el = unsafeMapUI el (const $ UI.get readFileAttr el) (UI.valueChange el)
+fileChange el = unsafeMapUI el (const $ UI.get readFileAttr el) (UI.onChangeE el)
 
 selectionMultipleChange :: Element -> Event [Int]
 selectionMultipleChange el = unsafeMapUI el (const $ UI.get selectedMultiple el) (UI.click el)
@@ -550,7 +550,7 @@ readFileAttr = mkReadAttr get
     get   el = fmap  from  $  callFunction $ ffi "readFileInput($(%1))" el
     from s = case JSON.fromJSON s of
                   JSON.Success x -> M.lookup ("filevalue" ::String) x
-                  i -> Nothing -- errorWithStackTrace (show i)
+                  i -> traceShow s Nothing -- errorWithStackTrace (show i)
 
 
 jsTimeZone :: UI TimeZone

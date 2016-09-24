@@ -76,20 +76,18 @@ calendarSelector = do
     increment <- accumB iday  currentE
     let incrementT =  tidings increment (flip ($) <$> increment <@> currentE)
 
-    currentOutput <- UI.div # sink text (fmap show $ (\i j -> (resRange False i j ,resRange True i j))<$>  facts (triding resolution) <*> facts incrementT )
-    sidebar <- UI.div # set children [getElement agenda,current,getElement resolution,currentOutput ]
+    -- currentOutput <- UI.div # sink text (fmap show $ (\i j -> (resRange False i j ,resRange True i j))<$>  facts (triding resolution) <*> facts incrementT )
+    sidebar <- UI.div # set children [getElement agenda,current,getElement resolution]
     return (sidebar,(triding agenda ,incrementT,triding resolution))
 
 positionSel = do
     cpos <-UI.div
     bcpos <-UI.button # set text "Localização Atual"
-    sidebar <-UI.div # set children [bcpos,cpos]
     (e,h) <- liftIO$ newEvent
     positionB <- stepper Nothing (Just <$>e)
     onEventFT (UI.click bcpos) (\_ -> runFunction $ ffi "fireCurrentPosition(%1)" bcpos)
     onEventFT (currentPosition bcpos ) (liftIO. h )
-    element cpos # sink text (show <$> positionB)
-    return (sidebar,currentPosition bcpos, h,tidings positionB (diffEvent positionB  (Just <$> e)))
+    return (bcpos,currentPosition bcpos, h,tidings positionB (diffEvent positionB  (Just <$> e)))
 
 lookupAccess inf l f c = join $ fmap (indexField (IProd  True [(lookKey inf (fst c) f)] )) . G.lookup (idex inf (fst c) l) $ snd c
 
@@ -127,6 +125,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
           where
             pk = [("table_name",txt . rawName $ table ), ("schema_name",txt (schemaName inf))]
             row = lookupAccess (meta inf) pk  "usage" ("ordering",orderMap)
+  all <- checkedWidget (pure False)
   bset <- mdo
     let
 
@@ -144,7 +143,14 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
         where
           tb =  k
 
-    bset <- checkDivSetTGen tables ((\i k j -> tableUsage i j k ) <$> collectionTid orddb <*> triding bset) (M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i)  $ e ) <$> iniTables) buttonString ((\lg i j -> lg i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle)
+    let allTablesSel True = M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i)  $ e ) $ tables
+        allTablesSel False = M.empty
+        iniSel =  M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i)  $ e ) <$> iniTables
+    iniValue <- currentValue (facts iniSel)
+    let iniEvent = (unionWith const (rumors iniSel ) (allTablesSel <$> rumors (triding all)))
+    iniBehaviour <- stepper iniValue  iniEvent
+
+    bset <- checkDivSetTGen tables ((\i k j -> tableUsage i j k ) <$> collectionTid orddb <*> triding bset) (tidings iniBehaviour iniEvent ) buttonString ((\lg i j -> lg i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle)
     return bset
   let
       ordRow orderMap pkset =  field
@@ -162,8 +168,8 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
 
 -}
   element bset # set UI.style [("overflow","auto"),("height","99%")]
-  tableHeader <- UI.h4 # set text "Table"
-  tbChooserI <- UI.div # set children [tableHeader,filterInp,getElement bset]  # set UI.style [("height","50vh")]
+  header <- UI.div # set children [getElement all,filterInp] # set UI.style [("display","inline-flex")]
+  tbChooserI <- UI.div # set children [header,getElement bset]  # set UI.style [("height","50vh")]
   return $ (lookDesc,TrivialWidget ((\f -> M.mapKeys (fmap f))<$> lookDesc <*> (M.mapKeys (\i-> (i,i))  <$>triding bset)) tbChooserI)
 
 

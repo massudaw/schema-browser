@@ -14,6 +14,7 @@ import Types.Index as G
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM.TMVar
 import Control.Concurrent.STM
+import Control.Monad.RWS
 import Types.Patch
 import qualified NonEmpty as Non
 import Utils
@@ -148,7 +149,7 @@ dynP ~(P s d) = d
 dynPK =  runKleisli . dynP
 
 
-type TransactionM = ReaderT InformationSchema (WriterT [TableModification (TBIdx Key Showable)] IO)
+type TransactionM = RWST InformationSchema [TableModification (TBIdx Key Showable)] (M.Map Table (TableIndex Key Showable))  IO
 
 type PageToken = PageTokenF Key Showable
 
@@ -161,11 +162,6 @@ data PageTokenF k v
   | HeadToken
   deriving(Eq,Ord,Show,Generic)
 
-pageFirst :: (a -> b) -> PageTokenF a v -> PageTokenF b v
-pageFirst f (TableRef i) = TableRef $ first f <$> i
-pageFirst _ (NextToken i) = NextToken i
-pageFirst _ (PageIndex i) = PageIndex i
-pageFirst _ HeadToken =HeadToken
 
 data SchemaEditor
   = SchemaEditor

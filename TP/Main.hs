@@ -89,7 +89,7 @@ setup smvar args w = void $ do
   getBody w #+ [element hoverBoard,element container]
   mapUIFinalizerT body (traverse (\inf-> mdo
     let kitems = F.toList (pkMap inf)
-        initKey = maybe [] F.toList  . (\iv -> fmap (lookTable inf)  <$> join (lookT <$> iv)) <$> cliTid
+        initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> M.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
         lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested (IProd False ["selection"]) (IProd True ["table"])) iv
                     in fmap (\(TB1 (SText t)) -> t) .unArray  <$> join (fmap unSOptional' i)
     iniKey <-currentValue (facts initKey)

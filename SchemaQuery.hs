@@ -26,6 +26,7 @@ import RuntimeTypes
 import Step.Host
 
 import qualified Data.GiST.BTree as G
+import Control.Monad.RWS
 import Step.Common
 
 import Data.Time
@@ -39,8 +40,6 @@ import Data.Ord
 import GHC.Stack
 import qualified NonEmpty as Non
 import Data.Functor.Identity
-import Control.Monad.Writer
-import Control.Monad.Reader
 import Control.Concurrent.STM
 import Reactive.Threepenny
 import Utils
@@ -180,7 +179,7 @@ tableLoader table  page size presort fixed
   -- Primitive Tables
   | otherwise  =  do
     inf <- ask
-    let base (Path _ (FKJoinTable i j  ) ) = fst j == schemaName inf
+    let base (Path _ (FKJoinTable i j  ) ) = False -- fst j == schemaName inf
         base i = True
         remoteFKS = S.filter (not .base )  (_rawFKSL table)
         getAtt i (m ,k ) = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues . unTB $ k
@@ -189,7 +188,7 @@ tableLoader table  page size presort fixed
     o <- pageTable False (\table page size presort fixed predtop  -> do
           (res ,x ,o) <- (listEd $ schemaOps inf) (table {_rawFKSL = S.filter base  (_rawFKSL table)}) page size presort fixed predtop
           let getFKS  v = foldl (\m (Path _ (FKJoinTable i j ))  -> m >>= (\m -> do
-                let rinf = justError "no schema" $ M.lookup ((fst j))  (depschema inf)
+                let rinf = maybe inf id $ M.lookup ((fst j))  (depschema inf)
                     table = lookTable rinf $ snd j
                     predicate = case predtop of
                                   WherePredicate l ->
@@ -211,12 +210,11 @@ tableLoader table  page size presort fixed
                        fk <- joinFK i
                        return $ addAttr  fk i) <$> m
                 liftIO $ putStrLn $ "reloadForeign table" <> show (tableName table) <> " - " <> show (lefts joined)
-                fetched <-traverse (\pred -> local (const rinf) $  tableLoader table Nothing Nothing []  (WherePredicate (AndColl pred))) $ traverse (\k -> (\ v ->  (PrimColl (IProd True [ _relOrigin  $ k], Left ( ArrayTB1 (Non.fromList v), "IN")))) <$> ( nonEmpty $ catMaybes $  fmap (_tbattr .unTB) . L.find ((== [k]) . keyattr ) <$> (lefts joined) ))  i
+                fetched <- traverse (\pred -> local (const rinf) $  tableLoader table Nothing Nothing []  (WherePredicate (AndColl pred))) $ traverse (\k -> (\ v ->  (PrimColl (IProd True [ _relOrigin  $ k], Left ( ArrayTB1 (Non.fromList v), "IN")))) <$> ( nonEmpty $ catMaybes $   join . fmap ( unSOptional'. _tbattr .unTB) . L.find ((== [k]) . keyattr ) <$> (lefts joined) ))  i
                 return (rights  joined)) )  (return v) $ P.sortBy (P.comparing pathRelRel)  (S.toList remoteFKS)
           resFKS <- getFKS res
           return (resFKS,x,o )) table page size presort fixed
     lf <- liftIO getCurrentTime
-
     liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
     return o
 
@@ -287,13 +285,15 @@ pageTable flag method table page size presort fixed = do
                return ((sq,mp),[])
        let nidx =  M.insert fixidx (fst i) fixedmap
            ndata = snd i
+       loadmap <- get
        liftIO $ atomically $ do
          when (L.length ndata > 0) $ writeTQueue (patchVar dbvar) (F.toList $ patch  <$> ndata )
          when (isNothing ((join $ fmap (M.lookup pageidx . snd) $ M.lookup fixidx fixedmap))) $ putTMVar (idxVar dbvar ) nidx
-       return (nidx, if L.length ndata > 0 then createUn (S.fromList $ rawPK table) ndata <> reso else reso)
+         return (nidx, if L.length ndata > 0 then createUn (S.fromList $ rawPK table) ndata <> reso else fromMaybe reso (M.lookup table loadmap ))
     let tde = fmap ffixed <$> rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
     let iniFil = fmap ffixed iniT
     tdb  <- stepper iniFil tde
+    modify (M.insert table ( snd $iniFil))
     return (dbvar {collectionTid  = fmap snd $ tidings tdb tde},iniFil)
 
 
@@ -326,7 +326,7 @@ noInsert' (k1,v1)   = do
 
 transactionLog :: InformationSchema -> TransactionM a -> IO [TableModification (TBIdx Key Showable)]
 transactionLog inf log = do -- withTransaction (conn inf) $ do
-  (md,mods)  <- runWriterT (runReaderT log inf )
+  (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [TableModification id t f] m) M.empty mods
   agg2 <- Tra.traverse (\(k,v) -> do
     ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ M.lookup ((rawSchema k ))  (depschema inf) ) k
@@ -340,7 +340,7 @@ transactionLog inf log = do -- withTransaction (conn inf) $ do
 
 transactionNoLog :: InformationSchema -> TransactionM a -> IO a
 transactionNoLog inf log = do -- withTransaction (conn inf) $ do
-  (md,mods)  <- runWriterT (runReaderT log inf )
+  (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\tm@(TableModification id t f) m -> M.insertWith mappend t [tm] m) M.empty mods
   Tra.traverse (\(k,v) -> do
     ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ M.lookup ((rawSchema k ))  (depschema inf) ) k
@@ -351,7 +351,7 @@ transactionNoLog inf log = do -- withTransaction (conn inf) $ do
 
 transaction :: InformationSchema -> TransactionM a -> IO a
 transaction inf log = do -- withTransaction (conn inf) $ do
-  (md,mods)  <- runWriterT (runReaderT log inf )
+  (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\tm@(TableModification id t f) m -> M.insertWith mappend t [tm] m) M.empty mods
   Tra.traverse (\(k,v) -> do
     ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ M.lookup ((rawSchema k ))  (depschema inf) ) k

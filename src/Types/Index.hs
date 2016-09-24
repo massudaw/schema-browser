@@ -41,7 +41,7 @@ import qualified Data.List as L
 import qualified Data.Set as Set
 import Data.GiST.BTree
 import Data.Map (Map)
-import qualified Data.Map as M
+import qualified Data.Map.Strict as M
 
 
 
