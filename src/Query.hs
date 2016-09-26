@@ -550,12 +550,12 @@ searchGist ::
   -> Maybe a
 searchGist relTable m gist =  join . fmap (\k -> lookGist (S.fromList $fmap (\k-> justError (" no pk " <> show (k,relTable)) $ M.lookup k relTable) (_kvpk m) ) k  gist)
   where
-    lookGist un pk  v =  if L.length res <= 1  then safeHead res else Nothing
-      where res =  G.search (tbpred un pk) v
+    lookGist un pk  v =  join $ safeHead <$> res
+      where res =  flip G.search  v <$> tbpred un pk
     tbpred un  = tbjust  . Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  relTable ))).  filter ((`S.member` un). fst ) . concat .fmap aattri
         where
           flipTable = M.fromList . fmap swap .M.toList
-          tbjust = G.Idex . M.fromList . justError "cant be empty"
+          tbjust = fmap (G.Idex . M.fromList )
 
 joinRel :: (Ord a ,Show a,G.Predicates (G.TBIndex Key a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex Key a) (TBData Key a) -> FTB (TBData Key a)
 joinRel tb rel ref table
@@ -572,16 +572,17 @@ joinRel tb rel ref table
 
 joinRel2 :: (Ord a ,Show a,G.Predicates (G.TBIndex Key a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex Key a) (TBData Key a) -> Maybe (FTB (TBData Key a))
 joinRel2 tb rel ref table
-  | L.all (isOptional .keyType) origin
+  | L.any (isOptional .keyType) origin
   = Just $ LeftTB1  $ join $ fmap (flip (joinRel2 tb (Le.over relOri unKOptional <$> rel ) ) table) (Tra.traverse unLeftItens ref )
   | L.any (isArray.keyType) origin
-  = fmap (ArrayTB1 .  Non.fromList ) $Tra.sequenceA   $ traceShowId $ fmap (flip (joinRel2 tb (Le.over relOri unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ justError "no array" $ L.find  (isArray .keyType . _tbattrkey) ref) [0..(Non.length (unArray $ justError " no array" $ L.find  isArrayTB1 $ fmap unAttr $  ref) - 1)])
+  = fmap (ArrayTB1 .  Non.fromList ) $Tra.sequenceA   $ fmap (flip (joinRel2 tb (Le.over relOri unKArray <$> rel ) ) table . (:L.filter (not .isArray . keyType ._tbattrkey) ref)) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ arr ) [0..(Non.length (unArray $ _tbattr arr)   - 1)])
   | otherwise
     =  TB1 <$> tbel
       where origin = fmap _relOrigin rel
+            arr = justError ("no array"<> show ref) $ L.find  (isArray .keyType . _tbattrkey) ref
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
             invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
-            tbel = searchGist  invrelMap tb table (traceShowId $ Just ref)
+            tbel = searchGist  invrelMap tb table (Just ref)
             isArrayTB1 (ArrayTB1 _ ) = True
             isArrayTB1 _  = False
 

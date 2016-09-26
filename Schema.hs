@@ -455,21 +455,3 @@ selectFromTable t a b c p = do
   inf  <- ask
   selectFrom  t a b c (WherePredicate $ AndColl $ fmap (lookAccess inf t). PrimColl <$> p)
 
-liftAccess :: InformationSchema -> Text -> Access Text  -> Access Key
-liftAccess inf tname (ISum i) =  ISum $ fmap (liftAccess inf tname)  i
-liftAccess inf tname (Many i) =  Many $ fmap (liftAccess inf tname)  i
-liftAccess inf tname (IProd b l) = IProd b $ fmap (lookKey inf tname) l
-liftAccess inf tname (Nested i c) = Nested ref (liftAccess inf (snd l) c)
-  where
-    ref@(IProd _ refk) = liftAccess inf tname i
-    tb = lookTable inf tname
-    n = justError "no fk" $ L.find (\i -> S.fromList refk == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
-    l = case n of
-          (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
-          (Path _ rel@(FKInlineTable  l  ) ) ->  l
-liftAccess _ _ i = errorWithStackTrace (show i)
-
-
-lookAccess :: InformationSchema -> Text -> (Access Text , Either (FTB Showable,Text) Text) -> (Access Key, Either (FTB Showable,Text) Text)
-lookAccess inf tname l = Le.over (Le._1) (liftAccess inf tname)  l
-

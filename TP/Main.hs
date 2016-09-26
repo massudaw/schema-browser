@@ -7,6 +7,7 @@ module TP.Main where
 
 import TP.Selector
 import Data.Unique
+import Postgresql.Backend (connRoot)
 import TP.View
 import TP.Account
 import TP.Browser
@@ -296,6 +297,18 @@ databaseChooser smvar metainf sargs = do
   element authBox  # sink UI.style (facts $ (\a b -> noneShow $  fromMaybe True $  liftA2 (\(db,sc) (csch) -> if sc == (schemaName csch )then False else True ) a b )<$>    dbsWT <*> chooserT )
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schemaEl , getElement dbsW]
   return $ (chooserT,[schemaSel ]<>  [authBox] )
+
+
+testTable s t w = do
+  args <- getArgs
+  let db = argsToState args
+  smvar   <- newMVar M.empty
+  conn <- connectPostgreSQL (connRoot db)
+  let
+    amap = authMap smvar db ("postgres", "queijo")
+  (inf,_) <- runDynamic $ keyTables smvar conn (s,"postgres") amap []
+  transactionNoLog inf $ selectFrom t Nothing Nothing [] w
+
 
 
 

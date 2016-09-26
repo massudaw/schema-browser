@@ -30,6 +30,7 @@ import qualified Reactive.Threepenny as R
 import Database.PostgreSQL.Simple hiding (Binary)
 import Data.Functor.Identity
 import Data.Map (Map)
+import qualified Control.Lens as Le
 import qualified Data.Map as M
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Set as S
@@ -149,7 +150,7 @@ dynP ~(P s d) = d
 dynPK =  runKleisli . dynP
 
 
-type TransactionM = RWST InformationSchema [TableModification (TBIdx Key Showable)] (M.Map Table (TableIndex Key Showable))  IO
+type TransactionM = RWST InformationSchema [TableModification (TBIdx Key Showable)] (M.Map (Table,WherePredicate) (TableIndex Key Showable))  IO
 
 type PageToken = PageTokenF Key Showable
 
@@ -259,6 +260,24 @@ fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
         where (FKJoinTable  _ (schname,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
               ta = lookTable inf tname
               rinf = fromMaybe inf (M.lookup schname (depschema inf))
+
+liftAccess :: InformationSchema -> Text -> Access Text  -> Access Key
+liftAccess inf tname (ISum i) =  ISum $ fmap (liftAccess inf tname)  i
+liftAccess inf tname (Many i) =  Many $ fmap (liftAccess inf tname)  i
+liftAccess inf tname (IProd b l) = IProd b $ fmap (lookKey inf tname) l
+liftAccess inf tname (Nested i c) = Nested ref (liftAccess inf (snd l) c)
+  where
+    ref@(IProd _ refk) = liftAccess inf tname i
+    tb = lookTable inf tname
+    n = justError "no fk" $ L.find (\i -> S.fromList refk == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
+    l = case n of
+          (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
+          (Path _ rel@(FKInlineTable  l  ) ) ->  l
+liftAccess _ _ i = errorWithStackTrace (show i)
+
+
+lookAccess :: InformationSchema -> Text -> (Access Text , Either (FTB Showable,Text) Text) -> (Access Key, Either (FTB Showable,Text) Text)
+lookAccess inf tname l = Le.over (Le._1) (liftAccess inf tname)  l
 
 
 makeLenses ''InformationSchemaKV

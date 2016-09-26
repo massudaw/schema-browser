@@ -28,8 +28,6 @@ import Database.PostgreSQL.Simple.Internal
 import qualified Data.Map as M
 import qualified Data.ByteString as BS
 
-
-
 main :: IO ()
 main = do
   args <- getArgs

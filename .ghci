@@ -1,4 +1,4 @@
 :set  -fwarn-unused-imports
 :set -isrc
-:set args mode 8023 localhost 5432 incendio postgres queijo metadata view_fks 
+:set args localhost 5432 incendio postgres queijo metadata 
 :set -j8

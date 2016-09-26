@@ -7,7 +7,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Types.Index
-  (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,filter',mapKeys ,getIndex ,pickSplitG ,minP,maxP,unFin,queryCheck,indexPred,module G ) where
+  (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,filter',mapKeys ,getIndex ,pickSplitG ,minP,maxP,unFin,queryCheck,indexPred,checkPred,module G ) where
 
 import Data.Maybe
 import Control.Arrow (first)
@@ -65,6 +65,7 @@ instance Semigroup DiffShowable where
       appendDShowable (DSInt l ) (DSInt j) =  DSInt $ l + j
       appendDShowable (DSDays l ) (DSDays j) =  DSDays $ l + j
       appendDShowable (DSDiffTime l ) (DSDiffTime j) =  DSDiffTime $ l + j
+      appendDShowable (DSPosition (x,y,z) ) (DSPosition (a,b,c)) =  DSPosition $ (x+a,y+b,z+c)
       appendDShowable a b = errorWithStackTrace (show (a,b))
 
 instance Predicates (WherePredicate,Predicate Int) where
@@ -137,12 +138,14 @@ instance Affine Showable where
   loga (SNumeric t) =  DSInt $ t
   loga (SDate t) =  DSDays  (diffDays  t (ModifiedJulianDay 0))
   loga (STimestamp t) =  DSDiffTime (diffUTCTime (localTimeToUTC utc t) (UTCTime (ModifiedJulianDay 0) 0))
+  loga (SPosition (Position t)) =  DSPosition t
   loga i = errorWithStackTrace (show i)
   expa (DSText t) =  SText $ T.pack $ expa t
   expa (DSDouble t) =  SDouble $ t
   expa (DSInt t) =  SNumeric $ t
   expa (DSDays t) =  SDate $ addDays t (ModifiedJulianDay 0)
   expa (DSDiffTime t) =  STimestamp $ utcToLocalTime utc $ addUTCTime  t (UTCTime (ModifiedJulianDay 0) 0)
+  expa (DSPosition t) =  SPosition $ Position t
   expa i = errorWithStackTrace (show i)
   subtraction = diffS
     where
@@ -152,12 +155,14 @@ instance Affine Showable where
       diffS (SNumeric t) (SNumeric o) = DSInt $ o -t
       diffS (STimestamp i ) (STimestamp j) = DSDiffTime (diffUTCTime (localTimeToUTC utc j) (localTimeToUTC utc  i))
       diffS (SDate i ) (SDate j) = DSDays (diffDays j i)
+      diffS (SPosition (Position (x,y,z)) ) (SPosition (Position (a,b,c))) = DSPosition (a-x,b-y,c-z)
       diffS a b  = errorWithStackTrace (show (a,b))
   addition (SText v) (DSText t) = SText $ T.pack $ addition (T.unpack v) t
   addition (SNumeric v) (DSInt t) = SNumeric  $ v + t
   addition (SDouble v) (DSDouble t) = SDouble $ v + t
   addition (STimestamp  v) (DSDiffTime t) = STimestamp $ utcToLocalTime utc $ addUTCTime t (localTimeToUTC utc v)
   addition (SDate v) (DSDays t) = SDate $ addDays t v
+  addition (SPosition (Position (x,y,z)) ) (DSPosition (a,b,c)) = SPosition $ Position (a+x,b+y,c+z)
   addition i j = errorWithStackTrace (show (i,j))
 
 instance Predicates (TBIndex Key Showable) where
@@ -265,6 +270,7 @@ instance (Fractional (DiffFTB (Tangent a)) ,Affine a ,Ord a) => Affine (FTB a) w
 data DiffShowable
   = DSText [Int]
   | DSDouble Double
+  | DSPosition (Double,Double,Double)
   | DSInt Int
   | DSDiffTime NominalDiffTime
   | DSDays Integer
@@ -349,6 +355,8 @@ intervalSub (IntervalTB1 i) (IntervalTB1 j)
     width i = Interval.upperBound i `subtraction` Interval.lowerBound i
 
 
+notNeg (DSPosition l)
+  | otherwise = DSPosition l
 notNeg (DSText l)
   | L.null dp || headS dp < 0 = def
   | otherwise = DSText l

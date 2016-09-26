@@ -114,7 +114,7 @@ updatePatch
 updatePatch conn kv old  t =
     execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk ) >> return patch
   where
-    patch  = justError ("cant diff states" <> (concat $ zipWith differ (show kv) (show old))) $ traceShowId $ diff old kv
+    patch  = justError ("cant diff states" <> (concat $ zipWith differ (show kv) (show old))) $ diff old kv
     kold = M.toList $ getPKM old
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> kold

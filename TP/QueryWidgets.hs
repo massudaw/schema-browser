@@ -313,7 +313,7 @@ labelCase inf a old wid = do
     return $ TrivialWidget (triding wid) el
 
 refTables' inf table page pred = do
-        ((DBVar2 tmvard _   _ vpdiff _ _ ),res)  <-  liftIO $ transactionNoLog inf $ eventTable table page Nothing  [] pred
+        ((DBVar2 tmvard _   _ vpdiff _ _ ),res)  <-  liftIO $ transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
         let update = foldl'(flip (\p-> fmap (flip apply p)))
         bres <- ui $ accumBDyn res (flip update <$> rumors vpdiff)
         let
@@ -723,13 +723,13 @@ takeArray a = fmap (Non.fromList) . nonEmpty .fmap (justError "is nothing" ). No
 
 
 indexItens
-  :: (Ord k ,Show k,Show b)
+  :: (Show b)
      => Int
-     -> TB Identity k a
+     -> TB Identity Key a
      -> Tidings Int
-     -> NonEmpty (Tidings (Maybe (TB Identity k b)))
-     -> Tidings (Maybe (TB Identity k b))
-     -> Tidings (Maybe (TB Identity k b ))
+     -> NonEmpty (Tidings (Maybe (TB Identity Key b)))
+     -> Tidings (Maybe (TB Identity Key b))
+     -> Tidings (Maybe (TB Identity Key b ))
 indexItens s tb@(Attr k v) offsetT inner old = fmap constrAttr  <$> bres
   where
     tdcomp = fmap (fmap _tbattr ) <$>  takeArray inner
@@ -742,8 +742,9 @@ indexItens s tb@(FKT ifk rel _) offsetT inner old = fmap constFKT  <$> bres
     bres =  attrEditor s <$> offsetT <*> fmap (fmap (fktzip .projFKT)) old <*> bres2
     constFKT a = FKT (mapKV (mapComp (mapFAttr (const (ArrayTB1 ref ))) ) ifk)   rel (ArrayTB1 tb )
       where (ref,tb) = Non.unzip a
-    projFKT (FKT i  _ j ) = (head $ fmap (unAttr.unTB ) $ unkvlist i,  j)
-    fktzip (ArrayTB1 lc , ArrayTB1 m) =  Non.zip lc m
+    projFKT (FKT i  _ j ) = (unAttr $ justError ("no array" <> show i)  $ safeHead $  fmap unTB  $ unkvlist i,  j)
+    fktzip !(ArrayTB1 lc , ArrayTB1 m) =  Non.zip lc m
+    fktzip i = errorWithStackTrace  ( show i)
 indexItens s tb@(IT na _) offsetT inner old = fmap constIT <$> bres
   where
     bres2 = fmap (fmap _fkttable) <$> takeArray inner
@@ -1174,7 +1175,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
           sortList =  sorting' <$> pure (fmap ((,True)._relTarget) rel)
       let
           vv :: Tidings (Maybe [TB Identity CoreKey Showable])
-          vv =   join . fmap nonEmpty  <$>  liftA2 (<>) iold2  ftdi2
+          vv =   join .  fmap (\i -> if L.length i == L.length rel then Just i else Nothing) <$>  liftA2 (<>) iold2  ftdi2
       cvres <- currentValue (facts vv)
       filterInp <- UI.input # set UI.class_ "col-xs-3"
       filterInpBh <- stepper "" (UI.valueChange filterInp)

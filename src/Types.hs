@@ -96,6 +96,8 @@ type PGPrim =  Prim PGType PGRecord
 type CorePrim = Prim KPrim (Text,Text)
 type CoreKey = FKey (KType CorePrim)
 
+unArray' (ArrayTB1 s) =  s
+unArray' o  = Non.fromList [o] -- errorWithStackTrace $ "unArray' no pattern " <> show o
 
 unArray (ArrayTB1 s) =  s
 unArray o  = errorWithStackTrace $ "unArray no pattern " <> show o
