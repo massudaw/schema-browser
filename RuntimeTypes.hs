@@ -150,7 +150,7 @@ dynP ~(P s d) = d
 dynPK =  runKleisli . dynP
 
 
-type TransactionM = RWST InformationSchema [TableModification (TBIdx Key Showable)] (M.Map (Table,WherePredicate) (TableIndex Key Showable))  IO
+type TransactionM = RWST InformationSchema [TableModification (TBIdx Key Showable)] (Map (Table,WherePredicate) (TableIndex Key Showable))  IO
 
 type PageToken = PageTokenF Key Showable
 

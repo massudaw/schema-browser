@@ -233,11 +233,11 @@ createTableRefsUnion inf m i  = do
 
   liftIO $forkIO $ forever $ (do
       forkIO . hidx =<< atomically (takeTMVar midx)
-      return () ) `catch` (\e -> print ("block index",tableName i ,e :: SomeException))
+      return () )
   liftIO$ forkIO $ forever $ (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
-        (void $ hdiff (concat patches))) `catch` (\e -> print ("block data",tableName i ,e :: SomeException))
+        (void $ hdiff (concat patches)))
   return (tableMeta i,  DBVar2  mdiff midx midxLoad (R.tidings bhdiff patch) (R.tidings bhidx eidx) bh2 )
 
 
@@ -261,11 +261,11 @@ createTableRefs inf i = do
   bhidx <- R.stepper (M.singleton mempty (G.size v,M.empty)) eidx
   liftIO$ forkIO $ forever $ (do
       forkIO . hidx =<< atomically (takeTMVar midx)
-      return () ) `catch` (\e -> print ("block index",tableName i ,e :: SomeException))
+      return () )
   liftIO $forkIO $ forever $ (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
-        (void $ hdiff (concat patches))) `catch` (\e -> print ("block data ",tableName i ,e :: SomeException))
+        (void $ hdiff (concat patches)))
   return (tableMeta i,  DBVar2  mdiff midx midxLoad (R.tidings bhdiff ediff) (R.tidings bhidx eidx) bh2 )
 
 
@@ -381,8 +381,8 @@ joinRelT rel ref tb table
 addStats schema = do
   let metaschema = meta schema
   varmap <- liftIO$ atomically $ readTMVar ( mvarMap schema)
-  let stats = lookTable metaschema "table_stats"
-  (dbpol,(_,polling))<- liftIO$ transactionNoLog metaschema $ eventTable stats  Nothing Nothing [] mempty
+  let stats = "table_stats"
+  (dbpol,(_,polling))<- liftIO$ transactionNoLog metaschema $ selectFrom stats  Nothing Nothing [] mempty
   let
     row t s ls = tblist . fmap _tb $ [Attr "schema_name" (TB1 (SText (schemaName schema ) )), Attr "table_name" (TB1 (SText t)) , Attr "size" (TB1 (SNumeric s)), Attr "loadedsize" (TB1 (SNumeric ls)) ]
     lrow t dyn st = liftTable' metaschema "table_stats" . row t (maybe (G.size dyn) (maximum .fmap fst ) $  nonEmpty $  F.toList st) $ (G.size dyn)

@@ -60,9 +60,11 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
       calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
       schemaPred =  [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") )]
 
-    dashes <- liftIO $ do
-      (_,(_,tmap)) <- transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
-      (evdb,(_,evMap )) <- transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
+    dashes <- liftIO$ do
+      (tmap,evMap) <- transactionNoLog (meta inf) $ do
+        (_,(_,evMap )) <- selectFromTable "event" Nothing Nothing [] schemaPred
+        (_,(_,tmap)) <- selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
+        return (tmap,evMap)
       return $ fmap (\e ->
         let
             (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema_name","table_name"] e

@@ -307,7 +307,7 @@ testTable s t w = do
   let
     amap = authMap smvar db ("postgres", "queijo")
   (inf,_) <- runDynamic $ keyTables smvar conn (s,"postgres") amap []
-  transactionNoLog inf $ selectFrom t Nothing Nothing [] w
+  transactionNoLog inf $ selectFrom t Nothing Nothing [] (WherePredicate $ lookAccess inf t <$> w)
 
 
 

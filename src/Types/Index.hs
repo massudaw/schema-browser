@@ -68,9 +68,9 @@ instance Semigroup DiffShowable where
       appendDShowable (DSPosition (x,y,z) ) (DSPosition (a,b,c)) =  DSPosition $ (x+a,y+b,z+c)
       appendDShowable a b = errorWithStackTrace (show (a,b))
 
-instance Predicates (WherePredicate,Predicate Int) where
-  type Penalty (WherePredicate ,Predicate Int)= ([DiffShowable],Int)
-  type Query (WherePredicate ,Predicate Int)= (WherePredicate ,Predicate Int)
+instance (Predicates (Predicate a),Ord a) => Predicates (WherePredicate,Predicate a ) where
+  type Penalty (WherePredicate ,Predicate a)= ([DiffShowable],Penalty (Predicate a))
+  type Query (WherePredicate ,Predicate a)= (WherePredicate ,Query (Predicate a) )
   consistent (c1,i) (c2,j) = consistent c1 c2 && consistent i j
   penalty (c1,i) (c2,j) = (penalty c1 c2 ,penalty i j)
   match  (c1,i) e (c2,j) = match c1 e c2 && match i e j
@@ -299,16 +299,17 @@ instance Predicates (FTB Showable) where
   consistent (SerialTB1 (Just i)) j@(TB1 _) = consistent i j
   consistent i j  = errorWithStackTrace (show (i,j))
 
-  match  (Right "is not null") _  j   = True
-  match  (Right "is null") _   j   = False
+  match  (Right "is not null") _  (LeftTB1 j)   = isJust j
+  match  (Right "is not null") _  i   = True
   match  (Right "is null") _   (LeftTB1 j)   = isNothing j
-  match  v  a  (LeftTB1 j)   = fromMaybe False (match v a <$> j)
+  match  (Right "is null") _   j   = False
   match (Left v) a j  = ma  v a j
     where
+      ma  v  a  (LeftTB1 j)   = fromMaybe False (ma v a <$> j)
+      ma  v  a  (SerialTB1 j)   = fromMaybe False (ma v a <$> j)
+      ma  v  a  (DelayedTB1 j)   = fromMaybe False (ma v a <$> j)
       ma  (LeftTB1 j ,v) e  i   = fromMaybe False ((\a -> ma (a,v) e i) <$> j)
       ma  (LeftTB1 i,"=") e   (LeftTB1 j)   = fromMaybe False $ liftA2 (\a b -> ma a e b) ((,"=") <$> i) j
-      ma  ((ArrayTB1 j) ,"IN") _  i  = F.elem i j
-      ma  ((ArrayTB1 j) ,"FIN") _  i  = F.elem i j
       ma  (TB1 i,_) _  (TB1 j)   = i == j
       ma  ((ArrayTB1 i) ,"<@") _  ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
       ma  ((ArrayTB1 j) ,"IN")  _ ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
@@ -319,6 +320,8 @@ instance Predicates (FTB Showable) where
       ma (j@(TB1 _),"FIN") _ (ArrayTB1 i) = F.elem j i
       ma ((ArrayTB1 i) ,"@>") _ j@(TB1 _)   = F.elem j i
       ma ((ArrayTB1 i) ,"=") _ j@(TB1 _)   = F.elem j i
+      ma  ((ArrayTB1 j) ,"IN") _  i  = F.elem i j
+      ma  ((ArrayTB1 j) ,"FIN") _  i  = F.elem i j
       ma ((ArrayTB1 i) ,"@>") e j   = F.all (\i -> ma (i,"@>") e j) i
       ma (IntervalTB1 i ,"<@") _ j@(TB1 _)  = j `Interval.member` i
       ma (IntervalTB1 i ,"@>") _ j@(TB1 _)  = j `Interval.member` i
@@ -335,6 +338,7 @@ instance Predicates (FTB Showable) where
       ma (IntervalTB1 j ,"&&") _  (IntervalTB1 i)  = not $ Interval.null $ j `Interval.intersection` i
       ma (IntervalTB1 i ,_) Intersect (IntervalTB1 j)  = not $ Interval.null $ j `Interval.intersection` i
       ma i e j = errorWithStackTrace ("no ma = " <> show (i,e,j))
+  match x y z = errorWithStackTrace ("no match = " <> show (x,y,z))
 
   union  l
     | otherwise =  IntervalTB1 ( mi `interval` ma )

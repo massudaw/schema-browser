@@ -257,7 +257,7 @@ viewerKey inf table cli layout cliTid = mdo
     res3 <- ui $ mapT0EventDyn (fmap inisort (fmap G.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap G.toList) $ tidings ( res2) ( rumors vpt) ) )
     return (offset, res3)
   onEvent (rumors $ triding offset) $ (\i ->  liftIO $ do
-    transactionNoLog inf $ eventTable  table  (Just $ i `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  [] $ mempty)
+    transactionNoLog inf $ selectFrom (tableName table ) (Just $ i `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  [] $ mempty)
   let
     paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
   page <- currentValue (facts paging)

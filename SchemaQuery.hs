@@ -1,7 +1,7 @@
 {-# LANGUAGE TypeFamilies,FlexibleContexts,OverloadedStrings,TupleSections #-}
 module SchemaQuery
-  (eventTable
-  ,createUn
+  (
+  createUn
   ,selectFromA
   ,selectFrom
   ,updateFrom
@@ -143,8 +143,13 @@ tableLoader :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicat
 tableLoader table  page size presort fixed
   -- Union Tables
   | not $ L.null $ rawUnion table  = do
+    liftIO$ putStrLn $ "start loadTable " <> show (tableName table,fixed)
+    li <- liftIO getCurrentTime
     inf <- ask
-    i <- mapM (\t -> tableLoader t page size presort (rebaseKey inf t  fixed))  (rawUnion table)
+    i <- mapM (\t -> do
+      l <- tableLoader t page size presort (rebaseKey inf t  fixed)
+      return l
+              )  (rawUnion table)
     let mvar = mvarMap inf
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )
@@ -155,6 +160,8 @@ tableLoader table  page size presort fixed
 
         o = foldr mergeDBRef  (M.empty,G.empty) (fmap (createUn (S.fromList$ rawPK table).fmap projunion.G.toList) . snd <$>i )
     modify (M.insert (table,fixed) ( snd o ))
+    lf <- liftIO getCurrentTime
+    liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
     return $ (dbvar, o)
   -- (Scoped || Partitioned) Tables
   | not  (null $ _rawScope table ) && not (S.null (rawFKS table) )= do
@@ -182,7 +189,7 @@ tableLoader table  page size presort fixed
         base i = True
         remoteFKS = S.filter (not.base)  (_rawFKSL table)
         getAtt i (m ,k ) = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues . unTB $ k
-    liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
+    liftIO$ putStrLn $ "start loadTable " <> show (tableName table,fixed)
     li <- liftIO getCurrentTime
     o <- pageTable False (\table page size presort fixed predtop  -> do
           let
@@ -206,16 +213,15 @@ tableLoader table  page size presort fixed
                                       test f (Nested (IProd _ p) (Many[i] ),j)  = if p == f then Just (i ,j) else Nothing
                                       test f (Nested (IProd _ p) i ,j)  = if p == f then Just (i ,j) else Nothing
                                       test v f = Nothing
-                                   in  maybe mempty WherePredicate (go (test (_relOrigin <$> i)) l)
+                                   in  fmap WherePredicate (go (test (_relOrigin <$> i)) l)
                 liftIO $ putStrLn $ "loadForeign table" <> show (tableName table)
-                let innerpred = maybe mempty (\pred -> WherePredicate (AndColl pred)) $ traverse (\k -> (\v -> (PrimColl (IProd True [ _relTarget $ k], Left ( ArrayTB1 (Non.fromList v), "IN")))) <$> ( nonEmpty $ L.nub $ concat $ catMaybes $   join . fmap ( fmap (F.toList . unArray') . unSOptional'. _tbattr .unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) . unKV .snd <$> v ))  i
-                (_,(_,tb2)) <- local (const rinf) (tableLoader table  Nothing Nothing []  (innerpred <> predicate predtop))
-                (_,(_,tb)) <- local (const rinf) (tableLoader table  Nothing Nothing []  (predicate predtop ))
+                let innerpred = fmap (\pred -> WherePredicate (AndColl pred)) $ traverse (\k -> (\v -> (PrimColl (IProd True [ _relTarget $ k], Left ( if L.length v == 1 then (L.head v,"=") else (ArrayTB1 (Non.fromList v), "IN"))))) <$> ( nonEmpty $ L.nub $ concat $ catMaybes $   join . fmap ( fmap (F.toList . unArray') . unSOptional'. _tbattr .unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) . unKV .snd <$> v ))  i
+                (_,(_,tb2)) <- local (const rinf) (tableLoader table  Nothing Nothing []  (fromMaybe mempty $ innerpred <> predicate predtop))
                 let
                     tar = S.fromList $ fmap _relOrigin i
                     inj = S.difference tar  old
                     joinFK :: TBData Key Showable -> Either [Compose Identity (TB Identity)  Key Showable] (Column Key Showable)
-                    joinFK m  = maybe (Left taratt) Right $ FKT (kvlist tarinj ) i <$> joinRel2 (tableMeta table ) i (fmap unTB $ taratt ) (tb <> tb2)
+                    joinFK m  = maybe (Left taratt) Right $ FKT (kvlist tarinj ) i <$> joinRel2 (tableMeta table ) i (fmap unTB $ taratt ) tb2
                       where
                             taratt = getAtt tar (tableNonRef' m)
                             tarinj = getAtt inj (tableNonRef' m)
@@ -224,6 +230,7 @@ tableLoader table  page size presort fixed
                     joined = (\i -> do
                        fk <- joinFK i
                        return $ addAttr  fk i) <$> m
+                liftIO $ print $ lefts joined
                 return (rights  joined,old <> tar)) )  (return (v,S.empty )) $ P.sortBy (P.comparing pathRelRel)  (S.toList remoteFKS)
           (resFKS ,_)<- getFKS res
           return (resFKS,x,o )) table page size presort fixed
@@ -244,7 +251,6 @@ joinTable reflist  a b c d e =
     ask >>= (\ inf -> pageTable False ((joinListEd $ schemaOps inf) reflist) a b c d e )
 
 
-eventTable = tableLoader
 
 predNull (WherePredicate i) = L.null i
 -- predNull (LegacyPredicate i) = L.null i
@@ -269,9 +275,11 @@ pageTable flag method table page size presort fixed = do
        fixedmap  <- liftIO $ currentValue (facts (idxTid dbvar))
        idxVL<- liftIO$ atomically $readTMVar (idxVarLoad dbvar)
        reso <- liftIO $ currentValue (facts (collectionTid dbvar ))
+       loadmap <- get
        let pageidx = (fromMaybe 0 page +1) * pagesize
-           freso = ffixed reso
-           predreq = (fixidx,G.Equals pageidx)
+           freso =  fromMaybe fr (M.lookup (table ,fixed) loadmap )
+              where fr = ffixed reso
+           predreq = (fixidx,G.Contains (pageidx - pagesize,pageidx))
            reqs = G.query predreq idxVL
 
        i <- case  fromMaybe (10000000,M.empty ) $  M.lookup fixidx fixedmap of
@@ -279,31 +287,30 @@ pageTable flag method table page size presort fixed = do
              if flag || (sq > G.size freso -- Tabela é maior que a tabela carregada
                 && pageidx  > G.size freso ) -- O carregado é menor que a página
                && (isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixidx fixedmap)  -- Ignora quando página já esta carregando
-                   && L.null reqs)
+                   )
              then do
                liftIO $ atomically $ do
                  v <- takeTMVar (idxVarLoad dbvar)
-                 putTMVar (idxVarLoad dbvar) (G.insert ((),(fixidx,G.Equals pageidx)) (3,6) v)
+                 putTMVar (idxVarLoad dbvar) (G.insert ((),(fixidx,G.Contains (pageidx - pagesize ,pageidx))) (3,6) v)
 
                let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
-               liftIO$ putStrLn $ "new page " <> show (tableName table,sq, pageidx, G.size freso,page, pagesize)
+               liftIO$ putStrLn $ "new page " <> show (tableName table,sq, pageidx, G.size freso,G.size reso,page, pagesize)
                (res,nextToken ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
                let
                    token =  nextToken
                    index = (estLength page pagesize s, maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token$ mp)
                return  (index,res)
              else do
-               liftIO$ putStrLn $ "keep page " <> show (tableName table,sq, pageidx, G.size freso,page, pagesize)
+               liftIO$ putStrLn $ "keep page " <> show (tableName table,sq, pageidx, G.size freso,G.size reso,page, pagesize)
                return ((sq,mp),[])
        let nidx =  M.insert fixidx (fst i) fixedmap
            ndata = snd i
-       loadmap <- get
        liftIO $ atomically $ do
          when (L.length ndata > 0) $ writeTQueue (patchVar dbvar) (F.toList $ patch  <$> ndata )
          when (isNothing ((join $ fmap (M.lookup pageidx . snd) $ M.lookup fixidx fixedmap))) $ putTMVar (idxVar dbvar ) nidx
-         return (nidx, if L.length ndata > 0 then createUn (S.fromList $ rawPK table)  ndata <> reso else fromMaybe reso (M.lookup (table ,fixed) loadmap ))
-    let tde = fmap ffixed <$> rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
-    let iniFil = fmap ffixed iniT
+         return (nidx, if L.length ndata > 0 then createUn (S.fromList $ rawPK table)  ndata <> freso else  freso )
+    let tde = rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
+    let iniFil = iniT
     tdb  <- stepper iniFil tde
     modify (M.insert (table,fixed) ( snd $iniT))
     return (dbvar {collectionTid  = fmap snd $ tidings tdb tde},iniFil)

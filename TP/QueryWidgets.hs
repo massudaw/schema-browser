@@ -322,7 +322,7 @@ refTables' inf table page pred = do
 
 
 refTables inf table = do
-        ((DBVar2 tmvard _   _ vpdiff _ _ ),res)  <-  liftIO $ transactionNoLog inf $ eventTable table (Just 0) Nothing  [] mempty
+        ((DBVar2 tmvard _   _ vpdiff _ _ ),res)  <-  liftIO $ transactionNoLog inf $ selectFrom (tableName table) (Just 0) Nothing  [] mempty
         let update = foldl'(flip (\p-> fmap (flip apply p)))
         bres <- ui $ accumBDyn res (flip update <$> rumors vpdiff)
         let
@@ -1203,10 +1203,10 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
         return (offset, res3)
       -- Load offseted items
       onEvent (filterE (isJust . fst) $ (,) <$> facts iold2 <@> rumors (triding offset)) $ (\(o,i) ->  traverse (\o -> liftIO $ do
-        transactionNoLog inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (predicatefk  o)) o  )
+        transactionNoLog inf $ selectFrom (_kvname m) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (predicatefk  o)) o  )
 
       onEvent (filterE (\(a,b,c)->isJust c && isNothing a ) $ (,,) <$> facts tdi <*> facts (triding offset)<@> diffEvent (facts iold2)(rumors iold2) ) $ (\(v0,i,o) ->  traverse (\o -> liftIO $ do
-        transactionNoLog inf $ eventTable  (lookTable inf (_kvname m)) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (predicatefk   o)) o  )
+        transactionNoLog inf $ selectFrom (_kvname m) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (predicatefk   o)) o  )
 
       -- Select page
       let
@@ -1401,7 +1401,7 @@ viewer inf table envK = mdo
                   ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
                   flist = catMaybes $ fmap (\(i,_,j) -> (\(op,v) -> (IProd True [i],Left (v,T.pack op))) <$> j) slist'
-              (_,(fixmap,lres)) <- liftIO $ transactionNoLog inf $ eventTable  table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (WherePredicate $ AndColl $ fmap PrimColl $envK <> flist)
+              (_,(fixmap,lres)) <- liftIO $ transactionNoLog inf $ selectFrom (tableName table ) (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (WherePredicate $ AndColl $ fmap PrimColl $envK <> flist)
               let (size,_) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (WherePredicate$AndColl $ fmap PrimColl $  envK) fixmap
               return (o,(slist,paging o (size,sorting' ordlist (G.toList lres))))
       nearest' :: M.Map Int (TB2 CoreKey Showable) -> Int -> ((Int,Maybe (Int,TB2 CoreKey Showable)))

@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings, Arrows ,RecordWildCards#-}
-module OFX where
+module OFX (ofxPlugin) where
 import Text.Parsec
 import Data.OFX
 import System.IO
