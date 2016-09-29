@@ -229,8 +229,6 @@ indexPred (a@(IProd _ _),eq) r =
     Nothing ->  errorWithStackTrace ("cant find attr" <> show (a,eq,r))
     Just (Attr _ rv) ->
       case eq of
-        Right "is not null" -> isJust $ unSOptional' rv
-        Right "is null" -> isNothing $ unSOptional' rv
         i -> match eq Exact rv
     Just (IT _ rv) ->
       case eq of
@@ -290,9 +288,7 @@ instance Predicates (FTB Showable) where
   consistent (i@(TB1 _) ) ((ArrayTB1 j)) = F.elem  i j
   consistent ((TB1 i) ) ((TB1 j) ) = i == j
   consistent ((IntervalTB1 i) ) ((IntervalTB1 j) ) = not $ Interval.null $  j `Interval.intersection` i
-  -- consistent ((IntervalTB1 i) ) ((IntervalTB1 j)) = i `Interval.isSubsetOf` j
   consistent ((IntervalTB1 i) ) (j@(TB1 _) ) = j `Interval.member` i
-  -- consistent ((ArrayTB1 i) ) ((ArrayTB1 j)  ) = not $ Set.null $ Set.fromList (F.toList i) `Set.intersection` Set.fromList  (F.toList j)
   consistent (ArrayTB1 i)  ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
   consistent (ArrayTB1 i)  (j@(TB1 _)) = F.elem  j i
   consistent (ArrayTB1 i)  (j  ) = F.all (\i -> consistent i j) i
@@ -320,8 +316,8 @@ instance Predicates (FTB Showable) where
       ma (j@(TB1 _),"FIN") _ (ArrayTB1 i) = F.elem j i
       ma ((ArrayTB1 i) ,"@>") _ j@(TB1 _)   = F.elem j i
       ma ((ArrayTB1 i) ,"=") _ j@(TB1 _)   = F.elem j i
-      ma  ((ArrayTB1 j) ,"IN") _  i  = F.elem i j
-      ma  ((ArrayTB1 j) ,"FIN") _  i  = F.elem i j
+      ma  ((ArrayTB1 j) ,"IN") p  i  = F.any (\el -> ma (el,"=") p i ) j
+      ma  ((ArrayTB1 j) ,"FIN") p  i  = F.any (\el -> ma (el,"=") p  i ) j
       ma ((ArrayTB1 i) ,"@>") e j   = F.all (\i -> ma (i,"@>") e j) i
       ma (IntervalTB1 i ,"<@") _ j@(TB1 _)  = j `Interval.member` i
       ma (IntervalTB1 i ,"@>") _ j@(TB1 _)  = j `Interval.member` i

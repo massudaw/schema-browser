@@ -261,11 +261,11 @@ createTableRefs inf i = do
   bhidx <- R.stepper (M.singleton mempty (G.size v,M.empty)) eidx
   liftIO$ forkIO $ forever $ (do
       forkIO . hidx =<< atomically (takeTMVar midx)
-      return () )
+      return () ) `catch` (\e -> print ("block index",tableName i ,e :: SomeException))
   liftIO $forkIO $ forever $ (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
-        (void $ hdiff (concat patches)))
+        (void $ hdiff (concat patches))) `catch` (\e -> print ("block data ",tableName i ,e :: SomeException))
   return (tableMeta i,  DBVar2  mdiff midx midxLoad (R.tidings bhdiff ediff) (R.tidings bhidx eidx) bh2 )
 
 

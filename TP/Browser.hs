@@ -185,7 +185,7 @@ chooserTable inf bset cliTid cli = do
   element nav # set UI.class_ "col-xs-11"
   layout <- checkedWidget (pure False)
   body <- UI.div
-  el <- mapUIFinalizerT body (\l -> mapM (\(nav,((table,desc),sub))-> do
+  el <- ui $ accumDiff (\l -> evalUI body  . (\(nav,((table,desc),sub))-> do
     header <- UI.h3
         # set UI.class_ "header"
         # set text (T.unpack desc)
@@ -206,8 +206,8 @@ chooserTable inf bset cliTid cli = do
                   ) sub
               UI.div # set children els
     UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFacts <$> triding layout)# set UI.style [("border","2px dotted gray")]
-        ) l) $ liftA2 (\i j -> (i,) <$> j)  (triding nav) (M.toList <$> bBset)
-  element body # sink0 UI.children (facts el) # set UI.class_ "col-xs-12"
+                       ) $ l) $ fmap S.fromList $ liftA2 (\i j -> (i,) <$> j)  (triding nav) (M.toList <$> bBset)
+  element body # sink0 UI.children (F.toList <$> facts el) # set UI.class_ "col-xs-12"
   element layout  # set UI.class_ "col-xs-1"
   return [getElement layout ,getElement nav ,body]
 

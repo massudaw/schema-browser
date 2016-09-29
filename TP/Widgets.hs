@@ -4,6 +4,7 @@ module TP.Widgets where
 
 import GHC.Stack
 import Control.Monad.Writer
+import Data.Tuple(swap)
 import qualified Control.Monad.Trans.Writer as Writer
 import Control.Monad
 import Data.Ord
@@ -611,4 +612,37 @@ mapUIFinalizerT el m inp = ui $ do
   mapTEventDyn (\i -> evalUI el  $ m i) inp
 
 line n =   set  text n
+
+accumDiff
+  :: Prelude.Ord k =>
+     (k -> Dynamic b)
+     -> Tidings (S.Set k)
+     -> Dynamic
+          (Tidings (M.Map k b))
+accumDiff  f t = do
+  ini <- currentValue (facts t)
+  iniout <- traverse (execDynamic f)$ S.toList ini
+  (del,add) <- diffAddRemove t f
+  let eva = unionWith (.) ( (\s m -> foldr (M.delete ) m s). S.toList  <$> del ) ((\s m -> foldr (uncurry M.insert ) m s) <$> add )
+  bs <- accumB  (M.fromList iniout)  eva
+  onEventIO (filterJust$ (\m -> traverse (flip M.lookup  m) ) <$> bs <@> (S.toList <$> del)) (liftIO .sequence . concat . fmap snd)
+  return (fmap (fmap fst ) $ tidings bs (flip ($) <$> bs <@> eva))
+
+execDynamic :: (a -> Dynamic b) -> a -> Dynamic (a,(b,[IO ()]))
+execDynamic f l = liftIO . fmap ((l,)) . runDynamic $ f l
+
+diffAddRemove :: Ord a => Tidings (S.Set a) -> (a -> Dynamic b) -> Dynamic (Event (S.Set a) ,Event [(a, (b,[IO()]))])
+diffAddRemove l f = do
+  let delete  = filterJust $ prune <$> evdell
+  add <- mapEventDyn ( traverse (execDynamic f). S.toList )  $ filterJust $ prune <$> evadd
+  return (delete,fmap fst add)
+
+    where
+      evdiff = diffEvent (facts l ) (rumors l)
+      evadd = flip S.difference <$> facts l <@> evdiff
+      evdell = S.difference <$> facts l <@> evdiff
+      prune i = if S.null i  then Nothing else Just i
+
+
+
 
