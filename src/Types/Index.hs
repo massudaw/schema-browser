@@ -96,7 +96,7 @@ instance Predicates WherePredicate where
       cons (Left i ) (Right j ) = DSInt (-1)
       cons (Right i ) (Right j ) = DSInt $ if i == j then 0 else 1
   pickSplit = pickSplitG
-  union l = WherePredicate $ AndColl $ fmap (\(k,a)-> PrimColl(k,a))$ M.toList $ foldl1 ( M.mergeWithKey (\_ i j -> Just $ pairunion [i,j]) (fmap id) (fmap id) ) ((\(WherePredicate pr ) -> M.fromList .F.toList $ pr)<$> l)
+  union l = WherePredicate $ AndColl $ fmap (\(k,a)-> PrimColl(k,a))$ M.toList $ foldl ( M.mergeWithKey (\_ i j -> Just $ pairunion [i,j]) (fmap id) (fmap id) ) M.empty ((\(WherePredicate pr ) -> M.fromList .F.toList $ pr)<$> l)
     where
       pairunion i = Left $ (union  $ fmap fst (lefts i),headS $ fmap snd (lefts i ))
 

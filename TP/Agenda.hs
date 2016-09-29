@@ -50,6 +50,7 @@ import qualified Data.Foldable as F
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Map as M
+import qualified Data.Set as S
 
 calendarCreate m cal def = runFunction $ ffi "createAgenda(%1,%2,%3)" cal def m
 
@@ -101,7 +102,8 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
                   ) item
     calendar <- UI.div # set UI.class_ "col-xs-10"
     element body # set children [calendar]
-    let calFun (agenda,resolution,incrementT,selected) = mdo
+    let inpCal = sel
+    let calFun (agenda,resolution,incrementT) = mdo
             let
               capitalize (i:xs) = toUpper i : xs
               capitalize [] = []
@@ -124,23 +126,26 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
             onEventFT evs (liftIO . transaction inf . mapM
                   (\i -> do
                      patchFrom i >>= traverse (tell . pure )))
-            edits <- mapM (\(cap,(_,t,fields,proj))->  do
-                let pred = WherePredicate $ lookAccess inf (tableName t)<$> timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
-                    fieldKey (TB1 (SText v))=  lookKey inf (tableName t) v
-                -- (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
-                reftb <- refTables' inf t Nothing pred
-                let v = fmap snd $ reftb ^. _1
-                let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
-                tdib <- stepper Nothing (join <$> evsel)
-                let tdi = tidings tdib (join <$> evsel)
-                (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi)  reftb [] [] (allRec' (tableMap inf) $ t)  tdi
-                mapUIFinalizerT innerCalendar
-                  ((\i -> do
-                    calendarAddSource innerCalendar  t ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .  concat . fmap (lefts.snd) $ fmap proj $ G.toList i)))
-                  ) (v)
-                UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
-                ) selected
-            element sel # set children (edits)
+            edits <- ui$ accumDiff (\(tref,_)->  evalUI calendar $ do
+              let ref  =  (\i j ->  L.find ((== i) .  (^. _2._2)) j ) tref dashes
+              traverse (\(cap,(_,t,fields,proj))-> do
+                    let pred = WherePredicate $ lookAccess inf (tableName t)<$> timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
+                        fieldKey (TB1 (SText v))=  lookKey inf (tableName t) v
+                    -- (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
+                    reftb <- refTables' inf t Nothing pred
+                    let v = fmap snd $ reftb ^. _1
+                    let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
+                    tdib <- stepper Nothing (join <$> evsel)
+                    let tdi = tidings tdib (join <$> evsel)
+                    (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi)  reftb [] [] (allRec' (tableMap inf) $ t)  tdi
+                    mapUIFinalizerT innerCalendar
+                      ((\i -> do
+                        calendarAddSource innerCalendar  t ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .  concat . fmap (lefts.snd) $ fmap proj $ G.toList i)))
+                      ) (v)
+                    UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
+                                   ) ref) (M.fromList . M.keys <$>inpCal)
+
+            element sel # sink children ( catMaybes .F.toList <$> facts edits)
 
             {-fins <- mapM (\((_,(_,t,_)),s)->  fmap snd $ mapUIFinalizerT innerCalendar (
                       lift  $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing []  (WherePredicate $ timePred ((\(TB1 (SText v))->  lookKey inf tname v) <$> fields ) cal)) calendarSelT
@@ -163,10 +168,8 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
             return innerCalendar
 -}
 
-    let inpCal =
-          ((\i j -> filter (flip L.elem (concat (F.toList i)) .  (^. _2._2)) j )<$> sel <*> pure dashes)
 
-    mapUIFinalizerT calendar calFun ((,,,) <$> agendaT <*> resolutionT <*> incrementT <*> inpCal)
+    mapUIFinalizerT calendar calFun ((,,) <$> agendaT <*> resolutionT <*> incrementT )
 
     return  (legendStyle , dashes )
 

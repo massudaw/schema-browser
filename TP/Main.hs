@@ -94,6 +94,7 @@ setup smvar args w = void $ do
         lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested (IProd False ["selection"]) (IProd True ["table"])) iv
                     in fmap (\(TB1 (SText t)) -> t) .unArray  <$> join (fmap unSOptional' i)
     iniKey <-currentValue (facts initKey)
+
     (lookDesc,bset) <- tableChooser inf  kitems (fst <$> tfilter) (snd <$> tfilter)  ((schemaName inf)) ((username inf)) (pure iniKey)
 
     posSel <- positionSel
@@ -101,10 +102,7 @@ setup smvar args w = void $ do
     (sidebar,calendarT) <- calendarSelector
     tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [sidebar,posSel ^._1,getElement bset]# sink0 UI.style (facts $ noneShow <$> triding menu)
     element body # set children [tbChooser,bd]
-    tfilter <-  mapUIFinalizerT bd (\nav-> do
-      bdo <- UI.div
-      element bd # set children [bdo]
-      let
+    let
           buttonStyle k (e,sub) = mdo
             let tableK = k
             label <- UI.div # sink0 UI.text (fmap T.unpack $ facts $ lookDesc  <*> pure k)  # set UI.class_ "fixed-label col-xs-11"
@@ -120,6 +118,10 @@ setup smvar args w = void $ do
             top <- UI.div # set children[state, label] # set  UI.class_ "col-xs-12"
             element prebset  # set UI.style (noneShow . not $ L.null (rawUnion tableK))
             UI.div # set children [top,prebset] # set UI.style [("width","100%")]
+
+    tfilter <-  mapUIFinalizerT bd (\nav-> do
+      bdo <- UI.div
+      element bd # set children [bdo]
       case nav of
         "Map" -> do
           element bdo  # set UI.style [("width","100%")]
