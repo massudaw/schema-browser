@@ -208,9 +208,6 @@ instance Widget (RangeBox a) where
 checkDivSetTGen :: (Ord a,Ord b ,Eq a,Ord c) => [a] -> Tidings (a -> b) -> Tidings (Map a [c]) ->  (a -> UI (a,((Element,[Element]),Event (a,([c],[c]))))) -> Tidings (a -> (Element  , [Element])-> UI Element ) -> UI (TrivialWidget (Map a [c]))
 checkDivSetTGen ks sort binit   el st = do
   buttons <- mapM el  ks
-  -- dv <- UI.div
-  -- tdout <- ui $ accumDiff (\(_,v) -> evalUI dv v ) ((\sti -> M.fromList $ fmap (\(k,(v,_)) -> (k,sti k v) ) buttons )<$> st )
-  -- element dv # sink children (facts $ (\old f -> F.toList $ M.mapKeys f   old ) <$>  tdout <*> sort )
   dv <- UI.div # sink items ((\sti f -> fmap (\ (k,(v,_)) -> sti k (v) ) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$>  facts st <*> facts sort )
   let
     evs = unionWith const (const <$> rumors binit) (foldr (unionWith (.)) never $ fmap (\(i,(ab,db)) -> (if L.null ab then id else M.alter (Just . maybe ab (L.nub . mappend ab) ) i)  . (if L.null db then id else M.alter (join . fmap ((\i -> if L.null i then Nothing else Just i) . flip (foldr L.delete)  db )) i)  ) . snd .snd <$> buttons)
@@ -652,8 +649,5 @@ diffAddRemove l f = do
       evadd = flip diff <$> facts l <@> evdiff
       evdell =  diff <$> facts l <@> evdiff
       prune i = if M.null i  then Nothing else Just i
-
-
-
-diffEventKeys b ev = filterJust $ (\i j -> if M.keysSet i == M.keysSet j then Nothing else Just j ) <$> b <@> ev
+      diffEventKeys b ev = filterJust $ (\i j -> if M.keysSet i == M.keysSet j then Nothing else Just j ) <$> b <@> ev
 

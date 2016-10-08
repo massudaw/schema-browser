@@ -227,6 +227,9 @@ indexPred (n@(Nested k nt ) ,eq) r
 indexPred (a@(IProd _ _),eq) r =
   case indexField a r of
     Nothing ->  errorWithStackTrace ("cant find attr" <> show (a,eq,r))
+    Just (Fun _ _ rv) ->
+      case eq of
+        i -> match eq Exact rv
     Just (Attr _ rv) ->
       case eq of
         i -> match eq Exact rv

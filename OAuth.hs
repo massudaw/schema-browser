@@ -90,22 +90,24 @@ syncHistory [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))]  ix table offset 
       return ((addAttr refAttr) <$>  c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
 
 
-listTable table offset page maxResults sort ix
-  | tableName table == "history" = return ([],Nothing , 0)
-  | tableName table == "attachments" = return ([],Nothing , 0)
+listTable torigin offset page maxResults sort ix
+  | tablen == "history" = return ([],Nothing , 0)
+  | tablen == "attachments" = return ([],Nothing , 0)
   | otherwise = do
       inf <- ask
       tok <- liftIO$ R.currentValue $ R.facts (snd $ justError "no token" $ token $  inf)
       let user = fst $ justError "no token" $ token inf
       decoded <- liftIO $ do
-          let req =  url (schemaName inf) user <> T.unpack (rawName table ) <> "?" <> maybe "" (\s -> "pageToken=" <> readToken s <> "&") page  <> ("maxResults=" <> show (maybe defsize id maxResults) <> "&") <> "access_token=" ++ ( accessToken tok )
+          let req =  url (schemaName inf) user <> T.unpack (tablen ) <> "?" <> maybe "" (\s -> "pageToken=" <> readToken s <> "&") page  <> ("maxResults=" <> show (maybe defsize id maxResults) <> "&") <> "access_token=" ++ ( accessToken tok )
           print  req
           (t,d) <- duration $ decode <$> simpleHttpHeader [("GData-Version","3.0")] req
-          print ("list",table,t)
+          print ("list",tablen,t)
           return  d
-      let idx = if schemaName inf == "tasks" then "items" else rawName table
-      c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) table ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
+      let idx = if schemaName inf == "tasks" then "items" else tablen
+      c <-  traverse (convertAttrs inf Nothing (_tableMapL inf) (lookTable inf tablen)) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
       return (c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
+  where
+    tablen = _kvname (fst torigin)
 
 getKeyAttr (TB1 (m, k)) = (concat (fmap keyattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 

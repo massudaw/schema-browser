@@ -53,7 +53,7 @@ dropTable r= "DROP TABLE "<> rawFullName r
 
 
 -- createTable :: Table -> Text
-createTable r@(Raw sch _ _ _ _ tbl _ _ _ pk _ fk inv attr _) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
+createTable r@(Raw _ sch _ _ _ _ tbl _ _ _ pk _ fk inv attr _) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
   where
     commands = (renderAttr <$> S.toList attr ) <> [renderPK] <> fmap renderFK (S.toList fk)
     renderAttr k = keyValue k <> " " <> renderTy (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
@@ -70,29 +70,37 @@ createTable r@(Raw sch _ _ _ _ tbl _ _ _ pk _ fk inv attr _) = "CREATE TABLE " <
 
 
 
-expandInlineTable ::  TB3  (Labeled Text) Key  () ->  Text
-expandInlineTable tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =
-   let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name)  <> ") as it" <> t
-       name =  tableAttr tb
-       aliasKeys (Labeled  a (Attr n    _ ))  =  "(" <> t <> ")." <> keyValue n <> " as " <> a
+expandInlineTable ::  TB3  (Labeled Text) Key  () -> Text ->  Text
+expandInlineTable tb@(TB1 (meta, Compose (Labeled t ((KV i))))) pre=
+  let
+    query = "(SELECT " <>  T.intercalate "," (aliasKeys  <$> (filter (not .isFun) $ fmap getCompose (sortPosition name) ))  <> ") as " <> t
+    name =  tableAttr tb
+    isFun  (Labeled a (Fun _ _ _ )) = True
+    isFun  _ = False
+    aliasKeys (Labeled  a (Attr n    _ ))  =  "(" <> pre <> ")." <> keyValue n <> " as " <> a
+       -- aliasKeys (Labeled  a (Fun n f fs ))  =  "" -- f <> "(" "(" <> t <> ")." <> keyValue n <> " as " <> a
    in query
-expandInlineTable tb = errorWithStackTrace (show tb)
+expandInlineTable tb _ = errorWithStackTrace (show tb)
 
 
-expandInlineArrayTable ::  TB3  (Labeled Text) Key  () ->  Text
-expandInlineArrayTable tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =
-   let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name)  <> ",row_number() over () as arrrow FROM UNNEST(" <> t <> ") as ix ) it" <> t
+expandInlineArrayTable ::  TB3  (Labeled Text) Key  () -> Text ->  Text
+expandInlineArrayTable tb@(TB1 (meta, Compose (Labeled t ((KV i))))) pre =
+   let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$>   sortPosition name)  <> ",row_number() over () as arrrow FROM UNNEST(" <> pre <> ") as ix ) " <> t
        name =  tableAttr tb
        aliasKeys (Labeled  a (Attr n    _ ))  =  "(ix)." <> keyValue n <> " as " <> a
    in query
 
+sortPosition = L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr))
+
 expandBaseTable ::  TB3  (Labeled Text) Key  () ->  Text
 expandBaseTable tb@(TB1 (meta, Compose (Labeled t ((KV i))))) =
-   let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> name) <> " FROM " <> aliasTable <> ") as " <> t
-       name =  tableAttr tb
-       aliasTable = kvMetaFullName meta <> " as " <> t
-       aliasKeys (Labeled  a (Attr n    _ ))  =  t <> "." <> keyValue n <> " as " <> a
-       aliasKeys i = ""
+  let
+     query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$> ( sortPosition name)) <> " FROM " <> aliasTable <> ") as " <> t
+     name =  tableAttr tb
+     aliasTable = kvMetaFullName meta <> " as " <> t
+     aliasKeys (Labeled  a (Attr n    _ ))  =  t <> "." <> keyValue n <> " as " <> a
+     aliasKeys (Labeled a (IT n _ ))  = t <> "." <> keyValue n <> " as " <> a
+     aliasKeys _  = ""
    in query
 
 
@@ -111,9 +119,9 @@ expandTable tb
   | isTableRec tb = do
       expandFKMutRecursive tb
       return $ tlabel tb
-  | isFilled (getInlineRec tb) = do
+        {-  | isFilled (getInlineRec tb) = do
       expandInlineRecursive tb
-      return $ tlabel tb
+      return $ tlabel tb-}
   | otherwise = return $ expandBaseTable  tb
 
 
@@ -149,7 +157,7 @@ expandInlineRecursive tbase =
      attrsf tRecf =  T.intercalate "," (map (\e -> maybe e explode $ L.find ((e == ).snd) tRecf)  nonrecb )
       where
        explode = (\(tRec ,tRecf)-> "ROW(" <> T.intercalate "," (F.toList tRec) <> ") as " <> tRecf)
-       nonrecb =  explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id  ) . getCompose <$> m
+       nonrecb =  explodeDelayed  undefined (\i -> "ROW(" <> i <> ")")  "," (const id  ) . getCompose <$> m
               where m = F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
                     tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec  $ _kvrecrels m)) <$> tbase
      with inlineEl  = tell [open,close] >> return (pret,(M.insert (S.fromList $ keyattri (labelValue $ getCompose $ inlineEl)) tRec  nonrecM  ,tRecf))
@@ -170,15 +178,15 @@ expandInlineRecursive tbase =
          joinPk  tbpk = "(" <> T.intercalate "," (fmap ("o." <>)  tbpk ) <>  ")=(" <> T.intercalate "," (fmap ("c." <>)  tbpk  )<> ")"
          recKey = (S.fromList $ keyattri (labelValue $ getCompose $ inlineEl))
          attrs pre =  T.intercalate "," (fmap (pre <>) $ F.toList (M.insert  recKey tRec  nonrecM ))
-         nonrecM =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id  )) . getCompose <$> m
+         nonrecM =  (explodeDelayed undefined (\i -> "ROW(" <> i <> ")")  "," (const id  )) . getCompose <$> m
             where m =  _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
                   tfil =   tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec  $ _kvrecrels m)) <$> t
-         tRec =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) $ Labeled (label $ getCompose $ snd $head $ F.toList v) (Attr l (TB1 ()))
+         tRec =  (explodeDelayed undefined(\i -> "ROW(" <> i <> ")")  "," (const id ) ) $ Labeled (label $ getCompose $ snd $head $ F.toList v) (Attr l (TB1 ()))
          tRecf  =  label $ getCompose $ inlineEl
          IT l v =  labelValue $ getCompose $ head $ concat $ F.toList $  labelValue $ getCompose $  snd $  joinNonRef' $  unTB1 tnfil
-         tpk =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> m
+         tpk =  (explodeDelayed undefined(\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> m
             where m =  F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ head $ F.toList $ tfilpk
-         tbpk =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> m
+         tbpk =  (explodeDelayed undefined(\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> m
             where m =  F.toList $ _kvvalues $ labelValue $ getCompose $  tbPK $ tbase
          tfilpk  =  tbFilterE (\m e -> not $ S.member e (S.fromList $ fmap S.fromList $ topRec $  _kvrecrels m)) <$> v
          tnfil =   tbFilterE (\m e -> S.member e (S.fromList $ fmap S.fromList $ topRec $ _kvrecrels m)) <$> t
@@ -199,7 +207,7 @@ expandFKMutRecursive
      -> m ()
 expandFKMutRecursive t=
     let
-      query  =  tname <> "(" <> T.intercalate "," (tnonRec <> tRec <> (("f"<>) <$>  tRec ) <> (label <$> l)) <> ") as  ( SELECT "  <> T.intercalate "," (tnonRec<> tRec <> tRec <> (const "null :: record" <$> l)) <>" FROM (select * from " <> expandBaseTable t <>  (fst (runWriter (expandQuery' False (fmap unlabelIT $ TB1 $(first (\t -> t {_kvrecrels =[] }  )) tnonRecA)))) <> ") as " <> tname <> " UNION ALL " <> recpart <> ")"
+      query  =  tname <> "(" <> T.intercalate "," (tnonRec <> tRec <> (("f"<>) <$>  tRec ) <> (label <$> l)) <> ") as  ( SELECT "  <> T.intercalate "," (tnonRec<> tRec <> tRec <> (const "null :: record" <$> l)) <>" FROM (select * from " <> expandBaseTable t <>  (fst (runWriter (expandQuery' False (unlabelIT $ first (\t -> t {_kvrecrels =[] }  ) tnonRecA)))) <> ") as " <> tname <> " UNION ALL " <> recpart <> ")"
       recpart = "(SELECT " <> T.intercalate "," (fmap ("sg." <>) ( tnonRec <> tRec) <> (fmap recflags idx) <> (recfield <$> idx) ) <> " FROM "<> tname <> " sg " <> T.concat (recpoint <$> idx ) <> " WHERE " <> T.intercalate " OR "(recwhere <$> idx ) <> " UNION ALL " <> recpart2 <> ")"
           where idx= [0..length tRec -1]
       recpart2 = "SELECT sg.* FROM "<> tname <> " sg " <> T.concat (recpoint <$> idx) <> " WHERE " <> T.intercalate " OR " (T.intercalate " and " (recwhere3 <$> idx) : (recwhere2 <$> idx))
@@ -218,23 +226,23 @@ expandFKMutRecursive t=
                 idx= L.delete l [0..length tRec -1]
       recwhere3 l =  "(" <> tn l  <> head tnonRec <> " is not null and "    <> T.intercalate " or " (fmap (\i -> tn l <> "f" <> i <> " is not null ")  tRec) <> ")"
           where tn l = "t" <> T.pack (show l) <> "."
-      top = tbasen <> " as (select " <> T.intercalate "," (tRec2  <> ((\(l,v) -> explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id) v <> " as " <> l ) <$> itv  ))  <> " from " <> tname <> " WHERE " <> pred   <>") "
+      top = tbasen <> " as (select " <> T.intercalate "," (tRec2  <> ((\(l,v) -> explodeDelayed undefined(\i -> "ROW(" <> i <> ")")  "," (const id) v <> " as " <> l ) <$> itv  ))  <> " from " <> tname <> " WHERE " <> pred   <>") "
           where pred = T.intercalate " and " (fmap (\i -> "f" <> i <> " is null ")  tRec)
 
 
 
-      explodeRowSg l = explodeDelayed  (\i -> "ROW(" <> i <> ")")  "," (const (l <> ))
+      explodeRowSg l = explodeDelayed  undefined(\i -> "ROW(" <> i <> ")")  "," (const (l <> ))
       tname = (label $ getCompose $ snd (unTB1 t)) <> "pre"
       tbasen = (label $ getCompose $ snd (unTB1 t))
       tnonRec ,tRec :: [Text]
-      tnonRec =  (explodeDelayed id   "," (const id  )) . getCompose <$> m
+      tnonRec =  (explodeDelayed undefined id   "," (const id  )) . getCompose <$> m
         where m = flattenNonRec (_kvrecrels $ fst $ unTB1 t) (unTB1 t)
       tnonRecA =  (unTB1 t)
-      tRec =   (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
+      tRec =   (explodeDelayed undefined (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
         where l = concat $ fmap (unkvlist . _tbref .labelValue . getCompose ).  L.filter (isFKT .labelValue .getCompose) $ flattenRec (fmap (fmap (fmap S.fromList)) $_kvrecrels $ fst $ unTB1 t) (unTB1 t)
               isFKT (FKT _ _ _) = True
               isFKT i = False
-      tRec2 =  (explodeDelayed (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
+      tRec2 =  (explodeDelayed undefined (\i -> "ROW(" <> i <> ")")  "," (const id ) ) .getCompose <$> l
           where l = F.toList $ _kvvalues $ labelValue $ getCompose $  snd $ unTB1 $ tfil
       itv =   fmap (\i -> case getCompose i of
                                       Labeled lit (IT i itv) -> (lit,Unlabeled $ IT i (unlabelIT <$> itv))
@@ -263,7 +271,7 @@ selectQuery t koldpre order wherepred = (,ordevalue <> predvalue) $ if L.null (s
     else "WITH RECURSIVE " <> T.intercalate "," ( snd withDecl ) <> fst withDecl
   where withDecl = runWriter tableQuery
         tableQuery = do
-            tname <- expandTable (TB1 t)
+            let tname = traceShowId $ expandBaseTable (TB1 t)
             tquery <- if isTableRec (TB1 t) || isFilled (getInlineRec (TB1 t)) then return "" else expandQuery False (TB1 t)
             return $ "SELECT " <> explodeRow (TB1 t) <> " FROM " <>  tname <>  tquery <> pred <> orderQ
         (predquery , predvalue ) = case traceShowId wherepred of
@@ -301,11 +309,11 @@ isFilled =  not . L.null
 expandQuery left (ArrayTB1 (t:| _) ) =  expandQuery left t
 expandQuery left (LeftTB1 (Just t)) =  expandQuery left t
 expandQuery left (DelayedTB1 (Just t)) = return ""--  expandQuery left t
-expandQuery left t@(TB1 (meta, m))
+expandQuery left (TB1 t)
 --    | isTableRec t  || isFilled (getInlineRec t)  = return "" -- expandTable t
     | otherwise   = expandQuery' left t
 
-expandQuery' left t@(TB1 (meta, m)) = foldr1 (liftA2 mappend) (expandJoin left (F.toList (_kvvalues . labelValue . getCompose $ m) ) .getCompose <$> F.toList (_kvvalues . labelValue . getCompose $ m))
+expandQuery' left t@(meta, m) = foldr1 (liftA2 mappend) (expandJoin left (F.toList (_kvvalues . labelValue . getCompose $ m) ) .getCompose <$> F.toList (_kvvalues . labelValue . getCompose $ m))
 
 tableType (ArrayTB1 (i :| _ )) = tableType i <> "[]"
 tableType (LeftTB1 (Just i)) = tableType i
@@ -324,27 +332,31 @@ allAttr (TB1 (i,k)) = F.all (isAttr . unLB ) (_kvvalues $ unLB  k)
   where isAttr (Attr _ _) = True
         isAttr _ = False
 
+look :: Key -> [Labeled Text ((TB (Labeled Text)) Key ())] ->  Labeled Text ((TB (Labeled Text)) Key ())
+look ki i = justError ("missing FK on " <> show (ki,keyAttr . labelValue <$> i )  ) $ (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
+
 expandJoin :: Bool -> [Compose (Labeled Text) (TB (Labeled Text)) Key ()] -> Labeled Text (TB (Labeled Text) Key ()) -> Writer [Text] Text
 expandJoin left env (Unlabeled  (IT i (LeftTB1 (Just tb) )))
     = expandJoin True env $ Unlabeled (IT i tb)
 expandJoin left env (Labeled l (IT i (LeftTB1 (Just tb) )))
     = expandJoin True env $ Labeled l (IT i tb)
-expandJoin left env (Labeled l (IT _ (ArrayTB1 (tb :| _ ) )))
+expandJoin left env (Labeled l (IT a (ArrayTB1 (tb :| _ ) )))
     = do
     tjoin <- expandQuery left tb
-    return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> explodeRow tb <> (if allAttr tb then  " :: " <> tableType tb else "")  <> "  order by arrrow ) as " <> l <> " FROM " <> expandInlineArrayTable tb <> tjoin <> " )  as " <>  label tas <> " ON true"
+    return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> explodeRow tb {- <> (if allAttr tb then  " :: " <> tableType tb   else "")  -} <> "  order by arrrow ) as " <> label tas <> " FROM " <> expandInlineArrayTable tb l <> tjoin <> " )  as p" <>  label tas <> " ON true"
         where
           tas = getTas tb
           getTas (DelayedTB1 (Just tb))  = getTas tb
           getTas (TB1  (_,Compose tas)) = tas
           jt = if left then " LEFT" else ""
-expandJoin left env (Unlabeled (IT _ tb)) =  do
+expandJoin left env (Labeled l (IT a tb)) =  do
      tjoin <- expandQuery left tb
-     return $ " JOIN LATERAL "<> expandInlineTable  tb  <> " ON true "   <>  tjoin
-expandJoin left env (Labeled _ (IT i tb )) = return ""
+     return $ " JOIN LATERAL "<> expandInlineTable  tb  l  <> " ON true "   <>  tjoin
+-- expandJoin left env (Labeled _ (IT i tb )) = return ""
      -- expandQuery left tb
      -- tjoin <- expandQuery left tb
      -- return $ " JOIN LATERAL "<> expandInlineTable (label $ getCompose i) tb  <> " ON true "   <>  tjoin
+expandJoin left env (Labeled _ (Fun _ _ _ )) = return ""
 expandJoin left env (Labeled _ (Attr _ _ )) = return ""
 expandJoin left env (Unlabeled  (Attr _ _ )) = return ""
 expandJoin left env (Unlabeled (FKT i rel (LeftTB1 (Just tb)))) = expandJoin True env (Unlabeled (FKT i rel tb))
@@ -392,36 +404,50 @@ joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectio
 
 
 
-explodeRow :: TB3 (Labeled Text) Key () -> Text
+explodeRow ::TB3 (Labeled Text) Key () -> Text
 explodeRow = explodeRow'  (\i -> "ROW(" <> i <> ")")  "," (const id)
 explodeRecord :: TB3Data (Labeled Text) Key () -> Text
-explodeRecord  = explodeRow''   (\i -> "ROW(" <> i <> ")")  "," (const id)
+explodeRecord  = explodeRow''   (\i -> "ROW("<> i <> ")")  "," (const id)
 
 
-leafDel True i = " case when " <> i <> " is not null then true else null end "
-leafDel False i = " case when " <> i <> " is not null then true else null end "
+leafDel True i = " case when " <> i <> " is not null then true else null end  as " <> i
+leafDel False i = " case when " <> i <> " is not null then true else null end  as " <> i
 
 explodeRow' block  assoc  leaf (DelayedTB1 (Just tbd@(TB1 (i,tb)))) = "(true)"
 explodeRow' block assoc leaf (LeftTB1 (Just tb) ) = explodeRow' block assoc leaf tb
 explodeRow' block assoc leaf (ArrayTB1 (tb:|_) ) = explodeRow' block assoc leaf tb
 explodeRow' block assoc leaf (TB1 i ) = explodeRow'' block assoc leaf i
 
-explodeRow'' block assoc leaf  ((m ,Compose (Unlabeled (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr))$F.toList  tb  ))
-explodeRow'' block assoc leaf  ((m ,Compose (Labeled l (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed block assoc leaf .getCompose)  $ L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr))$ F.toList  tb  ))
+explodeRow'' block assoc leaf  t@((m ,Compose (Unlabeled (KV tb)))) = block (T.intercalate assoc (fmap (explodeDelayed t block assoc leaf .getCompose)  $ sortPosition $F.toList  tb  ))
+explodeRow'' block assoc leaf  t@((m ,Compose (Labeled l (KV tb)))) = sel (T.intercalate assoc (fmap (explodeDelayed t block assoc leaf .getCompose)  $ sortPosition $ F.toList  tb  ))
+  where sel i = "(select p" <> l <> " from (select " <> i<>  ") as p" <> l <> ")"
 
-explodeDelayed block assoc leaf (Labeled l (Attr k  _ ))
+replaceexpr :: Expr -> [Text]  -> Text
+replaceexpr k ac = go k
+  where
+    go :: Expr -> Text
+    go (Function i e) = i <> "(" <> T.intercalate ","  (go   <$> e) <> ")"
+    go (Value i ) = (ac !! i )
+
+
+explodeDelayed tb block assoc leaf (Labeled l (Fun k (ex,a)  _ )) =  replaceexpr ex $ fmap (\i -> explodeDelayed tb block assoc leaf $ indexLabel i tb) a -- leaf (isArray (keyType k)) l
+explodeDelayed _ block assoc leaf (Labeled l (Attr k  _ ))
   | isKDelayed (keyType k) = leafDel (isArray (keyType k)) l
   | otherwise =  leaf (isArray (keyType k)) l
-explodeDelayed block assoc leaf (Unlabeled (Attr k  _ )) = leaf (isArray (keyType k))  (keyValue k)
+explodeDelayed _ block assoc leaf (Labeled l (Attr k  _ ))
+  | isKDelayed (keyType k) = leafDel (isArray (keyType k)) l
+  | otherwise =  leaf (isArray (keyType k)) l
+explodeDelayed _ block assoc leaf (Unlabeled (Attr k  _ )) = leaf (isArray (keyType k))  (keyValue k)
 
-explodeDelayed block assoc leaf (Unlabeled (IT  n t )) =  explodeRow'  block assoc leaf t
-explodeDelayed block assoc leaf (Labeled l (IT  _ tb  )) = leaf False l
-explodeDelayed block assoc leaf (Labeled l (FKT i  _ tb  )) = case unkvlist i of
+explodeDelayed _ block assoc leaf (Unlabeled (IT  n t )) =  explodeRow'  block assoc leaf t
+explodeDelayed _ block assoc leaf (Labeled l (IT  _ tb  )) = leaf False m
+  where m = label $ getCompose $ snd $  head $ F.toList tb
+explodeDelayed tbenv  block assoc leaf (Labeled l (FKT ref  _ _ )) = case unkvlist ref of
              [] -> leaf False l
-             i -> T.intercalate assoc (F.toList $ (explodeDelayed block assoc leaf . getCompose ) <$> i) <> assoc <> leaf False l
-explodeDelayed block assoc leaf (Unlabeled (FKT i rel t )) = case unkvlist i of
+             i -> T.intercalate assoc (explodeDelayed tbenv block assoc leaf . getCompose <$> i) <> assoc <> leaf False l
+explodeDelayed tb block assoc leaf (Unlabeled (FKT ref rel t )) = case unkvlist ref of
              [] -> explodeRow' block assoc leaf t
-             i -> T.intercalate assoc (F.toList $ (explodeDelayed block assoc leaf .getCompose) <$> i) <> assoc <> explodeRow' block assoc leaf t
+             i -> T.intercalate assoc (explodeDelayed tb block assoc leaf .getCompose <$> i) <> assoc <> explodeRow' block assoc leaf t
 
 
 printPred :: Show b => TB3Data (Labeled Text)  Key b ->  BoolCollection (Access Key ,Either (FTB Showable,Text) Text ) -> (Maybe [Text],Maybe [Column Key Showable])
@@ -452,6 +478,22 @@ inferParamType _ _ = ""
 
 justLabel :: TB3Data (Labeled Text ) Key () -> Key -> Text
 justLabel t k =  justError ("cant find label"  <> show k <> " - " <> show t).getLabels t $ k
+
+indexLabel  :: Show a =>
+    Access Key
+    -> TB3Data (Labeled Text) Key a
+    -> (Labeled Text (TB (Labeled Text) Key a))
+indexLabel p@(IProd b l) v =
+    case findAttr l v of
+      Just i -> getCompose i
+      Nothing -> errorWithStackTrace "no fk"
+indexLabel  n@(Nested ix@(IProd b l) (Many [nt])) v =
+    case getCompose $ justError "no nested" $ findFK l v of
+      Unlabeled i -> indexLabel  nt.head . F.toList . _fkttable $ i
+      Labeled i _ -> errorWithStackTrace "cant index"
+indexLabel  (Many [nt]) v = flip (indexLabel ) v $ nt
+-- indexLabel  (ISum [nt]) v = flip (indexLabel ) v <$> nt
+indexLabel  i v = errorWithStackTrace (show (i, v))
 
 
 

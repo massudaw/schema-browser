@@ -195,7 +195,7 @@ patchMod patch@(m,_,_) = do
 
 selectAll
   ::
-     TableK Key
+     TBF (Labeled Text) Key ()
      -> Int
      -> Maybe PageToken
      -> Int
@@ -205,13 +205,13 @@ selectAll
            [(KVMetadata Key,
              Compose
                Identity (KV (Compose Identity (TB Identity))) Key Showable)])
-selectAll table offset i  j k st = do
+selectAll m offset i  j k st = do
       inf <- ask
       let
           unref (TableRef i) = Just i
           unref (HeadToken ) = Nothing
-          tbf =  tableView (tableMap inf) table
-      let m = tbf
+          -- tbf =  tableView (tableMap inf) table
+          -- let m = tbf
       (t,v) <- liftIO$ duration  $ paginate inf m k offset j (join $ fmap unref i) st
       mapM_ (tellRefs ) (snd v)
       return v
@@ -224,6 +224,7 @@ tellRefs  (m,k) = do
             tell ((\m@(k,v) -> TableModification Nothing (lookTable inf (_kvname k)) . patch $ m) <$> F.toList t)
             mapM_ (tellRefs ) $ F.toList t
         tellRefsAttr (Attr _ _ ) = return ()
+        tellRefsAttr (Fun _ _ _ ) = return ()
         tellRefsAttr (IT _ t ) = void $ mapM (tellRefs ) $ F.toList t
     mapM_ (tellRefsAttr . unTB ) $ F.toList  (_kvvalues $ unTB k)
 

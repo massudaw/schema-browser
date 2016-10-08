@@ -146,6 +146,7 @@ pathRelRel :: Ord k => Path (Set k ) (SqlOperationK k) -> Set (Rel k)
 pathRelRel (Path _ (FKJoinTable  rel   _ )  ) = Set.fromList rel
 pathRelRel (Path r (FKInlineTable  _  )   ) = Set.map Inline r
 pathRelRel (Path r (RecJoin l rel )   ) =  pathRelRel (Path r rel )
+pathRelRel (Path r (FunctionField _ _ _ ) ) =  Set.map Inline r
 
 pathRelRel' :: Ord k => Path (Set k ) (SqlOperationK k) -> MutRec [Set (Rel k )]
 pathRelRel' (Path r (RecJoin l rel )   )
@@ -183,7 +184,7 @@ data Access a
   | Rec Int (Access a)
   | Point Int
   | Many [Access a]
-  deriving(Show,Eq,Ord,Functor,Foldable,Traversable)
+  deriving(Show,Eq,Ord,Functor,Foldable,Traversable,Generic)
 
 data BoolCollection a
  = AndColl [BoolCollection a]
@@ -315,6 +316,8 @@ instance Binary a => Binary (Identity a)
 instance (Binary (f (KV (Compose f (TB f)) g k)) , Binary (f (KV (Compose f (TB f)) g ())) , Binary (f (TB f g ())) ,Binary (f (TB f g k)), Binary k ,Binary g) => Binary (TB f g k )
 instance Binary a => Binary (FTB a)
 instance Binary k => Binary (KVMetadata k )
+instance Binary k => Binary (Access k)
+instance Binary Expr
 
 instance Binary a => Binary (Interval.Extended a) where
   put (Interval.Finite a ) = B.put a
@@ -348,17 +351,22 @@ instance Binary TimeOfDay where
 
 data TB f k a
   = Attr
-    { _tbattrkey :: ! k
-    , _tbattr :: ! (FTB a)
+    { _tbattrkey ::  k
+    , _tbattr ::  (FTB a)
+    }
+  | Fun
+    { _tbattrkey :: k
+    , _fundata :: (Expr,[Access k])
+    , _tbattr :: FTB a
     }
   | IT -- Inline Table
-    { _tbattrkey :: ! k
-    , _fkttable ::  ! (FTB1 f  k a)
+    { _tbattrkey ::  k
+    , _fkttable ::   (FTB1 f  k a)
     }
   | FKT -- Foreign Table
-    { _tbref :: ! (KV (Compose f (TB f)) k a)
-    , _fkrelation :: ! [Rel k]
-    , _fkttable ::  ! (FTB1 f  k a)
+    { _tbref ::  (KV (Compose f (TB f)) k a)
+    , _fkrelation ::  [Rel k]
+    , _fkttable ::   (FTB1 f  k a)
     }
   deriving(Functor,Foldable,Traversable,Generic)
 
@@ -419,6 +427,7 @@ secondKV  f (KV m ) = KV . fmap (second f ) $ m
 
 firstTB :: (Ord k, Functor f) => (c -> k) -> TB f c a -> TB f k a
 firstTB f (Attr k i) = Attr (f k) i
+firstTB f (Fun k i l ) = Fun (f k) (fmap (fmap f) <$> i) l
 firstTB f (IT k i) = IT (f k) (fmap (mapKey' f) i)
 firstTB f (FKT k  m  i) = FKT  (mapBothKV (f) (mapComp (firstTB f)) k)  (fmap f  <$> m) (fmap (mapKey' f) i)
 
@@ -557,12 +566,16 @@ instance Eq Sess.Session where
 instance Ord Sess.Session where
   compare i j = compare 1 2
 
+data Expr
+  = Value Int
+  | Function Text [Expr]
+  deriving(Eq,Ord,Show,Generic)
 type SqlOperation = SqlOperationK Key
 data SqlOperationK k
   = FKJoinTable [Rel k] (Text,Text)
   | RecJoin (MutRec [[Rel k ]])  (SqlOperationK k)
   | FKInlineTable (Text,Text)
-  | FKExtendedJoinTable [Rel k] (Text,Text)
+  | FunctionField k Expr [Access Text]
   deriving(Eq,Ord,Show,Functor)
 
 fkTargetTable (FKJoinTable  r tn) = snd tn
@@ -583,11 +596,19 @@ data TableType
 
 type Table = TableK Key
 
-mapTableK f (Raw  s tt tr de is rn  un ra rsc rp rd rf inv rat u ) = Raw s tt tr (S.map f de) is rn (fmap (S.map f) un) ra (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf )(S.map (mapPath f )  inv) (S.map f rat) (mapTableK f <$> u)
+mapTableK f (Raw  uni s tt tr de is rn  un ra rsc rp rd rf inv rat u ) = Raw uni s tt tr (S.map f de) is rn (fmap (S.map f) un) ra (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf )(S.map (mapPath f )  inv) (S.map f rat) (mapTableK f <$> u)
   where mapPath f (Path i j ) = Path (S.map f i) (fmap f j)
 
+instance Show Unique where
+    show i = show (hashUnique i)
+instance Eq (TableK k) where
+  i == j = _tableUnique i == _tableUnique j
+instance Ord (TableK k) where
+  compare i j = compare (_tableUnique i) (_tableUnique j)
+
 data TableK k
-    =  Raw { _rawSchemaL :: Text
+  =  Raw   { _tableUnique :: Unique
+           ,_rawSchemaL :: Text
            , rawTableType :: TableType
            , rawTranslation :: Maybe Text
            , rawDelayed :: (Set k)
@@ -607,7 +628,7 @@ data TableK k
           { origin :: TableK k
           , unionList :: [(TableK k)]
           }
-     deriving(Eq,Ord,Show)
+     deriving(Show)
 
 rawFKS = _rawFKSL
 
@@ -748,6 +769,7 @@ keyattr = keyattri . head . F.toList . getCompose
 
 keyattri :: Foldable f => TB f  k  a -> [Rel k]
 keyattri (Attr i  _ ) = [Inline i]
+keyattri (Fun i _ _ ) = [Inline i]
 keyattri (FKT i  rel _ ) = rel
 keyattri (IT i  _ ) =  [Inline i]
 
@@ -759,12 +781,14 @@ tableAttr (TB1 (m ,(Compose (Labeled _ (KV  n)))) ) =   concat  $ F.toList (nonR
 tableAttr (TB1 (m ,(Compose (Unlabeled (KV  n)))) ) =   concat  $ F.toList (nonRef <$> n)
 
 nonRef :: (Ord f,Show k ,Show f,Ord k) => Compose (Labeled f ) (TB (Labeled f) ) k () -> [Compose (Labeled f ) (TB (Labeled f) ) k ()]
+nonRef i@(Compose (Labeled _ (Fun _ _ _ ))) =[i]
+nonRef i@(Compose (Unlabeled  (Fun _ _ _ ))) =[i]
 nonRef i@(Compose (Labeled _ (Attr _ _ ))) =[i]
 nonRef i@(Compose (Unlabeled  (Attr _ _ ))) =[i]
 nonRef (Compose (Unlabeled  ((FKT i  _ _ )))) = concat (nonRef <$> unkvlist i)
 nonRef (Compose (Labeled _ ((FKT i  _ _ )))) = concat (nonRef <$> unkvlist i)
 nonRef j@(Compose (Unlabeled (IT k v ))) = [Compose (Labeled (label $ getCompose $ snd $ head $ F.toList v) (Attr k (TB1 ()))) ]
-nonRef j@(Compose (Labeled _ (IT k v ))) = [Compose (Labeled (label $ getCompose $ snd $ head $ F.toList v) (Attr k (TB1 ()))) ]
+nonRef j@(Compose (Labeled l (IT k v ))) = [Compose (Labeled l (Attr k (TB1 ()))) ]
 
 -- nonRef i = errorWithStackTrace (show i)
 
@@ -780,6 +804,7 @@ joinNonRef' (m,n)  = (m, mapComp (rebuildTable . _kvvalues) n)
     compJoin = Compose . join . fmap getCompose . getCompose
     rebuildTable n =     fmap compJoin . traComp nonRef <$> n
     nonRef :: (Monad f,Traversable  f,Ord k) => TB f k a -> [Compose f (TB f ) k a]
+    nonRef (Fun k rel v ) = [Compose . return $ Fun k rel v]
     nonRef (Attr k v ) = [Compose . return $ Attr k v]
     nonRef (FKT i _ _ ) = tra
         where tra = concat ( fmap compJoin   . traComp  nonRef <$> unkvlist i)
@@ -854,6 +879,20 @@ unlabelIT (m,n)  = (m, mapComp (KV . fmap (Compose . nonRef  .getCompose) . _kvv
 
 
 
+tableNonRef2 :: Ord k => TB3Data (Labeled Text) k a -> TB3Data (Labeled Text) k a
+tableNonRef2 (m,n)  = (m, mapComp (KV . rebuildTable . _kvvalues) n)
+  where
+    rebuildTable n =    Map.unions (nonRef . getCompose <$> F.toList n)
+    -- nonRef :: Ord k => TB (Labeled Text) k a -> M.Map (Rel k) (TB (Labeled Text) k  a)
+    nonRef :: Ord k => Labeled Text (TB (Labeled Text) k a) -> Map (Set (Rel k )) (Compose (Labeled Text ) (TB (Labeled Text)) k a)
+    nonRef (Labeled _ (FKT i _ _ )) = _kvvalues i
+    nonRef (Unlabeled (FKT i _ _ )) = _kvvalues i
+    nonRef (Labeled t it@(IT j k )) = Map.singleton (S.singleton $ Inline j) (Compose $ Labeled t $ IT  j (tableNonRef2 <$> k ))
+    nonRef (Unlabeled it@(IT j k )) = Map.singleton (S.singleton $ Inline j) (Compose $ Unlabeled $ IT  j (tableNonRef2 <$> k ))
+    nonRef i@(Labeled t (Attr j _)) = Map.singleton (S.singleton $ Inline j) (Compose i)
+    nonRef i@(Unlabeled (Attr j _)) = Map.singleton (S.singleton $ Inline j) (Compose i)
+
+
 
 tableNonRef :: Ord k => TB2 k a -> TB2 k a
 tableNonRef = fmap tableNonRef'
@@ -863,14 +902,14 @@ tableNonRef' (m,n)  = (m, mapComp (KV . rebuildTable . _kvvalues) n)
   where
     rebuildTable n = mapFromTBList .  concat . F.toList $  traComp nonRef <$> n
     nonRef :: Ord k => TB Identity k a -> [(TB Identity ) k a]
-    nonRef (Attr k v ) = [Attr k v]
     nonRef (FKT i _ _ ) = concat (overComp nonRef <$> unkvlist i)
     nonRef it@(IT j k ) = [(IT  j (tableNonRef k )) ]
+    nonRef i = [i]
 
 nonRefTB :: Ord k => TB Identity k a -> [(TB Identity ) k a]
-nonRefTB (Attr k v ) = [Attr k v]
 nonRefTB (FKT i _ _ ) = concat (overComp nonRefTB <$> unkvlist i)
 nonRefTB it@(IT j k ) = [(IT  j (tableNonRef k )) ]
+nonRefTB i  = [i]
 
 
 addDefault
@@ -879,6 +918,7 @@ addDefault
 addDefault = mapComp def
   where
     def ((Attr k i)) = (Attr k (LeftTB1 Nothing))
+    def ((Fun k i _)) = (Fun k i (LeftTB1 Nothing))
     def ((IT  rel j )) = (IT  rel (LeftTB1 Nothing)  )
     def ((FKT at rel j )) = (FKT (KV $ addDefault <$> _kvvalues at) rel (LeftTB1 Nothing)  )
 
@@ -886,6 +926,7 @@ kattr :: Compose Identity (TB Identity  ) k a -> [FTB a]
 kattr = kattri . runIdentity . getCompose
 kattri :: Column k a -> [FTB a]
 kattri (Attr _ i ) = [i]
+kattri (Fun _ _ i ) = [i]
 kattri (FKT i  _ _ ) =  (L.concat $ kattr  <$> unkvlist i)
 kattri (IT _  i ) =  recTB i
   where recTB (TB1 (m, i) ) =  L.concat $ fmap kattr (F.toList $ _kvvalues $ runIdentity $ getCompose i)
@@ -894,6 +935,7 @@ kattri (IT _  i ) =  recTB i
 
 aattr = aattri . runIdentity . getCompose
 aattri (Attr k i ) = [(k,i)]
+aattri (Fun k _ i ) = [(k,i)]
 aattri (FKT i  _ _ ) =  (L.concat $ aattr  <$> unkvlist i)
 aattri (IT _ _) = []
 
@@ -962,9 +1004,11 @@ unTB1 i = fromMaybe (errorWithStackTrace ("unTB1" <> show i)) . headMay . F.toLi
 -- Intersections and relations
 
 keyAttr (Attr i _ ) = i
+keyAttr (Fun i _ _ ) = i
 keyAttr i = errorWithStackTrace $ "cant find keyattr " <> (show i)
 
 unAttr (Attr _ i) = i
+unAttr (Fun _ _ i) = i
 unAttr i = errorWithStackTrace $ "cant find attr" <> (show i)
 
 srange l m = IntervalTB1 $ Interval.interval (Interval.Finite l,True) (Interval.Finite m ,True)
@@ -1008,6 +1052,8 @@ unLeftItens = unLeftTB
   where
     unLeftTB (Attr k v)
       = Attr (unKOptional k) <$> unSOptional v
+    unLeftTB (Fun k rel v)
+      = Fun (unKOptional k) rel <$> unSOptional v
     unLeftTB (IT na (LeftTB1 l))
       = IT (unKOptional na) <$>  l
     unLeftTB i@(IT na (TB1 (_,l)))
@@ -1023,11 +1069,14 @@ unLeftItens = unLeftTB
 
 attrOptional :: TB Identity (FKey (KType k))  Showable ->  (TB Identity  (FKey (KType k))  Showable)
 attrOptional (Attr k v) =  Attr (kOptional k) (LeftTB1 . Just $ v)
+attrOptional (Fun k rel v) =  Fun (kOptional k) rel (LeftTB1 . Just $ v)
 attrOptional (FKT ifk rel  tb)  = FKT (mapKV tbOptional ifk) (Le.over relOri kOptional <$> rel) (LeftTB1 (Just tb))
   where tbOptional = mapComp (firstTB kOptional) . mapComp (mapFAttr (LeftTB1 . Just))
 attrOptional (IT na j) = IT  na (LeftTB1 (Just j))
 
 leftItens :: TB Identity (FKey (KType k)) a -> Maybe (TB Identity  (FKey (KType k)) Showable) -> Maybe (TB Identity  (FKey (KType k)) Showable)
+leftItens tb@(Fun k  rel _ ) =  maybe emptyAttr (Just .attrOptional)
+  where emptyAttr = Fun k rel <$> (showableDef (keyType k))
 leftItens tb@(Attr k _ ) =  maybe emptyAttr (Just .attrOptional)
   where emptyAttr = Attr k <$> (showableDef (keyType k))
 leftItens tb@(IT na _ ) =   Just . maybe  emptyIT attrOptional
@@ -1086,10 +1135,12 @@ replaceRecRel :: Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b ) ->
 replaceRecRel = foldr (\(MutRec l) v  -> foldr (\a -> recOverMAttr' a l )   v l)
 
 unKOptionalAttr (Attr k i ) = Attr (unKOptional k) i
+unKOptionalAttr (Fun k rel i ) = Fun (unKOptional k) rel i
 unKOptionalAttr (IT  r (LeftTB1 (Just j))  ) = (\j-> IT   r j )    j
 unKOptionalAttr (FKT i  l (LeftTB1 (Just j))  ) = FKT (fmap (mapComp (first unKOptional) ) i)  l j
 
 unOptionalAttr (Attr k i ) = Attr (unKOptional k) <$> unSOptional i
+unOptionalAttr (Fun k rel i ) = Fun (unKOptional k) rel <$> unSOptional i
 unOptionalAttr (IT r (LeftTB1 j)  ) = (\j-> IT   r j ) <$>     j
 unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverseKV ( traComp (traFAttr unSOptional) . (mapComp (firstTB unKOptional)) ) i)  j
 

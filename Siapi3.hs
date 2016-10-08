@@ -134,7 +134,7 @@ protocolocnpjForm prot ano cgc_cpf vv =
     , ("javax.faces.ViewState" :: BSC.ByteString) := vv]
 
 siapiAndamento3Url =
-    "https://siapi3.bombeiros.go.gov.br/paginaInicialWeb.jsf"
+    "http://siapi3.bombeiros.go.gov.br/paginaInicialWeb.jsf"
 
 siapiListAndamento3Url =
-    "https://siapi3.bombeiros.go.gov.br/listarAndamentosWeb.jsf"
+    "http://siapi3.bombeiros.go.gov.br/listarAndamentosWeb.jsf"

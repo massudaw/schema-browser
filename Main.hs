@@ -31,7 +31,6 @@ import qualified Data.ByteString as BS
 main :: IO ()
 main = do
   args <- getArgs
-  print "Start Server"
   smvar   <- newMVar M.empty
   let db = argsToState args
   -- Load Metadata
@@ -41,6 +40,7 @@ main = do
 
   print "Load Metadata"
   (metas ,_)<- runDynamic $keyTables  smvar conn  ("metadata", T.pack $ user db) amap plugList
+  print "Start Server"
   ref <- addServer metas
 
   print "Load Plugins"
@@ -51,18 +51,18 @@ main = do
 
   print "Load GUI Server"
   forkIO $ threadDelay 50000 >> rawSystem "chromium" ["http://localhost:8025"] >> return ()
-  startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar  args)
-      (do
+  let
+    initGUI = do
         Just (TableModification _ _ (_,G.Idex c,_)) <- addClientLogin metas
         let [(SerialTB1 (Just (TB1 (SNumeric i))))] = F.toList c
-        return i )
-      (\w ->  do
+        return i
+    finalizeGUI w = do
         print ("delete client" <> show (wId w))
         deleteClientLogin metas (wId w)
-        deleteClient metas (fromIntegral $ wId w) )
+        deleteClient metas (fromIntegral $ wId w)
 
-  traverse (deleteServer metas) ref
+
+  startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar args) initGUI finalizeGUI
   print "Finish Server"
-  print "Start Dump State"
-  print "Finish Dump State"
+  traverse (deleteServer metas) ref
   return ()

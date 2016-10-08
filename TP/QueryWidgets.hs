@@ -228,15 +228,16 @@ indexPluginAttr  i  plugItens = pfks
 attrSize :: Column CoreKey b -> (Int,Int)
 attrSize (FKT  _  _ _ ) = (12,4)
 attrSize (IT _ _ ) = (12,4)
-attrSize (Attr k _ ) = go  (keyType k)
-  where
-    go :: KType CorePrim -> (Int,Int)
-    go i = case i of
-                KOptional l ->  go l
-                KDelayed l ->  go l
-                KSerial l -> go l
-                KArray l -> let (i1,i2) = go l in (i1+1,i2*8)
-                KInterval l -> let (i1,i2) = go l in (i1*2 ,i2)
+attrSize (Attr k _ ) = goAttSize  (keyType k)
+attrSize (Fun k _ _ ) = goAttSize  (keyType k)
+
+goAttSize :: KType CorePrim -> (Int,Int)
+goAttSize i = case i of
+                KOptional l ->  goAttSize l
+                KDelayed l ->  goAttSize l
+                KSerial l -> goAttSize l
+                KArray l -> let (i1,i2) = goAttSize l in (i1+1,i2*8)
+                KInterval l -> let (i1,i2) = goAttSize l in (i1*2 ,i2)
                 (Primitive i) ->
                   case (\(AtomicPrim i) -> i) $ i of
                        PInt -> (3,1)
@@ -328,7 +329,7 @@ refTables inf table = do
         let
             vpt =  tidings bres (update <$> bres <@> rumors vpdiff )
         return (vpt,res,fmap snd vpt,tmvard)
-
+          {-
 tbCaseDiff
   :: InformationSchema
   -> SelPKConstraint
@@ -367,7 +368,7 @@ tbCaseDiff inf _ a@(Attr i _ ) wl plugItens preoldItems = do
         attrUI <- buildUIDiff (keyModifier i) (keyType i)  tdiv
         let insertT = fmap (PAttr i ) <$> triding attrUI
         return $ TrivialWidget insertT  (getElement attrUI)
-
+-}
 
 tbCase
   :: InformationSchema
@@ -401,7 +402,11 @@ tbCase inf _ i@(IT na tb1 ) wl plugItens oldItems
 tbCase inf _ a@(Attr i _ ) wl plugItens preoldItems = do
         let oldItems = maybe preoldItems (\v-> fmap (Just . fromMaybe (Attr i v)) preoldItems  ) ( keyStatic i)
         tdi <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return oldItems ) (fmap snd plugItens )
-        attrUITable tdi a
+        fmap (fmap (Attr i )) <$> attrUITable (fmap _tbattr <$> tdi) (_tbattrkey a)
+tbCase inf _ a@(Fun i rel _ ) wl plugItens preoldItems = do
+        let oldItems = maybe preoldItems (\v-> fmap (Just . fromMaybe (Attr i v)) preoldItems  ) ( keyStatic i)
+        tdi <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return oldItems ) (fmap snd plugItens )
+        fmap (fmap (Fun i rel )) <$> attrUITable (fmap _tbattr <$> tdi) (_tbattrkey a)
 
 emptyRecTable (FKT rel l tb )
     = case tb of
@@ -436,7 +441,7 @@ tbRecCase inf constr a wl plugItens preoldItems' = do
 
 unTBMap :: Show a => TBData k a -> Map (Set (Rel k  )) (Compose Identity (TB Identity ) k a )
 unTBMap = _kvvalues . unTB . snd
-
+  {-
 eiTableDiff
   :: InformationSchema
      -> SelPKConstraint
@@ -509,7 +514,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) oldItems = do
      set style [("margin-left","0px"),("border","2px"),("border-color","gray"),("border-style","solid")]
   return (body, output)
 
-
+-}
 
 eiTable
   :: InformationSchema
@@ -783,13 +788,13 @@ dynHandler hand val ix (l,old)= do
 
 
 attrUITable
-  :: Tidings (Maybe (TB Identity CoreKey Showable))
-     -> TB Identity CoreKey ()
-     -> UI (TrivialWidget (Maybe (TB Identity CoreKey Showable)))
-attrUITable  tAttr attr@(Attr i _ ) = do
-      let tdiv = fmap _tbattr <$> tAttr
+  :: Tidings (Maybe (FTB Showable))
+     -> CoreKey
+     -> UI (TrivialWidget (Maybe (FTB Showable)))
+attrUITable  tAttr i  = do
+      let tdiv = tAttr
       attrUI <- buildUIDiff (keyModifier i) (keyType i)  tdiv
-      let insertT = fmap (Attr i ) <$> (recoverEdit <$> tdiv <*> triding attrUI  )
+      let insertT =(recoverEdit <$> tdiv <*> triding attrUI  )
       return $ TrivialWidget insertT  (getElement attrUI)
 
 
@@ -992,7 +997,7 @@ buildPrim fm tdi i = case i of
             sp <- UI.div # set children (inputUI : elem)
             paintBorder sp (facts pkt) (facts tdi)
             return $ TrivialWidget pkt sp
-
+              {-
 iUITableDiff
   :: InformationSchema
   -- Plugin Modifications
@@ -1048,7 +1053,7 @@ iUITableDiff inf pmods oldItems  (IT na  tb1)
         composed <- UI.span # set children [offset , offsetDiv]
         return  $ TrivialWidget  bres composed
 
-
+-}
 
 iUITable
   :: InformationSchema

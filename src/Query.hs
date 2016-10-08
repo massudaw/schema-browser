@@ -203,8 +203,9 @@ tableToKV r =   do
 
 prelabelTable :: Text -> Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (Labeled Text Table,TB3Data (Labeled Text)  Key  () )
 prelabelTable pre i = do
-   name <- Tra.traverse (\k-> (S.singleton (Inline k),) <$> kname (Labeled pre i)  k ) (tableToKV i)
-   return (Labeled pre i, (tableMeta i,) $ Compose $ Labeled pre $ KV $ M.fromList $ fmap Compose <$> name)
+   t <- tname i
+   name <- Tra.traverse (\k-> (S.singleton (Inline k),) <$> kname t  k ) (tableToKV i)
+   return (Labeled pre i, (tableMeta i,) $ Compose $ Labeled (label t) $ KV $ M.fromList $ fmap Compose <$> name)
 
 
 labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (Labeled Text Table,TB3Data (Labeled Text)  Key  () )
@@ -256,6 +257,7 @@ isReflexive (Path _ l  ) = isPathReflexive l
 isPathReflexive (FKJoinTable  ks _)
   | otherwise   = all id $ fmap (\j-> isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) (keyType (_relTarget j) )) ks
 isPathReflexive (FKInlineTable _)= True
+isPathReflexive (FunctionField _ _ _)= False
 isPathReflexive (RecJoin _ i ) = isPathReflexive i
 
 
@@ -300,12 +302,13 @@ tableViewNR invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
 tlabel t = (label $ getCompose $ snd (unTB1 t))
 
 pathToRel (Path ifk (FKInlineTable _ ) ) = fmap Inline $ F.toList ifk
+pathToRel (Path ifk (FunctionField _ _ _ ) ) = fmap Inline $ F.toList ifk
 pathToRel (Path ifk (FKJoinTable ks _ ) ) = ks
 
 dumbKey n = Key n  Nothing [] 0 Nothing (unsafePerformIO newUnique) (Primitive (AtomicPrim PInt ))
 
 recursePath
-  :: Bool->  RecState Key
+  :: KVMetadata Key -> Bool->  RecState Key
      -> [(Set (Rel Key), Labeled Text (TB (Labeled Text) Key ()))]
      -> [(Set (Rel Key), Labeled Text (TB (Labeled Text) Key ()))]
      -> Map Text (Map Text Table)
@@ -313,16 +316,14 @@ recursePath
      -> State
           ((Int, Map Int Table), (Int, Map Int Key))
           (Compose (Labeled Text) (TB (Labeled Text)) Key ())
-recursePath isLeft isRec vacc ksbn invSchema p@(Path ifk jo@(FKInlineTable (s,t) ) )
+recursePath m isLeft isRec vacc ksbn invSchema p@(Path ifk jo@(FKInlineTable (s,t) ) )
     | anyArrayRel ks  =   do
           let
               ref = (\i -> justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) $ head (S.toList ifk )
           (_,ksn) <-  prelabelTable  (label ref) nextT
           tb <- fun ksn
           tas <- tname nextT
-          let knas = dumbKey (rawName nextT)
-          kas <- kname tas  knas
-          return $  Compose $ Labeled ("it" <> (label $ kas ) ) $ IT (head (S.toList ifk))   (mapOpt $ mapArray $ TB1 tb )
+          return $  Compose $ Labeled ((label $ ref)) $ IT (head (S.toList ifk))   (mapOpt $ mapArray $ TB1 tb )
     | otherwise = do
           let
             ref = (\i -> justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) $ head (S.toList ifk )
@@ -334,7 +335,7 @@ recursePath isLeft isRec vacc ksbn invSchema p@(Path ifk jo@(FKInlineTable (s,t)
               let knas = dumbKey (rawName nextT)
               kas <- kname tas  knas
               return $ Labeled (label kas)
-            else return  Unlabeled
+            else return  (Labeled (label ref) )
           return $ ( Compose $ lab $ IT  (head (S.toList ifk)) (mapOpt $ TB1 tb)   )
     where
         ks = pathToRel p
@@ -344,7 +345,7 @@ recursePath isLeft isRec vacc ksbn invSchema p@(Path ifk jo@(FKInlineTable (s,t)
         nextT = justError ("recursepath lookIT "  <> show t <> " " <> show invSchema) (join $ M.lookup t <$> M.lookup s invSchema)
         fun =  recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
-recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn,tn)) )
+recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn,tn)) )
     | anyArrayRel ks =   do
           (t,ksn) <- labelTable nextT
           tb <-fun ksn
@@ -371,9 +372,13 @@ recursePath isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn,t
         mapOpt i = if anyLeftRel ks then  LeftTB1 $ Just  i else i
         fun =   recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
-recursePath isLeft isRec vacc ksbn invSchema jo@(Path ifk (RecJoin l f) )
-    = recursePath isLeft (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec  ) vacc ksbn invSchema (Path ifk f )
-
+recursePath m isLeft isRec vacc ksbn invSchema jo@(Path ifk (RecJoin l f) )
+  = recursePath m isLeft (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec  ) vacc ksbn invSchema (Path ifk f )
+recursePath m isLeft isRec vacc ksbn invSchema jo@(Path ifk (FunctionField k l f) )
+  = return $ Compose $ Labeled (label ref) (Fun k  (l,a) (TB1 () ))
+    where
+      a = liftASch invSchema (_kvschema m) (_kvname m) <$> f
+      ref = (\i -> justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) $ head (S.toList ifk )
 recurseTB :: Map Text (Map Text Table) -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TB3Data (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3Data (Labeled Text) Key ())
 recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else m  ,) <$>
     (\kv -> case kv of
@@ -398,7 +403,7 @@ recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else
                       cond (_,l) = mAny (\l-> L.length l == 1  && ((== relFk ). S.fromList. last $ l)) l
                   if L.length lastItem < 2
                   then   do
-                    i <- fmap (relFk,) . recursePath nextLeft ( fmap (fmap (L.drop 1 ))  <$> L.filter (\(_,i) -> mAny (\i -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) i ) (isRec <> fmap (\i -> (i,i) ) (_kvrecrels m))) vacc ( (M.toList $  fmap getCompose items )) invSchema $ fk
+                    i <- fmap (relFk,) . recursePath m nextLeft ( fmap (fmap (L.drop 1 ))  <$> L.filter (\(_,i) -> mAny (\i -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) i ) (isRec <> fmap (\i -> (i,i) ) (_kvrecrels m))) vacc ( (M.toList $  fmap getCompose items )) invSchema $ fk
                     return (fmap getCompose i:vacc)
                   else return vacc
                   ) (return []) $ P.sortBy (P.comparing pathRelRel) (F.toList $ fks' )
@@ -423,6 +428,28 @@ anyLeftRel = L.any isLeftRel
 isLeftRel (Rel i _ _ ) =  isKOptional (keyType i)
 isLeftRel (Inline i ) =  isKOptional (keyType i)
 isLeftRel (RelAccess i j ) =  isKOptional (keyType i) || isLeftRel j
+
+
+liftASch :: Map Text (Map Text Table) -> Text -> Text -> Access Text  -> Access Key
+liftASch inf s tname (ISum i) =  ISum $ fmap (liftASch inf s tname)  i
+liftASch inf s tname (Many i) =  Many $ fmap (liftASch inf s tname)  i
+liftASch inf s tname (IProd b l) = IProd b $ fmap lookKey  l
+  where
+    tb = lookup tname $  lookup s inf
+    lookup i m = justError ("no look" <> show i) $ M.lookup i m
+    lookKey c = i
+      where
+        i = justError "no attr" $ L.find ((==c).keyValue ) (tableToKV tb)
+liftASch inf s tname (Nested i c) = Nested ref (liftASch inf (fst l ) (snd l) c)
+  where
+    ref@(IProd _ refk) = liftASch inf s tname i
+    lookup i m = justError ("no look" <> show i) $ M.lookup i m
+    tb = lookup tname $  lookup s inf
+    n = justError "no fk" $ L.find (\i -> S.fromList refk == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
+    l = case n of
+          (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
+          (Path _ rel@(FKInlineTable  l  ) ) ->  l
+liftASch _ _ _ i = errorWithStackTrace (show i)
 
 
 
@@ -489,6 +516,7 @@ unlabel (Unlabeled (IT tn t) ) = (IT tn (unTlabel t ))
 unlabel (Labeled l (FKT i fkrel t) ) = (FKT (mapKV relabel i) fkrel (unTlabel  t ))
 unlabel (Unlabeled (FKT i fkrel t) ) = (FKT (mapKV relabel i) fkrel (unTlabel t))
 unlabel (Labeled l (Attr k i )) = Attr k i
+unlabel (Labeled l (Fun k i m )) = Fun k i m
 
 relabel = Compose . Identity . unlabel.getCompose
 

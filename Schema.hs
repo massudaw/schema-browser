@@ -4,8 +4,10 @@
 module Schema where
 
 import Data.String
+import Step.Host
 import Types
 import Codec.Compression.GZip
+import Expression
 import Step.Common
 import Data.Tuple
 import Control.Concurrent.STM.TQueue
@@ -104,7 +106,6 @@ readFModifier "write" = FWrite
 keyTables ,keyTablesInit :: MVar (Map Text InformationSchema )->  Connection -> (Text ,Text) -> (Text -> IO (Auth , SchemaEditor)) -> [Plugins] ->  R.Dynamic InformationSchema
 keyTables schemaVar conn (schema ,user) authMap pluglist = maybe (keyTablesInit schemaVar conn (schema,user) authMap pluglist ) return  . (M.lookup schema ) =<< liftIO (readMVar schemaVar)
 
-
 extendedRel :: HM.HashMap (Text,Text) Key -> Text -> Text -> Text -> Key -> Rel Key
 extendedRel inf t a b c =  snd access $ (lrel (fst access))
 
@@ -161,9 +162,18 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
                 where map
                         | s == schema = keyMap
                         | otherwise = _keyMapL (justError "no schema" $ M.lookup s rsch)
+
+           lookupKey' :: Text -> (Text,Text) -> Key
+           lookupKey' s (t,c) = justError ("nokey" <> show (t,c)) $ HM.lookup ( (t,c)) map
+                where map
+                        | s == schema = keyMap
+                        | otherwise = _keyMapL (justError "no schema" $ M.lookup s rsch)
+
        let
           foreignKeys :: Query
           foreignKeys = "select origin_table_name,target_schema_name,target_table_name,origin_fks,target_fks,rel_fks from metadata.fks where origin_schema_name = ?"
+          functionKeys :: Query
+          functionKeys = "select table_name,schema_name,column_name,cols,fun from metadata.function_keys where schema_name = ?"
           exforeignKeys :: Query
           exforeignKeys = "select origin_table_name,target_schema_name,target_table_name,origin_fks,target_fks,rel_fks from metadata.extended_view_fks where origin_schema_name = ?"
 
@@ -172,11 +182,16 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
 
 
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ HM.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  HM.toList keyMap :: Map Text (Set Key)
-           i3l =  (\(c,(pksl,scp,is_sum))-> let
+       functionsRefs <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc,tc,cols,fun) -> (tp,S.singleton $ Path (S.singleton $ lookupKey' sc (tp ,tc)) ( FunctionField ( lookupKey' sc (tp ,tc)) (readFun fun) (indexer <$> V.toList cols ) ) )) <$> query conn functionKeys (Only schema)
+       i3l <-  traverse (\(c,(pksl,scp,is_sum))-> do
+                               let
                                   pks = F.toList pksl
                                   inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
+                                  functionFK = M.lookup c functionsRefs
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> S.fromList pks)
-                                in (c ,Raw schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ (M.lookup c efks )<>(M.lookup c fks )<> fmap S.fromList inlineFK ) S.empty attr [])) <$> res :: [(Text,Table)]
+                               un <-liftIO $ newUnique
+                               return (c ,Raw un schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ (M.lookup c efks )<>(M.lookup c fks )<> fmap S.fromList inlineFK  <> functionFK) S.empty attr [])) res :: R.Dynamic [(Text,Table)]
+       let
            unionQ = "select schema_name,table_name,inputs from metadata.table_union where schema_name = ?"
 
        ures <- liftIO $ query conn unionQ (Only schema) :: R.Dynamic [(Text,Text,Vector Text)]
@@ -196,6 +211,7 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
 
        mvar <- liftIO$ atomically $ newTMVar  M.empty
        let inf = InformationSchema schema user oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.filterWithKey (\k v -> not $ L.elem (tableName v ) (concat $ fmap (\(_,_,n) -> F.toList n) ures)) $ i2u)  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist
+       liftIO$ print functionsRefs
        varmap <- mapM (createTableRefs inf) (filter (L.null . rawUnion) $ F.toList i2u)
        let preinf = InformationSchema schema user oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  i2u  i3u sizeMapt undefined conn undefined rsch ops pluglist
        varmapU <- mapM (createTableRefsUnion preinf (M.fromList varmap)) (filter (not . L.null . rawUnion) $ F.toList i2u)
@@ -283,6 +299,7 @@ addRecInit inf m = fmap recOverFKS m
                       FKJoinTable b nt -> case L.filter (not .L.null) $  openPath S.empty [] pini of
                               [] -> if snd nt == tableName t then  RecJoin (MutRec []) (FKJoinTable  b nt) else FKJoinTable  b nt
                               e -> RecJoin (MutRec e) (FKJoinTable  b nt)
+                      i -> i
                       )
                     where
                       openPath ts p pa@(Path _(FKInlineTable nt) )
@@ -293,6 +310,7 @@ addRecInit inf m = fmap recOverFKS m
                         | snd nt == tableName t  = [p]
                         | S.member pa ts =  []
                         | otherwise = openTable (S.insert pa ts)  p nt
+                      openPath ts p (Path _ (FunctionField _ _ _)) = []
                       openPath ts p pa = errorWithStackTrace (show (ts,p,pa))
                       openTable t p (st,nt)  =  do
                               let cons pa

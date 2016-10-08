@@ -90,9 +90,11 @@ checkField n@(Nested ix@(IProd b l) nt ) t
          IT l i -> IT l  <$> checkFTB  nt i
          FKT a  c d -> FKT a  c <$> (if not b then maybe (failure [n]) (checkFTB nt) $ unRSOptional' d else checkFTB nt d  )
          Attr k v -> failure [n]
+         Fun k rel v -> failure [n]
 checkField  p@(IProd b l) i
   = case i  of
       Attr k v -> maybe (failure [p]) (pure) $ fmap (Attr k ) . (\i -> if b then  unRSOptional' i else Just i ) $ v
+      Fun k rel v -> maybe (failure [p]) (pure) $ fmap (Fun k rel ) . (\i -> if b then  unRSOptional' i else Just i ) $ v
       FKT a c d -> (\i -> FKT i c d) <$> (traverseKV (traComp (checkField p) )  a )
       i -> errorWithStackTrace ( show (b,l,i))
 checkField i j = errorWithStackTrace (show (i,j))

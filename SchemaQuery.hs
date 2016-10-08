@@ -200,7 +200,9 @@ tableLoader table  page size presort fixed
                 go pred (PrimColl l) = AndColl $ PrimColl <$> pred l
                 predicate (Nested (IProd b i) j ,Left _ ) = (\a -> (IProd b [a], Right "is not null")) <$> i
                 predicate i  = [i]
-          (res ,x ,o) <- (listEd $ schemaOps inf) (table {_rawFKSL = S.filter base  (_rawFKSL table)}) page size presort fixed (unestPred predtop)
+
+            tbf = tableView  (tableMap inf) table
+          (res ,x ,o) <- (listEd $ schemaOps inf) (tableNonRef2 tbf) page size presort fixed (unestPred predtop)
           let getFKS  v = foldl (\(m) (Path _ (FKJoinTable i j ))  -> m >>= (\(m,old) -> do
                 let rinf = maybe inf id $ M.lookup ((fst j))  (depschema inf)
                     table = lookTable rinf $ snd j
@@ -421,6 +423,7 @@ tbDiffEdit i j
   | otherwise = tbEdit i j
 
 tbEdit :: Column Key Showable -> Column Key Showable -> TransactionM (Column Key Showable)
+tbEdit (Fun a1 _ a2) (Fun k1 rel k2)= return $ (Fun k1 rel k2)
 tbEdit (Attr a1 a2) (Attr k1 k2)= return $ (Attr k1 k2)
 tbEdit (IT a1 a2) (IT k2 t2) = IT k2 <$> noInsert t2
 tbEdit g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) =
@@ -437,6 +440,7 @@ tbEdit g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) =
 
 tbInsertEdit :: Column Key Showable -> TransactionM (Column Key Showable)
 tbInsertEdit j@(Attr k1 k2) = return $ (Attr k1 k2)
+tbInsertEdit j@(Fun k1 rel k2) = return $ (Fun k1 rel k2)
 tbInsertEdit (IT k2 t2) = IT k2 <$> noInsert t2
 tbInsertEdit f@(FKT pk rel2  t2) =
    case t2 of
