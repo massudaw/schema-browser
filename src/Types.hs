@@ -192,10 +192,58 @@ data BoolCollection a
  | PrimColl a
  deriving(Show,Eq,Ord,Functor,Foldable)
 
+type AccessOp a= Either (FTB a, BinaryOperator) UnaryOperator
+
+data UnaryOperator
+  = IsNull
+  | Not UnaryOperator
+  deriving(Eq,Ord,Show)
+
+renderUnary (Not i) = "not " <> renderUnary i
+renderUnary IsNull = "null"
+renderUnary i = errorWithStackTrace (show i)
+
+renderBinary (Flip (Flip i)) = renderBinary i
+renderBinary Contains  = "@>"
+renderBinary (Flip Contains) = "<@"
+renderBinary Equals = "="
+renderBinary (Flip Equals )= "="
+renderBinary IntersectOp = "&&"
+renderBinary (Flip IntersectOp )= "&&"
+renderBinary (AllOp op) = renderBinary op <> " all"
+renderBinary (AnyOp op) = renderBinary op <> " any"
+renderBinary (Flip (AllOp op)) = " all" <> renderBinary op
+renderBinary (Flip (AnyOp op)) = " any" <> renderBinary op
+renderBinary i = errorWithStackTrace (show i)
+
+readBinaryOp :: T.Text -> BinaryOperator
+readBinaryOp "=" = Equals
+readBinaryOp "@>" = Contains
+readBinaryOp "<@" = Flip Contains
+readBinaryOp "&&" = IntersectOp
+readBinaryOp "= all" = AllOp Equals
+readBinaryOp "@> all" = AllOp Contains
+readBinaryOp "<@ all" = AllOp (Flip Contains)
+readBinaryOp "= any" = AnyOp Equals
+readBinaryOp "@> any" = AnyOp Contains
+readBinaryOp "<@ any" = AnyOp (Flip Contains)
+readBinaryOp i = errorWithStackTrace (show i)
+
+
+data BinaryOperator
+  = AllOp BinaryOperator
+  | Contains
+  | Equals
+  | IntersectOp
+  | Flip BinaryOperator
+  | AnyOp BinaryOperator
+  deriving (Eq,Ord,Show,Generic)
+instance Binary BinaryOperator
+
 type WherePredicate = TBPredicate Key Showable
 
 newtype TBPredicate k a
-  = WherePredicate (BoolCollection (Access k ,Either (FTB a,T.Text) T.Text))
+  = WherePredicate (BoolCollection (Access k ,AccessOp a ))
   deriving (Show,Eq,Ord)
 
 
@@ -282,7 +330,7 @@ data Rel k
   }
   | Rel
   { _relOri :: k
-  , _relOperator:: Text
+  , _relOperator:: BinaryOperator
   , _relTip :: k
   }
   | RelAccess
@@ -472,7 +520,7 @@ data KPrim
    = PText
    | PBoolean
    | PAddress
-   | PInt
+   | PInt Int
    | PDouble
    | PDate
    | PDayTime
@@ -503,9 +551,9 @@ data KType a
    | KOptional (KType a)
    | KDelayed (KType a)
    | KTable [KType a]
-   deriving(Eq,Ord,Functor,Generic,Foldable)
+   deriving(Eq,Ord,Functor,Generic,Foldable,Show)
 
-instance Show (KType KPrim ) where
+{-instance Show (KType KPrim ) where
   show =  showTy show
 
 instance Show (KType (Prim KPrim (Text,Text))) where
@@ -513,6 +561,7 @@ instance Show (KType (Prim KPrim (Text,Text))) where
 
 instance Show (KType (Prim (Text,Text) (Text,Text))) where
   show = T.unpack . showTy (T.pack . show)
+-}
 
 showTy f (Primitive i ) = f i
 showTy f (KArray i) = "{" <>  showTy f i <> "}"
@@ -1039,7 +1088,7 @@ unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (kvlist $ nonl <> fmap
     indexArray ix s =  Non.atMay (unArray s) ix
 unIndex o i = errorWithStackTrace (show (o,i))
 
-unLeftKey :: (Show (KType k),Ord b,Show b) => TB Identity (FKey (KType k)) b -> TB Identity (FKey (KType k)) b
+unLeftKey :: (Show k,Ord b,Show b) => TB Identity (FKey (KType k)) b -> TB Identity (FKey (KType k)) b
 unLeftKey (Attr k v ) = (Attr (unKOptional k) v)
 unLeftKey (IT na (LeftTB1 (Just tb1))) = IT na tb1
 unLeftKey i@(IT na (TB1  _ )) = i
@@ -1047,7 +1096,7 @@ unLeftKey (FKT ilk rel  (LeftTB1 (Just tb1))) = (FKT (kvlist $ mapComp (firstTB 
 unLeftKey i@(FKT ilk rel  (TB1  _ )) = i
 unLeftKey i = errorWithStackTrace (show i)
 
-unLeftItens  :: (Show (KType k) , Show a) => TB Identity  (FKey (KType k)) a -> Maybe (TB Identity  (FKey (KType k)) a )
+unLeftItens  :: (Show k , Show a) => TB Identity  (FKey (KType k)) a -> Maybe (TB Identity  (FKey (KType k)) a )
 unLeftItens = unLeftTB
   where
     unLeftTB (Attr k v)

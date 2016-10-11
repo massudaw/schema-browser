@@ -103,8 +103,8 @@ tableChooser :: InformationSchemaKV Key Showable
                             TrivialWidget (M.Map (TableK Key, Text) [TableK Key]))
 tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables = do
   let
-      pred =  [(IProd True ["schema_name"],Left (txt $ iniSchemas,"="))]
-      authPred =  [(IProd True ["grantee"],Left ( txt $ iniUsers,"=")), (IProd True ["table_schema"],Left (txt $ iniSchemas,"="))]
+      pred =  [(IProd True ["schema_name"],Left (txt $ iniSchemas,Equals))]
+      authPred =  [(IProd True ["grantee"],Left ( txt $ iniUsers,Equals)), (IProd True ["table_schema"],Left (txt $ iniSchemas,Equals))]
   (orddb ,authorization,translation) <- liftIO $ transactionNoLog  (meta inf) $
       (,,) <$> (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred))
            <*> (fst <$> (selectFromTable "authorization" Nothing Nothing [] authPred))

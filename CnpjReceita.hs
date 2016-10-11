@@ -81,7 +81,7 @@ convertHtml out =
             scnae = filter ((/=(TB1 (SText "Não Informada"))).fst) $ fmap (\t -> ((TB1 . SText .TL.filter (not . flip L.elem ("-." :: String)) . fst) t ,    (TB1 . SText .TL.strip . TL.drop 3 .  snd ) t)) ts
                 where ts = join . maybeToList $ fmap (TL.breakOn " - " .  TL.pack ) <$> (M.lookup "CÓDIGO E DESCRIÇÃO DAS ATIVIDADES ECONÔMICAS SECUNDÁRIAS" out)
             attrs = tb [ own "owner_name" (idx "NOME EMPRESARIAL")
-                       , fk [Rel "address" "=" "id"] [own "address" (LeftTB1 $ Just $ TB1 $ SNumeric (-1)) ]
+                       , fk [Rel "address" Equals "id"] [own "address" (LeftTB1 $ Just $ TB1 $ SNumeric (-1)) ]
                           (LeftTB1 $ Just $
                           tb [attr "id" (SerialTB1 Nothing)
                               ,attr "logradouro" (idx "LOGRADOURO")
@@ -91,9 +91,9 @@ convertHtml out =
                               ,attr "bairro" (idx "BAIRRO/DISTRITO")
                               ,attr "municipio" (idx "MUNICÍPIO")
                               ,attr "uf" (idx "UF")])
-                       ,fk [Rel "atividade_principal" "=" "id"] [own "atividade_principal" (LeftTB1 $ Just (pcnae))]
+                       ,fk [Rel "atividade_principal" Equals "id"] [own "atividade_principal" (LeftTB1 $ Just (pcnae))]
                                   (LeftTB1 $ Just $ tb [cna "id" pcnae,cna "description" pdesc] )
-                       ,afk [(Rel "atividades_secundarias" "=" "id")] [own "atividades_secundarias" (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ fmap fst scnae)]
+                       ,afk [(Rel "atividades_secundarias" Equals "id")] [own "atividades_secundarias" (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ fmap fst scnae)]
                                   ((\(pcnae,pdesc)-> tb [cna "id" pcnae,cna "description" pdesc] ) <$> scnae)]
         in Just  attrs
 

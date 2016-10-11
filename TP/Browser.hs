@@ -98,7 +98,7 @@ addServer inf =  do
       obj = serverCreate inf now
     transaction inf $ insertFrom obj
 
-idexToPred (G.Idex  i) = head $ (\(k,a)-> (IProd True [k],Left (a,"@>"))) <$>  M.toList  i
+idexToPred (G.Idex  i) = head $ (\(k,a)-> (IProd True [k],Left (a,Contains))) <$>  M.toList  i
 
 deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
   now <- getCurrentTime
@@ -130,7 +130,7 @@ updateClient metainf inf table tdi clientId now = do
       time = TB1  . STimestamp . utcToLocalTime utc
       inter i j  = IntervalTB1 $ Interval.interval (i,True) (j,True)
       row = tblist . fmap _tb
-            $ [ FKT (kvlist [_tb $ Attr "clientid" (TB1 (SNumeric (clientId )))]) [Rel "clientid" "=" "id"] (TB1 $ mapKey' keyValue $ old)
+            $ [ FKT (kvlist [_tb $ Attr "clientid" (TB1 (SNumeric (clientId )))]) [Rel "clientid" Equals "id"] (TB1 $ mapKey' keyValue $ old)
               , Attr "up_time" (inter (Interval.Finite $ time now) Interval.PosInf)
               , Attr "schema_name" (txt .  schemaName $ inf )
               , IT "selection"
@@ -218,7 +218,7 @@ viewerKey inf table cli layout cliTid = mdo
   iv   <- currentValue (facts cliTid)
   let
       lookT,lookPK :: TBData Key Showable -> Maybe (Int,TBData Key Showable)
-      lookT iv = join $ fmap ((\t -> L.find (\(ix,i)->  G.indexPred (liftAccess (meta inf) "clients_table" $ IProd True ["table"],Left (txt (tableName table), "=")) i) $ zip [0..] (fmap unTB1 $ F.toList t) ).unArray) (join $ unSOptional <$> i)
+      lookT iv = join $ fmap ((\t -> L.find (\(ix,i)->  G.indexPred (liftAccess (meta inf) "clients_table" $ IProd True ["table"],Left (txt (tableName table), Equals)) i) $ zip [0..] (fmap unTB1 $ F.toList t) ).unArray) (join $ unSOptional <$> i)
         where
           i = _fkttable <$> indexField (liftAccess (meta inf) "clients" $ (IProd False ["selection"]) ) iv
 
@@ -264,7 +264,7 @@ viewerKey inf table cli layout cliTid = mdo
   res4 <- ui $ mapT0EventDyn (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
   itemList <- listBoxEl itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (fmap Just <$> tidings st sel ) (pure id) (pure (maybe id attrLine))
   let evsel =  rumors (fmap join  $ triding itemList)
-  (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] [(IProd True ["schema_name"],Left (txt (schemaName inf),"=" ))]
+  (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals ))]
   -- ui $onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) inf dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< getCurrentTime )
   prop <- stepper cv evsel
   let tds = tidings prop evsel

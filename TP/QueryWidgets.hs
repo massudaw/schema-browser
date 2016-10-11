@@ -240,7 +240,7 @@ goAttSize i = case i of
                 KInterval l -> let (i1,i2) = goAttSize l in (i1*2 ,i2)
                 (Primitive i) ->
                   case (\(AtomicPrim i) -> i) $ i of
-                       PInt -> (3,1)
+                       PInt _-> (3,1)
                        PText-> (3,1)
                        PDate -> (3,1)
                        PColor-> (3,1)
@@ -1180,7 +1180,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
           sortList =  sorting' <$> pure (fmap ((,True)._relTarget) rel)
       let
           vv :: Tidings (Maybe [TB Identity CoreKey Showable])
-          vv =   join .  fmap (\i -> if L.length i == L.length rel then Just i else Nothing) <$>  liftA2 (<>) iold2  ftdi2
+          vv =   join .  fmap (\i -> if L.length i == L.length rel then Just i else Nothing).  fmap L.nub . traceShowId <$>  liftA2 (<>) iold2  ftdi2
       cvres <- currentValue (facts vv)
       filterInp <- UI.input # set UI.class_ "col-xs-3"
       filterInpBh <- stepper "" (UI.valueChange filterInp)
@@ -1212,7 +1212,6 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
 
       onEvent (filterE (\(a,b,c)->isJust c && isNothing a ) $ (,,) <$> facts tdi <*> facts (triding offset)<@> diffEvent (facts iold2)(rumors iold2) ) $ (\(v0,i,o) ->  traverse (\o -> liftIO $ do
         transactionNoLog inf $ selectFrom (_kvname m) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (predicatefk   o)) o  )
-
       -- Select page
       let
         paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
@@ -1388,7 +1387,7 @@ sortFilterUI conv ix bh  = do
 
 
 
-viewer :: InformationSchema -> Table -> [(Access Key ,Either (FTB Showable,Text) Text)] -> UI Element
+viewer :: InformationSchema -> Table -> [(Access Key ,AccessOp Showable )] -> UI Element
 viewer inf table envK = mdo
   let
       filterStatic =filter (not . flip L.elem (concat $ fmap (F.toList . (Le.view Le._1)) envK))
@@ -1405,7 +1404,7 @@ viewer inf table envK = mdo
               let slist = fmap (\(i,j,_) -> (i,j)) slist'
                   ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
-                  flist = catMaybes $ fmap (\(i,_,j) -> (\(op,v) -> (IProd True [i],Left (v,T.pack op))) <$> j) slist'
+                  flist = catMaybes $ fmap (\(i,_,j) -> (\(op,v) -> (IProd True [i],Left (v,readBinaryOp $ T.pack op))) <$> j) slist'
               (_,(fixmap,lres)) <- liftIO $ transactionNoLog inf $ selectFrom (tableName table ) (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (WherePredicate $ AndColl $ fmap PrimColl $envK <> flist)
               let (size,_) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (WherePredicate$AndColl $ fmap PrimColl $  envK) fixmap
               return (o,(slist,paging o (size,sorting' ordlist (G.toList lres))))

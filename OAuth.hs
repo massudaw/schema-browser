@@ -341,7 +341,7 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
             PText -> join $ readPrim k . T.unpack <$> (v ^? _String)
             PTimestamp _ ->
                 (fmap (STimestamp . utcToLocalTime utc) . resultToMaybe . fromJSON $ v ) <|> (STimestamp . utcToLocalTime utc . posixSecondsToUTCTime.realToFrac . (/10^3). read . T.unpack  <$> (v ^? _String))
-            PInt ->  (SNumeric . round <$> (v ^? _Number)) <|> (SNumeric . round .read . T.unpack <$> ( v^? _String))
+            PInt _->  (SNumeric . round <$> (v ^? _Number)) <|> (SNumeric . round .read . T.unpack <$> ( v^? _String))
             PDouble -> SDouble . realToFrac  <$> (v ^? _Number)
             PBinary -> join  $ readPrim k . T.unpack  <$> (v ^? _String)
           RecordPrim (i,m) ->  Left .fmap TB1 .  tbNull <$>  convertAttrs infsch (if f then Nothing else getref) inf   (justError "no look" $  M.lookup m inf ) v
@@ -435,7 +435,7 @@ gmailPrim =
   ,("email",PMime "text/plain")
   ,("html",PMime "text/html")
   ,("double precision",PDouble)
-  ,("integer",PInt)
+  ,("integer",PInt 8)
   ,("boolean",PBoolean)
   ,("base64url",PText)
   ]

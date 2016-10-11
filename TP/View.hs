@@ -56,7 +56,7 @@ geoPred geofields (_,ne,sw) = geo
     geo =
       OrColl $
         PrimColl .
-        (, Left ((IntervalTB1 $ Interval.interval (makePos sw) (makePos ne)),"@>") ) .
+          (, Left ((IntervalTB1 $ Interval.interval (makePos sw) (makePos ne)),Contains) ) .
         indexer . T.pack . renderShowable <$>
         F.toList geofields
 
@@ -67,10 +67,10 @@ timePred evfields (_,incrementT,resolution) = time
       PrimColl . (, Left ( (IntervalTB1 $ fmap (ref (keyType f)) i),op (keyType f))) $
         indexer (keyValue f)
     op f = case f of
-             KInterval i -> "&&"
+             KInterval i -> IntersectOp
              KOptional i -> op i
              KSerial i -> op i
-             Primitive i -> "@>"
+             Primitive i -> Contains
     ref f =
         case f of
             Primitive (AtomicPrim PDate) ->
@@ -93,7 +93,7 @@ predicate
     :: Maybe (NonEmpty Key)
     -> Maybe (NonEmpty (FTB Showable))
     -> (Maybe (t, [Double], [Double]), Maybe (t1, UTCTime, String))
-    -> BoolCollection (Access T.Text,Either (FTB Showable,T.Text) T.Text)
+    -> BoolCollection (Access T.Text,AccessOp Showable)
 predicate evfields geofields (i,j) =
     AndColl $
     catMaybes [liftA2 geoPred geofields i, liftA2 timePred evfields j]

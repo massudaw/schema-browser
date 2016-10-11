@@ -76,7 +76,7 @@ indexFieldRec n@(Nested ix@(IProd b l) nt) v = join $ fmap joinFTB . traverse (i
 
 genPredicate i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
 genPredicate i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
-genPredicate i (IProd b l) =  (\l -> if b then Just $ PrimColl (IProd b l,Right (if i then "is not null" else "is null") ) else Nothing ) $ l
+genPredicate i (IProd b l) =  (\l -> if b then Just $ PrimColl (IProd b l,Right (if i then Not IsNull else IsNull) ) else Nothing ) $ l
 genPredicate i n@(Nested (IProd b p) l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> genPredicate i (IProd b [a]) ) <$> p -- AndColl <$> liftA2 (\i  j -> [i,j]) (genPredicate i p)  ( genNestedPredicate p i l)
 genPredicate _ i = errorWithStackTrace (show i)
 

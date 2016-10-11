@@ -145,8 +145,8 @@ setup smvar args w = void $ do
                 "Poll" -> do
                     element metabody #
                       set items
-                          [ metaAllTableIndexA inf "polling" [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") ) ]
-                          , metaAllTableIndexA inf "polling_log" [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") ) ]]
+                          [ metaAllTableIndexA inf "polling" [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals) ) ]
+                          , metaAllTableIndexA inf "polling_log" [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals) ) ]]
                 "Change" -> do
                     case schemaName inf of
                       "gmail" -> do
@@ -163,16 +163,16 @@ setup smvar args w = void $ do
                           listBoxEl itemListEl2 ( G.toList . snd  <$> vpt)  (pure Nothing) (pure id) ( pure attrLine )
                         element metabody # set children [itemListEl,itemListEl2]
                       i -> do
-                        let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),"IN"))]
+                        let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                         dash <- metaAllTableIndexA inf "modification_table" pred
                         element metabody # set UI.children [dash]
                 "Stats" -> do
-                    let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),"IN"))]
+                    let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     stats <- metaAllTableIndexA inf "table_stats" pred
-                    clients <- metaAllTableIndexA inf "clients"$  [(IProd True ["schema_name"],Left (LeftTB1 $ Just $ txt (schemaName inf),"=") ) ]<> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),"IN") )]
+                    clients <- metaAllTableIndexA inf "clients"$  [(IProd True ["schema_name"],Left (LeftTB1 $ Just $ txt (schemaName inf),Equals) ) ]<> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
                     element metabody # set UI.children [stats,clients]
                 "Exception" -> do
-                    let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),"IN"))]
+                    let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     dash <- metaAllTableIndexA inf "plugin_exception" pred
                     element metabody # set UI.children [dash]
                 i -> errorWithStackTrace (show i)
@@ -233,7 +233,7 @@ authMap smvar sargs (user,pass) schemaN =
     where oauth tag = do
               user <- justError "no google user" <$> lookupEnv "GOOGLE_USER"
               metainf <- metaInf smvar
-              (dbmeta ,_) <- transactionNoLog metainf $ selectFromTable "google_auth" Nothing Nothing [] [(IProd True ["username"],Left ((txt  $ T.pack user ),"=") )]
+              (dbmeta ,_) <- transactionNoLog metainf $ selectFromTable "google_auth" Nothing Nothing [] [(IProd True ["username"],Left ((txt  $ T.pack user ),Equals) )]
               let
                   td :: Tidings (OAuth2Tokens)
                   td = (\o -> let

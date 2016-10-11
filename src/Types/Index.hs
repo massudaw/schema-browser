@@ -16,6 +16,8 @@ import Step.Host
 import Control.Applicative
 import Data.Either
 import Data.GiST.RTree (pickSplitG)
+import Data.GiST.BTree hiding(Equals,Contains)
+import Data.GiST.GiST as G
 import Data.Tuple (swap)
 import Data.Binary
 import Data.Semigroup
@@ -29,8 +31,6 @@ import Data.Char
 import qualified Data.Foldable as F
 import Data.Functor.Apply
 import Prelude hiding(head,lookup,filter)
-import Data.GiST.GiST as G
-import Data.GiST.BTree (Predicate(..))
 import qualified Data.Interval as Interval
 import Data.Interval (interval,lowerBound',upperBound',lowerBound,upperBound)
 import qualified Data.ExtendedReal as ER
@@ -39,7 +39,7 @@ import GHC.Stack
 import Debug.Trace
 import qualified Data.List as L
 import qualified Data.Set as Set
-import Data.GiST.BTree
+import qualified Data.List as L
 import Data.Map (Map)
 import qualified Data.Map.Strict as M
 
@@ -212,7 +212,7 @@ checkPred' v (AndColl i ) = F.all  (checkPred' v)i
 checkPred' v (OrColl i ) = F.any (checkPred' v) i
 checkPred' v (PrimColl i) = indexPred i v
 
-indexPred :: (Access Key ,Either (FTB Showable,T.Text) T.Text ) -> TBData Key Showable -> Bool
+indexPred :: (Access Key ,AccessOp Showable ) -> TBData Key Showable -> Bool
 indexPred (Many i,eq) a= all (\i -> indexPred (i,eq) a) i
 indexPred (n@(Nested k nt ) ,eq) r
   = case  indexField n r of
@@ -235,13 +235,13 @@ indexPred (a@(IProd _ _),eq) r =
         i -> match eq Exact rv
     Just (IT _ rv) ->
       case eq of
-        Right "is not null" -> isJust $ unSOptional' rv
-        Right "is null" -> isNothing $ unSOptional' rv
+        Right (Not IsNull ) -> isJust $ unSOptional' rv
+        Right IsNull -> isNothing $ unSOptional' rv
         i -> errorWithStackTrace (show i)
     Just (FKT _ _ rv) ->
       case eq of
-        Right "is not null" -> isJust $ unSOptional' rv
-        Right "is null" -> isNothing $ unSOptional' rv
+        Right (Not IsNull)  -> isJust $ unSOptional' rv
+        Right IsNull -> isNothing $ unSOptional' rv
         i -> errorWithStackTrace (show i)
 
 
@@ -280,7 +280,7 @@ data DiffShowable
 
 instance Predicates (FTB Showable) where
   type Penalty (FTB Showable) = DiffShowable
-  type Query (FTB Showable) = Either (FTB Showable , T.Text) T.Text
+  type Query (FTB Showable) = AccessOp Showable
   consistent (LeftTB1 Nothing) (LeftTB1 Nothing)     = True
   consistent (LeftTB1 (Just i)) (LeftTB1 (Just j) )    = consistent j  i
   consistent (LeftTB1 (Just i)) j     = consistent j  i
@@ -298,28 +298,28 @@ instance Predicates (FTB Showable) where
   consistent (SerialTB1 (Just i)) j@(TB1 _) = consistent i j
   consistent i j  = errorWithStackTrace (show (i,j))
 
-  match  (Right "is not null") _  (LeftTB1 j)   = isJust j
-  match  (Right "is not null") _  i   = True
-  match  (Right "is null") _   (LeftTB1 j)   = isNothing j
-  match  (Right "is null") _   j   = False
+  match  (Right (Not i) ) c  j   = not $ match (Right i ) c j
+  match  (Right IsNull) _   (LeftTB1 j)   = isNothing j
+  match  (Right IsNull) _   j   = False
   match (Left v) a j  = ma  v a j
     where
+      -- ma v a j | traceShow (v,a,j) False = undefined
       ma  v  a  (LeftTB1 j)   = fromMaybe False (ma v a <$> j)
       ma  v  a  (SerialTB1 j)   = fromMaybe False (ma v a <$> j)
       ma  v  a  (DelayedTB1 j)   = fromMaybe False (ma v a <$> j)
       ma  (LeftTB1 j ,v) e  i   = fromMaybe False ((\a -> ma (a,v) e i) <$> j)
-      ma  (LeftTB1 i,"=") e   (LeftTB1 j)   = fromMaybe False $ liftA2 (\a b -> ma a e b) ((,"=") <$> i) j
+      ma  (LeftTB1 i,Equals) e   (LeftTB1 j)   = fromMaybe False $ liftA2 (\a b -> ma (a,Equals) e b) i j
       ma  (TB1 i,_) _  (TB1 j)   = i == j
-      ma  ((ArrayTB1 i) ,"<@") _  ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-      ma  ((ArrayTB1 j) ,"IN")  _ ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-      ma  ((ArrayTB1 j) ,"FIN") _  ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-      ma  ((ArrayTB1 j),"@>" ) _  ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-      ma (j@(TB1 _),"<@") _  (ArrayTB1 i) = F.elem j i
-      ma (j@(TB1 _),"=") _ (ArrayTB1 i) = F.elem j i
-      ma (j@(TB1 _),"FIN") _ (ArrayTB1 i) = F.elem j i
-      ma ((ArrayTB1 i) ,"@>") _ j@(TB1 _)   = F.elem j i
+      ma  ((ArrayTB1 i) ,Flip Contains ) _  ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
+      ma  ((ArrayTB1 j),Contains ) _  ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
+      ma (j@(TB1 _),AnyOp o ) p  (ArrayTB1 i) = F.any (ma (j,o) p )  i
+      ma (ArrayTB1 i,Flip (AnyOp o)) p j  = F.any (\i -> ma (i,o) p j ) i
+      ma (i@(TB1 _) ,op) p (IntervalTB1 j)  = i `Interval.member` j
+      ma (IntervalTB1 i ,op) p j@(TB1 _)  = j `Interval.member` i
+     {- ma ((ArrayTB1 i) ,"@>") _ j@(TB1 _)   = F.elem j i
       ma ((ArrayTB1 i) ,"=") _ j@(TB1 _)   = F.elem j i
       ma  ((ArrayTB1 j) ,"IN") p  i  = F.any (\el -> ma (el,"=") p i ) j
+      ma  ((ArrayTB1 j) ,"ANY") p  i  = F.any (\el -> ma (el,"=") p i ) j
       ma  ((ArrayTB1 j) ,"FIN") p  i  = F.any (\el -> ma (el,"=") p  i ) j
       ma ((ArrayTB1 i) ,"@>") e j   = F.all (\i -> ma (i,"@>") e j) i
       ma (IntervalTB1 i ,"<@") _ j@(TB1 _)  = j `Interval.member` i
@@ -332,9 +332,10 @@ instance Predicates (FTB Showable) where
       ma (j@(TB1 _ ),"<@") _ (IntervalTB1 i)  = j `Interval.member` i
       ma (j@(TB1 _ ),"@>") _ (IntervalTB1 i)  = j `Interval.member` i
       ma (j@(TB1 _ ),"=") _ (IntervalTB1 i)  = j `Interval.member` i
-      ma (IntervalTB1 i ,"<@") Exact (IntervalTB1 j)  = j `Interval.isSubsetOf` i
-      ma (IntervalTB1 j ,"@>") Exact (IntervalTB1 i)  = j `Interval.isSubsetOf` i
-      ma (IntervalTB1 j ,"&&") _  (IntervalTB1 i)  = not $ Interval.null $ j `Interval.intersection` i
+-}
+      ma (IntervalTB1 i ,Contains) Exact (IntervalTB1 j)  = j `Interval.isSubsetOf` i
+      ma (IntervalTB1 j ,Flip Contains) Exact (IntervalTB1 i)  = j `Interval.isSubsetOf` i
+      ma (IntervalTB1 j ,IntersectOp) _  (IntervalTB1 i)  = not $ Interval.null $ j `Interval.intersection` i
       ma (IntervalTB1 i ,_) Intersect (IntervalTB1 j)  = not $ Interval.null $ j `Interval.intersection` i
       ma i e j = errorWithStackTrace ("no ma = " <> show (i,e,j))
   match x y z = errorWithStackTrace ("no match = " <> show (x,y,z))

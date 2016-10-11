@@ -58,7 +58,7 @@ calendarCreate el (Just (p,ne,sw)) evs= runFunction $ ffi "createMap (%1,%2,%3,%
 mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
     let
       calendarT = (\(a,b) c -> (a,b,c)) <$> ((,)<$> facts agendaT <*> facts incrementT )<#> resolutionT
-      schemaPred = [(IProd True ["schema_name"],Left (txt (schemaName inf),"="))]
+      schemaPred = [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals))]
 
     (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
     (_,(_,evMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred

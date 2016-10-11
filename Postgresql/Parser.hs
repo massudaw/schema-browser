@@ -117,14 +117,14 @@ postgresPrim =
   ,("double precision",PDouble)
   ,("numeric",PDouble)
   ,("float8",PDouble)
-  ,("int4",PInt)
+  ,("int4",PInt 4)
   ,("cnpj",PCnpj)
   ,("cpf",PCpf)
-  ,("int8",PInt)
-  ,("integer",PInt)
-  ,("bigint",PInt)
-  ,("cardinal_number",PInt)
-  ,("smallint",PInt)
+  ,("int8",PInt 8)
+  ,("integer",PInt 4)
+  ,("bigint",PInt 8)
+  ,("cardinal_number",PInt 2)
+  ,("smallint",PInt 2)
   ,("boolean",PBoolean)
   ,("bool",PBoolean)
   ,("timestamptz",PTimestamp Nothing )
@@ -290,7 +290,7 @@ unIntercalateAtto l s = go l
 
 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
-parseAttr i | traceShow i False = undefined
+-- parseAttr i | traceShow i False = undefined
 parseAttr (Attr i _ ) = do
   s<- parseShowable (keyType  i) <?> show i
   return $  Attr i s
@@ -300,7 +300,7 @@ parseAttr (Fun i rel _ ) = do
 
 
 parseAttr (IT na j) = do
-  mj <- tryquoted (parseLabeledTable j) -- <|>  return ((,SOptional Nothing) <$> j)
+  mj <- tryquoted (parseLabeledTable j)
   return $ IT  na mj
 
 parseAttr (FKT l rel j ) = do
@@ -329,7 +329,7 @@ parseLabeledTable (LeftTB1 (Just i )) =
 parseLabeledTable  tb1 = traverse parseRecord  $ tb1
 
 parseRecord  (me,m) = (char '('  *> (do
-  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (traceShowId $  L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr.snd)) $M.toList (replaceRecRel  (_kvvalues $ unTB m) (fmap (fmap (fmap S.fromList) ) $ _kvrecrels  me))) ) (char ',')
+  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (  L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr.snd)) $M.toList (replaceRecRel  (_kvvalues $ unTB m) (fmap (fmap (fmap S.fromList) ) $ _kvrecrels  me))) ) (char ',')
   return (me,Compose $ Identity $  KV (M.fromList im) )) <*  char ')' )
 
 parseRow els  = (char '('  *> (do
@@ -398,7 +398,7 @@ parsePrim i =  do
         PMime  _ -> let
               pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}" <* takeWhile (=='\\'))
            in tryquoted pr
-        PInt ->  SNumeric <$>  signed decimal
+        PInt _ ->  SNumeric <$>  signed decimal
         PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
         PDouble -> SDouble <$> pg_double
         PColor -> let

@@ -102,7 +102,7 @@ readPrim t =
      PCnpj -> readCnpj
      PCpf-> readCpf
      PDouble ->  readDouble
-     PInt -> readInt
+     PInt _-> readInt
      PTimestamp zone -> readTimestamp
      PInterval -> readInterval
      PDate-> readDate

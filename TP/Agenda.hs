@@ -59,7 +59,7 @@ calendarAddSource cal t evs = runFunction $ ffi "addSource(%1,%2,%3)" cal (table
 eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
     let
       calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
-      schemaPred =  [(IProd True ["schema_name"],Left (txt (schemaName inf),"=") )]
+      schemaPred =  [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals) )]
 
     dashes <- liftIO$ do
       (tmap,evMap) <- transactionNoLog (meta inf) $ do

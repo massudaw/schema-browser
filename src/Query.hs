@@ -16,7 +16,6 @@ module Query
   ,unComp
   ,isTableRec
   ,tbFilterE
-  ,intersectionOp
   ,isKDelayed
   ,isKOptional
   ,lookGist
@@ -96,6 +95,7 @@ import qualified Types.Index as G
 
 
 
+-- transformKey ki ko v | traceShow (ki,ko,v) False = undefined
 transformKey (KSerial i)  (KOptional j) (SerialTB1 v)  | i == j = LeftTB1  v
 transformKey (KOptional i)  (KSerial j) (LeftTB1 v)  | i == j = SerialTB1 v
 transformKey (KOptional j) l (LeftTB1  v)
@@ -103,11 +103,13 @@ transformKey (KOptional j) l (LeftTB1  v)
     | otherwise = errorWithStackTrace "no transform optional nothing"
 transformKey (KSerial j)  l (SerialTB1 v)
     | isJust v = transformKey j l (fromJust v)
-    | otherwise =  DelayedTB1 Nothing
+    | otherwise =  SerialTB1 Nothing
 transformKey l@(Primitive _)  (KOptional j ) v  = LeftTB1 $ Just (transformKey l j v)
 transformKey l@(Primitive _)  (KSerial j ) v   = SerialTB1 $ Just (transformKey l j v)
 transformKey l@(Primitive _)  (KArray j ) v | j == l  = ArrayTB1 $ pure v
 transformKey ki kr v | ki == kr = v
+transformKey (Primitive ki) (Primitive kr) v
+  | isPrimReflexive ki kr = v
 transformKey ki kr  v = errorWithStackTrace  ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
 
 
@@ -129,38 +131,7 @@ isKOptional (Primitive _) = False
 isKOptional (KArray i)  = isKOptional i
 -- isKOptional i = errorWithStackTrace (show ("isKOptional",i))
 
-
-
-getPrim i@(Primitive _ ) = i
-getPrim (KOptional j) =  getPrim j
-getPrim (KDelayed j) =  getPrim j
-getPrim (KSerial j) =  getPrim j
-getPrim (KArray j) =  getPrim j
-getPrim (KInterval j) =  getPrim j
-
-inner b l m = l <> b <> m
-
 -- Operators
-
-intersectionOp :: (Eq b,Show (KType (Prim KPrim b ))) => KType (Prim KPrim b)-> Text -> KType (Prim KPrim b)-> (Text -> Text -> Text)
-intersectionOp (KOptional i) op (KOptional j) = intersectionOp i op j
-intersectionOp i op (KOptional j) = intersectionOp i op j
-intersectionOp (KOptional i) op j = intersectionOp i op j
-intersectionOp (KInterval i) op (KInterval j )  = inner op
-intersectionOp (KArray i) op  (KArray j )  = inner op
-intersectionOp (KInterval i) op j
-    | getPrim i == getPrim j =  inner op
-    | otherwise = errorWithStackTrace $ "wrong type intersectionOp " <> show i <> " /= " <> show j
-intersectionOp i op (KInterval j)
-    | getPrim i == getPrim j = inner "<@"
-    | otherwise = errorWithStackTrace $ "wrong type intersectionOp " <> show i <> " /= " <> show j
-intersectionOp (KArray i ) op  j
-    | i == getPrim j = (\j i -> i <> " IN (select * from unnest("<> j <> ") ) ")
-    | otherwise = errorWithStackTrace $ "wrong type intersectionOp {*} - * " <> show i <> " /= " <> show j
-intersectionOp j op (KArray i )
-    | getPrim i == getPrim j = (\i j  -> i <> " IN (select * from unnest("<> j <> ") ) ")
-    | otherwise = errorWithStackTrace $ "wrong type intersectionOp * - {*} " <> show j <> " /= " <> show i
-intersectionOp i op j = inner op
 
 showTable t  = rawSchema t <> "." <> rawName t
 
@@ -221,21 +192,27 @@ isTableRec tb = isTableRec'  (unTB1 tb )
 isTableRec' tb = not $ L.null $ _kvrecrels (fst  tb )
 
 
+isPrimReflexive (AtomicPrim (PInt i)) (AtomicPrim (PInt j)) = True
+isPrimReflexive a b = False
+
 isPairReflexive (Primitive i ) op (KInterval (Primitive j)) | i == j = False
 isPairReflexive (Primitive j) op  (KArray (Primitive i) )  | i == j = False
 isPairReflexive (KInterval i) op (KInterval j)
-  | i == j && op == "<@" = False
-  | i == j && op == "=" = True
-isPairReflexive (Primitive i ) op (Primitive j) | i == j = True
+  | i == j && op == Contains = False
+  | op == Equals = isPairReflexive i op j
+isPairReflexive (Primitive i ) op (Primitive j)
+    | i == j = True
+    | otherwise = isPrimReflexive i  j
 isPairReflexive (KOptional i ) op  j = isPairReflexive i op j
 isPairReflexive i  op (KOptional j) = isPairReflexive i op j
 isPairReflexive (KSerial i) op j = isPairReflexive i op j
 isPairReflexive i op (KSerial j) = isPairReflexive i op j
 isPairReflexive (KArray i )  op  (KArray j)
-  | i == j  && op == "<@" = False
-  | i == j  && op == "=" = True
+  | i == j  && op == Contains = False
+  | op == Equals = isPairReflexive i op j
 isPairReflexive (KArray i )  op  j = True
-isPairReflexive i op  j = errorWithStackTrace $ "isPairReflexive " <> show i <> " - "<> show  j
+isPairReflexive j op (KArray i )  = False
+isPairReflexive i op  j = errorWithStackTrace $ "isPairReflexive " <> show i <> " - " <> show op <> " - " <> show  j
 
 filterReflexive ks = L.filter (reflexiveRel ks) ks
 
@@ -305,7 +282,7 @@ pathToRel (Path ifk (FKInlineTable _ ) ) = fmap Inline $ F.toList ifk
 pathToRel (Path ifk (FunctionField _ _ _ ) ) = fmap Inline $ F.toList ifk
 pathToRel (Path ifk (FKJoinTable ks _ ) ) = ks
 
-dumbKey n = Key n  Nothing [] 0 Nothing (unsafePerformIO newUnique) (Primitive (AtomicPrim PInt ))
+dumbKey n = Key n  Nothing [] 0 Nothing (unsafePerformIO newUnique) (Primitive (AtomicPrim (PInt 0) ))
 
 recursePath
   :: KVMetadata Key -> Bool->  RecState Key

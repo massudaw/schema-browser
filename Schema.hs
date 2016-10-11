@@ -112,7 +112,7 @@ extendedRel inf t a b c =  snd access $ (lrel (fst access))
     where path :: [Text]
           path = T.splitOn "->" a
           lrel :: Text -> Rel Key
-          lrel t =  Rel (justError "no key" $ HM.lookup (t ,  last path) inf ) b c
+          lrel t =  Rel (justError "no key" $ HM.lookup (t ,  last path) inf ) (readBinaryOp b) c
           access :: (Text, Rel Key -> Rel Key)
           access = foldl cons  (t,id) (init path)
             where
@@ -177,7 +177,7 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
           exforeignKeys :: Query
           exforeignKeys = "select origin_table_name,target_schema_name,target_table_name,origin_fks,target_fks,rel_fks from metadata.extended_view_fks where origin_schema_name = ?"
 
-       fks <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) ( FKJoinTable (zipWith3 (\a b c -> Rel a b c) (lookFk tp kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn foreignKeys (Only schema)
+       fks <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) ( FKJoinTable (zipWith3 (\a b c -> Rel a (readBinaryOp b) c) (lookFk tp kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn foreignKeys (Only schema)
        efks <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp (head . T.splitOn "->" <$> kp)) ( FKJoinTable (zipWith3 (\a b c -> extendedRel keyMap tp a b c)  (V.toList kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn exforeignKeys (Only schema) :: R.Dynamic (Map Text (Set (Path (Set Key) (SqlOperation ) )))
 
 
@@ -466,7 +466,7 @@ selectFromTable :: Text
  -> Maybe Int
  -> Maybe Int
  -> [(Key, Order)]
- -> [(Access Text , Either (FTB Showable,Text) Text)]
+ -> [(Access Text , AccessOp Showable )]
  -> TransactionM
       (DBVar, Collection Key Showable)
 selectFromTable t a b c p = do

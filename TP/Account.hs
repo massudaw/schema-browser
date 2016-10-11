@@ -57,7 +57,7 @@ import qualified Data.Map as M
 accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
     let
       calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
-      schemaPred = [(IProd True ["schema_name"],Left (txt (schemaName inf),"="))]
+      schemaPred = [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals))]
 
     (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
     (_,(_,emap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred

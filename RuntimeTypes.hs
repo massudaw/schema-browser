@@ -277,7 +277,7 @@ liftAccess inf tname (Nested i c) = Nested ref (liftAccess inf (snd l) c)
 liftAccess _ _ i = errorWithStackTrace (show i)
 
 
-lookAccess :: InformationSchema -> Text -> (Access Text , Either (FTB Showable,Text) Text) -> (Access Key, Either (FTB Showable,Text) Text)
+lookAccess :: InformationSchema -> Text -> (Access Text , AccessOp Showable ) -> (Access Key, AccessOp Showable )
 lookAccess inf tname l = Le.over (Le._1) (liftAccess inf tname)  l
 
 
