@@ -413,8 +413,6 @@ addStats schema = do
 
 
 
-runDBM inf m = do
-    runReaderT m inf
 
 
 lookPK :: InformationSchema -> (Set Key) -> Table

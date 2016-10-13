@@ -134,6 +134,10 @@ showableDef (KSerial i) = Just $ SerialTB1 (showableDef i)
 showableDef (KArray i ) = Nothing -- Just (SComposite Vector.empty)
 showableDef i = Nothing
 
+isFunction :: SqlOperationK k -> Bool
+isFunction (FunctionField _ _ _) = True
+isFunction i = False
+
 isRecRel (RecJoin _ _ ) =  True
 isRecRel i = False
 
@@ -144,7 +148,8 @@ pathRelRel :: Ord k => Path (Set k ) (SqlOperationK k) -> Set (Rel k)
 pathRelRel (Path _ (FKJoinTable  rel   _ )  ) = Set.fromList rel
 pathRelRel (Path r (FKInlineTable  _  )   ) = Set.map Inline r
 pathRelRel (Path r (RecJoin l rel )   ) =  pathRelRel (Path r rel )
-pathRelRel (Path r (FunctionField _ _ _ ) ) =  Set.map Inline r
+pathRelRel (Path r (FunctionField _ _ a ) ) =  Set.map Inline r
+
 
 pathRelRel' :: Ord k => Path (Set k ) (SqlOperationK k) -> MutRec [Set (Rel k )]
 pathRelRel' (Path r (RecJoin l rel )   )
@@ -405,7 +410,7 @@ instance Binary TimeOfDay where
 data TB f k a
   = Attr
     { _tbattrkey ::  k
-    , _tbattr ::  (FTB a)
+    , _tbattr ::  FTB a
     }
   | Fun
     { _tbattrkey :: k
@@ -764,7 +769,10 @@ instance Num Showable where
     SNumeric j  + SDouble i = SDouble $ i +  fromIntegral j
     v + k = errorWithStackTrace (show (v,k))
     SNumeric i *  SNumeric j = SNumeric (i * j)
+    SNumeric i *  SDouble j = SDouble (fromIntegral i * j)
+    SDouble i *  SNumeric j = SDouble (i * fromIntegral j)
     SDouble i *  SDouble j = SDouble (i * j)
+    i * j = errorWithStackTrace (show (i,j))
     fromInteger i = SDouble $ fromIntegral i
     negate (SNumeric i) = SNumeric $ negate i
     negate (SDouble i) = SDouble $ negate i
@@ -930,6 +938,8 @@ tableNonRef2 (m,n)  = (m, mapComp (KV . rebuildTable . _kvvalues) n)
     rebuildTable n =    Map.unions (nonRef . getCompose <$> F.toList n)
     -- nonRef :: Ord k => TB (Labeled Text) k a -> M.Map (Rel k) (TB (Labeled Text) k  a)
     nonRef :: Ord k => Labeled Text (TB (Labeled Text) k a) -> Map (Set (Rel k )) (Compose (Labeled Text ) (TB (Labeled Text)) k a)
+    nonRef (Labeled _ (Fun i _ _ )) =Map.empty
+    nonRef (Unlabeled (Fun i _ _ )) = Map.empty
     nonRef (Labeled _ (FKT i _ _ )) = _kvvalues i
     nonRef (Unlabeled (FKT i _ _ )) = _kvvalues i
     nonRef (Labeled t it@(IT j k )) = Map.singleton (S.singleton $ Inline j) (Compose $ Labeled t $ IT  j (tableNonRef2 <$> k ))

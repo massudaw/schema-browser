@@ -11,6 +11,7 @@ import Data.Attoparsec.Char8
 import Data.Text
 import qualified Data.ByteString.Char8 as BS
 
+import Debug.Trace
 
 readFun f = case parseOnly parseFunction f of
               Right i -> i
@@ -30,13 +31,15 @@ parseFunction =  do
   many (char ' ')
   return (Function (pack $ BS.unpack fun ) f)
 
+funmap :: Map Text (([KPrim],KPrim ),[FTB Showable] -> FTB Showable)
+funmap = M.fromList [("float8mul",(([PDouble,PDouble],PDouble),(\[i,j]-> i * j )))]
 
 evaluate :: Key -> Expr -> Map Text (([k],k ),[FTB Showable] -> FTB Showable) -> [Access Key] -> TBData Key Showable -> Maybe (Column Key Showable)
-evaluate k e fs ac tb = Attr k <$> go e
+evaluate k e fs ac tb = traceShowId $ Fun k (e,traceShowId $ ac) <$> go e
   where
     go :: Expr -> Maybe (FTB Showable)
     go (Function i e) = f <$> (traverse go   e)
       where (_,f) = justError ("no function" <> show i) $ M.lookup i fs
-    go (Value i ) = _tbattr <$> indexField (ac !! i ) tb
+    go (Value i ) = indexFieldRec (ac !! i ) tb
 
 
