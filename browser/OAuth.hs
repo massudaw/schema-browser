@@ -3,6 +3,7 @@ module OAuth (gmailOps) where
 import qualified NonEmpty as Non
 import Control.Lens
 import Control.Exception
+import Utils
 import qualified Types.Index as G
 import qualified Data.ByteString.Lazy.Char8 as BS
 import Control.Arrow
@@ -48,6 +49,7 @@ import Data.Map (Map)
 import Debug.Trace
 import Data.List (find,intercalate)
 import qualified Reactive.Threepenny as R
+import qualified Data.HashMap.Strict as HM
 
 --
 file   = "./tokens.txt"
@@ -264,11 +266,11 @@ gmailOps = (SchemaEditor undefined undefined insertTable deleteRow listTable get
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
-lbackRef (TB1 t) = snd $ Types.head $ M.toList $ getPKM t
+lbackRef (TB1 t) = snd $ head $ M.toList $ getPKM t
 
 lookMTable inf m = lookSTable inf (_kvschema m,_kvname m)
 
-convertAttrs :: InformationSchema -> Maybe (TBData Key Showable) -> M.Map Text Table ->  Table -> Value -> TransactionM (TBData Key Showable)
+convertAttrs :: InformationSchema -> Maybe (TBData Key Showable) -> HM.HashMap Text Table ->  Table -> Value -> TransactionM (TBData Key Showable)
 convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb ))
   where
     pathOrigin (Path i _  ) = i
@@ -344,7 +346,7 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
             PInt _->  (SNumeric . round <$> (v ^? _Number)) <|> (SNumeric . round .read . T.unpack <$> ( v^? _String))
             PDouble -> SDouble . realToFrac  <$> (v ^? _Number)
             PBinary -> join  $ readPrim k . T.unpack  <$> (v ^? _String)
-          RecordPrim (i,m) ->  Left .fmap TB1 .  tbNull <$>  convertAttrs infsch (if f then Nothing else getref) inf   (justError "no look" $  M.lookup m inf ) v
+          RecordPrim (i,m) ->  Left .fmap TB1 .  tbNull <$>  convertAttrs infsch (if f then Nothing else getref) inf   (justError "no look" $  HM.lookup m inf ) v
                 where  tbNull tb = if null (getAttr' tb) then Nothing else Just  tb
     fun f (KArray i) v = (\l -> if null l then return (typ i) else fmap (bimap  nullArr  nullArr) .   biTrav (fun f i) $ l ) $ (v ^.. values )
         where nullArr lm = if null l then Nothing else Just (ArrayTB1 $ Non.fromList l)

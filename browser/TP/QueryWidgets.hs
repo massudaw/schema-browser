@@ -386,7 +386,7 @@ tbCase inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
 
             -- Move to referenced table unique constraints
             relTable = M.fromList $ fmap (\i -> (_relTarget i,_relOrigin i)) rel
-            rinf = fromMaybe inf $ M.lookup (_kvschema m) (depschema inf)
+            rinf = fromMaybe inf $ HM.lookup (_kvschema m) (depschema inf)
             table = lookTable rinf  (_kvname m)
             m = (fst $ unTB1 tb1)
             pkset :: S.Set Key
@@ -1180,7 +1180,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
           sortList =  sorting' <$> pure (fmap ((,True)._relTarget) rel)
       let
           vv :: Tidings (Maybe [TB Identity CoreKey Showable])
-          vv =   join .  fmap (\i -> if L.length i == L.length rel then Just i else Nothing).  fmap L.nub . traceShowId <$>  liftA2 (<>) iold2  ftdi2
+          vv =   join .  fmap (\i -> if L.length i == L.length rel then Just i else Nothing)  <$>  liftA2 (<>) iold2  ftdi2
       cvres <- currentValue (facts vv)
       filterInp <- UI.input # set UI.class_ "col-xs-3"
       filterInpBh <- stepper "" (UI.valueChange filterInp)

@@ -19,5 +19,4 @@ imap f = Non.map (uncurry f) . Non.zip (Non.fromList [0..])
 
 fromList [] = errorWithStackTrace "empty list"
 fromList l = Non.fromList l
-{-# NOINLINE fromList #-}
 

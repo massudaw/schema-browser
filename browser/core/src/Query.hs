@@ -9,6 +9,7 @@ module Query
   tbPK
   ,joinRel
   ,joinRel2
+  ,isPrimReflexive
   ,alterKeyType
   ,inattr
   ,searchGist
@@ -22,11 +23,6 @@ module Query
   ,tlabel
   ,tableView
   ,unTlabel'
-  ,PGRecord
-  ,PGType
-  ,PGKey
-  ,CoreKey
-  ,CorePrim
   ,backFKRef
   ,backPathRef
   ,filterReflexive
@@ -192,17 +188,18 @@ isTableRec tb = isTableRec'  (unTB1 tb )
 isTableRec' tb = not $ L.null $ _kvrecrels (fst  tb )
 
 
+isPrimReflexive :: Eq b => Prim KPrim b -> Prim KPrim b -> Bool
+isPrimReflexive i j | i == j = True
 isPrimReflexive (AtomicPrim (PInt i)) (AtomicPrim (PInt j)) = True
 isPrimReflexive a b = False
 
+isPairReflexive :: (Show b , Eq b) => KType (Prim KPrim b ) -> BinaryOperator -> KType (Prim KPrim b) -> Bool
 isPairReflexive (Primitive i ) op (KInterval (Primitive j)) | i == j = False
 isPairReflexive (Primitive j) op  (KArray (Primitive i) )  | i == j = False
 isPairReflexive (KInterval i) op (KInterval j)
   | i == j && op == Contains = False
   | op == Equals = isPairReflexive i op j
-isPairReflexive (Primitive i ) op (Primitive j)
-    | i == j = True
-    | otherwise = isPrimReflexive i  j
+isPairReflexive (Primitive i ) op (Primitive j) = isPrimReflexive i  j
 isPairReflexive (KOptional i ) op  j = isPairReflexive i op j
 isPairReflexive i  op (KOptional j) = isPairReflexive i op j
 isPairReflexive (KSerial i) op j = isPairReflexive i op j
@@ -238,9 +235,10 @@ isPathReflexive (FunctionField _ _ _)= False
 isPathReflexive (RecJoin _ i ) = isPathReflexive i
 
 
+type TableMap = HM.HashMap Text (HM.HashMap Text Table)
 
 allRec'
-  :: Map Text (Map Text Table)
+  :: TableMap
      -> Table
      -> TBData Key ()
 allRec' i t = unTlabel' $ tableView  i t
@@ -288,7 +286,7 @@ recursePath
   :: KVMetadata Key -> Bool->  RecState Key
      -> [(Set (Rel Key), Labeled Text (TB (Labeled Text) Key ()))]
      -> [(Set (Rel Key), Labeled Text (TB (Labeled Text) Key ()))]
-     -> Map Text (Map Text Table)
+     -> TableMap
      -> Path (Set Key) SqlOperation
      -> State
           ((Int, Map Int Table), (Int, Map Int Key))
@@ -319,7 +317,7 @@ recursePath m isLeft isRec vacc ksbn invSchema p@(Path ifk jo@(FKInlineTable (s,
         nextLeft =  isLeft || anyLeftRel ks
         mapArray i =  if anyArrayRel ks then ArrayTB1 $ pure i else i
         mapOpt i = if anyLeftRel ks then  LeftTB1 $ Just  i else i
-        nextT = justError ("recursepath lookIT "  <> show t <> " " <> show invSchema) (join $ M.lookup t <$> M.lookup s invSchema)
+        nextT = justError ("recursepath lookIT "  <> show t <> " " <> show invSchema) (join $ HM.lookup t <$> HM.lookup s invSchema)
         fun =  recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
 recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn,tn)) )
@@ -342,7 +340,7 @@ recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn
             else return  Unlabeled
           return $ Compose $ lab $ FKT (kvlist $ fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks)))  ks (mapOpt $ TB1 tb)
   where
-        nextT = (\(Just i)-> i) (join $ M.lookup tn <$> (M.lookup sn invSchema))
+        nextT = (\(Just i)-> i) (join $ HM.lookup tn <$> (HM.lookup sn invSchema))
         e = S.fromList $ rawPK nextT
         nextLeft = any (isKOptional.keyType) (S.toList ifk) || isLeft
         mapArray i =  if anyArrayRel ks then ArrayTB1 (pure i) else i
@@ -356,7 +354,8 @@ recursePath m isLeft isRec vacc ksbn invSchema jo@(Path ifk (FunctionField k l f
     where
       a = liftASch invSchema (_kvschema m) (_kvname m) <$> f
       ref = (\i -> justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) $ head (S.toList ifk )
-recurseTB :: Map Text (Map Text Table) -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TB3Data (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3Data (Labeled Text) Key ())
+
+recurseTB :: TableMap -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TB3Data (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3Data (Labeled Text) Key ())
 recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else m  ,) <$>
     (\kv -> case kv of
       (Compose (Labeled l kv )) -> do
@@ -407,20 +406,20 @@ isLeftRel (Inline i ) =  isKOptional (keyType i)
 isLeftRel (RelAccess i j ) =  isKOptional (keyType i) || isLeftRel j
 
 
-liftASch :: Map Text (Map Text Table) -> Text -> Text -> Access Text  -> Access Key
+liftASch :: TableMap  -> Text -> Text -> Access Text  -> Access Key
 liftASch inf s tname (ISum i) =  ISum $ fmap (liftASch inf s tname)  i
 liftASch inf s tname (Many i) =  Many $ fmap (liftASch inf s tname)  i
 liftASch inf s tname (IProd b l) = IProd b $ fmap lookKey  l
   where
     tb = lookup tname $  lookup s inf
-    lookup i m = justError ("no look" <> show i) $ M.lookup i m
+    lookup i m = justError ("no look" <> show i) $ HM.lookup i m
     lookKey c = i
       where
         i = justError "no attr" $ L.find ((==c).keyValue ) (tableToKV tb)
 liftASch inf s tname (Nested i c) = Nested ref (liftASch inf (fst l ) (snd l) c)
   where
     ref@(IProd _ refk) = liftASch inf s tname i
-    lookup i m = justError ("no look" <> show i) $ M.lookup i m
+    lookup i m = justError ("no look" <> show i) $ HM.lookup i m
     tb = lookup tname $  lookup s inf
     n = justError "no fk" $ L.find (\i -> S.fromList refk == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
     l = case n of

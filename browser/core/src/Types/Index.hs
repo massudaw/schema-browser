@@ -53,6 +53,7 @@ newtype TBIndex k a
 instance (Binary a, Binary k)  => Binary (TBIndex  k a)
 
 mapKeys f (Idex i ) = Idex $ M.mapKeys f i
+
 getIndex :: Ord k => TBData k a -> TBIndex k a
 getIndex = Idex . getPKM
 

@@ -7,6 +7,7 @@ import qualified Network.Wreq.Session as Sess
 -- import Widgets
 import Types
 import Utils
+import Pdf
 
 import OpenSSL.Session (context)
 import Network.HTTP.Client.OpenSSL
@@ -23,6 +24,8 @@ import Data.ByteString.Search (replace)
 
 import Debug.Trace
 
+import System.Process(callCommand)
+
 siapi3Page protocolo ano cgc_cpf nota = do
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
     Sess.get session $ traceShowId  prefeituraLoginCookie
@@ -30,8 +33,8 @@ siapi3Page protocolo ano cgc_cpf nota = do
     print (pr ^? responseBody)
     r <- Sess.get session $ traceShowId $ (BSC.unpack $ prefeituraConsutalNota nota)
     let html =  (replace ("/sistemas/"::BS.ByteString) ("http://www11.goiania.go.gov.br/sistemas/"::BS.ByteString). BSL.toStrict ) <$> (r ^? responseBody)
-    file <- htmlToPdf (nota <> protocolo) html
-    return $ Just $ SBinary  file
+    file <- traverse (htmlToPdf (nota <> protocolo) ) html
+    return $ SBinary  <$> file
 
 notaXML protocolo ano cgc_cpf nota = do
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
@@ -60,4 +63,6 @@ prefeituraConsutalNota nota = "http://www11.goiania.go.gov.br/sistemas/snfse/asp
 
 
 test = notaXML "1553542" "1" "denise17" "101"
+
+
 

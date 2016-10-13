@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Postgresql.Printer
@@ -12,6 +13,7 @@ module Postgresql.Printer
 import Query
 import Debug.Trace
 import Data.Ord
+import Data.String
 import Step.Host (findFK,findAttr,findFKAttr)
 import Step.Common
 import NonEmpty (NonEmpty(..))
@@ -38,6 +40,7 @@ import Data.Text (Text)
 import GHC.Stack
 
 import Types
+import Types.Inference
 
 
 
@@ -384,42 +387,21 @@ expandJoin left env (Unlabeled (FKT _ rel tb)) = do
       jt = if left then " LEFT" else ""
 
 expandJoin left env (Labeled l (FKT i rel tb)) =  foldr1 (liftA2 mappend) $ (expandJoin left env . getCompose ) <$> unkvlist i
--- expandJoin left env i = errorWithStackTrace (show ("expandJoin",i))
 
 joinOnPredicate :: [Rel Key] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> Text
 joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectionOp (keyType . keyAttr . labelValue $ l) op (keyType . keyAttr . labelValue $ r) (label l)  (label r )) <$> fkm
     where fkm  = (\rel -> Rel (look (_relRoot rel ) m) (_relOperator rel) (look (_relTarget rel ) n)) <$>  ks
           look ki i = justError ("missing FK on " <> show (ki,ks ,keyAttr . labelValue <$> i )) $ (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
 
-
-getPrim i@(Primitive _ ) = i
-getPrim (KOptional j) =  getPrim j
-getPrim (KDelayed j) =  getPrim j
-getPrim (KSerial j) =  getPrim j
-getPrim (KArray j) =  getPrim j
-getPrim (KInterval j) =  getPrim j
-
+inner :: Text -> Text -> Text -> Text
 inner b l m = l <> b <> m
 
-
-intersectionOp :: (Eq b,Show (KType (Prim KPrim b ))) => KType (Prim KPrim b)-> BinaryOperator -> KType (Prim KPrim b)-> (Text -> Text -> Text)
-intersectionOp (KOptional i) op (KOptional j) = intersectionOp i op j
+intersectionOp :: (Eq b,Show b,Show (KType (Prim KPrim b ))) => KType (Prim KPrim b)-> BinaryOperator -> KType (Prim KPrim b)-> (Text -> Text -> Text)
 intersectionOp i op (KOptional j) = intersectionOp i op j
 intersectionOp (KOptional i) op j = intersectionOp i op j
-intersectionOp (KInterval i) op (KInterval j )  = inner  (renderBinary op)
-intersectionOp (KArray i) op  (KArray j )  = inner (renderBinary op)
-intersectionOp (KInterval i) op j
-  | getPrim i == getPrim j =  inner (renderBinary op)
-    | otherwise = errorWithStackTrace $ "wrong type intersectionOp " <> show i <> " /= " <> show j
-intersectionOp i op (KInterval j)
-    | getPrim i == getPrim j = inner "<@"
-    | otherwise = errorWithStackTrace $ "wrong type intersectionOp " <> show i <> " /= " <> show j
-intersectionOp (KArray i ) op  j
-    | i == getPrim j = (\j i -> i <> " IN (select * from unnest("<> j <> ") ) ")
-    | otherwise = errorWithStackTrace $ "wrong type intersectionOp {*} - * " <> show i <> " /= " <> show j
-intersectionOp j op (KArray i )
-    | getPrim i == getPrim j = (\i j  -> i <> " IN (select * from unnest("<> j <> ") ) ")
-    | otherwise = errorWithStackTrace $ "wrong type intersectionOp * - {*} " <> show j <> " /= " <> show i
+intersectionOp (Primitive j) op (KArray (Primitive i) )
+  | isPrimReflexive i j = (\i j  -> i <> renderBinary op <> "(" <> j <> ")" )
+  | otherwise = errorWithStackTrace $ "wrong type intersectionOp * - {*} " <> show j <> " /= " <> show i
 intersectionOp i op j = inner (renderBinary op)
 
 
@@ -489,43 +471,41 @@ printPred t (AndColl wpred) =
                   w = unzip . fmap (printPred  t) <$> nonEmpty wpred
                 in (pure . (\i -> " (" <> i <> ") ") . T.intercalate " AND " <$>  join (nonEmpty . concat . catMaybes .fst <$> w) , concat . catMaybes . snd <$> w )
 
-inferParamType e i |traceShow (e,i) False = undefined
-inferParamType  (Flip (Flip e)) i = inferParamType e i
-inferParamType e (KOptional i) = inferParamType e i
-inferParamType e (KSerial i) = inferParamType e i
-inferParamType e (KDelayed i) = inferParamType e i
-inferParamType e (KInterval i) = inferParamType e i
-inferParamType (Flip (AnyOp e)) (KArray i) = inferParamType (Flip e) i <> "[]"
-inferParamType (AnyOp e) (KArray i) = inferParamType e i
-inferParamType (Flip Equals) i = inferParamType Equals i
-inferParamType Contains (Primitive (AtomicPrim PDouble )) = ":: double precision"
-inferParamType Equals (Primitive (AtomicPrim PDouble )) = ":: double precision"
-inferParamType Contains (Primitive (AtomicPrim PText)) = ":: character varying"
-inferParamType Equals (Primitive (AtomicPrim PText)) = ":: character varying"
-inferParamType Contains (Primitive (AtomicPrim (PInt 4) )) = ":: integer"
-inferParamType Equals (Primitive (AtomicPrim (PInt 4) )) = ":: integer"
-inferParamType Contains (Primitive (AtomicPrim (PInt 8) )) = ":: bigint"
-inferParamType Equals (Primitive (AtomicPrim (PInt 8) )) = ":: bigint"
-inferParamType (Flip Contains) (Primitive (AtomicPrim PDouble )) = ":: floatrange"
-inferParamType (Flip Contains) (Primitive (AtomicPrim (PInt i))) = case i of
-                4 -> ":: int4range"
-                8 -> ":: int8range"
-inferParamType (Flip Contains) (Primitive (AtomicPrim (PDate))) = ":: daterange"
-inferParamType (Flip Contains) (Primitive (AtomicPrim (PTimestamp i ) )) = case i of
-                                                                  Just i -> ":: tsrange"
-                                                                  Nothing -> ":: tstzrange"
-  {-inferParamType "ANY" (Primitive (AtomicPrim (PInt 8))) = ":: bigint[]"
-inferParamType "ANY" (Primitive (AtomicPrim (PInt 4))) = ":: integer[]"
-inferParamType "= any" (Primitive (AtomicPrim (PInt 8))) = ":: bigint"
-inferParamType "= any" (Primitive (AtomicPrim (PInt 4))) = ":: integer"
-inferParamType "@>" (Primitive (AtomicPrim PDouble )) = ":: double precision"
-inferParamType "@>" (Primitive (AtomicPrim (PInt 8))) = ":: bigint"
-inferParamType "@>" (Primitive (AtomicPrim (PInt 4) )) = ":: integer"
-inferParamType "@>" (Primitive (AtomicPrim PDate )) = ":: daterange"
-inferParamType "@>" (Primitive (AtomicPrim PPosition )) = ":: point3range"
--}
-inferParamType _ _ = ""
+renderType (KInterval t) =
+  case t of
+    Primitive (AtomicPrim (PInt i)) ->  case i of
+      4 -> "int4range"
+      8 -> "int8range"
+    Primitive (AtomicPrim PDate) -> "daterange"
+    Primitive (AtomicPrim PDouble) -> "floatrange"
+    Primitive (AtomicPrim (PTimestamp i)) -> case i of
+      Just i -> "tsrange"
+      Nothing -> "tstzrange"
+    i -> Nothing
+renderType (Primitive (RecordPrim (s,t)) ) = Just $ s <> "." <> t
+renderType (Primitive (AtomicPrim t) ) =
+  case t  of
+    PDouble -> "double precision"
+    PText -> "character varying"
+    PInt v -> case v of
+      4 -> "integer"
+      8 -> "bigint"
+    PDate -> "date"
+    PTimestamp v -> case v of
+      Just i -> "timestamp without time zone"
+      Nothing -> "timestamp with time zone"
+    i -> Nothing
+renderType (KArray i) = (<>"[]") <$> renderType i
+renderType (KOptional i) =renderType i
+renderType (KSerial i) =renderType i
+renderType (KDelayed i) =renderType i
 
+-- inferParamType e i |traceShow (e,i) False = undefined
+
+instance IsString (Maybe T.Text) where
+  fromString i = Just (fromString i)
+
+inferParamType op i = maybe "" (":: " <>) $ renderType $ inferOperatorType op i
 
 justLabel :: TB3Data (Labeled Text ) Key () -> Key -> Text
 justLabel t k =  justError ("cant find label"  <> show k <> " - " <> show t).getLabels t $ k
@@ -555,7 +535,7 @@ indexFieldL
     -> Access Key
     -> TB3Data (Labeled Text) Key ()
     -> [(Maybe Text, Maybe (TB Identity Key Showable))]
-indexFieldL e c p v | traceShow (e,c,p) False = undefined
+-- indexFieldL e c p v | traceShow (e,c,p) False = undefined
 indexFieldL e c p@(IProd b l) v =
     case findAttr l v of
       Just i -> [utlabel  e c i]
@@ -610,19 +590,10 @@ utlabel (Right  e) c a = result
 utlabel (Left (value,e)) c a = result
   where
     idx = tlabel' . getCompose $ a
-      {-operator (KOptional i ) = operator i
-    operator (KSerial i ) = operator i
-    operator (KArray (Primitive _) ) = "<@@"
-    operator (KDelayed i ) = operator i
-    operator (KInterval i ) = "@>"
-    operator (Primitive i ) = "="-}
     operator i = errorWithStackTrace (show i)
     opvalue ref (AnyOp i)  = " ? " <> renderBinary i <>  " ANY( " <> T.intercalate "." (c ++ [ref]) <>  ")"
     opvalue ref (Flip (AnyOp (AnyOp Equals)))  = T.intercalate "." (c ++ [ref]) <> " " <>  "<@@" <>  " ANY( ? " <>  inferParamType e (KArray $ keyType (fst idx)) <> ")"
     opvalue ref (Flip (AnyOp i))  = T.intercalate "." (c ++ [ref]) <> " " <> renderBinary (Flip i) <>  " ANY( ? " <>  inferParamType e (KArray $ keyType (fst idx)) <> ")"
-    -- opvalue ref "ANY"  = T.intercalate "." (c ++ [ref]) <> " " <> operator (keyType (fst idx)) <>  " ANY( ? " <> inferParamType e (keyType (fst idx)) <> ")"
-    -- opvalue ref "IN"  = (\v ->  T.intercalate "." (c ++ [ref]) <> " IN(" <> " select unnest( ? " <> inferParamType e (keyType (fst v)) <> "))") $ idx
-    -- opvalue ref "FIN"  = (\v -> "? " <> inferParamType e (keyType (fst v)) <> " IN(" <> " select unnest( " <>  T.intercalate "." (c ++ [ref]) <> "))") $ idx
     opvalue ref  i = (\v ->  " ? " <> inferParamType (Flip i) (keyType (fst idx)) <> renderBinary i <>  T.intercalate "." (c ++ [ref]) ) $ idx
     opparam _ = Just $ Attr (fst idx ) value
     result =  ( Just $  (opvalue (snd $ idx) e)   ,opparam e )

@@ -25,7 +25,6 @@ import qualified Types.Index as G
 import Debug.Trace
 import Types
 import SchemaQuery
-import Plugins
 import TP.Widgets
 import Postgresql.Backend (postgresOps)
 import Prelude hiding (head)
@@ -57,20 +56,21 @@ import qualified Data.Set as S
 
 import Database.PostgreSQL.Simple
 import qualified Data.Map as M
+import qualified Data.HashMap.Strict as HM
 
 import OAuth
 import GHC.Stack
 
 
 setup
-     ::  MVar (M.Map Text  InformationSchema) ->  [String] -> Window -> UI ()
-setup smvar args w = void $ do
-  metainf <- justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
+  ::  MVar (HM.HashMap Text  InformationSchema) ->  [String] -> [Plugins] -> Window -> UI ()
+setup smvar args plugList w = void $ do
+  metainf <- justError "no meta" . HM.lookup "metadata" <$> liftIO ( readMVar smvar)
   let bstate = argsToState args
   let amap = authMap smvar bstate (user bstate , pass bstate)
-  inf <- ui $ fmap (justError ("no schema" <> show (schema bstate))) $ traverse (\i -> loadSchema smvar (T.pack i) (conn metainf) (user bstate)  amap ) $ schema  bstate
+  inf <- ui $ fmap (justError ("no schema" <> show (schema bstate))) $ traverse (\i -> loadSchema smvar (T.pack i) (conn metainf) (user bstate)  amap plugList) $ schema  bstate
   (cli,cliTid) <- liftIO $ addClient (fromIntegral $ wId w) metainf inf ((\t -> lookTable inf . T.pack $ t) <$> tablename bstate  ) (rowpk bstate)
-  (evDB,chooserItens) <- databaseChooser smvar metainf bstate
+  (evDB,chooserItens) <- databaseChooser smvar metainf bstate plugList
   body <- UI.div# set UI.class_ "col-xs-12"
   return w # set title (host bstate <> " - " <>  dbn bstate)
   hoverBoard<-UI.div # set UI.style [("float","left"),("height","100vh"),("width","15px")]
@@ -90,7 +90,7 @@ setup smvar args w = void $ do
   getBody w #+ [element hoverBoard,element container]
   mapUIFinalizerT body (traverse (\inf-> mdo
     let kitems = F.toList (pkMap inf)
-        initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> M.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
+        initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> HM.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
         lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested (IProd False ["selection"]) (IProd True ["table"])) iv
                     in fmap (\(TB1 (SText t)) -> t) .unArray  <$> join (fmap unSOptional' i)
     iniKey <-currentValue (facts initKey)
@@ -244,10 +244,10 @@ authMap smvar sargs (user,pass) schemaN =
                             i -> errorWithStackTrace ("wrong token" <> show i)
               return (OAuthAuth (Just (if tag then "@me" else T.pack user,td )), gmailOps)
 
-loadSchema smvar schemaN dbConn user authMap  =  do
+loadSchema smvar schemaN dbConn user authMap  plugList =  do
     keyTables smvar dbConn (schemaN,T.pack $ user) authMap plugList
 
-databaseChooser smvar metainf sargs = do
+databaseChooser smvar metainf sargs plugList = do
   dbs <- liftIO $ listDBS  metainf sargs
   let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,T.pack s)) (schema sargs)
   dbsW <- listBox ((\((c,j)) -> (c,) <$> j) <$> dbs ) (pure dbsInit) (pure id) (pure (line . T.unpack. snd  ))
@@ -271,7 +271,7 @@ databaseChooser smvar metainf sargs = do
               load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-4" # sink UI.enabled (facts (isJust <$> dbsWT) )
               ui$ mapEventDyn  ( traverse (\ v ->do
                 let auth = authMap smvar sargs (user sargs ,pass sargs )
-                inf <- loadSchema smvar schemaN (rootconn metainf) (user sargs)  auth
+                inf <- loadSchema smvar schemaN (rootconn metainf) (user sargs)  auth plugList
                 liftIO$schemaH $ Just inf))(usernameB <@ (UI.click load))
               user <- UI.div # set children [usernamel,username] # set UI.class_ "col-xs-8"
               UI.div # set children [user ,load]
@@ -284,7 +284,7 @@ databaseChooser smvar metainf sargs = do
             ui$ mapTEventDyn
               (traverse (\(user,pass)-> do
                 let auth = authMap smvar sargs (user,pass)
-                inf <- loadSchema smvar schemaN (rootconn metainf) user auth
+                inf <- loadSchema smvar schemaN (rootconn metainf) user auth plugList
                 liftIO$schemaH $ Just inf
                 ))(formLogin)
 
@@ -293,7 +293,7 @@ databaseChooser smvar metainf sargs = do
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   authBox <- UI.div # sink items (maybeToList . fmap genSchema <$> facts dbsWT) # set UI.class_ "col-xs-4" # set UI.style [("border", "gray solid 2px")]
   let auth = authMap smvar sargs (user sargs ,pass sargs )
-  inf <- ui $traverse (\i -> loadSchema smvar (T.pack i ) (rootconn metainf) (user sargs) auth) (schema sargs)
+  inf <- ui $traverse (\i -> loadSchema smvar (T.pack i ) (rootconn metainf) (user sargs) auth plugList ) (schema sargs)
   chooserB  <- stepper inf schemaE
   let chooserT = tidings chooserB schemaE
   element authBox  # sink UI.style (facts $ (\a b -> noneShow $  fromMaybe True $  liftA2 (\(db,sc) (csch) -> if sc == (schemaName csch )then False else True ) a b )<$>    dbsWT <*> chooserT )
@@ -304,7 +304,7 @@ databaseChooser smvar metainf sargs = do
 testTable s t w = do
   args <- getArgs
   let db = argsToState args
-  smvar   <- newMVar M.empty
+  smvar   <- newMVar HM.empty
   conn <- connectPostgreSQL (connRoot db)
   let
     amap = authMap smvar db ("postgres", "queijo")

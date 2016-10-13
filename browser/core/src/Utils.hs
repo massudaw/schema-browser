@@ -11,11 +11,11 @@ import GHC.Stack
 import GHC.Exts
 import Data.Interval as Interval
 import Data.Maybe
+import Prelude hiding (head)
 import Data.Monoid
 
 import qualified Data.Map as M
 import System.Directory
-import System.Process(callCommand)
 import Data.Traversable
 import qualified Data.Foldable as F
 
@@ -81,18 +81,6 @@ justError e  _ = errorWithStackTrace e
 
 groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
 
-htmlToPdf art html = do
-    let
-      output = (BSC.unpack art) <> ".pdf"
-      input = (BSC.unpack  art ) <> ".html"
-    traverse (BSL.writeFile (fromString input )) html
-    callCommand $ "wkhtmltopdf --print-media-type -T 10 page " <> input <>   " " <> output
-    file <- BS.readFile (fromString output)
-    removeFile input
-    removeFile output
-    return file
-
-
 allMaybesMap m = if M.null filtered then Nothing else Just filtered
       where filtered  = fmap fromJust $ M.filter isJust m
 
@@ -140,3 +128,6 @@ unFinite :: Interval.Extended a -> Maybe a
 unFinite (Interval.Finite i ) = Just i
 unFinite i  = Nothing -- errorWithStackTrace "not finite"
 
+
+head [] = errorWithStackTrace "no head error"
+head l = L.head l

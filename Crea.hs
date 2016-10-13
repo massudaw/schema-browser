@@ -7,6 +7,7 @@ import qualified Data.Map as M
 import Network.Wreq
 import Utils
 import Safe
+import Pdf
 import Control.Exception
 import qualified Network.Wreq.Session as Sess
 import Control.Monad
@@ -73,8 +74,8 @@ creaLoginArt rnp user pass art = do
     pr <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
     pr <- Sess.get session $ (traceShowId (creaArtQuery (BSC.unpack art) ))
     let html = (replace (fst replacePath ) (snd replacePath ) . (BSL.toStrict  )) <$> (pr ^? responseBody)
-    file <- htmlToPdf art html
-    return $ fmap (SBinary  ) $ Just file
+    file <- traverse (htmlToPdf art) html
+    return $ fmap (SBinary  ) $ file
 
 creaBoletoArt rnp user pass art = do
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do

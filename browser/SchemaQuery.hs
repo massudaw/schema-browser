@@ -100,7 +100,7 @@ syncFrom t page size presort fixed = do
   mmap <- liftIO $ atomically $ readTMVar mvar
   let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )
   let
-      rinf = fromMaybe inf $ M.lookup (fst stable) (depschema inf)
+      rinf = fromMaybe inf $ HM.lookup (fst stable) (depschema inf)
       fromtable = (lookTable rinf $ snd stable)
       defSort = fmap (,Desc) $  rawPK t
   (l,i) <- local (const rinf) $ tableLoader fromtable Nothing Nothing []  fixed
@@ -136,7 +136,7 @@ deleteFrom  a   = do
 mergeDBRef  = (\(j,i) (m,l) -> ((M.unionWith (\(a,b) (c,d) -> (a+c,b<>d))  j  m , i <>  l )))
 
 getFKRef inf predtop (me,old) v (Path r (FKInlineTable  j ) ) =  do
-                let rinf = maybe inf id $ M.lookup ((fst j))  (depschema inf)
+                let rinf = maybe inf id $ HM.lookup ((fst j))  (depschema inf)
                     table = lookTable rinf $ snd j
                     predicate predtop = case predtop of
                                   WherePredicate l ->
@@ -163,7 +163,7 @@ getFKRef inf predtop (me,old) v (Path r (FKInlineTable  j ) ) =  do
     where
         getAtt i (m ,k ) = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues . unTB $ k
 getFKRef inf predtop (me,old) v (Path _ (FKJoinTable i j ) ) =  do
-                let rinf = maybe inf id $ M.lookup ((fst j))  (depschema inf)
+                let rinf = maybe inf id $ HM.lookup ((fst j))  (depschema inf)
                     table = lookTable rinf $ snd j
                     predicate predtop = case predtop of
                                   WherePredicate l ->
@@ -237,7 +237,7 @@ tableLoader table  page size presort fixed
       mmap <- liftIO $ atomically $ readTMVar mvar
       let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )
       let
-          rinf = fromMaybe inf $ M.lookup (fst stable) (depschema inf)
+          rinf = fromMaybe inf $ HM.lookup (fst stable) (depschema inf)
           fromtable = (lookTable rinf $ snd stable)
           defSort = fmap (,Desc) $  rawPK fromtable
       (l,i) <- local (const rinf) $ tableLoader  fromtable page  size defSort mempty
@@ -260,10 +260,10 @@ tableLoader table  page size presort fixed
                 -- predicate (Nested (IProd b i) j ,Left _ ) = (\a -> (IProd b [a], Right "is not null")) <$> i
                 predicate i  = [i]
             tbf = tableView  (tableMap inf) table
-          (res ,x ,o) <- (listEd $ schemaOps inf) (tableNonRef2 tbf) page size presort fixed (unestPred predtop)
-          (resFKS ,_)<- getFKS inf predtop (_rawFKSL table) res
+          (res ,x ,o) <- (listEd $ schemaOps inf) tbf page size presort fixed (unestPred predtop)
+          -- (resFKS ,_)<- getFKS inf predtop (_rawFKSL table) res
 
-          return (rights $ fmap resFKS  res,x,o )) table page size presort fixed
+          return ({-rights $ fmap resFKS  -} res,x,o )) table page size presort fixed
     lf <- liftIO getCurrentTime
     liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
     return o
@@ -378,7 +378,7 @@ transactionLog inf log = do -- withTransaction (conn inf) $ do
   (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [TableModification id t f] m) M.empty mods
   agg2 <- Tra.traverse (\(k,v) -> do
-    ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ M.lookup ((rawSchema k ))  (depschema inf) ) k
+    ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
     nm <- mapM (logger (schemaOps inf) inf) v
     putPatch (patchVar ref ) $ (\(TableModification _ _ p) -> p) <$> nm
     return nm
@@ -392,7 +392,7 @@ transactionNoLog inf log = do -- withTransaction (conn inf) $ do
   (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\tm@(TableModification id t f) m -> M.insertWith mappend t [tm] m) M.empty mods
   Tra.traverse (\(k,v) -> do
-    ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ M.lookup ((rawSchema k ))  (depschema inf) ) k
+    ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
     putPatch (patchVar ref ) $ (\(TableModification id t f)-> f) <$>v
     ) (M.toList aggr)
   return md
@@ -403,7 +403,7 @@ transaction inf log = do -- withTransaction (conn inf) $ do
   (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\tm@(TableModification id t f) m -> M.insertWith mappend t [tm] m) M.empty mods
   Tra.traverse (\(k,v) -> do
-    ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ M.lookup ((rawSchema k ))  (depschema inf) ) k
+    ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
     nm <- mapM (logger (schemaOps inf) inf) v
     putPatch (patchVar ref ) $ (\(TableModification id t f)-> f) <$> nm
     ) (M.toList aggr)
@@ -458,7 +458,7 @@ tbEdit g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) =
    case (a2,t2) of
         (TB1 o@(om,ol),TB1 t@(m,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           local (\inf -> fromMaybe inf (M.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( kvlist $ fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb)) rel2 tb ) . TB1  <$> fullDiffEdit o t)
+           local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( kvlist $ fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb)) rel2 tb ) . TB1  <$> fullDiffEdit o t)
         (LeftTB1  _ ,LeftTB1 _) ->
            maybe (return f ) (fmap attrOptional) $ liftA2 tbEdit (unLeftItens g) (unLeftItens f)
         (ArrayTB1 o,ArrayTB1 l) ->
@@ -474,7 +474,7 @@ tbInsertEdit f@(FKT pk rel2  t2) =
    case t2 of
         t@(TB1 (m,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           local (\inf -> fromMaybe inf (M.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( kvlist $ fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb)) rel2 tb ) <$> fullInsert ( t))
+           local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( kvlist $ fmap _tb $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb)) rel2 tb ) <$> fullInsert ( t))
         LeftTB1 i ->
            maybe (return f ) ((fmap attrOptional) . tbInsertEdit ) (unLeftItens f)
         ArrayTB1 l ->

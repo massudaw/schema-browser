@@ -5,6 +5,8 @@ import qualified Data.HashMap.Strict as HM
 import Data.Map (Map)
 import Types
 import Data.Ord
+import qualified Data.Aeson as A
+import qualified Data.Aeson.Types as A
 import Data.Either
 import Utils
 import Control.Monad
@@ -18,12 +20,10 @@ import Data.Functor.Identity
 import Data.Scientific hiding(scientific)
 import Data.Bits
 import qualified  Data.Map as M
-
 import Data.Tuple
 import Data.Time.Clock
 import Data.String
 import Data.Attoparsec.Combinator (lookAhead)
-
 import Control.Applicative
 import Control.Monad.IO.Class
 import qualified Data.Serialize as Sel
@@ -163,6 +163,7 @@ textToPrim (AtomicPrim (s,i)) = case  HM.lookup i  postgresPrim of
   Just k -> AtomicPrim k -- $ fromMaybe k (M.lookup k (M.fromList postgresLiftPrim ))
   Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
 textToPrim (RecordPrim i) =  (RecordPrim i)
+
 
 
 
@@ -381,6 +382,24 @@ doublequoted :: Parser a -> Parser a
 doublequoted  p =   (takeWhile (== '\\') >>  char '\"') *>  inner <* ( takeWhile (=='\\') >> char '\"')
   where inner = tryquoted p
 
+parsePrimJSON :: KPrim -> A.Value -> A.Parser Showable
+parsePrimJSON i  =
+    case i of
+      PDynamic  -> A.withText (show i) (return .SDynamic . B.decode . BSL.fromStrict . fst . B16.decode .BS.pack . T.unpack)
+      PBinary -> A.withText (show i) (return .SBinary . fst . B16.decode .BS.pack . T.unpack)
+      PMime _ -> A.withText (show i) (return .SBinary . fst . B16.decode .BS.pack . T.unpack)
+      PInt  _ -> A.withScientific (show i) (return .SNumeric . floor)
+      PDouble  -> A.withScientific (show i) (return .SDouble . toRealFloat)
+      PBoolean -> A.withBool (show i) (return. SBoolean)
+      PAddress -> A.withText (show i) (return .SText )
+      PColor -> A.withText (show i) (return .SText )
+      PText -> A.withText (show i) (return .SText )
+      PCnpj -> A.withText (show i) (return .SText )
+      PCpf -> A.withText (show i) (return .SText )
+      PInterval -> A.withText (show i) (either (errorWithStackTrace "no parse" ) (return . SPInterval )  . parseOnly diffInterval .BS.pack . T.unpack)
+      PTimestamp _ -> A.withText (show i) (maybe (fail "cant parse timestamp") (return .STimestamp  . fst) . strptime "%Y-%m-%d %H:%M:%OS")
+      PDayTime  -> A.withText (show i) (maybe (fail "cant parse daytime") (return .SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS")
+      PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay . fst) . strptime "%Y-%m-%d")
 
 parsePrim
   :: KPrim
@@ -472,6 +491,16 @@ parseShowable p@(Primitive (AtomicPrim i)) = forw  . TB1 <$> parsePrim i
 
 parseShowable i  = error $  "not implemented " <> show i
 
+parseShowableJSON (KSerial i)  v = SerialTB1 . Just <$> parseShowableJSON i v
+parseShowableJSON (KOptional i ) v =
+  case v of
+    A.Null ->  return $ LeftTB1 Nothing
+    vn -> LeftTB1 . Just  <$>  parseShowableJSON i vn
+parseShowableJSON  (KArray i )  (A.Array l )
+  =  maybe (fail "empty list" ) (fmap (ArrayTB1 . Non.fromList) . mapM (parseShowableJSON i)) (nonEmpty $ F.toList l)
+parseShowableJSON  p@(Primitive (AtomicPrim i)) v =  forw . TB1 <$> parsePrimJSON i v
+  where (forw,_)  =conversion p
+
 pg_double :: Parser Double
 pg_double
     =   (string "NaN"       *> pure ( 0 / 0))
@@ -483,6 +512,7 @@ pg_double
 
 unOnly :: Only a -> a
 unOnly (Only i) = i
+
 
 
 instance Sel.Serialize a => Sel.Serialize (ER.Extended a ) where

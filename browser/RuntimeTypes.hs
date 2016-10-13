@@ -43,8 +43,8 @@ import Control.Lens.TH
 import GHC.Stack
 
 
-metaInf :: MVar (Map Text InformationSchema ) -> IO InformationSchema
-metaInf smvar = justError "no meta" . M.lookup "metadata" <$> liftIO ( readMVar smvar)
+metaInf :: MVar (HM.HashMap Text InformationSchema ) -> IO InformationSchema
+metaInf smvar = justError "no meta" . HM.lookup "metadata" <$> liftIO ( readMVar smvar)
 
 
 type InformationSchema = InformationSchemaKV Key Showable
@@ -56,17 +56,17 @@ data InformationSchemaKV k v
   , _keyMapL :: HM.HashMap (Text,Text) k
   , _backendKey :: Map Unique PGKey
   , _pkMapL :: Map (Set k ) Table
-  , _tableMapL :: Map Text Table
+  , _tableMapL :: HM.HashMap Text Table
   , tableSize :: Map Table Int
   , mvarMap :: TMVar (Map (KVMetadata k) (DBVar2 k v ))
   , rootconn :: Connection
   , metaschema :: Maybe (InformationSchemaKV k v)
-  , depschema :: Map Text (InformationSchemaKV k v)
+  , depschema :: HM.HashMap Text (InformationSchemaKV k v)
   , schemaOps :: SchemaEditor
   , plugins :: [Plugins ]
   }
 
-backendsKey s = _backendKey s <> Prelude.foldl mappend mempty (fmap (backendsKey .snd)$ M.toList $ depschema s)
+backendsKey s = _backendKey s <> Prelude.foldl mappend mempty (fmap (backendsKey .snd)$ HM.toList $ depschema s)
 
 data Auth
   = PostAuth Connection
@@ -92,8 +92,8 @@ data BrowserState
 type TBF f k v = (KVMetadata k ,Compose  f  (KV (Compose f (TB f))) k v)
 
 
-tableMap :: InformationSchema -> Map Text (Map Text Table)
-tableMap s = M.singleton (schemaName s) (_tableMapL s ) <> Prelude.foldl mappend mempty (fmap tableMap  (fmap snd $ M.toList $ depschema s))
+tableMap :: InformationSchema -> HM.HashMap Text (HM.HashMap Text Table)
+tableMap s = HM.singleton (schemaName s) (_tableMapL s ) <> Prelude.foldl mappend mempty (fmap tableMap  (fmap snd $ HM.toList $ depschema s))
 
 keyMap = _keyMapL
 pkMap = _pkMapL
@@ -191,10 +191,10 @@ argsToState  [h,ph,d,u,p] = BrowserState h ph d  u p Nothing Nothing Nothing
 argsToState i = errorWithStackTrace (show i)
 
 lookTable :: InformationSchema -> Text -> Table
-lookTable inf t = justError ("no table: " <> T.unpack t) $ M.lookup t (_tableMapL inf)
+lookTable inf t = justError ("no table: " <> T.unpack t) $ HM.lookup t (_tableMapL inf)
 
 lookSTable :: InformationSchema -> (Text,Text) -> Table
-lookSTable inf (s,t) = justError ("no table: " <> T.unpack t) $ join $ M.lookup t <$> M.lookup s (tableMap inf)
+lookSTable inf (s,t) = justError ("no table: " <> T.unpack t) $ join $ HM.lookup t <$> HM.lookup s (tableMap inf)
 
 lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k  <> show (HM.toList (keyMap inf))) $ HM.lookup (t,k) (keyMap inf)
@@ -227,7 +227,7 @@ liftField :: InformationSchema -> Text -> Column Text a -> Column Key a
 liftField inf tname (Attr t v) = Attr (lookKey inf tname t) v
 liftField inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (lookKey inf tname ) (mapComp (liftField inf tname) ) ref)   ( rel) (liftKeys rinf tname2 tb)
     where FKJoinTable  rel (schname,tname2)  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
-          rinf = fromMaybe inf (M.lookup schname (depschema inf))
+          rinf = fromMaybe inf (HM.lookup schname (depschema inf))
           ta = lookTable inf tname
 liftField inf tname (IT rel tb) = IT (lookKey inf tname  rel) (liftKeys inf tname2 tb)
     where FKInlineTable (_,tname2)  = unRecRel.pathRel  $ justError (show (rel ,rawFKS ta)) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline rel))  (F.toList$ rawFKS  ta)
@@ -246,7 +246,7 @@ liftPatchAttr inf tname p@(PInline rel e ) =  PInline ( lookKey inf tname rel) (
 liftPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel (fmap (liftPatchAttr inf tname) pa) (tableMeta $ lookTable rinf tname2) (fmap (liftPatch rinf tname2 ) $ b)
     where (FKJoinTable  rel (schname,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
-          rinf = fromMaybe inf (M.lookup schname (depschema inf))
+          rinf = fromMaybe inf (HM.lookup schname (depschema inf))
 
 
 fixPatch ::  a ~ Index a => InformationSchema -> Text -> TBIdx Key a  -> TBIdx Key a
@@ -260,7 +260,7 @@ fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
     fixPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa) (tableMeta $ lookTable rinf tname2) b
         where (FKJoinTable  _ (schname,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
               ta = lookTable inf tname
-              rinf = fromMaybe inf (M.lookup schname (depschema inf))
+              rinf = fromMaybe inf (HM.lookup schname (depschema inf))
 
 liftAccess :: InformationSchema -> Text -> Access Text  -> Access Key
 liftAccess inf tname (ISum i) =  ISum $ fmap (liftAccess inf tname)  i

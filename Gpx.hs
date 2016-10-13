@@ -3,6 +3,7 @@ module Gpx
   (readArt,readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readHtmlReceita,readHtml) where
 
 import Types
+import Utils
 import Data.String
 import Control.Applicative
 

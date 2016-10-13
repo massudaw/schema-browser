@@ -28,10 +28,11 @@ import Database.PostgreSQL.Simple.Internal
 import qualified Data.Map as M
 import qualified Data.ByteString as BS
 
+import qualified Data.HashMap.Strict as HM
 main :: IO ()
 main = do
   args <- getArgs
-  smvar   <- newMVar M.empty
+  smvar   <- newMVar HM.empty
   let db = argsToState args
   -- Load Metadata
   conn <- connectPostgreSQL (connRoot db)
@@ -62,7 +63,7 @@ main = do
         deleteClient metas (fromIntegral $ wId w)
 
 
-  startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar args) initGUI finalizeGUI
+  startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar args plugList ) initGUI finalizeGUI
   print "Finish Server"
   traverse (deleteServer metas) ref
   return ()

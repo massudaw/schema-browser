@@ -17,7 +17,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Types where
+module Types  where
 
 import Data.Ord
 import qualified NonEmpty as Non
@@ -66,8 +66,6 @@ import Data.Text (Text)
 import Debug.Trace
 import Data.Unique
 
-head [] = errorWithStackTrace "no head error"
-head l = L.head l
 
 isSerial (KSerial _) = True
 isSerial _ = False
@@ -260,11 +258,18 @@ data KVMetadata k
   , _kvattrs :: [k]
   , _kvdelayed :: [k]
   , _kvrecrels :: [MutRec [[Rel k]]]
-  }deriving(Eq,Ord,Functor,Foldable,Generic)
+  }deriving(Functor,Foldable,Generic)
+
+instance Eq (KVMetadata k) where
+  i == j = _kvschema  i  == _kvschema j &&  _kvname i == _kvname j
+instance Eq k => Ord (KVMetadata k) where
+  compare  = comparing _kvschema  <> comparing _kvname
 
 instance Show k => Show (KVMetadata k) where
   show k = T.unpack (_kvname k)
+
 kvMetaFullName m = _kvschema m <> "." <> _kvname m
+
 filterTB1 f = fmap (filterTB1' f)
 filterTB1' f ((m ,i)) = (m , mapComp (filterKV f) i)
 mapTB1  f (TB1 (m, i))  =  TB1 (m ,mapComp (mapKV f) i )
@@ -309,13 +314,13 @@ type Key = CoreKey -- FKey (KType  (Prim (Text,Text) (Text,Text)))
 
 data FKey a
     = Key
-    { keyValue :: ! Text
-    , keyTranslation :: ! (Maybe Text)
+    { keyValue :: Text
+    , keyTranslation ::  (Maybe Text)
     , keyModifier :: [FieldModifier]
     , keyPosition :: Int
     , keyStatic :: Maybe (FTB Showable)
-    , keyFastUnique :: ! Unique
-    , _keyTypes :: ! a
+    , keyFastUnique ::  Unique
+    , _keyTypes ::  a
     }deriving(Functor,Generic)
 
 instance (Functor f ,Bifunctor g)  => Bifunctor (Compose f g ) where
@@ -481,11 +486,11 @@ firstTB f (FKT k  m  i) = FKT  (mapBothKV (f) (mapComp (firstTB f)) k)  (fmap f 
 
 data FTB a
   = TB1 a
-  | LeftTB1  ! (Maybe (FTB a))
-  | SerialTB1 !(Maybe (FTB a))
-  | IntervalTB1 !(Interval.Interval (FTB a))
-  | DelayedTB1 !(Maybe (FTB a))
-  | ArrayTB1 ! (NonEmpty (FTB a))
+  | LeftTB1   (Maybe (FTB a))
+  | SerialTB1 (Maybe (FTB a))
+  | IntervalTB1 (Interval.Interval (FTB a))
+  | DelayedTB1 (Maybe (FTB a))
+  | ArrayTB1  (NonEmpty (FTB a))
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable,Generic)
 
 instance Applicative FTB where
@@ -553,15 +558,6 @@ data KType a
    | KTable [KType a]
    deriving(Eq,Ord,Functor,Generic,Foldable,Show)
 
-{-instance Show (KType KPrim ) where
-  show =  showTy show
-
-instance Show (KType (Prim KPrim (Text,Text))) where
-  show =  showTy show
-
-instance Show (KType (Prim (Text,Text) (Text,Text))) where
-  show = T.unpack . showTy (T.pack . show)
--}
 
 showTy f (Primitive i ) = f i
 showTy f (KArray i) = "{" <>  showTy f i <> "}"
@@ -570,12 +566,11 @@ showTy f (KInterval i) = "(" <>  showTy f i <> ")"
 showTy f (KSerial i) = showTy f i <> "?"
 showTy f (KDelayed i) = showTy f i <> "-"
 showTy f (KTable i) = "t"
--- showTy f i = errorWithStackTrace ("no ty for " <> show   i)
+showTy f i = errorWithStackTrace ("no ty for " <> show   i)
 
 
 instance Eq (FKey a) where
    k == l = keyFastUnique k == keyFastUnique l
-   k /= l = keyFastUnique k /= keyFastUnique l
 
 instance Ord (FKey a) where
    compare i j = compare (keyFastUnique i) (keyFastUnique j)
@@ -593,20 +588,20 @@ newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,
 
 
 data Showable
-  = SText !Text
-  | SNumeric !Int
-  | SBoolean !Bool
-  | SDouble !Double
-  | STimestamp !LocalTime
-  | SPInterval !DiffTime
-  | SPosition !Position
-  | SBounding !Bounding
-  | SLineString !LineString
-  | SDate !Day
-  | SDayTime !TimeOfDay
-  | SBinary !BS.ByteString
-  | SDynamic ! (FTB Showable)
-  | SSession !Sess.Session
+  = SText Text
+  | SNumeric Int
+  | SBoolean Bool
+  | SDouble Double
+  | STimestamp LocalTime
+  | SPInterval DiffTime
+  | SPosition Position
+  | SBounding Bounding
+  | SLineString LineString
+  | SDate Day
+  | SDayTime TimeOfDay
+  | SBinary BS.ByteString
+  | SDynamic  (FTB Showable)
+  | SSession Sess.Session
   deriving(Ord,Eq,Show,Generic)
 
 instance Eq Sess.Session where
@@ -619,6 +614,7 @@ data Expr
   = Value Int
   | Function Text [Expr]
   deriving(Eq,Ord,Show,Generic)
+
 type SqlOperation = SqlOperationK Key
 data SqlOperationK k
   = FKJoinTable [Rel k] (Text,Text)

@@ -6,7 +6,6 @@ module Schema where
 import Data.String
 import Step.Host
 import Types
-import Codec.Compression.GZip
 import Expression
 import Step.Common
 import Data.Tuple
@@ -103,8 +102,8 @@ readFModifier "edit" = FPatch
 readFModifier "write" = FWrite
 
 
-keyTables ,keyTablesInit :: MVar (Map Text InformationSchema )->  Connection -> (Text ,Text) -> (Text -> IO (Auth , SchemaEditor)) -> [Plugins] ->  R.Dynamic InformationSchema
-keyTables schemaVar conn (schema ,user) authMap pluglist = maybe (keyTablesInit schemaVar conn (schema,user) authMap pluglist ) return  . (M.lookup schema ) =<< liftIO (readMVar schemaVar)
+keyTables ,keyTablesInit :: MVar (HM.HashMap Text InformationSchema )->  Connection -> (Text ,Text) -> (Text -> IO (Auth , SchemaEditor)) -> [Plugins] ->  R.Dynamic InformationSchema
+keyTables schemaVar conn (schema ,user) authMap pluglist = maybe (keyTablesInit schemaVar conn (schema,user) authMap pluglist ) return  . (HM.lookup schema ) =<< liftIO (readMVar schemaVar)
 
 extendedRel :: HM.HashMap (Text,Text) Key -> Text -> Text -> Text -> Key -> Rel Key
 extendedRel inf t a b c =  snd access $ (lrel (fst access))
@@ -153,7 +152,7 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
         schemaForeign :: Query
         schemaForeign = "select target_schema_name from metadata.fks where origin_schema_name = ? and target_schema_name <> origin_schema_name"
        rslist <- liftIO$query conn  schemaForeign (Only schema)
-       rsch <- M.fromList <$> mapM (\(Only s) -> (s,) <$> keyTables  schemaVar conn (s,user) authMap pluglist) rslist
+       rsch <- HM.fromList <$> mapM (\(Only s) -> (s,) <$> keyTables  schemaVar conn (s,user) authMap pluglist) rslist
        let lookFk t k = V.toList $ lookupKey2 (fmap (t,) k)
            lookRFk s t k = V.toList $ lookupKey2 (fmap (t,) k)
             where
@@ -161,13 +160,13 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
               lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ HM.lookup ( (t,c)) map)
                 where map
                         | s == schema = keyMap
-                        | otherwise = _keyMapL (justError "no schema" $ M.lookup s rsch)
+                        | otherwise = _keyMapL (justError "no schema" $ HM.lookup s rsch)
 
            lookupKey' :: Text -> (Text,Text) -> Key
            lookupKey' s (t,c) = justError ("nokey" <> show (t,c)) $ HM.lookup ( (t,c)) map
                 where map
                         | s == schema = keyMap
-                        | otherwise = _keyMapL (justError "no schema" $ M.lookup s rsch)
+                        | otherwise = _keyMapL (justError "no schema" $ HM.lookup s rsch)
 
        let
           foreignKeys :: Query
@@ -196,14 +195,14 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
 
        ures <- liftIO $ query conn unionQ (Only schema) :: R.Dynamic [(Text,Text,Vector Text)]
        let
-           i3 = addRecInit (M.singleton schema (M.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $  M.fromList i3l
-           pks = M.fromList $ fmap (\(_,t)-> (S.fromList$ rawPK t ,t)) $ M.toList i3
-           i2 =   M.filterWithKey (\k _ -> not.S.null $ k )  pks
-           unionT (s,n,l) = (n ,(\t -> t { rawUnion =  ((\t -> justLook t i3 )<$>  F.toList l )} ))
+           i3 = addRecInit (HM.singleton schema (HM.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $  HM.fromList i3l
+           pks = M.fromList $ fmap (\(_,t)-> (S.fromList$ rawPK t ,t)) $ HM.toList i3
+           i2 =    M.filterWithKey (\k _ -> not.S.null $ k )  pks
+           unionT (s,n,l) = (n ,(\t -> t { rawUnion =  ((\t -> justError "no key" $ HM.lookup t i3 )<$>  F.toList l )} ))
        let
-           i3u = foldr (uncurry M.adjust. swap ) i3 (unionT <$> ures)
+           i3u = foldr (uncurry HM.adjust. swap ) i3 (unionT <$> ures)
            i2u = foldr (uncurry M.adjust. swap) i2 (first (justError "no union table" . fmap (\(i,_,_) ->S.fromList $ F.toList i) . flip M.lookup (M.fromList res)) . unionT <$> ures)
-       sizeMapt <- liftIO$ M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  M.lookup t i3u ) <$> query conn tableSizes (Only schema)
+       sizeMapt <- liftIO$ M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  HM.lookup t i3u ) <$> query conn tableSizes (Only schema)
 
        metaschema <- if (schema /= "metadata")
           then Just <$> keyTables  schemaVar conn ("metadata",user) authMap pluglist
@@ -216,7 +215,7 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
        let preinf = InformationSchema schema user oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  i2u  i3u sizeMapt undefined conn undefined rsch ops pluglist
        varmapU <- mapM (createTableRefsUnion preinf (M.fromList varmap)) (filter (not . L.null . rawUnion) $ F.toList i2u)
        liftIO$ atomically $ takeTMVar mvar >> putTMVar mvar  (M.fromList $ varmap <> varmapU)
-       var <- liftIO$ modifyMVar_  schemaVar   (return . M.insert schema inf )
+       var <- liftIO$ modifyMVar_  schemaVar   (return . HM.insert schema inf )
        addStats inf
        return inf
 
@@ -286,7 +285,7 @@ createTableRefs inf i = do
 
 
 -- Search for recursive cycles and tag the tables
-addRecInit :: Map Text (Map Text Table) -> Map Text Table -> Map Text Table
+addRecInit :: HM.HashMap Text (HM.HashMap Text Table) -> HM.HashMap Text Table -> HM.HashMap Text Table
 addRecInit inf m = fmap recOverFKS m
   where
         recOverFKS t  = t Le.& rawFKSL Le.%~ S.map path
@@ -318,7 +317,7 @@ addRecInit inf m = fmap recOverFKS m
                                     | otherwise = p <> [F.toList (pathRelRel (fmap unRecRel pa))]
                               ix <- fmap (\pa-> openPath t ( cons pa ) (fmap unRecRel pa)) fsk
                               return (concat (L.filter (not.L.null) ix))
-                        where tb = justError ("no table" <> show (nt,m)) $ join $ M.lookup nt <$> (M.lookup st inf)
+                        where tb = justError ("no table" <> show (nt,m)) $ join $ HM.lookup nt <$> (HM.lookup st inf)
                               fsk = F.toList $ rawFKS tb
 
 
@@ -376,7 +375,7 @@ type DBM k v = ReaderT (Database k v) IO
 
 atTableS s  k = do
   i <- ask
-  k <- liftIO$ dbTable (mvarMap $ fromMaybe i (M.lookup s (depschema i))) k
+  k <- liftIO$ dbTable (mvarMap $ fromMaybe i (HM.lookup s (depschema i))) k
   liftIO $ R.currentValue (R.facts (collectionTid k))
 
 
@@ -425,10 +424,10 @@ lookPK inf pk =
            i -> errorWithStackTrace (show pk)
 
 
-dumpSnapshot :: MVar (M.Map T.Text InformationSchema ) -> IO ()
+dumpSnapshot :: MVar (HM.HashMap T.Text InformationSchema ) -> IO ()
 dumpSnapshot smvar = do
   smap <- readMVar smvar
-  mapM (uncurry writeSchema) (M.toList smap)
+  mapM (uncurry writeSchema) (HM.toList smap)
   return ()
 
 writeSchema s v = do

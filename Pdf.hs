@@ -4,25 +4,33 @@
 --
 -- The example shows how to use incremental updates to change PDF file
 
-module Pdf where
+module Pdf
+  (htmlToPdf
+  ) where
 
 import Data.String
 import Control.Monad
 import System.IO
-import qualified System.IO.Streams as Streams
 import System.Environment
 
 import qualified Data.ByteString as BS
 import Data.IORef
 import Control.Applicative
 import Data.Monoid
+import System.Process
+import System.Directory
+import qualified Data.ByteString.Char8 as BSC
+import qualified Data.ByteString.Lazy.Char8 as BSL
 
 import qualified Data.Text as T
-import Pdf.Toolbox.Core
-import Pdf.Toolbox.Document
 
+{-
 -- Using the internals to switch from 'pdf-toolbox-document' level
 -- to 'pdf-toolbox-core'
+
+import qualified System.IO.Streams as Streams
+import Pdf.Toolbox.Core
+import Pdf.Toolbox.Document
 import Pdf.Toolbox.Document.Internal.Types
 
 testDanilo = do
@@ -53,3 +61,21 @@ parseBombeiroPdf input = do
                 (tipo,subtipo) = breakDrop "-" $ snd $ breakDrop ":" ocupacao
             return  $ fmap (breakDrop ":" ) [area,carga] <> [("tipo",tipo),("subtipo",subtipo)]
       return (mappend (dados res ) (name resn))
+
+
+-}
+htmlToPdf
+  ::
+         BSC.ByteString -> BSL.ByteString -> IO BSC.ByteString
+htmlToPdf art html = do
+    let
+      output = (BSC.unpack art) <> ".pdf"
+      input = (BSC.unpack  art ) <> ".html"
+    BSL.writeFile (fromString input ) html
+    callCommand $ "wkhtmltopdf --print-media-type -T 10 page " <> input <>   " " <> output
+    file <- BS.readFile (fromString output)
+    removeFile input
+    removeFile output
+    return file
+
+
