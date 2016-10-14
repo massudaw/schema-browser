@@ -476,7 +476,6 @@ parseShowable (KSerial i)
     = SerialTB1 <$> ((Just <$> parseShowable i) )
 parseShowable (KInterval k)=
     let
-      emptyInter = const (IntervalTB1 Interval.empty) <$> string "empty"
       inter = do
         lb <- (char '[' >> return True ) <|> (char '(' >> return False )
         i <- (ER.Finite <$> parseShowable k) <|>  return ER.NegInf
@@ -484,7 +483,7 @@ parseShowable (KInterval k)=
         j <- (ER.Finite <$> parseShowable k) <|> return ER.PosInf
         rb <- (char ']' >> return True) <|> (char ')' >> return False )
         return $ IntervalTB1 $ Interval.interval (i,lb) (j,rb)
-     in tryquoted  inter <|> emptyInter
+     in tryquoted  inter
 
 parseShowable p@(Primitive (AtomicPrim i)) = forw  . TB1 <$> parsePrim i
   where (forw,_) = conversion p

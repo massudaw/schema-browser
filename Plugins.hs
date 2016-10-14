@@ -525,6 +525,29 @@ instance ToJSON Timeline where
 
 itR i f = atR i (IT (fromString i)<$> f)
 
+idxRA = fmap (fmap unArray) <$> idxR
+
+gerarParcelas= FPlugins "Gerar Parcelas" tname  $ BoundedPlugin2 url
+  where
+    tname = "pricing"
+    url :: ArrowReader
+    url =  proc t -> do
+              parcelas :: Maybe (Non.NonEmpty (FTB Showable) )<- idxRA "parcelas"-< ()
+              preco :: Maybe (FTB Showable )<- idxR "pricing_price"-< ()
+              let
+                par :: Maybe (Non.NonEmpty (FTB Showable) )
+                par = (\p par -> (p*)<$> par)<$> preco <*> parcelas
+              pagamentos <- idxR "pagamentos" -< ()
+              pg <- atR  "pagamentos" (proc (pagamentos,parcelas) -> do
+                  odxR "payment_description" -<  ()
+                  odxR "price" -<  ()
+                  let
+                    total :: Int
+                    total = maybe 0 length parcelas
+                  let pagamento = _tb $ FKT (kvlist [attrT  ("pagamentos",LeftTB1 pagamentos )]) [Rel "pagamentos" Equals "id_payment"] (LeftTB1 $ fmap ArrayTB1 $ ( liftA2 (Non.zipWith (\valorParcela ix -> TB1 $ tblist [attrT ("payment_description",TB1 $ SText $ T.pack $ "Parcela (" <> show (ix+1) <> "/" <> show total <>")" ),attrT ("price",valorParcela) ])) parcelas (Just $ Non.fromList [0 .. total])))
+                  returnA -<  pagamento ) -< (pagamentos,par)
+              returnA -<  Just $ tblist [pg ]
+
 pagamentoArr =  itR "pagamento" (proc descontado -> do
               pinicio <- idxR "inicio"-< ()
               p <- idxR "vezes" -< ()
@@ -777,4 +800,4 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
 
 
 plugList :: [Plugins]
-plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,{- lplugContract ,lplugOrcamento ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin , importarofx,gerarPagamentos , pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo]
+plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,{- lplugContract ,lplugOrcamento ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin , importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo]

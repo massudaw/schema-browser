@@ -86,7 +86,7 @@ instance Predicates WherePredicate where
       cons (Left i ) (Left j ) =consistent (fst i) (fst j)
       cons (Right i ) (Left j ) =False
       cons (Left i ) (Right j ) =False
-      cons (Right i ) (Right j ) = i == j
+      conS (Right i ) (Right j ) = i == j
 
   match (WherePredicate c1) e (WherePredicate c2)  = F.all id $ M.mergeWithKey (\_ i j -> Just $ either (match i e.fst) (const False) j  ) (const False <$>) (const False <$>) (M.fromList $ F.toList c1) (M.fromList $  F.toList c2)
 
@@ -202,7 +202,9 @@ instance  Predicates (Map Key (FTB Showable)) where
   consistent l i =  if M.null b then False else  F.all id b
     where
       b =  M.intersectionWith consistent (M.mapKeys keyValue l) (M.mapKeys keyValue i)
-  union l = foldl1 (M.intersectionWith (\i j -> union [i,j]) ) l
+  union l
+    | L.null l = M.empty
+    | otherwise = foldl1 (M.intersectionWith (\i j -> union [i,j]) ) l
   penalty p1 p2 = M.mergeWithKey (\_ i j -> Just $penalty i j ) (fmap (loga .unFin . fst .minP)) (fmap (loga . unFin . fst . minP))  p1 p2
   pickSplit = pickSplitG
 

@@ -407,10 +407,8 @@ tbCase inf _ a@(Attr i _ ) wl plugItens preoldItems = do
 tbCase inf _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let search (IProd _ t) = fmap (fmap _tbattr ). snd <$> L.find ((S.fromList t ==) . S.fromList . fmap _relOrigin . keyattri . fst) wl
       search (Nested (IProd _ t) m ) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). snd <$> L.find ((S.fromList t ==) . S.fromList . fmap _relOrigin .keyattri . fst) wl
-      refs = catMaybes $ fmap search (snd rel)
-      r = sequenceA refs
-  fmap (fmap (Fun i rel )) <$> attrUITable (fmap _tbattr . preevaluate i (fst rel) funmap (snd rel) <$> r ) (_tbattrkey a)
-  -- fmap (fmap (Fun i rel )) <$> attrUITable (_tbattr <$> preoldItems) (_tbattrkey a)
+      refs = sequenceA $ catMaybes $ fmap search (snd rel)
+  fmap (fmap (traceShowId . Fun i rel )) <$> attrUITable (fmap _tbattr . preevaluate i (fst rel) funmap (snd rel) <$> refs ) (_tbattrkey a)
 
 emptyRecTable (FKT rel l tb )
     = case tb of
@@ -815,7 +813,9 @@ buildUIDiff km i  tdi = go i tdi
             TrivialWidget offsetT offset <- offsetField (pure 0)  never (maybe 0 (Non.length .unArray) <$> (recoverEdit <$> facts tdi <*> facts bres))
             let arraySize = 8
                 tdi2  = fmap unArray <$> tdi
-            widgets <- mapM (\ix -> go ti ((\ o v -> join $ flip Non.atMay (o + ix) <$> v ) <$> offsetT <*> tdi2) ) [0..arraySize -1 ]
+                index o ix v = join $ flip Non.atMay (o + ix) <$> v
+            widgets <- mapM (\ix -> go ti (index ix <$> offsetT <*> tdi2) ) [0..arraySize -1 ]
+            sequenceA $ zipWith (\(ix,i) j -> element i # sink UI.style (facts $ (\o t d-> noneShow . isJust  $ recoverEdit (index o ix t) d ) <$> offsetT<*> tdi2 <*> triding j)) (zip [0..] $ tail widgets ) widgets
             let
               widgets2 = Tra.sequenceA (  zipWith (\i j -> (i,) <$> j) [0..] $( triding <$> widgets) )
               reduceA  o i
@@ -874,7 +874,7 @@ buildUIDiff km i  tdi = go i tdi
             subcomposed <- UI.div # set UI.children [composed]
             return $ TrivialWidget ( (\i j -> reduceDiff $ [i,j])<$> (liftA2 (\i j -> PInter True (j,i))<$>  triding lbd <*> triding inf) <*> (liftA2 (\i j -> PInter False (j,i)) <$> triding ubd <*> triding sup)) subcomposed
          (Primitive (AtomicPrim i) ) -> do
-            pinp <- fmap (fmap TB1) <$> buildPrim km (fmap (\(TB1 i )-> i) <$> tdi) i
+            pinp <- fmap (fmap TB1) <$> buildPrim km (fmap unTB1 <$> tdi) i
             return $ TrivialWidget (editor <$> tdi <*> triding pinp) (getElement pinp)
          i -> errorWithStackTrace (show i)
 
@@ -1244,9 +1244,9 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
 
       let evsel = ( unionWith const (rumors tdi) ) (rumors $ join <$> triding itemList)
       prop <- stepper cv evsel
-      let ptds = tidings prop evsel
-      tds <- foldr (\i j ->updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap (unTB1. _fkttable).filterJust . rumors . snd <$>  plmods)
-      element itemList #  sink text (maybe "" (\v -> (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v))<$>  facts (ptds )) # set UI.style [("border","1px solid gray"),("height","20px")]
+      let tds = tidings prop evsel
+      -- tds <- foldr (\i j ->updateEvent  Just  i =<< j)  (return ptds) (fmap Just . fmap (unTB1. _fkttable).filterJust . rumors . snd <$>  plmods)
+      element itemList #  sink text (maybe "" (\v -> (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v))<$>  facts (tds )) # set UI.style [("border","1px solid gray"),("height","20px")]
       (celem,ediff,pretdi) <-crudUITable inf (pure "-") reftb staticold (fmap (fmap (fmap (unTB1 . _fkttable))) <$> plmods)  tbdata tds
       (diffUp) <-  mapEventFin (fmap pure ) $ (\i j -> return $fmap (flip apply (fixPatch inf (_kvname m) j) ) i) <$>  facts pretdi <@> ediff
       let

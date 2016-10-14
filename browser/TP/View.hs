@@ -9,6 +9,7 @@ module TP.View where
 import qualified Data.Aeson as A
 import Utils
 import Safe
+import qualified NonEmpty as Non
 import Debug.Trace
 import Data.Maybe
 import qualified Graphics.UI.Threepenny as UI
@@ -163,7 +164,7 @@ makePatch zone ((t,pk,k),a) =
     ty (KOptional k) i = fmap (POpt . Just) . ty k $ i
     ty (KSerial k) i = fmap (PSerial . Just) . ty k $ i
     ty (KInterval k) (Left i) =
-      [ PatchSet $ catMaybes $
+      [ PatchSet $ Non.fromList $ catMaybes $
         (fmap (fmap (PInter True . (, True))) . (traverse (ty k . Right) . unFinite) $
            Interval.lowerBound i) <>
              (fmap (fmap (PInter False . (, True))) . (traverse (ty k . Right ). unFinite) $
