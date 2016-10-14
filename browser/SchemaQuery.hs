@@ -166,7 +166,7 @@ getFKRef inf predtop rtable (me,old) v (Path r (FKInlineTable  j ) ) =  do
 
 getFKRef inf predtop rtable (me,old) v (Path ref (FunctionField a b c)) = do
   let
-    cl = liftAccess inf (tableName rtable ) <$> c
+    cl = c
     addAttr :: TBData Key Showable -> Either [Compose Identity (TB Identity)  Key Showable] (TBData Key Showable)
     addAttr (m,i) = maybe (Left []) (\r -> Right (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)   i) ) i)) r
       where
@@ -208,7 +208,7 @@ getFKRef inf predtop rtable (me,old) v (Path _ (FKJoinTable i j ) ) =  do
         getAtt i (m ,k ) = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues . unTB $ k
 
 
-getFKS inf predtop table v = F.foldl' (\m f  -> m >>= (\i -> getFKRef inf predtop  table i v f)) (return (return ,S.empty )) $ first <> second
+getFKS inf predtop table v = F.foldl' (\m f  -> m >>= (\i -> getFKRef inf predtop  table i v f)) (return (return ,S.empty )) $ sorted -- first <> second
   where first =  filter (not .isFunction . pathRel )$ sorted
         second = filter (isFunction . pathRel )$ sorted
         sorted = P.sortBy (P.comparing pathRelRel)  (S.toList (rawFKS table))
@@ -234,7 +234,6 @@ tableLoader table  page size presort fixed
         projunion  i = res
             where
               res = liftTable' inf (tableName table ) .mapKey' keyValue $i
-
         o = foldr mergeDBRef  (M.empty,G.empty) (fmap (createUn (S.fromList$ rawPK table).fmap projunion.G.toList) . snd <$>i )
     modify (M.insert (table,fixed) ( snd o ))
     lf <- liftIO getCurrentTime

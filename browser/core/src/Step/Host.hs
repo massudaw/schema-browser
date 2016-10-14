@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Host (module Step.Common,attrT,findPK,findFK,findAttr,findFKAttr,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexField,indexFieldRec,indexer,genPredicate) where
+module Step.Host (module Step.Common,attrT,findPK,findFK,findAttr,findFKAttr,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexField,indexFieldRec,indexer,genPredicate,joinFTB) where
 
 import Types
 import Control.Applicative.Lift
@@ -70,9 +70,11 @@ joinFTB (ArrayTB1 i) =  ArrayTB1 $ fmap joinFTB i
 joinFTB (TB1 i) =  i
 
 indexFieldRec :: Access Key-> TBData Key Showable -> Maybe (FTB Showable)
+indexFieldRec p@(Many [l]) v = indexFieldRec l v
 indexFieldRec p@(IProd b l) v = _tbattr . unTB <$> findAttr  l  v
 indexFieldRec n@(Nested ix@(IProd b l) (Many[nt]) ) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK l v
 indexFieldRec n@(Nested ix@(IProd b l) nt) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK l v
+indexFieldRec n v = errorWithStackTrace (show (n,v))
 
 genPredicate i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
 genPredicate i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)

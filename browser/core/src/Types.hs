@@ -148,7 +148,7 @@ pathRelRel :: Ord k => Path (Set k ) (SqlOperationK k) -> Set (Rel k)
 pathRelRel (Path _ (FKJoinTable  rel   _ )  ) = Set.fromList rel
 pathRelRel (Path r (FKInlineTable  _  )   ) = Set.map Inline r
 pathRelRel (Path r (RecJoin l rel )   ) =  pathRelRel (Path r rel )
-pathRelRel (Path r (FunctionField _ _ a ) ) =  Set.map Inline r
+pathRelRel (Path r (FunctionField _ _ a ) ) =  Set.map Inline r <> (S.fromList $ relAccesGen <$> a)
 
 
 pathRelRel' :: Ord k => Path (Set k ) (SqlOperationK k) -> MutRec [Set (Rel k )]
@@ -625,7 +625,7 @@ data SqlOperationK k
   = FKJoinTable [Rel k] (Text,Text)
   | RecJoin (MutRec [[Rel k ]])  (SqlOperationK k)
   | FKInlineTable (Text,Text)
-  | FunctionField k Expr [Access Text]
+  | FunctionField k Expr [Access k]
   deriving(Eq,Ord,Show,Functor)
 
 fkTargetTable (FKJoinTable  r tn) = snd tn
@@ -820,9 +820,15 @@ mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),i))
 keyattr :: Foldable f => Compose f (TB f ) k  a -> [Rel k]
 keyattr = keyattri . head . F.toList . getCompose
 
+
+relAccesGen :: Access k -> Rel k
+relAccesGen (IProd i [l] ) = Inline l
+relAccesGen (Nested (IProd i [l]) m ) = RelAccess l (relAccesGen m)
+relAccesGen (Many [l]) = relAccesGen l
+
 keyattri :: Foldable f => TB f  k  a -> [Rel k]
 keyattri (Attr i  _ ) = [Inline i]
-keyattri (Fun i _ _ ) = [Inline i]
+keyattri (Fun i  l _ ) = [Inline i] <> (relAccesGen <$> snd l)
 keyattri (FKT i  rel _ ) = rel
 keyattri (IT i  _ ) =  [Inline i]
 

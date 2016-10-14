@@ -32,6 +32,7 @@ module TP.QueryWidgets (
 
 import RuntimeTypes
 import TP.View
+import Expression
 import Data.Tuple
 import Types.Patch
 import Data.Semigroup hiding (diff)
@@ -403,10 +404,13 @@ tbCase inf _ a@(Attr i _ ) wl plugItens preoldItems = do
         let oldItems = maybe preoldItems (\v-> fmap (Just . fromMaybe (Attr i v)) preoldItems  ) ( keyStatic i)
         tdi <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return oldItems ) (fmap snd plugItens )
         fmap (fmap (Attr i )) <$> attrUITable (fmap _tbattr <$> tdi) (_tbattrkey a)
-tbCase inf _ a@(Fun i rel _ ) wl plugItens preoldItems = do
-        let oldItems = maybe preoldItems (\v-> fmap (Just . fromMaybe (Attr i v)) preoldItems  ) ( keyStatic i)
-        tdi <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return oldItems ) (fmap snd plugItens )
-        fmap (fmap (Fun i rel )) <$> attrUITable (fmap _tbattr <$> tdi) (_tbattrkey a)
+tbCase inf _ a@(Fun i rel ac ) wl plugItens preoldItems = do
+  let search (IProd _ t) = fmap (fmap _tbattr ). snd <$> L.find ((S.fromList t ==) . S.fromList . fmap _relOrigin . keyattri . fst) wl
+      search (Nested (IProd _ t) m ) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). snd <$> L.find ((S.fromList t ==) . S.fromList . fmap _relOrigin .keyattri . fst) wl
+      refs = catMaybes $ fmap search (snd rel)
+      r = sequenceA refs
+  fmap (fmap (Fun i rel )) <$> attrUITable (fmap _tbattr . preevaluate i (fst rel) funmap (snd rel) <$> r ) (_tbattrkey a)
+  -- fmap (fmap (Fun i rel )) <$> attrUITable (_tbattr <$> preoldItems) (_tbattrkey a)
 
 emptyRecTable (FKT rel l tb )
     = case tb of

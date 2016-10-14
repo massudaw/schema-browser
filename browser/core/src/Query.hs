@@ -8,6 +8,7 @@ module Query
   (
   tbPK
   ,joinRel
+  ,liftASch
   ,joinRel2
   ,isPrimReflexive
   ,alterKeyType
@@ -352,7 +353,7 @@ recursePath m isLeft isRec vacc ksbn invSchema jo@(Path ifk (RecJoin l f) )
 recursePath m isLeft isRec vacc ksbn invSchema jo@(Path ifk (FunctionField k l f) )
   = return $ Compose $ Labeled (label ref) (Fun k  (l,a) (TB1 () ))
     where
-      a = liftASch invSchema (_kvschema m) (_kvname m) <$> f
+      a = f
       ref = (\i -> justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) $ head (S.toList ifk )
 
 recurseTB :: TableMap -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TB3Data (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3Data (Labeled Text) Key ())
@@ -369,9 +370,10 @@ recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else
           let
               items = _kvvalues kv
               fkSet:: S.Set Key
-              fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ S.toList fks'
+              fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction .pathRel) $ S.toList fks'
+              funSet = S.unions $ fmap (\(Path i _ )-> i) $ filter (isFunction.pathRel) (S.toList fks')
               nonFKAttrs :: [(S.Set (Rel Key) ,TBLabel  ())]
-              nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) fkSet) items
+              nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) (fkSet <> funSet)) items
           pt <- foldl (\acc  fk ->  do
                   vacc <- acc
                   let relFk =pathRelRel fk

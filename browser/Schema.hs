@@ -1,9 +1,10 @@
-{-# LANGUAGE FlexibleContexts,ConstraintKinds,TypeFamilies,RankNTypes, TupleSections,BangPatterns,OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables,FlexibleContexts,ConstraintKinds,TypeFamilies,RankNTypes, TupleSections,BangPatterns,OverloadedStrings #-}
 
 
 module Schema where
 
 import Data.String
+import Query
 import Step.Host
 import Types
 import Expression
@@ -180,19 +181,26 @@ keyTablesInit schemaVar conn (schema,user) authMap pluglist = do
        efks <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp (head . T.splitOn "->" <$> kp)) ( FKJoinTable (zipWith3 (\a b c -> extendedRel keyMap tp a b c)  (V.toList kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn exforeignKeys (Only schema) :: R.Dynamic (Map Text (Set (Path (Set Key) (SqlOperation ) )))
 
 
+       functionsRefs <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc::Text,tc,cols,fun) -> (tp,S.singleton $ Path (S.singleton $ tc) ( FunctionField tc (readFun fun) (indexer <$> V.toList cols ) ) )) <$> query conn functionKeys (Only schema):: R.Dynamic (Map Text (Set (Path (Set Text) (SqlOperationK Text) ) ))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ HM.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  HM.toList keyMap :: Map Text (Set Key)
-       functionsRefs <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc,tc,cols,fun) -> (tp,S.singleton $ Path (S.singleton $ lookupKey' sc (tp ,tc)) ( FunctionField ( lookupKey' sc (tp ,tc)) (readFun fun) (indexer <$> V.toList cols ) ) )) <$> query conn functionKeys (Only schema)
-       i3l <-  traverse (\(c,(pksl,scp,is_sum))-> do
+       i3lnoFun <-  traverse (\(c,(pksl,scp,is_sum))-> do
                                let
                                   pks = F.toList pksl
                                   inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
-                                  functionFK = M.lookup c functionsRefs
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> S.fromList pks)
                                un <-liftIO $ newUnique
-                               return (c ,Raw un schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ (M.lookup c efks )<>(M.lookup c fks )<> fmap S.fromList inlineFK  <> functionFK) S.empty attr [])) res :: R.Dynamic [(Text,Table)]
+                               return (c ,Raw un schema  ((\(Just i) -> i) $ M.lookup c resTT) (M.lookup c transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup c authorization)  (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ (M.lookup c efks )<>(M.lookup c fks )<> fmap S.fromList inlineFK  ) S.empty attr [])) res :: R.Dynamic [(Text,Table)]
        let
            unionQ = "select schema_name,table_name,inputs from metadata.table_union where schema_name = ?"
 
+           tableMapPre = HM.singleton schema (HM.fromList i3lnoFun)
+           addRefs table = maybe table (\r -> Le.over rawFKSL (S.union (S.map liftFun r)) table) ref
+             where ref =  M.lookup (tableName table) functionsRefs
+                   liftFun (Path i (FunctionField k s a) ) =  Path (S.map (lookupKey' ts . (tn,) ) i) (FunctionField (lookupKey' ts (tn ,k)) s (liftASch tableMapPre ts tn <$> a))
+                   tn = tableName table
+                   ts = rawSchema table
+
+           i3l =fmap addRefs <$> i3lnoFun
        ures <- liftIO $ query conn unionQ (Only schema) :: R.Dynamic [(Text,Text,Vector Text)]
        let
            i3 = addRecInit (HM.singleton schema (HM.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $  HM.fromList i3l

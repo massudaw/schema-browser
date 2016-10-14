@@ -34,8 +34,18 @@ parseFunction =  do
 funmap :: Map Text (([KPrim],KPrim ),[FTB Showable] -> FTB Showable)
 funmap = M.fromList [("float8mul",(([PDouble,PDouble],PDouble),(\[i,j]-> i * j )))]
 
+
+preevaluate :: Key -> Expr -> Map Text (([k],k ),[FTB Showable] -> FTB Showable) -> [Access Key] -> [Maybe (FTB Showable)] -> Maybe (Column Key Showable)
+preevaluate k e fs ac res = Fun k (e, ac) <$> go e
+  where
+    go :: Expr -> Maybe (FTB Showable)
+    go (Function i e) = f <$> (traverse go   e)
+      where (_,f) = justError ("no function" <> show i) $ M.lookup i fs
+    go (Value i ) = (res !! i)
+
+
 evaluate :: Key -> Expr -> Map Text (([k],k ),[FTB Showable] -> FTB Showable) -> [Access Key] -> TBData Key Showable -> Maybe (Column Key Showable)
-evaluate k e fs ac tb = traceShowId $ Fun k (e,traceShowId $ ac) <$> go e
+evaluate k e fs ac tb = Fun k (e,traceShowId $ ac) <$> go e
   where
     go :: Expr -> Maybe (FTB Showable)
     go (Function i e) = f <$> (traverse go   e)
