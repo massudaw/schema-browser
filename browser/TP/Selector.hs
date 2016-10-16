@@ -103,27 +103,27 @@ tableChooser :: InformationSchemaKV Key Showable
                             TrivialWidget (M.Map (TableK Key, Text) [TableK Key]))
 tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables = do
   let
-      pred =  [(IProd True ["schema_name"],Left (txt $ iniSchemas,Equals))]
-      authPred =  [(IProd True ["grantee"],Left ( txt $ iniUsers,Equals)), (IProd True ["table_schema"],Left (txt $ iniSchemas,Equals))]
+      pred2 =  [(IProd True ["schema"],Left (int $ schemaId inf  ,Equals))]
+      authPred =  [(IProd True ["grantee"],Left ( int $ fst $ username inf ,Equals)), (IProd True ["schema"],Left (int $ schemaId inf ,Equals))]
   (orddb ,authorization,translation) <- liftIO $ transactionNoLog  (meta inf) $
-      (,,) <$> (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred))
+      (,,) <$> (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred2))
            <*> (fst <$> (selectFromTable "authorization" Nothing Nothing [] authPred))
-           <*> (fst <$> (selectFromTable "table_name_translation" Nothing Nothing []  pred ))
+           <*> (fst <$> (selectFromTable "table_name_translation" Nothing Nothing []  pred2 ))
   filterInp <- UI.input # set UI.style [("width","100%")]
   filterInpBh <- stepper "" (T.pack <$> UI.valueChange filterInp)
   let filterInpT = tidings filterInpBh (T.pack <$> UI.valueChange filterInp)
 
   let
       -- Table Description
-      lookDesc = (\i j -> maybe (rawName j)  (\(Attr _ v )-> T.pack $ renderShowable v) $ lookupAccess  (meta inf) [("schema_name" ,txt $ schemaName inf),("table_name",txt (tableName j))] "translation"  ( "table_name_translation", i )) <$> collectionTid translation
+      lookDesc = (\i j -> maybe (rawName j)  (\(Attr _ v )-> T.pack $ renderShowable v) $ lookupAccess  (meta inf) [("schema" ,int $ schemaId inf),("table",int (_tableUnique j))] "translation"  ( "table_name_translation", i )) <$> collectionTid translation
       -- Authorization
-      authorize =  (\autho t -> isJust $ G.lookup (idex  (meta inf) "authorization"  [("table_schema", txt (schemaName inf) ),("table_name",txt $ tableName t),("grantee",txt $ username inf)]) autho)  <$> collectionTid authorization
+      authorize =  (\autho t -> isJust $ G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ _tableUnique t),("grantee",int $ fst $ username inf)]) autho)  <$> collectionTid authorization
       -- Text Filter
       filterLabel = (\j d -> (\i -> T.isInfixOf (T.toLower j) (T.toLower  $ d i)))<$> filterInpT <*> lookDesc
       -- Usage Count
       tableUsage orderMap table selection = (L.elem table (M.keys selection), maybe (Right 0) (Left . _tbattr) row)
           where
-            pk = [("table_name",txt . rawName $ table ), ("schema_name",txt (schemaName inf))]
+            pk = [("table",int . _tableUnique $ table ), ("schema",int (schemaId inf))]
             row = lookupAccess (meta inf) pk  "usage" ("ordering",orderMap)
   all <- checkedWidget (pure False)
   bset <- mdo
@@ -156,7 +156,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
       ordRow orderMap pkset =  field
           where
             field =  G.lookup (G.Idex $ M.fromList pk) orderMap
-            pk = first (lookKey (meta inf ) "ordering") <$>[("table_name",txt . rawName $ pkset ), ("schema_name",txt (schemaName inf))]
+            pk = first (lookKey (meta inf ) "ordering") <$>[("table",int $ _tableUnique  pkset ), ("schema",int $ schemaId inf)]
       incClick field =  (fst field , G.getIndex field ,[patch $ fmap (+SNumeric 1) usage])
           where
             usage = lookAttr' (meta inf ) "usage"   field

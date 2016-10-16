@@ -32,23 +32,24 @@ import qualified Data.HashMap.Strict as HM
 main :: IO ()
 main = do
   args <- getArgs
-  smvar   <- newMVar HM.empty
+  smvar   <- createVar
   let db = argsToState args
   -- Load Metadata
-  conn <- connectPostgreSQL (connRoot db)
   let
     amap = authMap smvar db (user db , pass db )
 
   print "Load Metadata"
-  (metas ,_)<- runDynamic $keyTables  smvar conn  ("metadata", T.pack $ user db) amap plugList
+  (metas ,_)<- runDynamic $keyTables  smvar ("metadata", T.pack $ user db) amap []
+
+  print "Load Plugins"
+  regplugs <- plugs smvar amap db plugList
+
   print "Start Server"
   ref <- addServer metas
 
-  print "Load Plugins"
-  plugs smvar amap db plugList
 
   print "Load Polling Process"
-  poller smvar amap db plugList False
+  poller smvar amap db regplugs False
 
   print "Load GUI Server"
   forkIO $ threadDelay 50000 >> rawSystem "chromium" ["http://localhost:8025"] >> return ()
@@ -63,7 +64,7 @@ main = do
         deleteClient metas (fromIntegral $ wId w)
 
 
-  startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar args plugList ) initGUI finalizeGUI
+  startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar args regplugs ) initGUI finalizeGUI
   print "Finish Server"
   traverse (deleteServer metas) ref
   return ()

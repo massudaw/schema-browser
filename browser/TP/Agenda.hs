@@ -60,16 +60,18 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
     let
       calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
       schemaPred =  [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals) )]
+      schemaPred2 =  [(IProd True ["schema"],Left (int (schemaId inf),Equals) )]
 
     dashes <- liftIO$ do
       (tmap,evMap) <- transactionNoLog (meta inf) $ do
-        (_,(_,evMap )) <- selectFromTable "event" Nothing Nothing [] schemaPred
-        (_,(_,tmap)) <- selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
+        (_,(_,evMap )) <- selectFromTable "event" Nothing Nothing [] schemaPred2
+        (_,(_,tmap)) <- selectFromTable "table_name_translation" Nothing Nothing [] schemaPred2
         return (tmap,evMap)
       return $ fmap (\e ->
         let
-            (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema_name","table_name"] e
-            lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
+            Just (TB1 (SText tname)) = unSOptional' $  _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
+            table = lookTable inf tname
+            lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema" ,int $ schemaId inf),("table",int $ _tableUnique table )]) i ) $ tmap
             Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"event" $ IProd True ["event"]) e
             (Attr _ color )= lookAttr' (meta inf) "color" e
             toLocalTime = fmap to

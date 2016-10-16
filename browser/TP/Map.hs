@@ -58,19 +58,20 @@ calendarCreate el (Just (p,ne,sw)) evs= runFunction $ ffi "createMap (%1,%2,%3,%
 mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
     let
       calendarT = (\(a,b) c -> (a,b,c)) <$> ((,)<$> facts agendaT <*> facts incrementT )<#> resolutionT
-      schemaPred = [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals))]
+      schemaPred2 = [(IProd True ["schema"],Left (int (schemaId inf),Equals))]
 
-    (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
-    (_,(_,evMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred
-    (_,(_,eventMap )) <- liftIO$ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
+    (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred2
+    (_,(_,evMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred2
+    (_,(_,eventMap )) <- liftIO$ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
     cliZone <- jsTimeZone
     let dashes = (\e ->
           let
-              (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema_name","table_name"] e
-              lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
+              Just (TB1 (SText tname)) = unSOptional' $ _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
+              table = lookTable inf tname
+              lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema" ,int $ schemaId inf),("table",int (_tableUnique table))]) i ) $ tmap
               evfields = join $fmap (\(Attr _ (ArrayTB1 n))-> n) . indexField  (liftAccess (meta inf) "event" $ IProd True ["event"])   <$> erow
                 where
-                  erow = G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )])  eventMap
+                  erow = G.lookup (idex (meta inf) "event" [("schema" ,int $ schemaId inf),("table",int (_tableUnique table))])  eventMap
               (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "geo" e
               (Attr _ color )= lookAttr' (meta inf) "color" e
               (Attr _ size )= lookAttr' (meta inf) "size" e

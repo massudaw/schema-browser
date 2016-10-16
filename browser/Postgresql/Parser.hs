@@ -118,6 +118,7 @@ postgresPrim =
   ,("numeric",PDouble)
   ,("float8",PDouble)
   ,("int4",PInt 4)
+  ,("oid",PInt 4)
   ,("cnpj",PCnpj)
   ,("cpf",PCpf)
   ,("int8",PInt 8)

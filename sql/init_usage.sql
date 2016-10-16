@@ -1,4 +1,4 @@
-﻿insert into metadata.ordering (schema_name,table_name,usage) (select t.schema_name,t.table_name,0 from metadata.tables t left join metadata.ordering o on o.table_name= t.table_name and o.schema_name = t.schema_name where usage is null );
+﻿insert into metadata.ordering (schema,"table",usage) (select t.schema,oid,0 from metadata.tables2 t left join metadata.ordering o on "table"= t.oid and o.schema = t.schema where usage is null );
 
 update 
  pg_attribute set attnotnull = 't'

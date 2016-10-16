@@ -114,6 +114,7 @@ chuncksOf i v = let (h,t) = L.splitAt i v
               in h : chuncksOf i t
 
 justLook k m = justError ("no key in map" <> show k <> show m ) . M.lookup k $ m
+justLookH k m = justError ("no key in map" <> show k <> show m ) . HM.lookup k $ m
 
 eitherToMaybe = either (const Nothing) Just
 

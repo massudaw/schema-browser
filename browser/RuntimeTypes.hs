@@ -43,15 +43,23 @@ import Control.Lens.TH
 import GHC.Stack
 
 
-metaInf :: MVar (HM.HashMap Text InformationSchema ) -> IO InformationSchema
-metaInf smvar = justError "no meta" . HM.lookup "metadata" <$> liftIO ( readMVar smvar)
+metaInf :: DatabaseSchema -> IO InformationSchema
+metaInf smvar = justError "no meta" . HM.lookup "metadata" <$> liftIO ( readMVar (globalRef smvar))
 
 
 type InformationSchema = InformationSchemaKV Key Showable
+data DatabaseSchema
+  = DatabaseSchema
+    { schemaIdMap :: M.Map Int Text
+    , schemaNameMap  :: HM.HashMap Text Int
+    , schemaConn :: Connection
+    , globalRef :: MVar (HM.HashMap Text InformationSchema )
+    }
 data InformationSchemaKV k v
   = InformationSchema
-  { schemaName :: Text
-  , username :: Text
+  { schemaId :: Int
+  , schemaName :: Text
+  , username :: (Int,Text)
   , authtoken :: Auth
   , _keyMapL :: HM.HashMap (Text,Text) k
   , _backendKey :: Map Unique PGKey
@@ -115,8 +123,10 @@ type DBVar = DBVar2 Key Showable
 type Collection k v = (Map WherePredicate (Int,Map Int (PageTokenF k v)),GiST (TBIndex k  v ) (TBData k v))
 type TableIndex k v = GiST (TBIndex k  v ) (TBData k v)
 
-type Plugins = FPlugins Text
+type PrePlugins = FPlugins Text
+type Plugins = (Int,PrePlugins)
 type VarDef = (Text,KType CorePrim)
+
 
 data FPlugins k =
     FPlugins

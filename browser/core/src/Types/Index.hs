@@ -170,7 +170,15 @@ instance Predicates (TBIndex Key Showable) where
   type (Penalty (TBIndex Key Showable)) = Penalty (Map Key (FTB Showable))
   type Query (TBIndex Key Showable) = TBPredicate Key Showable
   consistent (Idex j) (Idex  m )
-     = consistent j m
+    = (if hasText then traceShow (M.keys j) else id )$ consistent j m
+     where hasText = L.any  (isText.keyType )(M.keys j)
+           isText (KOptional i) = isText i
+           isText (KSerial i) = isText i
+           isText (KArray i) = isText i
+           isText (KInterval i ) = isText i
+           isText (Primitive (AtomicPrim PText )) =  True
+           isText (Primitive i ) =  False
+           isText i = errorWithStackTrace (show i)
   match (WherePredicate l)  e (Idex v) =  match (WherePredicate l) e v
   union l  = Idex   projL
     where

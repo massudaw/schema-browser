@@ -6,6 +6,7 @@ module Poller
 
 import qualified NonEmpty as Non
 import Control.Concurrent.Async
+import Control.Arrow
 import Types
 import qualified Types.Index as G
 import Control.Monad.Writer
@@ -39,18 +40,26 @@ import qualified Data.Map as M
 import qualified Data.HashMap.Strict as HM
 
 
+idex inf t v = G.Idex $ M.fromList  $ first (lookKey inf t  ) <$> v
 
 plugs schm authmap db plugs = do
   inf <- metaInf schm
-  transactionNoLog inf  $ do
+  regplugs <- transactionNoLog inf  $ do
       (db ,(_,t)) <- selectFrom "plugins"  Nothing Nothing [] $ mempty
-      let els = L.filter (not . (`L.elem` G.toList t)) $ (\o->  liftTable' inf "plugins" $ tblist (_tb  <$> [Attr "name" (TB1 $ SText $ _name o) ])) <$> plugs
-      elsFKS <- mapM loadFKS  els
-      liftIO $ transaction inf $ mapM fullDiffInsert  elsFKS
+      let regplugs = catMaybes $ findplug <$> plugs
+          findplug :: PrePlugins -> Maybe Plugins
+          findplug p = (,p). round . unTB1 . flip index "oid" . fst <$>  listToMaybe (G.query pred t)
+            where
+              pred :: G.Query (G.TBIndex Key Showable)
+              pred = WherePredicate $ AndColl [PrimColl (liftAccess inf "plugins" $ IProd True ["name"] , Left (txt $ _name p,Equals))]
+      return regplugs
+  modifyMVar_ (globalRef schm) (return . HM.alter  (fmap(\i -> i {plugins=regplugs})) "metadata")
+  return regplugs
 
 
 
 index tb item = snd $ justError ("no item" <> show item) $ indexTable (IProd True [item]) (tableNonRef' tb)
+index2 tb item = justError ("no item" <> show item) $ indexFieldRec item tb
 
 checkTime curr = do
     let
@@ -67,21 +76,22 @@ poller schm authmap db plugs is_test = do
   let conn = rootconn metas
   (dbpol,(_,polling))<- transactionNoLog metas $ selectFrom "polling" Nothing Nothing [] $ mempty
   let
-    project tb =  (schema,intervalms,p)
+    project tb =  (schema,intervalms,p,pid)
       where
-        TB1 (SText schema )= index tb "schema_name"
+        TB1 (SNumeric schema )= index tb "schema"
         TB1 (SNumeric intervalms) = index tb "poll_period_ms"
-        TB1 (SText p) = index tb "poll_name"
+        TB1 (SText p) = index2 tb (liftAccess metas "polling" $ Nested (IProd True ["plugin"]) (Many [IProd True ["name"]]))
+        pid = index tb "plugin"
     enabled = G.toList polling
     poll tb  = do
-      let plug = L.find ((==pname ). _name ) plugs
-          (schema,intervalms ,pname ) = project tb
+      let plug = L.find ((==pname ). _name .snd ) plugs
+          (schema,intervalms ,pname ,pid) = project tb
           indexRow polling = justError (show $ tbpred tb) $ G.lookup (tbpred tb) polling
           tbpred = G.Idex . getPKM
 
-      (inf ,_)<- runDynamic $keyTables  schm conn  (schema, T.pack $ user db) authmap plugs
+      (inf ,_)<- runDynamic $keyTables  schm (justLook schema (schemaIdMap schm) , T.pack $ user db) authmap plugs
       (startP,_,_,current) <- checkTime (indexRow polling )
-      flip traverse plug $ \p -> do
+      flip traverse plug $ \(idp,p) -> do
           let f = pluginStatic p
               elemp = pluginAction p
               pname = _name p
@@ -108,7 +118,7 @@ poller schm authmap db plugs is_test = do
                               tdInput i =  isJust  $ checkTable  (liftAccess inf a $ fst f) i
                               tdOutput1 i =  not $ isJust  $ checkTable  (liftAccess inf a $ snd f) i
 
-                          i <-  mapConcurrently (mapM (\inp -> catchPluginException inf a pname (M.toList $ getPKM inp) $ transactionLog inf $ do
+                          i <-  mapConcurrently (mapM (\inp -> catchPluginException inf a idp (M.toList $ getPKM inp) $ transactionLog inf $ do
                               ovm  <- fmap (liftTable' inf a) <$> liftIO (elemp (Just $ mapKey' keyValue inp))
                               maybe (return ()) (\ov-> do
                                    p <- fullDiffEdit inp ov
@@ -122,16 +132,16 @@ poller schm authmap db plugs is_test = do
                       let polling_log = lookTable metas "polling_log"
                       dbplog <-  refTable metas polling_log
                       let table = tblist
-                              [ attrT ("poll_name",TB1 (SText pname))
-                              , attrT ("schema_name",TB1 (SText schema))
+                              [ attrT ("plugin",pid )
+                              , attrT ("schema",TB1 (SNumeric schema))
                               , _tb $ IT "diffs" (LeftTB1 $ ArrayTB1  . Non.fromList <$> (
                                         nonEmpty  . concat . catMaybes $
                                             fmap (fmap (TB1 . tblist  )) .  either (\r ->Just $ pure $ [attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) ),attrT ("modify",LeftTB1 $Nothing)]) (Just . fmap (\r -> [attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $  r))   ),attrT ("except",LeftTB1 $Nothing)])) <$> i))
                               , attrT ("duration",srange (time current) (time end))]
                           time  = TB1 . STimestamp . utcToLocalTime utc
                           table2 = tblist
-                              [ attrT ("poll_name",TB1 (SText pname))
-                              , attrT ("schema_name",TB1 (SText schema))
+                              [ attrT ("plugin",pid)
+                              , attrT ("schema",TB1 (SNumeric schema))
                               , attrT ("time",srange (time current) (time end))
                               ]
 

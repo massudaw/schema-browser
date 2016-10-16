@@ -799,5 +799,5 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
       returnA -< artInp v
 
 
-plugList :: [Plugins]
+plugList :: [PrePlugins]
 plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,{- lplugContract ,lplugOrcamento ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin , importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo]

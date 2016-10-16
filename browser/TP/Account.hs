@@ -57,7 +57,8 @@ import qualified Data.Map as M
 accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
     let
       calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
-      schemaPred = [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals))]
+      schId = int (schemaId inf)
+      schemaPred = [(IProd True ["schema"],Left (schId,Equals))]
 
     (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
     (_,(_,emap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
@@ -65,9 +66,11 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
     cliZone <- jsTimeZone
     let dashes = fmap (\e ->
           let
-              (Attr _ (TB1 (SText tname))) = lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema_name","table_name"] e
-              lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )]) i ) $ tmap
-              Just (Attr _ (ArrayTB1 efields )) =indexField  (liftAccess (meta inf) "event" $ IProd True ["event"]) $ fromJust $ G.lookup (idex (meta inf) "event" [("schema_name" ,txt $ schemaName inf),("table_name",txt tname )])  emap
+              Just (TB1 (SText tname)) = unSOptional' $ _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
+              table = lookTable  inf tname
+              tablId = int (_tableUnique table)
+              lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema" ,schId ),("table",tablId )]) i ) $ tmap
+              Just (Attr _ (ArrayTB1 efields )) =indexField  (liftAccess (meta inf) "event" $ IProd True ["event"]) $ fromJust $ G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
               (Attr _ (ArrayTB1 afields ))= lookAttr' (meta inf) "account" e
               (Attr _ color )= lookAttr' (meta inf) "color" e
               toLocalTime = fmap to

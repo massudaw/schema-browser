@@ -657,7 +657,7 @@ instance Ord (TableK k) where
   compare i j = compare (_tableUnique i) (_tableUnique j)
 
 data TableK k
-  =  Raw   { _tableUnique :: Unique
+  =  Raw   { _tableUnique :: Int
            ,_rawSchemaL :: Text
            , rawTableType :: TableType
            , rawTranslation :: Maybe Text
@@ -1252,5 +1252,8 @@ tbFilter pred (DelayedTB1 (Just i)) = tbFilter pred i
 
 tbFilter' :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3Data f k a ->  Compose f (KV  (Compose f (TB f ))) k a
 tbFilter' pred (kv,item) =  mapComp (\(KV item)->  KV $ Map.filterWithKey (\k _ -> pred kv k ) $ item) item
+-- Combinators
 
 txt = TB1 . SText
+int = TB1 . SNumeric
+

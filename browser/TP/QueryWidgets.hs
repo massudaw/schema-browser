@@ -134,7 +134,7 @@ pluginUI :: InformationSchema
     -> Tidings (Maybe (TBData CoreKey Showable) )
     -> Plugins
     -> UI (Element ,(Access Key,Tidings (Maybe (TBData CoreKey Showable))))
-pluginUI oinf trinp (FPlugins n tname (StatefullPlugin ac)) = do
+pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
   let
       fresh :: [([VarDef],[VarDef])]
       fresh = fmap fst ac
@@ -156,7 +156,7 @@ pluginUI oinf trinp (FPlugins n tname (StatefullPlugin ac)) = do
         inp :: Tidings (Maybe (TBData CoreKey Showable))
         inp = fmap (tbmap . mapFromTBList) . join  . fmap nonEmpty <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap _tb) .  triding) elemsIn )
 
-      (preinp,(_,liftedE )) <- pluginUI  inf (mergeCreate <$>  unoldItems <*>  inp) (FPlugins "Enviar" tname aci)
+      (preinp,(_,liftedE )) <- pluginUI  inf (mergeCreate <$>  unoldItems <*>  inp) (idp,FPlugins "Enviar" tname aci)
 
       elemsOut <- mapM (\fresh -> do
         let attrB pre a = do
@@ -174,7 +174,7 @@ pluginUI oinf trinp (FPlugins n tname (StatefullPlugin ac)) = do
   el <- UI.div  # set children (b: (fst $ fst freshUI))
   return (el , (liftAccess inf tname  $snd $ pluginStatic' $ snd $ last ac ,last $ snd $ fst freshUI ))
 
-pluginUI inf oldItems p@(FPlugins n t (PurePlugin arrow )) = do
+pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
   let f =second (liftAccess inf t ). first (liftAccess  inf t ) $ staticP arrow
       action = pluginAction   p
   let tdInputPre = fmap (checkTable' (fst f)) <$>  oldItems
@@ -187,10 +187,10 @@ pluginUI inf oldItems p@(FPlugins n t (PurePlugin arrow )) = do
   out <- UI.div # set children [headerP,details]
   ini <- currentValue (facts tdInput )
   kk <- stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
-  pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap (join . eitherToMaybe ). catchPluginException inf t n (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
+  pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap (join . eitherToMaybe ). catchPluginException inf t idp (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
   return (out, (snd f ,   fmap (liftTable' inf t) <$> pgOut ))
 
-pluginUI inf oldItems p@(FPlugins n t (BoundedPlugin2 arrow)) = do
+pluginUI inf oldItems (idp,p@(FPlugins n t (BoundedPlugin2 arrow))) = do
   overwrite <- checkedWidget (pure False)
   let f = second (liftAccess inf t ). first (liftAccess inf t ) $ staticP arrow
       action = pluginAction p
@@ -206,7 +206,7 @@ pluginUI inf oldItems p@(FPlugins n t (BoundedPlugin2 arrow)) = do
   vo <- currentValue (facts tdOutput)
   vi <- currentValue (facts tdInput)
   bcv <- stepper (Nothing {-maybe vi (const Nothing) vo-}) ecv
-  pgOut  <- ui $mapTEventDyn (\v -> liftIO .fmap (fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf t n (M.toList $ getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v)  (tidings bcv ecv)
+  pgOut  <- ui $mapTEventDyn (\v -> liftIO .fmap (fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf t idp (M.toList $ getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v)  (tidings bcv ecv)
   return (out, (snd f ,  pgOut ))
 
 indexPluginAttr
@@ -529,7 +529,7 @@ eiTable
 eiTable inf constr refs plmods ftb@(meta,k) oldItems = do
   let
       table = lookTable inf (_kvname meta)
-  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds ) (plugins inf) )
+  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds .snd ) (plugins inf) )
   let plugmods = first repl <$> ((snd <$> res) <> plmods)
       repl (Rec  ix v ) = (replace ix v v)
       repl (Many[(Rec  ix v )]) = (replace ix v v)

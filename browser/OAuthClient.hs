@@ -40,7 +40,7 @@ tableToToken = atR "token" (fmap tokenToOAuth <$> (liftA4 (,,,) <$> idxM "access
 transToken :: (Show k ,KeyString k ,Applicative m ,Monad m) => Maybe (TBData k Showable ) -> m (Maybe (OAuth2Tokens))
 transToken = fmap join . traverse ((fmap return) (dynPure   $ atR "token" (fmap tokenToOAuth <$> (liftA4 (,,,) <$> idxM "accesstoken" <*> idxM "refreshtoken" <*> idxM "expiresin" <*> idxM "tokentype" )) ))
 
-oauthpoller :: Plugins
+oauthpoller :: PrePlugins
 oauthpoller = FPlugins "Gmail Login" "google_auth" (BoundedPlugin2 url)
   where
     url :: ArrowReader
