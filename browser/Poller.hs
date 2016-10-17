@@ -164,7 +164,6 @@ poller schm authmap db plugs is_test = do
 
               bhIter <- stepper (indexRow  polling) evIter
               let  evDiffIter = diffEvent bhIter evIter
-
               runDynamic $onEventIO  evDiffIter (liftIO . iter) )
           return ()
   mapM poll  enabled

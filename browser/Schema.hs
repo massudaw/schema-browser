@@ -114,7 +114,7 @@ extendedRel inf t a b c =  snd access $ (lrel (fst access))
           lrel :: Text -> Rel Key
           lrel t =  Rel (justError "no key" $ HM.lookup (t ,  last path) inf ) (readBinaryOp b) c
           access :: (Text, Rel Key -> Rel Key)
-          access = foldl cons  (t,id) (init path)
+          access = F.foldl' cons  (t,id) (init path)
             where
               cons (t,j) i = (snd $ inlineName $ keyType  k ,j . RelAccess k )
                 where
@@ -362,7 +362,7 @@ logTableModification inf (TableModification Nothing table i) = do
 
   let ltime =  utcToLocalTime utc $ time
       (_,G.Idex pidx,pdata) = firstPatch keyValue  i
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (username,modification_time,table_name,data_index2,modification_data  ,schema_name) VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (snd $ username inf ,ltime,rawName table, V.fromList <$> nonEmpty (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) (M.toList pidx) )) , fmap (Binary  . B.encode ) . V.fromList <$> nonEmpty pdata , schemaName inf)
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (\"user\",modification_time,\"table\",data_index2,modification_data  ,\"schema\") VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (fst $ username inf ,ltime,_tableUnique table, V.fromList <$> nonEmpty (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) (M.toList pidx) )) , fmap (Binary  . B.encode ) . V.fromList <$> nonEmpty pdata , schemaId inf)
   return (TableModification (Just id) table i )
 
 

@@ -69,7 +69,7 @@ serverCreate metainf now = liftTable' metainf "server" row
               , Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
               ]
 
-addClientLogin inf =  transaction inf $ do
+addClientLogin inf =  transactionNoLog inf $ do
     now <- liftIO$ getCurrentTime
     let
       obj = clientCreate inf now
@@ -87,7 +87,7 @@ deleteClientLogin inf i= do
     old = justError ("no row " <> show (attrIdex [pk]) ) $ G.lookup (attrIdex [pk]) tb
     pt = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
 
-  transaction inf $ do
+  transactionNoLog inf $ do
     v <- updateFrom   (apply old pt ) old
     tell (maybeToList v)
     return v
@@ -96,7 +96,7 @@ addServer inf =  do
     now <- getCurrentTime
     let
       obj = serverCreate inf now
-    transaction inf $ insertFrom obj
+    transactionNoLog inf $ insertFrom obj
 
 idexToPred (G.Idex  i) = head $ (\(k,a)-> (IProd True [k],Left (a,Contains))) <$>  M.toList  i
 
@@ -108,7 +108,7 @@ deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
     oldClis =  L.filter (G.indexPred (idexToPred $ attrIdex [pk])) (G.toList tb)
     pt old = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
 
-  mapM (\(old) -> transaction inf $ do
+  mapM (\(old) -> transactionNoLog inf $ do
     v <- updateFrom   (apply old (pt old)) old
     tell (maybeToList v)
     return v) oldClis
@@ -116,7 +116,7 @@ deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
 
 
   let pt = (tableMeta (lookTable inf "server") , ref ,[PAttr (lookKey inf "server" "up_time") (PInter False ((PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
-  transaction inf $ updateFrom (apply (create o) pt) (create o)
+  transactionNoLog inf $ updateFrom (apply (create o) pt) (create o)
 
 
 opt f = LeftTB1 . fmap f

@@ -165,7 +165,7 @@ setup smvar args plugList w = void $ do
                           listBoxEl itemListEl2 ( G.toList . snd  <$> vpt)  (pure Nothing) (pure id) ( pure attrLine )
                         element metabody # set children [itemListEl,itemListEl2]
                       i -> do
-                        let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                        let pred = [(IProd True ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ int . _tableUnique <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                         dash <- metaAllTableIndexA inf "modification_table" pred
                         element metabody # set UI.children [dash]
                 "Stats" -> do

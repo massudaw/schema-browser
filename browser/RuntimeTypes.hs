@@ -48,6 +48,8 @@ metaInf smvar = justError "no meta" . HM.lookup "metadata" <$> liftIO ( readMVar
 
 
 type InformationSchema = InformationSchemaKV Key Showable
+type UserTable = (Int,Text)
+
 data DatabaseSchema
   = DatabaseSchema
     { schemaIdMap :: M.Map Int Text
@@ -55,11 +57,12 @@ data DatabaseSchema
     , schemaConn :: Connection
     , globalRef :: MVar (HM.HashMap Text InformationSchema )
     }
+
 data InformationSchemaKV k v
   = InformationSchema
   { schemaId :: Int
   , schemaName :: Text
-  , username :: (Int,Text)
+  , username :: UserTable
   , authtoken :: Auth
   , _keyMapL :: HM.HashMap (Text,Text) k
   , _backendKey :: Map Unique PGKey
