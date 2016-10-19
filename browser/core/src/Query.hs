@@ -593,7 +593,7 @@ joinRel2 tb rel ref table
             isArrayTB1 _  = False
 
 
-lookGist un pk  = G.lookup (tbpred un pk)
+lookGist un pk  = G.search (tbpred un pk)
   where
     tbpred un  = tbjust  . traverse (traverse unSOptional') .getUn un
       where

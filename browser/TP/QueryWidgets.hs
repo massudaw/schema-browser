@@ -638,7 +638,7 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
 diffTidings t = tidings (facts t) $ diffEvent (facts t ) (rumors t)
 
 unConstraint :: Set CoreKey -> TBData CoreKey Showable -> G.GiST (G.TBIndex CoreKey Showable) (TBData CoreKey Showable) -> Bool
-unConstraint un v m = isJust . lookGist un v $ m
+unConstraint un v m = not . L.null . lookGist un v $ m
 
 processPanelTable
    :: Element
@@ -650,9 +650,13 @@ processPanelTable
    -> UI (Element, Event (TBIdx CoreKey Showable) )
 processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
   let
-      containsGist ref map = if isJust refM then isJust (lookGist ix ref map) else False
+      containsGist ref map = if isJust refM then not $ L.null (lookGist ix ref map) else False
         where ix = (S.fromList $ _kvpk (tableMeta table))
               refM = traverse unSOptional' (getPKM ref)
+      conflictGist ref map = if isJust refM then lookGist ix ref map else[]
+        where ix = (S.fromList $ _kvpk (tableMeta table))
+              refM = traverse unSOptional' (getPKM ref)
+
 
   -- Insert when isValid
   let insertEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$>  facts inscrud ) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (facts inscrud ) (facts gist ))
@@ -670,6 +674,15 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
   -- Edit when any persistent field has changed
          sink0 UI.enabled editEnabled
 
+  let mergeEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> facts inscrud) (liftA2 (\i j -> not . L.null   $ maybe [] (\e -> filter ((/= e) .tableNonRef') $  conflictGist e j) i  ) (facts inscrud) (facts gist ))
+  mergeB <- UI.button #
+         set text "MERGE" #
+         set UI.class_ "buttonSet"#
+         set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table )) #
+  -- Edit when any persistent field has changed
+         sink0 UI.enabled mergeEnabled
+
+
   let deleteEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (facts oldItemsi ) (facts gist ))
   deleteB <- UI.button #
          set text "DELETE" #
@@ -679,16 +692,25 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
          sink0 UI.enabled deleteEnabled
   let
          filterKey enabled k = const () <$> filterApply (const <$> enabled) (k )
+         crudMerge (Just i) g =
+            fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf ( do
+              let confl = conflictGist i g
+              mapM deleteFrom confl
+              fullDiffInsert  i)
+
          crudEdi (Just i) (Just j) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEditInsert  i j
          crudIns (Just j)   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
          crudDel (Just j)  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> transaction inf (deleteFrom j)
   diffEdi <- mapEventFin id $ crudEdi <$> facts oldItemsi <*> facts inscrud <@ (unionWith const (UI.click editB) (filterKey editEnabled ( onAltU lbox)))
   diffDel <- mapEventFin id $ crudDel <$> facts oldItemsi <@ UI.click deleteB
+  diffMerge <- mapEventFin id $ crudMerge <$> facts inscrud <*> facts gist <@ UI.click mergeB
   diffIns <- mapEventFin id $ crudIns <$> facts inscrud <@ (unionWith const (UI.click insertB) (filterKey  insertEnabled (onAltI lbox)))
+  conflict <- UI.div # sink items (facts $ (\i j -> fmap showFKE $ maybe [] (flip conflictGist j) i)  <$> inscrud <*> gist)
   transaction <- UI.span #
-         set children [insertB,editB,deleteB] #
+         set children [insertB,editB,mergeB,deleteB] #
          set UI.style (noneShowSpan (ReadWrite ==  rawTableType table ))
-  return (transaction , fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffDel] )
+  out <- UI.div # set children [transaction,conflict]
+  return (out, fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffMerge,diffDel] )
 
 
 

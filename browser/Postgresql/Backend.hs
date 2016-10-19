@@ -155,7 +155,6 @@ insertMod j  = do
       table = lookTable inf (_kvname (fst  j))
     kvn <- insertPatch (fmap (mapKey' (recoverFields inf)) . fromRecord . (mapKey' (typeTrans inf))) (conn  inf) (patch $ mapKey' (recoverFields inf) j) (mapTableK (recoverFields inf ) table)
     let mod =  TableModification Nothing table (firstPatch (typeTrans inf) $ kvn)
-    --Just <$> logTableModification inf mod
     return $ Just  mod
 
 
@@ -167,7 +166,6 @@ deleteMod j@(meta,_) = do
       patch =  (tableMeta table, G.getIndex  j,[])
       table = lookTable inf (_kvname (fst  j))
     deletePatch (conn inf)  (firstPatch (recoverFields inf) patch) table
-    -- Just <$> logTableModification inf (TableModification Nothing table  patch)
     return (TableModification Nothing table  patch)
   tell  (maybeToList $ Just log)
   return $ Just log
@@ -179,7 +177,6 @@ updateMod kv old = do
     let table = lookTable inf (_kvname (fst  old ))
     patch <- updatePatch (conn  inf) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table
     let mod =  TableModification Nothing table (firstPatch (typeTrans inf) patch)
-    -- Just <$> logTableModification inf mod
     return $ Just mod
 
 patchMod :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))

@@ -242,7 +242,7 @@ compactTB1 :: (Ord a , Show a, Ord b ,Show b) => [TBIdx a b] -> [TBIdx a b ]
 compactTB1 i = fmap (\((i,j),p)-> (i,j,concat p)) $  groupSplit2 (\(i,j,_) -> (i,j))  (\(_,_,p) -> p) i
 
 compactAttr :: (Ord a , Show a, Ord b ,Show b,Ord (Index b) ,Show (Index b)) => [PathAttr a b ] -> [PathAttr a b ]
-compactAttr  i =  fmap recover .  groupSplit2 projectors pathProj $ i
+compactAttr  i =  fmap (recover.traceShowId) .  groupSplit2 projectors pathProj $ i
   where
     pathProj (PAttr i j)  = Right (Right j)
     pathProj (PFun i rel j)  = Right (Right j)
@@ -252,10 +252,10 @@ compactAttr  i =  fmap recover .  groupSplit2 projectors pathProj $ i
     projectors (PFun i r j ) =  Left (Left (i,r))
     projectors (PInline i j) = Left (Right i)
     projectors (PFK i _ m j) = Right (i,m,j)
-    recover (Left (Right i),j) = PAttr i (justError "cant comapct pattr" $ compactPatches $ rights $ rights j)
+    recover (Left (Right i),j) = justError "cant compact" $ (fmap (PAttr i) $ compactPatches $ rights $ rights j) <|>  (fmap (PInline i ) $ compactPatches $lefts j)
     recover (Left (Left (i,r)),j) = PFun i r (justError "cant comapct pattr" $ compactPatches $ rights $ rights j)
-    recover (Left (Right i),j) = PInline i (justError "cant compact pinline" $ compactPatches $lefts j)
     recover (Right (i,m,j) ,l) = PFK i (compactAttr $ concat $ lefts $ rights l) m j
+    recover i  = errorWithStackTrace $ "no item" <> (show i)
 
 
 
@@ -267,7 +267,7 @@ compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . 
     pathProj (POpt  i) = i
     pathProj (PSerial i) = i
     pathProj (PDelayed i) = i
-    pathProj p@(PInter _ i) = Just (p)
+    pathProj p@(PInter _ i) = Just p
     pathProj i@(PAtom _  ) = Just i
     -- pathProj i = errorWithStackTrace (show i)
     projectors (PIdx i _ ) = PIdIdx i
@@ -284,7 +284,7 @@ compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . 
     recover (PIdInter i ,  j ) = justError "no patch inter" $ patchSet (catMaybes j)
     recover (PIdAtom , j ) = justError "can't be empty " $ patchSet (catMaybes j)
     -- recover i = errorWithStackTrace (show i)
-    compact j = join $ compactPatches <$> Just (catMaybes j)
+    compact j = compactPatches $ catMaybes j
 
 
 
@@ -531,7 +531,7 @@ applyFTB pr a (ArrayTB1 i ) (PIdx ix o) = case o of
 applyFTB pr a (SerialTB1 i ) (PSerial o) = SerialTB1 $  applyOpt pr a i o
 applyFTB pr a (DelayedTB1 i ) (PDelayed o) = DelayedTB1 $  applyOpt pr a i o
 applyFTB pr a (IntervalTB1 i) (PInter b (p,l))
-  = IntervalTB1 $ checkInter pr (PInter b (p,l) ) $ if b
+  = IntervalTB1 $  if b
         then interval (second (const l) $ first (mapExtended p) (lowerBound' i))    (upperBound' i)
         else interval (lowerBound' i) (second (const l) $ first (mapExtended  p ) (upperBound' i))
   where

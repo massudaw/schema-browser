@@ -325,9 +325,9 @@ instance Predicates (FTB Showable) where
   consistent ((TB1 i) ) ((TB1 j) ) = i == j
   consistent ((IntervalTB1 i) ) ((IntervalTB1 j) ) = not $ Interval.null $  j `Interval.intersection` i
   consistent ((IntervalTB1 i) ) (j@(TB1 _) ) = j `Interval.member` i
-  consistent (ArrayTB1 i)  ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-  consistent (ArrayTB1 i)  (j@(TB1 _)) = F.elem  j i
-  consistent (ArrayTB1 i)  (j  ) = F.all (\i -> consistent i j) i
+  consistent (ArrayTB1 i)  (ArrayTB1 j)   = not $ Set.null $ traceShowId $ Set.intersection (Set.fromList (F.toList i) ) (Set.fromList  (F.toList j))
+  consistent (ArrayTB1 i)  j  = F.any (flip consistent j) i
+  consistent i  (ArrayTB1 j ) = F.any (consistent i) j
   consistent (SerialTB1 (Just i)) j@(TB1 _) = consistent i j
   consistent i j  = errorWithStackTrace (show (i,j))
 

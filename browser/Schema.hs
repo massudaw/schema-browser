@@ -259,12 +259,12 @@ createTableRefsUnion inf m i  = do
   bhidx <- R.stepper M.empty eidx
 
   liftIO $forkIO $ forever $ (do
-      forkIO . hidx . force =<< atomically (takeTMVar midx)
+      forkIO . hidx =<< atomically (takeTMVar midx)
       return () )
   liftIO$ forkIO $ forever $ (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
-        (void $ hdiff (force $ concat patches)))
+        (void $ hdiff (concat patches)))
   return (tableMeta i,  DBVar2  mdiff midx midxLoad (R.tidings bhdiff patch) (R.tidings bhidx eidx) bh2 )
 
 
@@ -288,12 +288,12 @@ createTableRefs inf i = do
   (eidx ,hidx) <- R.newEvent
   bhidx <- R.stepper (M.singleton mempty (G.size v,M.empty)) eidx
   liftIO$ forkIO $ forever $ catchJust notException(do
-    forkIO . hidx . force =<< atomically (takeTMVar midx)
+    forkIO . hidx =<< atomically (takeTMVar midx)
     return () )  (\e -> print ("block index",tableName i ,e :: SomeException))
   liftIO $forkIO $ forever $ catchJust notException (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
-        (void $ hdiff (force $ concat patches)))  (\e -> print ("block data ",tableName i ,e :: SomeException))
+        (void $ hdiff (concat patches)))  (\e -> print ("block data ",tableName i ,e :: SomeException))
   return (tableMeta i,  DBVar2  mdiff midx midxLoad (R.tidings bhdiff ediff) (R.tidings bhidx eidx) bh2 )
 
 
