@@ -9,6 +9,7 @@ import Step.Common
 import GHC.Generics
 import Data.Unique
 import Data.Maybe
+import Control.DeepSeq
 import Data.Binary
 import Types.Index as G
 import Control.Concurrent.STM.TQueue
@@ -169,6 +170,7 @@ type TransactionM = RWST InformationSchema [TableModification (TBIdx Key Showabl
 type PageToken = PageTokenF Key Showable
 
 deriving instance (Binary v,Binary k) => Binary (PageTokenF k v)
+deriving instance (NFData v,NFData k) => NFData (PageTokenF k v)
 
 data PageTokenF k v
   = PageIndex Int

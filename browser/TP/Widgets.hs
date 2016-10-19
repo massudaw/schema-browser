@@ -119,7 +119,7 @@ mapEventFin f = fmap (fmap fst).ui . mapEventDyn (liftIO . f)
 mapEvent :: (a -> IO b) -> Event a -> Dynamic (Event b)
 mapEvent f x = do
   (e,h) <- liftIO $ newEvent
-  onEventIO x (\i -> void . forkIO $ (f i)  >>= h)
+  onEventIO x (\i -> void  $ (f i)  >>= h)
   return  e
 
 
@@ -129,9 +129,9 @@ mapTEventDyn f x = do
 
 mapT0EventDyn :: a -> (a -> Dynamic b) -> Tidings a -> Dynamic (Tidings b)
 mapT0EventDyn i f x = mdo
-  (be,v) <- liftIO$ runDynamic $ f i
-  (e,finmap) <- liftIO$ runDynamic $ mapEventDyn (\(a,b) -> liftIO (sequence (reverse $ zipWith (\i -> traceShow ("Finalizer",i) ) [0..] a)) >>  f b) ((,)<$> (snd <$> t) <@> rumors x)
-  t <- stepper (be,v) e
+  ini <- liftIO$ runDynamic $ f i
+  (e,finmap) <- liftIO$ runDynamic $ mapEventDyn (\ ~(a,b) -> liftIO (sequence_ a) >>  f b) ((,)<$> (snd <$> t) <@> rumors x)
+  t <- stepper ini e
   let finall = do
         (_,fin) <- currentValue t
         sequence fin
@@ -140,6 +140,20 @@ mapT0EventDyn i f x = mdo
   Writer.tell [finall]
   return $ tidings (fst <$>t) (fst <$> e)
 
+
+onEventDyn
+  :: Event a ->  (a -> Dynamic b) -> Dynamic ()
+onEventDyn  e f =  mdo
+  (efin,hfin) <- newEvent
+  (_,finmap) <- liftIO $ runDynamic $ onEventIO ((,) <$> bfin <@>e ) (\ ~(fin,i) -> sequence_ fin >> (liftIO . hfin  .snd =<< (runDynamic  ( f i) )) )
+  bfin <- stepper [] (filterJust $ nonEmpty <$> efin)
+  let finall = do
+        fin <- currentValue bfin
+        sequence fin
+        sequence finmap
+        return ()
+  Writer.tell [finall]
+  return ()
 
 
 
@@ -293,9 +307,8 @@ checkedWidget init = do
   let e = unionWith const (rumors init) (UI.checkedChange i)
   v <- currentValue (facts init)
   b <- stepper v e
-  bh <- stepper v (diffEvent  b e)
   dv <- UI.span # set children [i] # set UI.style [("padding","2px")]
-  return $ TrivialWidget  (tidings bh (diffEvent bh e)) dv
+  return $ TrivialWidget  (tidings b e) dv
 
 checkedWidgetM :: Tidings (Maybe Bool) -> UI (TrivialWidget (Maybe Bool))
 checkedWidgetM init = do
@@ -453,7 +466,6 @@ listBoxEl list bitems bsel bfilter bdisplay = do
         lookupIndex indices (Just sel) = L.findIndex (== sel)  indices
     els <- ui $ accumDiff (\(k,v)-> evalUI list $  UI.option # v) (liftA2 (\i j -> M.fromList $ (\ix -> (ix, j ix ))<$> i) bitems bdisplay)
     element list # sink children (facts $ (\m i -> F.toList . M.mapKeys ( flip L.findIndex i. (==) ) $ m)<$> els <*> bindices)
-    --element list # sink children (facts (F.toList <$> els))
 
     -- animate output selection
 
@@ -592,6 +604,7 @@ pruneTidings chw tds =   tidings chkBH chkAll
     chkAll = unionWith const chkEvent chkBehaviour
     chkBH = (\b e -> if b then e else Nothing ) <$> facts chw <*> facts tds
 
+
 strAttr :: String -> WriteAttr Element String
 strAttr name = mkWriteAttr (set' (attr name))
 
@@ -605,9 +618,7 @@ flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 
 onEventFT
   :: Event a ->  (a -> UI b) -> UI  ()
-onEventFT e h = do
-  fin <- onEvent e h
-  return ()
+onEventFT = onEvent
 
 mapUIFinalizerT
   :: Element

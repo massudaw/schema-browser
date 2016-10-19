@@ -20,6 +20,7 @@
 module Types  where
 
 import Data.Ord
+import Control.DeepSeq
 import qualified NonEmpty as Non
 import NonEmpty (NonEmpty(..))
 import Control.Lens.TH
@@ -193,14 +194,17 @@ data BoolCollection a
  = AndColl [BoolCollection a]
  | OrColl [BoolCollection a]
  | PrimColl a
- deriving(Show,Eq,Ord,Functor,Foldable)
+ deriving(Show,Eq,Ord,Functor,Foldable,Generic)
+
+instance NFData a => NFData (BoolCollection a)
 
 type AccessOp a= Either (FTB a, BinaryOperator) UnaryOperator
 
 data UnaryOperator
   = IsNull
   | Not UnaryOperator
-  deriving(Eq,Ord,Show)
+  deriving(Eq,Ord,Show,Generic)
+instance NFData UnaryOperator
 
 renderUnary (Not i) = "not " <> renderUnary i
 renderUnary IsNull = "null"
@@ -241,13 +245,16 @@ data BinaryOperator
   | Flip BinaryOperator
   | AnyOp BinaryOperator
   deriving (Eq,Ord,Show,Generic)
+
 instance Binary BinaryOperator
+instance NFData BinaryOperator
 
 type WherePredicate = TBPredicate Key Showable
 
 newtype TBPredicate k a
   = WherePredicate (BoolCollection (Access k ,AccessOp a ))
-  deriving (Show,Eq,Ord)
+  deriving (Show,Eq,Ord,Generic)
+instance (NFData k, NFData a) => NFData (TBPredicate k a)
 
 
 kvfullname m = _kvschema m <> "." <> _kvname m
@@ -328,6 +335,7 @@ data FKey a
     , _keyTypes ::  a
     }deriving(Functor,Generic)
 
+instance NFData a => NFData (FKey a)
 instance (Functor f ,Bifunctor g)  => Bifunctor (Compose f g ) where
   first f  = Compose . fmap (first f) . getCompose
   second f = Compose . fmap (second f) . getCompose
@@ -364,31 +372,41 @@ _relRoot  (RelAccess i _ ) = i
 instance Binary Sess.Session where
   put i = return ()
   get = error ""
+instance NFData Sess.Session where
+  rnf _ = ()
 instance Binary Order
+instance NFData Order
+
 instance Binary a => Binary (NonEmpty a) where
 instance Binary a => Binary (KType a)
 instance (Binary (f (g k a)) ) => Binary (Compose f g k a )
 instance (Binary (f k a) ,Binary k ) => Binary (KV f k a)
 instance Binary k => Binary (Rel k)
+instance NFData k => NFData (Rel k)
 instance Binary a => Binary (Identity a)
 instance (Binary (f (KV (Compose f (TB f)) g k)) , Binary (f (KV (Compose f (TB f)) g ())) , Binary (f (TB f g ())) ,Binary (f (TB f g k)), Binary k ,Binary g) => Binary (TB f g k )
 instance Binary a => Binary (FTB a)
+instance NFData a => NFData (FTB a)
 instance Binary k => Binary (KVMetadata k )
+instance NFData k => NFData (KVMetadata k )
 instance Binary k => Binary (Access k)
+instance NFData k => NFData (Access k)
 instance Binary Expr
+instance NFData Expr
 
 instance Binary a => Binary (Interval.Extended a) where
-  put (Interval.Finite a ) = B.put a
-  get = Interval.Finite <$> B.get
 instance Binary a => Binary ( Interval.Interval a)  where
-  put (Interval.Interval i j ) = B.put i >> B.put j
-  get = liftA2 Interval.Interval B.get B.get
 
 
 instance Binary Position
+instance NFData Position
 instance Binary Bounding
+instance NFData Bounding
 instance Binary LineString
+instance NFData LineString
 instance Binary Showable
+instance NFData Showable
+
 instance Binary DiffTime where
   put i = B.put (round  (realToFrac i :: Double) :: Int )
   get  = secondsToDiffTime <$> B.get
@@ -442,7 +460,7 @@ filterKey' f ((m ,k) ) = (m,) . mapComp (\(KV kv) -> KV $ Map.filterWithKey f kv
 filterKey f = fmap f
 
 
-newtype MutRec a = MutRec {unMutRec ::  [a] }deriving(Eq,Ord,Show,Functor,Foldable,Generic,Binary)
+newtype MutRec a = MutRec {unMutRec ::  [a] }deriving(Eq,Ord,Show,Functor,Foldable,Generic,Binary,NFData)
 
 traFAttr :: (Traversable g ,Applicative f) => ( FTB a -> f (FTB a) ) -> TB g k a -> f (TB g k a)
 traFAttr f (Attr i v)  = Attr i <$> f v
@@ -546,13 +564,16 @@ data KPrim
    | PSession
    | PColor
    | PDynamic
-   deriving(Show,Eq,Ord)
+   deriving(Show,Eq,Ord,Generic)
+
+instance NFData KPrim
 
 data Prim a b
   = AtomicPrim a
   | RecordPrim b
-  deriving(Eq,Ord,Show)
+  deriving(Eq,Ord,Show,Generic)
 
+instance (NFData a , NFData b) => NFData (Prim a b)
 data KType a
    = Primitive a
    | KSerial (KType a)
@@ -563,6 +584,7 @@ data KType a
    | KTable [KType a]
    deriving(Eq,Ord,Functor,Generic,Foldable,Show)
 
+instance NFData a => NFData (KType a)
 
 showTy f (Primitive i ) = f i
 showTy f (KArray i) = "{" <>  showTy f i <> "}"
@@ -581,7 +603,7 @@ instance Ord (FKey a) where
    compare i j = compare (keyFastUnique i) (keyFastUnique j)
 
 instance Show a => Show (FKey a)where
-  show k = (T.unpack $ maybe (keyValue k) id (keyTranslation  k)) <> "::" <> (show $ hashUnique $ keyFastUnique k)
+  show k = (T.unpack $ maybe (keyValue k) id (keyTranslation  k))
 
 showKey k  =   maybe (keyValue k)  (\t -> keyValue k <> "-" <> t ) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::" <> T.pack (show (keyType k) <> "::" <> show (keyModifier k) <> "::" <> show (keyPosition k )  )
 
@@ -636,7 +658,9 @@ data FieldModifier
    = FRead
    | FWrite
    | FPatch
-   deriving(Eq,Ord,Show)
+   deriving(Eq,Ord,Show,Generic)
+
+instance NFData FieldModifier
 
 data TableType
    = ReadOnly

@@ -20,6 +20,7 @@ import Data.GiST.BTree hiding(Equals,Contains)
 import Data.GiST.GiST as G
 import Data.Tuple (swap)
 import Data.Binary
+import Control.DeepSeq
 import Data.Semigroup
 import GHC.Generics
 import Types
@@ -51,11 +52,38 @@ newtype TBIndex k a
   deriving(Eq,Show,Ord,Functor,Generic)
 
 instance (Binary a, Binary k)  => Binary (TBIndex  k a)
+instance (NFData a, NFData k)  => NFData (TBIndex  k a)
 
 mapKeys f (Idex i ) = Idex $ M.mapKeys f i
 
 getIndex :: Ord k => TBData k a -> TBIndex k a
 getIndex = Idex . getPKM
+
+instance (Num a , Num (Tangent a) ,Fractional a ,Affine a) => Affine (ER.Extended a ) where
+  type Tangent (ER.Extended a) = ER.Extended (Tangent  a)
+  loga (ER.Finite i) = ER.Finite $ loga i
+  loga ER.PosInf = ER.PosInf
+  loga ER.NegInf = ER.NegInf
+  expa (ER.Finite i) = ER.Finite $ expa  i
+  expa ER.PosInf = ER.PosInf
+  expa ER.NegInf = ER.PosInf
+  subtraction (ER.Finite i) (ER.Finite j) = ER.Finite $ subtraction i j
+  subtraction (ER.PosInf ) (ER.PosInf ) = ER.Finite 0
+  subtraction (ER.PosInf ) (ER.NegInf ) = ER.PosInf
+  subtraction (ER.NegInf ) (ER.PosInf ) = ER.NegInf
+  subtraction (ER.NegInf ) (ER.NegInf ) = ER.Finite 0
+  addition (ER.Finite i) (ER.Finite j) = ER.Finite $ addition i j
+  addition ER.NegInf  ER.NegInf = ER.NegInf
+  addition ER.PosInf ER.NegInf = ER.Finite 0
+  addition ER.NegInf ER.PosInf = ER.Finite 0
+  addition ER.PosInf ER.PosInf = ER.PosInf
+
+instance Semigroup a => Semigroup (ER.Extended a ) where
+  (ER.Finite i ) <>  (ER.Finite j) = ER.Finite (i <> j)
+  ER.NegInf  <>  j = ER.NegInf
+  j <> ER.NegInf  = ER.NegInf
+  i <>  ER.PosInf = ER.PosInf
+  ER.PosInf <> _= ER.PosInf
 
 instance Semigroup DiffShowable where
   (<>) = appendDShowable
@@ -70,7 +98,7 @@ instance Semigroup DiffShowable where
       appendDShowable a b = errorWithStackTrace (show (a,b))
 
 instance (Predicates (Predicate a),Ord a) => Predicates (WherePredicate,Predicate a ) where
-  type Penalty (WherePredicate ,Predicate a)= ([DiffShowable],Penalty (Predicate a))
+  type Penalty (WherePredicate ,Predicate a)= ([ER.Extended DiffShowable],Penalty (Predicate a))
   type Query (WherePredicate ,Predicate a)= (WherePredicate ,Query (Predicate a) )
   consistent (c1,i) (c2,j) = consistent c1 c2 && consistent i j
   penalty (c1,i) (c2,j) = (penalty c1 c2 ,penalty i j)
@@ -79,7 +107,7 @@ instance (Predicates (Predicate a),Ord a) => Predicates (WherePredicate,Predicat
   pickSplit = pickSplitG
 
 instance Predicates WherePredicate where
-  type Penalty WherePredicate = [DiffShowable]
+  type Penalty WherePredicate = [ER.Extended DiffShowable]
   type Query WherePredicate = WherePredicate
   consistent (WherePredicate c1) (WherePredicate c2)  = F.all id $ M.mergeWithKey (\_ i j -> Just $ cons i j) (const False <$>) (const False <$>) (M.fromList $F.toList c1) (M.fromList $ F.toList c2)
     where
@@ -93,9 +121,9 @@ instance Predicates WherePredicate where
   penalty (WherePredicate c1) (WherePredicate c2) =F.toList $ M.intersectionWithKey (\_ i j -> cons i j )  (M.fromList $ F.toList c1) (M.fromList $  F.toList c2)
     where
       cons (Left i ) (Left j ) =penalty (fst i) (fst j)
-      cons (Right i ) (Left j ) = DSInt 1
-      cons (Left i ) (Right j ) = DSInt (-1)
-      cons (Right i ) (Right j ) = DSInt $ if i == j then 0 else 1
+      cons (Right i ) (Left j ) = ER.Finite $ DSInt 1
+      cons (Left i ) (Right j ) =  ER.Finite $ DSInt (-1)
+      cons (Right i ) (Right j ) =  ER.Finite $ DSInt $ if i == j then 0 else 1
   pickSplit = pickSplitG
   union l = WherePredicate $ AndColl $ fmap (\(k,a)-> PrimColl(k,a))$ M.toList $ foldl ( M.mergeWithKey (\_ i j -> Just $ pairunion [i,j]) (fmap id) (fmap id) ) M.empty ((\(WherePredicate pr ) -> M.fromList .F.toList $ pr)<$> l)
     where
@@ -170,15 +198,15 @@ instance Predicates (TBIndex Key Showable) where
   type (Penalty (TBIndex Key Showable)) = Penalty (Map Key (FTB Showable))
   type Query (TBIndex Key Showable) = TBPredicate Key Showable
   consistent (Idex j) (Idex  m )
-    = (if hasText then traceShow (M.keys j) else id )$ consistent j m
-     where hasText = L.any  (isText.keyType )(M.keys j)
+    =  consistent j m
+      {-where hasText = L.any  (isText.keyType )(M.keys j)
            isText (KOptional i) = isText i
            isText (KSerial i) = isText i
            isText (KArray i) = isText i
            isText (KInterval i ) = isText i
            isText (Primitive (AtomicPrim PText )) =  True
            isText (Primitive i ) =  False
-           isText i = errorWithStackTrace (show i)
+           isText i = errorWithStackTrace (show i)-}
   match (WherePredicate l)  e (Idex v) =  match (WherePredicate l) e v
   union l  = Idex   projL
     where
@@ -199,7 +227,7 @@ instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
 
 -- Attr List Predicate
 instance  Predicates (Map Key (FTB Showable)) where
-  type Penalty (Map Key (FTB Showable )) = Map Key DiffShowable
+  type Penalty (Map Key (FTB Showable )) = Map Key (ER.Extended DiffShowable)
   type Query (Map Key (FTB Showable )) = TBPredicate Key Showable
   match (WherePredicate a ) e  v=  go a
     where
@@ -213,7 +241,7 @@ instance  Predicates (Map Key (FTB Showable)) where
   union l
     | L.null l = M.empty
     | otherwise = foldl1 (M.intersectionWith (\i j -> union [i,j]) ) l
-  penalty p1 p2 = M.mergeWithKey (\_ i j -> Just $penalty i j ) (fmap (loga .unFin . fst .minP)) (fmap (loga . unFin . fst . minP))  p1 p2
+  penalty p1 p2 = M.mergeWithKey (\_ i j -> Just $penalty i j ) (fmap (maybe ER.PosInf (ER.Finite .loga) .unFin . fst .minP)) (fmap (maybe ER.PosInf (ER.Finite .loga ). unFin . fst . minP))  p1 p2
   pickSplit = pickSplitG
 
 
@@ -267,18 +295,12 @@ data DiffFTB a
   -- | DiffArray [DiffFTB a]
   deriving(Eq,Ord,Show)
 
-instance Affine a => Affine (ER.Extended a) where
-  type Tangent (ER.Extended a) = Tangent a
-  subtraction (ER.Finite i) (ER.Finite j)=  subtraction i j
-  subtraction i j=  errorWithStackTrace " no subtraction"
-  addition (ER.Finite i) j =  ER.Finite (addition i j)
-  addition i j=  errorWithStackTrace " no subtraction"
-
+{-
 instance (Fractional (DiffFTB (Tangent a)) ,Affine a ,Ord a) => Affine (FTB a) where
   type Tangent (FTB a) = DiffFTB (Tangent a)
   subtraction = intervalSub
   addition = intervalAdd
-
+-}
 data DiffShowable
   = DSText [Int]
   | DSDouble Double
@@ -290,7 +312,7 @@ data DiffShowable
 
 
 instance Predicates (FTB Showable) where
-  type Penalty (FTB Showable) = DiffShowable
+  type Penalty (FTB Showable) = ER.Extended DiffShowable
   type Query (FTB Showable) = AccessOp Showable
   consistent (LeftTB1 Nothing) (LeftTB1 Nothing)     = True
   consistent (LeftTB1 (Just i)) (LeftTB1 (Just j) )    = consistent j  i
@@ -358,8 +380,8 @@ instance Predicates (FTB Showable) where
 
   pickSplit = pickSplitG
 
-  penalty p1 p2 =  (notNeg $ (unFin $ fst $ minP p2) `subtraction`  (unFin $ fst $ minP p1)) <>  (notNeg $ (unFin $ fst $ maxP p1) `subtraction` (unFin $ fst $ maxP p2))
-
+  penalty p1 p2 =  (maybe ER.PosInf ER.Finite $ fmap notNeg $ liftA2 subtraction (unFin $ fst $ minP p2) (unFin $ fst $ minP p1)) <>  (maybe ER.PosInf ER.Finite $ fmap notNeg $ liftA2 subtraction (unFin $ fst $ maxP p1)  (unFin $ fst $ maxP p2))
+    {-
 intervalAdd (IntervalTB1 i ) (DiffInterval (off,wid))
   = IntervalTB1 $ (lowerBound i `addition` off,True) `Interval.interval` (upperBound i `addition` wid,True)
 
@@ -369,7 +391,7 @@ intervalSub (IntervalTB1 i) (IntervalTB1 j)
     center i = Interval.lowerBound i  `addition` ((width i)/2)
     width i = Interval.upperBound i `subtraction` Interval.lowerBound i
 
-
+-}
 notNeg (DSPosition l)
   | otherwise = DSPosition l
 notNeg (DSText l)
@@ -392,8 +414,8 @@ notNeg (DSDiffTime l )
 notNeg i= errorWithStackTrace (show i)
 
 
-unFin (Interval.Finite (TB1 i) ) = i
-unFin o = errorWithStackTrace (show o)
+unFin (Interval.Finite (TB1 i) ) = Just i
+unFin o = Nothing -- errorWithStackTrace (show o)
 
 minP (LeftTB1 (Just i) ) = minP i
 minP ((IntervalTB1 i) ) = lowerBound' i

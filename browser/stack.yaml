@@ -12,6 +12,7 @@ packages:
 - core
 - deps/threepenny-gui/
 - deps/data-interval/
+- deps/extended-reals-0.2.2.0/
 - deps/GiST-0.0.1/
 - deps/wreq-0.4.0.0/
 - deps/ordered-0.1

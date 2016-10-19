@@ -139,7 +139,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
           return (k,((b,(snd <$> unions)),evs))
 
     let
-      visible  k = (\i j k-> i tb && j tb && k tb ) <$> filterLabel <*> authorize <*> tableFilter
+      visible  k = (\i j k sel -> (i tb && j tb && k tb ) || (L.elem [tb] sel)) <$> filterLabel <*> authorize <*> tableFilter <*> triding bset
         where
           tb =  k
 

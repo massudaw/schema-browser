@@ -8,13 +8,14 @@ module TP.Agenda where
 
 import GHC.Stack
 import Step.Host
+import Control.Monad.Writer as Writer
 import TP.View
 import qualified Data.Interval as Interval
 import Control.Concurrent
 import Utils
 import Types.Patch
 import Control.Arrow
-import Control.Lens ((^.), _1, mapped,_2, _3)
+import Control.Lens ((^.), _1, mapped,_2, _3,_4)
 import qualified Data.List as L
 import Data.Either
 import Data.Interval (Interval(..))
@@ -55,6 +56,7 @@ import qualified Data.Set as S
 calendarCreate m cal def = runFunction $ ffi "createAgenda(%1,%2,%3)" cal def m
 
 calendarAddSource cal t evs = runFunction $ ffi "addSource(%1,%2,%3)" cal (tableName t) evs
+calendarRemoveSource cal t = runFunction $ ffi "removeSource(%1,%2)" cal (tableName t)
 
 eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
     let
@@ -117,7 +119,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
             calendarFrame <- UI.div # set children [innerCalendar] # set UI.style [("height","450px"),("overflow","auto")]
             element calendar # set children [calendarFrame,sel]
             calendarCreate (transMode agenda resolution) innerCalendar (show incrementT)
-            onEventFT (UI.hover innerCalendar) (const $ do
+            ui $ onEventDyn (UI.hover innerCalendar) (const $ evalUI innerCalendar $ do
                     runFunction $ ffi "$(%1).fullCalendar('render')" innerCalendar )
             let
               evc = eventClick innerCalendar
@@ -125,7 +127,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
               evr = eventResize innerCalendar
               evdd = eventDragDrop innerCalendar
               evs =  fmap (makePatch cliZone . first (readPK inf . T.pack))<$> unions [evr,evdd,evd]
-            onEventFT evs (liftIO . transaction inf . mapM
+            ui $ onEventDyn evs (liftIO . transaction inf . mapM
                   (\i -> do
                      patchFrom i >>= traverse (tell . pure )))
             edits <- ui$ accumDiff (\(tref,_)->  evalUI calendar $ do
@@ -139,11 +141,13 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
                     let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
                     tdib <- stepper Nothing (join <$> evsel)
                     let tdi = tidings tdib (join <$> evsel)
-                    (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi)  reftb [] [] (allRec' (tableMap inf) $ t)  tdi
+                    (el,ediff,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi)  reftb [] [] (allRec' (tableMap inf) $ t)  tdi
+                    ui $ onEventDyn (pure <$> ediff) (liftIO .  putPatch (reftb ^. _4 ))
                     mapUIFinalizerT innerCalendar
-                      ((\i -> do
-                        calendarAddSource innerCalendar  t ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .  concat . fmap (lefts.snd) $ fmap proj $ G.toList i)))
-                      ) (v)
+                      (\i -> do
+                        calendarAddSource innerCalendar  t ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .  concat . fmap (lefts.snd) $ fmap proj $ G.toList i))
+                        ui $ Writer.tell [fmap fst $ runDynamic $ evalUI innerCalendar $ calendarRemoveSource innerCalendar t])
+                       (v)
                     UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
                                    ) ref) (M.fromList . M.keys <$>inpCal)
 

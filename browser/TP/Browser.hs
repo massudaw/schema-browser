@@ -230,6 +230,7 @@ viewerKey inf table cli layout cliTid = mdo
                 in fmap (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
 
   reftb@(vpt,vp,_,var) <- refTables inf table
+  res2 <- stepper vp (rumors vpt)
 
   let
       tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (M.fromList $ justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) iv ) <$> vpt <*> tdip
@@ -254,9 +255,9 @@ viewerKey inf table cli layout cliTid = mdo
   let wheel = negate <$> mousewheel itemListEl
   (offset,res3)<- mdo
     offset <- offsetField (pure 0) wheel  (lengthPage <$> facts res3)
-    res3 <- ui $ mapT0EventDyn (fmap inisort (fmap G.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap G.toList) $ tidings ( res2) ( rumors vpt) ) )
+    res3 <- ui $ mapT0EventDyn (fmap inisort (fmap G.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap G.toList) $ tidings res2 (rumors vpt) ) )
     return (offset, res3)
-  onEvent (rumors $ triding offset) $ (\i ->  liftIO $ do
+  ui $ onEventDyn (rumors $ triding offset) $ (\i ->  liftIO $ do
     transactionNoLog inf $ selectFrom (tableName table ) (Just $ i `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  [] $ mempty)
   let
     paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
@@ -274,8 +275,7 @@ viewerKey inf table cli layout cliTid = mdo
   let
      sel = filterJust $ safeHead . concat <$> unions [ diffUp,unions [rumors  $ fmap join (triding itemList) ]]
   st <- stepper cv sel
-  res2 <- stepper (vp) (rumors vpt)
-  onEvent (pure <$> ediff) (liftIO .  putPatch var )
+  ui $ onEventDyn (pure <$> ediff) (liftIO .  putPatch var )
   title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine i  )  <$> st) # set UI.class_ "col-xs-8"
   expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked filterEnabled# set UI.class_ "col-xs-1"
   let evc = UI.checkedChange expand
@@ -283,7 +283,7 @@ viewerKey inf table cli layout cliTid = mdo
   insertDiv <- UI.div # set children [title,head cru] # set UI.class_ "container-fluid"
   insertDivBody <- UI.div # set children [insertDiv,last cru]
   element sortList # sink UI.style  (noneShow <$> filterEnabled) # set UI.class_ "col-xs-4"
-  element offset # set UI.class_ "col-xs-4"
+  element offset # set UI.class_ "col-xs-2"
   element filterInp # set UI.class_ "col-xs-3"
   element itemList -- # set UI.class_ "row"
   itemSel <- UI.div # set children ( [expand , filterInp, getElement offset ,getElement sortList] ) -- # set UI.class_ "row"

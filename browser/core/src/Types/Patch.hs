@@ -35,6 +35,7 @@ module Types.Patch
 
 -- import Warshal
 import Types
+import Control.DeepSeq
 import Data.Tuple
 import qualified Types.Index as G
 import Control.Monad.Reader
@@ -209,8 +210,10 @@ data PathAttr k a
 
 
 instance (Binary k ,Binary a) => Binary (PathAttr k a)
+instance (NFData k ,NFData a) => NFData (PathAttr k a)
 
 
+instance (NFData k ) => NFData (PathFTB k )
 instance (Binary k ) => Binary (PathFTB k )
 
 data PathTID

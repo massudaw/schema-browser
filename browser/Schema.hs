@@ -4,6 +4,7 @@
 module Schema where
 
 import Data.String
+import Control.DeepSeq
 import Query
 import Step.Host
 import Types
@@ -243,7 +244,8 @@ createTableRefsUnion inf m i  = do
       diffIni = []
   mdiff <-  liftIO$ atomically $ newTQueue
   (iv,v) <- liftIO$ readTable inf "dump" (schemaName inf) (i)
-  (patch,hdiff) <- R.newEvent
+  (patcht,hdiff) <- R.newEvent
+  let patch = patcht
   let
       patchUni = fmap concat $ R.unions $ R.rumors . patchTid .(justError "no table union" . flip M.lookup m) . tableMeta <$>  (rawUnion i)
       patchunion  = liftPatch inf (tableName i ) .firstPatch keyValue
@@ -257,12 +259,12 @@ createTableRefsUnion inf m i  = do
   bhidx <- R.stepper M.empty eidx
 
   liftIO $forkIO $ forever $ (do
-      forkIO . hidx =<< atomically (takeTMVar midx)
+      forkIO . hidx . force =<< atomically (takeTMVar midx)
       return () )
   liftIO$ forkIO $ forever $ (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
-        (void $ hdiff (concat patches)))
+        (void $ hdiff (force $ concat patches)))
   return (tableMeta i,  DBVar2  mdiff midx midxLoad (R.tidings bhdiff patch) (R.tidings bhidx eidx) bh2 )
 
 
@@ -273,7 +275,8 @@ createTableRefs inf i = do
       diffIni :: [TBIdx Key Showable]
       diffIni = []
   mdiff <-  liftIO$ atomically $ newTQueue
-  (ediff,hdiff) <- R.newEvent
+  (edifft,hdiff) <- R.newEvent
+  let ediff = edifft
   (iv,v) <- liftIO$ readTable inf "dump" (schemaName inf) (i)
   midx <-  liftIO$ atomically$ newTMVar iv
   midxLoad <-  liftIO$ atomically $ newTMVar G.empty
@@ -285,12 +288,12 @@ createTableRefs inf i = do
   (eidx ,hidx) <- R.newEvent
   bhidx <- R.stepper (M.singleton mempty (G.size v,M.empty)) eidx
   liftIO$ forkIO $ forever $ catchJust notException(do
-      forkIO . hidx =<< atomically (takeTMVar midx)
-      return () )  (\e -> print ("block index",tableName i ,e :: SomeException))
+    forkIO . hidx . force =<< atomically (takeTMVar midx)
+    return () )  (\e -> print ("block index",tableName i ,e :: SomeException))
   liftIO $forkIO $ forever $ catchJust notException (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
-        (void $ hdiff (concat patches)))  (\e -> print ("block data ",tableName i ,e :: SomeException))
+        (void $ hdiff (force $ concat patches)))  (\e -> print ("block data ",tableName i ,e :: SomeException))
   return (tableMeta i,  DBVar2  mdiff midx midxLoad (R.tidings bhdiff ediff) (R.tidings bhidx eidx) bh2 )
 
 
@@ -344,12 +347,12 @@ newKey name ty p = do
   return $ Key name Nothing    [FRead,FWrite] p Nothing un ty
 
 
-catchPluginException :: InformationSchema -> Text -> Int -> [(Key, FTB Showable)] -> IO (a) -> IO (Either Int (a))
-catchPluginException inf pname tname idx i = do
+catchPluginException :: InformationSchema -> Int -> Int -> [(Key, FTB Showable)] -> IO (a) -> IO (Either Int (a))
+catchPluginException inf pname tname  idx i = do
   (Right <$> i) `catch` (\e  -> do
                 t <- getCurrentTime
                 print (t,e :: SomeException)
-                id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (username,schema_name,table_name,plugin,exception,data_index2,instant) values(?,?,?,?,?,?,?) returning id" (snd $ username inf , schemaName inf,pname,tname,Binary (B.encode $ show (e :: SomeException)) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value" . second (Binary . B.encode) . first keyValue) idx) ), t )
+                id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (\"user\",\"schema\",\"table\",\"plugin\",exception,data_index2,instant) values(?,?,?,?,?,?,?) returning id" (fst $ username inf , schemaId inf,pname,tname,Binary (B.encode $ show (e :: SomeException)) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value" . second (Binary . B.encode) . first keyValue) idx) ), t )
                 return (Left (unOnly $ head $id)))
 
 

@@ -7,6 +7,7 @@
 module TP.Map where
 
 import Step.Host
+import Control.Monad.Writer as Writer
 import TP.View
 import GHC.Stack
 import Control.Monad.Writer
@@ -48,6 +49,8 @@ import Data.Text (Text)
 
 import qualified Data.Map as M
 import qualified Data.HashMap.Strict as HM
+
+removeLayers el tname = runFunction $ ffi "removeLayer(%1,%2)" el tname
 
 createLayers el tname Nothing evs= runFunction $ ffi "createLayer (%1,%3,null,null,null,%2)" el evs tname
 createLayers el tname (Just (p,ne,sw)) evs= runFunction $ ffi "createLayer (%1,%6,%2,%3,%4,%5)" el (show p) (show ne) (show sw) evs tname
@@ -123,7 +126,9 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
             let tdi = tidings tdib (join <$> evsel)
             (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi) reftb [] [] (allRec' (tableMap inf) $ lookTable inf t)  tdi
             mapUIFinalizerT innerCalendar (\i -> do
-              createLayers innerCalendar tname positionB (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) v
+              createLayers innerCalendar tname positionB (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)
+                                          ) v
+            -- ui $ Writer.tell[fmap fst $ runDynamic $ evalUI innerCalendar $ removeLayers innerCalendar tname]
             UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
             ) filterInp
           ) selected

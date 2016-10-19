@@ -52,6 +52,10 @@ function handleFileSelect(evt) {
     }
   }
 
+function removeLayer (ref,tname){
+    ref.mymap.removeLayer(ref.layer[tname]);
+}
+
 function createLayer(ref,tname,posj,nej,swj,features){
   var points = JSON.parse(features);
   if (ref.layer[tname] == null )
@@ -136,8 +140,11 @@ function renderCal(el){
   $(el).fullCalendar('render');
 }
 
-function addSource(el,table,source){
+function removeSource(el,table){
   $(el).fullCalendar('removeEvents',function(e) { return e.table ==table});
+}
+
+function addSource(el,table,source){
   $(el).fullCalendar('addEventSource',JSON.parse(source));
 }
 

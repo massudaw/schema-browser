@@ -118,7 +118,7 @@ poller schm authmap db plugs is_test = do
                               tdInput i =  isJust  $ checkTable  (liftAccess inf a $ fst f) i
                               tdOutput1 i =  not $ isJust  $ checkTable  (liftAccess inf a $ snd f) i
 
-                          i <-  mapConcurrently (mapM (\inp -> catchPluginException inf a idp (M.toList $ getPKM inp) $ transactionLog inf $ do
+                          i <-  mapConcurrently (mapM (\inp -> catchPluginException inf (_tableUnique (lookTable inf a)) idp (M.toList $ getPKM inp) $ transactionLog inf $ do
                               ovm  <- fmap (liftTable' inf a) <$> liftIO (elemp (Just $ mapKey' keyValue inp))
                               maybe (return ()) (\ov-> do
                                    p <- fullDiffEdit inp ov

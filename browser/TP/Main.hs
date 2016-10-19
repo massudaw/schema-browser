@@ -145,10 +145,10 @@ setup smvar args plugList w = void $ do
               element bdo # set children [getElement metanav,metabody] # set UI.style [("display","block")]
               mapUIFinalizerT metabody (\(nav,tables)-> case nav  of
                 "Poll" -> do
-                    element metabody #
-                      set items
-                          [ metaAllTableIndexA inf "polling" [(IProd True ["schema"],Left (schId,Equals) ) ]
+                    els <- sequence      [ metaAllTableIndexA inf "polling" [(IProd True ["schema"],Left (schId,Equals) ) ]
                           , metaAllTableIndexA inf "polling_log" [(IProd True ["schema"],Left (schId,Equals) ) ]]
+                    element metabody #
+                      set children els
                 "Change" -> do
                     case schemaName inf of
                       "gmail" -> do
@@ -169,12 +169,12 @@ setup smvar args plugList w = void $ do
                         dash <- metaAllTableIndexA inf "modification_table" pred
                         element metabody # set UI.children [dash]
                 "Stats" -> do
-                    let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                    let pred = [(IProd True ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ int. _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     stats <- metaAllTableIndexA inf "table_stats" pred
-                    clients <- metaAllTableIndexA inf "clients"$  [(IProd True ["schema_name"],Left (LeftTB1 $ Just $ txt (schemaName inf),Equals) ) ]<> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
+                    clients <- metaAllTableIndexA inf "clients"$  [(IProd True ["schema_name"],Left (LeftTB1 $ Just $ txt (schemaName inf),Equals) ) ]<> if M.null tables then [] else [ (Nested (IProd True ["selection"] ) (Many [ IProd True ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
                     element metabody # set UI.children [stats,clients]
                 "Exception" -> do
-                    let pred = [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table_name"],Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                    let pred = [(IProd True ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ int . _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     dash <- metaAllTableIndexA inf "plugin_exception" pred
                     element metabody # set UI.children [dash]
                 i -> errorWithStackTrace (show i)
@@ -293,7 +293,8 @@ databaseChooser smvar metainf sargs plugList = do
             UI.div # set children (widE <> [load])
 
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
-  authBox <- UI.div # sink items (maybeToList . fmap genSchema <$> facts dbsWT) # set UI.class_ "col-xs-4" # set UI.style [("border", "gray solid 2px")]
+  genS <- mapUIFinalizerT (getElement dbsW) (traverse genSchema) dbsWT
+  authBox <- UI.div # sink children (maybeToList <$> facts genS) # set UI.class_ "col-xs-4" # set UI.style [("border", "gray solid 2px")]
   let auth = authMap smvar sargs (user sargs ,pass sargs )
   inf <- ui $traverse (\i -> loadSchema smvar (T.pack i ) (user sargs) auth plugList ) (schema sargs)
   chooserB  <- stepper inf schemaE

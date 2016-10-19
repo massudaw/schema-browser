@@ -40,11 +40,13 @@ library
     TP.Account
     TP.View
     Text
+  ghc-options:         -O2 
   default-extensions: TupleSections,OverloadedStrings
   build-depends:
      core
    , base ==4.8.*
    , scientific
+   , deepseq
    , ordered
    -- Postgresql Backend
    , blaze-builder

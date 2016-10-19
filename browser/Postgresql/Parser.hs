@@ -64,7 +64,7 @@ import Blaze.ByteString.Builder.Char8(fromChar)
 
 preconversion i =  join $ (\t -> M.lookup (i,t) (postgresLiftPrimConv)) <$> ktypeLift  i
 
-conversion i = fromMaybe (id,id) $ preconversion i
+conversion i = fromMaybe (id , id) $ preconversion i
 
 topconversion v@(KDelayed n ) =   preconversion v <|> fmap lif (topconversion n )
   where
