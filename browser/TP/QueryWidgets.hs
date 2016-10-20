@@ -674,14 +674,13 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
   -- Edit when any persistent field has changed
          sink0 UI.enabled editEnabled
 
-  let mergeEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> facts inscrud) (liftA2 (\i j -> not . L.null   $ maybe [] (\e -> filter ((/= e) .tableNonRef') $  conflictGist e j) i  ) (facts inscrud) (facts gist ))
+  let mergeEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> facts inscrud) (liftA2 (\i j -> not . L.null   $ maybe [] (\e -> filter ((/= tableNonRef' e) .tableNonRef') $  conflictGist e j) i  ) (facts inscrud) (facts gist ))
   mergeB <- UI.button #
          set text "MERGE" #
          set UI.class_ "buttonSet"#
          set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table )) #
   -- Edit when any persistent field has changed
          sink0 UI.enabled mergeEnabled
-
 
   let deleteEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (facts oldItemsi ) (facts gist ))
   deleteB <- UI.button #
@@ -691,21 +690,21 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
   -- Delete when isValid
          sink0 UI.enabled deleteEnabled
   let
-         filterKey enabled k = const () <$> filterApply (const <$> enabled) (k )
-         crudMerge (Just i) g =
-            fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf ( do
-              let confl = conflictGist i g
-              mapM deleteFrom confl
-              fullDiffInsert  i)
+       filterKey enabled k = const () <$> filterApply (const <$> enabled) (k )
+       crudMerge (Just i) g =
+          fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf ( do
+            let confl = conflictGist i g
+            mapM deleteFrom confl
+            fullDiffInsert  i)
+       crudEdi (Just i) (Just j) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEditInsert  i j
+       crudIns (Just j)   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
+       crudDel (Just j)  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> transaction inf (deleteFrom j)
 
-         crudEdi (Just i) (Just j) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEditInsert  i j
-         crudIns (Just j)   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
-         crudDel (Just j)  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> transaction inf (deleteFrom j)
   diffEdi <- mapEventFin id $ crudEdi <$> facts oldItemsi <*> facts inscrud <@ (unionWith const (UI.click editB) (filterKey editEnabled ( onAltU lbox)))
   diffDel <- mapEventFin id $ crudDel <$> facts oldItemsi <@ UI.click deleteB
   diffMerge <- mapEventFin id $ crudMerge <$> facts inscrud <*> facts gist <@ UI.click mergeB
   diffIns <- mapEventFin id $ crudIns <$> facts inscrud <@ (unionWith const (UI.click insertB) (filterKey  insertEnabled (onAltI lbox)))
-  conflict <- UI.div # sink items (facts $ (\i j -> fmap showFKE $ maybe [] (flip conflictGist j) i)  <$> inscrud <*> gist)
+  conflict <- UI.div # sink items (facts $ (\i j -> fmap showFKE $ maybe [] (flip conflictGist j) i)  <$> inscrud <*> gist) # sink UI.style (noneShow <$>mergeEnabled)
   transaction <- UI.span #
          set children [insertB,editB,mergeB,deleteB] #
          set UI.style (noneShowSpan (ReadWrite ==  rawTableType table ))
@@ -891,13 +890,17 @@ buildUIDiff km i  tdi = go i tdi
             composed <-  UI.div
             subcomposed <- UI.div # set UI.children [composed]
             inf <- go ti (join.fmap (unInterval inf' ) <$> tdi)
-            lbd <- fmap Diff <$> checkedWidget (maybe False id . fmap (unInterval (snd . Interval.lowerBound') ) <$> tdi)
+            lbd <- checkedWidget (maybe False id . fmap (unInterval (snd . Interval.lowerBound') ) <$> tdi)
 
             sup <- go ti (join.fmap (unInterval sup')  <$> tdi)
-            ubd <- fmap Diff<$> checkedWidget (maybe False id .fmap (unInterval (snd . Interval.upperBound' ) ) <$> tdi)
+            ubd <- checkedWidget (maybe False id .fmap (unInterval (snd . Interval.upperBound' ) ) <$> tdi)
             element composed # set UI.style [("display","inline-flex")] # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
             let
-              output = (\i j -> reduceDiff $ [i,j])<$> (liftA2 (curry (PInter True)) <$>  triding inf <*> triding lbd ) <*> (liftA2 (curry (PInter False )) <$> triding sup <*> triding ubd)
+              replaceL  Delete   h= Diff $ PInter True (Interval.NegInf,h)
+              replaceL   i h =  fmap (PInter True  . (,h). Interval.Finite) i
+              replaceU  Delete   h = Diff $ PInter False (Interval.PosInf,h)
+              replaceU  i  h =  fmap (PInter False . (,h).Interval.Finite) i
+              output = (\i j -> reduceDiff $ [i,j])<$> (replaceL <$>  triding inf <*> triding lbd ) <*> (replaceU <$> triding sup <*> triding ubd)
             return $ TrivialWidget  output subcomposed
          (Primitive (AtomicPrim i)) -> do
             pinp <- fmap (fmap TB1) <$> buildPrim km (fmap unTB1 <$> tdi) i

@@ -29,6 +29,7 @@ import qualified Data.Map as M
 import qualified Data.ByteString as BS
 
 import qualified Data.HashMap.Strict as HM
+
 main :: IO ()
 main = do
   args <- getArgs

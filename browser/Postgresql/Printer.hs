@@ -13,6 +13,7 @@ module Postgresql.Printer
 import Query
 import Debug.Trace
 import Data.Ord
+import Types.Index (TBIndex(..))
 import Data.String
 import Step.Host (findFK,findAttr,findFKAttr)
 import Step.Common
@@ -265,7 +266,7 @@ selectQuery
         (KV (Compose (Labeled Text) (TB (Labeled Text))))
         Key
         ())
-    -> Maybe [(Key, FTB Showable)]
+     -> Maybe (TBIndex Key Showable)
      -> [(Key, Order)]
      -> WherePredicate
      -> (Text,Maybe [TB Identity Key Showable])
@@ -282,11 +283,12 @@ selectQuery t koldpre order wherepred = (,ordevalue <> predvalue) $ if L.null (s
         pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  ( orderquery <> predquery)
         (orderquery , ordevalue) =
           let
-            oq = (const $ pure $ generateComparison (first (justLabel t) <$> order)) <$> koldpre
+            unIndex (Idex i ) = M.toList i
+            oq = (const $ pure $ generateComparison (first (justLabel t) <$> order)) . unIndex<$> koldpre
             koldPk :: Maybe [TB Identity Key Showable]
-            koldPk =  (\k -> uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) k ) <$> koldpre
+            koldPk =  (\k -> uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) k ) . unIndex <$> koldpre
             pkParam =  koldPk <> (tail .reverse <$> koldPk)
-          in (oq,pkParam)
+         in (oq,pkParam)
         orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first (justLabel t) <$> order)
 
 generateComparison ((k,v):[]) = k <>  dir v <> "?"

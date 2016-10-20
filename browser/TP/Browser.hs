@@ -85,7 +85,7 @@ deleteClientLogin inf i= do
   let
     pk = Attr (lookKey inf "client_login" "id") (TB1 (SNumeric i))
     old = justError ("no row " <> show (attrIdex [pk]) ) $ G.lookup (attrIdex [pk]) tb
-    pt = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
+    pt = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((ER.Finite $ PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
 
   transactionNoLog inf $ do
     v <- updateFrom   (apply old pt ) old
@@ -106,7 +106,7 @@ deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
   let
     pk = Attr (lookKey inf "client_login" "up_time") (TB1 (STimestamp (utcToLocalTime utc now)))
     oldClis =  L.filter (G.indexPred (idexToPred $ attrIdex [pk])) (G.toList tb)
-    pt old = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
+    pt old = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((ER.Finite $ PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
 
   mapM (\(old) -> transactionNoLog inf $ do
     v <- updateFrom   (apply old (pt old)) old
@@ -115,7 +115,7 @@ deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
 
 
 
-  let pt = (tableMeta (lookTable inf "server") , ref ,[PAttr (lookKey inf "server" "up_time") (PInter False ((PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
+  let pt = (tableMeta (lookTable inf "server") , ref ,[PAttr (lookKey inf "server" "up_time") (PInter False ((ER.Finite $ PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
   transactionNoLog inf $ updateFrom (apply (create o) pt) (create o)
 
 
@@ -179,21 +179,16 @@ addClient clientId metainf inf table row =  do
 
 
 chooserTable inf bset cliTid cli = do
-  let
-    bBset = triding bset
-  nav  <- buttonDivSet ["Browser"] (pure $ Just "Browser")(\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")]. set UI.class_ "buttonSet btn-xs btn-default pull-right")
-  element nav # set UI.class_ "col-xs-11"
   layout <- checkedWidget (pure False)
   body <- UI.div
-  el <- ui $ accumDiff (\(l,_) -> evalUI body  . (\(nav,((table,desc),sub))-> do
+  el <- ui $ accumDiff (evalUI body  . (\(((table,desc),sub))-> do
     header <- UI.h3
         # set UI.class_ "header"
         # set text (T.unpack desc)
-    let layFacts i =  if i then ("col-xs-" <> (show $  (12`div`length l))) else "row"
+    let
         layFacts2 i =  if i then ("col-xs-" <> (show $  6)) else "row"
 
-    body <- case nav of
-        "Browser" -> do
+    body <-  do
             if L.length sub == 1
                then do
               viewerKey inf table cli (layFacts2 . not <$> triding layout) cliTid
@@ -205,11 +200,11 @@ chooserTable inf bset cliTid cli = do
                   UI.div # set children [l,b]
                   ) sub
               UI.div # set children els
-    UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFacts <$> triding layout)# set UI.style [("border","2px dotted gray")]
-                       ) $ l) $ fmap (M.fromList . fmap (\i -> (i,())) ) $ liftA2 (\i j -> (i,) <$> j)  (triding nav) (M.toList <$> bBset)
+    UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFacts2 <$> triding layout)# set UI.style [("border","2px dotted gray")]
+                       ).fst)  (M.fromList . fmap (\i -> (i,())) . M.toList <$> triding bset)
   element body # sink0 UI.children (F.toList <$> facts el) # set UI.class_ "col-xs-12"
   element layout  # set UI.class_ "col-xs-1"
-  return [getElement layout ,getElement nav ,body]
+  return [getElement layout ,body]
 
 viewerKey
   ::
@@ -266,7 +261,7 @@ viewerKey inf table cli layout cliTid = mdo
   itemList <- listBoxEl itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (fmap Just <$> tidings st sel ) (pure id) (pure (maybe id attrLine))
   let evsel =  rumors (fmap join  $ triding itemList)
   (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals ))]
-  -- ui $onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) inf dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< getCurrentTime )
+  ui $onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) inf dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< getCurrentTime )
   prop <- stepper cv evsel
   let tds = tidings prop evsel
 

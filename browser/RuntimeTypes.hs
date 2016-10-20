@@ -175,7 +175,7 @@ deriving instance (NFData v,NFData k) => NFData (PageTokenF k v)
 data PageTokenF k v
   = PageIndex Int
   | NextToken Text
-  | TableRef [(k, FTB v)]
+  | TableRef (TBIndex k v)
   | HeadToken
   deriving(Eq,Ord,Show,Generic)
 
@@ -289,6 +289,7 @@ liftAccess inf tname (Nested i c) = Nested ref (liftAccess inf (snd l) c)
     l = case n of
           (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
           (Path _ rel@(FKInlineTable  l  ) ) ->  l
+
 liftAccess _ _ i = errorWithStackTrace (show i)
 
 

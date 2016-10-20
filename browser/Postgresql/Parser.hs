@@ -290,6 +290,16 @@ unIntercalateAtto l s = go l
     go (e:cs) =  liftA2 (:) e  (s *> go cs)
     go [] = errorWithStackTrace  "empty list"
 
+parseAttrJSON (Attr i _ ) v = do
+  s<- parseShowableJSON (keyType  i) v
+  return $  Attr i s
+parseAttrJSON (Fun i rel _ )v = do
+  s<- parseShowableJSON (keyType  i) v
+  return $  (Fun i rel s)
+parseAttrJSON (IT na j) v = do
+  mj <- parseLabeledTableJSON j v
+  return $ IT  na mj
+
 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
 -- parseAttr i | traceShow i False = undefined
@@ -329,6 +339,27 @@ parseLabeledTable (DelayedTB1 (Just tb) ) =  string "t" >>  return (DelayedTB1  
 parseLabeledTable (LeftTB1 (Just i )) =
   LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapTable (LeftTB1 . Just) <$>  mapKey kOptional i) >> return Nothing) <|> return Nothing )
 parseLabeledTable  tb1 = traverse parseRecord  $ tb1
+
+parseLabeledTableJSON (ArrayTB1 (l :| _)) (A.Array a)=
+  ArrayTB1 <$> traverse (parseLabeledTableJSON l ) (Non.fromList . F.toList $a)
+-- parseLabeledTableJSON (ArrayTB1 (l :| _)) (A.Null) = fail "no array"
+parseLabeledTableJSON (LeftTB1 (Just l)) A.Null = return $ LeftTB1 Nothing
+parseLabeledTableJSON (LeftTB1 (Just l)) v = fmap LeftTB1 $ fmap Just (parseLabeledTableJSON l v) <|> return (Nothing)
+parseLabeledTableJSON (TB1 l) v = fmap TB1 $ parseRecordJSON  l v
+parseLabeledTableJSON i v= errorWithStackTrace (show (i,v))
+
+
+parseRecordJSON  (me,m) (A.Object v) = (do
+  let try1 i v = HM.lookup (label i ) v
+      try2  (IT _ r) v = HM.lookup ( "p" <> l1 ) v<|> HM.lookup  l1  v
+        where l1 = (label $ getCompose$ snd $ unTB1 r)
+      try2 (FKT _ _ r) v = HM.lookup ( "p" <> l1 ) v <|> HM.lookup  l1  v
+        where l1 = (label $ getCompose$ snd $ unTB1 r)
+      try2 i _ = Nothing
+
+  im <- traverse (fmap _tb . (\ i -> parseAttrJSON  (labelValue i) (justError (" no attr " <> show (i,v)) $ try1 i v <|> try2 (labelValue i) v)). getCompose )$   _kvvalues (labelValue $ getCompose m)
+  return (me,Compose $ Identity $  KV im ))
+
 
 parseRecord  (me,m) = (char '('  *> (do
   im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (  L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr.snd)) $M.toList (replaceRecRel  (_kvvalues $ unTB m) (fmap (fmap (fmap S.fromList) ) $ _kvrecrels  me))) ) (char ',')
@@ -384,8 +415,9 @@ doublequoted  p =   (takeWhile (== '\\') >>  char '\"') *>  inner <* ( takeWhile
   where inner = tryquoted p
 
 parsePrimJSON :: KPrim -> A.Value -> A.Parser Showable
-parsePrimJSON i  =
-    case i of
+parsePrimJSON i  A.Null = fail ("cant be null" <> show i)
+parsePrimJSON i  v =
+  (case i of
       PDynamic  -> A.withText (show i) (return .SDynamic . B.decode . BSL.fromStrict . fst . B16.decode .BS.pack . T.unpack)
       PBinary -> A.withText (show i) (return .SBinary . fst . B16.decode .BS.pack . T.unpack)
       PMime _ -> A.withText (show i) (return .SBinary . fst . B16.decode .BS.pack . T.unpack)
@@ -397,10 +429,18 @@ parsePrimJSON i  =
       PText -> A.withText (show i) (return .SText )
       PCnpj -> A.withText (show i) (return .SText )
       PCpf -> A.withText (show i) (return .SText )
-      PInterval -> A.withText (show i) (either (errorWithStackTrace "no parse" ) (return . SPInterval )  . parseOnly diffInterval .BS.pack . T.unpack)
-      PTimestamp _ -> A.withText (show i) (maybe (fail "cant parse timestamp") (return .STimestamp  . fst) . strptime "%Y-%m-%d %H:%M:%OS")
+      PInterval ->  A.withText (show i) (either (errorWithStackTrace "no parse" ) (return . SPInterval )  . parseOnly diffInterval .BS.pack . T.unpack)
+      PTimestamp _ -> (\v -> A.withText (show i) (maybe (fail ("cant parse timestamp" <> show (i,v))) (return .STimestamp  . fst) . strptime "%Y-%m-%dT%H:%M:%OS") $ v)
       PDayTime  -> A.withText (show i) (maybe (fail "cant parse daytime") (return .SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS")
       PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay . fst) . strptime "%Y-%m-%d")
+      PPosition -> A.withText (show i) (\s -> case  Sel.runGet getPosition (fst $ B16.decode (BS.pack $ T.unpack s))of
+              i -> case i of
+                Right i -> pure $ SPosition i
+                Left e -> fail e)
+
+      i -> errorWithStackTrace (show i)
+  ) v
+
 
 parsePrim
   :: KPrim
@@ -491,6 +531,8 @@ parseShowable p@(Primitive (AtomicPrim i)) = forw  . TB1 <$> parsePrim i
 
 parseShowable i  = error $  "not implemented " <> show i
 
+parseShowableJSON (KDelayed i) (A.Bool b)
+  = if b then return (DelayedTB1 Nothing)  else fail "no error"
 parseShowableJSON (KSerial i)  v = SerialTB1 . Just <$> parseShowableJSON i v
 parseShowableJSON (KOptional i ) v =
   case v of
@@ -500,6 +542,13 @@ parseShowableJSON  (KArray i )  (A.Array l )
   =  maybe (fail "empty list" ) (fmap (ArrayTB1 . Non.fromList) . mapM (parseShowableJSON i)) (nonEmpty $ F.toList l)
 parseShowableJSON  p@(Primitive (AtomicPrim i)) v =  forw . TB1 <$> parsePrimJSON i v
   where (forw,_)  =conversion p
+
+parseShowableJSON (KInterval i ) (A.String v)
+  = case parseOnly (parseShowable(KInterval i)) (BS.pack $ T.unpack v) of
+        Right i -> return i
+        Left i -> fail i
+parseShowableJSON i v = errorWithStackTrace (show (i,v))
+
 
 pg_double :: Parser Double
 pg_double
@@ -646,6 +695,19 @@ fromShowable ty v =
    case parseOnly (parseShowable (ty )) v of
       Right i -> Just i
       Left l -> Nothing
+
+fromRecordJSON :: TB3Data (Labeled Text) Key () ->  FR.RowParser (TBData Key Showable)
+fromRecordJSON foldable = do
+  let parser   f = case A.parseEither (\(A.Object i) -> parseRecordJSON foldable $ justError "no top" $ HM.lookup ("p" <> (label $ getCompose (snd foldable))) i )  f of
+                  Right i -> i
+                  Left i -> errorWithStackTrace (show i)
+
+  parser <$> FR.field
+        {-parseRecordJSON $ FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
+                               (Right (Just r ) ) -> return r
+                               Right Nothing -> error (show j )
+                               Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
+-}
 
 fromRecord foldable = do
     let parser  = parseRecord foldable
