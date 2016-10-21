@@ -7,6 +7,7 @@ import Data.String
 import Control.DeepSeq
 import Query
 import Step.Host
+import qualified Data.Interval as Interval
 import Types
 import Expression
 import Step.Common
@@ -354,6 +355,19 @@ catchPluginException inf pname tname  idx i = do
                 print (t,e :: SomeException)
                 id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (\"user\",\"schema\",\"table\",\"plugin\",exception,data_index2,instant) values(?,?,?,?,?,?,?) returning id" (fst $ username inf , schemaId inf,pname,tname,Binary (B.encode $ show (e :: SomeException)) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value" . second (Binary . B.encode) . first keyValue) idx) ), t )
                 return (Left (unOnly $ head $id)))
+
+logLoadTimeTable
+  ::
+     InformationSchema
+     -> Table -> TBPredicate Key Showable -> String -> IO a -> IO a
+logLoadTimeTable inf table pred mode action = do
+  ini <- getCurrentTime
+  a <- action
+  end <- getCurrentTime
+  let ltime time =  STimestamp $ utcToLocalTime utc $ time
+  liftIO $ execute(rootconn inf) "INSERT INTO metadata.stat_load_table(\"user\",\"table\",\"schema\",load,mode) VALUES (?,?,?,?,?)"  (fst $ username inf ,_tableUnique table,  schemaId inf,Interval.interval (Interval.Finite (ltime ini),True) (Interval.Finite (ltime end),True),mode)
+  return a
+
 
 
 logTableModification

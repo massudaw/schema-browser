@@ -30,8 +30,11 @@ module Types.Patch
   ,isDelete
   ,patchEditor
   ,joinEditor
+  ,indexFilterP
+  ,indexFilterPatch
   --
   ,PathFTB(..),PathAttr(..),TBIdx,firstPatch,PatchConstr)where
+
 
 -- import Warshal
 import Types
@@ -88,6 +91,32 @@ patchEditor i
   | otherwise = Diff $ PatchSet (Non.fromList$ concat $ normalize <$> i)
       where normalize (PatchSet i) = concat $ fmap normalize i
             normalize i = [i]
+
+
+indexFilterP (WherePredicate p) v = go p
+  where
+    go (AndColl l)  = F.all go l
+    go (OrColl l ) = F.any  go l
+    go (PrimColl l ) = indexFilterPatch l v
+
+indexFilterPatch :: (Access Key,Either (FTB Showable,BinaryOperator) UnaryOperator) -> TBIdx Key Showable -> Bool
+indexFilterPatch ((IProd _ l) ,op)  (_,_,lo) =
+  case L.find ((Set.fromList (fmap Inline l) == ).pattrKey) lo of
+    Just i ->
+      case i of
+        PAttr k f -> G.match op G.Exact (create f :: FTB Showable)
+        i -> True
+    Nothing -> True
+indexFilterPatch ((Nested (IProd _  l) n) ,op)  (_,_,lo) =
+  case L.find ((Set.fromList l == ).Set.map _relOrigin . pattrKey) lo of
+    Just i ->
+      case i of
+        PInline k f -> L.any (indexFilterPatch (n,op)) f
+        PFK _ _ _ f -> L.any (indexFilterPatch (n,op)) f
+        i -> True
+    Nothing -> True
+indexFilterPatch (Many [n],op) o = indexFilterPatch (n,op) o
+indexFilterPatch i o= errorWithStackTrace (show (i,o))
 
 
 

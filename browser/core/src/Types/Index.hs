@@ -314,21 +314,20 @@ data DiffShowable
 instance Predicates (FTB Showable) where
   type Penalty (FTB Showable) = ER.Extended DiffShowable
   type Query (FTB Showable) = AccessOp Showable
-  consistent (LeftTB1 Nothing) (LeftTB1 Nothing)     = True
-  consistent (LeftTB1 (Just i)) (LeftTB1 (Just j) )    = consistent j  i
-  consistent (LeftTB1 (Just i)) j     = consistent j  i
-  consistent i (LeftTB1 (Just j))     = consistent i  j
-  consistent (j@(TB1 _) )  (LeftTB1 (Just i))  = consistent j  i
-  consistent (j@(TB1 _) )  (SerialTB1 (Just i))  = consistent j  i
-  consistent (j@(TB1 _) )  ((IntervalTB1 i) ) = j `Interval.member` i
-  consistent (i@(TB1 _) ) ((ArrayTB1 j)) = F.elem  i j
-  consistent ((TB1 i) ) ((TB1 j) ) = i == j
-  consistent ((IntervalTB1 i) ) ((IntervalTB1 j) ) = not $ Interval.null $  j `Interval.intersection` i
-  consistent ((IntervalTB1 i) ) (j@(TB1 _) ) = j `Interval.member` i
+  consistent (TB1 i)  (TB1 j)  = i == j
+  consistent (IntervalTB1 i) (IntervalTB1 j) = not $ Interval.null $  j `Interval.intersection` i
+  consistent j@(TB1 _)  (IntervalTB1 i)  = j `Interval.member` i
+  consistent (IntervalTB1 i) j@(TB1 _)  = j `Interval.member` i
   consistent (ArrayTB1 i)  (ArrayTB1 j)   = not $ Set.null $ Set.intersection (Set.fromList (F.toList i) ) (Set.fromList  (F.toList j))
   consistent (ArrayTB1 i)  j  = F.any (flip consistent j) i
   consistent i  (ArrayTB1 j ) = F.any (consistent i) j
-  consistent (SerialTB1 (Just i)) j@(TB1 _) = consistent i j
+
+  consistent (SerialTB1 i) (SerialTB1 j ) = fromMaybe True $ liftA2 consistent j  i
+  consistent (SerialTB1 i) j = fromMaybe True $ (flip consistent j ) <$>  i
+  consistent j (SerialTB1 i)  = fromMaybe True $ (consistent j ) <$>  i
+  consistent (LeftTB1 i) (LeftTB1 j ) = fromMaybe True $ liftA2 consistent j  i
+  consistent (LeftTB1 i) j = fromMaybe True $ (flip consistent j ) <$>  i
+  consistent i (LeftTB1 j) = fromMaybe True $(consistent i ) <$>  j
   consistent i j  = errorWithStackTrace (show (i,j))
 
   match  (Right (Not i) ) c  j   = not $ match (Right i ) c j
@@ -349,23 +348,6 @@ instance Predicates (FTB Showable) where
       ma (ArrayTB1 i,Flip (AnyOp o)) p j  = F.any (\i -> ma (i,o) p j ) i
       ma (i@(TB1 _) ,op) p (IntervalTB1 j)  = i `Interval.member` j
       ma (IntervalTB1 i ,op) p j@(TB1 _)  = j `Interval.member` i
-     {- ma ((ArrayTB1 i) ,"@>") _ j@(TB1 _)   = F.elem j i
-      ma ((ArrayTB1 i) ,"=") _ j@(TB1 _)   = F.elem j i
-      ma  ((ArrayTB1 j) ,"IN") p  i  = F.any (\el -> ma (el,"=") p i ) j
-      ma  ((ArrayTB1 j) ,"ANY") p  i  = F.any (\el -> ma (el,"=") p i ) j
-      ma  ((ArrayTB1 j) ,"FIN") p  i  = F.any (\el -> ma (el,"=") p  i ) j
-      ma ((ArrayTB1 i) ,"@>") e j   = F.all (\i -> ma (i,"@>") e j) i
-      ma (IntervalTB1 i ,"<@") _ j@(TB1 _)  = j `Interval.member` i
-      ma (IntervalTB1 i ,"@>") _ j@(TB1 _)  = j `Interval.member` i
-      ma (IntervalTB1 i ,"FIN")_ j@(TB1 _)  = j `Interval.member` i
-      ma (IntervalTB1 i ,"IN") _ j@(TB1 _)  = j `Interval.member` i
-      ma (IntervalTB1 i ,"=") _ j@(TB1 _)  = j `Interval.member` i
-      ma (j@(TB1 _ ),"IN") _ (IntervalTB1 i)  = j `Interval.member` i
-      ma (j@(TB1 _ ),"FIN")_ (IntervalTB1 i)  = j `Interval.member` i
-      ma (j@(TB1 _ ),"<@") _ (IntervalTB1 i)  = j `Interval.member` i
-      ma (j@(TB1 _ ),"@>") _ (IntervalTB1 i)  = j `Interval.member` i
-      ma (j@(TB1 _ ),"=") _ (IntervalTB1 i)  = j `Interval.member` i
--}
       ma (IntervalTB1 i ,Contains) Exact (IntervalTB1 j)  = j `Interval.isSubsetOf` i
       ma (IntervalTB1 j ,Flip Contains) Exact (IntervalTB1 i)  = j `Interval.isSubsetOf` i
       ma (IntervalTB1 j ,IntersectOp) _  (IntervalTB1 i)  = not $ Interval.null $ j `Interval.intersection` i
@@ -381,17 +363,9 @@ instance Predicates (FTB Showable) where
   pickSplit = pickSplitG
 
   penalty p1 p2 =  (maybe ER.PosInf ER.Finite $ fmap notNeg $ liftA2 subtraction (unFin $ fst $ minP p2) (unFin $ fst $ minP p1)) <>  (maybe ER.PosInf ER.Finite $ fmap notNeg $ liftA2 subtraction (unFin $ fst $ maxP p1)  (unFin $ fst $ maxP p2))
-    {-
-intervalAdd (IntervalTB1 i ) (DiffInterval (off,wid))
-  = IntervalTB1 $ (lowerBound i `addition` off,True) `Interval.interval` (upperBound i `addition` wid,True)
 
-intervalSub (IntervalTB1 i) (IntervalTB1 j)
-  = DiffInterval (center j `subtraction` center i ,width j - width i)
-  where
-    center i = Interval.lowerBound i  `addition` ((width i)/2)
-    width i = Interval.upperBound i `subtraction` Interval.lowerBound i
 
--}
+
 notNeg (DSPosition l)
   | otherwise = DSPosition l
 notNeg (DSText l)

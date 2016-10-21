@@ -299,6 +299,7 @@ parseAttrJSON (Fun i rel _ )v = do
 parseAttrJSON (IT na j) v = do
   mj <- parseLabeledTableJSON j v
   return $ IT  na mj
+parseAttrJSON i v = errorWithStackTrace (show (i,v))
 
 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)

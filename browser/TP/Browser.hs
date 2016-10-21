@@ -220,16 +220,15 @@ viewerKey inf table cli layout cliTid = mdo
       lookPK iv = join $ fmap ((\t -> safeHead  $ zip [0..] (fmap unTB1 $ F.toList t) ). unArray) (join $ unSOptional <$> i)
         where
           i = _fkttable <$> indexField (liftAccess (meta inf) "clients_table" $ (IProd False ["selection"]) ) iv
-      lookKV iv = let i = unLeftItens $ lookAttr' (meta inf)  "data_index" iv
+      lookKV iv = let i = lookAttr' (meta inf)  "data_index" iv
                       unKey t = liftA2 (,) ((\(Attr _ (TB1 (SText i)))-> Just $ lookKey inf  (tableName table) i ) $ lookAttr' (meta inf)  "key" t  )( pure $ (\(Attr _ (TB1 (SDynamic i)))-> i) $ lookAttr'  (meta inf)  "val" t )
-                in fmap (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
+                in (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
 
   reftb@(vpt,vp,_,var) <- refTables inf table
-  res2 <- stepper vp (rumors vpt)
 
   let
       tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (M.fromList $ justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) iv ) <$> vpt <*> tdip
-      tdip = join . fmap (join . fmap (join . fmap (lookKV . snd ). lookPK .snd). lookT ) <$> cliTid
+      tdip = join . fmap (join . fmap ( fmap (lookKV . snd ). lookPK .snd). lookT ) <$> cliTid
   cv <- currentValue (facts tdi)
   -- Final Query ListBox
   filterInp <- UI.input
@@ -243,19 +242,20 @@ viewerKey inf table cli layout cliTid = mdo
      tsort = sorting' . filterOrd <$> triding sortList
      filtering res = (\t -> fmap (filter (filteringPred t )) )<$> filterInpT  <*> res
      pageSize = 20
-     lengthPage (fixmap,i) = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
+     divPage s = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
+     lengthPage (fixmap,_) = s
         where (s,_)  = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
   inisort <- currentValue (facts tsort)
   itemListEl <- UI.select # set UI.class_ "col-xs-6" # set UI.style [("width","100%")] # set UI.size "21"
   let wheel = negate <$> mousewheel itemListEl
   (offset,res3)<- mdo
-    offset <- offsetField (pure 0) wheel  (lengthPage <$> facts res3)
-    res3 <- ui $ mapT0EventDyn (fmap inisort (fmap G.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap G.toList) $ tidings res2 (rumors vpt) ) )
+    offset <- offsetFieldFiltered (pure 0) wheel   [(L.length . snd <$> res3) ,L.length . snd <$> vpt,(lengthPage <$> res3)]
+    res3 <- ui $ mapT0EventDyn (fmap inisort (fmap G.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap G.toList) $ vpt) )
     return (offset, res3)
   ui $ onEventDyn (rumors $ triding offset) $ (\i ->  liftIO $ do
-    transactionNoLog inf $ selectFrom (tableName table ) (Just $ i `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  [] $ mempty)
+    transactionNoLog inf $ selectFrom (tableName table ) (Just $ divPage (i + pageSize) `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  [] $ mempty)
   let
-    paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) ) <$> triding offset
+    paging  = (\o -> fmap (L.take pageSize . L.drop o) ) <$> triding offset
   page <- currentValue (facts paging)
   res4 <- ui $ mapT0EventDyn (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
   itemList <- listBoxEl itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (fmap Just <$> tidings st sel ) (pure id) (pure (maybe id attrLine))

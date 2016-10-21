@@ -19,6 +19,7 @@ module TP.QueryWidgets (
     refTables,
     refTables',
     offsetField,
+    offsetFieldFiltered,
     sorting',
     lookAttr',
     lookAttrs',
@@ -304,12 +305,17 @@ labelCase inf a old wid = do
     paintEdit l (facts (triding wid )) (facts old)
     return $ TrivialWidget (triding wid) el
 
+
 refTables' inf table page pred = do
         ((DBVar2 tmvard _   _ vpdiff _ _ ),res)  <-  liftIO $ transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
-        let update = foldl'(flip (\p-> fmap (flip apply p)))
-        bres <- ui $ accumBDyn res (flip update <$> rumors vpdiff)
         let
-            vpt =  tidings bres (update <$> bres <@> rumors vpdiff )
+          filterPred :: [Index (TBData Key Showable)] -> Maybe [Index (TBData Key Showable)]
+          filterPred = nonEmpty . filter (\d@(_,p,_) -> G.match pred G.Exact p && indexFilterP pred d )
+          update = foldl' (flip (\p-> fmap (flip apply p)))
+          diffs = filterJust $ filterPred <$> rumors vpdiff
+        bres <- ui $ accumBDyn res (flip update <$> diffs)
+        let
+            vpt =  tidings bres (update <$> bres <@> diffs)
         return (vpt,res,fmap snd vpt,tmvard)
 
 
@@ -625,7 +631,6 @@ crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems
           ui $ onEventDyn (rumors tableb)
               (liftIO . h2)
           end <- liftIO  getCurrentTime
-          liftIO $ putStrLn $ "diff " <> show (tableName table )<>  " " <> show (diffUTCTime end ini)
           UI.div # set children [listBody,panelItems]
       fun i = UI.div
 
@@ -1119,6 +1124,39 @@ iUITable inf plmods oldItems  tb@(IT na (ArrayTB1 (tb1 :| _)))
       let bres = indexItens arraySize tb offsetT (Non.fromList $ triding <$>  items ) oldItems
       element dv  # set children (offset : (getElement <$> items))
       return $ TrivialWidget bres  dv
+
+offsetFieldFiltered  initT eve maxes = do
+  init <- currentValue (facts initT)
+  offset <- UI.span# set (attr "contenteditable") "true" #  set UI.style [("width","50px")]
+
+  lengs  <- mapM (\max -> UI.span # sink text (("/" ++) .show  <$> facts max )) maxes
+  offparen <- UI.div # set children (offset : lengs) # set UI.style [("border","2px solid black"),("margin-left","4px") , ("margin-right","4px"),("text-align","center")]
+
+  let max  = facts $ foldr1 (liftA2 min) maxes
+  let offsetE =  filterJust $ (\m i -> if i <m then Just i else Nothing ) <$> max <@> (filterJust $ readMaybe <$> onEnter offset)
+      ev = unionWith const (negate <$> mousewheel offparen) eve
+      saturate m i j
+          | m == 0 = 0
+          | i + j < 0  = 0
+          | i + j > m  = m
+          | otherwise = i + j
+      diff o m inc
+        | saturate m inc o /= o = Just (saturate m inc )
+        | otherwise = Nothing
+
+  (offsetB ,ev2) <- mdo
+    let
+      filt = ( filterJust $ diff <$> offsetB <*> max <@> fmap (*3) ev  )
+      ev2 = (fmap concatenate $ unions [fmap const offsetE,filt ])
+    offsetB <- ui $ accumBDyn 0 (  ev2)
+    return (offsetB,ev2)
+  element offset # sink UI.text (show <$> offsetB)
+  let
+     cev = flip ($) <$> offsetB <@> ev2
+     offsetT = tidings offsetB cev
+  return (TrivialWidget offsetT offparen)
+
+
 
 offsetField  initT eve  max = do
   init <- currentValue (facts initT)

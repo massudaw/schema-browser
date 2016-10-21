@@ -5,6 +5,7 @@ import Types
 import qualified Types.Index as G
 import Step.Common
 import Step.Host
+import System.Environment
 import Safe
 import Control.Monad
 import Postgresql.Printer
@@ -129,15 +130,27 @@ updatePatch conn kv old  t =
 differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 
 paginate inf t order off size koldpre wherepred = do
-    let (que,attr) =
-            let
-              que =  selectQuery t koldpre order wherepred
-            in que
-    let quec = fromString $ T.unpack $ "SELECT row_to_json(q),count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
-    print quec
-    v <- uncurry (queryWith (withCount (fromRecordJSON t) ) (conn inf ) ) (quec, maybe [] (fmap (firstTB (recoverFields inf)))  attr)
-    print (maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int]))
-    return ((maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])), fmap fst v)
+    let (que,attr) = selectQuery t koldpre order wherepred
+    i <- lookupEnv "POSTGRESQL_DECODER"
+    let
+      jsonDecode =  do
+        let quec = fromString $ T.unpack $ "SELECT row_to_json(q),count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
+        print quec
+        logLoadTimeTable inf (lookTable inf $ _kvname (fst t)) wherepred "JSON" $
+            uncurry (queryWith (withCount (fromRecordJSON t) ) (conn inf ) ) (quec, maybe [] (fmap (firstTB (recoverFields inf)))  attr)
+      textDecode = do
+        let quec = fromString $ T.unpack $ "SELECT *,count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
+        print quec
+        logLoadTimeTable inf (lookTable inf $ _kvname (fst t)) wherepred "TEXT" $
+            uncurry (queryWith (withCount (fromRecord (unTlabel' t)) ) (conn inf ) ) (quec, maybe [] (fmap (firstTB (recoverFields inf)))  attr)
+
+    v <- case i of
+           Just "JSON" ->  jsonDecode
+           Just "TEXT" ->    textDecode
+           Nothing -> jsonDecode
+    let estimateSize = maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])
+    print estimateSize
+    return (estimateSize, fmap fst v)
   where
 
         offsetQ = " OFFSET " <> T.pack (show off)
@@ -190,6 +203,7 @@ patchMod patch@(m,_,_) = do
     return (Just mod)
 
 
+
 selectAll
   ::
      TBF (Labeled Text) Key ()
@@ -209,7 +223,8 @@ selectAll m offset i  j k st = do
           unref (HeadToken ) = Nothing
           -- tbf =  tableView (tableMap inf) table
           -- let m = tbf
-      (t,v) <- liftIO$ duration  $ paginate inf m k offset j (join $ fmap unref i) st
+
+      v <- liftIO$ paginate inf m k offset j (join $ fmap unref i) st
       mapM_ (tellRefs ) (snd v)
       return v
 
