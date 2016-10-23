@@ -172,7 +172,7 @@ setup smvar args plugList w = void $ do
                 "Stats" -> do
                     let pred = [(IProd True ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ int. _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     stats <- metaAllTableIndexA inf "table_stats" pred
-                    clients <- metaAllTableIndexA inf "clients"$  [(IProd True ["schema_name"],Left (LeftTB1 $ Just $ txt (schemaName inf),Equals) ) ]<> if M.null tables then [] else [ (Nested (IProd True ["selection"] ) (Many [ IProd True ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
+                    clients <- metaAllTableIndexA inf "clients"$  [(IProd True ["schema"],Left (LeftTB1 $ Just $ int (schemaId inf),Equals) ) ]<> if M.null tables then [] else [ (Nested (IProd True ["selection"] ) (Many [ IProd True ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
                     element metabody # set UI.children [stats,clients]
                 "Exception" -> do
                     let pred = [(IProd True ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ int . _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
@@ -197,8 +197,8 @@ setup smvar args plugList w = void $ do
 listDBS ::  InformationSchema -> BrowserState -> Dynamic (Tidings (Text,[Text]))
 listDBS metainf dname = do
   map <- (\db -> do
-        (dbvar ,(_,schemasTB)) <- transactionNoLog metainf $  selectFrom "schema" Nothing Nothing [] mempty
-        let schemas schemaTB = fmap ((\(Attr _ (TB1 (SText s)) ) -> s) .lookAttr' metainf "name") $ F.toList  schemasTB
+        (dbvar ,_) <- transactionNoLog metainf $  selectFrom "schema2" Nothing Nothing [] mempty
+        let schemas schemasTB = fmap ((\(Attr _ (LeftTB1 (Just (TB1 (SText s)))) ) -> s) .lookAttr' metainf "name") $ F.toList  schemasTB
         return ((db,).schemas  <$> collectionTid dbvar)) (T.pack $ dbn dname)
   return map
 

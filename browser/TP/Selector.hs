@@ -104,7 +104,7 @@ tableChooser :: InformationSchemaKV Key Showable
 tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables = do
   let
       pred2 =  [(IProd True ["schema"],Left (int $ schemaId inf  ,Equals))]
-      authPred =  [(IProd True ["grantee"],Left ( int $ fst $ username inf ,Equals)), (IProd True ["schema"],Left (int $ schemaId inf ,Equals))]
+      authPred =  [(IProd True ["grantee"],Left ( int $ fst $ username inf ,Equals))] <> pred2
   (orddb ,authorization,translation) <- ui $ transactionNoLog  (meta inf) $
       (,,) <$> (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred2))
            <*> (fst <$> (selectFromTable "authorization" Nothing Nothing [] authPred))

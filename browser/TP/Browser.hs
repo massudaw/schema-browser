@@ -132,7 +132,7 @@ updateClient metainf inf table tdi clientId now = do
       row = tblist . fmap _tb
             $ [ FKT (kvlist [_tb $ Attr "clientid" (TB1 (SNumeric (clientId )))]) [Rel "clientid" Equals "id"] (TB1 $ mapKey' keyValue $ old)
               , Attr "up_time" (inter (Interval.Finite $ time now) Interval.PosInf)
-              , Attr "schema_name" (txt .  schemaName $ inf )
+              , Attr "schema" (int .  schemaId $ inf )
               , IT "selection"
                   (LeftTB1 $ (\table -> ArrayTB1 $ Non.fromList [
                     TB1 $ tblist $ fmap _tb[ Attr "table" (txt .  tableName $ table)
@@ -150,7 +150,7 @@ updateClient metainf inf table tdi clientId now = do
     return lrow
 
 num = TB1 . SNumeric
-getClient metainf clientId inf ccli = G.lookup (idex metainf "clients"  [("clientid",num clientId),("schema_name",txt $ schemaName inf)]) ccli :: Maybe (TBData Key Showable)
+getClient metainf clientId inf ccli = G.lookup (idex metainf "clients"  [("clientid",num clientId),("schema",int $ schemaId inf)]) ccli :: Maybe (TBData Key Showable)
 
 deleteClient metainf clientId = do
   (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing [] $ mempty
@@ -260,7 +260,7 @@ viewerKey inf table cli layout cliTid = mdo
   res4 <- ui $ mapT0EventDyn (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
   itemList <- listBoxEl itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (fmap Just <$> tidings st sel ) (pure id) (pure (maybe id attrLine))
   let evsel =  rumors (fmap join  $ triding itemList)
-  (dbmeta ,(_,_)) <- ui $ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals ))]
+  (dbmeta ,(_,_)) <- ui $ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] [(IProd True ["schema"],Left (int (schemaId inf),Equals ))]
   ui $onEventDyn ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) inf dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< liftIO getCurrentTime )
   prop <-ui $ stepper cv evsel
   let tds = tidings prop evsel

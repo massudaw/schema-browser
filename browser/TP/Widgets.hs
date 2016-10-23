@@ -638,20 +638,25 @@ accumDiff
           (Tidings (M.Map k b))
 accumDiff  f t = do
   ini <- currentValue (facts t)
-  iniout <- liftIO$ mapConcurrently (execDynamic f)$ M.toList ini
+  iniout <- liftIO$ mapConcurrently (evalDynamic f)$ M.toList ini
   (del,add) <- diffAddRemove t f
   let eva = unionWith (.) ( (\s m -> foldr (M.delete ) m s). S.toList  <$> del ) ((\s m -> foldr (uncurry M.insert ) m s) <$> add )
   bs <- accumB  (M.fromList iniout)  eva
   onEventIO (filterJust$ (\m -> traverse (flip M.lookup  m) ) <$> bs <@> (S.toList <$> del)) (liftIO .sequence . concat . fmap snd)
   return (fmap (fmap fst ) $ tidings bs (flip ($) <$> bs <@> eva))
 
-execDynamic :: ((k,a) -> Dynamic b) -> (k,a) -> IO (k,(b,[IO ()]))
-execDynamic f l =  fmap ((fst l,)) . runDynamic $ f l
+evalDynamic :: ((k,a) -> Dynamic b) -> (k,a) -> IO (k,(b,[IO ()]))
+evalDynamic f l =  fmap ((fst l,)) . runDynamic $ f l
+
+closeDynamic  m = do
+  (i,v) <- runDynamic m
+  sequence_ v
+  return i
 
 diffAddRemove :: Ord k => Tidings (M.Map k a ) -> ((k,a) -> Dynamic b) -> Dynamic (Event (S.Set k) ,Event [(k, (b,[IO()]))])
 diffAddRemove l f = do
   let delete  = fmap M.keysSet $filterJust $ prune <$> evdell
-  add <- mapEventDyn ( liftIO . mapConcurrently (execDynamic f). M.toList )  $ filterJust $ prune <$> evadd
+  add <- mapEventDyn ( liftIO . mapConcurrently (evalDynamic f). M.toList )  $ filterJust $ prune <$> evadd
   return (delete,fmap fst add)
 
     where

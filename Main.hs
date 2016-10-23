@@ -19,6 +19,7 @@ import Utils
 import Schema
 
 import RuntimeTypes
+import Reactive.Threepenny
 import Graphics.UI.Threepenny.Core hiding (get,delete,apply)
 import Graphics.UI.Threepenny.Internal (wId)
 import Data.Monoid hiding (Product(..))
@@ -56,10 +57,10 @@ main = do
   forkIO $ threadDelay 50000 >> rawSystem "chromium" ["http://localhost:8025"] >> return ()
   let
     initGUI = do
-      (Just (TableModification _ _ (_,G.Idex c,_)),_) <- runDynamic $ addClientLogin metas
+      Just (TableModification _ _ (_,G.Idex c,_)) <- addClientLogin metas
       let [(SerialTB1 (Just (TB1 (SNumeric i))))] = F.toList c
       return i
-    finalizeGUI w = void $ runDynamic $ do
+    finalizeGUI w = void $ closeDynamic $ do
         liftIO$ print ("delete client" <> show (wId w))
         deleteClientLogin metas (wId w)
         deleteClient metas (fromIntegral $ wId w)

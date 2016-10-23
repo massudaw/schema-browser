@@ -198,15 +198,15 @@ instance Predicates (TBIndex Key Showable) where
   type (Penalty (TBIndex Key Showable)) = Penalty (Map Key (FTB Showable))
   type Query (TBIndex Key Showable) = TBPredicate Key Showable
   consistent (Idex j) (Idex  m )
-    =  consistent j m
-      {-where hasText = L.any  (isText.keyType )(M.keys j)
+    =  {-(if hasText  then traceShow (M.keys j) else id ) $-} consistent j m
+     where hasText = L.any  (isText.keyType )(M.keys j)
            isText (KOptional i) = isText i
            isText (KSerial i) = isText i
            isText (KArray i) = isText i
            isText (KInterval i ) = isText i
            isText (Primitive (AtomicPrim PText )) =  True
            isText (Primitive i ) =  False
-           isText i = errorWithStackTrace (show i)-}
+           isText i = errorWithStackTrace (show i)
   match (WherePredicate l)  e (Idex v) =  match (WherePredicate l) e v
   union l  = Idex   projL
     where
@@ -237,7 +237,7 @@ instance  Predicates (Map Key (FTB Showable)) where
       go (PrimColl (i,op)) = maybe True (\i -> match op e  i) (fmap _tbattr $ indexField i (errorWithStackTrace "no meta",Compose $Identity $ KV (M.mapKeys (Set.singleton .Inline) $ M.mapWithKey (\k v -> Compose $ Identity $ Attr k v) v)) )
   consistent l i =  if M.null b then False else  F.all id b
     where
-      b =  M.intersectionWith consistent (M.mapKeys keyValue l) (M.mapKeys keyValue i)
+      b =  M.intersectionWith consistent (l) (i)
   union l
     | L.null l = M.empty
     | otherwise = foldl1 (M.intersectionWith (\i j -> union [i,j]) ) l
