@@ -66,9 +66,9 @@ defsize = 200
 estLength page size est = fromMaybe 0 page * size  +  est
 
 
-refTable :: InformationSchema -> Table -> IO DBVar
+refTable :: MonadIO m => InformationSchema -> Table -> m DBVar
 refTable  inf table  = do
-  mmap <- atomically $ readTMVar (mvarMap inf)
+  mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
   return $ justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
 
 
@@ -355,7 +355,7 @@ pageTable flag method table page size presort fixed = do
          return (nidx, if L.length ndata > 0 then createUn (S.fromList $ rawPK table)  ndata <> freso else  freso )
     let tde = rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
     let iniFil = iniT
-    tdb  <- stepper iniFil tde
+    tdb  <- lift $ stepper iniFil tde
     modify (M.insert (table,fixed) ( snd $iniT))
     return (dbvar {collectionTid  = fmap snd $ tidings tdb tde},iniFil)
 
@@ -387,7 +387,7 @@ noInsert' (k1,v1)   = do
    let proj = _kvvalues . unTB
    (k1,) . _tb . KV <$>  Tra.sequence (fmap (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1))
 
-transactionLog :: InformationSchema -> TransactionM a -> IO [TableModification (TBIdx Key Showable)]
+transactionLog :: InformationSchema -> TransactionM a -> Dynamic [TableModification (TBIdx Key Showable)]
 transactionLog inf log = do -- withTransaction (conn inf) $ do
   (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [TableModification id t f] m) M.empty mods
@@ -401,7 +401,7 @@ transactionLog inf log = do -- withTransaction (conn inf) $ do
 
 
 
-transactionNoLog :: InformationSchema -> TransactionM a -> IO a
+transactionNoLog :: InformationSchema -> TransactionM a -> Dynamic a
 transactionNoLog inf log = do -- withTransaction (conn inf) $ do
   (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\tm@(TableModification id t f) m -> M.insertWith mappend t [tm] m) M.empty mods
@@ -412,7 +412,7 @@ transactionNoLog inf log = do -- withTransaction (conn inf) $ do
   return md
 
 
-transaction :: InformationSchema -> TransactionM a -> IO a
+transaction :: InformationSchema -> TransactionM a -> Dynamic a
 transaction inf log = do -- withTransaction (conn inf) $ do
   (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\tm@(TableModification id t f) m -> M.insertWith mappend t [tm] m) M.empty mods

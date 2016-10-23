@@ -67,16 +67,17 @@ setup
   ::  DatabaseSchema ->  [String] -> [Plugins] -> Window -> UI ()
 setup smvar args plugList w = void $ do
   metainf <- liftIO$ metaInf smvar
+  setCallBufferMode BufferRun
   let bstate = argsToState args
   let amap = authMap smvar bstate (user bstate , pass bstate)
   inf <- ui $ fmap (justError ("no schema" <> show (schema bstate))) $ traverse (\i -> loadSchema smvar (T.pack i)  (user bstate)  amap plugList) $ schema  bstate
-  (cli,cliTid) <- liftIO $ addClient (fromIntegral $ wId w) metainf inf ((\t -> lookTable inf . T.pack $ t) <$> tablename bstate  ) (rowpk bstate)
+  (cli,cliTid) <- ui $ addClient (fromIntegral $ wId w) metainf inf ((\t -> lookTable inf . T.pack $ t) <$> tablename bstate  ) (rowpk bstate)
   (evDB,chooserItens) <- databaseChooser smvar metainf bstate plugList
   body <- UI.div# set UI.class_ "col-xs-12"
   return w # set title (host bstate <> " - " <>  dbn bstate)
   hoverBoard<-UI.div # set UI.style [("float","left"),("height","100vh"),("width","15px")]
   let he = const True <$> UI.hover hoverBoard
-  bhe <-stepper True he
+  bhe <- ui $stepper True he
   menu <- checkedWidget (tidings bhe he)
   element menu # set UI.class_ "col-xs-1"
   nav  <- buttonDivSet  ["Map","Account","Agenda","Browser","Metadata"] (pure $ args `atMay` 6  )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
@@ -153,13 +154,13 @@ setup smvar args plugList w = void $ do
                     case schemaName inf of
                       "gmail" -> do
                         b <- UI.button # set text "sync"
-                        (dbvar,(m,t))  <- liftIO$ transactionNoLog inf $ selectFrom "history" Nothing Nothing []  mempty
+                        (dbvar,(m,t))  <- ui $ transactionNoLog inf $ selectFrom "history" Nothing Nothing []  mempty
                         itemListEl <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
                         itemListEl2 <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
                         do
-                          ((DBVar2 tmvard _   _ vpdiff _ _ ),res) <- liftIO$ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] mempty
+                          ((DBVar2 tmvard _   _ vpdiff _ _ ),res) <- ui $ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] mempty
                           let update = F.foldl'(flip (\p-> fmap (flip apply p)))
-                          bres <- accumB ((M.empty,G.empty) :: Collection Key Showable) (flip update <$> rumors vpdiff)
+                          bres <- ui $ accumB ((M.empty,G.empty) :: Collection Key Showable) (flip update <$> rumors vpdiff)
                           let
                             vpt =  tidings bres (  update <$> bres <@> rumors vpdiff )
                           listBoxEl itemListEl2 ( G.toList . snd  <$> vpt)  (pure Nothing) (pure id) ( pure attrLine )
@@ -193,7 +194,7 @@ setup smvar args plugList w = void $ do
 
 
 
-listDBS ::  InformationSchema -> BrowserState -> IO (Tidings (Text,[Text]))
+listDBS ::  InformationSchema -> BrowserState -> Dynamic (Tidings (Text,[Text]))
 listDBS metainf dname = do
   map <- (\db -> do
         (dbvar ,(_,schemasTB)) <- transactionNoLog metainf $  selectFrom "schema" Nothing Nothing [] mempty
@@ -211,8 +212,8 @@ loginWidget userI passI =  do
 
   userDiv <- UI.div # set children [usernamel,username] # set UI.class_  "col-xs-5"
   passDiv <- UI.div # set children [passwordl,password] # set UI.class_  "col-xs-5"
-  usernameB <- stepper userI usernameE
-  passwordB <- stepper passI passwordE
+  usernameB <- ui $ stepper userI usernameE
+  passwordB <-  ui $stepper passI passwordE
   let usernameT = tidings usernameB usernameE
       passwordT = tidings passwordB passwordE
   return $ ((liftA2 (liftA2 (,)) usernameT passwordT) ,[userDiv,passDiv])
@@ -235,7 +236,7 @@ authMap smvar sargs (user,pass) schemaN =
     where oauth tag = do
               user <- justError "no google user" <$> lookupEnv "GOOGLE_USER"
               metainf <- metaInf smvar
-              (dbmeta ,_) <- transactionNoLog metainf $ selectFromTable "google_auth" Nothing Nothing [] [(IProd True ["username"],Left ((txt  $ T.pack user ),Equals) )]
+              ((dbmeta ,_),_) <- runDynamic $ transactionNoLog metainf $ selectFromTable "google_auth" Nothing Nothing [] [(IProd True ["username"],Left ((txt  $ T.pack user ),Equals) )]
               let
                   td :: Tidings (OAuth2Tokens)
                   td = (\o -> let
@@ -250,13 +251,13 @@ loadSchema smvar schemaN user authMap  plugList =  do
     keyTables smvar (schemaN,T.pack $ user) authMap plugList
 
 databaseChooser smvar metainf sargs plugList = do
-  dbs <- liftIO $ listDBS  metainf sargs
+  dbs <- ui $ listDBS  metainf sargs
   let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,T.pack s)) (schema sargs)
   dbsW <- listBox ((\((c,j)) -> (c,) <$> j) <$> dbs ) (pure dbsInit) (pure id) (pure (line . T.unpack. snd  ))
   schemaEl <- flabel # set UI.text "schema"
   cc <- currentValue (facts $ triding dbsW)
   let dbsWE = rumors $ triding dbsW
-  dbsWB <- stepper cc dbsWE
+  dbsWB <-  ui $stepper cc dbsWE
   let dbsWT  = tidings dbsWB dbsWE
   (schemaE,schemaH) <- liftIO newEvent
   metainf <- liftIO $ metaInf smvar
@@ -268,7 +269,7 @@ databaseChooser smvar metainf sargs plugList = do
               username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set value (fromMaybe "" userEnv)
               let usernameE = nonEmpty  <$> UI.valueChange username
 
-              usernameB <- stepper userEnv usernameE
+              usernameB <-  ui $stepper userEnv usernameE
 
               load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-4" # sink UI.enabled (facts (isJust <$> dbsWT) )
               ui$ mapEventDyn  ( traverse (\ v ->do
@@ -297,7 +298,7 @@ databaseChooser smvar metainf sargs plugList = do
   authBox <- UI.div # sink children (maybeToList <$> facts genS) # set UI.class_ "col-xs-4" # set UI.style [("border", "gray solid 2px")]
   let auth = authMap smvar sargs (user sargs ,pass sargs )
   inf <- ui $traverse (\i -> loadSchema smvar (T.pack i ) (user sargs) auth plugList ) (schema sargs)
-  chooserB  <- stepper inf schemaE
+  chooserB  <- ui $ stepper inf schemaE
   let chooserT = tidings chooserB schemaE
   element authBox  # sink UI.style (facts $ (\a b -> noneShow $  fromMaybe True $  liftA2 (\(db,sc) (csch) -> if sc == (schemaName csch )then False else True ) a b )<$>    dbsWT <*> chooserT )
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schemaEl , getElement dbsW]
@@ -321,8 +322,21 @@ testTable s t w = do
     amap = authMap smvar db ("postgres", "queijo")
   (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
   wm <- mkWeakMVar  (globalRef smvar) (sequence_ fin)
-  i <- transactionNoLog inf $ selectFrom t Nothing Nothing [] (WherePredicate $ lookAccess inf t <$> w)
+  (i,_) <- runDynamic $ transactionNoLog inf $ selectFrom t Nothing Nothing [] (WherePredicate $ lookAccess inf t <$> w)
   print (fst (snd i))
+
+
+testPlugin s t p  = do
+  args <- getArgs
+  let db = argsToState args
+  smvar <- createVar
+  let
+    amap = authMap smvar db ("postgres", "queijo")
+  (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
+  wm <- mkWeakMVar  (globalRef smvar) (sequence_ fin)
+  let (i,o) = pluginStatic p
+  print $ liftAccess inf t i
+  print $ liftAccess inf t o
 
 
 

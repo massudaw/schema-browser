@@ -61,7 +61,7 @@ list liste slote iteme els = mdo
               el = fromJust $ M.lookup ix m
               elnew = fromJust $ M.lookup ixnew m
          evres = unionWith (.)(swapKey  <$> evs) ev2
-    res <- accumT (M.fromList $ zip [0..] els)  evres
+    res <- ui $ accumT (M.fromList $ zip [0..] els)  evres
     el <- liste # set children (fst <$> slots )
     return $ TrivialWidget (F.toList <$> res ) el
 

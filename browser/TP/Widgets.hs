@@ -43,7 +43,7 @@ data TrivialWidget a =
 
 
 -- Generate a accum the behaviour and generate the ahead of promised event
-accumT :: MonadIO m => a -> Event (a ->a) -> m (Tidings a)
+accumT :: a -> Event (a ->a) -> Dynamic (Tidings a)
 accumT e ev = do
   b <- accumB e ev
   return $ tidings b (flip ($) <$> b <@> ev)
@@ -53,13 +53,13 @@ evalUI el f = liftIO (getWindow el) >>= \w ->  runUI w f
 
 evalDyn el f = getWindow el >>= \w -> fmap fst $ runDynamic $ runUI w f
 
-accumTds :: MonadIO m => Tidings a -> Event (a -> a) -> m (Tidings a)
+accumTds :: Tidings a -> Event (a -> a) -> Dynamic (Tidings a)
 accumTds e l = do
   ve <- currentValue (facts e)
   accumT ve $ concatenate <$> unions ([l,const <$> rumors e ])
 
 
-accumTs :: MonadIO m => a -> [Event (a -> a)] -> m (Tidings a)
+accumTs :: a -> [Event (a -> a)] -> Dynamic (Tidings a)
 accumTs e = accumT e . foldr1 (unionWith (.))
 
 
@@ -67,7 +67,7 @@ adEvent :: Event a -> Tidings a -> UI (Tidings a)
 adEvent ne t = do
   c <- currentValue (facts t)
   let ev = unionWith const (rumors t) ne
-  nb <- stepper c ev
+  nb <- ui $ stepper c ev
   return $ tidings nb ev
 
 
@@ -78,14 +78,14 @@ liftEvent e h = do
   register e (void .  maybe (return ()) ( putMVar ivar .Just )  )
   return ()
 
-cutEvent :: MonadIO m => Event b -> Tidings a -> m (Tidings a)
+cutEvent :: Event b -> Tidings a -> Dynamic (Tidings a)
 cutEvent ev b = do
  v <- currentValue (facts b)
  let nev = facts b <@ ev
  nbev <- stepper v nev
  return  $tidings nbev nev
 
-updateTEvent :: MonadIO m =>  (a -> Maybe a) -> Tidings a -> Tidings a -> m (Tidings a)
+updateTEvent :: (a -> Maybe a) -> Tidings a -> Tidings a -> Dynamic (Tidings a)
 updateTEvent validate ev b = do
  v <- currentValue (facts b)
  evi <- currentValue (facts ev)
@@ -94,7 +94,7 @@ updateTEvent validate ev b = do
  return  $tidings nbev nev
 
 
-updateEvent :: MonadIO m =>  (a -> Maybe a) -> Event a -> Tidings a -> m (Tidings a)
+updateEvent :: (a -> Maybe a) -> Event a -> Tidings a -> Dynamic (Tidings a)
 updateEvent validate ev b = do
  v <- currentValue (facts b)
  let nev = unionWith const (filterJust (validate <$> ev)) (rumors b)
@@ -105,7 +105,7 @@ updateEvent validate ev b = do
 diffEvent b ev = filterJust $ (\i j -> if i == j then Nothing else Just j ) <$> b <@> ev
 notdiffEvent b ev = filterJust $ (\i j -> if i /= j then Nothing else Just j ) <$> b <@> ev
 
-addEvent :: (Eq a,MonadIO m) => Event a -> Tidings a -> m (Tidings a)
+addEvent :: (Eq a) => Event a -> Tidings a -> Dynamic (Tidings a)
 addEvent ev b = do
  v <- currentValue (facts b)
  let nev = unionWith const (rumors b) ev
@@ -114,7 +114,7 @@ addEvent ev b = do
 
 
 
-mapEventFin f = fmap (fmap fst).ui . mapEventDyn (liftIO . f)
+mapEventFin f = fmap (fmap fst).ui . mapEventDyn f
 
 mapEvent :: (a -> IO b) -> Event a -> Dynamic (Event b)
 mapEvent f x = do
@@ -137,7 +137,7 @@ mapT0EventDyn i f x = mdo
         sequence fin
         sequence finmap
         return ()
-  Writer.tell [finall]
+  registerDynamic finall
   return $ tidings (fst <$>t) (fst <$> e)
 
 
@@ -152,7 +152,7 @@ onEventDyn  e f =  mdo
         sequence fin
         sequence finmap
         return ()
-  Writer.tell [finall]
+  registerDynamic finall
   return ()
 
 
@@ -226,7 +226,7 @@ checkDivSetTGen ks sort binit   el st = do
   let
     evs = unionWith const (const <$> rumors binit) (foldr (unionWith (.)) never $ fmap (\(i,(ab,db)) -> (if L.null ab then id else M.alter (Just . maybe ab (L.nub . mappend ab) ) i)  . (if L.null db then id else M.alter (join . fmap ((\i -> if L.null i then Nothing else Just i) . flip (foldr L.delete)  db )) i)  ) . snd .snd <$> buttons)
   v <- currentValue (facts binit)
-  bv <- accumB v  evs
+  bv <- ui $ accumB v  evs
   return (TrivialWidget (tidings bv (flip ($) <$> bv <@> evs) ) dv)
 
 
@@ -237,7 +237,7 @@ checkDivSetT ks sort binit   el st = mdo
   let
     evs = unionWith const (const <$> rumors binit) (foldr (unionWith (.)) never $ fmap (\(i,b) -> if b then (i:) else L.delete i) . snd .snd <$> buttons)
   v <- currentValue (facts binit)
-  bv <- accumB v  evs
+  bv <- ui $ accumB v  evs
   return (TrivialWidget (tidings bv (flip ($) <$> bv <@> evs) ) dv)
     where
       buttonString   k = do
@@ -253,7 +253,7 @@ buttonDivSetT ks sort binit   el st = mdo
   dv <- UI.div # sink items ((\f -> fmap (\ (k,(v,_)) -> st k (element v) # sink UI.enabled (not . (Just k==) <$> bv)) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$>  facts sort )
   let evs = foldl (unionWith const) (filterJust $ rumors binit) (snd .snd <$> buttons)
   v <- currentValue (facts binit)
-  bv <- stepper  v  (Just <$> evs)
+  bv <- ui $ stepper  v  (Just <$> evs)
   return (TrivialWidget (tidings bv (Just <$> evs)) dv)
     where
       buttonString   k = do
@@ -267,7 +267,7 @@ buttonDivSetFun ks binit   el = mdo
   dv <- UI.div # set children (fst <$> buttons)
   let evs = foldl (unionWith const) (filterJust $ rumors binit) (snd <$> buttons)
   v <- currentValue (facts binit)
-  bv <- stepper (maybe (justError "no head" $ safeHead ks) id v) evs
+  bv <- ui $ stepper (maybe (justError "no head" $ safeHead ks) id v) evs
   return (TrivialWidget (tidings bv evs) dv)
     where
       buttonString   bv k = do
@@ -284,7 +284,7 @@ buttonDivSet ks binit   el = mdo
   dv <- UI.div # set children (fst <$> buttons)
   let evs = foldl (unionWith const) (filterJust $ rumors binit) (snd <$> buttons)
   v <- currentValue (facts binit)
-  bv <- stepper (maybe (justError "no head" $ safeHead ks) id v) evs
+  bv <- ui $ stepper (maybe (justError "no head" $ safeHead ks) id v) evs
   return (TrivialWidget (tidings bv evs) dv)
     where
       buttonString   bv k = do
@@ -306,7 +306,7 @@ checkedWidget init = do
   i <- UI.input # set UI.type_ "checkbox" # sink UI.checked (facts init)
   let e = unionWith const (rumors init) (UI.checkedChange i)
   v <- currentValue (facts init)
-  b <- stepper v e
+  b <- ui$ stepper v e
   dv <- UI.span # set children [i] # set UI.style [("padding","2px")]
   return $ TrivialWidget  (tidings b e) dv
 
@@ -315,7 +315,7 @@ checkedWidgetM init = do
   i <- UI.input # set UI.type_ "checkbox" # sink UI.checked (maybe False id <$> facts init)
   let e = unionWith const (rumors init) (Just <$>  UI.checkedChange i)
   v <- currentValue (facts init)
-  b <- stepper v e
+  b <- ui $ stepper v e
   dv <- UI.span # set children [i] # set UI.style [("padding","2px")]
   return $ TrivialWidget  (tidings b e) dv
 
@@ -328,7 +328,7 @@ optionalListBox' l o  s = mdo
   ol <- UI.listBox ((Nothing:) <$>  fmap (fmap Just) l) (fmap Just <$> st) (maybe UI.div <$> s)
   let sel = unionWith const (rumors $ fmap join $ UI.userSelection ol) (rumors o)
   v <- currentValue ( facts o)
-  st <- stepper v sel
+  st <- ui $ stepper v sel
   return $ TrivialWidget (tidings st sel ) (getElement ol)
 
 
@@ -406,7 +406,7 @@ paintBorder e b i  = element e # sink0 UI.style ((\ m n -> (:[("border-style","s
 -- Botão de imprimir frame no browser
 printIFrame i = do
    print <- UI.button # set UI.text "Imprimir"
-   bh <- stepper "" (pure ("<script> window.frames[\"" <> i <>  "\"].focus(); window.frames[\"" <> i <> "\"].print();</script>") <@ UI.click print)
+   bh <- ui $ stepper "" (pure ("<script> window.frames[\"" <> i <>  "\"].focus(); window.frames[\"" <> i <> "\"].print();</script>") <@ UI.click print)
    dv <- UI.div # UI.sink UI.html bh
    UI.div # set children [print,dv]
 
@@ -441,11 +441,11 @@ multiUserSelection = _selectionMLB
 selectItem = mdo
   pan <- UI.div # sink text (fromMaybe "NO VALUE " <$>  facts (triding v))
   sel <-  UI.select # set UI.size "3"
-  bh <- stepper False (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange sel ))
+  bh <- ui $stepper False (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange sel ))
   element sel # sink UI.style (noneShow <$> bh)
   element pan # sink UI.style (noneShow . not <$> bh)
   v <- listBoxEl sel (pure ["A","B","C"]) (tidings lb  never) (pure id) (pure(\v -> set UI.text (show v)))
-  lb <- stepper (Just "A") (rumors (triding  v))
+  lb <- ui $ stepper (Just "A") (rumors (triding  v))
   UI.div # set children [pan,sel]
 
 setLookup x s = if S.member x s then Just x else Nothing
@@ -539,7 +539,7 @@ multiListBox bitems bsel bdisplay = do
     let
         -- eindexes2 = (\m-> catMaybes $ fmap (flip setLookup m) e)  <$> (S.fromList <$> rumors bitems)
         ev =  foldr1 (unionWith const) [rumors bsel,eindexes]
-    bsel2 <- stepper e ev
+    bsel2 <- ui $ stepper e ev
     let
         _selectionMLB = tidings bsel2 ev
         _elementMLB   = list

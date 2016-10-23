@@ -63,9 +63,9 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
       calendarT = (\(a,b) c -> (a,b,c)) <$> ((,)<$> facts agendaT <*> facts incrementT )<#> resolutionT
       schemaPred2 = [(IProd True ["schema"],Left (int (schemaId inf),Equals))]
 
-    (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred2
-    (_,(_,evMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred2
-    (_,(_,eventMap )) <- liftIO$ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
+    (_,(_,tmap)) <- ui $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred2
+    (_,(_,evMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred2
+    (_,(_,eventMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
     cliZone <- jsTimeZone
     let dashes = (\e ->
           let
@@ -119,10 +119,10 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
               t = tname
           mapUIFinalizerT innerCalendar (\(positionB,calT)-> do
             let pred = lookAccess inf tname <$> predicate (fmap (\(TB1 (SText v))->  lookKey inf tname v) <$>efields ) (Just $  fields ) (positionB,Just calT)
-            reftb <- refTables' inf (lookTable inf t) (Just 0) (WherePredicate pred)
+            reftb <- ui $ refTables' inf (lookTable inf t) (Just 0) (WherePredicate pred)
             let v = fmap snd $ reftb ^. _1
             let evsel = (\j (tev,pk,_) -> if tableName tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
-            tdib <- stepper Nothing (join <$> evsel)
+            tdib <- ui $ stepper Nothing (join <$> evsel)
             let tdi = tidings tdib (join <$> evsel)
             (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi) reftb [] [] (allRec' (tableMap inf) $ lookTable inf t)  tdi
             mapUIFinalizerT innerCalendar (\i -> do

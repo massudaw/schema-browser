@@ -5,13 +5,13 @@
 {-# LANGUAGE FlexibleContexts #-}
 module PandocRenderer where
 
-import Debug.Trace
 import Text.Pandoc.Options
 import Types
 import Text.Pandoc.PDF
 
 import Control.Monad
 import Text.Pandoc.Writers.LaTeX
+import GHC.Stack
 import Text.Pandoc.Builder hiding ((<>))
 import Control.Applicative
 import Data.String
@@ -69,7 +69,7 @@ renderProjectContract = myDoc
               template <- liftIO$ readFile' utf8 "contract.template"
               liftIO$ makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odxR "contract" -< ()
-          returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "contract" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict . either id id ) outdoc
+          returnA -<  (\i -> tbmap . mapFromTBList . pure . Compose. Identity . Attr "contract" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict <$>  either (const Nothing) Just  i) outdoc
 
 
 renderProjectReport = myDoc
@@ -94,7 +94,7 @@ renderProjectReport = myDoc
               template <- liftIO$ readFile' utf8 "raw.template"
               liftIO$ makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odxR "report" -< ()
-          returnA -<  (Just .  tbmap . mapFromTBList . pure . Compose. Identity . Attr "report" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict . either id id ) outdoc
+          returnA -<  (\i -> tbmap . mapFromTBList . pure . Compose. Identity . Attr "report" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict <$> either (const Nothing) Just i ) outdoc
 
 
 renderProjectPricingA = myDoc
@@ -116,7 +116,7 @@ renderProjectPricingA = myDoc
                         ( atR "id_contact" ((\f m l -> f <> " " <> m <> " " <> l ) <$> varT "firstname"  <*> var "middlename" <*> var "lastname"))) -< env
               d <- var "pricing_execution_time" -< env
               idp <- atR "id_project" (varT "id_project") -< env
-              da <- varT "pricing_date" -< env
+              da <- varT "price_available" -< env
               v <- arrayVar "pricing_service" -< env
               p <- varT "pricing_price" -< env
               o <- atR "id_project"
@@ -124,7 +124,7 @@ renderProjectPricingA = myDoc
                         (atR "id_owner"  (varT"owner_name"))) -< env
               end <- atR "id_project" $ atR "address" (var "logradouro" <> ", "<> var "number" <> " " <> var "complemento") -< env
               mun <- atR "id_project" $ atR "address" (var "municipio" <> "-" <> var "uf") -< env
-              returnA -< (setT ( para $ "Proposta :" <> idp <> ", " <> ( da )) $ doc $
+              returnA -< (setT ( para $ "Proposta :" <> idp <> ", " <>  da ) $ doc $
                      para ( f <> ",")
                      <> orderedList [
                        para "Serviços Executados" <> v ,
@@ -147,11 +147,10 @@ renderProjectPricingA = myDoc
                         ])) -< preenv
           outdoc <- act (\i -> liftIO $ do
               template <- readFile' utf8 "raw.template"
-              makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
+              makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i
+                  ) -< pdoc
           odxR "orcamento" -< preenv
-          returnA -<  (Just .  tbmap .mapFromTBList . pure . Compose. Identity . Attr "orcamento" . LeftTB1 . Just . DelayedTB1 .Just . TB1 . SBinary .  BS.toStrict . either id id ) outdoc
-
-
+          returnA -<  (\i -> tbmap .mapFromTBList . pure . Compose. Identity . Attr "orcamento" . LeftTB1 . Just . DelayedTB1 .Just . TB1 . SBinary .  BS.toStrict <$> either (const Nothing) Just i) outdoc
 
 
 readFile' e name = openFile name ReadMode >>= liftM2 (>>) (flip hSetEncoding $ e)   hGetContents

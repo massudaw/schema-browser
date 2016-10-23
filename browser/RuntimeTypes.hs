@@ -165,7 +165,7 @@ dynP ~(P s d) = d
 dynPK =  runKleisli . dynP
 
 
-type TransactionM = RWST InformationSchema [TableModification (TBIdx Key Showable)] (Map (Table,WherePredicate) (TableIndex Key Showable))  IO
+type TransactionM = RWST InformationSchema [TableModification (TBIdx Key Showable)] (Map (Table,WherePredicate) (TableIndex Key Showable)) R.Dynamic
 
 type PageToken = PageTokenF Key Showable
 
@@ -191,7 +191,7 @@ data SchemaEditor
   , typeTransform :: PGKey -> CoreKey
   , joinListEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   , joinSyncEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )] -> [(Text ,Column Key Showable)]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
-  ,logger :: InformationSchema -> TableModification (TBIdx Key Showable)  -> IO (TableModification (TBIdx Key Showable))
+  ,logger :: MonadIO m => InformationSchema -> TableModification (TBIdx Key Showable)  -> m (TableModification (TBIdx Key Showable))
   , opsPageSize :: Int
   }
 
@@ -215,7 +215,7 @@ lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k  <> show (HM.toList (keyMap inf))) $ HM.lookup (t,k) (keyMap inf)
 
 
-putPatch m = atomically . writeTQueue m -- . force
+putPatch m = liftIO .atomically . writeTQueue m -- . force
 
 
 liftTable' :: InformationSchema -> Text -> TBData Text a -> TBData Key a

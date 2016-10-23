@@ -60,9 +60,9 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
       schId = int (schemaId inf)
       schemaPred = [(IProd True ["schema"],Left (schId,Equals))]
 
-    (_,(_,tmap)) <- liftIO $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
-    (_,(_,emap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
-    (_,(_,aMap )) <- liftIO $ transactionNoLog  (meta inf) $ selectFromTable "accounts" Nothing Nothing [] schemaPred
+    (_,(_,tmap)) <- ui $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
+    (_,(_,emap )) <-ui $ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
+    (_,(_,aMap )) <-ui $ transactionNoLog  (meta inf) $ selectFromTable "accounts" Nothing Nothing [] schemaPred
     cliZone <- jsTimeZone
     let dashes = fmap (\e ->
           let
@@ -97,7 +97,7 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
               maybe UI.div (\k@(t,(c,tname,_,_,_)) ->   mdo
                 expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
                 let evc = UI.checkedChange expand
-                evb <- stepper False evc
+                evb <- ui $ stepper False evc
                 missing <- (element $ fromJust $ M.lookup tname  (M.fromList itemListEl2)) # sink UI.style (noneShow <$> evb)
                 header <- UI.div
                   # set items [element b # set UI.class_"col-xs-1", UI.div # set text  t # set UI.class_ "col-xs-10", element expand ]
@@ -116,7 +116,7 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
             (\calT -> do
               let pred = WherePredicate $ lookAccess inf t <$> timePred (fieldKey <$> fields ) calT
                   fieldKey (TB1 (SText v))=  lookKey inf t v
-              (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
+              (v,_) <-  ui $ transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
               mapUIFinalizerT innerCalendar
                 ((\i -> do
                   let caption =  UI.caption # set text cap

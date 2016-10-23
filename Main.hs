@@ -46,7 +46,7 @@ main = do
   regplugs <- plugs smvar amap db plugList
 
   print "Start Server"
-  ref <- addServer metas
+  (ref ,_)<- runDynamic $ addServer metas
 
 
   print "Load Polling Process"
@@ -56,16 +56,16 @@ main = do
   forkIO $ threadDelay 50000 >> rawSystem "chromium" ["http://localhost:8025"] >> return ()
   let
     initGUI = do
-        Just (TableModification _ _ (_,G.Idex c,_)) <- addClientLogin metas
-        let [(SerialTB1 (Just (TB1 (SNumeric i))))] = F.toList c
-        return i
-    finalizeGUI w = do
-        print ("delete client" <> show (wId w))
+      (Just (TableModification _ _ (_,G.Idex c,_)),_) <- runDynamic $ addClientLogin metas
+      let [(SerialTB1 (Just (TB1 (SNumeric i))))] = F.toList c
+      return i
+    finalizeGUI w = void $ runDynamic $ do
+        liftIO$ print ("delete client" <> show (wId w))
         deleteClientLogin metas (wId w)
         deleteClient metas (fromIntegral $ wId w)
 
 
   startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar args regplugs ) initGUI finalizeGUI
   print "Finish Server"
-  traverse (deleteServer metas) ref
+  runDynamic $ traverse (deleteServer metas) ref
   return ()

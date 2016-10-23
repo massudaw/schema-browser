@@ -10,7 +10,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 
-module Plugins (plugList,siapi3Plugin) where
+module Plugins (plugList,lplugOrcamento, siapi3Plugin) where
 
 import qualified NonEmpty as Non
 import Location
@@ -800,4 +800,4 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
 
 
 plugList :: [PrePlugins]
-plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,{- lplugContract ,lplugOrcamento ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin , importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo]
+plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin , importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo]

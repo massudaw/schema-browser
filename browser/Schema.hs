@@ -228,7 +228,7 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
        varmapU <- mapM (createTableRefsUnion preinf (M.fromList varmap)) (filter (not . L.null . rawUnion) $ F.toList i2u)
        liftIO$ atomically $ takeTMVar mvar >> putTMVar mvar  (M.fromList $ varmap <> varmapU)
        var <- liftIO$ modifyMVar_  (globalRef schemaVar  ) (return . HM.insert schema inf )
-       addStats inf
+       -- addStats inf
        return inf
 
 
@@ -253,7 +253,7 @@ createTableRefsUnion inf m i  = do
   R.onEventIO patchUni (hdiff. fmap patchunion)
   midx <-  liftIO$ atomically$ newTMVar iv
   midxLoad <-  liftIO$ atomically$ newTMVar G.empty
-  bh <- R.accumBDyn v (flip (L.foldl' apply) <$> patch )
+  bh <- R.accumB v (flip (L.foldl' apply) <$> patch )
   let bh2 = (R.tidings bh (L.foldl' apply  <$> bh R.<@> patch ))
   bhdiff <- R.stepper diffIni patch
   (eidx ,hidx) <- R.newEvent
@@ -283,7 +283,7 @@ createTableRefs inf i = do
   midxLoad <-  liftIO$ atomically $ newTMVar G.empty
   let applyP = (\l v ->  L.foldl' (\j  i -> apply j i  ) v l  )
       evdiff = applyP <$> ediff
-  bh <- R.accumBDyn v evdiff
+  bh <- R.accumB v evdiff
   let bh2 = R.tidings bh (flip ($) <$> bh R.<@> evdiff )
   bhdiff <- R.stepper diffIni ediff
   (eidx ,hidx) <- R.newEvent
@@ -432,7 +432,7 @@ addStats schema = do
   let metaschema = meta schema
   varmap <- liftIO$ atomically $ readTMVar ( mvarMap schema)
   let stats = "table_stats"
-  (dbpol,(_,polling))<- liftIO$ transactionNoLog metaschema $ selectFrom stats  Nothing Nothing [] mempty
+  (dbpol,(_,polling))<- transactionNoLog metaschema $ selectFrom stats  Nothing Nothing [] mempty
   let
     row t s ls = tblist . fmap _tb $ [Attr "schema" (int (schemaId schema ) ), Attr "table" (int t) , Attr "size" (TB1 (SNumeric s)), Attr "loadedsize" (TB1 (SNumeric ls)) ]
     lrow t dyn st = liftTable' metaschema "table_stats" . row t (maybe (G.size dyn) (maximum .fmap fst ) $  nonEmpty $  F.toList st) $ (G.size dyn)

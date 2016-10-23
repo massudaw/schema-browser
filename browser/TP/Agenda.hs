@@ -64,7 +64,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
       schemaPred =  [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals) )]
       schemaPred2 =  [(IProd True ["schema"],Left (int (schemaId inf),Equals) )]
 
-    dashes <- liftIO$ do
+    dashes <- ui$ do
       (tmap,evMap) <- transactionNoLog (meta inf) $ do
         (_,(_,evMap )) <- selectFromTable "event" Nothing Nothing [] schemaPred2
         (_,(_,tmap)) <- selectFromTable "table_name_translation" Nothing Nothing [] schemaPred2
@@ -97,7 +97,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
               maybe UI.div (\(k@(t,(c,tname,_,_))) -> mdo
                 expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
                 let evc = UI.checkedChange expand
-                evb <- stepper False evc
+                evb <- ui $ stepper False evc
                 missing <- UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")] # sink UI.style (noneShow <$> evb)
                 header <- UI.div
                   # set items [element b # set UI.class_"col-xs-1", UI.div # set text  t # set UI.class_ "col-xs-10", element expand ]
@@ -127,7 +127,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
               evr = eventResize innerCalendar
               evdd = eventDragDrop innerCalendar
               evs =  fmap (makePatch cliZone . first (readPK inf . T.pack))<$> unions [evr,evdd,evd]
-            ui $ onEventDyn evs (liftIO . transaction inf . mapM
+            ui $ onEventDyn evs (transaction inf . mapM
                   (\i -> do
                      patchFrom i >>= traverse (tell . pure )))
             edits <- ui$ accumDiff (\(tref,_)->  evalUI calendar $ do
@@ -136,17 +136,17 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
                     let pred = WherePredicate $ lookAccess inf (tableName t)<$> timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
                         fieldKey (TB1 (SText v))=  lookKey inf (tableName t) v
                     -- (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
-                    reftb <- refTables' inf t Nothing pred
+                    reftb <- ui $ refTables' inf t Nothing pred
                     let v = fmap snd $ reftb ^. _1
                     let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
-                    tdib <- stepper Nothing (join <$> evsel)
+                    tdib <- ui $ stepper Nothing (join <$> evsel)
                     let tdi = tidings tdib (join <$> evsel)
                     (el,ediff,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi)  reftb [] [] (allRec' (tableMap inf) $ t)  tdi
                     ui $ onEventDyn (pure <$> ediff) (liftIO .  putPatch (reftb ^. _4 ))
                     mapUIFinalizerT innerCalendar
                       (\i -> do
                         calendarAddSource innerCalendar  t ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .  concat . fmap (lefts.snd) $ fmap proj $ G.toList i))
-                        ui $ Writer.tell [fmap fst $ runDynamic $ evalUI innerCalendar $ calendarRemoveSource innerCalendar t])
+                        ui $ registerDynamic (fmap fst $ runDynamic $ evalUI innerCalendar $ calendarRemoveSource innerCalendar t))
                        (v)
                     UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
                                    ) ref) (M.fromList . M.keys <$>inpCal)

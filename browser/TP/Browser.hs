@@ -80,7 +80,7 @@ addClientLogin inf =  transactionNoLog inf $ do
 attrIdex l =  G.Idex $ M.fromList $ fmap (\(Attr i k) -> (i,k)) l
 
 deleteClientLogin inf i= do
-  now <- getCurrentTime
+  now <- liftIO $ getCurrentTime
   (_,(_,tb)) <- transactionNoLog inf $ selectFrom "client_login"  Nothing Nothing [] $ mempty
   let
     pk = Attr (lookKey inf "client_login" "id") (TB1 (SNumeric i))
@@ -93,7 +93,7 @@ deleteClientLogin inf i= do
     return v
 
 addServer inf =  do
-    now <- getCurrentTime
+    now <- liftIO$ getCurrentTime
     let
       obj = serverCreate inf now
     transactionNoLog inf $ insertFrom obj
@@ -101,7 +101,7 @@ addServer inf =  do
 idexToPred (G.Idex  i) = head $ (\(k,a)-> (IProd True [k],Left (a,Contains))) <$>  M.toList  i
 
 deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
-  now <- getCurrentTime
+  now <- liftIO $ getCurrentTime
   (_,(_,tb)) <- transactionNoLog inf $ selectFrom "client_login"  Nothing Nothing [] $ mempty
   let
     pk = Attr (lookKey inf "client_login" "up_time") (TB1 (STimestamp (utcToLocalTime utc now)))
@@ -169,7 +169,7 @@ editClient metainf inf dbmeta ccli  table tdi clientId now
     return ()
 
 addClient clientId metainf inf table row =  do
-    now <- getCurrentTime
+    now <- liftIO getCurrentTime
     let
       tdi = fmap (M.toList .getPKM) $ join $ (\ t -> fmap (tblist' t ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName t))  ). F.toList) <$>  table <*> row
     (dbmeta ,(_,ccli)) <- transactionNoLog metainf $ selectFrom "clients"  Nothing Nothing []  mempty
@@ -224,7 +224,7 @@ viewerKey inf table cli layout cliTid = mdo
                       unKey t = liftA2 (,) ((\(Attr _ (TB1 (SText i)))-> Just $ lookKey inf  (tableName table) i ) $ lookAttr' (meta inf)  "key" t  )( pure $ (\(Attr _ (TB1 (SDynamic i)))-> i) $ lookAttr'  (meta inf)  "val" t )
                 in (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
 
-  reftb@(vpt,vp,_,var) <- refTables inf table
+  reftb@(vpt,vp,_,var) <- ui $ refTables inf table
 
   let
       tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (M.fromList $ justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) iv ) <$> vpt <*> tdip
@@ -232,7 +232,7 @@ viewerKey inf table cli layout cliTid = mdo
   cv <- currentValue (facts tdi)
   -- Final Query ListBox
   filterInp <- UI.input
-  filterInpBh <- stepper "" (UI.valueChange filterInp)
+  filterInpBh <-ui $ stepper "" (UI.valueChange filterInp)
   let filterInpT = tidings filterInpBh (diffEvent filterInpBh (UI.valueChange filterInp))
       sortSet = rawPK table <>  L.filter (not .(`L.elem` rawPK table)) (F.toList . tableKeys . TB1 . tableNonRef' . allRec' (tableMap inf ) $ table)
   sortList <- selectUI sortSet ((,True) <$> rawPK table ) UI.div UI.div conv
@@ -252,7 +252,7 @@ viewerKey inf table cli layout cliTid = mdo
     offset <- offsetFieldFiltered (pure 0) wheel   [(L.length . snd <$> res3) ,L.length . snd <$> vpt,(lengthPage <$> res3)]
     res3 <- ui $ mapT0EventDyn (fmap inisort (fmap G.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap G.toList) $ vpt) )
     return (offset, res3)
-  ui $ onEventDyn (rumors $ triding offset) $ (\i ->  liftIO $ do
+  ui $ onEventDyn (rumors $ triding offset) $ (\i ->  do
     transactionNoLog inf $ selectFrom (tableName table ) (Just $ divPage (i + pageSize) `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  [] $ mempty)
   let
     paging  = (\o -> fmap (L.take pageSize . L.drop o) ) <$> triding offset
@@ -260,21 +260,21 @@ viewerKey inf table cli layout cliTid = mdo
   res4 <- ui $ mapT0EventDyn (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
   itemList <- listBoxEl itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (fmap Just <$> tidings st sel ) (pure id) (pure (maybe id attrLine))
   let evsel =  rumors (fmap join  $ triding itemList)
-  (dbmeta ,(_,_)) <- liftIO$ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals ))]
-  ui $onEventIO ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) inf dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< getCurrentTime )
-  prop <- stepper cv evsel
+  (dbmeta ,(_,_)) <- ui $ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals ))]
+  ui $onEventDyn ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) inf dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< liftIO getCurrentTime )
+  prop <-ui $ stepper cv evsel
   let tds = tidings prop evsel
 
   (cru,ediff,pretdi) <- crudUITable inf (pure "+")  reftb [] [] (allRec' (tableMap inf) table) tds
   diffUp <-  ui $ mapEvent (fmap pure)  $ (\i j -> traverse (return . flip apply j ) i) <$> facts pretdi <@> ediff
   let
      sel = filterJust $ safeHead . concat <$> unions [ diffUp,unions [rumors  $ fmap join (triding itemList) ]]
-  st <- stepper cv sel
+  st <-ui $ stepper cv sel
   ui $ onEventDyn (pure <$> ediff) (liftIO .  putPatch var )
   title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine i  )  <$> st) # set UI.class_ "col-xs-8"
   expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked filterEnabled# set UI.class_ "col-xs-1"
   let evc = UI.checkedChange expand
-  filterEnabled <- stepper False evc
+  filterEnabled <- ui $ stepper False evc
   insertDiv <- UI.div # set children [title,head cru] # set UI.class_ "container-fluid"
   insertDivBody <- UI.div # set children [insertDiv,last cru]
   element sortList # sink UI.style  (noneShow <$> filterEnabled) # set UI.class_ "col-xs-4"

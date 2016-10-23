@@ -2,7 +2,8 @@
 \usepackage[utf8]{inputenc} % set input encoding to utf8
 \usepackage{fancyhdr}
 \usepackage{graphicx} 
-
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
 \pagestyle{fancy}
 \rhead{\includegraphics[width=2cm]{massuda-eng.png}}
 \cfoot{ \begin{center} {  Denise Sales Massuda \\  \footnotesize Engenheira Civil CREA 19.750/D GO \\  \footnotesize Email: msgdenise@gmail.com Fixo: (62) 4016.2198 Cel.: (62) 9213.9699 \\ \footnotesize Av. Mutirão, 371 - Ed. Loureço Office , Sala 520 - Setor Oeste} \end{center}}

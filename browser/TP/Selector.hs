@@ -66,14 +66,14 @@ calendarSelector = do
     agenda <- mdo
       agenda <- UI.button # sink text ((\b -> if b then "Agenda" else "Basic") <$> agB)
       let agE = pure not <@ UI.click agenda
-      agB <- accumB False agE
+      agB <- ui $ accumB False agE
       return $ TrivialWidget (tidings agB (flip ($) <$> agB <@> agE)) agenda
 
     current <- UI.div # set children [prev,today,next]
     let
       currentE = concatenate <$> unions  [resRange False  <$> facts (triding resolution) <@ UI.click next
                                        ,resRange True   <$> facts (triding resolution) <@ UI.click prev , const (const iday) <$> UI.click today ]
-    increment <- accumB iday  currentE
+    increment <- ui $ accumB iday  currentE
     let incrementT =  tidings increment (flip ($) <$> increment <@> currentE)
 
     -- currentOutput <- UI.div # sink text (fmap show $ (\i j -> (resRange False i j ,resRange True i j))<$>  facts (triding resolution) <*> facts incrementT )
@@ -84,7 +84,7 @@ positionSel = do
     cpos <-UI.div
     bcpos <-UI.button # set text "Localização Atual"
     (e,h) <- liftIO$ newEvent
-    positionB <- stepper Nothing (Just <$>e)
+    positionB <- ui $ stepper Nothing (Just <$>e)
     onEventFT (UI.click bcpos) (\_ -> runFunction $ ffi "fireCurrentPosition(%1)" bcpos)
     onEventFT (currentPosition bcpos ) (liftIO. h )
     return (bcpos,currentPosition bcpos, h,tidings positionB (diffEvent positionB  (Just <$> e)))
@@ -105,12 +105,12 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
   let
       pred2 =  [(IProd True ["schema"],Left (int $ schemaId inf  ,Equals))]
       authPred =  [(IProd True ["grantee"],Left ( int $ fst $ username inf ,Equals)), (IProd True ["schema"],Left (int $ schemaId inf ,Equals))]
-  (orddb ,authorization,translation) <- liftIO $ transactionNoLog  (meta inf) $
+  (orddb ,authorization,translation) <- ui $ transactionNoLog  (meta inf) $
       (,,) <$> (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred2))
            <*> (fst <$> (selectFromTable "authorization" Nothing Nothing [] authPred))
            <*> (fst <$> (selectFromTable "table_name_translation" Nothing Nothing []  pred2 ))
   filterInp <- UI.input # set UI.style [("width","100%")]
-  filterInpBh <- stepper "" (T.pack <$> UI.valueChange filterInp)
+  filterInpBh <- ui $ stepper "" (T.pack <$> UI.valueChange filterInp)
   let filterInpT = tidings filterInpBh (T.pack <$> UI.valueChange filterInp)
 
   let
@@ -148,7 +148,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
         iniSel =  M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i)  $ e ) <$> iniTables
     iniValue <- currentValue (facts iniSel)
     let iniEvent = (unionWith const (rumors iniSel ) (allTablesSel <$> rumors (triding all)))
-    iniBehaviour <- stepper iniValue  iniEvent
+    iniBehaviour <- ui $ stepper iniValue  iniEvent
 
     bset <- checkDivSetTGen tables ((\i k j -> tableUsage i j k ) <$> collectionTid orddb <*> triding bset) (tidings iniBehaviour iniEvent ) buttonString ((\lg i j -> lg i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle)
     return bset

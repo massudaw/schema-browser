@@ -22,7 +22,7 @@ import Control.Concurrent
 import Data.Functor.Apply
 import Control.Concurrent.STM
 import Utils
-import TP.Widgets (diffEvent)
+import TP.Widgets (diffEvent,onEventDyn)
 import Schema
 import Types.Patch
 import Data.Maybe
@@ -44,7 +44,7 @@ idex inf t v = G.Idex $ M.fromList  $ first (lookKey inf t  ) <$> v
 
 plugs schm authmap db plugs = do
   inf <- metaInf schm
-  regplugs <- transactionNoLog inf  $ do
+  regplugs <- fmap fst $ runDynamic $ transactionNoLog inf  $ do
       (db ,(_,t)) <- selectFrom "plugins"  Nothing Nothing [] $ mempty
       let regplugs = catMaybes $ findplug <$> plugs
           findplug :: PrePlugins -> Maybe Plugins
@@ -74,7 +74,7 @@ checkTime curr = do
 poller schm authmap db plugs is_test = do
   metas <- metaInf schm
   let conn = rootconn metas
-  (dbpol,(_,polling))<- transactionNoLog metas $ selectFrom "polling" Nothing Nothing [] $ mempty
+  ((dbpol,(_,polling)),_)<- runDynamic $ transactionNoLog metas $ selectFrom "polling" Nothing Nothing [] $ mempty
   let
     project tb =  (schema,intervalms,p,pid)
       where
@@ -97,15 +97,15 @@ poller schm authmap db plugs is_test = do
               pname = _name p
               a = _bounds p
           let iter polling = do
-                  (start,end,curr,current) <- checkTime polling
-                  putStrLn $ "LAST RUN " <> show (schema,pname,current,start,end)
+                  (start,end,curr,current) <- liftIO$ checkTime polling
+                  liftIO$ putStrLn $ "LAST RUN " <> show (schema,pname,current,start,end)
                   let intervalsec = intervalms `div` 10^3
                   when (is_test || diffUTCTime current start  >  fromIntegral intervalsec) $ do
-                      putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
+                      liftIO$ putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let fetchSize = 200
                           pred =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicate True (fst f) , genPredicate False (snd f)])
                       (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  (Just 0) (Just fetchSize) []  pred
-                      threadDelay 10000
+                      liftIO$ threadDelay 10000
                       let sizeL = justLook pred  l
                           lengthPage s pageSize  =  traceShow (res,pageSize,s) res
                             where
@@ -118,7 +118,7 @@ poller schm authmap db plugs is_test = do
                               tdInput i =  isJust  $ checkTable  (liftAccess inf a $ fst f) i
                               tdOutput1 i =  not $ isJust  $ checkTable  (liftAccess inf a $ snd f) i
 
-                          i <-  mapConcurrently (mapM (\inp -> catchPluginException inf (_tableUnique (lookTable inf a)) idp (M.toList $ getPKM inp) $ transactionLog inf $ do
+                          i <-  liftIO $ mapConcurrently (mapM (\inp -> catchPluginException inf (_tableUnique (lookTable inf a)) idp (M.toList $ getPKM inp) $ fmap fst $ runDynamic $ transactionLog inf $ do
                               ovm  <- fmap (liftTable' inf a) <$> liftIO (elemp (Just $ mapKey' keyValue inp))
                               maybe (return ()) (\ov-> do
                                    p <- fullDiffEdit inp ov
@@ -127,8 +127,8 @@ poller schm authmap db plugs is_test = do
                             ) . L.transpose .  chuncksOf 20 $ evb
                           return $ concat i
                           ) [0..(lengthPage (fst sizeL) fetchSize -1)]
-                      end <- getCurrentTime
-                      putStrLn $ "END " <>T.unpack pname <> " - " <> show end
+                      end <- liftIO $ getCurrentTime
+                      liftIO$ putStrLn $ "END " <>T.unpack pname <> " - " <> show end
                       let polling_log = lookTable metas "polling_log"
                       dbplog <-  refTable metas polling_log
                       let table = tblist
@@ -158,13 +158,13 @@ poller schm authmap db plugs is_test = do
               -- iter polling
               tm <- timer intervalms
               print (intervalms,diffUTCTime current startP,(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))
-              forkIO (void $  threadDelay (max 0 (10^3*(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))) >> putStrLn ("Timer Start" <> T.unpack pname) >> start tm>> iter (indexRow polling))
+              forkIO (void $  threadDelay (max 0 (10^3*(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))) >> putStrLn ("Timer Start" <> T.unpack pname) >> start tm>>  (runDynamic $ iter (indexRow polling)))
               let
                   evIter = indexRow <$> (unionWith const (rumors $ collectionTid dbpol ) (facts ( collectionTid dbpol )<@ tick tm))
 
-              bhIter <- stepper (indexRow  polling) evIter
+              (bhIter ,_) <- runDynamic $ stepper (indexRow  polling) evIter
               let  evDiffIter = diffEvent bhIter evIter
-              runDynamic $onEventIO  evDiffIter (liftIO . iter) )
+              runDynamic $onEventDyn  evDiffIter (iter) )
           return ()
   mapM poll  enabled
 
