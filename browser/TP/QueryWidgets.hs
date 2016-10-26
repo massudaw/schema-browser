@@ -1467,7 +1467,7 @@ viewer inf table envK = mdo
       event1 = (\(j,k) i  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pure iniPg <*> triding offset) <@> rumors (triding sortList)
       event2 = (\(j,i) k  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pg <*> triding sortList) <@> rumors (triding offset)
       evs = (unionWith const event1 event2)
-  tdswhere <- fmap (fmap (fmap fst)) ui $mapEventDyn id evs
+  tdswhere <-  mapEventFin id evs
   offsetTotal <- ui $ stepper (fst $ snd $ snd $ iniQ) (fmap (fst . snd .snd ) tdswhere)
   pg <- ui $ accumT ((fromJust  $addT iniQ ) M.empty ) (unionWith (flip (.)) ((pure (const iniPg ) <@ event1)) (filterJust (addT <$> tdswhere )))
 

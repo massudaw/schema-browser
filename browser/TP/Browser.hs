@@ -181,10 +181,10 @@ addClient clientId metainf inf table row =  do
 chooserTable inf bset cliTid cli = do
   layout <- checkedWidget (pure False)
   body <- UI.div
-  el <- ui $ accumDiff (evalUI body  . (\(((table,desc),sub))-> do
+  el <- ui $ accumDiff (evalUI body  . (\((table,sub))-> do
     header <- UI.h3
         # set UI.class_ "header"
-        # set text (T.unpack desc)
+        # set text (T.unpack (rawName table))
     let
         layFacts2 i =  if i then ("col-xs-" <> (show $  6)) else "row"
 

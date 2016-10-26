@@ -97,8 +97,14 @@ setup smvar args plugList w = void $ do
         lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested (IProd False ["selection"]) (IProd True ["table"])) iv
                     in fmap (\(TB1 (SText t)) -> t) .unArray  <$> join (fmap unSOptional' i)
     iniKey <-currentValue (facts initKey)
+    let
+      buttonStyle lookDesc k e= do
+         let tableK = k
+         label <- UI.div # sink0 UI.text (fmap T.unpack $ facts $ lookDesc  <*> pure k)  # set UI.class_ "fixed-label col-xs-11"
+         state <- element e  # set UI.class_ "col-xs-1"
+         UI.div # set children[state, label] # set  UI.class_ "col-xs-12"
 
-    (lookDesc,bset) <- tableChooser inf  kitems (fst <$> tfilter) (snd <$> tfilter)  ((schemaName inf)) (snd (username inf)) (pure iniKey)
+    bset <- tableChooser inf  kitems (fst <$> tfilter ) (snd <$> tfilter)  ((schemaName inf)) (snd (username inf)) (pure iniKey)
 
     posSel <- positionSel
     bd <- UI.div  # set UI.class_ "col-xs-10"
@@ -106,21 +112,7 @@ setup smvar args plugList w = void $ do
     tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [sidebar,posSel ^._1,getElement bset]# sink0 UI.style (facts $ noneShow <$> triding menu)
     element body # set children [tbChooser,bd]
     let
-          buttonStyle k (e,sub) = mdo
-            let tableK = k
-            label <- UI.div # sink0 UI.text (fmap T.unpack $ facts $ lookDesc  <*> pure k)  # set UI.class_ "fixed-label col-xs-11"
-            state <- element e   # sink UI.checked (maybe False (not . L.null) . M.lookup k . M.mapKeys fst <$> facts (triding bset)) # set UI.class_ "col-xs-1"
-            subels  <- mapM (\(ki,ei) -> do
-              element ei # sink UI.checked (maybe False (elem ki) . M.lookup k. M.mapKeys fst  <$> facts (triding bset)) # set UI.class_ "col-xs-1"
-              label <- UI.div # sink0 UI.text (fmap T.unpack $ facts $ lookDesc  <*> pure ki) # set UI.style [("width","100%")] # set UI.class_ "fixed-label col-xs-11"
-              UI.div # set children[ei , label]
-              ) (zip (rawUnion tableK) sub)
 
-
-            prebset <- UI.div # set children subels # set UI.style [("padding-left","5px")] # set  UI.class_ "col-xs-12"
-            top <- UI.div # set children[state, label] # set  UI.class_ "col-xs-12"
-            element prebset  # set UI.style (noneShow . not $ L.null (rawUnion tableK))
-            UI.div # set children [top,prebset] # set UI.style [("width","100%")]
 
     tfilter <-  mapUIFinalizerT bd (\nav-> do
       bdo <- UI.div
@@ -128,14 +120,14 @@ setup smvar args plugList w = void $ do
       case nav of
         "Map" -> do
           element bdo  # set UI.style [("width","100%")]
-          fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$> mapWidget bdo calendarT posSel (triding bset) inf
+          fmap ((\i j -> elem j i) . fmap (^._2)) <$> mapWidget bdo calendarT posSel (triding bset) inf
         "Agenda" -> do
           element bdo  # set UI.style [("width","100%")]
           cliZone <- jsTimeZone
-          fmap ((\i j -> elem j i) . fmap (^._2._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
+          fmap ((\i j -> elem j i) . fmap (^._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
         "Account" -> do
           element bdo  # set UI.style [("width","100%")]
-          fmap ((\i j -> elem (tableName j) i) . fmap (^._2._2)) <$> accountWidget bdo calendarT (triding bset) inf
+          fmap ((\i j -> elem j i) . fmap (^._2)) <$> accountWidget bdo calendarT (triding bset) inf
         "Metadata" -> do
               let metaOpts = ["Poll","Stats","Change","Exception"]
                   iniOpts = join $ fmap (\i -> if elem i metaOpts then Just i else Nothing)$  args `atMay`  7
@@ -181,11 +173,11 @@ setup smvar args plugList w = void $ do
                 i -> errorWithStackTrace (show i)
                     ) ((,) <$> triding metanav <*> triding bset)
               return bdo
-              return  ((buttonStyle,const True))
+              return  (buttonStyle,const True)
         "Browser" -> do
               subels <- chooserTable  inf  bset cliTid  cli
               element bdo  # set children  subels # set UI.style [("height","90vh"),("overflow","auto")]
-              return  ((buttonStyle, const True))
+              return  (buttonStyle, const True  )
         i -> errorWithStackTrace (show i)
          )  (triding nav)
     return tfilter
@@ -272,10 +264,10 @@ databaseChooser smvar metainf sargs plugList = do
               usernameB <-  ui $stepper userEnv usernameE
 
               load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-4" # sink UI.enabled (facts (isJust <$> dbsWT) )
-              ui$ mapEventDyn  ( traverse (\ v ->do
+              ui $ onEventDyn (usernameB <@ (UI.click load))( traverse (\ v ->do
                 let auth = authMap smvar sargs (user sargs ,pass sargs )
                 inf <- loadSchema smvar schemaN  (user sargs)  auth plugList
-                liftIO$schemaH $ Just inf))(usernameB <@ (UI.click load))
+                liftIO$schemaH $ Just inf))
               user <- UI.div # set children [usernamel,username] # set UI.class_ "col-xs-8"
               UI.div # set children [user ,load]
 

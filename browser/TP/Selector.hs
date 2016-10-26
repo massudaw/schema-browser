@@ -93,14 +93,14 @@ lookupAccess inf l f c = join $ fmap (indexField (IProd  True [(lookKey inf (fst
 
 tableChooser :: InformationSchemaKV Key Showable
                       -> [Table]
-                      -> Tidings (Table -> (Element, [Element]) -> UI Element)
+                      -> Tidings ( Tidings (Table -> Text) -> Table -> (Element) -> UI Element)
                       -> Tidings (TableK Key -> Bool)
                       -> Text
                       -> Text
                       -> Tidings [TableK Key]
                       -> UI
-                           (Tidings (TableK k -> Text),
-                            TrivialWidget (M.Map (TableK Key, Text) [TableK Key]))
+                           (
+                            TrivialWidget (M.Map (TableK Key) [TableK Key]))
 tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables = do
   let
       pred2 =  [(IProd True ["schema"],Left (int $ schemaId inf  ,Equals))]
@@ -131,12 +131,9 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
 
         buttonString k = do
           b <- UI.input # set UI.type_ "checkbox"
-          let un = rawUnion tableK
-              tableK = k
-          unions <- mapM (\i -> (i,) <$> UI.input# set UI.type_ "checkbox") un
-          let ev = (k,) . (\b -> if b then (if L.null un then [tableK ] else un,[]) else ([],if L.null un then [tableK] else un))<$>UI.checkedChange b
-          let evs = foldr (unionWith const) ev $ fmap (k,) .  (\(ki,e) -> (\i-> (if i then ([ki],[]) else ([],[ki]))) <$> UI.checkedChange e  )<$> unions
-          return (k,((b,(snd <$> unions)),evs))
+          let un = rawUnion k
+              ev = (k,) . (\b -> if b then (if L.null un then [k] else un) else [])<$>UI.checkedChange b
+          return (k,(b,ev))
 
     let
       visible  k = (\i j k sel -> (i tb && j tb && k tb ) || (L.elem [tb] sel)) <$> filterLabel <*> authorize <*> tableFilter <*> triding bset
@@ -150,7 +147,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
     let iniEvent = (unionWith const (rumors iniSel ) (allTablesSel <$> rumors (triding all)))
     iniBehaviour <- ui $ stepper iniValue  iniEvent
 
-    bset <- checkDivSetTGen tables ((\i k j -> tableUsage i j k ) <$> collectionTid orddb <*> triding bset) (tidings iniBehaviour iniEvent ) buttonString ((\lg i j -> lg i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle)
+    bset <- checkDivSetTGen tables ((\i k j -> tableUsage i j k ) <$> collectionTid orddb <*> triding bset) (tidings iniBehaviour iniEvent ) buttonString ((\lg i j -> lg lookDesc i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle )
     return bset
   let
       ordRow orderMap pkset =  field
@@ -170,6 +167,6 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
   element bset # set UI.style [("overflow","auto"),("height","99%")]
   header <- UI.div # set children [getElement all,filterInp] # set UI.style [("display","inline-flex")]
   tbChooserI <- UI.div # set children [header,getElement bset]  # set UI.style [("height","50vh")]
-  return $ (lookDesc,TrivialWidget ((\f -> M.mapKeys (fmap f))<$> lookDesc <*> (M.mapKeys (\i-> (i,i))  <$>triding bset)) tbChooserI)
+  return $ (TrivialWidget (triding bset) tbChooserI)
 
 

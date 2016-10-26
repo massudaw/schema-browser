@@ -65,15 +65,13 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
       schemaPred2 =  [(IProd True ["schema"],Left (int (schemaId inf),Equals) )]
 
     dashes <- ui$ do
-      (tmap,evMap) <- transactionNoLog (meta inf) $ do
+      evMap <- transactionNoLog (meta inf) $ do
         (_,(_,evMap )) <- selectFromTable "event" Nothing Nothing [] schemaPred2
-        (_,(_,tmap)) <- selectFromTable "table_name_translation" Nothing Nothing [] schemaPred2
-        return (tmap,evMap)
+        return evMap
       return $ fmap (\e ->
         let
             Just (TB1 (SText tname)) = unSOptional' $  _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
             table = lookTable inf tname
-            lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema" ,int $ schemaId inf),("table",int $ _tableUnique table )]) i ) $ tmap
             Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"event" $ IProd True ["event"]) e
             (Attr _ color )= lookAttr' (meta inf) "color" e
             toLocalTime = fmap to
@@ -87,20 +85,20 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
                   where attr  = attrValue <$> lookAttrM inf field r
             proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  projf r <$> F.toList efields
             attrValue (Attr k v) = v
-         in (lookDesc,(txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,efields,proj))) ( G.toList evMap)
+         in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,efields,proj)) ( G.toList evMap)
 
     iday <- liftIO getCurrentTime
     let
-      legendStyle  table (b,_)
+      legendStyle  lookDesc table b
             =  do
-              let item = M.lookup table (M.fromList  $ fmap (\i@(t,(a,b,c,_))-> (b,i)) dashes)
-              maybe UI.div (\(k@(t,(c,tname,_,_))) -> mdo
+              let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,_)-> (b,i)) dashes)
+              maybe UI.div (\(k@((c,tname,_,_))) -> mdo
                 expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
                 let evc = UI.checkedChange expand
                 evb <- ui $ stepper False evc
                 missing <- UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")] # sink UI.style (noneShow <$> evb)
                 header <- UI.div
-                  # set items [element b # set UI.class_"col-xs-1", UI.div # set text  t # set UI.class_ "col-xs-10", element expand ]
+                  # set items [element b # set UI.class_"col-xs-1", UI.div # sink text  (T.unpack .($table) <$> facts lookDesc ) # set UI.class_ "col-xs-10", element expand ]
                   # set UI.style [("background-color",renderShowable c)]
                 UI.div # set children [header,missing]
                   ) item
@@ -131,8 +129,8 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
                   (\i -> do
                      patchFrom i >>= traverse (tell . pure )))
             edits <- ui$ accumDiff (\(tref,_)->  evalUI calendar $ do
-              let ref  =  (\i j ->  L.find ((== i) .  (^. _2._2)) j ) tref dashes
-              traverse (\(cap,(_,t,fields,proj))-> do
+              let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
+              traverse (\((_,t,fields,proj))-> do
                     let pred = WherePredicate $ lookAccess inf (tableName t)<$> timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
                         fieldKey (TB1 (SText v))=  lookKey inf (tableName t) v
                     -- (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
@@ -149,7 +147,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
                         ui $ registerDynamic (fmap fst $ runDynamic $ evalUI innerCalendar $ calendarRemoveSource innerCalendar t))
                        (v)
                     UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
-                                   ) ref) (M.fromList . M.keys <$>inpCal)
+                                   ) ref) inpCal
 
             element sel # sink children ( catMaybes .F.toList <$> facts edits)
 

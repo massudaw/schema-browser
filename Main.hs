@@ -41,20 +41,19 @@ main = do
     amap = authMap smvar db (user db , pass db )
 
   print "Load Metadata"
-  (metas ,_)<- runDynamic $keyTables  smvar ("metadata", T.pack $ user db) amap []
+  (metas ,lm)<- runDynamic $keyTables  smvar ("metadata", T.pack $ user db) amap []
 
   print "Load Plugins"
   regplugs <- plugs smvar amap db plugList
 
   print "Start Server"
-  (ref ,_)<- runDynamic $ addServer metas
+  (ref ,ls)<- runDynamic $ addServer metas
 
 
   print "Load Polling Process"
   poller smvar amap db regplugs False
 
   print "Load GUI Server"
-  forkIO $ threadDelay 50000 >> rawSystem "chromium" ["http://localhost:8025"] >> return ()
   let
     initGUI = do
       Just (TableModification _ _ (_,G.Idex c,_)) <- addClientLogin metas
@@ -69,4 +68,7 @@ main = do
   startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar args regplugs ) initGUI finalizeGUI
   print "Finish Server"
   runDynamic $ traverse (deleteServer metas) ref
+  sequence lm
+  sequence ls
+
   return ()

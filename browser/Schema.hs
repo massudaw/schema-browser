@@ -257,15 +257,15 @@ createTableRefsUnion inf m i  = do
   let bh2 = (R.tidings bh (L.foldl' apply  <$> bh R.<@> patch ))
   bhdiff <- R.stepper diffIni patch
   (eidx ,hidx) <- R.newEvent
-  bhidx <- R.stepper M.empty eidx
+  bhidx <- R.stepper M.empty (eidx)
 
   liftIO $forkIO $ forever $ (do
-      forkIO . hidx =<< atomically (takeTMVar midx)
+      forkIO . hidx . force =<< atomically (takeTMVar midx)
       return () )
   liftIO$ forkIO $ forever $ (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
-        (void $ hdiff (concat patches)))
+        (void $ hdiff $ force (concat patches)))
   return (tableMeta i,  DBVar2  mdiff midx midxLoad (R.tidings bhdiff patch) (R.tidings bhidx eidx) bh2 )
 
 
@@ -287,14 +287,14 @@ createTableRefs inf i = do
   let bh2 = R.tidings bh (flip ($) <$> bh R.<@> evdiff )
   bhdiff <- R.stepper diffIni ediff
   (eidx ,hidx) <- R.newEvent
-  bhidx <- R.stepper (M.singleton mempty (G.size v,M.empty)) eidx
+  bhidx <- R.stepper (M.singleton mempty (G.size v,M.empty)) (eidx)
   liftIO$ forkIO $ forever $ catchJust notException(do
-    forkIO . hidx =<< atomically (takeTMVar midx)
+    forkIO . hidx . force =<< atomically (takeTMVar midx)
     return () )  (\e -> print ("block index",tableName i ,e :: SomeException))
   liftIO $forkIO $ forever $ catchJust notException (do
       patches <- atomically $ takeMany mdiff
       when (not $ L.null $ concat patches) $ do
-        (void $ hdiff (concat patches)))  (\e -> print ("block data ",tableName i ,e :: SomeException))
+        (void $ hdiff $ force (concat patches)))  (\e -> print ("block data ",tableName i ,e :: SomeException))
   return (tableMeta i,  DBVar2  mdiff midx midxLoad (R.tidings bhdiff ediff) (R.tidings bhidx eidx) bh2 )
 
 

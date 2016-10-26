@@ -22,7 +22,7 @@ import Control.Concurrent
 import Data.Functor.Apply
 import Control.Concurrent.STM
 import Utils
-import TP.Widgets (diffEvent,onEventDyn)
+import TP.Widgets (diffEvent)
 import Schema
 import Types.Patch
 import Data.Maybe

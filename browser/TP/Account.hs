@@ -60,7 +60,6 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
       schId = int (schemaId inf)
       schemaPred = [(IProd True ["schema"],Left (schId,Equals))]
 
-    (_,(_,tmap)) <- ui $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred
     (_,(_,emap )) <-ui $ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
     (_,(_,aMap )) <-ui $ transactionNoLog  (meta inf) $ selectFromTable "accounts" Nothing Nothing [] schemaPred
     cliZone <- jsTimeZone
@@ -69,7 +68,6 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
               Just (TB1 (SText tname)) = unSOptional' $ _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
               table = lookTable  inf tname
               tablId = int (_tableUnique table)
-              lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema" ,schId ),("table",tablId )]) i ) $ tmap
               Just (Attr _ (ArrayTB1 efields )) =indexField  (liftAccess (meta inf) "event" $ IProd True ["event"]) $ fromJust $ G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
               (Attr _ (ArrayTB1 afields ))= lookAttr' (meta inf) "account" e
               (Attr _ color )= lookAttr' (meta inf) "color" e
@@ -85,22 +83,22 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
                           accattr  = attrValue $ lookAttr' inf aafield r
               proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  zipWith (projf r) ( F.toList efields) (F.toList afields)
               attrValue (Attr k v) = v
-           in (lookDesc,(color,tname,efields,afields,proj))  ) ( G.toList aMap)
+           in ((color,table,efields,afields,proj))  ) ( G.toList aMap)
 
     let allTags =  dashes
     itemListEl2 <- mapM (\i ->
-      (i^. _2 ._2,) <$> UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")]) dashes
+      (i^. _2,) <$> UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")]) dashes
     let
-        legendStyle table (b,_)
+        legendStyle lookDesc table b
             =  do
-              let item = M.lookup (tableName table ) (M.fromList  $ fmap (\i@(t,(_,b,_,_,_))-> (b,i)) dashes )
-              maybe UI.div (\k@(t,(c,tname,_,_,_)) ->   mdo
+              let item = M.lookup table  (M.fromList  $ fmap (\i@((_,b,_,_,_))-> (b,i)) dashes )
+              maybe UI.div (\k@((c,tname,_,_,_)) ->   mdo
                 expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
                 let evc = UI.checkedChange expand
                 evb <- ui $ stepper False evc
                 missing <- (element $ fromJust $ M.lookup tname  (M.fromList itemListEl2)) # sink UI.style (noneShow <$> evb)
                 header <- UI.div
-                  # set items [element b # set UI.class_"col-xs-1", UI.div # set text  t # set UI.class_ "col-xs-10", element expand ]
+                  # set items [element b # set UI.class_"col-xs-1", UI.div # sink text  (T.unpack . ($table) <$> facts lookDesc) # set UI.class_ "col-xs-10", element expand ]
                   # set UI.style [("background-color",renderShowable c)]
                 UI.div # set children [header,missing]) item
 
@@ -109,17 +107,17 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
 
     let
       calFun selected = do
-          innerCalendarSet <- M.fromList <$> mapM (\((_,(_,i,_,_,_))) -> (i,) <$> UI.table)  selected
+          innerCalendarSet <- M.fromList <$> mapM (\a -> (a^._2,) <$> UI.table)  selected
           innerCalendar  <- UI.div # set children (F.toList innerCalendarSet)
           element calendar # set children [innerCalendar]
-          _ <- mapM (\(cap,(_,t,fields,efields,proj))->  mapUIFinalizerT (fromJust $ M.lookup t innerCalendarSet)
+          _ <- mapM (\((_,table,fields,efields,proj))->  mapUIFinalizerT (fromJust $ M.lookup table innerCalendarSet)
             (\calT -> do
-              let pred = WherePredicate $ lookAccess inf t <$> timePred (fieldKey <$> fields ) calT
-                  fieldKey (TB1 (SText v))=  lookKey inf t v
-              (v,_) <-  ui $ transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
+              let pred = WherePredicate $ lookAccess inf (tableName table) <$> timePred (fieldKey <$> fields ) calT
+                  fieldKey (TB1 (SText v))=  lookKey inf (tableName table) v
+              (v,_) <-  ui $ transactionNoLog  inf $ selectFromA (tableName table) Nothing Nothing [] pred
               mapUIFinalizerT innerCalendar
                 ((\i -> do
-                  let caption =  UI.caption # set text cap
+                  let caption =  UI.caption -- # set text (T.unpack $ maybe (rawName t) id $ rawDescription t)
                       header = UI.tr # set items [UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>  fields) , UI.th # set text "Title" ,UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>efields) ]
                       row i = UI.tr # set items [UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)]
                       body = (fmap row dat ) <> if L.null dat then [] else [totalrow totalval]
@@ -131,13 +129,13 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
                           mindate = minimum $ justError "no" . M.lookup "start" <$> dat
                           maxdate = maximum $ justError "no" . M.lookup "start" <$> dat
                       totalrow i = UI.tr # set items  (fmap (\i -> i # set UI.style [("border","solid 2px")] )[UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)] ) # set UI.style [("border","solid 2px")]
-                  element (fromJust $ M.lookup t innerCalendarSet) # set items (caption:header:body))
+                  element (fromJust $ M.lookup table innerCalendarSet) # set items (caption:header:body))
                 ) (collectionTid v)
                 )calendarSelT
               ) selected
           return ()
-    _ <- mapUIFinalizerT calendar calFun (((\i j -> filter (flip L.elem (tableName <$> concat (F.toList i)) .  (^. _2._2)) j )<$> sel <*> pure dashes)
-        )
+    _ <- mapUIFinalizerT calendar calFun ((\i j -> filter (flip L.elem (concat (F.toList i)) .  (^. _2)) j )<$> sel <*> pure dashes)
+
 
     return (legendStyle,dashes)
 

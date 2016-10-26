@@ -63,7 +63,6 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
       calendarT = (\(a,b) c -> (a,b,c)) <$> ((,)<$> facts agendaT <*> facts incrementT )<#> resolutionT
       schemaPred2 = [(IProd True ["schema"],Left (int (schemaId inf),Equals))]
 
-    (_,(_,tmap)) <- ui $ transactionNoLog (meta inf) $ selectFromTable "table_name_translation" Nothing Nothing [] schemaPred2
     (_,(_,evMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred2
     (_,(_,eventMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
     cliZone <- jsTimeZone
@@ -71,7 +70,6 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
           let
               Just (TB1 (SText tname)) = unSOptional' $ _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
               table = lookTable inf tname
-              lookDesc = (\i  -> maybe (T.unpack $ tname)  ((\(Attr _ v) -> renderShowable v). lookAttr' (meta inf)  "translation") $ G.lookup (idex (meta inf) "table_name_translation" [("schema" ,int $ schemaId inf),("table",int (_tableUnique table))]) i ) $ tmap
               evfields = join $fmap (\(Attr _ (ArrayTB1 n))-> n) . indexField  (liftAccess (meta inf) "event" $ IProd True ["event"])   <$> erow
                 where
                   erow = G.lookup (idex (meta inf) "event" [("schema" ,int $ schemaId inf),("table",int (_tableUnique table))])  eventMap
@@ -85,16 +83,16 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
               convField (TB1 v ) = Just $ to $ v
                 where to p@(SPosition (Position (y,x,z) ))  =  [("position",TB1 p )]
               convField i  = errorWithStackTrace (show i)
-          in (lookDesc,(color,tname,efields,evfields,proj))) <$>  ( G.toList evMap)
+          in ((color,table,efields,evfields,proj))) <$>  ( G.toList evMap)
 
 
     let
-      legendStyle table (b,_)
+      legendStyle lookDesc table b
             =  do
-              let item = M.lookup (tableName table ) (M.fromList  $ fmap (\i@(t,(a,b,c,_,_))-> (b,i)) dashes)
-              maybe UI.div (\(k@(t,(c,_,_,_,_))) ->
+              let item = M.lookup table  (M.fromList  $ fmap (\i@((a,b,c,_,_))-> (b,i)) dashes)
+              maybe UI.div (\(k@((c,_,_,_,_))) ->
                 UI.div # set items [UI.div
-                  # set items [element b # set UI.class_ "col-xs-1", UI.div # set text  t #  set UI.class_ "fixed-label col-xs-11" # set UI.style [("background-color",renderShowable c)] ]
+                  # set items [element b # set UI.class_ "col-xs-1", UI.div # sink text  (T.unpack . ($table) <$> facts lookDesc) #  set UI.class_ "fixed-label col-xs-11" # set UI.style [("background-color",renderShowable c)] ]
                   # set UI.style [("background-color",renderShowable c)]]) item
 
 
@@ -114,17 +112,17 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
         element calendar # set children [innerCalendar,editor]
         calendarCreate  innerCalendar pb ("[]"::String)
         onEvent (moveend innerCalendar) (liftIO . h .traceShowId )
-        fin <- mapM (\((_,(_,tname,fields,efields,proj))) -> do
+        fin <- mapM (\((_,tb,fields,efields,proj)) -> do
           let filterInp =  liftA2 (,) positionT  calendarT
-              t = tname
+              tname = tableName tb
           mapUIFinalizerT innerCalendar (\(positionB,calT)-> do
             let pred = lookAccess inf tname <$> predicate (fmap (\(TB1 (SText v))->  lookKey inf tname v) <$>efields ) (Just $  fields ) (positionB,Just calT)
-            reftb <- ui $ refTables' inf (lookTable inf t) (Just 0) (WherePredicate pred)
+            reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) (WherePredicate pred)
             let v = fmap snd $ reftb ^. _1
-            let evsel = (\j (tev,pk,_) -> if tableName tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
+            let evsel = (\j (tev,pk,_) -> if tev == tb then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
             tdib <- ui $ stepper Nothing (join <$> evsel)
             let tdi = tidings tdib (join <$> evsel)
-            (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi) reftb [] [] (allRec' (tableMap inf) $ lookTable inf t)  tdi
+            (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi) reftb [] [] (allRec' (tableMap inf) $ lookTable inf tname)  tdi
             mapUIFinalizerT innerCalendar (\i -> do
               createLayers innerCalendar tname positionB (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)
                                           ) v
@@ -135,7 +133,7 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
         let els = foldr (liftA2 (:)) (pure []) fin
         element editor  # sink children (facts els)
         return ()
-    let calInp = (\i -> filter (flip L.elem (tableName <$> concat (F.toList i)) .  (^. _2._2)) dashes  )<$> sel
+    let calInp = (\i -> filter (flip L.elem (concat (F.toList i)) .  (^. _2)) dashes  )<$> sel
     _ <- mapUIFinalizerT calendar calFun calInp
     return (legendStyle,dashes)
 

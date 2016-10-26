@@ -28,7 +28,6 @@ library
     Step.Common
     Step.Host
   default-extensions: TupleSections,OverloadedStrings 
-  ghc-options: -O2 
   hs-source-dirs: src
   build-depends:
      scientific
