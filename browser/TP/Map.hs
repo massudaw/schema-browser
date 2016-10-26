@@ -83,7 +83,7 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
               convField (TB1 v ) = Just $ to $ v
                 where to p@(SPosition (Position (y,x,z) ))  =  [("position",TB1 p )]
               convField i  = errorWithStackTrace (show i)
-          in ((color,table,efields,evfields,proj))) <$>  ( G.toList evMap)
+          in (color,table,efields,evfields,proj)) <$>  ( G.toList evMap)
 
 
     let

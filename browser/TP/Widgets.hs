@@ -465,8 +465,9 @@ listBoxEl list bitems bsel bfilter bdisplay = do
     -- sink listBox [ selection :== stepper (-1) $ bSelection <@ eDisplay ]
 
     -- user selection
+    selEv <- UI.selectionChangeUI list
     let
-        eindexes = (\l i -> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <@> UI.selectionChange list
+        eindexes = (\l i -> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <@> selEv
     let
         _selectionLB = tidings (facts bsel) eindexes
         _elementLB   = list

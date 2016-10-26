@@ -131,8 +131,9 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
 
         buttonString k = do
           b <- UI.input # set UI.type_ "checkbox"
+          chkE <- UI.checkedChangeUI b
           let un = rawUnion k
-              ev = (k,) . (\b -> if b then (if L.null un then [k] else un) else [])<$>UI.checkedChange b
+              ev = (k,) . (\b -> if b then (if L.null un then [k] else un) else [])<$>chkE
           return (k,(b,ev))
 
     let

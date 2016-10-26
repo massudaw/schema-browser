@@ -280,8 +280,7 @@ viewerKey inf table cli layout cliTid = mdo
   element sortList # sink UI.style  (noneShow <$> filterEnabled) # set UI.class_ "col-xs-4"
   element offset # set UI.class_ "col-xs-2"
   element filterInp # set UI.class_ "col-xs-3"
-  element itemList -- # set UI.class_ "row"
-  itemSel <- UI.div # set children ( [expand , filterInp, getElement offset ,getElement sortList] ) -- # set UI.class_ "row"
-  itemSelec <- UI.div # set children [itemSel,getElement itemList] -- # set UI.class_ "col-xs-6"
+  itemSel <- UI.div # set children ( [expand , filterInp, getElement offset ,getElement sortList] )
+  itemSelec <- UI.div # set children [itemSel,getElement itemList]
   mapM (\i -> element i # sink0 UI.class_ (facts $ layout)) [itemSelec,insertDivBody]
   UI.div # set children ([itemSelec,insertDivBody ] )
