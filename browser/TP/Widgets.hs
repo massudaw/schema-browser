@@ -231,7 +231,7 @@ checkDivSetT ks sort binit   el st = do
       buttonString   k = do
         v <- currentValue (facts binit)
         b <- el k # set UI.checked  (elem k v )
-        let ev = (k,)<$>UI.checkedChange b
+        ev <-  fmap (k,)<$>UI.checkedChangeUI b
         return (k,(b,ev))
 
 
@@ -292,7 +292,8 @@ appendItems = mkWriteAttr $ \i x -> void $ return x  #+ i
 checkedWidget :: Tidings Bool -> UI (TrivialWidget Bool)
 checkedWidget init = do
   i <- UI.input # set UI.type_ "checkbox" # sink UI.checked (facts init)
-  let e = unionWith const (rumors init) (UI.checkedChange i)
+  ev <- UI.checkedChangeUI i
+  let e = unionWith const (rumors init) ev
   v <- currentValue (facts init)
   b <- ui$ stepper v e
   dv <- UI.span # set children [i] # set UI.style [("padding","2px")]
@@ -301,7 +302,8 @@ checkedWidget init = do
 checkedWidgetM :: Tidings (Maybe Bool) -> UI (TrivialWidget (Maybe Bool))
 checkedWidgetM init = do
   i <- UI.input # set UI.type_ "checkbox" # sink UI.checked (maybe False id <$> facts init)
-  let e = unionWith const (rumors init) (Just <$>  UI.checkedChange i)
+  ev <- UI.checkedChangeUI i
+  let e = unionWith const (rumors init) (Just <$>  ev )
   v <- currentValue (facts init)
   b <- ui $ stepper v e
   dv <- UI.span # set children [i] # set UI.style [("padding","2px")]
@@ -343,8 +345,8 @@ readMouse v  =   (,,,) <$> readMay i<*>readMay a<*> readMay b <*>readMay c
       [i,a,b,c] :: [JSON.Value] = unsafeFromJSON (v)
 -- readMouse i = errorWithStackTrace $show i
 
-onkey :: Element -> ((Int,Bool,Bool,Bool) -> Bool) -> Event String
-onkey el f = unsafeMapUI el (const $ UI.get value el) (filterE f $ filterJust $ readMouse <$> domEvent "keydown" el)
+onkey :: Element -> ((Int,Bool,Bool,Bool) -> Bool) -> UI (Event String)
+onkey el f = mapEventUI el (const $ UI.get value el) (filterE f $ filterJust $ readMouse <$> domEvent "keydown" el)
 
 onAltEnter el = onkey el (\case{(13,False,True,False)-> True ; i -> False})
 onAltE el = onkey el (\case{(69,False,True,False)-> True ; i -> False})
@@ -521,9 +523,10 @@ multiListBox bitems bsel bdisplay = do
     -- sink listBox [ selection :== stepper (-1) $ bSelection <@ eDisplay ]
 
     -- user selection
+    sel <- selectionMultipleChange list
     let bindices2 :: Tidings (M.Map Int a)
         bindices2 = M.fromList . zip [0..] <$> bitems
-        eindexes = lookupIndex <$> facts bindices2 <@> selectionMultipleChange list
+        eindexes = lookupIndex <$> facts bindices2 <@> sel
     e <- currentValue (facts bsel)
     let
         -- eindexes2 = (\m-> catMaybes $ fmap (flip setLookup m) e)  <$> (S.fromList <$> rumors bitems)
@@ -546,11 +549,11 @@ infixl 4 <#>
 (<#>) :: Behavior (a -> b) -> Tidings a -> Tidings b
 b <#>  t = tidings ( b <*> facts t ) (b <@> rumors t)
 
-fileChange :: Element -> Event (Maybe String)
-fileChange el = unsafeMapUI el (const $ UI.get readFileAttr el) (UI.onChangeE el)
+fileChange :: Element -> UI (Event (Maybe String))
+fileChange el = mapEventUI el (const $ UI.get readFileAttr el) (UI.onChangeE el)
 
-selectionMultipleChange :: Element -> Event [Int]
-selectionMultipleChange el = unsafeMapUI el (const $ UI.get selectedMultiple el) (UI.click el)
+selectionMultipleChange :: Element -> UI (Event [Int])
+selectionMultipleChange el = mapEventUI el (const $ UI.get selectedMultiple el) (UI.click el)
 
 readFileAttr :: ReadAttr Element (Maybe String)
 readFileAttr = mkReadAttr get

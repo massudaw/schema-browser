@@ -228,7 +228,7 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
        varmapU <- mapM (createTableRefsUnion preinf (M.fromList varmap)) (filter (not . L.null . rawUnion) $ F.toList i2u)
        liftIO$ atomically $ takeTMVar mvar >> putTMVar mvar  (M.fromList $ varmap <> varmapU)
        var <- liftIO$ modifyMVar_  (globalRef schemaVar  ) (return . HM.insert schema inf )
-       -- addStats inf
+       addStats inf
        return inf
 
 

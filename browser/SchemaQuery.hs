@@ -305,6 +305,8 @@ filterfixed fixed v
        else G.queryCheck fixed v
 
 
+
+
 pageTable flag method table page size presort fixed = do
     inf <- ask
     let mvar = mvarMap inf
@@ -325,11 +327,16 @@ pageTable flag method table page size presort fixed = do
               where fr = ffixed reso
            predreq = (fixidx,G.Contains (pageidx - pagesize,pageidx))
            reqs = G.query predreq idxVL
+           diffpred'  (WherePredicate (AndColl [])) = Just $ (WherePredicate (AndColl []))
+           diffpred'  (WherePredicate f ) = WherePredicate <$> foldl (\i f -> i >>= flip G.splitIndex f  ) (Just  f)  (fmap snd $ G.getEntries freso)
+           diffpred = diffpred' fixed
 
+       liftIO$ print ((fmap snd $ G.getEntries freso),diffpred)
        i <- case  fromMaybe (10000000,M.empty ) $  M.lookup fixidx fixedmap of
           (sq,mp) -> do
              if flag || (sq > G.size freso -- Tabela é maior que a tabela carregada
                 && pageidx  > G.size freso ) -- O carregado é menor que a página
+                && isJust diffpred
                && (isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixidx fixedmap)  -- Ignora quando página já esta carregando
                    )
              then do
@@ -339,7 +346,7 @@ pageTable flag method table page size presort fixed = do
 
                let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                liftIO$ putStrLn $ "new page " <> show (tableName table,sq, pageidx, G.size freso,G.size reso,page, pagesize)
-               (res,nextToken ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
+               (res,nextToken ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList (justError "no pred" diffpred)
                let
                    token =  nextToken
                    index = (estLength page pagesize s, maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token$ mp)

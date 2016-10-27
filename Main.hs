@@ -60,9 +60,9 @@ main = do
       let [(SerialTB1 (Just (TB1 (SNumeric i))))] = F.toList c
       return i
     finalizeGUI w = void $ closeDynamic $ do
-        liftIO$ print ("delete client" <> show (wId w))
-        deleteClientLogin metas (wId w)
+        liftIO$ print ("delete client " <> show (wId w))
         deleteClient metas (fromIntegral $ wId w)
+        deleteClientLogin metas (wId w)
 
 
   startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar args regplugs ) initGUI finalizeGUI

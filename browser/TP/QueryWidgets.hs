@@ -690,10 +690,12 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
        crudIns (Just j)   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
        crudDel (Just j)  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> transaction inf (deleteFrom j)
 
-  diffEdi <- mapEventFin id $ crudEdi <$> facts oldItemsi <*> facts inscrud <@ (unionWith const (UI.click editB) (filterKey editEnabled ( onAltU lbox)))
+  altU <- onAltU lbox
+  altI <- onAltI lbox
+  diffEdi <- mapEventFin id $ crudEdi <$> facts oldItemsi <*> facts inscrud <@ (unionWith const (UI.click editB) (filterKey editEnabled ( altU)))
   diffDel <- mapEventFin id $ crudDel <$> facts oldItemsi <@ UI.click deleteB
   diffMerge <- mapEventFin id $ crudMerge <$> facts inscrud <*> facts gist <@ UI.click mergeB
-  diffIns <- mapEventFin id $ crudIns <$> facts inscrud <@ (unionWith const (UI.click insertB) (filterKey  insertEnabled (onAltI lbox)))
+  diffIns <- mapEventFin id $ crudIns <$> facts inscrud <@ (unionWith const (UI.click insertB) (filterKey  insertEnabled altI ))
   conflict <- UI.div # sink items (facts $ (\i j -> fmap showFKE $ maybe [] (flip conflictGist j) i)  <$> inscrud <*> gist) # sink UI.style (noneShow <$>mergeEnabled)
   transaction <- UI.span #
          set children [insertB,editB,mergeB,deleteB] #
@@ -978,7 +980,8 @@ buildPrim fm tdi i = case i of
            clearB <- UI.button # set UI.text "clear"
            file <- UI.input # set UI.type_ "file" # set UI.multiple True # set UI.style (noneShow $ elem FWrite fm)
            runFunction$ ffi "$(%1).on('change',handleFileSelect);" file
-           tdi2 <- ui $ addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fileChange file ) =<< addEvent (const Nothing <$> UI.click clearB) tdi
+           fchange <- fileChange file
+           tdi2 <- ui $ addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange) =<< addEvent (const Nothing <$> UI.click clearB) tdi
            let fty = case mime of
                 "application/pdf" -> ("iframe","src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
                 "application/x-ofx" -> ("textarea","value",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
@@ -1117,8 +1120,9 @@ offsetFieldFiltered  initT eve maxes = do
   lengs  <- mapM (\max -> UI.span # sink text (("/" ++) .show  <$> facts max )) maxes
   offparen <- UI.div # set children (offset : lengs) # set UI.style [("border","2px solid black"),("margin-left","4px") , ("margin-right","4px"),("text-align","center")]
 
+  enter  <- onEnter offset
   let max  = facts $ foldr1 (liftA2 min) maxes
-  let offsetE =  filterJust $ (\m i -> if i <m then Just i else Nothing ) <$> max <@> (filterJust $ readMaybe <$> onEnter offset)
+  let offsetE =  filterJust $ (\m i -> if i <m then Just i else Nothing ) <$> max <@> (filterJust $ readMaybe <$> enter)
       ev = unionWith const (negate <$> mousewheel offparen) eve
       saturate m i j
           | m == 0 = 0
@@ -1149,7 +1153,8 @@ offsetField  initT eve  max = do
   leng <- UI.span # sink text (("/" ++) .show  <$> max )
   offparen <- UI.div # set children [offset,leng] # set UI.style [("border","2px solid black"),("margin-left","4px") , ("margin-right","4px"),("text-align","center")]
 
-  let offsetE =  filterJust $ (\m i -> if i <m then Just i else Nothing ) <$> max <@> (filterJust $ readMaybe <$> onEnter offset)
+  offsetEnter <- onEnter offset
+  let offsetE =  filterJust $ (\m i -> if i <m then Just i else Nothing ) <$> max <@> (filterJust $ readMaybe <$> offsetEnter)
       ev = unionWith const (negate <$> mousewheel offparen) eve
       saturate m i j
           | m == 0 = 0
@@ -1274,7 +1279,8 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
         else do
           pan <- UI.div #  set UI.class_ "col-xs-5 fixed-label"
           let isel  = itemListEl
-          bh <- ui $ stepper False (unionWith const (const False <$> onEsc filterInp ) (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange isel )))
+          esc <- onEsc filterInp
+          bh <- ui $ stepper False (unionWith const (const False <$> esc) (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange isel )))
           element isel # sink UI.style (noneShow <$> bh)
           element filterInp # set UI.style (noneShow False)
           element offset # set UI.style (noneShow False)
