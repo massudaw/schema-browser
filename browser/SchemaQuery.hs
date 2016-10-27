@@ -331,13 +331,13 @@ pageTable flag method table page size presort fixed = do
            diffpred'  (WherePredicate f ) = WherePredicate <$> foldl (\i f -> i >>= flip G.splitIndex f  ) (Just  f)  (fmap snd $ G.getEntries freso)
            diffpred = diffpred' fixed
 
-       liftIO$ print ((fmap snd $ G.getEntries freso),diffpred)
+       -- liftIO$ print ((fmap snd $ G.getEntries freso),diffpred)
        i <- case  fromMaybe (10000000,M.empty ) $  M.lookup fixidx fixedmap of
           (sq,mp) -> do
              if flag || (sq > G.size freso -- Tabela é maior que a tabela carregada
                 && pageidx  > G.size freso ) -- O carregado é menor que a página
-                && isJust diffpred
                && (isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixidx fixedmap)  -- Ignora quando página já esta carregando
+                && isJust diffpred
                    )
              then do
                liftIO $ atomically $ do
@@ -345,7 +345,7 @@ pageTable flag method table page size presort fixed = do
                  putTMVar (idxVarLoad dbvar) (G.insert ((),(fixidx,G.Contains (pageidx - pagesize ,pageidx))) (3,6) v)
 
                let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
-               liftIO$ putStrLn $ "new page " <> show (tableName table,sq, pageidx, G.size freso,G.size reso,page, pagesize)
+               liftIO$ putStrLn $ "new page " <> show (tableName table,sq, pageidx, G.size freso,G.size reso,page, pagesize,diffpred)
                (res,nextToken ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList (justError "no pred" diffpred)
                let
                    token =  nextToken
