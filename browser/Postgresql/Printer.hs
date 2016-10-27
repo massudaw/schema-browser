@@ -568,6 +568,7 @@ indexFieldL e c n@(Nested ix@(IProd b l) nt) v =
     case getCompose $ justError "no nested" $ findFK l v of
         Unlabeled i ->
           concat . fmap (indexFieldL e c nt) . F.toList . _fkttable $ i
+        Labeled l (IT k fk) -> (indexFieldL e c nt  $ head (F.toList fk ))
         Labeled l a -> {-->
           let
             go (ArrayTB1 (i:| _)) =

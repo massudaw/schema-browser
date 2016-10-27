@@ -161,7 +161,9 @@ instance Affine String where
 
 
 splitIndex :: BoolCollection (Access Key ,AccessOp Showable) -> TBIndex Key Showable -> Maybe (BoolCollection (Access Key , AccessOp Showable))
-splitIndex (AndColl l ) f = fmap AndColl $ nonEmpty $ catMaybes $ flip splitIndex  f <$> l
+splitIndex (AndColl l ) f = if F.all (isNothing .snd) al then Nothing else Just $ AndColl $ fmap (\(i,j) -> fromMaybe i j) al
+    where
+      al = (\l -> (l,splitIndex  l f) )<$> l
 splitIndex (OrColl l ) f = fmap OrColl $ nonEmpty $ catMaybes $ flip splitIndex  f <$> l
 splitIndex (PrimColl (i,op) ) (Idex v ) = maybe (Just $ PrimColl (i,op) ) (\v -> splitPred (PrimColl (i,op)) v) (fmap _tbattr $ indexField i (errorWithStackTrace "no meta",Compose $Identity $ KV (M.mapKeys (Set.singleton .Inline) $ M.mapWithKey (\k v -> Compose $ Identity $ Attr k v) v)) )
 
@@ -169,8 +171,8 @@ splitPred :: BoolCollection (Access Key ,AccessOp Showable) ->  FTB Showable -> 
 splitPred (PrimColl (prod ,Left (a@(TB1 _ ) ,op))) (ArrayTB1 b ) = if elem a  b then Nothing else Just (PrimColl (prod , Left (a,op)))
 splitPred (PrimColl (prod ,Left (a@(TB1 _ ) ,op))) (IntervalTB1 b ) = if Interval.member a  b then Nothing else Just (PrimColl (prod , Left (a,op)))
 splitPred (PrimColl (prod ,Left (a@(TB1 _ ) ,op))) b@(TB1  _ ) = if a  == b then Nothing else Just (PrimColl (prod , Left (a,op)))
-splitPred (PrimColl (prod ,Left ((IntervalTB1 a ) ,op))) i@(TB1  _ ) = (\i -> if F.length i == 1 then head . F.toList $ i else AndColl (F.toList i) ). fmap (PrimColl. (prod,). Left . (,op).IntervalTB1) <$> Interval.split i a
-splitPred (PrimColl (prod ,Left (i@(IntervalTB1 u) ,op))) (IntervalTB1 a ) =(\i -> if F.length i == 1 then head . F.toList $ i else AndColl (F.toList i) ). fmap (PrimColl .(prod,). Left . (,op).IntervalTB1) <$>  Interval.difference u a
+splitPred (PrimColl (prod ,Left ((IntervalTB1 a ) ,op))) i@(TB1  _ ) = (\i -> if F.length i == 1 then head . F.toList $ i else OrColl (F.toList i) ). fmap (PrimColl. (prod,). Left . (,op).IntervalTB1) <$> Interval.split i a
+splitPred (PrimColl (prod ,Left (i@(IntervalTB1 u) ,op))) (IntervalTB1 a ) =(\i -> if F.length i == 1 then head . F.toList $ i else OrColl (F.toList i) ). fmap (PrimColl .(prod,). Left . (,op).IntervalTB1) <$>  Interval.difference u a
 splitPred (PrimColl (prod ,Left ((ArrayTB1 l ) ,Flip (AnyOp op)))) a  = OrColl <$> nonEmpty (catMaybes $ fmap (\i -> splitPred (PrimColl (prod,Left (i,op))) a) $ F.toList l)
 splitPred (AndColl l) e = fmap AndColl $ nonEmpty $ catMaybes $ (flip splitPred e)<$> l
 splitPred (OrColl l) e = fmap OrColl $ nonEmpty $ catMaybes $ (flip splitPred e) <$> l

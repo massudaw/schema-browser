@@ -331,7 +331,7 @@ pageTable flag method table page size presort fixed = do
            diffpred'  (WherePredicate f ) = WherePredicate <$> foldl (\i f -> i >>= flip G.splitIndex f  ) (Just  f)  (fmap snd $ G.getEntries freso)
            diffpred = diffpred' fixed
 
-       -- liftIO$ print ((fmap snd $ G.getEntries freso),diffpred)
+       liftIO$ print ((fmap snd $ G.getEntries freso),diffpred)
        i <- case  fromMaybe (10000000,M.empty ) $  M.lookup fixidx fixedmap of
           (sq,mp) -> do
              if flag || (sq > G.size freso -- Tabela é maior que a tabela carregada
