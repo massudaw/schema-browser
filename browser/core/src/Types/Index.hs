@@ -115,7 +115,7 @@ instance Predicates WherePredicate where
       cons (Left i ) (Left j ) =consistent (fst i) (fst j)
       cons (Right i ) (Left j ) =False
       cons (Left i ) (Right j ) =False
-      conS (Right i ) (Right j ) = i == j
+      cons (Right i ) (Right j ) = i == j
 
   match (WherePredicate c1) e (WherePredicate c2)  = F.all id $ M.mergeWithKey (\_ i j -> Just $ either (match i e.fst) (const False) j  ) (const False <$>) (const False <$>) (M.fromList $ F.toList c1) (M.fromList $  F.toList c2)
 

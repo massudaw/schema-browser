@@ -12,6 +12,7 @@ import Data.Ord
 import Reactive.Threepenny
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (delete)
+import Graphics.UI.Threepenny.Internal (wTimeZone)
 
 import qualified Data.Map as M
 import qualified Data.Foldable as F
@@ -53,10 +54,6 @@ evalUI el f = liftIO (getWindow el) >>= \w ->  runUI w f
 
 evalDyn el f = getWindow el >>= \w -> fmap fst $ runDynamic $ runUI w f
 
-accumTds :: Tidings a -> Event (a -> a) -> Dynamic (Tidings a)
-accumTds e l = do
-  ve <- currentValue (facts e)
-  accumT ve $ concatenate <$> unions ([l,const <$> rumors e ])
 
 
 
@@ -561,13 +558,7 @@ readFileAttr = mkReadAttr get
                   JSON.Success x -> M.lookup ("filevalue" ::String) x
                   i -> traceShow s Nothing -- errorWithStackTrace (show i)
 
-
-jsTimeZone :: UI TimeZone
-jsTimeZone  = do
-  fmap ((\ i -> TimeZone (negate i) False "") .from )$ callFunction $ ffi "new Date().getTimezoneOffset()"
-  where
-    from s = let JSON.Success x =JSON.fromJSON s in x
-
+jsTimeZone = wTimeZone <$> askWindow
 
 selectedMultiple :: Attr Element [Int]
 selectedMultiple = mkReadWriteAttr get set

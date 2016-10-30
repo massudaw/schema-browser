@@ -1273,7 +1273,8 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
           let isel  = itemListEl
           esc <- onEsc filterInp
           panC <- UI.clickUI pan
-          selCh <- UI.selectionChangeUI isel
+          lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) . snd  <$>    res4 ) (tidings (fmap Just <$> st ) (fmap Just <$> sel )) (pure id) ((\i -> maybe id (\l  ->    i  l ) )<$> showFK )
+          let selCh = rumors (triding lbox)
           bh <- ui $ stepper False (unionWith const (const False <$> esc) (unionWith const (const True <$> panC) (const False <$> selCh) ))
           element isel # sink UI.style (noneShow <$> bh)
           element filterInp # set UI.style (noneShow False)
@@ -1282,7 +1283,6 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
               element filterInp # set UI.style (noneShow v)
               element offset # set UI.style (noneShow v)
               if True then runFunction$ ffi "$(%1).focus();" filterInp else return ())
-          lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) . snd  <$>    res4 ) (tidings (fmap Just <$> st ) (fmap Just <$> sel )) (pure id) ((\i -> maybe id (\l  ->    i  l ) )<$> showFK )
           return (TrivialWidget  (triding lbox) pan )
 
 

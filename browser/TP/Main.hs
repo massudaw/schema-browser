@@ -62,6 +62,8 @@ import qualified Data.HashMap.Strict as HM
 import OAuth
 import GHC.Stack
 
+setBody :: Element -> UI ()
+setBody e = runFunction (ffi "document.body.appendChild(%1) " e )
 
 setup
   ::  DatabaseSchema ->  [String] -> [Plugins] -> Window -> UI ()
@@ -89,7 +91,7 @@ setup smvar args plugList w = void $ do
     expand True = "col-xs-10"
     expand False = "col-xs-12"
   element body # sink0 UI.class_ (facts $ expand <$> triding menu)
-  getBody w #+ [element hoverBoard,element container]
+  mapM (setBody ) [hoverBoard,container]
   mapUIFinalizerT body (traverse (\inf-> mdo
     let kitems = F.toList (pkMap inf)
         schId = int $ schemaId inf
