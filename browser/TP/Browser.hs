@@ -151,7 +151,7 @@ num = TB1 . SNumeric
 getClient metainf clientId inf ccli = G.lookup (idex metainf "clients"  [("clientid",num clientId),("schema",int $ schemaId inf)]) ccli :: Maybe (TBData Key Showable)
 
 deleteClient metainf clientId = do
-  dbmeta  <-  refTable metainf (lookTable metainf "clients")
+  dbmeta  <-  prerefTable metainf (lookTable metainf "clients")
   putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , G.Idex $ M.fromList [(lookKey metainf "clients" "clientid",TB1 (SNumeric (clientId)))],[])]
 
 editClient metainf inf dbmeta ccli  table tdi clientId now
@@ -163,7 +163,7 @@ editClient metainf inf dbmeta ccli  table tdi clientId now
     let
         lrow :: Maybe (Index (TBData Key Showable))
         lrow = maybe (Just $ patch new ) (flip diff new )  cli
-    traverse (putPatch (patchVar dbmeta ) . pure ) lrow
+    traverse (putPatch (patchVar $ iniRef $ dbmeta ) . pure ) lrow
     return ()
 
 addClient clientId metainf inf table row =  do
@@ -172,7 +172,7 @@ addClient clientId metainf inf table row =  do
       tdi = fmap (M.toList .getPKM) $ join $ (\ t -> fmap (tblist' t ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName t))  ). F.toList) <$>  table <*> row
     dbmeta  <- refTable metainf (lookTable metainf "clients")
     new <- updateClient metainf inf table tdi clientId now
-    putPatch (patchVar dbmeta ) [patch new]
+    putPatch (patchVar $iniRef dbmeta ) [patch new]
     return (clientId, getClient metainf clientId inf <$> collectionTid dbmeta)
 
 

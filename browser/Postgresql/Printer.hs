@@ -309,7 +309,7 @@ expandQuery left (TB1 t)
 --    | isTableRec t  || isFilled (getInlineRec t)  = return "" -- expandTable t
     | otherwise   = expandQuery' left t
 
-expandQuery' left t@(meta, m) = foldr1 (liftA2 mappend) (expandJoin left (F.toList (_kvvalues . labelValue . getCompose $ m) ) .getCompose <$> F.toList (_kvvalues . labelValue . getCompose $ m))
+expandQuery' left t@(meta, m) = foldr (liftA2 mappend) (return "") (expandJoin left (F.toList (_kvvalues . labelValue . getCompose $ m) ) .getCompose <$> F.toList (_kvvalues . labelValue . getCompose $ m))
 
 tableType (ArrayTB1 (i :| _ )) = tableType i <> "[]"
 tableType (LeftTB1 (Just i)) = tableType i
@@ -388,7 +388,7 @@ expandJoin left env (Unlabeled (FKT _ rel tb)) = do
     where
       jt = if left then " LEFT" else ""
 
-expandJoin left env (Labeled l (FKT i rel tb)) =  foldr1 (liftA2 mappend) $ (expandJoin left env . getCompose ) <$> unkvlist i
+expandJoin left env (Labeled l (FKT i rel tb)) =  foldr (liftA2 mappend) (return "") $ (expandJoin left env . getCompose ) <$> unkvlist i
 
 joinOnPredicate :: [Rel Key] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> [Labeled Text ((TB (Labeled Text))  Key ())] -> Text
 joinOnPredicate ks m n =  T.intercalate " AND " $ (\(Rel l op r) ->  intersectionOp (keyType . keyAttr . labelValue $ l) op (keyType . keyAttr . labelValue $ r) (label l)  (label r )) <$> fkm

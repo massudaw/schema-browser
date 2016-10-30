@@ -87,7 +87,7 @@ import Step.Host
 import qualified Data.Foldable as F
 import Data.Foldable (foldl')
 import Debug.Trace
-import Control.Concurrent.STM.TQueue
+import Control.Concurrent.STM.TChan
 import qualified Data.Text as T
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -101,7 +101,7 @@ type SelPKConstraint = [([Column CoreKey ()],Tidings PKConstraint)]
 
 type SelTBConstraint = [([Column CoreKey ()],Tidings TBConstraint)]
 
-type RefTables = (Tidings (Collection CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  CoreKey Showable) (TBData CoreKey Showable)), TQueue [TBIdx CoreKey Showable] )
+type RefTables = (Tidings (Collection CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  CoreKey Showable) (TBData CoreKey Showable)), TChan [TBIdx CoreKey Showable] )
 
 --- Plugins Interface Methods
 createFresh :: Text -> InformationSchema -> Text -> KType CorePrim -> IO InformationSchema
@@ -299,16 +299,8 @@ labelCase inf a old wid = do
 
 
 refTables' inf table page pred = do
-        ((DBVar2 tmvard _   _ vpdiff _ _ ),res)  <-  transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
-        let
-          filterPred :: [Index (TBData Key Showable)] -> Maybe [Index (TBData Key Showable)]
-          filterPred = nonEmpty . filter (\d@(_,p,_) -> G.match pred G.Exact p && indexFilterP pred d )
-          update = foldl' (flip (\p-> fmap (flip apply p)))
-          diffs = filterJust $ filterPred <$> rumors vpdiff
-        bres <- accumB res (flip update <$> diffs)
-        let
-            vpt =  tidings bres (update <$> bres <@> diffs)
-        return (vpt,res,fmap snd vpt,tmvard)
+        (ref,res)  <-  transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
+        return (liftA2 (,) (idxTid ref) (collectionTid ref),res,collectionTid ref,patchVar $ iniRef ref)
 
 
 refTables inf table = refTables' inf table Nothing mempty
@@ -408,7 +400,7 @@ tbRecCase inf constr a wl plugItens preoldItems' = do
       let preoldItems = emptyRecTable  a <$> preoldItems'
       check <- ui $foldr (\i j ->  updateTEvent  (fmap Just ) i =<< j) (return $ join . fmap unLeftItens  <$> preoldItems) (fmap (fmap (join . fmap unLeftItens) . snd) plugItens )
       TrivialWidget btr bel <- checkedWidget  (isJust <$> check)
-      (ev,h) <- liftIO $ newEvent
+      (ev,h) <- ui $ newEvent
       inipre <- currentValue  (facts preoldItems)
       let fun True = do
               initpre <- currentValue (facts preoldItems)
@@ -581,8 +573,8 @@ crudUITable
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> UI ([Element],Event (TBIdx CoreKey Showable ) ,Tidings (Maybe (TBData CoreKey Showable)))
 crudUITable inf open reftb@(bres , _ ,gist ,_) refs pmods ftb@(m,_)  preoldItems = do
-  (e2,h2) <- liftIO $ newEvent
-  (ediff ,hdiff) <- liftIO $ newEvent
+  (e2,h2) <- ui $ newEvent
+  (ediff ,hdiff) <- ui $ newEvent
   nav  <- buttonDivSet ["+","-"] (fmap Just open) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-3 pull-right"
   sub <- UI.div
@@ -774,7 +766,7 @@ attrEditor s o x y = arrayEditor merge create delete x y
 
 
 dynHandler hand val ix (l,old)= do
-    (ev,h) <- liftIO $ newEvent
+    (ev,h) <- ui $ newEvent
     el <- UI.div
     let idyn True  =  do
           tds <- hand ix
@@ -1280,7 +1272,9 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
           pan <- UI.div #  set UI.class_ "col-xs-5 fixed-label"
           let isel  = itemListEl
           esc <- onEsc filterInp
-          bh <- ui $ stepper False (unionWith const (const False <$> esc) (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange isel )))
+          panC <- UI.clickUI pan
+          selCh <- UI.selectionChangeUI isel
+          bh <- ui $ stepper False (unionWith const (const False <$> esc) (unionWith const (const True <$> panC) (const False <$> selCh) ))
           element isel # sink UI.style (noneShow <$> bh)
           element filterInp # set UI.style (noneShow False)
           element offset # set UI.style (noneShow False)

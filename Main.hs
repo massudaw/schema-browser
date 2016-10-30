@@ -41,10 +41,12 @@ main = do
     amap = authMap smvar db (user db , pass db )
 
   print "Load Metadata"
-  (metas ,lm)<- runDynamic $keyTables  smvar ("metadata", T.pack $ user db) amap []
+  (metas ,lm)<- runDynamic $keyTablesInit  smvar ("metadata", T.pack $ user db) amap []
 
   print "Load Plugins"
   regplugs <- plugs smvar amap db plugList
+  _ <- runDynamic $keyTablesInit  smvar ("gmail", T.pack $ user db) amap regplugs
+  _ <- runDynamic $keyTablesInit  smvar ("incendio", T.pack $ user db) amap regplugs
 
   print "Start Server"
   (ref ,ls)<- runDynamic $ addServer metas

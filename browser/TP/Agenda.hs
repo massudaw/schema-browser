@@ -133,7 +133,6 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
               traverse (\((_,t,fields,proj))-> do
                     let pred = WherePredicate $ lookAccess inf (tableName t)<$> timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
                         fieldKey (TB1 (SText v))=  lookKey inf (tableName t) v
-                    -- (v,_) <-  liftIO $  transactionNoLog  inf $ selectFromA t Nothing Nothing [] pred
                     reftb <- ui $ refTables' inf t Nothing pred
                     let v = fmap snd $ reftb ^. _1
                     let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc

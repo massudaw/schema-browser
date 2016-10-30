@@ -12,7 +12,8 @@ import Types
 import Expression
 import Step.Common
 import Data.Tuple
-import Control.Concurrent.STM.TQueue
+import Control.Concurrent.STM.TChan
+import Control.Concurrent.STM.TVar
 import Control.Concurrent.STM
 import Types.Patch
 import Control.Monad.RWS
@@ -106,7 +107,7 @@ readFModifier "write" = FWrite
 
 
 keyTables ,keyTablesInit :: DatabaseSchema ->  (Text ,Text) -> (Text -> IO (Auth , SchemaEditor)) -> [Plugins] ->  R.Dynamic InformationSchema
-keyTables schemaVar (schema ,user) authMap pluglist = maybe (keyTablesInit schemaVar (schema,user) authMap pluglist ) return  . (HM.lookup schema ) =<< liftIO (readMVar (globalRef schemaVar))
+keyTables schemaVar (schema ,user) authMap pluglist = {- maybe (keyTablesInit schemaVar (schema,user) authMap pluglist ) -} return  . (justError ("no table" <> T.unpack schema). HM.lookup schema ) =<< liftIO (readMVar (globalRef schemaVar))
 
 extendedRel :: HM.HashMap (Text,Text) Key -> Text -> Text -> Text -> Key -> Rel Key
 extendedRel inf t a b c =  snd access $ (lrel (fst access))
@@ -228,74 +229,78 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
        varmapU <- mapM (createTableRefsUnion preinf (M.fromList varmap)) (filter (not . L.null . rawUnion) $ F.toList i2u)
        liftIO$ atomically $ takeTMVar mvar >> putTMVar mvar  (M.fromList $ varmap <> varmapU)
        var <- liftIO$ modifyMVar_  (globalRef schemaVar  ) (return . HM.insert schema inf )
-       addStats inf
+       -- addStats inf
        return inf
 
-
-takeMany mvar = go . (:[]) =<< readTQueue mvar
-  where
-    go v = do
-      i <- tryReadTQueue mvar
-      maybe (return (reverse v )) (go . (:v)) i
 
 createTableRefsUnion inf m i  = do
   t <- liftIO$ getCurrentTime
   let
       diffIni :: [TBIdx Key Showable]
       diffIni = []
-  mdiff <-  liftIO$ atomically $ newTQueue
+  mdiff <-  liftIO$ atomically $ newBroadcastTChan
+  nmdiff <-  liftIO $ atomically $ dupTChan mdiff
+  chanidx <-  liftIO$ atomically $ newBroadcastTChan
+  nchanidx <-  liftIO$ atomically $ dupTChan chanidx
   (iv,v) <- liftIO$ readTable inf "dump" (schemaName inf) (i)
-  (patcht,hdiff) <- R.newEvent
-  let patch = patcht
   let
-      patchUni = fmap concat $ R.unions $ R.rumors . patchTid .(justError "no table union" . flip M.lookup m) . tableMeta <$>  (rawUnion i)
+      patchUni =  patchVar . (justError "no table union" . flip M.lookup m) . tableMeta <$>  (rawUnion i)
       patchunion  = liftPatch inf (tableName i ) .firstPatch keyValue
-  R.onEventIO patchUni (hdiff. fmap patchunion)
-  midx <-  liftIO$ atomically$ newTMVar iv
-  midxLoad <-  liftIO$ atomically$ newTMVar G.empty
-  bh <- R.accumB v (flip (L.foldl' apply) <$> patch )
-  let bh2 = (R.tidings bh (L.foldl' apply  <$> bh R.<@> patch ))
-  bhdiff <- R.stepper diffIni patch
-  (eidx ,hidx) <- R.newEvent
-  bhidx <- R.stepper M.empty (eidx)
+  liftIO$ mapM (\chan -> do
+    nchan <- atomically $ dupTChan chan
+    forkIO $ forever $ (atomically $ do
+      v <- readTChan   nchan
+      writeTChan nmdiff (patchunion <$> v) )) patchUni
+  midx <-  liftIO$ atomically$ newTVar iv
+  collectionState <-  liftIO$ atomically$ newTVar G.empty
+  midxLoad <-  liftIO$ atomically$ newTVar G.empty
 
-  liftIO $forkIO $ forever $ (do
-      forkIO . hidx . force =<< atomically (takeTMVar midx)
+  t0 <- liftIO $forkIO $ forever $ (do
+      v <- atomically (do
+          v <- readTChan nchanidx
+          writeTVar midx  v
+          return v )
       return () )
-  liftIO$ forkIO $ forever $ (do
-      patches <- atomically $ takeMany mdiff
-      when (not $ L.null $ concat patches) $ do
-        (void $ hdiff $ force (concat patches)))
-  return (tableMeta i,  DBVar2  mdiff midx midxLoad (R.tidings bhdiff patch) (R.tidings bhidx eidx) bh2 )
+  R.registerDynamic (killThread t0)
+  t1 <- liftIO$ forkIO $ forever $ (
+      atomically $ do
+        patches <- takeMany nmdiff
+        when (not $ L.null $ concat patches) $
+          modifyTVar' collectionState (flip (L.foldl' apply ) (concat patches))
+        return patches)
+  R.registerDynamic (killThread t1)
+  return (tableMeta i,  DBRef mdiff midx chanidx collectionState midxLoad )
 
 
-createTableRefs :: InformationSchema -> Table -> R.Dynamic (KVMetadata Key,DBVar)
+createTableRefs :: InformationSchema -> Table -> R.Dynamic (KVMetadata Key,DBRef Key Showable)
 createTableRefs inf i = do
   t <- liftIO$ getCurrentTime
   let
       diffIni :: [TBIdx Key Showable]
       diffIni = []
-  mdiff <-  liftIO$ atomically $ newTQueue
-  (edifft,hdiff) <- R.newEvent
-  let ediff = edifft
+  mdiff <-  liftIO$ atomically $ newBroadcastTChan
+  chanidx <-  liftIO$ atomically $ newBroadcastTChan
+  nchanidx <- liftIO$ atomically $dupTChan chanidx
+  nmdiff <- liftIO$ atomically $dupTChan mdiff
   (iv,v) <- liftIO$ readTable inf "dump" (schemaName inf) (i)
-  midx <-  liftIO$ atomically$ newTMVar iv
-  midxLoad <-  liftIO$ atomically $ newTMVar G.empty
-  let applyP = (\l v ->  L.foldl' (\j  i -> apply j i  ) v l  )
-      evdiff = applyP <$> ediff
-  bh <- R.accumB v evdiff
-  let bh2 = R.tidings bh (flip ($) <$> bh R.<@> evdiff )
-  bhdiff <- R.stepper diffIni ediff
-  (eidx ,hidx) <- R.newEvent
-  bhidx <- R.stepper (M.singleton mempty (G.size v,M.empty)) (eidx)
-  liftIO$ forkIO $ forever $ catchJust notException(do
-    forkIO . hidx . force =<< atomically (takeTMVar midx)
-    return () )  (\e -> print ("block index",tableName i ,e :: SomeException))
-  liftIO $forkIO $ forever $ catchJust notException (do
-      patches <- atomically $ takeMany mdiff
-      when (not $ L.null $ concat patches) $ do
-        (void $ hdiff $ force (concat patches)))  (\e -> print ("block data ",tableName i ,e :: SomeException))
-  return (tableMeta i,  DBVar2  mdiff midx midxLoad (R.tidings bhdiff ediff) (R.tidings bhidx eidx) bh2 )
+  midx <-  liftIO$ atomically$ newTVar iv
+  collectionState <-  liftIO$ atomically $ newTVar G.empty
+  midxLoad <-  liftIO$ atomically $ newTVar G.empty
+  t0 <- liftIO$ forkIO $ forever $ catchJust notException(do
+      v <- atomically (do
+          v <- readTChan nchanidx
+          writeTVar midx  v
+          return v )
+      return () )  (\e -> print ("block index",tableName i ,e :: SomeException))
+  R.registerDynamic (killThread t0)
+  t1 <- liftIO $forkIO $ forever $ catchJust notException (
+      atomically $ do
+        patches <- takeMany nmdiff
+        when (not $ L.null $ concat patches) $
+          modifyTVar' collectionState (flip (L.foldl' apply ) (concat patches))
+      )  (\e -> print ("block data ",tableName i ,e :: SomeException))
+  R.registerDynamic (killThread t1)
+  return (tableMeta i,  DBRef mdiff midx chanidx collectionState midxLoad )
 
 
 notException e =  if isJust eb || isJust es then Nothing else Just e
@@ -406,16 +411,11 @@ ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
 type Database k v = InformationSchemaKV k v
 type DBM k v = ReaderT (Database k v) IO
 
-atTableS s  k = do
-  i <- ask
-  k <- liftIO$ dbTable (mvarMap $ fromMaybe i (HM.lookup s (depschema i))) k
-  liftIO $ R.currentValue (R.facts (collectionTid k))
-
 
 atTable k = do
   i <- ask
   k <- liftIO$ dbTable (mvarMap i) k
-  liftIO $ R.currentValue (R.facts (collectionTid k))
+  liftIO $ atomically $ readTVar (collectionState k)
 
 joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  G.GiST (G.TBIndex Key Showable) (TBData Key Showable) -> TransactionM ( FTB (TBData Key Showable))
 joinRelT rel ref tb table
@@ -427,7 +427,7 @@ joinRelT rel ref tb table
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
             invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
             tbel = searchGist  invrelMap (tableMeta tb) table (Just ref)
-
+              {-
 addStats schema = do
   let metaschema = meta schema
   varmap <- liftIO$ atomically $ readTMVar ( mvarMap schema)
@@ -444,7 +444,7 @@ addStats schema = do
       )) (M.toList  varmap)
   return  schema
 
-
+-}
 
 
 
@@ -470,8 +470,8 @@ writeSchema s v = do
 
 writeTable s t v = do
   let tname = s <> "/" <> (fromString $ T.unpack (_kvname t))
-  iv <- R.currentValue $ R.facts $ collectionTid v
-  iidx <- R.currentValue $ R.facts $ idxTid v
+  iv <- atomically $ readTVar  (collectionState v)
+  iidx <- atomically $ readTVar (idxVar v)
   {-
   let sidx = first (fmap (firstTB keyValue)) . fmap (fmap (fmap (pageFirst keyValue))) <$> M.toList iidx
       sdata = fmap (mapKey' keyValue) $ G.toList $ iv

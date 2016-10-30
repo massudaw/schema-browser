@@ -36,7 +36,7 @@ just i Nothing = i
 just  Nothing i  = i
 
 
-atAny k ps = P (nest fsum,nest ssum ) (Kleisli (\i -> local (fmap unTB1 . indexTB1 ind)$foldr1 (liftA2 just)  (fmap ($i) asum)))
+atAny k ps = P (nest fsum,nest ssum ) (Kleisli (\i -> local (fmap unTB1 . indexTB1 ind)$foldr (liftA2 just)  (return Nothing)(fmap ($i) asum)))
   where
     nest [] = Many []
     nest ls = Many [Nested ind $ ISum ls]

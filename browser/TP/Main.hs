@@ -144,19 +144,15 @@ setup smvar args plugList w = void $ do
                       set children els
                 "Change" -> do
                     case schemaName inf of
-                      "gmail" -> do
+                      {-"gmail" -> do
                         b <- UI.button # set text "sync"
                         (dbvar,(m,t))  <- ui $ transactionNoLog inf $ selectFrom "history" Nothing Nothing []  mempty
                         itemListEl <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
                         itemListEl2 <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
                         do
-                          ((DBVar2 tmvard _   _ vpdiff _ _ ),res) <- ui $ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] mempty
-                          let update = F.foldl'(flip (\p-> fmap (flip apply p)))
-                          bres <- ui $ accumB ((M.empty,G.empty) :: Collection Key Showable) (flip update <$> rumors vpdiff)
-                          let
-                            vpt =  tidings bres (  update <$> bres <@> rumors vpdiff )
-                          listBoxEl itemListEl2 ( G.toList . snd  <$> vpt)  (pure Nothing) (pure id) ( pure attrLine )
-                        element metabody # set children [itemListEl,itemListEl2]
+                          (ref,res) <- ui $ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] mempty
+                          listBoxEl itemListEl2 ( G.toList <$> collectionTid ref)  (pure Nothing) (pure id) ( pure attrLine )
+                        element metabody # set children [itemListEl,itemListEl2]-}
                       i -> do
                         let pred = [(IProd True ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ int . _tableUnique <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                         dash <- metaAllTableIndexA inf "modification_table" pred
@@ -251,7 +247,7 @@ databaseChooser smvar metainf sargs plugList = do
   let dbsWE = rumors $ triding dbsW
   dbsWB <-  ui $stepper cc dbsWE
   let dbsWT  = tidings dbsWB dbsWE
-  (schemaE,schemaH) <- liftIO newEvent
+  (schemaE,schemaH) <- ui newEvent
   metainf <- liftIO $ metaInf smvar
   let genSchema (db,schemaN)
         | schemaN  `L.elem` ["gmail","tasks"]  =  do

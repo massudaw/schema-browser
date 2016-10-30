@@ -83,7 +83,7 @@ calendarSelector = do
 positionSel = do
     cpos <-UI.div
     bcpos <-UI.button # set text "Localização Atual"
-    (e,h) <- liftIO$ newEvent
+    (e,h) <- ui $ newEvent
     positionB <- ui $ stepper Nothing (Just <$>e)
     onEventFT (UI.click bcpos) (\_ -> runFunction $ ffi "fireCurrentPosition(%1)" bcpos)
     onEventFT (currentPosition bcpos ) (liftIO. h )

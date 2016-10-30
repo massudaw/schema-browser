@@ -156,7 +156,7 @@ poller schm authmap db plugs is_test = do
           pid <- forkIO (void $ do
               putStrLn ("Start Poller: " <> T.unpack pname )
               -- iter polling
-              tm <- timer intervalms
+              (tm,_) <- runDynamic $ timer intervalms
               print (intervalms,diffUTCTime current startP,(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))
               forkIO (void $  threadDelay (max 0 (10^3*(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))) >> putStrLn ("Timer Start" <> T.unpack pname) >> start tm>>  (runDynamic $ iter (indexRow polling)))
               let

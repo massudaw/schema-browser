@@ -70,7 +70,7 @@ data InformationSchemaKV k v
   , _pkMapL :: Map (Set k ) Table
   , _tableMapL :: HM.HashMap Text Table
   , tableSize :: Map Table Int
-  , mvarMap :: TMVar (Map (KVMetadata k) (DBVar2 k v ))
+  , mvarMap :: TMVar (Map (KVMetadata k) (DBRef k v ))
   , rootconn :: Connection
   , metaschema :: Maybe (InformationSchemaKV k v)
   , depschema :: HM.HashMap Text (InformationSchemaKV k v)
@@ -110,18 +110,21 @@ tableMap s = HM.singleton (schemaName s) (_tableMapL s ) <> Prelude.foldl mappen
 keyMap = _keyMapL
 pkMap = _pkMapL
 
+data DBRef k v =
+  DBRef  { patchVar :: TChan [TBIdx k v]
+  , idxVar :: TVar (Map WherePredicate (Int,Map Int (PageTokenF k v)))
+  , idxChan :: TChan (Map WherePredicate (Int,Map Int (PageTokenF k v)))
+  , collectionState :: TVar (TableIndex k v)
+  , idxVarLoad :: TVar (GiST (WherePredicate ,G.Predicate Int) ())
+  }
+
 data DBVar2 k v=
-  DBVar2
-  { patchVar :: TQueue [TBIdx k v]
-  , idxVar :: TMVar (Map WherePredicate (Int,Map Int (PageTokenF k v)))
-  , idxVarLoad :: TMVar (GiST (WherePredicate ,G.Predicate Int) ())
-  , patchTid :: R.Tidings [TBIdx k v]
+  DBVar2   { iniRef :: DBRef k v
   , idxTid :: R.Tidings (Map WherePredicate (Int,Map Int (PageTokenF k v)))
   , collectionTid :: R.Tidings (TableIndex k v )
   }
 
 
-idxColTid db =  (,) <$> idxTid db <*> collectionTid db
 
 type DBVar = DBVar2 Key Showable
 type Collection k v = (Map WherePredicate (Int,Map Int (PageTokenF k v)),GiST (TBIndex k  v ) (TBData k v))
@@ -215,7 +218,7 @@ lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k  <> show (HM.toList (keyMap inf))) $ HM.lookup (t,k) (keyMap inf)
 
 
-putPatch m = liftIO .atomically . writeTQueue m -- . force
+putPatch m = liftIO .atomically . writeTChan m . force
 
 
 liftTable' :: InformationSchema -> Text -> TBData Text a -> TBData Key a

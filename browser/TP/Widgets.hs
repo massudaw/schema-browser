@@ -59,8 +59,6 @@ accumTds e l = do
   accumT ve $ concatenate <$> unions ([l,const <$> rumors e ])
 
 
-accumTs :: a -> [Event (a -> a)] -> Dynamic (Tidings a)
-accumTs e = accumT e . foldr1 (unionWith (.))
 
 
 adEvent :: Event a -> Tidings a -> UI (Tidings a)
@@ -121,7 +119,7 @@ mapEventFin f x = ui $ mdo
 
 mapEvent :: (a -> IO b) -> Event a -> Dynamic (Event b)
 mapEvent f x = do
-  (e,h) <- liftIO $ newEvent
+  (e,h) <- newEvent
   onEventIO x (\i -> void  $ (f i)  >>= h)
   return  e
 
@@ -639,7 +637,7 @@ accumDiff
           (Tidings (M.Map k b))
 accumDiff  f t = mdo
   ini <- currentValue (facts t)
-  iniout <- liftIO$ mapConcurrently (evalDynamic f)$ M.toList ini
+  iniout <- liftIO$ mapM (evalDynamic f)$ M.toList ini
   (del,add) <- diffAddRemove t f
   del2 <- mapEvent (\(fin,d) -> do
          let fins =  catMaybes $ fmap (flip M.lookup fin) d
@@ -662,7 +660,7 @@ closeDynamic  m = do
 diffAddRemove :: (Show k,Ord k) => Tidings (M.Map k a ) -> ((k,a) -> Dynamic b) -> Dynamic (Event (S.Set k) ,Event [(k, (b,[IO()]))])
 diffAddRemove l f = do
   let delete  = fmap M.keysSet $filterJust $ prune <$> evdell
-  add <- mapEvent (mapConcurrently (evalDynamic f). M.toList)  $ filterJust $ prune <$> evadd
+  add <- mapEvent (mapM (evalDynamic f). M.toList)  $ filterJust $ prune <$> evadd
   return (delete,add)
 
     where

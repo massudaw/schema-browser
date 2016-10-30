@@ -2,6 +2,7 @@
 module SchemaQuery
   (
   createUn
+  ,takeMany
   ,selectFromA
   ,selectFrom
   ,updateFrom
@@ -10,6 +11,7 @@ module SchemaQuery
   ,syncFrom
   ,getFrom
   ,deleteFrom
+  ,prerefTable
   ,refTable
   ,loadFKS
   ,fullDiffInsert
@@ -25,13 +27,14 @@ import Graphics.UI.Threepenny.Core (mapEventDyn)
 import RuntimeTypes
 import Step.Host
 import Expression
+import Control.Concurrent
 
 import qualified Data.GiST.BTree as G
 import Control.Monad.RWS
 import Step.Common
 
 import Data.Time
-import Control.Lens as Le
+import qualified Control.Lens as Le
 import Data.Either
 import Control.Concurrent.Async
 import Control.Monad.Trans.Maybe
@@ -42,7 +45,7 @@ import GHC.Stack
 import qualified NonEmpty as Non
 import Data.Functor.Identity
 import Control.Concurrent.STM
-import Reactive.Threepenny
+import Reactive.Threepenny hiding (apply)
 import Utils
 import qualified Data.Map as M
 import qualified Data.HashMap.Strict as HM
@@ -65,11 +68,20 @@ defsize = 200
 
 estLength page size est = fromMaybe 0 page * size  +  est
 
-
-refTable :: MonadIO m => InformationSchema -> Table -> m DBVar
-refTable  inf table  = do
+prerefTable :: MonadIO m => InformationSchema -> Table -> m (DBRef Key Showable)
+prerefTable  inf table  = do
   mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
   return $ justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
+
+
+
+refTable :: InformationSchema -> Table -> Dynamic DBVar
+refTable  inf table  = do
+  mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
+  let ref = justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
+  idxTds <- convertChanStepper  (idxChan ref)(idxVar ref)
+  dbTds <- convertChanTidings mempty  (patchVar ref) (collectionState ref)
+  return (DBVar2 ref idxTds dbTds)
 
 
 tbpredM un v = G.Idex . M.fromList $ justError "optional pk" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
@@ -151,7 +163,7 @@ getFKRef inf predtop rtable (me,old) v (Path r (FKInlineTable  j ) ) =  do
                                    in  fmap WherePredicate (go (test (S.toList r)) l)
 
                     -- editAttr :: (TBData Key Showable -> TBData Key Showable) -> TBData Key Showable -> TBData Key Showable
-                    editAttr fun  (m,i) = (m,mapComp (\(KV i) -> KV (M.alter  (fmap (mapComp (over fkttable (fmap (either undefined  id .fun))))) (S.map Inline r)  i )) i )
+                    editAttr fun  (m,i) = (m,mapComp (\(KV i) -> KV (M.alter  (fmap (mapComp (Le.over fkttable (fmap (either undefined  id .fun))))) (S.map Inline r)  i )) i )
                     nextRef :: [TBData Key Showable]
                     nextRef= (concat $ catMaybes $ fmap (\i -> fmap (F.toList . _fkttable.unTB) $ M.lookup (S.map Inline r) (_kvvalues $ unTB $ snd  i) )v)
 
@@ -229,7 +241,8 @@ tableLoader table  page size presort fixed
               )  (rawUnion table)
     let mvar = mvarMap inf
     mmap <- liftIO $ atomically $ readTMVar mvar
-    let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )
+    dbvar <- lift $ refTable   inf table
+    let
         projunion :: TBData Key Showable -> TBData Key Showable
         projunion  i = res
             where
@@ -248,7 +261,8 @@ tableLoader table  page size presort fixed
           Path kref (FKJoinTable rel stable ) =  sref
       let mvar = mvarMap inf
       mmap <- liftIO $ atomically $ readTMVar mvar
-      let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )
+      dbvar <- lift $ refTable   inf table
+     --  let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )
       let
           rinf = fromMaybe inf $ HM.lookup (fst stable) (depschema inf)
           fromtable = (lookTable rinf $ snd stable)
@@ -312,37 +326,39 @@ pageTable flag method table page size presort fixed = do
     let mvar = mvarMap inf
         defSort = fmap (,Desc) $  rawPK table
         sortList  = if L.null presort then defSort else presort
-        fixidx = fixed
         pagesize = maybe (opsPageSize $ schemaOps inf)id size
         ffixed = filterfixed  fixed
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
+    (reso ,nchan) <- liftIO $ atomically $
+      (,) <$> readTVar (collectionState dbvar)<*> dupTChan (patchVar dbvar)
+
+    (fixedmap,fixedChan)  <- liftIO $ atomically $
+         liftA2 (,) (readTVar (idxVar dbvar)) (dupTChan (idxChan dbvar))
     iniT <- do
-       fixedmap  <- liftIO $ currentValue (facts (idxTid dbvar))
-       idxVL<- liftIO$ atomically $readTMVar (idxVarLoad dbvar)
-       reso <- liftIO $ currentValue (facts (collectionTid dbvar ))
+
+       idxVL<- liftIO$ atomically $readTVar (idxVarLoad dbvar)
        loadmap <- get
        let pageidx = (fromMaybe 0 page +1) * pagesize
            freso =  fromMaybe fr (M.lookup (table ,fixed) loadmap )
               where fr = ffixed reso
-           predreq = (fixidx,G.Contains (pageidx - pagesize,pageidx))
+           predreq = (fixed,G.Contains (pageidx - pagesize,pageidx))
            reqs = G.query predreq idxVL
-           diffpred'  (WherePredicate (AndColl [])) = Just $ (WherePredicate (AndColl []))
+           diffpred'  i@(WherePredicate (AndColl [])) = Just i
            diffpred'  (WherePredicate f ) = WherePredicate <$> foldl (\i f -> i >>= flip G.splitIndex f  ) (Just  f)  (fmap snd $ G.getEntries freso)
            diffpred = diffpred' fixed
 
-       liftIO$ print ((fmap snd $ G.getEntries freso),diffpred)
-       i <- case  fromMaybe (10000000,M.empty ) $  M.lookup fixidx fixedmap of
+       -- liftIO$ print ((fmap snd $ G.getEntries freso),diffpred)
+       i <- case  fromMaybe (10000000,M.empty ) $  M.lookup fixed fixedmap of
           (sq,mp) -> do
              if flag || (sq > G.size freso -- Tabela é maior que a tabela carregada
                 && pageidx  > G.size freso ) -- O carregado é menor que a página
-               && (isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixidx fixedmap)  -- Ignora quando página já esta carregando
+               && (isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixed fixedmap)  -- Ignora quando página já esta carregando
                 && isJust diffpred
                    )
              then do
                liftIO $ atomically $ do
-                 v <- takeTMVar (idxVarLoad dbvar)
-                 putTMVar (idxVarLoad dbvar) (G.insert ((),(fixidx,G.Contains (pageidx - pagesize ,pageidx))) (3,6) v)
+                 modifyTVar' (idxVarLoad dbvar) (G.insert ((),(fixed,G.Contains (pageidx - pagesize ,pageidx))) (3,6) )
 
                let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                liftIO$ putStrLn $ "new page " <> show (tableName table,sq, pageidx, G.size freso,G.size reso,page, pagesize,diffpred)
@@ -354,17 +370,64 @@ pageTable flag method table page size presort fixed = do
              else do
                liftIO$ putStrLn $ "keep page " <> show (tableName table,sq, pageidx, G.size freso,G.size reso,page, pagesize)
                return ((sq,mp),[])
-       let nidx =  M.insert fixidx (fst i) fixedmap
+       let nidx =  M.insert fixed (fst i)
            ndata = snd i
-       liftIO $ atomically $ do
-         when (L.length ndata > 0) $ writeTQueue (patchVar dbvar) (F.toList $ patch  <$> ndata )
-         when (isNothing ((join $ fmap (M.lookup pageidx . snd) $ M.lookup fixidx fixedmap))) $ putTMVar (idxVar dbvar ) nidx
-         return (nidx, if L.length ndata > 0 then createUn (S.fromList $ rawPK table)  ndata <> freso else  freso )
-    let tde = rumors (liftA2 (,) (idxTid dbvar) (collectionTid dbvar ))
+       liftIO $ do
+         putPatch (patchVar dbvar) (F.toList $ patch  <$> ndata )
+         atomically $ modifyTVar' (idxVar dbvar ) nidx
+         return (nidx fixedmap, if L.length ndata > 0 then createUn (S.fromList $ rawPK table)  ndata <> freso else  freso )
     let iniFil = iniT
-    tdb  <- lift $ stepper iniFil tde
     modify (M.insert (table,fixed) ( snd $iniT))
-    return (dbvar {collectionTid  = fmap snd $ tidings tdb tde},iniFil)
+    vpt <- lift $ convertChanTidings0 fixed (snd iniFil) nchan
+    idxTds <- lift $ convertChanStepper0 fixedmap fixedChan
+    return (DBVar2 dbvar idxTds vpt ,iniFil)
+
+convertChanStepper0  ini nchan = do
+        (e,h) <- newEvent
+        t <- liftIO $ forkIO  $ forever ( do
+            a <- atomically $ readTChan nchan
+            h a )
+        bh <- stepper ini e
+        registerDynamic (killThread t)
+        return (tidings bh e)
+
+convertChanStepper idxv idxref = do
+        (ini,nchan) <- liftIO $atomically $
+          (,) <$> readTVar idxref <*> dupTChan idxv
+        convertChanStepper0 ini nchan
+
+convertChanEvent chan = do
+  (e,h) <- newEvent
+  t <- liftIO $ forkIO $ forever (do
+    patches <- atomically $ takeMany chan
+    h (concat patches))
+  registerDynamic (killThread t)
+  return e
+
+convertChanTidings fixed idxv idxref = do
+      (ini,nchan) <- liftIO $atomically $
+          (,) <$> readTVar idxref <*> dupTChan idxv
+      convertChanTidings0 fixed ini nchan
+
+
+convertChanTidings0 fixed ini nchan = do
+    evdiff <-  convertChanEvent nchan
+    let
+      filterPred :: [Index (TBData Key Showable)] -> Maybe [Index (TBData Key Showable)]
+      filterPred = nonEmpty . filter (\d@(_,p,_) -> G.match fixed G.Exact p && indexFilterP fixed d )
+      update = F.foldl' (flip (\p-> (flip apply p)))
+      diffs = filterJust $ filterPred <$> evdiff
+    bres <- accumB ini (flip update <$> diffs)
+    return $tidings bres (update <$> bres <@> diffs)
+
+
+takeMany mvar = go . (:[]) =<< readTChan mvar
+  where
+    go v = do
+      i <- tryReadTChan mvar
+      maybe (return (reverse v )) (go . (:v)) i
+
+
 
 
 
@@ -399,7 +462,7 @@ transactionLog inf log = do -- withTransaction (conn inf) $ do
   (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [TableModification id t f] m) M.empty mods
   agg2 <- Tra.traverse (\(k,v) -> do
-    ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
+    ref <- prerefTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
     nm <- mapM (logger (schemaOps inf) inf) v
     putPatch (patchVar ref ) $ (\(TableModification _ _ p) -> p) <$> nm
     return nm
@@ -413,7 +476,7 @@ transactionNoLog inf log = do -- withTransaction (conn inf) $ do
   (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\tm@(TableModification id t f) m -> M.insertWith mappend t [tm] m) M.empty mods
   Tra.traverse (\(k,v) -> do
-    ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
+    ref <- prerefTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
     putPatch (patchVar ref ) $ (\(TableModification id t f)-> f) <$>v
     ) (M.toList aggr)
   return md
@@ -424,7 +487,7 @@ transaction inf log = do -- withTransaction (conn inf) $ do
   (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\tm@(TableModification id t f) m -> M.insertWith mappend t [tm] m) M.empty mods
   Tra.traverse (\(k,v) -> do
-    ref <- refTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
+    ref <- prerefTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
     nm <- mapM (logger (schemaOps inf) inf) v
     putPatch (patchVar ref ) $ (\(TableModification id t f)-> f) <$> nm
     ) (M.toList aggr)
