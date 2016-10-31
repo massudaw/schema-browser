@@ -69,7 +69,7 @@ setup
   ::  DatabaseSchema ->  [String] -> [Plugins] -> Window -> UI ()
 setup smvar args plugList w = void $ do
   metainf <- liftIO$ metaInf smvar
-  setCallBufferMode BufferRun
+  setCallBufferMode BufferAll
   let bstate = argsToState args
   let amap = authMap smvar bstate (user bstate , pass bstate)
   inf <- ui $ fmap (justError ("no schema" <> show (schema bstate))) $ traverse (\i -> loadSchema smvar (T.pack i)  (user bstate)  amap plugList) $ schema  bstate
@@ -331,3 +331,11 @@ testPlugin s t p  = do
 
 
 
+testCalls = testWidget (return $ do
+  setCallBufferMode BufferAll
+  i <- runFunction (ffi "var a= 1")
+  i <- callFunction (ffi "2")
+  j <- callFunction (ffi "1")
+  UI.div # set text (show (i + j :: Int))
+
+                       )

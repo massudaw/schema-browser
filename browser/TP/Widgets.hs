@@ -358,10 +358,9 @@ testPointInRange ui = do
                       getBody w #+ [element e1]
                       return () )
 
-unsafeMapUI el f = unsafeMapIO (\a -> evalDyn el (f a))
 
 -- paint e b = element e # sink UI.style (greenRed . isJust <$> b)
-paintEdit e b i  = element e # sink0 UI.style ((\ m n -> pure . ("background-color",) $ cond  m n ) <$> b <*> i )
+paintEdit e b i  = element e # sinkDiff UI.style ((\ m n -> pure . ("background-color",) $ cond  m n ) <$> b <*> i )
   where cond i j
           | isJust i  && isNothing j  = "green"
           | isNothing i  && isNothing j = "red"

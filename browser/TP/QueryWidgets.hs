@@ -294,7 +294,7 @@ labelCase inf a old wid = do
     el <- UI.div #
       set children [l,getElement wid] #
       set UI.class_ ("col-xs-" <> show (fst $  attrSize a))
-    paintEdit l (facts (triding wid )) (facts old)
+    paintEdit l (triding wid ) (old)
     return $ TrivialWidget (triding wid) el
 
 
@@ -641,36 +641,36 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
 
 
   -- Insert when isValid
-  let insertEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$>  facts inscrud ) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (facts inscrud ) (facts gist ))
+  let insertEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$>  inscrud ) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (inscrud ) (gist ))
   insertB <- UI.button #
           set text "INSERT" #
           set UI.class_ "buttonSet" #
           set UI.style (noneShowSpan ("INSERT" `elem` rawAuthorization table ))  #
-          sink0 UI.enabled insertEnabled
+          sinkDiff UI.enabled insertEnabled
 
-  let editEnabled = liftA2 (&& ) (liftA2 (&&) (isJust. fmap tableNonRef'   <$> facts inscrud ) (isJust <$> facts oldItemsi)) $ liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . snd ). fmap tableNonRef' <$> facts inscrud) (fmap (_kvvalues . unTB .  snd ). fmap tableNonRef' <$> facts oldItemsi)) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (facts inscrud) (facts gist) )
+  let editEnabled = liftA2 (&& ) (liftA2 (&&) (isJust. fmap tableNonRef'   <$> inscrud ) (isJust <$> oldItemsi)) $ liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . snd ). fmap tableNonRef' <$> inscrud) (fmap (_kvvalues . unTB .  snd ). fmap tableNonRef' <$> oldItemsi)) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (inscrud) (gist) )
   editB <- UI.button #
          set text "EDIT" #
          set UI.class_ "buttonSet"#
          set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table )) #
   -- Edit when any persistent field has changed
-         sink0 UI.enabled editEnabled
+         sinkDiff UI.enabled editEnabled
 
-  let mergeEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> facts inscrud) (liftA2 (\i j -> not . L.null   $ maybe [] (\e -> filter ((/= tableNonRef' e) .tableNonRef') $  conflictGist e j) i  ) (facts inscrud) (facts gist ))
+  let mergeEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> inscrud) (liftA2 (\i j -> not . L.null   $ maybe [] (\e -> filter ((/= tableNonRef' e) .tableNonRef') $  conflictGist e j) i  ) (inscrud) (gist ))
   mergeB <- UI.button #
          set text "MERGE" #
          set UI.class_ "buttonSet"#
          set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table )) #
   -- Edit when any persistent field has changed
-         sink0 UI.enabled mergeEnabled
+         sinkDiff UI.enabled mergeEnabled
 
-  let deleteEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> facts oldItemsi) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (facts oldItemsi ) (facts gist ))
+  let deleteEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> oldItemsi) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (oldItemsi ) (gist ))
   deleteB <- UI.button #
          set text "DELETE" #
          set UI.class_ "buttonSet"#
          set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table )) #
   -- Delete when isValid
-         sink0 UI.enabled deleteEnabled
+         sinkDiff UI.enabled deleteEnabled
   let
        filterKey enabled k = const () <$> filterApply (const <$> enabled) (k )
        crudMerge (Just i) g =
@@ -684,11 +684,12 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
 
   altU <- onAltU lbox
   altI <- onAltI lbox
-  diffEdi <- mapEventFin id $ crudEdi <$> facts oldItemsi <*> facts inscrud <@ (unionWith const (UI.click editB) (filterKey editEnabled ( altU)))
+  diffEdi <- mapEventFin id $ crudEdi <$> facts oldItemsi <*> facts inscrud <@ (unionWith const (UI.click editB) (filterKey (facts editEnabled) ( altU)))
   diffDel <- mapEventFin id $ crudDel <$> facts oldItemsi <@ UI.click deleteB
   diffMerge <- mapEventFin id $ crudMerge <$> facts inscrud <*> facts gist <@ UI.click mergeB
-  diffIns <- mapEventFin id $ crudIns <$> facts inscrud <@ (unionWith const (UI.click insertB) (filterKey  insertEnabled altI ))
-  conflict <- UI.div # sink items (facts $ (\i j -> fmap showFKE $ maybe [] (flip conflictGist j) i)  <$> inscrud <*> gist) # sink UI.style (noneShow <$>mergeEnabled)
+  diffIns <- mapEventFin id $ crudIns <$> facts inscrud <@ (unionWith const (UI.click insertB) (filterKey  (facts insertEnabled) altI ))
+
+  conflict <- UI.div # sinkDiff text ((\i j -> maybe "" (L.intercalate "," .fmap (showFKText ). flip conflictGist  j) i )  <$> inscrud <*> gist) # sinkDiff UI.style (noneShow <$>mergeEnabled)
   transaction <- UI.span #
          set children [insertB,editB,mergeB,deleteB] #
          set UI.style (noneShowSpan (ReadWrite ==  rawTableType table ))
@@ -698,6 +699,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
 
 
 
+showFKText v = (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v)
 showFKE v =  UI.div # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v) # set UI.class_ "fixed-label"
 
 showFK = (pure ((\v j ->j  # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec'  v))))
@@ -1004,7 +1006,9 @@ buildPrim fm tdi i = case i of
             let f = facts tdi
             v <- currentValue f
             inputUI <- UI.input # sink UI.value (maybe "" renderPrim <$> f) # set UI.style [("width","100%")] # if [FRead] == fm then (set (strAttr "readonly") "") else id
-            let pke = unionWith const (readPrim i <$> UI.valueChange inputUI) (rumors tdi)
+            onCE <- UI.onChangeEUI inputUI
+
+            let pke = unionWith const (readPrim i <$> onCE ) (rumors tdi)
             pk <- ui $ stepper v  pke
             sp <- UI.div # set children (inputUI : elem)
             return $ TrivialWidget(tidings pk pke) sp
