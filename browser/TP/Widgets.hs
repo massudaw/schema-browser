@@ -463,7 +463,7 @@ listBoxEl list bitems bsel bfilter bdisplay = do
     -- user selection
     selEv <- UI.selectionChangeUI list
     let
-        eindexes = (\l i -> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <@> selEv
+        eindexes = (\l i -> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <@> (fmap Just selEv)
     let
         _selectionLB = tidings (facts bsel) eindexes
         _elementLB   = list
@@ -533,6 +533,15 @@ multiListBox bitems bsel bdisplay = do
     return $ TrivialWidget (_selectionMLB ) (_elementMLB)
 
 
+sink0 :: ReadWriteAttrMIO UI b i o -> Behavior i -> UI b -> UI b
+sink0 attr uiv ui =  do
+  v <- currentValue uiv
+  ui # set attr v # sink attr uiv
+
+source :: String -> ReadWriteAttrMIO JSFunction  Element  b a ->UI Element ->  UI (Event a)
+source change attr mel = do
+  el <- mel
+  domEventH change el (UI.get attr el )
 
 
 oitems = mkWriteAttr $ \i x -> void $ do
@@ -544,36 +553,27 @@ infixl 4 <#>
 b <#>  t = tidings ( b <*> facts t ) (b <@> rumors t)
 
 fileChange :: Element -> UI (Event (Maybe String))
-fileChange el = mapEventUI el (const $ UI.get readFileAttr el) (UI.onChangeE el)
+fileChange el = domEventAsync "change" el (UI.get readFileAttrFFI el)
 
 selectionMultipleChange :: Element -> UI (Event [Int])
-selectionMultipleChange el = mapEventUI el (const $ UI.get selectedMultiple el) (UI.click el)
+selectionMultipleChange el = domEventH "change" el (UI.get selectedMultipleFFI el)
 
-readFileAttr :: ReadAttr Element (Maybe String)
-readFileAttr = mkReadAttr get
-  where
-    get   el = fmap  from  $  callFunction $ ffi "readFileInput($(%1))" el
-    from s = case JSON.fromJSON s of
-                  JSON.Success x -> M.lookup ("filevalue" ::String) x
-                  i -> traceShow s Nothing -- errorWithStackTrace (show i)
+
+readFileAttrFFI :: ReadWriteAttrMIO JSAsync Element () (Maybe String)
+readFileAttrFFI = ReadWriteAttr (\g ->ffi "handleFileSelect(%1,%2,$(%3))" UI.event g) (\_ _ -> JSAsync emptyFunction)
 
 jsTimeZone = wTimeZone <$> askWindow
 
 selectedMultiple :: Attr Element [Int]
-selectedMultiple = mkReadWriteAttr get set
-  where
-    get   el = fmap from $ callFunction $ ffi "getOpts($(%1))" el
-    set v el = runFunction $ ffi "setOpts($(%1),%2)" el (JSON.toJSON  v)
-    from s = let JSON.Success x =JSON.fromJSON s in x
+selectedMultiple = ffiAttrCall selectedMultipleFFI
+
+selectedMultipleFFI
+    :: ReadWriteAttrMIO JSFunction Element [Int] [Int]
+selectedMultipleFFI = ffiAttr "getOpts($(%1))" "setOpts($(%2),%1)"
 
 
 mousewheel :: Element -> Event Int
 mousewheel = fmap ((\i -> if (i :: Int) > 0 then 1 else -1) .  unsafeFromJSON ) . domEvent "wheel"
-
-sink0 attr uiv ui =  do
-  v <- currentValue uiv
-  ui # set attr v # sink attr uiv
-
 
 emptyUI = TrivialWidget (pure Nothing) <$> UI.div
 

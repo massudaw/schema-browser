@@ -33,7 +33,7 @@ function readFileInput (f){
   }
   return value;
 }
-function handleFileSelect(evt) {
+function handleFileSelect(fun,evt) {
     var files = evt.target.files; // FileList object
     // Loop through the FileList and render image files as thumbnails.
     for (var i = 0, f; f = files[i]; i++) {
@@ -43,7 +43,7 @@ function handleFileSelect(evt) {
       reader.onload = (function(theFile) {
         return function(e) {
           // Render thumbnail.
-          theFile.filevalue = e.target.result
+          fun(e.target.result);
         };
       })(f);
 

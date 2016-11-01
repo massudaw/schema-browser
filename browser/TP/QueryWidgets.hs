@@ -689,7 +689,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
   diffMerge <- mapEventFin id $ crudMerge <$> facts inscrud <*> facts gist <@ UI.click mergeB
   diffIns <- mapEventFin id $ crudIns <$> facts inscrud <@ (unionWith const (UI.click insertB) (filterKey  (facts insertEnabled) altI ))
 
-  conflict <- UI.div # sinkDiff text ((\i j -> maybe "" (L.intercalate "," .fmap (showFKText ). flip conflictGist  j) i )  <$> inscrud <*> gist) # sinkDiff UI.style (noneShow <$>mergeEnabled)
+  conflict <- UI.div # sinkDiff text ((\i j l -> if l then maybe "" (L.intercalate "," .fmap (showFKText ). flip conflictGist  j) i else "")  <$> inscrud <*> gist <*> mergeEnabled) # sinkDiff UI.style (noneShow <$>mergeEnabled)
   transaction <- UI.span #
          set children [insertB,editB,mergeB,deleteB] #
          set UI.style (noneShowSpan (ReadWrite ==  rawTableType table ))
@@ -973,7 +973,7 @@ buildPrim fm tdi i = case i of
            let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
            clearB <- UI.button # set UI.text "clear"
            file <- UI.input # set UI.type_ "file" # set UI.multiple True # set UI.style (noneShow $ elem FWrite fm)
-           runFunction$ ffi "$(%1).on('change',handleFileSelect);" file
+           -- runFunction$ ffi "$(%1).on('change',handleFileSelect);" file
            fchange <- fileChange file
            tdi2 <- ui $ addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange) =<< addEvent (const Nothing <$> UI.click clearB) tdi
            let fty = case mime of

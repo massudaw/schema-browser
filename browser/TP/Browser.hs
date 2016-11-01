@@ -231,8 +231,9 @@ viewerKey inf table cli layout cliTid = mdo
   cv <- currentValue (facts tdi)
   -- Final Query ListBox
   filterInp <- UI.input
-  filterInpBh <-ui $ stepper "" (UI.valueChange filterInp)
-  let filterInpT = tidings filterInpBh (diffEvent filterInpBh (UI.valueChange filterInp))
+  vcfil <- element filterInp # source "change" UI.valueFFI
+  filterInpBh <-ui $ stepper ""  vcfil
+  let filterInpT = tidings filterInpBh (diffEvent filterInpBh vcfil)
       sortSet = rawPK table <>  L.filter (not .(`L.elem` rawPK table)) (F.toList . tableKeys . TB1 . tableNonRef' . allRec' (tableMap inf ) $ table)
   sortList <- selectUI sortSet ((,True) <$> rawPK table ) UI.div UI.div conv
   element sortList # set UI.style [("overflow-y","scroll"),("height","200px")]
