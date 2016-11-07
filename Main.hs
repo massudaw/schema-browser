@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleContexts,OverloadedStrings #-}
-module Main where
+module Main (main) where
 import TP.Main
 import TP.Browser(addServer,deleteServer,deleteClient,addClientLogin,deleteClientLogin)
 import Data.Unique

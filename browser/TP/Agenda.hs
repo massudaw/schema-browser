@@ -94,7 +94,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
               let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,_)-> (b,i)) dashes)
               maybe UI.div (\(k@((c,tname,_,_))) -> mdo
                 expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
-                let evc = UI.checkedChange expand
+                evc <- UI.checkedChange expand
                 evb <- ui $ stepper False evc
                 missing <- UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")] # sink UI.style (noneShow <$> evb)
                 header <- UI.div
@@ -117,7 +117,8 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
             calendarFrame <- UI.div # set children [innerCalendar] # set UI.style [("height","450px"),("overflow","auto")]
             element calendar # set children [calendarFrame,sel]
             calendarCreate (transMode agenda resolution) innerCalendar (show incrementT)
-            ui $ onEventDyn (UI.hover innerCalendar) (const $ evalUI innerCalendar $ do
+            ho <- UI.hover innerCalendar
+            ui $ onEventDyn ho (const $ evalUI innerCalendar $ do
                     runFunction $ ffi "$(%1).fullCalendar('render')" innerCalendar )
             let
               evc = eventClick innerCalendar

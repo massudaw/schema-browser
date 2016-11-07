@@ -98,6 +98,7 @@ transformKey (KOptional i)  (KSerial j) (LeftTB1 v)  | i == j = SerialTB1 v
 transformKey (KOptional j) l (LeftTB1  v)
     | isJust v = transformKey j l (fromJust v)
     | otherwise = errorWithStackTrace "no transform optional nothing"
+transformKey (KSerial j)  l v@(TB1 _) = transformKey j l v
 transformKey (KSerial j)  l (SerialTB1 v)
     | isJust v = transformKey j l (fromJust v)
     | otherwise =  SerialTB1 Nothing
@@ -538,7 +539,7 @@ backFKRef
 backFKRef relTable ifk = fmap (uncurry Attr). reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . snd
   where
         reorderPK l = fmap (\i -> justError (show ("reorder wrong" :: String, ifk ,relTable , l,i))  $ L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
-        lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (keyType ko ) (keyType kn) v)) <$> knm
+        lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (keyType ko ) (keyType kn) (  v))) <$> knm
           where knm =  M.lookup ko relTable
 
 

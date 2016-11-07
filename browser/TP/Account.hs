@@ -94,7 +94,7 @@ accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
               let item = M.lookup table  (M.fromList  $ fmap (\i@((_,b,_,_,_))-> (b,i)) dashes )
               maybe UI.div (\k@((c,tname,_,_,_)) ->   mdo
                 expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
-                let evc = UI.checkedChange expand
+                evc <-  UI.checkedChange expand
                 evb <- ui $ stepper False evc
                 missing <- (element $ fromJust $ M.lookup tname  (M.fromList itemListEl2)) # sink UI.style (noneShow <$> evb)
                 header <- UI.div

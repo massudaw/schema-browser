@@ -65,14 +65,19 @@ calendarSelector = do
     prev <- UI.button  # set text "<"
     agenda <- mdo
       agenda <- UI.button # sink text ((\b -> if b then "Agenda" else "Basic") <$> agB)
-      let agE = pure not <@ UI.click agenda
+      agendaE <- UI.click agenda
+      let agE = pure not <@ agendaE
       agB <- ui $ accumB False agE
       return $ TrivialWidget (tidings agB (flip ($) <$> agB <@> agE)) agenda
 
     current <- UI.div # set children [prev,today,next]
+    nextE <- UI.click next
+    prevE <- UI.click prev
+    todayE <- UI.click today
     let
-      currentE = concatenate <$> unions  [resRange False  <$> facts (triding resolution) <@ UI.click next
-                                       ,resRange True   <$> facts (triding resolution) <@ UI.click prev , const (const iday) <$> UI.click today ]
+      currentE = concatenate <$> unions  [ resRange False  <$> facts (triding resolution) <@ nextE
+                                       , resRange True   <$> facts (triding resolution) <@ prevE
+                                       , const (const iday) <$> todayE ]
     increment <- ui $ accumB iday  currentE
     let incrementT =  tidings increment (flip ($) <$> increment <@> currentE)
 
@@ -85,7 +90,8 @@ positionSel = do
     bcpos <-UI.button # set text "Localização Atual"
     (e,h) <- ui $ newEvent
     positionB <- ui $ stepper Nothing (Just <$>e)
-    onEventFT (UI.click bcpos) (\_ -> runFunction $ ffi "fireCurrentPosition(%1)" bcpos)
+    bcpose <- UI.click bcpos
+    onEventFT bcpose  (\_ -> runFunction $ ffi "fireCurrentPosition(%1)" bcpos)
     onEventFT (currentPosition bcpos ) (liftIO. h )
     return (bcpos,currentPosition bcpos, h,tidings positionB (diffEvent positionB  (Just <$> e)))
 
@@ -110,8 +116,9 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
            <*> (fst <$> (selectFromTable "authorization" Nothing Nothing [] authPred))
            <*> (fst <$> (selectFromTable "table_name_translation" Nothing Nothing []  pred2 ))
   filterInp <- UI.input # set UI.style [("width","100%")]
-  filterInpBh <- ui $ stepper "" (T.pack <$> UI.valueChange filterInp)
-  let filterInpT = tidings filterInpBh (T.pack <$> UI.valueChange filterInp)
+  filterInpE <- UI.valueChange filterInp
+  filterInpBh <- ui $ stepper "" (T.pack <$> filterInpE)
+  let filterInpT = tidings filterInpBh (T.pack <$> filterInpE )
 
   let
       -- Table Description
@@ -131,7 +138,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
 
         buttonString k = do
           b <- UI.input # set UI.type_ "checkbox"
-          chkE <- UI.checkedChangeUI b
+          chkE <- UI.checkedChange b
           let un = rawUnion k
               ev = (k,) . (\b -> if b then (if L.null un then [k] else un) else [])<$>chkE
           return (k,(b,ev))
@@ -155,15 +162,15 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
           where
             field =  G.lookup (G.Idex $ M.fromList pk) orderMap
             pk = first (lookKey (meta inf ) "ordering") <$>[("table",int $ _tableUnique  pkset ), ("schema",int $ schemaId inf)]
-      incClick field =  (fst field , G.getIndex field ,[patch $ fmap (+SNumeric 1) usage])
+              {-incClick field =  (fst field , G.getIndex field ,[patch $ fmap (+SNumeric 1) usage])
           where
             usage = lookAttr' (meta inf ) "usage"   field
 
-  {- ui $ onEventIO ((\i j -> fmap incClick <$> (ordRow i <$> j)) <$> facts (collectionTid orddb) <@> rumors bBset)
+  ui $ onEventDyn ((\i j -> fmap incClick <$> (ordRow i <$> M.keys j)) <$> facts (collectionTid orddb) <@> rumors (triding bset)
+              )
     (traverse (traverse (\p -> do
       _ <- transactionNoLog (meta inf ) $ patchFrom  p
-      putPatch (patchVar orddb) [p] )))
-
+      putPatch (patchVar $  iniRef orddb) [p] )))
 -}
   element bset # set UI.style [("overflow","auto"),("height","99%")]
   header <- UI.div # set children [getElement all,filterInp] # set UI.style [("display","inline-flex")]

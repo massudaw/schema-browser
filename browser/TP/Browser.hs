@@ -230,24 +230,23 @@ viewerKey inf table cli layout cliTid = mdo
       tdip = join . fmap (join . fmap ( fmap (lookKV . snd ). lookPK .snd). lookT ) <$> cliTid
   cv <- currentValue (facts tdi)
   -- Final Query ListBox
-  filterInp <- UI.input
-  vcfil <- element filterInp # source "change" UI.valueFFI
-  filterInpBh <-ui $ stepper ""  vcfil
-  let filterInpT = tidings filterInpBh (diffEvent filterInpBh vcfil)
+  filterInp <- UI.input # set UI.class_ "col-xs-3"
+  filterInpT <- element filterInp # sourceT "keydown" UI.valueFFI ""
+  let
       sortSet = rawPK table <>  L.filter (not .(`L.elem` rawPK table)) (F.toList . tableKeys . TB1 . tableNonRef' . allRec' (tableMap inf ) $ table)
   sortList <- selectUI sortSet ((,True) <$> rawPK table ) UI.div UI.div conv
   element sortList # set UI.style [("overflow-y","scroll"),("height","200px")]
   let
      filteringPred i = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  .snd
      tsort = sorting' . filterOrd <$> triding sortList
-     filtering res = (\t -> fmap (filter (filteringPred t )) )<$> filterInpT  <*> res
+     filtering res = (\t -> fmap (filter (filteringPred t )) )<$> triding filterInpT  <*> res
      pageSize = 20
      divPage s = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
      lengthPage (fixmap,_) = s
         where (s,_)  = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
   inisort <- currentValue (facts tsort)
   itemListEl <- UI.select # set UI.class_ "col-xs-6" # set UI.style [("width","100%")] # set UI.size "21"
-  let wheel = negate <$> mousewheel itemListEl
+  wheel <- fmap negate <$> UI.mousewheel itemListEl
   (offset,res3)<- mdo
     offset <- offsetFieldFiltered (pure 0) wheel   [(L.length . snd <$> res3) ,L.length . snd <$> vpt,(lengthPage <$> res3)]
     res3 <- ui $ mapT0EventDyn (fmap inisort (fmap G.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap G.toList) $ vpt) )
@@ -258,28 +257,20 @@ viewerKey inf table cli layout cliTid = mdo
     paging  = (\o -> fmap (L.take pageSize . L.drop o) ) <$> triding offset
   page <- currentValue (facts paging)
   res4 <- ui $ mapT0EventDyn (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
-  itemList <- listBoxEl itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (fmap Just <$> tidings st sel ) (pure id) (pure (maybe id attrLine))
-  let evsel =  rumors (fmap join  $ triding itemList)
-  (dbmeta ,(_,_)) <- ui $ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] [(IProd True ["schema"],Left (int (schemaId inf),Equals ))]
-  ui $onEventDyn ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) inf dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< liftIO getCurrentTime )
-  prop <-ui $ stepper cv evsel
-  let tds = tidings prop evsel
+  itemList <- listBoxElEq (\l m -> maybe False id $ liftA2 (\i j ->G.getIndex i == G.getIndex j) l m) itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (Just <$> tds) (pure id) (pure (maybe id attrLine))
+  -- (dbmeta ,(_,_)) <- ui $ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] [(IProd True ["schema"],Left (int (schemaId inf),Equals ))]
+  -- ui $onEventDyn ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) inf dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< liftIO getCurrentTime )
+  let tds = (fmap join  $ triding itemList)
 
   (cru,ediff,pretdi) <- crudUITable inf (pure "+")  reftb [] [] (allRec' (tableMap inf) table) tds
-  diffUp <-  ui $ mapEvent (fmap pure)  $ (\i j -> traverse (return . flip apply j ) i) <$> facts pretdi <@> ediff
-  let
-     sel = filterJust $ safeHead . concat <$> unions [ diffUp,unions [rumors  $ fmap join (triding itemList) ]]
-  st <-ui $ stepper cv sel
-  ui $ onEventDyn (pure <$> ediff) (liftIO .  putPatch var )
-  title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine i  )  <$> st) # set UI.class_ "col-xs-8"
+  title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine i  )  <$> facts tds ) # set UI.class_ "col-xs-8"
   expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked filterEnabled# set UI.class_ "col-xs-1"
-  let evc = UI.checkedChange expand
+  evc <- UI.checkedChange expand
   filterEnabled <- ui $ stepper False evc
   insertDiv <- UI.div # set children [title,head cru] # set UI.class_ "container-fluid"
   insertDivBody <- UI.div # set children [insertDiv,last cru]
   element sortList # sink UI.style  (noneShow <$> filterEnabled) # set UI.class_ "col-xs-4"
   element offset # set UI.class_ "col-xs-2"
-  element filterInp # set UI.class_ "col-xs-3"
   itemSel <- UI.div # set children ( [expand , filterInp, getElement offset ,getElement sortList] )
   itemSelec <- UI.div # set children [itemSel,getElement itemList]
   mapM (\i -> element i # sink0 UI.class_ (facts $ layout)) [itemSelec,insertDivBody]

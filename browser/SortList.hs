@@ -29,14 +29,16 @@ sortItem conv ix bh  = do
               Just False -> Nothing
               Nothing -> Just True
   dv <- UI.div # sink text (conv <$> bh)
-  let ev = (\(l,t)-> const (l,step t)) <$>  bh <@> UI.click dv
+  cli <- UI.click dv
+  let ev = (\(l,t)-> const (l,step t)) <$>  bh <@> cli
   return $ TrivialWidget (tidings bh ev) dv
 
 
 
 item ix t = do
   dr <- UI.input # sink value (show <$> t)
-  return $ TrivialWidget (tidings t (read <$> UI.valueChange dr) ) dr
+  vc <- UI.valueChange dr
+  return $ TrivialWidget (tidings t (read <$> vc ) ) dr
 
 
 slot :: UI Element -> (Int -> Behavior a -> UI (TrivialWidget a)) -> Int -> Behavior a -> UI (Element,(Event (Int,Int),Event (Int,a)))

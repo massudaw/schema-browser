@@ -5,6 +5,7 @@ module Postgresql.Printer
   (selectQuery
   ,tableType
   ,explodeRecord
+  ,expandBaseTable
   ,createTable
   ,dropTable
   )

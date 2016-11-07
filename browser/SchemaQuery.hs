@@ -28,6 +28,7 @@ import RuntimeTypes
 import Step.Host
 import Expression
 import Control.Concurrent
+import Control.Monad.Catch
 
 import qualified Data.GiST.BTree as G
 import Control.Monad.RWS
@@ -200,7 +201,7 @@ getFKRef inf predtop rtable (me,old) v (Path _ (FKJoinTable i j ) ) =  do
                                    in  fmap WherePredicate (go (test (_relOrigin <$> i)) l)
                 liftIO $ putStrLn $ "loadForeign table" <> show (tableName table)
                 let innerpred = fmap (\pred -> WherePredicate (AndColl pred)) $ traverse (\k -> (\v -> (PrimColl (IProd True [ _relTarget $ k], Left ( if L.length v == 1 then (L.head v, _relOperator k ) else (ArrayTB1 (Non.fromList v), Flip (AnyOp (_relOperator k ))))))) <$> ( nonEmpty $ L.nub $  concat $ catMaybes $   fmap (F.toList . unArray' ) . join . fmap (  unSOptional'. _tbattr .unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) . unKV .snd <$> v ))  i
-                (_,(_,tb2)) <- local (const rinf) (tableLoader table  Nothing Nothing []  (fromMaybe mempty $ innerpred <> predicate predtop))
+                (_,(_,tb2)) <- local (const rinf) (tableLoader table  Nothing (Just 1000) []  (fromMaybe mempty $ innerpred <> predicate predtop))
                 let
                     tar = S.fromList $ fmap _relOrigin i
                     refl = S.fromList $ fmap _relOrigin $ filterReflexive i
@@ -348,7 +349,7 @@ pageTable flag method table page size presort fixed = do
            diffpred'  (WherePredicate f ) = WherePredicate <$> foldl (\i f -> i >>= flip G.splitIndex f  ) (Just  f)  (fmap snd $ G.getEntries freso)
            diffpred = diffpred' fixed
 
-       -- liftIO$ print ((fmap snd $ G.getEntries freso),diffpred)
+       liftIO$ print ((fmap snd $ G.getEntries freso),diffpred)
        i <- case  fromMaybe (10000000,M.empty ) $  M.lookup fixed fixedmap of
           (sq,mp) -> do
              if flag || (sq > G.size freso -- Tabela é maior que a tabela carregada
@@ -399,8 +400,8 @@ convertChanStepper idxv idxref = do
 convertChanEvent chan = do
   (e,h) <- newEvent
   t <- liftIO $ forkIO $ forever (do
-    patches <- atomically $ takeMany chan
-    h (concat patches))
+    patches <- atomically $ readTChan chan
+    h patches)
   registerDynamic (killThread t)
   return e
 
@@ -442,10 +443,10 @@ fullInsert' ((k1,v1) )  = do
    ret <-  (k1,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
    (_,(_,l)) <- tableLoader  tb Nothing Nothing [] (mempty)
    if  (isNothing $ flip G.lookup l $ tbpredM (S.fromList $ _kvpk k1)  ret ) && rawTableType tb == ReadWrite
-      then do
+      then catchAll (do
         i@(Just (TableModification _ _ tb))  <- insertFrom  ret
         tell (maybeToList i)
-        return $ create tb
+        return $ create tb) (\e -> return ret)
       else do
         return ret
 

@@ -136,7 +136,7 @@ findProd p (Many i) = L.find p i
 findProd p i = Nothing
 
 isNested :: Access Key -> Access Key -> Bool
-isNested p (Nested pn i) =  p == pn
+isNested (IProd _ p) (Nested (IProd b l ) i) =  L.sort p == L.sort l
 isNested p i =  False
 
 uNest :: Access Key -> Access Key

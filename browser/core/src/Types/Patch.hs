@@ -26,12 +26,18 @@ module Types.Patch
   ,Editor(..)
   ,filterDiff
   ,isDiff
+  ,pattrKey
   ,isKeep
   ,isDelete
   ,patchEditor
   ,joinEditor
   ,indexFilterP
   ,indexFilterPatch
+  --
+  ,patchfkt
+  ,unAtom
+  ,unIndexItensP
+  ,unLeftItensP
   --
   ,PathFTB(..),PathAttr(..),TBIdx,firstPatch,PatchConstr)where
 
@@ -40,6 +46,7 @@ module Types.Patch
 import Types
 import Control.DeepSeq
 import Data.Tuple
+import qualified Control.Lens as Le
 import qualified Types.Index as G
 import Control.Monad.Reader
 import Data.Semigroup hiding (diff)
@@ -117,6 +124,40 @@ indexFilterPatch ((Nested (IProd _  l) n) ,op)  (_,_,lo) =
     Nothing -> True
 indexFilterPatch (Many [n],op) o = indexFilterPatch (n,op) o
 indexFilterPatch i o= errorWithStackTrace (show (i,o))
+
+unIndexItensP :: (Show (KType k),Show a) =>  Int -> Int -> Maybe (PathAttr (FKey (KType k)) a) -> Maybe (PathAttr (FKey (KType k) ) a )
+unIndexItensP ix o =  join . fmap (unIndexP (ix+ o) )
+  where
+    unIndexF o (PIdx ix v) = if o == ix  then v else Nothing
+    unIndexF o (PatchSet l ) =  PatchSet . Non.fromList <$> nonEmpty ( catMaybes (unIndexF o <$> F.toList l))
+    unIndexF o i = errorWithStackTrace (show (o,i))
+    unIndexP :: (Show (KType k),Show a) => Int -> PathAttr (FKey (KType k)) a -> Maybe (PathAttr (FKey (KType k) ) a )
+    unIndexP o (PAttr  k v) =  PAttr k <$> unIndexF o v
+    unIndexP o (PInline k v) = PInline k <$> unIndexF o v
+    unIndexP o (PFK rel els m v) = (\mi li ->  PFK  (Le.over relOri (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi m li) <$> (traverse (unIndexP o) els) <*> unIndexF o v
+    unIndexP o i = errorWithStackTrace (show (o,i))
+
+unSOptionalP (PatchSet l ) =  PatchSet . Non.fromList <$> nonEmpty ( catMaybes (unSOptionalP <$> F.toList l))
+unSOptionalP (POpt i ) = i
+unSOptionalP i = Just i
+
+unLeftItensP  :: (Show k , Show a) => PathAttr (FKey (KType k)) a -> Maybe (PathAttr (FKey (KType k)) a )
+unLeftItensP = unLeftTB
+  where
+
+    unLeftTB (PAttr k (PatchSet l)) = PAttr (unKOptional k) . PatchSet . Non.fromList <$> nonEmpty ( catMaybes (unSOptionalP <$> F.toList l))
+    unLeftTB (PAttr k v)
+      = PAttr (unKOptional k) <$> unSOptionalP v
+    unLeftTB (PFun k rel v)
+      = PFun (unKOptional k) rel <$> unSOptionalP v
+    unLeftTB (PInline na l)
+      = PInline (unKOptional na) <$>  unSOptionalP l
+    unLeftTB (PFK rel ifk m tb)
+      = (\ik -> PFK  (Le.over relOri unKOptional <$> rel) ik   m)
+          <$> traverse unLeftTB ifk
+          <*>  unSOptionalP tb
+    unLeftTB i = errorWithStackTrace (show i)
+
 
 
 
@@ -238,6 +279,13 @@ data PathAttr k a
   | PFK [Rel k] [PathAttr k a] (KVMetadata k) (PathFTB (TBIdx k a))
   deriving(Eq,Ord,Show,Functor,Generic)
 
+patchfkt (PFK _ _ _ k) = k
+patchfkt (PInline  _ k) = k
+patchfkt i = errorWithStackTrace (show i)
+
+unAtom (PatchSet (PAtom l Non.:| _ ) ) =  l
+unAtom (PAtom i ) = i
+unAtom i =traceStack (show i) $ errorWithStackTrace (show   i)
 
 instance (Binary k ,Binary a) => Binary (PathAttr k a)
 instance (NFData k ,NFData a) => NFData (PathAttr k a)

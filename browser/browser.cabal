@@ -47,6 +47,7 @@ library
    , scientific
    , deepseq
    , ordered
+   , exceptions
    -- Postgresql Backend
    , blaze-builder
    , postgresql-simple >=0.4 && <0.5

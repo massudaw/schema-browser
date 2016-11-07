@@ -226,7 +226,8 @@ checkDivSetT ks sort binit   el st = do
       buttonString   k = do
         v <- currentValue (facts binit)
         b <- el k # set UI.checked  (elem k v )
-        ev <-  fmap (k,)<$>UI.checkedChangeUI b
+        checki  <- UI.checkedChange b
+        let ev = (k,)<$>checki
         return (k,(b,ev))
 
 
@@ -241,7 +242,8 @@ buttonDivSetT ks sort binit   el st = mdo
     where
       buttonString   k = do
         b <- el k
-        let ev = pure k <@ UI.click  b
+        cli <- UI.click b
+        let ev = pure k <@ cli
         return (k,(b,ev))
 
 buttonDivSetFun :: Eq a => [a] -> Tidings (Maybe a)  ->  (a -> UI Element ) -> UI (TrivialWidget a)
@@ -255,7 +257,8 @@ buttonDivSetFun ks binit   el = mdo
     where
       buttonString   bv k = do
         b <- el k # sink UI.enabled (not . (k==) <$> bv)
-        let ev = pure k <@ UI.click  b
+        cli <- UI.click b
+        let ev = pure k <@ cli
         return (b,ev)
 
 
@@ -272,7 +275,9 @@ buttonDivSet ks binit   el = mdo
     where
       buttonString   bv k = do
         b <- el k # sink UI.enabled (not . (k==) <$> bv)
-        let ev = pure k <@ UI.click  b
+
+        cli <- UI.click b
+        let ev = pure k <@ cli
         return (b,ev)
 
 
@@ -287,7 +292,7 @@ appendItems = mkWriteAttr $ \i x -> void $ return x  #+ i
 checkedWidget :: Tidings Bool -> UI (TrivialWidget Bool)
 checkedWidget init = do
   i <- UI.input # set UI.type_ "checkbox" # sink UI.checked (facts init)
-  ev <- UI.checkedChangeUI i
+  ev <- UI.checkedChange i
   let e = unionWith const (rumors init) ev
   v <- currentValue (facts init)
   b <- ui$ stepper v e
@@ -297,7 +302,7 @@ checkedWidget init = do
 checkedWidgetM :: Tidings (Maybe Bool) -> UI (TrivialWidget (Maybe Bool))
 checkedWidgetM init = do
   i <- UI.input # set UI.type_ "checkbox" # sink UI.checked (maybe False id <$> facts init)
-  ev <- UI.checkedChangeUI i
+  ev <- UI.checkedChange i
   let e = unionWith const (rumors init) (Just <$>  ev )
   v <- currentValue (facts init)
   b <- ui $ stepper v e
@@ -331,25 +336,17 @@ readBool "true" = Just True
 readBool "false" = Just False
 readBool i = Nothing
 
-readMouse :: EventData -> Maybe (Int,Bool,Bool,Bool)
-readMouse v  =   (,,,) <$> readMay i<*>readMay a<*> readMay b <*>readMay c
-  where
-      readMay i = case JSON.fromJSON $ i of
-                    JSON.Success i -> Just i
-                    i -> Nothing
-      [i,a,b,c] :: [JSON.Value] = unsafeFromJSON (v)
--- readMouse i = errorWithStackTrace $show i
 
-onkey :: Element -> ((Int,Bool,Bool,Bool) -> Bool) -> UI (Event String)
-onkey el f = mapEventUI el (const $ UI.get value el) (filterE f $ filterJust $ readMouse <$> domEvent "keydown" el)
+onkey :: Element -> (Int,Bool,Bool,Bool) -> UI (Event ())
+onkey el f = fmap (const ()) <$>  UI.keydownFilter f el
 
-onAltEnter el = onkey el (\case{(13,False,True,False)-> True ; i -> False})
-onAltE el = onkey el (\case{(69,False,True,False)-> True ; i -> False})
-onAltU el = onkey el (\case{(85,False,True,False)-> True ; i -> False})
-onAltI el = onkey el (\case{(73,False,True,False)-> True ; i -> False})
-onAltD el = onkey el (\case{(68,False,True,False)-> True ; i -> False})
-onEnter el = onkey el (\case {(13,_,_,_)-> True; i -> False})
-onEsc el = onkey el (\case {(27,_,_,_) -> True ; i -> False})
+onAltEnter el = onkey el (13,False,True,False)
+onAltE el = onkey el (69,False,True,False)
+onAltU el = onkey el (85,False,True,False)
+onAltI el = onkey el (73,False,True,False)
+onAltD el = onkey el (68,False,True,False)
+onEnter el = onkey el (13,False,False,False)
+onEsc el = onkey el (27,False,False,False)
 
 
 testPointInRange ui = do
@@ -386,17 +383,6 @@ paintBorder e b i  = element e # sink0 UI.style ((\ m n -> (:[("border-style","s
 
 
 
--- Convert html to Pdf using wkhtmltopdf
--- Botão de imprimir frame no browser
-printIFrame i = do
-   print <- UI.button # set UI.text "Imprimir"
-   bh <- ui $ stepper "" (pure ("<script> window.frames[\"" <> i <>  "\"].focus(); window.frames[\"" <> i <> "\"].print();</script>") <@ UI.click print)
-   dv <- UI.div # UI.sink UI.html bh
-   UI.div # set children [print,dv]
-
-
-
-
 {-----------------------------------------------------------------------------
     List box
 ------------------------------------------------------------------------------}
@@ -422,38 +408,32 @@ userSelection = _selectionLB
 multiUserSelection :: MultiListBox a -> Tidings [a]
 multiUserSelection = _selectionMLB
 
-selectItem = mdo
-  pan <- UI.div # sink text (fromMaybe "NO VALUE " <$>  facts (triding v))
-  sel <-  UI.select # set UI.size "3"
-  bh <- ui $stepper False (unionWith const (const True <$> UI.click pan) (const False <$> UI.selectionChange sel ))
-  element sel # sink UI.style (noneShow <$> bh)
-  element pan # sink UI.style (noneShow . not <$> bh)
-  v <- listBoxEl sel (pure ["A","B","C"]) (tidings lb  never) (pure id) (pure(\v -> set UI.text (show v)))
-  lb <- ui $ stepper (Just "A") (rumors (triding  v))
-  UI.div # set children [pan,sel]
 
 setLookup x s = if S.member x s then Just x else Nothing
-listBoxEl :: forall a. (Ord a,Show a)
-    => Element
+listBoxEl = listBoxElEq (==)
+listBoxElEq :: forall a. (Show a)
+    =>
+    (a -> a -> Bool)
+    ->  Element
     -> Tidings [a]               -- ^ list of items
     -> Tidings (Maybe a)         -- ^ selected item
     -> Tidings ([a] -> [a])      -- ^ view list to list transform (filter,sort)
     -> Tidings (a -> UI Element -> UI Element) -- ^ display for an item
     -> UI (TrivialWidget (Maybe a))
-listBoxEl list bitems bsel bfilter bdisplay = do
+listBoxElEq eq list bitems bsel bfilter bdisplay = do
     let bindices :: Tidings [a]
         bindices =  bfilter <*> bitems
     -- animate output items
     let
         bindex   = lookupIndex <$> bitems <*> bsel
         lookupIndex indices Nothing    = Nothing
-        lookupIndex indices (Just sel) = L.findIndex (== sel)  indices
+        lookupIndex indices (Just sel) = L.findIndex (eq sel)  indices
         els = liftA2 (\i j -> (\ix ->  UI.option # j ix )<$> i) bitems bdisplay
     element list # sink items (facts els )
 
     -- animate output selection
 
-    element list # sink UI.selection (facts bindex)
+    element list # sinkDiff UI.selection (traceShowId <$> bindex)
 
 
     -- changing the display won't change the current selection
@@ -461,11 +441,12 @@ listBoxEl list bitems bsel bfilter bdisplay = do
     -- sink listBox [ selection :== stepper (-1) $ bSelection <@ eDisplay ]
 
     -- user selection
-    selEv <- UI.selectionChangeUI list
+    selEv <- fmap Just <$> UI.selectionChange list
+    selBh <- ui $stepper   Nothing (selEv)
     let
-        eindexes = (\l i -> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <@> (fmap Just selEv)
+        eindexes = (\l i -> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> bitems <*> ((tidings selBh selEv))
     let
-        _selectionLB = tidings (facts bsel) eindexes
+        _selectionLB = eindexes
         _elementLB   = list
 
     return $ TrivialWidget _selectionLB _elementLB
@@ -543,6 +524,14 @@ source change attr mel = do
   el <- mel
   domEventH change el (UI.get attr el )
 
+sourceT :: String -> ReadWriteAttrMIO JSFunction  Element  b a -> a -> UI Element ->  UI (TrivialWidget a)
+sourceT change attr ini mel = do
+  el <- mel
+  ev <-domEventH change el (UI.get attr el )
+  bh <-ui $ stepper ini ev
+  return (TrivialWidget (tidings bh ev) el)
+
+
 
 oitems = mkWriteAttr $ \i x -> void $ do
     return x # set children [] #+ map (\i -> UI.option # i) i
@@ -560,7 +549,7 @@ selectionMultipleChange el = domEventH "change" el (UI.get selectedMultipleFFI e
 
 
 readFileAttrFFI :: ReadWriteAttrMIO JSAsync Element () (Maybe String)
-readFileAttrFFI = ReadWriteAttr (\g ->ffi "handleFileSelect(%1,%2,$(%3))" UI.event g) (\_ _ -> JSAsync emptyFunction)
+readFileAttrFFI = ReadWriteAttr (\g ->ffi "handleFileSelect(%1,%2,$(%3))" UI.async UI.event g) (\_ _ -> JSAsync emptyFunction)
 
 jsTimeZone = wTimeZone <$> askWindow
 
@@ -572,8 +561,6 @@ selectedMultipleFFI
 selectedMultipleFFI = ffiAttr "getOpts($(%1))" "setOpts($(%2),%1)"
 
 
-mousewheel :: Element -> Event Int
-mousewheel = fmap ((\i -> if (i :: Int) > 0 then 1 else -1) .  unsafeFromJSON ) . domEvent "wheel"
 
 emptyUI = TrivialWidget (pure Nothing) <$> UI.div
 

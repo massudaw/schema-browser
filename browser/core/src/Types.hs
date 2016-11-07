@@ -427,22 +427,22 @@ instance Binary TimeOfDay where
 
 data TB f k a
   = Attr
-    { _tbattrkey ::  k
-    , _tbattr ::  FTB a
+    { _tbattrkey ::  !k
+    , _tbattr ::  !( FTB a)
     }
   | Fun
-    { _tbattrkey :: k
-    , _fundata :: (Expr,[Access k])
-    , _tbattr :: FTB a
+    { _tbattrkey :: ! k
+    , _fundata :: ! (Expr,[Access k])
+    , _tbattr :: ! (FTB a)
     }
   | IT -- Inline Table
-    { _tbattrkey ::  k
-    , _fkttable ::   (FTB1 f  k a)
+    { _tbattrkey :: ! k
+    , _fkttable ::   ! (FTB1 f  k a)
     }
   | FKT -- Foreign Table
-    { _tbref ::  (KV (Compose f (TB f)) k a)
-    , _fkrelation ::  [Rel k]
-    , _fkttable ::   (FTB1 f  k a)
+    { _tbref ::  ! (KV (Compose f (TB f)) k a)
+    , _fkrelation :: ! [Rel k]
+    , _fkttable ::   ! (FTB1 f  k a)
     }
   deriving(Functor,Foldable,Traversable,Generic)
 

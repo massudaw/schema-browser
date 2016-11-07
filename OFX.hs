@@ -11,6 +11,7 @@ import Control.Applicative
 
 import Data.Time
 import Types hiding (txt)
+import Data.Functor.Identity
 import qualified Data.Text as T
 
 
@@ -20,12 +21,12 @@ txt = TB1 . SText . T.pack
 frac = TB1 . SDouble
 tzone  = TB1 . STimestamp . zonedTimeToLocalTime
 
-i =: j = (i,j)
+i =: j = Attr i j
 
-convertTrans acc (Transaction {..})  = traceShowId $
+convertTrans acc (Transaction {..})  =
     ["fitid" =: serial txt (if txFITID == "0" then Nothing else Just txFITID)
     ,"memo" =:  opt txt txMEMO
-    ,"trntype" =: txt (tail $ show txTRNTYPE )
+    ,FKT (KV $ mapFromTBList $ [_tb $ "trntype" =: txt (tail $ show txTRNTYPE )]) [Rel "trntype" Equals "trttype"] (TB1 ( tblist $ [_tb $ "trttype" =: txt (tail $ show txTRNTYPE )]))
     ,"dtposted" =: tzone txDTPOSTED
     ,"dtuser" =:  opt tzone txDTUSER
     ,"dtavail" =: opt tzone txDTAVAIL
@@ -38,7 +39,7 @@ convertTrans acc (Transaction {..})  = traceShowId $
     ,"sic" =: opt txt txSIC
     ,"payeeid" =: opt txt txPAYEEID
     ,"account" =: acc
-    ] :: [(T.Text,FTB Showable)]
+    ]  :: [TB Identity T.Text Showable]
 
 testAccount = do
   let tfile = "extrato2.ofx"

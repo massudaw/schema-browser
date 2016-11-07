@@ -419,9 +419,9 @@ parsePrimJSON :: KPrim -> A.Value -> A.Parser Showable
 parsePrimJSON i  A.Null = fail ("cant be null" <> show i)
 parsePrimJSON i  v =
   (case i of
-      PDynamic  -> A.withText (show i) (return .SDynamic . B.decode . BSL.fromStrict . fst . B16.decode .BS.pack . T.unpack)
-      PBinary -> A.withText (show i) (return .SBinary . fst . B16.decode .BS.pack . T.unpack)
-      PMime _ -> A.withText (show i) (return .SBinary . fst . B16.decode .BS.pack . T.unpack)
+      PDynamic  -> A.withText (show i) (return .SDynamic . B.decode . BSL.fromStrict . (fst . B16.decode . BS.drop 1 . BS.dropWhile (=='\\') ).  BS.pack . T.unpack)
+      PBinary -> A.withText (show i) (return .SBinary . (fst . B16.decode . BS.drop 1 . BS.dropWhile (=='\\') ) . BS.pack . T.unpack)
+      PMime _ -> A.withText (show i) (return .SBinary . (fst . B16.decode . BS.drop 1 . BS.dropWhile (=='\\') )  . BS.pack . T.unpack . traceShowId )
       PInt  _ -> A.withScientific (show i) (return .SNumeric . floor)
       PDouble  -> A.withScientific (show i) (return .SDouble . toRealFloat)
       PBoolean -> A.withBool (show i) (return. SBoolean)

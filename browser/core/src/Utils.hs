@@ -6,6 +6,7 @@ import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as TE
 import qualified Data.Text.Lazy as T
 import  Data.Aeson
+import Debug.Trace
 import qualified Data.Vector as V
 import GHC.Stack
 import GHC.Exts
@@ -77,7 +78,7 @@ translateMonth v = foldr (\i -> (uncurry T.replace) i )  v transTable
 
 
 justError e (Just i) = i
-justError e  _ = errorWithStackTrace e
+justError e  v = traceStack e  (errorWithStackTrace e)
 
 groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
 

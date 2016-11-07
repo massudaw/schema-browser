@@ -78,7 +78,7 @@ setup smvar args plugList w = void $ do
   body <- UI.div# set UI.class_ "col-xs-12"
   return w # set title (host bstate <> " - " <>  dbn bstate)
   hoverBoard<-UI.div # set UI.style [("float","left"),("height","100vh"),("width","15px")]
-  let he = const True <$> UI.hover hoverBoard
+  he <- fmap (const True) <$> UI.hover hoverBoard
   bhe <- ui $stepper True he
   menu <- checkedWidget (tidings bhe he)
   element menu # set UI.class_ "col-xs-1"
@@ -197,8 +197,8 @@ loginWidget userI passI =  do
   username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set UI.value (maybe "" id userI)
   passwordl <- flabel # set UI.text "Senha"
   password <- UI.input # set UI.name "password" # set UI.style [("width","142px")] # set UI.type_ "password" # set UI.value (maybe "" id passI)
-  let usernameE = nonEmpty  <$> UI.valueChange username
-      passwordE = nonEmpty <$> UI.valueChange password
+  usernameE <- fmap nonEmpty  <$> UI.valueChange username
+  passwordE <- fmap nonEmpty <$> UI.valueChange password
 
   userDiv <- UI.div # set children [usernamel,username] # set UI.class_  "col-xs-5"
   passDiv <- UI.div # set children [passwordl,password] # set UI.class_  "col-xs-5"
@@ -257,12 +257,13 @@ databaseChooser smvar metainf sargs plugList = do
               liftIO $ print userEnv
               usernamel <- flabel # set UI.text "Usuário"
               username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set value (fromMaybe "" userEnv)
-              let usernameE = nonEmpty  <$> UI.valueChange username
+              usernameE <-  fmap nonEmpty  <$> UI.valueChange username
 
               usernameB <-  ui $stepper userEnv usernameE
 
               load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-4" # sink UI.enabled (facts (isJust <$> dbsWT) )
-              ui $ onEventDyn (usernameB <@ (UI.click load))( traverse (\ v ->do
+              loadE <- UI.click load
+              ui $ onEventDyn (usernameB <@ loadE )( traverse (\ v ->do
                 let auth = authMap smvar sargs (user sargs ,pass sargs )
                 inf <- loadSchema smvar schemaN  (user sargs)  auth plugList
                 liftIO$schemaH $ Just inf))
@@ -272,8 +273,9 @@ databaseChooser smvar metainf sargs plugList = do
         | otherwise   = do
             (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
             load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-2" # sink UI.enabled (facts (isJust <$> dbsWT) )
+            loadE <- UI.click load
             let login =   widT
-                formLogin = form login (UI.click load)
+                formLogin = form login  loadE
             ui$ mapTEventDyn
               (traverse (\(user,pass)-> do
                 let auth = authMap smvar sargs (user,pass)

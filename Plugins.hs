@@ -13,7 +13,10 @@
 module Plugins (plugList,lplugOrcamento, siapi3Plugin) where
 
 import qualified NonEmpty as Non
+import System.Process
+import Control.Monad.Catch
 import Location
+import Data.Interval(Extended(..),interval,lowerBound',upperBound)
 import PrefeituraSNFSE
 import Text
 import Data.Tuple
@@ -437,7 +440,7 @@ siapi3Inspection = FPlugins pname tname  $ BoundedPlugin2 url
         let ao  (bv,taxa) =  Just $ tblist  ( [_tb $ Attr "ano" (justError "ano" ano) ,_tb $ Attr "protocolo" (justError "protocolo"protocolo), attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
             iat bv = Compose . Identity $ (IT "andamentos"
                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv))
-        returnA -< (\i -> FKT (kvlist $ _tb <$> [Attr "ano" (LeftTB1 $ ano) ,Attr "protocolo" (LeftTB1 $ protocolo)]) [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] (LeftTB1 $ Just $ TB1 i)) <$> join (ao <$> b)) -< cpf
+        returnA -< traceShowId.(\i -> FKT (kvlist $ _tb <$> [Attr "ano" (LeftTB1 $ ano) ,Attr "protocolo" (LeftTB1 $ protocolo)]) [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] (LeftTB1 $ Just $ TB1 i)) <$> join (ao <$> b)) -< cpf
       returnA -< tblist  . pure . _tb  <$> v
 
 
@@ -454,6 +457,8 @@ siapi3Plugin  = FPlugins pname tname  $ BoundedPlugin2 url
               $ atR "id_owner,id_contact"
                 $ atR "id_owner"
                   $ atAny "ir_reg" [varTB "cpf_number",varTB "cnpj_number"] -< t
+      odxR "ano" -< ()
+      odxR "protocolo" -< ()
       v <- atMR "protocolo,ano" (proc cpf -> do
         protocolo <- idxR "protocolo" -< ()
         ano <- idxR "ano" -< ()
@@ -471,7 +476,7 @@ siapi3Plugin  = FPlugins pname tname  $ BoundedPlugin2 url
         let ao  (bv,taxa) =  Just $ tblist  ( [_tb $ Attr "ano" (justError "ano" ano) ,_tb $ Attr "protocolo" (justError "protocolo"protocolo), attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
             iat bv = Compose . Identity $ (IT "andamentos"
                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv))
-        returnA -< (\i -> FKT (kvlist $ _tb <$> [Attr "ano" (LeftTB1 $ ano) ,Attr "protocolo" (LeftTB1 $ protocolo)]) [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] (LeftTB1 $ Just $ TB1 i)) <$> join (ao <$> b)) -< cpf
+        returnA -< traceShowId.(\i -> FKT (kvlist $ _tb <$> [Attr "protocolo" (LeftTB1 $ protocolo), Attr "ano" (LeftTB1 $ ano)]) [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] (LeftTB1 $ Just $ TB1 i)) <$> join (ao <$> b)) -< cpf
       returnA -< tblist  . pure . _tb  <$> v
 
 bool = TB1 . SBoolean
@@ -621,7 +626,7 @@ encodeMessage = PurePlugin url
                          "dwg" -> (\v -> case (\(TB1 (SBinary i )) ->  preview $ BSL.fromStrict i) $ v of
                                     Right l -> tbv "png" (Just $ TB1 (SBinary $ BSL.toStrict $l))
                                     Left l -> tbv "bmp" (Just $ TB1 (SBinary $ BSL.toStrict $l))) <$> v
-                         i -> traceShow i Nothing
+                         i -> Nothing
                 | T.isInfixOf "application/pgp-signature" mime =  Just $ tb "plain"
                 | T.isInfixOf "multipart/alternative" mime =  last <$> (ifNull . catMaybes $ next)
                 | T.isInfixOf "multipart" mime =   Just  $ tbmix (catMaybes next)
@@ -663,6 +668,36 @@ pagamentoServico = FPlugins "Gerar Pagamento" tname $ BoundedPlugin2 url
           pag <- pagamentoArr -< Just descontado
           returnA -< Just . tblist . pure . _tb  $ pag
 
+fetchofx = FPlugins "OFX Import" tname $ BoundedPlugin2 url
+  where
+    tname = "itau_import"
+    url :: ArrowReader
+    url = proc t  -> do
+        (pass ,r) <- atR "login_credentials" (proc c -> do
+            nu <- idxK "operator_number" -< c
+            na <- idxK "operator_name" -< c
+            pas <- idxK "password" -< c
+            r <- atR "conta" $ idxK "id_account" -< c
+            returnA -< ([nu,na,pas],r)) -< ()
+
+        IntervalTB1 range <- idxK "range" -< ()
+        (fname,file,date) <- act (\(range,i) -> liftIO$ do
+              t <- getCurrentTime
+              let fname = "extrato-" <> renderShowable (justError "cant be infinite " $ unFinite $ (upperBound range)) <> "," <> show (utctDay t) <>".ofx"
+                  input = L.intercalate ";" $ ["echo \"" <> "OP" <> "\""] <> ((\i ->  "echo \"" <> renderShowable i<> "\"" ) <$> (i<>[ justError "cant be infinite " $unFinite $ (upperBound range)]))
+              callCommand ( "(" <> input <> " && cat) | xvfb-run --server-args='-screen 0, 1440x900x24' ofx-itau") `catchAll` (\e -> print e)
+              print $ "readFile " ++ fname
+              file <- BS.readFile fname
+              return (TB1 $ SText $ T.pack $ fname ,file,IntervalTB1 $ interval (lowerBound' range) (Finite $ TB1 $ SDate $ utctDay t,False))
+                 ) -< (range, pass)
+        odxR "range" -< ()
+        atR "ofx" (proc t -> do
+            odxR "file_name" -<()
+            odxR "import_file" -< ()
+            odxR "account" -< ()) -< ()
+
+        returnA -<  Just (tblist $ fmap _tb [FKT (kvlist [_tb $ Attr "ofx" fname]) [Rel "ofx" Equals "file_name" ] (TB1 $ tblist $ fmap _tb [Attr "file_name" fname,Attr "import_file" (LeftTB1 $ Just $ DelayedTB1 $ Just $ TB1 $ SBinary file)]), Attr "range" (date)])
+
 
 
 importarofx = FPlugins "OFX Import" tname  $ BoundedPlugin2 url
@@ -676,6 +711,7 @@ importarofx = FPlugins "OFX Import" tname  $ BoundedPlugin2 url
       atR "statements,account" (proc t -> do
         odxR "fitid" -< t
         odxR "memo" -< t
+        odxR "trntype" -< t
         atR "trntype" (odxR "trttype") -< t
         odxR "dtposted" -< t
         odxR "dtuser" -< t
@@ -691,11 +727,11 @@ importarofx = FPlugins "OFX Import" tname  $ BoundedPlugin2 url
 
       b <- act (fmap join . traverse ofx ) -< liftA3 (,,) fn i r
       let ao :: TB2 Text Showable
-          ao =  LeftTB1 $ ArrayTB1 . Non.fromList . fmap (TB1 . tblist . fmap attrT ) <$>  b
+          ao =  LeftTB1 $ ArrayTB1 . Non.fromList . fmap (TB1 . tblist . fmap _tb) <$>  b
           ref :: [Compose Identity (TB Identity ) Text(Showable)]
-          ref = [attrT  ("statements",LeftTB1 $ join $ fmap (ArrayTB1 .  Non.fromList  ).   allMaybes . fmap (join . fmap unSSerial . M.lookup "fitid" . M.fromList ) <$> b)]
+          ref = [attrT  ("statements",LeftTB1 $ join $ fmap (ArrayTB1 .  Non.fromList  ).   allMaybes . fmap (join . fmap unSSerial . fmap _tbattr .L.find (("fitid"==). _tbattrkey ) ) <$> b)]
           tbst :: (Maybe (TBData Text (Showable)))
-          tbst = Just $ tblist [_tb $ FKT (kvlist ref) [Rel "statements" Equals "fitid",Rel "account" Equals "account"] ao]
+          tbst = Just $ tblist $ fmap _tb [FKT (kvlist ref) [Rel "statements" Equals "fitid",Rel "account" Equals "account"] ao]
       returnA -< tbst
     ofx (TB1 (SText i), ((DelayedTB1 (Just (TB1 (SBinary r) )))) , acc )
       = liftIO $ ofxPlugin (T.unpack i) (BS.unpack r) acc
@@ -800,4 +836,4 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
 
 
 plugList :: [PrePlugins]
-plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,siapi3Taxa,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin , importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo]
+plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin , importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]
