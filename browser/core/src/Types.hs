@@ -88,6 +88,11 @@ isArray (KArray _) = True
 isArray (KOptional i) = isArray i
 isArray _ = False
 
+newtype TBIndex k a
+  = Idex (Map k (FTB a))
+  deriving(Eq,Show,Ord,Functor,Generic)
+
+
 type PGType = (Text,Text)
 type PGKey = FKey (KType PGPrim )
 type PGRecord = (Text,Text)

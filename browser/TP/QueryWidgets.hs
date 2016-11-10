@@ -186,6 +186,25 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
   pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap ( join . liftA2 diff v . fmap (liftTable' inf t).  join . eitherToMaybe ). catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
   return (headerP, (snd f ,   pgOut ))
 
+pluginUI inf oldItems (idp,p@(FPlugins n t (DiffIOPlugin arrow))) = do
+  overwrite <- checkedWidget (pure False)
+  let f = second (liftAccess inf t ). first (liftAccess inf t ) $ staticP arrow
+      action = pluginActionDiff p
+  let tdInputPre = fmap (checkTable' (fst f)) <$>  oldItems
+      tdInput = join . fmap (eitherToMaybe .  runErrors) <$> tdInputPre
+      tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
+  headerP <- UI.button # set text (T.unpack n) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+  cliHeader <- UI.click headerP
+  let ecv = facts tdInput <@ cliHeader
+  vo <- currentValue (facts tdOutput)
+  vi <- currentValue (facts tdInput)
+  bcv <- ui $ stepper (Nothing {-maybe vi (const Nothing) vo-}) ecv
+  pgOut  <- ui $mapTEventDyn (\v -> do
+    liftIO .fmap ( fmap (liftPatch inf t ). join . eitherToMaybe ) . catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v
+                             )  (tidings bcv ecv)
+  return (headerP, (snd f ,  pgOut ))
+
+
 pluginUI inf oldItems (idp,p@(FPlugins n t (BoundedPlugin2 arrow))) = do
   overwrite <- checkedWidget (pure False)
   let f = second (liftAccess inf t ). first (liftAccess inf t ) $ staticP arrow
@@ -200,7 +219,7 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (BoundedPlugin2 arrow))) = do
   vi <- currentValue (facts tdInput)
   bcv <- ui $ stepper (Nothing {-maybe vi (const Nothing) vo-}) ecv
   pgOut  <- ui $mapTEventDyn (\v -> do
-    liftIO .fmap (join . liftA2 diff v . fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v
+    liftIO .fmap (traceShowId .join . liftA2 diff v . fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v
                              )  (tidings bcv ecv)
   return (headerP, (snd f ,  pgOut ))
 
@@ -1270,7 +1289,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
           vv =   join .   fmap (\i -> if L.length i == L.length rel then Just i else Nothing) <$>  liftA2 (<>) iold2  ftdi2
       cvres <- currentValue (facts vv)
       filterInp <- UI.input # set UI.class_ "col-xs-3"
-      filterInpE <- UI.onChangeE filterInp
+      filterInpE <- UI.valueChange filterInp
       filterInpBh <- ui $ stepper "" filterInpE
       iniGist <- currentValue (facts gist)
 
@@ -1324,7 +1343,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
           lboxeel <- mapUIFinalizerT pan (\i -> if i
                                     then do
                                         lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) . snd  <$>    res4 ) (tidings (fmap Just <$> st ) (fmap Just <$> sel )) (pure id) ((\i -> maybe id (\l  ->    i  l ) )<$> showFK )
-                                        onEvent (rumors $triding lbox) (liftIO . helbox)
+                                        onEvent (rumors $ diffTidings $triding lbox) (liftIO . helbox)
                                         return $ itemListEl
 
                                     else  UI.div) (tidings bh (unionWith const (const False <$> esc) (unionWith const (const True <$> panC) (const False <$> elbox) )))

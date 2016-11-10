@@ -19,6 +19,7 @@ a { text-decoration: none; margin: 0 10px; }
 .fixed-label {
     overflow: hidden;
     text-overflow: ellipsis;
+    font-size:medium;
 }
 
 .header {

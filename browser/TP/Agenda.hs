@@ -98,7 +98,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
                 evb <- ui $ stepper False evc
                 missing <- UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")] # sink UI.style (noneShow <$> evb)
                 header <- UI.div
-                  # set items [element b # set UI.class_"col-xs-1", UI.div # sink text  (T.unpack .($table) <$> facts lookDesc ) # set UI.class_ "col-xs-10", element expand ]
+                  # set items [element b # set UI.class_"col-xs-1", UI.div # sink text  (T.unpack .($table) <$> facts lookDesc ) # set UI.class_ "fixed-label col-xs-10", element expand ]
                   # set UI.style [("background-color",renderShowable c)]
                 UI.div # set children [header,missing]
                   ) item

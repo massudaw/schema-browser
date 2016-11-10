@@ -48,10 +48,6 @@ import qualified Data.Map.Strict as M
 
 
 --- Row Level Predicate
-newtype TBIndex k a
-  = Idex (Map k (FTB a))
-  deriving(Eq,Show,Ord,Functor,Generic)
-
 instance (Binary a, Binary k)  => Binary (TBIndex  k a)
 instance (NFData a, NFData k)  => NFData (TBIndex  k a)
 
@@ -435,4 +431,5 @@ toList = getData
 
 filter f = foldl' (\m i -> G.insert i (3,6) m) G.empty  . L.filter (f .fst ) . getEntries
 filter' f = foldl' (\m i -> G.insert i (3,6) m) G.empty  . L.filter (f .fst )
+
 

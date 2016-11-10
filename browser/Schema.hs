@@ -107,7 +107,7 @@ readFModifier "write" = FWrite
 
 
 keyTables ,keyTablesInit :: DatabaseSchema ->  (Text ,Text) -> (Text -> IO (Auth , SchemaEditor)) -> [Plugins] ->  R.Dynamic InformationSchema
-keyTables schemaVar (schema ,user) authMap pluglist = {- maybe (keyTablesInit schemaVar (schema,user) authMap pluglist ) -} return  . (justError ("no table" <> T.unpack schema). HM.lookup schema ) =<< liftIO (readMVar (globalRef schemaVar))
+keyTables schemaVar (schema ,user) authMap pluglist =  maybe (keyTablesInit schemaVar (schema,user) authMap pluglist ) return.  HM.lookup schema  =<< liftIO (readMVar (globalRef schemaVar))
 
 extendedRel :: HM.HashMap (Text,Text) Key -> Text -> Text -> Text -> Key -> Rel Key
 extendedRel inf t a b c =  snd access $ (lrel (fst access))

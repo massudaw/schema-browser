@@ -44,10 +44,10 @@ module Types.Patch
 
 -- import Warshal
 import Types
+import qualified Types.Index as G
 import Control.DeepSeq
 import Data.Tuple
 import qualified Control.Lens as Le
-import qualified Types.Index as G
 import Control.Monad.Reader
 import Data.Semigroup hiding (diff)
 import qualified NonEmpty as Non
@@ -373,24 +373,24 @@ groupSplit2 :: Ord b => (a -> b) -> (a -> c ) -> [a] -> [(b ,[c])]
 groupSplit2 f g = fmap (\i-> (f $ justError "cant group" $ safeHead i , g <$> i)) . groupWith f
 
 notOptional :: G.TBIndex k a -> G.TBIndex k a
-notOptional (G.Idex m) = G.Idex   . justError "cant be empty " . traverse unSOptional'  $ m
+notOptional (Idex m) = Idex   . justError "cant be empty " . traverse unSOptional'  $ m
 
 applyGiSTChange
   ::  (G.Predicates (G.TBIndex k  a) , PatchConstr k a)  => G.GiST (G.TBIndex k a ) (TBData k a) -> RowPatch k (Index a) -> Maybe (G.GiST (G.TBIndex k a ) (TBData k a))
 applyGiSTChange l patom@(m,i, []) = Just $ G.delete (create <$> notOptional i) (3,6)  l
-    where tbpred v = notOptional $ G.Idex  $ Map.fromList $  getUn un v
+    where tbpred v = notOptional $ Idex  $ Map.fromList $  getUn un v
           un = (Set.fromList $ _kvpk m)
 applyGiSTChange l patom@(m,ipa, p) =  case G.lookup (notOptional i) l  of
                   Just v ->
                         do
                           let val =  applyIfChange v patom
                           el <- if isNothing val then trace "no change" val else val
-                          let pkel = G.Idex $ getPKM el
+                          let pkel = Idex $ getPKM el
                           Just $ G.insert (el,tbpred  el) (3,6) . G.delete (notOptional i)  (3,6) $ l
                   Nothing -> let
                       el = createTB1  patom
                    in Just $ G.insert (el,tbpred  el) (3,6)  l
-    where tbpred v = notOptional $ G.Idex  $ Map.fromList $ getUn un v
+    where tbpred v = notOptional $ Idex  $ Map.fromList $ getUn un v
           un = (Set.fromList $ _kvpk m)
           i = fmap create  ipa
 
@@ -398,19 +398,32 @@ applyGiSTChange l patom@(m,ipa, p) =  case G.lookup (notOptional i) l  of
 applyGiST
   ::  (G.Predicates (G.TBIndex k  a) , PatchConstr k a)  => G.GiST (G.TBIndex k a ) (TBData k a) -> RowPatch k (Index a) -> G.GiST (G.TBIndex k a ) (TBData k a)
 applyGiST l patom@(m,i, []) = G.delete (create <$> notOptional i) (3,6)  l
-    where tbpred v = notOptional $ G.Idex  $ Map.fromList $  getUn un v
+    where tbpred v = notOptional $ Idex  $ Map.fromList $  getUn un v
           un = (Set.fromList $ _kvpk m)
 applyGiST l patom@(m,ipa, p) =  case G.lookup (notOptional i) l  of
                   Just v ->  let
                            el = applyRecord  v patom
-                           pkel = G.Idex $ getPKM el
+                           pkel = Idex $ getPKM el
                           in G.insert (el,tbpred  el) (3,6) . G.delete (notOptional i)  (3,6) $ l
                   Nothing -> let
                       el = createTB1  patom
                       in G.insert (el,tbpred  el) (3,6)  l
-    where tbpred v = notOptional $ G.Idex  $ Map.fromList $ getUn un v
+    where tbpred v = notOptional $ Idex  $ Map.fromList $ getUn un v
           un = (Set.fromList $ _kvpk m)
           i = fmap create  ipa
+
+patchTB1 :: PatchConstr k a => TBData k  a -> TBIdx k  (Index a)
+patchTB1 (m, k)  = (m  ,Idex $ fmap patch <$> getPKM (m,k) ,  F.toList $ patchAttr  . unTB <$> (unKV k))
+
+difftable
+  ::  (PatchConstr k a  , Show a,Show k ) => TBData k a -> TBData k a
+     -> Maybe (Index (TBData k a ))
+difftable old@(m, v) (n, o) = if L.null attrs then Nothing else Just  (m,   Idex $ fmap patch  <$> getPKM old , attrs)
+    where attrs = catMaybes $ F.toList  $ Map.mergeWithKey (\_ i j -> Just $ diffAttr (unTB  i) (unTB j)) (const Map.empty ) (fmap (Just. patchAttr . unTB) ) (unKV v) (unKV $  o)
+
+diffTB1 :: (PatchConstr k a ) =>  TB2 k a -> TB2  k  a -> Maybe (PathFTB   (Index (TBData k a )) )
+diffTB1 = diffFTB patchTB1  difftable
+
 
 
 travPath f p (PatchSet i) = foldl f p i
@@ -458,19 +471,6 @@ applyRecord
      -> TBData d a
 applyRecord t@((m, v)) (_ ,_  , k)  = (m ,mapComp (KV . flip (foldr (\p m -> Map.alter (\v -> Just $ maybe (_tb $ createAttr p) (mapComp (flip applyAttr p )) v   ) (pattrKey p) m)) k  . _kvvalues ) v)
   where edit  v k =  mapComp (flip applyAttr k ) v
-
-patchTB1 :: PatchConstr k a => TBData k  a -> TBIdx k  (Index a)
-patchTB1 (m, k)  = (m  ,G.Idex $ fmap patch <$> getPKM (m,k) ,  F.toList $ patchAttr  . unTB <$> (unKV k))
-
-difftable
-  ::  (PatchConstr k a  , Show a,Show k ) => TBData k a -> TBData k a
-     -> Maybe (Index (TBData k a ))
-difftable old@(m, v) (n, o) = if L.null attrs then Nothing else Just  (m,   G.Idex $ fmap patch  <$> getPKM old , attrs)
-    where attrs = catMaybes $ F.toList  $ Map.mergeWithKey (\_ i j -> Just $ diffAttr (unTB  i) (unTB j)) (const Map.empty ) (fmap (Just. patchAttr . unTB) ) (unKV v) (unKV $  o)
-
-diffTB1 :: (PatchConstr k a ) =>  TB2 k a -> TB2  k  a -> Maybe (PathFTB   (Index (TBData k a )) )
-diffTB1 = diffFTB patchTB1  difftable
-
 
 patchSet i
   | L.length i == 0 = Nothing

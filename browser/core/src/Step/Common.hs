@@ -27,7 +27,7 @@ instance Monoid WherePredicate where
 
 data Parser m s a b = P (s,s) (m a b) deriving Functor
 
-type ArrowReader  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) IO)) (Access Text) () (Maybe (TBData  Text Showable))
+type ArrowReader  = ArrowReaderM IO
 type PluginTable v = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) Identity)) (Access Text) () v
 
 type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Access Text) () (Maybe (TBData  Text Showable))

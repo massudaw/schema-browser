@@ -246,6 +246,7 @@ viewerKey inf table cli layout cliTid = mdo
         where (s,_)  = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
   inisort <- currentValue (facts tsort)
   itemListEl <- UI.select # set UI.class_ "col-xs-6" # set UI.style [("width","100%")] # set UI.size "21"
+  runFunction $ ffi "$(%1).selectpicker('mobile')" itemListEl
   wheel <- fmap negate <$> UI.mousewheel itemListEl
   (offset,res3)<- mdo
     offset <- offsetFieldFiltered (pure 0) wheel   [(L.length . snd <$> res3) ,L.length . snd <$> vpt,(lengthPage <$> res3)]

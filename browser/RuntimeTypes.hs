@@ -143,15 +143,23 @@ data FPlugins k =
       }
 data FPlugAction k
   = StatefullPlugin [(([VarDef ],[VarDef]),FPlugAction k) ]
-  | BoundedPlugin2  ( ArrowReaderM IO)
+  | BoundedPlugin2  (ArrowReaderM IO)
   | PurePlugin (ArrowReaderM Identity)
+  | DiffPurePlugin (ArrowReaderDiffM Identity)
+  | DiffIOPlugin (ArrowReaderDiffM IO)
 
+type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Access Text) () (Maybe (Index (TBData Text Showable)))
 
 pluginStatic = pluginStatic' . _plugAction
 pluginAction = pluginAction' . _plugAction
+pluginActionDiff = pluginActionDiff' . _plugAction
 
 pluginStatic' (BoundedPlugin2  a) = staticP a
+pluginStatic' (DiffIOPlugin a) = staticP a
+pluginStatic' (DiffPurePlugin a) = staticP a
 pluginStatic' (PurePlugin  a) = staticP a
+
+pluginActionDiff' (DiffIOPlugin a ) = fmap join . traverse (dynIO a)
 pluginAction' (BoundedPlugin2   a ) = fmap join . traverse (dynIO a)
 pluginAction' (PurePlugin  a) = fmap join . traverse ((fmap return) (dynPure a ))
 

@@ -31,6 +31,8 @@ import PandocRenderer
 import OAuthClient
 
 import Types
+import Types.Patch
+import Types.Index (getIndex)
 import Step.Client
 import RuntimeTypes
 import Utils
@@ -668,11 +670,12 @@ pagamentoServico = FPlugins "Gerar Pagamento" tname $ BoundedPlugin2 url
           pag <- pagamentoArr -< Just descontado
           returnA -< Just . tblist . pure . _tb  $ pag
 
-fetchofx = FPlugins "OFX Import" tname $ BoundedPlugin2 url
+fetchofx = FPlugins "OFX Import" tname $ DiffIOPlugin url
   where
     tname = "itau_import"
-    url :: ArrowReader
+    url :: ArrowReaderDiffM IO
     url = proc t  -> do
+        idx <-idxK "id" -< ()
         (pass ,r) <- atR "login_credentials" (proc c -> do
             nu <- idxK "operator_number" -< c
             na <- idxK "operator_name" -< c
@@ -685,18 +688,21 @@ fetchofx = FPlugins "OFX Import" tname $ BoundedPlugin2 url
               t <- getCurrentTime
               let fname = "extrato-" <> renderShowable (justError "cant be infinite " $ unFinite $ (upperBound range)) <> "," <> show (utctDay t) <>".ofx"
                   input = L.intercalate ";" $ ["echo \"" <> "OP" <> "\""] <> ((\i ->  "echo \"" <> renderShowable i<> "\"" ) <$> (i<>[ justError "cant be infinite " $unFinite $ (upperBound range)]))
-              callCommand ( "(" <> input <> " && cat) | xvfb-run --server-args='-screen 0, 1440x900x24' ofx-itau") `catchAll` (\e -> print e)
+              callCommand ( "(" <> input <> " | cat) | xvfb-run --server-args='-screen 0, 1440x900x24' ofx-itau ;") `catchAll` (\e -> print e)
               print $ "readFile " ++ fname
               file <- BS.readFile fname
-              return (TB1 $ SText $ T.pack $ fname ,file,IntervalTB1 $ interval (lowerBound' range) (Finite $ TB1 $ SDate $ utctDay t,False))
+              return (TB1 $ SText $ T.pack $ fname , LeftTB1 $ Just $ DelayedTB1 $ Just $ TB1 $ SBinary file,PInter False (Finite $ patch (TB1 $ SDate $ utctDay t),False))
                  ) -< (range, pass)
         odxR "range" -< ()
+
         atR "ofx" (proc t -> do
             odxR "file_name" -<()
             odxR "import_file" -< ()
             odxR "account" -< ()) -< ()
-
-        returnA -<  Just (tblist $ fmap _tb [FKT (kvlist [_tb $ Attr "ofx" fname]) [Rel "ofx" Equals "file_name" ] (TB1 $ tblist $ fmap _tb [Attr "file_name" fname,Attr "import_file" (LeftTB1 $ Just $ DelayedTB1 $ Just $ TB1 $ SBinary file)]), Attr "range" (date)])
+        refs <- atRA "ofx" (idxK "file_name") -< ()
+        let ix = length refs
+        pk <- act (const ask )-< ()
+        returnA -<  traceShowId $ Just (kvempty,Idex (M.singleton "id" (SerialTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) kvempty  (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (M.singleton "file_name" fname) ,[PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
 
 
 
@@ -727,7 +733,7 @@ importarofx = FPlugins "OFX Import" tname  $ BoundedPlugin2 url
 
       b <- act (fmap join . traverse ofx ) -< liftA3 (,,) fn i r
       let ao :: TB2 Text Showable
-          ao =  LeftTB1 $ ArrayTB1 . Non.fromList . fmap (TB1 . tblist . fmap _tb) <$>  b
+          ao =  LeftTB1 $ ArrayTB1 . Non.fromList . fmap (TB1 . tblist . fmap _tb) <$>  join (nonEmpty <$> b)
           ref :: [Compose Identity (TB Identity ) Text(Showable)]
           ref = [attrT  ("statements",LeftTB1 $ join $ fmap (ArrayTB1 .  Non.fromList  ).   allMaybes . fmap (join . fmap unSSerial . fmap _tbattr .L.find (("fitid"==). _tbattrkey ) ) <$> b)]
           tbst :: (Maybe (TBData Text (Showable)))

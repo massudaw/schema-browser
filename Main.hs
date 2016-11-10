@@ -45,9 +45,11 @@ main = do
 
   print "Load Plugins"
   regplugs <- plugs smvar amap db plugList
-  _ <- runDynamic $keyTablesInit  smvar ("gmail", T.pack $ user db) amap regplugs
+    {-_ <- runDynamic $keyTablesInit  smvar ("gmail", T.pack $ user db) amap regplugs
   _ <- runDynamic $keyTablesInit  smvar ("incendio", T.pack $ user db) amap regplugs
-
+  _ <- runDynamic $keyTablesInit  smvar ("health", T.pack $ user db) amap regplugs
+  _ <- runDynamic $keyTablesInit  smvar ("nutrition", T.pack $ user db) amap regplugs
+-}
   print "Start Server"
   (ref ,ls)<- runDynamic $ addServer metas
 
