@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Host (module Step.Common,attrT,findPK,findFK,findAttr,findFKAttr,isNested,findProd,replace,uNest,checkTable,hasProd,checkTable',indexField,indexFieldRec,indexer,genPredicate,joinFTB) where
+module Step.Host (module Step.Common,attrT,findPK,findFK,findAttr,findFKAttr,isNested,findProd,replace,uNest,hasProd,indexField,indexFieldRec,indexer,genPredicate,joinFTB) where
 
 import Types
 import Control.Applicative.Lift
@@ -84,49 +84,6 @@ genPredicate i n@(Nested (IProd b p ) l ) = fmap AndColl $ nonEmpty $ catMaybes 
 genPredicate _ i = errorWithStackTrace (show i)
 
 genNestedPredicate n i v = fmap (\(a,b) -> (Nested n a , b )) <$> genPredicate i v
-
-
-checkField :: Access Key -> Column Key Showable -> Errors [Access Key] (Column Key Showable)
-checkField p@(Point ix) _ = failure [p]
-checkField n@(Nested ix@(IProd b l) nt ) t
-  = case t of
-         IT l i -> IT l  <$> checkFTB  nt i
-         FKT a  c d -> FKT a  c <$> (if not b then maybe (failure [n]) (checkFTB nt) $ unRSOptional' d else checkFTB nt d  )
-         Attr k v -> failure [n]
-         Fun k rel v -> failure [n]
-checkField  p@(IProd b l) i
-  = case i  of
-      Attr k v -> maybe (failure [p]) (pure) $ fmap (Attr k ) . (\i -> if b then  unRSOptional' i else Just i ) $ v
-      Fun k rel v -> maybe (failure [p]) (pure) $ fmap (Fun k rel ) . (\i -> if b then  unRSOptional' i else Just i ) $ v
-      FKT a c d -> (\i -> FKT i c d) <$> (traverseKV (traComp (checkField p) )  a )
-      i -> errorWithStackTrace ( show (b,l,i))
-checkField i j = errorWithStackTrace (show (i,j))
-
-
-checkFTB l (ArrayTB1 i )
-  | otherwise =   ArrayTB1 <$> traverse (checkFTB  l) i
-
-checkFTB l (LeftTB1 j) = LeftTB1 <$> traverse (checkFTB  l) j
-checkFTB  l (DelayedTB1 j) = DelayedTB1 <$> traverse (checkFTB l) j
-checkFTB  (Rec ix i) t = checkFTB  (replace ix i i ) t
-checkFTB  (Many [m@(Many l)]) t = checkFTB  m t
-checkFTB  (Many [m@(Rec _ _ )]) t = checkFTB  m t
-
-checkFTB f (TB1 k) = TB1 <$> checkTable' f k
-
-checkTable' :: Access Key -> TBData Key Showable -> Errors [Access Key] (TBData Key Showable)
-checkTable' (ISum []) v
-  = failure [ISum []]
-checkTable'  f@(ISum ls) (m,v)
-  = fmap (tblist . pure . _tb) $ maybe (failure [f]) id  $ listToMaybe . catMaybes $  fmap (\(Many [l]) ->  fmap (checkField l) . join . fmap ( traFAttr  unRSOptional') $ indexField l $ (m,v)) ls
-checkTable' (Many l) (m,v) =
-  ( (m,) . _tb . KV . mapFromTBList ) <$> T.traverse (\k -> maybe (failure [k]) (fmap _tb. checkField k ). indexField  k $ (m,v)) l
-
-
-checkTable l b = eitherToMaybe $ runErrors (checkTable' l b)
-
-
-
 
 hasProd :: (Access Key -> Bool) -> Access Key ->  Bool
 hasProd p (Many i) = any p i

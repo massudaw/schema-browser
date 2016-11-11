@@ -53,7 +53,7 @@ insertPatch f conn path@(m ,s,i ) t =  liftIO$ if not $ L.null serialAttr
         let
           iquery :: String
           iquery = T.unpack $ prequery <> " RETURNING ROW(" <>  T.intercalate "," (projKey serialAttr) <> ")"
-        out <-  fmap safeHead $ liftIO $ queryWith (f (mapRecord (const ()) serialTB )) conn (fromString  iquery ) directAttr
+        out <-  fmap safeHead $ liftIO $ queryWith (f (mapValue' (const ()) serialTB )) conn (fromString  iquery ) directAttr
         let Just (_,_ ,gen) =  join $ diff serialTB <$> out
             comp = compact (i <> gen)
         return (m, G.getIndex (justError "no out insert" out) ,comp )
@@ -72,7 +72,7 @@ insertPatch f conn path@(m ,s,i ) t =  liftIO$ if not $ L.null serialAttr
       serialAttr = serial aattri attrs
       directAttr = direct aattri attrs
       projKey = fmap (keyValue ._relOrigin) . concat . fmap keyattri
-      serialTB = reclist' t (fmap _tb  serialAttr)
+      serialTB = tblist' t (fmap _tb  serialAttr)
       all1 f [] = False
       all1 f i = all f i
 
@@ -106,7 +106,7 @@ applyPatch conn patch@(m,G.Idex kold,skv)  =
     attrPatchValue (PAttr  k v) = Attr k (create v) :: TB Identity PGKey Showable
     pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> M.toList kold)
     setter = " SET " <> T.intercalate "," (   attrPatchName <$> skv   )
-    up = "UPDATE " <> kvfullname m <> setter <>  pred
+    up = "UPDATE " <> kvMetaFullName m <> setter <>  pred
 
 
 updatePatch

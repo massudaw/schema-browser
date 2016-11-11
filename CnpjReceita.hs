@@ -46,7 +46,7 @@ getCaptchaCpf session = do
        (fmap BSL.toStrict . (^? responseBody)) <$> (Sess.get session $ cpfcaptcha)
 
 
-convertCPF out = Just $ (tbmap . mapFromTBList . pure . attr "owner_name" . LeftTB1 .Just . TB1 . SText . TL.pack  $ out )
+convertCPF out = Just $ (tblist . pure . attr "owner_name" . LeftTB1 .Just . TB1 . SText . TL.pack  $ out )
   where attr k =  _tb . Attr k
 
 getCpfForm session captcha nascimento cgc_cpf = do
@@ -75,7 +75,7 @@ convertHtml out =
             idx  = LeftTB1 . fmap (TB1 . SText . TL.pack . head) . flip M.lookup out
             fk rel i  = Compose . Identity . FKT (kvlist i )rel
             afk rel i  = fk rel i  . LeftTB1 . Just . ArrayTB1 . Non.fromList
-            tb attr = TB1 $ tbmap $ mapFromTBList  attr
+            tb attr = TB1 $ tblist attr
             (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (TB1 . SText .TL.filter (not . flip L.elem ("-." :: String)) . fst) t ,  justError " no description" $  TB1 . SText .  TL.strip .  TL.drop 3. snd <$>  t)
                 where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)
             scnae = filter ((/=(TB1 (SText "Não Informada"))).fst) $ fmap (\t -> ((TB1 . SText .TL.filter (not . flip L.elem ("-." :: String)) . fst) t ,    (TB1 . SText .TL.strip . TL.drop 3 .  snd ) t)) ts

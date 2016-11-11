@@ -154,9 +154,9 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
            ) inpfresh
       let
         inp :: Tidings (Maybe (TBData CoreKey Showable))
-        inp = fmap (tbmap . mapFromTBList) . join  . fmap nonEmpty <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap _tb) .  triding) elemsIn )
+        inp = fmap tblist <$> foldr (liftA2 (liftA2 (:) )) (pure (Just [])) (fmap (fmap ( fmap _tb) .  triding) elemsIn )
 
-      (preinp,(_,liftedE )) <- pluginUI  inf (mergeCreate <$>  unoldItems <*>  inp) (idp,FPlugins "Enviar" tname aci)
+      (preinp,(_,liftedE )) <- pluginUI  inf (liftA2 mergeTB1 <$>  unoldItems <*>  inp) (idp,FPlugins "Enviar" tname aci)
 
       elemsOut <- mapM (\fresh -> do
         let attrB pre a = do
@@ -178,9 +178,10 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
   let f =second (liftAccess inf t ). first (liftAccess  inf t ) $ staticP arrow
       action = pluginAction   p
       pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (fst f)])
-      tdInputPre = join . fmap (\i -> if traceShow (i,pred :: TBPredicate Key Showable) $ G.checkPred i pred  then Just i else Nothing) <$>  oldItems
+      tdInputPre = join . fmap (\i -> if G.checkPred i pred  then Just i else Nothing) <$>  oldItems
       tdInput = tdInputPre
-      tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
+      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
+      tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
   headerP <- UI.button # set text (T.unpack n) {- # sink UI.enabled (isJust <$> facts tdInput) -} # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   ini <- currentValue (facts tdInput )
   kk <- ui $ stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
@@ -194,7 +195,9 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (DiffIOPlugin arrow))) = do
       pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (fst f)])
       tdInputPre = join . fmap (\i -> if traceShow (i,pred :: TBPredicate Key Showable) $ G.checkPred i pred  then Just i else Nothing) <$>  oldItems
       tdInput = tdInputPre
-      tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
+      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
+      tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
+      -- tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
   headerP <- UI.button # set text (T.unpack n) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   cliHeader <- UI.click headerP
   let ecv = facts tdInput <@ cliHeader
@@ -216,7 +219,9 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (BoundedPlugin2 arrow))) = do
       pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (fst f)])
       tdInputPre = join . fmap (\i -> if traceShow (i,pred :: TBPredicate Key Showable) $ G.checkPred i pred  then Just i else Nothing) <$>  oldItems
       tdInput = tdInputPre
-      tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
+      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
+      tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
+      -- tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
   headerP <- UI.button # set text (T.unpack n) {- # sink UI.enabled (isJust <$> facts tdInput) -} # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   cliHeader <- UI.click headerP
   let ecv = facts tdInput <@ cliHeader
@@ -532,12 +537,6 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) oldItems = do
 
 -}
 
-genPredicateFull i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
-genPredicateFull i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
-genPredicateFull i (IProd b l) =  (\l -> if b then Just $ PrimColl (IProd b l,Right (if i then Not IsNull else IsNull) ) else Nothing ) $ l
-genPredicateFull i n@(Nested p@(IProd _ _ ) l ) = fmap (\(a,b) -> (Nested p a , b )) <$> genPredicateFull i l
-genPredicateFull _ i = errorWithStackTrace (show i)
-
 
 eiTable
   :: InformationSchema
@@ -794,7 +793,7 @@ indexItens
 indexItens s tb@(Attr k v) offsetT inner old = fmap constrAttr  <$> bres
   where
     tdcomp = fmap (fmap _tbattr ) <$>  takeArray inner
-    tdi = fmap  (unSComposite . _tbattr) <$> old
+    tdi = fmap  (unArray. _tbattr) <$> old
     constrAttr = Attr k . ArrayTB1
     bres = attrEditor s <$> offsetT <*>  tdi <*> tdcomp
 indexItens s tb@(FKT ifk rel _) offsetT inner old = fmap constFKT  <$> bres
@@ -809,7 +808,7 @@ indexItens s tb@(FKT ifk rel _) offsetT inner old = fmap constFKT  <$> bres
 indexItens s tb@(IT na _) offsetT inner old = fmap constIT <$> bres
   where
     bres2 = fmap (fmap _fkttable) <$> takeArray inner
-    emptyIT = unSComposite . _fkttable
+    emptyIT = unArray. _fkttable
     bres =  attrEditor s <$> offsetT <*> (fmap emptyIT <$> old) <*> bres2
     constIT = IT   na . ArrayTB1
 

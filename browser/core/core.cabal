@@ -20,6 +20,9 @@ library
     NonEmpty
     Query
     Types
+    Types.Compose
+    Types.Common
+    Types.Primitive
     Types.Inference
     Types.Index
     Types.Patch

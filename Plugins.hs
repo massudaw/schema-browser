@@ -87,7 +87,7 @@ siapi2Hack = FPlugins pname tname $ BoundedPlugin2  url
                     ,("VALOR","valor_taxa")
                     ,("LOCAL DE ATEND","local")
                     ,("REGIÃO DE ATEN","regiao")]
-    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
     url :: ArrowReader
     url = proc t -> do
       protocolo <- varTB "protocolo" -< t
@@ -115,7 +115,7 @@ siapi2Plugin = FPlugins pname tname $ BoundedPlugin2  url
   where
     pname ="Siapi2 Andamento"
     tname = "siapi3"
-    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
     url :: ArrowReader
     url = proc t -> do
       protocolo <- varTB "protocolo" -< t
@@ -239,7 +239,7 @@ analiseProjeto = FPlugins pname tname $ BoundedPlugin2 url
     pname , tname :: Text
     pname = "Cadastro Bombeiro"
     tname = "fire_project"
-    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
     url :: ArrowReader
     url = proc t -> do
       atR "id_owner,id_contact"
@@ -417,8 +417,8 @@ siapi3Inspection = FPlugins pname tname  $ BoundedPlugin2 url
     pname , tname :: Text
     pname = "Siapi3 Inspeção"
     tname = "fire_inspection"
-    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
-    tobs  =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional'
+    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
+    tobs  =  fmap (BS.pack . renderShowable ) . join . fmap unSOptional'
     url :: ArrowReader
     url = proc t -> do
       cpf <- atR "id_project"
@@ -451,8 +451,8 @@ siapi3Plugin  = FPlugins pname tname  $ BoundedPlugin2 url
     pname , tname :: Text
     pname = "Siapi3 Andamento"
     tname = "fire_project"
-    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
-    tobs  =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional'
+    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
+    tobs  =  fmap (BS.pack . renderShowable ) . join . fmap unSOptional'
     url :: ArrowReader
     url = proc t -> do
       cpf <- atR "id_project"
@@ -745,7 +745,7 @@ importarofx = FPlugins "OFX Import" tname  $ BoundedPlugin2 url
 notaPrefeitura = FPlugins "Nota Prefeitura" tname $ BoundedPlugin2 url
   where
     tname = "nota"
-    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
     url ::  ArrowReader
     url = proc t -> do
       i <- varTB "id_nota" -< t
@@ -762,7 +762,7 @@ notaPrefeitura = FPlugins "Nota Prefeitura" tname $ BoundedPlugin2 url
 queryArtCreaData = FPlugins "Art Crea Data" tname $ BoundedPlugin2 url
   where
     tname = "art"
-    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
     url :: ArrowReader
     url = proc t -> do
       i <- varTB "art_number" -< t
@@ -783,7 +783,7 @@ queryArtCreaData = FPlugins "Art Crea Data" tname $ BoundedPlugin2 url
 queryArtCrea = FPlugins "Documento Final Art Crea" tname $ BoundedPlugin2 url
   where
     tname = "art"
-    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
     url :: ArrowReader
     url = proc t -> do
       i <- varTB "art_number" -< t
@@ -803,7 +803,7 @@ queryArtBoletoCrea = FPlugins pname tname $ BoundedPlugin2  url
   where
     pname = "Boleto Art Crea"
     tname = "art"
-    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
     url :: ArrowReader
     url = proc t -> do
       i <- varTB "art_number" -< t
@@ -824,7 +824,7 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
   where
     tname = "art"
     pname = "Andamento Art Crea"
-    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unRSOptional' <$>  idxR i
+    varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
     url :: ArrowReader
     url = proc t -> do
       i <- varTB "art_number" -< ()

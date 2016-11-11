@@ -6,6 +6,7 @@ import qualified Data.List.NonEmpty as Non
 import Data.List.NonEmpty hiding (fromList)
 
 import Safe as S
+import Data.Binary
 import Prelude as P
 import GHC.Stack
 
@@ -20,3 +21,4 @@ imap f = Non.map (uncurry f) . Non.zip (Non.fromList [0..])
 fromList [] = errorWithStackTrace "empty list"
 fromList l = Non.fromList l
 
+instance Binary a => Binary (NonEmpty a) where

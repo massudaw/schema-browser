@@ -1,13 +1,15 @@
-{-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveFunctor  #-}
-module Step.Common (PluginTable,Parser(..),Access(..),ArrowReaderM,ArrowReader,KeyString(..),BoolCollection(..),WherePredicate(..)) where
+{-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveGeneric,DeriveFunctor  #-}
+module Step.Common (PluginTable,Parser(..),Access(..),ArrowReaderM,ArrowReader,KeyString(..),BoolCollection(..),WherePredicate(..),TBPredicate(..)) where
 
-import Types
+import Types.Common
+import Types.Primitive
 import Data.Tuple
 import Control.Monad.Reader
 import Control.Applicative
 import Data.Text (Text)
 import Data.String
 import Data.Functor.Identity
+import GHC.Generics
 import qualified Data.Text as T
 import qualified Data.Map as M
 
@@ -15,11 +17,31 @@ import Data.GiST.GiST as G
 import qualified Data.Foldable as F
 
 import Control.Arrow
+import Control.DeepSeq
 import Control.Category (Category(..),id)
 import Prelude hiding((.),id,head)
 import Data.Monoid
 import Data.Foldable(Foldable)
 import Data.Traversable(Traversable)
+
+data BoolCollection a
+ = AndColl [BoolCollection a]
+ | OrColl [BoolCollection a]
+ | PrimColl a
+ deriving(Show,Eq,Ord,Functor,Foldable,Generic)
+
+instance NFData a => NFData (BoolCollection a)
+
+
+
+type WherePredicate = TBPredicate Key Showable
+
+newtype TBPredicate k a
+  = WherePredicate (BoolCollection (Access k ,AccessOp a ))
+  deriving (Show,Eq,Ord,Generic)
+instance (NFData k, NFData a) => NFData (TBPredicate k a)
+
+
 instance Monoid WherePredicate where
   mempty = WherePredicate (AndColl [])
   mappend (WherePredicate i) (WherePredicate  j) = WherePredicate (AndColl [i,j])

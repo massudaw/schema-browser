@@ -3,7 +3,7 @@ module Postgresql.Parser where
 
 import qualified Data.HashMap.Strict as HM
 import Data.Map (Map)
-import Types
+import Types hiding (Parser)
 import Data.Ord
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A

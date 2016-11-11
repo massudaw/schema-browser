@@ -69,7 +69,7 @@ renderProjectContract = myDoc
               template <- liftIO$ readFile' utf8 "contract.template"
               liftIO$ makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odxR "contract" -< ()
-          returnA -<  (\i -> tbmap . mapFromTBList . pure . Compose. Identity . Attr "contract" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict <$>  either (const Nothing) Just  i) outdoc
+          returnA -<  (\i -> tblist .  pure . Compose. Identity . Attr "contract" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict <$>  either (const Nothing) Just  i) outdoc
 
 
 renderProjectReport = myDoc
@@ -94,7 +94,7 @@ renderProjectReport = myDoc
               template <- liftIO$ readFile' utf8 "raw.template"
               liftIO$ makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i ) -< pdoc
           odxR "report" -< ()
-          returnA -<  (\i -> tbmap . mapFromTBList . pure . Compose. Identity . Attr "report" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict <$> either (const Nothing) Just i ) outdoc
+          returnA -<  (\i -> tblist .  pure . Compose. Identity . Attr "report" . LeftTB1 . Just . DelayedTB1 . Just . TB1 . SBinary .  BS.toStrict <$> either (const Nothing) Just i ) outdoc
 
 
 renderProjectPricingA = myDoc
@@ -150,7 +150,7 @@ renderProjectPricingA = myDoc
               makePDF "pdflatex" writeLaTeX  def {writerStandalone = True ,writerTemplate = template }   i
                   ) -< pdoc
           odxR "orcamento" -< preenv
-          returnA -<  (\i -> tbmap .mapFromTBList . pure . Compose. Identity . Attr "orcamento" . LeftTB1 . Just . DelayedTB1 .Just . TB1 . SBinary .  BS.toStrict <$> either (const Nothing) Just i) outdoc
+          returnA -<  (\i -> tblist . pure . Compose. Identity . Attr "orcamento" . LeftTB1 . Just . DelayedTB1 .Just . TB1 . SBinary .  BS.toStrict <$> either (const Nothing) Just i) outdoc
 
 
 readFile' e name = openFile name ReadMode >>= liftM2 (>>) (flip hSetEncoding $ e)   hGetContents

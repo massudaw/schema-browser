@@ -104,6 +104,8 @@ poller schm authmap db plugs is_test = do
                       liftIO$ putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let fetchSize = 200
                           pred =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicate True (fst f) , genPredicate False (snd f)])
+                          predFullIn =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicateFull True (fst f) ])
+                          predFullOut =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicateFull True (snd f) ])
                       (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  (Just 0) (Just fetchSize) []  pred
                       liftIO$ threadDelay 10000
                       let sizeL = justLook pred  l
@@ -114,10 +116,7 @@ poller schm authmap db plugs is_test = do
                           (_,(_,listResAll)) <- transactionNoLog inf $ selectFrom a  (Just ix) (Just fetchSize) [] pred
                           let listRes = L.take fetchSize . G.toList $  listResAll
 
-                          let evb = filter (\i -> tdInput i  && tdOutput1 i ) listRes
-                              tdInput i =  isJust  $ checkTable  (liftAccess inf a $ fst f) i
-                              tdOutput1 i =  not $ isJust  $ checkTable  (liftAccess inf a $ snd f) i
-
+                          let evb = filter (\i-> G.checkPred i predFullIn && not (G.checkPred i predFullOut) ) listRes
                           i <-  liftIO $ mapConcurrently (mapM (\inp -> catchPluginException inf (_tableUnique (lookTable inf a)) idp (M.toList $ getPKM inp) $ fmap fst $ runDynamic $ transactionLog inf $ do
                               case elemp of
                                 Right action  -> do

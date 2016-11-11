@@ -112,7 +112,7 @@ odxM  l =
 -- Optional value with maybe wrapping
 idxM  l =
   let ll = splitIndex False l
-   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . join . fmap (unRSOptional' . snd) . join  . fmap (indexTableAttr ll)))
+   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . join . fmap (unSOptional' . snd) . join  . fmap (indexTableAttr ll)))
 
 -- Obrigatory value without maybe wrapping
 
@@ -122,7 +122,7 @@ tb = P (Many [] , Many []) (Kleisli (const ask ))
 
 idxK  l =
   let ll = splitIndex True l
-   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (\ v -> return . justError ("no value found "  <> show (ll,v)). join . fmap (unRSOptional' . snd) . join . fmap (indexTableAttr ll)$ v) )
+   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (\ v -> return . justError ("no value found "  <> show (ll,v)). join . fmap (unSOptional' . snd) . join . fmap (indexTableAttr ll)$ v) )
 
 
 idxR  l =

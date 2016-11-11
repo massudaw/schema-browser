@@ -313,5 +313,11 @@ lookAccess :: InformationSchema -> Text -> (Access Text , AccessOp Showable ) ->
 lookAccess inf tname l = Le.over (Le._1) (liftAccess inf tname)  l
 
 
-makeLenses ''InformationSchemaKV
+genPredicateFull i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
+genPredicateFull i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
+genPredicateFull i (IProd b l) =  (\l -> if b then Just $ PrimColl (IProd b l,Right (if i then Not IsNull else IsNull) ) else Nothing ) $ l
+genPredicateFull i n@(Nested p@(IProd _ _ ) l ) = fmap (\(a,b) -> (Nested p a , b )) <$> genPredicateFull i l
+genPredicateFull _ i = errorWithStackTrace (show i)
 
+
+makeLenses ''InformationSchemaKV

@@ -137,6 +137,7 @@ class Affine f where
   subtraction :: f -> f -> Tangent f
   addition :: f -> Tangent f -> f
 
+
 instance Affine String where
   type Tangent String = [Int]
   loga = fmap ord
@@ -277,7 +278,7 @@ indexPred (n@(Nested k nt ) ,eq) r
     recPred (SerialTB1 i) = maybe False recPred i
     recPred (LeftTB1 i) = maybe False recPred i
     recPred (TB1 i ) = i
-    recPred (ArrayTB1 i) = all recPred (F.toList i)
+    recPred (ArrayTB1 i) = any recPred (F.toList i)
     recPred i = errorWithStackTrace (show i)
 indexPred (a@(IProd _ _),eq) r =
   case indexField a r of
