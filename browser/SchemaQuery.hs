@@ -285,7 +285,7 @@ tableLoader table  page size presort fixed
                 go pred (AndColl l) = AndColl (go pred <$> l)
                 go pred (OrColl l) = OrColl (go pred <$> l)
                 go pred (PrimColl l) = AndColl $ PrimColl <$> pred l
-                -- predicate (Nested (IProd b i) j ,Left _ ) = (\a -> (IProd b [a], Right "is not null")) <$> i
+                predicate (Nested (IProd b i) j ,Left _ ) = (\a -> (IProd b [a], Right (Not IsNull))) <$> i
                 predicate i  = [i]
             tbf = tableView  (tableMap inf) table
 

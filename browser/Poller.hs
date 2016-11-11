@@ -26,7 +26,7 @@ import TP.Widgets (diffEvent)
 import Schema
 import Types.Patch
 import Data.Maybe
-import Reactive.Threepenny
+import Reactive.Threepenny hiding (apply)
 import Debug.Trace
 import Data.Traversable (traverse)
 import qualified Data.List as L
@@ -93,7 +93,7 @@ poller schm authmap db plugs is_test = do
       (startP,_,_,current) <- checkTime (indexRow polling )
       flip traverse plug $ \(idp,p) -> do
           let f = pluginStatic p
-              elemp = pluginAction p
+              elemp = pluginRun (_plugAction p)
               pname = _name p
               a = _bounds p
           let iter polling = do
@@ -119,10 +119,17 @@ poller schm authmap db plugs is_test = do
                               tdOutput1 i =  not $ isJust  $ checkTable  (liftAccess inf a $ snd f) i
 
                           i <-  liftIO $ mapConcurrently (mapM (\inp -> catchPluginException inf (_tableUnique (lookTable inf a)) idp (M.toList $ getPKM inp) $ fmap fst $ runDynamic $ transactionLog inf $ do
-                              ovm  <- fmap (liftTable' inf a) <$> liftIO (elemp (Just $ mapKey' keyValue inp))
-                              maybe (return ()) (\ov-> do
-                                   p <- fullDiffEdit inp ov
-                                   return ()) ovm
+                              case elemp of
+                                Right action  -> do
+                                  ovm  <- fmap (liftTable' inf a) <$> liftIO (action (Just $ mapKey' keyValue inp))
+                                  maybe (return ()) (\ov-> do
+                                         p <- fullDiffEdit inp ov
+                                         return ()) ovm
+                                Left action -> do
+                                    ovm  <- fmap (liftPatch inf a) <$> liftIO (action (Just $ mapKey' keyValue inp))
+                                    maybe (return ()) (\ov-> do
+                                      p <- fullDiffEdit inp (apply inp ov)
+                                      return ()) ovm
                               )
                             ) . L.transpose .  chuncksOf 20 $ evb
                           return $ concat i

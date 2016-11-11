@@ -522,9 +522,11 @@ indexLabel p@(IProd b l) v =
       Just i -> getCompose i
       Nothing -> errorWithStackTrace "no fk"
 indexLabel  n@(Nested ix@(IProd b l) (Many [nt])) v =
-    case getCompose $ justError "no nested" $ findFK l v of
-      Unlabeled i -> indexLabel  nt.head . F.toList . _fkttable $ i
-      Labeled i _ -> errorWithStackTrace "cant index"
+    case   findFK l v of
+      Just a ->  case getCompose a of
+        Unlabeled i -> indexLabel  nt.head . F.toList . _fkttable $ i
+        Labeled i _ -> errorWithStackTrace ("cant index" <> show i)
+      Nothing -> errorWithStackTrace ("cant index"<> show l)
 indexLabel  (Many [nt]) v = flip (indexLabel ) v $ nt
 -- indexLabel  (ISum [nt]) v = flip (indexLabel ) v <$> nt
 indexLabel  i v = errorWithStackTrace (show (i, v))
@@ -566,9 +568,12 @@ indexFieldL e c p@(IProd b l) v =
                              Nothing  -> errorWithStackTrace ("no fk attr" <> show (l,v))
 
 indexFieldL e c n@(Nested ix@(IProd b l) nt) v =
-    case getCompose $ justError "no nested" $ findFK l v of
+  case findFK l v of
+    Just a -> case getCompose a of
         Unlabeled i ->
           concat . fmap (indexFieldL e c nt) . F.toList . _fkttable $ i
+        Labeled l (IT k (LeftTB1 (Just (ArrayTB1 (fk :| _))))) ->  [(Just (l <> " is not null"), Nothing)]
+        Labeled l (IT k (ArrayTB1 (fk :| _))) ->  [(Just (l <> " is not null"), Nothing)]
         Labeled l (IT k fk) -> (indexFieldL e c nt  $ head (F.toList fk ))
         Labeled l a -> {-->
           let
@@ -581,6 +586,8 @@ indexFieldL e c n@(Nested ix@(IProd b l) nt) v =
             m = label $ getCompose $ snd $  head $ F.toList (_fkttable a)
          in go (_fkttable a)
           -- -} [(Just (l <> " is not null"), Nothing)]
+
+    Nothing -> concat $ (\i -> indexFieldL (Right (Not IsNull)) c (IProd b [i]) v)<$> l
 
 indexFieldL e c (Many nt) v = concat $ flip (indexFieldL e c) v <$> nt
 indexFieldL e c (ISum nt) v = concat $ flip (indexFieldL e c) v <$> nt

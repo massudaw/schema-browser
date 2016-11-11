@@ -159,6 +159,11 @@ pluginStatic' (DiffIOPlugin a) = staticP a
 pluginStatic' (DiffPurePlugin a) = staticP a
 pluginStatic' (PurePlugin  a) = staticP a
 
+pluginRun b@(BoundedPlugin2 _) = Right (pluginAction' b)
+pluginRun b@(PurePlugin _ ) = Right (pluginAction' b)
+pluginRun b@(DiffIOPlugin _ ) = Left (pluginActionDiff' b)
+pluginRun b@(DiffPurePlugin _ ) = Left (pluginActionDiff' b)
+
 pluginActionDiff' (DiffIOPlugin a ) = fmap join . traverse (dynIO a)
 pluginAction' (BoundedPlugin2   a ) = fmap join . traverse (dynIO a)
 pluginAction' (PurePlugin  a) = fmap join . traverse ((fmap return) (dynPure a ))

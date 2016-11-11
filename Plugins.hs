@@ -459,8 +459,6 @@ siapi3Plugin  = FPlugins pname tname  $ BoundedPlugin2 url
               $ atR "id_owner,id_contact"
                 $ atR "id_owner"
                   $ atAny "ir_reg" [varTB "cpf_number",varTB "cnpj_number"] -< t
-      odxR "ano" -< ()
-      odxR "protocolo" -< ()
       v <- atMR "protocolo,ano" (proc cpf -> do
         protocolo <- idxR "protocolo" -< ()
         ano <- idxR "ano" -< ()

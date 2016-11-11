@@ -271,7 +271,7 @@ indexPred :: (Access Key ,AccessOp Showable ) -> TBData Key Showable -> Bool
 indexPred (Many i,eq) a= all (\i -> indexPred (i,eq) a) i
 indexPred (n@(Nested k nt ) ,eq) r
   = case  indexField n r of
-    Nothing -> errorWithStackTrace ("cant find attr" <> show (n,nt))
+    Nothing -> False -- traceShow (n,eq,r) $errorWithStackTrace ("cant find attr" <> show (n,nt))
     Just i ->  recPred $ indexPred (nt , eq ) <$> _fkttable  i
   where
     recPred (SerialTB1 i) = maybe False recPred i
@@ -281,7 +281,7 @@ indexPred (n@(Nested k nt ) ,eq) r
     recPred i = errorWithStackTrace (show i)
 indexPred (a@(IProd _ _),eq) r =
   case indexField a r of
-    Nothing ->  errorWithStackTrace ("cant find attr" <> show (a,eq,r))
+    Nothing ->  False -- traceShow (a,eq,r) $ errorWithStackTrace ("cant find attr" <> show (a,eq,r))
     Just (Fun _ _ rv) ->
       case eq of
         i -> match eq Exact rv
@@ -292,12 +292,12 @@ indexPred (a@(IProd _ _),eq) r =
       case eq of
         Right (Not IsNull ) -> isJust $ unSOptional' rv
         Right IsNull -> isNothing $ unSOptional' rv
-        i -> errorWithStackTrace (show i)
+        i -> traceShow (a,eq,r) $errorWithStackTrace (show i)
     Just (FKT _ _ rv) ->
       case eq of
         Right (Not IsNull)  -> isJust $ unSOptional' rv
         Right IsNull -> isNothing $ unSOptional' rv
-        i -> errorWithStackTrace (show i)
+        i -> traceShow (a,eq,r) $errorWithStackTrace (show i)
 
 
 queryCheck :: WherePredicate -> G.GiST (TBIndex Key Showable) (TBData Key Showable) -> G.GiST (TBIndex Key Showable) (TBData Key Showable)

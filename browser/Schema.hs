@@ -353,12 +353,12 @@ newKey name ty p = do
   return $ Key name Nothing    [FRead,FWrite] p Nothing un ty
 
 
-catchPluginException :: InformationSchema -> Int -> Int -> [(Key, FTB Showable)] -> IO (a) -> IO (Either Int (a))
+catchPluginException :: InformationSchema -> Int -> Int -> [(Key, FTB Showable)] -> IO a -> IO (Either Int (a))
 catchPluginException inf pname tname  idx i = do
   (Right <$> i) `catch` (\e  -> do
                 t <- getCurrentTime
                 print (t,e :: SomeException)
-                id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (\"user\",\"schema\",\"table\",\"plugin\",exception,data_index2,instant) values(?,?,?,?,?,?,?) returning id" (fst $ username inf , schemaId inf,pname,tname,Binary (B.encode $ show (e :: SomeException)) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value" . second (Binary . B.encode) . first keyValue) idx) ), t )
+                id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (\"user\",\"schema\",\"table\",\"plugin\",exception,data_index2,instant) values(?,?,?,?,?,? :: metadata.key_value[] ,?) returning id" (fst $ username inf , schemaId inf,pname,tname,Binary (B.encode $ show (e :: SomeException)) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value" . second (Binary . B.encode) . first keyValue) idx) ) , t )
                 return (Left (unOnly $ head $id)))
 
 logLoadTimeTable

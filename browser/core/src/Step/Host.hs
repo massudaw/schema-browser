@@ -79,7 +79,8 @@ indexFieldRec n v = errorWithStackTrace (show (n,v))
 genPredicate i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
 genPredicate i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
 genPredicate i (IProd b l) =  (\l -> if b then Just $ PrimColl (IProd b l,Right (if i then Not IsNull else IsNull) ) else Nothing ) $ l
-genPredicate i n@(Nested (IProd b p) l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> genPredicate i (IProd b [a]) ) <$> p -- AndColl <$> liftA2 (\i  j -> [i,j]) (genPredicate i p)  ( genNestedPredicate p i l)
+-- genPredicate i n@(Nested p@(IProd _ _ ) l ) =  genNestedPredicate p i l
+genPredicate i n@(Nested (IProd b p ) l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> if i then genPredicate i (IProd b [a]) else  Nothing ) <$> p
 genPredicate _ i = errorWithStackTrace (show i)
 
 genNestedPredicate n i v = fmap (\(a,b) -> (Nested n a , b )) <$> genPredicate i v
