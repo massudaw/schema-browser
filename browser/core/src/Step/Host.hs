@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Host (module Step.Common,attrT,findPK,findFK,findAttr,findFKAttr,isNested,findProd,replace,uNest,hasProd,indexField,indexFieldRec,indexer,genPredicate,joinFTB) where
+module Step.Host (module Step.Common,attrT,findFK,findAttr,findFKAttr,isNested,findProd,replace,uNest,hasProd,indexField,indexFieldRec,indexer,genPredicate,joinFTB) where
 
 import Types
 import Control.Applicative.Lift
@@ -100,7 +100,6 @@ isNested p i =  False
 uNest :: Access Key -> Access Key
 uNest (Nested pn i) = i
 
-findPK = concat . fmap keyattr  .toList . _kvvalues  . unTB . tbPK
 
 indexer field = foldr (\i j -> Nested  (IProd True i) (Many [j]) ) (IProd True (last vec)) (init vec )
   where vec = splitOn "," <$> splitOn ":" field

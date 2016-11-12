@@ -1,10 +1,11 @@
 {-# LANGUAGE FlexibleContexts,TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
-module Postgresql.Backend where
+module Postgresql.Backend (connRoot,postgresOps) where
 
 import Types
 import qualified Types.Index as G
 import Step.Common
 import Step.Host
+import Data.Functor.Apply
 import System.Environment
 import Safe
 import Control.Monad
@@ -126,6 +127,9 @@ updatePatch conn kv old  t =
     tbskv = snd isM
     isM :: TBData PGKey  Showable
     isM =  justError ("cant diff befor update" <> show (kv,old)) $ diffUpdateAttr kv old
+
+diffUpdateAttr :: (Ord k , Ord a) => TBData k a -> TBData k a -> Maybe (TBData k a )
+diffUpdateAttr  kv kold@(t,_ )  =  fmap ((t,) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . snd . tableNonRef'  $ kv ) (unKV . snd . tableNonRef' $ kold )
 
 differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 
@@ -252,7 +256,7 @@ loadDelayed inf t@(k,v) values@(ks,vs)
            delayedTB1 =  fmap (mapComp (\(KV i ) -> KV (M.filterWithKey  (\i _ -> isJust $ M.lookup i filteredAttrs )  i )))
            delayed =  mapKey' (kOptional . ifDelayed . ifOptional) (mapValue' (const ()) (delayedTB1 t))
            str = "select row_to_json(q)  FROM (SELECT " <> explodeRecord delayed <> " FROM " <> expandBaseTable (TB1 t) <> " WHERE " <> whr <> ") as q "
-           pk = (fmap (firstTB (recoverFields inf) .unTB) $ fmap snd $ L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)   ) $ M.toList $ _kvvalues $  runIdentity $ getCompose $ tbPK' (tableNonRef' values))
+           pk = (fmap (firstTB (recoverFields inf) .unTB) $ fmap snd $ L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)   ) $ M.toList $ _kvvalues $  unTB $ snd $ tbPK (tableNonRef' values))
        print (T.unpack str,show pk )
        is <- queryWith (fromRecordJSON delayed) (conn inf) (fromString $ T.unpack str) pk
        res <- case is of

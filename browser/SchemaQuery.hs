@@ -312,7 +312,6 @@ joinTable reflist  a b c d e =
 
 
 predNull (WherePredicate i) = L.null i
--- predNull (LegacyPredicate i) = L.null i
 
 filterfixed fixed v
   = if predNull fixed
@@ -332,10 +331,10 @@ pageTable flag method table page size presort fixed = do
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
     (reso ,nchan) <- liftIO $ atomically $
-      (,) <$> readTVar (collectionState dbvar)<*> dupTChan (patchVar dbvar)
+      (,) <$> readTVar (collectionState dbvar)<*> cloneTChan (patchVar dbvar)
 
     (fixedmap,fixedChan)  <- liftIO $ atomically $
-         liftA2 (,) (readTVar (idxVar dbvar)) (dupTChan (idxChan dbvar))
+        liftA2 (,) (readTVar (idxVar dbvar)) (cloneTChan (idxChan dbvar))
     iniT <- do
 
        idxVL<- liftIO$ atomically $readTVar (idxVarLoad dbvar)
@@ -394,7 +393,7 @@ convertChanStepper0  ini nchan = do
 
 convertChanStepper idxv idxref = do
         (ini,nchan) <- liftIO $atomically $
-          (,) <$> readTVar idxref <*> dupTChan idxv
+          (,) <$> readTVar idxref <*> cloneTChan idxv
         convertChanStepper0 ini nchan
 
 convertChanEvent chan = do
@@ -407,7 +406,7 @@ convertChanEvent chan = do
 
 convertChanTidings fixed idxv idxref = do
       (ini,nchan) <- liftIO $atomically $
-          (,) <$> readTVar idxref <*> dupTChan idxv
+          (,) <$> readTVar idxref <*> cloneTChan idxv
       convertChanTidings0 fixed ini nchan
 
 

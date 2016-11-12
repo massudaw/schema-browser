@@ -269,7 +269,7 @@ createTableRefsUnion inf m i  = do
           modifyTVar' collectionState (flip (L.foldl' apply ) (concat patches))
         return patches)
   R.registerDynamic (killThread t1)
-  return (tableMeta i,  DBRef mdiff midx chanidx collectionState midxLoad )
+  return (tableMeta i,  DBRef nmdiff midx nchanidx collectionState midxLoad )
 
 
 createTableRefs :: InformationSchema -> Table -> R.Dynamic (KVMetadata Key,DBRef Key Showable)
@@ -300,7 +300,7 @@ createTableRefs inf i = do
           modifyTVar' collectionState (flip (L.foldl' apply ) (concat patches))
       )  (\e -> print ("block data ",tableName i ,e :: SomeException))
   R.registerDynamic (killThread t1)
-  return (tableMeta i,  DBRef mdiff midx chanidx collectionState midxLoad )
+  return (tableMeta i,  DBRef nmdiff midx nchanidx collectionState midxLoad )
 
 
 notException e =  if isJust eb || isJust es then Nothing else Just e

@@ -791,21 +791,6 @@ attrT (i,j) = Compose . Identity $ Attr i j
 -- notOptional :: k a -> G.TBIndex k a
 notOptionalPK m =  justError "cant be empty " . traverse unSOptional'  $ m
 
-tbPK :: (Functor f,Ord k)=>TB3 f k a -> Compose f (KV  (Compose f (TB f ))) k a
-tbPK = tbFilter  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) ))
-
-tbFilter :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
-tbFilter pred (TB1 i) = tbFilter' pred i
-tbFilter pred (LeftTB1 (Just i)) = tbFilter pred i
-tbFilter pred (ArrayTB1 (i :| _ )) = tbFilter pred i
-tbFilter pred (DelayedTB1 (Just i)) = tbFilter pred i
-
-
-
-tbFilter' :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3Data f k a ->  Compose f (KV  (Compose f (TB f ))) k a
-tbFilter' pred (kv,item) =  mapComp (\(KV item)->  KV $ Map.filterWithKey (\k _ -> pred kv k ) $ item) item
--- Combinators
-
 txt = TB1 . SText
 int = TB1 . SNumeric
 

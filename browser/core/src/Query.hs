@@ -12,12 +12,10 @@ module Query
   ,joinRel2
   ,isPrimReflexive
   ,alterKeyType
-  ,inattr
   ,searchGist
   ,rawFullName
   ,unComp
   ,isTableRec
-  ,tbFilterE
   ,isKDelayed
   ,isKOptional
   ,lookGist
@@ -30,10 +28,8 @@ module Query
   ,isReflexive
   ,isInlineRel
   ,attrValueName
-  ,diffUpdateAttr
   ,relabelT
   ,showTable
-  ,tbPK'
   ,isAccessRel
   ,isArrayRel
   ,isLeftRel
@@ -44,7 +40,6 @@ module Query
   ,tableViewNR
   ,inf'
   ,sup'
-  ,tbAttr
   )
   where
 
@@ -53,14 +48,12 @@ import Control.Arrow (first)
 import qualified Control.Lens as Le
 import NonEmpty (NonEmpty(..))
 import qualified NonEmpty as Non
-import Data.Functor.Apply
 import Data.Time.LocalTime
 import Data.Unique
 import Data.Functor.Identity
 import Data.Ord
 import qualified Data.Poset as P
 import qualified Data.Foldable as F
--- import Data.Traversable (mapAccumL)
 import qualified Data.Traversable as Tra
 import Data.Maybe
 import qualified Data.Interval as Interval
@@ -92,6 +85,10 @@ import qualified Types.Index as G
 
 
 
+
+transformKey
+  :: (Eq b, Show a, Show b) =>
+     KType (Prim KPrim b) -> KType (Prim KPrim b) -> FTB a -> FTB a
 -- transformKey ki ko v | traceShow (ki,ko,v) False = undefined
 transformKey (KSerial i)  (KOptional j) (SerialTB1 v)  | i == j = LeftTB1  v
 transformKey (KOptional i)  (KSerial j) (LeftTB1 v)  | i == j = SerialTB1 v
@@ -136,8 +133,6 @@ showTable t  = rawSchema t <> "." <> rawName t
 
 
 
-diffUpdateAttr :: (Ord k , Ord a) => TBData k a -> TBData k a -> Maybe (TBData k a )
-diffUpdateAttr  kv kold@(t,_ )  =  fmap ((t,) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . snd . tableNonRef'  $ kv ) (unKV . snd . tableNonRef' $ kold )
 
 
 attrValueName :: (Ord a,Ord k, Show k ,Show a) => TB Identity (FKey k) a -> Text
@@ -160,7 +155,7 @@ allKVRec :: Ord f => TB2 f Showable -> [FTB Showable]
 allKVRec = concat . F.toList . fmap allKVRec'
 
 allKVRec' :: Ord k => TBData k  Showable -> [FTB Showable]
-allKVRec'  t@(m, e)=  concat $ fmap snd $ L.sortBy (comparing (\i -> maximum $ (`L.elemIndex` _kvdesc m)  <$> (fmap _relOrigin $ F.toList $fst i) ))  $ M.toList (go . unTB <$> (_kvvalues $ unTB $ eitherDescPK t))
+allKVRec'  t@(m, e)=  concat $ fmap snd $ L.sortBy (comparing (\i -> maximum $ (`L.elemIndex` _kvdesc m)  <$> (fmap _relOrigin $ F.toList $fst i) ))  $ M.toList (go . unTB <$> (_kvvalues $ unTB $ snd $ eitherDescPK t))
   where
         go  (FKT _  _ tb) =  allKVRec  tb
         go  (IT  _ tb) = allKVRec tb
@@ -170,18 +165,13 @@ allKVRec'  t@(m, e)=  concat $ fmap snd $ L.sortBy (comparing (\i -> maximum $ (
 tableToKV r =   do
    ((rawPK r)) <> (rawDescription r)  <>(S.toList (rawAttrs r))
 
-prelabelTable :: Text -> Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (Labeled Text Table,TB3Data (Labeled Text)  Key  () )
-prelabelTable pre i = do
-   t <- tname i
-   name <- Tra.traverse (\k-> (S.singleton (Inline k),) <$> kname t  k ) (tableToKV i)
-   return (Labeled pre i, (tableMeta i,) $ Compose $ Labeled (label t) $ KV $ M.fromList $ fmap Compose <$> name)
 
 
-labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (Labeled Text Table,TB3Data (Labeled Text)  Key  () )
+labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (TB3Data (Labeled Text)  Key  () )
 labelTable i = do
    t <- tname i
    name <- Tra.traverse (\k-> (S.singleton (Inline k),) <$> kname t k ) (tableToKV i)
-   return (t, (tableMeta i,) $ Compose $ Labeled (label t) $ KV $ M.fromList $ fmap Compose <$> name)
+   return ( (tableMeta i,) $ Compose $ Labeled (label t) $ KV $ M.fromList $ fmap Compose <$> name)
 
 unComp :: (Show (g k a) ,F.Foldable f ) => Compose f g k a -> g k a
 unComp = head . F.toList . getCompose
@@ -247,32 +237,18 @@ allRec' i t = unTlabel' $ tableView  i t
 
 tableView  invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   when (L.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r ) <> " the pk is null")
-  (t,ks) <- labelTable r
+  ks <- labelTable r
   tb <- recurseTB invSchema (rawFKS r) False [] ks
   return  $ tb
 
 tableViewNR invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   when (L.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r )<> " the pk is null")
-  (t,ks) <- labelTable r
+  ks <- labelTable r
   tb <- recurseTB invSchema (S.filter (all isInlineRel. F.toList .pathRelRel)$ rawFKS r) False [] ks
   return  $ TB1 tb
 
 
 
-
---- Note [InlinableRec]
--- when some base table has a recursive inlinable field we need to
--- open the table reach the recursive attr, perform a with recursive query
--- with field and index tagging , then recover the base table
--- for example :
---  def :
---  rec_root ( id serial , rec_test :: rec_test)
---  rec_test ( tag tag , rec_test:: rec_test)
---  procedure :
---   open(id,iter,tag,rec_test) (expand rec_root with iter 0 and open the recursive field) (iter over the recursive field)
---   close(id,iter,tag,rec_test) (get max iter) (iterate until last item)
---   final(id,rec_test) join rec_root where iter = 0 and replace rec_field with (row (tag,rec_test))
---
 
 
 
@@ -284,10 +260,15 @@ pathToRel (Path ifk (FKJoinTable ks _ ) ) = ks
 
 dumbKey n = Key n  Nothing [] 0 Nothing (unsafePerformIO newUnique) (Primitive (AtomicPrim (PInt 0) ))
 
+findRefIT ifk = justError ("cant find ref" <> show ifk). M.lookup (S.map Inline ifk )
+findRefFK fks ksbn = kvlist $ fmap (\i -> Compose . justError ("cant find " ). M.lookup (S.singleton (Inline i)) $ ksbn ) fks
+
 recursePath
-  :: KVMetadata Key -> Bool->  RecState Key
+  :: KVMetadata Key
+  -> Bool
+  ->  RecState Key
      -> [(Set (Rel Key), Labeled Text (TB (Labeled Text) Key ()))]
-     -> [(Set (Rel Key), Labeled Text (TB (Labeled Text) Key ()))]
+     -> M.Map (Set (Rel Key)) (Labeled Text (TB (Labeled Text) Key ()))
      -> TableMap
      -> Path (Set Key) SqlOperation
      -> State
@@ -296,15 +277,15 @@ recursePath
 recursePath m isLeft isRec vacc ksbn invSchema p@(Path ifk jo@(FKInlineTable (s,t) ) )
     | anyArrayRel ks  =   do
           let
-              ref = (\i -> justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) $ head (S.toList ifk )
-          (_,ksn) <-  prelabelTable  (label ref) nextT
+              ref = findRefIT ifk ksbn
+          ksn <-  labelTable  nextT
           tb <- fun ksn
           tas <- tname nextT
           return $  Compose $ Labeled ((label $ ref)) $ IT (head (S.toList ifk))   (mapOpt $ mapArray $ TB1 tb )
     | otherwise = do
           let
-            ref = (\i -> justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) $ head (S.toList ifk )
-          (_,ksn) <-  prelabelTable  (label ref) nextT
+            ref = findRefIT ifk  ksbn
+          ksn <-  labelTable  nextT
           tb <- fun ksn
           lab <- if isTableRec' tb
             then do
@@ -324,14 +305,14 @@ recursePath m isLeft isRec vacc ksbn invSchema p@(Path ifk jo@(FKInlineTable (s,
 
 recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn,tn)) )
     | anyArrayRel ks =   do
-          (t,ksn) <- labelTable nextT
+          ksn <- labelTable nextT
           tb <-fun ksn
           tas <- tname nextT
           let knas = dumbKey (rawName nextT)
           kas <- kname tas  knas
-          return $ Compose $ Labeled (label $ kas) (FKT (kvlist $ fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton i) . S.map _relOrigin . fst )$ ksbn ) (_relRoot <$> (filter (\i -> not $ S.member i (S.unions $ fmap fst vacc)) $  filterReflexive ks) ))  ks  (mapOpt $ mapArray $ TB1 tb  ))
+          return $ Compose $ Labeled (label $ kas) (FKT (findRefFK (_relRoot <$> (filter (\i -> not $ S.member i (S.unions $ fmap fst vacc)) $  filterReflexive ks) ) ksbn  )  ks  (mapOpt $ mapArray $ TB1 tb  ))
     | otherwise = do
-          (t,ksn) <- labelTable nextT
+          ksn <- labelTable nextT
           tb@(m,Compose r)  <-fun ksn
           lab <- if not  . L.null $ isRec
             then do
@@ -340,7 +321,7 @@ recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn
               kas <- kname tas  knas
               return $ Labeled (label kas)
             else return  Unlabeled
-          return $ Compose $ lab $ FKT (kvlist $ fmap (\i -> Compose . justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks)))  ks (mapOpt $ TB1 tb)
+          return $ Compose $ lab $ FKT (findRefFK  (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks)) ksbn )  ks (mapOpt $ TB1 tb)
   where
         nextT = (\(Just i)-> i) (join $ HM.lookup tn <$> (HM.lookup sn invSchema))
         e = S.fromList $ rawPK nextT
@@ -355,7 +336,7 @@ recursePath m isLeft isRec vacc ksbn invSchema jo@(Path ifk (FunctionField k l f
   = return $ Compose $ Labeled (label ref) (Fun k  (l,a) (TB1 () ))
     where
       a = f
-      ref = (\i -> justError ("cant find " ). fmap snd . L.find ((== S.singleton (Inline i)) . fst )$ ksbn ) $ head (S.toList ifk )
+      ref = (\i -> justError ("cant find " ).  M.lookup (S.singleton (Inline i)) $ ksbn ) $ head (S.toList ifk )
 
 recurseTB :: TableMap -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TB3Data (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3Data (Labeled Text) Key ())
 recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else m  ,) <$>
@@ -382,7 +363,7 @@ recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else
                       cond (_,l) = mAny (\l-> L.length l == 1  && ((== relFk ). S.fromList. last $ l)) l
                   if L.length lastItem < 2
                   then   do
-                    i <- fmap (relFk,) . recursePath m nextLeft ( fmap (fmap (L.drop 1 ))  <$> L.filter (\(_,i) -> mAny (\i -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) i ) (isRec <> fmap (\i -> (i,i) ) (_kvrecrels m))) vacc ( (M.toList $  fmap getCompose items )) invSchema $ fk
+                    i <- fmap (relFk,) . recursePath m nextLeft ( fmap (fmap (L.drop 1 ))  <$> L.filter (\(_,i) -> mAny (\i -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) i ) (isRec <> fmap (\i -> (i,i) ) (_kvrecrels m))) vacc ( (fmap getCompose items )) invSchema $ fk
                     return (fmap getCompose i:vacc)
                   else return vacc
                   ) (return []) $ P.sortBy (P.comparing pathRelRel) (F.toList $ fks' )
@@ -432,27 +413,22 @@ liftASch _ _ _ i = errorWithStackTrace (show i)
 
 
 
-eitherDescPK :: (Functor f,F.Foldable f,Ord k) =>TB3Data f k a -> Compose f (KV  (Compose f (TB f ))) k a
+eitherDescPK :: (Functor f,F.Foldable f,Ord k) =>TB3Data f k a -> TB3Data f k a
 eitherDescPK i@(kv, _)
-  | not ( null ( _kvdesc kv) ) =  if L.null (F.toList desc) then tbPK' i else desc
-  | otherwise = tbPK' i
+  | not ( null ( _kvdesc kv) ) =  if L.null (F.toList desc) then tbPK i else desc
+  | otherwise = tbPK i
     where desc = tbDesc i
 
 
-tbDesc :: (Functor f,Ord k)=>TB3Data f k a -> Compose f (KV  (Compose f (TB f ))) k a
+tbDesc :: (Functor f,Ord k)=>TB3Data f k a ->  TB3Data f k a
 tbDesc  =  tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvdesc kv ) ))
 
+tbPK :: (Functor f,Ord k)=>TB3Data f k a -> TB3Data f k a
+tbPK = tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) ))
 
-
-tbPK' :: (Functor f,Ord k)=>TB3Data f k a -> Compose f (KV  (Compose f (TB f ))) k a
-tbPK' = tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) ))
-
-tbAttr :: (Functor f,Ord k) =>  TB3 f k a ->  Compose f (KV  (Compose f (TB f ))) k a
-tbAttr  =  tbFilter  (\kv k -> not (S.isSubsetOf (S.map _relOrigin k) (S.fromList (_kvpk kv) <> (S.fromList (_kvdesc kv ))) ))
-
-tbFilterE  pred (kv,item) =  (kv,mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item)
-
-
+tbFilter' :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3Data f k a ->  TB3Data f k a
+tbFilter' pred (kv,item) =  (kv,mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item)
+-- Combinators
 
 
 
@@ -602,8 +578,6 @@ lookGist un pk  = G.search (tbpred un pk)
 
 
 
-inattr :: TB Identity b a -> b
-inattr = _relOrigin . head . keyattri
 
 
 
