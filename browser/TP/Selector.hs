@@ -48,12 +48,9 @@ import GHC.Stack
 
 calendarSelector = do
     let buttonStyle k e = e # set UI.text (fromJust $ M.lookup k transRes)# set UI.class_ "btn-xs btn-default buttonSet"
-          where transRes = M.fromList [("month","Mês"),("week","Semana"),("day","Dia")]
+          where transRes = M.fromList [("year","Ano"),("month","Mês"),("week","Semana"),("day","Dia")]
         defView = "week"
-        viewList = ["month","day","week"] :: [String]
-        transMode _ "month" = "month"
-        transMode True i = "agenda" <> capitalize i
-        transMode False i = "basic" <> capitalize i
+        viewList = ["year","month","day","week"] :: [String]
         capitalize (i:xs) = toUpper i : xs
         capitalize [] = []
 
@@ -63,12 +60,7 @@ calendarSelector = do
     next <- UI.button  # set text ">"
     today <- UI.button # set text "Hoje"
     prev <- UI.button  # set text "<"
-    agenda <- mdo
-      agenda <- UI.button # sink text ((\b -> if b then "Agenda" else "Basic") <$> agB)
-      agendaE <- UI.click agenda
-      let agE = pure not <@ agendaE
-      agB <- ui $ accumB False agE
-      return $ TrivialWidget (tidings agB (flip ($) <$> agB <@> agE)) agenda
+
 
     current <- UI.div # set children [prev,today,next]
     nextE <- UI.click next
@@ -82,8 +74,8 @@ calendarSelector = do
     let incrementT =  tidings increment (flip ($) <$> increment <@> currentE)
 
     -- currentOutput <- UI.div # sink text (fmap show $ (\i j -> (resRange False i j ,resRange True i j))<$>  facts (triding resolution) <*> facts incrementT )
-    sidebar <- UI.div # set children [getElement agenda,current,getElement resolution]
-    return (sidebar,(triding agenda ,incrementT,triding resolution))
+    sidebar <- UI.div # set children [current,getElement resolution]
+    return (sidebar,(incrementT,triding resolution))
 
 positionSel = do
     cpos <-UI.div

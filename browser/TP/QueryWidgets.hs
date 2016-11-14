@@ -182,10 +182,10 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
       tdInput = tdInputPre
       predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
       tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
-  headerP <- UI.button # set text (T.unpack n) {- # sink UI.enabled (isJust <$> facts tdInput) -} # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+  headerP <- UI.button # set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   ini <- currentValue (facts tdInput )
   kk <- ui $ stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
-  pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap ( join . traceShowId . liftA2 diff v . fmap (liftTable' inf t).  join . eitherToMaybe ). catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
+  pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap ( join .  liftA2 diff v . fmap (liftTable' inf t).  join . eitherToMaybe ). catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
   return (headerP, (snd f ,   pgOut ))
 
 pluginUI inf oldItems (idp,p@(FPlugins n t (DiffIOPlugin arrow))) = do
@@ -193,17 +193,16 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (DiffIOPlugin arrow))) = do
   let f = second (liftAccess inf t ). first (liftAccess inf t ) $ staticP arrow
       action = pluginActionDiff p
       pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (fst f)])
-      tdInputPre = join . fmap (\i -> if traceShow (i,pred :: TBPredicate Key Showable) $ G.checkPred i pred  then Just i else Nothing) <$>  oldItems
+      tdInputPre = join . fmap (\i -> if G.checkPred i pred  then Just i else Nothing) <$>  oldItems
       tdInput = tdInputPre
       predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
       tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
-      -- tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
-  headerP <- UI.button # set text (T.unpack n) # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput)  #set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   cliHeader <- UI.click headerP
   let ecv = facts tdInput <@ cliHeader
   vo <- currentValue (facts tdOutput)
   vi <- currentValue (facts tdInput)
-  bcv <- ui $ stepper (Nothing {-maybe vi (const Nothing) vo-}) ecv
+  bcv <- ui $ stepper Nothing  ecv
   pgOut  <- ui $mapTEventDyn (\v -> do
     liftIO .fmap ( fmap (liftPatch inf t ). join . eitherToMaybe ) . catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "no Action"  v) $ ( action $ fmap (mapKey' keyValue) v)
                              )  (tidings bcv ecv)
@@ -214,22 +213,19 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (BoundedPlugin2 arrow))) = do
   overwrite <- checkedWidget (pure False)
   let f = second (liftAccess inf t ). first (liftAccess inf t ) $ staticP arrow
       action = pluginAction p
-      -- tdInputPre = fmap (checkTable' (fst f).check) <$>  oldItems
-      -- tdInput = join . fmap (eitherToMaybe .  runErrors) <$> tdInputPre
       pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (fst f)])
-      tdInputPre = join . fmap (\i -> if traceShow (i,pred :: TBPredicate Key Showable) $ G.checkPred i pred  then Just i else Nothing) <$>  oldItems
+      tdInputPre = join . fmap (\i -> if G.checkPred i pred  then Just i else Nothing) <$>  oldItems
       tdInput = tdInputPre
       predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
       tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
-      -- tdOutput = join . fmap (checkTable (snd f)) <$> oldItems
-  headerP <- UI.button # set text (T.unpack n) {- # sink UI.enabled (isJust <$> facts tdInput) -} # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+  headerP <- UI.button # set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   cliHeader <- UI.click headerP
   let ecv = facts tdInput <@ cliHeader
   vo <- currentValue (facts tdOutput)
   vi <- currentValue (facts tdInput)
-  bcv <- ui $ stepper (Nothing {-maybe vi (const Nothing) vo-}) ecv
+  bcv <- ui $ stepper Nothing ecv
   pgOut  <- ui $mapTEventDyn (\v -> do
-    liftIO .fmap (traceShowId .join . liftA2 diff v . fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v
+    liftIO .fmap (join . liftA2 diff v . fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v
                              )  (tidings bcv ecv)
   return (headerP, (snd f ,  pgOut ))
 

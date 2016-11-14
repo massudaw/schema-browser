@@ -32,7 +32,6 @@ import OAuthClient
 
 import Types
 import Types.Patch
-import Types.Index (getIndex)
 import Step.Client
 import RuntimeTypes
 import Utils
@@ -182,6 +181,7 @@ cpfForm = BoundedPlugin2 url
               returnA -< Nothing
 
 atPrim  p = Primitive (AtomicPrim p )
+
 queryCPFStatefull = FPlugins "CPF Receita" "owner" $ StatefullPlugin
   [(([],[("captchaViewer",atPrim (PMime "image/jpg") )
     ,("sess",atPrim PSession )])
@@ -265,10 +265,10 @@ germinacao = FPlugins pname tname $ PurePlugin  url
     tname = "plantio"
     url :: ArrowReaderM Identity
     url = proc t -> do
-      plant <- idxR "plantio"  -< ()
-      poly <- atR "planta" (idxR "periodo_germinacao" ) -< ()
+      plant <- idxK "plantio"  -< ()
+      poly <- atR "planta" (idxK "periodo_germinacao" ) -< ()
       odxR "previsao_germinacao" -< ()
-      returnA -< (\(TB1 (SDate d)) (IntervalTB1 i)  -> tblist [_tb $ Attr "previsao_germinacao" (LeftTB1 $ Just $ IntervalTB1 $ ((\(TB1 i) -> TB1 $ SDate$  addDays  (fromIntegral i)d ) <$>   i))] ) <$> plant <*> poly
+      returnA -< Just $ (\(TB1 (SDate d)) (IntervalTB1 i)  -> tblist [_tb $ Attr "previsao_germinacao" (LeftTB1 $ Just $ IntervalTB1 $ ((\(TB1 i) -> TB1 $ SDate$  addDays  (fromIntegral i)d ) <$>   i))] )  plant  poly
 
 preparoInsumo = FPlugins pname tname $ PurePlugin  url
 
@@ -278,10 +278,10 @@ preparoInsumo = FPlugins pname tname $ PurePlugin  url
     tname = "insumo_producao"
     url :: ArrowReaderM Identity
     url = proc t -> do
-      plant <- idxR "producao"  -< ()
-      poly <- atR "insumo" (idxR "periodo_preparo" ) -< ()
+      plant <- idxK "producao"  -< ()
+      poly <- atR "insumo" (idxK "periodo_preparo" ) -< ()
       odxR "previsao_preparo" -< ()
-      returnA -< (\(TB1 (SDate d)) (IntervalTB1 i)  -> tblist [_tb $ Attr "previsao_preparo" (LeftTB1 $ Just $ IntervalTB1 $ ((\(TB1 i) -> TB1 $ SDate$  addDays  (fromIntegral i)d ) <$>   i))] ) <$> plant <*> poly
+      returnA -< Just $ (\(TB1 (SDate d)) (IntervalTB1 i)  -> tblist [_tb $ Attr "previsao_preparo" (LeftTB1 $ Just $ IntervalTB1 $ ((\(TB1 i) -> TB1 $ SDate$  addDays  (fromIntegral i)d ) <$>   i))] )  plant poly
 
 
 
@@ -709,9 +709,9 @@ importarofx = FPlugins "OFX Import" tname  $ BoundedPlugin2 url
     tname = "account_file"
     url :: ArrowReader
     url = proc t -> do
-      fn <- idxR "file_name" -< t
-      i <- idxR "import_file" -< t
-      r <- atR "account" $ idxR "id_account" -< t
+      fn <- idxK "file_name" -< t
+      i <- idxK "import_file" -< t
+      r <- atR "account" $ idxK "id_account" -< t
       atR "statements,account" (proc t -> do
         odxR "fitid" -< t
         odxR "memo" -< t
@@ -729,7 +729,7 @@ importarofx = FPlugins "OFX Import" tname  $ BoundedPlugin2 url
         odxR "payeeid" -< t
         ) -< t
 
-      b <- act (fmap join . traverse ofx ) -< liftA3 (,,) fn i r
+      b <- act ofx  -< (,,) fn i r
       let ao :: TB2 Text Showable
           ao =  LeftTB1 $ ArrayTB1 . Non.fromList . fmap (TB1 . tblist . fmap _tb) <$>  join (nonEmpty <$> b)
           ref :: [Compose Identity (TB Identity ) Text(Showable)]
@@ -840,4 +840,4 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
 
 
 plugList :: [PrePlugins]
-plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,areaDesign,siapi3CheckApproval,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin , importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]
+plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,areaDesign,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin , importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]

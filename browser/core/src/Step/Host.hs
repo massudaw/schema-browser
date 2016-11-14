@@ -42,9 +42,9 @@ findAttr l v =  M.lookup (S.fromList $ fmap Inline l) $  _kvvalues $ unF (snd v)
 
 findFKAttr :: (Foldable f ,Show a) => [Key] -> (TB3Data f Key a) -> Maybe (Compose f (TB f ) Key a)
 findFKAttr l v =   case fmap  (fmap unF )$ L.find (\(k,v) -> not $ L.null $ L.intersect l (S.toList k) ) $ M.toList $ M.mapKeys (S.map ( _relOrigin)) $ _kvvalues $ unF (snd v) of
-                      Just (k,(FKT a _ _ )) ->   L.find (\i -> not $ L.null $ L.intersect l $ fmap (_relOrigin) $ keyattr $ i ) (F.toList $ _kvvalues $a)
-                      Just (k ,i) -> errorWithStackTrace (show l)
-                      Nothing -> Nothing
+      Just (k,(FKT a _ _ )) ->   L.find (\i -> not $ L.null $ L.intersect l $ fmap (_relOrigin) $ keyattr $ i ) (F.toList $ _kvvalues $a)
+      Just (k ,i) -> errorWithStackTrace (show l)
+      Nothing -> Nothing
 
 
 replace ix i (Nested k nt) = Nested k (replace ix i nt)
@@ -79,7 +79,6 @@ indexFieldRec n v = errorWithStackTrace (show (n,v))
 genPredicate i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
 genPredicate i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
 genPredicate i (IProd b l) =  (\l -> if b then Just $ PrimColl (IProd b l,Right (if i then Not IsNull else IsNull) ) else Nothing ) $ l
--- genPredicate i n@(Nested p@(IProd _ _ ) l ) =  genNestedPredicate p i l
 genPredicate i n@(Nested (IProd b p ) l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> if i then genPredicate i (IProd b [a]) else  Nothing ) <$> p
 genPredicate _ i = errorWithStackTrace (show i)
 

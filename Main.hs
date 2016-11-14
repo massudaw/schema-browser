@@ -31,13 +31,13 @@ import qualified Data.ByteString as BS
 
 import qualified Data.HashMap.Strict as HM
 
+
 main :: IO ()
 main = do
   args <- getArgs
   smvar   <- createVar
-  let db = argsToState args
-  -- Load Metadata
   let
+    db = argsToState args
     amap = authMap smvar db (user db , pass db )
 
   print "Load Metadata"
@@ -45,11 +45,6 @@ main = do
 
   print "Load Plugins"
   regplugs <- plugs smvar amap db plugList
-    {-_ <- runDynamic $keyTablesInit  smvar ("gmail", T.pack $ user db) amap regplugs
-  _ <- runDynamic $keyTablesInit  smvar ("incendio", T.pack $ user db) amap regplugs
-  _ <- runDynamic $keyTablesInit  smvar ("health", T.pack $ user db) amap regplugs
-  _ <- runDynamic $keyTablesInit  smvar ("nutrition", T.pack $ user db) amap regplugs
--}
   print "Start Server"
   (ref ,ls)<- runDynamic $ addServer metas
 

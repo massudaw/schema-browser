@@ -583,6 +583,18 @@ testDyn = return $ do
   nest <- UI.div # sink children (F.toList <$> facts out)
   UI.div # set children [getElement list,getElement b,nest]
 
+importUI f = do
+    runFunction $ ffi "jQuery.ajaxSettings.cache = true"
+    w <- askWindow
+    getHead w #+ f
+    runFunction $ ffi "jQuery.ajaxSettings.cache = false"
+
+js , css :: String -> UI Element
+css ref =  mkElement "link" # set UI.href ("static/"<> ref)# set UI.rel "stylesheet"
+js ref =  mkElement "script" # set UI.type_ "text/javascript" # set UI.src ("static/"<> ref)
+jsRemote ref =  mkElement "script" # set UI.type_ "text/javascript" # set UI.src ref
+
+
 
 testWidget e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "static", jsCustomHTML = Just "index.html" })  ( \w ->  do
               els <- e
@@ -618,7 +630,6 @@ accumDiff  f t = mdo
   (del,add) <- diffAddRemove t f
   del2 <- mapEvent (\(fin,d) -> do
          let fins =  catMaybes $ fmap (flip M.lookup fin) d
-         print ("finalizers" ,d, L.length $ concat $ fmap snd fins)
          _ <- traverse sequence_ $ fmap snd fins
          return d)  ((,) <$> bs <@> (S.toList  <$> del ))
   let eva = unionWith (.) ( (\s m -> foldr (M.delete ) m s) <$> del2 ) ((\s m -> foldr (uncurry M.insert ) m s) <$> add )

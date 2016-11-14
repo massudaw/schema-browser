@@ -4,7 +4,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module TP.Agenda where
+module TP.Agenda (eventWidget) where
 
 import GHC.Stack
 import Step.Host
@@ -58,9 +58,26 @@ calendarCreate m cal def = runFunction $ ffi "createAgenda(%1,%2,%3)" cal def m
 calendarAddSource cal t evs = runFunction $ ffi "addSource(%1,%2,%3)" cal (tableName t) evs
 calendarRemoveSource cal t = runFunction $ ffi "removeSource(%1,%2)" cal (tableName t)
 
-eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
+data Mode
+  = Agenda
+  | Basic
+  | Timeline
+  deriving(Eq,Show,Ord)
+
+eventWidget body (incrementT,resolutionT) sel inf cliZone = do
+    w <-  askWindow
+    importUI $ fmap js
+       ["fullcalendar-3.0.1/lib/jquery-ui.min.js"
+       ,"fullcalendar-3.0.1/lib/moment.min.js"
+       ,"fullcalendar-3.0.1/fullcalendar.min.js"
+       ,"fullcalendar-scheduler-1.4.0/scheduler.min.js"
+       ,"fullcalendar-3.0.1/locale-all.js"]
+              <>  fmap css
+       ["fullcalendar-3.0.1/fullcalendar.min.css"
+       ,"fullcalendar-scheduler-1.4.0/scheduler.min.css"
+       ]
+
     let
-      calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
       schemaPred =  [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals) )]
       schemaPred2 =  [(IProd True ["schema"],Left (int (schemaId inf),Equals) )]
 
@@ -83,7 +100,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
             convField i = errorWithStackTrace (show i)
             projf  r efield@(TB1 (SText field))  = (if (isJust $ join $  unSOptional <$> attr) then Left else Right) (M.fromList $ concat (convField <$> maybeToList attr  ) <> [("id", txt $ writePK r efield   ),("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color ),("field", efield )] :: M.Map Text (FTB Showable))
                   where attr  = attrValue <$> lookAttrM inf field r
-            proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  projf r <$> F.toList efields
+            proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  projf r <$> (F.toList efields)
             attrValue (Attr k v) = v
          in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,efields,proj)) ( G.toList evMap)
 
@@ -102,19 +119,23 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
                   # set UI.style [("background-color",renderShowable c)]
                 UI.div # set children [header,missing]
                   ) item
+
+    agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Timeline) (\i ->  UI.button # set text (show i){- # set UI.class_ "buttonSet btn-xs btn-default pull-right")-})
+
     calendar <- UI.div # set UI.class_ "col-xs-10"
-    element body # set children [calendar]
+    element body # set children [getElement agenda,calendar]
     let inpCal = sel
     let calFun (agenda,resolution,incrementT) = mdo
             let
               capitalize (i:xs) = toUpper i : xs
               capitalize [] = []
-              transMode _ "month" = "month"
-              transMode True i = "agenda" <> capitalize i
-              transMode False i = "basic" <> capitalize i
+              transMode Agenda i = "agenda" <> capitalize i
+              transMode Basic "month" = "month"
+              transMode Basic i = "basic" <> capitalize i
+              transMode Timeline i = "timeline" <> capitalize i
             innerCalendar  <- UI.div
             sel <- UI.div
-            calendarFrame <- UI.div # set children [innerCalendar] # set UI.style [("height","450px"),("overflow","auto")]
+            calendarFrame <- UI.div # set children [innerCalendar]
             element calendar # set children [calendarFrame,sel]
             calendarCreate (transMode agenda resolution) innerCalendar (show incrementT)
             ho <- UI.hover innerCalendar
@@ -132,7 +153,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
             edits <- ui$ accumDiff (\(tref,_)->  evalUI calendar $ do
               let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
               traverse (\((_,t,fields,proj))-> do
-                    let pred = WherePredicate $ lookAccess inf (tableName t)<$> timePred (fieldKey <$> fields ) (agenda,incrementT,resolution)
+                    let pred = WherePredicate $ lookAccess inf (tableName t)<$> timePred (fieldKey <$> fields ) (incrementT,resolution)
                         fieldKey (TB1 (SText v))=  lookKey inf (tableName t) v
                     reftb <- ui $ refTables' inf t Nothing pred
                     let v = fmap snd $ reftb ^. _1
@@ -173,7 +194,7 @@ eventWidget body (agendaT,incrementT,resolutionT) sel inf cliZone = do
 -}
 
 
-    mapUIFinalizerT calendar calFun ((,,) <$> agendaT <*> resolutionT <*> incrementT )
+    mapUIFinalizerT calendar calFun ((,,) <$> triding agenda <*> resolutionT <*> incrementT )
 
     return  (legendStyle , dashes )
 

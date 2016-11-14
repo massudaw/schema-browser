@@ -36,6 +36,7 @@ library
     TP.QueryWidgets
     TP.Widgets
     TP.Agenda
+    TP.Chart
     TP.Map
     TP.Account
     TP.View

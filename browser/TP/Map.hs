@@ -58,9 +58,13 @@ calendarCreate el Nothing evs= runFunction $ ffi "createMap (%1,null,null,null,%
 calendarCreate el (Just (p,ne,sw)) evs= runFunction $ ffi "createMap (%1,%2,%3,%4,%5)" el (show p) (show ne) (show sw) evs
 
 
-mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
+mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
+    importUI
+      [js "leaflet.js"
+      ,css "leaflet.css"]
+
     let
-      calendarT = (\(a,b) c -> (a,b,c)) <$> ((,)<$> facts agendaT <*> facts incrementT )<#> resolutionT
+      calendarT = (\b c -> (b,c)) <$> facts incrementT <#> resolutionT
       schemaPred2 = [(IProd True ["schema"],Left (int (schemaId inf),Equals))]
 
     (_,(_,evMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred2
@@ -76,14 +80,14 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
               (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "geo" e
               (Attr _ color )= lookAttr' (meta inf) "color" e
               (Attr _ size )= lookAttr' (meta inf) "size" e
-              projf  r efield@(TB1 (SText field))  = fmap (\i ->  HM.fromList $ i <> [("id", txt $ writePK r efield   ),("title"::Text , txt $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)),("size", size),("color",  color)]) $ join $ convField  <$> indexFieldRec (liftAccess inf tname $ indexer field) r
+              projf  r efield@(TB1 (SText field))  = fmap (\i ->  HM.fromList $ i <> [("id", txt $ writePK r efield   ),("title"::Text , txt $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)),("size", size),("color",   txt $ T.pack $ "#" <> renderShowable color )]) $ join $ convField  <$> indexFieldRec (liftAccess inf tname $ indexer field) r
               proj r = projf r <$> F.toList efields
               convField (ArrayTB1 v) = Just $ [("position",ArrayTB1 v)]
               convField (LeftTB1 v) = join $ convField  <$> v
               convField (TB1 v ) = Just $ to $ v
                 where to p@(SPosition (Position (y,x,z) ))  =  [("position",TB1 p )]
               convField i  = errorWithStackTrace (show i)
-          in (color,table,efields,evfields,proj)) <$>  ( G.toList evMap)
+          in ("#" <> renderShowable color ,table,efields,evfields,proj)) <$>  ( G.toList evMap)
 
 
     let
@@ -92,8 +96,8 @@ mapWidget body (agendaT,incrementT,resolutionT) (sidebar,cposE,h,positionT) sel 
               let item = M.lookup table  (M.fromList  $ fmap (\i@((a,b,c,_,_))-> (b,i)) dashes)
               maybe UI.div (\(k@((c,_,_,_,_))) ->
                 UI.div # set items [UI.div
-                  # set items [element b # set UI.class_ "col-xs-1", UI.div # sink text  (T.unpack . ($table) <$> facts lookDesc) #  set UI.class_ "fixed-label col-xs-11" # set UI.style [("background-color",renderShowable c)] ]
-                  # set UI.style [("background-color",renderShowable c)]]) item
+                  # set items [element b # set UI.class_ "col-xs-1", UI.div # sink text  (T.unpack . ($table) <$> facts lookDesc) #  set UI.class_ "fixed-label col-xs-11" # set UI.style [("background-color",c)] ]
+                  # set UI.style [("background-color",c)]]) item
 
 
     mapOpen <- liftIO getCurrentTime

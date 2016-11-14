@@ -14,6 +14,7 @@ import TP.Account
 import TP.Browser
 import Control.Monad.Writer (runWriterT)
 import TP.Agenda
+import TP.Chart
 import Control.Lens (_1,_2,(^.),over)
 import TP.Map
 import Safe
@@ -79,10 +80,11 @@ setup smvar args plugList w = void $ do
   return w # set title (host bstate <> " - " <>  dbn bstate)
   hoverBoard<-UI.div # set UI.style [("float","left"),("height","100vh"),("width","15px")]
   he <- fmap (const True) <$> UI.hover hoverBoard
+
   bhe <- ui $stepper True he
   menu <- checkedWidget (tidings bhe he)
   element menu # set UI.class_ "col-xs-1"
-  nav  <- buttonDivSet  ["Map","Account","Agenda","Browser","Metadata"] (pure $ args `atMay` 6  )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonDivSet  ["Map","Account","Agenda","Chart","Browser","Metadata"] (pure $ args `atMay` 6  )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5 pull-right"
   chooserDiv <- UI.div # set children  ([getElement menu] <> chooserItens <> [getElement nav ] ) # set UI.style [("align-items","flex-end"),("height","7vh"),("width","100%")] # set UI.class_ "col-xs-12"
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
@@ -90,7 +92,6 @@ setup smvar args plugList w = void $ do
   let
     expand True = "col-xs-10"
     expand False = "col-xs-12"
-  element body # sink0 UI.class_ (facts $ expand <$> triding menu)
   mapM (setBody ) [hoverBoard,container]
   mapUIFinalizerT body (traverse (\inf-> mdo
     let kitems = F.toList (pkMap inf)
@@ -109,7 +110,7 @@ setup smvar args plugList w = void $ do
     bset <- tableChooser inf  kitems (fst <$> tfilter ) (snd <$> tfilter)  ((schemaName inf)) (snd (username inf)) (pure iniKey)
 
     posSel <- positionSel
-    bd <- UI.div  # set UI.class_ "col-xs-10"
+    bd <- UI.div  # sink0 UI.class_ (facts $ expand <$> triding menu)
     (sidebar,calendarT) <- calendarSelector
     tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [sidebar,posSel ^._1,getElement bset]# sink0 UI.style (facts $ noneShow <$> triding menu)
     element body # set children [tbChooser,bd]
@@ -127,6 +128,10 @@ setup smvar args plugList w = void $ do
           element bdo  # set UI.style [("width","100%")]
           cliZone <- jsTimeZone
           fmap ((\i j -> elem j i) . fmap (^._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
+        "Chart" -> do
+          element bdo  # set UI.style [("width","100%")]
+          cliZone <- jsTimeZone
+          fmap ((\i j -> elem j i) . fmap (^._2)) <$>  chartWidget bdo calendarT (triding bset) inf cliZone
         "Account" -> do
           element bdo  # set UI.style [("width","100%")]
           fmap ((\i j -> elem j i) . fmap (^._2)) <$> accountWidget bdo calendarT (triding bset) inf

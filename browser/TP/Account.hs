@@ -54,9 +54,9 @@ import Data.Text (Text)
 import qualified Data.Map as M
 
 
-accountWidget body (agendaT,incrementT,resolutionT)sel inf = do
+accountWidget body (incrementT,resolutionT) sel inf = do
     let
-      calendarSelT = liftA3 (,,) agendaT incrementT resolutionT
+      calendarSelT = liftA2 (,) incrementT resolutionT
       schId = int (schemaId inf)
       schemaPred = [(IProd True ["schema"],Left (schId,Equals))]
 

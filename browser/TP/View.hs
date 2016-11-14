@@ -61,7 +61,7 @@ geoPred geofields (_,ne,sw) = geo
         indexer . T.pack . renderShowable <$>
         F.toList geofields
 
-timePred evfields (_,incrementT,resolution) = time
+timePred evfields (incrementT,resolution) = time
   where
     time = OrColl $ timeField <$> F.toList evfields
     timeField f =
@@ -93,12 +93,20 @@ timePred evfields (_,incrementT,resolution) = time
 predicate
     :: Maybe (NonEmpty Key)
     -> Maybe (NonEmpty (FTB Showable))
-    -> (Maybe (t, [Double], [Double]), Maybe (t1, UTCTime, String))
+    -> (Maybe (t, [Double], [Double]), Maybe (UTCTime, String))
     -> BoolCollection (Access T.Text,AccessOp Showable)
 predicate evfields geofields (i,j) =
     AndColl $
     catMaybes [liftA2 geoPred geofields i, liftA2 timePred evfields j]
 
+resRange b "year" d =
+    d
+    { utctDay = addGregorianMonthsClip
+          (if b
+               then -6
+               else 6)
+          (utctDay d)
+    }
 resRange b "month" d =
     d
     { utctDay = addGregorianMonthsClip

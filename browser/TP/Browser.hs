@@ -177,6 +177,8 @@ addClient clientId metainf inf table row =  do
 
 
 
+layFactsDiv i j =  if i then ("col-xs-" <> (show $  12 `div` fromIntegral (max 1 $ j))) else "col-xs-12"
+
 chooserTable inf bset cliTid cli = do
   layout <- checkedWidget (pure False)
   body <- UI.div
@@ -185,21 +187,19 @@ chooserTable inf bset cliTid cli = do
         # set UI.class_ "header"
         # set text (T.unpack (rawName table))
     let
-        layFacts2 i =  if i then ("col-xs-" <> (show $  6)) else "row"
-
     body <-  do
             if L.length sub == 1
                then do
-              viewerKey inf table cli (layFacts2 . not <$> triding layout) cliTid
+                 viewerKey inf table cli  (triding layout ) cliTid
                else do
               els <- mapM (\t -> do
                   l <- UI.h4 #  set text (T.unpack $fromMaybe (rawName t)  $ rawTranslation t) # set UI.class_ "col-xs-12 header"
-                  b <- viewerKey inf t cli (layFacts2 . not <$> triding layout) cliTid
+                  b <- viewerKey inf t cli  (triding layout )cliTid
                   element b # set UI.class_ "col-xs-12"
                   UI.div # set children [l,b]
                   ) sub
               UI.div # set children els
-    UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFacts2 <$> triding layout)# set UI.style [("border","2px dotted gray")]
+    UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFactsDiv <$> triding layout <*> fmap M.size (triding bset))# set UI.style [("border","2px dotted gray")]
                        ).fst)  (M.fromList . fmap (\i -> (i,())) . M.toList <$> triding bset)
   element body # sink0 UI.children (F.toList <$> facts el) # set UI.class_ "col-xs-12"
   element layout  # set UI.class_ "col-xs-1"
@@ -207,8 +207,9 @@ chooserTable inf bset cliTid cli = do
 
 viewerKey
   ::
-      InformationSchema -> Table -> Int -> Tidings String -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
-viewerKey inf table cli layout cliTid = mdo
+      InformationSchema -> Table -> Int -> Tidings Bool -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
+viewerKey inf table cli layoutS cliTid = mdo
+  let layout = layFactsDiv <$> layoutS <*> pure 2
   iv   <- currentValue (facts cliTid)
   let
       lookT,lookPK :: TBData Key Showable -> Maybe (Int,TBData Key Showable)

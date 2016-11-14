@@ -8,6 +8,7 @@ module Postgresql.Printer
   ,expandBaseTable
   ,createTable
   ,dropTable
+  ,escapeReserved
   )
   where
 
@@ -74,6 +75,10 @@ createTable r@(Raw _ sch _ _ _ _ tbl _ _ _ pk _ fk inv attr _) = "CREATE TABLE "
     renderFK (Path origin _  ) = ""
 
 
+
+reservedNames = ["column","table","schema"]
+escapeReserved :: T.Text -> T.Text
+escapeReserved i = if i `elem` reservedNames then "\"" <> i <> "\"" else i
 
 expandInlineTable ::  TB3  (Labeled Text) Key  () -> Text ->  Text
 expandInlineTable tb@(TB1 (meta, Compose (Labeled t ((KV i))))) pre=

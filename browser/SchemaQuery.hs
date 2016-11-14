@@ -3,6 +3,7 @@ module SchemaQuery
   (
   createUn
   ,takeMany
+  ,convertChanEvent
   ,selectFromA
   ,selectFrom
   ,updateFrom
@@ -72,15 +73,15 @@ estLength page size est = fromMaybe 0 page * size  +  est
 prerefTable :: MonadIO m => InformationSchema -> Table -> m (DBRef Key Showable)
 prerefTable  inf table  = do
   mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
-  return $ justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
+  return $ justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
 
 
 
 refTable :: InformationSchema -> Table -> Dynamic DBVar
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
-  let ref = justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
-  idxTds <- convertChanStepper  (idxChan ref)(idxVar ref)
+  let ref = justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
+  idxTds<- convertChanStepper  (idxChan ref)(idxVar ref)
   dbTds <- convertChanTidings mempty  (patchVar ref) (collectionState ref)
   return (DBVar2 ref idxTds dbTds)
 
@@ -112,7 +113,7 @@ syncFrom t page size presort fixed = do
       Path kref (FKJoinTable rel stable ) =  sref
   let mvar = mvarMap inf
   mmap <- liftIO $ atomically $ readTMVar mvar
-  let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )
+  let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (table) mmap )
   let
       rinf = fromMaybe inf $ HM.lookup (fst stable) (depschema inf)
       fromtable = (lookTable rinf $ snd stable)
@@ -329,7 +330,7 @@ pageTable flag method table page size presort fixed = do
         pagesize = maybe (opsPageSize $ schemaOps inf)id size
         ffixed = filterfixed  fixed
     mmap <- liftIO $ atomically $ readTMVar mvar
-    let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (tableMeta table) mmap )
+    let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
     (reso ,nchan) <- liftIO $ atomically $
       (,) <$> readTVar (collectionState dbvar)<*> cloneTChan (patchVar dbvar)
 
@@ -366,16 +367,16 @@ pageTable flag method table page size presort fixed = do
                let
                    token =  nextToken
                    index = (estLength page pagesize s, maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token$ mp)
+               liftIO$ do
+                 putPatch (idxChan dbvar ) (fixed ,estLength page pagesize s, pageidx ,fromMaybe HeadToken token)
+                 putPatch (patchVar dbvar) (F.toList $ patch  <$> res)
                return  (index,res)
              else do
                liftIO$ putStrLn $ "keep page " <> show (tableName table,sq, pageidx, G.size freso,G.size reso,page, pagesize)
                return ((sq,mp),[])
        let nidx =  M.insert fixed (fst i)
            ndata = snd i
-       liftIO $ do
-         putPatch (patchVar dbvar) (F.toList $ patch  <$> ndata )
-         atomically $ modifyTVar' (idxVar dbvar ) nidx
-         return (nidx fixedmap, if L.length ndata > 0 then createUn (S.fromList $ rawPK table)  ndata <> freso else  freso )
+       return (nidx fixedmap, if L.length ndata > 0 then createUn (S.fromList $ rawPK table)  ndata <> freso else  freso )
     let iniFil = iniT
     modify (M.insert (table,fixed) ( snd $iniT))
     vpt <- lift $ convertChanTidings0 fixed (snd iniFil) nchan
@@ -387,9 +388,10 @@ convertChanStepper0  ini nchan = do
         t <- liftIO $ forkIO  $ forever ( do
             a <- atomically $ readTChan nchan
             h a )
-        bh <- stepper ini e
+        let conv (v,s,i,t) = (M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) v)
+        bh <- accumB ini (conv <$> e)
         registerDynamic (killThread t)
-        return (tidings bh e)
+        return (tidings bh (flip conv<$> bh<@> e))
 
 convertChanStepper idxv idxref = do
         (ini,nchan) <- liftIO $atomically $
@@ -421,6 +423,7 @@ convertChanTidings0 fixed ini nchan = do
     return $tidings bres (update <$> bres <@> diffs)
 
 
+takeMany :: TChan a -> STM [a]
 takeMany mvar = go . (:[]) =<< readTChan mvar
   where
     go v = do

@@ -70,7 +70,7 @@ data InformationSchemaKV k v
   , _pkMapL :: Map (Set k ) Table
   , _tableMapL :: HM.HashMap Text Table
   , tableSize :: Map Table Int
-  , mvarMap :: TMVar (Map (KVMetadata k) (DBRef k v ))
+  , mvarMap :: TMVar (Map (TableK k) (DBRef k v ))
   , rootconn :: Connection
   , metaschema :: Maybe (InformationSchemaKV k v)
   , depschema :: HM.HashMap Text (InformationSchemaKV k v)
@@ -113,7 +113,7 @@ pkMap = _pkMapL
 data DBRef k v =
   DBRef  { patchVar :: TChan [TBIdx k v]
   , idxVar :: TVar (Map WherePredicate (Int,Map Int (PageTokenF k v)))
-  , idxChan :: TChan (Map WherePredicate (Int,Map Int (PageTokenF k v)))
+  , idxChan :: TChan (WherePredicate , Int,Int ,PageTokenF k v)
   , collectionState :: TVar (TableIndex k v)
   , idxVarLoad :: TVar (GiST (WherePredicate ,G.Predicate Int) ())
   }

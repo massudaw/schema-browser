@@ -1,3 +1,7 @@
+google.charts.load("current", {packages:["timeline"]});
+google.charts.load("current", {packages:['corechart']});
+
+
 function updateColor(el,c){
   el._jscLinkedInstance.fromString(c);
 }
@@ -123,6 +127,32 @@ function handleLocationError(browserHasGeolocation, pos) {
                         'Error: Your browser doesn\'t support geolocation.');
 }
 
+function removeChartColumns(el ){
+  el.chart.clearChart();
+}
+function addChartColumns(el,table,fields,source){
+  var data = JSON.parse(source);
+  var chart = el.chart
+  var dataTable = new google.visualization.DataTable();
+          dataTable.addColumn({ type: 'string', id: 'Name' });
+          fields.map(function(i){dataTable.addColumn({ type: 'number',id: i});});
+          dataTable.addRows(data.filter(function (o){ return  o.value != null }).map(function(o){
+            return [o.title].concat(o.value.map(parseFloat)) ;
+          }));
+
+          var options = {
+                width :1000
+                };
+
+          chart.draw(dataTable, options);
+
+}
+function createChart(el,tdate,view){
+          var container = el ;
+          var chart = new google.visualization.ColumnChart(container);
+          el.chart = chart;
+};
+
 
 function createAgenda(el,tdate,view){
   var date = new Date(tdate);
@@ -130,7 +160,7 @@ function createAgenda(el,tdate,view){
   var m = date.getMonth();
   var y = date.getFullYear();
 
-  $(el).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: date,lang: 'pt-br',editable: true,eventLimit: true, defaultView : view ,eventDrop : el.eventDrop , eventResize: el.eventResize, drop : el.drop, droppable:true ,eventClick: function(data, event, view) {
+  $(el).fullCalendar({header: { left: '',center: 'title' , right: ''},defaultDate: date,lang: 'pt-br',editable: true,eventLimit: true, defaultView : view ,eventDrop : el.eventDrop , height : 450,eventResize: el.eventResize, schedulerLicenseKey: 'GPL-My-Project-Is-Open-Source' ,drop : el.drop, droppable:true ,eventClick: function(data, event, view) {
   el.eventClick(data,event,view);
           }});
   $(el).fullCalendar('render');

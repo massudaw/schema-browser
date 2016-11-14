@@ -65,7 +65,7 @@ insertPatch f conn path@(m ,s,i ) t =  liftIO$ if not $ L.null serialAttr
         execute  conn (fromString  iquery ) directAttr
         return path
     where
-      prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
+      prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (escapeReserved <$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
       attrs =  concat $ nonRefTB . create <$> i
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
       serial f =  filter (all1 testSerial  .f)
@@ -99,13 +99,13 @@ applyPatch conn patch@(m,G.Idex kold,skv)  =
   where
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> M.toList kold
-    attrPatchName (PAttr k p ) = keyValue k <> "=" <> nestP(keyValue k) p
+    attrPatchName (PAttr k p ) = escapeReserved (keyValue k) <> "=" <> nestP(keyValue k) p
       where nestP k (PInter True (b,j)) = "lowerI(" <> k <> "," <> "?" <>" ," <> (T.pack $show j)<> ")"
             nestP k (PInter False (b,j)) = "upperI(" <> k <> "," <> "?" <> "," <> (T.pack (show j )) <> ")"
             nestP k (PatchSet l) = F.foldl' nestP k  l
             nestP k i = "?"
     attrPatchValue (PAttr  k v) = Attr k (create v) :: TB Identity PGKey Showable
-    pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> M.toList kold)
+    pred   =" WHERE " <> T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> M.toList kold)
     setter = " SET " <> T.intercalate "," (   attrPatchName <$> skv   )
     up = "UPDATE " <> kvMetaFullName m <> setter <>  pred
 
@@ -120,8 +120,8 @@ updatePatch conn kv old  t =
     kold = M.toList $ getPKM old
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> kold
-    pred   =" WHERE " <> T.intercalate " AND " (equality . keyValue . fst <$> kold)
-    setter = " SET " <> T.intercalate "," (equality .   attrValueName <$> skv   )
+    pred   =" WHERE " <> T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> kold)
+    setter = " SET " <> T.intercalate "," (equality .   escapeReserved . attrValueName <$> skv   )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = unTB <$> F.toList  (_kvvalues $ unTB tbskv)
     tbskv = snd isM
