@@ -4,7 +4,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module TP.Selector (calendarSelector,positionSel,tableChooser,selectFromTable) where
+module TP.Selector (tableOrder,calendarSelector,positionSel,tableChooser,selectFromTable) where
 
 import TP.View
 import Control.Monad.Writer (runWriterT, WriterT(..))
@@ -87,7 +87,8 @@ positionSel = do
     onEventFT (currentPosition bcpos ) (liftIO. h )
     return (bcpos,currentPosition bcpos, h,tidings positionB (diffEvent positionB  (Just <$> e)))
 
-lookupAccess inf l f c = join $ fmap (indexField (IProd  True [(lookKey inf (fst c) f)] )) . G.lookup (idex inf (fst c) l) $ snd c
+
+tableUsage inf orderMap table selection = (L.elem table (M.keys selection), tableOrder inf orderMap table )
 
 tableChooser :: InformationSchemaKV Key Showable
                       -> [Table]
@@ -120,10 +121,6 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
       -- Text Filter
       filterLabel = (\j d -> (\i -> T.isInfixOf (T.toLower j) (T.toLower  $ d i)))<$> filterInpT <*> lookDesc
       -- Usage Count
-      tableUsage orderMap table selection = (L.elem table (M.keys selection), maybe (Right 0) (Left . _tbattr) row)
-          where
-            pk = [("table",int . _tableUnique $ table ), ("schema",int (schemaId inf))]
-            row = lookupAccess (meta inf) pk  "usage" ("ordering",orderMap)
   all <- checkedWidget (pure False)
   bset <- mdo
     let
@@ -147,7 +144,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
     let iniEvent = (unionWith const (rumors iniSel ) (allTablesSel <$> rumors (triding all)))
     iniBehaviour <- ui $ stepper iniValue  iniEvent
 
-    bset <- checkDivSetTGen tables ((\i k j -> tableUsage i j k ) <$> collectionTid orddb <*> triding bset) (tidings iniBehaviour iniEvent ) buttonString ((\lg i j -> lg lookDesc i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle )
+    bset <- checkDivSetTGen tables ((\i k j -> tableUsage inf i j k ) <$> collectionTid orddb <*> triding bset) (tidings iniBehaviour iniEvent ) buttonString ((\lg i j -> lg lookDesc i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle )
     return bset
   let
       ordRow orderMap pkset =  field

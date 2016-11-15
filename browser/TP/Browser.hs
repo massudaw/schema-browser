@@ -180,6 +180,11 @@ addClient clientId metainf inf table row =  do
 layFactsDiv i j =  if i then ("col-xs-" <> (show $  12 `div` fromIntegral (max 1 $ j))) else "col-xs-12"
 
 chooserTable inf bset cliTid cli = do
+
+  let
+    pred2 =  [(IProd True ["schema"],Left (int $ schemaId inf  ,Equals))]
+  orddb <- ui $ transactionNoLog  (meta inf) $
+      (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred2))
   layout <- checkedWidget (pure False)
   body <- UI.div
   el <- ui $ accumDiff (evalUI body  . (\((table,sub))-> do
@@ -201,7 +206,8 @@ chooserTable inf bset cliTid cli = do
               UI.div # set children els
     UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFactsDiv <$> triding layout <*> fmap M.size (triding bset))# set UI.style [("border","2px dotted gray")]
                        ).fst)  (M.fromList . fmap (\i -> (i,())) . M.toList <$> triding bset)
-  element body # sink0 UI.children (F.toList <$> facts el) # set UI.class_ "col-xs-12"
+
+  element body # sink0 UI.children (facts $ (\els ord-> fmap snd $ L.sortBy (flip $ comparing fst) $ fmap (first (tableOrder inf ord .fst)) els ) <$> fmap M.toList el <*> collectionTid orddb) # set UI.class_ "col-xs-12"
   element layout  # set UI.class_ "col-xs-1"
   return [getElement layout ,body]
 

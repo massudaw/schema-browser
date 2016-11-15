@@ -59,7 +59,6 @@ import qualified Data.Text as T
 
 import qualified Reactive.Threepenny as R
 
-import Query
 import Postgresql.Parser
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as BSL
@@ -387,7 +386,14 @@ logTableModification inf (TableModification Nothing table i) = do
   [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (\"user\",modification_time,\"table\",data_index2,modification_data  ,\"schema\") VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (fst $ username inf ,ltime,_tableUnique table, V.fromList <$> nonEmpty (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) (M.toList pidx) )) , fmap (Binary  . B.encode ) . V.fromList <$> nonEmpty pdata , schemaId inf)
   return (TableModification (Just id) table i )
 
+tableOrder inf orderMap table=  maybe (Right 0) (Left . _tbattr) row
+          where
+            pk = [("table",int . _tableUnique $ table ), ("schema",int (schemaId inf))]
+            row = lookupAccess (meta inf) pk  "usage" ("ordering",orderMap)
 
+lookupAccess inf l f c = join $ fmap (indexField (IProd  True [(lookKey inf (fst c) f)] )) . G.lookup (idex inf (fst c) l) $ snd c
+
+idex inf t v = G.Idex $ M.fromList  $ first (lookKey inf t  ) <$> v
 
 dbTable mvar table = do
     mmap <- atomically $readTMVar mvar

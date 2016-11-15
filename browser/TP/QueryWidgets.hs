@@ -1596,7 +1596,6 @@ lookAttr' inf k (i,m) = unTB $ err $  M.lookup (S.singleton ((lookKey inf (_kvna
       ta = M.mapKeys (S.map _relOrigin) (unKV m)
       err= justError ("no attr " <> show k <> " for table " <> show (_kvname i,M.keys ta))
 
-idex inf t v = G.Idex $ M.fromList  $ first (lookKey inf t  ) <$> v
 
 attrLine i   = do
   line ( L.intercalate "," (fmap renderShowable .  allKVRec'  $ i))

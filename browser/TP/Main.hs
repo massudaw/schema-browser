@@ -166,9 +166,10 @@ setup smvar args plugList w = void $ do
                         element metabody # set UI.children [dash]
                 "Stats" -> do
                     let pred = [(IProd True ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ int. _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                    stats_load <- metaAllTableIndexA inf "stat_load_table" pred
                     stats <- metaAllTableIndexA inf "table_stats" pred
                     clients <- metaAllTableIndexA inf "clients"$  [(IProd True ["schema"],Left (LeftTB1 $ Just $ int (schemaId inf),Equals) ) ]<> if M.null tables then [] else [ (Nested (IProd True ["selection"] ) (Many [ IProd True ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
-                    element metabody # set UI.children [stats,clients]
+                    element metabody # set UI.children [stats,stats_load,clients]
                 "Exception" -> do
                     let pred = [(IProd True ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ int . _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     dash <- metaAllTableIndexA inf "plugin_exception" pred
