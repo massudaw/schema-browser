@@ -116,7 +116,7 @@ pathRelRel :: Ord k => Path (Set k ) (SqlOperationK k) -> Set (Rel k)
 pathRelRel (Path _ (FKJoinTable  rel   _ )  ) = Set.fromList rel
 pathRelRel (Path r (FKInlineTable  _  )   ) = Set.map Inline r
 pathRelRel (Path r (RecJoin l rel )   ) =  pathRelRel (Path r rel )
-pathRelRel (Path r (FunctionField _ _ a ) ) =  Set.map Inline r <> (S.fromList $ relAccesGen <$> a)
+pathRelRel (Path _ (FunctionField r _ a ) ) =  S.singleton $ RelFun r (relAccesGen <$> a)
 
 
 pathRelRel' :: Ord k => Path (Set k ) (SqlOperationK k) -> MutRec [Set (Rel k )]
@@ -439,10 +439,19 @@ instance Num Showable where
     SDouble i + SNumeric j = SDouble $ i +  fromIntegral j
     SNumeric j  + SDouble i = SDouble $ i +  fromIntegral j
     v + k = errorWithStackTrace (show (v,k))
+    STimestamp i - STimestamp j =  SPInterval $ realToFrac $ diffUTCTime (localTimeToUTC utc i) (localTimeToUTC utc  j)
+    SNumeric i -  SNumeric j = SNumeric (i - j)
+    SDouble i -  SDouble j = SDouble (i - j)
+    SDouble i - SNumeric j = SDouble $ i -  fromIntegral j
+    SNumeric j  - SDouble i = SDouble $ i -  fromIntegral j
+    v - k = errorWithStackTrace (show (v,k))
     SNumeric i *  SNumeric j = SNumeric (i * j)
     SNumeric i *  SDouble j = SDouble (fromIntegral i * j)
     SDouble i *  SNumeric j = SDouble (i * fromIntegral j)
     SDouble i *  SDouble j = SDouble (i * j)
+    SDouble i *  SPInterval j = SDouble (i * realToFrac j)
+    SPInterval i *  SDouble j = SDouble (j * realToFrac i)
+    SPInterval i *  SPInterval j = SPInterval (i * j)
     i * j = errorWithStackTrace (show (i,j))
     fromInteger i = SDouble $ fromIntegral i
     negate (SNumeric i) = SNumeric $ negate i
@@ -456,6 +465,7 @@ instance Num Showable where
 instance Fractional Showable where
   fromRational i = SDouble (fromRational i)
   recip (SDouble i) = SDouble (recip i)
+  recip (SPInterval i) = SPInterval (recip i)
   recip (SNumeric i) = SDouble (recip $ fromIntegral i)
   recip i = errorWithStackTrace (show i)
 

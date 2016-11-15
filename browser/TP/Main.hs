@@ -131,7 +131,7 @@ setup smvar args plugList w = void $ do
         "Chart" -> do
           element bdo  # set UI.style [("width","100%")]
           cliZone <- jsTimeZone
-          fmap ((\i j -> elem j i) . fmap (^._2)) <$>  chartWidget bdo calendarT (triding bset) inf cliZone
+          fmap ((\i j -> elem j i) . fmap (^._2)) <$>  chartWidget bdo calendarT posSel (triding bset) inf cliZone
         "Account" -> do
           element bdo  # set UI.style [("width","100%")]
           fmap ((\i j -> elem j i) . fmap (^._2)) <$> accountWidget bdo calendarT (triding bset) inf

@@ -37,6 +37,7 @@ siapi3Page protocolo ano cgc_cpf = do
                     BSC.takeWhile (/= '\"') .
                     BS.drop 7 . snd . BS.breakSubstring "value=\"" <$>
                     view
+            print siapiAndamento3Url
             pr <-
                 traverse
                     (Sess.post session siapiAndamento3Url .
@@ -44,7 +45,15 @@ siapi3Page protocolo ano cgc_cpf = do
                     viewValue
             print siapiListAndamento3Url
             r <- Sess.get session $ siapiListAndamento3Url
-            return $ BSLC.unpack <$> (r ^? responseBody)
+            o <- do
+              (l,v) <- readSiapi3Andamento (BSLC.unpack $ justError "no response" $ r ^? responseBody)
+              print siapiListAndamento3Url
+              res <- Sess.post session siapiListAndamento3Url  (nextPage $ justError "no view " $safeHead v )
+              (l2,v) <- readSiapi3AndamentoAJAX (BSLC.unpack $  justError "no response" $ res ^? responseBody)
+              return (l<> (tail . Utils.head $ l2))
+
+            return $
+              liftA2 (,) (Just o) (L.isInfixOf "AGUARDANDO PAGAMENTO DA TAXA" . BSLC.unpack <$> (r ^? responseBody))
 
 siapi2 protocolo ano = do
     let addrs =
@@ -96,7 +105,7 @@ siapi2 protocolo ano = do
                      (i, j)) .
                L.take 2) .
           L.filter ((== 2) . L.length) .
-          traceShowId . concat . fmap (split4 . rem) . concat <$>
+          concat . fmap (split4 . rem) . concat <$>
           vs
         , fmap rem . tailEmpty . concat <$> va)
 
@@ -104,13 +113,23 @@ tailEmpty [] = []
 tailEmpty i = tail i
 
 siapi3 protocolo ano cgc_cpf = do
-    v <- (siapi3Page protocolo ano cgc_cpf)
-    r <- traverse readSiapi3Andamento v
-    return $
-        traceShowId $
-        traceShow (protocolo, ano, cgc_cpf) $
-        liftA2 (,) r (L.isInfixOf "AGUARDANDO PAGAMENTO DA TAXA" <$> v)
+    siapi3Page protocolo ano cgc_cpf
 
+nextPage :: String
+                  -> [FormParam]
+nextPage viewState =
+  ["javax.faces.partial.ajax" := ("true":: BS.ByteString)
+  ,"javax.faces.source:formListaDeAndamentos":=("tabela":: BS.ByteString)
+  ,"javax.faces.partial.execute":=("formListaDeAndamentos:tabela":: BS.ByteString)
+  ,"javax.faces.partial.render":=("formListaDeAndamentos:tabela":: BS.ByteString)
+  ,"formListaDeAndamentos:tabela":=("formListaDeAndamentos:tabela":: BS.ByteString)
+  ,"formListaDeAndamentos:tabela_pagination":=("true":: BS.ByteString)
+  ,"formListaDeAndamentos:tabela_first":=(15::Int)
+  ,"formListaDeAndamentos:tabela_rows":=(15::Int)
+  ,"formListaDeAndamentos:tabela_encodeFeature":=("true":: BS.ByteString)
+  ,"formListaDeAndamentos":=("formListaDeAndamentos":: BS.ByteString)
+  ,"javax.faces.ViewState":=viewState
+  ]
 protocolocnpjForm :: BS.ByteString
                   -> BS.ByteString
                   -> BS.ByteString
@@ -138,3 +157,6 @@ siapiAndamento3Url =
 
 siapiListAndamento3Url =
     "http://siapi3.bombeiros.go.gov.br/listarAndamentosWeb.jsf"
+
+
+

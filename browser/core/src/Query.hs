@@ -487,7 +487,28 @@ inf' = unFinite . Interval.lowerBound
 sup' = unFinite . Interval.upperBound
 
 
-instance P.Poset (FKey (KType Text))where
+instance (Show i,P.Poset i )=> P.Poset (Rel i)where
+  compare  (Inline i ) (Inline j) = P.compare i j
+  compare  (Rel i _ a ) (Inline j ) = case i == j of
+                                        True -> P.GT
+                                        False -> P.compare i j
+  compare  (Inline j )(Rel i _ a )  = case i == j of
+                                        True -> P.LT
+                                        False -> P.compare j i
+  compare  (Rel i _ a ) (Rel j _ b) = P.compare i j <> P.compare a b
+  compare  (RelFun i  a ) j  = case L.any (== j) a  of
+                                          True -> P.GT
+                                          False -> P.compare (Inline i) j
+  compare   j (RelFun i  a )= case L.any (== j) a  of
+                                          True -> P.LT
+                                          False -> P.compare j (Inline i)
+
+  compare i j = errorWithStackTrace (show (i,j))
+
+
+
+
+instance P.Poset (FKey i)where
   compare  = (\i j -> case compare (i) (j) of
                       EQ -> P.EQ
                       LT -> P.LT

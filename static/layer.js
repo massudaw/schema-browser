@@ -131,25 +131,84 @@ function removeChartColumns(el ){
   el.chart.clearChart();
 }
 function addChartColumns(el,table,fields,source){
+  var dataInp = JSON.parse(source);
+	var axisY = fields.map(function(i){return {lineThickness:2}});
+	var ix = 0;
+  var dataCol = fields.map(function(i){
+	  var data = dataInp.map(function(r){
+						return {label: r.title.slice(0,20),y:parseFloat(r.value[ix])}
+				}); 
+				return { type :'column'
+               ,name : i
+							 ,showInLegend : true
+							 ,axisYIndex : ix++
+               ,dataPoints : data
+							}
+			});
+	var chart = new CanvasJS.Chart(el,
+	{
+		animationEnabled: true,
+      	theme: "theme2",
+    width:1000,
+		title:{
+			text: table
+		},
+    axisY: axisY,
+    axisX:{labelMaxWidth:50,labelWrap:true},
+		data: dataCol,
+		legend: {
+			cursor: "pointer",
+			itemclick: function (e) {
+				if (typeof(e.dataSeries.visible) === "undefined" || e.dataSeries.visible) {
+					e.dataSeries.visible = false;
+				} else {
+					e.dataSeries.visible = true;
+			}
+			chart.render();
+			}
+		}
+	});
+
+	chart.render();
+}
+/*
+function addChartColumns(el,table,fields,source){
   var data = JSON.parse(source);
   var chart = el.chart
   var dataTable = new google.visualization.DataTable();
           dataTable.addColumn({ type: 'string', id: 'Name' });
-          fields.map(function(i){dataTable.addColumn({ type: 'number',id: i});});
+          fields.map(function(i){dataTable.addColumn({ type: 'number',id: i,label : i });});
           dataTable.addRows(data.filter(function (o){ return  o.value != null }).map(function(o){
             return [o.title].concat(o.value.map(parseFloat)) ;
           }));
 
+          var ix = 0;
+          var axis = fields.map(function(i){
+              ix++; 
+              return {title :i,textPosition:ix == 2 ? 'in' : 'out'};
+          });
+          var series ={};
+          var ix= 0;
+          fields.map(function(i){;
+              var i = ix
+              series [i] = {type :'bars',targetAxisIndex:i};
+              ix++
+              });
           var options = {
-                width :1000
+                width :1000,
+                title: table,
+                vAxes: axis,
+                hAxis:{title : 'id'},
+                series:series
                 };
 
           chart.draw(dataTable, options);
 
 }
+*/
 function createChart(el,tdate,view){
           var container = el ;
-          var chart = new google.visualization.ColumnChart(container);
+          var chart = new google.visualization.ComboChart(container);
           el.chart = chart;
 };
 

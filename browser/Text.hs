@@ -125,7 +125,7 @@ readPrim t =
       readDayTimeHour =  fmap (SDayTime . localTimeOfDay . fst) . strptime "%H"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
       readLineString = nonEmpty (fmap SLineString . readMaybe)
-      readTimestamp =  fmap (STimestamp  .  fst) . strptime "%Y-%m-%d %H:%M:%OS"
+      readTimestamp =  fmap (STimestamp  .  fst) . (\i -> strptime "%Y-%m-%d %H:%M:%OS" i <|> strptime "%Y-%m-%d %H:%M:%S" i)
       readInterval =  fmap SPInterval . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
       nonEmpty f ""  = Nothing
       nonEmpty f i  = f i

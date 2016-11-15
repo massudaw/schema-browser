@@ -2,6 +2,7 @@ module Expression where
 
 import Data.Map (Map)
 import qualified Data.Map  as M
+import Data.Interval(upperBound,lowerBound)
 import Data.Monoid
 import Step.Host
 import Control.Applicative
@@ -32,7 +33,13 @@ parseFunction =  do
   return (Function (pack $ BS.unpack fun ) f)
 
 funmap :: Map Text (([KPrim],KPrim ),[FTB Showable] -> FTB Showable)
-funmap = M.fromList [("float8mul",(([PDouble,PDouble],PDouble),(\[i,j]-> i * j )))]
+funmap = M.fromList [
+        ("lower",(([PDouble],PDouble),(\[IntervalTB1 i] -> justError "cant be infinite" $ unFinite $  lowerBound i)))
+       ,("upper",(([PDouble],PDouble),(\[IntervalTB1 i] -> justError "cant be infinite" $ unFinite $  upperBound i)))
+       ,("float8sum",(([PDouble,PDouble],PDouble),(\[i,j]-> i + j )))
+       ,("float8sub",(([PDouble,PDouble],PDouble),(\[i,j]-> i - j )))
+       ,("float8div",(([PDouble,PDouble],PDouble),(\[i,j]-> i / j )))
+       ,("float8mul",(([PDouble,PDouble],PDouble),(\[i,j]-> i * j )))]
 
 
 preevaluate :: Key -> Expr -> Map Text (([k],k ),[FTB Showable] -> FTB Showable) -> [Access Key] -> [Maybe (FTB Showable)] -> Maybe (Column Key Showable)
@@ -45,7 +52,7 @@ preevaluate k e fs ac res = Fun k (e, ac) <$> go e
 
 
 evaluate :: Key -> Expr -> Map Text (([k],k ),[FTB Showable] -> FTB Showable) -> [Access Key] -> TBData Key Showable -> Maybe (Column Key Showable)
-evaluate k e fs ac tb = Fun k (e,traceShowId $ ac) <$> go e
+evaluate k e fs ac tb = Fun k (e,ac) <$> go e
   where
     go :: Expr -> Maybe (FTB Showable)
     go (Function i e) = f <$> (traverse go   e)

@@ -299,7 +299,11 @@ data Rel k
   }
   | RelAccess
   { _relOri :: k
-  , _relAccess :: (Rel k)
+  , _relAccess :: Rel k
+  }
+  | RelFun
+  { _relOri :: k
+  , _relReference :: [Rel k]
   }
   deriving(Eq,Show,Ord,Functor,Foldable,Generic)
 
@@ -311,9 +315,11 @@ _relTarget i = errorWithStackTrace (show i)
 _relOrigin (Rel i _ _) = i
 _relOrigin (Inline i) = i
 _relOrigin (RelAccess _ i) = _relOrigin i
+_relOrigin (RelFun i _) = i
 _relRoot  (Rel i _ _ ) = i
 _relRoot  (Inline i  ) = i
 _relRoot  (RelAccess i _ ) = i
+_relRoot  (RelFun i _ ) = i
 
 
 
@@ -496,8 +502,9 @@ instance Num a => Num (FTB a) where
   i + j = liftA2 (+) i  j
   i - j = liftA2 (-) i j
   i * j = liftA2 (*) i  j
-  abs i  = fmap abs i
-  signum i  = signum <$> i
+  negate  = fmap negate
+  abs   = fmap abs
+  signum   = fmap signum
   fromInteger i  = TB1 (fromInteger i )
 
 instance Fractional a => Fractional (FTB a) where
@@ -525,7 +532,7 @@ relAccesGen (Many [l]) = relAccesGen l
 
 keyattri :: Foldable f => TB f  k  a -> [Rel k]
 keyattri (Attr i  _ ) = [Inline i]
-keyattri (Fun i  l _ ) = [Inline i] <> (relAccesGen <$> snd l)
+keyattri (Fun i  l _ ) = [RelFun i (relAccesGen <$> snd l)]
 keyattri (FKT i  rel _ ) = rel
 keyattri (IT i  _ ) =  [Inline i]
 

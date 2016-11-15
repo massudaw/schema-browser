@@ -59,13 +59,15 @@ calendarCreate cal def = runFunction $ ffi "createChart(%1,%2)" cal def
 calendarAddSource cal t fields evs = runFunction $ ffi "addChartColumns(%1,%2,%3,%4)" cal (tableName t) fields evs
 calendarRemoveSource cal t = runFunction $ ffi "removeChartColumns(%1,%2)" cal (tableName t)
 
-chartWidget body (incrementT,resolutionT) sel inf cliZone = do
+chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
     let
 
       schId = int (schemaId inf)
       schemaPred = [(IProd True ["schema"],Left (schId,Equals))]
 
     dashes <- ui$ do
+      (_,(_,emap )) <-transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
+      (_,(_,geomap )) <-transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred
       evMap <- transactionNoLog (meta inf) $ do
         (_,(_,evMap )) <- selectFromTable "metrics" Nothing Nothing [] schemaPred
         return evMap
@@ -75,9 +77,12 @@ chartWidget body (incrementT,resolutionT) sel inf cliZone = do
             table = lookTable inf tname
             tablId = int (_tableUnique table)
             Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"metrics" $ IProd True ["metrics"]) e
+            -- Just (Attr _ (ArrayTB1 timefields ))= indexField (liftAccess (meta inf )"event" $ IProd True ["event"]) e
+            timeFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "event" $ IProd True ["event"])  <$> G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
+            geoFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "geo" $ IProd True ["geo"])  <$> G.lookup (idex (meta inf) "geo" [("schema" ,schId ),("table",tablId )])  geomap
             (Attr _ color )= lookAttr' (meta inf) "color" e
             projf  r efield  = M.fromList [("value" ,ArrayTB1 $  attr <$> efield), ("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color )] :: M.Map Text (FTB Showable)
-              where attr  (TB1 (SText field)) = attrValue $ justError ("no attr " <> show field) (lookAttrM inf field r)
+              where attr  (TB1 (SText field)) = _tbattr $ unTB $justError ("no attr " <> show field) (findAttr [lookKey inf tname field] r)
             isKInterval (KInterval i) = True
             isKInterval (KOptional i) = isKInterval i
             isKInterval (Primitive i ) = False
@@ -85,14 +90,14 @@ chartWidget body (incrementT,resolutionT) sel inf cliZone = do
 
             proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  projf r efields
             attrValue (Attr k v) = v
-         in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,F.toList efields,proj) ) ( G.toList evMap)
+         in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,F.toList efields,(timeFields,geoFields),proj) ) ( G.toList evMap)
 
     iday <- liftIO getCurrentTime
     let
       legendStyle  lookDesc table b
             =  do
-              let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,_)-> (b,i)) dashes)
-              maybe UI.div (\(k@((c,tname,_,_))) -> mdo
+              let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,t,_)-> (b,i)) dashes)
+              maybe UI.div (\(k@((c,tname,_,_,_))) -> mdo
                 expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
                 evc <- UI.checkedChange expand
                 evb <- ui $ stepper False evc
@@ -105,18 +110,15 @@ chartWidget body (incrementT,resolutionT) sel inf cliZone = do
     calendar <- UI.div # set UI.class_ "col-xs-10"
     element body # set children [calendar]
     let inpCal = sel
-    let calFun (resolution,incrementT) = mdo
-            let
-              capitalize (i:xs) = toUpper i : xs
-              capitalize [] = []
+    let calFun (resolution,incrementT,positionB) = mdo
             let
               evc = eventClick calendar
             edits <- ui$ accumDiff (\(tref,_)->  evalUI calendar $ do
-              charts <- UI.div
+              charts <- UI.div  # set UI.style [("height", "300px"),("width", "900px")]
               calendarCreate  charts (show incrementT)
               let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
-              traverse (\((_,t,fields,proj))-> do
-                    let pred = WherePredicate $ AndColl [] -- lookAccess inf (tableName t)<$> timePred (fieldKey <$> fields ) (incrementT,resolution)
+              traverse (\((_,t,fields,(timeFields,geoFields),proj))-> do
+                    let pred = fromMaybe mempty (fmap (\fields -> WherePredicate $ lookAccess inf (tableName t)<$> timePred (fieldKey <$> fields) (incrementT,resolution)) timeFields  <> liftA2 (\field pos-> WherePredicate $ lookAccess inf (tableName t)<$> geoPred field pos ) geoFields positionB )
                         fieldKey (TB1 (SText v))=  lookKey inf (tableName t) v
                     reftb <- ui $ refTables' inf t Nothing pred
                     let v = fmap snd $ reftb ^. _1
@@ -131,13 +133,13 @@ chartWidget body (incrementT,resolutionT) sel inf cliZone = do
                         ui $ registerDynamic (fmap fst $ runDynamic $ evalUI charts $ calendarRemoveSource charts t))
                        (v)
                     mapM (\i -> element i # sink UI.style  (noneShow . isJust <$> tdib)) el
-                    UI.div # set children (charts:el)
+                    UI.div # set children (charts:el) # set UI.class_ "row"
                                    ) ref) inpCal
 
             element calendar # sink children ( catMaybes .F.toList <$> facts edits)
 
 
-    onFFI "google.charts.setOnLoadCallback(%1)" (evalUI body $  mapUIFinalizerT calendar calFun ((,) <$> resolutionT <*> incrementT ))
+    onFFI "google.charts.setOnLoadCallback(%1)" (evalUI body $  mapUIFinalizerT calendar calFun ((,,) <$> resolutionT <*> incrementT <*> positionB))
 
     return  (legendStyle , dashes )
 

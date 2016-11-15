@@ -180,11 +180,10 @@ getFKRef inf predtop rtable (me,old) v (Path r (FKInlineTable  j ) ) =  do
 
 getFKRef inf predtop rtable (me,old) v (Path ref (FunctionField a b c)) = do
   let
-    cl = c
     addAttr :: TBData Key Showable -> Either [Compose Identity (TB Identity)  Key Showable] (TBData Key Showable)
     addAttr (m,i) = maybe (Left []) (\r -> Right (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)   i) ) i)) r
       where
-        r =  evaluate a b funmap cl (m,i)
+        r =  traceShowId $ traceShow (a,b,c,i) $evaluate a b funmap c (m,i)
   return (me >=> addAttr ,old <> ref )
 
 getFKRef inf predtop rtable (me,old) v (Path _ (FKJoinTable i j ) ) =  do
@@ -222,7 +221,7 @@ getFKRef inf predtop rtable (me,old) v (Path _ (FKJoinTable i j ) ) =  do
         getAtt i (m ,k ) = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues . unTB $ k
 
 
-getFKS inf predtop table v = F.foldl' (\m f  -> m >>= (\i -> getFKRef inf predtop  table i v f)) (return (return ,S.empty )) $ sorted -- first <> second
+getFKS inf predtop table v = F.foldl' (\m f  -> m >>= (\i -> getFKRef inf predtop  table i v f)) (return (return ,S.empty )) $ traceShowId sorted -- first <> second
   where first =  filter (not .isFunction . pathRel )$ sorted
         second = filter (isFunction . pathRel )$ sorted
         sorted = P.sortBy (P.comparing pathRelRel)  (S.toList (rawFKS table))

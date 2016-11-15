@@ -1,10 +1,11 @@
 {-# LANGUAGE Arrows, TupleSections,OverloadedStrings ,NoMonomorphismRestriction #-}
 module Gpx
-  (readArt,readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readHtmlReceita,readHtml) where
+  (readArt,readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readSiapi3AndamentoAJAX,readHtmlReceita,readHtml) where
 
 import Types
 import Utils
 import Data.String
+import Safe
 import Control.Applicative
 
 import Data.Maybe
@@ -43,6 +44,11 @@ getTable' :: ArrowXml a => a XmlTree b  -> a XmlTree [[b]]
 getTable' b=  atTag "table"  >>> listA (rows >>> listA cols) where
         rows = getChildren >>> is "tr"
         cols = getChildren >>> is "td" >>> b
+getTd:: ArrowXml a => a XmlTree b  -> a XmlTree [[b]]
+getTd b=  listA (rows >>> listA cols) where
+        rows = getChildren >>> is "tr"
+        cols = getChildren >>> is "td" >>> b
+
 
 
 is x = deep (isElem >>> hasName x)
@@ -134,12 +140,6 @@ testCreaArt = do
   kk <- BS.readFile "creaHistoricoArt.html"
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
   readCreaHistoricoHtml inp
-
-testSiapi3 = do
-  kk <- BS.readFile "siapi32.html"
-  let inp = (TE.unpack $ TE.decodeLatin1 kk)
-  readSiapi3Andamento inp
-
 readSiapi3Solicitacao file = do
   let
       txt = trim ^<< ( concat ^<< listA ((atTag "a" <+> atTag "span") >>> getChildren >>>  getText)) <+> ((notContaining (atTag "div") (deep (hasName "a") <+> deep (hasName "span"))  >>> deep getText )  )
@@ -148,12 +148,37 @@ readSiapi3Solicitacao file = do
   tail .head <$> runX arr
 -}
 
+testSiapi3 = do
+  kk <- BS.readFile "debug.html"
+  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  readSiapi3AndamentoAJAX inp
+
+
 readSiapi3Andamento file = do
   let
       txt = trim ^<< (concat ^<< listA ((atTag "a" <+> atTag "span") >>> getChildren >>>  getText))
-      arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
-          >>> deep (hasAttrValue "id" (=="formListaDeAndamentos:tabela")) >>> getTable' txt
-  tail .head <$> runX arr
+      arr = proc t -> do
+          s <- readString [withValidate no,withWarnings no,withParseHTML yes] file -< t
+          v <- deep (hasAttrValue "id" (=="formListaDeAndamentos:tabela")) >>> getTable' txt -< s
+          returnA -< v
+      arr2 =readString [withValidate no,withWarnings no,withParseHTML yes] file >>>
+        deep (atTag "input" >>> hasAttrValue "id" (=="javax.faces.ViewState") >>>getAttrValue "value")
+  a <- concat .maybeToList . fmap tail . safeHead <$>runX arr
+  b  <- runX arr2
+  return (a,b)
+
+readSiapi3AndamentoAJAX file = do
+  let
+      txt = trim ^<< (concat ^<< listA ((atTag "a" <+> atTag "span") >>> getChildren >>>  getText))
+      arr = proc t -> do
+          s <- readString [withValidate no,withWarnings no,withParseHTML yes] file -< t
+          res <- deep (atTag "update" >>> hasAttrValue "id" (=="formListaDeAndamentos:tabela")) >>> getChildren  >>> getText >>> (readFromString [withValidate no,withWarnings no,withParseHTML yes]  >>> getTd txt )-< s
+          returnA -< res
+      arr2 =readString [withValidate no,withWarnings no,withParseHTML yes] file >>>
+        deep (atTag "update" >>> hasAttrValue "id" (== "javax.faces.ViewState") >>> getChildren >>> getText)
+  a <- runX arr
+  b  <- runX arr2
+  return (a,b)
 
 readCreaHistoricoHtml file = fmap tail <$> do
   let
@@ -173,6 +198,7 @@ readHtml file = do
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
         >>> getTable' (deep getText)
   runX arr
+
 {-
 exec inputs = do
   let schema = "health"
