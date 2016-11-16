@@ -185,12 +185,14 @@ chooserTable inf bset cliTid cli = do
     pred2 =  [(IProd True ["schema"],Left (int $ schemaId inf  ,Equals))]
   orddb <- ui $ transactionNoLog  (meta inf) $
       (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred2))
+  translationDb <- ui $ transactionNoLog  (meta inf) $
+      (fst <$> (selectFromTable "table_name_translation" Nothing Nothing []  pred2 ))
   layout <- checkedWidget (pure False)
   body <- UI.div
   el <- ui $ accumDiff (evalUI body  . (\((table,sub))-> do
     header <- UI.h3
         # set UI.class_ "header"
-        # set text (T.unpack (rawName table))
+        # sink0 text (facts $ T.unpack . lookDesc inf table <$> collectionTid translationDb)
     let
     body <-  do
             if L.length sub == 1
@@ -207,7 +209,8 @@ chooserTable inf bset cliTid cli = do
     UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFactsDiv <$> triding layout <*> fmap M.size (triding bset))# set UI.style [("border","2px dotted gray")]
                        ).fst)  (M.fromList . fmap (\i -> (i,())) . M.toList <$> triding bset)
 
-  element body # sink0 UI.children (facts $ (\els ord-> fmap snd $ L.sortBy (flip $ comparing fst) $ fmap (first (tableOrder inf ord .fst)) els ) <$> fmap M.toList el <*> collectionTid orddb) # set UI.class_ "col-xs-12"
+  let sortTable els ord = fmap snd $ L.sortBy (flip $ comparing fst) $ fmap (first (\i -> tableOrder inf (fst i) ord )) els
+  element body # sink0 UI.children (facts $ sortTable <$> fmap M.toList el <*> collectionTid orddb) # set UI.class_ "col-xs-12"
   element layout  # set UI.class_ "col-xs-1"
   return [getElement layout ,body]
 

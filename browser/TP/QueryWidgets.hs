@@ -138,13 +138,13 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
   let
       fresh :: [([VarDef],[VarDef])]
       fresh = fmap fst ac
-  b <- UI.button # set UI.text (T.unpack n)
+  b <- flabel # set UI.text (T.unpack n)
   inf <- liftIO $  foldl' (\i (kn,kty) -> (\m -> createFresh  tname m kn kty) =<< i ) (return  oinf) (concat $ fmap fst fresh <> fmap snd fresh )
   let
       freshKeys :: [([CoreKey],[CoreKey])]
       freshKeys = first (fmap lookK ) . second (fmap lookK) <$> fresh
       lookK = lookKey inf tname . fst
-  freshUI <- foldl' (\old (aci ,(inpfresh,outfresh)) -> (old >>= (\((l,ole),unoldItems)-> do
+  freshUI <- foldl' (\old (aci ,(inpfresh,outfresh)) -> (old >>= (\(l,unoldItems)-> do
 
       elemsIn <- mapM (\fresh -> do
         let attrB pre a = do
@@ -169,10 +169,10 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
             . set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
       j<- UI.div # styleUI  # set children (fmap getElement elemsIn <> [preinp])# sink UI.style (noneShow .isJust <$> facts unoldItems)
       k <- UI.div # styleUI  # set children (fmap getElement elemsOut) # sink UI.style (noneShow .isJust <$> facts liftedE  )
-      return  (( l <> [j , k], ole <> [fmap (\i -> create i :: TBData Key Showable)<$> liftedE] ), mergeCreate <$> unoldItems <*> (fmap (\i -> create i :: TBData Key Showable)<$> liftedE)  ))
-           ) ) (return (([],[]),trinp)) $ zip (fmap snd ac) freshKeys
-  el <- UI.div  # set children (b: (fst $ fst freshUI))
-  return (el , (liftAccess inf tname  $snd $ pluginStatic' $ snd $ last ac ,fmap (fmap patch) $ last $ snd $ fst freshUI ))
+      return  ( l <> [j , k] , liftA2 apply <$> facts unoldItems <#> liftedE  ))
+           ) ) (return (([],trinp))) $ zip (fmap snd ac) freshKeys
+  el <- UI.div  # set children (b: (fst freshUI))
+  return (el , (liftAccess inf tname  $snd $ pluginStatic' $ snd $ last ac ,fmap (fmap patch) $  snd freshUI ))
 
 pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
   let f =second (liftAccess inf t ). first (liftAccess  inf t ) $ staticP arrow
@@ -182,7 +182,7 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
       tdInput = tdInputPre
       predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
       tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
-  headerP <- UI.button # set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+  headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   ini <- currentValue (facts tdInput )
   kk <- ui $ stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
   pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap ( join .  liftA2 diff v . fmap (liftTable' inf t).  join . eitherToMaybe ). catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
@@ -197,7 +197,7 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (DiffIOPlugin arrow))) = do
       tdInput = tdInputPre
       predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
       tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
-  headerP <- UI.button # set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput)  #set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+  headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput)  #set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   cliHeader <- UI.click headerP
   let ecv = facts tdInput <@ cliHeader
   vo <- currentValue (facts tdOutput)
@@ -218,7 +218,7 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (BoundedPlugin2 arrow))) = do
       tdInput = tdInputPre
       predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
       tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
-  headerP <- UI.button # set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+  headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   cliHeader <- UI.click headerP
   let ecv = facts tdInput <@ cliHeader
   vo <- currentValue (facts tdOutput)
@@ -616,7 +616,7 @@ crudUITable
 crudUITable inf open reftb@(bres , _ ,gist ,tref) refs pmods ftb@(m,_)  preoldItems = do
   (e2,h2) <- ui $ newEvent
   (ediff ,hdiff) <- ui $ newEvent
-  nav  <- buttonDivSet ["+","-"] (fmap Just open) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonDivSet ["+","-"] (fmap Just open) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-right")
   element nav # set UI.class_ "col-xs-3 pull-right"
   sub <- UI.div
   let table = lookTable inf ( _kvname  m )
@@ -687,14 +687,14 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
 
   -- Insert when isValid
   let insertEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$>  inscrud ) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (inscrud ) (gist ))
-  insertB <- UI.button #
+  insertB <- UI.button# set UI.class_ "btn btn-sm" #
           set text "INSERT" #
           set UI.class_ "buttonSet" #
           set UI.style (noneShowSpan ("INSERT" `elem` rawAuthorization table ))  #
           sinkDiff UI.enabled insertEnabled
 
   let editEnabled = liftA2 (&& ) (liftA2 (&&) (isJust. fmap tableNonRef'   <$> inscrud ) (isJust <$> oldItemsi)) $ liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . snd ). fmap tableNonRef' <$> inscrud) (fmap (_kvvalues . unTB .  snd ). fmap tableNonRef' <$> oldItemsi)) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (inscrud) (gist) )
-  editB <- UI.button #
+  editB <- UI.button# set UI.class_ "btn btn-sm" #
          set text "EDIT" #
          set UI.class_ "buttonSet"#
          set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table )) #
@@ -702,7 +702,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
          sinkDiff UI.enabled editEnabled
 
   let mergeEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> inscrud) (liftA2 (\i j -> not . L.null   $ maybe [] (\e -> filter ((/= tableNonRef' e) .tableNonRef') $  conflictGist e j) i  ) (inscrud) (gist ))
-  mergeB <- UI.button #
+  mergeB <- UI.button# set UI.class_ "btn btn-sm" #
          set text "MERGE" #
          set UI.class_ "buttonSet"#
          set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table )) #
@@ -710,7 +710,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
          sinkDiff UI.enabled mergeEnabled
 
   let deleteEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> oldItemsi) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (oldItemsi ) (gist ))
-  deleteB <- UI.button #
+  deleteB <- UI.button# set UI.class_ "btn btn-sm" #
          set text "DELETE" #
          set UI.class_ "buttonSet"#
          set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table )) #
@@ -1036,7 +1036,7 @@ buildPrim fm tdi i = case i of
            let fty = case mime of
                 "application/pdf" -> pdfFrame ("iframe",strAttr "src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
                 "application/x-ofx" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-                "image/jpg" -> pdfFrame ("img",strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
+                "image/jpg" -> (\i -> pdfFrame ("img",strAttr "src",maybe "" binarySrc ,[("max-height","200px")]) i # set UI.class_ "img-responsive")
                 "image/png" -> pdfFrame ("img",strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
                 "image/bmp" -> pdfFrame ("img",strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
                 "text/html" -> pdfFrame ("iframe",strAttr "srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])

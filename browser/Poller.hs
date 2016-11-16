@@ -116,7 +116,7 @@ poller schm authmap db plugs is_test = do
                           (_,(_,listResAll)) <- transactionNoLog inf $ selectFrom a  (Just ix) (Just fetchSize) [] pred
                           let listRes = L.take fetchSize . G.toList $  listResAll
 
-                          let evb = filter (\i-> G.checkPred i predFullIn {-&& not (G.checkPred i predFullOut)-} ) listRes
+                          let evb = filter (\i-> G.checkPred i predFullIn && not (G.checkPred i predFullOut) ) listRes
                           i <-  liftIO $ mapConcurrently (mapM (\inp -> catchPluginException inf (_tableUnique (lookTable inf a)) idp (M.toList $ getPKM inp) $ fmap fst $ runDynamic $ transactionLog inf $ do
                               case elemp of
                                 Right action  -> do

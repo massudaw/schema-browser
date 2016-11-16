@@ -88,7 +88,7 @@ positionSel = do
     return (bcpos,currentPosition bcpos, h,tidings positionB (diffEvent positionB  (Just <$> e)))
 
 
-tableUsage inf orderMap table selection = (L.elem table (M.keys selection), tableOrder inf orderMap table )
+tableUsage inf orderMap table selection = (L.elem table (M.keys selection), tableOrder inf table orderMap )
 
 tableChooser :: InformationSchemaKV Key Showable
                       -> [Table]

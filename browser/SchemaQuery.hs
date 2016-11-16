@@ -78,6 +78,17 @@ prerefTable  inf table  = do
 
 
 refTable :: InformationSchema -> Table -> Dynamic DBVar
+refTable  inf (Union table origin )  = do
+  refs <- mapM (refTable inf ) origin
+  let mergeDBRefT  (ref1,j ,i) (ref2,m ,l) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l )
+      dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty) (Le.over Le._3 (fmap (createUn (S.fromList$ rawPK table).fmap projunion.G.toList)) .(\(DBVar2 e i j) -> ([e],i,j)) <$>refs )
+      dbvar (l,i,j) = DBVar2 (L.head l) i j
+      projunion :: TBData Key Showable -> TBData Key Showable
+      projunion  i = res
+            where
+              res = liftTable' inf (tableName table ) .mapKey' keyValue $i
+
+  return $ dbvar dbvarMerge
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
   let ref = justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
@@ -85,15 +96,11 @@ refTable  inf table  = do
   dbTds <- convertChanTidings mempty  (patchVar ref) (collectionState ref)
   return (DBVar2 ref idxTds dbTds)
 
-
 tbpredM un v = G.Idex . M.fromList $ justError "optional pk" $ (Tra.traverse (Tra.traverse unSOptional' ) $getUn un v)
 
 createUn :: S.Set Key -> [TBData Key Showable] -> G.GiST (G.TBIndex Key Showable) (TBData Key Showable)
 createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn un (tableNonRef' i) )
   where transPred v = G.Idex $ M.fromList $ justError "invalid pred" (Tra.traverse (Tra.traverse unSOptional' ) $getUn un (tableNonRef' v))
-
-
--- tableLoader :: InformationSchema -> Table -> TransactionM (Collection Key Showable)
 
 
 selectFromA t a b c d = do
@@ -183,7 +190,7 @@ getFKRef inf predtop rtable (me,old) v (Path ref (FunctionField a b c)) = do
     addAttr :: TBData Key Showable -> Either [Compose Identity (TB Identity)  Key Showable] (TBData Key Showable)
     addAttr (m,i) = maybe (Left []) (\r -> Right (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)   i) ) i)) r
       where
-        r =  traceShowId $ traceShow (a,b,c,i) $evaluate a b funmap c (m,i)
+        r =  evaluate a b funmap c (m,i)
   return (me >=> addAttr ,old <> ref )
 
 getFKRef inf predtop rtable (me,old) v (Path _ (FKJoinTable i j ) ) =  do
@@ -242,7 +249,6 @@ tableLoader table  page size presort fixed
               )  (rawUnion table)
     let mvar = mvarMap inf
     mmap <- liftIO $ atomically $ readTMVar mvar
-    dbvar <- lift $ refTable   inf table
     let
         projunion :: TBData Key Showable -> TBData Key Showable
         projunion  i = res
@@ -250,9 +256,13 @@ tableLoader table  page size presort fixed
               res = liftTable' inf (tableName table ) .mapKey' keyValue $i
         o = foldr mergeDBRef  (M.empty,G.empty) (fmap (createUn (S.fromList$ rawPK table).fmap projunion.G.toList) . snd <$>i )
     modify (M.insert (table,fixed) ( snd o ))
+    let mergeDBRefT  (ref1,j ,i) (ref2,m ,l) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l )
+        dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty) (Le.over Le._3 (fmap (createUn (S.fromList$ rawPK table).fmap projunion.G.toList)) .(\(DBVar2 e i j) -> ([e],i,j)). fst <$>i )
+        dbvar (l,i,j) = DBVar2 (L.head l) i j
+
     lf <- liftIO getCurrentTime
     liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
-    return $ (dbvar, o)
+    return $ (dbvar dbvarMerge, o)
   -- (Scoped || Partitioned) Tables
   | not  (null $ _rawScope table ) && not (S.null (rawFKS table) )= do
       inf <- ask

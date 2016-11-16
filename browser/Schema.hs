@@ -9,6 +9,7 @@ import Query
 import Step.Host
 import qualified Data.Interval as Interval
 import Types
+import Text
 import Expression
 import Step.Common
 import Data.Tuple
@@ -222,54 +223,11 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
 
        mvar <- liftIO$ atomically $ newTMVar  M.empty
        let inf = InformationSchema schemaId schema (uid,user) oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.filterWithKey (\k v -> not $ L.elem (tableName v ) (concat $ fmap (\(_,_,n) -> F.toList n) ures)) $ i2u)  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist
-       liftIO$ print functionsRefs
        varmap <- mapM (createTableRefs inf) (filter (L.null . rawUnion) $ F.toList i2u)
-       let preinf = InformationSchema  (justLookH schema (schemaNameMap schemaVar)) schema (uid,user) oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  i2u  i3u sizeMapt undefined conn undefined rsch ops pluglist
-       varmapU <- mapM (createTableRefsUnion preinf (M.fromList varmap)) (filter (not . L.null . rawUnion) $ F.toList i2u)
-       liftIO$ atomically $ takeTMVar mvar >> putTMVar mvar  (M.fromList $ varmap <> varmapU)
+       liftIO$ atomically $ takeTMVar mvar >> putTMVar mvar  (M.fromList varmap )
        var <- liftIO$ modifyMVar_  (globalRef schemaVar  ) (return . HM.insert schema inf )
        addStats inf
        return inf
-
-
-createTableRefsUnion inf m i  = do
-  t <- liftIO$ getCurrentTime
-  let
-      diffIni :: [TBIdx Key Showable]
-      diffIni = []
-  mdiff <-  liftIO$ atomically $ newBroadcastTChan
-  nmdiff <-  liftIO $ atomically $ dupTChan mdiff
-  chanidx <-  liftIO$ atomically $ newBroadcastTChan
-  nchanidx <-  liftIO$ atomically $ dupTChan chanidx
-  (iv,v) <- liftIO$ readTable inf "dump" (schemaName inf) (i)
-  let
-      patchUni =  patchVar . (justError "no table union" . flip M.lookup m)  <$>  (rawUnion i)
-      patchunion  = liftPatch inf (tableName i ) .firstPatch keyValue
-  liftIO$ mapM (\chan -> do
-    nchan <- atomically $ dupTChan chan
-    forkIO $ forever $ (atomically $ do
-      v <- readTChan   nchan
-      writeTChan nmdiff (patchunion <$> v) )) patchUni
-  midx <-  liftIO$ atomically$ newTVar iv
-  collectionState <-  liftIO$ atomically$ newTVar G.empty
-  midxLoad <-  liftIO$ atomically$ newTVar G.empty
-
-  t0 <- liftIO $forkIO $ forever $ (do
-      atomically (do
-          (v,s,i,t) <- readTChan nchanidx
-          modifyTVar' midx  (M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) v)
-          )
-      return () )
-  R.registerDynamic (killThread t0)
-  t1 <- liftIO$ forkIO $ forever $ (
-      atomically $ do
-        patches <- takeMany nmdiff
-        when (not $ L.null $ concat patches) $
-          modifyTVar' collectionState (flip (L.foldl' apply ) (concat patches))
-        return patches)
-  R.registerDynamic (killThread t1)
-  return (i,  DBRef nmdiff midx nchanidx collectionState midxLoad )
-
 
 createTableRefs :: InformationSchema -> Table -> R.Dynamic (TableK Key,DBRef Key Showable)
 createTableRefs inf i = do
@@ -386,10 +344,26 @@ logTableModification inf (TableModification Nothing table i) = do
   [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (\"user\",modification_time,\"table\",data_index2,modification_data  ,\"schema\") VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (fst $ username inf ,ltime,_tableUnique table, V.fromList <$> nonEmpty (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) (M.toList pidx) )) , fmap (Binary  . B.encode ) . V.fromList <$> nonEmpty pdata , schemaId inf)
   return (TableModification (Just id) table i )
 
-tableOrder inf orderMap table=  maybe (Right 0) (Left . _tbattr) row
-          where
-            pk = [("table",int . _tableUnique $ table ), ("schema",int (schemaId inf))]
-            row = lookupAccess (meta inf) pk  "usage" ("ordering",orderMap)
+lookDesc
+  :: InformationSchemaKV Key Showable
+     -> TableK k
+     -> G.GiST (TBIndex Key Showable) (TBData Key Showable)
+     -> T.Text
+lookDesc inf j i = maybe (rawName j)  (\(Attr _ (TB1 (SText v)))-> v) row
+  where
+    pk = [("schema" ,int $ schemaId inf),("table",int (_tableUnique j))]
+    row = lookupAccess  (meta inf) pk "translation"  ("table_name_translation", i)
+
+tableOrder
+  :: Num b =>
+     InformationSchemaKV Key Showable
+     -> TableK k
+     -> G.GiST (TBIndex Key Showable) (TBData Key Showable)
+     -> FTB Showable
+tableOrder inf table orderMap =  maybe (int 0) _tbattr row
+  where
+    pk = [("table",int . _tableUnique $ table ), ("schema",int (schemaId inf))]
+    row = lookupAccess (meta inf) pk  "usage" ("ordering",orderMap)
 
 lookupAccess inf l f c = join $ fmap (indexField (IProd  True [(lookKey inf (fst c) f)] )) . G.lookup (idex inf (fst c) l) $ snd c
 
