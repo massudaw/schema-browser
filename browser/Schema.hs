@@ -7,6 +7,7 @@ import Data.String
 import Control.DeepSeq
 import Query
 import Step.Host
+import Data.Ord
 import qualified Data.Interval as Interval
 import Types
 import Text
@@ -340,14 +341,14 @@ logTableModification inf (TableModification Nothing table i) = do
   time <- getCurrentTime
 
   let ltime =  utcToLocalTime utc $ time
-      (_,G.Idex pidx,pdata) = firstPatch keyValue  i
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (\"user\",modification_time,\"table\",data_index2,modification_data  ,\"schema\") VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (fst $ username inf ,ltime,_tableUnique table, V.fromList <$> nonEmpty (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) (M.toList pidx) )) , fmap (Binary  . B.encode ) . V.fromList <$> nonEmpty pdata , schemaId inf)
+      (meta,G.Idex pidx,pdata) = firstPatch keyValue  i
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (\"user\",modification_time,\"table\",data_index2,modification_data  ,\"schema\") VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (fst $ username inf ,ltime,_tableUnique table, V.fromList <$> nonEmpty (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) (zip (_kvpk meta) (F.toList pidx)) )) , fmap (Binary  . B.encode ) . V.fromList <$> nonEmpty pdata , schemaId inf)
   return (TableModification (Just id) table i )
 
 lookDesc
   :: InformationSchemaKV Key Showable
      -> TableK k
-     -> G.GiST (TBIndex Key Showable) (TBData Key Showable)
+     -> G.GiST (TBIndex Showable) (TBData Key Showable)
      -> T.Text
 lookDesc inf j i = maybe (rawName j)  (\(Attr _ (TB1 (SText v)))-> v) row
   where
@@ -358,16 +359,16 @@ tableOrder
   :: Num b =>
      InformationSchemaKV Key Showable
      -> TableK k
-     -> G.GiST (TBIndex Key Showable) (TBData Key Showable)
+     -> G.GiST (TBIndex Showable) (TBData Key Showable)
      -> FTB Showable
 tableOrder inf table orderMap =  maybe (int 0) _tbattr row
   where
     pk = [("table",int . _tableUnique $ table ), ("schema",int (schemaId inf))]
     row = lookupAccess (meta inf) pk  "usage" ("ordering",orderMap)
 
-lookupAccess inf l f c = join $ fmap (indexField (IProd  True [(lookKey inf (fst c) f)] )) . G.lookup (idex inf (fst c) l) $ snd c
+lookupAccess inf l f c = join $ fmap (indexField (IProd  notNull [(lookKey inf (fst c) f)] )) . G.lookup (idex inf (fst c) l) $ snd c
 
-idex inf t v = G.Idex $ M.fromList  $ first (lookKey inf t  ) <$> v
+idex inf t v = G.Idex $ V.fromList $ fmap snd $ L.sortBy (comparing ((`L.elemIndex` (rawPK $ lookTable inf t)).fst)) $ first (lookKey inf t  ) <$> v
 
 dbTable mvar table = do
     mmap <- atomically $readTMVar mvar
@@ -397,7 +398,7 @@ atTable k = do
   k <- liftIO$ dbTable (mvarMap i) k
   liftIO $ atomically $ readTVar (collectionState k)
 
-joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  G.GiST (G.TBIndex Key Showable) (TBData Key Showable) -> TransactionM ( FTB (TBData Key Showable))
+joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  G.GiST (G.TBIndex Showable) (TBData Key Showable) -> TransactionM ( FTB (TBData Key Showable))
 joinRelT rel ref tb table
   | L.all (isOptional .keyType) origin = fmap LeftTB1 $ traverse (\ref->  joinRelT (Le.over relOri unKOptional <$> rel ) ref  tb table) (traverse unLeftItens ref )
   | L.any (isArray.keyType) origin = fmap (ArrayTB1 .Non.fromList)$ traverse (\ref -> joinRelT (Le.over relOri unKArray <$> rel ) ref  tb table ) (fmap (\i -> pure $ justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(Non.length (unArray $ unAttr $ head ref) - 1)])
@@ -416,7 +417,7 @@ addStats schema = do
   let
     row t s ls = tblist . fmap _tb $ [Attr "schema" (int (schemaId schema ) ), Attr "table" (int t) , Attr "size" (TB1 (SNumeric s)), Attr "loadedsize" (TB1 (SNumeric ls)) ]
     lrow t dyn st = liftTable' metaschema "table_stats" . row t (maybe (G.size dyn) (maximum .fmap fst ) $  nonEmpty $  F.toList st) $ (G.size dyn)
-    lookdiff tb row =  maybe (Just $ patch row ) (\old ->  diff old row ) (G.lookup (G.Idex (getPKM row)) tb)
+    lookdiff tb row =  maybe (Just $ patch row ) (\old ->  diff old row ) (G.lookup (G.getIndex row) tb)
   mapM_ (\(m,_)-> do
     var <- refTable schema (m)
     let event = R.filterJust $ lookdiff <$> R.facts (collectionTid dbpol ) R.<@> (flip (lrow (_tableUnique $ (m))) <$>  R.facts (idxTid var ) R.<@> R.rumors (collectionTid  var ) )

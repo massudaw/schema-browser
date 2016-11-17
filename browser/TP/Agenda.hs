@@ -78,8 +78,8 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
        ]
 
     let
-      schemaPred =  [(IProd True ["schema_name"],Left (txt (schemaName inf),Equals) )]
-      schemaPred2 =  [(IProd True ["schema"],Left (int (schemaId inf),Equals) )]
+      schemaPred =  [(keyRef ["schema_name"],Left (txt (schemaName inf),Equals) )]
+      schemaPred2 =  [(keyRef ["schema"],Left (int (schemaId inf),Equals) )]
 
     dashes <- ui$ do
       evMap <- transactionNoLog (meta inf) $ do
@@ -89,7 +89,7 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
         let
             Just (TB1 (SText tname)) = unSOptional' $  _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
             table = lookTable inf tname
-            Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"event" $ IProd True ["event"]) e
+            Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"event" $ keyRef ["event"]) e
             (Attr _ color )= lookAttr' (meta inf) "color" e
             toLocalTime = fmap to
               where to (STimestamp i )  = STimestamp $  utcToLocalTime cliZone $ localTimeToUTC utc i
@@ -157,7 +157,7 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
                         fieldKey (TB1 (SText v))=  lookKey inf (tableName t) v
                     reftb <- ui $ refTables' inf t Nothing pred
                     let v = fmap snd $ reftb ^. _1
-                    let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
+                    let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup  pk j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
                     tdib <- ui $ stepper Nothing (join <$> evsel)
                     let tdi = tidings tdib (join <$> evsel)
                     (el,ediff,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi)  reftb [] [] (allRec' (tableMap inf) $ t)  tdi

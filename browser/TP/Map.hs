@@ -65,7 +65,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
 
     let
       calendarT = (\b c -> (b,c)) <$> facts incrementT <#> resolutionT
-      schemaPred2 = [(IProd True ["schema"],Left (int (schemaId inf),Equals))]
+      schemaPred2 = [(keyRef ["schema"],Left (int (schemaId inf),Equals))]
 
     (_,(_,evMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred2
     (_,(_,eventMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
@@ -74,7 +74,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
           let
               Just (TB1 (SText tname)) = unSOptional' $ _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
               table = lookTable inf tname
-              evfields = join $fmap (\(Attr _ (ArrayTB1 n))-> n) . indexField  (liftAccess (meta inf) "event" $ IProd True ["event"])   <$> erow
+              evfields = join $fmap (\(Attr _ (ArrayTB1 n))-> n) . indexField  (liftAccess (meta inf) "event" $ keyRef ["event"])   <$> erow
                 where
                   erow = G.lookup (idex (meta inf) "event" [("schema" ,int $ schemaId inf),("table",int (_tableUnique table))])  eventMap
               (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "geo" e
@@ -123,7 +123,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
             let pred = lookAccess inf tname <$> predicate (fmap (\(TB1 (SText v))->  lookKey inf tname v) <$>efields ) (Just $  fields ) (positionB,Just calT)
             reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) (WherePredicate pred)
             let v = fmap snd $ reftb ^. _1
-            let evsel = (\j (tev,pk,_) -> if tev == tb then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
+            let evsel = (\j (tev,pk,_) -> if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
             tdib <- ui $ stepper Nothing (join <$> evsel)
             let tdi = tidings tdib (join <$> evsel)
             (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi) reftb [] [] (allRec' (tableMap inf) $ lookTable inf tname)  tdi

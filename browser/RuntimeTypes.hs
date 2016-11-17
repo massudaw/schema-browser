@@ -127,8 +127,8 @@ data DBVar2 k v=
 
 
 type DBVar = DBVar2 Key Showable
-type Collection k v = (Map WherePredicate (Int,Map Int (PageTokenF k v)),GiST (TBIndex k  v ) (TBData k v))
-type TableIndex k v = GiST (TBIndex k  v ) (TBData k v)
+type Collection k v = (Map WherePredicate (Int,Map Int (PageTokenF k v)),GiST (TBIndex   v ) (TBData k v))
+type TableIndex k v = GiST (TBIndex   v ) (TBData k v)
 
 type PrePlugins = FPlugins Text
 type Plugins = (Int,PrePlugins)
@@ -165,6 +165,7 @@ pluginRun b@(DiffIOPlugin _ ) = Left (pluginActionDiff' b)
 pluginRun b@(DiffPurePlugin _ ) = Left (pluginActionDiff' b)
 
 pluginActionDiff' (DiffIOPlugin a ) = fmap join . traverse (dynIO a)
+pluginActionDiff' (DiffPurePlugin a ) = fmap join . traverse (fmap return (dynPure a))
 pluginAction' (BoundedPlugin2   a ) = fmap join . traverse (dynIO a)
 pluginAction' (PurePlugin  a) = fmap join . traverse ((fmap return) (dynPure a ))
 
@@ -191,7 +192,7 @@ deriving instance (NFData v,NFData k) => NFData (PageTokenF k v)
 data PageTokenF k v
   = PageIndex Int
   | NextToken Text
-  | TableRef (TBIndex k v)
+  | TableRef (TBIndex  v)
   | HeadToken
   deriving(Eq,Ord,Show,Generic)
 
@@ -315,7 +316,7 @@ lookAccess inf tname l = Le.over (Le._1) (liftAccess inf tname)  l
 
 genPredicateFull i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
-genPredicateFull i (IProd b l) =  (\l -> if b then Just $ PrimColl (IProd b l,Right (if i then Not IsNull else IsNull) ) else Nothing ) $ l
+genPredicateFull i (IProd b l) =  (\i -> PrimColl (IProd b l,Right i ))  <$> b
 genPredicateFull i n@(Nested p@(IProd _ _ ) l ) = fmap (\(a,b) -> (Nested p a , b )) <$> genPredicateFull i l
 genPredicateFull _ i = errorWithStackTrace (show i)
 

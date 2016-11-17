@@ -7,9 +7,12 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Types.Index
-  (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,filter',mapKeys ,getIndex ,pickSplitG ,minP,maxP,unFin,queryCheck,indexPred,checkPred,splitIndex,splitPred,module G ) where
+  (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,filter',mapKeys
+  ,getIndex ,getUnique,notOptional,tbpred
+  ,pickSplitG ,minP,maxP,unFin,queryCheck,indexPred,checkPred,splitIndex,splitPred,splitIndexPK,module G ) where
 
 import Data.Maybe
+import Control.Monad
 import Control.Arrow (first)
 import Data.Functor.Identity
 import Step.Host
@@ -27,6 +30,7 @@ import GHC.Generics
 import Types
 import Utils
 import Data.Time
+import qualified Data.Vector as V
 import Data.Ord
 import Data.Foldable (foldl')
 import Data.Char
@@ -48,13 +52,22 @@ import qualified Data.Map.Strict as M
 
 
 --- Row Level Predicate
-instance (Binary a, Binary k)  => Binary (TBIndex  k a)
-instance (NFData a, NFData k)  => NFData (TBIndex  k a)
+instance (Binary a)  => Binary (TBIndex  a)
+instance (NFData a)  => NFData (TBIndex   a)
 
-mapKeys f (Idex i ) = Idex $ M.mapKeys f i
+mapKeys f (Idex i ) = Idex $ i
 
-getIndex :: Ord k => TBData k a -> TBIndex k a
-getIndex = Idex . getPKM
+getUnique :: Ord k => [k] -> TBData k a -> TBIndex  a
+getUnique ks (m,v) = Idex . V.fromList . fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn (Set.fromList ks) $ (m,v)
+getIndex :: Ord k => TBData k a -> TBIndex  a
+getIndex (m,v) = Idex . V.fromList . fmap snd . L.sortBy (comparing ((`L.elemIndex` (_kvpk m)).fst)) .M.toList .  getPKM $ (m,v)
+
+notOptional :: TBIndex  a -> TBIndex  a
+notOptional (Idex m) = Idex   . justError "cant be empty " . traverse unSOptional'  $ m
+
+tbpred :: Ord k => TBData k a -> TBIndex a
+tbpred = notOptional . getIndex
+
 
 instance (Num a , Num (Tangent a) ,Fractional a ,Affine a) => Affine (ER.Extended a ) where
   type Tangent (ER.Extended a) = ER.Extended (Tangent  a)
@@ -156,13 +169,21 @@ instance Affine String where
       addStr [] (b:bs) = chr b : addStr [] bs
       addStr (a:as) (b:bs) = chr (ord a + b) : addStr as bs
 
-
-splitIndex :: BoolCollection (Access Key ,AccessOp Showable) -> TBIndex Key Showable -> Maybe (BoolCollection (Access Key , AccessOp Showable))
-splitIndex (AndColl l ) f = if F.all (isNothing .snd) al then Nothing else Just $ AndColl $ fmap (\(i,j) -> fromMaybe i j) al
+splitIndexPK :: BoolCollection (Access Key ,AccessOp Showable) -> [Key] -> Maybe (BoolCollection (Access Key , AccessOp Showable))
+splitIndexPK (OrColl l ) pk  = if F.all (isNothing .snd) al then Nothing else Just $ OrColl $ fmap (\(i,j) -> fromMaybe i j) al
     where
-      al = (\l -> (l,splitIndex  l f) )<$> l
-splitIndex (OrColl l ) f = fmap OrColl $ nonEmpty $ catMaybes $ flip splitIndex  f <$> l
-splitIndex (PrimColl (i,op) ) (Idex v ) = maybe (Just $ PrimColl (i,op) ) (\v -> splitPred (PrimColl (i,op)) v) (fmap _tbattr $ indexField i (errorWithStackTrace "no meta",Compose $Identity $ KV (M.mapKeys (Set.singleton .Inline) $ M.mapWithKey (\k v -> Compose $ Identity $ Attr k v) v)) )
+      al = (\l -> (l,splitIndexPK  l pk ) )<$> l
+splitIndexPK (AndColl l ) pk  = fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK  i pk ) <$> l
+splitIndexPK (PrimColl (p@(IProd _ [i]),op) ) pk  = if elem i  pk  then Just (PrimColl (p,op)) else Nothing
+
+
+
+splitIndex :: BoolCollection (Access Key ,AccessOp Showable) -> [Key] -> TBIndex Showable -> Maybe (BoolCollection (Access Key , AccessOp Showable))
+splitIndex (AndColl l ) pk f = if F.all (isNothing .snd) al then Nothing else Just $ AndColl $ fmap (\(i,j) -> fromMaybe i j) al
+    where
+      al = (\l -> (l,splitIndex  l pk f) )<$> l
+splitIndex (OrColl l ) pk f = fmap OrColl $ nonEmpty $ catMaybes $ (\i -> splitIndex  i pk f) <$> l
+splitIndex (PrimColl (p@(IProd _ [i]),op) ) pk (Idex v ) = maybe (Just (PrimColl (p,op))) (splitPred (PrimColl (p,op))) ((v V.!) <$>  (L.elemIndex i pk ))
 
 splitPred :: BoolCollection (Access Key ,AccessOp Showable) ->  FTB Showable -> Maybe (BoolCollection (Access Key,AccessOp Showable)  )
 splitPred (PrimColl (prod ,Left (a@(TB1 _ ) ,op))) (ArrayTB1 b ) = if elem a  b then Nothing else Just (PrimColl (prod , Left (a,op)))
@@ -211,20 +232,12 @@ instance Affine Showable where
   addition (SPosition (Position (x,y,z)) ) (DSPosition (a,b,c)) = SPosition $ Position (a+x,b+y,c+z)
   addition i j = errorWithStackTrace (show (i,j))
 
-instance Predicates (TBIndex Key Showable) where
-  type (Penalty (TBIndex Key Showable)) = Penalty (Map Key (FTB Showable))
-  type Query (TBIndex Key Showable) = TBPredicate Key Showable
+instance Predicates (TBIndex Showable) where
+  type (Penalty (TBIndex Showable)) = Penalty (V.Vector (FTB Showable))
+  type Query (TBIndex Showable) = (TBPredicate Key Showable,[Key])
   consistent (Idex j) (Idex  m )
     =  {-(if hasText  then traceShow (M.keys j) else id ) $-} consistent j m
-     where hasText = L.any  (isText.keyType )(M.keys j)
-           isText (KOptional i) = isText i
-           isText (KSerial i) = isText i
-           isText (KArray i) = isText i
-           isText (KInterval i ) = isText i
-           isText (Primitive (AtomicPrim PText )) =  True
-           isText (Primitive i ) =  False
-           isText i = errorWithStackTrace (show i)
-  match (WherePredicate l)  e (Idex v) =  match (WherePredicate l) e v
+  match (WherePredicate l,un)  e (Idex v) =  match (WherePredicate l,un) e v
   union l  = Idex   projL
     where
           projL = union  (fmap (\(Idex i) -> i)l)
@@ -234,7 +247,7 @@ instance Predicates (TBIndex Key Showable) where
 
 projIdex (Idex v) = F.toList v
 
-instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
+instance (Predicates (TBIndex  a )  ) => Monoid (G.GiST (TBIndex  a)  b) where
   mempty = G.empty
   mappend i j
     | G.size i < G.size j = ins  j (getEntries i )
@@ -243,6 +256,26 @@ instance (Predicates (TBIndex k a )  ) => Monoid (G.GiST (TBIndex k a)  b) where
 
 
 -- Attr List Predicate
+
+instance  Predicates (V.Vector (FTB Showable)) where
+  type Penalty (V.Vector (FTB Showable )) = V.Vector (ER.Extended DiffShowable)
+  type Query (V.Vector (FTB Showable )) = (TBPredicate Key Showable,[Key])
+  match (WherePredicate a ,un) e  v=  go a
+    where
+      -- Index the field and if not found return true to row filtering pass
+      go (AndColl l) = F.all go l
+      go (OrColl l ) = F.any go  l
+      go (PrimColl (IProd _ [i],op)) = maybe (traceShow (i,un) True) (match op e)  (( v V.!)  <$> L.elemIndex i un)
+  consistent l i =  if V.null b then False else  F.all id b
+    where
+      b =  V.zipWith consistent (l) (i)
+  union l
+    | L.null l = V.empty
+    | otherwise = foldl1 (V.zipWith (\i j -> union [i,j]) ) l
+  penalty p1 p2 = V.zipWith (\i j -> penalty i j ) p1 p2 -- (fmap (maybe ER.PosInf (ER.Finite .loga) .unFin . fst .minP)) (fmap (maybe ER.PosInf (ER.Finite .loga ). unFin . fst . minP))  p1 p2
+  pickSplit = pickSplitG
+
+
 instance  Predicates (Map Key (FTB Showable)) where
   type Penalty (Map Key (FTB Showable )) = Map Key (ER.Extended DiffShowable)
   type Query (Map Key (FTB Showable )) = TBPredicate Key Showable
@@ -301,9 +334,9 @@ indexPred (a@(IProd _ _),eq) r =
         i -> traceShow (a,eq,r) $errorWithStackTrace (show i)
 
 
-queryCheck :: WherePredicate -> G.GiST (TBIndex Key Showable) (TBData Key Showable) -> G.GiST (TBIndex Key Showable) (TBData Key Showable)
-queryCheck pred = t1
-  where t1 = filter' (flip checkPred pred) . G.query pred
+queryCheck :: (WherePredicate ,[Key])-> G.GiST (TBIndex Showable) (TBData Key Showable) -> G.GiST (TBIndex  Showable) (TBData Key Showable)
+queryCheck pred@(WherePredicate b ,pk) = t1
+  where t1 = filter' (flip checkPred (fst pred)) . maybe G.getEntries (\p -> G.query (WherePredicate p,pk)) (splitIndexPK b pk)
 
 -- Atomic Predicate
 
@@ -312,12 +345,6 @@ data DiffFTB a
   -- | DiffArray [DiffFTB a]
   deriving(Eq,Ord,Show)
 
-{-
-instance (Fractional (DiffFTB (Tangent a)) ,Affine a ,Ord a) => Affine (FTB a) where
-  type Tangent (FTB a) = DiffFTB (Tangent a)
-  subtraction = intervalSub
-  addition = intervalAdd
--}
 data DiffShowable
   = DSText [Int]
   | DSDouble Double
@@ -350,6 +377,7 @@ instance Predicates (FTB Showable) where
   match  (Right (Not i) ) c  j   = not $ match (Right i ) c j
   match  (Right IsNull) _   (LeftTB1 j)   = isNothing j
   match  (Right IsNull) _   j   = False
+  match  (Right (Range b (Not IsNull))) _   (IntervalTB1 j)   = isJust $ unFin $ if b then upperBound j else lowerBound j
   match (Left v) a j  = ma  v a j
     where
       -- ma v a j | traceShow (v,a,j) False = undefined

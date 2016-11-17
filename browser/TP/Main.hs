@@ -97,7 +97,7 @@ setup smvar args plugList w = void $ do
     let kitems = F.toList (pkMap inf)
         schId = int $ schemaId inf
         initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> HM.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
-        lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested (IProd False ["selection"]) (IProd True ["table"])) iv
+        lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested (IProd Nothing["selection"]) (keyRef ["table"])) iv
                     in fmap (\(TB1 (SText t)) -> t) .unArray  <$> join (fmap unSOptional' i)
     iniKey <-currentValue (facts initKey)
     let
@@ -145,8 +145,8 @@ setup smvar args plugList w = void $ do
               element bdo # set children [getElement metanav,metabody] # set UI.style [("display","block")]
               mapUIFinalizerT metabody (\(nav,tables)-> case nav  of
                 "Poll" -> do
-                    els <- sequence      [ metaAllTableIndexA inf "polling" [(IProd True ["schema"],Left (schId,Equals) ) ]
-                          , metaAllTableIndexA inf "polling_log" [(IProd True ["schema"],Left (schId,Equals) ) ]]
+                    els <- sequence      [ metaAllTableIndexA inf "polling" [(keyRef ["schema"],Left (schId,Equals) ) ]
+                          , metaAllTableIndexA inf "polling_log" [(keyRef ["schema"],Left (schId,Equals) ) ]]
                     element metabody #
                       set children els
                 "Change" -> do
@@ -161,17 +161,17 @@ setup smvar args plugList w = void $ do
                           listBoxEl itemListEl2 ( G.toList <$> collectionTid ref)  (pure Nothing) (pure id) ( pure attrLine )
                         element metabody # set children [itemListEl,itemListEl2]-}
                       i -> do
-                        let pred = [(IProd True ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ int . _tableUnique <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                        let pred = [(keyRef ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table"],Left (ArrayTB1 $ int . _tableUnique <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                         dash <- metaAllTableIndexA inf "modification_table" pred
                         element metabody # set UI.children [dash]
                 "Stats" -> do
-                    let pred = [(IProd True ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ int. _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                    let pred = [(keyRef ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table"],Left (ArrayTB1 $ int. _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     stats_load <- metaAllTableIndexA inf "stat_load_table" pred
                     stats <- metaAllTableIndexA inf "table_stats" pred
-                    clients <- metaAllTableIndexA inf "clients"$  [(IProd True ["schema"],Left (LeftTB1 $ Just $ int (schemaId inf),Equals) ) ]<> if M.null tables then [] else [ (Nested (IProd True ["selection"] ) (Many [ IProd True ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
+                    clients <- metaAllTableIndexA inf "clients"$  [(keyRef ["schema"],Left (LeftTB1 $ Just $ int (schemaId inf),Equals) ) ]<> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
                     element metabody # set UI.children [stats,stats_load,clients]
                 "Exception" -> do
-                    let pred = [(IProd True ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (IProd True ["table"],Left (ArrayTB1 $ int . _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                    let pred = [(keyRef ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table"],Left (ArrayTB1 $ int . _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     dash <- metaAllTableIndexA inf "plugin_exception" pred
                     element metabody # set UI.children [dash]
                 i -> errorWithStackTrace (show i)
@@ -232,7 +232,7 @@ authMap smvar sargs (user,pass) schemaN =
     where oauth tag = do
               user <- justError "no google user" <$> lookupEnv "GOOGLE_USER"
               metainf <- metaInf smvar
-              ((dbmeta ,_),_) <- runDynamic $ transactionNoLog metainf $ selectFromTable "google_auth" Nothing Nothing [] [(IProd True ["username"],Left ((txt  $ T.pack user ),Equals) )]
+              ((dbmeta ,_),_) <- runDynamic $ transactionNoLog metainf $ selectFromTable "google_auth" Nothing Nothing [] [(keyRef ["username"],Left ((txt  $ T.pack user ),Equals) )]
               let
                   td :: Tidings (OAuth2Tokens)
                   td = (\o -> let

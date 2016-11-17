@@ -9,6 +9,7 @@ import Control.Exception
 import qualified Data.Text as T
 import Control.Arrow
 import Control.Monad.Reader
+import qualified Data.Vector as V
 import Prelude hiding (head)
 import Step.Client
 import qualified Data.Map as M
@@ -78,7 +79,7 @@ readHistory = proc x -> do
   mdeleted <- atMA "user,messagesDeleted->messages" (idxM "id")  -< ()
   -- labelAdded <- atA "labelsAdded"  ((,) <$> idxK "id" <*> idxK "labels")  -< ()
   -- labelDeleted <- atA "messagesDeleted"   -< ()
-  let patchDel i = (kvempty ,  G.Idex $ M.fromList [("id",i)] , [])
+  let patchDel i = (kvempty ,  G.Idex $ V.fromList [i] , [])
       patchCreate i = firstPatch keyString $ patch i
   odxR "showpatch" -< ()
   returnA -< Just $ tblist $ _tb <$> [Attr "showpatch" (TB1 $ SText $ T.pack $ show $ (patchDel <$> catMaybes mdeleted) <>  (patchCreate <$> catMaybes madded))]

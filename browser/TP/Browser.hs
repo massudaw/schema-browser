@@ -13,6 +13,7 @@ import Safe
 import qualified NonEmpty as Non
 import Data.Char
 import Step.Common
+import qualified Data.Vector as V
 import Step.Host
 import Query
 import Data.Time
@@ -77,12 +78,12 @@ addClientLogin inf =  transactionNoLog inf $ do
     tell (maybeToList i)
     return i
 
-attrIdex l =  G.Idex $ M.fromList $ fmap (\(Attr i k) -> (i,k)) l
+attrIdex l =  G.Idex $ V.fromList $ fmap (\(Attr i k) -> k) l
 
 deleteClientLogin inf i= do
   now <- liftIO $ getCurrentTime
 
-  (_,(_,tb)) <- transactionNoLog inf $ selectFrom "client_login"  Nothing Nothing [] (WherePredicate (AndColl [PrimColl (IProd True [ (lookKey inf "client_login" "id")] , Left ((TB1 (SNumeric i)),Equals))]))
+  (_,(_,tb)) <- transactionNoLog inf $ selectFrom "client_login"  Nothing Nothing [] (WherePredicate (AndColl [PrimColl (keyRef [ (lookKey inf "client_login" "id")] , Left ((TB1 (SNumeric i)),Equals))]))
   let
     pk = Attr (lookKey inf "client_login" "id") (TB1 (SNumeric i))
     old = justError ("no row " <> show (attrIdex [pk]) ) $ G.lookup (attrIdex [pk]) tb
@@ -99,14 +100,15 @@ addServer inf =  do
       obj = serverCreate inf now
     transactionNoLog inf $ insertFrom obj
 
-idexToPred (G.Idex  i) = head $ (\(k,a)-> (IProd True [k],Left (a,Contains))) <$>  M.toList  i
+idexToPred t (G.Idex  i) = head $ (\(k,a)-> (keyRef [k],Left (a,Contains))) <$>  zip (rawPK t) (F.toList i)
 
 deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
   now <- liftIO $ getCurrentTime
-  (_,(_,tb)) <- transactionNoLog inf $ selectFrom "client_login"  Nothing Nothing [] (WherePredicate (AndColl [PrimColl (IProd True [(lookKey inf "client_login" "up_time") ],Left ((TB1 (STimestamp (utcToLocalTime utc now))),Flip Contains))]))
+  (_,(_,tb)) <- transactionNoLog inf $ selectFrom "client_login"  Nothing Nothing [] (WherePredicate (AndColl [PrimColl (keyRef [(lookKey inf "client_login" "up_time") ],Left ((TB1 (STimestamp (utcToLocalTime utc now))),Flip Contains))]))
   let
+    t= (lookTable inf "client_login")
     pk = Attr (lookKey inf "client_login" "up_time")(TB1 (STimestamp (utcToLocalTime utc now)))
-    oldClis =  L.filter (G.indexPred (idexToPred $ attrIdex [pk])) (G.toList tb)
+    oldClis =  L.filter (G.indexPred (idexToPred t $ attrIdex [pk])) (G.toList tb)
     pt old = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((ER.Finite $ PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
 
   mapM (\(old) -> transactionNoLog inf $ do
@@ -120,7 +122,7 @@ deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
 opt f = LeftTB1 . fmap f
 
 updateClient metainf inf table tdi clientId now = do
-    (_,(_,tb)) <- transactionNoLog metainf $ selectFrom "client_login"  Nothing Nothing [] (WherePredicate $ AndColl [PrimColl(IProd True [(lookKey metainf "client_login" "id")] ,Left (int clientId,Equals))]  )
+    (_,(_,tb)) <- transactionNoLog metainf $ selectFrom "client_login"  Nothing Nothing [] (WherePredicate $ AndColl [PrimColl(keyRef [(lookKey metainf "client_login" "id")] ,Left (int clientId,Equals))]  )
     let
       pk = Attr (lookKey metainf "client_login" "id") (SerialTB1 $ Just $ TB1 (SNumeric clientId))
       old = justError ("no row " <> show (attrIdex [pk],tb) ) $ G.lookup (attrIdex [pk]) tb
@@ -152,7 +154,7 @@ getClient metainf clientId inf ccli = G.lookup (idex metainf "clients"  [("clien
 
 deleteClient metainf clientId = do
   dbmeta  <-  prerefTable metainf (lookTable metainf "clients")
-  putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , G.Idex $ M.fromList [(lookKey metainf "clients" "clientid",TB1 (SNumeric (clientId)))],[])]
+  putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , idex metainf "clients" [("clientid",TB1 (SNumeric (clientId)))],[])]
 
 editClient metainf inf dbmeta ccli  table tdi clientId now
   | fmap tableName table == Just "client" && schemaName inf == "metadata" = return ()
@@ -182,7 +184,7 @@ layFactsDiv i j =  if i then ("col-xs-" <> (show $  12 `div` fromIntegral (max 1
 chooserTable inf bset cliTid cli = do
 
   let
-    pred2 =  [(IProd True ["schema"],Left (int $ schemaId inf  ,Equals))]
+    pred2 =  [(keyRef ["schema"],Left (int $ schemaId inf  ,Equals))]
   orddb <- ui $ transactionNoLog  (meta inf) $
       (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred2))
   translationDb <- ui $ transactionNoLog  (meta inf) $
@@ -222,13 +224,13 @@ viewerKey inf table cli layoutS cliTid = mdo
   iv   <- currentValue (facts cliTid)
   let
       lookT,lookPK :: TBData Key Showable -> Maybe (Int,TBData Key Showable)
-      lookT iv = join $ fmap ((\t -> L.find (\(ix,i)->  G.indexPred (liftAccess (meta inf) "clients_table" $ IProd True ["table"],Left (txt (tableName table), Equals)) i) $ zip [0..] (fmap unTB1 $ F.toList t) ).unArray) (join $ unSOptional <$> i)
+      lookT iv = join $ fmap ((\t -> L.find (\(ix,i)->  G.indexPred (liftAccess (meta inf) "clients_table" $ keyRef ["table"],Left (txt (tableName table), Equals)) i) $ zip [0..] (fmap unTB1 $ F.toList t) ).unArray) (join $ unSOptional <$> i)
         where
-          i = _fkttable <$> indexField (liftAccess (meta inf) "clients" $ (IProd False ["selection"]) ) iv
+          i = _fkttable <$> indexField (liftAccess (meta inf) "clients" $ (IProd Nothing ["selection"]) ) iv
 
       lookPK iv = join $ fmap ((\t -> safeHead  $ zip [0..] (fmap unTB1 $ F.toList t) ). unArray) (join $ unSOptional <$> i)
         where
-          i = _fkttable <$> indexField (liftAccess (meta inf) "clients_table" $ (IProd False ["selection"]) ) iv
+          i = _fkttable <$> indexField (liftAccess (meta inf) "clients_table" $ (IProd Nothing ["selection"]) ) iv
       lookKV iv = let i = lookAttr' (meta inf)  "data_index" iv
                       unKey t = liftA2 (,) ((\(Attr _ (TB1 (SText i)))-> Just $ lookKey inf  (tableName table) i ) $ lookAttr' (meta inf)  "key" t  )( pure $ (\(Attr _ (TB1 (SDynamic i)))-> i) $ lookAttr'  (meta inf)  "val" t )
                 in (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
@@ -236,7 +238,7 @@ viewerKey inf table cli layoutS cliTid = mdo
   reftb@(vpt,vp,_,var) <- ui $ refTables inf table
 
   let
-      tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (M.fromList $ justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) iv ) <$> vpt <*> tdip
+      tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (V.fromList $ fmap snd $ justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) iv ) <$> vpt <*> tdip
       tdip = join . fmap (join . fmap ( fmap (lookKV . snd ). lookPK .snd). lookT ) <$> cliTid
   cv <- currentValue (facts tdi)
   -- Final Query ListBox
@@ -269,7 +271,7 @@ viewerKey inf table cli layoutS cliTid = mdo
   page <- currentValue (facts paging)
   res4 <- ui $ mapT0EventDyn (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
   itemList <- listBoxElEq (\l m -> maybe False id $ liftA2 (\i j ->G.getIndex i == G.getIndex j) l m) itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (Just <$> tds) (pure id) (pure (maybe id attrLine))
-  -- (dbmeta ,(_,_)) <- ui $ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] [(IProd True ["schema"],Left (int (schemaId inf),Equals ))]
+  -- (dbmeta ,(_,_)) <- ui $ transactionNoLog (meta inf) $ selectFromTable "clients"  Nothing Nothing [] [(keyRef ["schema"],Left (int (schemaId inf),Equals ))]
   -- ui $onEventDyn ((,) <$> facts (collectionTid dbmeta ) <@> evsel ) (\(ccli ,i) -> void . editClient (meta inf) inf dbmeta  ccli (Just table ) (M.toList . getPKM <$> i) cli =<< liftIO getCurrentTime )
   let tds = (fmap join  $ triding itemList)
 

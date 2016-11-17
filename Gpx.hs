@@ -163,7 +163,7 @@ readSiapi3Andamento file = do
           returnA -< v
       arr2 =readString [withValidate no,withWarnings no,withParseHTML yes] file >>>
         deep (atTag "input" >>> hasAttrValue "id" (=="javax.faces.ViewState") >>>getAttrValue "value")
-  a <- concat .maybeToList . fmap tail . safeHead <$>runX arr
+  a <- concat .maybeToList . fmap safeTail . safeHead <$>runX arr
   b  <- runX arr2
   return (a,b)
 

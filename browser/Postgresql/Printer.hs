@@ -139,7 +139,7 @@ selectQuery
         (KV (Compose (Labeled Text) (TB (Labeled Text))))
         Key
         ())
-     -> Maybe (TBIndex Key Showable)
+     -> Maybe (TBIndex Showable)
      -> [(Key, Order)]
      -> WherePredicate
      -> (Text,Maybe [TB Identity Key Showable])
@@ -156,7 +156,7 @@ selectQuery t koldpre order wherepred = (,ordevalue <> predvalue) $ if L.null (s
         pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  ( orderquery <> predquery)
         (orderquery , ordevalue) =
           let
-            unIndex (Idex i ) = M.toList i
+            unIndex (Idex i ) = zip (_kvpk (fst t)) $ F.toList i
             oq = (const $ pure $ generateComparison (first (justLabel t) <$> order)) . unIndex<$> koldpre
             koldPk :: Maybe [TB Identity Key Showable]
             koldPk =  (\k -> uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) k ) . unIndex <$> koldpre

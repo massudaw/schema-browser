@@ -63,7 +63,7 @@ chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
     let
 
       schId = int (schemaId inf)
-      schemaPred = [(IProd True ["schema"],Left (schId,Equals))]
+      schemaPred = [(keyRef ["schema"],Left (schId,Equals))]
 
     dashes <- ui$ do
       (_,(_,emap )) <-transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
@@ -76,10 +76,10 @@ chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
             Just (TB1 (SText tname)) = unSOptional' $  _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
             table = lookTable inf tname
             tablId = int (_tableUnique table)
-            Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"metrics" $ IProd True ["metrics"]) e
-            -- Just (Attr _ (ArrayTB1 timefields ))= indexField (liftAccess (meta inf )"event" $ IProd True ["event"]) e
-            timeFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "event" $ IProd True ["event"])  <$> G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
-            geoFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "geo" $ IProd True ["geo"])  <$> G.lookup (idex (meta inf) "geo" [("schema" ,schId ),("table",tablId )])  geomap
+            Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"metrics" $ keyRef ["metrics"]) e
+            -- Just (Attr _ (ArrayTB1 timefields ))= indexField (liftAccess (meta inf )"event" $ keyRef ["event"]) e
+            timeFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "event" $ keyRef ["event"])  <$> G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
+            geoFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "geo" $ keyRef ["geo"])  <$> G.lookup (idex (meta inf) "geo" [("schema" ,schId ),("table",tablId )])  geomap
             (Attr _ color )= lookAttr' (meta inf) "color" e
             projf  r efield  = M.fromList [("value" ,ArrayTB1 $  attr <$> efield), ("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color )] :: M.Map Text (FTB Showable)
               where attr  (TB1 (SText field)) = _tbattr $ unTB $justError ("no attr " <> show field) (findAttr [lookKey inf tname field] r)
@@ -122,7 +122,7 @@ chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
                         fieldKey (TB1 (SText v))=  lookKey inf (tableName t) v
                     reftb <- ui $ refTables' inf t Nothing pred
                     let v = fmap snd $ reftb ^. _1
-                    let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup ( G.Idex  $ notOptionalPK $ M.fromList $pk) j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
+                    let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup pk j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
                     tdib <- ui $ stepper Nothing (join <$> evsel)
                     let tdi = tidings tdib (join <$> evsel)
                     (el,ediff,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi)  reftb [] [] (allRec' (tableMap inf) $ t)  tdi

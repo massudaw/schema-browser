@@ -17,6 +17,7 @@ module Types.Primitive  where
 
 import Types.Common
 import Data.Ord
+import Data.Vector (Vector)
 import Control.DeepSeq
 import qualified NonEmpty as Non
 import NonEmpty (NonEmpty(..))
@@ -84,8 +85,9 @@ isArray (KArray _) = True
 isArray (KOptional i) = isArray i
 isArray _ = False
 
-newtype TBIndex k a
-  = Idex (Map k (FTB a))
+newtype TBIndex  a
+  -- = Idex (Map k (FTB a))
+  = Idex (Vector (FTB a))
   deriving(Eq,Show,Ord,Functor,Generic)
 
 

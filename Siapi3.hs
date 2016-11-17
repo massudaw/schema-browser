@@ -4,6 +4,7 @@ module Siapi3 where
 
 import Network.Wreq
 import qualified Network.Wreq.Session as Sess
+import Safe
 import Control.Concurrent.Async
 import Control.Monad.IO.Class
 import OpenSSL.Session (context)
@@ -11,6 +12,7 @@ import Network.HTTP.Client.OpenSSL
 import Control.Lens
 import Utils
 import Control.Applicative
+import Data.Maybe
 import Control.Monad
 import Data.Monoid
 import qualified Data.Text as T
@@ -50,7 +52,7 @@ siapi3Page protocolo ano cgc_cpf = do
               print siapiListAndamento3Url
               res <- Sess.post session siapiListAndamento3Url  (nextPage $ justError "no view " $safeHead v )
               (l2,v) <- readSiapi3AndamentoAJAX (BSLC.unpack $  justError "no response" $ res ^? responseBody)
-              return (l<> (tail . Utils.head $ l2))
+              return (l<> (concat . maybeToList . fmap safeTail . safeHead $ l2))
 
             return $
               liftA2 (,) (Just o) (L.isInfixOf "AGUARDANDO PAGAMENTO DA TAXA" . BSLC.unpack <$> (r ^? responseBody))

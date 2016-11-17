@@ -87,7 +87,7 @@ deletePatch conn patch@(m ,G.Idex kold ,_) t = do
     return patch
   where
     equality k = attrValueName k <> "="  <> "?"
-    koldPk = uncurry Attr <$> M.toList kold
+    koldPk = uncurry Attr <$> zip (_kvpk m) (F.toList kold)
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     del = "DELETE FROM " <> rawFullName t <>   pred
 
@@ -98,14 +98,14 @@ applyPatch conn patch@(m,G.Idex kold,skv)  =
     execute conn (fromString $ traceShowId $ T.unpack up)  (fmap attrPatchValue skv <> koldPk ) >> return patch
   where
     equality k = k <> "="  <> "?"
-    koldPk = uncurry Attr <$> M.toList kold
+    koldPk = uncurry Attr <$> zip (_kvpk m) (F.toList kold)
     attrPatchName (PAttr k p ) = escapeReserved (keyValue k) <> "=" <> nestP(keyValue k) p
       where nestP k (PInter True (b,j)) = "lowerI(" <> k <> "," <> "?" <>" ," <> (T.pack $show j)<> ")"
             nestP k (PInter False (b,j)) = "upperI(" <> k <> "," <> "?" <> "," <> (T.pack (show j )) <> ")"
             nestP k (PatchSet l) = F.foldl' nestP k  l
             nestP k i = "?"
     attrPatchValue (PAttr  k v) = Attr k (create v) :: TB Identity PGKey Showable
-    pred   =" WHERE " <> T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> M.toList kold)
+    pred   =" WHERE " <> T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (_kvpk m) (F.toList kold))
     setter = " SET " <> T.intercalate "," (   attrPatchName <$> skv   )
     up = "UPDATE " <> kvMetaFullName m <> setter <>  pred
 
@@ -272,6 +272,6 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 
 
-postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef . G.Idex . M.filterWithKey (\k _ -> L.elem k (fmap fst s) ) .   getPKM <$> lastMay i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o )  (\table j -> do
+postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef . G.getIndex <$> lastMay i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o )  (\table j -> do
     inf <- ask
     liftIO . loadDelayed inf (tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined (\ a -> liftIO . logTableModification a) 200

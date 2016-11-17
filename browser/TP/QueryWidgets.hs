@@ -100,7 +100,7 @@ type SelPKConstraint = [([Column CoreKey ()],Tidings PKConstraint)]
 
 type SelTBConstraint = [([Column CoreKey ()],Tidings TBConstraint)]
 
-type RefTables = (Tidings (Collection CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  CoreKey Showable) (TBData CoreKey Showable)), TChan [TBIdx CoreKey Showable] )
+type RefTables = (Tidings (Collection CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)), TChan [TBIdx CoreKey Showable] )
 
 --- Plugins Interface Methods
 createFresh :: Text -> InformationSchema -> Text -> KType CorePrim -> IO InformationSchema
@@ -187,7 +187,19 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
   kk <- ui $ stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
   pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap ( join .  liftA2 diff v . fmap (liftTable' inf t).  join . eitherToMaybe ). catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
   return (headerP, (snd f ,   pgOut ))
-
+pluginUI inf oldItems (idp,p@(FPlugins n t (DiffPurePlugin arrow ))) = do
+  let f =second (liftAccess inf t ). first (liftAccess  inf t ) $ staticP arrow
+      action = pluginActionDiff   p
+      pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (fst f)])
+      tdInputPre = join . fmap (\i -> if G.checkPred i pred  then Just i else Nothing) <$>  oldItems
+      tdInput = tdInputPre
+      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
+      tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
+  headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+  ini <- currentValue (facts tdInput )
+  kk <- ui $ stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
+  pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap ( fmap (liftPatch inf t).  join . eitherToMaybe ). catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
+  return (headerP, (snd f ,   pgOut ))
 pluginUI inf oldItems (idp,p@(FPlugins n t (DiffIOPlugin arrow))) = do
   overwrite <- checkedWidget (pure False)
   let f = second (liftAccess inf t ). first (liftAccess inf t ) $ staticP arrow
@@ -235,27 +247,14 @@ indexPluginAttrDiff
   -> [(Access Key, Tidings (Maybe (Index (Column Key Showable))))]
 indexPluginAttrDiff a@(Attr i _ )  plugItens =  evs
   where
-        thisPlugs = filter (hasProd (== IProd True ( _relOrigin <$> keyattri a)) . fst)  plugItens
-        evs  = fmap ( fmap ( join . fmap (\(_,_,p) -> L.find (((== S.fromList (keyattri a))  . pattrKey )) p )) ) <$>  thisPlugs
+    match (IProd _ l ) ( IProd _ f) = L.sort l == L.sort f
+    match i ( IProd _ f) = False
+    thisPlugs = filter (hasProd (`match` (keyRef ( _relOrigin <$> keyattri a))) . fst)  plugItens
+    evs  = fmap ( fmap ( join . fmap (\(_,_,p) -> L.find (((== S.fromList (keyattri a))  . pattrKey )) p )) ) <$>  thisPlugs
 indexPluginAttrDiff  i  plugItens = pfks
   where
-        thisPlugs = filter (hasProd (isNested ((IProd True $ fmap (_relOrigin) (keyattri i) ))) .  fst) plugItens
-        pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested((IProd True $ fmap ( _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap ((\(_,_,p) -> L.find (((== S.fromList (keyattri i))  . pattrKey )) p )))) <$> ( thisPlugs)
-
-
-indexPluginAttr
-  :: Column Key ()
-  -> [(Access Key, Tidings (Maybe (TBData Key a1)))]
-  -> [(Access Key, Tidings (Maybe (Column Key a1)))]
-indexPluginAttr a@(Attr _ _ )  plugItens =  evs
-  where
-        thisPlugs = filter (hasProd (== IProd True ( _relOrigin <$> keyattri a)) . fst)  plugItens
-        evs  = fmap ( fmap ( join . fmap ( fmap unTB . fmap snd . getCompose . unTB . findTB1 (((== keyattri a)  . keyattr )) . TB1 )) ) <$>  thisPlugs
-indexPluginAttr  i  plugItens = pfks
-  where
-        thisPlugs = filter (hasProd (isNested ((IProd True $ fmap (_relOrigin) (keyattri i) ))) .  fst) plugItens
-        pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested((IProd True $ fmap ( _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap (fmap  unTB . fmap snd . getCompose . unTB . findTB1 ((==keyattri i)  . keyattr ) . TB1 ))) <$> ( thisPlugs)
-
+        thisPlugs = filter (hasProd (isNested ((keyRef $ fmap (_relOrigin) (keyattri i) ))) .  fst) plugItens
+        pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested((keyRef $ fmap ( _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap ((\(_,_,p) -> L.find (((== S.fromList (keyattri i))  . pattrKey )) p )))) <$> ( thisPlugs)
 
 
 --- Style and Attribute Size
@@ -632,9 +631,9 @@ crudUITable inf open reftb@(bres , _ ,gist ,tref) refs pmods ftb@(m,_)  preoldIt
             putPatch tref (maybeToList p)
             return p  )) (preoldItems)
           let
-              deleteCurrentUn un e l =   maybe l (\v -> G.delete (G.Idex $ M.fromList v) (3,6) l) $  join $ (\e -> traverse (traverse unSOptional')  (getUn un e) ) <$> e
-              tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ snd $ tbPK ftb , (S.fromList $ _kvpk m, ( fmap snd bres)))
-          unConstraints <-  traverse (traverse (traverse (ui . mapTEventDyn return ))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn un  (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un . G.toList ) (fmap snd bres)))) <$> fmap S.fromList (_kvuniques m)
+              deleteCurrentUn un e l =   maybe l (\v -> G.delete v (3,6) l) $  G.getUnique un <$> e
+              tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ snd $ tbPK ftb , (_kvpk m, ( fmap snd bres)))
+          unConstraints <-  traverse (traverse (traverse (ui . mapTEventDyn return ))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn (S.fromList un ) (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un . G.toList ) (fmap snd bres)))) <$> (_kvuniques m)
           unDeleted <- traverse (traverse (traverse (ui . mapTEventDyn return))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> preoldItems <*> o))) (tpkConstraint:unConstraints))
           let
               dunConstraints (un,o) = flip (\i ->  maybe (const False ) (unConstraint un .tblist' table . fmap _tb ) (traverse (traFAttr unSOptional' ) i ) ) <$> o
@@ -664,7 +663,7 @@ crudUITable inf open reftb@(bres , _ ,gist ,tref) refs pmods ftb@(m,_)  preoldIt
 
 diffTidings t = tidings (facts t) $ diffEvent (facts t ) (rumors t)
 
-unConstraint :: Set CoreKey -> TBData CoreKey Showable -> G.GiST (G.TBIndex CoreKey Showable) (TBData CoreKey Showable) -> Bool
+unConstraint :: [CoreKey] -> TBData CoreKey Showable -> G.GiST (G.TBIndex Showable) (TBData CoreKey Showable) -> Bool
 unConstraint un v m = not . L.null . lookGist un v $ m
 
 processPanelTable
@@ -678,10 +677,10 @@ processPanelTable
 processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
   let
       containsGist ref map = if isJust refM then not $ L.null (lookGist ix ref map) else False
-        where ix = (S.fromList $ _kvpk (tableMeta table))
+        where ix = (_kvpk (tableMeta table))
               refM = traverse unSOptional' (getPKM ref)
       conflictGist ref map = if isJust refM then lookGist ix ref map else[]
-        where ix = (S.fromList $ _kvpk (tableMeta table))
+        where ix = (_kvpk (tableMeta table))
               refM = traverse unSOptional' (getPKM ref)
 
 
@@ -1308,8 +1307,8 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
           tdi = (\i j -> searchGist relTable m  i j)<$> gist <*> vv
           filterInpT = tidings filterInpBh filterInpE
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList . snd
-          predicatefk o = (WherePredicate $AndColl $ catMaybes $ fmap ((\(Attr k v) -> PrimColl . (IProd True [k], ) . Left . (,_relOperator $ justError "no rel" $ L.find (\i ->_relTarget i == k) rel) <$> unSOptional' v). replaceKey)  o)
-          preindex = (\i -> maybe id (\i -> fmap (filterfixed (predicatefk i)))i ) <$>iold2 <*>vpt
+          predicatefk o = (WherePredicate $AndColl $ catMaybes $ fmap ((\(Attr k v) -> PrimColl . (keyRef [k], ) . Left . (,_relOperator $ justError "no rel" $ L.find (\i ->_relTarget i == k) rel) <$> unSOptional' v). replaceKey)  o)
+          preindex = (\i -> maybe id (\i -> fmap (filterfixed (lookTable inf (_kvname m))(predicatefk i)))i ) <$>iold2 <*>vpt
       presort <- ui $ mapTEventDyn return (fmap  <$> sortList <*> fmap (fmap G.toList ) preindex)
       -- Filter and paginate
       (offset,res3)<- do
@@ -1548,7 +1547,7 @@ viewer inf table envK = mdo
               let slist = fmap (\(i,j,_) -> (i,j)) slist'
                   ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
                   paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
-                  flist = catMaybes $ fmap (\(i,_,j) -> (\(op,v) -> (IProd True [i],Left (v,readBinaryOp $ T.pack op))) <$> j) slist'
+                  flist = catMaybes $ fmap (\(i,_,j) -> (\(op,v) -> (keyRef [i],Left (v,readBinaryOp $ T.pack op))) <$> j) slist'
               (_,(fixmap,lres)) <- transactionNoLog inf $ selectFrom (tableName table ) (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (WherePredicate $ AndColl $ fmap PrimColl $envK <> flist)
               let (size,_) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (WherePredicate$AndColl $ fmap PrimColl $  envK) fixmap
               return (o,(slist,paging o (size,sorting' ordlist (G.toList lres))))

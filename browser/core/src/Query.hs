@@ -47,6 +47,7 @@ import Data.Tuple(swap)
 import Control.Arrow (first)
 import qualified Control.Lens as Le
 import NonEmpty (NonEmpty(..))
+import qualified Data.Vector as V
 import qualified NonEmpty as Non
 import Data.Time.LocalTime
 import Data.Unique
@@ -540,28 +541,27 @@ backFKRef relTable ifk = fmap (uncurry Attr). reorderPK .  concat . fmap aattr .
           where knm =  M.lookup ko relTable
 
 
-tbpred un  = tbjust  . Tra.traverse (Tra.traverse unSOptional') .getUn un
-  where
-    tbjust = G.Idex . M.fromList .  justError "cant be empty"
+tbpred un  = G.notOptional . G.getUnique un
 
 searchGist ::
   (Functor t,  Show a ,Show a1,Ord k,  Show k,
-   Foldable t, G.Predicates (G.TBIndex k a1)) =>
+   Foldable t, G.Predicates (G.TBIndex  a1)) =>
   M.Map k k
   -> KVMetadata k
-  -> G.GiST (G.TBIndex k a1) a
+  -> G.GiST (G.TBIndex  a1) a
   -> Maybe (t (TB Data.Functor.Identity.Identity k a1))
   -> Maybe a
 searchGist relTable m gist =  join . fmap (\k -> lookGist (S.fromList $fmap (\k-> justError (" no pk " <> show (k,relTable)) $ M.lookup k relTable) (_kvpk m) ) k  gist)
   where
     lookGist un pk  v =  join $ safeHead <$> res
       where res =  flip G.search  v <$> tbpred un pk
-    tbpred un  = tbjust  . Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  relTable ))).  filter ((`S.member` un). fst ) . concat .fmap aattri
+
+    tbpred un  = tbjust  .  Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  relTable ))).  filter ((`S.member` un). fst ) . concat .fmap aattri
         where
           flipTable = M.fromList . fmap swap .M.toList
-          tbjust = fmap (G.Idex . M.fromList )
+          tbjust = fmap (G.Idex . V.fromList .fmap snd.L.sortBy (comparing ((`L.elemIndex` _kvpk m).fst)))
 
-joinRel :: (Ord a ,Show a,G.Predicates (G.TBIndex Key a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex Key a) (TBData Key a) -> FTB (TBData Key a)
+joinRel :: (Ord a ,Show a,G.Predicates (G.TBIndex a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex a) (TBData Key a) -> FTB (TBData Key a)
 joinRel tb rel ref table
   | L.all (isOptional .keyType) origin
     = LeftTB1 $ fmap (flip (joinRel tb (Le.over relOri unKOptional <$> rel ) ) table) (Tra.traverse unLeftItens ref )
@@ -574,7 +574,7 @@ joinRel tb rel ref table
             invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
             tbel = searchGist  invrelMap tb table (Just ref)
 
-joinRel2 :: (Ord a ,Show a,G.Predicates (G.TBIndex Key a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex Key a) (TBData Key a) -> Maybe (FTB (TBData Key a))
+joinRel2 :: (Ord a ,Show a,G.Predicates (G.TBIndex a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex a) (TBData Key a) -> Maybe (FTB (TBData Key a))
 joinRel2 tb rel ref table
   | L.any (isOptional .keyType) origin
   = Just $ LeftTB1  $ join $ fmap (flip (joinRel2 tb (Le.over relOri unKOptional <$> rel ) ) table) (Tra.traverse unLeftItens ref )
@@ -592,10 +592,6 @@ joinRel2 tb rel ref table
 
 
 lookGist un pk  = G.search (tbpred un pk)
-  where
-    tbpred un  = tbjust  . traverse (traverse unSOptional') .getUn un
-      where
-        tbjust = G.Idex . M.fromList . justError "cant be empty"
 
 
 

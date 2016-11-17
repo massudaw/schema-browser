@@ -19,6 +19,7 @@ import Location
 import Data.Interval(Extended(..),interval,lowerBound',upperBound)
 import PrefeituraSNFSE
 import Text
+import qualified Data.Vector as V
 import Data.Tuple
 import Incendio
 import DWGPreview
@@ -31,6 +32,7 @@ import PandocRenderer
 import OAuthClient
 
 import Types
+import Types.Index
 import Types.Patch
 import Step.Client
 import RuntimeTypes
@@ -395,22 +397,21 @@ retencaoServicos = FPlugins pname tname  $ PurePlugin url
 
 
 
-siapi3CheckApproval = FPlugins pname tname  $ PurePlugin url
-
+siapi3CheckApproval = FPlugins pname tname  $ DiffPurePlugin url
   where
     pname , tname :: Text
     pname = "Check Approval"
     tname = "siapi3"
-    url :: ArrowReaderM Identity
+    url :: ArrowReaderDiffM Identity
     url = proc t -> do
-      odxR "aproval_date" -< ()
+      odx  (Just $ Range True (Not IsNull)) "aproval_date" -< ()
       v <- catMaybes <$> atRA "andamentos" (
           liftA2 (,) <$> idxR "andamento_description"  <*> idxR "andamento_date"
           ) -< ()
-
       let app = L.find (\(TB1 (SText x),_) -> "APROVADO" ==   x) v
           tt = L.find ((\(TB1 (SText x)) -> T.isInfixOf "ENTREGUE AO SOLICITANTE APROVADO"  x).fst) v
-      returnA -< Just $ tblist [_tb $ Attr "aproval_date" (LeftTB1 $ fmap ((\(TB1 (STimestamp t)) -> TB1 $ SDate (localDay t)) .snd) (liftA2 const app tt))]
+      row <- act (const ask )-< ()
+      returnA -< traceShowId $ fmap ((\(TB1 (STimestamp t)) -> (\v-> (kvempty,maybe (Idex mempty) getIndex row ,[PAttr "aproval_date" v])) .upperPatch.(,True) . Finite $ PAtom $ STimestamp t) .snd) (liftA2 const app tt)
 
 siapi3Inspection = FPlugins pname tname  $ BoundedPlugin2 url
   where
@@ -463,7 +464,7 @@ siapi3Plugin  = FPlugins pname tname  $ BoundedPlugin2 url
         protocolo <- idxR "protocolo" -< ()
         ano <- idxR "ano" -< ()
         odxR "taxa_paga" -< ()
-        odxR "aproval_date" -< ()
+        odx (Just (Range True $ Not IsNull)) "aproval_date" -< ()
         atR "andamentos" (proc t -> do
             odxR "andamento_date" -<  t
             odxR "andamento_description" -<  t
@@ -689,7 +690,7 @@ fetchofx = FPlugins "OFX Import" tname $ DiffIOPlugin url
               callCommand ( "(" <> input <> " | cat) | xvfb-run --server-args='-screen 0, 1440x900x24' ofx-itau ;") `catchAll` (\e -> print e)
               print $ "readFile " ++ fname
               file <- BS.readFile fname
-              return (TB1 $ SText $ T.pack $ fname , LeftTB1 $ Just $ DelayedTB1 $ Just $ TB1 $ SBinary file,PInter False (Finite $ patch (TB1 $ SDate $ utctDay t),False))
+              return (TB1 $ SText $ T.pack $ fname , LeftTB1 $ Just $ DelayedTB1 $ Just $ TB1 $ SBinary file,upperPatch (Finite $ (PAtom $ SDate $ utctDay t),False))
                  ) -< (range, pass)
         odxR "range" -< ()
 
@@ -700,7 +701,7 @@ fetchofx = FPlugins "OFX Import" tname $ DiffIOPlugin url
         refs <- atRA "ofx" (idxK "file_name") -< ()
         let ix = length refs
         pk <- act (const ask )-< ()
-        returnA -<  traceShowId $ Just (kvempty,Idex (M.singleton "id" (SerialTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) kvempty  (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (M.singleton "file_name" fname) ,[PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
+        returnA -<  traceShowId $ Just (kvempty,Idex (pure (SerialTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) kvempty  (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,[PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
 
 
 
@@ -840,4 +841,4 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
 
 
 plugList :: [PrePlugins]
-plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,areaDesign,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin , importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]
+plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,areaDesign,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin ,siapi3CheckApproval, importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]

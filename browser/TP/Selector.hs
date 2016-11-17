@@ -102,8 +102,8 @@ tableChooser :: InformationSchemaKV Key Showable
                             TrivialWidget (M.Map (TableK Key) [TableK Key]))
 tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables = do
   let
-      pred2 =  [(IProd True ["schema"],Left (int $ schemaId inf  ,Equals))]
-      authPred =  [(IProd True ["grantee"],Left ( int $ fst $ username inf ,Equals))] <> pred2
+      pred2 =  [(keyRef ["schema"],Left (int $ schemaId inf  ,Equals))]
+      authPred =  [(keyRef ["grantee"],Left ( int $ fst $ username inf ,Equals))] <> pred2
   (orddb ,authorization,translation) <- ui $ transactionNoLog  (meta inf) $
       (,,) <$> (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred2))
            <*> (fst <$> (selectFromTable "authorization" Nothing Nothing [] authPred))
@@ -115,11 +115,11 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
 
   let
       -- Table Description
-      lookDesc = (\i j -> maybe (rawName j)  (\(Attr _ v )-> T.pack $ renderShowable v) $ lookupAccess  (meta inf) [("schema" ,int $ schemaId inf),("table",int (_tableUnique j))] "translation"  ( "table_name_translation", i )) <$> collectionTid translation
+      lookDescT = (\i table -> lookDesc inf table i)<$> collectionTid translation
       -- Authorization
       authorize =  (\autho t -> isJust $ G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ _tableUnique t),("grantee",int $ fst $ username inf)]) autho)  <$> collectionTid authorization
       -- Text Filter
-      filterLabel = (\j d -> (\i -> T.isInfixOf (T.toLower j) (T.toLower  $ d i)))<$> filterInpT <*> lookDesc
+      filterLabel = (\j d -> (\i -> T.isInfixOf (T.toLower j) (T.toLower  $ d i)))<$> filterInpT <*> lookDescT
       -- Usage Count
   all <- checkedWidget (pure False)
   bset <- mdo
@@ -144,13 +144,13 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
     let iniEvent = (unionWith const (rumors iniSel ) (allTablesSel <$> rumors (triding all)))
     iniBehaviour <- ui $ stepper iniValue  iniEvent
 
-    bset <- checkDivSetTGen tables ((\i k j -> tableUsage inf i j k ) <$> collectionTid orddb <*> triding bset) (tidings iniBehaviour iniEvent ) buttonString ((\lg i j -> lg lookDesc i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle )
+    bset <- checkDivSetTGen tables ((\i k j -> tableUsage inf i j k ) <$> collectionTid orddb <*> triding bset) (tidings iniBehaviour iniEvent ) buttonString ((\lg i j -> lg lookDescT i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle )
     return bset
   let
       ordRow orderMap pkset =  field
           where
-            field =  G.lookup (G.Idex $ M.fromList pk) orderMap
-            pk = first (lookKey (meta inf ) "ordering") <$>[("table",int $ _tableUnique  pkset ), ("schema",int $ schemaId inf)]
+            field =  G.lookup pk orderMap
+            pk = idex (meta inf ) "ordering" [("table",int $ _tableUnique  pkset ), ("schema",int $ schemaId inf)]
               {-incClick field =  (fst field , G.getIndex field ,[patch $ fmap (+SNumeric 1) usage])
           where
             usage = lookAttr' (meta inf ) "usage"   field

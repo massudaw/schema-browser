@@ -42,6 +42,8 @@ module Types.Common (
 
     ,Expr (..) , Access(..)
     ,UnaryOperator(..)
+    ,notNull
+    ,keyRef
     ,BinaryOperator(..)
     ,renderUnary,readBinaryOp,renderBinary
     ,AccessOp
@@ -162,11 +164,13 @@ type Column k a = TB Identity k a
 type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Identity))) k a )
 type TB3Data  f k a = (KVMetadata k,Compose f (KV (Compose f (TB f ))) k a )
 
-data Access a
-  = IProd Bool [a]
-  | ISum  [Access a]
-  | Nested (Access a) (Access a)
-  | Rec Int (Access a)
+keyRef k = IProd notNull k
+
+data Access  a
+  = IProd (Maybe UnaryOperator) [a]
+  | ISum  [Access  a]
+  | Nested (Access  a) (Access  a)
+  | Rec Int (Access  a)
   | Point Int
   | Many [Access a]
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable,Generic)
@@ -184,8 +188,12 @@ type AccessOp a= Either (FTB a, BinaryOperator) UnaryOperator
 data UnaryOperator
   = IsNull
   | Not UnaryOperator
+  | Range Bool UnaryOperator
   deriving(Eq,Ord,Show,Generic)
 instance NFData UnaryOperator
+instance Binary UnaryOperator
+
+notNull = Just $ Not IsNull
 
 renderUnary (Not i) = "not " <> renderUnary i
 renderUnary IsNull = "null"
@@ -332,8 +340,8 @@ instance Binary a => Binary (FTB a)
 instance NFData a => NFData (FTB a)
 instance Binary k => Binary (KVMetadata k )
 instance NFData k => NFData (KVMetadata k )
-instance Binary k => Binary (Access k)
-instance NFData k => NFData (Access k)
+instance (Binary k) => Binary (Access k )
+instance (NFData k) => NFData (Access k )
 instance Binary Expr
 instance NFData Expr
 
@@ -349,7 +357,7 @@ data TB f k a
     }
   | Fun
     { _tbattrkey :: ! k
-    , _fundata :: ! (Expr,[Access k])
+    , _fundata :: ! (Expr,[Access k  ])
     , _tbattr :: ! (FTB a)
     }
   | IT -- Inline Table

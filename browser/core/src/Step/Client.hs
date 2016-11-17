@@ -1,5 +1,5 @@
 {-# LANGUAGE Arrows,OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Client (module Step.Common,idxR,idxK,act,odxR,nameO,nameI,callI,atAny,atMA,callO,odxM,idxM,atR,atK,atRA,attrT,tb,indexTable,atMR) where
+module Step.Client (module Step.Common,notNull,idxR,idxK,act,odx,odxR,nameO,nameI,callI,atAny,atMA,callO,odxM,idxM,atR,atK,atRA,attrT,tb,indexTable,atMR) where
 
 import Types
 import Step.Common
@@ -40,7 +40,7 @@ atAny k ps = P (nest fsum,nest ssum ) (Kleisli (\i -> local (fmap unTB1 . indexT
   where
     nest [] = Many []
     nest ls = Many [Nested ind $ ISum ls]
-    ind = splitIndex True k
+    ind = splitIndex (Just $ Not IsNull) k
     fsum = filter (/= Many [])$ fmap (\(P s _ )-> fst s ) ps
     ssum = filter (/= Many [])$ fmap (\(P s _ )-> snd s ) ps
     asum = fmap (\(P s (Kleisli j) ) -> j ) ps
@@ -59,7 +59,7 @@ atMA
      -> Parser (Kleisli m) (Access Text) t t1
      -> Parser (Kleisli m) (Access Text) t [t1]
 atMA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> unTB1 <$> toList l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
-  where ind = splitIndex False i
+  where ind = splitIndex Nothing i
 
 
 atRA
@@ -69,7 +69,7 @@ atRA
      -> Parser (Kleisli m) (Access Text) t t1
      -> Parser (Kleisli m) (Access Text) t [t1]
 atRA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> unTB1 <$> toList l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
-  where ind = splitIndex True i
+  where ind = splitIndex (Just $ Not IsNull) i
 
 unLeftTB1 = join . fmap (\v -> case v of
                (LeftTB1 i ) -> i
@@ -79,11 +79,11 @@ at b i (P s (Kleisli j) )  =  P (BF.second (nest (ind b)) . BF.first (nest (ind 
   where ind b = splitIndex b i
 
 
-atK = at False
-atR = at True
-atMR = at True
+atK = at Nothing
+atR = at notNull
+atMR = at notNull
   where
-    at b i (P s (Kleisli j) )  =  P (BF.second (nest (ind False)) . BF.first (nest (ind b)) $ s) (Kleisli (\i -> local (fmap unTB1 . unLeftTB1 . indexTB1 (ind b)) (j i )  ))
+    at b i (P s (Kleisli j) )  =  P (BF.second (nest (ind Nothing)) . BF.first (nest (ind b)) $ s) (Kleisli (\i -> local (fmap unTB1 . unLeftTB1 . indexTB1 (ind b)) (j i )  ))
       where ind b = splitIndex b i
 
 
@@ -101,17 +101,21 @@ callO  i ~(P _ d) = P (Many[],Many [Point i] ) d
 splitIndex b l = (fmap T.pack . IProd b . unIntercalate (','==) $ l)
 
   -- Obrigatory value with maybe wrapping
+odx p l =
+  let ll = splitIndex p l
+   in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
+
 odxR  l =
-  let ll = splitIndex True l
+  let ll = splitIndex notNull l
    in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
 odxM  l =
-  let ll = splitIndex False l
+  let ll = splitIndex Nothing l
    in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
 
 
 -- Optional value with maybe wrapping
 idxM  l =
-  let ll = splitIndex False l
+  let ll = splitIndex Nothing l
    in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . join . fmap (unSOptional' . snd) . join  . fmap (indexTableAttr ll)))
 
 -- Obrigatory value without maybe wrapping
@@ -121,12 +125,12 @@ tb :: MonadReader  a m => Parser (Kleisli m) (Access Text) t a
 tb = P (Many [] , Many []) (Kleisli (const ask ))
 
 idxK  l =
-  let ll = splitIndex True l
+  let ll = splitIndex notNull l
    in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (\ v -> return . justError ("no value found "  <> show (ll,v)). join . fmap (unSOptional' . snd) . join . fmap (indexTableAttr ll)$ v) )
 
 
 idxR  l =
-  let ll = splitIndex True l
+  let ll = splitIndex notNull l
    in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
 
 

@@ -143,7 +143,7 @@ deleteRow pk
         return v
     liftIO $print decoded
     let p = if BS.null decoded  then
-            Just $ TableModification Nothing table  (fst pk , G.Idex $ getPKM pk, [])
+              Just $ TableModification Nothing table  (fst pk , G.getIndex pk, [])
             else Nothing
     tell (maybeToList p)
     return p

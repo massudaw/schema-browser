@@ -80,7 +80,7 @@ indexFieldRec n v = errorWithStackTrace (show (n,v))
 
 genPredicate i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
 genPredicate i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
-genPredicate i (IProd b l) =  (\l -> if b then Just $ PrimColl (IProd b l,Right (if i then Not IsNull else IsNull) ) else Nothing ) $ l
+genPredicate i (IProd b l) =  (\i -> PrimColl (IProd b l,Right i  )) <$> b
 genPredicate i n@(Nested (IProd b p ) l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> if i then genPredicate i (IProd b [a]) else  Nothing ) <$> p
 genPredicate _ i = errorWithStackTrace (show i)
 
@@ -102,6 +102,6 @@ uNest :: Access Key -> Access Key
 uNest (Nested pn i) = i
 
 
-indexer field = foldr (\i j -> Nested  (IProd True i) (Many [j]) ) (IProd True (last vec)) (init vec )
+indexer field = foldr (\i j -> Nested  (IProd Nothing i) (Many [j]) ) (IProd Nothing (last vec)) (init vec )
   where vec = splitOn "," <$> splitOn ":" field
 

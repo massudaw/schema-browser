@@ -40,7 +40,6 @@ import qualified Data.Map as M
 import qualified Data.HashMap.Strict as HM
 
 
-idex inf t v = G.Idex $ M.fromList  $ first (lookKey inf t  ) <$> v
 
 plugs schm authmap db plugs = do
   inf <- metaInf schm
@@ -48,17 +47,17 @@ plugs schm authmap db plugs = do
       (db ,(_,t)) <- selectFrom "plugins"  Nothing Nothing [] $ mempty
       let regplugs = catMaybes $ findplug <$> plugs
           findplug :: PrePlugins -> Maybe Plugins
-          findplug p = (,p). round . unTB1 . flip index "oid" . fst <$>  listToMaybe (G.query pred t)
+          findplug p = (,p). round . unTB1 . flip index "oid" . fst <$>  listToMaybe (G.getEntries $ G.queryCheck (pred ,rawPK (lookTable inf "plugins")) t)
             where
-              pred :: G.Query (G.TBIndex Key Showable)
-              pred = WherePredicate $ AndColl [PrimColl (liftAccess inf "plugins" $ IProd True ["name"] , Left (txt $ _name p,Equals))]
+              pred :: TBPredicate Key Showable
+              pred = WherePredicate $ AndColl [PrimColl (liftAccess inf "plugins" $ keyRef ["name"] , Left (txt $ _name p,Equals))]
       return regplugs
   modifyMVar_ (globalRef schm) (return . HM.alter  (fmap(\i -> i {plugins=regplugs})) "metadata")
   return regplugs
 
 
 
-index tb item = snd $ justError ("no item" <> show item) $ indexTable (IProd True [item]) (tableNonRef' tb)
+index tb item = snd $ justError ("no item" <> show item) $ indexTable (keyRef [item]) (tableNonRef' tb)
 index2 tb item = justError ("no item" <> show item) $ indexFieldRec item tb
 
 checkTime curr = do
@@ -80,14 +79,14 @@ poller schm authmap db plugs is_test = do
       where
         TB1 (SNumeric schema )= index tb "schema"
         TB1 (SNumeric intervalms) = index tb "poll_period_ms"
-        TB1 (SText p) = index2 tb (liftAccess metas "polling" $ Nested (IProd True ["plugin"]) (Many [IProd True ["name"]]))
+        TB1 (SText p) = index2 tb (liftAccess metas "polling" $ Nested (keyRef ["plugin"]) (Many [keyRef ["name"]]))
         pid = index tb "plugin"
     enabled = G.toList polling
     poll tb  = do
       let plug = L.find ((==pname ). _name .snd ) plugs
           (schema,intervalms ,pname ,pid) = project tb
           indexRow polling = justError (show $ tbpred tb) $ G.lookup (tbpred tb) polling
-          tbpred = G.Idex . getPKM
+          tbpred = G.getIndex
 
       (inf ,_)<- runDynamic $keyTables  schm (justLook schema (schemaIdMap schm) , T.pack $ user db) authmap plugs
       (startP,_,_,current) <- checkTime (indexRow polling )

@@ -27,6 +27,8 @@ import qualified Types.Index as G
 import Utils
 import Data.Maybe
 import qualified Data.Vector as V
+import qualified Data.List as L
+import Data.Ord
 import Text
 import RuntimeTypes
 import Step.Common
@@ -147,8 +149,9 @@ writePK r efield =
                keyValue i <> "=" <> T.pack (renderShowable j))) $
     M.toList $ getPKM r
 
-readPK :: InformationSchema -> T.Text -> (Table, [(Key, FTB Showable)], Key)
-readPK inf s = (tb, pk, editField)
+
+readPK :: InformationSchema -> T.Text -> (Table, G.TBIndex Showable, Key)
+readPK inf s = (tb, G.Idex $ V.fromList $ fmap snd $ L.sortBy (comparing ((`L.elemIndex` rawPK tb).fst)) pk, editField)
   where
     [t,pks,f] = T.splitOn "->" s
     pk =
@@ -164,10 +167,10 @@ readPK inf s = (tb, pk, editField)
     pksk = rawPK tb
 makePatch
     :: TimeZone
-    -> ((Table, [(Key, FTB Showable)], Key), Either (Interval UTCTime) UTCTime)
+    -> ((Table, G.TBIndex Showable, Key), Either (Interval UTCTime) UTCTime)
     -> TBIdx Key Showable
 makePatch zone ((t,pk,k),a) =
-    (tableMeta t, G.Idex $ M.fromList pk, PAttr k <$> (ty (keyType k) $ a))
+  (tableMeta t,  pk, PAttr k <$> (ty (keyType k) $ a))
   where
     ty (KOptional k) i = fmap (POpt . Just) . ty k $ i
     ty (KSerial k) i = fmap (PSerial . Just) . ty k $ i
