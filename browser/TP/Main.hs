@@ -8,6 +8,7 @@ module TP.Main where
 import TP.Selector
 import Data.Unique
 import Postgresql.Backend (connRoot)
+import TP.TestRules
 import Data.Tuple
 import TP.View
 import TP.Account
@@ -82,7 +83,8 @@ setup smvar args plugList w = void $ do
   he <- fmap (const True) <$> UI.hover hoverBoard
 
   bhe <- ui $stepper True he
-  menu <- checkedWidget (tidings bhe he)
+
+  menu <- checkedWidget (fmap not (fmap not (tidings bhe he)))
   element menu # set UI.class_ "col-xs-1"
   nav  <- buttonDivSet  ["Map","Account","Agenda","Chart","Browser","Metadata"] (pure $ args `atMay` 6  )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
   element nav # set UI.class_ "col-xs-5 pull-right"

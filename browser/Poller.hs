@@ -85,7 +85,7 @@ poller schm authmap db plugs is_test = do
     poll tb  = do
       let plug = L.find ((==pname ). _name .snd ) plugs
           (schema,intervalms ,pname ,pid) = project tb
-          indexRow polling = justError (show $ tbpred tb) $ G.lookup (tbpred tb) polling
+          indexRow polling = justError (show $ (tbpred tb ,polling)) $ G.lookup (tbpred tb) polling
           tbpred = G.getIndex
 
       (inf ,_)<- runDynamic $keyTables  schm (justLook schema (schemaIdMap schm) , T.pack $ user db) authmap plugs

@@ -197,6 +197,7 @@ notNull = Just $ Not IsNull
 
 renderUnary (Not i) = "not " <> renderUnary i
 renderUnary IsNull = "null"
+renderUnary (Range b i )= renderUnary i <> (if b then " upper" else " lower")
 renderUnary i = errorWithStackTrace (show i)
 
 renderBinary (Flip (Flip i)) = renderBinary i

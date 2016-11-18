@@ -559,7 +559,7 @@ searchGist relTable m gist =  join . fmap (\k -> lookGist (S.fromList $fmap (\k-
     tbpred un  = tbjust  .  Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  relTable ))).  filter ((`S.member` un). fst ) . concat .fmap aattri
         where
           flipTable = M.fromList . fmap swap .M.toList
-          tbjust = fmap (G.Idex . V.fromList .fmap snd.L.sortBy (comparing ((`L.elemIndex` _kvpk m).fst)))
+          tbjust = fmap (G.Idex . fmap snd.L.sortBy (comparing ((`L.elemIndex` _kvpk m).fst)))
 
 joinRel :: (Ord a ,Show a,G.Predicates (G.TBIndex a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex a) (TBData Key a) -> FTB (TBData Key a)
 joinRel tb rel ref table

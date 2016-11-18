@@ -151,7 +151,7 @@ writePK r efield =
 
 
 readPK :: InformationSchema -> T.Text -> (Table, G.TBIndex Showable, Key)
-readPK inf s = (tb, G.Idex $ V.fromList $ fmap snd $ L.sortBy (comparing ((`L.elemIndex` rawPK tb).fst)) pk, editField)
+readPK inf s = (tb, G.Idex $ fmap snd $ L.sortBy (comparing ((`L.elemIndex` rawPK tb).fst)) pk, editField)
   where
     [t,pks,f] = T.splitOn "->" s
     pk =

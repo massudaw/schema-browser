@@ -468,6 +468,7 @@ indexFieldL e c i v = errorWithStackTrace (show (i, v))
 utlabel (Right  e) c a = result
   where
     idx = tlabel' . getCompose $ a
+    opvalue  ref i@(Range _ l)  =  "(" <> T.intercalate "." (c ++ [ref])   <> ")" <> "i" <> renderUnary i
     opvalue  ref i  =  T.intercalate "." (c ++ [ref])  <> " is " <> renderUnary i
     result =  ( Just $  (opvalue (snd $ idx) e)   ,Nothing)
 utlabel (Left (value,e)) c a = result

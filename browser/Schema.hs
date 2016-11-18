@@ -368,7 +368,7 @@ tableOrder inf table orderMap =  maybe (int 0) _tbattr row
 
 lookupAccess inf l f c = join $ fmap (indexField (IProd  notNull [(lookKey inf (fst c) f)] )) . G.lookup (idex inf (fst c) l) $ snd c
 
-idex inf t v = G.Idex $ V.fromList $ fmap snd $ L.sortBy (comparing ((`L.elemIndex` (rawPK $ lookTable inf t)).fst)) $ first (lookKey inf t  ) <$> v
+idex inf t v = G.Idex $  fmap snd $ L.sortBy (comparing ((`L.elemIndex` (rawPK $ lookTable inf t)).fst)) $ first (lookKey inf t  ) <$> v
 
 dbTable mvar table = do
     mmap <- atomically $readTMVar mvar

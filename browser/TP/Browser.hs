@@ -78,7 +78,7 @@ addClientLogin inf =  transactionNoLog inf $ do
     tell (maybeToList i)
     return i
 
-attrIdex l =  G.Idex $ V.fromList $ fmap (\(Attr i k) -> k) l
+attrIdex l =  G.Idex $  fmap (\(Attr i k) -> k) l
 
 deleteClientLogin inf i= do
   now <- liftIO $ getCurrentTime
@@ -238,7 +238,7 @@ viewerKey inf table cli layoutS cliTid = mdo
   reftb@(vpt,vp,_,var) <- ui $ refTables inf table
 
   let
-      tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (V.fromList $ fmap snd $ justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) iv ) <$> vpt <*> tdip
+      tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (fmap snd $ justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) iv ) <$> vpt <*> tdip
       tdip = join . fmap (join . fmap ( fmap (lookKV . snd ). lookPK .snd). lookT ) <$> cliTid
   cv <- currentValue (facts tdi)
   -- Final Query ListBox

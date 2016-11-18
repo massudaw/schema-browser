@@ -79,7 +79,7 @@ readHistory = proc x -> do
   mdeleted <- atMA "user,messagesDeleted->messages" (idxM "id")  -< ()
   -- labelAdded <- atA "labelsAdded"  ((,) <$> idxK "id" <*> idxK "labels")  -< ()
   -- labelDeleted <- atA "messagesDeleted"   -< ()
-  let patchDel i = (kvempty ,  G.Idex $ V.fromList [i] , [])
+  let patchDel i = (kvempty ,  G.Idex  [i] , [])
       patchCreate i = firstPatch keyString $ patch i
   odxR "showpatch" -< ()
   returnA -< Just $ tblist $ _tb <$> [Attr "showpatch" (TB1 $ SText $ T.pack $ show $ (patchDel <$> catMaybes mdeleted) <>  (patchCreate <$> catMaybes madded))]

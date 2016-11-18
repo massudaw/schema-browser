@@ -87,7 +87,7 @@ isArray _ = False
 
 newtype TBIndex  a
   -- = Idex (Map k (FTB a))
-  = Idex (Vector (FTB a))
+  = Idex [FTB a]
   deriving(Eq,Show,Ord,Functor,Generic)
 
 

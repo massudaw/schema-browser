@@ -9,7 +9,7 @@
 module Types.Index
   (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,filter',mapKeys
   ,getIndex ,getUnique,notOptional,tbpred
-  ,pickSplitG ,minP,maxP,unFin,queryCheck,indexPred,checkPred,splitIndex,splitPred,splitIndexPK,module G ) where
+  ,minP,maxP,unFin,queryCheck,indexPred,checkPred,splitIndex,splitPred,splitIndexPK,module G ) where
 
 import Data.Maybe
 import Control.Monad
@@ -19,7 +19,6 @@ import Step.Host
 import Control.Applicative
 import qualified NonEmpty as Non
 import Data.Either
-import Data.GiST.RTree (pickSplitG)
 import Data.GiST.BTree hiding(Equals,Contains)
 import Data.GiST.GiST as G
 import Data.Tuple (swap)
@@ -30,7 +29,6 @@ import GHC.Generics
 import Types
 import Utils
 import Data.Time
-import qualified Data.Vector as V
 import Data.Ord
 import Data.Foldable (foldl')
 import Data.Char
@@ -58,9 +56,9 @@ instance (NFData a)  => NFData (TBIndex   a)
 mapKeys f (Idex i ) = Idex $ i
 
 getUnique :: Ord k => [k] -> TBData k a -> TBIndex  a
-getUnique ks (m,v) = Idex . V.fromList . fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn (Set.fromList ks) $ (m,v)
+getUnique ks (m,v) = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn (Set.fromList ks) $ (m,v)
 getIndex :: Ord k => TBData k a -> TBIndex  a
-getIndex (m,v) = Idex . V.fromList . fmap snd . L.sortBy (comparing ((`L.elemIndex` (_kvpk m)).fst)) .M.toList .  getPKM $ (m,v)
+getIndex (m,v) = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` (_kvpk m)).fst)) .M.toList .  getPKM $ (m,v)
 
 notOptional :: TBIndex  a -> TBIndex  a
 notOptional (Idex m) = Idex   . justError "cant be empty " . traverse unSOptional'  $ m
@@ -105,7 +103,7 @@ instance Semigroup DiffShowable where
       appendDShowable (DSDays l ) (DSDays j) =  DSDays $ l + j
       appendDShowable (DSDiffTime l ) (DSDiffTime j) =  DSDiffTime $ l + j
       appendDShowable (DSPosition (x,y,z) ) (DSPosition (a,b,c)) =  DSPosition $ (x+a,y+b,z+c)
-      appendDShowable a b = errorWithStackTrace (show (a,b))
+      appendDShowable a b = errorWithStackTrace ("append " <> show (a,b))
 
 instance (Predicates (Predicate a),Ord a) => Predicates (WherePredicate,Predicate a ) where
   type Penalty (WherePredicate ,Predicate a)= ([ER.Extended DiffShowable],Penalty (Predicate a))
@@ -114,7 +112,6 @@ instance (Predicates (Predicate a),Ord a) => Predicates (WherePredicate,Predicat
   penalty (c1,i) (c2,j) = (penalty c1 c2 ,penalty i j)
   match  (c1,i) e (c2,j) = match c1 e c2 && match i e j
   union i  = (union (fst <$> i), union (snd <$> i))
-  pickSplit = pickSplitG
 
 instance Predicates WherePredicate where
   type Penalty WherePredicate = [ER.Extended DiffShowable]
@@ -134,7 +131,6 @@ instance Predicates WherePredicate where
       cons (Right i ) (Left j ) = ER.Finite $ DSInt 1
       cons (Left i ) (Right j ) =  ER.Finite $ DSInt (-1)
       cons (Right i ) (Right j ) =  ER.Finite $ DSInt $ if i == j then 0 else 1
-  pickSplit = pickSplitG
   union l = WherePredicate $ AndColl $ fmap (\(k,a)-> PrimColl(k,a))$ M.toList $ foldl ( M.mergeWithKey (\_ i j -> Just $ pairunion [i,j]) (fmap id) (fmap id) ) M.empty ((\(WherePredicate pr ) -> M.fromList .F.toList $ pr)<$> l)
     where
       pairunion i = Left $ (union  $ fmap fst (lefts i),headS $ fmap snd (lefts i ))
@@ -155,19 +151,21 @@ instance Affine String where
   type Tangent String = [Int]
   loga = fmap ord
   expa = fmap chr
-  subtraction = diffStr
+  subtraction i j = diffStr i j
     where
       diffStr :: String -> String -> [Int]
-      diffStr [] [] = []
+      diffStr (a:as) (b:bs) = (ord b - ord a) : diffStr as bs
       diffStr bs [] = ord <$> bs
       diffStr [] bs = ord <$> bs
-      diffStr (a:as) (b:bs) = (ord b - ord a) : diffStr as bs
-  addition = addStr
+      diffStr [] [] = []
+  {-# INLINE subtraction #-}
+  addition  i j = addStr  i j
     where
-      addStr [] [] = []
+      addStr (a:as) (b:bs) = chr (ord a + b) : addStr as bs
       addStr (a:as) []  = a : addStr as []
       addStr [] (b:bs) = chr b : addStr [] bs
-      addStr (a:as) (b:bs) = chr (ord a + b) : addStr as bs
+      addStr [] [] = []
+  {-# INLINE addition #-}
 
 splitIndexPK :: BoolCollection (Access Key ,AccessOp Showable) -> [Key] -> Maybe (BoolCollection (Access Key , AccessOp Showable))
 splitIndexPK (OrColl l ) pk  = if F.all (isNothing .snd) al then Nothing else Just $ OrColl $ fmap (\(i,j) -> fromMaybe i j) al
@@ -183,7 +181,7 @@ splitIndex (AndColl l ) pk f = if F.all (isNothing .snd) al then Nothing else Ju
     where
       al = (\l -> (l,splitIndex  l pk f) )<$> l
 splitIndex (OrColl l ) pk f = fmap OrColl $ nonEmpty $ catMaybes $ (\i -> splitIndex  i pk f) <$> l
-splitIndex (PrimColl (p@(IProd _ [i]),op) ) pk (Idex v ) = maybe (Just (PrimColl (p,op))) (splitPred (PrimColl (p,op))) ((v V.!) <$>  (L.elemIndex i pk ))
+splitIndex (PrimColl (p@(IProd _ [i]),op) ) pk (Idex v ) = maybe (Just (PrimColl (p,op))) (splitPred (PrimColl (p,op))) ((v !!) <$>  (L.elemIndex i pk ))
 
 splitPred :: BoolCollection (Access Key ,AccessOp Showable) ->  FTB Showable -> Maybe (BoolCollection (Access Key,AccessOp Showable)  )
 splitPred (PrimColl (prod ,Left (a@(TB1 _ ) ,op))) (ArrayTB1 b ) = if elem a  b then Nothing else Just (PrimColl (prod , Left (a,op)))
@@ -224,6 +222,7 @@ instance Affine Showable where
       diffS (SDate i ) (SDate j) = DSDays (diffDays j i)
       diffS (SPosition (Position (x,y,z)) ) (SPosition (Position (a,b,c))) = DSPosition (a-x,b-y,c-z)
       diffS a b  = errorWithStackTrace (show (a,b))
+  {-# INLINE subtraction #-}
   addition (SText v) (DSText t) = SText $ T.pack $ addition (T.unpack v) t
   addition (SNumeric v) (DSInt t) = SNumeric  $ v + t
   addition (SDouble v) (DSDouble t) = SDouble $ v + t
@@ -231,19 +230,28 @@ instance Affine Showable where
   addition (SDate v) (DSDays t) = SDate $ addDays t v
   addition (SPosition (Position (x,y,z)) ) (DSPosition (a,b,c)) = SPosition $ Position (a+x,b+y,c+z)
   addition i j = errorWithStackTrace (show (i,j))
+  {-# INLINE addition #-}
 
 instance Predicates (TBIndex Showable) where
-  type (Penalty (TBIndex Showable)) = Penalty (V.Vector (FTB Showable))
+  type (Penalty (TBIndex Showable)) = [ER.Extended DiffShowable]
   type Query (TBIndex Showable) = (TBPredicate Key Showable,[Key])
-  consistent (Idex j) (Idex  m )
-    =  {-(if hasText  then traceShow (M.keys j) else id ) $-} consistent j m
-  match (WherePredicate l,un)  e (Idex v) =  match (WherePredicate l,un) e v
-  union l  = Idex   projL
+  consistent (Idex l) (Idex  i )
+    =  if null b then False else  F.all id b
     where
-          projL = union  (fmap (\(Idex i) -> i)l)
+      b =  zipWith consistent (l) (i)
 
-  penalty (Idex i ) (Idex j) = penalty i j
-  pickSplit = pickSplitG
+  match (WherePredicate a,un)  e (Idex v) = go a
+    where
+      -- Index the field and if not found return true to row filtering pass
+      go (AndColl l) = F.all go l
+      go (OrColl l ) = F.any go  l
+      go (PrimColl (IProd _ [i],op)) = maybe (traceShow (i,un) True) (match op e)  (( v !!)  <$> L.elemIndex i un)
+
+  union l
+    | L.null l = Idex []
+    | otherwise = F.foldl1 (\(Idex l) (Idex s) -> Idex $ zipWith (\i j -> union [i,j]) l s) l
+
+  penalty (Idex p1 ) (Idex p2) = zipWith (\i j -> penalty i j ) p1 p2 -- (fmap (maybe ER.PosInf (ER.Finite .loga) .unFin . fst .minP)) (fmap (maybe ER.PosInf (ER.Finite .loga ). unFin . fst . minP))  p1 p2
 
 projIdex (Idex v) = F.toList v
 
@@ -256,24 +264,6 @@ instance (Predicates (TBIndex  a )  ) => Monoid (G.GiST (TBIndex  a)  b) where
 
 
 -- Attr List Predicate
-
-instance  Predicates (V.Vector (FTB Showable)) where
-  type Penalty (V.Vector (FTB Showable )) = V.Vector (ER.Extended DiffShowable)
-  type Query (V.Vector (FTB Showable )) = (TBPredicate Key Showable,[Key])
-  match (WherePredicate a ,un) e  v=  go a
-    where
-      -- Index the field and if not found return true to row filtering pass
-      go (AndColl l) = F.all go l
-      go (OrColl l ) = F.any go  l
-      go (PrimColl (IProd _ [i],op)) = maybe (traceShow (i,un) True) (match op e)  (( v V.!)  <$> L.elemIndex i un)
-  consistent l i =  if V.null b then False else  F.all id b
-    where
-      b =  V.zipWith consistent (l) (i)
-  union l
-    | L.null l = V.empty
-    | otherwise = foldl1 (V.zipWith (\i j -> union [i,j]) ) l
-  penalty p1 p2 = V.zipWith (\i j -> penalty i j ) p1 p2 -- (fmap (maybe ER.PosInf (ER.Finite .loga) .unFin . fst .minP)) (fmap (maybe ER.PosInf (ER.Finite .loga ). unFin . fst . minP))  p1 p2
-  pickSplit = pickSplitG
 
 
 instance  Predicates (Map Key (FTB Showable)) where
@@ -292,7 +282,6 @@ instance  Predicates (Map Key (FTB Showable)) where
     | L.null l = M.empty
     | otherwise = foldl1 (M.intersectionWith (\i j -> union [i,j]) ) l
   penalty p1 p2 = M.mergeWithKey (\_ i j -> Just $penalty i j ) (fmap (maybe ER.PosInf (ER.Finite .loga) .unFin . fst .minP)) (fmap (maybe ER.PosInf (ER.Finite .loga ). unFin . fst . minP))  p1 p2
-  pickSplit = pickSplitG
 
 
 checkPred v (WherePredicate l) = checkPred' v l
@@ -405,7 +394,6 @@ instance Predicates (FTB Showable) where
     where mi = minimum (minP <$> l)
           ma = maximum (maxP <$> l)
 
-  pickSplit = pickSplitG
 
   penalty p1 p2 =  (maybe ER.PosInf ER.Finite $ fmap notNeg $ liftA2 subtraction (unFin $ fst $ minP p2) (unFin $ fst $ minP p1)) <>  (maybe ER.PosInf ER.Finite $ fmap notNeg $ liftA2 subtraction (unFin $ fst $ maxP p1)  (unFin $ fst $ maxP p2))
 

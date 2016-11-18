@@ -78,7 +78,7 @@ translateMonth v = foldr (\i -> (uncurry T.replace) i )  v transTable
 
 
 justError e (Just i) = i
-justError e  v = traceStack e  (errorWithStackTrace e)
+justError e  v = errorWithStackTrace e
 
 groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
 

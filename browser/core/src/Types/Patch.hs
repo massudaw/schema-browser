@@ -290,7 +290,7 @@ patchfkt i = errorWithStackTrace (show i)
 
 unAtom (PatchSet (PAtom l Non.:| _ ) ) =  l
 unAtom (PAtom i ) = i
-unAtom i =traceStack (show i) $ errorWithStackTrace (show   i)
+unAtom i =errorWithStackTrace (show   i)
 
 instance (Binary k ,Binary a) => Binary (PathAttr k a)
 instance (NFData k ,NFData a) => NFData (PathAttr k a)
@@ -401,7 +401,9 @@ applyGiST l patom@(m,ipa, p) =  case G.lookup (G.notOptional i) l  of
                   Just v ->  let
                            el = applyRecord  v patom
                            pkel = G.tbpred el
-                          in G.insert (el,G.tbpred  el) (3,6) . G.delete (G.notOptional i)  (3,6) $ l
+                        in if  pkel == i
+                              then G.update (G.notOptional i) (flip applyRecord patom) l
+                              else G.insert (el,G.tbpred  el) (3,6) . G.delete (G.notOptional i)  (3,6) $ l
                   Nothing -> let
                       el = createTB1  patom
                       in G.insert (el,G.tbpred  el) (3,6)  l
