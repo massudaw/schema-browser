@@ -120,7 +120,7 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
                 UI.div # set children [header,missing]
                   ) item
 
-    agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Timeline) (\i ->  UI.button # set text (show i){- # set UI.class_ "buttonSet btn-xs btn-default pull-right")-})
+    agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i ->  UI.button # set text (show i){- # set UI.class_ "buttonSet btn-xs btn-default pull-right")-})
 
     calendar <- UI.div # set UI.class_ "col-xs-10"
     element body # set children [getElement agenda,calendar]

@@ -92,8 +92,8 @@ refTable  inf (Union table origin )  = do
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
   let ref = justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
-  idxTds<- convertChanStepper  (idxChan ref)(idxVar ref)
-  dbTds <- convertChanTidings mempty  (patchVar ref) (collectionState ref)
+  idxTds<- convertChanStepper  ref
+  dbTds <- convertChanTidings mempty  ref
   return (DBVar2 ref idxTds dbTds)
 
 tbpredM un  = G.notOptional . G.getUnique un
@@ -193,7 +193,7 @@ getFKRef inf predtop rtable (me,old) v (Path ref (FunctionField a b c)) = do
         r =  evaluate a b funmap c (m,i)
   return (me >=> addAttr ,old <> ref )
 
-getFKRef inf predtop rtable (me,old) v (Path _ (FKJoinTable i j ) ) =  do
+getFKRef inf predtop rtable (me,old) v path@(Path _ (FKJoinTable i j ) ) =  do
                 let rinf = maybe inf id $ HM.lookup ((fst j))  (depschema inf)
                     table = lookTable rinf $ snd j
                     predicate predtop = case predtop of
@@ -206,27 +206,30 @@ getFKRef inf predtop rtable (me,old) v (Path _ (FKJoinTable i j ) ) =  do
                                       test f (Nested (IProd _ p) i ,j)  = if p == f then Just (i ,j) else Nothing
                                       test v f = Nothing
                                    in  fmap WherePredicate (go (test (_relOrigin <$> i)) l)
-                liftIO $ putStrLn $ "loadForeign table" <> show (tableName table)
-                let innerpred = fmap (\pred -> WherePredicate (AndColl pred)) $ traverse (\k -> (\v -> (PrimColl (IProd notNull [ _relTarget $ k], Left ( if L.length v == 1 then (L.head v, _relOperator k ) else (ArrayTB1 (Non.fromList v), Flip (AnyOp (_relOperator k ))))))) <$> ( nonEmpty $ L.nub $  concat $ catMaybes $   fmap (F.toList . unArray' ) . join . fmap (  unSOptional'. _tbattr .unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) . unKV .snd <$> v ))  i
-                    pred = (fromMaybe mempty $ innerpred <> predicate predtop)
-                (_,out) <- local (const rinf) (tableLoader table  (Just 0) Nothing [] pred)
-                let check ix (i,tb2) = do
-                      mergeDBRef (i,tb2) <$> if (isJust (M.lookup pred i)
-                                                && (fst $ justError "" $ M.lookup pred i) > G.size tb2
-                                                && (fst $ justError "" $ M.lookup pred i) >= 200)
-                        then  do
-                          liftIO$ print (M.lookup pred i , G.size tb2 , i,pred)
-                          (_,out) <- local (const rinf) (tableLoader table  (Just (ix +1) ) Nothing []  pred)
-                          return out
-                        else return (M.empty , G.empty)
-                (_,tb2) <- check 0 out
+                liftIO $ putStrLn $ "loadForeign table" <> show (path)
+                let refs = (   fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap (OrColl. fmap (\i->PrimColl (IProd notNull [_relTarget $ k] ,Left (i,_relOperator k))).F.toList .unArray') . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v )
+                    predm = (refs<> predicate predtop)
+                tb2 <- case predm of
+                  Just pred -> do
+                    (_,out) <- local (const rinf) (tableLoader table  (Just 0) Nothing [] pred)
+                    let check ix (i,tb2) = do
+                          mergeDBRef (i,tb2) <$> if (isJust (M.lookup pred i)
+                                                    && (fst $ justError "" $ M.lookup pred i) > G.size tb2
+                                                    && (fst $ justError "" $ M.lookup pred i) >= 200)
+                            then  do
+                              (_,out) <- local (const rinf) (tableLoader table  (Just (ix +1) ) Nothing []  pred)
+                              return out
+                            else return (M.empty , G.empty)
+                    (_,tb2) <- check 0 out
+                    return tb2
+                  Nothing -> return G.empty
 
                 let
                     tar = S.fromList $ fmap _relOrigin i
                     refl = S.fromList $ fmap _relOrigin $ filterReflexive i
                     inj = S.difference refl old
                     joinFK :: TBData Key Showable -> Either [Compose Identity (TB Identity)  Key Showable] (Column Key Showable)
-                    joinFK m  = maybe (Left taratt) Right $ FKT (kvlist tarinj ) i <$> joinRel2 (tableMeta table ) i (fmap unTB $ taratt ) tb2
+                    joinFK m  = maybe (traceShow (_tbattr .unTB <$>taratt,filter (\(G.Idex i) -> take 2 i ==(take 2 $ _tbattr .unTB <$>taratt)) $ fmap snd $ G.getEntries tb2) Left (taratt)) Right $ FKT (kvlist tarinj ) i <$> joinRel2 (tableMeta table ) i (fmap unTB $ taratt ) tb2
                       where
                         taratt = getAtt tar (tableNonRef' m)
                         tarinj = getAtt inj (tableNonRef' m)
@@ -252,7 +255,7 @@ tableLoader :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicat
 tableLoader table  page size presort fixed
   -- Union Tables
   | not $ L.null $ rawUnion table  = do
-    liftIO$ putStrLn $ "start loadTable " <> show (tableName table,fixed)
+    liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
     li <- liftIO getCurrentTime
     inf <- ask
     i <- mapM (\t -> do
@@ -298,7 +301,7 @@ tableLoader table  page size presort fixed
   -- Primitive Tables
   | otherwise  =  do
     inf <- ask
-    liftIO$ putStrLn $ "start loadTable " <> show (tableName table,fixed)
+    liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
     li <- liftIO getCurrentTime
     o <- pageTable False (\table page size presort fixed predtop  -> do
           let
@@ -313,7 +316,7 @@ tableLoader table  page size presort fixed
           (res ,x ,o) <- (listEd $ schemaOps inf) (tableNonRef2 tbf) page size presort fixed (unestPred predtop)
           (resFKS ,_)<- getFKS inf predtop table res
           let result = fmap resFKS   res
-          liftIO $print (lefts result)
+          liftIO $ print ("not fetched FKS", length(lefts result),length(rights result),take 10$ lefts result)
           return (rights  result,x,o )) table page size presort fixed
     lf <- liftIO getCurrentTime
     liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
@@ -353,10 +356,10 @@ pageTable flag method table page size presort fixed = do
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
     (reso ,nchan) <- liftIO $ atomically $
-      (,) <$> readTVar (collectionState dbvar)<*> cloneTChan (patchVar dbvar)
+      forwardTchan (fixed ,rawPK table) dbvar
 
-    (fixedmap,fixedChan,idxVL)  <- liftIO $ atomically $
-        liftA3 (,,) (readTVar (idxVar dbvar)) (cloneTChan (idxChan dbvar)) (readTVar (idxVarLoad dbvar))
+    ((fixedmap,fixedChan),idxVL)  <- liftIO $ atomically $
+      liftA2 (,) (readIndex dbvar) (readTVar (idxVarLoad dbvar))
     iniT <- do
 
        loadmap <- get
@@ -371,7 +374,6 @@ pageTable flag method table page size presort fixed = do
            hasIndex = M.lookup fixed fixedmap
            (sq ,_)= justError "no index" hasIndex
 
-       liftIO$ print ((fmap snd $ G.getEntries freso),diffpred)
        i <-  if flag || ( (isNothing hasIndex|| (sq > G.size freso)) -- Tabela é maior que a tabela carregada
                 && pageidx  > G.size freso ) -- O carregado é menor que a página
                && (isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixed fixedmap)  -- Ignora quando página já esta carregando
@@ -384,15 +386,15 @@ pageTable flag method table page size presort fixed = do
 
                let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                    (_,mp) = fromMaybe (0,M.empty ) hasIndex
-               liftIO$ putStrLn $ "new page " <> show (tableName table, pageidx, G.size freso,G.size reso,page, pagesize,diffpred)
+               liftIO$ putStrLn $ "new page " <> show (tableName table, pageidx, G.size freso,G.size reso,page, pagesize)
                (res,nextToken ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList (justError "no pred" diffpred)
                let
                    token =  nextToken
-                   index = (estLength page pagesize s, maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token$ mp)
+                   index = (estLength page pagesize (s + G.size freso) , maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token$ mp)
                liftIO$ do
-                 putPatch (idxChan dbvar ) (fixed ,estLength page pagesize s, pageidx ,fromMaybe HeadToken token)
+                 putPatch (idxChan dbvar ) (justError"no pred" diffpred,estLength page pagesize s, pageidx ,fromMaybe HeadToken token)
                  putPatch (patchVar dbvar) (F.toList $ patch  <$> res)
-               return  (index,res)
+               return  (index,res <> G.toList freso)
              else do
 
                liftIO$ putStrLn $ "keep page " <> show (tableName table, pageidx, G.size freso,G.size reso,page, pagesize)
@@ -406,6 +408,24 @@ pageTable flag method table page size presort fixed = do
     idxTds <- lift $ convertChanStepper0 fixedmap fixedChan
     return (DBVar2 dbvar idxTds vpt ,iniFil)
 
+readIndex dbvar = do
+    (ini,nchan) <-
+      (,) <$> readTVar (idxVar dbvar)<*> cloneTChan (idxChan dbvar)
+    patches <- takeMany' nchan
+    let conv (v,s,i,t) = (M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) v)
+    return (F.foldl' (flip conv) ini patches,nchan)
+
+forwardTchan fixed dbvar = do
+  var <-readTVar (collectionState dbvar)
+  chan <- cloneTChan (patchVar dbvar)
+  patches <- takeMany' chan
+  let
+      splitMatch (WherePredicate b,o) p = maybe True (\i -> G.match (WherePredicate i ,o) G.Exact p  ) (G.splitIndexPK b o)
+      filterPred :: [Index (TBData Key Showable)] -> Maybe [Index (TBData Key Showable)]
+      filterPred = nonEmpty . filter (\d@(_,p,_) -> splitMatch fixed p && indexFilterP (fst fixed) d )
+      update = F.foldl' (flip (\p-> (flip apply p)))
+  return (update var (concat patches),chan)
+
 convertChanStepper0  ini nchan = do
         (e,h) <- newEvent
         t <- liftIO $ forkIO  $ forever ( do
@@ -416,9 +436,9 @@ convertChanStepper0  ini nchan = do
         registerDynamic (killThread t)
         return (tidings bh (flip conv<$> bh<@> e))
 
-convertChanStepper idxv idxref = do
+convertChanStepper dbvar = do
         (ini,nchan) <- liftIO $atomically $
-          (,) <$> readTVar idxref <*> cloneTChan idxv
+          readIndex dbvar
         convertChanStepper0 ini nchan
 
 convertChanEvent chan = do
@@ -429,9 +449,9 @@ convertChanEvent chan = do
   registerDynamic (killThread t)
   return e
 
-convertChanTidings fixed idxv idxref = do
+convertChanTidings fixed dbvar = do
       (ini,nchan) <- liftIO $atomically $
-          (,) <$> readTVar idxref <*> cloneTChan idxv
+        forwardTchan fixed  dbvar
       convertChanTidings0 fixed ini nchan
 
 
@@ -445,6 +465,16 @@ convertChanTidings0 fixed ini nchan = do
       diffs = filterJust $ filterPred <$> evdiff
     bres <- accumB ini (flip update <$> diffs)
     return $tidings bres (update <$> bres <@> diffs)
+
+takeMany' :: TChan a -> STM [a]
+takeMany' mvar = maybe (return[]) (go . (:[])) =<< tryReadTChan mvar
+  where
+    go v = do
+      i <- tryReadTChan mvar
+      maybe (return (reverse v )) (go . (:v)) i
+
+
+
 
 
 takeMany :: TChan a -> STM [a]

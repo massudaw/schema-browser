@@ -323,7 +323,7 @@ testTable s t w = do
   (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
   wm <- mkWeakMVar  (globalRef smvar) (sequence_ fin)
   (i,_) <- runDynamic $ transactionNoLog inf $ selectFrom t Nothing Nothing [] (WherePredicate $ lookAccess inf t <$> w)
-  print (fst (snd i))
+  return ()
 
 
 testPlugin s t p  = do

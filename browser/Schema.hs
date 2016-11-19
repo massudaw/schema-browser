@@ -227,7 +227,7 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
        varmap <- mapM (createTableRefs inf) (filter (L.null . rawUnion) $ F.toList i2u)
        liftIO$ atomically $ takeTMVar mvar >> putTMVar mvar  (M.fromList varmap )
        var <- liftIO$ modifyMVar_  (globalRef schemaVar  ) (return . HM.insert schema inf )
-       addStats inf
+       -- addStats inf
        return inf
 
 createTableRefs :: InformationSchema -> Table -> R.Dynamic (TableK Key,DBRef Key Showable)
@@ -249,14 +249,14 @@ createTableRefs inf i = do
           (v,s,i,t) <- readTChan nchanidx
           modifyTVar' midx  (M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) v)
           )
-      )  (\e -> atomically (readTChan nchanidx ) >>= (\d ->  print ("block index",tableName i ,e :: SomeException,d)))
+      )  (\e -> atomically (readTChan nchanidx ) >>= (\d ->  appendFile ("errors/index-" <> T.unpack ( tableName i)) $ show (e :: SomeException,d)<>"\n"))
   R.registerDynamic (killThread t0)
   t1 <- liftIO $forkIO $ forever $ catchJust notException (
       atomically $ do
         patches <- takeMany nmdiff
         when (not $ L.null $ concat patches) $
           modifyTVar' collectionState (flip (L.foldl' apply ) (concat patches))
-          )  (\e -> atomically ( takeMany nmdiff ) >>= (\v -> print ("block data ",tableName i ,e :: SomeException,v)))
+      )  (\e -> atomically ( takeMany nmdiff ) >>= (\d ->  appendFile ("errors/data-" <> T.unpack ( tableName i)) $ show (e :: SomeException,d)<>"\n"))
   R.registerDynamic (killThread t1)
   return (i,  DBRef nmdiff midx nchanidx collectionState midxLoad )
 
