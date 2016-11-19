@@ -356,7 +356,7 @@ pageTable flag method table page size presort fixed = do
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
     (reso ,nchan) <- liftIO $ atomically $
-      forwardTchan (fixed ,rawPK table) dbvar
+      readState (fixed ,rawPK table) dbvar
 
     ((fixedmap,fixedChan),idxVL)  <- liftIO $ atomically $
       liftA2 (,) (readIndex dbvar) (readTVar (idxVarLoad dbvar))
@@ -415,7 +415,7 @@ readIndex dbvar = do
     let conv (v,s,i,t) = (M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) v)
     return (F.foldl' (flip conv) ini patches,nchan)
 
-forwardTchan fixed dbvar = do
+readState fixed dbvar = do
   var <-readTVar (collectionState dbvar)
   chan <- cloneTChan (patchVar dbvar)
   patches <- takeMany' chan
@@ -429,12 +429,12 @@ forwardTchan fixed dbvar = do
 convertChanStepper0  ini nchan = do
         (e,h) <- newEvent
         t <- liftIO $ forkIO  $ forever ( do
-            a <- atomically $ readTChan nchan
+            a <- atomically $ takeMany nchan
             h a )
         let conv (v,s,i,t) = (M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) v)
-        bh <- accumB ini (conv <$> e)
+        bh <- accumB ini ((\l i-> F.foldl' (flip conv) i l)<$> e)
         registerDynamic (killThread t)
-        return (tidings bh (flip conv<$> bh<@> e))
+        return (tidings bh ((\i l-> F.foldl' (flip conv) i l)<$> bh<@> e))
 
 convertChanStepper dbvar = do
         (ini,nchan) <- liftIO $atomically $
@@ -451,7 +451,7 @@ convertChanEvent chan = do
 
 convertChanTidings fixed dbvar = do
       (ini,nchan) <- liftIO $atomically $
-        forwardTchan fixed  dbvar
+        readState fixed  dbvar
       convertChanTidings0 fixed ini nchan
 
 
