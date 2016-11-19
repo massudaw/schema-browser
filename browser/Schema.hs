@@ -246,8 +246,9 @@ createTableRefs inf i = do
   midxLoad <-  liftIO$ atomically $ newTVar G.empty
   t0 <- liftIO$ forkIO $ forever $ catchJust notException(do
       atomically (do
-          (v,s,i,t) <- readTChan nchanidx
-          modifyTVar' midx  (M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) v)
+          ls <- takeMany nchanidx
+          let conv (v,s,i,t) = M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) v
+          modifyTVar' midx (\s -> F.foldl' (flip conv)   s ls)
           )
       )  (\e -> atomically (readTChan nchanidx ) >>= (\d ->  appendFile ("errors/index-" <> T.unpack ( tableName i)) $ show (e :: SomeException,d)<>"\n"))
   R.registerDynamic (killThread t0)

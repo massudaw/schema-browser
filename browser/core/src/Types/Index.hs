@@ -366,7 +366,8 @@ instance Predicates (FTB Showable) where
   match  (Right (Not i) ) c  j   = not $ match (Right i ) c j
   match  (Right IsNull) _   (LeftTB1 j)   = isNothing j
   match  (Right IsNull) _   j   = False
-  match  (Right (Range b (Not IsNull))) _   (IntervalTB1 j)   = isJust $ unFin $ if b then upperBound j else lowerBound j
+  match  (Right (BinaryConstant op e )) i v  = match (Left (generateConstant e,op)) i v
+  match  (Right (Range b pred)) i  (IntervalTB1 j)   = match  (Right $ pred) i $ LeftTB1 $ fmap TB1 $ unFin $ if b then upperBound j else lowerBound j
   match (Left v) a j  = ma  v a j
     where
       -- ma v a j | traceShow (v,a,j) False = undefined

@@ -206,8 +206,8 @@ data PathFTB   a
   | PAtom a
   deriving(Show,Eq,Ord,Functor,Generic,Foldable)
 
-upperPatch = PInter True
-lowerPatch = PInter False
+upperPatch = PInter False
+lowerPatch = PInter True
 
 newtype FBPatch p
   =  FBPatch (p ,p)

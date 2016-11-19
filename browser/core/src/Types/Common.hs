@@ -42,6 +42,7 @@ module Types.Common (
 
     ,Expr (..) , Access(..)
     ,UnaryOperator(..)
+    ,Constant(..)
     ,notNull
     ,keyRef
     ,BinaryOperator(..)
@@ -185,13 +186,22 @@ instance NFData a => NFData (BoolCollection a)
 
 type AccessOp a= Either (FTB a, BinaryOperator) UnaryOperator
 
+data Constant
+  = CurrentTime
+  | CurrentDate
+  deriving(Eq,Ord,Show,Generic)
+
 data UnaryOperator
   = IsNull
   | Not UnaryOperator
   | Range Bool UnaryOperator
+  | BinaryConstant BinaryOperator Constant
   deriving(Eq,Ord,Show,Generic)
+
 instance NFData UnaryOperator
 instance Binary UnaryOperator
+instance NFData Constant
+instance Binary Constant
 
 notNull = Just $ Not IsNull
 

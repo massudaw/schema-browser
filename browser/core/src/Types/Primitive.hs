@@ -35,6 +35,7 @@ import Data.Binary (Binary)
 import Data.Vector.Binary
 import qualified Data.Binary as B
 import Data.Text.Binary
+import System.IO.Unsafe
 import Data.Functor.Identity
 import Data.Typeable
 import Data.Vector(Vector)
@@ -806,3 +807,6 @@ notOptionalPK m =  justError "cant be empty " . traverse unSOptional'  $ m
 txt = TB1 . SText
 int = TB1 . SNumeric
 
+generateConstant CurrentDate = unsafePerformIO $ do
+        i<- getCurrentTime
+        return $ (TB1 $ SDate (utctDay i))

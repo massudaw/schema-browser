@@ -14,6 +14,7 @@ module Postgresql.Printer
 
 import Query
 import Debug.Trace
+import Data.Time
 import Data.Ord
 import Types.Index (TBIndex(..))
 import Data.String
@@ -25,6 +26,7 @@ import Data.Bifunctor
 import qualified Data.Foldable as F
 import qualified Data.Traversable as Tra
 import Data.Maybe
+import System.IO.Unsafe
 import Data.Monoid hiding (Product)
 
 import qualified Data.Text as T
@@ -465,12 +467,14 @@ indexFieldL e c (Many nt) v = concat $ flip (indexFieldL e c) v <$> nt
 indexFieldL e c (ISum nt) v = concat $ flip (indexFieldL e c) v <$> nt
 indexFieldL e c i v = errorWithStackTrace (show (i, v))
 
-utlabel (Right  e) c a = result
+utlabel (Right  e) c a = result e
   where
     idx = tlabel' . getCompose $ a
     opvalue  ref (Range b l)  =  (if b then "upper" else "lower") <> "(" <> T.intercalate "." (c ++ [ref])   <> ")" <> " is "<> renderUnary l
     opvalue  ref i  =  T.intercalate "." (c ++ [ref])  <> " is " <> renderUnary i
-    result =  ( Just $  (opvalue (snd $ idx) e)   ,Nothing)
+
+    result (BinaryConstant b i) =  utlabel (Left (generateConstant i ,b)) c a
+    result i =  (Just $  opvalue (snd $ idx) e   ,Nothing )
 utlabel (Left (value,e)) c a = result
   where
     idx = tlabel' . getCompose $ a

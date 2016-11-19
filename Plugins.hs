@@ -692,7 +692,7 @@ fetchofx = FPlugins "OFX Import" tname $ DiffIOPlugin url
               file <- BS.readFile fname
               return (TB1 $ SText $ T.pack $ fname , LeftTB1 $ Just $ DelayedTB1 $ Just $ TB1 $ SBinary file,upperPatch (Finite $ (PAtom $ SDate $ utctDay t),False))
                  ) -< (range, pass)
-        odxR "range" -< ()
+        odx  (Just $ Range True  ((BinaryConstant Equals CurrentDate))) "range" -< ()
 
         atR "ofx" (proc t -> do
             odxR "file_name" -<()
