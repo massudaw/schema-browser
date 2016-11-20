@@ -173,8 +173,11 @@ splitIndexPK (OrColl l ) pk  = if F.all (isNothing .snd) al then Nothing else Ju
       al = (\l -> (l,splitIndexPK  l pk ) )<$> l
 splitIndexPK (AndColl l ) pk  = fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK  i pk ) <$> l
 splitIndexPK (PrimColl (p@(IProd _ [i]),op) ) pk  = if elem i  pk  then Just (PrimColl (p,op)) else Nothing
+splitIndexPK (PrimColl (p@(IProd _ l),op) ) pk  = errorWithStackTrace (show (l,op,pk))
 
 
+instance Monoid (TBIndex a) where
+  mempty  = Idex []
 
 splitIndex :: BoolCollection (Access Key ,AccessOp Showable) -> [Key] -> TBIndex Showable -> Maybe (BoolCollection (Access Key , AccessOp Showable))
 splitIndex (AndColl l ) pk f = if F.all (isNothing .snd) al then Nothing else Just $ AndColl $ fmap (\(i,j) -> fromMaybe i j) al

@@ -5,6 +5,8 @@ module TP.Widgets where
 import GHC.Stack
 import Control.Concurrent.Async
 import Control.Monad.Writer
+import Control.Monad
+import Control.Arrow(first)
 import Data.Tuple(swap)
 import qualified Control.Monad.Trans.Writer as Writer
 import Control.Monad
@@ -618,6 +620,29 @@ mapUIFinalizerT el m inp = ui $ do
 
 line n =   set  text n
 
+accumDiffCounter
+  :: (Show k ,Prelude.Ord k) =>
+    (Int -> (k,a) -> Dynamic b)
+     -> Tidings (M.Map k a )
+     -> Dynamic
+          (Tidings (M.Map k b))
+accumDiffCounter  f t = mdo
+  ini <- currentValue (facts t)
+  iniout <- liftIO$ mapM (\(ix,v)-> evalDynamic (f ix) v)$ zip [0..] $M.toList ini
+  let (del,addpre) = diffAddRemove t
+  add <- mapEvent (\((ix,_),v) -> mapM (\(ix,v)-> evalDynamic (f ix) v) $zip [ix..] (M.toList $ v) )  $(,)<$>bs <@>addpre
+  del2 <- mapEvent (\((ix,fin),d) -> do
+         let fins =  catMaybes $ fmap (flip M.lookup fin) d
+         _ <- traverse sequence_ $ fmap snd fins
+         return d)  ((,) <$> bs <@> (S.toList  <$> del ))
+  let evadd = ((\s (acc,m) -> (traceShow (acc + length s,fmap fst s) $ acc + length s,foldr (uncurry M.insert ) m s)) <$> add )
+      evdel = ( (\s (acc,m) -> (acc,foldr (M.delete ) m s)) <$> del2 )
+  let eva = unionWith (.) evdel evadd
+  bs <- accumB  (M.size ini,M.fromList iniout)  eva
+  registerDynamic (void $ join $ traverse sequence_ . fmap snd . F.toList  .snd <$> currentValue bs)
+  return (fmap (fmap fst ) $ tidings (fmap snd bs) (fmap snd $ flip ($) <$> bs <@> eva))
+
+
 accumDiff
   :: (Show k ,Prelude.Ord k) =>
      ((k,a) -> Dynamic b)
@@ -627,7 +652,8 @@ accumDiff
 accumDiff  f t = mdo
   ini <- currentValue (facts t)
   iniout <- liftIO$ mapM (evalDynamic f)$ M.toList ini
-  (del,add) <- diffAddRemove t f
+  let (del,addpre) = diffAddRemove t
+  add <- mapEvent (mapM (evalDynamic f). M.toList) addpre
   del2 <- mapEvent (\(fin,d) -> do
          let fins =  catMaybes $ fmap (flip M.lookup fin) d
          _ <- traverse sequence_ $ fmap snd fins
@@ -645,13 +671,11 @@ closeDynamic  m = do
   sequence_ v
   return i
 
-diffAddRemove :: (Show k,Ord k) => Tidings (M.Map k a ) -> ((k,a) -> Dynamic b) -> Dynamic (Event (S.Set k) ,Event [(k, (b,[IO()]))])
-diffAddRemove l f = do
-  let delete  = fmap M.keysSet $filterJust $ prune <$> evdell
-  add <- mapEvent (mapM (evalDynamic f). M.toList)  $ filterJust $ prune <$> evadd
-  return (delete,add)
-
+diffAddRemove :: (Show k,Ord k) => Tidings (M.Map k a )  -> (Event (S.Set k) ,Event (M.Map k a))
+diffAddRemove l= (delete,add)
     where
+      delete  = fmap M.keysSet $filterJust $ prune <$> evdell
+      add =  filterJust $ prune <$> evadd
       diff i j = M.difference i  j
       evdiff = diffEventKeys (facts l ) (rumors l)
       evadd = flip diff <$> facts l <@> evdiff

@@ -241,6 +241,8 @@ data BinaryOperator
   = AllOp BinaryOperator
   | Contains
   | Equals
+  | GreaterThan Bool
+  | LowerThan  Bool
   | IntersectOp
   | Flip BinaryOperator
   | AnyOp BinaryOperator
@@ -252,6 +254,9 @@ instance NFData BinaryOperator
 
 
 
+
+instance Monoid (KVMetadata k ) where
+  mempty = kvempty
 
 data KVMetadata k
   = KVMetadata

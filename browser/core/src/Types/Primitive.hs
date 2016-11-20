@@ -809,4 +809,8 @@ int = TB1 . SNumeric
 
 generateConstant CurrentDate = unsafePerformIO $ do
         i<- getCurrentTime
-        return $ (TB1 $ SDate (utctDay i))
+        return  (TB1 $ SDate (utctDay i))
+generateConstant CurrentTime = unsafePerformIO $ do
+        i<- getCurrentTime
+        return (TB1 $ STimestamp ( utcToLocalTime utc i))
+

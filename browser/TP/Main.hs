@@ -99,9 +99,12 @@ setup smvar args plugList w = void $ do
     let kitems = F.toList (pkMap inf)
         schId = int $ schemaId inf
         initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> HM.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
-        lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested (IProd Nothing["selection"]) (keyRef ["table"])) iv
+        lookT iv = let  i = traceShowId $ indexFieldRec (liftAccess metainf "clients" $ Nested (IProd Nothing["selection"]) (keyRef ["table"])) iv
                     in fmap (\(TB1 (SText t)) -> t) .unArray  <$> join (fmap unSOptional' i)
+
+    cliIni <- currentValue (facts cliTid)
     iniKey <-currentValue (facts initKey)
+    liftIO$ print ("iniKey",iniKey,cliIni)
     let
       buttonStyle lookDesc k e= do
          let tableK = k
@@ -170,7 +173,7 @@ setup smvar args plugList w = void $ do
                     let pred = [(keyRef ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table"],Left (ArrayTB1 $ int. _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     stats_load <- metaAllTableIndexA inf "stat_load_table" pred
                     stats <- metaAllTableIndexA inf "table_stats" pred
-                    clients <- metaAllTableIndexA inf "clients"$  [(keyRef ["schema"],Left (LeftTB1 $ Just $ int (schemaId inf),Equals) ) ]<> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
+                    clients <- metaAllTableIndexA inf "clients"$  [(keyRef ["schema"],Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
                     element metabody # set UI.children [stats,stats_load,clients]
                 "Exception" -> do
                     let pred = [(keyRef ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table"],Left (ArrayTB1 $ int . _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
