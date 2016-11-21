@@ -47,7 +47,7 @@ import RuntimeTypes
 import qualified Data.Map as M
 import Data.Map (Map)
 import Debug.Trace
-import Data.List (find,intercalate)
+import Data.List (find,intercalate,sort)
 import qualified Reactive.Threepenny as R
 import qualified Data.HashMap.Strict as HM
 
@@ -245,7 +245,7 @@ getTable tb pk
           tableScope = _fkttable $ lookOrigin  spk (unTB1 pk)
       let fromtable = (lookSTable inf $ stable)
       joinGet fromtable  tb  tableScope  pk
-  | S.fromList (fmap _relOrigin (getKeyAttr pk) ) ==  S.fromList (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb) = return Nothing
+  | S.fromList (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb) `S.isSubsetOf` S.fromList (fmap _relOrigin (getKeyAttr pk) )  = return Nothing
   | otherwise = do
     inf <- ask
     tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
@@ -285,7 +285,7 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
                fks = justError "" (find ((S.singleton k `S.isSubsetOf` ). pathOrigin) (F.toList (rawFKS tb)))
                (FKJoinTable  rel (_,trefname) ) = unRecRel $ pathRel fks
                vk = iv  ^? ( key (keyValue  k))
-               fk =  F.toList $  pathRelRel fks
+               fk =  sort $ F.toList $  pathRelRel fks
                treftable = (lookTable infsch trefname)
                exchange tname (KArray i)  = KArray (exchange tname i)
                exchange tname (KOptional i)  = KOptional (exchange tname i)

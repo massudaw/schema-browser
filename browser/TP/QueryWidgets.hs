@@ -34,6 +34,7 @@ module TP.QueryWidgets (
 import RuntimeTypes
 import TP.View
 import Expression
+import Control.Monad.Catch
 import Data.Tuple
 import Data.Semigroup hiding (diff)
 import qualified NonEmpty as Non
@@ -555,7 +556,7 @@ eiTable inf constr refs plmods ftb@(meta,k) oldItems = do
             w <- jm
             let el =  L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> ( _kvrecrels meta))
                 plugattr = indexPluginAttrDiff (unTB m) plugmods
-                aref = maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( snd) ( L.find (((keyattr m)==) . keyattri .fst) $  refs)
+                aref = (\i j -> maybe i (liftA2 ( <|> ) i ) j) (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( fmap snd $ L.find (((keyattr m)==) . keyattri .fst) $  refs)
             wn <- (if el
                     then tbRecCase
                     else tbCase ) inf constr (unTB m) (fmap triding <$> w) plugattr aref
@@ -568,7 +569,7 @@ eiTable inf constr refs plmods ftb@(meta,k) oldItems = do
         ) (return []) (P.sortBy (P.comparing fst ) . M.toList $ replaceRecRel (unTBMap $ ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta))
   let
       sequenceTable :: [(Column CoreKey () ,TrivialWidget (Maybe (Column CoreKey Showable)))] -> Tidings (Maybe (TBData CoreKey Showable))
-      sequenceTable fks = fmap (tblist' table . fmap _tb) . Tra.sequenceA <$> Tra.sequenceA (triding .snd <$> fks)
+      sequenceTable fks = fmap (tblist' table . fmap _tb) . Tra.sequenceA  <$> Tra.sequenceA (triding .snd <$> fks)
       tableb =  sequenceTable fks
 
   (listBody,output) <- if rawIsSum table
@@ -623,7 +624,7 @@ crudUITable inf open reftb@(bres , _ ,gist ,tref) refs pmods ftb@(m,_)  preoldIt
       fun "+" = logTime "crud" $ do
           let
             getItem :: TBData CoreKey Showable -> TransactionM (Maybe (TBIdx CoreKey Showable))
-            getItem  =  getFrom table
+            getItem  v =  getFrom table v `catchAll` (\e -> liftIO (putStrLn $"error getting Item" ++ show (e :: SomeException)) >> return Nothing)
           preoldItens <- currentValue (facts preoldItems)
           loadedItens <-  ui $ join <$> traverse (transactionNoLog inf  . getItem) preoldItens
           (loadedItensEv ) <- mapUIFinalizerT sub (ui . fmap join <$> traverse (\i ->  do
@@ -795,7 +796,7 @@ indexItens s tb@(FKT ifk rel _) offsetT inner old = fmap constFKT  <$> bres
   where
     bres2 = fmap (fmap projFKT )  <$> takeArray  inner
     bres =  attrEditor s <$> offsetT <*> fmap (fmap (fktzip .projFKT)) old <*> bres2
-    constFKT a = FKT (mapKV (mapComp (mapFAttr (const (ArrayTB1 ref ))) ) ifk)   rel (ArrayTB1 tb )
+    constFKT a = FKT (mapKV (mapComp (mapFAttr (const (ArrayTB1 ref ))) ) ifk)   (L.sort rel ) (ArrayTB1 tb )
       where (ref,tb) = Non.unzip a
     projFKT (FKT i  _ j ) = (unAttr $ justError ("no array" <> show i)  $ safeHead $  fmap unTB  $ unkvlist i,  j)
     fktzip (ArrayTB1 lc , ArrayTB1 m) =  Non.zip lc m
@@ -1260,13 +1261,13 @@ fkUITable
   -- Static Information about relation
   -> Column CoreKey ()
   -> UI (TrivialWidget(Maybe (Column CoreKey Showable)))
-fkUITable inf constr tbrefs plmods  ref@wl oldItems  tb@(FKT ilk rel  tb1@(TB1 _) )
+{-fkUITable inf constr tbrefs plmods  ref@wl oldItems  tb@(FKT ilk rel  tb1@(TB1 _) )
   | L.any isAccessRel rel = do
     let rela = L.filter isAccessRel rel
         derel ilk = kvlist $ fmap (_tb . flip unRel  (unTB <$> unkvlist ilk)) rela
         reln = unRels <$> rel
     tr <- fkUITable inf constr tbrefs  plmods  (first  (\(FKT ifk rel tb1) -> FKT (derel ifk) reln tb1). second (fmap (\(FKT ilk rel tb1)-> FKT (derel ilk) reln tb1 )<$>)  <$> wl) (fmap (\(FKT ilk reln tb1)-> FKT (derel  ilk) reln tb1)<$> oldItems)  (FKT (derel ilk) reln tb1)
-    return  tr
+    return  tr-}
 fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = logTime ("fk " <> (show $ keyattri tb)) $ mdo
       let
         relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
@@ -1289,7 +1290,7 @@ fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  t
         sortList =  sorting' <$> pure (fmap ((,True)._relTarget) rel)
       let
         vv :: Tidings (Maybe [TB Identity CoreKey Showable])
-        vv =   join .   fmap (\i -> if L.length i == L.length rel then Just i else Nothing) <$>  liftA2 (<>) iold2  ftdi2
+        vv =   join .   fmap (\i -> if L.length i == L.length rel then Just i else Nothing) .fmap L.nub <$>  liftA2 (<>) iold2  ftdi2
       cvres <- currentValue (facts vv)
       filterInp <- UI.input # set UI.class_ "col-xs-3"
       filterInpE <- UI.valueChange filterInp

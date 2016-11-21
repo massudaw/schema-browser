@@ -417,7 +417,7 @@ indexFieldL
 -- indexFieldL e c p v | traceShow (e,c,p) False = undefined
 indexFieldL e c p@(IProd b l) v =
     case findAttr l v of
-      Just i -> [utlabel  e c i]
+      Just i -> [utlabel  e c (tlabel' . getCompose $ i)]
       Nothing ->
             case
                    fmap getCompose $ findFK l v of
@@ -426,7 +426,7 @@ indexFieldL e c p@(IProd b l) v =
                     case i of
                         (FKT ref _ _) ->
                             (\l ->
-                                  utlabel e c.
+                                  utlabel e c.tlabel' . getCompose.
                                   justError ("no attr" <> show (ref, l)) .
                                   L.find
                                       ((== [l]) .
@@ -438,7 +438,7 @@ indexFieldL e c p@(IProd b l) v =
     -- TODO: proper check  accessing the term
                 Just (Labeled i _) -> [(Just (i <> " is not null"), Nothing)]
                 Nothing -> case findFKAttr l v of
-                             Just i -> [utlabel e  c i]
+                             Just i -> [utlabel e  c (tlabel' . getCompose $i)]
                              Nothing  -> errorWithStackTrace ("no fk attr" <> show (l,v))
 
 indexFieldL e c n@(Nested ix@(IProd b l) nt) v =
@@ -467,17 +467,18 @@ indexFieldL e c (Many nt) v = concat $ flip (indexFieldL e c) v <$> nt
 indexFieldL e c (ISum nt) v = concat $ flip (indexFieldL e c) v <$> nt
 indexFieldL e c i v = errorWithStackTrace (show (i, v))
 
-utlabel (Right  e) c a = result e
+utlabel (Right  e) c idx = result e idx
   where
-    idx = tlabel' . getCompose $ a
-    opvalue  ref (Range b l)  =  (if b then "upper" else "lower") <> "(" <> T.intercalate "." (c ++ [ref])   <> ")" <> " is "<> renderUnary l
     opvalue  ref i  =  T.intercalate "." (c ++ [ref])  <> " is " <> renderUnary i
 
-    result (BinaryConstant b i) =  utlabel (Left (generateConstant i ,b)) c a
-    result i =  (Just $  opvalue (snd $ idx) e   ,Nothing )
-utlabel (Left (value,e)) c a = result
+    result (Not (Not l)) v=  result l v
+    result (Not l) v= first (fmap (\i -> "not (" <> i <> ")"))  $ result l v
+    result (BinaryConstant b i) v =  utlabel (Left (generateConstant i ,b)) c v
+    result (Range  b l) (ty,v) = result l (unKInterval ty,(((if b then "upper" else "lower") <> "(" <> T.intercalate "." (c ++ [v])   <> ")" ) ) )
+    result i v =  (Just $  opvalue (snd v) i   ,Nothing )
+    unKInterval =alterKeyType (\(KInterval i) -> i)
+utlabel (Left (value,e)) c idx = result
   where
-    idx = tlabel' . getCompose $ a
     operator i = errorWithStackTrace (show i)
     opvalue ref (AnyOp i)  = " ? " <> renderBinary i <>  " ANY( " <> T.intercalate "." (c ++ [ref]) <>  ")"
     opvalue ref (Flip (AnyOp (AnyOp Equals)))  = T.intercalate "." (c ++ [ref]) <> " " <>  "<@@" <>  " ANY( ? " <>  inferParamType e (KArray $ keyType (fst idx)) <> ")"

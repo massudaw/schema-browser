@@ -5,6 +5,7 @@ module RuntimeTypes where
 import Control.Concurrent
 
 import Types
+import Control.Exception
 import Step.Common
 import GHC.Generics
 import Data.Unique
@@ -319,6 +320,15 @@ genPredicateFull i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFul
 genPredicateFull i (IProd b l) =  (\i -> PrimColl (IProd b l,Right i ))  <$> b
 genPredicateFull i n@(Nested p@(IProd _ _ ) l ) = fmap (\(a,b) -> (Nested p a , b )) <$> genPredicateFull i l
 genPredicateFull _ i = errorWithStackTrace (show i)
+
+notException e =  if isJust eb || isJust es || isJust as then Nothing else Just e
+  where
+    eb :: Maybe BlockedIndefinitelyOnMVar
+    eb = fromException e
+    as :: Maybe AsyncException
+    as = fromException e
+    es :: Maybe BlockedIndefinitelyOnSTM
+    es = fromException e
 
 
 makeLenses ''InformationSchemaKV

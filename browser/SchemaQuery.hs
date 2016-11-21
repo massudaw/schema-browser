@@ -92,8 +92,8 @@ refTable  inf (Union table origin )  = do
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
   let ref = justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
-  idxTds<- convertChanStepper  ref
-  dbTds <- convertChanTidings mempty  ref
+  idxTds<- convertChanStepper  table ref
+  dbTds <- convertChanTidings table mempty  ref
   return (DBVar2 ref idxTds dbTds)
 
 tbpredM un  = G.notOptional . G.getUnique un
@@ -404,8 +404,8 @@ pageTable flag method table page size presort fixed = do
        return (nidx fixedmap, if L.length ndata > 0 then createUn (rawPK table)  ndata <> freso else  freso )
     let iniFil = iniT
     modify (M.insert (table,fixed) ( snd $iniT))
-    vpt <- lift $ convertChanTidings0 (fixed ,rawPK table)(snd iniFil) nchan
-    idxTds <- lift $ convertChanStepper0 fixedmap fixedChan
+    vpt <- lift $ convertChanTidings0 table (fixed ,rawPK table)(snd iniFil) nchan
+    idxTds <- lift $ convertChanStepper0 table fixedmap fixedChan
     return (DBVar2 dbvar idxTds vpt ,iniFil)
 
 readIndex dbvar = do
@@ -426,37 +426,37 @@ readState fixed dbvar = do
       update = F.foldl' (flip (\p-> (flip apply p)))
   return (update var (concat patches),chan)
 
-convertChanStepper0  ini nchan = do
+convertChanStepper0  table ini nchan = do
         (e,h) <- newEvent
-        t <- liftIO $ forkIO  $ forever ( do
+        t <- liftIO $ forkIO  $ forever $catchJust notException ( do
             a <- atomically $ takeMany nchan
-            h a )
+            h a ) (\e -> atomically ( takeMany nchan ) >>= (\d ->  appendFile ("errors/data-" <> T.unpack ( tableName table )) $ show (e :: SomeException,d)<>"\n"))
         let conv (v,s,i,t) = (M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) v)
         bh <- accumB ini ((\l i-> F.foldl' (flip conv) i l)<$> e)
         registerDynamic (killThread t)
         return (tidings bh ((\i l-> F.foldl' (flip conv) i l)<$> bh<@> e))
 
-convertChanStepper dbvar = do
+convertChanStepper table dbvar = do
         (ini,nchan) <- liftIO $atomically $
           readIndex dbvar
-        convertChanStepper0 ini nchan
+        convertChanStepper0 table ini nchan
 
-convertChanEvent chan = do
+convertChanEvent table chan = do
   (e,h) <- newEvent
-  t <- liftIO $ forkIO $ forever (do
-    patches <- atomically $ readTChan chan
-    h patches)
+  t <- liftIO $ forkIO $ forever $ catchJust notException (do
+    patches <- atomically $ takeMany chan
+    h (concat patches) )(\e -> atomically ( takeMany chan ) >>= (\d ->  appendFile ("errors/data-" <> T.unpack ( tableName table )) $ show (e :: SomeException,d)<>"\n"))
   registerDynamic (killThread t)
   return e
 
-convertChanTidings fixed dbvar = do
+convertChanTidings table fixed dbvar = do
       (ini,nchan) <- liftIO $atomically $
         readState fixed  dbvar
-      convertChanTidings0 fixed ini nchan
+      convertChanTidings0 table fixed ini nchan
 
 
-convertChanTidings0 fixed ini nchan = do
-    evdiff <-  convertChanEvent nchan
+convertChanTidings0 table fixed ini nchan = do
+    evdiff <-  convertChanEvent table nchan
     let
       splitMatch (WherePredicate b,o) p = maybe True (\i -> G.match (WherePredicate i ,o) G.Exact p  ) (G.splitIndexPK b o)
       filterPred :: [Index (TBData Key Showable)] -> Maybe [Index (TBData Key Showable)]
@@ -489,7 +489,7 @@ takeMany mvar = go . (:[]) =<< readTChan mvar
 
 
 
-fullInsert = Tra.traverse (fullInsert')
+fullInsert = Tra.traverse fullInsert'
 
 fullInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
 fullInsert' ((k1,v1) )  = do

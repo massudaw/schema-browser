@@ -80,7 +80,7 @@ indexFieldRec n v = errorWithStackTrace (show (n,v))
 
 genPredicate i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
 genPredicate i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
-genPredicate i (IProd b l) =  (\i -> PrimColl (IProd b l,Right i  )) <$> b
+genPredicate o (IProd b l) =  (\i -> PrimColl (IProd b l,Right (if o then i else Not i ) )) <$> b
 genPredicate i n@(Nested (IProd b p ) l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> if i then genPredicate i (IProd b [a]) else  Nothing ) <$> p
 genPredicate _ i = errorWithStackTrace (show i)
 

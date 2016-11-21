@@ -262,12 +262,6 @@ createTableRefs inf i = do
   return (i,  DBRef nmdiff midx nchanidx collectionState midxLoad )
 
 
-notException e =  if isJust eb || isJust es then Nothing else Just e
-  where
-    eb :: Maybe BlockedIndefinitelyOnMVar
-    eb = fromException e
-    es :: Maybe BlockedIndefinitelyOnSTM
-    es = fromException e
 -- Search for recursive cycles and tag the tables
 addRecInit :: HM.HashMap Text (HM.HashMap Text Table) -> HM.HashMap Text Table -> HM.HashMap Text Table
 addRecInit inf m = fmap recOverFKS m
@@ -401,14 +395,17 @@ atTable k = do
 
 joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  G.GiST (G.TBIndex Showable) (TBData Key Showable) -> TransactionM ( FTB (TBData Key Showable))
 joinRelT rel ref tb table
-  | L.all (isOptional .keyType) origin = fmap LeftTB1 $ traverse (\ref->  joinRelT (Le.over relOri unKOptional <$> rel ) ref  tb table) (traverse unLeftItens ref )
-  | L.any (isArray.keyType) origin = fmap (ArrayTB1 .Non.fromList)$ traverse (\ref -> joinRelT (Le.over relOri unKArray <$> rel ) ref  tb table ) (fmap (\i -> pure $ justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(Non.length (unArray $ unAttr $ head ref) - 1)])
+  | L.any (isOptional .keyType) origin = fmap LeftTB1 $ traverse (\ref->  joinRelT (Le.over relOri unKOptional <$> rel ) ref  tb table) (traverse unLeftItens ref )
+  | L.any (isArray.keyType) origin = fmap (ArrayTB1 .Non.fromList)$ traverse (\ref -> joinRelT (Le.over relOri unKArray <$> rel ) ref  tb table ) $ (fmap (\i -> (justError ("cant index  " <> show (i,ref)). join . fmap (unIndex i) $ (L.find isTBArray ref )) : (filter (not .isTBArray) ref))) [0..(Non.length (unArray $ unAttr $ justError ("no array" <> show ref)  $L.find isTBArray ref) - 1)]
   | otherwise = maybe (tell (TableModification Nothing tb . patch <$> F.toList tbcreate) >> return tbcreate ) (return .TB1) tbel
       where origin = fmap _relOrigin rel
             tbcreate = TB1 $ tblist' tb (_tb . firstTB (\k -> fromMaybe k  $ M.lookup k relMap ) <$> ref )
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
             invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
             tbel = searchGist  invrelMap (tableMeta tb) table (Just ref)
+            isTBArray i = isKArray (keyType $ _tbattrkey i)
+            isKArray (KArray i) = True
+            isKArray i = False
 
 addStats schema = do
   let metaschema = meta schema

@@ -669,7 +669,7 @@ pagamentoServico = FPlugins "Gerar Pagamento" tname $ BoundedPlugin2 url
           pag <- pagamentoArr -< Just descontado
           returnA -< Just . tblist . pure . _tb  $ pag
 
-fetchofx = FPlugins "OFX Import" tname $ DiffIOPlugin url
+fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
   where
     tname = "itau_import"
     url :: ArrowReaderDiffM IO
@@ -701,7 +701,7 @@ fetchofx = FPlugins "OFX Import" tname $ DiffIOPlugin url
         refs <- atRA "ofx" (idxK "file_name") -< ()
         let ix = length refs
         pk <- act (const ask )-< ()
-        returnA -<  traceShowId $ Just (kvempty,Idex (pure (SerialTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) kvempty  (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,[PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
+        returnA -<  traceShowId $ Just (kvempty,Idex (pure (SerialTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) kvempty  (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,[PAttr "account" (patch r),PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
 
 
 
@@ -841,4 +841,4 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
 
 
 plugList :: [PrePlugins]
-plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,areaDesign,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin ,siapi3CheckApproval, importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]
+plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,areaDesign,oauthpoller,{-createEmail,renderEmail ,-}lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin ,siapi3CheckApproval, importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]
