@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns,OverloadedStrings #-}
 module Utils where
 
 import qualified Data.List as L
@@ -78,7 +78,8 @@ translateMonth v = foldr (\i -> (uncurry T.replace) i )  v transTable
 
 
 justError e (Just i) = i
-justError e  v = errorWithStackTrace e
+justError e  v = r
+  where ! r =  errorWithStackTrace e
 
 groupSplit f = fmap (\i-> (f $ head i , i)) . groupWith f
 

@@ -1,7 +1,8 @@
 {-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveGeneric,DeriveFunctor  #-}
-module Step.Common (PluginTable,Parser(..),Access(..),ArrowReaderM,ArrowReader,KeyString(..),BoolCollection(..),WherePredicate(..),TBPredicate(..)) where
+module Step.Common (PluginTable,Parser(..),Access(..),ArrowReaderM,ArrowReader,KeyString(..),BoolCollection(..),WherePredicate(..),TBPredicate(..),mapPredicate ) where
 
 import Types.Common
+import Data.Binary
 import Types.Primitive
 import Data.Tuple
 import Control.Monad.Reader
@@ -31,15 +32,18 @@ data BoolCollection a
  deriving(Show,Eq,Ord,Functor,Foldable,Generic)
 
 instance NFData a => NFData (BoolCollection a)
+instance Binary a => Binary (BoolCollection a)
 
 
 
+mapPredicate f (WherePredicate i ) = WherePredicate (fmap (first (fmap f )) i)
 type WherePredicate = TBPredicate Key Showable
 
 newtype TBPredicate k a
   = WherePredicate (BoolCollection (Access k ,AccessOp a ))
   deriving (Show,Eq,Ord,Generic)
 instance (NFData k, NFData a) => NFData (TBPredicate k a)
+instance (Binary k, Binary a) => Binary (TBPredicate k a)
 
 
 instance Monoid WherePredicate where

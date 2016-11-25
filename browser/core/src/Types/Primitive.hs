@@ -197,21 +197,6 @@ instance NFData LineString
 instance Binary Showable
 instance NFData Showable
 
-instance Binary DiffTime where
-  put i = B.put (round  (realToFrac i :: Double) :: Int )
-  get  = secondsToDiffTime <$> B.get
-
-instance Binary LocalTime where
-  put i = B.put (realToFrac $ utcTimeToPOSIXSeconds $ localTimeToUTC utc i :: Double)
-  get = utcToLocalTime utc . posixSecondsToUTCTime . realToFrac <$> (B.get :: B.Get Double)
-
-instance Binary Day where
-  put (ModifiedJulianDay i ) = B.put i
-  get = ModifiedJulianDay <$> B.get
-
-instance Binary TimeOfDay where
-  put i = B.put (timeOfDayToTime  i )
-  get = timeToTimeOfDay  <$> B.get
 
 
 

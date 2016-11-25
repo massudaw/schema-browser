@@ -575,7 +575,7 @@ diffFTB p d (IntervalTB1 i) (IntervalTB1 j)
           diffExtended _   i = Nothing
 
 diffFTB p d (TB1 i) (TB1  j) = fmap PAtom $ d i j
-diffFTB p d  i j = errorWithStackTrace (show (i,j))
+diffFTB p d  i j = errorWithStackTrace ("diffError" <> show (i,j))
 
 
 instance Applicative Interval.Extended where

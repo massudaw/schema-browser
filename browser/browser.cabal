@@ -47,6 +47,7 @@ library
      core
    , base ==4.8.*
    , scientific
+   , zlib
    , deepseq
    , ordered
    , exceptions

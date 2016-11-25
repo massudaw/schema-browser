@@ -65,6 +65,7 @@ main = do
 
 
   startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar args regplugs ) initGUI finalizeGUI
+  mapM writeSchema  . HM.toList =<< readMVar (globalRef smvar)
   print "Finish Server"
   runDynamic $ traverse (deleteServer metas) ref
   sequence lm

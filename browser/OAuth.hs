@@ -1,6 +1,9 @@
-{-# LANGUAGE FlexibleContexts ,Arrows ,TupleSections,OverloadedStrings #-}
-module OAuth (gmailOps) where
+{-# LANGUAGE RankNTypes,FlexibleContexts ,Arrows ,TupleSections,OverloadedStrings #-}
+module OAuth (gmailOps,simpleHttpHeader,historyLoad,url) where
 import qualified NonEmpty as Non
+import qualified Data.Poset as P
+import Step.Host
+import SchemaQuery
 import Control.Lens
 import Control.Exception
 import Utils
@@ -72,6 +75,61 @@ defsize = 100
 
 readToken (HeadToken) = ""
 readToken (NextToken i) = T.unpack i
+
+historyLoad = do
+  inf <- ask
+  let (user,tokenT )= justError "no token" $ token inf
+
+
+  dbvar <- lift $ refTable  (meta inf ) (lookTable (meta inf ) "google_auth")
+  row <- G.lookup (G.Idex [txt $ user]) <$> R.currentValue (R.facts $collectionTid dbvar)
+  let Just (TB1 (SText start ))= join $indexFieldRec (liftAccess (meta inf) "google_auth" (IProd Nothing ["historyid"]  ))<$> row
+
+  token <-R.currentValue (R.facts tokenT)
+  let
+      getMessage :: Fold Value  (Text,Text)
+      getMessage =  runFold ((,) <$> Fold (key "id"._String) <*> Fold (key "threadId". _String))
+      patchHeader i l= (mempty,G.Idex [txt user,txt i] , l)
+      userfk = PFK [Rel "user" Equals "id"] [PAttr "user" (patch $ txt user)] mempty (PAtom $ patch $ mapKey' keyValue $justError"no row" $ row)
+      patchAddMessage  i = fmap (\(i,t) -> [
+            liftPatch inf "messages" $
+              patchHeader i [PAttr "id" (patch $ txt i),PAttr "threadId" (patch $ txt t),userfk]
+           ,liftPatch inf "threads" $
+              patchHeader i [PAttr "id" (patch $ txt t),userfk]
+            ] ) $  i ^? ( key "message" . getMessage )
+      patchDelMessage  i = fmap (\(i,t) -> [liftPatch inf "messages" $ patchHeader i []]) $  i ^? ( key "message" . getMessage )
+      req = url "gmail" "wesley.massuda@gmail.com" <> "history" <> "?" <>  "startHistoryId=" ++ T.unpack start <> "&access_token=" ++ ( accessToken token )
+      generateAdd res =  fmap (concat .catMaybes .F.toList .fmap (\ i -> patchAddMessage i  ))  $ res ^? key "messagesAdded" . _Array
+      generateDel res =   fmap (concat .catMaybes .F.toList .fmap (\ i -> patchDelMessage i  ))  $ res ^? key "messagesDeleted" . _Array
+      generate res =  (fromMaybe [] $ generateAdd res <> generateDel res)
+  liftIO $ print req
+  res <- liftIO$ simpleHttpHeader [("GData-Version","3.0")] req
+  let patches = fmap generate (res ^. key "history" . _Array )
+      historyNewId = res ^. key "historyId" . _String
+      messages = (lookTable inf "messages")
+  liftIO $ print patches
+  ref <- liftIO$ prerefTable inf messages
+  patchRoute (concat $ patches)
+  tb <- lift $ refTable inf messages
+  v <- R.currentValue (R.facts $ collectionTid tb)
+  -- Update Id
+  (\i ->
+    if i == start
+       then
+        return Nothing
+       else
+        lift $ transaction (meta inf)$ patchFrom
+                $ liftPatch (meta inf)"google_auth" (mempty,G.Idex [txt user],[PAttr "historyid" (patch $ txt i)])
+           ) historyNewId
+  return ()
+
+
+patchRoute l = do
+  inf <- ask
+  mapM (\p@(t,i,l) -> do
+    ref <- liftIO$ prerefTable inf (lookTable inf (_kvname t))
+    putPatch (patchVar ref) [p]) l
+
 
 
 syncHistory [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))]  ix table offset page maxResults sort _ = do
@@ -262,7 +320,7 @@ getDiffTable table  j = fmap (join . fmap (diff j ) ) $ getTable  table $ TB1 j
 joinGetDiffTable table  tableref f j = fmap (join . fmap (diff j)) $ joinGet table tableref (TB1 f) (TB1 j)
 
 
-gmailOps = (SchemaEditor undefined undefined insertTable deleteRow listTable getDiffTable mapKeyType joinList syncHistory undefined 100)
+gmailOps = (SchemaEditor (error "no op1") (error "no op2") insertTable deleteRow listTable getDiffTable mapKeyType joinList syncHistory (error "no op3")100 (Just historyLoad))
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t
@@ -270,23 +328,26 @@ lbackRef (TB1 t) = snd $ head $ M.toList $ getPKM t
 
 lookMTable inf m = lookSTable inf (_kvschema m,_kvname m)
 
+traverseAccum f  l = foldl (\(a,m) c -> (\ a -> m >>= (\i -> fmap (:i) a )) <$> f  c a  ) (S.empty,return []) l
+
 convertAttrs :: InformationSchema -> Maybe (TBData Key Showable) -> HM.HashMap Text Table ->  Table -> Value -> TransactionM (TBData Key Showable)
-convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (traverse kid (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb ))
+convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (snd $ traverseAccum kid (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb ))
   where
     pathOrigin (Path i _  ) = i
     isFKJoinTable (Path _ (FKJoinTable  _ _)) = True
     isFKJoinTable (Path i (RecJoin _ j  ) ) = isFKJoinTable (Path i j )
     isFKJoinTable _ = False
     fkFields = S.unions $ map pathOrigin $ filter isFKJoinTable $  F.toList $rawFKS tb
-    kid :: Key ->   TransactionM (Maybe (TB Identity Key Showable))
-    kid  k
+    kid :: Key ->   S.Set Key -> (S.Set Key,TransactionM (Maybe (TB Identity Key Showable)))
+    kid  k acc
       | S.member k fkFields
             = let
-               fks = justError "" (find ((S.singleton k `S.isSubsetOf` ). pathOrigin) (F.toList (rawFKS tb)))
-               (FKJoinTable  rel (_,trefname) ) = unRecRel $ pathRel fks
-               vk = iv  ^? ( key (keyValue  k))
-               fk =  sort $ F.toList $  pathRelRel fks
-               treftable = (lookTable infsch trefname)
+               fks = justError ("not path origin" <> (show k)) $  (find ((S.singleton k `S.isSubsetOf` ). pathOrigin) (P.sortBy (P.comparing pathRelRel) $F.toList (rawFKS tb)))
+               (rel,trefname) = case unRecRel $ pathRel fks of
+                       (FKInlineTable  (_,trefname) ) -> ([Inline k],trefname)
+                       (FKJoinTable  rel (_,trefname) ) -> (rel,trefname)
+               fk =  F.toList $  pathRelRel fks
+               treftable = lookTable infsch trefname
                exchange tname (KArray i)  = KArray (exchange tname i)
                exchange tname (KOptional i)  = KOptional (exchange tname i)
                exchange tname (KSerial i)  = KSerial (exchange tname i)
@@ -302,13 +363,13 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
                                 relMap = M.fromList $ fmap (\rel -> (_relOrigin rel ,_relTarget rel) ) rel
                                 nv  = flip mergeTB1 transrefs  <$> v
                             tell (TableModification Nothing (lookTable infsch trefname ) . patch <$> F.toList (nv))
-                            return $ FKT (kvlist [Compose .Identity . Types.Attr  k $ (lbackRef    nv) ])  fk nv
+                            return $ FKT (kvlist [_tb . Types.Attr  k $ (lbackRef    nv) ])  rel nv
                           Nothing ->  do
                             tell (TableModification Nothing (lookTable infsch trefname ) . patch <$> F.toList (v))
-                            return $ FKT (kvlist [Compose .Identity . Types.Attr  k $ (lbackRef    v) ])  fk v))
+                            return $ FKT (kvlist [_tb . Types.Attr  k $ (lbackRef    v) ])  fk v))
                     (traverse (\v -> do
                         let ref = [_tb $ Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd <$> maybeToList (tableNonRef' <$> getref))
-                            refTB = [_tb $ Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd <$> maybeToList (getref))
+                            refTB = [_tb $ Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd .tableNonRef'<$> maybeToList (getref))
                         tbs <- atTable ( lookTable infsch trefname)
                         let reftb = join $ fmap unSOptional $ joinRel2 (tableMeta $ lookTable infsch trefname) fk (fmap unTB ref)  tbs
                         reftbT <- joinRelT  fk (fmap unTB refTB) ( lookTable infsch trefname) tbs
@@ -321,18 +382,19 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
 
                             pti <- joinGetDiffTable (lookMTable infsch (fst scoped)) treftable scoped reftb
                             tell (TableModification Nothing treftable <$> maybeToList pti)
-                            return $ maybe (reftb) (unTB1 . apply (TB1 reftb) . PAtom) pti) reftbT ) getref) return (reftb)
-                        return $ FKT (kvlist ref ) fk   patch ))
+                            return $ maybe (reftb) (apply reftb  ) pti) reftbT ) getref) return (reftb)
+                        return $ FKT (kvlist (filter (not .(`S.member` acc). _tbattrkey.unTB )ref) ) rel patch ))
                funL = funO  True (exchange trefname $ keyType k) vk
-               funR = funO  True ( keyType k) vk
+               funR = funO  True (keyType k) vk
+               vk = iv  ^? ( key (keyValue  k))
                mergeFun = do
                           (l,r) <- liftA2 (,) funL funR
                           return $ case (l,r) of
                             (Left (Just i),Right (Just j)) -> Right (Just j)
                             (Left (Just i),_) -> Left (Just i)
                             (Left i ,j ) -> j
-              in  join . fmap  patt $    mergeFun
-      | otherwise =  fmap (either ((\v-> IT ( k) v)  <$> ) (Types.Attr k<$>) ) . funO  False (  keyType k)  $ (iv ^? ( key ( keyValue k))  )
+             in  (S.insert k acc,join . fmap  patt $    mergeFun)
+      | otherwise =  (S.insert k acc,fmap (either ((\v-> IT ( k) v)  <$> ) (Types.Attr k<$>) ) . funO  False (  keyType k)  $ (iv ^? ( key ( keyValue k))  ))
 
     resultToMaybe (Success i) = Just i
     resultToMaybe (Error i ) = Nothing

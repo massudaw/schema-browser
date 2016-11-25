@@ -126,7 +126,6 @@ poller schm authmap db plugs is_test = do
                                 Left action -> do
                                     ovm  <- fmap (liftPatch inf a) <$> liftIO (action (Just $ mapKey' keyValue inp))
                                     maybe (return ()) (\ov-> do
-                                      liftIO $ print $ apply inp ov
                                       p <- fullDiffEditInsert inp (apply inp ov)
                                       return ()) ovm
                               )

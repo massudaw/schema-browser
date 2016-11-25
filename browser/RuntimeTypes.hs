@@ -7,6 +7,7 @@ import Control.Concurrent
 import Types
 import Control.Exception
 import Step.Common
+import Debug.Trace
 import GHC.Generics
 import Data.Unique
 import Data.Maybe
@@ -113,22 +114,22 @@ pkMap = _pkMapL
 
 data DBRef k v =
   DBRef  { patchVar :: TChan [TBIdx k v]
-  , idxVar :: TVar (Map WherePredicate (Int,Map Int (PageTokenF k v)))
-  , idxChan :: TChan (WherePredicate , Int,Int ,PageTokenF k v)
+  , idxVar :: TVar (Map WherePredicate (Int,Map Int (PageTokenF  v)))
+  , idxChan :: TChan (WherePredicate , Int,Int ,PageTokenF  v)
   , collectionState :: TVar (TableIndex k v)
   , idxVarLoad :: TVar (GiST (WherePredicate ,G.Predicate Int) ())
   }
 
 data DBVar2 k v=
   DBVar2   { iniRef :: DBRef k v
-  , idxTid :: R.Tidings (Map WherePredicate (Int,Map Int (PageTokenF k v)))
+  , idxTid :: R.Tidings (Map WherePredicate (Int,Map Int (PageTokenF  v)))
   , collectionTid :: R.Tidings (TableIndex k v )
   }
 
 
 
 type DBVar = DBVar2 Key Showable
-type Collection k v = (Map WherePredicate (Int,Map Int (PageTokenF k v)),GiST (TBIndex   v ) (TBData k v))
+type Collection k v = (Map WherePredicate (Int,Map Int (PageTokenF  v)),GiST (TBIndex   v ) (TBData k v))
 type TableIndex k v = GiST (TBIndex   v ) (TBData k v)
 
 type PrePlugins = FPlugins Text
@@ -185,12 +186,12 @@ dynPK =  runKleisli . dynP
 
 type TransactionM = RWST InformationSchema [TableModification (TBIdx Key Showable)] (Map (Table,WherePredicate) (TableIndex Key Showable)) R.Dynamic
 
-type PageToken = PageTokenF Key Showable
+type PageToken = PageTokenF Showable
 
-deriving instance (Binary v,Binary k) => Binary (PageTokenF k v)
-deriving instance (NFData v,NFData k) => NFData (PageTokenF k v)
+deriving instance (Binary v) => Binary (PageTokenF  v)
+deriving instance (NFData v) => NFData (PageTokenF  v)
 
-data PageTokenF k v
+data PageTokenF v
   = PageIndex Int
   | NextToken Text
   | TableRef (TBIndex  v)
@@ -211,6 +212,7 @@ data SchemaEditor
   , joinSyncEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )] -> [(Text ,Column Key Showable)]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   ,logger :: MonadIO m => InformationSchema -> TableModification (TBIdx Key Showable)  -> m (TableModification (TBIdx Key Showable))
   , opsPageSize :: Int
+  , historySync :: Maybe (TransactionM ())
   }
 
 typeTrans inf = typeTransform (schemaOps inf)
@@ -263,8 +265,8 @@ liftField inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (lookKey inf tname ) (ma
           rinf = fromMaybe inf (HM.lookup schname (depschema inf))
           ta = lookTable inf tname
 liftField inf tname (IT rel tb) = IT (lookKey inf tname  rel) (liftKeys inf tname2 tb)
-    where FKInlineTable (_,tname2)  = unRecRel.pathRel  $ justError (show (rel ,rawFKS ta)) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline rel))  (F.toList$ rawFKS  ta)
-          ta = lookTable inf tname
+  where FKInlineTable (_,tname2)  = unRecRel. pathRel  $ justError (show (rel ,rawFKS ta)) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline rel))  (F.toList$ rawFKS  ta)
+        ta = lookTable inf tname
 
 liftPatch :: a ~ Index a => InformationSchema -> Text -> TBIdx Text a -> TBIdx Key a
 liftPatch inf t (_ , k ,p) = (tableMeta ta ,G.mapKeys (lookKey inf t )  k,fmap (liftPatchAttr inf t) p)
@@ -296,6 +298,8 @@ fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
               rinf = fromMaybe inf (HM.lookup schname (depschema inf))
 
 liftAccess :: InformationSchema -> Text -> Access Text  -> Access Key
+liftAccess inf tname (Point i  ) =  Point i
+liftAccess inf tname (Rec i j ) =  Rec i (liftAccess inf tname  j)
 liftAccess inf tname (ISum i) =  ISum $ fmap (liftAccess inf tname)  i
 liftAccess inf tname (Many i) =  Many $ fmap (liftAccess inf tname)  i
 liftAccess inf tname (IProd b l) = IProd b $ fmap (lookKey inf tname) l
@@ -315,6 +319,8 @@ lookAccess :: InformationSchema -> Text -> (Access Text , AccessOp Showable ) ->
 lookAccess inf tname l = Le.over (Le._1) (liftAccess inf tname)  l
 
 
+genPredicateFull i (Rec _ _) = Nothing  -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
+genPredicateFull i (Point _) = Nothing -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (IProd b l) =  (\i -> PrimColl (IProd b l,Right i ))  <$> b

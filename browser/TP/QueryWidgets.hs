@@ -796,7 +796,7 @@ indexItens s tb@(FKT ifk rel _) offsetT inner old = fmap constFKT  <$> bres
   where
     bres2 = fmap (fmap projFKT )  <$> takeArray  inner
     bres =  attrEditor s <$> offsetT <*> fmap (fmap (fktzip .projFKT)) old <*> bres2
-    constFKT a = FKT (mapKV (mapComp (mapFAttr (const (ArrayTB1 ref ))) ) ifk)   (L.sort rel ) (ArrayTB1 tb )
+    constFKT a = FKT (mapKV (mapComp (mapFAttr (const (ArrayTB1 ref ))) ) ifk)   rel  (ArrayTB1 tb )
       where (ref,tb) = Non.unzip a
     projFKT (FKT i  _ j ) = (unAttr $ justError ("no array" <> show i)  $ safeHead $  fmap unTB  $ unkvlist i,  j)
     fktzip (ArrayTB1 lc , ArrayTB1 m) =  Non.zip lc m
@@ -843,7 +843,7 @@ logTime s f = do
   ini <- liftIO $ getCurrentTime
   r <- f
   out <- liftIO $ getCurrentTime
-  liftIO$ putStrLn  $ s <>  " " <> show (diffUTCTime out ini)
+--  liftIO$ putStrLn  $ s <>  " " <> show (diffUTCTime out ini)
 
   return r
 
@@ -940,7 +940,7 @@ buildUIDiff km i  tdi = go i tdi
             return $ TrivialWidget  output subcomposed
          (Primitive (AtomicPrim i)) -> do
             pinp <- fmap (fmap TB1) <$> buildPrim km (fmap unTB1 <$> tdi) i
-            return $ TrivialWidget (editor <$> tdi <*> triding pinp) (getElement pinp)
+            return $ TrivialWidget (editor  <$> tdi <*> triding pinp) (getElement pinp)
          i -> errorWithStackTrace (show i)
 
 reduceDiff :: [Editor (PathFTB a) ] -> Editor (PathFTB a)

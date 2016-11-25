@@ -4,6 +4,7 @@ module SchemaQuery
   createUn
   ,takeMany
   ,convertChanEvent
+  ,tellPatches
   ,selectFromA
   ,selectFrom
   ,updateFrom
@@ -22,6 +23,8 @@ module SchemaQuery
   ,transactionLog
   ,transactionNoLog
   ,filterfixed
+  ,readState
+  ,readIndex
   )where
 import Graphics.UI.Threepenny.Core (mapEventDyn)
 
@@ -506,6 +509,8 @@ fullInsert' ((k1,v1) )  = do
       else do
         return ret
 
+tellPatches :: [TableModification (TBIdx Key Showable)] -> TransactionM ()
+tellPatches = tell
 
 noInsert = Tra.traverse (noInsert' )
 
@@ -620,6 +625,7 @@ tbInsertEdit f@(FKT pk rel2  t2) =
            maybe (return f ) ((fmap attrOptional) . tbInsertEdit ) (unLeftItens f)
         ArrayTB1 l ->
            (fmap (attrArray f .Non.fromList)) $  Tra.traverse (\ix ->   tbInsertEdit $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. Non.length l - 1 ]
+
 
 loadFKS table = do
   inf <- ask

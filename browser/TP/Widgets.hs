@@ -363,8 +363,9 @@ paintEdit e b i  = element e # sinkDiff UI.style ((\ m n -> pure . ("background-
   where cond i j
           | isJust i  && isNothing j  = "green"
           | isNothing i  && isNothing j = "red"
-          | isNothing i && isJust j  = traceShow j "purple"
-          -- | i /= j = "yellow"
+          | isNothing i && isJust j  = "purple"
+          | i /= j = "yellow"
+          -- | isNothing i && isJust j  = traceShow j "purple"
           | i /= j = trace ((concat $ fmap differ $   zip  si sj) <> L.drop (L.length sj) si  <> L.drop (L.length si) sj ) "yellow"
           | i == j = "blue"
           | otherwise = "green"

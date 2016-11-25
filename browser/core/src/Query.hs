@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
@@ -563,27 +564,29 @@ searchGist relTable m gist =  join . fmap (\k -> lookGist (S.fromList $fmap (\k-
 
 joinRel :: (Ord a ,Show a,G.Predicates (G.TBIndex a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex a) (TBData Key a) -> FTB (TBData Key a)
 joinRel tb rel ref table
-  | L.all (isOptional .keyType) origin
+  | L.any (isOptional .keyType) origin
     = LeftTB1 $ fmap (flip (joinRel tb (Le.over relOri unKOptional <$> rel ) ) table) (Tra.traverse unLeftItens ref )
   | L.any (isArray.keyType) origin
-    = ArrayTB1 $ Non.fromList $  fmap (flip (joinRel tb (Le.over relOri unKArray <$> rel ) ) table . pure ) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ (head ref)) [0..(Non.length (unArray $ unAttr $ head ref) - 1)])
+  = let
+      !arr = justError ("no array"<> show (ref,origin ,fmap keyType origin)) $ L.find isTBArray ref
+    in ArrayTB1 $ Non.fromList $  fmap (flip (joinRel tb (Le.over relOri unKArray <$> rel ) ) table ) (fmap (\i -> (justError ("cant index  " <> show (i,ref)). unIndex i $ arr ) : (filter (not .isTBArray) ref)) [0..(Non.length (unArray $ _tbattr arr )- 1)])
   | otherwise
     = maybe (TB1 $ tblistM tb (_tb . firstTB (\k -> fromMaybe k  $ M.lookup k relMap ) <$> ref )) TB1 tbel
       where origin = fmap _relOrigin rel
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
             invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
             tbel = searchGist  invrelMap tb table (Just ref)
+            isTBArray i = isArray (keyType $ _tbattrkey i)
 
 joinRel2 :: (Ord a ,Show a,G.Predicates (G.TBIndex a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex a) (TBData Key a) -> Maybe (FTB (TBData Key a))
 joinRel2 tb rel ref table
   | L.any (isOptional .keyType) origin
   = Just $ LeftTB1  $ join $ fmap (flip (joinRel2 tb (Le.over relOri unKOptional <$> rel ) ) table) (Tra.traverse unLeftItens ref )
   | L.any (isArray.keyType) origin
-  = fmap (ArrayTB1 .  Non.fromList ) $Tra.sequenceA   $ fmap (flip (joinRel2 tb (Le.over relOri unKArray <$> rel ) ) table . (:L.filter (not .isArray . keyType ._tbattrkey) ref)) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ arr ) [0..(Non.length (unArray $ _tbattr arr)   - 1)])
+  = join $ fmap (\arr -> fmap (ArrayTB1 .  Non.fromList ) $Tra.sequenceA   $ fmap (flip (joinRel2 tb (Le.over relOri unKArray <$> rel ) ) table . (:L.filter (not .isArray . keyType ._tbattrkey) ref)) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ arr ) [0..(Non.length (unArray $ _tbattr arr)   - 1)])) $ L.find  (isArray .keyType . _tbattrkey) ref
   | otherwise
     =  TB1 <$> tbel
       where origin = fmap _relOrigin rel
-            arr = justError ("no array"<> show ref) $ L.find  (isArray .keyType . _tbattrkey) ref
             relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
             invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
             tbel = searchGist  invrelMap tb table (Just ref)

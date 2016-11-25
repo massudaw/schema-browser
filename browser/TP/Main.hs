@@ -7,10 +7,14 @@ module TP.Main where
 
 import TP.Selector
 import Data.Unique
+import qualified Data.Binary as B
 import Postgresql.Backend (connRoot)
+import System.Process
 import TP.TestRules
+import Control.Concurrent.STM
 import Data.Tuple
 import TP.View
+import Data.Aeson (decode,Value(String))
 import TP.Account
 import TP.Browser
 import Control.Monad.Writer (runWriterT)
@@ -99,7 +103,7 @@ setup smvar args plugList w = void $ do
     let kitems = F.toList (pkMap inf)
         schId = int $ schemaId inf
         initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> HM.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
-        lookT iv = let  i = traceShowId $ indexFieldRec (liftAccess metainf "clients" $ Nested (IProd Nothing["selection"]) (keyRef ["table"])) iv
+        lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested (IProd Nothing["selection"]) (keyRef ["table"])) iv
                     in fmap (\(TB1 (SText t)) -> t) .unArray  <$> join (fmap unSOptional' i)
 
     cliIni <- currentValue (facts cliTid)
@@ -246,6 +250,8 @@ authMap smvar sargs (user,pass) schemaN =
                   toOAuth v = case fmap TB1 $ F.toList $ snd $ unTB1 v :: [FTB Showable] of
                             [a,b,c,d] -> tokenToOAuth (b,d,a,c)
                             i -> errorWithStackTrace ("wrong token" <> show i)
+
+
               return (OAuthAuth (Just (if tag then "@me" else T.pack user,td )), gmailOps)
 
 loadSchema smvar schemaN user authMap  plugList =  do
@@ -315,7 +321,60 @@ createVar = do
   l <- query_ conn "select oid,name from metadata.schema"
   return $ DatabaseSchema (M.fromList l) (HM.fromList $ swap <$> l) conn smvar
 
+testBinary = do
+  args <- getArgs
+  let db = argsToState args
+  smvar <- createVar
+  let
+    amap = authMap smvar db ("postgres", "queijo")
+  (meta,finm) <- runDynamic $ keyTables smvar  ("metadata","postgres") amap []
+  let
+    amap = authMap smvar db ("wesley.massuda@gmail.com", "queijo")
+  (inf,fing) <- runDynamic $ keyTables smvar  ("gmail","wesley.massuda@gmail.com") amap []
+  let start = "7629481"
+  let t = lookTable inf "messages"
+  ((i,(_,s)),_) <- runDynamic $ transactionNoLog inf $ selectFrom (tableName t) Nothing Nothing [] mempty
+  runDynamic $ mapM (\p -> transactionNoLog inf $ putPatch (patchVar (iniRef i)).  maybeToList =<<  getFrom t p) (L.take 4  $ G.toList s)
+  writeTable "dump_test/gmail"  (lookTable inf "messages") (iniRef i)
+  writeTable "dump_test/gmail"  (lookTable inf "labels") (iniRef i)
+  writeTable "dump_test/gmail"  (lookTable inf "attachments") (iniRef i)
+  (t,l) <- runDynamic $ readTable inf "dump_test" "gmail" (lookTable inf "messages")
+  s <- atomically $ readTVar (collectionState (iniRef i))
+  let wrong = filter (any not .fst ) (zipWith (\i j -> ([i ==j,G.getIndex i == G.getIndex j,tableNonRef' i == tableNonRef' j, liftTable' inf "messages" (mapKey' keyValue j ) == j , (liftTable' inf "messages" $ B.decode (B.encode (mapKey' keyValue j ))) == j ],(i,j)))(L.sort $ G.toList (snd t)) (L.sort $ G.toList s))
+  let readWrite j =  do
+        B.encodeFile "test" (  tableNonRef'. mapKey' keyValue <$> j )
+        o <- fmap (liftTable' inf "messages") <$>  B.decodeFile "test"
+        return $ o == (tableNonRef'<$> j)
 
+  o <- readWrite ( (G.toList (s)))
+  print (fmap fst wrong)
+  print o
+  -- mapM (putStrLn) $ take 2 $ zipWith (\si sj -> ((concat $ fmap differ $   zip  si sj) <> L.drop (L.length sj) si  <> L.drop (L.length si) sj ))  (fmap show $L.sort $ G.toList (snd t)) (fmap show $L.sort $ G.toList s)
+  -- mapM (putStrLn) $ take 2 $ zipWith (\si sj -> ((concat $ fmap differ $   zip  si sj) <> L.drop (L.length sj) si  <> L.drop (L.length si) sj ))  (fmap (show .tableNonRef')$L.sort $ G.toList (snd t)) (fmap (show.tableNonRef') $L.sort $ G.toList s)
+  --
+
+  -- print (G.toList (snd t))
+  -- print (G.toList (snd s))
+  sequence_ l
+  sequence_ fing
+  sequence_ finm
+  return ()
+
+
+
+testSync  = do
+  args <- getArgs
+  let db = argsToState args
+  smvar <- createVar
+  let
+    amap = authMap smvar db ("postgres", "queijo")
+  (meta,fin) <- runDynamic $ keyTables smvar  ("metadata","postgres") amap []
+  let
+    amap = authMap smvar db ("wesley.massuda@gmail.com", "queijo")
+  (inf,fin) <- runDynamic $ keyTables smvar  ("gmail","wesley.massuda@gmail.com") amap []
+  let start = "7629481"
+  runDynamic $ transaction inf $ historyLoad
+  return ()
 
 testTable s t w = do
   args <- getArgs
@@ -334,8 +393,8 @@ testPlugin s t p  = do
   let db = argsToState args
   smvar <- createVar
   let
-    amap = authMap smvar db ("postgres", "queijo")
-  (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
+    amap = authMap smvar db ("wesley.massuda@gmail.com", "queijo")
+  (inf,fin) <- runDynamic $ keyTables smvar  (s,"wesley.massuda@gmail.com") amap []
   wm <- mkWeakMVar  (globalRef smvar) (sequence_ fin)
   let (i,o) = pluginStatic p
   print $ liftAccess inf t i

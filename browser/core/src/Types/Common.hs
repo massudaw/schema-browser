@@ -74,7 +74,6 @@ import Types.Compose
 import Control.DeepSeq
 import qualified NonEmpty as Non
 import NonEmpty (NonEmpty(..))
-import Data.Functor.Apply
 import Utils
 import Data.Bifunctor
 import Safe
@@ -84,6 +83,7 @@ import GHC.Generics
 import Data.Binary (Binary)
 import qualified Data.Binary as B
 import Data.Functor.Identity
+import Data.Binary.Orphans
 import Data.Typeable
 import Data.Vector(Vector)
 import Data.Functor.Classes
@@ -451,9 +451,9 @@ data FTB a
   = TB1 a
   | LeftTB1   (Maybe (FTB a))
   | SerialTB1 (Maybe (FTB a))
-  | IntervalTB1 (Interval.Interval (FTB a))
   | DelayedTB1 (Maybe (FTB a))
   | ArrayTB1  (NonEmpty (FTB a))
+  | IntervalTB1 (Interval.Interval (FTB a))
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable,Generic)
 
 instance Applicative FTB where
@@ -497,10 +497,6 @@ unTB = runIdentity . getCompose
 
 _tb :: f k b -> Compose Identity f k b
 _tb = Compose . Identity
-
-
-instance (Ord k,Apply (f k) ,Functor (f k )) =>Apply  (KV f k) where
-  KV pk  <.> KV pk1 = KV (Map.intersectionWith (<.>) pk pk1)
 
 
 

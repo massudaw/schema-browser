@@ -324,6 +324,7 @@ indexPred (a@(IProd _ _),eq) r =
         Right (Not IsNull)  -> isJust $ unSOptional' rv
         Right IsNull -> isNothing $ unSOptional' rv
         i -> traceShow (a,eq,r) $errorWithStackTrace (show i)
+indexPred i v= errorWithStackTrace (show (i,v))
 
 
 queryCheck :: (WherePredicate ,[Key])-> G.GiST (TBIndex Showable) (TBData Key Showable) -> G.GiST (TBIndex  Showable) (TBData Key Showable)

@@ -78,6 +78,7 @@ library
    ,void
    ,extra
    ,binary
+   ,binary-orphans
    ,vector-binary-instances
    ,text-binary
    ,mime-mail
