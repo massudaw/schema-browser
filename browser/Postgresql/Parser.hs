@@ -252,7 +252,7 @@ instance  TF.ToField (TB Identity PGKey Showable)  where
   toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri ) ) $ maybe id (flip mappend) attrs $ (unTB <$> F.toList (_kvvalues $ unTB i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
   toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
-  toField e = errorWithStackTrace (show e)
+  toField e = traceShow e $ errorWithStackTrace (show e)
 
 
 

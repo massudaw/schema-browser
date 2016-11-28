@@ -271,7 +271,7 @@ instance Patch Showable  where
   patch = id
 
 
-type PatchConstr k a = (Patch a , Ord a , Show a,Show k , Ord k)
+type PatchConstr k a = (Eq (Index a),Patch a , Ord a , Show a,Show k , Ord k)
 
 type TBIdx  k a = (KVMetadata k, G.TBIndex   a ,[PathAttr k a])
 type RowPatch k a = TBIdx k a -- (KVMetadata k, TBData k a ,[PathAttr k a])
@@ -467,7 +467,9 @@ applyRecord
     TBData d a
      -> TBIdx d (Index a)
      -> TBData d a
-applyRecord t@((m, v)) (_ ,_  , k)  = (m ,mapComp (KV . flip (foldr (\p m -> Map.alter (\v -> Just $ maybe (_tb $ createAttr p) (mapComp (flip applyAttr p )) v   ) (pattrKey p) m)) k  . _kvvalues ) v)
+applyRecord t@((m, v)) (m2 ,p  , k)
+  | _kvname m == _kvname m2 && p == fmap patch (G.getIndex t) = (m ,mapComp (KV . flip (foldr (\p m -> Map.alter (\v -> Just $ maybe (_tb $ createAttr p) (mapComp (flip applyAttr p )) v   ) (pattrKey p) m)) k  . _kvvalues ) v)
+  | otherwise = create (m2,p,k)
   where edit  v k =  mapComp (flip applyAttr k ) v
 
 patchSet i
@@ -493,7 +495,7 @@ applyAttrChange (IT k i) (PInline _   p)  = IT k <$> (applyIfChange i p)
 applyAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a) -> TB Identity k a
 applyAttr (Attr k i) (PAttr _ p)  = Attr k (applyShowable i p)
 applyAttr (Fun k rel i) (PFun _ _ p)  = Fun k rel (applyShowable i p)
-applyAttr (FKT k rel  i) (PFK _ p _ b )  =  FKT ref  rel  (create b)
+applyAttr (FKT k rel  i) (PFK _ p _ b )  =  FKT ref  rel  (apply  i b)
   where
               ref =  KV$  Map.mapWithKey (\key vi -> foldl  (\i j ->  edit key j i ) vi p ) (mapFromTBList (concat $ traComp nonRefTB <$>  unkvlist k))
               edit  key  k@(PAttr  s _) v = if (_relOrigin $ justError "no key" $ safeHead $ F.toList $ key) == s then  mapComp (flip applyAttr k ) v else v
@@ -602,7 +604,7 @@ applyFTB pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                       Just p -> if ix <=  Non.length i - 1
                                 then ArrayTB1 $ Non.imap (\i v -> if i == ix then applyFTB pr a v p else v )  i
                                 else if ix == Non.length i
-                                      then ArrayTB1 $ i <> pure (createFTB pr p)
+                                      then ArrayTB1 $ traceShowId $ i <> pure (createFTB pr p)
                                       else errorWithStackTrace $ "ix bigger than next elem"
 applyFTB pr a (SerialTB1 i ) (PSerial o) = SerialTB1 $  applyOpt pr a i o
 applyFTB pr a (DelayedTB1 i ) (PDelayed o) = DelayedTB1 $  applyOpt pr a i o

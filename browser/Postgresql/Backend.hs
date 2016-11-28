@@ -43,6 +43,10 @@ import qualified Data.Set as S
 import qualified Database.PostgreSQL.Simple.FromRow as FR
 import Database.PostgreSQL.Simple
 
+filterFun k = filter (\k -> not $ isFun k )
+  where isFun (PFun _ _ _ ) = True
+        isFun i = False
+
 insertPatch
   :: (MonadIO m ,Functor m )
      => (TBData PGKey () -> FR.RowParser (TBData PGKey Showable ))
@@ -164,6 +168,7 @@ paginate inf t order off size koldpre wherepred = do
 
 
 -- High level db operations
+
 
 insertMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
 insertMod j  = do
