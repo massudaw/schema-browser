@@ -235,7 +235,7 @@ authMap smvar sargs (user,pass) schemaN =
           "gmail" ->  oauth False
           "tasks" ->  oauth True
           i ->  do
-            conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack (user )<> " password=" <> BS.pack (pass ) <> " dbname=" <> (BS.pack $  dbn sargs) )
+            conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack (user )<> " password=" <> BS.pack (pass ) <> " dbname=" <> (BS.pack $  dbn sargs) <> " sslmode=require" )
             execute_ conn "set bytea_output='hex'"
             return (PostAuth conn, postgresOps)
     where oauth tag = do

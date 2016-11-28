@@ -210,7 +210,7 @@ getFKRef inf predtop rtable (me,old) v path@(Path _ (FKJoinTable i j ) ) =  do
                                       test v f = Nothing
                                    in  fmap WherePredicate (go (test (_relOrigin <$> i)) l)
                 liftIO $ putStrLn $ "loadForeign table" <> show (path)
-                let refs = (   fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap (OrColl. fmap (\i->PrimColl (IProd notNull [_relTarget $ k] ,Left (i,_relOperator k))).F.toList .unArray') . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v )
+                let refs = (   fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap (OrColl. fmap (\i->PrimColl (IProd notNull [_relTarget $ k] ,Left (i,Flip $ _relOperator k))).F.toList .unArray') . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v )
                     predm = (refs<> predicate predtop)
                 tb2 <- case predm of
                   Just pred -> do

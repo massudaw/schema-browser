@@ -1,12 +1,15 @@
-{-# LANGUAGE DeriveDataTypeable,ConstraintKinds,TypeFamilies ,DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,ScopedTypeVariables,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+{-# LANGUAGE BangPatterns,DeriveDataTypeable,ConstraintKinds,TypeFamilies ,DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,ScopedTypeVariables,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 module Postgresql.Parser where
 
 import qualified Data.HashMap.Strict as HM
 import Data.Map (Map)
 import Types hiding (Parser)
+import Postgresql.Printer
 import Data.Ord
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A
+import qualified Data.Vector as V
+import qualified Data.Foldable as F
 import Data.Either
 import Utils
 import Control.Monad
@@ -62,35 +65,59 @@ import Database.PostgreSQL.Simple
 import Blaze.ByteString.Builder(fromByteString)
 import Blaze.ByteString.Builder.Char8(fromChar)
 
-preconversion i =  join $ (\t -> M.lookup (i,t) (postgresLiftPrimConv)) <$> ktypeLift  i
+preconversion i =  join $ (\t -> M.lookup (i,t) postgresLiftPrimConv) <$> ktypeLift  i
+preunconversion i =  join $ (\t -> M.lookup (t,i) postgresLiftPrimConv) <$> ktypeUnLift  i
 
 conversion i = fromMaybe (id , id) $ preconversion i
 
-topconversion v@(KDelayed n ) =   preconversion v <|> fmap lif (topconversion n )
+topconversion f v@(KDelayed n ) =   preconversion v <|> fmap lif (topconversion f n )
   where
-    lif (a,b) = ((\(DelayedTB1 i) -> DelayedTB1 (fmap a i)), (\(DelayedTB1 i) -> DelayedTB1 (fmap b  i )))
-topconversion v@(KSerial n ) =   preconversion v <|> fmap lif (topconversion n )
+    mapd a (DelayedTB1 i) = DelayedTB1 (fmap a i)
+    mapd _ ! b =errorWithStackTrace (show (b))
+    lif (a,b) = (mapd a , mapd b)
+
+topconversion f v@(KSerial n ) =   preconversion v <|> fmap lif (topconversion f n )
   where
-    lif (a,b) = ((\(SerialTB1 i) -> SerialTB1 (fmap a i)), (\(SerialTB1 i) -> SerialTB1 (fmap b  i )))
-topconversion v@(KOptional n ) =   preconversion v <|> fmap lif (topconversion n )
+    maps a (SerialTB1 i) = SerialTB1 (fmap a i)
+    maps a ! b =errorWithStackTrace (show (b))
+    lif (a,b) = (maps a , maps b)
+
+topconversion f v@(KOptional n ) =   preconversion v <|> fmap lif (topconversion f n )
   where
-    lif (a,b) = ((\(LeftTB1 i) -> LeftTB1 (fmap a i)), (\(LeftTB1 i) -> LeftTB1 (fmap b  i )))
-topconversion v@(KArray n) =  preconversion v <|> fmap lif (topconversion n )
+    mapo a (LeftTB1 i) = LeftTB1 (fmap a i)
+    mapo a i = traceShow (n,i) $ a i
+    mapo a ! b = traceShow (b,n) $ errorWithStackTrace (show (b))
+    lif (a,b) = (mapo a , mapo b)
+
+topconversion f v@(KArray n) =  preconversion v <|> fmap lif (topconversion f n )
   where
-    lif (a,b) = ((\(ArrayTB1 i) -> ArrayTB1 (fmap a i)), (\(ArrayTB1 i) -> ArrayTB1 (fmap b  i )))
-topconversion v@(KInterval n) =  preconversion v <|> fmap lif (topconversion n )
+    mapa a (ArrayTB1 i) = ArrayTB1 (fmap a i)
+    mapa a ! b =errorWithStackTrace (show (b))
+    lif (a,b) = (mapa a , mapa b)
+
+topconversion f v@(KInterval n) =  preconversion v <|> fmap lif (topconversion f n )
   where
-    lif (a,b) = ((\(IntervalTB1 i) -> IntervalTB1 (fmap a i)), (\(IntervalTB1 i) -> IntervalTB1 (fmap b  i )))
-topconversion v@(Primitive i) =  preconversion v
+    map a (IntervalTB1 i) = IntervalTB1 (fmap a i)
+    map a ! b =errorWithStackTrace (show (b))
+    lif (a,b) = (map a , map b)
+topconversion f v@(Primitive i) =  preconversion v
 
 
 
-postgresLiftPrimConv :: Ord b => Map (KType (Prim KPrim b),KType (Prim KPrim b))  ( FTB  Showable -> FTB Showable , FTB Showable -> FTB Showable )
+postgresLiftPrimConv :: Map (KType (Prim KPrim (Text,Text)),KType (Prim KPrim (Text,Text)))  ( FTB  Showable -> FTB Showable , FTB Showable -> FTB Showable )
 postgresLiftPrimConv =
-  M.fromList [((Primitive (AtomicPrim PBounding ), KInterval (Primitive (AtomicPrim PPosition)) ), ((\(TB1 (SBounding (Bounding i) )) -> IntervalTB1 (fmap   (TB1. SPosition ) i)) , (\(IntervalTB1 i) -> TB1 $ SBounding $ Bounding $ (fmap (\(TB1 (SPosition i)) -> i)) i)))]
+  M.fromList [((Primitive (AtomicPrim PBounding ), KInterval (Primitive (AtomicPrim PPosition)) )
+              , ((\(TB1 (SBounding (Bounding i) )) -> IntervalTB1 (fmap   (TB1. SPosition ) i)  ) . traceShowId
+                , (\(IntervalTB1 i) -> TB1 $ SBounding $ Bounding $ (fmap (\(TB1 (SPosition i)) -> i)) i) .  traceShowId ))
+                  {-  ,((Primitive (AtomicPrim PLineString ), KArray (Primitive (AtomicPrim PPosition)) )
+                , ((\(TB1 (SLineString (LineString i) )) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1. SPosition ) i)) .  traceShowId
+                   , (\(ArrayTB1 i) -> TB1 $ SLineString $ LineString $ V.fromList  $ F.toList $ (fmap (\(TB1 (SPosition i)) -> i)) i) .  traceShowId ))-}]
 
-postgresLiftPrim :: Ord b => Map (KType (Prim KPrim b)) (KType (Prim KPrim b))
+postgresLiftPrim :: Map (KType (Prim KPrim (Text,Text))) (KType (Prim KPrim (Text,Text)))
 postgresLiftPrim = M.fromList $ M.keys postgresLiftPrimConv
+
+postgresUnLiftPrim :: Map (KType (Prim KPrim (Text,Text))) (KType (Prim KPrim (Text,Text)))
+postgresUnLiftPrim = M.fromList $ fmap swap $ M.keys postgresLiftPrimConv
 
 postgresPrim :: HM.HashMap Text KPrim
 postgresPrim =
@@ -139,27 +166,32 @@ postgresPrim =
   ,("time with time zone" , PDayTime)
   ,("time without time zone" , PDayTime)
   ,("POINT3",PPosition)
+  ,("geometry",PPosition)
   ,("LINESTRING3",PLineString)
   ,("box3d",PBounding)
   ]
 
-ktypeLift :: Ord b => KType (Prim KPrim b) -> Maybe (KType (Prim KPrim b))
-ktypeLift i = (M.lookup i  postgresLiftPrim )
+ktypeUnLift :: KType (Prim KPrim (Text,Text)) -> Maybe (KType (Prim KPrim (Text,Text)))
+ktypeUnLift i = M.lookup i postgresUnLiftPrim
 
-ktypeRec v@(KOptional i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KArray i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KInterval i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KSerial i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KDelayed i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(Primitive i ) = ktypeLift v
+ktypeLift :: KType (Prim KPrim (Text,Text)) -> Maybe (KType (Prim KPrim (Text,Text)))
+ktypeLift i = M.lookup i postgresLiftPrim
+
+ktypeRec f v@(KOptional i) = fmap KOptional $  f v <|> ktypeRec f i
+ktypeRec f v@(KArray i) =  f v <|> ktypeRec f i
+ktypeRec f v@(KInterval i) =  f v <|> ktypeRec f i
+ktypeRec f v@(KSerial i) = f v <|> ktypeRec f i
+ktypeRec f v@(KDelayed i) = f v <|> ktypeRec f i
+ktypeRec f v@(Primitive i ) = f v
 
 mapKeyType :: FKey (KType PGPrim) -> FKey (KType (Prim KPrim (Text,Text)))
 mapKeyType  = fmap mapKType
 
 mapKType :: KType PGPrim -> KType CorePrim
-mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec (fmap textToPrim i)
+mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec ktypeLift (fmap textToPrim i)
 
 textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)
+textToPrim i | traceShow i False =undefined
 textToPrim (AtomicPrim (s,i)) = case  HM.lookup i  postgresPrim of
   Just k -> AtomicPrim k -- $ fromMaybe k (M.lookup k (M.fromList postgresLiftPrim ))
   Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
@@ -171,6 +203,9 @@ textToPrim (RecordPrim i) =  (RecordPrim i)
 -- Wrap new instances without quotes delimiting primitive values
 newtype UnQuoted a = UnQuoted {unQuoted :: a}
 
+    -- toField i = errorWithStackTrace (show i)
+
+
 instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Text,a)) where
   toField (LeftTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
   toField (SerialTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
@@ -179,15 +214,38 @@ instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Tex
   toField (IntervalTB1 is )
     | ty == Just "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $maybe "" T.unpack $ ty), TF.Plain $ fromByteString "range"]
     | ty == Just "POINT3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
+    | ty == Just "LINESTRING3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
     | otherwise  = TF.toField  tyv
     where tyv = fmap (\(TB1 i ) -> snd i) is
           ty = unFinite $  Interval.lowerBound $ fmap (\(TB1 i ) -> fst i) is
   toField (TB1 (t,i)) = TF.toField i
   -- toField i = errorWithStackTrace (show i)
 
+instance (TF.ToField a , TF.ToField b ) => TF.ToField (Either a b ) where
+  toField (Right i) = TF.toField i
+  toField (Left i) = TF.toField i
+instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
+  toField (k ,i) = case  liftA2 (,) (ktypeRec ktypeUnLift  k ) (topconversion preunconversion k) of
+                     Just (k,(_,b)) -> toFiel   k (b i)
+                     Nothing -> toFiel k i
+    where
+      toFiel (KOptional k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
+      toFiel (KSerial k ) ( SerialTB1 i) = maybe (TF.Plain "null") (toFiel k) i
+      toFiel (KDelayed k ) (DelayedTB1 i) = maybe (TF.Plain "null") (toFiel k) i
+      toFiel (KArray k ) (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   (F.toList $ fmap unTB1 is)
+      toFiel (KInterval k) (IntervalTB1 is ) = TF.Many [TF.Plain (fromByteString $ BS.pack $ T.unpack $ justError ("no array" <> show k) $ renderType (KInterval k) ) ,TF.Plain "(" ,TF.toField  (fmap unTB1 $ unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (fmap unTB1 $ unFinite $ Interval.upperBound is) ,TF.Plain ")"]
+        -- | k == Just "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $maybe "" T.unpack $ ty), TF.Plain $ fromByteString "range"]
+        -- | k == Just "POINT3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
+        -- | ty == Just "LINESTRING3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
+        -- | otherwise  = TF.toField  tyv
+      toFiel (Primitive k) (TB1 i) = TF.toField i
+      toFiel i j = traceShow(i,j) $ errorWithStackTrace ("toFiel" ++ show (i,j))
+
+
+
 
 instance  TF.ToField (TB Identity PGKey Showable)  where
-  toField (Attr k  i) = case  topconversion (textToPrim <$> keyType k) of
+  toField (Attr k  i) = case  topconversion preconversion (textToPrim <$> keyType k) of
           Just (_,b) -> TF.toField (fmap ( snd $ (\(AtomicPrim i ) -> i)$head $ F.toList $ keyType k,) $ b i)
           Nothing -> TF.toField (fmap (snd $ (\(AtomicPrim i ) -> i) $ head $ F.toList $ keyType k,) i)
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
@@ -233,7 +291,7 @@ instance TF.ToField (UnQuoted Bounding ) where
 
 
 instance TF.ToField (UnQuoted LineString) where
-  toField (UnQuoted (LineString l)) = TF.Many  [str "ST_SetSRID(ST_MakeLine (", TF.Many points ,   str "),4326)"]
+  toField (UnQuoted (LineString l)) = TF.Many  [str "ST_SetSRID(ST_MakeLine (array[", TF.Many points ,   str "]),4326)"]
     where del = TF.Plain $ fromChar ','
           str = TF.Plain . fromByteString
           points :: [TF.Action]
@@ -243,7 +301,7 @@ instance TF.ToField (UnQuoted LineString) where
 
 
 instance TF.ToField (UnQuoted Position) where
-  toField (UnQuoted (Position (lat,lon,alt))) = TF.Many [str "ST_SetSRID(ST_MakePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str "),4326)"]
+  toField (UnQuoted (Position (lat,lon,alt))) = TF.Many [str "ST_setsrid(st_makePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str "),4326)"]
     where del = TF.Plain $ fromChar ','
           str = TF.Plain . fromByteString
 
@@ -291,7 +349,8 @@ unIntercalateAtto l s = go l
     go [] = errorWithStackTrace  "empty list"
 
 parseAttrJSON (Attr i _ ) v = do
-  s<- parseShowableJSON (keyType  i) v
+  let tyun = fromMaybe (keyType i) $ fmap (traceShow (keyType i) . traceShowId ) $ ktypeRec ktypeUnLift (keyType i)
+  s<- parseShowableJSON tyun v
   return $  Attr i s
 parseAttrJSON (Fun i rel _ )v = do
   s<- parseShowableJSON (keyType  i) v
@@ -309,6 +368,7 @@ parseAttr (Attr i _ ) = do
   return $  Attr i s
 parseAttr (Fun i rel _ ) = do
   s<- parseShowable (keyType  i) <?> show i
+
   return $  (Fun i rel s)
 
 
@@ -438,6 +498,10 @@ parsePrimJSON i  v =
               i -> case i of
                 Right i -> pure $ SPosition i
                 Left e -> fail e)
+      PLineString -> A.withText (show i) (\s -> case  Sel.runGet getLineString(fst $ B16.decode (BS.pack $ T.unpack s))of
+              i -> case i of
+                Right i -> pure $ SLineString i
+                Left e -> fail e)
 
       i -> errorWithStackTrace (show i)
   ) v
@@ -548,7 +612,7 @@ parseShowableJSON (KInterval i ) (A.String v)
   = case parseOnly (parseShowable(KInterval i)) (BS.pack $ T.unpack v) of
         Right i -> return i
         Left i -> fail i
-parseShowableJSON i v = errorWithStackTrace (show (i,v))
+parseShowableJSON i v = errorWithStackTrace ("parseShowableJSON" <> show (i,v))
 
 
 pg_double :: Parser Double

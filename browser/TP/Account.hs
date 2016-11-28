@@ -112,8 +112,8 @@ accountWidget body (incrementT,resolutionT) sel inf = do
           element calendar # set children [innerCalendar]
           _ <- mapM (\((_,table,fields,efields,proj))->  mapUIFinalizerT (fromJust $ M.lookup table innerCalendarSet)
             (\calT -> do
-              let pred = WherePredicate $ lookAccess inf (tableName table) <$> timePred (fieldKey <$> fields ) calT
-                  fieldKey (TB1 (SText v))=  lookKey inf (tableName table) v
+              let pred = WherePredicate $ timePred inf table (fieldKey <$> fields ) calT
+                  fieldKey (TB1 (SText v))=   v
               (v,_) <-  ui $ transactionNoLog  inf $ selectFromA (tableName table) Nothing Nothing [] pred
               mapUIFinalizerT innerCalendar
                 ((\i -> do

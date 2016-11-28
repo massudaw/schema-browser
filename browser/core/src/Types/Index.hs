@@ -173,7 +173,8 @@ splitIndexPK (OrColl l ) pk  = if F.all (isNothing .snd) al then Nothing else Ju
       al = (\l -> (l,splitIndexPK  l pk ) )<$> l
 splitIndexPK (AndColl l ) pk  = fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK  i pk ) <$> l
 splitIndexPK (PrimColl (p@(IProd _ [i]),op) ) pk  = if elem i  pk  then Just (PrimColl (p,op)) else Nothing
-splitIndexPK (PrimColl (p@(IProd _ l),op) ) pk  = errorWithStackTrace (show (l,op,pk))
+splitIndexPK (PrimColl (p@(IProd _ l),op) ) pk  = Nothing --errorWithStackTrace (show (l,op,pk))
+splitIndexPK i  pk  = Nothing -- errorWithStackTrace (show (i,pk))
 
 
 instance Monoid (TBIndex a) where
@@ -185,6 +186,7 @@ splitIndex (AndColl l ) pk f = if F.all (isNothing .snd) al then Nothing else Ju
       al = (\l -> (l,splitIndex  l pk f) )<$> l
 splitIndex (OrColl l ) pk f = fmap OrColl $ nonEmpty $ catMaybes $ (\i -> splitIndex  i pk f) <$> l
 splitIndex (PrimColl (p@(IProd _ [i]),op) ) pk (Idex v ) = maybe (Just (PrimColl (p,op))) (splitPred (PrimColl (p,op))) ((v !!) <$>  (L.elemIndex i pk ))
+splitIndex i  k j = Just i
 
 splitPred :: BoolCollection (Access Key ,AccessOp Showable) ->  FTB Showable -> Maybe (BoolCollection (Access Key,AccessOp Showable)  )
 splitPred (PrimColl (prod ,Left (a@(TB1 _ ) ,op))) (ArrayTB1 b ) = if elem a  b then Nothing else Just (PrimColl (prod , Left (a,op)))
@@ -375,6 +377,7 @@ instance Predicates (FTB Showable) where
   match (Left v) a j  = ma  v a j
     where
       -- ma v a j | traceShow (v,a,j) False = undefined
+      ma  (v,Flip (Flip op))  a  j   = ma (v,op)  a j
       ma  v  a  (LeftTB1 j)   = fromMaybe False (ma v a <$> j)
       ma  v  a  (SerialTB1 j)   = fromMaybe False (ma v a <$> j)
       ma  v  a  (DelayedTB1 j)   = fromMaybe False (ma v a <$> j)
@@ -383,7 +386,8 @@ instance Predicates (FTB Showable) where
       ma  (TB1 i,_) _  (TB1 j)   = i == j
       ma  ((ArrayTB1 i) ,Flip Contains ) _  ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
       ma  ((ArrayTB1 j),Contains ) _  ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-      ma (j@(TB1 _),AnyOp o ) p  (ArrayTB1 i) = F.any (ma (j,o) p )  i
+      ma (j@(TB1 _),AnyOp o ) p  (ArrayTB1 i) = F.any (ma (j,Flip o) p )  i
+      ma (j,AnyOp o ) p  (ArrayTB1 i) = F.any (ma (j,Flip o) p )  i
       ma (ArrayTB1 i,Flip (AnyOp o)) p j  = F.any (\i -> ma (i,o) p j ) i
       ma (i@(TB1 _) ,op) p (IntervalTB1 j)  = i `Interval.member` j
       ma (IntervalTB1 i ,op) p j@(TB1 _)  = j `Interval.member` i
@@ -391,7 +395,7 @@ instance Predicates (FTB Showable) where
       ma (IntervalTB1 j ,Flip Contains) Exact (IntervalTB1 i)  = j `Interval.isSubsetOf` i
       ma (IntervalTB1 j ,IntersectOp) _  (IntervalTB1 i)  = not $ Interval.null $ j `Interval.intersection` i
       ma (IntervalTB1 i ,_) Intersect (IntervalTB1 j)  = not $ Interval.null $ j `Interval.intersection` i
-      ma i e j = errorWithStackTrace ("no ma = " <> show (i,e,j))
+      ma i e j = traceShow (i,e,j) $ errorWithStackTrace ("no ma = " <> show (i,e,j))
   match x y z = errorWithStackTrace ("no match = " <> show (x,y,z))
 
   union  l

@@ -7,6 +7,7 @@
 module TP.Map where
 
 import Step.Host
+import qualified NonEmpty as Non
 import Control.Monad.Writer as Writer
 import TP.View
 import GHC.Stack
@@ -84,8 +85,9 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
               proj r = projf r <$> F.toList efields
               convField (ArrayTB1 v) = Just $ [("position",ArrayTB1 v)]
               convField (LeftTB1 v) = join $ convField  <$> v
-              convField (TB1 v ) = Just $ to $ v
+              convField (TB1 v ) = Just $ to  v
                 where to p@(SPosition (Position (y,x,z) ))  =  [("position",TB1 p )]
+                      to p@(SLineString (LineString v)) =[("position",ArrayTB1 $ Non.fromList $ fmap (TB1 .SPosition)$ F.toList v)]
               convField i  = errorWithStackTrace (show i)
           in ("#" <> renderShowable color ,table,efields,evfields,proj)) <$>  ( G.toList evMap)
 
@@ -116,11 +118,12 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
         element calendar # set children [innerCalendar,editor]
         calendarCreate  innerCalendar pb ("[]"::String)
         onEvent (moveend innerCalendar) (liftIO . h .traceShowId )
-        fin <- mapM (\((_,tb,fields,efields,proj)) -> do
+        fin <- mapM (\(_,tb,fields,efields,proj) -> do
           let filterInp =  liftA2 (,) positionT  calendarT
               tname = tableName tb
           mapUIFinalizerT innerCalendar (\(positionB,calT)-> do
-            let pred = lookAccess inf tname <$> predicate (fmap (\(TB1 (SText v))->  lookKey inf tname v) <$>efields ) (Just $  fields ) (positionB,Just calT)
+            let pred = predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)
+                fieldKey (TB1 (SText v))=  v
             reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) (WherePredicate pred)
             let v = fmap snd $ reftb ^. _1
             let evsel = (\j (tev,pk,_) -> if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc

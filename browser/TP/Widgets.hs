@@ -565,7 +565,7 @@ selectedMultipleFFI = ffiAttr "getOpts($(%1))" "setOpts($(%2),%1)"
 
 
 
-emptyUI = TrivialWidget (pure Nothing) <$> UI.div
+emptyUI = TrivialWidget (pure  Nothing) <$> UI.div
 
 pruneTidings chw tds =   tidings chkBH chkAll
   where

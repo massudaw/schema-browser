@@ -228,6 +228,7 @@ readBinaryOp "=" = Equals
 readBinaryOp "@>" = Contains
 readBinaryOp "<@" = Flip Contains
 readBinaryOp "&&" = IntersectOp
+readBinaryOp "any =" = Flip $ AnyOp Equals
 readBinaryOp "= all" = AllOp Equals
 readBinaryOp "@> all" = AllOp Contains
 readBinaryOp "<@ all" = AllOp (Flip Contains)

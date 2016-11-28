@@ -54,28 +54,48 @@ instance A.ToJSON Showable where
             , A.String $ T.pack (show z)]
     toJSON i = A.toJSON (renderPrim i)
 
-geoPred geofields (_,ne,sw) = geo
-  where
-    geo =
-      OrColl $
-        PrimColl .
-          (, Left ((IntervalTB1 $ Interval.interval (makePos sw) (makePos ne)),Contains) ) .
-        indexer . T.pack . renderShowable <$>
-        F.toList geofields
+indexTy (IProd _ [k] )=  keyType k
+indexTy (Many [k] )= indexTy k
+indexTy (Nested (IProd _ [i] ) n) = nestTy (keyType i ) (indexTy n)
+    where
+      nestTy (KOptional k) n = KOptional (nestTy k n)
+      nestTy (KOptional k) (KOptional n) = KOptional (nestTy k n)
+      nestTy (KArray k) i = KArray (nestTy k i)
+      nestTy (Primitive k) i = i
 
-timePred evfields (incrementT,resolution) = time
+geoPred inf tname geofields (_,ne,sw) = traceShowId geo
+  where
+    geo = OrColl $ geoField <$> F.toList geofields
+    geoField f =
+        PrimColl .
+          (, Left (IntervalTB1 $ Interval.interval (makePos sw) (makePos ne),op (indexTy index)))
+            $ index
+      where
+        index =  liftAccess inf (tableName tname)  ( indexer f)
+
+    op f
+      =  case f of
+        Primitive o -> Flip Contains
+        KOptional i -> op i
+        KSerial i -> op i
+        KInterval i -> IntersectOp
+        KArray i-> AnyOp $ op i
+        v -> errorWithStackTrace (show v)
+
+timePred inf tname evfields (incrementT,resolution) = traceShowId time
   where
     time = OrColl $ timeField <$> F.toList evfields
     timeField f =
-      PrimColl . (, Left ( (IntervalTB1 $ fmap (ref (keyType f)) i),op (keyType f))) $
-        indexer (keyValue f)
+      PrimColl . (, Left ( (IntervalTB1 $ fmap (ref ty) i),op ty)) $ index
+      where
+        index =  liftAccess inf (tableName tname)  ( indexer f)
+        ty = indexTy index
     op f = case f of
              KInterval i -> IntersectOp
              KOptional i -> op i
              KSerial i -> op i
-             Primitive i -> Contains
-    ref f =
-        case f of
+             Primitive i -> Flip Contains
+    ref f =  case f of
             Primitive (AtomicPrim PDate) ->
                 (TB1 . SDate . localDay . utcToLocalTime utc)
             Primitive (AtomicPrim (PTimestamp _)) ->
@@ -93,13 +113,15 @@ timePred evfields (incrementT,resolution) = time
             incrementT
 
 predicate
-    :: Maybe (NonEmpty Key)
-    -> Maybe (NonEmpty (FTB Showable))
+  :: InformationSchema
+    -> Table
+    -> Maybe (NonEmpty T.Text)
+    -> Maybe (NonEmpty T.Text)
     -> (Maybe (t, [Double], [Double]), Maybe (UTCTime, String))
-    -> BoolCollection (Access T.Text,AccessOp Showable)
-predicate evfields geofields (i,j) =
+    -> BoolCollection (Access Key,AccessOp Showable)
+predicate inf tname evfields geofields (i,j) =
     AndColl $
-    catMaybes [liftA2 geoPred geofields i, liftA2 timePred evfields j]
+      catMaybes [liftA2 (geoPred inf tname ) geofields i, liftA2 (timePred inf tname) evfields j]
 
 resRange b "year" d =
     d

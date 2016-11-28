@@ -153,8 +153,8 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
             edits <- ui$ accumDiff (\(tref,_)->  evalUI calendar $ do
               let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
               traverse (\((_,t,fields,proj))-> do
-                    let pred = WherePredicate $ lookAccess inf (tableName t)<$> timePred (fieldKey <$> fields ) (incrementT,resolution)
-                        fieldKey (TB1 (SText v))=  lookKey inf (tableName t) v
+                    let pred = WherePredicate $ timePred inf t (fieldKey <$> fields ) (incrementT,resolution)
+                        fieldKey (TB1 (SText v))=   v
                     reftb <- ui $ refTables' inf t Nothing pred
                     let v = fmap snd $ reftb ^. _1
                     let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup  pk j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc

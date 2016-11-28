@@ -118,8 +118,8 @@ chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
               calendarCreate  charts (show incrementT)
               let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
               traverse (\((_,t,fields,(timeFields,geoFields),proj))-> do
-                    let pred = fromMaybe mempty (fmap (\fields -> WherePredicate $ lookAccess inf (tableName t)<$> timePred (fieldKey <$> fields) (incrementT,resolution)) timeFields  <> liftA2 (\field pos-> WherePredicate $ lookAccess inf (tableName t)<$> geoPred field pos ) geoFields positionB )
-                        fieldKey (TB1 (SText v))=  lookKey inf (tableName t) v
+                    let pred = fromMaybe mempty (fmap (\fields -> WherePredicate $  timePred inf t (fieldKey <$> fields) (incrementT,resolution)) timeFields  <> liftA2 (\field pos-> WherePredicate $ geoPred inf t(fieldKey <$>  field) pos ) geoFields positionB )
+                        fieldKey (TB1 (SText v))=   v
                     reftb <- ui $ refTables' inf t Nothing pred
                     let v = fmap snd $ reftb ^. _1
                     let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup pk j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc

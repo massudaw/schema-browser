@@ -3,11 +3,13 @@ module Types.Inference
   ) where
 
 import Types
+import Debug.Trace
 import GHC.Stack
 
 inferOperatorType ::
 										 Show t =>
 										 BinaryOperator -> KType t -> KType t
+inferOperatorType i j | traceShow ("infer",i,j) False = undefined
 inferOperatorType (Flip (Flip e))  i = inferOperatorType e i
 inferOperatorType e (KOptional i) = inferOperatorType e i
 inferOperatorType e (KDelayed i) = inferOperatorType e i
@@ -20,6 +22,6 @@ inferOperatorType Equals i = i
 inferOperatorType (Flip Equals) i = i
 inferOperatorType IntersectOp i = i
 inferOperatorType (Flip IntersectOp ) i = i
-inferOperatorType o k = errorWithStackTrace (show (o,k))
+inferOperatorType o k = errorWithStackTrace ("infererror" ++ show (o,k))
 
 

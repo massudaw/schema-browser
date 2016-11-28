@@ -4,6 +4,7 @@
 module Postgresql.Printer
   (selectQuery
   ,tableType
+  ,renderType
   ,explodeRecord
   ,expandBaseTable
   ,createTable
@@ -144,8 +145,8 @@ selectQuery
      -> Maybe (TBIndex Showable)
      -> [(Key, Order)]
      -> WherePredicate
-     -> (Text,Maybe [TB Identity Key Showable])
-selectQuery t koldpre order wherepred = (,ordevalue <> predvalue) $ if L.null (snd withDecl )
+     -> (Text,Maybe [Either (TB Identity Key Showable) (PrimType ,FTB Showable)])
+selectQuery t koldpre order wherepred = (, (fmap Left <$> ordevalue )<> (fmap Right <$> predvalue)) $ if L.null (snd withDecl )
     then fst withDecl
     else "WITH RECURSIVE " <> T.intercalate "," ( snd withDecl ) <> fst withDecl
   where withDecl = runWriter tableQuery
@@ -163,7 +164,7 @@ selectQuery t koldpre order wherepred = (,ordevalue <> predvalue) $ if L.null (s
             koldPk :: Maybe [TB Identity Key Showable]
             koldPk =  (\k -> uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) k ) . unIndex <$> koldpre
             pkParam =  koldPk <> (tail .reverse <$> koldPk)
-         in (oq,pkParam)
+          in (oq,pkParam)
         orderQ = " ORDER BY " <> T.intercalate "," ((\(l,j)  -> l <> " " <> showOrder j ) . first (justLabel t) <$> order)
 
 generateComparison ((k,v):[]) = k <>  dir v <> "?"
@@ -334,7 +335,7 @@ explodeDelayed tb block assoc leaf (Unlabeled (FKT ref rel t )) = case unkvlist 
 
 
 
-printPred :: TB3Data (Labeled Text)  Key ()->  BoolCollection (Access Key ,AccessOp Showable ) -> (Maybe [Text],Maybe [Column Key Showable])
+printPred :: TB3Data (Labeled Text)  Key ()->  BoolCollection (Access Key ,AccessOp Showable ) -> (Maybe [Text],Maybe [(PrimType,FTB Showable)])
 printPred t (PrimColl (a,e)) = (Just $ catMaybes $ fmap fst idx,Just $ catMaybes $ fmap snd idx)
   where
     idx = indexFieldL e [] a t
@@ -354,6 +355,8 @@ renderType (KInterval t) =
       4 -> "int4range"
       8 -> "int8range"
     Primitive (AtomicPrim PDate) -> "daterange"
+    Primitive (AtomicPrim PLineString ) -> "point3range"
+    Primitive (AtomicPrim PPosition ) -> "point3range"
     Primitive (AtomicPrim PDouble) -> "floatrange"
     Primitive (AtomicPrim (PTimestamp i)) -> case i of
       Just i -> "tsrange"
@@ -377,12 +380,12 @@ renderType (KOptional i) =renderType i
 renderType (KSerial i) =renderType i
 renderType (KDelayed i) =renderType i
 
--- inferParamType e i |traceShow (e,i) False = undefined
 
 instance IsString (Maybe T.Text) where
   fromString i = Just (fromString i)
 
-inferParamType op i = maybe "" (":: " <>) $ renderType $ inferOperatorType op i
+-- inferParamType e i |traceShow ("inferParam"e,i) False = undefined
+inferParamType op i = maybe "" (":: " <>) $ renderType $ traceShowId  $ inferOperatorType op i
 
 justLabel :: TB3Data (Labeled Text ) Key () -> Key -> Text
 justLabel t k =  justError ("cant find label"  <> show k <> " - " <> show t).getLabels t $ k
@@ -407,13 +410,14 @@ indexLabel  i v = errorWithStackTrace (show (i, v))
 
 
 
+type PrimType = KType (Prim KPrim (Text,Text))
 
 indexFieldL
     ::  AccessOp Showable
     -> [Text]
     -> Access Key
     -> TB3Data (Labeled Text) Key ()
-    -> [(Maybe Text, Maybe (TB Identity Key Showable))]
+    -> [(Maybe Text, Maybe (PrimType ,FTB Showable))]
 -- indexFieldL e c p v | traceShow (e,c,p) False = undefined
 indexFieldL e c p@(IProd b l) v =
     case findAttr l v of
@@ -479,12 +483,18 @@ utlabel (Right  e) c idx = result e idx
     unKInterval =alterKeyType (\(KInterval i) -> i)
 utlabel (Left (value,e)) c idx = result
   where
+    notFlip (Flip i) = False
+    notFlip i = True
     operator i = errorWithStackTrace (show i)
-    opvalue ref (AnyOp i)  = " ? " <> renderBinary i <>  " ANY( " <> T.intercalate "." (c ++ [ref]) <>  ")"
-    opvalue ref (Flip (AnyOp (AnyOp Equals)))  = T.intercalate "." (c ++ [ref]) <> " " <>  "<@@" <>  " ANY( ? " <>  inferParamType e (KArray $ keyType (fst idx)) <> ")"
-    opvalue ref (Flip (AnyOp i))  = T.intercalate "." (c ++ [ref]) <> " " <> renderBinary (Flip i) <>  " ANY( ? " <>  inferParamType e (KArray $ keyType (fst idx)) <> ")"
-    opvalue ref  i = (\v ->  " ? " <> inferParamType (Flip i) (keyType (fst idx)) <> renderBinary i <>  T.intercalate "." (c ++ [ref]) ) $ idx
-    opparam _ = Just $ Attr (fst idx ) value
+    opvalue ref op | traceShow ("opvalue",ref,op) False = undefined
+    opvalue re  (Flip (Flip i)) = opvalue re i
+    opvalue ref (Flip (AnyOp (AnyOp Equals)))  = T.intercalate "." (c ++ [ref]) <> " " <>  "<@@" <>  " ANY( ? " <> ")"
+    opvalue ref (AnyOp i)  = " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <> renderBinary (Flip i) <> " ANY(" <> T.intercalate "." (c ++ [ref])<> ")"
+    opvalue ref (Flip (AnyOp i))  = T.intercalate "." (c ++ [ref]) <> renderBinary i <>  " ANY( " <> " ? " <>  ")"
+    opvalue ref (Flip i) =  " ? " <> inferParamType (Flip i) ( keyType (fst idx)) <> renderBinary i <>  T.intercalate "." (c ++ [ref])
+    opvalue ref i =  T.intercalate "." (c ++ [ref]) <> renderBinary i <>  " ? " <> inferParamType i ( keyType (fst idx))
+    opparm ref | traceShow ("opparam",ref) False = undefined
+    opparam e = Just $ (inferOperatorType e (keyType  $fst idx ) ,value)
     result =  ( Just $  (opvalue (snd $ idx) e)   ,opparam e )
 
 tlabel' (Labeled l (Attr k _)) =  (k,l)

@@ -30,8 +30,8 @@ import Debug.Trace
 elem :: Char -> String -> Bool
 elem = Prelude.elem
 
-atTag tag = deep (isElem >>> hasName tag)
 
+atTag tag = deep (isElem >>> hasName tag)
 
 
 
