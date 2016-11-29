@@ -265,7 +265,12 @@ instance Show a => Show (FKey a)where
 
 showKey k  =   maybe (keyValue k)  (\t -> keyValue k <> "-" <> t ) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::" <> T.pack (show (keyType k) <> "::" <> show (keyModifier k) <> "::" <> show (keyPosition k )  )
 
-newtype Position = Position (Double,Double,Double) deriving(Eq,Ord,Typeable,Show,Read,Generic)
+newtype Position = Position (Double,Double,Double) deriving(Eq,Typeable,Show,Read,Generic)
+
+instance Ord Position where
+  (Position (x,y,z) ) <= (Position (a,b,c)) =  x <= a && y <= b && z <= c
+  (Position (x,y,z) ) >= (Position (a,b,c)) =  x >= a && y >= b && z >= c
+
 
 newtype Bounding = Bounding (Interval.Interval Position) deriving(Eq,Ord,Typeable,Show,Generic)
 

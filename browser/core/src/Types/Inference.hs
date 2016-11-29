@@ -9,7 +9,7 @@ import GHC.Stack
 inferOperatorType ::
 										 Show t =>
 										 BinaryOperator -> KType t -> KType t
-inferOperatorType i j | traceShow ("infer",i,j) False = undefined
+-- inferOperatorType i j | traceShow ("infer",i,j) False = undefined
 inferOperatorType (Flip (Flip e))  i = inferOperatorType e i
 inferOperatorType e (KOptional i) = inferOperatorType e i
 inferOperatorType e (KDelayed i) = inferOperatorType e i

@@ -15,6 +15,7 @@ module Postgresql.Printer
 
 import Query
 import Debug.Trace
+import Postgresql.Types
 import Data.Time
 import Data.Ord
 import Types.Index (TBIndex(..))
@@ -355,8 +356,8 @@ renderType (KInterval t) =
       4 -> "int4range"
       8 -> "int8range"
     Primitive (AtomicPrim PDate) -> "daterange"
-    Primitive (AtomicPrim PLineString ) -> "point3range"
-    Primitive (AtomicPrim PPosition ) -> "point3range"
+    Primitive (AtomicPrim PLineString ) -> "box3d"
+    Primitive (AtomicPrim PPosition ) -> "box3d"
     Primitive (AtomicPrim PDouble) -> "floatrange"
     Primitive (AtomicPrim (PTimestamp i)) -> case i of
       Just i -> "tsrange"
@@ -385,7 +386,7 @@ instance IsString (Maybe T.Text) where
   fromString i = Just (fromString i)
 
 -- inferParamType e i |traceShow ("inferParam"e,i) False = undefined
-inferParamType op i = maybe "" (":: " <>) $ renderType $ traceShowId  $ inferOperatorType op i
+inferParamType op i = maybe "" (":: " <>) $ renderType $  inferOperatorType op i
 
 justLabel :: TB3Data (Labeled Text ) Key () -> Key -> Text
 justLabel t k =  justError ("cant find label"  <> show k <> " - " <> show t).getLabels t $ k
@@ -410,7 +411,6 @@ indexLabel  i v = errorWithStackTrace (show (i, v))
 
 
 
-type PrimType = KType (Prim KPrim (Text,Text))
 
 indexFieldL
     ::  AccessOp Showable
@@ -486,17 +486,34 @@ utlabel (Left (value,e)) c idx = result
     notFlip (Flip i) = False
     notFlip i = True
     operator i = errorWithStackTrace (show i)
-    opvalue ref op | traceShow ("opvalue",ref,op) False = undefined
+    -- opvalue ref op | traceShow ("opvalue",ref,op) False = undefined
     opvalue re  (Flip (Flip i)) = opvalue re i
     opvalue ref (Flip (AnyOp (AnyOp Equals)))  = T.intercalate "." (c ++ [ref]) <> " " <>  "<@@" <>  " ANY( ? " <> ")"
-    opvalue ref (AnyOp i)  = " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <> renderBinary (Flip i) <> " ANY(" <> T.intercalate "." (c ++ [ref])<> ")"
+    opvalue ref (AnyOp i)  = recoverop (keyType (fst idx))
+        where
+          recoverop (KOptional i) = recoverop i
+          recoverop (KArray (Primitive (AtomicPrim PPosition))) =  " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <>  "&&" <>  T.intercalate "." (c ++ [ref])
+          recoverop _ =  " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <> renderBinary (Flip i) <> " ANY(" <> T.intercalate "." (c ++ [ref])<> ")"
     opvalue ref (Flip (AnyOp i))  = T.intercalate "." (c ++ [ref]) <> renderBinary i <>  " ANY( " <> " ? " <>  ")"
-    opvalue ref (Flip i) =  " ? " <> inferParamType (Flip i) ( keyType (fst idx)) <> renderBinary i <>  T.intercalate "." (c ++ [ref])
-    opvalue ref i =  T.intercalate "." (c ++ [ref]) <> renderBinary i <>  " ? " <> inferParamType i ( keyType (fst idx))
-    opparm ref | traceShow ("opparam",ref) False = undefined
+    opvalue ref i =  T.intercalate "." (c ++ [ref]) <>  unliftOp i (keyType (fst idx))<>  " ? " <> inferParamType i ( keyType (fst idx))
+    -- opparm ref | traceShow ("opparam",ref) False = undefined
     opparam e = Just $ (inferOperatorType e (keyType  $fst idx ) ,value)
     result =  ( Just $  (opvalue (snd $ idx) e)   ,opparam e )
 
+unliftOp :: BinaryOperator -> PrimType -> Text
+unliftOp  op ty =  recurseOp recinf op  recty
+  where infered = inferOperatorType op  ty
+        recinf = (fromMaybe infered $ ktypeRec ktypeUnLift infered )
+        recty = (fromMaybe ty $ktypeRec ktypeUnLift ty)
+
+recurseOp :: PrimType -> BinaryOperator -> PrimType -> Text
+recurseOp (KOptional i) o k = recurseOp i o k
+recurseOp i o (KOptional k) = recurseOp i o k
+recurseOp i (Flip (Flip o)) k = recurseOp i o k
+-- recurseOp i (Flip o)  k = recurseOp k o i
+recurseOp i o k | traceShow (i,o,k) $ isJust rw =  justError "rw" rw
+  where rw = M.lookup (i,o,k)  rewriteOp
+recurseOp i o k = renderBinary o
 tlabel' (Labeled l (Attr k _)) =  (k,l)
 tlabel' (Labeled l (IT k tb )) =  (k,l <> " :: " <> tableType tb)
 tlabel' (Unlabeled (Attr k _)) = (k,keyValue k)

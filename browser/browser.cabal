@@ -23,6 +23,7 @@ library
     Postgresql.Backend
     Postgresql.Parser
     Postgresql.Printer
+    Postgresql.Types
 
     Poller
     Expression

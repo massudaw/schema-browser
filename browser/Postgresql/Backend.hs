@@ -43,7 +43,7 @@ import qualified Data.Set as S
 import qualified Database.PostgreSQL.Simple.FromRow as FR
 import Database.PostgreSQL.Simple
 
-filterFun k = filter (\k -> not $ isFun k )
+filterFun  = filter (\k -> not $ isFun k )
   where isFun (PFun _ _ _ ) = True
         isFun i = False
 
@@ -71,7 +71,7 @@ insertPatch f conn path@(m ,s,i ) t =  liftIO$ if not $ L.null serialAttr
         return path
     where
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (escapeReserved <$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
-      attrs =  concat $ nonRefTB . create <$> i
+      attrs =  concat $ nonRefTB . create <$> filterFun i
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
       serial f =  filter (all1 testSerial  .f)
       direct f = filter (not.all1 testSerial .f)

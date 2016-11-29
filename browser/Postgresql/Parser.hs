@@ -4,6 +4,7 @@ module Postgresql.Parser where
 import qualified Data.HashMap.Strict as HM
 import Data.Map (Map)
 import Types hiding (Parser)
+import Postgresql.Types
 import Postgresql.Printer
 import Data.Ord
 import qualified Data.Aeson as A
@@ -65,125 +66,6 @@ import Database.PostgreSQL.Simple
 import Blaze.ByteString.Builder(fromByteString)
 import Blaze.ByteString.Builder.Char8(fromChar)
 
-preconversion i =  join $ (\t -> M.lookup (i,t) postgresLiftPrimConv) <$> ktypeLift  i
-preunconversion i =  join $ (\t -> M.lookup (t,i) postgresLiftPrimConv) <$> ktypeUnLift  i
-
-conversion i = fromMaybe (id , id) $ preconversion i
-
-topconversion f v@(KDelayed n ) =   preconversion v <|> fmap lif (topconversion f n )
-  where
-    mapd a (DelayedTB1 i) = DelayedTB1 (fmap a i)
-    mapd _ ! b =errorWithStackTrace (show (b))
-    lif (a,b) = (mapd a , mapd b)
-
-topconversion f v@(KSerial n ) =   preconversion v <|> fmap lif (topconversion f n )
-  where
-    maps a (SerialTB1 i) = SerialTB1 (fmap a i)
-    maps a ! b =errorWithStackTrace (show (b))
-    lif (a,b) = (maps a , maps b)
-
-topconversion f v@(KOptional n ) =   preconversion v <|> fmap lif (topconversion f n )
-  where
-    mapo a (LeftTB1 i) = LeftTB1 (fmap a i)
-    mapo a i = traceShow (n,i) $ a i
-    mapo a ! b = traceShow (b,n) $ errorWithStackTrace (show (b))
-    lif (a,b) = (mapo a , mapo b)
-
-topconversion f v@(KArray n) =  preconversion v <|> fmap lif (topconversion f n )
-  where
-    mapa a (ArrayTB1 i) = ArrayTB1 (fmap a i)
-    mapa a ! b =errorWithStackTrace (show (b))
-    lif (a,b) = (mapa a , mapa b)
-
-topconversion f v@(KInterval n) =  preconversion v <|> fmap lif (topconversion f n )
-  where
-    map a (IntervalTB1 i) = IntervalTB1 (fmap a i)
-    map a ! b =errorWithStackTrace (show (b))
-    lif (a,b) = (map a , map b)
-topconversion f v@(Primitive i) =  preconversion v
-
-
-
-postgresLiftPrimConv :: Map (KType (Prim KPrim (Text,Text)),KType (Prim KPrim (Text,Text)))  ( FTB  Showable -> FTB Showable , FTB Showable -> FTB Showable )
-postgresLiftPrimConv =
-  M.fromList [((Primitive (AtomicPrim PBounding ), KInterval (Primitive (AtomicPrim PPosition)) )
-              , ((\(TB1 (SBounding (Bounding i) )) -> IntervalTB1 (fmap   (TB1. SPosition ) i)  ) . traceShowId
-                , (\(IntervalTB1 i) -> TB1 $ SBounding $ Bounding $ (fmap (\(TB1 (SPosition i)) -> i)) i) .  traceShowId ))
-                  {-  ,((Primitive (AtomicPrim PLineString ), KArray (Primitive (AtomicPrim PPosition)) )
-                , ((\(TB1 (SLineString (LineString i) )) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1. SPosition ) i)) .  traceShowId
-                   , (\(ArrayTB1 i) -> TB1 $ SLineString $ LineString $ V.fromList  $ F.toList $ (fmap (\(TB1 (SPosition i)) -> i)) i) .  traceShowId ))-}]
-
-postgresLiftPrim :: Map (KType (Prim KPrim (Text,Text))) (KType (Prim KPrim (Text,Text)))
-postgresLiftPrim = M.fromList $ M.keys postgresLiftPrimConv
-
-postgresUnLiftPrim :: Map (KType (Prim KPrim (Text,Text))) (KType (Prim KPrim (Text,Text)))
-postgresUnLiftPrim = M.fromList $ fmap swap $ M.keys postgresLiftPrimConv
-
-postgresPrim :: HM.HashMap Text KPrim
-postgresPrim =
-  HM.fromList [("character varying",PText)
-  ,("name",PText)
-  ,("character_data",PText)
-  ,("varchar",PText)
-  ,("text",PText)
-  ,("address",PAddress)
-  ,("character",PText)
-  ,("char",PText)
-  ,("bpchar",PText)
-  ,("sql_identifier" , PText)
-  ,("base64url",PText)
-  ,("session",PSession)
-  ,("bytea",PBinary)
-  ,("pdf",PMime "application/pdf")
-  ,("ofx",PMime "application/x-ofx")
-  ,("jpg",PMime "image/jpg")
-  ,("png",PMime "image/png")
-  ,("email",PMime "text/plain")
-  ,("html",PMime "text/html")
-  ,("dynamic",PDynamic)
-  ,("double precision",PDouble)
-  ,("numeric",PDouble)
-  ,("float8",PDouble)
-  ,("int4",PInt 4)
-  ,("oid",PInt 4)
-  ,("cnpj",PCnpj)
-  ,("cpf",PCpf)
-  ,("int8",PInt 8)
-  ,("integer",PInt 4)
-  ,("bigint",PInt 8)
-  ,("cardinal_number",PInt 2)
-  ,("smallint",PInt 2)
-  ,("boolean",PBoolean)
-  ,("bool",PBoolean)
-  ,("timestamptz",PTimestamp Nothing )
-  ,("timestamp",PTimestamp (Just utc))
-  ,("timestamp with time zone",PTimestamp Nothing )
-  ,("timestamp without time zone",PTimestamp (Just utc))
-  ,("interval", PInterval)
-  ,("date" ,PDate)
-  ,("time",PDayTime)
-  ,("color",PColor)
-  ,("time with time zone" , PDayTime)
-  ,("time without time zone" , PDayTime)
-  ,("POINT3",PPosition)
-  ,("geometry",PPosition)
-  ,("LINESTRING3",PLineString)
-  ,("box3d",PBounding)
-  ]
-
-ktypeUnLift :: KType (Prim KPrim (Text,Text)) -> Maybe (KType (Prim KPrim (Text,Text)))
-ktypeUnLift i = M.lookup i postgresUnLiftPrim
-
-ktypeLift :: KType (Prim KPrim (Text,Text)) -> Maybe (KType (Prim KPrim (Text,Text)))
-ktypeLift i = M.lookup i postgresLiftPrim
-
-ktypeRec f v@(KOptional i) = fmap KOptional $  f v <|> ktypeRec f i
-ktypeRec f v@(KArray i) =  f v <|> ktypeRec f i
-ktypeRec f v@(KInterval i) =  f v <|> ktypeRec f i
-ktypeRec f v@(KSerial i) = f v <|> ktypeRec f i
-ktypeRec f v@(KDelayed i) = f v <|> ktypeRec f i
-ktypeRec f v@(Primitive i ) = f v
-
 mapKeyType :: FKey (KType PGPrim) -> FKey (KType (Prim KPrim (Text,Text)))
 mapKeyType  = fmap mapKType
 
@@ -191,7 +73,7 @@ mapKType :: KType PGPrim -> KType CorePrim
 mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec ktypeLift (fmap textToPrim i)
 
 textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)
-textToPrim i | traceShow i False =undefined
+-- textToPrim i | traceShow i False =undefined
 textToPrim (AtomicPrim (s,i)) = case  HM.lookup i  postgresPrim of
   Just k -> AtomicPrim k -- $ fromMaybe k (M.lookup k (M.fromList postgresLiftPrim ))
   Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
@@ -213,7 +95,7 @@ instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Tex
   toField (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   (F.toList is)
   toField (IntervalTB1 is )
     | ty == Just "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $maybe "" T.unpack $ ty), TF.Plain $ fromByteString "range"]
-    | ty == Just "POINT3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
+    | ty == Just "POINT3" = TF.Many [TF.Plain "box3d(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
     | ty == Just "LINESTRING3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
     | otherwise  = TF.toField  tyv
     where tyv = fmap (\(TB1 i ) -> snd i) is
@@ -225,7 +107,7 @@ instance (TF.ToField a , TF.ToField b ) => TF.ToField (Either a b ) where
   toField (Right i) = TF.toField i
   toField (Left i) = TF.toField i
 instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
-  toField (k ,i) = case  liftA2 (,) (ktypeRec ktypeUnLift  k ) (topconversion preunconversion k) of
+  toField (k ,i) = case  liftA2 (,) (traceShowId $ ktypeRec ktypeUnLift  k ) (topconversion preunconversion k) of
                      Just (k,(_,b)) -> toFiel   k (b i)
                      Nothing -> toFiel k i
     where
@@ -349,8 +231,8 @@ unIntercalateAtto l s = go l
     go [] = errorWithStackTrace  "empty list"
 
 parseAttrJSON (Attr i _ ) v = do
-  let tyun = fromMaybe (keyType i) $ fmap (traceShow (keyType i) . traceShowId ) $ ktypeRec ktypeUnLift (keyType i)
-  s<- parseShowableJSON tyun v
+  let tyun = fromMaybe (keyType i) $ ktypeRec ktypeUnLift (keyType i)
+  s<- parseShowableJSON  tyun  v
   return $  Attr i s
 parseAttrJSON (Fun i rel _ )v = do
   s<- parseShowableJSON (keyType  i) v
@@ -481,7 +363,7 @@ parsePrimJSON i  v =
   (case i of
       PDynamic  -> A.withText (show i) (return .SDynamic . B.decode . BSL.fromStrict . (fst . B16.decode . BS.drop 1 . BS.dropWhile (=='\\') ).  BS.pack . T.unpack)
       PBinary -> A.withText (show i) (return .SBinary . (fst . B16.decode . BS.drop 1 . BS.dropWhile (=='\\') ) . BS.pack . T.unpack)
-      PMime _ -> A.withText (show i) (return .SBinary . (fst . B16.decode . BS.drop 1 . BS.dropWhile (=='\\') )  . BS.pack . T.unpack . traceShowId )
+      PMime _ -> A.withText (show i) (return .SBinary . (fst . B16.decode . BS.drop 1 . BS.dropWhile (=='\\') )  . BS.pack . T.unpack )
       PInt  _ -> A.withScientific (show i) (return .SNumeric . floor)
       PDouble  -> A.withScientific (show i) (return .SDouble . toRealFloat)
       PBoolean -> A.withBool (show i) (return. SBoolean)

@@ -131,10 +131,10 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
             let tdi = tidings tdib (join <$> evsel)
             (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi) reftb [] [] (allRec' (tableMap inf) $ lookTable inf tname)  tdi
             mapUIFinalizerT innerCalendar (\i -> do
-              createLayers innerCalendar tname positionB (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)
-                                          ) v
-            -- ui $ Writer.tell[fmap fst $ runDynamic $ evalUI innerCalendar $ removeLayers innerCalendar tname]
-            UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
+              createLayers innerCalendar tname positionB (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) v
+            stat <- UI.div  # sinkDiff text (show . (\i -> (positionB,length i, i) ).  (fmap snd . G.getEntries .filterfixed tb (WherePredicate pred )) <$> v)
+            edit <- UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
+            UI.div # set children [stat,edit]
             ) filterInp
           ) selected
         let els = foldr (liftA2 (:)) (pure []) fin
