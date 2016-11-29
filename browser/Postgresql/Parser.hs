@@ -76,7 +76,7 @@ textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)
 -- textToPrim i | traceShow i False =undefined
 textToPrim (AtomicPrim (s,i)) = case  HM.lookup i  postgresPrim of
   Just k -> AtomicPrim k -- $ fromMaybe k (M.lookup k (M.fromList postgresLiftPrim ))
-  Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
+  Nothing -> traceShow i $ errorWithStackTrace $ "no conversion for type " <> (show i)
 textToPrim (RecordPrim i) =  (RecordPrim i)
 
 
@@ -170,6 +170,7 @@ instance TF.ToField (UnQuoted Bounding ) where
           points = [point (Interval.lowerBound l), del, point (Interval.upperBound l)]
           -- point :: Position -> TF.Action
           point (ER.Finite (Position (lat,lon,alt))) = TF.Many [str "ST_setsrid(ST_MakePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str "),4326)"]
+          point (ER.Finite (Position2D (lat,lon))) = TF.Many [str "ST_setsrid(ST_MakePoint(", TF.toField lat , del , TF.toField lon ,  str "),4326)"]
 
 
 instance TF.ToField (UnQuoted LineString) where
@@ -180,10 +181,14 @@ instance TF.ToField (UnQuoted LineString) where
           points = L.intercalate [del] (fmap point (F.toList l))
           point :: Position -> [TF.Action]
           point (Position (lat,lon,alt)) = [str "ST_MakePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str ")"]
+          point (Position2D (lat,lon)) = [str "ST_setsrid(ST_MakePoint(", TF.toField lat , del , TF.toField lon ,  str "),4326)"]
 
 
 instance TF.ToField (UnQuoted Position) where
   toField (UnQuoted (Position (lat,lon,alt))) = TF.Many [str "ST_setsrid(st_makePoint(", TF.toField lat , del , TF.toField lon , del, TF.toField alt , str "),4326)"]
+    where del = TF.Plain $ fromChar ','
+          str = TF.Plain . fromByteString
+  toField (UnQuoted (Position2D (lat,lon))) = TF.Many [str "ST_setsrid(st_makePoint(", TF.toField lat , del , TF.toField lon , del,  str "),4326)"]
     where del = TF.Plain $ fromChar ','
           str = TF.Plain . fromByteString
 
@@ -376,14 +381,27 @@ parsePrimJSON i  v =
       PTimestamp _ -> (\v -> A.withText (show i) (maybe (fail ("cant parse timestamp" <> show (i,v))) (return .STimestamp  . fst) . strptime "%Y-%m-%dT%H:%M:%OS") $ v)
       PDayTime  -> A.withText (show i) (maybe (fail "cant parse daytime") (return .SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS")
       PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay . fst) . strptime "%Y-%m-%d")
-      PPosition -> A.withText (show i) (\s -> case  Sel.runGet getPosition (fst $ B16.decode (BS.pack $ T.unpack s))of
-              i -> case i of
-                Right i -> pure $ SPosition i
-                Left e -> fail e)
-      PLineString -> A.withText (show i) (\s -> case  Sel.runGet getLineString(fst $ B16.decode (BS.pack $ T.unpack s))of
+      PPosition ix -> A.withText (show i) (\s -> case ix of
+            3 -> case  Sel.runGet (getPosition3d get3DPosition)(fst $ B16.decode (BS.pack $ T.unpack s))of
+                i -> case i of
+                  Right i -> pure $ SPosition i
+                  Left e -> fail e
+            2 -> case  Sel.runGet (getPosition3d get2DPosition ) (traceShowId $ fst $ B16.decode (BS.pack $ T.unpack s))of
+                i -> case i of
+                  Right i -> pure $ SPosition i
+                  Left e -> fail e
+                                        )
+
+      PLineString ix -> A.withText (show i) (\s -> case ix of
+          3 -> case  Sel.runGet (getLineString get3DPosition)(fst $ B16.decode (BS.pack $ T.unpack s))of
               i -> case i of
                 Right i -> pure $ SLineString i
-                Left e -> fail e)
+                Left e -> fail e
+          2->case  Sel.runGet (getLineString get2DPosition ) (fst $ B16.decode (BS.pack $ T.unpack s))of
+              i -> case i of
+                Right i -> pure $ SLineString i
+                Left e -> fail e
+                                    )
 
       i -> errorWithStackTrace (show i)
   ) v
@@ -435,19 +453,19 @@ parsePrim i =  do
                     i <- fmap (SDate . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i
                  in tryquoted p
-        PPosition -> do
+        PPosition i-> do
           s <- plain' "\",)}"
-          case  Sel.runGet getPosition (fst $ B16.decode s)of
+          case  Sel.runGet (getPosition3d get3DPosition)(fst $ B16.decode s)of
               i -> case i of
                 Right i -> pure $ SPosition i
                 Left e -> fail e
-        PLineString -> do
+        PLineString i-> do
           s <- plain' "\",)}"
-          case  Sel.runGet getLineString (fst $ B16.decode s)of
+          case  Sel.runGet (getLineString get3DPosition)(fst $ B16.decode s)of
               i -> case i of
                 Right i -> pure $ SLineString i
                 Left e -> fail e
-        PBounding -> SBounding <$> tryquoted box3dParser
+        PBounding i-> SBounding <$> tryquoted box3dParser
 
 
 -- parseShowable (KArray (KDelayed i))
@@ -515,37 +533,36 @@ instance Sel.Serialize a => Sel.Serialize (ER.Extended a ) where
   get = ER.Finite <$> Sel.get
   put (ER.Finite i ) = Sel.put i
 
-instance Sel.Serialize Bounding where
-  get = do
-      i <- liftA2 (Interval.interval) Sel.get Sel.get
-      return  $ Bounding i
-  put (Bounding i ) = do
-      Sel.put (Interval.upperBound i)
-      Sel.put (Interval.lowerBound i)
+
+get2DPosition = do
+      x <- Sel.getFloat64le
+      y <- Sel.getFloat64le
+      return  $ Position2D (x,y)
+put2DPosition (Position2D (x,y)) = do
+      Sel.putFloat64le x
+      Sel.putFloat64le y
 
 
 
-instance Sel.Serialize Position where
-  get = do
+get3DPosition = do
       x <- Sel.getFloat64le
       y <- Sel.getFloat64le
       z <- Sel.getFloat64le
       return  $ Position (x,y,z)
-  put (Position (x,y,z)) = do
+put3DPosition (Position (x,y,z)) = do
       Sel.putFloat64le x
       Sel.putFloat64le y
       Sel.putFloat64le z
 
-instance Sel.Serialize LineString where
-  get = do
+getLineStringArray get = do
       n <- Sel.getWord32host
-      LineString .Vector.fromList <$> replicateM (fromIntegral n ) Sel.get
-  put (LineString  v ) = do
-      mapM_ (Sel.put) (F.toList v)
+      LineString .Vector.fromList <$> replicateM (fromIntegral n ) get
+putLineStringArray (LineString  v ) = do
+      mapM_ (put3DPosition) (F.toList v)
 
 
 
-getLineString = do
+getLineString get = do
           i <- Sel.getWord8
           if i  == 1
            then do
@@ -553,15 +570,17 @@ getLineString = do
              srid <- Sel.getWord32host
              let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
              case ty  of
-               2 -> Sel.get
+               2 -> getLineStringArray get
                i -> error $ "type not implemented " <> show ty
            else
              return (error $ "BE not implemented " <> show i )
 
 
 box3dParser = do
-          string "BOX3D"
-          let makePoint [x,y,z] = Position (x,y,z)
+          string "BOX3D" <|> string "BOX2D"
+          let
+            makePoint [x,y,z] = Position (x,y,z)
+            makePoint [x,y] = Position2D (x,y)
           res  <- char '(' *> sepBy1 (sepBy1 ( scientific) (char ' ') ) (char ',') <* char ')'
           return $ case fmap (fmap  realToFrac) res  of
             [m,s] ->  Bounding ((ER.Finite $ makePoint m ,True) `Interval.interval` (ER.Finite $ makePoint s,True))
@@ -575,7 +594,7 @@ instance (FromField a, FromField b, FromField c, FromField d, FromField e,
 
 
 instance F.FromField Position where
-  fromField f t = case  fmap (Sel.runGet getPosition ) decoded of
+  fromField f t = case  fmap (Sel.runGet (getPosition3d get3DPosition)) decoded of
     Just i -> case i of
       Right i -> pure i
       Left e -> F.returnError F.ConversionFailed  f e
@@ -583,18 +602,18 @@ instance F.FromField Position where
     where
         decoded = fmap (fst . B16.decode) t
 
-getPosition = do
+getPosition3d get = do
           i <- Sel.getWord8
           if i  == 1
            then do
              typ <- Sel.getWord32host
              srid <- Sel.getWord32host
              let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
-             case ty  of
-               1 -> Sel.get
-               i -> error $ "type not implemented " <> show ty
+             case traceShowId ty  of
+               1 -> get
+               i -> errorWithStackTrace $ "type not implemented " <> show ty
            else
-             return (error $ "BE not implemented " <> show i  )
+             return (errorWithStackTrace $ "BE not implemented " <> show i  )
 
 
 safeMaybe e f i = maybe (errorWithStackTrace (e  <> ", input = " <> show i )) id (f i)

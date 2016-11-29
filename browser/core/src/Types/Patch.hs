@@ -604,7 +604,7 @@ applyFTB pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                       Just p -> if ix <=  Non.length i - 1
                                 then ArrayTB1 $ Non.imap (\i v -> if i == ix then applyFTB pr a v p else v )  i
                                 else if ix == Non.length i
-                                      then ArrayTB1 $ traceShowId $ i <> pure (createFTB pr p)
+                                      then ArrayTB1 $ i <> pure (createFTB pr p)
                                       else errorWithStackTrace $ "ix bigger than next elem"
 applyFTB pr a (SerialTB1 i ) (PSerial o) = SerialTB1 $  applyOpt pr a i o
 applyFTB pr a (DelayedTB1 i ) (PDelayed o) = DelayedTB1 $  applyOpt pr a i o

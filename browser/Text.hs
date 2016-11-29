@@ -107,9 +107,9 @@ readPrim t =
      PInterval -> readInterval
      PDate-> readDate
      PDayTime -> \t -> readDayTime t <|> readDayTimeMin t <|> readDayTimeHour t
-     PPosition -> readPosition
+     PPosition i-> readPosition
      PBoolean -> readBoolean
-     PLineString -> readLineString
+     PLineString i-> readLineString
      PBinary -> readBin
   where
       readInt = nonEmpty (fmap SNumeric . readMaybe)

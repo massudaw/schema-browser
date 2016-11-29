@@ -952,13 +952,24 @@ reduceDiff i
 
 buildPrim :: [FieldModifier] ->Tidings (Maybe Showable) ->   KPrim -> UI (TrivialWidget (Maybe Showable))
 buildPrim fm tdi i = case i of
-         PPosition -> do
-            lon <- buildPrim fm (fmap (\(SPosition (Position (lon,_,_))) -> SDouble lon ) <$> tdi) PDouble
-            lat <- buildPrim fm (fmap (\(SPosition (Position (_,lat,_))) -> SDouble lat ) <$> tdi) PDouble
-            alt <- buildPrim fm (fmap (\(SPosition (Position (_,_,alt))) -> SDouble alt ) <$> tdi) PDouble
-            let res = liftA3 (\(SDouble a)(SDouble b) (SDouble c) -> SPosition (Position (a,b,c))) <$> triding lon <*> triding lat <*> triding alt
-            composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children (getElement <$> [lon,lat,alt])
-            return $ TrivialWidget res composed
+         PPosition i-> do
+           case i of
+             3-> do
+                lon <- buildPrim fm (fmap (\(SPosition (Position (lon,_,_))) -> SDouble lon ) <$> tdi) PDouble
+                lat <- buildPrim fm (fmap (\(SPosition (Position (_,lat,_))) -> SDouble lat ) <$> tdi) PDouble
+                alt <- buildPrim fm (fmap (\(SPosition (Position (_,_,alt))) -> SDouble alt ) <$> tdi) PDouble
+                let res = liftA3 (\(SDouble a)(SDouble b) (SDouble c) -> SPosition (Position (a,b,c))) <$> triding lon <*> triding lat <*> triding alt
+                composed <- UI.div # set UI.style [("display","inline-flex")]  # set UI.children (getElement <$> [lon,lat,alt])
+                upper <- UI.div # set children [composed]
+                return $ TrivialWidget res upper
+             2-> do
+                lon <- buildPrim fm (fmap (\(SPosition (Position2D (lon,_))) -> SDouble lon ) <$> tdi) PDouble
+                lat <- buildPrim fm (fmap (\(SPosition (Position2D (_,lat))) -> SDouble lat ) <$> tdi) PDouble
+                let res = liftA2 (\(SDouble a)(SDouble b)  -> SPosition (Position2D (a,b))) <$> triding lon <*> triding lat
+                composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children (getElement <$> [lon,lat])
+                upper <- UI.div # set children [composed]
+                return $ TrivialWidget res upper
+
 
          PBoolean -> do
            res <- checkedWidgetM (fmap (\(SBoolean i) -> i) <$> tdi )

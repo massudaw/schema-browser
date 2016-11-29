@@ -396,7 +396,7 @@ pageTable flag method table page size presort fixed = do
                    index = (estLength page pagesize (s + G.size freso) , maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token$ mp)
                liftIO$ do
                  putPatch (idxChan dbvar ) (justError"no pred" diffpred,estLength page pagesize s, pageidx ,fromMaybe HeadToken token)
-                 putPatch (patchVar dbvar) (F.toList $ patch  <$> res)
+                 putPatch (patchVar dbvar) (F.toList $ patch  <$> filter (\i -> isNothing $ G.lookup (G.getIndex i) reso  )res)
                return  (index,res <> G.toList freso)
              else do
 

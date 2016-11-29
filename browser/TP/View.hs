@@ -52,6 +52,12 @@ instance A.ToJSON Showable where
             [ A.String $ T.pack (show x)
             , A.String $ T.pack (show y)
             , A.String $ T.pack (show z)]
+    toJSON (SPosition (Position2D (y,x))) =
+        A.Array $
+        V.fromList
+            [ A.String $ T.pack (show x)
+            , A.String $ T.pack (show y)
+            ]
     toJSON i = A.toJSON (renderPrim i)
 
 indexTy (IProd _ [k] )=  keyType k
@@ -68,9 +74,10 @@ geoPred inf tname geofields (_,ne,sw) = traceShowId geo
     geo = OrColl $ geoField <$> F.toList geofields
     geoField f =
         PrimColl .
-          (, Left (IntervalTB1 $ Interval.interval (makePos sw) (makePos ne),op (indexTy index)))
+          (, Left (IntervalTB1 $ Interval.interval (makePos (L.head $ F.toList nty)sw) (makePos (L.head $ F.toList nty)ne),op nty))
             $ index
       where
+        nty= indexTy index
         index =  liftAccess inf (tableName tname)  ( indexer f)
 
     op f
@@ -155,10 +162,16 @@ resRange b "week" d =
                else 7)
           (utctDay d)
     }
+resRange b "hour" d =
+   addUTCTime (if b
+               then -3600
+               else 3600) d
 
-makePos [b,a,z] =
+makePos (AtomicPrim (PPosition 2))[b,a,z] =
+    (Interval.Finite $ TB1 $ SPosition (Position2D (a, b)), True)
+makePos (AtomicPrim (PPosition 3)) [b,a,z] =
     (Interval.Finite $ TB1 $ SPosition (Position (a, b, z)), True)
-makePos i = errorWithStackTrace (show i)
+makePos _ i = errorWithStackTrace (show i)
 
 writePK :: TBData Key Showable -> FTB Showable -> T.Text
 writePK r efield =

@@ -212,13 +212,13 @@ data KPrim
    | PDayTime
    | PTimestamp (Maybe TimeZone)
    | PInterval
-   | PPosition
-   | PBounding
+   | PPosition Int
+   | PBounding Int
+   | PLineString Int
    | PCnpj
    | PMime Text
    | PCpf
    | PBinary
-   | PLineString
    | PSession
    | PColor
    | PDynamic
@@ -265,11 +265,15 @@ instance Show a => Show (FKey a)where
 
 showKey k  =   maybe (keyValue k)  (\t -> keyValue k <> "-" <> t ) (keyTranslation k) <> "::" <> T.pack ( show $ hashUnique $ keyFastUnique k )<> "::" <> T.pack (show $ keyStatic k) <>  "::" <> T.pack (show (keyType k) <> "::" <> show (keyModifier k) <> "::" <> show (keyPosition k )  )
 
-newtype Position = Position (Double,Double,Double) deriving(Eq,Typeable,Show,Read,Generic)
+data Position
+    = Position (Double,Double,Double)
+    | Position2D (Double,Double) deriving(Eq,Typeable,Show,Read,Generic)
 
 instance Ord Position where
   (Position (x,y,z) ) <= (Position (a,b,c)) =  x <= a && y <= b && z <= c
+  (Position2D (x,y) ) <= (Position2D (a,b)) =  x <= a && y <= b
   (Position (x,y,z) ) >= (Position (a,b,c)) =  x >= a && y >= b && z >= c
+  (Position2D (x,y) ) >= (Position2D (a,b)) =  x >= a && y >= b
 
 
 newtype Bounding = Bounding (Interval.Interval Position) deriving(Eq,Ord,Typeable,Show,Generic)

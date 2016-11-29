@@ -80,15 +80,15 @@ function createLayer(ref,tname,posj,nej,swj,features){
    var line =  L.polyline(latlonA,{color:p.color});
    line.on('click',function(e ){ref.eventClick(p,e);});
    layer.addLayer(line);
-   var head = L.circle(latlonA[0],p.size/3,{color:p.color});
+   var head = L.circle(latlonA[0],{radius: p.size,color:p.color});
    head.on('click',function(e ){ref.eventClick(p,e);});
    layer.addLayer(head);
-   var tail = L.circle(latlonA[1],p.size/4,{color:p.color});
+   var tail = L.circle(latlonA[1],{radius: p.size/2,color:p.color});
    tail.on('click',function(e ){ref.eventClick(p,e);});
    layer.addLayer(tail);
   }
   else{
-  feature = L.circle(p.position,p.size,{color:p.color}); 
+  feature = L.circle(p.position,{radius: p.size,color:p.color}).bindTooltip(p.title).openTooltip(); 
   feature.on('click',function(e ){ref.eventClick(p,e);});
   layer.addLayer(feature);
   }

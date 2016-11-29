@@ -86,7 +86,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
               convField (ArrayTB1 v) = Just $ [("position",ArrayTB1 v)]
               convField (LeftTB1 v) = join $ convField  <$> v
               convField (TB1 v ) = Just $ to  v
-                where to p@(SPosition (Position (y,x,z) ))  =  [("position",TB1 p )]
+                where to p@(SPosition _ )  =  [("position",TB1 p )]
                       to p@(SLineString (LineString v)) =[("position",ArrayTB1 $ Non.fromList $ fmap (TB1 .SPosition)$ F.toList v)]
               convField i  = errorWithStackTrace (show i)
           in ("#" <> renderShowable color ,table,efields,evfields,proj)) <$>  ( G.toList evMap)

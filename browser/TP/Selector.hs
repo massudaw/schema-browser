@@ -48,9 +48,9 @@ import GHC.Stack
 
 calendarSelector = do
     let buttonStyle k e = e # set UI.text (fromJust $ M.lookup k transRes)# set UI.class_ "btn-xs btn-default buttonSet"
-          where transRes = M.fromList [("year","Ano"),("month","Mês"),("week","Semana"),("day","Dia")]
+          where transRes = M.fromList [("year","Ano"),("month","Mês"),("week","Semana"),("day","Dia"),("hour","Hora")]
         defView = "week"
-        viewList = ["year","month","day","week"] :: [String]
+        viewList = ["year","month","day","week","hour"] :: [String]
         capitalize (i:xs) = toUpper i : xs
         capitalize [] = []
 
