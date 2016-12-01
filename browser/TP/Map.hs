@@ -8,12 +8,15 @@ module TP.Map where
 
 import Step.Host
 import qualified NonEmpty as Non
+import Database.PostgreSQL.Simple
 import Control.Monad.Writer as Writer
+import Postgresql.Parser
+import Control.Arrow (first)
 import TP.View
 import GHC.Stack
 import Control.Monad.Writer
 import Control.Concurrent
-import Control.Lens ((^.),_1,_2)
+import Control.Lens ((^.),_1,_2,_5)
 import Safe
 import Control.Concurrent.Async
 import Data.Interval as Interval
@@ -53,8 +56,7 @@ import qualified Data.HashMap.Strict as HM
 
 removeLayers el tname = runFunction $ ffi "removeLayer(%1,%2)" el tname
 
-createLayers el tname Nothing evs= runFunction $ ffi "createLayer (%1,%3,null,null,null,%2)" el evs tname
-createLayers el tname (Just (p,ne,sw)) evs= runFunction $ ffi "createLayer (%1,%6,%2,%3,%4,%5)" el (show p) (show ne) (show sw) evs tname
+createLayers el tname evs= runFunction $ ffi "createLayer (%1,%3,%2)" el evs tname
 calendarCreate el Nothing evs= runFunction $ ffi "createMap (%1,null,null,null,%2)" el evs
 calendarCreate el (Just (p,ne,sw)) evs= runFunction $ ffi "createMap (%1,%2,%3,%4,%5)" el (show p) (show ne) (show sw) evs
 
@@ -88,6 +90,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
               convField (TB1 v ) = Just $ to  v
                 where to p@(SPosition _ )  =  [("position",TB1 p )]
                       to p@(SLineString (LineString v)) =[("position",ArrayTB1 $ Non.fromList $ fmap (TB1 .SPosition)$ F.toList v)]
+                      to p =[("position",TB1 p)]
               convField i  = errorWithStackTrace (show i)
           in ("#" <> renderShowable color ,table,efields,evfields,proj)) <$>  ( G.toList evMap)
 
@@ -112,12 +115,32 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
         innerCalendar <-UI.div # set UI.id_ "map" # set UI.style [("heigth","450px")]
         let
           evc = eventClick innerCalendar
+        (eselg,hselg) <- ui$newEvent
+        start <- ui$stepper Nothing (fmap snd <$> (filterE (maybe False (not .fst)) eselg))
+        startD <- UI.div #  sink text (maybe "" (show . G.getIndex) <$> start)
+        end <- ui$stepper Nothing (fmap snd <$> filterE (maybe False fst ) eselg)
+        endD <- UI.div #  sink text (maybe "" (show . G.getIndex) <$> end)
+        route <- UI.button # set text "route"
+        routeE <- UI.click route
+        output <- UI.div
+        onEvent (filterJust $ liftA2 (,) <$> start <*> end <@ routeE) (\(s,e) -> do
+              l :: [Only Int]<- liftIO$ query (rootconn inf) "select node from pgr_dijkstra('select gid as id ,source,target,cost from transito.ways'::text,  ? , ? ,true)"( fmap ( unTB1 . (\(SerialTB1 (Just i)) -> i) . L.head .F.toList. getPKM) [s,e])
+              let path = zip lo (tail lo)
+                  lo = fmap unOnly l
+                  tb = lookTable inf "ways"
+                  Just proj = fmap (^._5) $ L.find ((==tb).(^._2) ) dashes
+
+              v <- ui$refTables' inf tb  Nothing (WherePredicate (OrColl $ (\(i,j) -> AndColl $fmap (PrimColl . first (liftAccess inf "ways")) [( IProd Nothing ["source"],Left (int i,Equals)), (IProd Nothing ["target"],Left (int j,Equals))])  <$> path ))
+              mapUIFinalizerT innerCalendar (\i -> createLayers innerCalendar (tableName tb)  (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ (snd i))) (v^._1))
+              -- element output # sink text (show <$> facts (v ^. _1 )))
+
         onEvent cposE (\(c,sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3,%4)" innerCalendar c sw ne)
         pb <- currentValue (facts positionT)
+        routeD <- UI.div
         editor <- UI.div
-        element calendar # set children [innerCalendar,editor]
+        element calendar # set children [routeD,innerCalendar,editor]
         calendarCreate  innerCalendar pb ("[]"::String)
-        onEvent (moveend innerCalendar) (liftIO . h .traceShowId )
+        onEvent (moveend innerCalendar) (liftIO . h)
         fin <- mapM (\(_,tb,fields,efields,proj) -> do
           let filterInp =  liftA2 (,) positionT  calendarT
               tname = tableName tb
@@ -126,17 +149,23 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
                 fieldKey (TB1 (SText v))=  v
             reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) (WherePredicate pred)
             let v = fmap snd $ reftb ^. _1
-            let evsel = (\j (tev,pk,_) -> if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
-            tdib <- ui $ stepper Nothing (join <$> evsel)
-            let tdi = tidings tdib (join <$> evsel)
+            let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
+            onEvent evsel (liftIO . hselg)
+
+
+            -- shift <- ui$ stepper False holdShift
+
+            tdib <- ui $ stepper Nothing (fmap snd <$> evsel)
+            let tdi = tidings tdib (fmap snd <$> evsel)
             (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi) reftb [] [] (allRec' (tableMap inf) $ lookTable inf tname)  tdi
-            mapUIFinalizerT innerCalendar (\i -> do
-              createLayers innerCalendar tname positionB (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) v
-            stat <- UI.div  # sinkDiff text (show . (\i -> (positionB,length i, i) ).  (fmap snd . G.getEntries .filterfixed tb (WherePredicate pred )) <$> v)
+            mapUIFinalizerT innerCalendar (\i ->
+              createLayers innerCalendar tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) v
+            -- stat <- UI.div  # sinkDiff text (show . (\i -> (positionB,length i, i) ).  (fmap snd . G.getEntries .filterfixed tb (WherePredicate pred )) <$> v)
             edit <- UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
-            UI.div # set children [stat,edit]
+            UI.div # set children [edit]
             ) filterInp
           ) selected
+        element routeD # set children [startD,endD,route,output]
         let els = foldr (liftA2 (:)) (pure []) fin
         element editor  # sink children (facts els)
         return ()
@@ -149,9 +178,13 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
 
 
 readMapPK v = case unsafeFromJSON v of
-        [i]  -> Just i
+      [i,j]  -> Just (i,readBool j)
+      i -> Nothing
+  where
+    readBool "false" = False
+    readBool "true" = True
 
-eventClick:: Element -> Event String
+eventClick:: Element -> Event (String,Bool)
 eventClick el = filterJust $ readMapPK <$> domEvent "mapEventClick" el
 
 

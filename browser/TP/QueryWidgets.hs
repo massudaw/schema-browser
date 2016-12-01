@@ -818,9 +818,10 @@ attrEditor s o x y = arrayEditor merge create delete x y
 
 dynHandler hand val ix (l,old)= do
     (ev,h) <- ui $ newEvent
+    let valix = val ix
     el <- UI.div
     let idyn True  =  do
-          tds <- hand ix
+          tds <- hand ix valix
           ini <- currentValue (facts $ triding tds)
           liftIO $ h ini
           fin <- ui $ onEventDyn (rumors $ triding tds) (liftIO . h)
@@ -830,7 +831,7 @@ dynHandler hand val ix (l,old)= do
           UI.div
     els <- mapUIFinalizerT el idyn old
     element el # sink children (pure <$>  facts els)
-    iniv <- currentValue (facts $ val ix)
+    iniv <- currentValue (facts $ valix)
     bend <- ui $ stepper iniv ev
     let notProp = filterE isNothing $ notdiffEvent bend  (ev)
     bend2 <- ui $ stepper iniv  (diffEvent bend  ev)
@@ -872,8 +873,14 @@ buildUIDiff km i  tdi = go i tdi
             let arraySize = 8
                 tdi2  = fmap unArray <$> tdi
                 index o ix v = join $ flip Non.atMay (o + ix) <$> v
-            widgets <- mapM (\ix -> go ti (index ix <$> offsetT <*> tdi2) ) [0..arraySize -1 ]
-            sequenceA $ zipWith (\(ix,i) j -> element i # sink UI.style (facts $ (\o t d-> noneShow . isJust  $ recoverEdit (index o ix t) d ) <$> offsetT<*> tdi2 <*> triding j)) (zip [0..] $ tail widgets ) widgets
+           -- widgets <- mapM (\ix -> go ti (index ix <$> offsetT <*> tdi2) ) [0..arraySize -1 ]
+           -- sequenceA $ zipWith (\(ix,i) j -> element i # sink UI.style (facts $ (\o t d-> noneShow . isJust  $ recoverEdit (index o ix t) d ) <$> offsetT<*> tdi2 <*> triding j)) (zip [0..] $ tail widgets ) widgets
+            let unIndexEl ix = (index ix <$> offsetT <*> tdi2)
+                dyn = dynHandler (\ix valix ->do
+                    wid <- go ti valix
+                    return $ TrivialWidget (recoverEdit  <$> valix <*> triding wid) (getElement wid) ) unIndexEl
+
+            widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
             let
               widgets2 = Tra.sequenceA (  zipWith (\i j -> (i,) <$> j) [0..] $( triding <$> widgets) )
               reduceA  o i
@@ -883,7 +890,7 @@ buildUIDiff km i  tdi = go i tdi
               treatA a (Diff v) = Diff $ PIdx a  (Just v)
               treatA a Delete =  Diff $ PIdx a Nothing
               treatA _ Keep = Keep
-              bres = reduceA  <$> offsetT <*>  widgets2
+              bres = reduceA  <$> offsetT <*>  ((\ l m -> fmap (\(ix,i) -> (ix,editor i (join $ flip Non.atMay ix <$> m))) l )<$> widgets2 <*> tdi2)
             element offsetDiv # set children (fmap getElement widgets)
             composed <- UI.span # set children [offset , offsetDiv]
             return  $ TrivialWidget  (bres) composed
@@ -952,7 +959,7 @@ reduceDiff i
 
 buildPrim :: [FieldModifier] ->Tidings (Maybe Showable) ->   KPrim -> UI (TrivialWidget (Maybe Showable))
 buildPrim fm tdi i = case i of
-         PPosition i-> do
+         PGeom(PPosition i)-> do
            case i of
              3-> do
                 lon <- buildPrim fm (fmap (\(SPosition (Position (lon,_,_))) -> SDouble lon ) <$> tdi) PDouble
@@ -969,8 +976,6 @@ buildPrim fm tdi i = case i of
                 composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children (getElement <$> [lon,lat])
                 upper <- UI.div # set children [composed]
                 return $ TrivialWidget res upper
-
-
          PBoolean -> do
            res <- checkedWidgetM (fmap (\(SBoolean i) -> i) <$> tdi )
            return (fmap SBoolean <$> res)
@@ -1044,13 +1049,14 @@ buildPrim fm tdi i = case i of
            fchange <- fileChange file
            clearE <- UI.click clearB
            tdi2 <- ui $ addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange) =<< addEvent (const Nothing <$> clearE ) tdi
-           let fty = case mime of
-                "application/pdf" -> pdfFrame ("iframe",strAttr "src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
-                "application/x-ofx" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-                "image/jpg" -> (\i -> pdfFrame ("img",strAttr "src",maybe "" binarySrc ,[("max-height","200px")]) i # set UI.class_ "img-responsive")
-                "image/png" -> pdfFrame ("img",strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
-                "image/bmp" -> pdfFrame ("img",strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
-                "text/html" -> pdfFrame ("iframe",strAttr "srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+           let
+             fty = case mime of
+               "application/pdf" -> pdfFrame ("iframe",strAttr "src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
+               "application/x-ofx" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+               "image/jpg" -> (\i -> pdfFrame ("img",strAttr "src",maybe "" binarySrc ,[("max-height","200px")]) i # set UI.class_ "img-responsive")
+               "image/png" -> pdfFrame ("img",strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
+               "image/bmp" -> pdfFrame ("img",strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
+               "text/html" -> pdfFrame ("iframe",strAttr "srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
            f <- fty (facts tdi2) # sinkDiff UI.style (noneShow. isJust <$> tdi2)
            fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]
            res <- UI.div # set children [fd,f]
@@ -1171,9 +1177,9 @@ iUITable inf plmods oldItems  tb@(IT na (ArrayTB1 (tb1 :| _)))
           arraySize = 8
       (TrivialWidget offsetT offset) <- offsetField (pure 0) never (maybe 0 (Non.length . (\(IT _ (ArrayTB1 l) ) -> l)) <$> bres )
       let unIndexEl ix = (unIndexItens  ix <$> offsetT <*> )
-          dyn = dynHandler (\ix -> iUITable inf
-                (fmap ((unIndexItensP  ix <$> offsetT <*> )) <$> plmods)
-                (unIndexEl ix oldItems)
+          dyn = dynHandler (\ix valix-> iUITable inf
+                (fmap (unIndexItensP  ix <$> offsetT <*> ) <$> plmods)
+                valix
                 (IT  na tb1)) (flip unIndexEl oldItems)
       items <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
       let bres = indexItens arraySize tb offsetT (Non.fromList $ triding <$>  items ) oldItems
@@ -1414,9 +1420,9 @@ fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1
      let
          fkst = FKT (mapKV (mapComp (firstTB unKArray)) ifk ) (fmap (Le.over relOri (\i -> if isArray (keyType i) then unKArray i else i )) rel)  tb1
          dyn = dynHandler  recurse (\ix -> unIndexItens ix <$> offsetT  <*>  oldItems)
-         recurse ix = do
+         recurse ix oix = do
            lb <- UI.div # sink UI.text (show . (+ix) <$> facts offsetT ) # set UI.class_ "col-xs-1"
-           TrivialWidget tr el<- fkUITable inf constr tbrefs (fmap (unIndexItensP  ix <$> offsetT <*> ) <$> plmods) wl (unIndexItens ix <$> offsetT  <*>  oldItems) fkst
+           TrivialWidget tr el<- fkUITable inf constr tbrefs (fmap (unIndexItensP  ix <$> offsetT <*> ) <$> plmods) wl oix fkst
            element el # set UI.class_ "col-xs-11"
            TrivialWidget tr <$> UI.div # set UI.children [lb,el]
      fks <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]

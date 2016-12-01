@@ -107,7 +107,7 @@ instance (TF.ToField a , TF.ToField b ) => TF.ToField (Either a b ) where
   toField (Right i) = TF.toField i
   toField (Left i) = TF.toField i
 instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
-  toField (k ,i) = case  liftA2 (,) (traceShowId $ ktypeRec ktypeUnLift  k ) (topconversion preunconversion k) of
+  toField (k ,i) = case  liftA2 (,) (ktypeRec ktypeUnLift  k ) (topconversion preunconversion k) of
                      Just (k,(_,b)) -> toFiel   k (b i)
                      Nothing -> toFiel k i
     where
@@ -235,9 +235,10 @@ unIntercalateAtto l s = go l
     go (e:cs) =  liftA2 (:) e  (s *> go cs)
     go [] = errorWithStackTrace  "empty list"
 
+-- parseAttrJSON i v | traceShow (i,v) False = undefined
 parseAttrJSON (Attr i _ ) v = do
   let tyun = fromMaybe (keyType i) $ ktypeRec ktypeUnLift (keyType i)
-  s<- parseShowableJSON  tyun  v
+  s<- parseShowableJSON   tyun  v
   return $  Attr i s
 parseAttrJSON (Fun i rel _ )v = do
   s<- parseShowableJSON (keyType  i) v
@@ -381,31 +382,34 @@ parsePrimJSON i  v =
       PTimestamp _ -> (\v -> A.withText (show i) (maybe (fail ("cant parse timestamp" <> show (i,v))) (return .STimestamp  . fst) . strptime "%Y-%m-%dT%H:%M:%OS") $ v)
       PDayTime  -> A.withText (show i) (maybe (fail "cant parse daytime") (return .SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS")
       PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay . fst) . strptime "%Y-%m-%d")
-      PPosition ix -> A.withText (show i) (\s -> case ix of
-            3 -> case  Sel.runGet (getPosition3d get3DPosition)(fst $ B16.decode (BS.pack $ T.unpack s))of
-                i -> case i of
-                  Right i -> pure $ SPosition i
-                  Left e -> fail e
-            2 -> case  Sel.runGet (getPosition3d get2DPosition ) (traceShowId $ fst $ B16.decode (BS.pack $ T.unpack s))of
-                i -> case i of
-                  Right i -> pure $ SPosition i
-                  Left e -> fail e
-                                        )
-
-      PLineString ix -> A.withText (show i) (\s -> case ix of
-          3 -> case  Sel.runGet (getLineString get3DPosition)(fst $ B16.decode (BS.pack $ T.unpack s))of
-              i -> case i of
-                Right i -> pure $ SLineString i
-                Left e -> fail e
-          2->case  Sel.runGet (getLineString get2DPosition ) (fst $ B16.decode (BS.pack $ T.unpack s))of
-              i -> case i of
-                Right i -> pure $ SLineString i
-                Left e -> fail e
-                                    )
+      PGeom a -> A.withText (show i)  (either fail pure .Sel.runGet (parseGeom a). fst . B16.decode .BS.pack . T.unpack)
 
       i -> errorWithStackTrace (show i)
   ) v
 
+-- parseGeom a | traceShow a False = undefined
+parseGeom a = case a of
+          PPosition ix ->  case ix of
+                3 -> fmap SPosition $(getPosition3d get3DPosition)
+                2 -> fmap SPosition $ (getPosition3d get2DPosition )
+
+          PPolygon ix ->  case ix of
+                3 ->  getPolygon get3DPosition
+                2 ->  getPolygon get2DPosition
+          MultiGeom g ->do
+            i <- Sel.getWord8
+            if i  == 1
+             then do
+               typ <- Sel.getWord32host
+               srid <- Sel.getWord32host
+               let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
+               n <- Sel.getWord32host
+               case  ty  of
+                 6 -> SMultiGeom <$> replicateM (fromIntegral n) (parseGeom g)
+             else fail "no little endiang"
+          PLineString ix -> case ix of
+            3 -> fmap SLineString $ (getLineString get3DPosition)
+            2->fmap SLineString $ (getLineString get2DPosition )
 
 parsePrim
   :: KPrim
@@ -453,19 +457,20 @@ parsePrim i =  do
                     i <- fmap (SDate . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i
                  in tryquoted p
-        PPosition i-> do
-          s <- plain' "\",)}"
-          case  Sel.runGet (getPosition3d get3DPosition)(fst $ B16.decode s)of
-              i -> case i of
-                Right i -> pure $ SPosition i
-                Left e -> fail e
-        PLineString i-> do
-          s <- plain' "\",)}"
-          case  Sel.runGet (getLineString get3DPosition)(fst $ B16.decode s)of
-              i -> case i of
-                Right i -> pure $ SLineString i
-                Left e -> fail e
-        PBounding i-> SBounding <$> tryquoted box3dParser
+        PGeom a -> case a of
+          PPosition i-> do
+            s <- plain' "\",)}"
+            case  Sel.runGet (getPosition3d get3DPosition)(fst $ B16.decode s)of
+                i -> case i of
+                  Right i -> pure $ SPosition i
+                  Left e -> fail e
+          PLineString i-> do
+            s <- plain' "\",)}"
+            case  Sel.runGet (getLineString get3DPosition)(fst $ B16.decode s)of
+                i -> case i of
+                  Right i -> pure $ SLineString i
+                  Left e -> fail e
+          PBounding i-> SBounding <$> tryquoted box3dParser
 
 
 -- parseShowable (KArray (KDelayed i))
@@ -558,8 +563,25 @@ getLineStringArray get = do
       n <- Sel.getWord32host
       LineString .Vector.fromList <$> replicateM (fromIntegral n ) get
 putLineStringArray (LineString  v ) = do
-      mapM_ (put3DPosition) (F.toList v)
+      mapM_ put3DPosition (F.toList v)
 
+
+getPoly get = do
+      n <- Sel.getWord32host
+      (\(i:xs) -> SPolygon i xs)<$> replicateM (fromIntegral n) (getLineStringArray get)
+
+getPolygon get = do
+          i <- Sel.getWord8
+          if i  == 1
+           then do
+             typ <- Sel.getWord32host
+             -- srid <- Sel.getWord32host
+             let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
+             case ty  of
+               3 -> getPoly get
+               i -> errorWithStackTrace ("no ty" <> show i)
+           else
+             return (error $ "BE not implemented " <> show i )
 
 
 getLineString get = do
@@ -609,7 +631,7 @@ getPosition3d get = do
              typ <- Sel.getWord32host
              srid <- Sel.getWord32host
              let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
-             case traceShowId ty  of
+             case ty  of
                1 -> get
                i -> errorWithStackTrace $ "type not implemented " <> show ty
            else

@@ -226,6 +226,7 @@ instance Affine Showable where
       diffS (STimestamp i ) (STimestamp j) = DSDiffTime (diffUTCTime (localTimeToUTC utc j) (localTimeToUTC utc  i))
       diffS (SDate i ) (SDate j) = DSDays (diffDays j i)
       diffS (SPosition (Position (x,y,z)) ) (SPosition (Position (a,b,c))) = DSPosition (a-x,b-y,c-z)
+      diffS (SPosition (Position2D (x,y)) ) (SPosition (Position2D (a,b))) = DSPosition (a-x,b-y,0)
       diffS a b  = errorWithStackTrace (show (a,b))
   {-# INLINE subtraction #-}
   addition (SText v) (DSText t) = SText $ T.pack $ addition (T.unpack v) t
@@ -234,6 +235,7 @@ instance Affine Showable where
   addition (STimestamp  v) (DSDiffTime t) = STimestamp $ utcToLocalTime utc $ addUTCTime t (localTimeToUTC utc v)
   addition (SDate v) (DSDays t) = SDate $ addDays t v
   addition (SPosition (Position (x,y,z)) ) (DSPosition (a,b,c)) = SPosition $ Position (a+x,b+y,c+z)
+  addition (SPosition (Position2D (x,y)) ) (DSPosition (a,b,_)) = SPosition $ Position2D (a+x,b+y)
   addition i j = errorWithStackTrace (show (i,j))
   {-# INLINE addition #-}
 
@@ -386,8 +388,8 @@ instance Predicates (FTB Showable) where
       ma  (TB1 i,_) _  (TB1 j)   = i == j
       ma  ((ArrayTB1 i) ,Flip Contains ) _  ((ArrayTB1 j)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
       ma  ((ArrayTB1 j),Contains ) _  ((ArrayTB1 i)  ) = Set.fromList (F.toList i) `Set.isSubsetOf` Set.fromList  (F.toList j)
-      ma (j@(TB1 _),AnyOp o ) p  (ArrayTB1 i) = F.any (ma (j,Flip o) p )  i
-      ma (j,AnyOp o ) p  (ArrayTB1 i) = F.any (ma (j,Flip o) p )  i
+      ma (j,AnyOp o ) p  (ArrayTB1 i) = F.any (ma (j,o) p )  i
+      ma (j,Flip (AnyOp o) ) p  (ArrayTB1 i) = F.any (ma (j,o) p )  i
       ma (ArrayTB1 i,Flip (AnyOp o)) p j  = F.any (\i -> ma (i,o) p j ) i
       ma (i@(TB1 _) ,op) p (IntervalTB1 j)  = i `Interval.member` j
       ma (IntervalTB1 i ,op) p j@(TB1 _)  = j `Interval.member` i

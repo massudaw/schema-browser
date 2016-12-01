@@ -60,7 +60,7 @@ function removeLayer (ref,tname){
     ref.mymap.removeLayer(ref.layer[tname]);
 }
 
-function createLayer(ref,tname,posj,nej,swj,features){
+function createLayer(ref,tname,features){
   var points = JSON.parse(features);
   if (ref.layer[tname] == null )
   {
@@ -73,7 +73,15 @@ function createLayer(ref,tname,posj,nej,swj,features){
   layers = points.map(function (p){ 
   
   var feature ;
-  if (p.position.constructor === Array && p.position[1].constructor ===Array ){
+  
+  if (p.position.constructor === Array && p.position[0].constructor ===Array && p.position[0].constructor === Array ){
+    p.position.map(function(pos){
+      var r = pos.map(function(l){ return l.map(function(b){return L.latLng(b[0],b[1])})})
+      var poly = L.polygon(r);
+      poly.on('click',function(e ){ref.eventClick(p,e);});
+      layer.addLayer(poly);});
+  }else{
+  if (p.position.constructor === Array && p.position[0].constructor ===Array ){
    latlonA = p.position.map(function(l){
      return L.latLng(l[0],l[1]);
    })
@@ -92,7 +100,7 @@ function createLayer(ref,tname,posj,nej,swj,features){
   feature.on('click',function(e ){ref.eventClick(p,e);});
   layer.addLayer(feature);
   }
-  })
+  }})
 }
 
 
@@ -287,8 +295,9 @@ function clientHandlers(){
       }
    ,'mapEventClick' : function(el,eventType,sendEvent){
       el.eventClick=  function(e,pos) {
-      sendEvent([e.id].filter(function(e) {return e !== null}).map(function(e){return  e.toString()}));
-      return true;
+
+        sendEvent([e.id,pos.originalEvent.shiftKey].filter(function(e) {return e !== null}).map(function(e){return  e.toString()}));
+        return true;
       }; 
       }
    ,'currentPosition' : function(el,eventType ,sendEvent){

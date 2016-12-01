@@ -202,6 +202,14 @@ instance NFData Showable
 
 type FTB1 f k a = FTB (KVMetadata k, Compose f (KV (Compose f (TB f))) k a)
 
+data GeomType
+  = MultiGeom GeomType
+  | PPolygon Int
+  | PLineString Int
+  | PPosition Int
+  | PBounding  Int
+  deriving(Eq,Show,Ord,Generic)
+
 data KPrim
    = PText
    | PBoolean
@@ -212,9 +220,7 @@ data KPrim
    | PDayTime
    | PTimestamp (Maybe TimeZone)
    | PInterval
-   | PPosition Int
-   | PBounding Int
-   | PLineString Int
+   | PGeom GeomType
    | PCnpj
    | PMime Text
    | PCpf
@@ -225,6 +231,7 @@ data KPrim
    deriving(Show,Eq,Ord,Generic)
 
 instance NFData KPrim
+instance NFData GeomType
 
 data Prim a b
   = AtomicPrim a
@@ -291,6 +298,8 @@ data Showable
   | SPosition Position
   | SBounding Bounding
   | SLineString LineString
+  | SPolygon LineString [LineString]
+  | SMultiGeom [Showable]
   | SDate Day
   | SDayTime TimeOfDay
   | SBinary BS.ByteString

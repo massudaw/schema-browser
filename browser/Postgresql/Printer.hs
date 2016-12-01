@@ -356,12 +356,16 @@ renderType (KInterval t) =
       4 -> "int4range"
       8 -> "int8range"
     Primitive (AtomicPrim PDate) -> "daterange"
-    Primitive (AtomicPrim (PLineString i)) -> case i of
-        2 -> "box2d"
-        3 -> "box3d"
-    Primitive (AtomicPrim (PPosition i)) -> case i of
-        2 -> "box2d"
-        3 -> "box2d"
+    Primitive (AtomicPrim (PGeom i)) ->
+      let box 2 = "box2d"
+          box 3 = "box3d"
+          geom a = case a of
+              PLineString i-> box i
+              PPosition i -> box i
+              PPolygon i -> box i
+              MultiGeom o -> geom o
+      in geom i
+
     Primitive (AtomicPrim PDouble) -> "floatrange"
     Primitive (AtomicPrim (PTimestamp i)) -> case i of
       Just i -> "tsrange"
@@ -493,10 +497,12 @@ utlabel (Left (value,e)) c idx = result
     -- opvalue ref op | traceShow ("opvalue",ref,op) False = undefined
     opvalue re  (Flip (Flip i)) = opvalue re i
     opvalue ref (Flip (AnyOp (AnyOp Equals)))  = T.intercalate "." (c ++ [ref]) <> " " <>  "<@@" <>  " ANY( ? " <> ")"
-    opvalue ref (AnyOp i)  = recoverop (keyType (fst idx))
+    opvalue ref (AnyOp i)  = case ktypeRec ktypeUnLift  (keyType (fst idx)) of
+                              Just _-> T.intercalate "." (c ++ [ref]) <>  unliftOp (AnyOp i) (keyType (fst idx))<>  " ? " <> inferParamType i ( keyType (fst idx))
+                              Nothing  ->recoverop (keyType (fst idx))
         where
           recoverop (KOptional i) = recoverop i
-          recoverop (KArray (Primitive (AtomicPrim (PPosition _)))) =  " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <>  "&&" <>  T.intercalate "." (c ++ [ref])
+          recoverop (KArray (Primitive (AtomicPrim (PGeom (PPosition _))))) =  " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <>  "&&" <>  T.intercalate "." (c ++ [ref])
           recoverop _ =  " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <> renderBinary (Flip i) <> " ANY(" <> T.intercalate "." (c ++ [ref])<> ")"
     opvalue ref (Flip (AnyOp i))  = T.intercalate "." (c ++ [ref]) <> renderBinary i <>  " ANY( " <> " ? " <>  ")"
     opvalue ref i =  T.intercalate "." (c ++ [ref]) <>  unliftOp i (keyType (fst idx))<>  " ? " <> inferParamType i ( keyType (fst idx))

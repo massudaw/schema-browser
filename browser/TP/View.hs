@@ -44,20 +44,29 @@ instance A.ToJSON a =>
     toJSON (LeftTB1 i) = fromMaybe (A.toJSON ("" :: String)) (A.toJSON <$> i)
     toJSON (ArrayTB1 i) = (A.toJSON $ F.toList i)
 
-instance A.ToJSON Showable where
-    toJSON (SText i) = A.toJSON i
-    toJSON (SPosition (Position (y,x,z))) =
+instance A.ToJSON LineString where
+    toJSON (LineString l ) = A.toJSON l
+
+instance A.ToJSON Position where
+    toJSON ((Position (y,x,z))) =
         A.Array $
         V.fromList
             [ A.String $ T.pack (show x)
             , A.String $ T.pack (show y)
             , A.String $ T.pack (show z)]
-    toJSON (SPosition (Position2D (y,x))) =
+    toJSON ((Position2D (y,x))) =
         A.Array $
         V.fromList
             [ A.String $ T.pack (show x)
             , A.String $ T.pack (show y)
             ]
+
+instance A.ToJSON Showable where
+    toJSON (SText i) = A.toJSON i
+    toJSON (SMultiGeom l) = A.toJSON l
+    toJSON (SPolygon h t) = A.toJSON (h:t)
+    toJSON (SLineString i) = A.toJSON i
+    toJSON (SPosition i ) = A.toJSON i
     toJSON i = A.toJSON (renderPrim i)
 
 indexTy (IProd _ [k] )=  keyType k
@@ -167,9 +176,13 @@ resRange b "hour" d =
                then -3600
                else 3600) d
 
-makePos (AtomicPrim (PPosition 2))[b,a,z] =
+makePos (AtomicPrim (PGeom (MultiGeom (PPolygon 3)))) [b,a,z] =
+    (Interval.Finite $ TB1 $ SPosition (Position (a, b,z)), True)
+makePos (AtomicPrim (PGeom (MultiGeom (PPolygon 2)))) [b,a,z] =
     (Interval.Finite $ TB1 $ SPosition (Position2D (a, b)), True)
-makePos (AtomicPrim (PPosition 3)) [b,a,z] =
+makePos (AtomicPrim (PGeom (PPosition 2)))[b,a,z] =
+    (Interval.Finite $ TB1 $ SPosition (Position2D (a, b)), True)
+makePos (AtomicPrim (PGeom (PPosition 3))) [b,a,z] =
     (Interval.Finite $ TB1 $ SPosition (Position (a, b, z)), True)
 makePos _ i = errorWithStackTrace (show i)
 

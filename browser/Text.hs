@@ -64,6 +64,9 @@ renderPrim (SBinary _) = show "<Binary>"
 renderPrim (SDynamic s) = renderShowable s
 renderPrim (SPosition a) = show a
 renderPrim (SPInterval a) = show a
+renderPrim (SPolygon i a) = show (i:a)
+renderPrim (SMultiGeom a) = show a
+renderPrim i = show i
 
 
 defaultType t =
@@ -107,9 +110,11 @@ readPrim t =
      PInterval -> readInterval
      PDate-> readDate
      PDayTime -> \t -> readDayTime t <|> readDayTimeMin t <|> readDayTimeHour t
-     PPosition i-> readPosition
+     PGeom a ->  case a of
+       PPosition i-> readPosition
+       PLineString i-> readLineString
+       MultiGeom (PPolygon i ) -> readMultiPolygon
      PBoolean -> readBoolean
-     PLineString i-> readLineString
      PBinary -> readBin
   where
       readInt = nonEmpty (fmap SNumeric . readMaybe)
@@ -125,6 +130,7 @@ readPrim t =
       readDayTimeHour =  fmap (SDayTime . localTimeOfDay . fst) . strptime "%H"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
       readLineString = nonEmpty (fmap SLineString . readMaybe)
+      readMultiPolygon = nonEmpty (fmap SMultiGeom . fmap (fmap (\(i:xs) -> SPolygon i xs)). readMaybe)
       readTimestamp =  fmap (STimestamp  .  fst) . (\i -> strptime "%Y-%m-%d %H:%M:%OS" i <|> strptime "%Y-%m-%d %H:%M:%S" i)
       readInterval =  fmap SPInterval . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
       nonEmpty f ""  = Nothing
