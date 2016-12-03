@@ -10,7 +10,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE NoMonomorphismRestriction,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
 
-module Plugins (plugList,lplugOrcamento, siapi3Plugin) where
+module Plugins (importargpx ,plugList,lplugOrcamento, siapi3Plugin) where
 
 import qualified NonEmpty as Non
 import System.Process
@@ -29,6 +29,7 @@ import OFX
 import Crea
 import  GHC.Stack
 import PandocRenderer
+import Gpx
 import OAuthClient
 
 import Types
@@ -704,6 +705,29 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
         returnA -<  traceShowId $ Just (kvempty,Idex (pure (SerialTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) kvempty  (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,[PAttr "account" (patch r),PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
 
 
+importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
+  where
+    tname = "import_gpx"
+    url :: ArrowReaderDiffM IO
+    url = proc t -> do
+      fn <- idxK "file_name" -< t
+      r <- atR "run" $ idxK "id_run" -< t
+      atR "run,samples" (proc t -> do
+        odxR "instant" -< t
+        odxR "position" -< t
+        odxR "id_sample" -< t
+        odxR "id_run" -< t
+        ) -< t
+
+      b <- act (\(TB1 (SBinary i )) -> liftIO . gpx $ BS.unpack i ) -< fn
+      let ao :: Index (TB2 Text Showable)
+          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom . (mempty,Idex [int ix],) . fmap patch $ (Attr "id_run"  r : Attr "id_sample" (int ix) : a)) <$>  join (nonEmpty . zip [0..] <$> b)
+          ref :: [TB Identity  Text Showable]
+          ref = [uncurry Attr  $ ("samples",ArrayTB1 $ Non.fromList $ fmap int   [0.. length (justError "no b" b)])]
+          tbst :: (Maybe (TBIdx Text (Showable)))
+          tbst = traceShowId $ Just $ (mempty , Idex [r],  [PFK  [Rel "samples" Equals "id_sample",Rel "run" Equals "id_run"] (fmap patch ref) mempty ao])
+      returnA -< tbst
+
 
 importarofx = FPlugins "OFX Import" tname  $ BoundedPlugin2 url
   where
@@ -841,4 +865,4 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
 
 
 plugList :: [PrePlugins]
-plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,areaDesign,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin ,siapi3CheckApproval, importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]
+plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,areaDesign,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]

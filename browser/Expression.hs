@@ -34,8 +34,8 @@ parseFunction =  do
 
 funmap :: Map Text (([KPrim],KPrim ),[FTB Showable] -> FTB Showable)
 funmap = M.fromList [
-        ("lower",(([PDouble],PDouble),(\[IntervalTB1 i] -> justError "cant be infinite" $ unFinite $  lowerBound i)))
-       ,("upper",(([PDouble],PDouble),(\[IntervalTB1 i] -> justError "cant be infinite" $ unFinite $  upperBound i)))
+        ("lower",(([PDouble],PDouble),(\[IntervalTB1 i] -> LeftTB1 $  unFinite $  lowerBound i)))
+       ,("upper",(([PDouble],PDouble),(\[IntervalTB1 i] -> LeftTB1 $  unFinite $  upperBound i)))
        ,("float8sum",(([PDouble,PDouble],PDouble),(\[i,j]-> i + j )))
        ,("float8sub",(([PDouble,PDouble],PDouble),(\[i,j]-> i - j )))
        ,("float8div",(([PDouble,PDouble],PDouble),(\[i,j]-> i / j )))

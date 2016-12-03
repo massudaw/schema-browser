@@ -169,7 +169,7 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
            lookRFk s t k = V.toList $ lookupKey2 (fmap (t,) k)
             where
               lookupKey2 :: Functor f => f (Text,Text) -> f Key
-              lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ HM.lookup ( (t,c)) map)
+              lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show  (t,c)) $ HM.lookup ( traceShowId (t,c)) map)
                 where map
                         | s == schema = keyMap
                         | otherwise = _keyMapL (justError "no schema" $ HM.lookup s rsch)

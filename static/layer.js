@@ -74,7 +74,7 @@ function createLayer(ref,tname,features){
   
   var feature ;
   
-  if (p.position.constructor === Array && p.position[0].constructor ===Array && p.position[0].constructor === Array ){
+  if (p.position.constructor === Array && p.position[0].constructor ===Array && p.position[0][0].constructor === Array ){
     p.position.map(function(pos){
       var r = pos.map(function(l){ return l.map(function(b){return L.latLng(b[0],b[1])})})
       var poly = L.polygon(r);
@@ -88,12 +88,6 @@ function createLayer(ref,tname,features){
    var line =  L.polyline(latlonA,{color:p.color});
    line.on('click',function(e ){ref.eventClick(p,e);});
    layer.addLayer(line);
-   var head = L.circle(latlonA[0],{radius: p.size,color:p.color});
-   head.on('click',function(e ){ref.eventClick(p,e);});
-   layer.addLayer(head);
-   var tail = L.circle(latlonA[1],{radius: p.size/2,color:p.color});
-   tail.on('click',function(e ){ref.eventClick(p,e);});
-   layer.addLayer(tail);
   }
   else{
   feature = L.circle(p.position,{radius: p.size,color:p.color}).bindTooltip(p.title).openTooltip(); 
@@ -138,7 +132,7 @@ function handleLocationError(browserHasGeolocation, pos) {
 function removeChartColumns(el ){
   el.chart.clearChart();
 }
-function addChartColumns(el,table,fields,source){
+function addChartColumns(el,table,fields,source,chart){
   var dataInp = JSON.parse(source);
 	var axisY = fields.map(function(i){return {lineThickness:2}});
 	var ix = 0;
@@ -146,7 +140,7 @@ function addChartColumns(el,table,fields,source){
 	  var data = dataInp.map(function(r){
 						return {label: r.title.slice(0,20),y:parseFloat(r.value[ix])}
 				}); 
-				return { type :'column'
+				return { type :chart
                ,name : i
 							 ,showInLegend : true
 							 ,axisYIndex : ix++

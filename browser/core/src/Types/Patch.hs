@@ -23,6 +23,7 @@ module Types.Patch
 
   ,editor
   ,recoverEdit
+  ,recoverEditChange
   ,Editor(..)
   ,filterDiff
   ,isDiff
@@ -163,8 +164,19 @@ unLeftItensP = unLeftTB
 
 
 
+recoverEditChange  i j | traceShow (i,j) False = undefined
+recoverEditChange (Just i) Keep = Just i
+recoverEditChange (Just i) Delete = Nothing
+recoverEditChange  (Just i)(Diff j ) = join $ Just $ applyIfChange i j
+recoverEditChange  Nothing (Diff j ) = Just $ create j
+recoverEditChange  Nothing Keep = Nothing
+recoverEditChange  Nothing Delete = Nothing
+recoverEditChange  _ _ = errorWithStackTrace "no edit"
 
 
+
+
+recoverEdit  i j | traceShow (i,j) False = undefined
 recoverEdit (Just i) Keep = Just i
 recoverEdit (Just i) Delete = Nothing
 recoverEdit (Just i)(Diff j ) = Just $ apply i j
@@ -258,6 +270,7 @@ instance (Ord a,Show a,Patch a) => Patch (FTB a ) where
   type Index (FTB a) =  PathFTB (Index a)
   diff = diffFTB patch diff
   apply = applyFTB create apply
+  applyIfChange = applyFTBM create apply
   create = createFTB create
   patch = patchFTB patch
 
@@ -585,6 +598,18 @@ instance Applicative Interval.Extended where
   (Interval.Finite i) <*> (Interval.Finite j) =  Interval.Finite $ i j
 
 
+
+applyOptM
+  :: (Show a,Ord a) =>
+     (Index a -> a)
+     -> (a -> Index a  -> a)-> Maybe (FTB a) -> Maybe (PathFTB (Index a)) ->  (Maybe (FTB a))
+applyOptM  pr a i  o = case i of
+                      Nothing -> case o of
+                            Nothing -> Nothing
+                            Just j -> createFTB pr <$> o
+                      Just _ -> join $ applyFTBM pr a <$> i <*> o
+
+
 applyOpt
   :: (Show a,Ord a) =>
      (Index a -> a)
@@ -595,12 +620,38 @@ applyOpt  pr a i  o = case i of
                             Just j -> createFTB pr <$> o
                       Just _ -> applyFTB pr a <$> i <*> o
 
+applyFTBM
+  :: (Ord a,Show a) =>
+  (Index a  -> a) -> (a -> Index a -> a) -> FTB a -> PathFTB (Index a) -> Maybe (FTB a)
+applyFTBM pr a (LeftTB1 i ) op@(POpt o) = Just $ LeftTB1 $ applyOptM pr a i o
+applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
+                      Nothing -> fmap (ArrayTB1 . Non.fromList) . nonEmpty $ (Non.take ix   i) ++ (Non.drop (ix+1) i)
+                      Just p -> if ix <=  Non.length i - 1
+                                then fmap ArrayTB1 $ sequenceA $ Non.imap (\i v -> if i == ix then applyFTBM pr a v p else Just v )  i
+                                else if ix == Non.length i
+                                      then Just $ ArrayTB1 $ i <> pure (createFTB pr p)
+                                      else errorWithStackTrace $ "ix bigger than next elem"
+
+applyFTBM pr a (SerialTB1 i ) (PSerial o) = Just $ SerialTB1 $  applyOpt pr a i o
+applyFTBM pr a (DelayedTB1 i ) (PDelayed o) = Just $ DelayedTB1 $  applyOpt pr a i o
+applyFTBM pr a (IntervalTB1 i) (PInter b (p,l))
+  = Just $ IntervalTB1 $  if b
+        then interval (second (const l) $ first (mapExtended p) (lowerBound' i))    (upperBound' i)
+        else interval (lowerBound' i) (second (const l) $ first (mapExtended  p ) (upperBound' i))
+  where
+    mapExtended p (Interval.Finite i) = justError "" . applyFTBM pr a i <$> p
+    mapExtended p _ = createFTB pr  <$> p
+applyFTBM pr a (TB1 i) (PAtom p)  =  Just $ TB1 $ a i p
+applyFTBM pr a  b (PatchSet l ) = foldl (\i l -> (\i -> applyFTBM pr a i l ) =<< i ) (Just b) l
+applyFTBM _ _ a b = errorWithStackTrace ("applyFTB: " )
+
+
 applyFTB
   :: (Ord a,Show a) =>
   (Index a  -> a) -> (a -> Index a -> a) -> FTB a -> PathFTB (Index a) -> FTB a
 applyFTB pr a (LeftTB1 i ) op@(POpt o) = LeftTB1 $ applyOpt pr a i o
 applyFTB pr a (ArrayTB1 i ) (PIdx ix o) = case o of
-                      Nothing -> ArrayTB1 $ Non.fromList $ Non.take ix   i
+                      Nothing -> ArrayTB1 $ Non.fromList $ (Non.take ix   i) ++ (Non.drop (ix+1) i)
                       Just p -> if ix <=  Non.length i - 1
                                 then ArrayTB1 $ Non.imap (\i v -> if i == ix then applyFTB pr a v p else v )  i
                                 else if ix == Non.length i

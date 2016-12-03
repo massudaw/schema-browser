@@ -61,6 +61,7 @@ calendarCreate el Nothing evs= runFunction $ ffi "createMap (%1,null,null,null,%
 calendarCreate el (Just (p,ne,sw)) evs= runFunction $ ffi "createMap (%1,%2,%3,%4,%5)" el (show p) (show ne) (show sw) evs
 
 
+idx inf c v@(m,k) = indexField ( liftAccess inf (_kvname m) (keyRef c))  v
 mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
     importUI
       [js "leaflet.js"
@@ -77,7 +78,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
           let
               Just (TB1 (SText tname)) = unSOptional' $ _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
               table = lookTable inf tname
-              evfields = join $fmap (\(Attr _ (ArrayTB1 n))-> n) . indexField  (liftAccess (meta inf) "event" $ keyRef ["event"])   <$> erow
+              evfields = join $ fmap (unArray . _tbattr ) . idx (meta inf) ["event"]   <$> erow
                 where
                   erow = G.lookup (idex (meta inf) "event" [("schema" ,int $ schemaId inf),("table",int (_tableUnique table))])  eventMap
               (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "geo" e

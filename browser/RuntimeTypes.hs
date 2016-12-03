@@ -296,6 +296,10 @@ fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
         where (FKJoinTable  _ (schname,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
               ta = lookTable inf tname
               rinf = fromMaybe inf (HM.lookup schname (depschema inf))
+    fixPatchAttr inf tname p@(PFun k _ b ) =  PFun ki (expr,a) b
+      where (FunctionField ki expr a )   = (unRecRel.pathRel) $ justError (show (k,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.singleton(k))  (F.toList$ rawFKS  ta)
+            ta = lookTable inf tname
+
 
 liftAccess :: InformationSchema -> Text -> Access Text  -> Access Key
 liftAccess inf tname (Point i  ) =  Point i

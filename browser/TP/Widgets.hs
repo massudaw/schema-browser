@@ -606,6 +606,7 @@ testWidget e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "
 
 
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
+hlabel h = UI.span # set UI.class_ (L.intercalate " "$ ["label","label-default"] ++ h )
 
 onEventFT
   :: Event a ->  (a -> UI b) -> UI  ()

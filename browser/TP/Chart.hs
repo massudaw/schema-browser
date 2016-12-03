@@ -7,6 +7,7 @@
 module TP.Chart (chartWidget) where
 
 import GHC.Stack
+import Data.Ord
 import qualified NonEmpty as Non
 import Step.Host
 import Control.Monad.Writer as Writer
@@ -54,9 +55,12 @@ import Data.Text (Text)
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-calendarCreate cal def = runFunction $ ffi "createChart(%1,%2)" cal def
 
-calendarAddSource cal t fields evs = runFunction $ ffi "addChartColumns(%1,%2,%3,%4)" cal (tableName t) fields evs
+instance ToJS (FTB Showable ) where
+  render  = return .JSCode . BSL.unpack . A.encode
+
+calendarCreate cal def = runFunction $ ffi "createChart(%1,%2)" cal def
+calendarAddSource cal chart t fields evs = runFunction $ ffi "addChartColumns(%1,%2,%3,%4,%5)" cal (tableName t) fields evs chart
 calendarRemoveSource cal t = runFunction $ ffi "removeChartColumns(%1,%2)" cal (tableName t)
 
 chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
@@ -77,6 +81,7 @@ chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
             table = lookTable inf tname
             tablId = int (_tableUnique table)
             Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"metrics" $ keyRef ["metrics"]) e
+            Just (Attr _ chart)= indexField (liftAccess (meta inf )"metrics" $ keyRef ["chart_type"]) e
             -- Just (Attr _ (ArrayTB1 timefields ))= indexField (liftAccess (meta inf )"event" $ keyRef ["event"]) e
             timeFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "event" $ keyRef ["event"])  <$> G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
             geoFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "geo" $ keyRef ["geo"])  <$> G.lookup (idex (meta inf) "geo" [("schema" ,schId ),("table",tablId )])  geomap
@@ -90,7 +95,7 @@ chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
 
             proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  projf r efields
             attrValue (Attr k v) = v
-         in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,F.toList efields,(timeFields,geoFields),proj) ) ( G.toList evMap)
+         in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,F.toList efields,(timeFields,geoFields,chart),proj) ) ( G.toList evMap)
 
     iday <- liftIO getCurrentTime
     let
@@ -117,7 +122,7 @@ chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
               charts <- UI.div  # set UI.style [("height", "300px"),("width", "900px")]
               calendarCreate  charts (show incrementT)
               let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
-              traverse (\((_,t,fields,(timeFields,geoFields),proj))-> do
+              traverse (\((_,t,fields,(timeFields,geoFields,chart),proj))-> do
                     let pred = fromMaybe mempty (fmap (\fields -> WherePredicate $  timePred inf t (fieldKey <$> fields) (incrementT,resolution)) timeFields  <> liftA2 (\field pos-> WherePredicate $ geoPred inf t(fieldKey <$>  field) pos ) geoFields positionB )
                         fieldKey (TB1 (SText v))=   v
                     reftb <- ui $ refTables' inf t Nothing pred
@@ -129,7 +134,7 @@ chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
                     ui $ onEventDyn (pure <$> ediff) (liftIO .  putPatch (reftb ^. _4 ))
                     mapUIFinalizerT charts
                       (\i -> do
-                        calendarAddSource charts t (renderShowable <$> fields ) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .   fmap (snd.proj) $ G.toList i))
+                        calendarAddSource charts chart t (renderShowable <$> fields ) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .   fmap (snd.proj) $ L.sortBy (comparing (G.getIndex))$ G.toList i))
                         ui $ registerDynamic (fmap fst $ runDynamic $ evalUI charts $ calendarRemoveSource charts t))
                        (v)
                     mapM (\i -> element i # sink UI.style  (noneShow . isJust <$> tdib)) el

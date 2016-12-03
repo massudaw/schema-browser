@@ -1,10 +1,12 @@
 {-# LANGUAGE Arrows, TupleSections,OverloadedStrings ,NoMonomorphismRestriction #-}
 module Gpx
-  (readArt,readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readSiapi3AndamentoAJAX,readHtmlReceita,readHtml) where
+  (gpx,readArt,readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readSiapi3AndamentoAJAX,readHtmlReceita,readHtml) where
 
 import Types
+import Types.Patch
 import Utils
 import Data.String
+import Control.Monad
 import Safe
 import Control.Applicative
 
@@ -52,15 +54,15 @@ getTd b=  listA (rows >>> listA cols) where
 
 
 is x = deep (isElem >>> hasName x)
-{-
+
 getPoint = atTag "trkpt" >>>
   proc x -> do
     lat <- getAttrValue "lat"  -< x
     lon <- getAttrValue "lon" -< x
-    ele <- text <<< atTag "ele" -< x
-    time <- text <<< atTag "time" -< x
-    returnA -< [SPosition $ Position (read lat,read lon,read ele),STimestamp $  fromJust $ fmap fst  $ strptime "%Y-%m-%dT%H:%M:%SZ" time ]
--}
+    ele <- deep getText <<< atTag "ele" -< x
+    time <- deep getText <<< atTag "time" -< x
+    returnA -< [Attr "position" (TB1 $ SPosition $ Position (read lon ,read lat ,read ele)),Attr "instant" (TB1 $ STimestamp $  fromJust $ fmap fst  $ strptime "%Y-%m-%dT%H:%M:%SZ" time )]
+
 file :: Showable
 file = "/home/massudaw/2014-08-27-1653.gpx"
 
@@ -104,6 +106,14 @@ triml = dropWhile (`elem` " \r\n\t")
 -- | Remove trailing space (including newlines) from string.
 trimr :: String -> String
 trimr = reverse . triml . reverse
+
+testGpx = print =<< (readFile "track.gpx" >>= gpx )
+
+gpx :: String -> IO (Maybe [[TB Identity TE.Text Showable]])
+gpx file = do
+  i <- runX (readString [withValidate no,withWarnings no,withParseHTML yes] file
+        >>> atTag"trk" >>> atTag "trkseg" >>> listA getPoint)
+  return $ (safeHead i)
 
 testSiapi2 = do
   kk <- BS.readFile "Consulta Solicitação.html"
@@ -199,22 +209,3 @@ readHtml file = do
         >>> getTable' (deep getText)
   runX arr
 
-{-
-exec inputs = do
-  let schema = "health"
-  conn <- connectPostgreSQL "user=postgres dbname=test"
-  let Just (_,SText file) = L.find ((== "file") . fst) inputs
-  let
-    arr = readDocument [withValidate no,withTrace 1] (unpack file)
-        >>> getPoint
-  inf <- keyTables conn conn  (schema,"postgres")
-  print (tableMap inf)
-  res <- runX arr
-  let runVals = [("period",IntervalTB1 $ (ER.Finite $ last $ head res ,True) `interval` (ER.Finite $ last $ last res,True))]  <> L.filter ((/= "file") . fst ) inputs
-      runInput = withFields inf  "run" $   lookupKeys inf "run"  runVals
-  print runInput
-  -- pkrun <- uncurry (insertPK fromShowableList conn) runInput
-  -- print pkrun
-  -- mapM_ (\i-> uncurry (insert conn) (withFields inf "track" (pkrun <> lookupKeys inf "track" i))) (consLL "id_sample" (SNumeric <$> [0..])  $  zipLL (repeat []) ["position","instant"] res )
-  return (Nothing ,[])
-  -}

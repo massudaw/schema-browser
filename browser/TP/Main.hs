@@ -393,8 +393,8 @@ testPlugin s t p  = do
   let db = argsToState args
   smvar <- createVar
   let
-    amap = authMap smvar db ("wesley.massuda@gmail.com", "queijo")
-  (inf,fin) <- runDynamic $ keyTables smvar  (s,"wesley.massuda@gmail.com") amap []
+    amap = authMap smvar db ("postgres", "queijo")
+  (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
   wm <- mkWeakMVar  (globalRef smvar) (sequence_ fin)
   let (i,o) = pluginStatic p
   print $ liftAccess inf t i
