@@ -436,7 +436,7 @@ listBoxElEq eq list bitems bsel bfilter bdisplay = do
 
     -- animate output selection
 
-    element list # sinkDiff UI.selection (traceShowId <$> bindex)
+    element list # sinkDiff UI.selection bindex
 
 
     -- changing the display won't change the current selection
@@ -637,7 +637,7 @@ accumDiffCounter  f t = mdo
          let fins =  catMaybes $ fmap (flip M.lookup fin) d
          _ <- traverse sequence_ $ fmap snd fins
          return d)  ((,) <$> bs <@> (S.toList  <$> del ))
-  let evadd = ((\s (acc,m) -> (traceShow (acc + length s,fmap fst s) $ acc + length s,foldr (uncurry M.insert ) m s)) <$> add )
+  let evadd = ((\s (acc,m) -> ( acc + length s,foldr (uncurry M.insert ) m s)) <$> add )
       evdel = ( (\s (acc,m) -> (acc,foldr (M.delete ) m s)) <$> del2 )
   let eva = unionWith (.) evdel evadd
   bs <- accumB  (M.size ini,M.fromList iniout)  eva

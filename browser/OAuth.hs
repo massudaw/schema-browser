@@ -90,7 +90,7 @@ historyLoad = do
       getMessage :: Fold Value  (Text,Text)
       getMessage =  runFold ((,) <$> Fold (key "id"._String) <*> Fold (key "threadId". _String))
       patchHeader i l= (mempty,G.Idex [txt user,txt i] , l)
-      userfk = PFK [Rel "user" Equals "id"] [PAttr "user" (patch $ txt user)] mempty (PAtom $ patch $ mapKey' keyValue $justError"no row" $ row)
+      userfk = PFK [Rel "user" Equals "id"] [PAttr "user" (patch $ txt user)] (PAtom $ patch $ mapKey' keyValue $justError"no row" $ row)
       patchAddMessage  i = fmap (\(i,t) -> [
             liftPatch inf "messages" $
               patchHeader i [PAttr "id" (patch $ txt i),PAttr "threadId" (patch $ txt t),userfk]

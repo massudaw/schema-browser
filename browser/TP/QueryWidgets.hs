@@ -829,7 +829,7 @@ dynHandlerPatch hand val ix (l,old)= do
           liftIO $ h Keep
           return []
     el <- UI.div
-    els <- mapUIFinalizerT el idyn old
+    els <- mapUIFinalizerT el idyn (diffTidings $ (||)<$> old<*> fmap isJust valix)
     element el # sink children (facts els)
     bend <- ui $ stepper Keep ev
     let
@@ -887,8 +887,16 @@ attrUITable
 attrUITable  tAttr i  = logTime ("attr " <> show i) $ do
       attrUI <- buildUIDiff (keyModifier i) (keyType i)  tAttr
       let insertT = recoverEditChange <$> tAttr <*> triding attrUI
-      return $ TrivialWidget (fmap traceShowId insertT ) (getElement attrUI)
+      return $ TrivialWidget insertT  (getElement attrUI)
 
+-- reduceDiffList o i | traceShow (o,i) False = undefined
+reduceDiffList o i
+   | F.all isKeep (snd <$> i) = Keep
+   | otherwise = patchEditor $ lefts diffs ++ reverse (rights diffs)
+   where diffs = catMaybes $ (\(ix,v) -> treatA (o+ix)v) <$> i
+         treatA a (Diff v) = Just $ Left $ PIdx a  (Just v)
+         treatA a Delete =  Just $ Right $ PIdx a Nothing
+         treatA _ Keep = Nothing
 
 maybeEdit v id (Diff i) =  id i
 maybeEdit v id _  = v
@@ -918,17 +926,13 @@ buildUIDiff km i  tdi = go i tdi
             widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
             let
               widgets2 = Tra.sequenceA (  zipWith (\i j -> (i,) <$> j) [0..] $( triding <$> widgets) )
-              reduceA o i | traceShow (o,i) False = undefined
-              reduceA  o i
-                | F.all isKeep (snd <$> i) = Keep
-                | otherwise = patchEditor $ filterDiff $ (\(ix,v) -> treatA (o+ix)v) <$> i
-              treatA a (Diff v) = Diff $ PIdx a  (Just v)
-              treatA a Delete =  Diff $ PIdx a Nothing
-              treatA _ Keep = Keep
-              bres = reduceA  <$> offsetT <*>  widgets2 --((\ l m -> fmap (\(ix,i) -> (ix,editor  (join $ flip Non.atMay ix <$> m) i )) l )<$> widgets2 <*> tdi2)
+              -- [Note] Array diff must be applied in the right order
+              --  additions and edits first in ascending order than deletion in descending order
+              --  this way the patch index is always preserved
+              bres = reduceDiffList  <$> offsetT <*>  widgets2 --((\ l m -> fmap (\(ix,i) -> (ix,editor  (join $ flip Non.atMay ix <$> m) i )) l )<$> widgets2 <*> tdi2)
             element offsetDiv # set children (fmap getElement widgets)
             composed <- UI.span # set children [offset , offsetDiv]
-            return  $ TrivialWidget  (fmap traceShowId bres) composed
+            return  $ TrivialWidget  bres composed
          (KOptional ti) -> do
            let pretdi = ( join . fmap unSOptional' <$> tdi)
            tdnew <- go ti pretdi

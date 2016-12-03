@@ -278,7 +278,7 @@ liftPatchAttr inf t p@(PAttr k v ) =  PAttr (lookKey inf t k)  v
 liftPatchAttr inf tname p@(PInline rel e ) =  PInline ( lookKey inf tname rel) ((liftPatch inf tname2 ) <$>  e)
     where Just (FKInlineTable (_,tname2)) = fmap (unRecRel.pathRel) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (rel)) )  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
-liftPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel (fmap (liftPatchAttr inf tname) pa) (tableMeta $ lookTable rinf tname2) (fmap (liftPatch rinf tname2 ) $ b)
+liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf tname) pa)  (fmap (liftPatch rinf tname2 ) $ b)
     where (FKJoinTable  rel (schname,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
           rinf = fromMaybe inf (HM.lookup schname (depschema inf))
@@ -292,7 +292,7 @@ fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
     fixPatchAttr inf tname p@(PInline rel e ) =  PInline rel (fmap (\(_,o,v)-> (tableMeta $ lookTable inf tname2,o,fmap (fixPatchAttr  inf tname2 )v)) e)
         where Just (FKInlineTable (_,tname2)) = fmap (unRecRel.pathRel) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (keyValue rel)) )  (F.toList$ rawFKS  ta)
               ta = lookTable inf tname
-    fixPatchAttr inf tname p@(PFK rel2 pa t b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa) (tableMeta $ lookTable rinf tname2) b
+    fixPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa)  b
         where (FKJoinTable  _ (schname,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
               ta = lookTable inf tname
               rinf = fromMaybe inf (HM.lookup schname (depschema inf))

@@ -702,7 +702,7 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
         refs <- atRA "ofx" (idxK "file_name") -< ()
         let ix = length refs
         pk <- act (const ask )-< ()
-        returnA -<  traceShowId $ Just (kvempty,Idex (pure (SerialTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) kvempty  (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,[PAttr "account" (patch r),PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
+        returnA -<  traceShowId $ Just (kvempty,Idex (pure (SerialTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,[PAttr "account" (patch r),PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
 
 
 importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
@@ -725,7 +725,7 @@ importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
           ref :: [TB Identity  Text Showable]
           ref = [uncurry Attr  $ ("samples",ArrayTB1 $ Non.fromList $ fmap int   [0.. length (justError "no b" b)])]
           tbst :: (Maybe (TBIdx Text (Showable)))
-          tbst = traceShowId $ Just $ (mempty , Idex [r],  [PFK  [Rel "samples" Equals "id_sample",Rel "run" Equals "id_run"] (fmap patch ref) mempty ao])
+          tbst = traceShowId $ Just $ (mempty , Idex [r],  [PFK  [Rel "samples" Equals "id_sample",Rel "run" Equals "id_run"] (fmap patch ref) ao])
       returnA -< tbst
 
 
