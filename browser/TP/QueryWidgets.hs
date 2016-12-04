@@ -437,7 +437,7 @@ emptyRecTable (IT l tb)
 tbRecCase ::  InformationSchema ->  SelPKConstraint  -> Column CoreKey () -> [(Column CoreKey () ,Tidings (Maybe (Column CoreKey Showable)))] -> PluginRef  (Column CoreKey Showable) -> Tidings (Maybe (Column CoreKey Showable)) -> UI (TrivialWidget (Maybe (Column CoreKey Showable)))
 tbRecCase inf constr a wl plugItens preoldItems' = do
       let preoldItems = emptyRecTable  a <$> preoldItems'
-      let check = foldl (liftA2 (\j i ->  liftA2 apply j i <|> j <|> (create <$> i ))) (join . fmap unLeftItens  <$> preoldItems) (fmap (fmap (join . fmap unLeftItensP) . snd) plugItens )
+      let check = foldl' (liftA2 (\j i ->  liftA2 apply j i <|> j <|> (create <$> i ))) (join . fmap unLeftItens  <$> preoldItems) (fmap (fmap (join . fmap unLeftItensP) . snd) plugItens )
       TrivialWidget btr bel <- checkedWidget  (isJust <$> check)
       (ev,h) <- ui $ newEvent
       inipre <- currentValue  (facts preoldItems)
@@ -660,7 +660,9 @@ crudUITable inf open reftb@(bres , _ ,gist ,tref) refs pmods ftb@(m,_)  preoldIt
   element sub # sink children (pure <$> facts end)
   cv <- currentValue (facts preoldItems)
   bh2 <- ui $ stepper  cv (unionWith const e2  (rumors preoldItems))
-  return ([getElement nav,sub], ediff ,F.foldl (\i j -> (\i j -> liftA2 apply i j<|> i  <|> (create <$>j))<$> i <*> j) (tidings bh2 (unionWith const e2  (rumors preoldItems))) (fmap snd pmods))
+  return ([getElement nav,sub], ediff ,F.foldl' (\i j -> mergePatches <$> i <*> j) (tidings bh2 (unionWith const e2  (rumors preoldItems))) (fmap snd pmods))
+
+mergePatches i j = join (liftA2 applyIfChange i j)<|> i  <|> join (createIfChange <$>j)
 
 diffTidings t = tidings (facts t) $ diffEvent (facts t ) (rumors t)
 
@@ -1331,7 +1333,7 @@ fkUITable
 fkUITable inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = logTime ("fk " <> (show $ keyattri tb)) $ mdo
       let
         relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
-        ftdi = F.foldl' (liftA2 (\i j -> liftA2 apply i j <|> i  <|> (create <$>j) ) )  oldItems (snd <$>  plmods)
+        ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$>  plmods)
         replaceKey =  firstTB (\k -> maybe k id  $ fmap _relTarget $ L.find ((==k)._relOrigin) $  rel)
         replaceRel a =  (fst $ search (_relOrigin $ head $ keyattri a),  firstTB (\k  -> snd $ search k ) a)
             where  search  k = let v = justError ("no key" <> show k )$ L.find ((==k)._relOrigin)  rel in (_relOperator v , _relTarget v)
@@ -1477,7 +1479,7 @@ fkUITable inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1
      fks <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
 
      element dv # set children (getElement <$> fks)
-     let bres = indexItens arraySize  tb offsetT (Non.fromList $ triding <$> fks) (foldl' (liftA2 (\i j -> liftA2 apply i j <|> i <|> (create <$> j))) oldItems (fmap snd plmods))
+     let bres = indexItens arraySize  tb offsetT (Non.fromList $ triding <$> fks) (foldl' (liftA2 mergePatches) oldItems (snd <$> plmods))
      res <- UI.div # set children [offset ,dv]
      return $  TrivialWidget bres  res
 

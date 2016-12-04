@@ -289,22 +289,22 @@ newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,
 
 
 data Showable
-  = SText Text
-  | SNumeric Int
-  | SBoolean Bool
-  | SDouble Double
-  | STimestamp LocalTime
-  | SPInterval DiffTime
-  | SPosition Position
-  | SBounding Bounding
-  | SLineString LineString
-  | SPolygon LineString [LineString]
-  | SMultiGeom [Showable]
-  | SDate Day
-  | SDayTime TimeOfDay
-  | SBinary BS.ByteString
-  | SDynamic  (FTB Showable)
-  | SSession Sess.Session
+  = SText ! Text
+  | SNumeric ! Int
+  | SBoolean ! Bool
+  | SDouble ! Double
+  | STimestamp ! LocalTime
+  | SPInterval ! DiffTime
+  | SPosition ! Position
+  | SBounding ! Bounding
+  | SLineString ! LineString
+  | SPolygon ! LineString ! [LineString]
+  | SMultiGeom ! [Showable]
+  | SDate ! Day
+  | SDayTime ! TimeOfDay
+  | SBinary ! BS.ByteString
+  | SDynamic  ! (FTB Showable)
+  | SSession ! Sess.Session
   deriving(Ord,Eq,Show,Generic)
 
 instance Eq Sess.Session where
