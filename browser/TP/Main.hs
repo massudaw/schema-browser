@@ -89,8 +89,16 @@ setup smvar args plugList w = void $ do
   bhe <- ui $stepper True he
 
   menu <- checkedWidget (fmap not (fmap not (tidings bhe he)))
+  cliZone <- jsTimeZone
+  metadataNav <- mapUIFinalizerT body (traverse
+        (\inf -> sequenceA $ (M.fromList [("Map",fmap (^._2) <$>mapWidgetMeta inf)
+                             ,("Chart",fmap (^._2) <$> chartWidgetMetadata inf )
+                             ,("Account",fmap (^._2) <$> accountWidgetMeta inf )
+                             ,("Agenda",fmap (^._2) <$> eventWidgetMeta inf cliZone)
+                                         ]))) evDB
   element menu # set UI.class_ "col-xs-1"
-  nav  <- buttonDivSet  ["Map","Account","Agenda","Chart","Browser","Metadata"] (pure $ args `atMay` 6  )(\i -> UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
+  nav  <- buttonDivSet  ["Map","Account","Agenda","Chart","Browser","Metadata"] (pure $ args `atMay` 6  )(\i -> do
+    UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right" # sink  UI.style (noneShow . (maybe True (\i -> isJust .nonEmpty $ i).join . fmap (M.lookup i) ) <$> facts metadataNav ))
   element nav # set UI.class_ "col-xs-5 pull-right"
   chooserDiv <- UI.div # set children  ([getElement menu] <> chooserItens <> [getElement nav ] ) # set UI.style [("align-items","flex-end"),("height","7vh"),("width","100%")] # set UI.class_ "col-xs-12"
   container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"

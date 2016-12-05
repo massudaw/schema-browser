@@ -211,7 +211,13 @@ data GeomType
   | PPosition Int
   | PBounding  Int
   deriving(Eq,Show,Ord,Generic)
-
+    {-
+data TimeType
+  = PTimestamp (Maybe TimeZone)
+  | PDate
+  | PDayTime
+  | PInterval
+-}
 data KPrim
    = PText
    | PBoolean
@@ -787,7 +793,10 @@ tbUn un (TB1 (kv,item)) =  (\kv ->  mapComp (\(KV item)->  KV $ Map.filterWithKe
 
 
 getPK (TB1 i) = getPKM i
-getPKM (m, k) = Map.fromList $  concat $ F.toList (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (unTB k))))
+
+getPKM (m, k) = Map.fromList $  getPKL (m,k)
+
+getPKL (m, k) = concat $ F.toList (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (unTB k))))
 
 getAttr'  (m, k) =  L.sortBy (comparing fst) (concat (fmap aattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
 
@@ -816,6 +825,8 @@ notOptionalPK m =  justError "cant be empty " . traverse unSOptional'  $ m
 txt = TB1 . SText
 int = TB1 . SNumeric
 pos = TB1 . SGeo . SPosition
+timestamp = TB1 . STimestamp
+date = TB1 . SDate
 
 generateConstant CurrentDate = unsafePerformIO $ do
         i<- getCurrentTime

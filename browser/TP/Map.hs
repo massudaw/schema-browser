@@ -62,19 +62,14 @@ calendarCreate el (Just (p,ne,sw)) evs= runFunction $ ffi "createMap (%1,%2,%3,%
 
 
 idx inf c v@(m,k) = indexField ( liftAccess inf (_kvname m) (keyRef c))  v
-mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
-    importUI
-      [js "leaflet.js"
-      ,css "leaflet.css"]
 
+mapWidgetMeta  inf = do
     let
-      calendarT = (\b c -> (b,c)) <$> facts incrementT <#> resolutionT
       schemaPred2 = [(keyRef ["schema"],Left (int (schemaId inf),Equals))]
-
     (_,(_,evMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred2
     (_,(_,eventMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
     cliZone <- jsTimeZone
-    let dashes = (\e ->
+    return $ (\e ->
           let
               Just (TB1 (SText tname)) = unSOptional' $ _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
               table = lookTable inf tname
@@ -93,6 +88,15 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
           in ("#" <> renderShowable color ,table,efields,evfields,proj)) <$>  ( G.toList evMap)
 
 
+mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
+    importUI
+      [js "leaflet.js"
+      ,css "leaflet.css"]
+
+    let
+      calendarT = (\b c -> (b,c)) <$> facts incrementT <#> resolutionT
+
+    dashes <- mapWidgetMeta inf
     let
       legendStyle lookDesc table b
             =  do

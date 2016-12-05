@@ -58,7 +58,7 @@ mapKeys f (Idex i ) = Idex $ i
 getUnique :: Ord k => [k] -> TBData k a -> TBIndex  a
 getUnique ks (m,v) = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn (Set.fromList ks) $ (m,v)
 getIndex :: Ord k => TBData k a -> TBIndex  a
-getIndex (m,v) = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` (_kvpk m)).fst)) .M.toList .  getPKM $ (m,v)
+getIndex (m,v) = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` (_kvpk m)).fst)) .  getPKL $ (m,v)
 
 notOptional :: TBIndex  a -> TBIndex  a
 notOptional (Idex m) = Idex   . justError "cant be empty " . traverse unSOptional'  $ m

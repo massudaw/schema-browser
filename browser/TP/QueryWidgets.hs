@@ -914,8 +914,6 @@ buildUIDiff km i  tdi = go i tdi
             let arraySize = 8
                 tdi2  = fmap unArray <$> tdi
                 index o ix v = join $ flip Non.atMay (o + ix) <$> v
-           -- widgets <- mapM (\ix -> go ti (index ix <$> offsetT <*> tdi2) ) [0..arraySize -1 ]
-           -- sequenceA $ zipWith (\(ix,i) j -> element i # sink UI.style (facts $ (\o t d-> noneShow . isJust  $ recoverEdit (index o ix t) d ) <$> offsetT<*> tdi2 <*> triding j)) (zip [0..] $ tail widgets ) widgets
             let unIndexEl ix = (index ix <$> offsetT <*> tdi2)
                 dyn = dynHandlerPatch  (\ix valix ->do
                     wid <- go ti valix

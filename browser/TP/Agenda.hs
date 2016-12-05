@@ -4,7 +4,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module TP.Agenda (eventWidget) where
+module TP.Agenda (eventWidget,eventWidgetMeta) where
 
 import GHC.Stack
 import Step.Host
@@ -64,24 +64,12 @@ data Mode
   | Timeline
   deriving(Eq,Show,Ord)
 
-eventWidget body (incrementT,resolutionT) sel inf cliZone = do
-    w <-  askWindow
-    importUI $ fmap js
-       ["fullcalendar-3.0.1/lib/jquery-ui.min.js"
-       ,"fullcalendar-3.0.1/lib/moment.min.js"
-       ,"fullcalendar-3.0.1/fullcalendar.min.js"
-       ,"fullcalendar-scheduler-1.4.0/scheduler.min.js"
-       ,"fullcalendar-3.0.1/locale-all.js"]
-              <>  fmap css
-       ["fullcalendar-3.0.1/fullcalendar.min.css"
-       ,"fullcalendar-scheduler-1.4.0/scheduler.min.css"
-       ]
-
+eventWidgetMeta inf cliZone= do
     let
       schemaPred =  [(keyRef ["schema_name"],Left (txt (schemaName inf),Equals) )]
       schemaPred2 =  [(keyRef ["schema"],Left (int (schemaId inf),Equals) )]
 
-    dashes <- ui$ do
+    ui$ do
       evMap <- transactionNoLog (meta inf) $ do
         (_,(_,evMap )) <- selectFromTable "event" Nothing Nothing [] schemaPred2
         return evMap
@@ -104,6 +92,21 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
             attrValue (Attr k v) = v
          in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,efields,proj)) ( G.toList evMap)
 
+
+eventWidget body (incrementT,resolutionT) sel inf cliZone = do
+    w <-  askWindow
+    importUI $ fmap js
+       ["fullcalendar-3.0.1/lib/jquery-ui.min.js"
+       ,"fullcalendar-3.0.1/lib/moment.min.js"
+       ,"fullcalendar-3.0.1/fullcalendar.min.js"
+       ,"fullcalendar-scheduler-1.4.0/scheduler.min.js"
+       ,"fullcalendar-3.0.1/locale-all.js"]
+              <>  fmap css
+       ["fullcalendar-3.0.1/fullcalendar.min.css"
+       ,"fullcalendar-scheduler-1.4.0/scheduler.min.css"
+       ]
+
+    dashes<- eventWidgetMeta inf cliZone
     iday <- liftIO getCurrentTime
     let
       legendStyle  lookDesc table b

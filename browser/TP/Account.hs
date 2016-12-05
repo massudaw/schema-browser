@@ -53,17 +53,15 @@ import Data.Text (Text)
 
 import qualified Data.Map as M
 
-
-accountWidget body (incrementT,resolutionT) sel inf = do
+accountWidgetMeta inf = do
     let
-      calendarSelT = liftA2 (,) incrementT resolutionT
       schId = int (schemaId inf)
       schemaPred = [(keyRef ["schema"],Left (schId,Equals))]
 
     (_,(_,emap )) <-ui $ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
     (_,(_,aMap )) <-ui $ transactionNoLog  (meta inf) $ selectFromTable "accounts" Nothing Nothing [] schemaPred
     cliZone <- jsTimeZone
-    let dashes = fmap (\e ->
+    return $ fmap (\e ->
           let
               Just (TB1 (SText tname)) = unSOptional' $ _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
               table = lookTable  inf tname
@@ -85,6 +83,13 @@ accountWidget body (incrementT,resolutionT) sel inf = do
               attrValue (Attr k v) = v
            in ((color,table,efields,afields,proj))  ) ( G.toList aMap)
 
+
+
+accountWidget body (incrementT,resolutionT) sel inf = do
+    let
+      calendarSelT = liftA2 (,) incrementT resolutionT
+
+    dashes <- accountWidgetMeta inf
     let allTags =  dashes
     itemListEl2 <- mapM (\i ->
       (i^. _2,) <$> UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")]) dashes

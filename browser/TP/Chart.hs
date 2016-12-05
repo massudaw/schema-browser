@@ -4,7 +4,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module TP.Chart (chartWidget) where
+module TP.Chart (chartWidget,chartWidgetMetadata) where
 
 import GHC.Stack
 import Data.Ord
@@ -63,13 +63,13 @@ calendarCreate cal def = runFunction $ ffi "createChart(%1,%2)" cal def
 calendarAddSource cal chart t fields evs = runFunction $ ffi "addChartColumns(%1,%2,%3,%4,%5)" cal (tableName t) fields evs chart
 calendarRemoveSource cal t = runFunction $ ffi "removeChartColumns(%1,%2)" cal (tableName t)
 
-chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
-    let
+chartWidgetMetadata inf = do
+  let
 
       schId = int (schemaId inf)
       schemaPred = [(keyRef ["schema"],Left (schId,Equals))]
 
-    dashes <- ui$ do
+  ui$ do
       (_,(_,emap )) <-transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
       (_,(_,geomap )) <-transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred
       evMap <- transactionNoLog (meta inf) $ do
@@ -97,6 +97,9 @@ chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
             attrValue (Attr k v) = v
          in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,F.toList efields,(timeFields,geoFields,chart),proj) ) ( G.toList evMap)
 
+chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
+
+    dashes <- chartWidgetMetadata inf
     iday <- liftIO getCurrentTime
     let
       legendStyle  lookDesc table b
