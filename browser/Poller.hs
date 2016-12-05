@@ -119,12 +119,14 @@ poller schm authmap db plugs is_test = do
                           i <-  liftIO $ mapConcurrently (mapM (\inp -> catchPluginException inf (_tableUnique (lookTable inf a)) idp (M.toList $ getPKM inp) $ fmap fst $ runDynamic $ transactionLog inf $ do
                               case elemp of
                                 Right action  -> do
-                                  ovm  <- fmap (liftTable' inf a) <$> liftIO (action (Just $ mapKey' keyValue inp))
+                                  getP <- getFrom (lookTable inf a) inp
+                                  ovm  <- fmap (liftTable' inf a) <$> liftIO (action (Just $ mapKey' keyValue (maybe inp (apply inp) getP)))
                                   maybe (return ()) (\ov-> do
                                          p <- fullDiffEdit inp ov
                                          return ()) ovm
                                 Left action -> do
-                                    ovm  <- fmap (liftPatch inf a) <$> liftIO (action (Just $ mapKey' keyValue inp))
+                                    getP <- getFrom (lookTable inf a) inp
+                                    ovm  <- fmap (liftPatch inf a) <$> liftIO (action (Just $ mapKey' keyValue (maybe inp (apply inp) getP)))
                                     maybe (return ()) (\ov-> do
                                       liftIO $ print inp
                                       liftIO $ print (apply inp ov)
