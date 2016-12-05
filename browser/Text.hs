@@ -56,18 +56,19 @@ renderPrim (SNumeric a) = show a
 renderPrim (SBoolean a) = show a
 renderPrim (SDouble a) = show a
 renderPrim (STimestamp a) = show a
-renderPrim (SLineString a ) = show a
-renderPrim (SBounding a ) = show a
 renderPrim (SDate a) = show a
 renderPrim (SDayTime a) = show a
 renderPrim (SBinary _) = show "<Binary>"
 renderPrim (SDynamic s) = renderShowable s
-renderPrim (SPosition a) = show a
 renderPrim (SPInterval a) = show a
-renderPrim (SPolygon i a) = show (i:a)
-renderPrim (SMultiGeom a) = show a
+renderPrim (SGeo o ) = renderGeo o
 renderPrim i = show i
 
+renderGeo (SPosition a) = show a
+renderGeo (SPolygon i a) = show (i:a)
+renderGeo (SMultiGeom a) = show a
+renderGeo (SLineString a ) = show a
+renderGeo (SBounding a ) = show a
 
 defaultType t =
     case t of
@@ -110,7 +111,7 @@ readPrim t =
      PInterval -> readInterval
      PDate-> readDate
      PDayTime -> \t -> readDayTime t <|> readDayTimeMin t <|> readDayTimeHour t
-     PGeom a ->  case a of
+     PGeom a ->  fmap (fmap SGeo )$ case a of
        PPosition i-> readPosition
        PLineString i-> readLineString
        MultiGeom (PPolygon i ) -> readMultiPolygon

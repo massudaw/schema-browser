@@ -449,12 +449,12 @@ firstTB f (IT k i) = IT (f k) (mapKey f i)
 firstTB f (FKT k  m  i) = FKT  (mapBothKV (f) (mapComp (firstTB f)) k)  (fmap f  <$> m) (mapKey f i)
 
 data FTB a
-  = TB1 a
-  | LeftTB1   (Maybe (FTB a))
-  | SerialTB1 (Maybe (FTB a))
-  | DelayedTB1 (Maybe (FTB a))
-  | ArrayTB1  (NonEmpty (FTB a))
-  | IntervalTB1 (Interval.Interval (FTB a))
+  = TB1 ! a
+  | LeftTB1   ! (Maybe (FTB a))
+  | SerialTB1 ! (Maybe (FTB a))
+  | DelayedTB1 ! (Maybe (FTB a))
+  | ArrayTB1  ! (NonEmpty (FTB a))
+  | IntervalTB1 ! (Interval.Interval (FTB a))
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable,Generic)
 
 instance Applicative FTB where

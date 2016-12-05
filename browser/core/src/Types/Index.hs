@@ -93,6 +93,11 @@ instance Semigroup a => Semigroup (ER.Extended a ) where
   i <>  ER.PosInf = ER.PosInf
   ER.PosInf <> _= ER.PosInf
 
+instance Semigroup DiffPosition where
+  DiffPosition2D (x,y) <> DiffPosition2D (i,j)  = DiffPosition2D (x + i , y + j)
+  DiffPosition3D (x,y,z) <> DiffPosition3D (i,j,k)  = DiffPosition3D (x + i , y + j,z+ k)
+  a <> b = errorWithStackTrace (show (a,b))
+
 instance Semigroup DiffShowable where
   (<>) = appendDShowable
     where
@@ -102,7 +107,7 @@ instance Semigroup DiffShowable where
       appendDShowable (DSInt l ) (DSInt j) =  DSInt $ l + j
       appendDShowable (DSDays l ) (DSDays j) =  DSDays $ l + j
       appendDShowable (DSDiffTime l ) (DSDiffTime j) =  DSDiffTime $ l + j
-      appendDShowable (DSPosition (x,y,z) ) (DSPosition (a,b,c)) =  DSPosition $ (x+a,y+b,z+c)
+      appendDShowable (DSPosition x ) (DSPosition y ) =  DSPosition $ x <> y
       appendDShowable a b = errorWithStackTrace ("append " <> show (a,b))
 
 instance (Predicates (Predicate a),Ord a) => Predicates (WherePredicate,Predicate a ) where
@@ -200,6 +205,16 @@ splitPred (PrimColl (prod ,Left ((ArrayTB1 l ) ,Flip (AnyOp op)))) a  = OrColl <
 splitPred p@(PrimColl (prod,Right i)) _ =  Just p
 splitPred a e = errorWithStackTrace (show (a,e))
 
+instance Affine Position where
+  type Tangent Position = DiffPosition
+  subtraction ((Position (x,y,z)) ) ((Position (a,b,c))) = DiffPosition3D (a-x,b-y,c-z)
+  subtraction ((Position2D (x,y)) ) ((Position2D (a,b))) = DiffPosition2D (a-x,b-y)
+  addition ((Position (x,y,z)) ) ((DiffPosition3D (a,b,c))) = Position (a+x,b+y,c+z)
+  addition ((Position2D (x,y)) ) ((DiffPosition2D (a,b))) = Position2D (a+x,b+y)
+  expa ((DiffPosition3D t)) =  Position t
+  expa ((DiffPosition2D t)) =  Position2D t
+  loga ((Position t)) =  (DiffPosition3D t)
+  loga ((Position2D t)) =  (DiffPosition2D t)
 
 instance Affine Showable where
   type Tangent Showable = DiffShowable
@@ -208,14 +223,14 @@ instance Affine Showable where
   loga (SNumeric t) =  DSInt $ t
   loga (SDate t) =  DSDays  (diffDays  t (ModifiedJulianDay 0))
   loga (STimestamp t) =  DSDiffTime (diffUTCTime (localTimeToUTC utc t) (UTCTime (ModifiedJulianDay 0) 0))
-  loga (SPosition (Position t)) =  DSPosition t
+  loga (SGeo (SPosition t)) =  DSPosition (loga t)
   loga i = errorWithStackTrace (show i)
   expa (DSText t) =  SText $ T.pack $ expa t
   expa (DSDouble t) =  SDouble $ t
   expa (DSInt t) =  SNumeric $ t
   expa (DSDays t) =  SDate $ addDays t (ModifiedJulianDay 0)
   expa (DSDiffTime t) =  STimestamp $ utcToLocalTime utc $ addUTCTime  t (UTCTime (ModifiedJulianDay 0) 0)
-  expa (DSPosition t) =  SPosition $ Position t
+  expa (DSPosition t) =  SGeo $ SPosition (expa t)
   expa i = errorWithStackTrace (show i)
   subtraction = diffS
     where
@@ -225,8 +240,7 @@ instance Affine Showable where
       diffS (SNumeric t) (SNumeric o) = DSInt $ o -t
       diffS (STimestamp i ) (STimestamp j) = DSDiffTime (diffUTCTime (localTimeToUTC utc j) (localTimeToUTC utc  i))
       diffS (SDate i ) (SDate j) = DSDays (diffDays j i)
-      diffS (SPosition (Position (x,y,z)) ) (SPosition (Position (a,b,c))) = DSPosition (a-x,b-y,c-z)
-      diffS (SPosition (Position2D (x,y)) ) (SPosition (Position2D (a,b))) = DSPosition (a-x,b-y,0)
+      diffS (SGeo(SPosition s )) (SGeo(SPosition b)) = DSPosition $ subtraction s b
       diffS a b  = errorWithStackTrace (show (a,b))
   {-# INLINE subtraction #-}
   addition (SText v) (DSText t) = SText $ T.pack $ addition (T.unpack v) t
@@ -234,8 +248,7 @@ instance Affine Showable where
   addition (SDouble v) (DSDouble t) = SDouble $ v + t
   addition (STimestamp  v) (DSDiffTime t) = STimestamp $ utcToLocalTime utc $ addUTCTime t (localTimeToUTC utc v)
   addition (SDate v) (DSDays t) = SDate $ addDays t v
-  addition (SPosition (Position (x,y,z)) ) (DSPosition (a,b,c)) = SPosition $ Position (a+x,b+y,c+z)
-  addition (SPosition (Position2D (x,y)) ) (DSPosition (a,b,_)) = SPosition $ Position2D (a+x,b+y)
+  addition (SGeo(SPosition  v )) (DSPosition t ) = SGeo(SPosition $ addition v t)
   addition i j = errorWithStackTrace (show (i,j))
   {-# INLINE addition #-}
 
@@ -245,7 +258,7 @@ instance Predicates (TBIndex Showable) where
   consistent (Idex l) (Idex  i )
     =  if null b then False else  F.all id b
     where
-      b =  zipWith consistent (l) (i)
+      b =  zipWith consistent l i
 
   match (WherePredicate a,un)  e (Idex v) = go a
     where
@@ -301,7 +314,7 @@ indexPred :: (Access Key ,AccessOp Showable ) -> TBData Key Showable -> Bool
 indexPred (Many i,eq) a= all (\i -> indexPred (i,eq) a) i
 indexPred (n@(Nested k nt ) ,eq) r
   = case  indexField n r of
-    Nothing -> False -- traceShow (n,eq,r) $errorWithStackTrace ("cant find attr" <> show (n,nt))
+    Nothing -> False
     Just i ->  recPred $ indexPred (nt , eq ) <$> _fkttable  i
   where
     recPred (SerialTB1 i) = maybe False recPred i
@@ -311,7 +324,7 @@ indexPred (n@(Nested k nt ) ,eq) r
     recPred i = errorWithStackTrace (show i)
 indexPred (a@(IProd _ _),eq) r =
   case indexField a r of
-    Nothing ->  False -- traceShow (a,eq,r) $ errorWithStackTrace ("cant find attr" <> show (a,eq,r))
+    Nothing ->  False
     Just (Fun _ _ rv) ->
       case eq of
         i -> match eq Exact rv
@@ -342,10 +355,15 @@ data DiffFTB a
   -- | DiffArray [DiffFTB a]
   deriving(Eq,Ord,Show)
 
+data DiffPosition
+  = DiffPosition3D (Double,Double,Double)
+  | DiffPosition2D (Double,Double)
+  deriving(Eq,Ord,Show)
+
 data DiffShowable
   = DSText [Int]
   | DSDouble Double
-  | DSPosition (Double,Double,Double)
+  | DSPosition DiffPosition
   | DSInt Int
   | DSDiffTime NominalDiffTime
   | DSDays Integer

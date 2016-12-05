@@ -1000,23 +1000,27 @@ reduceDiff i
 
 buildPrim :: [FieldModifier] ->Tidings (Maybe Showable) ->   KPrim -> UI (TrivialWidget (Maybe Showable))
 buildPrim fm tdi i = case i of
-         PGeom(PPosition i)-> do
-           case i of
-             3-> do
-                lon <- buildPrim fm (fmap (\(SPosition (Position (lon,_,_))) -> SDouble lon ) <$> tdi) PDouble
-                lat <- buildPrim fm (fmap (\(SPosition (Position (_,lat,_))) -> SDouble lat ) <$> tdi) PDouble
-                alt <- buildPrim fm (fmap (\(SPosition (Position (_,_,alt))) -> SDouble alt ) <$> tdi) PDouble
-                let res = liftA3 (\(SDouble a)(SDouble b) (SDouble c) -> SPosition (Position (a,b,c))) <$> triding lon <*> triding lat <*> triding alt
-                composed <- UI.div # set UI.style [("display","inline-flex")]  # set UI.children (getElement <$> [lon,lat,alt])
-                upper <- UI.div # set children [composed]
-                return $ TrivialWidget res upper
-             2-> do
-                lon <- buildPrim fm (fmap (\(SPosition (Position2D (lon,_))) -> SDouble lon ) <$> tdi) PDouble
-                lat <- buildPrim fm (fmap (\(SPosition (Position2D (_,lat))) -> SDouble lat ) <$> tdi) PDouble
-                let res = liftA2 (\(SDouble a)(SDouble b)  -> SPosition (Position2D (a,b))) <$> triding lon <*> triding lat
-                composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children (getElement <$> [lon,lat])
-                upper <- UI.div # set children [composed]
-                return $ TrivialWidget res upper
+         PGeom g-> fmap (fmap(fmap SGeo)) $do
+           let tdig = fmap (\(SGeo i) -> i) <$> tdi
+           case g of
+             PPosition i -> do
+               let tdip = fmap (\(SPosition i) -> i) <$> tdig
+               fmap (fmap SPosition)<$> case i of
+                 3-> do
+                    lon <- buildPrim fm (fmap (\((Position (lon,_,_))) -> SDouble lon ) <$> tdip) PDouble
+                    lat <- buildPrim fm (fmap (\((Position (_,lat,_))) -> SDouble lat ) <$> tdip) PDouble
+                    alt <- buildPrim fm (fmap (\((Position (_,_,alt))) -> SDouble alt ) <$> tdip) PDouble
+                    let res = liftA3 (\(SDouble a)(SDouble b) (SDouble c) -> (Position (a,b,c))) <$> triding lon <*> triding lat <*> triding alt
+                    composed <- UI.div # set UI.style [("display","inline-flex")]  # set UI.children (getElement <$> [lon,lat,alt])
+                    upper <- UI.div # set children [composed]
+                    return $ TrivialWidget res upper
+                 2-> do
+                    lon <- buildPrim fm (fmap (\((Position2D (lon,_))) -> SDouble lon ) <$> tdip) PDouble
+                    lat <- buildPrim fm (fmap (\((Position2D (_,lat))) -> SDouble lat ) <$> tdip) PDouble
+                    let res = liftA2 (\(SDouble a)(SDouble b)  -> (Position2D (a,b))) <$> triding lon <*> triding lat
+                    composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children (getElement <$> [lon,lat])
+                    upper <- UI.div # set children [composed]
+                    return $ TrivialWidget res upper
          PBoolean -> do
            res <- checkedWidgetM (fmap (\(SBoolean i) -> i) <$> tdi )
            return (fmap SBoolean <$> res)
@@ -1026,10 +1030,11 @@ buildPrim fm tdi i = case i of
             timeButton <- UI.button # set UI.text "now"
             cliTime <- UI.click timeButton
             evCurr <-  mapEventFin (liftIO . fmap Just) (pure getCurrentTime <@ cliTime )
-            let  newEv = fmap (STimestamp . utcToLocalTime cliZone ) <$> evCurr
-                 maptime f (STimestamp i) = STimestamp (f i)
-                 toLocal = maptime  (utcToLocalTime cliZone . localTimeToUTC utc)
-                 fromLocal = maptime (utcToLocalTime utc .localTimeToUTC cliZone)
+            let
+              newEv = fmap (STimestamp . utcToLocalTime cliZone ) <$> evCurr
+              maptime f (STimestamp i) = STimestamp (f i)
+              toLocal = maptime  (utcToLocalTime cliZone . localTimeToUTC utc)
+              fromLocal = maptime (utcToLocalTime utc .localTimeToUTC cliZone)
             tdi2 <- ui $ addEvent newEv  (fmap toLocal <$> tdi)
             fmap (fmap fromLocal) <$> oneInput tdi2 [timeButton]
          PDate -> do

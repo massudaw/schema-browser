@@ -61,12 +61,14 @@ instance A.ToJSON Position where
             , A.String $ T.pack (show y)
             ]
 
-instance A.ToJSON Showable where
-    toJSON (SText i) = A.toJSON i
+instance A.ToJSON SGeo where
     toJSON (SMultiGeom l) = A.toJSON l
     toJSON (SPolygon h t) = A.toJSON (h:t)
     toJSON (SLineString i) = A.toJSON i
     toJSON (SPosition i ) = A.toJSON i
+instance A.ToJSON Showable where
+    toJSON (SText i) = A.toJSON i
+    toJSON (SGeo o) = A.toJSON o
     toJSON i = A.toJSON (renderPrim i)
 
 indexTy (IProd _ [k] )=  keyType k
@@ -177,13 +179,13 @@ resRange b "hour" d =
                else 3600) d
 
 makePos (AtomicPrim (PGeom (MultiGeom (PPolygon 3)))) [b,a,z] =
-    (Interval.Finite $ TB1 $ SPosition (Position (a, b,z)), True)
+    (Interval.Finite $ pos (Position (a, b,z)), True)
 makePos (AtomicPrim (PGeom (MultiGeom (PPolygon 2)))) [b,a,z] =
-    (Interval.Finite $ TB1 $ SPosition (Position2D (a, b)), True)
+    (Interval.Finite $ pos (Position2D (a, b)), True)
 makePos (AtomicPrim (PGeom (PPosition 2)))[b,a,z] =
-    (Interval.Finite $ TB1 $ SPosition (Position2D (a, b)), True)
+    (Interval.Finite $ pos (Position2D (a, b)), True)
 makePos (AtomicPrim (PGeom (PPosition 3))) [b,a,z] =
-    (Interval.Finite $ TB1 $ SPosition (Position (a, b, z)), True)
+    (Interval.Finite $ pos (Position (a, b, z)), True)
 makePos _ i = errorWithStackTrace (show i)
 
 writePK :: TBData Key Showable -> FTB Showable -> T.Text

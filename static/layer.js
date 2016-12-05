@@ -77,7 +77,7 @@ function createLayer(ref,tname,features){
   if (p.position.constructor === Array && p.position[0].constructor ===Array && p.position[0][0].constructor === Array ){
     p.position.map(function(pos){
       var r = pos.map(function(l){ return l.map(function(b){return L.latLng(b[0],b[1])})})
-      var poly = L.polygon(r);
+      var poly = L.polygon(r,{color:p.color});
       poly.on('click',function(e ){ref.eventClick(p,e);});
       layer.addLayer(poly);});
   }else{

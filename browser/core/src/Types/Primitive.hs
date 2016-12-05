@@ -196,6 +196,8 @@ instance Binary LineString
 instance NFData LineString
 instance Binary Showable
 instance NFData Showable
+instance Binary SGeo
+instance NFData SGeo
 
 
 
@@ -274,7 +276,8 @@ showKey k  =   maybe (keyValue k)  (\t -> keyValue k <> "-" <> t ) (keyTranslati
 
 data Position
     = Position (Double,Double,Double)
-    | Position2D (Double,Double) deriving(Eq,Typeable,Show,Read,Generic)
+    | Position2D (Double,Double)
+    deriving(Eq,Typeable,Show,Read,Generic)
 
 instance Ord Position where
   (Position (x,y,z) ) <= (Position (a,b,c)) =  x <= a && y <= b && z <= c
@@ -287,6 +290,13 @@ newtype Bounding = Bounding (Interval.Interval Position) deriving(Eq,Ord,Typeabl
 
 newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,Read,Generic)
 
+data SGeo
+  = SPosition !Position
+  | SLineString !LineString
+  | SPolygon !LineString ![LineString]
+  | SMultiGeom ![SGeo]
+  | SBounding !Bounding
+  deriving(Ord,Eq,Show,Generic)
 
 data Showable
   = SText ! Text
@@ -295,11 +305,7 @@ data Showable
   | SDouble ! Double
   | STimestamp ! LocalTime
   | SPInterval ! DiffTime
-  | SPosition ! Position
-  | SBounding ! Bounding
-  | SLineString ! LineString
-  | SPolygon ! LineString ! [LineString]
-  | SMultiGeom ! [Showable]
+  | SGeo  !SGeo
   | SDate ! Day
   | SDayTime ! TimeOfDay
   | SBinary ! BS.ByteString
@@ -809,6 +815,7 @@ notOptionalPK m =  justError "cant be empty " . traverse unSOptional'  $ m
 
 txt = TB1 . SText
 int = TB1 . SNumeric
+pos = TB1 . SGeo . SPosition
 
 generateConstant CurrentDate = unsafePerformIO $ do
         i<- getCurrentTime

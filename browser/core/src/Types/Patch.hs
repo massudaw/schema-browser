@@ -457,7 +457,7 @@ createTB1 (m ,s ,k)  = (m ,).  _tb .KV . mapFromTBList  <$>  traverse (fmap _tb 
 
 
 pattrKey (PAttr s _ ) = Set.singleton $ Inline s
-pattrKey (PFun s _ _ ) = Set.singleton $ Inline s
+pattrKey (PFun s l _ ) = Set.singleton $ RelFun s (relAccesGen <$> snd l)
 pattrKey (PInline s _ ) = Set.singleton $ Inline s
 pattrKey (PFK s _  _ ) = Set.fromList s
 

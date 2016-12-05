@@ -150,7 +150,7 @@ instance TF.ToField (UnQuoted Showable) where
   toField (UnQuoted (SDayTime  i )) = TF.Plain $ timeOfDayToBuilder (i)
   toField (UnQuoted (SDouble i )) =  TF.toField i
   toField (UnQuoted (SNumeric i )) =  TF.toField i
-  toField (UnQuoted (SPosition i )) =  TF.toField i
+  toField (UnQuoted (SGeo (SPosition i ))) =  TF.toField i
   toField (UnQuoted i) = errorWithStackTrace (show i)
 
 instance TF.ToField Position where
@@ -206,18 +206,21 @@ intervalBuilder i =  TF.Many [TF.Plain $ fromByteString ("\'"  <> lbd (snd $ Int
           ubd True = "]"
           ubd False =")"
 
+instance TF.ToField SGeo where
+  toField (SPosition t) = TF.toField t
+  toField (SLineString t) = TF.toField t
+  toField (SBounding t) = TF.toField t
+  -- toField (SMultiGeom t) = TF.toField t
 
 instance TF.ToField Showable where
   toField (SText t) = TF.toField t
   toField (SNumeric t) = TF.toField t
   toField (SDate t) = TF.toField t
   toField (SDayTime t) = TF.toField t
+  toField (SBoolean t) = TF.toField t
   toField (STimestamp t) = TF.toField t
   toField (SDouble t) = TF.toField t
-  toField (SPosition t) = TF.toField t
-  toField (SLineString t) = TF.toField t
-  toField (SBounding t) = TF.toField t
-  toField (SBoolean t) = TF.toField t
+  toField (SGeo i ) = TF.toField i
   toField (SBinary t) = TF.toField (Binary t)
   toField (SDynamic t) = TF.toField (Binary (B.encode t))
 
@@ -382,7 +385,7 @@ parsePrimJSON i  v =
       PTimestamp _ -> (\v -> A.withText (show i) (maybe (fail ("cant parse timestamp" <> show (i,v))) (return .STimestamp  . fst) . strptime "%Y-%m-%dT%H:%M:%OS") $ v)
       PDayTime  -> A.withText (show i) (maybe (fail "cant parse daytime") (return .SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS")
       PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay . fst) . strptime "%Y-%m-%d")
-      PGeom a -> A.withText (show i)  (either fail pure .Sel.runGet (parseGeom a). fst . B16.decode .BS.pack . T.unpack)
+      PGeom a -> A.withText (show i)  (fmap SGeo . either fail pure .Sel.runGet (parseGeom a). fst . B16.decode .BS.pack . T.unpack)
 
       i -> errorWithStackTrace (show i)
   ) v
@@ -457,7 +460,7 @@ parsePrim i =  do
                     i <- fmap (SDate . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)}"
                     maybe (fail "cant parse date") return i
                  in tryquoted p
-        PGeom a -> case a of
+        PGeom a -> (fmap SGeo) $ case a of
           PPosition i-> do
             s <- plain' "\",)}"
             case  Sel.runGet (getPosition3d get3DPosition)(fst $ B16.decode s)of

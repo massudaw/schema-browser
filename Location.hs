@@ -66,10 +66,10 @@ queryGeocodeBoundary = FPlugins "Google Geocode" "address"  $ BoundedPlugin2 url
                 viewport = dec !> "results" !!> 0 !> "geometry" !> "viewport"
                 getPos l = Position <$> liftA2 (\(Number i) (Number j)-> (realToFrac i ,realToFrac j ,0)) (l !> "lng" )( l  !> "lat" )
             p <- MaybeT $ return $ getPos loc
-            b <- MaybeT $ return $ case (fmap IntervalTB1 $ fmap (fmap (TB1 . SPosition))$  (\i j -> interval (Finite i ,True) (Finite j ,True))<$> getPos (bounds !> "southwest") <*> getPos (bounds !> "northeast"), fmap IntervalTB1 $ fmap (fmap (TB1 . SPosition) )$ (\i j -> interval (Finite i ,True) (Finite j ,True))<$> getPos (viewport !> "southwest") <*> getPos (viewport !> "northeast")) of
+            b <- MaybeT $ return $ case (fmap IntervalTB1 $ fmap (fmap (pos))$  (\i j -> interval (Finite i ,True) (Finite j ,True))<$> getPos (bounds !> "southwest") <*> getPos (bounds !> "northeast"), fmap IntervalTB1 $ fmap (fmap (pos) )$ (\i j -> interval (Finite i ,True) (Finite j ,True))<$> getPos (viewport !> "southwest") <*> getPos (viewport !> "northeast")) of
                                         (i@(Just _), _ ) -> i
                                         (Nothing , j) -> j
-            return [("geocode" ,TB1 $ SPosition p)]) -<  (im,addr)
+            return [("geocode" ,pos p)]) -<  (im,addr)
 
       let tb =  tblist . fmap (_tb . (uncurry Attr ) . second (LeftTB1 . Just )) <$> r
       returnA -< tb
