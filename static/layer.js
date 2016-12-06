@@ -90,7 +90,7 @@ function createLayer(ref,tname,features){
    layer.addLayer(line);
   }
   else{
-  feature = L.circle(p.position,{radius: p.size,color:p.color}).bindTooltip(p.title).openTooltip(); 
+  feature = L.circle(p.position,{radius: p.size,color:p.color}).bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
   feature.on('click',function(e ){ref.eventClick(p,e);});
   layer.addLayer(feature);
   }
