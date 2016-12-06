@@ -2,6 +2,7 @@
 module Main (main) where
 import TP.Main
 import TP.Browser(addServer,deleteServer,deleteClient,addClientLogin,deleteClientLogin)
+import Rmtc
 import Data.Unique
 import Types
 import qualified Types.Index as G
@@ -51,6 +52,7 @@ main = do
 
   print "Load Polling Process"
   poller smvar amap db regplugs False
+  pollRmtc smvar amap (T.pack $ user db)
 
   print "Load GUI Server"
   let

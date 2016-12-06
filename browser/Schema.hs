@@ -513,7 +513,7 @@ writeTable :: String -> Table -> DBRef Key Showable -> IO ()
 writeTable s t v = do
   print ("dumping table " <> s <> " " <> T.unpack ( tableName t))
   let tname = s <> "/" <> (fromString $ T.unpack (tableName t))
-  (iv,_) <- atomically $ readState mempty (v)
+  (iv,_,_) <- atomically $ readState mempty (v)
   (iidx ,_)<- atomically $ readIndex (v)
   let sidx = first (mapPredicate keyValue)  <$> M.toList iidx
       sdata = fmap (mapKey' keyValue.tableNonRef') $ G.toList $ iv

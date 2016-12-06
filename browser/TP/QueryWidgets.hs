@@ -877,8 +877,6 @@ logTime s f = do
   ini <- liftIO $ getCurrentTime
   r <- f
   out <- liftIO $ getCurrentTime
---  liftIO$ putStrLn  $ s <>  " " <> show (diffUTCTime out ini)
-
   return r
 
 

@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies,FlexibleContexts,OverloadedStrings,TupleSections #-}
+{-# LANGUAGE RecursiveDo,TypeFamilies,FlexibleContexts,OverloadedStrings,TupleSections #-}
 module SchemaQuery
   (
   createUn
@@ -358,7 +358,7 @@ pageTable flag method table page size presort fixed = do
         ffixed = filterfixed  table fixed
     mmap <- liftIO $ atomically $ readTMVar mvar
     let dbvar =  justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
-    (reso ,nchan) <- liftIO $ atomically $
+    (reso ,nchan,iniVar) <- liftIO $ atomically $
       readState (fixed ,rawPK table) dbvar
 
     ((fixedmap,fixedChan),idxVL)  <- liftIO $ atomically $
@@ -407,7 +407,7 @@ pageTable flag method table page size presort fixed = do
        return (nidx fixedmap, if L.length ndata > 0 then createUn (rawPK table)  ndata <> freso else  freso )
     let iniFil = iniT
     modify (M.insert (table,fixed) ( snd $iniT))
-    vpt <- lift $ convertChanTidings0 table (fixed ,rawPK table)(snd iniFil) nchan
+    vpt <- lift $ convertChanTidings0 table (fixed ,rawPK table) (snd iniFil) iniVar nchan
     idxTds <- lift $ convertChanStepper0 table fixedmap fixedChan
     return (DBVar2 dbvar idxTds vpt ,iniFil)
 
@@ -427,7 +427,7 @@ readState fixed dbvar = do
       filterPred :: [Index (TBData Key Showable)] -> Maybe [Index (TBData Key Showable)]
       filterPred = nonEmpty . filter (\d@(_,p,_) -> splitMatch fixed p && indexFilterP (fst fixed) d )
       update = F.foldl' (flip (\p-> (flip apply p)))
-  return (update var (concat patches),chan)
+  return (update var (concat patches),chan,collectionState dbvar)
 
 convertChanStepper0  table ini nchan = do
         (e,h) <- newEvent
@@ -444,30 +444,41 @@ convertChanStepper table dbvar = do
           readIndex dbvar
         convertChanStepper0 table ini nchan
 
-convertChanEvent table chan = do
+convertChanEvent table fixed bres inivar chan = do
   (e,h) <- newEvent
   t <- liftIO $ forkIO $ forever $ catchJust notException (do
-    patches <- atomically $ takeMany chan
-    h (concat patches) )(\e -> atomically ( takeMany chan ) >>= (\d ->  appendFile ("errors/data-" <> T.unpack ( tableName table )) $ show (e :: SomeException,d)<>"\n"))
+    (ml,oldM) <- atomically $ (,) <$> takeMany chan <*> readTVar inivar
+    v <- currentValue bres
+    let
+        m = concat ml
+        newRows =  filter (\d@(_,p,_) -> splitMatch fixed p && indexFilterP (fst fixed) d && isNothing (G.lookup p v) ) m
+        filterPred :: [Index (TBData Key Showable)] -> Maybe [Index (TBData Key Showable)]
+        filterPred = nonEmpty . filter (\d@(_,p,_) -> splitMatch fixed p && indexFilterP (fst fixed) d )
+        lookNew  (_,p,_) = fmap patch $ G.lookup p oldM
+        filterPredNot j = nonEmpty . catMaybes . map (\d@(m,p,_) -> if isJust ( G.lookup p j) && not (splitMatch fixed p && indexFilterP (fst fixed) d ) then Just (m,p,[]) else Nothing )
+        newpatches = lookNew <$> newRows
+        oldRows =  filterPredNot v m
+        patches =  nonEmpty ( catMaybes newpatches )<> oldRows <> filterPred m
+
+    traverse  h patches
+    return () )(\e -> atomically ( takeMany chan ) >>= (\d ->  appendFile ("errors/data-" <> T.unpack ( tableName table )) $ show (e :: SomeException,d)<>"\n"))
   registerDynamic (killThread t)
   return e
 
 convertChanTidings table fixed dbvar = do
-      (ini,nchan) <- liftIO $atomically $
+      (ini,nchan,inivar) <- liftIO $atomically $
         readState fixed  dbvar
-      convertChanTidings0 table fixed ini nchan
+      convertChanTidings0 table fixed ini inivar nchan
 
 
-convertChanTidings0 table fixed ini nchan = do
-    evdiff <-  convertChanEvent table nchan
+splitMatch (WherePredicate b,o) p = maybe True (\i -> G.match (WherePredicate i ,o) G.Exact p  ) (G.splitIndexPK b o)
+
+convertChanTidings0 table fixed ini iniVar nchan = mdo
+    evdiff <-  convertChanEvent table fixed bres iniVar nchan
     let
-      splitMatch (WherePredicate b,o) p = maybe True (\i -> G.match (WherePredicate i ,o) G.Exact p  ) (G.splitIndexPK b o)
-      filterPred :: [Index (TBData Key Showable)] -> Maybe [Index (TBData Key Showable)]
-      filterPred = nonEmpty . filter (\d@(_,p,_) -> splitMatch fixed p && indexFilterP (fst fixed) d )
       update = F.foldl' (flip (\p-> (flip apply p)))
-      diffs = filterJust $ filterPred <$> evdiff
-    bres <- accumB ini (flip update <$> diffs)
-    return $tidings bres (update <$> bres <@> diffs)
+    bres <- accumB ini (flip update <$> evdiff)
+    return $tidings bres (update <$> bres <@> evdiff)
 
 takeMany' :: TChan a -> STM [a]
 takeMany' mvar = maybe (return[]) (go . (:[])) =<< tryReadTChan mvar
@@ -624,8 +635,6 @@ tbInsertEdit f@(FKT pk rel2  t2) =
         LeftTB1 i ->
            maybe (return f ) ((fmap attrOptional) . tbInsertEdit ) (unLeftItens f)
         ArrayTB1 l -> do
-          liftIO $ print f
-
           (fmap (attrArray f .Non.fromList)) $  Tra.traverse (\ix ->   tbInsertEdit $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. Non.length l - 1 ]
 
 
