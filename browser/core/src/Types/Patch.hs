@@ -55,6 +55,7 @@ import qualified Control.Lens as Le
 import Control.Monad.Reader
 import Data.Semigroup hiding (diff)
 import qualified NonEmpty as Non
+import NonEmpty (NonEmpty)
 import Data.Bifunctor
 import Data.Maybe
 import GHC.Generics
@@ -193,7 +194,7 @@ editor Nothing (Just j) = Diff (patch j)
 editor Nothing Nothing = Keep
 
 data Editor  a
-  = Diff a
+  = Diff ! a
   | Delete
   | Keep
   deriving(Eq,Ord,Functor,Show)
@@ -209,21 +210,17 @@ instance Applicative Editor where
 
 
 data PathFTB   a
-  = POpt (Maybe (PathFTB a))
-  | PDelayed (Maybe (PathFTB a))
-  | PSerial (Maybe (PathFTB a))
-  | PIdx Int (Maybe (PathFTB a))
-  | PInter Bool (Extended (PathFTB a),Bool)
-  | PatchSet (Non.NonEmpty (PathFTB a))
-  | PAtom a
+  = POpt !(Maybe (PathFTB a))
+  | PDelayed !(Maybe (PathFTB a))
+  | PSerial !(Maybe (PathFTB a))
+  | PIdx Int !(Maybe (PathFTB a))
+  | PInter !Bool !(Extended (PathFTB a),Bool)
+  | PatchSet !(Non.NonEmpty (PathFTB a))
+  | PAtom !a
   deriving(Show,Eq,Ord,Functor,Generic,Foldable)
 
 upperPatch = PInter False
 lowerPatch = PInter True
-
-newtype FBPatch p
-  =  FBPatch (p ,p)
-  deriving (Show,Eq,Ord)
 
 
 class Patch f where
@@ -236,6 +233,14 @@ class Patch f where
   create = justError "no create" . createIfChange
   createIfChange :: Index f -> Maybe f
   patch  :: f -> Index f
+
+data PatchIndex a = PatchIndex Int (Maybe a)
+
+instance Patch a => Patch (NonEmpty a) where
+  type Index (NonEmpty a)  = PatchIndex (Index a)
+  applyIfChange j (PatchIndex i (Just a)) = Just $ Non.imap (\ix -> if ix == i then flip apply a else id ) j
+  applyIfChange j (PatchIndex i Nothing ) = fmap Non.fromList $ nonEmpty $ Non.take i j <> Non.drop (i+1) j
+
 
 class Compact f where
   compact :: [f] -> [f]
@@ -291,10 +296,10 @@ type RowPatch k a = TBIdx k a -- (KVMetadata k, TBData k a ,[PathAttr k a])
 
 
 data PathAttr k a
-  = PAttr k (PathFTB a)
-  | PFun k (Expr ,[Access k]) (PathFTB a)
-  | PInline k (PathFTB  (TBIdx k a))
-  | PFK [Rel k] [PathAttr k a]  (PathFTB (TBIdx k a))
+  = PAttr !k !(PathFTB a)
+  | PFun !k !(Expr ,[Access k]) !(PathFTB a)
+  | PInline !k !(PathFTB  (TBIdx k a))
+  | PFK ![Rel k] ![PathAttr k a]  !(PathFTB (TBIdx k a))
   deriving(Eq,Ord,Show,Functor,Generic)
 
 patchfkt (PFK _ _  k) = k
@@ -475,17 +480,6 @@ applyRecordChange t@(m, v) (m2 ,idx   , k)
     edit  key  k v = if  key == pattrKey k then  applyAttrChange  v k else Just v
 
 
-{-
-applyRecord
-   :: PatchConstr d a =>
-    TBData d a
-     -> TBIdx d (Index a)
-     -> TBData d a
-applyRecord t@((m, v)) (m2 ,p  , k)
-  | _kvname m == _kvname m2 && p == fmap patch (G.getIndex t) = (m ,mapComp (KV . flip (foldr (\p m -> Map.alter (\v -> Just $ maybe (_tb $ create p) (mapComp (flip apply p )) v   ) (pattrKey p) m)) k  . _kvvalues ) v)
-  | otherwise = create (m2,p,k)
-    where edit  v k =  mapComp (flip apply k ) v
--}
 patchSet i
   | L.length i == 0 = Nothing
   | L.length i == 1 = safeHead i
