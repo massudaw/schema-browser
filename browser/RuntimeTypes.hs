@@ -234,6 +234,8 @@ lookSTable inf (s,t) = justError ("no table: " <> T.unpack t) $ join $ HM.lookup
 lookKey :: InformationSchema -> Text -> Text -> Key
 lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpack k  <> show (HM.toList (keyMap inf))) $ HM.lookup (t,k) (keyMap inf)
 
+lookKeyM :: InformationSchema -> Text -> Text -> Maybe Key
+lookKeyM inf t k =  HM.lookup (t,k) (keyMap inf)
 
 putPatch m = liftIO .atomically . writeTChan m . force
 
@@ -299,6 +301,23 @@ fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
     fixPatchAttr inf tname p@(PFun k _ b ) =  PFun ki (expr,a) b
       where (FunctionField ki expr a )   = (unRecRel.pathRel) $ justError (show (k,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.singleton(k))  (F.toList$ rawFKS  ta)
             ta = lookTable inf tname
+liftAccessM :: InformationSchema -> Text -> Access Text  -> Maybe (Access Key)
+liftAccessM inf tname (Point i  ) =  Just $ Point i
+liftAccessM inf tname (Rec i j ) =  Rec i <$> (liftAccessM inf tname  j)
+liftAccessM inf tname (ISum i) =  ISum <$> traverse (liftAccessM inf tname)  i
+liftAccessM inf tname (Many i) =  Many <$> traverse (liftAccessM inf tname)  i
+liftAccessM inf tname (IProd b l) = IProd b <$> traverse  (lookKeyM inf tname) l
+liftAccessM inf tname (Nested i c) = Nested <$> ref <*> join (fmap (\ l -> liftAccessM inf  (snd (proj l)) c ) n)
+  where
+    ref = liftAccessM inf tname i
+    tb = lookTable inf tname
+    n = join $ (\(IProd _ refk )-> L.find (\i -> S.fromList refk == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)) <$> ref
+    proj n = case n of
+          (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
+          (Path _ rel@(FKInlineTable  l  ) ) ->  l
+
+liftAccessM _ _ i = errorWithStackTrace (show i)
+
 
 
 liftAccess :: InformationSchema -> Text -> Access Text  -> Access Key

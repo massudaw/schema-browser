@@ -199,15 +199,6 @@ data Editor  a
   | Keep
   deriving(Eq,Ord,Functor,Show)
 
-instance Applicative Editor where
-  pure = Diff
-  Diff a <*> Diff b = Diff $ a  b
-  Delete <*> i = Delete
-  i <*> Delete  = Delete
-  Keep <*> i = Keep
-  i <*> Keep = Keep
-
-
 
 data PathFTB   a
   = POpt !(Maybe (PathFTB a))
@@ -240,6 +231,7 @@ instance Patch a => Patch (NonEmpty a) where
   type Index (NonEmpty a)  = PatchIndex (Index a)
   applyIfChange j (PatchIndex i (Just a)) = Just $ Non.imap (\ix -> if ix == i then flip apply a else id ) j
   applyIfChange j (PatchIndex i Nothing ) = fmap Non.fromList $ nonEmpty $ Non.take i j <> Non.drop (i+1) j
+  createIfChange (PatchIndex i a ) = join $ fmap (fmap pure.createIfChange) a
 
 
 class Compact f where
@@ -574,11 +566,6 @@ diffFTB p d (TB1 i) (TB1  j) = fmap PAtom $ d i j
 diffFTB p d  i j = errorWithStackTrace ("diffError" <> show (i,j))
 
 
-instance Applicative Interval.Extended where
-  pure i = Interval.Finite i
-  (Interval.Finite i) <*> (Interval.Finite j) =  Interval.Finite $ i j
-
-
 
 applyOptM
   :: (Show a,Ord a) =>
@@ -630,18 +617,17 @@ createFTBM p (PInter b o ) = IntervalTB1 <$> join (checkInterM p (PInter b o)  <
 createFTBM p (PAtom i )  = fmap TB1 $ p i
 createFTBM p (PatchSet l)
   | L.null l= errorWithStackTrace "no patch"
-  | otherwise = foldl1 mappend (createFTBM p <$> l)
+  | otherwise = foldl1 (<>) (createFTBM p <$> l)
 
 firstT f (i,j) = (,j) <$> f i
 
 
-instance (Ord a )=> Monoid (FTB a) where
- mempty = LeftTB1 Nothing
- mappend (LeftTB1 i) (LeftTB1 j) = LeftTB1 (j)
- mappend (IntervalTB1 i) (IntervalTB1 j) = IntervalTB1 ( i `Interval.intersection` j)
- mappend (ArrayTB1 i) (ArrayTB1 j) = ArrayTB1 (i <>  j)
- mappend (DelayedTB1 i) (DelayedTB1 j) = DelayedTB1 (j)
- mappend (SerialTB1 i) (SerialTB1 j) = SerialTB1 (j)
- mappend (TB1 i) (TB1 j) = TB1 j
+instance (Ord a )=> Semigroup (FTB a) where
+ (LeftTB1 i)<> (LeftTB1 j) = LeftTB1 (j)
+ (IntervalTB1 i) <> (IntervalTB1 j) = IntervalTB1 ( i `Interval.intersection` j)
+ (ArrayTB1 i) <> (ArrayTB1 j) = ArrayTB1 (i <>  j)
+ (DelayedTB1 i) <> (DelayedTB1 j) = DelayedTB1 (j)
+ (SerialTB1 i) <> (SerialTB1 j) = SerialTB1 (j)
+ (TB1 i) <> (TB1 j) = TB1 j
 
 

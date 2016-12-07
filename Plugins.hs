@@ -14,6 +14,7 @@ module Plugins (importargpx ,plugList,lplugOrcamento, siapi3Plugin) where
 
 import qualified NonEmpty as Non
 import System.Process
+import Data.Semigroup
 import Control.Monad.Catch
 import Location
 import Data.Interval(Extended(..),interval,lowerBound',upperBound)
@@ -55,7 +56,6 @@ import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import Data.Time
 import qualified Data.ByteString.Base64.URL as B64Url
-import Data.Monoid hiding (Product(..))
 import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Data.Map as M

@@ -52,7 +52,7 @@ main = do
 
   print "Load Polling Process"
   poller smvar amap db regplugs False
-  pollRmtc smvar amap (T.pack $ user db)
+  -- pollRmtc smvar amap (T.pack $ user db)
 
   print "Load GUI Server"
   let

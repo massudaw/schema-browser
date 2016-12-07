@@ -73,28 +73,44 @@ function createLayer(ref,tname,features){
   layers = points.map(function (p){ 
   
   var feature ;
-  
-  if (p.position.constructor === Array && p.position[0].constructor ===Array && p.position[0][0].constructor === Array ){
-    p.position.map(function(pos){
-      var r = pos.map(function(l){ return l.map(function(b){return L.latLng(b[0],b[1])})})
-      var poly = L.polygon(r,{color:p.color});
-      poly.on('click',function(e ){ref.eventClick(p,e);});
-      layer.addLayer(poly);});
-  }else{
-  if (p.position.constructor === Array && p.position[0].constructor ===Array ){
-   latlonA = p.position.map(function(l){
-     return L.latLng(l[0],l[1]);
-   })
-   var line =  L.polyline(latlonA,{color:p.color});
-   line.on('click',function(e ){ref.eventClick(p,e);});
-   layer.addLayer(line);
+  switch(tname ){
+    case 'max_registro_onibus'  :
+     var bus = L.icon({iconUrl:'static/images/bus.png',iconSize:p.size});
+     feature = L.marker(p.position,{icon:bus}).bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
+     feature.on('click',function(e ){ref.eventClick(p,e);});
+     layer.addLayer(feature);
+     break;
+    case 'pontos'  :
+     var bus = L.icon({iconUrl:'static/images/bus-stop.png',iconSize:p.size});
+     feature = L.marker(p.position,{icon:bus}).bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
+     feature.on('click',function(e ){ref.eventClick(p,e);});
+     layer.addLayer(feature);
+     break;
+
+   default:
+    if (p.position.constructor === Array && p.position[0].constructor ===Array && p.position[0][0].constructor === Array ){
+      p.position.map(function(pos){
+        var r = pos.map(function(l){ return l.map(function(b){return L.latLng(b[0],b[1])})})
+        var poly = L.polygon(r,{color:p.color});
+        poly.on('click',function(e ){ref.eventClick(p,e);});
+        layer.addLayer(poly);});
+    }else{
+    if (p.position.constructor === Array && p.position[0].constructor ===Array ){
+     latlonA = p.position.map(function(l){
+       return L.latLng(l[0],l[1]);
+     })
+     var line =  L.polyline(latlonA,{color:p.color});
+     line.on('click',function(e ){ref.eventClick(p,e);});
+     layer.addLayer(line);
+    }
+    else{
+    feature = L.circle(p.position,{radius: p.size,color:p.color}).bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
+    feature.on('click',function(e ){ref.eventClick(p,e);});
+    layer.addLayer(feature);
+    }
+    }
   }
-  else{
-  feature = L.circle(p.position,{radius: p.size,color:p.color}).bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
-  feature.on('click',function(e ){ref.eventClick(p,e);});
-  layer.addLayer(feature);
-  }
-  }})
+  })
 }
 
 

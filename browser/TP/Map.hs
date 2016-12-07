@@ -8,6 +8,7 @@ module TP.Map where
 
 import Step.Host
 import qualified NonEmpty as Non
+import Utils
 import Database.PostgreSQL.Simple
 import Control.Monad.Writer as Writer
 import Postgresql.Parser
@@ -109,8 +110,25 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
 
     mapOpen <- liftIO getCurrentTime
 
+    filterInp <- UI.input
+    filterInpT <- element filterInp # sourceT "change" UI.valueFFI ""
+    let
+      parseMany t l =  parseInp t <$> unIntercalate ('&'==) l
+      -- parseInp t i | traceShow i False = undefined
+      parseInp t i
+        | not (L.null j ) && T.pack tnew == tableName t  =    (,tail r ) <$> liftAccessM inf (tableName t) ( nest (unIntercalate ('.'==) (tail j)))
+        | not $ L.null r =  (,tail r ) <$> liftAccessM inf (tableName t) ( nest (unIntercalate ('.'==) l))
+        | otherwise = Nothing
+        where (l,r) = break(=='=') i
+              (tnew,j ) = break (=='|') l
+              nest (i:[]) = (IProd Nothing [T.pack i])
+              nest (i:xs) = Nested (IProd Nothing [T.pack i]) (Many [nest xs])
+      -- filteringPred Nothing row = True
+      -- filteringPred i = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (\(k,v) -> keyValue k <> "=" <>( T.pack $ renderShowable v)) . concat . fmap aattr . F.toList . _kvvalues . unTB. snd
+      filteringPred  (k,v) row = maybe True (L.isInfixOf (toLower <$> v)  . fmap toLower . renderShowable )   $ (flip indexFieldRec row  k)
+      filtering tb res = (\t -> filter (\row -> all (\i -> filteringPred i row) (catMaybes  t  )) )<$> (fmap (parseMany tb ) (triding filterInpT )) <*> fmap G.toList res
     calendar <-UI.div # set UI.class_ "col-xs-10"
-    element body # set children [calendar]
+    element body # set children [filterInp,calendar]
 
     let
       calFun selected = do
@@ -143,8 +161,9 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
         element calendar # set children [routeD,innerCalendar,editor]
         calendarCreate  innerCalendar pb ("[]"::String)
         onEvent (moveend innerCalendar) (liftIO . h)
+
         fin <- mapM (\(_,tb,fields,efields,proj) -> do
-          let filterInp =  liftA2 (,) positionT  calendarT
+          let pcal =  liftA2 (,) positionT  calendarT
               tname = tableName tb
           mapUIFinalizerT innerCalendar (\(positionB,calT)-> do
             let pred = predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)
@@ -160,12 +179,13 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
             tdib <- ui $ stepper Nothing (fmap snd <$> evsel)
             let tdi = tidings tdib (fmap snd <$> evsel)
             (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi) reftb [] [] (allRec' (tableMap inf) $ lookTable inf tname)  tdi
+
             mapUIFinalizerT innerCalendar (\i ->
-              createLayers innerCalendar tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) v
+              createLayers innerCalendar tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   i)) (filtering tb v)
             -- stat <- UI.div  # sinkDiff text (show . (\i -> (positionB,length i, i) ).  (fmap snd . G.getEntries .filterfixed tb (WherePredicate pred )) <$> v)
             edit <- UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
             UI.div # set children [edit]
-            ) filterInp
+            ) pcal
           ) selected
         element routeD # set children [startD,endD,route,output]
         let els = foldr (liftA2 (:)) (pure []) fin

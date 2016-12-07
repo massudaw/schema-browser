@@ -280,8 +280,8 @@ viewerKey inf table tix cli layoutS cliTid = mdo
   sortList <- selectUI sortSet ((,True) <$> rawPK table ) UI.div UI.div conv
   element sortList # set UI.style [("overflow-y","scroll"),("height","200px")]
   let
-     filteringPred i = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  .snd
      tsort = sorting' . filterOrd <$> triding sortList
+     filteringPred i = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  .snd
      filtering res = (\t -> fmap (filter (filteringPred t )) )<$> triding filterInpT  <*> res
      pageSize = 20
      divPage s = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
