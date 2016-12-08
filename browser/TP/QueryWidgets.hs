@@ -1074,7 +1074,7 @@ buildPrim fm tdi i = case i of
            ini <- currentValue (facts tdi2)
            let f = (\i -> do
                 f <- pdfFrame fty  i # set UI.type_ "video/mp4"
-                mkElement "video" # set children (pure f) # set (strAttr "width" ) "320" # set (strAttr "height" ) "240" # set (strAttr "controls") ""
+                mkElement "video" # set children (pure f) # set (strAttr "width" ) "320" # set (strAttr "height" ) "240" # set (strAttr "controls") ""# set (strAttr "autoplay") ""
                    ) <$> (facts tdi2)
                pdfFrame (elem,sr , call,st) pdf = mkElement (elem ) # set sr (call  pdf)
            v <- UI.div # sink  items(pure <$> f)

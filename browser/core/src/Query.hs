@@ -153,11 +153,11 @@ attrValueName i = errorWithStackTrace $ " no attr value instance " <> show i
 rawFullName = showTable
 
 
-allKVRec :: Ord f => TB2 f Showable -> [FTB Showable]
+allKVRec :: TB2 Key Showable -> [FTB Showable]
 allKVRec = concat . F.toList . fmap allKVRec'
 
-allKVRec' :: Ord k => TBData k  Showable -> [FTB Showable]
-allKVRec'  t@(m, e)=  concat $ fmap snd $ L.sortBy (comparing (\i -> maximum $ (`L.elemIndex` _kvdesc m)  <$> (fmap _relOrigin $ F.toList $fst i) ))  $ M.toList (go . unTB <$> (_kvvalues $ unTB $ snd $ eitherDescPK t))
+allKVRec' :: TBData Key  Showable -> [FTB Showable]
+allKVRec'  t@(m, e)=  concat $ fmap snd $ L.sortBy (comparing (\i -> maximum $ (`L.elemIndex` _kvdesc m)  <$> (fmap _relOrigin $ F.toList $fst i) ))  $ M.toList (go  <$> eitherDescPK t)
   where
         go  (FKT _  _ tb) =  allKVRec  tb
         go  (IT  _ tb) = allKVRec tb
@@ -415,11 +415,12 @@ liftASch _ _ _ i = errorWithStackTrace (show i)
 
 
 
-eitherDescPK :: (Functor f,F.Foldable f,Ord k) =>TB3Data f k a -> TB3Data f k a
+eitherDescPK :: Show a => TB3Data Identity Key a -> M.Map (S.Set (Rel Key )) (Column Key a)
 eitherDescPK i@(kv, _)
-  | not ( null ( _kvdesc kv) ) =  if L.null (F.toList desc) then tbPK i else desc
-  | otherwise = tbPK i
-    where desc = tbDesc i
+  | not ( null ( _kvdesc kv) ) =  if L.null (F.toList desc) then  pk else fromMaybe pk desc
+  | otherwise = pk
+  where desc = traverse unLeftItens $  unTB <$> (_kvvalues $ unTB $ snd $ tbDesc i)
+        pk = unTB <$> (_kvvalues $ unTB $ snd $tbPK i)
 
 
 tbDesc :: (Functor f,Ord k)=>TB3Data f k a ->  TB3Data f k a

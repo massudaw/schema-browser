@@ -70,24 +70,38 @@ function createLayer(ref,tname,features){
     ref.layer[tname].clearLayers();
   }
   var layer = ref.layer[tname];
-  layers = points.map(function (p){ 
-  
-  var feature ;
-  switch(tname ){
-    case 'max_registro_onibus'  :
-     var bus = L.icon({iconUrl:'static/images/bus.png',iconSize:p.size});
-     feature = L.marker(p.position,{icon:bus}).bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
+  layers = points.map(function (t){ 
+  var p =  Object.assign(t.label,t.style);
+  var f = p.feature ;
+  if (f.icon !== ''){ 
+     var st = f.icon
+     var bus = L.icon({iconUrl: st.url ,iconSize:st.size});
+     var feature = L.marker(p.position,{icon:bus}).bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
      feature.on('click',function(e ){ref.eventClick(p,e);});
      layer.addLayer(feature);
-     break;
-    case 'pontos'  :
-     var bus = L.icon({iconUrl:'static/images/bus-stop.png',iconSize:p.size});
-     feature = L.marker(p.position,{icon:bus}).bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
-     feature.on('click',function(e ){ref.eventClick(p,e);});
-     layer.addLayer(feature);
-     break;
+  }
+  if (f.point !== ''){
+    var st = f.point;
+    switch (f.point.geometry){
+      case 'circle' :
+        var feature = L.circle(p.position,{radius: st.size,color:p.color})
+        feature.bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
+        feature.on('click',function(e ){ref.eventClick(p,e);});
+        layer.addLayer(feature);
+      break;
+      default :
+        var feature = L.shapeMarker(p.position, {
+                    shape: f.point.geometry ,
+                    radius: parseFloat(st.size),
+                    color : p.color
+                });
+        feature.bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
+        feature.on('click',function(e ){ref.eventClick(p,e);});
+        layer.addLayer(feature);
 
-   default:
+    }
+  }
+  if (f.point === '' && f.icon === '') {
     if (p.position.constructor === Array && p.position[0].constructor ===Array && p.position[0][0].constructor === Array ){
       p.position.map(function(pos){
         var r = pos.map(function(l){ return l.map(function(b){return L.latLng(b[0],b[1])})})
@@ -104,7 +118,7 @@ function createLayer(ref,tname,features){
      layer.addLayer(line);
     }
     else{
-    feature = L.circle(p.position,{radius: p.size,color:p.color}).bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
+    var feature = L.circle(p.position,{radius: p.size,color:p.color}).bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
     feature.on('click',function(e ){ref.eventClick(p,e);});
     layer.addLayer(feature);
     }

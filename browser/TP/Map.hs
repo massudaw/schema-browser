@@ -78,35 +78,36 @@ mapWidgetMeta  inf = do
               evfields = join $ fmap (unArray . _tbattr ) . idx (meta inf) ["event"]   <$> erow
                 where
                   erow = G.lookup (idex (meta inf) "event" [("schema" ,int $ schemaId inf),("table",int (_tableUnique table))])  eventMap
-              (Attr _ (ArrayTB1 efields ))= lookAttr' (meta inf) "geo" e
+              Just (ArrayTB1 efields ) = indexFieldRec (liftAccess (meta inf) "geo" (Nested (keyRef ["features"] ) $keyRef  ["geo" ])) e
+              (IT _ (ArrayTB1 features))= lookAttr' (meta inf) "features" e
               (Attr _ color )= lookAttr' (meta inf) "color" e
-              (Attr _ size )= lookAttr' (meta inf) "size" e
-              projf  r efield@(TB1 (SText field))  = fmap (\i ->  HM.fromList $ i <> [("id", txt $ writePK r efield   ),("title"::Text , txt $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)),("size", size),("color",   txt $ T.pack $ "#" <> renderShowable color )]) $ join $ convField  <$> indexFieldRec (liftAccess inf tname $ indexer field) r
-              proj r = projf r <$> F.toList efields
+              projf  :: TBData Key Showable -> (FTB Showable , FTB (TBData Key Showable) ) -> Maybe (HM.HashMap Text A.Value)
+              projf  r (efield@(TB1 (SText field)),features)  = fmap (\i ->  HM.fromList [("label",A.toJSON (HM.fromList $ i <> [("id", txt $ writePK r efield   ),("title"::Text , txt $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r))])) ,("style",A.toJSON features)]) $ join $ convField  <$> indexFieldRec (liftAccess inf tname $ indexer field) r
+              proj r = projf r <$> zip (F.toList efields) (F.toList features)
               convField (ArrayTB1 v) = Just $ [("position",ArrayTB1 v)]
               convField (LeftTB1 v) = join $ convField  <$> v
               convField (TB1 v ) = Just [("position", TB1 v)]
               convField i  = errorWithStackTrace (show i)
           in ("#" <> renderShowable color ,table,efields,evfields,proj)) <$>  ( G.toList evMap)
 
-
-mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
-    importUI
-      [js "leaflet.js"
-      ,css "leaflet.css"]
-
-    let
-      calendarT = (\b c -> (b,c)) <$> facts incrementT <#> resolutionT
-
-    dashes <- mapWidgetMeta inf
-    let
-      legendStyle lookDesc table b
+legendStyle dashes lookDesc table b
             =  do
               let item = M.lookup table  (M.fromList  $ fmap (\i@((a,b,c,_,_))-> (b,i)) dashes)
               maybe UI.div (\(k@((c,_,_,_,_))) ->
                 UI.div # set items [UI.div
                   # set items [element b # set UI.class_ "col-xs-1", UI.div # sink text  (T.unpack . ($table) <$> facts lookDesc) #  set UI.class_ "fixed-label col-xs-11" # set UI.style [("background-color",c)] ]
                   # set UI.style [("background-color",c)]]) item
+
+mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
+    importUI
+      [js "leaflet.js"
+      ,js "leaflet-svg-markers.min.js"
+      ,css "leaflet.css"]
+
+    let
+      calendarT = (\b c -> (b,c)) <$> facts incrementT <#> resolutionT
+
+    dashes <- mapWidgetMeta inf
 
 
     mapOpen <- liftIO getCurrentTime
@@ -115,7 +116,6 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
     filterInpT <- element filterInp # sourceT "change" UI.valueFFI ""
     let
       parseMany t l =  parseInp t <$> unIntercalate ('&'==) l
-      -- parseInp t i | traceShow i False = undefined
       parseInp t i
         | not (L.null j ) && T.pack tnew == tableName t  =    (,tail r ) <$> liftAccessM inf (tableName t) ( nest (unIntercalate ('.'==) (tail j)))
         | not $ L.null r =  (,tail r ) <$> liftAccessM inf (tableName t) ( nest (unIntercalate ('.'==) l))
@@ -124,8 +124,6 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
               (tnew,j ) = break (=='|') l
               nest (i:[]) = (IProd Nothing [T.pack i])
               nest (i:xs) = Nested (IProd Nothing [T.pack i]) (Many [nest xs])
-      -- filteringPred Nothing row = True
-      -- filteringPred i = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (\(k,v) -> keyValue k <> "=" <>( T.pack $ renderShowable v)) . concat . fmap aattr . F.toList . _kvvalues . unTB. snd
       filteringPred  (k,v) row = maybe True (L.isInfixOf (toLower <$> v)  . fmap toLower . renderShowable )   $ (flip indexFieldRec row  k)
       filtering tb res = (\t -> filter (\row -> all (\i -> filteringPred i row) (catMaybes  t  )) )<$> (fmap (parseMany tb ) (triding filterInpT )) <*> fmap G.toList res
     calendar <-UI.div # set UI.class_ "col-xs-10"
@@ -199,7 +197,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
         return ()
     let calInp = (\i -> filter (flip L.elem (concat (F.toList i)) .  (^. _2)) dashes  )<$> sel
     _ <- mapUIFinalizerT calendar calFun calInp
-    return (legendStyle,dashes)
+    return (legendStyle dashes ,dashes)
 
 
 

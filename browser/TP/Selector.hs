@@ -133,9 +133,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
           return (k,(b,ev))
 
     let
-      visible  k = (\i j k sel -> (i tb && j tb && k tb ) || (L.elem [tb] sel)) <$> filterLabel <*> authorize <*> tableFilter <*> triding bset
-        where
-          tb =  k
+      visible  = (\i j k sel tb -> (i tb && j tb && k tb ) || (L.elem [tb] sel)) <$> filterLabel <*> authorize <*> tableFilter <*> triding bset
 
     let allTablesSel True = M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i)  $ e ) $ tables
         allTablesSel False = M.empty
@@ -144,7 +142,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
     let iniEvent = (unionWith const (rumors iniSel ) (allTablesSel <$> rumors (triding all)))
     iniBehaviour <- ui $ stepper iniValue  iniEvent
 
-    bset <- checkDivSetTGen tables ((\i k j -> tableUsage inf i j k ) <$> collectionTid orddb <*> triding bset) (tidings iniBehaviour iniEvent ) buttonString ((\lg i j -> lg lookDescT i j # set UI.class_ "table-list-item" # sink UI.style (noneDisplay "-webkit-box" <$> facts (visible i))) <$> legendStyle )
+    bset <- checkDivSetTGen tables ((\i k j -> tableUsage inf i j k ) <$> collectionTid orddb <*> triding bset) (tidings iniBehaviour iniEvent ) buttonString ((\lg visible i j -> (if visible  i then (lg lookDescT i j # set UI.class_ "table-list-item" ) else UI.div # set children [j] )# set UI.style (noneDisplay "-webkit-box" $ visible i)) <$> legendStyle <*> visible )
     return bset
   let
       ordRow orderMap pkset =  field

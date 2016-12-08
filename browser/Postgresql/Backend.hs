@@ -91,7 +91,7 @@ deletePatch conn patch@(m ,G.Idex kold ,_) t = do
     execute conn (fromString $ traceShowId $ T.unpack del) koldPk
     return patch
   where
-    equality k = attrValueName k <> "="  <> "?"
+    equality k = escapeReserved (attrValueName k) <> "="  <> "?"
     koldPk = uncurry Attr <$> zip (_kvpk m) (F.toList kold)
     pred   =" WHERE " <> T.intercalate " AND " (fmap  equality koldPk)
     del = "DELETE FROM " <> rawFullName t <>   pred
