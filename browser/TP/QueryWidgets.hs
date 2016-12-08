@@ -1062,6 +1062,25 @@ buildPrim fm tdi i = case i of
            let ev = if elem FWrite fm then unionWith const (rumors tdi) (Just . SBinary . BSC.pack <$> vcf) else rumors tdi
            step <- ui $ stepper  ini ev
            return (TrivialWidget (tidings step ev) f)
+         PMime "video/mp4" -> do
+           let binarySrc = (\(SBinary i) -> "data:" <> T.unpack "video/mp4"<> ";base64," <>  (BSC.unpack $ B64.encode i) )
+           clearB <- UI.button # set UI.text "clear"
+           file <- UI.input # set UI.type_ "file" # set UI.multiple True # set UI.style (noneShow $ elem FWrite fm)
+           fchange <- fileChange file
+           clearE <- UI.click clearB
+           tdi2 <- ui $ addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange) =<< addEvent (const Nothing <$> clearE ) tdi
+
+           let fty = ("source",UI.src,maybe "" binarySrc  ,[])
+           ini <- currentValue (facts tdi2)
+           let f = (\i -> do
+                f <- pdfFrame fty  i # set UI.type_ "video/mp4"
+                mkElement "video" # set children (pure f) # set (strAttr "width" ) "320" # set (strAttr "height" ) "240" # set (strAttr "controls") ""
+                   ) <$> (facts tdi2)
+               pdfFrame (elem,sr , call,st) pdf = mkElement (elem ) # set sr (call  pdf)
+           v <- UI.div # sink  items(pure <$> f)
+           o <- UI.div # set children [file,clearB,v]
+           return (TrivialWidget tdi2 o)
+
          PMime "application/dwg" -> do
            let fty = ("div",UI.value,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
            ini <- currentValue (facts tdi)

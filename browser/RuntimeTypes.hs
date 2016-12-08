@@ -228,6 +228,9 @@ argsToState i = errorWithStackTrace (show i)
 lookTable :: InformationSchema -> Text -> Table
 lookTable inf t = justError ("no table: " <> T.unpack t) $ HM.lookup t (_tableMapL inf)
 
+lookTableM :: InformationSchema -> Text -> Maybe Table
+lookTableM inf t =  HM.lookup t (_tableMapL inf)
+
 lookSTable :: InformationSchema -> (Text,Text) -> Table
 lookSTable inf (s,t) = justError ("no table: " <> T.unpack t) $ join $ HM.lookup t <$> HM.lookup s (tableMap inf)
 

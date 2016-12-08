@@ -176,4 +176,4 @@ pollRmtc smvar amap user = do
   (inf ,lm)<- runDynamic $keyTablesInit  smvar ("transito", user ) amap []
   (_,l) <- runDynamic $ refTables' inf (lookTable inf "max_registro_onibus") Nothing mempty
   sequence l
-  forkIO $ forever ( checkOnibus inf >> threadDelay (1*60*10^6))
+  forkIO $ forever ( checkOnibus inf >> threadDelay (5*60*10^6))

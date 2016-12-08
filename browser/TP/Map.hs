@@ -8,6 +8,7 @@ module TP.Map where
 
 import Step.Host
 import qualified NonEmpty as Non
+import Data.String
 import Utils
 import Database.PostgreSQL.Simple
 import Control.Monad.Writer as Writer
@@ -128,37 +129,43 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
       filteringPred  (k,v) row = maybe True (L.isInfixOf (toLower <$> v)  . fmap toLower . renderShowable )   $ (flip indexFieldRec row  k)
       filtering tb res = (\t -> filter (\row -> all (\i -> filteringPred i row) (catMaybes  t  )) )<$> (fmap (parseMany tb ) (triding filterInpT )) <*> fmap G.toList res
     calendar <-UI.div # set UI.class_ "col-xs-10"
-    element body # set children [filterInp,calendar]
 
+    (eselg,hselg) <- ui$newEvent
+    start <- ui$stepper Nothing (fmap snd <$> (filterE (maybe False (not .fst)) eselg))
+    startD <- UI.div #  sink text (maybe "" (show . G.getIndex) <$> start)
+    end <- ui$stepper Nothing (fmap snd <$> filterE (maybe False fst ) eselg)
+    endD <- UI.div #  sink text (maybe "" (show . G.getIndex) <$> end)
+    route <- UI.button # set text "route"
+    let inirouteT = "ways"
+    routeT <- UI.input # set value inirouteT
+    erouteT <- UI.valueChange routeT
+    brouteT <- ui$stepper inirouteT erouteT
+    routeE <- UI.click route
+    routeD <- UI.div
+    element routeD # set children [routeT,startD,endD,route]
+
+    element body # set children [filterInp,routeD,calendar]
     let
       calFun selected = do
         innerCalendar <-UI.div # set UI.id_ "map" # set UI.style [("heigth","450px")]
         let
           evc = eventClick innerCalendar
-        (eselg,hselg) <- ui$newEvent
-        start <- ui$stepper Nothing (fmap snd <$> (filterE (maybe False (not .fst)) eselg))
-        startD <- UI.div #  sink text (maybe "" (show . G.getIndex) <$> start)
-        end <- ui$stepper Nothing (fmap snd <$> filterE (maybe False fst ) eselg)
-        endD <- UI.div #  sink text (maybe "" (show . G.getIndex) <$> end)
-        route <- UI.button # set text "route"
-        routeE <- UI.click route
-        output <- UI.div
-        onEvent (filterJust $ liftA2 (,) <$> start <*> end <@ routeE) (\(s,e) -> do
-              l :: [Only Int]<- liftIO$ query (rootconn inf) "select node from pgr_dijkstra('select gid as id ,source,target,cost from transito.ways'::text,  ? , ? ,true)"( fmap ( unTB1 . (\(SerialTB1 (Just i)) -> i) . L.head .F.toList. getPKM) [s,e])
+
+        onEvent (filterJust $ liftA3 (,,) <$> start <*> fmap (lookTableM inf. T.pack) brouteT <*> end <@ routeE) (\(s,t,e) -> do
+              l :: [Only Int]<- liftIO$ query (rootconn inf) (fromString $ "select node from pgr_dijkstra('select gid as id ,source,target,cost from " <> T.unpack (schemaName inf <> "." <> tableName t) <> "'::text,  ? , ? ,true)")( fmap ( unTB1 . (\(SerialTB1 (Just i)) -> i) . L.head .F.toList. getPKM) [s,e])
               let path = zip lo (tail lo)
                   lo = fmap unOnly l
-                  tb = lookTable inf "ways"
+                  tb = t
                   Just proj = fmap (^._5) $ L.find ((==tb).(^._2) ) dashes
-
-              v <- ui$refTables' inf tb  Nothing (WherePredicate (OrColl $ (\(i,j) -> AndColl $fmap (PrimColl . first (liftAccess inf "ways")) [( IProd Nothing ["source"],Left (int i,Equals)), (IProd Nothing ["target"],Left (int j,Equals))])  <$> path ))
-              mapUIFinalizerT innerCalendar (\i -> createLayers innerCalendar (tableName tb)  (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ (snd i))) (v^._1))
-              -- element output # sink text (show <$> facts (v ^. _1 )))
+              traverse (\path -> do
+                v <- ui$refTables' inf tb  Nothing (WherePredicate (OrColl $ (\(i,j) -> AndColl $fmap (PrimColl . first (liftAccess inf (tableName t))) [(   IProd Nothing ["source"],Left (int i,Equals)), (IProd Nothing ["target"],Left (int j,Equals))])  <$> path ))
+                mapUIFinalizerT innerCalendar (\i -> createLayers innerCalendar (tableName tb)  (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ (snd i))) (v^._1)
+                  ) (nonEmpty path))
 
         onEvent cposE (\(c,sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3,%4)" innerCalendar c sw ne)
         pb <- currentValue (facts positionT)
-        routeD <- UI.div
         editor <- UI.div
-        element calendar # set children [routeD,innerCalendar,editor]
+        element calendar # set children [innerCalendar,editor]
         calendarCreate  innerCalendar pb ("[]"::String)
         onEvent (moveend innerCalendar) (liftIO . h)
 
@@ -187,7 +194,6 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
             UI.div # set children [edit]
             ) pcal
           ) selected
-        element routeD # set children [startD,endD,route,output]
         let els = foldr (liftA2 (:)) (pure []) fin
         element editor  # sink children (facts els)
         return ()
