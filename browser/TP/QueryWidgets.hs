@@ -346,13 +346,12 @@ refTables' inf table page pred = do
 
 refTables inf table = refTables' inf table Nothing mempty
 
-         {-
 tbCaseDiff
   :: InformationSchema
   -> SelPKConstraint
   -> Column CoreKey ()
   -> [(Column CoreKey () ,(Tidings (Editor (Index (Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable ))))]
-  -> [(Access Key,Tidings (Maybe (Column CoreKey Showable)))]
+  -> PluginRef (Column CoreKey Showable)
   -> Tidings (Maybe (Column CoreKey Showable))
   -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
 tbCaseDiff inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
@@ -361,7 +360,7 @@ tbCaseDiff inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin $ fmap unTB $ unkvlist ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattri .fst) wl
             relTable = M.fromList $ fmap (\i -> (_relTarget i,_relOrigin i)) rel
-            rinf = fromMaybe inf $ M.lookup (_kvschema m) (depschema inf)
+            rinf = fromMaybe inf $ HM.lookup (_kvschema m) (depschema inf)
             table = lookTable rinf  (_kvname m)
             m = (fst $ unTB1 tb1)
             pkset :: S.Set Key
@@ -370,21 +369,30 @@ tbCaseDiff inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             convertConstr :: SelTBConstraint
             convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> constr .  backFKRef relTable (getRelOrigin f)  ) j ) <$>  restrictConstraint
         let
-            patchRefs = fmap (\(a,b) -> (flip recoverEdit ) <$> facts a <#> b ) <$> nonInjRefs
+            patchRefs = fmap (\(a,b) -> (flip recoverEditChange ) <$> facts a <#> b ) <$> nonInjRefs
         ref <- ui $ refTables rinf   table
         v <-  fkUITable rinf (convertConstr ) ref plugItens  patchRefs oldItems i
-        return $ TrivialWidget  (editor <$> triding v <*> ftdi) (getElement v)
+        return $ TrivialWidget  (editor <$> triding v <*> oldItems) (getElement v)
 
 tbCaseDiff inf _ i@(IT na tb1 ) wl plugItens oldItems
     = iUITableDiff inf plugItens oldItems i
 tbCaseDiff inf _ a@(Attr i _ ) wl plugItens preoldItems = do
         let oldItems = maybe preoldItems (\v-> fmap (Just . fromMaybe (Attr i v)) preoldItems  ) ( keyStatic i)
-        tdi <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return oldItems ) (fmap snd plugItens )
         let tdiv = fmap _tbattr <$> tdi
+            tdi = foldr (liftA2 (\i j -> liftA2 apply j i <|> j <|> (create <$> i) )) oldItems (fmap snd plugItens)
         attrUI <- buildUIDiff (keyModifier i) (keyType i)  tdiv
         let insertT = fmap (PAttr i ) <$> triding attrUI
         return $ TrivialWidget insertT  (getElement attrUI)
--}
+tbCaseDiff inf _ a@(Fun i rel ac ) wl plugItens preoldItems = do
+  let
+    search (IProd _ t) = fmap (fmap _tbattr ). uncurry recoverT .snd <$> L.find ((S.fromList t ==) . S.fromList . fmap _relOrigin . keyattri . fst) wl
+    search (Nested (IProd _ t) m ) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). uncurry recoverT . snd <$> L.find ((S.fromList t ==) . S.fromList . fmap _relOrigin .keyattri . fst) wl
+    refs = sequenceA $ catMaybes $ fmap search (snd rel)
+  ev <- fmap (fmap (PFun i rel )) <$> buildUIDiff (keyModifier i)(keyType i) (fmap _tbattr . preevaluate i (fst rel) funmap (snd rel) <$> refs )
+  return $ TrivialWidget (triding ev) (getElement ev)
+
+recoverT i j = liftA2 (flip recoverEditChange) i j
+
 
 tbCase
   :: InformationSchema
@@ -458,28 +466,32 @@ tbRecCase inf constr a wl plugItens preoldItems' = do
 
 unTBMap :: Show a => TBData k a -> Map (Set (Rel k  )) (Compose Identity (TB Identity ) k a )
 unTBMap = _kvvalues . unTB . snd
-  {-
+
+instance Applicative Editor where
+  pure =Diff
+  Diff f <*> Diff v = Diff $ f  v
+
 eiTableDiff
   :: InformationSchema
      -> SelPKConstraint
      -> [(Column CoreKey () ,Tidings (Maybe (Column CoreKey Showable)))]
-     -> [(Access Key,Tidings (Maybe (TBData CoreKey Showable)))]
+     -> PluginRef (TBData CoreKey Showable)
      -> TBData CoreKey ()
      -> Tidings (Maybe (TBData CoreKey Showable))
      -> UI (Element,Tidings (Editor (Index (TBData CoreKey Showable))))
 eiTableDiff inf constr refs plmods ftb@(meta,k) oldItems = do
   let
       table = lookTable inf (_kvname meta)
-  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds ) (plugins inf) )
-  let plugmods = first repl <$> ((snd <$> res) <> plmods)
+  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds .snd ) (plugins inf) )
+  let plugmods = first repl <$> (resdiff <> plmods)
+      resdiff =   fmap ( liftA2 (\i -> join .liftA2 (\j i@(_,pk,_)   -> if pk == G.getIndex j then Just i else Nothing ) i) oldItems ) . snd <$> res
       repl (Rec  ix v ) = replace ix v v
       repl (Many[(Rec  ix v )]) = replace ix v v
       repl v = v
-  oldItemsPlug <- foldr (\i j ->  updateTEvent  (fmap Just) i =<< j) (return oldItems ) (fmap snd plugmods)
   fks :: [(Column CoreKey () ,(TrivialWidget (Editor (Index (Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable))))]  <- foldl' (\jm (l,m)  -> do
             w <- jm
             let el = L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> ( _kvrecrels meta))
-                plugattr = indexPluginAttr (unTB m) plugmods
+                plugattr = indexPluginAttrDiff (unTB m) plugmods
                 aref = maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( snd) (L.find (((keyattr m)==) . keyattri .fst) $  refs)
             wn <- (if el
                     then tbCaseDiff -- tbRecCase
@@ -493,13 +505,13 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) oldItems = do
         ) (return []) (P.sortBy (P.comparing fst ) . M.toList $ replaceRecRel (unTBMap $ ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta))
   let
       sequenceTable :: [(Column CoreKey () ,(TrivialWidget (Editor (Index (Column CoreKey Showable))), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (Index (TBData CoreKey Showable)))
-      sequenceTable fks = (\old difs -> (\ i -> if L.null i then Keep else (fmap (tableMeta table , maybe (G.Idex M.empty)G.getIndex old,) . Tra.sequenceA . fmap Diff) i) . filterDiff $ difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
+      sequenceTable fks = (\old difs -> (\ i -> if L.null i then Keep else (fmap (tableMeta table , maybe (G.Idex [])G.getIndex old,) . Tra.sequenceA . fmap Diff) i) . filterDiff $ difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
       tableb =  sequenceTable fks
 
   (listBody,output) <- if rawIsSum table
     then do
       let
-        initialSum = join . fmap ((\(n,  j) ->    fmap keyattr $ safeHead $ catMaybes  $ (fmap (_tb . fmap (const ()) ) . unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)))) ) <$> oldItemsPlug
+        initialSum = join . fmap ((\(n,  j) ->    fmap keyattr $ safeHead $ catMaybes  $ (fmap (_tb . fmap (const ()) ) . unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)))) ) <$>oldItems
         sumButtom itb =  do
            let i = unTB itb
            lab <- labelCaseDiff inf i  (fst $ justError ("no attr" <> show i) $ M.lookup (keyattri i) $ M.mapKeys (keyattri ) $ M.fromList fks)
@@ -510,7 +522,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) oldItems = do
       let
           keypattr (PAttr i _) = [Inline i]
           keypattr (PInline i _) = [Inline i]
-          keypattr (PFK  l _ _ _) = l
+          keypattr (PFK  l  _ _) = l
           resei :: Tidings (Editor (Index (TBData CoreKey Showable)))
           resei = (\j -> fmap (\(m,i,l)  -> (m,i,L.filter ((== keyattr j) . keypattr) l))) <$> triding chk <*> tableb
       listBody <- UI.div #  set children (getElement chk : F.toList (getElement .fst .snd <$> fks))
@@ -531,7 +543,6 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) oldItems = do
      set style [("margin-left","0px"),("border","2px"),("border-color","gray"),("border-style","solid")]
   return (body, output)
 
--}
 
 
 eiTable
@@ -640,10 +651,10 @@ crudUITable inf open reftb@(bres , _ ,gist ,tref) refs pmods ftb@(m,_)  preoldIt
               dunConstraints (un,o) = flip (\i ->  maybe (const False ) (unConstraint un .tblist' table . fmap _tb ) (traverse (traFAttr unSOptional' ) i ) ) <$> o
               unFinal:: [([Column CoreKey ()], Tidings PKConstraint)]
               unFinal = fmap (fmap dunConstraints) unDeleted
-          (listBody,tableb) <- eiTable inf   unFinal  refs pmods ftb preoldItems
-          -- (listBody,tablebdiff) <- eiTableDiff inf   unFinal  refs pmods ftb oldItems
-          -- let
-          --  tableb = recoverEdit <$> oldItems <*> tablebdiff
+          -- (listBody,tableb) <- eiTable inf   unFinal  refs pmods ftb preoldItems
+          (listBody,tablebdiff) <- eiTableDiff inf   unFinal  refs pmods ftb preoldItems
+          let
+            tableb = recoverEditChange <$> preoldItems <*> tablebdiff
 
 
           (panelItems,tdiff)<- processPanelTable listBody inf reftb  tableb table preoldItems
@@ -923,11 +934,11 @@ buildUIDiff km i  tdi = go i tdi
 
             widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
             let
-              widgets2 = Tra.sequenceA (  zipWith (\i j -> (i,) <$> j) [0..] $( triding <$> widgets) )
+              widgets2 = Tra.sequenceA (zipWith (\i j -> (i,) <$> j) [0..] ( triding <$> widgets) )
               -- [Note] Array diff must be applied in the right order
               --  additions and edits first in ascending order than deletion in descending order
               --  this way the patch index is always preserved
-              bres = reduceDiffList  <$> offsetT <*>  widgets2 --((\ l m -> fmap (\(ix,i) -> (ix,editor  (join $ flip Non.atMay ix <$> m) i )) l )<$> widgets2 <*> tdi2)
+              bres = reduceDiffList  <$> offsetT <*>  widgets2
             element offsetDiv # set children (fmap getElement widgets)
             composed <- UI.span # set children [offset , offsetDiv]
             return  $ TrivialWidget  bres composed
@@ -938,7 +949,7 @@ buildUIDiff km i  tdi = go i tdi
            -- Delete equals create
            let
                test Delete  _ = Diff $ POpt Nothing
-               test Keep Nothing = Diff$ POpt Nothing
+               -- test Keep Nothing = Diff$ POpt Nothing
                test Keep _ = Keep
                test (Diff i ) _ = Diff (POpt (Just  i))
 
@@ -1149,24 +1160,24 @@ buildPrim fm tdi i = case i of
             pk <- ui $ stepper v  pke
             sp <- UI.div # set children (inputUI : elem)
             return $ TrivialWidget(tidings pk pke) sp
-              {-
+
 iUITableDiff
   :: InformationSchema
   -- Plugin Modifications
-  -> [(Access Key,Tidings (Maybe (Column CoreKey (Showable))))]
+  -> PluginRef (Column CoreKey (Showable))
   -- Selected Item
   -> Tidings (Maybe (Column CoreKey Showable))
   -- Static Information about relation
   -> Column CoreKey ()
   -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
 iUITableDiff inf pmods oldItems  (IT na  tb1)
-  = fmap (fmap (PInline  na) )<$> go tb1   (fmap (fmap (fmap (_fkttable))) <$> pmods) (fmap _fkttable <$> oldItems)
+  = fmap (fmap (PInline  na) )<$> go tb1   (fmap (fmap (fmap (patchfkt))) <$> pmods) (fmap _fkttable <$> oldItems)
   where
     go mt pmods oldItems =  case mt of
       (TB1 tdata@(meta,_)) ->  do
         (celem,tcrud) <- eiTableDiff inf []
                 []
-                (fmap (fmap(fmap unTB1))<$> pmods)
+                (fmap (fmap(fmap unAtom))<$> pmods)
                 tdata
                 (fmap unTB1<$>oldItems)
         element celem #
@@ -1175,12 +1186,13 @@ iUITableDiff inf pmods oldItems  (IT na  tb1)
         let bres =  (fmap ( PAtom )<$> tcrud)
         return $ TrivialWidget bres celem
       (LeftTB1 (Just tb1)) -> do
-        tr <- go tb1 ( fmap (fmap (join . fmap unSOptional'))<$> pmods) (join . fmap unSOptional' <$> oldItems)
+        tr <- go tb1 ( fmap (fmap (join . fmap (\(POpt i ) -> i)))<$> pmods) (join . fmap unSOptional' <$> oldItems)
         let
-          test Delete = Diff $ POpt Nothing
-          test Keep = Keep
-          test (Diff i ) = Diff (POpt (Just  i))
-        return $  test <$> tr
+          test Delete  _ = Diff $ POpt Nothing
+          -- test Keep Nothing = Diff$ POpt Nothing
+          test Keep _ = Keep
+          test (Diff i ) _ = Diff (POpt (Just  i))
+        return $ TrivialWidget ( test <$> triding tr <*> oldItems) (getElement tr)
 
       (ArrayTB1 (tb1 :| _)) -> mdo
         offsetDiv  <- UI.div
@@ -1188,24 +1200,29 @@ iUITableDiff inf pmods oldItems  (IT na  tb1)
         TrivialWidget offsetT offset <- offsetField (pure 0)  never (maybe 0 (Non.length .unArray) <$> (recoverEditChange <$> oldItems <*> bres))
         let arraySize = 8
             tdi2  = fmap unArray <$>oldItems
-            pltdi2  = fmap (fmap (fmap unArray ))<$> pmods
-        widgets <- mapM (\ix -> go tb1 (fmap (fmap (((\ o v -> join $ flip Non.atMay (o + ix) <$> v ) <$> offsetT <*>))) pltdi2)   ((\ o v -> join $ flip Non.atMay (o + ix) <$> v ) <$> offsetT <*> tdi2) ) [0..arraySize -1 ]
+            convertPatchSet ix (PatchSet p) = patchSet $ catMaybes $ fmap (convertPatchSet ix ) (F.toList p)
+            convertPatchSet ix (PIdx ix2 p)
+              | ix == ix2 = p
+              | otherwise = Nothing
+            index o ix v = join $ flip Non.atMay (o + ix) <$> v
+        let unIndexEl ix = (index ix <$> offsetT <*> tdi2)
+            dyn = dynHandlerPatch  (\ix valix ->do
+                    wid <- go tb1 (fmap (fmap (((\ o v -> join $ (convertPatchSet (o + ix)) <$> v ) <$> offsetT <*>))) pmods) valix
+                    lb <- hlabel ["col-xs-1"] # sink UI.text (show . (+ix) <$> facts offsetT )
+                    paintEditDiff lb (facts (triding wid ))
+                    element wid # set UI.class_ "col-xs-11"
+                    row <- UI.div # set children [lb,getElement wid]
+                    return $ TrivialWidget (triding wid) row ) unIndexEl
+
+        widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
+
         let
           widgets2 = Tra.sequenceA (  zipWith (\i j -> (i,) <$> j) [0..] $( triding <$> widgets) )
-
-          reduceA  o i
-            | F.all isKeep (snd <$> i) = Keep
-            | L.null $ fst $ break isDelete (snd <$> i) = Delete
-            | otherwise = patchEditor . filterDiff $ (\(ix,v) -> treatA (o+ix)v) <$> i
-          treatA a (Diff v) = Diff $ PIdx a  (Just v)
-          treatA a Delete =  Diff $ PIdx a Nothing
-          treatA _ Keep = Keep
-          bres = reduceA  <$> offsetT <*>  widgets2
+          bres = reduceDiffList  <$> offsetT <*>  widgets2
         element offsetDiv # set children (fmap getElement widgets)
         composed <- UI.span # set children [offset , offsetDiv]
         return  $ TrivialWidget  bres composed
 
--}
 
 type PluginRef a = [(Access Key, Tidings (Maybe (Index a)))]
 

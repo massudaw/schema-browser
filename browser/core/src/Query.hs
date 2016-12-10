@@ -419,7 +419,7 @@ eitherDescPK :: Show a => TB3Data Identity Key a -> M.Map (S.Set (Rel Key )) (Co
 eitherDescPK i@(kv, _)
   | not ( null ( _kvdesc kv) ) =  if L.null (F.toList desc) then  pk else fromMaybe pk desc
   | otherwise = pk
-  where desc = traverse unLeftItens $  unTB <$> (_kvvalues $ unTB $ snd $ tbDesc i)
+  where desc = (\i -> if F.null i then Nothing else Just i). fmap (justError "") . M.filter (\i -> isJust i) $  fmap unLeftItens $  unTB <$> (_kvvalues $ unTB $ snd $ tbDesc i)
         pk = unTB <$> (_kvvalues $ unTB $ snd $tbPK i)
 
 

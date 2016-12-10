@@ -746,7 +746,7 @@ kDelayed = Le.over keyTypes KDelayed
 unKOptional (Key a  v c m n d (KOptional e)) = (Key a  v c m n d e )
 unKOptional (Key a  v c m n d (KSerial e)) = (Key a  v c m n d e )
 unKOptional (Key a  v c m n d (e@(Primitive _))) = (Key a  v c m n d e )
-unKOptional i = errorWithStackTrace ("unKOptional" <> show i)
+unKOptional i = i -- errorWithStackTrace ("unKOptional" <> show i)
 
 unKDelayed (Key v a  c m n d (KDelayed e)) = (Key v a  c m n d e )
 unKDelayed i = errorWithStackTrace ("unKDelayed" <> show i)

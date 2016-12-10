@@ -329,7 +329,6 @@ firstPatchAttr f (PInline k a) = PInline (f k) (fmap (firstPatch f) a)
 firstPatchAttr f (PFK rel k   b ) = PFK (fmap (fmap f) rel)  (fmap (firstPatchAttr f) k)  (fmap (firstPatch f) $ b)
 
 
-compactionLaw t l = diffTB1 t (foldl applyTB1 t l ) == compactPatches l
 
 compactTB1 :: (Ord a , Show a, Ord b ,Show b) => [TBIdx a b] -> [TBIdx a b ]
 compactTB1 i = fmap (\((i,j),p)-> (i,j,concat p)) $  groupSplit2 (\(i,j,_) -> (i,j))  (\(_,_,p) -> p) i
@@ -588,7 +587,7 @@ applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                                 then fmap ArrayTB1 $ sequenceA $ Non.imap (\i v -> if i == ix then applyFTBM pr a v p else Just v )  i
                                 else if ix == Non.length i
                                       then (\p -> ArrayTB1 $ i <> pure p) <$> createFTBM pr p
-                                      else errorWithStackTrace $ "ix bigger than next elem"
+                                      else Nothing -- errorWithStackTrace $ "ix bigger than next elem"
 
 applyFTBM pr a (SerialTB1 i ) (PSerial o) = Just $ SerialTB1 $  applyOptM pr a i o
 applyFTBM pr a (DelayedTB1 i ) (PDelayed o) = Just $ DelayedTB1 $  applyOptM pr a i o
