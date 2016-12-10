@@ -187,6 +187,7 @@ recoverEdit Nothing Delete = Nothing
 recoverEdit _ _ = errorWithStackTrace "no edit"
 
 
+-- editor  i j | traceShow (i,j) False = undefined
 editor (Just i) Nothing = Delete
 editor (Just i) (Just j) = maybe Keep Diff df
     where df = diff i j
@@ -495,7 +496,7 @@ diffAttr :: PatchConstr k a  => TB Identity k a -> TB Identity k a -> Maybe (Pat
 diffAttr (Attr k i) (Attr l m ) = fmap (PAttr k) (diffShowable i m)
 diffAttr (Fun k rel i) (Fun l rel2 m ) = fmap (PFun k rel ) (diffShowable i m)
 diffAttr (IT k i) (IT _ l) = fmap (PInline k  ) (diffTB1 i l)
-diffAttr (FKT  k _ i) (FKT m rel b) = (\l  -> Just (PFK rel l   (patch b))) (catMaybes $ F.toList $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j)) (_kvvalues k) (_kvvalues m)  )
+diffAttr (FKT  k _ i) (FKT m rel b) = PFK rel   <$> (nonEmpty $ catMaybes $ F.toList $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j)) (_kvvalues k) (_kvvalues m)  ) <*> diff i b
 
 patchAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a)
 patchAttr a@(Attr k v) = PAttr k  (patchFTB patch   v)
@@ -542,10 +543,9 @@ patchFTB p (TB1 j) = PAtom $ p j
 diffOpt :: (Ord a,Show a) => (a -> Index a ) -> (a -> a -> Maybe (Index a)) ->  Maybe (FTB a) -> Maybe (FTB a) -> Maybe (Maybe (PathFTB    (Index a)))
 diffOpt p d i j
     | isJust i && isJust j = sequenceA $ liftA2 (diffFTB  p d ) i j
-    | isJust i && isNothing j = Just $ Nothing
-    | isNothing i && isJust j = Just $ (patchFTB p <$> j)
-    | i /= j = ( liftA2 (diffFTB p d ) i j )
-    | otherwise = Nothing
+    | isJust i && isNothing j = Just  Nothing
+    | isNothing i && isJust j = Just  (patchFTB p <$> j)
+    | isNothing i && isNothing j =  Nothing
 
 diffFTB :: (Ord a,Show a) => (a -> Index a) -> (a -> a -> Maybe (Index a) ) ->  FTB a -> FTB a -> Maybe (PathFTB (Index a))
 diffFTB p d (LeftTB1 i) (LeftTB1 j) = POpt <$> diffOpt p d i j
