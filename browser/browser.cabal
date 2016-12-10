@@ -33,7 +33,6 @@ library
     SortList
     TP.Main
     TP.Browser
-    TP.TestRules
     TP.Selector
     TP.QueryWidgets
     TP.Widgets

@@ -10,7 +10,6 @@ import Data.Unique
 import qualified Data.Binary as B
 import Postgresql.Backend (connRoot)
 import System.Process
-import TP.TestRules
 import Control.Concurrent.STM
 import Data.Tuple
 import TP.View
