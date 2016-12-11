@@ -748,7 +748,13 @@ unKOptional (Key a  v c m n d (KSerial e)) = (Key a  v c m n d e )
 unKOptional (Key a  v c m n d (e@(Primitive _))) = (Key a  v c m n d e )
 unKOptional i = i -- errorWithStackTrace ("unKOptional" <> show i)
 
-unKDelayed (Key v a  c m n d (KDelayed e)) = (Key v a  c m n d e )
+unKTDelayed (KDelayed e ) = e
+unKTDelayed (KSerial e ) = e
+unKTDelayed (KOptional e ) = KOptional $ unKTDelayed e
+unKTDelayed (KArray e ) = KArray $ unKTDelayed e
+unKTDelayed i = i
+
+unKDelayed (Key v a  c m n d e) = (Key v a  c m n d (unKTDelayed e) )
 unKDelayed i = errorWithStackTrace ("unKDelayed" <> show i)
 
 unKArray (Key a v c d m n (KArray e)) = Key a v  c d  m n e

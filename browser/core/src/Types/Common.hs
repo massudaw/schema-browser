@@ -619,7 +619,7 @@ kattr = kattri . runIdentity . getCompose
 kattri :: Column k a -> [FTB a]
 kattri (Attr _ i ) = [i]
 kattri (Fun _ _ i ) = [i]
-kattri (FKT i  _ _ ) =  (L.concat $ kattr  <$> unkvlist i)
+kattri (FKT i  _ _ ) =  L.concat $ kattr  <$> unkvlist i
 kattri (IT _  i ) =  recTB i
   where recTB (TB1 (m, i) ) =  L.concat $ fmap kattr (F.toList $ _kvvalues $ runIdentity $ getCompose i)
         recTB (ArrayTB1 i ) = L.concat $ F.toList $ fmap recTB i
@@ -628,7 +628,7 @@ kattri (IT _  i ) =  recTB i
 aattr = aattri . runIdentity . getCompose
 aattri (Attr k i ) = [(k,i)]
 aattri (Fun k _ i ) = [(k,i)]
-aattri (FKT i  _ _ ) =  (L.concat $ aattr  <$> unkvlist i)
+aattri (FKT i  _ _ ) =  L.concat $ aattr  <$> unkvlist i
 aattri (IT _ _) = []
 
 

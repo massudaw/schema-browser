@@ -122,10 +122,7 @@ isKDelayed _ = False
 
 
 isKOptional (KOptional i) = True
-isKOptional (KSerial i) = isKOptional i
-isKOptional (KInterval i) = isKOptional i
-isKOptional (Primitive _) = False
-isKOptional (KArray i)  = isKOptional i
+isKOptional _ = False
 -- isKOptional i = errorWithStackTrace (show ("isKOptional",i))
 
 -- Operators

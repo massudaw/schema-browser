@@ -221,8 +221,14 @@ getFKRef inf predtop rtable (me,old) v path@(Path _ (FKJoinTable i j ) ) =  do
                                                     && (fst $ justError "" $ M.lookup pred i) >= 200)
                             then  do
                               (_,out) <- local (const rinf) (tableLoader table  (Just (ix +1) ) Nothing []  pred)
-                              return out
-                            else return (M.empty , G.empty)
+                              if G.size (snd out) == G.size tb2
+                                 then  do
+                                   liftIO$ print ("STOP LOADING 2", tableName table,G.size (snd out), G.size tb2)
+                                   return (M.empty , G.empty)
+                                 else  check (ix +1) out
+                            else do
+                              liftIO $ print ("STOP LOADING " , tableName table,M.lookup pred i,G.size tb2)
+                              return (M.empty , G.empty)
                     (_,tb2) <- check 0 out
                     return tb2
                   Nothing -> return G.empty
@@ -232,7 +238,7 @@ getFKRef inf predtop rtable (me,old) v path@(Path _ (FKJoinTable i j ) ) =  do
                     refl = S.fromList $ fmap _relOrigin $ filterReflexive i
                     inj = S.difference refl old
                     joinFK :: TBData Key Showable -> Either [Compose Identity (TB Identity)  Key Showable] (Column Key Showable)
-                    joinFK m  = maybe (traceShow (_tbattr .unTB <$>taratt,filter (\(G.Idex i) -> take 2 i ==(take 2 $ _tbattr .unTB <$>taratt)) $ fmap snd $ G.getEntries tb2) Left (taratt)) Right $ FKT (kvlist tarinj ) i <$> joinRel2 (tableMeta table ) i (fmap unTB $ taratt ) tb2
+                    joinFK m  = maybe (Left (taratt)) Right $ FKT (kvlist tarinj ) i <$> joinRel2 (tableMeta table ) i (fmap unTB $ taratt ) tb2
                       where
                         taratt = getAtt tar (tableNonRef' m)
                         tarinj = getAtt inj (tableNonRef' m)
@@ -380,7 +386,7 @@ pageTable flag method table page size presort fixed = do
        i <-  if flag || ( (isNothing hasIndex|| (sq > G.size freso)) -- Tabela é maior que a tabela carregada
                 && pageidx  > G.size freso ) -- O carregado é menor que a página
                && (isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixed fixedmap)  -- Ignora quando página já esta carregando
-                && isJust diffpred
+                                                                                       -- && isJust diffpred
                    )
              then do
                liftIO $ atomically $ do
@@ -390,12 +396,12 @@ pageTable flag method table page size presort fixed = do
                let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                    (_,mp) = fromMaybe (0,M.empty ) hasIndex
                liftIO$ putStrLn $ "new page " <> show (tableName table, pageidx, G.size freso,G.size reso,page, pagesize)
-               (res,nextToken ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList (justError "no pred" diffpred)
+               (res,nextToken ,s ) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed-- (justError "no pred" diffpred)
                let
                    token =  nextToken
                    index = (estLength page pagesize (s + G.size freso) , maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token$ mp)
                liftIO$ do
-                 putPatch (idxChan dbvar ) (justError"no pred" diffpred,estLength page pagesize s, pageidx ,fromMaybe HeadToken token)
+                 putPatch (idxChan dbvar ) (fixed {-justError"no pred" diffpred-},estLength page pagesize s, pageidx ,fromMaybe HeadToken token)
                  putPatch (patchVar dbvar) (F.toList $ patch  <$> filter (\i -> isNothing $ G.lookup (G.getIndex i) reso  )res)
                return  (index,res <> G.toList freso)
              else do

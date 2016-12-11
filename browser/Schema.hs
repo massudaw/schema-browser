@@ -443,8 +443,6 @@ mergeTB1 ((m,Compose k) ) ((m2,Compose k2) )
   | m == m2 = (m,Compose $ liftA2 (<>) k k2)
   | otherwise = (m,Compose $ liftA2 (<>) k k2) -- errorWithStackTrace (show (m,m2))
 
-ifOptional i = if isKOptional (keyType i) then unKOptional i else i
-ifDelayed i = if isKDelayed (keyType i) then unKDelayed i else i
 
 
 

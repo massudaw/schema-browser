@@ -412,7 +412,7 @@ siapi3CheckApproval = FPlugins pname tname  $ DiffPurePlugin url
       let app = L.find (\(TB1 (SText x),_) -> "APROVADO" ==   x) v
           tt = L.find ((\(TB1 (SText x)) -> T.isInfixOf "ENTREGUE AO SOLICITANTE APROVADO"  x).fst) v
       row <- act (const ask )-< ()
-      returnA -< traceShowId $ fmap ((\(TB1 (STimestamp t)) -> (\v-> (kvempty,maybe (Idex mempty) getIndex row ,[PAttr "aproval_date" v])) .upperPatch.(,True) . Finite $ PAtom $ STimestamp t) .snd) (liftA2 const app tt)
+      returnA -< fmap ((\(TB1 (STimestamp t)) -> (\v-> (kvempty,maybe (Idex mempty) getIndex row ,[PAttr "aproval_date" v])) .upperPatch.(,True) . Finite $ PAtom $ STimestamp t) .snd) (liftA2 const app tt)
 
 siapi3Inspection = FPlugins pname tname  $ BoundedPlugin2 url
   where
@@ -444,7 +444,7 @@ siapi3Inspection = FPlugins pname tname  $ BoundedPlugin2 url
         let ao  (bv,taxa) =  Just $ tblist  ( [_tb $ Attr "ano" (justError "ano" ano) ,_tb $ Attr "protocolo" (justError "protocolo"protocolo), attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
             iat bv = Compose . Identity $ (IT "andamentos"
                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv))
-        returnA -< traceShowId.(\i -> FKT (kvlist $ _tb <$> [Attr "ano" (LeftTB1 $ ano) ,Attr "protocolo" (LeftTB1 $ protocolo)]) [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] (LeftTB1 $ Just $ TB1 i)) <$> join (ao <$> b)) -< cpf
+        returnA -< (\i -> FKT (kvlist $ _tb <$> [Attr "ano" (LeftTB1 $ ano) ,Attr "protocolo" (LeftTB1 $ protocolo)]) [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] (LeftTB1 $ Just $ TB1 i)) <$> join (ao <$> b)) -< cpf
       returnA -< tblist  . pure . _tb  <$> v
 
 
@@ -478,7 +478,7 @@ siapi3Plugin  = FPlugins pname tname  $ BoundedPlugin2 url
         let ao  (bv,taxa) =  Just $ tblist  ( [_tb $ Attr "ano" (justError "ano" ano) ,_tb $ Attr "protocolo" (justError "protocolo"protocolo), attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
             iat bv = Compose . Identity $ (IT "andamentos"
                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv))
-        returnA -< traceShowId.(\i -> FKT (kvlist $ _tb <$> [Attr "protocolo" (LeftTB1 $ protocolo), Attr "ano" (LeftTB1 $ ano)]) [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] (LeftTB1 $ Just $ TB1 i)) <$> join (ao <$> b)) -< cpf
+        returnA -< (\i -> FKT (kvlist $ _tb <$> [Attr "protocolo" (LeftTB1 $ protocolo), Attr "ano" (LeftTB1 $ ano)]) [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] (LeftTB1 $ Just $ TB1 i)) <$> join (ao <$> b)) -< cpf
       returnA -< tblist  . pure . _tb  <$> v
 
 bool = TB1 . SBoolean
@@ -702,7 +702,7 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
         refs <- atRA "ofx" (idxK "file_name") -< ()
         let ix = length refs
         pk <- act (const ask )-< ()
-        returnA -<  traceShowId $ Just (kvempty,Idex (pure (SerialTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,[PAttr "account" (patch r),PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
+        returnA -<   Just (kvempty,Idex (pure (SerialTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,[PAttr "account" (patch r),PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
 
 
 importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
@@ -725,14 +725,14 @@ importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
           ref :: [TB Identity  Text Showable]
           ref = [uncurry Attr  $ ("samples",ArrayTB1 $ Non.fromList $ fmap int   [0.. length (justError "no b" b)])]
           tbst :: (Maybe (TBIdx Text (Showable)))
-          tbst = traceShowId $ Just $ (mempty , Idex [r],  [PFK  [Rel "samples" Equals "id_sample",Rel "run" Equals "id_run"] (fmap patch ref) ao])
+          tbst =  Just $ (mempty , Idex [r],  [PFK  [Rel "samples" Equals "id_sample",Rel "run" Equals "id_run"] (fmap patch ref) ao])
       returnA -< tbst
 
 
-importarofx = FPlugins "OFX Import" tname  $ BoundedPlugin2 url
+importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
   where
     tname = "account_file"
-    url :: ArrowReader
+    url :: ArrowReaderDiffM IO
     url = proc t -> do
       fn <- idxK "file_name" -< t
       i <- idxK "import_file" -< t
@@ -755,12 +755,18 @@ importarofx = FPlugins "OFX Import" tname  $ BoundedPlugin2 url
         ) -< t
 
       b <- act ofx  -< (,,) fn i r
-      let ao :: TB2 Text Showable
-          ao =  LeftTB1 $ ArrayTB1 . Non.fromList . fmap (TB1 . tblist . fmap _tb) <$>  join (nonEmpty <$> b)
+      let ao :: Index (TB2 Text Showable)
+          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom . (mempty,Idex (maybeToList . join . fmap unSSerial . fmap _tbattr .L.find (("fitid"==). _tbattrkey ) $ a ),) . fmap patch   $ a) <$>  join (nonEmpty . zip [0..] <$> b)
+          ref :: [TB Identity  Text Showable]
+          ref = [Attr  "statements" . LeftTB1 $ fmap (ArrayTB1 . Non.fromList ) .  join $  nonEmpty . catMaybes . fmap (  join . fmap unSSerial . fmap _tbattr .L.find (("fitid"==). _tbattrkey ) )<$> b]
+          tbst :: (Maybe (TBIdx Text (Showable)))
+          tbst = Just $ (mempty , Idex [fn],  [PFK  [Rel "statements" Equals "fitid",Rel "account" Equals "account"] (fmap patch ref) ao])
+
+          {-ao =  LeftTB1 $ ArrayTB1 . Non.fromList . fmap (TB1 . tblist . fmap _tb) <$>  join (nonEmpty <$> b)
           ref :: [Compose Identity (TB Identity ) Text(Showable)]
           ref = [attrT  ("statements",LeftTB1 $ join $ fmap (ArrayTB1 .  Non.fromList  ).   allMaybes . fmap (join . fmap unSSerial . fmap _tbattr .L.find (("fitid"==). _tbattrkey ) ) <$> b)]
           tbst :: (Maybe (TBData Text (Showable)))
-          tbst = Just $ tblist $ fmap _tb [FKT (kvlist ref) [Rel "statements" Equals "fitid",Rel "account" Equals "account"] ao]
+          tbst = Just $ tblist $ fmap _tb [FKT (kvlist ref) [Rel "statements" Equals "fitid",Rel "account" Equals "account"] ao]-}
       returnA -< tbst
     ofx (TB1 (SText i), ((DelayedTB1 (Just (TB1 (SBinary r) )))) , acc )
       = liftIO $ ofxPlugin (T.unpack i) (BS.unpack r) acc
