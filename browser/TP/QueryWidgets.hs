@@ -396,9 +396,20 @@ tbCaseDiff inf _ a@(Fun i rel ac ) wl plugItens preoldItems = do
 
 recoverT i j = liftA2 (flip recoverEditChange) i j
 
-  {-
-tbRecCase ::  InformationSchema ->  SelPKConstraint  -> Column CoreKey () -> [(Column CoreKey () ,Tidings (Maybe (Column CoreKey Showable)))] -> PluginRef  (Column CoreKey Showable) -> Tidings (Maybe (Column CoreKey Showable)) -> UI (TrivialWidget (Maybe (Column CoreKey Showable)))
-tbRecCase inf constr a wl plugItens preoldItems' = do
+emptyRecTable (FKT rel l tb )
+    = case tb of
+          (LeftTB1 _ ) ->  Just . fromMaybe (FKT (mapKV (mapComp (mapFAttr (const (LeftTB1 Nothing)))) rel) l (LeftTB1 Nothing))
+          i -> id
+emptyRecTable (IT l tb)
+    = case tb of
+          (LeftTB1 _) -> Just . fromMaybe (IT l (LeftTB1 Nothing))
+          i -> id
+
+
+tbRecCaseDiff ::  InformationSchema ->  SelPKConstraint  -> Column CoreKey ()
+        -> [(Column CoreKey () ,(Tidings (Editor (Index (Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable ))))]
+        -> PluginRef  (Column CoreKey Showable) -> Tidings (Maybe (Column CoreKey Showable)) -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
+tbRecCaseDiff inf constr a wl plugItens preoldItems' = do
       let preoldItems = emptyRecTable  a <$> preoldItems'
       let check = foldl' (liftA2 (\j i ->  liftA2 apply j i <|> j <|> (create <$> i ))) (join . fmap unLeftItens  <$> preoldItems) (fmap (fmap (join . fmap unLeftItensP) . snd) plugItens )
       TrivialWidget btr bel <- checkedWidget  (isJust <$> check)
@@ -407,7 +418,7 @@ tbRecCase inf constr a wl plugItens preoldItems' = do
       let fun True = do
               initpre <- currentValue (facts preoldItems)
               initpreOldB <- ui $ stepper initpre (rumors preoldItems)
-              TrivialWidget btre bel <- tbCase inf constr a wl plugItens (tidings initpreOldB (rumors preoldItems) )
+              TrivialWidget btre bel <- tbCaseDiff inf constr a wl plugItens (tidings initpreOldB (rumors preoldItems) )
               ui $ onEventDyn (rumors btre) (liftIO . h )
               el <- UI.div # set children [bel]
               return el
@@ -415,9 +426,8 @@ tbRecCase inf constr a wl plugItens preoldItems' = do
               UI.div
       sub <- UI.div # sink items  (pure .fun <$> facts btr ) # set UI.class_ "row"
       out <- UI.div # set children [bel,sub]
-      binipre <- ui $ stepper  inipre (unionWith const ev (rumors preoldItems))
-      return (TrivialWidget  (tidings binipre (unionWith const (rumors preoldItems) ev)) out)
--}
+      binipre <- ui $ stepper  Keep ev
+      return (TrivialWidget  (tidings binipre ev) out)
 
 unTBMap :: Show a => TBData k a -> Map (Set (Rel k  )) (Compose Identity (TB Identity ) k a )
 unTBMap = _kvvalues . unTB . snd
@@ -449,7 +459,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) oldItems = do
                 plugattr = indexPluginAttrDiff (unTB m) plugmods
                 aref = maybe (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems) ( snd) (L.find (((keyattr m)==) . keyattri .fst) $  refs)
             wn <- (if el
-                    then tbCaseDiff -- tbRecCase
+                    then tbRecCaseDiff
                     else tbCaseDiff ) inf constr (unTB m)  (fmap (first triding) <$> w) plugattr aref
             lab <- if
               rawIsSum table
