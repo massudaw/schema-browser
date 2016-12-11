@@ -193,7 +193,7 @@ addClient clientId metainf inf table row =  do
     dbmeta  <- prerefTable metainf (lookTable metainf "clients")
     putPatch (patchVar $dbmeta ) [patch new]
     (_,_,clientState,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl (keyRef [ (lookKey (meta inf) "clients" "clientid")] , Left (num clientId,Equals))]))
-    return (clientId, getClient metainf clientId inf .traceShowId <$> clientState)
+    return (clientId, getClient metainf clientId inf <$> clientState)
 
 
 
