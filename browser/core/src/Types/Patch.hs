@@ -238,9 +238,8 @@ instance Patch a => Patch (NonEmpty a) where
 class Compact f where
   compact :: [f] -> [f]
 
-instance (G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex  a ) (TBData k a)) where
+instance (NFData k, NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex  a ) (TBData k a)) where
   type Index (G.GiST (G.TBIndex  a ) (TBData k a)  ) = RowPatch k (Index a)
-  apply = applyGiST
   applyIfChange = applyGiSTChange
 
 
@@ -387,23 +386,30 @@ expandPSet p = [p]
 groupSplit2 :: Ord b => (a -> b) -> (a -> c ) -> [a] -> [(b ,[c])]
 groupSplit2 f g = fmap (\i-> (f $ justError "cant group" $ safeHead i , g <$> i)) . groupWith f
 
+
+instance NFData (f (g k a)) => NFData (Compose  f g k a) where
+
+instance (NFData (f k a),NFData k ) => NFData (KV f k a) where
+
+instance (NFData k ,NFData a ) => NFData (TB Identity k a) where
+
 applyGiSTChange
-  ::  (G.Predicates (G.TBIndex   a) , PatchConstr k a)  => G.GiST (G.TBIndex  a ) (TBData k a) -> RowPatch k (Index a) -> Maybe (G.GiST (G.TBIndex  a ) (TBData k a))
+  ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => G.GiST (G.TBIndex  a ) (TBData k a) -> RowPatch k (Index a) -> Maybe (G.GiST (G.TBIndex  a ) (TBData k a))
 applyGiSTChange l patom@(m,i, []) = Just $ G.delete (create <$> G.notOptional i) (3,6)  l
 applyGiSTChange l patom@(m,ipa, p) =  case G.lookup (G.notOptional i) l  of
-                  Just v ->
-                        do
-                          let val =  applyIfChange v patom
-                          el <- if isNothing val then trace "no change" val else val
+                  Just v -> do
+                          el <-  force $ applyIfChange v patom
                           let pkel = G.getIndex el
-                          Just $ G.insert (el,G.tbpred  el) (3,6) . G.delete (G.notOptional i)  (3,6) $ l
+                          return $ if pkel == i
+                                then G.update (G.notOptional i) (const el) l
+                                else G.insert (el,G.tbpred  el) (3,6) . G.delete (G.notOptional i)  (3,6) $ l
                   Nothing -> let
-                      el = createIfChange  patom
+                      el = force$ createIfChange  patom
                    in (\eli -> G.insert (eli,G.tbpred  eli) (3,6)  l) <$> el
    where
          i = fmap create  ipa
 
-
+{-
 applyGiST
   ::  (G.Predicates (G.TBIndex   a) , PatchConstr k a)  => G.GiST (G.TBIndex  a ) (TBData k a) -> RowPatch k (Index a) -> G.GiST (G.TBIndex  a ) (TBData k a)
 applyGiST l patom@(m,i, []) = G.delete (create <$> G.notOptional i) (3,6)  l
@@ -419,7 +425,7 @@ applyGiST l patom@(m,ipa, p) =  case G.lookup (G.notOptional i) l  of
                       in G.insert (el,G.tbpred  el) (3,6)  l
     where
           i = fmap create  ipa
-
+-}
 patchTB1 :: PatchConstr k a => TBData k  a -> TBIdx k  (Index a)
 patchTB1 (m, k)  = (m  ,fmap patch $G.getIndex (m,k) ,  F.toList $ patchAttr  . unTB <$> (unKV k))
 

@@ -30,6 +30,7 @@ import Graphics.UI.Threepenny.Core (mapEventDyn)
 
 import RuntimeTypes
 import Control.Arrow (first)
+import Control.DeepSeq
 import Step.Host
 import Expression
 import Control.Concurrent
@@ -435,7 +436,7 @@ readIndex dbvar = do
     return (F.foldl' (flip conv) ini patches,nchan)
 
 readState
-  :: (Ord k ,Eq (Index v), Ord k, Ord v, Show k, Show v,
+  :: (Ord k ,NFData v,NFData k,Eq (Index v), Ord k, Ord v, Show k, Show v,
       G.Predicates (TBIndex v), Patch v, Index v ~ v) =>
       (TBPredicate k Showable, [k ])
      -> DBRef k v
@@ -507,7 +508,7 @@ convertChanEvent table fixed bres inivar chan = do
   return e
 
 convertChanTidings
-  :: (Show k,Ord k )
+  :: (Show k,Ord k ,NFData k)
   => TableK k
   -> (TBPredicate k Showable, [k ])
      -> DBRef k Showable
@@ -522,7 +523,7 @@ convertChanTidings table fixed dbvar = do
 splitMatch (WherePredicate b,o) p = maybe True (\i -> G.match (mapPredicate (justError "no index" . flip L.elemIndex o ) $ WherePredicate i ) G.Exact p  ) (G.splitIndexPK b o)
 
 convertChanTidings0
-  :: (Show k ,Ord k)
+  :: (Show k ,NFData k,Ord k)
      =>TableK k
      -> (TBPredicate k Showable, [k])
      -> G.GiST (TBIndex Showable) (TBData k Showable)
