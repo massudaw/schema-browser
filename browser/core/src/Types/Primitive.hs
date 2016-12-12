@@ -168,9 +168,11 @@ data FKey a
     , keyModifier :: [FieldModifier]
     , keyPosition :: Int
     , keyStatic :: Maybe (FTB Showable)
-    , keyFastUnique ::  Unique
+    , keyFastUnique ::  KeyUnique
     , _keyTypes ::  a
     }deriving(Functor,Generic)
+
+type KeyUnique = Unique
 
 instance NFData a => NFData (FKey a)
 
@@ -629,7 +631,7 @@ addDefault = mapComp def
 
 tableMeta :: Ord k => TableK k -> KVMetadata k
 tableMeta (Union s l ) =  tableMeta s
-tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawDescription t) (fmap F.toList $ uniqueConstraint t) [] (F.toList $ rawAttrs t) (F.toList $ rawDelayed t) (paths' <> paths)
+tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawDescription t) (fmap F.toList $ uniqueConstraint t) [] (F.toList $ rawAttrs t)[]  (F.toList $ rawDelayed t) (paths' <> paths)
   where rec = filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
         same = filter ((tableName t ==). fkTargetTable . pathRel) rec
         notsame = filter (not . (tableName t ==). fkTargetTable . pathRel) rec
@@ -841,3 +843,4 @@ generateConstant CurrentTime = unsafePerformIO $ do
         i<- getCurrentTime
         return (TB1 $ STimestamp ( utcToLocalTime utc i))
 
+replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)

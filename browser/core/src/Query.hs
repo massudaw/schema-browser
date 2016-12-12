@@ -560,36 +560,39 @@ searchGist relTable m gist =  join . fmap (\k -> lookGist (S.fromList $fmap (\k-
           flipTable = M.fromList . fmap swap .M.toList
           tbjust = fmap (G.Idex . fmap snd.L.sortBy (comparing ((`L.elemIndex` _kvpk m).fst)))
 
-joinRel :: (Ord a ,Show a,G.Predicates (G.TBIndex a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex a) (TBData Key a) -> FTB (TBData Key a)
-joinRel tb rel ref table
-  | L.any (isOptional .keyType) origin
-    = LeftTB1 $ fmap (flip (joinRel tb (Le.over relOri unKOptional <$> rel ) ) table) (Tra.traverse unLeftItens ref )
-  | L.any (isArray.keyType) origin
+joinRel :: (Show k ,Ord k ,Ord a ,Show a,G.Predicates (G.TBIndex a)) => KVMetadata k ->  [(Rel k ,FTB a)] -> G.GiST (G.TBIndex a) (TBData k a) -> FTB (TBData k a)
+joinRel tb ref table
+  | L.any (isLeft.snd)  ref
+  = LeftTB1 $ fmap (flip (joinRel tb ) table) (Tra.traverse (Tra.traverse unSOptional) ref )
+  | L.any (isArray.snd) ref
   = let
-      !arr = justError ("no array"<> show (ref,origin ,fmap keyType origin)) $ L.find isTBArray ref
-    in ArrayTB1 $ Non.fromList $  fmap (flip (joinRel tb (Le.over relOri unKArray <$> rel ) ) table ) (fmap (\i -> (justError ("cant index  " <> show (i,ref)). unIndex i $ arr ) : (filter (not .isTBArray) ref)) [0..(Non.length (unArray $ _tbattr arr )- 1)])
+      !arr = justError ("no array"<> show ref )$ L.find (isArray. snd ) ref
+   in ArrayTB1 $ Non.fromList $  fmap (\i -> joinRel tb ((fst arr,i): L.filter (not . isArray . snd)  ref) table ) (fmap (\i -> justError ("cant index  " <> show (i,ref)). (`Non.atMay` i) . unArray . snd $ arr ) [0..(Non.length (unArray  $ snd arr )- 1)])
   | otherwise
-    = maybe (TB1 $ tblistM tb (_tb . firstTB (\k -> fromMaybe k  $ M.lookup k relMap ) <$> ref )) TB1 tbel
-      where origin = fmap _relOrigin rel
-            relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
-            invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
-            tbel = searchGist  invrelMap tb table (Just ref)
-            isTBArray i = isArray (keyType $ _tbattrkey i)
+  = maybe (TB1 $ tblistM tb (fmap _tb $  fmap (\(i,j) -> Attr  (_relTarget i) j )  ref )) TB1 tbel
+      where
+            isLeft (LeftTB1 i) = True
+            isLeft i = False
+            isArray (ArrayTB1 i) = True
+            isArray i = False
+            tbel = G.lookup (G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref) table
 
-joinRel2 :: (Ord a ,Show a,G.Predicates (G.TBIndex a)) => KVMetadata Key ->  [Rel Key] -> [Column Key a] -> G.GiST (G.TBIndex a) (TBData Key a) -> Maybe (FTB (TBData Key a))
-joinRel2 tb rel ref table
-  | L.any (isOptional .keyType) origin
-  = Just $ LeftTB1  $ join $ fmap (flip (joinRel2 tb (Le.over relOri unKOptional <$> rel ) ) table) (Tra.traverse unLeftItens ref )
-  | L.any (isArray.keyType) origin
-  = join $ fmap (\arr -> fmap (ArrayTB1 .  Non.fromList ) $Tra.sequenceA   $ fmap (flip (joinRel2 tb (Le.over relOri unKArray <$> rel ) ) table . (:L.filter (not .isArray . keyType ._tbattrkey) ref)) (fmap (\i -> justError ("cant index  " <> show (i,head ref)). unIndex i $ arr ) [0..(Non.length (unArray $ _tbattr arr)   - 1)])) $ L.find  (isArray .keyType . _tbattrkey) ref
+joinRel2 :: (Show k , Ord k,Ord a ,Show a,G.Predicates (G.TBIndex a)) => KVMetadata k->  [(Rel k ,FTB a)] -> G.GiST (G.TBIndex a) (TBData k a) -> Maybe (FTB (TBData k a))
+joinRel2 tb ref table
+  | L.any (isLeft.snd) ref
+  = Just $ LeftTB1  $ join $ fmap (flip (joinRel2 tb ) table) (Tra.traverse (traverse unSOptional) ref )
+  | L.any (isArray.snd) ref
+  = let
+      !arr = justError ("no array"<> show ref )$ L.find (isArray .snd) ref
+   in fmap (ArrayTB1 .  Non.fromList ) $Tra.sequenceA   $ fmap (flip (joinRel2 tb ) table . (:L.filter (not .isArray .snd) ref)) (fmap (\i -> (fst arr,) . justError ("cant index  " <> show (i,head ref)). (flip Non.atMay i) $ unArray $ snd arr ) [0..(Non.length (unArray $ snd arr)   - 1)])
   | otherwise
     =  TB1 <$> tbel
-      where origin = fmap _relOrigin rel
-            relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
-            invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
-            tbel = searchGist  invrelMap tb table (Just ref)
-            isArrayTB1 (ArrayTB1 _ ) = True
-            isArrayTB1 _  = False
+      where
+            isLeft (LeftTB1 i) = True
+            isLeft i = False
+            isArray (ArrayTB1 i) = True
+            isArray i = False
+            tbel = G.lookup (G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref) table
 
 
 lookGist un pk  = G.search (tbpred un pk)

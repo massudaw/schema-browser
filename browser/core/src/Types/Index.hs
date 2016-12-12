@@ -7,11 +7,12 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Types.Index
-  (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,filter',mapKeys
+  (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,filter'
   ,getIndex ,getUnique,notOptional,tbpred
   ,minP,maxP,unFin,queryCheck,indexPred,checkPred,splitIndex,splitPred,splitIndexPK,module G ) where
 
 import Data.Maybe
+import Safe
 import Control.Monad
 import Control.Arrow (first)
 import Data.Functor.Identity
@@ -50,13 +51,13 @@ import qualified Data.Map.Strict as M
 
 
 --- Row Level Predicate
-instance (Binary a)  => Binary (TBIndex  a)
-instance (NFData a)  => NFData (TBIndex   a)
+instance (Binary a)  => Binary (TBIndex a)
+instance (NFData a)  => NFData (TBIndex a)
 
-mapKeys f (Idex i ) = Idex $ i
 
 getUnique :: Ord k => [k] -> TBData k a -> TBIndex  a
 getUnique ks (m,v) = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn (Set.fromList ks) $ (m,v)
+
 getIndex :: Ord k => TBData k a -> TBIndex  a
 getIndex (m,v) = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` (_kvpk m)).fst)) .  getPKL $ (m,v)
 
@@ -110,36 +111,6 @@ instance Semigroup DiffShowable where
       appendDShowable (DSPosition x ) (DSPosition y ) =  DSPosition $ x <> y
       appendDShowable a b = errorWithStackTrace ("append " <> show (a,b))
 
-instance (Predicates (Predicate a),Ord a) => Predicates (WherePredicate,Predicate a ) where
-  type Penalty (WherePredicate ,Predicate a)= ([ER.Extended DiffShowable],Penalty (Predicate a))
-  type Query (WherePredicate ,Predicate a)= (WherePredicate ,Query (Predicate a) )
-  consistent (c1,i) (c2,j) = consistent c1 c2 && consistent i j
-  penalty (c1,i) (c2,j) = (penalty c1 c2 ,penalty i j)
-  match  (c1,i) e (c2,j) = match c1 e c2 && match i e j
-  union i  = (union (fst <$> i), union (snd <$> i))
-
-instance Predicates WherePredicate where
-  type Penalty WherePredicate = [ER.Extended DiffShowable]
-  type Query WherePredicate = WherePredicate
-  consistent (WherePredicate c1) (WherePredicate c2)  = F.all id $ M.mergeWithKey (\_ i j -> Just $ cons i j) (const False <$>) (const False <$>) (M.fromList $F.toList c1) (M.fromList $ F.toList c2)
-    where
-      cons (Left i ) (Left j ) =consistent (fst i) (fst j)
-      cons (Right i ) (Left j ) =False
-      cons (Left i ) (Right j ) =False
-      cons (Right i ) (Right j ) = i == j
-
-  match (WherePredicate c1) e (WherePredicate c2)  = F.all id $ M.mergeWithKey (\_ i j -> Just $ either (match i e.fst) (const False) j  ) (const False <$>) (const False <$>) (M.fromList $ F.toList c1) (M.fromList $  F.toList c2)
-
-  penalty (WherePredicate c1) (WherePredicate c2) =F.toList $ M.intersectionWithKey (\_ i j -> cons i j )  (M.fromList $ F.toList c1) (M.fromList $  F.toList c2)
-    where
-      cons (Left i ) (Left j ) =penalty (fst i) (fst j)
-      cons (Right i ) (Left j ) = ER.Finite $ DSInt 1
-      cons (Left i ) (Right j ) =  ER.Finite $ DSInt (-1)
-      cons (Right i ) (Right j ) =  ER.Finite $ DSInt $ if i == j then 0 else 1
-  union l = WherePredicate $ AndColl $ fmap (\(k,a)-> PrimColl(k,a))$ M.toList $ foldl ( M.mergeWithKey (\_ i j -> Just $ pairunion [i,j]) (fmap id) (fmap id) ) M.empty ((\(WherePredicate pr ) -> M.fromList .F.toList $ pr)<$> l)
-    where
-      pairunion i = Left $ (union  $ fmap fst (lefts i),headS $ fmap snd (lefts i ))
-
 
 headS [] = errorWithStackTrace "no head"
 headS i = head i
@@ -172,7 +143,7 @@ instance Affine String where
       addStr [] [] = []
   {-# INLINE addition #-}
 
-splitIndexPK :: BoolCollection (Access Key ,AccessOp Showable) -> [Key] -> Maybe (BoolCollection (Access Key , AccessOp Showable))
+splitIndexPK :: Eq k => BoolCollection (Access k ,AccessOp Showable) -> [k] -> Maybe (BoolCollection (Access k , AccessOp Showable))
 splitIndexPK (OrColl l ) pk  = if F.all (isNothing .snd) al then Nothing else Just $ OrColl $ fmap (\(i,j) -> fromMaybe i j) al
     where
       al = (\l -> (l,splitIndexPK  l pk ) )<$> l
@@ -185,7 +156,7 @@ splitIndexPK i  pk  = Nothing -- errorWithStackTrace (show (i,pk))
 instance Monoid (TBIndex a) where
   mempty  = Idex []
 
-splitIndex :: BoolCollection (Access Key ,AccessOp Showable) -> [Key] -> TBIndex Showable -> Maybe (BoolCollection (Access Key , AccessOp Showable))
+splitIndex :: (Eq k ,Show k) => BoolCollection (Access k ,AccessOp Showable) -> [k] -> TBIndex Showable -> Maybe (BoolCollection (Access k, AccessOp Showable))
 splitIndex (AndColl l ) pk f = if F.all (isNothing .snd) al then Nothing else Just $ AndColl $ fmap (\(i,j) -> fromMaybe i j) al
     where
       al = (\l -> (l,splitIndex  l pk f) )<$> l
@@ -193,7 +164,7 @@ splitIndex (OrColl l ) pk f = fmap OrColl $ nonEmpty $ catMaybes $ (\i -> splitI
 splitIndex (PrimColl (p@(IProd _ [i]),op) ) pk (Idex v ) = maybe (Just (PrimColl (p,op))) (splitPred (PrimColl (p,op))) ((v !!) <$>  (L.elemIndex i pk ))
 splitIndex i  k j = Just i
 
-splitPred :: BoolCollection (Access Key ,AccessOp Showable) ->  FTB Showable -> Maybe (BoolCollection (Access Key,AccessOp Showable)  )
+splitPred :: (Eq k ,Show k) => BoolCollection (Access k,AccessOp Showable) ->  FTB Showable -> Maybe (BoolCollection (Access k,AccessOp Showable)  )
 splitPred (PrimColl (prod ,Left (a@(TB1 _ ) ,op))) (ArrayTB1 b ) = if elem a  b then Nothing else Just (PrimColl (prod , Left (a,op)))
 splitPred (PrimColl (prod ,Left (a@(TB1 _ ) ,op))) (IntervalTB1 b ) = if Interval.member a  b then Nothing else Just (PrimColl (prod , Left (a,op)))
 splitPred (PrimColl (prod ,Left (a@(TB1 _ ) ,op))) b@(TB1  _ ) = if a  == b then Nothing else Just (PrimColl (prod , Left (a,op)))
@@ -254,18 +225,18 @@ instance Affine Showable where
 
 instance Predicates (TBIndex Showable) where
   type (Penalty (TBIndex Showable)) = [ER.Extended DiffShowable]
-  type Query (TBIndex Showable) = (TBPredicate Key Showable,[Key])
+  type Query (TBIndex Showable) = (TBPredicate Int Showable)
   consistent (Idex l) (Idex  i )
     =  if null b then False else  F.all id b
     where
       b =  zipWith consistent l i
 
-  match (WherePredicate a,un)  e (Idex v) = go a
+  match (WherePredicate a)  e (Idex v) = go a
     where
       -- Index the field and if not found return true to row filtering pass
       go (AndColl l) = F.all go l
       go (OrColl l ) = F.any go  l
-      go (PrimColl (IProd _ [i],op)) = maybe (traceShow (i,un) True) (match op e)  (( v !!)  <$> L.elemIndex i un)
+      go (PrimColl (IProd _ [i],op)) = maybe (traceShow i True) (match op e)  ( v `atMay` i)
 
   union l
     | L.null l = Idex []
@@ -285,10 +256,10 @@ instance (Predicates (TBIndex  a )  ) => Monoid (G.GiST (TBIndex  a)  b) where
 
 -- Attr List Predicate
 
-
-instance  Predicates (Map Key (FTB Showable)) where
-  type Penalty (Map Key (FTB Showable )) = Map Key (ER.Extended DiffShowable)
-  type Query (Map Key (FTB Showable )) = TBPredicate Key Showable
+{-
+instance  Predicates (Map k (FTB Showable)) where
+  type Penalty (Map k (FTB Showable )) = Map k (ER.Extended DiffShowable)
+  type Query (Map k (FTB Showable )) = TBPredicate k Showable
   match (WherePredicate a ) e  v=  go a
     where
       -- Index the field and if not found return true to row filtering pass
@@ -302,7 +273,7 @@ instance  Predicates (Map Key (FTB Showable)) where
     | L.null l = M.empty
     | otherwise = foldl1 (M.intersectionWith (\i j -> union [i,j]) ) l
   penalty p1 p2 = M.mergeWithKey (\_ i j -> Just $penalty i j ) (fmap (maybe ER.PosInf (ER.Finite .loga) .unFin . fst .minP)) (fmap (maybe ER.PosInf (ER.Finite .loga ). unFin . fst . minP))  p1 p2
-
+-}
 
 checkPred v (WherePredicate l) = checkPred' v l
 
@@ -310,7 +281,7 @@ checkPred' v (AndColl i ) = F.all  (checkPred' v)i
 checkPred' v (OrColl i ) = F.any (checkPred' v) i
 checkPred' v (PrimColl i) = indexPred i v
 
-indexPred :: (Access Key ,AccessOp Showable ) -> TBData Key Showable -> Bool
+indexPred :: (Show k ,Ord k) => (Access k ,AccessOp Showable ) -> TBData k Showable -> Bool
 indexPred (Many i,eq) a= all (\i -> indexPred (i,eq) a) i
 indexPred (n@(Nested k nt ) ,eq) r
   = case  indexField n r of
@@ -344,9 +315,9 @@ indexPred (a@(IProd _ _),eq) r =
 indexPred i v= errorWithStackTrace (show (i,v))
 
 
-queryCheck :: (WherePredicate ,[Key])-> G.GiST (TBIndex Showable) (TBData Key Showable) -> G.GiST (TBIndex  Showable) (TBData Key Showable)
+queryCheck :: (Show k,Ord k) => (WherePredicateK k ,[k])-> G.GiST (TBIndex Showable) (TBData k Showable) -> G.GiST (TBIndex  Showable) (TBData k Showable)
 queryCheck pred@(WherePredicate b ,pk) = t1
-  where t1 = filter' (flip checkPred (fst pred)) . maybe G.getEntries (\p -> G.query (WherePredicate p,pk)) (splitIndexPK b pk)
+  where t1 = filter' (flip checkPred (fst pred)) . maybe G.getEntries (\p -> G.query (mapPredicate (\i -> justError "no predicate" $ L.elemIndex i pk)  $ WherePredicate p)) (splitIndexPK b pk)
 
 -- Atomic Predicate
 

@@ -285,7 +285,7 @@ instance Patch Showable  where
 type PatchConstr k a = (Eq (Index a),Patch a , Ord a , Show a,Show k , Ord k)
 
 type TBIdx  k a = (KVMetadata k, G.TBIndex   a ,[PathAttr k a])
-type RowPatch k a = TBIdx k a -- (KVMetadata k, TBData k a ,[PathAttr k a])
+type RowPatch k a = TBIdx k a
 
 
 data PathAttr k a
@@ -321,7 +321,7 @@ data PathTID
 
 
 firstPatch :: (Ord a ,Ord k , Ord (Index a), Ord j ) => (k -> j ) -> TBIdx k a -> TBIdx j a
-firstPatch f (i,j,k) = (fmap f i , G.mapKeys f j ,fmap (firstPatchAttr f) k)
+firstPatch f (i,j,k) = (fmap f i , j ,fmap (firstPatchAttr f) k)
 
 firstPatchAttr :: (Ord k , Ord j ,Ord a ,Ord (Index a)) => (k -> j ) -> PathAttr k a -> PathAttr j a
 firstPatchAttr f (PAttr k a) = PAttr (f k) a
@@ -600,7 +600,7 @@ applyFTBM pr a (IntervalTB1 i) (PInter b (p,l))
     mapExtended p _ = traverse (createFTBM pr ) p
 applyFTBM pr a (TB1 i) (PAtom p)  =  fmap TB1 $ a i p
 applyFTBM pr a  b (PatchSet l ) = foldl (\i l -> (\i -> applyFTBM pr a i l ) =<< i ) (Just b) l
-applyFTBM _ _ a b = errorWithStackTrace ("applyFTB: " )
+applyFTBM _ _ a b = errorWithStackTrace ("applyFTB: " <> show a )
 
 checkInterM :: (Show a,Ord a) => (Index a  -> Maybe  a) -> PathFTB (Index a) -> Interval.Interval (FTB a)-> Maybe (Interval.Interval (FTB a))
 checkInterM p (PInter b o) inter = if fst (lowerBound' inter) == Interval.PosInf || fst (upperBound' inter) == Interval.NegInf then Nothing else Just inter

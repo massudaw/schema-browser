@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveGeneric,DeriveFunctor  #-}
-module Step.Common (PluginTable,Parser(..),Access(..),ArrowReaderM,ArrowReader,KeyString(..),BoolCollection(..),WherePredicate(..),TBPredicate(..),mapPredicate ) where
+module Step.Common (PluginTable,Parser(..),Access(..),ArrowReaderM,ArrowReader,KeyString(..),BoolCollection(..),WherePredicateK(..),WherePredicate(..),TBPredicate(..),mapPredicate ) where
 
 import Types.Common
 import Data.Binary
@@ -37,7 +37,8 @@ instance Binary a => Binary (BoolCollection a)
 
 
 mapPredicate f (WherePredicate i ) = WherePredicate (fmap (first (fmap f )) i)
-type WherePredicate = TBPredicate Key Showable
+type WherePredicateK k = TBPredicate k Showable
+type WherePredicate = WherePredicateK Key
 
 newtype TBPredicate k a
   = WherePredicate (BoolCollection (Access k ,AccessOp a ))

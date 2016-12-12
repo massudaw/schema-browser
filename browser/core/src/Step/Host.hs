@@ -34,15 +34,15 @@ import Data.Traversable (traverse)
 
 unF i = L.head (F.toList (getCompose i))
 
-findFK :: (Foldable f ,Show a) => [Key] -> (TB3Data f Key a) -> Maybe (Compose f (TB f ) Key a)
+findFK :: (Show k ,Ord k ,Foldable f ,Show a) => [k] -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
 findFK  l v =  M.lookup (S.fromList l) $M.mapKeys (S.map ( _relOrigin)) $ _kvvalues $ unF (snd v)
 
-findAttr :: (Foldable f ,Show a) => [Key] -> (TB3Data f Key a) -> Maybe (Compose f (TB f ) Key a)
+findAttr :: (Show k ,Ord k ,Foldable f ,Show a) => [k] -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
 findAttr l v =  M.lookup (S.fromList $ Inline <$> l) $ M.mapKeys (S.map mapFunctions ) $  _kvvalues $ unF (snd v)
   where mapFunctions (RelFun i _ ) = Inline i
         mapFunctions j = j
 
-findFKAttr :: (Foldable f ,Show a) => [Key] -> (TB3Data f Key a) -> Maybe (Compose f (TB f ) Key a)
+findFKAttr :: (Show k ,Ord k ,Foldable f ,Show a) => [k] -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
 findFKAttr l v =   case fmap  (fmap unF )$ L.find (\(k,v) -> not $ L.null $ L.intersect l (S.toList k) ) $ M.toList $ M.mapKeys (S.map ( _relOrigin)) $ _kvvalues $ unF (snd v) of
       Just (k,(FKT a _ _ )) ->   L.find (\i -> not $ L.null $ L.intersect l $ fmap (_relOrigin) $ keyattr $ i ) (F.toList $ _kvvalues $a)
       Just (k ,i) -> errorWithStackTrace (show l)
@@ -56,7 +56,7 @@ replace ix i (Point p)
   | otherwise = (Point p)
 replace ix i v = v
 
-indexField :: Access Key -> TBData Key Showable -> Maybe (Column Key Showable)
+indexField :: (Ord k , Show k) => Access k -> TBData k Showable -> Maybe (Column k Showable)
 indexField p@(IProd b l) v = case unTB <$> findAttr  l  v of
                                Nothing -> case unTB <$>  findFK l (v) of
                                   Just (FKT ref _ _) ->  unTB <$> ((\l ->  L.find ((==[l]). fmap ( _relOrigin). keyattr ) $ unkvlist ref ) $head l)

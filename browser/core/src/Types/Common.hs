@@ -253,9 +253,6 @@ instance Binary BinaryOperator
 instance NFData BinaryOperator
 
 
-
-
-
 instance Monoid (KVMetadata k ) where
   mempty = kvempty
 
@@ -269,6 +266,7 @@ data KVMetadata k
   , _kvuniques :: [[k]]
   , _kvorder :: [(k,Order)]
   , _kvattrs :: [k]
+  , _kvrefs :: [[Rel k]]
   , _kvdelayed :: [k]
   , _kvrecrels :: [MutRec [[Rel k]]]
   }deriving(Functor,Foldable,Generic)
@@ -366,7 +364,6 @@ instance NFData Expr
 
 
 
-
 data TB f k a
   = Attr
     { _tbattrkey ::  !k
@@ -409,7 +406,7 @@ traFAttr f (Attr i v)  = Attr i <$> f v
 traFAttr f (IT i v)  = IT i <$> traverse (traFValue f) v
 traFAttr f (FKT  i rel v)  = liftA2 (\a b -> FKT a rel b)  ((traverseKV (traComp (traFAttr f))) i) (traverse (traFValue f) v)
 
-traFValue :: (Traversable g ,Applicative f) => ( FTB a -> f (FTB a) ) -> TB3Data g k a -> f (TB3Data g k a)
+traFValue :: (Traversable g ,Applicative f) => (FTB a -> f (FTB a) ) -> TB3Data g k a -> f (TB3Data g k a)
 traFValue f (m ,k) =  fmap ((m,)). traComp (fmap KV . traverse (traComp (traFAttr f)) . _kvvalues )  $  k
 
 
@@ -645,7 +642,7 @@ tblistM :: Ord k => KVMetadata k -> [Compose Identity  (TB Identity) k a] -> TBD
 tblistM t  = (t, ) . Compose . Identity . KV . mapFromTBList
 
 
-kvempty  = KVMetadata "" ""  [] [] [] [] [] [] [] []
+kvempty  = KVMetadata "" ""  [] [] [] [] [] [] [] [] []
 
 instance Ord a => Ord (Interval.Interval a ) where
   compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)

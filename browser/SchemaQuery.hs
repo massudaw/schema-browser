@@ -238,8 +238,9 @@ getFKRef inf predtop rtable (me,old) v path@(Path _ (FKJoinTable i j ) ) =  do
                     refl = S.fromList $ fmap _relOrigin $ filterReflexive i
                     inj = S.difference refl old
                     joinFK :: TBData Key Showable -> Either [Compose Identity (TB Identity)  Key Showable] (Column Key Showable)
-                    joinFK m  = maybe (Left (taratt)) Right $ FKT (kvlist tarinj ) i <$> joinRel2 (tableMeta table ) i (fmap unTB $ taratt ) tb2
+                    joinFK m  = maybe (Left (taratt)) Right $ FKT (kvlist tarinj ) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ fmap unTB $ taratt ) tb2
                       where
+                        replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
                         taratt = getAtt tar (tableNonRef' m)
                         tarinj = getAtt inj (tableNonRef' m)
                     addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
@@ -376,7 +377,6 @@ pageTable flag method table page size presort fixed = do
            freso =  fromMaybe fr (M.lookup (table ,fixed) loadmap )
               where fr = ffixed reso
            predreq = (fixed,G.Contains (pageidx - pagesize,pageidx))
-           reqs = G.query predreq idxVL
            diffpred'  i@(WherePredicate (AndColl [])) = Just i
            diffpred'  (WherePredicate f ) = WherePredicate <$> foldl (\i f -> i >>= (\a -> G.splitIndex a (rawPK table)f)  ) (Just  f)  (fmap snd $ G.getEntries freso)
            diffpred = diffpred' fixed
@@ -389,8 +389,6 @@ pageTable flag method table page size presort fixed = do
                                                                                        -- && isJust diffpred
                    )
              then do
-               liftIO $ atomically $ do
-                 modifyTVar' (idxVarLoad dbvar) (G.insert ((),(fixed,G.Contains (pageidx - pagesize ,pageidx))) (3,6) )
 
 
                let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
@@ -429,7 +427,6 @@ readState fixed dbvar = do
   chan <- cloneTChan (patchVar dbvar)
   patches <- takeMany' chan
   let
-      splitMatch (WherePredicate b,o) p = maybe True (\i -> G.match (WherePredicate i ,o) G.Exact p  ) (G.splitIndexPK b o)
       filterPred :: [Index (TBData Key Showable)] -> Maybe [Index (TBData Key Showable)]
       filterPred = nonEmpty . filter (\d@(_,p,_) -> splitMatch fixed p && indexFilterP (fst fixed) d )
       update = F.foldl' (flip (\p-> (flip apply p)))
@@ -477,7 +474,7 @@ convertChanTidings table fixed dbvar = do
       convertChanTidings0 table fixed ini inivar nchan
 
 
-splitMatch (WherePredicate b,o) p = maybe True (\i -> G.match (WherePredicate i ,o) G.Exact p  ) (G.splitIndexPK b o)
+splitMatch (WherePredicate b,o) p = maybe True (\i -> G.match (mapPredicate (justError "no index" . flip L.elemIndex o ) $ WherePredicate i ) G.Exact p  ) (G.splitIndexPK b o)
 
 convertChanTidings0 table fixed ini iniVar nchan = mdo
     evdiff <-  convertChanEvent table fixed bres iniVar nchan
@@ -665,7 +662,7 @@ loadFK table (Path ori (FKJoinTable rel (st,tt) ) ) = do
   let
       relSet = S.fromList $ _relOrigin <$> rel
       tb  = unTB <$> F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . snd . tableNonRef' $ table))
-      fkref = joinRel  (tableMeta targetTable) rel tb  mtable
+      fkref = joinRel  (tableMeta targetTable) (fmap (replaceRel rel) tb ) mtable
   return $ Just $ FKT (kvlist $ _tb <$> tb) rel   fkref
 loadFK table (Path ori (FKInlineTable to ) )   = do
   runMaybeT $ do
@@ -674,3 +671,4 @@ loadFK table (Path ori (FKInlineTable to ) )   = do
     return $ IT rel loadVt
 
 loadFK  _ _ = return Nothing
+

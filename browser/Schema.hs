@@ -277,7 +277,7 @@ createTableRefs inf i = do
         atomically $ do
           patches <- takeMany nmdiff
           when (not $ L.null $ concat patches) $
-            modifyTVar' collectionState (flip (L.foldl' apply ) (concat patches))
+            modifyTVar' collectionState (flip (L.foldl' apply ) ( concat patches))
         )  (\e -> atomically ( takeMany nmdiff ) >>= (\d ->  appendFile ("errors/data-" <> T.unpack ( tableName i)) $ show (e :: SomeException,d)<>"\n"))
     R.registerDynamic (killThread t1)
     liftIO$ atomically $ modifyTMVar (mvarMap inf) (M.insert i (DBRef nmdiff midx nchanidx collectionState midxLoad ))
@@ -307,7 +307,7 @@ loadFKDisk inf table old (Path ori (FKJoinTable rel (st,tt) ) ) = do
   let
       relSet = S.fromList $ _relOrigin <$> rel
       tb  = unTB <$> F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . snd . tableNonRef' $ table))
-      fkref = joinRel2  (tableMeta targetTable) rel tb  mtable
+      fkref = joinRel2  (tableMeta targetTable) (fmap (replaceRel rel )tb ) mtable
   case  FKT (kvlist $ _tb <$> filter (not . (`S.member` old) . _tbattrkey ) tb) rel   <$>fkref of
     Nothing ->  return $ if F.any (isKOptional.keyType . _relOrigin) rel
                    then Just $ FKT (kvlist $ _tb <$> filter (not . (`S.member` old) . _tbattrkey ) tb) rel (LeftTB1 Nothing)

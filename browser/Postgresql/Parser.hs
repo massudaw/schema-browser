@@ -1,4 +1,5 @@
-{-# LANGUAGE BangPatterns,DeriveDataTypeable,ConstraintKinds,TypeFamilies ,DeriveTraversable,DeriveFoldable,StandaloneDeriving,RecursiveDo,FlexibleInstances,RankNTypes,NoMonomorphismRestriction,ScopedTypeVariables,UndecidableInstances,FlexibleContexts,OverloadedStrings ,TupleSections, ExistentialQuantification #-}
+{-# LANGUAGE
+  UndecidableInstances,FlexibleInstances,FlexibleContexts,TupleSections #-}
 module Postgresql.Parser where
 
 import qualified Data.HashMap.Strict as HM
