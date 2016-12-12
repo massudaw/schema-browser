@@ -47,7 +47,7 @@ instance (NFData k, NFData a) => NFData (TBPredicate k a)
 instance (Binary k, Binary a) => Binary (TBPredicate k a)
 
 
-instance Monoid WherePredicate where
+instance Monoid (WherePredicateK k) where
   mempty = WherePredicate (AndColl [])
   mappend (WherePredicate i) (WherePredicate  j) = WherePredicate (AndColl [i,j])
 

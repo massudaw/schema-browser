@@ -111,7 +111,7 @@ indexFilterP (WherePredicate p) v = go p
     go (OrColl l ) = F.any  go l
     go (PrimColl l ) = indexFilterPatch l v
 
-indexFilterPatch :: (Access Key,Either (FTB Showable,BinaryOperator) UnaryOperator) -> TBIdx Key Showable -> Bool
+indexFilterPatch :: (Show k,Ord k) => (Access k ,Either (FTB Showable,BinaryOperator) UnaryOperator) -> TBIdx k Showable -> Bool
 indexFilterPatch ((IProd _ l) ,op)  (_,_,lo) =
   case L.find ((Set.fromList (fmap Inline l) == ).pattrKey) lo of
     Just i ->

@@ -227,7 +227,7 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
           else return Nothing
 
        mvar <- liftIO$ atomically $ newTMVar  M.empty
-       let inf = InformationSchema schemaId schema (uid,user) oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.filterWithKey (\k v -> not $ L.elem (tableName v ) (concat $ fmap (\(_,_,n) -> F.toList n) ures)) $ i2u)  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist
+       let inf = InformationSchema schemaId schema (uid,user) oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ fmap (\i -> (keyFastUnique i,i)) $ F.toList keyMap) (M.filterWithKey (\k v -> not $ L.elem (tableName v ) (concat $ fmap (\(_,_,n) -> F.toList n) ures)) $ i2u)  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist
        mapM (createTableRefs inf) (filter (L.null . rawUnion) $ F.toList i2u)
        var <- liftIO$ modifyMVar_ (globalRef schemaVar  ) (return . HM.insert schema inf )
        -- addStats inf
@@ -248,22 +248,28 @@ createTableRefs inf i = do
   map <- liftIO$ atomically $ readTMVar (mvarMap inf)
   if isJust (M.lookup i map)
      then
-     liftIO$ atomically $ do
-       let ref =  justError "" $ M.lookup i map
-       (,) <$> readTVar (idxVar ref )
-          <*> readTVar (collectionState ref )
+     liftIO $ atomically $ do
+       let
+           ref :: DBRef KeyUnique Showable
+           ref =  justError "" $ M.lookup i map
+       idx <- readTVar (idxVar ref )
+       st <- readTVar (collectionState ref)
+       return ((M.mapKeys (mapPredicate (recoverKey inf)) idx, fmap (mapKey' (recoverKey inf)) st) :: Collection Key Showable)
      else  do
     t <- liftIO$ getCurrentTime
     let
-        diffIni :: [TBIdx Key Showable]
+        diffIni :: [TBIdx KeyUnique Showable]
         diffIni = []
     mdiff <-  liftIO$ atomically $ newBroadcastTChan
     chanidx <-  liftIO$ atomically $ newBroadcastTChan
     nchanidx <- liftIO$ atomically $dupTChan chanidx
     nmdiff <- liftIO$ atomically $dupTChan mdiff
-    (iv,v) <- readTable inf "dump" (schemaName inf) (i)
+    (ivp,vp) <- readTable inf "dump" (schemaName inf) (i)
+    let iv = (M.mapKeys (mapPredicate keyFastUnique) ivp)
+        v = (mapKey' (keyFastUnique) <$> vp)
+
     midx <-  liftIO$ atomically$ newTVar iv
-    collectionState <-  liftIO$ atomically $ newTVar v
+    collectionState <-  liftIO$ atomically $ newTVar  v
     midxLoad <-  liftIO$ atomically $ newTVar G.empty
     t0 <- liftIO$ forkIO $ forever $ catchJust notException(do
         atomically (do
@@ -281,7 +287,7 @@ createTableRefs inf i = do
         )  (\e -> atomically ( takeMany nmdiff ) >>= (\d ->  appendFile ("errors/data-" <> T.unpack ( tableName i)) $ show (e :: SomeException,d)<>"\n"))
     R.registerDynamic (killThread t1)
     liftIO$ atomically $ modifyTMVar (mvarMap inf) (M.insert i (DBRef nmdiff midx nchanidx collectionState midxLoad ))
-    return (iv,v)
+    return (ivp,vp)
 
 loadFKSDisk inf table = do
   let
@@ -509,16 +515,16 @@ writeSchema (schema,schemaVar) = do
            when (not hasDir ) $  do
              print $"create dir" <> sdir
              createDirectory sdir
-           mapM_ (uncurry (writeTable sdir ) ) varmap
+           mapM_ (uncurry (writeTable schemaVar sdir ) ) varmap
 
-writeTable :: String -> Table -> DBRef Key Showable -> IO ()
-writeTable s t v = do
+writeTable :: InformationSchema -> String -> Table -> DBRef KeyUnique Showable -> IO ()
+writeTable inf s t v = do
   print ("dumping table " <> s <> " " <> T.unpack ( tableName t))
   let tname = s <> "/" <> (fromString $ T.unpack (tableName t))
   (iv,_,_) <- atomically $ readState mempty (v)
   (iidx ,_)<- atomically $ readIndex (v)
-  let sidx = first (mapPredicate keyValue)  <$> M.toList iidx
-      sdata = fmap (mapKey' keyValue.tableNonRef') $ G.toList $ iv
+  let sidx = first (mapPredicate (keyValue.recoverKey inf))  <$> M.toList iidx
+      sdata = fmap (mapKey' (keyValue.recoverKey inf).tableNonRef') $ G.toList $ iv
   when (not (L.null sdata) )$
     B.encodeFile  tname (sidx, sdata)
 

@@ -101,7 +101,7 @@ type SelPKConstraint = [([Column CoreKey ()],Tidings PKConstraint)]
 
 type SelTBConstraint = [([Column CoreKey ()],Tidings TBConstraint)]
 
-type RefTables = (Tidings (Collection CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)), TChan [TBIdx CoreKey Showable] )
+type RefTables = (Tidings (Collection CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)), TChan [TBIdx KeyUnique Showable] )
 
 --- Plugins Interface Methods
 createFresh :: Text -> InformationSchema -> Text -> KType CorePrim -> IO InformationSchema

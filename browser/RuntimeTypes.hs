@@ -1,4 +1,4 @@
-{-# LANGUAGE DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
 module RuntimeTypes where
 
 
@@ -69,16 +69,20 @@ data InformationSchemaKV k v
   , authtoken :: Auth
   , _keyMapL :: HM.HashMap (Text,Text) k
   , _backendKey :: Map Unique PGKey
+  , _keyUnique :: Map Unique k
   , _pkMapL :: Map (Set k ) Table
   , _tableMapL :: HM.HashMap Text Table
   , tableSize :: Map Table Int
-  , mvarMap :: TMVar (Map (TableK k) (DBRef k v ))
+  , mvarMap :: TMVar (Map (TableK k) (DBRef KeyUnique v ))
   , rootconn :: Connection
   , metaschema :: Maybe (InformationSchemaKV k v)
   , depschema :: HM.HashMap Text (InformationSchemaKV k v)
   , schemaOps :: SchemaEditor
   , plugins :: [Plugins ]
   }
+
+
+recoverKey inf un = justError ("no key " <> show un) $ M.lookup un (_keyUnique inf)
 
 backendsKey s = _backendKey s <> Prelude.foldl mappend mempty (fmap (backendsKey .snd)$ HM.toList $ depschema s)
 
@@ -114,22 +118,23 @@ pkMap = _pkMapL
 
 data DBRef k v =
   DBRef  { patchVar :: TChan [TBIdx k v]
-  , idxVar :: TVar (Map WherePredicate (Int,Map Int (PageTokenF  v)))
-  , idxChan :: TChan (WherePredicate , Int,Int ,PageTokenF  v)
-  , collectionState :: TVar (TableIndex k v)
-  , idxVarLoad :: TVar (GiST (WherePredicate ,G.Predicate Int) ())
-  }
+         , idxVar :: TVar (Map (WherePredicateK k) (Int,Map Int (PageTokenF  v)))
+         , idxChan :: TChan ((WherePredicateK k) , Int,Int ,PageTokenF  v)
+         , collectionState  :: TVar (TableIndex k v)
+         , idxVarLoad ::  TVar (GiST (WherePredicateK k ,G.Predicate Int) ())
+         }
 
-data DBVar2 k v=
-  DBVar2   { iniRef :: DBRef k v
+data DBVar2  v=
+  DBVar2
+  { iniRef :: DBRef Unique v
   , idxTid :: R.Tidings (Map WherePredicate (Int,Map Int (PageTokenF  v)))
-  , collectionTid :: R.Tidings (TableIndex k v )
+  , collectionTid :: R.Tidings (TableIndex Key v )
   }
 
 
 
-type DBVar = DBVar2 Key Showable
-type Collection k v = (Map WherePredicate (Int,Map Int (PageTokenF  v)),GiST (TBIndex   v ) (TBData k v))
+type DBVar = DBVar2 Showable
+type Collection k v = (Map (WherePredicateK k) (Int,Map Int (PageTokenF  v)),GiST (TBIndex   v ) (TBData k v))
 type TableIndex k v = GiST (TBIndex   v ) (TBData k v)
 
 type PrePlugins = FPlugins Text
@@ -184,7 +189,7 @@ dynP ~(P s d) = d
 dynPK =  runKleisli . dynP
 
 
-type TransactionM = RWST InformationSchema [TableModification (TBIdx Key Showable)] (Map (Table,WherePredicate) (TableIndex Key Showable)) R.Dynamic
+type TransactionM = RWST InformationSchema [TableModification (TBIdx Key Showable)] (Map (Table,WherePredicate) (TableIndex KeyUnique Showable)) R.Dynamic
 
 type PageToken = PageTokenF Showable
 
@@ -240,7 +245,8 @@ lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpac
 lookKeyM :: InformationSchema -> Text -> Text -> Maybe Key
 lookKeyM inf t k =  HM.lookup (t,k) (keyMap inf)
 
-putPatch m = liftIO .atomically . writeTChan m . force
+putPatch m = liftIO .atomically . writeTChan m . force. fmap (firstPatch keyFastUnique)
+putIdx m = liftIO .atomically . writeTChan m . force
 
 
 liftTable' :: InformationSchema -> Text -> TBData Text a -> TBData Key a

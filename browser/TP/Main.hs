@@ -327,7 +327,7 @@ createVar = do
   conn <- connectPostgreSQL (connRoot db)
   l <- query_ conn "select oid,name from metadata.schema"
   return $ DatabaseSchema (M.fromList l) (HM.fromList $ swap <$> l) conn smvar
-
+    {-
 testBinary = do
   args <- getArgs
   let db = argsToState args
@@ -342,9 +342,9 @@ testBinary = do
   let t = lookTable inf "messages"
   ((i,(_,s)),_) <- runDynamic $ transactionNoLog inf $ selectFrom (tableName t) Nothing Nothing [] mempty
   runDynamic $ mapM (\p -> transactionNoLog inf $ putPatch (patchVar (iniRef i)).  maybeToList =<<  getFrom t p) (L.take 4  $ G.toList s)
-  writeTable "dump_test/gmail"  (lookTable inf "messages") (iniRef i)
-  writeTable "dump_test/gmail"  (lookTable inf "labels") (iniRef i)
-  writeTable "dump_test/gmail"  (lookTable inf "attachments") (iniRef i)
+  writeTable inf "dump_test/gmail"  (lookTable inf "messages") (iniRef i)
+  writeTable inf "dump_test/gmail"  (lookTable inf "labels") (iniRef i)
+  writeTable inf "dump_test/gmail"  (lookTable inf "attachments") (iniRef i)
   (t,l) <- runDynamic $ readTable inf "dump_test" "gmail" (lookTable inf "messages")
   s <- atomically $ readTVar (collectionState (iniRef i))
   let wrong = filter (any not .fst ) (zipWith (\i j -> ([i ==j,G.getIndex i == G.getIndex j,tableNonRef' i == tableNonRef' j, liftTable' inf "messages" (mapKey' keyValue j ) == j , (liftTable' inf "messages" $ B.decode (B.encode (mapKey' keyValue j ))) == j ],(i,j)))(L.sort $ G.toList (snd t)) (L.sort $ G.toList s))
@@ -367,7 +367,7 @@ testBinary = do
   sequence_ finm
   return ()
 
-
+-}
 
 testSync  = do
   args <- getArgs
