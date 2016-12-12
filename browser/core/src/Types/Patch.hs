@@ -43,7 +43,8 @@ module Types.Patch
   --
   ,PathFTB(..)
   ,upperPatch,lowerPatch
-  ,PathAttr(..),TBIdx,firstPatch,PatchConstr)where
+  ,PathAttr(..),TBIdx,firstPatch,firstPatchRow,PatchConstr
+  ,RowPatch(..))where
 
 
 -- import Warshal
@@ -97,6 +98,15 @@ joinEditor (Diff i ) = i
 joinEditor Keep  = Keep
 joinEditor Delete = Delete
 
+data RowPatch k a
+  = CreateRow (TBData k a)
+  | PatchRow (TBIdx k a)
+  deriving(Show,Eq,Ord,Functor,Generic)
+
+instance (NFData k ,NFData a )=> NFData (RowPatch k a)
+instance (Binary k ,Binary a) => Binary (RowPatch k a)
+
+type TBIdx k a = (KVMetadata k, G.TBIndex   a ,[PathAttr k a])
 patchEditor i
   | L.length i == 0 = Keep
   | L.length i == 1 = maybe Keep Diff $ safeHead i
@@ -283,8 +293,6 @@ instance Patch Showable  where
 
 type PatchConstr k a = (Eq (Index a),Patch a , Ord a , Show a,Show k , Ord k)
 
-type TBIdx  k a = (KVMetadata k, G.TBIndex   a ,[PathAttr k a])
-type RowPatch k a = TBIdx k a
 
 
 data PathAttr k a
@@ -318,6 +326,10 @@ data PathTID
   | PIdAtom
   deriving (Eq,Ord,Show)
 
+
+firstPatchRow :: (Ord a ,Ord k , Ord (Index a), Ord j ) => (k -> j ) -> RowPatch k a -> RowPatch j a
+firstPatchRow f (CreateRow i ) = CreateRow $ mapKey' f i
+firstPatchRow f (PatchRow i ) = PatchRow $ firstPatch f i
 
 firstPatch :: (Ord a ,Ord k , Ord (Index a), Ord j ) => (k -> j ) -> TBIdx k a -> TBIdx j a
 firstPatch f (i,j,k) = (fmap f i , j ,fmap (firstPatchAttr f) k)
@@ -395,8 +407,8 @@ instance (NFData k ,NFData a ) => NFData (TB Identity k a) where
 
 applyGiSTChange
   ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => G.GiST (G.TBIndex  a ) (TBData k a) -> RowPatch k (Index a) -> Maybe (G.GiST (G.TBIndex  a ) (TBData k a))
-applyGiSTChange l patom@(m,i, []) = Just $ G.delete (create <$> G.notOptional i) (3,6)  l
-applyGiSTChange l patom@(m,ipa, p) =  case G.lookup (G.notOptional i) l  of
+applyGiSTChange l (PatchRow patom@(m,i, [])) = Just $ G.delete (create <$> G.notOptional i) (3,6)  l
+applyGiSTChange l (PatchRow patom@(m,ipa, p)) =  case G.lookup (G.notOptional i) l  of
                   Just v -> do
                           el <-  force $ applyIfChange v patom
                           let pkel = G.getIndex el
@@ -408,24 +420,13 @@ applyGiSTChange l patom@(m,ipa, p) =  case G.lookup (G.notOptional i) l  of
                    in (\eli -> G.insert (eli,G.tbpred  eli) (3,6)  l) <$> el
    where
          i = fmap create  ipa
+applyGiSTChange l (CreateRow elp ) =  case G.lookup i l  of
+                  Just v ->  Just $ G.insert (el,G.tbpred  el) (3,6) . G.delete i  (3,6) $ l
+                  Nothing -> Just $ G.insert (el,G.tbpred  el) (3,6)  l
+   where
+     el = fmap (fmap create) elp
+     i = G.notOptional $ G.getIndex el
 
-{-
-applyGiST
-  ::  (G.Predicates (G.TBIndex   a) , PatchConstr k a)  => G.GiST (G.TBIndex  a ) (TBData k a) -> RowPatch k (Index a) -> G.GiST (G.TBIndex  a ) (TBData k a)
-applyGiST l patom@(m,i, []) = G.delete (create <$> G.notOptional i) (3,6)  l
-applyGiST l patom@(m,ipa, p) =  case G.lookup (G.notOptional i) l  of
-                  Just v ->  let
-                           el = apply v patom
-                           pkel = G.tbpred el
-                        in if  pkel == i
-                              then G.update (G.notOptional i) (flip apply patom) l
-                              else G.insert (el,G.tbpred  el) (3,6) . G.delete (G.notOptional i)  (3,6) $ l
-                  Nothing -> let
-                      el = create  patom
-                      in G.insert (el,G.tbpred  el) (3,6)  l
-    where
-          i = fmap create  ipa
--}
 patchTB1 :: PatchConstr k a => TBData k  a -> TBIdx k  (Index a)
 patchTB1 (m, k)  = (m  ,fmap patch $G.getIndex (m,k) ,  F.toList $ patchAttr  . unTB <$> (unKV k))
 

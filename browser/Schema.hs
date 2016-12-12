@@ -399,16 +399,19 @@ logLoadTimeTable inf table pred mode action = do
 
 
 logTableModification
-  :: (B.Binary a ,Ord a, Ord (Index a)) =>
+  :: (B.Binary a ,Ord a,Patch a,Show a, Ord (Index a),a ~Index a) =>
      InformationSchema
-     -> TableModification (TBIdx Key a)  -> IO (TableModification (TBIdx Key a))
-logTableModification inf (TableModification Nothing table i) = do
+     -> TableModification (RowPatch Key a)  -> IO (TableModification (RowPatch Key a))
+logTableModification inf (TableModification Nothing table ip) = do
+  let i = case ip of
+            PatchRow i -> i
+            CreateRow i -> patch i
   time <- getCurrentTime
 
   let ltime =  utcToLocalTime utc $ time
       (meta,G.Idex pidx,pdata) = firstPatch keyValue  i
   [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (\"user\",modification_time,\"table\",data_index2,modification_data  ,\"schema\") VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (fst $ username inf ,ltime,_tableUnique table, V.fromList <$> nonEmpty (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) (zip (_kvpk meta) (F.toList pidx)) )) , fmap (Binary  . B.encode ) . V.fromList <$> nonEmpty pdata , schemaId inf)
-  return (TableModification (Just id) table i )
+  return (TableModification (Just id) table ip )
 
 lookDesc
   :: InformationSchemaKV Key Showable
@@ -464,7 +467,7 @@ atTable k = do
 joinRelT ::  [(Rel Key, FTB Showable)] -> Table ->  G.GiST (G.TBIndex Showable) (TBData Key Showable) -> TransactionM ( FTB (TBData Key Showable))
 joinRelT ref tb table  = do
   let out = joinRel (tableMeta tb) ref table
-  traverse (\i -> tell [TableModification Nothing tb . patch $ i]) out
+  traverse (\i -> tell [TableModification Nothing tb . CreateRow $ i]) out
   return out
   {-joinRelT rel ref tb table
   | L.any (isOptional .keyType) origin = fmap LeftTB1 $ traverse (\ref->  joinRelT (Le.over relOri unKOptional <$> rel ) ref  tb table) (traverse unLeftItens ref )
@@ -492,7 +495,7 @@ addStats schema = do
     var <- refTable schema (m)
     let event = R.filterJust $ lookdiff <$> R.facts (collectionTid dbpol ) R.<@> (flip (lrow (_tableUnique $ (m))) <$>  R.facts (idxTid var ) R.<@> R.rumors (collectionTid  var ) )
     R.onEventIO event (\i -> do
-      putPatch (patchVar $ iniRef dbpol) . pure  $ i
+      putPatch (patchVar $ iniRef dbpol) . pure  .PatchRow $ i
       )) (M.toList  varmap)
   return  schema
 

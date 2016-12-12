@@ -128,7 +128,7 @@ patchRoute l = do
   inf <- ask
   mapM (\p@(t,i,l) -> do
     ref <- liftIO$ prerefTable inf (lookTable inf (_kvname t))
-    putPatch (patchVar ref) [p]) l
+    putPatch (patchVar ref) [PatchRow p]) l
 
 
 
@@ -201,7 +201,7 @@ deleteRow pk
         return v
     liftIO $print decoded
     let p = if BS.null decoded  then
-              Just $ TableModification Nothing table  (fst pk , G.getIndex pk, [])
+              Just $ TableModification Nothing table  (PatchRow (fst pk , G.getIndex pk, []))
             else Nothing
     tell (maybeToList p)
     return p
@@ -225,7 +225,7 @@ insertTable pk
         print ("insert",getPK (TB1 pk),t)
         return $ decode $ v
     liftIO $ print decoded
-    fmap (TableModification Nothing table . patch . mergeTB1 pk ) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table) .  fmap (\i -> (i :: Value)  ) $  decoded)
+    fmap (TableModification Nothing table .PatchRow. patch . mergeTB1 pk ) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table) .  fmap (\i -> (i :: Value)  ) $  decoded)
 
 lookOrigin  k (i,m) = unTB $ err $  find (( k == ). S.fromList . fmap _relOrigin. keyattr ) (F.toList $  unKV m)
     where
@@ -362,10 +362,10 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
 
                                 relMap = M.fromList $ fmap (\rel -> (_relOrigin rel ,_relTarget rel) ) rel
                                 nv  = flip mergeTB1 transrefs  <$> v
-                            tell (TableModification Nothing (lookTable infsch trefname ) . patch <$> F.toList (nv))
+                            tell (TableModification Nothing (lookTable infsch trefname ) . PatchRow . patch <$> F.toList (nv))
                             return $ FKT (kvlist [_tb . Types.Attr  k $ (lbackRef    nv) ])  rel nv
                           Nothing ->  do
-                            tell (TableModification Nothing (lookTable infsch trefname ) . patch <$> F.toList (v))
+                            tell (TableModification Nothing (lookTable infsch trefname ) .PatchRow. patch <$> F.toList (v))
                             return $ FKT (kvlist [_tb . Types.Attr  k $ (lbackRef    v) ])  fk v))
                     (traverse (\v -> do
                         let ref = [_tb $ Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd <$> maybeToList (tableNonRef' <$> getref))
@@ -381,7 +381,7 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
                                         [i] -> unTB1 (_fkttable (unTB i))
 
                             pti <- joinGetDiffTable (lookMTable infsch (fst scoped)) treftable scoped reftb
-                            tell (TableModification Nothing treftable <$> maybeToList pti)
+                            tell (TableModification Nothing treftable .PatchRow<$> maybeToList pti)
                             return $ maybe (reftb) (apply reftb  ) pti) reftbT ) getref) return (reftb)
                         return $ FKT (kvlist (filter (not .(`S.member` acc). _tbattrkey.unTB )ref) ) rel patch ))
                funL = funO  True (exchange trefname $ keyType k) vk

@@ -117,7 +117,7 @@ keyMap = _keyMapL
 pkMap = _pkMapL
 
 data DBRef k v =
-  DBRef  { patchVar :: TChan [TBIdx k v]
+  DBRef  { patchVar :: TChan [RowPatch k v]
          , idxVar :: TVar (Map (WherePredicateK k) (Int,Map Int (PageTokenF  v)))
          , idxChan :: TChan ((WherePredicateK k) , Int,Int ,PageTokenF  v)
          , collectionState  :: TVar (TableIndex k v)
@@ -189,7 +189,7 @@ dynP ~(P s d) = d
 dynPK =  runKleisli . dynP
 
 
-type TransactionM = RWST InformationSchema [TableModification (TBIdx Key Showable)] (Map (Table,WherePredicate) (TableIndex KeyUnique Showable)) R.Dynamic
+type TransactionM = RWST InformationSchema [TableModification (RowPatch Key Showable)] (Map (Table,WherePredicate) (TableIndex KeyUnique Showable)) R.Dynamic
 
 type PageToken = PageTokenF Showable
 
@@ -206,16 +206,16 @@ data PageTokenF v
 
 data SchemaEditor
   = SchemaEditor
-  { editEd  :: TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
-  , patchEd :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
-  , insertEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
-  , deleteEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+  { editEd  :: TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+  , patchEd :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+  , insertEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+  , deleteEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , listEd :: TBF (Labeled Text) Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   , getEd :: Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   , typeTransform :: PGKey -> CoreKey
   , joinListEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   , joinSyncEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )] -> [(Text ,Column Key Showable)]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
-  ,logger :: MonadIO m => InformationSchema -> TableModification (TBIdx Key Showable)  -> m (TableModification (TBIdx Key Showable))
+  ,logger :: MonadIO m => InformationSchema -> TableModification (RowPatch Key Showable)  -> m (TableModification (RowPatch Key Showable))
   , opsPageSize :: Int
   , historySync :: Maybe (TransactionM ())
   }
@@ -245,7 +245,7 @@ lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpac
 lookKeyM :: InformationSchema -> Text -> Text -> Maybe Key
 lookKeyM inf t k =  HM.lookup (t,k) (keyMap inf)
 
-putPatch m = liftIO .atomically . writeTChan m . force. fmap (firstPatch keyFastUnique)
+putPatch m = liftIO .atomically . writeTChan m . force. fmap (firstPatchRow keyFastUnique)
 putIdx m = liftIO .atomically . writeTChan m . force
 
 
@@ -294,6 +294,9 @@ liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf 
           ta = lookTable inf tname
           rinf = fromMaybe inf (HM.lookup schname (depschema inf))
 
+
+fixPatchRow inf t (PatchRow i) = PatchRow $ fixPatch inf  t i
+fixPatchRow inf t (CreateRow i) =  CreateRow i
 
 fixPatch ::  a ~ Index a => InformationSchema -> Text -> TBIdx Key a  -> TBIdx Key a
 fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)

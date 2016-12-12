@@ -103,7 +103,7 @@ addServer inf =  do
 
 idexToPred t (G.Idex  i) = head $ (\(k,a)-> (keyRef [k],Left (a,Contains))) <$>  zip (rawPK t) (F.toList i)
 
-deleteServer inf (TableModification _ _ o@(a,ref,c)) = do
+deleteServer inf (TableModification _ _ (PatchRow o@(a,ref,c))) = do
   now <- liftIO $ getCurrentTime
   (_,(_,tb)) <- transactionNoLog inf $ selectFrom "client_login"  Nothing Nothing [] (WherePredicate (AndColl [PrimColl (keyRef [(lookKey inf "client_login" "up_time") ],Left ((TB1 (STimestamp (utcToLocalTime utc now))),Contains))]))
   let
@@ -171,7 +171,7 @@ getClient metainf clientId inf ccli = G.lookup (idex metainf "clients"  [("clien
 
 deleteClient metainf clientId = do
   dbmeta  <-  prerefTable metainf (lookTable metainf "clients")
-  putPatch (patchVar dbmeta) [(tableMeta (lookTable metainf "clients") , idex metainf "clients" [("clientid",num clientId)],[])]
+  putPatch (patchVar dbmeta) [PatchRow (tableMeta (lookTable metainf "clients") , idex metainf "clients" [("clientid",num clientId)],[])]
 
 editClient metainf inf dbmeta ccli  table tdi clientId now ix
   | fmap tableName table == Just "client" && schemaName inf == "metadata" = return ()
@@ -182,7 +182,7 @@ editClient metainf inf dbmeta ccli  table tdi clientId now ix
     let
         lrow :: Maybe (Index (TBData Key Showable))
         lrow = maybe (Just $ patch new ) (flip diff new )  cli
-    traverse (putPatch (patchVar $ iniRef $ dbmeta ) . pure ) lrow
+    traverse (putPatch (patchVar $ iniRef $ dbmeta ) . pure .PatchRow) lrow
     return ()
 
 addClient clientId metainf inf table row =  do
@@ -191,7 +191,7 @@ addClient clientId metainf inf table row =  do
       tdi = fmap (M.toList .getPKM) $ join $ (\ t -> fmap (tblist' t ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName t))  ). F.toList) <$>  table <*> row
     new <- updateClient metainf inf table tdi clientId now
     dbmeta  <- prerefTable metainf (lookTable metainf "clients")
-    putPatch (patchVar $dbmeta ) [patch new]
+    putPatch (patchVar $dbmeta ) [PatchRow $patch new]
     (_,_,clientState,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl (keyRef [ (lookKey (meta inf) "clients" "clientid")] , Left (num clientId,Equals))]))
     return (clientId, getClient metainf clientId inf <$> clientState)
 
@@ -220,11 +220,11 @@ chooserTable inf bset cliTid cli = do
       let cpatch = liftPatch (meta inf) "clients" $ addTable  (wId i) now table ix
           dpatch now = liftPatch (meta inf) "clients" $ removeTable (wId i) now table ix
       liftIO $ print cpatch
-      putPatch (patchVar ref) [cpatch]
+      putPatch (patchVar ref) [PatchRow cpatch]
       registerDynamic(do
         now <- getCurrentTime
         print $ dpatch now
-        putPatch (patchVar ref) [dpatch now])
+        putPatch (patchVar ref) [PatchRow $ dpatch now])
 
 
     body <-  do
@@ -314,12 +314,12 @@ viewerKey inf table tix cli layoutS cliTid = mdo
     now <- liftIO$ getCurrentTime
     let p =liftPatch (meta inf) "clients" $ addRow  (wId w) now  (M.toList sel ) tix ix
     liftIO$ print p
-    putPatch (patchVar dbmeta) [p]
+    putPatch (patchVar dbmeta) [PatchRow p]
     ui$registerDynamic (do
       now <- liftIO$ getCurrentTime
       let d =liftPatch (meta inf) "clients" $ removeRow (wId w) now  tix ix
       print d
-      putPatch (patchVar dbmeta) [d]
+      putPatch (patchVar dbmeta) [PatchRow d]
           )
         )v)
 

@@ -5,6 +5,7 @@ import TP.Browser(addServer,deleteServer,deleteClient,addClientLogin,deleteClien
 import Rmtc
 import Data.Unique
 import Types
+import Types.Patch (RowPatch(..))
 import qualified Types.Index as G
 import qualified Data.Foldable as F
 import TP.QueryWidgets(lookAttr')
@@ -57,7 +58,7 @@ main = do
   print "Load GUI Server"
   let
     initGUI = do
-      Just (TableModification _ _ (_,G.Idex c,_)) <- addClientLogin metas
+      Just (TableModification _ _ (PatchRow (_,G.Idex c,_))) <- addClientLogin metas
       let [(SerialTB1 (Just (TB1 (SNumeric i))))] = F.toList c
       return i
     finalizeGUI w = void $ closeDynamic $ do

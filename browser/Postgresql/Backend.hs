@@ -170,18 +170,18 @@ paginate inf t order off size koldpre wherepred = do
 -- High level db operations
 
 
-insertMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+insertMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
 insertMod j  = do
   inf <- ask
   liftIO $ do
     let
       table = lookTable inf (_kvname (fst  j))
     kvn <- insertPatch (fmap (mapKey' (recoverFields inf)) . fromRecord . (mapKey' (typeTrans inf))) (conn  inf) (patch $ mapKey' (recoverFields inf) j) (mapTableK (recoverFields inf ) table)
-    let mod =  TableModification Nothing table (firstPatch (typeTrans inf) $ kvn)
+    let mod =  TableModification Nothing table (PatchRow $ firstPatch (typeTrans inf) $ kvn)
     return $ Just  mod
 
 
-deleteMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+deleteMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
 deleteMod j@(meta,_) = do
   inf <- ask
   log <- liftIO $  do
@@ -189,26 +189,26 @@ deleteMod j@(meta,_) = do
       patch =  (tableMeta table, G.getIndex  j,[])
       table = lookTable inf (_kvname (fst  j))
     deletePatch (conn inf)  (firstPatch (recoverFields inf) patch) table
-    return (TableModification Nothing table  patch)
+    return (TableModification Nothing table  $ PatchRow patch)
   tell  (maybeToList $ Just log)
   return $ Just log
 
-updateMod :: TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+updateMod :: TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
 updateMod kv old = do
   inf <- ask
   liftIO$ do
     let table = lookTable inf (_kvname (fst  old ))
     patch <- updatePatch (conn  inf) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table
-    let mod =  TableModification Nothing table (firstPatch (typeTrans inf) patch)
+    let mod =  TableModification Nothing table ( PatchRow $ firstPatch (typeTrans inf) patch)
     return $ Just mod
 
-patchMod :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (TBIdx Key Showable)))
+patchMod :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
 patchMod patch@(m,_,_) = do
   inf <- ask
   liftIO $ do
     let table = lookTable inf (_kvname m )
     patch <- applyPatch (conn  inf) (firstPatch (recoverFields inf ) patch )
-    let mod =  TableModification Nothing table (firstPatch (typeTrans inf) patch)
+    let mod =  TableModification Nothing table (PatchRow $ firstPatch (typeTrans inf) patch)
     -- Just <$> logTableModification inf mod
     return (Just mod)
 
@@ -243,7 +243,7 @@ tellRefs  (m,k) = do
     inf <- ask
     let
         tellRefsAttr (FKT l k t) = void $ do
-            tell ((\m@(k,v) -> TableModification Nothing (lookTable inf (_kvname k)) . patch $ m) <$> F.toList t)
+            tell ((\m@(k,v) -> TableModification Nothing (lookTable inf (_kvname k)) . CreateRow $ m) <$> F.toList t)
             mapM_ (tellRefs ) $ F.toList t
         tellRefsAttr (Attr _ _ ) = return ()
         tellRefsAttr (Fun _ _ _ ) = return ()

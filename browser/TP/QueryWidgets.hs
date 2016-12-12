@@ -101,7 +101,7 @@ type SelPKConstraint = [([Column CoreKey ()],Tidings PKConstraint)]
 
 type SelTBConstraint = [([Column CoreKey ()],Tidings TBConstraint)]
 
-type RefTables = (Tidings (Collection CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)), TChan [TBIdx KeyUnique Showable] )
+type RefTables = (Tidings (Collection CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)), TChan [RowPatch KeyUnique Showable] )
 
 --- Plugins Interface Methods
 createFresh :: Text -> InformationSchema -> Text -> KType CorePrim -> IO InformationSchema
@@ -538,8 +538,8 @@ crudUITableDiff inf open reftb@(bres , _ ,gist ,tref) refs pmods ftb@(m,_)  preo
           loadedItens <-  ui $ join <$> traverse (transactionNoLog inf  . getItem) preoldItens
           (loadedItensEv ) <- mapUIFinalizerT sub (ui . fmap join <$> traverse (\i ->  do
             p <-  transactionNoLog inf . getItem $ i
-            putPatch tref (maybeToList p)
-            return p  )) (preoldItems)
+            putPatch tref (fmap PatchRow $ maybeToList p)
+            return (fmap PatchRow p  ))) (preoldItems)
           let
               deleteCurrentUn un e l =   maybe l (\v -> G.delete v (3,6) l) $  G.getUnique un <$> e
               tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ snd $ tbPK ftb , (_kvpk m, ( fmap snd bres)))
@@ -597,8 +597,8 @@ crudUITable inf open reftb@(bres , _ ,gist ,tref) refs pmods ftb@(m,_)  preoldIt
           loadedItens <-  ui $ join <$> traverse (transactionNoLog inf  . getItem) preoldItens
           (loadedItensEv ) <- mapUIFinalizerT sub (ui . fmap join <$> traverse (\i ->  do
             p <-  transactionNoLog inf . getItem $ i
-            putPatch tref (maybeToList p)
-            return p  )) (preoldItems)
+            putPatch tref (fmap PatchRow $ maybeToList p)
+            return (fmap PatchRow p  ) )) (preoldItems)
           let
               deleteCurrentUn un e l =   maybe l (\v -> G.delete v (3,6) l) $  G.getUnique un <$> e
               tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ snd $ tbPK ftb , (_kvpk m, ( fmap snd bres)))
@@ -642,7 +642,7 @@ processPanelTable
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> Table
    -> Tidings (Maybe (TBData CoreKey Showable))
-   -> UI (Element, Event (TBIdx CoreKey Showable) )
+   -> UI (Element, Event (RowPatch CoreKey Showable) )
 processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
   let
       containsGist ref map = if isJust refM then not $ L.null (lookGist ix ref map) else False
@@ -687,13 +687,13 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
   let
        filterKey enabled k = const () <$> filterApply (const <$> enabled) (k )
        crudMerge (Just i) g =
-          fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf ( do
+          fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf ( do
             let confl = conflictGist i g
             mapM deleteFrom confl
             fullDiffInsert  i)
-       crudEdi (Just i) (Just j) =  fmap (\g -> fmap (fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEditInsert  i j
-       crudIns (Just j)   =  fmap (tableDiff . fmap ( fixPatch inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
-       crudDel (Just j)  = fmap (tableDiff . fmap ( fixPatch inf (tableName table)))<$> transaction inf (deleteFrom j)
+       crudEdi (Just i) (Just j) =  fmap (\g -> fmap (PatchRow . fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEditInsert  i j
+       crudIns (Just j)   =  fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
+       crudDel (Just j)  = fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)))<$> transaction inf (deleteFrom j)
 
   altU <- onAltU lbox
   altI <- onAltI lbox

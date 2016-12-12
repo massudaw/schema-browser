@@ -33,6 +33,7 @@ import Control.Arrow (first)
 import Control.DeepSeq
 import Step.Host
 import Expression
+import Types.Index (checkPred)
 import Control.Concurrent
 import Control.Monad.Catch
 
@@ -407,7 +408,7 @@ pageTable flag method table page size presort fixed = do
                    index = (estLength page pagesize (s + G.size freso) , maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token $ mp)
                liftIO$ do
                  putIdx (idxChan dbvar ) (fixedU {-justError"no pred" diffpred-},estLength page pagesize s, pageidx ,fromMaybe HeadToken token)
-                 putPatch (patchVar dbvar) (F.toList $ patch  <$> filter (\i -> isNothing $ G.lookup (G.getIndex i) reso  )   resK)
+                 putPatch (patchVar dbvar) (F.toList $ CreateRow <$> filter (\i -> isNothing $ G.lookup (G.getIndex i) reso  )   resK)
                return  (index,res <> G.toList freso)
              else do
 
@@ -440,15 +441,21 @@ readState
       G.Predicates (TBIndex v), Patch v, Index v ~ v) =>
       (TBPredicate k Showable, [k ])
      -> DBRef k v
-     -> STM (TableIndex k v, TChan [TBIdx k v], TVar (TableIndex k v))
+     -> STM (TableIndex k v, TChan [RowPatch k v], TVar (TableIndex k v))
 readState fixed dbvar = do
   var <-readTVar (collectionState dbvar)
   chan <- cloneTChan (patchVar dbvar)
   patches <- takeMany' chan
   let
-      filterPred = nonEmpty . filter (\d@(_,p,_) -> splitMatch fixed p && indexFilterP (fst fixed) d )
+      filterPred = nonEmpty . filter (\d -> splitMatch fixed (indexPK d) && indexFilterR (fst fixed) d )
       update = F.foldl' (flip (\p-> (flip apply p)))
   return (update var (concat patches),chan,collectionState dbvar)
+
+indexPK (CreateRow i) = G.getIndex i
+indexPK (PatchRow (_,i,_) ) = i
+
+indexFilterR j (CreateRow i) = checkPred i j
+indexFilterR j (PatchRow i) = indexFilterP j i
 
 convertChanStepper0
   :: (Ord k1, Ord k2, Show k1, Show t, Show k2, Show a) =>
@@ -480,13 +487,13 @@ convertChanStepper table dbvar = do
 
 convertChanEvent
   :: (Ord k, Show k) =>
-     TableK k1
+     TableK k
      -> (TBPredicate k Showable, [k])
      -> Behavior (G.GiST (TBIndex Showable) a)
      -> TVar (G.GiST (TBIndex Showable) (TBData k Showable))
-     -> TChan [(KVMetadata k, TBIndex Showable, [PathAttr k Showable])]
+     -> TChan [RowPatch k Showable ]
      -> Dynamic
-          (Event [(KVMetadata k, TBIndex Showable, [PathAttr k Showable])])
+          (Event [RowPatch k Showable])
 convertChanEvent table fixed bres inivar chan = do
   (e,h) <- newEvent
   t <- liftIO $ forkIO $ forever $ catchJust notException (do
@@ -494,10 +501,10 @@ convertChanEvent table fixed bres inivar chan = do
     v <- currentValue bres
     let
         m = concat ml
-        newRows =  filter (\d@(_,p,_) -> splitMatch fixed p && indexFilterP (fst fixed) d && isNothing (G.lookup p v) ) m
-        filterPred = nonEmpty . filter (\d@(_,p,_) -> splitMatch fixed p && indexFilterP (fst fixed) d )
-        lookNew  (_,p,_) = fmap patch $ G.lookup p oldM
-        filterPredNot j = nonEmpty . catMaybes . map (\d@(m,p,_) -> if isJust ( G.lookup p j) && not (splitMatch fixed p && indexFilterP (fst fixed) d ) then Just (m,p,[]) else Nothing )
+        newRows =  filter (\d -> splitMatch fixed (indexPK d) && indexFilterR (fst fixed) d && isNothing (G.lookup (indexPK d) v) ) m
+        filterPred = nonEmpty . filter (\d -> splitMatch fixed (indexPK d) && indexFilterR (fst fixed) d )
+        lookNew  d = fmap CreateRow $ G.lookup (indexPK d) oldM
+        filterPredNot j = nonEmpty . catMaybes . map (\d -> if isJust ( G.lookup (indexPK d) j) && not (splitMatch fixed (indexPK d) && indexFilterR (fst fixed) d ) then Just (PatchRow (tableMeta table ,indexPK d,[])) else Nothing )
         newpatches = lookNew <$> newRows
         oldRows =  filterPredNot v m
         patches =  nonEmpty ( catMaybes newpatches )<> oldRows <> filterPred m
@@ -529,7 +536,7 @@ convertChanTidings0
      -> G.GiST (TBIndex Showable) (TBData k Showable)
      -> TVar (G.GiST (TBIndex Showable) (TBData k Showable))
      -> TChan
-          [(KVMetadata k , TBIndex Showable, [PathAttr k Showable])]
+          [RowPatch k Showable ]
           -> Dynamic (Tidings (G.GiST (TBIndex Showable) (TBData k Showable)))
 convertChanTidings0 table fixed ini iniVar nchan = mdo
     evdiff <-  convertChanEvent table fixed bres iniVar nchan
@@ -559,6 +566,8 @@ takeMany mvar = go . (:[]) =<< readTChan mvar
 
 
 
+createRow (CreateRow i) = i
+createRow (PatchRow i) = create i
 
 
 fullInsert = Tra.traverse fullInsert'
@@ -574,11 +583,11 @@ fullInsert' ((k1,v1) )  = do
       then catchAll (do
         i@(Just (TableModification _ _ tb))  <- insertFrom  ret
         tell (maybeToList i)
-        return $ create tb) (\e -> return ret)
+        return $ createRow tb) (\e -> return ret)
       else do
         return ret
 
-tellPatches :: [TableModification (TBIdx Key Showable)] -> TransactionM ()
+tellPatches :: [TableModification (RowPatch Key Showable)] -> TransactionM ()
 tellPatches = tell
 
 noInsert = Tra.traverse (noInsert' )
@@ -588,7 +597,7 @@ noInsert' (k1,v1)   = do
    let proj = _kvvalues . unTB
    (k1,) . _tb . KV <$>  Tra.sequence (fmap (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1))
 
-transactionLog :: InformationSchema -> TransactionM a -> Dynamic [TableModification (TBIdx Key Showable)]
+transactionLog :: InformationSchema -> TransactionM a -> Dynamic [TableModification (RowPatch Key Showable)]
 transactionLog inf log = do -- withTransaction (conn inf) $ do
   (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [TableModification id t f] m) M.empty mods
@@ -645,7 +654,7 @@ fullDiffEdit old@((k1,v1) ) (k2,v2) = do
       tell (maybeToList mod)
    return edn
 
-fullDiffInsert :: TBData Key Showable -> TransactionM  (Maybe (TableModification (TBIdx Key Showable)))
+fullDiffInsert :: TBData Key Showable -> TransactionM  (Maybe (TableModification (RowPatch Key Showable)))
 fullDiffInsert (k2,v2) = do
    inf <- ask
    let proj = _kvvalues . unTB
