@@ -455,8 +455,12 @@ atTable k = do
   k <- liftIO$ dbTable (mvarMap i) k
   liftIO $ atomically $ readTVar (collectionState k)
 
-joinRelT ::  [Rel Key] -> [Column Key Showable] -> Table ->  G.GiST (G.TBIndex Showable) (TBData Key Showable) -> TransactionM ( FTB (TBData Key Showable))
-joinRelT rel ref tb table
+joinRelT ::  [(Rel Key, FTB Showable)] -> Table ->  G.GiST (G.TBIndex Showable) (TBData Key Showable) -> TransactionM ( FTB (TBData Key Showable))
+joinRelT ref tb table  = do
+  let out = joinRel (tableMeta tb) ref table
+  traverse (\i -> tell [TableModification Nothing tb . patch $ i]) out
+  return out
+  {-joinRelT rel ref tb table
   | L.any (isOptional .keyType) origin = fmap LeftTB1 $ traverse (\ref->  joinRelT (Le.over relOri unKOptional <$> rel ) ref  tb table) (traverse unLeftItens ref )
   | L.any (isArray.keyType) origin = fmap (ArrayTB1 .Non.fromList)$ traverse (\ref -> joinRelT (Le.over relOri unKArray <$> rel ) ref  tb table ) $ (fmap (\i -> (justError ("cant index  " <> show (i,ref)). join . fmap (unIndex i) $ (L.find isTBArray ref )) : (filter (not .isTBArray) ref))) [0..(Non.length (unArray $ unAttr $ justError ("no array" <> show ref)  $L.find isTBArray ref) - 1)]
   | otherwise = maybe (tell (TableModification Nothing tb . patch <$> F.toList tbcreate) >> return tbcreate ) (return .TB1) tbel
@@ -467,7 +471,7 @@ joinRelT rel ref tb table
             tbel = searchGist  invrelMap (tableMeta tb) table (Just ref)
             isTBArray i = isKArray (keyType $ _tbattrkey i)
             isKArray (KArray i) = True
-            isKArray i = False
+            isKArray i = False-}
 
 addStats schema = do
   let metaschema = meta schema
