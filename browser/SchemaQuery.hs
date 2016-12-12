@@ -98,9 +98,9 @@ refTable :: InformationSchema -> Table -> Dynamic DBVar
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
   let ref = justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
-  idxTds<- convertChanStepper  table ref
-  dbTds <- convertChanTidings (mapTableK keyFastUnique table) mempty  ref
-  return (DBVar2 ref (M.mapKeys (mapPredicate (recoverKey inf))<$>idxTds)  (fmap (mapKey' (recoverKey inf))<$> dbTds))
+  idxTds<- convertChanStepper  inf (mapTableK keyFastUnique table) ref
+  dbTds <- convertChanTidings inf (mapTableK keyFastUnique table) mempty  ref
+  return (DBVar2 ref idxTds  dbTds)
 
 tbpredM un  = G.notOptional . G.getUnique un
 
@@ -419,9 +419,9 @@ pageTable flag method table page size presort fixed = do
        return (nidx fixedmap, if L.length ndata > 0 then createUn (rawPK tableU)  ndata <> freso else  freso )
     let iniFil = iniT
     modify (M.insert (table,fixed) ( snd $iniT))
-    vpt <- lift $ convertChanTidings0 tableU (fixedU ,rawPK tableU) (snd iniFil) iniVar nchan
-    idxTds <- lift $ convertChanStepper0 (tableU) fixedmap fixedChan
-    return (DBVar2 dbvar (M.mapKeys (mapPredicate (recoverKey inf)) <$> idxTds) (fmap (mapKey' (recoverKey inf))<$> vpt) ,first (M.mapKeys (mapPredicate (recoverKey inf))).fmap (fmap (mapKey' (recoverKey inf)) )$iniFil)
+    vpt <- lift $ convertChanTidings0 inf tableU (fixedU ,rawPK tableU) (snd iniFil) iniVar nchan
+    idxTds <- lift $ convertChanStepper0 inf (tableU) fixedmap fixedChan
+    return (DBVar2 dbvar idxTds vpt ,first (M.mapKeys (mapPredicate (recoverKey inf))).fmap (fmap (mapKey' (recoverKey inf)) )$iniFil)
 
 readIndex
   :: (Ord k )
@@ -458,32 +458,32 @@ indexFilterR j (CreateRow i) = checkPred i j
 indexFilterR j (PatchRow i) = indexFilterP j i
 
 convertChanStepper0
-  :: (Ord k1, Ord k2, Show k1, Show t, Show k2, Show a) =>
-         TableK k
-              -> M.Map k1 (t, M.Map k2 a)
-     -> TChan (k1, t, k2, a)
+  :: (Show v) =>
+    InformationSchema -> TableK KeyUnique
+    -> (M.Map (WherePredicateK KeyUnique) (Int, M.Map Int (PageTokenF v)))
+    -> TChan (WherePredicateK KeyUnique,Int,Int,PageTokenF v)
      -> Dynamic
-          (Tidings (M.Map k1 (t, M.Map k2 a)))
-convertChanStepper0  table ini nchan = do
+          (Tidings (M.Map (WherePredicateK Key) (Int, M.Map Int (PageTokenF v))))
+convertChanStepper0  inf table ini nchan = do
         (e,h) <- newEvent
         t <- liftIO $ forkIO  $ forever $catchJust notException ( do
             a <- atomically $ takeMany nchan
             h a ) (\e -> atomically ( takeMany nchan ) >>= (\d ->  appendFile ("errors/data-" <> T.unpack ( tableName table )) $ show (e :: SomeException,d)<>"\n"))
-        let conv (v,s,i,t) = (M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) v)
-        bh <- accumB ini ((\l i-> F.foldl' (flip conv) i l)<$> e)
+        let conv (v,s,i,t) = (M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) (mapPredicate (recoverKey inf) v) )
+        bh <- accumB (M.mapKeys (mapPredicate (recoverKey inf))ini) ((\l i-> F.foldl' (flip conv) i l)<$> e)
         registerDynamic (killThread t)
         return (tidings bh ((\i l-> F.foldl' (flip conv) i l)<$> bh<@> e))
 
 convertChanStepper
-  :: (Ord k,Show k,Show v) =>
-     TableK k1
-     -> DBRef k v
+  :: (Show v) =>
+    InformationSchema -> TableK KeyUnique
+     -> DBRef KeyUnique v
      -> Dynamic
-          (Tidings (M.Map (WherePredicateK k) (Int, M.Map Int (PageTokenF v))))
-convertChanStepper table dbvar = do
+          (Tidings (M.Map (WherePredicateK Key) (Int, M.Map Int (PageTokenF v))))
+convertChanStepper inf table dbvar = do
         (ini,nchan) <- liftIO $atomically $
           readIndex dbvar
-        convertChanStepper0 table ini nchan
+        convertChanStepper0 inf table ini nchan
 
 convertChanEvent
   :: (Ord k, Show k) =>
@@ -515,34 +515,34 @@ convertChanEvent table fixed bres inivar chan = do
   return e
 
 convertChanTidings
-  :: (Show k,Ord k ,NFData k)
-  => TableK k
-  -> (TBPredicate k Showable, [k ])
-     -> DBRef k Showable
+ ::
+  InformationSchema -> TableK KeyUnique
+  -> (TBPredicate KeyUnique Showable, [KeyUnique ])
+     -> DBRef KeyUnique Showable
      -> Dynamic
-          (Tidings (G.GiST (TBIndex Showable) (TBData k Showable)))
-convertChanTidings table fixed dbvar = do
+          (Tidings (G.GiST (TBIndex Showable) (TBData Key Showable)))
+convertChanTidings inf table fixed dbvar = do
       (ini,nchan,inivar) <- liftIO $atomically $
         readState fixed  dbvar
-      convertChanTidings0 table fixed ini inivar nchan
+      convertChanTidings0 inf table fixed ini inivar nchan
 
 
 splitMatch (WherePredicate b,o) p = maybe True (\i -> G.match (mapPredicate (justError "no index" . flip L.elemIndex o ) $ WherePredicate i ) G.Exact p  ) (G.splitIndexPK b o)
 
 convertChanTidings0
-  :: (Show k ,NFData k,Ord k)
-     =>TableK k
-     -> (TBPredicate k Showable, [k])
-     -> G.GiST (TBIndex Showable) (TBData k Showable)
-     -> TVar (G.GiST (TBIndex Showable) (TBData k Showable))
+  ::
+  InformationSchema -> TableK KeyUnique
+     -> (TBPredicate KeyUnique Showable, [KeyUnique])
+     -> G.GiST (TBIndex Showable) (TBData KeyUnique Showable)
+     -> TVar (G.GiST (TBIndex Showable) (TBData KeyUnique Showable))
      -> TChan
-          [RowPatch k Showable ]
-          -> Dynamic (Tidings (G.GiST (TBIndex Showable) (TBData k Showable)))
-convertChanTidings0 table fixed ini iniVar nchan = mdo
+          [RowPatch KeyUnique Showable ]
+          -> Dynamic (Tidings (G.GiST (TBIndex Showable) (TBData Key Showable)))
+convertChanTidings0 inf table fixed ini iniVar nchan = mdo
     evdiff <-  convertChanEvent table fixed bres iniVar nchan
     let
-      update = F.foldl' (flip (\p-> (flip apply p)))
-    bres <- accumB ini (flip update <$> evdiff)
+      update l = F.foldl' (flip (\p-> (flip apply p) )) l . fmap (firstPatchRow (recoverKey inf))
+    bres <- accumB (mapKey' (recoverKey inf) <$>ini) (flip update <$> evdiff)
     return $tidings bres (update <$> bres <@> evdiff)
 
 takeMany' :: TChan a -> STM [a]

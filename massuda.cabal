@@ -29,9 +29,9 @@ executable threepenny-layer
   main-is:             Main.hs
 
   if flag(rebug)
-   ghc-options:         -O -threaded -rtsopts -fprof-auto -fprof-auto-calls 
+   ghc-options:         -O -threaded -rtsopts -fprof-auto -fprof-auto-calls  -dynamic
   else
-   ghc-options:         -O2 -threaded -rtsopts 
+   ghc-options:         -O2 -threaded -rtsopts  -dynamic
 
   OTHER-MODules:
     CnpjReceita
