@@ -152,13 +152,6 @@ chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
     return  (legendStyle , dashes )
 
 
-onFFI ff handler = do
-    (e,h) <- ui $ newEvent
-    obj <- ffiExport (void $ (runDynamic $ handler) >>= h . snd )
-    runFunction $ ffi ff obj
-    onEvent e (ui . registerDynamic . sequence_)
-
-
 
 type DateChange = (String, Either (Interval UTCTime) UTCTime)
 

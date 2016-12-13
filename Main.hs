@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts,OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables,FlexibleContexts,OverloadedStrings #-}
 module Main (main) where
 import TP.Main
 import TP.Browser(addServer,deleteServer,deleteClient,addClientLogin,deleteClientLogin)
@@ -11,7 +11,6 @@ import qualified Data.Foldable as F
 import TP.QueryWidgets(lookAttr')
 import System.Process (rawSystem)
 import Poller
-import Plugins
 import Postgresql.Backend (connRoot)
 import Prelude hiding (head)
 import Control.Monad.Reader
@@ -19,6 +18,7 @@ import Control.Concurrent
 import System.Environment
 import Utils
 import Schema
+import Plugins
 
 import RuntimeTypes
 import Reactive.Threepenny
@@ -42,6 +42,8 @@ main = do
     db = argsToState args
     amap = authMap smvar db (user db , pass db )
 
+
+  print "Dyn Load Plugins"
   print "Load Metadata"
   (metas ,lm)<- runDynamic $keyTablesInit  smvar ("metadata", T.pack $ user db) amap []
 

@@ -948,12 +948,17 @@ buildUIDiff km i  plug tdi = go i plug tdi
          (KInterval ti) -> do
             let unInterval f (IntervalTB1 i ) = f i
                 unInterval _ i = errorWithStackTrace (show i)
+                unfinp (Interval.Finite i) = Just i
+                unfinp i = Nothing
+                plugtdi i (PInter j l)
+                  | i == j  =  unfinp $ fst l
+                  | otherwise = Nothing
             composed <-  UI.div
             subcomposed <- UI.div # set UI.children [composed]
-            inf <- go ti plug (join.fmap (unInterval inf' ) <$> tdi)
+            inf <- go ti ( fmap (join . fmap (plugtdi True)) <$> plug) (join.fmap (unInterval inf' ) <$> tdi)
             lbd <- checkedWidget (maybe False id . fmap (unInterval (snd . Interval.lowerBound') ) <$> tdi)
 
-            sup <- go ti plug (join.fmap (unInterval sup')  <$> tdi)
+            sup <- go ti (fmap (join . fmap (plugtdi False ) )<$> plug) (join.fmap (unInterval sup')  <$> tdi)
             ubd <- checkedWidget (maybe False id .fmap (unInterval (snd . Interval.upperBound' ) ) <$> tdi)
             element composed # set UI.style [("display","inline-flex")] # set UI.children [getElement lbd ,getElement  inf,getElement sup,getElement ubd]
             let
@@ -1056,7 +1061,7 @@ buildPrim fm tdi i = case i of
            ini <- currentValue (facts tdi2)
            let f = (\i -> do
                 f <- pdfFrame fty  i # set UI.type_ "video/mp4"
-                mkElement "video" # set children (pure f) # set (strAttr "width" ) "320" # set (strAttr "height" ) "240" # set (strAttr "controls") ""# set (strAttr "autoplay") ""
+                mkElement "video" # set children (pure f) # set (UI.strAttr "width" ) "320" # set (UI.strAttr "height" ) "240" # set (UI.strAttr "controls") ""# set (UI.strAttr "autoplay") ""
                    ) <$> (facts tdi2)
                pdfFrame (elem,sr , call,st) pdf = mkElement (elem ) # set sr (call  pdf)
            v <- UI.div # sink  items(pure <$> f)
@@ -1080,7 +1085,8 @@ buildPrim fm tdi i = case i of
            vi <- currentValue (facts tdi)
            tdib <- ui $ stepper   vi tdie
            let tdi2 = tidings tdib tdie
-           let fty = ("iframe",strAttr "src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
+           let fty = ("iframe",UI.strAttr "src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
+
            f <- pdfFrame fty (facts tdi2) # sink0 UI.style (noneShow . isJust <$> facts tdi2)
            fd <- UI.div # set UI.style [("display","inline-flex")] # set children [i]
            res <- UI.div # set children [fd,f]
@@ -1094,13 +1100,13 @@ buildPrim fm tdi i = case i of
            tdi2 <- ui $ addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange) =<< addEvent (const Nothing <$> clearE ) tdi
            let
              fty = case mime of
-               "application/pdf" -> pdfFrame ("iframe",strAttr "src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
+               "application/pdf" -> pdfFrame ("iframe" ,UI.strAttr "src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
                "application/x-ofx" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
                "application/gpx+xml" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-               "image/jpg" -> (\i -> pdfFrame ("img",strAttr "src",maybe "" binarySrc ,[("max-height","200px")]) i # set UI.class_ "img-responsive")
-               "image/png" -> pdfFrame ("img",strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
-               "image/bmp" -> pdfFrame ("img",strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
-               "text/html" -> pdfFrame ("iframe",strAttr "srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+               "image/jpg" -> (\i -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")]) i # set UI.class_ "img-responsive")
+               "image/png" -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
+               "image/bmp" -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
+               "text/html" -> pdfFrame ("iframe" ,UI.strAttr "srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
            f <- fty (facts tdi2) # sinkDiff UI.style (noneShow. isJust <$> tdi2)
            fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]
            res <- UI.div # set children [fd,f]
@@ -1124,7 +1130,7 @@ buildPrim fm tdi i = case i of
     oneInput tdi elem = do
             let f = tdi
             v <- currentValue (facts f)
-            inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> f) # set UI.style [("width","100%")] # if [FRead] == fm then (set (strAttr "readonly") "") else id
+            inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> f) # set UI.style [("width","100%")] # if [FRead] == fm then (set (UI.strAttr "readonly") "") else id
             onCE <- UI.onChangeE inputUI
 
             let pke = unionWith const (readPrim i <$> onCE ) (rumors tdi)

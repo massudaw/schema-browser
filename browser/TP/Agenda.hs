@@ -65,6 +65,16 @@ data Mode
   deriving(Eq,Show,Ord)
 
 eventWidgetMeta inf cliZone= do
+    importUI $ fmap js
+       ["fullcalendar-3.0.1/lib/jquery-ui.min.js"
+       ,"fullcalendar-3.0.1/lib/moment.min.js"
+       ,"fullcalendar-3.0.1/fullcalendar.min.js"
+       ,"fullcalendar-scheduler-1.4.0/scheduler.min.js"
+       ,"fullcalendar-3.0.1/locale-all.js"]
+              <>  fmap css
+       ["fullcalendar-3.0.1/fullcalendar.min.css"
+       ,"fullcalendar-scheduler-1.4.0/scheduler.min.css"
+       ]
     let
       schemaPred =  [(keyRef ["schema_name"],Left (txt (schemaName inf),Equals) )]
       schemaPred2 =  [(keyRef ["schema"],Left (int (schemaId inf),Equals) )]
@@ -95,16 +105,7 @@ eventWidgetMeta inf cliZone= do
 
 eventWidget body (incrementT,resolutionT) sel inf cliZone = do
     w <-  askWindow
-    importUI $ fmap js
-       ["fullcalendar-3.0.1/lib/jquery-ui.min.js"
-       ,"fullcalendar-3.0.1/lib/moment.min.js"
-       ,"fullcalendar-3.0.1/fullcalendar.min.js"
-       ,"fullcalendar-scheduler-1.4.0/scheduler.min.js"
-       ,"fullcalendar-3.0.1/locale-all.js"]
-              <>  fmap css
-       ["fullcalendar-3.0.1/fullcalendar.min.css"
-       ,"fullcalendar-scheduler-1.4.0/scheduler.min.css"
-       ]
+
 
     dashes<- eventWidgetMeta inf cliZone
     iday <- liftIO getCurrentTime

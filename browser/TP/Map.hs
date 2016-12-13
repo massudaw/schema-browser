@@ -66,6 +66,11 @@ calendarCreate el (Just (p,ne,sw)) evs= runFunction $ ffi "createMap (%1,%2,%3,%
 idx inf c v@(m,k) = indexField ( liftAccess inf (_kvname m) (keyRef c))  v
 
 mapWidgetMeta  inf = do
+    importUI
+      [js "leaflet.js"
+      ,css "leaflet.css"
+      ,js "leaflet-svg-markers.min.js"
+      ]
     let
       schemaPred2 = [(keyRef ["schema"],Left (int (schemaId inf),Equals))]
     (_,(_,evMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred2
@@ -99,10 +104,7 @@ legendStyle dashes lookDesc table b
                   # set UI.style [("background-color",c)]]) item
 
 mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
-    importUI
-      [js "leaflet.js"
-      ,js "leaflet-svg-markers.min.js"
-      ,css "leaflet.css"]
+
 
     let
       calendarT = (\b c -> (b,c)) <$> facts incrementT <#> resolutionT
@@ -141,6 +143,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
     routeE <- UI.click route
     routeD <- UI.div
     element routeD # set children [routeT,startD,endD,route]
+
 
     element body # set children [filterInp,routeD,calendar]
     let
@@ -196,7 +199,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
         element editor  # sink children (facts els)
         return ()
     let calInp = (\i -> filter (flip L.elem (concat (F.toList i)) .  (^. _2)) dashes  )<$> sel
-    _ <- mapUIFinalizerT calendar calFun calInp
+    onFFI "$(document).ready((%1))" (evalUI body $   mapUIFinalizerT calendar calFun calInp)
     return (legendStyle dashes ,dashes)
 
 

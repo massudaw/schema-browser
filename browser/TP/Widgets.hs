@@ -354,7 +354,7 @@ onEsc el = onkey el (27,False,False,False)
 testPointInRange ui = do
   startGUI defaultConfig {jsPort = Just 8000} (\w -> do
                       e1 <- ui
-                      getBody w #+ [element e1]
+                      addBody [element e1]
                       return () )
 
 
@@ -575,8 +575,6 @@ pruneTidings chw tds =   tidings chkBH chkAll
     chkBH = (\b e -> if b then e else Nothing ) <$> facts chw <*> facts tds
 
 
-strAttr :: String -> WriteAttr Element String
-strAttr name = mkWriteAttr (set' (attr name))
 
 testDyn = return $ do
   list <- multiListBox (pure [1,2,3,4,5]) (pure $ [1])  (pure (line.show))
@@ -589,19 +587,20 @@ testDyn = return $ do
 importUI f = do
     runFunction $ ffi "jQuery.ajaxSettings.cache = true"
     w <- askWindow
-    getHead w #+ f
+    addHead f
     runFunction $ ffi "jQuery.ajaxSettings.cache = false"
+    flushCallBuffer
 
 js , css :: String -> UI Element
 css ref =  mkElement "link" # set UI.href ("static/"<> ref)# set UI.rel "stylesheet"
-js ref =  mkElement "script" # set UI.type_ "text/javascript" # set UI.src ("static/"<> ref)
-jsRemote ref =  mkElement "script" # set UI.type_ "text/javascript" # set UI.src ref
+js ref =  mkElement "script" # set UI.type_ "text/javascript" # set (UI.boolAttr "defer") False # set (UI.boolAttr "async") False # set UI.src ("static/"<> ref)
+jsRemote ref =  mkElement "script" # set UI.type_ "text/javascript" # set (UI.boolAttr "defer") False # set (UI.boolAttr "async") False # set UI.src ref
 
 
 
 testWidget e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "static", jsCustomHTML = Just "index.html" })  ( \w ->  do
               els <- e
-              getBody w #+ [els]
+              addBody [els]
               return ())(return 1) (\w -> (return ()))
 
 
@@ -684,4 +683,12 @@ diffAddRemove l= (delete,add)
       evdell =  diff <$> facts l <@> evdiff
       prune i = if M.null i  then Nothing else Just i
       diffEventKeys b ev = filterJust $ (\i j -> if M.keysSet i == M.keysSet j then Nothing else Just j ) <$> b <@> ev
+
+onFFI ff handler = do
+    (e,h) <- ui $ newEvent
+    obj <- ffiExport (void $ (runDynamic $ handler) >>= h . snd )
+    runFunction $ ffi ff obj
+    onEvent e (ui . registerDynamic . sequence_)
+
+
 

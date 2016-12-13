@@ -607,7 +607,7 @@ applyFTBM pr a (IntervalTB1 i) (PInter b (p,l))
     mapExtended p _ = traverse (createFTBM pr ) p
 applyFTBM pr a (TB1 i) (PAtom p)  =  fmap TB1 $ a i p
 applyFTBM pr a  b (PatchSet l ) = foldl (\i l -> (\i -> applyFTBM pr a i l ) =<< i ) (Just b) l
-applyFTBM _ _ a b = errorWithStackTrace ("applyFTB: " <> show a )
+applyFTBM pr _ a b = errorWithStackTrace ("applyFTB: " <> show (a,fmap pr b) )
 
 checkInterM :: (Show a,Ord a) => (Index a  -> Maybe  a) -> PathFTB (Index a) -> Interval.Interval (FTB a)-> Maybe (Interval.Interval (FTB a))
 checkInterM p (PInter b o) inter = if fst (lowerBound' inter) == Interval.PosInf || fst (upperBound' inter) == Interval.NegInf then Nothing else Just inter

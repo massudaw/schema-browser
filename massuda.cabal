@@ -31,7 +31,7 @@ executable threepenny-layer
   if flag(rebug)
    ghc-options:         -O -threaded -rtsopts -fprof-auto -fprof-auto-calls  -dynamic
   else
-   ghc-options:         -O2 -threaded -rtsopts  -dynamic
+   ghc-options:         -O2 -threaded -rtsopts  
 
   OTHER-MODules:
     CnpjReceita
@@ -44,6 +44,7 @@ executable threepenny-layer
     Pdf
     PandocRenderer
     Plugins
+    Rmtc
     PrefeituraSNFSE
     Siapi3
   default-extensions: TupleSections,OverloadedStrings
@@ -64,6 +65,7 @@ executable threepenny-layer
    , base16-bytestring >=0.1 && <0.2
    , strptime >=1.0 && <1.1
    , threepenny-gui 
+   , plugins
    , attoparsec >=0.12.1.4 && <0.13
    , time >=1.4.1 && <1.6
    , transformers >=0.4 && <0.7
