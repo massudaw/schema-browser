@@ -200,8 +200,6 @@ extra-deps:
 - io-streams-haproxy-1.0.0.1
 - readable-0.3.1
 - binary-orphans-0.1.5.1
-- plugins-1.5.5.0
-- haskell-src-1.0.2.0
 
 
 
