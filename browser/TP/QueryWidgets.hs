@@ -1456,7 +1456,7 @@ fkUITableDiff inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 
      return $  TrivialWidget bres  res
 
 reduceTable l
-  | traceShow l False = undefined
+  -- | traceShow l False = undefined
   | L.any isDelete l = Delete
   | otherwise  = (\i -> if L.null i then Keep else Diff i) . filterDiff $ l
 

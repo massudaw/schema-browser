@@ -75,7 +75,7 @@ insertPatch f conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> l
       attrs =  concat $ nonRefTB . create <$> filterFun i
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
       direct f = filter (not.all1 testSerial .f)
-      serialAttr = flip Attr (SerialTB1 Nothing)<$> filter (isSerial .traceShowId .keyType) ( rawPK t <> F.toList (rawAttrs t))
+      serialAttr = flip Attr (SerialTB1 Nothing)<$> filter (isSerial .keyType) ( rawPK t <> F.toList (rawAttrs t))
       directAttr :: [TB Identity PGKey Showable]
       directAttr = direct aattri attrs
       projKey :: [TB Identity PGKey a ] -> [Text]
@@ -90,7 +90,8 @@ deletePatch
   ::
      Connection ->  TBIdx PGKey Showable -> Table -> IO (TBIdx PGKey Showable)
 deletePatch conn patch@(m ,G.Idex kold ,_) t = do
-    execute conn (fromString $ traceShowId $ T.unpack del) koldPk
+    print del
+    execute conn (fromString $ T.unpack del) koldPk
     return patch
   where
     equality k = escapeReserved (attrValueName k) <> "="  <> "?"
@@ -101,8 +102,9 @@ deletePatch conn patch@(m ,G.Idex kold ,_) t = do
 applyPatch
   ::
      Connection -> TBIdx PGKey Showable -> IO (TBIdx PGKey Showable)
-applyPatch conn patch@(m,G.Idex kold,skv)  =
-    execute conn (fromString $ traceShowId $ T.unpack up)  (fmap attrPatchValue skv <> koldPk ) >> return patch
+applyPatch conn patch@(m,G.Idex kold,skv)  = do
+    print up
+    execute conn (fromString $ T.unpack up)  (fmap attrPatchValue skv <> koldPk ) >> return patch
   where
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> zip (_kvpk m) (F.toList kold)
@@ -120,8 +122,9 @@ applyPatch conn patch@(m,G.Idex kold,skv)  =
 updatePatch
   ::
      Connection -> TBData PGKey Showable -> TBData PGKey Showable -> Table -> IO (TBIdx PGKey Showable)
-updatePatch conn kv old  t =
-    execute conn (fromString $ traceShowId $ T.unpack up)  (skv <> koldPk ) >> return patch
+updatePatch conn kv old  t = do
+    print up
+    execute conn (fromString $ T.unpack up)  (skv <> koldPk ) >> return patch
   where
     patch  = justError ("cant diff states" <> (concat $ zipWith differ (show kv) (show old))) $ diff old kv
     kold = M.toList $ getPKM old
