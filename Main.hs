@@ -2,6 +2,7 @@
 module Main (main) where
 import TP.Main
 import TP.Browser(addServer,deleteServer,deleteClient,addClientLogin,deleteClientLogin)
+import Debug.Trace
 import Rmtc
 import Data.Unique
 import Types
@@ -61,7 +62,7 @@ main = do
   let
     initGUI = do
       Just (TableModification _ _ (PatchRow (_,G.Idex c,_))) <- addClientLogin metas
-      let [(SerialTB1 (Just (TB1 (SNumeric i))))] = F.toList c
+      let [(SerialTB1 (Just (TB1 (SNumeric i))))] = traceShowId $ F.toList c
       return i
     finalizeGUI w = void $ closeDynamic $ do
         liftIO$ print ("delete client " <> show (wId w))

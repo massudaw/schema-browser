@@ -398,15 +398,22 @@ logLoadTimeTable inf table pred mode action = do
 
 
 
+patchNoRef (m,pk,l) =  (m,pk,concat $ attrNoRef <$> l)
+  where
+    attrNoRef (PFK _ l _ ) = l
+    attrNoRef (PInline i l ) = [PInline i $ patchNoRef <$> l]
+    attrNoRef i = [i]
+
 logTableModification
   :: (B.Binary a ,Ord a,Patch a,Show a, Ord (Index a),a ~Index a) =>
      InformationSchema
      -> TableModification (RowPatch Key a)  -> IO (TableModification (RowPatch Key a))
 logTableModification inf (TableModification Nothing table ip) = do
-  let i = case ip of
+  let i = patchNoRef $ case ip of
             PatchRow i -> i
             CreateRow i -> patch i
   time <- getCurrentTime
+  print i
 
   let ltime =  utcToLocalTime utc $ time
       (meta,G.Idex pidx,pdata) = firstPatch keyValue  i

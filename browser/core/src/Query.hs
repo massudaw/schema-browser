@@ -7,7 +7,8 @@
 
 module Query
   (
-  tbPK
+   tbPK
+  ,tableAttrs
   ,joinRel
   ,liftASch
   ,joinRel2
@@ -161,7 +162,7 @@ allKVRec'  t@(m, e)=  concat $ fmap snd $ L.sortBy (comparing (\i -> maximum $ (
         go  (Attr _ a) = [a]
 
 
-tableToKV r =   do
+tableAttrs r =   do
    ((rawPK r)) <> (rawDescription r)  <>(S.toList (rawAttrs r))
 
 
@@ -169,7 +170,7 @@ tableToKV r =   do
 labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (TB3Data (Labeled Text)  Key  () )
 labelTable i = do
    t <- tname i
-   name <- Tra.traverse (\k-> (S.singleton (Inline k),) <$> kname t k ) (tableToKV i)
+   name <- Tra.traverse (\k-> (S.singleton (Inline k),) <$> kname t k ) (tableAttrs i)
    return ( (tableMeta i,) $ Compose $ Labeled (label t) $ KV $ M.fromList $ fmap Compose <$> name)
 
 unComp :: (Show (g k a) ,F.Foldable f ) => Compose f g k a -> g k a
@@ -398,7 +399,7 @@ liftASch inf s tname (IProd b l) = IProd b $ fmap lookKey  l
     lookup i m = justError ("no look" <> show i) $ HM.lookup i m
     lookKey c = i
       where
-        i = justError "no attr" $ L.find ((==c).keyValue ) (tableToKV tb)
+        i = justError "no attr" $ L.find ((==c).keyValue ) (tableAttrs tb)
 liftASch inf s tname (Nested i c) = Nested ref (liftASch inf (fst l ) (snd l) c)
   where
     ref@(IProd _ refk) = liftASch inf s tname i

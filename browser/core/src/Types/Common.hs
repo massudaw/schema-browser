@@ -27,6 +27,7 @@ module Types.Common (
     ,unArray' , unArray
 
     ,KV(..)
+    ,kvAttrs
     ,kvMetaFullName
     ,unKV
     ,kvlist
@@ -255,6 +256,8 @@ instance NFData BinaryOperator
 
 instance Monoid (KVMetadata k ) where
   mempty = kvempty
+
+kvAttrs m =  L.nub $ _kvattrs m <> _kvpk m <> _kvdesc m
 
 data KVMetadata k
   = KVMetadata

@@ -38,7 +38,10 @@ findFK :: (Show k ,Ord k ,Foldable f ,Show a) => [k] -> (TB3Data f k a) -> Maybe
 findFK  l v =  M.lookup (S.fromList l) $M.mapKeys (S.map ( _relOrigin)) $ _kvvalues $ unF (snd v)
 
 findAttr :: (Show k ,Ord k ,Foldable f ,Show a) => [k] -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
-findAttr l v =  M.lookup (S.fromList $ Inline <$> l) $ M.mapKeys (S.map mapFunctions ) $  _kvvalues $ unF (snd v)
+findAttr l v =  M.lookup (S.fromList $ Inline <$> l) (  _kvvalues $ unF (snd v))  <|> findFun l v
+
+findFun :: (Show k ,Ord k ,Foldable f ,Show a) => [k] -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
+findFun l v = fmap snd . L.find ((( Inline <$> l) == ).fmap mapFunctions . S.toList .fst) $ M.toList $ _kvvalues $ unF (snd v)
   where mapFunctions (RelFun i _ ) = Inline i
         mapFunctions j = j
 

@@ -22,6 +22,8 @@ module SchemaQuery
   ,transaction
   ,transactionLog
   ,transactionNoLog
+  ,patchCheck
+  ,tableCheck
   ,filterfixed
   ,readState
   ,readIndex
@@ -456,6 +458,20 @@ indexPK (PatchRow (_,i,_) ) = i
 
 indexFilterR j (CreateRow i) = checkPred i j
 indexFilterR j (PatchRow i) = indexFilterP j i
+
+patchCheck (m,s,i) = if checkAllFilled then Right (m,s,i) else Left ("non nullable rows not filled " ++ show ( need `S.difference` available ))
+  where
+      checkAllFilled =  need `S.isSubsetOf`  available
+      available = S.unions $ S.map _relOrigin . pattrKey <$> i
+      need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i)) )  (kvAttrs m)
+
+tableCheck (m,t) = if checkAllFilled then Right (m,t) else Left ("non nullable rows not filled " ++ show ( need `S.difference` available ))
+  where
+      checkAllFilled =  need `S.isSubsetOf`  available
+      available = S.fromList $ concat $ fmap _relOrigin . keyattr <$> unKV  t
+      need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i)) )  (kvAttrs m)
+
+
 
 convertChanStepper0
   :: (Show v) =>

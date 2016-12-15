@@ -3,6 +3,7 @@ module Postgresql.Backend (connRoot,postgresOps) where
 
 import Types
 import qualified Types.Index as G
+import SchemaQuery
 import Step.Common
 import Step.Host
 import Data.Either
@@ -46,7 +47,6 @@ import Database.PostgreSQL.Simple
 filterFun  = filter (\k -> not $ isFun k )
   where isFun (PFun _ _ _ ) = True
         isFun i = False
-
 insertPatch
   :: (MonadIO m ,Functor m )
      => (TBData PGKey () -> FR.RowParser (TBData PGKey Showable ))
@@ -54,29 +54,31 @@ insertPatch
      -> TBIdx PGKey Showable
      -> TableK PGKey
      -> m (TBIdx PGKey Showable )
-insertPatch f conn path@(m ,s,i ) t =  liftIO$ if not $ L.null serialAttr
+insertPatch f conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> liftIO$ if not $ L.null serialAttr
       then do
         let
           iquery :: String
           iquery = T.unpack $ prequery <> " RETURNING ROW(" <>  T.intercalate "," (projKey serialAttr) <> ")"
-        out <-  fmap safeHead $ liftIO $ queryWith (f (mapValue' (const ()) serialTB )) conn (fromString  iquery ) directAttr
-        let Just (_,_ ,gen) =  join $ diff serialTB <$> out
-            comp = compact (i <> gen)
-        return (m, G.getIndex (justError "no out insert" out) ,comp )
+        print iquery
+        [out] <- liftIO $ queryWith (f serialTB ) conn (fromString  iquery) directAttr
+        let (_,_ ,gen) =  patch out
+        return (m, G.getIndex out  , i <> gen)
       else do
         let
           iquery = T.unpack prequery
         print iquery
         execute  conn (fromString  iquery ) directAttr
-        return path
+        return path) checkAllFilled
     where
+      checkAllFilled = patchCheck path
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (escapeReserved <$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
       attrs =  concat $ nonRefTB . create <$> filterFun i
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
-      serial f =  filter (all1 testSerial  .f)
       direct f = filter (not.all1 testSerial .f)
-      serialAttr = serial aattri attrs
+      serialAttr = flip Attr (SerialTB1 Nothing)<$> filter (isSerial .traceShowId .keyType) ( rawPK t <> F.toList (rawAttrs t))
+      directAttr :: [TB Identity PGKey Showable]
       directAttr = direct aattri attrs
+      projKey :: [TB Identity PGKey a ] -> [Text]
       projKey = fmap (keyValue ._relOrigin) . concat . fmap keyattri
       serialTB = tblist' t (fmap _tb  serialAttr)
       all1 f [] = False

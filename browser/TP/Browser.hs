@@ -60,15 +60,15 @@ import GHC.Stack
 clientCreate metainf now = liftTable' metainf "client_login" row
   where
     row = tblist . fmap _tb
-            $ [ Attr "id" (SerialTB1 Nothing)
-              , Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
+            $ [
+               Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
               ]
 
 serverCreate metainf now = liftTable' metainf "server" row
   where
     row = tblist . fmap _tb
-            $ [ Attr "serverid" (SerialTB1 Nothing)
-              , Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
+            $ [
+               Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
               ]
 
 addClientLogin inf =  transactionNoLog inf $ do

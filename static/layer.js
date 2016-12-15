@@ -109,19 +109,25 @@ function createLayer(ref,tname,features){
         poly.on('click',function(e ){ref.eventClick(p,e);});
         layer.addLayer(poly);});
     }else{
-    if (p.position.constructor === Array && p.position[0].constructor ===Array ){
-     latlonA = p.position.map(function(l){
-       return L.latLng(l[0],l[1]);
-     })
-     var line =  L.polyline(latlonA,{color:p.color});
-     line.on('click',function(e ){ref.eventClick(p,e);});
-     layer.addLayer(line);
-    }
-    else{
-    var feature = L.circle(p.position,{radius: p.size,color:p.color}).bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
-    feature.on('click',function(e ){ref.eventClick(p,e);});
-    layer.addLayer(feature);
-    }
+      if (p.position.constructor === Array && p.position[0].constructor ===Array ){
+        var line ;
+        latlonA = p.position.map(function(l){
+           return L.latLng(l[0],l[1]);
+         })
+        if (f.line !== ''){
+         line =  L.polyline(latlonA,{color:p.color,weight:f.line.width});
+
+        }else{
+         line =  L.polyline(latlonA,{color:p.color});
+        }
+         line.on('click',function(e ){ref.eventClick(p,e);});
+         layer.addLayer(line);
+      }
+        else{
+        var feature = L.circle(p.position,{radius: p.size,color:p.color}).bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
+        feature.on('click',function(e ){ref.eventClick(p,e);});
+        layer.addLayer(feature);
+      }
     }
   }
   })

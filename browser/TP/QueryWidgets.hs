@@ -473,7 +473,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) oldItems = do
         ) (return []) (P.sortBy (P.comparing fst ) . M.toList $ replaceRecRel (unTBMap $ ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta))
   let
       sequenceTable :: [(Column CoreKey () ,(TrivialWidget (Editor (Index (Column CoreKey Showable))), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (Index (TBData CoreKey Showable)))
-      sequenceTable fks = (\old difs -> (\ i -> if L.null i then Keep else (fmap (tableMeta table , maybe (G.Idex [])G.getIndex old,) . Tra.sequenceA . fmap Diff) i) . filterDiff $ difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
+      sequenceTable fks = (\old difs -> (\ i ->  (fmap (tableMeta table , maybe (G.Idex [])G.getIndex old,)   ) i) . reduceTable $ difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
       tableb =  sequenceTable fks
 
   (listBody,output) <- if rawIsSum table
@@ -554,7 +554,7 @@ crudUITableDiff inf open reftb@(bres , _ ,gist ,tref) refs pmods ftb@(m,_)  preo
             tableb = recoverEditChange <$> preoldItems <*> tablebdiff
 
 
-          (panelItems,tdiff)<- processPanelTable listBody inf reftb  tableb table preoldItems
+          (panelItems,tdiff)<- processPanelTable listBody inf reftb  tablebdiff table preoldItems
           let diff = unionWith const tdiff   (filterJust $ rumors loadedItensEv)
 
           ui $ onEventDyn diff (putPatch tref . pure)
@@ -609,12 +609,11 @@ crudUITable inf open reftb@(bres , _ ,gist ,tref) refs pmods ftb@(m,_)  preoldIt
               unFinal:: [([Column CoreKey ()], Tidings PKConstraint)]
               unFinal = fmap (fmap dunConstraints) unDeleted
           (listBody,tablebdiff) <- eiTableDiff inf   unFinal  refs pmods ftb preoldItems
-          let
-            tableb = recoverEditChange <$> preoldItems <*> tablebdiff
 
 
-          (panelItems,tdiff)<- processPanelTable listBody inf reftb  tableb table preoldItems
+          (panelItems,tdiff)<- processPanelTable listBody inf reftb  tablebdiff table preoldItems
           let diff = unionWith const tdiff   (filterJust $ rumors loadedItensEv)
+              tableb = recoverEditChange <$> preoldItems <*> tablebdiff
 
           ui $ onEventDyn diff (liftIO . putPatch tref . pure)
           ui $ onEventDyn (rumors tableb)
@@ -635,16 +634,21 @@ diffTidings t = tidings (facts t) $ diffEvent (facts t ) (rumors t)
 unConstraint :: [CoreKey] -> TBData CoreKey Showable -> G.GiST (G.TBIndex Showable) (TBData CoreKey Showable) -> Bool
 unConstraint un v m = not . L.null . lookGist un v $ m
 
+
+onDiff f g (Diff i ) = f i
+onDiff f g _ = g
+
 processPanelTable
    :: Element
    -> InformationSchema
    -> RefTables
-   -> Tidings (Maybe (TBData CoreKey Showable))
+   -> Tidings (Editor (TBIdx CoreKey Showable))
    -> Table
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> UI (Element, Event (RowPatch CoreKey Showable) )
-processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
+processPanelTable lbox inf reftb@(res,_,gist,_) inscrudp table oldItemsi = do
   let
+      inscrud = recoverEditChange <$> oldItemsi <*> inscrudp
       containsGist ref map = if isJust refM then not $ L.null (lookGist ix ref map) else False
         where ix = (_kvpk (tableMeta table))
               refM = traverse unSOptional' (getPKM ref)
@@ -654,14 +658,14 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrud table oldItemsi = do
 
 
   -- Insert when isValid
-  let insertEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$>  inscrud ) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (inscrud ) (gist ))
+  let insertEnabled = liftA2 (&&) (onDiff isRight False . fmap patchCheck <$>  inscrudp ) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (inscrud ) (gist ))
   insertB <- UI.button# set UI.class_ "btn btn-sm" #
           set text "INSERT" #
           set UI.class_ "buttonSet" #
           set UI.style (noneShowSpan ("INSERT" `elem` rawAuthorization table ))  #
           sinkDiff UI.enabled insertEnabled
 
-  let editEnabled = liftA2 (&& ) (liftA2 (&&) (isJust. fmap tableNonRef'   <$> inscrud ) (isJust <$> oldItemsi)) $ liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . snd ). fmap tableNonRef' <$> inscrud) (fmap (_kvvalues . unTB .  snd ). fmap tableNonRef' <$> oldItemsi)) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (inscrud) (gist) )
+  let editEnabled = liftA2 (&& ) (liftA2 (&&) ((maybe False (isRight . tableCheck  )  )<$> inscrud ) (isJust <$> oldItemsi)) $ liftA2 (&&) (liftA2 (\i j -> maybe False (any fst . F.toList  ) $ liftA2 (liftF2 (\l m -> if l  /= m then (True,(l,m)) else (False,(l,m))) )  i j) (fmap (_kvvalues . unTB . snd ). fmap tableNonRef' <$> inscrud) (fmap (_kvvalues . unTB .  snd ). fmap tableNonRef' <$> oldItemsi)) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (inscrud) (gist) )
   editB <- UI.button# set UI.class_ "btn btn-sm" #
          set text "EDIT" #
          set UI.class_ "buttonSet"#
@@ -1447,11 +1451,14 @@ fkUITableDiff inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 
           widgets2 = Tra.sequenceA (  zipWith (\i j -> (i,) <$> j) [0..] $( triding <$> fks) )
           bres0 = reduceDiffListFK <$> offsetT <*>  widgets2
           loadRes (i,j)  =  PFK rel [PAttr  (_relOrigin $ head $ keyattr $ head $ F.toList $ _kvvalues ifk) i] j
-          bres = fmap (head.compact) .(\i -> if L.null i then Keep else Diff i). filterDiff <$> sequenceA ((fmap loadRes  <$> bres0) : fmap (fmap (maybe Keep Diff) . snd) plmods)
+          bres = fmap (head.compact) . reduceTable <$> sequenceA ((fmap loadRes  <$> bres0) : fmap (fmap (maybe Keep Diff) . snd) plmods)
      res <- UI.div # set children [offset ,dv]
      return $  TrivialWidget bres  res
 
-
+reduceTable l
+  | traceShow l False = undefined
+  | L.any isDelete l = Delete
+  | otherwise  = (\i -> if L.null i then Keep else Diff i) . filterDiff $ l
 
 pdfFrame (elem,sr , call,st) pdf = mkElement (elem ) UI.# sink0 sr (call <$> pdf)  UI.# UI.set style (st)
 
