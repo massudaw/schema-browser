@@ -503,7 +503,7 @@ diffAttr :: PatchConstr k a  => TB Identity k a -> TB Identity k a -> Maybe (Pat
 diffAttr (Attr k i) (Attr l m ) = fmap (PAttr k) (diffShowable i m)
 diffAttr (Fun k rel i) (Fun l rel2 m ) = fmap (PFun k rel ) (diffShowable i m)
 diffAttr (IT k i) (IT _ l) = fmap (PInline k  ) (diffTB1 i l)
-diffAttr (FKT  k _ i) (FKT m rel b) = PFK rel   <$> (nonEmpty $ catMaybes $ F.toList $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j)) (_kvvalues k) (_kvvalues m)  ) <*> diff i b
+diffAttr (FKT  k _ i) (FKT m rel b) = PFK rel   <$> (Just $ catMaybes $ F.toList $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j)) (_kvvalues k) (_kvvalues m)  ) <*> diff i b
 
 patchAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a)
 patchAttr a@(Attr k v) = PAttr k  (patchFTB patch   v)

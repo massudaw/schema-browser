@@ -77,7 +77,7 @@ textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)
 -- textToPrim i | traceShow i False =undefined
 textToPrim (AtomicPrim (s,i)) = case  HM.lookup i  postgresPrim of
   Just k -> AtomicPrim k -- $ fromMaybe k (M.lookup k (M.fromList postgresLiftPrim ))
-  Nothing -> traceShow i $ errorWithStackTrace $ "no conversion for type " <> (show i)
+  Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
 textToPrim (RecordPrim i) =  (RecordPrim i)
 
 
@@ -122,7 +122,7 @@ instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
         -- | ty == Just "LINESTRING3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
         -- | otherwise  = TF.toField  tyv
       toFiel (Primitive k) (TB1 i) = TF.toField i
-      toFiel i j = traceShow(i,j) $ errorWithStackTrace ("toFiel" ++ show (i,j))
+      toFiel i j = errorWithStackTrace ("toFiel" ++ show (i,j))
 
 
 
@@ -135,7 +135,7 @@ instance  TF.ToField (TB Identity PGKey Showable)  where
   toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri ) ) $ maybe id (flip mappend) attrs $ (unTB <$> F.toList (_kvvalues $ unTB i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
   toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
-  toField e = traceShow e $ errorWithStackTrace (show e)
+  toField e = errorWithStackTrace (show e)
 
 
 

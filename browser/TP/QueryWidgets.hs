@@ -241,7 +241,7 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (BoundedPlugin2 arrow))) = do
   vi <- currentValue (facts tdInput)
   bcv <- ui $ stepper Nothing ecv
   pgOut  <- ui $mapTEventDyn (\v -> do
-    liftIO .fmap (join .  liftA2 diff v . fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v
+    liftIO .fmap (join .  traceShowId .liftA2 diff v . traceShowId . fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v
                              )  (tidings bcv ecv)
   return (headerP, (snd f ,  pgOut ))
 
@@ -616,7 +616,7 @@ crudUITable inf open reftb@(bres , _ ,gist ,tref) refs pmods ftb@(m,_)  preoldIt
               tableb = recoverEditChange <$> preoldItems <*> tablebdiff
 
           ui $ onEventDyn diff (liftIO . putPatch tref . pure)
-          ui $ onEventDyn (rumors tableb)
+          ui $ onEventDyn (filterE (maybe False (isRight.tableCheck)) (rumors tableb))
               (liftIO . h2)
           UI.div # set children [listBody,panelItems]
       fun i = UI.div
