@@ -182,19 +182,18 @@ insertMod j  = do
     let
       table = lookTable inf (_kvname (fst  j))
     kvn <- insertPatch (fmap (mapKey' (recoverFields inf)) . fromRecord . (mapKey' (typeTrans inf))) (conn  inf) (patch $ mapKey' (recoverFields inf) j) (mapTableK (recoverFields inf ) table)
-    let mod =  TableModification Nothing table (PatchRow $ firstPatch (typeTrans inf) $ kvn)
+    let mod =  TableModification Nothing table (CreateRow $ create $ firstPatch (typeTrans inf) $ kvn)
     return $ Just  mod
 
 
-deleteMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-deleteMod j@(meta,_) = do
+deleteMod :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+deleteMod patch@(m,pk,_) = do
   inf <- ask
   log <- liftIO $  do
     let
-      patch =  (tableMeta table, G.getIndex  j,[])
-      table = lookTable inf (_kvname (fst  j))
+      table = lookTable inf (_kvname m)
     deletePatch (conn inf)  (firstPatch (recoverFields inf) patch) table
-    return (TableModification Nothing table  $ PatchRow patch)
+    return (TableModification Nothing table  $ PatchRow (m,pk,[]))
   tell  (maybeToList $ Just log)
   return $ Just log
 

@@ -690,14 +690,16 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrudp table oldItemsi = do
          sinkDiff UI.enabled deleteEnabled
   let
        filterKey enabled k = const () <$> filterApply (const <$> enabled) (k )
+       crudMerge :: Maybe (TBData Key Showable)  ->  G.GiST (TBIndex Showable) (TBData Key Showable )-> Dynamic (Maybe (RowPatch Key Showable))
        crudMerge (Just i) g =
           fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf ( do
             let confl = conflictGist i g
-            mapM deleteFrom confl
+            mapM deleteFrom (fmap patch confl :: [TBIdx Key Showable])
             fullDiffInsert  i)
        crudEdi (Just i) (Just j) =  fmap (\g -> fmap (PatchRow . fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEditInsert  i j
        crudIns (Just j)   =  fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
-       crudDel (Just j)  = fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)))<$> transaction inf (deleteFrom j)
+       crudDel :: Maybe (TBData Key Showable)  ->  Dynamic (Maybe (RowPatch Key Showable))
+       crudDel (Just j)  = fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)))<$> transaction inf (deleteFrom (patch j :: TBIdx Key Showable))
 
   altU <- onAltU lbox
   altI <- onAltI lbox
@@ -1297,6 +1299,7 @@ fkUITableDiff inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItem
       let
         relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
         ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$>  plmods)
+        replaceKey :: TB Identity CoreKey a -> TB Identity CoreKey a
         replaceKey =  firstTB (\k -> maybe k id  $ fmap _relTarget $ L.find ((==k)._relOrigin) $  rel)
         replaceRel a =  (fst $ search (_relOrigin $ head $ keyattri a),  firstTB (\k  -> snd $ search k ) a)
             where  search  k = let v = justError ("no key" <> show k )$ L.find ((==k)._relOrigin)  rel in (_relOperator v , _relTarget v)

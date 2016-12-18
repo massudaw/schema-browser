@@ -2,6 +2,9 @@
 module Main (main) where
 import TP.Main
 import TP.Browser(addServer,deleteServer,deleteClient,addClientLogin,deleteClientLogin)
+import PatchSync
+import Safe
+import Control.Concurrent.STM
 import Debug.Trace
 import Rmtc
 import Data.Unique
@@ -42,8 +45,6 @@ main = do
   let
     db = argsToState args
     amap = authMap smvar db (user db , pass db )
-
-
   print "Dyn Load Plugins"
   print "Load Metadata"
   (metas ,lm)<- runDynamic $keyTablesInit  smvar ("metadata", T.pack $ user db) amap []
@@ -58,11 +59,21 @@ main = do
   poller smvar amap db regplugs False
   -- pollRmtc smvar amap (T.pack $ user db)
 
+  cp <- lookupEnv "SYNC_SERVER_PORT"
+  ch <- lookupEnv "SYNC_SERVER_HOST"
+  traverse (forkIO .flip patchClient smvar) (ServerConfig <$> (join $ readMay <$> cp)<*> ch)
+
+
+  sp <- lookupEnv "SYNC_PORT"
+  sh <- lookupEnv "SYNC_HOST"
+  traverse (forkIO . flip patchServer  smvar) (ServerConfig <$> (join $ readMay <$> sp)<*> sh)
+
+
   print "Load GUI Server"
   let
     initGUI = do
-      Just (TableModification _ _ (PatchRow (_,G.Idex c,_))) <- addClientLogin metas
-      let [(SerialTB1 (Just (TB1 (SNumeric i))))] = traceShowId $ F.toList c
+      Just (TableModification _ _ (CreateRow c)) <- addClientLogin metas
+      let [(SerialTB1 (Just (TB1 (SNumeric i))))] = traceShowId $ F.toList ((\(Idex i ) -> i) $ G.getIndex c)
       return i
     finalizeGUI w = void $ closeDynamic $ do
         liftIO$ print ("delete client " <> show (wId w))
@@ -71,7 +82,7 @@ main = do
 
 
   startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar args regplugs ) initGUI finalizeGUI
-  mapM writeSchema  . HM.toList =<< readMVar (globalRef smvar)
+  mapM writeSchema  . HM.toList =<< atomically (readTMVar (globalRef smvar))
   print "Finish Server"
   runDynamic $ traverse (deleteServer metas) ref
   sequence lm

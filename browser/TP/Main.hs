@@ -175,7 +175,7 @@ setup smvar args plugList w = void $ do
                           listBoxEl itemListEl2 ( G.toList <$> collectionTid ref)  (pure Nothing) (pure id) ( pure attrLine )
                         element metabody # set children [itemListEl,itemListEl2]-}
                       i -> do
-                        let pred = [(keyRef ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table"],Left (ArrayTB1 $ int . _tableUnique <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                        let pred = [(keyRef ["schema_name"],Left (txt $schemaName inf,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table_name"],Left (ArrayTB1 $ txt . tableName<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                         dash <- metaAllTableIndexA inf "modification_table" pred
                         element metabody # set UI.children [dash]
                 "Stats" -> do
@@ -321,7 +321,7 @@ databaseChooser smvar metainf sargs plugList = do
 createVar = do
   args <- getArgs
   let db = argsToState args
-  smvar   <- newMVar HM.empty
+  smvar   <- atomically $newTMVar HM.empty
   conn <- connectPostgreSQL (connRoot db)
   l <- query_ conn "select oid,name from metadata.schema"
   return $ DatabaseSchema (M.fromList l) (HM.fromList $ swap <$> l) conn smvar
@@ -388,7 +388,6 @@ testTable s t w = do
   let
     amap = authMap smvar db ("postgres", "queijo")
   (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
-  wm <- mkWeakMVar  (globalRef smvar) (sequence_ fin)
   (i,_) <- runDynamic $ transactionNoLog inf $ selectFrom t Nothing Nothing [] (WherePredicate $ lookAccess inf t <$> w)
   return ()
 
@@ -400,7 +399,6 @@ testPlugin s t p  = do
   let
     amap = authMap smvar db ("postgres", "queijo")
   (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
-  wm <- mkWeakMVar  (globalRef smvar) (sequence_ fin)
   let (i,o) = pluginStatic p
   print $ liftAccess inf t i
   print $ liftAccess inf t o

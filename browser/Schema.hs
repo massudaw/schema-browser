@@ -1,4 +1,4 @@
-{-# LANGUAGE ScopedTypeVariables,FlexibleContexts,ConstraintKinds,TypeFamilies,RankNTypes, TupleSections,BangPatterns,OverloadedStrings #-}
+{-# LANGUAGE TypeOperators,DeriveFunctor,FlexibleInstances ,ScopedTypeVariables,FlexibleContexts,ConstraintKinds,TypeFamilies,RankNTypes, TupleSections,BangPatterns,OverloadedStrings #-}
 
 
 module Schema where
@@ -112,7 +112,7 @@ readFModifier "write" = FWrite
 
 
 keyTables ,keyTablesInit :: DatabaseSchema ->  (Text ,Text) -> (Text -> IO (Auth , SchemaEditor)) -> [Plugins] ->  R.Dynamic InformationSchema
-keyTables schemaVar (schema ,user) authMap pluglist =  maybe (keyTablesInit schemaVar (schema,user) authMap pluglist ) return.  HM.lookup schema  =<< liftIO (readMVar (globalRef schemaVar))
+keyTables schemaVar (schema ,user) authMap pluglist =  maybe (keyTablesInit schemaVar (schema,user) authMap pluglist ) return.  HM.lookup schema  =<< liftIO (atomically $ readTMVar (globalRef schemaVar))
 
 extendedRel :: HM.HashMap (Text,Text) Key -> Text -> Text -> Text -> Key -> Rel Key
 extendedRel inf t a b c =  snd access $ (lrel (fst access))
@@ -229,7 +229,7 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
        mvar <- liftIO$ atomically $ newTMVar  M.empty
        let inf = InformationSchema schemaId schema (uid,user) oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ fmap (\i -> (keyFastUnique i,i)) $ F.toList keyMap) (M.filterWithKey (\k v -> not $ L.elem (tableName v ) (concat $ fmap (\(_,_,n) -> F.toList n) ures)) $ i2u)  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist
        mapM (createTableRefs inf) (filter (L.null . rawUnion) $ F.toList i2u)
-       var <- liftIO$ modifyMVar_ (globalRef schemaVar  ) (return . HM.insert schema inf )
+       var <- liftIO$ atomically $ modifyTMVar (globalRef schemaVar  ) (HM.insert schema inf )
        -- addStats inf
          {-
        traverse (\ req -> do
@@ -416,9 +416,101 @@ logTableModification inf (TableModification Nothing table ip) = do
   print i
 
   let ltime =  utcToLocalTime utc $ time
-      (meta,G.Idex pidx,pdata) = firstPatch keyValue  i
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (\"user\",modification_time,\"table\",data_index2,modification_data  ,\"schema\") VALUES (?,?,?,?,? :: bytea[],?) returning modification_id "  (fst $ username inf ,ltime,_tableUnique table, V.fromList <$> nonEmpty (  (fmap (TBRecord2 "metadata.key_value"  . second (Binary . B.encode) ) (zip (_kvpk meta) (F.toList pidx)) )) , fmap (Binary  . B.encode ) . V.fromList <$> nonEmpty pdata , schemaId inf)
+      (met,G.Idex pidx,pdata) = firstPatch keyValue  i
+
+  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,?,?::bytea[],? ,?) returning modification_id "  (snd $ username inf ,ltime,tableName table, V.fromList $ (  fmap  (Binary . B.encode)   pidx ) , Binary  . B.encode $firstPatchRow keyValue ip, schemaName inf)
+  let modt = lookTable (meta inf)  "modification_table"
+  dbref <- prerefTable (meta inf) modt
+  putPatch (patchVar dbref) [encodeTableModification inf  ltime (TableModification (Just id) table ip )]
   return (TableModification (Just id) table ip )
+
+decodeTableModification d
+  = (schema,table ,\inf ->  TableModification   (Just mod_id)  (lookTable inf table) (liftPatchRow inf table $ datamod mod_data ))
+  where
+    table = unOnly . att . ix "table_name" $ d
+    schema = unOnly . att . ix "schema_name" $ d
+    mod_id = unOnly . att .ix "modification_id" $ d
+    mod_data :: Only  (Binary (RowPatch Text Showable))
+    mod_data = att .ix "modification_data" $ d
+    mod_key :: Non.NonEmpty (Binary (FTB Showable))
+    mod_key = fmap unOnly . unCompF . att .ix "data_index" $ d
+    datamod =  unBinary  . unOnly
+
+unBinary (Binary i) = i
+
+encodeTableModification inf ltime  (TableModification id table ip)
+  =CreateRow (liftTable' (meta inf) "modification_table" $ tblist $ _tb <$>  [
+                               Attr "user_name"  (txt$ snd $ username inf)
+                              ,Attr "modification_time" (timestamp ltime)
+                              ,Attr "table_name" (txt$ tableName table)
+                              ,Attr "data_index" (ArrayTB1 $ TB1 . encodeS   <$> mod_key)
+                              ,Attr "modification_data" (TB1. SBinary . BSL.toStrict . B.encode  $ firstPatchRow keyValue ip)
+                              ,Attr "schema_name" (txt $ schemaName inf)
+                              ,Attr "modification_id" (maybe (errorWithStackTrace "no id")int id)
+                              ])
+  where (met,G.Idex pidx,pdata)
+          = firstPatch keyValue $ patchNoRef $ case ip of
+              PatchRow i -> i
+              CreateRow i -> patch i
+        --mod_key :: Non.NonEmpty (Binary (FTB Showable))
+        mod_key = Non.fromList $ Binary <$> pidx
+
+
+att :: (Functor f ,DecodeTB1 f , DecodeShowable a ) => TB g k Showable -> f a
+att (Attr i j ) = fmap decodeS $ decFTB  j
+ix i d = justError ("no field " ++ show i ) $ indexField (IProd Nothing [i]) d
+
+class DecodeTB1 f where
+  decFTB :: FTB a -> f a
+  encFTB :: f a-> FTB a
+
+instance  DecodeTB1 Only where
+  decFTB (TB1 i ) = Only  i
+  encFTB (Only i) = TB1  i
+
+infixr 1 :*:
+newtype (:*:) f g a = CompFunctor {unCompF :: (f (g a))}deriving(Functor)
+
+
+instance  DecodeTB1 g => DecodeTB1 (Interval.Interval :*: g)  where
+  decFTB (IntervalTB1 i) = CompFunctor $ fmap decFTB i
+  encFTB (CompFunctor i) = IntervalTB1 $ fmap encFTB  i
+
+instance  DecodeTB1 g => DecodeTB1 (Non.NonEmpty :*: g)  where
+  decFTB (ArrayTB1 i) = CompFunctor $ fmap decFTB i
+  encFTB (CompFunctor i) = ArrayTB1 $ fmap encFTB  i
+
+instance  DecodeTB1 g => DecodeTB1 (Maybe :*: g)  where
+  decFTB (LeftTB1 i) = CompFunctor $ fmap decFTB i
+  encFTB (CompFunctor i) = LeftTB1 $ fmap encFTB  i
+
+class DecodeTable a where
+  decodeT :: TBData Text Showable  -> a
+  encodeT :: a -> TBData Text Showable
+
+
+class DecodeShowable a where
+  decodeS :: Showable  -> a
+  encodeS:: a-> Showable
+
+instance  B.Binary a => DecodeShowable (Binary a) where
+  decodeS (SBinary i) = Binary $ B.decode (BSL.fromStrict i)
+  encodeS (Binary i) = SBinary ( BSL.toStrict $ B.encode i)
+
+
+instance  DecodeShowable Int where
+  decodeS (SNumeric i) = i
+  encodeS i = SNumeric i
+
+instance  DecodeShowable Double where
+  decodeS (SDouble i) = i
+  encodeS i = SDouble i
+
+instance  DecodeShowable Text where
+  decodeS (SText i) = i
+  encodeS i = SText i
+
+
 
 lookDesc
   :: InformationSchemaKV Key Showable
@@ -476,18 +568,6 @@ joinRelT ref tb table  = do
   let out = joinRel (tableMeta tb) ref table
   traverse (\i -> tell [TableModification Nothing tb . CreateRow $ i]) out
   return out
-  {-joinRelT rel ref tb table
-  | L.any (isOptional .keyType) origin = fmap LeftTB1 $ traverse (\ref->  joinRelT (Le.over relOri unKOptional <$> rel ) ref  tb table) (traverse unLeftItens ref )
-  | L.any (isArray.keyType) origin = fmap (ArrayTB1 .Non.fromList)$ traverse (\ref -> joinRelT (Le.over relOri unKArray <$> rel ) ref  tb table ) $ (fmap (\i -> (justError ("cant index  " <> show (i,ref)). join . fmap (unIndex i) $ (L.find isTBArray ref )) : (filter (not .isTBArray) ref))) [0..(Non.length (unArray $ unAttr $ justError ("no array" <> show ref)  $L.find isTBArray ref) - 1)]
-  | otherwise = maybe (tell (TableModification Nothing tb . patch <$> F.toList tbcreate) >> return tbcreate ) (return .TB1) tbel
-      where origin = fmap _relOrigin rel
-            tbcreate = TB1 $ tblist' tb (_tb . firstTB (\k -> fromMaybe k  $ M.lookup k relMap ) <$> ref )
-            relMap = M.fromList $ (\r ->  (_relOrigin r,_relTarget r) )<$>  rel
-            invrelMap = M.fromList $ (\r ->  (_relTarget r,_relOrigin r) )<$>  rel
-            tbel = searchGist  invrelMap (tableMeta tb) table (Just ref)
-            isTBArray i = isKArray (keyType $ _tbattrkey i)
-            isKArray (KArray i) = True
-            isKArray i = False-}
 
 addStats schema = do
   let metaschema = meta schema

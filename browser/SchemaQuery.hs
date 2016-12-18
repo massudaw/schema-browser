@@ -4,6 +4,7 @@ module SchemaQuery
   createUn
   ,takeMany
   ,convertChanEvent
+  ,applyBackend
   ,tellPatches
   ,selectFromA
   ,selectFrom
@@ -15,6 +16,7 @@ module SchemaQuery
   ,deleteFrom
   ,prerefTable
   ,refTable
+  ,refTableSTM
   ,loadFKS
   ,fullDiffInsert
   ,fullDiffEdit
@@ -78,10 +80,17 @@ defsize = 200
 
 estLength page size est = fromMaybe 0 page * size  +  est
 
+refTableSTM :: InformationSchema -> Table -> STM (DBRef KeyUnique Showable)
+refTableSTM  inf table  = do
+  mmap <- readTMVar (mvarMap inf)
+  return $ justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
+
+
 prerefTable :: MonadIO m => InformationSchema -> Table -> m (DBRef KeyUnique Showable)
 prerefTable  inf table  = do
   mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
   return $ justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
+
 
 
 
@@ -110,6 +119,18 @@ createUn :: Ord k => [k] -> [TBData k Showable] -> G.GiST (G.TBIndex Showable) (
 createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn (S.fromList un) (tableNonRef' i) )
   where transPred  =  G.notOptional . G.getUnique un . tableNonRef'
 
+
+applyBackend (CreateRow t@(m,i)) = do
+   insertFrom   t
+applyBackend (PatchRow t@(m,i,[])) = do
+   deleteFrom   t
+applyBackend (PatchRow p@(m,pk,i)) = do
+   inf <- ask
+   ref <- prerefTable inf  (lookTable inf (_kvname m))
+   (v,_,_) <- liftIO$ atomically $ readState (WherePredicate (AndColl []),fmap keyFastUnique $ _kvpk m) ref
+   let old = mapKey' (recoverKey inf ) $ justError "no item" $ G.lookup pk v
+
+   updateFrom   old   (apply  old p)
 
 selectFromA t a b c d = do
   inf <- ask

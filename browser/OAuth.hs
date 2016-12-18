@@ -182,31 +182,31 @@ urlPath  s m
             where j = _kvname (fst v)
                   ref = intercalate "," (renderShowable  <$> F.toList (getPKM v))
 
-
-deleteRow pk
+{-
+deleteRow (m,pk,_)
   | otherwise = do
     inf <- ask
     let
-      scoped  = fmap (unTB1 ._fkttable . unTB) $ filter ((`elem` (_rawScope (lookTable inf (_kvname (fst pk))))) . _relOrigin . head . keyattr ) (F.toList $ unKV $snd $ pk)
+      scoped  = fmap (unTB1 ._fkttable . unTB) $ filter ((`elem` (_rawScope (lookTable inf (_kvname (m))))) . _relOrigin . head . keyattr ) (F.toList $ unKV $snd $ pk)
     tok <- getToken scoped
     let user = fst $ justError "no token" $ token inf
-        table = lookTable inf (_kvname (fst pk))
+        table = lookTable inf (_kvname (m))
     decoded <- liftIO $ do
-        let req = urlPath (schemaName inf)  scoped  <> "/" <> T.unpack (_kvname (fst pk ) ) <> "/" <> ( intercalate "," ( renderShowable . snd <$> notScoped (M.toList $ getPKM pk )))<>  "?access_token=" ++ ( accessToken tok)
-            notScoped  = filter (not . (`elem` (_rawScope (lookTable inf (_kvname (fst pk))))).fst)
+      let req = urlPath (schemaName inf)  scoped  <> "/" <> T.unpack (_kvname (m) ) <> "/" <> ( intercalate "," ( renderShowable . snd <$> notScoped (zip $ pk )))<>  "?access_token=" ++ ( accessToken tok)
+            notScoped  = filter (not . (`elem` (_rawScope (lookTable inf (_kvname (m))))).fst)
         (t,v) <- duration
             -- $ "DELETE" <> show req
             (deleteRequest [("GData-Version","3.0")] req)
-        print ("delete",getPKM pk ,t)
+        print ("delete",pk ,t)
         return v
     liftIO $print decoded
     let p = if BS.null decoded  then
-              Just $ TableModification Nothing table  (PatchRow (fst pk , G.getIndex pk, []))
+              Just $ TableModification Nothing table  (PatchRow (m, pk, []))
             else Nothing
     tell (maybeToList p)
     return p
 
-
+-}
 insertTable pk
   | otherwise = do
     inf <- ask
@@ -320,7 +320,7 @@ getDiffTable table  j = fmap (join . fmap (diff j ) ) $ getTable  table $ TB1 j
 joinGetDiffTable table  tableref f j = fmap (join . fmap (diff j)) $ joinGet table tableref (TB1 f) (TB1 j)
 
 
-gmailOps = (SchemaEditor (error "no op1") (error "no op2") insertTable deleteRow listTable getDiffTable mapKeyType joinList syncHistory (error "no op3")100 (Just historyLoad))
+gmailOps = (SchemaEditor (error "no op1") (error "no op2") insertTable undefined listTable getDiffTable mapKeyType joinList syncHistory (error "no op3")100 (Just historyLoad))
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t

@@ -52,7 +52,7 @@ plugs schm authmap db plugs = do
               pred :: TBPredicate Key Showable
               pred = WherePredicate $ AndColl [PrimColl (liftAccess inf "plugins" $ keyRef ["name"] , Left (txt $ _name p,Equals))]
       return regplugs
-  modifyMVar_ (globalRef schm) (return . HM.alter  (fmap(\i -> i {plugins=regplugs})) "metadata")
+  atomically $ modifyTMVar (globalRef schm) (HM.alter  (fmap(\i -> i {plugins=regplugs})) "metadata")
   return regplugs
 
 

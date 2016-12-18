@@ -54,6 +54,11 @@ executable threepenny-layer
    ,exceptions
    , ordered
    , blaze-builder
+   , pipes
+   , pipes-parse
+   , pipes-binary
+   , pipes-concurrency
+   , pipes-network
    , zlib
    , base ==4.8.*
    , postgresql-simple >=0.4 && <0.5

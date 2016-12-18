@@ -47,7 +47,7 @@ import GHC.Stack
 
 
 metaInf :: DatabaseSchema -> IO InformationSchema
-metaInf smvar = justError "no meta" . HM.lookup "metadata" <$> liftIO ( readMVar (globalRef smvar))
+metaInf smvar = justError "no meta" . HM.lookup "metadata" <$> liftIO ( atomically $ readTMVar (globalRef smvar))
 
 
 type InformationSchema = InformationSchemaKV Key Showable
@@ -58,7 +58,7 @@ data DatabaseSchema
     { schemaIdMap :: M.Map Int Text
     , schemaNameMap  :: HM.HashMap Text Int
     , schemaConn :: Connection
-    , globalRef :: MVar (HM.HashMap Text InformationSchema )
+    , globalRef :: TMVar (HM.HashMap Text InformationSchema )
     }
 
 data InformationSchemaKV k v
@@ -209,7 +209,7 @@ data SchemaEditor
   { editEd  :: TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , patchEd :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , insertEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-  , deleteEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+  , deleteEd :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , listEd :: TBF (Labeled Text) Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   , getEd :: Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   , typeTransform :: PGKey -> CoreKey
@@ -246,6 +246,7 @@ lookKeyM :: InformationSchema -> Text -> Text -> Maybe Key
 lookKeyM inf t k =  HM.lookup (t,k) (keyMap inf)
 
 putPatch m = liftIO .atomically . writeTChan m . force. fmap (firstPatchRow keyFastUnique)
+putPatchSTM m =  writeTChan m . force. fmap (firstPatchRow keyFastUnique)
 putIdx m = liftIO .atomically . writeTChan m . force
 
 
@@ -278,6 +279,9 @@ liftField inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (lookKey inf tname ) (ma
 liftField inf tname (IT rel tb) = IT (lookKey inf tname  rel) (liftKeys inf tname2 tb)
   where FKInlineTable (_,tname2)  = unRecRel. pathRel  $ justError (show (rel ,rawFKS ta)) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline rel))  (F.toList$ rawFKS  ta)
         ta = lookTable inf tname
+
+liftPatchRow inf t (PatchRow i) = PatchRow $ liftPatch inf t i
+liftPatchRow inf t (CreateRow i) = CreateRow $ liftTable' inf t i
 
 liftPatch :: a ~ Index a => InformationSchema -> Text -> TBIdx Text a -> TBIdx Key a
 liftPatch inf t (_ , k ,p) = (tableMeta ta ,  k,fmap (liftPatchAttr inf t) p)
