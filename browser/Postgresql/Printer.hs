@@ -374,6 +374,8 @@ renderType (KInterval t) =
 renderType (Primitive (RecordPrim (s,t)) ) = Just $ s <> "." <> t
 renderType (Primitive (AtomicPrim t) ) =
   case t  of
+    PBinary -> "bytea"
+    PDynamic -> "bytea"
     PDouble -> "double precision"
     PText -> "character varying"
     PInt v -> case v of
@@ -511,7 +513,7 @@ utlabel (Left (value,e)) c idx = result
     result =  ( Just $  (opvalue (snd $ idx) e)   ,opparam e )
 
 unliftOp :: BinaryOperator -> PrimType -> Text
-unliftOp  op ty =  recurseOp recinf op  recty
+unliftOp  op ty =   recurseOp recinf op  recty
   where infered = inferOperatorType op  ty
         recinf = (fromMaybe infered $ ktypeRec ktypeUnLift infered )
         recty = (fromMaybe ty $ktypeRec ktypeUnLift ty)
@@ -521,7 +523,7 @@ recurseOp (KOptional i) o k = recurseOp i o k
 recurseOp i o (KOptional k) = recurseOp i o k
 recurseOp i (Flip (Flip o)) k = recurseOp i o k
 -- recurseOp i (Flip o)  k = recurseOp k o i
-recurseOp i o k | traceShow (i,o,k) $ isJust rw =  justError "rw" rw
+recurseOp i o k | isJust rw =  justError "rw" rw
   where rw = M.lookup (i,o,k)  rewriteOp
 recurseOp i o k = renderBinary o
 tlabel' (Labeled l (Attr k _)) =  (k,l)

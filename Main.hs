@@ -1,8 +1,8 @@
-{-# LANGUAGE ScopedTypeVariables,FlexibleContexts,OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies ,Rank2Types, FlexibleContexts, UndecidableInstances ,ScopedTypeVariables,FlexibleContexts,OverloadedStrings #-}
 module Main (main) where
+import PatchSync
 import TP.Main
 import TP.Browser(addServer,deleteServer,deleteClient,addClientLogin,deleteClientLogin)
-import PatchSync
 import Safe
 import Control.Concurrent.STM
 import Debug.Trace

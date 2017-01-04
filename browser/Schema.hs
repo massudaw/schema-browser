@@ -4,6 +4,7 @@
 module Schema where
 
 import Data.String
+import System.Environment
 import qualified Data.Poset as P
 import Control.Monad.Trans.Maybe
 import Codec.Compression.Zlib
@@ -169,7 +170,7 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
            lookRFk s t k = V.toList $ lookupKey2 (fmap (t,) k)
             where
               lookupKey2 :: Functor f => f (Text,Text) -> f Key
-              lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show  (t,c)) $ HM.lookup ( traceShowId (t,c)) map)
+              lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show  (s,t,c)) $ HM.lookup ( (t,c)) map)
                 where map
                         | s == schema = keyMap
                         | otherwise = _keyMapL (justError "no schema" $ HM.lookup s rsch)
@@ -213,7 +214,7 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
            i3l =fmap addRefs <$> i3lnoFun
        ures <- liftIO $ query conn unionQ (Only schema) :: R.Dynamic [(Text,Text,Vector Text)]
        let
-           i3 = addRecInit (HM.singleton schema (HM.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $  HM.fromList i3l
+           i3 =  addRecInit (HM.singleton schema (HM.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $  HM.fromList i3l
            pks = M.fromList $ fmap (\(_,t)-> (S.fromList$ rawPK t ,t)) $ HM.toList i3
            i2 =    M.filterWithKey (\k _ -> not.S.null $ k )  pks
            unionT (s,n,l) = (n ,(\t -> t { rawUnion =  ((\t -> justError "no key" $ HM.lookup t i3 )<$>  F.toList l )} ))
@@ -393,7 +394,7 @@ logLoadTimeTable inf table pred mode action = do
   a <- action
   end <- getCurrentTime
   let ltime time =  STimestamp $ utcToLocalTime utc $ time
-  liftIO $ execute(rootconn inf) "INSERT INTO metadata.stat_load_table(\"user\",\"table\",\"schema\",load,mode) VALUES (?,?,?,?,?)"  (fst $ username inf ,_tableUnique table,  schemaId inf,Interval.interval (Interval.Finite (ltime ini),True) (Interval.Finite (ltime end),True),mode)
+  liftIO $ execute (rootconn inf) "INSERT INTO metadata.stat_load_table(\"user\",\"table\",\"schema\",load,mode) VALUES (?,?,?,?,?)"  (fst $ username inf ,_tableUnique table,  schemaId inf,Interval.interval (Interval.Finite (ltime ini),True) (Interval.Finite (ltime end),True),mode)
   return a
 
 
@@ -413,13 +414,14 @@ logTableModification inf (TableModification Nothing table ip) = do
             PatchRow i -> i
             CreateRow i -> patch i
   time <- getCurrentTime
-  print i
-
+  env <- lookupEnv "ROOT"
+  let
+    mod = if isJust env then "master_modification_table" else "modification_table"
   let ltime =  utcToLocalTime utc $ time
       (met,G.Idex pidx,pdata) = firstPatch keyValue  i
 
-  [Only id] <- liftIO $ query (rootconn inf) "INSERT INTO metadata.modification_table (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,?,?::bytea[],? ,?) returning modification_id "  (snd $ username inf ,ltime,tableName table, V.fromList $ (  fmap  (Binary . B.encode)   pidx ) , Binary  . B.encode $firstPatchRow keyValue ip, schemaName inf)
-  let modt = lookTable (meta inf)  "modification_table"
+  [Only id] <- liftIO $ query (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata." <> mod <> " (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,?,?::bytea[],? ,?) returning modification_id " ) (snd $ username inf ,ltime,tableName table, V.fromList $ (  fmap  (Binary . B.encode)   pidx ) , Binary  . B.encode $firstPatchRow keyValue ip, schemaName inf)
+  let modt = lookTable (meta inf)  mod
   dbref <- prerefTable (meta inf) modt
   putPatch (patchVar dbref) [encodeTableModification inf  ltime (TableModification (Just id) table ip )]
   return (TableModification (Just id) table ip )

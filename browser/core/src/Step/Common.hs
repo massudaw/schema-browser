@@ -1,7 +1,8 @@
-{-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveGeneric,DeriveFunctor  #-}
+{-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveGeneric,DeriveFunctor  ,GeneralizedNewtypeDeriving,TupleSections #-}
 module Step.Common (PluginTable,Parser(..),Access(..),ArrowReaderM,ArrowReader,KeyString(..),BoolCollection(..),WherePredicateK(..),WherePredicate(..),TBPredicate(..),mapPredicate ) where
 
 import Types.Common
+import Control.Arrow.Transformer.Static
 import Data.Binary
 import Types.Primitive
 import Data.Tuple
@@ -61,6 +62,14 @@ type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m
 
 deriving instance Functor m => Functor (Kleisli m i )
 
+
+
+
+newtype StaticEnv  m t k v = StaticEnv (StaticArrow ((,) (t,t))  m  k v ) deriving (Arrow , Functor,Applicative , Category)
+
+instance (Monoid s ,Applicative (a i),Monoid m) => Monoid (StaticEnv a s i m) where
+  mempty = StaticEnv $ StaticArrow (mempty ,pure mempty)
+  mappend (StaticEnv (StaticArrow (i , l))) (StaticEnv (StaticArrow( j ,m ))) =  StaticEnv $ StaticArrow  (mappend i j,liftA2 mappend l  m )
 
 instance (Monoid s ,Arrow m)  => Arrow (Parser m s) where
   arr f = (P mempty (arr f ))

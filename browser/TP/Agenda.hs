@@ -80,9 +80,7 @@ eventWidgetMeta inf cliZone= do
       schemaPred2 =  [(keyRef ["schema"],Left (int (schemaId inf),Equals) )]
 
     ui$ do
-      evMap <- transactionNoLog (meta inf) $ do
-        (_,(_,evMap )) <- selectFromTable "event" Nothing Nothing [] schemaPred2
-        return evMap
+      (_,(_,evMap )) <- transactionNoLog (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
       return $ fmap (\e ->
         let
             Just (TB1 (SText tname)) = unSOptional' $  _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e

@@ -115,8 +115,8 @@ instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
       toFiel (KOptional k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
       toFiel (KSerial k ) ( SerialTB1 i) = maybe (TF.Plain "null") (toFiel k) i
       toFiel (KDelayed k ) (DelayedTB1 i) = maybe (TF.Plain "null") (toFiel k) i
-      toFiel (KArray k ) (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   (F.toList $ fmap unTB1 is)
-      toFiel (KInterval k) (IntervalTB1 is ) = TF.Many [TF.Plain (fromByteString $ BS.pack $ T.unpack $ justError ("no array" <> show k) $ renderType (KInterval k) ) ,TF.Plain "(" ,TF.toField  (fmap unTB1 $ unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (fmap unTB1 $ unFinite $ Interval.upperBound is) ,TF.Plain ")"]
+      toFiel (KArray k ) (ArrayTB1 is ) = TF.Many $[TF.toField $ PGTypes.PGArray   (F.toList $ fmap unTB1 is)  ] ++ maybeToList ( TF.Plain .fromByteString . BS.pack . T.unpack . (" :: "<>) <$> ( renderType (KArray k)))
+      toFiel (KInterval k) (IntervalTB1 is ) = TF.Many [TF.Plain ( fromByteString $ BS.pack $ T.unpack $justError ("no array" <> show k) $ renderType (KInterval k) ) ,TF.Plain "(" ,TF.toField  (fmap unTB1 $ unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (fmap unTB1 $ unFinite $ Interval.upperBound is) ,TF.Plain ")"]
         -- | k == Just "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $maybe "" T.unpack $ ty), TF.Plain $ fromByteString "range"]
         -- | k == Just "POINT3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
         -- | ty == Just "LINESTRING3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
@@ -124,6 +124,15 @@ instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
       toFiel (Primitive k) (TB1 i) = TF.toField i
       toFiel i j = errorWithStackTrace ("toFiel" ++ show (i,j))
 
+
+
+instance  TF.ToField (TB Identity Key Showable)  where
+  toField (Attr k  i) = TF.toField (keyType k ,i)
+  toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
+  toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri ) ) $ maybe id (flip mappend) attrs $ (unTB <$> F.toList (_kvvalues $ unTB i) )  ))
+      where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
+  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
+  toField e = errorWithStackTrace (show e)
 
 
 

@@ -85,7 +85,7 @@ poller schm authmap db plugs is_test = do
     poll tb  = do
       let plug = L.find ((==pname ). _name .snd ) plugs
           (schema,intervalms ,pname ,pid) = project tb
-          indexRow polling = justError (show $ (tbpred tb ,polling)) $ G.lookup (tbpred tb) polling
+          indexRow polling = justError (show $ (tbpred tb )) $ G.lookup (tbpred tb) polling
           tbpred = G.getIndex
 
       (inf ,_)<- runDynamic $keyTables  schm (justLook schema (schemaIdMap schm) , T.pack $ user db) authmap plugs
@@ -108,7 +108,7 @@ poller schm authmap db plugs is_test = do
                       (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  (Just 0) (Just fetchSize) []  pred
                       liftIO$ threadDelay 10000
                       let sizeL = justLook pred  l
-                          lengthPage s pageSize  =  traceShow (res,pageSize,s) res
+                          lengthPage s pageSize  =   res
                             where
                               res = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
                       i <- concat <$> mapM (\ix -> do
@@ -128,8 +128,6 @@ poller schm authmap db plugs is_test = do
                                     getP <- getFrom (lookTable inf a) inp
                                     ovm  <- fmap (liftPatch inf a) <$> liftIO (action (Just $ mapKey' keyValue (maybe inp (apply inp) getP)))
                                     maybe (return ()) (\ov-> do
-                                      liftIO $ print inp
-                                      liftIO $ print (apply inp ov)
                                       p <- fullDiffEditInsert inp (apply inp ov)
                                       return ()) ovm
                               )
@@ -154,12 +152,12 @@ poller schm authmap db plugs is_test = do
                               , attrT ("time",srange (time current) (time end))
                               ]
 
-                      (p2,p) <- transactionNoLog metas  $ do
+                      transactionLog metas  $ do
                           fktable2 <- loadFKS  (liftTable' metas "polling"  table2)
-                          p2 <- fullDiffEdit curr fktable2
+                          fullDiffEdit curr fktable2
+                      transactionNoLog metas $ do
                           fktable <- loadFKS  (liftTable' metas  "polling_log"  table)
-                          p <-fullDiffInsert  (liftTable' metas  "polling_log"  table)
-                          return (fktable2,p)
+                          fullDiffInsert  (liftTable' metas  "polling_log"  table)
                       return ()
 
           pid <- forkIO (void $ do

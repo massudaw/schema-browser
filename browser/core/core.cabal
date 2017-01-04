@@ -36,6 +36,7 @@ library
   build-depends:
      scientific
    , ordered
+   , reflection
    , deepseq
    , base ==4.8.*
    , postgresql-simple >=0.4 && <0.5
@@ -75,7 +76,6 @@ library
    ,stringsearch
    ,safe
    ,async
-   ,tasty
    ,void
    ,extra
    ,binary
@@ -91,3 +91,8 @@ library
 
   default-language:    Haskell2010
 
+Benchmark gist
+    type:       exitcode-stdio-1.0
+    main-is:    bench.hs
+    build-depends: core,base ,criterion, time,containers , GiST,QuickCheck
+    ghc-options: -fprof-auto -threaded

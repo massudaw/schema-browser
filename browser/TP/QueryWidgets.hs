@@ -173,10 +173,10 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
             . set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
       j<- UI.div # styleUI  # set children (fmap getElement elemsIn <> [preinp])# sink UI.style (noneShow .isJust <$> facts unoldItems)
       k <- UI.div # styleUI  # set children (fmap getElement elemsOut) # sink UI.style (noneShow .isJust <$> facts liftedE  )
-      return  ( l <> [j , k] , liftA2 apply <$> facts unoldItems <#> liftedE  ))
+      return  ( l <> [j , k] , liftA2 mergeTB1 <$> facts unoldItems <#>  fmap (fmap create) liftedE  ))
            ) ) (return (([],trinp))) $ zip (fmap snd ac) freshKeys
   el <- UI.div  # set children (b: (fst freshUI))
-  return (el , (liftAccess inf tname  $snd $ pluginStatic' $ snd $ last ac ,fmap (fmap patch) $  snd freshUI ))
+  return (el , (liftAccess inf tname  $snd $ pluginStatic' $ snd $ last ac ,fmap join $ liftA2 diff  <$>  trinp<*> snd freshUI ))
 
 pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
   let f =second (liftAccess inf t ). first (liftAccess  inf t ) $ staticP arrow
@@ -241,7 +241,7 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (BoundedPlugin2 arrow))) = do
   vi <- currentValue (facts tdInput)
   bcv <- ui $ stepper Nothing ecv
   pgOut  <- ui $mapTEventDyn (\v -> do
-    liftIO .fmap (join .  traceShowId .liftA2 diff v . traceShowId . fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v
+    liftIO .fmap (join .  liftA2 diff v .  fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf (_tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v
                              )  (tidings bcv ecv)
   return (headerP, (snd f ,  pgOut ))
 
@@ -359,7 +359,7 @@ tbCaseDiff
   -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
 tbCaseDiff inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
         let
-            oldItems =  maybe preoldItems (\v -> if L.null v then preoldItems else fmap (maybe (Just (FKT (kvlist $ fmap  (_tb . uncurry Attr)  v) rel (SerialTB1 Nothing) )) Just ) preoldItems  ) (Tra.traverse (\k -> fmap (k,) . keyStatic $ k ) ( getRelOrigin $ fmap unTB $ unkvlist ifk))
+            oldItems =  preoldItems -- (\v -> if L.null v then preoldItems else fmap (maybe (Just (FKT (kvlist $ fmap  (_tb . uncurry Attr)  v) rel (SerialTB1 Nothing) )) Just ) preoldItems  ) (Tra.traverse (\k -> fmap (k,) . keyStatic $ k ) ( getRelOrigin $ fmap unTB $ unkvlist ifk))
             nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin $ fmap unTB $ unkvlist ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattri .fst) wl
             relTable = M.fromList $ fmap (\i -> (_relTarget i,_relOrigin i)) rel
@@ -448,7 +448,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) oldItems = do
       table = lookTable inf (_kvname meta)
   res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds .snd ) (plugins inf) )
   let plugmods = first repl <$> (resdiff <> plmods)
-      resdiff =   fmap ( liftA2 (\i j -> (join .liftA2 (\j i@(_,pk,_)   -> if  pk == G.getIndex j then Just i else Nothing ) i $ j ) <|> j ) oldItems   ) . snd <$> res
+      resdiff =   fmap ( liftA2 (\i j -> (join .liftA2 (\j i@(_,pk,_)   -> if   pk == G.getIndex j then Just i else Nothing ) i $ j ) <|> j ) oldItems   ) .  snd <$> res
       repl (Rec  ix v ) = replace ix v v
       repl (Many[(Rec  ix v )]) = replace ix v v
       repl v = v
@@ -658,7 +658,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_) inscrudp table oldItemsi = do
 
 
   -- Insert when isValid
-  let insertEnabled = liftA2 (&&) (onDiff isRight False . fmap patchCheck <$>  inscrudp ) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (inscrud ) (gist ))
+  let insertEnabled = liftA2 (&&) (onDiff isRight False .  fmap patchCheck <$>  inscrudp ) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (inscrud ) (gist ))
   insertB <- UI.button# set UI.class_ "btn btn-sm" #
           set text "INSERT" #
           set UI.class_ "buttonSet" #
@@ -867,8 +867,10 @@ reduceDiffListFK o i
    | otherwise = liftA2 (,) (patchEditor $ fmap fst res )  (patchEditor $ fmap snd res)
    where diffs = catMaybes $ (\(ix,v) -> treatA (o+ix)v) <$> i
          treatA a (Diff (PFK _ [PAttr k l]  v)) = Just $ Left $  (PIdx a (Just l) ,PIdx a  (Just v))
+         treatA a (Diff (PFK _ []  v)) = Nothing
          treatA a Delete =  Just $ Right $ (PIdx a Nothing,PIdx a Nothing)
          treatA _ Keep = Nothing
+         treatA a p = errorWithStackTrace (show (a,p))
          res = lefts diffs ++ reverse (rights diffs)
 
 

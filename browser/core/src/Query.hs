@@ -593,7 +593,7 @@ joinRel2 tb ref table
             isLeft i = False
             isArray (ArrayTB1 i) = True
             isArray i = False
-            tbel = G.lookup (G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref) table
+            tbel = maybe (traceShow (G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref)Nothing) Just $ G.lookup (G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref) table
 
 
 lookGist un pk  = G.search (tbpred un pk)

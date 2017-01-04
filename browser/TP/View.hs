@@ -84,10 +84,10 @@ instance A.ToJSON Showable where
 
 indexTy (IProd _ [k] )=  keyType k
 indexTy (Many [k] )= indexTy k
-indexTy (Nested (IProd _ [i] ) n) = nestTy (keyType i ) (indexTy n)
+indexTy (Nested (IProd _ [xs] ) n) = traceShowId $ nestTy (keyType xs) (indexTy n)
     where
-      nestTy (KOptional k) n = KOptional (nestTy k n)
       nestTy (KOptional k) (KOptional n) = KOptional (nestTy k n)
+      nestTy (KOptional k) n = KOptional (nestTy k n)
       nestTy (KArray k) i = KArray (nestTy k i)
       nestTy (Primitive k) i = i
 
@@ -197,7 +197,7 @@ makePos (AtomicPrim (PGeom (PPosition 2)))[b,a,z] =
     (Interval.Finite $ pos (Position2D (a, b)), True)
 makePos (AtomicPrim (PGeom (PPosition 3))) [b,a,z] =
     (Interval.Finite $ pos (Position (a, b, z)), True)
-makePos _ i = errorWithStackTrace (show i)
+makePos a i = errorWithStackTrace (show (a,i))
 
 writePK :: TBData Key Showable -> FTB Showable -> T.Text
 writePK r efield =

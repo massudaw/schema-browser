@@ -680,7 +680,7 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
             nu <- idxK "operator_number" -< c
             na <- idxK "operator_name" -< c
             pas <- idxK "password" -< c
-            r <- atR "conta" $ idxK "id_account" -< c
+            r <- idxA "account" -< c
             returnA -< ([nu,na,pas],r)) -< ()
 
         IntervalTB1 range <- idxK "range" -< ()
@@ -698,11 +698,11 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
         atR "ofx" (proc t -> do
             odxR "file_name" -<()
             odxR "import_file" -< ()
-            odxR "account" -< ()) -< ()
+            atR "account" (odxR "id_account" ) -< ()) -< ()
         refs <- atRA "ofx" (idxK "file_name") -< ()
         let ix = length refs
         pk <- act (const ask )-< ()
-        returnA -<   Just (kvempty,Idex (pure (SerialTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,[PAttr "account" (patch r),PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
+        returnA -<   Just (kvempty,Idex (pure (SerialTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,patch (r): [PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
 
 
 importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url

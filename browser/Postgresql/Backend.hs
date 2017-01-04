@@ -49,11 +49,11 @@ filterFun  = filter (\k -> not $ isFun k )
         isFun i = False
 insertPatch
   :: (MonadIO m ,Functor m )
-     => (TBData PGKey () -> FR.RowParser (TBData PGKey Showable ))
+     => (TBData Key () -> FR.RowParser (TBData Key Showable ))
      -> Connection
-     -> TBIdx PGKey Showable
-     -> TableK PGKey
-     -> m (TBIdx PGKey Showable )
+     -> TBIdx Key Showable
+     -> TableK Key
+     -> m (TBIdx Key Showable )
 insertPatch f conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> liftIO$ if not $ L.null serialAttr
       then do
         let
@@ -76,9 +76,9 @@ insertPatch f conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> l
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
       direct f = filter (not.all1 testSerial .f)
       serialAttr = flip Attr (SerialTB1 Nothing)<$> filter (isSerial .keyType) ( rawPK t <> F.toList (rawAttrs t))
-      directAttr :: [TB Identity PGKey Showable]
+      directAttr :: [TB Identity Key Showable]
       directAttr = direct aattri attrs
-      projKey :: [TB Identity PGKey a ] -> [Text]
+      projKey :: [TB Identity Key a ] -> [Text]
       projKey = fmap (keyValue ._relOrigin) . concat . fmap keyattri
       serialTB = tblist' t (fmap _tb  serialAttr)
       all1 f [] = False
@@ -181,8 +181,8 @@ insertMod j  = do
   liftIO $ do
     let
       table = lookTable inf (_kvname (fst  j))
-    kvn <- insertPatch (fmap (mapKey' (recoverFields inf)) . fromRecord . (mapKey' (typeTrans inf))) (conn  inf) (patch $ mapKey' (recoverFields inf) j) (mapTableK (recoverFields inf ) table)
-    let mod =  TableModification Nothing table (CreateRow $ create $ firstPatch (typeTrans inf) $ kvn)
+    kvn <- insertPatch (fromRecord  ) (conn  inf) (patch $  j) ( table)
+    let mod =  TableModification Nothing table (CreateRow $ create  kvn)
     return $ Just  mod
 
 

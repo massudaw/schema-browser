@@ -109,7 +109,7 @@ setup smvar args plugList w = void $ do
         schId = int $ schemaId inf
         initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> HM.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
         lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested (IProd Nothing["selection"]) (keyRef ["table"])) iv
-                    in fmap (\(TB1 (SText t)) -> t) .unArray  <$> join (fmap unSOptional' i)
+                    in fmap (\(TB1 (SText t)) -> t) . traceShowId .unArray  <$> join (fmap unSOptional' i)
 
     cliIni <- currentValue (facts cliTid)
     iniKey <-currentValue (facts initKey)
@@ -321,11 +321,13 @@ databaseChooser smvar metainf sargs plugList = do
 createVar = do
   args <- getArgs
   let db = argsToState args
+  b <- lookupEnv "ROOT_SERVER"
   smvar   <- atomically $newTMVar HM.empty
   conn <- connectPostgreSQL (connRoot db)
   l <- query_ conn "select oid,name from metadata.schema"
-  return $ DatabaseSchema (M.fromList l) (HM.fromList $ swap <$> l) conn smvar
-    {-
+  return $ DatabaseSchema (M.fromList l) (isJust b) (HM.fromList $ swap <$> l) conn smvar
+
+{-
 testBinary = do
   args <- getArgs
   let db = argsToState args
@@ -388,7 +390,8 @@ testTable s t w = do
   let
     amap = authMap smvar db ("postgres", "queijo")
   (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
-  (i,_) <- runDynamic $ transactionNoLog inf $ selectFrom t Nothing Nothing [] (WherePredicate $ lookAccess inf t <$> w)
+  ((_,(_,i)),_) <- runDynamic $ transactionNoLog inf $ selectFrom t Nothing Nothing [] (WherePredicate $ lookAccess inf t <$> w)
+
   return ()
 
 

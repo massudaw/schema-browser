@@ -216,12 +216,20 @@ renderBinary Contains  = "@>"
 renderBinary (Flip Contains) = "<@"
 renderBinary Equals = "="
 renderBinary (Flip Equals )= "="
-renderBinary IntersectOp = "&&"
+renderBinary (Flip (GreaterThan b)) = renderBinary( LowerThan b)
+renderBinary (Flip (LowerThan b)) = renderBinary( GreaterThan b)
+renderBinary (GreaterThan True )=  ">="
+renderBinary (GreaterThan False)=  ">"
+renderBinary (LowerThan False)=  "<"
+renderBinary (LowerThan True)=  "<="
+renderBinary (IntersectOp )= "&&"
 renderBinary (Flip IntersectOp )= "&&"
 renderBinary (AllOp op) = renderBinary op <> " all"
 renderBinary (AnyOp op) = renderBinary op <> " any"
 renderBinary (Flip (AllOp op)) = " all" <> renderBinary op
 renderBinary (Flip (AnyOp op)) = " any" <> renderBinary op
+-- Symetric Operators
+renderBinary  (Flip i ) = renderBinary i
 renderBinary i = errorWithStackTrace (show i)
 
 readBinaryOp :: T.Text -> BinaryOperator

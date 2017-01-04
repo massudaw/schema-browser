@@ -60,7 +60,7 @@ topconversion f v@(Primitive i) =  f v
 
 denormConversions l = M.fromList $ fmap go (M.toList l)
   where
-    go (i,_) | traceShow i False = undefined
+    -- go (i,_) | traceShow i False = undefined
     go ((k,o),(l,f)) =
       case liftA2 (,) (ktypeRec (flip M.lookup  (M.fromList $ M.keys postgresLiftPrimConv')) o ) (topconversion (preconversion' postgresLiftPrimConv') o) of
           Just (i,(a,b)) ->  go ((k,i),(a.l,b.f))
@@ -178,8 +178,8 @@ ktypeLift i = M.lookup i postgresLiftPrim
 ktypeRec f v@(KOptional i) =   f v <|> fmap KOptional (ktypeRec f i)
 ktypeRec f v@(KArray i) =   f v <|> fmap KArray (ktypeRec f i)
 ktypeRec f v@(KInterval i) =   f v <|> fmap KInterval (ktypeRec f i)
-ktypeRec f v@(KSerial i) = f v <|> ktypeRec f i
-ktypeRec f v@(KDelayed i) = f v <|> ktypeRec f i
+ktypeRec f v@(KSerial i) = f v <|> fmap KSerial (ktypeRec f i)
+ktypeRec f v@(KDelayed i) = f v <|> fmap KDelayed (ktypeRec f i)
 ktypeRec f v@(Primitive i ) = f v
 
 

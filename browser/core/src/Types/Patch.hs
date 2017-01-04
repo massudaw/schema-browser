@@ -126,7 +126,7 @@ indexFilterPatch ((IProd _ l) ,op)  (_,_,lo) =
   case L.find ((Set.fromList (fmap Inline l) == ).pattrKey) lo of
     Just i ->
       case i of
-        PAttr k f -> G.match op G.Exact (create f :: FTB Showable)
+        PAttr k f -> G.match op (Right $ (create f :: FTB Showable))
         i -> True
     Nothing -> True
 indexFilterPatch ((Nested (IProd _  l) n) ,op)  (_,_,lo) =
@@ -471,12 +471,13 @@ applyRecordChange
     TBData d a
      -> TBIdx d (Index a)
      -> Maybe (TBData d a)
-applyRecordChange t@(m, v) (m2 ,idx   , k)
-    | _kvname m == _kvname m2 && idx == fmap patch (G.getIndex t) = (m ,) <$> traComp ref v
-    | otherwise = createIfChange (m2,idx,k)
+applyRecordChange t@(m, v) (m2 ,idx   , k) =
+  {-| _kvname m == _kvname m2 && idx == fmap patch (G.getIndex t) =-} (m ,) <$> traComp ref v
+    -- | otherwise = createIfChange (m2,idx,k)
   where
-    ref (KV v) =  KV <$>  Map.traverseWithKey (\key -> traComp (\vi -> foldl  (\i j ->  edit key j =<< i ) (Just vi) k) ) v
-    edit  key  k v = if  key == pattrKey k then  applyAttrChange  v k else Just v
+    ref (KV v) =  KV <$>  fmap add (Map.traverseWithKey (\key -> traComp (\vi -> maybe (Just vi) (foldl  (\i j ->  edit j =<< i ) (Just vi)) (nonEmpty $ filter ((key ==).pattrKey )k) )) v)
+    add v = foldr (\p v -> Map.insert (pattrKey p) (_tb $ create p) v) v $  filter (isNothing . flip Map.lookup  v.pattrKey) k
+    edit  k v = applyAttrChange  v k
 
 
 patchSet i

@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
+{-# LANGUAGE FlexibleInstances,FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
 module RuntimeTypes where
 
 
@@ -53,9 +53,13 @@ metaInf smvar = justError "no meta" . HM.lookup "metadata" <$> liftIO ( atomical
 type InformationSchema = InformationSchemaKV Key Showable
 type UserTable = (Int,Text)
 
+data TidingsAffine  a = TA  (R.Behavior a) (R.Event (Index a))
+
+
 data DatabaseSchema
   = DatabaseSchema
     { schemaIdMap :: M.Map Int Text
+    , isRoot :: Bool
     , schemaNameMap  :: HM.HashMap Text Int
     , schemaConn :: Connection
     , globalRef :: TMVar (HM.HashMap Text InformationSchema )
@@ -82,7 +86,8 @@ data InformationSchemaKV k v
   }
 
 
-recoverKey inf un = justError ("no key " <> show un) $ M.lookup un (_keyUnique inf)
+recoverKey inf un = justError ("no key " <> show un) $ M.lookup un (_keyUnique inf) <|> deps
+  where deps = join $ L.find isJust $ (\i -> M.lookup  un  (_keyUnique i)) <$> F.toList (depschema inf)
 
 backendsKey s = _backendKey s <> Prelude.foldl mappend mempty (fmap (backendsKey .snd)$ HM.toList $ depschema s)
 
@@ -129,6 +134,7 @@ data DBVar2  v=
   { iniRef :: DBRef Unique v
   , idxTid :: R.Tidings (Map WherePredicate (Int,Map Int (PageTokenF  v)))
   , collectionTid :: R.Tidings (TableIndex Key v )
+  , collectionPatches :: R.Event [RowPatch Key v ]
   }
 
 
@@ -342,11 +348,12 @@ liftAccess inf tname (Rec i j ) =  Rec i (liftAccess inf tname  j)
 liftAccess inf tname (ISum i) =  ISum $ fmap (liftAccess inf tname)  i
 liftAccess inf tname (Many i) =  Many $ fmap (liftAccess inf tname)  i
 liftAccess inf tname (IProd b l) = IProd b $ fmap (lookKey inf tname) l
-liftAccess inf tname (Nested i c) = Nested ref (liftAccess inf (snd l) c)
+liftAccess inf tname (Nested i c) = Nested ref (liftAccess rinf (snd l) c)
   where
+    rinf = fromMaybe inf (HM.lookup  (fst l) (depschema inf))
     ref@(IProd _ refk) = liftAccess inf tname i
     tb = lookTable inf tname
-    n = justError "no fk" $ L.find (\i -> S.fromList refk == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
+    n = justError ("no fk " ++ show (i,refk,rawFKS tb) )$ L.find (\i -> S.fromList refk == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
     l = case n of
           (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
           (Path _ rel@(FKInlineTable  l  ) ) ->  l

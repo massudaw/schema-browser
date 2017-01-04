@@ -121,6 +121,7 @@ executable threepenny-layer
    ,semigroups
    ,stm
    ,browser
+   ,reflection
    ,iso8601-time
 
   default-language:    Haskell2010

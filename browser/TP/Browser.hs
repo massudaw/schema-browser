@@ -155,7 +155,7 @@ updateClient metainf inf table tdi clientId now = do
     (_,(_,tb)) <- transactionNoLog metainf $ selectFrom "client_login"  Nothing Nothing [] (WherePredicate $ AndColl [PrimColl(keyRef [(lookKey metainf "client_login" "id")] ,Left (int clientId,Equals))]  )
     let
       pk = Attr (lookKey metainf "client_login" "id") (SerialTB1 $ Just $ TB1 (SNumeric clientId))
-      old = justError ("no row " <> show (attrIdex [pk],tb) ) $ G.lookup (attrIdex [pk]) tb
+      old = justError ("no row " <> show (attrIdex [pk]) ) $ G.lookup (attrIdex [pk]) tb
     let
       row = tblist . fmap _tb
             $ [ FKT (kvlist [_tb $ Attr "clientid" (TB1 (SNumeric (clientId )))]) [Rel "clientid" Equals "id"] (TB1 $ mapKey' keyValue $ old)
@@ -189,7 +189,9 @@ addClient clientId metainf inf table row =  do
     now <- liftIO getCurrentTime
     let
       tdi = fmap (M.toList .getPKM) $ join $ (\ t -> fmap (tblist' t ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName t))  ). F.toList) <$>  table <*> row
-    new <- updateClient metainf inf table tdi clientId now
+    newi <- updateClient metainf inf table tdi clientId now
+    let new = maybe newi (\table -> apply newi (liftPatch metainf "clients" $addTable (clientId) now table  0)) table
+-- clientIdaddRow  (wId w) now  (M.toList sel ) tix ix
     dbmeta  <- prerefTable metainf (lookTable metainf "clients")
     putPatch (patchVar $dbmeta ) [PatchRow $patch new]
     (_,_,clientState,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl (keyRef [ (lookKey (meta inf) "clients" "clientid")] , Left (num clientId,Equals))]))
@@ -219,11 +221,9 @@ chooserTable inf bset cliTid cli = do
       now <- liftIO$ getCurrentTime
       let cpatch = liftPatch (meta inf) "clients" $ addTable  (wId i) now table ix
           dpatch now = liftPatch (meta inf) "clients" $ removeTable (wId i) now table ix
-      liftIO $ print cpatch
       putPatch (patchVar ref) [PatchRow cpatch]
       registerDynamic(do
         now <- getCurrentTime
-        print $ dpatch now
         putPatch (patchVar ref) [PatchRow $ dpatch now])
 
 
@@ -240,7 +240,7 @@ chooserTable inf bset cliTid cli = do
                   ) sub
               UI.div # set children els
     UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFactsDiv <$> triding layout <*> fmap M.size (triding bset))# set UI.style [("border","2px dotted gray")]
-                              ).fst)                                  (M.fromList . fmap (\i -> (i,())) . M.toList <$> triding bset)
+                              ).fst)                                  ( M.fromList . fmap (\i -> (i,())) . M.toList <$> triding bset)
 
   let sortTable els ord = fmap snd $ L.sortBy (flip $ comparing fst) $ fmap (first (\i -> tableOrder inf (fst i) ord )) els
   element body # sink0 UI.children (facts $ sortTable <$> fmap M.toList el <*> collectionTid orddb) # set UI.class_ "col-xs-12"
@@ -313,12 +313,10 @@ viewerKey inf table tix cli layoutS cliTid = mdo
   onEvent ((,)<$> ixpk <@>diffpk) (\(ix,v)->traverse (\sel -> do
     now <- liftIO$ getCurrentTime
     let p =liftPatch (meta inf) "clients" $ addRow  (wId w) now  (M.toList sel ) tix ix
-    liftIO$ print p
     putPatch (patchVar dbmeta) [PatchRow p]
     ui$registerDynamic (do
       now <- liftIO$ getCurrentTime
       let d =liftPatch (meta inf) "clients" $ removeRow (wId w) now  tix ix
-      print d
       putPatch (patchVar dbmeta) [PatchRow d]
           )
         )v)

@@ -1,5 +1,5 @@
 {-# LANGUAGE Arrows,OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Client (module Step.Common,notNull,idxR,idxK,act,odx,odxR,nameO,nameI,callI,atAny,atMA,callO,odxM,idxM,atR,atK,atRA,attrT,tb,indexTable,atMR) where
+module Step.Client (module Step.Common,notNull,idxR,idxK,act,odx,odxR,nameO,nameI,callI,atAny,idxA,atMA,callO,odxM,idxM,atR,atK,atRA,attrT,tb,indexTable,atMR) where
 
 import Types
 import Step.Common
@@ -75,6 +75,7 @@ unLeftTB1 = join . fmap (\v -> case v of
                (LeftTB1 i ) -> i
                i@(TB1 _ ) -> Just i)
 
+
 at b i (P s (Kleisli j) )  =  P (BF.second (nest (ind b)) . BF.first (nest (ind b)) $ s) (Kleisli (\i -> local (fmap unTB1 . unLeftTB1 . indexTB1 (ind b)) (j i )  ))
   where ind b = splitIndex b i
 
@@ -128,11 +129,23 @@ idxK  l =
   let ll = splitIndex notNull l
    in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (\ v -> return . justError ("no value found "  <> show (ll,v)). join . fmap (unSOptional' . snd) . join . fmap (indexTableAttr ll)$ v) )
 
+idxA  l =
+  let ll = splitIndex notNull l
+   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (\ v -> return . justError ("no value found "  <> show (ll,v)). indexAttr ll$ v) )
+
+
+
 
 idxR  l =
   let ll = splitIndex notNull l
    in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
 
+
+indexAttr (IProd _ l) t
+  = do
+    (m,v) <- t
+    i <-   M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin))$ _kvvalues $ unTB v
+    return $ unTB i
 
 
 
