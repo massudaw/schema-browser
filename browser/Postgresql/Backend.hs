@@ -6,6 +6,7 @@ import qualified Types.Index as G
 import SchemaQuery
 import Step.Common
 import Step.Host
+import Data.Interval (Extended(..),upperBound)
 import Data.Either
 import Data.Functor.Apply
 import System.Environment
@@ -233,12 +234,12 @@ selectAll
 selectAll m offset i  j k st = do
       inf <- ask
       let
-          unref (TableRef i) = Just i
+          unref (TableRef i) = Just $  upperBound <$>  i
           unref (HeadToken ) = Nothing
           -- tbf =  tableView (tableMap inf) table
           -- let m = tbf
 
-      v <- liftIO$ paginate inf m k offset j (join $ fmap unref i) st
+      v <- liftIO$ paginate inf m k offset j ( join $ fmap unref i) st
       mapM_ (tellRefs ) (snd v)
       return v
 
@@ -291,6 +292,6 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 
 
-postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef . G.getIndex <$> lastMay i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o )  (\table j -> do
+postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef <$> G.getBounds i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o )  (\table j -> do
     inf <- ask
     liftIO . loadDelayed inf (tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined (\ a -> liftIO . logTableModification a) 200 Nothing

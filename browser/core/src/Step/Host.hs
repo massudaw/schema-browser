@@ -59,7 +59,7 @@ replace ix i (Point p)
   | otherwise = (Point p)
 replace ix i v = v
 
-indexField :: (Ord k , Show k) => Access k -> TBData k Showable -> Maybe (Column k Showable)
+indexField :: (Ord k ,Show a, Show k) => Access k -> TBData k a-> Maybe (Column k a)
 indexField p@(IProd b l) v = case unTB <$> findAttr  l  v of
                                Nothing -> case unTB <$>  findFK l (v) of
                                   Just (FKT ref _ _) ->  unTB <$> ((\l ->  L.find ((==[l]). fmap ( _relOrigin). keyattr ) $ unkvlist ref ) $head l)

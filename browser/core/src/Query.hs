@@ -4,6 +4,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module Query
   (
@@ -553,8 +554,8 @@ searchGist ::
   -> Maybe a
 searchGist relTable m gist =  join . fmap (\k -> lookGist (S.fromList $fmap (\k-> justError (" no pk " <> show (k,relTable)) $ M.lookup k relTable) (_kvpk m) ) k  gist)
   where
-    lookGist un pk  v =  join $ safeHead <$> res
-      where res =  flip G.search  v <$> tbpred un pk
+    lookGist un pk  v =  join res
+      where res = flip G.lookup v <$> tbpred un pk
 
     tbpred un  = tbjust  .  Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  relTable ))).  filter ((`S.member` un). fst ) . concat .fmap aattri
         where
@@ -593,7 +594,7 @@ joinRel2 tb ref table
             isLeft i = False
             isArray (ArrayTB1 i) = True
             isArray i = False
-            tbel = maybe (traceShow (G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref)Nothing) Just $ G.lookup (G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref) table
+            tbel = G.lookup (G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref) table
 
 
 lookGist un pk  = G.search (tbpred un pk)

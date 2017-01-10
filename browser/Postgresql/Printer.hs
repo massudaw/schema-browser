@@ -21,6 +21,7 @@ import Data.Ord
 import Types.Index (TBIndex(..))
 import Data.String
 import Step.Host (findFK,findAttr,findFKAttr)
+import qualified Data.Interval as I
 import Step.Common
 import NonEmpty (NonEmpty(..))
 import Data.Functor.Apply
@@ -143,7 +144,7 @@ selectQuery
         (KV (Compose (Labeled Text) (TB (Labeled Text))))
         Key
         ())
-     -> Maybe (TBIndex Showable)
+     -> Maybe [I.Extended (FTB Showable)]
      -> [(Key, Order)]
      -> WherePredicate
      -> (Text,Maybe [Either (TB Identity Key Showable) (PrimType ,FTB Showable)])
@@ -160,8 +161,10 @@ selectQuery t koldpre order wherepred = (, (fmap Left <$> ordevalue )<> (fmap Ri
         pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  ( orderquery <> predquery)
         (orderquery , ordevalue) =
           let
-            unIndex (Idex i ) = zip (_kvpk (fst t)) $ F.toList i
-            oq = (const $ pure $ generateComparison (first (justLabel t) <$> order)) . unIndex<$> koldpre
+            unIndex i  = catMaybes $ zipWith  (\i j -> (i,) <$> j) (_kvpk (fst t)) $ fmap unFin $ traceShowId i
+            unFin (I.Finite i) = Just i
+            unFin j = Nothing
+            oq = (\i ->  pure $ generateComparison (first (justLabel t) <$> (filter ((`elem` (fmap fst i)).fst) order))) . unIndex<$> koldpre
             koldPk :: Maybe [TB Identity Key Showable]
             koldPk =  (\k -> uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) k ) . unIndex <$> koldpre
             pkParam =  koldPk <> (tail .reverse <$> koldPk)

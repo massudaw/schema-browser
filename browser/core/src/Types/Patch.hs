@@ -405,6 +405,7 @@ instance (NFData (f k a),NFData k ) => NFData (KV f k a) where
 
 instance (NFData k ,NFData a ) => NFData (TB Identity k a) where
 
+
 applyGiSTChange
   ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => G.GiST (G.TBIndex  a ) (TBData k a) -> RowPatch k (Index a) -> Maybe (G.GiST (G.TBIndex  a ) (TBData k a))
 applyGiSTChange l (PatchRow patom@(m,i, [])) = Just $ G.delete (create <$> G.notOptional i) (3,6)  l

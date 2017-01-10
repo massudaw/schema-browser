@@ -249,6 +249,8 @@ data Prim a b
   deriving(Eq,Ord,Show,Generic)
 
 instance (NFData a , NFData b) => NFData (Prim a b)
+
+
 data KType a
    = Primitive a
    | KSerial (KType a)
@@ -256,7 +258,6 @@ data KType a
    | KInterval (KType a)
    | KOptional (KType a)
    | KDelayed (KType a)
-   | KTable [KType a]
    deriving(Eq,Ord,Functor,Generic,Foldable,Show)
 
 instance NFData a => NFData (KType a)
@@ -267,7 +268,6 @@ showTy f (KOptional i) = showTy f i <> "*"
 showTy f (KInterval i) = "(" <>  showTy f i <> ")"
 showTy f (KSerial i) = showTy f i <> "?"
 showTy f (KDelayed i) = showTy f i <> "-"
-showTy f (KTable i) = "t"
 showTy f i = errorWithStackTrace ("no ty for " <> show   i)
 
 
@@ -356,7 +356,7 @@ data TableType
 
 type Table = TableK Key
 
-mapTableK f (Raw  uni s tt tr de is rn  un ra rsc rp rd rf inv rat u ) = Raw uni s tt tr (S.map f de) is rn (fmap (S.map f) un) ra (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf )(S.map (mapPath f )  inv) (S.map f rat) (mapTableK f <$> u)
+mapTableK f (Raw  uni s tt tr de is rn  un ra rsc rp rd rf inv rat u ) = Raw uni s tt tr (S.map f de) is rn (fmap (fmap f) un) ra (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf )(S.map (mapPath f )  inv) (S.map f rat) (mapTableK f <$> u)
   where mapPath f (Path i j ) = Path (S.map f i) (fmap f j)
 
 instance Show Unique where
@@ -374,7 +374,7 @@ data TableK k
            , rawDelayed :: (Set k)
            , rawIsSum :: Bool
            , _rawNameL :: Text
-           , uniqueConstraint :: [Set k]
+           , uniqueConstraint :: [[k]]
            , rawAuthorization :: [Text]
            , _rawScope :: [k]
            , _rawPKL :: [k]
@@ -835,6 +835,12 @@ int = TB1 . SNumeric
 pos = TB1 . SGeo . SPosition
 timestamp = TB1 . STimestamp
 date = TB1 . SDate
+
+class ConstantGen v where
+  generate ::  Constant -> v
+
+instance ConstantGen (FTB Showable) where
+  generate = generateConstant
 
 generateConstant CurrentDate = unsafePerformIO $ do
         i<- getCurrentTime

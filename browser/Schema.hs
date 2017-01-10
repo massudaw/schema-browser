@@ -200,7 +200,7 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
                                   pks = F.toList pksl
                                   inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> S.fromList pks)
-                               in (c ,Raw un schema  (justLook c resTT) (M.lookup un transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap (S.fromList . fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup un authorization)  (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ (M.lookup c efks )<>(M.lookup c fks )<> fmap S.fromList inlineFK  ) S.empty attr [])) res :: [(Text,Table)]
+                               in (c ,Raw un schema  (justLook c resTT) (M.lookup un transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap ( fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (maybe [] id $ M.lookup un authorization)  (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ (M.lookup c efks )<>(M.lookup c fks )<> fmap S.fromList inlineFK  ) S.empty attr [])) res :: [(Text,Table)]
        let
            unionQ = "select schema_name,table_name,inputs from metadata.table_union where schema_name = ?"
 
@@ -246,6 +246,7 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
 modifyTMVar v  x = takeTMVar  v >>= putTMVar v. x
 createTableRefs :: InformationSchema -> Table -> R.Dynamic (Collection Key Showable)
 createTableRefs inf i = do
+  let table = mapTableK keyFastUnique i
   map <- liftIO$ atomically $ readTMVar (mvarMap inf)
   if isJust (M.lookup i map)
      then
@@ -254,7 +255,7 @@ createTableRefs inf i = do
            ref :: DBRef KeyUnique Showable
            ref =  justError "" $ M.lookup i map
        idx <- readTVar (idxVar ref )
-       st <- readTVar (collectionState ref)
+       (_,st) <- readTVar (collectionState ref)
        return ((M.mapKeys (mapPredicate (recoverKey inf)) idx, fmap (mapKey' (recoverKey inf)) st) :: Collection Key Showable)
      else  do
     t <- liftIO$ getCurrentTime
@@ -270,8 +271,10 @@ createTableRefs inf i = do
         v = (mapKey' (keyFastUnique) <$> vp)
 
     midx <-  liftIO$ atomically$ newTVar iv
-    collectionState <-  liftIO$ atomically $ newTVar  v
-    midxLoad <-  liftIO$ atomically $ newTVar G.empty
+    let
+      sidx :: [SecondaryIndex KeyUnique Showable]
+      sidx = fmap ((,G.empty).fmap keyFastUnique) (uniqueConstraint i)
+    collectionState <-  liftIO$ atomically $ newTVar  (sidx,v)
     t0 <- liftIO$ forkIO $ forever $ catchJust notException(do
         atomically (do
             ls <- takeMany nchanidx
@@ -284,10 +287,10 @@ createTableRefs inf i = do
         atomically $ do
           patches <- takeMany nmdiff
           when (not $ L.null $ concat patches) $
-            modifyTVar' collectionState (flip (L.foldl' apply ) ( concat patches))
+            modifyTVar' collectionState (\e -> L.foldl' (\i j  -> fromJust $ applyTableRep table i j) e (concat patches))
         )  (\e -> atomically ( takeMany nmdiff ) >>= (\d ->  appendFile ("errors/data-" <> T.unpack ( tableName i)) $ show (e :: SomeException,d)<>"\n"))
     R.registerDynamic (killThread t1)
-    liftIO$ atomically $ modifyTMVar (mvarMap inf) (M.insert i (DBRef nmdiff midx nchanidx collectionState midxLoad ))
+    liftIO$ atomically $ modifyTMVar (mvarMap inf) (M.insert i (DBRef nmdiff midx nchanidx collectionState ))
     return (ivp,vp)
 
 loadFKSDisk inf table = do
@@ -613,7 +616,7 @@ writeTable :: InformationSchema -> String -> Table -> DBRef KeyUnique Showable -
 writeTable inf s t v = do
   print ("dumping table " <> s <> " " <> T.unpack ( tableName t))
   let tname = s <> "/" <> (fromString $ T.unpack (tableName t))
-  (iv,_,_) <- atomically $ readState mempty (v)
+  (sidx,iv,_,_) <- atomically $ readState mempty (v)
   (iidx ,_)<- atomically $ readIndex (v)
   let sidx = first (mapPredicate (keyValue.recoverKey inf))  <$> M.toList iidx
       sdata = fmap (mapKey' (keyValue.recoverKey inf).tableNonRef') $ G.toList $ iv

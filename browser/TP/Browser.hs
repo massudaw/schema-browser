@@ -191,7 +191,6 @@ addClient clientId metainf inf table row =  do
       tdi = fmap (M.toList .getPKM) $ join $ (\ t -> fmap (tblist' t ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName t))  ). F.toList) <$>  table <*> row
     newi <- updateClient metainf inf table tdi clientId now
     let new = maybe newi (\table -> apply newi (liftPatch metainf "clients" $addTable (clientId) now table  0)) table
--- clientIdaddRow  (wId w) now  (M.toList sel ) tix ix
     dbmeta  <- prerefTable metainf (lookTable metainf "clients")
     putPatch (patchVar $dbmeta ) [PatchRow $patch new]
     (_,_,clientState,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl (keyRef [ (lookKey (meta inf) "clients" "clientid")] , Left (num clientId,Equals))]))
@@ -266,10 +265,10 @@ viewerKey inf table tix cli layoutS cliTid = mdo
                       unKey t = liftA2 (,) ((\(Attr _ (TB1 (SText i)))-> Just $ lookKey inf  (tableName table) i ) $ lookAttr' (meta inf)  "key" t  )( pure $ (\(Attr _ (TB1 (SDynamic i)))-> i) $ lookAttr'  (meta inf)  "val" t )
                 in (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
 
-  reftb@(vpt,vp,_,var) <- ui $ refTables inf table
+  reftb@(vptmeta,vp,vpt,var) <- ui $ refTables inf table
 
   let
-      tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (fmap snd $ justError "" $ traverse (traverse unSOptional' ) $v)) (snd i) ) iv ) <$> vpt <*> tdip
+      tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (fmap snd $ justError "" $ traverse (traverse unSOptional' ) $v)) i ) iv ) <$> vpt <*> tdip
       tdip = join . fmap (join . fmap ( fmap (lookKV . snd ). lookPK .snd). lookT ) <$> cliTid
   cv <- currentValue (facts tdi)
   -- Final Query ListBox
@@ -282,26 +281,27 @@ viewerKey inf table tix cli layoutS cliTid = mdo
   let
      tsort = sorting' . filterOrd <$> triding sortList
      filteringPred i = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  .snd
-     filtering res = (\t -> fmap (filter (filteringPred t )) )<$> triding filterInpT  <*> res
+     filtering res = (\t -> (filter (filteringPred t )) )<$> triding filterInpT  <*> res
      pageSize = 20
      divPage s = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
-     lengthPage (fixmap,_) = s
+     lengthPage (fixmap) = s
         where (s,_)  = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
   inisort <- currentValue (facts tsort)
   itemListEl <- UI.select # set UI.class_ "col-xs-6" # set UI.style [("width","100%")] # set UI.size "21"
   runFunction $ ffi "$(%1).selectpicker('mobile')" itemListEl
   wheel <- fmap negate <$> UI.mousewheel itemListEl
+  let inivp = inisort .G.toList $ snd vp
   (offset,res3)<- mdo
-    offset <- offsetFieldFiltered (pure 0) wheel   [(L.length . snd <$> res3) ,L.length . snd <$> vpt,(lengthPage <$> res3)]
-    res3 <- ui $ mapT0EventDyn (fmap inisort (fmap G.toList vp)) return ( (\f i -> fmap f i)<$> tsort <*> (filtering $ fmap (fmap G.toList) $ vpt) )
+    offset <- offsetFieldFiltered (pure 0) wheel   [(L.length <$> res3) ,L.length <$> vpt,(lengthPage <$> vptmeta)]
+    res3 <- ui $ mapT0EventDyn inivp return ( tsort <*> (filtering $ fmap G.toList $ vpt) )
     return (offset, res3)
   ui $ onEventDyn (rumors $ triding offset) $ (\i ->  do
     transactionNoLog inf $ selectFrom (tableName table ) (Just $ divPage (i + pageSize) `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  [] $ mempty)
   let
-    paging  = (\o -> fmap (L.take pageSize . L.drop o) ) <$> triding offset
+    paging  = (\o -> (L.take pageSize . L.drop o) ) <$> triding offset
   page <- currentValue (facts paging)
-  res4 <- ui $ mapT0EventDyn (page $ fmap inisort (fmap G.toList vp)) return (paging <*> res3)
-  itemList <- listBoxElEq (\l m -> maybe False id $ liftA2 (\i j ->G.getIndex i == G.getIndex j) l m) itemListEl ((Nothing:) . fmap Just <$> fmap snd res4) (Just <$> tds) (pure id) (pure (maybe id attrLine))
+  res4 <- ui $ mapT0EventDyn (page inivp) return (paging <*> res3)
+  itemList <- listBoxElEq (\l m -> maybe False id $ liftA2 (\i j ->G.getIndex i == G.getIndex j) l m) itemListEl ((Nothing:) . fmap Just <$> res4) (Just <$> tds) (pure id) (pure (maybe id attrLine))
   let tds = (fmap join  $ triding itemList)
 
   (cru,ediff,pretdi) <- crudUITable inf (pure "+")  reftb [] [] (allRec' (tableMap inf) table) tds

@@ -18,7 +18,7 @@ import TP.View
 import GHC.Stack
 import Control.Monad.Writer
 import Control.Concurrent
-import Control.Lens ((^.),_1,_2,_5)
+import Control.Lens ((^.),_1,_2,_3,_5)
 import Safe
 import Control.Concurrent.Async
 import Data.Interval as Interval
@@ -160,7 +160,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
                   Just proj = fmap (^._5) $ L.find ((==tb).(^._2) ) dashes
               traverse (\path -> do
                 v <- ui$refTables' inf tb  Nothing (WherePredicate (OrColl $ (\(i,j) -> AndColl $fmap (PrimColl . first (liftAccess inf (tableName t))) [(   IProd Nothing ["source"],Left (int i,Equals)), (IProd Nothing ["target"],Left (int j,Equals))])  <$> path ))
-                mapUIFinalizerT innerCalendar (\i -> createLayers innerCalendar (tableName tb)  (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ (snd i))) (v^._1)
+                mapUIFinalizerT innerCalendar (\i -> createLayers innerCalendar (tableName tb)  (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) (v^._3)
                   ) (nonEmpty path))
 
         onEvent cposE (\(c,sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3,%4)" innerCalendar c sw ne)
@@ -177,7 +177,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
             let pred = predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)
                 fieldKey (TB1 (SText v))=  v
             reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) (WherePredicate pred)
-            let v = fmap snd $ reftb ^. _1
+            let v = reftb ^. _3
             let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
             onEvent evsel (liftIO . hselg)
 
@@ -190,9 +190,9 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
 
             mapUIFinalizerT innerCalendar (\i ->
               createLayers innerCalendar tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   i)) (filtering tb v)
-            -- stat <- UI.div  # sinkDiff text (show . (\i -> (positionB,length i, i) ).  (fmap snd . G.getEntries .filterfixed tb (WherePredicate pred )) <$> v)
+            stat <- UI.div  # sinkDiff text (show . (\i -> (positionB,length i, i) ).  (fmap snd . G.getEntries .filterfixed tb (WherePredicate pred )) <$> v)
             edit <- UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
-            UI.div # set children [edit]
+            UI.div # set children [stat,edit]
             ) pcal
           ) selected
         let els = foldr (liftA2 (:)) (pure []) fin

@@ -158,7 +158,7 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
                     let pred = WherePredicate $ timePred inf t (fieldKey <$> fields ) (incrementT,resolution)
                         fieldKey (TB1 (SText v))=   v
                     reftb <- ui $ refTables' inf t Nothing pred
-                    let v = fmap snd $ reftb ^. _1
+                    let v = reftb ^. _3
                     let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup  pk j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
                     tdib <- ui $ stepper Nothing (join <$> evsel)
                     let tdi = tidings tdib (join <$> evsel)

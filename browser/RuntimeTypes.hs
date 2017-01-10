@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances,FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
+{-# LANGUAGE FlexibleInstances,FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,UndecidableInstances,ExistentialQuantification #-}
 module RuntimeTypes where
 
 
@@ -7,6 +7,7 @@ import Control.Concurrent
 import Types
 import Control.Exception
 import Step.Common
+import Data.Interval(Interval)
 import Debug.Trace
 import GHC.Generics
 import Data.Unique
@@ -124,24 +125,68 @@ pkMap = _pkMapL
 data DBRef k v =
   DBRef  { patchVar :: TChan [RowPatch k v]
          , idxVar :: TVar (Map (WherePredicateK k) (Int,Map Int (PageTokenF  v)))
-         , idxChan :: TChan ((WherePredicateK k) , Int,Int ,PageTokenF  v)
-         , collectionState  :: TVar (TableIndex k v)
-         , idxVarLoad ::  TVar (GiST (WherePredicateK k ,G.Predicate Int) ())
+         , idxChan :: TChan (WherePredicateK k , Int,Int ,PageTokenF  v)
+         , collectionState  :: TVar ([SecondaryIndex k v],TableIndex k v)
          }
 
 data DBVar2  v=
   DBVar2
   { iniRef :: DBRef Unique v
   , idxTid :: R.Tidings (Map WherePredicate (Int,Map Int (PageTokenF  v)))
-  , collectionTid :: R.Tidings (TableIndex Key v )
+  , collectionTid :: R.Tidings (TableIndex Key v)
   , collectionPatches :: R.Event [RowPatch Key v ]
   }
+
+
+type IndexMetadata k v = Map (WherePredicateK k) (Int,Map Int (PageTokenF  v))
+type TableIndex k v = GiST (TBIndex v) (TBData k v)
+type SecondaryIndex k v = ([k],GiST (TBIndex v) (TBIndex v))
+type TableRep k v  = ([SecondaryIndex k v],TableIndex k v)
+
+applyTableRep
+  ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => TableK k -> TableRep k a -> RowPatch k (Index a) -> Maybe (TableRep k a)
+applyTableRep table (sidxs,l) (PatchRow patom@(m,i, []))
+    = Just $ (didxs <$> sidxs, G.delete (create <$> G.notOptional i) (3,6)  l)
+  where
+    didxs (un ,sidx)= (un,maybe sidx (\v -> G.delete v (3,6) sidx ) (G.getUnique un <$> v))
+    v = G.lookup (create <$> G.notOptional i)  l
+applyTableRep table (sidxs,l) (PatchRow patom@(m,ipa, p)) =  (dixs <$> sidxs ,) <$> (case G.lookup (G.notOptional i) l  of
+                  Just v -> do
+                          el <-  applyIfChange v patom
+                          let pkel = G.getIndex el
+                          return $ if pkel == i
+                                then G.update (G.notOptional i) (const el) l
+                                else G.insert (el,G.tbpred  el) (3,6) . G.delete (G.notOptional i)  (3,6) $ l
+                  Nothing -> let
+                      el = createIfChange  patom
+                   in (\eli -> G.insert (eli,G.tbpred  eli) (3,6)  l) <$> el)
+   where
+     dixs (un,sidx) = (un,sidx)--(\v -> G.insert (v,G.getIndex i) (3,6) sidx ) (G.getUnique un  el))
+     i = fmap create  ipa
+applyTableRep table (sidxs,l) (CreateRow elp ) =  Just  (didxs <$> sidxs,case G.lookup i l  of
+                  Just v ->  if v == el then l else G.insert (el,G.tbpred  el) (3,6) . G.delete i  (3,6) $ l
+                  Nothing -> G.insert (el,G.tbpred  el) (3,6)  l)
+   where
+     didxs (un,sidx) = (un,(\v -> G.insert (v,G.getIndex el) (3,6) sidx ) (G.getUnique un  el))
+     el = fmap (fmap create) elp
+     i = G.notOptional $ G.getIndex el
+
+
+queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[k])-> TableRep k Showable-> G.GiST (TBIndex  Showable) (TBData k Showable)
+queryCheckSecond pred@(WherePredicate b ,pk) (s,g) = t1
+  where t1 = filter' (flip checkPred (fst pred)) $ fromMaybe (getEntries  g)  (searchPK  <|>  searchSIdx)
+        searchPK = (\p -> G.query (mapPredicate (\i -> justError "no predicate" $ L.elemIndex i pk)  $ WherePredicate p) g) <$>  (splitIndexPK b pk)
+        searchSIdx = (\sset -> L.filter ((`S.member` sset) .snd) $ getEntries g) <$> mergeSIdxs
+        testSFks (un,g) = (\p -> S.fromList $ fmap snd $ G.query (mapPredicate (\i -> justError "no predicate" $ L.elemIndex i pk)  $ WherePredicate p) g) <$>  splitIndexPK b  un
+        mergeSIdxs :: Maybe (S.Set (TBIndex Showable))
+        mergeSIdxs = S.unions <$> (nonEmpty $ catMaybes $ testSFks <$> s)
+
+
 
 
 
 type DBVar = DBVar2 Showable
 type Collection k v = (Map (WherePredicateK k) (Int,Map Int (PageTokenF  v)),GiST (TBIndex   v ) (TBData k v))
-type TableIndex k v = GiST (TBIndex   v ) (TBData k v)
 
 type PrePlugins = FPlugins Text
 type Plugins = (Int,PrePlugins)
@@ -205,9 +250,10 @@ deriving instance (NFData v) => NFData (PageTokenF  v)
 data PageTokenF v
   = PageIndex Int
   | NextToken Text
-  | TableRef (TBIndex  v)
+  | TableRef [Interval (FTB v)]
   | HeadToken
   deriving(Eq,Ord,Show,Generic)
+
 
 
 data SchemaEditor

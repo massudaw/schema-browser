@@ -370,7 +370,7 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
                     (traverse (\v -> do
                         let ref = [_tb $ Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd <$> maybeToList (tableNonRef' <$> getref))
                             refTB = [_tb $ Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd .tableNonRef'<$> maybeToList (getref))
-                        tbs <- atTable ( lookTable infsch trefname)
+                        (_,tbs) <- atTable ( lookTable infsch trefname)
                         let reftb = join $ fmap unSOptional $ joinRel2 (tableMeta $ lookTable infsch trefname) (fmap (replaceRel fk . unTB) ref)  (mapKey' (recoverKey infsch) <$> tbs)
                         reftbT <- joinRelT  (fmap (replaceRel fk . unTB )refTB) ( lookTable infsch trefname) (mapKey' (recoverKey infsch) <$> tbs)
                         patch <- maybe (maybe (return reftbT)   (\getref -> traverse (\reftb -> do
