@@ -4,7 +4,6 @@ module SchemaQuery
   createUn
   ,takeMany
   ,convertChanEvent
-  ,childrenRefs
   ,childrenRefsUnique
   ,applyBackend
   ,tellPatches
@@ -28,8 +27,8 @@ module SchemaQuery
   ,transactionNoLog
   ,patchCheck
   ,tableCheck
-  ,filterfixed
   ,filterfixedS
+  ,filterfixed
   ,readState
   ,readIndex
   )where
@@ -410,6 +409,7 @@ filterfixed table fixed v
        then v
        else G.queryCheck (fixed ,rawPK table) v
 
+
 filterfixedS table fixed v
   = if predNull fixed
        then snd v
@@ -426,42 +426,18 @@ childrenRefsUnique  inf table (sidxs,base) (FKJoinTable rel j ,evs)  =  concat $
                   Just idx -> conv <$> resIndex idx
                   Nothing -> conv <$> resScan base
                   where
-                    pred = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (IProd Nothing [justError "no pk" $ L.elemIndex o (fmap _relOrigin rel)]  , Left (fromJust $ unSOptional' $fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
-                    predKey = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (IProd Nothing [o]  , Left (fromJust $ unSOptional' $ fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK (mapTableK keyFastUnique jtable)),op))) <$> relf )
+                    predK = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (IProd Nothing [o]  , Left (fromJust $ unSOptional' $fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
+                    predKey =  mapPredicate keyFastUnique predK
+                    pred =  mapPredicate (\o -> justError "no pk" $ L.elemIndex o (fmap _relOrigin rel)) predK
                     resIndex idx = G.query pred idx
-                    resScan idx = fmap (\i -> ( G.getUnique (fmap (keyFastUnique._relOrigin) rel) i,G.getIndex i)  ) $ filter (flip checkPred predKey ) (G.toList idx)
-                    conv (G.Idex fks , pk) = PatchRow (kvempty,pk ,[PFK relf (zipWith (\i j -> PAttr (_relOrigin i) (patch j)) relf fks ) (recurse rel p)])
+                    resScan idx = fmap (\i -> (G.getIndex i, G.getUnique (fmap (keyFastUnique._relOrigin) rel) i)  ) $ filter (flip checkPred predKey ) (G.toList idx)
+                    conv ( pk,G.Idex fks ) = PatchRow (kvempty,pk ,[PFK relf (zipWith (\i j -> PAttr (_relOrigin i) (patch j)) relf fks ) (recurse rel p)])
                     unKOptional (KOptional i) = i
                     unKOptional i = i
                     recurse  rel  p
                       | L.any (isKOptional .keyType._relOrigin ) rel = POpt $ Just (recurse ( (Le.over (relOri .keyTypes) unKOptional) <$> rel) p )
                       | otherwise = PAtom p
                       -- | L.any (isArray ._relOrigin ) rel = POpt $ Just (recurse ( (Le.over (relOri ) unKOptional) <$> rel) p )
-
-
-
-childrenRefs :: InformationSchema -> ([SecondaryIndex Key Showable],TableIndex Key Showable) -> (SqlOperation , [RowPatch Key Showable]) -> [RowPatch Key Showable]
-childrenRefs inf (sidxs,base) (FKJoinTable rel j ,evs)  =  concat $ (\i -> search  i  sidx) <$>  evs
-              where
-                rinf = maybe inf id $ HM.lookup ((fst j))  (depschema inf)
-                jtable = lookTable rinf $ snd j
-                sidx = M.lookup (_relOrigin  <$> rel) (M.fromList sidxs)
-                search (PatchRow p@(_,G.Idex v,_)) idxM = case idxM of
-                  Just idx -> conv <$> resIndex (idx)
-                  Nothing -> conv <$> resScan (base)
-                  where
-                    pred = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (IProd Nothing [justError "no pk" $ L.elemIndex o (fmap _relOrigin rel)]  , Left (fromJust $ unSOptional' $fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
-                    predKey = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (IProd Nothing [o ]  , Left (fromJust $ unSOptional' $ fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
-                    resIndex idx = G.query pred idx
-                    resScan idx = fmap (\i -> ( G.getUnique (fmap _relOrigin rel) i,G.getIndex i)  ) $ filter (flip checkPred predKey ) (G.toList idx)
-                    conv (G.Idex fks , pk) = PatchRow (kvempty,pk ,[PFK rel (zipWith (\i j -> PAttr (_relOrigin i) (patch j)) rel fks ) (recurse rel p)])
-                    unKOptional (KOptional i) = i
-                    unKOptional i = i
-                    recurse  rel  p
-                      | L.any (isKOptional .keyType._relOrigin ) rel = POpt $ Just (recurse ( (Le.over (relOri .keyTypes) unKOptional) <$> rel) p )
-                      | otherwise = PAtom p
-                    --  | L.any (isArray ._relOrigin ) rel = POpt $ Just (recurse ( (Le.over (relOri ) unKOptional) <$> rel) p )
-
 
 
 
@@ -516,9 +492,6 @@ pageTable flag method table page size presort fixed = do
     let iniFil = (nidx,ndata)
     modify (M.insert (table,fixed)  ndata)
     (vpt,evpt) <- mdo
-        let
-          mergeDep b (fk,e)= childrenRefs inf <$> facts b <@> ((fk ,) <$> e)
-          mergeDeps = fmap concat $ unions  $ fmap (mergeDep vpt) evs
 
         (vpt ,evpt)<- lift $ convertChanTidings0 inf tableU (fixedU ,rawPK tableU) never (sidx ,snd iniFil) iniVar nchan
         return (vpt,evpt)

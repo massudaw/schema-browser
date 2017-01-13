@@ -26,7 +26,7 @@ import qualified Data.Text as T
 
 import qualified Data.List as L
 import Control.Arrow
-import Data.Text
+import Data.Text (Text)
 import Control.Applicative
 import Control.Monad.Writer
 
@@ -173,9 +173,10 @@ applyTableRep table (sidxs,l) (CreateRow elp ) =  Just  (didxs <$> sidxs,case G.
 
 
 queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[k])-> TableRep k Showable-> G.GiST (TBIndex  Showable) (TBData k Showable)
-queryCheckSecond pred@(b ,pk) (s,g) = t1
-  where t1 = filter' (flip checkPred (fst pred)) $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
+queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (s,g) = t1
+  where t1 = G.fromList' . maybe id (\pred -> L.filter (flip checkPred (pred) . fst )) notPK $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
         searchSIdx = (\sset -> L.filter ((`S.member` sset) .snd) $ getEntries g) <$> mergeSIdxs
+        notPK = fmap WherePredicate $ F.foldl' (\l i -> flip G.splitIndexPKB  i =<< l ) (Just bool) (pk : fmap fst s )
         mergeSIdxs :: Maybe (S.Set (TBIndex Showable))
         mergeSIdxs = S.unions <$> (nonEmpty $ catMaybes $ fmap (S.fromList . fmap snd ) . searchPK b <$> s)
 

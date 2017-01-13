@@ -631,11 +631,11 @@ firstT f (i,j) = (,j) <$> f i
 
 
 instance (Ord a )=> Semigroup (FTB a) where
- (LeftTB1 i)<> (LeftTB1 j) = LeftTB1 (j)
- (IntervalTB1 i) <> (IntervalTB1 j) = IntervalTB1 ( i `Interval.intersection` j)
- (ArrayTB1 i) <> (ArrayTB1 j) = ArrayTB1 (i <>  j)
- (DelayedTB1 i) <> (DelayedTB1 j) = DelayedTB1 (j)
- (SerialTB1 i) <> (SerialTB1 j) = SerialTB1 (j)
- (TB1 i) <> (TB1 j) = TB1 j
+ LeftTB1 i<> LeftTB1 j = LeftTB1 j
+ IntervalTB1 i <> IntervalTB1 j = IntervalTB1 ( i `Interval.intersection` j)
+ ArrayTB1 i <> ArrayTB1 j = ArrayTB1 (i <>  j)
+ DelayedTB1 i <> DelayedTB1 j = DelayedTB1 j
+ SerialTB1 i <> SerialTB1 j = SerialTB1 j
+ TB1 i <> TB1 j = TB1 j
 
 

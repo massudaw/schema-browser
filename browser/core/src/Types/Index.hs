@@ -21,7 +21,7 @@ module Types.Index
 --  ,insertRefl,deleteRefl,searchRefl
 -- ,buildGistConsistent
 -- ,ReifiedGist(..)
-  ,minP,maxP,unFin,queryCheck,indexPred,checkPred,splitIndex,splitPred,splitIndexPK,module G ) where
+  ,minP,maxP,unFin,queryCheck,indexPred,checkPred,splitIndex,splitPred,splitIndexPKB,splitIndexPK,module G ) where
 
 import Data.Reflection
 import qualified Data.Vector as V
@@ -202,6 +202,15 @@ splitIndexPK (AndColl l ) pk  = fmap AndColl $ nonEmpty $ catMaybes $ (\i -> spl
 splitIndexPK (PrimColl (p@(IProd _ [i]),op) ) pk  = if elem i  pk  then Just (PrimColl (p,op)) else Nothing
 splitIndexPK (PrimColl (p@(IProd _ l),op) ) pk  = Nothing --errorWithStackTrace (show (l,op,pk))
 splitIndexPK i  pk  = Nothing -- errorWithStackTrace (show (i,pk))
+
+splitIndexPKB :: Eq k => BoolCollection (Access k ,AccessOp Showable) -> [k] -> Maybe (BoolCollection (Access k , AccessOp Showable))
+splitIndexPKB  (OrColl l ) pk  = if F.all (isNothing .snd) al then Nothing else Just $ OrColl $ fmap (\(i,j) -> fromMaybe i j) al
+    where
+      al = (\l -> (l,splitIndexPKB  l pk ) )<$> l
+splitIndexPKB  (AndColl l ) pk  = fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB  i pk ) <$> l
+splitIndexPKB  (PrimColl (p@(IProd _ [i]),op) ) pk  = if not (elem i  pk)  then Just (PrimColl (p,op)) else Nothing
+splitIndexPKB  i  pk  = Just i
+
 
 
 instance Monoid (TBIndex a) where
@@ -387,7 +396,9 @@ indexPred i v= errorWithStackTrace (show (i,v))
 
 queryCheck :: (Show k,Ord k) => (WherePredicateK k ,[k])-> G.GiST (TBIndex Showable) (TBData k Showable) -> G.GiST (TBIndex  Showable) (TBData k Showable)
 queryCheck pred@(WherePredicate b ,pk) = t1
-  where t1 = filter' (flip checkPred (fst pred)) . maybe G.getEntries (\p -> G.query (mapPredicate (\i -> justError ("no predicate " ++ show (i,pk)) $ L.elemIndex i pk)  $ WherePredicate p)) (splitIndexPK b pk)
+  where t1 = fromList' . maybe id (\pred -> L.filter (flip checkPred (WherePredicate pred) . fst )) notPK . maybe G.getEntries (\p -> G.query (mapPredicate (\i -> justError ("no predicate " ++ show (i,pk)) $ L.elemIndex i pk)  $ WherePredicate p)) (splitIndexPK b pk)
+        notPK = splitIndexPKB b pk
+
 
 -- Atomic Predicate
 
