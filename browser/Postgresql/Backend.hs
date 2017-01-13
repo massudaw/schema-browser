@@ -5,6 +5,7 @@ import Types
 import qualified Types.Index as G
 import SchemaQuery
 import Step.Common
+import Control.Exception (uninterruptibleMask,mask_,throw,catch,throw,SomeException)
 import Step.Host
 import Data.Interval (Extended(..),upperBound)
 import Data.Either
@@ -151,8 +152,10 @@ paginate inf t order off size koldpre wherepred = do
       jsonDecode =  do
         let quec = fromString $ T.unpack $ "SELECT row_to_json(q),count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
         print quec
-        logLoadTimeTable inf (lookTable inf $ _kvname (fst t)) wherepred "JSON" $
-          uncurry (queryWith (withCount (fromRecordJSON t) ) (conn inf ) ) (quec, maybe [] (fmap (either(Left .firstTB (recoverFields inf)) Right)) attr)
+        uninterruptibleMask(\restore ->  do
+          x <- logLoadTimeTable inf (lookTable inf $ _kvname (fst t)) wherepred "JSON" $
+                uncurry (queryWith (withCount (fromRecordJSON t) ) (conn inf ) ) (quec, maybe [] (fmap (either(Left .firstTB (recoverFields inf)) Right)) attr)
+          restore (return x) `catch` (\e -> throw (e :: SomeException) ))
       textDecode = do
         let quec = fromString $ T.unpack $ "SELECT *,count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
         print quec

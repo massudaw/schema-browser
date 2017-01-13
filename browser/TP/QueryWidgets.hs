@@ -101,7 +101,7 @@ type SelPKConstraint = [([Column CoreKey ()],Tidings PKConstraint)]
 
 type SelTBConstraint = [([Column CoreKey ()],Tidings TBConstraint)]
 
-type RefTables = (Tidings (IndexMetadata CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)), TChan [RowPatch KeyUnique Showable] )
+type RefTables = (Tidings (IndexMetadata CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)),Tidings [SecondaryIndex CoreKey Showable ], TChan [RowPatch KeyUnique Showable] )
 
 --- Plugins Interface Methods
 createFresh :: Text -> InformationSchema -> Text -> KType CorePrim -> IO InformationSchema
@@ -344,7 +344,7 @@ labelCase inf a old wid = do
 
 refTables' inf table page pred = do
         (ref,res)  <-  transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
-        return (idxTid ref,res,collectionTid ref,patchVar $ iniRef ref)
+        return (idxTid ref,res,collectionTid ref,undefined,patchVar $ iniRef ref)
 
 
 refTables inf table = refTables' inf table Nothing mempty
@@ -359,7 +359,7 @@ tbCaseDiff
   -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
 tbCaseDiff inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
         let
-            oldItems =  preoldItems -- (\v -> if L.null v then preoldItems else fmap (maybe (Just (FKT (kvlist $ fmap  (_tb . uncurry Attr)  v) rel (SerialTB1 Nothing) )) Just ) preoldItems  ) (Tra.traverse (\k -> fmap (k,) . keyStatic $ k ) ( getRelOrigin $ fmap unTB $ unkvlist ifk))
+            oldItems =  preoldItems
             nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin $ fmap unTB $ unkvlist ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattri .fst) wl
             relTable = M.fromList $ fmap (\i -> (_relTarget i,_relOrigin i)) rel
@@ -374,7 +374,7 @@ tbCaseDiff inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
         let
             patchRefs = fmap (\(a,b) -> (flip recoverEditChange ) <$> facts a <#> b ) <$> nonInjRefs
         ref <- ui $ refTables rinf   table
-        v <-  fkUITableDiff rinf (convertConstr ) ref plugItens  patchRefs oldItems i
+        v <-  fkUITableDiff rinf convertConstr ref plugItens  patchRefs oldItems i
         return $ TrivialWidget  (triding v ) (getElement v)
 
 tbCaseDiff inf _ i@(IT na tb1 ) wl plugItens oldItems
@@ -515,73 +515,6 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) oldItems = do
      set style [("margin-left","0px"),("border","2px"),("border-color","gray"),("border-style","solid")]
   return (body, output)
 
-
-{-
-crudUITableDiff
-   :: InformationSchema
-   -> Tidings String
-   -> RefTables
-   -> [(TB Identity CoreKey () ,Tidings (Maybe (TB Identity CoreKey Showable)))]
-   -> PluginRef (TBData CoreKey Showable)
-   -> TBData CoreKey ()
-   -> Tidings (Maybe (TBData CoreKey Showable))
-   -> UI ([Element],Tidings (Editor (Index (TBData CoreKey Showable))))
-crudUITableDiff inf open reftb@(bres , _ ,gist ,tref) refs pmods ftb@(m,_)  preoldItems = do
-  (e2,h2) <- ui $ newEvent
-  nav  <- buttonDivSet ["+","-"] (fmap Just open) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-right")
-  element nav # set UI.class_ "col-xs-3 pull-right"
-  sub <- UI.div
-  let table = lookTable inf ( _kvname  m )
-  let
-      ini = maybe Delete Diff . safeHead . compact  . catMaybes  <$> (Tra.sequenceA $  snd  <$> pmods)
-      fun "+" = logTime "crud" $ do
-          let
-            getItem :: TBData CoreKey Showable -> TransactionM (Maybe (TBIdx CoreKey Showable))
-            getItem  v =  getFrom table v `catchAll` (\e -> liftIO (putStrLn $"error getting Item" ++ show (e :: SomeException)) >> return Nothing)
-          preoldItens <- currentValue (facts preoldItems)
-          loadedItens <-  ui $ join <$> traverse (transactionNoLog inf  . getItem) preoldItens
-          (loadedItensEv ) <- mapUIFinalizerT sub (ui . fmap join <$> traverse (\i ->  do
-            p <-  transactionNoLog inf . getItem $ i
-            putPatch tref (fmap PatchRow $ maybeToList p)
-            return (fmap PatchRow p  ))) (preoldItems)
-          let
-              deleteCurrentUn ::
-                         (Ord k) =>
-                         [k]
-                         -> Maybe (TBData k Showable)
-                         -> G.GiST (TBIndex Showable) a
-                         -> G.GiST (TBIndex Showable) a
-              deleteCurrentUn un e l =   maybe l (\v -> G.delete v (3,6) l) $  G.getUnique un <$> e
-              tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ snd $ tbPK ftb , (_kvpk m,  gist))
-          unConstraints <-  traverse (traverse (traverse (ui . mapTEventDyn return ))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn (S.fromList un ) (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un . G.toList ) gist))) <$> (_kvuniques m)
-          unDeleted <- traverse (traverse (traverse (ui . mapTEventDyn return))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> preoldItems <*> o))) (tpkConstraint:unConstraints))
-          let
-              dunConstraints (un,o) = flip (\i ->  maybe (const False ) (unConstraint un .tblist' table . fmap _tb ) (traverse (traFAttr unSOptional' ) i ) ) <$> o
-              unFinal:: [([Column CoreKey ()], Tidings PKConstraint)]
-              unFinal = fmap (fmap dunConstraints) unDeleted
-          (listBody,tablebdiff) <- eiTableDiff inf   unFinal  refs pmods ftb preoldItems
-          let
-            tableb = recoverEditChange <$> preoldItems <*> tablebdiff
-
-
-          (panelItems,tdiff)<- processPanelTable listBody inf reftb  tablebdiff table preoldItems
-          let diff = unionWith const tdiff   (filterJust $ rumors loadedItensEv)
-
-          ui $ onEventDyn diff (putPatch tref . pure)
-          ui $ onEventDyn (rumors tablebdiff) (liftIO . h2)
-          UI.div # set children [listBody,panelItems]
-      fun i = do
-        ui $ onEventDyn (rumors ini) (liftIO . h2)
-        UI.div
-
-  end <- mapUIFinalizerT sub fun (diffTidings $ triding nav)
-  element sub # sink children (pure <$> facts end)
-  cv <- currentValue (facts ini)
-  bh2 <- ui $ stepper  cv e2
-  return ([getElement nav,sub],  tidings bh2 e2   )
-
-
--}
 crudUITable
    :: InformationSchema
    -> Tidings String
@@ -591,7 +524,7 @@ crudUITable
    -> TBData CoreKey ()
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> UI ([Element],Event (TBIdx CoreKey Showable ) ,Tidings (Maybe (TBData CoreKey Showable)))
-crudUITable inf open reftb@(_, _ ,gist ,tref) refs pmods ftb@(m,_)  preoldItems = do
+crudUITable inf open reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItems = do
   (e2,h2) <- ui $ newEvent
   (ediff ,hdiff) <- ui $ newEvent
   nav  <- buttonDivSet ["+","-"] (fmap Just open) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-right")
@@ -612,7 +545,7 @@ crudUITable inf open reftb@(_, _ ,gist ,tref) refs pmods ftb@(m,_)  preoldItems 
           let
               deleteCurrentUn un e l =   maybe l (\v -> G.delete v (3,6) l) $  G.getUnique un <$> e
               tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ snd $ tbPK ftb , (_kvpk m, ( gist)))
-          unConstraints <-  traverse (traverse (traverse (ui . mapTEventDyn return ))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn (S.fromList un ) (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un . G.toList ) (gist)))) <$> (_kvuniques m)
+          unConstraints <-  traverse (traverse (traverse (ui . mapTEventDyn return ))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn (S.fromList un ) (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un . G.toList ) gist))) <$> _kvuniques m
           unDeleted <- traverse (traverse (traverse (ui . mapTEventDyn return))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> preoldItems <*> o))) (tpkConstraint:unConstraints))
           let
               dunConstraints (un,o) = flip (\i ->  maybe (const False ) (unConstraint un .tblist' table . fmap _tb ) (traverse (traFAttr unSOptional' ) i ) ) <$> o
@@ -656,7 +589,7 @@ processPanelTable
    -> Table
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> UI (Element, Event (RowPatch CoreKey Showable) )
-processPanelTable lbox inf reftb@(res,_,gist,_) inscrudp table oldItemsi = do
+processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   let
       inscrud = recoverEditChange <$> oldItemsi <*> inscrudp
       containsGist ref map = if isJust refM then not $ L.null (lookGist ix ref map) else False
@@ -1307,7 +1240,7 @@ fkUITableDiff
   -- Static Information about relation
   -> Column CoreKey ()
   -> UI (TrivialWidget(Editor (Index (Column CoreKey Showable))))
-fkUITableDiff inf constr reftb@(vpt,res,gist,tmvard) plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = logTime ("fk " <> (show $ keyattri tb)) $ mdo
+fkUITableDiff inf constr reftb@(vpt,_,gist,_,_) plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = logTime ("fk " <> (show $ keyattri tb)) $ mdo
       let
         relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
         ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$>  plmods)

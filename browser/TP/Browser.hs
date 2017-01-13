@@ -193,7 +193,7 @@ addClient clientId metainf inf table row =  do
     let new = maybe newi (\table -> apply newi (liftPatch metainf "clients" $addTable (clientId) now table  0)) table
     dbmeta  <- prerefTable metainf (lookTable metainf "clients")
     putPatch (patchVar $dbmeta ) [PatchRow $patch new]
-    (_,_,clientState,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl (keyRef [ (lookKey (meta inf) "clients" "clientid")] , Left (num clientId,Equals))]))
+    (_,_,clientState,_,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl (keyRef [ (lookKey (meta inf) "clients" "clientid")] , Left (num clientId,Equals))]))
     return (clientId, getClient metainf clientId inf <$> clientState)
 
 
@@ -265,7 +265,7 @@ viewerKey inf table tix cli layoutS cliTid = mdo
                       unKey t = liftA2 (,) ((\(Attr _ (TB1 (SText i)))-> Just $ lookKey inf  (tableName table) i ) $ lookAttr' (meta inf)  "key" t  )( pure $ (\(Attr _ (TB1 (SDynamic i)))-> i) $ lookAttr'  (meta inf)  "val" t )
                 in (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
 
-  reftb@(vptmeta,vp,vpt,var) <- ui $ refTables inf table
+  reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables inf table
 
   let
       tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (fmap snd $ justError "" $ traverse (traverse unSOptional' ) $v)) i ) iv ) <$> vpt <*> tdip

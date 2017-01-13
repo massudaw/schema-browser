@@ -54,7 +54,7 @@ main = do
   print "Start Server"
   (ref ,ls)<- runDynamic $ addServer metas
 
-
+{-
   print "Load Polling Process"
   poller smvar amap db regplugs False
   -- pollRmtc smvar amap (T.pack $ user db)
@@ -68,7 +68,7 @@ main = do
   sh <- lookupEnv "SYNC_HOST"
   traverse (forkIO . flip patchServer  smvar) (ServerConfig <$> (join $ readMay <$> sp)<*> sh)
 
-
+-}
   print "Load GUI Server"
   let
     initGUI = do

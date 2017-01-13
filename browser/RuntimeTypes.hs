@@ -167,21 +167,21 @@ applyTableRep table (sidxs,l) (CreateRow elp ) =  Just  (didxs <$> sidxs,case G.
                   Just v ->  if v == el then l else G.insert (el,G.tbpred  el) (3,6) . G.delete i  (3,6) $ l
                   Nothing -> G.insert (el,G.tbpred  el) (3,6)  l)
    where
-     didxs (un,sidx) = (un,(\v -> G.insert (v,G.getIndex el) (3,6) sidx ) (G.getUnique un  el))
+     didxs (un,sidx) = (un,G.insert (G.getIndex el,G.getUnique un  el) (3,6) sidx  )
      el = fmap (fmap create) elp
      i = G.notOptional $ G.getIndex el
 
 
 queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[k])-> TableRep k Showable-> G.GiST (TBIndex  Showable) (TBData k Showable)
-queryCheckSecond pred@(WherePredicate b ,pk) (s,g) = t1
-  where t1 = filter' (flip checkPred (fst pred)) $ fromMaybe (getEntries  g)  (searchPK  <|>  searchSIdx)
-        searchPK = (\p -> G.query (mapPredicate (\i -> justError "no predicate" $ L.elemIndex i pk)  $ WherePredicate p) g) <$>  (splitIndexPK b pk)
+queryCheckSecond pred@(b ,pk) (s,g) = t1
+  where t1 = filter' (flip checkPred (fst pred)) $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
         searchSIdx = (\sset -> L.filter ((`S.member` sset) .snd) $ getEntries g) <$> mergeSIdxs
-        testSFks (un,g) = (\p -> S.fromList $ fmap snd $ G.query (mapPredicate (\i -> justError "no predicate" $ L.elemIndex i pk)  $ WherePredicate p) g) <$>  splitIndexPK b  un
         mergeSIdxs :: Maybe (S.Set (TBIndex Showable))
-        mergeSIdxs = S.unions <$> (nonEmpty $ catMaybes $ testSFks <$> s)
+        mergeSIdxs = S.unions <$> (nonEmpty $ catMaybes $ fmap (S.fromList . fmap snd ) . searchPK b <$> s)
 
 
+searchPK ::  Eq k => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [(a,TBIndex  Showable)]
+searchPK (WherePredicate b) (pk, g)= (\p -> G.query (mapPredicate (\i -> justError "no predicate pk " $ L.elemIndex i pk)  $ WherePredicate p) g) <$>  splitIndexPK b pk
 
 
 

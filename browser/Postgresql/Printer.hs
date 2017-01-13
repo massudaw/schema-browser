@@ -64,9 +64,9 @@ dropTable r= "DROP TABLE "<> rawFullName r
 
 
 -- createTable :: Table -> Text
-createTable r@(Raw _ sch _ _ _ _ tbl _ _ _ pk _ fk inv attr _) = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
+createTable r = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
   where
-    commands = (renderAttr <$> S.toList attr ) <> [renderPK] <> fmap renderFK (S.toList fk)
+    commands = (renderAttr <$> S.toList (rawAttrs r) ) <> [renderPK] <> fmap renderFK (S.toList $ rawFKS r)
     renderAttr k = keyValue k <> " " <> renderTy (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
     renderKeySet pk = T.intercalate "," (fmap keyValue (S.toList pk ))
     renderTy (KOptional ty) = renderTy ty <> ""
@@ -75,7 +75,7 @@ createTable r@(Raw _ sch _ _ _ _ tbl _ _ _ pk _ fk inv attr _) = "CREATE TABLE "
     renderTy (KArray ty) = renderTy ty <> "[] "
     renderTy (Primitive ty ) = ty
     -- renderTy (InlineTable s ty ) = s <> "." <> ty
-    renderPK = "CONSTRAINT " <> tbl <> "_PK PRIMARY KEY (" <>  renderKeySet (S.fromList pk) <> ")"
+    renderPK = "CONSTRAINT " <> tableName r<> "_PK PRIMARY KEY (" <>  renderKeySet (S.fromList $ rawPK r) <> ")"
     -- renderFK (Path origin (FKJoinTable  ks (_,table)) ) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
     renderFK (Path origin _  ) = ""
 

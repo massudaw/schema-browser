@@ -2,8 +2,8 @@
 
 update 
  pg_attribute set attnotnull = 't'
-from pg_class 
- , metadata.view_pk   where attrelid = oid and attname in (select unnest(pks)) and table_name = pg_class.relname and attnotnull = 'f';
+from pg_class c
+ , metadata.view_pk   where attrelid = c.oid and attname in (select unnest(pks)) and table_name = c.relname and attnotnull = 'f';
 
 
 -- UPDATE NOT NULL METADATA VIEW FIELDS

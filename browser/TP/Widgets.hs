@@ -125,7 +125,7 @@ mapEvent f x = do
 
 mapTEventDyn f x = do
   i <- currentValue  (facts x)
-  mapT0EventDyn i f x
+  mapT0EventDynInterrupt i f x
 
 mapT0EventDyn :: a -> (a -> Dynamic b) -> Tidings a -> Dynamic (Tidings b)
 mapT0EventDyn i f x = mdo
@@ -135,6 +135,16 @@ mapT0EventDyn i f x = mdo
   registerDynamic $ sequence_ . snd =<< currentValue t
   return $ tidings (fst <$>t) (fst <$> e)
 
+
+
+mapT0EventDynInterrupt :: a -> (a -> Dynamic b) -> Tidings a -> Dynamic (Tidings b)
+mapT0EventDynInterrupt i f x = mdo
+  ini <- liftIO $ runDynamic $ f i
+  (e,ei) <- mapEventDynInterrupt (\ ~(a,i ,b) -> liftIO i >> liftIO (sequence_ a) >>  f b) ((,,)<$> (snd <$> t)  <*> ti <@> rumors x)
+  t <- stepper ini e
+  ti <- stepper (return ()) ei
+  registerDynamic $ sequence_ . snd =<< currentValue t
+  return $ tidings (fst <$>t) (fst <$> e)
 
 
 

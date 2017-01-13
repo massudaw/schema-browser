@@ -15,7 +15,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Types.Index
-  (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,filter ,filter'
+  (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,fromList',filter ,filter'
   ,Number(..)
   ,getIndex ,getBounds,getUnique,notOptional,tbpred
 --  ,insertRefl,deleteRefl,searchRefl
@@ -387,7 +387,7 @@ indexPred i v= errorWithStackTrace (show (i,v))
 
 queryCheck :: (Show k,Ord k) => (WherePredicateK k ,[k])-> G.GiST (TBIndex Showable) (TBData k Showable) -> G.GiST (TBIndex  Showable) (TBData k Showable)
 queryCheck pred@(WherePredicate b ,pk) = t1
-  where t1 = filter' (flip checkPred (fst pred)) . maybe G.getEntries (\p -> G.query (mapPredicate (\i -> justError "no predicate" $ L.elemIndex i pk)  $ WherePredicate p)) (splitIndexPK b pk)
+  where t1 = filter' (flip checkPred (fst pred)) . maybe G.getEntries (\p -> G.query (mapPredicate (\i -> justError ("no predicate " ++ show (i,pk)) $ L.elemIndex i pk)  $ WherePredicate p)) (splitIndexPK b pk)
 
 -- Atomic Predicate
 
@@ -444,12 +444,11 @@ instance (ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord 
         cons (SerialTB1 i) j = fromMaybe True $ (flip cons j ) <$>  i
         cons j (SerialTB1 i)  = fromMaybe True $ (cons j ) <$>  i
         cons i (LeftTB1 j) = fromMaybe True $(cons i ) <$>  j
-        cons i j  = errorWithStackTrace (show (i,j))
-  consistent  i j  = errorWithStackTrace (show (i,j))
+        cons i j  = errorWithStackTrace (show ("rr",i,j))
 
-  match i (Left j) = mar i  j
+  match i (Left j) = mal i  j
     where
-      mar (Left v)  j  = ma  v  j
+      mal (Left v)  j  = ma  v  j
         where
           ma (i@(TB1 _) ,op)  j  = i `Interval.member` j
           ma (DelayedTB1 j ,v)   i   = fromMaybe False ((\a -> ma (a,v) i) <$> j)
@@ -459,15 +458,16 @@ instance (ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord 
           ma (IntervalTB1 i ,Contains) j = j `Interval.isSubsetOf` i
           ma (IntervalTB1 j ,Flip Contains) (i)  = j `Interval.isSubsetOf` i
           ma (IntervalTB1 j ,IntersectOp) (i)  = not $ Interval.null $ j `Interval.intersection` i
+          ma (IntervalTB1 j ,_) (i)  = not $ Interval.null $ j `Interval.intersection` i
           ma  i j =errorWithStackTrace (show (i,j))
-      mar (Right v) j = ma v j
+      mal (Right v) j = ma v j
         where
           ma  (Not i)   j   = not $ ma i   j
           ma  IsNull    j   = False
-          ma  (BinaryConstant op e )  v  = mar (Left (generate e,op))  v
+          ma  (BinaryConstant op e )  v  = mal (Left (generate e,op))  v
           ma  (Range b pred)  j   = match  (Right  pred) $ Right $ LeftTB1 $ fmap TB1 $ unFin $ if b then upperBound j else lowerBound j
           ma  i j =errorWithStackTrace (show (i,j))
-      mar i j = errorWithStackTrace $ show (i,j)
+      mal i j = errorWithStackTrace $ show (i,j)
   match i (Right j) = mar i j
     where
       mar (Left v)  j  = ma  v  j
@@ -506,7 +506,7 @@ instance (ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord 
           ma i  j = errorWithStackTrace ("no ma =" ++ show (i,j))
   match x  z = errorWithStackTrace ("no match = " <> show (x,z))
 
-  bound (Right i) =  (ER.Finite i,True) `interval` (ER.Finite i,True)
+  bound (Right i) =  minP i `interval` maxP i
   bound (Left i) =  i
   {-# INLINE bound #-}
   merge (Left i ) (Left j)  =  min (lowerBound' i) (lowerBound' j) `interval` max (upperBound' j) (upperBound' i)
@@ -530,7 +530,6 @@ instance (ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord 
 newtype Number a = Number a deriving (Num,Eq,Ord,Generic)
 
 instance NFData a => NFData (Number a)
-
 instance (NFData a,Ord a ,Num a) => Predicates (Number a) where
   type Penalty (Number a) = ER.Extended (Number a)
   type Node (Number a) = Interval (Number a)
@@ -559,7 +558,6 @@ instance (NFData a,Ord a ,Num a) => Predicates (Number a) where
   merge (Right i ) (Right j) =  (ER.Finite $ min i j ,True ) `interval` (ER.Finite $ max i j , True)
   {-# INLINE merge #-}
 
-
 unFin' (Interval.Finite i) = Just i
 unFin' i = Nothing
 
@@ -578,7 +576,7 @@ minP i = errorWithStackTrace (show i)
 
 maxP ((IntervalTB1 i) ) = upperBound' i
 maxP (i@(TB1 _) ) = (ER.Finite $ i,True)
-maxP (LeftTB1 (Just i) ) = minP i
+maxP (LeftTB1 (Just i) ) = maxP i
 maxP ((ArrayTB1 i) ) =   maxP $  F.maximum i
 maxP i = errorWithStackTrace (show i)
 
@@ -587,6 +585,12 @@ maxP i = errorWithStackTrace (show i)
 fromList pred = foldl'  acc G.empty
   where
     acc !m v = G.insert (v,pred v ) (3,6) m
+
+-- Higher Level operations
+fromList' :: Predicates p => [(a ,p)] -> GiST p a
+fromList' = foldl'  acc G.empty
+  where
+    acc !m v = G.insert v (3,6) m
 
 lookup pk  = safeHead . G.search pk
 

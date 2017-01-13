@@ -69,7 +69,6 @@ import Data.Unique
 
 makeLenses ''KV
 makeLenses ''TB
-makeLenses ''Rel
 
 isSerial (KSerial _) = True
 isSerial _ = False
@@ -356,7 +355,7 @@ data TableType
 
 type Table = TableK Key
 
-mapTableK f (Raw  uni s tt tr de is rn  un ra rsc rp rd rf inv rat u ) = Raw uni s tt tr (S.map f de) is rn (fmap (fmap f) un) ra (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf )(S.map (mapPath f )  inv) (S.map f rat) (mapTableK f <$> u)
+mapTableK f (Raw  uni s tt tr de is rn  un idx ra rsc rp rd rf inv rat u ) = Raw uni s tt tr (S.map f de) is rn (fmap (fmap f) un) (fmap (fmap f) idx) ra (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf )(S.map (mapPath f )  inv) (S.map f rat) (mapTableK f <$> u)
   where mapPath f (Path i j ) = Path (S.map f i) (fmap f j)
 
 instance Show Unique where
@@ -375,6 +374,7 @@ data TableK k
            , rawIsSum :: Bool
            , _rawNameL :: Text
            , uniqueConstraint :: [[k]]
+           , _rawIndexes ::  [[k]]
            , rawAuthorization :: [Text]
            , _rawScope :: [k]
            , _rawPKL :: [k]
@@ -661,7 +661,7 @@ srange l m = IntervalTB1 $ Interval.interval (Interval.Finite l,True) (Interval.
 
 
 
-
+makeLenses ''Rel
 makeLenses ''FKey
 makeLenses ''TableK
 

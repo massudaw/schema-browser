@@ -15,7 +15,7 @@ import Control.Concurrent
 import Utils
 import Types.Patch
 import Control.Arrow
-import Control.Lens ((^.), _1, mapped,_2, _3,_4)
+import Control.Lens ((^.), _1, mapped,_2, _3,_4,_5)
 import qualified Data.List as L
 import Data.Either
 import Data.Interval (Interval(..))
@@ -163,7 +163,7 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
                     tdib <- ui $ stepper Nothing (join <$> evsel)
                     let tdi = tidings tdib (join <$> evsel)
                     (el,ediff,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi)  reftb [] [] (allRec' (tableMap inf) $ t)  tdi
-                    ui $ onEventDyn (pure <$> ediff) (liftIO .  putPatch (reftb ^. _4 ).fmap PatchRow)
+                    ui $ onEventDyn (pure <$> ediff) (liftIO .  putPatch (reftb ^. _5 ).fmap PatchRow)
                     mapUIFinalizerT innerCalendar
                       (\i -> do
                         calendarAddSource innerCalendar  t ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .  concat . fmap (lefts.snd) $ fmap proj $ G.toList i))
