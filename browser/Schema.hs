@@ -644,7 +644,7 @@ writeTable :: InformationSchema -> String -> Table -> DBRef KeyUnique Showable -
 writeTable inf s t v = do
   print ("dumping table " <> s <> " " <> T.unpack ( tableName t))
   let tname = s <> "/" <> (fromString $ T.unpack (tableName t))
-  (sidx,iv,_,_) <- atomically $ readState mempty (v)
+  (sidx,iv,_,_) <- atomically $ readState mempty (mapTableK keyFastUnique t) (v)
   (iidx ,_)<- atomically $ readIndex (v)
   let sidx = first (mapPredicate (keyValue.recoverKey inf))  <$> M.toList iidx
       sdata = fmap (mapKey' (keyValue.recoverKey inf).tableNonRef') $ G.toList $ iv

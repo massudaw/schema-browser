@@ -16,7 +16,6 @@
 
 module Types.Index
   (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,fromList',filter ,filter'
-  ,Number(..)
   ,getIndex ,getBounds,getUnique,notOptional,tbpred
 --  ,insertRefl,deleteRefl,searchRefl
 -- ,buildGistConsistent
@@ -71,6 +70,8 @@ import qualified Data.Map.Strict as M
 instance (Binary a)  => Binary (TBIndex a)
 instance (NFData a)  => NFData (TBIndex a)
 
+cinterval ::Ord a=> a -> a -> Interval a
+cinterval i j = ER.Finite i Interval.<=..<= ER.Finite j
 
 
 getUnique :: Ord k => [k] -> TBData k a -> TBIndex  a
@@ -357,7 +358,7 @@ checkPred' v (AndColl i ) = F.all  (checkPred' v)i
 checkPred' v (OrColl i ) = F.any (checkPred' v) i
 checkPred' v (PrimColl i) = indexPred i v
 
-type ShowableConstr  a = (ConstantGen (FTB a ),Affine a,Positive (Tangent a),Semigroup (Tangent a),Ord (Tangent a),Ord a )
+type ShowableConstr  a = (Range a,ConstantGen (FTB a ),Affine a,Positive (Tangent a),Semigroup (Tangent a),Ord (Tangent a),Ord a )
 indexPred :: (Show k ,ShowableConstr a , Show a,Ord k) => (Access k ,AccessOp a) -> TBData k a-> Bool
 indexPred (Many i,eq) a= all (\i -> indexPred (i,eq) a) i
 indexPred (n@(Nested k nt ) ,eq) r
@@ -425,8 +426,26 @@ instance Predicates Showable where
   penalty (Right (SDouble i)) (Right  (SDouble j)) = DSDouble $ i  - j
   -- penalty (Left i) (Right  (SDouble j)) = DSDouble $ i  - j
 
+class Range v where
+  pureR :: v -> Interval  v
+  appendR :: v -> v -> Interval v
 
-instance (ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord (Tangent v),Ord v,Show v , Affine v ) => Predicates (FTB v) where
+instance (Ord v ,Range v) => Range (FTB v ) where
+  pureR (TB1 i)  =  fmap TB1 $ pureR i
+  pureR (ArrayTB1 is) = foldl1 appendRI (fmap pureR is)
+  pureR (IntervalTB1 is) =  is
+  pureR (LeftTB1 is) =  maybe Interval.empty  pureR is
+  appendR (TB1 i ) (TB1 j) = fmap TB1 $ appendR i j
+
+
+instance Range Showable where
+  pureR  i = i `cinterval` i
+  appendR = mergeS
+
+appendRI :: (Ord v ,Range v) => Interval v -> Interval v -> Interval v
+appendRI i  j  = maybe (ER.NegInf,True) lowerBound' (liftA2 appendR (unFin' $ fst $ lowerBound' i ) (unFin' $ fst $ lowerBound' j)) `interval` maybe (ER.PosInf,True) upperBound' (liftA2 appendR (unFin' $ fst $ upperBound' i ) (unFin' $ fst $ upperBound' j))
+
+instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord (Tangent v),Ord v,Show v , Affine v ) => Predicates (FTB v) where
   type Node (FTB v) = Interval.Interval (FTB v)
   type Penalty (FTB v) = ER.Extended (Tangent v)
   type Query (FTB v) = AccessOp v
@@ -517,60 +536,50 @@ instance (ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord 
           ma i  j = errorWithStackTrace ("no ma =" ++ show (i,j))
   match x  z = errorWithStackTrace ("no match = " <> show (x,z))
 
-  bound (Right i) =  minP i `interval` maxP i
+  bound (Right i) =  pureR i
   bound (Left i) =  i
   {-# INLINE bound #-}
-  merge (Left i ) (Left j)  =  min (lowerBound' i) (lowerBound' j) `interval` max (upperBound' j) (upperBound' i)
-  merge (Right i ) (Left j)  =  min (minP i)   (lowerBound' j) `interval` max (maxP i) (upperBound' j)
-  merge (Left j ) (Right i)  =  min (minP i)   (lowerBound' j) `interval` max (maxP i) (upperBound' j)
-  merge (Right i ) (Right j) =  (min (minP i) (minP j)) `interval` (max (maxP i) (maxP j) )
+  merge (Left i ) (Left j)  =  appendRI i j
+  merge (Right i ) (Left j)  =  pureR i `appendRI` j
+  merge (Left j ) (Right i)  =  j `appendRI` pureR i
+  merge (Right i ) (Right j) =  pureR i `appendRI` pureR j
   {-# INLINE merge #-}
   penalty (Left i)  (Left j)
     = (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin (fst $ lowerBound' j  )) (unFin (fst $ lowerBound' i)))
     <> (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin (fst $ upperBound' i  )) (unFin (fst $ upperBound' j)))
   penalty (Right i  ) (Left j)
-    = (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin (fst $ lowerBound' j  )) (unFin (fst $ minP i)))
-    <> (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin (fst $ maxP i  )) (unFin (fst $ upperBound' j)))
-  penalty (Right p1) (Right p2) =  (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin $ fst $ minP p2) (unFin $ fst $ minP p1)) <>  (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin $ fst $ maxP p1)  (unFin $ fst $ maxP p2))
+    = (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin (fst $ lowerBound' j  )) (unFin (fst $ mi)))
+    <> (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin (fst $ ma  )) (unFin (fst $ upperBound' j)))
+      where
+        range  = pureR i
+        mi = lowerBound' range
+        ma = upperBound' range
+  penalty (Right r1) (Right r2) =  (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin $ fst $ lowerBound' p2) (unFin $ fst $ lowerBound' p1)) <>  (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin $ fst $ upperBound' p1)  (unFin $ fst $ upperBound' p2))
+      where
+        p1 = pureR r1
+        p2 = pureR r2
+
   penalty (Left i  ) (Right j)
-    = (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction  (unFin (fst $ minP j)) (unFin (fst $ lowerBound' i  )))
-    <> (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction  (unFin (fst $ upperBound' i)) (unFin (fst $ maxP j  )))
+    = (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction  (unFin (fst $ mi )) (unFin (fst $ lowerBound' i  )))
+    <> (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction  (unFin (fst $ upperBound' i)) (unFin (fst $ ma   )))
+      where
+        range  = pureR j
+        mi = lowerBound' range
+        ma = upperBound' range
   {-# INLINE penalty #-}
-
-
-newtype Number a = Number a deriving (Num,Eq,Ord,Generic)
-
-instance NFData a => NFData (Number a)
-instance (NFData a,Ord a ,Num a) => Predicates (Number a) where
-  type Penalty (Number a) = ER.Extended (Number a)
-  type Node (Number a) = Interval (Number a)
-  consistent (Right i) (Right j) = i == j
-  consistent (Left i) (Right j) =  Interval.member j  i
-  consistent (Right i) (Left j) =  Interval.member i j
-  consistent (Left i) (Left j) =  not $ Interval.null $ Interval.intersection i j
-  penalty (Right i) (Right j)
-    = ER.Finite (i - j)
-  penalty (Left i) (Left j)
-    = (maybe ER.PosInf (ER.Finite . max 0) $ liftA2 (-) (unFin' (fst $ lowerBound' j  )) (unFin' (fst $ lowerBound' i)))
-    +  (maybe ER.NegInf (ER.Finite . max 0) $ liftA2 (-) (unFin' (fst $ upperBound' i  )) (unFin' (fst $ upperBound' i)))
-  penalty (Left i) (Right j)
-    = (maybe ER.PosInf (ER.Finite . max 0) $ liftA2 (-) (Just j) (unFin' (fst $ lowerBound' i)))
-    +  (maybe ER.NegInf (ER.Finite . max 0) $ liftA2 (-) (unFin' (fst $ upperBound' i  )) (Just j))
-  penalty  (Right j) (Left i)
-    = (maybe ER.PosInf (ER.Finite . max 0) $ liftA2 (-) (unFin' (fst $ lowerBound' i)) (Just j))
-    +  (maybe ER.NegInf (ER.Finite . max 0) $ liftA2 (-) (Just j) (unFin' (fst $ upperBound' i  )))
-
-  bound (Right i) =  (ER.Finite i,True) `interval` (ER.Finite i,True)
-  bound (Left i) = i
-  {-# INLINE bound #-}
-  merge (Left i ) (Left j)  =  min (lowerBound' i) (lowerBound' j) `interval` max (upperBound' j) (upperBound' i)
-  merge (Right i ) (Left j)  =  min (ER.Finite i,True)   (lowerBound' j) `interval` max (ER.Finite i , True)  (upperBound' j)
-  merge (Left j ) (Right i)  =  min (ER.Finite i,True)   (lowerBound' j) `interval` max (ER.Finite i , True)  (upperBound' j)
-  merge (Right i ) (Right j) =  (ER.Finite $ min i j ,True ) `interval` (ER.Finite $ max i j , True)
-  {-# INLINE merge #-}
 
 unFin' (Interval.Finite i) = Just i
 unFin' i = Nothing
+
+mergeS :: Showable -> Showable -> Interval Showable
+mergeS (SGeo (SPosition i) ) (SGeo (SPosition j)) =  fmap (SGeo. SPosition ) $ mergeP i j
+mergeS i j = min i j  `cinterval` max i j
+
+mergeP (Position2D (i,j)) (Position2D (l,m))=  Position2D (min i l , min j m) `cinterval` Position2D (max i l , max j m)
+mergeP (Position(i,j,k)) (Position (l,m,n))=  Position (min i l , min j m,min k n) `cinterval` Position (max i l , max j m,max k n)
+
+boundS :: Showable -> Interval Showable
+boundS i = i `cinterval` i
 
 
 
@@ -578,9 +587,12 @@ unFin (Interval.Finite (TB1 i) ) = Just i
 unFin o = Nothing -- errorWithStackTrace (show o)
 
 
+mergeFTB (TB1 i ) (TB1 j) =   fmap TB1  $ mergeS i  j
+mergeFTB (IntervalTB1 i ) (IntervalTB1 j)  = maybe (ER.NegInf,True) lowerBound' (liftA2 mergeFTB (unFin' $ fst $ lowerBound' i ) (unFin' $ fst $ lowerBound' j)) `interval` maybe (ER.PosInf,True) upperBound' (liftA2 mergeFTB (unFin' $ fst $ upperBound' i ) (unFin' $ fst $ upperBound' j))
 
-minP ((IntervalTB1 i) ) = lowerBound' i
-minP (i@(TB1 _) ) = (ER.Finite $ i,True)
+minP ,maxP :: (Show i , Ord i) => FTB i -> (ER.Extended (FTB i),Bool)
+minP (IntervalTB1 i)  = lowerBound' i
+minP i@(TB1 _) = (ER.Finite $ i,True)
 minP (LeftTB1 (Just i) ) = minP i
 minP (ArrayTB1 i) = minP$   F.minimum i
 minP i = errorWithStackTrace (show i)

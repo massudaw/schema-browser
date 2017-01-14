@@ -174,9 +174,9 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
           let pcal =  liftA2 (,) positionT  calendarT
               tname = tableName tb
           mapUIFinalizerT innerCalendar (\(positionB,calT)-> do
-            let pred = predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)
+            let pred = WherePredicate $ predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)
                 fieldKey (TB1 (SText v))=  v
-            reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) (WherePredicate pred)
+            reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
             let v = reftb ^. _3
             let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
             onEvent evsel (liftIO . hselg)
@@ -190,7 +190,8 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
 
             mapUIFinalizerT innerCalendar (\i ->
               createLayers innerCalendar tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   i)) (filtering tb v)
-            stat <- UI.div  # sinkDiff text (show . (\i -> (positionB,length i, i) ).  (fmap snd . G.getEntries .filterfixed tb (WherePredicate pred )) <$> v)
+
+            stat <- UI.div  # sinkDiff text (show . M.lookup pred <$>   (reftb ^. _1))
             edit <- UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
             UI.div # set children [stat,edit]
             ) pcal

@@ -129,8 +129,9 @@ applyBackend (PatchRow t@(m,i,[])) = do
    deleteFrom   t
 applyBackend (PatchRow p@(m,pk@(G.Idex pki),i)) = do
    inf <- ask
-   ref <- prerefTable inf  (lookTable inf (_kvname m))
-   (sidx,v,_,_) <- liftIO $ atomically $ readState (WherePredicate (AndColl []),fmap keyFastUnique $ _kvpk m) ref
+   let table = (lookTable inf (_kvname m))
+   ref <- prerefTable inf table
+   (sidx,v,_,_) <- liftIO $ atomically $ readState (WherePredicate (AndColl []),fmap keyFastUnique $ _kvpk m) (mapTableK keyFastUnique table ) ref
    let oldm = mapKey' (recoverKey inf ) <$>  G.lookup pk v
 
    old <- maybe (do
@@ -455,7 +456,7 @@ pageTable flag method table page size presort fixed = do
       dbvar :: DBRef KeyUnique Showable
       dbvar =  justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
     (sidx,reso ,nchan,iniVar) <- liftIO $ atomically $
-      readState (fixedU ,rawPK tableU) dbvar
+      readState (fixedU ,rawPK tableU) tableU dbvar
 
     ((fixedmap,fixedChan))  <- liftIO $ atomically $readIndex dbvar
     (nidx,ndata,evs)<- do
@@ -492,7 +493,6 @@ pageTable flag method table page size presort fixed = do
     let iniFil = (nidx,ndata)
     modify (M.insert (table,fixed)  ndata)
     (vpt,evpt) <- mdo
-
         (vpt ,evpt)<- lift $ convertChanTidings0 inf tableU (fixedU ,rawPK tableU) never (sidx ,snd iniFil) iniVar nchan
         return (vpt,evpt)
 
@@ -516,15 +516,16 @@ readState
   :: (Ord k ,NFData v,NFData k,Eq (Index v), Ord k, Ord v, Show k, Show v,
       G.Predicates (TBIndex v), Patch v, Index v ~ v) =>
       (TBPredicate k Showable, [k ])
+      -> TableK k
      -> DBRef k v
      -> STM ([SecondaryIndex k v],TableIndex k v, TChan [RowPatch k v], TVar ([SecondaryIndex k v],TableIndex k v))
-readState fixed dbvar = do
+readState fixed table dbvar = do
   var <-readTVar (collectionState dbvar)
   chan <- cloneTChan (patchVar dbvar)
   patches <- takeMany' chan
   let
       filterPred = nonEmpty . filter (\d -> splitMatch fixed (indexPK d) && indexFilterR (fst fixed) d )
-      update (s,l) p = (s,F.foldl' (flip (\p-> (flip apply p))) l p)
+      update l v = F.foldl' (\i j-> fromJust $  applyTableRep table i j)   l v
       (sidxs, pidx) = update var (concat patches)
   return (sidxs,pidx,chan,collectionState dbvar)
 
@@ -615,7 +616,7 @@ convertChanTidings
     (Tidings (TableRep Key Showable),Event [RowPatch Key Showable])
 convertChanTidings inf table fixed evdep dbvar = do
       (sidx,ini,nchan,inivar) <- liftIO $atomically $
-        readState fixed  dbvar
+        readState fixed  table dbvar
       convertChanTidings0 inf table fixed evdep (sidx,ini) inivar nchan
 
 

@@ -167,21 +167,21 @@ applyTableRep table (sidxs,l) (CreateRow elp ) =  Just  (didxs <$> sidxs,case G.
                   Just v ->  if v == el then l else G.insert (el,G.tbpred  el) (3,6) . G.delete i  (3,6) $ l
                   Nothing -> G.insert (el,G.tbpred  el) (3,6)  l)
    where
-     didxs (un,sidx) = (un,G.insert (G.getIndex el,G.getUnique un  el) (3,6) sidx  )
+     didxs (un,sidx) =  (un,G.insert ((G.getIndex el,G.getUnique un  el)) (3,6) sidx  )
      el = fmap (fmap create) elp
      i = G.notOptional $ G.getIndex el
 
 
 queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[k])-> TableRep k Showable-> G.GiST (TBIndex  Showable) (TBData k Showable)
-queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (s,g) = t1
+queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (s,g) = {-traceShow (notPK ,pred,G.size g,S.size <$> mergeSIdxs,fmap (\i -> (fst i,G.size (snd i)) )s,mergeSIdxs) -}t1
   where t1 = G.fromList' . maybe id (\pred -> L.filter (flip checkPred (pred) . fst )) notPK $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
         searchSIdx = (\sset -> L.filter ((`S.member` sset) .snd) $ getEntries g) <$> mergeSIdxs
         notPK = fmap WherePredicate $ F.foldl' (\l i -> flip G.splitIndexPKB  i =<< l ) (Just bool) (pk : fmap fst s )
         mergeSIdxs :: Maybe (S.Set (TBIndex Showable))
-        mergeSIdxs = S.unions <$> (nonEmpty $ catMaybes $ fmap (S.fromList . fmap snd ) . searchPK b <$> s)
+        mergeSIdxs = foldl1 S.union <$> (nonEmpty $ catMaybes $ fmap (S.fromList . fmap fst ) . searchPK b <$> s)
 
 
-searchPK ::  Eq k => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [(a,TBIndex  Showable)]
+searchPK ::  (Show k,Eq k) => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [(a,TBIndex  Showable)]
 searchPK (WherePredicate b) (pk, g)= (\p -> G.query (mapPredicate (\i -> justError "no predicate pk " $ L.elemIndex i pk)  $ WherePredicate p) g) <$>  splitIndexPK b pk
 
 
