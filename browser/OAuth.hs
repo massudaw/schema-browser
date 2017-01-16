@@ -144,7 +144,7 @@ syncHistory [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))]  ix table offset 
           return  d
       let idx = if schemaName inf == "tasks" then "items" else rawName table
           relMap = M.fromList $ fmap (\rel -> (_relTarget rel ,_relOrigin rel) ) rel
-          refAttr = (_tb $ FKT (kvlist $ fmap _tb $ concat $ F.toList $ backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
+          refAttr = (_tb $ FKT (kvlist $ fmap _tb $ concat $ F.toList $ justError "no back path " . backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
           addAttr refAttr (m ,t ) = (m, mapComp (\(KV i) -> KV  $ M.insert (S.fromList $ keyattr refAttr ) refAttr i ) t)
       c <-  traverse (convertAttrs inf (Just $ tblist [refAttr]) (_tableMapL inf) table ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
       return ((addAttr refAttr) <$>  c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
@@ -285,7 +285,7 @@ joinList [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))] tableref offset page
           return $ decode v
       let idx = if schemaName inf == "tasks" then "items" else rawName tableref
           relMap = M.fromList $ fmap (\rel -> (_relTarget rel ,_relOrigin rel) ) rel
-          refAttr = (_tb $ FKT (kvlist $ fmap _tb $ concat $ F.toList $ backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
+          refAttr = (_tb $ FKT (kvlist $ fmap _tb $ concat $ F.toList $ justError " no back path " . backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
       c <-  traverse (convertAttrs inf (Just $ tblist [refAttr]) (_tableMapL inf) tableref ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
       let addAttr refAttr (m ,t ) = (m, mapComp (\(KV i) -> KV  $ M.insert (S.fromList $ keyattr refAttr ) refAttr i ) t)
       return ((addAttr refAttr) <$>  c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))

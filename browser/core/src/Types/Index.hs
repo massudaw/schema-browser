@@ -17,10 +17,16 @@
 module Types.Index
   (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,fromList',filter ,filter'
   ,getIndex ,getBounds,getUnique,notOptional,tbpred
---  ,insertRefl,deleteRefl,searchRefl
--- ,buildGistConsistent
--- ,ReifiedGist(..)
-  ,minP,maxP,unFin,queryCheck,indexPred,checkPred,splitIndex,splitPred,splitIndexPKB,splitIndexPK,module G ) where
+  ,unFin
+  ,indexParam
+  ,queryCheck
+  ,indexPred
+  ,checkPred
+  ,splitIndex
+  ,splitPred
+  ,splitIndexPKB
+  ,splitIndexPK
+  ,module G ) where
 
 import Data.Reflection
 import qualified Data.Vector as V
@@ -92,23 +98,22 @@ notOptional (Idex m) = Idex   . justError "cant be empty " . traverse unSOptiona
 tbpred :: Ord k => TBData k a -> TBIndex a
 tbpred = notOptional . getIndex
 
-instance (Num a , Num (Tangent a) ,Fractional a ,Affine a) => Affine (ER.Extended a ) where
+instance (Show a,Affine a) => Affine (ER.Extended a ) where
   type Tangent (ER.Extended a) = ER.Extended (Tangent  a)
-  loga (ER.Finite i) = ER.Finite $ loga i
   loga ER.PosInf = ER.PosInf
   loga ER.NegInf = ER.NegInf
-  expa (ER.Finite i) = ER.Finite $ expa  i
   expa ER.PosInf = ER.PosInf
   expa ER.NegInf = ER.PosInf
   subtraction (ER.Finite i) (ER.Finite j) = ER.Finite $ subtraction i j
-  subtraction (ER.PosInf ) (ER.PosInf ) = ER.Finite 0
-  subtraction (ER.PosInf ) (ER.NegInf ) = ER.PosInf
-  subtraction (ER.NegInf ) (ER.PosInf ) = ER.NegInf
-  subtraction (ER.NegInf ) (ER.NegInf ) = ER.Finite 0
+  subtraction (ER.NegInf ) i = ER.NegInf
+  subtraction (ER.PosInf ) i = ER.PosInf
+  subtraction i  (ER.PosInf ) = ER.NegInf
+  subtraction i  (ER.NegInf) = ER.PosInf
+  subtraction i j = errorWithStackTrace (show (i,j))
   addition (ER.Finite i) (ER.Finite j) = ER.Finite $ addition i j
   addition ER.NegInf  ER.NegInf = ER.NegInf
-  addition ER.PosInf ER.NegInf = ER.Finite 0
-  addition ER.NegInf ER.PosInf = ER.Finite 0
+  addition ER.PosInf ER.NegInf = ER.PosInf
+  addition ER.NegInf ER.PosInf = ER.NegInf
   addition ER.PosInf ER.PosInf = ER.PosInf
 
 notNeg (DSPosition l)
@@ -332,8 +337,7 @@ instance ( Predicates (FTB v)) => Predicates (TBIndex v ) where
       node i = Left i
 
 
-  bound (Right (Idex i)) =  fmap (bound .Right)i
-  bound (Left i) =   i
+  bound (Idex i) =  fmap bound i
   merge = transEither merge
 
   penalty = transEither penalty
@@ -346,8 +350,10 @@ instance (Predicates (TBIndex  a )  ) => Monoid (G.GiST (TBIndex  a)  b) where
   mappend i j
     | G.size i < G.size j = ins  j (getEntries i )
     | otherwise  = ins  i (getEntries j )
-    where ins = foldl' (\j i -> G.insert i (3,6) j)
+    where ins = foldl' (\j i -> G.insert i indexParam j)
 
+indexParam :: (Int,Int)
+indexParam = (10,20)
 
 -- Attr List Predicate
 
@@ -358,7 +364,7 @@ checkPred' v (AndColl i ) = F.all  (checkPred' v)i
 checkPred' v (OrColl i ) = F.any (checkPred' v) i
 checkPred' v (PrimColl i) = indexPred i v
 
-type ShowableConstr  a = (Range a,ConstantGen (FTB a ),Affine a,Positive (Tangent a),Semigroup (Tangent a),Ord (Tangent a),Ord a )
+type ShowableConstr  a = (Fractional a ,Range a,ConstantGen (FTB a ),Affine a,Positive (Tangent a),Semigroup (Tangent a),Ord (Tangent a),Ord a )
 indexPred :: (Show k ,ShowableConstr a , Show a,Ord k) => (Access k ,AccessOp a) -> TBData k a-> Bool
 indexPred (Many i,eq) a= all (\i -> indexPred (i,eq) a) i
 indexPred (n@(Nested k nt ) ,eq) r
@@ -418,13 +424,6 @@ data DiffShowable
   | DSDays Integer
   deriving(Eq,Ord,Show)
 
-instance Predicates Showable where
-  type Node Showable = Showable
-  type Penalty Showable = DiffShowable
-  type Query Showable = Showable
-  penalty (Right (SNumeric i)) (Right (SNumeric j)) = DSInt $ i -  j
-  penalty (Right (SDouble i)) (Right  (SDouble j)) = DSDouble $ i  - j
-  -- penalty (Left i) (Right  (SDouble j)) = DSDouble $ i  - j
 
 class Range v where
   pureR :: v -> Interval  v
@@ -443,19 +442,19 @@ instance Range Showable where
   appendR = mergeS
 
 appendRI :: (Ord v ,Range v) => Interval v -> Interval v -> Interval v
-appendRI i  j  = maybe (ER.NegInf,True) lowerBound' (liftA2 appendR (unFin' $ fst $ lowerBound' i ) (unFin' $ fst $ lowerBound' j)) `interval` maybe (ER.PosInf,True) upperBound' (liftA2 appendR (unFin' $ fst $ upperBound' i ) (unFin' $ fst $ upperBound' j))
+appendRI i  j  = maybe (ER.NegInf,True) lowerBound' (liftA2 appendR (unFin $ fst $ lowerBound' i ) (unFin $ fst $ lowerBound' j)) `interval` maybe (ER.PosInf,True) upperBound' (liftA2 appendR (unFin $ fst $ upperBound' i ) (unFin $ fst $ upperBound' j))
 
 instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord (Tangent v),Ord v,Show v , Affine v ) => Predicates (FTB v) where
-  type Node (FTB v) = Interval.Interval (FTB v)
+  type Node (FTB v) = Interval.Interval v
   type Penalty (FTB v) = ER.Extended (Tangent v)
   type Query (FTB v) = AccessOp v
   consistent (Left i ) (Left j) = not . Interval.null $  j `Interval.intersection` i
   consistent (Right i ) (Left j) = cons i j
       where
-        cons j@(TB1 _)  i  = j `Interval.member` i
+        cons (TB1 j)  i  = j `Interval.member` i
         cons (LeftTB1 i) j = fromMaybe True $ (flip cons j ) <$>  i
         cons (ArrayTB1 i)  j  = F.any (flip cons j) i
-        cons (IntervalTB1 i) j = not $ Interval.null $  j `Interval.intersection` i
+        cons (IntervalTB1 i) j = not $ Interval.null $  j `Interval.intersection` (fmap unTB1 i)
         cons (SerialTB1 i) j = fromMaybe True $ (flip cons j ) <$>  i
         cons (DelayedTB1 i) j = fromMaybe True $ (flip cons j ) <$>  i
   consistent (Left i ) (Right j) = consistent (Right j) (Left i)
@@ -480,23 +479,23 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
     where
       mal (Left v)  j  = ma  v  j
         where
-          ma (i@(TB1 _) ,op)  j  = i `Interval.member` j
+          ma ((TB1 i) ,op)  j  = i `Interval.member` j
           ma (DelayedTB1 j ,v)   i   = fromMaybe False ((\a -> ma (a,v) i) <$> j)
           ma (SerialTB1 j ,v)   i   = fromMaybe False ((\a -> ma (a,v) i) <$> j)
           ma (LeftTB1 j ,v)   i   = fromMaybe False ((\a -> ma (a,v) i) <$> j)
           ma (ArrayTB1 i,Flip (AnyOp o))  j  = F.any (\i -> ma (i,o)  j ) i
-          ma (IntervalTB1 i ,Contains) j = j `Interval.isSubsetOf` i
-          ma (IntervalTB1 j ,Flip Contains) (i)  = j `Interval.isSubsetOf` i
-          ma (IntervalTB1 j ,IntersectOp) (i)  = not $ Interval.null $ j `Interval.intersection` i
-          ma (IntervalTB1 j ,_) (i)  = not $ Interval.null $ j `Interval.intersection` i
+          -- ma (IntervalTB1 i ,Contains) j = j `Interval.isSubsetOf` fmap unTB1 i
+          ma (IntervalTB1 j ,Flip Contains) (i)  = fmap unTB1 j `Interval.isSubsetOf` i
+          ma (IntervalTB1 j ,IntersectOp) (i)  = not $ Interval.null $ fmap unTB1 j `Interval.intersection` i
+          ma (IntervalTB1 j ,_) (i)  = not $ Interval.null $ fmap unTB1 j `Interval.intersection` i
           ma  i j =errorWithStackTrace (show (i,j))
       mal (Right v) j = ma v j
         where
-          ma  (Not i)   j   = not $ ma i   j
-          ma  IsNull    j   = False
-          ma  (BinaryConstant op e )  v  = mal (Left (generate e,op))  v
-          ma  (Range b pred)  j   = match  (Right  pred) $ Right $ LeftTB1 $ fmap TB1 $ unFin $ if b then upperBound j else lowerBound j
-          ma  i j =errorWithStackTrace (show (i,j))
+          ma (Not i) j = not $ ma i   j
+          ma IsNull  j = False
+          ma (BinaryConstant op e )  v  = mal (Left (generate e,op))  v
+          ma (Range b pred)  j   = match  (Right  pred) $ Right $ LeftTB1 $ fmap TB1 $ unFin $ if b then upperBound j else lowerBound j
+          ma i j =errorWithStackTrace (show (i,j))
       mal i j = errorWithStackTrace $ show (i,j)
   match i (Right j) = mar i j
     where
@@ -532,44 +531,43 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
           ma  IsNull  (LeftTB1 j)   = isNothing j
           ma  IsNull   j   = False
           ma  (BinaryConstant op e )  v  = mar (Left (generate e,op))  v
-          ma  (Range b pred)  (IntervalTB1 j)   = ma  pred $ LeftTB1 $ fmap TB1 $ unFin $ if b then upperBound j else lowerBound j
+          ma  (Range b pred)  (IntervalTB1 j)   = ma  pred $ LeftTB1 $ unFin $ if b then upperBound j else lowerBound j
           ma i  j = errorWithStackTrace ("no ma =" ++ show (i,j))
   match x  z = errorWithStackTrace ("no match = " <> show (x,z))
 
-  bound (Right i) =  pureR i
-  bound (Left i) =  i
+  bound i =  fmap unTB1 $ pureR i
   {-# INLINE bound #-}
   merge (Left i ) (Left j)  =  appendRI i j
-  merge (Right i ) (Left j)  =  pureR i `appendRI` j
-  merge (Left j ) (Right i)  =  j `appendRI` pureR i
-  merge (Right i ) (Right j) =  pureR i `appendRI` pureR j
+  merge (Right i ) (Left j)  =  fmap unTB1 (pureR i) `appendRI` j
+  merge (Left j ) (Right i)  =  j `appendRI` fmap unTB1 (pureR i)
+  merge (Right i ) (Right j) =  fmap unTB1 (pureR i) `appendRI` fmap unTB1 (pureR j)
   {-# INLINE merge #-}
   penalty (Left i)  (Left j)
-    = (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin (fst $ lowerBound' j  )) (unFin (fst $ lowerBound' i)))
-    <> (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin (fst $ upperBound' i  )) (unFin (fst $ upperBound' j)))
+    = (fmap notneg $ subtraction (fst (lowerBound' j  )) (fst $ lowerBound' i))
+    <> (fmap notneg $ subtraction (fst $ upperBound' i  ) (fst $ upperBound' j))
   penalty (Right i  ) (Left j)
-    = (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin (fst $ lowerBound' j  )) (unFin (fst $ mi)))
-    <> (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin (fst $ ma  )) (unFin (fst $ upperBound' j)))
+    = (fmap notneg $ subtraction ((fst $ lowerBound' j  )) ((fst $ mi)))
+    <> ( fmap notneg $ subtraction ((fst $ ma  )) ((fst $ upperBound' j)))
       where
-        range  = pureR i
+        range  = fmap unTB1 (pureR i)
         mi = lowerBound' range
         ma = upperBound' range
-  penalty (Right r1) (Right r2) =  (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin $ fst $ lowerBound' p2) (unFin $ fst $ lowerBound' p1)) <>  (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction (unFin $ fst $ upperBound' p1)  (unFin $ fst $ upperBound' p2))
+  penalty (Right r1) (Right r2)
+    =  ( fmap notneg $ subtraction (fst $ lowerBound' p2) (fst $ lowerBound' p1))
+    <> ( fmap notneg $ subtraction (fst $ upperBound' p1)  (fst $ upperBound' p2))
       where
-        p1 = pureR r1
-        p2 = pureR r2
+        p1 = fmap unTB1 $ pureR r1
+        p2 = fmap unTB1 $ pureR r2
 
   penalty (Left i  ) (Right j)
-    = (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction  (unFin (fst $ mi )) (unFin (fst $ lowerBound' i  )))
-    <> (maybe ER.PosInf ER.Finite $ fmap notneg $ liftA2 subtraction  (unFin (fst $ upperBound' i)) (unFin (fst $ ma   )))
+    = ( fmap notneg $ subtraction  ((fst $ mi )) ((fst $ lowerBound' i  )))
+    <> ( fmap notneg $ subtraction  ((fst $ upperBound' i)) ((fst $ ma   )))
       where
-        range  = pureR j
+        range  = fmap unTB1 $ pureR j
         mi = lowerBound' range
         ma = upperBound' range
   {-# INLINE penalty #-}
 
-unFin' (Interval.Finite i) = Just i
-unFin' i = Nothing
 
 mergeS :: Showable -> Showable -> Interval Showable
 mergeS (SGeo (SPosition i) ) (SGeo (SPosition j)) =  fmap (SGeo. SPosition ) $ mergeP i j
@@ -583,42 +581,28 @@ boundS i = i `cinterval` i
 
 
 
-unFin (Interval.Finite (TB1 i) ) = Just i
-unFin o = Nothing -- errorWithStackTrace (show o)
+unFin (Interval.Finite i) = Just i
+unFin o = Nothing
 
 
-mergeFTB (TB1 i ) (TB1 j) =   fmap TB1  $ mergeS i  j
-mergeFTB (IntervalTB1 i ) (IntervalTB1 j)  = maybe (ER.NegInf,True) lowerBound' (liftA2 mergeFTB (unFin' $ fst $ lowerBound' i ) (unFin' $ fst $ lowerBound' j)) `interval` maybe (ER.PosInf,True) upperBound' (liftA2 mergeFTB (unFin' $ fst $ upperBound' i ) (unFin' $ fst $ upperBound' j))
 
-minP ,maxP :: (Show i , Ord i) => FTB i -> (ER.Extended (FTB i),Bool)
-minP (IntervalTB1 i)  = lowerBound' i
-minP i@(TB1 _) = (ER.Finite $ i,True)
-minP (LeftTB1 (Just i) ) = minP i
-minP (ArrayTB1 i) = minP$   F.minimum i
-minP i = errorWithStackTrace (show i)
-
-maxP ((IntervalTB1 i) ) = upperBound' i
-maxP (i@(TB1 _) ) = (ER.Finite $ i,True)
-maxP (LeftTB1 (Just i) ) = maxP i
-maxP ((ArrayTB1 i) ) =   maxP $  F.maximum i
-maxP i = errorWithStackTrace (show i)
 
 
 -- Higher Level operations
 fromList pred = foldl'  acc G.empty
   where
-    acc !m v = G.insert (v,pred v ) (3,6) m
+    acc !m v = G.insert (v,pred v ) indexParam m
 
 -- Higher Level operations
 fromList' :: Predicates p => [(a ,p)] -> GiST p a
 fromList' = foldl'  acc G.empty
   where
-    acc !m v = G.insert v (3,6) m
+    acc !m v = G.insert v indexParam m
 
 lookup pk  = safeHead . G.search pk
 
 toList = getData
 
-filter f = foldl' (\m i -> G.insert i (3,6) m) G.empty  . L.filter (f .fst ) . getEntries
-filter' f = foldl' (\m i -> G.insert i (3,6) m) G.empty  . L.filter (f .fst )
+filter f = foldl' (\m i -> G.insert i indexParam m) G.empty  . L.filter (f .fst ) . getEntries
+filter' f = foldl' (\m i -> G.insert i indexParam m) G.empty  . L.filter (f .fst )
 

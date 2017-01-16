@@ -408,22 +408,22 @@ instance (NFData k ,NFData a ) => NFData (TB Identity k a) where
 
 applyGiSTChange
   ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => G.GiST (G.TBIndex  a ) (TBData k a) -> RowPatch k (Index a) -> Maybe (G.GiST (G.TBIndex  a ) (TBData k a))
-applyGiSTChange l (PatchRow patom@(m,i, [])) = Just $ G.delete (create <$> G.notOptional i) (3,6)  l
+applyGiSTChange l (PatchRow patom@(m,i, [])) = Just $ G.delete (create <$> G.notOptional i) G.indexParam  l
 applyGiSTChange l (PatchRow patom@(m,ipa, p)) =  case G.lookup (G.notOptional i) l  of
                   Just v -> do
                           el <-  applyIfChange v patom
                           let pkel = G.getIndex el
                           return $ if pkel == i
                                 then G.update (G.notOptional i) (const el) l
-                                else G.insert (el,G.tbpred  el) (3,6) . G.delete (G.notOptional i)  (3,6) $ l
+                                else G.insert (el,G.tbpred  el) G.indexParam . G.delete (G.notOptional i)  G.indexParam $ l
                   Nothing -> let
                       el = createIfChange  patom
-                   in (\eli -> G.insert (eli,G.tbpred  eli) (3,6)  l) <$> el
+                   in (\eli -> G.insert (eli,G.tbpred  eli) G.indexParam  l) <$> el
    where
          i = fmap create  ipa
 applyGiSTChange l (CreateRow elp ) =  case G.lookup i l  of
-                  Just v ->  Just $ G.insert (el,G.tbpred  el) (3,6) . G.delete i  (3,6) $ l
-                  Nothing -> Just $ G.insert (el,G.tbpred  el) (3,6)  l
+                  Just v ->  Just $ G.insert (el,G.tbpred  el) G.indexParam . G.delete i  G.indexParam $ l
+                  Nothing -> Just $ G.insert (el,G.tbpred  el) G.indexParam  l
    where
      el = fmap (fmap create) elp
      i = G.notOptional $ G.getIndex el

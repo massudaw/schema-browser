@@ -370,7 +370,7 @@ tbCaseDiff inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             pkset = S.fromList $ rawPK table
             restrictConstraint = filter ((`S.isSubsetOf` pkset) . S.fromList . getRelOrigin  .fst) constr
             convertConstr :: SelTBConstraint
-            convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> constr .  backFKRef relTable (getRelOrigin f)  ) j ) <$>  restrictConstraint
+            convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> constr .  justError "no back fk" .backFKRef relTable (getRelOrigin f)  ) j ) <$>  restrictConstraint
         let
             patchRefs = fmap (\(a,b) -> (flip recoverEditChange ) <$> facts a <#> b ) <$> nonInjRefs
         ref <- ui $ refTables rinf   table
@@ -543,7 +543,7 @@ crudUITable inf open reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItem
             putPatch tref (fmap PatchRow $ maybeToList p)
             return (fmap PatchRow p  ) )) (preoldItems)
           let
-              deleteCurrentUn un e l =   maybe l (\v -> G.delete v (3,6) l) $  G.getUnique un <$> e
+              deleteCurrentUn un e l =   maybe l (\v -> G.delete v G.indexParam l) $  G.getUnique un <$> e
               tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ snd $ tbPK ftb , (_kvpk m, ( gist)))
           unConstraints <-  traverse (traverse (traverse (ui . mapTEventDyn return ))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn (S.fromList un ) (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un . G.toList ) gist))) <$> _kvuniques m
           unDeleted <- traverse (traverse (traverse (ui . mapTEventDyn return))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> preoldItems <*> o))) (tpkConstraint:unConstraints))
@@ -1366,7 +1366,7 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,_,_) plmods nonInjRefs   oldItems  tb
             UI.div # set  children [getElement itemList , head celem]  # set UI.class_ "row"
       subnet <- UI.div # set children [fk , last celem] # set UI.class_ "col-xs-12"
       let
-        fksel =  fmap (\box ->  FKT (kvlist $ fmap _tb $ backFKRef relTable  (fmap (keyAttr .unTB ) $ unkvlist ifk)   (box)) rel (TB1 box) ) <$>  ((\i -> maybe i Just) <$>  pretdi <*> tidings st sel)
+        fksel =  join . fmap (\box ->  (\ref -> FKT (kvlist $ fmap _tb $ ref ) rel (TB1 box) ) <$> backFKRef relTable  (fmap (keyAttr .unTB ) $ unkvlist ifk)   (box) ) <$>  ((\i -> maybe i Just) <$>  pretdi <*> tidings st sel)
       return $ TrivialWidget (editor <$> oldItems <*> fksel ) subnet
 fkUITableDiff inf constr tbrefs plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb1 ))) = do
   tr <- fkUITableDiff inf constr tbrefs (fmap (join . fmap unLeftItensP  <$>) <$> plmods)  (first unLeftKey . second (join . fmap unLeftItens <$>) <$> wl) (join . fmap unLeftItens  <$> oldItems)  (FKT (mapKV (mapComp (firstTB unKOptional) ) ilk ) (Le.over relOri unKOptional <$> rel) tb1)

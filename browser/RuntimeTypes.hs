@@ -146,9 +146,9 @@ type TableRep k v  = ([SecondaryIndex k v],TableIndex k v)
 applyTableRep
   ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => TableK k -> TableRep k a -> RowPatch k (Index a) -> Maybe (TableRep k a)
 applyTableRep table (sidxs,l) (PatchRow patom@(m,i, []))
-    = Just $ (didxs <$> sidxs, G.delete (create <$> G.notOptional i) (3,6)  l)
+    = Just $ (didxs <$> sidxs, G.delete (create <$> G.notOptional i) G.indexParam  l)
   where
-    didxs (un ,sidx)= (un,maybe sidx (\v -> G.delete v (3,6) sidx ) (G.getUnique un <$> v))
+    didxs (un ,sidx)= (un,maybe sidx (\v -> G.delete v G.indexParam sidx ) (G.getUnique un <$> v))
     v = G.lookup (create <$> G.notOptional i)  l
 applyTableRep table (sidxs,l) (PatchRow patom@(m,ipa, p)) =  (dixs <$> sidxs ,) <$> (case G.lookup (G.notOptional i) l  of
                   Just v -> do
@@ -156,18 +156,18 @@ applyTableRep table (sidxs,l) (PatchRow patom@(m,ipa, p)) =  (dixs <$> sidxs ,) 
                           let pkel = G.getIndex el
                           return $ if pkel == i
                                 then G.update (G.notOptional i) (const el) l
-                                else G.insert (el,G.tbpred  el) (3,6) . G.delete (G.notOptional i)  (3,6) $ l
+                                else G.insert (el,G.tbpred  el) G.indexParam . G.delete (G.notOptional i)  G.indexParam $ l
                   Nothing -> let
                       el = createIfChange  patom
-                   in (\eli -> G.insert (eli,G.tbpred  eli) (3,6)  l) <$> el)
+                   in (\eli -> G.insert (eli,G.tbpred  eli) G.indexParam  l) <$> el)
    where
-     dixs (un,sidx) = (un,sidx)--(\v -> G.insert (v,G.getIndex i) (3,6) sidx ) (G.getUnique un  el))
+     dixs (un,sidx) = (un,sidx)--(\v -> G.insert (v,G.getIndex i) G.indexParam sidx ) (G.getUnique un  el))
      i = fmap create  ipa
 applyTableRep table (sidxs,l) (CreateRow elp ) =  Just  (didxs <$> sidxs,case G.lookup i l  of
-                  Just v ->  if v == el then l else G.insert (el,G.tbpred  el) (3,6) . G.delete i  (3,6) $ l
-                  Nothing -> G.insert (el,G.tbpred  el) (3,6)  l)
+                  Just v ->  if v == el then l else G.insert (el,G.tbpred  el) G.indexParam . G.delete i  G.indexParam $ l
+                  Nothing -> G.insert (el,G.tbpred  el) G.indexParam  l)
    where
-     didxs (un,sidx) =  (un,G.insert ((G.getIndex el,G.getUnique un  el)) (3,6) sidx  )
+     didxs (un,sidx) =  (un,G.insert ((G.getIndex el,G.getUnique un  el)) G.indexParam sidx  )
      el = fmap (fmap create) elp
      i = G.notOptional $ G.getIndex el
 

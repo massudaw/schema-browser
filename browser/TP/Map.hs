@@ -181,9 +181,6 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
             let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
             onEvent evsel (liftIO . hselg)
 
-
-            -- shift <- ui$ stepper False holdShift
-
             tdib <- ui $ stepper Nothing (fmap snd <$> evsel)
             let tdi = tidings tdib (fmap snd <$> evsel)
             (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi) reftb [] [] (allRec' (tableMap inf) $ lookTable inf tname)  tdi

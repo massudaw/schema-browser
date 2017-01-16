@@ -527,18 +527,18 @@ relabelT' :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB3Data f k a -
 relabelT' p l (m ,Compose j) =  (m,Compose $ l (KV $ fmap (Compose.  l . relabeling p l . p . getCompose ) (_kvvalues $ p j)))
 
 backPathRef :: Path (Set Key) SqlOperation -> TBData Key Showable ->  [Column Key Showable]
-backPathRef (Path k (FKJoinTable rel t)) = backFKRef (M.fromList $ fmap (\i -> (_relTarget i ,_relOrigin i)) rel) (F.toList k)
+backPathRef (Path k (FKJoinTable rel t)) = justError "no back path"  . backFKRef (M.fromList $ fmap (\i -> (_relTarget i ,_relOrigin i)) rel) (F.toList k)
 
 backFKRef
-  :: (Show (f Key ),Show a, Functor f) =>
+  :: (Foldable f,Show (f Key ),Show a, Functor f) =>
      M.Map Key Key
      -> f Key
      -> TBData  Key a
-     -> f (TB f1 Key a)
-backFKRef relTable ifk = fmap (uncurry Attr). reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . snd
+     -> Maybe (f (TB f1 Key a))
+backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . snd
   where
-        reorderPK l = fmap (\i -> justError (show ("reorder wrong" :: String, ifk ,relTable , l,i))  $ L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
-        lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (keyType ko ) (keyType kn) (  v))) <$> knm
+    reorderPK l = fmap (\i  -> L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
+    lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (keyType ko ) (keyType kn) (  v))) <$> knm
           where knm =  M.lookup ko relTable
 
 
