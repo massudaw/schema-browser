@@ -70,6 +70,7 @@ instance A.ToJSON Position where
         V.fromList
             [ A.String $ T.pack (show x)
             , A.String $ T.pack (show y)
+            , A.String $ T.pack (show 0)
             ]
 
 instance A.ToJSON SGeo where
@@ -91,7 +92,7 @@ indexTy (Nested (IProd _ [xs] ) n) = traceShowId $ nestTy (keyType xs) (indexTy 
       nestTy (KArray k) i = KArray (nestTy k i)
       nestTy (Primitive k) i = i
 
-geoPred inf tname geofields (_,ne,sw) = traceShowId geo
+geoPred inf tname geofields (ne,sw) = traceShowId geo
   where
     geo = OrColl $ geoField <$> F.toList geofields
     geoField f =
@@ -146,7 +147,7 @@ predicate
     -> Table
     -> Maybe (NonEmpty T.Text)
     -> Maybe (NonEmpty T.Text)
-    -> (Maybe (t, [Double], [Double]), Maybe (UTCTime, String))
+    -> (Maybe ([Double], [Double]), Maybe (UTCTime, String))
     -> BoolCollection (Access Key,AccessOp Showable)
 predicate inf tname evfields geofields (i,j) =
     AndColl $
@@ -247,11 +248,11 @@ makePatch zone ((t,pk,k),a) =
         STimestamp .
         utcToLocalTime utc . localTimeToUTC zone . utcToLocalTime utc
 
-readPosition:: EventData -> Maybe ([Double],[Double],[Double])
-readPosition (v) = (,,) <$> readP i a z <*> readP ni na nz <*>readP si sa sz
+readPosition:: EventData -> Maybe ([Double],[Double])
+readPosition (v) = traceShowId $ (,) <$>  readP ni na nz <*>readP si sa sz
   where
-     [i,a,z,ni,na,nz,si,sa,sz] = unsafeFromJSON v
+     [ni,na,nz,si,sa,sz] = unsafeFromJSON v
      readP i a z = (\i j z-> [i,j, z]) <$> readMay i<*> readMay a <*> readMay z
 
-currentPosition :: Element -> Event ([Double],[Double],[Double])
+currentPosition :: Element -> Event ([Double],[Double])
 currentPosition el = filterJust $ readPosition<$>  domEvent "currentPosition" el

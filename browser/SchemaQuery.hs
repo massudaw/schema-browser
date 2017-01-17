@@ -5,6 +5,11 @@ module SchemaQuery
   ,takeMany
   ,convertChanEvent
   ,childrenRefsUnique
+  ,refTables'
+  ,lookAttrM
+  ,lookAttr'
+  ,lookAttrs'
+  ,refTables
   ,applyBackend
   ,tellPatches
   ,selectFromA
@@ -835,4 +840,25 @@ loadFK table (Path ori (FKInlineTable to ) )   = do
     return $ IT rel loadVt
 
 loadFK  _ _ = return Nothing
+
+refTables' inf table page pred = do
+        (ref,res)  <-  transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
+        return (idxTid ref,res,collectionTid ref,undefined,patchVar $ iniRef ref)
+
+
+refTables inf table = refTables' inf table Nothing mempty
+
+
+lookAttrM  inf k (i,m) = unTB <$> M.lookup (S.singleton (Inline (lookKey inf (_kvname i) k))) (unKV m)
+
+lookAttrs' inf k (i,m) = unTB $ err $  M.lookup (S.fromList (lookKey inf (_kvname i) <$> k)) ta
+    where
+      ta = M.mapKeys (S.map _relOrigin) (unKV m)
+      err= justError ("no attr " <> show k <> " for table " <> show (_kvname i,M.keys ta ))
+
+lookAttr' inf k (i,m) = unTB $ err $  M.lookup (S.singleton ((lookKey inf (_kvname i) k))) ta
+    where
+      ta = M.mapKeys (S.map _relOrigin) (unKV m)
+      err= justError ("no attr " <> show k <> " for table " <> show (_kvname i,M.keys ta))
+
 

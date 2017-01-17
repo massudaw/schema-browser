@@ -39,6 +39,7 @@ library
     TP.Agenda
     TP.Chart
     TP.Map
+    TP.MapSelector
     TP.Account
     TP.View
     Text

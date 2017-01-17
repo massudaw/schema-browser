@@ -44,6 +44,7 @@ import Text
 import SortList
 import Data.Functor.Identity
 import Control.Monad.Writer hiding((<>))
+import TP.MapSelector
 import Control.Applicative.Lift
 import SchemaQuery
 import qualified Data.Binary as B
@@ -56,7 +57,7 @@ import Graphics.UI.Threepenny.Core hiding (apply,delete)
 import Graphics.UI.Threepenny.Internal (ui)
 import Data.String
 import Data.Ord
-import Control.Lens (_1,over,(^?),(&),(%~))
+import Control.Lens (_1,_2,over,(^?),(&),(%~))
 import qualified Control.Lens as Le
 import Utils
 import Data.Char
@@ -341,13 +342,6 @@ labelCase inf a old wid = do
     paintEdit l (triding wid ) (old)
     return $ TrivialWidget (triding wid) el
 
-
-refTables' inf table page pred = do
-        (ref,res)  <-  transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
-        return (idxTid ref,res,collectionTid ref,undefined,patchVar $ iniRef ref)
-
-
-refTables inf table = refTables' inf table Nothing mempty
 
 tbCaseDiff
   :: InformationSchema
@@ -1280,7 +1274,7 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,_,_) plmods nonInjRefs   oldItems  tb
           cv = searchGist relTable m iniGist cvres
           tdi = searchGist relTable m <$> gist <*> vv
           filterInpT = tidings filterInpBh filterInpE
-          filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList . snd
+          filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.pack . showFKText
           predicatefk o = (WherePredicate $AndColl $ catMaybes $ fmap ((\(Attr k v) -> PrimColl . (keyRef [k], ) . Left . (,Flip $ _relOperator $ justError "no rel" $ L.find (\i ->_relTarget i == k) rel) <$> unSOptional' v). replaceKey)  o)
           preindex = (\i -> maybe id (\i -> filterfixed (lookTable inf (_kvname m))(predicatefk i))i ) <$>iold2 <*>gist
       presort <- ui $ mapTEventDyn return (sortList <*> fmap G.toList  preindex)
@@ -1304,6 +1298,12 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,_,_) plmods nonInjRefs   oldItems  tb
         paging  = (\o -> L.take pageSize . L.drop (o*pageSize) ) <$> triding offset
       res4 <- ui$ mapTEventDyn  return (paging <*> res3)
 
+      metaMap <- mapWidgetMeta inf
+      let
+          hasMap = L.find ((== (lookTable inf (_kvname m))).(Le.^._2)) metaMap
+          add i m =  if i then (m:) else id
+
+      navMeta  <- buttonDivSet (add (isJust hasMap) "M" ["B"]) (fmap Just $pure "B") (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-right")
       itemList <- if isReadOnly tb
         then
            TrivialWidget (Just  <$> tdi ) <$>
@@ -1318,15 +1318,25 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,_,_) plmods nonInjRefs   oldItems  tb
           panC <- UI.click pan
           (elbox ,helbox) <- ui  newEvent
           bh <- ui $ stepper False (unionWith const (const False <$> esc) (unionWith const (const True <$> panC) (const False <$> elbox ) ))
-          lboxeel <- mapUIFinalizerT pan (\i -> if i
+          lboxeel <- mapUIFinalizerT pan (\(metamap,i) -> if i
                                     then do
-                                        lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) <$>    res4 ) (tidings (fmap Just <$> st ) (fmap Just <$> sel )) (pure id) ((\i -> maybe id (\l  ->    i  l ) )<$> showFK )
-                                        onEvent (rumors $ diffTidings $triding lbox) (liftIO . helbox)
-                                        return $ itemListEl
+                                        case metamap of
+                                          "B" -> do
+                                            lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) <$>    res4 ) (tidings (fmap Just <$> st ) (fmap Just <$> sel )) (pure id) ((\i -> maybe id (\l  ->    i  l ) )<$> showFK )
+                                            onEvent (rumors $ diffTidings $triding lbox) (liftIO . helbox)
+                                            return $ itemListEl
+                                          "M" -> do
+                                            let selection = (fromJust hasMap)
+                                            t <- liftIO $ getCurrentTime
+                                            TrivialWidget i el <- mapSelector inf selection (pure (t,"month")) (tidings st  sel ) (never, pure Nothing)
+                                            onEvent (rumors $ diffTidings i ) (liftIO . helbox.Just)
+                                            return el
 
-                                    else  UI.div) (tidings bh (unionWith const (const False <$> esc) (unionWith const (const True <$> panC) (const False <$> elbox) )))
+
+                                    else  UI.div)$  (,) <$> triding navMeta <*> (tidings bh (unionWith const (const False <$> esc) (unionWith const (const True <$> panC) (const False <$> elbox) )))
 
           elembox <- UI.div # sink children (pure <$> facts lboxeel)
+
           let evbox = (unionWith const (fmap Just <$> rumors tdi) elbox )
           blbox <- ui $ stepper (fmap Just cv) evbox
           let
@@ -1341,8 +1351,9 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,_,_) plmods nonInjRefs   oldItems  tb
               if True then runFunction$ ffi "$(%1).focus();" filterInp else return ())
 
           element pan#  sink text (maybe "" (\v -> (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v))<$>  facts (tds )) # set UI.style [("border","1px solid gray"),("height","20px")]
-          elsel <-element top # set  children [pan, elembox , filterInp,getElement offset]
-          return (TrivialWidget  (triding lbox) elsel)
+          elsel <-element top # set  children [pan, filterInp,getElement offset,getElement navMeta]
+          elout <- UI.div # set children [elsel,elembox]
+          return (TrivialWidget  (triding lbox) elout)
 
 
       let evsel = ( unionWith const (rumors tdi) ) (rumors $ join <$> triding itemList)
@@ -1571,19 +1582,6 @@ renderTableNoHeaderSort2 header inf modtablei out = do
       body sort o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader' sort UI.td rendererShowableUI inf $ o)
   header # set UI.class_ "row"
   UI.table # set UI.class_ "table table-bordered table-striped" # sink items ((\(i,l)-> header : fmap (body i) l )<$> out)
-
-
-lookAttrM  inf k (i,m) = unTB <$> M.lookup (S.singleton (Inline (lookKey inf (_kvname i) k))) (unKV m)
-
-lookAttrs' inf k (i,m) = unTB $ err $  M.lookup (S.fromList (lookKey inf (_kvname i) <$> k)) ta
-    where
-      ta = M.mapKeys (S.map _relOrigin) (unKV m)
-      err= justError ("no attr " <> show k <> " for table " <> show (_kvname i,M.keys ta ))
-
-lookAttr' inf k (i,m) = unTB $ err $  M.lookup (S.singleton ((lookKey inf (_kvname i) k))) ta
-    where
-      ta = M.mapKeys (S.map _relOrigin) (unKV m)
-      err= justError ("no attr " <> show k <> " for table " <> show (_kvname i,M.keys ta))
 
 
 attrLine i   = do

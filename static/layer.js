@@ -64,13 +64,14 @@ function createLayer(ref,tname,features){
   var points = JSON.parse(features);
   if (ref.layer[tname] == null )
   {
-    ref.layer[tname] = L.layerGroup().addTo(ref.mymap)
+    ref.layer[tname] = L.layerGroup();
   }
   else {
-    ref.layer[tname].clearLayers();
+    ref.layer[tname].clearLayers().remove();
+    ref.layer[tname]= L.layerGroup();
   }
   var layer = ref.layer[tname];
-  layers = points.map(function (t){ 
+  points.map(function (t){ 
   var p =  Object.assign(t.label,t.style);
   var f = p.feature ;
   if (f.icon !== ''){ 
@@ -84,7 +85,7 @@ function createLayer(ref,tname,features){
     var st = f.point;
     switch (f.point.geometry){
       case 'circle' :
-        var feature = L.circle(p.position,{radius: st.size,color:p.color})
+        var feature = L.circle(p.position,{radius: parseFloat(st.size),color:p.color});
         feature.bindTooltip(p.title,{direction:'center',opacity:0.8,className :'pointTooltip'}).openTooltip(); 
         feature.on('click',function(e ){ref.eventClick(p,e);});
         layer.addLayer(feature);
@@ -138,25 +139,26 @@ function createLayer(ref,tname,features){
     }
   }
   })
+  layer.addTo(ref.mymap);
+
 }
 
 
-function createMap (ref,posj,nej,swj,features){
-  pos = JSON.parse(posj);
+function createMap (ref,nej,swj,features){
   ref.mymap = L.map(ref);
-  if (pos == null) {
-      navigator.geolocation.getCurrentPosition(function(position) {
+  ne = JSON.parse(nej);
+  sw  = JSON.parse(swj);
+  if (ne == null || sw == null ) {
+    /*    navigator.geolocation.getCurrentPosition(function(position) {
       var mtorad = 0.00000898315
       var mcdis = 4000*mtorad
       var bounds = L.latLngBounds([position.coords.latitude + mcdis , position.coords.longitude + mcdis],[position.coords.latitude - mcdis , position.coords.longitude - mcdis]);
-      setPosition(ref,[position.coords.latitude, position.coords.longitude],bounds.getSouthWest(),bounds.getNorthEast());
+      setPosition(ref,bounds.getSouthWest(),bounds.getNorthEast());
     }, function() {
       handleLocationError(true, map.getCenter());
-    });
+    });(*/
   }else {
-      ne = JSON.parse(nej);
-      sw  = JSON.parse(swj);
-    ref.mymap.fitBounds([ne,sw]);
+    ref.mymap.fitBounds([ne,sw],{animate:false});
   }
   ref.layer={}
 
@@ -282,21 +284,17 @@ function addSource(el,table,source){
   $(el).fullCalendar('addEventSource',JSON.parse(source));
 }
 
-function setPosition(el, center,sw,ne){
-  el.mymap.fitBounds([
-          sw,
-          ne
-  ]);
+function setPosition(el, sw,ne){
+  el.mymap.fitBounds([ne,sw],{animate:false});
 }
 
 function clientHandlers(){
   return {'moveend': function(el,eventType,sendEvent){
     el.mymap.on(eventType,function(e) {
     var bounds = el.mymap.getBounds();
-    var center =bounds.getCenter();
     var sw=bounds.getSouthWest();
     var ne=bounds.getNorthEast();
-    sendEvent([center.lat,center.lng,0,ne.lat,ne.lng,0,sw.lat,sw.lng,0].map(function(e){return e.toString()}));
+    sendEvent([ne.lat,ne.lng,0,sw.lat,sw.lng,0].map(function(e){return e.toString()}));
     return true;
     });
   }
@@ -343,10 +341,9 @@ function clientHandlers(){
         var mtorad = 0.00000898315
         var mcdis = 4000*mtorad
         var bounds = L.latLngBounds([position.coords.latitude + mcdis , position.coords.longitude + mcdis],[position.coords.latitude - mcdis , position.coords.longitude - mcdis]);
-        var center =bounds.getCenter();
         var sw=bounds.getSouthWest();
         var ne=bounds.getNorthEast();
-        sendEvent([center.lat,center.lng,0,ne.lat,ne.lng,0,sw.lat,sw.lng,0].map(function(e){return e.toString()}));
+        sendEvent([ne.lat,ne.lng,0,sw.lat,sw.lng,0].map(function(e){return e.toString()}));
 
     }, function() {
       handleLocationError(true, map.getCenter());

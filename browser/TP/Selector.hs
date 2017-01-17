@@ -85,6 +85,7 @@ positionSel = do
     bcpose <- UI.click bcpos
     onEventFT bcpose  (\_ -> runFunction $ ffi "fireCurrentPosition(%1)" bcpos)
     onEventFT (currentPosition bcpos ) (liftIO. h )
+    runFunction $ ffi "fireCurrentPosition(%1)" bcpos
     return (bcpos,currentPosition bcpos, h,tidings positionB (diffEvent positionB  (Just <$> e)))
 
 
