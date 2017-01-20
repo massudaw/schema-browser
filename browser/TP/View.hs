@@ -92,12 +92,13 @@ indexTy (Nested (IProd _ [xs] ) n) = traceShowId $ nestTy (keyType xs) (indexTy 
       nestTy (KArray k) i = KArray (nestTy k i)
       nestTy (Primitive k) i = i
 
+
 geoPred inf tname geofields (ne,sw) = traceShowId geo
   where
     geo = OrColl $ geoField <$> F.toList geofields
     geoField f =
         PrimColl .
-          (, Left (IntervalTB1 $ Interval.interval (makePos (L.head $ F.toList nty)sw) (makePos (L.head $ F.toList nty)ne),op nty))
+          (, Left (makeInterval (L.head $ F.toList nty)  (sw,ne) ,op nty))
             $ index
       where
         nty= indexTy index
@@ -190,6 +191,10 @@ resRange b "hour" d =
                then -3600
                else 3600) d
 
+makeInterval :: Prim KPrim (T.Text,T.Text) ->  ([Double], [Double]) -> FTB Showable
+makeInterval nty (sw,ne) = IntervalTB1 $ Interval.interval (makePos nty sw) (makePos nty ne)
+
+makePos :: Prim KPrim (T.Text,T.Text) -> [Double] -> (Extended (FTB Showable),Bool)
 makePos (AtomicPrim (PGeom (MultiGeom (PPolygon 3)))) [b,a,z] =
     (Interval.Finite $ pos (Position (a, b,z)), True)
 makePos (AtomicPrim (PGeom (MultiGeom (PPolygon 2)))) [b,a,z] =
@@ -256,3 +261,11 @@ readPosition (v) = traceShowId $ (,) <$>  readP ni na nz <*>readP si sa sz
 
 currentPosition :: Element -> Event ([Double],[Double])
 currentPosition el = filterJust $ readPosition<$>  domEvent "currentPosition" el
+
+
+convertInter i =    liftA2 (,) (fmap convertPoint $ G.unFin $ fst $upperBound' i) (fmap convertPoint $ G.unFin $ fst $lowerBound' i)
+  where
+     convertPoint ((SGeo (SPosition (Position (y,x,z)) ))) = [x,y,z]
+     convertPoint ((SGeo (SPosition (Position2D (y,x)) ))) = [x,y,0]
+
+

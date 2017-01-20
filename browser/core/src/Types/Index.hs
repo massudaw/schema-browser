@@ -434,6 +434,8 @@ instance (Ord v ,Range v) => Range (FTB v ) where
   pureR (ArrayTB1 is) = foldl1 appendRI (fmap pureR is)
   pureR (IntervalTB1 is) =  is
   pureR (LeftTB1 is) =  maybe Interval.empty  pureR is
+  pureR (SerialTB1 is) =  maybe Interval.empty  pureR is
+  pureR (DelayedTB1 is) =  maybe Interval.empty  pureR is
   appendR (TB1 i ) (TB1 j) = fmap TB1 $ appendR i j
 
 

@@ -178,7 +178,7 @@ queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (s,g) = {-traceShow (notPK ,
         searchSIdx = (\sset -> L.filter ((`S.member` sset) .snd) $ getEntries g) <$> mergeSIdxs
         notPK = fmap WherePredicate $ F.foldl' (\l i -> flip G.splitIndexPKB  i =<< l ) (Just bool) (pk : fmap fst s )
         mergeSIdxs :: Maybe (S.Set (TBIndex Showable))
-        mergeSIdxs = foldl1 S.union <$> (nonEmpty $ catMaybes $ fmap (S.fromList . fmap fst ) . searchPK b <$> s)
+        mergeSIdxs = foldl1 S.intersection<$> (nonEmpty $ catMaybes $ fmap (S.fromList . fmap fst ) . searchPK b <$> s)
 
 
 searchPK ::  (Show k,Eq k) => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [(a,TBIndex  Showable)]

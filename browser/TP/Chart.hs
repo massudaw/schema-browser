@@ -97,7 +97,7 @@ chartWidgetMetadata inf = do
             attrValue (Attr k v) = v
          in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,F.toList efields,(timeFields,geoFields,chart),proj) ) ( G.toList evMap)
 
-chartWidget body (incrementT,resolutionT) (_,_,_,positionB) sel inf cliZone = do
+chartWidget body (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
 
     dashes <- chartWidgetMetadata inf
     iday <- liftIO getCurrentTime

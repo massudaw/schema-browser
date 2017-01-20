@@ -46,6 +46,7 @@ import qualified Data.Set as S
 import qualified Data.Map as M
 import GHC.Stack
 
+
 calendarSelector = do
     let buttonStyle k e = e # set UI.text (fromJust $ M.lookup k transRes)# set UI.class_ "btn-xs btn-default buttonSet"
           where transRes = M.fromList [("year","Ano"),("month","Mês"),("week","Semana"),("day","Dia"),("hour","Hora")]
@@ -82,11 +83,12 @@ positionSel = do
     bcpos <-UI.button # set text "Localização Atual"
     (e,h) <- ui $ newEvent
     positionB <- ui $ stepper Nothing (Just <$>e)
+    let
     bcpose <- UI.click bcpos
     onEventFT bcpose  (\_ -> runFunction $ ffi "fireCurrentPosition(%1)" bcpos)
     onEventFT (currentPosition bcpos ) (liftIO. h )
     runFunction $ ffi "fireCurrentPosition(%1)" bcpos
-    return (bcpos,currentPosition bcpos, h,tidings positionB (diffEvent positionB  (Just <$> e)))
+    return (bcpos,tidings positionB (diffEvent positionB  (Just <$> e)))
 
 
 tableUsage inf orderMap table selection = (L.elem table (M.keys selection), tableOrder inf table orderMap )

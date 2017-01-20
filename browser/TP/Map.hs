@@ -58,9 +58,8 @@ import qualified Data.Map as M
 import qualified Data.HashMap.Strict as HM
 
 
-mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
 
-
+mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
     let
       calendarT = (,) <$> facts incrementT <#> resolutionT
     dashes <- mapWidgetMeta inf
@@ -96,6 +95,12 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
     routeD <- UI.div
     element routeD # set children [routeT,startD,endD,route]
 
+    (positionLocal,h) <- ui $ newEvent
+    let positionE = (unionWith const (rumors prepositionT) positionLocal)
+    pb <- currentValue (facts prepositionT)
+    positionB <- ui $stepper  pb positionE
+    let positionT = tidings positionB positionE
+
 
     element body # set children [filterInp,routeD,calendar]
     let
@@ -115,12 +120,12 @@ mapWidget body (incrementT,resolutionT) (sidebar,cposE,h,positionT) sel inf = do
                 mapUIFinalizerT innerCalendar (\i -> createLayers innerCalendar (tableName tb)  (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) (v^._3)
                   ) (nonEmpty path))
 
-        onEvent cposE (\(sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3)" innerCalendar  sw ne)
         pb <- currentValue (facts positionT)
         editor <- UI.div
         element calendar # set children [innerCalendar,editor]
         calendarCreate  innerCalendar pb ("[]"::String)
-        onEvent (moveend innerCalendar) (liftIO . h)
+        onEvent (moveend innerCalendar) (liftIO . h. Just)
+        onEvent (filterJust $ rumors prepositionT) (\(sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3)" innerCalendar  sw ne)
 
         fin <- mapM (\(_,tb,fields,efields,proj) -> do
           let pcal =  liftA2 (,) positionT  calendarT

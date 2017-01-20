@@ -595,7 +595,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
 
 
   -- Insert when isValid
-  let insertEnabled = liftA2 (&&) (onDiff isRight False .  fmap patchCheck <$>  inscrudp ) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (inscrud ) (gist ))
+  let insertEnabled = liftA2 (&&) (liftA2 (||) (onDiff isRight False .  fmap patchCheck <$>  inscrudp) ((maybe False (isRight . tableCheck  )  )<$> inscrud )) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (inscrud ) (gist ))
   insertB <- UI.button# set UI.class_ "btn btn-sm" #
           set text "INSERT" #
           set UI.class_ "buttonSet" #
@@ -1303,7 +1303,7 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,_,_) plmods nonInjRefs   oldItems  tb
           hasMap = L.find ((== (lookTable inf (_kvname m))).(Le.^._2)) metaMap
           add i m =  if i then (m:) else id
 
-      navMeta  <- buttonDivSet (add (isJust hasMap) "M" ["B"]) (fmap Just $pure "B") (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-right")
+      navMeta  <- buttonDivSet (add (isJust hasMap) "M" ["B"]) (fmap Just $pure (maybe "B" (const "M") hasMap )) (\i -> UI.button # set UI.text i # set UI.style [("font-size","smaller")] # set UI.class_ "buttonSet btn-xs btn-default btn pull-right")
       itemList <- if isReadOnly tb
         then
            TrivialWidget (Just  <$> tdi ) <$>
