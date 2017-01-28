@@ -5,6 +5,7 @@ import Types
 import qualified Types.Index as G
 import SchemaQuery
 import Step.Common
+import qualified Data.Poset as P
 import Control.Exception (uninterruptibleMask,mask_,throw,catch,throw,SomeException)
 import Step.Host
 import Data.Interval (Extended(..),upperBound)
@@ -188,18 +189,32 @@ insertMod j  = do
     let
       table = lookTable inf (_kvname (fst  j))
     (t,pk,attrs) <- insertPatch (fromRecord  ) (conn  inf) (patch $  j) ( table)
-    let mod =  TableModification Nothing table (CreateRow $ create  (t,pk,catMaybes (defaultAttrs <$> (F.toList $ rawAttrs table)  ) <> catMaybes (defaultFKS . pathRel <$> S.toList (rawFKS table)) <> attrs ))
+    let mod =  TableModification Nothing table (CreateRow $ create  (t,pk,deftable table <> attrs ))
     return $ Just  mod
 
+deftable table =
+  let
+    fks' = S.toList $ rawFKS table
+    items = tableAttrs table
+    fkSet,funSet:: S.Set Key
+    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction .pathRel) $ fks'
+    funSet = S.unions $ fmap (\(Path i _ )-> i) $ filter (isFunction.pathRel) (fks')
+    nonFKAttrs ,fks :: [[Rel Key]]
+    nonFKAttrs =   fmap (pure .Inline)$  filter (\i -> not $ S.member i (fkSet <> funSet)) items
+    fks = (S.toList . pathRelRel <$> fks')
 
-defaultFKS i =Nothing
-defaultFKS (FKJoinTable i l)
-  | L.any (isKOptional . keyType . _relOrigin ) i = flip (PFK i) (POpt Nothing) <$>  (traverse (defaultAttrs . _relOrigin ) i)
+  in catMaybes $ fmap (\i -> defaultAttrs  i) (nonFKAttrs <> fks)
 
-defaultAttrs  k  =
+
+defaultAttrs  [Inline k]  =
   case keyType k of
     KOptional i -> Just (PAttr k (POpt Nothing))
     i -> Nothing
+defaultAttrs i
+  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin ) i = flip (PFK i) (POpt Nothing) <$>  (traverse (defaultAttrs . pure .Inline . _relOrigin ) i)
+  where isRel (Rel _  _ _ ) = True
+        isRel _ = False
+defaultAttrs i = Nothing
 
 
 
