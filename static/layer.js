@@ -60,6 +60,17 @@ function removeLayer (ref,tname){
     ref.mymap.removeLayer(ref.layer[tname]);
 }
 
+function createBounds(ref,tname,features){
+  var points = JSON.parse(features);
+  if (ref.layer[tname] == null )
+  {
+  ref.bounds[tname] =  L.layerGroup();
+  }else{
+    ref.layer[tname].remove();
+    ref.layer[tname]= L.layerGroup();
+  }
+}
+
 function createLayer(ref,tname,features){
   var points = JSON.parse(features);
   if (ref.layer[tname] == null )

@@ -49,6 +49,8 @@ import Database.PostgreSQL.Simple
 filterFun  = filter (\k -> not $ isFun k )
   where isFun (PFun _ _ _ ) = True
         isFun i = False
+
+
 insertPatch
   :: (MonadIO m ,Functor m )
      => (TBData Key () -> FR.RowParser (TBData Key Showable ))
@@ -185,9 +187,22 @@ insertMod j  = do
   liftIO $ do
     let
       table = lookTable inf (_kvname (fst  j))
-    kvn <- insertPatch (fromRecord  ) (conn  inf) (patch $  j) ( table)
-    let mod =  TableModification Nothing table (CreateRow $ create  kvn)
+    (t,pk,attrs) <- insertPatch (fromRecord  ) (conn  inf) (patch $  j) ( table)
+    let mod =  TableModification Nothing table (CreateRow $ create  (t,pk,catMaybes (defaultAttrs <$> (F.toList $ rawAttrs table)  ) <> catMaybes (defaultFKS . pathRel <$> S.toList (rawFKS table)) <> attrs ))
     return $ Just  mod
+
+
+defaultFKS i =Nothing
+defaultFKS (FKJoinTable i l)
+  | L.any (isKOptional . keyType . _relOrigin ) i = flip (PFK i) (POpt Nothing) <$>  (traverse (defaultAttrs . _relOrigin ) i)
+
+defaultAttrs  k  =
+  case keyType k of
+    KOptional i -> Just (PAttr k (POpt Nothing))
+    i -> Nothing
+
+
+
 
 
 deleteMod :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))

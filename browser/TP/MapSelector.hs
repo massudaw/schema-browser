@@ -13,6 +13,7 @@ import Foreign.JavaScript (toCode,JSFunction)
 import Utils
 import qualified Data.Sequence as S
 import Database.PostgreSQL.Simple
+import qualified Data.Interval as I
 import Control.Monad.Writer as Writer
 import Postgresql.Parser
 import Control.Arrow (first)
@@ -59,9 +60,10 @@ import qualified Data.HashMap.Strict as HM
 
 removeLayers el tname = runFunction $ ffi "removeLayer(%1,%2)" el tname
 
-createLayers el tname evs= runFunction $ ffi "createLayer (%1,%3,%2)" el evs tname
-calendarCreate el Nothing evs= runFunction $ ffi "createMap (%1,null,null,%2)" el evs
-calendarCreate el (Just (ne,sw)) evs= runFunction $ ffi "createMap (%1,%2,%3,%4)" el  (show ne) (show sw) evs
+createBounds el tname evs= runFunction $ ffi "createBounds(%1,%3,%2)" el evs tname
+createLayers el tname evs= runFunction $ ffi "createLayer(%1,%3,%2)" el evs tname
+calendarCreate el Nothing evs= runFunction $ ffi "createMap(%1,null,null,%2)" el evs
+calendarCreate el (Just (ne,sw)) evs= runFunction $ ffi "createMap(%1,%2,%3,%4)" el  (show ne) (show sw) evs
 
 
 idx inf c v@(m,k) = indexField ( liftAccess inf (_kvname m) (keyRef c))  v
@@ -126,13 +128,14 @@ mapSelector inf selected calendarT sel (cposE,positionT) = do
           fields = selected ^. _3
           evc = eventClick innerCalendar
           boundSel :: FTB Showable ->  TBData Key Showable -> Maybe (Interval Showable)
-          boundSel (TB1 (SText field)) sel = G.bound <$> indexFieldRec (liftAccess inf (tableName (selected ^._2 )) $ indexer field)   sel
+          boundSel (TB1 (SText field)) sel = (\(G.FTBNode i) -> i) . G.bound <$> indexFieldRec (liftAccess inf (tableName (selected ^._2 )) $ indexer field)   sel
           boundsSel :: Tidings (Maybe (Interval Showable ))
-          boundsSel = join . fmap (\j -> fmap G.union . fmap S.fromList  . nonEmpty . fmap leftEntry .  catMaybes .  fmap (flip boundSel  j) . F.toList  $  fields) <$> sel
-          leftEntry :: Interval Showable -> Either (Interval Showable) (FTB Showable)
-          leftEntry i  = Left i
+          boundsSel = join . traceShowId . fmap (\j -> fmap ((\(G.FTBNode i) -> i).G.union) . fmap S.fromList  . traceShowId . nonEmpty . fmap leftEntry .  catMaybes .  fmap (flip boundSel  j) . F.toList  $  fields) <$> sel
+          leftEntry :: Interval Showable -> Either (G.Node (FTB Showable)) (FTB Showable)
+          leftEntry i  = Left (G.FTBNode i)
         onEvent cposE (liftIO . hgselg)
         p <- currentValue (facts boundsSel)
+        liftIO $print p
         let
             pb = (join $ convertInter <$> p)
             positionE = (unionWith const (Just <$> egselg ) ( join . fmap convertInter <$> rumors boundsSel) )
@@ -143,10 +146,14 @@ mapSelector inf selected calendarT sel (cposE,positionT) = do
 
 
         let
-          pcal = liftA2 (,)  (tidings positionB positionE) calendarT
+          positionT = (tidings positionB positionE)
+          pcal = liftA2 (,)   positionT calendarT
 
         calendarCreate  innerCalendar (Nothing :: Maybe ([Double],[Double])) ("[]"::String)
         onEvent (moveend innerCalendar) (liftIO . hgselg)
+        onEvent ( filterJust $ join . fmap convertInter <$> rumors boundsSel)  setPosition
+        codep <- mapUIFinalizerT innerCalendar (liftIO . traverse (\(sw,ne) ->toCode $ (ffi "setPosition(%1,%2,%3)" innerCalendar sw ne :: JSFunction ()))) positionT
+        pscript <- mkElement "script" # sink text (maybe "" id .traceShowId <$> facts codep)
 
         fin <- (\(_,tb,fields,efields,proj) -> do
           let
@@ -163,10 +170,6 @@ mapSelector inf selected calendarT sel (cposE,positionT) = do
             ) pcal
           ) selected
         bselg <- ui $ stepper Nothing (fmap snd <$> eselg )
-        onEvent ( filterJust $ join . fmap convertInter <$> rumors boundsSel)  setPosition
-        -- traverse (liftIOLater . evalUI innerCalendar . setPosition) pb
-        codep <- liftIO $ maybe (return "") (\(sw,ne) ->toCode $ (ffi "setPosition(%1,%2,%3)" innerCalendar sw ne :: JSFunction ())) pb
-        pscript <- mkElement "script" # set text codep
         cal <- UI.div  # set children [ innerCalendar, pscript]
         return (TrivialWidget (tidings bselg (fmap snd <$> eselg)) cal)
 

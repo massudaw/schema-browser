@@ -458,7 +458,7 @@ createTB1
   :: PatchConstr d a =>
      (Index (TBData d a )) ->
      Maybe(KVMetadata d , Compose Identity  (KV (Compose Identity  (TB Identity))) d a)
-createTB1 (m ,s ,k)  = (m ,).  _tb .KV . mapFromTBList  <$>  traverse (fmap _tb .createIfChange) k
+createTB1 (m ,s ,k)  = (m ,).  _tb .KV . mapFromTBList  <$>  nonEmpty ( catMaybes $ fmap (fmap _tb .createIfChange) k)
 
 
 pattrKey (PAttr s _ ) = Set.singleton $ Inline s

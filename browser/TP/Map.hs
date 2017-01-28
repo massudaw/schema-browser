@@ -58,6 +58,17 @@ import qualified Data.Map as M
 import qualified Data.HashMap.Strict as HM
 
 
+instance UI.ToJS (G.Node (TBIndex Showable)) where
+  render  = render . A.toJSON
+
+instance A.ToJSON (G.Node (TBIndex Showable)) where
+  toJSON (G.TBIndexNode i) = A.toJSON i
+
+instance A.ToJSON (Interval Showable) where
+  toJSON i = A.toJSON [G.unFin $ fst $ lowerBound' i , G.unFin $ fst $ upperBound' i]
+
+instance A.ToJSON (G.Node (FTB Showable)) where
+  toJSON (G.FTBNode i) = A.toJSON i
 
 mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
     let
@@ -116,8 +127,9 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
                   tb = t
                   Just proj = fmap (^._5) $ L.find ((==tb).(^._2) ) dashes
               traverse (\path -> do
-                v <- ui$refTables' inf tb  Nothing (WherePredicate (OrColl $ (\(i,j) -> AndColl $fmap (PrimColl . first (liftAccess inf (tableName t))) [(   IProd Nothing ["source"],Left (int i,Equals)), (IProd Nothing ["target"],Left (int j,Equals))])  <$> path ))
-                mapUIFinalizerT innerCalendar (\i -> createLayers innerCalendar (tableName tb)  (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) (v^._3)
+                v <- ui $ refTables' inf tb  Nothing (WherePredicate (OrColl $ (\(i,j) -> AndColl $fmap (PrimColl . first (liftAccess inf (tableName t))) [(   IProd Nothing ["source"],Left (int i,Equals)), (IProd Nothing ["target"],Left (int j,Equals))])  <$> path ))
+                mapUIFinalizerT innerCalendar (\i -> do
+                  createLayers innerCalendar (tableName tb)  (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) (v^._3)
                   ) (nonEmpty path))
 
         pb <- currentValue (facts positionT)

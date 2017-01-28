@@ -263,6 +263,7 @@ currentPosition :: Element -> Event ([Double],[Double])
 currentPosition el = filterJust $ readPosition<$>  domEvent "currentPosition" el
 
 
+convertInter i | traceShow i False = undefined
 convertInter i =    liftA2 (,) (fmap convertPoint $ G.unFin $ fst $upperBound' i) (fmap convertPoint $ G.unFin $ fst $lowerBound' i)
   where
      convertPoint ((SGeo (SPosition (Position (y,x,z)) ))) = [x,y,z]

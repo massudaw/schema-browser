@@ -581,8 +581,7 @@ mergeCreate (Just i)  Nothing = Just i
 mergeCreate Nothing Nothing = Nothing
 
 mergeTB1 ((m,Compose k) ) ((m2,Compose k2) )
-  | m == m2 = (m,Compose $ liftA2 (<>) k k2)
-  | otherwise = (m,Compose $ liftA2 (<>) k k2) -- errorWithStackTrace (show (m,m2))
+  | otherwise = (m,Compose $ liftA2 (\(KV i ) (KV j) -> KV $ M.unionWith const i j ) k k2) -- errorWithStackTrace (show (m,m2))
 
 
 

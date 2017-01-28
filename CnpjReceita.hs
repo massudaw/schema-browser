@@ -83,8 +83,8 @@ convertHtml out =
             attrs = tb [ own "owner_name" (idx "NOME EMPRESARIAL")
                        , fk [Rel "address" Equals "id"] [own "address" (LeftTB1 $ Just $ TB1 $ SNumeric (-1)) ]
                           (LeftTB1 $ Just $
-                          tb [attr "id" (SerialTB1 Nothing)
-                              ,attr "logradouro" (idx "LOGRADOURO")
+                          tb [
+                              attr "logradouro" (idx "LOGRADOURO")
                               ,attr "number" (idx "NÚMERO")
                               ,attr "complemento" (idx "COMPLEMENTO")
                               ,attr "cep" (idx "CEP")
@@ -94,7 +94,7 @@ convertHtml out =
                        ,fk [Rel "atividade_principal" Equals "id"] [own "atividade_principal" (LeftTB1 $ Just (pcnae))]
                                   (LeftTB1 $ Just $ tb [cna "id" pcnae,cna "description" pdesc] )
                        ,afk [(Rel "atividades_secundarias" Equals "id")] [own "atividades_secundarias" (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ fmap fst scnae)]
-                                  ((\(pcnae,pdesc)-> tb [cna "id" pcnae,cna "description" pdesc] ) <$> scnae)]
+                                  ((\(pcnae,pdesc)-> tb [cna "id" pcnae,cna "description" pdesc] ) <$> filter ((/=txt "Não informada").snd) scnae)]
         in Just  attrs
 
 getCnpjForm session captcha cgc_cpf = do

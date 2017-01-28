@@ -18,10 +18,12 @@ module Types.Index
   (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,fromList',filter ,filter'
   ,getIndex ,getBounds,getUnique,notOptional,tbpred
   ,unFin
+  ,Node(..)
   ,indexParam
   ,queryCheck
   ,indexPred
   ,checkPred
+  ,cinterval
   ,splitIndex
   ,splitPred
   ,splitIndexPKB
@@ -100,21 +102,12 @@ tbpred = notOptional . getIndex
 
 instance (Show a,Affine a) => Affine (ER.Extended a ) where
   type Tangent (ER.Extended a) = ER.Extended (Tangent  a)
-  loga ER.PosInf = ER.PosInf
-  loga ER.NegInf = ER.NegInf
-  expa ER.PosInf = ER.PosInf
-  expa ER.NegInf = ER.PosInf
   subtraction (ER.Finite i) (ER.Finite j) = ER.Finite $ subtraction i j
   subtraction (ER.NegInf ) i = ER.NegInf
   subtraction (ER.PosInf ) i = ER.PosInf
   subtraction i  (ER.PosInf ) = ER.NegInf
   subtraction i  (ER.NegInf) = ER.PosInf
   subtraction i j = errorWithStackTrace (show (i,j))
-  addition (ER.Finite i) (ER.Finite j) = ER.Finite $ addition i j
-  addition ER.NegInf  ER.NegInf = ER.NegInf
-  addition ER.PosInf ER.NegInf = ER.PosInf
-  addition ER.NegInf ER.PosInf = ER.NegInf
-  addition ER.PosInf ER.PosInf = ER.PosInf
 
 notNeg (DSPosition l)
   | otherwise = DSPosition l
@@ -171,10 +164,7 @@ headS i = head i
 
 class Affine f where
   type Tangent f
-  loga :: f -> Tangent f
-  expa :: Tangent f -> f
   subtraction :: f -> f -> Tangent f
-  addition :: f -> Tangent f -> f
 
 class Positive f where
   notneg :: f -> f
@@ -182,8 +172,6 @@ class Positive f where
 
 instance Affine String where
   type Tangent String = [Int]
-  loga = fmap ord
-  expa = fmap chr
   subtraction i j = diffStr i j
     where
       diffStr :: String -> String -> [Int]
@@ -192,13 +180,6 @@ instance Affine String where
       diffStr [] bs = ord <$> bs
       diffStr [] [] = []
   {-# INLINE subtraction #-}
-  addition  i j = addStr  i j
-    where
-      addStr (a:as) (b:bs) = chr (ord a + b) : addStr as bs
-      addStr (a:as) []  = a : addStr as []
-      addStr [] (b:bs) = chr b : addStr [] bs
-      addStr [] [] = []
-  {-# INLINE addition #-}
 
 splitIndexPK :: Eq k => BoolCollection (Access k ,AccessOp Showable) -> [k] -> Maybe (BoolCollection (Access k , AccessOp Showable))
 splitIndexPK (OrColl l ) pk  = if F.all (isNothing .snd) al then Nothing else Just $ OrColl $ fmap (\(i,j) -> fromMaybe i j) al
@@ -246,37 +227,14 @@ instance Affine Position where
   type Tangent Position = DiffPosition
   subtraction ((Position (x,y,z)) ) ((Position (a,b,c))) = DiffPosition3D (a-x,b-y,c-z)
   subtraction ((Position2D (x,y)) ) ((Position2D (a,b))) = DiffPosition2D (a-x,b-y)
-  addition ((Position (x,y,z)) ) ((DiffPosition3D (a,b,c))) = Position (a+x,b+y,c+z)
-  addition ((Position2D (x,y)) ) ((DiffPosition2D (a,b))) = Position2D (a+x,b+y)
-  expa ((DiffPosition3D t)) =  Position t
-  expa ((DiffPosition2D t)) =  Position2D t
-  loga ((Position t)) =  (DiffPosition3D t)
-  loga ((Position2D t)) =  (DiffPosition2D t)
 
 instance Affine Int where
   type Tangent Int = Int
-  loga  = id
-  expa = id
   subtraction = (-)
-  addition = (+)
 
 
 instance Affine Showable where
   type Tangent Showable = DiffShowable
-  loga (SNumeric t) =  DSInt $ loga t
-  loga (SText t) =  DSText $ loga (T.unpack t)
-  loga (SDouble t) =  DSDouble $ t
-  loga (SDate t) =  DSDays  (diffDays  t (ModifiedJulianDay 0))
-  loga (STimestamp t) =  DSDiffTime (diffUTCTime (localTimeToUTC utc t) (UTCTime (ModifiedJulianDay 0) 0))
-  loga (SGeo (SPosition t)) =  DSPosition (loga t)
-  loga i = errorWithStackTrace (show i)
-  expa (DSInt t) =  SNumeric $ expa t
-  expa (DSText t) =  SText $ T.pack $ expa t
-  expa (DSDouble t) =  SDouble $ t
-  expa (DSDays t) =  SDate $ addDays t (ModifiedJulianDay 0)
-  expa (DSDiffTime t) =  STimestamp $ utcToLocalTime utc $ addUTCTime  t (UTCTime (ModifiedJulianDay 0) 0)
-  expa (DSPosition t) =  SGeo $ SPosition (expa t)
-  expa i = errorWithStackTrace (show i)
   subtraction = diffS
     where
       diffS :: Showable -> Showable -> DiffShowable
@@ -289,45 +247,38 @@ instance Affine Showable where
       diffS a b  = errorWithStackTrace (show (a,b))
       {-# INLINE diffS #-}
   {-# INLINE subtraction #-}
-  addition (SNumeric v) (DSInt t) = SNumeric  $ addition v  t
-  addition (SText v) (DSText t) = SText $ T.pack $ addition (T.unpack v) t
-  addition (SDouble v) (DSDouble t) = SDouble $ v + t
-  addition (STimestamp  v) (DSDiffTime t) = STimestamp $ utcToLocalTime utc $ addUTCTime t (localTimeToUTC utc v)
-  addition (SDate v) (DSDays t) = SDate $ addDays t v
-  addition (SGeo(SPosition  v )) (DSPosition t ) = SGeo(SPosition $ addition v t)
-  addition i j = errorWithStackTrace (show (i,j))
-  {-# INLINE addition #-}
 
 instance Positive DiffShowable where
   notneg = notNeg
 
 transEither
-  :: (Either a (FTB b) -> Either a (FTB b) -> c)
-  -> Either [a] (TBIndex b)
-  -> Either [a] (TBIndex b)
+  :: (Either (Node (FTB b)) (FTB b) -> Either (Node (FTB b)) (FTB b) -> c)
+  -> Either (Node (TBIndex b)) (TBIndex b)
+  -> Either (Node (TBIndex b)) (TBIndex b)
   -> [c]
 transEither f  i j  =
     case (i,j) of
         (Right (Idex i) ,Right (Idex j)) -> co (Right <$> i) (Right <$> j)
-        (Left (i) ,Left (j)) -> co (Left <$> i) (Left <$> j)
-        (Right (Idex i) ,Left (j)) -> co  (Right <$> i) (Left <$> j)
-        (Left (i) ,Right (Idex j)) -> co (Left <$> i) (Right <$> j)
+        (Left (TBIndexNode i) ,Left (TBIndexNode j)) -> co (Left <$> i) (Left <$> j)
+        (Right (Idex i) ,Left (TBIndexNode j)) -> co  (Right <$> i) (Left<$> j)
+        (Left (TBIndexNode i) ,Right (Idex j)) -> co (Left <$> i) (Right <$> j)
   where co l i =  zipWith f l i
 {-# INLINE transEither #-}
 
 instance ( Predicates (FTB v)) => Predicates (TBIndex v ) where
   type (Penalty (TBIndex v)) = [Penalty (FTB v)]
   type Query (TBIndex v) = (TBPredicate Int v)
-  type Node (TBIndex v) = [Node (FTB v)]
+  data Node (TBIndex v) = TBIndexNode [Node (FTB v)] deriving (Eq,Ord,Show)
   consistent i j = (\b -> if null b then False else  F.all id b) $ transEither consistent i j
 
+  origin = TBIndexNode (repeat G.origin)
   match (WherePredicate a)  (Right (Idex v)) = go a
     where
       -- Index the field and if not found return true to row filtering pass
       go (AndColl l) = F.all go l
       go (OrColl l ) = F.any go  l
       go (PrimColl (IProd _ [i],op)) = maybe True (match op .Right)  (v `atMay` i)
-  match (WherePredicate a)  (Left v) = go a
+  match (WherePredicate a)  (Left (TBIndexNode v)) = go a
     where
       -- Index the field and if not found return true to row filtering pass
       go (AndColl l) = F.all go l
@@ -337,10 +288,9 @@ instance ( Predicates (FTB v)) => Predicates (TBIndex v ) where
       node i = Left i
 
 
-  bound (Idex i) =  fmap bound i
-  merge = transEither merge
-
-  penalty = transEither penalty
+  bound (Idex i) =  TBIndexNode $ bound <$> i
+  merge (TBIndexNode i) (TBIndexNode j) = TBIndexNode $ zipWith merge i j
+  penalty (TBIndexNode i ) (TBIndexNode j) = zipWith penalty i j
   {-# INLINE penalty #-}
 
 projIdex (Idex v) = F.toList v
@@ -351,6 +301,9 @@ instance (Predicates (TBIndex  a )  ) => Monoid (G.GiST (TBIndex  a)  b) where
     | G.size i < G.size j = ins  j (getEntries i )
     | otherwise  = ins  i (getEntries j )
     where ins = foldl' (\j i -> G.insert i indexParam j)
+
+
+
 
 indexParam :: (Int,Int)
 indexParam = (10,20)
@@ -429,6 +382,7 @@ class Range v where
   pureR :: v -> Interval  v
   appendR :: v -> v -> Interval v
 
+
 instance (Ord v ,Range v) => Range (FTB v ) where
   pureR (TB1 i)  =  fmap TB1 $ pureR i
   pureR (ArrayTB1 is) = foldl1 appendRI (fmap pureR is)
@@ -441,17 +395,22 @@ instance (Ord v ,Range v) => Range (FTB v ) where
 
 instance Range Showable where
   pureR  i = i `cinterval` i
-  appendR = mergeS
+  appendR (SGeo (SPosition i)) (SGeo (SPosition j)) =  fmap (SGeo . SPosition )  $ mergeP i j
+    where
+      mergeP (Position2D (i,j)) (Position2D (l,m))=  Position2D (min i l , min j m) `cinterval` Position2D (max i l , max j m)
+      mergeP (Position(i,j,k)) (Position (l,m,n))=  Position (min i l , min j m,min k n) `cinterval` Position (max i l , max j m,max k n)
+  appendR i j = min i j  `cinterval` max i j
+
 
 appendRI :: (Ord v ,Range v) => Interval v -> Interval v -> Interval v
-appendRI i  j  = maybe (ER.NegInf,True) lowerBound' (liftA2 appendR (unFin $ fst $ lowerBound' i ) (unFin $ fst $ lowerBound' j)) `interval` maybe (ER.PosInf,True) upperBound' (liftA2 appendR (unFin $ fst $ upperBound' i ) (unFin $ fst $ upperBound' j))
+appendRI i  j  = maybe (min (lowerBound' j) (lowerBound' i )) lowerBound' (liftA2 appendR (unFin $ fst $ lowerBound' i ) (unFin $ fst $ lowerBound' j)) `interval`  (maybe (max (upperBound' i) (upperBound' j))upperBound' (liftA2 appendR (unFin $ fst $ upperBound' i ) (unFin $ fst $ upperBound' j)) )
 
 instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord (Tangent v),Ord v,Show v , Affine v ) => Predicates (FTB v) where
-  type Node (FTB v) = Interval.Interval v
+  data Node (FTB v) = FTBNode (Interval.Interval v) deriving (Eq,Ord,Show)
   type Penalty (FTB v) = ER.Extended (Tangent v)
   type Query (FTB v) = AccessOp v
-  consistent (Left i ) (Left j) = not . Interval.null $  j `Interval.intersection` i
-  consistent (Right i ) (Left j) = cons i j
+  consistent (Left (FTBNode i) ) (Left (FTBNode j)) = not . Interval.null $  j `Interval.intersection` i
+  consistent (Right i ) (Left (FTBNode j)) = cons i j
       where
         cons (TB1 j)  i  = j `Interval.member` i
         cons (LeftTB1 i) j = fromMaybe True $ (flip cons j ) <$>  i
@@ -477,9 +436,9 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
         cons i (LeftTB1 j) = fromMaybe True $(cons i ) <$>  j
         cons i j  = errorWithStackTrace (show ("rr",i,j))
 
-  match i (Left j) = mal i  j
+  match i (Left (FTBNode j)) = mal i  j
     where
-      mal (Left v)  j  = ma  v  j
+      mal (Left (v))  j  = ma  v  j
         where
           ma ((TB1 i) ,op)  j  = i `Interval.member` j
           ma (DelayedTB1 j ,v)   i   = fromMaybe False ((\a -> ma (a,v) i) <$> j)
@@ -537,49 +496,18 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
           ma i  j = errorWithStackTrace ("no ma =" ++ show (i,j))
   match x  z = errorWithStackTrace ("no match = " <> show (x,z))
 
-  bound i =  fmap unTB1 $ pureR i
+  origin  = FTBNode Interval.empty
+  bound i =  FTBNode $ fmap unTB1 $ pureR i
   {-# INLINE bound #-}
-  merge (Left i ) (Left j)  =  appendRI i j
-  merge (Right i ) (Left j)  =  fmap unTB1 (pureR i) `appendRI` j
-  merge (Left j ) (Right i)  =  j `appendRI` fmap unTB1 (pureR i)
-  merge (Right i ) (Right j) =  fmap unTB1 (pureR i) `appendRI` fmap unTB1 (pureR j)
+  merge (FTBNode i) (FTBNode j) = FTBNode $ appendRI i j
   {-# INLINE merge #-}
-  penalty (Left i)  (Left j)
+  penalty ((FTBNode i))  ((FTBNode  j))
     = (fmap notneg $ subtraction (fst (lowerBound' j  )) (fst $ lowerBound' i))
     <> (fmap notneg $ subtraction (fst $ upperBound' i  ) (fst $ upperBound' j))
-  penalty (Right i  ) (Left j)
-    = (fmap notneg $ subtraction ((fst $ lowerBound' j  )) ((fst $ mi)))
-    <> ( fmap notneg $ subtraction ((fst $ ma  )) ((fst $ upperBound' j)))
-      where
-        range  = fmap unTB1 (pureR i)
-        mi = lowerBound' range
-        ma = upperBound' range
-  penalty (Right r1) (Right r2)
-    =  ( fmap notneg $ subtraction (fst $ lowerBound' p2) (fst $ lowerBound' p1))
-    <> ( fmap notneg $ subtraction (fst $ upperBound' p1)  (fst $ upperBound' p2))
-      where
-        p1 = fmap unTB1 $ pureR r1
-        p2 = fmap unTB1 $ pureR r2
-
-  penalty (Left i  ) (Right j)
-    = ( fmap notneg $ subtraction  ((fst $ mi )) ((fst $ lowerBound' i  )))
-    <> ( fmap notneg $ subtraction  ((fst $ upperBound' i)) ((fst $ ma   )))
-      where
-        range  = fmap unTB1 $ pureR j
-        mi = lowerBound' range
-        ma = upperBound' range
   {-# INLINE penalty #-}
 
 
-mergeS :: Showable -> Showable -> Interval Showable
-mergeS (SGeo (SPosition i) ) (SGeo (SPosition j)) =  fmap (SGeo. SPosition ) $ mergeP i j
-mergeS i j = min i j  `cinterval` max i j
 
-mergeP (Position2D (i,j)) (Position2D (l,m))=  Position2D (min i l , min j m) `cinterval` Position2D (max i l , max j m)
-mergeP (Position(i,j,k)) (Position (l,m,n))=  Position (min i l , min j m,min k n) `cinterval` Position (max i l , max j m,max k n)
-
-boundS :: Showable -> Interval Showable
-boundS i = i `cinterval` i
 
 
 

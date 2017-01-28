@@ -540,6 +540,9 @@ indexPK (PatchRow (_,i,_) ) = i
 indexFilterR j (CreateRow i) = checkPred i j
 indexFilterR j (PatchRow i) = indexFilterP j i
 
+
+
+
 patchCheck (m,s,i) = if checkAllFilled then Right (m,s,i) else Left ("non nullable rows not filled " ++ show ( need `S.difference` available ))
   where
       checkAllFilled =  need `S.isSubsetOf`  available

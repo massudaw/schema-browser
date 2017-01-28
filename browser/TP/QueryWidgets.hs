@@ -152,15 +152,15 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
         let attrB pre a = do
               wn <-  tbCaseDiff  inf  mempty a mempty  mempty pre
               v <- labelCaseDiff inf a  wn
-              return  $ TrivialWidget (recoverEditChange <$> pre <*> triding v) (getElement v)
+              return  $ TrivialWidget (recoverEditChange <$> facts pre <#> triding v) (getElement v)
 
-        attrB (const Nothing <$> trinp)  (genAttr oinf fresh )
+        attrB (const Nothing <$> unoldItems)  (genAttr oinf fresh )
            ) inpfresh
       let
         inp :: Tidings (Maybe (TBData CoreKey Showable))
         inp = fmap tblist <$> foldr (liftA2 (liftA2 (:))) (pure (Just [])) (fmap (fmap ( fmap _tb) .  triding) elemsIn )
 
-      (preinp,(_,liftedE )) <- pluginUI  inf (liftA2 mergeTB1 <$>  unoldItems <*>  inp) (idp,FPlugins "Enviar" tname aci)
+      (preinp,(_,liftedE )) <- pluginUI  inf (liftA2 mergeTB1 <$>  facts unoldItems <#>  inp) (idp,FPlugins "Enviar" tname aci)
 
       elemsOut <- mapM (\fresh -> do
         let attrB pre a = do
@@ -174,10 +174,11 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
             . set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
       j<- UI.div # styleUI  # set children (fmap getElement elemsIn <> [preinp])# sink UI.style (noneShow .isJust <$> facts unoldItems)
       k <- UI.div # styleUI  # set children (fmap getElement elemsOut) # sink UI.style (noneShow .isJust <$> facts liftedE  )
-      return  ( l <> [j , k] , liftA2 mergeTB1 <$> facts unoldItems <#>  fmap (fmap create) liftedE  ))
+      return  ( l <> [j , k] , (\i j ->  liftA2 apply i j  <|> i <|> fmap create j) <$> facts unoldItems <#>  liftedE  ))
            ) ) (return (([],trinp))) $ zip (fmap snd ac) freshKeys
   el <- UI.div  # set children (b: (fst freshUI))
-  return (el , (liftAccess inf tname  $snd $ pluginStatic' $ snd $ last ac ,fmap join $ liftA2 diff  <$>  trinp<*> snd freshUI ))
+  let evdiff = fmap join $ liftA2 diff <$>  facts trinp <#> snd freshUI
+  return (el , (liftAccess inf tname  $snd $ pluginStatic' $ snd $ last ac , evdiff ))
 
 pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
   let f =second (liftAccess inf t ). first (liftAccess  inf t ) $ staticP arrow
@@ -629,7 +630,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
        filterKey enabled k = const () <$> filterApply (const <$> enabled) (k )
        crudMerge :: Maybe (TBData Key Showable)  ->  G.GiST (TBIndex Showable) (TBData Key Showable )-> Dynamic (Maybe (RowPatch Key Showable))
        crudMerge (Just i) g =
-          fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf ( do
+         fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf ( do
             let confl = conflictGist i g
             mapM deleteFrom (fmap patch confl :: [TBIdx Key Showable])
             fullDiffInsert  i)
