@@ -19,8 +19,15 @@ import GHC.Stack
 
 type PrimType = KType (Prim KPrim (Text,Text))
 
+
+-- This module implement a rule system  that converts general higher order datatypes  to backend primitive ones
+-- it assembles a isomorphism between the two types
+-- Nested types need to be unambigous so that we have only one possible conversion
+
+
 preconversion' a i =  join $ (\t -> M.lookup (i,t) a ) <$> (flip M.lookup $ M.fromList $ M.keys a) i
 preconversion  =  preconversion' postgresLiftPrimConv
+
 preunconversion i =  join $ (\t -> M.lookup (t,i) postgresLiftPrimConv) <$> ktypeUnLift  i
 
 conversion i = fromMaybe (id , id) $ preconversion i
@@ -46,6 +53,7 @@ topconversion f v@(KOptional n ) =   f v <|> fmap lif (topconversion f n )
 
 topconversion f v@(KArray n) =  f v <|> fmap lif (topconversion f n )
   where
+    -- mapa a i | traceShow i False = undefined
     mapa a (ArrayTB1 i) = ArrayTB1 (fmap a i)
     mapa a  b =errorWithStackTrace (show (b))
     lif (a,b) = (mapa a , mapa b)
@@ -60,10 +68,9 @@ topconversion f v@(Primitive i) =  f v
 
 denormConversions l = M.fromList $ fmap go (M.toList l)
   where
-    -- go (i,_) | traceShow i False = undefined
     go ((k,o),(l,f)) =
       case liftA2 (,) (ktypeRec (flip M.lookup  (M.fromList $ M.keys postgresLiftPrimConv')) o ) (topconversion (preconversion' postgresLiftPrimConv') o) of
-          Just (i,(a,b)) ->  go ((k,i),(a.l,b.f))
+          Just (i,(a,b)) ->  go ((k,i),(a.l,f.b))
           Nothing -> ((k,o),(l,f))
 
 postgresLiftPrimConv = denormConversions postgresLiftPrimConv'
@@ -80,12 +87,12 @@ postgresLiftPrimConv' =
                 ,((Primitive (AtomicPrim (PGeom $ PLineString 2)), KArray (Primitive (AtomicPrim (PGeom $ PPosition 2))) )
                  , ((\(TB1 (SGeo (SLineString (LineString i)) )) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (pos ) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SLineString $ LineString $ V.fromList  $ F.toList $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
-                ,((Primitive (AtomicPrim (PGeom $ (MultiGeom (PPolygon 2)))), KArray (Primitive (AtomicPrim (PGeom $ PPolygon 2))) )
-                 , ((\(TB1 (SGeo (SMultiGeom i  ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1 . SGeo) i))
-                   , (\(ArrayTB1 i) -> TB1 $ SGeo $ SMultiGeom   $ F.toList $  fmap ((\(SGeo i ) -> i). unTB1) i) ))
                 ,((Primitive (AtomicPrim (PGeom $ (PPolygon 2))), KArray (Primitive (AtomicPrim (PGeom $ PLineString 2))) )
                  , ((\(TB1 (SGeo (SPolygon i j ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1. SGeo .SLineString) (i:j)))
                    , (\(ArrayTB1 i) -> TB1 $ (\(i:j) -> SGeo $ SPolygon i j) $ F.toList $ (fmap (\(TB1 (SGeo (SLineString i))) -> i)) i) ))
+                ,((Primitive (AtomicPrim (PGeom $ (MultiGeom (PPolygon 2)))), KArray (Primitive (AtomicPrim (PGeom $ PPolygon 2))) )
+                 , ((\(TB1 (SGeo (SMultiGeom i  ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1 . SGeo) i))
+                   , (\(ArrayTB1 i) -> TB1 $ SGeo $ SMultiGeom   $  F.toList $  fmap ((\(SGeo i ) -> i). unTB1) i) ))
                 ,((Primitive (AtomicPrim (PGeom $ PLineString 3)), KArray (Primitive (AtomicPrim (PGeom $ PPosition 3))) )
                  , ((\(TB1 (SGeo (SLineString (LineString i)) )) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (pos ) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SLineString $ LineString $ V.fromList  $ F.toList $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))]

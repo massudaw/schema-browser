@@ -30,6 +30,7 @@ import Debug.Trace
 import Data.Ord
 import Data.Functor.Identity
 import qualified  Data.Map as M
+import qualified  Data.HashMap.Strict as HM
 
 import Data.Tuple
 import Data.String
@@ -155,10 +156,8 @@ paginate inf t order off size koldpre wherepred = do
       jsonDecode =  do
         let quec = fromString $ T.unpack $ "SELECT row_to_json(q),count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
         print quec
-        uninterruptibleMask(\restore ->  do
-          x <- logLoadTimeTable inf (lookTable inf $ _kvname (fst t)) wherepred "JSON" $
+        logLoadTimeTable inf (lookTable inf $ _kvname (fst t)) wherepred "JSON" $
                 uncurry (queryWith (withCount (fromRecordJSON t) ) (conn inf ) ) (quec, maybe [] (fmap (either(Left .firstTB (recoverFields inf)) Right)) attr)
-          restore (return x) `catch` (\e -> throw (e :: SomeException) ))
       textDecode = do
         let quec = fromString $ T.unpack $ "SELECT *,count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
         print quec
@@ -189,33 +188,44 @@ insertMod j  = do
     let
       table = lookTable inf (_kvname (fst  j))
     (t,pk,attrs) <- insertPatch (fromRecord  ) (conn  inf) (patch $  j) ( table)
-    let mod =  TableModification Nothing table (CreateRow $ create  (t,pk,deftable table <> attrs ))
+    let mod =  TableModification Nothing table (CreateRow $ create  (t,pk,deftable inf table <> attrs ))
     return $ Just  mod
 
-deftable table =
+--- Generate default values  patches
+--
+deftable inf table =
   let
     fks' = S.toList $ rawFKS table
     items = tableAttrs table
     fkSet,funSet:: S.Set Key
     fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction .pathRel) $ fks'
     funSet = S.unions $ fmap (\(Path i _ )-> i) $ filter (isFunction.pathRel) (fks')
-    nonFKAttrs ,fks :: [[Rel Key]]
-    nonFKAttrs =   fmap (pure .Inline)$  filter (\i -> not $ S.member i (fkSet <> funSet)) items
-    fks = (S.toList . pathRelRel <$> fks')
+    nonFKAttrs :: [Key]
+    nonFKAttrs =   filter (\i -> not $ S.member i (fkSet <> funSet)) items
+    fks = fks'
 
-  in catMaybes $ fmap (\i -> defaultAttrs  i) (nonFKAttrs <> fks)
+  in catMaybes $ fmap defaultAttrs  nonFKAttrs <> fmap (defaultFKS  inf) fks
 
 
-defaultAttrs  [Inline k]  =
-  case keyType k of
-    KOptional i -> Just (PAttr k (POpt Nothing))
-    i -> Nothing
-defaultAttrs i
-  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin ) i = flip (PFK i) (POpt Nothing) <$>  (traverse (defaultAttrs . pure .Inline . _relOrigin ) i)
+defaultAttrs  k  = PAttr k <$> (go (keyType k) <|> fmap patch (keyStatic k))
+  where
+    go ty  =
+      case ty of
+        KOptional i -> Just (POpt (go i))
+        i -> Nothing
+defaultFKS inf (Path _ (FKJoinTable i j ))
+  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin ) i = flip (PFK i) (POpt Nothing) <$>  (traverse (defaultAttrs .  _relOrigin ) i)
+  | otherwise  = Nothing
   where isRel (Rel _  _ _ ) = True
         isRel _ = False
-defaultAttrs i = Nothing
-
+defaultFKS inf (Path k (FKInlineTable i)) =
+  case keyType (head $ S.toList k) of
+    KOptional i -> Just (PInline (head $ S.toList k) (POpt Nothing))
+    Primitive _ -> PInline (head $ S.toList k) . PAtom .(tableMeta (lookTable rinf (snd i)) , G.Idex [],) <$> nonEmpty ( deftable rinf (lookTable rinf (snd i)))
+    i ->  Nothing
+  where rinf = fromMaybe inf $ HM.lookup (fst i) (depschema inf)
+defaultFKS inf (Path k (FunctionField  _ _ _)) = defaultAttrs (head $ S.toList k)
+defaultFKS inf (Path k (RecJoin     _ i )) =  defaultFKS inf (Path k i)
 
 
 
@@ -247,7 +257,6 @@ patchMod patch@(m,_,_) = do
     let table = lookTable inf (_kvname m )
     patch <- applyPatch (conn  inf) (firstPatch (recoverFields inf ) patch )
     let mod =  TableModification Nothing table (PatchRow $ firstPatch (typeTrans inf) patch)
-    -- Just <$> logTableModification inf mod
     return (Just mod)
 
 
@@ -269,24 +278,9 @@ selectAll m offset i  j k st = do
       let
           unref (TableRef i) = Just $  upperBound <$>  i
           unref (HeadToken ) = Nothing
-          -- tbf =  tableView (tableMap inf) table
-          -- let m = tbf
-
       v <- liftIO$ paginate inf m k offset j ( join $ fmap unref i) st
-      mapM_ (tellRefs ) (snd v)
       return v
 
-tellRefs  ::  TBData Key Showable ->  TransactionM ()
-tellRefs  (m,k) = do
-    inf <- ask
-    let
-        tellRefsAttr (FKT l k t) = void $ do
-            tell ((\m@(k,v) -> TableModification Nothing (lookTable inf (_kvname k)) . CreateRow $ m) <$> F.toList t)
-            mapM_ (tellRefs ) $ F.toList t
-        tellRefsAttr (Attr _ _ ) = return ()
-        tellRefsAttr (Fun _ _ _ ) = return ()
-        tellRefsAttr (IT _ t ) = void $ mapM (tellRefs ) $ F.toList t
-    mapM_ (tellRefsAttr . unTB ) $ F.toList  (_kvvalues $ unTB k)
 
 loadDelayed :: InformationSchema -> TB3Data (Labeled Text) Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
 loadDelayed inf t@(k,v) values@(ks,vs)
@@ -327,4 +321,4 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef <$> G.getBounds i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o )  (\table j -> do
     inf <- ask
-    liftIO . loadDelayed inf (tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined (\ a -> liftIO . logTableModification a) 200 Nothing
+    liftIO . loadDelayed inf (tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined (\ a -> liftIO . logTableModification a) 200 (\inf -> withTransaction (conn inf)) Nothing

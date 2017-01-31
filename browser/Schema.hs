@@ -233,7 +233,7 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
        let inf = InformationSchema schemaId schema (uid,user) oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ fmap (\i -> (keyFastUnique i,i)) $ F.toList keyMap) (M.filterWithKey (\k v -> not $ L.elem (tableName v ) (concat $ fmap (\(_,_,n) -> F.toList n) ures)) $ i2u)  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist
        mapM (createTableRefs inf) (filter (L.null . rawUnion) $ F.toList i2u)
        var <- liftIO$ atomically $ modifyTMVar (globalRef schemaVar  ) (HM.insert schema inf )
-       -- addStats inf
+       addStats inf
          {-
        traverse (\ req -> do
          r <- liftIO$ forkIO $ forever $
@@ -246,6 +246,7 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
        return inf
 
 modifyTMVar v  x = takeTMVar  v >>= putTMVar v. x
+
 createTableRefs :: InformationSchema -> Table -> R.Dynamic (Collection Key Showable,DBRef KeyUnique Showable)
 createTableRefs inf i = do
   let table = mapTableK keyFastUnique i

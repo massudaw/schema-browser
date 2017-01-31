@@ -1,4 +1,4 @@
-{-# LANGUAGE RecursiveDo,TypeFamilies,FlexibleContexts,OverloadedStrings,TupleSections #-}
+{-# LANGUAGE RankNTypes ,RecursiveDo,TypeFamilies,FlexibleContexts,OverloadedStrings,TupleSections #-}
 module SchemaQuery
   (
   createUn
@@ -55,6 +55,7 @@ import Step.Common
 
 import Data.Time
 import qualified Control.Lens as Le
+import Database.PostgreSQL.Simple
 import Data.Either
 import Control.Concurrent.Async
 import Control.Monad.Trans.Maybe
@@ -255,7 +256,7 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                                       removeArray (KArray i)  (AnyOp o) = o
                                       removeArray i  o = o
                                    in  fmap WherePredicate (go (test (_relOrigin <$> i)) l)
-                let refs = (   fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap (OrColl. fmap (\i->PrimColl (IProd notNull [_relTarget $ k] ,Left (i,Flip $ _relOperator k))).F.toList .unArray') . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v )
+                let refs = (   fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap ( (\i->PrimColl (IProd notNull [_relTarget $ k] ,Left (i,Flip $ _relOperator k)))) . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v )
                     predm = (refs<> predicate predtop)
                 (ref,tb2) <- case refs of
                   Just refspred-> do
@@ -706,7 +707,7 @@ noInsert' (k1,v1)   = do
    (k1,) . _tb . KV <$>  Tra.sequence (fmap (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1))
 
 transactionLog :: InformationSchema -> TransactionM a -> Dynamic [TableModification (RowPatch Key Showable)]
-transactionLog inf log = do -- withTransaction (conn inf) $ do
+transactionLog inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $do
   (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [TableModification id t f] m) M.empty mods
   agg2 <- Tra.traverse (\(k,v) -> do
@@ -730,8 +731,15 @@ transactionNoLog inf log = do -- withTransaction (conn inf) $ do
   return md
 
 
+withDynamic :: (forall b . IO b -> IO b) -> Dynamic a -> Dynamic a
+withDynamic  f i =  do
+  (v,e) <- liftIO $ f (runDynamic i)
+  mapM registerDynamic e
+  return v
+
+
 transaction :: InformationSchema -> TransactionM a -> Dynamic a
-transaction inf log = do -- withTransaction (conn inf) $ do
+transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
   (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\tm@(TableModification id t f) m -> M.insertWith mappend t [tm] m) M.empty mods
   Tra.traverse (\(k,v) -> do

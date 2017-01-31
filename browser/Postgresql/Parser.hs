@@ -107,9 +107,10 @@ instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Tex
 instance (TF.ToField a , TF.ToField b ) => TF.ToField (Either a b ) where
   toField (Right i) = TF.toField i
   toField (Left i) = TF.toField i
+
 instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
-  toField (k ,i) = case  liftA2 (,) (ktypeRec ktypeUnLift  k ) (topconversion preunconversion k) of
-                     Just (k,(_,b)) -> toFiel   k (b i)
+  toField (k ,i) = case  traceShow (k,i)  $ liftA2 (,) (ktypeRec ktypeUnLift  k ) (topconversion preunconversion k) of
+                     Just (k,(_,b)) -> toFiel k (traceShow (k,i) (b i))
                      Nothing -> toFiel k i
     where
       toFiel (KOptional k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
@@ -183,6 +184,23 @@ instance TF.ToField (UnQuoted Bounding ) where
           point (ER.Finite (Position2D (lat,lon))) = TF.Many [str "ST_setsrid(ST_MakePoint(", TF.toField lat , del , TF.toField lon ,  str "),4326)"]
 
 
+instance TF.ToField (UnQuoted SGeo) where
+  toField (UnQuoted (SMultiGeom i )) = TF.Many  [str "ST_SetSRID(ST_collect( array[" , TF.Many inner,   str "]),4326)"]
+    where
+      inner :: [TF.Action]
+      inner = L.intercalate [del] (fmap (pure .TF.toField) i)
+      str = TF.Plain . fromByteString
+      del = TF.Plain $ fromChar ','
+  toField (UnQuoted (SPolygon i j)) = TF.Many  [str "ST_SetSRID(ST_MakePolygon ( ", TF.toField i ,if L.null inner then str "" else TF.Many [str ",array[" , TF.Many inner,   str "]"] , str "),4326)"]
+    where
+      inner :: [TF.Action]
+      inner = L.intercalate [del] (fmap (pure .TF.toField) j)
+      str = TF.Plain . fromByteString
+      del = TF.Plain $ fromChar ','
+  toField (UnQuoted ((SLineString l))) = TF.toField (UnQuoted l)
+  toField (UnQuoted (SPosition l )) = TF.toField (UnQuoted l)
+  toField (UnQuoted (SBounding l )) = TF.toField (UnQuoted l)
+
 instance TF.ToField (UnQuoted LineString) where
   toField (UnQuoted (LineString l)) = TF.Many  [str "ST_SetSRID(ST_MakeLine (array[", TF.Many points ,   str "]),4326)"]
     where del = TF.Plain $ fromChar ','
@@ -220,7 +238,7 @@ instance TF.ToField SGeo where
   toField (SPosition t) = TF.toField t
   toField (SLineString t) = TF.toField t
   toField (SBounding t) = TF.toField t
-  -- toField (SMultiGeom t) = TF.toField t
+  toField t = TF.toField (UnQuoted t)
 
 instance TF.ToField Showable where
   toField (SText t) = TF.toField t
@@ -592,7 +610,7 @@ getPolygon get = do
              let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
              case ty  of
                3 -> getPoly get
-               i -> errorWithStackTrace ("no ty" <> show i)
+               i -> errorWithStackTrace ("no polygon type" <> show i)
            else
              return (error $ "BE not implemented " <> show i )
 

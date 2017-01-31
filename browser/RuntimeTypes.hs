@@ -270,6 +270,7 @@ data SchemaEditor
   , joinSyncEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )] -> [(Text ,Column Key Showable)]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   ,logger :: MonadIO m => InformationSchema -> TableModification (RowPatch Key Showable)  -> m (TableModification (RowPatch Key Showable))
   , opsPageSize :: Int
+  , transactionEd :: InformationSchema -> (forall a  . IO a -> IO a)
   , historySync :: Maybe (TransactionM ())
   }
 

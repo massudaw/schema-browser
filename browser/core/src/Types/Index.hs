@@ -485,7 +485,11 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
           ma (IntervalTB1 i ,Contains) (IntervalTB1 j)  = j `Interval.isSubsetOf` i
           ma (IntervalTB1 j ,Flip Contains) (IntervalTB1 i)  = j `Interval.isSubsetOf` i
           ma (IntervalTB1 j ,IntersectOp) (IntervalTB1 i)  = not $ Interval.null $ j `Interval.intersection` i
-          ma i  j =  errorWithStackTrace ("no ma = " <> show (i,j))
+          ma (j ,IntersectOp) (i)  = not $ Interval.null $ unFTB (bound j ) `Interval.intersection` unFTB (bound i)
+          ma (j ,Contains) (i)  = not $ Interval.null $ unFTB (bound j ) `Interval.intersection` unFTB (bound i)
+          ma (j ,(Flip op)) i = ma (j, op)  i
+          ma i  j =  errorWithStackTrace ("no mar left = " <> show (snd i ,fst i,j))
+          unFTB (FTBNode i ) = i
       mar (Right i ) j =ma i j
         where
           ma  (Not i) j  = not $ ma i   j
@@ -493,7 +497,7 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
           ma  IsNull   j   = False
           ma  (BinaryConstant op e )  v  = mar (Left (generate e,op))  v
           ma  (Range b pred)  (IntervalTB1 j)   = ma  pred $ LeftTB1 $ unFin $ if b then upperBound j else lowerBound j
-          ma i  j = errorWithStackTrace ("no ma =" ++ show (i,j))
+          ma i  j = errorWithStackTrace ("no mar right =" ++ show (i ,j))
   match x  z = errorWithStackTrace ("no match = " <> show (x,z))
 
   origin  = FTBNode Interval.empty
