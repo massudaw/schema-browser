@@ -94,17 +94,17 @@ transformKey
   :: (Eq b, Show a, Show b) =>
      KType (Prim KPrim b) -> KType (Prim KPrim b) -> FTB a -> FTB a
 -- transformKey ki ko v | traceShow (ki,ko,v) False = undefined
-transformKey (KSerial i)  (KOptional j) (SerialTB1 v)  | i == j = LeftTB1  v
-transformKey (KOptional i)  (KSerial j) (LeftTB1 v)  | i == j = SerialTB1 v
+transformKey (KSerial i)  (KOptional j) (LeftTB1 v)  | i == j = LeftTB1  v
+transformKey (KOptional i)  (KSerial j) (LeftTB1 v)  | i == j = LeftTB1 v
 transformKey (KOptional j) l (LeftTB1  v)
     | isJust v = transformKey j l (fromJust v)
     | otherwise = errorWithStackTrace "no transform optional nothing"
 transformKey (KSerial j)  l v@(TB1 _) = transformKey j l v
-transformKey (KSerial j)  l (SerialTB1 v)
+transformKey (KSerial j)  l (LeftTB1 v)
     | isJust v = transformKey j l (fromJust v)
-    | otherwise =  SerialTB1 Nothing
+    | otherwise =  LeftTB1 Nothing
 transformKey l@(Primitive _)  (KOptional j ) v  = LeftTB1 $ Just (transformKey l j v)
-transformKey l@(Primitive _)  (KSerial j ) v   = SerialTB1 $ Just (transformKey l j v)
+transformKey l@(Primitive _)  (KSerial j ) v   = LeftTB1 $ Just (transformKey l j v)
 transformKey l@(Primitive _)  (KArray j ) v | j == l  = ArrayTB1 $ pure v
 transformKey ki kr v | ki == kr = v
 transformKey (Primitive ki) (Primitive kr) v

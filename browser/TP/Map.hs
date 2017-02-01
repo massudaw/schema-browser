@@ -121,7 +121,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
           evc = eventClick innerCalendar
 
         onEvent (filterJust $ liftA3 (,,) <$> start <*> fmap (lookTableM inf. T.pack) brouteT <*> end <@ routeE) (\(s,t,e) -> do
-              l :: [Only Int]<- liftIO$ query (rootconn inf) (fromString $ "select node from pgr_dijkstra('select gid as id ,source,target,cost from " <> T.unpack (schemaName inf <> "." <> tableName t) <> "'::text,  ? , ? ,true)")( fmap ( unTB1 . (\(SerialTB1 (Just i)) -> i) . L.head .F.toList. getPKM) [s,e])
+              l :: [Only Int]<- liftIO$ query (rootconn inf) (fromString $ "select node from pgr_dijkstra('select gid as id ,source,target,cost from " <> T.unpack (schemaName inf <> "." <> tableName t) <> "'::text,  ? , ? ,true)")( fmap ( unTB1 . (\(LeftTB1 (Just i)) -> i) . L.head .F.toList. getPKM) [s,e])
               let path = zip lo (tail lo)
                   lo = fmap unOnly l
                   tb = t

@@ -129,7 +129,6 @@ getInlineRec' tb = L.filter (\i -> match $  unComp i) $ attrs
 
 
 expandTable ::  TB3  (Labeled Text) Key  () -> Writer [Text] Text
-expandTable (DelayedTB1 (Just tb)) = expandTable tb
 expandTable tb
   | isTableRec tb = errorWithStackTrace "no rec support"
   | otherwise = return $ expandBaseTable  tb
@@ -161,7 +160,7 @@ selectQuery t koldpre order wherepred = (, (fmap Left <$> ordevalue )<> (fmap Ri
         pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  ( orderquery <> predquery)
         (orderquery , ordevalue) =
           let
-            unIndex i  = catMaybes $ zipWith  (\i j -> (i,) <$> j) (_kvpk (fst t)) $ fmap unFin $ traceShowId i
+            unIndex i  = catMaybes $ zipWith  (\i j -> (i,) <$> j) (_kvpk (fst t)) $ fmap unFin  i
             unFin (I.Finite i) = Just i
             unFin j = Nothing
             oq = (\i ->  pure $ generateComparison (first (justLabel t) <$> (filter ((`elem` (fmap fst i)).fst) order))) . unIndex<$> koldpre
@@ -184,7 +183,6 @@ isFilled =  not . L.null
 
 expandQuery left (ArrayTB1 (t:| _) ) =  expandQuery left t
 expandQuery left (LeftTB1 (Just t)) =  expandQuery left t
-expandQuery left (DelayedTB1 (Just t)) = return ""--  expandQuery left t
 expandQuery left (TB1 t)
 --    | isTableRec t  || isFilled (getInlineRec t)  = return "" -- expandTable t
     | otherwise   = expandQuery' left t
@@ -222,7 +220,6 @@ expandJoin left env (Labeled l (IT a (ArrayTB1 (tb :| _ ) )))
     return $ jt <> " JOIN LATERAL (SELECT array_agg(" <> explodeRow tb <> "  order by arrrow ) as " <> label tas <> " FROM " <> expandInlineArrayTable tb l <> tjoin <> " )  as p" <>  label tas <> " ON true"
         where
           tas = getTas tb
-          getTas (DelayedTB1 (Just tb))  = getTas tb
           getTas (TB1  (_,Compose tas)) = tas
           jt = if left then " LEFT" else ""
 expandJoin left env (Labeled l (IT a tb)) =  do
@@ -254,7 +251,6 @@ expandJoin left env (Labeled l (FKT _ ks (ArrayTB1 (tb :| _))))
             where
               nonArrayRel = L.filter (not . isArray . keyType . _relOrigin) ks
           tas = getTas tb
-          getTas (DelayedTB1 (Just tb))  = getTas tb
           getTas (TB1  (_,Compose tas)) = tas
           look :: [Key] -> [Labeled Text ((TB (Labeled Text)) Key ())] ->  [Labeled Text ((TB (Labeled Text)) Key ())]
           look ki i = justError ("missing FK on " <> show (ki,ks ,keyAttr . labelValue <$> i )  ) $ allMaybes $ fmap (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
@@ -299,7 +295,6 @@ explodeRecord  = explodeRow''   (\i -> "ROW("<> i <> ")")  "," (const id)
 leafDel True i = " case when " <> i <> " is not null then true else null end  as " <> i
 leafDel False i = " case when " <> i <> " is not null then true else null end  as " <> i
 
-explodeRow' block  assoc  leaf (DelayedTB1 (Just tbd@(TB1 (i,tb)))) = "(true)"
 explodeRow' block assoc leaf (LeftTB1 (Just tb) ) = explodeRow' block assoc leaf tb
 explodeRow' block assoc leaf (ArrayTB1 (tb:|_) ) = explodeRow' block assoc leaf tb
 explodeRow' block assoc leaf (TB1 i ) = explodeRow'' block assoc leaf i
@@ -358,7 +353,10 @@ renderType (KInterval t) =
     Primitive (AtomicPrim (PInt i)) ->  case i of
       4 -> "int4range"
       8 -> "int8range"
-    Primitive (AtomicPrim PDate) -> "daterange"
+    Primitive (AtomicPrim (PTime (PDate))) -> "daterange"
+    Primitive (AtomicPrim (PTime (PTimestamp i))) -> case i of
+      Just i -> "tsrange"
+      Nothing -> "tstzrange"
     Primitive (AtomicPrim (PGeom i)) ->
       let box 2 = "box2d"
           box 3 = "box3d"
@@ -370,9 +368,6 @@ renderType (KInterval t) =
       in geom i
 
     Primitive (AtomicPrim PDouble) -> "floatrange"
-    Primitive (AtomicPrim (PTimestamp i)) -> case i of
-      Just i -> "tsrange"
-      Nothing -> "tstzrange"
     i -> Nothing
 renderType (Primitive (RecordPrim (s,t)) ) = Just $ s <> "." <> t
 renderType (Primitive (AtomicPrim t) ) =
@@ -384,10 +379,11 @@ renderType (Primitive (AtomicPrim t) ) =
     PInt v -> case v of
       4 -> "integer"
       8 -> "bigint"
-    PDate -> "date"
-    PTimestamp v -> case v of
-      Just i -> "timestamp without time zone"
-      Nothing -> "timestamp with time zone"
+    PTime i -> case i of
+      PDate -> "date"
+      PTimestamp v -> case v of
+        Just i -> "timestamp without time zone"
+        Nothing -> "timestamp with time zone"
     i -> Nothing
 renderType (KArray i) = (<>"[]") <$> renderType i
 renderType (KOptional i) =renderType i
@@ -499,7 +495,7 @@ utlabel (Left (value,e)) c idx = result
     notFlip (Flip i) = False
     notFlip i = True
     operator i = errorWithStackTrace (show i)
-    opvalue ref op | traceShow ("opvalue",ref,op) False = undefined
+    -- opvalue ref op | traceShow ("opvalue",ref,op) False = undefined
     opvalue re  (Flip (Flip i)) = opvalue re i
     opvalue ref (Flip (AnyOp (AnyOp Equals)))  = T.intercalate "." (c ++ [ref]) <> " " <>  "<@@" <>  " ANY( ? " <> ")"
     opvalue ref (AnyOp i)  = case ktypeRec ktypeUnLift  (keyType (fst idx)) of

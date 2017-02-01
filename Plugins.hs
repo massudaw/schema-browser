@@ -102,7 +102,7 @@ siapi2Hack = FPlugins pname tname $ BoundedPlugin2  url
       b <- act (Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return (Nothing,Nothing) else liftIO (siapi2  i (j) )  )) -<  (liftA2 (,) protocolo ano )
       let ao (sv,bv)  = Just $ tblist   $ svt  sv <> [iat $ bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
-          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
+          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STime . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
           convertAndamento i = error $ "convertAndamento " <> show i
           svt bv = catMaybes $ fmap attrT . (\i -> traverse (\k -> fmap snd $ L.find (L.isInfixOf k. fst ) map) (swap i)) <$>  value_mapping
             where map = fmap (LeftTB1 . Just . TB1 . SText . T.pack ) <$> bv
@@ -129,7 +129,7 @@ siapi2Plugin = FPlugins pname tname $ BoundedPlugin2  url
       b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return (Nothing ,Nothing) else liftIO (siapi2  i j >> error "siapi2 test error")  )) -<  (liftA2 (,) protocolo ano )
       let ao bv  = Just $ tblist   [iat bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
-          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
+          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STime .STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = Compose . Identity $ (IT
                             "andamentos"
@@ -176,7 +176,7 @@ cpfForm = BoundedPlugin2 url
       nascimento <-  idxK "nascimento" -< ()
       cnpj <-  atR "ir_reg" (idxK "cpf_number") -< ()
       sess <- idxK "sess" -< ()
-      html <- act (\(TB1 (SSession sess),TB1 (SText cap),TB1 (SDate nascimento),TB1 (SText cnpj))  -> lift  (getCpfForm sess (BS.pack $ T.unpack cap) (BS.pack $ renderDay nascimento ) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,nascimento,cnpj)
+      html <- act (\(TB1 (SSession sess),TB1 (SText cap),TB1 (STime (SDate nascimento)),TB1 (SText cnpj))  -> lift  (getCpfForm sess (BS.pack $ T.unpack cap) (BS.pack $ renderDay nascimento ) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,nascimento,cnpj)
       arrowS -< ()
       returnA -<   join .join $ fmap convertCPF <$> html
     arrowS = proc t -> do
@@ -189,7 +189,7 @@ queryCPFStatefull = FPlugins "CPF Receita" "owner" $ StatefullPlugin
   [(([],[("captchaViewer",atPrim (PMime "image/jpg") )
     ,("sess",atPrim PSession )])
     ,cpfCaptcha)
-  ,(([("nascimento",atPrim PDate )
+  ,(([("nascimento",atPrim (PTime PDate ))
     ,("captchaInput",atPrim PText )],[])
     ,cpfForm)]
 
@@ -271,7 +271,7 @@ germinacao = FPlugins pname tname $ PurePlugin  url
       plant <- idxK "plantio"  -< ()
       poly <- atR "planta" (idxK "periodo_germinacao" ) -< ()
       odxR "previsao_germinacao" -< ()
-      returnA -< Just $ (\(TB1 (SDate d)) (IntervalTB1 i)  -> tblist [_tb $ Attr "previsao_germinacao" (LeftTB1 $ Just $ IntervalTB1 $ ((\(TB1 i) -> TB1 $ SDate$  addDays  (fromIntegral i)d ) <$>   i))] )  plant  poly
+      returnA -< Just $ (\(TB1 (STime (SDate d))) (IntervalTB1 i)  -> tblist [_tb $ Attr "previsao_germinacao" (LeftTB1 $ Just $ IntervalTB1 $ ((\(TB1 i) -> TB1 $ STime  . SDate$  addDays  (fromIntegral i)d ) <$>   i))] )  plant  poly
 
 preparoInsumo = FPlugins pname tname $ PurePlugin  url
 
@@ -284,7 +284,7 @@ preparoInsumo = FPlugins pname tname $ PurePlugin  url
       plant <- idxK "producao"  -< ()
       poly <- atR "insumo" (idxK "periodo_preparo" ) -< ()
       odxR "previsao_preparo" -< ()
-      returnA -< Just $ (\(TB1 (SDate d)) (IntervalTB1 i)  -> tblist [_tb $ Attr "previsao_preparo" (LeftTB1 $ Just $ IntervalTB1 $ ((\(TB1 i) -> TB1 $ SDate$  addDays  (fromIntegral i)d ) <$>   i))] )  plant poly
+      returnA -< Just $ (\(TB1 ((STime (SDate d)))) (IntervalTB1 i)  -> tblist [_tb $ Attr "previsao_preparo" (LeftTB1 $ Just $ IntervalTB1 $ ((\(TB1 i) -> TB1 $ STime  .SDate$  addDays  (fromIntegral i)d ) <$>   i))] )  plant poly
 
 
 
@@ -412,7 +412,7 @@ siapi3CheckApproval = FPlugins pname tname  $ DiffPurePlugin url
       let app = L.find (\(TB1 (SText x),_) -> "APROVADO" ==   x) v
           tt = L.find ((\(TB1 (SText x)) -> T.isInfixOf "ENTREGUE AO SOLICITANTE APROVADO"  x).fst) v
       row <- act (const ask )-< ()
-      returnA -< fmap ((\(TB1 (STimestamp t)) -> (\v-> (kvempty,maybe (Idex mempty) getIndex row ,[PAttr "aproval_date" v])) .upperPatch.(,True) . Finite $ PAtom $ STimestamp t) .snd) (liftA2 const app tt)
+      returnA -< fmap ((\(TB1 (STime (STimestamp t))) -> (\v-> (kvempty,maybe (Idex mempty) getIndex row ,[PAttr "aproval_date" v])) .upperPatch.(,True) . Finite $ PAtom $ STime $ STimestamp t) .snd) (liftA2 const app tt)
 
 siapi3Inspection = FPlugins pname tname  $ BoundedPlugin2 url
   where
@@ -439,7 +439,7 @@ siapi3Inspection = FPlugins pname tname  $ BoundedPlugin2 url
             odxR "andamento_status" -<  t) -< ()
 
         b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= (14 :: Int ) then  return Nothing else liftIO $ siapi3  i j k )) -<   (liftA3 (,,) (tobs $ protocolo ) (tobs $ ano ) cpf)
-        let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ fmap attrT  $ ([("andamento_date",TB1 .STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
+        let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ fmap attrT  $ ([("andamento_date",TB1 . STime . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
             convertAndamento i = error $ "convertAndamento2015 :  " <> show i
         let ao  (bv,taxa) =  Just $ tblist  ( [_tb $ Attr "ano" (justError "ano" ano) ,_tb $ Attr "protocolo" (justError "protocolo"protocolo), attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
             iat bv = Compose . Identity $ (IT "andamentos"
@@ -473,7 +473,7 @@ siapi3Plugin  = FPlugins pname tname  $ BoundedPlugin2 url
             odxR "andamento_status" -<  t) -< ()
 
         b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= (14 :: Int ) then  return Nothing else liftIO $ siapi3  i j k )) -<   (liftA3 (,,) (tobs $ protocolo ) (tobs $ ano ) cpf)
-        let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ fmap attrT  $ ([("andamento_date",TB1 .STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
+        let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ fmap attrT  $ ([("andamento_date",TB1 .STime .STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
             convertAndamento i = error $ "convertAndamento2015 :  " <> show i
         let ao  (bv,taxa) =  Just $ tblist  ( [_tb $ Attr "ano" (justError "ano" ano) ,_tb $ Attr "protocolo" (justError "protocolo"protocolo), attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
             iat bv = Compose . Identity $ (IT "andamentos"
@@ -564,7 +564,7 @@ pagamentoArr =  itR "pagamento" (proc descontado -> do
                   odxR "price" -<  ()
                   odxR "scheduled_date" -<  ()
                   let total = maybe 0 fromIntegral  p :: Int
-                  let pagamento = _tb $ FKT (kvlist [attrT  ("pagamentos",LeftTB1 (Just $ ArrayTB1  $ Non.fromList (replicate total (num $ -1) )) )]) [Rel "pagamentos" Equals "id"] (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList ( fmap (\ix -> TB1 $ tblist [attrT ("id",SerialTB1 Nothing),attrT ("description",LeftTB1 $ Just $ TB1 $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",LeftTB1 valorParcela), attrT ("scheduled_date",LeftTB1 pinicio) ]) ([1 .. total])))
+                  let pagamento = _tb $ FKT (kvlist [attrT  ("pagamentos",LeftTB1 (Just $ ArrayTB1  $ Non.fromList (replicate total (num $ -1) )) )]) [Rel "pagamentos" Equals "id"] (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList ( fmap (\ix -> TB1 $ tblist [attrT ("id",LeftTB1 Nothing),attrT ("description",LeftTB1 $ Just $ TB1 $ SText $ T.pack $ "Parcela (" <> show ix <> "/" <> show total <>")" ),attrT ("price",LeftTB1 valorParcela), attrT ("scheduled_date",LeftTB1 pinicio) ]) ([1 .. total])))
                   returnA -<  pagamento ) -< (valorParcela,pinicio,p)
               returnA -<  TB1 $ tblist [pg ] )
 
@@ -637,7 +637,7 @@ encodeMessage = PurePlugin url
                       Just (TB1 (SText filename ))= filenameM
                       tb n  =  TB1 . tblist . pure . _tb . Attr n $ (LeftTB1 $  v)
                       tbv n v  =  TB1 . tblist . pure . _tb . Attr n $ (LeftTB1 $  v)
-                      deltb n  =  TB1 . tblist . pure . _tb . Attr n $ (LeftTB1 $ Just $ DelayedTB1 $    v)
+                      deltb n  =  TB1 . tblist . pure . _tb . Attr n $ (LeftTB1 $ Just $ LeftTB1 $    v)
                       tbmix l = TB1 . tblist . pure . _tb . IT "mixed" . LeftTB1 $ ArrayTB1 . Non.fromList <$>  (ifNull l )
           returnA -<  (maybe Nothing (flip mimeTable part )  $ (\(i,j) -> fmap (,j) i) enc)
     mixed =  nameO 1 (proc t ->  do
@@ -691,7 +691,7 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
               callCommand ( "(" <> input <> " | cat) | xvfb-run --server-args='-screen 0, 1440x900x24' ofx-itau ;") `catchAll` (\e -> print e)
               print $ "readFile " ++ fname
               file <- BS.readFile fname
-              return (TB1 $ SText $ T.pack $ fname , LeftTB1 $ Just $ DelayedTB1 $ Just $ TB1 $ SBinary file,upperPatch (Finite $ (PAtom $ SDate $ utctDay t),False))
+              return (TB1 $ SText $ T.pack $ fname , LeftTB1 $ Just $ LeftTB1 $ Just $ TB1 $ SBinary file,upperPatch (Finite $ (PAtom $ STime $ SDate $ utctDay t),False))
                  ) -< (range, pass)
         odx  (Just $ Range True  ((BinaryConstant Equals CurrentDate))) "range" -< ()
 
@@ -702,7 +702,7 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
         refs <- atRA "ofx" (idxK "file_name") -< ()
         let ix = length refs
         pk <- act (const ask )-< ()
-        returnA -<   Just (kvempty,Idex (pure (SerialTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,patch (r): [PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
+        returnA -<   Just (kvempty,Idex (pure (LeftTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,patch (r): [PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
 
 
 importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
@@ -768,7 +768,7 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
           tbst :: (Maybe (TBData Text (Showable)))
           tbst = Just $ tblist $ fmap _tb [FKT (kvlist ref) [Rel "statements" Equals "fitid",Rel "account" Equals "account"] ao]-}
       returnA -< tbst
-    ofx (TB1 (SText i), ((DelayedTB1 (Just (TB1 (SBinary r) )))) , acc )
+    ofx (TB1 (SText i), ((LeftTB1 (Just (TB1 (SBinary r) )))) , acc )
       = liftIO $ ofxPlugin (T.unpack i) (BS.unpack r) acc
     ofx i = errorWithStackTrace (show i)
 
@@ -787,7 +787,7 @@ notaPrefeitura = FPlugins "Nota Prefeitura" tname $ BoundedPlugin2 url
                                p <- varTB "goiania_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act (fmap join  . traverse (\(i, (j, k,a)) -> liftIO$ prefeituraNota j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ tblist [attrT ("nota",    LeftTB1 $ fmap (DelayedTB1 .Just . TB1 ) b)]
+      let ao =  Just $ tblist [attrT ("nota",    LeftTB1 $ fmap (LeftTB1 .Just . TB1 ) b)]
       returnA -< ao
 
 queryArtCreaData = FPlugins "Art Crea Data" tname $ BoundedPlugin2 url
@@ -826,7 +826,7 @@ queryArtCrea = FPlugins "Documento Final Art Crea" tname $ BoundedPlugin2 url
                                p <- varTB "crea_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act (fmap join  .  traverse (\(i, (j, k,a)) -> liftIO$ creaLoginArt  j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ tblist [attrT ("art",    LeftTB1 $ fmap (DelayedTB1 . Just . TB1 ) b)]
+      let ao =  Just $ tblist [attrT ("art",    LeftTB1 $ fmap (LeftTB1 . Just . TB1 ) b)]
       returnA -< ao
 
 
@@ -846,7 +846,7 @@ queryArtBoletoCrea = FPlugins pname tname $ BoundedPlugin2  url
                p <- varTB "crea_password"-< t
                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act ( traverse (\(i, (j, k,a)) -> lift $ creaBoletoArt  j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ tblist [attrT ("boleto",   LeftTB1 $ fmap ( DelayedTB1 . Just) $ (TB1 . SBinary. BSL.toStrict) <$> b)]
+      let ao =  Just $ tblist [attrT ("boleto",   LeftTB1 $ fmap ( LeftTB1 . Just) $ (TB1 . SBinary. BSL.toStrict) <$> b)]
       returnA -< ao
 
 
@@ -864,8 +864,8 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
       r <- atR "crea_register"
           (liftA3 (,,) <$> varTB "crea_number" <*> varTB "crea_user" <*> varTB "crea_password") -< t
       v <- act (fmap (join .maybeToList) . traverse (\(i, (j, k,a)) -> liftIO  $ creaConsultaArt  j k a i ) ) -< liftA2 (,) i r
-      let artVeri dm = ("verified_date" ,) . LeftTB1 . join $(\d ->  fmap (TB1 . STimestamp . fst) $ strptime "%d/%m/%Y %H:%M" ( d !!1) ) <$> dm
-          artPayd dm = ("payment_date" ,) . LeftTB1 . join $ (\d -> fmap (TB1 . STimestamp . fst )  $ strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
+      let artVeri dm = ("verified_date" ,) . LeftTB1 . join $(\d ->  fmap (TB1 . STime .STimestamp . fst) $ strptime "%d/%m/%Y %H:%M" ( d !!1) ) <$> dm
+          artPayd dm = ("payment_date" ,) . LeftTB1 . join $ (\d -> fmap (TB1 .STime . STimestamp . fst )  $ strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
           artInp inp = Just $ tblist $fmap attrT   $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       returnA -< artInp v
 

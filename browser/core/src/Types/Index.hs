@@ -239,8 +239,8 @@ instance Affine Showable where
       diffS (SNumeric t) (SNumeric o) = DSInt $ subtraction o t
       diffS (SText t) (SText o) = DSText $ subtraction (T.unpack o) (T.unpack t)
       diffS (SDouble t) (SDouble o) = DSDouble $ o -t
-      diffS (STimestamp i ) (STimestamp j) = DSDiffTime (diffUTCTime (localTimeToUTC utc j) (localTimeToUTC utc  i))
-      diffS (SDate i ) (SDate j) = DSDays (diffDays j i)
+      diffS (STime (STimestamp i )) (STime (STimestamp j)) = DSDiffTime (diffUTCTime (localTimeToUTC utc j) (localTimeToUTC utc  i))
+      diffS (STime (SDate i )) (STime (SDate j)) = DSDays (diffDays j i)
       diffS (SGeo(SPosition s )) (SGeo(SPosition b)) = DSPosition $ subtraction s b
       diffS a b  = errorWithStackTrace (show (a,b))
       {-# INLINE diffS #-}
@@ -326,8 +326,6 @@ indexPred (n@(Nested k nt ) ,eq) r
     recPred (TB1 i ) = i
     recPred (LeftTB1 i) = maybe False recPred i
     recPred (ArrayTB1 i) = any recPred i
-    recPred (DelayedTB1 i) = maybe False recPred i
-    recPred (SerialTB1 i) = maybe False recPred i
     recPred i = errorWithStackTrace (show i)
 indexPred (a@(IProd _ _),eq) r =
   case indexField a r of
@@ -386,8 +384,6 @@ instance (Ord v ,Range v) => Range (FTB v ) where
   pureR (ArrayTB1 (is Non.:| xs)) = F.foldl' appendRI  (pureR is) (fmap pureR xs)
   pureR (IntervalTB1 is) =  is
   pureR (LeftTB1 is) =  maybe Interval.empty  pureR is
-  pureR (SerialTB1 is) =  maybe Interval.empty  pureR is
-  pureR (DelayedTB1 is) =  maybe Interval.empty  pureR is
   {-# INLINE pureR #-}
   appendR (TB1 i ) (TB1 j) = fmap TB1 $ appendR i j
   {-# INLINE appendR#-}
@@ -420,8 +416,6 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
         cons (LeftTB1 i) j = fromMaybe True $ (flip cons j ) <$>  i
         cons (ArrayTB1 i)  j  = F.any (flip cons j) i
         cons (IntervalTB1 i) j = not $ Interval.null $  j `Interval.intersection` (fmap unTB1 i)
-        cons (SerialTB1 i) j = fromMaybe True $ (flip cons j ) <$>  i
-        cons (DelayedTB1 i) j = fromMaybe True $ (flip cons j ) <$>  i
   consistent (Left i ) (Right j) = consistent (Right j) (Left i)
   consistent (Right i) (Right j) = cons i j
       where
@@ -434,9 +428,6 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
         cons i  (ArrayTB1 j ) = F.any (cons i) j
         cons (LeftTB1 i) (LeftTB1 j ) = fromMaybe True $ liftA2 cons j  i
         cons (LeftTB1 i) j = fromMaybe True $ (flip cons j ) <$>  i
-        cons (SerialTB1 i) (SerialTB1 j ) = fromMaybe True $ liftA2 cons j  i
-        cons (SerialTB1 i) j = fromMaybe True $ (flip cons j ) <$>  i
-        cons j (SerialTB1 i)  = fromMaybe True $ (cons j ) <$>  i
         cons i (LeftTB1 j) = fromMaybe True $(cons i ) <$>  j
         cons i j  = errorWithStackTrace (show ("rr",i,j))
 
@@ -445,8 +436,6 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
       mal (Left (v))  j  = ma  v  j
         where
           ma ((TB1 i) ,op)  j  = i `Interval.member` j
-          ma (DelayedTB1 j ,v)   i   = fromMaybe False ((\a -> ma (a,v) i) <$> j)
-          ma (SerialTB1 j ,v)   i   = fromMaybe False ((\a -> ma (a,v) i) <$> j)
           ma (LeftTB1 j ,v)   i   = fromMaybe False ((\a -> ma (a,v) i) <$> j)
           ma (ArrayTB1 i,Flip (AnyOp o))  j  = F.any (\i -> ma (i,o)  j ) i
           -- ma (IntervalTB1 i ,Contains) j = j `Interval.isSubsetOf` fmap unTB1 i
@@ -472,8 +461,6 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
           -- ma v a j | traceShow (v,a,j) False = undefined
           ma  (v,Flip (Flip op)) j  = ma (v,op)   j
           ma  v (LeftTB1 j) = fromMaybe False (ma v  <$> j)
-          ma  v (SerialTB1 j) = fromMaybe False (ma v  <$> j)
-          ma  v (DelayedTB1 j) = fromMaybe False (ma v  <$> j)
           ma  (LeftTB1 j ,v) i = fromMaybe False ((\a -> ma (a,v) i) <$> j)
           ma  (TB1 i, GreaterThan True )  (TB1 j)   = i >= j
           ma  (TB1 i, (Flip (GreaterThan True) ))  (TB1 j)   = i <= j

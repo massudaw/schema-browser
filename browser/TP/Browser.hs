@@ -61,14 +61,14 @@ clientCreate metainf now = liftTable' metainf "client_login" row
   where
     row = tblist . fmap _tb
             $ [
-               Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
+               Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STime $ STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
               ]
 
 serverCreate metainf now = liftTable' metainf "server" row
   where
     row = tblist . fmap _tb
             $ [
-               Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
+               Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STime $ STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
               ]
 
 addClientLogin inf =  transactionNoLog inf $ do
@@ -88,7 +88,7 @@ deleteClientLogin inf i= do
   let
     pk = Attr (lookKey inf "client_login" "id") (TB1 (SNumeric i))
     old = justError ("no row " <> show (attrIdex [pk]) ) $ G.lookup (attrIdex [pk]) tb
-    pt = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((ER.Finite $ PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
+    pt = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((ER.Finite $ PAtom (STime $ STimestamp (utcToLocalTime utc now)) , False)))])
 
   transactionNoLog inf $ do
     v <- updateFrom  (apply old pt) old
@@ -105,18 +105,18 @@ idexToPred t (G.Idex  i) = head $ (\(k,a)-> (keyRef [k],Left (a,Contains))) <$> 
 
 deleteServer inf (TableModification _ _ (PatchRow o@(a,ref,c))) = do
   now <- liftIO $ getCurrentTime
-  (_,(_,tb)) <- transactionNoLog inf $ selectFrom "client_login"  Nothing Nothing [] (WherePredicate (AndColl [PrimColl (keyRef [(lookKey inf "client_login" "up_time") ],Left ((TB1 (STimestamp (utcToLocalTime utc now))),Contains))]))
+  (_,(_,tb)) <- transactionNoLog inf $ selectFrom "client_login"  Nothing Nothing [] (WherePredicate (AndColl [PrimColl (keyRef [(lookKey inf "client_login" "up_time") ],Left ((TB1 (STime $ STimestamp (utcToLocalTime utc now))),Contains))]))
   let
     t= (lookTable inf "client_login")
-    pk = Attr (lookKey inf "client_login" "up_time")(TB1 (STimestamp (utcToLocalTime utc now)))
+    pk = Attr (lookKey inf "client_login" "up_time")(TB1 (STime $ STimestamp (utcToLocalTime utc now)))
     oldClis =  L.filter (G.indexPred (idexToPred t $ attrIdex [pk])) (G.toList tb)
-    pt old = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((ER.Finite $ PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
+    pt old = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((ER.Finite $ PAtom (STime $ STimestamp (utcToLocalTime utc now)) , False)))])
 
   mapM (\(old) -> transactionNoLog inf $ do
     v <- updateFrom   (apply old (pt old)) old
     tell (maybeToList v)
     return v) oldClis
-  let pt = (tableMeta (lookTable inf "server") , ref ,[PAttr (lookKey inf "server" "up_time") (PInter False ((ER.Finite $ PAtom (STimestamp (utcToLocalTime utc now)) , False)))])
+  let pt = (tableMeta (lookTable inf "server") , ref ,[PAttr (lookKey inf "server" "up_time") (PInter False ((ER.Finite $ PAtom (STime $ STimestamp (utcToLocalTime utc now)) , False)))])
   transactionNoLog inf $ updateFrom (apply (create o) pt) (create o)
 
 
@@ -148,13 +148,13 @@ addRow idClient now tdi tix rix =  (mempty,G.Idex [num idClient],[PInline "selec
                                                   ( ArrayTB1 . Non.fromList .   fmap (\(i,j) -> TB1 $ tblist $ fmap _tb [Attr "key" (txt  $ keyValue i) ,Attr "val" (TB1 . SDynamic $  j) ]) $tdi)])
                                               ]))])
 
-time = TB1  . STimestamp . utcToLocalTime utc
+time = TB1  . STime . STimestamp . utcToLocalTime utc
 inter i j  = IntervalTB1 $ Interval.interval (i,True) (j,True)
 
 updateClient metainf inf table tdi clientId now = do
     (_,(_,tb)) <- transactionNoLog metainf $ selectFrom "client_login"  Nothing Nothing [] (WherePredicate $ AndColl [PrimColl(keyRef [(lookKey metainf "client_login" "id")] ,Left (int clientId,Equals))]  )
     let
-      pk = Attr (lookKey metainf "client_login" "id") (SerialTB1 $ Just $ TB1 (SNumeric clientId))
+      pk = Attr (lookKey metainf "client_login" "id") (LeftTB1 $ Just $ TB1 (SNumeric clientId))
       old = justError ("no row " <> show (attrIdex [pk]) ) $ G.lookup (attrIdex [pk]) tb
     let
       row = tblist . fmap _tb

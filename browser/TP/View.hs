@@ -127,10 +127,10 @@ timePred inf tname evfields (incrementT,resolution) = traceShowId time
              KSerial i -> op i
              Primitive i -> Flip Contains
     ref f =  case f of
-            Primitive (AtomicPrim PDate) ->
-                (TB1 . SDate . localDay . utcToLocalTime utc)
-            Primitive (AtomicPrim (PTimestamp _)) ->
-                (TB1 . STimestamp . utcToLocalTime utc)
+            Primitive (AtomicPrim (PTime PDate)) ->
+              (TB1 . STime . SDate . localDay . utcToLocalTime utc)
+            Primitive (AtomicPrim (PTime (PTimestamp _))) ->
+              (TB1 . STime . STimestamp . utcToLocalTime utc)
             KOptional i -> ref i
             KSerial i -> ref i
             KInterval i -> ref i
@@ -240,7 +240,7 @@ makePatch zone ((t,pk,k),a) =
   (tableMeta t,  pk, PAttr k <$> (ty (keyType k) $ a))
   where
     ty (KOptional k) i = fmap (POpt . Just) . ty k $ i
-    ty (KSerial k) i = fmap (PSerial . Just) . ty k $ i
+    ty (KSerial k) i = fmap (POpt. Just) . ty k $ i
     ty (KInterval k) (Left i) =
       [ PatchSet $ Non.fromList $
         (fmap ((PInter True . (, True))) . (traverse (ty k . Right) ) $
@@ -248,9 +248,9 @@ makePatch zone ((t,pk,k),a) =
              (fmap ((PInter False . (, True))) . (traverse (ty k . Right ) ) $
            Interval.upperBound i)]
     ty (Primitive p) (Right r) = pure . PAtom . cast p $ r
-    cast (AtomicPrim PDate) = SDate . utctDay
-    cast (AtomicPrim (PTimestamp l)) =
-        STimestamp .
+    cast (AtomicPrim (PTime PDate)) = STime . SDate . utctDay
+    cast (AtomicPrim (PTime (PTimestamp l))) =
+      STime . STimestamp .
         utcToLocalTime utc . localTimeToUTC zone . utcToLocalTime utc
 
 readPosition:: EventData -> Maybe ([Double],[Double])

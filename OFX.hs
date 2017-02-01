@@ -18,10 +18,10 @@ import qualified Data.Text as T
 
 
 opt f v = LeftTB1 $  f <$> v
-serial f v = SerialTB1 $ f <$> v
+serial f v = LeftTB1 $ f <$> v
 txt = TB1 . SText . T.pack
 frac = TB1 . SDouble
-tzone  = TB1 . STimestamp . zonedTimeToLocalTime
+tzone  = TB1 . STime . STimestamp . zonedTimeToLocalTime
 
 i =: j = Attr i j
 

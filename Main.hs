@@ -73,7 +73,7 @@ main = do
   let
     initGUI = do
       Just (TableModification _ _ (CreateRow c)) <- addClientLogin metas
-      let [(SerialTB1 (Just (TB1 (SNumeric i))))] = traceShowId $ F.toList ((\(Idex i ) -> i) $ G.getIndex c)
+      let [(LeftTB1 (Just (TB1 (SNumeric i))))] = traceShowId $ F.toList ((\(Idex i ) -> i) $ G.getIndex c)
       return i
     finalizeGUI w = void $ closeDynamic $ do
         liftIO$ print ("delete client " <> show (wId w))

@@ -33,8 +33,6 @@ import qualified Data.Text as T
 
 renderShowable :: FTB Showable -> String
 renderShowable (LeftTB1 i ) = maybe "" renderShowable i
-renderShowable (DelayedTB1 i ) =  maybe "<NotLoaded>" (\i -> "<Loaded| " <> renderShowable i <> "|>") i
-renderShowable (SerialTB1 i ) = maybe "" renderShowable i
 renderShowable (ArrayTB1 i)  = L.intercalate "," $ F.toList $ fmap renderShowable i
 renderShowable (IntervalTB1 i)  = showInterval renderShowable i
   where
@@ -55,12 +53,14 @@ renderPrim (SText a) = T.unpack a
 renderPrim (SNumeric a) = show a
 renderPrim (SBoolean a) = show a
 renderPrim (SDouble a) = show a
-renderPrim (STimestamp a) = show a
-renderPrim (SDate a) = show a
-renderPrim (SDayTime a) = show a
+renderPrim (STime i)
+  = case i of
+    STimestamp a ->  show a
+    SDate a -> show a
+    SDayTime a -> show a
+    SPInterval a -> show a
 renderPrim (SBinary _) = show "<Binary>"
 renderPrim (SDynamic s) = renderShowable s
-renderPrim (SPInterval a) = show a
 renderPrim (SGeo o ) = renderGeo o
 renderPrim i = show i
 
@@ -83,7 +83,7 @@ readTypeOpt t (Just i) = readType t i
 readType t = case t of
     Primitive (AtomicPrim i) -> fmap TB1 <$> readPrim i
     KOptional i -> opt LeftTB1 (readType i)
-    KSerial i -> opt SerialTB1 (readType i)
+    KSerial i -> opt LeftTB1 (readType i)
     KArray i  -> parseArray (readType i)
     KInterval i -> inter (readType i)
   where
@@ -107,10 +107,11 @@ readPrim t =
      PCpf-> readCpf
      PDouble ->  readDouble
      PInt _-> readInt
-     PTimestamp zone -> readTimestamp
-     PInterval -> readInterval
-     PDate-> readDate
-     PDayTime -> \t -> readDayTime t <|> readDayTimeMin t <|> readDayTimeHour t
+     PTime a ->case a of
+       PTimestamp zone -> readTimestamp
+       PDate-> readDate
+       PInterval -> readInterval
+       PDayTime -> \t -> readDayTime t <|> readDayTimeMin t <|> readDayTimeHour t
      PGeom a ->  fmap (fmap SGeo )$ case a of
        PPosition i-> readPosition
        PLineString i-> readLineString
@@ -125,15 +126,15 @@ readPrim t =
       readBin = nonEmpty (\i-> fmap (SBinary . BS.pack ) . readMaybe $  "\"" <> i <> "\"")
       readCnpj = nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cnpjValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
       readCpf = traceShowId . nonEmpty (\i-> fmap (SText . T.pack . fmap Char.intToDigit ) . join . fmap (join . fmap (eitherToMaybe . cpfValidate ). (allMaybes . fmap readDigit)) . readMaybe $  "\"" <> i <> "\"")
-      readDate =  fmap (SDate . localDay . fst) . strptime "%Y-%m-%d"
-      readDayTime =  fmap (SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS"
-      readDayTimeMin =  fmap (SDayTime . localTimeOfDay . fst) . strptime "%H:%M"
-      readDayTimeHour =  fmap (SDayTime . localTimeOfDay . fst) . strptime "%H"
+      readDate =  fmap (STime . SDate . localDay . fst) . strptime "%Y-%m-%d"
+      readDayTime =  fmap (STime . SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS"
+      readDayTimeMin =  fmap (STime . SDayTime . localTimeOfDay . fst) . strptime "%H:%M"
+      readDayTimeHour =  fmap (STime . SDayTime . localTimeOfDay . fst) . strptime "%H"
       readPosition = nonEmpty (fmap SPosition . readMaybe)
       readLineString = nonEmpty (fmap SLineString . readMaybe)
       readMultiPolygon = nonEmpty (fmap SMultiGeom . fmap (fmap (\(i:xs) -> SPolygon i xs)). readMaybe)
-      readTimestamp =  fmap (STimestamp  .  fst) . (\i -> strptime "%Y-%m-%d %H:%M:%OS" i <|> strptime "%Y-%m-%d %H:%M:%S" i)
-      readInterval =  fmap SPInterval . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
+      readTimestamp =  fmap (STime . STimestamp  .  fst) . (\i -> strptime "%Y-%m-%d %H:%M:%OS" i <|> strptime "%Y-%m-%d %H:%M:%S" i)
+      readInterval =  fmap (STime . SPInterval) . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
       nonEmpty f ""  = Nothing
       nonEmpty f i  = f i
 

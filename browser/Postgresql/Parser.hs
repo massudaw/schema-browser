@@ -91,8 +91,7 @@ newtype UnQuoted a = UnQuoted {unQuoted :: a}
 
 instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Text,a)) where
   toField (LeftTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
-  toField (SerialTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
-  toField (DelayedTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
+  toField (LeftTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
   toField (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   (F.toList is)
   toField (IntervalTB1 is )
     | ty == Just "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $maybe "" T.unpack $ ty), TF.Plain $ fromByteString "range"]
@@ -114,8 +113,7 @@ instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
                      Nothing -> toFiel k i
     where
       toFiel (KOptional k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
-      toFiel (KSerial k ) ( SerialTB1 i) = maybe (TF.Plain "null") (toFiel k) i
-      toFiel (KDelayed k ) (DelayedTB1 i) = maybe (TF.Plain "null") (toFiel k) i
+      toFiel (KDelayed k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel k) i
       toFiel (KArray k ) (ArrayTB1 is ) = TF.Many $[TF.toField $ PGTypes.PGArray   (F.toList $ fmap unTB1 is)  ] ++ maybeToList ( TF.Plain .fromByteString . BS.pack . T.unpack . (" :: "<>) <$> ( renderType (KArray k)))
       toFiel (KInterval k) (IntervalTB1 is ) = TF.Many [TF.Plain ( fromByteString $ BS.pack $ T.unpack $justError ("no array" <> show k) $ renderType (KInterval k) ) ,TF.Plain "(" ,TF.toField  (fmap unTB1 $ unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (fmap unTB1 $ unFinite $ Interval.upperBound is) ,TF.Plain ")"]
         -- | k == Just "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $maybe "" T.unpack $ ty), TF.Plain $ fromByteString "range"]
@@ -156,12 +154,13 @@ instance TR.ToRow a => TF.ToField (TBRecord2 a) where
 data TBRecord2 a = TBRecord2 Text a
 
 instance TF.ToField (UnQuoted Showable) where
-  toField (UnQuoted (STimestamp i )) = TF.Plain $ localTimestampToBuilder (Finite i)
-  toField (UnQuoted (SDate i )) = TF.Plain $ dateToBuilder (Finite i)
-  toField (UnQuoted (SDayTime  i )) = TF.Plain $ timeOfDayToBuilder (i)
   toField (UnQuoted (SDouble i )) =  TF.toField i
   toField (UnQuoted (SNumeric i )) =  TF.toField i
   toField (UnQuoted (SGeo (SPosition i ))) =  TF.toField i
+  toField (UnQuoted (STime t)) = case t of
+        STimestamp i ->  TF.Plain $ localTimestampToBuilder (Finite i)
+        SDate i  -> TF.Plain $ dateToBuilder (Finite i)
+        SDayTime i -> TF.Plain $ timeOfDayToBuilder (i)
   toField (UnQuoted i) = errorWithStackTrace (show i)
 
 instance TF.ToField Position where
@@ -243,11 +242,12 @@ instance TF.ToField SGeo where
 instance TF.ToField Showable where
   toField (SText t) = TF.toField t
   toField (SNumeric t) = TF.toField t
-  toField (SDate t) = TF.toField t
-  toField (SDayTime t) = TF.toField t
   toField (SBoolean t) = TF.toField t
-  toField (STimestamp t) = TF.toField t
   toField (SDouble t) = TF.toField t
+  toField (STime ti) = case ti of
+                        SDate  t -> TF.toField t
+                        (SDayTime t) -> TF.toField t
+                        (STimestamp t) -> TF.toField t
   toField (SGeo i ) = TF.toField i
   toField (SBinary t) = TF.toField (Binary t)
   toField (SDynamic t) = TF.toField (Binary (B.encode t))
@@ -315,7 +315,6 @@ tryquoted i = doublequoted i <|> i
 parseLabeledTable :: TB2 Key () -> Parser (TB2 Key Showable)
 parseLabeledTable (ArrayTB1 (t :| _)) =
   join $ fromMaybe (fail "empty list") . fmap (return .ArrayTB1 . Non.fromList ) . nonEmpty <$> (parseArray (doublequoted $ parseLabeledTable t) <|> parseArray (parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey kOptional t))  >>  return (fail "")))
-parseLabeledTable (DelayedTB1 (Just tb) ) =  string "t" >>  return (DelayedTB1  Nothing) -- <$> parseLabeledTable tb
 parseLabeledTable (LeftTB1 (Just i )) =
   LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapTable (LeftTB1 . Just) <$>  mapKey kOptional i) >> return Nothing) <|> return Nothing )
 parseLabeledTable  tb1 = traverse parseRecord  $ tb1
@@ -409,10 +408,11 @@ parsePrimJSON i  v =
       PText -> A.withText (show i) (return .SText )
       PCnpj -> A.withText (show i) (return .SText )
       PCpf -> A.withText (show i) (return .SText )
-      PInterval ->  A.withText (show i) (either (errorWithStackTrace "no parse" ) (return . SPInterval )  . parseOnly diffInterval .BS.pack . T.unpack)
-      PTimestamp _ -> (\v -> A.withText (show i) (maybe (fail ("cant parse timestamp" <> show (i,v))) (return .STimestamp  . fst) . strptime "%Y-%m-%dT%H:%M:%OS") $ v)
-      PDayTime  -> A.withText (show i) (maybe (fail "cant parse daytime") (return .SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS")
-      PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay . fst) . strptime "%Y-%m-%d")
+      PTime t -> fmap STime <$> case t of
+        PInterval ->  A.withText (show i) (either (errorWithStackTrace "no parse" ) (return . SPInterval )  . parseOnly diffInterval .BS.pack . T.unpack)
+        PTimestamp _ -> (\v -> A.withText (show i) (maybe (fail ("cant parse timestamp" <> show (i,v))) (return .STimestamp  . fst) . strptime "%Y-%m-%dT%H:%M:%OS") $ v)
+        PDayTime  -> A.withText (show i) (maybe (fail "cant parse daytime") (return .SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS")
+        PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay . fst) . strptime "%Y-%m-%d")
       PGeom a -> A.withText (show i)  (fmap SGeo . either fail pure .Sel.runGet (parseGeom a). fst . B16.decode .BS.pack . T.unpack)
 
       i -> errorWithStackTrace (show i)
@@ -469,25 +469,26 @@ parsePrim i =  do
               in    (fmap SText $ join $ either (fail. show)  (return)  . TE.decodeUtf8' <$> dec) <|> (SText   . TE.decodeLatin1 <$> dec )
         PCnpj -> parsePrim PText
         PCpf -> parsePrim PText
-        PInterval ->
-          let i = SPInterval <$> diffInterval
-           in tryquoted i
+        PTime ti -> fmap STime $ case ti of
+          PInterval ->
+            let i = SPInterval <$> diffInterval
+             in tryquoted i
 
-        PTimestamp zone ->
-             let p =  do
-                    i <- fmap (STimestamp  . fst) . strptime "%Y-%m-%d %H:%M:%OS"<$> plain' "\\\",)}"
-                    maybe (fail "cant parse date") return i
-                 in tryquoted p
-        PDayTime ->
-             let p =  do
-                    i <- fmap (SDayTime . localTimeOfDay .  fst) . strptime "%H:%M:%OS"<$> plain' "\\\",)}"
-                    maybe (fail "cant parse date") return i
-                 in tryquoted p
-        PDate ->
-             let p = do
-                    i <- fmap (SDate . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)}"
-                    maybe (fail "cant parse date") return i
-                 in tryquoted p
+          PTimestamp zone ->
+               let p =  do
+                      i <- fmap (STimestamp  . fst) . strptime "%Y-%m-%d %H:%M:%OS"<$> plain' "\\\",)}"
+                      maybe (fail "cant parse date") return i
+                   in tryquoted p
+          PDayTime ->
+               let p =  do
+                      i <- fmap (SDayTime . localTimeOfDay .  fst) . strptime "%H:%M:%OS"<$> plain' "\\\",)}"
+                      maybe (fail "cant parse date") return i
+                   in tryquoted p
+          PDate ->
+               let p = do
+                      i <- fmap (SDate . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)}"
+                      maybe (fail "cant parse date") return i
+                   in tryquoted p
         PGeom a -> (fmap SGeo) $ case a of
           PPosition i-> do
             s <- plain' "\",)}"
@@ -513,9 +514,9 @@ parseShowable (KArray i)
 parseShowable (KOptional i)
     = LeftTB1 <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
 parseShowable (KDelayed i)
-    = (string "t" >> return (DelayedTB1 Nothing))
+    = (string "t" >> return (LeftTB1 Nothing))
 parseShowable (KSerial i)
-    = SerialTB1 <$> ((Just <$> parseShowable i) )
+    = LeftTB1 <$> ((Just <$> parseShowable i) )
 parseShowable (KInterval k)=
     let
       inter = do
@@ -533,8 +534,8 @@ parseShowable p@(Primitive (AtomicPrim i)) = forw  . TB1 <$> parsePrim i
 parseShowable i  = error $  "not implemented " <> show i
 
 parseShowableJSON (KDelayed i) (A.Bool b)
-  = if b then return (DelayedTB1 Nothing)  else fail "no error"
-parseShowableJSON (KSerial i)  v = SerialTB1 . Just <$> parseShowableJSON i v
+  = if b then return (LeftTB1 Nothing)  else fail "no error"
+parseShowableJSON (KSerial i)  v = LeftTB1 . Just <$> parseShowableJSON i v
 parseShowableJSON (KOptional i ) v =
   case v of
     A.Null ->  return $ LeftTB1 Nothing

@@ -81,7 +81,7 @@ insertPatch f conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> l
       attrs =  concat $ nonRefTB . create <$> filterFun i
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
       direct f = filter (not.all1 testSerial .f)
-      serialAttr = flip Attr (SerialTB1 Nothing)<$> filter (isSerial .keyType) ( rawPK t <> F.toList (rawAttrs t))
+      serialAttr = flip Attr (LeftTB1 Nothing)<$> filter (isSerial .keyType) ( rawPK t <> F.toList (rawAttrs t))
       directAttr :: [TB Identity Key Showable]
       directAttr = direct aattri attrs
       projKey :: [TB Identity Key a ] -> [Text]
@@ -307,7 +307,7 @@ loadDelayed inf t@(k,v) values@(ks,vs)
     makeDelayed (KArray k ) = KArray (makeDelayed k)
     makeDelayed (Primitive k ) = KDelayed (Primitive k)
 
-    makeDelayedV (TB1 i) = DelayedTB1 $ Just (TB1 i)
+    makeDelayedV (TB1 i) = LeftTB1 $ Just (TB1 i)
     makeDelayedV (LeftTB1 i) = LeftTB1 $ makeDelayedV <$> i
     makeDelayedV (ArrayTB1 i) = ArrayTB1 $ makeDelayedV <$> i
 

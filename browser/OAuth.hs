@@ -403,8 +403,9 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
         case i of
           AtomicPrim k -> return $ Right $ fmap TB1 $ case k of
             PText -> join $ readPrim k . T.unpack <$> (v ^? _String)
-            PTimestamp _ ->
-                (fmap (STimestamp . utcToLocalTime utc) . resultToMaybe . fromJSON $ v ) <|> (STimestamp . utcToLocalTime utc . posixSecondsToUTCTime.realToFrac . (/10^3). read . T.unpack  <$> (v ^? _String))
+            PTime ti -> case ti of
+              PTimestamp _ ->
+                (fmap (STime . STimestamp . utcToLocalTime utc) . resultToMaybe . fromJSON $ v ) <|> (STime . STimestamp . utcToLocalTime utc . posixSecondsToUTCTime.realToFrac . (/10^3). read . T.unpack  <$> (v ^? _String))
             PInt _->  (SNumeric . round <$> (v ^? _Number)) <|> (SNumeric . round .read . T.unpack <$> ( v^? _String))
             PDouble -> SDouble . realToFrac  <$> (v ^? _Number)
             PBinary -> join  $ readPrim k . T.unpack  <$> (v ^? _String)
@@ -417,7 +418,7 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
 
     funO :: Bool -> KType (Prim KPrim (Text,Text))-> Maybe Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
     funO f (KOptional i) v =  fmap (bimap (Just . LeftTB1  ) (Just . LeftTB1)) . maybe (return $ typ i) (fun f i) $ v
-    funO f (KSerial i) v =  fmap (bimap (Just . SerialTB1 ) (Just . SerialTB1 )) . maybe (return $ typ i) (fun f i) $ v
+    funO f (KSerial i) v =  fmap (bimap (Just . LeftTB1 ) (Just . LeftTB1 )) . maybe (return $ typ i) (fun f i) $ v
     funO f i v = maybe (return $typ i) (fun f i) v
 
     typ (KArray i ) = typ i
@@ -458,10 +459,10 @@ conversion i = fromMaybe (id,id) $ preconversion i
 
 topconversion v@(KDelayed n ) =   preconversion v <|> fmap lif (topconversion n )
   where
-    lif (a,b) = ((\(DelayedTB1 i) -> DelayedTB1 (fmap a i)), (\(DelayedTB1 i) -> DelayedTB1 (fmap b  i )))
+    lif (a,b) = ((\(LeftTB1 i) -> LeftTB1 (fmap a i)), (\(LeftTB1 i) -> LeftTB1 (fmap b  i )))
 topconversion v@(KSerial n ) =   preconversion v <|> fmap lif (topconversion n )
   where
-    lif (a,b) = ((\(SerialTB1 i) -> SerialTB1 (fmap a i)), (\(SerialTB1 i) -> SerialTB1 (fmap b  i )))
+    lif (a,b) = ((\(LeftTB1 i) -> LeftTB1 (fmap a i)), (\(LeftTB1 i) -> LeftTB1 (fmap b  i )))
 topconversion v@(KOptional n ) =   preconversion v <|> fmap lif (topconversion n )
   where
     lif (a,b) = ((\(LeftTB1 i) -> LeftTB1 (fmap a i)), (\(LeftTB1 i) -> LeftTB1 (fmap b  i )))
@@ -488,8 +489,8 @@ gmailPrim :: HM.HashMap Text KPrim
 gmailPrim =
   HM.fromList
   [("text",PText)
-  ,("datetime",PTimestamp (Just utc) )
-  ,("timestamp",PTimestamp (Just utc) )
+  ,("datetime",PTime $ PTimestamp (Just utc) )
+  ,("timestamp",PTime $PTimestamp (Just utc) )
   ,("pdf",PMime "application/pdf")
   ,("dwg",PMime "application/dwg")
   ,("ofx",PMime "application/x-ofx")

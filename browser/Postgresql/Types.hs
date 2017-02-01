@@ -34,13 +34,13 @@ conversion i = fromMaybe (id , id) $ preconversion i
 
 topconversion f v@(KDelayed n ) =   f v <|> fmap lif (topconversion f n )
   where
-    mapd a (DelayedTB1 i) = DelayedTB1 (fmap a i)
+    mapd a (LeftTB1 i) = LeftTB1 (fmap a i)
     mapd _ b =errorWithStackTrace (show (b))
     lif (a,b) = (mapd a , mapd b)
 
 topconversion f v@(KSerial n ) =   f v <|> fmap lif (topconversion f n )
   where
-    maps a (SerialTB1 i) = SerialTB1 (fmap a i)
+    maps a (LeftTB1 i) = LeftTB1 (fmap a i)
     maps a b =errorWithStackTrace (show (b))
     lif (a,b) = (maps a , maps b)
 
@@ -121,7 +121,7 @@ rewriteOp = M.fromList [
 
 postgresPrim :: HM.HashMap Text KPrim
 postgresPrim =
-  HM.fromList [("character varying",PText)
+  HM.fromList $ [("character varying",PText)
   ,("name",PText)
   ,("character_data",PText)
   ,("varchar",PText)
@@ -157,27 +157,29 @@ postgresPrim =
   ,("smallint",PInt 2)
   ,("boolean",PBoolean)
   ,("bool",PBoolean)
-  ,("timestamptz",PTimestamp Nothing )
+  ,("color",PColor)]
+   ++( fmap PTime <$>
+  [("timestamptz",PTimestamp Nothing )
   ,("timestamp",PTimestamp (Just utc))
   ,("timestamp with time zone",PTimestamp Nothing )
   ,("timestamp without time zone",PTimestamp (Just utc))
-  ,("interval", PInterval)
+  ,("interval",PInterval)
   ,("date" ,PDate)
-  ,("color",PColor)
   ,("time",PDayTime)
-  ,("time with time zone" , PDayTime)
-  ,("time without time zone" , PDayTime)
-  ,("POINT3",PGeom $ PPosition 3)
-  ,("POINT2",PGeom $ PPosition 2)
-  ,("POLYGON3",PGeom $ PPolygon 3)
-  ,("POLYGON2",PGeom $ PPolygon 2)
-  ,("MULTIPOLYGON2",PGeom $ MultiGeom$PPolygon 2)
-  ,("MULTIPOLYGON3",PGeom $ MultiGeom$ PPolygon 3)
-  ,("LINESTRING3",PGeom $ PLineString 3)
-  ,("LINESTRING2",PGeom $ PLineString 2)
-  ,("box3d",PGeom $ PBounding 3)
-  ,("box2d",PGeom $ PBounding 2)
-  ]
+  ,("time with time zone" ,PDayTime)
+  ,("time without time zone" ,PDayTime)])
+    ++ (fmap PGeom <$> [
+   ("POINT3",PPosition 3)
+  ,("POINT2",PPosition 2)
+  ,("POLYGON3",PPolygon 3)
+  ,("POLYGON2",PPolygon 2)
+  ,("MULTIPOLYGON2",MultiGeom$PPolygon 2)
+  ,("MULTIPOLYGON3",MultiGeom$ PPolygon 3)
+  ,("LINESTRING3",PLineString 3)
+  ,("LINESTRING2",PLineString 2)
+  ,("box3d",PBounding 3)
+  ,("box2d",PBounding 2)
+  ])
 
 ktypeUnLift :: KType (Prim KPrim (Text,Text)) -> Maybe (KType (Prim KPrim (Text,Text)))
 ktypeUnLift i = M.lookup i postgresUnLiftPrim

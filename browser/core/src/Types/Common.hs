@@ -130,15 +130,13 @@ unSOptional (LeftTB1 i) = i
 unSOptional i = (Just i)-- traceShow ("unSOptional No Pattern Match SOptional-" <> show i) (Just i)
 
 unSOptional' (LeftTB1 i ) = i
-unSOptional' (SerialTB1 i )  = i
-unSOptional' (DelayedTB1 i )  = i
 unSOptional' i   = Just i
 
 
-unSDelayed (DelayedTB1 i) = i
+unSDelayed (LeftTB1 i) = i
 unSDelayed i = traceShow ("unSDelayed No Pattern Match" <> show i) Nothing
 
-unSSerial (SerialTB1 i) = i
+unSSerial (LeftTB1 i) = i
 unSSerial i = traceShow ("unSSerial No Pattern Match SSerial-" <> show i) Nothing
 
 
@@ -458,7 +456,7 @@ firstTB f (FKT k  m  i) = FKT  (mapBothKV (f) (mapComp (firstTB f)) k)  (fmap f 
 
 data FTB a
   = TB1 ! a
-  | LeftTB1   ! (Maybe (FTB a))
+  | LeftTB1  ! (Maybe (FTB a))
   | ArrayTB1  ! (NonEmpty (FTB a))
   | IntervalTB1 ! (Interval.Interval (FTB a))
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable,Generic)
@@ -470,14 +468,6 @@ instance Applicative FTB where
   LeftTB1 i <*> LeftTB1 j = LeftTB1 $ liftA2 (<*>) i j
   i <*> LeftTB1 j = LeftTB1 $ fmap (i <*>)  j
   LeftTB1 i <*> j = LeftTB1 $ fmap (<*>j)  i
-
-  DelayedTB1 i <*> DelayedTB1 j = DelayedTB1 $ liftA2 (<*>) i j
-  i <*> DelayedTB1 j = DelayedTB1 $ fmap (i <*>)  j
-  DelayedTB1 i <*> j = DelayedTB1 $ fmap (<*>j)  i
-
-  SerialTB1 i <*> SerialTB1 j = SerialTB1 $ liftA2 (<*>) i j
-  i <*> SerialTB1 j = SerialTB1 $ fmap (i <*>)  j
-  SerialTB1 i <*> j = SerialTB1 $ fmap (<*>j)  i
 
   ArrayTB1 i <*> ArrayTB1 j = ArrayTB1 $ liftA2 (<*>) i j
   i <*> ArrayTB1 j = ArrayTB1 $ fmap (i <*>)  j
@@ -633,10 +623,6 @@ aattri (Attr k i ) = [(k,i)]
 aattri (Fun k _ i ) = [(k,i)]
 aattri (FKT i  _ _ ) =  L.concat $ aattr  <$> unkvlist i
 aattri (IT _ _) = []
-
-
-
-
 
 
 

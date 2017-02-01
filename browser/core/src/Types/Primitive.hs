@@ -101,7 +101,7 @@ type CoreKey = FKey (KType CorePrim)
 
 
 showableDef (KOptional i) = Just $ LeftTB1 (showableDef i)
-showableDef (KSerial i) = Just $ SerialTB1 (showableDef i)
+showableDef (KSerial i) = Just $ LeftTB1 (showableDef i)
 showableDef (KArray i ) = Nothing -- Just (SComposite Vector.empty)
 showableDef i = Nothing
 
@@ -200,6 +200,8 @@ instance Binary Showable
 instance NFData Showable
 instance Binary SGeo
 instance NFData SGeo
+instance Binary STime
+instance NFData STime
 
 
 
@@ -213,26 +215,24 @@ data GeomType
   | PPosition Int
   | PBounding  Int
   deriving(Eq,Show,Ord,Generic)
-    {-
+
 data TimeType
-  = PTimestamp (Maybe TimeZone)
-  | PDate
-  | PDayTime
-  | PInterval
--}
+  =  PTimestamp (Maybe TimeZone)
+  |  PDate
+  |  PDayTime
+  |  PInterval
+  deriving(Show,Eq,Ord,Generic)
+
 data KPrim
    = PText
    | PBoolean
    | PAddress
    | PInt Int
    | PDouble
-   | PDate
-   | PDayTime
-   | PTimestamp (Maybe TimeZone)
-   | PInterval
    | PGeom GeomType
-   | PCnpj
+   | PTime TimeType
    | PMime Text
+   | PCnpj
    | PCpf
    | PBinary
    | PSession
@@ -242,6 +242,7 @@ data KPrim
 
 instance NFData KPrim
 instance NFData GeomType
+instance NFData TimeType
 
 data Prim a b
   = AtomicPrim a
@@ -298,6 +299,7 @@ newtype Bounding = Bounding (Interval.Interval Position) deriving(Eq,Ord,Typeabl
 
 newtype LineString = LineString (Vector Position) deriving(Eq,Ord,Typeable,Show,Read,Generic)
 
+--- Geo Data Runtime Representations
 data SGeo
   = SPosition !Position
   | SLineString !LineString
@@ -306,18 +308,23 @@ data SGeo
   | SBounding !Bounding
   deriving(Ord,Eq,Show,Generic)
 
+--- Time Data Runtime Representations
+data STime
+  = STimestamp ! LocalTime
+  | SDate ! Day
+  | SDayTime ! TimeOfDay
+  | SPInterval ! DiffTime
+  deriving(Ord,Eq,Show,Generic)
+
 data Showable
   = SText ! Text
   | SNumeric ! Int
   | SBoolean ! Bool
   | SDouble ! Double
-  | STimestamp ! LocalTime
-  | SPInterval ! DiffTime
   | SGeo  !SGeo
-  | SDate ! Day
-  | SDayTime ! TimeOfDay
+  | STime !STime
   | SBinary ! BS.ByteString
-  | SDynamic  ! (FTB Showable)
+  | SDynamic ! (FTB Showable)
   | SSession ! Sess.Session
   deriving(Ord,Eq,Show,Generic)
 
@@ -460,7 +467,7 @@ instance Num Showable where
     SDouble i + SNumeric j = SDouble $ i +  fromIntegral j
     SNumeric j  + SDouble i = SDouble $ i +  fromIntegral j
     v + k = errorWithStackTrace (show (v,k))
-    STimestamp i - STimestamp j =  SPInterval $ realToFrac $ diffUTCTime (localTimeToUTC utc i) (localTimeToUTC utc  j)
+    STime(STimestamp i) - STime(STimestamp j) =  STime $ SPInterval $ realToFrac $ diffUTCTime (localTimeToUTC utc i) (localTimeToUTC utc  j)
     SNumeric i -  SNumeric j = SNumeric (i - j)
     SDouble i -  SDouble j = SDouble (i - j)
     SDouble i - SNumeric j = SDouble $ i -  fromIntegral j
@@ -470,9 +477,9 @@ instance Num Showable where
     SNumeric i *  SDouble j = SDouble (fromIntegral i * j)
     SDouble i *  SNumeric j = SDouble (i * fromIntegral j)
     SDouble i *  SDouble j = SDouble (i * j)
-    SDouble i *  SPInterval j = SDouble (i * realToFrac j)
-    SPInterval i *  SDouble j = SDouble (j * realToFrac i)
-    SPInterval i *  SPInterval j = SPInterval (i * j)
+    SDouble i *  (STime (SPInterval j)) = SDouble (i * realToFrac j)
+    (STime (SPInterval i ))*  SDouble j = SDouble (j * realToFrac i)
+    STime(SPInterval i) *  STime (SPInterval j) = STime $ SPInterval (i * j)
     i * j = errorWithStackTrace (show (i,j))
     fromInteger i = SDouble $ fromIntegral i
     negate (SNumeric i) = SNumeric $ negate i
@@ -486,7 +493,7 @@ instance Num Showable where
 instance Fractional Showable where
   fromRational i = SDouble (fromRational i)
   recip (SDouble i) = SDouble (recip i)
-  recip (SPInterval i) = SPInterval (recip i)
+  recip (STime (SPInterval i)) = STime $ SPInterval (recip i)
   recip (SNumeric i) = SDouble (recip $ fromIntegral i)
   recip i = errorWithStackTrace (show i)
 
@@ -518,7 +525,6 @@ instance Monad (Labeled Text) where
 -- tableAttr :: (Traversable f ,Ord k) => TB3 f k () -> [Compose f (TB f) k ()]
 -- tableAttr (ArrayTB1 i) = tableAttr <$> i
 -- tableAttr (LeftTB1 i ) = tableAttr<$> i
-tableAttr (DelayedTB1 (Just tb)) = tableAttr tb
 tableAttr (TB1 (m ,(Compose (Labeled _ (KV  n)))) ) =   concat  $ F.toList (nonRef <$> n)
 tableAttr (TB1 (m ,(Compose (Unlabeled (KV  n)))) ) =   concat  $ F.toList (nonRef <$> n)
 
@@ -834,8 +840,8 @@ notOptionalPK m =  justError "cant be empty " . traverse unSOptional'  $ m
 txt = TB1 . SText
 int = TB1 . SNumeric
 pos = TB1 . SGeo . SPosition
-timestamp = TB1 . STimestamp
-date = TB1 . SDate
+timestamp = TB1 .STime . STimestamp
+date = TB1 . STime . SDate
 
 class ConstantGen v where
   generate ::  Constant -> v
@@ -845,9 +851,9 @@ instance ConstantGen (FTB Showable) where
 
 generateConstant CurrentDate = unsafePerformIO $ do
         i<- getCurrentTime
-        return  (TB1 $ SDate (utctDay i))
+        return  (TB1 $ STime $ SDate (utctDay i))
 generateConstant CurrentTime = unsafePerformIO $ do
         i<- getCurrentTime
-        return (TB1 $ STimestamp ( utcToLocalTime utc i))
+        return (TB1 $ STime  $STimestamp ( utcToLocalTime utc i))
 
 replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)

@@ -282,10 +282,10 @@ goAttSize i = case i of
                   case (\(AtomicPrim i) -> i) $ i of
                        PInt _-> (3,1)
                        PText-> (3,1)
-                       PDate -> (3,1)
+                       PTime PDate -> (3,1)
                        PColor-> (3,1)
-                       PTimestamp _ -> (3,1)
-                       PDayTime -> (3,1)
+                       PTime (PTimestamp _ )-> (3,1)
+                       PTime PDayTime -> (3,1)
                        PAddress -> (12,8)
                        PMime m -> case m of
                                     "image/jpg" ->  (4,8)
@@ -869,26 +869,26 @@ buildUIDiff km i  plug tdi = go i plug tdi
            return $ TrivialWidget ( reduceOptional <$> triding tdnew  ) retUI
          (KSerial ti) -> do
            let pretdi = ( join . fmap unSSerial <$> tdi)
-               plugtdi = fmap (join . fmap (\(PSerial i ) -> i) )<$> plug
+               plugtdi = fmap (join . fmap (\(POpt i ) -> i) )<$> plug
            tdnew <- go ti  plugtdi pretdi
            retUI <- UI.div # set children [getElement tdnew]
            -- Delete equals create
            let
-               test Delete _ = Diff $ PSerial Nothing
+               test Delete _ = Diff $ POpt Nothing
                -- test Keep Nothing = Diff $ PSerial Nothing
                test Keep _ = Keep
-               test (Diff i ) _ = Diff (PSerial (Just  i))
+               test (Diff i ) _ = Diff (POpt (Just  i))
 
            return $ TrivialWidget ( test <$> triding tdnew <*> tdi) retUI
          (KDelayed ti) -> do
            let pretdi = ( join . fmap unSDelayed <$> tdi)
-               plugtdi = fmap (join . fmap (\(PDelayed i ) -> i) )<$> plug
+               plugtdi = fmap (join . fmap (\(POpt i ) -> i) )<$> plug
            tdnew <-  go ti plugtdi pretdi
            retUI <- UI.div# set children [getElement tdnew]
            let
                test Delete = Delete
                test Keep = Keep
-               test (Diff i ) = Diff (PDelayed (Just  i))
+               test (Diff i ) = Diff (POpt (Just  i))
 
            return $ TrivialWidget (test <$> triding tdnew  ) retUI
          (KInterval ti) -> do
@@ -953,37 +953,40 @@ buildPrim fm tdi i = case i of
          PBoolean -> do
            res <- checkedWidgetM (fmap (\(SBoolean i) -> i) <$> tdi )
            return (fmap SBoolean <$> res)
-         PTimestamp dbzone -> do
-            cliZone <- jsTimeZone
-            itime <- liftIO $  getCurrentTime
-            timeButton <- UI.button # set UI.text "now"
-            cliTime <- UI.click timeButton
-            evCurr <-  mapEventFin (liftIO . fmap Just) (pure getCurrentTime <@ cliTime )
-            let
-              newEv = fmap (STimestamp . utcToLocalTime cliZone ) <$> evCurr
-              maptime f (STimestamp i) = STimestamp (f i)
-              toLocal = maptime  (utcToLocalTime cliZone . localTimeToUTC utc)
-              fromLocal = maptime (utcToLocalTime utc .localTimeToUTC cliZone)
-            tdi2 <- ui $ addEvent newEv  (fmap toLocal <$> tdi)
-            fmap (fmap fromLocal) <$> oneInput tdi2 [timeButton]
-         PDate -> do
-            cliZone <- jsTimeZone
-            itime <- liftIO $  getCurrentTime
-            timeButton <- UI.button # set UI.text "now"
-            cliTime <- UI.click timeButton
-            evCurr <-  ui $ mapEvent (fmap Just) (pure getCurrentTime <@ cliTime )
-            let  newEv =  fmap (SDate . localDay . utcToLocalTime cliZone) <$> evCurr
-            tdi2 <- ui $ addEvent newEv  tdi
-            oneInput tdi2 [timeButton]
-         PDayTime -> do
-            cliZone <- jsTimeZone
-            itime <- liftIO $  getCurrentTime
-            timeButton <- UI.button # set UI.text "now"
-            cliTime <- UI.click timeButton
-            evCurr <-  ui $ mapEvent (fmap Just) (pure getCurrentTime <@ cliTime)
-            let  newEv = fmap (SDayTime. localTimeOfDay . utcToLocalTime cliZone) <$> evCurr
-            tdi2 <- ui $ addEvent newEv  tdi
-            oneInput tdi2 [timeButton]
+         PTime ti -> do
+           let  tdip =  tdi
+           case ti of
+             PTimestamp dbzone -> do
+                cliZone <- jsTimeZone
+                itime <- liftIO $  getCurrentTime
+                timeButton <- UI.button # set UI.text "now"
+                cliTime <- UI.click timeButton
+                evCurr <-  mapEventFin (liftIO . fmap Just) (pure getCurrentTime <@ cliTime )
+                let
+                  newEv = fmap (STime . STimestamp . utcToLocalTime cliZone ) <$> evCurr
+                  maptime f (STime (STimestamp i)) = STime $ STimestamp (f i)
+                  toLocal = maptime  (utcToLocalTime cliZone . localTimeToUTC utc)
+                  fromLocal = maptime (utcToLocalTime utc .localTimeToUTC cliZone)
+                tdi2 <- ui $ addEvent newEv  (fmap toLocal <$> tdip)
+                fmap (fmap fromLocal) <$> oneInput tdi2 [timeButton]
+             PDate -> do
+                cliZone <- jsTimeZone
+                itime <- liftIO $  getCurrentTime
+                timeButton <- UI.button # set UI.text "now"
+                cliTime <- UI.click timeButton
+                evCurr <-  ui $ mapEvent (fmap Just) (pure getCurrentTime <@ cliTime )
+                let  newEv =  fmap (STime. SDate . localDay . utcToLocalTime cliZone) <$> evCurr
+                tdi2 <- ui $ addEvent newEv  tdip
+                oneInput tdi2 [timeButton]
+             PDayTime -> do
+                cliZone <- jsTimeZone
+                itime <- liftIO $  getCurrentTime
+                timeButton <- UI.button # set UI.text "now"
+                cliTime <- UI.click timeButton
+                evCurr <-  ui $ mapEvent (fmap Just) (pure getCurrentTime <@ cliTime)
+                let  newEv = fmap (STime . SDayTime. localTimeOfDay . utcToLocalTime cliZone) <$> evCurr
+                tdi2 <- ui $ addEvent newEv  tdip
+                oneInput tdi2 [timeButton]
          PSession -> do
            dv <- UI.div # set text "session" # sink UI.style (noneShow . isJust <$> facts tdi)
            return  $ TrivialWidget tdi dv
