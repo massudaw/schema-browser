@@ -341,13 +341,13 @@ tableLoader table  page size presort fixed
             where
               res = liftTable' inf (tableName table ) .mapKey' keyValue $i
         o = foldr mergeDBRef  (M.empty,G.empty) (fmap (createUn (rawPK table).fmap projunion.G.toList) . snd <$>i )
-    modify (M.insert (table,fixed) ( mapKey' keyFastUnique <$> snd o ))
     let mergeDBRefT  (ref1,j ,i,o,k) (ref2,m ,l,p,n) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l , liftA2 (zipWith (\(i,j) (l,m) -> (i,j<>m))) o p ,unionWith mappend k n)
         dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty, pure ((,G.empty)<$> _rawIndexes table) ,never) (Le.over Le._3 (fmap (createUn (rawPK table).fmap projunion.G.toList)) .(\(DBVar2 e i j l k ) -> ([e],i,j,l,k)). fst <$>i )
         dbvar (l,i,j,p,k) = DBVar2 (L.head l) i j p k
 
     lf <- liftIO getCurrentTime
     liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
+    modify (M.insert (table,fixed) (dbvar dbvarMerge ,o) )
     return $ (dbvar dbvarMerge, o)
   -- (Scoped || Partitioned) Tables
     {-| not  (null $ _rawScope table ) && not (S.null (rawFKS table) )= do
@@ -448,6 +448,7 @@ childrenRefsUnique  inf table (sidxs,base) (FKJoinTable rel j ,evs)  =  concat $
 
 
 
+
 pageTable flag method table page size presort fixed = do
     inf <- ask
     let mvar = mvarMap inf
@@ -461,49 +462,64 @@ pageTable flag method table page size presort fixed = do
     let
       dbvar :: DBRef KeyUnique Showable
       dbvar =  justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
-    (sidx,reso ,nchan,iniVar) <- liftIO $ atomically $
-      readState (fixedU ,rawPK tableU) tableU dbvar
+    (fixedmap,fixedChan) <- liftIO $ atomically $readIndex dbvar
+    let pageidx = (fromMaybe 0 page +1) * pagesize
 
-    ((fixedmap,fixedChan))  <- liftIO $ atomically $readIndex dbvar
-    (nidx,ndata,evs)<- do
-       loadmap <- get
-       let pageidx = (fromMaybe 0 page +1) * pagesize
-           freso =  fromMaybe fr (M.lookup (table ,fixed) loadmap )
-              where fr = ffixed (sidx,reso)
-           predreq = (fixedU,G.Contains (pageidx - pagesize,pageidx))
-           hasIndex = M.lookup fixedU fixedmap
-           (sq ,_)= justError "no index" hasIndex
 
-       (nidx,ndata,evs) <-  if flag || ( (isNothing hasIndex|| (sq > G.size freso)) -- Tabela é maior que a tabela carregada
-                && pageidx  > G.size freso ) -- O carregado é menor que a página
-               && (isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixedU fixedmap)  -- Ignora quando página já esta carregando
-                                                                                       -- && isJust diffpred
-                   )
-             then do
-               let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
-                   (_,mp) = fromMaybe (0,M.empty ) hasIndex
-               liftIO$ putStrLn $ "new page " <> show (tableName table, pageidx, G.size freso,G.size reso,page, pagesize)
-               (resK,nextToken ,s ,evs) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
-               let
-                   res = fmap (mapKey' keyFastUnique ) resK
-                   token =  nextToken
-                   index = (estLength page pagesize (s + G.size freso) , maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token $ mp)
-               liftIO$ do
-                 putIdx (idxChan dbvar ) (fixedU ,estLength page pagesize s, pageidx ,fromMaybe HeadToken token)
-                 putPatch (patchVar dbvar) (F.toList $ CreateRow <$> filter (\i -> isNothing $ G.lookup (G.getIndex i) reso  )   resK)
-               return  (index,res <> G.toList freso,evs)
-             else do
-               liftIO$ putStrLn $ "keep page " <> show (tableName table, pageidx, G.size freso,G.size reso,page, pagesize)
-               return (fromMaybe (0,M.empty) hasIndex ,[],[])
-       return (M.insert fixedU nidx fixedmap, if L.length ndata > 0 then createUn (rawPK tableU)  ndata <> freso else  freso ,evs)
-    let iniFil = (nidx,ndata)
-    modify (M.insert (table,fixed)  ndata)
-    (vpt,evpt) <- mdo
+
+    res <- do
+       if isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixedU fixedmap)  -- Ignora quando página já esta carregando
+         then do
+           (sidx,reso ,nchan,iniVar) <- liftIO $ atomically $
+                    readState (fixedU ,rawPK tableU) tableU dbvar
+           let
+                 freso =  ffixed (sidx,reso)
+                 predreq = (fixedU,G.Contains (pageidx - pagesize,pageidx))
+                 hasIndex = M.lookup fixedU fixedmap
+                 (sq ,_)= justError "no index" hasIndex
+           (nidx,ndata) <-  if
+                    flag || ( (isNothing hasIndex|| (sq > G.size freso)) -- Tabela é maior que a tabela carregada
+                    && pageidx  > G.size freso ) -- O carregado é menor que a página
+                                                                                           -- && isJust diffpred
+
+                 then do
+                   let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
+                       (_,mp) = fromMaybe (0,M.empty ) hasIndex
+                   liftIO$ putStrLn $ "new page " <> show (tableName table, pageidx, G.size freso,G.size reso,page, pagesize)
+                   (resK,nextToken ,s ,evs) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
+                   let
+                       res = fmap (mapKey' keyFastUnique ) resK
+                       token =  nextToken
+                       index = (estLength page pagesize (s + G.size freso) , maybe (M.insert pageidx HeadToken) (M.insert pageidx ) token $ mp)
+                   liftIO$ do
+                     putIdx (idxChan dbvar ) (fixedU ,estLength page pagesize s, pageidx ,fromMaybe HeadToken token)
+                     putPatch (patchVar dbvar) (F.toList $ CreateRow <$> filter (\i -> isNothing $ G.lookup (G.getIndex i) reso  )   resK)
+                   return (index,res <> G.toList freso)
+                 else do
+                   liftIO$ putStrLn $ "keep page " <> show (tableName table, pageidx, G.size freso,G.size reso,page, pagesize)
+                   return (fromMaybe (0,M.empty) hasIndex ,[])
+           return $Right(M.insert fixedU nidx fixedmap, sidx,iniVar,nchan,if L.length ndata > 0 then createUn (rawPK tableU)  ndata <> freso else  freso )
+         else do
+           loadmap <- get
+           let preloaded = M.lookup (table ,fixed) loadmap
+           case preloaded  of
+             Just pre ->
+                return $Left (fromJust $ preloaded)
+             Nothing -> do
+                (sidx,reso ,nchan,iniVar) <- liftIO $ atomically $
+                    readState (fixedU ,rawPK tableU) tableU dbvar
+                let
+                   freso =  ffixed (sidx,reso)
+                return $ Right(fixedmap , sidx,iniVar,nchan,freso)
+    case res of
+      Left i -> return i
+      Right (nidx,sidx,iniVar,nchan,ndata) -> do
+        let iniFil = (nidx,ndata)
         (vpt ,evpt)<- lift $ convertChanTidings0 inf tableU (fixedU ,rawPK tableU) never (sidx ,snd iniFil) iniVar nchan
-        return (vpt,evpt)
-
-    idxTds <- lift $ convertChanStepper0 inf (tableU) fixedmap fixedChan
-    return (DBVar2 dbvar idxTds (fmap snd vpt) (fmap fst vpt) evpt ,first (M.mapKeys (mapPredicate (recoverKey inf))).fmap (fmap (mapKey' (recoverKey inf)) )$iniFil)
+        idxTds <- lift $ convertChanStepper0 inf (tableU) fixedmap fixedChan
+        let result = (DBVar2 dbvar idxTds (fmap snd vpt) (fmap fst vpt) evpt ,first (M.mapKeys (mapPredicate (recoverKey inf))).fmap (fmap (mapKey' (recoverKey inf)) )$iniFil)
+        modify (M.insert (table,fixed)  result)
+        return result
 
 readIndex
   :: (Ord k )

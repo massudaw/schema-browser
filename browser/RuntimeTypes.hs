@@ -242,7 +242,7 @@ dynP ~(P s d) = d
 dynPK =  runKleisli . dynP
 
 
-type TransactionM = RWST InformationSchema [TableModification (RowPatch Key Showable)] (Map (Table,WherePredicate) (TableIndex KeyUnique Showable)) R.Dynamic
+type TransactionM = RWST InformationSchema [TableModification (RowPatch Key Showable)] (Map (Table,WherePredicate) (DBVar,Collection Key Showable)) R.Dynamic
 
 type PageToken = PageTokenF Showable
 
