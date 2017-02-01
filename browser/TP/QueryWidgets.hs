@@ -540,13 +540,13 @@ crudUITable inf open reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItem
           let
               deleteCurrentUn un e l =   maybe l (\v -> G.delete v G.indexParam l) $  G.getUnique un <$> e
               tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ snd $ tbPK ftb , (_kvpk m, ( gist)))
-          unConstraints <-  traverse (traverse (traverse (ui . mapTEventDyn return ))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn (S.fromList un ) (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un . G.toList ) gist))) <$> _kvuniques m
-          unDeleted <- traverse (traverse (traverse (ui . mapTEventDyn return))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> preoldItems <*> o))) (tpkConstraint:unConstraints))
+          unConstraints <-  traverse (traverse (traverse (ui . cacheTidings))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn (S.fromList un ) (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un . G.toList ) gist))) <$> _kvuniques m
+          unDeleted <- traverse (traverse (traverse (ui . cacheTidings))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> preoldItems <*> o))) (tpkConstraint:unConstraints))
           let
               dunConstraints (un,o) = flip (\i ->  maybe (const False ) (unConstraint un .tblist' table . fmap _tb ) (traverse (traFAttr unSOptional' ) i ) ) <$> o
               unFinal:: [([Column CoreKey ()], Tidings PKConstraint)]
               unFinal = fmap (fmap dunConstraints) unDeleted
-          (listBody,tablebdiff) <- eiTableDiff inf   unFinal  refs pmods ftb preoldItems
+          (listBody,tablebdiff) <- eiTableDiff inf   unFinal  refs pmods ftb =<< ui (cacheTidings preoldItems)
 
 
           (panelItems,tdiff)<- processPanelTable listBody inf reftb  tablebdiff table preoldItems
@@ -1283,17 +1283,17 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,sgist,_) plmods nonInjRefs   oldItems
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.pack . showFKText
           predicatefk o = (WherePredicate $AndColl $ catMaybes $ fmap ((\(Attr k v) -> PrimColl . (keyRef [k], ) . Left . (,Flip $ _relOperator $ justError "no rel" $ L.find (\i ->_relTarget i == k) rel) <$> unSOptional' v). replaceKey)  o)
           preindex = (\i -> maybe id (\i -> filterfixed (lookTable inf (_kvname m))(predicatefk i))i ) <$>iold2 <*>gist
-      presort <- ui $ mapTEventDyn return (sortList <*> fmap G.toList  preindex)
+      presort <- ui $ cacheTidings (sortList <*> fmap G.toList  preindex)
       -- Filter and paginate
       (offset,res3)<- do
         let constr = liftA2 applyConstr presort constrT
 
-        res3 <- ui$ mapTEventDyn return (filter .filtering  <$> filterInpT <*> constr)
+        res3 <- ui$ cacheTidings (filter .filtering  <$> filterInpT <*> constr)
         element itemListEl # sink UI.size (show . (\i -> if i > 21 then 21 else (i +1 )) . length <$> facts res3)
 
         offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i j ) i )<$>  (facts res3) <#> (fmap (unTB1._fkttable )<$> oldItems)) wheel  (lengthPage <$> vpt)
         return (offset, res3)
-      tdi <- ui$ mapTEventDyn return ((\ g s v -> join $ searchGist relTable m  g s  <$> v) <$> gist  <*> sgist <*> vv)
+      tdi <- ui $ cacheTidings ((\ g s v -> join $ searchGist relTable m  g s  <$> v) <$> gist  <*> sgist <*> vv)
       -- Load offseted items
       ui $onEventDyn (filterE (isJust . fst) $ (,) <$> facts iold2 <@> rumors (triding offset)) $ (\(o,i) ->  traverse (\o -> do
         transactionNoLog inf $ selectFrom (_kvname m) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (predicatefk  o)) o  )
@@ -1301,9 +1301,7 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,sgist,_) plmods nonInjRefs   oldItems
       ui $onEventDyn (filterE (\(a,b,c)->isJust c && isNothing a ) $ (,,) <$> facts tdi <*> facts (triding offset)<@> diffEvent (facts iold2)(rumors iold2) ) $ (\(v0,i,o) ->  traverse (\o -> do
         transactionNoLog inf $ selectFrom (_kvname m) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (predicatefk   o)) o  )
       -- Select page
-      let
-        paging  = (\o -> L.take pageSize . L.drop (o*pageSize) ) <$> triding offset
-      res4 <- ui$ mapTEventDyn  return (paging <*> res3)
+      res4 <- ui$ cacheTidings ((\o -> L.take pageSize . L.drop (o*pageSize) ) <$> triding offset <*> res3)
 
       metaMap <- mapWidgetMeta inf
       let
@@ -1390,8 +1388,10 @@ fkUITableDiff inf constr tbrefs plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (
   tr <- fkUITableDiff inf constr tbrefs (fmap (join . fmap unLeftItensP  <$>) <$> plmods)  (first unLeftKey . second (join . fmap unLeftItens <$>) <$> wl) (join . fmap unLeftItens  <$> oldItems)  (FKT (mapKV (mapComp (firstTB unKOptional) ) ilk ) (Le.over relOri unKOptional <$> rel) tb1)
   return $ reduceFKOptional rel (_relOrigin . head . keyattr <$> F.toList (_kvvalues ilk) )<$> tr
 
-fkUITableDiff inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1:| _)) ) = mdo
+fkUITableDiff inf constr tbrefs preplmods  wl preoldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1:| _)) ) = mdo
      dv <- UI.div
+     oldItems <- ui $ cacheTidings preoldItems
+     plmods <- ui $ traverse (traverse cacheTidings) preplmods
      let -- wheel = fmap negate $ mousewheel dv
          arraySize = 8
      TrivialWidget offsetT offset <- offsetField (pure 0)  never (maybe 0 (Non.length .unArray. _fkttable ) <$> (recoverEditChange <$> oldItems <*> bres))

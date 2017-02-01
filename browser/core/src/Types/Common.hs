@@ -118,8 +118,6 @@ unkvlist = F.toList . _kvvalues
 kvlist :: (Foldable f, Ord k )=> [Compose f (TB f ) k a] -> KV (Compose f (TB f )) k a
 kvlist = KV. mapFromTBList
 
-
-
 unArray' (ArrayTB1 s) =  s
 unArray' o  = Non.fromList [o] -- errorWithStackTrace $ "unArray' no pattern " <> show o
 

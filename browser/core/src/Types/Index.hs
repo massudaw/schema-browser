@@ -410,12 +410,12 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
   type Penalty (FTB v) = ER.Extended (Tangent v)
   type Query (FTB v) = AccessOp v
   consistent (Left (FTBNode i) ) (Left (FTBNode j)) = not . Interval.null $  j `Interval.intersection` i
-  consistent (Right i ) (Left (FTBNode j)) = cons i j
+  consistent (Right i ) (Left (FTBNode j)) = consrl i j
       where
-        cons (TB1 j)  i  = j `Interval.member` i
-        cons (LeftTB1 i) j = fromMaybe True $ (flip cons j ) <$>  i
-        cons (ArrayTB1 i)  j  = F.any (flip cons j) i
-        cons (IntervalTB1 i) j = not $ Interval.null $  j `Interval.intersection` (fmap unTB1 i)
+        consrl (TB1 j)  i  = j `Interval.member` i
+        consrl (IntervalTB1 i) j = not $ Interval.null $  j `Interval.intersection` (fmap unTB1 i)
+        consrl (LeftTB1 i) j = fromMaybe True $ (flip consrl j ) <$>  i
+        consrl (ArrayTB1 i)  j  = F.any (flip consrl j) i
   consistent (Left i ) (Right j) = consistent (Right j) (Left i)
   consistent (Right i) (Right j) = cons i j
       where

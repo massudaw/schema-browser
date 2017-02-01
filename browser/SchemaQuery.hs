@@ -271,7 +271,7 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                               if G.size (snd out) == G.size tb2
                                  then  do
                                    return (M.empty , G.empty)
-                                 else  check (ix +1) out
+                                 else return (M.empty , G.empty) -- check (ix +1) out
                             else do
                               return (M.empty , G.empty)
                     (_,tb2) <- check 0 out
@@ -571,9 +571,10 @@ convertChanStepper0  inf table ini nchan = do
             a <- atomically $ takeMany nchan
             h a ) (\e -> atomically ( takeMany nchan ) >>= (\d ->  putStrLn $ show (e :: SomeException,d)<>"\n"))
         let conv (v,s,i,t) = (M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) (mapPredicate (recoverKey inf) v) )
-        bh <- accumB (M.mapKeys (mapPredicate (recoverKey inf))ini) ((\l i-> F.foldl' (flip conv) i l)<$> e)
+            dup i =(i,i)
         registerDynamic (killThread t)
-        return (tidings bh ((\i l-> F.foldl' (flip conv) i l)<$> bh<@> e))
+        accumT (M.mapKeys (mapPredicate (recoverKey inf))ini) ((\l i-> F.foldl' (flip conv) i l)<$> e)
+
 
 convertChanStepper
   :: (Show v) =>
@@ -642,7 +643,7 @@ convertChanTidings0
           [RowPatch KeyUnique Showable ]
           -> Dynamic (Tidings (TableRep Key Showable),Event [RowPatch Key Showable])
 convertChanTidings0 inf table fixed evdep ini iniVar nchan = mdo
-    evdiffp <-  convertChanEvent table fixed (first (fmap (first (fmap (keyFastUnique)))) <$> bres) iniVar nchan
+    evdiffp <-  convertChanEvent table fixed (first (fmap (first (fmap (keyFastUnique)))) <$> facts t) iniVar nchan
     let
       evdiff = unionWith mappend evdep (fmap (firstPatchRow (recoverKey inf)) <$> evdiffp)
       update :: TableRep Key Showable -> [RowPatch Key Showable] -> TableRep Key Showable
@@ -651,8 +652,8 @@ convertChanTidings0 inf table fixed evdep ini iniVar nchan = mdo
       recoverIni (i,j)= (first (fmap (recoverKey inf )) <$> i, recover j)
         where recover = fmap (mapKey' (recoverKey inf))
 
-    bres <- accumB (recoverIni ini) (flip update <$> evdiff)
-    return (tidings bres (update <$> bres <@> evdiff),evdiff)
+    t <- accumT (recoverIni ini) (flip update <$> evdiff)
+    return (t ,evdiff)
 
 takeMany' :: TChan a -> STM [a]
 takeMany' mvar = maybe (return[]) (go . (:[])) =<< tryReadTChan mvar

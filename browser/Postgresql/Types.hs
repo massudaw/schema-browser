@@ -32,39 +32,26 @@ preunconversion i =  join $ (\t -> M.lookup (t,i) postgresLiftPrimConv) <$> ktyp
 
 conversion i = fromMaybe (id , id) $ preconversion i
 
-topconversion f v@(KDelayed n ) =   f v <|> fmap lif (topconversion f n )
+
+
+topconversion f v
+  = case v of
+    KArray n ->  f v <|> fmap lifa (topconversion f n )
+    KInterval n ->  f v <|> fmap lifi (topconversion f n )
+    KDelayed n -> f v <|> fmap lifd (topconversion f n )
+    KSerial n -> f v <|> fmap lifd (topconversion f n )
+    KOptional n -> f v <|> fmap lifd (topconversion f n )
+    Primitive i ->  f v
   where
     mapd a (LeftTB1 i) = LeftTB1 (fmap a i)
     mapd _ b =errorWithStackTrace (show (b))
-    lif (a,b) = (mapd a , mapd b)
-
-topconversion f v@(KSerial n ) =   f v <|> fmap lif (topconversion f n )
-  where
-    maps a (LeftTB1 i) = LeftTB1 (fmap a i)
-    maps a b =errorWithStackTrace (show (b))
-    lif (a,b) = (maps a , maps b)
-
-topconversion f v@(KOptional n ) =   f v <|> fmap lif (topconversion f n )
-  where
-    mapo a (LeftTB1 i) = LeftTB1 (fmap a i)
-    -- mapo a i =  a i
-    mapo a  b =  errorWithStackTrace (show (b))
-    lif (a,b) = (mapo a , mapo b)
-
-topconversion f v@(KArray n) =  f v <|> fmap lif (topconversion f n )
-  where
-    -- mapa a i | traceShow i False = undefined
-    mapa a (ArrayTB1 i) = ArrayTB1 (fmap a i)
-    mapa a  b =errorWithStackTrace (show (b))
-    lif (a,b) = (mapa a , mapa b)
-
-topconversion f v@(KInterval n) =  f v <|> fmap lif (topconversion f n )
-  where
+    lifd (a,b) = (mapd a , mapd b)
     map a (IntervalTB1 i) = IntervalTB1 (fmap a i)
     map a  b =errorWithStackTrace (show (b))
-    lif (a,b) = (map a , map b)
-topconversion f v@(Primitive i) =  f v
-
+    lifi (a,b) = (map a , map b)
+    mapa a (ArrayTB1 i) = ArrayTB1 (fmap a i)
+    mapa a  b =errorWithStackTrace (show (b))
+    lifa (a,b) = (mapa a , mapa b)
 
 denormConversions l = M.fromList $ fmap go (M.toList l)
   where
@@ -121,7 +108,8 @@ rewriteOp = M.fromList [
 
 postgresPrim :: HM.HashMap Text KPrim
 postgresPrim =
-  HM.fromList $ [("character varying",PText)
+  HM.fromList $
+  [("character varying",PText)
   ,("name",PText)
   ,("character_data",PText)
   ,("varchar",PText)
@@ -168,8 +156,8 @@ postgresPrim =
   ,("time",PDayTime)
   ,("time with time zone" ,PDayTime)
   ,("time without time zone" ,PDayTime)])
-    ++ (fmap PGeom <$> [
-   ("POINT3",PPosition 3)
+    ++ (fmap PGeom <$>
+  [("POINT3",PPosition 3)
   ,("POINT2",PPosition 2)
   ,("POLYGON3",PPolygon 3)
   ,("POLYGON2",PPolygon 2)

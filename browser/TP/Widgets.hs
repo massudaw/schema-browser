@@ -46,10 +46,6 @@ data TrivialWidget a =
 
 
 -- Generate a accum the behaviour and generate the ahead of promised event
-accumT :: a -> Event (a ->a) -> Dynamic (Tidings a)
-accumT e ev = do
-  b <- accumB e ev
-  return $ tidings b (flip ($) <$> b <@> ev)
 
 
 evalUI el f = liftIO (getWindow el) >>= \w ->  runUI w f
@@ -122,10 +118,23 @@ mapEvent f x = do
   onEventIO x (\i -> void  $ (f i)  >>= h)
   return  e
 
-
-mapTEventDyn f x = do
+mapTEventDynInterrupt f x = do
   i <- currentValue  (facts x)
   mapT0EventDynInterrupt i f x
+
+mapTEventDyn :: (a -> Dynamic b) -> Tidings a -> Dynamic (Tidings b)
+mapTEventDyn f x = do
+  i <- currentValue  (facts x)
+  mapT0EventDyn i f x
+
+
+cacheTidings :: Tidings a -> Dynamic (Tidings a)
+cacheTidings  t = do
+  (e,h) <- newEvent
+  onEventIO (rumors t) h
+  v <- currentValue (facts t)
+  bt <- stepper v e
+  return $ tidings bt e
 
 mapT0EventDyn :: a -> (a -> Dynamic b) -> Tidings a -> Dynamic (Tidings b)
 mapT0EventDyn i f x = mdo
@@ -627,7 +636,7 @@ mapUIFinalizerT
      -> Tidings b
      -> UI (Tidings b1)
 mapUIFinalizerT el m inp = ui $ do
-  mapTEventDyn (\i -> evalUI el  $ m i) inp
+  mapTEventDynInterrupt (\i -> evalUI el  $ m i) inp
 
 line n =   set  text n
 

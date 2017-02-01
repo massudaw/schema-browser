@@ -317,15 +317,15 @@ data STime
   deriving(Ord,Eq,Show,Generic)
 
 data Showable
-  = SText ! Text
-  | SNumeric ! Int
-  | SBoolean ! Bool
-  | SDouble ! Double
-  | SGeo  !SGeo
-  | STime !STime
-  | SBinary ! BS.ByteString
-  | SDynamic ! (FTB Showable)
-  | SSession ! Sess.Session
+  = SText {-# UNPACK #-}! Text
+  | SNumeric {-# UNPACK #-}! Int
+  | SBoolean {-# UNPACK #-}! Bool
+  | SDouble {-# UNPACK #-}! Double
+  | SGeo  {-# UNPACK #-}!SGeo
+  | STime {-# UNPACK #-}!STime
+  | SBinary {-# UNPACK #-}! BS.ByteString
+  | SDynamic {-# UNPACK #-}! (FTB Showable)
+  | SSession {-# UNPACK #-}! Sess.Session
   deriving(Ord,Eq,Show,Generic)
 
 instance Eq Sess.Session where
@@ -458,7 +458,6 @@ instance RealFrac Showable where
 instance Integral Showable where
   toInteger (SNumeric i) = toInteger i
   quotRem (SNumeric i ) (SNumeric j ) = (\(l,m) -> (SNumeric l , SNumeric m)) $ quotRem i j
-
 
 
 instance Num Showable where
@@ -664,7 +663,6 @@ isInline _ = False
 -- Intersections and relations
 
 
-srange l m = IntervalTB1 $ Interval.interval (Interval.Finite l,True) (Interval.Finite m ,True)
 
 
 
@@ -735,7 +733,6 @@ leftItens tb@(FKT ilk rel _) = Just . maybe  emptyFKT attrOptional
   where
       emptyFKT = FKT (mapKV (mapComp (mapFAttr (const (LeftTB1 Nothing)))) ilk) rel (LeftTB1 Nothing)
 
--- mapkvlist f =  kvlist . f . unkvlist
 
 
 attrArray :: TB Identity Key b -> NonEmpty (TB Identity Key Showable) -> TB Identity Key Showable
@@ -744,9 +741,7 @@ attrArray back@(FKT _ _ _) oldItems  = (\(lc,tb) ->  FKT (kvlist [Compose $ Iden
 attrArray back@(IT _ _) oldItems  = (\tb ->  IT  (_tbattrkey back) (ArrayTB1 tb  ) )  $ (\(IT _ tb ) -> tb) <$> oldItems
 
 
-keyOptional (k,v) = (kOptional k ,LeftTB1 $ Just v)
 
-unKeyOptional (k  ,(LeftTB1 v) ) = fmap (unKOptional k,) v
 
 kOptional = Le.over keyTypes KOptional
 kArray = Le.over keyTypes KArray
@@ -783,7 +778,6 @@ recOverMAttr' tag tar  m =   foldr go m tar
     go (k:[]) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . recOverAttr tag  recv . _kvvalues ))))) )) k
       where recv = gt tag m
     go (k:xs) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . go xs . _kvvalues )))) ))) k
-
     gt (k:[]) = unTB . justError "no key" . Map.lookup k
     gt (k:xs) = gt xs . _kvvalues . unTB . snd . head .F.toList. _fkttable . unTB  . justError "no key" . Map.lookup k
 
@@ -834,8 +828,8 @@ attrT :: (a,FTB b) -> Compose Identity (TB Identity) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
 
--- notOptional :: k a -> G.TBIndex k a
-notOptionalPK m =  justError "cant be empty " . traverse unSOptional'  $ m
+
+srange l m = IntervalTB1 $ Interval.interval (Interval.Finite l,True) (Interval.Finite m ,True)
 
 txt = TB1 . SText
 int = TB1 . SNumeric

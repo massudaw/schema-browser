@@ -3,6 +3,7 @@ module SortList where
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.DragNDrop as UI
 import Graphics.UI.Threepenny.Core
+import Reactive.Threepenny
 import Data.Bifunctor
 import Data.Maybe
 import qualified Data.Map as M
