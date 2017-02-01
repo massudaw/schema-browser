@@ -109,8 +109,8 @@ instance (TF.ToField a , TF.ToField b ) => TF.ToField (Either a b ) where
   toField (Left i) = TF.toField i
 
 instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
-  toField (k ,i) = case  traceShow (k,i)  $ liftA2 (,) (ktypeRec ktypeUnLift  k ) (topconversion preunconversion k) of
-                     Just (k,(_,b)) -> toFiel k (traceShow (k,i) (b i))
+  toField (k ,i) = case   liftA2 (,) (ktypeRec ktypeUnLift  k ) (topconversion preunconversion k) of
+                     Just (k,(_,b)) -> toFiel k (b i)
                      Nothing -> toFiel k i
     where
       toFiel (KOptional k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
@@ -281,7 +281,7 @@ parseAttrJSON i v = errorWithStackTrace (show (i,v))
 
 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
--- parseAttr i | traceShow i False = undefined
+parseAttr i | traceShow i False = undefined
 parseAttr (Attr i _ ) = do
   s<- parseShowable (keyType  i) <?> show i
   return $  Attr i s

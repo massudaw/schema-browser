@@ -134,6 +134,7 @@ data DBVar2  v=
   { iniRef :: DBRef Unique v
   , idxTid :: R.Tidings (Map WherePredicate (Int,Map Int (PageTokenF  v)))
   , collectionTid :: R.Tidings (TableIndex Key v)
+  , collectionSecondaryTid :: R.Tidings [SecondaryIndex Key v]
   , collectionPatches :: R.Event [RowPatch Key v ]
   }
 
@@ -174,15 +175,15 @@ applyTableRep table (sidxs,l) (CreateRow elp ) =  Just  (didxs <$> sidxs,case G.
 
 queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[k])-> TableRep k Showable-> G.GiST (TBIndex  Showable) (TBData k Showable)
 queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (s,g) = {-traceShow (notPK ,pred,G.size g,S.size <$> mergeSIdxs,fmap (\i -> (fst i,G.size (snd i)) )s,mergeSIdxs) -}t1
-  where t1 = G.fromList' . maybe id (\pred -> L.filter (flip checkPred (pred) . fst )) notPK $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
-        searchSIdx = (\sset -> L.filter ((`S.member` sset) .snd) $ getEntries g) <$> mergeSIdxs
+  where t1 = G.fromList' . maybe id (\pred -> L.filter (flip checkPred (pred) . leafValue)) notPK $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
+        searchSIdx = (\sset -> L.filter ((`S.member` sset) .leafPred) $ getEntries g) <$> mergeSIdxs
         notPK = fmap WherePredicate $ F.foldl' (\l i -> flip G.splitIndexPKB  i =<< l ) (Just bool) (pk : fmap fst s )
         mergeSIdxs :: Maybe (S.Set (TBIndex Showable))
-        mergeSIdxs = foldl1 S.intersection<$> (nonEmpty $ catMaybes $ fmap (S.fromList . fmap fst ) . searchPK b <$> s)
+        mergeSIdxs = foldl1 S.intersection<$> (nonEmpty $ catMaybes $ fmap (S.fromList . fmap leafValue) . searchPK b <$> s)
 
 
-searchPK ::  (Show k,Eq k) => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [(a,TBIndex  Showable)]
-searchPK (WherePredicate b) (pk, g)= (\p -> G.query (mapPredicate (\i -> justError "no predicate pk " $ L.elemIndex i pk)  $ WherePredicate p) g) <$>  splitIndexPK b pk
+searchPK ::  (Show k,Eq k) => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [LeafEntry (TBIndex  Showable) a]
+searchPK (WherePredicate b) (pk, g)= (\p -> G.queryL (mapPredicate (\i -> justError "no predicate pk " $ L.elemIndex i pk)  $ WherePredicate p) g) <$>  splitIndexPK b pk
 
 
 

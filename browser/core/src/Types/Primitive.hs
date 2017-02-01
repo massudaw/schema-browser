@@ -20,6 +20,7 @@ import Data.Ord
 import Data.Vector (Vector)
 import Control.DeepSeq
 import qualified NonEmpty as Non
+
 import NonEmpty (NonEmpty(..))
 import Control.Lens.TH
 import qualified Control.Lens as Le

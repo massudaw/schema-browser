@@ -459,8 +459,6 @@ firstTB f (FKT k  m  i) = FKT  (mapBothKV (f) (mapComp (firstTB f)) k)  (fmap f 
 data FTB a
   = TB1 ! a
   | LeftTB1   ! (Maybe (FTB a))
-  | SerialTB1 ! (Maybe (FTB a))
-  | DelayedTB1 ! (Maybe (FTB a))
   | ArrayTB1  ! (NonEmpty (FTB a))
   | IntervalTB1 ! (Interval.Interval (FTB a))
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable,Generic)
@@ -487,9 +485,6 @@ instance Applicative FTB where
 
 
 type FTB1 f k a = FTB (KVMetadata k, Compose f (KV (Compose f (TB f))) k a)
-
-
-
 
 
 

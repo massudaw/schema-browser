@@ -131,8 +131,8 @@ mapSelector inf selected calendarT sel (cposE,positionT) = do
           boundSel (TB1 (SText field)) sel = (\(G.FTBNode i) -> i) . G.bound <$> indexFieldRec (liftAccess inf (tableName (selected ^._2 )) $ indexer field)   sel
           boundsSel :: Tidings (Maybe (Interval Showable ))
           boundsSel = join . traceShowId . fmap (\j -> fmap ((\(G.FTBNode i) -> i).G.union) . fmap S.fromList  . traceShowId . nonEmpty . fmap leftEntry .  catMaybes .  fmap (flip boundSel  j) . F.toList  $  fields) <$> sel
-          leftEntry :: Interval Showable -> Either (G.Node (FTB Showable)) (FTB Showable)
-          leftEntry i  = Left (G.FTBNode i)
+          leftEntry :: Interval Showable -> G.Node (FTB Showable)
+          leftEntry i  = (G.FTBNode i)
         onEvent cposE (liftIO . hgselg)
         p <- currentValue (facts boundsSel)
         liftIO $print p

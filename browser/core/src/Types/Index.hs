@@ -218,8 +218,6 @@ splitPred (PrimColl (prod ,Left (a@(TB1 _ ) ,op))) b@(TB1  _ ) = if a  == b then
 splitPred (PrimColl (prod ,Left ((IntervalTB1 a ) ,op))) i@(TB1  _ ) = (\i -> if F.length i == 1 then head . F.toList $ i else OrColl (F.toList i) ). fmap (PrimColl. (prod,). Left . (,op).IntervalTB1) <$> Interval.split i a
 splitPred (PrimColl (prod ,Left (i@(IntervalTB1 u) ,op))) (IntervalTB1 a ) =(\i -> if F.length i == 1 then head . F.toList $ i else OrColl (F.toList i) ). fmap (PrimColl .(prod,). Left . (,op).IntervalTB1) <$>  Interval.difference u a
 splitPred (PrimColl (prod ,Left ((ArrayTB1 l ) ,Flip (AnyOp op)))) a  = OrColl <$> nonEmpty (catMaybes $ fmap (\i -> splitPred (PrimColl (prod,Left (i,op))) a) $ F.toList l)
--- splitPred (AndColl l) e = fmap AndColl $ nonEmpty $ catMaybes $ (flip splitPred e)<$> l
--- splitPred (OrColl l) e = fmap OrColl $ nonEmpty $ catMaybes $ (flip splitPred e) <$> l
 splitPred p@(PrimColl (prod,Right i)) _ =  Just p
 splitPred a e = errorWithStackTrace (show (a,e))
 
@@ -300,7 +298,7 @@ instance (Predicates (TBIndex  a )  ) => Monoid (G.GiST (TBIndex  a)  b) where
   mappend i j
     | G.size i < G.size j = ins  j (getEntries i )
     | otherwise  = ins  i (getEntries j )
-    where ins = foldl' (\j i -> G.insert i indexParam j)
+    where ins = foldl' (\j i -> G.insertL i indexParam j)
 
 
 
@@ -327,7 +325,7 @@ indexPred (n@(Nested k nt ) ,eq) r
   where
     recPred (TB1 i ) = i
     recPred (LeftTB1 i) = maybe False recPred i
-    recPred (ArrayTB1 i) = any recPred (F.toList i)
+    recPred (ArrayTB1 i) = any recPred i
     recPred (DelayedTB1 i) = maybe False recPred i
     recPred (SerialTB1 i) = maybe False recPred i
     recPred i = errorWithStackTrace (show i)
@@ -356,7 +354,7 @@ indexPred i v= errorWithStackTrace (show (i,v))
 
 queryCheck :: (Show k,Ord k) => (WherePredicateK k ,[k])-> G.GiST (TBIndex Showable) (TBData k Showable) -> G.GiST (TBIndex  Showable) (TBData k Showable)
 queryCheck pred@(WherePredicate b ,pk) = t1
-  where t1 = fromList' . maybe id (\pred -> L.filter (flip checkPred (WherePredicate pred) . fst )) notPK . maybe G.getEntries (\p -> G.query (mapPredicate (\i -> justError ("no predicate " ++ show (i,pk)) $ L.elemIndex i pk)  $ WherePredicate p)) (splitIndexPK b pk)
+  where t1 = fromList' . maybe id (\pred -> L.filter (flip checkPred (WherePredicate pred) . leafValue )) notPK . maybe G.getEntries (\p -> G.queryL (mapPredicate (\i -> justError ("no predicate " ++ show (i,pk)) $ L.elemIndex i pk)  $ WherePredicate p)) (splitIndexPK b pk)
         notPK = splitIndexPKB b pk
 
 
@@ -385,25 +383,31 @@ class Range v where
 
 instance (Ord v ,Range v) => Range (FTB v ) where
   pureR (TB1 i)  =  fmap TB1 $ pureR i
-  pureR (ArrayTB1 is) = foldl1 appendRI (fmap pureR is)
+  pureR (ArrayTB1 (is Non.:| xs)) = F.foldl' appendRI  (pureR is) (fmap pureR xs)
   pureR (IntervalTB1 is) =  is
   pureR (LeftTB1 is) =  maybe Interval.empty  pureR is
   pureR (SerialTB1 is) =  maybe Interval.empty  pureR is
   pureR (DelayedTB1 is) =  maybe Interval.empty  pureR is
+  {-# INLINE pureR #-}
   appendR (TB1 i ) (TB1 j) = fmap TB1 $ appendR i j
+  {-# INLINE appendR#-}
 
 
 instance Range Showable where
   pureR  i = i `cinterval` i
-  appendR (SGeo (SPosition i)) (SGeo (SPosition j)) =  fmap (SGeo . SPosition )  $ mergeP i j
+  {-# INLINE pureR #-}
+  appendR !(SGeo (SPosition i)) !(SGeo (SPosition j)) =  fmap (SGeo . SPosition )  $ mergeP i j
     where
-      mergeP (Position2D (i,j)) (Position2D (l,m))=  Position2D (min i l , min j m) `cinterval` Position2D (max i l , max j m)
+      mergeP !(Position2D (i,j)) !(Position2D (l,m))=  Position2D (min i l , min j m) `cinterval` Position2D (max i l , max j m)
       mergeP (Position(i,j,k)) (Position (l,m,n))=  Position (min i l , min j m,min k n) `cinterval` Position (max i l , max j m,max k n)
+      {-# INLINE mergeP #-}
   appendR i j = min i j  `cinterval` max i j
+  {-# INLINE appendR #-}
 
 
 appendRI :: (Ord v ,Range v) => Interval v -> Interval v -> Interval v
-appendRI i  j  = maybe (min (lowerBound' j) (lowerBound' i )) lowerBound' (liftA2 appendR (unFin $ fst $ lowerBound' i ) (unFin $ fst $ lowerBound' j)) `interval`  (maybe (max (upperBound' i) (upperBound' j))upperBound' (liftA2 appendR (unFin $ fst $ upperBound' i ) (unFin $ fst $ upperBound' j)) )
+appendRI ! i  ! j  = maybe (min (lowerBound' j) (lowerBound' i )) lowerBound' (liftA2 appendR (unFin $ fst $ lowerBound' i ) (unFin $ fst $ lowerBound' j)) `interval`  (maybe (max (upperBound' i) (upperBound' j))upperBound' (liftA2 appendR (unFin $ fst $ upperBound' i ) (unFin $ fst $ upperBound' j)) )
+{-# INLINE appendRI #-}
 
 instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent v),Ord (Tangent v),Ord v,Show v , Affine v ) => Predicates (FTB v) where
   data Node (FTB v) = FTBNode (Interval.Interval v) deriving (Eq,Ord,Show)
@@ -449,7 +453,10 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
           ma (IntervalTB1 j ,Flip Contains) (i)  = fmap unTB1 j `Interval.isSubsetOf` i
           ma (IntervalTB1 j ,IntersectOp) (i)  = not $ Interval.null $ fmap unTB1 j `Interval.intersection` i
           ma (IntervalTB1 j ,_) (i)  = not $ Interval.null $ fmap unTB1 j `Interval.intersection` i
+          ma (j ,IntersectOp ) (i)  = not $ Interval.null $ unFTB (bound j) `Interval.intersection` i
+          ma (j ,Flip o ) (i)  = ma (j,o) i
           ma  i j =errorWithStackTrace (show (i,j))
+          unFTB (FTBNode i ) = i
       mal (Right v) j = ma v j
         where
           ma (Not i) j = not $ ma i   j
@@ -528,15 +535,15 @@ fromList pred = foldl'  acc G.empty
     acc !m v = G.insert (v,pred v ) indexParam m
 
 -- Higher Level operations
-fromList' :: Predicates p => [(a ,p)] -> GiST p a
+fromList' :: Predicates p => [LeafEntry p a ] -> GiST p a
 fromList' = foldl'  acc G.empty
   where
-    acc !m v = G.insert v indexParam m
+    acc !m v = G.insertL v indexParam m
 
 lookup pk  = safeHead . G.search pk
 
 toList = getData
 
-filter f = foldl' (\m i -> G.insert i indexParam m) G.empty  . L.filter (f .fst ) . getEntries
+filter f = foldl' (\m i -> G.insertL i indexParam m) G.empty  . L.filter (f .leafValue) . getEntries
 filter' f = foldl' (\m i -> G.insert i indexParam m) G.empty  . L.filter (f .fst )
 

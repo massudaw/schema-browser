@@ -125,7 +125,7 @@ input smvar = do
   masterdbref <- prerefTable meta (lookTable meta "master_modification_table")
   ((dbref ,(_,ini)),_)<- runDynamic $ transactionNoLog meta $ selectFrom "master_modification_table" Nothing Nothing [] (WherePredicate $AndColl[])
   let dat = G.getEntries ini
-      latest = maybe (G.Idex [TB1 (SNumeric 0)]) (maximum) $ nonEmpty (fmap snd dat)
+      latest = maybe (G.Idex [TB1 (SNumeric 0)]) (maximum) $ nonEmpty (fmap G.leafPred dat)
   q <- atomically $ dupTChan(patchVar (iniRef dbref))
   return (latest , Input $ do
       i <-readTChan q

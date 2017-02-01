@@ -187,6 +187,7 @@ isPrimReflexive (AtomicPrim (PInt i)) (AtomicPrim (PInt j)) = True
 isPrimReflexive a b = False
 
 isPairReflexive :: (Show b , Eq b) => KType (Prim KPrim b ) -> BinaryOperator -> KType (Prim KPrim b) -> Bool
+isPairReflexive i   IntersectOp j = False
 isPairReflexive (Primitive i ) op (KInterval (Primitive j)) | i == j = False
 isPairReflexive (Primitive j) op  (KArray (Primitive i) )  | i == j = False
 isPairReflexive (KInterval i) op (KInterval j)
@@ -200,14 +201,15 @@ isPairReflexive i op (KSerial j) = isPairReflexive i op j
 isPairReflexive (KArray i )  op  (KArray j)
   | i == j  && op == Contains = False
   | op == Equals = isPairReflexive i op j
-isPairReflexive (KArray i )  op  j = True
+isPairReflexive (KArray i )  (AnyOp op ) j = isPairReflexive i op j
+isPairReflexive i   (Flip IntersectOp) j = False
 isPairReflexive j op (KArray i )  = False
 isPairReflexive i op  j = errorWithStackTrace $ "isPairReflexive " <> show i <> " - " <> show op <> " - " <> show  j
 
 filterReflexive ks = L.filter (reflexiveRel ks) ks
 
 reflexiveRel ks
-  | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
+--  | any (isArray . keyType . _relOrigin) ks =  (isArray . keyType . _relOrigin)
   | all (isJust . keyStatic . _relOrigin) ks = ( isJust . keyStatic. _relOrigin)
   | any (isJust . keyStatic . _relOrigin) ks = ( isNothing . keyStatic. _relOrigin)
   | any (\j -> not $ isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) ( keyType (_relTarget j) )) ks =  const False
@@ -544,23 +546,38 @@ backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  c
 
 tbpred un  = G.notOptional . G.getUnique un
 
-searchGist ::
-  (Functor t,  Show a ,Show a1,Ord k,  Show k,
-   Foldable t, G.Predicates (G.TBIndex  a1)) =>
+tbpredFK
+  ::  (Foldable t, Show k,Functor t ,Ord k)
+  => M.Map k k
+  -> [k]
+  -> [k]
+  -> t (TB Identity k a1) ->  Maybe (G.TBIndex a1)
+tbpredFK rel un  pk2 v = tbjust  .  Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  rel ))).  filter ((`S.member` S.fromList un). fst ) . concat .fmap aattri $ v
+        where
+          flipTable = M.fromList . fmap swap .M.toList
+          tbjust = fmap (G.Idex . fmap snd.L.sortBy (comparing ((`L.elemIndex` pk2).fst)))
+
+{-searchGist ::
+  (Functor t,  Ord a1,Ord (G.Tangent a1),G.Predicates a1,Show a ,Show a1,Ord k,  Show k,
+   Foldable t, G.Predicates (FTB a1) ,G.Predicates (G.TBIndex  a1)) =>
   M.Map k k
   -> KVMetadata k
   -> G.GiST (G.TBIndex  a1) a
-  -> Maybe (t (TB Data.Functor.Identity.Identity k a1))
-  -> Maybe a
-searchGist relTable m gist =  join . fmap (\k -> lookGist (S.fromList $fmap (\k-> justError (" no pk " <> show (k,relTable)) $ M.lookup k relTable) (_kvpk m) ) k  gist)
+  -> [([k],G.GiST (G.TBIndex  a1) (G.TBIndex a1))]
+  -> t (TB Identity k a1)
+  -> Maybe a-}
+-- searchGist  i j k l m  | traceShow (i, fmap fst l,m) False = undefined
+searchGist relTable m gist sgist i =  join $ foldr (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (allMaybes $ fmap (\k->  M.lookup k relTable) (_kvpk m) ))  (((\(un,g) -> lookSIdx  un i g) <$> sgist) )
   where
-    lookGist un pk  v =  join res
-      where res = flip G.lookup v <$> tbpred un pk
+    lookGist rel un pk  v =  join res
+      where res = flip G.lookup v <$> tbpredFK rel un (_kvpk m) pk
 
-    tbpred un  = tbjust  .  Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  relTable ))).  filter ((`S.member` un). fst ) . concat .fmap aattri
-        where
-          flipTable = M.fromList . fmap swap .M.toList
-          tbjust = fmap (G.Idex . fmap snd.L.sortBy (comparing ((`L.elemIndex` _kvpk m).fst)))
+    lookSGist sidsx rel un pk  v =  join res
+      where res = flip G.lookup v <$> tbpredFK rel un sidsx pk
+
+    lookSIdx un pk sg = join . fmap (\i -> G.lookup i gist ) . (\i -> lookSGist  un relTable i  pk sg) <$> traceShowId (allMaybes $  fmap (\k -> M.lookup k relTable ) un  )
+
+
 
 joinRel :: (Show k ,Ord k ,Ord a ,Show a,G.Predicates (G.TBIndex a)) => KVMetadata k ->  [(Rel k ,FTB a)] -> G.GiST (G.TBIndex a) (TBData k a) -> FTB (TBData k a)
 joinRel tb ref table

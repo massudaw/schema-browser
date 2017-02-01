@@ -120,7 +120,7 @@ refTable  inf table  = do
   let ref = justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
   idxTds<- convertChanStepper  inf (mapTableK keyFastUnique table) ref
   (dbTds ,dbEvs)<- convertChanTidings inf (mapTableK keyFastUnique table) mempty  never ref
-  return (DBVar2 ref idxTds  (fmap snd dbTds) dbEvs)
+  return (DBVar2 ref idxTds  (fmap snd dbTds) (fmap fst dbTds ) dbEvs)
 
 tbpredM un  = G.notOptional . G.getUnique un
 
@@ -342,9 +342,9 @@ tableLoader table  page size presort fixed
               res = liftTable' inf (tableName table ) .mapKey' keyValue $i
         o = foldr mergeDBRef  (M.empty,G.empty) (fmap (createUn (rawPK table).fmap projunion.G.toList) . snd <$>i )
     modify (M.insert (table,fixed) ( mapKey' keyFastUnique <$> snd o ))
-    let mergeDBRefT  (ref1,j ,i,k) (ref2,m ,l,n) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l ,unionWith mappend k n)
-        dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty,never) (Le.over Le._3 (fmap (createUn (rawPK table).fmap projunion.G.toList)) .(\(DBVar2 e i j k ) -> ([e],i,j,k)). fst <$>i )
-        dbvar (l,i,j,k) = DBVar2 (L.head l) i j k
+    let mergeDBRefT  (ref1,j ,i,o,k) (ref2,m ,l,p,n) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l , liftA2 (zipWith (\(i,j) (l,m) -> (i,j<>m))) o p ,unionWith mappend k n)
+        dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty, pure ((,G.empty)<$> _rawIndexes table) ,never) (Le.over Le._3 (fmap (createUn (rawPK table).fmap projunion.G.toList)) .(\(DBVar2 e i j l k ) -> ([e],i,j,l,k)). fst <$>i )
+        dbvar (l,i,j,p,k) = DBVar2 (L.head l) i j p k
 
     lf <- liftIO getCurrentTime
     liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
@@ -503,7 +503,7 @@ pageTable flag method table page size presort fixed = do
         return (vpt,evpt)
 
     idxTds <- lift $ convertChanStepper0 inf (tableU) fixedmap fixedChan
-    return (DBVar2 dbvar idxTds (fmap snd vpt) evpt ,first (M.mapKeys (mapPredicate (recoverKey inf))).fmap (fmap (mapKey' (recoverKey inf)) )$iniFil)
+    return (DBVar2 dbvar idxTds (fmap snd vpt) (fmap fst vpt) evpt ,first (M.mapKeys (mapPredicate (recoverKey inf))).fmap (fmap (mapKey' (recoverKey inf)) )$iniFil)
 
 readIndex
   :: (Ord k )
@@ -854,7 +854,7 @@ loadFK  _ _ = return Nothing
 
 refTables' inf table page pred = do
         (ref,res)  <-  transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
-        return (idxTid ref,res,collectionTid ref,undefined,patchVar $ iniRef ref)
+        return (idxTid ref,res,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
 
 
 refTables inf table = refTables' inf table Nothing mempty

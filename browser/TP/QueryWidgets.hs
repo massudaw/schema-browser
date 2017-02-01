@@ -1235,7 +1235,7 @@ fkUITableDiff
   -- Static Information about relation
   -> Column CoreKey ()
   -> UI (TrivialWidget(Editor (Index (Column CoreKey Showable))))
-fkUITableDiff inf constr reftb@(vpt,_,gist,_,_) plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = logTime ("fk " <> (show $ keyattri tb)) $ mdo
+fkUITableDiff inf constr reftb@(vpt,_,gist,sgist,_) plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = logTime ("fk " <> (show $ keyattri tb)) $ mdo
       let
         relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
         ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$>  plmods)
@@ -1258,12 +1258,13 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,_,_) plmods nonInjRefs   oldItems  tb
         sortList =  sorting' <$> pure (fmap ((,True)._relTarget) rel)
       let
         vv :: Tidings (Maybe [TB Identity CoreKey Showable])
-        vv =   join .   fmap (\i -> if L.length i == L.length rel then Just i else Nothing) .fmap L.nub <$>  liftA2 (<>) iold2  ftdi2
+        vv =   join .   fmap (\i -> if  L.length i == L.length rel then Just i else Nothing) .fmap L.nub <$>  liftA2 (<>) iold2  ftdi2
       cvres <- currentValue (facts vv)
       filterInp <- UI.input # set UI.class_ "col-xs-3"
       filterInpE <- UI.valueChange filterInp
       filterInpBh <- ui $ stepper "" filterInpE
       iniGist <- currentValue (facts gist)
+      iniSgist <- currentValue (facts sgist)
 
       itemListEl <- UI.select #  set UI.class_ "col-xs-5 fixed-label" # set UI.size "21" # set UI.style ([("position","absolute"),("z-index","999"),("top","22px")] <> noneShow False)
 
@@ -1272,8 +1273,9 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,_,_) plmods nonInjRefs   oldItems  tb
           pageSize = 20
           lengthPage fixmap = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
             where (s,_) = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
-          cv = searchGist relTable m iniGist cvres
-          tdi = searchGist relTable m <$> gist <*> vv
+          cv = join $ searchGist relTable m iniGist iniSgist <$>cvres
+
+      let
           filterInpT = tidings filterInpBh filterInpE
           filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.pack . showFKText
           predicatefk o = (WherePredicate $AndColl $ catMaybes $ fmap ((\(Attr k v) -> PrimColl . (keyRef [k], ) . Left . (,Flip $ _relOperator $ justError "no rel" $ L.find (\i ->_relTarget i == k) rel) <$> unSOptional' v). replaceKey)  o)
@@ -1288,6 +1290,7 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,_,_) plmods nonInjRefs   oldItems  tb
 
         offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i j ) i )<$>  (facts res3) <#> (fmap (unTB1._fkttable )<$> oldItems)) wheel  (lengthPage <$> vpt)
         return (offset, res3)
+      tdi <- ui$ mapTEventDyn return ((\ g s v -> join $ searchGist relTable m  g s  <$> v) <$> gist  <*> sgist <*> vv)
       -- Load offseted items
       ui $onEventDyn (filterE (isJust . fst) $ (,) <$> facts iold2 <@> rumors (triding offset)) $ (\(o,i) ->  traverse (\o -> do
         transactionNoLog inf $ selectFrom (_kvname m) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (predicatefk  o)) o  )

@@ -283,7 +283,7 @@ createTableRefs inf i = do
       move (FKInlineTable _) = return Nothing
       move i = return Nothing
       sidx :: [SecondaryIndex KeyUnique Showable]
-      sidx = fmap (\un-> (fmap keyFastUnique un ,G.fromList' (fmap (\(i,j) -> (G.getUnique (fmap keyFastUnique un ) i,j)) $ G.getEntries v))   ) (L.delete (rawPK i) $ _rawIndexes i )
+      sidx = fmap (\un-> (fmap keyFastUnique un ,G.fromList' (fmap (\(i,n,j) -> (G.getUnique (fmap keyFastUnique un ) i,n,j)) $ G.getEntries v))   ) (L.delete (rawPK i) $ _rawIndexes i )
 
     nestedFKS <-  fmap catMaybes $ traverse move $   pathRel <$> F.toList (rawFKS i)
     newNestedFKS <- liftIO . atomically$ traverse (traverse (cloneTChan.patchVar)) nestedFKS

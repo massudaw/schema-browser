@@ -80,19 +80,23 @@ postgresLiftPrimConv' =
    M.fromList [((Primitive (AtomicPrim (PGeom $ PBounding 3)), KInterval (Primitive (AtomicPrim (PGeom $ PPosition 3))) )
                , ((\(TB1 (SGeo (SBounding (Bounding i)) )) -> IntervalTB1 (fmap   (pos ) i)  )
                  , (\(IntervalTB1 i) -> TB1 $ SGeo $ SBounding $ Bounding $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
-             ,((Primitive (AtomicPrim (PGeom $ PBounding 2)), KInterval (Primitive (AtomicPrim (PGeom $ PPosition 2))) )
-              , ((\(TB1 (SGeo (SBounding (Bounding i)) )) -> IntervalTB1 (fmap   (pos ) i)  )
-                , (\(IntervalTB1 i) -> TB1 $ SGeo $ SBounding $ Bounding $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
+
+                ,((Primitive (AtomicPrim (PGeom $ PBounding 2)), KInterval (Primitive (AtomicPrim (PGeom $ PPosition 2))) )
+                 , ((\(TB1 (SGeo (SBounding (Bounding i)) )) -> IntervalTB1 (fmap   (pos ) i)  )
+                   , (\(IntervalTB1 i) -> TB1 $ SGeo $ SBounding $ Bounding $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
 
                 ,((Primitive (AtomicPrim (PGeom $ PLineString 2)), KArray (Primitive (AtomicPrim (PGeom $ PPosition 2))) )
                  , ((\(TB1 (SGeo (SLineString (LineString i)) )) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (pos ) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SLineString $ LineString $ V.fromList  $ F.toList $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
+
                 ,((Primitive (AtomicPrim (PGeom $ (PPolygon 2))), KArray (Primitive (AtomicPrim (PGeom $ PLineString 2))) )
                  , ((\(TB1 (SGeo (SPolygon i j ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1. SGeo .SLineString) (i:j)))
                    , (\(ArrayTB1 i) -> TB1 $ (\(i:j) -> SGeo $ SPolygon i j) $ F.toList $ (fmap (\(TB1 (SGeo (SLineString i))) -> i)) i) ))
+
                 ,((Primitive (AtomicPrim (PGeom $ (MultiGeom (PPolygon 2)))), KArray (Primitive (AtomicPrim (PGeom $ PPolygon 2))) )
                  , ((\(TB1 (SGeo (SMultiGeom i  ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1 . SGeo) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SMultiGeom   $  F.toList $  fmap ((\(SGeo i ) -> i). unTB1) i) ))
+
                 ,((Primitive (AtomicPrim (PGeom $ PLineString 3)), KArray (Primitive (AtomicPrim (PGeom $ PPosition 3))) )
                  , ((\(TB1 (SGeo (SLineString (LineString i)) )) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (pos ) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SLineString $ LineString $ V.fromList  $ F.toList $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))]
