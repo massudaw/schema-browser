@@ -104,17 +104,18 @@ prerefTable  inf table  = do
 
 
 refTable :: InformationSchema -> Table -> Dynamic DBVar
-  {-refTable  inf (Union table origin )  = do
+refTable  inf (Union table origin )  = do
   refs <- mapM (refTable inf ) origin
-  let mergeDBRefT  (ref1,j ,i) (ref2,m ,l) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l )
-      dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty) (Le.over Le._3 (fmap (createUn (rawPK table).fmap projunion.G.toList)) .(\(DBVar2 e i j) -> ([e],i,j)) <$>refs )
-      dbvar (l,i,j) = DBVar2 (L.head l) i j
+
+  let mergeDBRefT  (ref1,j ,i,o,k) (ref2,m ,l,p,n) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l , liftA2 (zipWith (\(i,j) (l,m) -> (i,j<>m))) o p ,unionWith mappend k n)
+      dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty, pure ((,G.empty)<$> _rawIndexes table) ,never) (Le.over Le._3 (fmap (createUn (rawPK table).fmap projunion.G.toList)) .(\(DBVar2 e i j l k ) -> ([e],i,j,l,k)) <$>refs )
+      dbvar (l,i,j,p,k) = DBVar2 (L.head l) i j p k
       projunion :: TBData Key Showable -> TBData Key Showable
       projunion  i = res
             where
               res = liftTable' inf (tableName table ) .mapKey' keyValue $i
 
-  return $ dbvar dbvarMerge-}
+  return $ dbvar dbvarMerge
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
   let ref = justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
@@ -815,7 +816,7 @@ tbEdit g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) =
    case (a2,t2) of
         (TB1 o@(om,ol),TB1 t@(m,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( kvlist $ fmap _tb $ justError " no back path" $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb)) rel2 tb ) . TB1  <$> fullDiffEdit o t)
+           local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( kvlist $ fmap _tb $ justError (" no back path tbedit" ++ show relTable) $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb)) rel2 tb ) . TB1  <$> fullDiffEdit o t)
         (LeftTB1  _ ,LeftTB1 _) ->
            maybe (return f ) (fmap attrOptional) $ liftA2 tbEdit (unLeftItens g) (unLeftItens f)
         (ArrayTB1 o,ArrayTB1 l) ->
@@ -831,7 +832,7 @@ tbInsertEdit f@(FKT pk rel2  t2) =
    case t2 of
         t@(TB1 (m,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( kvlist $ fmap _tb $ justError " no back path" $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb)) rel2 tb ) <$> fullInsert  t)
+           local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ( kvlist $ fmap _tb $ justError (" no back path tbedit " ++ show relTable)$ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb)) rel2 tb ) <$> fullInsert  t)
         LeftTB1 i ->
            maybe (return f ) ((fmap attrOptional) . tbInsertEdit ) (unLeftItens f)
         ArrayTB1 l -> do

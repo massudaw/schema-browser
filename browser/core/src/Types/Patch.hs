@@ -106,7 +106,7 @@ data RowPatch k a
 instance (NFData k ,NFData a )=> NFData (RowPatch k a)
 instance (Binary k ,Binary a) => Binary (RowPatch k a)
 
-type TBIdx k a = (KVMetadata k, G.TBIndex   a ,[PathAttr k a])
+type TBIdx k a = (KVMetadata k, G.TBIndex a ,[PathAttr k a])
 patchEditor i
   | L.length i == 0 = Keep
   | L.length i == 1 = maybe Keep Diff $ safeHead i
@@ -145,12 +145,12 @@ unIndexItensP ix o =  join . fmap (unIndexP (ix+ o) )
   where
     unIndexF o (PIdx ix v) = if o == ix  then v else Nothing
     unIndexF o (PatchSet l ) =  PatchSet . Non.fromList <$> nonEmpty ( catMaybes (unIndexF o <$> F.toList l))
-    unIndexF o i = errorWithStackTrace (show (o,i))
+    unIndexF o i = errorWithStackTrace ("unIndexF error" ++ show (o,i))
     unIndexP :: (Show (KType k),Show a) => Int -> PathAttr (FKey (KType k)) a -> Maybe (PathAttr (FKey (KType k) ) a )
     unIndexP o (PAttr  k v) =  PAttr k <$> unIndexF o v
     unIndexP o (PInline k v) = PInline k <$> unIndexF o v
     unIndexP o (PFK rel els  v) = (\mi li ->  PFK  (Le.over relOri (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi  li) <$> (traverse (unIndexP o) els) <*> unIndexF o v
-    unIndexP o i = errorWithStackTrace (show (o,i))
+    unIndexP o i = errorWithStackTrace ("unIndexP error" ++ show (o,i))
 
 unSOptionalP (PatchSet l ) =  PatchSet . Non.fromList <$> nonEmpty ( catMaybes (unSOptionalP <$> F.toList l))
 unSOptionalP (POpt i ) = i
@@ -373,8 +373,8 @@ compactPatches i = patchSet . fmap recover .  groupSplit2 projectors pathProj . 
     projectors (PInter b _  ) = PIdInter b
     projectors (PAtom _  ) =  PIdAtom
     -- projectors i = errorWithStackTrace (show i)
-    recover (PIdIdx i, j ) = PIdx i  (compact j)
-    recover (PIdOpt , j ) = POpt  (compact j)
+    recover (PIdIdx i, j ) = PIdx i (compact j)
+    recover (PIdOpt , j ) = POpt (compact j)
     recover (PIdInter i ,  j ) = justError "no patch inter" $ patchSet (catMaybes j)
     recover (PIdAtom , j ) = justError "can't be empty " $ patchSet (catMaybes j)
     -- recover i = errorWithStackTrace (show i)

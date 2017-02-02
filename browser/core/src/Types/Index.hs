@@ -430,7 +430,6 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
         cons (LeftTB1 i) j = fromMaybe True $ (flip cons j ) <$>  i
         cons i (LeftTB1 j) = fromMaybe True $(cons i ) <$>  j
         cons i j  = errorWithStackTrace (show ("rr",i,j))
-
   match i (Left (FTBNode j)) = mal i  j
     where
       mal (Left (v))  j  = ma  v  j
@@ -438,7 +437,6 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
           ma ((TB1 i) ,op)  j  = i `Interval.member` j
           ma (LeftTB1 j ,v)   i   = fromMaybe False ((\a -> ma (a,v) i) <$> j)
           ma (ArrayTB1 i,Flip (AnyOp o))  j  = F.any (\i -> ma (i,o)  j ) i
-          -- ma (IntervalTB1 i ,Contains) j = j `Interval.isSubsetOf` fmap unTB1 i
           ma (IntervalTB1 j ,Flip Contains) (i)  = fmap unTB1 j `Interval.isSubsetOf` i
           ma (IntervalTB1 j ,IntersectOp) (i)  = not $ Interval.null $ fmap unTB1 j `Interval.intersection` i
           ma (IntervalTB1 j ,_) (i)  = not $ Interval.null $ fmap unTB1 j `Interval.intersection` i

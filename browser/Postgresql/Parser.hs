@@ -113,6 +113,7 @@ instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
                      Nothing -> toFiel k i
     where
       toFiel (KOptional k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
+      toFiel (KSerial k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
       toFiel (KDelayed k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel k) i
       toFiel (KArray k ) (ArrayTB1 is ) = TF.Many $[TF.toField $ PGTypes.PGArray   (F.toList $ fmap unTB1 is)  ] ++ maybeToList ( TF.Plain .fromByteString . BS.pack . T.unpack . (" :: "<>) <$> ( renderType (KArray k)))
       toFiel (KInterval k) (IntervalTB1 is ) = TF.Many [TF.Plain ( fromByteString $ BS.pack $ T.unpack $justError ("no array" <> show k) $ renderType (KInterval k) ) ,TF.Plain "(" ,TF.toField  (fmap unTB1 $ unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (fmap unTB1 $ unFinite $ Interval.upperBound is) ,TF.Plain ")"]

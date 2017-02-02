@@ -754,33 +754,9 @@ dynHandlerPatch hand val ix (l,old)= do
       inferEv = flip infer <$> valix <*> tidings bend ev
 
     inferIni <- currentValue (facts inferEv )
-    let diffInfer = (diffEvent (facts inferEv) (rumors inferEv))
-    inferBh <- ui$ stepper inferIni diffInfer
-    return $ (l <> [TrivialWidget (tidings bend ev) el], tidings inferBh diffInfer)
+    --let diffInfer = (diffEvent (facts inferEv) (rumors inferEv))
+    return $ (l <> [TrivialWidget (tidings bend ev) el], inferEv)
 
-
-dynHandler hand val ix (l,old)= do
-    (ev,h) <- ui $ newEvent
-    let valix = val ix
-    el <- UI.div
-    let idyn True  =  do
-          tds <- hand ix valix
-          ini <- currentValue (facts $ triding tds)
-          liftIO $ h ini
-          fin <- ui $ onEventDyn (rumors $ triding tds) (liftIO . h)
-          return (getElement tds)
-        idyn False = do
-          liftIO $ h Nothing
-          UI.div
-    els <- mapUIFinalizerT el idyn old
-    element el # sink children (pure <$>  facts els)
-    iniv <- currentValue (facts $ valix)
-    bend <- ui $ stepper iniv ev
-    let notProp = filterE isNothing $ notdiffEvent bend  (ev)
-    bend2 <- ui $ stepper iniv  (diffEvent bend  ev)
-    bendn <- ui $ stepper (isJust iniv ) (diffEvent (fmap isJust bend ) (fmap isJust ev))
-    bendn2 <- ui $ stepper (isJust iniv ) (diffEvent bendn  (fmap isJust ev))
-    return $ (l <> [TrivialWidget (tidings bend2 (diffEvent bend  ev)) el], tidings bendn2  (diffEvent bendn  (fmap isJust ev)))
 
 
 logTime s f = do
@@ -808,7 +784,7 @@ reduceDiffListFK o i
          treatA a (Diff (PFK _ []  v)) = Nothing
          treatA a Delete =  Just $ Right $ (PIdx a Nothing,PIdx a Nothing)
          treatA _ Keep = Nothing
-         treatA a p = errorWithStackTrace (show (a,p))
+         treatA a p = errorWithStackTrace ("reduceDiffList " ++ show (a,p))
          res = lefts diffs ++ reverse (rights diffs)
 
 
@@ -832,7 +808,7 @@ buildUIDiff km i  plug tdi = go i plug tdi
   where
     go :: KType (Prim KPrim (Text,Text))-> [Tidings (Maybe (Index (FTB Showable)))]-> Tidings (Maybe (FTB Showable)) -> UI (TrivialWidget (Editor (Index (FTB Showable))))
     go i plug tdi = case i of
-         (KArray ti ) -> mdo
+         KArray ti  -> mdo
             offsetDiv  <- UI.div
             -- let wheel = fmap negate $ mousewheel offsetDiv
             TrivialWidget offsetT offset <- offsetField (pure 0)  never (maybe 0 (Non.length .unArray) <$> (recoverEditChange <$> tdi <*> bres))
@@ -859,7 +835,7 @@ buildUIDiff km i  plug tdi = go i plug tdi
             element offsetDiv # set children (fmap getElement widgets)
             composed <- UI.span # set children [offset , offsetDiv]
             return  $ TrivialWidget  bres composed
-         (KOptional ti) -> do
+         KOptional ti -> do
            let pretdi = ( join . fmap unSOptional' <$> tdi)
                plugtdi = fmap (join . fmap (\(POpt i ) -> i) )<$> plug
            tdnew <- go ti  plugtdi pretdi
@@ -867,7 +843,7 @@ buildUIDiff km i  plug tdi = go i plug tdi
            -- Delete equals create
 
            return $ TrivialWidget ( reduceOptional <$> triding tdnew  ) retUI
-         (KSerial ti) -> do
+         KSerial ti -> do
            let pretdi = ( join . fmap unSSerial <$> tdi)
                plugtdi = fmap (join . fmap (\(POpt i ) -> i) )<$> plug
            tdnew <- go ti  plugtdi pretdi
@@ -880,7 +856,7 @@ buildUIDiff km i  plug tdi = go i plug tdi
                test (Diff i ) _ = Diff (POpt (Just  i))
 
            return $ TrivialWidget ( test <$> triding tdnew <*> tdi) retUI
-         (KDelayed ti) -> do
+         KDelayed ti -> do
            let pretdi = ( join . fmap unSDelayed <$> tdi)
                plugtdi = fmap (join . fmap (\(POpt i ) -> i) )<$> plug
            tdnew <-  go ti plugtdi pretdi
@@ -891,7 +867,7 @@ buildUIDiff km i  plug tdi = go i plug tdi
                test (Diff i ) = Diff (POpt (Just  i))
 
            return $ TrivialWidget (test <$> triding tdnew  ) retUI
-         (KInterval ti) -> do
+         KInterval ti -> do
             let unInterval f (IntervalTB1 i ) = f i
                 unInterval _ i = errorWithStackTrace (show i)
                 unfinp (Interval.Finite i) = Just i
@@ -914,7 +890,7 @@ buildUIDiff km i  plug tdi = go i plug tdi
               replaceU  i  h =  fmap (PInter False . (,h).Interval.Finite) i
               output = (\i j -> reduceDiff $ [i,j])<$> (replaceL <$>  triding inf <*> triding lbd ) <*> (replaceU <$> triding sup <*> triding ubd)
             return $ TrivialWidget  output subcomposed
-         (Primitive (AtomicPrim i)) -> do
+         Primitive (AtomicPrim i) -> do
            let tdi2 = F.foldl' (liftA2 mergePatches) tdi plug
            pinp <- fmap (fmap TB1) <$> buildPrim km (fmap unTB1 <$> tdi2) i
            return $ TrivialWidget (editor  <$> tdi <*> triding pinp) (getElement pinp)
@@ -1097,10 +1073,13 @@ iUITableDiff
   -> Column CoreKey ()
   -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
 iUITableDiff inf pmods oldItems  (IT na  tb1)
-  = fmap (fmap (PInline  na) )<$> go tb1   (fmap (fmap (fmap (patchfkt))) <$> pmods) (fmap _fkttable <$> oldItems)
+  = fmap (fmap (PInline  na) )<$> go (keyType na)   (fmap (fmap (fmap (patchfkt))) <$> pmods) (fmap _fkttable <$> oldItems)
   where
     go mt pmods oldItems =  case mt of
-      (TB1 tdata@(meta,_)) ->  do
+      Primitive (RecordPrim tn) ->  do
+        let tdata = allRec' (tableMap inf) table
+            table = lookTable rinf (snd tn)
+            rinf = fromMaybe inf (HM.lookup (fst tn) (depschema inf))
         (celem,tcrud) <- eiTableDiff inf []
                 []
                 (fmap (fmap(fmap unAtom))<$> pmods)
@@ -1111,7 +1090,7 @@ iUITableDiff inf pmods oldItems  (IT na  tb1)
 
         let bres =  (fmap ( PAtom )<$> tcrud)
         return $ TrivialWidget bres celem
-      (LeftTB1 (Just tb1)) -> do
+      KOptional tb1 -> do
         tr <- go tb1 ( fmap (fmap (join . fmap (\(POpt i ) -> i)))<$> pmods) (join . fmap unSOptional' <$> oldItems)
         let
           test Delete  _ = Diff $ POpt Nothing
@@ -1120,7 +1099,7 @@ iUITableDiff inf pmods oldItems  (IT na  tb1)
           test (Diff i ) _ = Diff (POpt (Just  i))
         return $ TrivialWidget ( test <$> triding tr <*> oldItems) (getElement tr)
 
-      (ArrayTB1 (tb1 :| _)) -> mdo
+      KArray tb1  -> mdo
         offsetDiv  <- UI.div
         -- let wheel = fmap negate $ mousewheel offsetDiv
         TrivialWidget offsetT offset <- offsetField (pure 0)  never (maybe 0 (Non.length .unArray) <$> (recoverEditChange <$> oldItems <*> bres))
@@ -1137,7 +1116,6 @@ iUITableDiff inf pmods oldItems  (IT na  tb1)
                     return $ TrivialWidget (triding wid) row ) unIndexEl
 
         widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
-
         let
           widgets2 = Tra.sequenceA (  zipWith (\i j -> (i,) <$> j) [0..] $( triding <$> widgets) )
           bres = reduceDiffList  <$> offsetT <*>  widgets2
@@ -1147,6 +1125,19 @@ iUITableDiff inf pmods oldItems  (IT na  tb1)
 
 
 type PluginRef a = [(Access Key, Tidings (Maybe (Index a)))]
+
+
+mergeFKRef :: [KType a] -> KType [a]
+mergeFKRef ls = foldl1 mergeOpt (fmap pure <$> ls)
+  where
+    mergeOpt (KOptional i) (KOptional j) = KOptional (mergeOpt i j)
+    mergeOpt (KOptional i) j = KOptional (mergeOpt i j)
+    mergeOpt i (KOptional j) = KOptional (mergeOpt i j)
+    mergeOpt (KArray i) (KArray j ) = KArray ( mergeOpt i j )
+    mergeOpt (KArray i) j = KArray (mergeOpt i j)
+    mergeOpt i (KArray j) = KArray (mergeOpt i j)
+    mergeOpt (Primitive i) (Primitive j) = Primitive (i <>j)
+    mergeOpt (Primitive i) (Primitive j) = Primitive (i <>j)
 
 offsetFieldFiltered  initT eve maxes = do
   init <- currentValue (facts initT)
@@ -1261,7 +1252,7 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,sgist,_) plmods nonInjRefs   oldItems
         sortList =  sorting' <$> pure (fmap ((,True)._relTarget) rel)
       let
         vv :: Tidings (Maybe [TB Identity CoreKey Showable])
-        vv =   join .   fmap (\i -> if  L.length i == L.length rel then Just i else Nothing) .fmap L.nub <$>  liftA2 (<>) iold2  ftdi2
+        vv =   traceShowId . join .   fmap (\i -> if  L.length i == L.length rel then Just i else Nothing) .fmap L.nub <$>  liftA2 (<>) iold2  ftdi2
       cvres <- currentValue (facts vv)
       filterInp <- UI.input # set UI.class_ "col-xs-3"
       filterInpE <- UI.valueChange filterInp
@@ -1291,9 +1282,9 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,sgist,_) plmods nonInjRefs   oldItems
         res3 <- ui$ cacheTidings (filter .filtering  <$> filterInpT <*> constr)
         element itemListEl # sink UI.size (show . (\i -> if i > 21 then 21 else (i +1 )) . length <$> facts res3)
 
-        offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i j ) i )<$>  (facts res3) <#> (fmap (unTB1._fkttable )<$> oldItems)) wheel  (lengthPage <$> vpt)
+        offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i j ) i )<$>  (facts res3) <#> (fmap (unTB1._fkttable )<$> ftdi)) wheel  (lengthPage <$> vpt)
         return (offset, res3)
-      tdi <- ui $ cacheTidings ((\ g s v -> join $ searchGist relTable m  g s  <$> v) <$> gist  <*> sgist <*> vv)
+      tdi <- ui $ cacheTidings ((\ g s v -> traceShowId $ join $ searchGist relTable m  g s  .traceShowId <$> v) <$> gist  <*> sgist <*> vv)
       -- Load offseted items
       ui $onEventDyn (filterE (isJust . fst) $ (,) <$> facts iold2 <@> rumors (triding offset)) $ (\(o,i) ->  traverse (\o -> do
         transactionNoLog inf $ selectFrom (_kvname m) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (predicatefk  o)) o  )
@@ -1383,15 +1374,15 @@ fkUITableDiff inf constr reftb@(vpt,_,gist,sgist,_) plmods nonInjRefs   oldItems
       subnet <- UI.div # set children [fk , last celem] # set UI.class_ "col-xs-12"
       let
         fksel =  join . fmap (\box ->  (\ref -> FKT (kvlist $ fmap _tb $ ref ) rel (TB1 box) ) <$> backFKRef relTable  (fmap (keyAttr .unTB ) $ unkvlist ifk)   (box) ) <$>  ((\i -> maybe i Just) <$>  pretdi <*> tidings st sel)
-      return $ TrivialWidget (editor <$> oldItems <*> fksel ) subnet
+      return $ TrivialWidget (editor <$> ftdi <*> fksel ) subnet
 fkUITableDiff inf constr tbrefs plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb1 ))) = do
   tr <- fkUITableDiff inf constr tbrefs (fmap (join . fmap unLeftItensP  <$>) <$> plmods)  (first unLeftKey . second (join . fmap unLeftItens <$>) <$> wl) (join . fmap unLeftItens  <$> oldItems)  (FKT (mapKV (mapComp (firstTB unKOptional) ) ilk ) (Le.over relOri unKOptional <$> rel) tb1)
   return $ reduceFKOptional rel (_relOrigin . head . keyattr <$> F.toList (_kvvalues ilk) )<$> tr
 
-fkUITableDiff inf constr tbrefs preplmods  wl preoldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1:| _)) ) = mdo
+fkUITableDiff inf constr tbrefs plmods  wl oldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1:| _)) ) = mdo
      dv <- UI.div
-     oldItems <- ui $ cacheTidings preoldItems
-     plmods <- ui $ traverse (traverse cacheTidings) preplmods
+     -- oldItems <- ui $ cacheTidings preoldItems
+     -- plmods <- ui $ traverse (traverse cacheTidings) preplmods
      let -- wheel = fmap negate $ mousewheel dv
          arraySize = 8
      TrivialWidget offsetT offset <- offsetField (pure 0)  never (maybe 0 (Non.length .unArray. _fkttable ) <$> (recoverEditChange <$> oldItems <*> bres))

@@ -313,7 +313,7 @@ recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn
           tas <- tname nextT
           let knas = dumbKey (rawName nextT)
           kas <- kname tas  knas
-          return $ Compose $ Labeled (label $ kas) (FKT (findRefFK (_relRoot <$> (filter (\i -> not $ S.member i (S.unions $ fmap fst vacc)) $  filterReflexive ks) ) ksbn  )  ks  (mapOpt $ mapArray $ TB1 tb  ))
+          return $ Compose $ Labeled (label $ kas) (FKT (findRefs  ksbn)  ks  (mapOpt $ mapArray $ TB1 tb  ))
     | otherwise = do
           ksn <- labelTable nextT
           tb@(m,Compose r)  <-fun ksn
@@ -324,9 +324,10 @@ recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn
               kas <- kname tas  knas
               return $ Labeled (label kas)
             else return  Unlabeled
-          return $ Compose $ lab $ FKT (findRefFK  (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks)) ksbn )  ks (mapOpt $ TB1 tb)
+          return $ Compose $ lab $ FKT ( findRefs ksbn )  ks (mapOpt $ TB1 tb)
   where
         nextT = (\(Just i)-> i) (join $ HM.lookup tn <$> (HM.lookup sn invSchema))
+        findRefs = findRefFK  (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks))
         e = S.fromList $ rawPK nextT
         nextLeft = any (isKOptional.keyType) (S.toList ifk) || isLeft
         mapArray i =  if anyArrayRel ks then ArrayTB1 (pure i) else i
@@ -529,7 +530,7 @@ relabelT' :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB3Data f k a -
 relabelT' p l (m ,Compose j) =  (m,Compose $ l (KV $ fmap (Compose.  l . relabeling p l . p . getCompose ) (_kvvalues $ p j)))
 
 backPathRef :: Path (Set Key) SqlOperation -> TBData Key Showable ->  [Column Key Showable]
-backPathRef (Path k (FKJoinTable rel t)) = justError "no back path"  . backFKRef (M.fromList $ fmap (\i -> (_relTarget i ,_relOrigin i)) rel) (F.toList k)
+backPathRef (Path k (FKJoinTable rel t)) = justError ("no back path ref "  ++ show (rel ,k)). backFKRef (M.fromList $ fmap (\i -> (_relTarget i ,_relOrigin i)) rel) (F.toList k)
 
 backFKRef
   :: (Foldable f,Show (f Key ),Show a, Functor f) =>
@@ -537,6 +538,7 @@ backFKRef
      -> f Key
      -> TBData  Key a
      -> Maybe (f (TB f1 Key a))
+backFKRef i j  | traceShow (i ,j) False =  undefined
 backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . snd
   where
     reorderPK l = fmap (\i  -> L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
@@ -567,13 +569,13 @@ tbpredFK rel un  pk2 v = tbjust  .  Tra.traverse (Tra.traverse unSOptional') . f
   -> t (TB Identity k a1)
   -> Maybe a-}
 -- searchGist  i j k l m  | traceShow (i, fmap fst l,m) False = undefined
-searchGist relTable m gist sgist i =  join $ foldr (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (allMaybes $ fmap (\k->  M.lookup k relTable) (_kvpk m) ))  (((\(un,g) -> lookSIdx  un i g) <$> sgist) )
+searchGist relTable m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (traceShow (_kvpk m, fmap (\k->  M.lookup k relTable) (_kvpk m)) $ allMaybes$ fmap (\k->  M.lookup k relTable) (_kvpk m) ))  (((\(un,g) -> lookSIdx  un i g) <$> sgist) )
   where
     lookGist rel un pk  v =  join res
-      where res = flip G.lookup v <$> tbpredFK rel un (_kvpk m) pk
+      where res = flip G.lookup v .traceShowId <$> tbpredFK rel un (_kvpk m) pk
 
     lookSGist sidsx rel un pk  v =  join res
-      where res = flip G.lookup v <$> tbpredFK rel un sidsx pk
+      where res = flip G.lookup v . traceShowId <$> tbpredFK rel un sidsx pk
 
     lookSIdx un pk sg = join . fmap (\i -> G.lookup i gist ) . (\i -> lookSGist  un relTable i  pk sg) <$> traceShowId (allMaybes $  fmap (\k -> M.lookup k relTable ) un  )
 
