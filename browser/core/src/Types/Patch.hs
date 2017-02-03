@@ -140,8 +140,8 @@ indexFilterPatch ((Nested (IProd _  l) n) ,op)  (_,_,lo) =
 indexFilterPatch (Many [n],op) o = indexFilterPatch (n,op) o
 indexFilterPatch i o= errorWithStackTrace (show (i,o))
 
-unIndexItensP :: (Show (KType k),Show a) =>  Int -> Int -> Maybe (PathAttr (FKey (KType k)) a) -> Maybe (PathAttr (FKey (KType k) ) a )
-unIndexItensP ix o =  join . fmap (unIndexP (ix+ o) )
+unIndexItensP :: (Show (KType k),Show a) =>  Int -> Int -> Maybe (PathAttr (FKey (KType k)) a) -> Maybe (Maybe (PathAttr (FKey (KType k) ) a ))
+unIndexItensP ix o =  fmap (unIndexP (ix+ o) )
   where
     unIndexF o (PIdx ix v) = if o == ix  then v else Nothing
     unIndexF o (PatchSet l ) =  PatchSet . Non.fromList <$> nonEmpty ( catMaybes (unIndexF o <$> F.toList l))

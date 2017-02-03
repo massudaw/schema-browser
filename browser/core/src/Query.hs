@@ -538,7 +538,7 @@ backFKRef
      -> f Key
      -> TBData  Key a
      -> Maybe (f (TB f1 Key a))
-backFKRef i j  | traceShow (i ,j) False =  undefined
+-- backFKRef i j  | traceShow (i ,j) False =  undefined
 backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . snd
   where
     reorderPK l = fmap (\i  -> L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
@@ -569,15 +569,15 @@ tbpredFK rel un  pk2 v = tbjust  .  Tra.traverse (Tra.traverse unSOptional') . f
   -> t (TB Identity k a1)
   -> Maybe a-}
 -- searchGist  i j k l m  | traceShow (i, fmap fst l,m) False = undefined
-searchGist relTable m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (traceShow (_kvpk m, fmap (\k->  M.lookup k relTable) (_kvpk m)) $ allMaybes$ fmap (\k->  M.lookup k relTable) (_kvpk m) ))  (((\(un,g) -> lookSIdx  un i g) <$> sgist) )
+searchGist relTable m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (  allMaybes$ fmap (\k->  M.lookup k relTable) (_kvpk m) ))  (((\(un,g) -> lookSIdx  un i g) <$> sgist) )
   where
     lookGist rel un pk  v =  join res
-      where res = flip G.lookup v .traceShowId <$> tbpredFK rel un (_kvpk m) pk
+      where res = flip G.lookup v <$> tbpredFK rel un (_kvpk m) pk
 
     lookSGist sidsx rel un pk  v =  join res
-      where res = flip G.lookup v . traceShowId <$> tbpredFK rel un sidsx pk
+      where res = flip G.lookup v <$> tbpredFK rel un sidsx pk
 
-    lookSIdx un pk sg = join . fmap (\i -> G.lookup i gist ) . (\i -> lookSGist  un relTable i  pk sg) <$> traceShowId (allMaybes $  fmap (\k -> M.lookup k relTable ) un  )
+    lookSIdx un pk sg = join . fmap (\i -> G.lookup i gist ) . (\i -> lookSGist  un relTable i  pk sg) <$> (allMaybes $  fmap (\k -> M.lookup k relTable ) un  )
 
 
 
