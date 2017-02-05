@@ -129,6 +129,7 @@ mapTEventDyn f x = do
 
 
 cacheTidings :: Tidings a -> Dynamic (Tidings a)
+-- cacheTidings  t = return t
 cacheTidings  t = do
   (e,h) <- newEvent
   onEventIO (rumors t) h
