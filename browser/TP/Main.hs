@@ -318,6 +318,7 @@ databaseChooser smvar metainf sargs plugList = do
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schemaEl , getElement dbsW]
   return $ (chooserT,[schemaSel ]<>  [authBox] )
 
+createVar :: IO (TMVar DatabaseSchema)
 createVar = do
   args <- getArgs
   let db = argsToState args
@@ -325,7 +326,7 @@ createVar = do
   smvar   <- atomically $newTMVar HM.empty
   conn <- connectPostgreSQL (connRoot db)
   l <- query_ conn "select oid,name from metadata.schema"
-  return $ DatabaseSchema (M.fromList l) (isJust b) (HM.fromList $ swap <$> l) conn smvar
+  newTMVar  ( DatabaseSchema (M.fromList l) (isJust b) (HM.fromList $ swap <$> l) conn smvar)
 
 {-
 testBinary = do

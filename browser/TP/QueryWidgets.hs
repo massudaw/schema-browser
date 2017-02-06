@@ -104,6 +104,9 @@ type SelTBConstraint = [([Column CoreKey ()],Tidings TBConstraint)]
 
 type RefTables = (Tidings (IndexMetadata CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)),Tidings [SecondaryIndex CoreKey Showable ], TChan [RowPatch KeyUnique Showable] )
 
+
+
+
 --- Plugins Interface Methods
 createFresh :: Text -> InformationSchema -> Text -> KType CorePrim -> IO InformationSchema
 createFresh  tname inf i ty@(Primitive atom)  =
@@ -358,17 +361,13 @@ tbCaseDiff inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin $ fmap unTB $ unkvlist ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattri .fst) wl
             relTable = M.fromList $ fmap (\i -> (_relTarget i,_relOrigin i)) rel
-            rinf = fromMaybe inf $ HM.lookup (_kvschema m) (depschema inf)
-            table = lookTable rinf  (_kvname m)
-            m = (fst $ unTB1 tb1)
-            pkset :: S.Set Key
-            pkset = S.fromList $ rawPK table
-            restrictConstraint = filter ((`S.isSubsetOf` pkset) . S.fromList . getRelOrigin  .fst) constr
+--            m = (fst $ unTB1 tb1)
+            restrictConstraint = filter ((`S.isSubsetOf` (S.fromList $ fmap _relTarget rel)) . S.fromList . getRelOrigin  .fst) constr
             convertConstr :: SelTBConstraint
             convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> constr .  justError "no back fk" .backFKRef relTable (getRelOrigin f)  ) j ) <$>  restrictConstraint
         let
             patchRefs = fmap (\(a,b) -> (flip recoverEditChange ) <$> facts a <#> b ) <$> nonInjRefs
-        v <-  fkUITableDiff rinf convertConstr plugItens  patchRefs oldItems i
+        v <-  fkUITableDiff inf convertConstr plugItens  patchRefs oldItems i
         return $ TrivialWidget  (triding v ) (getElement v)
 
 tbCaseDiff inf _ i@(IT na tb1 ) wl preplugItems preoldItems
@@ -1205,9 +1204,7 @@ fkUITableDiff
   -- Static Information about relation
   -> Column CoreKey ()
   -> UI (TrivialWidget(Editor (Index (Column CoreKey Showable))))
-fkUITableDiff inf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = logTime ("fk " <> (show $ keyattri tb)) $ do
-
-
+fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) = logTime ("fk " <> (show $ keyattri tb)) $ do
       -- Top Level Widget
       pan <- UI.div #  set UI.class_ "col-xs-5 fixed-label"
       top <- UI.div
@@ -1220,9 +1217,9 @@ fkUITableDiff inf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(TB1
         selector False = return []
         selector True = mdo
           let
-            rinf = fromMaybe inf $ HM.lookup (_kvschema m) (depschema inf)
-            table = lookTable rinf  (_kvname m)
-          reftb@(vpt,_,gist,sgist,_) <- ui $ refTables rinf   table
+            inf = fromMaybe preinf $ HM.lookup (_kvschema m) (depschema preinf)
+            table = lookTable inf  (_kvname m)
+          reftb@(vpt,_,gist,sgist,_) <- ui $ refTables inf   table
           let ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$>  plmods)
           let
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel

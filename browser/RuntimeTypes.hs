@@ -66,6 +66,13 @@ data DatabaseSchema
     , globalRef :: TMVar (HM.HashMap Text InformationSchema )
     }
 
+data ProjectAPI
+  = Project
+    { createProject ::  String -> TMVar DatabaseSchema -> IO ()
+    , dropProject :: String -> TMVar DatabaseSchema -> IO ()
+    }
+
+
 data InformationSchemaKV k v
   = InformationSchema
   { schemaId :: Int
@@ -257,6 +264,8 @@ data PageTokenF v
   deriving(Eq,Ord,Show,Generic)
 
 
+data Project
+  =
 
 data SchemaEditor
   = SchemaEditor
