@@ -67,9 +67,13 @@ import qualified Data.HashMap.Strict as HM
 import OAuth
 import GHC.Stack
 
+col :: UI Element -> Int -> UI Element
+col i l =   i # set   UI.class_ ("col-xs-" ++ show l)
+
+
 
 setup
-  ::  DatabaseSchema ->  [String] -> [Plugins] -> Window -> UI ()
+  ::  TMVar DatabaseSchema ->  [String] -> [Plugins] -> Window -> UI ()
 setup smvar args plugList w = void $ do
   metainf <- liftIO$ metaInf smvar
   setCallBufferMode BufferAll
@@ -105,11 +109,12 @@ setup smvar args plugList w = void $ do
     expand False = "col-xs-12"
   addBody  [return hoverBoard,return container]
   mapUIFinalizerT body (traverse (\inf-> mdo
-    let kitems = F.toList (pkMap inf)
-        schId = int $ schemaId inf
-        initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> HM.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
-        lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested (IProd Nothing["selection"]) (keyRef ["table"])) iv
-                    in fmap (\(TB1 (SText t)) -> t) . traceShowId .unArray  <$> join (fmap unSOptional' i)
+    let
+      kitems = F.toList (pkMap inf)
+      schId = int $ schemaId inf
+      initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> HM.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
+      lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested (IProd Nothing["selection"]) (keyRef ["table"])) iv
+                 in fmap (\(TB1 (SText t)) -> t) . traceShowId .unArray  <$> join (fmap unSOptional' i)
 
     cliIni <- currentValue (facts cliTid)
     iniKey <-currentValue (facts initKey)
@@ -326,7 +331,7 @@ createVar = do
   smvar   <- atomically $newTMVar HM.empty
   conn <- connectPostgreSQL (connRoot db)
   l <- query_ conn "select oid,name from metadata.schema"
-  newTMVar  ( DatabaseSchema (M.fromList l) (isJust b) (HM.fromList $ swap <$> l) conn smvar)
+  atomically $ newTMVar  ( DatabaseSchema (M.fromList l) (isJust b) (HM.fromList $ swap <$> l) conn smvar)
 
 {-
 testBinary = do

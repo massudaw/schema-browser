@@ -82,8 +82,9 @@ decoder smvar  = forever go
             void draw) i
 
     out (Push (CreateRow t)) = do
-      let (s,tb, mod ) = decodeTableModification t
-      inf <- justError ("no schema " ++ show s).  HM.lookup s <$> readTMVar (globalRef smvar)
+      let
+        (s,tb, mod ) = decodeTableModification t
+      inf <- justError ("no schema " ++ show s).  HM.lookup s <$> (readTMVar .globalRef  =<< readTMVar smvar)
       let
         table = lookTable inf  tb
       ref <- refTableSTM inf table

@@ -21,9 +21,14 @@ module Types.Index
   ,Node(..)
   ,indexParam
   ,queryCheck
+  ,PathIndex(..)
+  ,AttributePath(..)
   ,indexPred
   ,checkPred
+  ,checkPredIdx
+  ,checkPredId
   ,cinterval
+  ,PathTID(..)
   ,splitIndex
   ,splitPred
   ,splitIndexPKB
@@ -309,13 +314,64 @@ indexParam = (10,20)
 -- Attr List Predicate
 
 
-checkPred v (WherePredicate l) = checkPred' v l
+checkPredId v (WherePredicate l) = checkPredIdx  v l
+checkPredIdx v (AndColl i ) = fmap concat $ allMaybes $ fmap (checkPredIdx v)i
+checkPredIdx v (OrColl i ) = fmap concat $ nonEmpty $ catMaybes $   fmap (checkPredIdx v) i
+checkPredIdx v (PrimColl i) = fmap pure (indexPredIx i v)
 
+checkPred v (WherePredicate l) = checkPred' v l
 checkPred' v (AndColl i ) = F.all  (checkPred' v)i
 checkPred' v (OrColl i ) = F.any (checkPred' v) i
 checkPred' v (PrimColl i) = indexPred i v
 
 type ShowableConstr  a = (Fractional a ,Range a,ConstantGen (FTB a ),Affine a,Positive (Tangent a),Semigroup (Tangent a),Ord (Tangent a),Ord a )
+
+
+data PathIndex  a b
+  = ManyPath (Non.NonEmpty (PathIndex a b))
+  | NestedPath a (PathIndex a b)
+  | TipPath b
+  deriving(Eq,Ord,Show,Functor)
+
+data AttributePath  k
+  = PathAttr k (PathIndex PathTID ())
+  | PathInline k (PathIndex PathTID  (AttributePath k))
+  | PathForeign [Rel k ] (PathIndex PathTID (AttributePath k))
+  deriving(Eq,Ord,Show,Functor)
+
+data PathTID
+  = PIdIdx Int
+  | PIdOpt
+  | PIdInter Bool
+  | PIdAtom
+  deriving (Eq,Ord,Show)
+
+
+
+indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Access k ,AccessOp a) -> TBData k a-> Maybe (AttributePath k )
+-- indexPredIx (Many i,eq) a= traverse (\i -> indexPredIx (i,eq) a) i
+indexPredIx (n@(Nested k@(IProd _ [key]) nt ) ,eq) r
+  = case  indexField n r of
+    Nothing -> Nothing
+    Just i ->  fmap (PathInline key) $ recPred $ indexPredIx (nt , eq ) <$> _fkttable  i
+  where
+    recPred (TB1 i ) = TipPath <$> i
+    recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
+    recPred (ArrayTB1 i) = fmap (ManyPath . Non.fromList ) $ nonEmpty $ catMaybes $ F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
+    recPred i = errorWithStackTrace (show i)
+indexPredIx (a@(IProd _ [key]),eq) r =
+  case indexField a r of
+    Nothing ->  Nothing
+    Just (Attr _ rv) ->
+      fmap (PathAttr key) $ recPred eq rv
+  where
+    recPred eq (TB1 i ) = if match eq (Right (TB1 i)) then  Just (TipPath ()) else Nothing
+    recPred eq (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse (recPred eq )i
+    recPred eq (ArrayTB1 i) = fmap (ManyPath . Non.fromList ) $ nonEmpty $ catMaybes $ F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred eq i  ) i
+indexPredIx i v= errorWithStackTrace (show (i,v))
+
+
+
 indexPred :: (Show k ,ShowableConstr a , Show a,Ord k) => (Access k ,AccessOp a) -> TBData k a-> Bool
 indexPred (Many i,eq) a= all (\i -> indexPred (i,eq) a) i
 indexPred (n@(Nested k nt ) ,eq) r

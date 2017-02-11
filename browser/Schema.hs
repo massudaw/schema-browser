@@ -112,8 +112,8 @@ readFModifier "edit" = FPatch
 readFModifier "write" = FWrite
 
 
-keyTables ,keyTablesInit :: DatabaseSchema ->  (Text ,Text) -> (Text -> IO (Auth , SchemaEditor)) -> [Plugins] ->  R.Dynamic InformationSchema
-keyTables schemaVar (schema ,user) authMap pluglist =  maybe (keyTablesInit schemaVar (schema,user) authMap pluglist ) return.  HM.lookup schema  =<< liftIO (atomically $ readTMVar (globalRef schemaVar))
+keyTables ,keyTablesInit :: TMVar DatabaseSchema ->  (Text ,Text) -> (Text -> IO (Auth , SchemaEditor)) -> [Plugins] ->  R.Dynamic InformationSchema
+keyTables schemaVar (schema ,user) authMap pluglist =  maybe (keyTablesInit schemaVar (schema,user) authMap pluglist ) return.  HM.lookup schema  =<< liftIO (atomically $ readTMVar .globalRef =<< readTMVar schemaVar )
 
 extendedRel :: HM.HashMap (Text,Text) Key -> Text -> Text -> Text -> Key -> Rel Key
 extendedRel inf t a b c =  snd access $ (lrel (fst access))
@@ -130,7 +130,8 @@ extendedRel inf t a b c =  snd access $ (lrel (fst access))
                   k :: Key
                   k = justError "no key" $HM.lookup (t,i) inf
 
-keyTablesInit schemaVar (schema,user) authMap pluglist = do
+keyTablesInit schemaRef  (schema,user) authMap pluglist = do
+       schemaVar <- liftIO$ atomically $ readTMVar schemaRef
        let conn = schemaConn schemaVar
            schemaId = justLookH schema (schemaNameMap schemaVar)
        (oauth,ops ) <- liftIO$ authMap schema
@@ -166,7 +167,7 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
         schemaForeign :: Query
         schemaForeign = "select target_schema_name from metadata.fks where origin_schema_name = ? and target_schema_name <> origin_schema_name"
        rslist <- liftIO$query conn  schemaForeign (Only schema)
-       rsch <- HM.fromList <$> mapM (\(Only s) -> (s,) <$> keyTables  schemaVar (s,user) authMap pluglist) rslist
+       rsch <- HM.fromList <$> mapM (\(Only s) -> (s,) <$> keyTables  schemaRef (s,user) authMap pluglist) rslist
        let lookFk t k = V.toList $ lookupKey2 (fmap (t,) k)
            lookRFk s t k = V.toList $ lookupKey2 (fmap (t,) k)
             where
@@ -226,14 +227,14 @@ keyTablesInit schemaVar (schema,user) authMap pluglist = do
        sizeMapt <- liftIO$ M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  HM.lookup t i3u ) <$> query conn tableSizes (Only schema)
 
        metaschema <- if (schema /= "metadata")
-          then Just <$> keyTables  schemaVar ("metadata",user) authMap pluglist
+          then Just <$> keyTables  schemaRef ("metadata",user) authMap pluglist
           else return Nothing
 
        mvar <- liftIO$ atomically $ newTMVar  M.empty
        let inf = InformationSchema schemaId schema (uid,user) oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ fmap (\i -> (keyFastUnique i,i)) $ F.toList keyMap) (M.filterWithKey (\k v -> not $ L.elem (tableName v ) (concat $ fmap (\(_,_,n) -> F.toList n) ures)) $ i2u)  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist
        mapM (createTableRefs inf) (filter (L.null . rawUnion) $ F.toList i2u)
        var <- liftIO$ atomically $ modifyTMVar (globalRef schemaVar  ) (HM.insert schema inf )
-       addStats inf
+       -- addStats inf
          {-
        traverse (\ req -> do
          r <- liftIO$ forkIO $ forever $
@@ -283,7 +284,7 @@ createTableRefs inf i = do
       move (FKInlineTable _) = return Nothing
       move i = return Nothing
       sidx :: [SecondaryIndex KeyUnique Showable]
-      sidx = fmap (\un-> (fmap keyFastUnique un ,G.fromList' (fmap (\(i,n,j) -> (G.getUnique (fmap keyFastUnique un ) i,n,j)) $ G.getEntries v))   ) (L.delete (rawPK i) $ _rawIndexes i )
+      sidx = fmap (\un-> (fmap keyFastUnique un ,G.fromList' ( fmap (\(i,n,j) -> ((G.getUnique (fmap keyFastUnique un ) i,[]),n,j)) $ G.getEntries v))   ) (L.delete (rawPK i) $ _rawIndexes i )
 
     nestedFKS <-  fmap catMaybes $ traverse move $   pathRel <$> F.toList (rawFKS i)
     newNestedFKS <- liftIO . atomically$ traverse (traverse (cloneTChan.patchVar)) nestedFKS
@@ -455,6 +456,7 @@ logTableModification inf (TableModification Nothing table ip) = do
   [Only id] <- liftIO $ query (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata." <> mod <> " (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,?,?::bytea[],? ,?) returning modification_id " ) (snd $ username inf ,ltime,tableName table, V.fromList $ (  fmap  (Binary . B.encode)   pidx ) , Binary  . B.encode $firstPatchRow keyValue ip, schemaName inf)
   let modt = lookTable (meta inf)  mod
   dbref <- prerefTable (meta inf) modt
+
   putPatch (patchVar dbref) [encodeTableModification inf  ltime (TableModification (Just id) table ip )]
   return (TableModification (Just id) table ip )
 

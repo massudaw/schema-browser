@@ -320,7 +320,7 @@ getDiffTable table  j = fmap (join . fmap (diff j ) ) $ getTable  table $ TB1 j
 joinGetDiffTable table  tableref f j = fmap (join . fmap (diff j)) $ joinGet table tableref (TB1 f) (TB1 j)
 
 
-gmailOps = (SchemaEditor (error "no op1") (error "no op2") insertTable undefined listTable getDiffTable mapKeyType joinList syncHistory (error "no op3")100 (\i -> id )(Just historyLoad))
+gmailOps = (SchemaEditor (error "no op1") (error "no op2") insertTable undefined listTable getDiffTable mapKeyType joinList syncHistory (error "no op3")100 (\i -> id ) undefined (Just historyLoad))
 
 lbackRef (ArrayTB1 t) = ArrayTB1 $ fmap lbackRef t
 lbackRef (LeftTB1 t ) = LeftTB1 $ fmap lbackRef t

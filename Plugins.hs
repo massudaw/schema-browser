@@ -382,7 +382,7 @@ retencaoServicos = FPlugins pname tname  $ PurePlugin url
       let pis =  0.0065 * v
           cofins = 0.03 * v
           csll = 0.01 * v
-          irpj = 0.015 * v
+          irpj = if (0.015 * v) < 10 then 0 else  0.015*v
           issqn = if hasIssqn then 0.05 * v else 0
       returnA -< Just $ tblist $
           _tb <$> [att "pis_retido" pis

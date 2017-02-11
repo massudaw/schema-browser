@@ -85,9 +85,13 @@ textToPrim (RecordPrim i) =  (RecordPrim i)
 
 -- Wrap new instances without quotes delimiting primitive values
 newtype UnQuoted a = UnQuoted {unQuoted :: a}
+newtype DoubleQuoted a = DoubleQuoted {unDoubleQuoted :: a}
 
     -- toField i = errorWithStackTrace (show i)
 
+
+instance TF.ToField (DoubleQuoted String) where
+  toField (DoubleQuoted i) = TF.Many [TF.Plain "\"", TF.Plain (fromByteString $ BS.pack i) , TF.Plain "\""]
 
 instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Text,a)) where
   toField (LeftTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i

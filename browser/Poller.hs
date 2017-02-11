@@ -52,7 +52,9 @@ plugs schm authmap db plugs = do
               pred :: TBPredicate Key Showable
               pred = WherePredicate $ AndColl [PrimColl (liftAccess inf "plugins" $ keyRef ["name"] , Left (txt $ _name p,Equals))]
       return regplugs
-  atomically $ modifyTMVar (globalRef schm) (HM.alter  (fmap(\i -> i {plugins=regplugs})) "metadata")
+  atomically $ do
+    schmRef <-readTMVar schm
+    modifyTMVar (globalRef schmRef) (HM.alter  (fmap(\i -> i {plugins=regplugs})) "metadata")
   return regplugs
 
 
@@ -70,8 +72,9 @@ checkTime curr = do
     current <- getCurrentTime
     return $ (start,end,curr,current)
 
-poller schm authmap db plugs is_test = do
-  metas <- metaInf schm
+poller schmRef authmap db plugs is_test = do
+  metas <- metaInf schmRef
+
   let conn = rootconn metas
   ((dbpol,(_,polling)),_)<- runDynamic $ transactionNoLog metas $ selectFrom "polling" Nothing Nothing [] $ mempty
   let
@@ -88,7 +91,8 @@ poller schm authmap db plugs is_test = do
           indexRow polling = justError (show $ (tbpred tb )) $ G.lookup (tbpred tb) polling
           tbpred = G.getIndex
 
-      (inf ,_)<- runDynamic $keyTables  schm (justLook schema (schemaIdMap schm) , T.pack $ user db) authmap plugs
+      schm <- atomically $ readTMVar schmRef
+      (inf ,_)<- runDynamic $keyTables  schmRef (justLook schema (schemaIdMap schm) , T.pack $ user db) authmap plugs
       (startP,_,_,current) <- checkTime (indexRow polling )
       flip traverse plug $ \(idp,p) -> do
           let f = pluginStatic p

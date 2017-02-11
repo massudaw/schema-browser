@@ -6,6 +6,7 @@ import Control.Concurrent
 
 import Types
 import Control.Exception
+import Data.Time
 import Step.Common
 import Data.Interval(Interval)
 import Debug.Trace
@@ -47,8 +48,8 @@ import Control.Lens.TH
 import GHC.Stack
 
 
-metaInf :: DatabaseSchema -> IO InformationSchema
-metaInf smvar = justError "no meta" . HM.lookup "metadata" <$> liftIO ( atomically $ readTMVar (globalRef smvar))
+metaInf :: TMVar DatabaseSchema -> IO InformationSchema
+metaInf smvar = justError "no meta" . HM.lookup "metadata" <$> liftIO ( atomically $ readTMVar .globalRef  =<< readTMVar  smvar )
 
 
 type InformationSchema = InformationSchemaKV Key Showable
@@ -66,11 +67,6 @@ data DatabaseSchema
     , globalRef :: TMVar (HM.HashMap Text InformationSchema )
     }
 
-data ProjectAPI
-  = Project
-    { createProject ::  String -> TMVar DatabaseSchema -> IO ()
-    , dropProject :: String -> TMVar DatabaseSchema -> IO ()
-    }
 
 
 data InformationSchemaKV k v
@@ -148,7 +144,7 @@ data DBVar2  v=
 
 type IndexMetadata k v = Map (WherePredicateK k) (Int,Map Int (PageTokenF  v))
 type TableIndex k v = GiST (TBIndex v) (TBData k v)
-type SecondaryIndex k v = ([k],GiST (TBIndex v) (TBIndex v))
+type SecondaryIndex k v = ([k],GiST (TBIndex v) (TBIndex v,[AttributePath k ]))
 type TableRep k v  = ([SecondaryIndex k v],TableIndex k v)
 
 applyTableRep
@@ -158,35 +154,25 @@ applyTableRep table (sidxs,l) (PatchRow patom@(m,i, []))
   where
     didxs (un ,sidx)= (un,maybe sidx (\v -> G.delete v G.indexParam sidx ) (G.getUnique un <$> v))
     v = G.lookup (create <$> G.notOptional i)  l
-applyTableRep table (sidxs,l) (PatchRow patom@(m,ipa, p)) =  (dixs <$> sidxs ,) <$> (case G.lookup (G.notOptional i) l  of
-                  Just v -> do
-                          el <-  applyIfChange v patom
-                          let pkel = G.getIndex el
-                          return $ if pkel == i
-                                then G.update (G.notOptional i) (const el) l
-                                else G.insert (el,G.tbpred  el) G.indexParam . G.delete (G.notOptional i)  G.indexParam $ l
-                  Nothing -> let
-                      el = createIfChange  patom
-                   in (\eli -> G.insert (eli,G.tbpred  eli) G.indexParam  l) <$> el)
+applyTableRep table (sidxs,l) (PatchRow patom@(m,ipa, p)) =  (dixs <$> sidxs ,) <$> applyIfChange l (PatchRow patom)
    where
      dixs (un,sidx) = (un,sidx)--(\v -> G.insert (v,G.getIndex i) G.indexParam sidx ) (G.getUnique un  el))
-     i = fmap create  ipa
 applyTableRep table (sidxs,l) (CreateRow elp ) =  Just  (didxs <$> sidxs,case G.lookup i l  of
                   Just v ->  if v == el then l else G.insert (el,G.tbpred  el) G.indexParam . G.delete i  G.indexParam $ l
                   Nothing -> G.insert (el,G.tbpred  el) G.indexParam  l)
    where
-     didxs (un,sidx) =  (un,G.insert ((G.getIndex el,G.getUnique un  el)) G.indexParam sidx  )
+     didxs (un,sidx) =  (un,G.insert (((G.getIndex el,[]),G.getUnique un  el)) G.indexParam sidx  )
      el = fmap (fmap create) elp
      i = G.notOptional $ G.getIndex el
 
 
 queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[k])-> TableRep k Showable-> G.GiST (TBIndex  Showable) (TBData k Showable)
-queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (s,g) = {-traceShow (notPK ,pred,G.size g,S.size <$> mergeSIdxs,fmap (\i -> (fst i,G.size (snd i)) )s,mergeSIdxs) -}t1
+queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (s,g) = t1
   where t1 = G.fromList' . maybe id (\pred -> L.filter (flip checkPred (pred) . leafValue)) notPK $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
         searchSIdx = (\sset -> L.filter ((`S.member` sset) .leafPred) $ getEntries g) <$> mergeSIdxs
         notPK = fmap WherePredicate $ F.foldl' (\l i -> flip G.splitIndexPKB  i =<< l ) (Just bool) (pk : fmap fst s )
         mergeSIdxs :: Maybe (S.Set (TBIndex Showable))
-        mergeSIdxs = foldl1 S.intersection<$> (nonEmpty $ catMaybes $ fmap (S.fromList . fmap leafValue) . searchPK b <$> s)
+        mergeSIdxs = foldl1 S.intersection <$> (nonEmpty $ catMaybes $ fmap (S.fromList . fmap (fst.leafValue)) . searchPK b <$> s)
 
 
 searchPK ::  (Show k,Eq k) => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [LeafEntry (TBIndex  Showable) a]
@@ -264,8 +250,10 @@ data PageTokenF v
   deriving(Eq,Ord,Show,Generic)
 
 
-data Project
-  =
+data OverloadedRule
+  =  CreateRule  (TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable))))
+  |  DropRule  (TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable))))
+  |  UpdateRule  (TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable))))
 
 data SchemaEditor
   = SchemaEditor
@@ -281,6 +269,7 @@ data SchemaEditor
   ,logger :: MonadIO m => InformationSchema -> TableModification (RowPatch Key Showable)  -> m (TableModification (RowPatch Key Showable))
   , opsPageSize :: Int
   , transactionEd :: InformationSchema -> (forall a  . IO a -> IO a)
+  , rules :: M.Map (Text,Text) [OverloadedRule]
   , historySync :: Maybe (TransactionM ())
   }
 
@@ -309,7 +298,11 @@ lookKey inf t k = justError ("table " <> T.unpack t <> " has no key " <> T.unpac
 lookKeyM :: InformationSchema -> Text -> Text -> Maybe Key
 lookKeyM inf t k =  HM.lookup (t,k) (keyMap inf)
 
-putPatch m = liftIO .atomically . writeTChan m . force. fmap (firstPatchRow keyFastUnique)
+putPatch m a= liftIO$ do
+  i <- getCurrentTime
+  print ("putPatch",i,length a)
+  atomically $ putPatchSTM m a
+
 putPatchSTM m =  writeTChan m . force. fmap (firstPatchRow keyFastUnique)
 putIdx m = liftIO .atomically . writeTChan m . force
 
@@ -364,7 +357,7 @@ liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf 
 
 
 fixPatchRow inf t (PatchRow i) = PatchRow $ fixPatch inf  t i
-fixPatchRow inf t (CreateRow i) =  CreateRow i
+fixPatchRow inf t (CreateRow i) = CreateRow i
 
 fixPatch ::  a ~ Index a => InformationSchema -> Text -> TBIdx Key a  -> TBIdx Key a
 fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)

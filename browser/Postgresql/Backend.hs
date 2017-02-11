@@ -12,11 +12,13 @@ import Data.Interval (Extended(..),upperBound)
 import Data.Either
 import Data.Functor.Apply
 import System.Environment
+import Control.Concurrent.STM
 import Safe
 import Control.Monad
 import Postgresql.Printer
 import Postgresql.Parser
 import Utils
+import Text
 import Control.Monad.Reader
 import GHC.Stack
 import Schema
@@ -51,6 +53,51 @@ import Database.PostgreSQL.Simple
 filterFun  = filter (\k -> not $ isFun k )
   where isFun (PFun _ _ _ ) = True
         isFun i = False
+
+overloadedRules = M.fromList [(("metadata","catalog_schema"),[CreateRule createSchema,DropRule dropSchema,UpdateRule alterSchema])]
+
+createSchema v = do
+      inf <- ask
+      let n = fromJust $ indexFieldRec (IProd Nothing [name]) v
+          name = lookKey inf "catalog_schema" "name"
+          onewm = indexFieldRec (Nested (IProd Nothing [owner]) (IProd Nothing [user_name])) v
+          owner= lookKey inf "catalog_schema" "owner"
+          user_name = lookKey inf "user" "usename"
+      maybe
+        (liftIO$ execute (rootconn inf) "CREATE SCHEMA ? "(Only $ DoubleQuoted $ renderShowable n))
+        (\o -> liftIO$ execute (rootconn inf) "CREATE SCHEMA ? AUTHORIZATION ? "(DoubleQuoted $ renderShowable n, DoubleQuoted $ renderShowable o)) onewm
+      [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_schema where name =? " (Only $ (keyType name,n))
+      return $ Just $ TableModification Nothing (lookTable inf "catalog_schema")
+        (CreateRow $ liftTable' inf "catalog_schema"
+            (tblist $ _tb <$> [Attr "oid" (int i),Attr "type" (txt "sql"),Attr "name" n,Attr "owner" (fromMaybe n onewm)]))
+
+alterSchema v new = do
+      inf <- ask
+      let n = fromJust $ indexFieldRec (IProd Nothing [name]) v
+          nnewm = indexFieldRec (IProd Nothing [name]) new
+          o = fromJust $ indexFieldRec (Nested (IProd Nothing [owner]) (IProd Nothing [user_name])) v
+          onewm = indexFieldRec (Nested (IProd Nothing [owner]) (IProd Nothing [user_name])) new
+          name = lookKey inf "catalog_schema" "name"
+          owner= lookKey inf "catalog_schema" "owner"
+          user_name = lookKey inf "user" "usename"
+
+      traverse (\new -> when (new /= o )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? OWNER TO ?  "(DoubleQuoted $ renderShowable o, DoubleQuoted $ renderShowable new)) onewm
+      traverse (\new -> when (new /= n )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? RENAME TO ?  "(DoubleQuoted $ renderShowable n, DoubleQuoted $ renderShowable new)) nnewm
+      return $ TableModification Nothing (lookTable inf "catalog_schema") . PatchRow  . traceShowId <$> (diff v new)
+
+
+dropSchema  v = do
+      inf <- ask
+      let
+        cat = "catalog_schema"
+        name = lookKey inf cat "name"
+        n = fromJust $ indexFieldRec (IProd Nothing [name]) v
+        oid = lookKey inf  cat "oid"
+        i = fromJust $ indexFieldRec (IProd Nothing [oid]) v
+      liftIO$ execute (rootconn inf) "DROP SCHEMA ?"(Only $ DoubleQuoted $ renderShowable n)
+      return $ Just $ TableModification Nothing (lookTable inf cat )(PatchRow $ liftPatch inf cat (kvempty, G.Idex[(i)],[]))
+
+
 
 
 insertPatch
@@ -184,12 +231,17 @@ paginate inf t order off size koldpre wherepred = do
 insertMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
 insertMod j  = do
   inf <- ask
-  liftIO $ do
-    let
-      table = lookTable inf (_kvname (fst  j))
-    (t,pk,attrs) <- insertPatch (fromRecord  ) (conn  inf) (patch $  j) ( table)
-    let mod =  TableModification Nothing table (CreateRow $ create  (t,pk,deftable inf table <> attrs ))
-    return $ Just  mod
+  let overloaded  = M.lookup (_kvschema (fst j) ,_kvname (fst j)) overloadedRules
+      isCreate (CreateRule _ ) = True
+      isCreate _ = False
+  case L.find isCreate  =<< overloaded of
+    Just (CreateRule l) -> l j
+    Nothing ->   liftIO $ do
+      let
+        table = lookTable inf (_kvname (fst  j))
+      (t,pk,attrs) <- insertPatch (fromRecord  ) (conn  inf) (patch j) ( table)
+      let mod =  TableModification Nothing table (CreateRow $ create  (t,pk,deftable inf table <> attrs ))
+      return $ Just  mod
 
 --- Generate default values  patches
 --
@@ -244,11 +296,16 @@ deleteMod patch@(m,pk,_) = do
 updateMod :: TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
 updateMod kv old = do
   inf <- ask
-  liftIO$ do
-    let table = lookTable inf (_kvname (fst  old ))
-    patch <- updatePatch (conn  inf) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table
-    let mod =  TableModification Nothing table ( PatchRow $ firstPatch (typeTrans inf) patch)
-    return $ Just mod
+  let overloaded  = M.lookup (_kvschema (fst old) ,_kvname (fst old)) overloadedRules
+      isCreate (UpdateRule _ ) = True
+      isCreate _ = False
+  case L.find isCreate  =<< overloaded of
+    Just (UpdateRule i) ->  i old kv
+    Nothing -> liftIO$ do
+      let table = lookTable inf (_kvname (fst  old ))
+      patch <- updatePatch (conn  inf) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table
+      let mod =  TableModification Nothing table ( PatchRow $ firstPatch (typeTrans inf) patch)
+      return $ Just mod
 
 patchMod :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
 patchMod patch@(m,_,_) = do
@@ -321,4 +378,4 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef <$> G.getBounds i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o )  (\table j -> do
     inf <- ask
-    liftIO . loadDelayed inf (tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined (\ a -> liftIO . logTableModification a) 200 (\inf -> id {-withTransaction (conn inf)-}) Nothing
+    liftIO . loadDelayed inf (tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined (\ a -> liftIO . logTableModification a) 200 (\inf -> id {-withTransaction (conn inf)-})  overloadedRules Nothing

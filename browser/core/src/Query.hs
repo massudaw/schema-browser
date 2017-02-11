@@ -575,7 +575,7 @@ searchGist relTable m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relT
       where res = flip G.lookup v <$> tbpredFK rel un (_kvpk m) pk
 
     lookSGist sidsx rel un pk  v =  join res
-      where res = flip G.lookup v <$> tbpredFK rel un sidsx pk
+      where res = fmap fst .flip G.lookup v <$> tbpredFK rel un sidsx pk
 
     lookSIdx un pk sg = join . fmap (\i -> G.lookup i gist ) . (\i -> lookSGist  un relTable i  pk sg) <$> (allMaybes $  fmap (\k -> M.lookup k relTable ) un  )
 

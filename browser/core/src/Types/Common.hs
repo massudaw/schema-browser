@@ -373,8 +373,8 @@ instance NFData Expr
 
 data TB f k a
   = Attr
-    { _tbattrkey ::  !k
-    , _tbattr ::  !( FTB a)
+    { _tbattrkey :: !k
+    , _tbattr :: !(FTB a)
     }
   | Fun
     { _tbattrkey :: ! k

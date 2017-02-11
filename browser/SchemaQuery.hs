@@ -438,14 +438,19 @@ childrenRefsUnique  inf table (sidxs,base) (FKJoinTable rel j ,evs)  =  concat $
                     predKey =  mapPredicate keyFastUnique predK
                     pred =  mapPredicate (\o -> justError "no pk" $ L.elemIndex o (fmap _relOrigin rel)) predK
                     resIndex idx = G.query pred idx
-                    resScan idx = fmap (\i -> (G.getIndex i, G.getUnique (fmap (keyFastUnique._relOrigin) rel) i)  ) $ filter (flip checkPred predKey ) (G.toList idx)
-                    conv ( pk,G.Idex fks ) = PatchRow (kvempty,pk ,[PFK relf (zipWith (\i j -> PAttr (_relOrigin i) (patch j)) relf fks ) (recurse rel p)])
+                    resScan idx = catMaybes $ fmap (\(i,t) -> ((G.getIndex i,t), G.getUnique (fmap (keyFastUnique._relOrigin) rel) i)) . (\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx
+                    conv ((pk,[t]),G.Idex fks) = PatchRow (kvempty,pk ,[PFK relf (zipWith (\i j -> PAttr (_relOrigin i) (patch j)) relf fks ) (recurse2 t p)])
                     unKOptional (KOptional i) = i
                     unKOptional i = i
-                    recurse  rel  p
-                      | L.any (isKOptional .keyType._relOrigin ) rel = POpt $ Just (recurse ( (Le.over (relOri .keyTypes) unKOptional) <$> rel) p )
-                      | otherwise = PAtom p
-                      -- | L.any (isArray ._relOrigin ) rel = POpt $ Just (recurse ( (Le.over (relOri ) unKOptional) <$> rel) p )
+                    recurse2 (G.PathAttr _ i ) p = traceShowId $ go i
+                      where
+                        go (G.ManyPath (j Non.:| _) ) = go  j
+                        go (G.NestedPath i j ) = matcher i (go j)
+                        go (G.TipPath j ) = PAtom p
+                        matcher (PIdIdx ix )  = PIdx ix . Just
+                        matcher PIdOpt   = POpt . Just
+                        -- matcher PIdAtom = PAtom
+                    recurse2 i p = errorWithStackTrace (show i)
 
 
 
@@ -660,13 +665,15 @@ convertChanTidings0
           [RowPatch KeyUnique Showable ]
           -> Dynamic (Tidings (TableRep Key Showable),Event [RowPatch Key Showable])
 convertChanTidings0 inf table fixed evdep ini iniVar nchan = mdo
-    evdiffp <-  convertChanEvent table fixed (first (fmap (first (fmap (keyFastUnique)))) <$> facts t) iniVar nchan
+    evdiffp <-  convertChanEvent table fixed (first (fmap (first (fmap keyFastUnique). fmap (fmap (fmap (fmap (fmap keyFastUnique)))))) <$> facts t) iniVar nchan
+    ti <- liftIO$ getCurrentTime
     let
-      evdiff = unionWith mappend evdep (fmap (firstPatchRow (recoverKey inf)) <$> evdiffp)
+      evdiff = filterE (not.L.null) $ unionWith mappend evdep (fmap (firstPatchRow (recoverKey inf)) <$> evdiffp)
       update :: TableRep Key Showable -> [RowPatch Key Showable] -> TableRep Key Showable
-      update l v = F.foldl' (\i j-> fromJust $  applyTableRep (mapTableK (recoverKey inf)table) i j)   l v
+      -- update l v | traceShow (ti,tableName table,v)  False = undefined
+      update l v = F.foldl' (\i j-> fromJust $  applyTableRep (mapTableK (recoverKey inf)table) i j)   l  v
       recoverIni :: TableRep KeyUnique Showable -> TableRep Key Showable
-      recoverIni (i,j)= (first (fmap (recoverKey inf )) <$> i, recover j)
+      recoverIni (i,j)= (first (fmap (recoverKey inf )) . fmap (fmap (fmap (fmap (fmap  (recoverKey inf ))))) <$> i, recover j)
         where recover = fmap (mapKey' (recoverKey inf))
 
     t <- accumT (recoverIni ini) (flip update <$> evdiff)

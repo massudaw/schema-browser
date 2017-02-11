@@ -42,6 +42,7 @@ module Types.Patch
   ,unLeftItensP
   --
   ,PathFTB(..)
+  ,PathTID(..)
   ,upperPatch,lowerPatch
   ,PathAttr(..),TBIdx,firstPatch,firstPatchRow,PatchConstr
   ,RowPatch(..))where
@@ -50,6 +51,7 @@ module Types.Patch
 -- import Warshal
 import Types
 import qualified Types.Index as G
+import Types.Index (PathTID(..))
 import Control.DeepSeq
 import Data.Tuple
 import qualified Control.Lens as Le
@@ -315,14 +317,6 @@ instance (NFData k ,NFData a) => NFData (PathAttr k a)
 instance (NFData k ) => NFData (PathFTB k )
 instance (Binary k ) => Binary (PathFTB k )
 
-data PathTID
-  = PIdIdx Int
-  | PIdOpt
-  | PIdAtom
-  | PIdInter Bool
-  deriving (Eq,Ord,Show)
-
-
 firstPatchRow :: (Ord a ,Ord k , Ord (Index a), Ord j ) => (k -> j ) -> RowPatch k a -> RowPatch j a
 firstPatchRow f (CreateRow i ) = CreateRow $ mapKey' f i
 firstPatchRow f (PatchRow i ) = PatchRow $ firstPatch f i
@@ -403,7 +397,7 @@ applyGiSTChange l (PatchRow patom@(m,ipa, p)) =  case G.lookup (G.notOptional i)
                   Just v -> do
                           el <-  applyIfChange v patom
                           let pkel = G.getIndex el
-                          return $ if pkel == i
+                          return $ if  pkel == i
                                 then G.update (G.notOptional i) (const el) l
                                 else G.insert (el,G.tbpred  el) G.indexParam . G.delete (G.notOptional i)  G.indexParam $ l
                   Nothing -> let
@@ -462,7 +456,7 @@ applyRecordChange
     TBData d a
      -> TBIdx d (Index a)
      -> Maybe (TBData d a)
-applyRecordChange t@(m, v) (m2 ,idx   , k) =
+applyRecordChange t@(m, v) (_,_, k) =
   {-| _kvname m == _kvname m2 && idx == fmap patch (G.getIndex t) =-} (m ,) <$> traComp ref v
     -- | otherwise = createIfChange (m2,idx,k)
   where
