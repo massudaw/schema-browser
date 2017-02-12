@@ -102,7 +102,6 @@ prerefTable  inf table  = do
 
 
 
-
 refTable :: InformationSchema -> Table -> Dynamic DBVar
 refTable  inf (Union table origin )  = do
   refs <- mapM (refTable inf ) origin

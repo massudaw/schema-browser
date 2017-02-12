@@ -54,7 +54,27 @@ filterFun  = filter (\k -> not $ isFun k )
   where isFun (PFun _ _ _ ) = True
         isFun i = False
 
-overloadedRules = M.fromList [(("metadata","catalog_schema"),[CreateRule createSchema,DropRule dropSchema,UpdateRule alterSchema])]
+overloadedRules = M.fromList [(("metadata","catalog_schema"),[CreateRule createSchema,DropRule dropSchema,UpdateRule alterSchema])] <> overloaedTables
+
+overloaedTables = M.fromList [(("metadata","catalog_tables"),[CreateRule createTableCatalog])]
+
+createTableCatalog v = do
+      inf <- ask
+      let n = fromJust $ indexFieldRec (IProd Nothing [table_name]) v
+          table = "catalog_tables"
+          table_name = lookKey inf table "table_name"
+
+          schema = "schema"
+          sc = fromJust $ indexFieldRec (Nested (IProd Nothing [schemak]) (IProd Nothing [schema_name])) v
+          schemak = lookKey inf table  "schema_name"
+          schema_name= lookKey inf schema "name"
+      (liftIO$ execute (rootconn inf) "CREATE TABLE ?.? ()"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n))
+      [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_tables where table_name =? and schema_name = ? " ((keyType table_name,n),(keyType schema_name,sc))
+
+      let res = liftTable' inf table (tblist $ _tb <$> [Attr "oid" (int i),Attr "schema_name" sc,Attr "table_name" n,Attr "table_type" (txt "BASE TABLE")])
+      res2<- loadFKS res
+      return $ Just $ TableModification Nothing (lookTable inf table) (CreateRow  res2)
+
 
 createSchema v = do
       inf <- ask
@@ -67,9 +87,9 @@ createSchema v = do
         (liftIO$ execute (rootconn inf) "CREATE SCHEMA ? "(Only $ DoubleQuoted $ renderShowable n))
         (\o -> liftIO$ execute (rootconn inf) "CREATE SCHEMA ? AUTHORIZATION ? "(DoubleQuoted $ renderShowable n, DoubleQuoted $ renderShowable o)) onewm
       [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_schema where name =? " (Only $ (keyType name,n))
-      return $ Just $ TableModification Nothing (lookTable inf "catalog_schema")
-        (CreateRow $ liftTable' inf "catalog_schema"
-            (tblist $ _tb <$> [Attr "oid" (int i),Attr "type" (txt "sql"),Attr "name" n,Attr "owner" (fromMaybe n onewm)]))
+      let res = liftTable' inf "catalog_schema"(tblist $ _tb <$> [Attr "oid" (int i),Attr "type" (txt "sql"),Attr "name" n,Attr "owner" (fromMaybe n onewm)])
+      res2 <- loadFKS res
+      return $ Just $ TableModification Nothing (lookTable inf "catalog_schema") (CreateRow res2)
 
 alterSchema v new = do
       inf <- ask

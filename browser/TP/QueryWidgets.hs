@@ -552,7 +552,7 @@ crudUITable inf open reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItem
           (listBody,tablebdiff) <- eiTableDiff inf   unFinal  refs pmods ftb preoldItems
 
 
-          (panelItems,tdiff)<- processPanelTable listBody inf reftb  tablebdiff table preoldItems
+          (panelItems,tdiff)<- processPanelTable listBody inf reftb  (diffTidings tablebdiff) table preoldItems
           let diff = unionWith const tdiff   (filterJust $ rumors loadedItensEv)
               tableb = recoverEditChange <$> preoldItems <*> tablebdiff
 
@@ -609,7 +609,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
           -- set UI.style (noneShowSpan ("INSERT" `elem` rawAuthorization table ))  #
           sinkDiff UI.enabled insertEnabled
 
-  let editEnabled = (\i j k l m -> traceShow (i,j,k,l,m)$ i && j && k && l && m )<$> ((maybe False (isRight . tableCheck  )  )<$> inscrud ) <*> (isJust <$> oldItemsi) <*>   (liftA2 (\i j -> maybe False (flip containsGist j) i ) oldItemsi gist ) <*> (liftA3 (\i k j -> maybe False (flip (containsGistNotEqual (fromJust k)) j) i ) inscrud oldItemsi gist ) <*> (isDiff <$> inscrudp)
+  let editEnabled = (\i j k l m -> traceShow (i,j,k,l,m)$ i && j && k && l && m )<$> ((maybe False (isRight . tableCheck  )  )<$> inscrud ) <*> (isJust <$> oldItemsi) <*>   (liftA2 (\i j -> maybe False (flip containsGist j) i ) oldItemsi gist ) <*> (liftA3 (\i k j -> maybe False (\(a,b) -> containsGistNotEqual b a j) (liftA2 (,) k i) ) inscrud oldItemsi gist ) <*> (isDiff <$> inscrudp)
   editB <- UI.button# set UI.class_ "btn btn-sm" #
     set text "EDIT" #
          set UI.class_ "buttonSet"#
