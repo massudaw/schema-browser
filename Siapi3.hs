@@ -140,18 +140,18 @@ protocolocnpjForm :: BS.ByteString
 protocolocnpjForm prot ano cgc_cpf vv =
     [ "javax.faces.partial.ajax" := ("true" :: BS.ByteString)
     , "javax.faces.source" :=
-      ("formPaginaInicialWeb:botaoPesquisarWeb" :: BS.ByteString)
+      ("formPaginaInicialWeb:tabViewHome:botaoPesquisarWeb" :: BS.ByteString)
     , "javax.faces.partial.execute" :=
-      ("formPaginaInicialWeb:botaoPesquisarWeb formPaginaInicialWeb:protocoloWeb formPaginaInicialWeb:cpfCnpjWeb" :: BS.ByteString)
+      ("formPaginaInicialWeb:tabViewHome:botaoPesquisarWeb formPaginaInicialWeb:tabViewHome:protocoloWeb formPaginaInicialWeb:tabViewHome:cpfCnpjWeb" :: BS.ByteString)
     , ("javax.faces.partial.render" :: BSC.ByteString) :=
-      ("formPaginaInicialWeb:msgensGeral" :: BS.ByteString)
-    , ("formPaginaInicialWeb:botaoPesquisarWeb" :: BSC.ByteString) :=
-      ("formPaginaInicialWeb:botaoPesquisarWeb" :: BS.ByteString)
+      ("formPaginaInicialWeb:tabViewHome:msgensGeral" :: BS.ByteString)
+    , ("formPaginaInicialWeb:tabViewHome:botaoPesquisarWeb" :: BSC.ByteString) :=
+      ("formPaginaInicialWeb:tabViewHome:botaoPesquisarWeb" :: BS.ByteString)
     , ("formPaginaInicialWeb" :: BSC.ByteString) :=
       ("formPaginaInicialWeb" :: BS.ByteString)
-    , ("formPaginaInicialWeb:protocoloWeb" :: BSC.ByteString) :=
+    , ("formPaginaInicialWeb:tabViewHome:protocoloWeb" :: BSC.ByteString) :=
       (prot <> "/" <> ano)
-    , ("formPaginaInicialWeb:cpfCnpjWeb" :: BSC.ByteString) := (cgc_cpf)
+    , ("formPaginaInicialWeb:tabViewHome:cpfCnpjWeb" :: BSC.ByteString) := (cgc_cpf)
     , ("javax.faces.ViewState" :: BSC.ByteString) := vv]
 
 siapiAndamento3Url =
