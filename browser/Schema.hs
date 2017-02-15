@@ -5,9 +5,12 @@ module Schema where
 
 import Data.String
 import System.Environment
+import Postgresql.Types
 import qualified Data.Poset as P
 import Control.Monad.Trans.Maybe
 import Codec.Compression.Zlib
+import Data.Word
+import Data.Int
 import Control.DeepSeq
 import Control.Monad.State
 import Query
@@ -71,15 +74,15 @@ import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as BSL
 
 
-createType :: (Bool,Bool,Bool,Bool,Bool,Bool,Text,Text) -> KType (Prim (Text,Text) (Text,Text))
-createType  (isNull,isArray,isDelayed,isRange,isDef,isComp,tysch,tyname)
+createType :: (Bool,Bool,Bool,Bool,Bool,Bool,Text,Text,Maybe Int32) -> KType (Prim (Text,Text,Maybe Word32) (Text,Text))
+createType  (isNull,isArray,isDelayed,isRange,isDef,isComp,tysch,tyname,typmod)
   = comp (Primitive base)
   where
     add i v = if i then v else id
     comp = add isNull KOptional . add isArray KArray . add isRange KInterval . add isDef KSerial . add isDelayed KDelayed
     base
       | isComp =  RecordPrim (tysch ,tyname)
-      | otherwise = AtomicPrim (tysch ,tyname)
+      | otherwise = AtomicPrim (tysch ,tyname,fromIntegral <$> typmod)
 
 
 recoverFields :: InformationSchema -> FKey (KType (Prim KPrim  (Text,Text))) -> FKey (KType (Prim PGType PGRecord))
@@ -137,7 +140,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
        (oauth,ops ) <- liftIO$ authMap schema
        [Only uid] <- liftIO$ query conn "select oid from metadata.\"user\" where usename = ?" (Only user)
        uniqueMap <- liftIO$join $ mapM (\(t,c,op,mod,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr (V.toList $ fmap readFModifier mod) op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,field_modifiers,translation from  metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
-       res2 <- liftIO$ fmap ( (\i@(t,c,j,k,del,l,m,d,z,b)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  (join $ fromShowable2 (mapKType ty) .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,del,l,maybe False testSerial m,d,z,b)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_delayed,is_range,col_def,is_composite,type_schema,type_name from metadata.column_types where table_schema = ?"  (Only schema)
+       res2 <- liftIO$ fmap ( (\i@(t,c,j,k,del,l,m,d,z,b,typ)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  (join $ fromShowable2 (mapKType ty) .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,del,l,maybe False testSerial m,d,z,b,typ)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_delayed,is_range,col_def,is_composite,type_schema,type_name ,atttypmod from metadata.column_types where table_schema = ?"  (Only schema)
        let
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
           backendkeyMap = M.fromList keyList

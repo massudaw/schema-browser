@@ -106,6 +106,7 @@ readPrim t =
      PCnpj -> readCnpj
      PCpf-> readCpf
      PDouble ->  readDouble
+     PDimensional _ _ ->  readDouble
      PInt _-> readInt
      PTime a ->case a of
        PTimestamp zone -> readTimestamp

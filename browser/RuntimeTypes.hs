@@ -6,6 +6,7 @@ import Control.Concurrent
 
 import Types
 import Control.Exception
+import Postgresql.Types
 import Data.Time
 import Step.Common
 import Data.Interval(Interval)

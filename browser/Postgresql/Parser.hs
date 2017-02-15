@@ -73,11 +73,15 @@ mapKeyType  = fmap mapKType
 mapKType :: KType PGPrim -> KType CorePrim
 mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec ktypeLift (fmap textToPrim i)
 
-textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)
+textToPrim :: Prim PGType (Text,Text) -> Prim KPrim (Text,Text)
 -- textToPrim i | traceShow i False =undefined
-textToPrim (AtomicPrim (s,i)) = case  HM.lookup i  postgresPrim of
+textToPrim (AtomicPrim (s,i,tymod)) = case  HM.lookup i  postgresPrim of
   Just k -> AtomicPrim k -- $ fromMaybe k (M.lookup k (M.fromList postgresLiftPrim ))
-  Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
+  Nothing -> case tymod of
+               Just ty -> case HM.lookup i postgresPrimTyp of
+                            Just i -> AtomicPrim $ i ty
+                            Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
+               Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
 textToPrim (RecordPrim i) =  (RecordPrim i)
 
 
@@ -125,7 +129,7 @@ instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
         -- | k == Just "POINT3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
         -- | ty == Just "LINESTRING3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
         -- | otherwise  = TF.toField  tyv
-      toFiel (Primitive k) (TB1 i) = TF.toField i
+      toFiel (Primitive k) (TB1 i) = TF.Many [TF.toField i ,TF.Plain $ fromByteString $maybe ""  (" :: "<>) (BS.pack . T.unpack <$> renderType (Primitive k))]
       toFiel i j = errorWithStackTrace ("toFiel" ++ show (i,j))
 
 
@@ -142,12 +146,12 @@ instance  TF.ToField (TB Identity Key Showable)  where
 
 instance  TF.ToField (TB Identity PGKey Showable)  where
   toField (Attr k  i) = case  topconversion preconversion (textToPrim <$> keyType k) of
-          Just (_,b) -> TF.toField (fmap ( snd $ (\(AtomicPrim i ) -> i)$head $ F.toList $ keyType k,) $ b i)
-          Nothing -> TF.toField (fmap (snd $ (\(AtomicPrim i ) -> i) $ head $ F.toList $ keyType k,) i)
+          Just (_,b) -> TF.toField (fmap ( (\(AtomicPrim (_,i,_) ) -> i)$head $ F.toList $ keyType k,) $ b i)
+          Nothing -> TF.toField (fmap ((\(AtomicPrim (_,i,_) ) -> i) $ head $ F.toList $ keyType k,) i)
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
   toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri ) ) $ maybe id (flip mappend) attrs $ (unTB <$> F.toList (_kvvalues $ unTB i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ unTB i))
-  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
+  toField (IT n  (ArrayTB1 is)) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
   toField e = errorWithStackTrace (show e)
 
 
@@ -407,6 +411,7 @@ parsePrimJSON i  v =
       PMime _ -> A.withText (show i) (return .SBinary . (fst . B16.decode . BS.drop 1 . BS.dropWhile (=='\\') )  . BS.pack . T.unpack )
       PInt  _ -> A.withScientific (show i) (return .SNumeric . floor)
       PDouble  -> A.withScientific (show i) (return .SDouble . toRealFloat)
+      PDimensional _ _ -> A.withText (show i) (return .SDouble .  read . T.unpack )
       PBoolean -> A.withBool (show i) (return. SBoolean)
       PAddress -> A.withText (show i) (return .SText )
       PColor -> A.withText (show i) (return .SText )
@@ -420,7 +425,7 @@ parsePrimJSON i  v =
         PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay . fst) . strptime "%Y-%m-%d")
       PGeom a -> A.withText (show i)  (fmap SGeo . either fail pure .Sel.runGet (parseGeom a). fst . B16.decode .BS.pack . T.unpack)
 
-      i -> errorWithStackTrace (show i)
+      i -> errorWithStackTrace ("not defined " <> show i)
   ) v
 
 -- parseGeom a | traceShow a False = undefined

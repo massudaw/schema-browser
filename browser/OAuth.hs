@@ -7,6 +7,7 @@ import SchemaQuery
 import Control.Lens
 import Control.Exception
 import Utils
+import Postgresql.Types (PGPrim,PGType)
 import qualified Types.Index as G
 import qualified Data.ByteString.Lazy.Char8 as BS
 import Control.Arrow
@@ -521,8 +522,8 @@ mapKeyType  = fmap mapKType
 mapKType :: KType PGPrim -> KType CorePrim
 mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec (fmap textToPrim i)
 
-textToPrim :: Prim (Text,Text) (Text,Text) -> Prim KPrim (Text,Text)
-textToPrim (AtomicPrim (s,i)) = case  HM.lookup i  gmailPrim of
+textToPrim :: Prim PGType  (Text,Text) -> Prim KPrim (Text,Text)
+textToPrim (AtomicPrim (s,i,_)) = case  HM.lookup i  gmailPrim of
   Just k -> AtomicPrim k
   Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
 textToPrim (RecordPrim i) =  (RecordPrim i)

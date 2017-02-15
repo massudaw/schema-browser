@@ -501,6 +501,10 @@ instance (Show i,P.Poset i )=> P.Poset (Rel i)where
                                         True -> P.LT
                                         False -> P.compare j i
   compare  (Rel i _ a ) (Rel j _ b) = P.compare i j <> P.compare a b
+  compare  n@(RelFun i  a ) o@(RelFun j k)  = case traceShow (n,o) $ traceShowId (L.any (== Inline j) a,L.any (==Inline i) k)  of
+                                          (True ,_)-> P.GT
+                                          (_,True)-> P.LT
+                                          (False,False)-> P.compare (Inline i) (Inline j)
   compare  (RelFun i  a ) j  = case L.any (== j) a  of
                                           True -> P.GT
                                           False -> P.compare (Inline i) j
@@ -514,10 +518,10 @@ instance (Show i,P.Poset i )=> P.Poset (Rel i)where
 
 
 instance P.Poset (FKey i)where
-  compare  = (\i j -> case compare (i) (j) of
+  compare  i j = case compare (i) (j) of
                       EQ -> P.EQ
                       LT -> P.LT
-                      GT -> P.GT )
+                      GT -> P.GT
 
 relabeling :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB f k a -> TB p k a
 relabeling p l (Attr k i ) = (Attr k i)

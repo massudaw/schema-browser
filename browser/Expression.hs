@@ -1,7 +1,9 @@
 module Expression where
 
+import Control.Monad
 import Data.Map (Map)
 import qualified Data.Map  as M
+import Safe
 import Data.Interval(upperBound,lowerBound)
 import Data.Monoid
 import Step.Host
@@ -43,12 +45,13 @@ funmap = M.fromList [
 
 
 preevaluate :: Key -> Expr -> Map Text (([k],k ),[FTB Showable] -> FTB Showable) -> [Access Key] -> [Maybe (FTB Showable)] -> Maybe (Column Key Showable)
+preevaluate k e fs ac res | traceShow (ac,res) False = undefined
 preevaluate k e fs ac res = Fun k (e, ac) <$> go e
   where
     go :: Expr -> Maybe (FTB Showable)
     go (Function i e) = f <$> (traverse go   e)
       where (_,f) = justError ("no function" <> show i) $ M.lookup i fs
-    go (Value i ) = (res !! i)
+    go (Value i ) = join (res `atMay` i)
 
 
 evaluate :: Key -> Expr -> Map Text (([k],k ),[FTB Showable] -> FTB Showable) -> [Access Key] -> TBData Key Showable -> Maybe (Column Key Showable)
@@ -57,6 +60,6 @@ evaluate k e fs ac tb = Fun k (e,ac) <$> go e
     go :: Expr -> Maybe (FTB Showable)
     go (Function i e) = f <$> (traverse go   e)
       where (_,f) = justError ("no function" <> show i) $ M.lookup i fs
-    go (Value i ) = indexFieldRec (ac !! i ) tb
+    go (Value i ) = join $ flip indexFieldRec tb <$> (ac `atMay` i)
 
 

@@ -4,6 +4,7 @@ module Postgresql.Backend (connRoot,postgresOps) where
 import Types
 import qualified Types.Index as G
 import SchemaQuery
+import Postgresql.Types
 import Step.Common
 import qualified Data.Poset as P
 import Control.Exception (uninterruptibleMask,mask_,throw,catch,throw,SomeException)
@@ -57,6 +58,7 @@ filterFun  = filter (\k -> not $ isFun k )
 overloadedRules = M.fromList [(("metadata","catalog_schema"),[CreateRule createSchema,DropRule dropSchema,UpdateRule alterSchema])] <> overloaedTables
 
 overloaedTables = M.fromList [(("metadata","catalog_tables"),[CreateRule createTableCatalog])]
+
 
 createTableCatalog v = do
       inf <- ask

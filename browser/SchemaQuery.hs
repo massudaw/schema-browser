@@ -218,7 +218,7 @@ getFKRef inf predtop rtable (evs,me,old) v (Path r (FKInlineTable  j )) =  do
                              in  fmap WherePredicate (go (test (S.toList r)) l)
 
                 -- editAttr :: (TBData Key Showable -> TBData Key Showable) -> TBData Key Showable -> TBData Key Showable
-                editAttr fun  (m,i) = (m,mapComp (\(KV i) -> KV (M.alter  (fmap (mapComp (Le.over fkttable (fmap (either undefined  id .fun))))) (S.map Inline r)  i )) i )
+                editAttr fun  (m,i) = (m,mapComp (\(KV i) -> KV (M.alter  (fmap (mapComp (Le.over ifkttable (fmap (either undefined  id .fun))))) (S.map Inline r)  i )) i )
                 nextRef :: [TBData Key Showable]
                 nextRef= (concat $ catMaybes $ fmap (\i -> fmap (F.toList . _fkttable.unTB) $ M.lookup (S.map Inline r) (_kvvalues $ unTB $ snd  i) )v)
 
@@ -233,8 +233,8 @@ getFKRef inf predtop rtable (evs,me,old) v (Path r (FKInlineTable  j )) =  do
 
 getFKRef inf predtop rtable (evs,me,old) v (Path ref (FunctionField a b c)) = do
   let
-    addAttr :: TBData Key Showable -> Either [Compose Identity (TB Identity)  Key Showable] (TBData Key Showable)
-    addAttr (m,i) = maybe (Left []) (\r -> Right (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)   i) ) i)) r
+    addAttr :: TBData Key Showable -> Either ([Compose Identity (TB Identity)  Key Showable],[Rel Key]) (TBData Key Showable)
+    addAttr (m,i) = maybe (Right (m,i)) (\r -> Right (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)   i) ) i)) r
       where
         r =  evaluate a b funmap c (m,i)
   return (evs,me >=> addAttr ,old <> ref )
@@ -286,8 +286,8 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                     tar = S.fromList $ fmap _relOrigin i
                     refl = S.fromList $ fmap _relOrigin $ filterReflexive i
                     inj = S.difference refl old
-                    joinFK :: TBData Key Showable -> Either [Compose Identity (TB Identity)  Key Showable] (Column Key Showable)
-                    joinFK m  = maybe (Left taratt) Right $ FKT (kvlist tarinj ) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ fmap unTB $ taratt ) tb2
+                    joinFK :: TBData Key Showable -> Either ([Compose Identity (TB Identity)  Key Showable],[Rel Key]) (Column Key Showable)
+                    joinFK m  = maybe (Left (taratt,i)) Right $ FKT (kvlist tarinj ) i <$> joinRel2 (tableMeta table ) (fmap (replaceRel i )$ fmap unTB $ taratt ) tb2
                       where
                         replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
                         taratt = getAtt tar (tableNonRef' m)
@@ -311,13 +311,12 @@ getFKS
      -> [TBData Key Showable]
      -> TransactionM
           ([(SqlOperation,Event [RowPatch Key Showable])],TBData Key Showable -> Either
-                [Compose Identity (TB Identity) Key Showable]
+                ([Compose Identity (TB Identity) Key Showable],[Rel Key])
                 (TBData Key Showable),
            S.Set Key)
-getFKS inf predtop table v = F.foldl' (\m f  -> m >>= (\i -> getFKRef inf predtop  table i v f)) (return ([],return ,S.empty )) $ sorted -- first <> second
-  where first =  filter (not .isFunction . pathRel )$ sorted
-        second = filter (isFunction . pathRel )$ sorted
-        sorted = P.sortBy (P.comparing pathRelRel)  (S.toList (rawFKS table))
+getFKS inf predtop table v = F.foldl' (\m f  -> m >>= (\i -> getFKRef inf predtop  table i v f)) (return ([],return ,S.empty )) $ traceShowId sorted -- first <> second
+  where
+        sorted = P.sortBy (P.comparing ( pathRelRel))  (S.toList (rawFKS table))
 
 rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ ( lookAccess inf (tableName t) . (Le.over Le._1 (fmap  keyValue) )<$> fixed)
 
@@ -430,15 +429,15 @@ childrenRefsUnique  inf table (sidxs,base) (FKJoinTable rel j ,evs)  =  concat $
                 jtable = lookTable rinf $ snd j
                 sidx = M.lookup (keyFastUnique . _relOrigin  <$> rel) (M.fromList sidxs)
                 search (PatchRow p@(_,G.Idex v,_)) idxM = case idxM of
-                  Just idx -> conv <$> resIndex idx
-                  Nothing -> conv <$> resScan base
+                  Just idx -> concat $ conv <$> resIndex idx
+                  Nothing -> concat $ conv <$> resScan base
                   where
                     predK = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (IProd Nothing [o]  , Left (fromJust $ unSOptional' $fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
                     predKey =  mapPredicate keyFastUnique predK
                     pred =  mapPredicate (\o -> justError "no pk" $ L.elemIndex o (fmap _relOrigin rel)) predK
                     resIndex idx = G.query pred idx
                     resScan idx = catMaybes $ fmap (\(i,t) -> ((G.getIndex i,t), G.getUnique (fmap (keyFastUnique._relOrigin) rel) i)) . (\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx
-                    conv ((pk,[t]),G.Idex fks) = PatchRow (kvempty,pk ,[PFK relf (zipWith (\i j -> PAttr (_relOrigin i) (patch j)) relf fks ) (recurse2 t p)])
+                    conv ((pk,ts),G.Idex fks) = (\t -> PatchRow (kvempty,pk ,[PFK relf (zipWith (\i j -> PAttr (_relOrigin i) (patch j)) relf fks ) (recurse2 t p)]) ) <$> ts
                     unKOptional (KOptional i) = i
                     unKOptional i = i
                     recurse2 (G.PathAttr _ i ) p = traceShowId $ go i

@@ -1,9 +1,12 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE BinaryLiterals,FlexibleContexts #-}
 module Postgresql.Types where
 
 import Types
 import Data.Tuple
+import Data.Bits
 import qualified Data.Vector as V
+import Data.Int
+import Data.Word
 import qualified NonEmpty as Non
 import Data.Time
 import qualified Data.HashMap.Strict as HM
@@ -16,9 +19,16 @@ import Control.Monad
 import Debug.Trace
 import Data.Maybe
 import GHC.Stack
+import Data.Word
 
 type PrimType = KType (Prim KPrim (Text,Text))
 
+type PGType = (Text,Text,Maybe Word32)
+type PGRecord = (Text,Text)
+
+type PGKey = FKey (KType PGPrim )
+
+type PGPrim =  Prim PGType PGRecord
 
 -- This module implement a rule system  that converts general higher order datatypes  to backend primitive ones
 -- it assembles a isomorphism between the two types
@@ -105,6 +115,17 @@ rewriteOp = M.fromList [
       ((Primitive (AtomicPrim (PGeom $ PBounding 2)),  (Flip Contains) ,Primitive (AtomicPrim (PGeom $ PPosition 2))) , "&&"),
       ((Primitive (AtomicPrim (PGeom $ PBounding 3)),  (Flip Contains) ,Primitive (AtomicPrim (PGeom $ PPosition 3))) , "&&")]
 
+postgresPrimTyp :: HM.HashMap Text (Word32 -> KPrim)
+postgresPrimTyp = HM.fromList [("dimensional",decoderDimensional)]
+
+decoderDimensional :: Word32 -> KPrim
+decoderDimensional i = PDimensional (take 7)  (take 6,take 5 , take 4 ,take 3 ,take 2 ,take 1 ,take 0 )
+  where
+    take = fromIntegral . flip take4 i
+
+take4 :: Int -> Word32 -> Int8
+take4 ix i  =  (if testBit i (o + 3)  then 0b11111000 else 0)   .|. (  fromIntegral ((i `shiftR` o)  .&. 0b111))
+  where o = ix*4
 
 postgresPrim :: HM.HashMap Text KPrim
 postgresPrim =
@@ -134,8 +155,13 @@ postgresPrim =
   ,("double precision",PDouble)
   ,("numeric",PDouble)
   ,("float8",PDouble)
+  ,("int8",PInt 8)
   ,("int4",PInt 4)
-  ,("oid",PInt 4)
+  ,("int2",PInt 2)
+  ,("oid",PText)
+  ,("cid",PText)
+  ,("xid",PText)
+  ,("tid",PText)
   ,("cnpj",PCnpj)
   ,("cpf",PCpf)
   ,("int8",PInt 8)

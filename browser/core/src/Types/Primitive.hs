@@ -92,10 +92,6 @@ newtype TBIndex  a
   deriving(Eq,Show,Ord,Functor,Generic)
 
 
-type PGType = (Text,Text)
-type PGKey = FKey (KType PGPrim )
-type PGRecord = (Text,Text)
-type PGPrim =  Prim PGType PGRecord
 type CorePrim = Prim KPrim (Text,Text)
 type CoreKey = FKey (KType CorePrim)
 
@@ -229,6 +225,7 @@ data KPrim
    | PAddress
    | PInt Int
    | PDouble
+   | PDimensional Int (Int,Int,Int,Int,Int,Int,Int)
    | PGeom GeomType
    | PTime TimeType
    | PMime Text
@@ -770,14 +767,14 @@ tableKeys (ArrayTB1 (i :| _) ) = tableKeys i
 
 recOverAttr :: Ord k => [Set(Rel k)] -> TB Identity k a -> (Map (Set (Rel k )) (Compose Identity (TB Identity) k a ) -> Map (Set (Rel k )) (Compose Identity (TB Identity) k a ))
 recOverAttr (k:[]) attr = Map.insert k (_tb attr )
-recOverAttr (k:xs) attr = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . recOverAttr xs attr . _kvvalues )))))))  k
+recOverAttr (k:xs) attr = Map.alter (fmap (mapComp (Le.over ifkttable (fmap (fmap (mapComp (KV . recOverAttr xs attr . _kvvalues )))))))  k
 
 recOverMAttr' :: [Set (Rel Key)] -> [[Set (Rel Key)]] -> Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b ) ->Map (Set (Rel Key)) (Compose Identity (TB Identity ) Key b )
 recOverMAttr' tag tar  m =   foldr go m tar
   where
-    go (k:[]) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . recOverAttr tag  recv . _kvvalues ))))) )) k
+    go (k:[]) = Map.alter (fmap (mapComp (Le.over ifkttable (fmap (fmap (mapComp (KV . recOverAttr tag  recv . _kvvalues ))))) )) k
       where recv = gt tag m
-    go (k:xs) = Map.alter (fmap (mapComp (Le.over fkttable (fmap (fmap (mapComp (KV . go xs . _kvvalues )))) ))) k
+    go (k:xs) = Map.alter (fmap (mapComp (Le.over ifkttable (fmap (fmap (mapComp (KV . go xs . _kvvalues )))) ))) k
     gt (k:[]) = unTB . justError "no key" . Map.lookup k
     gt (k:xs) = gt xs . _kvvalues . unTB . snd . head .F.toList. _fkttable . unTB  . justError "no key" . Map.lookup k
 

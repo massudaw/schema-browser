@@ -35,7 +35,13 @@ import Data.Traversable (traverse)
 unF i = L.head (F.toList (getCompose i))
 
 findFK :: (Show k ,Ord k ,Foldable f ,Show a) => [k] -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
-findFK  l v =  M.lookup (S.fromList l) $M.mapKeys (S.map ( _relOrigin)) $ _kvvalues $ unF (snd v)
+findFK  l v =  fmap snd $ L.find (\(i,v) -> isFK v && S.map _relOrigin i == (S.fromList l))  $ M.toList $ _kvvalues $ unF (snd v)
+  where isRel (Rel _ _ _ ) = True
+        isRel _ = False
+        isFK i = case unF i of
+                   FKT _ _ _ -> True
+                   IT _  _  -> True
+                   i -> False
 
 findAttr :: (Show k ,Ord k ,Foldable f ,Show a) => [k] -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
 findAttr l v =  M.lookup (S.fromList $ Inline <$> l) (  _kvvalues $ unF (snd v))  <|> findFun l v

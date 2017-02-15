@@ -375,6 +375,7 @@ renderType (Primitive (AtomicPrim t) ) =
     PBinary -> "bytea"
     PDynamic -> "bytea"
     PDouble -> "double precision"
+    PDimensional _ _ -> "dimensional"
     PText -> "character varying"
     PInt v -> case v of
       4 -> "integer"

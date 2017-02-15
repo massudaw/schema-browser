@@ -14,6 +14,7 @@
 module Types.Common (
      module Types.Compose
     ,TB (..),TB2,TB3
+    ,_fkttable
     ,mapFValue,mapFValue',mapFAttr,traFAttr,traFValue,mapValue,mapValue'
     ,keyAttr
     ,unAttr
@@ -371,6 +372,7 @@ instance NFData Expr
 
 
 
+
 data TB f k a
   = Attr
     { _tbattrkey :: !k
@@ -383,14 +385,19 @@ data TB f k a
     }
   | IT -- Inline Table
     { _tbattrkey :: ! k
-    , _fkttable ::   ! (FTB1 f  k a)
+    , _ifkttable ::   ! (FTB1 f  k a)
     }
   | FKT -- Foreign Table
     { _tbref ::  ! (KV (Compose f (TB f)) k a)
     , _fkrelation :: ! [Rel k]
-    , _fkttable ::   ! (FTB1 f  k a)
+    , _ifkttable ::   ! (FTB1 f  k a)
     }
   deriving(Functor,Foldable,Traversable,Generic)
+
+_fkttable (IT _  i) = i
+_fkttable (FKT _ _ i) = i
+_fkttable (Attr i _) = errorWithStackTrace "hit attr"
+_fkttable (Fun i _ _) = errorWithStackTrace "hit fun"
 
 deriving instance (Eq (f (TB f k a )), Eq (f (KV (Compose f (TB f)) k ())) ,Eq (f (TB f k () )) , Eq ( (FTB1 f  k a )) ,Eq a , Eq k ) => Eq (TB f k a)
 deriving instance (Ord (f (TB f k a )), Ord (f (KV (Compose f (TB f)) k ())), Ord (f (TB f k () )) , Ord ( (FTB1 f  k a )) ,Ord a , Ord k ) => Ord (TB f k a)

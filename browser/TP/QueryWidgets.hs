@@ -285,6 +285,7 @@ goAttSize i = case i of
                   case (\(AtomicPrim i) -> i) $ i of
                        PInt _-> (3,1)
                        PText-> (3,1)
+                       PDimensional _ _ -> (3,1)
                        PTime PDate -> (3,1)
                        PColor-> (3,1)
                        PTime (PTimestamp _ )-> (3,1)
@@ -386,8 +387,9 @@ tbCaseDiff inf _ a@(Fun i rel ac ) wl plugItens preoldItems = do
     search (IProd _ t) = fmap (fmap _tbattr ). uncurry recoverT .snd <$> L.find ((S.fromList t ==) . S.fromList . fmap _relOrigin . keyattri . fst) wl
     search (Nested (IProd _ t) m ) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). uncurry recoverT . snd <$> L.find ((S.fromList t ==) . S.fromList . fmap _relOrigin .keyattri . fst) wl
     refs = sequenceA $ catMaybes $ fmap search (snd rel)
-  ev <- fmap (fmap (PFun i rel )) <$> buildUIDiff (keyModifier i)(keyType i) [] (fmap _tbattr . preevaluate i (fst rel) funmap (snd rel) <$> refs )
-  return $ TrivialWidget (triding ev) (getElement ev)
+  funinp <- ui$ cacheTidings (fmap _tbattr . preevaluate i (fst rel) funmap (snd rel) <$> refs )
+  ev <- buildUIDiff (keyModifier i)(keyType i) [] funinp
+  return $ TrivialWidget (editor <$> preoldItems <*> (fmap (Fun i rel) <$>  funinp)) (getElement ev)
 
 recoverT i j = liftA2 (flip recoverEditChange) i j
 
@@ -453,6 +455,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
       repl (Rec  ix v ) = replace ix v v
       repl (Many[(Rec  ix v )]) = replace ix v v
       repl v = v
+      srefs = P.sortBy (P.comparing (traceShowId .F.toList . fst) ) . M.toList $ replaceRecRel (unTBMap ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
   plugmods <- ui$ traverse (traverse cacheTidings ) $ first repl <$> (resdiff <> plmods)
   fks :: [(Column CoreKey () ,(TrivialWidget (Editor (Index (Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable))))]  <- foldl' (\jm (l,m)  -> do
             w <- jm
@@ -472,7 +475,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
               else labelCaseDiff inf (unTB m) nref
 
             return (w <> [(unTB m,(lab,aref))])
-        ) (return []) (P.sortBy (P.comparing fst ) . M.toList $ replaceRecRel (unTBMap $ ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta))
+        ) (return [])  (srefs)
   let
       sequenceTable :: [(Column CoreKey () ,(TrivialWidget (Editor (Index (Column CoreKey Showable))), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (Index (TBData CoreKey Showable)))
       sequenceTable fks = (\old difs -> (\ i ->  (fmap (tableMeta table , maybe (G.Idex [])G.getIndex old,)   ) i) . reduceTable $ difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
@@ -590,7 +593,7 @@ processPanelTable
 processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   let
       inscrud = recoverEditChange <$> oldItemsi <*> inscrudp
-      containsGistNotEqual old ref map = if isJust refM then (\i -> if L.null i  then True else [old] == F.toList i)$  (lookGist ix ref map) else False
+      containsGistNotEqual old ref map = if isJust refM then (\i -> if L.null i  then True else [G.getIndex old] == L.nub (fmap G.getIndex (F.toList i)))$  (lookGist ix ref map) else False
         where ix = (_kvpk (tableMeta table))
               refM = traverse unSOptional' (getPKM ref)
       containsGist ref map = if isJust refM then not $ L.null $  (lookGist ix ref map) else False
@@ -904,6 +907,26 @@ buildPrim fm tdi i = case i of
                     composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children (getElement <$> [lon,lat])
                     upper <- UI.div # set children [composed]
                     return $ TrivialWidget res upper
+         PDimensional i (a,b,c,d,e,f,g) -> do
+           let mult = zip [a,b,c,d,e,f,g] un
+               multP = filter ((>0).fst) mult
+               multN = filter ((<0).fst) mult
+
+               un = ["mol","K","g","l","A","s","m"]
+               pols = (L.intercalate "." $ fmap (\(i,j)-> if i == 1 then j else j<> "^" <> show i) multP)
+               negs = (L.intercalate "." $ fmap (\(i,j)-> j<> "^" <> show (abs i)) multN)
+               build i j
+                 | L.length i == 0 && L.length j == 0 = ""
+                 | L.length i == 0  = "1/" <> negs
+                 | L.length j == 0  = pols
+                 | otherwise = pols <> "/" <> negs
+               scale i
+                 | i == 0 = ""
+                 | otherwise = "10^" <> show i  <> "."
+           tag <- UI.span # set text  (scale i <> build pols negs)
+           out <- oneInput tdi [tag]
+           element out # set UI.style [("width","100%")]
+           return out
          PBoolean -> do
            res <- checkedWidgetM (fmap (\(SBoolean i) -> i) <$> tdi )
            return (fmap SBoolean <$> res)
@@ -1032,7 +1055,7 @@ buildPrim fm tdi i = case i of
     oneInput :: Tidings (Maybe Showable) -> [Element] ->  UI (TrivialWidget (Maybe Showable))
     oneInput tdi elem = do
             v <- currentValue (facts tdi)
-            inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("width","100%")] -- # if [FRead] == fm then (set (UI.strAttr "readonly") "") else id
+            inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("width","70%")] -- # if [FRead] == fm then (set (UI.strAttr "readonly") "") else id
             onCE <- UI.onChangeE inputUI
 
             let pke = unionWith const (readPrim i <$> onCE ) (rumors tdi)
