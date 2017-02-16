@@ -503,14 +503,27 @@ flipSort P.EQ = P.EQ
 flipSort P.GT = P.LT
 flipSort P.LT = P.GT
 
+-- To Topologically sort the elements we compare  both inputs and outputs for intersection if one matches we flip the
 instance  (Ord k,Show k,P.Poset k) => P.Poset (RelSort k ) where
-  compare (RelSort i ) (RelSort j) = case comp (S.fromList $ concat $ catMaybes $  _relOutputs <$> i) (S.fromList $ concat $ catMaybes $ _relInputs <$> j) of
-                                        P.LT -> P.LT
-                                        _ -> flipSort (P.compare  (S.fromList $ concat $ catMaybes $ _relOutputs <$> j) (S.fromList $ concat $ catMaybes $  _relInputs <$> i))
+  compare (RelSort i ) (RelSort j)
+    = case (comp (norm $  _relOutputs <$> i) (norm  $ _relInputs <$> j) , flipSort (comp (norm  $ _relOutputs <$> j) (norm  $  _relInputs <$> i)) ,P.compare (inp i) (inp j),P.compare (out i ) (out j) ) of
+            -- Reverse order
+            (_ , P.GT,_,_) -> P.GT
+            -- Right order
+            (P.LT , _ ,_,_) -> P.LT
+            -- No intersection  between elements sort by inputset
+            (_,_ ,P.EQ,o) -> o
+            (_,_ ,i,_) -> i
 
-      where comp i j  | S.empty == i = P.EQ
-            comp i j  | S.empty == j  = P.EQ
-            comp i j = P.compare i j
+    where
+      inp j= norm $ _relInputs <$> j
+      out j = norm $ _relOutputs <$> j
+      norm  = S.fromList . concat . catMaybes
+      comp a b  | traceShow (i,j ,a,b,P.compare a b) False = undefined
+      comp i j  | S.null (S.intersection i j ) = P.EQ
+      comp i j  | S.empty == i = P.EQ
+      comp i j  | S.empty == j  = P.EQ
+      comp i j = P.compare i j
   compare (RelSort [i] ) (RelSort [j]) = P.compare i j
   compare (RelSort [i] ) (RelSort j) = P.compare (S.singleton i ) (S.fromList j) <> if L.any (==P.EQ) (P.compare i <$> j) then P.LT else foldl1 mappend  (P.compare i <$> j)
   compare (RelSort i ) (RelSort [j]) = P.compare (S.fromList i) (S.singleton j ) <> if L.any (==P.EQ) (flip P.compare j <$> i) then P.GT else foldl1 mappend (flip P.compare j <$> i)

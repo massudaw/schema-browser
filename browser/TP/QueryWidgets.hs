@@ -1333,8 +1333,6 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
                               TrivialWidget i el <- mapSelector inf selection (pure (t,"month")) tdi (never, pure Nothing)
                               onEvent (rumors $ diffTidings i ) (liftIO . helbox.Just)
                               return el
-
-
                                         ) (triding navMeta)
 
               elembox <- UI.div # sink children (pure <$> facts lboxeel)
