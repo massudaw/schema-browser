@@ -330,10 +330,10 @@ loadFKSDisk inf table = do
   let
     targetTable = lookTable inf (_kvname (fst table))
     items = unKV . snd  $ table
-  fks <- fmap catMaybes $ snd $ F.foldl' (\(s,l) i@(Path si _ ) -> (s <> si ,liftA2 (:) (loadFKDisk inf ( table ) s i) l) )  (S.empty , return []) (P.sortBy (P.comparing pathRelRel) $F.toList (rawFKS targetTable))
+  fks <- fmap catMaybes $ snd $ F.foldl' (\(s,l) i@(Path si _ ) -> (s <> si ,liftA2 (:) (loadFKDisk inf ( table ) s i) l) )  (S.empty , return []) (P.sortBy (P.comparing (RelSort . S.toList . pathRelRel)) $F.toList (rawFKS targetTable))
   let
     fkSet:: S.Set Key
-    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ (P.sortBy (P.comparing pathRelRel) $F.toList (rawFKS targetTable))
+    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ (P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) $F.toList (rawFKS targetTable))
     fkSet2:: S.Set Key
     fkSet2 =   (S.fromList $ concat $ fmap (fmap _relOrigin .keyattri) $ fks)
     nonFKAttrs :: [(S.Set (Rel Key) ,Column Key Showable)]

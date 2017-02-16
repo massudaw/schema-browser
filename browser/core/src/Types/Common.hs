@@ -40,7 +40,7 @@ module Types.Common (
     ,kvempty
 
     ,Rel(..)
-    ,_relOrigin  ,_relRoot  ,_relTarget
+    ,_relOrigin  ,_relRoot  ,_relTarget,_relInputs,_relOutputs
 
     ,Expr (..) , Access(..)
     ,UnaryOperator(..)
@@ -353,6 +353,19 @@ _relRoot  (RelAccess i _ ) = i
 _relRoot  (RelFun i _ ) = i
 
 
+_relInputs (Rel i _ _ ) = Just [i]
+_relInputs (Inline i   ) = Nothing
+_relInputs (RelAccess i _ ) = Just [i ]
+_relInputs (RelFun  _ l) = Just $ fmap _relOrigin l
+
+_relOutputs (Rel i IntersectOp  _ ) = Nothing
+_relOutputs (Rel i (Flip IntersectOp ) _ ) = Nothing
+_relOutputs (Rel i Contains _ ) = Nothing
+_relOutputs (Rel i (Flip Contains ) _ ) = Nothing
+_relOutputs (Rel i _ _ ) = Just [i]
+_relOutputs (Inline i ) = Just [i]
+_relOutputs (RelAccess i _) = Nothing -- Just [i]
+_relOutputs (RelFun i _) = Just [i]
 
 instance (Binary (f k a) ,Binary k ) => Binary (KV f k a)
 instance Binary k => Binary (Rel k)

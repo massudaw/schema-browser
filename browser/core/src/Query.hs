@@ -10,6 +10,7 @@ module Query
   (
    tbPK
   ,tableAttrs
+  ,RelSort(..)
   ,joinRel
   ,liftASch
   ,joinRel2
@@ -184,12 +185,15 @@ isTableRec' tb = not $ L.null $ _kvrecrels (fst  tb )
 isPrimReflexive :: Eq b => Prim KPrim b -> Prim KPrim b -> Bool
 isPrimReflexive i j | i == j = True
 isPrimReflexive (AtomicPrim (PInt i)) (AtomicPrim (PInt j)) = True
+isPrimReflexive (AtomicPrim (PDimensional _ i)) (AtomicPrim (PDouble )) = True
+isPrimReflexive (AtomicPrim (PDouble )) (AtomicPrim (PDimensional _ _ )) = True
+isPrimReflexive (AtomicPrim (PDimensional _ _ )) (AtomicPrim (PDimensional  _ _ )) = True
 isPrimReflexive a b = False
 
 isPairReflexive :: (Show b , Eq b) => KType (Prim KPrim b ) -> BinaryOperator -> KType (Prim KPrim b) -> Bool
 isPairReflexive i   IntersectOp j = False
-isPairReflexive (Primitive i ) op (KInterval (Primitive j)) | i == j = False
-isPairReflexive (Primitive j) op  (KArray (Primitive i) )  | i == j = False
+isPairReflexive (Primitive i ) op (KInterval (Primitive j)) | i `isPrimReflexive` j = False
+isPairReflexive (Primitive j) op  (KArray (Primitive i) )  | i `isPrimReflexive` j = False
 isPairReflexive (KInterval i) op (KInterval j)
   | i == j && op == Contains = False
   | op == Equals = isPairReflexive i op j
@@ -370,10 +374,11 @@ recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else
                     i <- fmap (relFk,) . recursePath m nextLeft ( fmap (fmap (L.drop 1 ))  <$> L.filter (\(_,i) -> mAny (\i -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) i ) (isRec <> fmap (\i -> (i,i) ) (_kvrecrels m))) vacc ( (fmap getCompose items )) invSchema $ fk
                     return (fmap getCompose i:vacc)
                   else return vacc
-                  ) (return []) $ P.sortBy (P.comparing pathRelRel) (F.toList $ fks' )
+                  ) (return []) $ P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) (F.toList $ fks' )
           return (   KV $ M.fromList $ nonFKAttrs <> (fmap (fmap Compose ) pt)))
 
 mAny f (MutRec i) = L.any f i
+
 
 
 type RecState k = [(MutRec [[Rel k]],MutRec [[Rel k]])]
@@ -492,6 +497,25 @@ inf' = unFinite . Interval.lowerBound
 sup' = unFinite . Interval.upperBound
 
 
+data RelSort k = RelSort [Rel k] deriving (Eq,Ord)
+
+flipSort P.EQ = P.EQ
+flipSort P.GT = P.LT
+flipSort P.LT = P.GT
+
+instance  (Ord k,Show k,P.Poset k) => P.Poset (RelSort k ) where
+  compare (RelSort i ) (RelSort j) = case comp (S.fromList $ concat $ catMaybes $  _relOutputs <$> i) (S.fromList $ concat $ catMaybes $ _relInputs <$> j) of
+                                        P.LT -> P.LT
+                                        _ -> flipSort (P.compare  (S.fromList $ concat $ catMaybes $ _relOutputs <$> j) (S.fromList $ concat $ catMaybes $  _relInputs <$> i))
+
+      where comp i j  | S.empty == i = P.EQ
+            comp i j  | S.empty == j  = P.EQ
+            comp i j = P.compare i j
+  compare (RelSort [i] ) (RelSort [j]) = P.compare i j
+  compare (RelSort [i] ) (RelSort j) = P.compare (S.singleton i ) (S.fromList j) <> if L.any (==P.EQ) (P.compare i <$> j) then P.LT else foldl1 mappend  (P.compare i <$> j)
+  compare (RelSort i ) (RelSort [j]) = P.compare (S.fromList i) (S.singleton j ) <> if L.any (==P.EQ) (flip P.compare j <$> i) then P.GT else foldl1 mappend (flip P.compare j <$> i)
+  compare (RelSort i ) (RelSort j ) = P.compare (S.fromList i) (S.fromList j)
+
 instance (Show i,P.Poset i )=> P.Poset (Rel i)where
   compare  (Inline i ) (Inline j) = P.compare i j
   compare  (Rel i _ a ) (Inline j ) = case i == j of
@@ -518,7 +542,7 @@ instance (Show i,P.Poset i )=> P.Poset (Rel i)where
 
 
 instance P.Poset (FKey i)where
-  compare  i j = case compare (i) (j) of
+  compare  i j = case compare (keyPosition i) (keyPosition j) of
                       EQ -> P.EQ
                       LT -> P.LT
                       GT -> P.GT

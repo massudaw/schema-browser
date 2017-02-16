@@ -362,7 +362,6 @@ tbCaseDiff inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin $ fmap unTB $ unkvlist ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattri .fst) wl
             relTable = M.fromList $ fmap (\i -> (_relTarget i,_relOrigin i)) rel
---            m = (fst $ unTB1 tb1)
             restrictConstraint = filter ((`S.isSubsetOf` (S.fromList $ fmap _relTarget rel)) . S.fromList . getRelOrigin  .fst) constr
             convertConstr :: SelTBConstraint
             convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> constr .  justError "no back fk" .backFKRef relTable (getRelOrigin f)  ) j ) <$>  restrictConstraint
@@ -386,9 +385,9 @@ tbCaseDiff inf _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
     search (IProd _ t) = fmap (fmap _tbattr ). uncurry recoverT .snd <$> L.find ((S.fromList t ==) . S.fromList . fmap _relOrigin . keyattri . fst) wl
     search (Nested (IProd _ t) m ) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). uncurry recoverT . snd <$> L.find ((S.fromList t ==) . S.fromList . fmap _relOrigin .keyattri . fst) wl
-    refs = sequenceA $ catMaybes $ fmap search (snd rel)
+    refs = sequenceA $ catMaybes $ search <$> snd rel
   funinp <- ui$ cacheTidings (fmap _tbattr . preevaluate i (fst rel) funmap (snd rel) <$> refs )
-  ev <- buildUIDiff (keyModifier i)(keyType i) [] funinp
+  ev <- buildUIDiff ([FRead])(keyType i) [] funinp
   return $ TrivialWidget (editor <$> preoldItems <*> (fmap (Fun i rel) <$>  funinp)) (getElement ev)
 
 recoverT i j = liftA2 (flip recoverEditChange) i j
@@ -455,7 +454,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
       repl (Rec  ix v ) = replace ix v v
       repl (Many[(Rec  ix v )]) = replace ix v v
       repl v = v
-      srefs = P.sortBy (P.comparing (traceShowId .F.toList . fst) ) . M.toList $ replaceRecRel (unTBMap ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
+      srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (unTBMap ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
   plugmods <- ui$ traverse (traverse cacheTidings ) $ first repl <$> (resdiff <> plmods)
   fks :: [(Column CoreKey () ,(TrivialWidget (Editor (Index (Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable))))]  <- foldl' (\jm (l,m)  -> do
             w <- jm
@@ -568,8 +567,9 @@ crudUITable inf open reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItem
   end <- mapUIFinalizerT sub fun (diffTidings $ triding nav)
   element sub # sink children (pure <$> facts end)
   cv <- currentValue (facts preoldItems)
-  bh2 <- ui $ stepper  cv (unionWith const e2  (rumors preoldItems))
-  return ([getElement nav,sub], ediff ,F.foldl' (\i j -> mergePatches <$> i <*> j) (tidings bh2 (unionWith const e2  (rumors preoldItems))) (fmap snd pmods))
+  let evs2 = unionWith const e2  (rumors preoldItems)
+  bh2 <- ui $ stepper  cv evs2
+  return ([getElement nav,sub], ediff ,F.foldl' (\i j -> mergePatches <$> i <*> j) (tidings bh2 evs2) (fmap snd pmods))
 
 mergePatches i j = join (liftA2 applyIfChange i j)<|> i  <|> join (createIfChange <$>j)
 
@@ -912,7 +912,7 @@ buildPrim fm tdi i = case i of
                multP = filter ((>0).fst) mult
                multN = filter ((<0).fst) mult
 
-               un = ["mol","K","g","l","A","s","m"]
+               un = ["mol","K","A","l","kg","s","m"]
                pols = (L.intercalate "." $ fmap (\(i,j)-> if i == 1 then j else j<> "^" <> show i) multP)
                negs = (L.intercalate "." $ fmap (\(i,j)-> j<> "^" <> show (abs i)) multN)
                build i j
@@ -1302,7 +1302,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
 
             offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i j ) i )<$>  (facts res3) <#> (fmap (unTB1._fkttable )<$> ftdi)) wheel  (lengthPage <$> vpt)
             return (offset, res3)
-          tdi <- ui $ cacheTidings ((\ g s v -> join $ searchGist relTable m  g s  <$> v) <$> gist  <*> sgist <*> vv)
+          tdi <- ui $ cacheTidings ((\g s v -> join $ searchGist relTable m  g s  <$> v) <$> gist  <*> sgist <*> vv)
           -- Load offseted items
           ui $onEventDyn (filterE (isJust . fst) $ (,) <$> facts iold2 <@> rumors (triding offset)) $ (\(o,i) ->  traverse (\o -> do
             transactionNoLog inf $ selectFrom (_kvname m) (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  [] (predicatefk  o)) o  )
@@ -1360,7 +1360,6 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
             diffFK Nothing (Just i) = Diff $ patch i
             output = diffFK <$> oldItems <*> fksel
           inioutput <- ui $ currentValue (facts output)
-          liftIO$ helsel inioutput
           ui $ onEventIO (rumors output) (liftIO .helsel)
           return [getElement itemList]
 
@@ -1380,14 +1379,14 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
             staticold  =  second (fmap (fmap replaceKey )) . first replaceKey  <$> filter (all (\i ->  not (isInlineRel i ) &&  ((_relOperator i) == Equals)). keyattri.fst ) ( nonInjRefs)
           (celem,ediff,pretdi) <-crudUITable inf (fmap (\i -> if i then "+" else "-")$ bop ) reftb staticold (fmap (fmap (fmap (unAtom. patchfkt))) <$> plmods)  tbdata (fmap (unTB1._fkttable )<$> ftdi)
           let
-            fksel =  join . fmap (\box ->  (\ref -> FKT (kvlist $ fmap _tb $ ref ) rel (TB1 box) ) <$> backFKRef relTable  (fmap (keyAttr .unTB ) $ unkvlist ifk)   (box) ) <$>   pretdi
-            diffFK (Just i ) (Just j) = if tbrefM i == tbrefM j then Keep else Diff(patch j)
+            -- diffFK i j | traceShow (tableName table,isJust i, isJust j) False  =  undefined
+            fksel =  fmap (\box ->  maybe (FKT (kvlist []) rel (TB1 box) )(\ref -> FKT (kvlist $ fmap _tb $ ref ) rel (TB1 box) ) $ backFKRef relTable  (fmap (keyAttr .unTB ) $ unkvlist ifk)   (box) ) <$>   pretdi
+            diffFK (Just i ) (Just j) =  maybe Keep Diff (diff i  j)
             diffFK (Just i ) Nothing = Delete
             diffFK Nothing Nothing = Keep
             diffFK Nothing (Just i) = Diff $ patch i
-            output = diffFK <$> oldItems <*> fksel
+            output = diffFK <$> oldItems<*>fksel
           inioutput <- ui $ currentValue (facts output)
-          liftIO$ helsel inioutput
           ui $ onEventIO (rumors output) (liftIO .helsel)
           return celem
 

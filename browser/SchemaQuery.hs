@@ -316,7 +316,7 @@ getFKS
            S.Set Key)
 getFKS inf predtop table v = F.foldl' (\m f  -> m >>= (\i -> getFKRef inf predtop  table i v f)) (return ([],return ,S.empty )) $ traceShowId sorted -- first <> second
   where
-        sorted = P.sortBy (P.comparing ( pathRelRel))  (S.toList (rawFKS table))
+    sorted = P.sortBy (P.comparing (RelSort . F.toList .  pathRelRel))  (S.toList (rawFKS table))
 
 rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ ( lookAccess inf (tableName t) . (Le.over Le._1 (fmap  keyValue) )<$> fixed)
 
