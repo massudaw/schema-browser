@@ -131,7 +131,7 @@ createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (T
 
 applyBackend (CreateRow t@(m,i)) = do
    insertFrom   t
-applyBackend (PatchRow t@(m,i,[])) = do
+applyBackend (DropRow t) = do
    deleteFrom   t
 applyBackend (PatchRow p@(m,pk@(G.Idex pki),i)) = do
    inf <- ask
@@ -197,7 +197,9 @@ getFrom  a   b = do
   (getEd $ schemaOps inf)  a b
 deleteFrom  a   = do
   inf <- ask
-  (deleteEd $ schemaOps inf)  a
+  a <- (deleteEd $ schemaOps inf)  a
+  tell (maybeToList a)
+  return a
 
 
 mergeDBRef  = (\(j,i) (m,l) -> ((M.unionWith (\(a,b) (c,d) -> (a+c,b<>d))  j  m , i <>  l )))
@@ -555,10 +557,12 @@ readState fixed table dbvar = do
       (sidxs, pidx) = update var (concat patches)
   return (sidxs,pidx,chan,collectionState dbvar)
 
+indexPK (DropRow i) = G.getIndex i
 indexPK (CreateRow i) = G.getIndex i
 indexPK (PatchRow (_,i,_) ) = i
 
 indexFilterR j (CreateRow i) = checkPred i j
+indexFilterR j (DropRow i) = checkPred i j
 indexFilterR j (PatchRow i) = indexFilterP j i
 
 

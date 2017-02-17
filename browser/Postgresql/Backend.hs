@@ -57,7 +57,7 @@ filterFun  = filter (\k -> not $ isFun k )
 
 overloadedRules = M.fromList [(("metadata","catalog_schema"),[CreateRule createSchema,DropRule dropSchema,UpdateRule alterSchema])] <> overloaedTables
 
-overloaedTables = M.fromList [(("metadata","catalog_tables"),[CreateRule createTableCatalog])]
+overloaedTables = M.fromList [(("metadata","catalog_tables"),[CreateRule createTableCatalog,DropRule dropTableCatalog])]
 
 
 createTableCatalog v = do
@@ -76,6 +76,23 @@ createTableCatalog v = do
       let res = liftTable' inf table (tblist $ _tb <$> [Attr "oid" (int i),Attr "schema_name" sc,Attr "table_name" n,Attr "table_type" (txt "BASE TABLE")])
       res2<- loadFKS res
       return $ Just $ TableModification Nothing (lookTable inf table) (CreateRow  res2)
+
+
+dropTableCatalog v = do
+      inf <- ask
+      let n = fromJust $ indexFieldRec (IProd Nothing [table_name]) v
+          table = "catalog_tables"
+          table_name = lookKey inf table "table_name"
+
+          schema = "schema"
+          sc = fromJust $ indexFieldRec (Nested (IProd Nothing [schemak]) (IProd Nothing [schema_name])) v
+          schemak = lookKey inf table  "schema_name"
+          schema_name= lookKey inf schema "name"
+      (liftIO$ execute (rootconn inf) "DROP TABLE ?.?"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n))
+
+      return $ Just $ TableModification Nothing (lookTable inf table) (DropRow  v )
+
+
 
 
 createSchema v = do
@@ -117,7 +134,7 @@ dropSchema  v = do
         oid = lookKey inf  cat "oid"
         i = fromJust $ indexFieldRec (IProd Nothing [oid]) v
       liftIO$ execute (rootconn inf) "DROP SCHEMA ?"(Only $ DoubleQuoted $ renderShowable n)
-      return $ Just $ TableModification Nothing (lookTable inf cat )(PatchRow $ liftPatch inf cat (kvempty, G.Idex[(i)],[]))
+      return $ Just $ TableModification Nothing (lookTable inf cat ) (DropRow v )
 
 
 
@@ -304,16 +321,19 @@ defaultFKS inf (Path k (RecJoin     _ i )) =  defaultFKS inf (Path k i)
 
 
 
-deleteMod :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-deleteMod patch@(m,pk,_) = do
+deleteMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+deleteMod p@(m,_) = do
   inf <- ask
-  log <- liftIO $  do
-    let
-      table = lookTable inf (_kvname m)
-    deletePatch (conn inf)  (firstPatch (recoverFields inf) patch) table
-    return (TableModification Nothing table  $ PatchRow (m,pk,[]))
-  tell  (maybeToList $ Just log)
-  return $ Just log
+  let overloaded  = M.lookup (_kvschema m,_kvname m) overloadedRules
+      isRule (DropRule _ ) = True
+      isRule _ = False
+  log <- case L.find isRule =<< overloaded of
+    Just (DropRule i) ->  i p
+    Nothing ->  liftIO $  do
+      let table = lookTable inf (_kvname m)
+      deletePatch (conn inf)  (firstPatch (recoverFields inf) (patch p)) table
+      return $ Just $ (TableModification Nothing table  $ DropRow p)
+  return $ log
 
 updateMod :: TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
 updateMod kv old = do

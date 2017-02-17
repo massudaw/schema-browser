@@ -641,12 +641,12 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
        crudMerge (Just i) g =
          fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf ( do
             let confl = conflictGist i g
-            mapM deleteFrom (fmap patch confl :: [TBIdx Key Showable])
+            mapM deleteFrom confl
             fullDiffInsert  i)
        crudEdi (Just i) (Just j) =  fmap (\g -> fmap (PatchRow . fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEditInsert  i j
        crudIns (Just j)   =  fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
        crudDel :: Maybe (TBData Key Showable)  ->  Dynamic (Maybe (RowPatch Key Showable))
-       crudDel (Just j)  = fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)))<$> transaction inf (deleteFrom (patch j :: TBIdx Key Showable))
+       crudDel (Just j)  = fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)))<$> transaction inf (deleteFrom j )
 
   altU <- onAltU lbox
   altI <- onAltI lbox

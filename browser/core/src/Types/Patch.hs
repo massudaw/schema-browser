@@ -103,6 +103,7 @@ joinEditor Delete = Delete
 data RowPatch k a
   = CreateRow (TBData k a)
   | PatchRow (TBIdx k a)
+  | DropRow (TBData k a)
   deriving(Show,Eq,Ord,Functor,Generic)
 
 instance (NFData k ,NFData a )=> NFData (RowPatch k a)
@@ -319,6 +320,7 @@ instance (Binary k ) => Binary (PathFTB k )
 
 firstPatchRow :: (Ord a ,Ord k , Ord (Index a), Ord j ) => (k -> j ) -> RowPatch k a -> RowPatch j a
 firstPatchRow f (CreateRow i ) = CreateRow $ mapKey' f i
+firstPatchRow f (DropRow i ) = DropRow $ mapKey' f i
 firstPatchRow f (PatchRow i ) = PatchRow $ firstPatch f i
 
 firstPatch :: (Ord a ,Ord k , Ord (Index a), Ord j ) => (k -> j ) -> TBIdx k a -> TBIdx j a
@@ -392,7 +394,7 @@ instance (NFData k ,NFData a ) => NFData (TB Identity k a) where
 
 applyGiSTChange
   ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => G.GiST (G.TBIndex  a ) (TBData k a) -> RowPatch k (Index a) -> Maybe (G.GiST (G.TBIndex  a ) (TBData k a))
-applyGiSTChange l (PatchRow patom@(m,i, [])) = Just $ G.delete (create <$> G.notOptional i) G.indexParam  l
+applyGiSTChange l (DropRow patom) = Just $ G.delete (create <$> G.notOptional (G.getIndex patom )) G.indexParam  l
 applyGiSTChange l (PatchRow patom@(m,ipa, p)) =  case G.lookup (G.notOptional i) l  of
                   Just v -> do
                           el <-  applyIfChange v patom

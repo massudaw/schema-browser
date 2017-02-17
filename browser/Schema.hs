@@ -448,6 +448,7 @@ logTableModification
 logTableModification inf (TableModification Nothing table ip) = do
   let i = patchNoRef $ case ip of
             PatchRow i -> i
+            DropRow i -> patch i
             CreateRow i -> patch i
   time <- getCurrentTime
   env <- lookupEnv "ROOT"
@@ -491,6 +492,7 @@ encodeTableModification inf ltime  (TableModification id table ip)
           = firstPatch keyValue $ patchNoRef $ case ip of
               PatchRow i -> i
               CreateRow i -> patch i
+              DropRow i -> patch i
         --mod_key :: Non.NonEmpty (Binary (FTB Showable))
         mod_key = Non.fromList $ Binary <$> pidx
 

@@ -150,11 +150,11 @@ type TableRep k v  = ([SecondaryIndex k v],TableIndex k v)
 
 applyTableRep
   ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => TableK k -> TableRep k a -> RowPatch k (Index a) -> Maybe (TableRep k a)
-applyTableRep table (sidxs,l) (PatchRow patom@(m,i, []))
-    = Just $ (didxs <$> sidxs, G.delete (create <$> G.notOptional i) G.indexParam  l)
+applyTableRep table (sidxs,l) (DropRow patom)
+  = Just $ (didxs <$> sidxs, G.delete (create <$> G.notOptional (G.getIndex patom )) G.indexParam  l)
   where
     didxs (un ,sidx)= (un,maybe sidx (\v -> G.delete v G.indexParam sidx ) (G.getUnique un <$> v))
-    v = G.lookup (create <$> G.notOptional i)  l
+    v = G.lookup (create <$> G.notOptional (G.getIndex patom ))  l
 applyTableRep table (sidxs,l) (PatchRow patom@(m,ipa, p)) =  (dixs <$> sidxs ,) <$> applyIfChange l (PatchRow patom)
    where
      dixs (un,sidx) = (un,sidx)--(\v -> G.insert (v,G.getIndex i) G.indexParam sidx ) (G.getUnique un  el))
@@ -261,7 +261,7 @@ data SchemaEditor
   { editEd  :: TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , patchEd :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , insertEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-  , deleteEd :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+  , deleteEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , listEd :: TBF (Labeled Text) Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   , getEd :: Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   , typeTransform :: PGKey -> CoreKey
@@ -340,6 +340,7 @@ liftField inf tname (IT rel tb) = IT (lookKey inf tname  rel) (liftKeys inf tnam
 
 liftPatchRow inf t (PatchRow i) = PatchRow $ liftPatch inf t i
 liftPatchRow inf t (CreateRow i) = CreateRow $ liftTable' inf t i
+liftPatchRow inf t (DropRow i) = DropRow $ liftTable' inf t i
 
 liftPatch :: a ~ Index a => InformationSchema -> Text -> TBIdx Text a -> TBIdx Key a
 liftPatch inf t (_ , k ,p) = (tableMeta ta ,  k,fmap (liftPatchAttr inf t) p)
@@ -359,6 +360,7 @@ liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf 
 
 fixPatchRow inf t (PatchRow i) = PatchRow $ fixPatch inf  t i
 fixPatchRow inf t (CreateRow i) = CreateRow i
+fixPatchRow inf t (DropRow i) = DropRow i
 
 fixPatch ::  a ~ Index a => InformationSchema -> Text -> TBIdx Key a  -> TBIdx Key a
 fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
