@@ -423,18 +423,18 @@ parsePrimJSON i  v =
         PTimestamp _ -> (\v -> A.withText (show i) (maybe (fail ("cant parse timestamp" <> show (i,v))) (return .STimestamp  . fst) . strptime "%Y-%m-%dT%H:%M:%OS") $ v)
         PDayTime  -> A.withText (show i) (maybe (fail "cant parse daytime") (return .SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS")
         PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay . fst) . strptime "%Y-%m-%d")
-      PGeom a -> A.withText (show i)  (fmap SGeo . either fail pure .Sel.runGet (parseGeom a). fst . B16.decode .BS.pack . T.unpack)
+      PGeom ix a -> A.withText (show i)  (fmap SGeo . either fail pure .Sel.runGet (parseGeom ix a). fst . B16.decode .BS.pack . T.unpack)
 
       i -> errorWithStackTrace ("not defined " <> show i)
   ) v
 
 -- parseGeom a | traceShow a False = undefined
-parseGeom a = case a of
-          PPosition ix ->  case ix of
+parseGeom ix a = case a of
+          PPosition ->  case ix of
                 3 -> fmap SPosition $(getPosition3d get3DPosition)
                 2 -> fmap SPosition $ (getPosition3d get2DPosition )
 
-          PPolygon ix ->  case ix of
+          PPolygon ->  case ix of
                 3 ->  getPolygon get3DPosition
                 2 ->  getPolygon get2DPosition
           MultiGeom g ->do
@@ -446,9 +446,9 @@ parseGeom a = case a of
                let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
                n <- Sel.getWord32host
                case  ty  of
-                 6 -> SMultiGeom <$> replicateM (fromIntegral n) (parseGeom g)
+                 6 -> SMultiGeom <$> replicateM (fromIntegral n) (parseGeom ix g)
              else fail "no little endiang"
-          PLineString ix -> case ix of
+          PLineString -> case ix of
             3 -> fmap SLineString $ (getLineString get3DPosition)
             2->fmap SLineString $ (getLineString get2DPosition )
 
@@ -499,20 +499,20 @@ parsePrim i =  do
                       i <- fmap (SDate . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)}"
                       maybe (fail "cant parse date") return i
                    in tryquoted p
-        PGeom a -> (fmap SGeo) $ case a of
-          PPosition i-> do
+        PGeom ix a -> (fmap SGeo) $ case a of
+          PPosition -> do
             s <- plain' "\",)}"
             case  Sel.runGet (getPosition3d get3DPosition)(fst $ B16.decode s)of
                 i -> case i of
                   Right i -> pure $ SPosition i
                   Left e -> fail e
-          PLineString i-> do
+          PLineString -> do
             s <- plain' "\",)}"
             case  Sel.runGet (getLineString get3DPosition)(fst $ B16.decode s)of
                 i -> case i of
                   Right i -> pure $ SLineString i
                   Left e -> fail e
-          PBounding i-> SBounding <$> tryquoted box3dParser
+          PBounding -> SBounding <$> tryquoted box3dParser
 
 
 -- parseShowable (KArray (KDelayed i))

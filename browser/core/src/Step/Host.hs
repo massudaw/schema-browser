@@ -81,6 +81,7 @@ joinFTB (ArrayTB1 i) =  ArrayTB1 $ fmap joinFTB i
 joinFTB (TB1 i) =  i
 
 indexFieldRec :: Access Key-> TBData Key Showable -> Maybe (FTB Showable)
+indexFieldRec p@(ISum l) v = F.foldl' (<|>) Nothing (flip indexFieldRec  v <$> l)
 indexFieldRec p@(Many [l]) v = indexFieldRec l v
 indexFieldRec p@(IProd b l) v = _tbattr . unTB <$> findAttr  l  v
 indexFieldRec n@(Nested ix@(IProd b l) (Many[nt]) ) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK l v

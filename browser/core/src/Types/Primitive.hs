@@ -87,7 +87,6 @@ isArray (KOptional i) = isArray i
 isArray _ = False
 
 newtype TBIndex  a
-  -- = Idex (Map k (FTB a))
   = Idex [FTB a]
   deriving(Eq,Show,Ord,Functor,Generic)
 
@@ -206,10 +205,10 @@ type FTB1 f k a = FTB (KVMetadata k, Compose f (KV (Compose f (TB f))) k a)
 
 data GeomType
   = MultiGeom GeomType
-  | PPolygon Int
-  | PLineString Int
-  | PPosition Int
-  | PBounding  Int
+  | PPolygon
+  | PLineString
+  | PPosition
+  | PBounding
   deriving(Eq,Show,Ord,Generic)
 
 data TimeType
@@ -226,7 +225,7 @@ data KPrim
    | PInt Int
    | PDouble
    | PDimensional Int (Int,Int,Int,Int,Int,Int,Int)
-   | PGeom GeomType
+   | PGeom Int GeomType
    | PTime TimeType
    | PMime Text
    | PCnpj

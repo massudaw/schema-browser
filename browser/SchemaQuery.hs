@@ -220,7 +220,7 @@ getFKRef inf predtop rtable (evs,me,old) v (Path r (FKInlineTable  j )) =  do
                              in  fmap WherePredicate (go (test (S.toList r)) l)
 
                 -- editAttr :: (TBData Key Showable -> TBData Key Showable) -> TBData Key Showable -> TBData Key Showable
-                editAttr fun  (m,i) = (m,mapComp (\(KV i) -> KV (M.alter  (fmap (mapComp (Le.over ifkttable (fmap (either undefined  id .fun))))) (S.map Inline r)  i )) i )
+                editAttr fun  (m,i) = (m,mapComp (\(KV i) -> KV (M.alter  (fmap (mapComp (Le.over ifkttable (fmap (either (errorWithStackTrace . ("no inline table " ++) . show  ) id .fun))))) (S.map Inline r)  i )) i )
                 nextRef :: [TBData Key Showable]
                 nextRef= (concat $ catMaybes $ fmap (\i -> fmap (F.toList . _fkttable.unTB) $ M.lookup (S.map Inline r) (_kvvalues $ unTB $ snd  i) )v)
 
@@ -273,7 +273,7 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                               if G.size (snd out) == G.size tb2
                                  then  do
                                    return (M.empty , G.empty)
-                                 else return (M.empty , G.empty) -- check (ix +1) out
+                                 else  check (ix +1) out
                             else do
                               return (M.empty , G.empty)
                     (_,tb2) <- check 0 out
@@ -615,7 +615,7 @@ convertChanEvent
   :: (Ord k, Show k) =>
      TableK k
      -> (TBPredicate k Showable, [k])
-     -> Behavior ([SecondaryIndex k Showable],G.GiST (TBIndex Showable) a)
+     -> Behavior ([SecondaryIndex k Showable],G.GiST (TBIndex Showable) (TBData k Showable))
      -> TVar ([SecondaryIndex k Showable],G.GiST (TBIndex Showable) (TBData k Showable))
      -> TChan [RowPatch k Showable ]
      -> Dynamic
@@ -630,7 +630,7 @@ convertChanEvent table fixed bres inivar chan = do
         newRows =  filter (\d -> splitMatch fixed (indexPK d) && indexFilterR (fst fixed) d && isNothing (G.lookup (indexPK d) v) ) m
         filterPred = nonEmpty . filter (\d -> splitMatch fixed (indexPK d) && indexFilterR (fst fixed) d )
         lookNew  d = fmap CreateRow $ G.lookup (indexPK d) oldM
-        filterPredNot j = nonEmpty . catMaybes . map (\d -> if isJust ( G.lookup (indexPK d) j) && not (splitMatch fixed (indexPK d) && indexFilterR (fst fixed) d ) then Just (PatchRow (tableMeta table ,indexPK d,[])) else Nothing )
+        filterPredNot j = nonEmpty . catMaybes . map (\d -> if isJust ( G.lookup (indexPK d) j) && not (splitMatch fixed (indexPK d) && indexFilterR (fst fixed) d ) then DropRow <$> G.lookup (indexPK d) j else Nothing )
         newpatches = lookNew <$> newRows
         oldRows =  filterPredNot v m
         patches =  nonEmpty ( catMaybes newpatches )<> oldRows <> filterPred m
@@ -667,7 +667,7 @@ convertChanTidings0
           [RowPatch KeyUnique Showable ]
           -> Dynamic (Tidings (TableRep Key Showable),Event [RowPatch Key Showable])
 convertChanTidings0 inf table fixed evdep ini iniVar nchan = mdo
-    evdiffp <-  convertChanEvent table fixed (first (fmap (first (fmap keyFastUnique). fmap (fmap (fmap (fmap (fmap keyFastUnique)))))) <$> facts t) iniVar nchan
+    evdiffp <-  convertChanEvent table fixed (first (fmap (first (fmap keyFastUnique). fmap (fmap (fmap (fmap (G.mapAttributePath keyFastUnique)))))) . fmap (fmap (mapKey' keyFastUnique))<$> facts t) iniVar nchan
     ti <- liftIO$ getCurrentTime
     let
       evdiff = filterE (not.L.null) $ unionWith mappend evdep (fmap (firstPatchRow (recoverKey inf)) <$> evdiffp)
@@ -675,7 +675,7 @@ convertChanTidings0 inf table fixed evdep ini iniVar nchan = mdo
       -- update l v | traceShow (ti,tableName table,v)  False = undefined
       update l v = F.foldl' (\i j-> fromJust $  applyTableRep (mapTableK (recoverKey inf)table) i j)   l  v
       recoverIni :: TableRep KeyUnique Showable -> TableRep Key Showable
-      recoverIni (i,j)= (first (fmap (recoverKey inf )) . fmap (fmap (fmap (fmap (fmap  (recoverKey inf ))))) <$> i, recover j)
+      recoverIni (i,j)= (first (fmap (recoverKey inf )) . fmap (fmap (fmap (fmap (G.mapAttributePath (recoverKey inf ))))) <$> i, recover j)
         where recover = fmap (mapKey' (recoverKey inf))
 
     t <- accumT (recoverIni ini) (flip update <$> evdiff)

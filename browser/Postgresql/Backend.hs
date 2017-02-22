@@ -55,42 +55,79 @@ filterFun  = filter (\k -> not $ isFun k )
   where isFun (PFun _ _ _ ) = True
         isFun i = False
 
-overloadedRules = M.fromList [(("metadata","catalog_schema"),[CreateRule createSchema,DropRule dropSchema,UpdateRule alterSchema])] <> overloaedTables
-
+overloadedRules = overloaedSchema <> overloaedTables <> overloaedColumns
+overloaedSchema = M.fromList [(("metadata","catalog_schema"),[CreateRule createSchema,DropRule dropSchema,UpdateRule alterSchema])]
 overloaedTables = M.fromList [(("metadata","catalog_tables"),[CreateRule createTableCatalog,DropRule dropTableCatalog])]
+overloaedColumns = M.fromList [(("metadata","catalog_columns"),[CreateRule createColumnCatalog ,DropRule dropColumnCatalog])]
+
+createColumnCatalog v = do
+    inf <- ask
+    let
+        column ="catalog_columns"
+        table = "tables"
+        schema = "schema"
+        table_name = lookKey inf column "table_name"
+        tys = justError " no tys" $ indexFieldRec (liftAccess inf column $ Nested (IProd Nothing ["col_type"]) (ISum[Nested (IProd Nothing ["primitive"]) (IProd Nothing ["schema_name"]),Nested (IProd Nothing ["composite"]) (IProd Nothing ["schema_name"])])) v
+        ty = justError " no ty"$ indexFieldRec (liftAccess inf column $ Nested (IProd Nothing ["col_type"]) (ISum[Nested (IProd Nothing ["primitive"]) (IProd Nothing ["data_name"]),Nested (IProd Nothing ["composite"]) (IProd Nothing ["data_name"])])) v
+        n = justError "no n" $ indexFieldRec (liftAccess inf column $ Nested (IProd Nothing ["table_schema","table_name"]) (IProd Nothing ["table_name"])) v
+        sc = justError " no sc" $ indexFieldRec (Nested (IProd Nothing [schemak]) (IProd Nothing [schema_name])) v
+        schemak = lookKey inf column "table_schema"
+        schema_name= lookKey inf schema "name"
+        cc = justError "no cc" $ indexFieldRec (liftAccess inf column $IProd Nothing ["column_name"]) v
+        colname = lookKey inf table  "column_name"
+    liftIO  (execute (rootconn inf) "ALTER TABLE ?.? ADD COLUMN ? ?.? "(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n,DoubleQuoted $ renderShowable cc ,DoubleQuoted $ renderShowable tys ,DoubleQuoted $ renderShowable ty ))
+
+    return $ Just $ TableModification Nothing (lookTable inf table) (CreateRow  v)
+
+
+dropColumnCatalog v = do
+    inf <- ask
+    let n = fromJust $ indexFieldRec (IProd Nothing [table_name]) v
+        table = "catalog_tables"
+        table_name = lookKey inf table "table_name"
+
+        schema = "schema"
+        sc = fromJust $ indexFieldRec (Nested (IProd Nothing [schemak]) (IProd Nothing [schema_name])) v
+        schemak = lookKey inf table  "schema_name"
+        schema_name= lookKey inf schema "name"
+    (liftIO$ execute (rootconn inf) "DROP TABLE ?.?"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n))
+
+    return $ Just $ TableModification Nothing (lookTable inf table) (DropRow  v )
+
+
 
 
 createTableCatalog v = do
-      inf <- ask
-      let n = fromJust $ indexFieldRec (IProd Nothing [table_name]) v
-          table = "catalog_tables"
-          table_name = lookKey inf table "table_name"
+    inf <- ask
+    let n = fromJust $ indexFieldRec (IProd Nothing [table_name]) v
+        table = "catalog_tables"
+        table_name = lookKey inf table "table_name"
 
-          schema = "schema"
-          sc = fromJust $ indexFieldRec (Nested (IProd Nothing [schemak]) (IProd Nothing [schema_name])) v
-          schemak = lookKey inf table  "schema_name"
-          schema_name= lookKey inf schema "name"
-      (liftIO$ execute (rootconn inf) "CREATE TABLE ?.? ()"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n))
-      [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_tables where table_name =? and schema_name = ? " ((keyType table_name,n),(keyType schema_name,sc))
+        schema = "schema"
+        sc = fromJust $ indexFieldRec (Nested (IProd Nothing [schemak]) (IProd Nothing [schema_name])) v
+        schemak = lookKey inf table  "schema_name"
+        schema_name= lookKey inf schema "name"
+    (liftIO$ execute (rootconn inf) "CREATE TABLE ?.? ()"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n))
+    [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_tables where table_name =? and schema_name = ? " ((keyType table_name,n),(keyType schema_name,sc))
 
-      let res = liftTable' inf table (tblist $ _tb <$> [Attr "oid" (int i),Attr "schema_name" sc,Attr "table_name" n,Attr "table_type" (txt "BASE TABLE")])
-      res2<- loadFKS res
-      return $ Just $ TableModification Nothing (lookTable inf table) (CreateRow  res2)
+    let res = liftTable' inf table (tblist $ _tb <$> [Attr "oid" (int i),Attr "schema_name" sc,Attr "table_name" n,Attr "table_type" (txt "BASE TABLE")])
+    res2<- loadFKS res
+    return $ Just $ TableModification Nothing (lookTable inf table) (CreateRow  res2)
 
 
 dropTableCatalog v = do
-      inf <- ask
-      let n = fromJust $ indexFieldRec (IProd Nothing [table_name]) v
-          table = "catalog_tables"
-          table_name = lookKey inf table "table_name"
+    inf <- ask
+    let n = fromJust $ indexFieldRec (IProd Nothing [table_name]) v
+        table = "catalog_tables"
+        table_name = lookKey inf table "table_name"
 
-          schema = "schema"
-          sc = fromJust $ indexFieldRec (Nested (IProd Nothing [schemak]) (IProd Nothing [schema_name])) v
-          schemak = lookKey inf table  "schema_name"
-          schema_name= lookKey inf schema "name"
-      (liftIO$ execute (rootconn inf) "DROP TABLE ?.?"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n))
+        schema = "schema"
+        sc = fromJust $ indexFieldRec (Nested (IProd Nothing [schemak]) (IProd Nothing [schema_name])) v
+        schemak = lookKey inf table  "schema_name"
+        schema_name= lookKey inf schema "name"
+    (liftIO$ execute (rootconn inf) "DROP TABLE ?.?"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n))
 
-      return $ Just $ TableModification Nothing (lookTable inf table) (DropRow  v )
+    return $ Just $ TableModification Nothing (lookTable inf table) (DropRow  v )
 
 
 

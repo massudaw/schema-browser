@@ -195,14 +195,10 @@ makeInterval :: Prim KPrim (T.Text,T.Text) ->  ([Double], [Double]) -> FTB Showa
 makeInterval nty (sw,ne) = IntervalTB1 $ Interval.interval (makePos nty sw) (makePos nty ne)
 
 makePos :: Prim KPrim (T.Text,T.Text) -> [Double] -> (Extended (FTB Showable),Bool)
-makePos (AtomicPrim (PGeom (MultiGeom (PPolygon 3)))) [b,a,z] =
+makePos (AtomicPrim (PGeom 3 _ )) [b,a,z] =
     (Interval.Finite $ pos (Position (a, b,z)), True)
-makePos (AtomicPrim (PGeom (MultiGeom (PPolygon 2)))) [b,a,z] =
+makePos (AtomicPrim (PGeom 2 _ )) [b,a,z] =
     (Interval.Finite $ pos (Position2D (a, b)), True)
-makePos (AtomicPrim (PGeom (PPosition 2)))[b,a,z] =
-    (Interval.Finite $ pos (Position2D (a, b)), True)
-makePos (AtomicPrim (PGeom (PPosition 3))) [b,a,z] =
-    (Interval.Finite $ pos (Position (a, b, z)), True)
 makePos a i = errorWithStackTrace (show (a,i))
 
 writePK :: TBData Key Showable -> FTB Showable -> T.Text

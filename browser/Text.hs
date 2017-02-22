@@ -113,10 +113,10 @@ readPrim t =
        PDate-> readDate
        PInterval -> readInterval
        PDayTime -> \t -> readDayTime t <|> readDayTimeMin t <|> readDayTimeHour t
-     PGeom a ->  fmap (fmap SGeo )$ case a of
-       PPosition i-> readPosition
-       PLineString i-> readLineString
-       MultiGeom (PPolygon i ) -> readMultiPolygon
+     PGeom i a ->  fmap (fmap SGeo )$ case a of
+       PPosition -> readPosition
+       PLineString -> readLineString
+       MultiGeom PPolygon  -> readMultiPolygon
      PBoolean -> readBoolean
      PBinary -> readBin
   where

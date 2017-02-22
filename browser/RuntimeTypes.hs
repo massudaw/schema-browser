@@ -145,7 +145,7 @@ data DBVar2  v=
 
 type IndexMetadata k v = Map (WherePredicateK k) (Int,Map Int (PageTokenF  v))
 type TableIndex k v = GiST (TBIndex v) (TBData k v)
-type SecondaryIndex k v = ([k],GiST (TBIndex v) (TBIndex v,[AttributePath k ]))
+type SecondaryIndex k v = ([k],GiST (TBIndex v) (TBIndex v,[AttributePath k ()]))
 type TableRep k v  = ([SecondaryIndex k v],TableIndex k v)
 
 applyTableRep

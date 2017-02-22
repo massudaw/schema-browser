@@ -357,15 +357,10 @@ renderType (KInterval t) =
     Primitive (AtomicPrim (PTime (PTimestamp i))) -> case i of
       Just i -> "tsrange"
       Nothing -> "tstzrange"
-    Primitive (AtomicPrim (PGeom i)) ->
-      let box 2 = "box2d"
-          box 3 = "box3d"
-          geom a = case a of
-              PLineString i-> box i
-              PPosition i -> box i
-              PPolygon i -> box i
-              MultiGeom o -> geom o
-      in geom i
+    Primitive (AtomicPrim (PGeom ix i)) ->
+       case ix of
+            2 ->  "box2d"
+            3 ->  "box3d"
 
     Primitive (AtomicPrim PDouble) -> "floatrange"
     i -> Nothing
@@ -378,8 +373,10 @@ renderType (Primitive (AtomicPrim t) ) =
     PDimensional _ _ -> "dimensional"
     PText -> "character varying"
     PInt v -> case v of
+      2 -> "smallint"
       4 -> "integer"
       8 -> "bigint"
+      v -> errorWithStackTrace ("no index" ++ show   v)
     PTime i -> case i of
       PDate -> "date"
       PTimestamp v -> case v of
@@ -504,7 +501,7 @@ utlabel (Left (value,e)) c idx = result
                               Nothing  ->recoverop (keyType (fst idx))
         where
           recoverop (KOptional i) = recoverop i
-          recoverop (KArray (Primitive (AtomicPrim (PGeom (PPosition _))))) =  " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <>  "&&" <>  T.intercalate "." (c ++ [ref])
+          recoverop (KArray (Primitive (AtomicPrim (PGeom ix (PPosition ))))) =  " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <>  "&&" <>  T.intercalate "." (c ++ [ref])
           recoverop _ =  " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <> renderBinary (Flip i) <> " ANY(" <> T.intercalate "." (c ++ [ref])<> ")"
     opvalue ref (Flip (AnyOp i))  = T.intercalate "." (c ++ [ref]) <> renderBinary i <>  " ANY( " <> " ? " <>  ")"
     opvalue ref i =  T.intercalate "." (c ++ [ref]) <>  unliftOp i (keyType (fst idx))<>  " ? " <> inferParamType i ( keyType (fst idx))

@@ -74,27 +74,27 @@ postgresLiftPrimConv = denormConversions postgresLiftPrimConv'
 
 postgresLiftPrimConv' :: Map (KType (Prim KPrim (Text,Text)),KType (Prim KPrim (Text,Text)))  ( FTB  Showable -> FTB Showable , FTB Showable -> FTB Showable )
 postgresLiftPrimConv' =
-   M.fromList [((Primitive (AtomicPrim (PGeom $ PBounding 3)), KInterval (Primitive (AtomicPrim (PGeom $ PPosition 3))) )
+  M.fromList [((Primitive (AtomicPrim (PGeom 3 $ PBounding )), KInterval (Primitive (AtomicPrim (PGeom 3 $ PPosition ))) )
                , ((\(TB1 (SGeo (SBounding (Bounding i)) )) -> IntervalTB1 (fmap   (pos ) i)  )
                  , (\(IntervalTB1 i) -> TB1 $ SGeo $ SBounding $ Bounding $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
 
-                ,((Primitive (AtomicPrim (PGeom $ PBounding 2)), KInterval (Primitive (AtomicPrim (PGeom $ PPosition 2))) )
+             ,((Primitive (AtomicPrim (PGeom 2 $ PBounding )), KInterval (Primitive (AtomicPrim (PGeom 2 $ PPosition ))) )
                  , ((\(TB1 (SGeo (SBounding (Bounding i)) )) -> IntervalTB1 (fmap   (pos ) i)  )
                    , (\(IntervalTB1 i) -> TB1 $ SGeo $ SBounding $ Bounding $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
 
-                ,((Primitive (AtomicPrim (PGeom $ PLineString 2)), KArray (Primitive (AtomicPrim (PGeom $ PPosition 2))) )
+             ,((Primitive (AtomicPrim (PGeom 2 $ PLineString )), KArray (Primitive (AtomicPrim (PGeom 2 $ PPosition ))) )
                  , ((\(TB1 (SGeo (SLineString (LineString i)) )) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (pos ) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SLineString $ LineString $ V.fromList  $ F.toList $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
 
-                ,((Primitive (AtomicPrim (PGeom $ (PPolygon 2))), KArray (Primitive (AtomicPrim (PGeom $ PLineString 2))) )
+             ,((Primitive (AtomicPrim (PGeom 2 $ (PPolygon ))), KArray (Primitive (AtomicPrim (PGeom 2 $ PLineString ))) )
                  , ((\(TB1 (SGeo (SPolygon i j ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1. SGeo .SLineString) (i:j)))
                    , (\(ArrayTB1 i) -> TB1 $ (\(i:j) -> SGeo $ SPolygon i j) $ F.toList $ (fmap (\(TB1 (SGeo (SLineString i))) -> i)) i) ))
 
-                ,((Primitive (AtomicPrim (PGeom $ (MultiGeom (PPolygon 2)))), KArray (Primitive (AtomicPrim (PGeom $ PPolygon 2))) )
+             ,((Primitive (AtomicPrim (PGeom 2 $ (MultiGeom (PPolygon )))), KArray (Primitive (AtomicPrim (PGeom 2 $ PPolygon ))) )
                  , ((\(TB1 (SGeo (SMultiGeom i  ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1 . SGeo) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SMultiGeom   $  F.toList $  fmap ((\(SGeo i ) -> i). unTB1) i) ))
 
-                ,((Primitive (AtomicPrim (PGeom $ PLineString 3)), KArray (Primitive (AtomicPrim (PGeom $ PPosition 3))) )
+             ,((Primitive (AtomicPrim (PGeom 3 $ PLineString )), KArray (Primitive (AtomicPrim (PGeom 3 $ PPosition ))) )
                  , ((\(TB1 (SGeo (SLineString (LineString i)) )) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (pos ) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SLineString $ LineString $ V.fromList  $ F.toList $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))]
 
@@ -106,17 +106,33 @@ postgresUnLiftPrim :: Map (KType (Prim KPrim (Text,Text))) (KType (Prim KPrim (T
 postgresUnLiftPrim = M.fromList $ fmap swap $ M.keys postgresLiftPrimConv
 postgresUnLiftPrim' = M.fromList $ fmap swap $ M.keys postgresLiftPrimConv'
 
+
 rewriteOp :: M.Map (PrimType ,BinaryOperator , PrimType ) Text
 rewriteOp = M.fromList [
-      ((Primitive (AtomicPrim (PGeom $ PBounding 2)),  AnyOp (Flip Contains) ,Primitive (AtomicPrim (PGeom $ PLineString 2))) , "&&"),
-      ((Primitive (AtomicPrim (PGeom $ PBounding 3)),  AnyOp (Flip Contains) ,Primitive (AtomicPrim (PGeom $ PLineString 3))) , "&&"),
-      ((Primitive (AtomicPrim (PGeom $ PBounding 2)),  AnyOp (AnyOp (Flip Contains)) ,Primitive (AtomicPrim (PGeom $ PPolygon 2))) , "&&"),
-      ((Primitive (AtomicPrim (PGeom $ PBounding 2)),  AnyOp (AnyOp(AnyOp (Flip Contains))) ,Primitive (AtomicPrim (PGeom $ MultiGeom $ PPolygon 2))) , "&&"),
-      ((Primitive (AtomicPrim (PGeom $ PBounding 2)),  (Flip Contains) ,Primitive (AtomicPrim (PGeom $ PPosition 2))) , "&&"),
-      ((Primitive (AtomicPrim (PGeom $ PBounding 3)),  (Flip Contains) ,Primitive (AtomicPrim (PGeom $ PPosition 3))) , "&&")]
+      ((Primitive (AtomicPrim (PGeom 2 $ PBounding )),  AnyOp (Flip Contains) ,Primitive (AtomicPrim (PGeom 2 $ PLineString ))) , "&&"),
+      ((Primitive (AtomicPrim (PGeom 3 $ PBounding )),  AnyOp (Flip Contains) ,Primitive (AtomicPrim (PGeom 3 $ PLineString ))) , "&&"),
+      ((Primitive (AtomicPrim (PGeom 2 $ PBounding )),  AnyOp (AnyOp (Flip Contains)) ,Primitive (AtomicPrim (PGeom 2 $ PPolygon ))) , "&&"),
+      ((Primitive (AtomicPrim (PGeom 2 $ PBounding )),  AnyOp (AnyOp(AnyOp (Flip Contains))) ,Primitive (AtomicPrim (PGeom 2 $ MultiGeom $ PPolygon ))) , "&&"),
+      ((Primitive (AtomicPrim (PGeom 2 $ PBounding )),  (Flip Contains) ,Primitive (AtomicPrim (PGeom 2 $ PPosition ))) , "&&"),
+      ((Primitive (AtomicPrim (PGeom 3 $ PBounding )),  (Flip Contains) ,Primitive (AtomicPrim (PGeom 3 $ PPosition ))) , "&&")]
 
 postgresPrimTyp :: HM.HashMap Text (Word32 -> KPrim)
-postgresPrimTyp = HM.fromList [("dimensional",decoderDimensional)]
+postgresPrimTyp = HM.fromList
+    [("dimensional",decoderDimensional)
+    ,("geometry",decoderGeometry)]
+
+
+decoderGeometry :: Word32 -> KPrim
+decoderGeometry typmod  = PGeom  z $ case ty of
+                                       0 -> undefined -- "Unknown",
+                                       1 -> PPosition
+                                       2 -> PLineString
+                                       3 -> PPolygon
+                                       4 -> MultiGeom   PPosition
+                                       5 -> MultiGeom PLineString
+                                       6 -> MultiGeom PPolygon
+   where z= if (typmod .&. 0x00000002) `shiftR` 1 == 0b1 then 3 else 2
+         ty = (typmod .&. 0x000000FC)`shiftR` 2
 
 decoderDimensional :: Word32 -> KPrim
 decoderDimensional i = PDimensional (take 7)  (take 6,take 5 , take 4 ,take 3 ,take 2 ,take 1 ,take 0 )
@@ -182,18 +198,10 @@ postgresPrim =
   ,("time",PDayTime)
   ,("time with time zone" ,PDayTime)
   ,("time without time zone" ,PDayTime)])
-    ++ (fmap PGeom <$>
-  [("POINT3",PPosition 3)
-  ,("POINT2",PPosition 2)
-  ,("POLYGON3",PPolygon 3)
-  ,("POLYGON2",PPolygon 2)
-  ,("MULTIPOLYGON2",MultiGeom$PPolygon 2)
-  ,("MULTIPOLYGON3",MultiGeom$ PPolygon 3)
-  ,("LINESTRING3",PLineString 3)
-  ,("LINESTRING2",PLineString 2)
-  ,("box3d",PBounding 3)
-  ,("box2d",PBounding 2)
-  ])
+
+  ++ [("box3d",PGeom 3 $ PBounding )
+  ,("box2d",PGeom 2 $ PBounding )
+  ]
 
 ktypeUnLift :: KType (Prim KPrim (Text,Text)) -> Maybe (KType (Prim KPrim (Text,Text)))
 ktypeUnLift i = M.lookup i postgresUnLiftPrim

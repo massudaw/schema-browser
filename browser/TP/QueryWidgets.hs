@@ -886,12 +886,12 @@ reduceDiff i
 
 buildPrim :: [FieldModifier] ->Tidings (Maybe Showable) ->   KPrim -> UI (TrivialWidget (Maybe Showable))
 buildPrim fm tdi i = case i of
-         PGeom g-> fmap (fmap(fmap SGeo)) $do
+         PGeom ix g-> fmap (fmap(fmap SGeo)) $do
            let tdig = fmap (\(SGeo i) -> i) <$> tdi
            case g of
-             PPosition i -> do
+             PPosition -> do
                let tdip = fmap (\(SPosition i) -> i) <$> tdig
-               fmap (fmap SPosition)<$> case i of
+               fmap (fmap SPosition)<$> case ix of
                  3-> do
                     lon <- buildPrim fm (fmap (\((Position (lon,_,_))) -> SDouble lon ) <$> tdip) PDouble
                     lat <- buildPrim fm (fmap (\((Position (_,lat,_))) -> SDouble lat ) <$> tdip) PDouble

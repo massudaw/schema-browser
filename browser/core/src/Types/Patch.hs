@@ -281,6 +281,7 @@ instance (Ord a,Show a,Patch a) => Patch (FTB a ) where
   createIfChange = createFTBM createIfChange
   patch = patchFTB patch
 
+instance Monoid Showable where
 
 instance Patch Showable  where
   type Index Showable = Showable

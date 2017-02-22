@@ -23,6 +23,7 @@ module Types.Index
   ,queryCheck
   ,PathIndex(..)
   ,AttributePath(..)
+  ,mapAttributePath
   ,indexPred
   ,checkPred
   ,checkPredIdx
@@ -333,10 +334,15 @@ data PathIndex  a b
   | TipPath b
   deriving(Eq,Ord,Show,Functor)
 
-data AttributePath  k
-  = PathAttr k (PathIndex PathTID ())
-  | PathInline k (PathIndex PathTID  (AttributePath k))
-  | PathForeign [Rel k ] (PathIndex PathTID (AttributePath k))
+mapAttributePath :: (a -> b) -> AttributePath a i -> AttributePath b i
+mapAttributePath f (PathAttr k l) = PathAttr (f k ) l
+mapAttributePath f (PathInline k l ) = PathInline (f k) (fmap (mapAttributePath f ) l)
+mapAttributePath f (PathForeign k l ) = PathForeign (fmap f <$> k) (fmap (mapAttributePath f ) l)
+
+data AttributePath  k b
+  = PathAttr k (PathIndex PathTID b)
+  | PathInline k (PathIndex PathTID  (AttributePath k b))
+  | PathForeign [Rel k ] (PathIndex PathTID (AttributePath k b))
   deriving(Eq,Ord,Show,Functor)
 
 data PathTID
@@ -348,7 +354,7 @@ data PathTID
 
 
 
-indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Access k ,AccessOp a) -> TBData k a-> Maybe (AttributePath k )
+indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Access k ,AccessOp a) -> TBData k a-> Maybe (AttributePath k ())
 -- indexPredIx (Many i,eq) a= traverse (\i -> indexPredIx (i,eq) a) i
 indexPredIx (n@(Nested k@(IProd _ [key]) nt ) ,eq) r
   = case  indexField n r of
