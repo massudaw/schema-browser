@@ -296,8 +296,7 @@ viewerKey inf table tix cli layoutS cliTid = mdo
     res3 <- ui $ mapT0EventDyn inivp return ( tsort <*> (filtering $ fmap G.toList $ vpt) )
     return (offset, res3)
   ui $ onEventDyn (rumors $ triding offset) $ (\i ->  do
-    -- transactionNoLog inf $ selectFrom (tableName table ) (Just $ divPage (i + pageSize) `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  [] $ mempty)
-    return ())
+    transactionNoLog inf $ selectFrom (tableName table ) (Just $ divPage (i + pageSize) `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  [] $ mempty)
   let
     paging  = (\o -> (L.take pageSize . L.drop o) ) <$> triding offset
   page <- currentValue (facts paging)

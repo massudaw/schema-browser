@@ -643,10 +643,10 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
             let confl = conflictGist i g
             mapM deleteFrom confl
             fullDiffInsert  i)
-       crudEdi (Just i) (Just j) =  fmap (\g -> fmap (PatchRow . fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEditInsert  i j
-       crudIns (Just j)   =  fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
-       crudDel :: Maybe (TBData Key Showable)  ->  Dynamic (Maybe (RowPatch Key Showable))
-       crudDel (Just j)  = fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)))<$> transaction inf (deleteFrom j )
+       crudEdi i j =  fmap (\g -> fmap (PatchRow . fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEditInsert  i j
+       crudIns j   =  fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
+       crudDel :: TBData Key Showable  ->  Dynamic (Maybe (RowPatch Key Showable))
+       crudDel j  = fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)))<$> transaction inf (deleteFrom j )
 
   altU <- onAltU lbox
   altI <- onAltI lbox
@@ -654,10 +654,10 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   cliMerge <- UI.click mergeB
   cliDel <- UI.click deleteB
   cliEdit <- UI.click editB
-  diffEdi <- mapEventFin id $ crudEdi <$> facts oldItemsi <*> facts inscrud <@ (unionWith const cliEdit (filterKey (facts editEnabled) ( altU)))
-  diffDel <- mapEventFin id $ crudDel <$> facts oldItemsi <@ cliDel
+  diffEdi <- mapEventFin (fmap join . sequence) $ liftA2 crudEdi <$> facts oldItemsi <*> facts inscrud <@ (unionWith const cliEdit (filterKey (facts editEnabled) ( altU)))
+  diffDel <- mapEventFin (fmap join . sequence) $ fmap crudDel <$> facts oldItemsi <@ cliDel
   diffMerge <- mapEventFin id $ crudMerge <$> facts inscrud <*> facts gist <@ cliMerge
-  diffIns <- mapEventFin id $ crudIns <$> facts inscrud <@ (unionWith const cliIns (filterKey  (facts insertEnabled) altI ))
+  diffIns <- mapEventFin (fmap join . sequence) $ fmap crudIns <$> facts inscrud <@ (unionWith const cliIns (filterKey  (facts insertEnabled) altI ))
 
   conflict <- UI.div # sinkDiff text ((\i j l -> if l then maybe "" (L.intercalate "," .fmap (showFKText ). flip conflictGist  j) i else "")  <$> inscrud <*> gist <*> mergeEnabled) # sinkDiff UI.style (noneShow <$>mergeEnabled)
   transaction <- UI.span
@@ -964,6 +964,7 @@ buildPrim fm tdi i = case i of
                 let  newEv = fmap (STime . SDayTime. localTimeOfDay . utcToLocalTime cliZone) <$> evCurr
                 tdi2 <- ui $ addEvent newEv  tdip
                 oneInput tdi2 [timeButton]
+             PInterval -> oneInput tdi []
          PSession -> do
            dv <- UI.div # set text "session" # sink UI.style (noneShow . isJust <$> facts tdi)
            return  $ TrivialWidget tdi dv
@@ -1238,9 +1239,11 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
       let eh  = (unionWith const (const False <$> esc) ((const True <$> panC)  ))
       bh <- ui $ stepper False  eh
       (elsel , helsel ) <- ui newEvent
+      (eledit , heledit) <- ui newEvent
       itemDClick <- UI.dblclick top
       let itemDClickE = fmap (const not) itemDClick
       bop <- ui$accumT False itemDClickE
+      blsel <- ui $ stepper Keep elsel
 
       let
         selector False = return []
@@ -1366,7 +1369,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
             inf = fromMaybe preinf $ HM.lookup (_kvschema m) (depschema preinf)
             table = lookTable inf  (_kvname m)
           reftb@(vpt,_,gist,sgist,_) <- ui $ refTables inf   table
-          let ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$>  plmods)
+          let ftdi = flip recoverEditChange <$> tidings blsel elsel   <*> F.foldl' (liftA2 mergePatches)  oldItems  (snd <$>  plmods)
           let
             relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             replaceKey :: TB Identity CoreKey a -> TB Identity CoreKey a
@@ -1375,7 +1378,8 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
                 where  search  k = let v = justError ("no key" <> show k )$ L.find ((==k)._relOrigin)  rel in (_relOperator v , _relTarget v)
             staticold :: [(TB Identity CoreKey () ,Tidings(Maybe (TB Identity CoreKey (Showable))))]
             staticold  =  second (fmap (fmap replaceKey )) . first replaceKey  <$> filter (all (\i ->  not (isInlineRel i ) &&  ((_relOperator i) == Equals)). keyattri.fst ) ( nonInjRefs)
-          (celem,ediff,pretdi) <-crudUITable inf (fmap (\i -> if i then "+" else "-")$ bop ) reftb staticold (fmap (fmap (fmap (unAtom. patchfkt))) <$> plmods)  tbdata (fmap (unTB1._fkttable )<$> ftdi)
+
+          (celem,ediff,pretdi) <-crudUITable inf (fmap (\i -> if i then "+" else "-")$ bop ) reftb staticold (fmap (fmap (fmap (unAtom. patchfkt))) <$> plmods)  tbdata (fmap (unTB1._fkttable )<$> ftdi )
           let
             -- diffFK i j | traceShow (tableName table,isJust i, isJust j) False  =  undefined
             fksel =  fmap (\box ->  maybe (FKT (kvlist []) rel (TB1 box) )(\ref -> FKT (kvlist $ fmap _tb $ ref ) rel (TB1 box) ) $ backFKRef relTable  (fmap (keyAttr .unTB ) $ unkvlist ifk)   (box) ) <$>   pretdi
@@ -1385,13 +1389,13 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
             diffFK Nothing (Just i) = Diff $ patch i
             output = diffFK <$> oldItems<*>fksel
           inioutput <- ui $ currentValue (facts output)
-          ui $ onEventIO (rumors output) (liftIO .helsel)
+          ui $ onEventIO (rumors output) (liftIO .heledit)
           return celem
 
 
       let ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$>  plmods)
-      blsel <- ui$ stepper Keep elsel
-      element pan#  sink text (maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' . unTB1 . _fkttable )  <$>  (recoverEditChange <$> facts ftdi <*>blsel)) # set UI.style [("border","1px solid gray"),("height","20px")]
+      blsel <- ui$ stepper Keep (unionWith const elsel eledit)
+      element pan#  sink text (maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' . unTB1 . _fkttable )  <$>  (recoverEditChange <$> facts oldItems <*>blsel)) # set UI.style [("border","1px solid gray"),("height","20px")]
       selEls <- mapUIFinalizerT top selector  (tidings bh  eh)
       subnet <- UI.div  # sink children (facts selEls)
       subnet2 <- edit

@@ -1,9 +1,12 @@
-{-# LANGUAGE FlexibleContexts,TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
+{-# LANGUAGE Arrows,FlexibleContexts,TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
 module Postgresql.Backend (connRoot,postgresOps) where
 
 import Types
+import Step.Client
 import qualified Types.Index as G
+import Control.Arrow
 import SchemaQuery
+import Environment
 import Postgresql.Types
 import Step.Common
 import qualified Data.Poset as P
@@ -57,8 +60,11 @@ filterFun  = filter (\k -> not $ isFun k )
 
 overloadedRules = overloaedSchema <> overloaedTables <> overloaedColumns
 overloaedSchema = M.fromList [(("metadata","catalog_schema"),[CreateRule createSchema,DropRule dropSchema,UpdateRule alterSchema])]
-overloaedTables = M.fromList [(("metadata","catalog_tables"),[CreateRule createTableCatalog,DropRule dropTableCatalog])]
+overloaedTables = uncurry M.singleton $ translate createTableCatalog' --M.fromList [(("metadata","catalog_tables"),[CreateRule createTableCatalog,DropRule dropTableCatalog])]
 overloaedColumns = M.fromList [(("metadata","catalog_columns"),[CreateRule createColumnCatalog ,DropRule dropColumnCatalog])]
+
+
+toOverloaded l = staticP l
 
 createColumnCatalog v = do
     inf <- ask
@@ -85,14 +91,41 @@ dropColumnCatalog v = do
     let n = fromJust $ indexFieldRec (IProd Nothing [table_name]) v
         table = "catalog_tables"
         table_name = lookKey inf table "table_name"
-
         schema = "schema"
         sc = fromJust $ indexFieldRec (Nested (IProd Nothing [schemak]) (IProd Nothing [schema_name])) v
         schemak = lookKey inf table  "schema_name"
         schema_name= lookKey inf schema "name"
     (liftIO$ execute (rootconn inf) "DROP TABLE ?.?"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n))
-
     return $ Just $ TableModification Nothing (lookTable inf table) (DropRow  v )
+
+
+
+
+
+
+translate  r = ((i,m),[CreateRule $  (lift (runEnv r))])
+  where  ([Namespace i [Module m [RowCreate _ ]]],_)= staticP r
+         lift j i = do
+           inf <- ask
+           fmap ((Just . TableModification Nothing (lookTable inf m ). CreateRow . create).liftPatch inf  m) $ j (mapKey' keyValue i)
+
+
+createTableCatalog' :: PluginM [Namespace Text Text (TBIndex Showable) Text ]  (TBData  Text Showable) TransactionM  i ()
+createTableCatalog' = do
+  aschema "metadata" $
+    atable "catalog_tables" $
+      arow $
+        proc _ -> do
+          Atom t <- ifield "table_name" (ivalue (readV ())) -< ()
+          Atom s <- ifield "schema_name" (ivalue (readV  ()))-< ()
+          oid <- act (\(sc ,n) ->  do
+              inf <- lift ask
+              liftIO$ execute (rootconn inf) "CREATE TABLE ?.? ()"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n)
+              [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_tables where table_name =? and schema_name = ? " ((renderShowable n),(renderShowable sc))
+              return i) -< (TB1 s,TB1 t)
+          ifield "oid" (ivalue (writeV ())) -< [SNumeric oid]
+          returnA -< ()
+
 
 
 
