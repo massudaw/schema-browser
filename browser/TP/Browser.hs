@@ -91,7 +91,7 @@ deleteClientLogin inf i= do
     pt = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((ER.Finite $ PAtom (STime $ STimestamp (utcToLocalTime utc now)) , False)))])
 
   transactionNoLog inf $ do
-    v <- updateFrom  (apply old pt) old
+    v <- updateFrom  old pt
     tell (maybeToList v)
     return v
 
@@ -113,11 +113,11 @@ deleteServer inf (TableModification _ _ (PatchRow o@(a,ref,c))) = do
     pt old = (tableMeta (lookTable inf "client_login") , G.getIndex old,[PAttr (lookKey inf "client_login" "up_time") ( PInter False ((ER.Finite $ PAtom (STime $ STimestamp (utcToLocalTime utc now)) , False)))])
 
   mapM (\(old) -> transactionNoLog inf $ do
-    v <- updateFrom   (apply old (pt old)) old
+    v <- updateFrom   old (pt old)
     tell (maybeToList v)
     return v) oldClis
   let pt = (tableMeta (lookTable inf "server") , ref ,[PAttr (lookKey inf "server" "up_time") (PInter False ((ER.Finite $ PAtom (STime $ STimestamp (utcToLocalTime utc now)) , False)))])
-  transactionNoLog inf $ updateFrom (apply (create o) pt) (create o)
+  transactionNoLog inf $ updateFrom (create o) pt
 
 
 opt f = LeftTB1 . fmap f

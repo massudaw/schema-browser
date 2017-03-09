@@ -59,8 +59,8 @@ filterFun  = filter (\k -> not $ isFun k )
         isFun i = False
 
 overloadedRules = overloaedSchema <> overloaedTables <> overloaedColumns
-overloaedSchema = M.fromList [(("metadata","catalog_schema"),[CreateRule createSchema,DropRule dropSchema,UpdateRule alterSchema])]
-overloaedTables = uncurry M.singleton $ translate createTableCatalog' --M.fromList [(("metadata","catalog_tables"),[CreateRule createTableCatalog,DropRule dropTableCatalog])]
+overloaedSchema = M.fromList [(("metadata","catalog_schema"),[CreateRule createSchema,DropRule dropSchema,UpdateRule alterSchema ])]
+overloaedTables = (uncurry M.singleton $ translateC createTableCatalog) <> (uncurry M.singleton $ translateD dropTableCatalog)
 overloaedColumns = M.fromList [(("metadata","catalog_columns"),[CreateRule createColumnCatalog ,DropRule dropColumnCatalog])]
 
 
@@ -102,19 +102,26 @@ dropColumnCatalog v = do
 
 
 
-
-translate  r = ((i,m),[CreateRule $  (lift (runEnv r))])
-  where  ([Namespace i [Module m [RowCreate _ ]]],_)= staticP r
+translateD  r = ((i,m),[DropRule $  (lift (runEnv r))])
+  where  ([Namespace i [Module m [Row RowDrop _ ]]],_)= staticP r
          lift j i = do
            inf <- ask
-           fmap ((Just . TableModification Nothing (lookTable inf m ). CreateRow . create).liftPatch inf  m) $ j (mapKey' keyValue i)
+           fmap ((Just . TableModification Nothing (lookTable inf m ). DropRow . apply i ) . liftPatch inf  m) $ j (mapKey' keyValue i)
 
 
-createTableCatalog' :: PluginM [Namespace Text Text (TBIndex Showable) Text ]  (TBData  Text Showable) TransactionM  i ()
-createTableCatalog' = do
+
+translateC  r = ((i,m),[CreateRule $  (lift (runEnv r))])
+  where  ([Namespace i [Module m [Row RowCreate _ ]]],_)= staticP r
+         lift j i = do
+           inf <- ask
+           fmap ((Just . TableModification Nothing (lookTable inf m ). CreateRow . apply i ) . liftPatch inf  m) $ j (mapKey' keyValue i)
+
+
+createTableCatalog :: PluginM [Namespace Text Text RowModifier Text]  (TBData  Text Showable) TransactionM  i ()
+createTableCatalog = do
   aschema "metadata" $
     atable "catalog_tables" $
-      arow $
+      arow RowCreate $
         proc _ -> do
           Atom t <- ifield "table_name" (ivalue (readV ())) -< ()
           Atom s <- ifield "schema_name" (ivalue (readV  ()))-< ()
@@ -123,32 +130,28 @@ createTableCatalog' = do
               liftIO$ execute (rootconn inf) "CREATE TABLE ?.? ()"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n)
               [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_tables where table_name =? and schema_name = ? " ((renderShowable n),(renderShowable sc))
               return i) -< (TB1 s,TB1 t)
-          ifield "oid" (ivalue (writeV ())) -< [SNumeric oid]
+          ifield "oid" (iftb PIdOpt (ivalue (writeV ()))) -< [SNumeric oid]
+          returnA -< ()
+
+dropTableCatalog :: PluginM [Namespace Text Text RowModifier Text]  (TBData  Text Showable) TransactionM  i ()
+dropTableCatalog = do
+  aschema "metadata" $
+    atable "catalog_tables" $
+      arow RowDrop $
+        proc _ -> do
+          Atom t <- ifield "table_name" (ivalue (readV ())) -< ()
+          Atom s <- ifield "schema_name" (ivalue (readV  ()))-< ()
+          oid <- act (\(sc ,n) ->  do
+              inf <- lift ask
+              liftIO$ execute (rootconn inf) "CREATE TABLE ?.? ()"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n)
+              [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_tables where table_name =? and schema_name = ? " ((renderShowable n),(renderShowable sc))
+              return i) -< (TB1 s,TB1 t)
+          ifield "oid" (iftb PIdOpt (ivalue (writeV ()))) -< [SNumeric oid]
           returnA -< ()
 
 
 
-
-
-createTableCatalog v = do
-    inf <- ask
-    let n = fromJust $ indexFieldRec (IProd Nothing [table_name]) v
-        table = "catalog_tables"
-        table_name = lookKey inf table "table_name"
-
-        schema = "schema"
-        sc = fromJust $ indexFieldRec (Nested (IProd Nothing [schemak]) (IProd Nothing [schema_name])) v
-        schemak = lookKey inf table  "schema_name"
-        schema_name= lookKey inf schema "name"
-    (liftIO$ execute (rootconn inf) "CREATE TABLE ?.? ()"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n))
-    [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_tables where table_name =? and schema_name = ? " ((keyType table_name,n),(keyType schema_name,sc))
-
-    let res = liftTable' inf table (tblist $ _tb <$> [Attr "oid" (int i),Attr "schema_name" sc,Attr "table_name" n,Attr "table_type" (txt "BASE TABLE")])
-    res2<- loadFKS res
-    return $ Just $ TableModification Nothing (lookTable inf table) (CreateRow  res2)
-
-
-dropTableCatalog v = do
+dropTableCatalog' v = do
     inf <- ask
     let n = fromJust $ indexFieldRec (IProd Nothing [table_name]) v
         table = "catalog_tables"
@@ -180,9 +183,11 @@ createSchema v = do
       res2 <- loadFKS res
       return $ Just $ TableModification Nothing (lookTable inf "catalog_schema") (CreateRow res2)
 
-alterSchema v new = do
+alterSchema v p= do
+
       inf <- ask
-      let n = fromJust $ indexFieldRec (IProd Nothing [name]) v
+      let new = apply  v p
+          n = fromJust $ indexFieldRec (IProd Nothing [name]) v
           nnewm = indexFieldRec (IProd Nothing [name]) new
           o = fromJust $ indexFieldRec (Nested (IProd Nothing [owner]) (IProd Nothing [user_name])) v
           onewm = indexFieldRec (Nested (IProd Nothing [owner]) (IProd Nothing [user_name])) new
@@ -405,14 +410,16 @@ deleteMod p@(m,_) = do
       return $ Just $ (TableModification Nothing table  $ DropRow p)
   return $ log
 
-updateMod :: TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-updateMod kv old = do
+updateMod :: TBData Key Showable -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+updateMod old p = do
   inf <- ask
-  let overloaded  = M.lookup (_kvschema (fst old) ,_kvname (fst old)) overloadedRules
+  let
+      kv = apply  old p
+      overloaded  = M.lookup (_kvschema (fst old) ,_kvname (fst old)) overloadedRules
       isCreate (UpdateRule _ ) = True
       isCreate _ = False
   case L.find isCreate  =<< overloaded of
-    Just (UpdateRule i) ->  i old kv
+    Just (UpdateRule i) ->  i old p
     Nothing -> liftIO$ do
       let table = lookTable inf (_kvname (fst  old ))
       patch <- updatePatch (conn  inf) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table

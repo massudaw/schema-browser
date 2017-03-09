@@ -145,7 +145,7 @@ applyBackend (PatchRow p@(m,pk@(G.Idex pki),i)) = do
      return $ L.head $ G.toList o
         ) return oldm
    if isJust (diff old  (apply old p))
-     then updateFrom   old   (apply  old p)
+     then updateFrom   old   p
      else return Nothing
 
 selectFromA t a b c d = do
@@ -782,8 +782,8 @@ fullDiffEditInsert old@((k1,v1) ) (k2,v2) = do
    let proj = _kvvalues . unTB
    edn <- (k2,) . _tb . KV <$>  Tra.sequence (M.intersectionWith (\i j -> _tb <$>  tbDiffEditInsert (unTB i) (unTB j) ) (proj v1 ) (proj v2))
    when (isJust $ diff (tableNonRef' old) (tableNonRef' edn) ) $ do
-      mod <- updateFrom   edn old
-      tell (maybeToList mod)
+      mod <- traverse (updateFrom   old ) (diff old edn)
+      tell (maybeToList $ join  mod)
    return edn
 
 
@@ -793,8 +793,8 @@ fullDiffEdit old@((k1,v1) ) (k2,v2) = do
    let proj = _kvvalues . unTB
    edn <- (k2,) . _tb . KV <$>  Tra.sequence (M.intersectionWith (\i j -> _tb <$>  tbDiffEdit (unTB i) (unTB j) ) (proj v1 ) (proj v2))
    when (isJust $ diff (tableNonRef' old) (tableNonRef' edn) ) $ do
-      mod <- updateFrom   edn old
-      tell (maybeToList mod)
+      mod <- traverse (updateFrom   old ) (diff old edn)
+      tell (maybeToList $ join mod)
    return edn
 
 fullDiffInsert :: TBData Key Showable -> TransactionM  (Maybe (TableModification (RowPatch Key Showable)))

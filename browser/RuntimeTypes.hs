@@ -254,11 +254,11 @@ data PageTokenF v
 data OverloadedRule
   =  CreateRule  (TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable))))
   |  DropRule  (TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable))))
-  |  UpdateRule  (TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable))))
+  |  UpdateRule  (TBData Key Showable -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable))))
 
 data SchemaEditor
   = SchemaEditor
-  { editEd  :: TBData Key Showable -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+  { editEd  :: TBData Key Showable -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , patchEd :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , insertEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , deleteEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))

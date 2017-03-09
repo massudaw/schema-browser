@@ -61,9 +61,12 @@ instance Patch (Atom a) where
 instance Patch a => Patch (M.Map u a ) where
   type Index  (M.Map u a) = [(u,Index a)]
 
+data RowModifier
+  = RowCreate
+  | RowDrop
+  | RowPatch (TBIndex Showable)
 data Row pk  k
   = Row pk  [AttributePath k ()]
-  | RowCreate [AttributePath k ()]
   deriving(Show)
 
 data Module t pk k
@@ -83,17 +86,20 @@ runEnv  r  e  =  fmap (\(_,_,i) -> i) $ runRWST   ( (runKleisli $ dynP r ) ()) e
 indexTID (PIdIdx  ix )  (ArrayTB1 l) = l Non.!! ix
 indexTID PIdOpt  (LeftTB1 l) = fromJust l
 
+liftTID (PIdIdx ix) l = PIdx ix (Just l)
+liftTID PIdOpt  l = POpt $ Just l
+
 
 readM  v =  P ( [v],[]) (Kleisli (\_ -> get ))
 readV v = P ( [v],[]) (Kleisli (\_ -> ask ))
 writeV v = P ( [],[v]) (Kleisli (\i ->   tell  i ))
 
-incrementValue :: Monad m => PluginM [Universe Text Text Text (TBIndex Showable) Text] (M.Map Text (M.Map Text  (M.Map Text  (TableIndex Text Showable ))))  m () ()
+incrementValue :: Monad m => PluginM [Universe Text Text Text RowModifier Text] (M.Map Text (M.Map Text  (M.Map Text  (TableIndex Text Showable ))))  m () ()
 incrementValue
   = iuniverse "incendio" $
       ischema "incendio" $
         itable "test" $
-          irow (G.Idex [TB1 1]) $
+          irow (RowPatch $ G.Idex [TB1 1]) $
             ifield "counter" $
               iftb (PIdIdx 10) $
                 ivalue $ proc t ->  do
@@ -118,7 +124,7 @@ iftb :: Monad m =>
        PathTID
        -> PluginM [PathIndex PathTID v]  (Atom (FTB b))  m i a
        -> PluginM [PathIndex PathTID v]  (Atom (FTB b))  m i a
-iftb s   (P (tidxi ,tidxo) (Kleisli op) )  = P (NestedPath s <$> tidxi,NestedPath s <$> tidxo) (Kleisli $ (withReaderT id (fmap (indexTID s) ) . op  ))
+iftb s   (P (tidxi ,tidxo) (Kleisli op) )  = P (NestedPath s <$> tidxi,NestedPath s <$> tidxo) (Kleisli $ (withReaderT (fmap (liftTID s)) (fmap (indexTID s) ) . op  ))
 
 -- Attribute indexing
 ifield ::
@@ -144,16 +150,20 @@ iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathForeign s <$> tidxi,PathFo
 -- Row
 
 arow :: Monad m =>
-  PluginM [AttributePath k ()]  o  m  i a
-  -> PluginM [Row (TBIndex Showable) k ]  o  m i a
-arow  (P (tidxi ,tidxo) (Kleisli op) )  = P ([RowCreate  tidxi],[RowCreate  tidxo]) (Kleisli $ (withReaderT id id . op ))
+  RowModifier
+  -> PluginM [AttributePath k ()]  o  m  i a
+  -> PluginM [Row RowModifier k ]  o  m i a
+arow  m (P (tidxi ,tidxo) (Kleisli op) )  = P ([Row m tidxi],[Row m tidxo]) (Kleisli $ (withReaderT id id . op ))
 
 
 irow :: Monad m =>
-       TBIndex Showable
+       RowModifier
        -> PluginM [AttributePath k ()]  (TBData k Showable )  m  i a
-       -> PluginM [Row (TBIndex Showable) k ]  (TableIndex k Showable )  m i a
-irow s (P (tidxi ,tidxo) (Kleisli op) )  = P ([Row s tidxi],[Row s tidxo]) (Kleisli $ (withReaderT PatchRow (fromJust . G.lookup  s ) . op ))
+       -> PluginM [Row RowModifier k ]  (TableIndex k Showable )  m i a
+irow s (P (tidxi ,tidxo) (Kleisli op) )  = P ([Row s tidxi],[Row s tidxo]) (Kleisli $ (withReaderT PatchRow action  . op ))
+  where action = case s of
+            RowPatch ix -> fromJust . G.lookup ix
+
 
 -- Table
 
