@@ -22,7 +22,7 @@ module Types.Patch
   ,patchSet
 
   ,editor
-  ,recoverEdit
+  --,recoverEdit
   ,recoverEditChange
   ,Editor(..)
   ,filterDiff
@@ -189,17 +189,6 @@ recoverEditChange  _ _ = errorWithStackTrace "no edit"
 
 
 
-
--- recoverEdit  i j | traceShow (i,j) False = undefined
-recoverEdit (Just i) Keep = Just i
-recoverEdit (Just i) Delete = Nothing
-recoverEdit (Just i)(Diff j ) = Just $ apply i j
-recoverEdit Nothing (Diff j ) = Just $ create j
-recoverEdit Nothing Keep = Nothing
-recoverEdit Nothing Delete = Nothing
-recoverEdit _ _ = errorWithStackTrace "no edit"
-
-
 -- editor  i j | traceShow (i,j) False = undefined
 editor (Just i) Nothing = Delete
 editor (Just i) (Just j) = maybe Keep Diff df
@@ -282,7 +271,12 @@ instance (Ord a,Show a,Patch a) => Patch (FTB a ) where
   patch = patchFTB patch
 
 instance Monoid Showable where
+  mempty = error "no empty showable"
+  mappend i j = j
 
+instance Patch ()  where
+  type Index () = ()
+  patch = id
 instance Patch Showable  where
   type Index Showable = Showable
   diff  = diffPrim

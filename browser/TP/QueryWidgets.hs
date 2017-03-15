@@ -483,7 +483,8 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
   (listBody,output) <- if rawIsSum table
     then do
       let
-        initialSum = join . fmap ((\(n,  j) ->    fmap keyattr $ safeHead $ catMaybes  $ (fmap (_tb . fmap (const ()) ) . unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)))) ) <$>oldItems
+        initialSum = join . fmap ((\(n,  j) ->    fmap keyattr $ safeHead $ catMaybes  $ (fmap _tb  . unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)))) ) <$>oldItems
+        initalAttr = join . fmap ((\(n,  j) ->    safeHead $ catMaybes  $ (unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j)))) ) <$>oldItems
         sumButtom itb =  do
            let i = unTB itb
            lab <- labelCaseDiff inf i  (fst $ justError ("no attr" <> show i) $ M.lookup (keyattri i) $ M.mapKeys (keyattri ) $ M.fromList fks)
@@ -495,8 +496,12 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
           keypattr (PAttr i _) = [Inline i]
           keypattr (PInline i _) = [Inline i]
           keypattr (PFK  l  _ _) = l
+          delete (PAttr i _) = PAttr i (POpt Nothing)
+          delete (PInline i _) = PInline i (POpt Nothing)
+          delete (PFK i j _ ) = PFK i (fmap delete  j ) (POpt Nothing)
+          iniValue = (fmap (patch.attrOptional ) <$> initalAttr)
           resei :: Tidings (Editor (Index (TBData CoreKey Showable)))
-          resei = (\j -> fmap (\(m,i,l)  -> (m,i,L.filter ((== keyattr j) . keypattr) l))) <$> triding chk <*> tableb
+          resei = (\ini j -> fmap (\(m,i,l)  -> (m,i,traceShowId $ L.map (\i -> if (keypattr i == keyattr j) then i else delete i) (maybe l (:l) ini))) ) <$> iniValue <*> triding chk <*> tableb
       listBody <- UI.div #  set children (getElement chk : F.toList (getElement .fst .snd <$> fks))
       return (listBody, resei)
     else  do

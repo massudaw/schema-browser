@@ -56,7 +56,7 @@ main = do
 
 
   print "Load Polling Process"
-  poller smvar amap db regplugs False
+  -- poller smvar amap db regplugs False
   -- pollRmtc smvar amap (T.pack $ user db)
 
   cp <- lookupEnv "SYNC_SERVER_PORT"

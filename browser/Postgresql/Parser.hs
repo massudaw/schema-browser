@@ -6,6 +6,7 @@ import qualified Data.HashMap.Strict as HM
 import Data.Map (Map)
 import Types hiding (Parser)
 import Postgresql.Types
+import Text
 import Postgresql.Printer
 import Data.Ord
 import qualified Data.Aeson as A
@@ -93,6 +94,11 @@ newtype DoubleQuoted a = DoubleQuoted {unDoubleQuoted :: a}
 
     -- toField i = errorWithStackTrace (show i)
 
+instance TF.ToField (DoubleQuoted Showable ) where
+  toField (DoubleQuoted i) =  TF.toField (DoubleQuoted (renderPrim i))
+
+instance TF.ToField (DoubleQuoted (FTB Showable ) ) where
+  toField (DoubleQuoted i) =  TF.toField (DoubleQuoted (renderShowable i))
 
 instance TF.ToField (DoubleQuoted String) where
   toField (DoubleQuoted i) = TF.Many [TF.Plain "\"", TF.Plain (fromByteString $ BS.pack i) , TF.Plain "\""]

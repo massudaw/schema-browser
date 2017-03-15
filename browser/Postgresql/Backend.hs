@@ -59,132 +59,99 @@ filterFun  = filter (\k -> not $ isFun k )
         isFun i = False
 
 overloadedRules = overloaedSchema <> overloaedTables <> overloaedColumns
-overloaedSchema = M.fromList [(("metadata","catalog_schema"),[CreateRule createSchema,DropRule dropSchema,UpdateRule alterSchema ])]
-overloaedTables = (uncurry M.singleton $ translateC createTableCatalog) <> (uncurry M.singleton $ translateD dropTableCatalog)
-overloaedColumns = M.fromList [(("metadata","catalog_columns"),[CreateRule createColumnCatalog ,DropRule dropColumnCatalog])]
+overloaedSchema = M.intersectionWith mappend (M.fromList [(("metadata","catalog_schema"),[UpdateRule alterSchema ])]) (M.fromList (translate <$> [dropSchema,createSchema]))
+overloaedTables =  M.fromListWith (++) $ translate <$> [createTableCatalog, dropTableCatalog]
+overloaedColumns = M.fromListWith (++)  ( translate <$> [createColumnCatalog,dropColumnCatalog])
+
+schema_name  s = iforeign [(Rel s Equals "name")] (ivalue $ ifield "name" (ivalue (readV ())))
 
 
-toOverloaded l = staticP l
+createColumnCatalog  =
+  aschema "metadata" $
+    atable "catalog_columns" $
+      arow RowCreate $
+        proc _ -> do
+          c <- ifield "column_name" (ivalue (readV ())) -< ()
+          (s,t) <- iforeign [(Rel "table_name" Equals "table_name"),(Rel "table_schema" Equals "schema_name")]
+                      (ivalue ((,) <$> schema_name "schema_name"  <*>  ifield "table_name" (ivalue (readV ())))) -< ()
+          (sty,ty) <-  iinline "col_type"  . iftb PIdOpt .ivalue . isum $
+            [iinline "primitive" . iopt.  ivalue  $
+                  iforeign [(Rel "schema_name" Equals "nspname"),(Rel "data_name" Equals "typname")]
+                    (ivalue ((,) <$> ifield "nspname" (ivalue (readV ())) <*> ifield "typname" (ivalue (readV ()))))
+            ,iinline "composite" . iopt.  ivalue  $
+                  iforeign [(Rel "schema_name" Equals "schema_name"),(Rel "data_name" Equals "table_name")]
+                    (ivalue ((,) <$> ifield "schema_name" (ivalue (readV ())) <*> ifield "table_name" (ivalue (readV ()))))  ] -< ()
+          act (\(s,t,c,sty,ty) -> do
+            inf <- lift ask
+            liftIO  (execute (rootconn inf) "ALTER TABLE ?.? ADD COLUMN ? ?.? "(DoubleQuoted s ,DoubleQuoted t,DoubleQuoted c ,DoubleQuoted  sty ,DoubleQuoted ty ))
+            return ()) -< (s,t,c,sty,ty)
 
-createColumnCatalog v = do
-    inf <- ask
-    let
-        column ="catalog_columns"
-        table = "tables"
-        schema = "schema"
-        table_name = lookKey inf column "table_name"
-        tys = justError " no tys" $ indexFieldRec (liftAccess inf column $ Nested (IProd Nothing ["col_type"]) (ISum[Nested (IProd Nothing ["primitive"]) (IProd Nothing ["schema_name"]),Nested (IProd Nothing ["composite"]) (IProd Nothing ["schema_name"])])) v
-        ty = justError " no ty"$ indexFieldRec (liftAccess inf column $ Nested (IProd Nothing ["col_type"]) (ISum[Nested (IProd Nothing ["primitive"]) (IProd Nothing ["data_name"]),Nested (IProd Nothing ["composite"]) (IProd Nothing ["data_name"])])) v
-        n = justError "no n" $ indexFieldRec (liftAccess inf column $ Nested (IProd Nothing ["table_schema","table_name"]) (IProd Nothing ["table_name"])) v
-        sc = justError " no sc" $ indexFieldRec (Nested (IProd Nothing [schemak]) (IProd Nothing [schema_name])) v
-        schemak = lookKey inf column "table_schema"
-        schema_name= lookKey inf schema "name"
-        cc = justError "no cc" $ indexFieldRec (liftAccess inf column $IProd Nothing ["column_name"]) v
-        colname = lookKey inf table  "column_name"
-    liftIO  (execute (rootconn inf) "ALTER TABLE ?.? ADD COLUMN ? ?.? "(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n,DoubleQuoted $ renderShowable cc ,DoubleQuoted $ renderShowable tys ,DoubleQuoted $ renderShowable ty ))
-
-    return $ Just $ TableModification Nothing (lookTable inf table) (CreateRow  v)
-
-
-dropColumnCatalog v = do
-    inf <- ask
-    let n = fromJust $ indexFieldRec (IProd Nothing [table_name]) v
-        table = "catalog_tables"
-        table_name = lookKey inf table "table_name"
-        schema = "schema"
-        sc = fromJust $ indexFieldRec (Nested (IProd Nothing [schemak]) (IProd Nothing [schema_name])) v
-        schemak = lookKey inf table  "schema_name"
-        schema_name= lookKey inf schema "name"
-    (liftIO$ execute (rootconn inf) "DROP TABLE ?.?"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n))
-    return $ Just $ TableModification Nothing (lookTable inf table) (DropRow  v )
-
-
-
-
-
-translateD  r = ((i,m),[DropRule $  (lift (runEnv r))])
-  where  ([Namespace i [Module m [Row RowDrop _ ]]],_)= staticP r
-         lift j i = do
-           inf <- ask
-           fmap ((Just . TableModification Nothing (lookTable inf m ). DropRow . apply i ) . liftPatch inf  m) $ j (mapKey' keyValue i)
+dropColumnCatalog  = do
+  aschema "metadata" $
+    atable "catalog_columns" $
+      arow RowDrop $
+        proc _ -> do
+          c <- ifield "column_name" (ivalue (readV ())) -< ()
+          s <- iforeign [(Rel "table_schema" Equals "name")] (ivalue (ifield "name" (ivalue (readV ()) ))) -< ()
+          t <- iforeign [(Rel "table_name" Equals "table_name"),(Rel "table_schema" Equals "schema_name")] (ivalue (ifield "table_name" (ivalue (readV ())))) -< ()
+          act (\(t,s,c) -> do
+            inf <- lift ask
+            liftIO$ execute (rootconn inf) "ALTER TABLE ?.? DROP COLUMN ? "(DoubleQuoted  s ,DoubleQuoted  t, DoubleQuoted c)) -< (t,s,c)
+          returnA -< ()
 
 
 
-translateC  r = ((i,m),[CreateRule $  (lift (runEnv r))])
-  where  ([Namespace i [Module m [Row RowCreate _ ]]],_)= staticP r
-         lift j i = do
-           inf <- ask
-           fmap ((Just . TableModification Nothing (lookTable inf m ). CreateRow . apply i ) . liftPatch inf  m) $ j (mapKey' keyValue i)
 
 
-createTableCatalog :: PluginM [Namespace Text Text RowModifier Text]  (TBData  Text Showable) TransactionM  i ()
+createTableCatalog :: PluginM [Namespace Text Text RowModifier Text]  (Atom (TBData  Text Showable)) TransactionM  i ()
 createTableCatalog = do
   aschema "metadata" $
     atable "catalog_tables" $
       arow RowCreate $
         proc _ -> do
-          Atom t <- ifield "table_name" (ivalue (readV ())) -< ()
-          Atom s <- ifield "schema_name" (ivalue (readV  ()))-< ()
+          t <- ifield "table_name" (ivalue (readV ())) -< ()
+          s <- ifield "schema_name" (ivalue (readV  ()))-< ()
           oid <- act (\(sc ,n) ->  do
               inf <- lift ask
               liftIO$ execute (rootconn inf) "CREATE TABLE ?.? ()"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n)
               [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_tables where table_name =? and schema_name = ? " ((renderShowable n),(renderShowable sc))
               return i) -< (TB1 s,TB1 t)
-          ifield "oid" (iftb PIdOpt (ivalue (writeV ()))) -< [SNumeric oid]
+          ifield "oid" (iftb PIdOpt (ivalue (writeV ()))) -< SNumeric oid
           returnA -< ()
 
-dropTableCatalog :: PluginM [Namespace Text Text RowModifier Text]  (TBData  Text Showable) TransactionM  i ()
+dropTableCatalog :: PluginM [Namespace Text Text RowModifier Text]  (Atom (TBData  Text Showable)) TransactionM  i ()
 dropTableCatalog = do
   aschema "metadata" $
     atable "catalog_tables" $
       arow RowDrop $
         proc _ -> do
-          Atom t <- ifield "table_name" (ivalue (readV ())) -< ()
-          Atom s <- ifield "schema_name" (ivalue (readV  ()))-< ()
-          oid <- act (\(sc ,n) ->  do
+          t <- ifield "table_name" (ivalue (readV ())) -< ()
+          s <- ifield "schema_name" (ivalue (readV  ()))-< ()
+          act (\(sc ,n) ->  do
               inf <- lift ask
-              liftIO$ execute (rootconn inf) "CREATE TABLE ?.? ()"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n)
-              [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_tables where table_name =? and schema_name = ? " ((renderShowable n),(renderShowable sc))
-              return i) -< (TB1 s,TB1 t)
-          ifield "oid" (iftb PIdOpt (ivalue (writeV ()))) -< [SNumeric oid]
+              (liftIO$ execute (rootconn inf) "DROP TABLE ?.?"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n))
+              ) -< (TB1 s,TB1 t)
           returnA -< ()
 
 
-
-dropTableCatalog' v = do
-    inf <- ask
-    let n = fromJust $ indexFieldRec (IProd Nothing [table_name]) v
-        table = "catalog_tables"
-        table_name = lookKey inf table "table_name"
-
-        schema = "schema"
-        sc = fromJust $ indexFieldRec (Nested (IProd Nothing [schemak]) (IProd Nothing [schema_name])) v
-        schemak = lookKey inf table  "schema_name"
-        schema_name= lookKey inf schema "name"
-    (liftIO$ execute (rootconn inf) "DROP TABLE ?.?"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n))
-
-    return $ Just $ TableModification Nothing (lookTable inf table) (DropRow  v )
-
-
-
-
-createSchema v = do
-      inf <- ask
-      let n = fromJust $ indexFieldRec (IProd Nothing [name]) v
-          name = lookKey inf "catalog_schema" "name"
-          onewm = indexFieldRec (Nested (IProd Nothing [owner]) (IProd Nothing [user_name])) v
-          owner= lookKey inf "catalog_schema" "owner"
-          user_name = lookKey inf "user" "usename"
-      maybe
-        (liftIO$ execute (rootconn inf) "CREATE SCHEMA ? "(Only $ DoubleQuoted $ renderShowable n))
-        (\o -> liftIO$ execute (rootconn inf) "CREATE SCHEMA ? AUTHORIZATION ? "(DoubleQuoted $ renderShowable n, DoubleQuoted $ renderShowable o)) onewm
-      [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_schema where name =? " (Only $ (keyType name,n))
-      let res = liftTable' inf "catalog_schema"(tblist $ _tb <$> [Attr "oid" (int i),Attr "type" (txt "sql"),Attr "name" n,Attr "owner" (fromMaybe n onewm)])
-      res2 <- loadFKS res
-      return $ Just $ TableModification Nothing (lookTable inf "catalog_schema") (CreateRow res2)
+createSchema  = do
+  aschema "metadata" $
+    atable "catalog_schema" $
+      arow RowCreate $
+        proc _ -> do
+          s <- ifield "name" (ivalue (readV  ()))-< ()
+          o <- iforeign [(Rel "owner" Equals "oid")] (iftb PIdOpt $ ivalue (ifield "usename" ((ivalue (readV ()))) )) -< ()
+          oid <- act (\(n,onewm) ->  do
+            inf <- lift ask
+            maybe
+              (liftIO$ execute (rootconn inf) "CREATE SCHEMA ? "(Only $ DoubleQuoted $ renderShowable n))
+              (\o -> liftIO$ execute (rootconn inf) "CREATE SCHEMA ? AUTHORIZATION ? "(DoubleQuoted $ renderShowable n, DoubleQuoted $ renderShowable o)) onewm
+            [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_schema where name =? " (Only $ (renderShowable n))
+            return i) -< (TB1 s,Just (TB1 o))
+          ifield "oid" (iftb PIdOpt (ivalue (writeV ()))) -< SNumeric oid
+          returnA -< ()
 
 alterSchema v p= do
-
       inf <- ask
       let new = apply  v p
           n = fromJust $ indexFieldRec (IProd Nothing [name]) v
@@ -199,17 +166,17 @@ alterSchema v p= do
       traverse (\new -> when (new /= n )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? RENAME TO ?  "(DoubleQuoted $ renderShowable n, DoubleQuoted $ renderShowable new)) nnewm
       return $ TableModification Nothing (lookTable inf "catalog_schema") . PatchRow  . traceShowId <$> (diff v new)
 
-
-dropSchema  v = do
-      inf <- ask
-      let
-        cat = "catalog_schema"
-        name = lookKey inf cat "name"
-        n = fromJust $ indexFieldRec (IProd Nothing [name]) v
-        oid = lookKey inf  cat "oid"
-        i = fromJust $ indexFieldRec (IProd Nothing [oid]) v
-      liftIO$ execute (rootconn inf) "DROP SCHEMA ?"(Only $ DoubleQuoted $ renderShowable n)
-      return $ Just $ TableModification Nothing (lookTable inf cat ) (DropRow v )
+dropSchema = do
+  aschema "metadata" $
+    atable "catalog_schema" $
+      arow RowDrop $
+        proc _ -> do
+          s <- ifield "name" (ivalue (readV  ()))-< ()
+          act (\n->  do
+            inf <- lift ask
+            liftIO$ execute (rootconn inf) "DROP SCHEMA ?"(Only $ DoubleQuoted $ renderShowable n)
+            return ()) -< TB1 s
+          returnA -< ()
 
 
 
