@@ -25,7 +25,7 @@ tzone  = TB1 . STime . STimestamp . zonedTimeToLocalTime
 
 i =: j = Attr i j
 
-convertTrans acc (Transaction {..})  =
+convertTrans (Transaction {..})  =
     ["fitid" =: serial txt (if txFITID == "0" then Nothing else Just txFITID)
     ,"memo" =:  opt txt txMEMO
     ,FKT (KV $ mapFromTBList $ [_tb $ "trntype" =: txt (tail $ show txTRNTYPE )]) [Rel "trntype" Equals "trttype"] (TB1 ( tblist $ [_tb $ "trttype" =: txt (tail $ show txTRNTYPE )]))
@@ -40,16 +40,14 @@ convertTrans acc (Transaction {..})  =
     ,"refnum" =: opt txt txREFNUM
     ,"sic" =: opt txt txSIC
     ,"payeeid" =: opt txt txPAYEEID
-    ,"account" =: acc
     ]  :: [TB Identity T.Text Showable]
 
 testAccount = do
   let tfile = "extrato2.ofx"
-      acc = TB1 $ SNumeric 4
   file <- readFile tfile
-  either (const Nothing) Just . fmap (fmap (convertTrans acc) ) <$> account tfile file
+  either (const Nothing) Just . fmap (fmap (convertTrans ) ) <$> account tfile file
 
-ofxPlugin  i j acc = join . fmap nonEmpty . either (const Nothing) Just . fmap (fmap (convertTrans acc) ) <$> account i j
+ofxPlugin  i j = join . fmap nonEmpty . either (const Nothing) Just . fmap (fmap (convertTrans ) ) <$> account i j
 account :: String -> String -> IO (Either String [Transaction])
 account filename contents = do
    ofx <- case parse ofxFile filename contents of

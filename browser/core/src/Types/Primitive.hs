@@ -388,27 +388,41 @@ data TableK k
            , rawAttrs :: (Set k)
            , rawUnion :: [TableK k ]
            }
-     | Union
-          { origin :: TableK k
-          , unionList :: [(TableK k)]
-          }
+     | Project  (TableK k)  (TableTransform  k)
      deriving(Show)
+
+data TableTransform  k
+  = Union [TableK k]
+  | From (TableK k)
+  | Join (TableTransform k) (TableK k)  [Rel k]
+  | Filter (TableTransform k) (BoolCollection (Access k,AccessOp Showable))
+  deriving(Show)
 
 rawFKS = _rawFKSL
 
 unRecRel (RecJoin _ l) = l
 unRecRel l = l
 
+data BoolCollection a
+ = AndColl [BoolCollection a]
+ | OrColl [BoolCollection a]
+ | PrimColl a
+ deriving(Show,Eq,Ord,Functor,Foldable,Generic)
+
+instance NFData a => NFData (BoolCollection a)
+instance Binary a => Binary (BoolCollection a)
 
 
 
-rawPK  (Union i _ ) = _rawPKL i
+
+
+rawPK  (Project i _ ) = _rawPKL i
 rawPK  i  = _rawPKL i
-rawDescription (Union i _ ) = _rawDescriptionL i
+rawDescription (Project i _ ) = _rawDescriptionL i
 rawDescription  i  = _rawDescriptionL i
-rawName (Union i _) = _rawNameL i
+rawName (Project i _) = _rawNameL i
 rawName i  = _rawNameL i
-rawSchema (Union i _) = _rawSchemaL i
+rawSchema (Project i _) = _rawSchemaL i
 rawSchema i  = _rawSchemaL i
 
 tableName = rawName
@@ -632,7 +646,7 @@ addDefault = mapComp def
 
 
 tableMeta :: Ord k => TableK k -> KVMetadata k
-tableMeta (Union s l ) =  tableMeta s
+tableMeta (Project s _ ) =  tableMeta s
 tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawDescription t) (fmap F.toList $ uniqueConstraint t) [] (F.toList $ rawAttrs t)[]  (F.toList $ rawDelayed t) (paths' <> paths)
   where rec = filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
         same = filter ((tableName t ==). fkTargetTable . pathRel) rec

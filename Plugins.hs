@@ -532,28 +532,28 @@ instance ToJSON Timeline where
 
 itR i f = atR i (IT (fromString i)<$> f)
 
-idxRA = fmap (fmap unArray) <$> idxR
+idxRA = fmap (fmap unArray) . fmap ( join . fmap unSOptional' )<$> idxR
 
-gerarParcelas= FPlugins "Gerar Parcelas" tname  $ BoundedPlugin2 url
+gerarParcelas= FPlugins "Gerar Parcelas" tname  $ DiffIOPlugin url
   where
     tname = "pricing"
-    url :: ArrowReader
+    url :: ArrowReaderDiffM IO
     url =  proc t -> do
               parcelas :: Maybe (Non.NonEmpty (FTB Showable) )<- idxRA "parcelas"-< ()
               preco :: Maybe (FTB Showable )<- idxR "pricing_price"-< ()
               let
                 par :: Maybe (Non.NonEmpty (FTB Showable) )
                 par = (\p par -> (p*)<$> par)<$> preco <*> parcelas
-              pagamentos <- idxR "pagamentos" -< ()
-              pg <- atR  "pagamentos" (proc (pagamentos,parcelas) -> do
+              row <- act (const ask )-< ()
+              pg <- atR  "pagamentos" (proc parcelas -> do
                   odxR "payment_description" -<  ()
                   odxR "price" -<  ()
                   let
                     total :: Int
                     total = maybe 0 length parcelas
-                  let pagamento = _tb $ FKT (kvlist [attrT  ("pagamentos",LeftTB1 pagamentos )]) [Rel "pagamentos" Equals "id_payment"] (LeftTB1 $ fmap ArrayTB1 $ ( liftA2 (Non.zipWith (\valorParcela ix -> TB1 $ tblist [attrT ("payment_description",TB1 $ SText $ T.pack $ "Parcela (" <> show (ix+1) <> "/" <> show total <>")" ),attrT ("price",valorParcela) ])) parcelas (Just $ Non.fromList [0 .. total])))
-                  returnA -<  pagamento ) -< (pagamentos,par)
-              returnA -<  Just $ tblist [pg ]
+                  let pagamento = PFK [Rel "pagamentos" Equals "id_payment"] [] (patch $ LeftTB1 $ fmap ArrayTB1 $ ( liftA2 (Non.zipWith (\valorParcela ix -> TB1 $ tblist [attrT ("payment_description",TB1 $ SText $ T.pack $ "Parcela (" <> show (ix+1) <> "/" <> show total <>")" ),attrT ("price",valorParcela) ])) parcelas (Just $ Non.fromList [0 .. total])))
+                  returnA -<  pagamento ) -< (par)
+              returnA -<  Just $ (kvempty,maybe (Idex []) getIndex row ,[pg ])
 
 pagamentoArr =  itR "pagamento" (proc descontado -> do
               pinicio <- idxR "inicio"-< ()
@@ -676,7 +676,7 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
     url :: ArrowReaderDiffM IO
     url = proc t  -> do
         idx <-idxK "id" -< ()
-        (pass ,r) <- atR "login_credentials" (proc c -> do
+        (pass ,account) <- atR "login_credentials" (proc c -> do
             nu <- idxK "operator_number" -< c
             na <- idxK "operator_name" -< c
             pas <- idxK "password" -< c
@@ -702,7 +702,7 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
         refs <- atRA "ofx" (idxK "file_name") -< ()
         let ix = length refs
         pk <- act (const ask )-< ()
-        returnA -<   Just (kvempty,Idex (pure (LeftTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,patch (r): [PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
+        returnA -<   Just (kvempty,Idex (pure (LeftTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,patch account: [PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
 
 
 importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
@@ -736,7 +736,6 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
     url = proc t -> do
       fn <- idxK "file_name" -< t
       i <- idxK "import_file" -< t
-      r <- atR "account" $ idxK "id_account" -< t
       atR "statements,account" (proc t -> do
         odxR "fitid" -< t
         odxR "memo" -< t
@@ -754,7 +753,7 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
         odxR "payeeid" -< t
         ) -< t
 
-      b <- act ofx  -< (,,) fn i r
+      b <- act ofx  -< (,) fn i
       let ao :: Index (TB2 Text Showable)
           ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom . (mempty,Idex (maybeToList . join . fmap unSSerial . fmap _tbattr .L.find (("fitid"==). _tbattrkey ) $ a ),) . fmap patch   $ a) <$>  join (nonEmpty . zip [0..] <$> b)
           ref :: [TB Identity  Text Showable]
@@ -768,8 +767,8 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
           tbst :: (Maybe (TBData Text (Showable)))
           tbst = Just $ tblist $ fmap _tb [FKT (kvlist ref) [Rel "statements" Equals "fitid",Rel "account" Equals "account"] ao]-}
       returnA -< tbst
-    ofx (TB1 (SText i), ((LeftTB1 (Just (TB1 (SBinary r) )))) , acc )
-      = liftIO $ ofxPlugin (T.unpack i) (BS.unpack r) acc
+    ofx (TB1 (SText i), ((LeftTB1 (Just (TB1 (SBinary r) )))))
+      = liftIO $ ofxPlugin (T.unpack i) (BS.unpack r)
     ofx i = errorWithStackTrace (show i)
 
 

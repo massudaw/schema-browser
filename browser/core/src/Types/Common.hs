@@ -640,11 +640,16 @@ kattri (IT _  i ) =  recTB i
         recTB (ArrayTB1 i ) = L.concat $ F.toList $ fmap recTB i
         recTB (LeftTB1 i ) = L.concat $ F.toList $ fmap recTB i
 
-aattr = aattri . runIdentity . getCompose
+aattr = aattri . unTB
 aattri (Attr k i ) = [(k,i)]
 aattri (Fun k _ i ) = [(k,i)]
 aattri (FKT i  _ _ ) =  L.concat $ aattr  <$> unkvlist i
-aattri (IT _ _) = []
+aattri (IT _ i) =  go i
+  where
+    go i = case i of
+        TB1 i -> concat $ fmap maybeToList $ filter isJust $ fmap (traverse unSOptional') $ concat $ fmap aattr $ F.toList $ unkvlist (unTB $ snd i)
+        LeftTB1 i ->   maybe [] go i
+        i -> []
 
 
 

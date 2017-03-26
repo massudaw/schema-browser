@@ -362,19 +362,22 @@ tbCaseDiff inf constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
             nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin $ fmap unTB $ unkvlist ifk)
             nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattri .fst) wl
             relTable = M.fromList $ fmap (\i -> (_relTarget i,_relOrigin i)) rel
-            restrictConstraint = filter ((`S.isSubsetOf` (S.fromList $ fmap _relTarget rel)) . S.fromList . getRelOrigin  .fst) constr
+            restrictConstraint = filter ((`S.isSubsetOf` (S.fromList $ fmap _relOrigin rel)) . S.fromList . getRelOrigin  .fst) constr
             convertConstr :: SelTBConstraint
-            convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> constr .  justError "no back fk" .backFKRef relTable (getRelOrigin f)  ) j ) <$>  restrictConstraint
+            convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> constr . traceShowId .  justError "no back fk" .  (\box ->  (\ref -> pure $ FKT (kvlist $ fmap _tb $ ref ) rel (TB1 box) )<$> backFKRef relTable (getRelOrigin f) box ) ) j ) <$>  restrictConstraint
+        liftIO $print ("tbcase fk constr" ,fmap fst restrictConstraint)
         let
             patchRefs = fmap (\(a,b) -> (flip recoverEditChange ) <$> facts a <#> b ) <$> nonInjRefs
         v <-  fkUITableDiff inf convertConstr plugItens  patchRefs oldItems i
         return $ TrivialWidget  (triding v ) (getElement v)
 
-tbCaseDiff inf _ i@(IT na tb1 ) wl preplugItems preoldItems
+tbCaseDiff inf constr i@(IT na tb1 ) wl preplugItems preoldItems
     = do
+      let restrictConstraint = filter ((`S.isSubsetOf` (S.singleton na) ) . S.fromList . getRelOrigin  .fst) constr
+      liftIO $ print ("tbcase iui constr", fmap fst restrictConstraint)
       plugItems <- ui $ traverse (traverse cacheTidings) preplugItems
       oldItems <- ui $ cacheTidings preoldItems
-      iUITableDiff inf plugItems oldItems i
+      iUITableDiff inf restrictConstraint plugItems oldItems i
 tbCaseDiff inf _ a@(Attr i _ ) wl plugItens preoldItems = do
         let oldItems = maybe preoldItems (\v-> fmap (Just . fromMaybe (Attr i v)) preoldItems  ) ( keyStatic i)
         let tdiv = fmap _tbattr <$> oldItems
@@ -549,14 +552,14 @@ crudUITable inf open reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItem
             return (fmap PatchRow p  ) )) (preoldItems)
           let
               deleteCurrentUn un e l =   maybe l (\v -> G.delete v G.indexParam l) $  G.getUnique un <$> e
-              tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ snd $ tbPK ftb , (_kvpk m, ( gist)))
-          unConstraints <-  traverse (traverse (traverse (ui . cacheTidings))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn (S.fromList un ) (TB1 $ tableNonRef' ftb) , (un, fmap (createUn un . G.toList ) gist))) <$> _kvuniques m
+              tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ snd $ tbPK ftb , (_kvpk m,  gist))
+          unConstraints <-  traverse (traverse (traverse (ui . cacheTidings))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn (S.fromList un ) (TB1 ftb) , (un, fmap (createUn un . G.toList ) gist))) <$> _kvuniques m
           unDeleted <- traverse (traverse (traverse (ui . cacheTidings))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> preoldItems <*> o))) (tpkConstraint:unConstraints))
           let
-              dunConstraints (un,o) = flip (\i ->  maybe (const False ) (unConstraint un .tblist' table . fmap _tb ) (traverse (traFAttr unSOptional' ) i ) ) <$> o
+              dunConstraints (un,o) = flip (\i ->   (checkConstraint un .tblist' table . fmap _tb ) (i ) ) <$> o
               unFinal:: [([Column CoreKey ()], Tidings PKConstraint)]
               unFinal = fmap (fmap dunConstraints) unDeleted
-          (listBody,tablebdiff) <- eiTableDiff inf   unFinal  refs pmods ftb preoldItems
+          (listBody,tablebdiff) <- eiTableDiff inf  unFinal  refs pmods ftb preoldItems
 
 
           (panelItems,tdiff)<- processPanelTable listBody inf reftb  (diffTidings tablebdiff) table preoldItems
@@ -580,8 +583,9 @@ mergePatches i j = join (liftA2 applyIfChange i j)<|> i  <|> join (createIfChang
 
 diffTidings t = tidings (facts t) $ diffEvent (facts t ) (rumors t)
 
-unConstraint :: [CoreKey] -> TBData CoreKey Showable -> G.GiST (G.TBIndex Showable) (TBData CoreKey Showable) -> Bool
-unConstraint un v m = not . L.null . lookGist un v $ m
+checkConstraint :: [CoreKey] -> TBData CoreKey Showable -> G.GiST (G.TBIndex Showable) (TBData CoreKey Showable) -> Bool
+checkConstraint  un v m | traceShow (un,v) False = undefined
+checkConstraint un v m = checkGist un v $ m
 
 
 onDiff f g (Diff i ) = f i
@@ -610,7 +614,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
 
 
   -- Insert when isValid
-  let insertEnabled = liftA2 (&&) (liftA2 (||) (onDiff isRight False .  fmap patchCheck <$>  inscrudp) ((maybe False (isRight . tableCheck  )  )<$> inscrud )) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) (inscrud ) (gist ))
+  let insertEnabled = liftA2 (&&) (liftA2 (||) (onDiff isRight False .  fmap patchCheck <$>  inscrudp) (maybe False (isRight . tableCheck  )  <$> inscrud )) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) inscrud gist)
   insertB <- UI.button# set UI.class_ "btn btn-sm" #
           set text "INSERT" #
           set UI.class_ "buttonSet" #
@@ -649,7 +653,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
             mapM deleteFrom confl
             fullDiffInsert  i)
        crudEdi i j =  fmap (\g -> fmap (PatchRow . fixPatch inf (tableName table) ) $diff i  g) $ transaction inf $ fullDiffEditInsert  i j
-       crudIns j   =  fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf (fullDiffInsert  j)
+       crudIns j   =  fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf (fullDiffInsert $ traceShowId j)
        crudDel :: TBData Key Showable  ->  Dynamic (Maybe (RowPatch Key Showable))
        crudDel j  = fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)))<$> transaction inf (deleteFrom j )
 
@@ -1072,22 +1076,27 @@ buildPrim fm tdi i = case i of
 iUITableDiff
   :: InformationSchema
   -- Plugin Modifications
+  -> SelPKConstraint
   -> PluginRef (Column CoreKey (Showable))
   -- Selected Item
   -> Tidings (Maybe (Column CoreKey Showable))
   -- Static Information about relation
   -> Column CoreKey ()
   -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
-iUITableDiff inf pmods oldItems  (IT na  tb1)
-  = fmap (fmap (PInline  na) )<$> go (keyType na)   (fmap (fmap (fmap (patchfkt))) <$> pmods) (fmap _fkttable <$> oldItems)
+iUITableDiff inf constr pmods oldItems  (IT na  tb1)
+  = fmap (fmap (PInline  na) )<$> go (unConstr <$> constr) (keyType na)   (fmap (fmap (fmap (patchfkt))) <$> pmods) (fmap _fkttable <$> oldItems)
   where
-    go mt pmods oldItems =  case mt of
+    unConstr (i,j) = (i, (\j -> (\v -> j $ IT na <$> v)) <$> j )
+    go constr mt pmods oldItems =  case mt of
       Primitive (RecordPrim tn) ->  do
         coldItems <- ui $ cacheTidings oldItems
         let tdata = allRec' (tableMap inf) table
+            convertConstr ([pre],j) =  (\i -> ([i],(\j -> (\v -> j [traceShowId (TB1 (tblist (fmap addDefault (_tb <$> L.delete i attrs) ++ (_tb <$> v))))])) <$> j )) <$> attrs
+              where attrs = fmap unTB $ F.toList $ unKV $ snd $ unTB1 $ _fkttable pre
             table = lookTable rinf (snd tn)
             rinf = fromMaybe inf (HM.lookup (fst tn) (depschema inf))
-        (celem,tcrud) <- eiTableDiff inf []
+
+        (celem,tcrud) <- eiTableDiff inf (concat $ convertConstr <$> constr)
                 []
                 (fmap (fmap(fmap unAtom))<$> pmods)
                 tdata
@@ -1098,7 +1107,8 @@ iUITableDiff inf pmods oldItems  (IT na  tb1)
         let bres =  (fmap ( PAtom )<$> tcrud)
         return $ TrivialWidget bres celem
       KOptional tb1 -> do
-        tr <- go tb1 ( fmap (fmap (join . fmap (\(POpt i ) -> i)))<$> pmods) (join . fmap unSOptional' <$> oldItems)
+        let convertConstr (i,j) = (i,(\j -> (\v -> j $ LeftTB1. Just <$> v)) <$> j)
+        tr <- go (convertConstr <$>constr )tb1 ( fmap (fmap (join . fmap (\(POpt i ) -> i)))<$> pmods) (join . fmap unSOptional' <$> oldItems)
         let
           test Delete  _ = Diff $ POpt Nothing
           -- test Keep Nothing = Diff$ POpt Nothing
@@ -1115,7 +1125,7 @@ iUITableDiff inf pmods oldItems  (IT na  tb1)
             index o ix v = flip Non.atMay (o + ix)  <$> v
         let unIndexEl ix = filterT $ index ix <$> offsetT <*> tdi2
             dyn = dynHandlerPatch  (\ix valix ->do
-              wid <- go tb1 (fmap (fmap ((\p -> filterT $ (\ o v -> convertPatchSet (o + ix) <$> v ) <$> offsetT <*>p))) pmods) valix
+              wid <- go constr tb1 (fmap (fmap ((\p -> filterT $ (\ o v -> convertPatchSet (o + ix) <$> v ) <$> offsetT <*>p))) pmods) valix
               lb <- hlabel ["col-xs-1"] # sink UI.text (show . (+ix) <$> facts offsetT )
               paintEditDiff lb (facts (triding wid ))
               element wid # set UI.class_ "col-xs-11"
@@ -1264,8 +1274,6 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
             replaceKey =  firstTB (\k -> maybe k id  $ fmap _relTarget $ L.find ((==k)._relOrigin) $  rel)
             replaceRel a =  (fst $ search (_relOrigin $ head $ (keyattri a  )),  firstTB (\k  -> snd $ search k ) a)
                 where  search  k = let v = justError ("no key" <> show k )$ L.find ((==k)._relOrigin)  rel in (_relOperator v , _relTarget v)
-            staticold :: [(TB Identity CoreKey () ,Tidings(Maybe (TB Identity CoreKey (Showable))))]
-            staticold  =  second (fmap (fmap replaceKey )) . first replaceKey  <$> filter (all (\i ->  not (isInlineRel i ) &&  ((_relOperator i) == Equals)). keyattri.fst ) ( nonInjRefs)
             iold2 :: Tidings (Maybe [TB Identity CoreKey Showable])
             iold2 =  fmap (fmap ( uncurry Attr) . concat) . allMaybesEmpty  <$> iold
                 where
@@ -1273,13 +1281,14 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
                   iold  = Tra.sequenceA $ fmap (fmap ( aattr . _tb ) ) . snd <$> nonInjRefs
             ftdi2 :: Tidings (Maybe [TB Identity CoreKey Showable])
             ftdi2 =   fmap (fmap unTB. tbrefM ) <$> ftdi
-            applyConstr m l =  filter (foldl' (\l constr ->  liftA2 (&&) l (not <$> constr) ) (pure (True))  l) m
+            applyConstr m l =  filter (foldl' (\l constr ->  liftA2 (&&) l (not <$> constr) ) (pure True)  l) m
             constrT =  Tra.sequenceA $ fmap snd constr
             sortList :: Tidings ([TBData CoreKey Showable] -> [TBData CoreKey Showable])
             sortList =  sorting' <$> pure (fmap ((,True)._relTarget) rel)
           let
             vv :: Tidings (Maybe [TB Identity CoreKey Showable])
             vv =   join .   fmap (\i -> if  L.length i == L.length rel then Just i else Nothing) .fmap L.nub <$>  liftA2 (<>) iold2  ftdi2
+          liftIO $print ("fkui constr",fmap fst constr)
           cvres <- currentValue (facts vv)
           filterInp <- UI.input # set UI.class_ "col-xs-3"
           filterInpE <- UI.valueChange filterInp
@@ -1382,7 +1391,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
             replaceRel a =  (fst $ search (_relOrigin $ head $ (keyattri a  )),  firstTB (\k  -> snd $ search k ) a)
                 where  search  k = let v = justError ("no key" <> show k )$ L.find ((==k)._relOrigin)  rel in (_relOperator v , _relTarget v)
             staticold :: [(TB Identity CoreKey () ,Tidings(Maybe (TB Identity CoreKey (Showable))))]
-            staticold  =  second (fmap (fmap replaceKey )) . first replaceKey  <$> filter (all (\i ->  not (isInlineRel i ) &&  ((_relOperator i) == Equals)). keyattri.fst ) ( nonInjRefs)
+            staticold  =  second (fmap (fmap replaceKey )) . first replaceKey  <$> filter (all (\i ->  not (isInlineRel i ) &&  ((_relOperator i) == Equals)). keyattri.fst ) nonInjRefs
 
           (celem,ediff,pretdi) <-crudUITable inf (fmap (\i -> if i then "+" else "-")$ bop ) reftb staticold (fmap (fmap (fmap (unAtom. patchfkt))) <$> plmods)  tbdata (fmap (unTB1._fkttable )<$> ftdi )
           let

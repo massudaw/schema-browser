@@ -26,16 +26,6 @@ import Data.Monoid
 import Data.Foldable(Foldable)
 import Data.Traversable(Traversable)
 
-data BoolCollection a
- = AndColl [BoolCollection a]
- | OrColl [BoolCollection a]
- | PrimColl a
- deriving(Show,Eq,Ord,Functor,Foldable,Generic)
-
-instance NFData a => NFData (BoolCollection a)
-instance Binary a => Binary (BoolCollection a)
-
-
 
 mapPredicate f (WherePredicate i ) = WherePredicate (fmap (first (fmap f )) i)
 type WherePredicateK k = TBPredicate k Showable

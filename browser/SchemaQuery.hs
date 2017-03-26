@@ -103,7 +103,7 @@ prerefTable  inf table  = do
 
 
 refTable :: InformationSchema -> Table -> Dynamic DBVar
-refTable  inf (Union table origin )  = do
+refTable  inf (Project table (Union origin) )  = do
   refs <- mapM (refTable inf ) origin
 
   let mergeDBRefT  (ref1,j ,i,o,k) (ref2,m ,l,p,n) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l , liftA2 (zipWith (\(i,j) (l,m) -> (i,j<>m))) o p ,unionWith mappend k n)
@@ -258,8 +258,8 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                                       removeArray (KArray i)  (AnyOp o) = o
                                       removeArray i  o = o
                                    in  fmap WherePredicate (go (test (_relOrigin <$> i)) l)
-                let refs = (   fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap ( (\i->PrimColl (IProd notNull [_relTarget $ k] ,Left (i,Flip $ _relOperator k)))) . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v )
-                    predm = (refs<> predicate predtop)
+                let refs = traceShowId (   fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap ( (\i->PrimColl (IProd notNull [_relTarget $ k] ,Left (i,Flip $ _relOperator k)))) . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v )
+                    predm =(refs<> predicate predtop)
                 (ref,tb2) <- case refs of
                   Just refspred-> do
                     let pred = maybe refspred (refspred <> ) (predicate predtop)
@@ -316,7 +316,7 @@ getFKS
                 ([Compose Identity (TB Identity) Key Showable],[Rel Key])
                 (TBData Key Showable),
            S.Set Key)
-getFKS inf predtop table v = F.foldl' (\m f  -> m >>= (\i -> getFKRef inf predtop  table i v f)) (return ([],return ,S.empty )) $ traceShowId sorted -- first <> second
+getFKS inf predtop table v = F.foldl' (\m f  -> m >>= (\i -> getFKRef inf predtop  table i v f)) (return ([],return ,S.empty )) $ sorted -- first <> second
   where
     sorted = P.sortBy (P.comparing (RelSort . F.toList .  pathRelRel))  (S.toList (rawFKS table))
 
@@ -442,7 +442,7 @@ childrenRefsUnique  inf table (sidxs,base) (FKJoinTable rel j ,evs)  =  concat $
                     conv ((pk,ts),G.Idex fks) = (\t -> PatchRow (kvempty,pk ,[PFK relf (zipWith (\i j -> PAttr (_relOrigin i) (patch j)) relf fks ) (recurse2 t p)]) ) <$> ts
                     unKOptional (KOptional i) = i
                     unKOptional i = i
-                    recurse2 (G.PathAttr _ i ) p = traceShowId $ go i
+                    recurse2 (G.PathAttr _ i ) p = go i
                       where
                         go (G.ManyPath (j Non.:| _) ) = go  j
                         go (G.NestedPath i j ) = matcher i (go j)

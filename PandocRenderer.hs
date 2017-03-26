@@ -97,16 +97,25 @@ renderProjectReport = myDoc
           returnA -<  (\i -> tblist .  pure . Compose. Identity . Attr "report" . LeftTB1 . Just . LeftTB1. Just . TB1 . SBinary .  BS.toStrict <$> either (const Nothing) Just i ) outdoc
 
 
+ptext = plain . fromString
+arrayR s = unArray <$> idxK s
+
 renderProjectPricingA = myDoc
    where
       tname = "pricing"
       -- var :: Text -> Parser (->) (Access Text) () Inlines
+      render = fromString . renderShowable
       var str =  maybe "" fromString . fmap (renderShowable) <$> idxM str
       varT str =  maybe "" fromString . fmap (renderShowable) <$> idxR str
       arrayVar  str = (bulletList . concat . maybeToList . join . fmap   (cshow ) ) <$> idxR str
         where
           cshow (ArrayTB1 a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
           cshow (LeftTB1 a ) =  join $ fmap cshow a
+
+      address_model = atR "address"
+                            ((,,)<$> (var "logradouro" <> ", "<> var "number" <> " " <> var "complemento")
+                                <*> var "municipio"
+                                <*> var "uf")
       -- myDoc :: a -> Pandoc
       myDoc :: ArrowReader
       myDoc = proc preenv -> do
@@ -117,27 +126,53 @@ renderProjectPricingA = myDoc
               d <- var "pricing_execution_time" -< env
               idp <- atR "id_project" (varT "id_project") -< env
               da <- varT "price_available" -< env
+              p<- varT "pricing_price" -< env
+              p_value <- idxK "pricing_price" -< env
+              parcelas_rate <-  arrayR "parcelas" -< env
+              let parcelas  = fmap  (*p_value)  parcelas_rate
               v <- arrayVar "pricing_service" -< env
-              p <- varT "pricing_price" -< env
-              o <- atR "id_project"
+              (o,o_cpf,(oaddress,oc,os)) <- atR "id_project"
                      (atR "id_owner,id_contact"
-                        (atR "id_owner"  (varT"owner_name"))) -< env
-              end <- atR "id_project" $ atR "address" (var "logradouro" <> ", "<> var "number" <> " " <> var "complemento") -< env
-              mun <- atR "id_project" $ atR "address" (var "municipio" <> "-" <> var "uf") -< env
+                        (atR "id_owner"  ((,,)<$> varT "owner_name"
+                                            <*> atAny "ir_reg"
+                                                [fmap (\i -> "CPF: " <> render i) . join . fmap unSOptional'<$>  idxR "cpf_number"
+                                                                ,fmap (\i -> "CNPJ: " <> render i ) .join . fmap unSOptional' <$> idxR "cnpj_number"]
+                                            <*> address_model
+                                         ) )) -< env
+              ((end,mun,uf),(area,area_terreno,pavimentos,altura)) <-
+                atR "id_project" $
+                  ((,) <$> address_model
+                      <*> atR "dados_projeto" (
+                       (,,,) <$> varT "area"
+                           <*> varT "terrain_area"
+                           <*> varT "pavimentos"
+                           <*> varT "altura" ))  -< ()
               returnA -< (setT ( para $ "Proposta :" <> idp <> ", " <>  da ) $ doc $
                      para ( f <> ",")
                      <> orderedList [
                        para "Serviços Executados" <> v ,
                        para "Valor da Proposta" <>
                           plain ("Valor total:  " <> p ),
+                       para "Dados do Contratante" <>
+                         bulletList [
+                           ptext (fromMaybe "CPF/CNPJ:" o_cpf) ,
+                           plain ("Proprietário : " <> o ),
+                           plain ("Endereço: " <> oaddress),
+                           plain ("Município: " <> oc),
+                           plain ("Estado: " <> os)
+                                    ],
                        para "Dados do Servico" <>
                          bulletList [
-                           plain ("Proprietário : " <> o ),
                            plain ("Endereço: " <> end ),
-                           plain ("Local: " <> mun )
+                           plain ("Município: " <> mun ),
+                           plain ("Estado: " <> uf),
+                           plain ("Área Terreno: " <> area_terreno),
+                           plain ("Área Construida: " <> area),
+                           plain ("Altura: " <> altura),
+                           plain ("Pavimentos: " <> pavimentos)
                               ],
                        para "Condições de Pagamento" <>
-                          plain "Entrada de 50% (cinquenta porcento) do valor da proposta, 50% (cinquenta por cento) na entrega dos projetos aprovados.",
+                         bulletList ( (\(ix,v) -> ptext $ "Parcelas " ++ show ix ++ " - "  ++ render v ) <$> zip [0..] (F.toList parcelas )) ,
                        para "Despesas do Contratante" <>
                           plain "As despesas referentes a cópias dos projetos e taxas para aprovação não estão inclusas no orçamento e são por conta do Contratante",
                        para "Validade da Proposta" <>

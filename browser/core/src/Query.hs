@@ -23,6 +23,7 @@ module Query
   ,isKDelayed
   ,isKOptional
   ,lookGist
+  ,checkGist
   ,tlabel
   ,tableView
   ,unTlabel'
@@ -657,9 +658,11 @@ joinRel2 tb ref table
             tbel = G.lookup (G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref) table
 
 
-lookGist un pk  = G.search (tbpred un pk)
+lookGist un pk  = G.search (traceShowId $ tbpred un pk)
+checkGist un pk  m = maybe False (\i -> not $ L.null $ G.search i m ) (tbpredM un pk)
 
 
+tbpredM un  = G.notOptionalM . traceShowId . G.getUnique un
 
 
 

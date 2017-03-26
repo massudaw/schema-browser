@@ -16,7 +16,7 @@
 
 module Types.Index
   (Affine (..),Predicate(..),DiffShowable(..),TBIndex(..) , toList ,lookup ,fromList ,fromList',filter ,filter'
-  ,getIndex ,getBounds,getUnique,notOptional,tbpred
+  ,getIndex ,getBounds,getUnique,notOptional,notOptionalM,tbpred
   ,unFin
   ,Node(..)
   ,indexParam
@@ -100,8 +100,12 @@ getBounds ls = Just $ zipWith  (\i j -> (ER.Finite i,True) `interval` (ER.Finite
   where Idex l = getIndex (head ls)
         Idex u = getIndex (last ls)
 
+notOptionalM :: TBIndex  a -> Maybe (TBIndex  a)
+notOptionalM (Idex m) = fmap Idex   . traverse unSOptional'  $ m
+
+
 notOptional :: TBIndex  a -> TBIndex  a
-notOptional (Idex m) = Idex   . justError "cant be empty " . traverse unSOptional'  $ m
+notOptional m = justError "cant be empty " . notOptionalM $ m
 
 tbpred :: Ord k => TBData k a -> TBIndex a
 tbpred = notOptional . getIndex

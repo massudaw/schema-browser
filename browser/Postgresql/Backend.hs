@@ -8,6 +8,7 @@ import Control.Arrow
 import SchemaQuery
 import Environment
 import Postgresql.Types
+import Postgresql.Default
 import Step.Common
 import qualified Data.Poset as P
 import Control.Exception (uninterruptibleMask,mask_,throw,catch,throw,SomeException)
@@ -63,8 +64,16 @@ overloaedSchema = M.intersectionWith mappend (M.fromList [(("metadata","catalog_
 overloaedTables =  M.fromListWith (++) $ translate <$> [createTableCatalog, dropTableCatalog]
 overloaedColumns = M.fromListWith (++)  ( translate <$> [createColumnCatalog,dropColumnCatalog])
 
-schema_name  s = iforeign [(Rel s Equals "name")] (ivalue $ ifield "name" (ivalue (readV ())))
+schema_name  s
+  = iforeign [(Rel s Equals "name")] (ivalue $ ifield "name" (ivalue (readV ())))
 
+column_type
+  = isum [iinline "primitive" . iopt . ivalue $
+             iforeign [(Rel "schema_name" Equals "nspname"),(Rel "data_name" Equals "typname")]
+               (ivalue ((,) <$> ifield "nspname" (ivalue (readV ())) <*> ifield "typname" (ivalue (readV ()))))
+         ,iinline "composite" . iopt . ivalue $
+             iforeign [(Rel "schema_name" Equals "schema_name"),(Rel "data_name" Equals "table_name")]
+               (ivalue ((,) <$> ifield "schema_name" (ivalue (readV ())) <*> ifield "table_name" (ivalue (readV ()))))]
 
 createColumnCatalog  =
   aschema "metadata" $
@@ -74,13 +83,7 @@ createColumnCatalog  =
           c <- ifield "column_name" (ivalue (readV ())) -< ()
           (s,t) <- iforeign [(Rel "table_name" Equals "table_name"),(Rel "table_schema" Equals "schema_name")]
                       (ivalue ((,) <$> schema_name "schema_name"  <*>  ifield "table_name" (ivalue (readV ())))) -< ()
-          (sty,ty) <-  iinline "col_type"  . iftb PIdOpt .ivalue . isum $
-            [iinline "primitive" . iopt.  ivalue  $
-                  iforeign [(Rel "schema_name" Equals "nspname"),(Rel "data_name" Equals "typname")]
-                    (ivalue ((,) <$> ifield "nspname" (ivalue (readV ())) <*> ifield "typname" (ivalue (readV ()))))
-            ,iinline "composite" . iopt.  ivalue  $
-                  iforeign [(Rel "schema_name" Equals "schema_name"),(Rel "data_name" Equals "table_name")]
-                    (ivalue ((,) <$> ifield "schema_name" (ivalue (readV ())) <*> ifield "table_name" (ivalue (readV ()))))  ] -< ()
+          (sty,ty) <-  iinline "col_type"  . iftb PIdOpt .ivalue $ column_type -< ()
           act (\(s,t,c,sty,ty) -> do
             inf <- lift ask
             liftIO  (execute (rootconn inf) "ALTER TABLE ?.? ADD COLUMN ? ?.? "(DoubleQuoted s ,DoubleQuoted t,DoubleQuoted c ,DoubleQuoted  sty ,DoubleQuoted ty ))
@@ -91,16 +94,16 @@ dropColumnCatalog  = do
     atable "catalog_columns" $
       arow RowDrop $
         proc _ -> do
-          c <- ifield "column_name" (ivalue (readV ())) -< ()
-          s <- iforeign [(Rel "table_schema" Equals "name")] (ivalue (ifield "name" (ivalue (readV ()) ))) -< ()
-          t <- iforeign [(Rel "table_name" Equals "table_name"),(Rel "table_schema" Equals "schema_name")] (ivalue (ifield "table_name" (ivalue (readV ())))) -< ()
+          c <- ifield "column_name"
+              (ivalue (readV ())) -< ()
+          s <- iforeign [(Rel "table_schema" Equals "name")]
+              (ivalue (ifield "name" (ivalue (readV ()) ))) -< ()
+          t <- iforeign [(Rel "table_name" Equals "table_name"),(Rel "table_schema" Equals "schema_name")]
+              (ivalue (ifield "table_name" (ivalue (readV ())))) -< ()
           act (\(t,s,c) -> do
             inf <- lift ask
             liftIO$ execute (rootconn inf) "ALTER TABLE ?.? DROP COLUMN ? "(DoubleQuoted  s ,DoubleQuoted  t, DoubleQuoted c)) -< (t,s,c)
           returnA -< ()
-
-
-
 
 
 createTableCatalog :: PluginM [Namespace Text Text RowModifier Text]  (Atom (TBData  Text Showable)) TransactionM  i ()
@@ -109,11 +112,13 @@ createTableCatalog = do
     atable "catalog_tables" $
       arow RowCreate $
         proc _ -> do
-          t <- ifield "table_name" (ivalue (readV ())) -< ()
-          s <- ifield "schema_name" (ivalue (readV  ()))-< ()
+          t <- ifield "table_name"
+             (ivalue (readV ())) -< ()
+          s <- ifield "schema_name"
+             (ivalue (readV  ()))-< ()
           oid <- act (\(sc ,n) ->  do
               inf <- lift ask
-              liftIO$ execute (rootconn inf) "CREATE TABLE ?.? ()"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n)
+              liftIO$ execute (rootconn inf) "CREATE TABLE ?.? ()"(DoubleQuoted sc ,DoubleQuoted  n)
               [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_tables where table_name =? and schema_name = ? " ((renderShowable n),(renderShowable sc))
               return i) -< (TB1 s,TB1 t)
           ifield "oid" (iftb PIdOpt (ivalue (writeV ()))) -< SNumeric oid
@@ -125,11 +130,13 @@ dropTableCatalog = do
     atable "catalog_tables" $
       arow RowDrop $
         proc _ -> do
-          t <- ifield "table_name" (ivalue (readV ())) -< ()
-          s <- ifield "schema_name" (ivalue (readV  ()))-< ()
+          t <- ifield "table_name"
+              (ivalue (readV ())) -< ()
+          s <- ifield "schema_name"
+              (ivalue (readV  ()))-< ()
           act (\(sc ,n) ->  do
               inf <- lift ask
-              (liftIO$ execute (rootconn inf) "DROP TABLE ?.?"(DoubleQuoted $ renderShowable sc ,DoubleQuoted $ renderShowable n))
+              liftIO$ execute (rootconn inf) "DROP TABLE ?.?" (DoubleQuoted sc ,DoubleQuoted n)
               ) -< (TB1 s,TB1 t)
           returnA -< ()
 
@@ -139,15 +146,17 @@ createSchema  = do
     atable "catalog_schema" $
       arow RowCreate $
         proc _ -> do
-          s <- ifield "name" (ivalue (readV  ()))-< ()
-          o <- iforeign [(Rel "owner" Equals "oid")] (iftb PIdOpt $ ivalue (ifield "usename" ((ivalue (readV ()))) )) -< ()
+          s <- ifield "name"
+              (ivalue (readV  ()))-< ()
+          o <- iforeign [(Rel "owner" Equals "oid")]
+              (iopt $ ivalue (ifield "usename" ((ivalue (readV ()))) )) -< ()
           oid <- act (\(n,onewm) ->  do
             inf <- lift ask
             maybe
-              (liftIO$ execute (rootconn inf) "CREATE SCHEMA ? "(Only $ DoubleQuoted $ renderShowable n))
-              (\o -> liftIO$ execute (rootconn inf) "CREATE SCHEMA ? AUTHORIZATION ? "(DoubleQuoted $ renderShowable n, DoubleQuoted $ renderShowable o)) onewm
+              (liftIO$ execute (rootconn inf) "CREATE SCHEMA ? "(Only $ DoubleQuoted n))
+              (\o -> liftIO$ execute (rootconn inf) "CREATE SCHEMA ? AUTHORIZATION ? "(DoubleQuoted n, DoubleQuoted o)) onewm
             [Only i] <- liftIO$ query (rootconn inf) "select oid from metadata.catalog_schema where name =? " (Only $ (renderShowable n))
-            return i) -< (TB1 s,Just (TB1 o))
+            return i) -< (TB1 s,fmap TB1 o)
           ifield "oid" (iftb PIdOpt (ivalue (writeV ()))) -< SNumeric oid
           returnA -< ()
 
@@ -162,8 +171,8 @@ alterSchema v p= do
           owner= lookKey inf "catalog_schema" "owner"
           user_name = lookKey inf "user" "usename"
 
-      traverse (\new -> when (new /= o )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? OWNER TO ?  "(DoubleQuoted $ renderShowable o, DoubleQuoted $ renderShowable new)) onewm
-      traverse (\new -> when (new /= n )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? RENAME TO ?  "(DoubleQuoted $ renderShowable n, DoubleQuoted $ renderShowable new)) nnewm
+      traverse (\new -> when (new /= o )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? OWNER TO ?  "(DoubleQuoted o, DoubleQuoted new)) onewm
+      traverse (\new -> when (new /= n )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? RENAME TO ?  "(DoubleQuoted n, DoubleQuoted new)) nnewm
       return $ TableModification Nothing (lookTable inf "catalog_schema") . PatchRow  . traceShowId <$> (diff v new)
 
 dropSchema = do
@@ -174,7 +183,7 @@ dropSchema = do
           s <- ifield "name" (ivalue (readV  ()))-< ()
           act (\n->  do
             inf <- lift ask
-            liftIO$ execute (rootconn inf) "DROP SCHEMA ?"(Only $ DoubleQuoted $ renderShowable n)
+            liftIO$ execute (rootconn inf) "DROP SCHEMA ?"(Only $ DoubleQuoted n)
             return ()) -< TB1 s
           returnA -< ()
 
@@ -206,7 +215,7 @@ insertPatch f conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> l
     where
       checkAllFilled = patchCheck path
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (escapeReserved <$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
-      attrs =  concat $ nonRefTB . create <$> filterFun i
+      attrs =  concat $L.nub $ nonRefTB . create . traceShowId <$> filterFun i
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
       direct f = filter (not.all1 testSerial .f)
       serialAttr = flip Attr (LeftTB1 Nothing)<$> filter (isSerial .keyType) ( rawPK t <> F.toList (rawAttrs t))
@@ -321,46 +330,8 @@ insertMod j  = do
       let
         table = lookTable inf (_kvname (fst  j))
       (t,pk,attrs) <- insertPatch (fromRecord  ) (conn  inf) (patch j) ( table)
-      let mod =  TableModification Nothing table (CreateRow $ create  (t,pk,deftable inf table <> attrs ))
+      let mod =  TableModification Nothing table (CreateRow $ create  (t,pk,compact $ deftable inf table <> attrs ))
       return $ Just  mod
-
---- Generate default values  patches
---
-deftable inf table =
-  let
-    fks' = S.toList $ rawFKS table
-    items = tableAttrs table
-    fkSet,funSet:: S.Set Key
-    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction .pathRel) $ fks'
-    funSet = S.unions $ fmap (\(Path i _ )-> i) $ filter (isFunction.pathRel) (fks')
-    nonFKAttrs :: [Key]
-    nonFKAttrs =   filter (\i -> not $ S.member i (fkSet <> funSet)) items
-    fks = fks'
-
-  in catMaybes $ fmap defaultAttrs  nonFKAttrs <> fmap (defaultFKS  inf) fks
-
-
-defaultAttrs  k  = PAttr k <$> (go (keyType k) <|> fmap patch (keyStatic k))
-  where
-    go ty  =
-      case ty of
-        KOptional i -> Just (POpt (go i))
-        i -> Nothing
-defaultFKS inf (Path _ (FKJoinTable i j ))
-  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin ) i = flip (PFK i) (POpt Nothing) <$>  (traverse (defaultAttrs .  _relOrigin ) i)
-  | otherwise  = Nothing
-  where isRel (Rel _  _ _ ) = True
-        isRel _ = False
-defaultFKS inf (Path k (FKInlineTable i)) =
-  case keyType (head $ S.toList k) of
-    KOptional i -> Just (PInline (head $ S.toList k) (POpt Nothing))
-    Primitive _ -> PInline (head $ S.toList k) . PAtom .(tableMeta (lookTable rinf (snd i)) , G.Idex [],) <$> nonEmpty ( deftable rinf (lookTable rinf (snd i)))
-    i ->  Nothing
-  where rinf = fromMaybe inf $ HM.lookup (fst i) (depschema inf)
-defaultFKS inf (Path k (FunctionField  _ _ _)) = defaultAttrs (head $ S.toList k)
-defaultFKS inf (Path k (RecJoin     _ i )) =  defaultFKS inf (Path k i)
-
-
 
 
 deleteMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
