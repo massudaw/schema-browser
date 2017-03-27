@@ -487,49 +487,6 @@ num = TB1 . SNumeric
 elem :: Char -> String -> Bool
 elem = L.elem
 
-
-{-
-data Timeline
-  = Timeline
-  { header :: String
-  , dates :: [(Either Day LocalTime,String)]
-  }
-
-queryTimeline = BoundedPlugin "Timeline" "pricing"(staticP arrow)  elem
-  where
-    convDateArr i = swap . fmap projDate  <$> (catMaybes $ fmap (traverse unRSOptional') $ catMaybes $ i)
-    projDate (SDate (Finite f)) = Left f
-    projDate (STimestamp (Finite f)) =  Right f
-    projDate (SOptional (Just j )  ) = projDate j
-    projDate i = error $ " projDate " <> show i
-    arrow :: FunArrowPlug [(Either Day LocalTime,String)]
-    arrow = proc t -> do
-      prd <- varT "pricing_date" -< t
-      papr <- varN "pricing_approval" -< t
-      apd <- varN "id_project:aproval_date" -< t
-      arr <- varN "pagamentos:payment_date" -< t
-      arrD <- varN "pagamentos:payment_description" -< t
-      andDa <- varN "id_project:andamentos:andamento_date" -< t
-      andDe <- varN "id_project:andamentos:andamento_description" -< t
-      let vv =  concat $ maybeToList $ (\(SComposite i) (SComposite j)-> fmap Just $ zip (renderShowable <$> F.toList j ) (F.toList i)) <$>  arr <*> arrD
-
-      returnA -<  convDateArr ([("Proposta de Enviada",)<$> prd,("Projeto Aprovado",) <$> apd ,("Proposta Aprovada",) <$> papr] <>  vv {-<> vvand -})
-    elem inf inputs = do
-        e <- UI.div # set UI.id_ "timeline-embed"
-        let  timeline i = Timeline "hello" (dynP arrow $ i)
-        i <- UI.div # sink UI.html  (fmap (\i->  "<script>    var container = document.getElementById('timeline-embed');var items = new vis.DataSet("  <>  BSL.unpack ( encode (timeline i)) <> ") ;  var options = {} ; if (container.vis != null ) { container.vis.destroy(); } ; container.vis = new vis.Timeline(container,items,options); </script>") $ facts inputs)
-        UI.div # set children [e,i]
-
-
-instance ToJSON Timeline where
-  toJSON (Timeline h v) = toJSON (dates <$> zip [0..] v)
-
-    where dates (id,(Right i,j)) = object ["id" .= (id :: Int) ,"start" .=  ti i, "content" .= j, "type" .= ("point" :: String)]
-          dates (id,(Left i,j)) = object ["id" .= (id :: Int) ,"start" .=  tti i, "content" .= j, "type" .= ("point" :: String)]
-          ti  = formatTime defaultTimeLocale "%Y/%m/%d"
-          tti  = formatTime defaultTimeLocale "%Y/%m/%d %H:%M:%S"
--}
-
 itR i f = atR i (IT (fromString i)<$> f)
 
 idxRA = fmap (fmap unArray) . fmap ( join . fmap unSOptional' )<$> idxR

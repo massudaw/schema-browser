@@ -285,9 +285,10 @@ buttonDivSetFun ks binit   el = mdo
 
 
 
+buttonDivSet  ks binit el = buttonDivSetO ks binit (sink UI.enabled ) el
 
-buttonDivSet :: Eq a => [a] -> Tidings (Maybe a)  ->  (a -> UI Element ) -> UI (TrivialWidget a)
-buttonDivSet ks binit   el = mdo
+buttonDivSetO :: Eq a => [a] -> Tidings (Maybe a)  ->  (Behavior Bool -> UI Element -> UI Element  )  -> (a -> UI Element ) -> UI (TrivialWidget a)
+buttonDivSetO ks binit   op el = mdo
   buttons <- mapM (buttonString  bv ) ks
   dv <- UI.div # set children (fst <$> buttons)
   let evs = foldl (unionWith const) (filterJust $ rumors binit) (snd <$> buttons)
@@ -296,7 +297,7 @@ buttonDivSet ks binit   el = mdo
   return (TrivialWidget (tidings bv evs) dv)
     where
       buttonString   bv k = do
-        b <- el k # sink UI.enabled (not . (k==) <$> bv)
+        b <- el k # op (not . (k==) <$> bv)
 
         cli <- UI.click b
         let ev = pure k <@ cli

@@ -520,7 +520,7 @@ instance  (Ord k,Show k,P.Poset k) => P.Poset (RelSort k ) where
       inp j= norm $ _relInputs <$> j
       out j = norm $ _relOutputs <$> j
       norm  = S.fromList . concat . catMaybes
-      comp a b  | traceShow (i,j ,a,b,P.compare a b) False = undefined
+      -- comp a b  | traceShow (i,j ,a,b,P.compare a b) False = undefined
       comp i j  | S.null (S.intersection i j ) = P.EQ
       comp i j  | S.empty == i = P.EQ
       comp i j  | S.empty == j  = P.EQ
@@ -539,7 +539,7 @@ instance (Show i,P.Poset i )=> P.Poset (Rel i)where
                                         True -> P.LT
                                         False -> P.compare j i
   compare  (Rel i _ a ) (Rel j _ b) = P.compare i j <> P.compare a b
-  compare  n@(RelFun i  a ) o@(RelFun j k)  = case traceShow (n,o) $ traceShowId (L.any (== Inline j) a,L.any (==Inline i) k)  of
+  compare  n@(RelFun i  a ) o@(RelFun j k)  = case  (L.any (== Inline j) a,L.any (==Inline i) k)  of
                                           (True ,_)-> P.GT
                                           (_,True)-> P.LT
                                           (False,False)-> P.compare (Inline i) (Inline j)
@@ -658,11 +658,11 @@ joinRel2 tb ref table
             tbel = G.lookup (G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref) table
 
 
-lookGist un pk  = G.search (traceShowId $ tbpred un pk)
+lookGist un pk  = G.search (tbpred un pk)
 checkGist un pk  m = maybe False (\i -> not $ L.null $ G.search i m ) (tbpredM un pk)
 
 
-tbpredM un  = G.notOptionalM . traceShowId . G.getUnique un
+tbpredM un  = G.notOptionalM . G.getUnique un
 
 
 

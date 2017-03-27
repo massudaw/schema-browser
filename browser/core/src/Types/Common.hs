@@ -291,7 +291,7 @@ instance Show k => Show (KVMetadata k) where
 kvMetaFullName m = _kvschema m <> "." <> _kvname m
 
 filterTB1 f = fmap (filterTB1' f)
-filterTB1' f ((m ,i)) = (m , mapComp (filterKV f) i)
+filterTB1' f (m ,i) = (m , mapComp (filterKV f) i)
 
 mapTB1  f (TB1 (m, i))  =  TB1 (m ,mapComp (mapKV f) i )
 
@@ -647,6 +647,7 @@ aattri (FKT i  _ _ ) =  L.concat $ aattr  <$> unkvlist i
 aattri (IT _ i) =  go i
   where
     go i = case i of
+        -- TODO : Make a better representation for inline tables , to support product and sum tables properly
         TB1 i -> concat $ fmap maybeToList $ filter isJust $ fmap (traverse unSOptional') $ concat $ fmap aattr $ F.toList $ unkvlist (unTB $ snd i)
         LeftTB1 i ->   maybe [] go i
         i -> []
