@@ -777,6 +777,7 @@ transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
   return md
 
 fullDiffEditInsert :: TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
+fullDiffEditInsert old@((k1,v1) ) (k2,v2)  | traceShow (v1,v2) False = undefined
 fullDiffEditInsert old@((k1,v1) ) (k2,v2) = do
    inf <- ask
    let proj = _kvvalues . unTB
@@ -788,6 +789,7 @@ fullDiffEditInsert old@((k1,v1) ) (k2,v2) = do
 
 
 fullDiffEdit :: TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
+fullDiffEdit old@((k1,v1) ) (k2,v2)  | traceShow (v1,v2) False = undefined
 fullDiffEdit old@((k1,v1) ) (k2,v2) = do
    inf <- ask
    let proj = _kvvalues . unTB

@@ -669,10 +669,19 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   diffIns <- mapEventFin (fmap join . sequence) $ fmap crudIns <$> facts inscrud <@ (unionWith const cliIns (filterKey  (facts insertEnabled) altI ))
 
   conflict <- UI.div # sinkDiff text ((\i j l -> if l then maybe "" (L.intercalate "," .fmap (showFKText ). flip conflictGist  j) i else "")  <$> inscrud <*> gist <*> mergeEnabled) # sinkDiff UI.style (noneShow <$>mergeEnabled)
+  c <- checkedWidget (pure False)
   transaction <- UI.span
-    # set children [insertB,editB,mergeB,deleteB]
+    # set children [insertB,editB,mergeB,deleteB,getElement c]
     -- # set UI.style (noneShowSpan (ReadWrite ==  rawTableType table ))
-  out <- UI.div # set children [transaction,conflict]
+  debug <- UI.div
+  mapUIFinalizerT debug (\i -> if  i
+                            then do
+                              debug_out <- UI.mkElement "textarea"
+                                              #  sink UI.value (maybe "" ( ident . renderTable )<$> facts oldItemsi)
+                                              # set UI.style [("width","100%"),("height","300px")]
+                              element debug # set children [debug_out]
+                            else  element debug # set children [] ) (triding c)
+  out <- UI.div # set children [transaction,conflict,debug]
   return (out, fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffMerge,diffDel] )
 
 
@@ -1408,7 +1417,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
 
       let ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$>  plmods)
           evsel = unionWith const (unionWith const elsel eledit) (const Keep <$> rumors oldItems)
-      blsel <- ui$ stepper Keep (fmap traceShowId evsel)
+      blsel <- ui$ stepper Keep evsel
       element pan#  sink text (maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' . unTB1 . _fkttable )  <$>  (recoverEditChange <$> facts oldItems <*>blsel)) # set UI.style [("border","1px solid gray"),("height","20px")]
       selEls <- mapUIFinalizerT top selector  (tidings bh  eh)
       subnet <- UI.div  # sink children (facts selEls)

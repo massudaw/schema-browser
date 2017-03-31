@@ -5,6 +5,7 @@ import qualified NonEmpty as Non
 import Data.Ord
 import Control.Monad
 import Utils
+import Control.Arrow (first)
 import Debug.Trace
 
 import Data.Tuple
@@ -31,12 +32,41 @@ import qualified Data.Text as T
 
 -- This module contains text backend printer and parser
 
+ident :: [(Int,String)] -> String
+ident = L.intercalate "\n" . fmap (\(i,j) -> replicate i '\t' ++ j)
+
+renderTable :: TBData Key Showable ->  [(Int,String)]
+renderTable i =  concat $ renderAttr . unTB <$> F.toList (unKV (snd i))
+
+renderRel (Rel i op j) = show i ++ "  " ++ renderBinary op ++ " " ++ show j
+
+renderAttr :: TB Identity Key Showable ->  [(Int,String)]
+renderAttr (FKT k rel v )
+  = [(0,L.intercalate " AND " (fmap renderRel rel))]
+  ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderAttr . unTB <$> F.toList (_kvvalues k)) ++ "] => ")]
+  ++ fmap (first (+1)) (renderFTB renderTable v)
+renderAttr (Attr k v ) = [(0,show k ++ " => " ++ renderShowable v)]
+renderAttr (IT k v ) = [(0,show k ++ " => ")] ++ fmap (first (+1)) (renderFTB renderTable v)
+
+renderFTB :: (a -> [(Int,String)]) -> FTB a -> [(Int,String)]
+renderFTB f (TB1 i) = f i
+renderFTB f (LeftTB1 i) = concat $ maybeToList $ fmap (renderFTB f ) i
+renderFTB f (ArrayTB1 i)  = concat $ F.toList $ fmap (renderFTB f) i
+renderFTB f (IntervalTB1 i)  = [(0,showInterval  i)]
+  where
+    showInterval (Interval.Interval (i,j) (l,m)) = ocl j <> (showFin i) ++ "," ++ (showFin l) <> ocr m
+      where
+        showFin (ER.Finite i) = snd $ head $ renderFTB f i
+        showFin i =[]
+        ocl j = if j then "[" else "("
+        ocr j = if j then "]" else ")"
+
 renderShowable :: FTB Showable -> String
 renderShowable (LeftTB1 i ) = maybe "" renderShowable i
 renderShowable (ArrayTB1 i)  = L.intercalate "," $ F.toList $ fmap renderShowable i
 renderShowable (IntervalTB1 i)  = showInterval renderShowable i
   where
-    showInterval f i | i == Interval.empty = show i
+    showInterval f i | i == Interval.empty = show  i
     showInterval f (Interval.Interval (i,j) (l,m) ) = ocl j <> showFin  i <> "," <> showFin  l <> ocr m
       where
         showFin (ER.Finite i) = f i

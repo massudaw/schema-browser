@@ -47,6 +47,7 @@ executable threepenny-layer
     Rmtc
     PrefeituraSNFSE
     Siapi3
+    PatchSync
   default-extensions: TupleSections,OverloadedStrings
   build-depends:
      scientific
