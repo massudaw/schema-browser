@@ -25,6 +25,7 @@ library
     Postgresql.Parser
     Postgresql.Printer
     Postgresql.Types
+    Postgresql.Sql
 
     Poller
     Expression

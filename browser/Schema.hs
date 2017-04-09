@@ -5,6 +5,8 @@ module Schema where
 
 import Data.String
 import System.Environment
+import Data.Either
+import Postgresql.Sql
 import Postgresql.Types
 import qualified Data.Poset as P
 import Control.Monad.Trans.Maybe
@@ -206,7 +208,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
                                   inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
                                   attrMap =  M.fromList $ fmap (\i -> (keyPosition i,i)) $ S.toList $ justError "no attr" $ M.lookup c (all)
                                   attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> S.fromList pks)
-                               in (c ,Raw un schema  (justLook c resTT) (M.lookup un transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap ( fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (fromMaybe [] (fmap ( fmap (justError "no key" . flip M.lookup  attrMap)  . V.toList) <$> M.lookup c indexMap)) (maybe [] id $ M.lookup un authorization)  (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ (M.lookup c efks )<>(M.lookup c fks )<> fmap S.fromList inlineFK  ) S.empty attr [])) res :: [(Text,Table)]
+                               in (c ,Raw un schema  (justLook c resTT) (M.lookup un transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap ( fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (fromMaybe [] (fmap ( fmap (justError "no key" . flip M.lookup  attrMap)  . V.toList) <$> M.lookup c indexMap)) (maybe [] id $ M.lookup un authorization)  (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ (M.lookup c efks )<>(M.lookup c fks )<> fmap S.fromList inlineFK  ) S.empty attr )) res :: [(Text,Table)]
        let
            unionQ = "select schema_name,table_name,inputs from metadata.table_union where schema_name = ?"
 
@@ -218,15 +220,19 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
                    ts = rawSchema table
 
            i3l =fmap addRefs <$> i3lnoFun
-       ures <- liftIO $ query conn unionQ (Only schema) :: R.Dynamic [(Text,Text,Vector Text)]
+       ures <- fmap rights $ liftIO $ decodeViews conn schema
        let
            i3 =  addRecInit (HM.singleton schema (HM.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $  HM.fromList i3l
            pks = M.fromList $ fmap (\(_,t)-> (S.fromList$ rawPK t ,t)) $ HM.toList i3
            i2 =    M.filterWithKey (\k _ -> not.S.null $ k )  pks
-           unionT (s,n,l) = (n ,(\t -> t { rawUnion =  ((\t -> justError "no key" $ HM.lookup t i3 )<$>  F.toList l )} ))
+           -- unionT (s,n,l) = (n ,(\t -> Project t $ Union  ((\t -> justError "no key" $ HM.lookup t i3 )<$>  F.toList l ) ))
+
+           unionT (s,n ,_ ,Select _ _ _) = (n,id)
+           unionT (s,n,_,SqlUnion (Select _ (FromRaw _ i) _ )  (Select _ (FromRaw _ j) _) )
+             = (n ,(\t -> Project t ( Union ((\t -> justError "no key" $ HM.lookup (T.pack . BS.unpack $ t) i3 )<$>  [i,j] )) ))
        let
            i3u = foldr (uncurry HM.adjust. swap ) i3 (unionT <$> ures)
-           i2u = foldr (uncurry M.adjust. swap) i2 (first (justError "no union table" . fmap (\(_,i,_,_) ->S.fromList $ F.toList i) . flip M.lookup (M.fromList res)) . unionT <$> ures)
+           i2u = foldr (uncurry M.adjust. swap) i2 (first (\tn -> justError ("no union table" ++ show tn ). fmap (\(_,i,_,_) ->S.fromList $ F.toList i)  $ M.lookup tn (M.fromList res)) . unionT <$> ures)
        sizeMapt <- liftIO$ M.fromList . catMaybes . fmap  (\(t,cs)-> (,cs) <$>  HM.lookup t i3u ) <$> query conn tableSizes (Only schema)
 
        metaschema <- if (schema /= "metadata")
@@ -234,8 +240,15 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
           else return Nothing
 
        mvar <- liftIO$ atomically $ newTMVar  M.empty
-       let inf = InformationSchema schemaId schema (uid,user) oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ fmap (\i -> (keyFastUnique i,i)) $ F.toList keyMap) (M.filterWithKey (\k v -> not $ L.elem (tableName v ) (concat $ fmap (\(_,_,n) -> F.toList n) ures)) $ i2u)  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist
-       mapM (createTableRefs inf) (filter (L.null . rawUnion) $ F.toList i2u)
+       let inf = InformationSchema schemaId schema (uid,user) oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ fmap (\i -> (keyFastUnique i,i)) $ F.toList keyMap) (M.filterWithKey (\k v -> not $ L.elem (tableName v )  convert) $ i2u )  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist
+           convert = (concat $ fmap (\(_,_,_,n) -> deps  n) ures)
+           -- convert = (concat $ fmap (\(_,_,n) -> F.toList n) ures)
+           deps (SqlUnion (Select _ (FromRaw _ i) _)  (Select _ (FromRaw _ j) _)) = fmap (T.pack.BS.unpack) [i,j]
+           deps (Select _ _ _ ) = []
+
+
+       liftIO $ print ures
+       mapM (createTableRefs inf) (filter (not . isUnion) $ F.toList i2u)
        var <- liftIO$ atomically $ modifyTMVar (globalRef schemaVar  ) (HM.insert schema inf )
        -- addStats inf
          {-
@@ -249,6 +262,8 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
 
        return inf
 
+isUnion (Project _ (Union _ )) = True
+isUnion _ = False
 
 modifyTMVar v  x = takeTMVar  v >>= putTMVar v. x
 
@@ -561,7 +576,7 @@ lookDesc
      -> T.Text
 lookDesc inf j i = maybe (rawName j)  (\(Attr _ (TB1 (SText v)))-> v) row
   where
-    pk = [("schema" ,int $ schemaId inf),("table",int (_tableUnique j))]
+    pk = [("schema" ,int $ schemaId inf),("table",int (tableUnique j))]
     row = lookupAccess  (meta inf) pk "translation"  ("table_name_translation", i)
 
 tableOrder
@@ -572,7 +587,7 @@ tableOrder
      -> FTB Showable
 tableOrder inf table orderMap =  maybe (int 0) _tbattr row
   where
-    pk = [("table",int . _tableUnique $ table ), ("schema",int (schemaId inf))]
+    pk = [("table",int . tableUnique $ table ), ("schema",int (schemaId inf))]
     row = lookupAccess (meta inf) pk  "usage" ("ordering",orderMap)
 
 lookupAccess inf l f c = join $ fmap (indexField (IProd  notNull [(lookKey inf (fst c) f)] )) . G.lookup (idex inf (fst c) l) $ snd c
@@ -621,7 +636,7 @@ addStats schema = do
     lookdiff tb row =  maybe (Just $ patch row ) (\old ->  diff old row ) (G.lookup (G.getIndex row) tb)
   mapM_ (\(m,_)-> do
     var <- refTable schema (m)
-    let event = R.filterJust $ lookdiff <$> R.facts (collectionTid dbpol ) R.<@> (flip (lrow (_tableUnique $ (m))) <$>  R.facts (idxTid var ) R.<@> R.rumors (collectionTid  var ) )
+    let event = R.filterJust $ lookdiff <$> R.facts (collectionTid dbpol ) R.<@> (flip (lrow (tableUnique $ (m))) <$>  R.facts (idxTid var ) R.<@> R.rumors (collectionTid  var ) )
     R.onEventIO event (\i -> do
       putPatch (patchVar $ iniRef dbpol) . pure  .PatchRow $ i
       )) (M.toList  varmap)

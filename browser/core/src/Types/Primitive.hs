@@ -359,18 +359,22 @@ data TableType
 
 type Table = TableK Key
 
-mapTableK f (Raw  uni s tt tr de is rn  un idx ra rsc rp rd rf inv rat u ) = Raw uni s tt tr (S.map f de) is rn (fmap (fmap f) un) (fmap (fmap f) idx) ra (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf )(S.map (mapPath f )  inv) (S.map f rat) (mapTableK f <$> u)
+
+mapTableK f (Raw  uni s tt tr de is rn  un idx ra rsc rp rd rf inv rat ) = Raw uni s tt tr (S.map f de) is rn (fmap (fmap f) un) (fmap (fmap f) idx) ra (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf )(S.map (mapPath f )  inv) (S.map f rat)
   where mapPath f (Path i j ) = Path (S.map f i) (fmap f j)
+mapTableK f (Project t tr) = Project (mapTableK f t) (mapTransform f tr)
+
+mapTransform f (Union l ) = Union (fmap (mapTableK f) l)
 
 instance Show Unique where
     show i = show (hashUnique i)
 instance Eq (TableK k) where
-  i == j = _tableUnique i == _tableUnique j
+  i == j = tableUnique i == tableUnique j
 instance Ord (TableK k) where
-  compare i j = compare (_tableUnique i) (_tableUnique j)
+  compare i j = compare (tableUnique i) (tableUnique j)
 
 data TableK k
-  =  Raw   { _tableUnique :: Int
+  =  Raw   { tableUniqueR :: Int
            ,_rawSchemaL :: Text
            , rawTableType :: TableType
            , rawTranslation :: Maybe Text
@@ -385,11 +389,11 @@ data TableK k
            , _rawDescriptionL :: [k]
            , _rawFKSL ::  (Set (Path (Set k) (SqlOperationK k )))
            , _rawInvFKS ::  (Set (Path (Set k) (SqlOperationK k)))
-           , rawAttrs :: (Set k)
-           , rawUnion :: [TableK k ]
+           , _rawAttrsR :: (Set k)
            }
      | Project  (TableK k)  (TableTransform  k)
      deriving(Show)
+
 
 data TableTransform  k
   = Union [TableK k]
@@ -398,7 +402,6 @@ data TableTransform  k
   | Filter (TableTransform k) (BoolCollection (Access k,AccessOp Showable))
   deriving(Show)
 
-rawFKS = _rawFKSL
 
 unRecRel (RecJoin _ l) = l
 unRecRel l = l
@@ -415,7 +418,12 @@ instance Binary a => Binary (BoolCollection a)
 
 
 
-
+tableUnique (Project i _ ) = tableUniqueR i
+tableUnique i =  tableUniqueR i
+rawFKS (Project i _ ) =  _rawFKSL i
+rawFKS i =  _rawFKSL i
+rawUnion (Project i (Union l)) = l
+rawUnion _= []
 rawPK  (Project i _ ) = _rawPKL i
 rawPK  i  = _rawPKL i
 rawDescription (Project i _ ) = _rawDescriptionL i
@@ -424,7 +432,8 @@ rawName (Project i _) = _rawNameL i
 rawName i  = _rawNameL i
 rawSchema (Project i _) = _rawSchemaL i
 rawSchema i  = _rawSchemaL i
-
+rawAttrs (Project i _ ) = _rawAttrsR i
+rawAttrs i = _rawAttrsR i
 tableName = rawName
 translatedName tb =  maybe (rawName tb) id (rawTranslation tb )
 

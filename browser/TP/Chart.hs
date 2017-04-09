@@ -79,7 +79,7 @@ chartWidgetMetadata inf = do
         let
             Just (TB1 (SText tname)) = unSOptional' $  _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
             table = lookTable inf tname
-            tablId = int (_tableUnique table)
+            tablId = int (tableUnique table)
             Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"metrics" $ keyRef ["metrics"]) e
             Just (Attr _ chart)= indexField (liftAccess (meta inf )"metrics" $ keyRef ["chart_type"]) e
             -- Just (Attr _ (ArrayTB1 timefields ))= indexField (liftAccess (meta inf )"event" $ keyRef ["event"]) e

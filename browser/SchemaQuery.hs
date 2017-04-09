@@ -87,18 +87,20 @@ import qualified Data.Text as T
 
 defsize = 200
 
+lookDBVar mmap table = justError ("cant find mvar: " <> show table ++ show (fmap tableName $ M.keys mmap)) (M.lookup table mmap )
+
 estLength page size est = fromMaybe 0 page * size  +  est
 
 refTableSTM :: InformationSchema -> Table -> STM (DBRef KeyUnique Showable)
 refTableSTM  inf table  = do
   mmap <- readTMVar (mvarMap inf)
-  return $ justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
+  return $ lookDBVar mmap table
 
 
 prerefTable :: MonadIO m => InformationSchema -> Table -> m (DBRef KeyUnique Showable)
 prerefTable  inf table  = do
   mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
-  return $ justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
+  return $ lookDBVar mmap table
 
 
 
@@ -117,7 +119,7 @@ refTable  inf (Project table (Union origin) )  = do
   return $ dbvar dbvarMerge
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
-  let ref = justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
+  let ref = lookDBVar mmap table
   idxTds<- convertChanStepper  inf (mapTableK keyFastUnique table) ref
   (dbTds ,dbEvs)<- convertChanTidings inf (mapTableK keyFastUnique table) mempty  never ref
   return (DBVar2 ref idxTds  (fmap snd dbTds) (fmap fst dbTds ) dbEvs)
@@ -324,16 +326,14 @@ rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ ( lookAccess inf (ta
 
 tableLoader :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicate
     -> TransactionM (DBVar,Collection Key Showable)
-tableLoader table  page size presort fixed
-  -- Union Tables
-  | not $ L.null $ rawUnion table  = do
+tableLoader (Project table  (Union l)) page size presort fixed  = do
     liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
     li <- liftIO getCurrentTime
     inf <- ask
     i <- mapM (\t -> do
       l <- tableLoader t page size presort (rebaseKey inf t  fixed)
       return l
-              )  (rawUnion table)
+              ) l
     let mvar = mvarMap inf
     mmap <- liftIO $ atomically $ readTMVar mvar
     let
@@ -372,7 +372,7 @@ tableLoader table  page size presort fixed
       return (dbvar ,foldr mergeDBRef  (M.empty,G.empty) ix )
 -}
   -- Primitive Tables
-  | otherwise  =  do
+tableLoader table  page size presort fixed = do
     inf <- ask
     liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
     li <- liftIO getCurrentTime
@@ -467,7 +467,7 @@ pageTable flag method table page size presort fixed = do
     mmap <- liftIO $ atomically $ readTMVar mvar
     let
       dbvar :: DBRef KeyUnique Showable
-      dbvar =  justError ("cant find mvar" <> show table) (M.lookup (table) mmap )
+      dbvar =  lookDBVar mmap table
     (fixedmap,fixedChan) <- liftIO $ atomically $readIndex dbvar
     let pageidx = (fromMaybe 0 page +1) * pagesize
 

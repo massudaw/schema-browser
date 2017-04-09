@@ -184,13 +184,13 @@ setup smvar args plugList w = void $ do
                         dash <- metaAllTableIndexA inf "modification_table" pred
                         element metabody # set UI.children [dash]
                 "Stats" -> do
-                    let pred = [(keyRef ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table"],Left (ArrayTB1 $ int. _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                    let pred = [(keyRef ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table"],Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     stats_load <- metaAllTableIndexA inf "stat_load_table" pred
                     stats <- metaAllTableIndexA inf "table_stats" pred
                     clients <- metaAllTableIndexA inf "clients"$  [(keyRef ["schema"],Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
                     element metabody # set UI.children [stats,stats_load,clients]
                 "Exception" -> do
-                    let pred = [(keyRef ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table"],Left (ArrayTB1 $ int . _tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                    let pred = [(keyRef ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table"],Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     dash <- metaAllTableIndexA inf "plugin_exception" pred
                     element metabody # set UI.children [dash]
                 i -> errorWithStackTrace (show i)
@@ -213,7 +213,7 @@ listDBS ::  InformationSchema -> BrowserState -> Dynamic (Tidings (Text,[Text]))
 listDBS metainf dname = do
   map <- (\db -> do
         (dbvar ,_) <- transactionNoLog metainf $  selectFrom "schema2" Nothing Nothing [] mempty
-        let schemas schemasTB = fmap ((\(Attr _ (LeftTB1 (Just (TB1 (SText s)))) ) -> s) .lookAttr' metainf "name") $ F.toList  schemasTB
+        let schemas schemasTB = fmap ((\(Attr _ ((TB1 (SText s))) ) -> s) .lookAttr' metainf "name") $ F.toList  schemasTB
         return ((db,).schemas  <$> collectionTid dbvar)) (T.pack $ dbn dname)
   return map
 
@@ -397,6 +397,7 @@ testTable s t w = do
     amap = authMap smvar db ("postgres", "queijo")
   (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
   ((_,(_,i)),_) <- runDynamic $ transactionNoLog inf $ selectFrom t Nothing Nothing [] (WherePredicate $ lookAccess inf t <$> w)
+  print i
 
   return ()
 

@@ -85,7 +85,7 @@ mapWidgetMeta  inf = do
               table = lookTable inf tname
               evfields = join $ fmap (unArray . _tbattr ) . idx (meta inf) ["event"]   <$> erow
                 where
-                  erow = G.lookup (idex (meta inf) "event" [("schema" ,int $ schemaId inf),("table",int (_tableUnique table))])  eventMap
+                  erow = G.lookup (idex (meta inf) "event" [("schema" ,int $ schemaId inf),("table",int (tableUnique table))])  eventMap
               Just (ArrayTB1 efields ) = indexFieldRec (liftAccess (meta inf) "geo" (Nested (keyRef ["features"] ) $keyRef  ["geo" ])) e
               (IT _ (ArrayTB1 features))= lookAttr' (meta inf) "features" e
               (Attr _ color )= lookAttr' (meta inf) "color" e

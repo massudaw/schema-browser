@@ -91,6 +91,7 @@ positionSel = do
     return (bcpos,tidings positionB (diffEvent positionB  (Just <$> e)))
 
 
+
 tableUsage inf orderMap table selection = (L.elem table (M.keys selection), tableOrder inf table orderMap )
 
 tableChooser :: InformationSchemaKV Key Showable
@@ -120,7 +121,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
       -- Table Description
       lookDescT = (\i table -> lookDesc inf table i)<$> collectionTid translation
       -- Authorization
-      authorize =  (\autho t -> isJust $ G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ _tableUnique t),("grantee",int $ fst $ username inf)]) autho)  <$> collectionTid authorization
+      authorize =  (\autho t -> isJust $ G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique t),("grantee",int $ fst $ username inf)]) autho)  <$> collectionTid authorization
       -- Text Filter
       filterLabel = (\j d -> (\i -> T.isInfixOf (T.toLower j) (T.toLower  $ d i)))<$> filterInpT <*> lookDescT
       -- Usage Count
@@ -151,7 +152,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
       ordRow orderMap pkset =  field
           where
             field =  G.lookup pk orderMap
-            pk = idex (meta inf ) "ordering" [("table",int $ _tableUnique  pkset ), ("schema",int $ schemaId inf)]
+            pk = idex (meta inf ) "ordering" [("table",int $ tableUnique  pkset ), ("schema",int $ schemaId inf)]
               {-incClick field =  (fst field , G.getIndex field ,[patch $ fmap (+SNumeric 1) usage])
           where
             usage = lookAttr' (meta inf ) "usage"   field
