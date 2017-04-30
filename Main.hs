@@ -1,5 +1,5 @@
-{-# LANGUAGE TypeFamilies ,Rank2Types, FlexibleContexts, UndecidableInstances ,ScopedTypeVariables,FlexibleContexts,OverloadedStrings #-}
-module Main (main) where
+{-# LANGUAGE TypeFamilies, Rank2Types, FlexibleContexts,
+  UndecidableInstances, ScopedTypeVariables, OverloadedStrings #-}module Main (main) where
 import PatchSync
 import TP.Main
 import TP.Browser(addServer,deleteServer,deleteClient,addClientLogin,deleteClientLogin)
@@ -61,19 +61,19 @@ main = do
 
   cp <- lookupEnv "SYNC_SERVER_PORT"
   ch <- lookupEnv "SYNC_SERVER_HOST"
-  traverse (forkIO .flip patchClient smvar) (ServerConfig <$> (join $ readMay <$> cp)<*> ch)
+  traverse (forkIO .flip patchClient smvar) (ServerConfig <$> join (readMay <$> cp)<*> ch)
 
 
   sp <- lookupEnv "SYNC_PORT"
   sh <- lookupEnv "SYNC_HOST"
-  traverse (forkIO . flip patchServer  smvar) (ServerConfig <$> (join $ readMay <$> sp)<*> sh)
+  traverse (forkIO . flip patchServer  smvar) (ServerConfig <$> join (readMay <$> sp)<*> sh)
 
 
   print "Load GUI Server"
   let
     initGUI = do
       Just (TableModification _ _ (CreateRow c)) <- addClientLogin metas
-      let [(LeftTB1 (Just (TB1 (SNumeric i))))] = traceShowId $ F.toList ((\(Idex i ) -> i) $ G.getIndex c)
+      let [LeftTB1 (Just (TB1 (SNumeric i)))] = F.toList ((\(Idex i ) -> i) $ G.getIndex c)
       return i
     finalizeGUI w = void $ closeDynamic $ do
         liftIO$ print ("delete client " <> show (wId w))
@@ -85,8 +85,8 @@ main = do
   mapM writeSchema  . HM.toList =<< atomically (readTMVar .globalRef =<< readTMVar smvar)
   print "Finish Server"
   runDynamic $ traverse (deleteServer metas) ref
-  sequence lm
-  sequence ls
+  sequence_ lm
+  sequence_ ls
 
   return ()
 

@@ -98,12 +98,12 @@ updateEvent validate ev b = do
 diffEvent b ev = filterJust $ (\i j -> if i == j then Nothing else Just j ) <$> b <@> ev
 notdiffEvent b ev = filterJust $ (\i j -> if i /= j then Nothing else Just j ) <$> b <@> ev
 
-addEvent :: (Eq a) => Event a -> Tidings a -> Dynamic (Tidings a)
+addEvent :: Event a -> Tidings a -> Dynamic (Tidings a)
 addEvent ev b = do
  v <- currentValue (facts b)
  let nev = unionWith const (rumors b) ev
- nbev <- stepper v (diffEvent (facts b) nev)
- return  $tidings nbev (diffEvent nbev nev)
+ nbev <- stepper v nev
+ return  $tidings nbev nev
 
 
 

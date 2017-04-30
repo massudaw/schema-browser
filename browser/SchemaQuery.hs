@@ -87,7 +87,7 @@ import qualified Data.Text as T
 
 defsize = 200
 
-lookDBVar mmap table = justError ("cant find mvar: " <> show table ++ show (fmap tableName $ M.keys mmap)) (M.lookup table mmap )
+lookDBVar mmap table = justError ("cant find mvar: " <> show table ++ show (tableName <$> M.keys mmap)) (M.lookup table mmap )
 
 estLength page size est = fromMaybe 0 page * size  +  est
 
@@ -102,19 +102,21 @@ prerefTable  inf table  = do
   mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
   return $ lookDBVar mmap table
 
-
+projunion :: InformationSchema -> Table -> TBData Key Showable -> TBData Key Showable
+projunion inf table = res
+  where
+    res = liftTable' inf (tableName table) . filterAttrs . mapKey' keyValue
+    filterAttrs (m,v)=  (m, mapComp (\(KV v)-> KV $ M.filterWithKey (\k _ -> S.isSubsetOf (S.map _relOrigin k) attrs)  v ) v)
+      where
+        attrs = S.fromList $ keyValue <$> tableAttrs table
 
 refTable :: InformationSchema -> Table -> Dynamic DBVar
 refTable  inf (Project table (Union origin) )  = do
   refs <- mapM (refTable inf ) origin
 
   let mergeDBRefT  (ref1,j ,i,o,k) (ref2,m ,l,p,n) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l , liftA2 (zipWith (\(i,j) (l,m) -> (i,j<>m))) o p ,unionWith mappend k n)
-      dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty, pure ((,G.empty)<$> _rawIndexes table) ,never) (Le.over Le._3 (fmap (createUn (rawPK table).fmap projunion.G.toList)) .(\(DBVar2 e i j l k ) -> ([e],i,j,l,k)) <$>refs )
+      dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty, pure ((,G.empty)<$> _rawIndexes table) ,never) (Le.over Le._3 (fmap (createUn (rawPK table).fmap (projunion inf table).G.toList)) .(\(DBVar2 e i j l k ) -> ([e],i,j,l,k)) <$>refs )
       dbvar (l,i,j,p,k) = DBVar2 (L.head l) i j p k
-      projunion :: TBData Key Showable -> TBData Key Showable
-      projunion  i = res
-            where
-              res = liftTable' inf (tableName table ) .mapKey' keyValue $i
 
   return $ dbvar dbvarMerge
 refTable  inf table  = do
@@ -127,21 +129,20 @@ refTable  inf table  = do
 tbpredM un  = G.notOptional . G.getUnique un
 
 createUn :: Ord k => [k] -> [TBData k Showable] -> G.GiST (G.TBIndex Showable) (TBData k Showable)
-createUn un   =  G.fromList  transPred  .  filter (\i-> isJust $ Tra.traverse (Tra.traverse unSOptional' ) $ getUn (S.fromList un) (tableNonRef' i) )
+createUn un   =  G.fromList  transPred  .  filter (isJust . Tra.traverse (Tra.traverse unSOptional' ) . getUn (S.fromList un) . tableNonRef' )
   where transPred  =  G.notOptional . G.getUnique un . tableNonRef'
 
 
-applyBackend (CreateRow t@(m,i)) = do
+applyBackend (CreateRow t@(m,i)) =
    insertFrom   t
-applyBackend (DropRow t) = do
+applyBackend (DropRow t) =
    deleteFrom   t
 applyBackend (PatchRow p@(m,pk@(G.Idex pki),i)) = do
    inf <- ask
-   let table = (lookTable inf (_kvname m))
+   let table = lookTable inf (_kvname m)
    ref <- prerefTable inf table
-   (sidx,v,_,_) <- liftIO $ atomically $ readState (WherePredicate (AndColl []),fmap keyFastUnique $ _kvpk m) (mapTableK keyFastUnique table ) ref
+   (sidx,v,_,_) <- liftIO $ atomically $ readState (WherePredicate (AndColl []),keyFastUnique <$> _kvpk m) (mapTableK keyFastUnique table ) ref
    let oldm = mapKey' (recoverKey inf ) <$>  G.lookup pk v
-
    old <- maybe (do
      (_,(i,o)) <- selectFrom (_kvname m) Nothing Nothing [] (WherePredicate (AndColl ((\(k,o) -> PrimColl (IProd Nothing [k],Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk m) pki)))
      return $ L.head $ G.toList o
@@ -204,7 +205,7 @@ deleteFrom  a   = do
   return a
 
 
-mergeDBRef  = (\(j,i) (m,l) -> ((M.unionWith (\(a,b) (c,d) -> (a+c,b<>d))  j  m , i <>  l )))
+mergeDBRef  (j,i) (m,l) = (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d))  j  m , i <>  l )
 
 getFKRef inf predtop rtable (evs,me,old) v (Path r (FKInlineTable  j )) =  do
             let rinf = maybe inf id $ HM.lookup ((fst j))  (depschema inf)
@@ -260,7 +261,7 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                                       removeArray (KArray i)  (AnyOp o) = o
                                       removeArray i  o = o
                                    in  fmap WherePredicate (go (test (_relOrigin <$> i)) l)
-                let refs = traceShowId (   fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap ( (\i->PrimColl (IProd notNull [_relTarget $ k] ,Left (i,Flip $ _relOperator k)))) . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v )
+                let refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap ( (\i->PrimColl (IProd notNull [_relTarget $ k] ,Left (i,Flip $ _relOperator k)))) . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v
                     predm =(refs<> predicate predtop)
                 (ref,tb2) <- case refs of
                   Just refspred-> do
@@ -332,19 +333,13 @@ tableLoader (Project table  (Union l)) page size presort fixed  = do
     inf <- ask
     i <- mapM (\t -> do
       l <- tableLoader t page size presort (rebaseKey inf t  fixed)
-      return l
-              ) l
+      return l) l
     let mvar = mvarMap inf
     mmap <- liftIO $ atomically $ readTMVar mvar
-    let
-        projunion :: TBData Key Showable -> TBData Key Showable
-        projunion  i = res
-            where
-              res = liftTable' inf (tableName table ) .mapKey' keyValue $i
-        o = foldr mergeDBRef  (M.empty,G.empty) (fmap (createUn (rawPK table).fmap projunion.G.toList) . snd <$>i )
     let mergeDBRefT  (ref1,j ,i,o,k) (ref2,m ,l,p,n) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l , liftA2 (zipWith (\(i,j) (l,m) -> (i,j<>m))) o p ,unionWith mappend k n)
-        dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty, pure ((,G.empty)<$> _rawIndexes table) ,never) (Le.over Le._3 (fmap (createUn (rawPK table).fmap projunion.G.toList)) .(\(DBVar2 e i j l k ) -> ([e],i,j,l,k)). fst <$>i )
+        dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty, pure ((,G.empty)<$> _rawIndexes table) ,never) (Le.over Le._3 (fmap (createUn (rawPK table).fmap (projunion inf table).G.toList)) .(\(DBVar2 e i j l k ) -> ([e],i,j,l,k)). fst <$>i )
         dbvar (l,i,j,p,k) = DBVar2 (L.head l) i j p k
+        o = foldr mergeDBRef  (M.empty,G.empty) (fmap (createUn (rawPK table).fmap (projunion inf table).G.toList) . snd <$>i )
 
     lf <- liftIO getCurrentTime
     liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
@@ -566,7 +561,7 @@ indexFilterR j (DropRow i) = checkPred i j
 indexFilterR j (PatchRow i) = indexFilterP j i
 
 
-
+-- Default Checks
 
 patchCheck (m,s,i) = if checkAllFilled then Right (m,s,i) else Left ("non nullable rows not filled " ++ show ( need `S.difference` available ))
   where
@@ -726,7 +721,7 @@ fullInsert' ((k1,v1) )  = do
 tellPatches :: [TableModification (RowPatch Key Showable)] -> TransactionM ()
 tellPatches = tell
 
-noInsert = Tra.traverse (noInsert' )
+noInsert = Tra.traverse noInsert'
 
 noInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
 noInsert' (k1,v1)   = do
@@ -734,7 +729,7 @@ noInsert' (k1,v1)   = do
    (k1,) . _tb . KV <$>  Tra.sequence (fmap (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1))
 
 transactionLog :: InformationSchema -> TransactionM a -> Dynamic [TableModification (RowPatch Key Showable)]
-transactionLog inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $do
+transactionLog inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
   (md,_,mods)  <- runRWST log inf M.empty
   let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [TableModification id t f] m) M.empty mods
   agg2 <- Tra.traverse (\(k,v) -> do

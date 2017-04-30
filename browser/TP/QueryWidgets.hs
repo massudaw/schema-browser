@@ -451,12 +451,12 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
       table = lookTable inf (_kvname meta)
   res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds .snd ) (plugins inf) )
   let
-      resdiff =   fmap ( liftA2 (\i j -> (join .liftA2 (\j i@(_,pk,_)   -> if   pk == G.getIndex j then Just i else Nothing ) i $ j ) <|> j ) oldItems   ) .  snd <$> res
+      resdiff =   fmap ( liftA2 (\i j -> (join .liftA2 (\j i@(_,pk,_)   -> if   pk == G.getIndex j then Just i else Nothing ) i $ j ) ) oldItems   ) .  snd <$> res
       repl (Rec  ix v ) = replace ix v v
       repl (Many[(Rec  ix v )]) = replace ix v v
       repl v = v
       srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (unTBMap ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
-  plugmods <- ui$ traverse (traverse cacheTidings ) $ first repl <$> (resdiff <> plmods)
+      plugmods = first repl <$> (resdiff <> plmods)
   fks :: [(Column CoreKey () ,(TrivialWidget (Editor (Index (Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable))))]  <- foldl' (\jm (l,m)  -> do
             w <- jm
             let el = L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> ( _kvrecrels meta))
@@ -904,9 +904,9 @@ reduceDiff i
 
 buildPrim :: [FieldModifier] ->Tidings (Maybe Showable) ->   KPrim -> UI (TrivialWidget (Maybe Showable))
 buildPrim fm tdi i = case i of
-         PGeom ix g-> fmap (fmap(fmap SGeo)) $do
+         PGeom ix g->
            let tdig = fmap (\(SGeo i) -> i) <$> tdi
-           case g of
+           in fmap (fmap(fmap SGeo)) $ case g of
              PPosition -> do
                let tdip = fmap (\(SPosition i) -> i) <$> tdig
                fmap (fmap SPosition)<$> case ix of
@@ -1042,8 +1042,11 @@ buildPrim fm tdi i = case i of
            file <- UI.input # set UI.type_ "file" # set UI.multiple True # set UI.style (noneShow $ elem FWrite fm)
            fchange <- fileChange file
            clearE <- UI.click clearB
-           tdi2 <- ui $ addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange) =<< addEvent (const Nothing <$> clearE ) tdi
+           cur2 <- ui $currentValue (facts tdi)
+           let evi2 = foldl1 (unionWith const) [trace "tdi"<$> rumors tdi,const Nothing <$> clearE,  (trace "fchange" . join . fmap (either (const Nothing) (Just . SBinary).   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange)]
+           bdi2 <- ui $ stepper cur2  evi2
            let
+             tdi2 = tidings bdi2 evi2
              fty = case mime of
                "application/pdf" -> pdfFrame ("iframe" ,UI.strAttr "src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
                "application/x-ofx" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
@@ -1052,7 +1055,7 @@ buildPrim fm tdi i = case i of
                "image/png" -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
                "image/bmp" -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
                "text/html" -> pdfFrame ("iframe" ,UI.strAttr "srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-           f <- fty (facts tdi2) # sinkDiff UI.style (noneShow. isJust <$> tdi2)
+           f <- fty bdi2  # sinkDiff UI.style (noneShow. isJust <$> tdi2)
            fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]
            res <- UI.div # set children [fd,f]
            return (TrivialWidget tdi2 res)
