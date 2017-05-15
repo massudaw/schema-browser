@@ -18,6 +18,7 @@ module Types.Primitive  where
 import Types.Common
 import Data.Ord
 import Data.Vector (Vector)
+import Data.Dynamic
 import Control.DeepSeq
 import qualified NonEmpty as Non
 
@@ -234,6 +235,7 @@ data KPrim
    | PSession
    | PColor
    | PDynamic
+   | PTypeable TypeRep
    deriving(Show,Eq,Ord,Generic)
 
 instance NFData KPrim
@@ -312,6 +314,25 @@ data STime
   | SPInterval ! DiffTime
   deriving(Ord,Eq,Show,Generic)
 
+
+newtype HDynamic = HDynamic Dynamic
+
+instance Eq HDynamic where
+  i == j = True
+instance Ord HDynamic where
+  compare i j = EQ
+
+instance NFData HDynamic where
+  rnf (HDynamic i) =  ()
+
+instance Binary HDynamic where
+  put (HDynamic i) = return ()
+  get = undefined
+
+instance Show HDynamic where
+  show i = "HDynamic"
+
+
 data Showable
   = SText {-# UNPACK #-}! Text
   | SNumeric {-# UNPACK #-}! Int
@@ -321,11 +342,12 @@ data Showable
   | STime {-# UNPACK #-}!STime
   | SBinary {-# UNPACK #-}! BS.ByteString
   | SDynamic {-# UNPACK #-}! (FTB Showable)
+  | SHDynamic {-# UNPACK #-}! HDynamic
   | SSession {-# UNPACK #-}! Sess.Session
   deriving(Ord,Eq,Show,Generic)
 
 instance Eq Sess.Session where
-   i==  j = True
+  i ==  j = True
 
 instance Ord Sess.Session where
   compare i j = compare 1 2

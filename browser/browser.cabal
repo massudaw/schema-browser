@@ -27,6 +27,8 @@ library
     Postgresql.Types
     Postgresql.Sql
 
+    Plugins.Schema
+
     Poller
     Expression
     RuntimeTypes
@@ -52,6 +54,9 @@ library
    , base ==4.8.*
    , scientific
    , zlib
+   , ghc
+   , ghc-paths
+   , hinotify
    , deepseq
    , ordered
    , exceptions

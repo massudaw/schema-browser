@@ -1,4 +1,4 @@
-{-# LANGUAGE TupleSections,Arrows,OverloadedStrings #-}
+{-# LANGUAGE FlexibleInstances,TupleSections,Arrows,OverloadedStrings #-}
 module Location where
 
 import Network.Wreq
@@ -35,6 +35,7 @@ import OpenSSL.Session (context)
 import Network.HTTP.Client.OpenSSL
 
 import qualified Data.Map as M
+import qualified Data.HashMap.Strict as HM
 import qualified Data.Set as S
 
 
@@ -90,7 +91,7 @@ queryCEPBoundary = FPlugins "Correios CEP" "address" $ BoundedPlugin2  open
           odxR "logradouro" -< t
           r <- (act (  liftIO . traverse (\input -> do
                        v <- get . (\i-> addrs <> (L.filter (not . flip elem (",.-" :: String)) i) <> ".json")  . TL.unpack $ input
-                       return $ ( \i -> fmap (L.filter ((/="").snd) . M.toList ) $ join $ fmap decode (i ^? responseBody)  ) v ))) -< (\(TB1 (SText t))-> t) <$> Just i
+                       return $ ( \i -> fmap (L.filter ((/="").snd) . HM.toList ) $ join $ fmap decode (i ^? responseBody)  ) v ))) -< (\(TB1 (SText t))-> t) <$> Just i
           let tb = tblist . fmap ( (\i ->  _tb $ Attr (fst i ) (snd i)). first translate. second (LeftTB1 . Just . TB1 . SText)) <$> join r
           returnA -< tb
 

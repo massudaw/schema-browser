@@ -75,7 +75,7 @@ addClientLogin inf =  transactionNoLog inf $ do
     now <- liftIO$ getCurrentTime
     let
       obj = clientCreate inf now
-    i@(Just (TableModification _ _ tb))  <-  insertFrom obj
+    i <-  insertFrom obj
     tell (maybeToList i)
     return i
 

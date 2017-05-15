@@ -54,7 +54,6 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 calendarCreate m cal def = runFunction $ ffi "createAgenda(%1,%2,%3)" cal def m
-
 calendarAddSource cal t evs = runFunction $ ffi "addSource(%1,%2,%3)" cal (tableName t) evs
 calendarRemoveSource cal t = runFunction $ ffi "removeSource(%1,%2)" cal (tableName t)
 

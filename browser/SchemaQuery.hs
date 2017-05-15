@@ -305,6 +305,7 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                 return (evt :evs,me >=> joined,old <> refl)
     where
         getAtt i (m ,k ) = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues . unTB $ k
+getFKRef inf predtop rtable (evs,me,old) v path = errorWithStackTrace (show path)
 
 left f (Left i ) = Left (f i)
 left f (Right i ) = (Right i)

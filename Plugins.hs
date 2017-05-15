@@ -112,7 +112,6 @@ siapi2Hack = FPlugins pname tname $ BoundedPlugin2  url
       returnA -< join  (  ao    <$> join (fmap (uncurry (liftA2 (,))) b))
 
 
-
 siapi2Plugin = FPlugins pname tname $ BoundedPlugin2  url
   where
     pname ="Siapi2 Andamento"

@@ -50,7 +50,10 @@ import GHC.Stack
 
 
 metaInf :: TMVar DatabaseSchema -> IO InformationSchema
-metaInf smvar = justError "no meta" . HM.lookup "metadata" <$> liftIO ( atomically $ readTMVar .globalRef  =<< readTMVar  smvar )
+metaInf smvar = indexSchema smvar "metadata"
+
+indexSchema :: TMVar DatabaseSchema -> Text -> IO InformationSchema
+indexSchema smvar text = (\m -> justError ("no schema: "  ++ show text ++ " from: " ++ show (HM.keys m)). HM.lookup text $ m)<$> liftIO ( atomically $ readTMVar .globalRef  =<< readTMVar  smvar )
 
 
 type InformationSchema = InformationSchemaKV Key Showable
@@ -88,6 +91,7 @@ data InformationSchemaKV k v
   , depschema :: HM.HashMap Text (InformationSchemaKV k v)
   , schemaOps :: SchemaEditor
   , plugins :: [Plugins ]
+  , rootRef :: TMVar DatabaseSchema
   }
 
 
@@ -99,6 +103,7 @@ backendsKey s = _backendKey s <> Prelude.foldl mappend mempty (fmap (backendsKey
 data Auth
   = PostAuth Connection
   | OAuthAuth (Maybe (Text,R.Tidings OAuth2Tokens))
+  | NoAuth
 
 token s = case authtoken s of
       OAuthAuth i -> i

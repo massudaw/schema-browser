@@ -33,6 +33,7 @@ module TP.QueryWidgets (
 
 import RuntimeTypes
 import TP.View
+import Data.Dynamic (fromDynamic)
 import Expression
 import Control.Monad.Catch
 import Data.Tuple
@@ -135,7 +136,8 @@ genAttr inf k =
           let table =  lookTable inf  t
           in IT k $ TB1 $  unTlabel' $ tableView (tableMap inf) table
 
-pluginUI :: InformationSchema
+pluginUI
+    :: InformationSchema
     -> Tidings (Maybe (TBData CoreKey Showable) )
     -> Plugins
     -> UI (Element ,(Access Key,Tidings (Maybe (Index (TBData CoreKey Showable)))))
@@ -150,7 +152,6 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
       freshKeys = first (fmap lookK ) . second (fmap lookK) <$> fresh
       lookK = lookKey inf tname . fst
   freshUI <- foldl' (\old (aci ,(inpfresh,outfresh)) -> (old >>= (\(l,unoldItems)-> do
-
       elemsIn <- mapM (\fresh -> do
         let attrB pre a = do
               wn <-  tbCaseDiff  inf  mempty a mempty  mempty pre
@@ -228,7 +229,6 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (DiffIOPlugin arrow))) = do
     liftIO .fmap ( fmap (liftPatch inf t ). join . eitherToMaybe ) . catchPluginException inf (tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "no Action"  v) $ ( action $ fmap (mapKey' keyValue) v)
                              )  (tidings bcv ecv)
   return (headerP, (snd f ,  pgOut ))
-
 
 pluginUI inf oldItems (idp,p@(FPlugins n t (BoundedPlugin2 arrow))) = do
   overwrite <- checkedWidget (pure False)
@@ -314,8 +314,7 @@ labelCaseDiff inf a wid = do
     patch <- UI.div
     hl <- UI.div # set children [l,tip,patch]
     el <- UI.div #
-      set children [hl,getElement wid] #
-      set UI.class_ ("col-xs-" <> show (fst $  attrSize a))
+      set children [hl,getElement wid]
     {- bh <- stepper False (hoverTip2 l hl)
     element patch #
       sink text (liftA2 (\bh -> if bh then id else const "") bh (facts $ fmap ( show . join) $ liftA2 diff <$> triding wid <*> old)) #
@@ -437,6 +436,15 @@ instance Applicative Editor where
   Delete   <*> j = Delete
   i <*> Keep = Delete
 
+loadPlugins inf =  do
+  code <- liftIO$ indexSchema  (rootRef inf) "code"
+  (_,(_,evMap )) <- transactionNoLog  code $ selectFromTable "plugin_code" Nothing Nothing [] []
+  let
+    project e = justError "cant find function field" $ join . fmap (convert . _tbattr) $  indexField (liftAccess (meta inf ) "plugin" $ keyRef ["function"]) e
+    convert (TB1 (SHDynamic (HDynamic i))) = fromDynamic i  :: Maybe PrePlugins
+  return (project <$> F.toList evMap)
+
+
 eiTableDiff
   :: InformationSchema
      -> SelPKConstraint
@@ -447,9 +455,10 @@ eiTableDiff
      -> UI (Element,Tidings (Editor (Index (TBData CoreKey Showable))))
 eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
   oldItems <- ui $ cacheTidings preoldItems
+  -- plugins <- ui $ loadPlugins inf
   let
       table = lookTable inf (_kvname meta)
-  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds .snd ) (plugins inf) )
+  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds . snd) (plugins inf))
   let
       resdiff =   fmap ( liftA2 (\i j -> (join .liftA2 (\j i@(_,pk,_)   -> if   pk == G.getIndex j then Just i else Nothing ) i $ j ) ) oldItems   ) .  snd <$> res
       repl (Rec  ix v ) = replace ix v v
@@ -472,7 +481,10 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
             lab <- if
               rawIsSum table
               then return nref
-              else labelCaseDiff inf (unTB m) nref
+              else do
+                v <- labelCaseDiff inf (unTB m) nref
+                element v #  set UI.class_ ("col-xs-" <> show (fst $  attrSize (unTB m)))
+                return v
 
             return (w <> [(unTB m,(lab,aref))])
         ) (return [])  (srefs)
@@ -850,7 +862,6 @@ buildUIDiff km i  plug tdi = go i plug tdi
            -- Delete equals create
            let
                test Delete _ = Diff $ POpt Nothing
-               -- test Keep Nothing = Diff $ PSerial Nothing
                test Keep _ = Keep
                test (Diff i ) _ = Diff (POpt (Just  i))
 
@@ -963,7 +974,20 @@ buildPrim fm tdi i = case i of
                   toLocal = maptime  (utcToLocalTime cliZone . localTimeToUTC utc)
                   fromLocal = maptime (utcToLocalTime utc .localTimeToUTC cliZone)
                 tdi2 <- ui $ addEvent newEv  (fmap toLocal <$> tdip)
-                fmap (fmap fromLocal) <$> oneInput tdi2 [timeButton]
+                v <- currentValue (facts tdi)
+
+                inputUI <- UI.input
+                    # set UI.style [("width","70%")]
+                    # set UI.class_ "date"
+                    # set (UI.strAttr "data-date-format") "yyyy-mm-dd hh:ii:ss"
+                    # set (UI.strAttr "data-provide" ) "datetimepicker"
+                    # sinkDiff UI.value (maybe "" (fst . break (=='.') . renderPrim )<$> tdi2)
+
+                onCE <- UI.onChangeE inputUI
+                let pke = unionWith const (readPrim i <$> onCE ) (rumors tdi2)
+                pk <- ui $ stepper v  pke
+                sp <- UI.div # set children [inputUI , timeButton]
+                return $ TrivialWidget ((fmap fromLocal) <$> tidings pk pke) sp
              PDate -> do
                 cliZone <- jsTimeZone
                 itime <- liftIO $  getCurrentTime
@@ -972,7 +996,20 @@ buildPrim fm tdi i = case i of
                 evCurr <-  ui $ mapEvent (fmap Just) (pure getCurrentTime <@ cliTime )
                 let  newEv =  fmap (STime. SDate . localDay . utcToLocalTime cliZone) <$> evCurr
                 tdi2 <- ui $ addEvent newEv  tdip
-                oneInput tdi2 [timeButton]
+                v <- currentValue (facts tdi)
+
+                inputUI <- UI.input
+                    # set UI.style [("width","70%")]
+                    # set UI.class_ "date"
+                    # set (UI.strAttr "data-date-format") "yyyy-mm-dd"
+                    # set (UI.strAttr "data-provide" ) "datepicker"
+                    # sinkDiff UI.value (maybe "" renderPrim <$> tdi2)
+
+                onCE <- UI.onChangeE inputUI
+                let pke = unionWith const (readPrim i <$> onCE ) (rumors tdi2)
+                pk <- ui $ stepper v  pke
+                sp <- UI.div # set children [inputUI , timeButton]
+                return $ TrivialWidget(tidings pk pke) sp
              PDayTime -> do
                 cliZone <- jsTimeZone
                 itime <- liftIO $  getCurrentTime
@@ -1043,7 +1080,7 @@ buildPrim fm tdi i = case i of
            fchange <- fileChange file
            clearE <- UI.click clearB
            cur2 <- ui $currentValue (facts tdi)
-           let evi2 = foldl1 (unionWith const) [trace "tdi"<$> rumors tdi,const Nothing <$> clearE,  (trace "fchange" . join . fmap (either (const Nothing) (Just . SBinary).   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange)]
+           let evi2 = foldl1 (unionWith const) [ rumors tdi,const Nothing <$> clearE,  (trace "fchange" . join . fmap (either (const Nothing) (Just . SBinary).   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange)]
            bdi2 <- ui $ stepper cur2  evi2
            let
              tdi2 = tidings bdi2 evi2
@@ -1084,6 +1121,10 @@ buildPrim fm tdi i = case i of
             pk <- ui $ stepper v  pke
             sp <- UI.div # set children (inputUI : elem)
             return $ TrivialWidget(tidings pk pke) sp
+
+
+
+
 
 iUITableDiff
   :: InformationSchema

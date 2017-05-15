@@ -104,12 +104,12 @@ allMaybesEmpty  i = if F.all isJust i
 
 
 
-unIntercalate :: ( Char -> Bool) -> String -> [String]
-unIntercalate pred s                 =  case dropWhile pred s of
-                                "" -> []
-                                s' -> w : unIntercalate pred s''
-                                      where (w, s'') =
-                                             break pred s'
+unIntercalate :: (Char -> Bool) -> String -> [String]
+unIntercalate pred s =  case dropWhile pred s of
+                "" -> []
+                s' -> w : unIntercalate pred s''
+                      where (w, s'') =
+                             break pred s'
 
 chuncksOf i  [] = []
 chuncksOf i v = let (h,t) = L.splitAt i v

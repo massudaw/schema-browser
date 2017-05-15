@@ -240,7 +240,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
           else return Nothing
 
        mvar <- liftIO$ atomically $ newTMVar  M.empty
-       let inf = InformationSchema schemaId schema (uid,user) oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ fmap (\i -> (keyFastUnique i,i)) $ F.toList keyMap) (M.filterWithKey (\k v -> not $ L.elem (tableName v )  convert) $ i2u )  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist
+       let inf = InformationSchema schemaId schema (uid,user) oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ fmap (\i -> (keyFastUnique i,i)) $ F.toList keyMap) (M.filterWithKey (\k v -> not $ L.elem (tableName v )  convert) $ i2u )  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist schemaRef
            convert = (concat $ fmap (\(_,_,_,n) -> deps  n) ures)
            -- convert = (concat $ fmap (\(_,_,n) -> F.toList n) ures)
            deps (SqlUnion (Select _ (FromRaw _ i) _)  (Select _ (FromRaw _ j) _)) = fmap (T.pack.BS.unpack) [i,j]
@@ -250,7 +250,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
        liftIO $ print ures
        mapM (createTableRefs inf) (filter (not . isUnion) $ F.toList i2u)
        var <- liftIO$ atomically $ modifyTMVar (globalRef schemaVar  ) (HM.insert schema inf )
-       -- addStats inf
+       addStats inf
          {-
        traverse (\ req -> do
          r <- liftIO$ forkIO $ forever $

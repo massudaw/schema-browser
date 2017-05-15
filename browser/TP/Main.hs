@@ -7,6 +7,7 @@ module TP.Main where
 
 import TP.Selector
 import Data.Unique
+import Plugins.Schema (codeOps)
 import qualified Data.Binary as B
 import Postgresql.Backend (connRoot)
 import System.Process
@@ -242,6 +243,7 @@ form td ev =  tidings (facts td ) (facts td <@ ev )
 
 authMap smvar sargs (user,pass) schemaN =
       case schemaN of
+          "code" -> return (NoAuth , codeOps)
           "gmail" ->  oauth False
           "tasks" ->  oauth True
           i ->  do

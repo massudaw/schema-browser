@@ -22,6 +22,7 @@ import Control.Concurrent
 import System.Environment
 import Utils
 import Schema
+import Plugins.Schema
 import Plugins
 
 import RuntimeTypes
@@ -37,7 +38,6 @@ import qualified Data.ByteString as BS
 
 import qualified Data.HashMap.Strict as HM
 
-
 main :: IO ()
 main = do
   args <- getArgs
@@ -49,11 +49,20 @@ main = do
   print "Load Metadata"
   (metas ,lm)<- runDynamic $keyTablesInit  smvar ("metadata", T.pack $ user db) amap []
 
-  print "Load Plugins"
+  -- print "Load Plugins"
+  -- plugList <- plugListM
+
+  -- print "Loaded Plugins"
+  -- mapM (print ._name) plugList
+
   regplugs <- plugs smvar amap db plugList
   print "Start Server"
   (ref ,ls)<- runDynamic $ addServer metas
 
+
+  (_,pfin) <- runDynamic $ do
+    keyTablesInit  smvar ("code", T.pack $ user db) amap []
+    addPlugins  smvar
 
   print "Load Polling Process"
   poller smvar amap db regplugs False
@@ -72,6 +81,7 @@ main = do
   print "Load GUI Server"
   let
     initGUI = do
+
       Just (TableModification _ _ (CreateRow c)) <- addClientLogin metas
       let [LeftTB1 (Just (TB1 (SNumeric i)))] = F.toList ((\(Idex i ) -> i) $ G.getIndex c)
       return i
@@ -85,9 +95,9 @@ main = do
   mapM writeSchema  . HM.toList =<< atomically (readTMVar .globalRef =<< readTMVar smvar)
   print "Finish Server"
   runDynamic $ traverse (deleteServer metas) ref
+  sequence_ pfin
   sequence_ lm
   sequence_ ls
 
   return ()
-
 
