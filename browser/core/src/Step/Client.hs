@@ -99,25 +99,25 @@ callO  i ~(P _ d) = P (Many[],Many [Point i] ) d
 
 
 
-splitIndex b l = (fmap T.pack . IProd b . unIntercalate (','==) $ l)
+splitIndex b l = fmap (IProd b . T.pack) . unIntercalate (','==) $ l
 
   -- Obrigatory value with maybe wrapping
 odx p l =
   let ll = splitIndex p l
-   in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
+   in  P (Many [],Many ll ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
 
 odxR  l =
   let ll = splitIndex notNull l
-   in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
+   in  P (Many [],Many ll ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
 odxM  l =
   let ll = splitIndex Nothing l
-   in  P (Many [],Many [ll] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
+   in  P (Many [],Many ll ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
 
 
 -- Optional value with maybe wrapping
 idxM  l =
   let ll = splitIndex Nothing l
-   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . join . fmap (unSOptional' . snd) . join  . fmap (indexTableAttr ll)))
+   in  P (Many ll,Many [] ) (Kleisli $ const $  ask >>= (return . join . fmap (unSOptional' . snd) . join  . fmap (indexTableAttr ll)))
 
 -- Obrigatory value without maybe wrapping
 
@@ -127,32 +127,31 @@ tb = P (Many [] , Many []) (Kleisli (const ask ))
 
 idxK  l =
   let ll = splitIndex notNull l
-   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (\ v -> return . justError ("no value found "  <> show (ll,v)). join . fmap (unSOptional' . snd) . join . fmap (indexTableAttr ll)$ v) )
+   in  P (Many ll,Many [] ) (Kleisli $ const $  ask >>= (\ v -> return . justError ("no value found "  <> show (ll,v)). join . fmap (unSOptional' . snd) . join . fmap (indexTableAttr ll)$ v) )
 
 idxA  l =
   let ll = splitIndex notNull l
-   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (\ v -> return . justError ("no value found "  <> show (ll,v)). indexAttr ll$ v) )
+   in  P (Many ll,Many [] ) (Kleisli $ const $  ask >>= (\ v -> return . justError ("no value found "  <> show (ll,v)). indexAttr ll$ v) )
 
 
 
 
 idxR  l =
   let ll = splitIndex notNull l
-   in  P (Many [ll],Many [] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
+   in  P (Many ll,Many [] ) (Kleisli $ const $  ask >>= (return . fmap snd . join . fmap (indexTableAttr ll)))
 
 
-indexAttr (IProd _ l) t
+indexAttr l t
   = do
     (m,v) <- t
-    i <-   M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin))$ _kvvalues $ unTB v
+    i <-   M.lookup (S.fromList (iprodRef <$> l)) $ M.mapKeys (S.map (keyString. _relOrigin))$ _kvvalues $ unTB v
     return $ unTB i
 
 
-
-indexTB1 (IProd _ l) t
+indexTB1 l t
   = do
     (m,v) <- t
-    i <-   M.lookup (S.fromList l) $ M.mapKeys (S.map (keyString. _relOrigin))$ _kvvalues $ unTB v
+    i <-   M.lookup (S.fromList (iprodRef <$> l)) $ M.mapKeys (S.map (keyString. _relOrigin))$ _kvvalues $ unTB v
     case runIdentity $ getCompose $i  of
          Attr _ l -> Nothing
          FKT l  _ j -> return j
@@ -162,18 +161,18 @@ indexTB1 (IProd _ l) t
 firstCI f = mapComp (firstTB f)
 
 
-indexTableAttr (IProd _ l) t@(m,v)
+indexTableAttr l t@(m,v)
   = do
-    let finder = fmap (firstCI keyString ) . M.lookup (S.fromList $ fmap Inline l) . M.mapKeys (S.map (fmap keyString))
+    let finder = fmap (firstCI keyString ) . M.lookup (S.fromList $ fmap (Inline .iprodRef) l) . M.mapKeys (S.map (fmap keyString))
     i <- finder (_kvvalues $ unTB v )
     case runIdentity $ getCompose $ i  of
          Attr k l -> return (k,l)
          i ->  errorWithStackTrace (show i)
 
 
-indexTable (IProd _ l) t@(m,v)
+indexTable l t@(m,v)
   = do
-    let finder = L.find (L.any (==l). L.permutations .fmap _relOrigin. keyattr. firstCI keyString )
+    let finder = L.find (L.any (==fmap iprodRef l). L.permutations .fmap _relOrigin. keyattr. firstCI keyString )
     i <- finder (toList $ _kvvalues $ unTB v )
     case runIdentity $ getCompose $ i  of
          Attr k l -> return (k,l)

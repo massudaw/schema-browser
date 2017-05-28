@@ -126,14 +126,14 @@ indexFilterP (WherePredicate p) v = go p
 
 indexFilterPatch :: (Show k,Ord k) => (Access k ,Either (FTB Showable,BinaryOperator) UnaryOperator) -> TBIdx k Showable -> Bool
 indexFilterPatch ((IProd _ l) ,op)  (_,_,lo) =
-  case L.find ((Set.fromList (fmap Inline l) == ).pattrKey) lo of
+  case L.find ((Set.singleton (Inline l) == ).pattrKey) lo of
     Just i ->
       case i of
         PAttr k f -> G.match op (Right $ (create f :: FTB Showable))
         i -> True
     Nothing -> True
-indexFilterPatch ((Nested (IProd _  l) n) ,op)  (_,_,lo) =
-  case L.find ((Set.fromList l == ).Set.map _relOrigin . pattrKey) lo of
+indexFilterPatch ((Nested l n) ,op)  (_,_,lo) =
+  case L.find ((Set.fromList (iprodRef <$> l) == ).Set.map _relOrigin . pattrKey) lo of
     Just i ->
       case i of
         PInline k f -> L.any (indexFilterPatch (n,op)) f

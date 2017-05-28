@@ -114,7 +114,7 @@ setup smvar args plugList w = void $ do
       kitems = F.toList (pkMap inf)
       schId = int $ schemaId inf
       initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> HM.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
-      lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested (IProd Nothing["selection"]) (keyRef ["table"])) iv
+      lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested [keyRef "selection"] (keyRef "table")) iv
                  in fmap (\(TB1 (SText t)) -> t) . traceShowId .unArray  <$> join (fmap unSOptional' i)
 
     cliIni <- currentValue (facts cliTid)
@@ -165,8 +165,8 @@ setup smvar args plugList w = void $ do
               element bdo # set children [getElement metanav,metabody] # set UI.style [("display","block")]
               mapUIFinalizerT metabody (\(nav,tables)-> case nav  of
                 "Poll" -> do
-                    els <- sequence      [ metaAllTableIndexA inf "polling" [(keyRef ["schema"],Left (schId,Equals) ) ]
-                          , metaAllTableIndexA inf "polling_log" [(keyRef ["schema"],Left (schId,Equals) ) ]]
+                    els <- sequence      [ metaAllTableIndexA inf "polling" [(keyRef "schema",Left (schId,Equals) ) ]
+                          , metaAllTableIndexA inf "polling_log" [(keyRef "schema",Left (schId,Equals) ) ]]
                     element metabody #
                       set children els
                 "Change" -> do
@@ -178,20 +178,19 @@ setup smvar args plugList w = void $ do
                         itemListEl2 <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
                         do
                           (ref,res) <- ui $ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] mempty
-                          listBoxEl itemListEl2 ( G.toList <$> collectionTid ref)  (pure Nothing) (pure id) ( pure attrLine )
-                        element metabody # set children [itemListEl,itemListEl2]-}
+                          listBoxEl itemListEl2 ( G.toList <$> collectionTid ref)  (pure Nothing) (pure id) ( pure attrLine ) element metabody # set children [itemListEl,itemListEl2]-}
                       i -> do
-                        let pred = [(keyRef ["schema_name"],Left (txt $schemaName inf,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table_name"],Left (ArrayTB1 $ txt . tableName<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                        let pred = [(keyRef "schema_name",Left (txt $schemaName inf,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                         dash <- metaAllTableIndexA inf "modification_table" pred
                         element metabody # set UI.children [dash]
                 "Stats" -> do
-                    let pred = [(keyRef ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table"],Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                    let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     stats_load <- metaAllTableIndexA inf "stat_load_table" pred
                     stats <- metaAllTableIndexA inf "table_stats" pred
-                    clients <- metaAllTableIndexA inf "clients"$  [(keyRef ["schema"],Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
+                    clients <- metaAllTableIndexA inf "clients"$  [(keyRef "schema",Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
                     element metabody # set UI.children [stats,stats_load,clients]
                 "Exception" -> do
-                    let pred = [(keyRef ["schema"],Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef ["table"],Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                    let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     dash <- metaAllTableIndexA inf "plugin_exception" pred
                     element metabody # set UI.children [dash]
                 i -> errorWithStackTrace (show i)
@@ -209,14 +208,17 @@ setup smvar args plugList w = void $ do
   element body #  set UI.style [("width","100%")]
 
 
-
-listDBS ::  InformationSchema -> BrowserState -> Dynamic (Tidings (Text,[Text]))
-listDBS metainf dname = do
-  map <- (\db -> do
-        (dbvar ,_) <- transactionNoLog metainf $  selectFrom "schema2" Nothing Nothing [] mempty
-        let schemas schemasTB = fmap ((\(Attr _ ((TB1 (SText s))) ) -> s) .lookAttr' metainf "name") $ F.toList  schemasTB
-        return ((db,).schemas  <$> collectionTid dbvar)) (T.pack $ dbn dname)
-  return map
+listDBS ::  InformationSchema -> Text -> Dynamic (Tidings [(Text,Text)])
+listDBS metainf db = do
+  (dbvar ,_) <- transactionNoLog metainf $  selectFrom "schema2" Nothing Nothing [] mempty
+  let
+    schemas schemasTB =  liftA2 (,) sname  stype <$> F.toList  schemasTB
+      where
+        sname = untxt . lookAttr' metainf "name"
+        stype = untxt . lookAttr' metainf "type"
+        untxt (Attr _ (TB1 (SText s)))= s
+        untxt (Attr _ ((LeftTB1 (Just (TB1 (SText s))))))= s
+  return (schemas  <$> collectionTid dbvar)
 
 loginWidget userI passI =  do
   usernamel <- flabel # set UI.text "Usuário"
@@ -253,7 +255,7 @@ authMap smvar sargs (user,pass) schemaN =
     where oauth tag = do
               user <- justError "no google user" <$> lookupEnv "GOOGLE_USER"
               metainf <- metaInf smvar
-              ((dbmeta ,_),_) <- runDynamic $ transactionNoLog metainf $ selectFromTable "google_auth" Nothing Nothing [] [(keyRef ["username"],Left ((txt  $ T.pack user ),Equals) )]
+              ((dbmeta ,_),_) <- runDynamic $ transactionNoLog metainf $ selectFromTable "google_auth" Nothing Nothing [] [(keyRef "username",Left ((txt  $ T.pack user ),Equals) )]
               let
                   td :: Tidings (OAuth2Tokens)
                   td = (\o -> let
@@ -270,9 +272,14 @@ loadSchema smvar schemaN user authMap  plugList =  do
     keyTables smvar (schemaN,T.pack $ user) authMap plugList
 
 databaseChooser smvar metainf sargs plugList = do
-  dbs <- ui $ listDBS  metainf sargs
-  let dbsInit = fmap (\s -> (T.pack $ dbn sargs ,T.pack s)) (schema sargs)
-  dbsW <- listBox ((\((c,j)) -> (c,) <$> j) <$> dbs ) (pure dbsInit) (pure id) (pure (line . T.unpack. snd  ))
+  let db = T.pack $ dbn sargs
+  dbs <- ui $ listDBS  metainf  db
+  dbsWPre <- listBox
+      ((\j ->  fst <$> j) <$> dbs)
+      (pure $ fmap T.pack $ schema sargs)
+      (pure id)
+      (pure (line . T.unpack ))
+  let dbsW = TrivialWidget ((\i j ->  join $ (\k -> (db, ) <$> L.find ((==k).fst) j) <$> i ) <$> triding dbsWPre <*> dbs) (getElement dbsWPre)
   schemaEl <- flabel # set UI.text "schema"
   cc <- currentValue (facts $ triding dbsW)
   let dbsWE = rumors $ triding dbsW
@@ -280,8 +287,10 @@ databaseChooser smvar metainf sargs plugList = do
   let dbsWT  = tidings dbsWB dbsWE
   (schemaE,schemaH) <- ui newEvent
   metainf <- liftIO $ metaInf smvar
-  let genSchema (db,schemaN)
-        | schemaN  `L.elem` ["gmail","tasks"]  =  do
+  let
+    genSchema (db,(schemaN,ty))
+        = case ty of
+          "rest" -> do
               userEnv <- liftIO$ lookupEnv "GOOGLE_USER"
               liftIO $ print userEnv
               usernamel <- flabel # set UI.text "Usuário"
@@ -299,7 +308,7 @@ databaseChooser smvar metainf sargs plugList = do
               user <- UI.div # set children [usernamel,username] # set UI.class_ "col-xs-8"
               UI.div # set children [user ,load]
 
-        | otherwise   = do
+          "sql" -> do
             (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
             load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-2" # sink UI.enabled (facts (isJust <$> dbsWT) )
             loadE <- UI.click load
@@ -313,6 +322,8 @@ databaseChooser smvar metainf sargs plugList = do
                 ))(formLogin)
 
             UI.div # set children (widE <> [load])
+          "code" -> do
+            UI.div
 
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   genS <- mapUIFinalizerT (getElement dbsW) (traverse genSchema) dbsWT
@@ -321,7 +332,7 @@ databaseChooser smvar metainf sargs plugList = do
   inf <- ui $traverse (\i -> loadSchema smvar (T.pack i ) (user sargs) auth plugList ) (schema sargs)
   chooserB  <- ui $ stepper inf schemaE
   let chooserT = tidings chooserB schemaE
-  element authBox  # sink UI.style (facts $ (\a b -> noneShow $  fromMaybe True $  liftA2 (\(db,sc) (csch) -> if sc == (schemaName csch )then False else True ) a b )<$>    dbsWT <*> chooserT )
+  element authBox  # sink UI.style (facts $ (\a b -> noneShow $  fromMaybe True $  liftA2 (\(db,(sc,ty)) (csch) -> if sc == (schemaName csch )then False else True ) a b )<$>    dbsWT <*> chooserT )
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schemaEl , getElement dbsW]
   return $ (chooserT,[schemaSel ]<>  [authBox] )
 
@@ -414,9 +425,6 @@ testPlugin s t p  = do
   let (i,o) = pluginStatic p
   print $ liftAccess inf t i
   print $ liftAccess inf t o
-
-
-
 
 testCalls = testWidget (return $ do
   setCallBufferMode BufferAll

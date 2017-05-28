@@ -75,8 +75,8 @@ eventWidgetMeta inf cliZone= do
        ,"fullcalendar-scheduler-1.4.0/scheduler.min.css"
        ]
     let
-      schemaPred =  [(keyRef ["schema_name"],Left (txt (schemaName inf),Equals) )]
-      schemaPred2 =  [(keyRef ["schema"],Left (int (schemaId inf),Equals) )]
+      schemaPred =  [(keyRef "schema_name",Left (txt (schemaName inf),Equals) )]
+      schemaPred2 =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
 
     ui$ do
       (_,(_,evMap )) <- transactionNoLog (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
@@ -84,7 +84,7 @@ eventWidgetMeta inf cliZone= do
         let
             Just (TB1 (SText tname)) = unSOptional' $  _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
             table = lookTable inf tname
-            Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"event" $ keyRef ["event"]) e
+            Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"event" $ keyRef "event") e
             (Attr _ color )= lookAttr' (meta inf) "color" e
             toLocalTime = fmap to
               where to (STime (STimestamp i ))  = STime $ STimestamp $  utcToLocalTime cliZone $ localTimeToUTC utc i

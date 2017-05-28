@@ -163,10 +163,10 @@ createSchema  = do
 alterSchema v p= do
       inf <- ask
       let new = apply  v p
-          n = fromJust $ indexFieldRec (IProd Nothing [name]) v
-          nnewm = indexFieldRec (IProd Nothing [name]) new
-          o = fromJust $ indexFieldRec (Nested (IProd Nothing [owner]) (IProd Nothing [user_name])) v
-          onewm = indexFieldRec (Nested (IProd Nothing [owner]) (IProd Nothing [user_name])) new
+          n = fromJust $ indexFieldRec (keyRef name) v
+          nnewm = indexFieldRec (keyRef name) new
+          o = fromJust $ indexFieldRec (Nested [keyRef owner] (keyRef user_name)) v
+          onewm = indexFieldRec (Nested [keyRef owner] (keyRef user_name)) new
           name = lookKey inf "catalog_schema" "name"
           owner= lookKey inf "catalog_schema" "owner"
           user_name = lookKey inf "user" "usename"

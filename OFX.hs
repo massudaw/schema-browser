@@ -1,10 +1,11 @@
-{-# LANGUAGE OverloadedStrings, Arrows ,RecordWildCards#-}
+{-# LANGUAGE GADTs,OverloadedStrings, Arrows ,RecordWildCards#-}
 module OFX (ofxPlugin) where
 import Text.Parsec
 import Data.OFX
 import System.IO
 import System.Exit
 import Debug.Trace
+import Types.Patch
 
 import Control.Applicative
 import Control.Monad (join)
@@ -23,12 +24,12 @@ txt = TB1 . SText . T.pack
 frac = TB1 . SDouble
 tzone  = TB1 . STime . STimestamp . zonedTimeToLocalTime
 
-i =: j = Attr i j
+i =: j = PAttr i (patch j)
 
 convertTrans (Transaction {..})  =
     ["fitid" =: serial txt (if txFITID == "0" then Nothing else Just txFITID)
     ,"memo" =:  opt txt txMEMO
-    ,FKT (KV $ mapFromTBList $ [_tb $ "trntype" =: txt (tail $ show txTRNTYPE )]) [Rel "trntype" Equals "trttype"] (TB1 ( tblist $ [_tb $ "trttype" =: txt (tail $ show txTRNTYPE )]))
+    ,PFK [Rel "trntype" Equals "trttype"] ["trntype" =: txt (tail $ show txTRNTYPE )]  (PAtom (kvempty,Idex [txt (tail $ show txTRNTYPE )],["trttype" =: txt (tail $ show txTRNTYPE )]))
     ,"dtposted" =: tzone txDTPOSTED
     ,"dtuser" =:  opt tzone txDTUSER
     ,"dtavail" =: opt tzone txDTAVAIL
@@ -40,7 +41,7 @@ convertTrans (Transaction {..})  =
     ,"refnum" =: opt txt txREFNUM
     ,"sic" =: opt txt txSIC
     ,"payeeid" =: opt txt txPAYEEID
-    ]  :: [TB Identity T.Text Showable]
+    ]  :: [PathAttr T.Text Showable]
 
 testAccount = do
   let tfile = "extrato2.ofx"

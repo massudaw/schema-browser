@@ -96,8 +96,8 @@ transformKey
   :: (Eq b, Show a, Show b) =>
      KType (Prim KPrim b) -> KType (Prim KPrim b) -> FTB a -> FTB a
 -- transformKey ki ko v | traceShow (ki,ko,v) False = undefined
-transformKey (KSerial i)  (KOptional j) (LeftTB1 v)  | i == j = LeftTB1  v
-transformKey (KOptional i)  (KSerial j) (LeftTB1 v)  | i == j = LeftTB1 v
+transformKey (KSerial i)  (KOptional j) (LeftTB1 v)  | isPairReflexive i Equals j = LeftTB1 v
+transformKey (KOptional i)  (KSerial j) (LeftTB1 v)  | isPairReflexive i Equals j = LeftTB1 v
 transformKey (KOptional j) l (LeftTB1  v)
     | isJust v = transformKey j l (fromJust v)
     | otherwise = errorWithStackTrace "no transform optional nothing"
@@ -107,8 +107,8 @@ transformKey (KSerial j)  l (LeftTB1 v)
     | otherwise =  LeftTB1 Nothing
 transformKey l@(Primitive _)  (KOptional j ) v  = LeftTB1 $ Just (transformKey l j v)
 transformKey l@(Primitive _)  (KSerial j ) v   = LeftTB1 $ Just (transformKey l j v)
-transformKey l@(Primitive _)  (KArray j ) v | j == l  = ArrayTB1 $ pure v
-transformKey ki kr v | ki == kr = v
+transformKey l@(Primitive _)  (KArray j ) v | isPairReflexive l Equals j   = ArrayTB1 $ pure v
+transformKey ki kr v | isPairReflexive ki Equals kr = v
 transformKey (Primitive ki) (Primitive kr) v
   | isPrimReflexive ki kr = v
 transformKey ki kr  v = errorWithStackTrace  ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
@@ -403,7 +403,7 @@ isLeftRel (RelAccess i j ) =  isKOptional (keyType i) || isLeftRel j
 liftASch :: TableMap  -> Text -> Text -> Access Text  -> Access Key
 liftASch inf s tname (ISum i) =  ISum $ fmap (liftASch inf s tname)  i
 liftASch inf s tname (Many i) =  Many $ fmap (liftASch inf s tname)  i
-liftASch inf s tname (IProd b l) = IProd b $ fmap lookKey  l
+liftASch inf s tname (IProd b l) = IProd b $ lookKey  l
   where
     tb = lookup tname $  lookup s inf
     lookup i m = justError ("no look" <> show i) $ HM.lookup i m
@@ -412,10 +412,10 @@ liftASch inf s tname (IProd b l) = IProd b $ fmap lookKey  l
         i = justError "no attr" $ L.find ((==c).keyValue ) (tableAttrs tb)
 liftASch inf s tname (Nested i c) = Nested ref (liftASch inf (fst l ) (snd l) c)
   where
-    ref@(IProd _ refk) = liftASch inf s tname i
+    ref = liftASch inf s tname <$> i
     lookup i m = justError ("no look" <> show i) $ HM.lookup i m
     tb = lookup tname $  lookup s inf
-    n = justError "no fk" $ L.find (\i -> S.fromList refk == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
+    n = justError "no fk" $ L.find (\i -> S.fromList (iprodRef <$> ref )== (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
     l = case n of
           (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
           (Path _ rel@(FKInlineTable  l  ) ) ->  l

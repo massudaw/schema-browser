@@ -84,7 +84,7 @@ historyLoad = do
 
   dbvar <- lift $ refTable  (meta inf ) (lookTable (meta inf ) "google_auth")
   row <- G.lookup (G.Idex [txt $ user]) <$> R.currentValue (R.facts $collectionTid dbvar)
-  let Just (TB1 (SText start ))= join $indexFieldRec (liftAccess (meta inf) "google_auth" (IProd Nothing ["historyid"]  ))<$> row
+  let Just (TB1 (SText start ))= join $indexFieldRec (liftAccess (meta inf) "google_auth" (IProd Nothing "historyid"  ))<$> row
 
   token <-R.currentValue (R.facts tokenT)
   let

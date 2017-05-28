@@ -106,7 +106,7 @@ patchServer conf smvar = do
     i <- recv socka 4096
     let Pull (G.Idex [last]) = B.decode (BS.fromStrict i)
     putStrLn $ "Sync Index "  ++ show  last
-    let pred = (WherePredicate $ (AndColl [PrimColl (liftAccess meta "master_modification_table" $IProd Nothing ["modification_id"],Left (last,GreaterThan False))]))
+    let pred = (WherePredicate $ (AndColl [PrimColl (liftAccess meta "master_modification_table" $IProd Nothing "modification_id",Left (last,GreaterThan False))]))
     ((dbref,(_,l)),v)<-runDynamic $ transaction meta $ selectFrom "master_modification_table" Nothing Nothing [] pred
     q <- atomically $ dupTChan (patchVar (iniRef dbref))
     let master = (lookTable meta "master_modification_table")

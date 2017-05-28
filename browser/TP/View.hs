@@ -83,9 +83,9 @@ instance A.ToJSON Showable where
     toJSON (SGeo o) = A.toJSON o
     toJSON i = A.toJSON (renderPrim i)
 
-indexTy (IProd _ [k] )=  keyType k
+indexTy (IProd _ k )=  keyType k
 indexTy (Many [k] )= indexTy k
-indexTy (Nested (IProd _ [xs] ) n) = traceShowId $ nestTy (keyType xs) (indexTy n)
+indexTy (Nested [IProd _ xs] n) = nestTy (keyType xs) (indexTy n)
     where
       nestTy (KOptional k) (KOptional n) = KOptional (nestTy k n)
       nestTy (KOptional k) n = KOptional (nestTy k n)
@@ -102,7 +102,7 @@ geoPred inf tname geofields (ne,sw) = traceShowId geo
             $ index
       where
         nty= indexTy index
-        index =  liftAccess inf (tableName tname)  ( indexer f)
+        [index] =  liftAccess inf (tableName tname)  <$>  indexer f
 
     op f
       =  case f of
@@ -119,7 +119,7 @@ timePred inf tname evfields (incrementT,resolution) = traceShowId time
     timeField f =
       PrimColl . (, Left ( (IntervalTB1 $ fmap (ref ty) i),op ty)) $ index
       where
-        index =  liftAccess inf (tableName tname)  ( indexer f)
+        [index] =  liftAccess inf (tableName tname)  <$>  indexer f
         ty = indexTy index
     op f = case f of
              KInterval i -> IntersectOp

@@ -17,6 +17,7 @@ import System.Process
 import Data.Semigroup
 import Control.Monad.Catch
 import Location
+import Step.Host (findFK)
 import Data.Interval(Extended(..),interval,lowerBound',upperBound)
 import PrefeituraSNFSE
 import Text
@@ -692,6 +693,7 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
     url = proc t -> do
       fn <- idxK "file_name" -< t
       i <- idxK "import_file" -< t
+      row <- act (const ask )-< ()
       atR "statements,account" (proc t -> do
         odxR "fitid" -< t
         odxR "memo" -< t
@@ -711,22 +713,59 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
 
       b <- act ofx  -< (,) fn i
       let ao :: Index (TB2 Text Showable)
-          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom . (mempty,Idex (maybeToList . join . fmap unSSerial . fmap _tbattr .L.find (("fitid"==). _tbattrkey ) $ a ),) . fmap patch   $ a) <$>  join (nonEmpty . zip [0..] <$> b)
+          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom $ (mempty,Idex (maybeToList . join . fmap unSSerial . fmap _tbattr .L.find (([Inline "fitid"]==). keyattri ) $ (fmap create a :: [TB Identity Text Showable]) ), a)) <$>  join (nonEmpty . zip [0..] . fmap (patch (unTB (fromJust (findFK ["account" ] (fromJust row )))) :)<$> b)
           ref :: [TB Identity  Text Showable]
-          ref = [Attr  "statements" . LeftTB1 $ fmap (ArrayTB1 . Non.fromList ) .  join $  nonEmpty . catMaybes . fmap (  join . fmap unSSerial . fmap _tbattr .L.find (("fitid"==). _tbattrkey ) )<$> b]
+          ref = [Attr  "statements" . LeftTB1 $ fmap (ArrayTB1 . Non.fromList ) .  join $  nonEmpty . catMaybes . fmap (\i ->   join . fmap unSSerial . fmap _tbattr .L.find (([Inline "fitid"]==). keyattri) $ (fmap create  i :: [TB  Identity Text Showable ]) )<$> b]
           tbst :: (Maybe (TBIdx Text (Showable)))
           tbst = Just $ (mempty , Idex [fn],  [PFK  [Rel "statements" Equals "fitid",Rel "account" Equals "account"] (fmap patch ref) ao])
 
-          {-ao =  LeftTB1 $ ArrayTB1 . Non.fromList . fmap (TB1 . tblist . fmap _tb) <$>  join (nonEmpty <$> b)
-          ref :: [Compose Identity (TB Identity ) Text(Showable)]
-          ref = [attrT  ("statements",LeftTB1 $ join $ fmap (ArrayTB1 .  Non.fromList  ).   allMaybes . fmap (join . fmap unSSerial . fmap _tbattr .L.find (("fitid"==). _tbattrkey ) ) <$> b)]
-          tbst :: (Maybe (TBData Text (Showable)))
-          tbst = Just $ tblist $ fmap _tb [FKT (kvlist ref) [Rel "statements" Equals "fitid",Rel "account" Equals "account"] ao]-}
       returnA -< tbst
     ofx (TB1 (SText i), ((LeftTB1 (Just (TB1 (SBinary r) )))))
       = liftIO $ ofxPlugin (T.unpack i) (BS.unpack r)
     ofx i = errorWithStackTrace (show i)
 
+
+notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ BoundedPlugin2 url
+  where
+    tname = "nota"
+    varTB i = fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
+    url ::  ArrowReader
+    url = proc t -> do
+      i <- varTB "id_nota" -< t
+      odxR "nota_xml" -<  t
+      r <- atR "inscricao" (proc t -> do
+                               n <- varTB "inscricao_municipal" -< t
+                               u <- varTB "goiania_user"-< t
+                               p <- varTB "goiania_password"-< t
+                               returnA -< liftA3 (, , ) n u p  ) -< t
+      b <- act (fmap join  . traverse (\(i, (j, k,a)) -> liftIO$ prefeituraNotaXML j k a i ) ) -< liftA2 (,) i r
+      let ao =  Just $ tblist [attrT ("nota_xml",    LeftTB1 $ fmap  TB1  b)]
+      returnA -< ao
+
+checkPrefeituraXML = FPlugins "Check Nota Prefeitura XML" tname $ BoundedPlugin2 url
+  where
+    tname = "nota"
+    varTB i = (\(TB1 (SBinary i)) -> BS.unpack i ) <$>  idxK i
+    url ::  ArrowReader
+    url = proc t -> do
+      xml <- varTB "nota_xml" -< ()
+      values <- act (liftIO . readNota)  -< xml
+      traverse odxR (snd <$> translate)  -< ()
+      returnA -< tblist <$> nonEmpty (catMaybes $ replace <$> values)
+
+    translate =  [("valoriss","issqn_retido"),
+                  ("valorpis","pis_retido"),
+                  ("valorir","irpj_retido"),
+                  ("valorcsll","csll_retido"),
+                  ("valorcofins","cofins_retido"),
+                  ("valorinss","inss_retido")]
+    replace (i,v) = do
+      h <- M.lookup i (M.fromList translate)
+      return $ attrT (h,opt double (Just v))
+
+
+opt i = LeftTB1 .  fmap i
+double = TB1 . SDouble
 
 notaPrefeitura = FPlugins "Nota Prefeitura" tname $ BoundedPlugin2 url
   where
@@ -742,7 +781,7 @@ notaPrefeitura = FPlugins "Nota Prefeitura" tname $ BoundedPlugin2 url
                                p <- varTB "goiania_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act (fmap join  . traverse (\(i, (j, k,a)) -> liftIO$ prefeituraNota j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ tblist [attrT ("nota",    LeftTB1 $ fmap (LeftTB1 .Just . TB1 ) b)]
+      let ao =  Just $ tblist [attrT ("nota",    LeftTB1 $ fmap  TB1  b)]
       returnA -< ao
 
 queryArtCreaData = FPlugins "Art Crea Data" tname $ BoundedPlugin2 url
@@ -806,6 +845,7 @@ queryArtBoletoCrea = FPlugins pname tname $ BoundedPlugin2  url
 
 
 
+
 queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
   where
     tname = "art"
@@ -826,4 +866,4 @@ queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
 
 
 plugList :: [PrePlugins]
-plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,areaDesign,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , notaPrefeitura,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]
+plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,areaDesign,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , checkPrefeituraXML,notaPrefeitura,notaPrefeituraXML,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]

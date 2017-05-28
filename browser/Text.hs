@@ -1,6 +1,7 @@
 module Text where
 
 import Types
+import Types.Patch
 import qualified NonEmpty as Non
 import Data.Ord
 import Control.Monad
@@ -32,21 +33,50 @@ import qualified Data.Text as T
 
 -- This module contains text backend printer and parser
 
+explode sep depth = L.intercalate (sep :[]) . fmap (\(i,j) -> replicate i depth ++ j)
+
 ident :: [(Int,String)] -> String
-ident = L.intercalate "\n" . fmap (\(i,j) -> replicate i '\t' ++ j)
+ident = explode '\n' '\t'
+
+renderRowPatch :: TBIdx Key Showable -> [(Int,String)]
+renderRowPatch (_,_,i) =  concat $ renderPatch  <$> i
 
 renderTable :: TBData Key Showable ->  [(Int,String)]
 renderTable i =  concat $ renderAttr . unTB <$> F.toList (unKV (snd i))
 
 renderRel (Rel i op j) = show i ++ "  " ++ renderBinary op ++ " " ++ show j
 
+renderPatch :: PathAttr Key Showable ->  [(Int,String)]
+renderPatch (PFK rel k v )
+  = [(0,L.intercalate " AND " (fmap renderRel rel))]
+  ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderPatch <$> k) ++ "] => ")]
+  ++ fmap (first (+1)) (renderFTBPatch renderRowPatch v)
+renderPatch (PAttr k v ) = [(0,show k ++ " => " ++ ident (renderFTBPatch renderPrimPatch v))]
+renderPatch (PInline k v ) = [(0,show k ++ " => ")] ++ fmap (first (+1)) (renderFTBPatch renderRowPatch v)
+
+
+renderPrimPatch i = [(0,renderPrim  i)]
+
 renderAttr :: TB Identity Key Showable ->  [(Int,String)]
 renderAttr (FKT k rel v )
   = [(0,L.intercalate " AND " (fmap renderRel rel))]
   ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderAttr . unTB <$> F.toList (_kvvalues k)) ++ "] => ")]
   ++ fmap (first (+1)) (renderFTB renderTable v)
-renderAttr (Attr k v ) = [(0,show k ++ " => " ++ renderShowable v)]
+renderAttr (Attr k v ) = [(0,show k ++ " => " ++ ident (renderFTB renderPrimPatch v))]
 renderAttr (IT k v ) = [(0,show k ++ " => ")] ++ fmap (first (+1)) (renderFTB renderTable v)
+
+renderFTBPatch :: (a -> [(Int,String)]) -> PathFTB a -> [(Int,String)]
+renderFTBPatch f (PAtom i) = f i
+renderFTBPatch f (POpt i) = concat $ maybeToList $ fmap (renderFTBPatch f ) i
+renderFTBPatch f (PIdx ix i)  = fmap (fmap (\e -> show ix ++ "-" ++ e )) $ concat $ F.toList $ fmap (renderFTBPatch f) i
+renderFTBPatch f (PatchSet l ) =  concat $ F.toList $ fmap (renderFTBPatch f) l
+renderFTBPatch f (PInter b i)  = [(0,showFin i)]
+  where
+    showFin (ER.Finite i,s) = (if b then ocl s else "" ) ++ ident (renderFTBPatch f i) ++ (if not b then ocr s else "")
+    showFin i = []
+    ocl j = if j then "[" else "("
+    ocr j = if j then "]" else ")"
+
 
 renderFTB :: (a -> [(Int,String)]) -> FTB a -> [(Int,String)]
 renderFTB f (TB1 i) = f i
@@ -61,22 +91,7 @@ renderFTB f (IntervalTB1 i)  = [(0,showInterval  i)]
         ocl j = if j then "[" else "("
         ocr j = if j then "]" else ")"
 
-renderShowable :: FTB Showable -> String
-renderShowable (LeftTB1 i ) = maybe "" renderShowable i
-renderShowable (ArrayTB1 i)  = L.intercalate "," $ F.toList $ fmap renderShowable i
-renderShowable (IntervalTB1 i)  = showInterval renderShowable i
-  where
-    showInterval f i | i == Interval.empty = show  i
-    showInterval f (Interval.Interval (i,j) (l,m) ) = ocl j <> showFin  i <> "," <> showFin  l <> ocr m
-      where
-        showFin (ER.Finite i) = f i
-        showFin i = ""
-        ocl j = if j then "[" else "("
-        ocr j = if j then "]" else ")"
-    showInterval f i = show i -- errorWithStackTrace (show i)
-
-
-renderShowable (TB1  i) = renderPrim i
+renderShowable = ident . renderFTB renderPrimPatch
 
 renderPrim :: Showable -> String
 renderPrim (SText a) = T.unpack a
@@ -149,6 +164,7 @@ readPrim t =
        MultiGeom PPolygon  -> readMultiPolygon
      PBoolean -> readBoolean
      PBinary -> readBin
+     PMime i -> readBin
   where
       readInt = nonEmpty (fmap SNumeric . readMaybe)
       readBoolean = nonEmpty (fmap SBoolean . readMaybe)
@@ -175,7 +191,7 @@ readDigit i
   | otherwise = Nothing
 
 cpfValidate i
-  | length i /= 11 = Left "Invalid size Brazilian Cnpj need 14 digits"
+  | length i /= 11 = Left "Invalid size Brazilian Cpf need 11 digits"
   | m1v == m1 && m2v == m2 = Right i
   | otherwise = Left "Invalid checksum check your number"
   where multiplier1 =  [10,9,8,7,6,5,4,3,2]

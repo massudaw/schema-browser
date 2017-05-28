@@ -144,7 +144,7 @@ applyBackend (PatchRow p@(m,pk@(G.Idex pki),i)) = do
    (sidx,v,_,_) <- liftIO $ atomically $ readState (WherePredicate (AndColl []),keyFastUnique <$> _kvpk m) (mapTableK keyFastUnique table ) ref
    let oldm = mapKey' (recoverKey inf ) <$>  G.lookup pk v
    old <- maybe (do
-     (_,(i,o)) <- selectFrom (_kvname m) Nothing Nothing [] (WherePredicate (AndColl ((\(k,o) -> PrimColl (IProd Nothing [k],Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk m) pki)))
+     (_,(i,o)) <- selectFrom (_kvname m) Nothing Nothing [] (WherePredicate (AndColl ((\(k,o) -> PrimColl (IProd Nothing k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk m) pki)))
      return $ L.head $ G.toList o
         ) return oldm
    if isJust (diff old  (apply old p))
@@ -217,8 +217,8 @@ getFKRef inf predtop rtable (evs,me,old) v (Path r (FKInlineTable  j )) =  do
                                 go pred (AndColl l) = AndColl <$> nonEmpty (catMaybes $ go pred <$> l)
                                 go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
                                 go pred (PrimColl l) = PrimColl <$> pred l
-                                test f (Nested (IProd _ p) (Many[i] ),j)  = if p == f then Just (i ,j) else Nothing
-                                test f (Nested (IProd _ p) i ,j)  = if p == f then Just (i ,j) else Nothing
+                                test f (Nested p (Many[i] ),j)  = if (iprodRef <$> p) == f then Just (i ,j) else Nothing
+                                test f (Nested p i ,j)  = if (iprodRef <$> p) == f then Just (i ,j) else Nothing
                                 test v f = Nothing
                              in  fmap WherePredicate (go (test (S.toList r)) l)
 
@@ -254,15 +254,15 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                                       go pred (AndColl l) = AndColl <$> nonEmpty (catMaybes $ go pred <$> l)
                                       go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
                                       go pred (PrimColl l) = PrimColl <$> pred l
-                                      test f (Nested (IProd _ p) (Many[i] ),j)  = if p == f then Just ( i ,left (fmap (removeArray (keyType $ L.head p))) j) else Nothing
-                                      test f (Nested (IProd _ p) i ,j)  = if p == f then Just ( i ,left (fmap (removeArray (keyType $L.head p))) j) else Nothing
+                                      test f (Nested p (Many[i] ),j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (keyType $ iprodRef $ L.head p))) j) else Nothing
+                                      test f (Nested p i ,j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (keyType $ iprodRef $ L.head p))) j) else Nothing
                                       test v f = Nothing
                                       removeArray (KOptional i)  o = removeArray i o
                                       removeArray (KArray i)  (AnyOp o) = o
                                       removeArray i  o = o
                                    in  fmap WherePredicate (go (test (_relOrigin <$> i)) l)
-                let refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap ( (\i->PrimColl (IProd notNull [_relTarget $ k] ,Left (i,Flip $ _relOperator k)))) . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v
-                    predm =(refs<> predicate predtop)
+                let refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap ( (\i->PrimColl (IProd notNull (_relTarget $ k) ,Left (i,Flip $ _relOperator k)))) . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v
+                    predm =(refs <> predicate predtop)
                 (ref,tb2) <- case refs of
                   Just refspred-> do
                     let pred = maybe refspred (refspred <> ) (predicate predtop)
@@ -379,7 +379,7 @@ tableLoader table  page size presort fixed = do
                 go pred (AndColl l) = AndColl (go pred <$> l)
                 go pred (OrColl l) = OrColl (go pred <$> l)
                 go pred (PrimColl l) = AndColl $ PrimColl <$> pred l
-                predicate (Nested (IProd b i) j ,Left _ ) = (\a -> (IProd b [a], Right (Not IsNull))) <$> i
+                predicate (Nested i j ,Left _ ) = (\a -> (a, Right (Not IsNull))) <$> i
                 predicate i  = [i]
             tbf = tableView  (tableMap inf) table
           (res ,x ,o) <- (listEd $ schemaOps inf) (tableNonRef2 tbf) page size presort fixed (unestPred predtop)
@@ -430,7 +430,7 @@ childrenRefsUnique  inf table (sidxs,base) (FKJoinTable rel j ,evs)  =  concat $
                   Just idx -> concat $ conv <$> resIndex idx
                   Nothing -> concat $ conv <$> resScan base
                   where
-                    predK = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (IProd Nothing [o]  , Left (fromJust $ unSOptional' $fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
+                    predK = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (IProd Nothing o  , Left (fromJust $ unSOptional' $fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
                     predKey =  mapPredicate keyFastUnique predK
                     pred =  mapPredicate (\o -> justError "no pk" $ L.elemIndex o (fmap _relOrigin rel)) predK
                     resIndex idx = G.query pred idx
@@ -564,13 +564,13 @@ indexFilterR j (PatchRow i) = indexFilterP j i
 
 -- Default Checks
 
-patchCheck (m,s,i) = if checkAllFilled then Right (m,s,i) else Left ("non nullable rows not filled " ++ show ( need `S.difference` available ))
+patchCheck (m,s,i) = if checkAllFilled then Right (m,s,i) else Left ("patchCheck: non nullable rows not filled " ++ show ( need `S.difference` available ))
   where
       checkAllFilled =  need `S.isSubsetOf`  available
       available = S.unions $ S.map _relOrigin . pattrKey <$> i
       need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i) || isJust (keyStatic i )) )  (kvAttrs m)
 
-tableCheck (m,t) = if checkAllFilled then Right (m,t) else Left ("non nullable rows not filled " ++ show ( need `S.difference` available ))
+tableCheck (m,t) = if checkAllFilled then Right (m,t) else Left ("tableCheck: non nullable rows not filled " ++ show ( need `S.difference` available ))
   where
       checkAllFilled =  need `S.isSubsetOf`  available
       available = S.fromList $ concat $ fmap _relOrigin . keyattr <$> unKV  t
@@ -705,17 +705,24 @@ createRow (PatchRow i) = create i
 fullInsert = Tra.traverse fullInsert'
 
 fullInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
-fullInsert' ((k1,v1) )  = do
+fullInsert' v | traceShow ("fullInsert",v) False = undefined
+fullInsert' (k1,v1) = do
    inf <- ask
    let proj = _kvvalues . unTB
-       tb  = (lookTable inf (_kvname k1))
+       tb  = lookTable inf (_kvname k1)
    ret <-  (k1,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
-   (_,(_,l)) <- tableLoader  tb Nothing Nothing [] (mempty)
+   (_,(_,l)) <- tableLoader  tb Nothing Nothing [] mempty
+   liftIO $ print ("fullInsert",tbpredM (_kvpk k1)  ret , G.lookup (tbpredM (_kvpk k1)  ret) l ,ret)
    if  (isNothing $ flip G.lookup l $ tbpredM (_kvpk k1)  ret ) && rawTableType tb == ReadWrite
       then catchAll (do
         i@(Just (TableModification _ _ tb))  <- insertFrom  ret
         tell (maybeToList i)
-        return $ createRow tb) (\e -> return ret)
+        return $ createRow tb) (\e -> do
+          let pred = WherePredicate (AndColl ((\(k,o) -> PrimColl (IProd Nothing k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk k1) pki))
+              G.Idex pki = G.getIndex ret
+          (_,(_,l)) <- tableLoader  tb Nothing Nothing []  pred
+          liftIO$ putStrLn $ "failed insertion: "  ++ (show e)
+          return ret)
       else do
         return ret
 
@@ -773,7 +780,7 @@ transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
   return md
 
 fullDiffEditInsert :: TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-fullDiffEditInsert old@((k1,v1) ) (k2,v2)  | traceShow (v1,v2) False = undefined
+fullDiffEditInsert old@((k1,v1) ) (k2,v2)  | traceShow ("fullDiffEditInsert",v1,v2) False = undefined
 fullDiffEditInsert old@((k1,v1) ) (k2,v2) = do
    inf <- ask
    let proj = _kvvalues . unTB
@@ -785,7 +792,7 @@ fullDiffEditInsert old@((k1,v1) ) (k2,v2) = do
 
 
 fullDiffEdit :: TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-fullDiffEdit old@((k1,v1) ) (k2,v2)  | traceShow (v1,v2) False = undefined
+fullDiffEdit old@((k1,v1) ) (k2,v2)  | traceShow ("fullDiffEditInsert",v1,v2) False = undefined
 fullDiffEdit old@((k1,v1) ) (k2,v2) = do
    inf <- ask
    let proj = _kvvalues . unTB

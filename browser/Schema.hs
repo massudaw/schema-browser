@@ -200,7 +200,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
        efks <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp (head . T.splitOn "->" <$> kp)) ( FKJoinTable (zipWith3 (\a b c -> extendedRel keyMap tp a b c)  (V.toList kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn exforeignKeys (Only schema) :: R.Dynamic (Map Text (Set (Path (Set Key) (SqlOperation ) )))
 
 
-       functionsRefs <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc::Text,tc,cols,fun) -> (tp,S.singleton $ Path (S.singleton $ tc) ( FunctionField tc (readFun fun) (indexer <$> V.toList cols ) ) )) <$> query conn functionKeys (Only schema):: R.Dynamic (Map Text (Set (Path (Set Text) (SqlOperationK Text) ) ))
+       functionsRefs <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc::Text,tc,cols,fun) -> (tp,S.singleton $ Path (S.singleton $ tc) ( FunctionField tc (readFun fun) (head . indexer <$> V.toList cols ) ) )) <$> query conn functionKeys (Only schema):: R.Dynamic (Map Text (Set (Path (Set Text) (SqlOperationK Text) ) ))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ HM.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  HM.toList keyMap :: Map Text (Set Key)
        let i3lnoFun = fmap (\(c,(un,pksl,scp,is_sum))->
                                let
@@ -515,7 +515,7 @@ encodeTableModification inf ltime  (TableModification id table ip)
 
 att :: (Functor f ,DecodeTB1 f , DecodeShowable a ) => TB g k Showable -> f a
 att (Attr i j ) = fmap decodeS $ decFTB  j
-ix i d = justError ("no field " ++ show i ) $ indexField (IProd Nothing [i]) d
+ix i d = justError ("no field " ++ show i ) $ indexField (IProd Nothing i) d
 
 class DecodeTB1 f where
   decFTB :: FTB a -> f a
@@ -590,7 +590,7 @@ tableOrder inf table orderMap =  maybe (int 0) _tbattr row
     pk = [("table",int . tableUnique $ table ), ("schema",int (schemaId inf))]
     row = lookupAccess (meta inf) pk  "usage" ("ordering",orderMap)
 
-lookupAccess inf l f c = join $ fmap (indexField (IProd  notNull [(lookKey inf (fst c) f)] )) . G.lookup (idex inf (fst c) l) $ snd c
+lookupAccess inf l f c = join $ fmap (indexField (IProd  notNull (lookKey inf (fst c) f) )) . G.lookup (idex inf (fst c) l) $ snd c
 
 idex inf t v = G.Idex $  fmap snd $ L.sortBy (comparing ((`L.elemIndex` (rawPK $ lookTable inf t)).fst)) $ first (lookKey inf t  ) <$> v
 

@@ -387,12 +387,12 @@ liftAccessM inf tname (Point i  ) =  Just $ Point i
 liftAccessM inf tname (Rec i j ) =  Rec i <$> (liftAccessM inf tname  j)
 liftAccessM inf tname (ISum i) =  ISum <$> traverse (liftAccessM inf tname)  i
 liftAccessM inf tname (Many i) =  Many <$> traverse (liftAccessM inf tname)  i
-liftAccessM inf tname (IProd b l) = IProd b <$> traverse  (lookKeyM inf tname) l
+liftAccessM inf tname (IProd b l) = IProd b  <$> (lookKeyM inf tname) l
 liftAccessM inf tname (Nested i c) = Nested <$> ref <*> join (fmap (\ l -> liftAccessM inf  (snd (proj l)) c ) n)
   where
-    ref = liftAccessM inf tname i
+    ref = traverse (liftAccessM inf tname) i
     tb = lookTable inf tname
-    n = join $ (\(IProd _ refk )-> L.find (\i -> S.fromList refk == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)) <$> ref
+    n = join $ (\ ref -> L.find (\i -> S.fromList (iprodRef <$> ref) == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)) <$> ref
     proj n = case n of
           (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
           (Path _ rel@(FKInlineTable  l  ) ) ->  l
@@ -406,13 +406,13 @@ liftAccess inf tname (Point i  ) =  Point i
 liftAccess inf tname (Rec i j ) =  Rec i (liftAccess inf tname  j)
 liftAccess inf tname (ISum i) =  ISum $ fmap (liftAccess inf tname)  i
 liftAccess inf tname (Many i) =  Many $ fmap (liftAccess inf tname)  i
-liftAccess inf tname (IProd b l) = IProd b $ fmap (lookKey inf tname) l
+liftAccess inf tname (IProd b l) = IProd b $ (lookKey inf tname) l
 liftAccess inf tname (Nested i c) = Nested ref (liftAccess rinf (snd l) c)
   where
     rinf = fromMaybe inf (HM.lookup  (fst l) (depschema inf))
-    ref@(IProd _ refk) = liftAccess inf tname i
+    ref = liftAccess inf tname <$> i
     tb = lookTable inf tname
-    n = justError ("no fk " ++ show (i,refk,rawFKS tb) )$ L.find (\i -> S.fromList refk == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
+    n = justError ("no fk " ++ show (i,ref,rawFKS tb) )$ L.find (\i -> S.fromList (iprodRef <$> ref)== (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
     l = case n of
           (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
           (Path _ rel@(FKInlineTable  l  ) ) ->  l
@@ -429,7 +429,7 @@ genPredicateFull i (Point _) = Nothing -- AndColl <$> (nonEmpty $ catMaybes $ ge
 genPredicateFull i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (IProd b l) =  (\i -> PrimColl (IProd b l,Right i ))  <$> b
-genPredicateFull i n@(Nested p@(IProd _ _ ) l ) = fmap (\(a,b) -> (Nested p a , b )) <$> genPredicateFull i l
+genPredicateFull i n@(Nested p l ) = fmap (\(a,b) -> (Nested p a , b )) <$> genPredicateFull i l
 genPredicateFull _ i = errorWithStackTrace (show i)
 
 notException e =  if isJust eb || isJust es || isJust as then Nothing else Just e

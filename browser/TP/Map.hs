@@ -86,8 +86,8 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
         | otherwise = Nothing
         where (l,r) = break(=='=') i
               (tnew,j ) = break (=='|') l
-              nest (i:[]) = (IProd Nothing [T.pack i])
-              nest (i:xs) = Nested (IProd Nothing [T.pack i]) (Many [nest xs])
+              nest (i:[]) = keyRef (T.pack i)
+              nest (i:xs) = Nested [keyRef (T.pack i)] (Many [nest xs])
       filteringPred  (k,v) row = maybe True (L.isInfixOf (toLower <$> v)  . fmap toLower . renderShowable )   $ (flip indexFieldRec row  k)
       filtering tb res = (\t -> filter (\row -> all (\i -> filteringPred i row) (catMaybes  t  )) )<$> (fmap (parseMany tb ) (triding filterInpT )) <*> fmap G.toList res
     calendar <-UI.div
@@ -127,7 +127,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
                   tb = t
                   Just proj = fmap (^._5) $ L.find ((==tb).(^._2) ) dashes
               traverse (\path -> do
-                v <- ui $ refTables' inf tb  Nothing (WherePredicate (OrColl $ (\(i,j) -> AndColl $fmap (PrimColl . first (liftAccess inf (tableName t))) [(   IProd Nothing ["source"],Left (int i,Equals)), (IProd Nothing ["target"],Left (int j,Equals))])  <$> path ))
+                v <- ui $ refTables' inf tb  Nothing (WherePredicate (OrColl $ (\(i,j) -> AndColl $fmap (PrimColl . first (liftAccess inf (tableName t))) [(   keyRef "source",Left (int i,Equals)), (keyRef "target",Left (int j,Equals))])  <$> path ))
                 mapUIFinalizerT innerCalendar (\i -> do
                   createLayers innerCalendar (tableName tb)  (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) (v^._3)
                   ) (nonEmpty path))

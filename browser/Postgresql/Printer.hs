@@ -406,8 +406,8 @@ indexLabel p@(IProd b l) v =
     case findAttr l v of
       Just i -> getCompose i
       Nothing -> errorWithStackTrace "no fk"
-indexLabel  n@(Nested ix@(IProd b l) (Many [nt])) v =
-    case   findFK l v of
+indexLabel  n@(Nested l (Many [nt])) v =
+  case   findFK (iprodRef <$> l) v of
       Just a ->  case getCompose a of
         Unlabeled i -> indexLabel  nt.head . F.toList . _fkttable $ i
         Labeled i _ -> errorWithStackTrace ("cant index" <> show i)
@@ -431,7 +431,7 @@ indexFieldL e c p@(IProd b l) v =
       Just i -> [utlabel  e c (tlabel' . getCompose $ i)]
       Nothing ->
             case
-                   fmap getCompose $ findFK l v of
+                   fmap getCompose $ findFK [l] v of
 
                 Just (Unlabeled i) ->
                     case i of
@@ -443,17 +443,17 @@ indexFieldL e c p@(IProd b l) v =
                                       ((== [l]) .
                                        fmap (_relOrigin) . keyattr) $
                                   unkvlist ref) <$>
-                            l
+                                    [l]
                         i -> errorWithStackTrace "no fk"
     -- Don't support filtering from labeled queries yet just check if not null for all predicates
     -- TODO: proper check  accessing the term
                 Just (Labeled i _) -> [(Just (i <> " is not null"), Nothing)]
-                Nothing -> case findFKAttr l v of
+                Nothing -> case findFKAttr [l] v of
                              Just i -> [utlabel e  c (tlabel' . getCompose $i)]
                              Nothing  -> errorWithStackTrace ("no fk attr" <> show (l,v))
 
-indexFieldL e c n@(Nested ix@(IProd b l) nt) v =
-  case findFK l v of
+indexFieldL e c n@(Nested l nt) v =
+  case findFK (iprodRef <$> l) v of
     Just a -> case getCompose a of
         Unlabeled i ->
           concat . fmap (indexFieldL e c nt) . F.toList . _fkttable $ i
@@ -472,7 +472,7 @@ indexFieldL e c n@(Nested ix@(IProd b l) nt) v =
          in go (_fkttable a)
           -- -} [(Just (l <> " is not null"), Nothing)]
 
-    Nothing -> concat $ (\i -> indexFieldL (Right (Not IsNull)) c (IProd b [i]) v)<$> l
+    Nothing -> concat $ (\i -> indexFieldL (Right (Not IsNull)) c i v)<$> l
 
 indexFieldL e c (Many nt) v = concat $ flip (indexFieldL e c) v <$> nt
 indexFieldL e c (ISum nt) v = concat $ flip (indexFieldL e c) v <$> nt

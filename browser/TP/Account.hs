@@ -56,7 +56,7 @@ import qualified Data.Map as M
 accountWidgetMeta inf = do
     let
       schId = int (schemaId inf)
-      schemaPred = [(keyRef ["schema"],Left (schId,Equals))]
+      schemaPred = [(keyRef "schema",Left (schId,Equals))]
 
     (_,(_,emap )) <-ui $ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
     (_,(_,aMap )) <-ui $ transactionNoLog  (meta inf) $ selectFromTable "accounts" Nothing Nothing [] schemaPred
@@ -66,7 +66,7 @@ accountWidgetMeta inf = do
               Just (TB1 (SText tname)) = unSOptional' $ _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
               table = lookTable  inf tname
               tablId = int (tableUnique table)
-              Just (Attr _ (ArrayTB1 efields )) =indexField  (liftAccess (meta inf) "event" $ keyRef ["event"]) $ fromJust $ G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
+              Just (Attr _ (ArrayTB1 efields )) =indexField  (liftAccess (meta inf) "event" $ keyRef "event") $ fromJust $ G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
               (Attr _ (ArrayTB1 afields ))= lookAttr' (meta inf) "account" e
               (Attr _ color )= lookAttr' (meta inf) "color" e
               toLocalTime = fmap to

@@ -50,7 +50,7 @@ plugs schm authmap db plugs = do
           findplug p = (,p). round . unTB1 . flip index "oid" . G.leafValue<$>  listToMaybe (G.getEntries $ G.queryCheck (pred ,rawPK (lookTable inf "plugins")) t)
             where
               pred :: TBPredicate Key Showable
-              pred = WherePredicate $ AndColl [PrimColl (liftAccess inf "plugins" $ keyRef ["name"] , Left (txt $ _name p,Equals))]
+              pred = WherePredicate $ AndColl [PrimColl (liftAccess inf "plugins" $ keyRef "name" , Left (txt $ _name p,Equals))]
       return regplugs
   atomically $ do
     schmRef <-readTMVar schm
@@ -59,7 +59,7 @@ plugs schm authmap db plugs = do
 
 
 
-index tb item = snd $ justError ("no item" <> show item) $ indexTable (keyRef [item]) (tableNonRef' tb)
+index tb item = snd $ justError ("no item" <> show item) $ indexTable [keyRef item] (tableNonRef' tb)
 index2 tb item = justError ("no item" <> show item) $ indexFieldRec item tb
 
 checkTime curr = do
@@ -82,7 +82,7 @@ poller schmRef authmap db plugs is_test = do
       where
         TB1 (SNumeric schema )= index tb "schema"
         TB1 (SNumeric intervalms) = index tb "poll_period_ms"
-        TB1 (SText p) = index2 tb (liftAccess metas "polling" $ Nested (keyRef ["plugin"]) (Many [keyRef ["name"]]))
+        TB1 (SText p) = index2 tb (liftAccess metas "polling" $ Nested [keyRef "plugin"] (Many [keyRef "name"]))
         pid = index tb "plugin"
     enabled = G.toList polling
     poll tb  = do

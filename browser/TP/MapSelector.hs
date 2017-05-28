@@ -75,7 +75,7 @@ mapWidgetMeta  inf = do
       ,js "leaflet-svg-markers.min.js"
       ]-}
     let
-      schemaPred2 = [(keyRef ["schema"],Left (int (schemaId inf),Equals))]
+      schemaPred2 = [(keyRef "schema",Left (int (schemaId inf),Equals))]
     (_,(_,evMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred2
     (_,(_,eventMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
     cliZone <- jsTimeZone
@@ -83,14 +83,14 @@ mapWidgetMeta  inf = do
           let
               Just (TB1 (SText tname)) = unSOptional' $ _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
               table = lookTable inf tname
-              evfields = join $ fmap (unArray . _tbattr ) . idx (meta inf) ["event"]   <$> erow
+              evfields = join $ fmap (unArray . _tbattr ) . idx (meta inf) "event"   <$> erow
                 where
                   erow = G.lookup (idex (meta inf) "event" [("schema" ,int $ schemaId inf),("table",int (tableUnique table))])  eventMap
-              Just (ArrayTB1 efields ) = indexFieldRec (liftAccess (meta inf) "geo" (Nested (keyRef ["features"] ) $keyRef  ["geo" ])) e
+              Just (ArrayTB1 efields ) = indexFieldRec (liftAccess (meta inf) "geo" (Nested [keyRef "features"] $keyRef  "geo" )) e
               (IT _ (ArrayTB1 features))= lookAttr' (meta inf) "features" e
               (Attr _ color )= lookAttr' (meta inf) "color" e
               projf  :: TBData Key Showable -> (FTB Showable , FTB (TBData Key Showable) ) -> Maybe (HM.HashMap Text A.Value)
-              projf  r (efield@(TB1 (SText field)),features)  = fmap (\i ->  HM.fromList [("label",A.toJSON (HM.fromList $ i <> [("id", txt $ writePK r efield   ),("title"::Text , txt $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r))])) ,("style",A.toJSON features)]) $ join $ convField  <$> indexFieldRec (liftAccess inf tname $ indexer field) r
+              projf  r (efield@(TB1 (SText field)),features)  = fmap (\i ->  HM.fromList [("label",A.toJSON (HM.fromList $ i <> [("id", txt $ writePK r efield   ),("title"::Text , txt $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r))])) ,("style",A.toJSON features)]) $ join $ convField  <$> indexFieldRec (head $ liftAccess inf tname <$> indexer field) r
               proj r = projf r <$> zip (F.toList efields) (F.toList features)
               convField (ArrayTB1 v) = Just $ [("position",ArrayTB1 v)]
               convField (LeftTB1 v) = join $ convField  <$> v
@@ -128,7 +128,7 @@ mapSelector inf selected calendarT sel (cposE,positionT) = do
           fields = selected ^. _3
           evc = eventClick innerCalendar
           boundSel :: FTB Showable ->  TBData Key Showable -> Maybe (Interval Showable)
-          boundSel (TB1 (SText field)) sel = (\(G.FTBNode i) -> i) . G.bound <$> indexFieldRec (liftAccess inf (tableName (selected ^._2 )) $ indexer field)   sel
+          boundSel (TB1 (SText field)) sel = (\(G.FTBNode i) -> i) . G.bound <$> indexFieldRec (liftAccess inf (tableName (selected ^._2 )) $ head $ indexer field)   sel
           boundsSel :: Tidings (Maybe (Interval Showable ))
           boundsSel = join . traceShowId . fmap (\j -> fmap ((\(G.FTBNode i) -> i).G.union) . fmap S.fromList  . traceShowId . nonEmpty . fmap leftEntry .  catMaybes .  fmap (flip boundSel  j) . F.toList  $  fields) <$> sel
           leftEntry :: Interval Showable -> G.Node (FTB Showable)

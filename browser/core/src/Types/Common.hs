@@ -40,7 +40,7 @@ module Types.Common (
     ,kvempty
 
     ,Rel(..)
-    ,_relOrigin  ,_relRoot  ,_relTarget,_relInputs,_relOutputs
+    ,_relOrigin  ,_relRoot  ,_relTarget,_relInputs,_relOutputs,iprodRef
 
     ,Expr (..) , Access(..)
     ,UnaryOperator(..)
@@ -164,11 +164,12 @@ type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Ident
 type TB3Data  f k a = (KVMetadata k,Compose f (KV (Compose f (TB f ))) k a )
 
 keyRef k = IProd notNull k
+iprodRef (IProd _ l) = l
 
 data Access  a
-  = IProd (Maybe UnaryOperator) [a]
+  = IProd (Maybe UnaryOperator) a
   | ISum  [Access  a]
-  | Nested (Access  a) (Access  a)
+  | Nested [Access  a] (Access  a)
   | Rec Int (Access  a)
   | Point Int
   | Many [Access a]
@@ -562,8 +563,8 @@ keyattr = keyattri . head . F.toList . getCompose
 
 
 relAccesGen :: Access k -> Rel k
-relAccesGen (IProd i [l] ) = Inline l
-relAccesGen (Nested (IProd i [l]) m ) = RelAccess l (relAccesGen m)
+relAccesGen (IProd i l ) = Inline l
+relAccesGen (Nested [IProd i l] m ) = RelAccess l (relAccesGen m)
 relAccesGen (Many [l]) = relAccesGen l
 
 keyattri :: Foldable f => TB f  k  a -> [Rel k]

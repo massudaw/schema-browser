@@ -196,8 +196,8 @@ splitIndexPK (OrColl l ) pk  = if F.all (isNothing .snd) al then Nothing else Ju
     where
       al = (\l -> (l,splitIndexPK  l pk ) )<$> l
 splitIndexPK (AndColl l ) pk  = fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPK  i pk ) <$> l
-splitIndexPK (PrimColl (p@(IProd _ [i]),op) ) pk  = if elem i  pk  then Just (PrimColl (p,op)) else Nothing
-splitIndexPK (PrimColl (p@(IProd _ l),op) ) pk  = Nothing --errorWithStackTrace (show (l,op,pk))
+splitIndexPK (PrimColl (p@(IProd _ i),op) ) pk  = if elem i  pk  then Just (PrimColl (p,op)) else Nothing
+-- splitIndexPK (PrimColl (p@(IProd _ l),op) ) pk  = Nothing --errorWithStackTrace (show (l,op,pk))
 splitIndexPK i  pk  = Nothing -- errorWithStackTrace (show (i,pk))
 
 splitIndexPKB :: Eq k => BoolCollection (Access k ,AccessOp Showable) -> [k] -> Maybe (BoolCollection (Access k , AccessOp Showable))
@@ -205,7 +205,7 @@ splitIndexPKB  (OrColl l ) pk  = if F.all (isNothing .snd) al then Nothing else 
     where
       al = (\l -> (l,splitIndexPKB  l pk ) )<$> l
 splitIndexPKB  (AndColl l ) pk  = fmap AndColl $ nonEmpty $ catMaybes $ (\i -> splitIndexPKB  i pk ) <$> l
-splitIndexPKB  (PrimColl (p@(IProd _ [i]),op) ) pk  = if not (elem i  pk)  then Just (PrimColl (p,op)) else Nothing
+splitIndexPKB  (PrimColl (p@(IProd _ i),op) ) pk  = if not (elem i  pk)  then Just (PrimColl (p,op)) else Nothing
 splitIndexPKB  i  pk  = Just i
 
 
@@ -218,7 +218,7 @@ splitIndex (AndColl l ) pk f = if F.all (isNothing .snd) al then Nothing else Ju
     where
       al = (\l -> (l,splitIndex  l pk f) )<$> l
 splitIndex (OrColl l ) pk f = fmap OrColl $ nonEmpty $ catMaybes $ (\i -> splitIndex  i pk f) <$> l
-splitIndex (PrimColl (p@(IProd _ [i]),op) ) pk (Idex v ) = maybe (Just (PrimColl (p,op))) (splitPred (PrimColl (p,op))) ((v !!) <$>  (L.elemIndex i pk ))
+splitIndex (PrimColl (p@(IProd _ i),op) ) pk (Idex v ) = maybe (Just (PrimColl (p,op))) (splitPred (PrimColl (p,op))) ((v !!) <$>  (L.elemIndex i pk ))
 splitIndex i  k j = Just i
 
 splitPred :: (Eq k ,Show k) => BoolCollection (Access k,AccessOp Showable) ->  FTB Showable -> Maybe (BoolCollection (Access k,AccessOp Showable)  )
@@ -285,13 +285,13 @@ instance ( Predicates (FTB v)) => Predicates (TBIndex v ) where
       -- Index the field and if not found return true to row filtering pass
       go (AndColl l) = F.all go l
       go (OrColl l ) = F.any go  l
-      go (PrimColl (IProd _ [i],op)) = maybe True (match op .Right)  (v `atMay` i)
+      go (PrimColl (IProd _ i,op)) = maybe True (match op .Right)  (v `atMay` i)
   match (WherePredicate a)  (Left (TBIndexNode v)) = go a
     where
       -- Index the field and if not found return true to row filtering pass
       go (AndColl l) = F.all go l
       go (OrColl l ) = F.any go  l
-      go (PrimColl (IProd _ [i],op)) = maybe True (match op . node )  (v `atMay` i)
+      go (PrimColl (IProd _ i,op)) = maybe True (match op . node )  (v `atMay` i)
       node :: Node (FTB v) -> Either (Node (FTB v )) (FTB v)
       node i = Left i
 
@@ -360,7 +360,7 @@ data PathTID
 
 indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Access k ,AccessOp a) -> TBData k a-> Maybe (AttributePath k ())
 -- indexPredIx (Many i,eq) a= traverse (\i -> indexPredIx (i,eq) a) i
-indexPredIx (n@(Nested k@(IProd _ [key]) nt ) ,eq) r
+indexPredIx (n@(Nested [(IProd _ key)] nt ) ,eq) r
   = case  indexField n r of
     Nothing -> Nothing
     Just i ->  fmap (PathInline key) $ recPred $ indexPredIx (nt , eq ) <$> _fkttable  i
@@ -369,7 +369,7 @@ indexPredIx (n@(Nested k@(IProd _ [key]) nt ) ,eq) r
     recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
     recPred (ArrayTB1 i) = fmap (ManyPath . Non.fromList ) $ nonEmpty $ catMaybes $ F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
     recPred i = errorWithStackTrace (show i)
-indexPredIx (a@(IProd _ [key]),eq) r =
+indexPredIx (a@(IProd _ key),eq) r =
   case indexField a r of
     Nothing ->  Nothing
     Just (Attr _ rv) ->

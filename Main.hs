@@ -16,6 +16,7 @@ import TP.QueryWidgets(lookAttr')
 import System.Process (rawSystem)
 import Poller
 import Postgresql.Backend (connRoot)
+import Plugins (plugList)
 import Prelude hiding (head)
 import Control.Monad.Reader
 import Control.Concurrent
@@ -23,7 +24,6 @@ import System.Environment
 import Utils
 import Schema
 import Plugins.Schema
-import Plugins
 
 import RuntimeTypes
 import Reactive.Threepenny
@@ -49,20 +49,17 @@ main = do
   print "Load Metadata"
   (metas ,lm)<- runDynamic $keyTablesInit  smvar ("metadata", T.pack $ user db) amap []
 
-  -- print "Load Plugins"
-  -- plugList <- plugListM
 
-  -- print "Loaded Plugins"
-  -- mapM (print ._name) plugList
 
-  regplugs <- plugs smvar amap db plugList
   print "Start Server"
   (ref ,ls)<- runDynamic $ addServer metas
 
-
-  (_,pfin) <- runDynamic $ do
+  print "Load Plugins"
+  (plugListLoad,pfin) <- runDynamic $ do
     keyTablesInit  smvar ("code", T.pack $ user db) amap []
-    addPlugins  smvar
+    addPlugins  plugList smvar
+
+  regplugs <- plugs smvar amap db plugListLoad
 
   print "Load Polling Process"
   poller smvar amap db regplugs False

@@ -163,6 +163,7 @@ postgresPrim =
   ,("pdf",PMime "application/pdf")
   ,("ofx",PMime "application/x-ofx")
   ,("gpx",PMime "application/gpx+xml")
+  ,("xml",PMime "text/xml")
   ,("jpg",PMime "image/jpg")
   ,("png",PMime "image/png")
   ,("email",PMime "text/plain")

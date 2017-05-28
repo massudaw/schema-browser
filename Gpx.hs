@@ -1,6 +1,6 @@
-{-# LANGUAGE Arrows, TupleSections,OverloadedStrings ,NoMonomorphismRestriction #-}
+{-# LANGUAGE FlexibleContexts,Arrows, TupleSections,OverloadedStrings ,NoMonomorphismRestriction #-}
 module Gpx
-  (gpx,readArt,readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readSiapi3AndamentoAJAX,readHtmlReceita,readHtml) where
+  (gpx,readArt,readNota,readCpfName,readCreaHistoricoHtml,readInputForm,readSiapi3Andamento,readSiapi3AndamentoAJAX,readHtmlReceita,readHtml) where
 
 import Types
 import Types.Patch
@@ -119,6 +119,33 @@ testSiapi2 = do
   kk <- BS.readFile "Consulta Solicitação.html"
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
   putStrLn . unlines . fmap concat . concat =<< readHtml inp
+
+readTestNota = do
+  kk <- BS.readFile "test-nota.xml"
+  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  NotaFiscal <$> readNota inp
+
+data NotaFiscal
+   = NotaFiscal
+   { --  notaId :: Int
+   -- , notaDate :: LocalTime
+    notaValores :: [(String,Double)]
+   }deriving(Show)
+
+readNota inp = do
+  let
+      txt = trim ^<< hasText ( not .all (`elem` " *\160\t\r\n")) >>>  getText
+      arr = readString [withValidate no,withWarnings no,withParseHTML yes] inp
+        >>> atTag "servico" >>> atTag "valores" >>> getChildren
+            >>> listA (
+              proc i -> do
+                n <- getName -< i
+                v <- deep getText -< i
+                returnA -< ((n,) <$> (readMay (traceShowId  v) :: Maybe Double)))
+  l <- runX arr
+  return $ catMaybes (concat  l)
+
+
 
 
 testReceita = do

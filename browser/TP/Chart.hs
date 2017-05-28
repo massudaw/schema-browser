@@ -67,7 +67,7 @@ chartWidgetMetadata inf = do
   let
 
       schId = int (schemaId inf)
-      schemaPred = [(keyRef ["schema"],Left (schId,Equals))]
+      schemaPred = [(keyRef "schema",Left (schId,Equals))]
 
   ui$ do
       (_,(_,emap )) <-transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
@@ -80,14 +80,14 @@ chartWidgetMetadata inf = do
             Just (TB1 (SText tname)) = unSOptional' $  _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
             table = lookTable inf tname
             tablId = int (tableUnique table)
-            Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"metrics" $ keyRef ["metrics"]) e
-            Just (Attr _ chart)= indexField (liftAccess (meta inf )"metrics" $ keyRef ["chart_type"]) e
-            -- Just (Attr _ (ArrayTB1 timefields ))= indexField (liftAccess (meta inf )"event" $ keyRef ["event"]) e
-            timeFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "event" $ keyRef ["event"])  <$> G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
-            geoFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "geo" $ keyRef ["geo"])  <$> G.lookup (idex (meta inf) "geo" [("schema" ,schId ),("table",tablId )])  geomap
+            Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"metrics" $ keyRef "metrics") e
+            Just (Attr _ chart)= indexField (liftAccess (meta inf )"metrics" $ keyRef "chart_type") e
+            -- Just (Attr _ (ArrayTB1 timefields ))= indexField (liftAccess (meta inf )"event" $ keyRef "event") e
+            timeFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "event" $ keyRef "event")  <$> G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
+            geoFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "geo" $ keyRef "geo")  <$> G.lookup (idex (meta inf) "geo" [("schema" ,schId ),("table",tablId )])  geomap
             (Attr _ color )= lookAttr' (meta inf) "color" e
             projf  r efield  = M.fromList [("value" ,ArrayTB1 $  attr <$> efield), ("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color )] :: M.Map Text (FTB Showable)
-              where attr  (TB1 (SText field)) = _tbattr $ unTB $justError ("no attr " <> show field) (findAttr [lookKey inf tname field] r)
+              where attr  (TB1 (SText field)) = _tbattr $ unTB $justError ("no attr " <> show field) (findAttr (lookKey inf tname field) r)
             isKInterval (KInterval i) = True
             isKInterval (KOptional i) = isKInterval i
             isKInterval (Primitive i ) = False
