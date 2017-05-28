@@ -65,7 +65,3 @@ prefeituraLoginCookie = "http://www11.goiania.go.gov.br/sistemas/saces/asp/saces
 prefeituraLoginFormUrl ="http://www11.goiania.go.gov.br/sistemas/saces/asp/saces00005a1.asp"
 prefeituraConsutalNota nota = "http://www11.goiania.go.gov.br/sistemas/snfse/asp/snfse00200w0.asp?nota=" <> nota
 
-test = do
-  out <- notaXML "1553542" "1" "denise17" "101"
-  traverse (BSC.writeFile "test-nota.xml") out
-
