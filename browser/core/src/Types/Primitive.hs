@@ -875,8 +875,11 @@ srange l m = IntervalTB1 $ Interval.interval (Interval.Finite l,True) (Interval.
 txt = TB1 . SText
 int = TB1 . SNumeric
 pos = TB1 . SGeo . SPosition
+double = TB1 . SDouble
 timestamp = TB1 .STime . STimestamp
 date = TB1 . STime . SDate
+
+opt i = LeftTB1 .  fmap i
 
 class ConstantGen v where
   generate ::  Constant -> v

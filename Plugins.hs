@@ -764,8 +764,6 @@ checkPrefeituraXML = FPlugins "Check Nota Prefeitura XML" tname $ BoundedPlugin2
       return $ attrT (h,opt double (Just v))
 
 
-opt i = LeftTB1 .  fmap i
-double = TB1 . SDouble
 
 notaPrefeitura = FPlugins "Nota Prefeitura" tname $ BoundedPlugin2 url
   where

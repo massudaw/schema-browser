@@ -407,8 +407,9 @@ tbRecCaseDiff ::  InformationSchema ->  SelPKConstraint  -> Column CoreKey ()
         -> PluginRef  (Column CoreKey Showable) -> Tidings (Maybe (Column CoreKey Showable)) -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
 tbRecCaseDiff inf constr a wl plugItens preoldItems' = do
       let preoldItems = emptyRecTable  a <$> preoldItems'
-      let check = foldl' (liftA2 (\j i ->  liftA2 apply j i <|> j <|> (create <$> i ))) (join . fmap unLeftItens  <$> preoldItems) (fmap (fmap (join . fmap unLeftItensP) . snd) plugItens )
-      TrivialWidget btr bel <- checkedWidget  (isJust <$> check)
+      let check = foldl' (liftA2 (\j i ->  liftA2 apply j i <|> j <|> (create <$> i ))) (preoldItems) ( snd <$> plugItens )
+      TrivialWidget btr open<- checkedWidget  (isJust <$> check)
+      element open
       (ev,h) <- ui $ newEvent
       inipre <- currentValue  (facts preoldItems)
       let fun True = do
@@ -416,12 +417,12 @@ tbRecCaseDiff inf constr a wl plugItens preoldItems' = do
               initpreOldB <- ui $ stepper initpre (rumors preoldItems)
               TrivialWidget btre bel <- tbCaseDiff inf constr a wl plugItens (tidings initpreOldB (rumors preoldItems) )
               ui $ onEventDyn (rumors btre) (liftIO . h )
-              el <- UI.div # set children [bel]
+              el <- UI.div # set children [bel] # set UI.style [("border","1px solid gray")]
               return el
           fun False = do
-              UI.div
-      sub <- UI.div # sink items  (pure .fun <$> facts btr ) # set UI.class_ "row"
-      out <- UI.div # set children [bel,sub]
+            UI.div # set UI.style [("border","1px solid gray")]
+      sub <- UI.div # sink items  (pure .fun <$> facts btr )
+      out <- UI.div # set children [open,sub]
       binipre <- ui $ stepper  Keep ev
       return (TrivialWidget  (tidings binipre ev) out)
 
@@ -1190,6 +1191,7 @@ iUITableDiff inf constr pmods oldItems  (IT na  tb1)
         offsetDiv  <- UI.div
         -- let wheel = fmap negate $ mousewheel offsetDiv
         TrivialWidget offsetT offset <- offsetField (pure 0)  never (maybe 0 (Non.length .unArray) <$> (recoverEditChange <$> oldItems <*> bres))
+        element offset # set UI.class_ "col-xs-2 pull-right label label-default"
         let arraySize = 8
             tdi2  = fmap unArray <$>oldItems
             index o ix v = flip Non.atMay (o + ix)  <$> v
@@ -1198,7 +1200,7 @@ iUITableDiff inf constr pmods oldItems  (IT na  tb1)
               wid <- go constr tb1 (fmap (fmap ((\p -> filterT $ (\ o v -> convertPatchSet (o + ix) <$> v ) <$> offsetT <*>p))) pmods) valix
               lb <- hlabel ["col-xs-1"] # sink UI.text (show . (+ix) <$> facts offsetT )
               paintEditDiff lb (facts (triding wid ))
-              element wid # set UI.class_ "col-xs-11"
+              element wid # set UI.class_ "col-xs-12"
               row <- UI.div # set children [lb,getElement wid]
               return $ TrivialWidget (triding wid) row ) unIndexEl
 
@@ -1265,7 +1267,7 @@ offsetField  initT eve  max = do
   init <- currentValue (facts initT)
   offset <- UI.span# set (attr "contenteditable") "true" #  set UI.style [("width","50px")]
   leng <- UI.span # sink text (("/" ++) .show  <$> facts max )
-  offparen <- UI.div # set children [offset,leng] # set UI.style [("border","2px solid black"),("margin-left","4px") , ("margin-right","4px"),("text-align","center")]
+  offparen <- UI.div # set children [offset,leng] # set UI.style [("margin-left","4px") , ("margin-right","4px"),("text-align","center")]
 
   offsetEnter <- UI.onChangeE offset
   we <- UI.mousewheel offparen
@@ -1513,11 +1515,12 @@ fkUITableDiff inf constr preplmods  wl preoldItems  tb@(FKT ifk rel  (ArrayTB1 (
            TrivialWidget tr el<-  fkUITableDiff inf constr (fmap (\i ->  filterT $ (unIndexItensP  ix )<$> offsetT <*> i) <$> plmods) wl oix fkst
            lb <- hlabel ["col-xs-1"] # sink UI.text (show . (+ix) <$> facts offsetT )
            paintEditDiff lb (facts tr)
-           element el # set UI.class_ "col-xs-11"
+           element el # set UI.class_ "col-xs-12"
            TrivialWidget tr <$> UI.div # set UI.children [lb,el]
      fks <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],(pure True))) [0..arraySize -1 ]
 
      element dv # set children (getElement <$> fks)
+     element offset # set UI.class_ "col-xs-2 pull-right label label-default"
 
      let
           widgets2 = Tra.sequenceA (  zipWith (\i j -> (i,) <$> j) [0..] $( triding <$> fks) )

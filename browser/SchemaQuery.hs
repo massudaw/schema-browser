@@ -144,7 +144,7 @@ applyBackend (PatchRow p@(m,pk@(G.Idex pki),i)) = do
    (sidx,v,_,_) <- liftIO $ atomically $ readState (WherePredicate (AndColl []),keyFastUnique <$> _kvpk m) (mapTableK keyFastUnique table ) ref
    let oldm = mapKey' (recoverKey inf ) <$>  G.lookup pk v
    old <- maybe (do
-     (_,(i,o)) <- selectFrom (_kvname m) Nothing Nothing [] (WherePredicate (AndColl ((\(k,o) -> PrimColl (IProd Nothing k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk m) pki)))
+     (_,(i,o)) <- selectFrom (_kvname m) Nothing Nothing [] (WherePredicate (AndColl ((\(k,o) -> PrimColl (keyRef k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk m) pki)))
      return $ L.head $ G.toList o
         ) return oldm
    if isJust (diff old  (apply old p))
@@ -243,6 +243,9 @@ getFKRef inf predtop rtable (evs,me,old) v (Path ref (FunctionField a b c)) = do
       where
         r =  evaluate a b funmap c (m,i)
   return (evs,me >=> addAttr ,old <> ref )
+getFKRef inf predtop rtable (evs,me,old) v (Path ref (RecJoin i j )) = do
+  return (evs,me,old)
+
 
 
 getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  do
@@ -261,7 +264,7 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                                       removeArray (KArray i)  (AnyOp o) = o
                                       removeArray i  o = o
                                    in  fmap WherePredicate (go (test (_relOrigin <$> i)) l)
-                let refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap ( (\i->PrimColl (IProd notNull (_relTarget $ k) ,Left (i,Flip $ _relOperator k)))) . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v
+                let refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap ( (\i->PrimColl (keyRef(_relTarget $ k) ,Left (i,Flip $ _relOperator k)))) . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v
                     predm =(refs <> predicate predtop)
                 (ref,tb2) <- case refs of
                   Just refspred-> do
@@ -430,7 +433,7 @@ childrenRefsUnique  inf table (sidxs,base) (FKJoinTable rel j ,evs)  =  concat $
                   Just idx -> concat $ conv <$> resIndex idx
                   Nothing -> concat $ conv <$> resScan base
                   where
-                    predK = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (IProd Nothing o  , Left (fromJust $ unSOptional' $fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
+                    predK = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (keyRef o  , Left (fromJust $ unSOptional' $fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
                     predKey =  mapPredicate keyFastUnique predK
                     pred =  mapPredicate (\o -> justError "no pk" $ L.elemIndex o (fmap _relOrigin rel)) predK
                     resIndex idx = G.query pred idx
@@ -718,7 +721,7 @@ fullInsert' (k1,v1) = do
         i@(Just (TableModification _ _ tb))  <- insertFrom  ret
         tell (maybeToList i)
         return $ createRow tb) (\e -> do
-          let pred = WherePredicate (AndColl ((\(k,o) -> PrimColl (IProd Nothing k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk k1) pki))
+          let pred = WherePredicate (AndColl ((\(k,o) -> PrimColl (keyRef k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk k1) pki))
               G.Idex pki = G.getIndex ret
           (_,(_,l)) <- tableLoader  tb Nothing Nothing []  pred
           liftIO$ putStrLn $ "failed insertion: "  ++ (show e)
@@ -885,8 +888,8 @@ loadFK table (Path ori (FKInlineTable to ) )   = do
 loadFK  _ _ = return Nothing
 
 refTables' inf table page pred = do
-        (ref,res)  <-  transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
-        return (idxTid ref,res,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
+    (ref,res)  <-  transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
+    return (idxTid ref,res,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
 
 
 refTables inf table = refTables' inf table Nothing mempty

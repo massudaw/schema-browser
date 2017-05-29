@@ -86,6 +86,7 @@ instance KeyString Text where
 
 instance Eq a => Monoid (Access a ) where
   mempty = Many []
+  mappend (ISum j) (ISum i) = ISum (i <> j)
   mappend (Many j) (Many i) = Many (i <> j)
   mappend y@(Nested i l ) z@(Nested j m)
     | i == j = Nested i (mappend l m)

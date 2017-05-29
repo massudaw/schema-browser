@@ -4,7 +4,7 @@ module Postgresql.Parser where
 
 import qualified Data.HashMap.Strict as HM
 import Data.Map (Map)
-import Types hiding (Parser)
+import Types hiding (Parser,double)
 import Postgresql.Types
 import Text
 import Postgresql.Printer
