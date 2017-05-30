@@ -3,6 +3,7 @@ module Text where
 import Types
 import Types.Patch
 import qualified NonEmpty as Non
+import Data.Hashable
 import Data.Ord
 import Control.Monad
 import Utils
@@ -59,11 +60,11 @@ renderPrimPatch i = [(0,renderPrim  i)]
 
 renderAttr :: TB Identity Key Showable ->  [(Int,String)]
 renderAttr (FKT k rel v )
-  = [(0,L.intercalate " AND " (fmap renderRel rel))]
-  ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderAttr . unTB <$> F.toList (_kvvalues k)) ++ "] => ")]
-  ++ fmap (first (+1)) (renderFTB renderTable v)
-renderAttr (Attr k v ) = [(0,show k ++ " => " ++ ident (renderFTB renderPrimPatch v))]
-renderAttr (IT k v ) = [(0,show k ++ " => ")] ++ fmap (first (+1)) (renderFTB renderTable v)
+  = maybe [] (\i -> [(0,L.intercalate " AND " (fmap renderRel rel))]
+  ++ [(0,"[" ++ L.intercalate ","  i  ++ "] => ")] ++ fmap (first (+1)) (renderFTB renderTable v)) $ nonEmpty (concat $ fmap snd .renderAttr . unTB <$> F.toList (_kvvalues k))
+
+renderAttr (Attr k v ) = maybe [] (\i -> [(0,show k ++ " => " ++ ident i)]) (nonEmpty $ renderFTB renderPrimPatch v)
+renderAttr (IT k v ) = maybe [] (\i -> [(0,show k ++ " => ")] ++ fmap (first (+1)) i  ) $  nonEmpty (renderFTB renderTable v)
 
 renderFTBPatch :: (a -> [(Int,String)]) -> PathFTB a -> [(Int,String)]
 renderFTBPatch f (PAtom i) = f i
@@ -104,7 +105,7 @@ renderPrim (STime i)
     SDate a -> show a
     SDayTime a -> show a
     SPInterval a -> show a
-renderPrim (SBinary _) = show "<Binary>"
+renderPrim (SBinary i) = "Binary= " ++ show (hash i )
 renderPrim (SDynamic s) = renderShowable s
 renderPrim (SGeo o ) = renderGeo o
 renderPrim i = show i

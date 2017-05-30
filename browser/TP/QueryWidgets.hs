@@ -143,8 +143,8 @@ pluginUI
     -> UI (Element ,(Access Key,Tidings (Maybe (Index (TBData CoreKey Showable)))))
 pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
   let
-      fresh :: [([VarDef],[VarDef])]
-      fresh = fmap fst ac
+    fresh :: [([VarDef],[VarDef])]
+    fresh = fmap fst ac
   b <- flabel # set UI.text (T.unpack n)
   inf <- liftIO $  foldl' (\i (kn,kty) -> (\m -> createFresh  tname m kn kty) =<< i ) (return  oinf) (concat $ fmap fst fresh <> fmap snd fresh )
   let
@@ -315,13 +315,14 @@ labelCaseDiff inf a wid = do
     hl <- UI.div # set children [l,tip,patch]
     el <- UI.div #
       set children [hl,getElement wid]
-    {- bh <- stepper False (hoverTip2 l hl)
-    element patch #
-      sink text (liftA2 (\bh -> if bh then id else const "") bh (facts $ fmap ( show . join) $ liftA2 diff <$> triding wid <*> old)) #
-      sink0 UI.style (noneShow <$> bh)
-    element tip #
-      set text (show $ fmap showKey  <$> keyattri a) #
-      sink0 UI.style (noneShow <$> bh)-}
+    ht <- hoverTip2 l hl
+    bh <- ui $ stepper False ht
+    element patch
+      # sink text (liftA2 (\bh -> if bh then id else const "") bh (facts $ fmap  show $ (triding wid)))
+      # sink0 UI.style (noneShow <$> bh)
+    element tip
+      # set text (show $ fmap showKey  <$> keyattri a)
+      # sink0 UI.style (noneShow <$> bh)
     paintEditDiff l (facts (triding wid ))
     return $ TrivialWidget (triding wid) el
 
@@ -698,9 +699,11 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
                                       # set UI.text h
                                       # set UI.class_ "col-xs-4"
                             out <- UI.mkElement "textarea"
-                                      #  sink UI.value s
-                                      # set UI.style [("height","300px")]
+                                      # set (UI.strAttr "onkeyup") "textAreaAdjust(this)"
+                                      # set UI.style [("max-height","300px")]
                                       # set UI.class_ "col-xs-4"
+                            onChanges s (\v ->  do
+                              element out # set UI.value v # method  "textAreaAdjust(%1)")
                             return (header,out)
                       out <- mapM gen
                           [("Last", maybe "" (ident . renderTable) <$> facts oldItemsi)
@@ -713,7 +716,8 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   return (out, fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffMerge,diffDel] )
 
 
-
+method s i = do
+  i >>= runFunction . ffi s
 
 showFKText v = (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v)
 showFKE v =  UI.div # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v) # set UI.class_ "fixed-label"
@@ -848,10 +852,11 @@ buildUIDiff km i  plug tdi = go i plug tdi
                   wid <- go ti plugix valix
                   lb <- hlabel ["col-xs-1"] # sink UI.text (show . (+ix) <$> facts offsetT )
                   paintEditDiff lb (facts (triding wid ))
-                  element wid # set UI.class_ "col-xs-11"
+                  element wid # set UI.class_ "col-xs-12"
                   row <- UI.div # set children [lb,getElement wid]
                   return $ TrivialWidget (triding wid) row ) unIndexEl
 
+            element offset # set UI.class_ "label label-default pull-right col-xs-2"
             widgets <- fst <$> foldl' (\i j -> dyn j =<< i ) (return ([],pure True)) [0..arraySize -1 ]
             let
               widgets2 = Tra.sequenceA (zipWith (\i j -> (i,) <$> j) [0..] ( triding <$> widgets) )
@@ -1133,7 +1138,7 @@ buildPrim fm tdi i = case i of
     oneInput :: Tidings (Maybe Showable) -> [Element] ->  UI (TrivialWidget (Maybe Showable))
     oneInput tdi elem = do
             v <- currentValue (facts tdi)
-            inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("width","70%")] -- # if [FRead] == fm then (set (UI.strAttr "readonly") "") else id
+            inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("width","100%")] -- # if [FRead] == fm then (set (UI.strAttr "readonly") "") else id
             onCE <- UI.onChangeE inputUI
 
             let pke = unionWith const (readPrim i <$> onCE ) (rumors tdi)
@@ -1484,7 +1489,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
       let
           evsel = unionWith const (unionWith const elsel eledit) (const Keep <$> rumors oldItems)
       blsel <- ui$ stepper Keep evsel
-      element pan#  sink text (maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' . unTB1 . _fkttable )  <$>  (recoverEditChange <$> facts oldItems <*>blsel)) # set UI.style [("border","1px solid gray"),("height","20px")]
+      element pan#  sink text (maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' . unTB1 . _fkttable )  <$>  (recoverEditChange <$> facts oldItems <*>blsel)) # set UI.style [("border","1px solid gray"),("border-radius","4px"),("height","20px")]
       selEls <- mapUIFinalizerT top selector  (tidings bh  eh)
       subnet <- UI.div  # sink children (facts selEls)
       subnet2 <- edit

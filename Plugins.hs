@@ -739,7 +739,7 @@ notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ BoundedPlugin2 url
                                p <- varTB "goiania_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act (fmap join  . traverse (\(i, (j, k,a)) -> liftIO$ prefeituraNotaXML j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ tblist [attrT ("nota_xml",    LeftTB1 $ fmap  TB1  b)]
+      let ao =  Just $ tblist [attrT ("nota_xml",    LeftTB1 $ fmap  (LeftTB1 . Just .TB1)  b)]
       returnA -< ao
 
 checkPrefeituraXML = FPlugins "Check Nota Prefeitura XML" tname $ BoundedPlugin2 url
@@ -779,7 +779,7 @@ notaPrefeitura = FPlugins "Nota Prefeitura" tname $ BoundedPlugin2 url
                                p <- varTB "goiania_password"-< t
                                returnA -< liftA3 (, , ) n u p  ) -< t
       b <- act (fmap join  . traverse (\(i, (j, k,a)) -> liftIO$ prefeituraNota j k a i ) ) -< liftA2 (,) i r
-      let ao =  Just $ tblist [attrT ("nota",    LeftTB1 $ fmap  TB1  b)]
+      let ao =  Just $ tblist [attrT ("nota",    LeftTB1 $ fmap  (LeftTB1 . Just . TB1)  b)]
       returnA -< ao
 
 queryArtCreaData = FPlugins "Art Crea Data" tname $ BoundedPlugin2 url

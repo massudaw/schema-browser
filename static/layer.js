@@ -2,6 +2,11 @@ google.charts.load("current", {packages:["timeline"]});
 google.charts.load("current", {packages:['corechart']});
 
 
+function textAreaAdjust(o) {
+  o.style.height = "1px";
+  o.style.height = (25+o.scrollHeight)+"px";
+}
+
 function updateColor(el,c){
   el._jscLinkedInstance.fromString(c);
 }

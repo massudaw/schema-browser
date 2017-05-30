@@ -59,6 +59,7 @@ library
    , hinotify
    , deepseq
    , ordered
+   , hashable
    , exceptions
    -- Postgresql Backend
    , blaze-builder
