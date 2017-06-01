@@ -136,12 +136,14 @@ indexFilterPatch ((Nested l n) ,op)  (_,_,lo) =
   case L.find ((Set.fromList (iprodRef <$> l) == ).Set.map _relOrigin . pattrKey) lo of
     Just i ->
       case i of
-        PInline k f -> L.any (indexFilterPatch (n,op)) f
-        PFK _  _ f -> L.any (indexFilterPatch (n,op)) f
+        PInline k f -> L.any (indexFilterPatchU (n,op)) f
+        PFK _  _ f -> L.any (indexFilterPatchU (n,op)) f
         i -> True
     Nothing -> True
-indexFilterPatch (Many [n],op) o = indexFilterPatch (n,op) o
 indexFilterPatch i o= errorWithStackTrace (show (i,o))
+
+indexFilterPatchU :: (Show k,Ord k) => (Union (Access k) ,Either (FTB Showable,BinaryOperator) UnaryOperator) -> TBIdx k Showable -> Bool
+indexFilterPatchU (Many [n],op) o = indexFilterPatch (n,op) o
 
 unIndexItensP :: (Show (KType k),Show a) =>  Int -> Int -> Maybe (PathAttr (FKey (KType k)) a) -> Maybe (Maybe (PathAttr (FKey (KType k) ) a ))
 unIndexItensP ix o =  fmap (unIndexP (ix+ o) )

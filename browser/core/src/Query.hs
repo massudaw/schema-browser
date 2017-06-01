@@ -400,9 +400,10 @@ isLeftRel (Inline i ) =  isKOptional (keyType i)
 isLeftRel (RelAccess i j ) =  isKOptional (keyType i) || isLeftRel j
 
 
+liftASchU inf s tname (ISum i) =  ISum $ fmap (liftASch inf s tname)  i
+liftASchU inf s tname (Many i) =  Many $ fmap (liftASch inf s tname)  i
+
 liftASch :: TableMap  -> Text -> Text -> Access Text  -> Access Key
-liftASch inf s tname (ISum i) =  ISum $ fmap (liftASch inf s tname)  i
-liftASch inf s tname (Many i) =  Many $ fmap (liftASch inf s tname)  i
 liftASch inf s tname (IProd b l) = IProd b $ lookKey  l
   where
     tb = lookup tname $  lookup s inf
@@ -410,7 +411,7 @@ liftASch inf s tname (IProd b l) = IProd b $ lookKey  l
     lookKey c = i
       where
         i = justError "no attr" $ L.find ((==c).keyValue ) (tableAttrs tb)
-liftASch inf s tname (Nested i c) = Nested ref (liftASch inf (fst l ) (snd l) c)
+liftASch inf s tname (Nested i c) = Nested ref (liftASchU inf (fst l ) (snd l) c)
   where
     ref = liftASch inf s tname <$> i
     lookup i m = justError ("no look" <> show i) $ HM.lookup i m

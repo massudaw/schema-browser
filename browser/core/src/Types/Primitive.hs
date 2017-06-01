@@ -382,7 +382,7 @@ data TableType
 type Table = TableK Key
 
 
-mapTableK f (Raw  uni s tt tr de is rn  un idx ra rsc rp rd rf inv rat ) = Raw uni s tt tr (S.map f de) is rn (fmap (fmap f) un) (fmap (fmap f) idx) ra (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf )(S.map (mapPath f )  inv) (S.map f rat)
+mapTableK f (Raw  uni s tt tr de is rn  un idx rsc rp rd rf rat ) = Raw uni s tt tr (S.map f de) is rn (fmap (fmap f) un) (fmap (fmap f) idx) (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf ) (S.map f rat)
   where mapPath f (Path i j ) = Path (S.map f i) (fmap f j)
 mapTableK f (Project t tr) = Project (mapTableK f t) (mapTransform f tr)
 
@@ -395,22 +395,24 @@ instance Eq (TableK k) where
 instance Ord (TableK k) where
   compare i j = compare (tableUnique i) (tableUnique j)
 
+rawIsSum (Project i  _ ) = __rawIsSum i
+rawIsSum i = __rawIsSum i
+
+
 data TableK k
   =  Raw   { tableUniqueR :: Int
            ,_rawSchemaL :: Text
            , rawTableType :: TableType
            , rawTranslation :: Maybe Text
            , rawDelayed :: (Set k)
-           , rawIsSum :: Bool
+           , __rawIsSum :: Bool
            , _rawNameL :: Text
            , uniqueConstraint :: [[k]]
            , _rawIndexes ::  [[k]]
-           , rawAuthorization :: [Text]
            , _rawScope :: [k]
            , _rawPKL :: [k]
            , _rawDescriptionL :: [k]
            , _rawFKSL ::  (Set (Path (Set k) (SqlOperationK k )))
-           , _rawInvFKS ::  (Set (Path (Set k) (SqlOperationK k)))
            , _rawAttrsR :: (Set k)
            }
      | Project  (TableK k)  (TableTransform  k)

@@ -83,9 +83,9 @@ instance A.ToJSON Showable where
     toJSON (SGeo o) = A.toJSON o
     toJSON i = A.toJSON (renderPrim i)
 
+indexTyU (Many [k] )= indexTy k
 indexTy (IProd _ k )=  keyType k
-indexTy (Many [k] )= indexTy k
-indexTy (Nested [IProd _ xs] n) = nestTy (keyType xs) (indexTy n)
+indexTy (Nested [IProd _ xs] n) = nestTy (keyType xs) (indexTyU n)
     where
       nestTy (KOptional k) (KOptional n) = KOptional (nestTy k n)
       nestTy (KOptional k) n = KOptional (nestTy k n)

@@ -360,7 +360,7 @@ data PathTID
 
 indexPredIx :: (Show k ,ShowableConstr a , Show a,Ord k) => (Access k ,AccessOp a) -> TBData k a-> Maybe (AttributePath k ())
 -- indexPredIx (Many i,eq) a= traverse (\i -> indexPredIx (i,eq) a) i
-indexPredIx (n@(Nested [(IProd _ key)] nt ) ,eq) r
+indexPredIx (n@(Nested [(IProd _ key)] (Many[nt]) ) ,eq) r
   = case  indexField n r of
     Nothing -> Nothing
     Just i ->  fmap (PathInline key) $ recPred $ indexPredIx (nt , eq ) <$> _fkttable  i
@@ -383,8 +383,8 @@ indexPredIx i v= errorWithStackTrace (show (i,v))
 
 
 indexPred :: (Show k ,ShowableConstr a , Show a,Ord k) => (Access k ,AccessOp a) -> TBData k a-> Bool
-indexPred (Many i,eq) a= all (\i -> indexPred (i,eq) a) i
-indexPred (n@(Nested k nt ) ,eq) r
+-- indexPred (Many i,eq) a= all (\i -> indexPred (i,eq) a) i
+indexPred (n@(Nested k (Many[nt]) ) ,eq) r
   = case  indexField n r of
     Nothing -> False
     Just i ->  recPred $ indexPred (nt , eq ) <$> _fkttable  i

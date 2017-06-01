@@ -46,9 +46,9 @@ instance Monoid (WherePredicateK k) where
 data Parser m s a b = P (s,s) (m a b) deriving Functor
 
 type ArrowReader  = ArrowReaderM IO
-type PluginTable v = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) Identity)) (Access Text) () v
+type PluginTable v = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) Identity)) (Union (Access Text)) () v
 
-type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Access Text) () (Maybe (TBData  Text Showable))
+type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Union (Access Text)) () (Maybe (TBData  Text Showable))
 
 deriving instance Functor m => Functor (Kleisli m i )
 
@@ -84,16 +84,15 @@ instance KeyString Key where
 instance KeyString Text where
   keyString = id
 
-instance Eq a => Monoid (Access a ) where
+instance Eq a => Monoid (Union a ) where
   mempty = Many []
   mappend (ISum j) (ISum i) = ISum (i <> j)
   mappend (Many j) (Many i) = Many (i <> j)
-  mappend y@(Nested i l ) z@(Nested j m)
-    | i == j = Nested i (mappend l m)
-    | otherwise = Many [ y,z]
-  mappend i j@(Many _) = mappend (Many [i]) j
-  mappend j@(Many _) i  = mappend j (Many [i])
-  mappend i j = mappend (Many [i]) (Many [j])
+
+instance Applicative Union where
+  pure i = Many [i]
+  Many f <*> Many a = Many (zipWith ($) f a)
+
 
 instance (Monoid s ,Applicative (a i)) => Applicative (Parser a s i) where
   pure i = P mempty (pure i)

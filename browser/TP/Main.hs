@@ -114,7 +114,7 @@ setup smvar args plugList w = void $ do
       kitems = F.toList (pkMap inf)
       schId = int $ schemaId inf
       initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> HM.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
-      lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested [keyRef "selection"] (keyRef "table")) iv
+      lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested [keyRef "selection"] (pure $ keyRef "table")) iv
                  in fmap (\(TB1 (SText t)) -> t) . traceShowId .unArray  <$> join (fmap unSOptional' i)
 
     cliIni <- currentValue (facts cliTid)
@@ -423,8 +423,8 @@ testPlugin s t p  = do
     amap = authMap smvar db ("postgres", "queijo")
   (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
   let (i,o) = pluginStatic p
-  print $ liftAccess inf t i
-  print $ liftAccess inf t o
+  print $ liftAccessU inf t i
+  print $ liftAccessU inf t o
 
 testCalls = testWidget (return $ do
   setCallBufferMode BufferAll

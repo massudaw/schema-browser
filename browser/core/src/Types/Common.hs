@@ -45,6 +45,7 @@ module Types.Common (
     ,Expr (..) , Access(..)
     ,UnaryOperator(..)
     ,Constant(..)
+    ,Union(..)
     ,notNull
     ,keyRef
     ,BinaryOperator(..)
@@ -166,13 +167,18 @@ type TB3Data  f k a = (KVMetadata k,Compose f (KV (Compose f (TB f ))) k a )
 keyRef k = IProd notNull k
 iprodRef (IProd _ l) = l
 
+data Union a
+  = Many [a]
+  | ISum [a]
+  deriving(Show,Eq,Ord,Functor,Foldable,Traversable,Generic)
+
 data Access  a
   = IProd (Maybe UnaryOperator) a
-  | ISum  [Access  a]
-  | Nested [Access  a] (Access  a)
-  | Rec Int (Access  a)
+  -- | ISum  [Access  a]
+  | Nested [Access  a] (Union (Access  a))
+  | Rec Int (Union (Access  a))
   | Point Int
-  | Many [Access a]
+  -- | Many [Access a]
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable,Generic)
 
 data BoolCollection a
@@ -383,6 +389,8 @@ instance Binary k => Binary (KVMetadata k )
 instance NFData k => NFData (KVMetadata k )
 instance (Binary k) => Binary (Access k )
 instance (NFData k) => NFData (Access k )
+instance (Binary k) => Binary (Union k )
+instance (NFData k) => NFData (Union k )
 instance Binary Expr
 instance NFData Expr
 
@@ -564,8 +572,7 @@ keyattr = keyattri . head . F.toList . getCompose
 
 relAccesGen :: Access k -> Rel k
 relAccesGen (IProd i l ) = Inline l
-relAccesGen (Nested [IProd i l] m ) = RelAccess l (relAccesGen m)
-relAccesGen (Many [l]) = relAccesGen l
+relAccesGen (Nested [IProd i l] (Many [m]) ) = RelAccess l (relAccesGen m)
 
 keyattri :: Foldable f => TB f  k  a -> [Rel k]
 keyattri (Attr i  _ ) = [Inline i]

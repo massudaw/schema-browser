@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Host (module Step.Common,attrT,findFK,findAttr,findFKAttr,isNested,findProd,replace,uNest,hasProd,indexField,indexFieldRec,indexer,genPredicate,joinFTB) where
+module Step.Host (module Step.Common,attrT,findFK,findAttr,findFKAttr,isNested,findProd,replace,replaceU,uNest,hasProd,indexField,indexFieldRec,indexer,genPredicate,genPredicateU,joinFTB) where
 
 import Types
 import Control.Applicative.Lift
@@ -53,9 +53,9 @@ findFKAttr l v =   case fmap  (fmap unF )$ L.find (\(k,v) -> not $ L.null $ L.in
       Just (k ,i) -> errorWithStackTrace (show l)
       Nothing -> Nothing
 
+replaceU ix i (Many nt) = Many (fmap (replace ix i) nt )
 
-replace ix i (Nested k nt) = Nested k (replace ix i nt)
-replace ix i (Many nt) = Many (fmap (replace ix i) nt )
+replace ix i (Nested k nt) = Nested k (replaceU ix i nt)
 replace ix i (Point p)
   | ix == p = Rec ix i
   | otherwise = (Point p)
@@ -77,27 +77,29 @@ joinFTB (LeftTB1 i) =  LeftTB1 $ fmap joinFTB i
 joinFTB (ArrayTB1 i) =  ArrayTB1 $ fmap joinFTB i
 joinFTB (TB1 i) =  i
 
+indexFieldRecU p@(ISum l) v = F.foldl' (<|>) Nothing (flip indexFieldRec  v <$> l)
+indexFieldRecU p@(Many [l]) v = indexFieldRec l v
+
 indexFieldRec :: Access Key-> TBData Key Showable -> Maybe (FTB Showable)
-indexFieldRec p@(ISum l) v = F.foldl' (<|>) Nothing (flip indexFieldRec  v <$> l)
-indexFieldRec p@(Many [l]) v = indexFieldRec l v
 indexFieldRec p@(IProd b l) v = _tbattr . unTB <$> findAttr  l  v
 indexFieldRec n@(Nested l (Many[nt]) ) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK (iprodRef <$> l) v
-indexFieldRec n@(Nested l nt) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK (iprodRef <$> l) v
+indexFieldRec n@(Nested l nt) v = join $ fmap joinFTB . traverse (indexFieldRecU nt)  . _fkttable.  unTB <$> findFK (iprodRef <$> l) v
 indexFieldRec n v = errorWithStackTrace (show (n,v))
 
-genPredicate i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
-genPredicate i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
+genPredicateU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
+genPredicateU i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
+
 genPredicate o (IProd b l) =  (\i -> PrimColl (IProd b l,Right (if o then i else Not i ) )) <$> b
 genPredicate i n@(Nested p  l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> if i then genPredicate i a else  Nothing ) <$> p
 genPredicate _ i = errorWithStackTrace (show i)
 
-genNestedPredicate n i v = fmap (\(a,b) -> (Nested n a , b )) <$> genPredicate i v
+genNestedPredicate n i v = fmap (\(a,b) -> (Nested n (Many [a]) , b )) <$> genPredicate i v
 
-hasProd :: (Access Key -> Bool) -> Access Key ->  Bool
+hasProd :: (Access Key -> Bool) -> Union (Access Key) ->  Bool
 hasProd p (Many i) = any p i
 hasProd p i = False
 
-findProd :: (Access Key -> Bool) -> Access Key -> Maybe (Access Key)
+findProd :: (Access Key -> Bool) -> Union (Access Key) -> Maybe (Access Key)
 findProd p (Many i) = L.find p i
 findProd p i = Nothing
 
@@ -105,7 +107,7 @@ isNested :: [Access Key] -> Access Key -> Bool
 isNested p (Nested l i) = L.sort (iprodRef <$> p) == L.sort (iprodRef <$>l)
 isNested p i =  False
 
-uNest :: Access Key -> Access Key
+uNest :: Access Key -> Union (Access Key)
 uNest (Nested pn i) = i
 
 

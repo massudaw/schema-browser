@@ -140,7 +140,7 @@ pluginUI
     :: InformationSchema
     -> Tidings (Maybe (TBData CoreKey Showable) )
     -> Plugins
-    -> UI (Element ,(Access Key,Tidings (Maybe (Index (TBData CoreKey Showable)))))
+    -> UI (Element ,(Union (Access Key),Tidings (Maybe (Index (TBData CoreKey Showable)))))
 pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
   let
     fresh :: [([VarDef],[VarDef])]
@@ -182,15 +182,15 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
            ) ) (return (([],trinp))) $ zip (fmap snd ac) freshKeys
   el <- UI.div  # set children (b: (fst freshUI))
   let evdiff = fmap join $ liftA2 diff <$>  facts trinp <#> snd freshUI
-  return (el , (liftAccess inf tname  $snd $ pluginStatic' $ snd $ last ac , evdiff ))
+  return (el , (liftAccessU inf tname  $snd $ pluginStatic' $ snd $ last ac , evdiff ))
 
 pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
-  let f =second (liftAccess inf t ). first (liftAccess  inf t ) $ staticP arrow
+  let f =second (liftAccessU inf t ). first (liftAccessU  inf t ) $ staticP arrow
       action = pluginAction   p
-      pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (fst f)])
+      pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (fst f)])
       tdInputPre = join . fmap (\i -> if G.checkPred i pred  then Just i else Nothing) <$>  oldItems
       tdInput = tdInputPre
-      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
+      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (snd f)])
       tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
   headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   ini <- currentValue (facts tdInput )
@@ -198,12 +198,12 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
   pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap ( join .  liftA2 diff v . fmap (liftTable' inf t).  join . eitherToMaybe ). catchPluginException inf (tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
   return (headerP, (snd f ,   pgOut ))
 pluginUI inf oldItems (idp,p@(FPlugins n t (DiffPurePlugin arrow ))) = do
-  let f =second (liftAccess inf t ). first (liftAccess  inf t ) $ staticP arrow
+  let f =second (liftAccessU inf t ). first (liftAccessU  inf t ) $ staticP arrow
       action = pluginActionDiff   p
-      pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (fst f)])
+      pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (fst f)])
       tdInputPre = join . fmap (\i -> if G.checkPred i pred  then Just i else Nothing) <$>  oldItems
       tdInput = tdInputPre
-      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
+      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (snd f)])
       tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
   headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   ini <- currentValue (facts tdInput )
@@ -212,12 +212,12 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (DiffPurePlugin arrow ))) = do
   return (headerP, (snd f ,   pgOut ))
 pluginUI inf oldItems (idp,p@(FPlugins n t (DiffIOPlugin arrow))) = do
   overwrite <- checkedWidget (pure False)
-  let f = second (liftAccess inf t ). first (liftAccess inf t ) $ staticP arrow
+  let f = second (liftAccessU inf t ). first (liftAccessU inf t ) $ staticP arrow
       action = pluginActionDiff p
-      pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (fst f)])
+      pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (fst f)])
       tdInputPre = join . fmap (\i -> if G.checkPred i pred  then Just i else Nothing) <$>  oldItems
       tdInput = tdInputPre
-      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
+      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (snd f)])
       tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
   headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput)  #set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   cliHeader <- UI.click headerP
@@ -232,12 +232,12 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (DiffIOPlugin arrow))) = do
 
 pluginUI inf oldItems (idp,p@(FPlugins n t (BoundedPlugin2 arrow))) = do
   overwrite <- checkedWidget (pure False)
-  let f = second (liftAccess inf t ). first (liftAccess inf t ) $ staticP arrow
+  let f = second (liftAccessU inf t ). first (liftAccessU inf t ) $ staticP arrow
       action = pluginAction p
-      pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (fst f)])
+      pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (fst f)])
       tdInputPre = join . fmap (\i -> if G.checkPred i pred  then Just i else Nothing) <$>  oldItems
       tdInput = tdInputPre
-      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFull True (snd f)])
+      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (snd f)])
       tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
   headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   cliHeader <- UI.click headerP
@@ -252,8 +252,8 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (BoundedPlugin2 arrow))) = do
 
 indexPluginAttrDiff
   :: Column Key ()
-  -> [(Access Key, Tidings (Maybe (Index (TBData Key Showable))))]
-  -> [(Access Key, Tidings (Maybe (Index (Column Key Showable))))]
+  -> [(Union (Access Key), Tidings (Maybe (Index (TBData Key Showable))))]
+  -> [(Union (Access Key), Tidings (Maybe (Index (Column Key Showable))))]
 indexPluginAttrDiff a@(Attr i _ )  plugItens =  evs
   where
     match (IProd _ l ) ( IProd _ f) = l == f
@@ -385,7 +385,7 @@ tbCaseDiff inf _ a@(Attr i _ ) wl plugItens preoldItems = do
 tbCaseDiff inf _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
     search (IProd _ t) = fmap (fmap _tbattr ). uncurry recoverT .snd <$> L.find ((S.singleton t ==) . S.fromList . fmap _relOrigin . keyattri . fst) wl
-    search (Nested t m ) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). uncurry recoverT . snd <$> L.find ((S.fromList (iprodRef <$> t) ==) . S.fromList . fmap _relOrigin .keyattri . fst) wl
+    search (Nested t (Many [m]) ) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). uncurry recoverT . snd <$> L.find ((S.fromList (iprodRef <$> t) ==) . S.fromList . fmap _relOrigin .keyattri . fst) wl
     refs = sequenceA $ catMaybes $ search <$> snd rel
   funinp <- ui$ cacheTidings (fmap _tbattr . preevaluate i (fst rel) funmap (snd rel) <$> refs )
   ev <- buildUIDiff ([FRead])(keyType i) [] funinp
@@ -451,6 +451,12 @@ loadPlugins inf =  do
   return (project <$> F.toList evMap)
 
 
+repl :: Ord k =>Access k-> Union (Access k)
+repl (Rec  ix v ) = replaceU ix v v
+repl v = Many [v]
+traRepl :: Ord k => Union (Access k) -> Union (Access k)
+traRepl i = foldMap repl i
+
 eiTableDiff
   :: InformationSchema
      -> SelPKConstraint
@@ -467,11 +473,8 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
   res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds . snd) (plugins ))
   let
       resdiff =   fmap ( liftA2 (\i j -> (join .liftA2 (\j i@(_,pk,_)   -> if   pk == G.getIndex j then Just i else Nothing ) i $ j ) ) oldItems   ) .  snd <$> res
-      repl (Rec  ix v ) = replace ix v v
-      repl (Many[(Rec  ix v )]) = replace ix v v
-      repl v = v
       srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (unTBMap ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
-      plugmods = first repl <$> (resdiff <> plmods)
+      plugmods = first traRepl <$> (resdiff <> plmods)
   fks :: [(Column CoreKey () ,(TrivialWidget (Editor (Index (Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable))))]  <- foldl' (\jm (l,m)  -> do
             w <- jm
             let el = L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> ( _kvrecrels meta))
@@ -631,37 +634,44 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
               refM = traverse unSOptional' (getPKM ref)
 
 
+  let
+    pred2 =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
+    authPred =  [(keyRef "grantee",Left ( int $ fst $ username inf ,Equals))] <> pred2
+  auth <- fst <$> ui (transaction (meta inf) $ selectFromTable "authorization" Nothing Nothing [] authPred)
+  let authorize =  (\autho -> fmap unArray . unSOptional' . _tbattr .  lookAttr' (meta inf) "authorizations"  =<<  G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ fst $ username inf)]) autho)  <$> collectionTid auth
   -- Insert when isValid
   let insertEnabled = liftA2 (&&) (liftA2 (||) (onDiff isRight False .  fmap patchCheck <$>  inscrudp) (maybe False (isRight . tableCheck  )  <$> inscrud )) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) inscrud gist)
-  insertB <- UI.button# set UI.class_ "btn btn-sm" #
-          set text "INSERT" #
-          set UI.class_ "buttonSet" #
-          -- set UI.style (noneShowSpan ("INSERT" `elem` rawAuthorization table ))  #
-          sinkDiff UI.enabled insertEnabled
+  insertB <- UI.button
+      # set UI.class_ "btn btn-sm"
+      # set text "INSERT"
+      # set UI.class_ "buttonSet"
+      # sink UI.style (noneShowSpan . maybe False (txt "INSERT" `elem`) <$>facts authorize)
+      # sinkDiff UI.enabled insertEnabled
 
   let editEnabled = (\i j k l m -> {-traceShow (i,j,k,l,m)$-} i && j && k && l && m )<$> ((maybe False (isRight . tableCheck  )  )<$> inscrud ) <*> (isJust <$> oldItemsi) <*>   (liftA2 (\i j -> maybe False (flip containsGist j) i ) oldItemsi gist ) <*> (liftA3 (\i k j -> maybe False (\(a,b) -> containsGistNotEqual b a j) (liftA2 (,) k i) ) inscrud oldItemsi gist ) <*> (isDiff <$> inscrudp)
-  editB <- UI.button# set UI.class_ "btn btn-sm" #
-    set text "EDIT" #
-         set UI.class_ "buttonSet"#
-         -- set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table )) #
+  editB <- UI.button
+      # set UI.class_ "btn btn-sm"
+      # set text "EDIT"
+      # set UI.class_ "buttonSet"
+      # sink UI.style (noneShowSpan . maybe False (txt "UPDATE" `elem`) <$>facts authorize)
   -- Edit when any persistent field has changed
-         sinkDiff UI.enabled editEnabled
+      # sinkDiff UI.enabled editEnabled
 
   let mergeEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> inscrud) (liftA2 (\i j -> not . L.null   $ maybe [] (\e -> filter ((/= tableNonRef' e) .tableNonRef') $  conflictGist e j) i  ) (inscrud) (gist ))
-  mergeB <- UI.button# set UI.class_ "btn btn-sm" #
-         set text "MERGE" #
-         set UI.class_ "buttonSet"#
-         set UI.style (noneShowSpan ("UPDATE" `elem` rawAuthorization table )) #
+  mergeB <- UI.button# set UI.class_ "btn btn-sm"
+      # set text "MERGE"
+      # set UI.class_ "buttonSet"
+      # sink UI.style (noneShowSpan . maybe False (txt "UPDATE" `elem`) <$>facts authorize)
   -- Edit when any persistent field has changed
-         sinkDiff UI.enabled mergeEnabled
+      # sinkDiff UI.enabled mergeEnabled
 
   let deleteEnabled = liftA2 (&&) (isJust . fmap tableNonRef' <$> oldItemsi) (liftA2 (\i j -> maybe False (flip containsGist j) i  ) (oldItemsi ) (gist ))
-  deleteB <- UI.button# set UI.class_ "btn btn-sm" #
-         set text "DELETE" #
-         set UI.class_ "buttonSet"#
-         set UI.style (noneShowSpan ("DELETE" `elem` rawAuthorization table )) #
+  deleteB <- UI.button# set UI.class_ "btn btn-sm"
+      #   set text "DELETE"
+      #   set UI.class_ "buttonSet"
+      # sink UI.style (noneShowSpan . maybe False (txt "DELETE" `elem`) <$>facts authorize)
   -- Delete when isValid
-         sinkDiff UI.enabled deleteEnabled
+      #   sinkDiff UI.enabled deleteEnabled
   let
        filterKey enabled k = const () <$> filterApply (const <$> enabled) (k )
        crudMerge :: Maybe (TBData Key Showable)  ->  G.GiST (TBIndex Showable) (TBData Key Showable )-> Dynamic (Maybe (RowPatch Key Showable))
@@ -1218,7 +1228,7 @@ iUITableDiff inf constr pmods oldItems  (IT na  tb1)
         return  $ TrivialWidget  bres composed
 
 
-type PluginRef a = [(Access Key, Tidings (Maybe (Index a)))]
+type PluginRef a = [(Union(Access Key), Tidings (Maybe (Index a)))]
 
 
 mergeFKRef :: [KType a] -> KType [a]

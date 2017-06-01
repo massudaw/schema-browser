@@ -106,9 +106,9 @@ poller schmRef authmap db plugs is_test = do
                   when (is_test || diffUTCTime current start  >  fromIntegral intervalsec) $ do
                       liftIO$ putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let fetchSize = 200
-                          pred =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicate True (fst f) , genPredicate False (snd f)])
-                          predFullIn =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicateFull True (fst f) ])
-                          predFullOut =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicateFull True (snd f) ])
+                          pred =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicateU True (fst f) , genPredicateU False (snd f)])
+                          predFullIn =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicateFullU True (fst f) ])
+                          predFullOut =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicateFullU True (snd f) ])
                       (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  (Just 0) (Just fetchSize) []  pred
                       liftIO$ threadDelay 10000
                       let sizeL = justLook pred  l

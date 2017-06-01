@@ -218,7 +218,7 @@ getFKRef inf predtop rtable (evs,me,old) v (Path r (FKInlineTable  j )) =  do
                                 go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
                                 go pred (PrimColl l) = PrimColl <$> pred l
                                 test f (Nested p (Many[i] ),j)  = if (iprodRef <$> p) == f then Just (i ,j) else Nothing
-                                test f (Nested p i ,j)  = if (iprodRef <$> p) == f then Just (i ,j) else Nothing
+                                -- test f (Nested p i ,j)  = if (iprodRef <$> p) == f then Just (i ,j) else Nothing
                                 test v f = Nothing
                              in  fmap WherePredicate (go (test (S.toList r)) l)
 
@@ -258,7 +258,7 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                                       go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
                                       go pred (PrimColl l) = PrimColl <$> pred l
                                       test f (Nested p (Many[i] ),j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (keyType $ iprodRef $ L.head p))) j) else Nothing
-                                      test f (Nested p i ,j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (keyType $ iprodRef $ L.head p))) j) else Nothing
+                                      -- test f (Nested p i ,j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (keyType $ iprodRef $ L.head p))) j) else Nothing
                                       test v f = Nothing
                                       removeArray (KOptional i)  o = removeArray i o
                                       removeArray (KArray i)  (AnyOp o) = o
@@ -708,7 +708,7 @@ createRow (PatchRow i) = create i
 fullInsert = Tra.traverse fullInsert'
 
 fullInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
-fullInsert' v | traceShow ("fullInsert",v) False = undefined
+-- fullInsert' v | traceShow ("fullInsert",v) False = undefined
 fullInsert' (k1,v1) = do
    inf <- ask
    let proj = _kvvalues . unTB
@@ -783,7 +783,7 @@ transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
   return md
 
 fullDiffEditInsert :: TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-fullDiffEditInsert old@((k1,v1) ) (k2,v2)  | traceShow ("fullDiffEditInsert",v1,v2) False = undefined
+-- fullDiffEditInsert old@((k1,v1) ) (k2,v2)  | traceShow ("fullDiffEditInsert",v1,v2) False = undefined
 fullDiffEditInsert old@((k1,v1) ) (k2,v2) = do
    inf <- ask
    let proj = _kvvalues . unTB
@@ -795,7 +795,7 @@ fullDiffEditInsert old@((k1,v1) ) (k2,v2) = do
 
 
 fullDiffEdit :: TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
-fullDiffEdit old@((k1,v1) ) (k2,v2)  | traceShow ("fullDiffEditInsert",v1,v2) False = undefined
+-- fullDiffEdit old@((k1,v1) ) (k2,v2)  | traceShow ("fullDiffEditInsert",v1,v2) False = undefined
 fullDiffEdit old@((k1,v1) ) (k2,v2) = do
    inf <- ask
    let proj = _kvvalues . unTB

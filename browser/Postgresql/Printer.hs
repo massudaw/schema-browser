@@ -412,10 +412,10 @@ indexLabel  n@(Nested l (Many [nt])) v =
         Unlabeled i -> indexLabel  nt.head . F.toList . _fkttable $ i
         Labeled i _ -> errorWithStackTrace ("cant index" <> show i)
       Nothing -> errorWithStackTrace ("cant index"<> show l)
-indexLabel  (Many [nt]) v = flip (indexLabel ) v $ nt
 -- indexLabel  (ISum [nt]) v = flip (indexLabel ) v <$> nt
 indexLabel  i v = errorWithStackTrace (show (i, v))
 
+indexLabelU  (Many [nt]) v = flip (indexLabel ) v $ nt
 
 
 
@@ -456,10 +456,10 @@ indexFieldL e c n@(Nested l nt) v =
   case findFK (iprodRef <$> l) v of
     Just a -> case getCompose a of
         Unlabeled i ->
-          concat . fmap (indexFieldL e c nt) . F.toList . _fkttable $ i
+          concat . fmap (indexFieldLU e c nt) . F.toList . _fkttable $ i
         Labeled l (IT k (LeftTB1 (Just (ArrayTB1 (fk :| _))))) ->  [(Just (l <> " is not null"), Nothing)]
         Labeled l (IT k (ArrayTB1 (fk :| _))) ->  [(Just (l <> " is not null"), Nothing)]
-        Labeled l (IT k fk) -> (indexFieldL e c nt  $ head (F.toList fk ))
+        Labeled l (IT k fk) -> (indexFieldLU e c nt  $ head (F.toList fk ))
         Labeled l a -> {-->
           let
             go (ArrayTB1 (i:| _)) =
@@ -474,9 +474,10 @@ indexFieldL e c n@(Nested l nt) v =
 
     Nothing -> concat $ (\i -> indexFieldL (Right (Not IsNull)) c i v)<$> l
 
-indexFieldL e c (Many nt) v = concat $ flip (indexFieldL e c) v <$> nt
-indexFieldL e c (ISum nt) v = concat $ flip (indexFieldL e c) v <$> nt
 indexFieldL e c i v = errorWithStackTrace (show (i, v))
+
+indexFieldLU e c (Many nt) v = concat $ flip (indexFieldL e c) v <$> nt
+indexFieldLU e c (ISum nt) v = concat $ flip (indexFieldL e c) v <$> nt
 
 utlabel (Right  e) c idx = result e idx
   where

@@ -207,7 +207,7 @@ data FPlugAction k
   | DiffPurePlugin (ArrowReaderDiffM Identity)
   | DiffIOPlugin (ArrowReaderDiffM IO)
 
-type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Access Text) () (Maybe (Index (TBData Text Showable)))
+type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Union (Access Text)) () (Maybe (Index (TBData Text Showable)))
 
 pluginStatic = pluginStatic' . _plugAction
 pluginAction = pluginAction' . _plugAction
@@ -384,11 +384,9 @@ fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
             ta = lookTable inf tname
 liftAccessM :: InformationSchema -> Text -> Access Text  -> Maybe (Access Key)
 liftAccessM inf tname (Point i  ) =  Just $ Point i
-liftAccessM inf tname (Rec i j ) =  Rec i <$> (liftAccessM inf tname  j)
-liftAccessM inf tname (ISum i) =  ISum <$> traverse (liftAccessM inf tname)  i
-liftAccessM inf tname (Many i) =  Many <$> traverse (liftAccessM inf tname)  i
+liftAccessM inf tname (Rec i j ) =  Rec i <$> (liftAccessMU inf tname  j)
 liftAccessM inf tname (IProd b l) = IProd b  <$> (lookKeyM inf tname) l
-liftAccessM inf tname (Nested i c) = Nested <$> ref <*> join (fmap (\ l -> liftAccessM inf  (snd (proj l)) c ) n)
+liftAccessM inf tname (Nested i c) = Nested <$> ref <*> join (fmap (\ l -> liftAccessMU inf  (snd (proj l)) c ) n)
   where
     ref = traverse (liftAccessM inf tname) i
     tb = lookTable inf tname
@@ -400,14 +398,14 @@ liftAccessM inf tname (Nested i c) = Nested <$> ref <*> join (fmap (\ l -> liftA
 liftAccessM _ _ i = errorWithStackTrace (show i)
 
 
+liftAccessMU inf tname (ISum i) =  ISum <$> traverse (liftAccessM inf tname)  i
+liftAccessMU inf tname (Many i) =  Many <$> traverse (liftAccessM inf tname)  i
 
 liftAccess :: InformationSchema -> Text -> Access Text  -> Access Key
 liftAccess inf tname (Point i  ) =  Point i
-liftAccess inf tname (Rec i j ) =  Rec i (liftAccess inf tname  j)
-liftAccess inf tname (ISum i) =  ISum $ fmap (liftAccess inf tname)  i
-liftAccess inf tname (Many i) =  Many $ fmap (liftAccess inf tname)  i
+liftAccess inf tname (Rec i j ) =  Rec i (liftAccessU inf tname  j)
 liftAccess inf tname (IProd b l) = IProd b $ (lookKey inf tname) l
-liftAccess inf tname (Nested i c) = Nested ref (liftAccess rinf (snd l) c)
+liftAccess inf tname (Nested i c) = Nested ref (liftAccessU rinf (snd l) c)
   where
     rinf = fromMaybe inf (HM.lookup  (fst l) (depschema inf))
     ref = liftAccess inf tname <$> i
@@ -419,18 +417,32 @@ liftAccess inf tname (Nested i c) = Nested ref (liftAccess rinf (snd l) c)
 
 liftAccess _ _ i = errorWithStackTrace (show i)
 
+liftAccessU inf tname (ISum i) =  ISum $ fmap (liftAccess inf tname)  i
+liftAccessU inf tname (Many i) =  Many $ fmap (liftAccess inf tname)  i
 
 lookAccess :: InformationSchema -> Text -> (Access Text , AccessOp Showable ) -> (Access Key, AccessOp Showable )
 lookAccess inf tname l = Le.over (Le._1) (liftAccess inf tname)  l
 
 
+-- genPredicateFull i :: UnaryOp -> Access k -> Maybe (BoolCollection  (Access
+genPredicateFull
+  :: Show a =>
+     t
+     -> Access a
+     -> Maybe (BoolCollection (Access a, Either a1 UnaryOperator))
 genPredicateFull i (Rec _ _) = Nothing  -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (Point _) = Nothing -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
-genPredicateFull i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
-genPredicateFull i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (IProd b l) =  (\i -> PrimColl (IProd b l,Right i ))  <$> b
-genPredicateFull i n@(Nested p l ) = fmap (\(a,b) -> (Nested p a , b )) <$> genPredicateFull i l
+genPredicateFull i n@(Nested p l ) = fmap (\(a,b) -> (Nested p (Many[a]) , b )) <$> genPredicateFullU i l
 genPredicateFull _ i = errorWithStackTrace (show i)
+
+genPredicateFullU
+  :: Show a =>
+     t
+     -> Union (Access a)
+     -> Maybe (BoolCollection (Access a, Either a1 UnaryOperator))
+genPredicateFullU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
+genPredicateFullU i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 
 notException e =  if isJust eb || isJust es || isJust as then Nothing else Just e
   where
