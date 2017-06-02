@@ -784,6 +784,9 @@ attrArray back@(FKT _ _ _) oldItems  = (\(lc,tb) ->  FKT (kvlist [Compose $ Iden
 attrArray back@(IT _ _) oldItems  = (\tb ->  IT  (_tbattrkey back) (ArrayTB1 tb  ) )  $ (\(IT _ tb ) -> tb) <$> oldItems
 
 
+unFin (Interval.Finite i) = Just i
+unFin i = Nothing
+
 
 
 kOptional = Le.over keyTypes KOptional

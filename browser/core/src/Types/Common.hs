@@ -661,8 +661,6 @@ aattri (IT _ i) =  go i
         i -> []
 
 
-
-
 tblist :: Ord k => [Compose Identity  (TB Identity) k a] -> TBData k a
 tblist = tblistM kvempty
 

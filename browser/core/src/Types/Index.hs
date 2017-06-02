@@ -573,8 +573,6 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
 
 
 
-unFin (Interval.Finite i) = Just i
-unFin o = Nothing
 
 
 

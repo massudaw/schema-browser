@@ -10,6 +10,7 @@ import Postgresql.Types
 import Data.Time
 import Step.Common
 import Data.Interval(Interval)
+import qualified Data.Interval as Interval
 import Debug.Trace
 import GHC.Generics
 import Data.Unique
@@ -311,6 +312,55 @@ putPatch m a= liftIO$ do
 
 putPatchSTM m =  writeTChan m . force. fmap (firstPatchRow keyFastUnique)
 putIdx m = liftIO .atomically . writeTChan m . force
+
+typeCheckValue f (KOptional i) (LeftTB1 j) = maybe True (typeCheckValue f i) j
+typeCheckValue f (KDelayed i) (LeftTB1 j) = maybe True (typeCheckValue f i) j
+typeCheckValue f (KSerial i) (LeftTB1 j) = maybe True (typeCheckValue f i) j
+typeCheckValue f (KArray i )  (ArrayTB1 l) = all (typeCheckValue f i) l
+typeCheckValue f (KInterval i) (IntervalTB1 j) = maybe True (typeCheckValue f i)  (unFin $ Interval.lowerBound j)  && maybe True (typeCheckValue f i) (unFin $ Interval.upperBound j)
+typeCheckValue f (Primitive i)   (TB1 j) = f i j
+
+typeCheckPrim (PInt j) (SNumeric i) = True
+typeCheckPrim PDouble (SDouble i) = True
+typeCheckPrim PText (SText i) = True
+typeCheckPrim PColor (SNumeric i) = True
+typeCheckPrim (PGeom _ _ ) (SGeo i) = True
+typeCheckPrim PBoolean (SBoolean i) = True
+typeCheckPrim (PTypeable _) (SHDynamic i ) = True
+typeCheckPrim (PMime _ ) (SBinary i ) = True
+typeCheckPrim PBinary  (SBinary i ) = True
+typeCheckPrim (PDimensional _ _ ) (SDouble i ) = True
+typeCheckPrim PAddress  (SText i) = True
+typeCheckPrim i j  = False
+
+typeCheckTB inf table (Attr k i ) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) (keyType k ) i
+typeCheckTB inf table (IT k i ) = typeCheckValue (\(RecordPrim l) -> typeCheckTable inf  l ) (keyType k)  i
+typeCheckTB inf table (FKT k rel2 i ) = F.all (typeCheckTB inf table . unTB ) (_kvvalues k) && typeCheckValue (\(RecordPrim l) -> typeCheckTable inf  l )  ktype i
+    where FKJoinTable  rel next  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS table)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  table)
+          ktypeRel = mergeFKRef (keyType ._relOrigin <$> rel2)
+          ktype :: KType (Prim KPrim (Text,Text))
+          ktype = const (RecordPrim  next) <$> ktypeRel
+
+
+typeCheckTable :: InformationSchema -> (Text,Text) -> TBData (FKey (KType (Prim KPrim (Text,Text)))) Showable -> Bool
+typeCheckTable inf  c  (t,l)
+  =  F.all (typeCheckTB inf table . unTB ) (_kvvalues (unTB l))
+    where
+      table = lookSTable inf c
+
+
+mergeFKRef :: [KType a] -> KType [a]
+mergeFKRef ls = foldl1 mergeOpt (fmap pure <$> ls)
+  where
+    mergeOpt (KOptional i) (KOptional j) = KOptional (mergeOpt i j)
+    mergeOpt (KOptional i) j = KOptional (mergeOpt i j)
+    mergeOpt i (KOptional j) = KOptional (mergeOpt i j)
+    mergeOpt (KArray i) (KArray j ) = KArray ( mergeOpt i j )
+    mergeOpt (KArray i) j = KArray (mergeOpt i j)
+    mergeOpt i (KArray j) = KArray (mergeOpt i j)
+    mergeOpt (Primitive i) (Primitive j) = Primitive (i <>j)
+    mergeOpt (Primitive i) (Primitive j) = Primitive (i <>j)
+
 
 
 liftTable' :: InformationSchema -> Text -> TBData Text a -> TBData Key a

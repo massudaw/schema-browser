@@ -648,7 +648,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
       # sink UI.style (noneShowSpan . maybe False (txt "INSERT" `elem`) <$>facts authorize)
       # sinkDiff UI.enabled insertEnabled
 
-  let editEnabled = (\i j k l m -> {-traceShow (i,j,k,l,m)$-} i && j && k && l && m )<$> ((maybe False (isRight . tableCheck  )  )<$> inscrud ) <*> (isJust <$> oldItemsi) <*>   (liftA2 (\i j -> maybe False (flip containsGist j) i ) oldItemsi gist ) <*> (liftA3 (\i k j -> maybe False (\(a,b) -> containsGistNotEqual b a j) (liftA2 (,) k i) ) inscrud oldItemsi gist ) <*> (isDiff <$> inscrudp)
+  let editEnabled = (\i j k l m -> i && j && k && l && m )<$> ((maybe False (isRight . tableCheck  )  )<$> inscrud ) <*> (isJust <$> oldItemsi) <*>   (liftA2 (\i j -> maybe False (flip containsGist j) i ) oldItemsi gist ) <*> (liftA3 (\i k j -> maybe False (\(a,b) -> containsGistNotEqual b a j) (liftA2 (,) k i) ) inscrud oldItemsi gist ) <*> (isDiff <$> inscrudp)
   editB <- UI.button
       # set UI.class_ "btn btn-sm"
       # set text "EDIT"
@@ -718,7 +718,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
                       out <- mapM gen
                           [("Last", maybe "" (ident . renderTable) <$> facts oldItemsi)
                           ,("Diff", onDiff (ident.renderRowPatch ) "" <$> facts inscrudp)
-                          ,("New", maybe "" (ident . renderTable) <$> facts inscrud)]
+                          ,("New", maybe "" (\i -> if typeCheckTable inf (_rawSchemaL table,_rawNameL table) i then ident . renderTable $ i  else "can't type" ) <$> facts inscrud)]
 
                       element debug # set children (fmap fst out ++ fmap snd out)
                     else  element debug # set children [] ) (triding debugBox)
@@ -1229,19 +1229,6 @@ iUITableDiff inf constr pmods oldItems  (IT na  tb1)
 
 
 type PluginRef a = [(Union(Access Key), Tidings (Maybe (Index a)))]
-
-
-mergeFKRef :: [KType a] -> KType [a]
-mergeFKRef ls = foldl1 mergeOpt (fmap pure <$> ls)
-  where
-    mergeOpt (KOptional i) (KOptional j) = KOptional (mergeOpt i j)
-    mergeOpt (KOptional i) j = KOptional (mergeOpt i j)
-    mergeOpt i (KOptional j) = KOptional (mergeOpt i j)
-    mergeOpt (KArray i) (KArray j ) = KArray ( mergeOpt i j )
-    mergeOpt (KArray i) j = KArray (mergeOpt i j)
-    mergeOpt i (KArray j) = KArray (mergeOpt i j)
-    mergeOpt (Primitive i) (Primitive j) = Primitive (i <>j)
-    mergeOpt (Primitive i) (Primitive j) = Primitive (i <>j)
 
 offsetFieldFiltered  initT eve maxes = do
   init <- currentValue (facts initT)
