@@ -873,7 +873,17 @@ inlineFullName (Primitive (RecordPrim (s, i)) ) = s <> "." <> i
 attrT :: (a,FTB b) -> Compose Identity (TB Identity) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
-
+mergeFKRef :: [KType a] -> KType [a]
+mergeFKRef ls = foldl1 mergeOpt (fmap pure <$> ls)
+  where
+    mergeOpt (KOptional i) (KOptional j) = KOptional (mergeOpt i j)
+    mergeOpt (KOptional i) j = KOptional (mergeOpt i j)
+    mergeOpt i (KOptional j) = KOptional (mergeOpt i j)
+    mergeOpt (KArray i) (KArray j ) = KArray ( mergeOpt i j )
+    mergeOpt (KArray i) j = KArray (mergeOpt i j)
+    mergeOpt i (KArray j) = KArray (mergeOpt i j)
+    mergeOpt (Primitive i) (Primitive j) = Primitive (i <>j)
+    mergeOpt (Primitive i) (Primitive j) = Primitive (i <>j)
 
 srange l m = IntervalTB1 $ Interval.interval (Interval.Finite l,True) (Interval.Finite m ,True)
 

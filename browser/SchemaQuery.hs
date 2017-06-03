@@ -141,7 +141,7 @@ applyBackend (PatchRow p@(m,pk@(G.Idex pki),i)) = do
    inf <- ask
    let table = lookTable inf (_kvname m)
    ref <- prerefTable inf table
-   (sidx,v,_,_) <- liftIO $ atomically $ readState (WherePredicate (AndColl []),keyFastUnique <$> _kvpk m) (mapTableK keyFastUnique table ) ref
+   (sidx,v,_,_) <- liftIO $ atomically $ readState inf (WherePredicate (AndColl []),keyFastUnique <$> _kvpk m) (mapTableK keyFastUnique table ) ref
    let oldm = mapKey' (recoverKey inf ) <$>  G.lookup pk v
    old <- maybe (do
      (_,(i,o)) <- selectFrom (_kvname m) Nothing Nothing [] (WherePredicate (AndColl ((\(k,o) -> PrimColl (keyRef k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk m) pki)))
@@ -476,7 +476,7 @@ pageTable flag method table page size presort fixed = do
        if isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixedU fixedmap)  -- Ignora quando página já esta carregando
          then do
            (sidx,reso ,nchan,iniVar) <- liftIO $ atomically $
-                    readState (fixedU ,rawPK tableU) tableU dbvar
+             readState inf (fixedU ,rawPK tableU) tableU dbvar
            let
                  freso =  ffixed (sidx,reso)
                  predreq = (fixedU,G.Contains (pageidx - pagesize,pageidx))
@@ -512,7 +512,7 @@ pageTable flag method table page size presort fixed = do
                 return $Left (fromJust $ preloaded)
              Nothing -> do
                 (sidx,reso ,nchan,iniVar) <- liftIO $ atomically $
-                    readState (fixedU ,rawPK tableU) tableU dbvar
+                  readState inf (fixedU ,rawPK tableU) tableU dbvar
                 let
                    freso =  ffixed (sidx,reso)
                 return $ Right(fixedmap , sidx,iniVar,nchan,freso)
@@ -542,17 +542,18 @@ readIndex dbvar = do
 readState
   :: (Ord k ,NFData v,NFData k,Eq (Index v), Ord k, Ord v, Show k, Show v,
       G.Predicates (TBIndex v), Patch v, Index v ~ v) =>
-      (TBPredicate k Showable, [k ])
+        InformationSchema
+        -> (TBPredicate k Showable, [k ])
       -> TableK k
      -> DBRef k v
      -> STM ([SecondaryIndex k v],TableIndex k v, TChan [RowPatch k v], TVar ([SecondaryIndex k v],TableIndex k v))
-readState fixed table dbvar = do
+readState inf fixed table dbvar = do
   var <-readTVar (collectionState dbvar)
   chan <- cloneTChan (patchVar dbvar)
   patches <- takeMany' chan
   let
       filterPred = nonEmpty . filter (\d -> splitMatch fixed (indexPK d) && indexFilterR (fst fixed) d )
-      update l v = F.foldl' (\i j-> fromJust $  applyTableRep table i j)   l v
+      update l v = F.foldl' (\i j-> fromMaybe i $  applyTableRep inf table i j)   l v
       (sidxs, pidx) = update var (concat patches)
   return (sidxs,pidx,chan,collectionState dbvar)
 
@@ -649,7 +650,7 @@ convertChanTidings
     (Tidings (TableRep Key Showable),Event [RowPatch Key Showable])
 convertChanTidings inf table fixed evdep dbvar = do
       (sidx,ini,nchan,inivar) <- liftIO $atomically $
-        readState fixed  table dbvar
+        readState inf fixed  table dbvar
       convertChanTidings0 inf table fixed evdep (sidx,ini) inivar nchan
 
 
@@ -672,7 +673,7 @@ convertChanTidings0 inf table fixed evdep ini iniVar nchan = mdo
       evdiff = filterE (not.L.null) $ unionWith mappend evdep (fmap (firstPatchRow (recoverKey inf)) <$> evdiffp)
       update :: TableRep Key Showable -> [RowPatch Key Showable] -> TableRep Key Showable
       -- update l v | traceShow (ti,tableName table,v)  False = undefined
-      update l v = F.foldl' (\i j-> fromJust $  applyTableRep (mapTableK (recoverKey inf)table) i j)   l  v
+      update l v = F.foldl' (\i j-> fromMaybe i $  applyTableRep inf (mapTableK (recoverKey inf)table) i j)   l  v
       recoverIni :: TableRep KeyUnique Showable -> TableRep Key Showable
       recoverIni (i,j)= (first (fmap (recoverKey inf )) . fmap (fmap (fmap (fmap (G.mapAttributePath (recoverKey inf ))))) <$> i, recover j)
         where recover = fmap (mapKey' (recoverKey inf))

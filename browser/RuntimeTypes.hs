@@ -7,10 +7,12 @@ import Control.Concurrent
 import Types
 import Control.Exception
 import Postgresql.Types
+import Data.Functor.Constant
 import Data.Time
 import Step.Common
 import Data.Interval(Interval)
 import qualified Data.Interval as Interval
+import Control.Applicative.Lift
 import Debug.Trace
 import GHC.Generics
 import Data.Unique
@@ -154,17 +156,46 @@ type TableIndex k v = GiST (TBIndex v) (TBData k v)
 type SecondaryIndex k v = ([k],GiST (TBIndex v) (TBIndex v,[AttributePath k ()]))
 type TableRep k v  = ([SecondaryIndex k v],TableIndex k v)
 
+instance (NFData k, NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex  a ) (TBData k a)) where
+  type Index (G.GiST (G.TBIndex  a ) (TBData k a)  ) = RowPatch k (Index a)
+  -- applyIfChange = applyGiSTChange
+
+applyGiSTChange
+  ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => InformationSchema -> TableK k -> G.GiST (G.TBIndex  a ) (TBData k a) -> RowPatch k (Index a) -> Maybe (G.GiST (G.TBIndex  a ) (TBData k a))
+applyGiSTChange inf t l (DropRow patom) = Just $ G.delete (create <$> G.notOptional (G.getIndex patom )) G.indexParam  l
+applyGiSTChange inf t l (PatchRow patom@(m,ipa, p))
+  =  case G.lookup (G.notOptional i) l  of
+    Just v -> do
+      el <-  applyIfChange v patom
+      let pkel = G.getIndex el
+      return $ if  pkel == i
+            then G.update (G.notOptional i) (const el) l
+            else G.insert (el,G.tbpred  el) G.indexParam . G.delete (G.notOptional i)  G.indexParam $ l
+    Nothing -> do
+      el <- createIfChange  patom
+      return $ G.insert (el,G.tbpred  el) G.indexParam  l
+   where
+         i = fmap create  ipa
+applyGiSTChange inf t l (CreateRow elp )
+  =  case G.lookup i l  of
+    Just v ->  Just $ G.insert (el,G.tbpred  el) G.indexParam . G.delete i  G.indexParam $ l
+    Nothing -> Just $ G.insert (el,G.tbpred  el) G.indexParam  l
+   where
+     el = fmap (fmap create) elp
+     i = G.notOptional $ G.getIndex el
+
+
 applyTableRep
-  ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => TableK k -> TableRep k a -> RowPatch k (Index a) -> Maybe (TableRep k a)
-applyTableRep table (sidxs,l) (DropRow patom)
+  ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => InformationSchema -> TableK k -> TableRep k a -> RowPatch k (Index a) -> Maybe (TableRep k a)
+applyTableRep inf table (sidxs,l) (DropRow patom)
   = Just $ (didxs <$> sidxs, G.delete (create <$> G.notOptional (G.getIndex patom )) G.indexParam  l)
   where
     didxs (un ,sidx)= (un,maybe sidx (\v -> G.delete v G.indexParam sidx ) (G.getUnique un <$> v))
     v = G.lookup (create <$> G.notOptional (G.getIndex patom ))  l
-applyTableRep table (sidxs,l) (PatchRow patom@(m,ipa, p)) =  (dixs <$> sidxs ,) <$> applyIfChange l (PatchRow patom)
+applyTableRep inf table (sidxs,l) (PatchRow patom@(m,ipa, p)) =  (dixs <$> sidxs ,) <$>   applyGiSTChange inf table l (PatchRow patom)
    where
      dixs (un,sidx) = (un,sidx)--(\v -> G.insert (v,G.getIndex i) G.indexParam sidx ) (G.getUnique un  el))
-applyTableRep table (sidxs,l) (CreateRow elp ) =  Just  (didxs <$> sidxs,case G.lookup i l  of
+applyTableRep inf table (sidxs,l) (CreateRow elp ) =  Just  (didxs <$> sidxs,case G.lookup i l  of
                   Just v ->  if v == el then l else G.insert (el,G.tbpred  el) G.indexParam . G.delete i  G.indexParam $ l
                   Nothing -> G.insert (el,G.tbpred  el) G.indexParam  l)
    where
@@ -172,6 +203,9 @@ applyTableRep table (sidxs,l) (CreateRow elp ) =  Just  (didxs <$> sidxs,case G.
      el = fmap (fmap create) elp
      i = G.notOptional $ G.getIndex el
 
+typecheck f a = case f a of
+              Pure i -> Right a
+              Other (Constant l) ->  Left l
 
 queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[k])-> TableRep k Showable-> G.GiST (TBIndex  Showable) (TBData k Showable)
 queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (s,g) = t1
@@ -307,59 +341,52 @@ lookKeyM inf t k =  HM.lookup (t,k) (keyMap inf)
 
 putPatch m a= liftIO$ do
   i <- getCurrentTime
-  print ("putPatch",i,length a)
+  -- print ("putPatch",i,length a)
   atomically $ putPatchSTM m a
 
 putPatchSTM m =  writeTChan m . force. fmap (firstPatchRow keyFastUnique)
 putIdx m = liftIO .atomically . writeTChan m . force
 
-typeCheckValue f (KOptional i) (LeftTB1 j) = maybe True (typeCheckValue f i) j
-typeCheckValue f (KDelayed i) (LeftTB1 j) = maybe True (typeCheckValue f i) j
-typeCheckValue f (KSerial i) (LeftTB1 j) = maybe True (typeCheckValue f i) j
-typeCheckValue f (KArray i )  (ArrayTB1 l) = all (typeCheckValue f i) l
-typeCheckValue f (KInterval i) (IntervalTB1 j) = maybe True (typeCheckValue f i)  (unFin $ Interval.lowerBound j)  && maybe True (typeCheckValue f i) (unFin $ Interval.upperBound j)
+typeCheckValue f (KOptional i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValue f i) j
+typeCheckValue f (KDelayed i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValue f i) j
+typeCheckValue f (KSerial i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValue f i) j
+typeCheckValue f (KArray i )  (ArrayTB1 l) = F.foldl' (liftA2 const ) (Pure () ) (typeCheckValue f i<$>  l)
+typeCheckValue f (KInterval i) (IntervalTB1 j) = const <$> maybe (Pure ()) (typeCheckValue f i)  (unFin $ Interval.lowerBound j)  <*> maybe (Pure ()) (typeCheckValue f i) (unFin $ Interval.upperBound j)
 typeCheckValue f (Primitive i)   (TB1 j) = f i j
+typeCheckValue f i j = failure ["cant match " ++ show i ++ " with " ++ show j ]
 
-typeCheckPrim (PInt j) (SNumeric i) = True
-typeCheckPrim PDouble (SDouble i) = True
-typeCheckPrim PText (SText i) = True
-typeCheckPrim PColor (SNumeric i) = True
-typeCheckPrim (PGeom _ _ ) (SGeo i) = True
-typeCheckPrim PBoolean (SBoolean i) = True
-typeCheckPrim (PTypeable _) (SHDynamic i ) = True
-typeCheckPrim (PMime _ ) (SBinary i ) = True
-typeCheckPrim PBinary  (SBinary i ) = True
-typeCheckPrim (PDimensional _ _ ) (SDouble i ) = True
-typeCheckPrim PAddress  (SText i) = True
-typeCheckPrim i j  = False
+typeCheckPrim (PInt j) (SNumeric i) = Pure ()
+typeCheckPrim PDouble (SDouble i) = Pure ()
+typeCheckPrim PText (SText i) =  Pure ()
+typeCheckPrim (PTime _)(STime i) =  Pure ()
+typeCheckPrim PColor (SText i) = Pure ()
+typeCheckPrim (PDimensional _ _ ) (SDouble i) = Pure ()
+typeCheckPrim PCnpj (SText i) = Pure ()
+typeCheckPrim PCpf (SText i) = Pure ()
+typeCheckPrim (PGeom _ _ ) (SGeo i) = Pure ()
+typeCheckPrim PBoolean (SBoolean i) = Pure ()
+typeCheckPrim (PDynamic) (SDynamic i ) = Pure ()
+typeCheckPrim (PTypeable _) (SHDynamic i ) = Pure ()
+typeCheckPrim (PMime _ ) (SBinary i ) = Pure ()
+typeCheckPrim PBinary  (SBinary i ) = Pure ()
+typeCheckPrim (PDimensional _ _ ) (SDouble i ) = Pure ()
+typeCheckPrim PAddress  (SText i) = Pure ()
+typeCheckPrim i j  = failure ["cant match " ++ show i ++ " with " ++ show j ]
 
-typeCheckTB inf table (Attr k i ) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) (keyType k ) i
-typeCheckTB inf table (IT k i ) = typeCheckValue (\(RecordPrim l) -> typeCheckTable inf  l ) (keyType k)  i
-typeCheckTB inf table (FKT k rel2 i ) = F.all (typeCheckTB inf table . unTB ) (_kvvalues k) && typeCheckValue (\(RecordPrim l) -> typeCheckTable inf  l )  ktype i
-    where FKJoinTable  rel next  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS table)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  table)
-          ktypeRel = mergeFKRef (keyType ._relOrigin <$> rel2)
-          ktype :: KType (Prim KPrim (Text,Text))
-          ktype = const (RecordPrim  next) <$> ktypeRel
+typeCheckTB (Fun k ref i) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) (keyType k ) i
+typeCheckTB (Attr k i ) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) (keyType k ) i
+typeCheckTB (IT k i ) = typeCheckValue (\(RecordPrim l) -> typeCheckTable l ) (keyType k)  i
+typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB . unTB <$>  _kvvalues k) <*> typeCheckValue (\(RecordPrim l) -> typeCheckTable l )  ktype i
+  where -- FKJoinTable  rel next  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS table)) path
+        -- path = L.find (\(Path i _ )-> i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  table)
+        ktypeRel = mergeFKRef (keyType ._relOrigin <$> rel2)
+        ktype :: KType (Prim KPrim (Text,Text))
+        ktype = const (RecordPrim  ("","")) <$> ktypeRel
 
 
-typeCheckTable :: InformationSchema -> (Text,Text) -> TBData (FKey (KType (Prim KPrim (Text,Text)))) Showable -> Bool
-typeCheckTable inf  c  (t,l)
-  =  F.all (typeCheckTB inf table . unTB ) (_kvvalues (unTB l))
-    where
-      table = lookSTable inf c
-
-
-mergeFKRef :: [KType a] -> KType [a]
-mergeFKRef ls = foldl1 mergeOpt (fmap pure <$> ls)
-  where
-    mergeOpt (KOptional i) (KOptional j) = KOptional (mergeOpt i j)
-    mergeOpt (KOptional i) j = KOptional (mergeOpt i j)
-    mergeOpt i (KOptional j) = KOptional (mergeOpt i j)
-    mergeOpt (KArray i) (KArray j ) = KArray ( mergeOpt i j )
-    mergeOpt (KArray i) j = KArray (mergeOpt i j)
-    mergeOpt i (KArray j) = KArray (mergeOpt i j)
-    mergeOpt (Primitive i) (Primitive j) = Primitive (i <>j)
-    mergeOpt (Primitive i) (Primitive j) = Primitive (i <>j)
+typeCheckTable ::  (Text,Text) -> TBData (FKey (KType (Prim KPrim (Text,Text)))) Showable -> Errors [String] ()
+typeCheckTable c  (t,l)
+  | otherwise =  F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB . unTB <$> _kvvalues (unTB l))
 
 
 
@@ -392,6 +419,7 @@ liftField inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (lookKey inf tname ) (ma
 liftField inf tname (IT rel tb) = IT (lookKey inf tname  rel) (liftKeys inf tname2 tb)
   where FKInlineTable (_,tname2)  = unRecRel. pathRel  $ justError (show (rel ,rawFKS ta)) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline rel))  (F.toList$ rawFKS  ta)
         ta = lookTable inf tname
+liftField inf tname (Fun  k t v) = Fun (lookKey inf tname k ) (fmap(liftAccess inf tname )<$> t) v
 
 liftPatchRow inf t (PatchRow i) = PatchRow $ liftPatch inf t i
 liftPatchRow inf t (CreateRow i) = CreateRow $ liftTable' inf t i

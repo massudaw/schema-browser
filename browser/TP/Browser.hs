@@ -103,7 +103,7 @@ addServer inf =  do
 
 idexToPred t (G.Idex  i) = head $ (\(k,a)-> (keyRef k,Left (a,Contains))) <$>  zip (rawPK t) (F.toList i)
 
-deleteServer inf (TableModification _ _ (PatchRow o@(a,ref,c))) = do
+deleteServer inf (TableModification _ _ (CreateRow o)) = do
   now <- liftIO $ getCurrentTime
   (_,(_,tb)) <- transactionNoLog inf $ selectFrom "client_login"  Nothing Nothing [] (WherePredicate (AndColl [PrimColl (keyRef (lookKey inf "client_login" "up_time") ,Left ((TB1 (STime $ STimestamp (utcToLocalTime utc now))),Contains))]))
   let
@@ -116,11 +116,10 @@ deleteServer inf (TableModification _ _ (PatchRow o@(a,ref,c))) = do
     v <- updateFrom   old (pt old)
     tell (maybeToList v)
     return v) oldClis
-  let pt = (tableMeta (lookTable inf "server") , ref ,[PAttr (lookKey inf "server" "up_time") (PInter False ((ER.Finite $ PAtom (STime $ STimestamp (utcToLocalTime utc now)) , False)))])
-  transactionNoLog inf $ updateFrom (create o) pt
+  let pt = (tableMeta (lookTable inf "server") , G.getIndex o,[PAttr (lookKey inf "server" "up_time") (PInter False ((ER.Finite $ PAtom (STime $ STimestamp (utcToLocalTime utc now)) , False)))])
+  transactionNoLog inf $ updateFrom o pt
 
 
-opt f = LeftTB1 . fmap f
 
 removeTable :: Int -> UTCTime -> Table -> Int ->  TBIdx Text Showable
 removeTable idClient now table  tix = (mempty,G.Idex [num idClient],[PInline "selection" (POpt $ Just $ PIdx tix (Just $ PAtom $
@@ -160,7 +159,7 @@ updateClient metainf inf table tdi clientId now = do
       row = tblist . fmap _tb
             $ [ FKT (kvlist [_tb $ Attr "clientid" (TB1 (SNumeric (clientId )))]) [Rel "clientid" Equals "id"] (TB1 $ mapKey' keyValue $ old)
               , Attr "up_time" (inter (Interval.Finite $ time now) Interval.PosInf)
-              , Attr "schema" (int .  schemaId $ inf )
+              , Attr "schema" (opt (int .  schemaId ) (Just  inf ))
               , IT "selection" (LeftTB1 Nothing)]
 
       lrow = liftTable' metainf "clients" row

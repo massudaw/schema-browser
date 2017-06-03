@@ -215,7 +215,7 @@ insertPatch f conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> l
     where
       checkAllFilled = patchCheck path
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (escapeReserved <$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
-      attrs =  concat $L.nub $ nonRefTB . create . traceShowId <$> filterFun i
+      attrs =  concat $L.nub $ nonRefTB .  create . traceShowId <$> filterFun i
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
       direct f = filter (not.all1 testSerial .f)
       serialAttr = flip Attr (LeftTB1 Nothing)<$> filter (isSerial .keyType) ( rawPK t <> F.toList (rawAttrs t))
@@ -330,8 +330,7 @@ insertMod j  = do
       let
         table = lookTable inf (_kvname (fst  j))
       (t,pk,attrs) <- insertPatch (fromRecord  ) (conn  inf) (patch j) ( table)
-      let mod =  TableModification Nothing table (CreateRow $ create  (t,pk,compact $ deftable inf table <> attrs ))
-      return $ Just  mod
+      return $ TableModification Nothing table . CreateRow <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create  (t,pk,compact $ deftable inf table <> attrs )))
 
 
 deleteMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))

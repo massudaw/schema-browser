@@ -240,9 +240,6 @@ instance Patch a => Patch (NonEmpty a) where
 class Compact f where
   compact :: [f] -> [f]
 
-instance (NFData k, NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex  a ) (TBData k a)) where
-  type Index (G.GiST (G.TBIndex  a ) (TBData k a)  ) = RowPatch k (Index a)
-  applyIfChange = applyGiSTChange
 
 
 instance (Show (Index a),Ord (Index a),PatchConstr k a) => Compact (PathAttr k a) where
@@ -388,28 +385,6 @@ instance (NFData (f k a),NFData k ) => NFData (KV f k a) where
 
 instance (NFData k ,NFData a ) => NFData (TB Identity k a) where
 
-
-applyGiSTChange
-  ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => G.GiST (G.TBIndex  a ) (TBData k a) -> RowPatch k (Index a) -> Maybe (G.GiST (G.TBIndex  a ) (TBData k a))
-applyGiSTChange l (DropRow patom) = Just $ G.delete (create <$> G.notOptional (G.getIndex patom )) G.indexParam  l
-applyGiSTChange l (PatchRow patom@(m,ipa, p)) =  case G.lookup (G.notOptional i) l  of
-                  Just v -> do
-                          el <-  applyIfChange v patom
-                          let pkel = G.getIndex el
-                          return $ if  pkel == i
-                                then G.update (G.notOptional i) (const el) l
-                                else G.insert (el,G.tbpred  el) G.indexParam . G.delete (G.notOptional i)  G.indexParam $ l
-                  Nothing -> let
-                      el = createIfChange  patom
-                   in (\eli -> G.insert (eli,G.tbpred  eli) G.indexParam  l) <$> el
-   where
-         i = fmap create  ipa
-applyGiSTChange l (CreateRow elp ) =  case G.lookup i l  of
-                  Just v ->  Just $ G.insert (el,G.tbpred  el) G.indexParam . G.delete i  G.indexParam $ l
-                  Nothing -> Just $ G.insert (el,G.tbpred  el) G.indexParam  l
-   where
-     el = fmap (fmap create) elp
-     i = G.notOptional $ G.getIndex el
 
 patchTB1 :: PatchConstr k a => TBData k  a -> TBIdx k  (Index a)
 patchTB1 (m, k)  = (m  ,fmap patch $G.getIndex (m,k) ,  F.toList $ patchAttr  . unTB <$> (unKV k))

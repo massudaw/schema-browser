@@ -33,6 +33,7 @@ module TP.QueryWidgets (
 
 import RuntimeTypes
 import TP.View
+import Data.Functor.Constant
 import Data.Dynamic (fromDynamic)
 import Expression
 import Control.Monad.Catch
@@ -190,12 +191,13 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
       pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (fst f)])
       tdInputPre = join . fmap (\i -> if G.checkPred i pred  then Just i else Nothing) <$>  oldItems
       tdInput = tdInputPre
+      table = lookTable inf t
       predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (snd f)])
       tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
   headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   ini <- currentValue (facts tdInput )
   kk <- ui $ stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
-  pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap ( join .  liftA2 diff v . fmap (liftTable' inf t).  join . eitherToMaybe ). catchPluginException inf (tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
+  pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap ( join .  liftA2 diff v. ( join . fmap (either (const Nothing) Just . typecheck (typeCheckTable (tablePK table)) )) . fmap (liftTable' inf t).  join . eitherToMaybe ). catchPluginException inf (tableUnique table ) idp (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
   return (headerP, (snd f ,   pgOut ))
 pluginUI inf oldItems (idp,p@(FPlugins n t (DiffPurePlugin arrow ))) = do
   let f =second (liftAccessU inf t ). first (liftAccessU  inf t ) $ staticP arrow
@@ -475,7 +477,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
       resdiff =   fmap ( liftA2 (\i j -> (join .liftA2 (\j i@(_,pk,_)   -> if   pk == G.getIndex j then Just i else Nothing ) i $ j ) ) oldItems   ) .  snd <$> res
       srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (unTBMap ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
       plugmods = first traRepl <$> (resdiff <> plmods)
-  fks :: [(Column CoreKey () ,(TrivialWidget (Editor (Index (Column CoreKey Showable))),Tidings (Maybe (Column CoreKey Showable))))]  <- foldl' (\jm (l,m)  -> do
+  fks  <- foldl' (\jm (l,m)  -> do
             w <- jm
             let el = L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> ( _kvrecrels meta))
                 plugattr = indexPluginAttrDiff (unTB m) plugmods
@@ -622,7 +624,7 @@ processPanelTable
    -> UI (Element, Event (RowPatch CoreKey Showable) )
 processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   let
-      inscrud = recoverEditChange <$> oldItemsi <*> inscrudp
+      inscrud = (\i j -> either (const Nothing) Just . typecheck (typeCheckTable (_rawSchemaL table,_rawNameL table)) =<< recoverEditChange i j) <$> oldItemsi <*> inscrudp
       containsGistNotEqual old ref map = if isJust refM then (\i -> if L.null i  then True else [G.getIndex old] == L.nub (fmap G.getIndex (F.toList i)))$  (lookGist ix ref map) else False
         where ix = (_kvpk (tableMeta table))
               refM = traverse unSOptional' (getPKM ref)
@@ -697,19 +699,23 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   diffIns <- mapEventFin (fmap join . sequence) $ fmap crudIns <$> facts inscrud <@ (unionWith const cliIns (filterKey  (facts insertEnabled) altI ))
 
   conflict <- UI.div # sinkDiff text ((\i j l -> if l then maybe "" (L.intercalate "," .fmap (showFKText ). flip conflictGist  j) i else "")  <$> inscrud <*> gist <*> mergeEnabled) # sinkDiff UI.style (noneShow <$>mergeEnabled)
-  debugBox <- checkedWidget (pure True)
+  debugBox <- checkedWidget (onDiff (const True) False <$> inscrudp)
   transaction <- UI.span
     # set children [insertB,editB,mergeB,deleteB,getElement debugBox]
     -- # set UI.style (noneShowSpan (ReadWrite ==  rawTableType table ))
   debug <- UI.div
+  let renderTyped (Pure _ ) i  = ident. renderTable  $ i
+      renderTyped (Other (Constant i) ) _ = unlines i
   mapUIFinalizerT debug (\i -> if  i
                     then do
                       let gen (h,s) = do
+                            v <- ui $ currentValue s
                             header <- flabel
                                       # set UI.text h
                                       # set UI.class_ "col-xs-4"
                             out <- UI.mkElement "textarea"
                                       # set (UI.strAttr "onkeyup") "textAreaAdjust(this)"
+                                      # set UI.value v
                                       # set UI.style [("max-height","300px")]
                                       # set UI.class_ "col-xs-4"
                             onChanges s (\v ->  do
@@ -718,9 +724,11 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
                       out <- mapM gen
                           [("Last", maybe "" (ident . renderTable) <$> facts oldItemsi)
                           ,("Diff", onDiff (ident.renderRowPatch ) "" <$> facts inscrudp)
-                          ,("New", maybe "" (\i -> if typeCheckTable inf (_rawSchemaL table,_rawNameL table) i then ident . renderTable $ i  else "can't type" ) <$> facts inscrud)]
+                          ,("New", maybe "" (\i -> renderTyped (typeCheckTable (_rawSchemaL table,_rawNameL table) i ) i  ) <$> facts inscrud)]
 
                       element debug # set children (fmap fst out ++ fmap snd out)
+                      mapM (\i -> element i# method "textAreaAdjust(%1)")  (snd <$> out)
+                      return debug
                     else  element debug # set children [] ) (triding debugBox)
   out <- UI.div # set children [transaction,conflict,debug]
   return (out, fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffMerge,diffDel] )

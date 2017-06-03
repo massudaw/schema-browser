@@ -4,6 +4,7 @@ import PatchSync
 import TP.Main
 import TP.Browser(addServer,deleteServer,deleteClient,addClientLogin,deleteClientLogin)
 import Safe
+import Control.Exception
 import Control.Concurrent.STM
 import Debug.Trace
 import Rmtc
@@ -89,12 +90,15 @@ main = do
 
 
   startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar args regplugs ) initGUI finalizeGUI
-  mapM writeSchema  . HM.toList =<< atomically (readTMVar .globalRef =<< readTMVar smvar)
-  print "Finish Server"
-  runDynamic $ traverse (deleteServer metas) ref
-  sequence_ pfin
-  sequence_ lm
-  sequence_ ls
+    `catch` (\e -> do
+    putStrLn $ "Finish Server"
+    putStrLn $ "Exit Cause: " ++ show (e :: SomeException)
+    runDynamic $ traverse (deleteServer metas) ref
+    mapM writeSchema  . HM.toList =<< atomically (readTMVar .globalRef =<< readTMVar smvar)
+    sequence_ pfin
+    sequence_ lm
+    sequence_ ls
+            )
 
   return ()
 
