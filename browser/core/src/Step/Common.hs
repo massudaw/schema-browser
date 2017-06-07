@@ -15,7 +15,6 @@ import GHC.Generics
 import qualified Data.Text as T
 import qualified Data.Map as M
 
-import Data.GiST.GiST as G
 import qualified Data.Foldable as F
 
 import Control.Arrow
@@ -67,11 +66,16 @@ instance (Monoid s ,Arrow m)  => Arrow (Parser m s) where
 
 instance (Monoid s,Arrow m) => Category (Parser m s) where
    id = P mempty id
-   P (i) (j) . P (l ) (m) = P (i <> l) (j . m  )
+   P i j . P l  m = P (i <> l) (j . m  )
 
 instance Applicative m => Applicative (Kleisli m a) where
   pure i = Kleisli (const (pure i ))
   Kleisli f <*> Kleisli j  =  Kleisli  $ (\i -> f i <*> j i )
+
+instance Alternative m => Alternative (Kleisli m a) where
+  empty = Kleisli (const empty)
+  Kleisli f <|> Kleisli j  =  Kleisli  $ (\i -> f i <|> j i )
+
 
 
 
@@ -93,13 +97,21 @@ instance Applicative Union where
   pure i = Many [i]
   Many f <*> Many a = Many (zipWith ($) f a)
 
+instance Alternative Union where
+  empty = ISum []
+  ISum f <|> ISum g = ISum (f <> g)
 
 instance (Monoid s ,Applicative (a i)) => Applicative (Parser a s i) where
   pure i = P mempty (pure i)
   P i  j <*> P l m  = P (i <> l) (j <*> m )
 
+instance  (Monoid s,Alternative (a i)) => Alternative (Parser a s i ) where
+  empty = P mempty empty
+  P i l <|> P j m  = P (i <>  j)  (l <|> m)
+
 instance (Monoid s ,Applicative (a i) , IsString m) => IsString (Parser a s i m) where
   fromString s = pure (fromString s)
+
 
 instance (Monoid s ,Applicative (a i),Monoid m) => Monoid (Parser a s i m) where
   mempty = P mempty (pure mempty)

@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeFamilies,FlexibleContexts ,Arrows ,TupleSections,OverloadedStrings #-}
-module OAuthClient (readHistory ,oauthpoller,transToken,tokenToOAuth,oauthToToken) where
+module OAuthClient (readHistory ,oauthpoller,transToken,oauthToToken) where
 import Data.Maybe
 import Utils
 import Types.Patch
@@ -30,16 +30,23 @@ gmailScope = "https://www.googleapis.com/auth/gmail.modify"
 
 taskscope = "https://www.googleapis.com/auth/tasks"
 
-tokenToOAuth (TB1 (SText t), TB1 (SText r) , TB1 (SDouble i) , TB1 (SText k)) = OAuth2Tokens  (T.unpack t) (T.unpack r) (realToFrac i)  (T.unpack k)
+tokenToOAuth (TB1 (SText t)) (TB1 (SText r) ) (TB1 (SDouble i) )  (TB1 (SText k)) = OAuth2Tokens  (T.unpack t) (T.unpack r) (realToFrac i)  (T.unpack k)
+tokenToOAuth i j k l = error (show (i,j,k,l))
+
 oauthToToken (OAuth2Tokens  t r i  k)
   = TB1 $ tblist $ attrT . fmap (LeftTB1 .Just )<$> [("accesstoken",TB1 (SText $ T.pack t)), ("refreshtoken",TB1 $ SText $ T.pack r) , ("expiresin",TB1 (SDouble $realToFrac i)) , ("tokentype",TB1 (SText $ T.pack k))]
 
 liftA4 f  i j k  l= f <$> i <*> j <*> k <*> l
 
-tableToToken = atR "token" (fmap tokenToOAuth <$> (liftA4 (,,,) <$> idxM "accesstoken" <*> idxM "refreshtoken" <*> idxM "expiresin" <*> idxM "tokentype" ))
+tableToToken :: (Show k ,KeyString k ,Monad m) => Parser
+                     (Kleisli (ReaderT (Maybe (TBData k Showable)) m))
+                     (Union (Access T.Text))
+                     ()
+                     (Maybe OAuth2Tokens)
+tableToToken = atR "token" (liftA4 tokenToOAuth <$> idxM "accesstoken" <*> idxM "refreshtoken" <*> idxM "expiresin" <*> idxM "tokentype" )
 
-transToken :: (Show k ,KeyString k ,Applicative m ,Monad m) => Maybe (TBData k Showable ) -> m (Maybe (OAuth2Tokens))
-transToken = fmap join . traverse ((fmap return) (dynPure   $ atR "token" (fmap tokenToOAuth <$> (liftA4 (,,,) <$> idxM "accesstoken" <*> idxM "refreshtoken" <*> idxM "expiresin" <*> idxM "tokentype" )) ))
+transToken :: (Show k ,KeyString k ) => TBData k Showable  -> Maybe (OAuth2Tokens)
+transToken = dynPure tableToToken
 
 oauthpoller :: PrePlugins
 oauthpoller = FPlugins "Gmail Login" "google_auth" (BoundedPlugin2 url)

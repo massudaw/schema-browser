@@ -1,7 +1,6 @@
 {-# LANGUAGE RankNTypes ,RecursiveDo,TypeFamilies,FlexibleContexts,OverloadedStrings,TupleSections #-}
 module SchemaQuery
-  (
-  createUn
+  (createUn
   ,takeMany
   ,convertChanEvent
   ,childrenRefsUnique
@@ -36,6 +35,7 @@ module SchemaQuery
   ,filterfixed
   ,readState
   ,readIndex
+  ,projunion
   )where
 import Graphics.UI.Threepenny.Core (mapEventDyn)
 
@@ -110,14 +110,15 @@ projunion inf table = res
       where
         attrs = S.fromList $ keyValue <$> tableAttrs table
 
+mergeDBRefT  (ref1,j ,i,o,k) (ref2,m ,l,p,n) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l , liftA2 (zipWith (\(i,j) (l,m) -> (i,j<>m))) o p ,unionWith mappend k n)
+
 refTable :: InformationSchema -> Table -> Dynamic DBVar
 refTable  inf (Project table (Union origin) )  = do
   refs <- mapM (refTable inf ) origin
 
-  let mergeDBRefT  (ref1,j ,i,o,k) (ref2,m ,l,p,n) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l , liftA2 (zipWith (\(i,j) (l,m) -> (i,j<>m))) o p ,unionWith mappend k n)
+  let
       dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty, pure ((,G.empty)<$> _rawIndexes table) ,never) (Le.over Le._3 (fmap (createUn (rawPK table).fmap (projunion inf table).G.toList)) .(\(DBVar2 e i j l k ) -> ([e],i,j,l,k)) <$>refs )
       dbvar (l,i,j,p,k) = DBVar2 (L.head l) i j p k
-
   return $ dbvar dbvarMerge
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
@@ -223,14 +224,14 @@ getFKRef inf predtop rtable (evs,me,old) v (Path r (FKInlineTable  j )) =  do
                              in  fmap WherePredicate (go (test (S.toList r)) l)
 
                 -- editAttr :: (TBData Key Showable -> TBData Key Showable) -> TBData Key Showable -> TBData Key Showable
-                editAttr fun  (m,i) = (m,mapComp (\(KV i) -> KV (M.alter  (fmap (mapComp (Le.over ifkttable (fmap (either (errorWithStackTrace . ("no inline table " ++) . show  ) id .fun))))) (S.map Inline r)  i )) i )
+                editAttr fun  (m,i) = (m,) <$> traComp (\(KV i) -> fmap KV (flip Le.at (traverse (traComp (Le.traverseOf ifkttable (traverse fun)))) (S.map Inline r)  i )) i
                 nextRef :: [TBData Key Showable]
                 nextRef= (concat $ catMaybes $ fmap (\i -> fmap (F.toList . _fkttable.unTB) $ M.lookup (S.map Inline r) (_kvvalues $ unTB $ snd  i) )v)
 
             (_,joinFK,_) <- getFKS rinf predtop table nextRef
             let
                 joined i = do
-                  return $ editAttr joinFK i
+                  editAttr joinFK i
 
             return (evs,me >=> joined,old <> r)
     where
@@ -286,7 +287,6 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                     -- liftIO $print (tableName table,length v,G.size tb2)
                     return (collectionPatches ref,tb2)
                   Nothing -> return (never,G.empty)
-
                 let
                     evt = (FKJoinTable i j ,  filter isPatch <$> ref)
                     isPatch (PatchRow _ ) = True
@@ -543,7 +543,7 @@ readState
   :: (Ord k ,NFData v,NFData k,Eq (Index v), Ord k, Ord v, Show k, Show v,
       G.Predicates (TBIndex v), Patch v, Index v ~ v) =>
         InformationSchema
-        -> (TBPredicate k Showable, [k ])
+        -> (TBPredicate k Showable, [k])
       -> TableK k
      -> DBRef k v
      -> STM ([SecondaryIndex k v],TableIndex k v, TChan [RowPatch k v], TVar ([SecondaryIndex k v],TableIndex k v))
@@ -892,9 +892,7 @@ refTables' inf table page pred = do
     (ref,res)  <-  transactionNoLog inf $ selectFrom (tableName table ) page Nothing  [] pred
     return (idxTid ref,res,collectionTid ref,collectionSecondaryTid ref ,patchVar $ iniRef ref)
 
-
 refTables inf table = refTables' inf table Nothing mempty
-
 
 lookAttrM  inf k (i,m) = unTB <$> M.lookup (S.singleton (Inline (lookKey inf (_kvname i) k))) (unKV m)
 

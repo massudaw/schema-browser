@@ -149,7 +149,7 @@ unIndexItensP :: (Show (KType k),Show a) =>  Int -> Int -> Maybe (PathAttr (FKey
 unIndexItensP ix o =  fmap (unIndexP (ix+ o) )
   where
     unIndexF o (PIdx ix v) = if o == ix  then v else Nothing
-    unIndexF o (PatchSet l ) =  PatchSet . Non.fromList <$> nonEmpty ( catMaybes (unIndexF o <$> F.toList l))
+    unIndexF o (PatchSet l ) =  PatchSet  <$> Non.nonEmpty ( catMaybes (unIndexF o <$> F.toList l))
     unIndexF o i = errorWithStackTrace ("unIndexF error" ++ show (o,i))
     unIndexP :: (Show (KType k),Show a) => Int -> PathAttr (FKey (KType k)) a -> Maybe (PathAttr (FKey (KType k) ) a )
     unIndexP o (PAttr  k v) =  PAttr k <$> unIndexF o v
@@ -157,7 +157,7 @@ unIndexItensP ix o =  fmap (unIndexP (ix+ o) )
     unIndexP o (PFK rel els  v) = (\mi li ->  PFK  (Le.over relOri (\i -> if isArray (keyType i) then unKArray i else i ) <$> rel) mi  li) <$> (traverse (unIndexP o) els) <*> unIndexF o v
     unIndexP o i = errorWithStackTrace ("unIndexP error" ++ show (o,i))
 
-unSOptionalP (PatchSet l ) =  PatchSet . Non.fromList <$> nonEmpty ( catMaybes (unSOptionalP <$> F.toList l))
+unSOptionalP (PatchSet l ) =  PatchSet  <$> Non.nonEmpty ( catMaybes (unSOptionalP <$> F.toList l))
 unSOptionalP (POpt i ) = i
 unSOptionalP i = Just i
 
@@ -165,7 +165,7 @@ unLeftItensP  :: (Show k , Show a) => PathAttr (FKey (KType k)) a -> Maybe (Path
 unLeftItensP = unLeftTB
   where
 
-    unLeftTB (PAttr k (PatchSet l)) = PAttr (unKOptional k) . PatchSet . Non.fromList <$> nonEmpty ( catMaybes (unSOptionalP <$> F.toList l))
+    unLeftTB (PAttr k (PatchSet l)) = PAttr (unKOptional k) . PatchSet  <$> Non.nonEmpty ( catMaybes (unSOptionalP <$> F.toList l))
     unLeftTB (PAttr k v)
       = PAttr (unKOptional k) <$> unSOptionalP v
     unLeftTB (PFun k rel v)
@@ -233,7 +233,7 @@ data PatchIndex a = PatchIndex Int (Maybe a)
 instance Patch a => Patch (NonEmpty a) where
   type Index (NonEmpty a)  = PatchIndex (Index a)
   applyIfChange j (PatchIndex i (Just a)) = Just $ Non.imap (\ix -> if ix == i then flip apply a else id ) j
-  applyIfChange j (PatchIndex i Nothing ) = fmap Non.fromList $ nonEmpty $ Non.take i j <> Non.drop (i+1) j
+  applyIfChange j (PatchIndex i Nothing ) =  Non.nonEmpty $ Non.take i j <> Non.drop (i+1) j
   createIfChange (PatchIndex i a ) = join $ fmap (fmap pure.createIfChange) a
 
 
@@ -475,7 +475,7 @@ createAttrChange :: PatchConstr k a  => PathAttr k (Index a) -> Maybe (TB Identi
 createAttrChange (PAttr  k s  ) = Attr k  <$> createIfChange s
 createAttrChange (PFun k rel s  ) = Fun k  rel <$> createIfChange s
 createAttrChange (PInline k s ) = IT k <$> (createIfChange s)
-createAttrChange (PFK rel k  b ) = flip FKT rel <$> (kvlist . fmap _tb <$> traverse createAttrChange  k) <*> createIfChange b
+createAttrChange (PFK rel k  b ) = flip FKT rel <$> traceShowId (kvlist . fmap _tb <$> traverse createAttrChange  k) <*> traceShowId (createIfChange b)
 
 
 
@@ -545,7 +545,7 @@ applyFTBM
   (Index a  -> Maybe a) -> (a -> Index a -> Maybe a) -> FTB a -> PathFTB (Index a) -> Maybe (FTB a)
 applyFTBM pr a (LeftTB1 i ) op@(POpt o) = Just $ LeftTB1 $ applyOptM pr a i o
 applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
-                      Nothing -> fmap (ArrayTB1 . Non.fromList) . nonEmpty $ (Non.take ix   i) ++ (Non.drop (ix+1) i)
+                      Nothing -> fmap ArrayTB1 . Non.nonEmpty $ (Non.take ix   i) ++ (Non.drop (ix+1) i)
                       Just p -> if ix <=  Non.length i - 1
                                 then fmap ArrayTB1 $ sequenceA $ Non.imap (\i v -> if i == ix then applyFTBM pr a v p else Just v )  i
                                 else if ix == Non.length i
@@ -553,7 +553,7 @@ applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                                       else Nothing -- errorWithStackTrace $ "ix bigger than next elem"
 
 applyFTBM pr a (IntervalTB1 i) (PInter b (p,l))
-  = IntervalTB1 <$>  if b
+  = traceShowId $ traceShow (i,l,b) $ IntervalTB1 <$>  if b
                     then (flip interval) (upperBound' i)     <$> firstT (mapExtended p) (lowerBound' i)
                     else interval (lowerBound' i) <$> firstT (mapExtended  p ) (upperBound' i)
   where

@@ -8,6 +8,7 @@ module TP.Main where
 import TP.Selector
 import Data.Unique
 import Plugins.Schema (codeOps)
+import Control.Exception
 import qualified Data.Binary as B
 import Postgresql.Backend (connRoot)
 import System.Process
@@ -259,11 +260,11 @@ authMap smvar sargs (user,pass) schemaN =
               let
                   td :: Tidings (OAuth2Tokens)
                   td = (\o -> let
-                            token = justError "" . fmap (toOAuth . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $ head o )
+                            token = justError "" . fmap (toOAuth . unTB1 . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $ head o )
                             in token) . G.toList <$> collectionTid dbmeta
-                  toOAuth v = case fmap TB1 $ F.toList $ snd $ unTB1 v :: [FTB Showable] of
-                            [a,b,c,d] -> tokenToOAuth (b,d,a,c)
-                            i -> errorWithStackTrace ("wrong token" <> show i)
+                  toOAuth v = case transToken v of
+                                Just a -> a
+                                i -> errorWithStackTrace ("wrong token" <> show i)
 
 
               return (OAuthAuth (Just (if tag then "@me" else T.pack user,td )), gmailOps)
@@ -401,6 +402,29 @@ testSync  = do
   let start = "7629481"
   runDynamic $ transaction inf $ historyLoad
   return ()
+
+testTablePersist s t w = do
+  args <- getArgs
+  let db = argsToState args
+  smvar <- createVar
+  let
+    amap = authMap smvar db ("postgres", "queijo")
+  (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
+  runDynamic $ do
+    (e,(_,i)) <- transactionNoLog inf $ selectFrom t Nothing Nothing [] (WherePredicate $ lookAccess inf t <$> w)
+    liftIO$ putStrLn "Select"
+    liftIO$ mapM print (F.toList i)
+    let table = lookTable inf t
+
+    liftIO$ (callCommand $ "rm dump/" ++ T.unpack s ++ "/"++ T.unpack t) `catch` (\e -> print (e :: SomeException))
+    liftIO$ writeSchema (s ,inf)
+    liftIO$ atomically $ modifyTMVar (mvarMap inf) (const M.empty)
+    (_,o) <- readTable inf "dump"  table []
+    liftIO$ putStrLn "Read"
+    liftIO$ mapM print (F.toList o)
+
+  return ()
+
 
 testTable s t w = do
   args <- getArgs

@@ -585,7 +585,7 @@ backFKRef
 backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . snd
   where
     reorderPK l = fmap (\i  -> L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
-    lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (keyType ko ) (keyType kn) (  v))) <$> knm
+    lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (keyType ko ) (keyType kn) v)) <$> knm
           where knm =  M.lookup ko relTable
 
 
@@ -656,7 +656,8 @@ joinRel2 tb ref table
             isLeft i = False
             isArray (ArrayTB1 i) = True
             isArray i = False
-            tbel = G.lookup (G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref) table
+            idx = (G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref)
+            tbel = G.lookup idx table
 
 
 lookGist un pk  = G.search (tbpred un pk)

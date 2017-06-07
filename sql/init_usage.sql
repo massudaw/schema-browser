@@ -5,6 +5,17 @@ update
 from pg_class c
  , metadata.view_pk   where attrelid = c.oid and attname in (select unnest(pks)) and table_name = c.relname and attnotnull = 'f';
 
+update 
+ pg_attribute set attnotnull = 't'
+from pg_class c
+ , metadata.custom_unique where attrelid = c.oid and attname in (select unnest(pks)) and table_name = c.relname and attnotnull = 'f';
+
+
+update
+ pg_attribute set attnotnull = 't'
+ where attname = 'oid'  and attnotnull = 'f';
+
+
 
 -- UPDATE NOT NULL METADATA VIEW FIELDS
 

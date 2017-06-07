@@ -894,6 +894,7 @@ double = TB1 . SDouble
 timestamp = TB1 .STime . STimestamp
 date = TB1 . STime . SDate
 
+array f = ArrayTB1 . fmap f
 opt i = LeftTB1 .  fmap i
 
 class ConstantGen v where

@@ -20,6 +20,7 @@ module Types.Index
   ,unFin
   ,Node(..)
   ,indexParam
+  ,keys
   ,queryCheck
   ,PathIndex(..)
   ,AttributePath(..)
@@ -367,7 +368,7 @@ indexPredIx (n@(Nested [(IProd _ key)] (Many[nt]) ) ,eq) r
   where
     recPred (TB1 i ) = TipPath <$> i
     recPred (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse recPred i
-    recPred (ArrayTB1 i) = fmap (ManyPath . Non.fromList ) $ nonEmpty $ catMaybes $ F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
+    recPred (ArrayTB1 i) = fmap ManyPath  $ Non.nonEmpty $ catMaybes $ F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred i ) i
     recPred i = errorWithStackTrace (show i)
 indexPredIx (a@(IProd _ key),eq) r =
   case indexField a r of
@@ -377,7 +378,7 @@ indexPredIx (a@(IProd _ key),eq) r =
   where
     recPred eq (TB1 i ) = if match eq (Right (TB1 i)) then  Just (TipPath ()) else Nothing
     recPred eq (LeftTB1 i) = fmap (NestedPath PIdOpt )$  join $ traverse (recPred eq )i
-    recPred eq (ArrayTB1 i) = fmap (ManyPath . Non.fromList ) $ nonEmpty $ catMaybes $ F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred eq i  ) i
+    recPred eq (ArrayTB1 i) = fmap ManyPath . Non.nonEmpty $ catMaybes $ F.toList $ Non.imap (\ix i -> fmap (NestedPath (PIdIdx ix )) $ recPred eq i  ) i
 indexPredIx i v= errorWithStackTrace (show (i,v))
 
 
@@ -568,16 +569,6 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
     <> (fmap notneg $ subtraction (fst $ upperBound' i  ) (fst $ upperBound' j))
   {-# INLINE penalty #-}
 
-
-
-
-
-
-
-
-
-
-
 -- Higher Level operations
 fromList pred = foldl'  acc G.empty
   where
@@ -591,6 +582,8 @@ fromList' = foldl'  acc G.empty
 
 lookup pk  = safeHead . G.search pk
 
+keys :: GiST p a -> [p]
+keys = fmap (\(_,_,k)-> k) . getEntries
 toList = getData
 
 filter f = foldl' (\m i -> G.insertL i indexParam m) G.empty  . L.filter (f .leafValue) . getEntries

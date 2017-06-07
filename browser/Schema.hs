@@ -7,6 +7,7 @@ import Data.String
 import System.Environment
 import Data.Either
 import Postgresql.Sql
+import qualified Data.IntMap as IM
 import Postgresql.Types
 import qualified Data.Poset as P
 import Control.Monad.Trans.Maybe
@@ -241,15 +242,15 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
           else return Nothing
 
        mvar <- liftIO$ atomically $ newTMVar  M.empty
-       let inf = InformationSchema schemaId schema (uid,user) oauth keyMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ fmap (\i -> (keyFastUnique i,i)) $ F.toList keyMap) (M.filterWithKey (\k v -> not $ L.elem (tableName v )  convert) $ i2u )  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist schemaRef
+       let colMap =  fmap IM.fromList $ HM.fromListWith mappend $ (\((t,_),k) -> (t,[(keyPosition k,k)])) <$>  HM.toList keyMap
+       let inf = InformationSchema schemaId schema (uid,user) oauth keyMap colMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ fmap (\i -> (keyFastUnique i,i)) $ F.toList keyMap) (M.filterWithKey (\k v -> not $ L.elem (tableName v )  convert) $ i2u )  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist schemaRef
            convert = (concat $ fmap (\(_,_,_,n) -> deps  n) ures)
            -- convert = (concat $ fmap (\(_,_,n) -> F.toList n) ures)
            deps (SqlUnion (Select _ (FromRaw _ i) _)  (Select _ (FromRaw _ j) _)) = fmap (T.pack.BS.unpack) [i,j]
            deps (Select _ _ _ ) = []
 
 
-       liftIO $ print ures
-       mapM (createTableRefs inf) (filter (not . isUnion) $ F.toList i2u)
+       mapM (createTableRefs inf [] ) (filter (not . isUnion) $ F.toList i2u)
        var <- liftIO$ atomically $ modifyTMVar (globalRef schemaVar  ) (HM.insert schema inf )
        addStats inf
          {-
@@ -268,20 +269,34 @@ isUnion _ = False
 
 modifyTMVar v  x = takeTMVar  v >>= putTMVar v. x
 
-createTableRefs :: InformationSchema -> Table -> R.Dynamic (Collection KeyUnique Showable,DBRef KeyUnique Showable)
-createTableRefs inf i = do
+createTableRefs :: InformationSchema -> [MutRec [[Rel Key]]] -> Table ->   R.Dynamic (Collection KeyUnique Showable,DBRef KeyUnique Showable)
+createTableRefs inf rec (Project i (Union l) ) = do
+  liftIO$ putStrLn $ "Loading Table: " ++ T.unpack (rawName i)
+  let keyRel t k = do
+          new <- HM.lookup (tableName i , keyValue k)(keyMap inf)
+          old <- HM.lookup (tableName t , keyValue k) (keyMap inf)
+          return (keyFastUnique old,keyFastUnique new)
+      tableRel t = M.fromList $ catMaybes $ keyRel t<$> tableAttrs t
+  res <- mapM (\t -> do
+    ((idx,sdata),ref)<- createTableRefs inf rec t
+    return ((idx,createUn (keyFastUnique <$> rawPK i) (first (const (tableMeta (mapTableK keyFastUnique i)) ) .  mapKey' (\k -> fromMaybe k (M.lookup k (tableRel t))) <$> G.toList sdata)),ref)) l
+  return (foldr mappend (M.empty,G.empty) (fst <$> res) , head $ snd <$> res)
+createTableRefs inf rec i = do
+  liftIO$ putStrLn $ "Loading Table: " ++ T.unpack (rawName i)
   let table = mapTableK keyFastUnique i
   map <- liftIO$ atomically $ readTMVar (mvarMap inf)
   if isJust (M.lookup i map)
-     then
-     liftIO $ atomically $ do
-       let
-           ref :: DBRef KeyUnique Showable
-           ref =  justError "" $ M.lookup i map
-       idx <- readTVar (idxVar ref )
-       (_,st) <- readTVar (collectionState ref)
-       return (( idx,  st) ,ref)
+     then do
+       liftIO$ putStrLn $ "Cached Table: " ++ T.unpack (rawName i)
+       liftIO $ atomically $ do
+         let
+             ref :: DBRef KeyUnique Showable
+             ref =  justError "" $ M.lookup i map
+         idx <- readTVar (idxVar ref )
+         (_,st) <- readTVar (collectionState ref)
+         return (( idx,  st) ,ref)
      else  do
+    liftIO$ putStrLn $ "New Table: " ++ T.unpack (rawName i)
     t <- liftIO$ getCurrentTime
     let
         diffIni :: [TBIdx KeyUnique Showable]
@@ -293,7 +308,7 @@ createTableRefs inf i = do
     --(ivp,vp) <- readTable inf "dump" (schemaName inf) (i)
     -- let iv = M.mapKeys (mapPredicate keyFastUnique) ivp
       --  v = mapKey' (keyFastUnique) <$> vp
-    (iv,v) <- readTable inf "dump" (schemaName inf) (i)
+    (iv,v) <- readTable inf "dump" i rec
 
     midx <-  liftIO$ atomically$ newTVar iv
     depmap <- liftIO $ atomically $readTMVar (mvarMap inf )
@@ -301,7 +316,7 @@ createTableRefs inf i = do
       move (FKJoinTable i j)  =  do
             let rtable = M.lookup (lookSTable inf j) depmap
                 rinf = fromMaybe inf $ HM.lookup (fst j) (depschema inf)
-            Just . (FKJoinTable i j,)<$> maybe (fmap snd $ createTableRefs rinf (lookSTable inf j)) return rtable
+            Just . (FKJoinTable i j,)<$> maybe (fmap snd $ createTableRefs rinf rec (lookSTable inf j)) return rtable
       move (FKInlineTable _) = return Nothing
       move i = return Nothing
       sidx :: [SecondaryIndex KeyUnique Showable]
@@ -310,7 +325,6 @@ createTableRefs inf i = do
     nestedFKS <-  fmap catMaybes $ traverse move $   pathRel <$> F.toList (rawFKS i)
     newNestedFKS <- liftIO . atomically$ traverse (traverse (cloneTChan.patchVar)) nestedFKS
     collectionState <-  liftIO$ atomically $ newTVar  (sidx,v)
-    liftIO$ print (tableName table,rawFKS i ,fmap fst (nestedFKS))
     tdeps <- liftIO$ mapM (\(j,var)-> forkIO $ forever $ catchJust notException(do
         atomically (do
             let isPatch (PatchRow _ ) = True
@@ -344,49 +358,63 @@ createTableRefs inf i = do
     liftIO$ atomically $ modifyTMVar (mvarMap inf) (M.insert i  dbref)
     return ((iv,v),dbref)
 
-loadFKSDisk inf table = do
+loadFKSDisk inf targetTable rec = do
   let
-    targetTable = lookTable inf (_kvname (fst table))
-    items = unKV . snd  $ table
-  fks <- fmap catMaybes $ snd $ F.foldl' (\(s,l) i@(Path si _ ) -> (s <> S.map keyFastUnique si ,liftA2 (:) (loadFKDisk inf table  s i) l) )  (S.empty , return []) (P.sortBy (P.comparing (RelSort . S.toList . pathRelRel)) $F.toList (rawFKS targetTable))
-  let
-    fkSet:: S.Set KeyUnique
-    fkSet =   S.map keyFastUnique . S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ (P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) $F.toList (rawFKS targetTable))
-    fkSet2:: S.Set KeyUnique
-    fkSet2 =   (S.fromList $ concat $ fmap (fmap _relOrigin .keyattri) $ fks)
-    nonFKAttrs :: [(S.Set (Rel KeyUnique) ,Column KeyUnique Showable)]
-    nonFKAttrs =  fmap (fmap unTB) $M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) (S.intersection fkSet fkSet2)) items
-  return  $ tblist' (mapTableK keyFastUnique targetTable) (fmap _tb $fmap snd nonFKAttrs <> fks )
+    (fkSet2,pre) = F.foldr (\i@(Path si _ ) (s,l)  -> (S.map keyFastUnique si <> s  ,liftA2 (:)( loadFKDisk inf s rec i ) l) )  (S.empty , return []) (P.sortBy (P.comparing (RelSort . S.toList . pathRelRel)) $F.toList (rawFKS targetTable))
+  prefks <- pre
+  return (\table ->
+    let
+      items = unKV . snd  $ table
+      fks = catMaybes $  ($table) <$>  prefks
+      fkSet:: S.Set KeyUnique
+      fkSet =   S.map keyFastUnique . S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ (P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) $F.toList (rawFKS targetTable))
+      nonFKAttrs :: [(S.Set (Rel KeyUnique) ,Column KeyUnique Showable)]
+      nonFKAttrs =  fmap (fmap unTB) $M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) (S.intersection fkSet fkSet2)) items
+   in tblist' (mapTableK keyFastUnique targetTable) (fmap _tb $fmap snd nonFKAttrs <> fks ))
 
-loadFKDisk :: InformationSchema -> TBData KeyUnique Showable -> S.Set KeyUnique -> Path (S.Set Key ) SqlOperation -> R.Dynamic (Maybe (Column KeyUnique Showable))
-loadFKDisk inf table old (Path ori (FKJoinTable rel (st,tt) ) ) = do
+loadFKDisk :: InformationSchema ->  S.Set KeyUnique -> [MutRec [[Rel Key]]] -> Path (S.Set Key ) SqlOperation -> R.Dynamic (TBData KeyUnique Showable -> Maybe (Column KeyUnique Showable))
+-- loadFKDisk _ _  _ m | traceShow m False = undefined
+loadFKDisk inf old rec (Path ori (FKJoinTable rel (st,tt) ) ) = do
   let
     targetSchema = if schemaName inf == st then   inf else justError "no schema" $ HM.lookup st (depschema inf)
     targetTable = lookTable targetSchema tt
+  ((_,mtable ),_) <- createTableRefs targetSchema rec targetTable
 
-  ((_,mtable ),_) <- createTableRefs targetSchema targetTable
-  let
-      relSet = S.fromList $ keyFastUnique . _relOrigin <$> rel
-      relU = (fmap keyFastUnique <$> rel)
-      tb  = unTB <$> F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . snd . tableNonRef' $ table))
-      fkref = joinRel2  (keyFastUnique <$> tableMeta targetTable) (replaceRel  relU <$> tb) mtable
-  case  FKT (kvlist $ _tb <$> filter (not . (`S.member` old) . _tbattrkey ) tb) relU  <$>fkref of
-    Nothing ->  return $ if F.any (isKOptional.keyType . _relOrigin) rel
-                   then Just $ FKT (kvlist $ _tb <$> filter (not . (`S.member` old) . _tbattrkey ) tb) relU (LeftTB1 Nothing)
-                   else Nothing
-    i -> return i
-loadFKDisk inf table old (Path ori (FKInlineTable to ) ) = do
-    v <- runMaybeT $ do
-      IT rel vt  <- MaybeT . return $ unTB <$> M.lookup (S.map (Inline .keyFastUnique)   ori) (unKV .snd $ table)
-      loadVt <- lift $ traverse (loadFKSDisk inf) vt
-      return $ IT rel loadVt
-    case v of
-      Nothing -> return $ if  F.any (isKOptional .keyType) ori
-                    then  Just (IT (keyFastUnique $ head $ S.toList ori ) (LeftTB1 Nothing))
-                    else  Nothing
-      v -> return v
+  return (\table ->  do
+    let
+        relSet = S.fromList $ _relOrigin <$> relU
+        relU = (fmap keyFastUnique <$> rel)
+        tb  = unTB <$> F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . snd . tableNonRef' $ table))
+        fkref = joinRel2  (keyFastUnique <$> tableMeta targetTable) ( replaceRel  relU <$> tb) mtable
+    case  FKT (kvlist $ _tb <$> filter (not . (`S.member` old) . _tbattrkey ) tb) relU  <$>  fkref of
+      Nothing ->  if F.any (isKOptional.keyType . _relOrigin) rel
+                     then Just $ FKT (kvlist $ _tb <$> filter (not . (`S.member` old) . _tbattrkey ) tb) relU (LeftTB1 Nothing)
+                     else Nothing
+      i -> i)
+loadFKDisk inf old rec (Path ori (FKInlineTable (st,tt) ) ) = do
+  let targetTable = lookTable targetSchema tt
+      targetSchema = if schemaName inf == st then   inf else justError "no schema" $ HM.lookup st (depschema inf)
+  loadVtPre <- loadFKSDisk inf  targetTable rec
+  return (\table ->
+    let v = do
+            IT rel vt  <- unTB <$> M.lookup (S.map (Inline .keyFastUnique)   ori) (unKV .snd $ table)
+            let loadVt = loadVtPre  <$> vt
+            return $ IT rel loadVt
+    in case v of
+        Nothing ->  if  F.any (isKOptional .keyType) ori
+                      then  Just (IT (keyFastUnique $ head $ S.toList ori ) (LeftTB1 Nothing))
+                      else  Nothing
+        v -> v)
 
-loadFKDisk  _ _ _ _ = return Nothing
+loadFKDisk  inf old  rec (Path ori (RecJoin i l))
+  | L.elem i rec = do
+    return  (const Nothing)
+  | otherwise = do
+    loadFKDisk inf old (i:rec) (Path ori l)
+loadFKDisk  _ _ _ _  = return (const Nothing)
+
+addAttr :: Ord k => Set k -> TBData k Showable -> Column k Showable ->  TBData k Showable
+addAttr refl  (m,i) r = (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k   ) i )) i )
 
 -- Search for recursive cycles and tag the tables
 addRecInit :: HM.HashMap Text (HM.HashMap Text Table) -> HM.HashMap Text Table -> HM.HashMap Text Table
@@ -499,13 +527,13 @@ unBinary (Binary i) = i
 
 encodeTableModification inf ltime  (TableModification id table ip)
   =CreateRow (liftTable' (meta inf) "modification_table" $ tblist $ _tb <$>  [
-                               Attr "user_name"  (txt$ snd $ username inf)
-                              ,Attr "modification_time" (timestamp ltime)
-                              ,Attr "table_name" (txt$ tableName table)
-                              ,Attr "data_index" (ArrayTB1 $ TB1 . encodeS   <$> mod_key)
-                              ,Attr "modification_data" (TB1. SBinary . BSL.toStrict . B.encode  $ firstPatchRow keyValue ip)
-                              ,Attr "schema_name" (txt $ schemaName inf)
-                              ,Attr "modification_id" (maybe (errorWithStackTrace "no id")int id)
+                              Attr "user_name"  (txt$ snd $ username inf),
+                              Attr "modification_time" (timestamp ltime),
+                              Attr "table_name" (txt$ tableName table),
+                              Attr "data_index" (array (TB1 . encodeS) mod_key),
+                              Attr "modification_data" (TB1. SBinary . BSL.toStrict . B.encode  $ firstPatchRow keyValue ip),
+                              Attr "schema_name" (txt $ schemaName inf),
+                              Attr "modification_id" (opt int id)
                               ])
   where (met,G.Idex pidx,pdata)
           = firstPatch keyValue $ patchNoRef $ case ip of
@@ -608,14 +636,10 @@ mergeCreate (Just i)  Nothing = Just i
 mergeCreate Nothing Nothing = Nothing
 
 mergeTB1 ((m,Compose k) ) ((m2,Compose k2) )
-  | otherwise = (m,Compose $ liftA2 (\(KV i ) (KV j) -> KV $ M.unionWith const i j ) k k2) -- errorWithStackTrace (show (m,m2))
-
-
-
+  = (m,Compose $ liftA2 (\(KV i ) (KV j) -> KV $ M.unionWith const i j ) k k2)
 
 type Database k v = InformationSchemaKV k v
 type DBM k v = ReaderT (Database k v) IO
-
 
 atTable k = do
   i <- ask
@@ -645,9 +669,6 @@ addStats schema = do
       )) (M.toList  varmap)
   return  schema
 
-
-
-
 lookPK :: InformationSchema -> (Set Key) -> Table
 lookPK inf pk =
       case  M.lookup pk  (pkMap inf) of
@@ -668,35 +689,42 @@ writeSchema (schema,schemaVar) = do
              createDirectory sdir
            mapM_ (uncurry (writeTable schemaVar sdir ) ) varmap
 
-tablePK t =(_rawSchemaL t ,_rawNameL t)
-writeTable :: InformationSchema -> String -> Table -> DBRef KeyUnique Showable -> IO ()
+tablePK t = (_rawSchemaL t ,_rawNameL t)
+
+writeTable :: InformationSchema -> String -> Table -> DBRef KeyUnique Showable -> IO (Collection KeyUnique Showable)
 writeTable inf s t v = do
-  print ("dumping table " <> s <> " " <> T.unpack ( tableName t))
   let tname = s <> "/" <> (fromString $ T.unpack (tableName t))
-  (sidx,iv,_,_) <- atomically $ readState inf mempty (mapTableK keyFastUnique t) (v)
-  (iidx ,_)<- atomically $ readIndex (v)
+  print ("Dumping Table: " <> tname)
+  (_,iv,_,_) <- atomically $ readState inf mempty (mapTableK keyFastUnique t) v
+  (iidx ,_)<- atomically $ readIndex v
   let sidx = first (mapPredicate (keyValue.recoverKey inf))  <$> M.toList iidx
-      sdata = fmap (\i -> mapKey' keyValue . either (error . ("can't typecheck row : \n " ++) . unlines ) id. typecheck (typeCheckTable (tablePK t)) .mapKey' (recoverKey inf).tableNonRef' $ i) $ G.toList $ iv
+      sdata = fmap (\i -> mapKey' keyValue . either (error . ("can't typecheck row : \n " ++) . unlines ) id. typecheck (typeCheckTable (tablePK t)) .mapKey' (recoverKey inf).tableNonRef' $ i) $  iv
   when (not (L.null sdata) )$
-    B.encodeFile  tname (sidx, sdata)
-
-  return ()
-
+    B.encodeFile  tname (sidx, G.toList sdata)
+  return (iidx,iv)
 
 
-liftPredicate inf tname (WherePredicate i ) = WherePredicate $ first (liftAccess inf tname )<$> i
 
-readTable :: InformationSchema -> Text -> Text -> Table -> R.Dynamic (Collection KeyUnique Showable)
-readTable inf r s t  = do
+liftPredicateF m inf tname (WherePredicate i ) = WherePredicate $ first (liftAccessF m inf tname )<$> i
+
+readTable :: InformationSchema -> Text -> Table -> [MutRec [[Rel Key]]] -> R.Dynamic (Collection KeyUnique Showable)
+readTable inf r  t  rec = do
   let tname = fromString $ T.unpack $ r <> "/" <> s <> "/" <> tableName t
+      s = schemaName inf
   has <- liftIO$ doesFileExist tname
-  (m,prev) <- if has
+  (m,prev) <- if traceShowId has
     then do
       f <- liftIO$ (Right  <$> B.decodeFile tname ) `catch` (\e -> return $ Left ("error decoding" <> tname  <> show  (e :: SomeException )))
-      return $  either (const (M.empty ,[])) (\f -> (\(m,g) -> (M.mapKeys (mapPredicate keyFastUnique . liftPredicate inf (tableName t) ) m  , fmap (mapKey' keyFastUnique . liftTable' inf (tableName t) )$ g )) $ (f :: (Map (TBPredicate Text Showable) (Int, Map Int (PageTokenF Showable)),[TBData Text Showable]))) f
-    else
+      either (\i -> do
+        liftIO$ print ("Failed Loading Dump: " ++ show t ++ " - "  ++ show i )
+        return (M.empty ,[]))
+             (\(m,g) ->
+               return (M.mapKeys (mapPredicate keyFastUnique . liftPredicateF lookupKeyName inf (tableName t) ) (M.fromList (m :: [(TBPredicate Text Showable, (Int, Map Int (PageTokenF Showable)))]))  , fmap (mapKey' keyFastUnique . liftTableF lookupKeyName inf (tableName t) )$ (g :: [TBData Text Showable] )))  (f)
+    else do
+      liftIO$ print ("Dump file not found: " ++ tname )
       return (M.empty ,[])
-  v <- fmap (createUn (keyFastUnique <$> rawPK t)) $ traverse (loadFKSDisk inf) prev
+  disk <- loadFKSDisk inf t rec
+  let v = createUn (keyFastUnique <$> rawPK t) $ (\f -> disk  f) <$> prev
   return (m,v)
 
 selectFromTable :: Text

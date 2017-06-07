@@ -235,7 +235,7 @@ lookOrigin  k (i,m) = unTB $ err $  find (( k == ). S.fromList . fmap _relOrigin
 searchToken :: TBData Key Showable -> Maybe OAuth2Tokens
 searchToken from = if (_kvname $ fst from ) == "google_auth" then   transTok   else Nothing
   where
-      transTok  = runIdentity $ transToken (Just from)
+      transTok  = transToken from
 
 
 getToken :: [TBData Key Showable] -> TransactionM (OAuth2Tokens)

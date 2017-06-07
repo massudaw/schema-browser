@@ -59,8 +59,8 @@ plugs schm authmap db plugs = do
 
 
 
-index tb item = snd $ justError ("no item" <> show item) $ indexTable [keyRef item] (tableNonRef' tb)
-index2 tb item = justError ("no item" <> show item) $ indexFieldRec item tb
+index tb item = snd $ justError ("no item" <> show (item,tb)) $ indexTable [keyRef item] (tableNonRef' tb)
+index2 tb item = justError ("no item" <> show (item,tb)) $ indexFieldRec item tb
 
 checkTime curr = do
     let

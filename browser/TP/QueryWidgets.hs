@@ -624,7 +624,7 @@ processPanelTable
    -> UI (Element, Event (RowPatch CoreKey Showable) )
 processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   let
-      inscrud = (\i j -> either (const Nothing) Just . typecheck (typeCheckTable (_rawSchemaL table,_rawNameL table)) =<< recoverEditChange i j) <$> oldItemsi <*> inscrudp
+      inscrud = recoverEditChange  <$> oldItemsi <*> inscrudp
       containsGistNotEqual old ref map = if isJust refM then (\i -> if L.null i  then True else [G.getIndex old] == L.nub (fmap G.getIndex (F.toList i)))$  (lookGist ix ref map) else False
         where ix = (_kvpk (tableMeta table))
               refM = traverse unSOptional' (getPKM ref)
@@ -705,7 +705,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
     -- # set UI.style (noneShowSpan (ReadWrite ==  rawTableType table ))
   debug <- UI.div
   let renderTyped (Pure _ ) i  = ident. renderTable  $ i
-      renderTyped (Other (Constant i) ) _ = unlines i
+      renderTyped (Other (Constant i) ) _ = unlines ("Type check error":  i)
   mapUIFinalizerT debug (\i -> if  i
                     then do
                       let gen (h,s) = do
@@ -724,7 +724,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
                       out <- mapM gen
                           [("Last", maybe "" (ident . renderTable) <$> facts oldItemsi)
                           ,("Diff", onDiff (ident.renderRowPatch ) "" <$> facts inscrudp)
-                          ,("New", maybe "" (\i -> renderTyped (typeCheckTable (_rawSchemaL table,_rawNameL table) i ) i  ) <$> facts inscrud)]
+                          ,("New" , maybe "" (\i -> renderTyped (typeCheckTable (_rawSchemaL table,_rawNameL table) i ) i  ) <$> facts inscrud)]
 
                       element debug # set children (fmap fst out ++ fmap snd out)
                       mapM (\i -> element i# method "textAreaAdjust(%1)")  (snd <$> out)
@@ -845,7 +845,7 @@ reduceOptional (Diff i )  = Diff (POpt (Just  i))
 
 reduceFKOptional rel att  Delete  = Diff $ PFK rel ((\i -> PAttr i (POpt Nothing)) <$> att) (POpt Nothing)
 reduceFKOptional rel att  Keep = Keep
-reduceFKOptional rel att  (Diff (PFK _ attn vn))= Diff $ PFK rel ((\(PAttr i j ) -> PAttr i (POpt $ Just j)) <$> attn) (POpt $ Just vn)
+reduceFKOptional rel att  (Diff (PFK _ attn vn))= Diff $ PFK rel ((\(PAttr i j ) -> PAttr (kOptional i )(POpt $ Just j)) <$> attn) (POpt $ Just vn)
 
 
 
@@ -1341,6 +1341,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
       let itemDClickE = fmap (const not) itemDClick
       bop <- ui$accumT False itemDClickE
       let evlsel' = unionWith const elsel  (const Keep <$> rumors oldItems)
+          relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
       blsel <- ui $ stepper Keep evlsel'
 
       let
@@ -1355,7 +1356,6 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
           reftb@(vpt,_,gist,sgist,_) <- ui $ refTables inf   table
           let ftdi = F.foldl' (liftA2 mergePatches)  oldItems (snd <$>  plmods)
           let
-            relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             replaceKey :: TB Identity CoreKey a -> TB Identity CoreKey a
             replaceKey =  firstTB (\k -> maybe k id  $ fmap _relTarget $ L.find ((==k)._relOrigin) $  rel)
             replaceRel a =  (fst $ search (_relOrigin $ head $ (keyattri a  )),  firstTB (\k  -> snd $ search k ) a)
@@ -1453,7 +1453,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
           prop <- ui $ stepper cv evsel
           let tds = tidings prop evsel
           let
-            fksel =  join . fmap (\box ->  (\ref -> FKT (kvlist $ fmap _tb $ ref ) rel (TB1 box) ) <$> backFKRef relTable  (fmap (keyAttr .unTB ) $ unkvlist ifk)   (box) ) <$>   tds
+            fksel =  join . fmap (\box ->  (\ref -> FKT (kvlist $ fmap _tb $ ref ) rel (TB1 box) ) <$> backFKRef relTable  (fmap (keyAttr .unTB ) $ unkvlist ifk)   box ) <$>   tds
             diffFK (Just i ) (Just j) = if tbrefM i == tbrefM j then Keep else Diff(patch j)
             diffFK (Just i ) Nothing = Delete
             diffFK Nothing Nothing = Keep
@@ -1470,7 +1470,6 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
           reftb@(vpt,_,gist,sgist,_) <- ui $ refTables inf   table
           let ftdi = flip recoverEditChange <$> tidings blsel evlsel' <*> F.foldl' (liftA2 mergePatches)  oldItems  (snd <$>  plmods)
           let
-            relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
             replaceKey :: TB Identity CoreKey a -> TB Identity CoreKey a
             replaceKey =  firstTB (\k -> maybe k id  $ fmap _relTarget $ L.find ((==k)._relOrigin) $  rel)
             replaceRel a =  (fst $ search (_relOrigin $ head $ (keyattri a  )),  firstTB (\k  -> snd $ search k ) a)
@@ -1480,7 +1479,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
 
           (celem,ediff,pretdi) <-crudUITable inf (fmap (\i -> if i then "+" else "-")$ bop ) reftb staticold (fmap (fmap (fmap (unAtom. patchfkt))) <$> plmods)  tbdata (fmap (unTB1._fkttable )<$> ftdi )
           let
-            fksel =  fmap (\box ->  maybe (FKT (kvlist []) rel (TB1 box) )(\ref -> FKT (kvlist $ fmap _tb $ ref ) rel (TB1 box) ) $ backFKRef relTable  (fmap (keyAttr .unTB ) $ unkvlist ifk)   (box) ) <$>   pretdi
+            fksel =  fmap (\box ->  maybe (FKT (kvlist []) rel (TB1 box) )(\ref -> FKT (kvlist $ fmap _tb $ ref ) rel (TB1 box) ) $ backFKRef relTable  (fmap (keyAttr .unTB ) $ unkvlist ifk)   box ) <$>   pretdi
             -- diffFK i j | traceShow (tableName table,isJust i, isJust j) False  =  undefined
             diffFK (Just i ) (Just j) =  maybe Keep Diff (diff i  j)
             diffFK (Just i ) Nothing = Delete
@@ -1502,7 +1501,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
       element top # set children [pan,head subnet2,hidden]
       return $ TrivialWidget  (tidings blsel evsel) top
 fkUITableDiff inf constr plmods  wl oldItems  tb@(FKT ilk rel  (LeftTB1 (Just tb1 ))) = do
-  tr <- fkUITableDiff inf constr (fmap (join . fmap unLeftItensP  <$>) <$> plmods)  (first unLeftKey . second (join . fmap unLeftItens <$>) <$> wl) (join . fmap unLeftItens  <$> oldItems)  (FKT (mapKV (mapComp (firstTB unKOptional) ) ilk ) (Le.over relOri unKOptional <$> rel) tb1)
+  tr <- fkUITableDiff inf constr (fmap (join . fmap unLeftItensP  <$>) <$> plmods)  (first unLeftKey . second (join . fmap unLeftItens <$>) <$> wl) (join . fmap unLeftItens  <$> oldItems)  (FKT (kvlist $ mapComp (firstTB unKOptional) <$> unkvlist ilk  ) (Le.over relOri unKOptional <$> rel) tb1)
   return $ reduceFKOptional rel (_relOrigin . head . keyattr <$> F.toList (_kvvalues ilk) )<$> tr
 
 fkUITableDiff inf constr preplmods  wl preoldItems  tb@(FKT ifk rel  (ArrayTB1 (tb1:| _)) ) = mdo
@@ -1535,7 +1534,7 @@ fkUITableDiff inf constr preplmods  wl preoldItems  tb@(FKT ifk rel  (ArrayTB1 (
      let
           widgets2 = Tra.sequenceA (  zipWith (\i j -> (i,) <$> j) [0..] $( triding <$> fks) )
           bres0 = reduceDiffListFK <$> offsetT <*>  widgets2
-          loadRes (i,j)  =  PFK rel [PAttr  (_relOrigin $ head $ keyattr $ head $ F.toList $ _kvvalues ifk) i] j
+          loadRes (i,j) = PFK rel [PAttr  (_relOrigin $ head $ keyattr $ head $ F.toList $ _kvvalues ifk) i] j
           bres = fmap (head.compact) . reduceTable <$> sequenceA ((fmap loadRes  <$> bres0) : [])
      res <- UI.div # set children [offset ,dv]
      return $  TrivialWidget bres  res
@@ -1605,8 +1604,6 @@ hoverTip2 elemIn elemOut = do
   ho <- UI.hover elemIn
   le <- UI.leave elemOut
   return $ unionWith const (const True <$> ho) (const False <$> le )
-
-
 
 tableIndexA inf metaname env =   do
   let modtable = lookTable inf tname

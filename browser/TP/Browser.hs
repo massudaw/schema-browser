@@ -134,17 +134,18 @@ addTable idClient now table  tix = (mempty,G.Idex [num idClient],[PInline "selec
                                        , IT "selection" (LeftTB1 $ Nothing)
                                            ]))
                                        ])
-removeRow idClient now tix rix =  (mempty,G.Idex [num idClient],[PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
-                          (mempty,mempty,[PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ PAtom(
-                          (mempty,mempty,[ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))]))]))])
+removeRow idClient now tix rix
+  =  (mempty,G.Idex [num idClient],[PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
+                (mempty,mempty,[PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ PAtom(
+                (mempty,mempty,[ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))]))]))])
 
-
-addRow idClient now tdi tix rix =  (mempty,G.Idex [num idClient],[PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
+addRow idClient now tdi tix rix
+  =  (mempty,G.Idex [num idClient],[PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
                           (mempty,mempty,[PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ patch(
                                               TB1 $ tblist $ fmap _tb [
                                                Attr "up_time" (inter (Interval.Finite $ time now) Interval.PosInf)
                                               ,IT "data_index"
-                                                  ( ArrayTB1 . Non.fromList .   fmap (\(i,j) -> TB1 $ tblist $ fmap _tb [Attr "key" (txt  $ keyValue i) ,Attr "val" (TB1 . SDynamic $  j) ]) $tdi)])
+                                                  ( array (\(i,j) -> TB1 $ tblist $ fmap _tb [Attr "key" (txt  $ keyValue i) ,Attr "val" (TB1 . SDynamic $  j) ]) $tdi)])
                                               ]))])
 
 time = TB1  . STime . STimestamp . utcToLocalTime utc
@@ -309,16 +310,15 @@ viewerKey inf table tix cli layoutS cliTid = mdo
   w  <- askWindow
   let diffpk = diffEvent (facts pktds ) (rumors pktds)
   ixpk<-ui$accumB 0 (pure (+1) <@diffpk)
-  onEvent ((,)<$> ixpk <@>diffpk) (\(ix,v)->traverse (\sel -> do
+  onEvent ((,)<$> ixpk <@>diffpk) (\(ix,v)->traverse (traverse (\sel -> do
     now <- liftIO$ getCurrentTime
-    let p =liftPatch (meta inf) "clients" $ addRow  (wId w) now  (M.toList sel ) tix ix
+    let p =liftPatch (meta inf) "clients" $ addRow  (wId w) now  sel  tix ix
     putPatch (patchVar dbmeta) [PatchRow p]
-    ui$registerDynamic (do
+    ui $ registerDynamic (do
       now <- liftIO$ getCurrentTime
       let d =liftPatch (meta inf) "clients" $ removeRow (wId w) now  tix ix
       putPatch (patchVar dbmeta) [PatchRow d]
-          )
-        )v)
+          ))) (Non.nonEmpty . M.toList <$> v))
 
   title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine i  )  <$> facts tds ) # set UI.class_ "col-xs-8"
   expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked filterEnabled# set UI.class_ "col-xs-1"
