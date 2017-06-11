@@ -142,6 +142,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
        let conn = schemaConn schemaVar
            schemaId = justLookH schema (schemaNameMap schemaVar)
        (oauth,ops ) <- liftIO$ authMap schema
+       color <- liftIO$ query conn "SELECT color FROM metadata.schema_style where schema = ? " (Only schemaId )
        [Only uid] <- liftIO$ query conn "select oid from metadata.\"user\" where usename = ?" (Only user)
        uniqueMap <- liftIO$join $ mapM (\(t,c,op,mod,tr) -> ((t,c),) .(\ un -> (\def ->  Key c tr (V.toList $ fmap readFModifier mod) op def un )) <$> newUnique) <$>  query conn "select o.table_name,o.column_name,ordinal_position,field_modifiers,translation from  metadata.columns o left join metadata.table_translation t on o.column_name = t.column_name   where table_schema = ? "(Only schema)
        res2 <- liftIO$ fmap ( (\i@(t,c,j,k,del,l,m,d,z,b,typ)-> (t,) $ (\ty -> (justError ("no unique" <> show (t,c,fmap fst uniqueMap)) $  M.lookup (t,c) (M.fromList uniqueMap) )  (join $ fromShowable2 (mapKType ty) .  BS.pack . T.unpack <$> join (fmap (\v -> if testSerial v then Nothing else Just v) (join $ listToMaybe. T.splitOn "::" <$> m) )) ty )  (createType  (j,k,del,l,maybe False testSerial m,d,z,b,typ)) )) <$>  query conn "select table_name,column_name,is_nullable,is_array,is_delayed,is_range,col_def,is_composite,type_schema,type_name ,atttypmod from metadata.column_types where table_schema = ?"  (Only schema)
@@ -243,7 +244,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
 
        mvar <- liftIO$ atomically $ newTMVar  M.empty
        let colMap =  fmap IM.fromList $ HM.fromListWith mappend $ (\((t,_),k) -> (t,[(keyPosition k,k)])) <$>  HM.toList keyMap
-       let inf = InformationSchema schemaId schema (uid,user) oauth keyMap colMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ fmap (\i -> (keyFastUnique i,i)) $ F.toList keyMap) (M.filterWithKey (\k v -> not $ L.elem (tableName v )  convert) $ i2u )  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist schemaRef
+       let inf = InformationSchema schemaId schema (fmap unOnly $ listToMaybe color) (uid,user) oauth keyMap colMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ fmap (\i -> (keyFastUnique i,i)) $ F.toList keyMap) (M.filterWithKey (\k v -> not $ L.elem (tableName v )  convert) $ i2u )  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist schemaRef
            convert = (concat $ fmap (\(_,_,_,n) -> deps  n) ures)
            -- convert = (concat $ fmap (\(_,_,n) -> F.toList n) ures)
            deps (SqlUnion (Select _ (FromRaw _ i) _)  (Select _ (FromRaw _ j) _)) = fmap (T.pack.BS.unpack) [i,j]
@@ -697,8 +698,8 @@ writeTable inf s t v = do
   print ("Dumping Table: " <> tname)
   (_,iv,_,_) <- atomically $ readState inf mempty (mapTableK keyFastUnique t) v
   (iidx ,_)<- atomically $ readIndex v
-  let sidx = first (mapPredicate (keyValue.recoverKey inf))  <$> M.toList iidx
-      sdata = fmap (\i -> mapKey' keyValue . either (error . ("can't typecheck row : \n " ++) . unlines ) id. typecheck (typeCheckTable (tablePK t)) .mapKey' (recoverKey inf).tableNonRef' $ i) $  iv
+  let sidx = first (mapPredicate (keyPosition.recoverKey inf))  <$> M.toList iidx
+      sdata = fmap (\i -> mapKey' keyPosition . either (error . ("can't typecheck row : \n " ++) . unlines ) id. typecheck (typeCheckTable (tablePK t)) .mapKey' (recoverKey inf).tableNonRef' $ i) $  iv
   when (not (L.null sdata) )$
     B.encodeFile  tname (sidx, G.toList sdata)
   return (iidx,iv)
@@ -712,14 +713,14 @@ readTable inf r  t  rec = do
   let tname = fromString $ T.unpack $ r <> "/" <> s <> "/" <> tableName t
       s = schemaName inf
   has <- liftIO$ doesFileExist tname
-  (m,prev) <- if traceShowId has
+  (m,prev) <- if has
     then do
       f <- liftIO$ (Right  <$> B.decodeFile tname ) `catch` (\e -> return $ Left ("error decoding" <> tname  <> show  (e :: SomeException )))
       either (\i -> do
         liftIO$ print ("Failed Loading Dump: " ++ show t ++ " - "  ++ show i )
         return (M.empty ,[]))
              (\(m,g) ->
-               return (M.mapKeys (mapPredicate keyFastUnique . liftPredicateF lookupKeyName inf (tableName t) ) (M.fromList (m :: [(TBPredicate Text Showable, (Int, Map Int (PageTokenF Showable)))]))  , fmap (mapKey' keyFastUnique . liftTableF lookupKeyName inf (tableName t) )$ (g :: [TBData Text Showable] )))  (f)
+               return (M.fromList $ first (mapPredicate keyFastUnique . liftPredicateF lookupKeyPosition inf (tableName t) ) <$> m   , fmap (mapKey' keyFastUnique . liftTableF lookupKeyPosition inf (tableName t) )$ g))  f
     else do
       liftIO$ print ("Dump file not found: " ++ tname )
       return (M.empty ,[])

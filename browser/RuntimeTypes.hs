@@ -81,6 +81,7 @@ data InformationSchemaKV k v
   = InformationSchema
   { schemaId :: Int
   , schemaName :: Text
+  , schemaColor :: Maybe Text
   , username :: UserTable
   , authtoken :: Auth
   , _keyMapL :: HM.HashMap (Text,Text) k
@@ -237,6 +238,7 @@ data FPlugins k =
       , _bounds :: Text
       , _plugAction :: FPlugAction k
       }
+
 data FPlugAction k
   = StatefullPlugin [(([VarDef ],[VarDef]),FPlugAction k) ]
   | BoundedPlugin2  (ArrowReaderM IO)
@@ -244,7 +246,8 @@ data FPlugAction k
   | DiffPurePlugin (ArrowReaderDiffM Identity)
   | DiffIOPlugin (ArrowReaderDiffM IO)
 
-type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Union (Access Text)) () (Maybe (Index (TBData Text Showable)))
+type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) [Access Text] () (Maybe (Index (TBData Text Showable)))
+
 
 pluginStatic = pluginStatic' . _plugAction
 pluginAction = pluginAction' . _plugAction
@@ -529,16 +532,17 @@ genPredicateFull
 genPredicateFull i (Rec _ _) = Nothing  -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (Point _) = Nothing -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (IProd b l) =  (\i -> PrimColl (IProd b l,Right i ))  <$> b
-genPredicateFull i n@(Nested p l ) = fmap (\(a,b) -> (Nested p (Many[a]) , b )) <$> genPredicateFullU i l
+genPredicateFull i n@(Nested p (Many l) ) = fmap (\(a,b) -> (Nested p (Many[a]) , b )) <$> genPredicateFullU i l
+genPredicateFull i n@(Nested p (ISum l) ) = fmap (\(a,b) -> (Nested p (Many[a]) , b )) <$> genPredicateFullU i l
 genPredicateFull _ i = errorWithStackTrace (show i)
 
 genPredicateFullU
   :: Show a =>
      t
-     -> Union (Access a)
+     -> [Access a]
      -> Maybe (BoolCollection (Access a, Either a1 UnaryOperator))
-genPredicateFullU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
-genPredicateFullU i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
+genPredicateFullU i (l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
+genPredicateFullU i (l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 
 notException e =  if isJust eb || isJust es || isJust as then Nothing else Just e
   where

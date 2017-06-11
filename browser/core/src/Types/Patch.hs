@@ -475,7 +475,7 @@ createAttrChange :: PatchConstr k a  => PathAttr k (Index a) -> Maybe (TB Identi
 createAttrChange (PAttr  k s  ) = Attr k  <$> createIfChange s
 createAttrChange (PFun k rel s  ) = Fun k  rel <$> createIfChange s
 createAttrChange (PInline k s ) = IT k <$> (createIfChange s)
-createAttrChange (PFK rel k  b ) = flip FKT rel <$> traceShowId (kvlist . fmap _tb <$> traverse createAttrChange  k) <*> traceShowId (createIfChange b)
+createAttrChange (PFK rel k  b ) = flip FKT rel <$> (kvlist . fmap _tb <$> traverse createAttrChange  k) <*> (createIfChange b)
 
 
 
@@ -553,7 +553,7 @@ applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                                       else Nothing -- errorWithStackTrace $ "ix bigger than next elem"
 
 applyFTBM pr a (IntervalTB1 i) (PInter b (p,l))
-  = traceShowId $ traceShow (i,l,b) $ IntervalTB1 <$>  if b
+  =  IntervalTB1 <$>  if b
                     then (flip interval) (upperBound' i)     <$> firstT (mapExtended p) (lowerBound' i)
                     else interval (lowerBound' i) <$> firstT (mapExtended  p ) (upperBound' i)
   where

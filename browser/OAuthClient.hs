@@ -40,7 +40,7 @@ liftA4 f  i j k  l= f <$> i <*> j <*> k <*> l
 
 tableToToken :: (Show k ,KeyString k ,Monad m) => Parser
                      (Kleisli (ReaderT (Maybe (TBData k Showable)) m))
-                     (Union (Access T.Text))
+                     [Access T.Text]
                      ()
                      (Maybe OAuth2Tokens)
 tableToToken = atR "token" (liftA4 tokenToOAuth <$> idxM "accesstoken" <*> idxM "refreshtoken" <*> idxM "expiresin" <*> idxM "tokentype" )
@@ -82,7 +82,7 @@ oauthpoller = FPlugins "Gmail Login" "google_auth" (BoundedPlugin2 url)
 
 readHistory :: PluginTable (Maybe (TBData T.Text Showable))
 readHistory = proc x -> do
-  madded <- atMA "user,messagesAdded->messages" (tb) -< ()
+  madded <- atMA "user,messagesAdded->messages" tb -< ()
   mdeleted <- atMA "user,messagesDeleted->messages" (idxM "id")  -< ()
   -- labelAdded <- atA "labelsAdded"  ((,) <$> idxK "id" <*> idxK "labels")  -< ()
   -- labelDeleted <- atA "messagesDeleted"   -< ()

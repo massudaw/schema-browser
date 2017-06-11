@@ -152,13 +152,13 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
 
             tdib <- ui $ stepper Nothing (fmap snd <$> evsel)
             let tdi = tidings tdib (fmap snd <$> evsel)
-            (el,_,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi) reftb [] [] (allRec' (tableMap inf) $ lookTable inf tname)  tdi
+            (el,_) <- crudUITable inf  reftb [] [] (allRec' (tableMap inf) $ lookTable inf tname)  tdi
 
             mapUIFinalizerT innerCalendar (\i ->
               createLayers innerCalendar tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   i)) (filtering tb v)
 
             stat <- UI.div  # sinkDiff text (show . M.lookup pred <$>   (reftb ^. _1))
-            edit <- UI.div # set children el # sink UI.style  (noneShow . isJust <$> tdib)
+            edit <- UI.div # set children [el] # sink UI.style  (noneShow . isJust <$> tdib)
             UI.div # set children [stat,edit]
             ) pcal
           ) selected

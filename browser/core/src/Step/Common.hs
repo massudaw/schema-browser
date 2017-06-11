@@ -1,5 +1,5 @@
 {-# LANGUAGE TypeFamilies,Arrows,OverloadedStrings,DeriveFoldable,DeriveTraversable,StandaloneDeriving,FlexibleContexts,NoMonomorphismRestriction,Arrows,FlexibleInstances, DeriveGeneric,DeriveFunctor  ,GeneralizedNewtypeDeriving,TupleSections #-}
-module Step.Common (PluginTable,Parser(..),Access(..),ArrowReaderM,ArrowReader,KeyString(..),BoolCollection(..),WherePredicateK(..),WherePredicate(..),TBPredicate(..),mapPredicate ) where
+module Step.Common (PluginTable,Parser(..),Access(..),ArrowReaderM,ArrowReader,KeyString(..),BoolCollection(..),WherePredicateK(..),WherePredicate(..),TBPredicate(..),mapPredicate ,static) where
 
 import Types.Common
 import Control.Arrow.Transformer.Static
@@ -45,12 +45,13 @@ instance Monoid (WherePredicateK k) where
 data Parser m s a b = P (s,s) (m a b) deriving Functor
 
 type ArrowReader  = ArrowReaderM IO
-type PluginTable v = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) Identity)) (Union (Access Text)) () v
+type PluginTable v = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) Identity)) ([Access Text]) () v
 
-type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Union (Access Text)) () (Maybe (TBData  Text Showable))
+type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) ([Access Text]) () (Maybe (TBData  Text Showable))
 
 deriving instance Functor m => Functor (Kleisli m i )
 
+static (P i _ ) = i
 
 
 
@@ -58,7 +59,7 @@ newtype StaticEnv  m t k v = StaticEnv (StaticArrow ((,) (t,t))  m  k v ) derivi
 
 instance (Monoid s ,Applicative (a i),Monoid m) => Monoid (StaticEnv a s i m) where
   mempty = StaticEnv $ StaticArrow (mempty ,pure mempty)
-  mappend (StaticEnv (StaticArrow (i , l))) (StaticEnv (StaticArrow( j ,m ))) =  StaticEnv $ StaticArrow  (mappend i j,liftA2 mappend l  m )
+  mappend (StaticEnv (StaticArrow (i , l))) (StaticEnv (StaticArrow (j ,m ))) =  StaticEnv $ StaticArrow  (mappend i j,liftA2 mappend l  m )
 
 instance (Monoid s ,Arrow m)  => Arrow (Parser m s) where
   arr f = (P mempty (arr f ))
@@ -67,6 +68,7 @@ instance (Monoid s ,Arrow m)  => Arrow (Parser m s) where
 instance (Monoid s,Arrow m) => Category (Parser m s) where
    id = P mempty id
    P i j . P l  m = P (i <> l) (j . m  )
+
 
 instance Applicative m => Applicative (Kleisli m a) where
   pure i = Kleisli (const (pure i ))
@@ -113,7 +115,6 @@ instance (Monoid s ,Applicative (a i) , IsString m) => IsString (Parser a s i m)
   fromString s = pure (fromString s)
 
 
-instance (Monoid s ,Applicative (a i),Monoid m) => Monoid (Parser a s i m) where
-  mempty = P mempty (pure mempty)
-  mappend (P i  l) (P j m ) =  P (mappend i j) (liftA2 mappend l  m )
+instance (Monoid s ,Monad e ) => Monoid (Parser (Kleisli e) s a m) where
+  mappend (P i  (Kleisli l)) (P j (Kleisli m) ) =  P (mappend i j) (Kleisli (\i -> l i >>   m i ))
 

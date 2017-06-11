@@ -133,15 +133,14 @@ chartWidget body (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
                     let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup pk j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
                     tdib <- ui $ stepper Nothing (join <$> evsel)
                     let tdi = tidings tdib (join <$> evsel)
-                    (el,ediff,_) <- crudUITable inf ((\i -> if isJust i then "+" else "-") <$> tdi)  reftb [] [] (allRec' (tableMap inf) $ t)  tdi
-                    ui $ onEventDyn (pure <$> ediff) (liftIO .  putPatch (reftb ^. _5 ) .fmap PatchRow )
+                    (el,_) <- crudUITable inf   reftb [] [] (allRec' (tableMap inf) $ t)  tdi
                     mapUIFinalizerT charts
                       (\i -> do
                         calendarAddSource charts chart t (renderShowable <$> fields ) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .   fmap (snd.proj) $ L.sortBy (comparing (G.getIndex))$ G.toList i))
                         ui $ registerDynamic (fmap fst $ runDynamic $ evalUI charts $ calendarRemoveSource charts t))
                        (v)
-                    mapM (\i -> element i # sink UI.style  (noneShow . isJust <$> tdib)) el
-                    UI.div # set children (charts:el) # set UI.class_ "row"
+                    element el # sink UI.style  (noneShow . isJust <$> tdib)
+                    UI.div # set children [charts,el] # set UI.class_ "row"
                                    ) ref) inpCal
 
             element calendar # sink children ( catMaybes .F.toList <$> facts edits)

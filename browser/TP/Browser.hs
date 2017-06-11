@@ -198,7 +198,14 @@ addClient clientId metainf inf table row =  do
 
 
 
-layFactsDiv i j =  if i then ("col-xs-" <> (show $  12 `div` fromIntegral (max 1 $ j))) else "col-xs-12"
+layFactsDiv i j =  case i of
+                     Vertical -> "col-xs-" <> (show $  12 `div` fromIntegral (max 1 $ j))
+                     Horizontal -> "col-xs-12"
+
+data Layout
+  = Vertical
+  | Horizontal
+  deriving(Eq,Ord,Show)
 
 chooserTable inf bset cliTid cli = do
   let
@@ -207,10 +214,15 @@ chooserTable inf bset cliTid cli = do
       (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred2))
   translationDb <- ui $ transactionNoLog  (meta inf) $
       (fst <$> (selectFromTable "table_name_translation" Nothing Nothing []  pred2 ))
-  layout <- checkedWidget (pure False)
+  layout <- buttonDivSet [Vertical,Horizontal] (pure (Just Vertical))
+      (\i ->UI.button
+          # set UI.class_ "buttonSet label"
+          # set text (show i)
+          # set UI.style [("font-size","smaller"),("font-weight","bolder")]
+          )
   body <- UI.div
   el <- ui $ accumDiffCounter (\ix -> evalUI body  . (\((table,sub))-> do
-    header <- UI.h3
+    header <- UI.h4
         # set UI.class_ "header"
         # sink0 text (facts $ T.unpack . lookDesc inf table <$> collectionTid translationDb)
     let
@@ -229,28 +241,26 @@ chooserTable inf bset cliTid cli = do
     body <-  do
             if L.length sub == 1
                then do
-                 viewerKey inf table ix cli  (triding layout ) cliTid
+                 viewerKey inf table ix cli cliTid
                else do
               els <- mapM (\t -> do
                   l <- UI.h4 #  set text (T.unpack $fromMaybe (rawName t)  $ rawTranslation t) # set UI.class_ "col-xs-12 header"
-                  b <- viewerKey inf t ix cli  (triding layout )cliTid
+                  b <- viewerKey inf t ix cli  cliTid
                   element b # set UI.class_ "col-xs-12"
                   UI.div # set children [l,b]
                   ) sub
               UI.div # set children els
-    UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFactsDiv <$> triding layout <*> fmap M.size (triding bset))# set UI.style [("border","2px dotted gray")]
+    UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFactsDiv <$> triding layout <*> fmap M.size (triding bset))# set UI.style [("border","2px dotted "),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf))]
                               ).fst)                                  ( M.fromList . fmap (\i -> (i,())) . M.toList <$> triding bset)
 
   let sortTable els ord = fmap snd $ L.sortBy (flip $ comparing fst) $ fmap (first (\i -> tableOrder inf (fst i) ord )) els
-  element body # sink0 UI.children (facts $ sortTable <$> fmap M.toList el <*> collectionTid orddb) # set UI.class_ "col-xs-12"
-  element layout  # set UI.class_ "col-xs-1"
+  element body # sink0 UI.children (facts $ sortTable <$> fmap M.toList el <*> collectionTid orddb)
   return [getElement layout ,body]
 
 viewerKey
   ::
-      InformationSchema -> Table -> Int ->  Int -> Tidings Bool -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
-viewerKey inf table tix cli layoutS cliTid = mdo
-  let layout = layFactsDiv <$> layoutS <*> pure 2
+      InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
+viewerKey inf table tix cli cliTid = mdo
   iv   <- currentValue (facts cliTid)
   let
       lookT,lookPK :: TBData Key Showable -> Maybe (Int,TBData Key Showable)
@@ -304,7 +314,7 @@ viewerKey inf table tix cli layoutS cliTid = mdo
   itemList <- listBoxElEq (\l m -> maybe False id $ liftA2 (\i j ->G.getIndex i == G.getIndex j) l m) itemListEl ((Nothing:) . fmap Just <$> res4) (Just <$> tds) (pure id) (pure (maybe id attrLine))
   let tds = (fmap join  $ triding itemList)
 
-  (cru,ediff,pretdi) <- crudUITable inf (pure "+")  reftb [] [] (allRec' (tableMap inf) table) tds
+  (cru,pretdi) <- crudUITable inf   reftb [] [] (allRec' (tableMap inf) table) tds
   let pktds = fmap getPKM <$> tds
   dbmeta  <- liftIO$ prerefTable (meta inf)(lookTable (meta inf ) "clients")
   w  <- askWindow
@@ -324,11 +334,10 @@ viewerKey inf table tix cli layoutS cliTid = mdo
   expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked filterEnabled# set UI.class_ "col-xs-1"
   evc <- UI.checkedChange expand
   filterEnabled <- ui $ stepper False evc
-  insertDiv <- UI.div # set children [title,head cru] # set UI.class_ "container-fluid"
-  insertDivBody <- UI.div # set children [insertDiv,last cru]
+  insertDiv <- UI.div # set children [title] # set UI.class_ "container-fluid"
+  insertDivBody <- UI.div # set children [insertDiv,cru]
   element sortList # sink UI.style  (noneShow <$> filterEnabled) # set UI.class_ "col-xs-4"
   element offset # set UI.class_ "col-xs-2"
   itemSel <- UI.div # set children ( [expand , filterInp, getElement offset ,getElement sortList] )
   itemSelec <- UI.div # set children [itemSel,getElement itemList]
-  mapM (\i -> element i # sink0 UI.class_ (facts $ layout)) [itemSelec,insertDivBody]
   UI.div # set children ([itemSelec,insertDivBody ] )

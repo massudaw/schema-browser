@@ -53,9 +53,9 @@ findFKAttr l v =   case fmap  (fmap unF )$ L.find (\(k,v) -> not $ L.null $ L.in
       Just (k ,i) -> errorWithStackTrace (show l)
       Nothing -> Nothing
 
-replaceU ix i (Many nt) = Many (fmap (replace ix i) nt )
+replaceU ix i (Many nt) = (fmap (replace ix i) nt )
 
-replace ix i (Nested k nt) = Nested k (replaceU ix i nt)
+replace ix i (Nested k nt) = Nested k (Many $ replaceU ix i nt)
 replace ix i (Point p)
   | ix == p = Rec ix i
   | otherwise = (Point p)
@@ -86,8 +86,8 @@ indexFieldRec n@(Nested l (Many[nt]) ) v = join $ fmap joinFTB . traverse (index
 indexFieldRec n@(Nested l nt) v = join $ fmap joinFTB . traverse (indexFieldRecU nt)  . _fkttable.  unTB <$> findFK (iprodRef <$> l) v
 indexFieldRec n v = errorWithStackTrace (show (n,v))
 
-genPredicateU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
-genPredicateU i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
+genPredicateU i (l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
+genPredicateU i (l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
 
 genPredicate o (IProd b l) =  (\i -> PrimColl (IProd b l,Right (if o then i else Not i ) )) <$> b
 genPredicate i n@(Nested p  l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> if i then genPredicate i a else  Nothing ) <$> p
@@ -95,20 +95,19 @@ genPredicate _ i = errorWithStackTrace (show i)
 
 genNestedPredicate n i v = fmap (\(a,b) -> (Nested n (Many [a]) , b )) <$> genPredicate i v
 
-hasProd :: (Access Key -> Bool) -> Union (Access Key) ->  Bool
-hasProd p (Many i) = any p i
-hasProd p i = False
+hasProd :: (Access Key -> Bool) -> [Access Key] ->  Bool
+hasProd p i = any p i
 
-findProd :: (Access Key -> Bool) -> Union (Access Key) -> Maybe (Access Key)
-findProd p (Many i) = L.find p i
-findProd p i = Nothing
+findProd :: (Access Key -> Bool) -> [Access Key] -> Maybe (Access Key)
+findProd p i = L.find p i
 
 isNested :: [Access Key] -> Access Key -> Bool
 isNested p (Nested l i) = L.sort (iprodRef <$> p) == L.sort (iprodRef <$>l)
-isNested p i =  False
+-- isNested p i =  False
 
-uNest :: Access Key -> Union (Access Key)
-uNest (Nested pn i) = i
+uNest :: Access Key -> [Access Key]
+uNest (Nested pn (Many i)) = i
+uNest (Nested pn (ISum i)) = i
 
 
 indexer :: Text -> [Access Text]

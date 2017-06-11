@@ -74,6 +74,8 @@ col i l =   i # set   UI.class_ ("col-xs-" ++ show l)
 
 
 
+borderSchema inf  = [("border", "solid 1px" <> maybe "grey" (('#':).T.unpack) (schemaColor inf))]
+
 setup
   ::  TMVar DatabaseSchema ->  [String] -> [Plugins] -> Window -> UI ()
 setup smvar args plugList w = void $ do
@@ -84,14 +86,11 @@ setup smvar args plugList w = void $ do
   inf <- ui $ fmap (justError ("no schema" <> show (schema bstate))) $ traverse (\i -> loadSchema smvar (T.pack i)  (user bstate)  amap plugList) $ schema  bstate
   (cli,cliTid) <- ui $ addClient (fromIntegral $ wId w) metainf inf ((\t -> lookTable inf . T.pack $ t) <$> tablename bstate  ) (rowpk bstate)
   (evDB,chooserItens) <- databaseChooser smvar metainf bstate plugList
-  body <- UI.div# set UI.class_ "col-xs-12"
+  body <- UI.div# set UI.class_ "row"
   return w # set title (host bstate <> " - " <>  dbn bstate)
-  hoverBoard<-UI.div # set UI.style [("float","left"),("height","100vh"),("width","15px")]
-  he <- fmap (const True) <$> UI.hover hoverBoard
 
-  bhe <- ui $stepper True he
 
-  menu <- checkedWidget (fmap not (fmap not (tidings bhe he)))
+  menu <- checkedWidget (pure True)
   cliZone <- jsTimeZone
   metadataNav <- mapUIFinalizerT body (traverse
         (\inf -> sequenceA $ (M.fromList [("Map",fmap (^._2) <$>mapWidgetMeta inf)
@@ -103,13 +102,20 @@ setup smvar args plugList w = void $ do
   nav  <- buttonDivSet  ["Map","Account","Agenda","Chart","Browser","Metadata"] (pure $ args `atMay` 6  )(\i -> do
     UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right" # sink  UI.style (noneShow . (maybe True (\i -> isJust .nonEmpty $ i).join . fmap (M.lookup i) ) <$> facts metadataNav ))
   element nav # set UI.class_ "col-xs-5 pull-right"
-  chooserDiv <- UI.div # set children  ([getElement menu] <> chooserItens <> [getElement nav ] ) # set UI.style [("align-items","flex-end"),("height","7vh"),("width","100%")] # set UI.class_ "col-xs-12"
-  container <- UI.div # set children [chooserDiv , body] # set UI.class_ "container-fluid"
+  chooserDiv <- UI.div
+      # set children  ([getElement menu] <> chooserItens <> [getElement nav ])
+      # set UI.style [("align-items","flex-end")]
+      # set UI.class_ "row"
+      # sink0 UI.style (([("align-items","flex-end")] ++ ). maybe [] borderSchema <$> facts evDB)
+  container <- UI.div
+      # set children [chooserDiv , body]
+      # set UI.class_ "container-fluid"
 
+  element body # sink0 UI.style (([("align-items","flex-end")] ++ ). maybe [] borderSchema <$> facts evDB)
   let
     expand True = "col-xs-10"
     expand False = "col-xs-12"
-  addBody  [return hoverBoard,return container]
+  addBody  [return container]
   mapUIFinalizerT body (traverse (\inf-> mdo
     let
       kitems = F.toList (pkMap inf)
@@ -133,11 +139,14 @@ setup smvar args plugList w = void $ do
     posSel <- positionSel
     bd <- UI.div  # sink0 UI.class_ (facts $ expand <$> triding menu)
     (sidebar,calendarT) <- calendarSelector
-    tbChooser <- UI.div # set UI.class_ "col-xs-2"# set UI.style [("height","90vh"),("overflow","hidden")] # set children [sidebar,posSel ^._1,getElement bset]# sink0 UI.style (facts $ noneShow <$> triding menu)
+    tbChooser <- UI.div
+        # set UI.class_ "col-xs-2"
+        # set UI.style ([("height","90vh"),("overflow","hidden")] ++ borderSchema inf)
+        # set children [sidebar,posSel ^._1,getElement bset]
+        # sink0 UI.style (facts $ noneShow <$> triding menu)
     element body # set children [tbChooser,bd]
-    let
-
-
+    element bd
+        # set UI.style ([("height","90vh"),("overflow","hidden")] ++ borderSchema inf)
     tfilter <-  mapUIFinalizerT bd (\nav-> do
       bdo <- UI.div
       element bd # set children [bdo]
@@ -163,7 +172,7 @@ setup smvar args plugList w = void $ do
               metanav <- buttonDivSet metaOpts (pure iniOpts) displayOpts
               element metanav # set UI.class_ "col-xs-5 pull-right"
               metabody <- UI.div # set UI.class_ "col-xs-10"
-              element bdo # set children [getElement metanav,metabody] # set UI.style [("display","block")]
+              element bdo # set children [getElement metanav,metabody] # set UI.class_ "row" # set UI.style [("display","block")]
               mapUIFinalizerT metabody (\(nav,tables)-> case nav  of
                 "Poll" -> do
                     els <- sequence      [ metaAllTableIndexA inf "polling" [(keyRef "schema",Left (schId,Equals) ) ]
@@ -206,7 +215,7 @@ setup smvar args plugList w = void $ do
          )  (triding nav)
     return tfilter
       ) )  evDB
-  element body #  set UI.style [("width","100%")]
+  element body
 
 
 listDBS ::  InformationSchema -> Text -> Dynamic (Tidings [(Text,Text)])
@@ -281,7 +290,6 @@ databaseChooser smvar metainf sargs plugList = do
       (pure id)
       (pure (line . T.unpack ))
   let dbsW = TrivialWidget ((\i j ->  join $ (\k -> (db, ) <$> L.find ((==k).fst) j) <$> i ) <$> triding dbsWPre <*> dbs) (getElement dbsWPre)
-  schemaEl <- flabel # set UI.text "schema"
   cc <- currentValue (facts $ triding dbsW)
   let dbsWE = rumors $ triding dbsW
   dbsWB <-  ui $stepper cc dbsWE
@@ -328,13 +336,13 @@ databaseChooser smvar metainf sargs plugList = do
 
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
   genS <- mapUIFinalizerT (getElement dbsW) (traverse genSchema) dbsWT
-  authBox <- UI.div # sink children (maybeToList <$> facts genS) # set UI.class_ "col-xs-4" # set UI.style [("border", "gray solid 2px")]
+  authBox <- UI.div # sink children (maybeToList <$> facts genS) # set UI.class_ "col-xs-4"
   let auth = authMap smvar sargs (user sargs ,pass sargs )
   inf <- ui $traverse (\i -> loadSchema smvar (T.pack i ) (user sargs) auth plugList ) (schema sargs)
   chooserB  <- ui $ stepper inf schemaE
   let chooserT = tidings chooserB schemaE
   element authBox  # sink UI.style (facts $ (\a b -> noneShow $  fromMaybe True $  liftA2 (\(db,(sc,ty)) (csch) -> if sc == (schemaName csch )then False else True ) a b )<$>    dbsWT <*> chooserT )
-  schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [ schemaEl , getElement dbsW]
+  schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [getElement dbsW]
   return $ (chooserT,[schemaSel ]<>  [authBox] )
 
 createVar :: IO (TMVar DatabaseSchema)
