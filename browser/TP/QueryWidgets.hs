@@ -757,8 +757,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   return (out, fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffMerge,diffDel] )
 
 
-method s i = do
-  i >>= runFunction . ffi s
+method s i = i >>= \e -> runFunctionDelayed e . ffi s $ e
 
 showFKText v = (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v)
 
@@ -1143,8 +1142,8 @@ buildPrim fm tdi i = case i of
             pk <- ui $ stepper v  pke
             let pkt = tidings pk (diffEvent pk pke)
             sp <- UI.div # set UI.children [inputUI ]
-            runFunction$ ffi "new jscolor(%1)" inputUI
-            onChanges f (\f -> runFunction $ ffi "updateColor(%1,%2)" inputUI (maybe "FFFFFF" renderPrim  f))
+            runFunctionDelayed inputUI  $ ffi "new jscolor(%1)" inputUI
+            onChanges f (\f -> runFunctionDelayed inputUI  $ ffi "updateColor(%1,%2)" inputUI (maybe "FFFFFF" renderPrim  f))
             return $ TrivialWidget pkt sp
          z -> do
             oneInput tdi []
@@ -1471,7 +1470,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
             staticold :: [(TB Identity CoreKey () ,Tidings(Maybe (TB Identity CoreKey (Showable))))]
             staticold  =  second (fmap (fmap replaceKey )) . first replaceKey  <$> filter (all (\i ->  not (isInlineRel i ) &&  ((_relOperator i) == Equals)). keyattri.fst ) nonInjRefs
 
-          (celem,pretdi) <-dynCrudUITable inf (fmap (\i -> if i then "+" else "-")$ bop ) reftb staticold (fmap (fmap (fmap (unAtom. patchfkt))) <$> plmods)  tbdata (fmap (unTB1._fkttable )<$> ftdi )
+          (celem,pretdi) <- dynCrudUITable inf (fmap (\i -> if i then "+" else "-")$ bop ) reftb staticold (fmap (fmap (fmap (unAtom. patchfkt))) <$> plmods)  tbdata (fmap (unTB1._fkttable )<$> ftdi )
           let
             fksel =  fmap (\box ->  maybe (FKT (kvlist []) rel (TB1 box) )(\ref -> FKT (kvlist $ fmap _tb $ ref ) rel (TB1 box) ) $ backFKRef relTable  (fmap (keyAttr .unTB ) $ unkvlist ifk)   box ) <$>   pretdi
             -- diffFK i j | traceShow (tableName table,isJust i, isJust j) False  =  undefined

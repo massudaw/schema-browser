@@ -236,8 +236,7 @@ chooserTable inf bset cliTid cli = do
       registerDynamic(do
         now <- getCurrentTime
         putPatch (patchVar ref) [PatchRow $ dpatch now])
-
-
+    let tid = "nav-"  ++ T.unpack (rawName table)
     body <-  do
             if L.length sub == 1
                then do
@@ -247,9 +246,20 @@ chooserTable inf bset cliTid cli = do
                   l <- UI.h4 #  set text (T.unpack $fromMaybe (rawName t)  $ rawTranslation t) # set UI.class_ "col-xs-12 header"
                   b <- viewerKey inf t ix cli  cliTid
                   element b # set UI.class_ "col-xs-12"
-                  UI.div # set children [l,b]
+                  a <- UI.a # set (UI.strAttr "data-toggle") "tab" # set UI.href ("#" ++( T.unpack $ rawName t))
+                      # set text (T.unpack $fromMaybe (rawName t)  $ rawTranslation t)
+                  h <- UI.li
+                      # set  UI.children [a]
+                  c <- UI.div
+                      # set children [l,b]
+                      # set UI.id_ (T.unpack $ rawName t)
+                      # set UI.class_ "tab-pane"
+                  return (h,c)
                   ) sub
-              UI.div # set children els
+              h <- UI.div # set UI.id_  tid # set children (fst <$> els) # set UI.class_ "nav nav-tabs"
+              b <- UI.div # set children (snd <$> els) # set UI.class_ "tab-content"
+              UI.div # set children [h,b]
+    runFunctionDelayed body. ffi $ "$('#" ++ tid ++ " li').click(function (e) { $('.active').removeClass('active');  })"
     UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFactsDiv <$> triding layout <*> fmap M.size (triding bset))# set UI.style [("border","2px dotted "),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf))]
                               ).fst)                                  ( M.fromList . fmap (\i -> (i,())) . M.toList <$> triding bset)
 

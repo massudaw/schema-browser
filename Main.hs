@@ -51,7 +51,6 @@ main = do
   (metas ,lm)<- runDynamic $keyTablesInit  smvar ("metadata", T.pack $ user db) amap []
 
 
-
   print "Start Server"
   (ref ,ls)<- runDynamic $ addServer metas
 
@@ -63,7 +62,7 @@ main = do
   regplugs <- plugs smvar amap db plugListLoad
 
   print "Load Polling Process"
-  poller smvar amap db regplugs False
+  -- poller smvar amap db regplugs False
   -- pollRmtc smvar amap (T.pack $ user db)
 
   cp <- lookupEnv "SYNC_SERVER_PORT"

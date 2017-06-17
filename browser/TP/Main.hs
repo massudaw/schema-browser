@@ -316,7 +316,6 @@ databaseChooser smvar metainf sargs plugList = do
                 liftIO$schemaH $ Just inf))
               user <- UI.div # set children [usernamel,username] # set UI.class_ "col-xs-8"
               UI.div # set children [user ,load]
-
           "sql" -> do
             (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
             load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-2" # sink UI.enabled (facts (isJust <$> dbsWT) )

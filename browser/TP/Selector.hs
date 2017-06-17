@@ -148,21 +148,21 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
 
     bset <- checkDivSetTGen tables ((\i k j -> tableUsage inf i j k ) <$> collectionTid orddb <*> triding bset) (tidings iniBehaviour iniEvent ) buttonString ((\lg visible i j -> (if visible  i then (lg lookDescT i j # set UI.class_ "table-list-item" ) else UI.div # set children [j] )# set UI.style (noneDisplay "-webkit-box" $ visible i)) <$> legendStyle <*> visible )
     return bset
-  let
-      ordRow orderMap pkset =  field
-          where
-            field =  G.lookup pk orderMap
-            pk = idex (meta inf ) "ordering" [("table",int $ tableUnique  pkset ), ("schema",int $ schemaId inf)]
-              {-incClick field =  (fst field , G.getIndex field ,[patch $ fmap (+SNumeric 1) usage])
-          where
-            usage = lookAttr' (meta inf ) "usage"   field
 
-  ui $ onEventDyn ((\i j -> fmap incClick <$> (ordRow i <$> M.keys j)) <$> facts (collectionTid orddb) <@> rumors (triding bset)
-              )
-    (traverse (traverse (\p -> do
-      _ <- transactionNoLog (meta inf ) $ patchFrom  p
-      putPatch (patchVar $  iniRef orddb) [p] )))
--}
+  let
+    ordRow orderMap pkset =  field
+        where
+          field =  G.lookup pk orderMap
+          pk = idex (meta inf ) "ordering" [("table",int $ tableUnique  pkset ), ("schema",int $ schemaId inf)]
+    incClick field =  (fst field , G.getIndex field ,[patch $ fmap (+SNumeric 1) usage])
+        where
+          usage = lookAttr' (meta inf ) "usage"   field
+  onEvent
+      ((\i j -> fmap incClick <$> (ordRow i <$> M.keys j)) <$> facts (collectionTid orddb) <@> rumors (triding bset))
+      (ui . traverse (traverse (\p -> do
+          _ <- transactionNoLog (meta inf ) $ patchFrom  p
+          putPatch (patchVar $  iniRef orddb) [PatchRow p] )))
+
   element bset # set UI.style [("overflow","auto"),("height","99%")]
   header <- UI.div # set children [getElement all,filterInp] # set UI.style [("display","inline-flex")]
   tbChooserI <- UI.div # set children [header,getElement bset]  # set UI.style [("height","50vh")]

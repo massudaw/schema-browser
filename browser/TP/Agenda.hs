@@ -53,9 +53,9 @@ import Data.Text (Text)
 import qualified Data.Map as M
 import qualified Data.Set as S
 
-calendarCreate m cal def = runFunction $ ffi "createAgenda(%1,%2,%3)" cal def m
-calendarAddSource cal t evs = runFunction $ ffi "addSource(%1,%2,%3)" cal (tableName t) evs
-calendarRemoveSource cal t = runFunction $ ffi "removeSource(%1,%2)" cal (tableName t)
+calendarCreate m cal def = runFunctionDelayed cal $ ffi "createAgenda(%1,%2,%3)" cal def m
+calendarAddSource cal t evs = runFunctionDelayed cal $ ffi "addSource(%1,%2,%3)" cal (tableName t) evs
+calendarRemoveSource cal t = runFunctionDelayed cal $ ffi "removeSource(%1,%2)" cal (tableName t)
 
 data Mode
   = Agenda
@@ -124,7 +124,6 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
     agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i ->  UI.button # set text (show i){- # set UI.class_ "buttonSet btn-xs btn-default pull-right")-})
 
     calendar <- UI.div # set UI.class_ "col-xs-10"
-    element body # set children [getElement agenda,calendar]
     let inpCal = sel
     let calFun (agenda,resolution,incrementT) = mdo
             let
@@ -141,7 +140,7 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
             calendarCreate (transMode agenda resolution) innerCalendar (show incrementT)
             ho <- UI.hover innerCalendar
             ui $ onEventDyn ho (const $ evalUI innerCalendar $ do
-                    runFunction $ ffi "$(%1).fullCalendar('render')" innerCalendar )
+              runFunctionDelayed innerCalendar $ ffi "$(%1).fullCalendar('render')" innerCalendar )
             let
               evc = eventClick innerCalendar
               evd = eventDrop innerCalendar
@@ -195,6 +194,7 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
 
 
     mapUIFinalizerT calendar calFun ((,,) <$> triding agenda <*> resolutionT <*> incrementT )
+    element body # set children [getElement agenda,calendar]
 
     return  (legendStyle , dashes )
 
