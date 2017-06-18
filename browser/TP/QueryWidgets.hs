@@ -106,9 +106,6 @@ type SelTBConstraint = [([Column CoreKey ()],Tidings TBConstraint)]
 
 type RefTables = (Tidings (IndexMetadata CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)),Tidings [SecondaryIndex CoreKey Showable ], TChan [RowPatch KeyUnique Showable] )
 
-
-
-
 --- Plugins Interface Methods
 createFresh :: Text -> InformationSchema -> Text -> KType CorePrim -> IO InformationSchema
 createFresh  tname inf i ty@(Primitive atom)  =
@@ -156,7 +153,7 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
       elemsIn <- mapM (\fresh -> do
         let attrB pre a = do
               wn <-  tbCaseDiff  inf  mempty a mempty  mempty pre
-              v <- labelCaseDiff inf a  wn
+              v <- labelCaseDiff inf False a  wn
               return  $ TrivialWidget (recoverEditChange <$> facts pre <#> triding v) (getElement v)
 
         attrB (const Nothing <$> unoldItems)  (genAttr oinf fresh )
@@ -170,7 +167,7 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
       elemsOut <- mapM (\fresh -> do
         let attrB pre a = do
               wn <-  tbCaseDiff inf  []  a [] [] pre
-              TrivialWidget v e <- labelCaseDiff inf a  wn
+              TrivialWidget v e <- labelCaseDiff inf False a  wn
               return $ TrivialWidget (recoverEditChange <$> pre <*> v ) e
         attrB (fmap (\v ->  unTB . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . unTB . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ TB1 (create v :: TBData Key Showable) )  <$> liftedE  )  (genAttr oinf fresh )
        ) outfresh
@@ -307,24 +304,25 @@ getRelOrigin =  fmap _relOrigin . concat . fmap keyattri
 
 labelCaseDiff
   ::  InformationSchema
-  -> Column CoreKey ()
+  -> Bool -> Column CoreKey ()
   -> TrivialWidget (Editor (Index (Column CoreKey Showable)))
   -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
-labelCaseDiff inf a wid = do
+labelCaseDiff inf b a wid = do
     l <- flabel # set text (show $ _relOrigin <$> keyattri a)
     tip <- UI.div
     patch <- UI.div
     hl <- UI.div # set children [l,tip,patch]
-    el <- UI.div #
-      set children [hl,getElement wid]
+    el <- if b
+             then UI.div # set children [hl]
+             else UI.div # set children [hl,getElement wid]
     ht <- hoverTip2 l hl
     bh <- ui $ stepper False ht
-    element patch
+      {-element patch
       # sink text (liftA2 (\bh -> if bh then id else const "") bh (facts $ fmap  show $ (triding wid)))
       # sink0 UI.style (noneShow <$> bh)
     element tip
       # set text (show $ fmap showKey  <$> keyattri a)
-      # sink0 UI.style (noneShow <$> bh)
+      # sink0 UI.style (noneShow <$> bh)-}
     paintEditDiff l (facts (triding wid ))
     return $ TrivialWidget (triding wid) el
 
@@ -477,47 +475,46 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
       resdiff =   fmap ( liftA2 (\i j -> (join .liftA2 (\j i@(_,pk,_)   -> if   pk == G.getIndex j then Just i else Nothing ) i $ j ) ) oldItems   ) .  snd <$> res
       srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (unTBMap ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
       plugmods = first traRepl <$> (resdiff <> plmods)
-  fks  <- foldl' (\jm (l,m)  -> do
-            w <- jm
-            let el = L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> ( _kvrecrels meta))
-                plugattr = indexPluginAttrDiff (unTB m) plugmods
-                oldref = (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems)
-                aref = maybe oldref ( snd) (L.find (((keyattr m)==) . keyattri .fst) $  refs)
-            wn <- (if el
-                    then tbRecCaseDiff
-                    else tbCaseDiff ) inf constr (unTB m)  (fmap (first triding) <$> w) plugattr aref
-            let nref = maybe wn (\(_,a) -> TrivialWidget (liftA3  match (triding wn) a oldref) (getElement wn) ) (L.find (((keyattr m)==) . keyattri .fst) $  refs)
-                match Keep i j = maybe Keep Diff  (join ( liftA2 diff i j <|> fmap (Just .patch) i) )
-                match j _ _  = j
-            lab <- if
-              rawIsSum table
-              then return nref
-              else do
-                v <- labelCaseDiff inf (unTB m) nref
-                element v #  set UI.class_ ("col-xs-" <> show (fst $  attrSize (unTB m)))
-                return v
+      buildFKS =  foldl' (\jm (l,m)  -> do
+                    w <- jm
+                    let el = L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> ( _kvrecrels meta))
+                        plugattr = indexPluginAttrDiff (unTB m) plugmods
+                        oldref = (join . fmap (fmap unTB .  (^?  Le.ix l ) . unTBMap ) <$> oldItems)
+                        aref = maybe oldref ( snd) (L.find (((keyattr m)==) . keyattri .fst) $  refs)
+                    wn <- (if el
+                            then tbRecCaseDiff
+                            else tbCaseDiff ) inf constr (unTB m)  (fmap (first triding) <$> w) plugattr aref
+                    let nref = maybe wn (\(_,a) -> TrivialWidget (liftA3  match (triding wn) a oldref) (getElement wn) ) (L.find (((keyattr m)==) . keyattri .fst) $  refs)
+                        match Keep i j = maybe Keep Diff  (join ( liftA2 diff i j <|> fmap (Just .patch) i) )
+                        match j _ _  = j
+                    lab <- if
+                      rawIsSum table
+                      then return nref
+                      else do
+                        v <- labelCaseDiff inf False(unTB m) nref
+                        element v #  set UI.class_ ("col-xs-" <> show (fst $  attrSize (unTB m)))
+                        return v
 
-            return (w <> [(unTB m,(lab,aref))])
-        ) (return [])  (srefs)
+                    return (w <> [(unTB m,(lab,aref))])
+                ) (return [])  (srefs)
   let
       sequenceTable :: [(Column CoreKey () ,(TrivialWidget (Editor (Index (Column CoreKey Showable))), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (Index (TBData CoreKey Showable)))
       sequenceTable fks = (\old difs -> (\ i ->  (fmap (tableMeta table , maybe (G.Idex [])G.getIndex old,)   ) i) . reduceTable $ difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
-      tableb =  sequenceTable fks
 
   (listBody,output) <- if rawIsSum table
     then do
+      fks <-buildFKS
       let
         initialAttr = join . fmap (\(n,  j) ->    safeHead $ catMaybes  $ (unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j))))  <$>oldItems
         sumButtom itb =  do
            let i = unTB itb
-           lab <- labelCaseDiff inf i  (fst $ justError ("no attr" <> show i) $ M.lookup (keyattri i) $ M.mapKeys (keyattri ) $ M.fromList fks)
+           lab <- labelCaseDiff inf True i  (fst $ justError ("no attr" <> show i) $ M.lookup (keyattri i) $ M.mapKeys (keyattri ) $ M.fromList fks)
            element lab
         marker i = sink  UI.style ((\b -> if not b then [("border","2px gray dotted")] else [("border","2px white solid")] )<$> i)
 
       chk  <- buttonDivSetO (F.toList (unKV k))  (join . fmap (\i -> M.lookup (S.fromList (keyattri i)) (unKV k)) <$> initialAttr )  marker sumButtom
 
       element chk # set UI.style [("display","inline-flex")]
-      sequence $ (\(kix,(el,_)) -> element  el # sink0 UI.style (noneShow <$> ((==keyattri kix) .keyattr <$> facts (triding chk) ))) <$> fks
       let
           keypattr (PAttr i _) = [Inline i]
           keypattr (PInline i _) = [Inline i]
@@ -527,13 +524,15 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
           delete (PFK i j _ ) = PFK i (fmap delete  j ) (POpt Nothing)
           iniValue = (fmap (patch.attrOptional ) <$> initialAttr)
           resei :: Tidings (Editor (Index (TBData CoreKey Showable)))
-          resei = (\ini j -> fmap (\(m,i,l)  -> (m,i,L.map (\i -> if (keypattr i == keyattr j) then i else delete i) (maybe l (:l) ini))) ) <$> iniValue <*> triding chk <*> tableb
+          resei = (\ini j -> fmap (\(m,i,l)  -> (m,i,L.map (\i -> if (keypattr i == keyattr j) then i else delete i) (maybe l (:l) ini))) ) <$> iniValue <*> triding chk <*> sequenceTable fks
       listBody <- UI.div #  set children (getElement chk : F.toList (getElement .fst .snd <$> fks))
+      sequence $ (\(kix,(el,_)) -> element  el # sink0 UI.style (noneShow <$> ((==keyattri kix) .keyattr <$> facts (triding chk) ))) <$> fks
       return (listBody, resei)
     else  do
-      listBody <- UI.div # set UI.class_ "row" #
+      fks <- buildFKS
+      listBody <- UI.div  #
         set children (F.toList (getElement .fst . snd  <$> fks))
-      return (listBody,tableb)
+      return (listBody,sequenceTable fks)
   element listBody # set UI.class_ "row" #
       set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
   plugins <-  if not (L.null (fst <$> res))

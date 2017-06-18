@@ -148,7 +148,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
 
     bset <- checkDivSetTGen tables ((\i k j -> tableUsage inf i j k ) <$> collectionTid orddb <*> triding bset) (tidings iniBehaviour iniEvent ) buttonString ((\lg visible i j -> (if visible  i then (lg lookDescT i j # set UI.class_ "table-list-item" ) else UI.div # set children [j] )# set UI.style (noneDisplay "-webkit-box" $ visible i)) <$> legendStyle <*> visible )
     return bset
-
+      {-
   let
     ordRow orderMap pkset =  field
         where
@@ -158,10 +158,11 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
         where
           usage = lookAttr' (meta inf ) "usage"   field
   onEvent
-      ((\i j -> fmap incClick <$> (ordRow i <$> M.keys j)) <$> facts (collectionTid orddb) <@> rumors (triding bset))
+      ((\i j -> fmap incClick . ordRow i <$> M.keys j) <$> facts (collectionTid orddb) <@> rumors (triding bset))
       (ui . traverse (traverse (\p -> do
           _ <- transactionNoLog (meta inf ) $ patchFrom  p
           putPatch (patchVar $  iniRef orddb) [PatchRow p] )))
+          -}
 
   element bset # set UI.style [("overflow","auto"),("height","99%")]
   header <- UI.div # set children [getElement all,filterInp] # set UI.style [("display","inline-flex")]
