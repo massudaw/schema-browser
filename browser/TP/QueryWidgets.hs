@@ -154,7 +154,8 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
         let attrB pre a = do
               wn <-  tbCaseDiff  inf  mempty a mempty  mempty pre
               v <- labelCaseDiff inf False a  wn
-              return  $ TrivialWidget (recoverEditChange <$> facts pre <#> triding v) (getElement v)
+              out <- UI.div # set children [getElement v,getElement wn]
+              return  $ TrivialWidget (recoverEditChange <$> facts pre <#> triding v) out
 
         attrB (const Nothing <$> unoldItems)  (genAttr oinf fresh )
            ) inpfresh
@@ -168,7 +169,8 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
         let attrB pre a = do
               wn <-  tbCaseDiff inf  []  a [] [] pre
               TrivialWidget v e <- labelCaseDiff inf False a  wn
-              return $ TrivialWidget (recoverEditChange <$> pre <*> v ) e
+              out <- UI.div # set children [getElement e,getElement wn]
+              return $ TrivialWidget (recoverEditChange <$> pre <*> v ) out
         attrB (fmap (\v ->  unTB . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . unTB . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ TB1 (create v :: TBData Key Showable) )  <$> liftedE  )  (genAttr oinf fresh )
        ) outfresh
 
@@ -312,40 +314,22 @@ labelCaseDiff inf b a wid = do
     tip <- UI.div
     patch <- UI.div
     hl <- UI.div # set children [l,tip,patch]
-    el <- if b
-             then UI.div # set children [hl]
-             else UI.div # set children [hl,getElement wid]
     ht <- hoverTip2 l hl
     bh <- ui $ stepper False ht
-      {-element patch
+    element patch
       # sink text (liftA2 (\bh -> if bh then id else const "") bh (facts $ fmap  show $ (triding wid)))
       # sink0 UI.style (noneShow <$> bh)
     element tip
       # set text (show $ fmap showKey  <$> keyattri a)
-      # sink0 UI.style (noneShow <$> bh)-}
+      # sink0 UI.style (noneShow <$> bh)
     paintEditDiff l (facts (triding wid ))
-    return $ TrivialWidget (triding wid) el
+    return $ TrivialWidget (triding wid) hl
 
 paintEditDiff e  i  = element e # sink0 UI.style ((\ m  -> pure . ("background-color",) $ cond  m  ) <$> i )
   where cond (Delete )  = "purple"
         cond (Keep ) = "blue"
         cond (Diff i) = "yellow"
 
-
-
-labelCase
-  ::  InformationSchema
-  -> Column CoreKey ()
-  -> Tidings (Maybe (Column CoreKey Showable))
-  -> TrivialWidget (Maybe (Column CoreKey Showable))
-  -> UI (TrivialWidget (Maybe (Column CoreKey Showable)))
-labelCase inf a old wid = do
-    l <- flabel # set text (show $ _relOrigin <$> keyattri a)
-    el <- UI.div #
-      set children [l,getElement wid] #
-      set UI.class_ ("col-xs-" <> show (fst $  attrSize a))
-    paintEdit l (triding wid ) (old)
-    return $ TrivialWidget (triding wid) el
 
 
 tbCaseDiff
@@ -491,9 +475,9 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
                       rawIsSum table
                       then return nref
                       else do
-                        v <- labelCaseDiff inf False(unTB m) nref
-                        element v #  set UI.class_ ("col-xs-" <> show (fst $  attrSize (unTB m)))
-                        return v
+                        v <- labelCaseDiff inf False (unTB m) nref
+                        out <- UI.div # set children [getElement v,getElement  nref] #  set UI.class_ ("col-xs-" <> show (fst $  attrSize (unTB m)))
+                        return $ TrivialWidget (triding v) out
 
                     return (w <> [(unTB m,(lab,aref))])
                 ) (return [])  (srefs)
@@ -508,8 +492,9 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
         initialAttr = join . fmap (\(n,  j) ->    safeHead $ catMaybes  $ (unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j))))  <$>oldItems
         sumButtom itb =  do
            let i = unTB itb
-           lab <- labelCaseDiff inf True i  (fst $ justError ("no attr" <> show i) $ M.lookup (keyattri i) $ M.mapKeys (keyattri ) $ M.fromList fks)
-           element lab
+               body = (fst $ justError ("no attr" <> show i) $ M.lookup (keyattri i) $ M.mapKeys (keyattri ) $ M.fromList fks)
+           lab <- labelCaseDiff inf True i body
+           UI.div # set children [getElement lab,getElement body]
         marker i = sink  UI.style ((\b -> if not b then [("border","2px gray dotted")] else [("border","2px white solid")] )<$> i)
 
       chk  <- buttonDivSetO (F.toList (unKV k))  (join . fmap (\i -> M.lookup (S.fromList (keyattri i)) (unKV k)) <$> initialAttr )  marker sumButtom

@@ -103,7 +103,7 @@ findProd p i = L.find p i
 
 isNested :: [Access Key] -> Access Key -> Bool
 isNested p (Nested l i) = L.sort (iprodRef <$> p) == L.sort (iprodRef <$>l)
--- isNested p i =  False
+isNested p i =  False
 
 uNest :: Access Key -> [Access Key]
 uNest (Nested pn (Many i)) = i
