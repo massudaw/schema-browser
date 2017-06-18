@@ -492,9 +492,9 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
         initialAttr = join . fmap (\(n,  j) ->    safeHead $ catMaybes  $ (unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j))))  <$>oldItems
         sumButtom itb =  do
            let i = unTB itb
-               body = (fst $ justError ("no attr" <> show i) $ M.lookup (keyattri i) $ M.mapKeys (keyattri ) $ M.fromList fks)
-           lab <- labelCaseDiff inf True i body
-           UI.div # set children [getElement lab,getElement body]
+               (body ,_) = justError ("no sum attr " <> show i) $ M.lookup i (M.fromList fks)
+           element =<< labelCaseDiff inf True i body
+
         marker i = sink  UI.style ((\b -> if not b then [("border","2px gray dotted")] else [("border","2px white solid")] )<$> i)
 
       chk  <- buttonDivSetO (F.toList (unKV k))  (join . fmap (\i -> M.lookup (S.fromList (keyattri i)) (unKV k)) <$> initialAttr )  marker sumButtom
@@ -545,7 +545,7 @@ crudUITable inf reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItems = d
           let
             table = lookTable inf ( _kvname  m )
             getItem :: TBData CoreKey Showable -> TransactionM (Maybe (TBIdx CoreKey Showable))
-            getItem  v =  getFrom table v `catchAll` (\e -> liftIO (putStrLn $"error getting Item" ++ show (e :: SomeException)) >> return Nothing)
+            getItem  v =  getFrom table v `catchAll` (\e -> liftIO (putStrLn $ "error getting Item" ++ show (e :: SomeException)) >> return Nothing)
           preoldItens <- currentValue (facts preoldItems)
           loadedItens <-  ui $ join <$> traverse (transactionNoLog inf  . getItem) preoldItens
           (loadedItensEv ) <- mapUIFinalizerT out (ui . fmap join <$> traverse (\i ->  do
@@ -558,7 +558,7 @@ crudUITable inf reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItems = d
           unConstraints <-  traverse (traverse (traverse (ui . cacheTidings))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn (S.fromList un ) (TB1 ftb) , (un, fmap (createUn un . G.toList ) gist))) <$> _kvuniques m
           unDeleted <- traverse (traverse (traverse (ui . cacheTidings))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> preoldItems <*> o))) (tpkConstraint:unConstraints))
           let
-            dunConstraints (un,o) = flip (\i ->   (checkConstraint un .tblist' table . fmap _tb ) (i ) ) <$> o
+            dunConstraints (un,o) = flip (checkGist un .tblist' table . fmap _tb) <$> o
             unFinal:: [([Column CoreKey ()], Tidings PKConstraint)]
             unFinal = fmap (fmap dunConstraints) unDeleted
           (listBody,tablebdiff) <- eiTableDiff inf  unFinal  refs pmods ftb preoldItems
@@ -612,11 +612,6 @@ dynCrudUITable inf open reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldI
 mergePatches i j = join (liftA2 applyIfChange i j)<|> i  <|> join (createIfChange <$>j)
 
 diffTidings t = tidings (facts t) $ diffEvent (facts t ) (rumors t)
-
-checkConstraint :: [CoreKey] -> TBData CoreKey Showable -> G.GiST (G.TBIndex Showable) (TBData CoreKey Showable) -> Bool
--- checkConstraint  un v m | traceShow (un,v) False = undefined
-checkConstraint un v m = checkGist un v $ m
-
 
 onDiff f g (Diff i ) = f i
 onDiff f g _ = g

@@ -87,21 +87,15 @@ code smvar  = indexSchema smvar "code"
 
 list inp
     = case inp of
-        i -> Non.fromList i
-        i -> Non.fromList i
+        ISum i -> Non.fromList i
+        Many i -> Non.fromList i
 
 reference i | traceShow i False = undefined
 reference (IProd _ k)
   = [ IT "iprod" (LeftTB1 . Just . TB1 .
       tblist . fmap _tb $ [ Attr "key" ((txt ) k )])
     , IT "nested" (LeftTB1 Nothing)]
-reference (Nested l (Many nest ))
-  = [ IT "iprod" (LeftTB1 Nothing)
-    , IT "nested" (LeftTB1 . Just .TB1 .
-      tblist .fmap _tb $
-        [Attr "ref" (array (txt . iprodRef ) (Non.fromList l))
-        ,IT "nest" (array (TB1 .tblist . fmap _tb . reference ) ( list nest))]) ]
-reference (Nested l (ISum nest ))
+reference (Nested l nest )
   = [ IT "iprod" (LeftTB1 Nothing)
     , IT "nested" (LeftTB1 . Just .TB1 .
       tblist .fmap _tb $
@@ -125,8 +119,8 @@ addPlugins iniPlugList smvar = do
         let (inp,out) = pluginStatic dyn
         return $ tblist $ _tb <$> [ FKT (kvlist $ _tb . Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
                           , Attr "table" (txt (_bounds dyn) )
-                          , IT "input" (array (TB1 .tblist . fmap _tb . reference ) (list inp))
-                          , IT "output" (array (TB1 .tblist . fmap _tb . reference ) (list out))
+                          , IT "input" (array (TB1 .tblist . fmap _tb . reference ) (Non.fromList inp))
+                          , IT "output" (array (TB1 .tblist . fmap _tb . reference ) (Non.fromList out))
                           , Attr "plugin" (TB1 $ SHDynamic (HDynamic (toDyn dyn ))) ]
       where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl (keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
   R.onEventIO event (\dyn -> do

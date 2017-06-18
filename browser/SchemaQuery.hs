@@ -346,7 +346,7 @@ tableLoader (Project table  (Union l)) page size presort fixed  = do
         o = foldr mergeDBRef  (M.empty,G.empty) (fmap (createUn (rawPK table).fmap (projunion inf table).G.toList) . snd <$>i )
 
     lf <- liftIO getCurrentTime
-    liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
+    -- liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
     modify (M.insert (table,fixed) (dbvar dbvarMerge ,o) )
     return $ (dbvar dbvarMerge, o)
   -- (Scoped || Partitioned) Tables
@@ -392,7 +392,7 @@ tableLoader table  page size presort fixed = do
             print ("lefts",tableName table ,lefts result)
           return (rights  result,x,o ,evs)) table page size presort fixed
     lf <- liftIO getCurrentTime
-    liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
+    -- liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
     return o
 
 
@@ -490,7 +490,7 @@ pageTable flag method table page size presort fixed = do
                  then do
                    let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                        (_,mp) = fromMaybe (0,M.empty ) hasIndex
-                   liftIO$ putStrLn $ "new page " <> show (tableName table, pageidx, G.size freso,G.size reso,page, pagesize)
+                   -- liftIO$ putStrLn $ "new page " <> show (tableName table, pageidx, G.size freso,G.size reso,page, pagesize)
                    (resK,nextToken ,s ,evs) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
                    let
                        res = fmap (mapKey' keyFastUnique ) resK
@@ -501,7 +501,7 @@ pageTable flag method table page size presort fixed = do
                      putPatch (patchVar dbvar) (F.toList $ CreateRow <$> filter (\i -> isNothing $ G.lookup (G.getIndex i) reso  )   resK)
                    return (index,res <> G.toList freso)
                  else do
-                   liftIO$ putStrLn $ "keep page " <> show (tableName table, pageidx, G.size freso,G.size reso,page, pagesize)
+                   -- liftIO$ putStrLn $ "keep page " <> show (tableName table, pageidx, G.size freso,G.size reso,page, pagesize)
                    return (fromMaybe (0,M.empty) hasIndex ,[])
            return $Right(M.insert fixedU nidx fixedmap, sidx,iniVar,nchan,if L.length ndata > 0 then createUn (rawPK tableU)  ndata <> freso else  freso )
          else do
@@ -716,7 +716,7 @@ fullInsert' (k1,v1) = do
        tb  = lookTable inf (_kvname k1)
    ret <-  (k1,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
    (_,(_,l)) <- tableLoader  tb Nothing Nothing [] mempty
-   liftIO $ print ("fullInsert",tbpredM (_kvpk k1)  ret , G.lookup (tbpredM (_kvpk k1)  ret) l ,ret)
+   -- liftIO $ print ("fullInsert",tbpredM (_kvpk k1)  ret , G.lookup (tbpredM (_kvpk k1)  ret) l ,ret)
    if  (isNothing $ flip G.lookup l $ tbpredM (_kvpk k1)  ret ) && rawTableType tb == ReadWrite
       then catchAll (do
         i@(Just (TableModification _ _ tb))  <- insertFrom  ret
