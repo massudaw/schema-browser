@@ -1,6 +1,4 @@
 {-# LANGUAGE TypeOperators,DeriveFunctor,FlexibleInstances ,ScopedTypeVariables,FlexibleContexts,ConstraintKinds,TypeFamilies,RankNTypes, TupleSections,BangPatterns,OverloadedStrings #-}
-
-
 module Schema where
 
 import Data.String
@@ -119,8 +117,8 @@ readFModifier "edit" = FPatch
 readFModifier "write" = FWrite
 
 
-keyTables ,keyTablesInit :: TMVar DatabaseSchema ->  (Text ,Text) -> (Text -> IO (Auth , SchemaEditor)) -> [Plugins] ->  R.Dynamic InformationSchema
-keyTables schemaVar (schema ,user) authMap pluglist =  maybe (keyTablesInit schemaVar (schema,user) authMap pluglist ) return.  HM.lookup schema  =<< liftIO (atomically $ readTMVar .globalRef =<< readTMVar schemaVar )
+keyTables ,keyTablesInit :: TVar DatabaseSchema ->  (Text ,Text) -> (Text -> IO (Auth , SchemaEditor)) -> [Plugins] ->  R.Dynamic InformationSchema
+keyTables schemaVar (schema ,user) authMap pluglist =  maybe (keyTablesInit schemaVar (schema,user) authMap pluglist ) return.  HM.lookup schema  =<< liftIO (atomically $ readTVar .globalRef =<< readTVar schemaVar )
 
 extendedRel :: HM.HashMap (Text,Text) Key -> Text -> Text -> Text -> Key -> Rel Key
 extendedRel inf t a b c =  snd access $ (lrel (fst access))
@@ -138,7 +136,7 @@ extendedRel inf t a b c =  snd access $ (lrel (fst access))
                   k = justError "no key" $HM.lookup (t,i) inf
 
 keyTablesInit schemaRef  (schema,user) authMap pluglist = do
-       schemaVar <- liftIO$ atomically $ readTMVar schemaRef
+       schemaVar <- liftIO$ atomically $ readTVar schemaRef
        let conn = schemaConn schemaVar
            schemaId = justLookH schema (schemaNameMap schemaVar)
        (oauth,ops ) <- liftIO$ authMap schema
@@ -228,8 +226,6 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
            i3 =  addRecInit (HM.singleton schema (HM.fromList i3l ) <> foldr mappend mempty (tableMap <$> F.toList  rsch)) $  HM.fromList i3l
            pks = M.fromList $ fmap (\(_,t)-> (S.fromList$ rawPK t ,t)) $ HM.toList i3
            i2 =    M.filterWithKey (\k _ -> not.S.null $ k )  pks
-           -- unionT (s,n,l) = (n ,(\t -> Project t $ Union  ((\t -> justError "no key" $ HM.lookup t i3 )<$>  F.toList l ) ))
-
            unionT (s,n ,_ ,Select _ _ _) = (n,id)
            unionT (s,n,_,SqlUnion (Select _ (FromRaw _ i) _ )  (Select _ (FromRaw _ j) _) )
              = (n ,(\t -> Project t ( Union ((\t -> justError "no key" $ HM.lookup (T.pack . BS.unpack $ t) i3 )<$>  [i,j] )) ))
@@ -242,17 +238,16 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
           then Just <$> keyTables  schemaRef ("metadata",user) authMap pluglist
           else return Nothing
 
-       mvar <- liftIO$ atomically $ newTMVar  M.empty
+       mvar <- liftIO$ atomically $ newTVar  M.empty
        let colMap =  fmap IM.fromList $ HM.fromListWith mappend $ (\((t,_),k) -> (t,[(keyPosition k,k)])) <$>  HM.toList keyMap
        let inf = InformationSchema schemaId schema (fmap unOnly $ listToMaybe color) (uid,user) oauth keyMap colMap (M.fromList $ (\k -> (keyFastUnique k ,k))  <$>  F.toList backendkeyMap  )  (M.fromList $ fmap (\i -> (keyFastUnique i,i)) $ F.toList keyMap) (M.filterWithKey (\k v -> not $ L.elem (tableName v )  convert) $ i2u )  i3u sizeMapt mvar  conn metaschema  rsch ops pluglist schemaRef
            convert = (concat $ fmap (\(_,_,_,n) -> deps  n) ures)
-           -- convert = (concat $ fmap (\(_,_,n) -> F.toList n) ures)
            deps (SqlUnion (Select _ (FromRaw _ i) _)  (Select _ (FromRaw _ j) _)) = fmap (T.pack.BS.unpack) [i,j]
            deps (Select _ _ _ ) = []
 
 
        mapM (createTableRefs inf [] ) (filter (not . isUnion) $ F.toList i2u)
-       var <- liftIO$ atomically $ modifyTMVar (globalRef schemaVar  ) (HM.insert schema inf )
+       var <- liftIO$ atomically $ modifyTVar (globalRef schemaVar  ) (HM.insert schema inf )
        addStats inf
          {-
        traverse (\ req -> do
@@ -268,24 +263,24 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
 isUnion (Project _ (Union _ )) = True
 isUnion _ = False
 
-modifyTMVar v  x = takeTMVar  v >>= putTMVar v. x
 
 createTableRefs :: InformationSchema -> [MutRec [[Rel Key]]] -> Table ->   R.Dynamic (Collection KeyUnique Showable,DBRef KeyUnique Showable)
 createTableRefs inf rec (Project i (Union l) ) = do
   liftIO$ putStrLn $ "Loading Table: " ++ T.unpack (rawName i)
   let keyRel t k = do
-          new <- HM.lookup (tableName i , keyValue k)(keyMap inf)
-          old <- HM.lookup (tableName t , keyValue k) (keyMap inf)
+          let look i = HM.lookup (tableName i , keyValue k) (keyMap inf)
+          new <- look i
+          old <- look t
           return (keyFastUnique old,keyFastUnique new)
       tableRel t = M.fromList $ catMaybes $ keyRel t<$> tableAttrs t
   res <- mapM (\t -> do
-    ((idx,sdata),ref)<- createTableRefs inf rec t
+    ((idx,sdata),ref) <- createTableRefs inf rec t
     return ((idx,createUn (keyFastUnique <$> rawPK i) (first (const (tableMeta (mapTableK keyFastUnique i)) ) .  mapKey' (\k -> fromMaybe k (M.lookup k (tableRel t))) <$> G.toList sdata)),ref)) l
   return (foldr mappend (M.empty,G.empty) (fst <$> res) , head $ snd <$> res)
 createTableRefs inf rec i = do
   liftIO$ putStrLn $ "Loading Table: " ++ T.unpack (rawName i)
   let table = mapTableK keyFastUnique i
-  map <- liftIO$ atomically $ readTMVar (mvarMap inf)
+  map <- liftIO$ atomically $ readTVar (mvarMap inf)
   if isJust (M.lookup i map)
      then do
        liftIO$ putStrLn $ "Cached Table: " ++ T.unpack (rawName i)
@@ -306,13 +301,10 @@ createTableRefs inf rec i = do
     chanidx <-  liftIO$ atomically $ newBroadcastTChan
     nchanidx <- liftIO$ atomically $dupTChan chanidx
     nmdiff <- liftIO$ atomically $dupTChan mdiff
-    --(ivp,vp) <- readTable inf "dump" (schemaName inf) (i)
-    -- let iv = M.mapKeys (mapPredicate keyFastUnique) ivp
-      --  v = mapKey' (keyFastUnique) <$> vp
     (iv,v) <- readTable inf "dump" i rec
 
     midx <-  liftIO$ atomically$ newTVar iv
-    depmap <- liftIO $ atomically $readTMVar (mvarMap inf )
+    depmap <- liftIO $ atomically $readTVar (mvarMap inf )
     let
       move (FKJoinTable i j)  =  do
             let rtable = M.lookup (lookSTable inf j) depmap
@@ -356,7 +348,7 @@ createTableRefs inf rec i = do
         )  (\e -> atomically ( takeMany nmdiff ) >>= (\d ->  putStrLn $ show (e :: SomeException,d)<>"\n"))
     R.registerDynamic (killThread t1)
     let dbref = DBRef nmdiff midx nchanidx collectionState
-    liftIO$ atomically $ modifyTMVar (mvarMap inf) (M.insert i  dbref)
+    liftIO$ atomically $ modifyTVar (mvarMap inf) (M.insert i  dbref)
     return ((iv,v),dbref)
 
 loadFKSDisk inf targetTable rec = do
@@ -386,7 +378,7 @@ loadFKDisk inf old rec (Path ori (FKJoinTable rel (st,tt) ) ) = do
         relSet = S.fromList $ _relOrigin <$> relU
         relU = (fmap keyFastUnique <$> rel)
         tb  = unTB <$> F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . snd . tableNonRef' $ table))
-        fkref = joinRel2  (keyFastUnique <$> tableMeta targetTable) ( replaceRel  relU <$> tb) mtable
+        fkref = joinRel2  (keyFastUnique <$> tableMeta targetTable) (replaceRel  relU <$> tb) mtable
     case  FKT (kvlist $ _tb <$> filter (not . (`S.member` old) . _tbattrkey ) tb) relU  <$>  fkref of
       Nothing ->  if F.any (isKOptional.keyType . _relOrigin) rel
                      then Just $ FKT (kvlist $ _tb <$> filter (not . (`S.member` old) . _tbattrkey ) tb) relU (LeftTB1 Nothing)
@@ -627,7 +619,7 @@ lookupAccess inf l f c = join $ fmap (indexField (IProd  notNull (lookKey inf (f
 idex inf t v = G.Idex $  fmap snd $ L.sortBy (comparing ((`L.elemIndex` (rawPK $ lookTable inf t)).fst)) $ first (lookKey inf t  ) <$> v
 
 dbTable mvar table = do
-    mmap <- atomically $readTMVar mvar
+    mmap <- atomically $readTVar mvar
     return . justError ("no mvar " <> show table) . M.lookup table $ mmap
 
 
@@ -655,7 +647,7 @@ joinRelT ref tb table  = do
 
 addStats schema = do
   let metaschema = meta schema
-  varmap <- liftIO$ atomically $ readTMVar ( mvarMap schema)
+  varmap <- liftIO$ atomically $ readTVar ( mvarMap schema)
   let stats = "table_stats"
   (dbpol,(_,polling))<- transactionNoLog metaschema $ selectFrom stats  Nothing Nothing [] mempty
   let
@@ -678,7 +670,7 @@ lookPK inf pk =
 
 
 writeSchema (schema,schemaVar) = do
-  varmap <- atomically $ M.toList <$>  readTMVar (mvarMap schemaVar)
+  varmap <- atomically $ M.toList <$>  readTVar (mvarMap schemaVar)
   putStrLn $ "Dumping Schema: " ++ T.unpack schema
   --when (schema == "gmail")  $ do
   do

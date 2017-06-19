@@ -201,7 +201,6 @@ addClient clientId metainf inf table row =  do
 layFactsDiv i j =  case i of
                      Vertical -> "col-xs-" <> (show $  12 `div` fromIntegral (max 1 $ j))
                      Horizontal -> "col-xs-12"
-
 data Layout
   = Vertical
   | Horizontal
@@ -236,10 +235,9 @@ chooserTable inf bset cliTid cli = do
       registerDynamic(do
         now <- getCurrentTime
         putPatch (patchVar ref) [PatchRow $ dpatch now])
-    let tid = "nav-"  ++ T.unpack (rawName table)
     body <-  do
             if L.length sub == 1
-               then do
+               then
                  viewerKey inf table ix cli cliTid
                else do
               els <- mapM (\t -> do
@@ -256,10 +254,10 @@ chooserTable inf bset cliTid cli = do
                       # set UI.class_ "tab-pane"
                   return (h,c)
                   ) sub
-              h <- UI.div # set UI.id_  tid # set children (fst <$> els) # set UI.class_ "nav nav-tabs"
+              h <- UI.div # set children (fst <$> els) # set UI.class_ "nav nav-tabs"
+              runFunctionDelayed h $ ffi  "$(%1).find('li').click(function (e) { $('.active').removeClass('active');})" h
               b <- UI.div # set children (snd <$> els) # set UI.class_ "tab-content"
               UI.div # set children [h,b]
-    runFunctionDelayed body. ffi $ "$('#" ++ tid ++ " li').click(function (e) { $('.active').removeClass('active');  })"
     UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFactsDiv <$> triding layout <*> fmap M.size (triding bset))# set UI.style [("border","2px dotted "),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf))]
                               ).fst)                                  ( M.fromList . fmap (\i -> (i,())) . M.toList <$> triding bset)
 

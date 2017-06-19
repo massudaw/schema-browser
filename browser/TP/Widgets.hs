@@ -351,6 +351,19 @@ optionalListBox l o f s = do
 
 interval'' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
 
+detailsLabel
+  :: (UI Element -> UI Element) -> UI Element
+  -> UI Element
+detailsLabel lab gen = do
+  l <- flabel # lab
+  hl <- UI.div
+  ht <- hoverTip2 l hl
+  bh <- ui $ stepper False ht
+  let dynShow True = gen
+      dynShow False = UI.div
+  out <- mapUIFinalizerT hl dynShow (tidings bh ht)
+  details <- UI.div # sink children (pure <$> facts out)
+  element hl # set children [l,details]
 
 read1 s = unsafeFromJSON s
 -- read1 (EventData i )  = errorWithStackTrace $show i
@@ -711,5 +724,15 @@ onFFI ff handler = do
     runFunction $ ffi ff obj
     onEvent e (ui . registerDynamic . sequence_)
 
+
+hoverTip elemD= do
+  ho <- UI.hover elemD
+  le <- UI.leave elemD
+  return $ unionWith const (const True <$> ho) (const False <$> le )
+
+hoverTip2 elemIn elemOut = do
+  ho <- UI.click elemIn
+  le <- UI.leave elemOut
+  return $ unionWith const (const True <$> ho) (const False <$> le )
 
 

@@ -77,7 +77,7 @@ col i l =   i # set   UI.class_ ("col-xs-" ++ show l)
 borderSchema inf  = [("border", "solid 1px" <> maybe "grey" (('#':).T.unpack) (schemaColor inf))]
 
 setup
-  ::  TMVar DatabaseSchema ->  [String] -> [Plugins] -> Window -> UI ()
+  ::  TVar DatabaseSchema ->  [String] -> [Plugins] -> Window -> UI ()
 setup smvar args plugList w = void $ do
   metainf <- liftIO$ metaInf smvar
   setCallBufferMode BufferAll
@@ -344,15 +344,15 @@ databaseChooser smvar metainf sargs plugList = do
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [getElement dbsW]
   return $ (chooserT,[schemaSel ]<>  [authBox] )
 
-createVar :: IO (TMVar DatabaseSchema)
+createVar :: IO (TVar DatabaseSchema)
 createVar = do
   args <- getArgs
   let db = argsToState args
   b <- lookupEnv "ROOT_SERVER"
-  smvar   <- atomically $newTMVar HM.empty
+  smvar   <- atomically $newTVar HM.empty
   conn <- connectPostgreSQL (connRoot db)
   l <- query_ conn "select oid,name from metadata.schema"
-  atomically $ newTMVar  ( DatabaseSchema (M.fromList l) (isJust b) (HM.fromList $ swap <$> l) conn smvar)
+  atomically $ newTVar  ( DatabaseSchema (M.fromList l) (isJust b) (HM.fromList $ swap <$> l) conn smvar)
 
 {-
 testBinary = do
@@ -425,7 +425,7 @@ testTablePersist s t w = do
 
     liftIO$ (callCommand $ "rm dump/" ++ T.unpack s ++ "/"++ T.unpack t) `catch` (\e -> print (e :: SomeException))
     liftIO$ writeSchema (s ,inf)
-    liftIO$ atomically $ modifyTMVar (mvarMap inf) (const M.empty)
+    liftIO$ atomically $ modifyTVar (mvarMap inf) (const M.empty)
     (_,o) <- readTable inf "dump"  table []
     liftIO$ putStrLn "Read"
     liftIO$ mapM print (F.toList o)

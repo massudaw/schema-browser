@@ -75,7 +75,6 @@ eventWidgetMeta inf cliZone= do
        ,"fullcalendar-scheduler-1.4.0/scheduler.min.css"
        ]
     let
-      schemaPred =  [(keyRef "schema_name",Left (txt (schemaName inf),Equals) )]
       schemaPred2 =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
 
     ui$ do
@@ -102,9 +101,7 @@ eventWidgetMeta inf cliZone= do
 
 eventWidget body (incrementT,resolutionT) sel inf cliZone = do
     w <-  askWindow
-
-
-    dashes<- eventWidgetMeta inf cliZone
+    dashes <- eventWidgetMeta inf cliZone
     iday <- liftIO getCurrentTime
     let
       legendStyle  lookDesc table b
@@ -121,11 +118,16 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
                 UI.div # set children [header,missing]
                   ) item
 
-    agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i ->  UI.button # set text (show i){- # set UI.class_ "buttonSet btn-xs btn-default pull-right")-})
+    agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i ->  UI.button # set text (show i) # set UI.class_ "buttonSet btn-xs btn-default pull-right")
 
-    calendar <- UI.div # set UI.class_ "col-xs-10"
-    let inpCal = sel
-    let calFun (agenda,resolution,incrementT) = mdo
+    out <- mapUIFinalizerT body (calendarView inf cliZone dashes sel) ((,,) <$> triding agenda <*> resolutionT <*> incrementT )
+    calendar <- UI.div # sink UI.children (facts out)
+    element body # set children [getElement agenda,calendar]
+
+    return  (legendStyle , dashes )
+
+
+calendarView inf cliZone dashes sel (agenda,resolution,incrementT) = do
             let
               capitalize (i:xs) = toUpper i : xs
               capitalize [] = []
@@ -134,13 +136,7 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
               transMode Basic i = "basic" <> capitalize i
               transMode Timeline i = "timeline" <> capitalize i
             innerCalendar  <- UI.div
-            sel <- UI.div
-            calendarFrame <- UI.div # set children [innerCalendar]
-            element calendar # set children [calendarFrame,sel]
             calendarCreate (transMode agenda resolution) innerCalendar (show incrementT)
-            ho <- UI.hover innerCalendar
-            ui $ onEventDyn ho (const $ evalUI innerCalendar $ do
-              runFunctionDelayed innerCalendar $ ffi "$(%1).fullCalendar('render')" innerCalendar )
             let
               evc = eventClick innerCalendar
               evd = eventDrop innerCalendar
@@ -150,16 +146,16 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
             ui $ onEventDyn evs (transaction inf . mapM
                   (\i -> do
                      patchFrom i >>= traverse (tell . pure )))
-            edits <- ui$ accumDiff (\(tref,_)->  evalUI calendar $ do
+            edits <- ui$ accumDiff (\(tref,_)->  evalUI innerCalendar $ do
               let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
               traverse (\((_,t,fields,proj))-> do
                     let pred = WherePredicate $ timePred inf t (fieldKey <$> fields ) (incrementT,resolution)
                         fieldKey (TB1 (SText v))=   v
                     reftb <- ui $ refTables' inf t Nothing pred
                     let v = reftb ^. _3
-                    let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup  pk j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
-                    tdib <- ui $ stepper Nothing (join <$> evsel)
-                    let tdi = tidings tdib (join <$> evsel)
+                    let evsel = fmap join $ (\j (tev,pk,_) -> if tev == t then Just (G.lookup  pk j) else Nothing  ) <$> facts v <@> (readPK inf . T.pack <$> evc)
+                    tdib <- ui $ stepper Nothing evsel
+                    let tdi = tidings tdib evsel
                     (el,_) <- crudUITable inf   reftb [] [] (allRec' (tableMap inf) $ t)  tdi
                     mapUIFinalizerT innerCalendar
                       (\i -> do
@@ -167,44 +163,16 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
                         ui $ registerDynamic (fmap fst $ runDynamic $ evalUI innerCalendar $ calendarRemoveSource innerCalendar t))
                        (v)
                     UI.div # set children [el] # sink UI.style  (noneShow . isJust <$> tdib)
-                                   ) ref) inpCal
+                                   ) ref) sel
 
-            element sel # sink children ( catMaybes .F.toList <$> facts edits)
-
-            {-fins <- mapM (\((_,(_,t,_)),s)->  fmap snd $ mapUIFinalizerT innerCalendar (
-                      lift  $ transactionNoLog  inf $ selectFromA (tname) Nothing Nothing []  (WherePredicate $ timePred ((\(TB1 (SText v))->  lookKey inf tname v) <$> fields ) cal)) calendarSelT
-                      (\i -> do
-                      calendarAddSource innerCalendar  (T.unpack t) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  . filter (inRange res (utctDay day ) . unTB1 . fromJust .  M.lookup "start"  ) . concat . fmap (lefts.snd) $ i)))
-                      )  calendarSelT ) selectedData
-            liftIO $ addFin innerCalendar (fin:fins)-}
-              {-mapM (\(k,el) -> do
-              traverse (\t -> do
-                element  el
-                  # sink items (fmap (\(t,i) -> do
-                         h<- UI.div # set text (renderShowable t)
-                         b <- UI.div # set items (fmap (\i->do
-                           dv <-  UI.div # set text ((maybe "" renderShowable  $M.lookup "field" i )) # set UI.style ([("border","solid black 1px"),("padding-left","10px")]<> (maybeToList $ ("background-color",) . renderShowable<$>  M.lookup "color" i))
-                           runFunction $ ffi "$(%1).data('event', {title: %2 ,id:%3, color :%4 ,stick: false })" dv  (maybe ""  renderShowable $ M.lookup "title" i) (maybe ""  renderShowable $ M.lookup "id" i) (maybe ""  renderShowable $ M.lookup "color" i)
-                           runFunction $ ffi "$(%1).draggable({ helper: 'clone',scroll:false,appendTo: 'body' ,'z-index' : 999,revert:true,revertDuration:0})" dv
-                           return dv) i)
-                         UI.div # set children [h,b] # set UI.style [("border","dotted 1px black")]
-                          ) . filter (not .L.null .snd) . fmap (fmap rights) <$> facts t) # set UI.style [("border","solid 1px black")])  $ join $ flip M.lookup  (M.fromList selectedData) <$> Just k) itemListEl2
-            return innerCalendar
--}
-
-
-    mapUIFinalizerT calendar calFun ((,,) <$> triding agenda <*> resolutionT <*> incrementT )
-    element body # set children [getElement agenda,calendar]
-
-    return  (legendStyle , dashes )
-
+            selection <- UI.div # sink children ( catMaybes .F.toList <$> facts edits)
+            return [innerCalendar,selection]
 
 
 type DateChange = (String, Either (Interval UTCTime) UTCTime)
 
 -- readPosition:: EventData -> Maybe DateChange
 readTime v = case unsafeFromJSON v of
-
         [i,a,e]  -> (,) <$> Just i <*>
           ((\i j ->
                  Left $

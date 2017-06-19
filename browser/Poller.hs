@@ -53,8 +53,8 @@ plugs schm authmap db plugs = do
               pred = WherePredicate $ AndColl [PrimColl (liftAccess inf "plugins" $ keyRef "name" , Left (txt $ _name p,Equals))]
       return regplugs
   atomically $ do
-    schmRef <-readTMVar schm
-    modifyTMVar (globalRef schmRef) (HM.alter  (fmap(\i -> i {plugins=regplugs})) "metadata")
+    schmRef <-readTVar schm
+    modifyTVar (globalRef schmRef) (HM.alter  (fmap(\i -> i {plugins=regplugs})) "metadata")
   return regplugs
 
 
@@ -91,7 +91,7 @@ poller schmRef authmap db plugs is_test = do
           indexRow polling = justError (show $ (tbpred tb )) $ G.lookup (tbpred tb) polling
           tbpred = G.getIndex
 
-      schm <- atomically $ readTMVar schmRef
+      schm <- atomically $ readTVar schmRef
       (inf ,_)<- runDynamic $keyTables  schmRef (justLook schema (schemaIdMap schm) , T.pack $ user db) authmap plugs
       (startP,_,_,current) <- checkTime (indexRow polling )
       flip traverse plug $ \(idp,p) -> do

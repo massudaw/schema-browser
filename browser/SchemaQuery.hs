@@ -93,13 +93,13 @@ estLength page size est = fromMaybe 0 page * size  +  est
 
 refTableSTM :: InformationSchema -> Table -> STM (DBRef KeyUnique Showable)
 refTableSTM  inf table  = do
-  mmap <- readTMVar (mvarMap inf)
+  mmap <- readTVar (mvarMap inf)
   return $ lookDBVar mmap table
 
 
 prerefTable :: MonadIO m => InformationSchema -> Table -> m (DBRef KeyUnique Showable)
 prerefTable  inf table  = do
-  mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
+  mmap <- liftIO$ atomically $ readTVar (mvarMap inf)
   return $ lookDBVar mmap table
 
 projunion :: InformationSchema -> Table -> TBData Key Showable -> TBData Key Showable
@@ -121,7 +121,7 @@ refTable  inf (Project table (Union origin) )  = do
       dbvar (l,i,j,p,k) = DBVar2 (L.head l) i j p k
   return $ dbvar dbvarMerge
 refTable  inf table  = do
-  mmap <- liftIO$ atomically $ readTMVar (mvarMap inf)
+  mmap <- liftIO$ atomically $ readTVar (mvarMap inf)
   let ref = lookDBVar mmap table
   idxTds<- convertChanStepper  inf (mapTableK keyFastUnique table) ref
   (dbTds ,dbEvs)<- convertChanTidings inf (mapTableK keyFastUnique table) mempty  never ref
@@ -339,7 +339,7 @@ tableLoader (Project table  (Union l)) page size presort fixed  = do
       l <- tableLoader t page size presort (rebaseKey inf t  fixed)
       return l) l
     let mvar = mvarMap inf
-    mmap <- liftIO $ atomically $ readTMVar mvar
+    mmap <- liftIO $ atomically $ readTVar mvar
     let mergeDBRefT  (ref1,j ,i,o,k) (ref2,m ,l,p,n) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l , liftA2 (zipWith (\(i,j) (l,m) -> (i,j<>m))) o p ,unionWith mappend k n)
         dbvarMerge = foldr mergeDBRefT  ([],pure M.empty ,pure G.empty, pure ((,G.empty)<$> _rawIndexes table) ,never) (Le.over Le._3 (fmap (createUn (rawPK table).fmap (projunion inf table).G.toList)) .(\(DBVar2 e i j l k ) -> ([e],i,j,l,k)). fst <$>i )
         dbvar (l,i,j,p,k) = DBVar2 (L.head l) i j p k
@@ -357,7 +357,7 @@ tableLoader (Project table  (Union l)) page size presort fixed  = do
                 i ->  errorWithStackTrace ("no sref " <> show sref)
           Path kref (FKJoinTable rel stable ) =  sref
       let mvar = mvarMap inf
-      mmap <- liftIO $ atomically $ readTMVar mvar
+      mmap <- liftIO $ atomically $ readTVar mvar
       dbvar <- lift $ refTable   inf table
      --  let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (tableMeta table) mmap )
       let
@@ -463,7 +463,7 @@ pageTable flag method table page size presort fixed = do
         sortList  = if L.null presort then defSort else  presort
         pagesize = maybe (opsPageSize $ schemaOps inf)id size
         ffixed = filterfixedS  tableU fixedU
-    mmap <- liftIO $ atomically $ readTMVar mvar
+    mmap <- liftIO $ atomically $ readTVar mvar
     let
       dbvar :: DBRef KeyUnique Showable
       dbvar =  lookDBVar mmap table

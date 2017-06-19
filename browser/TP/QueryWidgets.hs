@@ -153,7 +153,7 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
       elemsIn <- mapM (\fresh -> do
         let attrB pre a = do
               wn <-  tbCaseDiff  inf  mempty a mempty  mempty pre
-              v <- labelCaseDiff inf False a  wn
+              v <- labelCaseDiff inf a  wn
               out <- UI.div # set children [getElement v,getElement wn]
               return  $ TrivialWidget (recoverEditChange <$> facts pre <#> triding v) out
 
@@ -168,7 +168,7 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
       elemsOut <- mapM (\fresh -> do
         let attrB pre a = do
               wn <-  tbCaseDiff inf  []  a [] [] pre
-              TrivialWidget v e <- labelCaseDiff inf False a  wn
+              TrivialWidget v e <- labelCaseDiff inf a  wn
               out <- UI.div # set children [getElement e,getElement wn]
               return $ TrivialWidget (recoverEditChange <$> pre <*> v ) out
         attrB (fmap (\v ->  unTB . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . unTB . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ TB1 (create v :: TBData Key Showable) )  <$> liftedE  )  (genAttr oinf fresh )
@@ -304,25 +304,20 @@ goAttSize i = case i of
 getRelOrigin :: [Column k () ] -> [k ]
 getRelOrigin =  fmap _relOrigin . concat . fmap keyattri
 
+
 labelCaseDiff
   ::  InformationSchema
-  -> Bool -> Column CoreKey ()
+  -> Column CoreKey ()
   -> TrivialWidget (Editor (Index (Column CoreKey Showable)))
   -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
-labelCaseDiff inf b a wid = do
-    l <- flabel # set text (show $ _relOrigin <$> keyattri a)
-    tip <- UI.div
-    patch <- UI.div
-    hl <- UI.div # set children [l,tip,patch]
-    ht <- hoverTip2 l hl
-    bh <- ui $ stepper False ht
-    element patch
-      # sink text (liftA2 (\bh -> if bh then id else const "") bh (facts $ fmap  show $ (triding wid)))
-      # sink0 UI.style (noneShow <$> bh)
-    element tip
-      # set text (show $ fmap showKey  <$> keyattri a)
-      # sink0 UI.style (noneShow <$> bh)
-    paintEditDiff l (facts (triding wid ))
+labelCaseDiff inf a wid = do
+    let dynShow = do
+          patch <- UI.div
+              # sink text  (facts $ fmap  show $ (triding wid))
+          tip <- UI.div
+              # set text (show $ fmap showKey  <$> keyattri a)
+          UI.div # set children [tip,patch]
+    hl <- detailsLabel (set UI.text (show $ _relOrigin <$> keyattri a) . (>>= (flip paintEditDiff $  facts (triding wid )))) dynShow
     return $ TrivialWidget (triding wid) hl
 
 paintEditDiff e  i  = element e # sink0 UI.style ((\ m  -> pure . ("background-color",) $ cond  m  ) <$> i )
@@ -475,7 +470,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
                       rawIsSum table
                       then return nref
                       else do
-                        v <- labelCaseDiff inf False (unTB m) nref
+                        v <- labelCaseDiff inf (unTB m) nref
                         out <- UI.div # set children [getElement v,getElement  nref] #  set UI.class_ ("col-xs-" <> show (fst $  attrSize (unTB m)))
                         return $ TrivialWidget (triding v) out
 
@@ -493,7 +488,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
         sumButtom itb =  do
            let i = unTB itb
                (body ,_) = justError ("no sum attr " <> show i) $ M.lookup i (M.fromList fks)
-           element =<< labelCaseDiff inf True i body
+           element =<< labelCaseDiff inf i body
 
         marker i = sink  UI.style ((\b -> if not b then [("border","2px gray dotted")] else [("border","2px white solid")] )<$> i)
 
@@ -528,7 +523,7 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
   body <- UI.div
     # set children (plugins  <> pure listBody)
     # set style [("margin-left","0px"),("border","2px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid")]
-  tableName <- flabel # set UI.text (T.unpack $ tableName table)
+  tableName <- detailsLabel (set UI.text (T.unpack $ tableName table)) (UI.div  # set text (show table))
   tableDiv <- UI.div # set children [tableName,body]
   return (tableDiv , output)
 
@@ -1566,16 +1561,6 @@ foldMetaHeader' order el rend inf = mapFAttr order (\(Attr k v) -> hideLong (F.t
                 bh <- ui $ stepper False hoverFlag
                 element elemD # sink items ((\b -> if not b then take 2  l  <> fmap ( set UI.style (noneShow False)) (drop 2 l) else  l ) <$> bh)
               else return elemD # set items l
-
-hoverTip elemD= do
-  ho <- UI.hover elemD
-  le <- UI.leave elemD
-  return $ unionWith const (const True <$> ho) (const False <$> le )
-
-hoverTip2 elemIn elemOut = do
-  ho <- UI.click elemIn
-  le <- UI.leave elemOut
-  return $ unionWith const (const True <$> ho) (const False <$> le )
 
 tableIndexA inf metaname env =   do
   let modtable = lookTable inf tname

@@ -22,7 +22,7 @@ import Control.DeepSeq
 import Data.Binary
 import Types.Index as G
 import Control.Concurrent.STM.TQueue
-import Control.Concurrent.STM.TMVar
+import Control.Concurrent.STM.TVar
 import Control.Concurrent.STM
 import Control.Monad.RWS
 import Types.Patch
@@ -53,11 +53,11 @@ import Control.Lens.TH
 import GHC.Stack
 
 
-metaInf :: TMVar DatabaseSchema -> IO InformationSchema
+metaInf :: TVar DatabaseSchema -> IO InformationSchema
 metaInf smvar = indexSchema smvar "metadata"
 
-indexSchema :: TMVar DatabaseSchema -> Text -> IO InformationSchema
-indexSchema smvar text = (\m -> justError ("no schema: "  ++ show text ++ " from: " ++ show (HM.keys m)). HM.lookup text $ m)<$> liftIO ( atomically $ readTMVar .globalRef  =<< readTMVar  smvar )
+indexSchema :: TVar DatabaseSchema -> Text -> IO InformationSchema
+indexSchema smvar text = (\m -> justError ("no schema: "  ++ show text ++ " from: " ++ show (HM.keys m)). HM.lookup text $ m)<$> liftIO ( atomically $ readTVar .globalRef  =<< readTVar  smvar )
 
 
 type InformationSchema = InformationSchemaKV Key Showable
@@ -72,7 +72,7 @@ data DatabaseSchema
     , isRoot :: Bool
     , schemaNameMap  :: HM.HashMap Text Int
     , schemaConn :: Connection
-    , globalRef :: TMVar (HM.HashMap Text InformationSchema )
+    , globalRef :: TVar (HM.HashMap Text InformationSchema )
     }
 
 
@@ -91,13 +91,13 @@ data InformationSchemaKV k v
   , _pkMapL :: Map (Set k ) Table
   , _tableMapL :: HM.HashMap Text Table
   , tableSize :: Map Table Int
-  , mvarMap :: TMVar (Map (TableK k) (DBRef KeyUnique v ))
+  , mvarMap :: TVar (Map (TableK k) (DBRef KeyUnique v ))
   , rootconn :: Connection
   , metaschema :: Maybe (InformationSchemaKV k v)
   , depschema :: HM.HashMap Text (InformationSchemaKV k v)
   , schemaOps :: SchemaEditor
   , plugins :: [Plugins ]
-  , rootRef :: TMVar DatabaseSchema
+  , rootRef :: TVar DatabaseSchema
   }
 
 

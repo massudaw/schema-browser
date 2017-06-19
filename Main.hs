@@ -93,7 +93,7 @@ main = do
     putStrLn $ "Finish Server"
     putStrLn $ "Exit Cause: " ++ show (e :: SomeException)
     runDynamic $ traverse (deleteServer metas) ref
-    mapM writeSchema  . HM.toList =<< atomically (readTMVar .globalRef =<< readTMVar smvar)
+    mapM writeSchema  . HM.toList =<< atomically (readTVar .globalRef =<< readTVar smvar)
     sequence_ pfin
     sequence_ lm
     sequence_ ls
