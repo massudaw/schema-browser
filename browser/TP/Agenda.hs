@@ -54,7 +54,11 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 calendarCreate m cal def = runFunctionDelayed cal $ ffi "createAgenda(%1,%2,%3)" cal def m
-calendarAddSource cal t evs = runFunctionDelayed cal $ ffi "addSource(%1,%2,%3)" cal (tableName t) evs
+
+calendarAddSource cal t evs = do
+  runFunctionDelayed cal $ ffi "addSource(%1,%2,%3)" cal (tableName t) (T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  $ evs)
+  ui $ registerDynamic (fmap fst $ runDynamic $ evalUI cal $ calendarRemoveSource cal t)
+
 calendarRemoveSource cal t = runFunctionDelayed cal $ ffi "removeSource(%1,%2)" cal (tableName t)
 
 data Mode
@@ -128,50 +132,62 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
 
 
 calendarView inf cliZone dashes sel (agenda,resolution,incrementT) = do
-            let
-              capitalize (i:xs) = toUpper i : xs
-              capitalize [] = []
-              transMode Agenda i = "agenda" <> capitalize i
-              transMode Basic "month" = "month"
-              transMode Basic i = "basic" <> capitalize i
-              transMode Timeline i = "timeline" <> capitalize i
-            innerCalendar  <- UI.div
-            calendarCreate (transMode agenda resolution) innerCalendar (show incrementT)
-            let
-              evc = eventClick innerCalendar
-              evd = eventDrop innerCalendar
-              evr = eventResize innerCalendar
-              evdd = eventDragDrop innerCalendar
-              evs =  fmap (makePatch cliZone . first (readPK inf . T.pack))<$> unions [evr,evdd,evd]
-            ui $ onEventDyn evs (transaction inf . mapM
-                  (\i -> do
-                     patchFrom i >>= traverse (tell . pure )))
-            edits <- ui$ accumDiff (\(tref,_)->  evalUI innerCalendar $ do
-              let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
-              traverse (\((_,t,fields,proj))-> do
-                    let pred = WherePredicate $ timePred inf t (fieldKey <$> fields ) (incrementT,resolution)
-                        fieldKey (TB1 (SText v))=   v
-                    reftb <- ui $ refTables' inf t Nothing pred
-                    let v = reftb ^. _3
-                    let evsel = fmap join $ (\j (tev,pk,_) -> if tev == t then Just (G.lookup  pk j) else Nothing  ) <$> facts v <@> (readPK inf . T.pack <$> evc)
-                    tdib <- ui $ stepper Nothing evsel
-                    let tdi = tidings tdib evsel
-                    (el,_) <- crudUITable inf   reftb [] [] (allRec' (tableMap inf) $ t)  tdi
-                    mapUIFinalizerT innerCalendar
-                      (\i -> do
-                        calendarAddSource innerCalendar  t ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .  concat . fmap (lefts.snd) $ fmap proj $ G.toList i))
-                        ui $ registerDynamic (fmap fst $ runDynamic $ evalUI innerCalendar $ calendarRemoveSource innerCalendar t))
-                       (v)
-                    UI.div # set children [el] # sink UI.style  (noneShow . isJust <$> tdib)
-                                   ) ref) sel
+    let
+      readPatch  = makePatch cliZone
+      readSel = readPK inf . T.pack
+    (tds, evc, innerCalendar) <- calendarSelRow readSel (agenda,resolution,incrementT)
+    edits <- ui$ accumDiff (\(tref,_)->  evalUI innerCalendar $ do
+      let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
+      traverse (\((_,t,fields,proj))-> do
+            let pred = WherePredicate $ timePred inf t (fieldKey <$> fields ) (incrementT,resolution)
+                fieldKey (TB1 (SText v))=   v
+            reftb <- ui $ refTables' inf t Nothing pred
+            let v = reftb ^. _3
+            let evsel = fmap join $ (\j (tev,pk,_) -> if tev == t then Just (G.lookup  pk j) else Nothing  ) <$> facts v <@>  evc
+            tdib <- ui $ stepper Nothing evsel
+            let tdi = tidings tdib evsel
+            (el,_) <- crudUITable inf   reftb [] [] (allRec' (tableMap inf) $ t)  tdi
+            mapUIFinalizerT innerCalendar
+              (\i ->calendarAddSource innerCalendar  t (  concat . fmap (lefts.snd) $ fmap proj $ G.toList i)) v
+            UI.div # set children [el] # sink UI.style  (noneShow . isJust <$> tdib)
+                           ) ref) sel
 
-            selection <- UI.div # sink children ( catMaybes .F.toList <$> facts edits)
-            return [innerCalendar,selection]
+    onEvent (rumors tds) (ui . transaction inf . mapM (\i ->
+      patchFrom (readPatch i) >>= traverse (tell . pure )))
+    selection <- UI.div # sink children ( catMaybes .F.toList <$> facts edits)
+    return [innerCalendar,selection]
 
+calendarSelRow readSel (agenda,resolution,incrementT) = do
+    let
+      capitalize (i:xs) = toUpper i : xs
+      capitalize [] = []
+      transMode Agenda i = "agenda" <> capitalize i
+      transMode Basic "month" = "month"
+      transMode Basic i = "basic" <> capitalize i
+      transMode Timeline i = "timeline" <> capitalize i
+    innerCalendar  <- UI.div
+    calendarCreate (transMode agenda resolution) innerCalendar (show incrementT)
+    let
+      evc = eventClick innerCalendar
+      evd = eventDrop innerCalendar
+      evr = eventResize innerCalendar
+      evdd = eventDragDrop innerCalendar
+      evs =  fmap (first readSel) <$> unions [evr,evdd,evd]
+    bhevs <- ui $ stepper [] evs
+    return $(tidings bhevs evs,readSel <$> evc, innerCalendar)
+
+
+addSource inf innerCalendar (_,t,fields,proj) (agenda,resolution,incrementT)= do
+    let pred = WherePredicate $ timePred inf t (fieldKey <$> fields ) (incrementT,resolution)
+        fieldKey (TB1 (SText v))=   v
+    reftb <- ui $ refTables' inf t Nothing pred
+    let v = reftb ^. _3
+    mapUIFinalizerT innerCalendar
+      (\i -> calendarAddSource innerCalendar  t (concat . fmap (lefts.snd) $ fmap proj $ G.toList i)) v
 
 type DateChange = (String, Either (Interval UTCTime) UTCTime)
 
--- readPosition:: EventData -> Maybe DateChange
+readTime :: EventData -> Maybe DateChange
 readTime v = case unsafeFromJSON v of
         [i,a,e]  -> (,) <$> Just i <*>
           ((\i j ->
