@@ -142,13 +142,13 @@ poller schmRef authmap db plugs is_test = do
                       liftIO$ putStrLn $ "END " <>T.unpack pname <> " - " <> show end
                       let polling_log = lookTable metas "polling_log"
                       dbplog <-  refTable metas polling_log
-                      let table = tblist
+                      let table = (\i -> tblist
                               [ attrT ("plugin",pid )
                               , attrT ("schema",TB1 (SNumeric schema))
                               , _tb $ IT "diffs" (LeftTB1 $ ArrayTB1  . Non.fromList <$> (
                                         nonEmpty  . concat . catMaybes $
                                             fmap (fmap (TB1 . tblist  )) .  either (\r ->Just $ pure $ [attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) ),attrT ("modify",LeftTB1 $Nothing)]) (Just . fmap (\r -> [attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $  r))   ),attrT ("except",LeftTB1 $Nothing)])) <$> i))
-                              , attrT ("duration",srange (time current) (time end))]
+                              , attrT ("duration",srange (time current) (time end))]) <$> nonEmpty i
                           time  = TB1 . STime . STimestamp . utcToLocalTime utc
                           table2 = tblist
                               [ attrT ("plugin",pid)
@@ -159,9 +159,10 @@ poller schmRef authmap db plugs is_test = do
                       transactionLog metas  $ do
                           fktable2 <- loadFKS  (liftTable' metas "polling"  table2)
                           fullDiffEdit curr fktable2
-                      transactionNoLog metas $ do
-                          fktable <- loadFKS  (liftTable' metas  "polling_log"  table)
-                          fullDiffInsert  (liftTable' metas  "polling_log"  table)
+                      traverse (\t->
+                        transactionNoLog metas $ do
+                            fktable <- loadFKS  (liftTable' metas  "polling_log"  t)
+                            fullDiffInsert  fktable) table
                       return ()
 
           pid <- forkIO (void $ do
