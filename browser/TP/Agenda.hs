@@ -137,8 +137,8 @@ calendarView inf cliZone dashes sel (agenda,resolution,incrementT) = do
       readSel = readPK inf . T.pack
     (tds, evc, innerCalendar) <- calendarSelRow readSel (agenda,resolution,incrementT)
     edits <- ui$ accumDiff (\(tref,_)->  evalUI innerCalendar $ do
-      let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
-      traverse (\((_,t,fields,proj))-> do
+      let ref  =  L.find ((== tref) .  (^. _2)) dashes
+      traverse (\(_,t,fields,proj)-> do
             let pred = WherePredicate $ timePred inf t (fieldKey <$> fields ) (incrementT,resolution)
                 fieldKey (TB1 (SText v))=   v
             reftb <- ui $ refTables' inf t Nothing pred

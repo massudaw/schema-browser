@@ -208,7 +208,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
                                   pks = F.toList pksl
                                   inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
                                   attrMap =  M.fromList $ fmap (\i -> (keyPosition i,i)) $ S.toList $ justError "no attr" $ M.lookup c (all)
-                                  attr = S.difference ((\(Just i) -> i) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> S.fromList pks)
+                                  attr = S.difference (justError ("no collumn" <> show c) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> S.fromList pks)
                                in (c ,Raw un schema  (justLook c resTT) (M.lookup un transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap ( fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (fromMaybe [] (fmap ( fmap (justError "no key" . flip M.lookup  attrMap)  . V.toList) <$> M.lookup c indexMap))   (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ (M.lookup c efks )<>(M.lookup c fks )<> fmap S.fromList inlineFK  ) attr )) res :: [(Text,Table)]
        let
            unionQ = "select schema_name,table_name,inputs from metadata.table_union where schema_name = ?"
@@ -493,7 +493,7 @@ logTableModification inf (TableModification Nothing table ip) = do
   time <- getCurrentTime
   env <- lookupEnv "ROOT"
   let
-    mod = if isJust env then "master_modification_table" else "modification_table"
+    mod = modificationEnv env
   let ltime =  utcToLocalTime utc $ time
       (met,G.Idex pidx,pdata) = firstPatch keyValue  i
 
@@ -501,9 +501,11 @@ logTableModification inf (TableModification Nothing table ip) = do
   let modt = lookTable (meta inf)  mod
   dbref <- prerefTable (meta inf) modt
 
-  putPatch (patchVar dbref) [encodeTableModification inf  ltime (TableModification (Just id) table ip )]
+  putPatch (patchVar dbref) [encodeTableModification inf  ltime env (TableModification (Just id) table ip )]
   return (TableModification (Just id) table ip )
 
+
+modificationEnv env = if isJust env then "master_modification_table" else "modification_table"
 decodeTableModification d
   = (schema,table ,\inf ->  TableModification   (Just mod_id)  (lookTable inf table) (liftPatchRow inf table $ datamod mod_data ))
   where
@@ -518,8 +520,8 @@ decodeTableModification d
 
 unBinary (Binary i) = i
 
-encodeTableModification inf ltime  (TableModification id table ip)
-  =CreateRow (liftTable' (meta inf) "modification_table" $ tblist $ _tb <$>  [
+encodeTableModification inf ltime  env (TableModification id table ip)
+  =CreateRow (liftTable' (meta inf) (modificationEnv env) $ tblist $ _tb <$>  [
                               Attr "user_name"  (txt$ snd $ username inf),
                               Attr "modification_time" (timestamp ltime),
                               Attr "table_name" (txt$ tableName table),
@@ -712,7 +714,7 @@ readTable inf r  t  rec = do
         liftIO$ print ("Failed Loading Dump: " ++ show t ++ " - "  ++ show i )
         return (M.empty ,[]))
              (\(m,g) ->
-               return (M.fromList $ first (mapPredicate keyFastUnique . liftPredicateF lookupKeyPosition inf (tableName t) ) <$> m   , fmap (mapKey' keyFastUnique . liftTableF lookupKeyPosition inf (tableName t) )$ g))  f
+               return (M.fromList $ first (mapPredicate keyFastUnique . liftPredicateF lookupKeyPosition inf (tableName t) ) <$> m   , mapKey' keyFastUnique . liftTableF lookupKeyPosition inf (tableName t) .traceShowId <$> g))  f
     else do
       liftIO$ print ("Dump file not found: " ++ tname )
       return (M.empty ,[])

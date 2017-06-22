@@ -1539,15 +1539,22 @@ sorting' ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i)
 
 
 rendererShowableUI k  v= renderer (keyValue k) v
-  where renderer "modification_data" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> showPatch (i:: PathAttr Text Showable) )  (B.decodeOrFail (BSL.fromStrict i))
-        renderer "exception" (SBinary i) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> UI.div # set UI.text (T.unpack i))  (B.decodeOrFail (BSL.fromStrict i))
-        renderer k i = UI.div # set text (renderPrim i)
-        showPatch l = UI.div # set text (show $ fmap renderPrim l)
+  where
+    renderer "modification_data" (TB1 (SBinary i)) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i) -> showPatch   i) (B.decodeOrFail (BSL.fromStrict i))
+    renderer "data_index" (ArrayTB1 l) = UI.div # set items ((\(TB1 (SBinary i)) -> either (\i-> UI.div # set UI.text (show i)) (\(_,_,i) -> showIndex i) (B.decodeOrFail (BSL.fromStrict i)) )<$> F.toList l)
+    renderer "exception" (TB1 (SBinary i)) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> UI.div # set UI.text (T.unpack i))  (B.decodeOrFail (BSL.fromStrict i))
+    renderer k i = UI.div # set text (renderShowable i)
+    showIndex :: FTB Showable -> UI Element
+    showIndex i =  UI.div # set text (renderShowable i)
+    showPatch :: RowPatch Text Showable -> UI Element
+    showPatch (PatchRow l)  = UI.div # set text (ident $ renderRowPatch l)
+    showPatch (DropRow l)  = UI.div # set text (ident $ renderTable l)
+    showPatch (CreateRow l)  = UI.div # set text (ident $ renderTable l)
 
 foldMetaHeader = foldMetaHeader' []
 
-foldMetaHeader' :: [CoreKey] -> UI Element -> (CoreKey -> a -> (UI Element)) -> InformationSchema -> TBData CoreKey a -> [UI Element]
-foldMetaHeader' order el rend inf = mapFAttr order (\(Attr k v) -> hideLong (F.toList $ rend  k <$> v ))
+foldMetaHeader' :: [CoreKey] -> UI Element -> (CoreKey -> FTB a -> (UI Element)) -> InformationSchema -> TBData CoreKey a -> [UI Element]
+foldMetaHeader' order el rend inf = mapFAttr order (\(Attr k v) -> hideLong [rend  k  v ])
     where
           mapFAttr order f (a,kv) = fmap snd. L.sortBy (comparing ((flip L.elemIndex order).  fst) ). concat $ (  fmap (match.unTB ) .  F.toList .  _kvvalues)  $ unTB kv
             where match i@(Attr k v) = [(k,f i)]
@@ -1653,10 +1660,11 @@ viewer inf table envK = mdo
   tdswhereb <- ui $ stepper (snd iniQ) (fmap snd tdswhere)
   let
       tview = unTlabel' . unTB1  $tableSt2
-  element itemList # set items ( pure . renderTableNoHeaderSort2   (return $ getElement sortList) inf (tableNonRef' tview) $   fmap (fmap ( tableNonRef')) . (\(slist ,(coun,tb))-> (fmap fst slist,tb))  <$>   tdswhereb )
+  element itemList # set items ( pure . renderTableNoHeaderSort2   (return $ getElement sortList) inf (tableNonRef' tview) $   fmap (fmap (filterAttr (\i -> not $ elem (_relOrigin i )(concat $ F.toList . fst <$> envK )).tableNonRef')) . (\(slist ,(coun,tb))-> (fmap fst slist,tb))  <$>   tdswhereb )
 
   UI.div # set children [getElement offset, itemList]
 
+filterAttr f (m,r) = (m,mapComp (\(KV i) -> KV $ M.filterWithKey (\k v -> F.any f k ) i) r)
 
 
 

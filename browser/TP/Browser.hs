@@ -321,22 +321,22 @@ viewerKey inf table tix cli cliTid = mdo
   res4 <- ui $ mapT0EventDyn (page inivp) return (paging <*> res3)
   itemList <- listBoxElEq (\l m -> maybe False id $ liftA2 (\i j ->G.getIndex i == G.getIndex j) l m) itemListEl ((Nothing:) . fmap Just <$> res4) (Just <$> tds) (pure id) (pure (maybe id attrLine))
   let tds = (fmap join  $ triding itemList)
-
-  (cru,pretdi) <- crudUITable inf   reftb [] [] (allRec' (tableMap inf) table) tds
+  (cru,pretdi) <- crudUITable inf reftb [] [] (allRec' (tableMap inf) table) tds
   let pktds = fmap getPKM <$> tds
   dbmeta  <- liftIO$ prerefTable (meta inf)(lookTable (meta inf ) "clients")
   w  <- askWindow
   let diffpk = diffEvent (facts pktds ) (rumors pktds)
-  ixpk<-ui$accumB 0 (pure (+1) <@diffpk)
-  onEvent ((,)<$> ixpk <@>diffpk) (\(ix,v)->traverse (traverse (\sel -> do
-    now <- liftIO$ getCurrentTime
-    let p =liftPatch (meta inf) "clients" $ addRow  (wId w) now  sel  tix ix
-    putPatch (patchVar dbmeta) [PatchRow p]
-    ui $ registerDynamic (do
+  ixpk <- ui$accumB 0 (pure (+1) <@diffpk)
+  onEvent ((,)<$> ixpk <@>diffpk) (\(ix,v)->
+    traverse (traverse (\sel -> do
       now <- liftIO$ getCurrentTime
-      let d =liftPatch (meta inf) "clients" $ removeRow (wId w) now  tix ix
-      putPatch (patchVar dbmeta) [PatchRow d]
-          ))) (Non.nonEmpty . M.toList <$> v))
+      let p =liftPatch (meta inf) "clients" $ addRow  (wId w) now  sel  tix ix
+      putPatch (patchVar dbmeta) [PatchRow p]
+      ui $ registerDynamic (do
+        now <- liftIO$ getCurrentTime
+        let d =liftPatch (meta inf) "clients" $ removeRow (wId w) now  tix ix
+        putPatch (patchVar dbmeta) [PatchRow d]
+            ))) (Non.nonEmpty . M.toList <$> v))
 
   title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine i  )  <$> facts tds ) # set UI.class_ "col-xs-8"
   expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked filterEnabled# set UI.class_ "col-xs-1"

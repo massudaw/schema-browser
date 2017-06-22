@@ -39,15 +39,15 @@ explode sep depth = L.intercalate (sep :[]) . fmap (\(i,j) -> replicate i depth 
 ident :: [(Int,String)] -> String
 ident = explode '\n' '\t'
 
-renderRowPatch :: TBIdx Key Showable -> [(Int,String)]
+renderRowPatch :: Show a => TBIdx a Showable -> [(Int,String)]
 renderRowPatch (_,_,i) =  concat $ renderPatch  <$> i
 
-renderTable :: TBData Key Showable ->  [(Int,String)]
+renderTable :: Show a => TBData a Showable ->  [(Int,String)]
 renderTable i =  concat $ renderAttr . unTB <$> F.toList (unKV (snd i))
 
 renderRel (Rel i op j) = show i ++ "  " ++ renderBinary op ++ " " ++ show j
 
-renderPatch :: PathAttr Key Showable ->  [(Int,String)]
+renderPatch :: Show a => PathAttr a Showable ->  [(Int,String)]
 renderPatch (PFK rel k v )
   = [(0,L.intercalate " AND " (fmap renderRel rel))]
   ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderPatch <$> k) ++ "] => ")]
@@ -58,7 +58,7 @@ renderPatch (PInline k v ) = [(0,show k ++ " => ")] ++ fmap (first (+1)) (render
 
 renderPrimPatch i = [(0,renderPrim  i)]
 
-renderAttr :: TB Identity Key Showable ->  [(Int,String)]
+renderAttr :: Show a => TB Identity a Showable ->  [(Int,String)]
 renderAttr (FKT k rel v )
   = maybe [] (\i -> [(0,L.intercalate " AND " (fmap renderRel rel))]
   ++ [(0,"[" ++ L.intercalate ","  i  ++ "] => ")] ++ fmap (first (+1)) (renderFTB renderTable v)) $ nonEmpty (concat $ fmap snd .renderAttr . unTB <$> F.toList (_kvvalues k))

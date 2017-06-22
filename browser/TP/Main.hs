@@ -171,7 +171,7 @@ setup smvar args plugList w = void $ do
                   displayOpts  i =  UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right"
               metanav <- buttonDivSet metaOpts (pure iniOpts) displayOpts
               element metanav # set UI.class_ "col-xs-5 pull-right"
-              metabody <- UI.div # set UI.class_ "col-xs-10"
+              metabody <- UI.div
               element bdo # set children [getElement metanav,metabody] # set UI.class_ "row" # set UI.style [("display","block")]
               mapUIFinalizerT metabody (\(nav,tables)-> case nav  of
                 "Poll" -> do
@@ -190,9 +190,9 @@ setup smvar args plugList w = void $ do
                           (ref,res) <- ui $ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] mempty
                           listBoxEl itemListEl2 ( G.toList <$> collectionTid ref)  (pure Nothing) (pure id) ( pure attrLine ) element metabody # set children [itemListEl,itemListEl2]-}
                       i -> do
-                        let pred = [(keyRef "schema_name",Left (txt $schemaName inf,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
-                        dash <- metaAllTableIndexA inf "modification_table" pred
-                        element metabody # set UI.children [dash]
+                        let pred = [(keyRef "user_name",Left (txt (snd $ username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                        dash <- metaAllTableIndexA inf "master_modification_table" pred
+                        element metabody # set UI.children [dash] # set UI.style [("overflow","auto")] # set UI.class_ "col-xs-12"
                 "Stats" -> do
                     let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
                     stats_load <- metaAllTableIndexA inf "stat_load_table" pred
@@ -205,7 +205,7 @@ setup smvar args plugList w = void $ do
                     element metabody # set UI.children [dash]
                 i -> errorWithStackTrace (show i)
                     ) ((,) <$> triding metanav <*> triding bset)
-              return bdo
+              return bdo# set UI.style [("height","90vh"),("overflow","auto")]
               return  (buttonStyle,const True)
         "Browser" -> do
               subels <- chooserTable  inf  bset cliTid  cli
