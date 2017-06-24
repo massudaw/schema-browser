@@ -40,7 +40,7 @@ import qualified Data.Set as S
 
 
 
-queryGeocodeBoundary = FPlugins "Google Geocode" "address"  $ BoundedPlugin2 url
+queryGeocodeBoundary = FPlugins "Google Geocode" "address"  $ IOPlugin url
   where
     url :: ArrowReader
     url = proc t -> do
@@ -77,7 +77,7 @@ queryGeocodeBoundary = FPlugins "Google Geocode" "address"  $ BoundedPlugin2 url
 
 
 
-queryCEPBoundary = FPlugins "Correios CEP" "address" $ BoundedPlugin2  open
+queryCEPBoundary = FPlugins "Correios CEP" "address" $ IOPlugin  open
   where
       translate :: Text -> Text
       translate "localidade" =  "municipio"

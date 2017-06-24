@@ -31,10 +31,20 @@ act a = P mempty (Kleisli a )
 
 
 atAny k ps = atP k (anyP ps)
+-- -atAny k ps = P (nest fsum,nest ssum ) (Kleisli (\i -> local (fmap unTB1 . indexTB1 ind)$foldr (liftA2 just)  (return Nothing)(fmap ($i) asum)))
+
+atAny k ps = P (nest fsum,nest ssum ) (Kleisli (\i -> local (fmap unTB1 . indexTB1 ind)$foldr (liftA2 (<|>))  (return Nothing)(fmap ($i) asum)))
+    where
+     nest [] = []
+     nest ls = [Nested ind $ ISum (concat ls)]
+     ind = splitIndex (Just $ Not IsNull) k
+     fsum =  fmap (\(P s _ )-> fst s ) ps
+     ssum =  fmap (\(P s _ )-> snd s ) ps
+     asum = fmap (\(P s (Kleisli j) ) -> j ) ps
 
 allP (P (ps,ks) a) = P (Many ps ,Many ks) a
 
-anyP ps = P (ISum fsum ,ISum ssum) (Kleisli (\i -> runMaybeT $ foldr (<|>)  empty (fmap ($i) asum)))
+anyP ps = P (ISum fsum ,ISum ssum) (Kleisli (\i -> runMaybeT $ foldr1 ((<|>) )  (fmap ($i) asum)))
   where
     asum = fmap (\(P s (Kleisli j) ) -> fmap MaybeT j ) ps
     fsum = concat $  fmap (\(P s _ )-> fst s ) ps

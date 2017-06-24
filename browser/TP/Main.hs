@@ -146,7 +146,7 @@ setup smvar args plugList w = void $ do
         # sink0 UI.style (facts $ noneShow <$> triding menu)
     element body # set children [tbChooser,bd]
     element bd
-        # set UI.style ([("height","90vh"),("overflow","hidden")] ++ borderSchema inf)
+        # set UI.style ([("height","90vh"),("overflow","auto")] ++ borderSchema inf)
     tfilter <-  mapUIFinalizerT bd (\nav-> do
       bdo <- UI.div
       element bd # set children [bdo]

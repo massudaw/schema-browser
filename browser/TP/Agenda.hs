@@ -15,6 +15,7 @@ import Control.Concurrent
 import Utils
 import Types.Patch
 import Control.Arrow
+import TP.Browser
 import Control.Lens ((^.), _1, mapped,_2, _3,_4,_5)
 import qualified Data.List as L
 import Data.Either
@@ -80,7 +81,6 @@ eventWidgetMeta inf cliZone= do
        ]
     let
       schemaPred2 =  [(keyRef "schema",Left (int (schemaId inf),Equals) )]
-
     ui$ do
       (_,(_,evMap )) <- transactionNoLog (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
       return $ fmap (\e ->
@@ -106,8 +106,8 @@ eventWidgetMeta inf cliZone= do
 eventWidget body (incrementT,resolutionT) sel inf cliZone = do
     w <-  askWindow
     dashes <- eventWidgetMeta inf cliZone
-    iday <- liftIO getCurrentTime
     let
+      schemaPred2 =   WherePredicate $ PrimColl (liftAccess (meta inf) "event" $ keyRef "schema",Left (int (schemaId inf),Equals) )
       legendStyle  lookDesc table b
             =  do
               let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,_)-> (b,i)) dashes)
@@ -122,11 +122,29 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
                 UI.div # set children [header,missing]
                   ) item
 
-    agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i ->  UI.button # set text (show i) # set UI.class_ "buttonSet btn-xs btn-default pull-right")
+    choose <- buttonDivSet ["Main","Config"] (pure $ Just "Main") (\i ->  UI.button # set text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
+    let
+      chooser "Config" = do
+        let
+            minf = meta inf
+            table = lookTable minf "event"
+        reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables' minf table Nothing schemaPred2
+        config <- selector minf reftb  table schemaPred2
+        let tds = triding config
+        (cru,pretdi) <- crudUITable minf reftb [] [] (allRec' (tableMap minf) table) (triding config)
+        return [getElement config,cru]
 
-    out <- mapUIFinalizerT body (calendarView inf cliZone dashes sel) ((,,) <$> triding agenda <*> resolutionT <*> incrementT )
-    calendar <- UI.div # sink UI.children (facts out)
-    element body # set children [getElement agenda,calendar]
+      chooser "Main" = do
+        agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i ->  UI.button # set text (show i) # set UI.class_ "buttonSet btn-xs btn-default pull-left")
+        out <- mapUIFinalizerT body (calendarView inf cliZone dashes sel) ((,,) <$> triding agenda <*> resolutionT <*> incrementT )
+        calendar <- UI.div # sink UI.children (facts out)
+        return [getElement agenda,calendar]
+    els <- mapUIFinalizerT body chooser (triding choose)
+
+    content <- UI.div # sink children (facts els) # set UI.class_ "row"
+    element choose  # set UI.class_ "row"
+
+    element body # set children [getElement choose,content] # set UI.style [("overflow","auto")]
 
     return  (legendStyle , dashes )
 

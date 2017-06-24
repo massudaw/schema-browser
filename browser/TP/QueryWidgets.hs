@@ -185,71 +185,63 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
   return (el , (liftAccessU inf tname  $snd $ pluginStatic' $ snd $ last ac , evdiff ))
 
 pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
-  let f =second (liftAccessU inf t ). first (liftAccessU  inf t ) $ staticP arrow
+  let
       action = pluginAction   p
-      pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (fst f)])
-      tdInputPre = join . fmap (\i -> if G.checkPred i pred  then Just i else Nothing) <$>  oldItems
-      tdInput = tdInputPre
       table = lookTable inf t
-      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (snd f)])
-      tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
+      (tdInput, tdOutput,out) = checkAccessFull inf t arrow oldItems
   headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   ini <- currentValue (facts tdInput )
   kk <- ui $ stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
   pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap ( join .  liftA2 diff v. ( join . fmap (either (const Nothing) Just . typecheck (typeCheckTable (tablePK table)) )) . fmap (liftTable' inf t).  join . eitherToMaybe ). catchPluginException inf (tableUnique table ) idp (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
-  return (headerP, (snd f ,   pgOut ))
+  return (headerP, (out ,   pgOut ))
 pluginUI inf oldItems (idp,p@(FPlugins n t (DiffPurePlugin arrow ))) = do
-  let f =second (liftAccessU inf t ). first (liftAccessU  inf t ) $ staticP arrow
+  let
       action = pluginActionDiff   p
-      pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (fst f)])
-      tdInputPre = join . fmap (\i -> if G.checkPred i pred  then Just i else Nothing) <$>  oldItems
-      tdInput = tdInputPre
-      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (snd f)])
-      tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
+      (tdInput, tdOutput,out) = checkAccessFull inf t arrow  oldItems
   headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   ini <- currentValue (facts tdInput )
   kk <- ui $ stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
   pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap ( fmap (liftPatch inf t).  join . eitherToMaybe ). catchPluginException inf (tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
-  return (headerP, (snd f ,   pgOut ))
+  return (headerP, (out,   pgOut ))
 pluginUI inf oldItems (idp,p@(FPlugins n t (DiffIOPlugin arrow))) = do
   overwrite <- checkedWidget (pure False)
-  let f = second (liftAccessU inf t ). first (liftAccessU inf t ) $ staticP arrow
+  let
       action = pluginActionDiff p
-      pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (fst f)])
-      tdInputPre = join . fmap (\i -> if G.checkPred i pred  then Just i else Nothing) <$>  oldItems
-      tdInput = tdInputPre
-      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (snd f)])
-      tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
+      (tdInput, tdOutput,out) = checkAccessFull inf t arrow oldItems
   headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput)  #set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   cliHeader <- UI.click headerP
   let ecv = facts tdInput <@ cliHeader
-  vo <- currentValue (facts tdOutput)
-  vi <- currentValue (facts tdInput)
   bcv <- ui $ stepper Nothing  ecv
   pgOut  <- ui $mapTEventDyn (\v -> do
     liftIO .fmap ( fmap (liftPatch inf t ). join . eitherToMaybe ) . catchPluginException inf (tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "no Action"  v) $ ( action $ fmap (mapKey' keyValue) v)
                              )  (tidings bcv ecv)
-  return (headerP, (snd f ,  pgOut ))
+  return (headerP, (out,  pgOut ))
 
-pluginUI inf oldItems (idp,p@(FPlugins n t (BoundedPlugin2 arrow))) = do
+pluginUI inf oldItems (idp,p@(FPlugins n t (IOPlugin arrow))) = do
   overwrite <- checkedWidget (pure False)
-  let f = second (liftAccessU inf t ). first (liftAccessU inf t ) $ staticP arrow
+  let
       action = pluginAction p
-      pred =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (fst f)])
-      tdInputPre = join . fmap (\i -> if G.checkPred i pred  then Just i else Nothing) <$>  oldItems
-      tdInput = tdInputPre
-      predOut =  WherePredicate $ AndColl (catMaybes [ genPredicateFullU True (snd f)])
-      tdOutput = join . fmap (\i -> if G.checkPred i predOut  then Just i else Nothing) <$> oldItems
+      (tdInput, tdOutput,out) = checkAccessFull inf t arrow  oldItems
   headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   cliHeader <- UI.click headerP
   let ecv = facts tdInput <@ cliHeader
-  vo <- currentValue (facts tdOutput)
-  vi <- currentValue (facts tdInput)
   bcv <- ui $ stepper Nothing ecv
   pgOut  <- ui $mapTEventDyn (\v -> do
     liftIO .fmap (join .  liftA2 diff v .  fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf (tableUnique $ lookTable inf t) idp (M.toList $ getPKM $ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v
                              )  (tidings bcv ecv)
-  return (headerP, (snd f ,  pgOut ))
+  return (headerP, (out ,  pgOut ))
+
+
+checkAccessFull inf  t arrow oldItems = (tdInput,tdOutput,out)
+    where
+      (inp,out) = second (liftAccessU inf t ). first (liftAccessU  inf t ) $ staticP arrow
+      pred =  WherePredicate <$> genPredicateFullU True (Many inp)
+      tdInput = join . fmap (checkPredFull pred) <$> oldItems
+      predOut =  WherePredicate <$> genPredicateFullU True (Many out)
+      tdOutput = join . fmap (checkPredFull predOut)  <$> oldItems
+      checkPredFull pred i
+          =  if maybe False (G.checkPred i) pred then  Just i else Nothing
+
 
 indexPluginAttrDiff
   :: Column Key ()
@@ -257,9 +249,9 @@ indexPluginAttrDiff
   -> [([Access Key], Tidings (Maybe (Index (Column Key Showable))))]
 indexPluginAttrDiff a@(Attr i _ )  plugItens =  evs
   where
-    match (IProd _ l ) ( IProd _ f) = l == f
-    match i ( IProd _ f) = False
-    thisPlugs = filter (hasProd (`match` (head $ ( keyRef . _relOrigin <$> keyattri a))) . fst)  plugItens
+    match (IProd _ l) ( IProd _ f) = l == f
+    match i f = False
+    thisPlugs = filter (hasProd (`match` (head (keyRef . _relOrigin <$> keyattri a))) . fst)  plugItens
     evs  = fmap ( fmap ( join . fmap (\(_,_,p) -> L.find (((== S.fromList (keyattri a))  . pattrKey )) p )) ) <$>  thisPlugs
 indexPluginAttrDiff  i  plugItens = pfks
   where
@@ -321,8 +313,8 @@ labelCaseDiff inf a wid = do
     return $ TrivialWidget (triding wid) hl
 
 paintEditDiff e  i  = element e # sink0 UI.style ((\ m  -> pure . ("background-color",) $ cond  m  ) <$> i )
-  where cond (Delete )  = "purple"
-        cond (Keep ) = "blue"
+  where cond Delete = "purple"
+        cond Keep = "blue"
         cond (Diff i) = "yellow"
 
 
@@ -765,7 +757,6 @@ dynHandlerPatch hand val ix (l,old)= do
     (ev,h) <- ui $ newEvent
     let valix =  val ix
     let
-        --idyn i | traceShow (ix,i) False = undefined
         idyn True  =  do
           tds <- hand ix valix
           ini <- currentValue (facts $ triding tds)
@@ -774,10 +765,6 @@ dynHandlerPatch hand val ix (l,old)= do
           return [getElement tds]
         idyn False = do
           return []
-        idynDiff [] True= idyn True
-        idynDiff [] False=return[]
-        idynDiff i False= idyn False
-        idynDiff i True= return i
     el <- UI.div
     pretd <- ui $ cacheTidings  old
     els <- mapUIFinalizerT el idyn  pretd

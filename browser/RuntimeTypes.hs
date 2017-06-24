@@ -241,7 +241,7 @@ data FPlugins k =
 
 data FPlugAction k
   = StatefullPlugin [(([VarDef ],[VarDef]),FPlugAction k) ]
-  | BoundedPlugin2  (ArrowReaderM IO)
+  | IOPlugin  (ArrowReaderM IO)
   | PurePlugin (ArrowReaderM Identity)
   | DiffPurePlugin (ArrowReaderDiffM Identity)
   | DiffIOPlugin (ArrowReaderDiffM IO)
@@ -253,19 +253,19 @@ pluginStatic = pluginStatic' . _plugAction
 pluginAction = pluginAction' . _plugAction
 pluginActionDiff = pluginActionDiff' . _plugAction
 
-pluginStatic' (BoundedPlugin2  a) = staticP a
+pluginStatic' (IOPlugin  a) = staticP a
 pluginStatic' (DiffIOPlugin a) = staticP a
 pluginStatic' (DiffPurePlugin a) = staticP a
 pluginStatic' (PurePlugin  a) = staticP a
 
-pluginRun b@(BoundedPlugin2 _) = Right (pluginAction' b)
+pluginRun b@(IOPlugin _) = Right (pluginAction' b)
 pluginRun b@(PurePlugin _ ) = Right (pluginAction' b)
 pluginRun b@(DiffIOPlugin _ ) = Left (pluginActionDiff' b)
 pluginRun b@(DiffPurePlugin _ ) = Left (pluginActionDiff' b)
 
 pluginActionDiff' (DiffIOPlugin a ) = fmap join . traverse (dynIO a)
 pluginActionDiff' (DiffPurePlugin a ) = fmap join . traverse (fmap return (dynPure a))
-pluginAction' (BoundedPlugin2   a ) = fmap join . traverse (dynIO a)
+pluginAction' (IOPlugin   a ) = fmap join . traverse (dynIO a)
 pluginAction' (PurePlugin  a) = fmap join . traverse ((fmap return) (dynPure a ))
 
 staticP ~(P s d) = s
@@ -532,17 +532,17 @@ genPredicateFull
 genPredicateFull i (Rec _ _) = Nothing  -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (Point _) = Nothing -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (IProd b l) =  (\i -> PrimColl (IProd b l,Right i ))  <$> b
-genPredicateFull i n@(Nested p (Many l) ) = fmap (\(a,b) -> (Nested p (Many[a]) , b )) <$> genPredicateFullU i l
-genPredicateFull i n@(Nested p (ISum l) ) = fmap (\(a,b) -> (Nested p (Many[a]) , b )) <$> genPredicateFullU i l
+genPredicateFull i (Nested p l) = fmap (\(a,b) -> (Nested p (Many[a]) , b )) <$> genPredicateFullU i l
 genPredicateFull _ i = errorWithStackTrace (show i)
 
 genPredicateFullU
   :: Show a =>
      t
-     -> [Access a]
+     -> Union (Access a)
      -> Maybe (BoolCollection (Access a, Either a1 UnaryOperator))
-genPredicateFullU i (l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
-genPredicateFullU i (l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
+genPredicateFullU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
+genPredicateFullU i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
+
 
 notException e =  if isJust eb || isJust es || isJust as then Nothing else Just e
   where

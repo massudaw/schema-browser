@@ -49,7 +49,7 @@ transToken :: (Show k ,KeyString k ) => TBData k Showable  -> Maybe (OAuth2Token
 transToken = dynPure tableToToken
 
 oauthpoller :: PrePlugins
-oauthpoller = FPlugins "Gmail Login" "google_auth" (BoundedPlugin2 url)
+oauthpoller = FPlugins "Gmail Login" "google_auth" (IOPlugin url)
   where
     url :: ArrowReader
     url = proc t -> do

@@ -265,6 +265,49 @@ chooserTable inf bset cliTid cli = do
   element body # sink0 UI.children (facts $ sortTable <$> fmap M.toList el <*> collectionTid orddb)
   return [getElement layout ,body]
 
+selector inf reftb@(vptmeta,vp,vpt,_,var) table predicate = mdo
+  -- Final Query ListBox
+  filterInp <- UI.input # set UI.class_ "col-xs-3"
+  filterInpT <- element filterInp # sourceT "keydown" UI.valueFFI ""
+  let
+      sortSet = rawPK table <>  L.filter (not .(`L.elem` rawPK table)) (F.toList . tableKeys . TB1 . tableNonRef' . allRec' (tableMap inf ) $ table)
+  sortList <- selectUI sortSet ((,True) <$> rawPK table ) UI.div UI.div conv
+  element sortList # set UI.style [("overflow-y","scroll"),("height","200px")]
+  let
+     tsort = sorting' . filterOrd <$> triding sortList
+     filteringPred i = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  .snd
+     filtering res = (\t -> (filter (filteringPred t )) )<$> triding filterInpT  <*> res
+     pageSize = 20
+     divPage s = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
+     lengthPage (fixmap) = s
+        where (s,_)  = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
+  inisort <- currentValue (facts tsort)
+  itemListEl <- UI.select # set UI.class_ "col-xs-6" # set UI.style [("width","100%")] # set UI.size "21"
+  runFunction $ ffi "$(%1).selectpicker('mobile')" itemListEl
+  wheel <- fmap negate <$> UI.mousewheel itemListEl
+  let inivp = inisort .G.toList $ snd vp
+  (offset,res3)<- mdo
+    offset <- offsetFieldFiltered (pure 0) wheel   [(L.length <$> res3) ,L.length <$> vpt,(lengthPage <$> vptmeta)]
+    res3 <- ui $ mapT0EventDyn inivp return ( tsort <*> (filtering $ fmap G.toList $ vpt) )
+    return (offset, res3)
+  ui $ onEventDyn (rumors $ triding offset) $ (\i ->  do
+    transactionNoLog inf $ selectFrom (tableName table ) (Just $ divPage (i + pageSize) `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  []  predicate)
+  let
+    paging  = (\o -> (L.take pageSize . L.drop o) ) <$> triding offset
+  page <- currentValue (facts paging)
+  res4 <- ui $ mapT0EventDyn (page inivp) return (paging <*> res3)
+  itemList <- listBoxElEq (\l m -> maybe False id $ liftA2 (\i j ->G.getIndex i == G.getIndex j) l m) itemListEl ((Nothing:) . fmap Just <$> res4) (Just <$> tds) (pure id) (pure (maybe id attrLine))
+  let tds = fmap join  $ triding itemList
+  expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked filterEnabled# set UI.class_ "col-xs-1"
+  evc <- UI.checkedChange expand
+  filterEnabled <- ui $ stepper False evc
+  element sortList # sink UI.style  (noneShow <$> filterEnabled) # set UI.class_ "col-xs-4"
+  element offset # set UI.class_ "col-xs-2"
+  itemSel <- UI.div # set children [expand,filterInp, getElement offset ,getElement sortList] # set UI.class_ "col-xs-12"
+  itemSelect <- UI.div # set children [itemSel,getElement itemList] # set UI.class_ "col-xs-12"
+  return (TrivialWidget tds itemSelect)
+
+
 viewerKey
   ::
       InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
@@ -283,12 +326,12 @@ viewerKey inf table tix cli cliTid = mdo
                       unKey t = liftA2 (,) ((\(Attr _ (TB1 (SText i)))-> Just $ lookKey inf  (tableName table) i ) $ lookAttr' (meta inf)  "key" t  )( pure $ (\(Attr _ (TB1 (SDynamic i)))-> i) $ lookAttr'  (meta inf)  "val" t )
                 in (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
 
-  reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables inf table
 
   let
       tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (fmap snd $ justError "" $ traverse (traverse unSOptional' ) $v)) i ) iv ) <$> vpt <*> tdip
       tdip = join . fmap (join . fmap ( fmap (lookKV . snd ). lookPK .snd). lookT ) <$> cliTid
-  cv <- currentValue (facts tdi)
+        {-
+  reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables inf table
   -- Final Query ListBox
   filterInp <- UI.input # set UI.class_ "col-xs-3"
   filterInpT <- element filterInp # sourceT "keydown" UI.valueFFI ""
@@ -321,12 +364,16 @@ viewerKey inf table tix cli cliTid = mdo
   res4 <- ui $ mapT0EventDyn (page inivp) return (paging <*> res3)
   itemList <- listBoxElEq (\l m -> maybe False id $ liftA2 (\i j ->G.getIndex i == G.getIndex j) l m) itemListEl ((Nothing:) . fmap Just <$> res4) (Just <$> tds) (pure id) (pure (maybe id attrLine))
   let tds = (fmap join  $ triding itemList)
-  (cru,pretdi) <- crudUITable inf reftb [] [] (allRec' (tableMap inf) table) tds
+-}
+  reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables' inf table Nothing mempty
+  itemList <- selector inf reftb table mempty
+  let tds = triding itemList
+  (cru,pretdi) <- crudUITable inf reftb [] [] (allRec' (tableMap inf) table) (triding itemList)
   let pktds = fmap getPKM <$> tds
   dbmeta  <- liftIO$ prerefTable (meta inf)(lookTable (meta inf ) "clients")
   w  <- askWindow
   let diffpk = diffEvent (facts pktds ) (rumors pktds)
-  ixpk <- ui$accumB 0 (pure (+1) <@diffpk)
+  ixpk <- ui $ accumB 0 (pure (+1) <@diffpk)
   onEvent ((,)<$> ixpk <@>diffpk) (\(ix,v)->
     traverse (traverse (\sel -> do
       now <- liftIO$ getCurrentTime
@@ -339,13 +386,6 @@ viewerKey inf table tix cli cliTid = mdo
             ))) (Non.nonEmpty . M.toList <$> v))
 
   title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine i  )  <$> facts tds ) # set UI.class_ "col-xs-8"
-  expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked filterEnabled# set UI.class_ "col-xs-1"
-  evc <- UI.checkedChange expand
-  filterEnabled <- ui $ stepper False evc
   insertDiv <- UI.div # set children [title] # set UI.class_ "container-fluid"
   insertDivBody <- UI.div # set children [insertDiv,cru]
-  element sortList # sink UI.style  (noneShow <$> filterEnabled) # set UI.class_ "col-xs-4"
-  element offset # set UI.class_ "col-xs-2"
-  itemSel <- UI.div # set children ( [expand , filterInp, getElement offset ,getElement sortList] )
-  itemSelec <- UI.div # set children [itemSel,getElement itemList]
-  UI.div # set children ([itemSelec,insertDivBody ] )
+  UI.div # set children ([getElement itemList,insertDivBody ] )

@@ -505,7 +505,7 @@ logTableModification inf (TableModification Nothing table ip) = do
   return (TableModification (Just id) table ip )
 
 
-modificationEnv env = if isJust env then "master_modification_table" else "modification_table"
+modificationEnv env = "modification_table" -- if isJust env then "master_modification_table" else "modification_table"
 decodeTableModification d
   = (schema,table ,\inf ->  TableModification   (Just mod_id)  (lookTable inf table) (liftPatchRow inf table $ datamod mod_data ))
   where
@@ -714,7 +714,7 @@ readTable inf r  t  rec = do
         liftIO$ print ("Failed Loading Dump: " ++ show t ++ " - "  ++ show i )
         return (M.empty ,[]))
              (\(m,g) ->
-               return (M.fromList $ first (mapPredicate keyFastUnique . liftPredicateF lookupKeyPosition inf (tableName t) ) <$> m   , mapKey' keyFastUnique . liftTableF lookupKeyPosition inf (tableName t) .traceShowId <$> g))  f
+               return (M.fromList $ first (mapPredicate keyFastUnique . liftPredicateF lookupKeyPosition inf (tableName t) ) <$> m   , mapKey' keyFastUnique . liftTableF lookupKeyPosition inf (tableName t) <$> g))  f
     else do
       liftIO$ print ("Dump file not found: " ++ tname )
       return (M.empty ,[])

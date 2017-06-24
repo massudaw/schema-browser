@@ -65,11 +65,11 @@ import Control.Arrow
 import qualified Data.Foldable as F
 
 
-lplugOrcamento = FPlugins "Orçamento" "pricing" $ BoundedPlugin2 renderProjectPricingA
-lplugContract = FPlugins "Contrato" "pricing" $ BoundedPlugin2 renderProjectContract
-lplugReport = FPlugins "Relatório" "pricing" $ BoundedPlugin2 renderProjectReport
+lplugOrcamento = FPlugins "Orçamento" "pricing" $ IOPlugin renderProjectPricingA
+lplugContract = FPlugins "Contrato" "pricing" $ IOPlugin renderProjectContract
+lplugReport = FPlugins "Relatório" "pricing" $ IOPlugin renderProjectReport
 
-siapi2Hack = FPlugins pname tname $ BoundedPlugin2  url
+siapi2Hack = FPlugins pname tname $ IOPlugin  url
   where
     pname ="Siapi2 Hack"
     tname = "hack"
@@ -113,7 +113,7 @@ siapi2Hack = FPlugins pname tname $ BoundedPlugin2  url
       returnA -< join  (  ao    <$> join (fmap (uncurry (liftA2 (,))) b))
 
 
-siapi2Plugin = FPlugins pname tname $ BoundedPlugin2  url
+siapi2Plugin = FPlugins pname tname $ IOPlugin  url
   where
     pname ="Siapi2 Andamento"
     tname = "siapi3"
@@ -139,7 +139,7 @@ siapi2Plugin = FPlugins pname tname $ BoundedPlugin2  url
     tailEmpty [] = []
     tailEmpty i  = tail i
 
-cpfCaptcha = BoundedPlugin2 url
+cpfCaptcha = IOPlugin url
   where
     url :: ArrowReader
     url = proc t -> do
@@ -150,7 +150,7 @@ cpfCaptcha = BoundedPlugin2 url
       odxR "captchaViewer" -< ()
       returnA -< Just $ tblist [attrT  ("sess", TB1 (SSession sess)) ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
 
-cnpjCaptcha = BoundedPlugin2 url
+cnpjCaptcha = IOPlugin url
   where
     url :: ArrowReader
     url = proc t -> do
@@ -165,7 +165,7 @@ renderDay d =  paddedm day <> paddedm month <> show year
   where (year,month,day) = toGregorian d
         paddedm m = (if m < 10 then "0" else "" ) <> show m
 
-cpfForm = BoundedPlugin2 url
+cpfForm = IOPlugin url
   where
     pname , tname :: Text
     pname = "CPF Form"
@@ -203,7 +203,7 @@ queryCNPJStatefull = FPlugins "CNPJ Receita" "owner" $ StatefullPlugin
 
 
 
-cnpjForm = BoundedPlugin2 url
+cnpjForm = IOPlugin url
   where
     pname , tname :: Text
     pname = "CNPJ Form"
@@ -237,7 +237,7 @@ cnpjForm = BoundedPlugin2 url
               odxR "bairro" -< t
 
 
-analiseProjeto = FPlugins pname tname $ BoundedPlugin2 url
+analiseProjeto = FPlugins pname tname $ IOPlugin url
   where
     pname , tname :: Text
     pname = "Cadastro Bombeiro"
@@ -414,7 +414,7 @@ siapi3CheckApproval = FPlugins pname tname  $ DiffPurePlugin url
       row <- act (const ask )-< ()
       returnA -< fmap ((\(TB1 (STime (STimestamp t))) -> (\v-> (kvempty,maybe (Idex mempty) getIndex row ,[PAttr "aproval_date" v])) .upperPatch.(,True) . Finite $ PAtom $ STime $ STimestamp t) .snd) (liftA2 const app tt)
 
-siapi3Inspection = FPlugins pname tname  $ BoundedPlugin2 url
+siapi3Inspection = FPlugins pname tname  $ IOPlugin url
   where
     pname , tname :: Text
     pname = "Siapi3 Inspeção"
@@ -448,7 +448,7 @@ siapi3Inspection = FPlugins pname tname  $ BoundedPlugin2 url
       returnA -< tblist  . pure . _tb  <$> v
 
 
-siapi3Plugin  = FPlugins pname tname  $ BoundedPlugin2 url
+siapi3Plugin  = FPlugins pname tname  $ IOPlugin url
   where
     pname , tname :: Text
     pname = "Siapi3 Andamento"
@@ -526,7 +526,7 @@ pagamentoArr =  itR "pagamento" (proc descontado -> do
               returnA -<  TB1 $ tblist [pg ] )
 
 
-gerarPagamentos = FPlugins "Gerar Pagamento" tname  $ BoundedPlugin2 url
+gerarPagamentos = FPlugins "Gerar Pagamento" tname  $ IOPlugin url
   where
     tname = "plano_aluno"
     url :: ArrowReader
@@ -543,7 +543,7 @@ gerarPagamentos = FPlugins "Gerar Pagamento" tname  $ BoundedPlugin2 url
 createEmail = FPlugins  "Create Email" "messages"
   $ StatefullPlugin [(([("plain",atPrim (PMime "text/plain") )],[]),generateEmail)]
 
-generateEmail = BoundedPlugin2   url
+generateEmail = IOPlugin   url
   where
     tname ="messages"
     url :: ArrowReader
@@ -616,7 +616,7 @@ encodeMessage = PurePlugin url
     decoder' (LeftTB1 i) =  (join $ fmap decoder' i)
 
 
-pagamentoServico = FPlugins "Gerar Pagamento" tname $ BoundedPlugin2 url
+pagamentoServico = FPlugins "Gerar Pagamento" tname $ IOPlugin url
   where
     tname = "servico_venda"
     url :: ArrowReader
@@ -725,7 +725,7 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
     ofx i = errorWithStackTrace (show i)
 
 
-notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ BoundedPlugin2 url
+notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ IOPlugin url
   where
     tname = "nota"
     varTB i = fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
@@ -742,7 +742,7 @@ notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ BoundedPlugin2 url
       let ao =  Just $ tblist [attrT ("nota_xml",    LeftTB1 $ fmap  (LeftTB1 . Just .TB1)  b)]
       returnA -< ao
 
-checkPrefeituraXML = FPlugins "Check Nota Prefeitura XML" tname $ BoundedPlugin2 url
+checkPrefeituraXML = FPlugins "Check Nota Prefeitura XML" tname $ IOPlugin url
   where
     tname = "nota"
     varTB i = (\(TB1 (SBinary i)) -> BS.unpack i ) <$>  idxK i
@@ -765,7 +765,7 @@ checkPrefeituraXML = FPlugins "Check Nota Prefeitura XML" tname $ BoundedPlugin2
 
 
 
-notaPrefeitura = FPlugins "Nota Prefeitura" tname $ BoundedPlugin2 url
+notaPrefeitura = FPlugins "Nota Prefeitura" tname $ IOPlugin url
   where
     tname = "nota"
     varTB i = fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
@@ -782,7 +782,7 @@ notaPrefeitura = FPlugins "Nota Prefeitura" tname $ BoundedPlugin2 url
       let ao =  Just $ tblist [attrT ("nota",    LeftTB1 $ fmap  (LeftTB1 . Just . TB1)  b)]
       returnA -< ao
 
-queryArtCreaData = FPlugins "Art Crea Data" tname $ BoundedPlugin2 url
+queryArtCreaData = FPlugins "Art Crea Data" tname $ IOPlugin url
   where
     tname = "art"
     varTB i = fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
@@ -803,7 +803,7 @@ queryArtCreaData = FPlugins "Art Crea Data" tname $ BoundedPlugin2 url
       returnA -< ao
 
 
-queryArtCrea = FPlugins "Documento Final Art Crea" tname $ BoundedPlugin2 url
+queryArtCrea = FPlugins "Documento Final Art Crea" tname $ IOPlugin url
   where
     tname = "art"
     varTB i = fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
@@ -822,7 +822,7 @@ queryArtCrea = FPlugins "Documento Final Art Crea" tname $ BoundedPlugin2 url
       returnA -< ao
 
 
-queryArtBoletoCrea = FPlugins pname tname $ BoundedPlugin2  url
+queryArtBoletoCrea = FPlugins pname tname $ IOPlugin  url
   where
     pname = "Boleto Art Crea"
     tname = "art"
@@ -842,7 +842,7 @@ queryArtBoletoCrea = FPlugins pname tname $ BoundedPlugin2  url
       returnA -< ao
 
 
-queryArtAndamento = FPlugins pname tname $  BoundedPlugin2 url
+queryArtAndamento = FPlugins pname tname $  IOPlugin url
   where
     tname = "art"
     pname = "Andamento Art Crea"

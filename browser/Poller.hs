@@ -92,7 +92,7 @@ poller schmRef authmap db plugs is_test = do
           tbpred = G.getIndex
 
       schm <- atomically $ readTVar schmRef
-      (inf ,_)<- runDynamic $keyTables  schmRef (justLook schema (schemaIdMap schm) , T.pack $ user db) authmap plugs
+      (inf ,_)<- runDynamic $ keyTables  schmRef (justLook schema (schemaIdMap schm) , T.pack $ user db) authmap plugs
       (startP,_,_,current) <- checkTime (indexRow polling )
       flip traverse plug $ \(idp,p) -> do
           let f = pluginStatic p
@@ -107,8 +107,8 @@ poller schmRef authmap db plugs is_test = do
                       liftIO$ putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let fetchSize = 200
                           pred =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicateU True (fst f) , genPredicateU False (snd f)])
-                          predFullIn =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicateFullU True (fst f) ])
-                          predFullOut =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicateFullU True (snd f) ])
+                          predFullIn =  WherePredicate . fmap (lookAccess inf a) <$>  genPredicateFullU True (Many $ fst f)
+                          predFullOut =  WherePredicate . fmap (lookAccess inf a) <$>  genPredicateFullU True (Many $ snd f)
                       (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  (Just 0) (Just fetchSize) []  pred
                       liftIO$ threadDelay 10000
                       let sizeL = justLook pred  l
@@ -119,7 +119,7 @@ poller schmRef authmap db plugs is_test = do
                           (_,(_,listResAll)) <- transactionNoLog inf $ selectFrom a  (Just ix) (Just fetchSize) [] pred
                           let listRes = L.take fetchSize . G.toList $  listResAll
 
-                          let evb = filter (\i-> G.checkPred i predFullIn && not (G.checkPred i predFullOut) ) listRes
+                          let evb = filter (\i-> maybe False (G.checkPred i) predFullIn && not (maybe False (G.checkPred i) predFullOut) ) listRes
                           i <-  liftIO $ mapConcurrently (mapM (\inp -> catchPluginException inf (tableUnique (lookTable inf a)) idp (M.toList $ getPKM inp) $ fmap fst $ runDynamic $ transactionLog inf $ do
                               case elemp of
                                 Right action  -> do
@@ -162,7 +162,7 @@ poller schmRef authmap db plugs is_test = do
                       traverse (\t->
                         transactionNoLog metas $ do
                             fktable <- loadFKS  (liftTable' metas  "polling_log"  t)
-                            fullDiffInsert  fktable) table
+                            fullDiffInsert  (liftTable' metas  "polling_log"  t)) table
                       return ()
 
           pid <- forkIO (void $ do
