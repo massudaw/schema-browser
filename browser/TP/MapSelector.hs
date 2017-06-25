@@ -152,20 +152,20 @@ mapSelector inf selected calendarT sel (cposE,positionT) = do
         calendarCreate  innerCalendar (Nothing :: Maybe ([Double],[Double])) ("[]"::String)
         onEvent (moveend innerCalendar) (liftIO . hgselg)
         onEvent ( filterJust $ join . fmap convertInter <$> rumors boundsSel)  setPosition
-        codep <- mapUIFinalizerT innerCalendar (liftIO . traverse (\(sw,ne) ->toCode $ (ffi "setPosition(%1,%2,%3)" innerCalendar sw ne :: JSFunction ()))) positionT
+        codep <- mapUIFinalizerT (liftIO . traverse (\(sw,ne) ->toCode $ (ffi "setPosition(%1,%2,%3)" innerCalendar sw ne :: JSFunction ()))) positionT
         pscript <- mkElement "script" # sink text (maybe "" id .traceShowId <$> facts codep)
 
         fin <- (\(_,tb,fields,efields,proj) -> do
           let
             tname = tableName tb
-          mapUIFinalizerT innerCalendar (\(positionB,calT)-> do
+          mapUIFinalizerT (\(positionB,calT)-> do
             let pred = WherePredicate $ predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)
                 fieldKey (TB1 (SText v))=  v
             reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
             let v = reftb ^. _3
             let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
             onEvent evsel (liftIO . hselg)
-            mapUIFinalizerT innerCalendar (\i ->
+            mapUIFinalizerT (\i ->
               createLayers innerCalendar tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   i)) v
             ) pcal
           ) selected

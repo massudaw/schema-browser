@@ -92,7 +92,7 @@ setup smvar args plugList w = void $ do
 
   menu <- checkedWidget (pure True)
   cliZone <- jsTimeZone
-  metadataNav <- mapUIFinalizerT body (traverse
+  metadataNav <- mapUIFinalizerT (traverse
         (\inf -> sequenceA $ (M.fromList [("Map",fmap (^._2) <$>mapWidgetMeta inf)
                              ,("Chart",fmap (^._2) <$> chartWidgetMetadata inf )
                              ,("Account",fmap (^._2) <$> accountWidgetMeta inf )
@@ -116,7 +116,7 @@ setup smvar args plugList w = void $ do
     expand True = "col-xs-10"
     expand False = "col-xs-12"
   addBody  [return container]
-  mapUIFinalizerT body (traverse (\inf-> mdo
+  mapUIFinalizerT (traverse (\inf-> mdo
     let
       kitems = F.toList (pkMap inf)
       schId = int $ schemaId inf
@@ -147,7 +147,7 @@ setup smvar args plugList w = void $ do
     element body # set children [tbChooser,bd]
     element bd
         # set UI.style ([("height","90vh"),("overflow","auto")] ++ borderSchema inf)
-    tfilter <-  mapUIFinalizerT bd (\nav-> do
+    tfilter <-  mapUIFinalizerT (\nav-> do
       bdo <- UI.div
       element bd # set children [bdo]
       case nav of
@@ -173,7 +173,7 @@ setup smvar args plugList w = void $ do
               element metanav # set UI.class_ "col-xs-5 pull-right"
               metabody <- UI.div
               element bdo # set children [getElement metanav,metabody] # set UI.class_ "row" # set UI.style [("display","block")]
-              mapUIFinalizerT metabody (\(nav,tables)-> case nav  of
+              mapUIFinalizerT (\(nav,tables)-> case nav  of
                 "Poll" -> do
                     els <- sequence      [ metaAllTableIndexA inf "polling" [(keyRef "schema",Left (schId,Equals) ) ]
                           , metaAllTableIndexA inf "polling_log" [(keyRef "schema",Left (schId,Equals) ) ]]
@@ -334,7 +334,7 @@ databaseChooser smvar metainf sargs plugList = do
             UI.div
 
   element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
-  genS <- mapUIFinalizerT (getElement dbsW) (traverse genSchema) dbsWT
+  genS <- mapUIFinalizerT  (traverse genSchema) dbsWT
   authBox <- UI.div # sink children (maybeToList <$> facts genS) # set UI.class_ "col-xs-4"
   let auth = authMap smvar sargs (user sargs ,pass sargs )
   inf <- ui $traverse (\i -> loadSchema smvar (T.pack i ) (user sargs) auth plugList ) (schema sargs)

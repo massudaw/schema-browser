@@ -115,12 +115,12 @@ accountWidget body (incrementT,resolutionT) sel inf = do
           innerCalendarSet <- M.fromList <$> mapM (\a -> (a^._2,) <$> UI.table)  selected
           innerCalendar  <- UI.div # set children (F.toList innerCalendarSet)
           element calendar # set children [innerCalendar]
-          _ <- mapM (\((_,table,fields,efields,proj))->  mapUIFinalizerT (fromJust $ M.lookup table innerCalendarSet)
+          _ <- mapM (\((_,table,fields,efields,proj))->  mapUIFinalizerT -- (fromJust $ M.lookup table innerCalendarSet)
             (\calT -> do
               let pred = WherePredicate $ timePred inf table (fieldKey <$> fields ) calT
                   fieldKey (TB1 (SText v))=   v
               (v,_) <-  ui $ transactionNoLog  inf $ selectFromA (tableName table) Nothing Nothing [] pred
-              mapUIFinalizerT innerCalendar
+              mapUIFinalizerT
                 ((\i -> do
                   let caption =  UI.caption -- # set text (T.unpack $ maybe (rawName t) id $ rawDescription t)
                       header = UI.tr # set items [UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>  fields) , UI.th # set text "Title" ,UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>efields) ]
@@ -139,7 +139,7 @@ accountWidget body (incrementT,resolutionT) sel inf = do
                 )calendarSelT
               ) selected
           return ()
-    _ <- mapUIFinalizerT calendar calFun ((\i j -> filter (flip L.elem (concat (F.toList i)) .  (^. _2)) j )<$> sel <*> pure dashes)
+    _ <- mapUIFinalizerT calFun ((\i j -> filter (flip L.elem (concat (F.toList i)) .  (^. _2)) j )<$> sel <*> pure dashes)
 
 
     return (legendStyle,dashes)

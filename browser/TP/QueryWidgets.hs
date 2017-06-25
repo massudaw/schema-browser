@@ -553,7 +553,7 @@ crudUITable inf reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItems = d
             getItem  v =  getFrom table v `catchAll` (\e -> liftIO (putStrLn $ "error getting Item" ++ show (e :: SomeException)) >> return Nothing)
           preoldItens <- currentValue (facts preoldItems)
           loadedItens <-  ui $ join <$> traverse (transactionNoLog inf  . getItem) preoldItens
-          (loadedItensEv ) <- mapUIFinalizerT out (ui . fmap join <$> traverse (\i ->  do
+          (loadedItensEv ) <- mapUIFinalizerT (ui . fmap join <$> traverse (\i ->  do
             p <-  transactionNoLog inf . getItem $ i
             putPatch tref (fmap PatchRow $ maybeToList p)
             return (fmap PatchRow p  ) )) preoldItems
@@ -607,7 +607,7 @@ dynCrudUITable inf open reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldI
           return out
       fun i = UI.div
 
-  end <- mapUIFinalizerT sub fun (diffTidings $ triding nav)
+  end <- mapUIFinalizerT fun (diffTidings $ triding nav)
   element sub # sink children (pure <$> facts end)
   cv <- currentValue (facts preoldItems)
   let evs2 = unionWith const e2  (rumors preoldItems)
@@ -713,7 +713,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   debug <- UI.div
   let renderTyped (Pure _ ) i  = ident. renderTable  $ i
       renderTyped (Other (Constant i) ) _ = unlines ("Type check error":  i)
-  mapUIFinalizerT debug (\i -> if  i
+  mapUIFinalizerT (\i -> if  i
                     then do
                       let gen (h,s) = do
                             v <- ui $ currentValue s
@@ -785,7 +785,7 @@ dynHandlerPatch hand val ix (l,old)= do
           return []
     el <- UI.div
     pretd <- ui $ cacheTidings  old
-    els <- mapUIFinalizerT el idyn  pretd
+    els <- mapUIFinalizerT idyn  pretd
     element el # sink children (facts els)
     bend <- ui $ stepper Keep (unionWith const (const Keep <$> rumors valix) ev)
     let
@@ -1394,7 +1394,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
 
           itemList <- do
               (elbox ,helbox) <- ui  newEvent
-              lboxeel <- mapUIFinalizerT pan (\(metamap) ->
+              lboxeel <- mapUIFinalizerT (\(metamap) ->
                           case metamap of
                             "B" -> do
                               lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) <$>    res4 ) (fmap Just <$> tdi) (pure id) ((\i -> maybe id (i$) )<$> showFK )
@@ -1465,7 +1465,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
           evsel = unionWith const (unionWith const elsel eledit) (const Keep <$> rumors oldItems)
       blsel <- ui$ stepper Keep evsel
       element pan#  sink text (maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' . unTB1 . _fkttable )  <$>  (recoverEditChange <$> facts oldItems <*>blsel)) # set UI.style [("border","1px solid gray"),("border-radius","4px"),("height","20px")]
-      selEls <- mapUIFinalizerT top selector  (tidings bh  eh)
+      selEls <- mapUIFinalizerT selector  (tidings bh  eh)
       subnet <- UI.div  # sink children (facts selEls)
       subnet2 <- edit
       hidden <- UI.div  # set children [subnet,last subnet2] # set UI.class_ "col-xs-12"

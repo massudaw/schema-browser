@@ -361,7 +361,7 @@ detailsLabel lab gen = do
   bh <- ui $ stepper False ht
   let dynShow True = gen
       dynShow False = UI.div
-  out <- mapUIFinalizerT hl dynShow (tidings bh ht)
+  out <- mapUIFinalizerT dynShow (tidings bh ht)
   details <- UI.div # sink children (pure <$> facts out)
   element hl # set children [l,details]
 
@@ -646,12 +646,12 @@ onEventFT
 onEventFT = onEvent
 
 mapUIFinalizerT
-  :: Element
-     -> (b -> UI b1)
+  :: (b -> UI b1)
      -> Tidings b
      -> UI (Tidings b1)
-mapUIFinalizerT el m inp = ui $ do
-  mapTEventDynInterrupt (\i -> evalUI el  $ m i) inp
+mapUIFinalizerT m inp = do
+  w <- askWindow
+  ui $ mapTEventDynInterrupt (runUI w . m ) inp
 
 line n =   set  text n
 

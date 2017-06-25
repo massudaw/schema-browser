@@ -128,7 +128,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
                   Just proj = fmap (^._5) $ L.find ((==tb).(^._2) ) dashes
               traverse (\path -> do
                 v <- ui $ refTables' inf tb  Nothing (WherePredicate (OrColl $ (\(i,j) -> AndColl $fmap (PrimColl . first (liftAccess inf (tableName t))) [(   keyRef "source",Left (int i,Equals)), (keyRef "target",Left (int j,Equals))])  <$> path ))
-                mapUIFinalizerT innerCalendar (\i -> do
+                mapUIFinalizerT (\i -> do
                   createLayers innerCalendar (tableName tb)  (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) (v^._3)
                   ) (nonEmpty path))
 
@@ -142,7 +142,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
         fin <- mapM (\(_,tb,fields,efields,proj) -> do
           let pcal =  liftA2 (,) positionT  calendarT
               tname = tableName tb
-          mapUIFinalizerT innerCalendar (\(positionB,calT)-> do
+          mapUIFinalizerT (\(positionB,calT)-> do
             let pred = WherePredicate $ predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)
                 fieldKey (TB1 (SText v))=  v
             reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
@@ -154,7 +154,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
             let tdi = tidings tdib (fmap snd <$> evsel)
             (el,_) <- crudUITable inf  reftb [] [] (allRec' (tableMap inf) $ lookTable inf tname)  tdi
 
-            mapUIFinalizerT innerCalendar (\i ->
+            mapUIFinalizerT (\i ->
               createLayers innerCalendar tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   i)) (filtering tb v)
 
             stat <- UI.div  # sinkDiff text (show . M.lookup pred <$>   (reftb ^. _1))
@@ -166,7 +166,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
         element editor  # sink children (facts els)
         return ()
     let calInp = (\i -> filter (flip L.elem (concat (F.toList i)) .  (^. _2)) dashes  )<$> sel
-    onFFI "$(document).ready((%1))" (evalUI body $   mapUIFinalizerT calendar calFun calInp)
+    onFFI "$(document).ready((%1))" (evalUI body $   mapUIFinalizerT calFun calInp)
     return (legendStyle dashes ,dashes)
 
 

@@ -134,7 +134,7 @@ chartWidget body (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
                     tdib <- ui $ stepper Nothing (join <$> evsel)
                     let tdi = tidings tdib (join <$> evsel)
                     (el,_) <- crudUITable inf   reftb [] [] (allRec' (tableMap inf) $ t)  tdi
-                    mapUIFinalizerT charts
+                    mapUIFinalizerT
                       (\i -> do
                         calendarAddSource charts chart t (renderShowable <$> fields ) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .   fmap (snd.proj) $ L.sortBy (comparing (G.getIndex))$ G.toList i))
                         ui $ registerDynamic (fmap fst $ runDynamic $ evalUI charts $ calendarRemoveSource charts t))
@@ -146,7 +146,7 @@ chartWidget body (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
             element calendar # sink children ( catMaybes .F.toList <$> facts edits)
 
 
-    onFFI "google.charts.setOnLoadCallback(%1)" (evalUI body $  mapUIFinalizerT calendar calFun ((,,) <$> resolutionT <*> incrementT <*> positionB))
+    onFFI "google.charts.setOnLoadCallback(%1)" (evalUI body $  mapUIFinalizerT calFun ((,,) <$> resolutionT <*> incrementT <*> positionB))
 
     return  (legendStyle , dashes )
 
