@@ -38,16 +38,18 @@ import Query
 import Data.Interval as Interval
 import qualified Data.Text as T
 
-instance A.ToJSON (TBData Key Showable) where
-  toJSON (_,kv)  = A.toJSON $ M.mapKeys (T.intercalate "," . L.map (keyValue ._relOrigin) . F.toList ) (fmap unTB m)
+newtype Row = Row (TBData Key Showable)
+instance A.ToJSON Row  where
+  toJSON (Row (_,kv))  = A.toJSON $ M.mapKeys (T.intercalate "," . L.map (keyValue ._relOrigin) . F.toList ) (fmap unTB m)
     where
       m = unKV kv
+
 instance A.ToJSON (Column Key Showable)  where
   toJSON (Attr k v ) =
     case (keyType k ) of
       Primitive (AtomicPrim PColor )-> A.toJSON $  "#" <> renderShowable v
       i ->  A.toJSON v
-  toJSON (IT k v) = A.toJSON v
+  toJSON (IT k v) = A.toJSON (fmap Row v)
 
 instance A.ToJSON a =>
          A.ToJSON (FTB a) where

@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveGeneric #-}
@@ -11,13 +12,14 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE UndecidableInstances #-}
 
 module Types.Primitive  where
 
 import Types.Common
 import Data.Ord
+import Text.Show.Deriving
 import Data.Vector (Vector)
+import Data.Functor.Classes
 import Data.Dynamic
 import Control.DeepSeq
 import qualified NonEmpty as Non
@@ -45,6 +47,7 @@ import Data.Functor.Classes
 import Data.Foldable (Foldable)
 import qualified Data.Foldable as F
 import qualified Data.Interval as Interval
+import Data.Interval (Extended,Interval(..))
 import qualified Data.ExtendedReal as ER
 import Data.Monoid hiding (Product)
 import qualified Data.Text as T
@@ -150,10 +153,8 @@ data Labeled l v
   }
   | Unlabeled
   { labelValue :: v
-  } deriving(Eq,Show,Ord,Foldable,Functor,Traversable)
+  } deriving(Eq,Show,Ord,Foldable,Functor,Traversable,Show1)
 
-instance (Show f) =>  Show1 (Labeled f  ) where
-  showsPrec1 = showsPrec
 
 type Key = CoreKey -- FKey (KType  (Prim (Text,Text) (Text,Text)))
 
@@ -706,8 +707,19 @@ isInline _ = False
 -- Intersections and relations
 
 
+deriving instance (Show a, Show k) => Show (TB Identity k a)
+deriving instance (Eq a, Eq k) => Eq (TB Identity k a)
+deriving instance (Ord a, Ord k) => Ord (TB Identity k a)
 
 
+instance Show1 Interval where
+  liftShowsPrec l s  k (Interval (le,lb) (ue,ub) ) =  showsPrec k lb . (liftShowsPrec l s  k le) . (liftShowsPrec  l s  k ue) . showsPrec k ub
+
+deriveShow1 ''Extended
+deriveShow1 ''NonEmpty
+deriveShow1 ''FTB
+
+deriveShow1 ''TB
 
 makeLenses ''Rel
 makeLenses ''FKey

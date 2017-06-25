@@ -37,9 +37,7 @@ module Types.Index
   ,splitIndexPK
   ,module G ) where
 
-import Data.Reflection
 import qualified Data.Vector as V
-import Data.Proxy      -- from tagged
 import Data.Maybe
 import Unsafe.Coerce
 import qualified Data.Sequence as S

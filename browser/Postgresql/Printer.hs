@@ -1,6 +1,8 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Postgresql.Printer
   (selectQuery
   ,tableType
@@ -134,6 +136,8 @@ expandTable tb
   | otherwise = return $ expandBaseTable  tb
 
 
+
+deriving instance (Show ((Labeled Text)(TB (Labeled Text)k a )), Show (FTB1 (Labeled Text) k a), Show (FTB a), Show a, Show k) =>Show (TB (Labeled Text)k a)
 
 topRec = join . join . fmap unMutRec
 selectQuery

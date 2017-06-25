@@ -606,7 +606,7 @@ lookDesc inf j i = maybe (rawName j)  (\(Attr _ (TB1 (SText v)))-> v) row
     row = lookupAccess  (meta inf) pk "translation"  ("table_name_translation", i)
 
 tableOrder
-  :: Num b =>
+  ::
      InformationSchemaKV Key Showable
      -> TableK k
      -> G.GiST (TBIndex Showable) (TBData Key Showable)

@@ -1,5 +1,6 @@
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
@@ -7,8 +8,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveFoldable #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Types.Common (
@@ -73,6 +74,7 @@ module Types.Common (
     ,tableNonRef )   where
 
 import Data.Ord
+import Text.Show.Deriving
 import Types.Compose
 import Control.DeepSeq
 import qualified NonEmpty as Non
@@ -140,13 +142,36 @@ unSSerial (LeftTB1 i) = i
 unSSerial i = traceShow ("unSSerial No Pattern Match SSerial-" <> show i) Nothing
 
 
-
-
-
-
-
 newtype KV f k a
-  = KV {_kvvalues :: Map (Set (Rel k)) (f k a)  }deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
+  = KV {_kvvalues :: Map (Set (Rel k)) (f k a)  }deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic,Eq1,Ord1)
+
+instance (Show k , Show1 (f k) ) => Show1 (KV f k)  where
+  liftShowsPrec spk slk ix (KV g) =  liftShowsPrec (liftShowsPrec spk slk ) (liftShowList spk slk )  ix g
+
+
+instance Eq2 Map where
+    liftEq2 eqk eqv m n =
+        Map.size m == Map.size n && liftEq (liftEq2 eqk eqv) (Map.toList m) (Map.toList n)
+
+instance Eq k => Eq1 (Map k) where
+    liftEq = liftEq2 (==)
+
+instance Ord2 Map where
+    liftCompare2 cmpk cmpv m n =
+        liftCompare (liftCompare2 cmpk cmpv) (Map.toList m) (Map.toList n)
+
+instance Ord k => Ord1 (Map k) where
+    liftCompare = liftCompare2 compare
+
+instance Show2 Map where
+    liftShowsPrec2 spk slk spv slv d m =
+        showsUnaryWith (liftShowsPrec sp sl) "fromList" d (Map.toList m)
+      where
+        sp = liftShowsPrec2 spk slk spv slv
+        sl = liftShowList2 spk slk spv slv
+
+instance Show k => Show1 (Map k) where
+    liftShowsPrec = liftShowsPrec2 showsPrec showList
 
 instance Binary Order
 instance NFData Order
@@ -162,7 +187,7 @@ data Order
 
 type Column k a = TB Identity k a
 type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Identity))) k a )
-type TB3Data  f k a = (KVMetadata k,Compose f (KV (Compose f (TB f ))) k a )
+type TB3Data f k a = (KVMetadata k,Compose f (KV (Compose f (TB f ))) k a )
 
 keyRef k = IProd notNull k
 iprodRef (IProd _ l) = l
@@ -382,7 +407,7 @@ instance (Binary (f k a) ,Binary k ) => Binary (KV f k a)
 instance Binary k => Binary (Rel k)
 instance NFData k => NFData (Rel k)
 instance Binary a => Binary (Identity a)
-instance (Binary (f (KV (Compose f (TB f)) g k)) , Binary (f (KV (Compose f (TB f)) g ())) , Binary (f (TB f g ())) ,Binary (f (TB f g k)), Binary k ,Binary g) => Binary (TB f g k )
+instance (Binary (Identity (KV (Compose Identity (TB Identity)) g k)) , Binary (Identity (TB Identity g k)), Binary k ,Binary g) => Binary (TB Identity g k )
 instance Binary a => Binary (FTB a)
 instance NFData a => NFData (FTB a)
 instance Binary k => Binary (KVMetadata k )
@@ -420,19 +445,20 @@ data TB f k a
     }
   deriving(Functor,Foldable,Traversable,Generic)
 
+
+
 _fkttable (IT _  i) = i
 _fkttable (FKT _ _ i) = i
 _fkttable (Attr i _) = errorWithStackTrace "hit attr"
 _fkttable (Fun i _ _) = errorWithStackTrace "hit fun"
 
-deriving instance (Eq (f (TB f k a )), Eq (f (KV (Compose f (TB f)) k ())) ,Eq (f (TB f k () )) , Eq ( (FTB1 f  k a )) ,Eq a , Eq k ) => Eq (TB f k a)
-deriving instance (Ord (f (TB f k a )), Ord (f (KV (Compose f (TB f)) k ())), Ord (f (TB f k () )) , Ord ( (FTB1 f  k a )) ,Ord a , Ord k ) => Ord (TB f k a)
-deriving instance (Show (f (TB f k a )), Show (f (KV (Compose f (TB f)) k ())),Show (f (TB f k () )) , Show ( (FTB1 f k a )) ,Show (FTB a),Show a , Show k ) =>Show (TB f k a)
 
 type TB2 k a = TB3 Identity k a
 
 type TB3 f k a = FTB1 f k a
 
+
+-- instance (Show k) => Show1 (TB Identity k )
 
 
 filterKey' f ((m ,k) ) = (m,) . mapComp (\(KV kv) -> KV $ Map.filterWithKey f kv )  $  k
@@ -491,6 +517,7 @@ data FTB a
   | ArrayTB1  ! (NonEmpty (FTB a))
   | IntervalTB1 ! (Interval.Interval (FTB a))
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable,Generic)
+
 
 instance Applicative FTB where
   pure = TB1
@@ -684,8 +711,9 @@ unKV
 unKV = _kvvalues . unTB
 
 
-unTB1 :: Show a=> FTB a -> a
-unTB1 i = fromMaybe (errorWithStackTrace ("unTB1" <> show i)) . headMay . F.toList $ i
+unTB1 :: FTB a -> a
+unTB1 (TB1 i) =  i
+unTB1 i = fromMaybe (error "unTB1: " ) . headMay . F.toList $ i
 
 -- Intersections and relations
 

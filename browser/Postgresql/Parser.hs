@@ -342,17 +342,20 @@ parseLabeledTableJSON (LeftTB1 (Just l)) v = fmap LeftTB1 $ fmap Just (parseLabe
 parseLabeledTableJSON (TB1 l) v = fmap TB1 $ parseRecordJSON  l v
 parseLabeledTableJSON i v= errorWithStackTrace (show (i,v))
 
+labelTable :: FTB (TB3Data (Labeled Text) Key ()) -> Text
+labelTable = label . getCompose. snd . unTB1
 
-parseRecordJSON  (me,m) (A.Object v) = (do
+parseRecordJSON :: TB3Data (Labeled Text) Key () -> A.Value -> A.Parser (TBData Key Showable)
+parseRecordJSON  (me,m) (A.Object v) = do
   let try1 i v = HM.lookup (label i ) v
-      try2  (IT _ r) v = HM.lookup ( "p" <> l1 ) v<|> HM.lookup  l1  v
-        where l1 = (label $ getCompose$ snd $ unTB1 r)
+      try2  (IT _ r) v = HM.lookup ( "p" <> l1 ) v <|> HM.lookup  l1  v
+        where l1 = labelTable r
       try2 (FKT _ _ r) v = HM.lookup ( "p" <> l1 ) v <|> HM.lookup  l1  v
-        where l1 = (label $ getCompose$ snd $ unTB1 r)
+        where l1 = labelTable r
       try2 i _ = Nothing
 
   im <- traverse (fmap _tb . (\ i -> parseAttrJSON  (labelValue i) (justError (" no attr " <> show (i,v)) $ try1 i v <|> try2 (labelValue i) v)). getCompose )$   _kvvalues (labelValue $ getCompose m)
-  return (me,Compose $ Identity $  KV im ))
+  return (me,Compose $ Identity $  KV im )
 
 
 parseRecord  (me,m) = (char '('  *> (do

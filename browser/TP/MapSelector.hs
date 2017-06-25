@@ -90,7 +90,7 @@ mapWidgetMeta  inf = do
               (IT _ (ArrayTB1 features))= lookAttr' (meta inf) "features" e
               (Attr _ color )= lookAttr' (meta inf) "color" e
               projf  :: TBData Key Showable -> (FTB Showable , FTB (TBData Key Showable) ) -> Maybe (HM.HashMap Text A.Value)
-              projf  r (efield@(TB1 (SText field)),features)  = fmap (\i ->  HM.fromList [("label",A.toJSON (HM.fromList $ i <> [("id", txt $ writePK r efield   ),("title"::Text , txt $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r))])) ,("style",A.toJSON features)]) $ join $ convField  <$> indexFieldRec (head $ liftAccess inf tname <$> indexer field) r
+              projf  r (efield@(TB1 (SText field)),features)  = fmap (\i ->  HM.fromList [("label",A.toJSON (HM.fromList $ i <> [("id", txt $ writePK r efield   ),("title"::Text , txt $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r))])) ,("style",A.toJSON (Row <$> features))]) $ join $ convField  <$> indexFieldRec (head $ liftAccess inf tname <$> indexer field) r
               proj r = projf r <$> zip (F.toList efields) (F.toList features)
               convField (ArrayTB1 v) = Just $ [("position",ArrayTB1 v)]
               convField (LeftTB1 v) = join $ convField  <$> v

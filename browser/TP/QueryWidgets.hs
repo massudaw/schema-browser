@@ -1,16 +1,6 @@
 {-# LANGUAGE
-    FlexibleInstances
-   ,BangPatterns
-   ,OverloadedStrings
-   ,ScopedTypeVariables
+    OverloadedStrings
    ,FlexibleContexts
-   ,ExistentialQuantification
-   ,TupleSections
-   ,LambdaCase
-   ,RankNTypes
-   ,RecordWildCards
-   ,DeriveFunctor
-   ,NoMonomorphismRestriction
    ,RecursiveDo
  #-}
 
@@ -105,6 +95,8 @@ type SelPKConstraint = [([Column CoreKey ()],Tidings PKConstraint)]
 type SelTBConstraint = [([Column CoreKey ()],Tidings TBConstraint)]
 
 type RefTables = (Tidings (IndexMetadata CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)),Tidings [SecondaryIndex CoreKey Showable ], TChan [RowPatch KeyUnique Showable] )
+
+type PluginRef a = [([Access Key], Tidings (Maybe (Index a)))]
 
 --- Plugins Interface Methods
 createFresh :: Text -> InformationSchema -> Text -> KType CorePrim -> IO InformationSchema
@@ -232,6 +224,16 @@ pluginUI inf oldItems (idp,p@(FPlugins n t (IOPlugin arrow))) = do
   return (headerP, (out ,  pgOut ))
 
 
+
+checkAccessFull
+  :: Functor f =>
+     InformationSchema
+     -> Text
+     -> Parser t [Access Text] t2 t3
+     -> f (Maybe (TBData Key Showable))
+     -> (f (Maybe (TBData Key Showable)),
+         f (Maybe (TBData Key Showable)),
+         [Access Key])
 checkAccessFull inf  t arrow oldItems = (tdInput,tdOutput,out)
     where
       (inp,out) = second (liftAccessU inf t ). first (liftAccessU  inf t ) $ staticP arrow
@@ -428,25 +430,20 @@ repl v = [v]
 traRepl :: Ord k => [Access k] -> [Access k]
 traRepl i = foldMap repl i
 
-eiTableDiff
-  :: InformationSchema
+buildFKS :: InformationSchema
      -> SelPKConstraint
-     -> [(Column CoreKey () ,Tidings (Maybe (Column CoreKey Showable)))]
-     -> PluginRef (TBData CoreKey Showable)
-     -> TBData CoreKey ()
-     -> Tidings (Maybe (TBData CoreKey Showable))
-     -> UI (Element,Tidings (Editor (Index (TBData CoreKey Showable))))
-eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
-  oldItems <- ui $ cacheTidings preoldItems
-  plugins <- ui $ loadPlugins inf
-  let
-      table = lookTable inf (_kvname meta)
-  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds . snd) (plugins ))
-  let
-      resdiff =   fmap ( liftA2 (\i j -> (join .liftA2 (\j i@(_,pk,_)   -> if   pk == G.getIndex j then Just i else Nothing ) i $ j ) ) oldItems   ) .  snd <$> res
-      srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (unTBMap ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
-      plugmods = first traRepl <$> (resdiff <> plmods)
-      buildFKS =  foldl' (\jm (l,m)  -> do
+        -> Table
+        -> [(Column CoreKey () ,Tidings (Maybe (Column CoreKey Showable)))]
+         -> PluginRef (TBData CoreKey Showable)
+         -> TBData CoreKey ()
+         -> Tidings (Maybe (TBData CoreKey Showable))
+         -> [(Set (Rel Key),
+                        Compose Identity (TB Identity) Key ())]  -> UI [(Column CoreKey (),
+                            (TrivialWidget
+                               (Editor (PathAttr CoreKey Showable)),
+                             Tidings (Maybe (Column CoreKey Showable))))]
+buildFKS inf constr table refs plugmods  ftb@(meta,k) oldItems srefs =  F.foldr  run (return [])  srefs
+  where run (l,m) jm  = do
                     w <- jm
                     let el = L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> ( _kvrecrels meta))
                         plugattr = indexPluginAttrDiff (unTB m) plugmods
@@ -465,21 +462,40 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
                         v <- labelCaseDiff inf (unTB m) nref
                         out <- UI.div # set children [getElement v,getElement  nref] #  set UI.class_ ("col-xs-" <> show (fst $  attrSize (unTB m)))
                         return $ TrivialWidget (triding v) out
+                    return (w <> [(unTB m,(lab,aref))] )
 
-                    return (w <> [(unTB m,(lab,aref))])
-                ) (return [])  (srefs)
+eiTableDiff
+  :: InformationSchema
+     -> SelPKConstraint
+     -> [(Column CoreKey () ,Tidings (Maybe (Column CoreKey Showable)))]
+     -> PluginRef (TBData CoreKey Showable)
+     -> TBData CoreKey ()
+     -> Tidings (Maybe (TBData CoreKey Showable))
+     -> UI (Element,Tidings (Editor (TBIdx CoreKey Showable)))
+eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
+  oldItems <- ui $ cacheTidings preoldItems
+  plugins <- ui $ loadPlugins inf
   let
-      sequenceTable :: [(Column CoreKey () ,(TrivialWidget (Editor (Index (Column CoreKey Showable))), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (Index (TBData CoreKey Showable)))
+      table = lookTable inf (_kvname meta)
+  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds . snd) (plugins ))
+  let
+      resdiff =   fmap ( liftA2 (\i j -> (join .liftA2 (\j i@(_,pk,_)   -> if   pk == G.getIndex j then Just i else Nothing ) i $ j ) ) oldItems   ) .  snd <$> res
+      srefs :: [(Set (Rel Key),
+                        Compose Identity (TB Identity) Key ())]
+      srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (unTBMap ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
+      plugmods = first traRepl <$> (resdiff <> plmods)
+  let
+      sequenceTable :: [(Column CoreKey () ,(TrivialWidget (Editor (PathAttr CoreKey Showable)), Tidings (Maybe (Column CoreKey Showable))))] -> Tidings (Editor (TBIdx CoreKey Showable))
       sequenceTable fks = (\old difs -> (\ i ->  (fmap (tableMeta table , maybe (G.Idex [])G.getIndex old,)   ) i) . reduceTable $ difs) <$> oldItems <*> Tra.sequenceA (triding .fst . snd <$> fks)
 
   (listBody,output) <- if rawIsSum table
     then do
-      fks <-buildFKS
+      fks <- buildFKS inf constr table refs plugmods ftb oldItems srefs
       let
         initialAttr = join . fmap (\(n,  j) ->    safeHead $ catMaybes  $ (unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j))))  <$>oldItems
         sumButtom itb =  do
            let i = unTB itb
-               (body ,_) = justError ("no sum attr " <> show i) $ M.lookup i (M.fromList fks)
+               (body ,_) = justError ("no sum attr " ) $ M.lookup i (M.fromList fks)
            element =<< labelCaseDiff inf i body
 
         marker i = sink  UI.style ((\b -> if not b then [("border","2px gray dotted")] else [("border","2px white solid")] )<$> i)
@@ -495,13 +511,13 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
           delete (PInline i _) = PInline i (POpt Nothing)
           delete (PFK i j _ ) = PFK i (fmap delete  j ) (POpt Nothing)
           iniValue = (fmap (patch.attrOptional ) <$> initialAttr)
-          resei :: Tidings (Editor (Index (TBData CoreKey Showable)))
+          resei :: Tidings (Editor (TBIdx CoreKey Showable))
           resei = (\ini j -> fmap (\(m,i,l)  -> (m,i,L.map (\i -> if (keypattr i == keyattr j) then i else delete i) (maybe l (:l) ini))) ) <$> iniValue <*> triding chk <*> sequenceTable fks
       listBody <- UI.div #  set children (getElement chk : F.toList (getElement .fst .snd <$> fks))
       sequence $ (\(kix,(el,_)) -> element  el # sink0 UI.style (noneShow <$> ((==keyattri kix) .keyattr <$> facts (triding chk) ))) <$> fks
       return (listBody, resei)
     else  do
-      fks <- buildFKS
+      fks <- buildFKS inf constr table refs plugmods ftb oldItems srefs
       listBody <- UI.div  #
         set children (F.toList (getElement .fst . snd  <$> fks))
       return (listBody,sequenceTable fks)
@@ -518,6 +534,8 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
   tableName <- detailsLabel (set UI.text (T.unpack $ tableName table)) (UI.div  # set text (show table))
   tableDiv <- UI.div # set children [tableName,body]
   return (tableDiv , output)
+
+{-# NOINLINE eiTableDiff #-}
 
 crudUITable
    :: InformationSchema
@@ -824,10 +842,10 @@ reduceFKOptional rel att  (Diff (PFK _ attn vn))= Diff $ PFK rel ((\(PAttr i j )
 maybeEdit v id (Diff i) =  id i
 maybeEdit v id _  = v
 
-buildUIDiff:: [FieldModifier] -> KType (Prim KPrim (Text,Text))-> [Tidings (Maybe (Index (FTB Showable)))]-> Tidings (Maybe (FTB Showable)) -> UI (TrivialWidget (Editor (Index (FTB Showable))))
+buildUIDiff:: [FieldModifier] -> KType (Prim KPrim (Text,Text))-> [Tidings (Maybe (PathFTB Showable))]-> Tidings (Maybe (FTB Showable)) -> UI (TrivialWidget (Editor (PathFTB Showable)))
 buildUIDiff km i  plug tdi = go i plug tdi
   where
-    go :: KType (Prim KPrim (Text,Text))-> [Tidings (Maybe (Index (FTB Showable)))]-> Tidings (Maybe (FTB Showable)) -> UI (TrivialWidget (Editor (Index (FTB Showable))))
+    go :: KType (Prim KPrim (Text,Text))-> [Tidings (Maybe (PathFTB Showable))]-> Tidings (Maybe (FTB Showable)) -> UI (TrivialWidget (Editor ((PathFTB Showable))))
     go i plug tdi = case i of
          KArray ti  -> mdo
             offsetDiv  <- UI.div
@@ -1133,7 +1151,7 @@ iUITableDiff
   -> Tidings (Maybe (Column CoreKey Showable))
   -- Static Information about relation
   -> Column CoreKey ()
-  -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
+  -> UI (TrivialWidget (Editor (PathAttr CoreKey Showable)))
 iUITableDiff inf constr pmods oldItems  (IT na  tb1)
   = fmap (fmap (PInline  na) )<$> go (unConstr <$> constr) (keyType na)   (fmap (fmap (fmap (patchfkt))) <$> pmods) (fmap _fkttable <$> oldItems)
   where
@@ -1190,7 +1208,6 @@ iUITableDiff inf constr pmods oldItems  (IT na  tb1)
         return  $ TrivialWidget  bres composed
 
 
-type PluginRef a = [([Access Key], Tidings (Maybe (Index a)))]
 
 offsetFieldFiltered  initT eve maxes = do
   init <- currentValue (facts initT)
@@ -1280,7 +1297,7 @@ fkUITableDiff
   -> Tidings (Maybe (Column CoreKey Showable))
   -- Static Information about relation
   -> Column CoreKey ()
-  -> UI (TrivialWidget(Editor (Index (Column CoreKey Showable))))
+  -> UI (TrivialWidget(Editor (PathAttr CoreKey Showable)))
 fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(TB1 tbdata@(m,_)  ) ) =  do
       -- Top Level Widget
       pan <- UI.div #  set UI.class_ "col-xs-5 fixed-label"
@@ -1303,7 +1320,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
           let ftdi = F.foldl' (liftA2 mergePatches) oldItems (snd <$> plmods)
           ui $ (\i -> onEventIO (rumors i) heledit) $ liftA2 editor oldItems ftdi
           return []
-        selector True = mdo
+        selector True = do
           let
             inf = fromMaybe preinf $ HM.lookup (_kvschema m) (depschema preinf)
             table = lookTable inf  (_kvname m)
@@ -1634,7 +1651,7 @@ viewer inf table envK = mdo
       ini = nearest' iniPg 0
       addT (c,(s,(cou,td))) = M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)
   iniQ <- ui $ makeQ iniSort ini
-  offset <- offsetField (pure 0 ) (never ) (ceiling . (/pageSize). fromIntegral <$> tidings offsetTotal never )
+  offset <- offsetField (pure 0 ) (never ) ((\i -> ceiling  (fromIntegral i /fromIntegral pageSize)) <$>  tidings offsetTotal never )
   let
       event1 , event2 :: Event (Dynamic (Int,([(CoreKey,Maybe Bool)],(Int,[TBData CoreKey Showable]))))
       event1 = (\(j,k) i  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pure iniPg <*> triding offset) <@> rumors (triding sortList)

@@ -56,10 +56,11 @@ getCpfForm session captcha nascimento cgc_cpf = do
           traverse (readCpfName . traceShowId . BSLC.unpack ) (fromJust pr ^? responseBody)
 
 
+initSess :: IO Sess.Session
 initSess =  do
   let
       man  = opensslManagerSettings context
-  Sess.newSession (Just (HTTP.createCookieJar  [])) man
+  return undefined -- Sess.newSession (Just (HTTP.createCookieJar  [])) man
 
 getCaptchaCnpj  session = do
        print cnpjhome
