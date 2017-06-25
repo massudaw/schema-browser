@@ -10,11 +10,10 @@ import Data.Binary
 import Data.Bifunctor
 import Data.Functor.Classes
 
-newtype Compose f g k a = Compose {getCompose :: f (g k a) } deriving (Functor,Foldable,Traversable,Ord,Eq,Generic)
+newtype Compose f g k a = Compose {getCompose :: f (g k a) } deriving (Functor,Foldable,Traversable,Ord,Eq,Generic,Generic1)
 
 instance (Show1 f ,Show1 (g k)) => Show1 (Compose f g k ) where
   liftShowsPrec f g i (Compose c )= liftShowsPrec (liftShowsPrec f g) (liftShowList f g ) i c
-
 
 
 instance (Show1 f ,Show a ,Show1 (g k)) => Show (Compose f g k a) where

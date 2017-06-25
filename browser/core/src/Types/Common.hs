@@ -9,8 +9,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE UndecidableInstances #-}
-{-# LANGUAGE UndecidableInstances #-}
 
 module Types.Common (
      module Types.Compose
@@ -407,7 +405,7 @@ instance (Binary (f k a) ,Binary k ) => Binary (KV f k a)
 instance Binary k => Binary (Rel k)
 instance NFData k => NFData (Rel k)
 instance Binary a => Binary (Identity a)
-instance (Binary (Identity (KV (Compose Identity (TB Identity)) g k)) , Binary (Identity (TB Identity g k)), Binary k ,Binary g) => Binary (TB Identity g k )
+instance (Binary k ,Binary g) => Binary (TB Identity g k )
 instance Binary a => Binary (FTB a)
 instance NFData a => NFData (FTB a)
 instance Binary k => Binary (KVMetadata k )
