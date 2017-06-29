@@ -442,8 +442,8 @@ buildFKS :: InformationSchema
                             (TrivialWidget
                                (Editor (PathAttr CoreKey Showable)),
                              Tidings (Maybe (Column CoreKey Showable))))]
-buildFKS inf constr table refs plugmods  ftb@(meta,k) oldItems srefs =  F.foldr  run (return [])  srefs
-  where run (l,m) jm  = do
+buildFKS inf constr table refs plugmods  ftb@(meta,k) oldItems srefs =  F.foldl'  run (return [])  srefs
+  where run jm (l,m) = do
                     w <- jm
                     let el = L.any (mAny ((l==) . head ))  (fmap (fmap S.fromList ) <$> ( _kvrecrels meta))
                         plugattr = indexPluginAttrDiff (unTB m) plugmods
@@ -535,7 +535,6 @@ eiTableDiff inf constr refs plmods ftb@(meta,k) preoldItems = do
   tableDiv <- UI.div # set children [tableName,body]
   return (tableDiv , output)
 
-{-# NOINLINE eiTableDiff #-}
 
 crudUITable
    :: InformationSchema
@@ -553,7 +552,7 @@ crudUITable inf reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItems = d
             getItem  v =  getFrom table v `catchAll` (\e -> liftIO (putStrLn $ "error getting Item" ++ show (e :: SomeException)) >> return Nothing)
           preoldItens <- currentValue (facts preoldItems)
           loadedItens <-  ui $ join <$> traverse (transactionNoLog inf  . getItem) preoldItens
-          (loadedItensEv ) <- mapUIFinalizerT (ui . fmap join <$> traverse (\i ->  do
+          loadedItensEv <- traverseUI (ui . fmap join <$> traverse (\i ->  do
             p <-  transactionNoLog inf . getItem $ i
             putPatch tref (fmap PatchRow $ maybeToList p)
             return (fmap PatchRow p  ) )) preoldItems
@@ -607,7 +606,7 @@ dynCrudUITable inf open reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldI
           return out
       fun i = UI.div
 
-  end <- mapUIFinalizerT fun (diffTidings $ triding nav)
+  end <- traverseUI fun (diffTidings $ triding nav)
   element sub # sink children (pure <$> facts end)
   cv <- currentValue (facts preoldItems)
   let evs2 = unionWith const e2  (rumors preoldItems)
@@ -713,7 +712,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   debug <- UI.div
   let renderTyped (Pure _ ) i  = ident. renderTable  $ i
       renderTyped (Other (Constant i) ) _ = unlines ("Type check error":  i)
-  mapUIFinalizerT (\i -> if  i
+  traverseUI (\i -> if  i
                     then do
                       let gen (h,s) = do
                             v <- ui $ currentValue s
@@ -785,7 +784,7 @@ dynHandlerPatch hand val ix (l,old)= do
           return []
     el <- UI.div
     pretd <- ui $ cacheTidings  old
-    els <- mapUIFinalizerT idyn  pretd
+    els <- traverseUI idyn  pretd
     element el # sink children (facts els)
     bend <- ui $ stepper Keep (unionWith const (const Keep <$> rumors valix) ev)
     let
@@ -941,8 +940,33 @@ reduceDiff i
   | F.all isDelete i = Delete
   | otherwise = patchEditor $ filterDiff i
 
+horizontal l = UI.div # set UI.style [("display","inline-flex")]  # set UI.children l
+vertical l = UI.div # set UI.children l
 
-buildPrim :: [FieldModifier] ->Tidings (Maybe Showable) ->   KPrim -> UI (TrivialWidget (Maybe Showable))
+class PrimEditor a where
+  primEditor :: Tidings (Maybe a) -> UI (TrivialWidget (Maybe a))
+
+instance (PrimEditor a,PrimEditor b,PrimEditor c) => PrimEditor (a,b,c) where
+  primEditor i = do
+    f <- primEditor (fmap (Le.view Le._1)<$> i)
+    s <- primEditor (fmap (Le.view Le._2)<$> i)
+    t <- primEditor (fmap (Le.view Le._3)<$> i)
+    TrivialWidget (liftA3 (,,)<$> triding f <*> triding s <*> triding t) <$> horizontal [getElement f,getElement s,getElement t]
+
+instance (PrimEditor a,PrimEditor b) => PrimEditor (a,b) where
+  primEditor i = do
+    f <- primEditor (fmap fst <$> i)
+    s <- primEditor (fmap snd <$> i)
+    TrivialWidget (liftA2 (,)<$> triding f <*> triding s) <$> horizontal [getElement f,getElement s]
+
+instance PrimEditor Bool where
+  primEditor  = checkedWidgetM
+
+instance PrimEditor Double where
+  primEditor i = fmap (fmap (\(SDouble i) -> i)) <$> buildPrim [] (fmap SDouble <$> i)  PDouble
+
+
+buildPrim :: [FieldModifier] -> Tidings (Maybe Showable) ->   KPrim -> UI (TrivialWidget (Maybe Showable))
 buildPrim fm tdi i = case i of
          PGeom ix g->
            let tdig = fmap (\(SGeo i) -> i) <$> tdi
@@ -950,22 +974,10 @@ buildPrim fm tdi i = case i of
              PPosition -> do
                let tdip = fmap (\(SPosition i) -> i) <$> tdig
                fmap (fmap SPosition)<$> case ix of
-                 3-> do
-                    lon <- buildPrim fm (fmap (\((Position (lon,_,_))) -> SDouble lon ) <$> tdip) PDouble
-                    lat <- buildPrim fm (fmap (\((Position (_,lat,_))) -> SDouble lat ) <$> tdip) PDouble
-                    alt <- buildPrim fm (fmap (\((Position (_,_,alt))) -> SDouble alt ) <$> tdip) PDouble
-                    let res = liftA3 (\(SDouble a)(SDouble b) (SDouble c) -> (Position (a,b,c))) <$> triding lon <*> triding lat <*> triding alt
-                    composed <- UI.div # set UI.style [("display","inline-flex")]  # set UI.children (getElement <$> [lon,lat,alt])
-                    upper <- UI.div # set children [composed]
-                    return $ TrivialWidget res upper
-                 2-> do
-                    lon <- buildPrim fm (fmap (\((Position2D (lon,_))) -> SDouble lon ) <$> tdip) PDouble
-                    lat <- buildPrim fm (fmap (\((Position2D (_,lat))) -> SDouble lat ) <$> tdip) PDouble
-                    let res = liftA2 (\(SDouble a)(SDouble b)  -> (Position2D (a,b))) <$> triding lon <*> triding lat
-                    composed <- UI.div # set UI.style [("display","inline-flex")] # set UI.children (getElement <$> [lon,lat])
-                    upper <- UI.div # set children [composed]
-                    return $ TrivialWidget res upper
-         PDimensional i (a,b,c,d,e,f,g) -> do
+                 3-> fmap (fmap Position) <$> primEditor (fmap (\(Position l) -> l) <$> tdip)
+                 2-> fmap (fmap Position2D) <$> primEditor (fmap (\(Position2D l) -> l) <$> tdip)
+
+         PDimensional s (a,b,c,d,e,f,g) -> do
            let mult = zip [a,b,c,d,e,f,g] un
                multP = filter ((>0).fst) mult
                multN = filter ((<0).fst) mult
@@ -981,12 +993,13 @@ buildPrim fm tdi i = case i of
                scale i
                  | i == 0 = ""
                  | otherwise = "10^" <> show i  <> "."
-           tag <- UI.span # set text  (scale i <> build pols negs)
-           out <- oneInput tdi [tag]
+           tag <- UI.span # set text  (scale s <> build pols negs)
+           inp <- oneInput i tdi
+           out <- horizontal [tag,getElement inp]
            element out # set UI.style [("width","100%")]
-           return out
+           return (TrivialWidget (triding inp) out)
          PBoolean -> do
-           res <- checkedWidgetM (fmap (\(SBoolean i) -> i) <$> tdi )
+           res <- primEditor (fmap (\(SBoolean i) -> i) <$> tdi )
            return (fmap SBoolean <$> res)
          PTime ti -> do
            let  tdip =  tdi
@@ -1031,46 +1044,11 @@ buildPrim fm tdi i = case i of
              PDayTime -> do
                 cliZone <- jsTimeZone
                 itime <- liftIO $  getCurrentTime
-                oneInput tdi []
-             PInterval -> oneInput tdi []
+                oneInput i tdi
+             PInterval -> oneInput i tdi
          PSession -> do
            dv <- UI.div # set text "session" # sink UI.style (noneShow . isJust <$> facts tdi)
            return  $ TrivialWidget tdi dv
-         PMime "text/plain" -> do
-           let fty = ("textarea",UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-           ini <- currentValue (facts tdi)
-           f <- pdfFrame fty (facts tdi) # sink UI.style (noneShow . (\i -> isJust i || elem FWrite fm) <$> facts tdi)
-           vcf <- UI.valueChange f
-           let ev = if elem FWrite fm then unionWith const (rumors tdi) (Just . SBinary . BSC.pack <$> vcf) else rumors tdi
-           step <- ui $ stepper  ini ev
-           return (TrivialWidget (tidings step ev) f)
-         PMime "video/mp4" -> do
-           let binarySrc = (\(SBinary i) -> "data:" <> T.unpack "video/mp4"<> ";base64," <>  (BSC.unpack $ B64.encode i) )
-           clearB <- UI.button # set UI.text "clear"
-           file <- UI.input # set UI.type_ "file" # set UI.multiple True # set UI.style (noneShow $ elem FWrite fm)
-           fchange <- fileChange file
-           clearE <- UI.click clearB
-           tdi2 <- ui $ addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange) =<< addEvent (const Nothing <$> clearE ) tdi
-
-           let fty = ("source",UI.src,maybe "" binarySrc  ,[])
-           ini <- currentValue (facts tdi2)
-           let f = (\i -> do
-                f <- pdfFrame fty  i # set UI.type_ "video/mp4"
-                mkElement "video" # set children (pure f) # set (UI.strAttr "width" ) "320" # set (UI.strAttr "height" ) "240" # set (UI.strAttr "controls") ""# set (UI.strAttr "autoplay") ""
-                   ) <$> (facts tdi2)
-               pdfFrame (elem,sr , call,st) pdf = mkElement (elem ) # set sr (call  pdf)
-           v <- UI.div # sink  items(pure <$> f)
-           o <- UI.div # set children [file,clearB,v]
-           return (TrivialWidget tdi2 o)
-
-         PMime "application/dwg" -> do
-           let fty = ("div",UI.value,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-           ini <- currentValue (facts tdi)
-           f <- pdfFrame fty (facts tdi) # sink UI.style (noneShow . (\i -> isJust i || elem FWrite fm) <$> facts tdi)
-           vcf <- UI.valueChange f
-           let ev = if elem FWrite fm then unionWith const (rumors tdi) (Just . SBinary . BSC.pack <$> vcf ) else rumors tdi
-           step <- ui $ stepper  ini ev
-           return (TrivialWidget (tidings step ev) f)
          PAddress -> do
            let binarySrc = (\(SText i) -> "https://drive.google.com/embeddedfolderview?id=" <> T.unpack i <> "#grid")
 
@@ -1086,32 +1064,67 @@ buildPrim fm tdi i = case i of
            fd <- UI.div # set UI.style [("display","inline-flex")] # set children [i]
            res <- UI.div # set children [fd,f]
            return (TrivialWidget tdi2 res)
-         PMime mime -> do
-           let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
-           clearB <- UI.button # set UI.text "clear"
-           file <- UI.input # set UI.type_ "file" # set UI.multiple True # set UI.style (noneShow $ elem FWrite fm)
-           fchange <- fileChange file
-           clearE <- UI.click clearB
-           cur2 <- ui $currentValue (facts tdi)
-           let evi2 = foldl1 (unionWith const) [ rumors tdi,const Nothing <$> clearE,  (trace "fchange" . join . fmap (either (const Nothing) (Just . SBinary).   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange)]
-           bdi2 <- ui $ stepper cur2  evi2
-           let
-             tdi2 = tidings bdi2 evi2
-             fty = case mime of
-               "application/pdf" -> pdfFrame ("iframe" ,UI.strAttr "src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
-               "application/x-ofx" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-               "text/xml" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-               "application/gpx+xml" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-               "image/jpg" -> (\i -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")]) i # set UI.class_ "img-responsive")
-               "image/png" -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
-               "image/bmp" -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
-               "text/html" -> pdfFrame ("iframe" ,UI.strAttr "srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
-           f <- fty bdi2  # sinkDiff UI.style (noneShow. isJust <$> tdi2)
-           fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]
-           res <- UI.div # set children [fd,f]
-           valChange <- UI.valueChange f
-           tdi3 <- ui $ addEvent  (readPrim  i <$> valChange) tdi2
-           return (TrivialWidget tdi3 res)
+         PMime mime ->
+           case mime of
+            "text/plain" -> do
+               let fty = ("textarea",UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+               ini <- currentValue (facts tdi)
+               f <- pdfFrame fty (facts tdi) # sink UI.style (noneShow . (\i -> isJust i || elem FWrite fm) <$> facts tdi)
+               vcf <- UI.valueChange f
+               let ev = if elem FWrite fm then unionWith const (rumors tdi) (Just . SBinary . BSC.pack <$> vcf) else rumors tdi
+               step <- ui $ stepper  ini ev
+               return (TrivialWidget (tidings step ev) f)
+            "application/dwg" -> do
+               let fty = ("div",UI.value,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+               ini <- currentValue (facts tdi)
+               f <- pdfFrame fty (facts tdi) # sink UI.style (noneShow . (\i -> isJust i || elem FWrite fm) <$> facts tdi)
+               vcf <- UI.valueChange f
+               let ev = if elem FWrite fm then unionWith const (rumors tdi) (Just . SBinary . BSC.pack <$> vcf ) else rumors tdi
+               step <- ui $ stepper  ini ev
+               return (TrivialWidget (tidings step ev) f)
+            "video/mp4" -> do
+               let binarySrc = (\(SBinary i) -> "data:" <> T.unpack "video/mp4"<> ";base64," <>  (BSC.unpack $ B64.encode i) )
+               clearB <- UI.button # set UI.text "clear"
+               file <- UI.input # set UI.type_ "file" # set UI.multiple True # set UI.style (noneShow $ elem FWrite fm)
+               fchange <- fileChange file
+               clearE <- UI.click clearB
+               tdi2 <- ui $ addEvent (join . fmap (fmap SBinary . either (const Nothing) Just .   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange) =<< addEvent (const Nothing <$> clearE ) tdi
+               let fty = ("source",UI.src,maybe "" binarySrc  ,[])
+               ini <- currentValue (facts tdi2)
+               let f = (\i -> do
+                    f <- pdfFrame fty  i # set UI.type_ "video/mp4"
+                    mkElement "video" # set children (pure f) # set (UI.strAttr "width" ) "320" # set (UI.strAttr "height" ) "240" # set (UI.strAttr "controls") ""# set (UI.strAttr "autoplay") ""
+                       ) <$> (facts tdi2)
+                   pdfFrame (elem,sr , call,st) pdf = mkElement (elem ) # set sr (call  pdf)
+               v <- UI.div # sink  items(pure <$> f)
+               o <- UI.div # set children [file,clearB,v]
+               return (TrivialWidget tdi2 o)
+            otherwise -> do
+               let binarySrc = (\(SBinary i) -> "data:" <> T.unpack mime <> ";base64," <>  (BSC.unpack $ B64.encode i) )
+               clearB <- UI.button # set UI.text "clear"
+               file <- UI.input # set UI.type_ "file" # set UI.multiple True # set UI.style (noneShow $ elem FWrite fm)
+               fchange <- fileChange file
+               clearE <- UI.click clearB
+               cur2 <- ui $currentValue (facts tdi)
+               let evi2 = foldl1 (unionWith const) [ rumors tdi,const Nothing <$> clearE,  (trace "fchange" . join . fmap (either (const Nothing) (Just . SBinary).   B64.decode .  BSC.drop 7. snd  . BSC.breakSubstring "base64," . BSC.pack ) <$> fchange)]
+               bdi2 <- ui $ stepper cur2  evi2
+               let
+                 tdi2 = tidings bdi2 evi2
+                 fty = case mime of
+                   "application/pdf" -> pdfFrame ("iframe" ,UI.strAttr "src",maybe "" binarySrc ,[("width","100%"),("height","300px")])
+                   "application/x-ofx" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+                   "text/xml" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+                   "application/gpx+xml" ->pdfFrame  ("textarea", UI.value ,maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+                   "image/jpg" -> (\i -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")]) i # set UI.class_ "img-responsive")
+                   "image/png" -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
+                   "image/bmp" -> pdfFrame ("img" ,UI.strAttr "src",maybe "" binarySrc ,[("max-height","200px")])
+                   "text/html" -> pdfFrame ("iframe" ,UI.strAttr "srcdoc",maybe "" (\(SBinary i) -> BSC.unpack i) ,[("width","100%"),("height","300px")])
+               f <- fty bdi2  # sinkDiff UI.style (noneShow. isJust <$> tdi2)
+               fd <- UI.div # set UI.style [("display","inline-flex")] # set children [file,clearB]
+               res <- UI.div # set children [fd,f]
+               valChange <- UI.valueChange f
+               tdi3 <- ui $ addEvent  (readPrim  i <$> valChange) tdi2
+               return (TrivialWidget tdi3 res)
          PColor -> do
             let f = facts tdi
             v <- currentValue f
@@ -1125,18 +1138,17 @@ buildPrim fm tdi i = case i of
             onChanges f (\f -> runFunctionDelayed inputUI  $ ffi "updateColor(%1,%2)" inputUI (maybe "FFFFFF" renderPrim  f))
             return $ TrivialWidget pkt sp
          z -> do
-            oneInput tdi []
+           oneInput z tdi
   where
-    oneInput :: Tidings (Maybe Showable) -> [Element] ->  UI (TrivialWidget (Maybe Showable))
-    oneInput tdi elem = do
-            v <- currentValue (facts tdi)
-            inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("width","100%")] -- # if [FRead] == fm then (set (UI.strAttr "readonly") "") else id
-            onCE <- UI.onChangeE inputUI
 
-            let pke = unionWith const (readPrim i <$> onCE ) (rumors tdi)
-            pk <- ui $ stepper v  pke
-            sp <- UI.div # set children (inputUI : elem)
-            return $ TrivialWidget(tidings pk pke) sp
+oneInput :: KPrim -> Tidings (Maybe Showable) ->   UI (TrivialWidget (Maybe Showable))
+oneInput i tdi = do
+    v <- currentValue (facts tdi)
+    inputUI <- UI.input # sinkDiff UI.value (maybe "" renderPrim <$> tdi) # set UI.style [("width","100%")]
+    onCE <- UI.onChangeE inputUI
+    pke <- ui . calmE $  unionWith const (readPrim i <$> onCE ) (rumors tdi)
+    pk <- ui $ stepper v  pke
+    return $ TrivialWidget(tidings pk pke) inputUI
 
 
 
@@ -1394,7 +1406,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
 
           itemList <- do
               (elbox ,helbox) <- ui  newEvent
-              lboxeel <- mapUIFinalizerT (\(metamap) ->
+              lboxeel <- traverseUI (\(metamap) ->
                           case metamap of
                             "B" -> do
                               lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) <$>    res4 ) (fmap Just <$> tdi) (pure id) ((\i -> maybe id (i$) )<$> showFK )
@@ -1465,7 +1477,7 @@ fkUITableDiff preinf constr  plmods nonInjRefs   oldItems  tb@(FKT ifk rel tb1@(
           evsel = unionWith const (unionWith const elsel eledit) (const Keep <$> rumors oldItems)
       blsel <- ui$ stepper Keep evsel
       element pan#  sink text (maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' . unTB1 . _fkttable )  <$>  (recoverEditChange <$> facts oldItems <*>blsel)) # set UI.style [("border","1px solid gray"),("border-radius","4px"),("height","20px")]
-      selEls <- mapUIFinalizerT selector  (tidings bh  eh)
+      selEls <- traverseUI selector  (tidings bh  eh)
       subnet <- UI.div  # sink children (facts selEls)
       subnet2 <- edit
       hidden <- UI.div  # set children [subnet,last subnet2] # set UI.class_ "col-xs-12"
@@ -1585,7 +1597,6 @@ metaAllTableIndexA inf metaname env =   do
   viewer (meta inf) modtable (Le.over (_1) (liftAccess (meta inf)tname)  <$> env)
 
 
-
 sortFilter :: [CoreKey] -> [(CoreKey,Bool)] -> [(CoreKey,(Text,Text))] -> UI Element -> UI Element -> ((CoreKey,Maybe Bool) -> String) -> UI (TrivialWidget [(CoreKey,Maybe Bool,Maybe (String,FTB Showable))])
 sortFilter l sel fil liste slote conv = do
     tds <- list liste slote (sortFilterUI conv) ((\i j -> fmap (\e -> (e,,Nothing)  $ fmap snd $  L.find ((==e).fst) j) i ) l sel)
@@ -1671,7 +1682,6 @@ viewer inf table envK = mdo
 filterAttr f (m,r) = (m,mapComp (\(KV i) -> KV $ M.filterWithKey (\k v -> F.any f k ) i) r)
 
 
-
 renderTableNoHeaderSort2 header inf modtablei out = do
   let
       body sort o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader' sort UI.td rendererShowableUI inf $ o)
@@ -1681,7 +1691,6 @@ renderTableNoHeaderSort2 header inf modtablei out = do
 
 attrLine i   = do
   line ( L.intercalate "," (fmap renderShowable .  allKVRec'  $ i))
-
 
 
 convertPatchSet ix (PatchSet p) = patchSet $ catMaybes $ fmap (convertPatchSet ix ) (F.toList p)

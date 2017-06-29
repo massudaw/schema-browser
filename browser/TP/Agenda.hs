@@ -104,7 +104,6 @@ eventWidgetMeta inf cliZone= do
 
 
 eventWidget body (incrementT,resolutionT) sel inf cliZone = do
-    w <-  askWindow
     dashes <- eventWidgetMeta inf cliZone
     let
       schemaPred2 =   WherePredicate $ PrimColl (liftAccess (meta inf) "event" $ keyRef "schema",Left (int (schemaId inf),Equals) )
@@ -136,10 +135,10 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
 
       chooser "Main" = do
         agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i ->  UI.button # set text (show i) # set UI.class_ "buttonSet btn-xs btn-default pull-left")
-        out <- mapUIFinalizerT (calendarView inf cliZone dashes sel) ((,,) <$> triding agenda <*> resolutionT <*> incrementT )
+        out <- traverseUI id $ calendarView inf cliZone dashes sel <$>  triding agenda <*> resolutionT <*> incrementT
         calendar <- UI.div # sink UI.children (facts out)
         return [getElement agenda,calendar]
-    els <- mapUIFinalizerT chooser (triding choose)
+    els <- traverseUI chooser (triding choose)
 
     content <- UI.div # sink children (facts els) # set UI.class_ "row"
     element choose  # set UI.class_ "row"
@@ -149,7 +148,7 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
     return  (legendStyle , dashes )
 
 
-calendarView inf cliZone dashes sel (agenda,resolution,incrementT) = do
+calendarView inf cliZone dashes sel  agenda resolution incrementT = do
     let
       readPatch  = makePatch cliZone
       readSel = readPK inf . T.pack
@@ -165,8 +164,8 @@ calendarView inf cliZone dashes sel (agenda,resolution,incrementT) = do
             tdib <- ui $ stepper Nothing evsel
             let tdi = tidings tdib evsel
             (el,_) <- crudUITable inf   reftb [] [] (allRec' (tableMap inf) $ t)  tdi
-            mapUIFinalizerT
-              (\i ->calendarAddSource innerCalendar  t (  concat . fmap (lefts.snd) $ fmap proj $ G.toList i)) v
+            traverseUI
+              (\i ->calendarAddSource innerCalendar  t (concat . fmap (lefts.snd) $ fmap proj $ G.toList i)) v
             UI.div # set children [el] # sink UI.style  (noneShow . isJust <$> tdib)
                            ) ref) sel
 
@@ -200,7 +199,7 @@ addSource inf innerCalendar (_,t,fields,proj) (agenda,resolution,incrementT)= do
         fieldKey (TB1 (SText v))=   v
     reftb <- ui $ refTables' inf t Nothing pred
     let v = reftb ^. _3
-    mapUIFinalizerT
+    traverseUI
       (\i -> calendarAddSource innerCalendar  t (concat . fmap (lefts.snd) $ fmap proj $ G.toList i)) v
 
 type DateChange = (String, Either (Interval UTCTime) UTCTime)

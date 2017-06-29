@@ -361,7 +361,7 @@ detailsLabel lab gen = do
   bh <- ui $ stepper False ht
   let dynShow True = gen
       dynShow False = UI.div
-  out <- mapUIFinalizerT dynShow (tidings bh ht)
+  out <- traverseUI dynShow (tidings bh ht)
   details <- UI.div # sink children (pure <$> facts out)
   element hl # set children [l,details]
 
@@ -632,7 +632,8 @@ jsRemote ref =  mkElement "script" # set UI.type_ "text/javascript" # set (UI.bo
 
 
 
-testWidget e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "static", jsCustomHTML = Just "index.html" })  ( \w ->  do
+testWidget e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "static", jsCustomHTML = Just "index.html" })
+        ( \w ->  do
               els <- e
               addBody [els]
               return ())(return 1) (\w -> (return ()))
@@ -645,11 +646,42 @@ onEventFT
   :: Event a ->  (a -> UI b) -> UI  ()
 onEventFT = onEvent
 
-mapUIFinalizerT
-  :: (b -> UI b1)
-     -> Tidings b
-     -> UI (Tidings b1)
-mapUIFinalizerT m inp = do
+
+infixl 4 <$|>
+
+
+(<$|>) = traverseUI
+
+-- | Returns a new behavior that only notifies for new values.
+calmB :: Eq a => Behavior a -> Dynamic (Behavior a)
+calmB b = do
+  (e, trigger) <- newEvent
+  current <- currentValue b
+  liftIO $ trigger current
+  onChangeDyn b (liftIO . trigger)
+  eCalm <- calmE e
+  fmap (fromMaybe (error "calmB")) <$> stepper Nothing (Just <$> eCalm)
+
+data Memory a = Empty | New a | Same a
+updateMemory :: Eq a => a -> Memory a -> Memory a
+updateMemory x Empty  = New x
+updateMemory x (New  a) | a /= x = New x
+updateMemory x (Same a) | a /= x = New x
+updateMemory x _ = Same x
+isNew :: Memory a -> Maybe a
+isNew (New x) = Just x
+isNew _ = Nothing
+
+-- | Returns a new 'Event' that skips consecutive triggers with the same value.
+calmE :: Eq a => Event a -> Dynamic (Event a)
+calmE e =
+  filterJust . fmap isNew <$> accumE Empty (updateMemory <$> e)
+
+traverseUI
+  :: (a -> UI b)
+     -> Tidings a
+     -> UI (Tidings b)
+traverseUI m inp = do
   w <- askWindow
   ui $ mapTEventDynInterrupt (runUI w . m ) inp
 
