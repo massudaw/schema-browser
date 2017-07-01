@@ -8,15 +8,22 @@ packages:
 - '.'
 - browser 
 - browser/core
-- deps/threepenny-gui/
-- deps/data-interval/
-- deps/hgdata
-- deps/extended-reals/
-- deps/GiST-0.0.1/
+- location: deps/threepenny-gui/
+  extra-dep: True
+- location: deps/data-interval/
+  extra-dep: True
+- location: deps/hgdata
+  extra-dep: True
+- location: deps/extended-reals/
+  extra-dep: True
+- location: deps/GiST-0.0.1/
+  extra-dep: True
   # - location: deps/wreq-0.4.0.0/
   #  extra-dep: True
-- deps/ordered-0.1
-- deps/pipes-binary
+- location: deps/ordered-0.1
+  extra-dep: True
+- location: deps/pipes-binary
+  extra-dep: True
 - location : deps/postgresql-simple-0.4.10.0/
   extra-dep: True
 

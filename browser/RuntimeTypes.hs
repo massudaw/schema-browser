@@ -159,6 +159,10 @@ type TableIndex k v = GiST (TBIndex v) (TBData k v)
 type SecondaryIndex k v = ([k],GiST (TBIndex v) (TBIndex v,[AttributePath k ()]))
 type TableRep k v  = ([SecondaryIndex k v],TableIndex k v)
 
+instance Patch ([Showable],TBData Key Showable ) where
+  type Index ([Showable],TBData Key Showable ) = ([Showable],TBIdx Key Showable)
+
+
 instance (NFData k, NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex  a ) (TBData k a)) where
   type Index (G.GiST (G.TBIndex  a ) (TBData k a)  ) = RowPatch k (Index a)
   -- applyIfChange = applyGiSTChange

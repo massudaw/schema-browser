@@ -89,6 +89,17 @@ import Prelude hiding(head)
 
 filterDiff  = fmap (\(Diff i ) -> i) . filter isDiff
 
+instance Applicative PathFTB where
+  pure = PAtom
+
+  POpt i <*> POpt j = POpt $ liftA2 (<*>) i j
+  i <*> POpt j = POpt $ fmap (i <*>)  j
+  POpt i <*> j = POpt $ fmap (<*>j)  i
+
+  PIdx ixi i  <*> PIdx ix j | ixi == ix= PIdx ix $ liftA2 (<*>) i j
+  PAtom i <*> PAtom j = PAtom $ i  j
+
+
 isDiff i@(Diff _) = True
 isDiff i = False
 isKeep i@(Keep) = True
@@ -211,7 +222,7 @@ data PathFTB   a
   | PIdx Int !(Maybe (PathFTB a))
   | PInter !Bool !(Extended (PathFTB a),Bool)
   | PatchSet !(Non.NonEmpty (PathFTB a))
-  deriving(Show,Eq,Ord,Functor,Generic,Foldable)
+  deriving(Show,Eq,Ord,Functor,Generic,Foldable,Traversable)
 
 upperPatch = PInter False
 lowerPatch = PInter True
