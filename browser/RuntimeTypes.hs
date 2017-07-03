@@ -159,8 +159,14 @@ type TableIndex k v = GiST (TBIndex v) (TBData k v)
 type SecondaryIndex k v = ([k],GiST (TBIndex v) (TBIndex v,[AttributePath k ()]))
 type TableRep k v  = ([SecondaryIndex k v],TableIndex k v)
 
-instance Patch ([Showable],TBData Key Showable ) where
-  type Index ([Showable],TBData Key Showable ) = ([Showable],TBIdx Key Showable)
+instance Patch ([FTB Showable],TBData Key Showable ) where
+  type Index ([FTB Showable],TBData Key Showable ) = ([FTB Showable],TBIdx Key Showable)
+  diff (i,j) (k,l)
+    | i == k =  (k ,) <$> diff j l
+    | otherwise = Just (k,patch l)
+  patch (i,j) = (i,patch j)
+  apply (i,j) (k,l)
+    | i == k = (k,apply j l)
 
 
 instance (NFData k, NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex  a ) (TBData k a)) where
@@ -423,9 +429,12 @@ liftKeys
      -> FTB1 Identity Key a
 liftKeys inf tname = fmap (liftTable' inf tname)
 
-findRefTable inf tname rel2 =  tname2
+findRefTableKey inf ta rel =  tname2
+  where   (FKJoinTable  _ (_,tname2) )  = (unRecRel.pathRel) $ justError (show (rel ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel))  (F.toList$ rawFKS  ta)
 
-  where   (FKJoinTable  _ (_,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map (keyValue) i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+
+findRefTable inf tname rel =  tname2
+  where   (FKJoinTable  _ (_,tname2) )  = (unRecRel.pathRel) $ justError (show (rel ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map (keyValue) i == S.fromList (_relOrigin <$> rel))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 
 liftFieldF :: (Show k ,Ord k) => LookupKey k -> InformationSchema -> Text -> Column k a -> Column Key a

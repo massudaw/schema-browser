@@ -885,6 +885,18 @@ inlineFullName (Primitive (RecordPrim (s, i)) ) = s <> "." <> i
 attrT :: (a,FTB b) -> Compose Identity (TB Identity) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
+-- mergeFKRef  $ keyType . _relOrigin <$>rel
+mergeFKRel :: [Rel CoreKey] -> KType [(KType CorePrim,KeyUnique)]
+mergeFKRel ls = F.foldr mergeRel (Primitive []) ((\i -> (keyType (_relOrigin i) ,keyFastUnique $ _relOrigin i))<$> ls)
+  where
+    mergeRel (KOptional o,ko)  (KOptional kl) = KOptional $ mergeRel (o,ko) kl
+    mergeRel (KArray o,ko)  (KArray kl) = KArray $ mergeRel (o,ko) kl
+    mergeRel (Primitive o,ko)  (Primitive kl) = Primitive ((Primitive o,ko) : kl)
+    mergeRel (KOptional o,ko) kt  = KOptional $ mergeRel (o,ko) kt
+    mergeRel (o,ko) (KOptional kt)  = KOptional $ mergeRel (o,ko) kt
+    mergeRel (KArray o,ko)  kl = KArray $ mergeRel (o,ko) kl
+    mergeRel (o,ko)  (KArray kl) = KArray $ mergeRel (o,ko) kl
+
 mergeFKRef :: [KType a] -> KType [a]
 mergeFKRef ls = foldl1 mergeOpt (fmap pure <$> ls)
   where
@@ -894,7 +906,6 @@ mergeFKRef ls = foldl1 mergeOpt (fmap pure <$> ls)
     mergeOpt (KArray i) (KArray j ) = KArray ( mergeOpt i j )
     mergeOpt (KArray i) j = KArray (mergeOpt i j)
     mergeOpt i (KArray j) = KArray (mergeOpt i j)
-    mergeOpt (Primitive i) (Primitive j) = Primitive (i <>j)
     mergeOpt (Primitive i) (Primitive j) = Primitive (i <>j)
 
 srange l m = IntervalTB1 $ Interval.interval (Interval.Finite l,True) (Interval.Finite m ,True)

@@ -93,11 +93,10 @@ instance Applicative PathFTB where
   pure = PAtom
 
   POpt i <*> POpt j = POpt $ liftA2 (<*>) i j
-  i <*> POpt j = POpt $ fmap (i <*>)  j
-  POpt i <*> j = POpt $ fmap (<*>j)  i
-
   PIdx ixi i  <*> PIdx ix j | ixi == ix= PIdx ix $ liftA2 (<*>) i j
   PAtom i <*> PAtom j = PAtom $ i  j
+  i <*> POpt j = POpt $ fmap (i <*>)  j
+  POpt i <*> j = POpt $ fmap (<*>j)  i
 
 
 isDiff i@(Diff _) = True
@@ -572,7 +571,7 @@ applyFTBM pr a (IntervalTB1 i) (PInter b (p,l))
     mapExtended p _ = traverse (createFTBM pr ) p
 applyFTBM pr a (TB1 i) (PAtom p)  =  fmap TB1 $ a i p
 applyFTBM pr a  b (PatchSet l ) = foldl (\i l -> (\i -> applyFTBM pr a i l ) =<< i ) (Just b) l
-applyFTBM pr _ a b = errorWithStackTrace ("applyFTB: " <> show (a,fmap pr b) )
+applyFTBM pr _ a b = error ("applyFTB: " <> show (a,fmap pr b) )
 
 checkInterM :: (Show a,Ord a) => (Index a  -> Maybe  a) -> PathFTB (Index a) -> Interval.Interval (FTB a)-> Maybe (Interval.Interval (FTB a))
 checkInterM p (PInter b o) inter = if fst (lowerBound' inter) == Interval.PosInf || fst (upperBound' inter) == Interval.NegInf then Nothing else Just inter

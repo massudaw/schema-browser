@@ -111,4 +111,5 @@ library
    , stm
    , iso8601-time
   default-language:    Haskell2010
+  ghc-options: -O2 
 

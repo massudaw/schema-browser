@@ -28,6 +28,7 @@ module Query
   ,tableView
   ,unTlabel'
   ,backFKRef
+  ,backFKRefType
   ,backPathRef
   ,filterReflexive
   ,isReflexive
@@ -575,6 +576,23 @@ relabelT' p l (m ,Compose j) =  (m,Compose $ l (KV $ fmap (Compose.  l . relabel
 backPathRef :: Path (Set Key) SqlOperation -> TBData Key Showable ->  [Column Key Showable]
 backPathRef (Path k (FKJoinTable rel t)) = justError ("no back path ref "  ++ show (rel ,k)). backFKRef (M.fromList $ fmap (\i -> (_relTarget i ,_relOrigin i)) rel) (F.toList k)
 
+backFKRefType
+  :: (Foldable f,Show (f Key ),Show a, Functor f) =>
+     M.Map Key Key
+     -> M.Map Key (CorePrim)
+     -> f Key
+     -> TBData  Key a
+     -> Maybe (f (TB f1 Key a))
+-- backFKRef i j  | traceShow (i ,j) False =  undefined
+backFKRefType relTable relType ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . snd
+  where
+    reorderPK l = fmap (\i  -> L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
+    lookFKsel (ko,v)=  (\kn tkn -> (kn ,transformKey (keyType ko ) (Primitive tkn) v)) <$> knm <*> tknm
+          where
+                knm =  M.lookup ko relTable
+                tknm =  M.lookup ko relType
+
+
 backFKRef
   :: (Foldable f,Show (f Key ),Show a, Functor f) =>
      M.Map Key Key
@@ -592,12 +610,12 @@ backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  c
 tbpred un  = G.notOptional . G.getUnique un
 
 tbpredFK
-  ::  (Foldable t, Show k,Functor t ,Ord k)
+  ::  ( Show k,Ord k)
   => M.Map k k
   -> [k]
   -> [k]
-  -> t (TB Identity k a1) ->  Maybe (G.TBIndex a1)
-tbpredFK rel un  pk2 v = tbjust  .  Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  rel ))).  filter ((`S.member` S.fromList un). fst ) . concat .fmap aattri $ v
+  -> [(k,FTB a1)] ->  Maybe (G.TBIndex a1)
+tbpredFK rel un  pk2 v = tbjust  .  Tra.traverse (Tra.traverse unSOptional') . fmap (first (\k -> justError (show k) $ M.lookup k (flipTable  rel ))).  filter ((`S.member` S.fromList un). fst )  $ v
         where
           flipTable = M.fromList . fmap swap .M.toList
           tbjust = fmap (G.Idex . fmap snd.L.sortBy (comparing ((`L.elemIndex` pk2).fst)))
