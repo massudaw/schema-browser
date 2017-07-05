@@ -510,22 +510,22 @@ firstTB f (IT k i) = IT (f k) (mapKey f i)
 firstTB f (FKT k  m  i) = FKT  (mapBothKV (f) (mapComp (firstTB f)) k)  (fmap f  <$> m) (mapKey f i)
 
 data FTB a
-  = TB1 ! a
-  | LeftTB1  ! (Maybe (FTB a))
-  | ArrayTB1  ! (NonEmpty (FTB a))
-  | IntervalTB1 ! (Interval.Interval (FTB a))
+  = TB1  a
+  | LeftTB1  (Maybe (FTB a))
+  | ArrayTB1  (NonEmpty (FTB a))
+  | IntervalTB1  (Interval.Interval (FTB a))
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable,Generic)
 
 
 instance Applicative FTB where
   pure = TB1
   TB1 i <*> TB1 j = TB1 $ i  j
-
   LeftTB1 i <*> LeftTB1 j = LeftTB1 $ liftA2 (<*>) i j
+  ArrayTB1 i <*> ArrayTB1 j = ArrayTB1 $ Non.zipWith (<*>) i j
+
   i <*> LeftTB1 j = LeftTB1 $ fmap (i <*>)  j
   LeftTB1 i <*> j = LeftTB1 $ fmap (<*>j)  i
 
-  ArrayTB1 i <*> ArrayTB1 j = ArrayTB1 $ liftA2 (<*>) i j
   i <*> ArrayTB1 j = ArrayTB1 $ fmap (i <*>)  j
   ArrayTB1  i <*> j = ArrayTB1 $ fmap (<*>j)  i
 

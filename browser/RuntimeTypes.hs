@@ -76,6 +76,7 @@ data DatabaseSchema
     }
 
 
+type TBRef k s = ([Column k s], TBData k s )
 
 data InformationSchemaKV k v
   = InformationSchema
@@ -157,16 +158,19 @@ data DBVar2  v=
 type IndexMetadata k v = Map (WherePredicateK k) (Int,Map Int (PageTokenF  v))
 type TableIndex k v = GiST (TBIndex v) (TBData k v)
 type SecondaryIndex k v = ([k],GiST (TBIndex v) (TBIndex v,[AttributePath k ()]))
+
 type TableRep k v  = ([SecondaryIndex k v],TableIndex k v)
 
 instance Patch ([FTB Showable],TBData Key Showable ) where
   type Index ([FTB Showable],TBData Key Showable ) = ([FTB Showable],TBIdx Key Showable)
   diff (i,j) (k,l)
     | i == k =  (k ,) <$> diff j l
-    | otherwise = Just (k,patch l)
+    | otherwise = traceShow (i,k) $ Just (k,patch l)
   patch (i,j) = (i,patch j)
-  apply (i,j) (k,l)
-    | i == k = (k,apply j l)
+  applyIfChange (i,j) (k,l)
+    | i == k = (k,) <$> applyIfChange j l
+    | otherwise = (k,) <$> applyIfChange j l
+  createIfChange (i,j) = (i,) <$> createIfChange j
 
 
 instance (NFData k, NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex  a ) (TBData k a)) where

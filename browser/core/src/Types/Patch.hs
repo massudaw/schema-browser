@@ -91,7 +91,6 @@ filterDiff  = fmap (\(Diff i ) -> i) . filter isDiff
 
 instance Applicative PathFTB where
   pure = PAtom
-
   POpt i <*> POpt j = POpt $ liftA2 (<*>) i j
   PIdx ixi i  <*> PIdx ix j | ixi == ix= PIdx ix $ liftA2 (<*>) i j
   PAtom i <*> PAtom j = PAtom $ i  j
@@ -216,11 +215,11 @@ data Editor  a
 
 
 data PathFTB   a
-  = PAtom !a
-  | POpt !(Maybe (PathFTB a))
-  | PIdx Int !(Maybe (PathFTB a))
-  | PInter !Bool !(Extended (PathFTB a),Bool)
-  | PatchSet !(Non.NonEmpty (PathFTB a))
+  = PAtom a
+  | POpt (Maybe (PathFTB a))
+  | PIdx Int (Maybe (PathFTB a))
+  | PInter Bool (Extended (PathFTB a),Bool)
+  | PatchSet (Non.NonEmpty (PathFTB a))
   deriving(Show,Eq,Ord,Functor,Generic,Foldable,Traversable)
 
 upperPatch = PInter False
