@@ -76,7 +76,8 @@ data DatabaseSchema
     }
 
 
-type TBRef k s = ([Column k s], TBData k s )
+type TBRef k s = (Map k (FTB s), TBData k s )
+type PTBRef k s = (Map k (FTB s), TBIdx k s )
 
 data InformationSchemaKV k v
   = InformationSchema
@@ -161,8 +162,8 @@ type SecondaryIndex k v = ([k],GiST (TBIndex v) (TBIndex v,[AttributePath k ()])
 
 type TableRep k v  = ([SecondaryIndex k v],TableIndex k v)
 
-instance Patch ([FTB Showable],TBData Key Showable ) where
-  type Index ([FTB Showable],TBData Key Showable ) = ([FTB Showable],TBIdx Key Showable)
+instance Patch (TBRef Key Showable) where
+  type Index (TBRef Key Showable) = (Map Key (FTB Showable),TBIdx Key Showable)
   diff (i,j) (k,l)
     | i == k =  (k ,) <$> diff j l
     | otherwise = traceShow (i,k) $ Just (k,patch l)

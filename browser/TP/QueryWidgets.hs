@@ -1247,19 +1247,19 @@ isReadOnly (FKT ifk rel _ ) = L.null (unkvlist ifk ) || all (not . any ((/= FRea
 isReadOnly (Attr k _ ) =  (not . any ((/= FRead)). keyModifier ) k
 isReadOnly (IT k _ ) =   (not . any ((/= FRead)). keyModifier ) k
 
-liftFK :: (Show k , Show b ,Eq k) => Column k b-> FTB ([FTB b] ,TBData k b)
+liftFK :: (Show k , Show b ,Ord k) => Column k b-> FTB (Map k (FTB b) ,TBData k b)
 liftFK (FKT l rel i ) = first (fmap TB1 ) <$> liftRel (fmap unTB  $ F.toList $ _kvvalues l ) rel i
 
-liftPFK :: (Show k,Show b,Eq k) => PathAttr k b-> PathFTB ([FTB b] ,TBIdx k b)
+liftPFK :: (Show k,Show b,Ord k) => PathAttr k b-> PathFTB (Map k (FTB b) ,TBIdx k b)
 liftPFK (PFK rel l i ) =first (fmap TB1 ) <$> liftPRel l  rel i
 
-liftRel :: (Show c ,Show k ,Show b,Eq k) => [Column k b] -> [Rel k] -> FTB c -> FTB ([b] ,c)
-liftRel l rel f = liftA2 (,) (F.foldl' (flip merge ) (TB1 []) rels) f
+liftRel :: (Ord k,Show c ,Show k ,Show b) => [Column k b] -> [Rel k] -> FTB c -> FTB (Map k b ,c)
+liftRel l rel f = liftA2 (,) (M.fromList  <$> F.foldl' (flip merge ) (TB1 []) rels) f
   where rels = catMaybes $ findRel l <$> rel
 
 
-liftPRel :: Eq k => [PathAttr k b] -> [Rel k] -> PathFTB c -> PathFTB ([b] ,c)
-liftPRel  l rel f = liftA2 (,) (F.foldl' (flip mergePFK) (PAtom []) rels) f
+liftPRel :: Ord k => [PathAttr k b] -> [Rel k] -> PathFTB c -> PathFTB (Map k b ,c)
+liftPRel  l rel f = liftA2 (,) (M.fromList  <$> F.foldl' (flip mergePFK) (PAtom []) rels) f
   where rels = catMaybes $ findPRel l <$> rel
 
 recoverRel :: Eq k => PathFTB ([b] ,TBIdx k b) -> ([PathFTB b],PathFTB (TBIdx k b))
@@ -1287,11 +1287,11 @@ merge i  (ArrayTB1 j) = ArrayTB1 $ (\j  -> merge i j) <$> j
 
 findPRel l (Rel k op j) =  do
   PAttr k v <- L.find (\(PAttr i v) -> i == k ) l
-  return v
+  return $ fmap (k,) v
 
 findRel l (Rel k op j) =  do
   Attr k v <- L.find (\(Attr i v) -> i == k ) l
-  return v
+  return $ fmap (k,) v
 
 instance Monad FTB where
   TB1 i >>= j =  j i
@@ -1305,6 +1305,8 @@ instance Monad PathFTB where
   PatchSet i >>= j = PatchSet $ (j =<<) <$> i
 
 
+attrToTuple  (Attr k v ) = (k,v)
+
 fkUITablePrim ::
   InformationSchema
   -- Plugin Modifications
@@ -1312,12 +1314,12 @@ fkUITablePrim ::
   -> SelTBConstraint
   -- Same Table References
   -> [(Column CoreKey () ,Tidings (Maybe (Column CoreKey Showable)))]
-  -> PluginRef  (FTB ([FTB Showable],TBData Key Showable))
+  -> PluginRef  (FTB (TBRef  Key Showable))
   -- Relation Event
-  -> Tidings (Maybe (FTB([FTB Showable],TBData CoreKey Showable)))
+  -> Tidings (Maybe (FTB(TBRef CoreKey Showable)))
   -- Static Information about relation
   -> [(Rel Key,CorePrim)]
-  -> UI (TrivialWidget(Editor (PathFTB ([FTB Showable],TBIdx CoreKey Showable))))
+  -> UI (TrivialWidget(Editor (PathFTB (PTBRef Key Showable))))
 fkUITablePrim preinf (rel,targetTable,(FKT ifk _ _)) constr  nonInjRefs   plmods  oldItems  prim = do
       -- Top Level Widget
       let m = tableMeta targetTable
@@ -1354,20 +1356,20 @@ fkUITablePrim preinf (rel,targetTable,(FKT ifk _ _)) constr  nonInjRefs   plmods
             replaceKey =  firstTB (\k -> maybe k id  $ fmap _relTarget $ L.find ((==k)._relOrigin) $  rel)
             replaceRel a =  (fst $ search (_relOrigin $ head $ (keyattri a  )),  firstTB (\k  -> snd $ search k ) a)
                 where  search  k = let v = justError ("no key" <> show k )$ L.find ((==k)._relOrigin)  rel in (_relOperator v , _relTarget v)
-            iold2 :: Tidings (Maybe [FTB Showable])
-            iold2 =  fmap (fmap snd.concat) . allMaybesEmpty  <$> iold
+            iold2 :: Tidings (Maybe (Map Key (FTB Showable)))
+            iold2 =  fmap (M.fromList . concat) . allMaybesEmpty  <$> iold
                 where
                   iold :: Tidings [Maybe [(CoreKey,FTB Showable)]]
                   iold  = Tra.sequenceA $ fmap (fmap ( aattr . _tb ) ) . snd <$> nonInjRefs
-            ftdi2 :: Tidings (Maybe [FTB Showable])
-            ftdi2 =   fmap (fmap join . sequenceA. fmap fst )  <$> ftdi
+            ftdi2 :: Tidings (Maybe (Map Key (FTB Showable)))
+            ftdi2 =   fmap (fmap join . M.fromList . zip (L.sort $ _relOrigin <$> rel). getZipList . sequenceA  . fmap (ZipList . F.toList . fst) )  <$> ftdi
             applyConstr m l =  filter (foldl' (\l constr ->  liftA2 (&&) l (not <$> constr) ) (pure True)  l) m
             constrT =  Tra.sequenceA $ fmap snd constr
             sortList :: Tidings ([TBData CoreKey Showable] -> [TBData CoreKey Showable])
             sortList =  sorting' <$> pure (fmap ((,True)._relTarget) rel)
           let
-            vv :: Tidings (Maybe [FTB Showable])
-            vv =   join .   fmap (\i -> if  L.length i == L.length rel then Just i else Nothing) .fmap L.nub <$>  liftA2 (<>) iold2  ftdi2
+            vv :: Tidings (Maybe (Map CoreKey (FTB Showable)))
+            vv =   join .   fmap (\i -> if  M.size i == L.length rel then Just i else Nothing) <$>  liftA2 (<>) iold2  ftdi2
           cvres <- currentValue (facts vv)
           filterInp <- UI.input # set UI.class_ "col-xs-3"
           filterInpE <- UI.valueChange filterInp
@@ -1381,14 +1383,14 @@ fkUITablePrim preinf (rel,targetTable,(FKT ifk _ _)) constr  nonInjRefs   plmods
             pageSize = 20
             lengthPage fixmap = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
               where (s,_) = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
-            cv = join $ searchGist relTable m iniGist iniSgist  .zip (_relOrigin <$> rel) <$>cvres
+            cv = join $ searchGist relTable m iniGist iniSgist  . M.toList <$>cvres
 
           let
             filterInpT = tidings filterInpBh filterInpE
             filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.pack . showFKText
-            predicatefk o = (WherePredicate $AndColl $ catMaybes $ fmap ((\(k, v) -> PrimColl . (keyRef k, ) . Left . (,Flip $ _relOperator $ justError "no rel" $ L.find (\i ->_relTarget i == k) rel) <$> unSOptional' v)) $ zip (_relTarget <$> rel) o)
+            predicatefk o = (WherePredicate $AndColl $ catMaybes $ fmap ((\(k, v) -> PrimColl . (keyRef k, ) . Left . (,Flip $ _relOperator $ justError "no rel" $ L.find (\i ->_relTarget i == k) rel) <$> unSOptional' v)) $ M.toList o)
             preindex = (maybe id (\i -> filterfixed (lookTable inf (_kvname m))(predicatefk i))) <$> iold2 <*>gist
-          tdi <- ui $ cacheTidings ((\g s v -> join $ searchGist relTable m  g s  .zip (_relTarget <$> rel) <$> v) <$> gist  <*> sgist <*> vv)
+          tdi <- ui $ cacheTidings ((\g s v -> join $ searchGist relTable m  g s  .M.toList <$> v) <$> gist  <*> sgist <*> vv)
           metaMap <- mapWidgetMeta inf
           let
               hasMap = L.find ((== (lookTable inf (_kvname m))).(Le.^._2)) metaMap
@@ -1448,7 +1450,7 @@ fkUITablePrim preinf (rel,targetTable,(FKT ifk _ _)) constr  nonInjRefs   plmods
           prop <- ui $ stepper cv evsel
           let tds = tidings prop evsel
           let
-            fksel =  join . fmap (\box ->  (\ref -> TB1 (_tbattr <$> L.sortBy (comparing _tbattrkey ) ref ,box) ) <$> backFKRef relTable (fmap (keyAttr .unTB ) $ unkvlist ifk)   box ) <$>   tds
+            fksel =  join . fmap (\box ->  (\ref -> TB1 (M.fromList $ attrToTuple <$> ref ,box) ) <$> backFKRefType relTable relType (fmap (keyAttr .unTB ) $ unkvlist ifk)   box ) <$>   tds
             diffFK (Just i ) (Just j) = if fmap fst i == fmap fst j then Keep else Diff(patch j)
             diffFK (Just i ) Nothing = Delete
             diffFK Nothing Nothing = Keep
@@ -1474,7 +1476,7 @@ fkUITablePrim preinf (rel,targetTable,(FKT ifk _ _)) constr  nonInjRefs   plmods
 
           (celem,pretdi) <- dynCrudUITable inf (fmap (\i -> if i then "+" else "-")$ bop ) staticold (fmap (fmap (fmap (unAtom. fmap snd))) <$> plmods) tbdata (fmap (unTB1.fmap snd)<$> ftdi )
           let
-            fksel =   fmap (\box -> maybe (TB1 ([],box) )(\ref -> TB1 ( _tbattr <$> L.sortBy (comparing _tbattrkey ) ref ,box) ) $ backFKRefType relTable relType (fmap (keyAttr .unTB ) $ unkvlist ifk)   box ) <$>   pretdi
+            fksel =   fmap (\box -> maybe (TB1 (M.empty,box) )(\ref -> TB1 ( M.fromList $ attrToTuple <$> ref ,box) ) $ backFKRefType relTable relType (fmap (keyAttr .unTB ) $ unkvlist ifk)   box ) <$>   pretdi
             diffFK (Just i ) (Just j) =  maybe Keep Diff (diff i  j)
             diffFK (Just i ) Nothing = Delete
             diffFK Nothing Nothing = Keep
@@ -1513,9 +1515,9 @@ fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT _ rel _)
   = fmap (fmap (recoverPFK rel)) <$> buildUIDiff (\plmods old ->  fkUITablePrim preinf (rel,lookTable preinf target,tb) constr nonInjRefs plmods old ) (fmap (zip rel) $ mergeFKRef  $ keyType . _relOrigin <$>rel) (fmap (fmap (fmap liftPFK)) <$> plmods) (fmap liftFK <$>oldItems)
     where target = findRefTableKey preinf table rel
 
-recoverPFK :: [Rel Key] -> (PathFTB ([FTB Showable],TBIdx Key Showable)) -> PathAttr Key Showable
+recoverPFK :: [Rel Key] -> (PathFTB (Map Key (FTB Showable),TBIdx Key Showable)) -> PathAttr Key Showable
 recoverPFK rel i =
-  PFK rel (zipWith (\i j -> PAttr (_relOrigin i) (join $ fmap patch j)) rel $ getZipList $ sequenceA $ fmap (ZipList . fst) i)   (fmap snd i)
+  PFK rel (fmap (\(i,j) -> PAttr i (join $ fmap patch j)) $  zip (L.sort $ _relOrigin <$> rel) . getZipList . sequenceA $ fmap ( ZipList . F.toList. fst) i)   (fmap snd i)
 
 
 reduceTable l

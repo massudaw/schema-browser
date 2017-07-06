@@ -45,7 +45,7 @@ funmap = M.fromList [
 
 
 preevaluate :: Key -> Expr -> Map Text (([k],k ),[FTB Showable] -> FTB Showable) -> [Access Key] -> [Maybe (FTB Showable)] -> Maybe (Column Key Showable)
-preevaluate k e fs ac res | traceShow (ac,res) False = undefined
+-- preevaluate k e fs ac res | traceShow (ac,res) False = undefined
 preevaluate k e fs ac res = Fun k (e, ac) <$> go e
   where
     go :: Expr -> Maybe (FTB Showable)
