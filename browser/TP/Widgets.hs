@@ -41,9 +41,17 @@ instance Widget (TrivialWidget  a) where
     getElement (TrivialWidget t e) = e
 
 data TrivialWidget a =
-    TrivialWidget { triding :: (Tidings a) , trielem ::  Element} deriving(Functor)
+    TrivialWidget { triding :: (Tidings a) , trielem ::  Element}
 
+instance Functor TrivialWidget where
+    fmap = trmap
 
+{-# NOINLINE[1] trmap #-}
+trmap f (TrivialWidget e j) = TrivialWidget (fmap f e) j
+
+{-# RULES
+"trmap/trmap" forall f g xs . trmap f (trmap g xs) = trmap (f . g) xs
+ #-}
 
 -- Generate a accum the behaviour and generate the ahead of promised event
 
