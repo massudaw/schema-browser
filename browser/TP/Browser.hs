@@ -236,28 +236,28 @@ chooserTable inf bset cliTid cli = do
         now <- getCurrentTime
         putPatch (patchVar ref) [PatchRow $ dpatch now])
     body <-  do
-            if L.length sub == 1
-               then
-                 viewerKey inf table ix cli cliTid
-               else do
-              els <- mapM (\t -> do
-                  l <- UI.h4 #  set text (T.unpack $fromMaybe (rawName t)  $ rawTranslation t) # set UI.class_ "col-xs-12 header"
-                  b <- viewerKey inf t ix cli  cliTid
-                  element b # set UI.class_ "col-xs-12"
-                  a <- UI.a # set (UI.strAttr "data-toggle") "tab" # set UI.href ("#" ++( T.unpack $ rawName t))
-                      # set text (T.unpack $fromMaybe (rawName t)  $ rawTranslation t)
-                  h <- UI.li
-                      # set  UI.children [a]
-                  c <- UI.div
-                      # set children [l,b]
-                      # set UI.id_ (T.unpack $ rawName t)
-                      # set UI.class_ "tab-pane"
-                  return (h,c)
-                  ) sub
-              h <- UI.div # set children (fst <$> els) # set UI.class_ "nav nav-tabs"
-              runFunctionDelayed h $ ffi  "$(%1).find('li').click(function (e) { $('.active').removeClass('active');})" h
-              b <- UI.div # set children (snd <$> els) # set UI.class_ "tab-content"
-              UI.div # set children [h,b]
+          if L.length sub == 1
+             then
+               viewerKey inf table ix cli cliTid
+             else do
+            els <- mapM (\t -> do
+                l <- UI.h4 #  set text (T.unpack $fromMaybe (rawName t)  $ rawTranslation t) # set UI.class_ "col-xs-12 header"
+                b <- viewerKey inf t ix cli  cliTid
+                element b # set UI.class_ "col-xs-12"
+                a <- UI.a # set (UI.strAttr "data-toggle") "tab" # set UI.href ("#" ++( T.unpack $ rawName t))
+                    # set text (T.unpack $fromMaybe (rawName t)  $ rawTranslation t)
+                h <- UI.li
+                    # set  UI.children [a]
+                c <- UI.div
+                    # set children [l,b]
+                    # set UI.id_ (T.unpack $ rawName t)
+                    # set UI.class_ "tab-pane"
+                return (h,c)
+                ) sub
+            h <- UI.div # set children (fst <$> els) # set UI.class_ "nav nav-tabs"
+            runFunctionDelayed h $ ffi  "$(%1).find('li').click(function (e) { $('.active').removeClass('active');})" h
+            b <- UI.div # set children (snd <$> els) # set UI.class_ "tab-content"
+            UI.div # set children [h,b]
     UI.div # set children [header,body] # sink0 UI.class_ (facts $ layFactsDiv <$> triding layout <*> fmap M.size (triding bset))# set UI.style [("border","2px dotted "),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf))]
                               ).fst)                                  ( M.fromList . fmap (\i -> (i,())) . M.toList <$> triding bset)
 
@@ -288,14 +288,14 @@ selector inf reftb@(vptmeta,vp,vpt,_,var) table predicate = mdo
   let inivp = inisort .G.toList $ snd vp
   (offset,res3)<- mdo
     offset <- offsetFieldFiltered (pure 0) wheel   [(L.length <$> res3) ,L.length <$> vpt,(lengthPage <$> vptmeta)]
-    res3 <- ui $ mapT0EventDyn inivp return ( tsort <*> (filtering $ fmap G.toList $ vpt) )
+    res3 <- ui $ cacheTidings ( tsort <*> (filtering $ fmap G.toList $ vpt) )
     return (offset, res3)
   ui $ onEventDyn (rumors $ triding offset) $ (\i ->  do
     transactionNoLog inf $ selectFrom (tableName table ) (Just $ divPage (i + pageSize) `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  []  predicate)
   let
     paging  = (\o -> (L.take pageSize . L.drop o) ) <$> triding offset
   page <- currentValue (facts paging)
-  res4 <- ui $ mapT0EventDyn (page inivp) return (paging <*> res3)
+  res4 <- ui $ cacheTidings (paging <*> res3)
   itemList <- listBoxElEq (\l m -> maybe False id $ liftA2 (\i j ->G.getIndex i == G.getIndex j) l m) itemListEl ((Nothing:) . fmap Just <$> res4) (Just <$> tds) (pure id) (pure (maybe id attrLine))
   let tds = fmap join  $ triding itemList
   expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked filterEnabled# set UI.class_ "col-xs-1"
@@ -311,7 +311,7 @@ selector inf reftb@(vptmeta,vp,vpt,_,var) table predicate = mdo
 viewerKey
   ::
       InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
-viewerKey inf table tix cli cliTid = mdo
+viewerKey inf table tix cli cliTid = do
   iv   <- currentValue (facts cliTid)
   let
       lookT,lookPK :: TBData Key Showable -> Maybe (Int,TBData Key Showable)
@@ -326,13 +326,14 @@ viewerKey inf table tix cli cliTid = mdo
                       unKey t = liftA2 (,) ((\(Attr _ (TB1 (SText i)))-> Just $ lookKey inf  (tableName table) i ) $ lookAttr' (meta inf)  "key" t  )( pure $ (\(Attr _ (TB1 (SDynamic i)))-> i) $ lookAttr'  (meta inf)  "val" t )
                 in (\(IT _ (ArrayTB1 t)) -> catMaybes $ F.toList $ fmap (unKey.unTB1) t) i
 
+  reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables' inf table Nothing mempty
   let
     tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (fmap snd $ justError "" $ traverse (traverse unSOptional' ) $v)) i ) iv ) <$> vpt <*> tdip
     tdip = join . fmap (join . fmap ( fmap (lookKV . snd ). lookPK .snd). lookT ) <$> cliTid
-  reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables' inf table Nothing mempty
   itemList <- selector inf reftb table mempty
   let tds = triding itemList
-  (cru,pretdi) <- crudUITable inf reftb [] [] (allRec' (tableMap inf) table) (triding itemList)
+  titems <- ui $ calmT tds
+  (cru,pretdi) <- crudUITable inf reftb [] [] (allRec' (tableMap inf) table) titems
   let pktds = fmap getPKM <$> tds
   dbmeta  <- liftIO$ prerefTable (meta inf)(lookTable (meta inf ) "clients")
   w  <- askWindow
@@ -349,7 +350,7 @@ viewerKey inf table tix cli cliTid = mdo
         putPatch (patchVar dbmeta) [PatchRow d]
             ))) (Non.nonEmpty . M.toList <$> v))
 
-  title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine i  )  <$> facts tds ) # set UI.class_ "col-xs-8"
+  title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine i  )  <$> facts titems) # set UI.class_ "col-xs-8"
   insertDiv <- UI.div # set children [title] # set UI.class_ "container-fluid"
   insertDivBody <- UI.div # set children [insertDiv,cru]
   UI.div # set children ([getElement itemList,insertDivBody ] )

@@ -359,10 +359,10 @@ detailsLabel lab gen = do
   hl <- UI.div
   ht <- hoverTip2 l hl
   bh <- ui $ stepper False ht
-  let dynShow True = gen
-      dynShow False = UI.div
+  let dynShow True = pure <$> gen
+      dynShow False = return []
   out <- traverseUI dynShow (tidings bh ht)
-  details <- UI.div # sink children (pure <$> facts out)
+  details <- UI.div # sink children (facts out)
   element hl # set children [l,details]
 
 read1 s = unsafeFromJSON s
@@ -462,7 +462,7 @@ listBoxElEq eq list bitems bsel bfilter bdisplay = do
         bindices =  bfilter <*> bitems
     -- animate output items
     let
-        bindex   = lookupIndex <$> bitems <*> bsel
+        bindex   = lookupIndex <$> facts bitems <#> bsel
         lookupIndex indices Nothing    = Nothing
         lookupIndex indices (Just sel) = L.findIndex (eq sel)  indices
         els = liftA2 (\i j -> (\ix ->  UI.option # j ix )<$> i) bitems bdisplay
@@ -479,9 +479,10 @@ listBoxElEq eq list bitems bsel bfilter bdisplay = do
 
     -- user selection
     selEv <- fmap Just <$> UI.selectionChange list
-    selBh <- ui $stepper   Nothing (selEv)
+    s <- ui $ calmE selEv
+    selBh <- ui $stepper   Nothing s
     let
-        eindexes = (\l i -> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> bitems <*> ((tidings selBh selEv))
+        eindexes = (\l i-> join (fmap (\is -> either (const Nothing) Just (at_ l  is)) i)) <$> facts bitems <#> tidings selBh selEv
     let
         _selectionLB = eindexes
         _elementLB   = list
@@ -677,6 +678,18 @@ calmE :: Eq a => Event a -> Dynamic (Event a)
 calmE e =
   filterJust . fmap isNew <$> accumE Empty (updateMemory <$> e)
 
+
+calmT :: Eq a => Tidings a -> Dynamic (Tidings a )
+calmT t = do
+  (e, trigger) <- newEvent
+  current <- currentValue (facts t)
+  liftIO $ trigger current
+  onChangeDyn (facts t) (liftIO . trigger)
+  eCalm <- calmE (rumors t)
+  bh <- stepper current eCalm
+  return $ tidings bh eCalm
+
+
 traverseUI
   :: (a -> UI b)
      -> Tidings a
@@ -763,7 +776,7 @@ hoverTip elemD= do
   return $ unionWith const (const True <$> ho) (const False <$> le )
 
 hoverTip2 elemIn elemOut = do
-  ho <- UI.click elemIn
+  ho <- UI.dblclick elemIn
   le <- UI.leave elemOut
   return $ unionWith const (const True <$> ho) (const False <$> le )
 

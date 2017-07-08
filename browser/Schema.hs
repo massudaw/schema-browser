@@ -353,7 +353,7 @@ createTableRefs inf rec i = do
 
 loadFKSDisk inf targetTable rec = do
   let
-    (fkSet2,pre) = F.foldr (\i@(Path si _ ) (s,l)  -> (S.map keyFastUnique si <> s  ,liftA2 (:)( loadFKDisk inf s rec i ) l) )  (S.empty , return []) (P.sortBy (P.comparing (RelSort . S.toList . pathRelRel)) $F.toList (rawFKS targetTable))
+    (fkSet2,pre) = F.foldl' (\(s,l) i@(Path si _ )   -> (S.map keyFastUnique si <> s  ,liftA2 (\j i -> j ++ [i]) l ( loadFKDisk inf s rec i )) )  (S.empty , return []) (P.sortBy (P.comparing (RelSort . S.toList . pathRelRel)) $F.toList (rawFKS targetTable))
   prefks <- pre
   return (\table ->
     let
@@ -366,7 +366,7 @@ loadFKSDisk inf targetTable rec = do
    in tblist' (mapTableK keyFastUnique targetTable) (fmap _tb $fmap snd nonFKAttrs <> fks ))
 
 loadFKDisk :: InformationSchema ->  S.Set KeyUnique -> [MutRec [[Rel Key]]] -> Path (S.Set Key ) SqlOperation -> R.Dynamic (TBData KeyUnique Showable -> Maybe (Column KeyUnique Showable))
--- loadFKDisk _ _  _ m | traceShow m False = undefined
+loadFKDisk _ old  _ m | traceShow (old,m) False = undefined
 loadFKDisk inf old rec (Path ori (FKJoinTable rel (st,tt) ) ) = do
   let
     targetSchema = if schemaName inf == st then   inf else justError "no schema" $ HM.lookup st (depschema inf)
@@ -376,12 +376,13 @@ loadFKDisk inf old rec (Path ori (FKJoinTable rel (st,tt) ) ) = do
   return (\table ->  do
     let
         relSet = S.fromList $ _relOrigin <$> relU
+        refl = S.fromList $ keyFastUnique . _relOrigin <$> filterReflexive rel
         relU = (fmap keyFastUnique <$> rel)
         tb  = unTB <$> F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . snd . tableNonRef' $ table))
         fkref = joinRel2  (keyFastUnique <$> tableMeta targetTable) (replaceRel  relU <$> tb) mtable
-    case  FKT (kvlist $ _tb <$> filter (not . (`S.member` old) . _tbattrkey ) tb) relU  <$>  fkref of
+    case  FKT (kvlist $ _tb <$> filter ((\i -> not (S.member i old) &&  S.member i refl ) . _tbattrkey ) tb) relU  <$>  fkref of
       Nothing ->  if F.any (isKOptional.keyType . _relOrigin) rel
-                     then Just $ FKT (kvlist $ _tb <$> filter (not . (`S.member` old) . _tbattrkey ) tb) relU (LeftTB1 Nothing)
+                     then Just $ FKT (kvlist $ _tb <$> filter ((\i -> not (S.member i old) &&  S.member i refl ) . _tbattrkey ) tb) relU (LeftTB1 Nothing)
                      else Nothing
       i -> i)
 loadFKDisk inf old rec (Path ori (FKInlineTable (st,tt) ) ) = do
