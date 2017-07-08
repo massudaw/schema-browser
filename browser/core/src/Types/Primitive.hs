@@ -153,7 +153,7 @@ data Labeled l v
   }
   | Unlabeled
   { labelValue :: v
-  } deriving(Eq,Show,Ord,Foldable,Functor,Traversable,Show1)
+  } deriving(Eq,Show,Ord,Foldable,Functor,Traversable)
 
 
 type Key = CoreKey -- FKey (KType  (Prim (Text,Text) (Text,Text)))
@@ -712,6 +712,10 @@ deriving instance (Show a, Show k) => Show (TB Identity k a)
 deriving instance (Eq a, Eq k) => Eq (TB Identity k a)
 deriving instance (Ord a, Ord k) => Ord (TB Identity k a)
 
+
+instance Show l => Show1 (Labeled l )where
+  liftShowsPrec l s k  (Labeled la t) = showsPrec k la  .  l  k t
+  liftShowsPrec l s k  (Unlabeled t) = l  k t
 
 instance Show1 Interval where
   liftShowsPrec l s  k (Interval (le,lb) (ue,ub) ) =  showsPrec k lb . (liftShowsPrec l s  k le) . (liftShowsPrec  l s  k ue) . showsPrec k ub

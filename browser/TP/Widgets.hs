@@ -62,8 +62,6 @@ evalDyn el f = getWindow el >>= \w -> fmap fst $ runDynamic $ runUI w f
 
 
 
-
-
 adEvent :: Event a -> Tidings a -> UI (Tidings a)
 adEvent ne t = do
   c <- currentValue (facts t)
