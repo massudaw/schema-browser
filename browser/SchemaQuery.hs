@@ -258,11 +258,11 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                                       go pred (AndColl l) = AndColl <$> nonEmpty (catMaybes $ go pred <$> l)
                                       go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
                                       go pred (PrimColl l) = PrimColl <$> pred l
-                                      test f (Nested p (Many[i] ),j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (keyType $ iprodRef $ L.head p))) j) else Nothing
+                                      test f (Nested p (Many[i] ),j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (_keyFunc $ keyType $ iprodRef $ L.head p))) j) else Nothing
                                       -- test f (Nested p i ,j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (keyType $ iprodRef $ L.head p))) j) else Nothing
                                       test v f = Nothing
-                                      removeArray (KOptional i)  o = removeArray i o
-                                      removeArray (KArray i)  (AnyOp o) = o
+                                      removeArray (KOptional :i)  o = removeArray i o
+                                      removeArray (KArray : i)  (AnyOp o) = o
                                       removeArray i  o = o
                                    in  fmap WherePredicate (go (test (_relOrigin <$> i)) l)
                 let refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap ( (\i->PrimColl (keyRef(_relTarget $ k) ,Left (i,Flip $ _relOperator k)))) . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v
@@ -439,8 +439,6 @@ childrenRefsUnique  inf table (sidxs,base) (FKJoinTable rel j ,evs)  =  concat $
                     resIndex idx = G.query pred idx
                     resScan idx = catMaybes $ fmap (\(i,t) -> ((G.getIndex i,t), G.getUnique (fmap (keyFastUnique._relOrigin) rel) i)) . (\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx
                     conv ((pk,ts),G.Idex fks) = (\t -> PatchRow (kvempty,pk ,[PFK relf (zipWith (\i j -> PAttr (_relOrigin i) (patch j)) relf fks ) (recurse2 t p)]) ) <$> ts
-                    unKOptional (KOptional i) = i
-                    unKOptional i = i
                     recurse2 (G.PathAttr _ i ) p = go i
                       where
                         go (G.ManyPath (j Non.:| _) ) = go  j

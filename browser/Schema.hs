@@ -78,10 +78,10 @@ import qualified Data.ByteString.Lazy as BSL
 
 createType :: (Bool,Bool,Bool,Bool,Bool,Bool,Text,Text,Maybe Int32) -> KType (Prim (Text,Text,Maybe Word32) (Text,Text))
 createType  (isNull,isArray,isDelayed,isRange,isDef,isComp,tysch,tyname,typmod)
-  = comp (Primitive base)
+  = Primitive comp base
   where
-    add i v = if i then v else id
-    comp = add isNull KOptional . add isArray KArray . add isRange KInterval . add isDef KSerial . add isDelayed KDelayed
+    add i v = if i then (v:) else id
+    comp = add isNull KOptional . add isArray KArray . add isRange KInterval . add isDef KSerial . add isDelayed KDelayed $ []
     base
       | isComp =  RecordPrim (tysch ,tyname)
       | otherwise = AtomicPrim (tysch ,tyname,fromIntegral <$> typmod)
@@ -106,7 +106,7 @@ queryAuthorization conn schema user = do
 tableSizes = "SELECT c.relname,c.reltuples::bigint AS estimate FROM   pg_class c JOIN   pg_namespace n ON c.relkind = 'r' and n.oid = c.relnamespace WHERE n.nspname = ? "
 
 -- fromShowable2 i j | traceShow (i,j) False = errorWithStackTrace ""
-fromShowable2 i@(Primitive (AtomicPrim PText )) v = fromShowable i $  BS.drop 1 (BS.init v)
+fromShowable2 i@(Primitive [] (AtomicPrim PText )) v = fromShowable i $  BS.drop 1 (BS.init v)
 fromShowable2 i v = fromShowable i v
 
 testSerial  =((=="nextval"). fst . T.break(=='('))

@@ -349,10 +349,7 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
                        (FKJoinTable  rel (_,trefname) ) -> (rel,trefname)
                fk =  F.toList $  pathRelRel fks
                treftable = lookTable infsch trefname
-               exchange tname (KArray i)  = KArray (exchange tname i)
-               exchange tname (KOptional i)  = KOptional (exchange tname i)
-               exchange tname (KSerial i)  = KSerial (exchange tname i)
-               exchange tname (Primitive i ) = Primitive $ case i of
+               exchange tname (Primitive l i ) = Primitive l $ case i of
                         AtomicPrim _ -> RecordPrim ("gmail", tname)
                         RecordPrim i -> RecordPrim i
                patt = either
@@ -400,7 +397,7 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
     resultToMaybe (Success i) = Just i
     resultToMaybe (Error i ) = Nothing
     fun :: Bool -> KType (Prim KPrim (Text,Text))-> Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
-    fun f (Primitive i) v =
+    fun f (Primitive [] i) v =
         case i of
           AtomicPrim k -> return $ Right $ fmap TB1 $ case k of
             PText -> join $ readPrim k . T.unpack <$> (v ^? _String)
@@ -412,20 +409,17 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
             PBinary -> join  $ readPrim k . T.unpack  <$> (v ^? _String)
           RecordPrim (i,m) ->  Left .fmap TB1 .  tbNull <$>  convertAttrs infsch (if f then Nothing else getref) inf   (justError "no look" $  HM.lookup m inf ) v
                 where  tbNull tb = if null (getAttr' tb) then Nothing else Just  tb
-    fun f (KArray i) v = (\l -> if null l then return (typ i) else fmap (bimap  nullArr  nullArr) .   biTrav (fun f i) $ l ) $ (v ^.. values )
+    fun f (Primitive (KArray :xs) i) v = (\l -> if null l then return (typ i) else fmap (bimap  nullArr  nullArr) .   biTrav (fun f (Primitive xs i)) $ l ) $ (v ^.. values )
         where nullArr lm = if null l then Nothing else Just (ArrayTB1 $ Non.fromList l)
                 where l = catMaybes lm
     fun f i v = errorWithStackTrace (show (i,v))
 
     funO :: Bool -> KType (Prim KPrim (Text,Text))-> Maybe Value -> TransactionM (Either (Maybe (TB2 Key Showable)) (Maybe (FTB Showable)))
-    funO f (KOptional i) v =  fmap (bimap (Just . LeftTB1  ) (Just . LeftTB1)) . maybe (return $ typ i) (fun f i) $ v
-    funO f (KSerial i) v =  fmap (bimap (Just . LeftTB1 ) (Just . LeftTB1 )) . maybe (return $ typ i) (fun f i) $ v
-    funO f i v = maybe (return $typ i) (fun f i) v
+    funO f (Primitive (KOptional :l) i) v =  fmap (bimap (Just . LeftTB1  ) (Just . LeftTB1)) . maybe (return $ typ i) (fun f (Primitive l i)) $ v
+    funO f (Primitive (KSerial :l) i) v =  fmap (bimap (Just . LeftTB1 ) (Just . LeftTB1 )) . maybe (return $ typ i) (fun f (Primitive l i)) $ v
+    funO f (Primitive l i) v = maybe (return $typ i) (fun f (Primitive l i)) v
 
-    typ (KArray i ) = typ i
-    typ (KOptional i ) = typ i
-    typ (KSerial i ) = typ i
-    typ (Primitive i ) = case i of
+    typ i  = case i of
         AtomicPrim _ -> Right Nothing
         RecordPrim _ -> Left Nothing
 
@@ -457,23 +451,6 @@ postHeaderJSON h url form = do
 preconversion i =  join $ (\t -> M.lookup (i,t) (gmailLiftPrimConv )) <$> ktypeLift  i
 
 conversion i = fromMaybe (id,id) $ preconversion i
-
-topconversion v@(KDelayed n ) =   preconversion v <|> fmap lif (topconversion n )
-  where
-    lif (a,b) = ((\(LeftTB1 i) -> LeftTB1 (fmap a i)), (\(LeftTB1 i) -> LeftTB1 (fmap b  i )))
-topconversion v@(KSerial n ) =   preconversion v <|> fmap lif (topconversion n )
-  where
-    lif (a,b) = ((\(LeftTB1 i) -> LeftTB1 (fmap a i)), (\(LeftTB1 i) -> LeftTB1 (fmap b  i )))
-topconversion v@(KOptional n ) =   preconversion v <|> fmap lif (topconversion n )
-  where
-    lif (a,b) = ((\(LeftTB1 i) -> LeftTB1 (fmap a i)), (\(LeftTB1 i) -> LeftTB1 (fmap b  i )))
-topconversion v@(KArray n) =  preconversion v <|> fmap lif (topconversion n )
-  where
-    lif (a,b) = ((\(ArrayTB1 i) -> ArrayTB1 (fmap a i)), (\(ArrayTB1 i) -> ArrayTB1 (fmap b  i )))
-topconversion v@(KInterval n) =  preconversion v <|> fmap lif (topconversion n )
-  where
-    lif (a,b) = ((\(IntervalTB1 i) -> IntervalTB1 (fmap a i)), (\(IntervalTB1 i) -> IntervalTB1 (fmap b  i )))
-topconversion v@(Primitive i) =  preconversion v
 
 -- Type Conversions
 --
@@ -509,18 +486,22 @@ gmailPrim =
 ktypeLift :: Ord b => KType (Prim KPrim b) -> Maybe (KType (Prim KPrim b))
 ktypeLift i = (M.lookup i  gmailLiftPrim )
 
-ktypeRec v@(KOptional i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KArray i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KInterval i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KSerial i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KDelayed i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(Primitive i ) = ktypeLift v
+addToken t (Primitive i a) = Primitive (t:i) a
+
+ktypeRec f v@(Primitive (KOptional:xs) i) =   f v <|> fmap (addToken KOptional) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive (KArray :xs) i) =   f v <|> fmap (addToken KArray) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive (KInterval:xs) i) =   f v <|> fmap (addToken KInterval) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive (KSerial :xs) i) = f v <|> fmap (addToken KSerial) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive (KDelayed :xs) i) = f v <|> fmap (addToken KDelayed) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive []  i ) = f v
+
+
 
 mapKeyType :: FKey (KType PGPrim) -> FKey (KType (Prim KPrim (Text,Text)))
 mapKeyType  = fmap mapKType
 
 mapKType :: KType PGPrim -> KType CorePrim
-mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec (fmap textToPrim i)
+mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec ktypeLift (fmap textToPrim i)
 
 textToPrim :: Prim PGType  (Text,Text) -> Prim KPrim (Text,Text)
 textToPrim (AtomicPrim (s,i,_)) = case  HM.lookup i  gmailPrim of

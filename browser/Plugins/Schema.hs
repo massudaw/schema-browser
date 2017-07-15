@@ -64,18 +64,22 @@ gmailLiftPrimConv =
 ktypeLift :: Ord b => KType (Prim KPrim b) -> Maybe (KType (Prim KPrim b))
 ktypeLift i = (M.lookup i  gmailLiftPrim )
 
-ktypeRec v@(KOptional i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KArray i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KInterval i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KSerial i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(KDelayed i) = ktypeLift v <|> ktypeRec i
-ktypeRec v@(Primitive i ) = ktypeLift v
+addToken t (Primitive i a) = Primitive (t:i) a
+
+ktypeRec f v@(Primitive (KOptional:xs) i) =   f v <|> fmap (addToken KOptional) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive (KArray :xs) i) =   f v <|> fmap (addToken KArray) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive (KInterval:xs) i) =   f v <|> fmap (addToken KInterval) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive (KSerial :xs) i) = f v <|> fmap (addToken KSerial) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive (KDelayed :xs) i) = f v <|> fmap (addToken KDelayed) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive []  i ) = f v
+
+
 
 mapKeyType :: FKey (KType PGPrim) -> FKey (KType (Prim KPrim (Text,Text)))
 mapKeyType  = fmap mapKType
 
 mapKType :: KType PGPrim -> KType CorePrim
-mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec (fmap textToPrim i)
+mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec ktypeLift (fmap textToPrim i)
 
 textToPrim :: Prim PGType  (Text,Text) -> Prim KPrim (Text,Text)
 textToPrim (AtomicPrim (s,i,_)) = case  HM.lookup i  gmailPrim of

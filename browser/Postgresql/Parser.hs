@@ -123,20 +123,22 @@ instance (TF.ToField a , TF.ToField b ) => TF.ToField (Either a b ) where
 
 instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
   toField (k ,i) = case   liftA2 (,) (ktypeRec ktypeUnLift  k ) (topconversion preunconversion k) of
-                     Just (k,(_,b)) -> toFiel k (b i)
-                     Nothing -> toFiel k i
+                     Just (k,(_,b)) -> toFielPrim k (b i)
+                     Nothing -> toFielPrim k i
     where
-      toFiel (KOptional k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
-      toFiel (KSerial k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
-      toFiel (KDelayed k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel k) i
-      toFiel (KArray k ) (ArrayTB1 is ) = TF.Many $[TF.toField $ PGTypes.PGArray   (F.toList $ fmap unTB1 is)  ] ++ maybeToList ( TF.Plain .fromByteString . BS.pack . T.unpack . (" :: "<>) <$> ( renderType (KArray k)))
-      toFiel (KInterval k) (IntervalTB1 is ) = TF.Many [TF.Plain ( fromByteString $ BS.pack $ T.unpack $justError ("no array" <> show k) $ renderType (KInterval k) ) ,TF.Plain "(" ,TF.toField  (fmap unTB1 $ unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (fmap unTB1 $ unFinite $ Interval.upperBound is) ,TF.Plain ")"]
-        -- | k == Just "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $maybe "" T.unpack $ ty), TF.Plain $ fromByteString "range"]
-        -- | k == Just "POINT3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
-        -- | ty == Just "LINESTRING3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
-        -- | otherwise  = TF.toField  tyv
-      toFiel (Primitive k) (TB1 i) = TF.Many [TF.toField i ,TF.Plain $ fromByteString $maybe ""  (" :: "<>) (BS.pack . T.unpack <$> renderType (Primitive k))]
-      toFiel i j = errorWithStackTrace ("toFiel" ++ show (i,j))
+      toFielPrim (Primitive l n) = toFiel l
+        where
+          toFiel (KOptional : k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
+          toFiel (KSerial : k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel  k) i
+          toFiel (KDelayed : k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel k) i
+          toFiel (KArray : k ) (ArrayTB1 is ) = TF.Many $[TF.toField $ PGTypes.PGArray   (F.toList $ fmap unTB1 is)  ] ++ maybeToList ( TF.Plain .fromByteString . BS.pack . T.unpack . (" :: "<>) <$> ( renderType (Primitive (KArray :k) n )))
+          toFiel (KInterval : k) (IntervalTB1 is ) = TF.Many [TF.Plain ( fromByteString $ BS.pack $ T.unpack $justError ("no array" <> show k) $ renderType (Primitive  (KInterval: k) n ) ) ,TF.Plain "(" ,TF.toField  (fmap unTB1 $ unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (fmap unTB1 $ unFinite $ Interval.upperBound is) ,TF.Plain ")"]
+            -- | k == Just "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $maybe "" T.unpack $ ty), TF.Plain $ fromByteString "range"]
+            -- | k == Just "POINT3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
+            -- | ty == Just "LINESTRING3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
+            -- | otherwise  = TF.toField  tyv
+          toFiel [] (TB1 i) = TF.Many [TF.toField i ,TF.Plain $ fromByteString $maybe ""  (" :: "<>) (BS.pack . T.unpack <$> renderType (Primitive [] n))]
+          toFiel i j = errorWithStackTrace ("toFiel" ++ show (i,j))
 
 
 
@@ -269,8 +271,8 @@ instance TF.ToField Showable where
 
 
 defaultType t =
-    case t of
-      KOptional i -> Just (LeftTB1 Nothing)
+  case _keyFunc t of
+      KOptional : i -> Just (LeftTB1 Nothing)
       i -> Nothing
 
 
@@ -522,53 +524,57 @@ parsePrim i =  do
                   Right i -> pure $ SLineString i
                   Left e -> fail e
           PBounding -> SBounding <$> tryquoted box3dParser
+        i -> error (show i)
 
 
 -- parseShowable (KArray (KDelayed i))
     -- = (string "t" >> return (ArrayTB1 $ [ SDelayed Nothing]))
 parseShowable :: KType (Prim KPrim (Text,Text)) -> Parser (FTB Showable)
-parseShowable (KArray i)
-  =  join $ fromMaybe (fail "empty list") .  fmap ( return .ArrayTB1  . Non.fromList) . nonEmpty <$> tryquoted par
-      where par = char '{'  *>  sepBy (parseShowable i) (char ',') <* char '}'
-parseShowable (KOptional i)
-    = LeftTB1 <$> ( (Just <$> (parseShowable i)) <|> pure (showableDef i) )
-parseShowable (KDelayed i)
-    = (string "t" >> return (LeftTB1 Nothing))
-parseShowable (KSerial i)
-    = LeftTB1 <$> ((Just <$> parseShowable i) )
-parseShowable (KInterval k)=
-    let
-      inter = do
-        lb <- (char '[' >> return True ) <|> (char '(' >> return False )
-        i <- (ER.Finite <$> parseShowable k) <|>  return ER.NegInf
-        char ','
-        j <- (ER.Finite <$> parseShowable k) <|> return ER.PosInf
-        rb <- (char ']' >> return True) <|> (char ')' >> return False )
-        return $ IntervalTB1 $ Interval.interval (i,lb) (j,rb)
-     in tryquoted  inter
+parseShowable (Primitive l (AtomicPrim i)) = parseKTypePrim l
+  where
+    parseKTypePrim (KArray : i)
+      =  join $ fromMaybe (fail "empty list") .  fmap ( return .ArrayTB1  . Non.fromList) . nonEmpty <$> tryquoted par
+          where par = char '{'  *>  sepBy (parseKTypePrim i) (char ',') <* char '}'
+    parseKTypePrim (KOptional: l)
+      = LeftTB1 <$> ( (Just <$> (parseKTypePrim l)) <|> pure (showableDef (Primitive l (AtomicPrim i) )) )
+    parseKTypePrim (KDelayed : i)
+        = (string "t" >> return (LeftTB1 Nothing))
+    parseKTypePrim (KSerial :i)
+        = LeftTB1 <$> ((Just <$> parseKTypePrim i) )
+    parseKTypePrim (KInterval :k)=
+        let
+          inter = do
+            lb <- (char '[' >> return True ) <|> (char '(' >> return False )
+            i <- (ER.Finite <$> parseKTypePrim k) <|>  return ER.NegInf
+            char ','
+            j <- (ER.Finite <$> parseKTypePrim k) <|> return ER.PosInf
+            rb <- (char ']' >> return True) <|> (char ')' >> return False )
+            return $ IntervalTB1 $ Interval.interval (i,lb) (j,rb)
+         in tryquoted  inter
+    parseKTypePrim [] = (forw  . TB1 <$> parsePrim i)
+      where (forw,_) = conversion (Primitive [] (AtomicPrim i))
 
-parseShowable p@(Primitive (AtomicPrim i)) = forw  . TB1 <$> parsePrim i
-  where (forw,_) = conversion p
 
-parseShowable i  = error $  "not implemented " <> show i
+    parseKTypePrim i  = error $  "not implemented " <> show i
 
-parseShowableJSON (KDelayed i) (A.Bool b)
-  = if b then return (LeftTB1 Nothing)  else fail "no error"
-parseShowableJSON (KSerial i)  v = LeftTB1 . Just <$> parseShowableJSON i v
-parseShowableJSON (KOptional i ) v =
-  case v of
-    A.Null ->  return $ LeftTB1 Nothing
-    vn -> LeftTB1 . Just  <$>  parseShowableJSON i vn
-parseShowableJSON  (KArray i )  (A.Array l )
-  =  maybe (fail "empty list" ) (fmap (ArrayTB1 . Non.fromList) . mapM (parseShowableJSON i)) (nonEmpty $ F.toList l)
-parseShowableJSON  p@(Primitive (AtomicPrim i)) v =  forw . TB1 <$> parsePrimJSON i v
-  where (forw,_)  =conversion p
+parseShowableJSON  p@(Primitive l (AtomicPrim i)) v = parseKTypePrim l v
+  where
+    parseKTypePrim (KDelayed :i) (A.Bool b)
+      = if b then return (LeftTB1 Nothing)  else fail "no error"
+    parseKTypePrim (KSerial :i)  v = LeftTB1 . Just <$> parseKTypePrim i v
+    parseKTypePrim (KOptional :i ) v =
+      case v of
+        A.Null ->  return $ LeftTB1 Nothing
+        vn -> LeftTB1 . Just  <$>  parseKTypePrim i vn
+    parseKTypePrim  (KArray :i )  (A.Array l )
+      =  maybe (fail "empty list" ) (fmap (ArrayTB1 . Non.fromList) . mapM (parseKTypePrim i)) (nonEmpty $ F.toList l)
 
-parseShowableJSON (KInterval i ) (A.String v)
-  = case parseOnly (parseShowable(KInterval i)) (BS.pack $ T.unpack v) of
-        Right i -> return i
-        Left i -> fail i
-parseShowableJSON i v = errorWithStackTrace ("parseShowableJSON" <> show (i,v))
+    parseKTypePrim (KInterval :l ) (A.String v)
+      = case parseOnly (parseShowable (Primitive (KInterval :l) (AtomicPrim i))) (BS.pack $ T.unpack v) of
+            Right i -> return i
+            Left i -> fail i
+    parseKTypePrim [] v = forw . TB1 <$> parsePrimJSON i v
+        where (forw,_)  =conversion (Primitive [] (AtomicPrim i))
 
 
 pg_double :: Parser Double

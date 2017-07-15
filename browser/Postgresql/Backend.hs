@@ -25,6 +25,7 @@ import Postgresql.Parser
 import Utils
 import Text
 import Control.Monad.Reader
+import Control.Lens as Le
 import GHC.Stack
 import Schema
 import RuntimeTypes
@@ -412,13 +413,13 @@ loadDelayed inf t@(k,v) values@(ks,vs)
        is <- queryWith (fromRecordJSON delayed) (conn inf) (fromString $ T.unpack str) pk
        res <- case is of
             [] -> errorWithStackTrace "empty query"
-            [i] ->return $ fmap (\(i,j,a) -> (i,G.getIndex values,a)) $ diff (ks , _tb $ KV filteredAttrs) (mapKey' (alterKeyType makeDelayed) . mapFValue' makeDelayedV $ i  )
+            [i] ->return $ fmap (\(i,j,a) -> (i,G.getIndex values,a)) $ diff (ks , _tb $ KV filteredAttrs) (mapKey' (alterKeyType (Le.over keyFunc makeDelayed)) . mapFValue' makeDelayedV $ i  )
             _ -> errorWithStackTrace "multiple result query"
        return res
   where
-    makeDelayed (KOptional k ) = KOptional (makeDelayed k)
-    makeDelayed (KArray k ) = KArray (makeDelayed k)
-    makeDelayed (Primitive k ) = KDelayed (Primitive k)
+    makeDelayed (KOptional :k ) = KOptional :(makeDelayed k)
+    makeDelayed (KArray :k ) = KArray :(makeDelayed k)
+    makeDelayed [] = [KDelayed ]
 
     makeDelayedV (TB1 i) = LeftTB1 $ Just (TB1 i)
     makeDelayedV (LeftTB1 i) = LeftTB1 $ makeDelayedV <$> i

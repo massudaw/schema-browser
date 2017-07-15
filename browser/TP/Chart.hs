@@ -88,10 +88,6 @@ chartWidgetMetadata inf = do
             (Attr _ color )= lookAttr' (meta inf) "color" e
             projf  r efield  = M.fromList [("value" ,ArrayTB1 $  attr <$> efield), ("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color )] :: M.Map Text (FTB Showable)
               where attr  (TB1 (SText field)) = _tbattr $ unTB $justError ("no attr " <> show field) (findAttr (lookKey inf tname field) r)
-            isKInterval (KInterval i) = True
-            isKInterval (KOptional i) = isKInterval i
-            isKInterval (Primitive i ) = False
-            isKInterval i = False
 
             proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  projf r efields
             attrValue (Attr k v) = v

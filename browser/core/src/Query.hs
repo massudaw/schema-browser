@@ -96,37 +96,37 @@ import qualified Types.Index as G
 transformKey
   :: (Eq b, Show a, Show b) =>
      KType (Prim KPrim b) -> KType (Prim KPrim b) -> FTB a -> FTB a
+transformKey (Primitive l p) (Primitive l1 p1) v
+  | isPrimReflexive p p1 = transformKPrim l l1 v
+  | otherwise = error ("cant match prim type" ++ show (p,p1))
+
 -- transformKey ki ko v | traceShow (ki,ko,v) False = undefined
-transformKey (KSerial i)  (KOptional j) (LeftTB1 v)  | isPairReflexive i Equals j = LeftTB1 v
-transformKey (KOptional i)  (KSerial j) (LeftTB1 v)  | isPairReflexive i Equals j = LeftTB1 v
-transformKey (KOptional j) l (LeftTB1  v)
-    | isJust v = transformKey j l (fromJust v)
+transformKPrim
+  :: Show a =>
+    [KTypePrim] -> [KTypePrim]  -> FTB a -> FTB a
+transformKPrim (KSerial :i)  (KOptional :j) (LeftTB1 v)  = LeftTB1 $ transformKPrim i j <$> v
+transformKPrim (KOptional :i)  (KSerial :j) (LeftTB1 v)  = LeftTB1 $ transformKPrim i j <$> v
+transformKPrim (KOptional :j) l (LeftTB1 v)
+    | isJust v = transformKPrim j l (fromJust v)
     | otherwise = errorWithStackTrace "no transform optional nothing"
-transformKey (KSerial j)  l v@(TB1 _) = transformKey j l v
-transformKey (KSerial j)  l (LeftTB1 v)
-    | isJust v = transformKey j l (fromJust v)
+transformKPrim (KSerial :j)  l (LeftTB1 v)
+    | isJust v = transformKPrim j l (fromJust v)
     | otherwise =  LeftTB1 Nothing
-transformKey l@(Primitive _)  (KOptional j ) v  = LeftTB1 $ Just (transformKey l j v)
-transformKey l@(Primitive _)  (KSerial j ) v   = LeftTB1 $ Just (transformKey l j v)
-transformKey l@(Primitive _)  (KArray j ) v | isPairReflexive l Equals j   = ArrayTB1 $ pure v
-transformKey ki kr v | isPairReflexive ki Equals kr = v
-transformKey (Primitive ki) (Primitive kr) v
-  | isPrimReflexive ki kr = v
-transformKey ki kr  v = errorWithStackTrace  ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
+transformKPrim []   (KOptional :j ) v  = LeftTB1 . Just $ (transformKPrim [] j v)
+transformKPrim []  (KSerial :j ) v   = LeftTB1 . Just $ (transformKPrim [] j v)
+transformKPrim [] (KArray :j ) v    = ArrayTB1 . pure $ transformKPrim [] j v
+transformKPrim ki kr v
+    | ki == kr =  v
+    | otherwise = errorWithStackTrace  ("No key transform defined for : " <> show ki <> " " <> show kr <> " " <> show v )
 
 
 
 
 
-isKDelayed (KDelayed i) = True
-isKDelayed (KSerial i) = isKDelayed i
-isKDelayed (KOptional i) = isKDelayed i
-isKDelayed (KInterval i) = isKDelayed i
-isKDelayed (KArray i)  = isKDelayed i
-isKDelayed _ = False
+isKDelayed (Primitive l _)  = isJust  $ L.find (==KDelayed) l
 
 
-isKOptional (KOptional i) = True
+isKOptional (Primitive (KOptional :_ ) i) = True
 isKOptional _ = False
 -- isKOptional i = errorWithStackTrace (show ("isKOptional",i))
 
@@ -188,29 +188,33 @@ isPrimReflexive :: Eq b => Prim KPrim b -> Prim KPrim b -> Bool
 isPrimReflexive i j | i == j = True
 isPrimReflexive (AtomicPrim (PInt i)) (AtomicPrim (PInt j)) = True
 isPrimReflexive (AtomicPrim (PDimensional _ i)) (AtomicPrim (PDouble )) = True
-isPrimReflexive (AtomicPrim (PDouble )) (AtomicPrim (PDimensional _ _ )) = True
+isPrimReflexive (AtomicPrim PDouble ) (AtomicPrim (PDimensional _ _ )) = True
 isPrimReflexive (AtomicPrim (PDimensional _ _ )) (AtomicPrim (PDimensional  _ _ )) = True
 isPrimReflexive a b = False
 
 isPairReflexive :: (Show b , Eq b) => KType (Prim KPrim b ) -> BinaryOperator -> KType (Prim KPrim b) -> Bool
-isPairReflexive i   IntersectOp j = False
-isPairReflexive (Primitive i ) op (KInterval (Primitive j)) | i `isPrimReflexive` j = False
-isPairReflexive (Primitive j) op  (KArray (Primitive i) )  | i `isPrimReflexive` j = False
-isPairReflexive (KInterval i) op (KInterval j)
+isPairReflexive (Primitive l a) op (Primitive l1 a1) =  isPairPrimReflexive l op l1 &&  isPrimReflexive a a1
+
+
+isPairPrimReflexive :: [KTypePrim]  -> BinaryOperator -> [KTypePrim]  -> Bool
+isPairPrimReflexive i   IntersectOp j = False
+isPairPrimReflexive [] op (KInterval :[])  = False
+isPairPrimReflexive [] op  (KArray :[])   = False
+isPairPrimReflexive (KInterval : i) op (KInterval :j)
   | i == j && op == Contains = False
-  | op == Equals = isPairReflexive i op j
-isPairReflexive (Primitive i ) op (Primitive j) = isPrimReflexive i  j
-isPairReflexive (KOptional i ) op  j = isPairReflexive i op j
-isPairReflexive i  op (KOptional j) = isPairReflexive i op j
-isPairReflexive (KSerial i) op j = isPairReflexive i op j
-isPairReflexive i op (KSerial j) = isPairReflexive i op j
-isPairReflexive (KArray i )  op  (KArray j)
+  | op == Equals = isPairPrimReflexive i op j
+isPairPrimReflexive [] op [] = True
+isPairPrimReflexive (KOptional : i) op  j = isPairPrimReflexive i op j
+isPairPrimReflexive i  op (KOptional :j) = isPairPrimReflexive i op j
+isPairPrimReflexive (KSerial:i) op j = isPairPrimReflexive i op j
+isPairPrimReflexive i op (KSerial:j) = isPairPrimReflexive i op j
+isPairPrimReflexive (KArray :i )  op  (KArray : j)
   | i == j  && op == Contains = False
-  | op == Equals = isPairReflexive i op j
-isPairReflexive (KArray i )  (AnyOp op ) j = isPairReflexive i op j
-isPairReflexive i   (Flip IntersectOp) j = False
-isPairReflexive j op (KArray i )  = False
-isPairReflexive i op  j = errorWithStackTrace $ "isPairReflexive " <> show i <> " - " <> show op <> " - " <> show  j
+  | op == Equals = isPairPrimReflexive i op j
+isPairPrimReflexive (KArray : i )  (AnyOp op ) j = isPairPrimReflexive i op j
+isPairPrimReflexive i   (Flip IntersectOp) j = False
+isPairPrimReflexive j op (KArray :i )  = False
+isPairPrimReflexive i op  j = errorWithStackTrace $ "isPairPrimReflexive " <> show i <> " - " <> show op <> " - " <> show  j
 
 filterReflexive ks = L.filter (reflexiveRel ks) ks
 
@@ -267,7 +271,7 @@ pathToRel (Path ifk (FKInlineTable _ ) ) = fmap Inline $ F.toList ifk
 pathToRel (Path ifk (FunctionField _ _ _ ) ) = fmap Inline $ F.toList ifk
 pathToRel (Path ifk (FKJoinTable ks _ ) ) = ks
 
-dumbKey n = Key n  Nothing [] 0 Nothing (unsafePerformIO newUnique) (Primitive (AtomicPrim (PInt 0) ))
+dumbKey n = Key n  Nothing [] 0 Nothing (unsafePerformIO newUnique) (Primitive [] (AtomicPrim (PInt 0) ))
 
 findRefIT ifk = justError ("cant find ref" <> show ifk). M.lookup (S.map Inline ifk )
 findRefFK fks ksbn = kvlist $ fmap (\i -> Compose . justError ("cant find " ). M.lookup (S.singleton (Inline i)) $ ksbn ) fks
@@ -587,7 +591,7 @@ backFKRefType
 backFKRefType relTable relType ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . snd
   where
     reorderPK l = fmap (\i  -> L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
-    lookFKsel (ko,v)=  (\kn tkn -> (kn ,transformKey (keyType ko ) (Primitive tkn) v)) <$> knm <*> tknm
+    lookFKsel (ko,v)=  (\kn tkn -> (kn ,transformKey (keyType ko ) (Primitive [] tkn) v)) <$> knm <*> tknm
           where
                 knm =  M.lookup ko relTable
                 tknm =  M.lookup ko relType

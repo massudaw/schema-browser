@@ -370,13 +370,15 @@ putPatch m a= liftIO$ do
 putPatchSTM m =  writeTChan m . force. fmap (firstPatchRow keyFastUnique)
 putIdx m = liftIO .atomically . writeTChan m . force
 
-typeCheckValue f (KOptional i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValue f i) j
-typeCheckValue f (KDelayed i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValue f i) j
-typeCheckValue f (KSerial i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValue f i) j
-typeCheckValue f (KArray i )  (ArrayTB1 l) = F.foldl' (liftA2 const ) (Pure () ) (typeCheckValue f i<$>  l)
-typeCheckValue f (KInterval i) (IntervalTB1 j) = const <$> maybe (Pure ()) (typeCheckValue f i)  (unFin $ Interval.lowerBound j)  <*> maybe (Pure ()) (typeCheckValue f i) (unFin $ Interval.upperBound j)
-typeCheckValue f (Primitive i)   (TB1 j) = f i j
-typeCheckValue f i j = failure ["cant match " ++ show i ++ " with " ++ show j ]
+typeCheckValuePrim f (KOptional :i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValuePrim f i) j
+typeCheckValuePrim f (KDelayed :i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValuePrim f i) j
+typeCheckValuePrim f (KSerial :i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValuePrim f i) j
+typeCheckValuePrim f (KArray :i )  (ArrayTB1 l) = F.foldl' (liftA2 const ) (Pure () ) (typeCheckValuePrim f i<$>  l)
+typeCheckValuePrim f (KInterval : i) (IntervalTB1 j) = const <$> maybe (Pure ()) (typeCheckValuePrim f i)  (unFin $ Interval.lowerBound j)  <*> maybe (Pure ()) (typeCheckValuePrim f i) (unFin $ Interval.upperBound j)
+typeCheckValuePrim f []  (TB1 j) = f j
+typeCheckValuePrim f i j = failure ["cant match " ++ show i ++ " with " ++ show j ]
+
+typeCheckValue f (Primitive l i)  j = typeCheckValuePrim (f i) l j
 
 typeCheckPrim (PInt j) (SNumeric i) = Pure ()
 typeCheckPrim PDouble (SDouble i) = Pure ()

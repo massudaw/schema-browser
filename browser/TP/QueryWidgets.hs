@@ -100,7 +100,7 @@ type PluginRef a = [([Access Key], Tidings (Maybe (Index a)))]
 
 --- Plugins Interface Methods
 createFresh :: Text -> InformationSchema -> Text -> KType CorePrim -> IO InformationSchema
-createFresh  tname inf i ty@(Primitive atom)  =
+createFresh  tname inf i ty@(Primitive [] atom)  =
   case atom of
     AtomicPrim _  -> do
       k <- newKey i ty 0
@@ -119,7 +119,7 @@ createFresh  tname inf i ty@(Primitive atom)  =
 genAttr :: InformationSchema -> CoreKey -> Column CoreKey ()
 genAttr inf k =
   case keyType k of
-    Primitive p ->
+    Primitive [] p ->
       case p of
         AtomicPrim l -> Attr k (TB1 ())
         RecordPrim (l,t) ->
@@ -270,34 +270,43 @@ attrSize (Attr k _ ) = goAttSize  (keyType k)
 attrSize (Fun k _ _ ) = goAttSize  (keyType k)
 
 goAttSize :: KType CorePrim -> (Int,Int)
-goAttSize i = case i of
-                KOptional l ->  goAttSize l
-                KDelayed l ->  goAttSize l
-                KSerial l -> goAttSize l
-                KArray l -> let (i1,i2) = goAttSize l in (i1+1,i2*8)
-                KInterval l -> let (i1,i2) = goAttSize l in (i1*2 ,i2)
-                Primitive i ->
-                  case (\(AtomicPrim i) -> i) $ i of
-                       PInt _-> (3,1)
-                       PText-> (3,1)
-                       PDimensional _ _ -> (3,1)
-                       PTime PDate -> (3,1)
-                       PColor-> (3,1)
-                       PTime (PTimestamp _ )-> (3,1)
-                       PTime PDayTime -> (3,1)
-                       PAddress -> (12,8)
-                       PMime m -> case m of
-                                    "image/jpg" ->  (4,8)
-                                    "application/pdf" ->  (6,8)
-                                    "application/x-ofx" ->  (6,8)
-                                    "text/plain" ->  (12,8)
-                                    "text/html" ->  (12,8)
-                                    i  ->  (6,8)
-                       i -> (3,1)
+goAttSize (Primitive l (AtomicPrim i)) = go l
+  where
+    go [] = case  i of
+       PInt _ -> (3,1)
+       PText-> (3,1)
+       PDimensional _ _ -> (3,1)
+       PTime PDate -> (3,1)
+       PColor-> (3,1)
+       PTime (PTimestamp _ )-> (3,1)
+       PTime PDayTime -> (3,1)
+       PAddress -> (12,8)
+       PMime m -> case m of
+                    "image/jpg" ->  (4,8)
+                    "application/pdf" ->  (6,8)
+                    "application/x-ofx" ->  (6,8)
+                    "text/plain" ->  (12,8)
+                    "text/html" ->  (12,8)
+                    i  ->  (6,8)
+       i -> (3,1)
+    go  (i:l) = case i of
+      KOptional  ->  go l
+      KDelayed  ->  go l
+      KSerial  -> go l
+      KArray  -> let (i1,i2) = go l in (i1+1,i2*8)
+      KInterval  -> let (i1,i2) = go l in (i1*2 ,i2)
 
 getRelOrigin :: [Column k () ] -> [k ]
 getRelOrigin =  fmap _relOrigin . concat . fmap keyattri
 
+attributeLabel :: Column CoreKey () -> String
+attributeLabel (Fun k rel _ ) = show k ++  " = " ++ renderFun rel
+attributeLabel (IT k v ) = show k
+attributeLabel (Attr k v ) = show k
+attributeLabel (FKT ifk rel v ) =  if L.null constr then   stotal else L.intercalate "," (show <$>  constr ) ++ " => " ++ stotal
+  where total = concat $ fmap _relOrigin . keyattr <$> _kvvalues ifk
+        stotal = if L.null total then "()" else L.intercalate "," (show <$> total)
+        constr = (_relOrigin <$> rel) L.\\ total
 
 labelCaseDiff
   ::  InformationSchema
@@ -309,9 +318,9 @@ labelCaseDiff inf a wid = do
           patch <- UI.div
               # sink text  (facts $ fmap  show $ (triding wid))
           tip <- UI.div
-              # set text (show $ fmap showKey  <$> keyattri a)
+              # set text (show $ keyattri  a)
           UI.div # set children [tip,patch]
-    hl <- detailsLabel (set UI.text (show $ _relOrigin <$> keyattri a) . (>>= (flip paintEditDiff $  facts (triding wid )))) dynShow
+    hl <- detailsLabel (set UI.text (attributeLabel a) . (>>= (flip paintEditDiff $  facts (triding wid )))) dynShow
     return $ TrivialWidget (triding wid) hl
 
 paintEditDiff e  i  = element e # sink0 UI.style ((\ m  -> pure . ("background-color",) $ cond  m  ) <$> i )
@@ -334,7 +343,7 @@ tbCaseDiff inf table constr i@(FKT ifk  rel tb1) wl plugItens preoldItems = do
         let
             oldItems =  preoldItems
             nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin $ fmap unTB $ unkvlist ifk)
-            nonInjRefs = filter ((\i -> if S.null i then False else traceShow i $ S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattri .fst) wl
+            nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattri .fst) wl
             relTable = M.fromList $ fmap (\i -> (_relTarget i,_relOrigin i)) rel
             restrictConstraint = filter ((`S.isSubsetOf` (S.fromList $ fmap _relOrigin rel)) . S.fromList . getRelOrigin  .fst) constr
             convertConstr :: SelTBConstraint
@@ -359,7 +368,7 @@ tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
     search (IProd _ t) = fmap (fmap _tbattr ). uncurry recoverT .snd <$> L.find ((S.singleton t ==) . S.fromList . fmap _relOrigin . keyattri . fst) wl
     search (Nested t (Many [m]) ) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). uncurry recoverT . snd <$> L.find ((S.fromList (iprodRef <$> t) ==) . S.fromList . fmap _relOrigin .keyattri . fst) wl
     refs = sequenceA $ catMaybes $ search <$> snd rel
-  funinp <- ui$ cacheTidings (fmap _tbattr . preevaluate i (fst rel) funmap (snd rel) <$> refs )
+  funinp <- traverseUI ( liftIO. evaluateFFI (rootconn inf) (keyType i) (fst rel) funmap (snd rel)) refs
   ev <- buildUIDiff (buildPrimitive [FRead]) (keyType i) [] funinp
   return $ TrivialWidget (editor <$> preoldItems <*> (fmap (Fun i rel) <$>  funinp)) (getElement ev)
 
@@ -700,7 +709,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   diffMerge <- mapEventFin id $ crudMerge <$> facts inscrud <*> facts gist <@ cliMerge
   diffIns <- mapEventFin (fmap join . sequence) $ fmap crudIns <$> facts inscrud <@ (unionWith const cliIns (filterKey  (facts insertEnabled) altI ))
 
-  conflict <- UI.div # sinkDiff text ((\i j l -> if l then maybe "" (L.intercalate "," .fmap (showFKText ). flip conflictGist  j) i else "")  <$> inscrud <*> gist <*> mergeEnabled) # sinkDiff UI.style (noneShow <$>mergeEnabled)
+  conflict <- UI.div # sinkDiff text ((\i j l -> if l then maybe "" (L.intercalate "," .fmap showFKText . flip conflictGist  j) i else "")  <$> inscrud <*> gist <*> mergeEnabled) # sinkDiff UI.style (noneShow <$>mergeEnabled)
   debugBox <- checkedWidget (pure False )--onDiff (const True) False <$> inscrudp)
   transaction <- UI.span
     # set children [insertB,editB,mergeB,deleteB,getElement debugBox]
@@ -821,13 +830,12 @@ unPOpt (POpt i ) = i
 type AtomicUI k b = PluginRef (FTB b) ->  Tidings (Maybe (FTB b)) ->  k -> UI (TrivialWidget (Editor (PathFTB (Index b))))
 
 buildUIDiff:: (Show k ,Ord b ,Patch b, Show b) => AtomicUI k b -> KType k -> PluginRef (FTB b) -> Tidings (Maybe (FTB b)) -> UI (TrivialWidget (Editor (PathFTB (Index b) )))
-buildUIDiff f i  plug tdi = go i plug tdi
+buildUIDiff f (Primitive l prim)  plug tdi = go l plug tdi
   where
     -- go :: KType (Prim KPrim (Text,Text))-> [Tidings (Maybe (PathFTB b ))]-> Tidings (Maybe (FTB b )) -> UI (TrivialWidget (Editor ((PathFTB b ))))
-    go i plug tdi = case i of
-         Primitive i -> do
-            f plug tdi  i
-         KArray ti  -> mdo
+    go [] plug tdi = f plug tdi prim
+    go (i:ti) plug tdi = case i of
+         KArray -> mdo
             ctdi <- ui $  cacheTidings tdi
             cplug <- ui $ traverse (traverse cacheTidings) plug
             offsetDiv  <- UI.div
@@ -857,19 +865,19 @@ buildUIDiff f i  plug tdi = go i plug tdi
             element offsetDiv # set children (fmap getElement widgets)
             composed <- UI.span # set children [offset , offsetDiv]
             return  $ TrivialWidget  bres composed
-         KOptional ti -> do
+         KOptional -> do
            let pretdi = join . fmap unSOptional' <$> tdi
                plugtdi = fmap (fmap (join . fmap unPOpt ))<$> plug
            tdnew <- go ti  plugtdi pretdi
            -- Delete equals create
            return  (reduceOptional <$> tdnew)
-         KSerial ti -> do
+         KSerial -> do
            let pretdi = join . fmap unSOptional' <$> tdi
                plugtdi = fmap (fmap (join . fmap unPOpt )) <$> plug
            tdnew <- go ti  plugtdi pretdi
            -- Delete equals create
            return $ (reduceOptional <$> tdnew )
-         KDelayed ti -> do
+         KDelayed -> do
            let pretdi =  join . fmap unSOptional' <$> tdi
                plugtdi = fmap (fmap (join . fmap unPOpt )) <$> plug
            tdnew <-  go ti plugtdi pretdi
@@ -878,7 +886,7 @@ buildUIDiff f i  plug tdi = go i plug tdi
                test Keep = Keep
                test (Diff i ) = Diff (POpt (Just  i))
            return (test <$> tdnew)
-         KInterval ti -> do
+         KInterval -> do
             let unInterval f (IntervalTB1 i ) = f i
                 unInterval _ i = errorWithStackTrace (show i)
                 unfinp (Interval.Finite i) = Just i
@@ -957,8 +965,8 @@ buildPrim fm tdi i = case i of
                multN = filter ((<0).fst) mult
 
                un = ["mol","K","A","l","kg","s","m"]
-               pols = (L.intercalate "." $ fmap (\(i,j)-> if i == 1 then j else j<> "^" <> show i) multP)
-               negs = (L.intercalate "." $ fmap (\(i,j)-> j<> "^" <> show (abs i)) multN)
+               pols = L.intercalate "." $ fmap (\(i,j)-> if i == 1 then j else j<> "^" <> show i) multP
+               negs = L.intercalate "." $ fmap (\(i,j)-> j<> "^" <> show (abs i)) multN
                build i j
                  | L.length i == 0 && L.length j == 0 = ""
                  | L.length i == 0  = "1/" <> negs
@@ -1461,7 +1469,7 @@ fkUITablePrim preinf (rel,targetTable,(FKT ifk _ _)) constr  nonInjRefs   plmods
           (celem,pretdi) <- dynCrudUITable inf (fmap (\i -> if i then "+" else "-")$ bop ) [](fmap (fmap (fmap (unAtom. fmap snd))) <$> plmods) tbdata (fmap (unTB1.fmap snd)<$> ftdi )
           let
             fksel =   fmap (\box -> maybe (TB1 (M.empty,box) )(\ref -> TB1 ( M.fromList $ attrToTuple <$> ref ,box) ) $ backFKRefType relTable relType (fmap (keyAttr .unTB ) $ unkvlist ifk)   box ) <$>   pretdi
-            diffFK (Just i ) (Just j) =   maybe Keep (Diff . traceShow (i,j) ) (diff i  j)
+            diffFK (Just i ) (Just j) =   maybe Keep Diff  (diff i  j)
             diffFK (Just i ) Nothing = Delete
             diffFK Nothing Nothing = Keep
             diffFK Nothing (Just i) = Diff $ patch i

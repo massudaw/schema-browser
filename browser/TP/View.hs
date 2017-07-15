@@ -47,7 +47,7 @@ instance A.ToJSON Row  where
 instance A.ToJSON (Column Key Showable)  where
   toJSON (Attr k v ) =
     case (keyType k ) of
-      Primitive (AtomicPrim PColor )-> A.toJSON $  "#" <> renderShowable v
+      Primitive [] (AtomicPrim PColor )-> A.toJSON $  "#" <> renderShowable v
       i ->  A.toJSON v
   toJSON (IT k v) = A.toJSON (fmap Row v)
 
@@ -87,12 +87,9 @@ instance A.ToJSON Showable where
 
 indexTyU (Many [k] )= indexTy k
 indexTy (IProd _ k )=  keyType k
-indexTy (Nested [IProd _ xs] n) = nestTy (keyType xs) (indexTyU n)
+indexTy (Nested [IProd _ xs] n) = Primitive ((_keyFunc $ keyType xs) ++ ty) at
     where
-      nestTy (KOptional k) (KOptional n) = KOptional (nestTy k n)
-      nestTy (KOptional k) n = KOptional (nestTy k n)
-      nestTy (KArray k) i = KArray (nestTy k i)
-      nestTy (Primitive k) i = i
+      Primitive ty at = indexTyU n
 
 
 geoPred inf tname geofields (ne,sw) = traceShowId geo
@@ -100,20 +97,21 @@ geoPred inf tname geofields (ne,sw) = traceShowId geo
     geo = OrColl $ geoField <$> F.toList geofields
     geoField f =
         PrimColl .
-          (, Left (makeInterval (L.head $ F.toList nty)  (sw,ne) ,op nty))
+          (, Left (makeInterval (_keyAtom nty)  (sw,ne) ,op nty))
             $ index
       where
         nty= indexTy index
         [index] =  liftAccess inf (tableName tname)  <$>  indexer f
 
-    op f
-      =  case f of
-        Primitive o -> Flip Contains
-        KOptional i -> op i
-        KSerial i -> op i
-        KInterval i -> IntersectOp
-        KArray i-> AnyOp $ op i
-        v -> errorWithStackTrace (show v)
+    op (Primitive f a) =  go f
+      where
+        go [] = Flip Contains
+        go (f:i) = case f of
+          KInterval -> IntersectOp
+          KOptional  -> go i
+          KSerial  -> go i
+          KArray -> AnyOp $ go i
+          v -> errorWithStackTrace (show v)
 
 timePred inf tname evfields (incrementT,resolution) = traceShowId time
   where
@@ -123,19 +121,18 @@ timePred inf tname evfields (incrementT,resolution) = traceShowId time
       where
         [index] =  liftAccess inf (tableName tname)  <$>  indexer f
         ty = indexTy index
-    op f = case f of
-             KInterval i -> IntersectOp
-             KOptional i -> op i
-             KSerial i -> op i
-             Primitive i -> Flip Contains
-    ref f =  case f of
-            Primitive (AtomicPrim (PTime PDate)) ->
+    op (Primitive f a) = go f
+      where
+        go [] = Flip Contains
+        go (f:i) = case f of
+             KInterval -> IntersectOp
+             KOptional -> go i
+             KSerial  -> go i
+    ref (Primitive f a) =  case a of
+            (AtomicPrim (PTime PDate)) ->
               (TB1 . STime . SDate . localDay . utcToLocalTime utc)
-            Primitive (AtomicPrim (PTime (PTimestamp _))) ->
+            (AtomicPrim (PTime (PTimestamp _))) ->
               (TB1 . STime . STimestamp . utcToLocalTime utc)
-            KOptional i -> ref i
-            KSerial i -> ref i
-            KInterval i -> ref i
             v -> errorWithStackTrace (show v)
     i =
         (\r d ->
@@ -193,7 +190,7 @@ resRange b "hour" d =
                then -3600
                else 3600) d
 
-makeInterval :: Prim KPrim (T.Text,T.Text) ->  ([Double], [Double]) -> FTB Showable
+makeInterval :: Prim KPrim (T.Text,T.Text) ->  ([Double] , [Double]) -> FTB Showable
 makeInterval nty (sw,ne) = IntervalTB1 $ Interval.interval (makePos nty sw) (makePos nty ne)
 
 makePos :: Prim KPrim (T.Text,T.Text) -> [Double] -> (Extended (FTB Showable),Bool)
@@ -235,17 +232,19 @@ makePatch
     -> ((Table, G.TBIndex Showable, Key), Either (Interval UTCTime) UTCTime)
     -> TBIdx Key Showable
 makePatch zone ((t,pk,k),a) =
-  (tableMeta t,  pk, PAttr k <$> (ty (keyType k) $ a))
+  (tableMeta t,  pk, PAttr k <$> (typ (keyType k) $ a))
   where
-    ty (KOptional k) i = fmap (POpt . Just) . ty k $ i
-    ty (KSerial k) i = fmap (POpt. Just) . ty k $ i
-    ty (KInterval k) (Left i) =
-      [ PatchSet $ Non.fromList $
-        (fmap ((PInter True . (, True))) . (traverse (ty k . Right) ) $
-           Interval.lowerBound i) <>
-             (fmap ((PInter False . (, True))) . (traverse (ty k . Right ) ) $
-           Interval.upperBound i)]
-    ty (Primitive p) (Right r) = pure . PAtom . cast p $ r
+    typ (Primitive l a ) =  ty l
+      where
+        ty (KOptional : k) i = fmap (POpt . Just) . ty k $ i
+        ty (KSerial : k) i = fmap (POpt. Just) . ty k $ i
+        ty (KInterval : k) (Left i) =
+          [ PatchSet $ Non.fromList $
+            (fmap ((PInter True . (, True))) . (traverse (ty k . Right) ) $
+               Interval.lowerBound i) <>
+                 (fmap ((PInter False . (, True))) . (traverse (ty k . Right ) ) $
+               Interval.upperBound i)]
+        ty []  (Right r) = pure . PAtom . cast a $ r
     cast (AtomicPrim (PTime PDate)) = STime . SDate . utctDay
     cast (AtomicPrim (PTime (PTimestamp l))) =
       STime . STimestamp .

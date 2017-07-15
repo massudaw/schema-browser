@@ -116,27 +116,29 @@ renderGeo (SMultiGeom a) = show a
 renderGeo (SLineString a ) = show a
 renderGeo (SBounding a ) = show a
 
-defaultType t =
+defaultType (Primitive t _ ) =
     case t of
-      KOptional i -> Just (LeftTB1 Nothing)
+      (KOptional : i) -> Just (LeftTB1 Nothing)
       i -> Nothing
 
-readTypeOpt t Nothing = case t of
-    KOptional i -> Just $ LeftTB1 Nothing
+readTypeOpt (Primitive t _) Nothing = case t of
+    KOptional :i -> Just $ LeftTB1 Nothing
     i -> Nothing
 readTypeOpt t (Just i) = readType t i
 
-readType t = case t of
-    Primitive (AtomicPrim i) -> fmap TB1 <$> readPrim i
-    KOptional i -> opt LeftTB1 (readType i)
-    KSerial i -> opt LeftTB1 (readType i)
-    KArray i  -> parseArray (readType i)
-    KInterval i -> inter (readType i)
+readType (Primitive l (AtomicPrim p) ) = go l
   where
-      opt c f "" =  Just $ c Nothing
-      opt c f i = fmap (c .Just) $ f i
-      parseArray f i =   fmap ArrayTB1 $  allMaybes $ fmap f $ Non.fromList $ unIntercalate (=='\n') i
-      inter f v = (\(i,j)-> fmap IntervalTB1 $  Interval.interval <$> fmap ((,lbnd).Interval.Finite) (f i) <*> fmap ((,ubnd).Interval.Finite) (f $ tail j) )  .  break (==',') . tail . init $ v
+    prim = fmap TB1 <$> readPrim p
+    go t = case t of
+      KOptional :i -> opt LeftTB1 (go i)
+      KSerial :i -> opt LeftTB1 (go i)
+      KArray :i  -> parseArray (go i)
+      KInterval :i -> inter (go i)
+      i -> prim
+    opt c f "" =  Just $ c Nothing
+    opt c f i = fmap (c .Just) $ f i
+    parseArray f i =   fmap ArrayTB1 $  allMaybes $ fmap f $ Non.fromList $ unIntercalate (=='\n') i
+    inter f v = (\(i,j)-> fmap IntervalTB1 $  Interval.interval <$> fmap ((,lbnd).Interval.Finite) (f i) <*> fmap ((,ubnd).Interval.Finite) (f $ tail j) )  .  break (==',') . tail . init $ v
         where lbnd = case head v of
                         '(' -> False
                         '[' -> True

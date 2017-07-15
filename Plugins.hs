@@ -183,7 +183,7 @@ cpfForm = IOPlugin url
               odxR "owner_name" -< t
               returnA -< Nothing
 
-atPrim  p = Primitive (AtomicPrim p )
+atPrim  p = Primitive [] (AtomicPrim p )
 
 queryCPFStatefull = FPlugins "CPF Receita" "owner" $ StatefullPlugin
   [(([],[("captchaViewer",atPrim (PMime "image/jpg") )
@@ -559,7 +559,7 @@ generateEmail = IOPlugin   url
 
 
 renderEmail = FPlugins  "Render Email" "messages" $ StatefullPlugin
-  [(([],[("message_viewer",Primitive $ RecordPrim ("gmail","mime"))])
+  [(([],[("message_viewer",Primitive [] $ RecordPrim ("gmail","mime"))])
     ,encodeMessage )]
 
 

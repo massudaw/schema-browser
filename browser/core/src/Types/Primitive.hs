@@ -75,19 +75,35 @@ import Data.Unique
 makeLenses ''KV
 makeLenses ''TB
 
-isSerial (KSerial _) = True
+
+data KTypePrim
+  = KSerial
+  | KArray
+  | KInterval
+  | KOptional
+  | KDelayed
+  deriving(Eq,Ord,Show,Generic)
+
+data KType a
+  = Primitive { _keyFunc :: [KTypePrim]
+              , _keyAtom :: a}
+  deriving(Eq,Ord,Functor,Generic,Foldable,Show)
+
+makeLenses ''KType
+
+isSerial (Primitive (KSerial: _) _) = True
 isSerial _ = False
 
-isPrim (Primitive i) = True
+isPrim (Primitive [] i) = True
 isPrim i = False
 
-isOptional (KOptional _) = True
+isOptional (Primitive (KOptional:_) _) = True
 isOptional _ = False
 
 
 isArray :: KType i -> Bool
-isArray (KArray _) = True
-isArray (KOptional i) = isArray i
+isArray (Primitive (KOptional:KArray :_) _) = True
+isArray (Primitive (KArray :_) _) = True
 isArray _ = False
 
 newtype TBIndex  a
@@ -99,9 +115,9 @@ type CorePrim = Prim KPrim (Text,Text)
 type CoreKey = FKey (KType CorePrim)
 
 
-showableDef (KOptional i) = Just $ LeftTB1 (showableDef i)
-showableDef (KSerial i) = Just $ LeftTB1 (showableDef i)
-showableDef (KArray i ) = Nothing -- Just (SComposite Vector.empty)
+showableDef (Primitive (KOptional:xs) i) = Just $ LeftTB1 (showableDef (Primitive xs i))
+showableDef (Primitive (KSerial:xs) i) = Just $ LeftTB1 (showableDef (Primitive xs i))
+showableDef (Primitive (KArray:xs) i) = Nothing -- Just (SComposite Vector.empty)
 showableDef i = Nothing
 
 isFunction :: SqlOperationK k -> Bool
@@ -183,6 +199,7 @@ instance Binary Sess.Session where
 instance NFData Sess.Session where
   rnf _ = ()
 
+instance Binary KTypePrim
 instance Binary a => Binary (KType a)
 
 
@@ -236,6 +253,7 @@ data KPrim
    | PSession
    | PColor
    | PDynamic
+   | PAny
    | PTypeable TypeRep
    deriving(Show,Eq,Ord,Generic)
 
@@ -250,25 +268,16 @@ data Prim a b
 
 instance (NFData a , NFData b) => NFData (Prim a b)
 
-
-data KType a
-   = Primitive a
-   | KSerial (KType a)
-   | KArray (KType a)
-   | KInterval (KType a)
-   | KOptional (KType a)
-   | KDelayed (KType a)
-   deriving(Eq,Ord,Functor,Generic,Foldable,Show)
-
+instance NFData KTypePrim
 instance NFData a => NFData (KType a)
 
-showTy f (Primitive i ) = f i
-showTy f (KArray i) = "{" <>  showTy f i <> "}"
-showTy f (KOptional i) = showTy f i <> "*"
-showTy f (KInterval i) = "(" <>  showTy f i <> ")"
-showTy f (KSerial i) = showTy f i <> "?"
-showTy f (KDelayed i) = showTy f i <> "-"
-showTy f i = errorWithStackTrace ("no ty for " <> show   i)
+showTy f (Primitive l i ) = f i ++ showT l
+  where
+  showT  (KArray :i) = "{" <>  showT  i <> "}"
+  showT  (KOptional :i) = showT  i <> "*"
+  showT  (KInterval: i) = "(" <>  showT  i <> ")"
+  showT  (KSerial: i) = showT  i <> "?"
+  showT  (KDelayed :i) = showT  i <> "-"
 
 
 instance Eq (FKey a) where
@@ -699,9 +708,7 @@ tblist' t  = tblistM (tableMeta t)
 
 
 
-isInline (KOptional i ) = isInline i
-isInline (KArray i ) = isInline i
-isInline (Primitive (RecordPrim _ ) ) = True
+isInline (Primitive _ (RecordPrim _ ) ) = True
 isInline _ = False
 
 
@@ -713,13 +720,11 @@ deriving instance (Eq a, Eq k) => Eq (TB Identity k a)
 deriving instance (Ord a, Ord k) => Ord (TB Identity k a)
 
 
-instance Show l => Show1 (Labeled l )where
-  liftShowsPrec l s k  (Labeled la t) = showsPrec k la  .  l  k t
-  liftShowsPrec l s k  (Unlabeled t) = l  k t
 
 instance Show1 Interval where
   liftShowsPrec l s  k (Interval (le,lb) (ue,ub) ) =  showsPrec k lb . (liftShowsPrec l s  k le) . (liftShowsPrec  l s  k ue) . showsPrec k ub
 
+deriveShow1 ''Labeled
 deriveShow1 ''Extended
 deriveShow1 ''NonEmpty
 deriveShow1 ''FTB
@@ -806,25 +811,25 @@ unFin i = Nothing
 
 
 
-kOptional = Le.over keyTypes KOptional
-kArray = Le.over keyTypes KArray
-kDelayed = Le.over keyTypes KDelayed
+kOptional = Le.over (keyTypes .keyFunc ) ( KOptional:)
+kArray = Le.over (keyTypes .keyFunc ) (KArray:)
+kDelayed = Le.over (keyTypes.keyFunc)  (KDelayed:)
 
-unKOptional (Key a  v c m n d (KOptional e)) = (Key a  v c m n d e )
-unKOptional (Key a  v c m n d (KSerial e)) = (Key a  v c m n d e )
-unKOptional (Key a  v c m n d (e@(Primitive _))) = (Key a  v c m n d e )
+unKOptional (Key a  v c m n d (Primitive (KOptional :cs ) e )) = Key a  v c m n d (Primitive cs e)
+unKOptional (Key a  v c m n d (Primitive (KSerial :cs) e)) = Key a  v c m n d (Primitive cs e)
+unKOptional (Key a  v c m n d (Primitive [] e)) = Key a  v c m n d (Primitive [] e)
 unKOptional i = i -- errorWithStackTrace ("unKOptional" <> show i)
 
-unKTDelayed (KDelayed e ) = e
-unKTDelayed (KSerial e ) = e
-unKTDelayed (KOptional e ) = KOptional $ unKTDelayed e
-unKTDelayed (KArray e ) = KArray $ unKTDelayed e
+unKTDelayed (KDelayed : e ) = e
+unKTDelayed (KSerial : e ) = e
+unKTDelayed (KOptional : e ) = KOptional : unKTDelayed e
+unKTDelayed (KArray : e ) = KArray : unKTDelayed e
 unKTDelayed i = i
 
-unKDelayed (Key v a  c m n d e) = (Key v a  c m n d (unKTDelayed e) )
+unKDelayed (Key v a  c m n d e) = (Key v a  c m n d (Le.over keyFunc unKTDelayed e) )
 unKDelayed i = errorWithStackTrace ("unKDelayed" <> show i)
 
-unKArray (Key a v c d m n (KArray e)) = Key a v  c d  m n e
+unKArray (Key a v c d m n (Primitive (KArray :xs ) e)) = Key a v  c d  m n (Primitive xs e)
 unKArray (Key a v c d m n e) = Key a  v c d  m n e
 
 tableKeys (TB1  (_,k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
@@ -879,39 +884,35 @@ getAttr (m, k) = traComp (concat . F.toList) k
 getUn un (m, k) =   concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k) un ) (  _kvvalues (unTB k))))
 
 
-inlineName (KOptional i) = inlineName i
-inlineName (KArray a ) = inlineName a
-inlineName (Primitive (RecordPrim (s, i)) ) = (s,i)
+inlineName (Primitive _ (RecordPrim (s, i)) ) = (s,i)
 
-inlineFullName (KOptional i) = inlineFullName i
-inlineFullName (KArray a ) = inlineFullName a
-inlineFullName (Primitive (RecordPrim (s, i)) ) = s <> "." <> i
+inlineFullName (Primitive _ (RecordPrim (s, i)) ) = s <> "." <> i
 
 attrT :: (a,FTB b) -> Compose Identity (TB Identity) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
 -- mergeFKRef  $ keyType . _relOrigin <$>rel
 mergeFKRel :: [Rel CoreKey] -> KType [(KType CorePrim,KeyUnique)]
-mergeFKRel ls = F.foldr mergeRel (Primitive []) ((\i -> (keyType (_relOrigin i) ,keyFastUnique $ _relOrigin i))<$> ls)
+mergeFKRel ls = Primitive (F.foldr mergeRel [] ((\i -> _keyFunc $ keyType (_relOrigin i)) <$> ls)) ((\i -> (Primitive [] $ _keyAtom $ keyType (_relOrigin i) ,keyFastUnique $ _relOrigin i))  <$> ls)
   where
-    mergeRel (KOptional o,ko)  (KOptional kl) = KOptional $ mergeRel (o,ko) kl
-    mergeRel (KArray o,ko)  (KArray kl) = KArray $ mergeRel (o,ko) kl
-    mergeRel (Primitive o,ko)  (Primitive kl) = Primitive ((Primitive o,ko) : kl)
-    mergeRel (KOptional o,ko) kt  = KOptional $ mergeRel (o,ko) kt
-    mergeRel (o,ko) (KOptional kt)  = KOptional $ mergeRel (o,ko) kt
-    mergeRel (KArray o,ko)  kl = KArray $ mergeRel (o,ko) kl
-    mergeRel (o,ko)  (KArray kl) = KArray $ mergeRel (o,ko) kl
+    mergeRel (KOptional : o)  (KOptional : kl) = KOptional : mergeRel o kl
+    mergeRel (KArray : o)  (KArray : kl) = KArray : mergeRel o kl
+    mergeRel []   []  = []
+    mergeRel (KOptional : o) kt  = KOptional : mergeRel o kt
+    mergeRel o (KOptional :kt)  = KOptional : mergeRel o kt
+    mergeRel (KArray : o)  kl = KArray : mergeRel o kl
+    mergeRel o  (KArray : kl) = KArray : mergeRel o kl
 
 mergeFKRef :: [KType a] -> KType [a]
-mergeFKRef ls = foldl1 mergeOpt (fmap pure <$> ls)
+mergeFKRef ls = Primitive (foldl1 mergeOpt (_keyFunc <$> ls)) (_keyAtom <$> ls)
   where
-    mergeOpt (KOptional i) (KOptional j) = KOptional (mergeOpt i j)
-    mergeOpt (KOptional i) j = KOptional (mergeOpt i j)
-    mergeOpt i (KOptional j) = KOptional (mergeOpt i j)
-    mergeOpt (KArray i) (KArray j ) = KArray ( mergeOpt i j )
-    mergeOpt (KArray i) j = KArray (mergeOpt i j)
-    mergeOpt i (KArray j) = KArray (mergeOpt i j)
-    mergeOpt (Primitive i) (Primitive j) = Primitive (i <>j)
+    mergeOpt (KOptional : i) (KOptional : j) = KOptional : (mergeOpt i j)
+    mergeOpt (KOptional : i) j = KOptional : mergeOpt i j
+    mergeOpt i (KOptional : j) = KOptional : mergeOpt i j
+    mergeOpt (KArray : i) (KArray : j ) = KArray :  mergeOpt i j
+    mergeOpt (KArray : i) j = KArray : mergeOpt i j
+    mergeOpt i (KArray : j) = KArray : mergeOpt i j
+    mergeOpt [] []  = []
 
 srange l m = IntervalTB1 $ Interval.interval (Interval.Finite l,True) (Interval.Finite m ,True)
 

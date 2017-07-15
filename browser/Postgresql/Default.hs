@@ -61,21 +61,22 @@ deftable inf table =
   in catMaybes $ fmap defaultAttrs  nonFKAttrs <> fmap (defaultFKS  inf) fks
 
 
-defaultAttrs  k  = PAttr k <$> (go (keyType k) <|> fmap patch (keyStatic k))
+defaultAttrs  k  = PAttr k <$> (go (_keyFunc $keyType k) <|> fmap patch (keyStatic k))
   where
     go ty  =
-      case ty of
-        KOptional i -> Just (POpt (go i))
+      case  ty of
+        KOptional :i -> Just (POpt (go i))
         i -> Nothing
+
 defaultFKS inf (Path _ (FKJoinTable i j ))
   | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin ) i = flip (PFK i) (POpt Nothing) <$>  (traverse (defaultAttrs .  _relOrigin ) i)
   | otherwise  = Nothing
   where isRel (Rel _  _ _ ) = True
         isRel _ = False
 defaultFKS inf (Path k (FKInlineTable i)) =
-  case keyType (head $ S.toList k) of
-    KOptional _ -> Just (PInline (head $ S.toList k) (POpt Nothing))
-    Primitive _ -> PInline (head $ S.toList k) . PAtom .(tableMeta (lookTable rinf (snd i)) , G.Idex [],) <$> nonEmpty ( deftable rinf (lookTable rinf (snd i)))
+  case _keyFunc $ keyType (head $ S.toList k) of
+    KOptional :_ -> Just (PInline (head $ S.toList k) (POpt Nothing))
+    [] -> PInline (head $ S.toList k) . PAtom .(tableMeta (lookTable rinf (snd i)) , G.Idex [],) <$> nonEmpty ( deftable rinf (lookTable rinf (snd i)))
     _ ->  Nothing
   where rinf = fromMaybe inf $ HM.lookup (fst i) (depschema inf)
 defaultFKS _ (Path k (FunctionField  _ _ _)) = defaultAttrs (head $ S.toList k)

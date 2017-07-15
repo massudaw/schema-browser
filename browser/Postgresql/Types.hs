@@ -44,15 +44,15 @@ conversion i = fromMaybe (id , id) $ preconversion i
 
 
 
-topconversion f v
-  = case v of
-    KArray n ->  f v <|> fmap lifa (topconversion f n )
-    KInterval n ->  f v <|> fmap lifi (topconversion f n )
-    KDelayed n -> f v <|> fmap lifd (topconversion f n )
-    KSerial n -> f v <|> fmap lifd (topconversion f n )
-    KOptional n -> f v <|> fmap lifd (topconversion f n )
-    Primitive i ->  f v
+topconversion f (Primitive v a) = go v
   where
+    go v = case v of
+      KArray :n ->  f (Primitive v a) <|> fmap lifa (go  n )
+      KInterval :n ->  f (Primitive v a) <|> fmap lifi (go n )
+      KDelayed :n -> f (Primitive v a) <|> fmap lifd (go  n )
+      KSerial :n -> f (Primitive v a) <|> fmap lifd (go  n )
+      KOptional :n -> f (Primitive v a) <|> fmap lifd (go  n )
+      [] ->  f (Primitive [] a)
     mapd a (LeftTB1 i) = LeftTB1 (fmap a i)
     mapd _ b =errorWithStackTrace (show (b))
     lifd (a,b) = (mapd a , mapd b)
@@ -74,27 +74,27 @@ postgresLiftPrimConv = denormConversions postgresLiftPrimConv'
 
 postgresLiftPrimConv' :: Map (KType (Prim KPrim (Text,Text)),KType (Prim KPrim (Text,Text)))  ( FTB  Showable -> FTB Showable , FTB Showable -> FTB Showable )
 postgresLiftPrimConv' =
-  M.fromList [((Primitive (AtomicPrim (PGeom 3 $ PBounding )), KInterval (Primitive (AtomicPrim (PGeom 3 $ PPosition ))) )
+  M.fromList [((Primitive [] (AtomicPrim (PGeom 3 $ PBounding )), (Primitive [KInterval] (AtomicPrim (PGeom 3 $ PPosition ))) )
                , ((\(TB1 (SGeo (SBounding (Bounding i)) )) -> IntervalTB1 (fmap   (pos ) i)  )
                  , (\(IntervalTB1 i) -> TB1 $ SGeo $ SBounding $ Bounding $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
 
-             ,((Primitive (AtomicPrim (PGeom 2 $ PBounding )), KInterval (Primitive (AtomicPrim (PGeom 2 $ PPosition ))) )
+             ,((Primitive [] (AtomicPrim (PGeom 2 $ PBounding )), (Primitive [KInterval] (AtomicPrim (PGeom 2 $ PPosition ))) )
                  , ((\(TB1 (SGeo (SBounding (Bounding i)) )) -> IntervalTB1 (fmap   (pos ) i)  )
                    , (\(IntervalTB1 i) -> TB1 $ SGeo $ SBounding $ Bounding $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
 
-             ,((Primitive (AtomicPrim (PGeom 2 $ PLineString )), KArray (Primitive (AtomicPrim (PGeom 2 $ PPosition ))) )
+             ,((Primitive [] (AtomicPrim (PGeom 2 $ PLineString )), (Primitive [KArray] (AtomicPrim (PGeom 2 $ PPosition ))) )
                  , ((\(TB1 (SGeo (SLineString (LineString i)) )) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (pos ) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SLineString $ LineString $ V.fromList  $ F.toList $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
 
-             ,((Primitive (AtomicPrim (PGeom 2 $ (PPolygon ))), KArray (Primitive (AtomicPrim (PGeom 2 $ PLineString ))) )
-                 , ((\(TB1 (SGeo (SPolygon i j ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1. SGeo .SLineString) (i:j)))
-                   , (\(ArrayTB1 i) -> TB1 $ (\(i:j) -> SGeo $ SPolygon i j) $ F.toList $ (fmap (\(TB1 (SGeo (SLineString i))) -> i)) i) ))
+             ,((Primitive [] (AtomicPrim (PGeom 2 $ PPolygon )), (Primitive [KArray] (AtomicPrim (PGeom 2 $ PLineString ))) )
+                 , ((\(TB1 (SGeo (SPolygon i j ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1. SGeo .SLineString) (i:j))).traceShowId
+                   , (\(ArrayTB1 i) -> TB1 $ (\(i:j) -> SGeo $ SPolygon i j) $ F.toList $ (fmap (\(TB1 (SGeo (SLineString i))) -> i)) i).traceShowId ))
 
-             ,((Primitive (AtomicPrim (PGeom 2 $ (MultiGeom (PPolygon )))), KArray (Primitive (AtomicPrim (PGeom 2 $ PPolygon ))) )
+             ,((Primitive [] (AtomicPrim (PGeom 2 $ (MultiGeom (PPolygon )))), (Primitive [KArray] (AtomicPrim (PGeom 2 $ PPolygon ))) )
                  , ((\(TB1 (SGeo (SMultiGeom i  ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1 . SGeo) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SMultiGeom   $  F.toList $  fmap ((\(SGeo i ) -> i). unTB1) i) ))
 
-             ,((Primitive (AtomicPrim (PGeom 3 $ PLineString )), KArray (Primitive (AtomicPrim (PGeom 3 $ PPosition ))) )
+             ,((Primitive [] (AtomicPrim (PGeom 3 $ PLineString )), (Primitive [KArray] (AtomicPrim (PGeom 3 $ PPosition ))) )
                  , ((\(TB1 (SGeo (SLineString (LineString i)) )) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (pos ) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SLineString $ LineString $ V.fromList  $ F.toList $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))]
 
@@ -109,12 +109,12 @@ postgresUnLiftPrim' = M.fromList $ fmap swap $ M.keys postgresLiftPrimConv'
 
 rewriteOp :: M.Map (PrimType ,BinaryOperator , PrimType ) Text
 rewriteOp = M.fromList [
-      ((Primitive (AtomicPrim (PGeom 2 $ PBounding )),  AnyOp (Flip Contains) ,Primitive (AtomicPrim (PGeom 2 $ PLineString ))) , "&&"),
-      ((Primitive (AtomicPrim (PGeom 3 $ PBounding )),  AnyOp (Flip Contains) ,Primitive (AtomicPrim (PGeom 3 $ PLineString ))) , "&&"),
-      ((Primitive (AtomicPrim (PGeom 2 $ PBounding )),  AnyOp (AnyOp (Flip Contains)) ,Primitive (AtomicPrim (PGeom 2 $ PPolygon ))) , "&&"),
-      ((Primitive (AtomicPrim (PGeom 2 $ PBounding )),  AnyOp (AnyOp(AnyOp (Flip Contains))) ,Primitive (AtomicPrim (PGeom 2 $ MultiGeom $ PPolygon ))) , "&&"),
-      ((Primitive (AtomicPrim (PGeom 2 $ PBounding )),  (Flip Contains) ,Primitive (AtomicPrim (PGeom 2 $ PPosition ))) , "&&"),
-      ((Primitive (AtomicPrim (PGeom 3 $ PBounding )),  (Flip Contains) ,Primitive (AtomicPrim (PGeom 3 $ PPosition ))) , "&&")]
+      ((Primitive [] (AtomicPrim (PGeom 2 $ PBounding )),  AnyOp (Flip Contains) ,Primitive[]  (AtomicPrim (PGeom 2 $ PLineString ))) , "&&"),
+      ((Primitive [] (AtomicPrim (PGeom 3 $ PBounding )),  AnyOp (Flip Contains) ,Primitive[]  (AtomicPrim (PGeom 3 $ PLineString ))) , "&&"),
+      ((Primitive [] (AtomicPrim (PGeom 2 $ PBounding )),  AnyOp (AnyOp (Flip Contains)) ,Primitive[]  (AtomicPrim (PGeom 2 $ PPolygon ))) , "&&"),
+      ((Primitive [] (AtomicPrim (PGeom 2 $ PBounding )),  AnyOp (AnyOp(AnyOp (Flip Contains))) ,Primitive []  (AtomicPrim (PGeom 2 $ MultiGeom $ PPolygon ))) , "&&"),
+      ((Primitive [] (AtomicPrim (PGeom 2 $ PBounding )),  (Flip Contains) ,Primitive [] (AtomicPrim (PGeom 2 $ PPosition ))) , "&&"),
+      ((Primitive [] (AtomicPrim (PGeom 3 $ PBounding )),  (Flip Contains) ,Primitive [] (AtomicPrim (PGeom 3 $ PPosition ))) , "&&")]
 
 postgresPrimTyp :: HM.HashMap Text (Word32 -> KPrim)
 postgresPrimTyp = HM.fromList
@@ -211,12 +211,14 @@ ktypeLift :: KType (Prim KPrim (Text,Text)) -> Maybe (KType (Prim KPrim (Text,Te
 ktypeLift i = M.lookup i postgresLiftPrim
 
 
-ktypeRec f v@(KOptional i) =   f v <|> fmap KOptional (ktypeRec f i)
-ktypeRec f v@(KArray i) =   f v <|> fmap KArray (ktypeRec f i)
-ktypeRec f v@(KInterval i) =   f v <|> fmap KInterval (ktypeRec f i)
-ktypeRec f v@(KSerial i) = f v <|> fmap KSerial (ktypeRec f i)
-ktypeRec f v@(KDelayed i) = f v <|> fmap KDelayed (ktypeRec f i)
-ktypeRec f v@(Primitive i ) = f v
+addToken t (Primitive i a) = Primitive (t:i) a
+
+ktypeRec f v@(Primitive (KOptional:xs) i) =   f v <|> fmap (addToken KOptional) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive (KArray :xs) i) =   f v <|> fmap (addToken KArray) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive (KInterval:xs) i) =   f v <|> fmap (addToken KInterval) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive (KSerial :xs) i) = f v <|> fmap (addToken KSerial) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive (KDelayed :xs) i) = f v <|> fmap (addToken KDelayed) (ktypeRec f (Primitive xs i))
+ktypeRec f v@(Primitive []  i ) = f v
 
 
 

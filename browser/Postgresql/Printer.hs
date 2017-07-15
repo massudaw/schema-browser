@@ -69,13 +69,14 @@ dropTable r= "DROP TABLE "<> rawFullName r
 createTable r = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
   where
     commands = (renderAttr <$> S.toList (rawAttrs r) ) <> [renderPK] <> fmap renderFK (S.toList $ rawFKS r)
-    renderAttr k = keyValue k <> " " <> renderTy (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
+    renderAttr k = keyValue k <> " " <> render (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
     renderKeySet pk = T.intercalate "," (fmap keyValue (S.toList pk ))
-    renderTy (KOptional ty) = renderTy ty <> ""
-    renderTy (KSerial ty) = renderTy ty <> ""
-    renderTy (KInterval ty) = renderTy ty <> ""
-    renderTy (KArray ty) = renderTy ty <> "[] "
-    renderTy (Primitive ty ) = ty
+    render (Primitive l ty ) = ty <> renderTy l
+      where
+        renderTy (KOptional :ty) = renderTy ty <> ""
+        renderTy (KSerial :ty) = renderTy ty <> ""
+        renderTy (KInterval :ty) = renderTy ty <> ""
+        renderTy (KArray :ty) = renderTy ty <> "[] "
     -- renderTy (InlineTable s ty ) = s <> "." <> ty
     renderPK = "CONSTRAINT " <> tableName r<> "_PK PRIMARY KEY (" <>  renderKeySet (S.fromList $ rawPK r) <> ")"
     -- renderFK (Path origin (FKJoinTable  ks (_,table)) ) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
@@ -214,6 +215,7 @@ look :: Key -> [Labeled Text ((TB (Labeled Text)) Key ())] ->  Labeled Text ((TB
 look ki i = justError ("missing FK on " <> show (ki,keyAttr . labelValue <$> i )  ) $ (\j-> L.find (\v -> keyAttr (labelValue v) == j) i  ) ki
 
 expandJoin :: Bool -> [Compose (Labeled Text) (TB (Labeled Text)) Key ()] -> Labeled Text (TB (Labeled Text) Key ()) -> Writer [Text] Text
+-- expandJoin i j k | traceShow (i,j,k) False = undefined
 expandJoin left env (Unlabeled  (IT i (LeftTB1 (Just tb) )))
     = expandJoin True env $ Unlabeled (IT i tb)
 expandJoin left env (Labeled l (IT i (LeftTB1 (Just tb) )))
@@ -279,9 +281,9 @@ inner :: Text -> Text -> Text -> Text
 inner b l m = l <> b <> m
 
 intersectionOp :: (Eq b,Show b,Show (KType (Prim KPrim b ))) => KType (Prim KPrim b)-> BinaryOperator -> KType (Prim KPrim b)-> (Text -> Text -> Text)
-intersectionOp i op (KOptional j) = intersectionOp i op j
-intersectionOp (KOptional i) op j = intersectionOp i op j
-intersectionOp (Primitive j) op (KArray (Primitive i) )
+intersectionOp i op (Primitive (KOptional :xs) j) = intersectionOp i op (Primitive xs j)
+intersectionOp (Primitive (KOptional :xs) i) op j = intersectionOp (Primitive xs i)  op j
+intersectionOp (Primitive [] j) op (Primitive (KArray :_) i )
   | isPrimReflexive i j = (\i j  -> i <> renderBinary op <> "(" <> j <> ")" )
   | otherwise = errorWithStackTrace $ "wrong type intersectionOp * - {*} " <> show j <> " /= " <> show i
 intersectionOp i op j = inner (renderBinary op)
@@ -352,24 +354,24 @@ printPred t (AndColl wpred) =
                   w = unzip . fmap (printPred  t) <$> nonEmpty wpred
                 in (pure . (\i -> " (" <> i <> ") ") . T.intercalate " AND " <$>  join (nonEmpty . concat . catMaybes .fst <$> w) , concat . catMaybes . snd <$> w )
 
-renderType (KInterval t) =
+renderType (Primitive (KInterval :xs) t ) =
   case t of
-    Primitive (AtomicPrim (PInt i)) ->  case i of
+    (AtomicPrim (PInt i)) ->  case i of
       4 -> "int4range"
       8 -> "int8range"
-    Primitive (AtomicPrim (PTime (PDate))) -> "daterange"
-    Primitive (AtomicPrim (PTime (PTimestamp i))) -> case i of
+    (AtomicPrim (PTime (PDate))) -> "daterange"
+    (AtomicPrim (PTime (PTimestamp i))) -> case i of
       Just i -> "tsrange"
       Nothing -> "tstzrange"
-    Primitive (AtomicPrim (PGeom ix i)) ->
+    (AtomicPrim (PGeom ix i)) ->
        case ix of
             2 ->  "box2d"
             3 ->  "box3d"
 
-    Primitive (AtomicPrim PDouble) -> "floatrange"
+    (AtomicPrim PDouble) -> "floatrange"
     i -> Nothing
-renderType (Primitive (RecordPrim (s,t)) ) = Just $ s <> "." <> t
-renderType (Primitive (AtomicPrim t) ) =
+renderType (Primitive [] (RecordPrim (s,t)) ) = Just $ s <> "." <> t
+renderType (Primitive [] (AtomicPrim t) ) =
   case t  of
     PBinary -> "bytea"
     PDynamic -> "bytea"
@@ -387,10 +389,10 @@ renderType (Primitive (AtomicPrim t) ) =
         Just i -> "timestamp without time zone"
         Nothing -> "timestamp with time zone"
     i -> Nothing
-renderType (KArray i) = (<>"[]") <$> renderType i
-renderType (KOptional i) =renderType i
-renderType (KSerial i) =renderType i
-renderType (KDelayed i) =renderType i
+renderType (Primitive (KArray :xs)i) = (<>"[]") <$> renderType (Primitive xs i)
+renderType (Primitive (KOptional :xs)i) = renderType (Primitive xs i)
+renderType (Primitive (KSerial :xs)i) = renderType (Primitive xs i)
+renderType (Primitive (KDelayed :xs)i) = renderType (Primitive xs i)
 
 
 instance IsString (Maybe T.Text) where
@@ -492,7 +494,7 @@ utlabel (Right  e) c idx = result e idx
     result (BinaryConstant b i) v =  utlabel (Left (generateConstant i ,b)) c v
     result (Range  b l) (ty,v) = result l (unKInterval ty,(((if b then "upper" else "lower") <> "(" <> T.intercalate "." (c ++ [v])   <> ")" ) ) )
     result i v =  (Just $  opvalue (snd v) i   ,Nothing )
-    unKInterval =alterKeyType (\(KInterval i) -> i)
+    unKInterval =alterKeyType (\(Primitive (KInterval :xs) i) -> Primitive xs i)
 utlabel (Left (value,e)) c idx = result
   where
     notFlip (Flip i) = False
@@ -505,8 +507,8 @@ utlabel (Left (value,e)) c idx = result
                               Just _-> T.intercalate "." (c ++ [ref]) <>  unliftOp (AnyOp i) (keyType (fst idx))<>  " ? " <> inferParamType i ( keyType (fst idx))
                               Nothing  ->recoverop (keyType (fst idx))
         where
-          recoverop (KOptional i) = recoverop i
-          recoverop (KArray (Primitive (AtomicPrim (PGeom ix (PPosition ))))) =  " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <>  "&&" <>  T.intercalate "." (c ++ [ref])
+          recoverop (Primitive (KOptional :xs) i) = recoverop (Primitive xs i)
+          recoverop (Primitive (KArray :xs) (AtomicPrim (PGeom ix (PPosition )))) =  " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <>  "&&" <>  T.intercalate "." (c ++ [ref])
           recoverop _ =  " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <> renderBinary (Flip i) <> " ANY(" <> T.intercalate "." (c ++ [ref])<> ")"
     opvalue ref (Flip (AnyOp i))  = T.intercalate "." (c ++ [ref]) <> renderBinary i <>  " ANY( " <> " ? " <>  ")"
     opvalue ref i =  T.intercalate "." (c ++ [ref]) <>  unliftOp i (keyType (fst idx))<>  " ? " <> inferParamType i ( keyType (fst idx))
@@ -521,13 +523,14 @@ unliftOp  op ty =   recurseOp recinf op  recty
         recty = (fromMaybe ty $ktypeRec ktypeUnLift ty)
 
 recurseOp :: PrimType -> BinaryOperator -> PrimType -> Text
-recurseOp (KOptional i) o k = recurseOp i o k
-recurseOp i o (KOptional k) = recurseOp i o k
+recurseOp (Primitive (KOptional :xs) i) o k = recurseOp (Primitive xs i) o k
+recurseOp i o (Primitive (KOptional :xs) k) = recurseOp i o (Primitive xs k)
 recurseOp i (Flip (Flip o)) k = recurseOp i o k
 -- recurseOp i (Flip o)  k = recurseOp k o i
 recurseOp i o k | isJust rw =  justError "rw" rw
   where rw = M.lookup (i,o,k)  rewriteOp
 recurseOp i o k = renderBinary o
+
 tlabel' (Labeled l (Attr k _)) =  (k,l)
 tlabel' (Labeled l (IT k tb )) =  (k,l <> " :: " <> tableType tb)
 tlabel' (Unlabeled (Attr k _)) = (k,keyValue k)
