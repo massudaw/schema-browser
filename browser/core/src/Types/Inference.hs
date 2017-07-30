@@ -4,12 +4,19 @@
 module Types.Inference
   (inferOperatorType
   ,runInfer
+  ,Scheme(..)
+  ,TVar(..)
+  ,infer
+  ,Type(..)
+  ,typeInt
+  ,extend
   ,inferExpr
   ,emptyTyenv
   ) where
 
 import Control.Monad.State
 import Control.Monad.Except
+import Data.Maybe
 import Data.Monoid
 import Data.List (nub)
 import Data.Foldable (foldr)
@@ -51,19 +58,27 @@ inferOp o k = errorWithStackTrace ("infererror" ++ show (o,k))
 newtype TVar = TV String
   deriving (Show, Eq, Ord)
 
-type Var = Int
+type Var = Integer
 
 data Type
   = TVar TVar
   | TCon (Prim  KPrim (Text,Text))
   | TCon1 [KTypePrim] Type
   | TArr Type Type
+  | TOp Op Type Type
   deriving (Show, Eq, Ord)
+
+data Op
+  = Mult
+  | Div
+  | Equal
+  deriving(Show,Eq,Ord)
 
 infixr `TArr`
 
 data Scheme = Forall [TVar] Type
   deriving (Show, Eq, Ord)
+
 
 typeInt :: Type
 typeInt  = TCon (AtomicPrim (PInt 8))
@@ -77,9 +92,10 @@ typeBool = TCon ( AtomicPrim PBoolean)
 newtype TypeEnv = TypeEnv (Map.Map Var Scheme)
   deriving Monoid
 
-data Unique = Unique { count :: Int }
+data Unique = Unique { count :: Integer }
 
 type Infer = ExceptT TypeError (State Unique)
+
 type Subst = Map.Map TVar Type
 
 data TypeError
@@ -89,10 +105,11 @@ data TypeError
   deriving(Show)
 
 
+
 runInfer :: Infer (Subst, Type) -> Either TypeError Scheme
 runInfer m = case evalState (runExceptT m) initUnique of
   Left err  -> Left err
-  Right res -> Right $ closeOver res
+  Right res  -> Right $ closeOver res
 
 closeOver :: (Map.Map TVar Type, Type) -> Scheme
 closeOver (sub, ty) = normalize sc
@@ -115,13 +132,19 @@ class Substitutable a where
   ftv   :: a -> Set.Set TVar
 
 instance Substitutable Type where
+  apply s (TCon1 l f)    = TCon1 l (apply s f)
   apply _ (TCon a)       = TCon a
   apply s t@(TVar a)     = Map.findWithDefault t a s
   apply s (t1 `TArr` t2) = apply s t1 `TArr` apply s t2
+  apply s (TOp op t1 t2) = TOp op (apply s t1 ) (apply s t2)
 
   ftv TCon{}         = Set.empty
+  ftv (TCon1 l v)    =  ftv v
   ftv (TVar a)       = Set.singleton a
   ftv (t1 `TArr` t2) = ftv t1 `Set.union` ftv t2
+  ftv (TOp op t1 t2) = ftv t1 `Set.union` ftv t2
+
+
 
 instance Substitutable Scheme where
   apply s (Forall as t)   = Forall as $ apply s' t
@@ -140,6 +163,7 @@ instance Substitutable TypeEnv where
 nullSubst :: Subst
 nullSubst = Map.empty
 
+
 compose :: Subst -> Subst -> Subst
 s1 `compose` s2 = Map.map (apply s1) s2 `Map.union` s1
 
@@ -149,14 +173,20 @@ unify (l `TArr` r) (l' `TArr` r')  = do
   s2 <- unify (apply s1 r) (apply s1 r')
   return (s2 `compose` s1)
 
+unify (l  `TArr` r) (TOp op l' r')  = do
+  s1 <- fmap traceShowId $ unify l l'
+  s2 <- unify (apply s1 r) (apply s1 r')
+  return (s2 `compose` s1)
+
+
 
 unify (TVar a) t = bind a t
 unify t (TVar a) = bind a t
-unify (TCon1 [] a) (TCon1 [] b) = unify a b
-unify (TCon1 (KOptional : xs ) a  ) (TCon1 (KOptional : ys)  b) = unify (TCon1 xs a) (TCon1 ys b)
-unify (TCon1 (KArray :xs ) a) (TCon1 (KArray :ys) b) = unify (TCon1 xs a) (TCon1 ys b)
-unify (TCon1 (KInterval:xs) a) (TCon1 (KInterval :ys) b) = unify (TCon1 xs a) (TCon1 ys b)
-unify (TCon a) (TCon b) | a == b = return nullSubst
+unify (TCon1 l  a) (TCon1 j b)
+  | l == j = unify a b
+unify (TCon a) (TCon b)
+  | a == b = return nullSubst
+unify (TCon (AtomicPrim(PDimensional _ _))) (TCon (AtomicPrim (PDimensional _ _ ))) = return nullSubst
 unify t1 t2 = throwError $ UnificationFail t1 t2
 
 bind ::  TVar -> Type -> Infer Subst
@@ -175,7 +205,7 @@ fresh :: Infer Type
 fresh = do
   s <- get
   put s{count = count s + 1}
-  return $ TVar $ TV (letters !! count s)
+  return $ TVar $ TV (letters !! fromIntegral (count s))
 
 instantiate ::  Scheme -> Infer Type
 instantiate (Forall as t) = do
@@ -187,12 +217,6 @@ generalize :: TypeEnv -> Type -> Scheme
 generalize env t  = Forall as t
   where as = Set.toList $ ftv t `Set.difference` ftv env
 
-ops :: Text -> Type
-ops "float8sum" = typeFloat `TArr` typeFloat `TArr` typeFloat
-ops "float8mul" = typeFloat `TArr` typeFloat `TArr` typeFloat
-ops "float8div" = typeFloat `TArr` typeFloat `TArr` typeFloat
-
-
 
 lookupEnv :: TypeEnv -> Var -> Infer (Subst, Type)
 lookupEnv (TypeEnv env) x =
@@ -202,35 +226,39 @@ lookupEnv (TypeEnv env) x =
                   return (nullSubst, t)
 
 
-infer :: TypeEnv -> Expr -> Infer (Subst, Type)
-infer env ex = case ex of
+infer :: OpsEnv -> TypeEnv -> Expr -> Infer (Subst, Type)
+infer ops env ex = case ex of
 
-  Value x -> lookupEnv env x
+  Value x -> lookupEnv env (fromIntegral x)
 
   Function op l -> do
-    inferPrim env l (ops op)
+    inferPrim ops env l  (fromJust (Map.lookup op ops ))
 
 
 
-inferPrim :: TypeEnv -> [Expr] -> Type -> Infer (Subst, Type)
-inferPrim env l t = do
+inferPrim :: OpsEnv -> TypeEnv -> [Expr] -> Scheme -> Infer (Subst, Type)
+inferPrim ops env l t = do
   tv <- fresh
   (s1, tf) <- foldM inferStep (nullSubst, id) l
-  s2 <- unify (apply s1 (tf tv)) t
+  st <- instantiate t
+  s2 <- unify (apply s1 (tf tv)) st
   return (s2 `compose` s1, apply s2 tv)
   where
   inferStep (s, tf) exp = do
-    (s', t) <- infer (apply s env) exp
+    (s', t) <- infer ops (apply s env) exp
     return (s' `compose` s, tf . (TArr t))
 
-inferExpr :: TypeEnv -> Expr -> Either TypeError Scheme
-inferExpr env = runInfer . infer env
+type OpsEnv = Map.Map Text Scheme
 
-inferTop :: TypeEnv -> [(Var, Expr)] -> Either TypeError TypeEnv
-inferTop env [] = Right env
-inferTop env ((name, ex):xs) = case inferExpr env ex of
+
+inferExpr :: OpsEnv ->  TypeEnv -> Expr -> Either TypeError Scheme
+inferExpr ops env = runInfer . infer ops env
+
+inferTop :: OpsEnv -> TypeEnv -> [(Var, Expr)] -> Either TypeError TypeEnv
+inferTop ops env [] = Right env
+inferTop ops env ((name, ex):xs) = case inferExpr ops env ex of
   Left err -> Left err
-  Right ty -> inferTop (extend env (name, ty)) xs
+  Right ty -> inferTop ops (extend env (name, ty)) xs
 
 normalize :: Scheme -> Scheme
 normalize (Forall ts body) = Forall (fmap snd ord) (normtype body)
@@ -239,10 +267,14 @@ normalize (Forall ts body) = Forall (fmap snd ord) (normtype body)
 
     fv (TVar a)   = [a]
     fv (TArr a b) = fv a ++ fv b
+    fv (TOp op  a b) = fv a ++ fv b
     fv (TCon _)   = []
     fv (TCon1 l i )   = fv i
 
     normtype (TArr a b) = TArr (normtype a) (normtype b)
+    normtype (TOp op  a b) = TOp op (normtype a) (normtype b)
+    normtype (TCon1 [] f)   = normtype f
+    normtype (TCon1 a f)   = TCon1 a (normtype f)
     normtype (TCon a)   = TCon a
     normtype (TVar a)   =
       case lookup a ord of

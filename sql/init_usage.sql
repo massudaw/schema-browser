@@ -24,7 +24,7 @@ update
  pg_attribute  set attnotnull = 't' 
   from pg_class 
     where attrelid = oid and array[attname :: text] <@ ARRAY['is_nullable','is_array','is_range','field_modifiers','ordinal_position'] and array[relname ::text] <@ ARRAY['columns','catalog_columns'] and attnotnull = 'f';
-    
+
 update  
  pg_attribute  set attnotnull = 't' 
   from pg_class 

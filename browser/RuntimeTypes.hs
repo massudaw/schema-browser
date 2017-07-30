@@ -437,7 +437,7 @@ liftKeys
 liftKeys inf tname = fmap (liftTable' inf tname)
 
 findRefTableKey inf ta rel =  tname2
-  where   (FKJoinTable  _ (_,tname2) )  = (unRecRel.pathRel) $ justError (show (rel ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel))  (F.toList$ rawFKS  ta)
+  where   (FKJoinTable  _ tname2 )  = (unRecRel.pathRel) $ justError (show (rel ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel))  (F.toList$ rawFKS  ta)
 
 
 findRefTable inf tname rel =  tname2

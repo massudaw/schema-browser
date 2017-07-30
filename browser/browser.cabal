@@ -21,7 +21,6 @@ library
     OAuthClient
 
     Postgresql.Backend
-    Postgresql.Default
     Postgresql.Parser
     Postgresql.Printer
     Postgresql.Types
@@ -30,6 +29,7 @@ library
     Plugins.Schema
 
     Poller
+    Default
     Expression
     RuntimeTypes
     Environment

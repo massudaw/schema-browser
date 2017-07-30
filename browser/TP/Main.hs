@@ -432,6 +432,7 @@ testTablePersist s t w = do
   return ()
 
 
+
 testTable s t w = do
   args <- getArgs
   let db = argsToState args

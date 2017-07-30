@@ -13,6 +13,7 @@ module SchemaQuery
   ,tellPatches
   ,selectFromA
   ,selectFrom
+  ,selectFrom'
   ,updateFrom
   ,patchFrom
   ,insertFrom
@@ -29,6 +30,7 @@ module SchemaQuery
   ,transaction
   ,transactionLog
   ,transactionNoLog
+  ,patchCheckInf
   ,patchCheck
   ,tableCheck
   ,filterfixedS
@@ -48,6 +50,7 @@ import Types.Primitive
 import Types.Index (checkPred)
 import Control.Concurrent
 import Control.Monad.Catch
+import Default
 
 import qualified Data.GiST.BTree as G
 import Control.Monad.RWS
@@ -85,7 +88,6 @@ import qualified Data.Text as T
 --  MultiTransaction Postgresql insertOperation
 --
 
-defsize = 200
 
 lookDBVar mmap table = justError ("cant find mvar: " <> show table ++ show (tableName <$> M.keys mmap)) (M.lookup table mmap )
 
@@ -145,7 +147,7 @@ applyBackend (PatchRow p@(m,pk@(G.Idex pki),i)) = do
    (sidx,v,_,_) <- liftIO $ atomically $ readState inf (WherePredicate (AndColl []),keyFastUnique <$> _kvpk m) (mapTableK keyFastUnique table ) ref
    let oldm = mapKey' (recoverKey inf ) <$>  G.lookup pk v
    old <- maybe (do
-     (_,(i,o)) <- selectFrom (_kvname m) Nothing Nothing [] (WherePredicate (AndColl ((\(k,o) -> PrimColl (keyRef k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk m) pki)))
+     (_,(i,o)) <- selectFrom' table Nothing Nothing [] (WherePredicate (AndColl ((\(k,o) -> PrimColl (keyRef k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk m) pki)))
      return $ L.head $ G.toList o
         ) return oldm
    if isJust (diff old  (apply old p))
@@ -156,36 +158,12 @@ selectFromA t a b c d = do
   inf <- ask
   tableLoader (lookTable inf t) a b c d
 
+selectFrom'  = tableLoader
+
+
 selectFrom t a b c d = do
   inf <- ask
   tableLoader (lookTable inf t) a b c d
-    {-
-syncFrom t page size presort fixed = do
-  let table = t
-  inf <- ask
-  let sref =  case filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope table)) (S.toList $ rawFKS table) of
-            [sref] -> sref
-            i ->  errorWithStackTrace ("no sref " <> show sref)
-      Path kref (FKJoinTable rel stable ) =  sref
-  let mvar = mvarMap inf
-  mmap <- liftIO $ atomically $ readTMVar mvar
-  let dbvar =  justError ("cant find mvar" <> show table  ) (M.lookup (table) mmap )
-  let
-      rinf = fromMaybe inf $ HM.lookup (fst stable) (depschema inf)
-      fromtable = (lookTable rinf $ snd stable)
-      defSort = fmap (,Desc) $  rawPK t
-  (l,i) <- local (const rinf) $ tableLoader fromtable Nothing Nothing []  fixed
-  let
-  ix <- mapM (\i -> do
-      let
-       --   fil = WherePredicate $ AndColl [("=", FKT ( kvlist $ _tb <$> backPathRef sref i) rel (TB1 i) )]
-      (_,t) <- selectFrom "history" Nothing Nothing defSort mempty -- (fil)
-      let latest = fmap (("=",) . uncurry Attr). M.toList . getPKM   $ ( L.maximumBy (comparing getPKM) $ G.toList $ snd t)
-      (joinSyncTable  [(fromtable ,i,sref)] table page size presort mempty . F.toList ) (latest)
-      ) $ F.toList (snd i)
-
-  return (dbvar ,(M.empty ,G.empty))--foldr mergeDBRef  (M.empty,G.empty) $ fmap snd $ ix )
--}
 
 updateFrom  a  b = do
   inf <- ask
@@ -247,24 +225,20 @@ getFKRef inf predtop rtable (evs,me,old) v (Path ref (FunctionField a b c)) = do
 getFKRef inf predtop rtable (evs,me,old) v (Path ref (RecJoin i j )) = do
   return (evs,me,old)
 
-
-
 getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  do
                 let rinf = maybe inf id $ HM.lookup ((fst j))  (depschema inf)
                     table = lookTable rinf $ snd j
-                    predicate predtop = case predtop of
-                                  WherePredicate l ->
-                                    let
-                                      go pred (AndColl l) = AndColl <$> nonEmpty (catMaybes $ go pred <$> l)
-                                      go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
-                                      go pred (PrimColl l) = PrimColl <$> pred l
-                                      test f (Nested p (Many[i] ),j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (_keyFunc $ keyType $ iprodRef $ L.head p))) j) else Nothing
-                                      -- test f (Nested p i ,j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (keyType $ iprodRef $ L.head p))) j) else Nothing
-                                      test v f = Nothing
-                                      removeArray (KOptional :i)  o = removeArray i o
-                                      removeArray (KArray : i)  (AnyOp o) = o
-                                      removeArray i  o = o
-                                   in  fmap WherePredicate (go (test (_relOrigin <$> i)) l)
+                    predicate (WherePredicate l ) =
+                        fmap WherePredicate (go (test (_relOrigin <$> i)) l)
+                      where
+                            go pred (AndColl l) = AndColl <$> nonEmpty (catMaybes $ go pred <$> l)
+                            go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
+                            go pred (PrimColl l) = PrimColl <$> pred l
+                            test f (Nested p (Many[i] ),j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (_keyFunc $ keyType $ iprodRef $ L.head p))) j) else Nothing
+                            test v f = Nothing
+                            removeArray (KOptional :i)  o = removeArray i o
+                            removeArray (KArray : i)  (AnyOp o) = o
+                            removeArray i  o = o
                 let refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap ( (\i->PrimColl (keyRef(_relTarget $ k) ,Left (i,Flip $ _relOperator k)))) . unSOptional' . _tbattr.unTB) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV .snd <$> v
                     predm =(refs <> predicate predtop)
                 (ref,tb2) <- case refs of
@@ -274,7 +248,7 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                     let check ix (i,tb2) = do
                           mergeDBRef (i,tb2) <$> if (isJust (M.lookup pred i)
                                                     && (fst $ justError "" $ M.lookup pred i) >= G.size tb2
-                                                    && (fst $ justError "" $ M.lookup pred i) >= 200)
+                                                    && (fst $ justError "" $ M.lookup pred i) >= 400)
                             then  do
                               (_,out) <- local (const rinf) (tableLoader table  (Just (ix +1) ) Nothing []  pred)
                               if G.size (snd out) == G.size tb2
@@ -346,7 +320,6 @@ tableLoader (Project table  (Union l)) page size presort fixed  = do
         o = foldr mergeDBRef  (M.empty,G.empty) (fmap (createUn (rawPK table).fmap (projunion inf table).G.toList) . snd <$>i )
 
     lf <- liftIO getCurrentTime
-    -- liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
     modify (M.insert (table,fixed) (dbvar dbvarMerge ,o) )
     return $ (dbvar dbvarMerge, o)
   -- (Scoped || Partitioned) Tables
@@ -392,22 +365,8 @@ tableLoader table  page size presort fixed = do
             print ("lefts",tableName table ,lefts result)
           return (rights  result,x,o ,evs)) table page size presort fixed
     lf <- liftIO getCurrentTime
-    -- liftIO $ putStrLn $ "finish loadTable" <> show  (tableName table) <> " - " <> show (diffUTCTime lf  li)
     return o
 
-
-{-
-joinSyncTable reflist  a b c d f e =
-    ask >>= (\inf -> pageTable True ((joinSyncEd $ schemaOps inf) reflist e ) a b c d f )
-
-
-
-joinTable :: [(Table,TBData Key Showable,Path (S.Set Key ) SqlOperation )]-> Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicate
-    -> TransactionM (DBVar,Collection Key Showable)
-joinTable reflist  a b c d e =
-    ask >>= (\ inf -> pageTable False ((joinListEd $ schemaOps inf) reflist) a b c d e )
-
--}
 
 predNull (WherePredicate i) = L.null i
 
@@ -422,32 +381,37 @@ filterfixedS table fixed v
        then snd v
        else queryCheckSecond (fixed ,rawPK table) v
 
-childrenRefsUnique :: InformationSchema -> TableK KeyUnique -> ([SecondaryIndex KeyUnique Showable],TableIndex KeyUnique Showable) -> (SqlOperation , [RowPatch KeyUnique Showable]) -> [RowPatch KeyUnique Showable]
+childrenRefsUnique
+  :: InformationSchema
+  -> TableK KeyUnique
+  -> ([SecondaryIndex KeyUnique Showable],TableIndex KeyUnique Showable)
+  -> (SqlOperation , [RowPatch KeyUnique Showable])
+  -> [RowPatch KeyUnique Showable]
 childrenRefsUnique  inf table (sidxs,base) (FKJoinTable rel j ,evs)  =  concat $ (\i -> search  i  sidx) <$>  evs
+      where
+        rinf = maybe inf id $ HM.lookup ((fst j))  (depschema inf)
+        relf = fmap keyFastUnique <$> rel
+        jtable = lookTable rinf $ snd j
+        sidx = M.lookup (keyFastUnique . _relOrigin  <$> rel) (M.fromList sidxs)
+        search (PatchRow p@(_,G.Idex v,_)) idxM = case idxM of
+          Just idx -> concat $ conv <$> resIndex idx
+          Nothing -> concat $ conv <$> resScan base
+          where
+            predK = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (keyRef o  , Left (fromJust $ unSOptional' $fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
+            predKey =  mapPredicate keyFastUnique predK
+            pred =  mapPredicate (\o -> justError "no pk" $ L.elemIndex o (fmap _relOrigin rel)) predK
+            resIndex idx = G.query pred idx
+            resScan idx = catMaybes $ fmap (\(i,t) -> ((G.getIndex i,t), G.getUnique (fmap (keyFastUnique._relOrigin) rel) i)) . (\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx
+            conv ((pk,ts),G.Idex fks) = (\t -> PatchRow (kvempty,pk ,[PFK relf (zipWith (\i j -> PAttr (_relOrigin i) (patch j)) relf fks ) (recurse2 t p)]) ) <$> ts
+            recurse2 (G.PathAttr _ i ) p = go i
               where
-                rinf = maybe inf id $ HM.lookup ((fst j))  (depschema inf)
-                relf = fmap keyFastUnique <$> rel
-                jtable = lookTable rinf $ snd j
-                sidx = M.lookup (keyFastUnique . _relOrigin  <$> rel) (M.fromList sidxs)
-                search (PatchRow p@(_,G.Idex v,_)) idxM = case idxM of
-                  Just idx -> concat $ conv <$> resIndex idx
-                  Nothing -> concat $ conv <$> resScan base
-                  where
-                    predK = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (keyRef o  , Left (fromJust $ unSOptional' $fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
-                    predKey =  mapPredicate keyFastUnique predK
-                    pred =  mapPredicate (\o -> justError "no pk" $ L.elemIndex o (fmap _relOrigin rel)) predK
-                    resIndex idx = G.query pred idx
-                    resScan idx = catMaybes $ fmap (\(i,t) -> ((G.getIndex i,t), G.getUnique (fmap (keyFastUnique._relOrigin) rel) i)) . (\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx
-                    conv ((pk,ts),G.Idex fks) = (\t -> PatchRow (kvempty,pk ,[PFK relf (zipWith (\i j -> PAttr (_relOrigin i) (patch j)) relf fks ) (recurse2 t p)]) ) <$> ts
-                    recurse2 (G.PathAttr _ i ) p = go i
-                      where
-                        go (G.ManyPath (j Non.:| _) ) = go  j
-                        go (G.NestedPath i j ) = matcher i (go j)
-                        go (G.TipPath j ) = PAtom p
-                        matcher (PIdIdx ix )  = PIdx ix . Just
-                        matcher PIdOpt   = POpt . Just
-                        -- matcher PIdAtom = PAtom
-                    recurse2 i p = errorWithStackTrace (show i)
+                go (G.ManyPath (j Non.:| _) ) = go  j
+                go (G.NestedPath i j ) = matcher i (go j)
+                go (G.TipPath j ) = PAtom p
+                matcher (PIdIdx ix )  = PIdx ix . Just
+                matcher PIdOpt   = POpt . Just
+                -- matcher PIdAtom = PAtom
+            recurse2 i p = errorWithStackTrace (show i)
 
 
 
@@ -459,36 +423,31 @@ pageTable flag method table page size presort fixed = do
         fixedU = mapPredicate keyFastUnique fixed
         defSort = fmap (,Desc) $  rawPK table
         sortList  = if L.null presort then defSort else  presort
-        pagesize = maybe (opsPageSize $ schemaOps inf)id size
+        pagesize = maybe (opsPageSize $ schemaOps inf) id size
         ffixed = filterfixedS  tableU fixedU
     mmap <- liftIO $ atomically $ readTVar mvar
     let
       dbvar :: DBRef KeyUnique Showable
       dbvar =  lookDBVar mmap table
     (fixedmap,fixedChan) <- liftIO $ atomically $readIndex dbvar
-    let pageidx = (fromMaybe 0 page +1) * pagesize
-
-
-
-    res <- do
-       if isNothing (join $ fmap (M.lookup pageidx . snd) $ M.lookup fixedU fixedmap)  -- Ignora quando página já esta carregando
+    let pageidx =  (fromMaybe 0 page +1) * pagesize
+        hasIndex = M.lookup fixedU fixedmap
+        (sq ,_)= justError "no index" hasIndex
+    res <- if (isNothing (join $ fmap (M.lookup pageidx . snd) hasIndex)) || sq < pageidx -- Ignora quando página já esta carregando
          then do
            (sidx,reso ,nchan,iniVar) <- liftIO $ atomically $
              readState inf (fixedU ,rawPK tableU) tableU dbvar
            let
                  freso =  ffixed (sidx,reso)
                  predreq = (fixedU,G.Contains (pageidx - pagesize,pageidx))
-                 hasIndex = M.lookup fixedU fixedmap
                  (sq ,_)= justError "no index" hasIndex
            (nidx,ndata) <-  if
                     flag || ( (isNothing hasIndex|| (sq > G.size freso)) -- Tabela é maior que a tabela carregada
                     && pageidx  > G.size freso ) -- O carregado é menor que a página
                                                                                            -- && isJust diffpred
-
                  then do
                    let pagetoken =  (join $ flip M.lookupLE  mp . (*pagesize) <$> page)
                        (_,mp) = fromMaybe (0,M.empty ) hasIndex
-                   -- liftIO$ putStrLn $ "new page " <> show (tableName table, pageidx, G.size freso,G.size reso,page, pagesize)
                    (resK,nextToken ,s ,evs) <- method table (liftA2 (-) (fmap (*pagesize) page) (fst <$> pagetoken)) (fmap snd pagetoken) size sortList fixed
                    let
                        res = fmap (mapKey' keyFastUnique ) resK
@@ -565,6 +524,14 @@ indexFilterR j (PatchRow i) = indexFilterP j i
 
 
 -- Default Checks
+
+patchCheckInf ::  InformationSchema -> TBIdx Key Showable ->  Either String (TBIdx Key Showable)
+patchCheckInf inf (m,s,i) = if isJust (createIfChange (m,s,i ++ defp ) :: Maybe (TBData Key Showable)) then Right (m,s,i) else Left ("patchCheck: non nullable rows not filled " ++ show ( need `S.difference` available ))
+  where
+      defp = deftable inf (lookTable inf (_kvname m  ))
+      available = S.unions $ S.map _relOrigin . pattrKey <$> i
+      need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i) || isJust (keyStatic i )) )  (kvAttrs m)
+
 
 patchCheck (m,s,i) = if checkAllFilled then Right (m,s,i) else Left ("patchCheck: non nullable rows not filled " ++ show ( need `S.difference` available ))
   where
@@ -686,19 +653,12 @@ takeMany' mvar = maybe (return[]) (go . (:[])) =<< tryReadTChan mvar
       i <- tryReadTChan mvar
       maybe (return (reverse v )) (go . (:v)) i
 
-
-
-
-
 takeMany :: TChan a -> STM [a]
 takeMany mvar = go . (:[]) =<< readTChan mvar
   where
     go v = do
       i <- tryReadTChan mvar
       maybe (return (reverse v )) (go . (:v)) i
-
-
-
 
 createRow (CreateRow i) = i
 createRow (PatchRow i) = create i
@@ -714,7 +674,6 @@ fullInsert' (k1,v1) = do
        tb  = lookTable inf (_kvname k1)
    ret <-  (k1,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
    (_,(_,l)) <- tableLoader  tb Nothing Nothing [] mempty
-   -- liftIO $ print ("fullInsert",tbpredM (_kvpk k1)  ret , G.lookup (tbpredM (_kvpk k1)  ret) l ,ret)
    if  (isNothing $ flip G.lookup l $ tbpredM (_kvpk k1)  ret ) && rawTableType tb == ReadWrite
       then catchAll (do
         i@(Just (TableModification _ _ tb))  <- insertFrom  ret
@@ -750,8 +709,6 @@ transactionLog inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
     ) (M.toList aggr)
   return $ concat $ agg2
 
-
-
 transactionNoLog :: InformationSchema -> TransactionM a -> Dynamic a
 transactionNoLog inf log = do -- withTransaction (conn inf) $ do
   (md,_,mods)  <- runRWST log inf M.empty
@@ -781,36 +738,33 @@ transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
     ) (M.toList aggr)
   return md
 
-fullDiffEditInsert :: TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
+fullDiffEditInsert :: TBData Key Showable -> TBData Key Showable -> TransactionM  (Maybe (TBIdx Key Showable))
 -- fullDiffEditInsert old@((k1,v1) ) (k2,v2)  | traceShow ("fullDiffEditInsert",v1,v2) False = undefined
-fullDiffEditInsert old@((k1,v1) ) (k2,v2) = do
+fullDiffEditInsert old@(k1,v1) (k2,v2) = do
    inf <- ask
-   let proj = _kvvalues . unTB
-   edn <- (k2,) . _tb . KV <$>  Tra.sequence (M.intersectionWith (\i j -> _tb <$>  tbDiffEditInsert (unTB i) (unTB j) ) (proj v1 ) (proj v2))
+   edn <- (k2,) . _tb . KV <$>  Tra.sequence (M.intersectionWith (\i j -> _tb <$>  tbDiffEditInsert (unTB i) (unTB j) ) (unKV v1 ) (unKV v2))
    when (isJust $ diff (tableNonRef' old) (tableNonRef' edn) ) $ do
       mod <- traverse (updateFrom   old ) (diff old edn)
       tell (maybeToList $ join  mod)
-   return edn
+   return (diff old edn)
 
 
-fullDiffEdit :: TBData Key Showable -> TBData Key Showable -> TransactionM  (TBData Key Showable)
+fullDiffEdit :: TBData Key Showable -> TBData Key Showable -> TransactionM  (Maybe (TBIdx Key Showable))
 -- fullDiffEdit old@((k1,v1) ) (k2,v2)  | traceShow ("fullDiffEditInsert",v1,v2) False = undefined
-fullDiffEdit old@((k1,v1) ) (k2,v2) = do
+fullDiffEdit old@(k1,v1) (k2,v2) = do
    inf <- ask
-   let proj = _kvvalues . unTB
-   edn <- (k2,) . _tb . KV <$>  Tra.sequence (M.intersectionWith (\i j -> _tb <$>  tbDiffEdit (unTB i) (unTB j) ) (proj v1 ) (proj v2))
+   edn <- (k2,) . _tb . KV <$>  Tra.sequence (M.intersectionWith (\i j -> _tb <$>  tbDiffEdit (unTB i) (unTB j) ) (unKV v1 ) (unKV v2))
    when (isJust $ diff (tableNonRef' old) (tableNonRef' edn) ) $ do
       mod <- traverse (updateFrom   old ) (diff old edn)
       tell (maybeToList $ join mod)
-   return edn
+   return (diff old edn)
 
 fullDiffInsert :: TBData Key Showable -> TransactionM  (Maybe (TableModification (RowPatch Key Showable)))
 fullDiffInsert (k2,v2) = do
    inf <- ask
-   let proj = _kvvalues . unTB
-   edn <- (k2,) . _tb . KV <$>  Tra.sequence ((\ j -> _tb <$>  tbInsertEdit ( unTB j) ) <$>  (proj v2))
-   mod <- insertFrom  (edn)
-   tell (maybeToList $mod)
+   edn <- (k2,) . _tb . KV <$>  Tra.sequence ((\ j -> _tb <$>  tbInsertEdit ( unTB j) ) <$>  (unKV v2))
+   mod <- insertFrom  edn
+   tell (maybeToList mod)
    return mod
 
 
@@ -832,7 +786,7 @@ tbEdit g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) =
    case (a2,t2) of
         (TB1 o@(om,ol),TB1 t@(m,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) ( kvlist . fmap _tb ) $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb))) rel2 tb ) . TB1  <$> fullDiffEdit o t)
+           local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) ( kvlist . fmap _tb ) $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb))) rel2 tb ) . TB1  . maybe o (apply o)  <$> fullDiffEdit o t)
         (LeftTB1  _ ,LeftTB1 _) ->
            maybe (return f ) (fmap attrOptional) $ liftA2 tbEdit (unLeftItens g) (unLeftItens f)
         (ArrayTB1 o,ArrayTB1 l) ->
@@ -853,7 +807,6 @@ tbInsertEdit f@(FKT pk rel2  t2) =
            maybe (return f ) ((fmap attrOptional) . tbInsertEdit ) (unLeftItens f)
         ArrayTB1 l -> do
           (fmap (attrArray f .Non.fromList)) $  Tra.traverse (\ix ->   tbInsertEdit $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. Non.length l - 1 ]
-
 
 loadFKS table = do
   inf <- ask

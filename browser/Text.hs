@@ -69,7 +69,7 @@ renderAttr (IT k v ) = maybe [] (\i -> [(0,show k ++ " => ")] ++ fmap (first (+1
 renderFTBPatch :: (a -> [(Int,String)]) -> PathFTB a -> [(Int,String)]
 renderFTBPatch f (PAtom i) = f i
 renderFTBPatch f (POpt i) = concat $ maybeToList $ fmap (renderFTBPatch f ) i
-renderFTBPatch f (PIdx ix i)  = fmap (fmap (\e -> show ix ++ "-" ++ e )) $ concat $ F.toList $ fmap (renderFTBPatch f) i
+renderFTBPatch f (PIdx ix i)  = maybe  [(0,show ix ++ "-")] (fmap (fmap (\e -> show ix ++ "-" ++ e )) . renderFTBPatch f) i
 renderFTBPatch f (PatchSet l ) =  concat $ F.toList $ fmap (renderFTBPatch f) l
 renderFTBPatch f (PInter b i)  = [(0,showFin i)]
   where
@@ -168,6 +168,7 @@ readPrim t =
      PBoolean -> readBoolean
      PBinary -> readBin
      PMime i -> readBin
+     i -> error $ show ("no case: " ++ show i)
   where
       readInt = nonEmpty (fmap SNumeric . readMaybe)
       readBoolean = nonEmpty (fmap SBoolean . readMaybe)

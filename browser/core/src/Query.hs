@@ -634,10 +634,10 @@ tbpredFK rel un  pk2 v = tbjust  .  Tra.traverse (Tra.traverse unSOptional') . f
   -> t (TB Identity k a1)
   -> Maybe a-}
 -- searchGist  i j k l m  | traceShow (i, fmap fst l,m) False = undefined
-searchGist relTable m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (  allMaybes$ fmap (\k->  M.lookup k relTable) (_kvpk m) ))  (((\(un,g) -> lookSIdx  un i g) <$> sgist) )
+searchGist relTable m gist sgist i =  join $ foldl (<|>) ((\pkg -> lookGist relTable pkg i gist) <$> (  allMaybes$ fmap (\k->  M.lookup k relTable) (rawPK m) ))  (((\(un,g) -> lookSIdx  un i g) <$> sgist) )
   where
     lookGist rel un pk  v =  join res
-      where res = flip G.lookup v <$> tbpredFK rel un (_kvpk m) pk
+      where res = flip G.lookup v <$> tbpredFK rel un (rawPK m) pk
 
     lookSGist sidsx rel un pk  v =  join res
       where res = fmap fst .flip G.lookup v <$> tbpredFK rel un sidsx pk

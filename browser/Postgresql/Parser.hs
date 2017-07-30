@@ -524,6 +524,7 @@ parsePrim i =  do
                   Right i -> pure $ SLineString i
                   Left e -> fail e
           PBounding -> SBounding <$> tryquoted box3dParser
+        PDimensional i j ->  parsePrim PDouble
         i -> error (show i)
 
 
@@ -575,6 +576,7 @@ parseShowableJSON  p@(Primitive l (AtomicPrim i)) v = parseKTypePrim l v
             Left i -> fail i
     parseKTypePrim [] v = forw . TB1 <$> parsePrimJSON i v
         where (forw,_)  =conversion (Primitive [] (AtomicPrim i))
+    parseKTypePrim a b = error $ "no match " ++ show (p,a,b)
 
 
 pg_double :: Parser Double
@@ -746,13 +748,7 @@ fromRecordJSON foldable = do
   let parser   f = case A.parseEither (\(A.Object i) -> parseRecordJSON foldable $ justError "no top" $ HM.lookup ("p" <> (label $ getCompose (snd foldable))) i )  f of
                   Right i -> i
                   Left i -> errorWithStackTrace (show i)
-
   parser <$> FR.field
-        {-parseRecordJSON $ FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
-                               (Right (Just r ) ) -> return r
-                               Right Nothing -> error (show j )
-                               Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
--}
 
 fromRecord foldable = do
     let parser  = parseRecord foldable
@@ -784,13 +780,4 @@ fromAttr foldable = do
                                (Right (Just r ) ) -> return r
                                Right Nothing -> error (show j )
                                Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
-
-withTestConn s action  = do
-  conn <- liftIO $connectPostgreSQL $ "user=massudaw password=queijo host=localhost port=5433 dbname=" <> fromString (T.unpack s)
-  action conn
-
-withConn s action =  do
-  conn <- liftIO $connectPostgreSQL $ "user=postgres password=queijo host=localhost port=5432 dbname=" <> fromString (T.unpack s)
-  action conn
-
 

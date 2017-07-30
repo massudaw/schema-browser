@@ -201,6 +201,7 @@ addClient clientId metainf inf table row =  do
 layFactsDiv i j =  case i of
                      Vertical -> "col-xs-" <> (show $  12 `div` fromIntegral (max 1 $ j))
                      Horizontal -> "col-xs-12"
+
 data Layout
   = Vertical
   | Horizontal
@@ -209,10 +210,9 @@ data Layout
 chooserTable inf bset cliTid cli = do
   let
     pred2 =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
-  orddb <- ui $ transactionNoLog  (meta inf) $
-      (fst <$> (selectFromTable "ordering"  Nothing Nothing []  pred2))
-  translationDb <- ui $ transactionNoLog  (meta inf) $
-      (fst <$> (selectFromTable "table_name_translation" Nothing Nothing []  pred2 ))
+  (orddb ,translationDb) <- ui $ transactionNoLog  (meta inf) $
+    (,) <$> (fst <$> selectFromTable "ordering"  Nothing Nothing []  pred2)
+        <*> (fst <$> selectFromTable "table_name_translation" Nothing Nothing []  pred2 )
   layout <- buttonDivSet [Vertical,Horizontal] (pure (Just Vertical))
       (\i ->UI.button
           # set UI.class_ "buttonSet label"
@@ -220,7 +220,7 @@ chooserTable inf bset cliTid cli = do
           # set UI.style [("font-size","smaller"),("font-weight","bolder")]
           )
   body <- UI.div
-  el <- ui $ accumDiffCounter (\ix -> evalUI body  . (\((table,sub))-> do
+  el <- ui $ accumDiffCounter (\ix -> evalUI body . (\((table,sub))-> do
     header <- UI.h4
         # set UI.class_ "header"
         # sink0 text (facts $ T.unpack . lookDesc inf table <$> collectionTid translationDb)
@@ -278,6 +278,7 @@ selector inf reftb@(vptmeta,vp,vpt,_,var) table predicate = mdo
      filteringPred i = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  .snd
      filtering res = (\t -> (filter (filteringPred t )) )<$> triding filterInpT  <*> res
      pageSize = 20
+     fetchingScale = opsPageSize (schemaOps inf) `div` pageSize
      divPage s = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
      lengthPage (fixmap) = s
         where (s,_)  = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
@@ -291,7 +292,7 @@ selector inf reftb@(vptmeta,vp,vpt,_,var) table predicate = mdo
     res3 <- ui $ cacheTidings ( tsort <*> (filtering $ fmap G.toList $ vpt) )
     return (offset, res3)
   ui $ onEventDyn (rumors $ triding offset) $ (\i ->  do
-    transactionNoLog inf $ selectFrom (tableName table ) (Just $ divPage (i + pageSize) `div` ((opsPageSize $ schemaOps inf) `div` pageSize)) Nothing  []  predicate)
+    transactionNoLog inf $ selectFrom' table (Just $ divPage (i + pageSize) `div` fetchingScale ) Nothing  []  predicate)
   let
     paging  = (\o -> (L.take pageSize . L.drop o) ) <$> triding offset
   page <- currentValue (facts paging)

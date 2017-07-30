@@ -8,7 +8,7 @@ import Control.Arrow
 import SchemaQuery
 import Environment
 import Postgresql.Types
-import Postgresql.Default
+import Default
 import Step.Common
 import qualified Data.Poset as P
 import Control.Exception (uninterruptibleMask,mask_,throw,catch,throw,SomeException)
@@ -327,7 +327,7 @@ insertMod j  = do
       isCreate _ = False
   case L.find isCreate  =<< overloaded of
     Just (CreateRule l) -> l j
-    Nothing ->   liftIO $ do
+    Nothing ->liftIO $ do
       let
         table = lookTable inf (_kvname (fst  j))
       (t,pk,attrs) <- insertPatch (fromRecord  ) (conn  inf) (patch j) ( table)
@@ -432,7 +432,8 @@ loadDelayed inf t@(k,v) values@(ks,vs)
 connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname   )
 
 
+tSize = 400
 
-postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef <$> G.getBounds i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe 200 g) s o )  (\table j -> do
+postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef <$> G.getBounds i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe tSize g) s o )  (\table j -> do
     inf <- ask
-    liftIO . loadDelayed inf (tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined (\ a -> liftIO . logTableModification a) 200 (\inf -> id {-withTransaction (conn inf)-})  overloadedRules Nothing
+    liftIO . loadDelayed inf (tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined (\ a -> liftIO . logTableModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules Nothing

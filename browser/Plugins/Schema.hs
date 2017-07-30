@@ -39,7 +39,7 @@ import Data.Dynamic (fromDyn,toDyn)
 import DynFlags (defaultFatalMessager, defaultFlushOut, PkgConfRef(PkgConfFile))
 
 import Debug.Trace
-codeOps = SchemaEditor (error "no ops 1") (error "no ops 2") (\i -> return Nothing ) (error "no ops 4") (\ _ _ _ _ _ _ -> return ([],Nothing ,0)) (\ _ _-> return Nothing )  mapKeyType (error "no ops 6")(error "no ops 7") undefined 200 (\inf -> id {-withTransaction (conn inf)-})  (error "no ops") Nothing
+codeOps = SchemaEditor (error "no ops 1") (error "no ops 2") (\i -> return Nothing ) (error "no ops 4") (\ _ _ _ _ _ _ -> return ([],Nothing ,0)) (\ _ _-> return Nothing )  mapKeyType (error "no ops 6")(error "no ops 7") undefined 400 (\inf -> id {-withTransaction (conn inf)-})  (error "no ops") Nothing
 
 gmailPrim :: HM.HashMap Text KPrim
 gmailPrim = HM.fromList

@@ -154,8 +154,8 @@ indexFilterPatch i o= errorWithStackTrace (show (i,o))
 indexFilterPatchU :: (Show k,Ord k) => (Union (Access k) ,Either (FTB Showable,BinaryOperator) UnaryOperator) -> TBIdx k Showable -> Bool
 indexFilterPatchU (Many [n],op) o = indexFilterPatch (n,op) o
 
-unIndexItensP :: (Show (KType k),Show a) =>  Int -> Int -> Maybe (PathAttr (FKey (KType k)) a) -> Maybe (Maybe (PathAttr (FKey (KType k) ) a ))
-unIndexItensP ix o =  fmap (unIndexP (ix+ o) )
+unIndexItensP :: (Show (KType k),Show a) =>  Int -> Int -> PathAttr (FKey (KType k)) a -> Maybe (PathAttr (FKey (KType k) ) a )
+unIndexItensP ix o =  unIndexP (ix+ o)
   where
     unIndexF o (PIdx ix v) = if o == ix  then v else Nothing
     unIndexF o (PatchSet l ) =  PatchSet  <$> Non.nonEmpty ( catMaybes (unIndexF o <$> F.toList l))
@@ -300,10 +300,10 @@ type PatchConstr k a = (Eq (Index a),Patch a , Ord a , Show a,Show k , Ord k)
 
 
 data PathAttr k a
-  = PAttr !k !(PathFTB a)
-  | PFun !k !(Expr ,[Access k]) !(PathFTB a)
-  | PInline !k !(PathFTB  (TBIdx k a))
-  | PFK ![Rel k] ![PathAttr k a]  !(PathFTB (TBIdx k a))
+  = PAttr k (PathFTB a)
+  | PFun k (Expr ,[Access k]) (PathFTB a)
+  | PInline k (PathFTB  (TBIdx k a))
+  | PFK [Rel k] [PathAttr k a]  (PathFTB (TBIdx k a))
   deriving(Eq,Ord,Show,Functor,Generic)
 
 patchfkt (PFK _ _  k) = k
@@ -538,21 +538,10 @@ diffFTB p d  i j = errorWithStackTrace ("diffError" <> show (i,j))
 
 
 
-applyOptM
-  :: (Show a,Ord a) =>
-    (Index a -> Maybe a)
-     -> (a -> Index a  -> Maybe a)-> Maybe (FTB a) -> Maybe (PathFTB (Index a)) ->  (Maybe (FTB a))
-applyOptM  pr a i  o = case i of
-                      Nothing -> case o of
-                            Nothing -> Nothing
-                            Just j -> join $ createFTBM pr <$> o
-                      Just _ -> join $ applyFTBM pr a <$> i <*> o
-
-
 applyFTBM
   :: (Ord a,Show a) =>
   (Index a  -> Maybe a) -> (a -> Index a -> Maybe a) -> FTB a -> PathFTB (Index a) -> Maybe (FTB a)
-applyFTBM pr a (LeftTB1 i ) op@(POpt o) = Just $ LeftTB1 $ applyOptM pr a i o
+applyFTBM pr a (LeftTB1 i ) op@(POpt o) = Just $ LeftTB1 $ join $ (applyFTBM pr a <$> i <*> o) <|> (createFTBM pr <$> o)
 applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                       Nothing -> fmap ArrayTB1 . Non.nonEmpty $ (Non.take ix   i) ++ (Non.drop (ix+1) i)
                       Just p -> if ix <=  Non.length i - 1
@@ -560,7 +549,6 @@ applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                                 else if ix == Non.length i
                                       then (\p -> ArrayTB1 $ i <> pure p) <$> createFTBM pr p
                                       else Nothing -- errorWithStackTrace $ "ix bigger than next elem"
-
 applyFTBM pr a (IntervalTB1 i) (PInter b (p,l))
   =  IntervalTB1 <$>  if b
                     then (flip interval) (upperBound' i)     <$> firstT (mapExtended p) (lowerBound' i)
@@ -580,7 +568,6 @@ createFTBM p (POpt i ) = Just $ LeftTB1 (join $ createFTBM p <$> i)
 createFTBM p (PIdx ix o ) = ArrayTB1 . pure <$>  join (createFTBM p <$> o)
 createFTBM p (PInter b o ) = IntervalTB1 <$> join (checkInterM p (PInter b o)  <$> inter)
   where inter = if b then flip interval  (Interval.PosInf,False) <$> firstT (traverse ( createFTBM p) ) o else  interval  (Interval.NegInf,False) <$>  ( firstT (traverse (createFTBM p)) o)
-
 createFTBM p (PAtom i )  = fmap TB1 $ p i
 createFTBM p (PatchSet l)
   | L.null l= errorWithStackTrace "no patch"
@@ -590,9 +577,9 @@ firstT f (i,j) = (,j) <$> f i
 
 
 instance (Ord a )=> Semigroup (FTB a) where
- LeftTB1 i<> LeftTB1 j = LeftTB1 j
- IntervalTB1 i <> IntervalTB1 j = IntervalTB1 ( i `Interval.intersection` j)
- ArrayTB1 i <> ArrayTB1 j = ArrayTB1 (i <>  j)
- TB1 i <> TB1 j = TB1 j
+  LeftTB1 i<> LeftTB1 j = LeftTB1 j
+  IntervalTB1 i <> IntervalTB1 j = IntervalTB1 ( i `Interval.intersection` j)
+  ArrayTB1 i <> ArrayTB1 j = ArrayTB1 (i <>  j)
+  TB1 i <> TB1 j = TB1 j
 
 

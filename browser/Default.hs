@@ -1,11 +1,9 @@
 {-# LANGUAGE Arrows,FlexibleContexts,TypeFamilies ,NoMonomorphismRestriction,OverloadedStrings ,TupleSections #-}
-module Postgresql.Default  where
+module Default  where
 
 import Types
 import qualified Types.Index as G
-import SchemaQuery
 import Environment
-import Postgresql.Types
 import Step.Common
 import qualified Data.Poset as P
 import Step.Host
@@ -13,13 +11,10 @@ import Data.Functor.Apply
 import System.Environment
 import Safe
 import Control.Monad
-import Postgresql.Printer
-import Postgresql.Parser
 import Utils
 import Text
 import Control.Monad.Reader
 import GHC.Stack
-import Schema
 import RuntimeTypes
 import Query
 import Control.Monad.Writer hiding (pass)
@@ -47,6 +42,10 @@ import qualified Data.Set as S
 
 --- Generate default values  patches
 --
+deftable
+  :: InformationSchemaKV Key Showable
+     -> TableK (FKey (KType (Prim KPrim (T.Text, T.Text))))
+     -> [PathAttr (FKey (KType CorePrim)) Showable]
 deftable inf table =
   let
     fks' = S.toList $ rawFKS table

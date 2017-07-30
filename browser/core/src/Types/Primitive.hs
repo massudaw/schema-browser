@@ -738,8 +738,8 @@ makeLenses ''TableK
 --
 --- Attr Cons/Uncons
 --
-unIndexItens :: (Show (KType k),Show a) =>  Int -> Int -> Maybe (TB Identity  (FKey (KType k))  a ) -> Maybe (Maybe (TB Identity  (FKey (KType k))  a ))
-unIndexItens ix o =  fmap (unIndex (ix+ o) )
+unIndexItens :: (Show (KType k),Show a) =>  Int -> Int -> TB Identity  (FKey (KType k))  a  -> (Maybe (TB Identity  (FKey (KType k))  a ))
+unIndexItens ix o =  unIndex (ix+ o)
 
 unIndex :: (Show (KType k),Show a) => Int -> TB Identity (FKey (KType k)) a -> Maybe (TB Identity (FKey (KType k)) a )
 unIndex o (Attr k (ArrayTB1 v)) = Attr (unKArray k) <$> Non.atMay v o
@@ -931,6 +931,7 @@ class ConstantGen v where
 
 instance ConstantGen (FTB Showable) where
   generate = generateConstant
+
 
 generateConstant CurrentDate = unsafePerformIO $ do
         i<- getCurrentTime
