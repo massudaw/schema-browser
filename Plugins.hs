@@ -148,18 +148,18 @@ cpfCaptcha = IOPlugin url
       atR "ir_reg" (idxK"cpf_number") -<()
       odxR "sess" -< ()
       odxR "captchaViewer" -< ()
-      returnA -< Just $ tblist [attrT  ("sess", TB1 (SSession sess)) ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
+      returnA -< Just $ tblist [_tb $ IT "sess" (LeftTB1 $ sess) ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
 
 cnpjCaptcha = IOPlugin url
   where
     url :: ArrowReader
     url = proc t -> do
       sess <- act (\_ -> lift  initSess ) -< ()
-      cap <- act (\sess -> lift (getCaptchaCnpj sess)) -< sess
+      (sess2,cap) <- act (\sess -> lift (getCaptchaCnpj sess)) -< sess
       atR "ir_reg" (idxK"cnpj_number") -<()
       odxR "sess" -< ()
       odxR "captchaViewer" -< ()
-      returnA -< Just $ tblist [attrT  ("sess", TB1 (SSession sess)) ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
+      returnA -< Just $ tblist $ traceShowId  [_tb $ IT "sess" (LeftTB1 $ sess2) ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
 
 renderDay d =  paddedm day <> paddedm month <> show year
   where (year,month,day) = toGregorian d
@@ -175,8 +175,8 @@ cpfForm = IOPlugin url
       cap <-  idxK "captchaInput" -< ()
       nascimento <-  idxK "nascimento" -< ()
       cnpj <-  atR "ir_reg" (idxK "cpf_number") -< ()
-      sess <- idxK "sess" -< ()
-      html <- act (\(TB1 (SSession sess),TB1 (SText cap),TB1 (STime (SDate nascimento)),TB1 (SText cnpj))  -> lift  (getCpfForm sess (BS.pack $ T.unpack cap) (BS.pack $ renderDay nascimento ) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,nascimento,cnpj)
+      sess <- idxKIn "sess" -< ()
+      html <- act (\(LeftTB1 sess,TB1 (SText cap),TB1 (STime (SDate nascimento)),TB1 (SText cnpj))  -> lift  (getCpfForm sess (BS.pack $ T.unpack cap) (BS.pack $ renderDay nascimento ) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,nascimento,cnpj)
       arrowS -< ()
       returnA -<   join .join $ fmap convertCPF <$> html
     arrowS = proc t -> do
@@ -187,7 +187,7 @@ atPrim  p = Primitive [] (AtomicPrim p )
 
 queryCPFStatefull = FPlugins "CPF Receita" "owner" $ StatefullPlugin
   [(([],[("captchaViewer",atPrim (PMime "image/jpg") )
-    ,("sess",atPrim PSession )])
+    ,("sess",Primitive [KOptional,KArray] (RecordPrim ("incendio" ,"cookie")))])
     ,cpfCaptcha)
   ,(([("nascimento",atPrim (PTime PDate ))
     ,("captchaInput",atPrim PText )],[])
@@ -196,7 +196,7 @@ queryCPFStatefull = FPlugins "CPF Receita" "owner" $ StatefullPlugin
 
 queryCNPJStatefull = FPlugins "CNPJ Receita" "owner" $ StatefullPlugin
   [(([],[("captchaViewer",atPrim (PMime "image/jpg") )
-    ,("sess",atPrim PSession )])
+    ,("sess",Primitive [KOptional,KArray] (RecordPrim ("incendio" ,"cookie")))])
     ,cnpjCaptcha)
   ,(([("captchaInput",atPrim PText )],[])
     ,cnpjForm)]
@@ -212,8 +212,8 @@ cnpjForm = IOPlugin url
     url = proc t -> do
       cap <- idxK "captchaInput" -< ()
       cnpj <- atR "ir_reg" (idxK "cnpj_number") -< ()
-      sess <- idxK "sess" -< ()
-      html :: Maybe [(String,String)] <- act (\(TB1 (SSession sess),TB1 (SText cap),TB1 (SText cnpj))  -> fmap join $ lift  (getCnpjForm sess (BS.pack $ T.unpack cap) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,cnpj)
+      sess <- idxKIn "sess" -< ()
+      html :: Maybe [(String,String)] <- act (\(LeftTB1 sess,TB1 (SText cap),TB1 (SText cnpj))  -> fmap join $ lift  (getCnpjForm sess (BS.pack $ T.unpack cap) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,cnpj)
 
       arrowS -< ()
       returnA -<   join $ fmap unTB1 .  convertHtml . (M.fromListWith (++) . fmap (fmap pure )) <$> html

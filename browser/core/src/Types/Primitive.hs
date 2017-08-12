@@ -892,8 +892,8 @@ attrT :: (a,FTB b) -> Compose Identity (TB Identity) a b
 attrT (i,j) = Compose . Identity $ Attr i j
 
 -- mergeFKRef  $ keyType . _relOrigin <$>rel
-mergeFKRel :: [Rel CoreKey] -> KType [(KType CorePrim,KeyUnique)]
-mergeFKRel ls = Primitive (F.foldr mergeRel [] ((\i -> _keyFunc $ keyType (_relOrigin i)) <$> ls)) ((\i -> (Primitive [] $ _keyAtom $ keyType (_relOrigin i) ,keyFastUnique $ _relOrigin i))  <$> ls)
+mergeFKRel :: [Rel CoreKey] -> KType [(Rel CoreKey,KType CorePrim)]
+mergeFKRel ls = Primitive (F.foldr mergeRel [] ((\i -> _keyFunc $ keyType (_relOrigin i)) <$> ls)) ((\i -> (i, keyType (_relTarget i) ))  <$> ls)
   where
     mergeRel (KOptional : o)  (KOptional : kl) = KOptional : mergeRel o kl
     mergeRel (KArray : o)  (KArray : kl) = KArray : mergeRel o kl

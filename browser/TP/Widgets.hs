@@ -386,7 +386,7 @@ onAltEnter el = onkey el (13,False,True,False)
 onAltE el = onkey el (69,False,True,False)
 onAltU el = onkey el (85,False,True,False)
 onAltI el = onkey el (73,False,True,False)
-onAltD el = onkey el (68,False,True,False)
+onAltO el = onkey el (79,False,True,False)
 onEnter el = onkey el (13,False,False,False)
 onEsc el = onkey el (27,False,False,False)
 
@@ -782,8 +782,17 @@ hoverTip elemD= do
   return $ unionWith const (const True <$> ho) (const False <$> le )
 
 hoverTip2 elemIn elemOut = do
+  (hoev,h) <- ui newEvent
   ho <- UI.dblclick elemIn
-  le <- UI.leave elemOut
-  return $ unionWith const (const True <$> ho) (const False <$> le )
+  onEvent ho (\_ -> liftIO . h $ True )
+  bh <- ui $ stepper False hoev
+  traverseUI (\i ->
+    if i
+    then  do
+      le <- UI.leave elemOut
+      onEvent le (\_ -> liftIO . h $ False)
+      return ()
+    else return ()) (tidings bh hoev)
+  return $ hoev
 
 

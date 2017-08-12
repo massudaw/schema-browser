@@ -196,8 +196,6 @@ addClient clientId metainf inf table row =  do
     (_,_,clientState,_,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl (keyRef (lookKey (meta inf) "clients" "clientid") , Left (num clientId,Equals))]))
     return (clientId, getClient metainf clientId inf <$> clientState)
 
-
-
 layFactsDiv i j =  case i of
                      Vertical -> "col-xs-" <> (show $  12 `div` fromIntegral (max 1 $ j))
                      Horizontal -> "col-xs-12"

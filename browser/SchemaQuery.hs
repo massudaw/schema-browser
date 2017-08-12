@@ -667,12 +667,12 @@ createRow (PatchRow i) = create i
 fullInsert = Tra.traverse fullInsert'
 
 fullInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
--- fullInsert' v | traceShow ("fullInsert",v) False = undefined
 fullInsert' (k1,v1) = do
    inf <- ask
    let proj = _kvvalues . unTB
        tb  = lookTable inf (_kvname k1)
-   ret <-  (k1,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
+       find rel = findRefTable inf (_kvname k1) rel
+   ret <-  (k1,) . _tb . KV <$>  M.traverseWithKey (\k j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
    (_,(_,l)) <- tableLoader  tb Nothing Nothing [] mempty
    if  (isNothing $ flip G.lookup l $ tbpredM (_kvpk k1)  ret ) && rawTableType tb == ReadWrite
       then catchAll (do
@@ -762,7 +762,7 @@ fullDiffEdit old@(k1,v1) (k2,v2) = do
 fullDiffInsert :: TBData Key Showable -> TransactionM  (Maybe (TableModification (RowPatch Key Showable)))
 fullDiffInsert (k2,v2) = do
    inf <- ask
-   edn <- (k2,) . _tb . KV <$>  Tra.sequence ((\ j -> _tb <$>  tbInsertEdit ( unTB j) ) <$>  (unKV v2))
+   edn <- (k2,) . _tb . KV <$>  M.traverseWithKey (\k j -> _tb <$>  tbInsertEdit ( unTB j) ) (unKV v2)
    mod <- insertFrom  edn
    tell (maybeToList mod)
    return mod
@@ -795,14 +795,15 @@ tbEdit g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) =
 
 
 tbInsertEdit :: Column Key Showable -> TransactionM (Column Key Showable)
-tbInsertEdit j@(Attr k1 k2) = return $ (Attr k1 k2)
-tbInsertEdit j@(Fun k1 rel k2) = return $ (Fun k1 rel k2)
+-- tbInsertEdit i | traceShow i False = undefined
+tbInsertEdit (Attr k1 k2) = return $ (Attr k1 k2)
+tbInsertEdit (Fun k1 rel k2) = return $ (Fun k1 rel k2)
 tbInsertEdit (IT k2 t2) = IT k2 <$> noInsert t2
-tbInsertEdit f@(FKT pk rel2  t2) =
+tbInsertEdit f@(FKT pk rel2 t2) =
    case t2 of
         t@(TB1 (m,l)) -> do
            let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) ( kvlist . fmap _tb ) $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb))) rel2 tb ) <$> fullInsert  t)
+           local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) ( kvlist . fmap _tb ) $ backFKRef relTable  (_relOrigin <$> rel2)  (unTB1 tb))) rel2 tb) <$> fullInsert  t)
         LeftTB1 i ->
            maybe (return f ) ((fmap attrOptional) . tbInsertEdit ) (unLeftItens f)
         ArrayTB1 l -> do

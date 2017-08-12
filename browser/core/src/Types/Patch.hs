@@ -92,17 +92,39 @@ filterDiff  = fmap (\(Diff i ) -> i) . filter isDiff
 instance Applicative PathFTB where
   pure = PAtom
   POpt i <*> POpt j = POpt $ liftA2 (<*>) i j
-  PIdx ixi i  <*> PIdx ix j | ixi == ix= PIdx ix $ liftA2 (<*>) i j
+  PIdx ixi i <*> PIdx ix j | ixi == ix= PIdx ix $ liftA2 (<*>) i j
+  PatchSet i <*> PatchSet j = PatchSet $ Non.zipWith (<*>) i j
   PAtom i <*> PAtom j = PAtom $ i  j
+
+  PIdx ix i <*> j = PIdx ix  $ (<*> j) <$>  i
+  i <*> PIdx ix j = PIdx ix  $ (i <*> ) <$>  j
   i <*> POpt j = POpt $ fmap (i <*>)  j
   POpt i <*> j = POpt $ fmap (<*>j)  i
+  PatchSet i <*> j = PatchSet $ fmap (<*> j ) i
+  i <*> PatchSet j = PatchSet $ fmap (i <*>  ) j
+
+data Editor  a
+  = Diff ! a
+  | Delete
+  | Keep
+  deriving(Eq,Ord,Functor,Show)
 
 
-isDiff i@(Diff _) = True
+data PathFTB a
+  = PAtom a
+  | POpt (Maybe (PathFTB a))
+  | PIdx Int (Maybe (PathFTB a))
+  | PInter Bool (Extended (PathFTB a),Bool)
+  | PatchSet (Non.NonEmpty (PathFTB a))
+  deriving(Show,Eq,Ord,Functor,Generic,Foldable,Traversable)
+
+
+
+isDiff (Diff _) = True
 isDiff i = False
-isKeep i@(Keep) = True
+isKeep Keep = True
 isKeep i = False
-isDelete  i@(Delete) = True
+isDelete Delete = True
 isDelete i = False
 
 joinEditor (Diff i ) = i
@@ -125,7 +147,6 @@ patchEditor i
   | otherwise = Diff $ PatchSet (Non.fromList$ concat $ normalize <$> i)
       where normalize (PatchSet i) = concat $ fmap normalize i
             normalize i = [i]
-
 
 indexFilterP (WherePredicate p) v = go p
   where
@@ -207,21 +228,6 @@ editor (Just i) (Just j) = maybe Keep Diff df
 editor Nothing (Just j) = Diff (patch j)
 editor Nothing Nothing = Keep
 
-data Editor  a
-  = Diff ! a
-  | Delete
-  | Keep
-  deriving(Eq,Ord,Functor,Show)
-
-
-data PathFTB   a
-  = PAtom a
-  | POpt (Maybe (PathFTB a))
-  | PIdx Int (Maybe (PathFTB a))
-  | PInter Bool (Extended (PathFTB a),Bool)
-  | PatchSet (Non.NonEmpty (PathFTB a))
-  deriving(Show,Eq,Ord,Functor,Generic,Foldable,Traversable)
-
 upperPatch = PInter False
 lowerPatch = PInter True
 
@@ -248,7 +254,6 @@ instance Patch a => Patch (NonEmpty a) where
 
 class Compact f where
   compact :: [f] -> [f]
-
 
 
 instance (Show (Index a),Ord (Index a),PatchConstr k a) => Compact (PathAttr k a) where
@@ -481,10 +486,10 @@ patchAttr a@(IT k v) = PInline k (patchFTB patchTB1 v)
 patchAttr a@(FKT k rel v) = PFK rel (patchAttr . unTB <$> unkvlist k) (patch v)
 
 createAttrChange :: PatchConstr k a  => PathAttr k (Index a) -> Maybe (TB Identity k a)
-createAttrChange (PAttr  k s  ) = Attr k  <$> createIfChange s
-createAttrChange (PFun k rel s  ) = Fun k  rel <$> createIfChange s
-createAttrChange (PInline k s ) = IT k <$> (createIfChange s)
-createAttrChange (PFK rel k  b ) = flip FKT rel <$> (kvlist . fmap _tb <$> traverse createAttrChange  k) <*> (createIfChange b)
+createAttrChange (PAttr  k s  ) = Attr k <$> createIfChange s
+createAttrChange (PFun k rel s  ) = Fun k rel <$> createIfChange s
+createAttrChange (PInline k s ) = IT k <$> createIfChange s
+createAttrChange (PFK rel k  b ) = flip FKT rel <$> (kvlist . fmap _tb <$> traverse createAttrChange  k) <*> createIfChange b
 
 
 

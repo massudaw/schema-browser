@@ -1,5 +1,5 @@
 {-# LANGUAGE Arrows,OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Client (module Step.Common,notNull,idxR,idxK,act,odx,odxR,nameO,nameI,callI,atAny,idxA,atMA,callO,odxM,idxM,atR,atK,atRA,attrT,tb,indexTable,atMR,allP,anyP) where
+module Step.Client (module Step.Common,notNull,idxR,idxK,idxKIn,act,odx,odxR,nameO,nameI,callI,atAny,idxA,atMA,callO,odxM,idxM,atR,atK,atRA,attrT,tb,indexTable,atMR,allP,anyP) where
 
 import Types
 import Step.Common
@@ -136,6 +136,11 @@ idxM  l =
 tb :: MonadReader  a m => Parser (Kleisli m) [Access Text] t a
 tb = P ([] , []) (Kleisli (const ask ))
 
+idxKIn  l =
+  let ll = splitIndex notNull l
+   in  P (ll,[] ) (Kleisli $ const $  ask >>= (\ v -> return . justError ("no value found "  <> show (ll,v)). fmap snd . join . fmap (indexTableInline ll)$ v) )
+
+
 idxK  l =
   let ll = splitIndex notNull l
    in  P (ll,[] ) (Kleisli $ const $  ask >>= (\ v -> return . justError ("no value found "  <> show (ll,v)). join . fmap (unSOptional' . snd) . join . fmap (indexTableAttr ll)$ v) )
@@ -143,8 +148,6 @@ idxK  l =
 idxA  l =
   let ll = splitIndex notNull l
    in  P (ll,[] ) (Kleisli $ const $  ask >>= (\ v -> return . justError ("no value found "  <> show (ll,v)). indexAttr ll$ v) )
-
-
 
 
 idxR  l =
@@ -170,6 +173,14 @@ indexTB1 l t
 
 
 firstCI f = mapComp (firstTB f)
+
+indexTableInline l t@(m,v)
+  = do
+    let finder = fmap (firstCI keyString ) . M.lookup (S.fromList $ fmap (Inline .iprodRef) l) . M.mapKeys (S.map (fmap keyString))
+    i <- finder (_kvvalues $ unTB v )
+    case runIdentity $ getCompose $ i  of
+      IT k l -> return (k,l)
+      i ->  errorWithStackTrace (show i)
 
 
 indexTableAttr l t@(m,v)
