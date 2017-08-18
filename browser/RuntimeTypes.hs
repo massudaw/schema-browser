@@ -166,7 +166,7 @@ instance Patch (TBRef Key Showable) where
   type Index (TBRef Key Showable) = (Map Key (FTB Showable),TBIdx Key Showable)
   diff (i,j) (k,l)
     | i == k =  (k ,) <$> diff j l
-    | otherwise = traceShow (i,k) $ Just (k,patch l)
+    | otherwise =  Just (k,patch l)
   patch (i,j) = (i,patch j)
   applyIfChange (i,j) (k,l)
     | i == k = (k,) <$> applyIfChange j l

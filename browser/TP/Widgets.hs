@@ -4,7 +4,7 @@ module TP.Widgets where
 
 import GHC.Stack
 import Control.Concurrent.Async
-import Control.Monad.Writer
+import Control.Monad.Writer hiding((<>))
 import Control.Monad
 import Control.Arrow(first)
 import Data.Tuple(swap)
@@ -21,7 +21,7 @@ import qualified Data.Foldable as F
 import Data.Time.LocalTime
 import qualified Data.Set as S
 import Data.Map (Map)
-import Data.Monoid
+import Data.Semigroup
 import Data.Foldable (foldl')
 import Data.Interval (Interval(..))
 import qualified Data.ExtendedReal as ER
@@ -39,6 +39,13 @@ import Utils
 
 instance Widget (TrivialWidget  a) where
     getElement (TrivialWidget t e) = e
+
+instance Semigroup a => Semigroup (Event a) where
+  i <> j = unionWith (<>) i j
+
+instance Semigroup a => Monoid (Event a) where
+  mempty = never
+  mappend i j =  i <>  j
 
 data TrivialWidget a =
     TrivialWidget { triding :: (Tidings a) , trielem ::  Element}

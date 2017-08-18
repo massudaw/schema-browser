@@ -330,9 +330,14 @@ viewerKey inf table tix cli cliTid = do
     tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (fmap snd $ justError "" $ traverse (traverse unSOptional' ) $v)) i ) iv ) <$> vpt <*> tdip
     tdip = join . fmap (join . fmap ( fmap (lookKV . snd ). lookPK .snd). lookT ) <$> cliTid
   itemList <- selector inf reftb table mempty
-  let tds = triding itemList
-  titems <- ui $ calmT tds
-  (cru,pretdi) <- crudUITable inf reftb [] [] (allRec' (tableMap inf) table) titems
+  v <- ui $ currentValue (facts tdi)
+  tds <-  mdo
+    let
+      updatedValue = (\i j -> const . join $ flip G.lookup j  . G.getIndex  <$> i )<$> facts tds <@> rumors vpt
+      selection = const <$> rumors (triding itemList)
+    tds <- ui $ accumT  v (unionWith (.) selection  updatedValue)
+    return tds
+  (cru,pretdi) <- crudUITable inf reftb [] [] (allRec' (tableMap inf) table) tds
   let pktds = fmap getPKM <$> tds
   dbmeta  <- liftIO$ prerefTable (meta inf)(lookTable (meta inf ) "clients")
   w  <- askWindow
@@ -349,7 +354,7 @@ viewerKey inf table tix cli cliTid = do
         putPatch (patchVar dbmeta) [PatchRow d]
             ))) (Non.nonEmpty . M.toList <$> v))
 
-  title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine i  )  <$> facts titems) # set UI.class_ "col-xs-8"
+  title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine i  )  <$> facts tds) # set UI.class_ "col-xs-8"
   insertDiv <- UI.div # set children [title] # set UI.class_ "container-fluid"
   insertDivBody <- UI.div # set children [insertDiv,cru]
   UI.div # set children ([getElement itemList,insertDivBody ] )

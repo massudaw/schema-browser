@@ -38,6 +38,7 @@ module SchemaQuery
   ,readState
   ,readIndex
   ,projunion
+  ,recoverEditDefault
   )where
 import Graphics.UI.Threepenny.Core (mapEventDyn)
 
@@ -667,12 +668,13 @@ createRow (PatchRow i) = create i
 fullInsert = Tra.traverse fullInsert'
 
 fullInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
+fullInsert' i | traceShow  ("fullinsert",i) False = undefined
 fullInsert' (k1,v1) = do
    inf <- ask
    let proj = _kvvalues . unTB
        tb  = lookTable inf (_kvname k1)
        find rel = findRefTable inf (_kvname k1) rel
-   ret <-  (k1,) . _tb . KV <$>  M.traverseWithKey (\k j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
+   ret <-  (k1,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
    (_,(_,l)) <- tableLoader  tb Nothing Nothing [] mempty
    if  (isNothing $ flip G.lookup l $ tbpredM (_kvpk k1)  ret ) && rawTableType tb == ReadWrite
       then catchAll (do
@@ -695,7 +697,7 @@ noInsert = Tra.traverse noInsert'
 noInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
 noInsert' (k1,v1)   = do
    let proj = _kvvalues . unTB
-   (k1,) . _tb . KV <$>  Tra.sequence (fmap (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1))
+   (k1,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
 
 transactionLog :: InformationSchema -> TransactionM a -> Dynamic [TableModification (RowPatch Key Showable)]
 transactionLog inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
@@ -762,7 +764,7 @@ fullDiffEdit old@(k1,v1) (k2,v2) = do
 fullDiffInsert :: TBData Key Showable -> TransactionM  (Maybe (TableModification (RowPatch Key Showable)))
 fullDiffInsert (k2,v2) = do
    inf <- ask
-   edn <- (k2,) . _tb . KV <$>  M.traverseWithKey (\k j -> _tb <$>  tbInsertEdit ( unTB j) ) (unKV v2)
+   edn <- (k2,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit ( unTB j) ) (unKV v2)
    mod <- insertFrom  edn
    tell (maybeToList mod)
    return mod
@@ -782,32 +784,32 @@ tbEdit :: Column Key Showable -> Column Key Showable -> TransactionM (Column Key
 tbEdit (Fun a1 _ a2) (Fun k1 rel k2)= return $ (Fun k1 rel k2)
 tbEdit (Attr a1 a2) (Attr k1 k2)= return $ (Attr k1 k2)
 tbEdit (IT a1 a2) (IT k2 t2) = IT k2 <$> noInsert t2
-tbEdit g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) =
-   case (a2,t2) of
-        (TB1 o@(om,ol),TB1 t@(m,l)) -> do
-           let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) ( kvlist . fmap _tb ) $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb))) rel2 tb ) . TB1  . maybe o (apply o)  <$> fullDiffEdit o t)
-        (LeftTB1  _ ,LeftTB1 _) ->
-           maybe (return f ) (fmap attrOptional) $ liftA2 tbEdit (unLeftItens g) (unLeftItens f)
-        (ArrayTB1 o,ArrayTB1 l) ->
-           (fmap (attrArray f .Non.fromList)) $  Tra.traverse (\ix ->   tbEdit ( justError ("cant find " <> show (ix,f)) $ unIndex ix g )( justError ("cant find " <> show (ix,f)) $ unIndex ix f ) )  [0.. Non.length l - 1 ]
-        i -> errorWithStackTrace (show i)
+tbEdit g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) = go a2 t2
+  where go a2 t2 = case (a2,t2) of
+          (TB1 o@(om,ol),TB1 t@(m,l)) -> do
+             let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
+             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) ( kvlist . fmap _tb ) $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb))) rel2 tb ) . TB1  . maybe o (apply o)  <$> fullDiffEdit o t)
+          (LeftTB1  i ,LeftTB1 j) ->
+            maybe (return f ) (fmap attrOptional) $ liftA2 go i j
+          (ArrayTB1 o,ArrayTB1 l) ->
+            attrArray f  <$> Tra.sequence (Non.zipWith go o l)
+          i -> errorWithStackTrace (show i)
 
 
 tbInsertEdit :: Column Key Showable -> TransactionM (Column Key Showable)
--- tbInsertEdit i | traceShow i False = undefined
+-- tbInsertEdit i | traceShow ("insertedit",i) False = undefined
 tbInsertEdit (Attr k1 k2) = return $ (Attr k1 k2)
 tbInsertEdit (Fun k1 rel k2) = return $ (Fun k1 rel k2)
 tbInsertEdit (IT k2 t2) = IT k2 <$> noInsert t2
-tbInsertEdit f@(FKT pk rel2 t2) =
-   case t2 of
-        t@(TB1 (m,l)) -> do
-           let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-           local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) ( kvlist . fmap _tb ) $ backFKRef relTable  (_relOrigin <$> rel2)  (unTB1 tb))) rel2 tb) <$> fullInsert  t)
-        LeftTB1 i ->
-           maybe (return f ) ((fmap attrOptional) . tbInsertEdit ) (unLeftItens f)
-        ArrayTB1 l -> do
-          (fmap (attrArray f .Non.fromList)) $  Tra.traverse (\ix ->   tbInsertEdit $ justError ("cant find " <> show (ix,f)) $ unIndex ix f  )  [0.. Non.length l - 1 ]
+tbInsertEdit f@(FKT pk rel2 t2) = go rel2 t2
+  where go rel t2 = case t2 of
+          t@(TB1 (m,l)) -> fmap traceShowId $ do
+             let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
+             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) ( kvlist . fmap _tb ) $ backFKRef relTable  (keyAttr .unTB <$> unkvlist pk) (unTB1 tb))) rel tb) <$> fullInsert  t)
+          LeftTB1 i ->
+            maybe (return f ) (fmap attrOptional . go (Le.over relOri unKOptional <$> rel) ) i
+          ArrayTB1 l -> do
+            attrArray f <$>  Tra.traverse (go (Le.over relOri unKArray <$> rel) ) l
 
 loadFKS table = do
   inf <- ask
@@ -857,5 +859,14 @@ lookAttr' inf k (i,m) = unTB $ err $  M.lookup (S.singleton ((lookKey inf (_kvna
     where
       ta = M.mapKeys (S.map _relOrigin) (unKV m)
       err= justError ("no attr " <> show k <> " for table " <> show (_kvname i,M.keys ta))
+
+
+recoverEditDefault inf table (Just i) Keep = Just i
+recoverEditDefault inf table (Just i) Delete = Nothing
+recoverEditDefault inf table (Just i)(Diff j ) =  applyIfChange i j
+recoverEditDefault inf table Nothing (Diff j ) = createIfChange  j
+recoverEditDefault inf table Nothing Keep = Nothing
+recoverEditDefault inf table Nothing Delete = Nothing
+recoverEditDefault inf table _ _ = errorWithStackTrace "no edit"
 
 

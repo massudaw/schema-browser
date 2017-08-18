@@ -34,6 +34,7 @@ import NonEmpty (NonEmpty(..))
 import Data.Bifunctor
 import Text
 import SortList
+import Default
 import Data.Functor.Identity
 import Control.Monad.Writer hiding((<>))
 import TP.MapSelector
@@ -640,7 +641,7 @@ processPanelTable
    -> UI (Element, Event (RowPatch CoreKey Showable) )
 processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   let
-      inscrud = recoverEditChange  <$> oldItemsi <*> inscrudp
+      inscrud = recoverEditChange <$> oldItemsi <*> inscrudp
       containsGistNotEqual old ref map = if isJust refM then (\i -> if L.null i  then True else [G.getIndex old] == L.nub (fmap G.getIndex (F.toList i)))$  (lookGist ix ref map) else False
         where ix = (_kvpk (tableMeta table))
               refM = traverse unSOptional' (getPKM ref)
@@ -786,16 +787,19 @@ dynHandlerPatch hand val ix (l,old)= do
     return $ (l <> [TrivialWidget (tidings bend ev) el], ( tidings bdifout evdiff))
 
 
--- reduceDiffList o i | traceShow (o,i) False = undefined
 reduceDiffList o i plug
    | F.all isKeep (snd <$> i) = Keep
-   | otherwise = patchEditor $  removeOverlap ++ reverse (rights diffs)
+   | otherwise = patchEditor $ removeOverlap ++ notOverlap ++  reverse (rights diffs)
    where diffs = catMaybes $ (\(ix,v) -> treatA (o+ix)v) <$> i
          treatA a (Diff v) = Just $ Left $ PIdx a  (Just v)
          treatA a Delete =  Just $ Right $ PIdx a Nothing
          treatA _ Keep = Nothing
-         removeOverlap = catMaybes $ fmap (\(PIdx ix a ) -> if (not $ ( ix - o) `elem`  (fst <$> i)) then  Just (PIdx ix a)  else (unDiff ix $ snd $  i !! (ix -  o)) ) (F.concat $ fmap unPatchSet $ catMaybes plug)
-         unPatchSet (PatchSet l ) = F.toList l
+         plugl = F.concat $ fmap unPatchSet $ catMaybes plug
+           where
+             unPatchSet (PatchSet l ) = F.toList l
+             unPatchSet i = [i]
+         removeOverlap = catMaybes $ fmap (\(PIdx ix a ) -> if (not $ ( ix - o) `elem`  (fst <$> i)) then  Just (PIdx ix a)  else (unDiff ix $ snd $  i !! (ix -  o)) ) plugl
+         notOverlap = filter (\(PIdx i o ) ->  not $ L.elem i ((\(PIdx i a ) -> i) <$> plugl )) (lefts diffs)
          unDiff o (Diff v) = Just $  PIdx o (Just v)
          unDiff o i = Nothing
 
@@ -811,7 +815,7 @@ unPOpt (POpt i ) = i
 
 type AtomicUI k b = PluginRef (FTB b) ->  Tidings (Maybe (FTB b)) ->  k -> UI (TrivialWidget (Editor (PathFTB (Index b))))
 
-buildUIDiff:: (Show k ,Ord b ,Patch b, Show b) => AtomicUI k b -> KType k -> PluginRef (FTB b) -> Tidings (Maybe (FTB b)) -> UI (TrivialWidget (Editor (PathFTB (Index b) )))
+buildUIDiff:: (Show (Index b),Show k ,Ord b ,Patch b, Show b) => AtomicUI k b -> KType k -> PluginRef (FTB b) -> Tidings (Maybe (FTB b)) -> UI (TrivialWidget (Editor (PathFTB (Index b) )))
 buildUIDiff f (Primitive l prim)  plug tdi = go l plug tdi
   where
     go [] plug tdi = f plug tdi prim
@@ -1363,7 +1367,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
                   case metamap of
                     "B" -> do
 
-                      let predicatefk o = WherePredicate $AndColl $ catMaybes $ fmap (\(k, v) -> PrimColl . (keyRef k, ) . Left . (,Flip $ _relOperator $ justError "no rel" $ L.find (\i ->_relOrigin i == k) rel) <$> unSOptional' v) $ M.toList o
+                      let predicatefk o = WherePredicate $AndColl $ catMaybes $ fmap (\(k, v) ->  join $ (\ o ->  fmap (\ rel -> PrimColl (keyRef (_relTarget rel),   Left  (o,Flip $ _relOperator rel) )) $  L.find ((==k) . _relOrigin ) rel) <$> unSOptional' v) $ M.toList o
                           predicate = fmap predicatefk <$> iold2
                       (lbox , l) <- selectListUI inf targetTable predicate reftb constr tdi
                       onEvent (rumors lbox) (liftIO . helbox)
@@ -1492,13 +1496,14 @@ fkUITableGen   ::
   -> Column CoreKey ()
   -> UI (TrivialWidget(Editor (PathAttr CoreKey Showable )))
 fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel _)
-  = fmap (fmap (recoverPFK rel)) <$> buildUIDiff (\plmods old ->  fkUITablePrim inf (rel,lookTable inf target,fmap (keyAttr .unTB ) $ unkvlist ifk) constr nonInjRefs plmods old ) (fmap (zip rel) $ mergeFKRef  $ keyType . _relOrigin <$>rel) (fmap (fmap (fmap liftPFK)) <$> plmods) (fmap liftFK <$>oldItems)
+  = fmap (fmap (recoverPFK  setattr rel)) <$> buildUIDiff (fkUITablePrim inf (rel,lookTable inf target,setattr) constr nonInjRefs) (fmap (zip rel) $ mergeFKRef  $ keyType . _relOrigin <$>rel) (fmap (fmap (fmap liftPFK)) <$> plmods) (fmap liftFK <$>oldItems)
     where (targetSchema,target) = findRefTableKey preinf table rel
           inf = fromMaybe preinf $ HM.lookup targetSchema (depschema preinf)
+          setattr = keyAttr . unTB <$> unkvlist ifk
 
-recoverPFK :: [Rel Key] -> (PathFTB (Map Key (FTB Showable),TBIdx Key Showable)) -> PathAttr Key Showable
-recoverPFK rel i =
-  PFK rel (fmap (\(i,j) -> PAttr i (join $ fmap patch j)) $  zip (L.sort $ _relOrigin <$> rel) . getZipList . sequenceA $ fmap ( ZipList . F.toList. fst) i)   (fmap snd i)
+recoverPFK :: [Key] -> [Rel Key]-> PathFTB (Map Key (FTB Showable),TBIdx Key Showable) -> PathAttr Key Showable
+recoverPFK ori rel i =
+  PFK rel ((catMaybes $ defaultAttrs <$> ori ) ++  (fmap (\(i,j) -> PAttr i (join $ fmap patch j)) $  zip  (L.sort ori ). getZipList . sequenceA $ fmap ( ZipList . F.toList. fst) i))   (fmap snd i)
 
 
 reduceTable l

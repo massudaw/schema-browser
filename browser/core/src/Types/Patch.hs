@@ -414,7 +414,7 @@ diffTB1 = diffFTB patchTB1  difftable
 
 
 
-travPath f p (PatchSet i) = foldl f p i
+travPath f p (PatchSet i) = F.foldl' f p i
 travPath f p i = f p i
 
 diffTable l l2 =   catMaybes $ F.toList $ Map.intersectionWith (\i j -> diffTB1 i j) (mkMap l) (mkMap l2)
@@ -448,7 +448,7 @@ applyRecordChange t@(m, v) (_,_, k) =
   {-| _kvname m == _kvname m2 && idx == fmap patch (G.getIndex t) =-} (m ,) <$> traComp ref v
     -- | otherwise = createIfChange (m2,idx,k)
   where
-    ref (KV v) =  KV <$>  fmap add (Map.traverseWithKey (\key -> traComp (\vi -> maybe (Just vi) (foldl  (\i j ->  edit j =<< i ) (Just vi)) (nonEmpty $ filter ((key ==).pattrKey )k) )) v)
+    ref (KV v) =  KV <$>  fmap add (Map.traverseWithKey (\key -> traComp (\vi -> maybe (Just vi) (F.foldl'  (\i j ->  edit j =<< i ) (Just vi)) (nonEmpty $ filter ((key ==).pattrKey )k) )) v)
     add v = foldr (\p v -> Map.insert (pattrKey p) (_tb $ create p) v) v $  filter (isNothing . flip Map.lookup  v.pattrKey) k
     edit  k v = applyAttrChange  v k
 
@@ -464,10 +464,10 @@ patchSet i
 applyAttrChange :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a) -> Maybe (TB Identity k a)
 applyAttrChange (Attr k i) (PAttr _ p)  = Attr k <$> (applyIfChange i p)
 applyAttrChange (Fun k rel i) (PFun _ _ p)  = Fun k rel <$> (applyIfChange i p)
-applyAttrChange (FKT k rel  i) (PFK _ p  b )  =  (\i -> FKT i rel  ) <$> ref <*> (applyIfChange i b)
+applyAttrChange (FKT k rel  i) (PFK _ p  b )  =  (\i -> FKT i rel  ) <$> ref <*> applyIfChange i b
   where
-    ref =  fmap KV$  Map.traverseWithKey (\key vi -> foldl  (\i j ->  edit key j =<< i ) (Just vi) p ) (_kvvalues k)
-    edit  key  k@(PAttr  s _) v = if (_relOrigin $ justError "no key" $ safeHead $ F.toList $ key) == s then  traComp (flip applyAttrChange k ) v else Just v
+    ref =  fmap KV$  Map.traverseWithKey (\key vi ->  F.foldl'  (\i j ->  edit j =<< i ) (Just vi) (filter ((==key) . pattrKey ) p) ) (_kvvalues k)
+    edit k v = traComp (flip applyAttrChange k ) v
 
 applyAttrChange (IT k i) (PInline _   p)  = IT k <$> (applyIfChange i p)
 
@@ -546,7 +546,7 @@ diffFTB p d  i j = errorWithStackTrace ("diffError" <> show (i,j))
 applyFTBM
   :: (Ord a,Show a) =>
   (Index a  -> Maybe a) -> (a -> Index a -> Maybe a) -> FTB a -> PathFTB (Index a) -> Maybe (FTB a)
-applyFTBM pr a (LeftTB1 i ) op@(POpt o) = Just $ LeftTB1 $ join $ (applyFTBM pr a <$> i <*> o) <|> (createFTBM pr <$> o)
+applyFTBM pr a (LeftTB1 i ) op@(POpt o) = Just $ LeftTB1 $ (join  (applyFTBM pr a <$> i <*> o)) <|> join (createFTBM pr <$> o)
 applyFTBM pr a (ArrayTB1 i ) (PIdx ix o) = case o of
                       Nothing -> fmap ArrayTB1 . Non.nonEmpty $ (Non.take ix   i) ++ (Non.drop (ix+1) i)
                       Just p -> if ix <=  Non.length i - 1
@@ -562,7 +562,7 @@ applyFTBM pr a (IntervalTB1 i) (PInter b (p,l))
     mapExtended p (Interval.Finite i) = traverse (applyFTBM pr a i)  p
     mapExtended p _ = traverse (createFTBM pr ) p
 applyFTBM pr a (TB1 i) (PAtom p)  =  fmap TB1 $ a i p
-applyFTBM pr a  b (PatchSet l ) = foldl (\i l -> (\i -> applyFTBM pr a i l ) =<< i ) (Just b) l
+applyFTBM pr a  b (PatchSet l ) = F.foldl' (\i l -> (\i -> applyFTBM pr a i l ) =<< i ) (Just b) l
 applyFTBM pr _ a b = error ("applyFTB: " <> show (a,fmap pr b) )
 
 checkInterM :: (Show a,Ord a) => (Index a  -> Maybe  a) -> PathFTB (Index a) -> Interval.Interval (FTB a)-> Maybe (Interval.Interval (FTB a))
@@ -574,9 +574,7 @@ createFTBM p (PIdx ix o ) = ArrayTB1 . pure <$>  join (createFTBM p <$> o)
 createFTBM p (PInter b o ) = IntervalTB1 <$> join (checkInterM p (PInter b o)  <$> inter)
   where inter = if b then flip interval  (Interval.PosInf,False) <$> firstT (traverse ( createFTBM p) ) o else  interval  (Interval.NegInf,False) <$>  ( firstT (traverse (createFTBM p)) o)
 createFTBM p (PAtom i )  = fmap TB1 $ p i
-createFTBM p (PatchSet l)
-  | L.null l= errorWithStackTrace "no patch"
-  | otherwise = foldl1 (<>) (createFTBM p <$> l)
+createFTBM p (PatchSet l) = F.foldl1 (<>) (createFTBM p <$> l)
 
 firstT f (i,j) = (,j) <$> f i
 
