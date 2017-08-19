@@ -188,16 +188,16 @@ selectListUI
   ::
      InformationSchema
      -> TableK CoreKey
+     -> Element
      -> Tidings (Maybe WherePredicate)
      -> RefTables
      -> SelTBConstraint
      -> Tidings (Maybe (TBData Key Showable))
      -> UI (Tidings (Maybe (Maybe (TBData Key Showable))), [Element])
-selectListUI inf table predicate (vpt,_,gist,sgist,_) constr tdi = do
+selectListUI inf table itemListEl predicate (vpt,_,gist,sgist,_) constr tdi = do
       filterInp <- UI.input # set UI.class_ "col-xs-3"
       filterInpE <- UI.valueChange filterInp
       filterInpBh <- ui $ stepper "" filterInpE
-      itemListEl <- UI.select #  set UI.class_ "col-xs-5 fixed-label" # set UI.size "21" # set UI.style ([("position","absolute"),("z-index","999"),("top","22px")] )
       wheel <- fmap negate <$> UI.mousewheel itemListEl
       let
         filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.pack . showFKText
@@ -238,7 +238,8 @@ selector
      -> Tidings (Maybe (TBData Key Showable))
      -> UI (TrivialWidget (Maybe (TBData Key Showable)))
 selector inf table reftb@(vptmeta,vp,vpt,_,var) predicate tdi = mdo
-  -- Final Query ListBox
+  {-
+   -- Final Query ListBox
   filterInp <- UI.input # set UI.class_ "col-xs-3"
   filterInpT <- element filterInp # sourceT "keydown" UI.valueFFI ""
   let
@@ -255,9 +256,6 @@ selector inf table reftb@(vptmeta,vp,vpt,_,var) predicate tdi = mdo
      lengthPage (fixmap) = s
         where (s,_)  = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
   inisort <- currentValue (facts tsort)
-  itemListEl <- UI.select # set UI.class_ "col-xs-6" # set UI.style [("width","100%")] # set UI.size "21"
-  runFunction $ ffi "$(%1).selectpicker('mobile')" itemListEl
-  wheel <- fmap negate <$> UI.mousewheel itemListEl
   let inivp = inisort .G.toList $ snd vp
   (offset,res3)<- mdo
     offset <- offsetFieldFiltered (pure 0) wheel   [(L.length <$> res3) ,L.length <$> vpt,(lengthPage <$> vptmeta)]
@@ -270,15 +268,16 @@ selector inf table reftb@(vptmeta,vp,vpt,_,var) predicate tdi = mdo
   page <- currentValue (facts paging)
   res4 <- ui $ cacheTidings (paging <*> res3)
   itemList <- listBoxElEq (\l m -> maybe False id $ liftA2 (\i j ->G.getIndex i == G.getIndex j) l m) itemListEl ((Nothing:) . fmap Just <$> res4) (Just <$> tds) (pure id) (pure (maybe id attrLine))
-  let tds = fmap join $ triding itemList
+ -}
+  itemListEl <- UI.select # set UI.style [("width","100%")] # set UI.size "21"
+  runFunction $ ffi "$(%1).selectpicker('mobile')" itemListEl
+  wheel <- fmap negate <$> UI.mousewheel itemListEl
+  (tds ,el) <-selectListUI inf table itemListEl predicate reftb [] tdi
   expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked filterEnabled# set UI.class_ "col-xs-1"
   evc <- UI.checkedChange expand
   filterEnabled <- ui $ stepper False evc
-  element sortList # sink UI.style  (noneShow <$> filterEnabled) # set UI.class_ "col-xs-4"
-  element offset # set UI.class_ "col-xs-2"
-  itemSel <- UI.div # set children [expand,filterInp, getElement offset ,getElement sortList] # set UI.class_ "col-xs-12"
-  itemSelect <- UI.div # set children [itemSel,getElement itemList] # set UI.class_ "col-xs-12"
-  return (TrivialWidget tds itemSelect)
+  itemSel <- UI.div # set children (expand: el) # set UI.class_ "col-xs-12"
+  return (TrivialWidget (join <$> tds )itemSel)
 
 
 showFK = pure (\v j -> j  # set text (showFKText v))
