@@ -1,5 +1,5 @@
-google.charts.load("current", {packages:["timeline"]});
-google.charts.load("current", {packages:['corechart']});
+//google.charts.load("current", {packages:["timeline"]});
+//google.charts.load("current", {packages:['corechart']});
 
 
 function textAreaAdjust(o) {
@@ -314,35 +314,34 @@ function clientHandlers(){
     return true;
     });
   }
-   ,'onchange':function(el,eventType,sendEvent){
-      $(el).on('change',function(i){
-        sendEvent([]);})
-      return true;
-   }
    ,'eventClick' : function(el,eventType,sendEvent){
       el.eventClick=  function(e,delta,revert) {
       sendEvent([e.id,(new Date(e.start)).toISOString(),e.end === null ? null : new Date(e.end).toISOString()].filter(function(e) {return e !== null}).map(function(e){return  e.toString()}));
       return true;
       }; 
+      return el.eventClick;
       }
    ,'eventDrop' : function(el,eventType,sendEvent){
       el.eventDrop =  function(e,delta,revert) {
       sendEvent([e.id,(new Date(e.start)).toISOString(),e.end === null ? null : new Date(e.end).toISOString()].filter(function(e) {return e !== null}).map(function(e){return  e.toString()}));
       return true;
       }; 
+      return el.eventDrop;
       }
    ,'eventResize' : function(el,eventType,sendEvent){
       el.eventResize =  function(e,delta,revert) {
       sendEvent([e.id,e == null ? null :new Date (e.start).toISOString(),e.end == null ? null:new Date (e.end).toISOString() ].filter(function(e) {return e !== null}).map(function(e){return e.toString()}));
       return true;
-      }; 
+      };
+      return el.eventResize;
       }
-   ,'externalDrop' : function(el,eventType,sendEvent){
+   ,'drop' : function(el,eventType,sendEvent){
       el.drop =  function(e,revert) {
       var evdata = $(this).data('event');
       sendEvent([evdata.id,e == null ? null :new Date (e).toISOString() ].filter(function(e) {return e !== null}).map(function(e){return e.toString()}));
       return true;
       }; 
+      return el.drop;
       }
    ,'mapEventClick' : function(el,eventType,sendEvent){
       el.eventClick=  function(e,pos) {
@@ -352,7 +351,7 @@ function clientHandlers(){
       }; 
       }
    ,'currentPosition' : function(el,eventType ,sendEvent){
-    $(el).bind(eventType,function(){
+    fun = function(){
       navigator.geolocation.getCurrentPosition(function(position) {
         var mtorad = 0.00000898315
         var mcdis = 4000*mtorad
@@ -364,7 +363,9 @@ function clientHandlers(){
     }, function() {
       handleLocationError(true, map.getCenter());
     });
-    });
+    }
+    $(el).bind(eventType,fun);
+    return fun;
    }
 
 }

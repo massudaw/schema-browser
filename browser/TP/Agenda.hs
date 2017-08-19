@@ -129,7 +129,7 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
             minf = meta inf
             table = lookTable minf "event"
         reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables' minf table Nothing schemaPred2
-        config <- selector minf reftb  table schemaPred2
+        config <- selector minf table reftb  (pure $ Just schemaPred2 ) (pure Nothing)
         let tds = triding config
         (cru,pretdi) <- crudUITable minf reftb [] [] (allRec' (tableMap minf) table) (triding config)
         return [getElement config,cru]
@@ -224,7 +224,7 @@ eventDrop :: Element -> Event DateChange
 eventDrop el = filterJust $ readTime <$> domEvent "eventDrop" el
 
 eventDragDrop :: Element -> Event DateChange
-eventDragDrop el = filterJust $ readTime <$> domEvent "externalDrop" el
+eventDragDrop el = filterJust $ readTime <$> domEvent "drop" el
 
 eventResize :: Element -> Event DateChange
 eventResize el = filterJust $ readTime <$> domEvent "eventResize" el

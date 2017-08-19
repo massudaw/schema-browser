@@ -282,7 +282,7 @@ viewerKey inf table tix cli cliTid = do
   let
     tdi = (\i iv-> join $ traverse (\v -> G.lookup  (G.Idex (fmap snd $ justError "" $ traverse (traverse unSOptional' ) $v)) i ) iv ) <$> vpt <*> tdip
     tdip = join . fmap (join . fmap ( fmap (lookKV . snd ). lookPK .snd). lookT ) <$> cliTid
-  itemList <- selector inf reftb table mempty
+  itemList <- selector inf table reftb (pure Nothing) tdi
   v <- ui $ currentValue (facts tdi)
   tds <-  mdo
     let
