@@ -10,6 +10,7 @@ import GHC.Stack
 import Step.Host
 import Control.Monad.Writer as Writer
 import TP.View
+import TP.Selector
 import qualified Data.Interval as Interval
 import Control.Concurrent
 import Utils

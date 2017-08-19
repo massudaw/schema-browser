@@ -8,16 +8,9 @@ module TP.QueryWidgets (
     crudUITable,
     refTables,
     refTables',
-    offsetField,
-    offsetFieldFiltered,
-    sorting',
-    lookAttr',
-    lookAttrs',
-    lookAttrM,
     tableIndexA,
     idex,
     metaAllTableIndexA ,
-    attrLine,
     viewer,
     ) where
 
@@ -1523,8 +1516,6 @@ renderTableNoHeaderSort2 header inf modtablei out = do
   header # set UI.class_ "row"
   UI.table # set UI.class_ "table table-bordered table-striped" # sink items ((\(i,l)-> header : fmap (body i) l )<$> out)
 
-attrLine i   = do
-  line ( L.intercalate "," (fmap renderShowable .  allKVRec'  $ i))
 
 convertPatchSet ix (PatchSet p) = patchSet $ catMaybes $ fmap (convertPatchSet ix ) (F.toList p)
 convertPatchSet ix (PIdx ix2 p)

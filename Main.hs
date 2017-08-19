@@ -13,7 +13,7 @@ import Types
 import Types.Patch (RowPatch(..))
 import qualified Types.Index as G
 import qualified Data.Foldable as F
-import TP.QueryWidgets(lookAttr')
+import TP.QueryWidgets
 import System.Process (rawSystem)
 import Poller
 import Postgresql.Backend (connRoot)
@@ -22,7 +22,6 @@ import Prelude hiding (head)
 import Control.Monad.Reader
 import Control.Concurrent
 import System.Environment
-import Utils
 import Schema
 import Plugins.Schema
 
@@ -78,7 +77,6 @@ main = do
   print "Load GUI Server"
   let
     initGUI = do
-
       Just (TableModification _ _ (CreateRow c)) <- addClientLogin metas
       let [LeftTB1 (Just (TB1 (SNumeric i)))] = F.toList ((\(Idex i ) -> i) $ G.getIndex c)
       return i

@@ -23,13 +23,12 @@ import qualified Types.Index as G
 import Data.Bifunctor (first)
 import Debug.Trace
 import TP.Selector
+import TP.Widgets
+import TP.QueryWidgets
 import Types
 import SchemaQuery
-import TP.Widgets
 import Postgresql.Backend (postgresOps)
-import SortList
 import Prelude hiding (head)
-import TP.QueryWidgets
 import Control.Monad.Reader
 import System.Environment
 import Data.Ord
@@ -260,50 +259,6 @@ chooserTable inf bset cliTid cli = do
   let sortTable els ord = fmap snd $ L.sortBy (flip $ comparing fst) $ fmap (first (\i -> tableOrder inf (fst i) ord )) els
   element body # sink0 UI.children (facts $ sortTable <$> fmap M.toList el <*> collectionTid orddb)
   return [getElement layout ,body]
-
-selector inf reftb@(vptmeta,vp,vpt,_,var) table predicate = mdo
-  -- Final Query ListBox
-  filterInp <- UI.input # set UI.class_ "col-xs-3"
-  filterInpT <- element filterInp # sourceT "keydown" UI.valueFFI ""
-  let
-      sortSet = rawPK table <>  L.filter (not .(`L.elem` rawPK table)) (F.toList . tableKeys . TB1 . tableNonRef' . allRec' (tableMap inf ) $ table)
-  sortList <- selectUI sortSet ((,True) <$> rawPK table ) UI.div UI.div conv
-  element sortList # set UI.style [("overflow-y","scroll"),("height","200px")]
-  let
-     tsort = sorting' . filterOrd <$> triding sortList
-     filteringPred i = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  .snd
-     filtering res = (\t -> (filter (filteringPred t )) )<$> triding filterInpT  <*> res
-     pageSize = 20
-     fetchingScale = opsPageSize (schemaOps inf) `div` pageSize
-     divPage s = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
-     lengthPage (fixmap) = s
-        where (s,_)  = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
-  inisort <- currentValue (facts tsort)
-  itemListEl <- UI.select # set UI.class_ "col-xs-6" # set UI.style [("width","100%")] # set UI.size "21"
-  runFunction $ ffi "$(%1).selectpicker('mobile')" itemListEl
-  wheel <- fmap negate <$> UI.mousewheel itemListEl
-  let inivp = inisort .G.toList $ snd vp
-  (offset,res3)<- mdo
-    offset <- offsetFieldFiltered (pure 0) wheel   [(L.length <$> res3) ,L.length <$> vpt,(lengthPage <$> vptmeta)]
-    res3 <- ui $ cacheTidings ( tsort <*> (filtering $ fmap G.toList $ vpt) )
-    return (offset, res3)
-  ui $ onEventDyn (rumors $ triding offset) $ (\i ->  do
-    transactionNoLog inf $ selectFrom' table (Just $ divPage (i + pageSize) `div` fetchingScale ) Nothing  []  predicate)
-  let
-    paging  = (\o -> (L.take pageSize . L.drop o) ) <$> triding offset
-  page <- currentValue (facts paging)
-  res4 <- ui $ cacheTidings (paging <*> res3)
-  itemList <- listBoxElEq (\l m -> maybe False id $ liftA2 (\i j ->G.getIndex i == G.getIndex j) l m) itemListEl ((Nothing:) . fmap Just <$> res4) (Just <$> tds) (pure id) (pure (maybe id attrLine))
-  let tds = fmap join $ triding itemList
-  expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked filterEnabled# set UI.class_ "col-xs-1"
-  evc <- UI.checkedChange expand
-  filterEnabled <- ui $ stepper False evc
-  element sortList # sink UI.style  (noneShow <$> filterEnabled) # set UI.class_ "col-xs-4"
-  element offset # set UI.class_ "col-xs-2"
-  itemSel <- UI.div # set children [expand,filterInp, getElement offset ,getElement sortList] # set UI.class_ "col-xs-12"
-  itemSelect <- UI.div # set children [itemSel,getElement itemList] # set UI.class_ "col-xs-12"
-  return (TrivialWidget tds itemSelect)
-
 
 viewerKey
   ::
