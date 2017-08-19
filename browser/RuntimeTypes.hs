@@ -5,9 +5,13 @@ module RuntimeTypes where
 import Control.Concurrent
 
 import Types
+import Types.Index as G
+import Types.Patch
+import Text
 import qualified Data.IntMap as IM
 import Control.Exception
 import Postgresql.Types
+import Query
 import Data.Functor.Constant
 import Data.Time
 import Step.Common
@@ -20,12 +24,10 @@ import Data.Unique
 import Data.Maybe
 import Control.DeepSeq
 import Data.Binary
-import Types.Index as G
 import Control.Concurrent.STM.TQueue
 import Control.Concurrent.STM.TVar
 import Control.Concurrent.STM
 import Control.Monad.RWS
-import Types.Patch
 import qualified NonEmpty as Non
 import Utils
 import qualified Data.Text as T
@@ -172,6 +174,18 @@ instance Patch (TBRef Key Showable) where
     | i == k = (k,) <$> applyIfChange j l
     | otherwise = (k,) <$> applyIfChange j l
   createIfChange (i,j) = (i,) <$> createIfChange j
+
+type RefTables = (R.Tidings (IndexMetadata CoreKey Showable),(Collection CoreKey Showable), R.Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)),R.Tidings [SecondaryIndex CoreKey Showable ], TChan [RowPatch KeyUnique Showable] )
+
+type PKConstraint = [Column CoreKey Showable] -> Bool
+
+type TBConstraint = TBData CoreKey Showable -> Bool
+
+type SelPKConstraint = [([Column CoreKey ()],R.Tidings PKConstraint)]
+
+type SelTBConstraint = [([Column CoreKey ()],R.Tidings TBConstraint)]
+
+type PluginRef a = [([Access Key], R.Tidings (Maybe (Index a)))]
 
 
 instance (NFData k, NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex  a ) (TBData k a)) where
@@ -573,5 +587,6 @@ notException e =  if isJust eb || isJust es || isJust as then Nothing else Just 
     es :: Maybe BlockedIndefinitelyOnSTM
     es = fromException e
 
+showFKText v = L.take 50 . L.intercalate "," $  (renderShowable <$> allKVRec' v)
 
 makeLenses ''InformationSchemaKV

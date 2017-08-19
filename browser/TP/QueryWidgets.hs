@@ -23,6 +23,7 @@ module TP.QueryWidgets (
 
 import RuntimeTypes
 import TP.View
+import TP.Selector
 import Data.Functor.Constant
 import Data.Dynamic (fromDynamic)
 import Expression
@@ -86,18 +87,6 @@ import qualified Data.Text as T
 import qualified Data.ByteString.Char8 as BSC
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import GHC.Stack
-
-type PKConstraint = [Column CoreKey Showable] -> Bool
-
-type TBConstraint = TBData CoreKey Showable -> Bool
-
-type SelPKConstraint = [([Column CoreKey ()],Tidings PKConstraint)]
-
-type SelTBConstraint = [([Column CoreKey ()],Tidings TBConstraint)]
-
-type RefTables = (Tidings (IndexMetadata CoreKey Showable),(Collection CoreKey Showable), Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)),Tidings [SecondaryIndex CoreKey Showable ], TChan [RowPatch KeyUnique Showable] )
-
-type PluginRef a = [([Access Key], Tidings (Maybe (Index a)))]
 
 --- Plugins Interface Methods
 createFresh :: Text -> InformationSchema -> Text -> KType CorePrim -> IO InformationSchema
@@ -558,7 +547,6 @@ crudUITable
    -> Tidings (Maybe (TBData CoreKey Showable))
    -> UI (Element,Tidings (Maybe (TBData CoreKey Showable)))
 crudUITable inf reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItems = do
-      out <- UI.div
       let
         table = lookTable inf ( _kvname  m )
         getItem :: TBData CoreKey Showable -> TransactionM (Maybe (TBIdx CoreKey Showable))
@@ -584,14 +572,14 @@ crudUITable inf reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItems = d
       let
         tableb = recoverEditChange <$> preoldItems <*> tablebdiff
 
-      out <- element out # set children [listBody,panelItems]
+      out <- UI.div # set children [listBody,panelItems]
       return (out ,tableb)
 
 
 
 dynCrudUITable
    :: InformationSchema
-   -> Tidings String
+   -> Tidings Bool
    -> [(TB Identity CoreKey () ,Tidings (Maybe (TB Identity CoreKey Showable)))]
    -> PluginRef (TBData CoreKey Showable)
    -> Table
@@ -600,16 +588,16 @@ dynCrudUITable
 dynCrudUITable inf open  refs pmods table preoldItems = do
   (e2,h2) <- ui $ newEvent
 
-  let translate "+" = "plus"
-      translate "-" = "minus"
-  nav  <- buttonDivSet ["+","-"] (fmap Just open)
+  let translate True = "plus"
+      translate False = "minus"
+  nav  <- buttonDivSet [True,False] (fmap Just open)
       (\i -> UI.button
           # set UI.style [("font-size","smaller"),("font-weight","bolder")]
           # set UI.class_ ("buttonSet btn-xs btn-default btn pull-left glyphicon-" <> translate i))
   element nav # set UI.class_ "pull-left"
   sub <- UI.div
   let
-      fun "+" =  do
+      fun True =  do
           reftb@(vpt,_,gist,sgist,_) <- ui $ refTables inf   table
           (out ,tableb)<- crudUITable inf reftb refs pmods (allRec' (tableMap inf ) table) preoldItems
           ui $ onEventDyn (filterE (maybe False (isRight.tableCheck)) (rumors tableb))
@@ -749,13 +737,6 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   return (out, fmap head $ unions $ fmap filterJust [diffEdi,diffIns,diffMerge,diffDel] )
 
 
-method s i = i >>= \e -> runFunctionDelayed e . ffi s $ e
-
-showFKText v = (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v)
-
-showFKE v =  UI.div # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec' $  v) # set UI.class_ "fixed-label"
-
-showFK = (pure ((\v j ->j  # set text (L.take 50 $ L.intercalate "," $ fmap renderShowable $ allKVRec'  v))))
 
 dynHandlerPatch hand val ix (l,old)= do
     (ev,h) <- ui $ newEvent
@@ -1162,75 +1143,6 @@ iUITableDiff inf constr pmods oldItems  (IT na  tb1)
     unConstr (i,j) = (i, (\j -> (\v -> j $ IT na <$> v)) <$> j )
 
 
-offsetFieldFiltered  initT eve maxes = do
-  init <- currentValue (facts initT)
-  offset <- UI.span# set (attr "contenteditable") "true" #  set UI.style [("width","50px")]
-
-  lengs  <- mapM (\max -> UI.span # sink text (("/" ++) .show  <$> facts max )) maxes
-  offparen <- UI.div # set children (offset : lengs) # set UI.style [("border","2px solid black"),("margin-left","4px") , ("margin-right","4px"),("text-align","center")]
-
-  enter  <- UI.onChangeE offset
-  whe <- UI.mousewheel offparen
-  let max  = facts $ foldr1 (liftA2 min) maxes
-  let offsetE =  filterJust $ (\m i -> if i <m then Just i else Nothing ) <$> max <@> (filterJust $ readMaybe <$> enter)
-      ev = unionWith const (negate <$> whe ) eve
-      saturate m i j
-          | m == 0 = 0
-          | i + j < 0  = 0
-          | i + j > m  = m
-          | otherwise = i + j
-      diff o m inc
-        | saturate m inc o /= o = Just (saturate m inc )
-        | otherwise = Nothing
-
-  (offsetB ,ev2) <- mdo
-    let
-      filt = ( filterJust $ diff <$> offsetB <*> max <@> fmap (*3) ev  )
-      ev2 = (fmap concatenate $ unions [fmap const offsetE,filt ])
-    offsetB <- ui $ accumB 0 (  ev2)
-    return (offsetB,ev2)
-  element offset # sink UI.text (show <$> offsetB)
-  let
-     cev = flip ($) <$> offsetB <@> ev2
-     offsetT = tidings offsetB cev
-  return (TrivialWidget offsetT offparen)
-
-
-
-offsetField  initT eve  max = do
-  init <- currentValue (facts initT)
-  offset <- UI.span# set (attr "contenteditable") "true" #  set UI.style [("width","50px")]
-  leng <- UI.span # sink text (("/" ++) .show  <$> facts max )
-  offparen <- UI.div # set children [offset,leng] # set UI.style [("margin-left","4px") , ("margin-right","4px"),("text-align","center")]
-
-  offsetEnter <- UI.onChangeE offset
-  we <- UI.mousewheel offparen
-  let offsetE =  filterJust $ (\m i -> if i <m then Just i else Nothing ) <$> facts max <@> (filterJust $ readMaybe <$> offsetEnter)
-  let
-      ev = unionWith const (negate <$>  we) eve
-      saturate m i j
-          | m == 0 = 0
-          | i + j < 0  = 0
-          | i + j > m - 1  = m - 1
-          | otherwise = i + j
-      diff o m inc
-        | saturate m inc o /= o = Just (saturate m inc )
-        | otherwise = Nothing
-
-  (offsetB ,ev2) <- mdo
-    let
-      filt = ( filterJust $ diff <$> offsetB <*> facts max <@> ev  )
-      ev2 = (fmap concatenate $ unions [fmap const offsetE,filt ])
-    offsetB <- ui $ accumB 0 (  ev2)
-    return (offsetB,ev2)
-  element offset # sink UI.text (show <$> offsetB)
-  let
-     cev = flip ($) <$> offsetB <@> ev2
-     offsetT = tidings offsetB cev
-  return (TrivialWidget offsetT offparen)
-
-
-
 
 isReadOnly (FKT ifk rel _ ) = L.null (unkvlist ifk ) || all (not . any ((/= FRead)). keyModifier . _relOrigin) rel
 isReadOnly (Attr k _ ) =  (not . any ((/= FRead)). keyModifier ) k
@@ -1411,7 +1323,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
             staticold :: [(TB Identity CoreKey () ,Tidings(Maybe (TB Identity CoreKey (Showable))))]
             staticold  =  second (fmap (fmap replaceKey )) . first replaceKey  <$> filter (all (\i ->  not (isInlineRel i ) &&  ((_relOperator i) == Equals)). keyattri.fst ) nonInjRefs
 
-          (celem,pretdi) <- dynCrudUITable inf (fmap (\i -> if i then "+" else "-")$ bop ) staticold (fmap (fmap (fmap (unAtom. fmap snd))) <$> plmods) targetTable (fmap (unTB1.fmap snd)<$> tdi )
+          (celem,pretdi) <- dynCrudUITable inf  bop  staticold (fmap (fmap (fmap (unAtom. fmap snd))) <$> plmods) targetTable (fmap (unTB1.fmap snd)<$> tdi )
           let
             fksel =   fmap (\box -> maybe (TB1 (M.empty,box) )(\ref -> TB1 ( M.fromList $ attrToTuple <$> ref ,box) ) $ backFKRefType relTable relType ifk box) <$>   pretdi
             diffFK (Just i ) (Just j) =   maybe Keep Diff  (diff i  j)
@@ -1435,52 +1347,6 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
       hidden <- UI.div  # set children [subnet,last subnet2] # set UI.class_ "col-xs-12"
       element top # set children [head subnet2,pan,hidden]
       return $ TrivialWidget  (tidings blsel evsel) top
-
-selectListUI
-  ::
-     InformationSchema
-     -> TableK CoreKey
-     -> Tidings (Maybe WherePredicate)
-     -> RefTables
-     -> SelTBConstraint
-     -> Tidings (Maybe (TBData Key Showable))
-     -> UI (Tidings (Maybe (Maybe (TBData Key Showable))), [Element])
-selectListUI inf targetTable predicate (vpt,_,gist,sgist,_) constr tdi = do
-      filterInp <- UI.input # set UI.class_ "col-xs-3"
-      filterInpE <- UI.valueChange filterInp
-      filterInpBh <- ui $ stepper "" filterInpE
-      itemListEl <- UI.select #  set UI.class_ "col-xs-5 fixed-label" # set UI.size "21" # set UI.style ([("position","absolute"),("z-index","999"),("top","22px")] )
-      wheel <- fmap negate <$> UI.mousewheel itemListEl
-      let
-        filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.pack . showFKText
-        filterInpT = tidings filterInpBh filterInpE
-        pageSize = 20
-        lengthPage fixmap = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
-          where (s,_) = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
-        preindex = maybe id (\i -> filterfixed targetTable i) <$> predicate <*> gist
-        sortList :: Tidings ([TBData CoreKey Showable] -> [TBData CoreKey Showable])
-        sortList =  sorting' <$> pure (fmap (,True) $ rawPK targetTable)
-
-      presort <- ui $ cacheTidings (sortList <*> fmap G.toList  preindex)
-      -- Filter and paginate
-      (offset,res3)<- do
-        let
-          aconstr = liftA2 applyConstr presort constrT
-          constrT =  Tra.sequenceA $ fmap snd constr
-          applyConstr m l =  filter (foldl' (\l c ->  liftA2 (&&) l (not <$> c) ) (pure True)  l) m
-        res3 <- ui$ cacheTidings (filter .filtering  <$> filterInpT <*> aconstr)
-        element itemListEl # sink UI.size (show . (\i -> if i > 21 then 21 else (i +1 )) . length <$> facts res3)
-        offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i j ) i )<$>  (facts res3) <#> tdi) wheel  (lengthPage <$> vpt)
-        return (offset, res3)
-
-      -- Load offseted items
-      ui $onEventDyn (filterE (isJust . fst) $ (,) <$> facts predicate<@> rumors (triding offset)) $ (\(o,i) ->  do
-        traverse (transactionNoLog inf . selectFrom' targetTable (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  []) o )
-
-      -- Select page
-      res4 <- ui $ cacheTidings ((\o -> L.take pageSize . L.drop (o*pageSize) ) <$> triding offset <*> res3)
-      lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) <$>    res4 ) (fmap Just <$> tdi) (pure id) ((\i -> maybe id (i$) )<$> showFK )
-      return ( triding lbox ,[itemListEl,filterInp,getElement offset])
 
 fkUITableGen   ::
   InformationSchema
@@ -1524,19 +1390,6 @@ unRel (RelAccess k l)  ilk = unRel l nref
    where
      nref = (fmap unTB . F.toList . unKV . snd . unTB1 . _fkttable . index $  ilk )
      index = justError "no index" . L.find ((==[Inline k]).  keyattri )
-
-data AscDesc a
-  = AscW a
-  | DescW a
-  deriving(Eq)
-
-instance Ord a => Ord (AscDesc a) where
-  compare (AscW a ) (AscW b) =  compare a b
-  compare (DescW a ) (DescW b) = compare (Down a ) (Down b)
-
-sorting' :: Ord k=> [(k ,Bool)] -> [TBData k Showable]-> [TBData k Showable]
-sorting' ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i),e) -> (ix,if i then DescW e  else AscW e) ) . F.toList .M.intersectionWith (,) (M.fromList (zipWith (\i (k,v) -> (k ,(i,v))) [0::Int ..] ss)) . M.fromList . concat . fmap aattr  . F.toList . _kvvalues . unTB . snd )  )
-
 
 rendererShowableUI k  v= renderer (keyValue k) v
   where

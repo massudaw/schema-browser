@@ -803,3 +803,4 @@ hoverTip2 elemIn elemOut = do
   return $ hoev
 
 
+method s i = i >>= \e -> runFunctionDelayed e . ffi s $ e

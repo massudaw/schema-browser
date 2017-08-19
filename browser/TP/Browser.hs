@@ -22,6 +22,7 @@ import Text
 import qualified Types.Index as G
 import Data.Bifunctor (first)
 import Debug.Trace
+import TP.Selector
 import Types
 import SchemaQuery
 import TP.Widgets
@@ -119,13 +120,10 @@ deleteServer inf (TableModification _ _ (CreateRow o)) = do
   let pt = (tableMeta (lookTable inf "server") , G.getIndex o,[PAttr (lookKey inf "server" "up_time") (PInter False ((ER.Finite $ PAtom (STime $ STimestamp (utcToLocalTime utc now)) , False)))])
   transactionNoLog inf $ updateFrom o pt
 
-
-
 removeTable :: Int -> UTCTime -> Table -> Int ->  TBIdx Text Showable
 removeTable idClient now table  tix = (mempty,G.Idex [num idClient],[PInline "selection" (POpt $ Just $ PIdx tix (Just $ PAtom $
                         (mempty,mempty, [ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))])))
                                        ])
-
 
 addTable :: Int -> UTCTime -> Table -> Int ->  TBIdx Text Showable
 addTable idClient now table  tix = (mempty,G.Idex [num idClient],[PInline "selection" (POpt $ Just $ PIdx tix (Just $ patch$
@@ -296,7 +294,7 @@ selector inf reftb@(vptmeta,vp,vpt,_,var) table predicate = mdo
   page <- currentValue (facts paging)
   res4 <- ui $ cacheTidings (paging <*> res3)
   itemList <- listBoxElEq (\l m -> maybe False id $ liftA2 (\i j ->G.getIndex i == G.getIndex j) l m) itemListEl ((Nothing:) . fmap Just <$> res4) (Just <$> tds) (pure id) (pure (maybe id attrLine))
-  let tds = fmap join  $ triding itemList
+  let tds = fmap join $ triding itemList
   expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked filterEnabled# set UI.class_ "col-xs-1"
   evc <- UI.checkedChange expand
   filterEnabled <- ui $ stepper False evc
@@ -336,7 +334,8 @@ viewerKey inf table tix cli cliTid = do
       updatedValue = (\i j -> const . join $ flip G.lookup j  . G.getIndex  <$> i )<$> facts tds <@> rumors vpt
       selection = const <$> rumors (triding itemList)
     tds <- ui $ accumT  v (unionWith (.) selection  updatedValue)
-    return tds
+    ui $ cacheTidings tds
+
   (cru,pretdi) <- crudUITable inf reftb [] [] (allRec' (tableMap inf) table) tds
   let pktds = fmap getPKM <$> tds
   dbmeta  <- liftIO$ prerefTable (meta inf)(lookTable (meta inf ) "clients")

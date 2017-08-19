@@ -4,13 +4,14 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module TP.Selector (tableOrder,calendarSelector,positionSel,tableChooser,selectFromTable) where
+module TP.Selector (tableOrder,calendarSelector,positionSel,tableChooser,selectFromTable,offsetFieldFiltered,offsetField,sorting',selectListUI) where
 
 import TP.View
 import Control.Monad.Writer (runWriterT, WriterT(..))
 import Control.Lens (_1, _2, (^.), over)
 import Safe
 import qualified NonEmpty as Non
+import Data.Maybe
 import Data.Char
 import Step.Common
 import Query
@@ -24,7 +25,6 @@ import Types
 import SchemaQuery
 import TP.Widgets
 import Prelude hiding (head)
-import TP.QueryWidgets
 import Control.Monad.Reader
 import Data.Ord
 import Utils
@@ -168,5 +168,102 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
   header <- UI.div # set children [getElement all,filterInp] # set UI.style [("display","inline-flex")]
   tbChooserI <- UI.div # set children [header,getElement bset]  # set UI.style [("height","50vh")]
   return $ (TrivialWidget (triding bset) tbChooserI)
+
+data AscDesc a
+  = AscW a
+  | DescW a
+  deriving(Eq)
+
+instance Ord a => Ord (AscDesc a) where
+  compare (AscW a ) (AscW b) =  compare a b
+  compare (DescW a ) (DescW b) = compare (Down a ) (Down b)
+
+
+sorting' :: Ord k=> [(k ,Bool)] -> [TBData k Showable]-> [TBData k Showable]
+sorting' ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i),e) -> (ix,if i then DescW e  else AscW e) ) . F.toList .M.intersectionWith (,) (M.fromList (zipWith (\i (k,v) -> (k ,(i,v))) [0::Int ..] ss)) . M.fromList . concat . fmap aattr  . F.toList . _kvvalues . unTB . snd )  )
+
+
+selectListUI
+  ::
+     InformationSchema
+     -> TableK CoreKey
+     -> Tidings (Maybe WherePredicate)
+     -> RefTables
+     -> SelTBConstraint
+     -> Tidings (Maybe (TBData Key Showable))
+     -> UI (Tidings (Maybe (Maybe (TBData Key Showable))), [Element])
+selectListUI inf targetTable predicate (vpt,_,gist,sgist,_) constr tdi = do
+      filterInp <- UI.input # set UI.class_ "col-xs-3"
+      filterInpE <- UI.valueChange filterInp
+      filterInpBh <- ui $ stepper "" filterInpE
+      itemListEl <- UI.select #  set UI.class_ "col-xs-5 fixed-label" # set UI.size "21" # set UI.style ([("position","absolute"),("z-index","999"),("top","22px")] )
+      wheel <- fmap negate <$> UI.mousewheel itemListEl
+      let
+        filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.pack . showFKText
+        filterInpT = tidings filterInpBh filterInpE
+        pageSize = 20
+        lengthPage fixmap = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
+          where (s,_) = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
+        preindex = maybe id (\i -> filterfixed targetTable i) <$> predicate <*> gist
+        sortList :: Tidings ([TBData CoreKey Showable] -> [TBData CoreKey Showable])
+        sortList =  sorting' <$> pure (fmap (,True) $ rawPK targetTable)
+
+      presort <- ui $ cacheTidings (sortList <*> fmap G.toList  preindex)
+      -- Filter and paginate
+      (offset,res3)<- do
+        let
+          aconstr = liftA2 applyConstr presort constrT
+          constrT =  traverse  snd constr
+          applyConstr m l =  filter (F.foldl' (\l c ->  liftA2 (&&) l (not <$> c) ) (pure True)  l) m
+        res3 <- ui$ cacheTidings (filter .filtering  <$> filterInpT <*> aconstr)
+        element itemListEl # sink UI.size (show . (\i -> if i > 21 then 21 else (i +1 )) . length <$> facts res3)
+        offset <- offsetField ((\j i -> maybe 0  (`div`pageSize) $ join $ fmap (\i -> L.elemIndex i j ) i )<$>  (facts res3) <#> tdi) wheel  (lengthPage <$> vpt)
+        return (offset, res3)
+
+      -- Load offseted items
+      ui $onEventDyn (filterE (isJust . fst) $ (,) <$> facts predicate<@> rumors (triding offset)) $ (\(o,i) ->  do
+        traverse (transactionNoLog inf . selectFrom' targetTable (Just $ i `div` (opsPageSize $ schemaOps inf) `div` pageSize) Nothing  []) o )
+
+      -- Select page
+      res4 <- ui $ cacheTidings ((\o -> L.take pageSize . L.drop (o*pageSize) ) <$> triding offset <*> res3)
+      lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) <$>    res4 ) (fmap Just <$> tdi) (pure id) ((\i -> maybe id (i$) )<$> showFK)
+      return ( triding lbox ,[itemListEl,filterInp,getElement offset])
+
+showFK = pure (\v j -> j  # set text (showFKText v))
+
+offsetField  initT eve  max = offsetFieldFiltered initT eve [max]
+
+offsetFieldFiltered  initT eve maxes = do
+  init <- currentValue (facts initT)
+  offset <- UI.span# set (attr "contenteditable") "true" #  set UI.style [("width","50px")]
+
+  lengs  <- mapM (\max -> UI.span # sink text (("/" ++) .show  <$> facts max )) maxes
+  offparen <- UI.div # set children (offset : lengs) # set UI.style [("border","2px solid black"),("margin-left","4px") , ("margin-right","4px"),("text-align","center")]
+
+  enter  <- UI.onChangeE offset
+  whe <- UI.mousewheel offparen
+  let max  = facts $ foldr1 (liftA2 min) maxes
+  let offsetE =  filterJust $ (\m i -> if i <m then Just i else Nothing ) <$> max <@> (filterJust $ readMay <$> enter)
+      ev = unionWith const (negate <$> whe ) eve
+      saturate m i j
+          | m == 0 = 0
+          | i + j < 0  = 0
+          | i + j > m  = m
+          | otherwise = i + j
+      diff o m inc
+        | saturate m inc o /= o = Just (saturate m inc )
+        | otherwise = Nothing
+
+  (offsetB ,ev2) <- mdo
+    let
+      filt = ( filterJust $ diff <$> offsetB <*> max <@> fmap (*3) ev  )
+      ev2 = (fmap concatenate $ unions [fmap const offsetE,filt ])
+    offsetB <- ui $ accumB 0 (  ev2)
+    return (offsetB,ev2)
+  element offset # sink UI.text (show <$> offsetB)
+  let
+     cev = flip ($) <$> offsetB <@> ev2
+     offsetT = tidings offsetB cev
+  return (TrivialWidget offsetT offparen)
 
 
