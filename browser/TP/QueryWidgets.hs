@@ -1271,11 +1271,10 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
               lboxeel <- traverseUI (\metamap ->
                   case metamap of
                     "B" -> do
-
                       let predicatefk o = WherePredicate $AndColl $ catMaybes $ fmap (\(k, v) ->  join $ (\ o ->  fmap (\ rel -> PrimColl (keyRef (_relTarget rel),   Left  (o,Flip $ _relOperator rel) )) $  L.find ((==k) . _relOrigin ) rel) <$> unSOptional' v) $ M.toList o
                           predicate = fmap predicatefk <$> iold2
 
-                      itemListEl <- UI.select #  set UI.class_ "col-xs-5 fixed-label" # set UI.size "21" # set UI.style ([("position","absolute"),("z-index","999"),("top","22px")] )
+                      itemListEl <- UI.select #  set UI.class_ "row fixed-label" # set UI.size "21" # set UI.style [("width","100%"),("position","absolute"),("z-index","999"),("top","22px")]
                       (lbox , l) <- selectListUI inf targetTable itemListEl predicate reftb constr tdi
                       onEvent (rumors lbox) (liftIO . helbox)
                       return l

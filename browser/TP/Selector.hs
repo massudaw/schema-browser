@@ -228,7 +228,8 @@ selectListUI inf table itemListEl predicate (vpt,_,gist,sgist,_) constr tdi = do
       -- Select page
       res4 <- ui $ cacheTidings ((\o -> L.take pageSize . L.drop (o*pageSize) ) <$> triding offset <*> res3)
       lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) <$>    res4 ) (fmap Just <$> tdi) (pure id) ((\i -> maybe id (i$) )<$> showFK)
-      return ( triding lbox ,[itemListEl,filterInp,getElement offset])
+      fInp <-  UI.div # set children [filterInp,getElement offset]  # set UI.class_ "row"
+      return ( triding lbox ,[fInp,itemListEl])
 
 selector
   :: InformationSchema
@@ -238,37 +239,6 @@ selector
      -> Tidings (Maybe (TBData Key Showable))
      -> UI (TrivialWidget (Maybe (TBData Key Showable)))
 selector inf table reftb@(vptmeta,vp,vpt,_,var) predicate tdi = mdo
-  {-
-   -- Final Query ListBox
-  filterInp <- UI.input # set UI.class_ "col-xs-3"
-  filterInpT <- element filterInp # sourceT "keydown" UI.valueFFI ""
-  let
-      sortSet = rawPK table <>  L.filter (not .(`L.elem` rawPK table)) (F.toList . tableKeys . TB1 . tableNonRef' . allRec' (tableMap inf ) $ table)
-  sortList <- selectUI sortSet ((,True) <$> rawPK table ) UI.div UI.div conv
-  element sortList # set UI.style [("overflow-y","scroll"),("height","200px")]
-  let
-     tsort = sorting' . filterOrd <$> triding sortList
-     filteringPred i = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.intercalate "," . fmap (T.pack . renderPrim ) . F.toList  .snd
-     filtering res = (\t -> (filter (filteringPred t )) )<$> triding filterInpT  <*> res
-     pageSize = 20
-     fetchingScale = opsPageSize (schemaOps inf) `div` pageSize
-     divPage s = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
-     lengthPage (fixmap) = s
-        where (s,_)  = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
-  inisort <- currentValue (facts tsort)
-  let inivp = inisort .G.toList $ snd vp
-  (offset,res3)<- mdo
-    offset <- offsetFieldFiltered (pure 0) wheel   [(L.length <$> res3) ,L.length <$> vpt,(lengthPage <$> vptmeta)]
-    res3 <- ui $ cacheTidings ( tsort <*> (filtering $ fmap G.toList $ vpt) )
-    return (offset, res3)
-  ui $ onEventDyn (rumors $ (,) <$> triding offset<*> predicate ) $ (\(i,predicate) ->  do
-    transactionNoLog inf $ selectFrom' table (Just $ divPage (i + pageSize) `div` fetchingScale ) Nothing  []  (fromMaybe mempty predicate))
-  let
-    paging  = (\o -> (L.take pageSize . L.drop o) ) <$> triding offset
-  page <- currentValue (facts paging)
-  res4 <- ui $ cacheTidings (paging <*> res3)
-  itemList <- listBoxElEq (\l m -> maybe False id $ liftA2 (\i j ->G.getIndex i == G.getIndex j) l m) itemListEl ((Nothing:) . fmap Just <$> res4) (Just <$> tds) (pure id) (pure (maybe id attrLine))
- -}
   itemListEl <- UI.select # set UI.style [("width","100%")] # set UI.size "21"
   runFunction $ ffi "$(%1).selectpicker('mobile')" itemListEl
   wheel <- fmap negate <$> UI.mousewheel itemListEl
@@ -289,7 +259,7 @@ offsetFieldFiltered  initT eve maxes = do
   offset <- UI.span# set (attr "contenteditable") "true" #  set UI.style [("width","50px")]
 
   lengs  <- mapM (\max -> UI.span # sink text (("/" ++) .show  <$> facts max )) maxes
-  offparen <- UI.div # set children (offset : lengs) # set UI.style [("border","2px solid black"),("margin-left","4px") , ("margin-right","4px"),("text-align","center")]
+  offparen <- UI.div # set children (offset : lengs) # set UI.style [("margin-left","4px") , ("margin-right","4px"),("text-align","center")]
 
   enter  <- UI.onChangeE offset
   whe <- UI.mousewheel offparen

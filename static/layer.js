@@ -1,5 +1,5 @@
-//google.charts.load("current", {packages:["timeline"]});
-//google.charts.load("current", {packages:['corechart']});
+google.charts.load("current", {packages:["timeline"]});
+google.charts.load("current", {packages:['corechart']});
 
 
 function textAreaAdjust(o) {
@@ -306,13 +306,15 @@ function setPosition(el, sw,ne){
 
 function clientHandlers(){
   return {'moveend': function(el,eventType,sendEvent){
-    el.mymap.on(eventType,function(e) {
+    var bf = function(e) {
     var bounds = el.mymap.getBounds();
     var sw=bounds.getSouthWest();
     var ne=bounds.getNorthEast();
     sendEvent([ne.lat,ne.lng,0,sw.lat,sw.lng,0].map(function(e){return e.toString()}));
     return true;
-    });
+    }
+    el.mymap.on(eventType,bf);
+    return  bf;
   }
    ,'eventClick' : function(el,eventType,sendEvent){
       el.eventClick=  function(e,delta,revert) {
@@ -349,6 +351,7 @@ function clientHandlers(){
         sendEvent([e.id,pos.originalEvent.shiftKey].filter(function(e) {return e !== null}).map(function(e){return  e.toString()}));
         return true;
       }; 
+      return el.eventClick;
       }
    ,'currentPosition' : function(el,eventType ,sendEvent){
     fun = function(){
