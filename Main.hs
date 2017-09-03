@@ -6,6 +6,7 @@ import TP.Browser(addServer,deleteServer,deleteClient,addClientLogin,deleteClien
 import Safe
 import Control.Exception
 import Control.Concurrent.STM
+import System.Remote.Monitoring
 import Debug.Trace
 import Rmtc
 import Data.Unique
@@ -86,6 +87,7 @@ main = do
         deleteClientLogin metas (wId w)
 
 
+  forkServer "localhost" 8000
   startGUI (defaultConfig { jsStatic = Just "static", jsCustomHTML = Just "index.html" })  (setup smvar args regplugs ) initGUI finalizeGUI
     `catch` (\e -> do
     putStrLn $ "Finish Server"

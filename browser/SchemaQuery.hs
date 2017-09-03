@@ -23,6 +23,7 @@ module SchemaQuery
   ,prerefTable
   ,refTable
   ,refTableSTM
+  ,readTableFromFile
   ,loadFKS
   ,fullDiffInsert
   ,fullDiffEdit
@@ -47,6 +48,9 @@ import Control.Arrow (first)
 import Control.DeepSeq
 import Step.Host
 import Expression
+import System.Directory
+import Data.String (fromString)
+import qualified Data.Binary as B
 import Types.Primitive
 import Types.Index (checkPred)
 import Control.Concurrent
@@ -359,7 +363,11 @@ tableLoader table  page size presort fixed = do
                 predicate (Nested i j ,Left _ ) = (\a -> (a, Right (Not IsNull))) <$> i
                 predicate i  = [i]
             tbf = tableView  (tableMap inf) table
-          (res ,x ,o) <- (listEd $ schemaOps inf) (tableNonRef2 tbf) page size presort fixed (unestPred predtop)
+
+          out  <- liftIO $ readTableFromFile inf "dump"  table
+          (res ,x ,o) <- case out  of
+            Just (_,i) -> return (mapKey'(recoverKey inf ) <$> i,Nothing, L.length i )
+            Nothing -> (listEd $ schemaOps inf) (tableNonRef2 tbf) page size presort fixed (unestPred predtop)
           (evs,resFKS ,_)<- getFKS inf predtop table res
           let result = fmap resFKS   res
           liftIO $ when (not $ null (lefts result)) $ do
@@ -368,6 +376,29 @@ tableLoader table  page size presort fixed = do
     lf <- liftIO getCurrentTime
     return o
 
+readTableFromFile
+  ::
+     InformationSchemaKV Key Showable
+     -> T.Text
+     -> TableK Key
+     -> IO (Maybe
+             (IndexMetadata KeyUnique Showable, [TBData KeyUnique Showable]))
+readTableFromFile  inf r t = do
+  let tname = fromString $ T.unpack $ r <> "/" <> s <> "/" <> tableName t
+      s = schemaName inf
+  liftIO $ print $ "Load from file:"  ++ tname
+  has <- liftIO$ doesFileExist tname
+  if has
+    then do
+      f <- (Right  <$> B.decodeFile tname ) `catch` (\e -> return $ Left ("error decoding" <> tname  <> show  (e :: SomeException )))
+      either (\i -> do
+        print ("Failed Loading Dump: " ++ show t ++ " - "  ++ show i )
+        return Nothing)
+             (\(m,g) ->
+               return $ (Just (M.fromList $ first (mapPredicate keyFastUnique . liftPredicateF lookupKeyPosition inf (tableName t) ) <$> m   , mapKey' keyFastUnique . liftTableF lookupKeyPosition inf (tableName t) <$> g) :: Maybe ( IndexMetadata KeyUnique Showable ,[TBData KeyUnique Showable])))  f
+      else return Nothing
+
+liftPredicateF m inf tname (WherePredicate i ) = WherePredicate $ first (liftAccessF m inf tname )<$> i
 
 predNull (WherePredicate i) = L.null i
 
@@ -389,30 +420,29 @@ childrenRefsUnique
   -> (SqlOperation , [RowPatch KeyUnique Showable])
   -> [RowPatch KeyUnique Showable]
 childrenRefsUnique  inf table (sidxs,base) (FKJoinTable rel j ,evs)  =  concat $ (\i -> search  i  sidx) <$>  evs
+  where
+    rinf = maybe inf id $ HM.lookup ((fst j))  (depschema inf)
+    relf = fmap keyFastUnique <$> rel
+    jtable = lookTable rinf $ snd j
+    sidx = M.lookup (keyFastUnique . _relOrigin  <$> rel) (M.fromList sidxs)
+    search (PatchRow p@(_,G.Idex v,_)) idxM = case idxM of
+      Just idx -> concat $ conv <$> resIndex idx
+      Nothing -> concat $ conv <$> resScan base
       where
-        rinf = maybe inf id $ HM.lookup ((fst j))  (depschema inf)
-        relf = fmap keyFastUnique <$> rel
-        jtable = lookTable rinf $ snd j
-        sidx = M.lookup (keyFastUnique . _relOrigin  <$> rel) (M.fromList sidxs)
-        search (PatchRow p@(_,G.Idex v,_)) idxM = case idxM of
-          Just idx -> concat $ conv <$> resIndex idx
-          Nothing -> concat $ conv <$> resScan base
+        predK = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (keyRef o  , Left (fromJust $ unSOptional' $fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
+        predKey =  mapPredicate keyFastUnique predK
+        pred =  mapPredicate (\o -> justError "no pk" $ L.elemIndex o (fmap _relOrigin rel)) predK
+        resIndex idx = G.query pred idx
+        resScan idx = catMaybes $ fmap (\(i,t) -> ((G.getIndex i,t), G.getUnique (fmap (keyFastUnique._relOrigin) rel) i)) . (\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx
+        conv ((pk,ts),G.Idex fks) = (\t -> PatchRow (kvempty,pk ,[PFK relf (zipWith (\i j -> PAttr (_relOrigin i) (patch j)) relf fks ) (recurse2 t p)]) ) <$> ts
+        recurse2 (G.PathAttr _ i ) p = go i
           where
-            predK = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (keyRef o  , Left (fromJust $ unSOptional' $fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
-            predKey =  mapPredicate keyFastUnique predK
-            pred =  mapPredicate (\o -> justError "no pk" $ L.elemIndex o (fmap _relOrigin rel)) predK
-            resIndex idx = G.query pred idx
-            resScan idx = catMaybes $ fmap (\(i,t) -> ((G.getIndex i,t), G.getUnique (fmap (keyFastUnique._relOrigin) rel) i)) . (\i->  (i,) <$> G.checkPredId i predKey) <$> G.toList idx
-            conv ((pk,ts),G.Idex fks) = (\t -> PatchRow (kvempty,pk ,[PFK relf (zipWith (\i j -> PAttr (_relOrigin i) (patch j)) relf fks ) (recurse2 t p)]) ) <$> ts
-            recurse2 (G.PathAttr _ i ) p = go i
-              where
-                go (G.ManyPath (j Non.:| _) ) = go  j
-                go (G.NestedPath i j ) = matcher i (go j)
-                go (G.TipPath j ) = PAtom p
-                matcher (PIdIdx ix )  = PIdx ix . Just
-                matcher PIdOpt   = POpt . Just
-                -- matcher PIdAtom = PAtom
-            recurse2 i p = errorWithStackTrace (show i)
+            go (G.ManyPath (j Non.:| _) ) = go  j
+            go (G.NestedPath i j ) = matcher i (go j)
+            go (G.TipPath j ) = PAtom p
+            matcher (PIdIdx ix )  = PIdx ix . Just
+            matcher PIdOpt   = POpt . Just
+        recurse2 i p = errorWithStackTrace (show i)
 
 
 

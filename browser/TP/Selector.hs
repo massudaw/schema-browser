@@ -93,7 +93,7 @@ positionSel = do
 
 
 
-tableUsage inf orderMap table selection = (L.elem table (M.keys selection), tableOrder inf table orderMap )
+tableUsage inf orderMap selection table = (L.elem table (M.keys selection), tableOrder inf table orderMap )
 
 tableChooser :: InformationSchemaKV Key Showable
                       -> [Table]
@@ -138,18 +138,21 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
           return (k,(b,ev))
 
     let
-      visible  = (\i j k sel tb -> (i tb && j tb && k tb ) || (L.elem [tb] sel)) <$> filterLabel <*> authorize <*> tableFilter <*> triding bset
+      visible  = (\i j k sel tb -> (i tb && j tb && k tb ) || L.elem [tb] sel) <$> filterLabel <*> authorize <*> tableFilter <*> triding bset
 
     let allTablesSel True = M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i)  $ e ) $ tables
         allTablesSel False = M.empty
         iniSel =  M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i)  $ e ) <$> iniTables
     iniValue <- currentValue (facts iniSel)
-    let iniEvent = (unionWith const (rumors iniSel ) (allTablesSel <$> rumors (triding all)))
+    let iniEvent = unionWith const (rumors iniSel ) (allTablesSel <$> rumors (triding all))
     iniBehaviour <- ui $ stepper iniValue  iniEvent
 
-    bset <- checkDivSetTGen tables ((\i k j -> tableUsage inf i j k ) <$> collectionTid orddb <*> triding bset) (tidings iniBehaviour iniEvent ) buttonString ((\lg visible i j -> (if visible  i then (lg lookDescT i j # set UI.class_ "table-list-item" ) else UI.div # set children [j] )# set UI.style (noneDisplay "-webkit-box" $ visible i)) <$> legendStyle <*> visible )
+    bset <- checkDivSetTGen
+              tables
+              (tidings iniBehaviour iniEvent)
+              buttonString
+              ((\lg visible i j -> (if visible  i then (lg lookDescT i j # set UI.class_ "table-list-item" ) else UI.div # set children [j] ) # set UI.style (noneDisplay "-webkit-box" $ visible i)) <$> legendStyle <*> visible )
     return bset
-      {-
   let
     ordRow orderMap pkset =  field
         where
@@ -163,7 +166,6 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
       (ui . traverse (traverse (\p -> do
           _ <- transactionNoLog (meta inf ) $ patchFrom  p
           putPatch (patchVar $  iniRef orddb) [PatchRow p] )))
-          -}
 
   element bset # set UI.style [("overflow","auto"),("height","99%")]
   header <- UI.div # set children [getElement all,filterInp] # set UI.style [("display","inline-flex")]
@@ -277,7 +279,7 @@ offsetFieldFiltered  initT eve maxes = do
 
   (offsetB ,ev2) <- mdo
     let
-      filt = ( filterJust $ diff <$> offsetB <*> max <@> fmap (*3) ev  )
+      filt =  filterJust $ diff <$> offsetB <*> max <@> ev
       ev2 = (fmap concatenate $ unions [fmap const offsetE,filt ])
     offsetB <- ui $ accumB 0 (  ev2)
     return (offsetB,ev2)

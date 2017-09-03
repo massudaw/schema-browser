@@ -423,10 +423,10 @@ siapi3Inspection = FPlugins pname tname  $ IOPlugin url
     tobs  =  fmap (BS.pack . renderShowable ) . join . fmap unSOptional'
     url :: ArrowReader
     url = proc t -> do
-      cpf <- atR "id_project"
-              $ atR "id_owner,id_contact"
-                $ atR "id_owner"
-                  $ atAny "ir_reg" [varTB "cpf_number",varTB "cnpj_number"] -< t
+      cpf <- atR "id_project" $
+               atR "id_owner,id_contact" $
+                 atR "id_owner" $
+                   atAny "ir_reg" [varTB "cpf_number",varTB "cnpj_number"] -< t
       v <- atMR "protocolo,ano" (proc cpf -> do
         protocolo <- idxR "protocolo" -< ()
         ano <- idxR "ano" -< ()
@@ -445,17 +445,17 @@ siapi3Inspection = FPlugins pname tname  $ IOPlugin url
             iat bv = Compose . Identity $ (IT "andamentos"
                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv))
         returnA -< (\i -> FKT (kvlist $ _tb <$> [Attr "ano" (LeftTB1 $ ano) ,Attr "protocolo" (LeftTB1 $ protocolo)]) [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] (LeftTB1 $ Just $ TB1 i)) <$> join (ao <$> b)) -< cpf
-      returnA -< tblist  . pure . _tb  <$> v
+      returnA -< tblist . pure . _tb  <$> v
 
 
-siapi3Plugin  = FPlugins pname tname  $ IOPlugin url
+siapi3Plugin  = FPlugins pname tname  $ DiffIOPlugin url
   where
     pname , tname :: Text
     pname = "Siapi3 Andamento"
     tname = "fire_project"
     varTB i =  fmap (BS.pack . renderShowable ) . join . fmap unSOptional' <$>  idxR i
     tobs  =  fmap (BS.pack . renderShowable ) . join . fmap unSOptional'
-    url :: ArrowReader
+    url :: ArrowReaderDiffM IO
     url = proc t -> do
       cpf <- atR "id_project"
               $ atR "id_owner,id_contact"
@@ -478,8 +478,8 @@ siapi3Plugin  = FPlugins pname tname  $ IOPlugin url
         let ao  (bv,taxa) =  Just $ tblist  ( [_tb $ Attr "ano" (justError "ano" ano) ,_tb $ Attr "protocolo" (justError "protocolo"protocolo), attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
             iat bv = Compose . Identity $ (IT "andamentos"
                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv))
-        returnA -< (\i -> FKT (kvlist $ _tb <$> [Attr "protocolo" (LeftTB1 $ protocolo), Attr "ano" (LeftTB1 $ ano)]) [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] (LeftTB1 $ Just $ TB1 i)) <$> join (ao <$> b)) -< cpf
-      returnA -< tblist  . pure . _tb  <$> v
+        returnA -< (\i -> PFK [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] []   (POpt $ Just $ PAtom $patch $ i)) <$> join (ao <$> b)) -< cpf
+      returnA -< Just (kvempty,Idex [],maybeToList v)
 
 bool = TB1 . SBoolean
 num = TB1 . SNumeric

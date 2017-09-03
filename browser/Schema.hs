@@ -301,7 +301,8 @@ createTableRefs inf rec i = do
     chanidx <-  liftIO$ atomically $ newBroadcastTChan
     nchanidx <- liftIO$ atomically $dupTChan chanidx
     nmdiff <- liftIO$ atomically $dupTChan mdiff
-    (iv,v) <- readTable inf "dump" i rec
+    let (iv,v) = (mempty,mempty)
+    -- (iv,v) <- readTable inf "dump" i rec
 
     midx <-  liftIO$ atomically$ newTVar iv
     depmap <- liftIO $ atomically $readTVar (mvarMap inf )
@@ -701,24 +702,13 @@ writeTable inf s t v = do
 
 
 
-liftPredicateF m inf tname (WherePredicate i ) = WherePredicate $ first (liftAccessF m inf tname )<$> i
 
 readTable :: InformationSchema -> Text -> Table -> [MutRec [[Rel Key]]] -> R.Dynamic (Collection KeyUnique Showable)
 readTable inf r  t  rec = do
-  let tname = fromString $ T.unpack $ r <> "/" <> s <> "/" <> tableName t
+  let
       s = schemaName inf
-  has <- liftIO$ doesFileExist tname
-  (m,prev) <- if has
-    then do
-      f <- liftIO$ (Right  <$> B.decodeFile tname ) `catch` (\e -> return $ Left ("error decoding" <> tname  <> show  (e :: SomeException )))
-      either (\i -> do
-        liftIO$ print ("Failed Loading Dump: " ++ show t ++ " - "  ++ show i )
-        return (M.empty ,[]))
-             (\(m,g) ->
-               return (M.fromList $ first (mapPredicate keyFastUnique . liftPredicateF lookupKeyPosition inf (tableName t) ) <$> m   , mapKey' keyFastUnique . liftTableF lookupKeyPosition inf (tableName t) <$> g))  f
-    else do
-      liftIO$ print ("Dump file not found: " ++ tname )
-      return (M.empty ,[])
+  o <- liftIO $ readTableFromFile inf r t
+  let (m,prev) = fromMaybe (M.empty ,[]) o
   disk <- loadFKSDisk inf t rec
   let v = createUn (keyFastUnique <$> rawPK t) $ (\f -> disk  f) <$> prev
   return (m,v)

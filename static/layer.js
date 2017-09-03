@@ -185,9 +185,7 @@ function createMap (ref,nej,swj,features){
 
 
 function handleLocationError(browserHasGeolocation, pos) {
-  alert(browserHasGeolocation ?
-                        'Error: The Geolocation service failed.' :
-                        'Error: Your browser doesn\'t support geolocation.');
+  
 }
 
 function removeChartColumns(el ){
@@ -364,7 +362,7 @@ function clientHandlers(){
         sendEvent([ne.lat,ne.lng,0,sw.lat,sw.lng,0].map(function(e){return e.toString()}));
 
     }, function() {
-      handleLocationError(true, map.getCenter());
+      handleLocationError(true, null );
     });
     }
     $(el).bind(eventType,fun);

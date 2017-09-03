@@ -234,15 +234,15 @@ rangeBoxes fkbox bp = do
 instance Widget (RangeBox a) where
   getElement = _rangeElement
 
-checkDivSetTGen :: (Ord a,Ord b ,Eq a,Ord c) => [a] -> Tidings (a -> b) -> Tidings (Map a [c]) ->  (a -> UI (a,((Element,Event (a,([c])))) ))-> Tidings (a -> Element  -> UI Element ) -> UI (TrivialWidget (Map a [c]))
-checkDivSetTGen ks sort binit   el st = do
+checkDivSetTGen :: (Ord a,Eq a,Ord c) => [a] -> Tidings (Map a [c]) ->  (a -> UI (a,((Element,Event (a,([c])))) ))-> Tidings (a -> Element  -> UI Element ) -> UI (TrivialWidget (Map a [c]))
+checkDivSetTGen ks binit   el st = do
   buttons <- mapM el  ks
   vini <- currentValue (facts binit)
   let
     evs = unionWith const (const <$> rumors binit) (foldr (unionWith (.)) never $ fmap (\(i,ab) -> (if L.null ab then M.delete i else M.alter (Just . maybe ab (L.nub . mappend ab) ) i)   ) . snd .snd <$> buttons)
   bv <- ui $ accumB vini  evs
   -- Place sorted Itens
-  dv <- UI.div # sink items (facts $(\sti f -> fmap (\ (k,(v,_)) -> sti k v) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$>  st <*> sort )
+  dv <- UI.div # sink items (facts $(\ sti -> fmap (\ (k,(v,_)) -> sti k v)  $ buttons) <$> st )
   -- Sink check state to elems
   mapM (\(k,e) -> element (fst e) # set UI.checked (isJust . M.lookup k $ vini) # sink UI.checked (isJust . M.lookup k <$> bv  )) buttons
   return (TrivialWidget (tidings bv (flip ($) <$> bv <@> evs) ) dv)

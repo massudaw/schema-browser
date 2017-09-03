@@ -52,8 +52,9 @@ executable threepenny-layer
   build-depends:
      scientific
    , core
-   ,exceptions
+   , exceptions
    , ordered
+   , ekg
    , blaze-builder
    , pipes
    , pipes-parse
