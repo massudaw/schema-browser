@@ -115,7 +115,7 @@ setup smvar args plugList w = void $ do
   let
     expand True = "col-xs-10"
     expand False = "col-xs-12"
-  addBody  [return container]
+  addBody  [container]
   traverseUI (traverse (\inf-> mdo
     let
       kitems = F.toList (pkMap inf)
@@ -125,14 +125,13 @@ setup smvar args plugList w = void $ do
                  in fmap (\(TB1 (SText t)) -> t) . traceShowId .unArray  <$> join (fmap unSOptional' i)
 
     cliIni <- currentValue (facts cliTid)
-    iniKey <-currentValue (facts initKey)
+    iniKey <- currentValue (facts initKey)
     liftIO$ print ("iniKey",iniKey,cliIni)
     let
-      buttonStyle lookDesc k e= do
-         let tableK = k
+      buttonStyle lookDesc k e = do
          label <- UI.div # sink0 UI.text (fmap T.unpack $ facts $ lookDesc  <*> pure k)  # set UI.class_ "fixed-label col-xs-11"
-         state <- element e  # set UI.class_ "col-xs-1"
-         UI.div # set children[state, label] # set  UI.class_ "col-xs-12"
+         element e # set UI.class_ "col-xs-1"
+         UI.label # set children [e , label] # set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
 
     bset <- tableChooser inf  kitems (fst <$> tfilter ) (snd <$> tfilter)  ((schemaName inf)) (snd (username inf)) (pure iniKey)
 
@@ -206,11 +205,11 @@ setup smvar args plugList w = void $ do
                 i -> errorWithStackTrace (show i)
                     ) ((,) <$> triding metanav <*> triding bset)
               return bdo# set UI.style [("height","90vh"),("overflow","auto")]
-              return  (buttonStyle,const True)
+              return  (buttonStyle, const True)
         "Browser" -> do
               subels <- chooserTable  inf  bset cliTid  cli
               element bdo  # set children  subels # set UI.style [("height","90vh"),("overflow","auto")]
-              return  (buttonStyle, const True  )
+              return  (buttonStyle, const True)
         i -> errorWithStackTrace (show i)
          )  (triding nav)
     return tfilter
@@ -457,7 +456,7 @@ testPlugin s t p  = do
   print $ liftAccessU inf t i
   print $ liftAccessU inf t o
 
-testCalls = testWidget (return $ do
+testCalls = testWidget (do
   setCallBufferMode BufferAll
   i <- runFunction (ffi "var a= 1")
   i <- callFunction (ffi "2")

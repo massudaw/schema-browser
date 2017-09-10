@@ -222,10 +222,10 @@ chooserTable inf bset cliTid cli = do
     let
     ui$do
       i <-liftIO$ getWindow body
-      ref <- prerefTable (meta inf ) (lookTable (meta inf ) "clients")
       now <- liftIO$ getCurrentTime
       let cpatch = liftPatch (meta inf) "clients" $ addTable  (wId i) now table ix
           dpatch now = liftPatch (meta inf) "clients" $ removeTable (wId i) now table ix
+      ref <- prerefTable (meta inf ) (lookTable (meta inf ) "clients")
       putPatch (patchVar ref) [PatchRow cpatch]
       registerDynamic(do
         now <- getCurrentTime
@@ -293,7 +293,7 @@ viewerKey inf table tix cli cliTid = do
 
   (cru,pretdi) <- crudUITable inf reftb [] [] (allRec' (tableMap inf) table) tds
   let pktds = fmap getPKM <$> tds
-  dbmeta  <- liftIO$ prerefTable (meta inf)(lookTable (meta inf ) "clients")
+  dbmeta  <- ui $ prerefTable (meta inf)(lookTable (meta inf ) "clients")
   w  <- askWindow
   let diffpk = diffEvent (facts pktds ) (rumors pktds)
   ixpk <- ui $ accumB 0 (pure (+1) <@diffpk)

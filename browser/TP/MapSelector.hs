@@ -62,23 +62,22 @@ removeLayers el tname = runFunction $ ffi "removeLayer(%1,%2)" el tname
 
 createBounds el tname evs= runFunction $ ffi "createBounds(%1,%3,%2)" el evs tname
 createLayers el tname evs= runFunction $ ffi "createLayer(%1,%3,%2)" el evs tname
-calendarCreate el Nothing evs= runFunction $ ffi "createMap(%1,null,null,%2)" el evs
-calendarCreate el (Just (ne,sw)) evs= runFunction $ ffi "createMap(%1,%2,%3,%4)" el  (show ne) (show sw) evs
-
+mapCreate el Nothing = runFunction $ ffi "createMap(%1,null,null,null)" el
+mapCreate el (Just (ne,sw)) = runFunction $ ffi "createMap(%1,%2,%3,null)" el  (show ne) (show sw)
 
 idx inf c v@(m,k) = indexField ( liftAccess inf (_kvname m) (keyRef c))  v
 
 mapWidgetMeta  inf = do
-  {-importUI
-      [js "leaflet.js"
-      ,css "leaflet.css"
-      ,js "leaflet-svg-markers.min.js"
-      ]-}
+    importUI
+      =<< sequence
+        [js "leaflet.js"
+        ,css "leaflet.css"
+        ,js "leaflet-svg-markers.min.js"
+        ]
     let
       schemaPred2 = [(keyRef "schema",Left (int (schemaId inf),Equals))]
     (_,(_,evMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred2
     (_,(_,eventMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
-    cliZone <- jsTimeZone
     return $ (\e ->
           let
               Just (TB1 (SText tname)) = unSOptional' $ _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
@@ -98,16 +97,25 @@ mapWidgetMeta  inf = do
               convField i  = errorWithStackTrace (show i)
           in ("#" <> renderShowable color ,table,efields,evfields,proj)) <$>  ( G.toList evMap)
 
-legendStyle dashes lookDesc table b
-            =  do
-              let item = M.lookup table  (M.fromList  $ fmap (\i@((a,b,c,_,_))-> (b,i)) dashes)
-              maybe UI.div (\(k@((c,_,_,_,_))) ->
-                UI.div # set items [UI.div
-                  # set items [element b # set UI.class_ "col-xs-1", UI.div # sink text  (T.unpack . ($table) <$> facts lookDesc) #  set UI.class_ "fixed-label col-xs-11" # set UI.style [("background-color",c)] ]
-                  # set UI.style [("background-color",c)]]) item
+legendStyle dashes lookDesc table b = maybe empty render item
+  where
+    empty = UI.div # set UI.style [("display", "none")]
+    render (c, _, _, _, _) = do
+      element b # set UI.class_ "col-xs-1"
+      label <-
+        UI.div # sink text (T.unpack . ($table) <$> facts lookDesc) #
+        set UI.class_ "fixed-label col-xs-11"
+      UI.label # set children [b, label] #
+        set UI.style [("background-color", c)] #
+        set UI.class_ "table-list-item" #
+        set UI.style [("display", "-webkit-box")]
+    item =
+      M.lookup table (M.fromList $ fmap (\i@((a, b, c, _, _)) -> (b, i)) dashes)
+
 mapSelector
-  :: (A.ToJSON a) =>
+  :: A.ToJSON a =>
      InformationSchema
+     -> Tidings (Maybe (TBPredicate Key Showable))
      -> (String,
          TableK Key,
          Non.NonEmpty (FTB Showable),
@@ -118,19 +126,19 @@ mapSelector
      -> (Event ( [Double], [Double]),
          Tidings (Maybe ([Double], [Double])))
      -> UI (TrivialWidget (Maybe (TBData Key Showable)))
-mapSelector inf selected calendarT sel (cposE,positionT) = do
-        innerCalendar <- UI.div # set UI.style [("height","250px"),("width","100%")]
+mapSelector inf pred selected mapT sel (cposE,positionT) = do
+        innermap <- UI.div # set UI.style [("height","250px"),("width","100%")]
 
-        (eselg,hselg) <- ui$newEvent
-        (egselg,hgselg) <- ui$newEvent
+        (eselg,hselg) <- ui $ newEvent
+        (egselg,hgselg) <- ui $ newEvent
 
         let
           fields = selected ^. _3
-          evc = eventClick innerCalendar
+          evc = eventClick innermap
           boundSel :: FTB Showable ->  TBData Key Showable -> Maybe (Interval Showable)
           boundSel (TB1 (SText field)) sel = (\(G.FTBNode i) -> i) . G.bound <$> indexFieldRec (liftAccess inf (tableName (selected ^._2 )) $ head $ indexer field)   sel
           boundsSel :: Tidings (Maybe (Interval Showable ))
-          boundsSel = join . traceShowId . fmap (\j -> fmap ((\(G.FTBNode i) -> i).G.union) . fmap S.fromList  . traceShowId . nonEmpty . fmap leftEntry .  catMaybes .  fmap (flip boundSel  j) . F.toList  $  fields) <$> sel
+          boundsSel = join . fmap (\j -> fmap ((\(G.FTBNode i) -> i).G.union) . fmap S.fromList  . nonEmpty . fmap leftEntry .  catMaybes .  fmap (flip boundSel  j) . F.toList  $  fields) <$> sel
           leftEntry :: Interval Showable -> G.Node (FTB Showable)
           leftEntry i  = (G.FTBNode i)
         onEvent cposE (liftIO . hgselg)
@@ -139,7 +147,7 @@ mapSelector inf selected calendarT sel (cposE,positionT) = do
         let
             pb = (join $ convertInter <$> p)
             positionE = (unionWith const (Just <$> egselg ) ( join . fmap convertInter <$> rumors boundsSel) )
-            setPosition = (\v@(sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3)" innerCalendar  sw ne)
+            setPosition = (\v@(sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3)" innermap  sw ne)
 
         positionB <- ui $stepper  pb  positionE
 
@@ -147,30 +155,31 @@ mapSelector inf selected calendarT sel (cposE,positionT) = do
 
         let
           positionT = (tidings positionB positionE)
-          pcal = liftA2 (,)   positionT calendarT
+          pcal = liftA2 (,)   positionT mapT
 
-        calendarCreate  innerCalendar (Nothing :: Maybe ([Double],[Double])) ("[]"::String)
-        onEvent (moveend innerCalendar) (liftIO . hgselg)
+        mapCreate  innermap (Nothing :: Maybe ([Double],[Double]))
+        onEvent (moveend innermap) (liftIO . hgselg)
         onEvent ( filterJust $ join . fmap convertInter <$> rumors boundsSel)  setPosition
-        codep <- traverseUI (liftIO . traverse (\(sw,ne) ->toCode $ (ffi "setPosition(%1,%2,%3)" innerCalendar sw ne :: JSFunction ()))) positionT
-        pscript <- mkElement "script" # sink text (maybe "" id .traceShowId <$> facts codep)
+        codep <- traverseUI (liftIO . traverse (\(sw,ne) ->toCode $ (ffi "setPosition(%1,%2,%3)" innermap sw ne :: JSFunction ()))) positionT
+        pscript <- mkElement "script" # sink text (maybe "" id <$> facts codep)
 
         fin <- (\(_,tb,fields,efields,proj) -> do
           let
             tname = tableName tb
-          traverseUI (\(positionB,calT)-> do
-            let pred = WherePredicate $ predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)
+          traverseUI (\(predi,(positionB,calT))-> do
+            let pred = WherePredicate $ AndColl $ [predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)] ++ maybeToList (unPred <$> predi)
+                unPred (WherePredicate e)  =e
                 fieldKey (TB1 (SText v))=  v
             reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
             let v = reftb ^. _3
             let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
             onEvent evsel (liftIO . hselg)
             traverseUI (\i ->
-              createLayers innerCalendar tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   i)) v
-            ) pcal
+              createLayers innermap tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   i)) v
+            ) $ liftA2 (,) pred pcal
           ) selected
         bselg <- ui $ stepper Nothing (fmap snd <$> eselg )
-        cal <- UI.div  # set children [ innerCalendar, pscript]
+        cal <- UI.div  # set children [ innermap, pscript]
         return (TrivialWidget (tidings bselg (fmap snd <$> eselg)) cal)
 
 readMapPK v = case unsafeFromJSON v of
@@ -185,5 +194,5 @@ eventClick el = filterJust $ readMapPK <$> domEvent "mapEventClick" el
 
 
 moveend :: Element -> Event ([Double],[Double])
-moveend el = filterJust $ traceShowId . readPosition <$>  domEvent "moveend" el
+moveend el = filterJust $ readPosition <$>  domEvent "moveend" el
 

@@ -42,6 +42,7 @@ library
     TP.QueryWidgets
     TP.Widgets
     TP.Agenda
+    TP.AgendaSelector
     TP.Chart
     TP.Map
     TP.MapSelector

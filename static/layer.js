@@ -160,7 +160,7 @@ function createLayer(ref,tname,features){
 }
 
 
-function createMap (ref,nej,swj,features){
+function createMap (ref,nej,swj){
   ref.mymap = L.map(ref);
   ne = JSON.parse(nej);
   sw  = JSON.parse(swj);

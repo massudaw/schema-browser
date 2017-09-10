@@ -1,6 +1,14 @@
 .hot-container p { margin-top: 10px; }
 a { text-decoration: none; margin: 0 10px; }
 
+label {
+  margin:0px
+}
+input[type="checkbox"]{
+  width: 16px;
+  height: 22px;
+  margin: 0;
+}
 .hot-container {
   min-height: 100px;
   margin-top: 100px;

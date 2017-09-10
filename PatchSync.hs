@@ -71,10 +71,10 @@ decoder smvar  = forever go
         if (a /= "")
           then do
             i <- P.decode
-            either (\_  -> unDraw a ) (\e -> do
-              (t,inf,tb,o) <- lift . atomically . out $ e
-              lift $ runDynamic $ transactionNoLog inf  $ applyBackend o
-              lift $ runDynamic $ transaction (meta inf ) $ applyBackend (liftPatchRow (meta inf) "master_modification_table" $ CreateRow t)
+            either (\_  -> unDraw a ) (\e -> void . lift . runDynamic $ do
+              (t,inf,tb,o) <- out $ e
+              transactionNoLog inf  $ applyBackend o
+              transaction (meta inf ) $ applyBackend (liftPatchRow (meta inf) "master_modification_table" $ CreateRow t)
               return ()
              ) i
 
@@ -84,13 +84,13 @@ decoder smvar  = forever go
     out (Push (CreateRow t)) = do
       let
         (s,tb, mod ) = decodeTableModification t
-      inf <- justError ("no schema " ++ show s).  HM.lookup s <$> (readTVar .globalRef  =<< readTVar smvar)
+      inf <- liftIO $atomically$ justError ("no schema " ++ show s).  HM.lookup s <$> (readTVar .globalRef  =<< readTVar smvar)
       let
         table = lookTable inf  tb
-      ref <- refTableSTM inf table
+      ref <- prerefTable inf table
       let
         TableModification _ _ p = mod inf
-      putPatchSTM (patchVar ref) [p]
+      liftIO $ atomically $ putPatchSTM (patchVar ref) [p]
       return (t,inf,table ,p)
 
 
@@ -123,7 +123,7 @@ sequenceP = forever $ do
 
 input smvar = do
   meta <- metaInf smvar
-  masterdbref <- prerefTable meta (lookTable meta "master_modification_table")
+  (masterdbref ,_)<- runDynamic $ prerefTable meta (lookTable meta "master_modification_table")
   ((dbref ,(_,ini)),_)<- runDynamic $ transactionNoLog meta $ selectFrom "master_modification_table" Nothing Nothing [] (WherePredicate $AndColl[])
   let dat = G.getEntries ini
       latest = maybe (G.Idex [TB1 (SNumeric 0)]) (maximum) $ nonEmpty (fmap G.leafPred dat)

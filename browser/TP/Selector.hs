@@ -151,7 +151,7 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
               tables
               (tidings iniBehaviour iniEvent)
               buttonString
-              ((\lg visible i j -> (if visible  i then (lg lookDescT i j # set UI.class_ "table-list-item" ) else UI.div # set children [j] ) # set UI.style (noneDisplay "-webkit-box" $ visible i)) <$> legendStyle <*> visible )
+              ((\lg visible i j -> if visible  i then (lg lookDescT i j ) else UI.div # set UI.style [("display","none")] )<$> legendStyle <*> visible )
     return bset
   let
     ordRow orderMap pkset =  field
@@ -260,7 +260,7 @@ offsetFieldFiltered  initT eve maxes = do
   init <- currentValue (facts initT)
   offset <- UI.span# set (attr "contenteditable") "true" #  set UI.style [("width","50px")]
 
-  lengs  <- mapM (\max -> UI.span # sink text (("/" ++) .show  <$> facts max )) maxes
+  lengs  <- mapM (\max -> UI.span # sinkDiff text (("/" ++) .show  <$> max )) maxes
   offparen <- UI.div # set children (offset : lengs) # set UI.style [("margin-left","4px") , ("margin-right","4px"),("text-align","center")]
 
   enter  <- UI.onChangeE offset
@@ -281,7 +281,7 @@ offsetFieldFiltered  initT eve maxes = do
     let
       filt =  filterJust $ diff <$> offsetB <*> max <@> ev
       ev2 = (fmap concatenate $ unions [fmap const offsetE,filt ])
-    offsetB <- ui $ accumB 0 (  ev2)
+    offsetB <- ui $ accumB 0 ev2
     return (offsetB,ev2)
   element offset # sink UI.text (show <$> offsetB)
   let

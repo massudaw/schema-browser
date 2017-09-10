@@ -311,7 +311,6 @@ buttonDivSetO ks binit   op el = mdo
     where
       buttonString   bv k = do
         b <- el k # op (not . (k==) <$> bv)
-
         cli <- UI.click b
         let ev = pure k <@ cli
         return (b,ev)
@@ -401,7 +400,7 @@ onEsc el = onkey el (27,False,False,False)
 testPointInRange ui = do
   startGUI defaultConfig {jsPort = Just 8000} (\w -> do
                       e1 <- ui
-                      addBody [element e1]
+                      addBody [e1]
                       return () )
 
 

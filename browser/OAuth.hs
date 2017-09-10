@@ -109,7 +109,7 @@ historyLoad = do
       historyNewId = res ^. key "historyId" . _String
       messages = (lookTable inf "messages")
   liftIO $ print patches
-  ref <- liftIO$ prerefTable inf messages
+  ref <- lift $ prerefTable inf messages
   patchRoute (concat $ patches)
   tb <- lift $ refTable inf messages
   v <- R.currentValue (R.facts $ collectionTid tb)
@@ -128,7 +128,7 @@ historyLoad = do
 patchRoute l = do
   inf <- ask
   mapM (\p@(t,i,l) -> do
-    ref <- liftIO$ prerefTable inf (lookTable inf (_kvname t))
+    ref <- lift $  prerefTable inf (lookTable inf (_kvname t))
     putPatch (patchVar ref) [PatchRow p]) l
 
 

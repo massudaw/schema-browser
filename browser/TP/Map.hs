@@ -1,7 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE RecursiveDo #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 
 module TP.Map (mapWidget,mapWidgetMeta) where
@@ -70,9 +68,10 @@ instance A.ToJSON (Interval Showable) where
 instance A.ToJSON (G.Node (FTB Showable)) where
   toJSON (G.FTBNode i) = A.toJSON i
 
+
 mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
     let
-      calendarT = (,) <$> facts incrementT <#> resolutionT
+      mapT = (,) <$> facts incrementT <#> resolutionT
     dashes <- mapWidgetMeta inf
     mapOpen <- liftIO getCurrentTime
 
@@ -90,57 +89,36 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
               nest (i:xs) = Nested [keyRef (T.pack i)] (Many [nest xs])
       filteringPred  (k,v) row = maybe True (L.isInfixOf (toLower <$> v)  . fmap toLower . renderShowable )   $ (flip indexFieldRec row  k)
       filtering tb res = (\t -> filter (\row -> all (\i -> filteringPred i row) (catMaybes  t  )) )<$> (fmap (parseMany tb ) (triding filterInpT )) <*> fmap G.toList res
-    calendar <-UI.div
+    map <-UI.div
 
     (eselg,hselg) <- ui$newEvent
     start <- ui$stepper Nothing (fmap snd <$> (filterE (maybe False (not .fst)) eselg))
     startD <- UI.div #  sink text (maybe "" (show . G.getIndex) <$> start)
     end <- ui$stepper Nothing (fmap snd <$> filterE (maybe False fst ) eselg)
     endD <- UI.div #  sink text (maybe "" (show . G.getIndex) <$> end)
-    route <- UI.button # set text "route"
-    let inirouteT = "ways"
-    routeT <- UI.input # set value inirouteT
-    erouteT <- UI.valueChange routeT
-    brouteT <- ui$stepper inirouteT erouteT
-    routeE <- UI.click route
-    routeD <- UI.div
-    element routeD # set children [routeT,startD,endD,route]
 
     (positionLocal,h) <- ui $ newEvent
-    let positionE = (unionWith const (rumors prepositionT) positionLocal)
+    let positionE = unionWith const (rumors prepositionT) positionLocal
     pb <- currentValue (facts prepositionT)
     positionB <- ui $stepper  pb positionE
     let positionT = tidings positionB positionE
 
 
-    element body # set children [filterInp,routeD,calendar]
+    element body # set children [filterInp,map]
     let
       calFun selected = do
-        innerCalendar <-UI.div # set UI.id_ "map" # set UI.style [("heigth","450px")]
+        innermap <-UI.div # set UI.id_ "map" # set UI.style [("heigth","450px")]
         let
-          evc = eventClick innerCalendar
-
-        onEvent (filterJust $ liftA3 (,,) <$> start <*> fmap (lookTableM inf. T.pack) brouteT <*> end <@ routeE) (\(s,t,e) -> do
-              l :: [Only Int]<- liftIO$ query (rootconn inf) (fromString $ "select node from pgr_dijkstra('select gid as id ,source,target,cost from " <> T.unpack (schemaName inf <> "." <> tableName t) <> "'::text,  ? , ? ,true)")( fmap ( unTB1 . (\(LeftTB1 (Just i)) -> i) . L.head .F.toList. getPKM) [s,e])
-              let path = zip lo (tail lo)
-                  lo = fmap unOnly l
-                  tb = t
-                  Just proj = fmap (^._5) $ L.find ((==tb).(^._2) ) dashes
-              traverse (\path -> do
-                v <- ui $ refTables' inf tb  Nothing (WherePredicate (OrColl $ (\(i,j) -> AndColl $fmap (PrimColl . first (liftAccess inf (tableName t))) [(   keyRef "source",Left (int i,Equals)), (keyRef "target",Left (int j,Equals))])  <$> path ))
-                traverseUI (\i -> do
-                  createLayers innerCalendar (tableName tb)  (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   G.toList $ i)) (v^._3)
-                  ) (nonEmpty path))
-
+          evc = eventClick innermap
         pb <- currentValue (facts positionT)
         editor <- UI.div
-        element calendar # set children [innerCalendar,editor]
-        calendarCreate  innerCalendar pb ("[]"::String)
-        onEvent (moveend innerCalendar) (liftIO . h. Just)
-        onEvent (filterJust $ rumors prepositionT) (\(sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3)" innerCalendar  sw ne)
+        element map # set children [innermap,editor]
+        mapCreate  innermap pb
+        onEvent (moveend innermap) (liftIO . h. Just)
+        onEvent (filterJust $ rumors prepositionT) (\(sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3)" innermap  sw ne)
 
         fin <- mapM (\(_,tb,fields,efields,proj) -> do
-          let pcal =  liftA2 (,) positionT  calendarT
+          let pcal =  liftA2 (,) positionT  mapT
               tname = tableName tb
           traverseUI (\(positionB,calT)-> do
             let pred = WherePredicate $ predicate inf tb (fmap  fieldKey <$>efields ) (fmap fieldKey <$> Just   fields ) (positionB,Just calT)
@@ -155,7 +133,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
             (el,_) <- crudUITable inf  reftb [] [] (allRec' (tableMap inf) $ lookTable inf tname)  tdi
 
             traverseUI (\i ->
-              createLayers innerCalendar tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   i)) (filtering tb v)
+              createLayers innermap tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   i)) (filtering tb v)
 
             stat <- UI.div  # sinkDiff text (show . M.lookup pred <$>   (reftb ^. _1))
             edit <- UI.div # set children [el] # sink UI.style  (noneShow . isJust <$> tdib)
@@ -168,7 +146,3 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
     let calInp = (\i -> filter (flip L.elem (concat (F.toList i)) .  (^. _2)) dashes  )<$> sel
     onFFI "$(document).ready((%1))" (evalUI body $   traverseUI calFun calInp)
     return (legendStyle dashes ,dashes)
-
-
-
-

@@ -546,7 +546,6 @@ liftAccessF lk inf tname (Nested i c) = Nested ref (liftAccessF lk rinf (snd l)<
     l = case n of
           (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
           (Path _ rel@(FKInlineTable  l  ) ) ->  l
-
 liftAccessF _ _ _  i = errorWithStackTrace (show i)
 
 liftAccess = liftAccessF lookupKeyName
@@ -557,7 +556,6 @@ lookAccess :: InformationSchema -> Text -> (Access Text , AccessOp Showable ) ->
 lookAccess inf tname l = Le.over (Le._1) (liftAccess inf tname)  l
 
 
--- genPredicateFull i :: UnaryOp -> Access k -> Maybe (BoolCollection  (Access
 genPredicateFull
   :: Show a =>
      t

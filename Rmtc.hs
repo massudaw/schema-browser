@@ -162,7 +162,7 @@ checkOnibus inf = do
 
   _ <- mapM (\i -> execute conn "INSERT INTO transito.destino_linha (linha,name) VALUES (?,?)" i `catchAll` (\e -> return 0)) (nub $ fmap (\i -> (numeroLinha $ linha i , nomeDestino $ destino i )) dec)
   _ <- mapM (\i -> execute conn "INSERT INTO transito.registro_onibus (onibus,horario,linha,geocode,situacao,destino) VALUES (?,?,?,?,?,?)" i ) (nub $ fmap (\i -> (numeroOnibus i,t,numeroLinha $ linha i ,Position (fst $ position i, snd $ position i,0),situacao i, nomeDestino $ destino i )) dec)
-  ref <-prerefTable inf (lookTable inf "max_registro_onibus")
+  (ref ,_)<- runDynamic $ prerefTable inf (lookTable inf "max_registro_onibus")
   print "start patch"
   (_,l) <- runDynamic $ refTables' inf (lookTable inf "max_registro_onibus") Nothing (WherePredicate (AndColl [ PrimColl (liftAccess inf "max_registro_onibus"$ keyRef "onibus",Left (ArrayTB1 $ Non.fromList ( (\i -> int (fromIntegral $ numeroOnibus i)) <$> dec) , Flip $ AnyOp Equals ))]))
   sequence l
