@@ -201,9 +201,6 @@ instance NFData Sess.Session where
 
 instance Binary KTypePrim
 instance Binary a => Binary (KType a)
-
-
-
 instance Binary Position
 instance NFData Position
 instance Binary Bounding
@@ -473,10 +470,13 @@ tableName = rawName
 translatedName tb =  maybe (rawName tb) id (rawTranslation tb )
 
 
-data TableModification p
+type TableModification p = TableModificationK Table p
+data TableModificationK k p
   = TableModification
-  { tableId :: (Maybe Int)
-  , tableObj :: Table
+  { tableId :: Maybe Int
+  , tableTime :: LocalTime
+  , tableUser :: Text
+  , tableObj :: k
   , tableDiff ::  p
   }
   deriving(Eq,Show,Functor,Generic)

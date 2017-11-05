@@ -5,6 +5,7 @@ import Types.Patch
 import qualified Types.Index as G
 import Utils
 import Reactive.Threepenny
+import Serializer
 import Control.Exception
 import Network.Socket hiding (send,recv)
 import Network.Socket.ByteString
@@ -83,15 +84,13 @@ decoder smvar  = forever go
 
     out (Push (CreateRow t)) = do
       let
-        (s,tb, mod ) = decodeTableModification t
+        TableModification _ _ _ (s,tb) p = decodeT t
       inf <- liftIO $atomically$ justError ("no schema " ++ show s).  HM.lookup s <$> (readTVar .globalRef  =<< readTVar smvar)
       let
         table = lookTable inf  tb
       ref <- prerefTable inf table
-      let
-        TableModification _ _ p = mod inf
-      liftIO $ atomically $ putPatchSTM (patchVar ref) [p]
-      return (t,inf,table ,p)
+      liftIO $ atomically $ putPatchSTM (patchVar ref) [liftPatchRow (meta inf) tb p]
+      return (t,inf,table ,liftPatchRow (meta inf) tb p)
 
 
 

@@ -40,7 +40,7 @@ liftA4 f  i j k  l= f <$> i <*> j <*> k <*> l
 
 tableToToken :: (Show k ,KeyString k ,Monad m) => Parser
                      (Kleisli (ReaderT (Maybe (TBData k Showable)) m))
-                     [Access T.Text]
+                     (Union (Access T.Text))
                      ()
                      (Maybe OAuth2Tokens)
 tableToToken = atR "token" (liftA4 tokenToOAuth <$> idxM "accesstoken" <*> idxM "refreshtoken" <*> idxM "expiresin" <*> idxM "tokentype" )

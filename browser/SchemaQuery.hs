@@ -48,6 +48,7 @@ module SchemaQuery
 import Graphics.UI.Threepenny.Core (mapEventDyn)
 
 import RuntimeTypes
+import Data.Semigroup(Semigroup)
 import Control.Arrow (first)
 import Control.DeepSeq
 import Step.Host
@@ -150,7 +151,7 @@ applyBackend (PatchRow p@(m,pk@(G.Idex pki),i)) = do
    inf <- ask
    let table = lookTable inf (_kvname m)
    ref <- lift $ prerefTable inf table
-   (sidx,v,_,_) <- liftIO $ atomically $ readState inf (WherePredicate (AndColl []),keyFastUnique <$> _kvpk m) (mapTableK keyFastUnique table ) ref
+   (sidx,v,_,_) <- liftIO $ atomically $ readState (WherePredicate (AndColl []),keyFastUnique <$> _kvpk m) (mapTableK keyFastUnique table ) ref
    let oldm = mapKey' (recoverKey inf ) <$>  G.lookup pk v
    old <- maybe (do
      (_,(i,o)) <- selectFrom' table Nothing Nothing [] (WherePredicate (AndColl ((\(k,o) -> PrimColl (keyRef k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk m) pki)))
@@ -202,7 +203,7 @@ getFKRef inf predtop rtable (evs,me,old) v (Path r (FKInlineTable  j )) =  do
                                 go pred (AndColl l) = AndColl <$> nonEmpty (catMaybes $ go pred <$> l)
                                 go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
                                 go pred (PrimColl l) = PrimColl <$> pred l
-                                test f (Nested p (Many[i] ),j)  = if (iprodRef <$> p) == f then Just (i ,j) else Nothing
+                                test f (Nested p (Many[One i] ),j)  = if (iprodRef <$> p) == f then Just (i ,j) else Nothing
                                 -- test f (Nested p i ,j)  = if (iprodRef <$> p) == f then Just (i ,j) else Nothing
                                 test v f = Nothing
                              in  fmap WherePredicate (go (test (S.toList r)) l)
@@ -240,7 +241,7 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                             go pred (AndColl l) = AndColl <$> nonEmpty (catMaybes $ go pred <$> l)
                             go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
                             go pred (PrimColl l) = PrimColl <$> pred l
-                            test f (Nested p (Many[i] ),j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (_keyFunc $ keyType $ iprodRef $ L.head p))) j) else Nothing
+                            test f (Nested p (Many[One i] ),j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (_keyFunc $ keyType $ iprodRef $ L.head p))) j) else Nothing
                             test v f = Nothing
                             removeArray (KOptional :i)  o = removeArray i o
                             removeArray (KArray : i)  (AnyOp o) = o
@@ -299,10 +300,10 @@ getFKS
      -> TableK Key
      -> [TBData Key Showable]
      -> TransactionM
-          ([(SqlOperation,Event [RowPatch Key Showable])],TBData Key Showable -> Either
-                ([Compose Identity (TB Identity) Key Showable],[Rel Key])
-                (TBData Key Showable),
-           S.Set Key)
+        ([(SqlOperation,Event [RowPatch Key Showable])],TBData Key Showable -> Either
+              ([Compose Identity (TB Identity) Key Showable],[Rel Key])
+              (TBData Key Showable),
+         S.Set Key)
 getFKS inf predtop table v = F.foldl' (\m f  -> m >>= (\i -> getFKRef inf predtop  table i v f)) (return ([],return ,S.empty )) $ sorted -- first <> second
   where
     sorted = P.sortBy (P.comparing (RelSort . F.toList .  pathRelRel))  (S.toList (rawFKS table))
@@ -367,7 +368,7 @@ tableLoader table  page size presort fixed = do
 
 
           (res ,x ,o) <- (listEd $ schemaOps inf) (tableNonRef2 tbf) page size presort fixed (unestPred predtop)
-          (evs,resFKS ,_)<- getFKS inf predtop table res
+          (evs,resFKS ,_) <- getFKS inf predtop table res
           let result = fmap resFKS   res
           liftIO $ when (not $ null (lefts result)) $ do
             print ("lefts",tableName table ,lefts result)
@@ -463,7 +464,7 @@ pageTable flag method table page size presort fixed = do
     res <- if (isNothing (join $ fmap (M.lookup pageidx . snd) hasIndex)) || sq < pageidx -- Ignora quando página já esta carregando
          then do
            (sidx,reso ,nchan,iniVar) <- liftIO $ atomically $
-             readState inf (fixedU ,rawPK tableU) tableU dbvar
+             readState (fixedU ,rawPK tableU) tableU dbvar
            let
                  freso =  ffixed (sidx,reso)
                  predreq = (fixedU,G.Contains (pageidx - pagesize,pageidx))
@@ -495,7 +496,7 @@ pageTable flag method table page size presort fixed = do
                return $ Left (fromJust $ preloaded)
              Nothing -> do
                 (sidx,reso ,nchan,iniVar) <- liftIO $ atomically $
-                  readState inf (fixedU ,rawPK tableU) tableU dbvar
+                  readState (fixedU ,rawPK tableU) tableU dbvar
                 return $ Right(fixedmap , sidx,iniVar,nchan,ffixed (sidx,reso))
     case res of
       Left i -> return i
@@ -522,20 +523,19 @@ readIndex dbvar = do
     return (F.foldl' (flip conv) ini patches,nchan)
 
 readState
-  :: (Ord k ,NFData v,NFData k,Eq (Index v), Ord k, Ord v, Show k, Show v,
-      G.Predicates (TBIndex v), Patch v, Index v ~ v) =>
-        InformationSchema
-        -> (TBPredicate k Showable, [k])
+  :: (G.Range v, ConstantGen (FTB v), G.Positive (G.Tangent v), Semigroup (G.Tangent v),G.Affine v, Ord (G.Tangent v),Ord k ,G.Predicates (TBIndex v),NFData v,NFData k,
+      PatchConstr k v, Index v ~ v) =>
+        (TBPredicate k Showable, [k])
       -> TableK k
      -> DBRef k v
      -> STM ([SecondaryIndex k v],TableIndex k v, TChan [RowPatch k v], TVar ([SecondaryIndex k v],TableIndex k v))
-readState inf fixed table dbvar = do
+readState fixed table dbvar = do
   var <-readTVar (collectionState dbvar)
   chan <- cloneTChan (patchVar dbvar)
   patches <- takeMany' chan
   let
       filterPred = nonEmpty . filter (\d -> splitMatch fixed (indexPK d) && indexFilterR (fst fixed) d )
-      update l v = F.foldl' (\i j-> fromMaybe i $  applyTableRep inf table i j)   l v
+      update l v = F.foldl' (\i j-> fromMaybe ((error $ "error applying"  ++ (show ( i,j)) ))  $  applyTableRep i j)   l v
       (sidxs, pidx) = update var (concat patches)
   return (sidxs,pidx,chan,collectionState dbvar)
 
@@ -640,7 +640,7 @@ convertChanTidings
     (Tidings (TableRep Key Showable),Event [RowPatch Key Showable])
 convertChanTidings inf table fixed evdep dbvar = do
       (sidx,ini,nchan,inivar) <- liftIO $atomically $
-        readState inf fixed  table dbvar
+        readState fixed  table dbvar
       convertChanTidings0 inf table fixed evdep (sidx,ini) inivar nchan
 
 
@@ -662,8 +662,7 @@ convertChanTidings0 inf table fixed evdep ini iniVar nchan = mdo
     let
       evdiff = filterE (not.L.null) $ unionWith mappend evdep (fmap (firstPatchRow (recoverKey inf)) <$> evdiffp)
       update :: TableRep Key Showable -> [RowPatch Key Showable] -> TableRep Key Showable
-      -- update l v | traceShow (ti,tableName table,v)  False = undefined
-      update l v = F.foldl' (\i j-> fromMaybe i $  applyTableRep inf (mapTableK (recoverKey inf)table) i j)   l  v
+      update l v = F.foldl' (\i j-> fromMaybe (error $ "error applying"  ++ (show ( i,j)) ) $  applyTableRep  i j)   l  v
       recoverIni :: TableRep KeyUnique Showable -> TableRep Key Showable
       recoverIni (i,j)= (first (fmap (recoverKey inf )) . fmap (fmap (fmap (fmap (G.mapAttributePath (recoverKey inf ))))) <$> i, recover j)
         where recover = fmap (mapKey' (recoverKey inf))
@@ -691,6 +690,7 @@ createRow (PatchRow i) = create i
 
 fullInsert = Tra.traverse fullInsert'
 
+
 fullInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
 -- fullInsert' i | traceShow  ("fullinsert",i) False = undefined
 fullInsert' (k1,v1) = do
@@ -702,7 +702,7 @@ fullInsert' (k1,v1) = do
    (_,(_,l)) <- tableLoader  tb Nothing Nothing [] mempty
    if  (isNothing $ flip G.lookup l $ tbpredM (_kvpk k1)  ret ) && rawTableType tb == ReadWrite
       then catchAll (do
-        i@(Just (TableModification _ _ tb))  <- insertFrom  ret
+        i@(Just (TableModification _ _ _ _ tb))  <- insertFrom  ret
         tell (maybeToList i)
         return $ createRow tb) (\e -> do
           let pred = WherePredicate (AndColl ((\(k,o) -> PrimColl (keyRef k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk k1) pki))
@@ -726,11 +726,11 @@ noInsert' (k1,v1)   = do
 transactionLog :: InformationSchema -> TransactionM a -> Dynamic [TableModification (RowPatch Key Showable)]
 transactionLog inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
   (md,_,mods)  <- runRWST log inf M.empty
-  let aggr = foldr (\(TableModification id t f) m -> M.insertWith mappend t [TableModification id t f] m) M.empty mods
+  let aggr = foldr (\(TableModification id ts u  t f) m -> M.insertWith mappend t [TableModification id ts u t f] m) M.empty mods
   agg2 <- Tra.traverse (\(k,v) -> do
     ref <- prerefTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
     nm <- mapM (logger (schemaOps inf) inf) v
-    putPatch (patchVar ref ) $ (\(TableModification _ _ p) -> p) <$> nm
+    putPatch (patchVar ref ) $ (\(TableModification _ _ _ _ p) -> p) <$> nm
     return nm
     ) (M.toList aggr)
   return $ concat $ agg2
@@ -739,10 +739,10 @@ transactionLog inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
 transactionNoLog :: InformationSchema -> TransactionM a -> Dynamic a
 transactionNoLog inf log = do -- withTransaction (conn inf) $ do
   (md,_,mods)  <- runRWST log inf M.empty
-  let aggr = foldr (\tm@(TableModification id t f) m -> M.insertWith mappend t [tm] m) M.empty mods
+  let aggr = foldr (\tm@(TableModification id _ _ t f) m -> M.insertWith mappend t [tm] m) M.empty mods
   Tra.traverse (\(k,v) -> do
     ref <- prerefTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
-    putPatch (patchVar ref ) $ (\(TableModification id t f)-> f) <$>v
+    putPatch (patchVar ref ) $ (\(TableModification id _ _ t f)-> f) <$>v
     ) (M.toList aggr)
   return md
 
@@ -757,11 +757,11 @@ withDynamic  f i =  do
 transaction :: InformationSchema -> TransactionM a -> Dynamic a
 transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
   (md,_,mods)  <- runRWST log inf M.empty
-  let aggr = foldr (\tm@(TableModification id t f) m -> M.insertWith mappend t [tm] m) M.empty mods
+  let aggr = foldr (\tm@(TableModification id _ _ t f) m -> M.insertWith mappend t [tm] m) M.empty mods
   Tra.traverse (\(k,v) -> do
     ref <- prerefTable (if rawSchema k == schemaName inf then inf else justError "no schema" $ HM.lookup ((rawSchema k ))  (depschema inf) ) k
     nm <- mapM (logger (schemaOps inf) inf) v
-    putPatch (patchVar ref ) $ (\(TableModification id t f)-> f) <$> nm
+    putPatch (patchVar ref ) $ (\(TableModification id _ _ t f)-> f) <$> nm
     ) (M.toList aggr)
   return md
 
@@ -806,6 +806,7 @@ tbDiffEdit i j
   | otherwise = tbEdit i j
 
 tbEdit :: Column Key Showable -> Column Key Showable -> TransactionM (Column Key Showable)
+tbEdit i j | traceShow (i,j) False = undefined
 tbEdit (Fun a1 _ a2) (Fun k1 rel k2)= return $ (Fun k1 rel k2)
 tbEdit (Attr a1 a2) (Attr k1 k2)= return $ (Attr k1 k2)
 tbEdit (IT a1 a2) (IT k2 t2) = IT k2 <$> noInsert t2
@@ -986,7 +987,7 @@ createTableRefs inf re i = do
         atomically $ do
           patches <- takeMany nmdiff
           when (not $ L.null $ concat patches) $
-            modifyTVar' collectionState (\e -> L.foldl' (\i j  -> fromMaybe i $applyTableRep inf table i j) e (concat patches))
+            modifyTVar' collectionState (\e -> L.foldl' (\i j  -> fromMaybe ((error $ "error applying"  ++ (show ( i,j)) )) $applyTableRep i j) e (concat patches))
         )  (\e -> atomically ( takeMany nmdiff ) >>= (\d ->  putStrLn $ show (e :: SomeException,d)<>"\n"))
     registerDynamic (killThread t1)
     let dbref = DBRef nmdiff midx nchanidx collectionState
@@ -1073,7 +1074,7 @@ writeTable :: InformationSchema -> String -> Table -> DBRef KeyUnique Showable -
 writeTable inf s t v = do
   let tname = s <> "/" <> (fromString $ T.unpack (tableName t))
   print ("Dumping Table: " <> tname)
-  (_,iv,_,_) <- atomically $ readState inf mempty (mapTableK keyFastUnique t) v
+  (_,iv,_,_) <- atomically $ readState mempty (mapTableK keyFastUnique t) v
   (iidx ,_)<- atomically $ readIndex v
   let sidx = first (mapPredicate (keyPosition.recoverKey inf))  <$> M.toList iidx
       sdata = fmap (\i -> mapKey' keyPosition . either (error . ("can't typecheck row : \n " ++) . unlines ) id. typecheck (typeCheckTable (tablePK t)) .mapKey' (recoverKey inf).tableNonRef' $ i) $  iv

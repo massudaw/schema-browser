@@ -97,7 +97,7 @@ tableUsage inf orderMap selection table = (L.elem table (M.keys selection), tabl
 
 tableChooser :: InformationSchemaKV Key Showable
                       -> [Table]
-                      -> Tidings ( Tidings (Table -> Text) -> Table -> (Element) -> UI Element)
+                      -> Tidings ( Tidings (Table -> Text) -> Table -> (Element) -> UI (Maybe Element))
                       -> Tidings (TableK Key -> Bool)
                       -> Text
                       -> Text
@@ -151,7 +151,12 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
               tables
               (tidings iniBehaviour iniEvent)
               buttonString
-              ((\lg visible i j -> if visible  i then (lg lookDescT i j ) else UI.div # set UI.style [("display","none")] )<$> legendStyle <*> visible )
+              ((\lg visible i j -> do
+                o <-  if visible  i
+                        then lg lookDescT i j
+                        else return Nothing
+                maybe (UI.div # set UI.style [("display","none")]) return o
+               )<$> legendStyle <*> visible )
     return bset
   let
     ordRow orderMap pkset =  field

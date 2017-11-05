@@ -412,7 +412,7 @@ indexLabel p@(IProd b l) v =
     case findAttr l v of
       Just i -> getCompose i
       Nothing -> errorWithStackTrace "no fk"
-indexLabel  n@(Nested l (Many [nt])) v =
+indexLabel  n@(Nested l (Many [One nt])) v =
   case   findFK (iprodRef <$> l) v of
       Just a ->  case getCompose a of
         Unlabeled i -> indexLabel  nt.head . F.toList . _fkttable $ i
@@ -421,7 +421,7 @@ indexLabel  n@(Nested l (Many [nt])) v =
 -- indexLabel  (ISum [nt]) v = flip (indexLabel ) v <$> nt
 indexLabel  i v = errorWithStackTrace (show (i, v))
 
-indexLabelU  (Many [nt]) v = flip (indexLabel ) v $ nt
+indexLabelU  (Many [One nt]) v = flip (indexLabel ) v $ nt
 
 
 
@@ -482,8 +482,9 @@ indexFieldL e c n@(Nested l nt) v =
 
 indexFieldL e c i v = errorWithStackTrace (show (i, v))
 
-indexFieldLU e c (Many nt) v = concat $ flip (indexFieldL e c) v <$> nt
-indexFieldLU e c (ISum nt) v = concat $ flip (indexFieldL e c) v <$> nt
+indexFieldLU e c (Many nt) v = concat $ flip (indexFieldLU e c) v <$> nt
+indexFieldLU e c (ISum nt) v = concat $ flip (indexFieldLU e c) v <$> nt
+indexFieldLU e c (One nt) v = flip (indexFieldL e c) v  nt
 
 utlabel (Right  e) c idx = result e idx
   where

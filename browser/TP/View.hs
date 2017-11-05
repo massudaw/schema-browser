@@ -85,7 +85,7 @@ instance A.ToJSON Showable where
     toJSON (SGeo o) = A.toJSON o
     toJSON i = A.toJSON (renderPrim i)
 
-indexTyU (Many [k] )= indexTy k
+indexTyU (Many [One k] )= indexTy k
 indexTy (IProd _ k )=  keyType k
 indexTy (Nested [IProd _ xs] n) = Primitive ((_keyFunc $ keyType xs) ++ ty) at
     where

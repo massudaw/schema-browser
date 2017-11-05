@@ -53,9 +53,10 @@ findFKAttr l v =   case fmap  (fmap unF )$ L.find (\(k,v) -> not $ L.null $ L.in
       Just (k ,i) -> errorWithStackTrace (show l)
       Nothing -> Nothing
 
-replaceU ix i (Many nt) = (fmap (replace ix i) nt )
+replaceU ix i (Many nt) = Many $ (fmap (replaceU ix i) nt )
+replaceU ix i (One nt ) = One $ replace ix i nt
 
-replace ix i (Nested k nt) = Nested k (Many $ replaceU ix i nt)
+replace ix i (Nested k nt) = Nested k (replaceU ix i nt)
 replace ix i (Point p)
   | ix == p = Rec ix i
   | otherwise = (Point p)
@@ -77,40 +78,42 @@ joinFTB (LeftTB1 i) =  LeftTB1 $ fmap joinFTB i
 joinFTB (ArrayTB1 i) =  ArrayTB1 $ fmap joinFTB i
 joinFTB (TB1 i) =  i
 
-indexFieldRecU p@(ISum l) v = F.foldl' (<|>) Nothing (flip indexFieldRec  v <$> l)
-indexFieldRecU p@(Many [l]) v = indexFieldRec l v
+indexFieldRecU p@(ISum l) v = F.foldl' (<|>) Nothing (flip indexFieldRecU  v <$> l)
+indexFieldRecU p@(Many [One l]) v = indexFieldRec l v
+indexFieldRecU (One i ) v = indexFieldRec i v
 
 indexFieldRec :: Access Key-> TBData Key Showable -> Maybe (FTB Showable)
 indexFieldRec p@(IProd b l) v = _tbattr . unTB <$> findAttr  l  v
-indexFieldRec n@(Nested l (Many[nt]) ) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK (iprodRef <$> l) v
+indexFieldRec n@(Nested l (Many[One nt]) ) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK (iprodRef <$> l) v
 indexFieldRec n@(Nested l nt) v = join $ fmap joinFTB . traverse (indexFieldRecU nt)  . _fkttable.  unTB <$> findFK (iprodRef <$> l) v
 indexFieldRec n v = errorWithStackTrace (show (n,v))
 
-genPredicateU i (l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
-genPredicateU i (l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicate i <$> l)
+genPredicateU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ (\(One o) -> genPredicate i o) <$> l)
+genPredicateU i (Many l) = OrColl <$> (nonEmpty $ catMaybes $ (\(One o) -> genPredicate i o) <$> l)
 
 genPredicate o (IProd b l) =  (\i -> PrimColl (IProd b l,Right (if o then i else Not i ) )) <$> b
 genPredicate i n@(Nested p  l ) = fmap AndColl $ nonEmpty $ catMaybes $ (\a -> if i then genPredicate i a else  Nothing ) <$> p
 genPredicate _ i = errorWithStackTrace (show i)
 
-genNestedPredicate n i v = fmap (\(a,b) -> (Nested n (Many [a]) , b )) <$> genPredicate i v
+genNestedPredicate n i v = fmap (\(a,b) -> (Nested n (Many [One a]) , b )) <$> genPredicate i v
 
-hasProd :: (Access Key -> Bool) -> [Access Key] ->  Bool
-hasProd p i = any p i
+hasProd :: (Access Key -> Bool) -> Union (Access Key) ->  Bool
+hasProd p i = F.any p i
 
-findProd :: (Access Key -> Bool) -> [Access Key] -> Maybe (Access Key)
-findProd p i = L.find p i
+findProd :: (Access Key -> Bool) -> Union (Access Key) -> Maybe (Access Key)
+findProd p i = F.find p i
 
 isNested :: [Access Key] -> Access Key -> Bool
 isNested p (Nested l i) = L.sort (iprodRef <$> p) == L.sort (iprodRef <$>l)
 isNested p i =  False
 
-uNest :: Access Key -> [Access Key]
-uNest (Nested pn (Many i)) = i
-uNest (Nested pn (ISum i)) = i
+uNest :: Access Key -> Union (Access Key)
+uNest (Nested pn i) = i
+
+
 
 
 indexer :: Text -> [Access Text]
-indexer field = foldr (\i j -> [Nested  (IProd Nothing <$> i) (Many j)] ) (IProd Nothing <$> last vec) (init vec )
+indexer field = foldr (\i j -> [Nested  (IProd Nothing <$> i) (Many (fmap One j))] ) (IProd Nothing <$> last vec) (init vec )
   where vec = splitOn "," <$> splitOn ":" field
 

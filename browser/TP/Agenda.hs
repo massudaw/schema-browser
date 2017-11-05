@@ -72,7 +72,7 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
       legendStyle  lookDesc table b
             =
               let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,_)-> (b,i)) dashes)
-              in maybe (UI.div # set UI.style [("display","none")])  (\(k@((c,tname,_,_))) -> mdo
+              in traverse (\(k@((c,tname,_,_))) -> mdo
                 element  b # set UI.class_"col-xs-1"
                 label <- UI.div # sink text  (T.unpack .($table) <$> facts lookDesc ) # set UI.class_ "fixed-label col-xs-10"
                 UI.label # set children [b,label]

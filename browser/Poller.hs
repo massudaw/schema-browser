@@ -82,7 +82,7 @@ poller schmRef authmap db plugs is_test = do
       where
         TB1 (SNumeric schema )= index tb "schema"
         TB1 (SNumeric intervalms) = index tb "poll_period_ms"
-        TB1 (SText p) = index2 tb (liftAccess metas "polling" $ Nested [keyRef "plugin"] (Many [keyRef "name"]))
+        TB1 (SText p) = index2 tb (liftAccess metas "polling" $ Nested [keyRef "plugin"] (Many [One $ keyRef "name"]))
         pid = index tb "plugin"
     enabled = G.toList polling
     poll tb  = do
@@ -107,8 +107,8 @@ poller schmRef authmap db plugs is_test = do
                       liftIO$ putStrLn $ "START " <> T.unpack pname  <> " - " <> show current
                       let fetchSize = 200
                           pred =  WherePredicate $ lookAccess inf a <$> AndColl (catMaybes [ genPredicateU True (fst f) , genPredicateU False (snd f)])
-                          predFullIn =  WherePredicate . fmap (lookAccess inf a) <$>  genPredicateFullU True (Many $ fst f)
-                          predFullOut =  WherePredicate . fmap (lookAccess inf a) <$>  genPredicateFullU True (Many $ snd f)
+                          predFullIn =  WherePredicate . fmap (lookAccess inf a) <$>  genPredicateFullU True (fst f)
+                          predFullOut =  WherePredicate . fmap (lookAccess inf a) <$>  genPredicateFullU True (snd f)
                       (_ ,(l,_ )) <- transactionNoLog inf $ selectFrom a  (Just 0) (Just fetchSize) []  pred
                       liftIO$ threadDelay 10000
                       let sizeL = justLook pred  l

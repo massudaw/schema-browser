@@ -6,6 +6,7 @@ import qualified NonEmpty as Non
 import Types.Patch
 import qualified Data.List as L
 import Utils
+import Control.Monad
 import Data.Maybe
 import Data.Proxy
 import Schema
@@ -89,12 +90,10 @@ textToPrim i = errorWithStackTrace ("textToPrim : " ++ show i)
 
 code smvar  = indexSchema smvar "code"
 
-list inp
-    = case inp of
-        ISum i -> Non.fromList i
-        Many i -> Non.fromList i
+list (Many inp) = join $ list <$> Non.fromList inp
+list (ISum inp) = join $ list <$> Non.fromList inp
+list (One i) = pure i
 
-reference i | traceShow i False = undefined
 reference (IProd _ k)
   = [ IT "iprod" (LeftTB1 . Just . TB1 .
       tblist . fmap _tb $ [ Attr "key" ((txt ) k )])
@@ -123,8 +122,8 @@ addPlugins iniPlugList smvar = do
         let (inp,out) = pluginStatic dyn
         return $ tblist $ _tb <$> [ FKT (kvlist $ _tb . Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
                           , Attr "table" (txt (_bounds dyn) )
-                          , IT "input" (array (TB1 .tblist . fmap _tb . reference ) (Non.fromList inp))
-                          , IT "output" (array (TB1 .tblist . fmap _tb . reference ) (Non.fromList out))
+                          , IT "input" (array (TB1 .tblist . fmap _tb . reference ) (list inp))
+                          , IT "output" (array (TB1 .tblist . fmap _tb . reference ) (list out))
                           , Attr "plugin" (TB1 $ SHDynamic (HDynamic (toDyn dyn ))) ]
       where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl (keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
   R.onEventIO event (\dyn -> do

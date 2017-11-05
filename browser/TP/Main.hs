@@ -128,7 +128,7 @@ setup smvar args plugList w = void $ do
     iniKey <- currentValue (facts initKey)
     liftIO$ print ("iniKey",iniKey,cliIni)
     let
-      buttonStyle lookDesc k e = do
+      buttonStyle lookDesc k e = Just <$> do
          label <- UI.div # sink0 UI.text (fmap T.unpack $ facts $ lookDesc  <*> pure k)  # set UI.class_ "fixed-label col-xs-11"
          element e # set UI.class_ "col-xs-1"
          UI.label # set children [e , label] # set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]

@@ -173,7 +173,7 @@ indexFilterPatch ((Nested l n) ,op)  (_,_,lo) =
 indexFilterPatch i o= errorWithStackTrace (show (i,o))
 
 indexFilterPatchU :: (Show k,Ord k) => (Union (Access k) ,Either (FTB Showable,BinaryOperator) UnaryOperator) -> TBIdx k Showable -> Bool
-indexFilterPatchU (Many [n],op) o = indexFilterPatch (n,op) o
+indexFilterPatchU (Many [One n],op) o = indexFilterPatch (n,op) o
 
 unIndexItensP :: (Show (KType k),Show a) =>  Int -> Int -> PathAttr (FKey (KType k)) a -> Maybe (PathAttr (FKey (KType k) ) a )
 unIndexItensP ix o =  unIndexP (ix+ o)
@@ -417,8 +417,6 @@ diffTB1 = diffFTB patchTB1  difftable
 travPath f p (PatchSet i) = F.foldl' f p i
 travPath f p i = f p i
 
-diffTable l l2 =   catMaybes $ F.toList $ Map.intersectionWith (\i j -> diffTB1 i j) (mkMap l) (mkMap l2)
-  where mkMap = Map.fromList . fmap (\i -> (getPK i,i))
 
 
 applyTB1
@@ -579,7 +577,7 @@ createFTBM p (PatchSet l) = F.foldl1 (<>) (createFTBM p <$> l)
 firstT f (i,j) = (,j) <$> f i
 
 
-instance (Ord a )=> Semigroup (FTB a) where
+instance Ord a => Semigroup (FTB a) where
   LeftTB1 i<> LeftTB1 j = LeftTB1 j
   IntervalTB1 i <> IntervalTB1 j = IntervalTB1 ( i `Interval.intersection` j)
   ArrayTB1 i <> ArrayTB1 j = ArrayTB1 (i <>  j)

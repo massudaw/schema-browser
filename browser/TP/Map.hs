@@ -4,6 +4,7 @@
 
 module TP.Map (mapWidget,mapWidgetMeta) where
 
+
 import Step.Host
 import qualified NonEmpty as Non
 import Data.String
@@ -86,7 +87,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
         where (l,r) = break(=='=') i
               (tnew,j ) = break (=='|') l
               nest (i:[]) = keyRef (T.pack i)
-              nest (i:xs) = Nested [keyRef (T.pack i)] (Many [nest xs])
+              nest (i:xs) = Nested [keyRef (T.pack i)] (Many [One $ nest xs])
       filteringPred  (k,v) row = maybe True (L.isInfixOf (toLower <$> v)  . fmap toLower . renderShowable )   $ (flip indexFieldRec row  k)
       filtering tb res = (\t -> filter (\row -> all (\i -> filteringPred i row) (catMaybes  t  )) )<$> (fmap (parseMany tb ) (triding filterInpT )) <*> fmap G.toList res
     map <-UI.div

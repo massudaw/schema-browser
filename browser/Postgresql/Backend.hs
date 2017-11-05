@@ -3,6 +3,7 @@ module Postgresql.Backend (connRoot,postgresOps) where
 
 import Types
 import Step.Client
+import Data.Time
 import qualified Types.Index as G
 import Control.Arrow
 import SchemaQuery
@@ -107,7 +108,7 @@ dropColumnCatalog  = do
           returnA -< ()
 
 
-createTableCatalog :: PluginM [Namespace Text Text RowModifier Text]  (Atom (TBData  Text Showable)) TransactionM  i ()
+createTableCatalog :: PluginM (Namespace Text Text RowModifier Text)  (Atom (TBData  Text Showable)) TransactionM  i ()
 createTableCatalog = do
   aschema "metadata" $
     atable "catalog_tables" $
@@ -125,7 +126,7 @@ createTableCatalog = do
           ifield "oid" (iftb PIdOpt (ivalue (writeV ()))) -< SNumeric oid
           returnA -< ()
 
-dropTableCatalog :: PluginM [Namespace Text Text RowModifier Text]  (Atom (TBData  Text Showable)) TransactionM  i ()
+dropTableCatalog :: PluginM (Namespace Text Text RowModifier Text)  (Atom (TBData  Text Showable)) TransactionM  i ()
 dropTableCatalog = do
   aschema "metadata" $
     atable "catalog_tables" $
@@ -174,7 +175,8 @@ alterSchema v p= do
 
       traverse (\new -> when (new /= o )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? OWNER TO ?  "(DoubleQuoted o, DoubleQuoted new)) onewm
       traverse (\new -> when (new /= n )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? RENAME TO ?  "(DoubleQuoted n, DoubleQuoted new)) nnewm
-      return $ TableModification Nothing (lookTable inf "catalog_schema") . PatchRow  . traceShowId <$> (diff v new)
+      l <- liftIO getCurrentTime
+      return $ TableModification Nothing (utcToLocalTime utc l) (snd $ username inf) (lookTable inf "catalog_schema") . PatchRow  . traceShowId <$> (diff v new)
 
 dropSchema = do
   aschema "metadata" $
@@ -293,14 +295,10 @@ paginate inf t order off size koldpre wherepred = do
     let
       jsonDecode =  do
         let quec = fromString $ T.unpack $ "SELECT row_to_json(q),count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
-        print quec
-        logLoadTimeTable inf (lookTable inf $ _kvname (fst t)) wherepred "JSON" $
-                uncurry (queryWith (withCount (fromRecordJSON t) ) (conn inf ) ) (quec, maybe [] (fmap (either(Left .firstTB (recoverFields inf)) Right)) attr)
+        uncurry (queryWith (withCount (fromRecordJSON t) ) (conn inf ) ) (quec, maybe [] (fmap (either(Left .firstTB (recoverFields inf)) Right)) attr)
       textDecode = do
         let quec = fromString $ T.unpack $ "SELECT *,count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
-        print quec
-        logLoadTimeTable inf (lookTable inf $ _kvname (fst t)) wherepred "TEXT" $
-          uncurry (queryWith (withCount (fromRecord (unTlabel' t)) ) (conn inf ) ) (quec, maybe [] (fmap (either (Left .firstTB (recoverFields inf)) Right ) ) attr)
+        uncurry (queryWith (withCount (fromRecord (unTlabel' t)) ) (conn inf ) ) (quec, maybe [] (fmap (either (Left .firstTB (recoverFields inf)) Right ) ) attr)
 
     v <- case i of
            Just "JSON" ->  jsonDecode
@@ -331,7 +329,8 @@ insertMod j  = do
       let
         table = lookTable inf (_kvname (fst  j))
       (t,pk,attrs) <- insertPatch (fromRecord  ) (conn  inf) (patch j) ( table)
-      return $ TableModification Nothing table . CreateRow <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create  (t,pk,compact $ deftable inf table <> attrs )))
+      l <- liftIO getCurrentTime
+      return $ TableModification Nothing (utcToLocalTime utc l) (snd $ username inf)table . CreateRow <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create  (t,pk,compact $ deftable inf table <> attrs )))
 
 
 deleteMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
@@ -345,7 +344,8 @@ deleteMod p@(m,_) = do
     Nothing ->  liftIO $  do
       let table = lookTable inf (_kvname m)
       deletePatch (conn inf)  (firstPatch (recoverFields inf) (patch p)) table
-      return $ Just $ (TableModification Nothing table  $ DropRow p)
+      l <- liftIO getCurrentTime
+      return $ Just $ (TableModification Nothing (utcToLocalTime utc l) (snd $ username inf)table  $ DropRow p)
   return $ log
 
 updateMod :: TBData Key Showable -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
@@ -361,7 +361,8 @@ updateMod old p = do
     Nothing -> liftIO$ do
       let table = lookTable inf (_kvname (fst  old ))
       patch <- updatePatch (conn  inf) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table
-      let mod =  TableModification Nothing table ( PatchRow $ firstPatch (typeTrans inf) patch)
+      l <- liftIO getCurrentTime
+      let mod =  TableModification Nothing (utcToLocalTime utc l) (snd $ username inf) table ( PatchRow $ firstPatch (typeTrans inf) patch)
       return $ Just mod
 
 patchMod :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
@@ -370,7 +371,8 @@ patchMod patch@(m,_,_) = do
   liftIO $ do
     let table = lookTable inf (_kvname m )
     patch <- applyPatch (conn  inf) (firstPatch (recoverFields inf ) patch )
-    let mod =  TableModification Nothing table (PatchRow $ firstPatch (typeTrans inf) patch)
+    l <- liftIO getCurrentTime
+    let mod =  TableModification Nothing (utcToLocalTime utc l) (snd $ username inf) table (PatchRow $ firstPatch (typeTrans inf) patch)
     return (Just mod)
 
 

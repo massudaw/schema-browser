@@ -2,78 +2,52 @@
 module Schema where
 
 import Data.String
+import Serializer
 import System.Environment
 import Data.Either
 import Postgresql.Sql
+import qualified Data.Binary as B
+import qualified Data.ByteString.Char8 as BS
 import qualified Data.IntMap as IM
 import Postgresql.Types
-import qualified Data.Poset as P
-import Control.Monad.Trans.Maybe
-import Codec.Compression.Zlib
 import Data.Word
 import Data.Int
-import Control.DeepSeq
 import Control.Monad.State
 import Query
 import Step.Host
 import Data.Ord
-import qualified Data.Interval as Interval
 import Types
-import Text
 import Expression
-import Step.Common
 import Data.Tuple
-import Control.Concurrent.STM.TChan
 import Control.Concurrent.STM.TVar
 import Control.Concurrent.STM
 import Types.Patch
 import Control.Monad.RWS
-import System.Directory
 import qualified Types.Index as G
-
 import SchemaQuery
-import qualified NonEmpty as Non
-import Control.Monad.Writer
-import Debug.Trace
 import Prelude hiding (head)
 import Data.Unique
 import qualified Data.Foldable as F
 import Data.Maybe
-import qualified Data.Binary as B
-import GHC.Stack
 import Data.Bifunctor(second,first)
 import Utils
 import Control.Exception
-import Control.Monad.Reader
 import qualified Control.Lens as Le
-
-import Data.Functor.Identity
 import Database.PostgreSQL.Simple
 import Data.Time
 import RuntimeTypes
-
-import Data.Traversable(sequenceA,traverse)
 import Data.Vector (Vector)
 import qualified Data.Vector as V
-
-import Control.Applicative
-import Control.Applicative.Lift
 import qualified Data.List as L
 import qualified Data.HashMap.Strict as HM
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Map (Map)
 import Data.Set (Set)
-import Control.Concurrent
-
 import Data.Text (Text)
 import qualified Data.Text as T
-
 import qualified Reactive.Threepenny as R
-
 import Postgresql.Parser
-import qualified Data.ByteString.Char8 as BS
-import qualified Data.ByteString.Lazy as BSL
 
 
 createType :: (Bool,Bool,Bool,Bool,Bool,Bool,Text,Text,Maybe Int32) -> KType (Prim (Text,Text,Maybe Word32) (Text,Text))
@@ -105,7 +79,7 @@ queryAuthorization conn schema user = do
 
 tableSizes = "SELECT c.relname,c.reltuples::bigint AS estimate FROM   pg_class c JOIN   pg_namespace n ON c.relkind = 'r' and n.oid = c.relnamespace WHERE n.nspname = ? "
 
--- fromShowable2 i j | traceShow (i,j) False = errorWithStackTrace ""
+-- fromShowable2 i j | traceShow (i,j) False = error ""
 fromShowable2 i@(Primitive [] (AtomicPrim PText )) v = fromShowable i $  BS.drop 1 (BS.init v)
 fromShowable2 i v = fromShowable i v
 
@@ -157,7 +131,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
           readTT :: Text ->  TableType
           readTT "BASE TABLE" = ReadWrite
           readTT "VIEW" = ReadOnly
-          readTT i =  errorWithStackTrace  $ T.unpack i
+          readTT i =  error  $ T.unpack i
 
        authorization <- liftIO$ queryAuthorization conn schemaId uid
        descMap <- liftIO$ M.fromList . fmap  (\(t,cs)-> (t,fmap (\c -> justError (show (t,c)) $ HM.lookup (t,c) keyMap) (V.toList cs)) ) <$> query conn "SELECT table_name,description FROM metadata.table_description WHERE table_schema = ? " (Only schema)
@@ -246,7 +220,6 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
            deps (Select _ _ _ ) = []
 
 
-       -- mapM (createTableRefs inf [] ) (filter (not . isUnion) $ F.toList i2u)
        var <- liftIO$ atomically $ modifyTVar (globalRef schemaVar  ) (HM.insert schema inf )
        addStats inf
          {-
@@ -290,7 +263,7 @@ addRecInit inf m = fmap recOverFKS m
                         | S.member pa ts =  []
                         | otherwise = openTable (S.insert pa ts)  p nt
                       openPath ts p (Path _ (FunctionField _ _ _)) = []
-                      openPath ts p pa = errorWithStackTrace (show (ts,p,pa))
+                      openPath ts p pa = error (show (ts,p,pa))
                       openTable t p (st,nt)  =  do
                               let cons pa
                                     | pa == pini = p
@@ -316,39 +289,19 @@ catchPluginException inf pname tname  idx i = do
                 id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (\"user\",\"schema\",\"table\",\"plugin\",exception,data_index2,instant) values(?,?,?,?,?,? :: metadata.key_value[] ,?) returning id" (fst $ username inf , schemaId inf,pname,tname,Binary (B.encode $ show (e :: SomeException)) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value" . second (Binary . B.encode) . first keyValue) idx) ) , t )
                 return (Left (unOnly $ head $id)))
 
-logLoadTimeTable
-  ::
-     InformationSchema
-     -> Table -> TBPredicate Key Showable -> String -> IO a -> IO a
-logLoadTimeTable inf table pred mode action = do
-  -- ini <- getCurrentTime
-  a <- action
-  -- end <- getCurrentTime
-  -- let ltime time =  STimestamp $ utcToLocalTime utc $ time
-  -- liftIO $ execute (rootconn inf) "INSERT INTO metadata.stat_load_table(\"user\",\"table\",\"schema\",load,mode) VALUES (?,?,?,?,?)"  (fst $ username inf ,_tableUnique table,  schemaId inf,Interval.interval (Interval.Finite (ltime ini),True) (Interval.Finite (ltime end),True),mode)
-  return a
-
-
-
-patchNoRef (m,pk,l) =  (m,pk,concat $ attrNoRef <$> l)
-  where
-    attrNoRef (PFK _ l _ ) = l
-    attrNoRef (PInline i l ) = [PInline i $ patchNoRef <$> l]
-    attrNoRef i = [i]
 
 logTableModification
-  :: (B.Binary a ,Ord a,Patch a,Show a, Ord (Index a),a ~Index a) =>
+  ::
      InformationSchema
-     -> TableModification (RowPatch Key a)  -> IO (TableModification (RowPatch Key a))
-logTableModification inf (TableModification Nothing table ip) = do
+     -> TableModification (RowPatch Key Showable)  -> IO (TableModification (RowPatch Key Showable))
+logTableModification inf (TableModification Nothing ts u table ip) = do
   let i = patchNoRef $ case ip of
             PatchRow i -> i
             DropRow i -> patch i
             CreateRow i -> patch i
   time <- getCurrentTime
   env <- lookupEnv "ROOT"
-  let
-    mod = modificationEnv env
+  let mod = modificationEnv env
   let ltime =  utcToLocalTime utc $ time
       (met,G.Idex pidx,pdata) = firstPatch keyValue  i
 
@@ -356,98 +309,11 @@ logTableModification inf (TableModification Nothing table ip) = do
   let modt = lookTable (meta inf)  mod
   (dbref ,_)<- R.runDynamic $ prerefTable (meta inf) modt
 
-  putPatch (patchVar dbref) [encodeTableModification inf  ltime env (TableModification (Just id) table ip )]
-  return (TableModification (Just id) table ip )
+  putPatch (patchVar dbref) [liftPatchRow (meta inf) (modificationEnv env)  $ CreateRow $ encodeT (TableModification (Just id) ts u (schemaName inf,tableName table ) (firstPatchRow keyValue ip ) )]
+  return (TableModification (Just id) ts u table ip )
 
 
 modificationEnv env = "modification_table" -- if isJust env then "master_modification_table" else "modification_table"
-decodeTableModification d
-  = (schema,table ,\inf ->  TableModification   (Just mod_id)  (lookTable inf table) (liftPatchRow inf table $ datamod mod_data ))
-  where
-    table = unOnly . att . ix "table_name" $ d
-    schema = unOnly . att . ix "schema_name" $ d
-    mod_id = unOnly . att .ix "modification_id" $ d
-    mod_data :: Only  (Binary (RowPatch Text Showable))
-    mod_data = att .ix "modification_data" $ d
-    mod_key :: Non.NonEmpty (Binary (FTB Showable))
-    mod_key = fmap unOnly . unCompF . att .ix "data_index" $ d
-    datamod =  unBinary  . unOnly
-
-unBinary (Binary i) = i
-
-encodeTableModification inf ltime  env (TableModification id table ip)
-  =CreateRow (liftTable' (meta inf) (modificationEnv env) $ tblist $ _tb <$>  [
-                              Attr "user_name"  (txt$ snd $ username inf),
-                              Attr "modification_time" (timestamp ltime),
-                              Attr "table_name" (txt$ tableName table),
-                              Attr "data_index" (array (TB1 . encodeS) mod_key),
-                              Attr "modification_data" (TB1. SBinary . BSL.toStrict . B.encode  $ firstPatchRow keyValue ip),
-                              Attr "schema_name" (txt $ schemaName inf),
-                              Attr "modification_id" (opt int id)
-                              ])
-  where (met,G.Idex pidx,pdata)
-          = firstPatch keyValue $ patchNoRef $ case ip of
-              PatchRow i -> i
-              CreateRow i -> patch i
-              DropRow i -> patch i
-        --mod_key :: Non.NonEmpty (Binary (FTB Showable))
-        mod_key = Non.fromList $ Binary <$> pidx
-
-
-att :: (Functor f ,DecodeTB1 f , DecodeShowable a ) => TB g k Showable -> f a
-att (Attr i j ) = fmap decodeS $ decFTB  j
-ix i d = justError ("no field " ++ show i ) $ indexField (IProd Nothing i) d
-
-class DecodeTB1 f where
-  decFTB :: FTB a -> f a
-  encFTB :: f a-> FTB a
-
-instance  DecodeTB1 Only where
-  decFTB (TB1 i ) = Only  i
-  encFTB (Only i) = TB1  i
-
-infixr 1 :*:
-newtype (:*:) f g a = CompFunctor {unCompF :: (f (g a))}deriving(Functor)
-
-
-instance  DecodeTB1 g => DecodeTB1 (Interval.Interval :*: g)  where
-  decFTB (IntervalTB1 i) = CompFunctor $ fmap decFTB i
-  encFTB (CompFunctor i) = IntervalTB1 $ fmap encFTB  i
-
-instance  DecodeTB1 g => DecodeTB1 (Non.NonEmpty :*: g)  where
-  decFTB (ArrayTB1 i) = CompFunctor $ fmap decFTB i
-  encFTB (CompFunctor i) = ArrayTB1 $ fmap encFTB  i
-
-instance  DecodeTB1 g => DecodeTB1 (Maybe :*: g)  where
-  decFTB (LeftTB1 i) = CompFunctor $ fmap decFTB i
-  encFTB (CompFunctor i) = LeftTB1 $ fmap encFTB  i
-
-class DecodeTable a where
-  decodeT :: TBData Text Showable  -> a
-  encodeT :: a -> TBData Text Showable
-
-
-class DecodeShowable a where
-  decodeS :: Showable  -> a
-  encodeS:: a-> Showable
-
-instance  B.Binary a => DecodeShowable (Binary a) where
-  decodeS (SBinary i) = Binary $ B.decode (BSL.fromStrict i)
-  encodeS (Binary i) = SBinary ( BSL.toStrict $ B.encode i)
-
-
-instance  DecodeShowable Int where
-  decodeS (SNumeric i) = i
-  encodeS i = SNumeric i
-
-instance  DecodeShowable Double where
-  decodeS (SDouble i) = i
-  encodeS i = SDouble i
-
-instance  DecodeShowable Text where
-  decodeS (SText i) = i
-  encodeS i = SText i
-
 
 
 lookDesc
@@ -475,32 +341,6 @@ lookupAccess inf l f c = join $ fmap (indexField (IProd  notNull (lookKey inf (f
 
 idex inf t v = G.Idex $  fmap snd $ L.sortBy (comparing ((`L.elemIndex` (rawPK $ lookTable inf t)).fst)) $ first (lookKey inf t  ) <$> v
 
-dbTable mvar table = do
-    mmap <- atomically $readTVar mvar
-    return . justError ("no mvar " <> show table) . M.lookup table $ mmap
-
-
-mergeCreate (Just i) (Just j) = Just $ mergeTB1 i j
-mergeCreate Nothing (Just i) = Just i
-mergeCreate (Just i)  Nothing = Just i
-mergeCreate Nothing Nothing = Nothing
-
-mergeTB1 ((m,Compose k) ) ((m2,Compose k2) )
-  = (m,Compose $ liftA2 (\(KV i ) (KV j) -> KV $ M.unionWith const i j ) k k2)
-
-type Database k v = InformationSchemaKV k v
-type DBM k v = ReaderT (Database k v) IO
-
-atTable k = do
-  i <- ask
-  k <- liftIO$ dbTable (mvarMap i) k
-  liftIO $ atomically $ readTVar (collectionState k)
-
-joinRelT ::  [(Rel Key, FTB Showable)] -> Table ->  G.GiST (G.TBIndex Showable) (TBData Key Showable) -> TransactionM ( FTB (TBData Key Showable))
-joinRelT ref tb table  = do
-  let out = joinRel (tableMeta tb) ref table
-  traverse (\i -> tell [TableModification Nothing tb . CreateRow $ i]) out
-  return out
 
 addStats schema = do
   let metaschema = meta schema
@@ -519,9 +359,4 @@ addStats schema = do
       )) (M.toList  varmap)
   return  schema
 
-lookPK :: InformationSchema -> (Set Key) -> Table
-lookPK inf pk =
-      case  M.lookup pk  (pkMap inf) of
-           Just table -> table
-           i -> errorWithStackTrace (show pk)
 

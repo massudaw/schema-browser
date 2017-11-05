@@ -103,7 +103,7 @@ addServer inf =  do
 
 idexToPred t (G.Idex  i) = head $ (\(k,a)-> (keyRef k,Left (a,Contains))) <$>  zip (rawPK t) (F.toList i)
 
-deleteServer inf (TableModification _ _ (CreateRow o)) = do
+deleteServer inf (TableModification _ _ _ _ (CreateRow o)) = do
   now <- liftIO $ getCurrentTime
   (_,(_,tb)) <- transactionNoLog inf $ selectFrom "client_login"  Nothing Nothing [] (WherePredicate (AndColl [PrimColl (keyRef (lookKey inf "client_login" "up_time") ,Left ((TB1 (STime $ STimestamp (utcToLocalTime utc now))),Contains))]))
   let

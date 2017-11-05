@@ -103,7 +103,7 @@ renderFun (e,ac) = go e
 joinKType (Primitive l (Primitive  i a)) = Primitive (l ++ i) a
 
 buildAccess :: Access Key -> KType (Prim KPrim (Text,Text))
-buildAccess n@(Nested i (Many [o])) =  joinKType $ const (buildAccess o ) <$> (mergeFKRef  (buildAccess <$> F.toList i ))
+buildAccess n@(Nested i (Many [One o])) =  joinKType $ const (buildAccess o ) <$> (mergeFKRef  (buildAccess <$> F.toList i ))
 buildAccess (IProd i l) = keyType l
 
 testFFI = do

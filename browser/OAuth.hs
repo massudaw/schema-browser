@@ -10,6 +10,7 @@ import Utils
 import Postgresql.Types (PGPrim,PGType)
 import qualified Types.Index as G
 import qualified Data.ByteString.Lazy.Char8 as BS
+import Control.Concurrent.STM
 import Control.Arrow
 import Control.Monad.Reader
 import qualified Data.HashMap.Strict as HM
@@ -201,8 +202,9 @@ deleteRow (m,pk,_)
         print ("delete",pk ,t)
         return v
     liftIO $print decoded
+    time <- liftIO $ getCurrentTime
     let p = if BS.null decoded  then
-              Just $ TableModification Nothing table  (PatchRow (m, pk, []))
+              Just $ TableModification Nothing (utcToLocalTime utc time) (snd $ username inf)table  (PatchRow (m, pk, []))
             else Nothing
     tell (maybeToList p)
     return p
@@ -226,7 +228,8 @@ insertTable pk
         print ("insert",getPK (TB1 pk),t)
         return $ decode $ v
     liftIO $ print decoded
-    fmap (TableModification Nothing table .PatchRow. patch . mergeTB1 pk ) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table) .  fmap (\i -> (i :: Value)  ) $  decoded)
+    time <- liftIO $ getCurrentTime
+    fmap (TableModification Nothing (utcToLocalTime utc time) (snd $ username inf) table .PatchRow. patch . mergeTB1 pk ) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table) .  fmap (\i -> (i :: Value)  ) $  decoded)
 
 lookOrigin  k (i,m) = unTB $ err $  find (( k == ). S.fromList . fmap _relOrigin. keyattr ) (F.toList $  unKV m)
     where
@@ -360,10 +363,12 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
 
                                 relMap = M.fromList $ fmap (\rel -> (_relOrigin rel ,_relTarget rel) ) rel
                                 nv  = flip mergeTB1 transrefs  <$> v
-                            tell (TableModification Nothing (lookTable infsch trefname ) . PatchRow . patch <$> F.toList (nv))
+                            time <- liftIO $ getCurrentTime
+                            tell (TableModification Nothing (utcToLocalTime utc time) (snd $ username infsch)(lookTable infsch trefname ) . PatchRow . patch <$> F.toList (nv))
                             return $ FKT (kvlist [_tb . Types.Attr  k $ (lbackRef    nv) ])  rel nv
                           Nothing ->  do
-                            tell (TableModification Nothing (lookTable infsch trefname ) .PatchRow. patch <$> F.toList (v))
+                            time <- liftIO $ getCurrentTime
+                            tell (TableModification Nothing (utcToLocalTime utc time) (snd $ username infsch)(lookTable infsch trefname ) .PatchRow. patch <$> F.toList (v))
                             return $ FKT (kvlist [_tb . Types.Attr  k $ (lbackRef    v) ])  fk v))
                     (traverse (\v -> do
                         let ref = [_tb $ Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd <$> maybeToList (tableNonRef' <$> getref))
@@ -379,7 +384,8 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
                                         [i] -> unTB1 (_fkttable (unTB i))
 
                             pti <- joinGetDiffTable (lookMTable infsch (fst scoped)) treftable scoped reftb
-                            tell (TableModification Nothing treftable .PatchRow<$> maybeToList pti)
+                            time <- liftIO $ getCurrentTime
+                            tell (TableModification Nothing (utcToLocalTime utc time) (snd $ username infsch)treftable .PatchRow<$> maybeToList pti)
                             return $ maybe (reftb) (apply reftb  ) pti) reftbT ) getref) return (reftb)
                         return $ FKT (kvlist (filter (not .(`S.member` acc). _tbattrkey.unTB )ref) ) rel patch ))
                funL = funO  True (exchange trefname $ keyType k) vk
@@ -508,5 +514,23 @@ textToPrim (AtomicPrim (s,i,_)) = case  HM.lookup i  gmailPrim of
   Just k -> AtomicPrim k
   Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
 textToPrim (RecordPrim i) =  (RecordPrim i)
+
+atTable k = do
+  i <- ask
+  k <- liftIO$ dbTable (mvarMap i) k
+  liftIO $ atomically $ readTVar (collectionState k)
+
+dbTable mvar table = do
+    mmap <- atomically $readTVar mvar
+    return . justError ("no mvar " <> show table) . M.lookup table $ mmap
+
+
+joinRelT ::  [(Rel Key, FTB Showable)] -> Table ->  G.GiST (G.TBIndex Showable) (TBData Key Showable) -> TransactionM ( FTB (TBData Key Showable))
+joinRelT ref tb table  = do
+  let out = joinRel (tableMeta tb) ref table
+  time <- liftIO $ getCurrentTime
+  inf <- ask
+  traverse (\i -> tell [TableModification Nothing (utcToLocalTime utc time) (snd $ username inf)tb . CreateRow $ i]) out
+  return out
 
 

@@ -30,6 +30,7 @@ library
 
     Poller
     Default
+    Serializer
     Expression
     RuntimeTypes
     Environment

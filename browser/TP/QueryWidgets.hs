@@ -121,7 +121,7 @@ pluginUI
     :: InformationSchema
     -> Tidings (Maybe (TBData CoreKey Showable) )
     -> Plugins
-    -> UI (Element ,([Access Key],Tidings (Maybe (Index (TBData CoreKey Showable)))))
+    -> UI (Element ,(Union (Access Key),Tidings (Maybe (Index (TBData CoreKey Showable)))))
 pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
   let
     fresh :: [([VarDef],[VarDef])]
@@ -220,17 +220,17 @@ checkAccessFull
   :: Functor f =>
      InformationSchema
      -> Text
-     -> Parser t [Access Text] t2 t3
+     -> Parser t (Union (Access Text)) t2 t3
      -> f (Maybe (TBData Key Showable))
      -> (f (Maybe (TBData Key Showable)),
          f (Maybe (TBData Key Showable)),
-         [Access Key])
+         (Union (Access Key)))
 checkAccessFull inf  t arrow oldItems = (tdInput,tdOutput,out)
     where
       (inp,out) = second (liftAccessU inf t ). first (liftAccessU  inf t ) $ staticP arrow
-      pred =  WherePredicate <$> genPredicateFullU True (Many inp)
+      pred =  WherePredicate <$> genPredicateFullU True inp
       tdInput = join . fmap (checkPredFull pred) <$> oldItems
-      predOut =  WherePredicate <$> genPredicateFullU True (Many out)
+      predOut =  WherePredicate <$> genPredicateFullU True out
       tdOutput = join . fmap (checkPredFull predOut)  <$> oldItems
       checkPredFull pred i
           =  if maybe False (G.checkPred i) pred then  Just i else Nothing
@@ -238,18 +238,18 @@ checkAccessFull inf  t arrow oldItems = (tdInput,tdOutput,out)
 
 indexPluginAttrDiff
   :: Column Key ()
-  -> [([Access Key], Tidings (Maybe (Index (TBData Key Showable))))]
-  -> [([Access Key], Tidings (Maybe (Index (Column Key Showable))))]
+  -> [(Union (Access Key), Tidings (Maybe (Index (TBData Key Showable))))]
+  -> [(Union (Access Key), Tidings (Maybe (Index (Column Key Showable))))]
 indexPluginAttrDiff a@(Attr i _ )  plugItens =  evs
   where
     match (IProd _ l) ( IProd _ f) = l == f
     match i f = False
     thisPlugs = filter (hasProd (`match` (head (keyRef . _relOrigin <$> keyattri a))) . fst)  plugItens
-    evs  = fmap ( fmap ( join . fmap (\(_,_,p) -> L.find (((== S.fromList (keyattri a))  . pattrKey )) p )) ) <$>  thisPlugs
+    evs  = fmap ( fmap ( join . fmap (\(_,_,p) -> F.find (((== S.fromList (keyattri a))  . pattrKey )) p )) ) <$>  thisPlugs
 indexPluginAttrDiff  i  plugItens = pfks
   where
     thisPlugs = filter (hasProd (isNested ((fmap (keyRef. _relOrigin) (keyattri i) ))) .  fst) plugItens
-    pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested((fmap ( keyRef . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap ((\(_,_,p) -> L.find (((== S.fromList (keyattri i))  . pattrKey )) p )))) <$> ( thisPlugs)
+    pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested((fmap ( keyRef . _relOrigin ) (keyattri i) )))) . second (fmap (join . fmap ((\(_,_,p) -> F.find (((== S.fromList (keyattri i))  . pattrKey )) p )))) <$>  thisPlugs
 
 
 --- Style and Attribute Size
@@ -352,7 +352,7 @@ tbCaseDiff inf table _ a@(Attr i _ ) wl plugItens preoldItems = do
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
     search (IProd _ t) = fmap (fmap _tbattr ). uncurry recoverT .snd <$> L.find ((S.singleton t ==) . S.fromList . fmap _relOrigin . keyattri . fst) wl
-    search (Nested t (Many [m]) ) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). uncurry recoverT . snd <$> L.find ((S.fromList (iprodRef <$> t) ==) . S.fromList . fmap _relOrigin .keyattri . fst) wl
+    search (Nested t (Many [One m]) ) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). uncurry recoverT . snd <$> L.find ((S.fromList (iprodRef <$> t) ==) . S.fromList . fmap _relOrigin .keyattri . fst) wl
     refs = sequenceA $ catMaybes $ search <$> snd rel
 
   funinp <- traverseUI ( traverse (liftIO. evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)). allMaybes ) refs
@@ -419,11 +419,12 @@ loadPlugins inf =  do
   return (project <$> F.toList evMap)
 
 
-repl :: Ord k =>Access k-> [Access k]
-repl (Rec  ix v ) = replaceU ix v v
-repl v = [v]
-traRepl :: Ord k => [Access k] -> [Access k]
+traRepl :: Ord k => Union (Access k) -> Union (Access k)
 traRepl i = foldMap repl i
+  where
+    repl :: Ord k =>Access k-> Union (Access k)
+    repl (Rec  ix v ) = replaceU ix v v
+    repl v = One v
 
 buildFKS :: InformationSchema
      -> SelPKConstraint
@@ -505,7 +506,7 @@ eiTableDiff inf table constr refs plmods ftb@(meta,k) preoldItems = do
           delete (PAttr i _) = PAttr i (POpt Nothing)
           delete (PInline i _) = PInline i (POpt Nothing)
           delete (PFK i j _ ) = PFK i (fmap delete  j ) (POpt Nothing)
-          iniValue = (fmap (patch.attrOptional ) <$> initialAttr)
+          iniValue = fmap (patch.attrOptional) <$> initialAttr
           resei :: Tidings (Editor (TBIdx CoreKey Showable))
           resei = (\ini j -> fmap (\(m,i,l)  -> (m,i,L.map (\i -> if (keypattr i == keyattr j) then i else delete i) (maybe l (:l) ini))) ) <$> iniValue <*> triding chk <*> sequenceTable fks
       listBody <- UI.div #  set children (getElement chk : F.toList (getElement .fst .snd <$> fks))
@@ -1372,7 +1373,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
       element top # set children [head subnet2,pan,hidden]
       return $ TrivialWidget   tdfk top
 
-fkUITableGen   ::
+fkUITableGen ::
   InformationSchema
   -- Plugin Modifications
   -> Table

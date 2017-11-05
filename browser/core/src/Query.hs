@@ -405,8 +405,9 @@ isLeftRel (Inline i ) =  isKOptional (keyType i)
 isLeftRel (RelAccess i j ) =  isKOptional (keyType i) || isLeftRel j
 
 
-liftASchU inf s tname (ISum i) =  ISum $ fmap (liftASch inf s tname)  i
-liftASchU inf s tname (Many i) =  Many $ fmap (liftASch inf s tname)  i
+liftASchU inf s tname (ISum i) =  ISum $ fmap (liftASchU inf s tname)  i
+liftASchU inf s tname (Many i) =  Many $ fmap (liftASchU inf s tname)  i
+liftASchU inf s tname (One i) =  One $ liftASch inf s tname  i
 
 liftASch :: TableMap  -> Text -> Text -> Access Text  -> Access Key
 liftASch inf s tname (IProd b l) = IProd b $ lookKey  l

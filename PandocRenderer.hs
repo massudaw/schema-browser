@@ -103,7 +103,6 @@ arrayR s = unArray <$> idxK s
 renderProjectPricingA = myDoc
    where
       tname = "pricing"
-      -- var :: Text -> Parser (->) (Access Text) () Inlines
       render = fromString . renderShowable
       var str =  maybe "" fromString . fmap (renderShowable) <$> idxM str
       varT str =  maybe "" fromString . fmap (renderShowable) <$> idxR str

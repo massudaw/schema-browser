@@ -185,49 +185,61 @@ type SelPKConstraint = [([Column CoreKey ()],R.Tidings PKConstraint)]
 
 type SelTBConstraint = [([Column CoreKey ()],R.Tidings TBConstraint)]
 
-type PluginRef a = [([Access Key], R.Tidings (Maybe (Index a)))]
-
+type PluginRef a = [(Union (Access Key), R.Tidings (Maybe (Index a)))]
 
 instance (NFData k, NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex  a ) (TBData k a)) where
   type Index (G.GiST (G.TBIndex  a ) (TBData k a)  ) = RowPatch k (Index a)
-  -- applyIfChange = applyGiSTChange
+  applyIfChange = applyGiSTChange
 
-applyGiSTChange
-  ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => InformationSchema -> TableK k -> G.GiST (G.TBIndex  a ) (TBData k a) -> RowPatch k (Index a) -> Maybe (G.GiST (G.TBIndex  a ) (TBData k a))
-applyGiSTChange inf t l (DropRow patom) = Just $ G.delete (create <$> G.notOptional (G.getIndex patom )) G.indexParam  l
-applyGiSTChange inf t l (PatchRow patom@(m,ipa, p))
-  =  case G.lookup (G.notOptional i) l  of
+instance (NFData k, NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (TableRep k a) where
+  type Index (TableRep k a) = RowPatch k (Index a)
+  applyIfChange = applyTableRep
+
+
+applyGiSTChange ::
+     (NFData k, NFData a, G.Predicates (G.TBIndex a), PatchConstr k a)
+  => G.GiST (G.TBIndex a) (TBData k a)
+  -> RowPatch k (Index a)
+  -> Maybe (G.GiST (G.TBIndex a) (TBData k a))
+applyGiSTChange l (DropRow patom) =
+  Just $ G.delete (create <$> G.notOptional (G.getIndex patom)) G.indexParam l
+applyGiSTChange l (PatchRow patom@(m, ipa, p)) =
+  case G.lookup (G.notOptional i) l of
     Just v -> do
-      el <-  applyIfChange v patom
+      el <- applyIfChange v patom
       let pkel = G.getIndex el
-      return $ if  pkel == i
-            then G.update (G.notOptional i) (const el) l
-            else G.insert (el,G.tbpred  el) G.indexParam . G.delete (G.notOptional i)  G.indexParam $ l
-    Nothing -> do
-      el <- createIfChange  patom
-      return $ G.insert (el,G.tbpred  el) G.indexParam  l
-   where
-         i = fmap create  ipa
-applyGiSTChange inf t l (CreateRow elp )
-  =  case G.lookup i l  of
-    Just v ->  Just $ G.insert (el,G.tbpred  el) G.indexParam . G.delete i  G.indexParam $ l
-    Nothing -> Just $ G.insert (el,G.tbpred  el) G.indexParam  l
-   where
-     el = fmap (fmap create) elp
-     i = G.notOptional $ G.getIndex el
+      return $
+        (if pkel == i
+          then G.update (G.notOptional i) (const el)
+          else G.insert (el, G.tbpred el) G.indexParam .
+            G.delete (G.notOptional i) G.indexParam) l
 
+    Nothing -> do
+      el <- createIfChange patom
+      return $ G.insert (el, G.tbpred el) G.indexParam l
+  where
+    i = fmap create ipa
+applyGiSTChange l (CreateRow elp) =
+  case G.lookup i l of
+    Just v ->
+      Just $
+      G.insert (el, G.tbpred el) G.indexParam . G.delete i G.indexParam $ l
+    Nothing -> Just $ G.insert (el, G.tbpred el) G.indexParam l
+  where
+    el = fmap (fmap create) elp
+    i = G.notOptional $ G.getIndex el
 
 applyTableRep
-  ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => InformationSchema -> TableK k -> TableRep k a -> RowPatch k (Index a) -> Maybe (TableRep k a)
-applyTableRep inf table (sidxs,l) (DropRow patom)
+  ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => TableRep k a -> RowPatch k (Index a) -> Maybe (TableRep k a)
+applyTableRep (sidxs,l) (DropRow patom)
   = Just $ (didxs <$> sidxs, G.delete (create <$> G.notOptional (G.getIndex patom )) G.indexParam  l)
   where
     didxs (un ,sidx)= (un,maybe sidx (\v -> G.delete v G.indexParam sidx ) (G.getUnique un <$> v))
     v = G.lookup (create <$> G.notOptional (G.getIndex patom ))  l
-applyTableRep inf table (sidxs,l) (PatchRow patom@(m,ipa, p)) =  (dixs <$> sidxs ,) <$>   applyGiSTChange inf table l (PatchRow patom)
+applyTableRep (sidxs,l) (PatchRow patom@(m,ipa, p)) =  (dixs <$> sidxs ,) <$>   applyGiSTChange l (PatchRow patom)
    where
      dixs (un,sidx) = (un,sidx)--(\v -> G.insert (v,G.getIndex i) G.indexParam sidx ) (G.getUnique un  el))
-applyTableRep inf table (sidxs,l) (CreateRow elp ) =  Just  (didxs <$> sidxs,case G.lookup i l  of
+applyTableRep (sidxs,l) (CreateRow elp ) =  Just  (didxs <$> sidxs,case G.lookup i l  of
                   Just v ->  if v == el then l else G.insert (el,G.tbpred  el) G.indexParam . G.delete i  G.indexParam $ l
                   Nothing -> G.insert (el,G.tbpred  el) G.indexParam  l)
    where
@@ -275,7 +287,7 @@ data FPlugAction k
   | DiffPurePlugin (ArrowReaderDiffM Identity)
   | DiffIOPlugin (ArrowReaderDiffM IO)
 
-type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) [Access Text] () (Maybe (Index (TBData Text Showable)))
+type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Union (Access Text)) () (Maybe (Index (TBData Text Showable)))
 
 
 pluginStatic = pluginStatic' . _plugAction
@@ -530,8 +542,9 @@ liftAccessM inf tname (Nested i c) = Nested <$> ref <*> join (fmap (\ l -> liftA
 liftAccessM _ _ i = errorWithStackTrace (show i)
 
 
-liftAccessMU inf tname (ISum i) =  ISum <$> traverse (liftAccessM inf tname)  i
-liftAccessMU inf tname (Many i) =  Many <$> traverse (liftAccessM inf tname)  i
+liftAccessMU inf tname (ISum i) =  ISum <$> traverse (liftAccessMU inf tname)  i
+liftAccessMU inf tname (Many i) =  Many <$> traverse (liftAccessMU inf tname)  i
+liftAccessMU inf tname (One i) =  One <$> liftAccessM inf tname  i
 
 liftAccessF :: (Show k ,Ord k) => LookupKey k ->InformationSchema -> Text -> Access k-> Access Key
 liftAccessF lk inf tname (Point i  ) =  Point i
@@ -564,7 +577,7 @@ genPredicateFull
 genPredicateFull i (Rec _ _) = Nothing  -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (Point _) = Nothing -- AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
 genPredicateFull i (IProd b l) =  (\i -> PrimColl (IProd b l,Right i ))  <$> b
-genPredicateFull i (Nested p l) = fmap (\(a,b) -> (Nested p (Many[a]) , b )) <$> genPredicateFullU i l
+genPredicateFull i (Nested p l) = fmap (\(a,b) -> (Nested p (Many[One a]) , b )) <$> genPredicateFullU i l
 genPredicateFull _ i = errorWithStackTrace (show i)
 
 genPredicateFullU
@@ -572,8 +585,9 @@ genPredicateFullU
      t
      -> Union (Access a)
      -> Maybe (BoolCollection (Access a, Either a1 UnaryOperator))
-genPredicateFullU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
-genPredicateFullU i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFull i <$> l)
+genPredicateFullU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFullU i <$> l)
+genPredicateFullU i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFullU i <$> l)
+genPredicateFullU i (One l) = AndColl <$> (fmap pure $  genPredicateFull i $ l)
 
 
 notException e =  if isJust eb || isJust es || isJust as then Nothing else Just e
@@ -586,5 +600,20 @@ notException e =  if isJust eb || isJust es || isJust as then Nothing else Just 
     es = fromException e
 
 showFKText v = L.take 50 . L.intercalate "," $  (renderShowable <$> allKVRec' v)
+
+patchNoRef (m,pk,l) =  (m,pk,concat $ attrNoRef <$> l)
+  where
+    attrNoRef (PFK _ l _ ) = l
+    attrNoRef (PInline i l ) = [PInline i $ patchNoRef <$> l]
+    attrNoRef i = [i]
+
+mergeCreate (Just i) (Just j) = Just $ mergeTB1 i j
+mergeCreate Nothing (Just i) = Just i
+mergeCreate (Just i)  Nothing = Just i
+mergeCreate Nothing Nothing = Nothing
+
+mergeTB1 ((m,Compose k) ) ((m2,Compose k2) )
+  = (m,Compose $ liftA2 (\(KV i ) (KV j) -> KV $ M.unionWith const i j ) k k2)
+
 
 makeLenses ''InformationSchemaKV

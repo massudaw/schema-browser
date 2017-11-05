@@ -79,7 +79,7 @@ main = do
     (ServerConfig <$> join (readMay <$> sp) <*> sh)
   print "Load GUI Server"
   let initGUI = do
-        Just (TableModification _ _ (CreateRow c)) <- addClientLogin metas
+        Just (TableModification _ _ _ _ (CreateRow c)) <- addClientLogin metas
         let [LeftTB1 (Just (TB1 (SNumeric i)))] =
               F.toList ((\(Idex i) -> i) $ G.getIndex c)
         return i

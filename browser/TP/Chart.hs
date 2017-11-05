@@ -98,22 +98,15 @@ chartWidget body (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
     dashes <- chartWidgetMetadata inf
     iday <- liftIO getCurrentTime
     let
-      legendStyle  lookDesc table b
-            =  do
-              let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,t,_)-> (b,i)) dashes)
-              maybe UI.div (\(k@((c,tname,_,_,_))) -> mdo
-                expand <- UI.input # set UI.type_ "checkbox" # sink UI.checked evb # set UI.class_ "col-xs-1"
-                evc <- UI.checkedChange expand
-                evb <- ui $ stepper False evc
-                missing <- UI.div  # set UI.style [("width","100%"),("height","150px") ,("overflow-y","auto")] # sink UI.style (noneShow <$> evb)
-                header <- UI.div
-                  # set items [element b # set UI.class_"col-xs-1", UI.div # sink text  (T.unpack .($table) <$> facts lookDesc ) # set UI.class_ "fixed-label col-xs-10", element expand ]
-                  # set UI.style [("background-color",renderShowable c)]
-                UI.div # set children [header,missing]
-                  ) item
+      legendStyle  lookDesc table b =
+        let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,t,_)-> (b,i)) dashes)
+        in traverse (\(k@((c,tname,_,_,_))) -> do
+          element b # set UI.class_"col-xs-1"
+          header <- UI.div # sink text  (T.unpack .($table) <$> facts lookDesc ) # set UI.class_ "fixed-label col-xs-11"
+          UI.label # set children [b,header]# set UI.style [("background-color",renderShowable c),("display","-webkit-box")]
+            ) item
     calendar <- UI.div # set UI.class_ "col-xs-10"
     element body # set children [calendar]
-    let inpCal = sel
     let calFun (resolution,incrementT,positionB) = mdo
             let
               evc = eventClick calendar
@@ -137,7 +130,7 @@ chartWidget body (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
                        (v)
                     element el # sink UI.style  (noneShow . isJust <$> tdib)
                     UI.div # set children [charts,el] # set UI.class_ "row"
-                                   ) ref) inpCal
+                                   ) ref) sel
 
             element calendar # sink children ( catMaybes .F.toList <$> facts edits)
 

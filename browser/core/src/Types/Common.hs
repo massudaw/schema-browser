@@ -17,6 +17,7 @@ module Types.Common (
     ,mapFValue,mapFValue',mapFAttr,traFAttr,traFValue,mapValue,mapValue'
     ,keyAttr
     ,unAttr
+    ,Ring(..)
 
     ,FTB (..)
     ,mapKV,findTB1,filterTB1',mapTB1,mapKey',mapKey,firstTB,mapBothKV,firstKV,secondKV,traverseKV,filterTB1,filterTB1'
@@ -121,10 +122,10 @@ kvlist :: (Foldable f, Ord k )=> [Compose f (TB f ) k a] -> KV (Compose f (TB f 
 kvlist = KV. mapFromTBList
 
 unArray' (ArrayTB1 s) =  s
-unArray' o  = Non.fromList [o] -- errorWithStackTrace $ "unArray' no pattern " <> show o
+unArray' o  = Non.fromList [o] -- error $ "unArray' no pattern " <> show o
 
 unArray (ArrayTB1 s) =  s
-unArray o  = errorWithStackTrace $ "unArray no pattern " <> show o
+unArray o  = error $ "unArray no pattern " <> show o
 
 unSOptional (LeftTB1 i) = i
 unSOptional i = (Just i)-- traceShow ("unSOptional No Pattern Match SOptional-" <> show i) (Just i)
@@ -182,6 +183,12 @@ data Order
   | Desc
   deriving(Eq,Ord,Show,Generic)
 
+class Ring a where
+  zero :: a
+  one :: a
+  mult :: a -> a -> a
+  add :: a -> a -> a
+  star :: a -> a
 
 type Column k a = TB Identity k a
 type TBData k a = (KVMetadata k,Compose Identity (KV (Compose Identity (TB Identity))) k a )
@@ -191,17 +198,16 @@ keyRef k = IProd notNull k
 iprodRef (IProd _ l) = l
 
 data Union a
-  = Many [a]
-  | ISum [a]
+  = Many [Union a]
+  | ISum [Union a]
+  | One a
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable,Generic)
 
 data Access  a
   = IProd (Maybe UnaryOperator) a
-  -- | ISum  [Access  a]
   | Nested [Access  a] (Union (Access  a))
   | Rec Int (Union (Access  a))
   | Point Int
-  -- | Many [Access a]
   deriving(Show,Eq,Ord,Functor,Foldable,Traversable,Generic)
 
 data BoolCollection a
@@ -236,7 +242,7 @@ notNull = Just $ Not IsNull
 renderUnary (Not i) = "not " <> renderUnary i
 renderUnary IsNull = "null"
 renderUnary (Range b i )= (if b then " upper" else " lower")
-renderUnary i = errorWithStackTrace (show i)
+renderUnary i = error (show i)
 
 renderBinary (Flip (Flip i)) = renderBinary i
 renderBinary Contains  = "@>"
@@ -257,7 +263,7 @@ renderBinary (Flip (AllOp op)) = " all" <> renderBinary op
 renderBinary (Flip (AnyOp op)) = " any" <> renderBinary op
 -- Symetric Operators
 renderBinary  (Flip i ) = renderBinary i
-renderBinary i = errorWithStackTrace (show i)
+renderBinary i = error (show i)
 
 readBinaryOp :: T.Text -> BinaryOperator
 readBinaryOp "=" = Equals
@@ -271,7 +277,7 @@ readBinaryOp "<@ all" = AllOp (Flip Contains)
 readBinaryOp "= any" = AnyOp Equals
 readBinaryOp "@> any" = AnyOp Contains
 readBinaryOp "<@ any" = AnyOp (Flip Contains)
-readBinaryOp i = errorWithStackTrace (show i)
+readBinaryOp i = error (show i)
 
 
 data BinaryOperator
@@ -337,7 +343,7 @@ filterKV i (KV n) =  KV $ Map.filterWithKey (\k ->  i. snd) n
 findKV i (KV  n) =  L.find (i . snd) $Map.toList  n
 
 findTB1  i (TB1 (m, j) )  = mapComp (Compose . findKV i) j
--- findTB1  l (LeftTB1  j )  = join $ findTB1  l <$> j -- errorWithStackTrace (show m)
+-- findTB1  l (LeftTB1  j )  = join $ findTB1  l <$> j -- error (show m)
 
 findTB1'  i (TB1 (m, j) )  = Map.lookup  i (_kvvalues $ runIdentity $ getCompose j  )
 findTB1'  i (LeftTB1  j )  = join $ findTB1' i <$> j
@@ -371,7 +377,7 @@ data Rel k
 
 _relTarget (Rel _ _ i ) =  i
 _relTarget (RelAccess _ i) = _relTarget i
-_relTarget i = errorWithStackTrace (show i)
+_relTarget i = error (show i)
 
 _relOrigin (Rel i _ _) = i
 _relOrigin (Inline i) = i
@@ -417,11 +423,6 @@ instance (NFData k) => NFData (Union k )
 instance Binary Expr
 instance NFData Expr
 
-
-
-
-
-
 data TB f k a
   = Attr
     { _tbattrkey :: !k
@@ -447,8 +448,8 @@ data TB f k a
 
 _fkttable (IT _  i) = i
 _fkttable (FKT _ _ i) = i
-_fkttable (Attr i _) = errorWithStackTrace "hit attr"
-_fkttable (Fun i _ _) = errorWithStackTrace "hit fun"
+_fkttable (Attr i _) = error "hit attr"
+_fkttable (Fun i _ _) = error "hit fun"
 
 
 type TB2 k a = TB3 Identity k a
@@ -473,8 +474,6 @@ traFAttr f (FKT  i rel v)  = liftA2 (\a b -> FKT a rel b)  ((traverseKV (traComp
 traFValue :: (Traversable g ,Applicative f) => (FTB a -> f (FTB a) ) -> TB3Data g k a -> f (TB3Data g k a)
 traFValue f (m ,k) =  fmap ((m,)). traComp (fmap KV . traverse (traComp (traFAttr f)) . _kvvalues )  $  k
 
-
-
 mapFAttr f (Attr i v)  = (Attr i (f v))
 mapFAttr f (IT i v)  = IT i (mapFValue f v)
 mapFAttr f (FKT  i rel v)  = FKT (mapKV (mapComp (mapFAttr f) ) i) rel  (mapFValue f v)
@@ -496,8 +495,6 @@ mapTableAttr f  i = i
 mapKey' :: Ord b => Functor f => (a -> b) -> TB3Data f a c -> TB3Data f b c
 mapKey f = fmap (mapKey' f)
 mapKey' f ((m ,k) ) = (fmap f m,) . mapComp (firstKV f)  $  k
-
-
 
 firstKV :: (Ord k ,Functor f) => (c -> k) -> KV (Compose f (TB f))c a -> KV (Compose f (TB f))k a
 firstKV  f (KV m ) = KV . fmap (mapComp (firstTB f) ) . Map.mapKeys (Set.map (fmap f)) $ m
@@ -532,15 +529,10 @@ instance Applicative FTB where
 
 type FTB1 f k a = FTB (KVMetadata k, Compose f (KV (Compose f (TB f))) k a)
 
-
-
-
 data Expr
   = Value Int
   | Function Text [Expr]
   deriving(Eq,Ord,Show,Generic)
-
-
 
 unTB :: Compose Identity f k b -> f k b
 unTB = runIdentity . getCompose
@@ -548,19 +540,14 @@ unTB = runIdentity . getCompose
 _tb :: f k b -> Compose Identity f k b
 _tb = Compose . Identity
 
-
-
-
 -- Literals Instances
 
 instance Enum a => Enum (FTB a) where
     toEnum = TB1 . toEnum
     fromEnum (TB1 i ) = fromEnum i
 
-
 instance Real a => Real (FTB a) where
   toRational (TB1 i )=  toRational i
-
 
 instance Integral a => Integral (FTB a) where
   toInteger (TB1 i) = toInteger i
@@ -581,9 +568,6 @@ instance Fractional a => Fractional (FTB a) where
   fromRational i = TB1 (fromRational i)
   recip i = fmap recip i
 
-
-
-
 overComp :: (f k b -> a ) -> Compose Identity f k b -> a
 overComp f =  f . unTB
 
@@ -597,7 +581,7 @@ keyattr = keyattri . head . F.toList . getCompose
 
 relAccesGen :: Access k -> Rel k
 relAccesGen (IProd i l ) = Inline l
-relAccesGen (Nested [IProd i l] (Many [m]) ) = RelAccess l (relAccesGen m)
+relAccesGen (Nested [IProd i l] (Many [One m]) ) = RelAccess l (relAccesGen m)
 
 keyattri :: Foldable f => TB f  k  a -> [Rel k]
 keyattri (Attr i  _ ) = [Inline i]
@@ -630,6 +614,7 @@ filterRec rels (m,n)  = (m, mapComp (KV . fmap (mapComp (nonRef (fmap (L.drop 1)
     nonRef r (IT j k ) =   IT j (filterRec r <$> k )
     nonRef r i = i
 
+
 filterNonRec ::  (Functor f,Show a, Show k ,Ord k) => [MutRec [[Rel k]]] -> TB3Data f k a -> TB3Data f k a
 filterNonRec rels (m,n)  = (m, mapComp (KV . fmap (mapComp (nonRef (fmap (L.drop 1) <$> rels))) . Map.filterWithKey (\k _ -> pred rels  k ) . _kvvalues )  n  )
   where
@@ -640,12 +625,9 @@ filterNonRec rels (m,n)  = (m, mapComp (KV . fmap (mapComp (nonRef (fmap (L.drop
     nonRef r i = i
 
 
-
-
-
-
 tableNonRef :: Ord k => TB2 k a -> TB2 k a
 tableNonRef = fmap tableNonRef'
+
 
 tableNonRef' :: Ord k => TBData k a -> TBData k a
 tableNonRef' (m,n)  = (m, mapComp (KV . rebuildTable . _kvvalues) n)
@@ -655,6 +637,7 @@ tableNonRef' (m,n)  = (m, mapComp (KV . rebuildTable . _kvvalues) n)
     nonRef (FKT i _ _ ) = concat (overComp nonRef <$> unkvlist i)
     nonRef it@(IT j k ) = [(IT  j (tableNonRef k )) ]
     nonRef i = [i]
+
 
 nonRefTB :: Ord k => TB Identity k a -> [(TB Identity ) k a]
 nonRefTB (FKT i _ _ ) = concat (overComp nonRefTB <$> unkvlist i)
@@ -672,6 +655,7 @@ kattri (IT _  i ) =  recTB i
   where recTB (TB1 (m, i) ) =  L.concat $ fmap kattr (F.toList $ _kvvalues $ runIdentity $ getCompose i)
         recTB (ArrayTB1 i ) = L.concat $ F.toList $ fmap recTB i
         recTB (LeftTB1 i ) = L.concat $ F.toList $ fmap recTB i
+
 
 aattr = aattri . unTB
 aattri (Attr k i ) = [(k,i)]
@@ -717,11 +701,8 @@ unTB1 i = fromMaybe (error "unTB1: " ) . headMay . F.toList $ i
 
 keyAttr (Attr i _ ) = i
 keyAttr (Fun i _ _ ) = i
-keyAttr i = errorWithStackTrace $ "cant find keyattr " <> (show i)
+keyAttr i = error $ "cant find keyattr " <> (show i)
 
 unAttr (Attr _ i) = i
 unAttr (Fun _ _ i) = i
-unAttr i = errorWithStackTrace $ "cant find attr" <> (show i)
-
-
-
+unAttr i = error $ "cant find attr" <> (show i)

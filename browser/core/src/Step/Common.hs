@@ -45,9 +45,9 @@ instance Monoid (WherePredicateK k) where
 data Parser m s a b = P (s,s) (m a b) deriving Functor
 
 type ArrowReader  = ArrowReaderM IO
-type PluginTable v = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) Identity)) [Access Text] () v
+type PluginTable v = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) Identity)) (Union (Access Text)) () v
 
-type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) [Access Text] () (Maybe (TBData  Text Showable))
+type ArrowReaderM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Union (Access Text)) () (Maybe (TBData  Text Showable))
 
 
 deriving instance Functor m => Functor (Kleisli m i )
@@ -62,13 +62,16 @@ instance (Monoid s ,Applicative (a i),Monoid m) => Monoid (StaticEnv a s i m) wh
   mempty = StaticEnv $ StaticArrow (mempty ,pure mempty)
   mappend (StaticEnv (StaticArrow (i , l))) (StaticEnv (StaticArrow (j ,m ))) =  StaticEnv $ StaticArrow  (mappend i j,liftA2 mappend l  m )
 
-instance (Monoid s ,Arrow m)  => Arrow (Parser m s) where
-  arr f = (P mempty (arr f ))
+instance (Ring s ,Arrow m)  => Arrow (Parser m s) where
+  arr f = (P one (arr f ))
   first (P s d )  = P s (first d )
 
-instance (Monoid s,Arrow m) => Category (Parser m s) where
-   id = P mempty id
-   P i j . P l  m = P (i <> l) (j . m  )
+instance (Ring s ,ArrowChoice m)  => ArrowChoice (Parser m s) where
+  (|||) (P (si,so) d ) (P (ki,ko)  j ) = P (si `add` ki ,so `add` ko) (d ||| j)
+
+instance (Ring s,Arrow m) => Category (Parser m s) where
+  id = P one id
+  P i j . P l  m = P (i `mult` l) (j . m  )
 
 
 instance Applicative m => Applicative (Kleisli m a) where
@@ -81,6 +84,26 @@ instance Alternative m => Alternative (Kleisli m a) where
 
 
 
+instance (Ring a , Ring b) => Ring (a,b) where
+  zero = (zero,zero)
+  one = (one,one)
+  mult (a,b) (c,d) = (mult  a c, mult b d)
+  add (a,b) (c,d) = (add a c, add b d)
+
+instance Ring (Union a) where
+  zero = ISum []
+  one = Many []
+
+  ISum l `add` ISum j = ISum (l <>  j)
+  l `add` ISum j = ISum (l :  j)
+  ISum l `add`j = ISum (l <> pure j)
+  i `add`j = ISum [i,j]
+
+  Many i `mult` Many j = Many $  i <> j
+  Many i `mult`j = Many $  i <> pure j
+  i `mult` Many j = Many $  pure i <> j
+  i `mult` j = Many  [i,j]
+
 
 class KeyString i where
   keyString :: i -> Text
@@ -91,14 +114,17 @@ instance KeyString Key where
 instance KeyString Text where
   keyString = id
 
+
 instance Eq a => Monoid (Union a ) where
   mempty = Many []
   mappend (ISum j) (ISum i) = ISum (i <> j)
   mappend (Many j) (Many i) = Many (i <> j)
+  mappend (Many j) i = Many (j <> pure i)
+  mappend i (Many j)  = Many (pure i <> j)
 
 instance Applicative Union where
-  pure i = Many [i]
-  Many f <*> Many a = Many (zipWith ($) f a)
+  pure i = Many [One i]
+  Many f <*> Many a = Many (zipWith (<*>) f a)
 
 instance Alternative Union where
   empty = ISum []
