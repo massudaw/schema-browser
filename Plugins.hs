@@ -426,7 +426,7 @@ siapi3Inspection = FPlugins pname tname  $ IOPlugin url
       cpf <- atR "id_project" $
                atR "id_owner,id_contact" $
                  atR "id_owner" $
-                   atAny "ir_reg" [varTB "cpf_number",varTB "cnpj_number"] -< t
+                   atR "ir_reg" (varTB "cpf_number" ||| varTB "cnpj_number") -< Left ()
       v <- atMR "protocolo,ano" (proc cpf -> do
         protocolo <- idxR "protocolo" -< ()
         ano <- idxR "ano" -< ()
@@ -460,7 +460,7 @@ siapi3Plugin  = FPlugins pname tname  $ DiffIOPlugin url
       cpf <- atR "id_project"
               $ atR "id_owner,id_contact"
                 $ atR "id_owner"
-                  $ atAny "ir_reg" [varTB "cpf_number",varTB "cnpj_number"] -< t
+                  $ atR "ir_reg" (varTB "cpf_number" ||| varTB "cnpj_number") -< undefined
       v <- atMR "protocolo,ano" (proc cpf -> do
         protocolo <- idxR "protocolo" -< ()
         ano <- idxR "ano" -< ()

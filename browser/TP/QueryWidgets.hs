@@ -352,7 +352,7 @@ tbCaseDiff inf table _ a@(Attr i _ ) wl plugItens preoldItems = do
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
     search (IProd _ t) = fmap (fmap _tbattr ). uncurry recoverT .snd <$> L.find ((S.singleton t ==) . S.fromList . fmap _relOrigin . keyattri . fst) wl
-    search (Nested t (Many [One m]) ) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). uncurry recoverT . snd <$> L.find ((S.fromList (iprodRef <$> t) ==) . S.fromList . fmap _relOrigin .keyattri . fst) wl
+    search (Nested t (Many [One m])) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). uncurry recoverT . snd <$> L.find ((S.fromList (iprodRef <$> t) ==) . S.fromList . fmap _relOrigin .keyattri . fst) wl
     refs = sequenceA $ catMaybes $ search <$> snd rel
 
   funinp <- traverseUI ( traverse (liftIO. evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)). allMaybes ) refs
@@ -987,9 +987,6 @@ buildPrim fm tdi i = case i of
                 itime <- liftIO $  getCurrentTime
                 oneInput i tdi
              PInterval -> oneInput i tdi
-         PSession -> do
-           dv <- UI.div # set text "session" # sink UI.style (noneShow . isJust <$> facts tdi)
-           return  $ TrivialWidget tdi dv
          PAddress -> do
            let binarySrc = (\(SText i) -> "https://drive.google.com/embeddedfolderview?id=" <> T.unpack i <> "#grid")
 
@@ -1133,15 +1130,9 @@ isReadOnly (FKT ifk rel _ ) = L.null (unkvlist ifk ) || all (not . any ((/= FRea
 isReadOnly (Attr k _ ) =  (not . any ((/= FRead)). keyModifier ) k
 isReadOnly (IT k _ ) =   (not . any ((/= FRead)). keyModifier ) k
 
-liftFK :: (Show k , Show b ,Ord k) => Column k b-> FTB (Map k (FTB b) ,TBData k b)
-liftFK (FKT l rel i ) = first (fmap TB1 ) <$> liftRel (fmap unTB  $ F.toList $ _kvvalues l ) rel i
 
 liftPFK :: (Show k,Show b,Ord k) => PathAttr k b-> PathFTB (Map k (FTB b) ,TBIdx k b)
 liftPFK (PFK rel l i ) =first (fmap TB1 ) <$> liftPRel l  rel i
-
-liftRel :: (Ord k,Show c ,Show k ,Show b) => [Column k b] -> [Rel k] -> FTB c -> FTB (Map k b ,c)
-liftRel l rel f = liftA2 (,) (M.fromList  <$> F.foldl' (flip merge ) (TB1 []) rels) f
-  where rels = catMaybes $ findRel l <$> rel
 
 
 liftPRel :: (Show b,Show k ,Ord k) => [PathAttr k b] -> [Rel k] -> PathFTB c -> PathFTB (Map k b ,c)
@@ -1164,34 +1155,14 @@ mergePFK i (PatchSet j) =  PatchSet $ mergePFK i <$> j
 mergePFK (PIdx ix i ) (PAtom l) = PIdx ix (flip mergePFK (PAtom l)  <$>  i)
 mergePFK (PAtom i ) (PAtom l) = PAtom (i : l)
 mergePFK i  j = errorWithStackTrace (show (i,j))
-
-merge :: FTB a -> FTB [a] -> FTB [a]
-merge (LeftTB1 i ) (LeftTB1 j) = LeftTB1 $ merge <$> i <*> j
-merge (ArrayTB1 i ) (ArrayTB1 j) = ArrayTB1 $ Non.zipWith merge i j
-merge (TB1 i ) (TB1 j) = TB1 $ i:j
-merge (LeftTB1 i) j = LeftTB1 $ (\i  -> merge i j) <$> i
-merge i (LeftTB1 j) = LeftTB1 $ (\j  -> merge i j) <$> j
-merge (ArrayTB1 i) j = ArrayTB1 $ (\i  -> merge i j) <$> i
-merge i  (ArrayTB1 j) = ArrayTB1 $ (\j  -> merge i j) <$> j
-
 findPRel l (Rel k op j) =  do
   PAttr k v <- L.find (\(PAttr i v) -> i == k ) l
   return $ fmap (k,) v
+recoverPFK :: [Key] -> [Rel Key]-> PathFTB (Map Key (FTB Showable),TBIdx Key Showable) -> PathAttr Key Showable
+recoverPFK ori rel i =
+  PFK rel ((catMaybes $ defaultAttrs <$> ori ) ++  (fmap (\(i,j) -> PAttr i (join $ fmap patch j)) $  zip  (L.sort ori ). getZipList . sequenceA $ fmap ( ZipList . F.toList. fst) i))   (fmap snd i)
 
-findRel l (Rel k op j) =  do
-  Attr k v <- L.find (\(Attr i v) -> i == k ) l
-  return $ fmap (k,) v
 
-instance Monad FTB where
-  TB1 i >>= j =  j i
-  LeftTB1 o  >>= j =  LeftTB1 $ fmap (j =<<) o
-  ArrayTB1 o  >>= j =  ArrayTB1 $ fmap (j =<<) o
-
-instance Monad PathFTB where
-  PAtom i >>= j = j i
-  PIdx ix i >>= j = PIdx ix $ (j =<<)  <$> i
-  POpt i >>= j = POpt $ (j =<<)  <$> i
-  PatchSet i >>= j = PatchSet $ (j =<<) <$> i
 
 
 attrToTuple  (Attr k v ) = (k,v)
@@ -1391,10 +1362,6 @@ fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel _)
     where (targetSchema,target) = findRefTableKey preinf table rel
           inf = fromMaybe preinf $ HM.lookup targetSchema (depschema preinf)
           setattr = keyAttr . unTB <$> unkvlist ifk
-
-recoverPFK :: [Key] -> [Rel Key]-> PathFTB (Map Key (FTB Showable),TBIdx Key Showable) -> PathAttr Key Showable
-recoverPFK ori rel i =
-  PFK rel ((catMaybes $ defaultAttrs <$> ori ) ++  (fmap (\(i,j) -> PAttr i (join $ fmap patch j)) $  zip  (L.sort ori ). getZipList . sequenceA $ fmap ( ZipList . F.toList. fst) i))   (fmap snd i)
 
 
 reduceTable l

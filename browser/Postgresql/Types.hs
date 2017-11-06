@@ -157,7 +157,6 @@ postgresPrim =
   ,("bpchar",PText)
   ,("sql_identifier" , PText)
   ,("base64url",PText)
-  ,("session",PSession)
   ,("bytea",PBinary)
   ,("mp4",PMime "video/mp4")
   ,("pdf",PMime "application/pdf")

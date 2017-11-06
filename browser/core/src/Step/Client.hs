@@ -1,5 +1,5 @@
 {-# LANGUAGE Arrows,OverloadedStrings,FlexibleContexts,NoMonomorphismRestriction #-}
-module Step.Client (module Step.Common,notNull,idxR,idxK,idxKIn,act,odx,odxR,nameO,nameI,callI,atAny,idxA,atMA,callO,odxM,idxM,atR,atK,atRA,attrT,tb,indexTable,atMR,allP,anyP,manyU) where
+module Step.Client (module Step.Common,notNull,idxR,idxK,idxKIn,act,odx,odxR,nameO,nameI,callI,atAny,idxA,atMA,callO,odxM,idxM,atR,atK,atRA,attrT,tb,indexTable,atMR,anyP,manyU) where
 
 import Types
 import Step.Common
@@ -7,6 +7,7 @@ import Control.Monad.Reader
 import Control.Monad.Trans.Maybe
 import qualified Data.Map as M
 import qualified Data.Set as S
+import qualified Control.Lens as Le
 import Data.Maybe
 import Data.Foldable (toList)
 import Control.Applicative
@@ -30,9 +31,9 @@ act :: (Monoid s,Monad m) => (a -> m b) ->  Parser (Kleisli m) s a b
 act a = P mempty (Kleisli a )
 
 
-atAny k ps = atP k (anyP ps)
+atAny k = atP k . anyP
 
-allP (P (ps,ks) a) = P (ps ,ks) a
+allP = id
 
 anyP ps = P (ISum fsum ,ISum ssum) (Kleisli (\i -> runMaybeT $ foldr1 ((<|>) )  (fmap ($i) asum)))
   where
@@ -40,13 +41,20 @@ anyP ps = P (ISum fsum ,ISum ssum) (Kleisli (\i -> runMaybeT $ foldr1 ((<|>) )  
     fsum =   fmap (\(P s _ )-> fst s ) ps
     ssum =   fmap (\(P s _ )-> snd s ) ps
 
-atP k (P (fsum,ssum) (Kleisli a))= P (nest fsum,nest ssum ) (Kleisli (fmap (local (fmap unTB1 . indexTB1 ind))  a))
+atP k (P (fsum,ssum) (Kleisli a))= P (nest fsum,nest ssum ) (Kleisli (fmap (local (fmap unTB1 . join . traverse  (indexTB1 ind)))  a))
   where
     nest (Many []) = Many []
     nest (ISum []) = Many []
     nest ls = Many [One $ Nested ind ls]
     ind = splitIndex (Just $ Not IsNull) k
-
+      {-
+aNest k (P (fsum,ssum) (Kleisli a))= P (nest fsum,nest ssum ) (Kleisli (a . indexTB1 ind)  )
+  where
+    nest (Many []) = Many []
+    nest (ISum []) = Many []
+    nest ls = Many [One $ Nested ind ls]
+    ind = splitIndex (Just $ Not IsNull) k
+-}
 
 nest ind (Many []) = Many []
 nest ind (Many [One (Rec ix i)])  = One . Nested ind $ Many [One $ Rec ix i]
@@ -58,7 +66,7 @@ atMA
      String
      -> Parser (Kleisli m) (Union (Access Text)) t t1
      -> Parser (Kleisli m) (Union (Access Text)) t [t1]
-atMA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> unTB1 <$> toList l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
+atMA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> unTB1 <$> toList l) . join . fmap (\(LeftTB1 i )-> i) . join . traverse ( indexTB1 ind))  =<< ask ))
   where ind = splitIndex Nothing i
 
 
@@ -68,7 +76,7 @@ atRA
      String
      -> Parser (Kleisli m) (Union (Access Text)) t t1
      -> Parser (Kleisli m) (Union (Access Text)) t [t1]
-atRA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> unTB1 <$> toList l) . join . fmap (\(LeftTB1 i )-> i) . indexTB1 ind)  =<< ask ))
+atRA i (P s (Kleisli j) )  =  P (BF.second (nest ind) . BF.first (nest ind) $ s) (Kleisli (\i -> maybe (return []) (mapM (\env -> local (const (Just env))  (j i ))) =<<  (return . Just . maybe [] (\(ArrayTB1 l) -> unTB1 <$> toList l) . join . fmap (\(LeftTB1 i )-> i) . join . traverse (indexTB1 ind))  =<< ask ))
   where ind = splitIndex (Just $ Not IsNull) i
 
 unLeftTB1 = join . fmap (\v -> case v of
@@ -76,7 +84,7 @@ unLeftTB1 = join . fmap (\v -> case v of
                i@(TB1 _ ) -> Just i)
 
 
-at b i (P s (Kleisli j) )  =  P (BF.second (nest (ind b)) . BF.first (nest (ind b)) $ s) (Kleisli (\i -> local (fmap unTB1 . unLeftTB1 . indexTB1 (ind b)) (j i )  ))
+at b i (P s (Kleisli j) )  =  P (BF.second (nest (ind b)) . BF.first (nest (ind b)) $ s) (Kleisli (\i -> local (fmap unTB1 . unLeftTB1 . join . traverse (indexTB1 (ind b))) (j i )  ))
   where ind b = splitIndex b i
 
 
@@ -90,12 +98,12 @@ atR
      String
      -> Parser (Kleisli m) (Union (Access Text)) a b
      -> Parser (Kleisli m) (Union (Access Text)) a b
-atR k = atP k . allP
+atR k = atP k
 
 atK = at Nothing
 atMR = at notNull
   where
-    at b i (P s (Kleisli j) )  =  P (BF.second (nest (ind Nothing)) . BF.first (nest (ind b)) $ s) (Kleisli (\i -> local (fmap unTB1 . unLeftTB1 . indexTB1 (ind b)) (j i )  ))
+    at b i (P s (Kleisli j) )  =  P (BF.second (nest (ind Nothing)) . BF.first (nest (ind b)) $ s) (Kleisli (\i -> local (fmap unTB1 . unLeftTB1 . join . traverse (indexTB1 (ind b))) (j i )  ))
       where ind b = splitIndex b i
 
 
@@ -163,14 +171,15 @@ indexAttr l t
     return $ unTB i
 
 
-indexTB1 l t
+indexTB1 l (m,v)
   = do
-    (m,v) <- t
-    i <-   M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)) . _kvvalues $ unTB v
+    i <- M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)) . _kvvalues $ unTB v
     case runIdentity $ getCompose $i  of
-         Attr _ l -> Nothing
-         FKT l  _ j -> return j
-         IT l  j -> return j
+       Attr _ l -> Nothing
+       FKT l i j -> return $ j
+       IT l j -> return $ j
+
+
 
 
 firstCI f = mapComp (firstTB f)

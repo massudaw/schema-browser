@@ -583,4 +583,10 @@ instance Ord a => Semigroup (FTB a) where
   ArrayTB1 i <> ArrayTB1 j = ArrayTB1 (i <>  j)
   TB1 i <> TB1 j = TB1 j
 
+instance Monad PathFTB where
+  PAtom i >>= j = j i
+  PIdx ix i >>= j = PIdx ix $ (j =<<)  <$> i
+  POpt i >>= j = POpt $ (j =<<)  <$> i
+  PatchSet i >>= j = PatchSet $ (j =<<) <$> i
+
 

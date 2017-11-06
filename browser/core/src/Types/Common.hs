@@ -56,6 +56,7 @@ module Types.Common (
     ,Order(..),showOrder
     ,Identity(..)
     ,_tb
+    ,liftFK
     ,unTB
     ,overComp
 
@@ -73,6 +74,7 @@ module Types.Common (
     ,tableNonRef )   where
 
 import Data.Ord
+import qualified Control.Lens as Le
 import Text.Show.Deriving
 import Types.Compose
 import Control.DeepSeq
@@ -110,6 +112,7 @@ import qualified Data.Set as Set
 import qualified Data.Set as  S
 import Control.Monad.State
 import Data.Text (Text)
+import Control.Monad
 
 import Debug.Trace
 import Data.Unique
@@ -514,6 +517,11 @@ data FTB a
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable,Generic)
 
 
+instance Monad FTB where
+  TB1 i >>= j =  j i
+  LeftTB1 o  >>= j =  LeftTB1 $ fmap (j =<<) o
+  ArrayTB1 o  >>= j =  ArrayTB1 $ fmap (j =<<) o
+
 instance Applicative FTB where
   pure = TB1
   TB1 i <*> TB1 j = TB1 $ i  j
@@ -623,6 +631,56 @@ filterNonRec rels (m,n)  = (m, mapComp (KV . fmap (mapComp (nonRef (fmap (L.drop
     nonRef r (FKT i rel k) = FKT i rel (filterNonRec r <$> k)
     nonRef r (IT j k ) =   IT j (filterNonRec r <$> k )
     nonRef r i = i
+
+traTable f = traverse (traComp (\(KV i) -> KV <$> f i ))
+
+alterFTB :: Applicative f => (a -> f a ) -> FTB a -> f (FTB a)
+alterFTB f (TB1 i ) = TB1 <$> f i
+alterFTB f (ArrayTB1 i ) = ArrayTB1 <$> traverse (alterFTB f)  i
+alterFTB f (LeftTB1 i ) = LeftTB1 <$> traverse (alterFTB f)  i
+alterFTB f (IntervalTB1 i ) = IntervalTB1 <$> traverse (alterFTB f)  i
+
+liftFK :: Ord k => Column k b-> FTB (Map k (FTB b) ,TBData k b)
+liftFK (FKT l rel i ) = first (fmap TB1 ) <$> liftRel (fmap unTB  $ F.toList $ _kvvalues l ) rel i
+
+liftRel :: (Ord k) => [Column k b] -> [Rel k] -> FTB c -> FTB (Map k b ,c)
+liftRel l rel f = liftA2 (,) (Map.fromList  <$> F.foldl' (flip merge ) (TB1 []) rels) f
+  where rels = catMaybes $ findRel l <$> rel
+
+recoverFK :: Ord k => [k] -> [Rel k]-> FTB (Map k (FTB s),TBData k s ) -> Column k s
+recoverFK ori rel i =
+  FKT (kvlist $ (fmap (\(i,j) -> _tb $ Attr i (join j)) $  zip  (L.sort ori ). getZipList . sequenceA $ fmap ( ZipList . F.toList. fst) i)) rel   (fmap snd i)
+
+
+
+merge :: FTB a -> FTB [a] -> FTB [a]
+merge (LeftTB1 i ) (LeftTB1 j) = LeftTB1 $ merge <$> i <*> j
+merge (ArrayTB1 i ) (ArrayTB1 j) = ArrayTB1 $ Non.zipWith merge i j
+merge (TB1 i ) (TB1 j) = TB1 $ i:j
+merge (LeftTB1 i) j = LeftTB1 $ (\i  -> merge i j) <$> i
+merge i (LeftTB1 j) = LeftTB1 $ (\j  -> merge i j) <$> j
+merge (ArrayTB1 i) j = ArrayTB1 $ (\i  -> merge i j) <$> i
+merge i  (ArrayTB1 j) = ArrayTB1 $ (\j  -> merge i j) <$> j
+
+
+findRel l (Rel k op j) =  do
+  Attr k v <- L.find (\(Attr i v) -> i == k ) l
+  return $ fmap (k,) v
+
+atTBValue
+  :: (Applicative f , Ord k ) =>
+    [Access k]
+     -> (FTB b -> f (FTB b))
+     -> (FTB (TBData  k b ) -> f (FTB (TBData k b)))
+     -> (FTB (Map k (FTB b),TBData k b) -> f (FTB (Map k (FTB b), TBData k b)))
+     -> (TBData k b)
+     -> f (TBData k b)
+atTBValue l f g h (m,v) = traTable (Le.at key (traverse (traComp modify ))) (m,v)
+  where key = justError "cant find key" $ L.find (\i -> S.map _relOrigin  i == S.fromList (iprodRef <$> l) ) (Map.keys  (_kvvalues (unTB v)))
+        modify i = case i  of
+          Attr k j -> Attr k <$> f j
+          IT l  j -> IT l <$> g j
+          t@(FKT l  i j) -> recoverFK  (concat $ fmap _relOrigin . keyattr <$> (unkvlist l )) i <$> h (liftFK t)
 
 
 tableNonRef :: Ord k => TB2 k a -> TB2 k a

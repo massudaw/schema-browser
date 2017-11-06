@@ -29,7 +29,6 @@ import Control.Lens.TH
 import qualified Control.Lens as Le
 import Data.Functor.Apply
 import Utils
-import qualified Network.Wreq.Session as Sess
 import Data.Bifunctor
 import Safe
 import Prelude hiding(head)
@@ -193,11 +192,6 @@ keyType = _keyTypes
 
 
 
-instance Binary Sess.Session where
-  put i = return ()
-  get = error ""
-instance NFData Sess.Session where
-  rnf _ = ()
 
 instance Binary KTypePrim
 instance Binary a => Binary (KType a)
@@ -247,7 +241,6 @@ data KPrim
    | PCnpj
    | PCpf
    | PBinary
-   | PSession
    | PColor
    | PDynamic
    | PAny
@@ -351,14 +344,8 @@ data Showable
   | SBinary {-# UNPACK #-}! BS.ByteString
   | SDynamic {-# UNPACK #-}! (FTB Showable)
   | SHDynamic {-# UNPACK #-}! HDynamic
-  | SSession {-# UNPACK #-}! Sess.Session
   deriving(Ord,Eq,Show,Generic)
 
-instance Eq Sess.Session where
-  i ==  j = True
-
-instance Ord Sess.Session where
-  compare i j = compare 1 2
 
 
 type SqlOperation = SqlOperationK Key
