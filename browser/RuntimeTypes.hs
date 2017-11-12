@@ -132,7 +132,7 @@ data BrowserState
   ,rowpk :: Maybe (Non.NonEmpty (Text,Text))
   }
 
-type TBF f k v = (KVMetadata k ,Compose  f  (KV (Compose f (TB f))) k v)
+type TBF f k v = (KVMetadata k ,KV (Compose f (TB f)) k v)
 
 
 tableMap :: InformationSchema -> HM.HashMap Text (HM.HashMap Text Table)
@@ -612,8 +612,8 @@ mergeCreate Nothing (Just i) = Just i
 mergeCreate (Just i)  Nothing = Just i
 mergeCreate Nothing Nothing = Nothing
 
-mergeTB1 ((m,Compose k) ) ((m2,Compose k2) )
-  = (m,Compose $ liftA2 (\(KV i ) (KV j) -> KV $ M.unionWith const i j ) k k2)
+mergeTB1 ((m,k) ) ((m2,k2) )
+  = (m,(\(KV i ) (KV j) -> KV $ M.unionWith const i j ) k k2)
 
 
 makeLenses ''InformationSchemaKV

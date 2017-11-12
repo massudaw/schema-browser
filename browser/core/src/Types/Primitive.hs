@@ -817,7 +817,7 @@ unKDelayed i = errorWithStackTrace ("unKDelayed" <> show i)
 unKArray (Key a v c d m n (Primitive (KArray :xs ) e)) = Key a v  c d  m n (Primitive xs e)
 unKArray (Key a v c d m n e) = Key a  v c d  m n e
 
-tableKeys (TB1  (_,k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _kvvalues $  runIdentity $ getCompose $ k)
+tableKeys (TB1  (_,k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _kvvalues $   k)
 tableKeys (LeftTB1 (Just i)) = tableKeys i
 tableKeys (ArrayTB1 (i :| _) ) = tableKeys i
 
@@ -860,10 +860,11 @@ getPKM (m, k) = Map.fromList $  getPKL (m,k)
 
 getPKL (m, k) = concat $ F.toList (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (k))))
 
-getAttr'  (m, k) =  L.sortBy (comparing fst) (concat (fmap aattr $ F.toList $  (  _kvvalues (runIdentity $ getCompose k))))
+getAttr'  (m, k) =  L.sortBy (comparing fst) (concat (fmap aattr $ F.toList $  (  _kvvalues k)))
 
 getPKAttr (m, k) = traComp (concat . F.toList . (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m))   )) k
-getAttr (m, k) = traComp (concat . F.toList) k
+
+getAttr (m, k) = concat . F.toList  $ k
 
 
 getUn un (m, k) =   concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k) un ) (  _kvvalues (k))))

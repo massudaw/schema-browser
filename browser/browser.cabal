@@ -25,6 +25,7 @@ library
     Postgresql.Printer
     Postgresql.Types
     Postgresql.Sql
+    Postgresql.Codegen
 
     Plugins.Schema
 

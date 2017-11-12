@@ -13,6 +13,7 @@ import Default
 import Step.Common
 import qualified Data.Poset as P
 import Control.Exception (uninterruptibleMask,mask_,throw,catch,throw,SomeException)
+import Postgresql.Printer
 import Step.Host
 import Data.Interval (Extended(..),upperBound)
 import Data.Either
@@ -279,13 +280,13 @@ updatePatch conn kv old  t = do
     pred   =" WHERE " <> T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> kold)
     setter = " SET " <> T.intercalate "," (equality .   escapeReserved . attrValueName <$> skv   )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
-    skv = unTB <$> F.toList  (_kvvalues $ unTB tbskv)
+    skv = unTB <$> F.toList  (_kvvalues $ tbskv)
     tbskv = snd isM
     isM :: TBData PGKey  Showable
     isM =  justError ("cant diff befor update" <> show (kv,old)) $ diffUpdateAttr kv old
 
 diffUpdateAttr :: (Ord k , Ord a) => TBData k a -> TBData k a -> Maybe (TBData k a )
-diffUpdateAttr  kv kold@(t,_ )  =  fmap ((t,) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . snd . tableNonRef'  $ kv ) (unKV . snd . tableNonRef' $ kold )
+diffUpdateAttr  kv kold@(t,_ )  =  fmap ((t,) . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . snd . tableNonRef'  $ kv ) (unKV . snd . tableNonRef' $ kold )
 
 differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 
@@ -377,6 +378,44 @@ patchMod patch@(m,_,_) = do
 
 
 
+loadDelayed :: InformationSchema -> TB3Data (Labeled Text) Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
+loadDelayed inf t@(k,v) values@(ks,vs)
+  | L.null $ _kvdelayed k = return Nothing
+  | L.null delayedattrs  = return Nothing
+  | otherwise = do
+       let
+           whr = T.intercalate " AND " ((\i-> justError ("no key" <> show i <> show labelMap)  (M.lookup (S.singleton $ Inline i) labelMap) <>  " = ?") <$> (_kvpk k) )
+           labelMap = fmap (label .getCompose) $  _kvvalues $  (snd $ tableNonRef2 (k,v))
+           table = justError "no table" $ M.lookup (S.fromList $ _kvpk k) (pkMap inf)
+           delayedTB1 :: TB3Data (Labeled Text) Key () -> TB3Data (Labeled Text) Key ()
+           delayedTB1 = fmap (\(KV i ) -> KV $ M.filterWithKey  (\i _ -> isJust $ M.lookup i filteredAttrs ) i)
+           delayed =  mapKey' unKDelayed (mapValue' (const ()) (delayedTB1 t))
+           str = codegen t $ do
+              tq <- expandBaseTable t
+              rq <- explodeRecord delayed
+              return $ "select row_to_json(q)  FROM (SELECT " <>  rq <> " FROM " <> tq <> " WHERE " <> whr <> ") as q "
+           pk = (fmap (firstTB (recoverFields inf) .unTB) $ fmap snd $ L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)   ) $ M.toList $ _kvvalues $   snd $ tbPK (tableNonRef' values))
+       print (T.unpack str,show pk )
+       is <- queryWith (fromRecordJSON delayed) (conn inf) (fromString $ T.unpack str) pk
+       res <- case is of
+            [] -> errorWithStackTrace "empty query"
+            [i] ->return $ fmap (\(i,j,a) -> (i,G.getIndex values,a)) $ diff (ks , KV filteredAttrs) (mapKey' (alterKeyType (Le.over keyFunc makeDelayed)) . mapFValue' makeDelayedV $ i  )
+            _ -> errorWithStackTrace "multiple result query"
+       return res
+  where
+    makeDelayed (KOptional :k ) = KOptional :(makeDelayed k)
+    makeDelayed (KArray :k ) = KArray :(makeDelayed k)
+    makeDelayed [] = [KDelayed ]
+
+    makeDelayedV (TB1 i) = LeftTB1 $ Just (TB1 i)
+    makeDelayedV (LeftTB1 i) = LeftTB1 $ makeDelayedV <$> i
+    makeDelayedV (ArrayTB1 i) = ArrayTB1 $ makeDelayedV <$> i
+
+    delayedattrs = concat $ fmap (keyValue . _relOrigin ) .  F.toList <$> M.keys filteredAttrs
+    filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (S.fromList $ _kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ vs)
+
+
+
 selectAll
   ::
      TBF (Labeled Text) Key ()
@@ -387,8 +426,7 @@ selectAll
      -> WherePredicate
      -> TransactionM  (Int,
            [(KVMetadata Key,
-             Compose
-               Identity (KV (Compose Identity (TB Identity))) Key Showable)])
+               (KV (Compose Identity (TB Identity))) Key Showable)])
 selectAll m offset i  j k st = do
       inf <- ask
       let

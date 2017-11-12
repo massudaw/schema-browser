@@ -61,10 +61,6 @@ createType  (isNull,isArray,isDelayed,isRange,isDef,isComp,tysch,tyname,typmod)
       | otherwise = AtomicPrim (tysch ,tyname,fromIntegral <$> typmod)
 
 
-recoverFields :: InformationSchema -> FKey (KType (Prim KPrim  (Text,Text))) -> FKey (KType (Prim PGType PGRecord))
-recoverFields inf v = map
-  where map = justError ("notype" <> T.unpack (showKey v)) $ M.lookup (keyFastUnique v)  (backendsKey inf )
-
 meta inf = maybe inf id (metaschema inf)
 
 
@@ -360,3 +356,6 @@ addStats schema = do
   return  schema
 
 
+recoverFields :: InformationSchema -> FKey (KType (Prim KPrim  (Text,Text))) -> FKey (KType (Prim PGType PGRecord))
+recoverFields inf v = map
+  where map = justError ("notype" <> T.unpack (showKey v)) $ M.lookup (keyFastUnique v)  (backendsKey inf )

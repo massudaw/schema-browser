@@ -339,7 +339,7 @@ filterKV i (KV n) =  KV $ Map.filterWithKey (\k ->  i. snd) n
 
 findKV i (KV  n) =  L.find (i . snd) $Map.toList  n
 
-findTB1  i (TB1 (m, j) )  = mapComp (Compose . findKV i) j
+findTB1  i (TB1 (m, j) )  = (Compose . findKV i) j
 -- findTB1  l (LeftTB1  j )  = join $ findTB1  l <$> j -- error (show m)
 
 findTB1'  i (TB1 (m, j) )  = Map.lookup  i (unKV j)
@@ -479,7 +479,7 @@ mapFValue f = fmap (mapFValue' f)
 mapFValue' f ((m ,k) ) = (m,) . KV . fmap (mapComp (mapFAttr f)) . _kvvalues   $  k
 
 
-mapValue' f ((m ,k) ) = (m,) . mapComp (fmap  f)  $  k
+mapValue' f (m ,k) = (m,) . fmap  f  $  k
 mapValue f = fmap (mapValue' f)
 
 
@@ -491,7 +491,7 @@ mapTableAttr f  i = i
 
 mapKey' :: Ord b => Functor f => (a -> b) -> TB3Data f a c -> TB3Data f b c
 mapKey f = fmap (mapKey' f)
-mapKey' f ((m ,k) ) = (fmap f m,) . (firstKV f)  $  k
+mapKey' f (m ,k) = (fmap f m,) . (firstKV f)  $  k
 
 firstKV :: (Ord k ,Functor f) => (c -> k) -> KV (Compose f (TB f))c a -> KV (Compose f (TB f))k a
 firstKV  f (KV m ) = KV . fmap (mapComp (firstTB f) ) . Map.mapKeys (Set.map (fmap f)) $ m
@@ -595,7 +595,7 @@ joinNonRef' (m,n)  = (m, rebuildTable . _kvvalues $  n)
   where
     compJoin :: Monad f => Compose f (Compose f g ) k  a -> Compose f g k a
     compJoin = Compose . join . fmap getCompose . getCompose
-    rebuildTable n =     traComp nonRef <$> n
+    rebuildTable n = fmap compJoin . traComp nonRef <$> n
     nonRef :: (Monad f,Traversable  f,Ord k) => TB f k a -> [Compose f (TB f ) k a]
     nonRef (Fun k rel v ) = [Compose . return $ Fun k rel v]
     nonRef (Attr k v ) = [Compose . return $ Attr k v]

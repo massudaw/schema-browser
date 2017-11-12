@@ -154,7 +154,7 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
               TrivialWidget v e <- labelCaseDiff inf a  wn
               out <- UI.div # set children [getElement e,getElement wn]
               return $ TrivialWidget (recoverEditChange <$> pre <*> v ) out
-        attrB (fmap (\v ->  unTB . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . unTB . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ TB1 (create v :: TBData Key Showable) )  <$> liftedE  )  (genAttr oinf fresh )
+        attrB (fmap (\v ->  unTB . justError ("no key " <> show fresh <> " in " <>  show v ) . fmap snd . getCompose . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ TB1 (create v :: TBData Key Showable) )  <$> liftedE  )  (genAttr oinf fresh )
        ) outfresh
 
       let styleUI =  set UI.class_ "row"
@@ -396,7 +396,7 @@ tbRecCaseDiff inf table constr a wl plugItens preoldItems' = do
       return (TrivialWidget  (tidings binipre ev) out)
 
 unTBMap :: Show a => TBData k a -> Map (Set (Rel k  )) (Compose Identity (TB Identity ) k a )
-unTBMap = _kvvalues . unTB . snd
+unTBMap = _kvvalues . snd
 
 instance Applicative Editor where
   pure =Diff
@@ -488,7 +488,7 @@ eiTableDiff inf table constr refs plmods ftb@(meta,k) preoldItems = do
     then do
       fks <- buildFKS inf constr table refs plugmods ftb oldItems srefs
       let
-        initialAttr = join . fmap (\(n,  j) ->    safeHead $ catMaybes  $ (unOptionalAttr  . unTB<$> F.toList (_kvvalues (unTB j))))  <$>oldItems
+        initialAttr = join . fmap (\(n,  j) ->    safeHead $ catMaybes  $ (unOptionalAttr  . unTB<$> F.toList (_kvvalues j)))  <$>oldItems
         sumButtom itb =  do
            let i = unTB itb
                (body ,_) = justError ("no sum attr " ) $ M.lookup i (M.fromList fks)
@@ -553,8 +553,8 @@ crudUITable inf reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItems = d
         return (fmap PatchRow p  ) )) preoldItems
       let
         deleteCurrentUn un e l =   maybe l (\v -> G.delete v G.indexParam l) $  G.getUnique un <$> e
-        tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ unTB $ snd $ tbPK ftb , (_kvpk m,  gist))
-      unConstraints <-  traverse (traverse (traverse (ui . cacheTidings))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ unTB $ tbUn (S.fromList un ) (TB1 ftb) , (un, fmap (createUn un . G.toList ) gist))) <$> _kvuniques m
+        tpkConstraint = (fmap unTB $ F.toList $ _kvvalues $ snd $ tbPK ftb , (_kvpk m,  gist))
+      unConstraints <-  traverse (traverse (traverse (ui . cacheTidings))) $ (\un -> (fmap unTB $ F.toList $ _kvvalues $ tbUn (S.fromList un ) (TB1 ftb) , (un, fmap (createUn un . G.toList ) gist))) <$> _kvuniques m
       unDeleted <- traverse (traverse (traverse (ui . cacheTidings))) (fmap (fmap (\(un,o)-> (un,deleteCurrentUn un <$> preoldItems <*> o))) (tpkConstraint:unConstraints))
       let
         dunConstraints (un,o) = flip (checkGist un .tblist' table . fmap _tb) <$> o
@@ -1401,7 +1401,7 @@ foldMetaHeader = foldMetaHeader' []
 foldMetaHeader' :: [CoreKey] -> UI Element -> (CoreKey -> FTB a -> (UI Element)) -> InformationSchema -> TBData CoreKey a -> [UI Element]
 foldMetaHeader' order el rend inf = mapFAttr order (\(Attr k v) -> hideLong [rend  k  v ])
     where
-          mapFAttr order f (a,kv) = fmap snd. L.sortBy (comparing ((flip L.elemIndex order).  fst) ). concat $ (  fmap (match.unTB ) .  F.toList .  _kvvalues)  $ unTB kv
+          mapFAttr order f (a,kv) = fmap snd. L.sortBy (comparing ((flip L.elemIndex order).  fst) ). concat $ (  fmap (match.unTB ) .  F.toList .  _kvvalues)  $ kv
             where match i@(Attr k v) = [(k,f i)]
                   match i@(FKT l rel t) = ((\k -> (_relOrigin $ head $ keyattr k ,). f . unTB  $ k)<$> unkvlist l )
                   match i@(IT l t) = [( l,hideLong ( concat $ F.toList $ fmap (foldMetaHeader  UI.div rend inf) t))]
@@ -1503,7 +1503,7 @@ viewer inf table envK = mdo
 
   UI.div # set children [getElement offset, itemList]
 
-filterAttr f (m,r) = (m,mapComp (\(KV i) -> KV $ M.filterWithKey (\k v -> F.any f k ) i) r)
+filterAttr f (m,r) = (m,(\(KV i) -> KV $ M.filterWithKey (\k v -> F.any f k ) i) r)
 
 
 renderTableNoHeaderSort2 header inf modtablei out = do

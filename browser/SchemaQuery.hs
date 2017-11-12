@@ -116,7 +116,7 @@ projunion :: InformationSchema -> Table -> TBData Key Showable -> TBData Key Sho
 projunion inf table = res
   where
     res = liftTable' inf (tableName table) . filterAttrs . mapKey' keyValue
-    filterAttrs (m,v)=  (m, mapComp (\(KV v)-> KV $ M.filterWithKey (\k _ -> S.isSubsetOf (S.map _relOrigin k) attrs)  v ) v)
+    filterAttrs (m,v)=  (m, (\(KV v)-> KV $ M.filterWithKey (\k _ -> S.isSubsetOf (S.map _relOrigin k) attrs)  v ) v)
       where
         attrs = S.fromList $ keyValue <$> tableAttrs table
 
@@ -209,9 +209,9 @@ getFKRef inf predtop rtable (evs,me,old) v (Path r (FKInlineTable  j )) =  do
                              in  fmap WherePredicate (go (test (S.toList r)) l)
 
                 -- editAttr :: (TBData Key Showable -> TBData Key Showable) -> TBData Key Showable -> TBData Key Showable
-                editAttr fun  (m,i) = (m,) <$> traComp (\(KV i) -> fmap KV (flip Le.at (traverse (traComp (Le.traverseOf ifkttable (traverse fun)))) (S.map Inline r)  i )) i
+                editAttr fun  (m,i) = (m,) <$> (\(KV i) -> fmap KV (flip Le.at (traverse (traComp (Le.traverseOf ifkttable (traverse fun)))) (S.map Inline r)  i )) i
                 nextRef :: [TBData Key Showable]
-                nextRef= (concat $ catMaybes $ fmap (\i -> fmap (F.toList . _fkttable.unTB) $ M.lookup (S.map Inline r) (_kvvalues $ unTB $ snd  i) )v)
+                nextRef= (concat $ catMaybes $ fmap (\i -> fmap (F.toList . _fkttable.unTB) $ M.lookup (S.map Inline r) (_kvvalues $ snd  i) )v)
 
             (_,joinFK,_) <- getFKS rinf predtop table nextRef
             let
@@ -225,7 +225,7 @@ getFKRef inf predtop rtable (evs,me,old) v (Path r (FKInlineTable  j )) =  do
 getFKRef inf predtop rtable (evs,me,old) v (Path ref (FunctionField a b c)) = do
   let
     addAttr :: TBData Key Showable -> Either ([Compose Identity (TB Identity)  Key Showable],[Rel Key]) (TBData Key Showable)
-    addAttr (m,i) = maybe (Right (m,i)) (\r -> Right (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)   i) ) i)) r
+    addAttr (m,i) = maybe (Right (m,i)) (\r -> Right (m,(\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)   i) ) i)) r
       where
         r =  evaluate a b funmap c (m,i)
   return (evs,me >=> addAttr ,old <> ref )
@@ -282,13 +282,13 @@ getFKRef inf predtop rtable (evs,me,old) v path@(Path _ (FKJoinTable i j ) ) =  
                         taratt = getAtt tar (tableNonRef' m)
                         tarinj = getAtt inj (tableNonRef' m)
                     addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
-                    addAttr r (m,i) = (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k   ) i )) i )
+                    addAttr r (m,i) = (m,(\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k   ) i )) i )
                     joined i = do
                        fk <- joinFK i
                        return $ addAttr  fk i
                 return (evt :evs,me >=> joined,old <> refl)
     where
-        getAtt i (m ,k ) = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues . unTB $ k
+        getAtt i (m ,k ) = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues  $ k
 getFKRef inf predtop rtable (evs,me,old) v path = errorWithStackTrace (show path)
 
 left f (Left i ) = Left (f i)
@@ -695,10 +695,10 @@ fullInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
 -- fullInsert' i | traceShow  ("fullinsert",i) False = undefined
 fullInsert' (k1,v1) = do
    inf <- ask
-   let proj = _kvvalues . unTB
+   let proj = _kvvalues
        tb  = lookTable inf (_kvname k1)
        find rel = findRefTable inf (_kvname k1) rel
-   ret <-  (k1,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
+   ret <-  (k1,) . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
    (_,(_,l)) <- tableLoader  tb Nothing Nothing [] mempty
    if  (isNothing $ flip G.lookup l $ tbpredM (_kvpk k1)  ret ) && rawTableType tb == ReadWrite
       then catchAll (do
@@ -720,8 +720,8 @@ noInsert = Tra.traverse noInsert'
 
 noInsert' :: TBData Key Showable -> TransactionM  (TBData Key Showable)
 noInsert' (k1,v1)   = do
-   let proj = _kvvalues . unTB
-   (k1,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
+   let proj = _kvvalues
+   (k1,) . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit (unTB j) )  (proj v1)
 
 transactionLog :: InformationSchema -> TransactionM a -> Dynamic [TableModification (RowPatch Key Showable)]
 transactionLog inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
@@ -769,7 +769,7 @@ fullDiffEditInsert :: TBData Key Showable -> TBData Key Showable -> TransactionM
 -- fullDiffEditInsert old@((k1,v1) ) (k2,v2)  | traceShow ("fullDiffEditInsert",v1,v2) False = undefined
 fullDiffEditInsert old@(k1,v1) (k2,v2) = do
    inf <- ask
-   edn <- (k2,) . _tb . KV <$>  Tra.sequence (M.intersectionWith (\i j -> _tb <$>  tbDiffEditInsert (unTB i) (unTB j) ) (unKV v1 ) (unKV v2))
+   edn <- (k2,) . KV <$>  Tra.sequence (M.intersectionWith (\i j -> _tb <$>  tbDiffEditInsert (unTB i) (unTB j) ) (unKV v1 ) (unKV v2))
    when (isJust $ diff (tableNonRef' old) (tableNonRef' edn) ) $ do
       mod <- traverse (updateFrom   old ) (diff old edn)
       tell (maybeToList $ join  mod)
@@ -780,7 +780,7 @@ fullDiffEdit :: TBData Key Showable -> TBData Key Showable -> TransactionM  (May
 -- fullDiffEdit old@((k1,v1) ) (k2,v2)  | traceShow ("fullDiffEditInsert",v1,v2) False = undefined
 fullDiffEdit old@(k1,v1) (k2,v2) = do
    inf <- ask
-   edn <- (k2,) . _tb . KV <$>  Tra.sequence (M.intersectionWith (\i j -> _tb <$>  tbDiffEdit (unTB i) (unTB j) ) (unKV v1 ) (unKV v2))
+   edn <- (k2,) . KV <$>  Tra.sequence (M.intersectionWith (\i j -> _tb <$>  tbDiffEdit (unTB i) (unTB j) ) (unKV v1 ) (unKV v2))
    when (isJust $ diff (tableNonRef' old) (tableNonRef' edn) ) $ do
       mod <- traverse (updateFrom   old ) (diff old edn)
       tell (maybeToList $ join mod)
@@ -789,7 +789,7 @@ fullDiffEdit old@(k1,v1) (k2,v2) = do
 fullDiffInsert :: TBData Key Showable -> TransactionM  (Maybe (TableModification (RowPatch Key Showable)))
 fullDiffInsert (k2,v2) = do
    inf <- ask
-   edn <- (k2,) . _tb . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit ( unTB j) ) (unKV v2)
+   edn <- (k2,) . KV <$>  Tra.traverse (\j -> _tb <$>  tbInsertEdit ( unTB j) ) (unKV v2)
    mod <- insertFrom  edn
    tell (maybeToList mod)
    return mod
@@ -1051,7 +1051,7 @@ loadFKDisk  inf old  re (Path ori (RecJoin i l))
 loadFKDisk  _ _ _ _  = return (const Nothing)
 
 addAttr :: Ord k => S.Set k -> TBData k Showable -> Column k Showable ->  TBData k Showable
-addAttr refl  (m,i) r = (m,mapComp (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k   ) i )) i )
+addAttr refl  (m,i) r = (m,(\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (_tb r)  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k   ) i )) i )
 
 
 writeSchema (schema,schemaVar) = do
