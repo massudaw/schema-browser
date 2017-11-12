@@ -121,8 +121,8 @@ initSess =  return $ unTiso cookieJar (HTTP.createCookieJar  [])
 cookieJar :: TIso HTTP.CookieJar (Maybe (FTB (TBData Text Showable)))
 cookieJar
   = TIso
-  (fmap ArrayTB1 . Non.nonEmpty . fmap (TB1 . (kvempty ,) . _tb . encodeCookie) . HTTP.destroyCookieJar)
-  (HTTP.createCookieJar . maybe  [] (Non.toList . fmap ( decodeCookie . unTB . snd .unTB1) . unArray ))
+  (fmap ArrayTB1 . Non.nonEmpty . fmap (TB1 . (kvempty ,) . encodeCookie) . HTTP.destroyCookieJar)
+  (HTTP.createCookieJar . maybe  [] (Non.toList . fmap ( decodeCookie . snd .unTB1) . unArray ))
 
 getCaptchaCnpj  cookie =Sess.withSessionControl (Just $ tIso cookieJar $cookie )HTTP.defaultManagerSettings$ \ session -> do
        print cnpjhome

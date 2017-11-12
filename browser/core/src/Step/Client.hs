@@ -93,7 +93,7 @@ atR
       MonadReader
         (Maybe
            (KVMetadata k,
-            Compose Identity (KV (Compose Identity (TB Identity))) k b1))
+            (KV (Compose Identity (TB Identity))) k b1))
         m) =>
      String
      -> Parser (Kleisli m) (Union (Access Text)) a b
@@ -167,13 +167,13 @@ idxR  l =
 indexAttr l t
   = do
     (m,v) <- t
-    i <-   M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)). _kvvalues $ unTB v
+    i <-   M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)). _kvvalues $ v
     return $ unTB i
 
 
 indexTB1 l (m,v)
   = do
-    i <- M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)) . _kvvalues $ unTB v
+    i <- M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)) . _kvvalues $ v
     case runIdentity $ getCompose $i  of
        Attr _ l -> Nothing
        FKT l i j -> return $ j
@@ -187,7 +187,7 @@ firstCI f = mapComp (firstTB f)
 indexTableInline l t@(m,v)
   = do
     let finder = fmap (firstCI keyString ) . M.lookup (S.fromList $ fmap (Inline .iprodRef) l) . M.mapKeys (S.map (fmap keyString))
-    i <- finder (_kvvalues $ unTB v )
+    i <- finder (_kvvalues $ v )
     case runIdentity $ getCompose $ i  of
       IT k l -> return (k,l)
       i ->  errorWithStackTrace (show i)
@@ -196,7 +196,7 @@ indexTableInline l t@(m,v)
 indexTableAttr l t@(m,v)
   = do
     let finder = fmap (firstCI keyString ) . M.lookup (S.fromList $ fmap (Inline .iprodRef) l) . M.mapKeys (S.map (fmap keyString))
-    i <- finder (_kvvalues $ unTB v )
+    i <- finder (_kvvalues $ v )
     case runIdentity $ getCompose $ i  of
          Attr k l -> return (k,l)
          i ->  errorWithStackTrace (show i)
@@ -205,7 +205,7 @@ indexTableAttr l t@(m,v)
 indexTable l t@(m,v)
   = do
     let finder = L.find (L.any (==fmap iprodRef l). L.permutations .fmap _relOrigin. keyattr. firstCI keyString )
-    i <- finder (toList $ _kvvalues $ unTB v )
+    i <- finder (toList $ _kvvalues $ v )
     case runIdentity $ getCompose $ i  of
          Attr k l -> return (k,l)
          FKT v _ _  -> safeHead $ aattr (head $ unkvlist v)

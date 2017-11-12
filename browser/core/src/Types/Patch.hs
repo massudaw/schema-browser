@@ -421,14 +421,14 @@ travPath f p i = f p i
 
 applyTB1
   :: PatchConstr k a =>
-       FTB1 Identity k a -> PathFTB   (TBIdx k (Index a) ) -> FTB1 Identity k a
+    FTB (TBData k a ) -> PathFTB   (TBIdx k (Index a) ) -> FTB (TBData k a )
 applyTB1 = apply -- create applyRecord
 
 createTB1
   :: PatchConstr d a =>
     (TBIdx d (Index a) ) ->
-     Maybe(KVMetadata d , Compose Identity  (KV (Compose Identity  (TB Identity))) d a)
-createTB1 (m ,s ,k)  = (m ,).  _tb .KV . mapFromTBList  <$>  nonEmpty ( catMaybes $ fmap (fmap _tb .createIfChange) k)
+      Maybe (TBData d a)
+createTB1 (m ,s ,k)  = (m ,).  KV . mapFromTBList  <$>  nonEmpty ( catMaybes $ fmap (fmap _tb .createIfChange) k)
 
 
 pattrKey (PAttr s _ ) = Set.singleton $ Inline s
@@ -443,7 +443,7 @@ applyRecordChange
      -> TBIdx d (Index a)
      -> Maybe (TBData d a)
 applyRecordChange t@(m, v) (_,_, k) =
-  {-| _kvname m == _kvname m2 && idx == fmap patch (G.getIndex t) =-} (m ,) <$> traComp ref v
+  {-| _kvname m == _kvname m2 && idx == fmap patch (G.getIndex t) =-} (m ,) <$> ref v
     -- | otherwise = createIfChange (m2,idx,k)
   where
     ref (KV v) =  KV <$>  fmap add (Map.traverseWithKey (\key -> traComp (\vi -> maybe (Just vi) (F.foldl'  (\i j ->  edit j =<< i ) (Just vi)) (nonEmpty $ filter ((key ==).pattrKey )k) )) v)

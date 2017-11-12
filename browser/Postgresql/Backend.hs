@@ -398,39 +398,6 @@ selectAll m offset i  j k st = do
       return v
 
 
-loadDelayed :: InformationSchema -> TB3Data (Labeled Text) Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
-loadDelayed inf t@(k,v) values@(ks,vs)
-  | L.null $ _kvdelayed k = return Nothing
-  | L.null delayedattrs  = return Nothing
-  | otherwise = do
-       let
-           whr = T.intercalate " AND " ((\i-> justError ("no key" <> show i <> show labelMap)  (M.lookup (S.singleton $ Inline i) labelMap) <>  " = ?") <$> (_kvpk k) )
-           labelMap = fmap (label .getCompose) $  _kvvalues $ head $ F.toList $ getCompose (snd $ tableNonRef2 (k,v))
-           table = justError "no table" $ M.lookup (S.fromList $ _kvpk k) (pkMap inf)
-           delayedTB1 =  fmap (mapComp (\(KV i ) -> KV (M.filterWithKey  (\i _ -> isJust $ M.lookup i filteredAttrs )  i )))
-           delayed =  mapKey' unKDelayed (mapValue' (const ()) (delayedTB1 t))
-           str = "select row_to_json(q)  FROM (SELECT " <> explodeRecord delayed <> " FROM " <> expandBaseTable (TB1 t) <> " WHERE " <> whr <> ") as q "
-           pk = (fmap (firstTB (recoverFields inf) .unTB) $ fmap snd $ L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)   ) $ M.toList $ _kvvalues $  unTB $ snd $ tbPK (tableNonRef' values))
-       print (T.unpack str,show pk )
-       is <- queryWith (fromRecordJSON delayed) (conn inf) (fromString $ T.unpack str) pk
-       res <- case is of
-            [] -> errorWithStackTrace "empty query"
-            [i] ->return $ fmap (\(i,j,a) -> (i,G.getIndex values,a)) $ diff (ks , _tb $ KV filteredAttrs) (mapKey' (alterKeyType (Le.over keyFunc makeDelayed)) . mapFValue' makeDelayedV $ i  )
-            _ -> errorWithStackTrace "multiple result query"
-       return res
-  where
-    makeDelayed (KOptional :k ) = KOptional :(makeDelayed k)
-    makeDelayed (KArray :k ) = KArray :(makeDelayed k)
-    makeDelayed [] = [KDelayed ]
-
-    makeDelayedV (TB1 i) = LeftTB1 $ Just (TB1 i)
-    makeDelayedV (LeftTB1 i) = LeftTB1 $ makeDelayedV <$> i
-    makeDelayedV (ArrayTB1 i) = ArrayTB1 $ makeDelayedV <$> i
-
-    delayedattrs = concat $ fmap (keyValue . _relOrigin ) .  F.toList <$> M.keys filteredAttrs
-    filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (S.fromList $ _kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs)
-
-
 connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname   )
 
 

@@ -31,7 +31,7 @@ import Data.Traversable (traverse)
 unF i = L.head (F.toList (getCompose i))
 
 findFK :: (Show k ,Ord k ,Foldable f ,Show a) => [k] -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
-findFK  l v =  fmap snd $ L.find (\(i,v) -> isFK v && S.map _relOrigin i == (S.fromList l))  $ M.toList $ _kvvalues $ unF (snd v)
+findFK  l v =  fmap snd $ L.find (\(i,v) -> isFK v && S.map _relOrigin i == (S.fromList l))  $ M.toList $ _kvvalues $ (snd v)
   where isRel (Rel _ _ _ ) = True
         isRel _ = False
         isFK i = case unF i of
@@ -40,15 +40,15 @@ findFK  l v =  fmap snd $ L.find (\(i,v) -> isFK v && S.map _relOrigin i == (S.f
                    i -> False
 
 findAttr :: (Show k ,Ord k ,Foldable f ,Show a) => k -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
-findAttr l v =  M.lookup (S.singleton . Inline $ l) (  _kvvalues $ unF (snd v))  <|> findFun l v
+findAttr l v =  M.lookup (S.singleton . Inline $ l) (  _kvvalues $ (snd v))  <|> findFun l v
 
 findFun :: (Show k ,Ord k ,Foldable f ,Show a) => k -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
-findFun l v = fmap snd . L.find (((pure . Inline $ l) == ).fmap mapFunctions . S.toList .fst) $ M.toList $ _kvvalues $ unF (snd v)
+findFun l v = fmap snd . L.find (((pure . Inline $ l) == ).fmap mapFunctions . S.toList .fst) $ M.toList $ _kvvalues $ (snd v)
   where mapFunctions (RelFun i _ ) = Inline i
         mapFunctions j = j
 
 findFKAttr :: (Show k ,Ord k ,Foldable f ,Show a) => [k] -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
-findFKAttr l v =   case fmap  (fmap unF )$ L.find (\(k,v) -> not $ L.null $ L.intersect l (S.toList k) ) $ M.toList $ M.mapKeys (S.map ( _relOrigin)) $ _kvvalues $ unF (snd v) of
+findFKAttr l v =   case fmap  (fmap unF )$ L.find (\(k,v) -> not $ L.null $ L.intersect l (S.toList k) ) $ M.toList $ M.mapKeys (S.map ( _relOrigin)) $ _kvvalues $ (snd v) of
       Just (k,(FKT a _ _ )) ->   L.find (\i -> not $ L.null $ L.intersect l $ fmap (_relOrigin) $ keyattr $ i ) (F.toList $ _kvvalues $a)
       Just (k ,i) -> errorWithStackTrace (show l)
       Nothing -> Nothing

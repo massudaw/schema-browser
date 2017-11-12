@@ -437,7 +437,7 @@ typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typ
 
 typeCheckTable ::  (Text,Text) -> TBData (FKey (KType (Prim KPrim (Text,Text)))) Showable -> Errors [String] ()
 typeCheckTable c  (t,l)
-  =  F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB . unTB <$> _kvvalues (unTB l))
+  =  F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB . unTB <$> _kvvalues (l))
 
 type LookupKey k = (InformationSchema -> Text -> k -> Key, Key -> k)
 lookupKeyName = (lookKey ,keyValue)
@@ -445,7 +445,7 @@ lookupKeyPosition= (lookKeyPosition , keyPosition)
 
 
 liftTableF ::  (Show k ,Ord k) => LookupKey k -> InformationSchema ->  Text -> TBData k a -> TBData Key a
-liftTableF f inf  tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapFromTBList $ mapComp (liftFieldF  f inf  tname) <$> F.toList i) v
+liftTableF f inf  tname (_,v)   = (tableMeta ta, (\(KV i) -> KV $ mapFromTBList $ mapComp (liftFieldF  f inf  tname) <$> F.toList i) v)
   where
     ta = lookTable inf tname
 
