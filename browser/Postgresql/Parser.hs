@@ -348,8 +348,12 @@ parseLabeledTableJSON i v= errorWithStackTrace (show (i,v))
 parseRecordJSON :: TB3Data (Labeled Text) Key () -> A.Value -> A.Parser (TBData Key Showable)
 parseRecordJSON  (me,m) (A.Object v) = do
   let try1 i v = HM.lookup (label i ) v
+      try2  (IT _ r) v = HM.lookup ( "p" <> (_kvname  $ fst $ head $ F.toList r)) v
+      try2 i _ = Nothing
 
-  im <- traverse (fmap _tb . (\ i -> parseAttrJSON  (labelValue i) (justError (" no attr " <> show (i,v)) $ try1 i v )). getCompose )$   _kvvalues m
+  im <- traverse (fmap _tb . (\ i -> parseAttrJSON  (labelValue i) (justError (" no attr " <> show (i,v)) $ try1 i v <|> try2 (labelValue i) v)). getCompose )$   _kvvalues m
+
+  -- im <- traverse (fmap _tb . (\ i -> parseAttrJSON  (labelValue i) (justError (" no attr " <> show (i,v)) $ try1 i v )). getCompose )$   _kvvalues m
   return (me, KV im )
 
 
@@ -738,7 +742,7 @@ fromShowable ty v =
 
 fromRecordJSON :: TB3Data (Labeled Text) Key () ->  FR.RowParser (TBData Key Showable)
 fromRecordJSON foldable = do
-  let parser   f = case A.parseEither (\i -> parseRecordJSON foldable  i )  f of
+  let parser   f = case A.parseEither (\(A.Object i) -> parseRecordJSON foldable $ justError "no top" $ HM.lookup ("p" <> _kvname (fst foldable)) i )  f of
                   Right i -> i
                   Left i -> errorWithStackTrace (show i)
   parser <$> FR.field

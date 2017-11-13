@@ -252,14 +252,14 @@ expandJoin left env (Labeled l (IT a (ArrayTB1 (tb :| _ ) )))
     (tas,itb) <- expandInlineArrayTable (unTB1 tb) l
     tjoin <- expandQuery left tb
     r <- explodeRow tb
-    let joinc = " (SELECT array_agg(" <> r <> "  order by row_number) as " <> tas <> (renderRow  $ tjoin (SQLRInline $ "FROM " <>  itb )) <> " )  as p" <>  tas
+    let joinc = " (SELECT array_agg(" <> r <> "  order by row_number) as " <> tas <> (renderRow  $ tjoin (SQLRInline $ " FROM " <>  itb )) <> " )  as p" <>  tas
     return $ (\row -> SQLRJoin row JTLateral jt (SQLRInline joinc) Nothing)
         where
           jt = if left then JDLeft  else JDNormal
 expandJoin left env (Labeled l (IT a (TB1 tb))) =  do
      tjoin <- expandQuery' left tb
      itable <- expandInlineTable  tb  l
-     return $ (\row -> SQLRJoin row JTLateral jt  (SQLRInline itable) Nothing) . tjoin
+     return $  tjoin . (\row -> SQLRJoin row JTLateral jt  (SQLRInline itable) Nothing)
         where
           jt = if left then JDLeft  else JDNormal
 expandJoin left env v = return id
@@ -300,10 +300,10 @@ explodeRow' (LeftTB1 (Just tb) ) = explodeRow' tb
 explodeRow' (ArrayTB1 (tb:|_) ) = explodeRow' tb
 explodeRow' (TB1 i ) = explodeRow'' i
 
-explodeRow'' t@(m ,KV tb) = do
-  block . T.intercalate assoc <$> (traverse (explodeDelayed t .getCompose)  $ traceShowId $ sortPosition $F.toList  tb  )
--- explodeRow'' t@(m ,KV tb) = sel (T.intercalate assoc (fmap (explodeDelayed t .getCompose)  $ sortPosition $ F.toList  tb  ))
--- where sel i = "(select p" <> l <> " from (select " <> i<>  ") as p" <> l <> ")"
+-- explodeRow'' t@(m ,KV tb) = do
+-- block . T.intercalate assoc <$> (traverse (explodeDelayed t .getCompose)  $ traceShowId $ sortPosition $F.toList  tb  )
+explodeRow'' t@(m ,KV tb) = sel . T.intercalate assoc <$> (traverse (explodeDelayed t .getCompose)  $ traceShowId $ sortPosition $F.toList  tb  )
+  where sel i = "(select p" <> (_kvname m) <> " from (select " <> i<>  ") as p" <> (_kvname m) <> ")"
 
 replaceexpr :: Expr -> [Text]  -> Text
 replaceexpr k ac = go k
