@@ -152,7 +152,7 @@ selectQuery
      -> [(Key, Order)]
      -> WherePredicate
      -> (Text,Maybe [Either (TB Identity Key Showable) (PrimType ,FTB Showable)])
-selectQuery t koldpre order wherepred = (, (fmap Left <$> ordevalue )<> (fmap Right <$> predvalue)) $ if L.null (snd withDecl )
+selectQuery t koldpre order wherepred = (, (fmap Left <$> ordevalue )<> (fmap Right <$> predvalue)) $traceShowId $ if L.null (snd withDecl )
     then fst withDecl
     else "WITH RECURSIVE " <> T.intercalate "," ( snd withDecl ) <> fst withDecl
   where withDecl = runWriter tableQuery
