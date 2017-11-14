@@ -564,17 +564,16 @@ instance Monad (Labeled Text) where
 -- tableAttr (ArrayTB1 i) = tableAttr <$> i
 -- tableAttr (LeftTB1 i ) = tableAttr<$> i
 tableAttr (m , KV n) =   concat  $ F.toList (nonRef <$> n)
-tableAttr (m , KV n) =   concat  $ F.toList (nonRef <$> n)
-
-nonRef :: (Ord f,Show k ,Show f,Ord k) => Compose (Labeled f ) (TB (Labeled f) ) k () -> [Compose (Labeled f ) (TB (Labeled f) ) k ()]
-nonRef i@(Compose (Labeled _ (Fun _ _ _ ))) =[i]
-nonRef i@(Compose (Unlabeled  (Fun _ _ _ ))) =[i]
-nonRef i@(Compose (Labeled _ (Attr _ _ ))) =[i]
-nonRef i@(Compose (Unlabeled  (Attr _ _ ))) =[i]
-nonRef (Compose (Unlabeled  ((FKT i  _ _ )))) = concat (nonRef <$> unkvlist i)
-nonRef (Compose (Labeled _ ((FKT i  _ _ )))) = concat (nonRef <$> unkvlist i)
-nonRef j@(Compose (Unlabeled (IT k v ))) = [Compose (Unlabeled (Attr k (TB1 ()))) ]
-nonRef j@(Compose (Labeled l (IT k v ))) = [Compose (Labeled l (Attr k (TB1 ()))) ]
+  where
+    nonRef :: (Ord f,Show k ,Show f,Ord k) => Compose (Labeled f ) (TB (Labeled f) ) k () -> [Compose (Labeled f ) (TB (Labeled f) ) k ()]
+    nonRef i@(Compose (Labeled _ (Fun _ _ _ ))) =[i]
+    nonRef i@(Compose (Unlabeled  (Fun _ _ _ ))) =[i]
+    nonRef i@(Compose (Labeled _ (Attr _ _ ))) =[i]
+    nonRef i@(Compose (Unlabeled  (Attr _ _ ))) =[i]
+    nonRef (Compose (Unlabeled  ((FKT i  _ _ )))) = concat (nonRef <$> unkvlist i)
+    nonRef (Compose (Labeled _ ((FKT i  _ _ )))) = concat (nonRef <$> unkvlist i)
+    nonRef j@(Compose (Unlabeled (IT k v ))) = [j]
+    nonRef j@(Compose (Labeled l (IT k v ))) = [j]
 
 -- nonRef i = errorWithStackTrace (show i)
 

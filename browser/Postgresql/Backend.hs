@@ -433,6 +433,7 @@ selectAll m offset i  j k st = do
           unref (TableRef i) = Just $  upperBound <$>  i
           unref (HeadToken ) = Nothing
       v <- liftIO$ paginate inf m k offset j ( join $ fmap unref i) st
+      liftIO $ print v
       return v
 
 

@@ -129,17 +129,19 @@ expandInlineTable tb@(meta, _) pre = do
     name =  tableAttr tb
     isFun  (Labeled a (Fun _ _ _ )) = True
     isFun  _ = False
-    aliasKeys (Labeled  a (Attr n    _ ))  =  "(" <> pre <> ")." <> keyValue n <> " as " <> a
+    aliasKeys (Labeled  a (Attr n    _ ))  =  "(i" <> pre <> ")." <> keyValue n <> " as " <> a
+    aliasKeys (Labeled a (IT n _ ))  = "(i" <> pre <> ")." <> keyValue n <> " as i" <> a
   return query
 
 
 expandInlineArrayTable ::  TB3Data (Labeled Text) Key  () -> Text -> Codegen (Text,Text)
 expandInlineArrayTable tb@(meta, KV i) pre = do
    tidx <- newTable meta
-   let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$>   sortPosition name)  <> ",row_number() over () as row_number FROM UNNEST(" <> pre <> ") as ix ) " <> t
+   let query = "(SELECT " <>  T.intercalate "," (aliasKeys  . getCompose <$>   sortPosition name)  <> ",row_number() over () as row_number FROM UNNEST(i" <> pre <> ") as ix ) " <> t
        name =  tableAttr tb
        t =  "t" <> T.pack (show tidx)
        aliasKeys (Labeled  a (Attr n  _ ))  =  "(ix)." <> keyValue n <> " as " <> a
+       aliasKeys (Labeled a (IT n _ ))  = "(ix)." <> keyValue n <> " as i" <> a
    return (t,query)
 
 sortPosition = L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr))
@@ -153,7 +155,7 @@ expandBaseTable tb@(meta, KV i) = do
      name =  tableAttr tb
      aliasTable = kvMetaFullName meta <> " as " <> t
      aliasKeys (Labeled  a (Attr n    _ ))  =  t <> "." <> keyValue n <> " as " <> a
-     aliasKeys (Labeled a (IT n _ ))  = t <> "." <> keyValue n <> " as " <> a
+     aliasKeys (Labeled a (IT n _ ))  = t <> "." <> keyValue n <> " as i" <> a
      aliasKeys _  = ""
   return query
 
@@ -172,7 +174,7 @@ expandTable tb
 
 
 
-codegen t l = traceShowId $ fst $ evalRWS l (Root (fst t)) (0,0,M.empty)
+codegen t l = fst $ evalRWS l (Root (fst t)) (0,0,M.empty)
 
 selectQuery
   :: (KVMetadata Key,
@@ -190,7 +192,7 @@ selectQuery t koldpre order wherepred = (withDecl, (fmap Left <$> ordevalue )<> 
             tname <- expandTable t
             tquery <- expandQuery' False t
             rec <- explodeRecord t
-            return $ "SELECT " <> rec <> " FROM " <>  renderRow (tquery (SQLRInline tname)) <> pred <> orderQ
+            return $ "SELECT " <> selectRow "p0" rec <> " FROM " <>  renderRow (tquery (SQLRInline tname)) <> pred <> orderQ
         (predquery , predvalue ) = case wherepred of
               WherePredicate wpred -> printPred t wpred
         pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  ( orderquery <> predquery)
@@ -252,7 +254,7 @@ expandJoin left env (Labeled l (IT a (ArrayTB1 (tb :| _ ) )))
     (tas,itb) <- expandInlineArrayTable (unTB1 tb) l
     tjoin <- expandQuery left tb
     r <- explodeRow tb
-    let joinc = " (SELECT array_agg(" <> r <> "  order by row_number) as " <> tas <> (renderRow  $ tjoin (SQLRInline $ " FROM " <>  itb )) <> " )  as p" <>  tas
+    let joinc = " (SELECT array_agg(" <> selectRow "arr" r <> " order by row_number) as " <> l <> (renderRow  $ tjoin (SQLRInline $ " FROM " <>  itb )) <> " )  as p" <>  tas
     return $ (\row -> SQLRJoin row JTLateral jt (SQLRInline joinc) Nothing)
         where
           jt = if left then JDLeft  else JDNormal
@@ -301,9 +303,10 @@ explodeRow' (ArrayTB1 (tb:|_) ) = explodeRow' tb
 explodeRow' (TB1 i ) = explodeRow'' i
 
 -- explodeRow'' t@(m ,KV tb) = do
--- block . T.intercalate assoc <$> (traverse (explodeDelayed t .getCompose)  $ traceShowId $ sortPosition $F.toList  tb  )
-explodeRow'' t@(m ,KV tb) = sel . T.intercalate assoc <$> (traverse (explodeDelayed t .getCompose)  $ traceShowId $ sortPosition $F.toList  tb  )
-  where sel i = "(select p" <> (_kvname m) <> " from (select " <> i<>  ") as p" <> (_kvname m) <> ")"
+-- block . T.intercalate assoc <$> (traverse (explodeDelayed t .getCompose)  $ sortPosition $F.toList  tb  )
+explodeRow'' t@(m ,KV tb) = T.intercalate assoc <$> (traverse (explodeDelayed t .getCompose)  $ sortPosition $F.toList  tb  )
+
+selectRow  l i = "(select rr as " <> l <> " from (select " <> i<>  ") as rr )"
 
 replaceexpr :: Expr -> [Text]  -> Text
 replaceexpr k ac = go k
@@ -325,8 +328,8 @@ explodeDelayed _ (Unlabeled (IT  n t )) =  explodeRow' t
 explodeDelayed rec (Labeled l (IT  k (LeftTB1 (Just tb  )))) = explodeDelayed rec (Labeled l (IT k tb))
 explodeDelayed _ (Labeled l (IT  _ (ArrayTB1 (TB1 tb :| _) ) )) = do
   m <- tableLabel (fst $ tb)
-  return $ leaf False m
-explodeDelayed _ (Labeled l (IT  _ t  )) = explodeRow' t
+  return $ leaf False l
+explodeDelayed _ (Labeled l (IT  _ t  )) = selectRow  l <$> (explodeRow' t)
 explodeDelayed tbenv  (Labeled l (FKT ref  _ _ )) = case unkvlist ref of
              [] -> return $ leaf False l
              i -> (\v -> T.intercalate assoc v <> assoc <> leaf False l) <$> traverse (explodeDelayed tbenv . getCompose) i

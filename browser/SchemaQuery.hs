@@ -987,7 +987,7 @@ createTableRefs inf re i = do
         atomically $ do
           patches <- takeMany nmdiff
           when (not $ L.null $ concat patches) $
-            modifyTVar' collectionState (\e -> L.foldl' (\i j  -> fromMaybe ((error $ "error applying"  ++ (show ( i,j)) )) $applyTableRep i j) e (concat patches))
+            modifyTVar' collectionState (\e -> L.foldl' (\i j  -> fromMaybe (error $ "error applying"  ) $applyTableRep i j) e (concat patches))
         )  (\e -> atomically ( takeMany nmdiff ) >>= (\d ->  putStrLn $ show (e :: SomeException,d)<>"\n"))
     registerDynamic (killThread t1)
     let dbref = DBRef nmdiff midx nchanidx collectionState
