@@ -272,12 +272,13 @@ transEither f  i j  =
   where co l i =  zipWith f l i
 {-# INLINE transEither #-}
 
-instance ( Predicates (FTB v)) => Predicates (TBIndex v ) where
+instance Predicates (FTB v) => Predicates (TBIndex v ) where
   type (Penalty (TBIndex v)) = [Penalty (FTB v)]
   type Query (TBIndex v) = (TBPredicate Int v)
   data Node (TBIndex v) = TBIndexNode [Node (FTB v)] deriving (Eq,Ord,Show)
   consistent i j = (\b -> if null b then False else  F.all id b) $ transEither consistent i j
 
+  -- This limit to 100 the number of index fields to avoid infinite lists
   origin = TBIndexNode (replicate 100 G.origin)
   match (WherePredicate a)  (Right (Idex v)) = go a
     where
