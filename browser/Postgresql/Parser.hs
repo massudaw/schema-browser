@@ -298,7 +298,7 @@ parseAttrJSON i v = errorWithStackTrace (show (i,v))
 
 
 parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
-parseAttr i | traceShow i False = undefined
+-- parseAttr i | traceShow i False = undefined
 parseAttr (Attr i _ ) = do
   s<- parseShowable (keyType  i) <?> show i
   return $  Attr i s
@@ -740,7 +740,7 @@ fromShowable ty v =
 
 fromRecordJSON :: TB3Data (Labeled Text) Key () ->  FR.RowParser (TBData Key Showable)
 fromRecordJSON foldable = do
-  let parser   f = case A.parseEither (\(A.Object i) -> fmap traceShowId $ parseRecordJSON foldable $ justError "no top" $ HM.lookup "p0"  i )  f of
+  let parser   f = case A.parseEither (\(A.Object i) -> parseRecordJSON foldable $ justError "no top" $ HM.lookup "p0"  i )  f of
                   Right i -> i
                   Left i -> errorWithStackTrace (show i)
   parser <$> FR.field

@@ -326,13 +326,11 @@ recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn
     | otherwise = do
           ksn <- labelTable nextT
           tb@(m,r)  <- fun ksn
-          lab <- if not  . L.null $ isRec
-            then do
-              tas <- tname nextT
-              let knas = dumbKey (rawName nextT)
-              kas <- kname tas  knas
-              return $ Labeled (label kas)
-            else return  Unlabeled
+          lab <- do
+            tas <- tname nextT
+            let knas = dumbKey (rawName nextT)
+            kas <- kname tas  knas
+            return $ Labeled (label kas)
           return $ Compose $ lab $ FKT ( findRefs ksbn )  ks (mapOpt $ TB1 tb)
   where
         nextT = (\(Just i)-> i) (join $ HM.lookup tn <$> (HM.lookup sn invSchema))

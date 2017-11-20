@@ -1,9 +1,7 @@
 {-# LANGUAGE FlexibleInstances,FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
 module RuntimeTypes where
 
-
 import Control.Concurrent
-
 import Types
 import Types.Index as G
 import Types.Patch

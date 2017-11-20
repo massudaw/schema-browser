@@ -15,6 +15,7 @@ import qualified Data.Poset as P
 import Control.Exception (uninterruptibleMask,mask_,throw,catch,throw,SomeException)
 import Postgresql.Printer
 import Step.Host
+import Postgresql.Codegen
 import Data.Interval (Extended(..),upperBound)
 import Data.Either
 import Data.Functor.Apply
@@ -177,7 +178,7 @@ alterSchema v p= do
       traverse (\new -> when (new /= o )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? OWNER TO ?  "(DoubleQuoted o, DoubleQuoted new)) onewm
       traverse (\new -> when (new /= n )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? RENAME TO ?  "(DoubleQuoted n, DoubleQuoted new)) nnewm
       l <- liftIO getCurrentTime
-      return $ TableModification Nothing (utcToLocalTime utc l) (snd $ username inf) (lookTable inf "catalog_schema") . PatchRow  . traceShowId <$> (diff v new)
+      return $ TableModification Nothing (utcToLocalTime utc l) (snd $ username inf) (lookTable inf "catalog_schema") . PatchRow   <$> (diff v new)
 
 dropSchema = do
   aschema "metadata" $
@@ -219,7 +220,7 @@ insertPatch f conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> l
     where
       checkAllFilled = patchCheck path
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (escapeReserved <$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
-      attrs =  concat $L.nub $ nonRefTB .  create . traceShowId <$> filterFun i
+      attrs =  concat $L.nub $ nonRefTB .  create  <$> filterFun i
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
       direct f = filter (not.all1 testSerial .f)
       serialAttr = flip Attr (LeftTB1 Nothing)<$> filter (isSerial .keyType) ( rawPK t <> F.toList (rawAttrs t))
@@ -393,7 +394,7 @@ loadDelayed inf t@(k,v) values@(ks,vs)
            str = codegen t $ do
               tq <- expandBaseTable t
               rq <- explodeRecord delayed
-              return $ "select row_to_json(q)  FROM (SELECT " <>  rq <> " FROM " <> tq <> " WHERE " <> whr <> ") as q "
+              return $ "select row_to_json(q)  FROM (SELECT " <>  rq <> " FROM " <> renderRow tq <> " WHERE " <> whr <> ") as q "
            pk = (fmap (firstTB (recoverFields inf) .unTB) $ fmap snd $ L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)   ) $ M.toList $ _kvvalues $   snd $ tbPK (tableNonRef' values))
        print (T.unpack str,show pk )
        is <- queryWith (fromRecordJSON delayed) (conn inf) (fromString $ T.unpack str) pk

@@ -747,7 +747,7 @@ dynHandlerPatch hand val ix (l,old)= do
       infer Keep Nothing  = False
       evnew = (&&) <$> facts old <@> unionWith (&&) (isJust <$> rumors valix) ( flip infer <$> facts valix <@> ev)
 
-    inivalix <- ui $currentValue (facts valix)
+    inivalix <- ui $ currentValue (facts valix)
     vout <- ui$ stepper (isJust inivalix) evnew
     let evdiff= diffEvent vout evnew
     bdifout <- ui $ stepper (isJust inivalix)  evdiff

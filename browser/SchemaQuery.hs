@@ -21,12 +21,10 @@ module SchemaQuery
   ,updateFrom
   ,patchFrom
   ,insertFrom
-  -- ,syncFrom
   ,getFrom
   ,deleteFrom
   ,prerefTable
   ,refTable
-  -- ,refTableSTM
   ,readTableFromFile
   ,loadFKS
   ,fullDiffInsert
@@ -806,7 +804,7 @@ tbDiffEdit i j
   | otherwise = tbEdit i j
 
 tbEdit :: Column Key Showable -> Column Key Showable -> TransactionM (Column Key Showable)
-tbEdit i j | traceShow (i,j) False = undefined
+-- tbEdit i j | traceShow (i,j) False = undefined
 tbEdit (Fun a1 _ a2) (Fun k1 rel k2)= return $ (Fun k1 rel k2)
 tbEdit (Attr a1 a2) (Attr k1 k2)= return $ (Attr k1 k2)
 tbEdit (IT a1 a2) (IT k2 t2) = IT k2 <$> noInsert t2
@@ -1009,7 +1007,7 @@ loadFKSDisk inf targetTable re = do
    in tblist' (mapTableK keyFastUnique targetTable) (fmap _tb $fmap snd nonFKAttrs <> fks ))
 
 loadFKDisk :: InformationSchema ->  S.Set KeyUnique -> [MutRec [[Rel Key]]] -> Path (S.Set Key ) SqlOperation -> Dynamic (TBData KeyUnique Showable -> Maybe (Column KeyUnique Showable))
-loadFKDisk _ old  _ m | traceShow (old,m) False = undefined
+-- loadFKDisk _ old  _ m | traceShow (old,m) False = undefined
 loadFKDisk inf old re (Path ori (FKJoinTable rel (st,tt) ) ) = do
   let
     targetSchema = if schemaName inf == st then   inf else justError "no schema" $ HM.lookup st (depschema inf)
