@@ -13,6 +13,10 @@ module Postgresql.Printer
   ,createTable
   ,dropTable
   ,escapeReserved
+  ,NameMap
+  ,CodegenT
+  ,lkTB
+  ,atTable
   )
   where
 
@@ -77,7 +81,8 @@ data Address k
 
 
 type NameMap = ((Int,M.Map [Address Key] Int),(Int,M.Map [Address Key] Int))
-type Codegen = RWS [Address Key] String NameMap
+type CodegenT m = RWST [Address Key] String NameMap m
+type Codegen = RWST [Address Key] String NameMap Identity
 
 
 mkKey i = do
@@ -102,15 +107,20 @@ lkKey i = do
   path <- ask
   return $ justError ("no key: " ++ show (m,path,i) ) (M.lookup (path ++ [i]) m )
 
-lkKey' i = do
-  (c,m) <- snd <$> get
-  path <- ask
-  return $  (M.lookup (path ++ [i]) m )
-
-
-
-
 newAttr k = mkKey (AttributeReference k)
+
+lkTB (Attr k _) = do
+  a<- lkAttr k
+  return $ "k" <> T.pack (show a)
+
+lkTB (IT k _ ) = do
+  a <-lkIT k
+  return $ "k" <> T.pack (show a)
+
+lkTB (FKT  _ rel _ ) = do
+  a <- lkFK rel
+  return $ "k" <> T.pack (show a)
+
 lkAttr k = lkKey (AttributeReference k)
 
 newIT k = mkKey (TableReference $ RelInline k)
@@ -162,13 +172,13 @@ expandInlineTable :: TB3Data (Labeled Text) Key () -> Text -> Codegen SQLRow
 expandInlineTable tb@(meta, _) pre = asNewTable meta $ (\t->  do
   let
     name =  tableAttr tb
-    isFun  (Labeled a (Fun _ _ _ )) = True
+    isFun  (Labeled _ (Fun _ _ _ )) = True
     isFun  _ = False
-    aliasKeys (Labeled  a (Attr n    _ ))  =  do
-      a <- newAttr (traceShow (a,n) n)
+    aliasKeys (Labeled  _ (Attr n    _ ))  =  do
+      a <- newAttr n
       return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing ("i" <> pre) ) ( keyValue n)) ("k" <>T.pack (show a))
-    aliasKeys (Labeled a (IT n _ ))  =    do
-      a <- newIT  (traceShow (a,n) n)
+    aliasKeys (Labeled _ (IT n _ ))  =    do
+      a <- newIT  n
       return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing ("i" <> pre )) ( keyValue n)) ("ik"<> T.pack (show a))
   cols <- mapM (aliasKeys . getCompose)  (sortPosition name)
   return $ SQLRSelect cols Nothing)
@@ -179,10 +189,10 @@ expandInlineArrayTable tb@(meta, KV i) pre = asNewTable meta $ (\t -> do
   let
      rowNumber = SQLARename (SQLAInline "row_number() over ()") "row_number"
      name =  tableAttr tb
-     aliasKeys (Labeled a (Attr n    _ ))  =  do
+     aliasKeys (Labeled _ (Attr n    _ ))  =  do
        a <- newAttr n
        return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing "ix") ( keyValue n)) ("k" <>T.pack (show a))
-     aliasKeys (Labeled a (IT n _ ))  =do
+     aliasKeys (Labeled _ (IT n _ ))  =do
        a <- newIT  n
        return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing "ix") ( keyValue n)) ("ik"<> T.pack (show a))
   cols <- mapM (aliasKeys . getCompose)  (sortPosition name)
@@ -200,10 +210,10 @@ asNewTable meta action = do
 expandBaseTable ::  TB3Data  (Labeled Text) Key  () -> Codegen SQLRow
 expandBaseTable tb@(meta, KV i) = asNewTable meta  (\t -> do
   let
-     aliasKeys (Labeled a at@(Attr n _ )) = do
+     aliasKeys (Labeled _ at@(Attr n _ )) = do
        a <- newAttr n
        return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing t) ( keyValue n)) ("k"<> T.pack (show a))
-     aliasKeys (Labeled a  at@(IT n _ )) = do
+     aliasKeys (Labeled _  at@(IT n _ )) = do
        a <- newIT  n
        return $ SQLARename (SQLAIndexAttr (SQLAReference Nothing t) ( keyValue n)) ("ik"<> T.pack (show a))
      name =  tableAttr tb
@@ -220,7 +230,9 @@ getInlineRec' tb = L.filter (\i -> match $  unComp i) $ attrs
 
 
 
-codegen t l = traceShowId $ fst $ evalRWS l [] ((0,M.empty),(0,M.empty))
+codegen t l =
+  case runRWS l [] ((0,M.empty),(0,M.empty)) of
+    (q,s,_) -> (q,s)
 
 selectQuery
   :: (KVMetadata Key,
@@ -230,7 +242,7 @@ selectQuery
      -> Maybe [I.Extended (FTB Showable)]
      -> [(Key, Order)]
      -> WherePredicate
-     -> (Text,Maybe [Either (TB Identity Key Showable) (PrimType ,FTB Showable)])
+     -> ((Text,NameMap),Maybe [Either (TB Identity Key Showable) (PrimType ,FTB Showable)])
 selectQuery t koldpre order wherepred = (withDecl, (fmap Left <$> ordevalue )<> (fmap Right <$> predvalue))
       where
         withDecl = codegen t tableQuery
@@ -291,17 +303,18 @@ look ki i = justError ("missing FK on " <> show (ki,keyAttr . labelValue <$> i )
 expandJoin :: Bool -> [Compose (Labeled Text) (TB (Labeled Text)) Key ()] -> Labeled Text (TB (Labeled Text) Key ()) -> Codegen (SQLRow -> SQLRow)
 expandJoin left env (Labeled l (IT i (LeftTB1 (Just tb) )))
     = expandJoin True env $ Labeled l (IT i tb)
-expandJoin left env (Labeled l (IT a (ArrayTB1 (tb :| _ ) )))
-    = do
-    itb <- expandInlineArrayTable (unTB1 tb) l
+expandJoin left env (Labeled _ (IT a (ArrayTB1 (tb :| _ ) ))) = do
+    l <- lkIT a
+    itb <- expandInlineArrayTable (unTB1 tb) ("k" <> T.pack (show l))
     tjoin <- expandQuery left tb
     r <- explodeRow tb
-    let joinc = " (SELECT array_agg(" <> selectRow "arr" r <> " order by row_number) as " <> l <> " " <> (renderRow  $ tjoin (SQLRFrom  itb )) <> " )  as p" <> l
+    let joinc = " (SELECT array_agg(" <> selectRow "arr" r <> " order by row_number) as " <> "k" <> T.pack (show l) <> " " <> (renderRow  $ tjoin (SQLRFrom  itb )) <> " )  as p" <> "k" <> T.pack (show l)
     return $ (\row -> SQLRJoin row JTLateral jt (SQLRInline joinc) Nothing)
         where
           jt = if left then JDLeft  else JDNormal
-expandJoin left env (Labeled l (IT a (TB1 tb))) =  do
-     itable <- expandInlineTable  tb  l
+expandJoin left env (Labeled _ (IT a (TB1 tb))) =  do
+     l <- lkIT a
+     itable <- expandInlineTable  tb  ("k" <> T.pack (show l))
      tjoin <- expandQuery' left tb
      return $  tjoin . (\row -> SQLRJoin row JTLateral jt  itable Nothing)
         where
@@ -356,26 +369,27 @@ replaceexpr k ac = go k
     go (Function i e) = i <> "(" <> T.intercalate ","  (go   <$> e) <> ")"
     go (Value i ) = (ac !! i )
 
-explodeDelayed tb (Labeled l (Fun k (ex,a)  _ )) =  replaceexpr ex <$> traverse (\i -> explodeDelayed tb $ indexLabel i tb) a -- leaf (isArray (keyType k)) l
-explodeDelayed _ (Labeled l (Attr k  _ ))
+explodeDelayed tb (Labeled _ (Fun k (ex,a)  _ )) =  replaceexpr ex <$> traverse (\i -> explodeDelayed tb $ indexLabel i tb) a -- leaf (isArray (keyType k)) l
+explodeDelayed _ (Labeled _ (Attr k  _ ))
   | isKDelayed (keyType k) = do
-    -- l <- lkAttr k
-    return $ leafDel l -- ("k" <> T.pack ( show l))
+    l <- lkAttr k
+    return $ leafDel ("k" <> T.pack ( show l))
   | otherwise =  do
-    -- l <- lkAttr k
-    return $ leaf  l -- ("k" <> T.pack ( show l))
+    l <- lkAttr k
+    return $ leaf  ("k" <> T.pack ( show l))
 
 explodeDelayed rec (Labeled l (IT  k (LeftTB1 (Just tb  )))) = do
   explodeDelayed rec (Labeled l (IT k tb))
-explodeDelayed _ (Labeled l (IT  _ (ArrayTB1 (TB1 tb :| _) ) )) = do
-  return $ leaf l
-explodeDelayed _ (Labeled l (IT  k t  )) = do
-   -- l <- lkIT k
-   selectRow l <$> explodeRow' t
-explodeDelayed tbenv  (Labeled l (FKT ref  _ _ )) = case unkvlist ref of
+explodeDelayed _ (Labeled _ (IT  k (ArrayTB1 (TB1 tb :| _) ) )) = do
+  l <- lkIT k
+  return $ leaf ("k" <> T.pack ( show l))
+explodeDelayed _ (Labeled _ (IT  k t  )) = do
+   l <- lkIT k
+   selectRow ("k" <> T.pack ( show l)) <$> explodeRow' t
+{-explodeDelayed tbenv  (Labeled l (FKT ref  _ _ )) = case unkvlist ref of
            [] -> return $ leaf l
            i -> (\v -> T.intercalate assoc v <> assoc <> leaf l) <$> traverse (explodeDelayed tbenv . getCompose) i
-
+-}
 
 printPred :: TB3Data (Labeled Text)  Key ()->  BoolCollection (Access Key ,AccessOp Showable ) -> (Maybe [Text],Maybe [(PrimType,FTB Showable)])
 printPred t (PrimColl (a,e)) = (Just $ catMaybes $ fmap fst idx,Just $ catMaybes $ fmap snd idx)

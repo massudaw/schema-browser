@@ -8,6 +8,8 @@ import Types hiding (Parser,double)
 import Postgresql.Types
 import Text
 import Postgresql.Printer
+import Control.Monad.Trans.Class
+import Control.Monad.RWS
 import Data.Ord
 import qualified Data.Aeson as A
 import qualified Data.Aeson.Types as A
@@ -68,6 +70,7 @@ import Database.PostgreSQL.Simple
 import Blaze.ByteString.Builder(fromByteString)
 import Blaze.ByteString.Builder.Char8(fromChar)
 
+type JSONParser = CodegenT A.Parser
 mapKeyType :: FKey (KType PGPrim) -> FKey (KType (Prim KPrim (Text,Text)))
 mapKeyType  = fmap mapKType
 
@@ -286,10 +289,10 @@ unIntercalateAtto l s = go l
 -- parseAttrJSON i v | traceShow (i,v) False = undefined
 parseAttrJSON (Attr i _ ) v = do
   let tyun = fromMaybe (keyType i) $ ktypeRec ktypeUnLift (keyType i)
-  s<- parseShowableJSON   tyun  v
+  s<- lift $ parseShowableJSON   tyun  v
   return $  Attr i s
 parseAttrJSON (Fun i rel _ )v = do
-  s<- parseShowableJSON (keyType  i) v
+  s<- lift $ parseShowableJSON (keyType  i) v
   return $  (Fun i rel s)
 parseAttrJSON (IT na j) v = do
   mj <- parseLabeledTableJSON j v
@@ -345,13 +348,13 @@ parseLabeledTableJSON (TB1 l) v = fmap TB1 $ parseRecordJSON  l v
 parseLabeledTableJSON i v= errorWithStackTrace (show (i,v))
 
 
-parseRecordJSON :: TB3Data (Labeled Text) Key () -> A.Value -> A.Parser (TBData Key Showable)
-parseRecordJSON  (me,m) (A.Object v) = do
-  let try1 i v = HM.lookup (label i ) v
+parseRecordJSON :: TB3Data (Labeled Text) Key () -> A.Value -> JSONParser (TBData Key Showable)
+parseRecordJSON  (me,m) (A.Object v) = atTable me $ do
+  let try1 i v = do
+        tb <- lkTB (labelValue i)
+        return $ justError (" no attr " <> show (i,v)) $ HM.lookup tb  v
 
-  -- im <- traverse (fmap _tb . (\ i -> parseAttrJSON  (labelValue i) (justError (" no attr " <> show (i,v)) $ try1 i v <|> try2 (labelValue i) v)). getCompose )$   _kvvalues m
-
-  im <- traverse (fmap _tb . (\ i -> parseAttrJSON  (labelValue i) (justError (" no attr " <> show (i,v)) $ try1 i v )). getCompose )$   _kvvalues m
+  im <- traverse (fmap _tb . (\ i -> parseAttrJSON  (labelValue i) =<<  try1 i v). getCompose )$   _kvvalues m
   return (me, KV im )
 
 
@@ -569,7 +572,7 @@ parseShowableJSON  p@(Primitive l (AtomicPrim i)) v = parseKTypePrim l v
       = case parseOnly (parseShowable (Primitive (KInterval :l) (AtomicPrim i))) (BS.pack $ T.unpack v) of
             Right i -> return i
             Left i -> fail i
-    parseKTypePrim [] v = forw . TB1 <$> parsePrimJSON i v
+    parseKTypePrim [] v = forw . TB1 <$> ( parsePrimJSON i v)
         where (forw,_)  =conversion (Primitive [] (AtomicPrim i))
     parseKTypePrim a b = error $ "no match " ++ show (p,a,b)
 
@@ -738,9 +741,9 @@ fromShowable ty v =
       Right i -> Just i
       Left l -> Nothing
 
-fromRecordJSON :: TB3Data (Labeled Text) Key () ->  FR.RowParser (TBData Key Showable)
-fromRecordJSON foldable = do
-  let parser   f = case A.parseEither (\(A.Object i) -> parseRecordJSON foldable $ justError "no top" $ HM.lookup "p0"  i )  f of
+fromRecordJSON :: TB3Data (Labeled Text) Key () -> NameMap ->  FR.RowParser (TBData Key Showable)
+fromRecordJSON foldable namemap = do
+  let parser   f = case A.parseEither (\(A.Object i) -> fmap fst $ evalRWST (parseRecordJSON foldable $ justError "no top" $ HM.lookup "p0"  i) [] namemap )  f of
                   Right i -> i
                   Left i -> errorWithStackTrace (show i)
   parser <$> FR.field

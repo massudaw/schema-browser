@@ -292,19 +292,15 @@ diffUpdateAttr  kv kold@(t,_ )  =  fmap ((t,) . KV ) .  allMaybesMap  $ liftF2 (
 differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 
 paginate inf t order off size koldpre wherepred = do
-    let (que,attr) = selectQuery t koldpre order wherepred
+    let ((que,name),attr) = selectQuery t koldpre order wherepred
     i <- lookupEnv "POSTGRESQL_DECODER"
     let
       jsonDecode =  do
         let quec = fromString $ T.unpack $ "SELECT row_to_json(q),count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
-        uncurry (queryWith (withCount (fromRecordJSON t) ) (conn inf ) ) (quec, maybe [] (fmap (either(Left .firstTB (recoverFields inf)) Right)) attr)
-      textDecode = do
-        let quec = fromString $ T.unpack $ "SELECT *,count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
-        uncurry (queryWith (withCount (fromRecord (unTlabel' t)) ) (conn inf ) ) (quec, maybe [] (fmap (either (Left .firstTB (recoverFields inf)) Right ) ) attr)
+        uncurry (queryWith (withCount (fromRecordJSON t name )) (conn inf ) ) (quec, maybe [] (fmap (either(Left .firstTB (recoverFields inf)) Right)) attr)
 
     v <- case i of
            Just "JSON" ->  jsonDecode
-           Just "TEXT" ->    textDecode
            Nothing -> jsonDecode
     let estimateSize = maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])
     print estimateSize
@@ -391,13 +387,13 @@ loadDelayed inf t@(k,v) values@(ks,vs)
            delayedTB1 :: TB3Data (Labeled Text) Key () -> TB3Data (Labeled Text) Key ()
            delayedTB1 = fmap (\(KV i ) -> KV $ M.filterWithKey  (\i _ -> isJust $ M.lookup i filteredAttrs ) i)
            delayed =  mapKey' unKDelayed (mapValue' (const ()) (delayedTB1 t))
-           str = codegen t $ do
+           (str,namemap) = codegen t $ do
               tq <- expandBaseTable t
               rq <- explodeRecord delayed
               return $ "select row_to_json(q)  FROM (SELECT " <>  rq <> " FROM " <> renderRow tq <> " WHERE " <> whr <> ") as q "
            pk = (fmap (firstTB (recoverFields inf) .unTB) $ fmap snd $ L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)   ) $ M.toList $ _kvvalues $   snd $ tbPK (tableNonRef' values))
        print (T.unpack str,show pk )
-       is <- queryWith (fromRecordJSON delayed) (conn inf) (fromString $ T.unpack str) pk
+       is <- queryWith (fromRecordJSON delayed namemap) (conn inf) (fromString $ T.unpack str) pk
        res <- case is of
             [] -> errorWithStackTrace "empty query"
             [i] ->return $ fmap (\(i,j,a) -> (i,G.getIndex values,a)) $ diff (ks , KV filteredAttrs) (mapKey' (alterKeyType (Le.over keyFunc makeDelayed)) . mapFValue' makeDelayedV $ i  )
