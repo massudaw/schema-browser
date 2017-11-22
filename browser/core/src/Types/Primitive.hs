@@ -165,9 +165,8 @@ data Labeled l v
   { label :: l
   , labelValue :: v
   }
-  | Unlabeled
-  { labelValue :: v
-  } deriving(Eq,Show,Ord,Foldable,Functor,Traversable)
+  | Unlabeled v
+  deriving(Eq,Show,Ord,Foldable,Functor,Traversable)
 
 
 type Key = CoreKey -- FKey (KType  (Prim (Text,Text) (Text,Text)))
@@ -541,13 +540,9 @@ type PathQuery = Path (Set Key) (SqlOperation )
 type TBLabel =  Compose (Labeled Text) (TB (Labeled Text) ) Key
 type TBIdent =  Compose Identity  (TB Identity ) Key
 
-
 instance Applicative (Labeled Text) where
-  pure =Unlabeled
+  pure = Unlabeled
   Labeled t l <*> Labeled j k = Labeled t (l  k)
-  Unlabeled  l <*> Labeled t k = Labeled t (l  k)
-  Labeled t l <*> Unlabeled  k = Labeled t (l  k)
-  Unlabeled l <*> Unlabeled  k = Unlabeled  (l  k)
 
 instance Monad (Labeled Text) where
   return = Unlabeled
@@ -559,20 +554,15 @@ instance Monad (Labeled Text) where
 
 
 
-
 -- tableAttr :: (Traversable f ,Ord k) => TB3 f k () -> [Compose f (TB f) k ()]
 -- tableAttr (ArrayTB1 i) = tableAttr <$> i
 -- tableAttr (LeftTB1 i ) = tableAttr<$> i
-tableAttr (m , KV n) =   concat  $ F.toList (nonRef <$> n)
+tableAttr (m , KV n) =   concat  $ F.toList (nonRef <$> traceShow (Map.keys n) n)
   where
     nonRef :: (Ord f,Show k ,Show f,Ord k) => Compose (Labeled f ) (TB (Labeled f) ) k () -> [Compose (Labeled f ) (TB (Labeled f) ) k ()]
     nonRef i@(Compose (Labeled _ (Fun _ _ _ ))) =[i]
-    nonRef i@(Compose (Unlabeled  (Fun _ _ _ ))) =[i]
     nonRef i@(Compose (Labeled _ (Attr _ _ ))) =[i]
-    nonRef i@(Compose (Unlabeled  (Attr _ _ ))) =[i]
-    nonRef (Compose (Unlabeled  ((FKT i  _ _ )))) = concat (nonRef <$> unkvlist i)
     nonRef (Compose (Labeled _ ((FKT i  _ _ )))) = concat (nonRef <$> unkvlist i)
-    nonRef j@(Compose (Unlabeled (IT k v ))) = [j]
     nonRef j@(Compose (Labeled l (IT k v ))) = [j]
 
 -- nonRef i = errorWithStackTrace (show i)
@@ -582,30 +572,26 @@ tableAttr (m , KV n) =   concat  $ F.toList (nonRef <$> n)
 
 -- joinNonRef' :: Ord k => TB3Data f k a -> TB3Data f k a
 
-flattenMap ::  Ord k => TB3Data (Labeled Text) k a -> [Compose (Labeled Text) (TB (Labeled Text) )  k a]
+flattenMap :: Ord k => TB3Data (Labeled Text) k a -> [Compose (Labeled Text) (TB (Labeled Text) )  k a]
 flattenMap (m,n)  = (concat . fmap nonRef . F.toList . _kvvalues) n
   where
     -- compJoin :: Monad f => Compose f (Compose f g ) k  a -> Compose f g k a
-    nonRef :: (Ord k) => Compose (Labeled Text) (TB (Labeled Text)) k a ->  [Compose (Labeled Text) (TB (Labeled Text) )  k a]
+    nonRef :: Ord k => Compose (Labeled Text) (TB (Labeled Text)) k a ->  [Compose (Labeled Text) (TB (Labeled Text) )  k a]
     nonRef (Compose (Labeled l (Attr k v ))) = [Compose (Labeled l ( Attr k v))]
     -- nonRef (FKT i _ _ ) = tra
         -- where tra = concat ( fmap compJoin   . traComp  nonRef <$> i)
-    nonRef (Compose (Labeled l it@(IT j k ))) =   concat $ flattenMap <$> (F.toList k  )
-    nonRef (Compose (Unlabeled it@(IT j k ))) =   concat $ flattenMap <$> (F.toList k  )
+    nonRef (Compose (Labeled l (IT j k ))) =   concat $ flattenMap <$> (F.toList k  )
 
 flattenNonRec ::  Ord k => [MutRec [[Rel k]]] -> TB3Data (Labeled Text) k a -> [Compose (Labeled Text) (TB (Labeled Text) )  k a]
 flattenNonRec rels (m,n)  = (concat . fmap (\r -> if pred rels r then nonRef (fmap (L.drop 1) <$>   (L.filter (\(MutRec rel) -> L.any (\rel -> keyattr r == head rel )rel) rels )) r  else []  ) . F.toList . _kvvalues) n
   where
     -- compJoin :: Monad f => Compose f (Compose f g ) k  a -> Compose f g k a
     pred rs v = not $ L.any (\(MutRec r) ->  L.any (\r -> L.length r == 1 && last r == keyattr  v ) r ) rs
-    nonRef :: (Ord k) => [MutRec [[Rel k]]] -> Compose (Labeled Text) (TB (Labeled Text)) k a ->  [Compose (Labeled Text) (TB (Labeled Text) )  k a]
+    nonRef :: Ord k => [MutRec [[Rel k]]] -> Compose (Labeled Text) (TB (Labeled Text)) k a ->  [Compose (Labeled Text) (TB (Labeled Text) )  k a]
     nonRef r (Compose (Labeled l (Attr k v ))) = [Compose (Labeled l ( Attr k v))]
     nonRef r (Compose (Labeled l (FKT i _ k ))) = tra
         where tra = unkvlist i <> concat  (flattenNonRec r <$> (F.toList k))
-    nonRef r (Compose (Unlabeled (FKT i _ k ))) = tra
-        where tra = unkvlist i <> concat  (flattenNonRec r <$> (F.toList k))
-    nonRef r (Compose (Labeled l it@(IT j k ))) =   concat $ flattenNonRec r <$> (F.toList k  )
-    nonRef r (Compose (Unlabeled it@(IT j k ))) =   concat $ flattenNonRec r <$> (F.toList k  )
+    nonRef r (Compose (Labeled l (IT j k ))) =   concat $ flattenNonRec r <$> (F.toList k  )
 
 flattenRec ::  (Show a, Show k ,Ord k) => [MutRec [Set (Rel k)]] -> TB3Data (Labeled Text) k a -> [Compose (Labeled Text) (TB (Labeled Text) )  k a]
 flattenRec rels (m,n)  = (concat . fmap (\r -> if pred rels r then nonRef (fmap (L.drop 1)   <$> (L.filter (\(MutRec rel) -> L.any (\rel -> Set.fromList (keyattr r ) == head rel ) rel ) rels )) r  else []  ) . F.toList . _kvvalues) ( n)
@@ -617,20 +603,7 @@ flattenRec rels (m,n)  = (concat . fmap (\r -> if pred rels r then nonRef (fmap 
     nonRef r (Compose (Labeled l (Attr k v ))) = [Compose (Labeled l ( Attr k v))]
     nonRef r (Compose (Labeled l (FKT i _ k ))) = tra
         where tra = unkvlist i <> concat  (flattenRec r <$> (F.toList k))
-    nonRef r (Compose (Unlabeled (FKT i _ k ))) = tra
-        where tra = unkvlist i <> concat  (flattenRec r <$> (F.toList k))
-    nonRef r (Compose (Labeled l it@(IT j k ))) =   concat $ flattenRec r <$> (F.toList k  )
-    nonRef r (Compose (Unlabeled it@(IT j k ))) =   concat $ flattenRec r <$> (F.toList k  )
-
-
-
--- unlabelIT ::  (Functor f,Show a, Show k ,Ord k) => [[[Rel k]]] -> TB3Data f k a -> TB3Data f k a
-unlabelIT (m,n)  = (m, (KV . fmap (Compose . nonRef  .getCompose) . _kvvalues )  n  )
-  where
-    nonRef  (Labeled l (IT j k )) =   Unlabeled (IT j (unlabelIT  <$> k ))
-    nonRef  i = i
-
-
+    nonRef r (Compose (Labeled l (IT j k ))) =   concat $ flattenRec r <$> (F.toList k  )
 
 
 tableNonRef2 :: Ord k => TB3Data (Labeled Text) k a -> TB3Data (Labeled Text) k a
@@ -640,20 +613,16 @@ tableNonRef2 (m,n)  = (m, (KV . rebuildTable . _kvvalues) n)
     -- nonRef :: Ord k => TB (Labeled Text) k a -> M.Map (Rel k) (TB (Labeled Text) k  a)
     nonRef :: Ord k => Labeled Text (TB (Labeled Text) k a) -> Map (Set (Rel k )) (Compose (Labeled Text ) (TB (Labeled Text)) k a)
     nonRef (Labeled _ (Fun i _ _ )) =Map.empty
-    nonRef (Unlabeled (Fun i _ _ )) = Map.empty
     nonRef (Labeled _ (FKT i _ _ )) = _kvvalues i
-    nonRef (Unlabeled (FKT i _ _ )) = _kvvalues i
-    nonRef (Labeled t it@(IT j k )) = Map.singleton (S.singleton $ Inline j) (Compose $ Labeled t $ IT  j (tableNonRef2 <$> k ))
-    nonRef (Unlabeled it@(IT j k )) = Map.singleton (S.singleton $ Inline j) (Compose $ Unlabeled $ IT  j (tableNonRef2 <$> k ))
+    nonRef (Labeled t (IT j k )) = Map.singleton (S.singleton $ Inline j) (Compose $ Labeled t $ IT  j (tableNonRef2 <$> k ))
     nonRef i@(Labeled t (Attr j _)) = Map.singleton (S.singleton $ Inline j) (Compose i)
-    nonRef i@(Unlabeled (Attr j _)) = Map.singleton (S.singleton $ Inline j) (Compose i)
 
 
 
 
 nonRefTB :: Ord k => TB Identity k a -> [(TB Identity ) k a]
 nonRefTB (FKT i _ _ ) = concat (overComp nonRefTB <$> unkvlist i)
-nonRefTB it@(IT j k ) = [(IT  j (tableNonRef k )) ]
+nonRefTB (IT j k ) = [IT  j (tableNonRef k ) ]
 nonRefTB i  = [i]
 
 

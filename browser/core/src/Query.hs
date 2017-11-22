@@ -166,15 +166,15 @@ allKVRec'  t@(m, e)=  concat $ fmap snd $ L.sortBy (comparing (\i -> maximum $ (
         go  (Attr _ a) = [a]
 
 
-tableAttrs r =   do
-   ((rawPK r)) <> (rawDescription r)  <>(S.toList (rawAttrs r))
+tableAttrs r =
+  L.nub $ ((rawPK r)) <> (rawDescription r)  <>(S.toList (rawAttrs r))
 
 
 
 labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (TB3Data (Labeled Text)  Key  () )
 labelTable i = do
    t <- tname i
-   name <- Tra.traverse (\k-> (S.singleton (Inline k),) <$> kname t k ) (tableAttrs i)
+   name <- Tra.traverse (\k-> (S.singleton (Inline k),) <$> kname t k ) (L.sortBy (comparing keyPosition) $ tableAttrs i)
    return ( (tableMeta i,) $  KV $ M.fromList $ fmap Compose <$> name)
 
 unComp :: (Show (g k a) ,F.Foldable f ) => Compose f g k a -> g k a
@@ -286,26 +286,20 @@ recursePath
      -> State
           ((Int, Map Int Table), (Int, Map Int Key))
           (Compose (Labeled Text) (TB (Labeled Text)) Key ())
+-- recursePath _ _ _ _ _ _ o | traceShow o False = undefined
 recursePath m isLeft isRec vacc ksbn invSchema p@(Path ifk jo@(FKInlineTable (s,t) ) )
     | anyArrayRel ks  =   do
           let
               ref = findRefIT ifk ksbn
           ksn <-  labelTable  nextT
           tb <- fun ksn
-          tas <- tname nextT
           return $  Compose $ Labeled ((label $ ref)) $ IT (head (S.toList ifk))   (mapOpt $ mapArray $ TB1 tb )
     | otherwise = do
           let
-            ref = findRefIT ifk  ksbn
+            ref = findRefIT ifk ksbn
           ksn <-  labelTable  nextT
           tb <- fun ksn
-          lab <- if isTableRec' tb
-            then do
-              tas <- tname nextT
-              let knas = dumbKey (rawName nextT)
-              kas <- kname tas  knas
-              return $ Labeled (label kas)
-            else return  (Labeled (label ref) )
+          let lab =  Labeled (label ref)
           return $ ( Compose $ lab $ IT  (head (S.toList ifk)) (mapOpt $ TB1 tb)   )
     where
         ks = pathToRel p
@@ -321,16 +315,13 @@ recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn
           tb <-fun ksn
           tas <- tname nextT
           let knas = dumbKey (rawName nextT)
-          kas <- kname tas  knas
-          return $ Compose $ Labeled (label $ kas) (FKT (findRefs  ksbn)  ks  (mapOpt $ mapArray $ TB1 tb  ))
+          return $ Compose $ Labeled "" (FKT (findRefs  ksbn)  ks  (mapOpt $ mapArray $ TB1 tb  ))
     | otherwise = do
           ksn <- labelTable nextT
           tb@(m,r)  <- fun ksn
           lab <- do
             tas <- tname nextT
-            let knas = dumbKey (rawName nextT)
-            kas <- kname tas  knas
-            return $ Labeled (label kas)
+            return $ Labeled ""
           return $ Compose $ lab $ FKT ( findRefs ksbn )  ks (mapOpt $ TB1 tb)
   where
         nextT = (\(Just i)-> i) (join $ HM.lookup tn <$> (HM.lookup sn invSchema))
@@ -361,7 +352,8 @@ recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else
               funSet = S.unions $ fmap (\(Path i _ )-> i) $ filter (isFunction.pathRel) (S.toList fks')
               nonFKAttrs :: [(S.Set (Rel Key) ,TBLabel  ())]
               nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) (fkSet <> funSet)) items
-          pt <- foldl (\acc  fk ->  do
+              fklist = P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) (F.toList fks')
+          pt <- F.foldl (\acc  fk ->  do
                   vacc <- acc
                   let relFk =pathRelRel fk
                       lastItem =   L.filter cond isRec
@@ -371,7 +363,7 @@ recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else
                     i <- fmap (relFk,) . recursePath m nextLeft ( fmap (fmap (L.drop 1 ))  <$> L.filter (\(_,i) -> mAny (\i -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) i ) (isRec <> fmap (\i -> (i,i) ) (_kvrecrels m))) vacc ( (fmap getCompose items )) invSchema $ fk
                     return (fmap getCompose i:vacc)
                   else return vacc
-                  ) (return []) $ P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) (F.toList $ fks' )
+                  ) (return [])  fklist
           return (   KV $ M.fromList $ nonFKAttrs <> (fmap (fmap Compose ) pt)))
 
 mAny f (MutRec i) = L.any f i
@@ -444,7 +436,7 @@ tbFilter' pred (kv,item) =  (kv,(\(KV item)->  KV $ M.filterWithKey (\k _ -> pre
 
 mkKey i = do
   (c,m) <- snd <$> get
-  let next = (c+1,M.insert (c+1) i m)
+  let next = traceShow (i,c+1) (c+1,M.insert (c+1) i m)
   modify (\(j,_) -> (j,next))
   return (c+1,i)
 
@@ -476,9 +468,7 @@ unTlabel' ((m,kv) )  = (m,) $ (\(KV kv) -> KV $ fmap (Compose . Identity .unlabe
 unTlabel  = fmap unTlabel'
 
 unlabel (Labeled l (IT tn t) ) = (IT tn (unTlabel t ))
-unlabel (Unlabeled (IT tn t) ) = (IT tn (unTlabel t ))
 unlabel (Labeled l (FKT i fkrel t) ) = (FKT (mapKV relabel i) fkrel (unTlabel  t ))
-unlabel (Unlabeled (FKT i fkrel t) ) = (FKT (mapKV relabel i) fkrel (unTlabel t))
 unlabel (Labeled l (Attr k i )) = Attr k i
 unlabel (Labeled l (Fun k i m )) = Fun k i m
 
@@ -498,16 +488,12 @@ sup' = unFinite . Interval.upperBound
 
 data RelSort k = RelSort [Rel k] deriving (Eq,Ord)
 
-flipSort P.EQ = P.EQ
-flipSort P.GT = P.LT
-flipSort P.LT = P.GT
-
 -- To Topologically sort the elements we compare  both inputs and outputs for intersection if one matches we flip the
 instance  (Ord k,Show k,P.Poset k) => P.Poset (RelSort k ) where
   compare (RelSort i ) (RelSort j)
-    = case (comp (norm $  _relOutputs <$> i) (norm  $ _relInputs <$> j) , flipSort (comp (norm  $ _relOutputs <$> j) (norm  $  _relInputs <$> i)) ,P.compare (inp i) (inp j),P.compare (out i ) (out j) ) of
+    = case (comp (out i) (inp j) , (comp (out j) (inp i)) ,P.compare (inp i) (inp j),P.compare (out i ) (out j) ) of
             -- Reverse order
-            (_ , P.GT,_,_) -> P.GT
+            (_ , P.LT,_,_) -> if S.size (out j) == L.length j then P.GT else P.EQ
             -- Right order
             (P.LT , _ ,_,_) -> P.LT
             -- No intersection  between elements sort by inputset
@@ -518,7 +504,6 @@ instance  (Ord k,Show k,P.Poset k) => P.Poset (RelSort k ) where
       inp j= norm $ _relInputs <$> j
       out j = norm $ _relOutputs <$> j
       norm  = S.fromList . concat . catMaybes
-      -- comp a b  | traceShow (i,j ,a,b,P.compare a b) False = undefined
       comp i j  | S.null (S.intersection i j ) = P.EQ
       comp i j  | S.empty == i = P.EQ
       comp i j  | S.empty == j  = P.EQ

@@ -432,7 +432,7 @@ data TB f k a
     }
   | IT -- Inline Table
     { _tbattrkey :: ! k
-    , _ifkttable ::   ! (FTB1 f  k a)
+    , _ifkttable :: ! (FTB1 f  k a)
     }
   | FKT -- Foreign Table
     { _tbref ::  ! (KV (Compose f (TB f)) k a)
@@ -600,7 +600,7 @@ joinNonRef' (m,n)  = (m, rebuildTable . _kvvalues $  n)
     nonRef (Fun k rel v ) = [Compose . return $ Fun k rel v]
     nonRef (Attr k v ) = [Compose . return $ Attr k v]
     nonRef (FKT i _ _ ) = tra
-      where tra = concat (fmap compJoin . traComp  nonRef <$> unkvlist i)
+      where tra = unkvlist i
     nonRef it@(IT j k ) =  [Compose . return $ (IT  j k ) ]
 
 
@@ -683,15 +683,15 @@ tableNonRef' :: Ord k => TBData k a -> TBData k a
 tableNonRef' (m,n)  = (m, (KV . rebuildTable . _kvvalues) n)
   where
     rebuildTable n = mapFromTBList .  concat . F.toList $  traComp nonRef <$> n
-    nonRef :: Ord k => TB Identity k a -> [(TB Identity ) k a]
+    nonRef :: Ord k => TB Identity k a -> [(TB Identity) k a]
     nonRef (FKT i _ _ ) = concat (overComp nonRef <$> unkvlist i)
-    nonRef it@(IT j k ) = [(IT  j (tableNonRef k )) ]
+    nonRef (IT j k ) = [(IT  j (tableNonRef k )) ]
     nonRef i = [i]
 
 
 nonRefTB :: Ord k => TB Identity k a -> [(TB Identity ) k a]
 nonRefTB (FKT i _ _ ) = concat (overComp nonRefTB <$> unkvlist i)
-nonRefTB it@(IT j k ) = [(IT  j (tableNonRef k )) ]
+nonRefTB (IT j k ) = [(IT  j (tableNonRef k )) ]
 nonRefTB i  = [i]
 
 

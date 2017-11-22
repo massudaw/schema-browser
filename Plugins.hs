@@ -460,7 +460,7 @@ siapi3Plugin  = FPlugins pname tname  $ DiffIOPlugin url
       cpf <- atR "id_project"
               $ atR "id_owner,id_contact"
                 $ atR "id_owner"
-                  $ atR "ir_reg" (varTB "cpf_number" ||| varTB "cnpj_number") -< undefined
+                  $ atAny "ir_reg" [varTB "cpf_number",varTB "cnpj_number"] -< t
       v <- atMR "protocolo,ano" (proc cpf -> do
         protocolo <- idxR "protocolo" -< ()
         ano <- idxR "ano" -< ()

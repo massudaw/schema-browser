@@ -185,11 +185,11 @@ type SelTBConstraint = [([Column CoreKey ()],R.Tidings TBConstraint)]
 
 type PluginRef a = [(Union (Access Key), R.Tidings (Maybe (Index a)))]
 
-instance (NFData k, NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex  a ) (TBData k a)) where
+instance (NFData k, NFData a,G.Predicates (G.TBIndex a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex  a ) (TBData k a)) where
   type Index (G.GiST (G.TBIndex  a ) (TBData k a)  ) = RowPatch k (Index a)
   applyIfChange = applyGiSTChange
 
-instance (NFData k, NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (TableRep k a) where
+instance (NFData k, NFData a,G.Predicates (G.TBIndex a) , PatchConstr k a) => Patch (TableRep k a) where
   type Index (TableRep k a) = RowPatch k (Index a)
   applyIfChange = applyTableRep
 
@@ -217,6 +217,7 @@ applyGiSTChange l (PatchRow patom@(m, ipa, p)) =
       return $ G.insert (el, G.tbpred el) G.indexParam l
   where
     i = fmap create ipa
+
 applyGiSTChange l (CreateRow elp) =
   case G.lookup i l of
     Just v ->

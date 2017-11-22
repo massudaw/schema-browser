@@ -432,16 +432,14 @@ testTablePersist s t w = do
 
 
 
-testTable s t w = do
+testTable s t  = do
   args <- getArgs
   let db = argsToState args
   smvar <- createVar
   let
     amap = authMap smvar db ("postgres", "queijo")
   (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
-  ((_,(_,i)),_) <- runDynamic $ transactionNoLog inf $ selectFrom t Nothing Nothing [] (WherePredicate $ lookAccess inf t <$> w)
-  print (F.toList i)
-  print i
+  ((_,(_,i)),_) <- runDynamic $ transactionNoLog inf $ selectFrom t Nothing Nothing [] mempty
 
   return ()
 
