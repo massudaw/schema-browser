@@ -578,9 +578,6 @@ addDefault = def
 
 
 
-
-
-
 tableMeta :: Ord k => TableK k -> KVMetadata k
 tableMeta (Project s _ ) =  tableMeta s
 tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawDescription t) (fmap F.toList $ uniqueConstraint t) [] (F.toList $ rawAttrs t)[]  (F.toList $ rawDelayed t) (paths' <> paths)
