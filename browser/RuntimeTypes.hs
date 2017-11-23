@@ -347,7 +347,7 @@ data SchemaEditor
   , patchEd :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , insertEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , deleteEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-  , listEd :: TBF (Labeled Text) Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
+  , listEd :: TBData  Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   , getEd :: Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   , typeTransform :: PGKey -> CoreKey
   , joinListEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)

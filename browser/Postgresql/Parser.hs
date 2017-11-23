@@ -348,13 +348,13 @@ parseLabeledTableJSON (TB1 l) v = fmap TB1 $ parseRecordJSON  l v
 parseLabeledTableJSON i v= errorWithStackTrace (show (i,v))
 
 
-parseRecordJSON :: TB3Data (Labeled Text) Key () -> A.Value -> JSONParser (TBData Key Showable)
+parseRecordJSON :: TBData Key () -> A.Value -> JSONParser (TBData Key Showable)
 parseRecordJSON  (me,m) (A.Object v) = atTable me $ do
   let try1 i v = do
-        tb <- lkTB (labelValue i)
+        tb <- lkTB i
         return $ justError (" no attr " <> show (i,v)) $ HM.lookup tb  v
 
-  im <- traverse (fmap _tb . (\ i -> parseAttrJSON  (labelValue i) =<<  try1 i v). getCompose )$   _kvvalues m
+  im <- traverse (fmap _tb . (\ i -> parseAttrJSON  i =<<  try1 i v). unTB)$   _kvvalues m
   return (me, KV im )
 
 
@@ -741,7 +741,7 @@ fromShowable ty v =
       Right i -> Just i
       Left l -> Nothing
 
-fromRecordJSON :: TB3Data (Labeled Text) Key () -> NameMap ->  FR.RowParser (TBData Key Showable)
+fromRecordJSON :: TBData Key () -> NameMap ->  FR.RowParser (TBData Key Showable)
 fromRecordJSON foldable namemap = do
   let parser   f = case A.parseEither (\(A.Object i) -> fmap fst $ evalRWST (parseRecordJSON foldable $ justError "no top" $ HM.lookup "p0"  i) [] namemap )  f of
                   Right i -> i

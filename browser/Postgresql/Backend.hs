@@ -7,6 +7,7 @@ import Data.Time
 import qualified Types.Index as G
 import Control.Arrow
 import SchemaQuery
+import Control.Monad.RWS hiding(pass)
 import Environment
 import Postgresql.Types
 import Default
@@ -375,24 +376,23 @@ patchMod patch@(m,_,_) = do
 
 
 
-loadDelayed :: InformationSchema -> TB3Data (Labeled Text) Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
+loadDelayed :: InformationSchema -> TBData Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
 loadDelayed inf t@(k,v) values@(ks,vs)
   | L.null $ _kvdelayed k = return Nothing
   | L.null delayedattrs  = return Nothing
   | otherwise = do
        let
            whr = T.intercalate " AND " ((\i-> justError ("no key" <> show i <> show labelMap)  (M.lookup (S.singleton $ Inline i) labelMap) <>  " = ?") <$> (_kvpk k) )
-           labelMap = fmap (label .getCompose) $  _kvvalues $  (snd $ tableNonRef2 (k,v))
+           (labelMap,_) = evalRWS (traverse (lkTB. unTB) $  _kvvalues $  (snd $ tableNonRef2 (k,v)) :: CodegenT Identity (M.Map (S.Set (Rel Key)) Text)) [Root k] namemap
            table = justError "no table" $ M.lookup (S.fromList $ _kvpk k) (pkMap inf)
-           delayedTB1 :: TB3Data (Labeled Text) Key () -> TB3Data (Labeled Text) Key ()
+           delayedTB1 :: TBData Key () -> TBData Key ()
            delayedTB1 = fmap (\(KV i ) -> KV $ M.filterWithKey  (\i _ -> isJust $ M.lookup i filteredAttrs ) i)
            delayed =  mapKey' unKDelayed (mapValue' (const ()) (delayedTB1 t))
-           (str,namemap) = codegen t $ do
+           (str,namemap) = codegen $ do
               tq <- expandBaseTable t
               rq <- explodeRecord delayed
               return $ "select row_to_json(q)  FROM (SELECT " <>  rq <> " FROM " <> renderRow tq <> " WHERE " <> whr <> ") as q "
            pk = (fmap (firstTB (recoverFields inf) .unTB) $ fmap snd $ L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)   ) $ M.toList $ _kvvalues $   snd $ tbPK (tableNonRef' values))
-       print (T.unpack str,show pk )
        is <- queryWith (fromRecordJSON delayed namemap) (conn inf) (fromString $ T.unpack str) pk
        res <- case is of
             [] -> errorWithStackTrace "empty query"
@@ -415,7 +415,7 @@ loadDelayed inf t@(k,v) values@(ks,vs)
 
 selectAll
   ::
-     TBF (Labeled Text) Key ()
+     TBF Identity Key ()
      -> Int
      -> Maybe PageToken
      -> Int
@@ -430,7 +430,6 @@ selectAll m offset i  j k st = do
           unref (TableRef i) = Just $  upperBound <$>  i
           unref (HeadToken ) = Nothing
       v <- liftIO$ paginate inf m k offset j ( join $ fmap unref i) st
-      liftIO $ print v
       return v
 
 

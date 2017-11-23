@@ -109,7 +109,7 @@ genAttr inf k =
          RecordPrim (s,t) ->
            let table =  lookTable sch t
                sch = fromMaybe inf (HM.lookup s (depschema inf))
-           in IT k $ kfold ty $  TB1 $ unTlabel' $ tableView (tableMap sch) table
+           in IT k $ kfold ty $  TB1 $ tableView (tableMap sch) table
   where
     kfold l = F.foldl' (.) id (kgen <$> l)
     kgen :: KTypePrim -> FTB a -> FTB a
@@ -1498,7 +1498,7 @@ viewer inf table envK = mdo
 
   tdswhereb <- ui $ stepper (snd iniQ) (fmap snd tdswhere)
   let
-      tview = unTlabel' . unTB1  $tableSt2
+      tview = unTB1  $tableSt2
   element itemList # set items ( pure . renderTableNoHeaderSort2   (return $ getElement sortList) inf (tableNonRef' tview) $   fmap (fmap (filterAttr (\i -> not $ elem (_relOrigin i )(concat $ F.toList . fst <$> envK )).tableNonRef')) . (\(slist ,(coun,tb))-> (fmap fst slist,tb))  <$>   tdswhereb )
 
   UI.div # set children [getElement offset, itemList]
