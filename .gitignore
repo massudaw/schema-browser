@@ -11,5 +11,10 @@ dist
 *.prof
 .cabal-sandbox
 .stack-work
+static
+sql
+threepenny-layer*
+dump
+dns
 
 

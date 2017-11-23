@@ -18,15 +18,12 @@ module Query
   ,alterKeyType
   ,searchGist
   ,rawFullName
-  ,unComp
-  ,isTableRec
+  ,isTableRec'
   ,isKDelayed
   ,isKOptional
   ,lookGist
   ,checkGist
-  ,tlabel
   ,tableView
-  ,unTlabel'
   ,backFKRef
   ,backFKRefType
   ,backPathRef
@@ -34,12 +31,10 @@ module Query
   ,isReflexive
   ,isInlineRel
   ,attrValueName
-  ,relabelT
   ,showTable
   ,isAccessRel
   ,isArrayRel
   ,isLeftRel
-  ,relabelT'
   ,mAny
   ,allKVRec'
   ,allRec'
@@ -57,7 +52,6 @@ import qualified Data.Vector as V
 import qualified NonEmpty as Non
 import Data.Time.LocalTime
 import Data.Unique
-import Data.Functor.Identity
 import Data.Ord
 import qualified Data.Poset as P
 import qualified Data.Foldable as F
@@ -139,7 +133,7 @@ showTable t  = rawSchema t <> "." <> rawName t
 
 
 
-attrValueName :: (Ord a,Ord k, Show k ,Show a) => TB Identity (FKey k) a -> Text
+attrValueName :: (Ord a,Ord k, Show k ,Show a) => TB (FKey k) a -> Text
 attrValueName (Attr i _ )= keyValue i
 attrValueName (IT i  _) = keyValue i
 attrValueName i = errorWithStackTrace $ " no attr value instance " <> show i
@@ -166,21 +160,17 @@ allKVRec'  t@(m, e)=  concat $ fmap snd $ L.sortBy (comparing (\i -> maximum $ (
         go  (Attr _ a) = [a]
 
 
-tableAttrs r =   do
-   ((rawPK r)) <> (rawDescription r)  <>(S.toList (rawAttrs r))
+tableAttrs r =
+  L.nub $ ((rawPK r)) <> (rawDescription r)  <>(S.toList (rawAttrs r))
 
 
 
-labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (TB3Data (Labeled Text)  Key  () )
+labelTable :: Table -> State ((Int, Map Int Table), (Int, Map Int Key)) (TBData  Key  () )
 labelTable i = do
-   t <- tname i
-   name <- Tra.traverse (\k-> (S.singleton (Inline k),) <$> kname t k ) (tableAttrs i)
-   return ( (tableMeta i,) $ Compose $ Labeled (label t) $ KV $ M.fromList $ fmap Compose <$> name)
+   name <- Tra.traverse (\k-> (S.singleton (Inline k),) <$> kname  k ) (L.sortBy (comparing keyPosition) $ tableAttrs i)
+   return ( (tableMeta i,) $  KV $ M.fromList $ name)
 
-unComp :: (Show (g k a) ,F.Foldable f ) => Compose f g k a -> g k a
-unComp = head . F.toList . getCompose
 
-isTableRec tb = isTableRec'  (unTB1 tb )
 isTableRec' tb = not $ L.null $ _kvrecrels (fst  tb )
 
 
@@ -246,7 +236,7 @@ allRec'
   :: TableMap
      -> Table
      -> TBData Key ()
-allRec' i t = unTlabel' $ tableView  i t
+allRec' i t = tableView  i t
 
 tableView  invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   when (L.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r ) <> " the pk is null")
@@ -265,7 +255,6 @@ tableViewNR invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
 
 
 
-tlabel t = (label $ getCompose $ snd (unTB1 t))
 
 pathToRel (Path ifk (FKInlineTable _ ) ) = fmap Inline $ F.toList ifk
 pathToRel (Path ifk (FunctionField _ _ _ ) ) = fmap Inline $ F.toList ifk
@@ -274,40 +263,33 @@ pathToRel (Path ifk (FKJoinTable ks _ ) ) = ks
 dumbKey n = Key n  Nothing [] 0 Nothing (unsafePerformIO newUnique) (Primitive [] (AtomicPrim (PInt 0) ))
 
 findRefIT ifk = justError ("cant find ref" <> show ifk). M.lookup (S.map Inline ifk )
-findRefFK fks ksbn = kvlist $ fmap (\i -> Compose . justError ("cant find " ). M.lookup (S.singleton (Inline i)) $ ksbn ) fks
+findRefFK fks ksbn = kvlist $ fmap (\i -> justError ("cant find " ). M.lookup (S.singleton (Inline i)) $ ksbn ) fks
 
 recursePath
   :: KVMetadata Key
   -> Bool
   ->  RecState Key
-     -> [(Set (Rel Key), Labeled Text (TB (Labeled Text) Key ()))]
-     -> M.Map (Set (Rel Key)) (Labeled Text (TB (Labeled Text) Key ()))
+     -> [(Set (Rel Key), TB Key ())]
+     -> M.Map (Set (Rel Key)) (TB Key ())
      -> TableMap
      -> Path (Set Key) SqlOperation
      -> State
           ((Int, Map Int Table), (Int, Map Int Key))
-          (Compose (Labeled Text) (TB (Labeled Text)) Key ())
+          (TB Key ())
+-- recursePath _ _ _ _ _ _ o | traceShow o False = undefined
 recursePath m isLeft isRec vacc ksbn invSchema p@(Path ifk jo@(FKInlineTable (s,t) ) )
     | anyArrayRel ks  =   do
           let
               ref = findRefIT ifk ksbn
           ksn <-  labelTable  nextT
           tb <- fun ksn
-          tas <- tname nextT
-          return $  Compose $ Labeled ((label $ ref)) $ IT (head (S.toList ifk))   (mapOpt $ mapArray $ TB1 tb )
+          return $  IT (head (S.toList ifk))   (mapOpt $ mapArray $ TB1 tb )
     | otherwise = do
           let
-            ref = findRefIT ifk  ksbn
+            ref = findRefIT ifk ksbn
           ksn <-  labelTable  nextT
           tb <- fun ksn
-          lab <- if isTableRec' tb
-            then do
-              tas <- tname nextT
-              let knas = dumbKey (rawName nextT)
-              kas <- kname tas  knas
-              return $ Labeled (label kas)
-            else return  (Labeled (label ref) )
-          return $ ( Compose $ lab $ IT  (head (S.toList ifk)) (mapOpt $ TB1 tb)   )
+          return $ ( IT  (head (S.toList ifk)) (mapOpt $ TB1 tb)   )
     where
         ks = pathToRel p
         nextLeft =  isLeft || anyLeftRel ks
@@ -320,21 +302,12 @@ recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn
     | anyArrayRel ks =   do
           ksn <- labelTable nextT
           tb <-fun ksn
-          tas <- tname nextT
           let knas = dumbKey (rawName nextT)
-          kas <- kname tas  knas
-          return $ Compose $ Labeled (label $ kas) (FKT (findRefs  ksbn)  ks  (mapOpt $ mapArray $ TB1 tb  ))
+          return $ (FKT (findRefs  ksbn)  ks  (mapOpt $ mapArray $ TB1 tb  ))
     | otherwise = do
           ksn <- labelTable nextT
-          tb@(m,Compose r)  <-fun ksn
-          lab <- if not  . L.null $ isRec
-            then do
-              tas <- tname nextT
-              let knas = dumbKey (rawName nextT)
-              kas <- kname tas  knas
-              return $ Labeled (label kas)
-            else return  Unlabeled
-          return $ Compose $ lab $ FKT ( findRefs ksbn )  ks (mapOpt $ TB1 tb)
+          tb@(m,r)  <- fun ksn
+          return  $ FKT ( findRefs ksbn )  ks (mapOpt $ TB1 tb)
   where
         nextT = (\(Just i)-> i) (join $ HM.lookup tn <$> (HM.lookup sn invSchema))
         findRefs = findRefFK  (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks))
@@ -347,20 +320,14 @@ recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn
 recursePath m isLeft isRec vacc ksbn invSchema jo@(Path ifk (RecJoin l f) )
   = recursePath m isLeft (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec  ) vacc ksbn invSchema (Path ifk f )
 recursePath m isLeft isRec vacc ksbn invSchema jo@(Path ifk (FunctionField k l f) )
-  = return $ Compose $ Labeled (label ref) (Fun k  (l,a) (TB1 () ))
+  = return $ (Fun k  (l,a) (TB1 () ))
     where
       a = f
       ref = (\i -> justError ("cant find " ).  M.lookup (S.singleton (Inline i)) $ ksbn ) $ head (S.toList ifk )
 
-recurseTB :: TableMap -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TB3Data (Labeled Text) Key () -> StateT ((Int, Map Int Table), (Int, Map Int Key)) Identity (TB3Data (Labeled Text) Key ())
+recurseTB :: TableMap -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TBData Key () -> State ((Int, Map Int Table), (Int, Map Int Key)) (TBData Key ())
 recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else m  ,) <$>
-    (\kv -> case kv of
-      (Compose (Labeled l kv )) -> do
-         i <- fun kv
-         return (Compose (Labeled l i));
-      (Compose (Unlabeled kv)) -> do
-         i<- fun kv
-         return (Compose (Unlabeled i))) kv
+  fun kv
     where
       fun =  (\kv -> do
           let
@@ -368,20 +335,20 @@ recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else
               fkSet:: S.Set Key
               fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction .pathRel) $ S.toList fks'
               funSet = S.unions $ fmap (\(Path i _ )-> i) $ filter (isFunction.pathRel) (S.toList fks')
-              nonFKAttrs :: [(S.Set (Rel Key) ,TBLabel  ())]
               nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) (fkSet <> funSet)) items
-          pt <- foldl (\acc  fk ->  do
+              fklist = P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) (F.toList fks')
+          pt <- F.foldl (\acc  fk ->  do
                   vacc <- acc
                   let relFk =pathRelRel fk
                       lastItem =   L.filter cond isRec
                       cond (_,l) = mAny (\l-> L.length l == 1  && ((== relFk ). S.fromList. last $ l)) l
                   if L.length lastItem < 2
                   then   do
-                    i <- fmap (relFk,) . recursePath m nextLeft ( fmap (fmap (L.drop 1 ))  <$> L.filter (\(_,i) -> mAny (\i -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) i ) (isRec <> fmap (\i -> (i,i) ) (_kvrecrels m))) vacc ( (fmap getCompose items )) invSchema $ fk
-                    return (fmap getCompose i:vacc)
+                    i <- fmap (relFk,) . recursePath m nextLeft ( fmap (fmap (L.drop 1 ))  <$> L.filter (\(_,i) -> mAny (\i -> (S.fromList .concat . maybeToList . safeHead $ i) == relFk ) i ) (isRec <> fmap (\i -> (i,i) ) (_kvrecrels m))) vacc ( (items )) invSchema $ fk
+                    return (i:vacc)
                   else return vacc
-                  ) (return []) $ P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) (F.toList $ fks' )
-          return (   KV $ M.fromList $ nonFKAttrs <> (fmap (fmap Compose ) pt)))
+                  ) (return [])  fklist
+          return (   KV $ M.fromList $ nonFKAttrs <> (pt)))
 
 mAny f (MutRec i) = L.any f i
 
@@ -430,22 +397,22 @@ liftASch _ _ _ i = errorWithStackTrace (show i)
 
 
 
-eitherDescPK :: Show a => TB3Data Identity Key a -> M.Map (S.Set (Rel Key )) (Column Key a)
+eitherDescPK :: Show a => TB3Data Key a -> M.Map (S.Set (Rel Key )) (Column Key a)
 eitherDescPK i@(kv, _)
   | not ( null ( _kvdesc kv) ) =  if L.null (F.toList desc) then  pk else fromMaybe pk desc
   | otherwise = pk
-  where desc = (\i -> if F.null i then Nothing else Just i). fmap (justError "") . M.filter (\i -> isJust i) $  fmap unLeftItens $  unTB <$> (_kvvalues $ unTB $ snd $ tbDesc i)
-        pk = unTB <$> (_kvvalues $ unTB $ snd $tbPK i)
+  where desc = (\i -> if F.null i then Nothing else Just i). fmap (justError "") . M.filter (\i -> isJust i) $  fmap unLeftItens $  (_kvvalues $ snd $ tbDesc i)
+        pk = (_kvvalues $ snd $tbPK i)
 
 
-tbDesc :: (Functor f,Ord k)=>TB3Data f k a ->  TB3Data f k a
+tbDesc :: (Ord k)=>TB3Data  k a ->  TB3Data  k a
 tbDesc  =  tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvdesc kv ) ))
 
-tbPK :: (Functor f,Ord k)=>TB3Data f k a -> TB3Data f k a
+tbPK :: (Ord k)=>TB3Data  k a -> TB3Data  k a
 tbPK = tbFilter'  (\kv k -> (S.isSubsetOf (S.map _relOrigin k) (S.fromList $ _kvpk kv ) ))
 
-tbFilter' :: (Functor f,Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3Data f k a ->  TB3Data f k a
-tbFilter' pred (kv,item) =  (kv,mapComp (\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item)
+tbFilter' :: (Ord k) =>  ( KVMetadata k -> Set (Rel k) -> Bool) -> TB3Data  k a ->  TB3Data  k a
+tbFilter' pred (kv,item) =  (kv,(\(KV item)->  KV $ M.filterWithKey (\k _ -> pred kv k ) $ item) item)
 -- Combinators
 
 
@@ -453,7 +420,7 @@ tbFilter' pred (kv,item) =  (kv,mapComp (\(KV item)->  KV $ M.filterWithKey (\k 
 
 mkKey i = do
   (c,m) <- snd <$> get
-  let next = (c+1,M.insert (c+1) i m)
+  let next = traceShow (i,c+1) (c+1,M.insert (c+1) i m)
   modify (\(j,_) -> (j,next))
   return (c+1,i)
 
@@ -463,38 +430,16 @@ mkTable i = do
   modify (\(_,j) -> (next,j))
   return (c+1)
 
-kname :: Labeled Text Table -> Key -> QueryRef (Labeled Text (TB (Labeled Text) Key () ))
-kname t i = do
+kname :: Key -> QueryRef (TB Key () )
+kname i = do
   n <- mkKey i
-  return $ (Labeled ("k" <> (T.pack $  show $ fst n)) (Attr i (TB1 ())) )
-
-
-
-
-tname :: Table -> QueryRef (Labeled Text Table)
-tname i = do
-  n <- mkTable i
-  return $ Labeled ("t" <> (T.pack $  show n)) i
+  return $ (Attr i (TB1 ()))
 
 
 
 alterKeyType f  = Le.over keyTypes f
 
 
-unTlabel' ((m,kv) )  = (m,) $ overLabel (\(KV kv) -> KV $ fmap (Compose . Identity .unlabel.getCompose ) $   kv) kv
-unTlabel  = fmap unTlabel'
-
-unlabel (Labeled l (IT tn t) ) = (IT tn (unTlabel t ))
-unlabel (Unlabeled (IT tn t) ) = (IT tn (unTlabel t ))
-unlabel (Labeled l (FKT i fkrel t) ) = (FKT (mapKV relabel i) fkrel (unTlabel  t ))
-unlabel (Unlabeled (FKT i fkrel t) ) = (FKT (mapKV relabel i) fkrel (unTlabel t))
-unlabel (Labeled l (Attr k i )) = Attr k i
-unlabel (Labeled l (Fun k i m )) = Fun k i m
-
-relabel = Compose . Identity . unlabel.getCompose
-
--- alterComp :: (f k a -> g d b ) -> Compose (Labeled Text) f  k a -> Compose (f Identityg d b
-overLabel f = Compose .  Identity . f . labelValue  .getCompose
 
 
 
@@ -507,16 +452,12 @@ sup' = unFinite . Interval.upperBound
 
 data RelSort k = RelSort [Rel k] deriving (Eq,Ord)
 
-flipSort P.EQ = P.EQ
-flipSort P.GT = P.LT
-flipSort P.LT = P.GT
-
 -- To Topologically sort the elements we compare  both inputs and outputs for intersection if one matches we flip the
 instance  (Ord k,Show k,P.Poset k) => P.Poset (RelSort k ) where
   compare (RelSort i ) (RelSort j)
-    = case (comp (norm $  _relOutputs <$> i) (norm  $ _relInputs <$> j) , flipSort (comp (norm  $ _relOutputs <$> j) (norm  $  _relInputs <$> i)) ,P.compare (inp i) (inp j),P.compare (out i ) (out j) ) of
+    = case (comp (out i) (inp j) , (comp (out j) (inp i)) ,P.compare (inp i) (inp j),P.compare (out i ) (out j) ) of
             -- Reverse order
-            (_ , P.GT,_,_) -> P.GT
+            (_ , P.LT,_,_) -> if S.size (out j) == L.length j then P.GT else P.EQ
             -- Right order
             (P.LT , _ ,_,_) -> P.LT
             -- No intersection  between elements sort by inputset
@@ -527,7 +468,6 @@ instance  (Ord k,Show k,P.Poset k) => P.Poset (RelSort k ) where
       inp j= norm $ _relInputs <$> j
       out j = norm $ _relOutputs <$> j
       norm  = S.fromList . concat . catMaybes
-      -- comp a b  | traceShow (i,j ,a,b,P.compare a b) False = undefined
       comp i j  | S.null (S.intersection i j ) = P.EQ
       comp i j  | S.empty == i = P.EQ
       comp i j  | S.empty == j  = P.EQ
@@ -568,15 +508,7 @@ instance P.Poset (FKey i)where
                       LT -> P.LT
                       GT -> P.GT
 
-relabeling :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB f k a -> TB p k a
-relabeling p l (Attr k i ) = (Attr k i)
-relabeling p l (IT i tb ) = IT i (relabelT p l tb)
 
-relabelT :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB3 f k a -> TB3 p k a
-relabelT p l =  fmap (relabelT' p l)
-
-relabelT' :: (forall a . f a -> a ) -> (forall a . a -> p a ) -> TB3Data f k a -> TB3Data p k a
-relabelT' p l (m ,Compose j) =  (m,Compose $ l (KV $ fmap (Compose.  l . relabeling p l . p . getCompose ) (_kvvalues $ p j)))
 
 backPathRef :: Path (Set Key) SqlOperation -> TBData Key Showable ->  [Column Key Showable]
 backPathRef (Path k (FKJoinTable rel t)) = justError ("no back path ref "  ++ show (rel ,k)). backFKRef (M.fromList $ fmap (\i -> (_relTarget i ,_relOrigin i)) rel) (F.toList k)
@@ -587,9 +519,9 @@ backFKRefType
      -> M.Map Key (CorePrim)
      -> f Key
      -> TBData  Key a
-     -> Maybe (f (TB f1 Key a))
+     -> Maybe (f (TB Key a))
 -- backFKRef i j  | traceShow (i ,j) False =  undefined
-backFKRefType relTable relType ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . snd
+backFKRefType relTable relType ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . snd
   where
     reorderPK l = fmap (\i  -> L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
     lookFKsel (ko,v)=  (\kn tkn -> (kn ,transformKey (keyType ko ) (Primitive [] tkn) v)) <$> knm <*> tknm
@@ -603,9 +535,9 @@ backFKRef
      M.Map Key Key
      -> f Key
      -> TBData  Key a
-     -> Maybe (f (TB f1 Key a))
+     -> Maybe (f (TB Key a))
 -- backFKRef i j  | traceShow (i ,j) False =  undefined
-backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . unTB . snd
+backFKRef relTable ifk = fmap (fmap (uncurry Attr)) . allMaybes . reorderPK .  concat . fmap aattr . F.toList .  _kvvalues . snd
   where
     reorderPK l = fmap (\i  -> L.find ((== i).fst) (catMaybes (fmap lookFKsel l) ) )  ifk
     lookFKsel (ko,v)=  (\kn -> (kn ,transformKey (keyType ko ) (keyType kn) v)) <$> knm
@@ -656,7 +588,7 @@ joinRel tb ref table
       !arr = justError ("no array"<> show ref )$ L.find (isArray. snd ) ref
    in ArrayTB1 $ Non.fromList $  fmap (\i -> joinRel tb ((fst arr,i): L.filter (not . isArray . snd)  ref) table ) (fmap (\i -> justError ("cant index  " <> show (i,ref)). (`Non.atMay` i) . unArray . snd $ arr ) [0..(Non.length (unArray  $ snd arr )- 1)])
   | otherwise
-  = maybe (TB1 $ tblistM tb (fmap _tb $  fmap (\(i,j) -> Attr  (_relTarget i) j )  ref )) TB1 tbel
+  = maybe (TB1 $ tblistM tb (fmap (\(i,j) -> Attr  (_relTarget i) j )  ref )) TB1 tbel
       where
             isLeft (LeftTB1 i) = True
             isLeft i = False

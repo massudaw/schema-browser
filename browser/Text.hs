@@ -43,7 +43,7 @@ renderRowPatch :: Show a => TBIdx a Showable -> [(Int,String)]
 renderRowPatch (_,_,i) =  concat $ renderPatch  <$> i
 
 renderTable :: Show a => TBData a Showable ->  [(Int,String)]
-renderTable i =  concat $ renderAttr . unTB <$> F.toList (unKV (snd i))
+renderTable i =  concat $ renderAttr  <$> F.toList (unKV (snd i))
 
 renderRel (Rel i op j) = show i ++ "  " ++ renderBinary op ++ " " ++ show j
 
@@ -58,10 +58,10 @@ renderPatch (PInline k v ) = [(0,show k ++ " => ")] ++ fmap (first (+1)) (render
 
 renderPrimPatch i = [(0,renderPrim  i)]
 
-renderAttr :: Show a => TB Identity a Showable ->  [(Int,String)]
+renderAttr :: Show a => TB a Showable ->  [(Int,String)]
 renderAttr (FKT k rel v )
   = [(0,L.intercalate " AND " (fmap renderRel rel))]
-  ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderAttr . unTB <$> F.toList (_kvvalues k))  ++ "] => ")] ++ fmap (first (+1)) (renderFTB renderTable v)
+  ++ [(0,"[" ++ L.intercalate "," (concat $ fmap snd .renderAttr <$> F.toList (_kvvalues k))  ++ "] => ")] ++ fmap (first (+1)) (renderFTB renderTable v)
 
 renderAttr (Attr k v ) = maybe [] (\i -> [(0,show k ++ " => " ++ ident i)]) (nonEmpty $ renderFTB renderPrimPatch v)
 renderAttr (IT k v ) = maybe [] (\i -> [(0,show k ++ " => ")] ++ fmap (first (+1)) i  ) $  nonEmpty (renderFTB renderTable v)

@@ -40,7 +40,7 @@ import qualified Data.Text as T
 
 newtype Row = Row (TBData Key Showable)
 instance A.ToJSON Row  where
-  toJSON (Row (_,kv))  = A.toJSON $ M.mapKeys (T.intercalate "," . L.map (keyValue ._relOrigin) . F.toList ) (fmap unTB m)
+  toJSON (Row (_,kv))  = A.toJSON $ M.mapKeys (T.intercalate "," . L.map (keyValue ._relOrigin) . F.toList ) (m)
     where
       m = unKV kv
 

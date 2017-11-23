@@ -50,7 +50,7 @@ getCaptchaCpf cookie = Sess.withSessionControl (Just $ tIso cookieJar $ cookie )
 
 
 convertCPF out = Just $ (tblist . pure . attr "owner_name" . LeftTB1 .Just . TB1 . SText . TL.pack  $ out )
-  where attr k =  _tb . Attr k
+  where attr k =  Attr k
 
 getCpfForm cookie captcha nascimento cgc_cpf = Sess.withSessionControl (Just $ tIso cookieJar $cookie )HTTP.defaultManagerSettings$ \ session -> do
           print cpfpost
@@ -60,7 +60,7 @@ getCpfForm cookie captcha nascimento cgc_cpf = Sess.withSessionControl (Just $ t
 
 boolean = SBoolean
 unboolean (SBoolean i ) = i
-attr i j = KV . mapFromTBList $ [_tb $ Attr i $ TB1 j]
+attr i j = KV . mapFromTBList $ [Attr i $ TB1 j]
 binary  = SBinary
 unbinary (SBinary i ) = i
 timestamp = STime . STimestamp .utcToLocalTime utc
@@ -78,7 +78,7 @@ instance Category TIso where
   TIso i j  .  TIso a b = TIso (i.a ) (b . j)
 
 
-unattr i (KV ix) = justError ("no attr " ++ show i ) $ unAtt . unTB <$> M.lookup (S.singleton $ Inline i)  (ix )
+unattr i (KV ix) = justError ("no attr " ++ show i ) $ unAtt <$> M.lookup (S.singleton $ Inline i)  (ix )
   where unAtt (Attr i (TB1 v)) = v
 
 cookieIso = TIso decodeCookie encodeCookie
@@ -121,8 +121,8 @@ initSess =  return $ unTiso cookieJar (HTTP.createCookieJar  [])
 cookieJar :: TIso HTTP.CookieJar (Maybe (FTB (TBData Text Showable)))
 cookieJar
   = TIso
-  (fmap ArrayTB1 . Non.nonEmpty . fmap (TB1 . (kvempty ,) . _tb . encodeCookie) . HTTP.destroyCookieJar)
-  (HTTP.createCookieJar . maybe  [] (Non.toList . fmap ( decodeCookie . unTB . snd .unTB1) . unArray ))
+  (fmap ArrayTB1 . Non.nonEmpty . fmap (TB1 . (kvempty ,) . encodeCookie) . HTTP.destroyCookieJar)
+  (HTTP.createCookieJar . maybe  [] (Non.toList . fmap ( decodeCookie . snd .unTB1) . unArray ))
 
 getCaptchaCnpj  cookie =Sess.withSessionControl (Just $ tIso cookieJar $cookie )HTTP.defaultManagerSettings$ \ session -> do
        print cnpjhome
@@ -134,10 +134,10 @@ getCaptchaCnpj  cookie =Sess.withSessionControl (Just $ tIso cookieJar $cookie )
 
 convertHtml out =
         let own = attr
-            attr i = Compose . Identity .  Attr  i
+            attr i = Attr  i
             cna  =  attr
             idx  = LeftTB1 . fmap (TB1 . SText . TL.pack . head) . flip M.lookup out
-            fk rel i  = Compose . Identity . FKT (kvlist i )rel
+            fk rel i  = FKT (kvlist i )rel
             afk rel i  = fk rel i  . LeftTB1 . Just . ArrayTB1 . Non.fromList
             tb attr = TB1 $ tblist attr
             (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (TB1 . SText .TL.filter (not . flip L.elem ("-." :: String)) . fst) t ,  justError " no description" $  TB1 . SText .  TL.strip .  TL.drop 3. snd <$>  t)

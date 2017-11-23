@@ -268,7 +268,7 @@ authMap smvar sargs (user,pass) schemaN =
               let
                   td :: Tidings (OAuth2Tokens)
                   td = (\o -> let
-                            token = justError "" . fmap (toOAuth . unTB1 . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $ head o )
+                            token = justError "" . fmap (toOAuth . unTB1 . _fkttable  ) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $ head o )
                             in token) . G.toList <$> collectionTid dbmeta
                   toOAuth v = case transToken v of
                                 Just a -> a
@@ -432,15 +432,14 @@ testTablePersist s t w = do
 
 
 
-testTable s t w = do
+testTable s t  = do
   args <- getArgs
   let db = argsToState args
   smvar <- createVar
   let
     amap = authMap smvar db ("postgres", "queijo")
   (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
-  ((_,(_,i)),_) <- runDynamic $ transactionNoLog inf $ selectFrom t Nothing Nothing [] (WherePredicate $ lookAccess inf t <$> w)
-  print i
+  ((_,(_,i)),_) <- runDynamic $ transactionNoLog inf $ selectFrom t Nothing Nothing [] mempty
 
   return ()
 

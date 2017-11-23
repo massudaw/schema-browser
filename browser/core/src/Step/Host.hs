@@ -28,27 +28,26 @@ import qualified Data.Traversable as T
 import Data.Traversable (traverse)
 
 
-unF i = L.head (F.toList (getCompose i))
 
-findFK :: (Show k ,Ord k ,Foldable f ,Show a) => [k] -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
-findFK  l v =  fmap snd $ L.find (\(i,v) -> isFK v && S.map _relOrigin i == (S.fromList l))  $ M.toList $ _kvvalues $ unF (snd v)
+findFK :: (Show k ,Ord k ,Show a) => [k] -> (TB3Data  k a) -> Maybe (TB k a)
+findFK  l v =  fmap snd $ L.find (\(i,v) -> isFK v && S.map _relOrigin i == (S.fromList l))  $ M.toList $ _kvvalues $ (snd v)
   where isRel (Rel _ _ _ ) = True
         isRel _ = False
-        isFK i = case unF i of
+        isFK i = case i of
                    FKT _ _ _ -> True
                    IT _  _  -> True
                    i -> False
 
-findAttr :: (Show k ,Ord k ,Foldable f ,Show a) => k -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
-findAttr l v =  M.lookup (S.singleton . Inline $ l) (  _kvvalues $ unF (snd v))  <|> findFun l v
+findAttr :: (Show k ,Ord k ,Show a) => k -> (TB3Data k a) -> Maybe (TB  k a)
+findAttr l v =  M.lookup (S.singleton . Inline $ l) (  _kvvalues $ (snd v))  <|> findFun l v
 
-findFun :: (Show k ,Ord k ,Foldable f ,Show a) => k -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
-findFun l v = fmap snd . L.find (((pure . Inline $ l) == ).fmap mapFunctions . S.toList .fst) $ M.toList $ _kvvalues $ unF (snd v)
+findFun :: (Show k ,Ord k ,Show a) => k -> (TB3Data  k a) -> Maybe (TB  k a)
+findFun l v = fmap snd . L.find (((pure . Inline $ l) == ).fmap mapFunctions . S.toList .fst) $ M.toList $ _kvvalues $ (snd v)
   where mapFunctions (RelFun i _ ) = Inline i
         mapFunctions j = j
 
-findFKAttr :: (Show k ,Ord k ,Foldable f ,Show a) => [k] -> (TB3Data f k a) -> Maybe (Compose f (TB f ) k a)
-findFKAttr l v =   case fmap  (fmap unF )$ L.find (\(k,v) -> not $ L.null $ L.intersect l (S.toList k) ) $ M.toList $ M.mapKeys (S.map ( _relOrigin)) $ _kvvalues $ unF (snd v) of
+findFKAttr :: (Show k ,Ord k ,Show a) => [k] -> (TB3Data  k a) -> Maybe (TB  k a)
+findFKAttr l v =   case L.find (\(k,v) -> not $ L.null $ L.intersect l (S.toList k) ) $ M.toList $ M.mapKeys (S.map ( _relOrigin)) $ _kvvalues $ (snd v) of
       Just (k,(FKT a _ _ )) ->   L.find (\i -> not $ L.null $ L.intersect l $ fmap (_relOrigin) $ keyattr $ i ) (F.toList $ _kvvalues $a)
       Just (k ,i) -> errorWithStackTrace (show l)
       Nothing -> Nothing
@@ -63,14 +62,14 @@ replace ix i (Point p)
 replace ix i v = v
 
 indexField :: (Ord k ,Show a, Show k) => Access k -> TBData k a-> Maybe (Column k a)
-indexField p@(IProd b l) v = case unTB <$> findAttr  l  v of
-                               Nothing -> case unTB <$>  findFK [l] (v) of
-                                  Just (FKT ref _ _) ->  unTB <$> ((\l ->  L.find ((==[l]). fmap  _relOrigin. keyattr ) $ unkvlist ref ) $ l)
-                                  Nothing -> unTB <$> findFKAttr [l] v
+indexField p@(IProd b l) v = case findAttr  l  v of
+                               Nothing -> case findFK [l] (v) of
+                                  Just (FKT ref _ _) ->  ((\l ->  L.find ((==[l]). fmap  _relOrigin. keyattr ) $ unkvlist ref ) $ l)
+                                  Nothing -> findFKAttr [l] v
                                i -> i
 
 
-indexField n@(Nested ix nt ) v = unTB <$> findFK (iprodRef <$> ix) v
+indexField n@(Nested ix nt ) v = findFK (iprodRef <$> ix) v
 indexField i _= errorWithStackTrace (show i)
 
 
@@ -83,9 +82,9 @@ indexFieldRecU p@(Many [One l]) v = indexFieldRec l v
 indexFieldRecU (One i ) v = indexFieldRec i v
 
 indexFieldRec :: Access Key-> TBData Key Showable -> Maybe (FTB Showable)
-indexFieldRec p@(IProd b l) v = _tbattr . unTB <$> findAttr  l  v
-indexFieldRec n@(Nested l (Many[One nt]) ) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable.  unTB <$> findFK (iprodRef <$> l) v
-indexFieldRec n@(Nested l nt) v = join $ fmap joinFTB . traverse (indexFieldRecU nt)  . _fkttable.  unTB <$> findFK (iprodRef <$> l) v
+indexFieldRec p@(IProd b l) v = _tbattr <$> findAttr  l  v
+indexFieldRec n@(Nested l (Many[One nt]) ) v = join $ fmap joinFTB . traverse (indexFieldRec nt)  . _fkttable  <$> findFK (iprodRef <$> l) v
+indexFieldRec n@(Nested l nt) v = join $ fmap joinFTB . traverse (indexFieldRecU nt)  . _fkttable  <$> findFK (iprodRef <$> l) v
 indexFieldRec n v = errorWithStackTrace (show (n,v))
 
 genPredicateU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ (\(One o) -> genPredicate i o) <$> l)

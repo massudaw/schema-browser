@@ -1,9 +1,7 @@
 {-# LANGUAGE FlexibleInstances,FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,TemplateHaskell,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,ExistentialQuantification #-}
 module RuntimeTypes where
 
-
 import Control.Concurrent
-
 import Types
 import Types.Index as G
 import Types.Patch
@@ -132,7 +130,7 @@ data BrowserState
   ,rowpk :: Maybe (Non.NonEmpty (Text,Text))
   }
 
-type TBF f k v = (KVMetadata k ,Compose  f  (KV (Compose f (TB f))) k v)
+type TBF  k v = (KVMetadata k ,KV k v)
 
 
 tableMap :: InformationSchema -> HM.HashMap Text (HM.HashMap Text Table)
@@ -187,11 +185,11 @@ type SelTBConstraint = [([Column CoreKey ()],R.Tidings TBConstraint)]
 
 type PluginRef a = [(Union (Access Key), R.Tidings (Maybe (Index a)))]
 
-instance (NFData k, NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex  a ) (TBData k a)) where
+instance (NFData k, NFData a,G.Predicates (G.TBIndex a) , PatchConstr k a) => Patch (G.GiST (G.TBIndex  a ) (TBData k a)) where
   type Index (G.GiST (G.TBIndex  a ) (TBData k a)  ) = RowPatch k (Index a)
   applyIfChange = applyGiSTChange
 
-instance (NFData k, NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a) => Patch (TableRep k a) where
+instance (NFData k, NFData a,G.Predicates (G.TBIndex a) , PatchConstr k a) => Patch (TableRep k a) where
   type Index (TableRep k a) = RowPatch k (Index a)
   applyIfChange = applyTableRep
 
@@ -219,6 +217,7 @@ applyGiSTChange l (PatchRow patom@(m, ipa, p)) =
       return $ G.insert (el, G.tbpred el) G.indexParam l
   where
     i = fmap create ipa
+
 applyGiSTChange l (CreateRow elp) =
   case G.lookup i l of
     Just v ->
@@ -348,7 +347,7 @@ data SchemaEditor
   , patchEd :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , insertEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
   , deleteEd :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-  , listEd :: TBF (Labeled Text) Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
+  , listEd :: TBData  Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   , getEd :: Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   , typeTransform :: PGKey -> CoreKey
   , joinListEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
@@ -427,7 +426,7 @@ typeCheckPrim i j  = failure ["cant match " ++ show i ++ " with " ++ show j ]
 typeCheckTB (Fun k ref i) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) (keyType k ) i
 typeCheckTB (Attr k i ) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) (keyType k ) i
 typeCheckTB (IT k i ) = typeCheckValue (\(RecordPrim l) -> typeCheckTable l ) (keyType k)  i
-typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB . unTB <$>  _kvvalues k) <*> typeCheckValue (\(RecordPrim l) -> typeCheckTable l )  ktype i
+typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB <$>  _kvvalues k) <*> typeCheckValue (\(RecordPrim l) -> typeCheckTable l )  ktype i
   where -- FKJoinTable  rel next  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS table)) path
         -- path = L.find (\(Path i _ )-> i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  table)
         ktypeRel = mergeFKRef (keyType ._relOrigin <$> rel2)
@@ -437,7 +436,7 @@ typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typ
 
 typeCheckTable ::  (Text,Text) -> TBData (FKey (KType (Prim KPrim (Text,Text)))) Showable -> Errors [String] ()
 typeCheckTable c  (t,l)
-  =  F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB . unTB <$> _kvvalues (unTB l))
+  =  F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB <$> _kvvalues (l))
 
 type LookupKey k = (InformationSchema -> Text -> k -> Key, Key -> k)
 lookupKeyName = (lookKey ,keyValue)
@@ -445,7 +444,7 @@ lookupKeyPosition= (lookKeyPosition , keyPosition)
 
 
 liftTableF ::  (Show k ,Ord k) => LookupKey k -> InformationSchema ->  Text -> TBData k a -> TBData Key a
-liftTableF f inf  tname (_,v)   = (tableMeta ta,) $ mapComp (\(KV i) -> KV $ mapFromTBList $ mapComp (liftFieldF  f inf  tname) <$> F.toList i) v
+liftTableF f inf  tname (_,v)   = (tableMeta ta, (\(KV i) -> KV $ mapFromTBList $ (liftFieldF  f inf  tname) <$> F.toList i) v)
   where
     ta = lookTable inf tname
 
@@ -458,8 +457,8 @@ liftTable' = liftTableF lookupKeyName
 liftKeys
   :: InformationSchema
      -> Text
-     -> FTB1 Identity Text a
-     -> FTB1 Identity Key a
+     -> FTB1 Text a
+     -> FTB1 Key a
 liftKeys inf tname = fmap (liftTable' inf tname)
 
 findRefTableKey inf ta rel =  tname2
@@ -472,7 +471,7 @@ findRefTable inf tname rel =  tname2
 
 liftFieldF :: (Show k ,Ord k) => LookupKey k -> InformationSchema -> Text -> Column k a -> Column Key a
 liftFieldF (f,p) inf tname (Attr t v) = Attr (f inf tname t) v
-liftFieldF (f,p) inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (f inf tname ) (mapComp (liftFieldF (f,p) inf tname) ) ref)   rel (liftTableF (f,p) rinf tname2 <$> tb)
+liftFieldF (f,p) inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (f inf tname ) ((liftFieldF (f,p) inf tname) ) ref)   rel (liftTableF (f,p) rinf tname2 <$> tb)
   where FKJoinTable  rel (schname,tname2)  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map p i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
         rinf = fromMaybe inf (HM.lookup schname (depschema inf))
         ta = lookTable inf tname
@@ -612,8 +611,8 @@ mergeCreate Nothing (Just i) = Just i
 mergeCreate (Just i)  Nothing = Just i
 mergeCreate Nothing Nothing = Nothing
 
-mergeTB1 ((m,Compose k) ) ((m2,Compose k2) )
-  = (m,Compose $ liftA2 (\(KV i ) (KV j) -> KV $ M.unionWith const i j ) k k2)
+mergeTB1 ((m,k) ) ((m2,k2) )
+  = (m,(\(KV i ) (KV j) -> KV $ M.unionWith const i j ) k k2)
 
 
 makeLenses ''InformationSchemaKV

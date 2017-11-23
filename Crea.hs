@@ -142,7 +142,7 @@ creaArtList situacao page =  "http://www.crea-go.org.br/art1025/cadastros/ajax_l
 
 convertArt :: [M.Map String String ]-> TBData T.Text Showable
 convertArt v =
-  tblist $ fmap _tb
+  tblist
   [numberA "substituida" $ join $ fmap (fmap (L.drop 2 .snd .L.break (== 'à')) .L.find ("Substituição à" `L.isInfixOf`) .  concat . fmap (\(i,j) -> [i,j]) . M.toList ) v `atMay` 0
   -- ,numberA "contrato" $ at 2 "Contrato:"
   ,textA "cpf_cnpj" $ filter (not . (`L.elem` (" /-." ::String))) <$> at 2 "CPF/CNPJ:"

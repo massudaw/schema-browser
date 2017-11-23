@@ -59,14 +59,14 @@ import GHC.Stack
 
 clientCreate metainf now = liftTable' metainf "client_login" row
   where
-    row = tblist . fmap _tb
-            $ [
+    row = tblist
+             [
                Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STime $ STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
               ]
 
 serverCreate metainf now = liftTable' metainf "server" row
   where
-    row = tblist . fmap _tb
+    row = tblist
             $ [
                Attr "up_time" (IntervalTB1 $ Interval.interval (ER.Finite (TB1 (STime $ STimestamp (utcToLocalTime utc now))),True) (ER.PosInf,True))
               ]
@@ -126,7 +126,7 @@ removeTable idClient now table  tix = (mempty,G.Idex [num idClient],[PInline "se
 
 addTable :: Int -> UTCTime -> Table -> Int ->  TBIdx Text Showable
 addTable idClient now table  tix = (mempty,G.Idex [num idClient],[PInline "selection" (POpt $ Just $ PIdx tix (Just $ patch$
-                    TB1 $ tblist $ fmap _tb[ Attr "table" (txt .  tableName $ table)
+                    TB1 $ tblist $ [ Attr "table" (txt .  tableName $ table)
                                        , Attr "up_time" ( inter (Interval.Finite (time now)) (Interval.PosInf))
                                        , IT "selection" (LeftTB1 $ Nothing)
                                            ]))
@@ -139,10 +139,10 @@ removeRow idClient now tix rix
 addRow idClient now tdi tix rix
   =  (mempty,G.Idex [num idClient],[PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
                           (mempty,mempty,[PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ patch(
-                                              TB1 $ tblist $ fmap _tb [
+                                              TB1 $ tblist $ [
                                                Attr "up_time" (inter (Interval.Finite $ time now) Interval.PosInf)
                                               ,IT "data_index"
-                                                  ( array (\(i,j) -> TB1 $ tblist $ fmap _tb [Attr "key" (txt  $ keyValue i) ,Attr "val" (TB1 . SDynamic $  j) ]) $tdi)])
+                                                  ( array (\(i,j) -> TB1 $ tblist $ [Attr "key" (txt  $ keyValue i) ,Attr "val" (TB1 . SDynamic $  j) ]) $tdi)])
                                               ]))])
 
 time = TB1  . STime . STimestamp . utcToLocalTime utc
@@ -154,8 +154,8 @@ updateClient metainf inf table tdi clientId now = do
       pk = Attr (lookKey metainf "client_login" "id") (LeftTB1 $ Just $ TB1 (SNumeric clientId))
       old = justError ("no row " <> show (attrIdex [pk]) ) $ G.lookup (attrIdex [pk]) tb
     let
-      row = tblist . fmap _tb
-            $ [ FKT (kvlist [_tb $ Attr "clientid" (TB1 (SNumeric (clientId )))]) [Rel "clientid" Equals "id"] (TB1 $ mapKey' keyValue $ old)
+      row = tblist
+            $ [ FKT (kvlist [Attr "clientid" (TB1 (SNumeric (clientId )))]) [Rel "clientid" Equals "id"] (TB1 $ mapKey' keyValue $ old)
               , Attr "up_time" (inter (Interval.Finite $ time now) Interval.PosInf)
               , Attr "schema" (opt (int .  schemaId ) (Just  inf ))
               , IT "selection" (LeftTB1 Nothing)]
@@ -185,7 +185,7 @@ editClient metainf inf dbmeta ccli  table tdi clientId now ix
 addClient clientId metainf inf table row =  do
     now <- liftIO getCurrentTime
     let
-      tdi = fmap (M.toList .getPKM) $ join $ (\ t -> fmap (tblist' t ) .  traverse (fmap _tb . (\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName t))  ). F.toList) <$>  table <*> row
+      tdi = fmap (M.toList .getPKM) $ join $ (\ t -> fmap (tblist' t ) .  traverse ((\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName t))  ). F.toList) <$>  table <*> row
     newi <- updateClient metainf inf table tdi clientId now
     let new = maybe newi (\table -> apply newi (liftPatch metainf "clients" $addTable (clientId) now table  0)) table
     dbmeta  <- prerefTable metainf (lookTable metainf "clients")

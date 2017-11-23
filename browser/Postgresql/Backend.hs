@@ -7,13 +7,16 @@ import Data.Time
 import qualified Types.Index as G
 import Control.Arrow
 import SchemaQuery
+import Control.Monad.RWS hiding(pass)
 import Environment
 import Postgresql.Types
 import Default
 import Step.Common
 import qualified Data.Poset as P
 import Control.Exception (uninterruptibleMask,mask_,throw,catch,throw,SomeException)
+import Postgresql.Printer
 import Step.Host
+import Postgresql.Codegen
 import Data.Interval (Extended(..),upperBound)
 import Data.Either
 import Data.Functor.Apply
@@ -176,7 +179,7 @@ alterSchema v p= do
       traverse (\new -> when (new /= o )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? OWNER TO ?  "(DoubleQuoted o, DoubleQuoted new)) onewm
       traverse (\new -> when (new /= n )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? RENAME TO ?  "(DoubleQuoted n, DoubleQuoted new)) nnewm
       l <- liftIO getCurrentTime
-      return $ TableModification Nothing (utcToLocalTime utc l) (snd $ username inf) (lookTable inf "catalog_schema") . PatchRow  . traceShowId <$> (diff v new)
+      return $ TableModification Nothing (utcToLocalTime utc l) (snd $ username inf) (lookTable inf "catalog_schema") . PatchRow   <$> (diff v new)
 
 dropSchema = do
   aschema "metadata" $
@@ -218,15 +221,15 @@ insertPatch f conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> l
     where
       checkAllFilled = patchCheck path
       prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (escapeReserved <$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
-      attrs =  concat $L.nub $ nonRefTB .  create . traceShowId <$> filterFun i
+      attrs =  concat $L.nub $ nonRefTB .  create  <$> filterFun i
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
       direct f = filter (not.all1 testSerial .f)
       serialAttr = flip Attr (LeftTB1 Nothing)<$> filter (isSerial .keyType) ( rawPK t <> F.toList (rawAttrs t))
-      directAttr :: [TB Identity Key Showable]
+      directAttr :: [TB Key Showable]
       directAttr = direct aattri attrs
-      projKey :: [TB Identity Key a ] -> [Text]
+      projKey :: [TB Key a ] -> [Text]
       projKey = fmap (keyValue ._relOrigin) . concat . fmap keyattri
-      serialTB = tblist' t (fmap _tb  serialAttr)
+      serialTB = tblist' t (serialAttr)
       all1 f [] = False
       all1 f i = all f i
 
@@ -259,7 +262,7 @@ applyPatch conn patch@(m,G.Idex kold,skv)  = do
             nestP k (PInter False (b,j)) = "upperI(" <> k <> "," <> "?" <> "," <> (T.pack (show j )) <> ")"
             nestP k (PatchSet l) = F.foldl' nestP k  l
             nestP k i = "?"
-    attrPatchValue (PAttr  k v) = Attr k (create v) :: TB Identity PGKey Showable
+    attrPatchValue (PAttr  k v) = Attr k (create v) :: TB PGKey Showable
     pred   =" WHERE " <> T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (_kvpk m) (F.toList kold))
     setter = " SET " <> T.intercalate "," (   attrPatchName <$> skv   )
     up = "UPDATE " <> kvMetaFullName m <> setter <>  pred
@@ -279,30 +282,26 @@ updatePatch conn kv old  t = do
     pred   =" WHERE " <> T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> kold)
     setter = " SET " <> T.intercalate "," (equality .   escapeReserved . attrValueName <$> skv   )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
-    skv = unTB <$> F.toList  (_kvvalues $ unTB tbskv)
+    skv = F.toList  (_kvvalues $ tbskv)
     tbskv = snd isM
     isM :: TBData PGKey  Showable
     isM =  justError ("cant diff befor update" <> show (kv,old)) $ diffUpdateAttr kv old
 
 diffUpdateAttr :: (Ord k , Ord a) => TBData k a -> TBData k a -> Maybe (TBData k a )
-diffUpdateAttr  kv kold@(t,_ )  =  fmap ((t,) . _tb . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . snd . tableNonRef'  $ kv ) (unKV . snd . tableNonRef' $ kold )
+diffUpdateAttr  kv kold@(t,_ )  =  fmap ((t,) . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . snd . tableNonRef'  $ kv ) (unKV . snd . tableNonRef' $ kold )
 
 differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 
 paginate inf t order off size koldpre wherepred = do
-    let (que,attr) = selectQuery t koldpre order wherepred
+    let ((que,name),attr) = selectQuery t koldpre order wherepred
     i <- lookupEnv "POSTGRESQL_DECODER"
     let
       jsonDecode =  do
         let quec = fromString $ T.unpack $ "SELECT row_to_json(q),count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
-        uncurry (queryWith (withCount (fromRecordJSON t) ) (conn inf ) ) (quec, maybe [] (fmap (either(Left .firstTB (recoverFields inf)) Right)) attr)
-      textDecode = do
-        let quec = fromString $ T.unpack $ "SELECT *,count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
-        uncurry (queryWith (withCount (fromRecord (unTlabel' t)) ) (conn inf ) ) (quec, maybe [] (fmap (either (Left .firstTB (recoverFields inf)) Right ) ) attr)
+        uncurry (queryWith (withCount (fromRecordJSON t name )) (conn inf ) ) (quec, maybe [] (fmap (either(Left .firstTB (recoverFields inf)) Right)) attr)
 
     v <- case i of
            Just "JSON" ->  jsonDecode
-           Just "TEXT" ->    textDecode
            Nothing -> jsonDecode
     let estimateSize = maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])
     print estimateSize
@@ -377,45 +376,27 @@ patchMod patch@(m,_,_) = do
 
 
 
-selectAll
-  ::
-     TBF (Labeled Text) Key ()
-     -> Int
-     -> Maybe PageToken
-     -> Int
-     -> [(Key, Order)]
-     -> WherePredicate
-     -> TransactionM  (Int,
-           [(KVMetadata Key,
-             Compose
-               Identity (KV (Compose Identity (TB Identity))) Key Showable)])
-selectAll m offset i  j k st = do
-      inf <- ask
-      let
-          unref (TableRef i) = Just $  upperBound <$>  i
-          unref (HeadToken ) = Nothing
-      v <- liftIO$ paginate inf m k offset j ( join $ fmap unref i) st
-      return v
-
-
-loadDelayed :: InformationSchema -> TB3Data (Labeled Text) Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
+loadDelayed :: InformationSchema -> TBData Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
 loadDelayed inf t@(k,v) values@(ks,vs)
   | L.null $ _kvdelayed k = return Nothing
   | L.null delayedattrs  = return Nothing
   | otherwise = do
        let
            whr = T.intercalate " AND " ((\i-> justError ("no key" <> show i <> show labelMap)  (M.lookup (S.singleton $ Inline i) labelMap) <>  " = ?") <$> (_kvpk k) )
-           labelMap = fmap (label .getCompose) $  _kvvalues $ head $ F.toList $ getCompose (snd $ tableNonRef2 (k,v))
+           (labelMap,_) = evalRWS (traverse (lkTB) $  _kvvalues $  (snd $ tableNonRef2 (k,v)) :: CodegenT Identity (M.Map (S.Set (Rel Key)) Text)) [Root k] namemap
            table = justError "no table" $ M.lookup (S.fromList $ _kvpk k) (pkMap inf)
-           delayedTB1 =  fmap (mapComp (\(KV i ) -> KV (M.filterWithKey  (\i _ -> isJust $ M.lookup i filteredAttrs )  i )))
+           delayedTB1 :: TBData Key () -> TBData Key ()
+           delayedTB1 = fmap (\(KV i ) -> KV $ M.filterWithKey  (\i _ -> isJust $ M.lookup i filteredAttrs ) i)
            delayed =  mapKey' unKDelayed (mapValue' (const ()) (delayedTB1 t))
-           str = "select row_to_json(q)  FROM (SELECT " <> explodeRecord delayed <> " FROM " <> expandBaseTable (TB1 t) <> " WHERE " <> whr <> ") as q "
-           pk = (fmap (firstTB (recoverFields inf) .unTB) $ fmap snd $ L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)   ) $ M.toList $ _kvvalues $  unTB $ snd $ tbPK (tableNonRef' values))
-       print (T.unpack str,show pk )
-       is <- queryWith (fromRecordJSON delayed) (conn inf) (fromString $ T.unpack str) pk
+           (str,namemap) = codegen $ do
+              tq <- expandBaseTable t
+              rq <- explodeRecord delayed
+              return $ "select row_to_json(q)  FROM (SELECT " <>  rq <> " FROM " <> renderRow tq <> " WHERE " <> whr <> ") as q "
+           pk = (fmap (firstTB (recoverFields inf) ) $ fmap snd $ L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)   ) $ M.toList $ _kvvalues $   snd $ tbPK (tableNonRef' values))
+       is <- queryWith (fromRecordJSON delayed namemap) (conn inf) (fromString $ T.unpack str) pk
        res <- case is of
             [] -> errorWithStackTrace "empty query"
-            [i] ->return $ fmap (\(i,j,a) -> (i,G.getIndex values,a)) $ diff (ks , _tb $ KV filteredAttrs) (mapKey' (alterKeyType (Le.over keyFunc makeDelayed)) . mapFValue' makeDelayedV $ i  )
+            [i] ->return $ fmap (\(i,j,a) -> (i,G.getIndex values,a)) $ diff (ks , KV filteredAttrs) (mapKey' (alterKeyType (Le.over keyFunc makeDelayed)) . mapFValue' makeDelayedV $ i  )
             _ -> errorWithStackTrace "multiple result query"
        return res
   where
@@ -428,7 +409,28 @@ loadDelayed inf t@(k,v) values@(ks,vs)
     makeDelayedV (ArrayTB1 i) = ArrayTB1 $ makeDelayedV <$> i
 
     delayedattrs = concat $ fmap (keyValue . _relOrigin ) .  F.toList <$> M.keys filteredAttrs
-    filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (S.fromList $ _kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ unTB vs)
+    filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (S.fromList $ _kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ vs)
+
+
+
+selectAll
+  ::
+     TBF Key ()
+     -> Int
+     -> Maybe PageToken
+     -> Int
+     -> [(Key, Order)]
+     -> WherePredicate
+     -> TransactionM  (Int,
+           [(KVMetadata Key,
+               KV Key Showable)])
+selectAll m offset i  j k st = do
+      inf <- ask
+      let
+          unref (TableRef i) = Just $  upperBound <$>  i
+          unref (HeadToken ) = Nothing
+      v <- liftIO$ paginate inf m k offset j ( join $ fmap unref i) st
+      return v
 
 
 connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  <> " user=" <> user dname <> " dbname=" <> dbn  dname <> " password=" <> pass dname   )

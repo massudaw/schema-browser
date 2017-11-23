@@ -14,7 +14,7 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import qualified Data.Foldable as F
 import Control.Applicative
-import Data.Text(Text)
+import Data.Text(Text,unpack)
 import Control.Monad
 import Debug.Trace
 import Data.Maybe

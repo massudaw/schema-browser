@@ -91,9 +91,7 @@ at b i (P s (Kleisli j) )  =  P (BF.second (nest (ind b)) . BF.first (nest (ind 
 atR
   :: (KeyString k,
       MonadReader
-        (Maybe
-           (KVMetadata k,
-            Compose Identity (KV (Compose Identity (TB Identity))) k b1))
+        (Maybe (TBData k Showable))
         m) =>
      String
      -> Parser (Kleisli m) (Union (Access Text)) a b
@@ -167,14 +165,14 @@ idxR  l =
 indexAttr l t
   = do
     (m,v) <- t
-    i <-   M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)). _kvvalues $ unTB v
-    return $ unTB i
+    i <-   M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)). _kvvalues $ v
+    return  i
 
 
 indexTB1 l (m,v)
   = do
-    i <- M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)) . _kvvalues $ unTB v
-    case runIdentity $ getCompose $i  of
+    i <- M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)) . _kvvalues $ v
+    case i  of
        Attr _ l -> Nothing
        FKT l i j -> return $ j
        IT l j -> return $ j
@@ -182,13 +180,13 @@ indexTB1 l (m,v)
 
 
 
-firstCI f = mapComp (firstTB f)
+firstCI f = (firstTB f)
 
 indexTableInline l t@(m,v)
   = do
     let finder = fmap (firstCI keyString ) . M.lookup (S.fromList $ fmap (Inline .iprodRef) l) . M.mapKeys (S.map (fmap keyString))
-    i <- finder (_kvvalues $ unTB v )
-    case runIdentity $ getCompose $ i  of
+    i <- finder (_kvvalues $ v )
+    case i  of
       IT k l -> return (k,l)
       i ->  errorWithStackTrace (show i)
 
@@ -196,8 +194,8 @@ indexTableInline l t@(m,v)
 indexTableAttr l t@(m,v)
   = do
     let finder = fmap (firstCI keyString ) . M.lookup (S.fromList $ fmap (Inline .iprodRef) l) . M.mapKeys (S.map (fmap keyString))
-    i <- finder (_kvvalues $ unTB v )
-    case runIdentity $ getCompose $ i  of
+    i <- finder (_kvvalues $ v )
+    case i  of
          Attr k l -> return (k,l)
          i ->  errorWithStackTrace (show i)
 
@@ -205,8 +203,8 @@ indexTableAttr l t@(m,v)
 indexTable l t@(m,v)
   = do
     let finder = L.find (L.any (==fmap iprodRef l). L.permutations .fmap _relOrigin. keyattr. firstCI keyString )
-    i <- finder (toList $ _kvvalues $ unTB v )
-    case runIdentity $ getCompose $ i  of
+    i <- finder (toList $ _kvvalues $ v )
+    case i  of
          Attr k l -> return (k,l)
          FKT v _ _  -> safeHead $ aattr (head $ unkvlist v)
          i ->  errorWithStackTrace (show i)

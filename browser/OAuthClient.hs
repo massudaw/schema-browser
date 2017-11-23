@@ -77,7 +77,7 @@ oauthpoller = FPlugins "Gmail Login" "google_auth" (IOPlugin url)
           ) -< token
        token <- atR "token" ((,,,) <$> odxR "accesstoken" <*> odxR "refreshtoken" <*> odxR "expiresin" <*> odxR "tokentype" ) -< ()
        odxR "refresh" -< ()
-       returnA -< Just . tblist . pure . _tb $ IT "token" (LeftTB1 $  oauthToToken <$> Just v )
+       returnA -< Just . tblist . pure $ IT "token" (LeftTB1 $  oauthToToken <$> Just v )
 
 
 readHistory :: PluginTable (Maybe (TBData T.Text Showable))
@@ -89,6 +89,6 @@ readHistory = proc x -> do
   let patchDel i = (kvempty ,  G.Idex  [i] , [])
       patchCreate i = firstPatch keyString $ patch i
   odxR "showpatch" -< ()
-  returnA -< Just $ tblist $ _tb <$> [Attr "showpatch" (TB1 $ SText $ T.pack $ show $ (patchDel <$> catMaybes mdeleted) <>  (patchCreate <$> catMaybes madded))]
+  returnA -< Just $ tblist $ [Attr "showpatch" (TB1 $ SText $ T.pack $ show $ (patchDel <$> catMaybes mdeleted) <>  (patchCreate <$> catMaybes madded))]
 
 
