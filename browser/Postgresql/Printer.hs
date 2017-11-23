@@ -220,7 +220,7 @@ expandBaseTable tb@(meta, KV i) = asNewTable meta  (\t -> do
   )
 
 
-getInlineRec' tb = L.filter (\i -> match $  unComp i) $ attrs
+getInlineRec' tb = L.filter (\i -> match $  i) $ attrs
   where attrs = F.toList $ _kvvalues  (snd tb)
         match (Attr _ _ ) = False
         match (IT _ i ) = isTableRec' (unTB1 i)
@@ -237,7 +237,7 @@ selectQuery
      -> Maybe [I.Extended (FTB Showable)]
      -> [(Key, Order)]
      -> WherePredicate
-     -> ((Text,NameMap),Maybe [Either (TB Identity Key Showable) (PrimType ,FTB Showable)])
+     -> ((Text,NameMap),Maybe [Either (TB Key Showable) (PrimType ,FTB Showable)])
 selectQuery t koldpre order wherepred = (withDecl, (fmap Left <$> ordevalue )<> (fmap Right <$> predvalue))
       where
         withDecl = codegen tableQuery
@@ -255,7 +255,7 @@ selectQuery t koldpre order wherepred = (withDecl, (fmap Left <$> ordevalue )<> 
             unFin (I.Finite i) = Just i
             unFin j = Nothing
             oq = (\i ->  pure $ generateComparison (first (justLabel (snd withDecl) t) <$> (filter ((`elem` (fmap fst i)).fst) order))) . unIndex<$> koldpre
-            koldPk :: Maybe [TB Identity Key Showable]
+            koldPk :: Maybe [TB Key Showable]
             koldPk =  (\k -> uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) k ) . unIndex <$> koldpre
             pkParam =  koldPk <> (tail .reverse <$> koldPk)
           in (oq,pkParam)
@@ -274,13 +274,12 @@ expandQuery left (LeftTB1 (Just t)) =  expandQuery left t
 expandQuery left (TB1 t)
     | otherwise   = expandQuery' left t
 
-expandQuery' left (meta, m) = atTable meta $ F.foldl (flip (\i -> liftA2 (.) (expandJoin left (unTB <$> F.toList (_kvvalues  m) ) i )  )) (return id) (P.sortBy (P.comparing (RelSort. keyattri )) $  unTB <$> F.toList (_kvvalues  m))
+expandQuery' left (meta, m) = atTable meta $ F.foldl (flip (\i -> liftA2 (.) (expandJoin left (F.toList (_kvvalues  m) ) i )  )) (return id) (P.sortBy (P.comparing (RelSort. keyattri )) $  F.toList (_kvvalues  m))
 
 tableType (ArrayTB1 (i :| _ )) = tableType i <> "[]"
 tableType (LeftTB1 (Just i)) = tableType i
 tableType (TB1 (m,_)) = kvMetaFullName  m
 
-unLB = unTB
 
 
 
@@ -325,7 +324,7 @@ intersectionOp i op j = inner (renderBinary op)
 
 
 
-explodeRow :: TB3 Identity Key () -> Codegen Text
+explodeRow :: TB3 Key () -> Codegen Text
 explodeRow = explodeRow'
 explodeRecord :: TBData  Key () -> Codegen Text
 explodeRecord  = explodeRow''
@@ -342,7 +341,7 @@ explodeRow' (TB1 i ) = explodeRow'' i
 
 -- explodeRow'' t@(m ,KV tb) = do
 -- block . T.intercalate assoc <$> (traverse (explodeDelayed t .getCompose)  $ sortPosition $F.toList  tb  )
-explodeRow'' t@(m ,KV tb) = atTable m $ T.intercalate assoc <$> (traverse (explodeDelayed t )  $ P.sortBy (P.comparing (RelSort. keyattri ))$ fmap unTB $ F.toList  tb)
+explodeRow'' t@(m ,KV tb) = atTable m $ T.intercalate assoc <$> (traverse (explodeDelayed t )  $ P.sortBy (P.comparing (RelSort. keyattri ))$ F.toList  tb)
 
 selectRow  l i = "(select rr as " <> l <> " from (select " <> i<>  ") as rr )"
 
@@ -443,7 +442,7 @@ indexLabel  :: Show a =>
     -> (Column  Key a)
 indexLabel p@(IProd b l) v =
     case findAttr l v of
-      Just i -> unTB i
+      Just i -> i
       Nothing -> errorWithStackTrace "no fk"
 indexLabel  i v = errorWithStackTrace (show (i, v))
 
@@ -460,15 +459,15 @@ indexFieldL
 -- indexFieldL e c p v | traceShow (e,c,p) False = undefined
 indexFieldL e c p@(IProd b l) v =
     case findAttr l v of
-      Just i -> pure . utlabel  e c <$> tlabel' (unTB  i)
+      Just i -> pure . utlabel  e c <$> tlabel' (i)
       Nothing ->
             case
-                   fmap unTB $ findFK [l] v of
+                   findFK [l] v of
 
                 Just i ->
                     case i of
                         (FKT ref _ _) ->
-                          pure . utlabel e c <$> (tlabel' . unTB $
+                          pure . utlabel e c <$> (tlabel' $
                                   justError ("no attr" <> show (ref, l)) .
                                   L.find
                                       ((== [l]) .
@@ -486,12 +485,12 @@ indexFieldL e c p@(IProd b l) v =
                   return [(Just (i <> " is not null"), Nothing)]
                 Nothing -> case findFKAttr [l] v of
                              Just i -> do
-                               pure . utlabel e  c <$> tlabel' (unTB i)
+                               pure . utlabel e  c <$> tlabel' (i)
                              Nothing  -> errorWithStackTrace ("no fk attr" <> show (l,v))
 
 indexFieldL e c n@(Nested l nt) v =
   case findFK (iprodRef <$> l) v of
-    Just a -> case unTB a of
+    Just a -> case a of
         t@(IT k (LeftTB1 (Just (ArrayTB1 (fk :| _))))) ->  do
           l <- lkTB t
           return [(Just ("i" <> l <> " is not null"), Nothing)]
@@ -574,4 +573,4 @@ getLabels t k =   justError ("cant find label"  <> show k <> " - " <> show t) . 
         return (k, "ik"<> T.pack (show l ) <> " :: " <> tableType tb)
 
 
-mapLabels label' t =  M.fromList <$> traverse (label'. unTB) (getAttr $ joinNonRef' t)
+mapLabels label' t =  M.fromList <$> traverse (label') (getAttr $ joinNonRef' t)

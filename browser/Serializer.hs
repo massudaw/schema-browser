@@ -73,7 +73,6 @@ instance (Ord a, a ~ Index a ,Show a, Patch a, B.Binary a) =>
       datamod = unBinary . unOnly
   encodeT (TableModification id ts u table ip) =
     tblist $
-    _tb <$>
     [ Attr "user_name" (txt u)
     , Attr "modification_time" (timestamp ts)
     , Attr "table_name" (txt $ snd table)
@@ -119,5 +118,5 @@ instance DecodeShowable LocalTime where
 
 unBinary (Binary i) = i
 
-att :: (Functor f, DecodeTB1 f, DecodeShowable a) => TB g k Showable -> f a
+att :: (Functor f, DecodeTB1 f, DecodeShowable a) => TB k Showable -> f a
 att (Attr i j) = decodeS <$> decFTB j

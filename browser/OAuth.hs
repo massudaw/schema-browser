@@ -146,7 +146,7 @@ syncHistory [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))]  ix table offset 
           return  d
       let idx = if schemaName inf == "tasks" then "items" else rawName table
           relMap = M.fromList $ fmap (\rel -> (_relTarget rel ,_relOrigin rel) ) rel
-          refAttr = (_tb $ FKT (kvlist $ fmap _tb $ concat $ F.toList $ justError "no back path " . backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
+          refAttr = (FKT (kvlist $ concat $ F.toList $ justError "no back path " . backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
           addAttr refAttr (m ,t ) = (m, (\(KV i) -> KV  $ M.insert (S.fromList $ keyattr refAttr ) refAttr i ) t)
       c <-  traverse (convertAttrs inf (Just $ tblist [refAttr]) (_tableMapL inf) table ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
       return ((addAttr refAttr) <$>  c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
@@ -217,7 +217,7 @@ insertTable pk
         attrs :: [(Key, FTB Showable)]
         attrs = filter (any (==FWrite) . keyModifier .fst ) $ getAttr' pk
     let
-      scoped  = fmap (unTB1 ._fkttable . unTB) $ filter ((`elem` (_rawScope (lookTable inf (_kvname (fst pk))))) . _relOrigin . head . keyattr ) (F.toList $ unKV $snd $ pk)
+      scoped  = fmap (unTB1 ._fkttable ) $ filter ((`elem` (_rawScope (lookTable inf (_kvname (fst pk))))) . _relOrigin . head . keyattr ) (F.toList $ unKV $snd $ pk)
     tok <- getToken scoped
     let user = fst $ justError "no token" $ token inf
         table = lookTable inf (_kvname (fst pk))
@@ -231,7 +231,7 @@ insertTable pk
     time <- liftIO $ getCurrentTime
     fmap (TableModification Nothing (utcToLocalTime utc time) (snd $ username inf) table .PatchRow. patch . mergeTB1 pk ) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table) .  fmap (\i -> (i :: Value)  ) $  decoded)
 
-lookOrigin  k (i,m) = unTB $ err $  find (( k == ). S.fromList . fmap _relOrigin. keyattr ) (F.toList $  unKV m)
+lookOrigin  k (i,m) = err $  find (( k == ). S.fromList . fmap _relOrigin. keyattr ) (F.toList $  unKV m)
     where
       err= justError ("no attr " <> show k <> " for table " <> show (_kvname i))
 
@@ -289,7 +289,7 @@ joinList [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))] tableref offset page
           return $ decode v
       let idx = if schemaName inf == "tasks" then "items" else rawName tableref
           relMap = M.fromList $ fmap (\rel -> (_relTarget rel ,_relOrigin rel) ) rel
-          refAttr = (_tb $ FKT (kvlist $ fmap _tb $ concat $ F.toList $ justError " no back path " . backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
+          refAttr = (FKT (kvlist $ concat $ F.toList $ justError " no back path " . backFKRef relMap (_relOrigin <$> rel) <$> TB1 from) rel (TB1 from))
       c <-  traverse (convertAttrs inf (Just $ tblist [refAttr]) (_tableMapL inf) tableref ) . maybe [] (\i -> (i :: Value) ^.. key idx  . values) $ decoded
       let addAttr refAttr (m ,t ) = (m, (\(KV i) -> KV  $ M.insert (S.fromList $ keyattr refAttr ) refAttr i ) t)
       return ((addAttr refAttr) <$>  c, fmap (NextToken ) $ fromJust decoded ^? key "nextPageToken" . _String , (maybe (length c) round $ fromJust decoded ^? key "resultSizeEstimate" . _Number))
@@ -335,14 +335,14 @@ lookMTable inf m = lookSTable inf (_kvschema m,_kvname m)
 traverseAccum f  l = foldl (\(a,m) c -> (\ a -> m >>= (\i -> fmap (:i) a )) <$> f  c a  ) (S.empty,return []) l
 
 convertAttrs :: InformationSchema -> Maybe (TBData Key Showable) -> HM.HashMap Text Table ->  Table -> Value -> TransactionM (TBData Key Showable)
-convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$> (snd $ traverseAccum kid (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb ))
+convertAttrs  infsch getref inf tb iv =   tblist' tb .  catMaybes <$> (snd $ traverseAccum kid (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb ))
   where
     pathOrigin (Path i _  ) = i
     isFKJoinTable (Path _ (FKJoinTable  _ _)) = True
     isFKJoinTable (Path i (RecJoin _ j  ) ) = isFKJoinTable (Path i j )
     isFKJoinTable _ = False
     fkFields = S.unions $ map pathOrigin $ filter isFKJoinTable $  F.toList $rawFKS tb
-    kid :: Key ->   S.Set Key -> (S.Set Key,TransactionM (Maybe (TB Identity Key Showable)))
+    kid :: Key ->   S.Set Key -> (S.Set Key,TransactionM (Maybe (TB Key Showable)))
     kid  k acc
       | S.member k fkFields
             = let
@@ -359,35 +359,35 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  fmap _tb  . catMaybes <$
                     (traverse (\v ->
                         case getref of
                           Just getref  ->  do
-                            let transrefs = tblist $ fmap (mapComp (firstTB (\k -> fromMaybe k  $ M.lookup  k relMap ))) $ (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ F.toList . unKV .snd $ getref)
+                            let transrefs = tblist $ fmap ((firstTB (\k -> fromMaybe k  $ M.lookup  k relMap ))) $ (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ F.toList . unKV .snd $ getref)
 
                                 relMap = M.fromList $ fmap (\rel -> (_relOrigin rel ,_relTarget rel) ) rel
                                 nv  = flip mergeTB1 transrefs  <$> v
                             time <- liftIO $ getCurrentTime
                             tell (TableModification Nothing (utcToLocalTime utc time) (snd $ username infsch)(lookTable infsch trefname ) . PatchRow . patch <$> F.toList (nv))
-                            return $ FKT (kvlist [_tb . Types.Attr  k $ (lbackRef    nv) ])  rel nv
+                            return $ FKT (kvlist [Types.Attr  k $ (lbackRef    nv) ])  rel nv
                           Nothing ->  do
                             time <- liftIO $ getCurrentTime
                             tell (TableModification Nothing (utcToLocalTime utc time) (snd $ username infsch)(lookTable infsch trefname ) .PatchRow. patch <$> F.toList (v))
-                            return $ FKT (kvlist [_tb . Types.Attr  k $ (lbackRef    v) ])  fk v))
+                            return $ FKT (kvlist [Types.Attr  k $ (lbackRef    v) ])  fk v))
                     (traverse (\v -> do
-                        let ref = [_tb $ Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd <$> maybeToList (tableNonRef' <$> getref))
-                            refTB = [_tb $ Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd .tableNonRef'<$> maybeToList (getref))
+                        let ref = [Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd <$> maybeToList (tableNonRef' <$> getref))
+                            refTB = [Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd .tableNonRef'<$> maybeToList (getref))
                         (_,tbs) <- atTable ( lookTable infsch trefname)
-                        let reftb = join $ fmap unSOptional $ joinRel2 (tableMeta $ lookTable infsch trefname) (fmap (replaceRel fk . unTB) ref)  (mapKey' (recoverKey infsch) <$> tbs)
-                        reftbT <- joinRelT  (fmap (replaceRel fk . unTB )refTB) ( lookTable infsch trefname) (mapKey' (recoverKey infsch) <$> tbs)
+                        let reftb = join $ fmap unSOptional $ joinRel2 (tableMeta $ lookTable infsch trefname) (fmap (replaceRel fk ) ref)  (mapKey' (recoverKey infsch) <$> tbs)
+                        reftbT <- joinRelT  (fmap (replaceRel fk )refTB) ( lookTable infsch trefname) (mapKey' (recoverKey infsch) <$> tbs)
                         patch <- maybe (maybe (return reftbT)   (\getref -> traverse (\reftb -> do
                             let scoped
                                   | null (_rawScope treftable) = getref
                                   | otherwise =
                                       case (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ F.toList . unKV .snd $ getref) of
-                                        [i] -> unTB1 (_fkttable (unTB i))
+                                        [i] -> unTB1 (_fkttable (i))
 
                             pti <- joinGetDiffTable (lookMTable infsch (fst scoped)) treftable scoped reftb
                             time <- liftIO $ getCurrentTime
                             tell (TableModification Nothing (utcToLocalTime utc time) (snd $ username infsch)treftable .PatchRow<$> maybeToList pti)
                             return $ maybe (reftb) (apply reftb  ) pti) reftbT ) getref) return (reftb)
-                        return $ FKT (kvlist (filter (not .(`S.member` acc). _tbattrkey.unTB )ref) ) rel patch ))
+                        return $ FKT (kvlist (filter (not .(`S.member` acc). _tbattrkey)ref) ) rel patch ))
                funL = funO  True (exchange trefname $ keyType k) vk
                funR = funO  True (keyType k) vk
                vk = iv  ^? ( key (keyValue  k))

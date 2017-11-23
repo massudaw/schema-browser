@@ -91,9 +91,7 @@ at b i (P s (Kleisli j) )  =  P (BF.second (nest (ind b)) . BF.first (nest (ind 
 atR
   :: (KeyString k,
       MonadReader
-        (Maybe
-           (KVMetadata k,
-            (KV (Compose Identity (TB Identity))) k b1))
+        (Maybe (TBData k Showable))
         m) =>
      String
      -> Parser (Kleisli m) (Union (Access Text)) a b
@@ -168,13 +166,13 @@ indexAttr l t
   = do
     (m,v) <- t
     i <-   M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)). _kvvalues $ v
-    return $ unTB i
+    return  i
 
 
 indexTB1 l (m,v)
   = do
     i <- M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)) . _kvvalues $ v
-    case runIdentity $ getCompose $i  of
+    case i  of
        Attr _ l -> Nothing
        FKT l i j -> return $ j
        IT l j -> return $ j
@@ -182,13 +180,13 @@ indexTB1 l (m,v)
 
 
 
-firstCI f = mapComp (firstTB f)
+firstCI f = (firstTB f)
 
 indexTableInline l t@(m,v)
   = do
     let finder = fmap (firstCI keyString ) . M.lookup (S.fromList $ fmap (Inline .iprodRef) l) . M.mapKeys (S.map (fmap keyString))
     i <- finder (_kvvalues $ v )
-    case runIdentity $ getCompose $ i  of
+    case i  of
       IT k l -> return (k,l)
       i ->  errorWithStackTrace (show i)
 
@@ -197,7 +195,7 @@ indexTableAttr l t@(m,v)
   = do
     let finder = fmap (firstCI keyString ) . M.lookup (S.fromList $ fmap (Inline .iprodRef) l) . M.mapKeys (S.map (fmap keyString))
     i <- finder (_kvvalues $ v )
-    case runIdentity $ getCompose $ i  of
+    case i  of
          Attr k l -> return (k,l)
          i ->  errorWithStackTrace (show i)
 
@@ -206,7 +204,7 @@ indexTable l t@(m,v)
   = do
     let finder = L.find (L.any (==fmap iprodRef l). L.permutations .fmap _relOrigin. keyattr. firstCI keyString )
     i <- finder (toList $ _kvvalues $ v )
-    case runIdentity $ getCompose $ i  of
+    case i  of
          Attr k l -> return (k,l)
          FKT v _ _  -> safeHead $ aattr (head $ unkvlist v)
          i ->  errorWithStackTrace (show i)

@@ -66,7 +66,6 @@ import GHC.Generics
 import Data.Either
 import Data.Binary (Binary(..))
 import Data.Ord
-import Data.Functor.Identity
 import Utils
 import Data.Traversable(traverse,sequenceA)
 import Data.Foldable (Foldable)
@@ -260,8 +259,8 @@ class Compact f where
 instance (Show (Index a),Ord (Index a),PatchConstr k a) => Compact (PathAttr k a) where
   compact = compactAttr
 
-instance PatchConstr k a => Patch (TB Identity k a)  where
-  type Index (TB Identity k a) =  PathAttr k (Index a)
+instance PatchConstr k a => Patch (TB k a)  where
+  type Index (TB k a) =  PathAttr k (Index a)
   diff = diffAttr
   applyIfChange = applyAttrChange
   createIfChange = createAttrChange
@@ -394,21 +393,20 @@ groupSplit2 :: Ord b => (a -> b) -> (a -> c ) -> [a] -> [(b ,[c])]
 groupSplit2 f g = fmap (\i-> (f $ justError "cant group" $ safeHead i , g <$> i)) . groupWith f
 
 
-instance NFData (f (g k a)) => NFData (Compose  f g k a) where
 
-instance (NFData (f k a),NFData k ) => NFData (KV f k a) where
+instance (NFData k ,NFData a) => NFData (KV  k a) where
 
-instance (NFData k ,NFData a ) => NFData (TB Identity k a) where
+instance (NFData k ,NFData a ) => NFData (TB k a) where
 
 
 patchTB1 :: PatchConstr k a => TBData k  a -> TBIdx k  (Index a)
-patchTB1 (m, k)  = (m  ,fmap patch $G.getIndex (m,k) ,  F.toList $ patchAttr  . unTB <$> (unKV k))
+patchTB1 (m, k)  = (m  ,fmap patch $G.getIndex (m,k) ,  F.toList $ patchAttr   <$> (unKV k))
 
 difftable
   ::  (PatchConstr k a  , Show a,Show k ) => TBData k a -> TBData k a
      -> Maybe (Index (TBData k a ))
 difftable old@(m, v) (n, o) = if L.null attrs then Nothing else Just  (m,   fmap patch  $ G.getIndex old , attrs)
-    where attrs = catMaybes $ F.toList  $ Map.mergeWithKey (\_ i j -> Just $ diffAttr (unTB  i) (unTB j)) (const Map.empty ) (fmap (Just. patchAttr . unTB) ) (unKV v) (unKV $  o)
+    where attrs = catMaybes $ F.toList  $ Map.mergeWithKey (\_ i j -> Just $ diffAttr (i) (j)) (const Map.empty ) (fmap (Just. patchAttr  ) ) (unKV v) (unKV $  o)
 
 diffTB1 :: (PatchConstr k a ) =>  TB2 k a -> TB2  k  a -> Maybe (PathFTB   (Index (TBData k a )) )
 diffTB1 = diffFTB patchTB1  difftable
@@ -429,7 +427,7 @@ createTB1
   :: PatchConstr d a =>
     (TBIdx d (Index a) ) ->
       Maybe (TBData d a)
-createTB1 (m ,s ,k)  = (m ,).  KV . mapFromTBList  <$>  nonEmpty ( catMaybes $ fmap (fmap _tb .createIfChange) k)
+createTB1 (m ,s ,k)  = (m ,).  KV . mapFromTBList  <$>  nonEmpty ( catMaybes $ fmap (createIfChange) k)
 
 
 pattrKey (PAttr s _ ) = Set.singleton $ Inline s
@@ -447,8 +445,8 @@ applyRecordChange t@(m, v) (_,_, k) =
   {-| _kvname m == _kvname m2 && idx == fmap patch (G.getIndex t) =-} (m ,) <$> ref v
     -- | otherwise = createIfChange (m2,idx,k)
   where
-    ref (KV v) =  KV <$>  fmap add (Map.traverseWithKey (\key -> traComp (\vi -> maybe (Just vi) (F.foldl'  (\i j ->  edit j =<< i ) (Just vi)) (nonEmpty $ filter ((key ==).pattrKey )k) )) v)
-    add v = foldr (\p v -> Map.insert (pattrKey p) (_tb $ create p) v) v $  filter (isNothing . flip Map.lookup  v.pattrKey) k
+    ref (KV v) =  KV <$>  fmap add (Map.traverseWithKey (\key -> (\vi -> maybe (Just vi) (F.foldl'  (\i j ->  edit j =<< i ) (Just vi)) (nonEmpty $ filter ((key ==).pattrKey )k) )) v)
+    add v = foldr (\p v -> Map.insert (pattrKey p) (create p) v) v $  filter (isNothing . flip Map.lookup  v.pattrKey) k
     edit  k v = applyAttrChange  v k
 
 
@@ -460,35 +458,35 @@ patchSet i
             normalize i = [i]
 
 
-applyAttrChange :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a) -> Maybe (TB Identity k a)
+applyAttrChange :: PatchConstr k a  => TB k a -> PathAttr k (Index a) -> Maybe (TB k a)
 applyAttrChange (Attr k i) (PAttr _ p)  = Attr k <$> (applyIfChange i p)
 applyAttrChange (Fun k rel i) (PFun _ _ p)  = Fun k rel <$> (applyIfChange i p)
 applyAttrChange (FKT k rel  i) (PFK _ p  b )  =  (\i -> FKT i rel  ) <$> ref <*> applyIfChange i b
   where
     ref =  fmap KV$  Map.traverseWithKey (\key vi ->  F.foldl'  (\i j ->  edit j =<< i ) (Just vi) (filter ((==key) . pattrKey ) p) ) (_kvvalues k)
-    edit k v = traComp (flip applyAttrChange k ) v
+    edit k v = (flip applyAttrChange k ) v
 
 applyAttrChange (IT k i) (PInline _   p)  = IT k <$> (applyIfChange i p)
 
 
 
-diffAttr :: PatchConstr k a  => TB Identity k a -> TB Identity k a -> Maybe (PathAttr k  (Index a))
+diffAttr :: PatchConstr k a  => TB k a -> TB k a -> Maybe (PathAttr k  (Index a))
 diffAttr (Attr k i) (Attr l m ) = fmap (PAttr k) (diffShowable i m)
 diffAttr (Fun k rel i) (Fun l rel2 m ) = fmap (PFun k rel ) (diffShowable i m)
 diffAttr (IT k i) (IT _ l) = fmap (PInline k  ) (diffTB1 i l)
-diffAttr (FKT  k _ i) (FKT m rel b) = PFK rel   <$> (Just $ catMaybes $ F.toList $ Map.intersectionWith (\i j -> diffAttr (unTB i) (unTB j)) (_kvvalues k) (_kvvalues m)  ) <*> diff i b
+diffAttr (FKT  k _ i) (FKT m rel b) = PFK rel   <$> (Just $ catMaybes $ F.toList $ Map.intersectionWith (\i j -> diffAttr (i) (j)) (_kvvalues k) (_kvvalues m)  ) <*> diff i b
 
-patchAttr :: PatchConstr k a  => TB Identity k a -> PathAttr k (Index a)
+patchAttr :: PatchConstr k a  => TB k a -> PathAttr k (Index a)
 patchAttr a@(Attr k v) = PAttr k  (patchFTB patch   v)
 patchAttr a@(Fun k rel v) = PFun k  rel (patchFTB patch v)
 patchAttr a@(IT k v) = PInline k (patchFTB patchTB1 v)
-patchAttr a@(FKT k rel v) = PFK rel (patchAttr . unTB <$> unkvlist k) (patch v)
+patchAttr a@(FKT k rel v) = PFK rel (patchAttr  <$> unkvlist k) (patch v)
 
-createAttrChange :: PatchConstr k a  => PathAttr k (Index a) -> Maybe (TB Identity k a)
+createAttrChange :: PatchConstr k a  => PathAttr k (Index a) -> Maybe (TB k a)
 createAttrChange (PAttr  k s  ) = Attr k <$> createIfChange s
 createAttrChange (PFun k rel s  ) = Fun k rel <$> createIfChange s
 createAttrChange (PInline k s ) = IT k <$> createIfChange s
-createAttrChange (PFK rel k  b ) = flip FKT rel <$> (kvlist . fmap _tb <$> traverse createAttrChange  k) <*> createIfChange b
+createAttrChange (PFK rel k  b ) = flip FKT rel <$> (kvlist  <$> traverse createAttrChange  k) <*> createIfChange b
 
 
 

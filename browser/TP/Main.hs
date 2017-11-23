@@ -268,7 +268,7 @@ authMap smvar sargs (user,pass) schemaN =
               let
                   td :: Tidings (OAuth2Tokens)
                   td = (\o -> let
-                            token = justError "" . fmap (toOAuth . unTB1 . _fkttable . unTB) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $ head o )
+                            token = justError "" . fmap (toOAuth . unTB1 . _fkttable  ) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $ head o )
                             in token) . G.toList <$> collectionTid dbmeta
                   toOAuth v = case transToken v of
                                 Just a -> a

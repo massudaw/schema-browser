@@ -225,11 +225,11 @@ insertPatch f conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> l
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
       direct f = filter (not.all1 testSerial .f)
       serialAttr = flip Attr (LeftTB1 Nothing)<$> filter (isSerial .keyType) ( rawPK t <> F.toList (rawAttrs t))
-      directAttr :: [TB Identity Key Showable]
+      directAttr :: [TB Key Showable]
       directAttr = direct aattri attrs
-      projKey :: [TB Identity Key a ] -> [Text]
+      projKey :: [TB Key a ] -> [Text]
       projKey = fmap (keyValue ._relOrigin) . concat . fmap keyattri
-      serialTB = tblist' t (fmap _tb  serialAttr)
+      serialTB = tblist' t (serialAttr)
       all1 f [] = False
       all1 f i = all f i
 
@@ -262,7 +262,7 @@ applyPatch conn patch@(m,G.Idex kold,skv)  = do
             nestP k (PInter False (b,j)) = "upperI(" <> k <> "," <> "?" <> "," <> (T.pack (show j )) <> ")"
             nestP k (PatchSet l) = F.foldl' nestP k  l
             nestP k i = "?"
-    attrPatchValue (PAttr  k v) = Attr k (create v) :: TB Identity PGKey Showable
+    attrPatchValue (PAttr  k v) = Attr k (create v) :: TB PGKey Showable
     pred   =" WHERE " <> T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> zip (_kvpk m) (F.toList kold))
     setter = " SET " <> T.intercalate "," (   attrPatchName <$> skv   )
     up = "UPDATE " <> kvMetaFullName m <> setter <>  pred
@@ -282,7 +282,7 @@ updatePatch conn kv old  t = do
     pred   =" WHERE " <> T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> kold)
     setter = " SET " <> T.intercalate "," (equality .   escapeReserved . attrValueName <$> skv   )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
-    skv = unTB <$> F.toList  (_kvvalues $ tbskv)
+    skv = F.toList  (_kvvalues $ tbskv)
     tbskv = snd isM
     isM :: TBData PGKey  Showable
     isM =  justError ("cant diff befor update" <> show (kv,old)) $ diffUpdateAttr kv old
@@ -383,7 +383,7 @@ loadDelayed inf t@(k,v) values@(ks,vs)
   | otherwise = do
        let
            whr = T.intercalate " AND " ((\i-> justError ("no key" <> show i <> show labelMap)  (M.lookup (S.singleton $ Inline i) labelMap) <>  " = ?") <$> (_kvpk k) )
-           (labelMap,_) = evalRWS (traverse (lkTB. unTB) $  _kvvalues $  (snd $ tableNonRef2 (k,v)) :: CodegenT Identity (M.Map (S.Set (Rel Key)) Text)) [Root k] namemap
+           (labelMap,_) = evalRWS (traverse (lkTB) $  _kvvalues $  (snd $ tableNonRef2 (k,v)) :: CodegenT Identity (M.Map (S.Set (Rel Key)) Text)) [Root k] namemap
            table = justError "no table" $ M.lookup (S.fromList $ _kvpk k) (pkMap inf)
            delayedTB1 :: TBData Key () -> TBData Key ()
            delayedTB1 = fmap (\(KV i ) -> KV $ M.filterWithKey  (\i _ -> isJust $ M.lookup i filteredAttrs ) i)
@@ -392,7 +392,7 @@ loadDelayed inf t@(k,v) values@(ks,vs)
               tq <- expandBaseTable t
               rq <- explodeRecord delayed
               return $ "select row_to_json(q)  FROM (SELECT " <>  rq <> " FROM " <> renderRow tq <> " WHERE " <> whr <> ") as q "
-           pk = (fmap (firstTB (recoverFields inf) .unTB) $ fmap snd $ L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)   ) $ M.toList $ _kvvalues $   snd $ tbPK (tableNonRef' values))
+           pk = (fmap (firstTB (recoverFields inf) ) $ fmap snd $ L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)   ) $ M.toList $ _kvvalues $   snd $ tbPK (tableNonRef' values))
        is <- queryWith (fromRecordJSON delayed namemap) (conn inf) (fromString $ T.unpack str) pk
        res <- case is of
             [] -> errorWithStackTrace "empty query"
@@ -415,7 +415,7 @@ loadDelayed inf t@(k,v) values@(ks,vs)
 
 selectAll
   ::
-     TBF Identity Key ()
+     TBF Key ()
      -> Int
      -> Maybe PageToken
      -> Int
@@ -423,7 +423,7 @@ selectAll
      -> WherePredicate
      -> TransactionM  (Int,
            [(KVMetadata Key,
-               (KV (Compose Identity (TB Identity))) Key Showable)])
+               KV Key Showable)])
 selectAll m offset i  j k st = do
       inf <- ask
       let

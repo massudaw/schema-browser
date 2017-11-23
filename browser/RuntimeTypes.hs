@@ -130,7 +130,7 @@ data BrowserState
   ,rowpk :: Maybe (Non.NonEmpty (Text,Text))
   }
 
-type TBF f k v = (KVMetadata k ,KV (Compose f (TB f)) k v)
+type TBF  k v = (KVMetadata k ,KV k v)
 
 
 tableMap :: InformationSchema -> HM.HashMap Text (HM.HashMap Text Table)
@@ -426,7 +426,7 @@ typeCheckPrim i j  = failure ["cant match " ++ show i ++ " with " ++ show j ]
 typeCheckTB (Fun k ref i) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) (keyType k ) i
 typeCheckTB (Attr k i ) = typeCheckValue (\(AtomicPrim l )-> typeCheckPrim l) (keyType k ) i
 typeCheckTB (IT k i ) = typeCheckValue (\(RecordPrim l) -> typeCheckTable l ) (keyType k)  i
-typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB . unTB <$>  _kvvalues k) <*> typeCheckValue (\(RecordPrim l) -> typeCheckTable l )  ktype i
+typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB <$>  _kvvalues k) <*> typeCheckValue (\(RecordPrim l) -> typeCheckTable l )  ktype i
   where -- FKJoinTable  rel next  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS table)) path
         -- path = L.find (\(Path i _ )-> i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  table)
         ktypeRel = mergeFKRef (keyType ._relOrigin <$> rel2)
@@ -436,7 +436,7 @@ typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typ
 
 typeCheckTable ::  (Text,Text) -> TBData (FKey (KType (Prim KPrim (Text,Text)))) Showable -> Errors [String] ()
 typeCheckTable c  (t,l)
-  =  F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB . unTB <$> _kvvalues (l))
+  =  F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB <$> _kvvalues (l))
 
 type LookupKey k = (InformationSchema -> Text -> k -> Key, Key -> k)
 lookupKeyName = (lookKey ,keyValue)
@@ -444,7 +444,7 @@ lookupKeyPosition= (lookKeyPosition , keyPosition)
 
 
 liftTableF ::  (Show k ,Ord k) => LookupKey k -> InformationSchema ->  Text -> TBData k a -> TBData Key a
-liftTableF f inf  tname (_,v)   = (tableMeta ta, (\(KV i) -> KV $ mapFromTBList $ mapComp (liftFieldF  f inf  tname) <$> F.toList i) v)
+liftTableF f inf  tname (_,v)   = (tableMeta ta, (\(KV i) -> KV $ mapFromTBList $ (liftFieldF  f inf  tname) <$> F.toList i) v)
   where
     ta = lookTable inf tname
 
@@ -457,8 +457,8 @@ liftTable' = liftTableF lookupKeyName
 liftKeys
   :: InformationSchema
      -> Text
-     -> FTB1 Identity Text a
-     -> FTB1 Identity Key a
+     -> FTB1 Text a
+     -> FTB1 Key a
 liftKeys inf tname = fmap (liftTable' inf tname)
 
 findRefTableKey inf ta rel =  tname2
@@ -471,7 +471,7 @@ findRefTable inf tname rel =  tname2
 
 liftFieldF :: (Show k ,Ord k) => LookupKey k -> InformationSchema -> Text -> Column k a -> Column Key a
 liftFieldF (f,p) inf tname (Attr t v) = Attr (f inf tname t) v
-liftFieldF (f,p) inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (f inf tname ) (mapComp (liftFieldF (f,p) inf tname) ) ref)   rel (liftTableF (f,p) rinf tname2 <$> tb)
+liftFieldF (f,p) inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (f inf tname ) ((liftFieldF (f,p) inf tname) ) ref)   rel (liftTableF (f,p) rinf tname2 <$> tb)
   where FKJoinTable  rel (schname,tname2)  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map p i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
         rinf = fromMaybe inf (HM.lookup schname (depschema inf))
         ta = lookTable inf tname

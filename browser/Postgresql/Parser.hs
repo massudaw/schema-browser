@@ -145,22 +145,22 @@ instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
 
 
 
-instance  TF.ToField (TB Identity Key Showable)  where
+instance  TF.ToField (TB Key Showable)  where
   toField (Attr k  i) = TF.toField (keyType k ,i)
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri ) ) $ maybe id (flip mappend) attrs $ (unTB <$> F.toList (_kvvalues $ i) )  ))
+  toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri ) ) $ maybe id (flip mappend) attrs $ (F.toList (_kvvalues $ i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ i))
   toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
   toField e = errorWithStackTrace (show e)
 
 
 
-instance  TF.ToField (TB Identity PGKey Showable)  where
+instance  TF.ToField (TB PGKey Showable)  where
   toField (Attr k  i) = case  topconversion preconversion (textToPrim <$> keyType k) of
           Just (_,b) -> TF.toField (fmap ( (\(AtomicPrim (_,i,_) ) -> i)$head $ F.toList $ keyType k,) $ b i)
           Nothing -> TF.toField (fmap ((\(AtomicPrim (_,i,_) ) -> i) $ head $ F.toList $ keyType k,) i)
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri ) ) $ maybe id (flip mappend) attrs $ (unTB <$> F.toList (_kvvalues $ i) )  ))
+  toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri ) ) $ maybe id (flip mappend) attrs $ (F.toList (_kvvalues $ i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ i))
   toField (IT n  (ArrayTB1 is)) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
   toField e = errorWithStackTrace (show e)
@@ -300,7 +300,7 @@ parseAttrJSON (IT na j) v = do
 parseAttrJSON i v = errorWithStackTrace (show (i,v))
 
 
-parseAttr :: TB Identity Key () -> Parser (TB Identity Key Showable)
+parseAttr :: TB Key () -> Parser (TB Key Showable)
 -- parseAttr i | traceShow i False = undefined
 parseAttr (Attr i _ ) = do
   s<- parseShowable (keyType  i) <?> show i
@@ -319,7 +319,7 @@ parseAttr (FKT l rel j ) = do
   ml <- if L.null (unkvlist l)
      then return []
      else do
-       ml <- unIntercalateAtto (traComp parseAttr <$> unkvlist l) (char ',')
+       ml <- unIntercalateAtto (parseAttr <$> unkvlist l) (char ',')
        char ','
        return ml
   mj <- tryquoted (parseLabeledTable j)
@@ -354,12 +354,12 @@ parseRecordJSON  (me,m) (A.Object v) = atTable me $ do
         tb <- lkTB i
         return $ justError (" no attr " <> show (i,v)) $ HM.lookup tb  v
 
-  im <- traverse (fmap _tb . (\ i -> parseAttrJSON  i =<<  try1 i v). unTB)$   _kvvalues m
+  im <- traverse ((\ i -> parseAttrJSON  i =<<  try1 i v))$   _kvvalues m
   return (me, KV im )
 
 
 parseRecord  (me,m) = (char '('  *> (do
-  im <- unIntercalateAtto (traverse (traComp parseAttr) <$> (  L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr.snd)) $M.toList (replaceRecRel  (_kvvalues $ m) (fmap (fmap (fmap S.fromList) ) $ _kvrecrels  me))) ) (char ',')
+  im <- unIntercalateAtto (traverse (parseAttr) <$> (  L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr.snd)) $M.toList (replaceRecRel  (_kvvalues $ m) (fmap (fmap (fmap S.fromList) ) $ _kvrecrels  me))) ) (char ',')
   return (me,  KV (M.fromList im) )) <*  char ')' )
 
 parseRow els  = (char '('  *> (do

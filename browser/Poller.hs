@@ -145,7 +145,7 @@ poller schmRef authmap db plugs is_test = do
                       let table = (\i -> tblist
                               [ attrT ("plugin",pid )
                               , attrT ("schema",TB1 (SNumeric schema))
-                              , _tb $ IT "diffs" (LeftTB1 $ ArrayTB1  . Non.fromList <$> (
+                              , IT "diffs" (LeftTB1 $ ArrayTB1  . Non.fromList <$> (
                                         nonEmpty  . concat . catMaybes $
                                             fmap (fmap (TB1 . tblist  )) .  either (\r ->Just $ pure $ [attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) ),attrT ("modify",LeftTB1 $Nothing)]) (Just . fmap (\r -> [attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $  r))   ),attrT ("except",LeftTB1 $Nothing)])) <$> i))
                               , attrT ("duration",srange (time current) (time end))]) <$> nonEmpty i

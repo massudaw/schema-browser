@@ -109,7 +109,7 @@ trimr = reverse . triml . reverse
 
 testGpx = print =<< (readFile "track.gpx" >>= gpx )
 
-gpx :: String -> IO (Maybe [[TB Identity TE.Text Showable]])
+gpx :: String -> IO (Maybe [[TB TE.Text Showable]])
 gpx file = do
   i <- runX (readString [withValidate no,withWarnings no,withParseHTML yes] file
         >>> atTag"trk" >>> atTag "trkseg" >>> listA getPoint)

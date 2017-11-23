@@ -72,7 +72,7 @@ queryGeocodeBoundary = FPlugins "Google Geocode" "address"  $ IOPlugin url
                                         (Nothing , j) -> j
             return [("geocode" ,pos p)]) -<  (im,addr)
 
-      let tb =  tblist . fmap (_tb . (uncurry Attr ) . second (LeftTB1 . Just )) <$> r
+      let tb =  tblist . fmap ((uncurry Attr ) . second (LeftTB1 . Just )) <$> r
       returnA -< tb
 
 
@@ -92,7 +92,7 @@ queryCEPBoundary = FPlugins "Correios CEP" "address" $ IOPlugin  open
           r <- (act (  liftIO . traverse (\input -> do
                        v <- get . (\i-> addrs <> (L.filter (not . flip elem (",.-" :: String)) i) <> ".json")  . TL.unpack $ input
                        return $ ( \i -> fmap (L.filter ((/="").snd) . HM.toList ) $ join $ fmap decode (i ^? responseBody)  ) v ))) -< (\(TB1 (SText t))-> t) <$> Just i
-          let tb = tblist . fmap ( (\i ->  _tb $ Attr (fst i ) (snd i)). first translate. second (LeftTB1 . Just . TB1 . SText)) <$> join r
+          let tb = tblist . fmap ( (\i ->  Attr (fst i ) (snd i)). first translate. second (LeftTB1 . Just . TB1 . SText)) <$> join r
           returnA -< tb
 
       addrs ="http://cep.correiocontrol.com.br/"

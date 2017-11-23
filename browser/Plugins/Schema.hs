@@ -96,14 +96,14 @@ list (One i) = pure i
 
 reference (IProd _ k)
   = [ IT "iprod" (LeftTB1 . Just . TB1 .
-      tblist . fmap _tb $ [ Attr "key" ((txt ) k )])
+      tblist  $ [ Attr "key" ((txt ) k )])
     , IT "nested" (LeftTB1 Nothing)]
 reference (Nested l nest )
   = [ IT "iprod" (LeftTB1 Nothing)
     , IT "nested" (LeftTB1 . Just .TB1 .
-      tblist .fmap _tb $
+      tblist $
         [Attr "ref" (array (txt . iprodRef ) (Non.fromList l))
-        ,IT "nest" (array (TB1 .tblist . fmap _tb . reference ) ( list nest))]) ]
+        ,IT "nest" (array (TB1 .tblist . reference ) ( list nest))]) ]
 reference  i = errorWithStackTrace ("no match reference: " ++ show i)
 
 addPlugins iniPlugList smvar = do
@@ -115,15 +115,15 @@ addPlugins iniPlugList smvar = do
   let
     row dyn@(FPlugins _ _ (StatefullPlugin _)) =  do
         name <- nameM
-        return $ tblist $ fmap _tb [FKT (kvlist $ _tb . Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM ) name)) [Rel "ref" Equals "oid"]  (TB1 name), Attr "table" (txt (_bounds dyn) ), Attr "plugin" (TB1 $ SHDynamic (HDynamic (toDyn dyn ))) ]
+        return $ tblist $ [FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM ) name)) [Rel "ref" Equals "oid"]  (TB1 name), Attr "table" (txt (_bounds dyn) ), Attr "plugin" (TB1 $ SHDynamic (HDynamic (toDyn dyn ))) ]
       where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl (keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
     row dyn = do
         name <- nameM
         let (inp,out) = pluginStatic dyn
-        return $ tblist $ _tb <$> [ FKT (kvlist $ _tb . Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
+        return $ tblist $ [ FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
                           , Attr "table" (txt (_bounds dyn) )
-                          , IT "input" (array (TB1 .tblist . fmap _tb . reference ) (list inp))
-                          , IT "output" (array (TB1 .tblist . fmap _tb . reference ) (list out))
+                          , IT "input" (array (TB1 .tblist . reference ) (list inp))
+                          , IT "output" (array (TB1 .tblist . reference ) (list out))
                           , Attr "plugin" (TB1 $ SHDynamic (HDynamic (toDyn dyn ))) ]
       where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl (keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
   R.onEventIO event (\dyn -> do

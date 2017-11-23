@@ -87,7 +87,7 @@ chartWidgetMetadata inf = do
             geoFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "geo" $ keyRef "geo")  <$> G.lookup (idex (meta inf) "geo" [("schema" ,schId ),("table",tablId )])  geomap
             (Attr _ color )= lookAttr' (meta inf) "color" e
             projf  r efield  = M.fromList [("value" ,ArrayTB1 $  attr <$> efield), ("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color )] :: M.Map Text (FTB Showable)
-              where attr  (TB1 (SText field)) = _tbattr $ unTB $justError ("no attr " <> show field) (findAttr (lookKey inf tname field) r)
+              where attr  (TB1 (SText field)) = _tbattr $ justError ("no attr " <> show field) (findAttr (lookKey inf tname field) r)
 
             proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  projf r efields
             attrValue (Attr k v) = v
