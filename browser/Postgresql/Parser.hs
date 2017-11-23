@@ -284,7 +284,7 @@ unIntercalateAtto l s = go l
   where
     go [e] =  fmap pure  e
     go (e:cs) =  liftA2 (:) e  (s *> go cs)
-    go [] = errorWithStackTrace  "empty list"
+    go [] = errorWithStackTrace  "unIntercalateAtto empty list"
 
 -- parseAttrJSON i v | traceShow (i,v) False = undefined
 parseAttrJSON (Attr i _ ) v = do
@@ -566,7 +566,7 @@ parseShowableJSON  p@(Primitive l (AtomicPrim i)) v = parseKTypePrim l v
         A.Null ->  return $ LeftTB1 Nothing
         vn -> LeftTB1 . Just  <$>  parseKTypePrim i vn
     parseKTypePrim  (KArray :i )  (A.Array l )
-      =  maybe (fail "empty list" ) (fmap (ArrayTB1 . Non.fromList) . mapM (parseKTypePrim i)) (nonEmpty $ F.toList l)
+      =  maybe (fail "parseKTypePrim empty list" ) (fmap (ArrayTB1 . Non.fromList) . mapM (parseKTypePrim i)) (nonEmpty $ F.toList l)
 
     parseKTypePrim (KInterval :l ) (A.String v)
       = case parseOnly (parseShowable (Primitive (KInterval :l) (AtomicPrim i))) (BS.pack $ T.unpack v) of

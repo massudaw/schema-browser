@@ -409,7 +409,7 @@ loadPlugins inf =  do
   code <- liftIO$ indexSchema  (rootRef inf) "code"
   (_,(_,evMap )) <- transactionNoLog  code $ selectFromTable "plugin_code" Nothing Nothing [] []
   let
-    project e = (i, p)
+    project e = traceShow ("plugin",i)(i, p)
       where
          i = justError "cant find function field" $ fmap (convertI . _tbattr) $  indexField (liftAccess code "plugin_code" $ keyRef "ref") e
          p = justError "cant find function field" $ join . fmap (convertP . _tbattr) $  indexField (liftAccess code  "plugin_code" $ keyRef "plugin") e
@@ -472,7 +472,7 @@ eiTableDiff inf table constr refs plmods ftb@(meta,k) preoldItems = do
   oldItems <- ui $ cacheTidings preoldItems
   plugins <- ui $ loadPlugins inf
   let
-  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds . snd) (plugins ))
+  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . traceShowId . _bounds .  snd) (plugins ))
   let
       resdiff =   fmap ( liftA2 (\i j -> (join .liftA2 (\j i@(_,pk,_)   -> if   pk == G.getIndex j then Just i else Nothing ) i $ j ) ) oldItems   ) .  snd <$> res
       srefs :: [(Set (Rel Key),
@@ -518,11 +518,8 @@ eiTableDiff inf table constr refs plmods ftb@(meta,k) preoldItems = do
       return (listBody,sequenceTable fks)
   element listBody # set UI.class_ "row" #
       set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
-  plugins <-  if not (L.null (fst <$> res))
-    then do
-      pure <$> UI.div # set children (fst <$> res)
-    else do
-      return []
+  plugins <-  do
+    pure <$> UI.div # set children (fst <$> res)
   body <- UI.div
     # set children (plugins  <> pure listBody)
     # set style [("margin-left","0px"),("border","2px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid")]

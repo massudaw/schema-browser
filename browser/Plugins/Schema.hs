@@ -10,7 +10,7 @@ import Control.Monad
 import Data.Maybe
 import Data.Proxy
 import Schema
-import NonEmpty
+import NonEmpty hiding(nonEmpty)
 import qualified Types.Index as G
 
 import RuntimeTypes
@@ -90,24 +90,30 @@ textToPrim i = errorWithStackTrace ("textToPrim : " ++ show i)
 
 code smvar  = indexSchema smvar "code"
 
-list (Many inp) = join $ list <$> Non.fromList inp
-list (ISum inp) = join $ list <$> Non.fromList inp
-list (One i) = pure i
+list' :: Union a -> Maybe (NonEmpty a)
+list' (Many inp) = join $  fmap (join  .Non.fromList) . nonEmpty . catMaybes . fmap list'   <$> nonEmpty inp
+list' (ISum inp) = join $  fmap (join  .Non.fromList) . nonEmpty . catMaybes . fmap list'   <$> nonEmpty inp
+list' (One i) = Just $ pure i
 
+list :: Union a -> NonEmpty a
+list = justError "empty list " . list'
+
+reference i | traceShow i False = undefined
 reference (IProd _ k)
   = [ IT "iprod" (LeftTB1 . Just . TB1 .
       tblist  $ [ Attr "key" ((txt ) k )])
     , IT "nested" (LeftTB1 Nothing)]
 reference (Nested l nest )
   = [ IT "iprod" (LeftTB1 Nothing)
-    , IT "nested" (LeftTB1 . Just .TB1 .
+    , IT "nested" (LeftTB1 $ (\nest -> TB1 .
       tblist $
         [Attr "ref" (array (txt . iprodRef ) (Non.fromList l))
-        ,IT "nest" (array (TB1 .tblist . reference ) ( list nest))]) ]
+        ,IT "nest" (array (TB1 .tblist . reference )  nest)]) <$> (list' nest)) ]
+
 reference  i = errorWithStackTrace ("no match reference: " ++ show i)
 
 addPlugins iniPlugList smvar = do
-  metaschema <- liftIO $code smvar
+  metaschema <- liftIO $ code smvar
   let plugins = "plugin_code"
   (_,(_,plug))<- transactionNoLog (meta metaschema) $ selectFrom "plugins" Nothing Nothing [] mempty
   (dbstats,_)<- transactionNoLog metaschema $ selectFrom plugins Nothing Nothing [] mempty
@@ -126,8 +132,7 @@ addPlugins iniPlugList smvar = do
                           , IT "output" (array (TB1 .tblist . reference ) (list out))
                           , Attr "plugin" (TB1 $ SHDynamic (HDynamic (toDyn dyn ))) ]
       where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl (keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
-  R.onEventIO event (\dyn -> do
-    putPatch (patchVar $ iniRef dbstats) . pure  $ dyn)
+  R.onEventIO event (putPatch (patchVar ( iniRef dbstats)) . pure )
   inotify <- liftIO initINotify
   let
     modifyed (Closed i j True ) = do
@@ -138,7 +143,7 @@ addPlugins iniPlugList smvar = do
     modifyed i = return ()
   watch <- liftIO$ addWatch inotify  [CloseWrite] "Plugins.hs" modifyed
   R.registerDynamic (removeWatch watch)
-  liftIO $  mapM (traverse (handle . CreateRow .liftTable' metaschema "plugin_code") . row)  iniPlugList
+  liftIO $ mapM (traverse (handle . traceShowId . CreateRow .liftTable' metaschema "plugin_code") . row)  iniPlugList
   return  iniPlugList
 
 

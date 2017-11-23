@@ -33,14 +33,12 @@ import  GHC.Stack
 import PandocRenderer
 import Gpx
 import OAuthClient
-
 import Types
 import Types.Index
 import Types.Patch
 import Step.Client
 import RuntimeTypes
 import Utils
-
 import Network.Mail.Mime
 import Control.Monad.Reader
 import Data.Functor.Apply
@@ -859,7 +857,6 @@ queryArtAndamento = FPlugins pname tname $  IOPlugin url
           artPayd dm = ("payment_date" ,) . opt (timestamp . fst) . join $ (\d -> strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
           artInp inp = Just $ tblist $fmap attrT   $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       returnA -< artInp v
-
 
 plugList :: [PrePlugins]
 plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,areaDesign,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,-}siapi3Plugin ,siapi3Inspection,siapi2Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , checkPrefeituraXML,notaPrefeitura,notaPrefeituraXML,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]

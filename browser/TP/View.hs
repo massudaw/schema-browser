@@ -92,7 +92,7 @@ indexTy (Nested [IProd _ xs] n) = Primitive ((_keyFunc $ keyType xs) ++ ty) at
       Primitive ty at = indexTyU n
 
 
-geoPred inf tname geofields (ne,sw) = traceShowId geo
+geoPred inf tname geofields (ne,sw) = geo
   where
     geo = OrColl $ geoField <$> F.toList geofields
     geoField f =
@@ -113,7 +113,7 @@ geoPred inf tname geofields (ne,sw) = traceShowId geo
           KArray -> AnyOp $ go i
           v -> errorWithStackTrace (show v)
 
-timePred inf tname evfields (incrementT,resolution) = traceShowId time
+timePred inf tname evfields (incrementT,resolution) = time
   where
     time = OrColl $ timeField <$> F.toList evfields
     timeField f =
@@ -251,7 +251,7 @@ makePatch zone ((t,pk,k),a) =
         utcToLocalTime utc . localTimeToUTC zone . utcToLocalTime utc
 
 readPosition:: EventData -> Maybe ([Double],[Double])
-readPosition (v) = traceShowId $ (,) <$>  readP ni na nz <*>readP si sa sz
+readPosition (v) = (,) <$>  readP ni na nz <*>readP si sa sz
   where
      [ni,na,nz,si,sa,sz] = unsafeFromJSON v
      readP i a z = (\i j z-> [i,j, z]) <$> readMay i<*> readMay a <*> readMay z
@@ -260,7 +260,6 @@ currentPosition :: Element -> Event ([Double],[Double])
 currentPosition el = filterJust $ readPosition<$>  domEvent "currentPosition" el
 
 
-convertInter i | traceShow i False = undefined
 convertInter i =    liftA2 (,) (fmap convertPoint $ G.unFin $ fst $upperBound' i) (fmap convertPoint $ G.unFin $ fst $lowerBound' i)
   where
      convertPoint ((SGeo (SPosition (Position (y,x,z)) ))) = [x,y,z]

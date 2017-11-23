@@ -424,8 +424,6 @@ instance NFData a => NFData (BoolCollection a)
 instance Binary a => Binary (BoolCollection a)
 
 
-
-
 tableUnique (Project i _ ) = tableUniqueR i
 tableUnique i =  tableUniqueR i
 rawFKS (Project i _ ) =  _rawFKSL i
@@ -456,12 +454,6 @@ data TableModificationK k p
   , tableDiff ::  p
   }
   deriving(Eq,Show,Functor,Generic)
-
-
-
-
-
-
 
 
 type QueryRef = State ((Int,Map Int Table ),(Int,Map Int Key))

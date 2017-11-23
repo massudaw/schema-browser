@@ -420,7 +420,7 @@ tbFilter' pred (kv,item) =  (kv,(\(KV item)->  KV $ M.filterWithKey (\k _ -> pre
 
 mkKey i = do
   (c,m) <- snd <$> get
-  let next = traceShow (i,c+1) (c+1,M.insert (c+1) i m)
+  let next = (c+1,M.insert (c+1) i m)
   modify (\(j,_) -> (j,next))
   return (c+1,i)
 

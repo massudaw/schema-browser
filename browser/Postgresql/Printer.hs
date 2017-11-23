@@ -89,7 +89,7 @@ type Codegen = RWST [Address Key] String NameMap Identity
 mkKey i = do
   (c,m) <- snd <$> get
   path <- ask
-  let next = traceShow (i,c+1) (c+1,M.insert (path ++ [i]) (c+1) m)
+  let next = (c+1,M.insert (path ++ [i]) (c+1) m)
   modify (\(j,_) -> (j,next))
   return (c+1)
 
