@@ -12,7 +12,7 @@ module Query
   ,tableAttrs
   ,RelSort(..)
   ,joinRel
-  ,liftASch
+  ,TableMap
   ,joinRel2
   ,isPrimReflexive
   ,alterKeyType
@@ -129,14 +129,9 @@ isKOptional _ = False
 showTable t  = rawSchema t <> "." <> rawName t
 
 
-
-
-
-
-attrValueName :: (Ord a,Ord k, Show k ,Show a) => TB (FKey k) a -> Text
+attrValueName ::  TB (FKey k) a -> Text
 attrValueName (Attr i _ )= keyValue i
 attrValueName (IT i  _) = keyValue i
-attrValueName i = errorWithStackTrace $ " no attr value instance " <> show i
 
 
 --
@@ -144,10 +139,7 @@ attrValueName i = errorWithStackTrace $ " no attr value instance " <> show i
 --
 
 
-
-
 rawFullName = showTable
-
 
 allKVRec :: TB2 Key Showable -> [FTB Showable]
 allKVRec = concat . F.toList . fmap allKVRec'
@@ -295,27 +287,26 @@ recursePath m isLeft isRec vacc ksbn invSchema p@(Path ifk jo@(FKInlineTable (s,
         nextLeft =  isLeft || anyLeftRel ks
         mapArray i =  if anyArrayRel ks then ArrayTB1 $ pure i else i
         mapOpt i = if anyLeftRel ks then  LeftTB1 $ Just  i else i
-        nextT = justError ("recursepath lookIT "  <> show t <> " " <> show invSchema) (join $ HM.lookup t <$> HM.lookup s invSchema)
+        nextT = justError ("recursepath lookIT "  <> show t <> " " <> show invSchema) (HM.lookup t =<< HM.lookup s invSchema)
         fun =  recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
 recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn,tn)) )
     | anyArrayRel ks =   do
           ksn <- labelTable nextT
           tb <-fun ksn
-          let knas = dumbKey (rawName nextT)
           return $ (FKT (findRefs  ksbn)  ks  (mapOpt $ mapArray $ TB1 tb  ))
     | otherwise = do
           ksn <- labelTable nextT
           tb@(m,r)  <- fun ksn
           return  $ FKT ( findRefs ksbn )  ks (mapOpt $ TB1 tb)
   where
-        nextT = (\(Just i)-> i) (join $ HM.lookup tn <$> (HM.lookup sn invSchema))
-        findRefs = findRefFK  (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks))
-        e = S.fromList $ rawPK nextT
-        nextLeft = any (isKOptional.keyType) (S.toList ifk) || isLeft
-        mapArray i =  if anyArrayRel ks then ArrayTB1 (pure i) else i
-        mapOpt i = if anyLeftRel ks then  LeftTB1 $ Just  i else i
-        fun =   recurseTB invSchema (rawFKS nextT) nextLeft isRec
+    nextT = justError "no table"  $ (HM.lookup tn  =<< HM.lookup sn invSchema)
+    findRefs = findRefFK  (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks))
+    e = S.fromList $ rawPK nextT
+    nextLeft = any (isKOptional.keyType) (S.toList ifk) || isLeft
+    mapArray i =  if anyArrayRel ks then ArrayTB1 (pure i) else i
+    mapOpt i = if anyLeftRel ks then  LeftTB1 $ Just  i else i
+    fun =   recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
 recursePath m isLeft isRec vacc ksbn invSchema jo@(Path ifk (RecJoin l f) )
   = recursePath m isLeft (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec  ) vacc ksbn invSchema (Path ifk f )
@@ -352,8 +343,6 @@ recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else
 
 mAny f (MutRec i) = L.any f i
 
-
-
 type RecState k = [(MutRec [[Rel k]],MutRec [[Rel k]])]
 
 isAccessRel (RelAccess i _ ) = True
@@ -370,30 +359,6 @@ anyLeftRel = L.any isLeftRel
 isLeftRel (Rel i _ _ ) =  isKOptional (keyType i)
 isLeftRel (Inline i ) =  isKOptional (keyType i)
 isLeftRel (RelAccess i j ) =  isKOptional (keyType i) || isLeftRel j
-
-
-liftASchU inf s tname (ISum i) =  ISum $ fmap (liftASchU inf s tname)  i
-liftASchU inf s tname (Many i) =  Many $ fmap (liftASchU inf s tname)  i
-liftASchU inf s tname (One i) =  One $ liftASch inf s tname  i
-
-liftASch :: TableMap  -> Text -> Text -> Access Text  -> Access Key
-liftASch inf s tname (IProd b l) = IProd b $ lookKey  l
-  where
-    tb = lookup tname $  lookup s inf
-    lookup i m = justError ("no look" <> show i) $ HM.lookup i m
-    lookKey c = i
-      where
-        i = justError "no attr" $ L.find ((==c).keyValue ) (tableAttrs tb)
-liftASch inf s tname (Nested i c) = Nested ref (liftASchU inf (fst l ) (snd l) c)
-  where
-    ref = liftASch inf s tname <$> i
-    lookup i m = justError ("no look" <> show i) $ HM.lookup i m
-    tb = lookup tname $  lookup s inf
-    n = justError "no fk" $ L.find (\i -> S.fromList (iprodRef <$> ref )== (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
-    l = case n of
-          (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
-          (Path _ rel@(FKInlineTable  l  ) ) ->  l
-liftASch _ _ _ i = errorWithStackTrace (show i)
 
 
 
@@ -436,15 +401,8 @@ kname i = do
   return $ (Attr i (TB1 ()))
 
 
-
 alterKeyType f  = Le.over keyTypes f
 
-
-
-
-
-
--- interval' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
 
 inf' = unFinite . Interval.lowerBound
 sup' = unFinite . Interval.upperBound
@@ -498,8 +456,6 @@ instance (Show i,P.Poset i )=> P.Poset (Rel i)where
                                           False -> P.compare j (Inline i)
 
   compare i j = errorWithStackTrace (show (i,j))
-
-
 
 
 instance P.Poset (FKey i)where
@@ -618,10 +574,4 @@ joinRel2 tb ref table
 lookGist un pk  = G.search (tbpred un pk)
 checkGist un pk  m = maybe False (\i -> not $ L.null $ G.search i m ) (tbpredM un pk)
 
-
 tbpredM un  = G.notOptionalM . G.getUnique un
-
-
-
-
-

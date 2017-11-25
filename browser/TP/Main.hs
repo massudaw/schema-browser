@@ -126,7 +126,6 @@ setup smvar args plugList w = void $ do
 
     cliIni <- currentValue (facts cliTid)
     iniKey <- currentValue (facts initKey)
-    liftIO$ print ("iniKey",iniKey,cliIni)
     let
       buttonStyle lookDesc k e = Just <$> do
          label <- UI.div # sink0 UI.text (fmap T.unpack $ facts $ lookDesc  <*> pure k)  # set UI.class_ "fixed-label col-xs-11"
@@ -300,7 +299,6 @@ databaseChooser smvar metainf sargs plugList = do
         = case ty of
           "rest" -> do
               userEnv <- liftIO$ lookupEnv "GOOGLE_USER"
-              liftIO $ print userEnv
               usernamel <- flabel # set UI.text "Usuário"
               username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set value (fromMaybe "" userEnv)
               usernameE <-  fmap nonEmpty  <$> UI.valueChange username

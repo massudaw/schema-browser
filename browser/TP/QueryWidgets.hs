@@ -409,7 +409,7 @@ loadPlugins inf =  do
   code <- liftIO$ indexSchema  (rootRef inf) "code"
   (_,(_,evMap )) <- transactionNoLog  code $ selectFromTable "plugin_code" Nothing Nothing [] []
   let
-    project e = traceShow ("plugin",i)(i, p)
+    project e = (i, p)
       where
          i = justError "cant find function field" $ fmap (convertI . _tbattr) $  indexField (liftAccess code "plugin_code" $ keyRef "ref") e
          p = justError "cant find function field" $ join . fmap (convertP . _tbattr) $  indexField (liftAccess code  "plugin_code" $ keyRef "plugin") e
@@ -472,7 +472,7 @@ eiTableDiff inf table constr refs plmods ftb@(meta,k) preoldItems = do
   oldItems <- ui $ cacheTidings preoldItems
   plugins <- ui $ loadPlugins inf
   let
-  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . traceShowId . _bounds .  snd) (plugins ))
+  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds .  snd) (plugins ))
   let
       resdiff =   fmap ( liftA2 (\i j -> (join .liftA2 (\j i@(_,pk,_)   -> if   pk == G.getIndex j then Just i else Nothing ) i $ j ) ) oldItems   ) .  snd <$> res
       srefs :: [(Set (Rel Key),
@@ -1084,23 +1084,14 @@ oneInput i tdi = do
     return $ TrivialWidget (tidings pk pke) inputUI
 
 
-renderInlineTable inf constr pmods oldItems (RecordPrim na)
-  =   go constr na   pmods oldItems
-  where
-    go constr tn pmods coldItems = do
-        let
-            convertConstr ([pre],j) =  (\i -> ([i],(\j -> (\v -> j [(TB1 (tblist (fmap addDefault (L.delete i attrs) ++ (v))))])) <$> j )) <$> attrs
-              where attrs = F.toList $ unKV $ snd $ unTB1 $ _fkttable pre
-            table = lookTable rinf (snd tn)
-            rinf = fromMaybe inf (HM.lookup (fst tn) (depschema inf))
-
-        (celem,tcrud) <- eiTableDiff inf table (concat $ convertConstr <$> constr)
-                []
-                pmods
-                (allRec' (tableMap inf) table)
-                coldItems
-
-        return $ TrivialWidget tcrud celem
+renderInlineTable inf constr pmods oldItems (RecordPrim na) = do
+    let
+        convertConstr ([pre],j) =  (\i -> ([i],(\j -> (\v -> j [(TB1 (tblist (fmap addDefault (L.delete i attrs) ++ (v))))])) <$> j )) <$> attrs
+          where attrs = F.toList $ unKV $ snd $ unTB1 $ _fkttable pre
+        table = lookTable rinf (snd na)
+        rinf = fromMaybe inf (HM.lookup (fst na) (depschema inf))
+    uncurry (flip TrivialWidget) <$>
+      eiTableDiff inf table (concat $ convertConstr <$> constr) [] pmods (allRec' (tableMap inf) table) oldItems
 
 
 
@@ -1118,7 +1109,7 @@ iUITableDiff
 iUITableDiff inf constr pmods oldItems  (IT na  tb1)
   = fmap (fmap (PInline  na) )<$> buildUIDiff (renderInlineTable inf (unConstr <$> constr)) (keyType na)   (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
   where
-    unConstr (i,j) = (i, (\j -> (\v -> j $ IT na <$> v)) <$> j )
+    unConstr (i,j) = (i, (\j -> (j . fmap (IT na) )) <$> j )
 
 
 

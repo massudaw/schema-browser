@@ -382,17 +382,16 @@ loadDelayed inf t@(k,v) values@(ks,vs)
   | L.null delayedattrs  = return Nothing
   | otherwise = do
        let
-           whr = T.intercalate " AND " ((\i-> justError ("no key" <> show i <> show labelMap)  (M.lookup (S.singleton $ Inline i) labelMap) <>  " = ?") <$> (_kvpk k) )
            (labelMap,_) = evalRWS (traverse (lkTB) $  _kvvalues $  (snd $ tableNonRef2 (k,v)) :: CodegenT Identity (M.Map (S.Set (Rel Key)) Text)) [Root k] namemap
-           table = justError "no table" $ M.lookup (S.fromList $ _kvpk k) (pkMap inf)
            delayedTB1 :: TBData Key () -> TBData Key ()
            delayedTB1 = fmap (\(KV i ) -> KV $ M.filterWithKey  (\i _ -> isJust $ M.lookup i filteredAttrs ) i)
            delayed =  mapKey' unKDelayed (mapValue' (const ()) (delayedTB1 t))
            (str,namemap) = codegen $ do
               tq <- expandBaseTable t
               rq <- explodeRecord delayed
-              return $ "select row_to_json(q)  FROM (SELECT " <>  rq <> " FROM " <> renderRow tq <> " WHERE " <> whr <> ") as q "
-           pk = (fmap (firstTB (recoverFields inf) ) $ fmap snd $ L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)   ) $ M.toList $ _kvvalues $   snd $ tbPK (tableNonRef' values))
+              let whr = T.intercalate " AND " ((\i-> justError ("no key " <> show i <> show labelMap)  (M.lookup (S.singleton $ Inline i) labelMap) <>  " = ?") <$> _kvpk k)
+              return $ "select row_to_json(q) FROM (SELECT " <>  selectRow "p0" rq <> " FROM " <> renderRow tq <> " WHERE " <> whr <> ") as q "
+           pk = fmap (firstTB (recoverFields inf) . snd) . L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)) . M.toList . _kvvalues . snd $ tbPK (tableNonRef' values)
        is <- queryWith (fromRecordJSON delayed namemap) (conn inf) (fromString $ T.unpack str) pk
        res <- case is of
             [] -> errorWithStackTrace "empty query"

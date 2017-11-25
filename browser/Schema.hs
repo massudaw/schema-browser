@@ -359,3 +359,24 @@ addStats schema = do
 recoverFields :: InformationSchema -> FKey (KType (Prim KPrim  (Text,Text))) -> FKey (KType (Prim PGType PGRecord))
 recoverFields inf v = map
   where map = justError ("notype" <> T.unpack (showKey v)) $ M.lookup (keyFastUnique v)  (backendsKey inf )
+
+
+liftASch :: TableMap  -> Text -> Text -> Access Text  -> Access Key
+liftASch inf s tname (IProd b l) = IProd b $ lookKey  l
+  where
+    tb = lookup tname $  lookup s inf
+    lookup i m = justError ("no look" <> show i) $ HM.lookup i m
+    lookKey c = justError "no attr" $ L.find ((==c).keyValue ) (tableAttrs tb)
+
+liftASch inf s tname (Nested i c) = Nested ref (liftASch inf sch st <$> c)
+  where
+    ref = liftASch inf s tname <$> i
+    lookup i m = justError ("no look" <> show i) $ HM.lookup i m
+    tb = lookup tname $  lookup s inf
+    Path _ rel  = justError "no fk" $ L.find (\i -> S.fromList (iprodRef <$> ref )== (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
+    (sch,st) = case rel of
+          FKJoinTable  _ l -> l
+          FKInlineTable  l -> l
+
+
+

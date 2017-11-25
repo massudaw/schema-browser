@@ -16,6 +16,7 @@ module Postgresql.Printer
   ,NameMap
   ,CodegenT
   ,Address(..)
+  ,selectRow
   ,lkTB
   ,atTable
   )

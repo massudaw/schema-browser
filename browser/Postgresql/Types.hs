@@ -87,10 +87,10 @@ postgresLiftPrimConv' =
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SLineString $ LineString $ V.fromList  $ F.toList $ (fmap (\(TB1 (SGeo (SPosition i))) -> i)) i) ))
 
              ,((Primitive [] (AtomicPrim (PGeom 2 $ PPolygon )), (Primitive [KArray] (AtomicPrim (PGeom 2 $ PLineString ))) )
-                 , ((\(TB1 (SGeo (SPolygon i j ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1. SGeo .SLineString) (i:j))).traceShowId
-                   , (\(ArrayTB1 i) -> TB1 $ (\(i:j) -> SGeo $ SPolygon i j) $ F.toList $ (fmap (\(TB1 (SGeo (SLineString i))) -> i)) i).traceShowId ))
+                 , ((\(TB1 (SGeo (SPolygon i j ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1. SGeo .SLineString) (i:j)))
+                   , (\(ArrayTB1 i) -> TB1 $ (\(i:j) -> SGeo $ SPolygon i j) $ F.toList $ (fmap (\(TB1 (SGeo (SLineString i))) -> i)) i)))
 
-             ,((Primitive [] (AtomicPrim (PGeom 2 $ (MultiGeom (PPolygon )))), (Primitive [KArray] (AtomicPrim (PGeom 2 $ PPolygon ))) )
+             ,((Primitive [] (AtomicPrim (PGeom 2 $ (MultiGeom (PPolygon )))), (Primitive [KArray] (AtomicPrim (PGeom 2 $ PPolygon ))))
                  , ((\(TB1 (SGeo (SMultiGeom i  ))) -> ArrayTB1 (Non.fromList $ F.toList  $ fmap   (TB1 . SGeo) i))
                    , (\(ArrayTB1 i) -> TB1 $ SGeo $ SMultiGeom   $  F.toList $  fmap ((\(SGeo i ) -> i). unTB1) i) ))
 
@@ -198,7 +198,6 @@ postgresPrim =
   ,("time",PDayTime)
   ,("time with time zone" ,PDayTime)
   ,("time without time zone" ,PDayTime)])
-
   ++ [("box3d",PGeom 3 $ PBounding )
   ,("box2d",PGeom 2 $ PBounding )
   ]
@@ -218,7 +217,3 @@ ktypeRec f v@(Primitive (KInterval:xs) i) =   f v <|> fmap (addToken KInterval) 
 ktypeRec f v@(Primitive (KSerial :xs) i) = f v <|> fmap (addToken KSerial) (ktypeRec f (Primitive xs i))
 ktypeRec f v@(Primitive (KDelayed :xs) i) = f v <|> fmap (addToken KDelayed) (ktypeRec f (Primitive xs i))
 ktypeRec f v@(Primitive []  i ) = f v
-
-
-
-

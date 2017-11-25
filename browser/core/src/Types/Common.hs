@@ -137,31 +137,6 @@ newtype KV k a
   = KV {_kvvalues :: Map (Set (Rel k)) (TB k a)  }deriving(Eq,Ord,Functor,Foldable,Traversable,Show,Generic)
 
 
-
-instance Eq2 Map where
-    liftEq2 eqk eqv m n =
-        Map.size m == Map.size n && liftEq (liftEq2 eqk eqv) (Map.toList m) (Map.toList n)
-
-instance Eq k => Eq1 (Map k) where
-    liftEq = liftEq2 (==)
-
-instance Ord2 Map where
-    liftCompare2 cmpk cmpv m n =
-        liftCompare (liftCompare2 cmpk cmpv) (Map.toList m) (Map.toList n)
-
-instance Ord k => Ord1 (Map k) where
-    liftCompare = liftCompare2 compare
-
-instance Show2 Map where
-    liftShowsPrec2 spk slk spv slv d m =
-        showsUnaryWith (liftShowsPrec sp sl) "fromList" d (Map.toList m)
-      where
-        sp = liftShowsPrec2 spk slk spv slv
-        sl = liftShowList2 spk slk spv slv
-
-instance Show k => Show1 (Map k) where
-    liftShowsPrec = liftShowsPrec2 showsPrec showList
-
 instance Binary Order
 instance NFData Order
 
@@ -415,22 +390,22 @@ instance NFData Expr
 
 data TB k a
   = Attr
-    { _tbattrkey :: !k
-    , _tbattr :: !(FTB a)
+    { _tbattrkey :: k
+    , _tbattr :: FTB a
     }
   | Fun
-    { _tbattrkey :: ! k
-    , _fundata :: ! (Expr,[Access k  ])
-    , _tbattr :: ! (FTB a)
+    { _tbattrkey ::  k
+    , _fundata ::  (Expr,[Access k  ])
+    , _tbattr :: FTB a
     }
   | IT -- Inline Table
-    { _tbattrkey :: ! k
-    , _ifkttable :: ! (FTB1  k a)
+    { _tbattrkey ::  k
+    , _ifkttable ::  FTB (KVMetadata k, KV k a)
     }
   | FKT -- Foreign Table
-    { _tbref ::  ! (KV k a)
-    , _fkrelation :: ! [Rel k]
-    , _ifkttable ::   ! (FTB1 k a)
+    { _tbref ::   KV k a
+    , _fkrelation ::  [Rel k]
+    , _ifkttable ::   FTB (KVMetadata k, KV k a)
     }
   deriving(Functor,Foldable,Traversable,Generic,Eq,Ord,Show)
 
@@ -445,10 +420,7 @@ _fkttable (Fun i _ _) = error "hit fun"
 
 type TB2 k a = TB3 k a
 
-type TB3 k a = FTB1  k a
-
-
--- instance (Show k) => Show1 (TB Identity k )
+type TB3 k a = FTB1 k a
 
 
 filterKey' f ((m ,k) ) = (m,) . (\(KV kv) -> KV $ Map.filterWithKey f kv )  $  k

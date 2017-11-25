@@ -140,28 +140,16 @@ pathRelRel' (Path r (RecJoin l rel )   )
   | L.null (unMutRec l) =  MutRec [[pathRelRel (Path r rel )]]
   | otherwise = fmap ((pathRelRel (Path r rel ) :) . fmap (Set.fromList)) l
 
-
-
-
 data Path a b
   = Path  a  b
   deriving(Eq,Ord,Show ,Functor)
-
-
-
-
 
 type Column k a = TB k a
 type TBData k a = (KVMetadata k,KV k a )
 type TB3Data   k a = (KVMetadata k,KV k a )
 
 
--- Reference labeling
--- exchange label reference for values when labeled
--- inline values reference when unlabeled
-
-
-type Key = CoreKey -- FKey (KType  (Prim (Text,Text) (Text,Text)))
+type Key = CoreKey
 
 data FKey a
     = Key
@@ -180,9 +168,6 @@ instance NFData a => NFData (FKey a)
 
 keyType = _keyTypes
 
-
-
-
 instance Binary KTypePrim
 instance Binary a => Binary (KType a)
 instance Binary Position
@@ -197,10 +182,6 @@ instance Binary SGeo
 instance NFData SGeo
 instance Binary STime
 instance NFData STime
-
-
-
-
 
 data GeomType
   = MultiGeom GeomType
@@ -324,15 +305,15 @@ instance Show HDynamic where
 
 
 data Showable
-  = SText {-# UNPACK #-}! Text
-  | SNumeric {-# UNPACK #-}! Int
-  | SBoolean {-# UNPACK #-}! Bool
-  | SDouble {-# UNPACK #-}! Double
-  | SGeo  {-# UNPACK #-}!SGeo
-  | STime {-# UNPACK #-}!STime
-  | SBinary {-# UNPACK #-}! BS.ByteString
-  | SDynamic {-# UNPACK #-}! (FTB Showable)
-  | SHDynamic {-# UNPACK #-}! HDynamic
+  = SText  Text
+  | SNumeric  Int
+  | SBoolean  Bool
+  | SDouble Double
+  | SGeo  SGeo
+  | STime STime
+  | SBinary BS.ByteString
+  | SDynamic (FTB Showable)
+  | SHDynamic  HDynamic
   deriving(Ord,Eq,Show,Generic)
 
 
@@ -524,7 +505,7 @@ type PathQuery = Path (Set Key) (SqlOperation )
 
 
 
-tableAttr (m , KV n) =   concat  $ F.toList (nonRef <$> traceShow (Map.keys n) n)
+tableAttr (m , KV n) =   concat  $ F.toList (nonRef <$> n)
   where
     nonRef i@(Fun _ _ _ ) =[i]
     nonRef i@(Attr _ _ ) =[i]
@@ -573,20 +554,15 @@ addDefault = def
 tableMeta :: Ord k => TableK k -> KVMetadata k
 tableMeta (Project s _ ) =  tableMeta s
 tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawDescription t) (fmap F.toList $ uniqueConstraint t) [] (F.toList $ rawAttrs t)[]  (F.toList $ rawDelayed t) (paths' <> paths)
-  where rec = filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
-        same = filter ((tableName t ==). fkTargetTable . pathRel) rec
-        notsame = filter (not . (tableName t ==). fkTargetTable . pathRel) rec
-        paths = fmap (fmap (fmap F.toList). pathRelRel' ) notsame
-        paths' = (\i -> if L.null i then [] else [MutRec i]) $ fmap ((head .unMutRec). fmap (fmap F.toList). pathRelRel' ) same
-
-
-
+  where
+    rec = filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
+    same = filter ((tableName t ==). fkTargetTable . pathRel) rec
+    notsame = filter (not . (tableName t ==). fkTargetTable . pathRel) rec
+    paths = fmap (fmap (fmap F.toList). pathRelRel' ) notsame
+    paths' = (\i -> if L.null i then [] else [MutRec i]) $ fmap ((head .unMutRec). fmap (fmap F.toList). pathRelRel' ) same
 
 tblist' :: Ord k => TableK k -> [TB  k a] -> TBData k a
 tblist' t  = tblistM (tableMeta t)
-
-
-
 
 
 isInline (Primitive _ (RecordPrim _ ) ) = True
@@ -594,12 +570,6 @@ isInline _ = False
 
 
 -- Intersections and relations
-
-
-
-
-
-
 
 makeLenses ''Rel
 makeLenses ''FKey

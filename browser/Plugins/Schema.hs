@@ -86,7 +86,7 @@ textToPrim :: Prim PGType  (Text,Text) -> Prim KPrim (Text,Text)
 textToPrim (AtomicPrim (s,i,_)) = case  HM.lookup i  gmailPrim of
   Just k -> AtomicPrim k
 textToPrim (RecordPrim i) =  (RecordPrim i)
-textToPrim i = errorWithStackTrace ("textToPrim : " ++ show i)
+textToPrim i = error ("textToPrim : " ++ show i)
 
 code smvar  = indexSchema smvar "code"
 
@@ -98,7 +98,6 @@ list' (One i) = Just $ pure i
 list :: Union a -> NonEmpty a
 list = justError "empty list " . list'
 
-reference i | traceShow i False = undefined
 reference (IProd _ k)
   = [ IT "iprod" (LeftTB1 . Just . TB1 .
       tblist  $ [ Attr "key" ((txt ) k )])
@@ -110,7 +109,7 @@ reference (Nested l nest )
         [Attr "ref" (array (txt . iprodRef ) (Non.fromList l))
         ,IT "nest" (array (TB1 .tblist . reference )  nest)]) <$> (list' nest)) ]
 
-reference  i = errorWithStackTrace ("no match reference: " ++ show i)
+reference  i = error ("no match reference: " ++ show i)
 
 addPlugins iniPlugList smvar = do
   metaschema <- liftIO $ code smvar
@@ -143,7 +142,7 @@ addPlugins iniPlugList smvar = do
     modifyed i = return ()
   watch <- liftIO$ addWatch inotify  [CloseWrite] "Plugins.hs" modifyed
   R.registerDynamic (removeWatch watch)
-  liftIO $ mapM (traverse (handle . traceShowId . CreateRow .liftTable' metaschema "plugin_code") . row)  iniPlugList
+  liftIO $ mapM (traverse (handle . CreateRow .liftTable' metaschema "plugin_code") . row)  iniPlugList
   return  iniPlugList
 
 
