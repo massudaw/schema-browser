@@ -11,7 +11,7 @@ import Control.Monad.Reader
 import qualified Data.Foldable as F
 import Data.Unique
 import Debug.Trace
-import PatchSync
+-- import PatchSync
 import Plugins (plugList)
 import Plugins.Schema
 import Poller
@@ -66,16 +66,16 @@ main = do
   regplugs <- plugs smvar amap db plugListLoad
   print "Load Polling Process"
   poller smvar amap db regplugs False
-  cp <- lookupEnv "SYNC_SERVER_PORT"
-  ch <- lookupEnv "SYNC_SERVER_HOST"
-  traverse
-    (forkIO . flip patchClient smvar)
-    (ServerConfig <$> join (readMay <$> cp) <*> ch)
-  sp <- lookupEnv "SYNC_PORT"
-  sh <- lookupEnv "SYNC_HOST"
-  traverse
-    (forkIO . flip patchServer smvar)
-    (ServerConfig <$> join (readMay <$> sp) <*> sh)
+  --cp <- lookupEnv "SYNC_SERVER_PORT"
+  --ch <- lookupEnv "SYNC_SERVER_HOST"
+  --traverse
+  --  (forkIO . flip patchClient smvar)
+  --  (ServerConfig <$> join (readMay <$> cp) <*> ch)
+  --sp <- lookupEnv "SYNC_PORT"
+  --sh <- lookupEnv "SYNC_HOST"
+  --traverse
+  --  (forkIO . flip patchServer smvar)
+  --  (ServerConfig <$> join (readMay <$> sp) <*> sh)
   print "Load GUI Server"
   let initGUI = do
         Just (TableModification _ _ _ _ (CreateRow c)) <- addClientLogin metas

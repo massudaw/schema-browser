@@ -56,7 +56,6 @@ import Prelude hiding (takeWhile,head)
 
 import qualified Data.Foldable as F
 import qualified Data.Text as T
-import qualified Data.Text.Encoding as TE
 import Data.Text (Text)
 import qualified Data.Set as S
 import Database.PostgreSQL.Simple.Time
@@ -71,6 +70,7 @@ import Blaze.ByteString.Builder(fromByteString)
 import Blaze.ByteString.Builder.Char8(fromChar)
 
 type JSONParser = CodegenT A.Parser
+
 mapKeyType :: FKey (KType PGPrim) -> FKey (KType (Prim KPrim (Text,Text)))
 mapKeyType  = fmap mapKType
 
@@ -84,18 +84,16 @@ textToPrim (AtomicPrim (s,i,tymod)) = case  HM.lookup i  postgresPrim of
   Nothing -> case tymod of
                Just ty -> case HM.lookup i postgresPrimTyp of
                             Just i -> AtomicPrim $ i ty
-                            Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
-               Nothing -> errorWithStackTrace $ "no conversion for type " <> (show i)
+                            Nothing -> error $ "no conversion for type " <> (show i)
+               Nothing -> error $ "no conversion for type " <> (show i)
 textToPrim (RecordPrim i) =  (RecordPrim i)
-
-
 
 
 -- Wrap new instances without quotes delimiting primitive values
 newtype UnQuoted a = UnQuoted {unQuoted :: a}
 newtype DoubleQuoted a = DoubleQuoted {unDoubleQuoted :: a}
 
-    -- toField i = errorWithStackTrace (show i)
+    -- toField i = error (show i)
 
 instance TF.ToField (DoubleQuoted Showable ) where
   toField (DoubleQuoted i) =  TF.toField (DoubleQuoted (renderPrim i))
@@ -118,7 +116,7 @@ instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Tex
     where tyv = fmap (\(TB1 i ) -> snd i) is
           ty = unFinite $  Interval.lowerBound $ fmap (\(TB1 i ) -> fst i) is
   toField (TB1 (t,i)) = TF.toField i
-  -- toField i = errorWithStackTrace (show i)
+  -- toField i = error (show i)
 
 instance (TF.ToField a , TF.ToField b ) => TF.ToField (Either a b ) where
   toField (Right i) = TF.toField i
@@ -141,7 +139,7 @@ instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
             -- | ty == Just "LINESTRING3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
             -- | otherwise  = TF.toField  tyv
           toFiel [] (TB1 i) = TF.Many [TF.toField i ,TF.Plain $ fromByteString $maybe ""  (" :: "<>) (BS.pack . T.unpack <$> renderType (Primitive [] n))]
-          toFiel i j = errorWithStackTrace ("toFiel" ++ show (i,j))
+          toFiel i j = error ("toFiel" ++ show (i,j))
 
 
 
@@ -151,7 +149,7 @@ instance  TF.ToField (TB Key Showable)  where
   toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri ) ) $ maybe id (flip mappend) attrs $ (F.toList (_kvvalues $ i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ i))
   toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
-  toField e = errorWithStackTrace (show e)
+  toField e = error (show e)
 
 
 
@@ -163,7 +161,7 @@ instance  TF.ToField (TB PGKey Showable)  where
   toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri ) ) $ maybe id (flip mappend) attrs $ (F.toList (_kvvalues $ i) )  ))
       where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ i))
   toField (IT n  (ArrayTB1 is)) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
-  toField e = errorWithStackTrace (show e)
+  toField e = error (show e)
 
 
 
@@ -181,7 +179,7 @@ instance TF.ToField (UnQuoted Showable) where
         STimestamp i ->  TF.Plain $ localTimestampToBuilder (Finite i)
         SDate i  -> TF.Plain $ dateToBuilder (Finite i)
         SDayTime i -> TF.Plain $ timeOfDayToBuilder (i)
-  toField (UnQuoted i) = errorWithStackTrace (show i)
+  toField (UnQuoted i) = error (show i)
 
 instance TF.ToField Position where
   toField = TF.toField . UnQuoted
@@ -284,7 +282,7 @@ unIntercalateAtto l s = go l
   where
     go [e] =  fmap pure  e
     go (e:cs) =  liftA2 (:) e  (s *> go cs)
-    go [] = errorWithStackTrace  "unIntercalateAtto empty list"
+    go [] = error  "unIntercalateAtto empty list"
 
 -- parseAttrJSON i v | traceShow (i,v) False = undefined
 parseAttrJSON (Attr i _ ) v = do
@@ -297,7 +295,7 @@ parseAttrJSON (Fun i rel _ )v = do
 parseAttrJSON (IT na j) v = do
   mj <- parseLabeledTableJSON j v
   return $ IT  na mj
-parseAttrJSON i v = errorWithStackTrace (show (i,v))
+parseAttrJSON i v = error (show (i,v))
 
 -- Note Because the list has a mempty operation when parsing
 -- we have overlap between maybe and list so we allow only nonempty lists
@@ -308,7 +306,7 @@ parseLabeledTableJSON (ArrayTB1 (l :| _)) (A.Array a)=
 parseLabeledTableJSON (LeftTB1 (Just l)) A.Null = return $ LeftTB1 Nothing
 parseLabeledTableJSON (LeftTB1 (Just l)) v = fmap LeftTB1 $ fmap Just (parseLabeledTableJSON l v) <|> return (Nothing)
 parseLabeledTableJSON (TB1 l) v = fmap TB1 $ parseRecordJSON  l v
-parseLabeledTableJSON i v= errorWithStackTrace (show (i,v))
+parseLabeledTableJSON i v= error (show (i,v))
 
 
 parseRecordJSON :: TBData Key () -> A.Value -> JSONParser (TBData Key Showable)
@@ -338,13 +336,13 @@ parsePrimJSON i  v =
       PCnpj -> A.withText (show i) (return .SText )
       PCpf -> A.withText (show i) (return .SText )
       PTime t -> fmap STime <$> case t of
-        PInterval ->  A.withText (show i) (either (errorWithStackTrace "no parse" ) (return . SPInterval )  . parseOnly diffInterval .BS.pack . T.unpack)
+        PInterval ->  A.withText (show i) (either (error "no parse" ) (return . SPInterval )  . parseOnly diffInterval .BS.pack . T.unpack)
         PTimestamp _ -> (\v -> A.withText (show i) (\s -> maybe (fail ("cant parse timestamp: " <> show (i,v))) (return .STimestamp  . fst)  (strptime "%Y-%m-%dT%H:%M:%OS"   s <|> strptime "%Y-%m-%d %H:%M:%OS" s )) v )
         PDayTime  -> A.withText (show i) (maybe (fail "cant parse daytime") (return .SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS")
         PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay . fst) . strptime "%Y-%m-%d")
       PGeom ix a -> A.withText (show i)  (fmap SGeo . either fail pure .Sel.runGet (parseGeom ix a). fst . B16.decode .BS.pack . T.unpack)
 
-      i -> errorWithStackTrace ("not defined " <> show i)
+      i -> error ("not defined " <> show i)
   ) v
 
 -- parseGeom a | traceShow a False = undefined
@@ -463,7 +461,7 @@ getPolygon get = do
              let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
              case ty  of
                3 -> getPoly get
-               i -> errorWithStackTrace ("no polygon type" <> show i)
+               i -> error ("no polygon type" <> show i)
            else
              return (error $ "BE not implemented " <> show i )
 
@@ -491,13 +489,6 @@ box3dParser = do
           return $ case fmap (fmap  realToFrac) res  of
             [m,s] ->  Bounding ((ER.Finite $ makePoint m ,True) `Interval.interval` (ER.Finite $ makePoint s,True))
 
-instance (FromField a, FromField b, FromField c, FromField d, FromField e,
-          FromField f, FromField g, FromField h, FromField i, FromField j,FromField k) =>
-    FromRow (a,b,c,d,e,f,g,h,i,j,k) where
-    fromRow = (,,,,,,,,,,) <$> field <*> field <*> field <*> field <*> field
-                          <*> field <*> field <*> field <*> field <*> field <*> field
-
-
 
 instance F.FromField Position where
   fromField f t = case  fmap (Sel.runGet (getPosition3d get3DPosition)) decoded of
@@ -517,12 +508,11 @@ getPosition3d get = do
              let ty = typ .&. complement 0x20000000 .&. complement 0x80000000
              case ty  of
                1 -> get
-               i -> errorWithStackTrace $ "type not implemented " <> show ty
+               i -> error $ "type not implemented " <> show ty
            else
-             return (errorWithStackTrace $ "BE not implemented " <> show i  )
+             return (error $ "BE not implemented " <> show i  )
 
-
-safeMaybe e f i = maybe (errorWithStackTrace (e  <> ", input = " <> show i )) id (f i)
+safeMaybe e f i = maybe (error (e  <> ", input = " <> show i )) id (f i)
 
 instance F.FromField DiffTime where
   fromField  f mdat = case  mdat of
@@ -533,8 +523,6 @@ instance F.FromField DiffTime where
           Left err -> F.returnError F.ConversionFailed f err
           Right conv -> return conv
 
-diffIntervalLayout = sepBy1 (toRealFloat <$> scientific) (string " days " <|> string " day " <|>  string ":" )
-
 diffInterval = (do
   res  <- diffIntervalLayout
   return $ case res  of
@@ -542,41 +530,28 @@ diffInterval = (do
     [m,s] ->  secondsToDiffTime (round $  60 * m + s)
     [h,m,s] ->  secondsToDiffTime (round $ h * 3600 + (60 ) * m + s)
     [d,h,m,s] -> secondsToDiffTime (round $ d *3600*24 + h * 3600 + (60  ) * m + s)
-    v -> errorWithStackTrace $ show v)
+    v -> error $ show v)
+    where
+      diffIntervalLayout = sepBy1 (toRealFloat <$> scientific) (string " days " <|> string " day " <|>  string ":" )
 
 
 
-parseInter token = do
-    lb <- (char '[' >> return True) <|> (char '(' >> return False)
-    [i,j] <- token
-    rb <- (char ']' >> return True ) <|> (char ')' >> return False )
-    return [(lb,ER.Finite i),(rb,ER.Finite j)]
+
 
 instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
 fromShowable k f = case A.parseEither (parseShowableJSON  k) f of
                  Right i -> i
-                 Left i -> errorWithStackTrace (show i)
+                 Left i -> error (show i)
 
 fromRecordJSON :: TBData Key () -> NameMap ->  FR.RowParser (TBData Key Showable)
 fromRecordJSON foldable namemap = do
   let parser   f = case A.parseEither (\(A.Object i) -> fmap fst $ evalRWST (parseRecordJSON foldable $ justError "no top" $ HM.lookup "p0"  i) [] namemap )  f of
                   Right i -> i
-                  Left i -> errorWithStackTrace (show i)
+                  Left i -> error (show i)
   parser <$> FR.field
 
-
-parseField parser = do
-    FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
-                               (Right (Just r ) ) -> return r
-                               Right Nothing -> error (show j )
-                               Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
-
-parserFieldAtto parser = (\i j -> case traverse (parseOnly  parser )  j of
-                               (Right (Just r ) ) -> return r
-                               Right Nothing -> error (show j )
-                               Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
 
 
 withCount value = do

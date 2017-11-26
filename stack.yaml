@@ -6,7 +6,7 @@ flags:
 
 packages:
 - '.'
-- browser 
+- browser
 - browser/core
 - location: deps/threepenny-gui/
   extra-dep: True
@@ -16,15 +16,11 @@ packages:
   extra-dep: True
 - location: deps/extended-reals/
   extra-dep: True
-- location: deps/GiST-0.0.1/
+- location: deps/GiST/
   extra-dep: True
-  # - location: deps/wreq-0.4.0.0/
-  #  extra-dep: True
-- location: deps/ordered-0.1
+- location: deps/ordered
   extra-dep: True
-- location: deps/pipes-binary
-  extra-dep: True
-- location : deps/postgresql-simple-0.4.10.0/
+- location : deps/postgresql-simple
   extra-dep: True
 
 extra-deps:
@@ -32,17 +28,9 @@ extra-deps:
   - strptime-1.0.10
   - Stream-0.4.7.2
   - lazysmallcheck-0.6
-  - pipes-network-0.6.4.1
   - snap-server-1.0.2.2
   - HsOpenSSL-0.11.4.9
-
-
-
-
-
-
-
-
+  - Only-0.1
 
 
 apply-ghc-options: everything
