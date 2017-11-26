@@ -8,7 +8,6 @@ module TP.QueryWidgets (
     crudUITable,
     refTables,
     refTables',
-    tableIndexA,
     idex,
     metaAllTableIndexA ,
     viewer,
@@ -1370,134 +1369,34 @@ unRel (RelAccess k l)  ilk = unRel l nref
      nref = (F.toList . unKV . snd . unTB1 . _fkttable . index $  ilk )
      index = justError "no index" . L.find ((==[Inline k]).  keyattri )
 
-rendererShowableUI k  v= renderer (keyValue k) v
-  where
-    renderer "modification_data" (TB1 (SBinary i)) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i) -> showPatch   i) (B.decodeOrFail (BSL.fromStrict i))
-    renderer "data_index" (ArrayTB1 l) = UI.div # set items ((\(TB1 (SBinary i)) -> either (\i-> UI.div # set UI.text (show i)) (\(_,_,i) -> showIndex i) (B.decodeOrFail (BSL.fromStrict i)) )<$> F.toList l)
-    renderer "exception" (TB1 (SBinary i)) = either (\i-> UI.div # set UI.text (show i)) (\(_,_,i ) -> UI.div # set UI.text (T.unpack i))  (B.decodeOrFail (BSL.fromStrict i))
-    renderer k i = UI.div # set text (renderShowable i)
-    showIndex :: FTB Showable -> UI Element
-    showIndex i =  UI.div # set text (renderShowable i)
-    showPatch :: RowPatch Text Showable -> UI Element
-    showPatch (PatchRow l)  = UI.div # set text (ident $ renderRowPatch l)
-    showPatch (DropRow l)  = UI.div # set text (ident $ renderTable l)
-    showPatch (CreateRow l)  = UI.div # set text (ident $ renderTable l)
-
-foldMetaHeader = foldMetaHeader' []
-
-foldMetaHeader' :: [CoreKey] -> UI Element -> (CoreKey -> FTB a -> (UI Element)) -> InformationSchema -> TBData CoreKey a -> [UI Element]
-foldMetaHeader' order el rend inf = mapFAttr order (\(Attr k v) -> hideLong [rend  k  v ])
-    where
-          mapFAttr order f (a,kv) = fmap snd. L.sortBy (comparing ((flip L.elemIndex order).  fst) ). concat $ (  fmap (match) .  F.toList .  _kvvalues)  $ kv
-            where match i@(Attr k v) = [(k,f i)]
-                  match i@(FKT l rel t) = ((\k -> (_relOrigin $ head $ keyattr k ,). f $ k)<$> unkvlist l )
-                  match i@(IT l t) = [( l,hideLong ( concat $ F.toList $ fmap (foldMetaHeader  UI.div rend inf) t))]
-          hideLong l = do
-            elemD <- el
-            if length l > 1
-              then do
-                hoverFlag  <- hoverTip elemD
-                bh <- ui $ stepper False hoverFlag
-                element elemD # sink items ((\b -> if not b then take 2  l  <> fmap ( set UI.style (noneShow False)) (drop 2 l) else  l ) <$> bh)
-              else return elemD # set items l
-
-tableIndexA inf metaname env =   do
-  let modtable = lookTable inf tname
-      tname = metaname
-  viewer inf modtable env
-
 
 metaAllTableIndexA inf metaname env =   do
-  let modtable = lookTable (meta inf) tname
-      tname = metaname
-  viewer (meta inf) modtable (Le.over (_1) (liftAccess (meta inf)tname)  <$> env)
-
-
-sortFilter :: [CoreKey] -> [(CoreKey,Bool)] -> [(CoreKey,(Text,Text))] -> UI Element -> UI Element -> ((CoreKey,Maybe Bool) -> String) -> UI (TrivialWidget [(CoreKey,Maybe Bool,Maybe (String,FTB Showable))])
-sortFilter l sel fil liste slote conv = do
-    tds <- list liste slote (sortFilterUI conv) ((\i j -> fmap (\e -> (e,,Nothing)  $ fmap snd $  L.find ((==e).fst) j) i ) l sel)
-    return $ TrivialWidget (triding tds) (getElement tds)
-
-validOp = ["&&","<@","@>","<",">","=","/=","<=",">="]
-readValid = (\v -> if elem v validOp then Just v else Nothing)
-
-sortFilterUI conv ix bh  = do
-    let
-        step t = case t of
-                Just True -> Just False
-                Just False -> Nothing
-                Nothing -> Just True
-    dv <- UI.div # sink text ((\(a,b,_) -> conv (a,b) )<$> bh)
-    op <- UI.input # set UI.style [("width","50px")]
-    vf <- UI.input # set UI.style [("width","80px")]
-    fi <- UI.button # set text "go"
-    opE <- UI.valueChange op
-    vfE <-  UI.valueChange vf
-    opB <- ui $ stepper "" opE
-    vfB <- ui $ stepper "" vfE
-
-    dvC <- UI.click dv
-    fiC <- UI.click fi
-    let
-        ev0 = flip (\(l,t,op,vf)-> const (l,step t,op,vf)) <$>  dvC
-        ev1 = flip (\(l,t,op,vf) opn -> (l,t,(readValid opn) ,vf)) <$>  opB <@ fiC
-        ev2 = flip (\(l,t,op,vf) vfn -> (l,t,op , (readType (keyType l) vfn))) <$>  vfB <@ fiC
-    block <- UI.div # set children [dv,op,vf,fi]
-    return $ TrivialWidget (tidings bh ((\ini@(l,t,op) f -> (\(l,t,op,v) -> (l , t ,liftA2 (,) op v)) $ f (l,t,fmap fst op , fmap snd op) ) <$> bh <@> (concatenate <$> unions [ev0,ev1,ev2]) )) block
+  let modtable = lookTable (meta inf) metaname
+  viewer (meta inf) modtable (Le.over (_1) (liftAccess (meta inf) metaname)  <$> env)
 
 
 viewer :: InformationSchema -> Table -> [(Access Key ,AccessOp Showable )] -> UI Element
-viewer inf table envK = mdo
+viewer inf table envK = do
+
   let
     filterStatic =filter (not . flip L.elem (concat $ fmap (F.toList . (Le.view Le._1)) envK))
     key = filterStatic $ F.toList $ rawPK table
     sortSet =  filterStatic . F.toList . tableKeys . tableNonRef . TB1 . allRec' (tableMap inf ) $ table
-    tableSt2 =   tableViewNR (tableMap inf) table
-  itemList <- UI.div
   let
-    pageSize = 20
-    iniPg =  M.empty
     iniSort = selSort sortSet ((,True) <$>  key)
-  sortList <- sortFilter sortSet ((,True) <$> key) []  UI.tr UI.th conv
+    flist = catMaybes $ fmap (\(i,_,j) -> (\(op,v) -> (keyRef i,Left (v,readBinaryOp $ T.pack op))) <$> j) iniSort
+    pred = WherePredicate $ AndColl $ fmap PrimColl $envK <> flist
+  reftb@(_,_,vpt,_,_) <- ui $ refTables' inf   table Nothing  pred
+  itemList <- selector inf table reftb (pure Nothing) (pure Nothing)
+  tds <-  mdo
+    let
+      updatedValue = (\i j -> const . join $ flip G.lookup j  . G.getIndex  <$> i )<$> facts tds <@> rumors vpt
+      selection = const <$> rumors (triding itemList)
+    tds <- ui $ accumT  Nothing  (unionWith (.) selection  updatedValue)
+    ui $ cacheTidings tds
 
-  let makeQ slist' (o,i) = do
-              let slist = fmap (\(i,j,_) -> (i,j)) slist'
-                  ordlist = (fmap (second fromJust) $filter (isJust .snd) slist)
-                  paging  = (\o -> fmap (L.take pageSize . L.drop (o*pageSize)) )
-                  flist = catMaybes $ fmap (\(i,_,j) -> (\(op,v) -> (keyRef i,Left (v,readBinaryOp $ T.pack op))) <$> j) slist'
-              (_,(fixmap,lres)) <- transactionNoLog inf $ selectFrom' table  (Just o) Nothing  (fmap (\t -> if t then Desc else Asc ) <$> ordlist) (WherePredicate $ AndColl $ fmap PrimColl $envK <> flist)
-              let (size,_) = justError ("no fix" <> show (envK ,fixmap)) $ M.lookup (WherePredicate$AndColl $ fmap PrimColl $  envK) fixmap
-              return (o,(slist,paging o (size,sorting' ordlist (G.toList lres))))
-      nearest' :: M.Map Int (TB2 CoreKey Showable) -> Int -> ((Int,Maybe (Int,TB2 CoreKey Showable)))
-      nearest' p o =  (o,) $ safeHead $ filter ((<=0) .(\i -> i -o) .  fst) $ reverse  $ L.sortBy (comparing ((\i -> (i - o)). fst )) (M.toList p)
-      ini = nearest' iniPg 0
-      addT (c,(s,(cou,td))) = M.insert (c +1)  <$>  (fmap TB1 $ safeHead $reverse td)
-  iniQ <- ui $ makeQ iniSort ini
-  offset <- offsetField (pure 0 ) (never ) ((\i -> ceiling  (fromIntegral i /fromIntegral pageSize)) <$>  tidings offsetTotal never )
-  let
-      event1 , event2 :: Event (Dynamic (Int,([(CoreKey,Maybe Bool)],(Int,[TBData CoreKey Showable]))))
-      event1 = (\(j,k) i  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pure iniPg <*> triding offset) <@> rumors (triding sortList)
-      event2 = (\(j,i) k  -> makeQ i (nearest' j k )) <$> facts ((,) <$> pg <*> triding sortList) <@> rumors (triding offset)
-      evs = (unionWith const event1 event2)
-  tdswhere <-  mapEventFin id evs
-  offsetTotal <- ui $ stepper (fst $ snd $ snd $ iniQ) (fmap (fst . snd .snd ) tdswhere)
-  pg <- ui $ accumT ((fromJust  $addT iniQ ) M.empty ) (unionWith (flip (.)) ((pure (const iniPg ) <@ event1)) (filterJust (addT <$> tdswhere )))
-
-  tdswhereb <- ui $ stepper (snd iniQ) (fmap snd tdswhere)
-  let
-      tview = unTB1  $tableSt2
-  element itemList # set items ( pure . renderTableNoHeaderSort2   (return $ getElement sortList) inf (tableNonRef' tview) $   fmap (fmap (filterAttr (\i -> not $ elem (_relOrigin i )(concat $ F.toList . fst <$> envK )).tableNonRef')) . (\(slist ,(coun,tb))-> (fmap fst slist,tb))  <$>   tdswhereb )
-
-  UI.div # set children [getElement offset, itemList]
-
-filterAttr f (m,r) = (m,(\(KV i) -> KV $ M.filterWithKey (\k v -> F.any f k ) i) r)
-
-
-renderTableNoHeaderSort2 header inf modtablei out = do
-  let
-      body sort o = UI.tr # set UI.class_ "row" #  set items (foldMetaHeader' sort UI.td rendererShowableUI inf $ o)
-  header # set UI.class_ "row"
-  UI.table # set UI.class_ "table table-bordered table-striped" # sink items ((\(i,l)-> header : fmap (body i) l )<$> out)
+  (cru,pretdi) <- crudUITable inf reftb [] [] (allRec' (tableMap inf) table) tds
+  UI.div # set UI.children [getElement itemList,cru]
 
 
 convertPatchSet ix (PatchSet p) = patchSet $ catMaybes $ fmap (convertPatchSet ix ) (F.toList p)

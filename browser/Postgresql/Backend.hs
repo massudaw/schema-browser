@@ -198,18 +198,20 @@ dropSchema = do
 
 insertPatch
   :: (MonadIO m ,Functor m )
-     => (TBData Key () -> FR.RowParser (TBData Key Showable ))
-     -> Connection
+     =>
+     Connection
      -> TBIdx Key Showable
      -> TableK Key
      -> m (TBIdx Key Showable )
-insertPatch f conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> liftIO$ if not $ L.null serialAttr
+insertPatch  conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> liftIO$ if not $ L.null serialAttr
       then do
         let
           iquery :: String
-          iquery = T.unpack $ prequery <> " RETURNING ROW(" <>  T.intercalate "," (projKey serialAttr) <> ")"
+          (iquery ,namemap)= codegen $ do
+              j <- explodeRecord (tblist serialAttr)
+              return $ T.unpack $ prequery <> " RETURNING (SELECT row_to_json(q) FROM (" <> selectRow "p0" j <> ") as q)"
         print iquery
-        [out] <- liftIO $ queryWith (f serialTB ) conn (fromString  iquery) directAttr
+        [out] <- liftIO $ queryWith (fromRecordJSON serialTB namemap ) conn (fromString  iquery) directAttr
         let (_,_ ,gen) =  patch out
         return (m, G.getIndex out  , i <> gen)
       else do
@@ -294,20 +296,14 @@ differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 
 paginate inf t order off size koldpre wherepred = do
     let ((que,name),attr) = selectQuery t koldpre order wherepred
-    i <- lookupEnv "POSTGRESQL_DECODER"
     let
-      jsonDecode =  do
+    v <- do
         let quec = fromString $ T.unpack $ "SELECT row_to_json(q),count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
         uncurry (queryWith (withCount (fromRecordJSON t name )) (conn inf ) ) (quec, maybe [] (fmap (either(Left .firstTB (recoverFields inf)) Right)) attr)
-
-    v <- case i of
-           Just "JSON" ->  jsonDecode
-           Nothing -> jsonDecode
     let estimateSize = maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])
     print estimateSize
     return (estimateSize, fmap fst v)
   where
-
         offsetQ = " OFFSET " <> T.pack (show off)
         limitQ = " LIMIT " <> T.pack (show size)
 
@@ -327,7 +323,7 @@ insertMod j  = do
     Nothing ->liftIO $ do
       let
         table = lookTable inf (_kvname (fst  j))
-      (t,pk,attrs) <- insertPatch (fromRecord  ) (conn  inf) (patch j) ( table)
+      (t,pk,attrs) <- insertPatch  (conn  inf) (patch j) ( table)
       l <- liftIO getCurrentTime
       return $ TableModification Nothing (utcToLocalTime utc l) (snd $ username inf)table . CreateRow <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create  (t,pk,compact $ deftable inf table <> attrs )))
 

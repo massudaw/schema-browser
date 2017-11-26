@@ -226,18 +226,16 @@ type TableMap = HM.HashMap Text (HM.HashMap Text Table)
 
 allRec'
   :: TableMap
-     -> Table
-     -> TBData Key ()
+  -> Table
+  -> TBData Key ()
 allRec' i t = tableView  i t
 
 tableView  invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
-  when (L.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r ) <> " the pk is null")
   ks <- labelTable r
   tb <- recurseTB invSchema (rawFKS r) False [] ks
   return  $ tb
 
 tableViewNR invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
-  when (L.null $ rawPK r) (fail $ "cant generate ast for table " <> T.unpack (tableName r )<> " the pk is null")
   ks <- labelTable r
   tb <- recurseTB invSchema (S.filter (all isInlineRel. F.toList .pathRelRel)$ rawFKS r) False [] ks
   return  $ TB1 tb

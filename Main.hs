@@ -66,7 +66,6 @@ main = do
   regplugs <- plugs smvar amap db plugListLoad
   print "Load Polling Process"
   poller smvar amap db regplugs False
-  -- pollRmtc smvar amap (T.pack $ user db)
   cp <- lookupEnv "SYNC_SERVER_PORT"
   ch <- lookupEnv "SYNC_SERVER_HOST"
   traverse

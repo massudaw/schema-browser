@@ -439,7 +439,7 @@ testTable s t  = do
   (inf,fin) <- runDynamic $ keyTables smvar  (s,"postgres") amap []
   ((_,(_,i)),_) <- runDynamic $ transactionNoLog inf $ selectFrom t Nothing Nothing [] mempty
 
-  return ()
+  return i
 
 
 testPlugin s t p  = do

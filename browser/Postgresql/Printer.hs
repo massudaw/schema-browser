@@ -107,21 +107,27 @@ atTable m = local (++ [Root m])
 lkKey i = do
   (c,m) <- snd <$> get
   path <- ask
-  return $ justError ("no key: " ++ show (m,path,i) ) (M.lookup (path ++ [i]) m )
+  return $ M.lookup (path ++ [i]) m
 
 newAttr k = mkKey (AttributeReference k)
 
 lkTB (Attr k _) = do
   a<- lkAttr k
-  return $ "k" <> T.pack (show a)
+  return $ case a of
+    Just a -> "k" <> T.pack (show a)
+    Nothing ->  keyValue k
 
 lkTB (IT k _ ) = do
   a <-lkIT k
-  return $ "k" <> T.pack (show a)
+  return $ case a of
+    Just a -> "k" <> T.pack (show a)
+    Nothing -> keyValue k
 
 lkTB (FKT  _ rel _ ) = do
   a <- lkFK rel
-  return $ "k" <> T.pack (show a)
+  return $ case a of
+    Just a -> "k" <> T.pack (show a)
+    Nothing -> error ""
 
 lkAttr k = lkKey (AttributeReference k)
 
@@ -287,18 +293,18 @@ tableType (TB1 (m,_)) = kvMetaFullName  m
 expandJoin :: Bool -> [Column Key ()] -> Column Key () -> Codegen (SQLRow -> SQLRow)
 expandJoin left env (IT i (LeftTB1 (Just tb) ))
     = expandJoin True env $ (IT i tb)
-expandJoin left env ((IT a (ArrayTB1 (tb :| _ ) ))) = do
-    l <- lkIT a
-    itb <- expandInlineArrayTable (unTB1 tb) ("k" <> T.pack (show l))
+expandJoin left env (t@(IT a (ArrayTB1 (tb :| _ ) ))) = do
+    l <- lkTB t
+    itb <- expandInlineArrayTable (unTB1 tb) l
     tjoin <- expandQuery left tb
     r <- explodeRow tb
-    let joinc = " (SELECT array_agg(" <> selectRow "arr" r <> " order by row_number) as " <> "k" <> T.pack (show l) <> " " <> (renderRow  $ tjoin (SQLRFrom  itb )) <> " )  as p" <> "k" <> T.pack (show l)
+    let joinc = " (SELECT array_agg(" <> selectRow "arr" r <> " order by row_number) as " <> l <> " " <> (renderRow  $ tjoin (SQLRFrom  itb )) <> " )  as p" <> l
     return $ (\row -> SQLRJoin row JTLateral jt (SQLRInline joinc) Nothing)
         where
           jt = if left then JDLeft  else JDNormal
-expandJoin left env ((IT a (TB1 tb))) =  do
-     l <- lkIT a
-     itable <- expandInlineTable  tb  ("k" <> T.pack (show l))
+expandJoin left env (t@(IT a (TB1 tb))) =  do
+     l <- lkTB t
+     itable <- expandInlineTable  tb l
      tjoin <- expandQuery' left tb
      return $  tjoin . (\row -> SQLRJoin row JTLateral jt  itable Nothing)
         where
@@ -354,22 +360,22 @@ replaceexpr k ac = go k
     go (Value i ) = (ac !! i )
 
 explodeDelayed tb ((Fun k (ex,a)  _ )) =  replaceexpr ex <$> traverse (\i -> explodeDelayed tb $ indexLabel i tb) a -- leaf (isArray (keyType k)) l
-explodeDelayed _ ((Attr k  _ ))
+explodeDelayed _ t@(Attr k  _ )
   | isKDelayed (keyType k) = do
-    l <- lkAttr k
-    return $ leafDel ("k" <> T.pack ( show l))
+    l <- lkTB t
+    return $ leafDel l
   | otherwise =  do
-    l <- lkAttr k
-    return $ leaf  ("k" <> T.pack ( show l))
+    l <- lkTB t
+    return $ leaf l
 
 explodeDelayed rec ((IT  k (LeftTB1 (Just tb  )))) = do
   explodeDelayed rec ((IT k tb))
-explodeDelayed _ ((IT  k (ArrayTB1 (TB1 tb :| _) ) )) = do
-  l <- lkIT k
-  return $ leaf ("k" <> T.pack ( show l))
-explodeDelayed _ ((IT  k t  )) = do
-   l <- lkIT k
-   selectRow ("k" <> T.pack ( show l)) <$> explodeRow' t
+explodeDelayed _ (t@(IT  k (ArrayTB1 (TB1 tb :| _) ) )) = do
+  l <- lkTB t
+  return $ leaf l
+explodeDelayed _ (t@(IT  k r  )) = do
+   l <- lkTB t
+   selectRow l <$> explodeRow' r
 {-explodeDelayed tbenv  (Labeled l (FKT ref  _ _ )) = case unkvlist ref of
            [] -> return $ leaf l
            i -> (\v -> T.intercalate assoc v <> assoc <> leaf l) <$> traverse (explodeDelayed tbenv . getCompose) i
@@ -566,12 +572,12 @@ tlabel' t@(IT k tb ) =  do
 getLabels :: TBData Key () ->  Key ->  Codegen Text
 getLabels t k =   justError ("cant find label"  <> show k <> " - " <> show t) . M.lookup  k <$> (mapLabels label' t)
     where
-      label' (Attr k _) =  do
-        l <- lkAttr k
-        return (k,"k" <> T.pack (show l ))
-      label' (IT k tb ) = do
-        l <- lkIT k
-        return (k, "ik"<> T.pack (show l ) <> " :: " <> tableType tb)
+      label' t@(Attr k _) =  do
+        l <- lkTB t
+        return (k,l )
+      label' t@(IT k tb ) = do
+        l <- lkTB t
+        return (k, "i" <>  l  <> " :: " <> tableType tb)
 
 
 mapLabels label' t =  M.fromList <$> traverse (label') (getAttr $ joinNonRef' t)

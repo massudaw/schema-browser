@@ -299,45 +299,8 @@ parseAttrJSON (IT na j) v = do
   return $ IT  na mj
 parseAttrJSON i v = errorWithStackTrace (show (i,v))
 
-
-parseAttr :: TB Key () -> Parser (TB Key Showable)
--- parseAttr i | traceShow i False = undefined
-parseAttr (Attr i _ ) = do
-  s<- parseShowable (keyType  i) <?> show i
-  return $  Attr i s
-parseAttr (Fun i rel _ ) = do
-  s<- parseShowable (keyType  i) <?> show i
-
-  return $  (Fun i rel s)
-
-
-parseAttr (IT na j) = do
-  mj <- tryquoted (parseLabeledTable j)
-  return $ IT  na mj
-
-parseAttr (FKT l rel j ) = do
-  ml <- if L.null (unkvlist l)
-     then return []
-     else do
-       ml <- unIntercalateAtto (parseAttr <$> unkvlist l) (char ',')
-       char ','
-       return ml
-  mj <- tryquoted (parseLabeledTable j)
-  return $  FKT (kvlist ml )rel  mj
-
-parseArray p = (char '{' *>  sepBy1 p (char ',') <* char '}')
-
-tryquoted :: Parser b -> Parser b
-tryquoted i = doublequoted i <|> i
-
 -- Note Because the list has a mempty operation when parsing
 -- we have overlap between maybe and list so we allow only nonempty lists
-parseLabeledTable :: TB2 Key () -> Parser (TB2 Key Showable)
-parseLabeledTable (ArrayTB1 (t :| _)) =
-  join $ fromMaybe (fail "empty list") . fmap (return .ArrayTB1 . Non.fromList ) . nonEmpty <$> (parseArray (doublequoted $ parseLabeledTable t) <|> parseArray (parseLabeledTable t) <|> (parseArray (doublequoted $ parseLabeledTable (mapKey kOptional t))  >>  return (fail "")))
-parseLabeledTable (LeftTB1 (Just i )) =
-  LeftTB1 <$> ((Just <$> parseLabeledTable i) <|> ( parseLabeledTable (mapTable (LeftTB1 . Just) <$>  mapKey kOptional i) >> return Nothing) <|> return Nothing )
-parseLabeledTable  tb1 = traverse parseRecord  $ tb1
 
 parseLabeledTableJSON (ArrayTB1 (l :| _)) (A.Array a)=
   ArrayTB1 <$> traverse (parseLabeledTableJSON l ) (Non.fromList . F.toList $a)
@@ -358,59 +321,6 @@ parseRecordJSON  (me,m) (A.Object v) = atTable me $ do
   return (me, KV im )
 
 
-parseRecord  (me,m) = (char '('  *> (do
-  im <- unIntercalateAtto (traverse (parseAttr) <$> (  L.sortBy (comparing (maximum . fmap (keyPosition ._relOrigin) .keyattr.snd)) $M.toList (replaceRecRel  (_kvvalues $ m) (fmap (fmap (fmap S.fromList) ) $ _kvrecrels  me))) ) (char ',')
-  return (me,  KV (M.fromList im) )) <*  char ')' )
-
-parseRow els  = (char '('  *> (do
-  im <- unIntercalateAtto (els ) (char ',')
-  return  im) <*  char ')' )
-
-
-
-startQuoted p =  do
---   let backquote = string "\""  <|> string "\\\\" <|> string "\\"
-  i <- lookAhead (many backquote )
-  readQuoted ( L.length i) (p)
-
-test4 = "\"StatusCodeException (Status {statusCode = 503, statusMessage = \"\"Service Unavailable\"\"}) [(\"\"Content-Type\"\",\"\"text/html\"\"),(\"\"Server\"\",\"\"Oracle-Web-Cache-11g/11.1.1.6.0 (N;ecid=49638990776402891,0:1)\"\"),(\"\"Content-Length\"\",\"\"402\"\"),(\"\"X-Response-Body-Start\"\",\"\"<!DOCTYPE HTML PUBLIC \\\\\"\"-//IETF//DTD HTML//EN\\\\\"\">\\\\n<html> <head>\\\\n<title>No Response from Application Web Server</title>\\\\n</head>\\\\n\\\\n<body bgcolor=\\\\\"\"white\\\\\"\">\\\\n<font color=\\\\\"\"red\\\\\"\">\\\\n<h1>No Response from Application Web Server</h1>\\\\n</font>\\\\n\\\\nThere was no response from the application web server for the page you requested. <br>Please notify the site's webmaster and try your request again later.\\\\n<hr>\\\\n\\\\n</body> </html>\\\\n\"\"),(\"\"X-Request-URL\"\",\"\"GET https://siapi3.bombeiros.go.gov.br:443/paginaInicialWeb.jsf\"\")] (CJ {expose = []})\""
-test3 = "\\\\\"\"\\\\\"\"FailedConnectionException2 \\\\\"\"\\\\\"\"\\\\\"\"\\\\\"\"accounts.google.com\\\\\"\"\\\\\"\"\\\\\"\"\\\\\"\" 443 True connect: does not exist (Network is unreachable)\\\\\"\"\\\\\"\""
-test2 = "\"StatusCodeException (Status {statusCode = 404, statusMessage = \"\"Not Found\"\"}) [(\"\"Date\"\",\"\"Tue, 17 Nov 2015 10:25:55 GMT\"\"),(\"\"Server\"\",\"\"Oracle-Fusion-Middleware/11g (11.1.1.6) Apache-Coyote/1.1 Oracle-Web-Cache-11g/11.1.1.6.0 (N;ecid=49287787001941909,0:1)\"\"),(\"\"Content-Length\"\",\"\"0\"\"),(\"\"X-Response-Body-Start\"\",\"\"\"\"),(\"\"X-Request-URL\"\",\"\"GET https://siapi3.bombeiros.go.gov.br:443/paginaInicialWeb.jsf\"\")] (CJ {expose = []})\""
-
-startQuotedText =  do
-  i <- lookAhead (many backquote)
-  readQuotedText (L.length  i)
-
-readText 0 = plain' ",)}"
-readText ix =  ( liftA2 (\i j  -> i <> BS.concat  j ) (scapedText ix)  (many1 (liftA2 (<>) (fmap requote (readQuotedText (ix +1))) (scapedText ix )))   <|> scapedText ix )
-      where
-        requote t = "\"" <> t <> "\""
-        scapedText ix = liftA2 (<>) (plain0' "\\\"") (BS.intercalate "" <$> ( many ((<>) <$> choice (escapedItem  ix <$>  escapes) <*>  plain0' "\\\"")))
-          where
-            escapes = [("n","\n"),("r","\r"),("t","\t"),("129","\129"),("137","\137"),("167","\167"),("194","\194"),("195","\195"),("224","\224"),("225","\225"),("227","\227"),("233","\233"),("237","\237"),("243","\243"),("245","\245"),("231","\231")]
-            escapedItem ix (c, o)  = Tra.sequence (replicate ix (char '\\'))  >> string c >> return o
-
-
-readQuotedText ix = readQuoted ix readText
-
-readQuoted 0 p = p 0
-readQuoted ix p =  do
-    (i,l) <- sequote ix -- Tra.sequence (replicate ix backquote  )
-    v <- p ix
-    _ <-  string (BS.concat (i <> l) )
-    return (BS.replicate ((length l `div` ix) -1 ) '"' <> v <> BS.replicate ((length l `div` ix )- 1 ) '"' )
-
-
-sequote ix =  ((,) <$> Tra.sequence (replicate ix backquote  ) <*> many backquote )
-
-backquote = string "\\\\" <|> string "\""  <|> string "\\"
-
-
-
-doublequoted :: Parser a -> Parser a
-doublequoted  p =   (takeWhile (== '\\') >>  char '\"') *>  inner <* ( takeWhile (=='\\') >> char '\"')
-  where inner = tryquoted p
-
 parsePrimJSON :: KPrim -> A.Value -> A.Parser Showable
 parsePrimJSON i  A.Null = fail ("cant be null" <> show i)
 parsePrimJSON i  v =
@@ -429,7 +339,7 @@ parsePrimJSON i  v =
       PCpf -> A.withText (show i) (return .SText )
       PTime t -> fmap STime <$> case t of
         PInterval ->  A.withText (show i) (either (errorWithStackTrace "no parse" ) (return . SPInterval )  . parseOnly diffInterval .BS.pack . T.unpack)
-        PTimestamp _ -> (\v -> A.withText (show i) (maybe (fail ("cant parse timestamp" <> show (i,v))) (return .STimestamp  . fst) . strptime "%Y-%m-%dT%H:%M:%OS") $ v)
+        PTimestamp _ -> (\v -> A.withText (show i) (\s -> maybe (fail ("cant parse timestamp: " <> show (i,v))) (return .STimestamp  . fst)  (strptime "%Y-%m-%dT%H:%M:%OS"   s <|> strptime "%Y-%m-%d %H:%M:%OS" s )) v )
         PDayTime  -> A.withText (show i) (maybe (fail "cant parse daytime") (return .SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS")
         PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay . fst) . strptime "%Y-%m-%d")
       PGeom ix a -> A.withText (show i)  (fmap SGeo . either fail pure .Sel.runGet (parseGeom ix a). fst . B16.decode .BS.pack . T.unpack)
@@ -461,100 +371,7 @@ parseGeom ix a = case a of
             3 -> fmap SLineString $ (getLineString get3DPosition)
             2->fmap SLineString $ (getLineString get2DPosition )
 
-parsePrim
-  :: KPrim
-       -> Parser Showable
--- parsePrim i | traceShow i False = error ""
-parsePrim i =  do
-   case i of
-        PDynamic ->  let
-              pr = SDynamic . B.decode . BSL.fromStrict . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}")
-           in tryquoted pr
-        PAddress ->  parsePrim PText
-        PBinary ->  let
-              pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}")
-           in tryquoted pr
-        PMime  _ -> let
-              pr = SBinary . fst . B16.decode . BS.drop 1 <$>  (takeWhile (=='\\') *> plain' "\\\",)}" <* takeWhile (=='\\'))
-           in tryquoted pr
-        PInt _ ->  SNumeric <$>  signed decimal
-        PBoolean -> SBoolean <$> ((const True <$> string "t") <|> (const False <$> string "f"))
-        PDouble -> SDouble <$> pg_double
-        PColor -> let
-            dec =  startQuotedText <|> const "" <$> string"\"\""
-              in    (fmap SText $ join $ either (fail. show)  (return)  . TE.decodeUtf8' <$> dec) <|> (SText   . TE.decodeLatin1 <$> dec )
-        PText -> let
-            dec =  startQuotedText <|> const "" <$> string"\"\""
-              in    (fmap SText $ join $ either (fail. show)  (return)  . TE.decodeUtf8' <$> dec) <|> (SText   . TE.decodeLatin1 <$> dec )
-        PCnpj -> parsePrim PText
-        PCpf -> parsePrim PText
-        PTime ti -> fmap STime $ case ti of
-          PInterval ->
-            let i = SPInterval <$> diffInterval
-             in tryquoted i
 
-          PTimestamp zone ->
-               let p =  do
-                      i <- fmap (STimestamp  . fst) . strptime "%Y-%m-%d %H:%M:%OS"<$> plain' "\\\",)}"
-                      maybe (fail "cant parse date") return i
-                   in tryquoted p
-          PDayTime ->
-               let p =  do
-                      i <- fmap (SDayTime . localTimeOfDay .  fst) . strptime "%H:%M:%OS"<$> plain' "\\\",)}"
-                      maybe (fail "cant parse date") return i
-                   in tryquoted p
-          PDate ->
-               let p = do
-                      i <- fmap (SDate . localDay . fst). strptime "%Y-%m-%d" <$> plain' "\\\",)}"
-                      maybe (fail "cant parse date") return i
-                   in tryquoted p
-        PGeom ix a -> (fmap SGeo) $ case a of
-          PPosition -> do
-            s <- plain' "\",)}"
-            case  Sel.runGet (getPosition3d get3DPosition)(fst $ B16.decode s)of
-                i -> case i of
-                  Right i -> pure $ SPosition i
-                  Left e -> fail e
-          PLineString -> do
-            s <- plain' "\",)}"
-            case  Sel.runGet (getLineString get3DPosition)(fst $ B16.decode s)of
-                i -> case i of
-                  Right i -> pure $ SLineString i
-                  Left e -> fail e
-          PBounding -> SBounding <$> tryquoted box3dParser
-        PDimensional i j ->  parsePrim PDouble
-        i -> error (show i)
-
-
--- parseShowable (KArray (KDelayed i))
-    -- = (string "t" >> return (ArrayTB1 $ [ SDelayed Nothing]))
-parseShowable :: KType (Prim KPrim (Text,Text)) -> Parser (FTB Showable)
-parseShowable (Primitive l (AtomicPrim i)) = parseKTypePrim l
-  where
-    parseKTypePrim (KArray : i)
-      =  join $ fromMaybe (fail "empty list") .  fmap ( return .ArrayTB1  . Non.fromList) . nonEmpty <$> tryquoted par
-          where par = char '{'  *>  sepBy (parseKTypePrim i) (char ',') <* char '}'
-    parseKTypePrim (KOptional: l)
-      = LeftTB1 <$> ( (Just <$> (parseKTypePrim l)) <|> pure (showableDef (Primitive l (AtomicPrim i) )) )
-    parseKTypePrim (KDelayed : i)
-        = (string "t" >> return (LeftTB1 Nothing))
-    parseKTypePrim (KSerial :i)
-        = LeftTB1 <$> ((Just <$> parseKTypePrim i) )
-    parseKTypePrim (KInterval :k)=
-        let
-          inter = do
-            lb <- (char '[' >> return True ) <|> (char '(' >> return False )
-            i <- (ER.Finite <$> parseKTypePrim k) <|>  return ER.NegInf
-            char ','
-            j <- (ER.Finite <$> parseKTypePrim k) <|> return ER.PosInf
-            rb <- (char ']' >> return True) <|> (char ')' >> return False )
-            return $ IntervalTB1 $ Interval.interval (i,lb) (j,rb)
-         in tryquoted  inter
-    parseKTypePrim [] = (forw  . TB1 <$> parsePrim i)
-      where (forw,_) = conversion (Primitive [] (AtomicPrim i))
-
-
-    parseKTypePrim i  = error $  "not implemented " <> show i
 
 parseShowableJSON  p@(Primitive l (AtomicPrim i)) v = parseKTypePrim l v
   where
@@ -569,9 +386,19 @@ parseShowableJSON  p@(Primitive l (AtomicPrim i)) v = parseKTypePrim l v
       =  maybe (fail "parseKTypePrim empty list" ) (fmap (ArrayTB1 . Non.fromList) . mapM (parseKTypePrim i)) (nonEmpty $ F.toList l)
 
     parseKTypePrim (KInterval :l ) (A.String v)
-      = case parseOnly (parseShowable (Primitive (KInterval :l) (AtomicPrim i))) (BS.pack $ T.unpack v) of
+      = case parseOnly inter (BS.pack $ T.unpack v) of
             Right i -> return i
             Left i -> fail i
+      where
+        dec  =  maybe (Left "can't decode interval number " ) (A.parseEither (parseKTypePrim l)) . A.decode . BSL.fromStrict
+        inter = do
+            lb <- (char '[' >> return True ) <|> (char '(' >> return False )
+            i <- dec <$> takeWhile (/=',')
+            char ','
+            j <- dec <$> takeWhile (\i -> i /=']' && i /= ')' )
+            rb <- (char ']' >> return True) <|> (char ')' >> return False )
+            return $ IntervalTB1 $ Interval.interval (either (const ER.NegInf) ER.Finite i,lb) (either (const ER.PosInf ) ER.Finite j,rb)
+
     parseKTypePrim [] v = forw . TB1 <$> ( parsePrimJSON i v)
         where (forw,_)  =conversion (Primitive [] (AtomicPrim i))
     parseKTypePrim a b = error $ "no match " ++ show (p,a,b)
@@ -718,11 +545,6 @@ diffInterval = (do
     v -> errorWithStackTrace $ show v)
 
 
-plain' :: String -> Parser BS.ByteString
-plain' delim = takeWhile1 (notInClass (delim ))
-
-plain0' :: String -> Parser BS.ByteString
-plain0' delim = Data.Attoparsec.ByteString.Char8.takeWhile (notInClass (delim ))
 
 parseInter token = do
     lb <- (char '[' >> return True) <|> (char '(' >> return False)
@@ -730,16 +552,12 @@ parseInter token = do
     rb <- (char ']' >> return True ) <|> (char ')' >> return False )
     return [(lb,ER.Finite i),(rb,ER.Finite j)]
 
-
-
-
 instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
-fromShowable ty v =
-   case parseOnly (parseShowable (ty )) v of
-      Right i -> Just i
-      Left l -> Nothing
+fromShowable k f = case A.parseEither (parseShowableJSON  k) f of
+                 Right i -> i
+                 Left i -> errorWithStackTrace (show i)
 
 fromRecordJSON :: TBData Key () -> NameMap ->  FR.RowParser (TBData Key Showable)
 fromRecordJSON foldable namemap = do
@@ -748,12 +566,6 @@ fromRecordJSON foldable namemap = do
                   Left i -> errorWithStackTrace (show i)
   parser <$> FR.field
 
-fromRecord foldable = do
-    let parser  = parseRecord foldable
-    FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
-                               (Right (Just r ) ) -> return r
-                               Right Nothing -> error (show j )
-                               Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
 
 parseField parser = do
     FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
@@ -771,11 +583,3 @@ withCount value = do
   v <- value
   c <- FR.field
   return (v,c)
-
-fromAttr foldable = do
-    let parser  = parseLabeledTable foldable
-    FR.fieldWith (\i j -> case traverse (parseOnly  parser )  j of
-                               (Right (Just r ) ) -> return r
-                               Right Nothing -> error (show j )
-                               Left i -> error (show i <> "  " <> maybe "" (show .T.pack . BS.unpack) j  ) )
-
