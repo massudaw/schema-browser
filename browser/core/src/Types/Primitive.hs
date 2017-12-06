@@ -125,24 +125,21 @@ isFunction i = False
 isRecRel (RecJoin _ _ ) =  True
 isRecRel i = False
 
-pathRel (Path _ rel  ) = rel
-pathRelRef (Path ifk _  ) = ifk
+pathRelOri :: Ord k => SqlOperationK k -> Set k
+pathRelOri = S.map _relOrigin . pathRelRel
 
-pathRelRel :: Ord k => Path (Set k ) (SqlOperationK k) -> Set (Rel k)
-pathRelRel (Path _ (FKJoinTable  rel   _ )  ) = Set.fromList rel
-pathRelRel (Path r (FKInlineTable  _  )   ) = Set.map Inline r
-pathRelRel (Path r (RecJoin l rel )   ) =  pathRelRel (Path r rel )
-pathRelRel (Path _ (FunctionField r _ a ) ) =  S.singleton $ RelFun r (relAccesGen <$> a)
+pathRelRel :: Ord k => SqlOperationK k -> Set (Rel k)
+pathRelRel (FKJoinTable  rel   _  ) = Set.fromList rel
+pathRelRel (FKInlineTable  r _  ) = Set.singleton $ Inline r
+pathRelRel (RecJoin l rel ) =  pathRelRel rel
+pathRelRel (FunctionField r _ a ) =  S.singleton $ RelFun r (relAccesGen <$> a)
 
 
-pathRelRel' :: Ord k => Path (Set k ) (SqlOperationK k) -> MutRec [Set (Rel k )]
-pathRelRel' (Path r (RecJoin l rel )   )
-  | L.null (unMutRec l) =  MutRec [[pathRelRel (Path r rel )]]
-  | otherwise = fmap ((pathRelRel (Path r rel ) :) . fmap (Set.fromList)) l
+pathRelRel' :: Ord k => SqlOperationK k -> MutRec [Set (Rel k )]
+pathRelRel' (RecJoin l rel )
+  | L.null (unMutRec l) =  MutRec [[pathRelRel rel ]]
+  | otherwise = fmap ((pathRelRel rel  :) . fmap (Set.fromList)) l
 
-data Path a b
-  = Path  a  b
-  deriving(Eq,Ord,Show ,Functor)
 
 type Column k a = TB k a
 type TBData k a = (KVMetadata k,KV k a )
@@ -279,7 +276,7 @@ data SGeo
 
 --- Time Data Runtime Representations
 data STime
-  = STimestamp ! LocalTime
+  = STimestamp ! UTCTime
   | SDate ! Day
   | SDayTime ! TimeOfDay
   | SPInterval ! DiffTime
@@ -322,12 +319,12 @@ type SqlOperation = SqlOperationK Key
 data SqlOperationK k
   = FKJoinTable [Rel k] (Text,Text)
   | RecJoin (MutRec [[Rel k ]])  (SqlOperationK k)
-  | FKInlineTable (Text,Text)
+  | FKInlineTable k (Text,Text)
   | FunctionField k Expr [Access k]
   deriving(Eq,Ord,Show,Functor)
 
 fkTargetTable (FKJoinTable  r tn) = snd tn
-fkTargetTable (FKInlineTable tn) = snd tn
+fkTargetTable (FKInlineTable _ tn ) = snd tn
 fkTargetTable (RecJoin t tn) = fkTargetTable tn
 
 data FieldModifier
@@ -348,7 +345,7 @@ type Table = TableK Key
 
 
 mapTableK f (Raw  uni s tt tr de is rn  un idx rsc rp rd rf rat ) = Raw uni s tt tr (S.map f de) is rn (fmap (fmap f) un) (fmap (fmap f) idx) (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf ) (S.map f rat)
-  where mapPath f (Path i j ) = Path (S.map f i) (fmap f j)
+  where mapPath f j  = (fmap f j)
 mapTableK f (Project t tr) = Project (mapTableK f t) (mapTransform f tr)
 
 mapTransform f (Union l ) = Union (fmap (mapTableK f) l)
@@ -377,7 +374,7 @@ data TableK k
            , _rawScope :: [k]
            , _rawPKL :: [k]
            , _rawDescriptionL :: [k]
-           , _rawFKSL ::  (Set (Path (Set k) (SqlOperationK k )))
+           , _rawFKSL ::  (Set (SqlOperationK k ))
            , _rawAttrsR :: (Set k)
            }
      | Project  (TableK k)  (TableTransform  k)
@@ -429,7 +426,7 @@ type TableModification p = TableModificationK Table p
 data TableModificationK k p
   = TableModification
   { tableId :: Maybe Int
-  , tableTime :: LocalTime
+  , tableTime :: UTCTime
   , tableUser :: Text
   , tableObj :: k
   , tableDiff ::  p
@@ -469,7 +466,7 @@ instance Num Showable where
     SDouble i + SNumeric j = SDouble $ i +  fromIntegral j
     SNumeric j  + SDouble i = SDouble $ i +  fromIntegral j
     v + k = errorWithStackTrace (show (v,k))
-    STime(STimestamp i) - STime(STimestamp j) =  STime $ SPInterval $ realToFrac $ diffUTCTime (localTimeToUTC utc i) (localTimeToUTC utc  j)
+    STime(STimestamp i) - STime(STimestamp j) =  STime $ SPInterval $ realToFrac $ diffUTCTime i j
     SNumeric i -  SNumeric j = SNumeric (i - j)
     SDouble i -  SDouble j = SDouble (i - j)
     SDouble i - SNumeric j = SDouble $ i -  fromIntegral j
@@ -500,7 +497,7 @@ instance Fractional Showable where
   recip i = errorWithStackTrace (show i)
 
 -- type HashQuery =  HashSchema (Set Key) (SqlOperation Table)
-type PathQuery = Path (Set Key) (SqlOperation )
+type PathQuery = SqlOperation
 
 
 
@@ -555,9 +552,9 @@ tableMeta :: Ord k => TableK k -> KVMetadata k
 tableMeta (Project s _ ) =  tableMeta s
 tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawDescription t) (fmap F.toList $ uniqueConstraint t) [] (F.toList $ rawAttrs t)[]  (F.toList $ rawDelayed t) (paths' <> paths)
   where
-    rec = filter (isRecRel.pathRel)  (Set.toList $ rawFKS t)
-    same = filter ((tableName t ==). fkTargetTable . pathRel) rec
-    notsame = filter (not . (tableName t ==). fkTargetTable . pathRel) rec
+    rec = filter isRecRel  (Set.toList $ rawFKS t)
+    same = filter ((tableName t ==). fkTargetTable ) rec
+    notsame = filter (not . (tableName t ==). fkTargetTable  ) rec
     paths = fmap (fmap (fmap F.toList). pathRelRel' ) notsame
     paths' = (\i -> if L.null i then [] else [MutRec i]) $ fmap ((head .unMutRec). fmap (fmap F.toList). pathRelRel' ) same
 
@@ -779,6 +776,6 @@ generateConstant CurrentDate = unsafePerformIO $ do
         return  (TB1 $ STime $ SDate (utctDay i))
 generateConstant CurrentTime = unsafePerformIO $ do
         i<- getCurrentTime
-        return (TB1 $ STime  $STimestamp ( utcToLocalTime utc i))
+        return (TB1 $ STime  $STimestamp  i)
 
 replaceRel rel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)

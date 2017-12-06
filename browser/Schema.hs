@@ -168,16 +168,16 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
           exforeignKeys :: Query
           exforeignKeys = "select origin_table_name,target_schema_name,target_table_name,origin_fks,target_fks,rel_fks from metadata.extended_view_fks where origin_schema_name = ?"
 
-       fks <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp kp) ( FKJoinTable (zipWith3 (\a b c -> Rel a (readBinaryOp b) c) (lookFk tp kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn foreignKeys (Only schema)
-       efks <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $ Path (S.fromList $ lookFk tp (head . T.splitOn "->" <$> kp)) ( FKJoinTable (zipWith3 (\a b c -> extendedRel keyMap tp a b c)  (V.toList kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn exforeignKeys (Only schema) :: R.Dynamic (Map Text (Set (Path (Set Key) (SqlOperation ) )))
+       fks <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $  ( FKJoinTable (zipWith3 (\a b c -> Rel a (readBinaryOp b) c) (lookFk tp kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn foreignKeys (Only schema)
+       efks <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $ ( FKJoinTable (zipWith3 (\a b c -> extendedRel keyMap tp a b c)  (V.toList kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn exforeignKeys (Only schema) :: R.Dynamic (Map Text (Set ((SqlOperation ) )))
 
 
-       functionsRefs <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc::Text,tc,cols,fun) -> (tp,S.singleton $ Path (S.singleton $ tc) ( FunctionField tc (readFun fun) (head . indexer <$> V.toList cols ) ) )) <$> query conn functionKeys (Only schema):: R.Dynamic (Map Text (Set (Path (Set Text) (SqlOperationK Text) ) ))
+       functionsRefs <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc::Text,tc,cols,fun) -> (tp,S.singleton $  ( FunctionField tc (readFun fun) (head . indexer <$> V.toList cols ) ) )) <$> query conn functionKeys (Only schema):: R.Dynamic (Map Text (Set ( (SqlOperationK Text) ) ))
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ HM.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  HM.toList keyMap :: Map Text (Set Key)
        let i3lnoFun = fmap (\(c,(un,pksl,scp,is_sum))->
                                let
                                   pks = F.toList pksl
-                                  inlineFK =  fmap (\k -> (\t -> Path (S.singleton k ) (  FKInlineTable $ inlineName t) ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
+                                  inlineFK =  fmap (\k -> (\t ->  (  FKInlineTable k $ inlineName t) ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
                                   attrMap =  M.fromList $ fmap (\i -> (keyPosition i,i)) $ S.toList $ justError "no attr" $ M.lookup c (all)
                                   attr = S.difference (justError ("no collumn" <> show c) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> S.fromList pks)
                                in (c ,Raw un schema  (justLook c resTT) (M.lookup un transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap ( fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (fromMaybe [] (fmap ( fmap (justError "no key" . flip M.lookup  attrMap)  . V.toList) <$> M.lookup c indexMap))   (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ (M.lookup c efks )<>(M.lookup c fks )<> fmap S.fromList inlineFK  ) attr )) res :: [(Text,Table)]
@@ -187,7 +187,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
            tableMapPre = HM.singleton schema (HM.fromList i3lnoFun)
            addRefs table = maybe table (\r -> Le.over rawFKSL (S.union (S.map liftFun r)) table) ref
              where ref =  M.lookup (tableName table) functionsRefs
-                   liftFun (Path i (FunctionField k s a) ) =  Path (S.map (lookupKey' ts . (tn,) ) i) (FunctionField (lookupKey' ts (tn ,k)) s (liftASch tableMapPre ts tn <$> a))
+                   liftFun ( (FunctionField k s a) ) =   (FunctionField (lookupKey' ts (tn ,k)) s (liftASch tableMapPre ts tn <$> a))
                    tn = tableName table
                    ts = rawSchema table
 
@@ -217,6 +217,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
            deps (Select _ _ _ ) = []
 
 
+       liftIO $print (schema,keyMap)
        var <- liftIO$ atomically $ modifyTVar (globalRef schemaVar  ) (HM.insert schema inf )
        addStats inf
          {-
@@ -240,34 +241,36 @@ addRecInit inf m = fmap recOverFKS m
   where
         recOverFKS t  = t Le.& rawFKSL Le.%~ S.map path
           where
-                path pini@(Path k rel ) =
-                    Path k (case rel of
-                      FKInlineTable nt  -> case  L.filter (not .L.null) $ openPath S.empty [] pini of
-                              [] -> if snd nt == tableName t then  RecJoin (MutRec []) (FKInlineTable nt) else FKInlineTable nt
-                              e -> RecJoin (MutRec e) (FKInlineTable nt)
-                      FKJoinTable b nt -> case L.filter (not .L.null) $  openPath S.empty [] pini of
-                              [] -> if snd nt == tableName t then  RecJoin (MutRec []) (FKJoinTable  b nt) else FKJoinTable  b nt
-                              e -> RecJoin (MutRec e) (FKJoinTable  b nt)
-                      i -> i
-                      )
+                path :: SqlOperation -> SqlOperation
+                path i@(FunctionField _ _ _ ) = i
+                path pini = case  L.filter (not .L.null) $ openPath S.empty [] pini of
+                              [] -> if (tname pini) == tableName t then  RecJoin (MutRec []) pini else pini
+                              e -> RecJoin (MutRec e) pini
                     where
-                      openPath ts p pa@(Path _(FKInlineTable nt) )
+                      tname :: SqlOperation -> Text
+                      tname (FKInlineTable _ nt) = snd nt
+                      tname (FKJoinTable _ nt) = snd nt
+                      openPath :: S.Set SqlOperation -> [[Rel Key]] -> SqlOperation -> [[[Rel Key]]]
+                      openPath ts p pa@(FKInlineTable _ nt )
                         | snd nt == tableName t = [p]
                         | S.member pa ts =  []
                         | otherwise = openTable (S.insert pa ts) p nt
-                      openPath ts p pa@(Path _(FKJoinTable  _ nt) )
+                      openPath ts p pa@((FKJoinTable  _ nt) )
                         | snd nt == tableName t  = [p]
                         | S.member pa ts =  []
                         | otherwise = openTable (S.insert pa ts)  p nt
-                      openPath ts p (Path _ (FunctionField _ _ _)) = []
-                      openPath ts p pa = error (show (ts,p,pa))
+                      openPath ts p (FunctionField _ _ _) = []
+                      -- openTable :: Set (SqlOperation) -> [[Rel Key]] -> a -> [[[Rel Key]]]
                       openTable t p (st,nt)  =  do
-                              let cons pa
-                                    | pa == pini = p
-                                    | otherwise = p <> [F.toList (pathRelRel (fmap unRecRel pa))]
-                              ix <- fmap (\pa-> openPath t ( cons pa ) (fmap unRecRel pa)) fsk
-                              return (concat (L.filter (not.L.null) ix))
+                                let
+                                    cons :: SqlOperation -> [[Rel Key]]
+                                    cons pa
+                                      -- | pa == pini = p
+                                      | otherwise = p <> [F.toList (pathRelRel $unRecRel pa)]
+                                ix <- fmap (\pa-> openPath t (cons pa ) (unRecRel pa)) fsk
+                                return (concat (L.filter (not.L.null) ix))
                         where tb = justError ("no table" <> show (nt,m)) $ join $ HM.lookup nt <$> (HM.lookup st inf)
+                              fsk :: [SqlOperation]
                               fsk = F.toList $ rawFKS tb
 
 
@@ -374,10 +377,10 @@ liftASch inf s tname (Nested i c) = Nested ref (liftASch inf sch st <$> c)
     ref = liftASch inf s tname <$> i
     lookup i m = justError ("no look" <> show i) $ HM.lookup i m
     tb = lookup tname $  lookup s inf
-    Path _ rel  = justError "no fk" $ L.find (\i -> S.fromList (iprodRef <$> ref )== (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
+    rel  = justError "no fk" $ L.find (\i -> S.fromList (iprodRef <$> ref )== (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
     (sch,st) = case rel of
           FKJoinTable  _ l -> l
-          FKInlineTable  l -> l
+          FKInlineTable  _ l -> l
 
 
 

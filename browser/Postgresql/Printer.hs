@@ -166,7 +166,7 @@ createTable r = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate 
     -- renderTy (InlineTable s ty ) = s <> "." <> ty
     renderPK = "CONSTRAINT " <> tableName r<> "_PK PRIMARY KEY (" <>  renderKeySet (S.fromList $ rawPK r) <> ")"
     -- renderFK (Path origin (FKJoinTable  ks (_,table)) ) = "CONSTRAINT " <> tbl <> "_FK_" <> table <> " FOREIGN KEY " <>  renderKeySet origin <> ") REFERENCES " <> table <> "(" <> renderKeySet end <> ")  MATCH SIMPLE  ON UPDATE  NO ACTION ON DELETE NO ACTION"
-    renderFK (Path origin _  ) = ""
+    renderFK _ = ""
 
 
 

@@ -176,7 +176,7 @@ instance TF.ToField (UnQuoted Showable) where
   toField (UnQuoted (SNumeric i )) =  TF.toField i
   toField (UnQuoted (SGeo (SPosition i ))) =  TF.toField i
   toField (UnQuoted (STime t)) = case t of
-        STimestamp i ->  TF.Plain $ localTimestampToBuilder (Finite i)
+        STimestamp i ->  TF.Plain $ utcTimestampToBuilder (Finite i)
         SDate i  -> TF.Plain $ dateToBuilder (Finite i)
         SDayTime i -> TF.Plain $ timeOfDayToBuilder (i)
   toField (UnQuoted i) = error (show i)
@@ -337,7 +337,7 @@ parsePrimJSON i  v =
       PCpf -> A.withText (show i) (return .SText )
       PTime t -> fmap STime <$> case t of
         PInterval ->  A.withText (show i) (either (error "no parse" ) (return . SPInterval )  . parseOnly diffInterval .BS.pack . T.unpack)
-        PTimestamp _ -> (\v -> A.withText (show i) (\s -> maybe (fail ("cant parse timestamp: " <> show (i,v))) (return .STimestamp  . fst)  (strptime "%Y-%m-%dT%H:%M:%OS"   s <|> strptime "%Y-%m-%d %H:%M:%OS" s )) v )
+        PTimestamp _ -> (\v -> A.withText (show i) (\s -> maybe (fail ("cant parse timestamp: " <> show (i,v))) (return .STimestamp  . localTimeToUTC utc . fst)  (strptime "%Y-%m-%dT%H:%M:%OS"   s <|> strptime "%Y-%m-%d %H:%M:%OS" s )) v )
         PDayTime  -> A.withText (show i) (maybe (fail "cant parse daytime") (return .SDayTime . localTimeOfDay . fst) . strptime "%H:%M:%OS")
         PDate  -> A.withText (show i) (maybe (fail "cant parse date") (return .SDate . localDay . fst) . strptime "%Y-%m-%d")
       PGeom ix a -> A.withText (show i)  (fmap SGeo . either fail pure .Sel.runGet (parseGeom ix a). fst . B16.decode .BS.pack . T.unpack)

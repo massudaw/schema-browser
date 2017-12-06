@@ -350,8 +350,8 @@ data SchemaEditor
   , listEd :: TBData  Key () -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   , getEd :: Table -> TBData Key Showable -> TransactionM (Maybe (TBIdx Key Showable))
   , typeTransform :: PGKey -> CoreKey
-  , joinListEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
-  , joinSyncEd :: [(Table,TBData Key Showable, Path (Set Key ) SqlOperation )] -> [(Text ,Column Key Showable)]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
+  , joinListEd :: [(Table,TBData Key Showable, SqlOperation )]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
+  , joinSyncEd :: [(Table,TBData Key Showable, SqlOperation )] -> [(Text ,Column Key Showable)]  -> Table -> Maybe Int -> Maybe PageToken -> Maybe Int -> [(Key,Order)] -> WherePredicate -> TransactionM ([TBData Key Showable],Maybe PageToken,Int)
   , logger :: forall m . MonadIO m => InformationSchema -> TableModification (RowPatch Key Showable)  -> m (TableModification (RowPatch Key Showable))
   , opsPageSize :: Int
   , transactionEd :: InformationSchema -> (forall a  . IO a -> IO a)
@@ -462,21 +462,21 @@ liftKeys
 liftKeys inf tname = fmap (liftTable' inf tname)
 
 findRefTableKey inf ta rel =  tname2
-  where   (FKJoinTable  _ tname2 )  = (unRecRel.pathRel) $ justError (show (rel ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel))  (F.toList$ rawFKS  ta)
+  where   (FKJoinTable  _ tname2 )  = unRecRel $ justError (show (rel ,rawFKS ta)) $ L.find (\r->  pathRelRel r == S.fromList (rel))  (F.toList$ rawFKS  ta)
 
 
 findRefTable inf tname rel =  tname2
-  where   (FKJoinTable  _ (_,tname2) )  = (unRecRel.pathRel) $ justError (show (rel ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map (keyValue) i == S.fromList (_relOrigin <$> rel))  (F.toList$ rawFKS  ta)
+  where   (FKJoinTable  _ (_,tname2) )  = (unRecRel) $ justError (show (rel ,rawFKS ta)) $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (_relOrigin <$> rel))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 
 liftFieldF :: (Show k ,Ord k) => LookupKey k -> InformationSchema -> Text -> Column k a -> Column Key a
 liftFieldF (f,p) inf tname (Attr t v) = Attr (f inf tname t) v
 liftFieldF (f,p) inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (f inf tname ) ((liftFieldF (f,p) inf tname) ) ref)   rel (liftTableF (f,p) rinf tname2 <$> tb)
-  where FKJoinTable  rel (schname,tname2)  = unRecRel $ pathRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map p i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+  where FKJoinTable  rel (schname,tname2)  = unRecRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\r-> S.map (fmap p) (pathRelRel r)  == S.fromList rel2)  (F.toList$ rawFKS  ta)
         rinf = fromMaybe inf (HM.lookup schname (depschema inf))
         ta = lookTable inf tname
 liftFieldF (f,p) inf tname (IT rel tb) = IT (f inf tname  rel) (liftTableF (f,p) inf tname2 <$> tb)
-  where FKInlineTable (_,tname2)  = unRecRel. pathRel  $ justError (show (rel ,rawFKS ta)) $ L.find (\r@(Path i _ )->  S.map (fmap p) (pathRelRel r) == S.singleton (Inline rel))  (F.toList$ rawFKS  ta)
+  where FKInlineTable _ (_,tname2)  = unRecRel $ justError (show (rel ,rawFKS ta)) $ L.find (\r->  S.map (fmap p) (pathRelRel r) == S.singleton (Inline rel))  (F.toList$ rawFKS  ta)
         ta = lookTable inf tname
 liftFieldF (f,p) inf tname (Fun  k t v) = Fun (f inf tname k ) (fmap(liftAccessF (f,p) inf tname )<$> t) v
 
@@ -497,10 +497,10 @@ liftPatch inf t (_ , k ,p) = (tableMeta ta ,  k,fmap (liftPatchAttr inf t) p)
 liftPatchAttr :: a ~ Index a => InformationSchema -> Text -> PathAttr Text a -> Index (Column Key a)
 liftPatchAttr inf t p@(PAttr k v ) =  PAttr (lookKey inf t k)  v
 liftPatchAttr inf tname p@(PInline rel e ) =  PInline ( lookKey inf tname rel) ((liftPatch inf tname2 ) <$>  e)
-    where Just (FKInlineTable (_,tname2)) = fmap (unRecRel.pathRel) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (rel)) )  (F.toList$ rawFKS  ta)
+    where (FKInlineTable _ (_,tname2)) = fromJust $ fmap unRecRel $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline rel) )  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf tname) pa)  (fmap (liftPatch rinf tname2 ) $ b)
-    where (FKJoinTable  rel (schname,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  S.map keyValue i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+    where (FKJoinTable  rel (schname,tname2) )  = unRecRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList rel2)  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
           rinf = fromMaybe inf (HM.lookup schname (depschema inf))
 
@@ -515,14 +515,14 @@ fixPatch inf t (i , k ,p) = (i,k,fmap (fixPatchAttr inf t) p)
     fixPatchAttr ::  InformationSchema -> Text -> PathAttr Key a -> PathAttr Key a
     fixPatchAttr inf t p@(PAttr _ _ ) =  p
     fixPatchAttr inf tname p@(PInline rel e ) =  PInline rel (fmap (\(_,o,v)-> (tableMeta $ lookTable inf tname2,o,fmap (fixPatchAttr  inf tname2 )v)) e)
-        where Just (FKInlineTable (_,tname2)) = fmap (unRecRel.pathRel) $ L.find (\r@(Path i _ )->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (keyValue rel)) )  (F.toList$ rawFKS  ta)
-              ta = lookTable inf tname
+      where FKInlineTable _ (_,tname2) = fromJust $ fmap unRecRel $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline (keyValue rel)) )  (F.toList$ rawFKS  ta)
+            ta = lookTable inf tname
     fixPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel2 (fmap (fixPatchAttr inf tname) pa)  b
-        where (FKJoinTable  _ (schname,tname2) )  = (unRecRel.pathRel) $ justError (show (rel2 ,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.fromList (_relOrigin <$> rel2))  (F.toList$ rawFKS  ta)
+        where (FKJoinTable  _ (schname,tname2) )  = unRecRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\r->  (pathRelRel r) == S.fromList rel2)  (F.toList$ rawFKS  ta)
               ta = lookTable inf tname
               rinf = fromMaybe inf (HM.lookup schname (depschema inf))
     fixPatchAttr inf tname p@(PFun k _ b ) =  PFun ki (expr,a) b
-      where (FunctionField ki expr a )   = (unRecRel.pathRel) $ justError (show (k,rawFKS ta)) $ L.find (\(Path i _ )->  i == S.singleton(k))  (F.toList$ rawFKS  ta)
+      where (FunctionField ki expr a )   = unRecRel $ justError (show (k,rawFKS ta)) $ L.find (\r->   (pathRelRel r)  == S.singleton(Inline k))  (F.toList$ rawFKS  ta)
             ta = lookTable inf tname
 
 liftAccessM ::  InformationSchema -> Text -> Access Text  -> Maybe (Access Key)
@@ -535,8 +535,8 @@ liftAccessM inf tname (Nested i c) = Nested <$> ref <*> join (fmap (\ l -> liftA
     tb = lookTable inf tname
     n = join $ (\ ref -> L.find (\i -> S.fromList (iprodRef <$> ref) == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)) <$> ref
     proj n = case n of
-          (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
-          (Path _ rel@(FKInlineTable  l  ) ) ->  l
+          FKJoinTable  _ l   ->  l
+          FKInlineTable  _ l   ->  l
 
 liftAccessM _ _ i = errorWithStackTrace (show i)
 
@@ -556,8 +556,8 @@ liftAccessF lk inf tname (Nested i c) = Nested ref (liftAccessF lk rinf (snd l)<
     tb = lookTable inf tname
     n = justError ("no fk " ++ show (i,ref,rawFKS tb) )$ L.find (\i -> S.fromList (iprodRef <$> ref)== (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
     l = case n of
-          (Path _ rel@(FKJoinTable  _ l  ) ) ->  l
-          (Path _ rel@(FKInlineTable  l  ) ) ->  l
+          FKJoinTable  _ l   ->  l
+          FKInlineTable  _ l   ->  l
 liftAccessF _ _ _  i = errorWithStackTrace (show i)
 
 liftAccess = liftAccessF lookupKeyName

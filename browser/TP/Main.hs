@@ -82,138 +82,137 @@ setup smvar args plugList w = void $ do
   metainf <- liftIO$ metaInf smvar
   setCallBufferMode BufferAll
   let bstate = argsToState args
-  let amap = authMap smvar bstate (user bstate , pass bstate)
-  inf <- ui $ fmap (justError ("no schema" <> show (schema bstate))) $ traverse (\i -> loadSchema smvar (T.pack i)  (user bstate)  amap plugList) $ schema  bstate
-  (cli,cliTid) <- ui $ addClient (fromIntegral $ wId w) metainf inf ((\t -> lookTable inf . T.pack $ t) <$> tablename bstate  ) (rowpk bstate)
   (evDB,chooserItens) <- databaseChooser smvar metainf bstate plugList
-  body <- UI.div# set UI.class_ "row"
   return w # set title (host bstate <> " - " <>  dbn bstate)
 
-
-  menu <- checkedWidget (pure True)
+  cliId <- UI.span # set UI.text (show $ wId w)
   cliZone <- jsTimeZone
-  metadataNav <- traverseUI (traverse
-        (\inf -> sequenceA $ (M.fromList [("Map",fmap (^._2) <$>mapWidgetMeta inf)
-                             ,("Chart",fmap (^._2) <$> chartWidgetMetadata inf )
-                             ,("Account",fmap (^._2) <$> accountWidgetMeta inf )
-                             ,("Agenda",fmap (^._2) <$> eventWidgetMeta inf cliZone)
-                                         ]))) evDB
-  element menu # set UI.class_ "col-xs-1"
-  nav  <- buttonDivSet  ["Map","Account","Agenda","Chart","Browser","Metadata"] (pure $ args `atMay` 6  )(\i -> do
-    UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right" # sink  UI.style (noneShow . (maybe True (\i -> isJust .nonEmpty $ i).join . fmap (M.lookup i) ) <$> facts metadataNav ))
-  element nav # set UI.class_ "col-xs-5 pull-right"
-  chooserDiv <- UI.div
-      # set children  ([getElement menu] <> chooserItens <> [getElement nav ])
-      # set UI.style [("align-items","flex-end")]
-      # set UI.class_ "row"
-      # sink0 UI.style (([("align-items","flex-end")] ++ ). maybe [] borderSchema <$> facts evDB)
-  container <- UI.div
-      # set children [chooserDiv , body]
-      # set UI.class_ "container-fluid"
 
-  element body # sink0 UI.style (([("align-items","flex-end")] ++ ). maybe [] borderSchema <$> facts evDB)
-  let
-    expand True = "col-xs-10"
-    expand False = "col-xs-12"
-  addBody  [container]
-  traverseUI (traverse (\inf-> mdo
+  selschemas <- traverseUI (traverse (\inf -> do
+    menu <- checkedWidget (pure True)
+    body <- UI.div# set UI.class_ "row"
+    (cli,cliTid) <- ui $ addClient (fromIntegral $ wId w) metainf inf (join $ lookTableM inf . T.pack  <$> tablename bstate) (rowpk bstate)
+    metadataNav <- sequenceA $  M.fromList
+                       [("Map",fmap (^._2) <$>mapWidgetMeta inf)
+                       ,("Chart",fmap (^._2) <$> chartWidgetMetadata inf )
+                       ,("Account",fmap (^._2) <$> accountWidgetMeta inf )
+                       ,("Agenda",fmap (^._2) <$> eventWidgetMeta inf cliZone)]
+    element menu # set UI.class_ "col-xs-1"
+    nav  <- buttonDivSet  ["Map","Account","Agenda","Chart","Browser","Metadata"] (pure $ args `atMay` 6  )(\i -> do
+        UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right" # set UI.style (noneShow $ (maybe True (\i -> isJust .nonEmpty $ i) $ M.lookup i  metadataNav) ))
+    element nav # set UI.class_ "col-xs-5 pull-right"
+    chooserDiv <- UI.div
+        # set children  ([getElement menu,getElement nav ])
+        # set UI.style [("align-items","flex-end")]
+        # set UI.class_ "row"
+        # set UI.style ([("align-items","flex-end")] ++  borderSchema inf)
+    container <- UI.div
+        # set children [chooserDiv , body]
+        # set UI.class_ "container-fluid"
+        # set UI.style ([("align-items","flex-end")] ++ borderSchema inf)
     let
-      kitems = F.toList (pkMap inf)
-      schId = int $ schemaId inf
-      initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> HM.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
-      lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested [keyRef "selection"] (pure $ keyRef "table")) iv
-                 in fmap (\(TB1 (SText t)) -> t) . traceShowId .unArray  <$> join (fmap unSOptional' i)
+      expand True = "col-xs-10"
+      expand False = "col-xs-12"
+    mdo
+      let
+        kitems = F.toList (pkMap inf)
+        schId = int $ schemaId inf
+        initKey = maybe [] (catMaybes.F.toList)  . (\iv -> fmap (\t -> HM.lookup t (_tableMapL inf))  <$> join (lookT <$> iv)) <$> cliTid
+        lookT iv = let  i = indexFieldRec (liftAccess metainf "clients" $ Nested [keyRef "selection"] $ pure $ Nested [keyRef "selection"](pure $ keyRef "table")) iv
+                    in  join $ (fmap (fmap (\(TB1 (SText t)) -> t) .  unArray) . unSOptional)  . Non.head . unArray  <$> join (fmap unSOptional' i)
 
-    cliIni <- currentValue (facts cliTid)
-    iniKey <- currentValue (facts initKey)
-    let
-      buttonStyle lookDesc k e = Just <$> do
-         label <- UI.div # sink0 UI.text (fmap T.unpack $ facts $ lookDesc  <*> pure k)  # set UI.class_ "fixed-label col-xs-11"
-         element e # set UI.class_ "col-xs-1"
-         UI.label # set children [e , label] # set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
+      cliIni <- currentValue (facts cliTid)
+      iniKey <- currentValue (facts initKey)
+      let
+        buttonStyle lookDesc k e = Just <$> do
+           label <- UI.div # sink0 UI.text (fmap T.unpack $ facts $ lookDesc  <*> pure k)  # set UI.class_ "fixed-label col-xs-11"
+           element e # set UI.class_ "col-xs-1"
+           UI.label # set children [e , label] # set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
 
-    bset <- tableChooser inf  kitems (fst <$> tfilter ) (snd <$> tfilter)  ((schemaName inf)) (snd (username inf)) (pure iniKey)
+      bset <- tableChooser inf  kitems (fst <$> tfilter ) (snd <$> tfilter)  ((schemaName inf)) (snd (username inf)) (pure iniKey)
 
-    posSel <- positionSel
-    bd <- UI.div  # sink0 UI.class_ (facts $ expand <$> triding menu)
-    (sidebar,calendarT) <- calendarSelector
-    tbChooser <- UI.div
-        # set UI.class_ "col-xs-2"
-        # set UI.style ([("height","90vh"),("overflow","hidden")] ++ borderSchema inf)
-        # set children [sidebar,posSel ^._1,getElement bset]
-        # sink0 UI.style (facts $ noneShow <$> triding menu)
-    element body # set children [tbChooser,bd]
-    element bd
-        # set UI.style ([("height","90vh"),("overflow","auto")] ++ borderSchema inf)
-    tfilter <-  traverseUI (\nav-> do
-      bdo <- UI.div
-      element bd # set children [bdo]
-      case nav of
-        "Map" -> do
-          element bdo  # set UI.style [("width","100%")]
-          fmap ((\i j -> elem j i) . fmap (^._2)) <$> mapWidget bdo calendarT posSel (triding bset) inf
-        "Agenda" -> do
-          element bdo  # set UI.style [("width","100%")]
-          cliZone <- jsTimeZone
-          fmap ((\i j -> elem j i) . fmap (^._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
-        "Chart" -> do
-          element bdo  # set UI.style [("width","100%")]
-          cliZone <- jsTimeZone
-          fmap ((\i j -> elem j i) . fmap (^._2)) <$>  chartWidget bdo calendarT posSel (triding bset) inf cliZone
-        "Account" -> do
-          element bdo  # set UI.style [("width","100%")]
-          fmap ((\i j -> elem j i) . fmap (^._2)) <$> accountWidget bdo calendarT (triding bset) inf
-        "Metadata" -> do
-              let metaOpts = ["Poll","Stats","Change","Exception"]
-                  iniOpts = join $ fmap (\i -> if elem i metaOpts then Just i else Nothing)$  args `atMay`  7
-                  displayOpts  i =  UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right"
-              metanav <- buttonDivSet metaOpts (pure iniOpts) displayOpts
-              element metanav # set UI.class_ "col-xs-5 pull-right"
-              metabody <- UI.div
-              element bdo # set children [getElement metanav,metabody] # set UI.class_ "row" # set UI.style [("display","block")]
-              traverseUI (\(nav,tables)-> case nav  of
-                "Poll" -> do
-                    els <- sequence      [ metaAllTableIndexA inf "polling" [(keyRef "schema",Left (schId,Equals) ) ]
-                          , metaAllTableIndexA inf "polling_log" [(keyRef "schema",Left (schId,Equals) ) ]]
-                    element metabody #
-                      set children els
-                "Change" -> do
-                    case schemaName inf of
-                      {-"gmail" -> do
-                        b <- UI.button # set text "sync"
-                        (dbvar,(m,t))  <- ui $ transactionNoLog inf $ selectFrom "history" Nothing Nothing []  mempty
-                        itemListEl <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
-                        itemListEl2 <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
-                        do
-                          (ref,res) <- ui $ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] mempty
-                          listBoxEl itemListEl2 ( G.toList <$> collectionTid ref)  (pure Nothing) (pure id) ( pure attrLine ) element metabody # set children [itemListEl,itemListEl2]-}
-                      i -> do
-                        let pred = [(keyRef "user_name",Left (txt (snd $ username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
-                        dash <- metaAllTableIndexA inf "master_modification_table" pred
-                        element metabody # set UI.children [dash] # set UI.style [("overflow","auto")] # set UI.class_ "col-xs-12"
-                "Stats" -> do
-                    let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
-                    stats_load <- metaAllTableIndexA inf "stat_load_table" pred
-                    stats <- metaAllTableIndexA inf "table_stats" pred
-                    clients <- metaAllTableIndexA inf "clients"$  [(keyRef "schema",Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
-                    element metabody # set UI.children [stats,stats_load,clients]
-                "Exception" -> do
-                    let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
-                    dash <- metaAllTableIndexA inf "plugin_exception" pred
-                    element metabody # set UI.children [dash]
-                i -> errorWithStackTrace (show i)
-                    ) ((,) <$> triding metanav <*> triding bset)
-              return bdo# set UI.style [("height","90vh"),("overflow","auto")]
-              return  (buttonStyle, const True)
-        "Browser" -> do
-              subels <- chooserTable  inf  bset cliTid  cli
-              element bdo  # set children  subels # set UI.style [("height","90vh"),("overflow","auto")]
-              return  (buttonStyle, const True)
-        i -> errorWithStackTrace (show i)
-         )  (triding nav)
-    return tfilter
-      ) )  evDB
-  element body
+      posSel <- positionSel
+      bd <- UI.div  # sink0 UI.class_ (facts $ expand <$> triding menu)
+      (sidebar,calendarT) <- calendarSelector
+      tbChooser <- UI.div
+          # set UI.class_ "col-xs-2"
+          # set UI.style ([("height","90vh"),("overflow","hidden")] ++ borderSchema inf)
+          # set children [sidebar,posSel ^._1,getElement bset]
+          # sink0 UI.style (facts $ noneShow <$> triding menu)
+      element body # set children [tbChooser,bd]
+      element bd
+          # set UI.style ([("height","90vh"),("overflow","auto")] ++ borderSchema inf)
+      tfilter <-  traverseUI (\nav-> do
+        bdo <- UI.div
+        element bd # set children [bdo]
+        case nav of
+          "Map" -> do
+            element bdo  # set UI.style [("width","100%")]
+            fmap ((\i j -> elem j i) . fmap (^._2)) <$> mapWidget bdo calendarT posSel (triding bset) inf
+          "Agenda" -> do
+            element bdo  # set UI.style [("width","100%")]
+            cliZone <- jsTimeZone
+            fmap ((\i j -> elem j i) . fmap (^._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
+          "Chart" -> do
+            element bdo  # set UI.style [("width","100%")]
+            cliZone <- jsTimeZone
+            fmap ((\i j -> elem j i) . fmap (^._2)) <$>  chartWidget bdo calendarT posSel (triding bset) inf cliZone
+          "Account" -> do
+            element bdo  # set UI.style [("width","100%")]
+            fmap ((\i j -> elem j i) . fmap (^._2)) <$> accountWidget bdo calendarT (triding bset) inf
+          "Metadata" -> do
+                let metaOpts = ["Poll","Stats","Change","Exception"]
+                    iniOpts = join $ fmap (\i -> if elem i metaOpts then Just i else Nothing)$  args `atMay`  7
+                    displayOpts  i =  UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right"
+                metanav <- buttonDivSet metaOpts (pure iniOpts) displayOpts
+                element metanav # set UI.class_ "col-xs-5 pull-right"
+                metabody <- UI.div
+                element bdo # set children [getElement metanav,metabody] # set UI.class_ "row" # set UI.style [("display","block")]
+                traverseUI (\(nav,tables)-> case nav  of
+                  "Poll" -> do
+                      els <- sequence      [ metaAllTableIndexA inf "polling" [(keyRef "schema",Left (schId,Equals) ) ]
+                            , metaAllTableIndexA inf "polling_log" [(keyRef "schema",Left (schId,Equals) ) ]]
+                      element metabody #
+                        set children els
+                  "Change" -> do
+                      case schemaName inf of
+                        {-"gmail" -> do
+                          b <- UI.button # set text "sync"
+                          (dbvar,(m,t))  <- ui $ transactionNoLog inf $ selectFrom "history" Nothing Nothing []  mempty
+                          itemListEl <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
+                          itemListEl2 <- UI.select # set UI.class_ "col-xs-9" # set UI.style [("width","70%"),("height","350px")] # set UI.size "20"
+                          do
+                            (ref,res) <- ui $ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] mempty
+                            listBoxEl itemListEl2 ( G.toList <$> collectionTid ref)  (pure Nothing) (pure id) ( pure attrLine ) element metabody # set children [itemListEl,itemListEl2]-}
+                        i -> do
+                          let pred = [(keyRef "user_name",Left (txt (snd $ username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                          dash <- metaAllTableIndexA inf "master_modification_table" pred
+                          element metabody # set UI.children [dash] # set UI.style [("overflow","auto")] # set UI.class_ "col-xs-12"
+                  "Stats" -> do
+                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                      stats_load <- metaAllTableIndexA inf "stat_load_table" pred
+                      stats <- metaAllTableIndexA inf "table_stats" pred
+                      clients <- metaAllTableIndexA inf "clients"$  [(keyRef "schema",Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
+                      element metabody # set UI.children [stats,stats_load,clients]
+                  "Exception" -> do
+                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                      dash <- metaAllTableIndexA inf "plugin_exception" pred
+                      element metabody # set UI.children [dash]
+                  i -> errorWithStackTrace (show i)
+                      ) ((,) <$> triding metanav <*> triding bset)
+                return bdo# set UI.style [("height","90vh"),("overflow","auto")]
+                return  (buttonStyle, const True)
+          "Browser" -> do
+                subels <- chooserTable  inf  bset cliTid  cli
+                element bdo  # set children  (pure subels) # set UI.style [("height","90vh"),("overflow","auto")]
+                return  (buttonStyle, const True)
+          i -> errorWithStackTrace (show i)
+           )  (triding nav)
+      return tfilter
+    return container ))   evDB
+  header <- UI.div # set UI.class_ "row" # set  children ([cliId]++chooserItens)
+  top <- layoutSel onShiftAlt selschemas # set UI.class_ "row"
+  addBody ([header,top])
 
 
 listDBS ::  InformationSchema -> Text -> Dynamic (Tidings [(Text,Text)])
@@ -280,14 +279,20 @@ loadSchema smvar schemaN user authMap  plugList =  do
     keyTables smvar (schemaN,T.pack $ user) authMap plugList
 
 databaseChooser smvar metainf sargs plugList = do
+  (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
+  load <- UI.button # set UI.text "Log In" # set UI.class_ "row"
+  loadE <- UI.click load
+  login <- UI.div # set children widE # set UI.class_ "row"
+  authBox <- UI.div # set children [login ,load]   # set UI.class_ "col-xs-2"
+  let
+      formLogin = form widT loadE
   let db = T.pack $ dbn sargs
   dbs <- ui $ listDBS  metainf  db
-  dbsWPre <- listBox
+  dbsWPre <- multiListBox
       ((\j ->  fst <$> j) <$> dbs)
-      (pure $ fmap T.pack $ schema sargs)
-      (pure id)
+      (pure $ maybeToList $ fmap T.pack $ schema sargs)
       (pure (line . T.unpack ))
-  let dbsW = TrivialWidget ((\i j ->  join $ (\k -> (db, ) <$> L.find ((==k).fst) j) <$> i ) <$> triding dbsWPre <*> dbs) (getElement dbsWPre)
+  let dbsW = TrivialWidget ((\i j ->  (\k -> justError " no schema" $ (db, ) <$> L.find ((==k).fst) j) <$> i ) <$> triding dbsWPre <*> dbs) (getElement dbsWPre)
   cc <- currentValue (facts $ triding dbsW)
   let dbsWE = rumors $ triding dbsW
   dbsWB <-  ui $stepper cc dbsWE
@@ -295,50 +300,36 @@ databaseChooser smvar metainf sargs plugList = do
   (schemaE,schemaH) <- ui newEvent
   metainf <- liftIO $ metaInf smvar
   let
-    genSchema (db,(schemaN,ty))
-        = case ty of
-          "rest" -> do
+    genSchema e@(db,(schemaN,ty)) (user,pass) = case ty of
+          {-"rest" -> do
               userEnv <- liftIO$ lookupEnv "GOOGLE_USER"
               usernamel <- flabel # set UI.text "Usuário"
               username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set value (fromMaybe "" userEnv)
               usernameE <-  fmap nonEmpty  <$> UI.valueChange username
               usernameB <-  ui $stepper userEnv usernameE
 
-              load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-4" # sink UI.enabled (facts (isJust <$> dbsWT) )
+              load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-4" # sink UI.enabled (facts (L.elem e<$> dbsWT) )
               loadE <- UI.click load
               ui $ onEventDyn (usernameB <@ loadE )( traverse (\ v ->do
                 let auth = authMap smvar sargs (user sargs ,pass sargs )
                 inf <- loadSchema smvar schemaN  (user sargs)  auth plugList
-                liftIO$schemaH $ Just inf))
+                liftIO$ schemaH [inf]))
               user <- UI.div # set children [usernamel,username] # set UI.class_ "col-xs-8"
-              UI.div # set children [user ,load]
+              UI.div # set children [user ,load] -}
           "sql" -> do
-            (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )
-            load <- UI.button # set UI.text "Log In" # set UI.class_ "col-xs-2" # sink UI.enabled (facts (isJust <$> dbsWT) )
-            loadE <- UI.click load
-            let login =   widT
-                formLogin = form login  loadE
-            ui$ mapTEventDyn
-              (traverse (\(user,pass)-> do
-                let auth = authMap smvar sargs (user,pass)
-                inf <- loadSchema smvar schemaN  user auth plugList
-                liftIO$schemaH $ Just inf
-                ))(formLogin)
+              let auth = authMap smvar sargs (user,pass)
+              inf <- loadSchema smvar schemaN  user auth plugList
+              return inf
 
-            UI.div # set children (widE <> [load])
           "code" -> do
-            UI.div
+              let auth = authMap smvar sargs (user,pass)
+              inf <- loadSchema smvar schemaN  user auth plugList
+              return inf
 
-  element dbsW # set UI.style [("height" ,"26px"),("width","140px")]
-  genS <- traverse genSchema <$|> dbsWT
-  authBox <- UI.div # sink children (maybeToList <$> facts genS) # set UI.class_ "col-xs-4"
-  let auth = authMap smvar sargs (user sargs ,pass sargs )
-  inf <- ui $traverse (\i -> loadSchema smvar (T.pack i ) (user sargs) auth plugList ) (schema sargs)
-  chooserB  <- ui $ stepper inf schemaE
-  let chooserT = tidings chooserB schemaE
-  element authBox  # sink UI.style (facts $ (\a b -> noneShow $  fromMaybe True $  liftA2 (\(db,(sc,ty)) (csch) -> if sc == (schemaName csch )then False else True ) a b )<$>    dbsWT <*> chooserT )
+  element dbsW # set UI.style [("width","140px")]
+  chooserT <- traverseUI ui $ (\l i-> mapM (flip genSchema (justError "no pass" i)) l ) <$> dbsWT <*> formLogin
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [getElement dbsW]
-  return $ (chooserT,[schemaSel ]<>  [authBox] )
+  return $ (chooserT,[schemaSel ,authBox] )
 
 createVar :: IO (TVar DatabaseSchema)
 createVar = do

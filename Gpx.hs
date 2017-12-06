@@ -5,6 +5,7 @@ module Gpx
 import Types
 import Types.Patch
 import Utils
+import Data.Time
 import Data.String
 import Control.Monad
 import Safe
@@ -61,7 +62,7 @@ getPoint = atTag "trkpt" >>>
     lon <- getAttrValue "lon" -< x
     ele <- deep getText <<< atTag "ele" -< x
     time <- deep getText <<< atTag "time" -< x
-    returnA -< [Attr "position" (TB1 $ SGeo $ SPosition $ Position (read lon ,read lat ,read ele)),Attr "instant" (TB1 $ STime $ STimestamp $  fromJust $ fmap fst  $ strptime "%Y-%m-%dT%H:%M:%SZ" time )]
+    returnA -< [Attr "position" (TB1 $ SGeo $ SPosition $ Position (read lon ,read lat ,read ele)),Attr "instant" (TB1 $ STime $ STimestamp $  localTimeToUTC utc . fromJust $ fmap fst  $ strptime "%Y-%m-%dT%H:%M:%SZ" time )]
 
 file :: Showable
 file = "/home/massudaw/2014-08-27-1653.gpx"

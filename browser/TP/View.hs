@@ -130,9 +130,9 @@ timePred inf tname evfields (incrementT,resolution) = time
              KSerial  -> go i
     ref (Primitive f a) =  case a of
             (AtomicPrim (PTime PDate)) ->
-              (TB1 . STime . SDate . localDay . utcToLocalTime utc)
+              (TB1 . STime . SDate . utctDay )
             (AtomicPrim (PTime (PTimestamp _))) ->
-              (TB1 . STime . STimestamp . utcToLocalTime utc)
+              (TB1 . STime . STimestamp  )
             v -> errorWithStackTrace (show v)
     i =
         (\r d ->
@@ -248,7 +248,7 @@ makePatch zone ((t,pk,k),a) =
     cast (AtomicPrim (PTime PDate)) = STime . SDate . utctDay
     cast (AtomicPrim (PTime (PTimestamp l))) =
       STime . STimestamp .
-        utcToLocalTime utc . localTimeToUTC zone . utcToLocalTime utc
+        localTimeToUTC zone . utcToLocalTime utc
 
 readPosition:: EventData -> Maybe ([Double],[Double])
 readPosition (v) = (,) <$>  readP ni na nz <*>readP si sa sz

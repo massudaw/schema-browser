@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
 module Plugins.Schema where
 
 import Types
@@ -7,6 +7,7 @@ import Types.Patch
 import qualified Data.List as L
 import Utils
 import Control.Monad
+import Serializer
 import Data.Maybe
 import Data.Proxy
 import Schema
@@ -40,6 +41,7 @@ import Data.Dynamic (fromDyn,toDyn)
 import DynFlags (defaultFatalMessager, defaultFlushOut, PkgConfRef(PkgConfFile))
 
 import Debug.Trace
+
 codeOps = SchemaEditor (error "no ops 1") (error "no ops 2") (\i -> return Nothing ) (error "no ops 4") (\ _ _ _ _ _ _ -> return ([],Nothing ,0)) (\ _ _-> return Nothing )  mapKeyType (error "no ops 6")(error "no ops 7") undefined 400 (\inf -> id {-withTransaction (conn inf)-})  (error "no ops") Nothing
 
 gmailPrim :: HM.HashMap Text KPrim
@@ -98,18 +100,29 @@ list' (One i) = Just $ pure i
 list :: Union a -> NonEmpty a
 list = justError "empty list " . list'
 
-reference (IProd _ k)
-  = [ IT "iprod" (LeftTB1 . Just . TB1 .
-      tblist  $ [ Attr "key" ((txt ) k )])
-    , IT "nested" (LeftTB1 Nothing)]
-reference (Nested l nest )
-  = [ IT "iprod" (LeftTB1 Nothing)
-    , IT "nested" (LeftTB1 $ (\nest -> TB1 .
-      tblist $
-        [Attr "ref" (array (txt . iprodRef ) (Non.fromList l))
-        ,IT "nest" (array (TB1 .tblist . reference )  nest)]) <$> (list' nest)) ]
+instance DecodeTable (Access Text) where
+  encodeT (IProd _ k) =
+    tblist
+      [ IT "iprod" (LeftTB1 . Just . TB1 . tblist $ [Attr "key" (txt k)])
+      , IT "nested" (LeftTB1 Nothing)
+      ]
+  encodeT (Nested l nest) =
+    tblist $
+    [ IT "iprod" (LeftTB1 Nothing)
+    , IT
+        "nested"
+        (LeftTB1 $
+         (\nest ->
+            TB1 . tblist $
+            [ Attr "ref" (array (txt . iprodRef) (Non.fromList l))
+            , IT "nest" (array (TB1 . encodeT) nest)
+            ]) <$>
+         (list' nest))
+    ]
 
-reference  i = error ("no match reference: " ++ show i)
+
+
+
 
 addPlugins iniPlugList smvar = do
   metaschema <- liftIO $ code smvar
@@ -120,15 +133,17 @@ addPlugins iniPlugList smvar = do
   let
     row dyn@(FPlugins _ _ (StatefullPlugin _)) =  do
         name <- nameM
-        return $ tblist $ [FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM ) name)) [Rel "ref" Equals "oid"]  (TB1 name), Attr "table" (txt (_bounds dyn) ), Attr "plugin" (TB1 $ SHDynamic (HDynamic (toDyn dyn ))) ]
+        return $ tblist $ [FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
+                     ,Attr "table" (txt (_bounds dyn) )
+                     ,Attr "plugin" (TB1 $ SHDynamic (HDynamic (toDyn dyn ))) ]
       where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl (keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
     row dyn = do
         name <- nameM
         let (inp,out) = pluginStatic dyn
         return $ tblist $ [ FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
                           , Attr "table" (txt (_bounds dyn) )
-                          , IT "input" (array (TB1 .tblist . reference ) (list inp))
-                          , IT "output" (array (TB1 .tblist . reference ) (list out))
+                          , IT "input" (array (TB1 .encodeT ) (list inp))
+                          , IT "output" (array (TB1 .encodeT) (list out))
                           , Attr "plugin" (TB1 $ SHDynamic (HDynamic (toDyn dyn ))) ]
       where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl (keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
   R.onEventIO event (putPatch (patchVar ( iniRef dbstats)) . pure )
@@ -157,7 +172,7 @@ plugListM  = do
     modSums <- initSession ["Plugins"]
 
     putString ":::Evaluate a name from module Plugins:::"
-    importDecl_RdrName <- parseImportDecl "import Plugins "
+    importDecl_RdrName <- parseImportDecl "import Plugins"
     importDecl_Run <- parseImportDecl "import RuntimeTypes"
     setContext [ IIDecl importDecl_RdrName
                , IIDecl importDecl_Run]
@@ -180,8 +195,7 @@ initSession modStrNames = do
                   return target
               ) modStrNames
   setTargets targets
-  addPkgDb  ".stack-work/install/x86_64-linux/ghc-7.10/7.10.3/lib/x86_64-linux-ghc-7.10.3/"
-
+  addPkgDb  ".stack-work/install/x86_64-linux/lts-8.20/8.0.2/lib/x86_64-linux-ghc-8.0.2/"
   load LoadAllTargets
   modSums <- mapM
               (\modStrName -> do

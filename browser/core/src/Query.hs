@@ -210,14 +210,14 @@ reflexiveRel ks
 isInlineRel (Inline _ ) =  True
 isInlineRel i = False
 
-isReflexive (Path i r@(FKJoinTable  ks  _ )  )
+isReflexive r@(FKJoinTable  ks  _ )
   -- |  not (t `S.isSubsetOf` (S.fromList $ fmap _relTarget ks ))  = False
   |  otherwise = isPathReflexive  r
-isReflexive (Path _ l  ) = isPathReflexive l
+isReflexive l  = isPathReflexive l
 
 isPathReflexive (FKJoinTable  ks _)
   | otherwise   = all id $ fmap (\j-> isPairReflexive (keyType (_relOrigin  j) ) (_relOperator j ) (keyType (_relTarget j) )) ks
-isPathReflexive (FKInlineTable _)= True
+isPathReflexive (FKInlineTable _ _)= True
 isPathReflexive (FunctionField _ _ _)= False
 isPathReflexive (RecJoin _ i ) = isPathReflexive i
 
@@ -246,13 +246,13 @@ tableViewNR invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
 
 
 
-pathToRel (Path ifk (FKInlineTable _ ) ) = fmap Inline $ F.toList ifk
-pathToRel (Path ifk (FunctionField _ _ _ ) ) = fmap Inline $ F.toList ifk
-pathToRel (Path ifk (FKJoinTable ks _ ) ) = ks
+pathToRel (FKInlineTable i _ )  = [Inline i]
+pathToRel (FunctionField i _ _ )  = [Inline i]
+pathToRel (FKJoinTable ks _  ) = ks
 
 dumbKey n = Key n  Nothing [] 0 Nothing (unsafePerformIO newUnique) (Primitive [] (AtomicPrim (PInt 0) ))
 
-findRefIT ifk = justError ("cant find ref" <> show ifk). M.lookup (S.map Inline ifk )
+findRefIT ifk = justError ("cant find ref" <> show ifk). M.lookup (S.singleton $ Inline ifk )
 findRefFK fks ksbn = kvlist $ fmap (\i -> justError ("cant find " ). M.lookup (S.singleton (Inline i)) $ ksbn ) fks
 
 recursePath
@@ -262,24 +262,24 @@ recursePath
      -> [(Set (Rel Key), TB Key ())]
      -> M.Map (Set (Rel Key)) (TB Key ())
      -> TableMap
-     -> Path (Set Key) SqlOperation
+     -> SqlOperation
      -> State
           ((Int, Map Int Table), (Int, Map Int Key))
           (TB Key ())
 -- recursePath _ _ _ _ _ _ o | traceShow o False = undefined
-recursePath m isLeft isRec vacc ksbn invSchema p@(Path ifk jo@(FKInlineTable (s,t) ) )
+recursePath m isLeft isRec vacc ksbn invSchema p@( FKInlineTable ifk (s,t) )
     | anyArrayRel ks  =   do
           let
               ref = findRefIT ifk ksbn
           ksn <-  labelTable  nextT
           tb <- fun ksn
-          return $  IT (head (S.toList ifk))   (mapOpt $ mapArray $ TB1 tb )
+          return $  IT ifk   (mapOpt $ mapArray $ TB1 tb )
     | otherwise = do
           let
             ref = findRefIT ifk ksbn
           ksn <-  labelTable  nextT
           tb <- fun ksn
-          return $ ( IT  (head (S.toList ifk)) (mapOpt $ TB1 tb)   )
+          return $ IT   ifk  (mapOpt $ TB1 tb)
     where
         ks = pathToRel p
         nextLeft =  isLeft || anyLeftRel ks
@@ -288,7 +288,7 @@ recursePath m isLeft isRec vacc ksbn invSchema p@(Path ifk jo@(FKInlineTable (s,
         nextT = justError ("recursepath lookIT "  <> show t <> " " <> show invSchema) (HM.lookup t =<< HM.lookup s invSchema)
         fun =  recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
-recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn,tn)) )
+recursePath m isLeft isRec vacc ksbn invSchema jo@(FKJoinTable  ks (sn,tn))
     | anyArrayRel ks =   do
           ksn <- labelTable nextT
           tb <-fun ksn
@@ -301,29 +301,26 @@ recursePath m isLeft isRec vacc ksbn invSchema (Path ifk jo@(FKJoinTable  ks (sn
     nextT = justError "no table"  $ (HM.lookup tn  =<< HM.lookup sn invSchema)
     findRefs = findRefFK  (_relOrigin <$> filter (\i -> not $ S.member (_relOrigin i) (S.map _relOrigin $ S.unions $ fmap fst vacc)) (filterReflexive ks))
     e = S.fromList $ rawPK nextT
-    nextLeft = any (isKOptional.keyType) (S.toList ifk) || isLeft
+    nextLeft = any (isKOptional.keyType) (_relOrigin<$> ks) || isLeft
     mapArray i =  if anyArrayRel ks then ArrayTB1 (pure i) else i
     mapOpt i = if anyLeftRel ks then  LeftTB1 $ Just  i else i
     fun =   recurseTB invSchema (rawFKS nextT) nextLeft isRec
 
-recursePath m isLeft isRec vacc ksbn invSchema jo@(Path ifk (RecJoin l f) )
-  = recursePath m isLeft (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec  ) vacc ksbn invSchema (Path ifk f )
-recursePath m isLeft isRec vacc ksbn invSchema jo@(Path ifk (FunctionField k l f) )
+recursePath m isLeft isRec vacc ksbn invSchema jo@(RecJoin l f)
+  = recursePath m isLeft (fmap (\(b,c) -> if mAny (\c -> L.null c) c  then (b,b) else (b,c)) $  isRec  ) vacc ksbn invSchema f
+recursePath m isLeft isRec vacc ksbn invSchema jo@(FunctionField k l f)
   = return $ (Fun k  (l,a) (TB1 () ))
     where
       a = f
-      ref = (\i -> justError ("cant find " ).  M.lookup (S.singleton (Inline i)) $ ksbn ) $ head (S.toList ifk )
+      ref = justError "cant find " .  M.lookup (S.singleton (Inline k)) $ ksbn
 
-recurseTB :: TableMap -> Set (Path (Set Key ) SqlOperation ) -> Bool -> RecState Key  -> TBData Key () -> State ((Int, Map Int Table), (Int, Map Int Key)) (TBData Key ())
-recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else m  ,) <$>
-  fun kv
-    where
-      fun =  (\kv -> do
+recurseTB :: TableMap -> Set SqlOperation -> Bool -> RecState Key  -> TBData Key () -> State ((Int, Map Int Table), (Int, Map Int Key)) (TBData Key ())
+recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else m  ,) <$> do
           let
               items = _kvvalues kv
               fkSet:: S.Set Key
-              fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction .pathRel) $ S.toList fks'
-              funSet = S.unions $ fmap (\(Path i _ )-> i) $ filter (isFunction.pathRel) (S.toList fks')
+              fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction ) $ S.toList fks'
+              funSet = S.unions $ fmap (S.map _relOrigin.pathRelRel) $ filter isFunction (S.toList fks')
               nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) (fkSet <> funSet)) items
               fklist = P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) (F.toList fks')
           pt <- F.foldl (\acc  fk ->  do
@@ -337,7 +334,7 @@ recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else
                     return (i:vacc)
                   else return vacc
                   ) (return [])  fklist
-          return (   KV $ M.fromList $ nonFKAttrs <> (pt)))
+          return (   KV $ M.fromList $ nonFKAttrs <> (pt))
 
 mAny f (MutRec i) = L.any f i
 
@@ -464,8 +461,8 @@ instance P.Poset (FKey i)where
 
 
 
-backPathRef :: Path (Set Key) SqlOperation -> TBData Key Showable ->  [Column Key Showable]
-backPathRef (Path k (FKJoinTable rel t)) = justError ("no back path ref "  ++ show (rel ,k)). backFKRef (M.fromList $ fmap (\i -> (_relTarget i ,_relOrigin i)) rel) (F.toList k)
+backPathRef ::  SqlOperation -> TBData Key Showable ->  [Column Key Showable]
+backPathRef (FKJoinTable rel t) = justError ("no back path ref "  ++ show rel ). backFKRef (M.fromList $ fmap (\i -> (_relTarget i ,_relOrigin i)) rel) (_relOrigin<$> rel)
 
 backFKRefType
   :: (Foldable f,Show (f Key ),Show a, Functor f) =>

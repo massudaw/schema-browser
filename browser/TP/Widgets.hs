@@ -393,6 +393,8 @@ onAltE el = onkey el (69,False,True,False)
 onAltU el = onkey el (85,False,True,False)
 onAltI el = onkey el (73,False,True,False)
 onAltO el = onkey el (79,False,True,False)
+onAlt ix el = onkey el (ix,False,True,False)
+onShiftAlt ix el = onkey el (ix,True,True,False)
 onEnter el = onkey el (13,False,False,False)
 onEsc el = onkey el (27,False,False,False)
 

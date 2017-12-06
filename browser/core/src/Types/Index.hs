@@ -248,7 +248,7 @@ instance Affine Showable where
       diffS (SNumeric t) (SNumeric o) = DSInt $ subtraction o t
       diffS (SText t) (SText o) = DSText $ subtraction (T.unpack o) (T.unpack t)
       diffS (SDouble t) (SDouble o) = DSDouble $ o -t
-      diffS (STime (STimestamp i )) (STime (STimestamp j)) = DSDiffTime (diffUTCTime (localTimeToUTC utc j) (localTimeToUTC utc  i))
+      diffS (STime (STimestamp i )) (STime (STimestamp j)) = DSDiffTime (diffUTCTime j i)
       diffS (STime (SDate i )) (STime (SDate j)) = DSDays (diffDays j i)
       diffS (SGeo(SPosition s )) (SGeo(SPosition b)) = DSPosition $ subtraction s b
       diffS a b  = errorWithStackTrace (show (a,b))

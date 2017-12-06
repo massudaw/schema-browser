@@ -67,8 +67,8 @@ checkTime curr = do
       IntervalTB1 time_inter = index curr "time"
       TB1 (STime (STimestamp startLocal)) = justError "cant be null "$ unFinite $ lowerBound time_inter
       TB1 (STime (STimestamp endLocal)) = justError "cant be null" $unFinite $ upperBound time_inter
-      start = localTimeToUTC utc startLocal
-      end = localTimeToUTC utc endLocal
+      start = startLocal
+      end = endLocal
     current <- getCurrentTime
     return $ (start,end,curr,current)
 
@@ -149,7 +149,7 @@ poller schmRef authmap db plugs is_test = do
                                         nonEmpty  . concat . catMaybes $
                                             fmap (fmap (TB1 . tblist  )) .  either (\r ->Just $ pure $ [attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) ),attrT ("modify",LeftTB1 $Nothing)]) (Just . fmap (\r -> [attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $  r))   ),attrT ("except",LeftTB1 $Nothing)])) <$> i))
                               , attrT ("duration",srange (time current) (time end))]) <$> nonEmpty i
-                          time  = TB1 . STime . STimestamp . utcToLocalTime utc
+                          time  = TB1 . STime . STimestamp
                           table2 = tblist
                               [ attrT ("plugin",pid)
                               , attrT ("schema",TB1 (SNumeric schema))

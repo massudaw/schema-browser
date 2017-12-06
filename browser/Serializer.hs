@@ -5,52 +5,124 @@ module Serializer where
 
 import qualified Data.Binary as B
 import qualified Data.ByteString.Char8 as BS
+import Data.Dynamic
+import Data.Profunctor.Cayley
+import Data.Profunctor
 import qualified Data.ByteString.Lazy as BSL
 import qualified Data.Interval as Interval
 import Data.Time
+import Control.Category
+import qualified Data.Map as M
 import Database.PostgreSQL.Simple
 import qualified NonEmpty as Non
 import RuntimeTypes
 import SchemaQuery
 import Step.Host
 import Types
+import Step.Common
 import Types.Index
 import Types.Patch
 import Utils
+import Prelude hiding(id,(.))
 
 import Data.Text (Text)
 import qualified Data.Text as T
 import Postgresql.Parser
 
+class ADecodeTB1 f where
+
 class DecodeTB1 f where
   decFTB :: FTB a -> f a
+  decFTB = decodeIso isoFTB
   encFTB :: f a -> FTB a
+  encFTB = encodeIso isoFTB
+  isoFTB :: SIso [KTypePrim]  (f a) (FTB a)
 
 instance DecodeTB1 Only where
   decFTB (TB1 i) = Only i
   encFTB (Only i) = TB1 i
 
+
 infixr 1 :*:
+
+data Reference k
+  = AttrRef (KType KPrim) k
+  | InlineTable (KType Text) k (Union (Reference k))
+
+
+data SIso s a b
+  = SIso
+  { token :: s
+  , encodeIso :: (a ->b)
+  , decodeIso :: (b ->a)
+  }
+
+type Serializer = Parser (->)
+
+overArray (P (vi,vo) k) = P (Primitive [KArray ], Primitive [KArray]) (\(ArrayTB1 l ) -> ArrayTB1 (fmap k l) )
+
+atTB ix (P (vi,vo) k) = P (AttrRef vi ix,AttrRef vo ix) (alterTB ix k)
+  where
+    alterTB ix k = M.alter (fmap k) ix
 
 newtype (:*:) f g a = CompFunctor
   { unCompF :: f (g a)
   } deriving (Functor)
 
-instance DecodeTB1 g => DecodeTB1 (Interval.Interval :*: g) where
-  decFTB (IntervalTB1 i) = CompFunctor $ fmap decFTB i
-  encFTB (CompFunctor i) = IntervalTB1 $ fmap encFTB i
 
-instance DecodeTB1 g => DecodeTB1 (Non.NonEmpty :*: g) where
-  decFTB (ArrayTB1 i) = CompFunctor $ fmap decFTB i
-  encFTB (CompFunctor i) = ArrayTB1 $ fmap encFTB i
+instance DecodeTB1 [] where
+  isoFTB = SIso [KOptional,KArray] encFTB decFTB
+    where
+      decFTB (LeftTB1 i ) = maybe [] decFTB i
+      decFTB (ArrayTB1 i ) = Non.toList (unTB1 <$> i)
+      encFTB [] = LeftTB1 Nothing
+      encFTB l = LeftTB1 (Just $ ArrayTB1 (TB1 <$> Non.fromList l))
+
+instance DecodeTB1 Interval.Interval where
+  decFTB (IntervalTB1 i) = fmap unTB1 i
+  encFTB i = IntervalTB1 $ fmap TB1 i
+  isoFTB = SIso [KInterval] encFTB decFTB
+
+instance DecodeTB1 Non.NonEmpty  where
+  decFTB (ArrayTB1 i) = fmap unTB1 i
+  encFTB i = ArrayTB1 $ fmap TB1 i
+  isoFTB = SIso [KArray] encFTB decFTB
 
 instance DecodeTB1 g => DecodeTB1 (Maybe :*: g) where
-  decFTB (LeftTB1 i) = CompFunctor $ fmap decFTB i
-  encFTB (CompFunctor i) = LeftTB1 $ fmap encFTB i
+  isoFTB = SIso ([KOptional] ++ l) encFTB decFTB
+    where
+      SIso l enc dec = isoFTB
+      decFTB (LeftTB1 i) = CompFunctor $ fmap dec i
+      encFTB (CompFunctor i) = LeftTB1 $ fmap enc i
 
 class DecodeTable a where
   decodeT :: TBData Text Showable -> a
   encodeT :: a -> TBData Text Showable
+
+
+data TIso i b  = TIso { unTiso :: (i -> b) , tIso :: (b -> i)}
+
+instance Category TIso where
+  id  = TIso id id
+  TIso i j  .  TIso a b = TIso (i.a ) (b . j)
+
+traverseIso :: Functor f => TIso a b -> TIso (f a ) (f b)
+traverseIso (TIso i j)  =  TIso (fmap i) (fmap j)
+
+ftbIso :: DecodeTB1 b => TIso (b a ) (FTB a)
+ftbIso  = TIso encFTB decFTB
+
+tableIso :: DecodeTable b => TIso b (TBData Text Showable)
+tableIso  = TIso encodeT decodeT
+
+
+
+instance DecodeTable Plugins where
+  decodeT d =  (ref,code)
+    where
+      ref = unOnly . att . ix "ref" $ d
+      code = unOnly . att . ix "plugin" $ d
+
 
 instance (Ord a, a ~ Index a ,Show a, Patch a, B.Binary a) =>
          DecodeTable (TableModificationK (Text, Text) (RowPatch Text a)) where
@@ -60,17 +132,14 @@ instance (Ord a, a ~ Index a ,Show a, Patch a, B.Binary a) =>
       time
       username
       (schema, table)
-      (datamod mod_data)
+      mod_data
     where
       schema = unOnly . att . ix "schema_name" $ d
       table = unOnly . att . ix "table_name" $ d
       mod_id = unOnly . att . ix "modification_id" $ d
-      mod_data = att . ix "modification_data" $ d
-      mod_key :: Non.NonEmpty (Binary (FTB a))
-      mod_key = fmap unOnly . unCompF . att . ix "data_index" $ d
+      mod_data = unBinary . unOnly . att . ix "modification_data" $ d
       username = unOnly . att . ix "user_name" $ d
       time = unOnly . att . ix "modification_time" $ d
-      datamod = unBinary . unOnly
   encodeT (TableModification id ts u table ip) =
     tblist $
     [ Attr "user_name" (txt u)
@@ -112,9 +181,12 @@ instance DecodeShowable Text where
   decodeS (SText i) = i
   encodeS = SText
 
-instance DecodeShowable LocalTime where
+instance DecodeShowable UTCTime where
   decodeS (STime (STimestamp i)) = i
   encodeS i = STime (STimestamp i)
+
+instance DecodeShowable PrePlugins where
+  decodeS (SHDynamic (HDynamic i)) = justError "invalid plugin code" $ fromDynamic i  :: PrePlugins
 
 unBinary (Binary i) = i
 

@@ -22,10 +22,11 @@ module Types.Common (
     ,FTB (..)
     ,mapKV,findTB1,filterTB1',mapTB1,mapKey',mapKey,firstTB,mapBothKV,firstKV,secondKV,traverseKV,filterTB1,filterTB1'
     ,mapTable
+    ,atTBValue
     ,unTB1
     ,unSOptional ,unSOptional'
     ,unSSerial, unSDelayed
-    ,unArray' , unArray
+    ,unArray
     ,KV(..)
     ,kvAttrs
     ,kvMetaFullName
@@ -50,7 +51,6 @@ module Types.Common (
     ,AccessOp
     ,MutRec(..)
     ,Order(..),showOrder
-    ,Identity(..)
     ,liftFK
     ,tableNonRef'
     ,keyattr
@@ -78,7 +78,6 @@ import Data.Maybe
 import GHC.Generics
 import Data.Binary (Binary)
 import qualified Data.Binary as B
-import Data.Functor.Identity
 import Data.Binary.Orphans
 import Data.Typeable
 import Data.Vector(Vector)
@@ -112,9 +111,6 @@ unkvlist = F.toList . _kvvalues
 
 kvlist :: Ord k => [TB k a] -> KV k a
 kvlist = KV. mapFromTBList
-
-unArray' (ArrayTB1 s) =  s
-unArray' o  = Non.fromList [o] -- error $ "unArray' no pattern " <> show o
 
 unArray (ArrayTB1 s) =  s
 unArray o  = error $ "unArray no pattern " <> show o
@@ -375,7 +371,6 @@ _relOutputs (RelFun i _) = Just [i]
 instance (Binary  a ,Binary k ) => Binary (KV  k a)
 instance Binary k => Binary (Rel k)
 instance NFData k => NFData (Rel k)
-instance Binary a => Binary (Identity a)
 instance (Binary k ,Binary g) => Binary (TB g k )
 instance Binary a => Binary (FTB a)
 instance NFData a => NFData (FTB a)

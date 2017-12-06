@@ -14,6 +14,7 @@ module Plugins (importargpx ,plugList,lplugOrcamento, siapi3Plugin) where
 
 import qualified NonEmpty as Non
 import System.Process
+import Data.Time
 import Data.Semigroup
 import Control.Monad.Catch
 import Location
@@ -101,7 +102,7 @@ siapi2Hack = FPlugins pname tname $ IOPlugin  url
       b <- act (Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return (Nothing,Nothing) else liftIO (siapi2  i (j) )  )) -<  (liftA2 (,) protocolo ano )
       let ao (sv,bv)  = Just $ tblist   $ svt  sv <> [iat $ bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
-          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STime . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
+          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STime . STimestamp . localTimeToUTC utc. fst  . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
           convertAndamento i = error $ "convertAndamento " <> show i
           svt bv = catMaybes $ fmap attrT . (\i -> traverse (\k -> fmap snd $ L.find (L.isInfixOf k. fst ) map) (swap i)) <$>  value_mapping
             where map = fmap (LeftTB1 . Just . TB1 . SText . T.pack ) <$> bv
@@ -127,7 +128,7 @@ siapi2Plugin = FPlugins pname tname $ IOPlugin  url
       b <- act ( Tra.traverse  (\(i,j)-> if read (BS.unpack j) >= 15 then  return (Nothing ,Nothing) else liftIO (siapi2  i j >> error "siapi2 test error")  )) -<  (liftA2 (,) protocolo ano )
       let ao bv  = Just $ tblist   [iat bv]
           convertAndamento :: [String] -> TB2 Text (Showable)
-          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STime .STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
+          convertAndamento [da,des] =  TB1 $ tblist $ fmap attrT  $  ([("andamento_date",TB1 . STime .STimestamp . localTimeToUTC utc  . fst . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
           convertAndamento i = error $ "convertAndamento " <> show i
           iat bv = (IT
                             "andamentos"
@@ -141,23 +142,23 @@ cpfCaptcha = IOPlugin url
   where
     url :: ArrowReader
     url = proc t -> do
-      sess <- act (\_ -> lift  initSess ) -< ()
+      let sess = initSess
       cap <- act (\sess -> lift (getCaptchaCpf sess)) -< sess
       atR "ir_reg" (idxK"cpf_number") -<()
       odxR "sess" -< ()
       odxR "captchaViewer" -< ()
-      returnA -< Just $ tblist [IT "sess" (LeftTB1 $ sess) ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
+      returnA -< Just $ tblist [IT "sess" sess ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
 
 cnpjCaptcha = IOPlugin url
   where
     url :: ArrowReader
     url = proc t -> do
-      sess <- act (\_ -> lift  initSess ) -< ()
+      let sess = initSess
       (sess2,cap) <- act (\sess -> lift (getCaptchaCnpj sess)) -< sess
       atR "ir_reg" (idxK"cnpj_number") -<()
       odxR "sess" -< ()
       odxR "captchaViewer" -< ()
-      returnA -< Just $ tblist $ traceShowId  [IT "sess" (LeftTB1 $ sess2) ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
+      returnA -< Just $ tblist [IT "sess" sess2 ,attrT ("captchaViewer",TB1 (SBinary $ justError "no captcha" cap))]
 
 renderDay d =  paddedm day <> paddedm month <> show year
   where (year,month,day) = toGregorian d
@@ -174,7 +175,7 @@ cpfForm = IOPlugin url
       nascimento <-  idxK "nascimento" -< ()
       cnpj <-  atR "ir_reg" (idxK "cpf_number") -< ()
       sess <- idxKIn "sess" -< ()
-      html <- act (\(LeftTB1 sess,TB1 (SText cap),TB1 (STime (SDate nascimento)),TB1 (SText cnpj))  -> lift  (getCpfForm sess (BS.pack $ T.unpack cap) (BS.pack $ renderDay nascimento ) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,nascimento,cnpj)
+      html <- act (\(sess,TB1 (SText cap),TB1 (STime (SDate nascimento)),TB1 (SText cnpj))  -> lift  (getCpfForm sess (BS.pack $ T.unpack cap) (BS.pack $ renderDay nascimento ) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,nascimento,cnpj)
       arrowS -< ()
       returnA -<   join .join $ fmap convertCPF <$> html
     arrowS = proc t -> do
@@ -211,7 +212,7 @@ cnpjForm = IOPlugin url
       cap <- idxK "captchaInput" -< ()
       cnpj <- atR "ir_reg" (idxK "cnpj_number") -< ()
       sess <- idxKIn "sess" -< ()
-      html :: Maybe [(String,String)] <- act (\(LeftTB1 sess,TB1 (SText cap),TB1 (SText cnpj))  -> fmap join $ lift  (getCnpjForm sess (BS.pack $ T.unpack cap) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,cnpj)
+      html :: Maybe [(String,String)] <- act (\(sess,TB1 (SText cap),TB1 (SText cnpj))  -> fmap join $ lift  (getCnpjForm sess (BS.pack $ T.unpack cap) (BS.pack $ T.unpack cnpj) )) -< (sess,cap,cnpj)
 
       arrowS -< ()
       returnA -<   join $ fmap unTB1 .  convertHtml . (M.fromListWith (++) . fmap (fmap pure )) <$> html
@@ -437,7 +438,7 @@ siapi3Inspection = FPlugins pname tname  $ IOPlugin url
             odxR "andamento_status" -<  t) -< ()
 
         b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= (14 :: Int ) then  return Nothing else liftIO $ siapi3  i j k )) -<   (liftA3 (,,) (tobs $ protocolo ) (tobs $ ano ) cpf)
-        let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ fmap attrT  $ ([("andamento_date",TB1 . STime . STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
+        let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ fmap attrT  $ ([("andamento_date",TB1 . STime . STimestamp .localTimeToUTC utc. fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
             convertAndamento i = error $ "convertAndamento2015 :  " <> show i
         let ao  (bv,taxa) =  Just $ tblist  ( [Attr "ano" (justError "ano" ano) ,Attr "protocolo" (justError "protocolo"protocolo), attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
             iat bv = (IT "andamentos"
@@ -471,7 +472,7 @@ siapi3Plugin  = FPlugins pname tname  $ DiffIOPlugin url
             odxR "andamento_status" -<  t) -< ()
 
         b <- act (fmap join .  Tra.traverse   (\(i,j,k)-> if read (BS.unpack j) <= (14 :: Int ) then  return Nothing else liftIO $ siapi3  i j k )) -<   (liftA3 (,,) (tobs $ protocolo ) (tobs $ ano ) cpf)
-        let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ fmap attrT  $ ([("andamento_date",TB1 .STime .STimestamp . fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
+        let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ fmap attrT  $ ([("andamento_date",TB1 .STime .STimestamp .localTimeToUTC utc. fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
             convertAndamento i = error $ "convertAndamento2015 :  " <> show i
         let ao  (bv,taxa) =  Just $ tblist  ( [Attr "ano" (justError "ano" ano) ,Attr "protocolo" (justError "protocolo"protocolo), attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv])
             iat bv = (IT "andamentos"
@@ -839,7 +840,6 @@ queryArtBoletoCrea = FPlugins pname tname $ IOPlugin  url
       let ao =  Just $ tblist [attrT ("boleto",   LeftTB1 $ fmap ( LeftTB1 . Just) $ (TB1 . SBinary. BSL.toStrict) <$> b)]
       returnA -< ao
 
-
 queryArtAndamento = FPlugins pname tname $  IOPlugin url
   where
     tname = "art"
@@ -853,8 +853,8 @@ queryArtAndamento = FPlugins pname tname $  IOPlugin url
       r <- atR "crea_register"
           (liftA3 (,,) <$> varTB "crea_number" <*> varTB "crea_user" <*> varTB "crea_password") -< t
       v <- act (fmap (join .maybeToList) . traverse (\(i, (j, k,a)) -> liftIO  $ creaConsultaArt  j k a i ) ) -< liftA2 (,) i r
-      let artVeri dm = ("verified_date" ,) . opt (timestamp . fst) . join $ (\d -> strptime "%d/%m/%Y %H:%M" ( d !!1))  <$> dm
-          artPayd dm = ("payment_date" ,) . opt (timestamp . fst) . join $ (\d -> strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
+      let artVeri dm = ("verified_date" ,) . opt (timestamp .localTimeToUTC utc. fst) . join $ (\d -> strptime "%d/%m/%Y %H:%M" ( d !!1))  <$> dm
+          artPayd dm = ("payment_date" ,) . opt (timestamp .localTimeToUTC utc. fst) . join $ (\d -> strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
           artInp inp = Just $ tblist $fmap attrT   $ [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       returnA -< artInp v
 

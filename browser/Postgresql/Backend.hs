@@ -179,7 +179,7 @@ alterSchema v p= do
       traverse (\new -> when (new /= o )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? OWNER TO ?  "(DoubleQuoted o, DoubleQuoted new)) onewm
       traverse (\new -> when (new /= n )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? RENAME TO ?  "(DoubleQuoted n, DoubleQuoted new)) nnewm
       l <- liftIO getCurrentTime
-      return $ TableModification Nothing (utcToLocalTime utc l) (snd $ username inf) (lookTable inf "catalog_schema") . PatchRow   <$> (diff v new)
+      return $ TableModification Nothing (l) (snd $ username inf) (lookTable inf "catalog_schema") . PatchRow   <$> (diff v new)
 
 dropSchema = do
   aschema "metadata" $
@@ -325,7 +325,7 @@ insertMod j  = do
         table = lookTable inf (_kvname (fst  j))
       (t,pk,attrs) <- insertPatch  (conn  inf) (patch j) ( table)
       l <- liftIO getCurrentTime
-      return $ TableModification Nothing (utcToLocalTime utc l) (snd $ username inf)table . CreateRow <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create  (t,pk,compact $ deftable inf table <> attrs )))
+      return $ TableModification Nothing (l) (snd $ username inf)table . CreateRow <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create  (t,pk,compact $ deftable inf table <> attrs )))
 
 
 deleteMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
@@ -340,7 +340,7 @@ deleteMod p@(m,_) = do
       let table = lookTable inf (_kvname m)
       deletePatch (conn inf)  (firstPatch (recoverFields inf) (patch p)) table
       l <- liftIO getCurrentTime
-      return $ Just $ (TableModification Nothing (utcToLocalTime utc l) (snd $ username inf)table  $ DropRow p)
+      return $ Just $ (TableModification Nothing (l) (snd $ username inf)table  $ DropRow p)
   return $ log
 
 updateMod :: TBData Key Showable -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
@@ -357,7 +357,7 @@ updateMod old p = do
       let table = lookTable inf (_kvname (fst  old ))
       patch <- updatePatch (conn  inf) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table
       l <- liftIO getCurrentTime
-      let mod =  TableModification Nothing (utcToLocalTime utc l) (snd $ username inf) table ( PatchRow $ firstPatch (typeTrans inf) patch)
+      let mod =  TableModification Nothing (l) (snd $ username inf) table ( PatchRow $ firstPatch (typeTrans inf) patch)
       return $ Just mod
 
 patchMod :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
@@ -367,7 +367,7 @@ patchMod patch@(m,_,_) = do
     let table = lookTable inf (_kvname m )
     patch <- applyPatch (conn  inf) (firstPatch (recoverFields inf ) patch )
     l <- liftIO getCurrentTime
-    let mod =  TableModification Nothing (utcToLocalTime utc l) (snd $ username inf) table (PatchRow $ firstPatch (typeTrans inf) patch)
+    let mod =  TableModification Nothing (l) (snd $ username inf) table (PatchRow $ firstPatch (typeTrans inf) patch)
     return (Just mod)
 
 

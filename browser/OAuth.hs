@@ -134,7 +134,7 @@ patchRoute l = do
 
 
 
-syncHistory [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))]  ix table offset page maxResults sort _ = do
+syncHistory [(tablefrom ,from, ((FKJoinTable rel _ )))]  ix table offset page maxResults sort _ = do
       inf <- ask
       tok <- getToken [from]
       let user = fst $ justError "no token" $ token inf
@@ -204,7 +204,7 @@ deleteRow (m,pk,_)
     liftIO $print decoded
     time <- liftIO $ getCurrentTime
     let p = if BS.null decoded  then
-              Just $ TableModification Nothing (utcToLocalTime utc time) (snd $ username inf)table  (PatchRow (m, pk, []))
+              Just $ TableModification Nothing time (snd $ username inf)table  (PatchRow (m, pk, []))
             else Nothing
     tell (maybeToList p)
     return p
@@ -229,7 +229,7 @@ insertTable pk
         return $ decode $ v
     liftIO $ print decoded
     time <- liftIO $ getCurrentTime
-    fmap (TableModification Nothing (utcToLocalTime utc time) (snd $ username inf) table .PatchRow. patch . mergeTB1 pk ) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table) .  fmap (\i -> (i :: Value)  ) $  decoded)
+    fmap (TableModification Nothing (time) (snd $ username inf) table .PatchRow. patch . mergeTB1 pk ) <$> (traverse (convertAttrs inf Nothing (_tableMapL inf) table) .  fmap (\i -> (i :: Value)  ) $  decoded)
 
 lookOrigin  k (i,m) = err $  find (( k == ). S.fromList . fmap _relOrigin. keyattr ) (F.toList $  unKV m)
     where
@@ -276,7 +276,7 @@ joinGet tablefrom tableref from ref
     traverse (convertAttrs inf (Just $ (unTB1 ref)) (_tableMapL inf) tableref ) .  fmap (\i -> (i :: Value)  ) $  decoded
   | otherwise = return Nothing
 
-joinList [(tablefrom ,from, (Path _ (FKJoinTable rel _ )))] tableref offset page maxResults sort ix
+joinList [(tablefrom ,from, ((FKJoinTable rel _ )))] tableref offset page maxResults sort ix
   | otherwise = do
       inf <- ask
       tok <- getToken [ from]
@@ -301,10 +301,10 @@ getTable tb pk
   | not $ null $ _rawScope tb = do
       inf <- ask
       liftIO $ print $ (tb,_rawScope tb,rawFKS tb)
-      let [sref] = filter (\(Path i _) -> S.isSubsetOf i (S.fromList $ _rawScope tb )) (S.toList $ rawFKS tb )
+      let [sref] = filter (\ l -> S.isSubsetOf (pathRelOri l) (S.fromList $ _rawScope tb )) (S.toList $ rawFKS tb )
       let
-          (Path spk  (FKJoinTable rel stable)) =  sref
-          tableScope = _fkttable $ lookOrigin  spk (unTB1 pk)
+          l@(FKJoinTable rel stable) =  sref
+          tableScope = _fkttable $ lookOrigin  (pathRelOri l ) (unTB1 pk)
       let fromtable = (lookSTable inf $ stable)
       joinGet fromtable  tb  tableScope  pk
   | S.fromList (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb) `S.isSubsetOf` S.fromList (fmap _relOrigin (getKeyAttr pk) )  = return Nothing
@@ -337,9 +337,9 @@ traverseAccum f  l = foldl (\(a,m) c -> (\ a -> m >>= (\i -> fmap (:i) a )) <$> 
 convertAttrs :: InformationSchema -> Maybe (TBData Key Showable) -> HM.HashMap Text Table ->  Table -> Value -> TransactionM (TBData Key Showable)
 convertAttrs  infsch getref inf tb iv =   tblist' tb .  catMaybes <$> (snd $ traverseAccum kid (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb ))
   where
-    pathOrigin (Path i _  ) = i
-    isFKJoinTable (Path _ (FKJoinTable  _ _)) = True
-    isFKJoinTable (Path i (RecJoin _ j  ) ) = isFKJoinTable (Path i j )
+    pathOrigin = pathRelOri
+    isFKJoinTable (FKJoinTable  _ _) = True
+    isFKJoinTable (RecJoin _ j  )  = isFKJoinTable j
     isFKJoinTable _ = False
     fkFields = S.unions $ map pathOrigin $ filter isFKJoinTable $  F.toList $rawFKS tb
     kid :: Key ->   S.Set Key -> (S.Set Key,TransactionM (Maybe (TB Key Showable)))
@@ -347,8 +347,8 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  catMaybes <$> (snd $ tra
       | S.member k fkFields
             = let
                fks = justError ("not path origin" <> (show k)) $  (find ((S.singleton k `S.isSubsetOf` ). pathOrigin) (P.sortBy (P.comparing pathRelRel) $F.toList (rawFKS tb)))
-               (rel,trefname) = case unRecRel $ pathRel fks of
-                       (FKInlineTable  (_,trefname) ) -> ([Inline k],trefname)
+               (rel,trefname) = case unRecRel $ fks of
+                       (FKInlineTable  k (_,trefname) ) -> ([Inline k],trefname)
                        (FKJoinTable  rel (_,trefname) ) -> (rel,trefname)
                fk =  F.toList $  pathRelRel fks
                treftable = lookTable infsch trefname
@@ -364,11 +364,11 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  catMaybes <$> (snd $ tra
                                 relMap = M.fromList $ fmap (\rel -> (_relOrigin rel ,_relTarget rel) ) rel
                                 nv  = flip mergeTB1 transrefs  <$> v
                             time <- liftIO $ getCurrentTime
-                            tell (TableModification Nothing (utcToLocalTime utc time) (snd $ username infsch)(lookTable infsch trefname ) . PatchRow . patch <$> F.toList (nv))
+                            tell (TableModification Nothing (time) (snd $ username infsch)(lookTable infsch trefname ) . PatchRow . patch <$> F.toList (nv))
                             return $ FKT (kvlist [Types.Attr  k $ (lbackRef    nv) ])  rel nv
                           Nothing ->  do
                             time <- liftIO $ getCurrentTime
-                            tell (TableModification Nothing (utcToLocalTime utc time) (snd $ username infsch)(lookTable infsch trefname ) .PatchRow. patch <$> F.toList (v))
+                            tell (TableModification Nothing (time) (snd $ username infsch)(lookTable infsch trefname ) .PatchRow. patch <$> F.toList (v))
                             return $ FKT (kvlist [Types.Attr  k $ (lbackRef    v) ])  fk v))
                     (traverse (\v -> do
                         let ref = [Attr  k $ v]  <> (filter ((`S.isSubsetOf` (S.fromList (fmap _relOrigin fk))) . S.fromList . fmap _relOrigin . keyattr ) $ concat $    F.toList . unKV .snd <$> maybeToList (tableNonRef' <$> getref))
@@ -385,7 +385,7 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  catMaybes <$> (snd $ tra
 
                             pti <- joinGetDiffTable (lookMTable infsch (fst scoped)) treftable scoped reftb
                             time <- liftIO $ getCurrentTime
-                            tell (TableModification Nothing (utcToLocalTime utc time) (snd $ username infsch)treftable .PatchRow<$> maybeToList pti)
+                            tell (TableModification Nothing (time) (snd $ username infsch)treftable .PatchRow<$> maybeToList pti)
                             return $ maybe (reftb) (apply reftb  ) pti) reftbT ) getref) return (reftb)
                         return $ FKT (kvlist (filter (not .(`S.member` acc). _tbattrkey)ref) ) rel patch ))
                funL = funO  True (exchange trefname $ keyType k) vk
@@ -409,7 +409,7 @@ convertAttrs  infsch getref inf tb iv =   tblist' tb .  catMaybes <$> (snd $ tra
             PText -> join $ readPrim k . T.unpack <$> (v ^? _String)
             PTime ti -> case ti of
               PTimestamp _ ->
-                (fmap (STime . STimestamp . utcToLocalTime utc) . resultToMaybe . fromJSON $ v ) <|> (STime . STimestamp . utcToLocalTime utc . posixSecondsToUTCTime.realToFrac . (/10^3). read . T.unpack  <$> (v ^? _String))
+                (fmap (STime . STimestamp  ) . resultToMaybe . fromJSON $ v ) <|> (STime . STimestamp .  posixSecondsToUTCTime.realToFrac . (/10^3). read . T.unpack  <$> (v ^? _String))
             PInt _->  (SNumeric . round <$> (v ^? _Number)) <|> (SNumeric . round .read . T.unpack <$> ( v^? _String))
             PDouble -> SDouble . realToFrac  <$> (v ^? _Number)
             PBinary -> join  $ readPrim k . T.unpack  <$> (v ^? _String)
@@ -530,7 +530,7 @@ joinRelT ref tb table  = do
   let out = joinRel (tableMeta tb) ref table
   time <- liftIO $ getCurrentTime
   inf <- ask
-  traverse (\i -> tell [TableModification Nothing (utcToLocalTime utc time) (snd $ username inf)tb . CreateRow $ i]) out
+  traverse (\i -> tell [TableModification Nothing time (snd $ username inf)tb . CreateRow $ i]) out
   return out
 
 

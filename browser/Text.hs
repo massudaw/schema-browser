@@ -184,7 +184,7 @@ readPrim t =
       readPosition = nonEmpty (fmap SPosition . readMaybe)
       readLineString = nonEmpty (fmap SLineString . readMaybe)
       readMultiPolygon = nonEmpty (fmap SMultiGeom . fmap (fmap (\(i:xs) -> SPolygon i xs)). readMaybe)
-      readTimestamp =  fmap (STime . STimestamp  .  fst) . (\i -> strptime "%Y-%m-%d %H:%M:%OS" i <|> strptime "%Y-%m-%d %H:%M:%S" i)
+      readTimestamp =  fmap (STime . STimestamp  .  localTimeToUTC utc . fst) . (\i -> strptime "%Y-%m-%d %H:%M:%OS" i <|> strptime "%Y-%m-%d %H:%M:%S" i)
       readInterval =  fmap (STime . SPInterval) . (\(h,r) -> (\(m,r)->  (\s m h -> secondsToDiffTime $ h*3600 + m*60 + s ) <$> readMaybe (safeTail r) <*> readMaybe m <*> readMaybe h )  $ break (==',') (safeTail r))  . break (==',')
       nonEmpty f ""  = Nothing
       nonEmpty f i  = f i

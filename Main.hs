@@ -81,6 +81,7 @@ main = do
         Just (TableModification _ _ _ _ (CreateRow c)) <- addClientLogin metas
         let [LeftTB1 (Just (TB1 (SNumeric i)))] =
               F.toList ((\(Idex i) -> i) $ G.getIndex c)
+        liftIO $ putStrLn $ "Initialize Client: " ++ show i
         return i
       finalizeGUI w =
         void $

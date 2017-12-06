@@ -51,8 +51,8 @@ deftable inf table =
     fks' = S.toList $ rawFKS table
     items = tableAttrs table
     fkSet,funSet:: S.Set Key
-    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction .pathRel) $ fks'
-    funSet = S.unions $ fmap (\(Path i _ )-> i) $ filter (isFunction.pathRel) (fks')
+    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction ) $ fks'
+    funSet = S.unions $ fmap pathRelOri  $ filter (isFunction) (fks')
     nonFKAttrs :: [Key]
     nonFKAttrs =   filter (\i -> not $ S.member i (fkSet <> funSet)) items
     fks = fks'
@@ -67,19 +67,19 @@ defaultAttrs  k  = PAttr k <$> (go (_keyFunc $keyType k) <|> fmap patch (keyStat
         KOptional :i -> Just (POpt (go i))
         i -> Nothing
 
-defaultFKS inf (Path _ (FKJoinTable i j ))
+defaultFKS inf (FKJoinTable i j )
   | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin ) i = flip (PFK i) (POpt Nothing) <$>  (traverse (defaultAttrs .  _relOrigin ) i)
   | otherwise  = Nothing
   where isRel (Rel _  _ _ ) = True
         isRel _ = False
-defaultFKS inf (Path k (FKInlineTable i)) =
-  case _keyFunc $ keyType (head $ S.toList k) of
-    KOptional :_ -> Just (PInline (head $ S.toList k) (POpt Nothing))
-    [] -> PInline (head $ S.toList k) . PAtom .(tableMeta (lookTable rinf (snd i)) , G.Idex [],) <$> nonEmpty ( deftable rinf (lookTable rinf (snd i)))
+defaultFKS inf (FKInlineTable k i) =
+  case _keyFunc $ keyType k of
+    KOptional :_ -> Just (PInline k (POpt Nothing))
+    [] -> PInline k . PAtom .(tableMeta (lookTable rinf (snd i)) , G.Idex [],) <$> nonEmpty ( deftable rinf (lookTable rinf (snd i)))
     _ ->  Nothing
   where rinf = fromMaybe inf $ HM.lookup (fst i) (depschema inf)
-defaultFKS _ (Path k (FunctionField  _ _ _)) = defaultAttrs (head $ S.toList k)
-defaultFKS inf (Path k (RecJoin     _ i )) =  defaultFKS inf (Path k i)
+defaultFKS _ (FunctionField  k _ _ ) = defaultAttrs k
+defaultFKS inf (RecJoin     _ i ) =  defaultFKS inf i
 
 
 

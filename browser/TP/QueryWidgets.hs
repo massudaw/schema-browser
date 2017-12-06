@@ -17,6 +17,7 @@ import Control.Applicative.Lift
 import Control.Concurrent.STM.TChan
 import Control.Lens ((%~), (&), (^?), _1, _2, over)
 import qualified Control.Lens as Le
+import Serializer (decodeT)
 import Control.Monad.Catch
 import Control.Monad.Writer hiding ((<>))
 import Data.Bifunctor
@@ -91,7 +92,7 @@ createFresh  tname inf i ty@(Primitive l  atom)  =
     RecordPrim (s,t) -> do
       k <- newKey i ty 0
       let tableO = lookTable inf tname
-          path = Path (S.singleton k) (FKInlineTable $ inlineName ty )
+          path =  (FKInlineTable k $ inlineName ty )
       return $ inf
           & tableMapL . Le.ix tname . rawFKSL %~  S.insert path
           & pkMapL . Le.ix (S.fromList $ rawPK tableO) . rawFKSL Le.%~  S.insert path
@@ -125,7 +126,7 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
     fresh :: [([VarDef],[VarDef])]
     fresh = fmap fst ac
   b <- flabel # set UI.text (T.unpack n)
-  inf <- liftIO $  foldl' (\i (kn,kty) -> (\m -> createFresh  tname m kn kty) =<< i ) (return  oinf) (concat $ fmap fst fresh <> fmap snd fresh )
+  inf <- liftIO $ foldl' (\i (kn,kty) -> (\m -> createFresh  tname m kn kty) =<< i ) (return  oinf) (concat $ fmap fst fresh <> fmap snd fresh )
   let
       freshKeys :: [([CoreKey],[CoreKey])]
       freshKeys = first (fmap lookK ) . second (fmap lookK) <$> fresh
@@ -404,17 +405,14 @@ instance Applicative Editor where
   Delete   <*> j = Delete
   i <*> Delete = Delete
 
+select table  = do
+  (_,(_,evMap )) <- selectFromTable table Nothing Nothing [] []
+  return (decodeT . mapKey' keyValue <$> evMap)
+
+loadPlugins :: InformationSchema -> Dynamic [Plugins]
 loadPlugins inf =  do
   code <- liftIO$ indexSchema  (rootRef inf) "code"
-  (_,(_,evMap )) <- transactionNoLog  code $ selectFromTable "plugin_code" Nothing Nothing [] []
-  let
-    project e = (i, p)
-      where
-         i = justError "cant find function field" $ fmap (convertI . _tbattr) $  indexField (liftAccess code "plugin_code" $ keyRef "ref") e
-         p = justError "cant find function field" $ join . fmap (convertP . _tbattr) $  indexField (liftAccess code  "plugin_code" $ keyRef "plugin") e
-    convertP (TB1 (SHDynamic (HDynamic i))) = fromDynamic i  :: Maybe PrePlugins
-    convertI (TB1 (SNumeric i)) = i
-  return (project <$> F.toList evMap)
+  F.toList <$> transactionNoLog  code (select "plugin_code")
 
 
 traRepl :: Ord k => Union (Access k) -> Union (Access k)
@@ -467,8 +465,8 @@ eiTableDiff
      -> TBData CoreKey ()
      -> Tidings (Maybe (TBData CoreKey Showable))
      -> UI (Element,Tidings (Editor (TBIdx CoreKey Showable)))
-eiTableDiff inf table constr refs plmods ftb@(meta,k) preoldItems = do
-  oldItems <- ui $ cacheTidings preoldItems
+eiTableDiff inf table constr refs plmods ftb@(meta,k) preOldItems = do
+  oldItems <- ui $ cacheTidings preOldItems
   plugins <- ui $ loadPlugins inf
   let
   res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds .  snd) (plugins ))
@@ -489,13 +487,12 @@ eiTableDiff inf table constr refs plmods ftb@(meta,k) preoldItems = do
         initialAttr = join . fmap (\(n,  j) ->    safeHead $ catMaybes  $ (unOptionalAttr  <$> F.toList (_kvvalues j)))  <$>oldItems
         sumButtom itb =  do
            let i = itb
-               (body ,_) = justError ("no sum attr " ) $ M.lookup i (M.fromList fks)
-           element =<< labelCaseDiff inf i body
-
+           case  M.lookup i (M.fromList fks) of
+             Just (body ,_) ->  element =<< labelCaseDiff inf i body
+             Nothing -> UI.div
         marker i = sink  UI.style ((\b -> if not b then [("border","1.0px gray solid"),("background","gray"),("border-top-right-radius","0.25em"),("border-top-left-radius","0.25em")] else [("border","1.5px white solid"),("background","white")] )<$> i)
 
       chk  <- buttonDivSetO (F.toList (unKV k))  (join . fmap (\i -> M.lookup (S.fromList (keyattri i)) (unKV k)) <$> initialAttr )  marker sumButtom
-
       element chk # set UI.style [("display","inline-flex")]
       let
           keypattr (PAttr i _) = [Inline i]
@@ -524,7 +521,7 @@ eiTableDiff inf table constr refs plmods ftb@(meta,k) preoldItems = do
     # set style [("margin-left","0px"),("border","2px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid")]
   tableName <- detailsLabel (set UI.text (T.unpack $ tableName table)) (UI.div  # set text (show table))
   tableDiv <- UI.div # set children [tableName,body]
-  return (tableDiv , (\i j -> maybe i ((\b -> if b then i else Keep ). isRight . tableCheck) (recoverEditChange j i))  <$> output <*> preoldItems)
+  return (tableDiv , (\i j -> maybe i ((\b -> if b then i else Keep ). isRight . tableCheck) (recoverEditChange j i))  <$> output <*> oldItems)
 
 
 crudUITable
@@ -560,7 +557,6 @@ crudUITable inf reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(m,_)  preoldItems = d
       (panelItems,tdiff)<- processPanelTable listBody inf reftb  tablebdiff table preoldItems
       let
         tableb = recoverEditChange <$> preoldItems <*> tablebdiff
-
       out <- UI.div # set children [listBody,panelItems]
       return (out ,tableb)
 
@@ -945,7 +941,7 @@ buildPrim fm tdi i = case i of
                 itime <- liftIO $  getCurrentTime
                 let
                   maptime f (STime (STimestamp i)) = STime $ STimestamp (f i)
-                  fromLocal = maptime (utcToLocalTime utc .localTimeToUTC cliZone)
+                  fromLocal = maptime (localTimeToUTC cliZone. utcToLocalTime utc)
                 v <- currentValue (facts tdi)
 
                 inputUI <- UI.input
@@ -1106,9 +1102,9 @@ iUITableDiff
   -> Column CoreKey ()
   -> UI (TrivialWidget (Editor (PathAttr CoreKey Showable)))
 iUITableDiff inf constr pmods oldItems  (IT na  tb1)
-  = fmap (fmap (PInline  na) )<$> buildUIDiff (renderInlineTable inf (unConstr <$> constr)) (keyType na)   (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
+  = fmap (fmap (PInline  na) )<$> buildUIDiff (renderInlineTable inf (fmap unConstr <$> constr)) (keyType na)   (fmap (fmap (fmap patchfkt)) <$> pmods) (fmap _fkttable <$> oldItems)
   where
-    unConstr (i,j) = (i, (\j -> (j . fmap (IT na) )) <$> j )
+    unConstr  =  fmap (\j -> (j . fmap (IT na) ))
 
 
 
@@ -1147,9 +1143,6 @@ findPRel l (Rel k op j) =  do
 recoverPFK :: [Key] -> [Rel Key]-> PathFTB (Map Key (FTB Showable),TBIdx Key Showable) -> PathAttr Key Showable
 recoverPFK ori rel i =
   PFK rel ((catMaybes $ defaultAttrs <$> ori ) ++  (fmap (\(i,j) -> PAttr i (join $ fmap patch j)) $  zip  (L.sort ori ). getZipList . sequenceA $ fmap ( ZipList . F.toList. fst) i))   (fmap snd i)
-
-
-
 
 attrToTuple  (Attr k v ) = (k,v)
 
