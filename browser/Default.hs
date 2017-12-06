@@ -48,7 +48,7 @@ deftable
      -> [PathAttr (FKey (KType CorePrim)) Showable]
 deftable inf table =
   let
-    fks' = S.toList $ rawFKS table
+    fks' =  rawFKS table
     items = tableAttrs table
     fkSet,funSet:: S.Set Key
     fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction ) $ fks'

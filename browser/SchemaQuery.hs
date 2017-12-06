@@ -130,8 +130,8 @@ refTable  inf (Project table (Union origin) )  = do
 refTable  inf table  = do
   mmap <- liftIO$ atomically $ readTVar (mvarMap inf)
   ref <- lookDBVar inf mmap table
-  idxTds<- convertChanStepper  inf (mapTableK keyFastUnique table) ref
-  (dbTds ,dbEvs) <- convertChanTidings inf (mapTableK keyFastUnique table) mempty  never ref
+  idxTds<- convertChanStepper  inf (fmap keyFastUnique table) ref
+  (dbTds ,dbEvs) <- convertChanTidings inf (fmap keyFastUnique table) mempty  never ref
   return (DBVar2 ref idxTds  (fmap snd dbTds) (fmap fst dbTds ) dbEvs)
 
 tbpredM un  = G.notOptional . G.getUnique un
@@ -149,7 +149,7 @@ applyBackend (PatchRow p@(m,pk@(G.Idex pki),i)) = do
    inf <- ask
    let table = lookTable inf (_kvname m)
    ref <- lift $ prerefTable inf table
-   (sidx,v,_,_) <- liftIO $ atomically $ readState (WherePredicate (AndColl []),keyFastUnique <$> _kvpk m) (mapTableK keyFastUnique table ) ref
+   (sidx,v,_,_) <- liftIO $ atomically $ readState (WherePredicate (AndColl []),keyFastUnique <$> _kvpk m) (fmap keyFastUnique table ) ref
    let oldm = mapKey' (recoverKey inf ) <$>  G.lookup pk v
    old <- maybe (do
      (_,(i,o)) <- selectFrom' table Nothing Nothing [] (WherePredicate (AndColl ((\(k,o) -> PrimColl (keyRef k,Left (justError "no opt " $ unSOptional' o,Equals))) <$> zip (_kvpk m) pki)))
@@ -303,7 +303,7 @@ getFKS
          S.Set Key)
 getFKS inf predtop table v = F.foldl' (\m f  -> m >>= (\i -> getFKRef inf predtop  table i v f)) (return ([],return ,S.empty )) $ sorted -- first <> second
   where
-    sorted = P.sortBy (P.comparing (RelSort . F.toList .  pathRelRel))  (S.toList (rawFKS table))
+    sorted = P.sortBy (P.comparing (RelSort . F.toList .  pathRelRel))  (rawFKS table)
 
 rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ ( lookAccess inf (tableName t) . (Le.over Le._1 (fmap  keyValue) )<$> fixed)
 
@@ -446,7 +446,7 @@ childrenRefsUnique  inf table (sidxs,base) (FKJoinTable rel j ,evs)  =  concat $
 pageTable flag method table page size presort fixed = do
     inf <- ask
     let mvar = mvarMap inf
-        tableU = mapTableK keyFastUnique table
+        tableU = fmap keyFastUnique table
         fixedU = mapPredicate keyFastUnique fixed
         defSort = fmap (,Desc) $  rawPK table
         sortList  = if L.null presort then defSort else  presort
@@ -839,7 +839,7 @@ loadFKS table = do
   let
     targetTable = lookTable inf (_kvname (fst table))
     fkSet:: S.Set Key
-    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ S.toList  (rawFKS targetTable)
+    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $  (rawFKS targetTable)
     items = unKV . snd  $ table
   fks <- catMaybes <$> mapM (loadFK ( table )) (F.toList $ rawFKS targetTable)
   let
@@ -915,11 +915,11 @@ createTableRefs inf re (Project i (Union l) ) = do
       tableRel t = M.fromList $ catMaybes $ keyRel t<$> tableAttrs t
   res <- mapM (\t -> do
     ((idx,sdata),ref) <- createTableRefs inf re t
-    return ((idx,createUn (keyFastUnique <$> rawPK i) (first (const (tableMeta (mapTableK keyFastUnique i)) ) .  mapKey' (\k -> fromMaybe k (M.lookup k (tableRel t))) <$> G.toList sdata)),ref)) l
+    return ((idx,createUn (keyFastUnique <$> rawPK i) (first (const (tableMeta (fmap keyFastUnique i)) ) .  mapKey' (\k -> fromMaybe k (M.lookup k (tableRel t))) <$> G.toList sdata)),ref)) l
   return (foldr mappend (M.empty,G.empty) (fst <$> res) , L.head $ snd <$> res)
 createTableRefs inf re i = do
   liftIO$ putStrLn $ "Loading Table: " ++ T.unpack (rawName i)
-  let table = mapTableK keyFastUnique i
+  let table = fmap keyFastUnique i
   map <- liftIO$ atomically $ readTVar (mvarMap inf)
   if isJust (M.lookup i map)
      then do
@@ -1003,7 +1003,7 @@ loadFKSDisk inf targetTable re = do
       fkSet =   S.map keyFastUnique . S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ (P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) $F.toList (rawFKS targetTable))
       nonFKAttrs :: [(S.Set (Rel KeyUnique) ,Column KeyUnique Showable)]
       nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) (S.intersection fkSet fkSet2)) items
-   in tblist' (mapTableK keyFastUnique targetTable) (fmap snd nonFKAttrs <> fks ))
+   in tblist' (fmap keyFastUnique targetTable) (fmap snd nonFKAttrs <> fks ))
 
 loadFKDisk :: InformationSchema ->  S.Set KeyUnique -> [MutRec [[Rel Key]]] ->  SqlOperation -> Dynamic (TBData KeyUnique Showable -> Maybe (Column KeyUnique Showable))
 -- loadFKDisk _ old  _ m | traceShow (old,m) False = undefined
@@ -1071,7 +1071,7 @@ writeTable :: InformationSchema -> String -> Table -> DBRef KeyUnique Showable -
 writeTable inf s t v = do
   let tname = s <> "/" <> (fromString $ T.unpack (tableName t))
   print ("Dumping Table: " <> tname)
-  (_,iv,_,_) <- atomically $ readState mempty (mapTableK keyFastUnique t) v
+  (_,iv,_,_) <- atomically $ readState mempty (fmap keyFastUnique t) v
   (iidx ,_)<- atomically $ readIndex v
   let sidx = first (mapPredicate (keyPosition.recoverKey inf))  <$> M.toList iidx
       sdata = fmap (\i -> mapKey' keyPosition . either (error . ("can't typecheck row : \n " ++) . unlines ) id. typecheck (typeCheckTable (tablePK t)) .mapKey' (recoverKey inf).tableNonRef' $ i) $  iv

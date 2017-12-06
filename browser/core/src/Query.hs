@@ -153,7 +153,7 @@ allKVRec'  t@(m, e)=  concat $ fmap snd $ L.sortBy (comparing (\i -> maximum $ (
 
 
 tableAttrs r =
-  L.nub $ ((rawPK r)) <> (rawDescription r)  <>(S.toList (rawAttrs r))
+  L.nub $ ((rawPK r)) <> (rawDescription r)  <>( (rawAttrs r))
 
 
 
@@ -237,7 +237,7 @@ tableView  invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
 
 tableViewNR invSchema r = fst $ flip runState ((0,M.empty),(0,M.empty)) $ do
   ks <- labelTable r
-  tb <- recurseTB invSchema (S.filter (all isInlineRel. F.toList .pathRelRel)$ rawFKS r) False [] ks
+  tb <- recurseTB invSchema (filter (all isInlineRel. F.toList .pathRelRel)$ rawFKS r) False [] ks
   return  $ TB1 tb
 
 
@@ -314,15 +314,15 @@ recursePath m isLeft isRec vacc ksbn invSchema jo@(FunctionField k l f)
       a = f
       ref = justError "cant find " .  M.lookup (S.singleton (Inline k)) $ ksbn
 
-recurseTB :: TableMap -> Set SqlOperation -> Bool -> RecState Key  -> TBData Key () -> State ((Int, Map Int Table), (Int, Map Int Key)) (TBData Key ())
+recurseTB :: TableMap -> [SqlOperation ]-> Bool -> RecState Key  -> TBData Key () -> State ((Int, Map Int Table), (Int, Map Int Key)) (TBData Key ())
 recurseTB invSchema  fks' nextLeft isRec (m, kv) =  (if L.null isRec then m else m  ,) <$> do
           let
               items = _kvvalues kv
               fkSet:: S.Set Key
-              fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction ) $ S.toList fks'
-              funSet = S.unions $ fmap (S.map _relOrigin.pathRelRel) $ filter isFunction (S.toList fks')
+              fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction ) $ fks'
+              funSet = S.unions $ fmap (S.map _relOrigin.pathRelRel) $ filter isFunction ( fks')
               nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) (fkSet <> funSet)) items
-              fklist = P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) (F.toList fks')
+              fklist = P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) ( fks')
           pt <- F.foldl (\acc  fk ->  do
                   vacc <- acc
                   let relFk =pathRelRel fk

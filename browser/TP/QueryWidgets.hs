@@ -94,8 +94,8 @@ createFresh  tname inf i ty@(Primitive l  atom)  =
       let tableO = lookTable inf tname
           path =  (FKInlineTable k $ inlineName ty )
       return $ inf
-          & tableMapL . Le.ix tname . rawFKSL %~  S.insert path
-          & pkMapL . Le.ix (S.fromList $ rawPK tableO) . rawFKSL Le.%~  S.insert path
+          & tableMapL . Le.ix tname . rawFKSL %~  (:) path
+          & pkMapL . Le.ix (S.fromList$ rawPK tableO) . rawFKSL Le.%~  (:) path
           & keyMapL %~ HM.insert (tname,i) k
 
 

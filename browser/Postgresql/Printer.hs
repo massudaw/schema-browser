@@ -154,7 +154,7 @@ dropTable r= "DROP TABLE "<> rawFullName r
 -- createTable :: Table -> Text
 createTable r = "CREATE TABLE " <> rawFullName r  <> "\n(\n\t" <> T.intercalate ",\n\t" commands <> "\n)"
   where
-    commands = (renderAttr <$> S.toList (rawAttrs r) ) <> [renderPK] <> fmap renderFK (S.toList $ rawFKS r)
+    commands = (renderAttr <$>  (rawAttrs r) ) <> [renderPK] <> fmap renderFK ( rawFKS r)
     renderAttr k = keyValue k <> " " <> render (keyType k) <> if  (isKOptional (keyType k)) then "" else " NOT NULL"
     renderKeySet pk = T.intercalate "," (fmap keyValue (S.toList pk ))
     render (Primitive l ty ) = ty <> renderTy l

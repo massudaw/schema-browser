@@ -316,6 +316,7 @@ data Showable
 
 
 type SqlOperation = SqlOperationK Key
+
 data SqlOperationK k
   = FKJoinTable [Rel k] (Text,Text)
   | RecJoin (MutRec [[Rel k ]])  (SqlOperationK k)
@@ -344,12 +345,6 @@ data TableType
 type Table = TableK Key
 
 
-mapTableK f (Raw  uni s tt tr de is rn  un idx rsc rp rd rf rat ) = Raw uni s tt tr (S.map f de) is rn (fmap (fmap f) un) (fmap (fmap f) idx) (map f rsc ) (map f rp) (fmap f rd) (S.map (mapPath f )  rf ) (S.map f rat)
-  where mapPath f j  = (fmap f j)
-mapTableK f (Project t tr) = Project (mapTableK f t) (mapTransform f tr)
-
-mapTransform f (Union l ) = Union (fmap (mapTableK f) l)
-
 instance Show Unique where
     show i = show (hashUnique i)
 instance Eq (TableK k) where
@@ -366,7 +361,7 @@ data TableK k
            ,_rawSchemaL :: Text
            , rawTableType :: TableType
            , rawTranslation :: Maybe Text
-           , rawDelayed :: (Set k)
+           , rawDelayed :: [k]
            , __rawIsSum :: Bool
            , _rawNameL :: Text
            , uniqueConstraint :: [[k]]
@@ -374,11 +369,11 @@ data TableK k
            , _rawScope :: [k]
            , _rawPKL :: [k]
            , _rawDescriptionL :: [k]
-           , _rawFKSL ::  (Set (SqlOperationK k ))
-           , _rawAttrsR :: (Set k)
+           , _rawFKSL ::  [SqlOperationK k]
+           , _rawAttrsR :: [k]
            }
-     | Project  (TableK k)  (TableTransform  k)
-     deriving(Show)
+  | Project  (TableK k)  (TableTransform  k)
+  deriving(Functor,Show)
 
 
 data TableTransform  k
@@ -386,7 +381,7 @@ data TableTransform  k
   | From (TableK k)
   | Join (TableTransform k) (TableK k)  [Rel k]
   | Filter (TableTransform k) (BoolCollection (Access k,AccessOp Showable))
-  deriving(Show)
+  deriving(Eq,Ord,Functor,Show)
 
 
 unRecRel (RecJoin _ l) = l
@@ -552,7 +547,7 @@ tableMeta :: Ord k => TableK k -> KVMetadata k
 tableMeta (Project s _ ) =  tableMeta s
 tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawDescription t) (fmap F.toList $ uniqueConstraint t) [] (F.toList $ rawAttrs t)[]  (F.toList $ rawDelayed t) (paths' <> paths)
   where
-    rec = filter isRecRel  (Set.toList $ rawFKS t)
+    rec = filter isRecRel  ( rawFKS t)
     same = filter ((tableName t ==). fkTargetTable ) rec
     notsame = filter (not . (tableName t ==). fkTargetTable  ) rec
     paths = fmap (fmap (fmap F.toList). pathRelRel' ) notsame

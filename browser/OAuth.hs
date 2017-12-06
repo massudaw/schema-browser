@@ -249,7 +249,7 @@ getToken from = do
 
 
 joinGet tablefrom tableref from ref
-  | S.fromList (fmap _relOrigin (getKeyAttr ref) ) ==  S.fromList (rawPK tableref <> S.toList (rawAttrs tableref ) <> rawDescription tableref) = return Nothing
+  | S.fromList (fmap _relOrigin (getKeyAttr ref) ) ==  S.fromList (rawPK tableref <>  (rawAttrs tableref ) <> rawDescription tableref) = return Nothing
   | tableName tableref == "history" = return Nothing
   |  not $ null $ _rawScope tableref = do
     inf <- ask
@@ -301,13 +301,13 @@ getTable tb pk
   | not $ null $ _rawScope tb = do
       inf <- ask
       liftIO $ print $ (tb,_rawScope tb,rawFKS tb)
-      let [sref] = filter (\ l -> S.isSubsetOf (pathRelOri l) (S.fromList $ _rawScope tb )) (S.toList $ rawFKS tb )
+      let [sref] = filter (\ l -> S.isSubsetOf (pathRelOri l) (S.fromList $ _rawScope tb )) (rawFKS tb )
       let
           l@(FKJoinTable rel stable) =  sref
           tableScope = _fkttable $ lookOrigin  (pathRelOri l ) (unTB1 pk)
       let fromtable = (lookSTable inf $ stable)
       joinGet fromtable  tb  tableScope  pk
-  | S.fromList (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb) `S.isSubsetOf` S.fromList (fmap _relOrigin (getKeyAttr pk) )  = return Nothing
+  | S.fromList (rawPK tb <>  (rawAttrs tb) <> rawDescription tb) `S.isSubsetOf` S.fromList (fmap _relOrigin (getKeyAttr pk) )  = return Nothing
   | otherwise = do
     inf <- ask
     tok <- liftIO $ R.currentValue $ R.facts (snd $ fromJust $ token inf)
@@ -335,7 +335,7 @@ lookMTable inf m = lookSTable inf (_kvschema m,_kvname m)
 traverseAccum f  l = foldl (\(a,m) c -> (\ a -> m >>= (\i -> fmap (:i) a )) <$> f  c a  ) (S.empty,return []) l
 
 convertAttrs :: InformationSchema -> Maybe (TBData Key Showable) -> HM.HashMap Text Table ->  Table -> Value -> TransactionM (TBData Key Showable)
-convertAttrs  infsch getref inf tb iv =   tblist' tb .  catMaybes <$> (snd $ traverseAccum kid (rawPK tb <> S.toList (rawAttrs tb) <> rawDescription tb ))
+convertAttrs  infsch getref inf tb iv =   tblist' tb .  catMaybes <$> (snd $ traverseAccum kid (rawPK tb <> (rawAttrs tb) <> rawDescription tb ))
   where
     pathOrigin = pathRelOri
     isFKJoinTable (FKJoinTable  _ _) = True

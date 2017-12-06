@@ -119,12 +119,15 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
           keyList =  fmap (\(t,k)-> ((t,keyValue k),k)) res2
           backendkeyMap = M.fromList keyList
           keyMap = fmap (typeTransform ops ) $ HM.fromList keyList
-          lookupKey3 :: (Functor f) => f (Int,Text,Maybe (Vector Text),Maybe (Vector Text),Bool) -> f (Text,(Int,Vector Key,Vector Key,Bool))
-          lookupKey3 = fmap  (\(o,t,c,s,b)-> (t,(o,maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci <> " " <> T.unpack t ) $ HM.lookup (t,ci) keyMap)) c,maybe V.empty (fmap (\ci -> justError ("no key " <> T.unpack ci) $ HM.lookup (t,ci) keyMap)) s,b)) )
-          lookupKey2 :: Functor f => f (Text,Text) -> f Key
-          lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show (t,c)) $ HM.lookup ( (t,c)) keyMap )
-          lookupKey ::  (Text,Text) ->  Key
-          lookupKey = (\(t,c)-> justError ("nokey" <> show (t,c)) $ HM.lookup ( (t,c)) keyMap )
+
+          lookupKey' map t c = justError ("nokey" <> show (t,c)) $ HM.lookup (t,c) map
+          lookupKey ::  Text -> Text ->  Key
+          lookupKey = lookupKey' keyMap
+
+          lookupPK :: Functor f => f (Int,Text,Maybe (Vector Text),Maybe (Vector Text),Bool) -> f (Text,(Int,Vector Key,Vector Key,Bool))
+          lookupPK = fmap  (\(o,t,c,s,b)-> (t,(o,vector  t c,vector t s,b)) )
+            where vector t = maybe V.empty (fmap (lookupKey t))
+          lookFk t k = V.toList $ fmap (lookupKey t) k
           readTT :: Text ->  TableType
           readTT "BASE TABLE" = ReadWrite
           readTT "VIEW" = ReadOnly
@@ -136,7 +139,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
        uniqueConstrMap <- liftIO$ M.fromListWith (++) . fmap (fmap pure)   <$> query conn "SELECT table_name,pks FROM metadata.unique_sets WHERE schema_name = ? " (Only schema)
        indexMap <- liftIO$ M.fromListWith (++) . fmap (fmap pure)   <$> query conn "SELECT table_name,columns FROM metadata.catalog_indexes WHERE schema_name = ? " (Only schema)
 
-       res <- liftIO$ lookupKey3 <$> query conn "SELECT oid,t.table_name,pks,scopes,s.table_name is not null FROM metadata.tables t left join metadata.pks  p on p.schema_name = t.schema_name and p.table_name = t.table_name left join metadata.sum_table s on s.schema_name = t.schema_name and t.table_name = s.table_name where t.schema_name = ?" (Only schema)
+       res <- liftIO$ lookupPK <$> query conn "SELECT oid,t.table_name,pks,scopes,s.table_name is not null FROM metadata.tables t left join metadata.pks  p on p.schema_name = t.schema_name and p.table_name = t.table_name left join metadata.sum_table s on s.schema_name = t.schema_name and t.table_name = s.table_name where t.schema_name = ?" (Only schema)
 
        resTT <- liftIO$ fmap readTT . M.fromList <$> query conn "SELECT table_name,table_type FROM metadata.tables where schema_name = ? " (Only schema)
 
@@ -145,20 +148,11 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
         schemaForeign = "select target_schema_name from metadata.fks where origin_schema_name = ? and target_schema_name <> origin_schema_name"
        rslist <- liftIO$query conn  schemaForeign (Only schema)
        rsch <- HM.fromList <$> mapM (\(Only s) -> (s,) <$> keyTables  schemaRef (s,user) authMap pluglist) rslist
-       let lookFk t k = V.toList $ lookupKey2 (fmap (t,) k)
-           lookRFk s t k = V.toList $ lookupKey2 (fmap (t,) k)
-            where
-              lookupKey2 :: Functor f => f (Text,Text) -> f Key
-              lookupKey2 = fmap  (\(t,c)-> justError ("nokey" <> show  (s,t,c)) $ HM.lookup ( (t,c)) map)
-                where map
-                        | s == schema = keyMap
-                        | otherwise = _keyMapL (justError "no schema" $ HM.lookup s rsch)
-
-           lookupKey' :: Text -> (Text,Text) -> Key
-           lookupKey' s (t,c) = justError ("nokey" <> show (t,c)) $ HM.lookup ( (t,c)) map
-                where map
-                        | s == schema = keyMap
-                        | otherwise = _keyMapL (justError "no schema" $ HM.lookup s rsch)
+       let
+           map s
+              | s == schema = keyMap
+              | otherwise = _keyMapL (justError "no schema" $ HM.lookup s rsch)
+           lookRFk s t k = V.toList $ fmap  (lookupKey' (map s) t) k
 
        let
           foreignKeys :: Query
@@ -168,26 +162,26 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
           exforeignKeys :: Query
           exforeignKeys = "select origin_table_name,target_schema_name,target_table_name,origin_fks,target_fks,rel_fks from metadata.extended_view_fks where origin_schema_name = ?"
 
-       fks <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $  ( FKJoinTable (zipWith3 (\a b c -> Rel a (readBinaryOp b) c) (lookFk tp kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn foreignKeys (Only schema)
-       efks <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,S.singleton $ ( FKJoinTable (zipWith3 (\a b c -> extendedRel keyMap tp a b c)  (V.toList kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn exforeignKeys (Only schema) :: R.Dynamic (Map Text (Set ((SqlOperation ) )))
+       fks <- liftIO$ M.fromListWith mappend . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp,  pure ( FKJoinTable (zipWith3 (\a b c -> Rel a (readBinaryOp b) c) (lookFk tp kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn foreignKeys (Only schema)
+       efks <- liftIO$ M.fromListWith mappend . fmap (\i@(tp,sc,tc,kp,kc,rel) -> (tp, pure ( FKJoinTable (zipWith3 (\a b c -> extendedRel keyMap tp a b c)  (V.toList kp ) (V.toList rel) (lookRFk sc tc kc)) (sc,tc)) )) <$> query conn exforeignKeys (Only schema) :: R.Dynamic (Map Text [SqlOperation ])
 
 
-       functionsRefs <- liftIO$ M.fromListWith S.union . fmap (\i@(tp,sc::Text,tc,cols,fun) -> (tp,S.singleton $  ( FunctionField tc (readFun fun) (head . indexer <$> V.toList cols ) ) )) <$> query conn functionKeys (Only schema):: R.Dynamic (Map Text (Set ( (SqlOperationK Text) ) ))
+       functionsRefs <- liftIO$ M.fromListWith mappend . fmap (\i@(tp,sc::Text,tc,cols,fun) -> (tp,  pure( FunctionField tc (readFun fun) (head . indexer <$> V.toList cols ) ) )) <$> query conn functionKeys (Only schema):: R.Dynamic (Map Text [SqlOperationK Text] )
        let all =  M.fromList $ fmap (\(c,l)-> (c,S.fromList $ fmap (\(t,n)-> (\(Just i) -> i) $ HM.lookup (t,keyValue n) keyMap ) l )) $ groupSplit (\(t,_)-> t)  $ (fmap (\((t,_),k) -> (t,k))) $  HM.toList keyMap :: Map Text (Set Key)
        let i3lnoFun = fmap (\(c,(un,pksl,scp,is_sum))->
                                let
                                   pks = F.toList pksl
                                   inlineFK =  fmap (\k -> (\t ->  (  FKInlineTable k $ inlineName t) ) $ keyType k ) .  filter (isInline .keyType ) .  S.toList <$> M.lookup c all
                                   attrMap =  M.fromList $ fmap (\i -> (keyPosition i,i)) $ S.toList $ justError "no attr" $ M.lookup c (all)
-                                  attr = S.difference (justError ("no collumn" <> show c) $ M.lookup c all) ((S.fromList $ (maybe [] id $ M.lookup c descMap) )<> S.fromList pks)
-                               in (c ,Raw un schema  (justLook c resTT) (M.lookup un transMap) (S.filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap ( fmap (lookupKey .(c,) )  . V.toList) <$> M.lookup c uniqueConstrMap)) (fromMaybe [] (fmap ( fmap (justError "no key" . flip M.lookup  attrMap)  . V.toList) <$> M.lookup c indexMap))   (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe S.empty $ (M.lookup c efks )<>(M.lookup c fks )<> fmap S.fromList inlineFK  ) attr )) res :: [(Text,Table)]
+                                  attr = S.toList $ S.difference (justError ("no collumn" <> show c) $ M.lookup c all) ( S.fromList $ (maybe [] id $ M.lookup c descMap) <>  pks)
+                               in (c ,Raw un schema  (justLook c resTT) (M.lookup un transMap) (filter (isKDelayed.keyType)  attr) is_sum c (fromMaybe [] (fmap ( fmap (lookupKey c )  . V.toList) <$> M.lookup c uniqueConstrMap)) (fromMaybe [] (fmap ( fmap (justError "no key" . flip M.lookup  attrMap)  . V.toList) <$> M.lookup c indexMap))   (F.toList scp) pks (maybe [] id $ M.lookup  c descMap) (fromMaybe []  $ (M.lookup c efks )<>(M.lookup c fks )<>  inlineFK  ) attr )) res :: [(Text,Table)]
        let
            unionQ = "select schema_name,table_name,inputs from metadata.table_union where schema_name = ?"
 
            tableMapPre = HM.singleton schema (HM.fromList i3lnoFun)
-           addRefs table = maybe table (\r -> Le.over rawFKSL (S.union (S.map liftFun r)) table) ref
+           addRefs table = maybe table (\r -> Le.over rawFKSL (mappend (fmap liftFun r)) table) ref
              where ref =  M.lookup (tableName table) functionsRefs
-                   liftFun ( (FunctionField k s a) ) =   (FunctionField (lookupKey' ts (tn ,k)) s (liftASch tableMapPre ts tn <$> a))
+                   liftFun ( (FunctionField k s a) ) =   (FunctionField (lookupKey' (map ts) tn k) s (liftASch tableMapPre ts tn <$> a))
                    tn = tableName table
                    ts = rawSchema table
 
@@ -239,7 +233,7 @@ isUnion _ = False
 addRecInit :: HM.HashMap Text (HM.HashMap Text Table) -> HM.HashMap Text Table -> HM.HashMap Text Table
 addRecInit inf m = fmap recOverFKS m
   where
-        recOverFKS t  = t Le.& rawFKSL Le.%~ S.map path
+        recOverFKS t  = t Le.& rawFKSL Le.%~ map path
           where
                 path :: SqlOperation -> SqlOperation
                 path i@(FunctionField _ _ _ ) = i
