@@ -11,6 +11,7 @@ import Control.Arrow (first)
 import Data.Map (Map)
 import qualified Data.Map  as M
 import Postgresql.Parser
+import Postgresql.Printer
 import Safe
 import Data.Interval(upperBound,lowerBound)
 import Data.Monoid
@@ -50,7 +51,7 @@ parseFunction =  do
 callFunction :: Connection -> String -> ( [KType (Prim KPrim (Text,Text))],KType (Prim KPrim (Text,Text))) -> [FTB Showable] -> IO (FTB Showable)
 callFunction conn fun ty inp = do
   Only i <- L.head <$> query conn (fromString $ " SELECT to_json(" ++ fun ++ ")" ) (L.zip (fst ty) inp)
-  return $ either (error "cant parse" ) id $  A.parseEither (parseShowableJSON (snd ty)) i
+  return $ either (error "cant parse" ) id $  A.parseEither (fmap fst . codegent . parseShowableJSON parsePrimitiveJSON  (snd ty)) i
 
 multProof (PDimensional i (a1,a2,a3,a4,a5,a6,a7)) (PDimensional j (b1,b2,b3,b4,b5,b6,b7)) = PDimensional (i+j) (a1+b1,a2+b2,a3+b3,a4+b4,a5+b5,a6+b6,a7+b7)
 divProof (PDimensional i (a1,a2,a3,a4,a5,a6,a7)) (PDimensional j (b1,b2,b3,b4,b5,b6,b7)) = PDimensional (i+j) (a1-b1,a2-b2,a3-b3,a4-b4,a5-b5,a6-b6,a7-b7)

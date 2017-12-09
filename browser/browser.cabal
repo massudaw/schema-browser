@@ -17,8 +17,6 @@ cabal-version:       >=1.10
 
 library 
   exposed-modules:
-    OAuth
-    OAuthClient
 
     Postgresql.Backend
     Postgresql.Parser

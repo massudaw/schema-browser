@@ -95,9 +95,9 @@ eventWidgetMeta inf cliZone= do
             convField (LeftTB1 i) = concat $   convField <$> maybeToList i
             convField (v) = [("start",toLocalTime $v)]
             convField i = errorWithStackTrace (show i)
-            projf  r efield@(TB1 (SText field))  = (if (isJust $ join $  unSOptional <$> attr) then Left else Right) (M.fromList $ concat (convField <$> maybeToList attr  ) <> [("id", txt $ writePK r efield   ),("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color ),("field", efield )] :: M.Map Text (FTB Showable))
+            projf  r efield@(TB1 (SText field))  = (if (isJust $ join $  unSOptional <$> attr) then Left else Right) (M.fromList $ concat (convField <$> maybeToList attr  ) <> [("id", txt $ writePK (tableMeta table) r efield   ),("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color ),("field", efield )] :: M.Map Text (FTB Showable))
                   where attr  = attrValue <$> lookAttrM inf field r
-            proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  projf r <$> (F.toList efields)
+            proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table) $  r),)$  projf r <$> (F.toList efields)
             attrValue (Attr k v) = v
          in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,efields,proj)) ( G.toList evMap)
 
@@ -142,8 +142,8 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
             UI.div # set children [] # sink UI.style  (noneShow . isJust <$> tdib)
                            ) ref) sel
 
-    onEvent (rumors tds) (ui . transaction inf . mapM (\i ->
-      patchFrom (readPatch i) >>= traverse (tell . pure )))
+    onEvent (rumors tds) (ui . transaction inf . mapM (\((t,ix,k),i) ->
+      patchFrom (tableMeta t) ix (readPatch (k,i)) >>= traverse (tell . pure )))
     selection <- UI.div # sink children ( catMaybes .F.toList <$> facts edits)
     return ([innerCalendar,selection],tidings bhsel eselg)
 

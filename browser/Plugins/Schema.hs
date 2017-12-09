@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, FlexibleContexts #-}
+{-# LANGUAGE GADTs,FlexibleInstances, FlexibleContexts #-}
 module Plugins.Schema where
 
 import Types
@@ -42,7 +42,7 @@ import DynFlags (defaultFatalMessager, defaultFlushOut, PkgConfRef(PkgConfFile))
 
 import Debug.Trace
 
-codeOps = SchemaEditor (error "no ops 1") (error "no ops 2") (\i -> return Nothing ) (error "no ops 4") (\ _ _ _ _ _ _ -> return ([],Nothing ,0)) (\ _ _-> return Nothing )  mapKeyType (error "no ops 6")(error "no ops 7") undefined 400 (\inf -> id {-withTransaction (conn inf)-})  (error "no ops") Nothing
+codeOps = SchemaEditor (error "no ops 1") (error "no ops 2") (\_ i -> return Nothing ) (error "no ops 4") (\ _ _ _ _ _ _ _ -> return ([],Nothing ,0)) (\ _ _-> return Nothing )  mapKeyType (error "no ops 6")(error "no ops 7") undefined 400 (\inf -> id {-withTransaction (conn inf)-})  (error "no ops") Nothing
 
 gmailPrim :: HM.HashMap Text KPrim
 gmailPrim = HM.fromList
@@ -121,26 +121,25 @@ instance DecodeTable (Access Text) where
     ]
 
 
-
-
-
 addPlugins iniPlugList smvar = do
   metaschema <- liftIO $ code smvar
   let plugins = "plugin_code"
   (_,(_,plug))<- transactionNoLog (meta metaschema) $ selectFrom "plugins" Nothing Nothing [] mempty
   (dbstats,_)<- transactionNoLog metaschema $ selectFrom plugins Nothing Nothing [] mempty
   (event,handle) <- R.newEvent
+  let mk = tableMeta $ lookTable (meta metaschema) "plugins"
+      m = fmap keyValue mk
   let
     row dyn@(FPlugins _ _ (StatefullPlugin _)) =  do
         name <- nameM
-        return $ tblist $ [FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
+        return $ tblist $ [FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM m ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
                      ,Attr "table" (txt (_bounds dyn) )
                      ,Attr "plugin" (TB1 $ SHDynamic (HDynamic (toDyn dyn ))) ]
       where nameM =  L.find (flip G.checkPred (WherePredicate (AndColl [PrimColl (keyRef "name",Left (txt (_name dyn ),Equals))]))) (mapKey' keyValue <$> plug)
     row dyn = do
         name <- nameM
         let (inp,out) = pluginStatic dyn
-        return $ tblist $ [ FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
+        return $ tblist $ [ FKT (kvlist $ Attr "ref" <$> ((fmap (justError "un ". unSOptional' ) . F.toList . getPKM m ) name)) [Rel "ref" Equals "oid"]  (TB1 name)
                           , Attr "table" (txt (_bounds dyn) )
                           , IT "input" (array (TB1 .encodeT ) (list inp))
                           , IT "output" (array (TB1 .encodeT) (list out))
@@ -152,13 +151,15 @@ addPlugins iniPlugList smvar = do
     modifyed (Closed i j True ) = do
       putStrLn ("### Modified Plugin: "  ++ show (i,j))
       plugList <- plugListM
-      mapM (traverse (handle . PatchRow . patch . liftTable' metaschema "plugin_code") . row ) plugList
+      let patchR m i = PatchRow (G.getIndex m i,patch i)
+      mapM (traverse (handle . patchR mk . liftTable' metaschema "plugin_code") . row ) plugList
       return ()
     modifyed i = return ()
   watch <- liftIO$ addWatch inotify  [CloseWrite] "Plugins.hs" modifyed
   R.registerDynamic (removeWatch watch)
   liftIO $ mapM (traverse (handle . CreateRow .liftTable' metaschema "plugin_code") . row)  iniPlugList
   return  iniPlugList
+
 
 
 putString = liftIO . putStrLn

@@ -5,7 +5,6 @@
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveFoldable #-}
@@ -17,9 +16,7 @@ module Types.Primitive  where
 
 import Types.Common
 import Data.Ord
-import Text.Show.Deriving
 import Data.Vector (Vector)
-import Data.Functor.Classes
 import Data.Dynamic
 import Control.DeepSeq
 import qualified NonEmpty as Non
@@ -30,31 +27,19 @@ import qualified Control.Lens as Le
 import Data.Functor.Apply
 import Utils
 import Data.Bifunctor
-import Safe
 import Prelude hiding(head)
-import Data.Maybe
 import GHC.Generics
 import Data.Binary (Binary)
-import Data.Vector.Binary
 import qualified Data.Binary as B
-import Data.Text.Binary
 import System.IO.Unsafe
-import Data.Functor.Identity
-import Data.Typeable
-import Data.Vector(Vector)
-import Data.Functor.Classes
 import Data.Foldable (Foldable)
 import qualified Data.Foldable as F
 import qualified Data.Interval as Interval
-import Data.Interval (Extended,Interval(..))
-import qualified Data.ExtendedReal as ER
 import Data.Monoid hiding (Product)
 import qualified Data.Text as T
 import qualified Data.ByteString as BS
-import GHC.Stack
-import Data.Traversable(Traversable,traverse)
+import Data.Traversable(traverse)
 import Data.Time
-import Data.Time.Clock.POSIX
 import Control.Monad
 import GHC.Exts
 import Control.Applicative
@@ -67,7 +52,6 @@ import qualified Data.Set as  S
 import Control.Monad.State
 import Data.Text (Text)
 
-import Debug.Trace
 import Data.Unique
 
 
@@ -118,6 +102,7 @@ showableDef (Primitive (KSerial:xs) i) = Just $ LeftTB1 (showableDef (Primitive 
 showableDef (Primitive (KArray:xs) i) = Nothing -- Just (SComposite Vector.empty)
 showableDef i = Nothing
 
+
 isFunction :: SqlOperationK k -> Bool
 isFunction (FunctionField _ _ _) = True
 isFunction i = False
@@ -127,6 +112,7 @@ isRecRel i = False
 
 pathRelOri :: Ord k => SqlOperationK k -> Set k
 pathRelOri = S.map _relOrigin . pathRelRel
+
 
 pathRelRel :: Ord k => SqlOperationK k -> Set (Rel k)
 pathRelRel (FKJoinTable  rel   _  ) = Set.fromList rel
@@ -142,8 +128,8 @@ pathRelRel' (RecJoin l rel )
 
 
 type Column k a = TB k a
-type TBData k a = (KVMetadata k,KV k a )
-type TB3Data   k a = (KVMetadata k,KV k a )
+type TBData k a = KV k a
+type TB3Data k a = KV k a
 
 
 type Key = CoreKey
@@ -317,13 +303,6 @@ data Showable
 
 type SqlOperation = SqlOperationK Key
 
-data SqlOperationK k
-  = FKJoinTable [Rel k] (Text,Text)
-  | RecJoin (MutRec [[Rel k ]])  (SqlOperationK k)
-  | FKInlineTable k (Text,Text)
-  | FunctionField k Expr [Access k]
-  deriving(Eq,Ord,Show,Functor)
-
 fkTargetTable (FKJoinTable  r tn) = snd tn
 fkTargetTable (FKInlineTable _ tn ) = snd tn
 fkTargetTable (RecJoin t tn) = fkTargetTable tn
@@ -460,13 +439,13 @@ instance Num Showable where
     SDouble i +  SDouble j = SDouble (i + j)
     SDouble i + SNumeric j = SDouble $ i +  fromIntegral j
     SNumeric j  + SDouble i = SDouble $ i +  fromIntegral j
-    v + k = errorWithStackTrace (show (v,k))
+    v + k = error (show (v,k))
     STime(STimestamp i) - STime(STimestamp j) =  STime $ SPInterval $ realToFrac $ diffUTCTime i j
     SNumeric i -  SNumeric j = SNumeric (i - j)
     SDouble i -  SDouble j = SDouble (i - j)
     SDouble i - SNumeric j = SDouble $ i -  fromIntegral j
     SNumeric j  - SDouble i = SDouble $ i -  fromIntegral j
-    v - k = errorWithStackTrace (show (v,k))
+    v - k = error (show (v,k))
     SNumeric i *  SNumeric j = SNumeric (i * j)
     SNumeric i *  SDouble j = SDouble (fromIntegral i * j)
     SDouble i *  SNumeric j = SDouble (i * fromIntegral j)
@@ -474,11 +453,11 @@ instance Num Showable where
     SDouble i *  (STime (SPInterval j)) = SDouble (i * realToFrac j)
     (STime (SPInterval i ))*  SDouble j = SDouble (j * realToFrac i)
     STime(SPInterval i) *  STime (SPInterval j) = STime $ SPInterval (i * j)
-    i * j = errorWithStackTrace (show (i,j))
+    i * j = error (show (i,j))
     fromInteger i = SDouble $ fromIntegral i
     negate (SNumeric i) = SNumeric $ negate i
     negate (SDouble i) = SDouble $ negate i
-    negate i = errorWithStackTrace (show i)
+    negate i = error (show i)
     abs (SNumeric i) = SNumeric $ abs i
     abs (SDouble i) = SDouble $ abs i
     signum (SNumeric i) = SNumeric $ signum i
@@ -489,7 +468,7 @@ instance Fractional Showable where
   recip (SDouble i) = SDouble (recip i)
   recip (STime (SPInterval i)) = STime $ SPInterval (recip i)
   recip (SNumeric i) = SDouble (recip $ fromIntegral i)
-  recip i = errorWithStackTrace (show i)
+  recip i = error (show i)
 
 -- type HashQuery =  HashSchema (Set Key) (SqlOperation Table)
 type PathQuery = SqlOperation
@@ -504,7 +483,7 @@ tableAttr (m , KV n) =   concat  $ F.toList (nonRef <$> n)
     nonRef (FKT i  _ _ ) = concat (nonRef <$> unkvlist i)
     nonRef j@(IT k v ) = [j]
 
--- nonRef i = errorWithStackTrace (show i)
+-- nonRef i = error (show i)
 
 -- joinNonRef :: Ord k => TB2 k a -> TB2 k a
 -- joinNonRef = fmap joinNonRef'
@@ -512,13 +491,13 @@ tableAttr (m , KV n) =   concat  $ F.toList (nonRef <$> n)
 -- joinNonRef' :: Ord k => TB3Data f k a -> TB3Data f k a
 
 tableNonRef2 :: Ord k => TBData k a -> TBData  k a
-tableNonRef2 (m,n)  = (m, (KV . rebuildTable . _kvvalues) n)
+tableNonRef2 n  =  (KV . rebuildTable . _kvvalues) n
   where
     rebuildTable n =    Map.unions (nonRef <$> F.toList n)
     nonRef :: Ord k => Column k a -> Map (Set (Rel k )) (TB  k a)
     nonRef ((Fun i _ _ )) =Map.empty
     nonRef ((FKT i _ _ )) = _kvvalues i
-    nonRef ((IT j k )) = Map.singleton (S.singleton $ Inline j) (IT  j (tableNonRef2 <$> k ))
+    nonRef (IT j k ) = Map.singleton (S.singleton $ Inline j) (IT  j (tableNonRef2 <$> k ))
     nonRef i@((Attr j _)) = Map.singleton (S.singleton $ Inline j) (i)
 
 
@@ -545,7 +524,7 @@ addDefault = def
 
 tableMeta :: Ord k => TableK k -> KVMetadata k
 tableMeta (Project s _ ) =  tableMeta s
-tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawDescription t) (fmap F.toList $ uniqueConstraint t) [] (F.toList $ rawAttrs t)[]  (F.toList $ rawDelayed t) (paths' <> paths)
+tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawDescription t) (fmap F.toList $ uniqueConstraint t) [] (F.toList $ rawAttrs t)[]  (F.toList $ rawDelayed t) (rawFKS t)(paths' <> paths)
   where
     rec = filter isRecRel  ( rawFKS t)
     same = filter ((tableName t ==). fkTargetTable ) rec
@@ -553,8 +532,8 @@ tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawD
     paths = fmap (fmap (fmap F.toList). pathRelRel' ) notsame
     paths' = (\i -> if L.null i then [] else [MutRec i]) $ fmap ((head .unMutRec). fmap (fmap F.toList). pathRelRel' ) same
 
-tblist' :: Ord k => TableK k -> [TB  k a] -> TBData k a
-tblist' t  = tblistM (tableMeta t)
+tblist' :: Ord k => [TB  k a] -> TBData k a
+tblist' = tblistM
 
 
 isInline (Primitive _ (RecordPrim _ ) ) = True
@@ -582,7 +561,7 @@ unIndex o (FKT els rel (ArrayTB1 m)  ) = (\li mi ->  FKT  (kvlist $ nonl <> fmap
     l = L.find (all (isArray.keyType) . fmap _relOrigin . keyattr)  (unkvlist els)
     nonl = L.filter (not .all (isArray.keyType) . fmap _relOrigin . keyattr) (unkvlist els)
     indexArray ix s =  Non.atMay (unArray s) ix
-unIndex o i = errorWithStackTrace (show (o,i))
+unIndex o i = error (show (o,i))
 
 unLeftKey :: (Show k,Ord b,Show b) => TB (FKey (KType k)) b -> TB (FKey (KType k)) b
 unLeftKey (Attr k v ) = (Attr (unKOptional k) v)
@@ -590,7 +569,7 @@ unLeftKey (IT na (LeftTB1 (Just tb1))) = IT na tb1
 unLeftKey i@(IT na (TB1  _ )) = i
 unLeftKey (FKT ilk rel  (LeftTB1 (Just tb1))) = (FKT (kvlist $ (firstTB unKOptional) <$> unkvlist ilk) (Le.over relOri unKOptional <$> rel) tb1)
 unLeftKey i@(FKT ilk rel  (TB1  _ )) = i
-unLeftKey i = errorWithStackTrace (show i)
+unLeftKey i = error (show i)
 
 unLeftItens  :: (Show k , Show a) => TB (FKey (KType k)) a -> Maybe (TB (FKey (KType k)) a )
 unLeftItens = unLeftTB
@@ -601,14 +580,14 @@ unLeftItens = unLeftTB
       = Fun (unKOptional k) rel <$> unSOptional v
     unLeftTB (IT na (LeftTB1 l))
       = IT (unKOptional na) <$>  l
-    unLeftTB i@(IT na (TB1 (_,l)))
+    unLeftTB i@(IT na (TB1 l))
       = Just i
     unLeftTB (FKT ifk rel  (LeftTB1 tb))
       = (\ik -> FKT (kvlist ik  ) (Le.over relOri unKOptional <$> rel))
           <$> traverse ( (traFAttr unSOptional) . (firstTB unKOptional )  ) (unkvlist ifk)
           <*>  tb
     unLeftTB i@(FKT ifk rel  (TB1  _ )) = Just i
-    unLeftTB i = errorWithStackTrace (show i)
+    unLeftTB i = error (show i)
 
 
 
@@ -650,7 +629,7 @@ kDelayed = Le.over (keyTypes.keyFunc)  (KDelayed:)
 unKOptional (Key a  v c m n d (Primitive (KOptional :cs ) e )) = Key a  v c m n d (Primitive cs e)
 unKOptional (Key a  v c m n d (Primitive (KSerial :cs) e)) = Key a  v c m n d (Primitive cs e)
 unKOptional (Key a  v c m n d (Primitive [] e)) = Key a  v c m n d (Primitive [] e)
-unKOptional i = i -- errorWithStackTrace ("unKOptional" <> show i)
+unKOptional i = i -- error ("unKOptional" <> show i)
 
 unKTDelayed (KDelayed : e ) = e
 unKTDelayed (KSerial : e ) = e
@@ -659,27 +638,27 @@ unKTDelayed (KArray : e ) = KArray : unKTDelayed e
 unKTDelayed i = i
 
 unKDelayed (Key v a  c m n d e) = (Key v a  c m n d (Le.over keyFunc unKTDelayed e) )
-unKDelayed i = errorWithStackTrace ("unKDelayed" <> show i)
+unKDelayed i = error ("unKDelayed" <> show i)
 
 unKArray (Key a v c d m n (Primitive (KArray :xs ) e)) = Key a v  c d  m n (Primitive xs e)
 unKArray (Key a v c d m n e) = Key a  v c d  m n e
 
-tableKeys (TB1  (_,k) ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _kvvalues $   k)
+tableKeys (TB1  k ) = concat $ fmap (fmap _relOrigin.keyattr) (F.toList $ _kvvalues $   k)
 tableKeys (LeftTB1 (Just i)) = tableKeys i
 tableKeys (ArrayTB1 (i :| _) ) = tableKeys i
 
 recOverAttr :: Ord k => [Set(Rel k)] -> TB k a -> (Map (Set (Rel k )) (TB  k a ) -> Map (Set (Rel k )) (TB  k a ))
-recOverAttr (k:[]) attr = Map.insert k (attr )
-recOverAttr (k:xs) attr = Map.alter (fmap ((Le.over ifkttable (fmap (fmap ((KV . recOverAttr xs attr . _kvvalues )))))))  k
+recOverAttr (k:[]) attr = Map.insert k attr
+recOverAttr (k:xs) attr = Map.alter (fmap ((Le.over ifkttable ((fmap ((KV . recOverAttr xs attr . _kvvalues )))))))  k
 
 recOverMAttr' :: [Set (Rel Key)] -> [[Set (Rel Key)]] -> Map (Set (Rel Key)) (TB Key b ) ->Map (Set (Rel Key)) (TB  Key b )
 recOverMAttr' tag tar  m =   foldr go m tar
   where
-    go (k:[]) = Map.alter (fmap ((Le.over ifkttable (fmap (fmap ((KV . recOverAttr tag  recv . _kvvalues ))))) )) k
+    go (k:[]) = Map.alter (fmap ((Le.over ifkttable ((fmap ((KV . recOverAttr tag  recv . _kvvalues ))))) )) k
       where recv = gt tag m
-    go (k:xs) = Map.alter (fmap ((Le.over ifkttable (fmap (fmap ((KV . go xs . _kvvalues )))) ))) k
+    go (k:xs) = Map.alter (fmap ((Le.over ifkttable ((fmap ((KV . go xs . _kvvalues )))) ))) k
     gt (k:[]) = justError "no key" . Map.lookup k
-    gt (k:xs) = gt xs . _kvvalues . snd . head .F.toList. _fkttable . justError "no key" . Map.lookup k
+    gt (k:xs) = gt xs . _kvvalues . head .F.toList. _fkttable . justError "no key" . Map.lookup k
 
 replaceRecRel :: Map (Set (Rel Key)) (TB  Key b ) -> [MutRec [Set (Rel Key) ]] -> Map (Set (Rel Key)) (TB  Key b )
 replaceRecRel = foldr (\(MutRec l) v  -> foldr (\a -> recOverMAttr' a l )   v l)
@@ -697,24 +676,25 @@ unOptionalAttr (FKT i  l (LeftTB1 j)  ) = liftA2 (\i j -> FKT i  l j) (traverseK
 
 
 tbUn :: Ord k =>   Set k -> TB3  k a ->   KV  k a
-tbUn un (TB1 (kv,item)) =  (\kv ->  (\(KV item)->  KV $ Map.filterWithKey (\k _ -> pred kv k ) $ item) item ) un
+tbUn un (TB1 (item)) =  (\kv ->  (\(KV item)->  KV $ Map.filterWithKey (\k _ -> pred kv k ) $ item) item ) un
   where pred kv k = (S.isSubsetOf (S.map _relOrigin k) kv )
 
 
-getPK (TB1 i) = getPKM i
+getPK m (TB1 i) = getPKM m i
 
-getPKM (m, k) = Map.fromList $  getPKL (m,k)
+getPKM :: Ord k => KVMetadata k -> KV k a -> Map k (FTB a)
+getPKM m = Map.fromList .  getPKL m
 
-getPKL (m, k) = concat $ F.toList (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (k))))
+getPKL m k = concat $ F.toList (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (k))))
 
-getAttr'  (m, k) =  L.sortBy (comparing fst) (concat (fmap aattr $ F.toList $  (  _kvvalues k)))
+getAttr'   k =  L.sortBy (comparing fst) (concat (fmap aattr $ F.toList $  (  _kvvalues k)))
 
-getPKAttr (m, k) = (concat . F.toList . (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m))   )) k
+getPKAttr m k = (concat . F.toList . (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m))   )) k
 
-getAttr (m, k) = concat . F.toList  $ k
+getAttr  k = concat . F.toList  $ k
 
 
-getUn un (m, k) =   concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k) un ) (  _kvvalues (k))))
+getUn un k =   concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k) un ) (  _kvvalues k)))
 
 
 inlineName (Primitive _ (RecordPrim (s, i)) ) = (s,i)

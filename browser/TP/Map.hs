@@ -93,10 +93,11 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
     map <-UI.div
 
     (eselg,hselg) <- ui$newEvent
-    start <- ui$stepper Nothing (fmap snd <$> (filterE (maybe False (not .fst)) eselg))
-    startD <- UI.div #  sink text (maybe "" (show . G.getIndex) <$> start)
-    end <- ui$stepper Nothing (fmap snd <$> filterE (maybe False fst ) eselg)
-    endD <- UI.div #  sink text (maybe "" (show . G.getIndex) <$> end)
+    start <- ui$stepper Nothing ((filterE (maybe False (not .snd.fst)) eselg))
+    let render = maybe "" (\((t,_),i) -> show $ G.getIndex (tableMeta t) i)
+    startD <- UI.div #  sink text (render <$> start)
+    end <- ui$stepper Nothing (filterE (maybe False (snd.fst) ) eselg)
+    endD <- UI.div #  sink text (render <$> end)
 
     (positionLocal,h) <- ui $ newEvent
     let positionE = unionWith const (rumors prepositionT) positionLocal
@@ -126,12 +127,13 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
                 fieldKey (TB1 (SText v))=  v
             reftb <- ui $ refTables' inf (lookTable inf tname) (Just 0) pred
             let v = reftb ^. _3
-            let evsel = (\j ((tev,pk,_),s) -> fmap (s,) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
+            let evsel = (\j ((tev,pk,_),s) -> fmap ((tev,s),) $ join $ if tev == tb then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (first (readPK inf . T.pack) ) evc
             onEvent evsel (liftIO . hselg)
 
             tdib <- ui $ stepper Nothing (fmap snd <$> evsel)
             let tdi = tidings tdib (fmap snd <$> evsel)
-            (el,_) <- crudUITable inf  reftb [] [] (allRec' (tableMap inf) $ lookTable inf tname)  tdi
+                table = lookTable inf tname
+            (el,_) <- crudUITable inf  table reftb [] [] (allRec' (tableMap inf) table)  tdi
 
             traverseUI (\i ->
               createLayers innermap tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   i)) (filtering tb v)

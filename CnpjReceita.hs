@@ -72,9 +72,9 @@ instance DecodeTable HTTP.Cookie where
     <*> (unboolean . unattr "cookie_persistent" )
     <*> (unboolean . unattr "cookie_host_only" )
     <*> (unboolean . unattr "cookie_secure_only" )
-    <*> (unboolean . unattr "cookie_http_only" )) . snd
+    <*> (unboolean . unattr "cookie_http_only" ))
   encodeT (HTTP.Cookie{..})
-    = (kvempty ,foldl mappend mempty [
+    = (foldl mappend mempty [
         attr "cookie_name"  (binary cookie_name ),
         attr "cookie_value" (binary cookie_value),
         attr "cookie_expiry_time" (timestamp cookie_expiry_time),

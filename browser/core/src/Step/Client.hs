@@ -164,12 +164,12 @@ idxR  l =
 
 indexAttr l t
   = do
-    (m,v) <- t
+    v <- t
     i <-   M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)). _kvvalues $ v
     return  i
 
 
-indexTB1 l (m,v)
+indexTB1 l v
   = do
     i <- M.lookup (S.fromList (iprodRef <$> l)) . M.mapKeys (S.map (keyString. _relOrigin)) . _kvvalues $ v
     case i  of
@@ -182,7 +182,7 @@ indexTB1 l (m,v)
 
 firstCI f = (firstTB f)
 
-indexTableInline l t@(m,v)
+indexTableInline l t@(v)
   = do
     let finder = fmap (firstCI keyString ) . M.lookup (S.fromList $ fmap (Inline .iprodRef) l) . M.mapKeys (S.map (fmap keyString))
     i <- finder (_kvvalues $ v )
@@ -191,7 +191,7 @@ indexTableInline l t@(m,v)
       i ->  errorWithStackTrace (show i)
 
 
-indexTableAttr l t@(m,v)
+indexTableAttr l t@(v)
   = do
     let finder = fmap (firstCI keyString ) . M.lookup (S.fromList $ fmap (Inline .iprodRef) l) . M.mapKeys (S.map (fmap keyString))
     i <- finder (_kvvalues $ v )
@@ -200,7 +200,7 @@ indexTableAttr l t@(m,v)
          i ->  errorWithStackTrace (show i)
 
 
-indexTable l t@(m,v)
+indexTable l t@(v)
   = do
     let finder = L.find (L.any (==fmap iprodRef l). L.permutations .fmap _relOrigin. keyattr. firstCI keyString )
     i <- finder (toList $ _kvvalues $ v )

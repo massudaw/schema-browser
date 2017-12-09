@@ -33,7 +33,6 @@ import Crea
 import  GHC.Stack
 import PandocRenderer
 import Gpx
-import OAuthClient
 import Types
 import Types.Index
 import Types.Patch
@@ -411,7 +410,7 @@ siapi3CheckApproval = FPlugins pname tname  $ DiffPurePlugin url
       let app = L.find (\(TB1 (SText x),_) -> "APROVADO" ==   x) v
           tt = L.find ((\(TB1 (SText x)) -> T.isInfixOf "ENTREGUE AO SOLICITANTE APROVADO"  x).fst) v
       row <- act (const ask )-< ()
-      returnA -< fmap ((\(TB1 (STime (STimestamp t))) -> (\v-> (kvempty,maybe (Idex mempty) getIndex row ,[PAttr "aproval_date" v])) .upperPatch.(,True) . Finite $ PAtom $ STime $ STimestamp t) .snd) (liftA2 const app tt)
+      returnA -< fmap ((\(TB1 (STime (STimestamp t))) -> (\v-> ([PAttr "aproval_date" v])) .upperPatch.(,True) . Finite $ PAtom $ STime $ STimestamp t) .snd) (liftA2 const app tt)
 
 siapi3Inspection = FPlugins pname tname  $ IOPlugin url
   where
@@ -478,7 +477,7 @@ siapi3Plugin  = FPlugins pname tname  $ DiffIOPlugin url
             iat bv = (IT "andamentos"
                            (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ reverse $ fmap convertAndamento bv))
         returnA -< (\i -> PFK [Rel "protocolo" Equals "protocolo" ,Rel "ano" Equals "ano"] []   (POpt $ Just $ PAtom $patch $ i)) <$> join (ao <$> b)) -< cpf
-      returnA -< Just (kvempty,Idex [],maybeToList v)
+      returnA -< Just (maybeToList v)
 
 bool = TB1 . SBoolean
 num = TB1 . SNumeric
@@ -509,7 +508,7 @@ gerarParcelas= FPlugins "Gerar Parcelas" tname  $ DiffIOPlugin url
                     total = maybe 0 length parcelas
                   let pagamento = PFK [Rel "pagamentos" Equals "id_payment"] [] (patch $ LeftTB1 $ fmap ArrayTB1 $ ( liftA2 (Non.zipWith (\valorParcela ix -> TB1 $ tblist [attrT ("payment_description",TB1 $ SText $ T.pack $ "Parcela (" <> show (ix+1) <> "/" <> show total <>")" ),attrT ("price",valorParcela) ])) parcelas (Just $ Non.fromList [0 .. total])))
                   returnA -<  pagamento ) -< (par)
-              returnA -<  Just $ (kvempty,maybe (Idex []) getIndex row ,[pg ])
+              returnA -<  Just $ [pg ]
 
 pagamentoArr =  itR "pagamento" (proc descontado -> do
               pinicio <- idxR "inicio"-< ()
@@ -658,7 +657,7 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
         refs <- atRA "ofx" (idxK "file_name") -< ()
         let ix = length refs
         pk <- act (const ask )-< ()
-        returnA -<   Just (kvempty,Idex (pure (LeftTB1 $ Just idx)), [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) (POpt $ Just $ PIdx ix $ Just $ PAtom $ (kvempty,Idex (pure fname) ,patch account: [PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
+        returnA -<   Just ([PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) (POpt $ Just $ PIdx ix $ Just $ PAtom $ (patch account: [PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)])
 
 
 importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
@@ -677,11 +676,11 @@ importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
 
       b <- act (\(TB1 (SBinary i )) -> liftIO . gpx $ BS.unpack i ) -< fn
       let ao :: Index (TB2 Text Showable)
-          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom . (mempty,Idex [int ix],) . fmap patch $ (Attr "id_run"  r : Attr "id_sample" (int ix) : a)) <$>  join (nonEmpty . zip [0..] <$> b)
+          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom .  fmap patch $ (Attr "id_run"  r : Attr "id_sample" (int ix) : a)) <$>  join (nonEmpty . zip [0..] <$> b)
           ref :: [TB Text Showable]
           ref = [uncurry Attr  $ ("samples",ArrayTB1 $ Non.fromList $ fmap int   [0.. length (justError "no b" b)])]
           tbst :: (Maybe (TBIdx Text (Showable)))
-          tbst =  Just $ (mempty , Idex [r],  [PFK  [Rel "samples" Equals "id_sample",Rel "run" Equals "id_run"] (fmap patch ref) ao])
+          tbst =  Just $ (  [PFK  [Rel "samples" Equals "id_sample",Rel "run" Equals "id_run"] (fmap patch ref) ao])
       returnA -< tbst
 
 
@@ -712,11 +711,11 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
 
       b <- act ofx  -< (,) fn i
       let ao :: Index (TB2 Text Showable)
-          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom $ (mempty,Idex (maybeToList . join . fmap unSSerial . fmap _tbattr .L.find (([Inline "fitid"]==). keyattri ) $ (fmap create a :: [TB Text Showable]) ), a)) <$>  join (nonEmpty . zip [0..] . fmap (patch ((fromJust (findFK ["account" ] (fromJust row )))) :)<$> b)
+          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom $ ( a)) <$>  join (nonEmpty . zip [0..] . fmap (patch ((fromJust (findFK ["account" ] (fromJust row )))) :)<$> b)
           ref :: [TB Text Showable]
           ref = [Attr  "statements" . LeftTB1 $ fmap (ArrayTB1 . Non.fromList ) .  join $  nonEmpty . catMaybes . fmap (\i ->   join . fmap unSSerial . fmap _tbattr .L.find (([Inline "fitid"]==). keyattri) $ (fmap create  i :: [TB  Text Showable ]) )<$> b]
           tbst :: (Maybe (TBIdx Text (Showable)))
-          tbst = Just $ (mempty , Idex [fn],  [PFK  [Rel "statements" Equals "fitid",Rel "account" Equals "account"] (fmap patch ref) ao])
+          tbst = Just $ (  [PFK  [Rel "statements" Equals "fitid",Rel "account" Equals "account"] (fmap patch ref) ao])
 
       returnA -< tbst
     ofx (TB1 (SText i), ((LeftTB1 (Just (TB1 (SBinary r) )))))
@@ -859,4 +858,4 @@ queryArtAndamento = FPlugins pname tname $  IOPlugin url
       returnA -< artInp v
 
 plugList :: [PrePlugins]
-plugList =  {-[siapi2Hack] ---} [FPlugins "History Patch" "history" (StatefullPlugin [(([("showpatch", atPrim PText )],[]),PurePlugin readHistory)]) , subdivision,retencaoServicos, designDeposito,areaDesign,oauthpoller,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,siapi3Plugin ,-}siapi3Inspection,siapi2Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , checkPrefeituraXML,notaPrefeitura,notaPrefeituraXML,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]
+plugList =  {-[siapi2Hack] ---} [ subdivision,retencaoServicos, designDeposito,areaDesign,createEmail,renderEmail ,lplugOrcamento ,{- lplugContract ,lplugReport,siapi3Plugin ,-}siapi3Inspection,siapi2Plugin ,siapi3CheckApproval, importargpx ,importarofx,gerarPagamentos ,gerarParcelas, pagamentoServico , checkPrefeituraXML,notaPrefeitura,notaPrefeituraXML,queryArtCrea , queryArtBoletoCrea , queryCEPBoundary,queryGeocodeBoundary,queryCPFStatefull , queryCNPJStatefull, queryArtAndamento,germinacao,preparoInsumo,fetchofx]

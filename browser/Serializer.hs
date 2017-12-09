@@ -151,11 +151,11 @@ instance (Ord a, a ~ Index a ,Show a, Patch a, B.Binary a) =>
     , Attr "modification_id" (opt int id)
     ]
     where
-      (_, Idex pidx , _) =
+      (Idex pidx , _) =
         case ip of
-          PatchRow i -> i
-          CreateRow i -> patch i
-          DropRow i -> patch i
+          PatchRow (p,i) -> (p,i)
+          CreateRow i -> (Idex mempty,patch i)
+          DropRow i -> (Idex mempty,patch i)
       mod_key :: Non.NonEmpty (Binary (FTB a))
       mod_key = Non.fromList $ Binary . fmap create <$> pidx
 

@@ -88,16 +88,16 @@ cinterval i j = ER.Finite i Interval.<=..<= ER.Finite j
 
 
 getUnique :: Ord k => [k] -> TBData k a -> TBIndex  a
-getUnique ks (m,v) = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn (Set.fromList ks) $ (m,v)
+getUnique ks v = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` ks).fst)) .  getUn (Set.fromList ks) $ v
 
-getIndex :: Ord k => TBData k a -> TBIndex  a
-getIndex (m,v) = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` (_kvpk m)).fst)) .  getPKL $ (m,v)
+getIndex :: Ord k => KVMetadata k -> TBData k a -> TBIndex  a
+getIndex m v = Idex .  fmap snd . L.sortBy (comparing ((`L.elemIndex` (_kvpk m)).fst)) .  getPKL m $ v
 
-getBounds :: (Ord k, Ord a) => [TBData k a] -> Maybe [Interval (FTB a)]
-getBounds [] = Nothing
-getBounds ls = Just $ zipWith  (\i j -> (ER.Finite i,True) `interval` (ER.Finite j,False)) l u
-  where Idex l = getIndex (head ls)
-        Idex u = getIndex (last ls)
+getBounds :: (Ord k, Ord a) => KVMetadata k -> [TBData k a] -> Maybe [Interval (FTB a)]
+getBounds m [] = Nothing
+getBounds m ls = Just $ zipWith  (\i j -> (ER.Finite i,True) `interval` (ER.Finite j,False)) l u
+  where Idex l = getIndex m (head ls)
+        Idex u = getIndex m (last ls)
 
 notOptionalM :: TBIndex  a -> Maybe (TBIndex  a)
 notOptionalM (Idex m) = fmap Idex   . traverse unSOptional'  $ m
@@ -106,8 +106,8 @@ notOptionalM (Idex m) = fmap Idex   . traverse unSOptional'  $ m
 notOptional :: TBIndex  a -> TBIndex  a
 notOptional m = justError "cant be empty " . notOptionalM $ m
 
-tbpred :: Ord k => TBData k a -> TBIndex a
-tbpred = notOptional . getIndex
+tbpred :: Ord k => KVMetadata k -> TBData k a -> TBIndex a
+tbpred m = notOptional . getIndex m
 
 instance (Show a,Affine a) => Affine (ER.Extended a ) where
   type Tangent (ER.Extended a) = ER.Extended (Tangent  a)

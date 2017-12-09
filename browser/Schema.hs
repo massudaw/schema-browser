@@ -213,7 +213,7 @@ keyTablesInit schemaRef  (schema,user) authMap pluglist = do
 
        liftIO $print (schema,keyMap)
        var <- liftIO$ atomically $ modifyTVar (globalRef schemaVar  ) (HM.insert schema inf )
-       addStats inf
+       -- addStats inf
          {-
        traverse (\ req -> do
          r <- liftIO$ forkIO $ forever $
@@ -280,7 +280,7 @@ catchPluginException inf pname tname  idx i = do
   (Right <$> i) `catch` (\e  -> do
                 t <- getCurrentTime
                 print (t,e :: SomeException)
-                id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (\"user\",\"schema\",\"table\",\"plugin\",exception,data_index2,instant) values(?,?,?,?,?,? :: metadata.key_value[] ,?) returning id" (fst $ username inf , schemaId inf,pname,tname,Binary (B.encode $ show (e :: SomeException)) ,V.fromList (  (fmap (TBRecord2 "metadata.key_value" . second (Binary . B.encode) . first keyValue) idx) ) , t )
+                id  <- query (rootconn inf) "INSERT INTO metadata.plugin_exception (\"user\",\"schema\",\"table\",\"plugin\",exception,data_index2,instant) values(?,?,?,?,?,? :: metadata.key_value[] ,?) returning id" (fst $ username inf , schemaId inf,pname,tname,Binary (B.encode $ show (e :: SomeException)) ,V.fromList (  (fmap (TBRecord2  . second (Binary . B.encode) . first keyValue) idx) ) , t )
                 return (Left (unOnly $ head $id)))
 
 
@@ -289,15 +289,15 @@ logTableModification
      InformationSchema
      -> TableModification (RowPatch Key Showable)  -> IO (TableModification (RowPatch Key Showable))
 logTableModification inf (TableModification Nothing ts u table ip) = do
-  let i = patchNoRef $ case ip of
+  let i = fmap patchNoRef $ case ip of
             PatchRow i -> i
-            DropRow i -> patch i
-            CreateRow i -> patch i
+            DropRow i -> (G.Idex mempty,patch i)
+            CreateRow i -> (G.Idex mempty,patch i)
   time <- getCurrentTime
   env <- lookupEnv "ROOT"
   let mod = modificationEnv env
   let ltime =  utcToLocalTime utc $ time
-      (met,G.Idex pidx,pdata) = firstPatch keyValue  i
+      (G.Idex pidx,pdata) = firstPatch keyValue  <$> i
 
   [Only id] <- liftIO $ query (rootconn inf) (fromString $ T.unpack $ "INSERT INTO metadata." <> mod <> " (\"user_name\",modification_time,\"table_name\",data_index,modification_data  ,\"schema_name\") VALUES (?,?,?,?::bytea[],? ,?) returning modification_id " ) (snd $ username inf ,ltime,tableName table, V.fromList $ (  fmap  (Binary . B.encode)   pidx ) , Binary  . B.encode $firstPatchRow keyValue ip, schemaName inf)
   let modt = lookTable (meta inf)  mod
@@ -335,7 +335,7 @@ lookupAccess inf l f c = join $ fmap (indexField (IProd  notNull (lookKey inf (f
 
 idex inf t v = G.Idex $  fmap snd $ L.sortBy (comparing ((`L.elemIndex` (rawPK $ lookTable inf t)).fst)) $ first (lookKey inf t  ) <$> v
 
-
+{-
 addStats schema = do
   let metaschema = meta schema
   varmap <- liftIO$ atomically $ readTVar ( mvarMap schema)
@@ -352,7 +352,7 @@ addStats schema = do
       putPatch (patchVar $ iniRef dbpol) . pure  .PatchRow $ i
       )) (M.toList  varmap)
   return  schema
-
+-}
 
 recoverFields :: InformationSchema -> FKey (KType (Prim KPrim  (Text,Text))) -> FKey (KType (Prim PGType PGRecord))
 recoverFields inf v = map

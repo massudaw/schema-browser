@@ -42,7 +42,6 @@ import qualified Data.List as L
 import qualified Data.ByteString.Char8 as BS
 
 import RuntimeTypes
-import OAuthClient
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (get,delete,apply)
 import qualified Data.ExtendedReal as ER
@@ -75,7 +74,7 @@ addClientLogin inf =  transactionNoLog inf $ do
     now <- liftIO$ getCurrentTime
     let
       obj = clientCreate inf now
-    i <-  insertFrom obj
+    i <-  insertFrom (lookMeta inf  "clients" ) obj
     tell (maybeToList i)
     return i
 
@@ -88,10 +87,10 @@ deleteClientLogin inf i= do
   let
     pk = Attr (lookKey inf "clients" "id") (TB1 (SNumeric i))
     old = justError ("no row " <> show (attrIdex [pk]) ) $ G.lookup (attrIdex [pk]) tb
-    pt = (tableMeta (lookTable inf "clients") , G.getIndex old,[PAttr (lookKey inf "clients" "up_time") ( PInter False ((ER.Finite $ PAtom (STime $ STimestamp (now)) , False)))])
+    pt = ( G.getIndex (lookMeta inf "clients")old,[PAttr (lookKey inf "clients" "up_time") ( PInter False ((ER.Finite $ PAtom (STime $ STimestamp (now)) , False)))])
 
   transactionNoLog inf $ do
-    v <- updateFrom  old pt
+    v <- updateFrom (lookMeta inf "clients") old (fst pt) (snd pt)
     tell (maybeToList v)
     return v
 
@@ -99,7 +98,7 @@ addServer inf =  do
     now <- liftIO$ getCurrentTime
     let
       obj = serverCreate inf now
-    transactionNoLog inf $ insertFrom obj
+    transactionNoLog inf $ insertFrom (lookMeta inf "server") obj
 
 idexToPred t (G.Idex  i) = head $ (\(k,a)-> (keyRef k,Left (a,Contains))) <$>  zip (rawPK t) (F.toList i)
 
@@ -110,40 +109,40 @@ deleteServer inf (TableModification _ _ _ _ (CreateRow o)) = do
     t= lookTable inf "clients"
     pk = Attr (lookKey inf "clients" "up_time")(TB1 (STime $ STimestamp (now)))
     oldClis =  L.filter (G.indexPred (idexToPred t $ attrIdex [pk])) (G.toList tb)
-    pt old = (tableMeta (lookTable inf "clients") , G.getIndex old,[PAttr (lookKey inf "clients" "up_time") ( PInter False ((ER.Finite $ PAtom (STime $ STimestamp (now)) , False)))])
+    pt old = (G.getIndex (lookMeta inf "clients")old,[PAttr (lookKey inf "clients" "up_time") ( PInter False ((ER.Finite $ PAtom (STime $ STimestamp (now)) , False)))])
 
   mapM (\(old) -> transactionNoLog inf $ do
-    v <- updateFrom   old (pt old)
+    v <- uncurry (updateFrom (lookMeta inf "clients") old) (pt old)
     tell (maybeToList v)
     return v) oldClis
-  let pt = (tableMeta (lookTable inf "server") , G.getIndex o,[PAttr (lookKey inf "server" "up_time") (PInter False ((ER.Finite $ PAtom (STime $ STimestamp (now)) , False)))])
-  transactionNoLog inf $ updateFrom o pt
+  let pt = (G.getIndex (tableMeta $lookTable inf "server")o,[PAttr (lookKey inf "server" "up_time") (PInter False ((ER.Finite $ PAtom (STime $ STimestamp (now)) , False)))])
+  transactionNoLog inf $ uncurry (updateFrom (lookMeta inf "server")o )pt
 
-removeTable :: Int -> UTCTime -> Table -> Int -> Int ->  TBIdx Text Showable
-removeTable idClient now table  six tix = (mempty,G.Idex [num idClient],[PInline "selection" (POpt $ Just $ PIdx six (Just $ PAtom $
-        (mempty,mempty,[PInline "selection" (POpt $ Just $ PIdx tix (Just $ PAtom
-                        (mempty,mempty, [ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))])))
+removeTable :: Int -> UTCTime -> Table -> Int -> Int ->  (TBIndex Showable,TBIdx Text Showable)
+removeTable idClient now table  six tix = atClient idClient ([PInline "selection" (POpt $ Just $ PIdx six (Just $ PAtom $
+        ([PInline "selection" (POpt $ Just $ PIdx tix (Just $ PAtom
+                        ([ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))])))
         ])))])
 
-addTable :: Int -> UTCTime -> Table -> Int -> Int ->  TBIdx Text Showable
+addTable :: Int -> UTCTime -> Table -> Int -> Int ->  (TBIndex Showable,TBIdx Text Showable)
 addTable idClient now table  six tix
   = atClient idClient [PInline "selection" (POpt$Just $ PIdx six $ Just$ PAtom
-     (mempty,mempty,[PInline "selection" (POpt $ Just $ PIdx tix (Just $ patch$
+     ([PInline "selection" (POpt $ Just $ PIdx tix (Just $ patch$
       TB1 $ encodeT ( ClientTableSelection (tableName table) (startTime now) [])))]))]
 
-atClient idClient =  (mempty,G.Idex [num idClient],)
+atClient idClient =  (G.Idex [num idClient],)
 
 removeRow idClient now six tix rix
   =  atClient idClient [PInline "selection" (POpt$Just $ PIdx six $ Just$ PAtom
-        (mempty,mempty,[PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
-          (mempty,mempty,[PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ PAtom(
-            (mempty,mempty,[ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))]))]))]))]
+        ([PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
+          ([PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ PAtom(
+            ([ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))]))]))]))]
 
 
 addRow idClient now tdi six tix rix
-  =  (mempty,G.Idex [num idClient],[PInline "selection" (POpt$Just $ PIdx six $ Just$ PAtom
-       (mempty,mempty,[PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
-          (mempty,mempty,[PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ PAtom $ patch(
+  =  atClient idClient ([PInline "selection" (POpt$Just $ PIdx six $ Just$ PAtom
+       ([PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
+          ([PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ PAtom $ patch(
               encodeT $ createRow now tdi)]))]))])
 
 
@@ -213,9 +212,9 @@ data ClientRowSelection
     , data_index :: Non.NonEmpty (Text ,FTB Showable)
     }
 
-addSchema :: Int -> UTCTime -> InformationSchema -> Int ->  TBIdx Text Showable
+addSchema :: Int -> UTCTime -> InformationSchema -> Int ->  (TBIndex Showable,TBIdx Text Showable)
 addSchema idClient now inf tix
-    = (mempty,G.Idex [num idClient],[PInline "selection" (POpt $ Just $ PIdx tix (Just $ patch$
+  =atClient idClient  ([PInline "selection" (POpt $ Just $ PIdx tix (Just $ patch$
       TB1 $ encodeT ( ClientSchemaSelection (schemaId inf ) (startTime now) [])))])
 
 
@@ -225,22 +224,22 @@ getClient metainf clientId inf ccli = G.lookup (idex metainf "clients"  [("id",n
 
 deleteClient metainf clientId = do
   dbmeta  <-  prerefTable metainf (lookTable metainf "clients")
-  putPatch (patchVar dbmeta) [PatchRow (tableMeta (lookTable metainf "clients") , idex metainf "clients" [("id",num clientId)],[])]
+  putPatch (patchVar dbmeta) [PatchRow ( idex metainf "clients" [("id",num clientId)],[])]
 
 editClient metainf inf dbmeta ccli  table tdi clientId now ix
-  | fmap tableName table == Just "client" && schemaName inf == "metadata" = return ()
+  | fmap tableName table == Just "clients" && schemaName inf == "metadata" = return ()
   | otherwise = maybe (return ()) (\table -> do
     let
-      lrow = PatchRow $ liftPatch metainf (tableName table) $ addSchema  clientId now inf 0
+      lrow = PatchRow $ liftPatch metainf (tableName table) <$> addSchema  clientId now inf 0
     putPatch (patchVar $ iniRef $ dbmeta ) [lrow]) table
 
 
 addClient clientId metainf inf table row =  do
     now <- liftIO getCurrentTime
     let
-      tdi = fmap (M.toList .getPKM) $ join $ (\ t -> fmap (tblist' t ) .  traverse ((\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName t))  ). F.toList) <$>  table <*> row
+      tdi = fmap (M.toList ) $ join $ (\t -> fmap (getPKM (tableMeta t) . tblist'  ) .  traverse ((\(k,v) -> fmap (Attr k) . readType (keyType $ k) . T.unpack  $ v).  first (lookKey inf (tableName t))  ). F.toList) <$>  table <*> row
     traverse (\table -> do
-      let new = liftPatch metainf "clients" $ addTable clientId now table  0 0
+      let new = liftPatch metainf "clients" <$> addTable clientId now table  0 0
       dbmeta  <- prerefTable metainf (lookTable metainf "clients")
       putPatch (patchVar $dbmeta ) [PatchRow $new] ) table
     (_,_,clientState,_,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl (keyRef (lookKey (meta inf) "clients" "id") , Left (num clientId,Equals))]))
@@ -299,8 +298,8 @@ chooserTable inf bset cliTid cli = do
     let
     ui$do
       now <- liftIO$ getCurrentTime
-      let cpatch = liftPatch (meta inf) "clients" $ addTable   (wId w) now table 0 ix
-          dpatch now = liftPatch (meta inf) "clients" $ removeTable  (wId w) now table 0 ix
+      let cpatch = liftPatch (meta inf) "clients" <$> addTable   (wId w) now table 0 ix
+          dpatch now = liftPatch (meta inf) "clients" <$> removeTable  (wId w) now table 0 ix
       ref <- prerefTable (meta inf ) (lookTable (meta inf ) "clients")
       putPatch (patchVar ref) [PatchRow cpatch]
       registerDynamic(do
@@ -362,13 +361,13 @@ viewerKey inf table tix cli cliTid = do
   v <- ui $ currentValue (facts tdi)
   tds <-  mdo
     let
-      updatedValue = (\i j -> const . join $ flip G.lookup j  . G.getIndex  <$> i )<$> facts tds <@> rumors vpt
+      updatedValue = (\i j -> const . join $ flip G.lookup j  . G.getIndex  (tableMeta table)<$> i )<$> facts tds <@> rumors vpt
       selection = const <$> rumors (triding itemList)
     tds <- ui $ accumT  v (unionWith (.) selection  updatedValue)
     ui $ cacheTidings tds
 
-  (cru,pretdi) <- crudUITable inf reftb [] [] (allRec' (tableMap inf) table) tds
-  let pktds = fmap getPKM <$> tds
+  (cru,pretdi) <- crudUITable inf table reftb [] [] (allRec' (tableMap inf) table) tds
+  let pktds = fmap (getPKM (tableMeta table))<$> tds
   dbmeta  <- ui $ prerefTable (meta inf)(lookTable (meta inf ) "clients")
   w  <- askWindow
   let diffpk = diffEvent (facts pktds ) (rumors pktds)
@@ -376,15 +375,15 @@ viewerKey inf table tix cli cliTid = do
   onEvent ((,)<$> ixpk <@>diffpk) (\(ix,v)->
     traverse (traverse (\sel -> do
       now <- liftIO$ getCurrentTime
-      let p =liftPatch (meta inf) "clients" $ addRow  (wId w) now  sel  0 tix ix
+      let p =liftPatch (meta inf) "clients" <$> addRow  (wId w) now  sel  0 tix ix
       putPatch (patchVar dbmeta) [PatchRow p]
       ui $ registerDynamic (do
         now <- liftIO$ getCurrentTime
-        let d =liftPatch (meta inf) "clients" $ removeRow (wId w) now  0 tix ix
+        let d =liftPatch (meta inf) "clients" <$> removeRow (wId w) now  0 tix ix
         putPatch (patchVar dbmeta) [PatchRow d]
             ))) (Non.nonEmpty . M.toList <$> v))
 
-  title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine i  )  <$> facts tds) # set UI.class_ "col-xs-8"
+  title <- UI.div #  sink items (pure . maybe UI.h4 (\i -> UI.h4 # attrLine inf (tableMeta table) i  )  <$> facts tds) # set UI.class_ "col-xs-8"
   insertDiv <- UI.div # set children [title] # set UI.class_ "container-fluid"
   insertDivBody <- UI.div # set children [insertDiv,cru]
   UI.div # set children ([getElement itemList,insertDivBody ] )

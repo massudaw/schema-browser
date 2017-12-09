@@ -36,7 +36,6 @@ import Reactive.Threepenny hiding (apply)
 import qualified Data.List as L
 import qualified Data.ByteString.Char8 as BS
 import RuntimeTypes
-import OAuthClient
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (get, delete, apply)
 import Data.Monoid hiding (Product(..))
@@ -120,11 +119,11 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
 
   let
       -- Table Description
-      lookDescT = (\i table -> lookDesc inf table i)<$> collectionTid translation
+      lookDescT =  flip (lookDesc inf) <$> collectionTid translation
       -- Authorization
       authorize =  (\autho t -> isJust $ G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique t),("grantee",int $ fst $ username inf)]) autho)  <$> collectionTid authorization
       -- Text Filter
-      filterLabel = (\j d -> (\i -> T.isInfixOf (T.toLower j) (T.toLower  $ d i)))<$> filterInpT <*> lookDescT
+      filterLabel = (\j d i -> T.isInfixOf (T.toLower j) (T.toLower  $ d i))<$> filterInpT <*> lookDescT
       -- Usage Count
   all <- checkedWidget (pure False)
   bset <- mdo
@@ -163,14 +162,17 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
         where
           field =  G.lookup pk orderMap
           pk = idex (meta inf ) "ordering" [("table",int $ tableUnique  pkset ), ("schema",int $ schemaId inf)]
-    incClick field =  (fst field , G.getIndex field ,[patch $ fmap (+SNumeric 1) usage])
+    incClick field =  (lookMeta (meta inf ) "ordering" ,G.getIndex (lookMeta (meta inf ) "ordering" )field ,[patch $ fmap (+SNumeric 1) usage])
         where
           usage = lookAttr' (meta inf ) "usage"   field
+  sel0 <- ui $ currentValue (facts $ triding bset)
+  let diffSet = ((\j (o,_) -> (M.keysSet j, S.difference (M.keysSet j ) o )) <$> rumors (triding bset))
+  old <- ui $ accumB (M.keysSet sel0,S.empty)  diffSet
   onEvent
-      ((\i j -> fmap incClick . ordRow i <$> M.keys j) <$> facts (collectionTid orddb) <@> rumors (triding bset))
-      (ui . traverse (traverse (\p -> do
-          _ <- transactionNoLog (meta inf ) $ patchFrom  p
-          putPatch (patchVar $  iniRef orddb) [PatchRow p] )))
+      ((\i j d -> fmap incClick . ordRow i <$> F.toList (snd (d j))) <$> facts (collectionTid orddb) <*> old <@> diffSet)
+      (ui . traverse (traverse (\(m,pk,p) -> do
+        _ <- transactionNoLog (meta inf ) $ patchFrom m pk p
+        putPatch (patchVar $  iniRef orddb) [PatchRow (pk,p)] )))
 
   element bset # set UI.style [("overflow","auto"),("height","99%")]
   header <- UI.div # set children [getElement all,filterInp] # set UI.style [("display","inline-flex")]
@@ -188,7 +190,7 @@ instance Ord a => Ord (AscDesc a) where
 
 
 sorting' :: Ord k=> [(k ,Bool)] -> [TBData k Showable]-> [TBData k Showable]
-sorting' ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i),e) -> (ix,if i then DescW e  else AscW e) ) . F.toList .M.intersectionWith (,) (M.fromList (zipWith (\i (k,v) -> (k ,(i,v))) [0::Int ..] ss)) . M.fromList . concat . fmap aattr  . F.toList . _kvvalues . snd )  )
+sorting' ss  =  L.sortBy (comparing   (L.sortBy (comparing fst) . fmap (\((ix,i),e) -> (ix,if i then DescW e  else AscW e) ) . F.toList .M.intersectionWith (,) (M.fromList (zipWith (\i (k,v) -> (k ,(i,v))) [0::Int ..] ss)) . M.fromList . concat . fmap aattr  . F.toList . _kvvalues )  )
 
 
 selectListUI
@@ -207,7 +209,7 @@ selectListUI inf table itemListEl predicate (vpt,_,gist,sgist,_) constr tdi = do
       filterInpBh <- ui $ stepper "" filterInpE
       wheel <- fmap negate <$> UI.mousewheel itemListEl
       let
-        filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.pack . showFKText
+        filtering i  = T.isInfixOf (T.pack $ toLower <$> i) . T.toLower . T.pack . showFKText inf (tableMeta table)
         filterInpT = tidings filterInpBh filterInpE
         pageSize = 20
         lengthPage fixmap = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
@@ -234,7 +236,7 @@ selectListUI inf table itemListEl predicate (vpt,_,gist,sgist,_) constr tdi = do
 
       -- Select page
       res4 <- ui $ cacheTidings ((\o -> L.take pageSize . L.drop (o*pageSize) ) <$> triding offset <*> res3)
-      lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) <$>    res4 ) (fmap Just <$> tdi) (pure id) ((\i -> maybe id (i$) )<$> showFK)
+      lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) <$>    res4 ) (fmap Just <$> tdi) (pure id) ((\i -> maybe id (i$) )<$> showFK inf (tableMeta table))
       fInp <-  UI.div # set children [filterInp,getElement offset]  # set UI.class_ "row"
       return ( triding lbox ,[fInp,itemListEl])
 
@@ -257,7 +259,7 @@ selector inf table reftb@(vptmeta,vp,vpt,_,var) predicate tdi = mdo
   return (TrivialWidget (join <$> tds )itemSel)
 
 
-showFK = pure (\v j -> j  # set text (showFKText v))
+showFK inf m = pure (\v j -> j  # set text (showFKText inf m v))
 
 offsetField  initT eve  max = offsetFieldFiltered initT eve [max]
 
@@ -295,5 +297,5 @@ offsetFieldFiltered  initT eve maxes = do
   return (TrivialWidget offsetT offparen)
 
 
-attrLine i   = do
-  line ( L.intercalate "," (fmap renderShowable .  allKVRec'  $ i))
+attrLine inf m i   = do
+  line ( L.intercalate "," (fmap renderShowable .  allKVRec' inf m $ i))

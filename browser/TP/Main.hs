@@ -40,7 +40,6 @@ import TP.QueryWidgets
 import Control.Monad.Reader
 import Control.Concurrent
 import System.Environment
-import Network.Google.OAuth2 (OAuth2Tokens(..))
 import Data.Ord
 import Utils
 import Schema
@@ -51,7 +50,6 @@ import qualified Data.List as L
 import qualified Data.ByteString.Char8 as BS
 
 import RuntimeTypes
-import OAuthClient
 import qualified Graphics.UI.Threepenny as UI
 import Graphics.UI.Threepenny.Core hiding (get,delete,apply)
 import Graphics.UI.Threepenny.Internal (wId)
@@ -66,7 +64,6 @@ import Database.PostgreSQL.Simple
 import qualified Data.Map as M
 import qualified Data.HashMap.Strict as HM
 
-import OAuth
 import GHC.Stack
 
 col :: UI Element -> Int -> UI Element
@@ -253,27 +250,10 @@ form td ev =  tidings (facts td ) (facts td <@ ev )
 authMap smvar sargs (user,pass) schemaN =
       case schemaN of
           "code" -> return (NoAuth , codeOps)
-          "gmail" ->  oauth False
-          "tasks" ->  oauth True
           i ->  do
             conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack (user )<> " password=" <> BS.pack (pass ) <> " dbname=" <> (BS.pack $  dbn sargs) <> " " )
             execute_ conn "set bytea_output='hex'"
             return (PostAuth conn, postgresOps)
-    where oauth tag = do
-              user <- justError "no google user" <$> lookupEnv "GOOGLE_USER"
-              metainf <- metaInf smvar
-              ((dbmeta ,_),_) <- runDynamic $ transactionNoLog metainf $ selectFromTable "google_auth" Nothing Nothing [] [(keyRef "username",Left ((txt  $ T.pack user ),Equals) )]
-              let
-                  td :: Tidings (OAuth2Tokens)
-                  td = (\o -> let
-                            token = justError "" . fmap (toOAuth . unTB1 . _fkttable  ) $ L.find ((==["token"]). fmap (keyValue._relOrigin) . keyattr )  $ F.toList (unKV $ snd $ head o )
-                            in token) . G.toList <$> collectionTid dbmeta
-                  toOAuth v = case transToken v of
-                                Just a -> a
-                                i -> errorWithStackTrace ("wrong token" <> show i)
-
-
-              return (OAuthAuth (Just (if tag then "@me" else T.pack user,td )), gmailOps)
 
 loadSchema smvar schemaN user authMap  plugList =  do
     keyTables smvar (schemaN,T.pack $ user) authMap plugList
@@ -394,7 +374,7 @@ testSync  = do
     amap = authMap smvar db ("wesley.massuda@gmail.com", "queijo")
   (inf,fin) <- runDynamic $ keyTables smvar  ("gmail","wesley.massuda@gmail.com") amap []
   let start = "7629481"
-  runDynamic $ transaction inf $ historyLoad
+  -- runDynamic $ transaction inf $ historyLoad
   return ()
 
 testTablePersist s t w = do

@@ -40,9 +40,7 @@ import qualified Data.Text as T
 
 newtype Row = Row (TBData Key Showable)
 instance A.ToJSON Row  where
-  toJSON (Row (_,kv))  = A.toJSON $ M.mapKeys (T.intercalate "," . L.map (keyValue ._relOrigin) . F.toList ) (m)
-    where
-      m = unKV kv
+  toJSON (Row kv)  = A.toJSON $ M.mapKeys (T.intercalate "," . L.map (keyValue ._relOrigin) . F.toList ) (unKV kv)
 
 instance A.ToJSON (Column Key Showable)  where
   toJSON (Attr k v ) =
@@ -51,8 +49,7 @@ instance A.ToJSON (Column Key Showable)  where
       i ->  A.toJSON v
   toJSON (IT k v) = A.toJSON (fmap Row v)
 
-instance A.ToJSON a =>
-         A.ToJSON (FTB a) where
+instance A.ToJSON a => A.ToJSON (FTB a) where
     toJSON (TB1 i) = A.toJSON i
     toJSON (LeftTB1 i) = fromMaybe (A.toJSON ("" :: String)) (A.toJSON <$> i)
     toJSON (ArrayTB1 i) = (A.toJSON $ F.toList i)
@@ -200,16 +197,16 @@ makePos (AtomicPrim (PGeom 2 _ )) [b,a,z] =
     (Interval.Finite $ pos (Position2D (a, b)), True)
 makePos a i = errorWithStackTrace (show (a,i))
 
-writePK :: TBData Key Showable -> FTB Showable -> T.Text
-writePK r efield =
+writePK :: KVMetadata Key -> TBData Key Showable -> FTB Showable -> T.Text
+writePK m r efield =
     (\i ->
-          _kvname (fst r) <> "->" <> i <> "->" <>
+          _kvname m <> "->" <> i <> "->" <>
           T.pack (renderShowable efield)) $
     T.intercalate ",," $
     fmap
         ((\(i,j) ->
                keyValue i <> "=" <> T.pack (renderShowable j))) $
-    M.toList $ getPKM r
+    M.toList $ getPKM  m r
 
 
 readPK :: InformationSchema -> T.Text -> (Table, G.TBIndex Showable, Key)
@@ -229,10 +226,10 @@ readPK inf s = (tb, G.Idex $ fmap snd $ L.sortBy (comparing ((`L.elemIndex` rawP
     pksk = rawPK tb
 makePatch
     :: TimeZone
-    -> ((Table, G.TBIndex Showable, Key), Either (Interval UTCTime) UTCTime)
+    -> ( Key, Either (Interval UTCTime) UTCTime)
     -> TBIdx Key Showable
-makePatch zone ((t,pk,k),a) =
-  (tableMeta t,  pk, PAttr k <$> (typ (keyType k) $ a))
+makePatch zone (k,a) =
+  (PAttr k <$> (typ (keyType k) $ a))
   where
     typ (Primitive l a ) =  ty l
       where

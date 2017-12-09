@@ -89,7 +89,7 @@ poller schmRef authmap db plugs is_test = do
       let plug = L.find ((==pname ). _name .snd ) plugs
           (schema,intervalms ,pname ,pid) = project tb
           indexRow polling = justError (show $ (tbpred tb )) $ G.lookup (tbpred tb) polling
-          tbpred = G.getIndex
+          tbpred = G.getIndex (tableMeta $ lookTable metas "polling")
 
       schm <- atomically $ readTVar schmRef
       (inf ,_)<- runDynamic $ keyTables  schmRef (justLook schema (schemaIdMap schm) , T.pack $ user db) authmap plugs
@@ -120,19 +120,19 @@ poller schmRef authmap db plugs is_test = do
                           let listRes = L.take fetchSize . G.toList $  listResAll
 
                           let evb = filter (\i-> maybe False (G.checkPred i) predFullIn && not (maybe False (G.checkPred i) predFullOut) ) listRes
-                          i <-  liftIO $ mapM (mapM (\inp -> catchPluginException inf (tableUnique (lookTable inf a)) idp (M.toList $ getPKM inp) $ fmap fst $ runDynamic $ transactionLog inf $ do
+                          i <-  liftIO $ mapM (mapM (\inp -> catchPluginException inf (tableUnique (lookTable inf a)) idp (M.toList $ getPKM (tableMeta $ lookTable inf a)inp) $ fmap fst $ runDynamic $ transactionLog inf $ do
                               case elemp of
                                 Right action  -> do
                                   getP <- getFrom (lookTable inf a) inp
                                   ovm  <- fmap (liftTable' inf a) <$> liftIO (action (Just $ mapKey' keyValue (maybe inp (apply inp) getP)))
                                   maybe (return ()) (\ov-> do
-                                         p <- fullDiffEdit inp ov
+                                         p <- fullDiffEdit (tableMeta $ lookTable inf a)inp ov
                                          return ()) ovm
                                 Left action -> do
                                     getP <- getFrom (lookTable inf a) inp
                                     ovm  <- fmap (liftPatch inf a) <$> liftIO (action (Just $ mapKey' keyValue (maybe inp (apply inp) getP)))
                                     maybe (return ()) (\ov-> do
-                                      p <- fullDiffEditInsert inp (apply inp ov)
+                                      p <- fullDiffEditInsert (tableMeta $ lookTable inf a)inp (apply inp ov)
                                       return ()) ovm
                               )
                             ) . L.transpose .  chuncksOf 20 $ evb
@@ -157,12 +157,12 @@ poller schmRef authmap db plugs is_test = do
                               ]
 
                       transactionLog metas  $ do
-                          fktable2 <- loadFKS  (liftTable' metas "polling"  table2)
-                          fullDiffEdit curr fktable2
+                          fktable2 <- loadFKS ( lookTable metas "polling") (liftTable' metas "polling"  table2)
+                          fullDiffEdit ( lookMeta metas "polling")curr fktable2
                       traverse (\t->
                         transactionNoLog metas $ do
-                            fktable <- loadFKS  (liftTable' metas  "polling_log"  t)
-                            fullDiffInsert  (liftTable' metas  "polling_log"  t)) table
+                            fktable <- loadFKS ( lookTable metas "polling_log") (liftTable' metas  "polling_log"  t)
+                            fullDiffInsert  (lookMeta metas "polling_log")(liftTable' metas  "polling_log"  t)) table
                       return ()
 
           pid <- forkIO (void $ do

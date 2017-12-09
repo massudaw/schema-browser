@@ -76,10 +76,10 @@ accountWidgetMeta inf = do
               convField (LeftTB1 i) = concat $   convField <$> maybeToList i
               convField (v) = [("start",toLocalTime $v)]
               convField i = errorWithStackTrace (show i)
-              projf  r efield@(TB1 (SText field)) afield@(TB1 (SText aafield))  = (if (isJust . unSOptional $ attr) then Left else Right) (M.fromList $ convField attr  <> [("id", txt $ writePK r efield   ),("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield ), ("commodity", accattr )] :: M.Map Text (FTB Showable))
+              projf  r efield@(TB1 (SText field)) afield@(TB1 (SText aafield))  = (if (isJust . unSOptional $ attr) then Left else Right) (M.fromList $ convField attr  <> [("id", txt $ writePK (tableMeta table) r efield   ),("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield ), ("commodity", accattr )] :: M.Map Text (FTB Showable))
                     where attr  = attrValue $ lookAttr' inf field r
                           accattr  = attrValue $ lookAttr' inf aafield r
-              proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  zipWith (projf r) ( F.toList efields) (F.toList afields)
+              proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r),)$  zipWith (projf r) ( F.toList efields) (F.toList afields)
               attrValue (Attr k v) = v
            in ((color,table,efields,afields,proj))  ) ( G.toList aMap)
 

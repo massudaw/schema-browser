@@ -8,6 +8,7 @@ import Types hiding (Parser,double)
 import Postgresql.Types
 import Text
 import Postgresql.Printer
+import RuntimeTypes
 import Control.Monad.Trans.Class
 import Control.Monad.RWS
 import Data.Ord
@@ -146,9 +147,8 @@ instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
 instance  TF.ToField (TB Key Showable)  where
   toField (Attr k  i) = TF.toField (keyType k ,i)
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri ) ) $ maybe id (flip mappend) attrs $ (F.toList (_kvvalues $ i) )  ))
-      where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ i))
-  toField (IT (n)  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
+  toField (IT n (TB1 i)) = TF.toField ( TBRecord2 $ L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri )) $  F.toList (_kvvalues $ i)  )
+  toField (IT n  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
   toField e = error (show e)
 
 
@@ -158,18 +158,17 @@ instance  TF.ToField (TB PGKey Showable)  where
           Just (_,b) -> TF.toField (fmap ( (\(AtomicPrim (_,i,_) ) -> i)$head $ F.toList $ keyType k,) $ b i)
           Nothing -> TF.toField (fmap ((\(AtomicPrim (_,i,_) ) -> i) $ head $ F.toList $ keyType k,) i)
   toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT n (TB1 (m,i))) = TF.toField (TBRecord2  (kvMetaFullName  m ) (L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri ) ) $ maybe id (flip mappend) attrs $ (F.toList (_kvvalues $ i) )  ))
-      where attrs = Tra.traverse (\i -> Attr i <$> showableDef (keyType i) ) $  F.toList $ (S.fromList $ _kvattrs  m ) `S.difference` (S.map _relOrigin $ S.unions $ M.keys (_kvvalues $ i))
+  toField (IT n (TB1 i)) = TF.toField  (TBRecord2 $ L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri))  (F.toList (_kvvalues $ i) ))
   toField (IT n  (ArrayTB1 is)) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
   toField e = error (show e)
 
 
 
 instance TR.ToRow a => TF.ToField (TBRecord2 a) where
-  toField (TBRecord2 s l) =  TF.Many   (TF.Plain (fromByteString "ROW(") : L.intercalate [TF.Plain $ fromChar ','] (fmap pure. TR.toRow  $ l) <> [TF.Plain (fromByteString $ ") :: " <>  BS.pack (T.unpack s) )] )
+  toField (TBRecord2 l) =  TF.Many (TF.Plain (fromByteString "ROW(") : L.intercalate [TF.Plain $ fromChar ','] (fmap pure. TR.toRow  $ l) <> [TF.Plain (fromByteString $ ")") ] )
 
 
-data TBRecord2 a = TBRecord2 Text a
+data TBRecord2 a = TBRecord2 a
 
 instance TF.ToField (UnQuoted Showable) where
   toField (UnQuoted (SDouble i )) =  TF.toField i
@@ -284,39 +283,33 @@ unIntercalateAtto l s = go l
     go (e:cs) =  liftA2 (:) e  (s *> go cs)
     go [] = error  "unIntercalateAtto empty list"
 
--- parseAttrJSON i v | traceShow (i,v) False = undefined
-parseAttrJSON (Attr i _ ) v = do
+-- parseAttrJSON inf i v | traceShow (i,v) False = undefined
+parseAttrJSON inf (Attr i _ )  v = do
   let tyun = fromMaybe (keyType i) $ ktypeRec ktypeUnLift (keyType i)
-  s<- lift $ parseShowableJSON   tyun  v
+  s<- parseShowableJSON  parsePrimitiveJSON tyun  v
   return $  Attr i s
-parseAttrJSON (Fun i rel _ )v = do
-  s<- lift $ parseShowableJSON (keyType  i) v
+parseAttrJSON inf (Fun i rel _ )v = do
+  s<- parseShowableJSON parsePrimitiveJSON (keyType  i) v
   return $  (Fun i rel s)
-parseAttrJSON (IT na j) v = do
-  mj <- parseLabeledTableJSON j v
+parseAttrJSON inf (IT na j) v = do
+  mj <- parseShowableJSON  (parseRecordLoad inf) (keyType na) v
   return $ IT  na mj
-parseAttrJSON i v = error (show (i,v))
+parseAttrJSON inf  i v = error (show (i,v))
 
--- Note Because the list has a mempty operation when parsing
--- we have overlap between maybe and list so we allow only nonempty lists
-
-parseLabeledTableJSON (ArrayTB1 (l :| _)) (A.Array a)=
-  ArrayTB1 <$> traverse (parseLabeledTableJSON l ) (Non.fromList . F.toList $a)
--- parseLabeledTableJSON (ArrayTB1 (l :| _)) (A.Null) = fail "no array"
-parseLabeledTableJSON (LeftTB1 (Just l)) A.Null = return $ LeftTB1 Nothing
-parseLabeledTableJSON (LeftTB1 (Just l)) v = fmap LeftTB1 $ fmap Just (parseLabeledTableJSON l v) <|> return (Nothing)
-parseLabeledTableJSON (TB1 l) v = fmap TB1 $ parseRecordJSON  l v
-parseLabeledTableJSON i v= error (show (i,v))
+parseRecordLoad :: InformationSchema -> Prim KPrim (Text,Text) -> A.Value -> JSONParser (FTB (TBData Key Showable))
+parseRecordLoad inf (RecordPrim r) v=
+  fmap TB1 $ parseRecordJSON inf (tableMeta tb) (tableNonRef2 $ allRec' (tableMap inf) tb) v
+  where tb = lookSTable inf r
 
 
-parseRecordJSON :: TBData Key () -> A.Value -> JSONParser (TBData Key Showable)
-parseRecordJSON  (me,m) (A.Object v) = atTable me $ do
+parseRecordJSON :: InformationSchema -> KVMetadata Key -> TBData Key () -> A.Value -> JSONParser (TBData Key Showable)
+parseRecordJSON  inf me m (A.Object v) = atTable me $ do
   let try1 i v = do
         tb <- lkTB i
         return $ justError (" no attr " <> show (i,v)) $ HM.lookup tb  v
 
-  im <- traverse ((\ i -> parseAttrJSON  i =<<  try1 i v))$   _kvvalues m
-  return (me, KV im )
+  im <- traverse ((\ i -> parseAttrJSON  inf i =<<  try1 i v))$   _kvvalues m
+  return $KV im
 
 
 parsePrimJSON :: KPrim -> A.Value -> A.Parser Showable
@@ -371,7 +364,8 @@ parseGeom ix a = case a of
 
 
 
-parseShowableJSON  p@(Primitive l (AtomicPrim i)) v = parseKTypePrim l v
+-- parseShowableJSON i p v | traceShow (p,v)False = undefined
+parseShowableJSON  fun p@(Primitive l i) v = parseKTypePrim l v
   where
     parseKTypePrim (KDelayed :i) (A.Bool b)
       = if b then return (LeftTB1 Nothing)  else fail "no error"
@@ -379,28 +373,33 @@ parseShowableJSON  p@(Primitive l (AtomicPrim i)) v = parseKTypePrim l v
     parseKTypePrim (KOptional :i ) v =
       case v of
         A.Null ->  return $ LeftTB1 Nothing
-        vn -> LeftTB1 . Just  <$>  parseKTypePrim i vn
+        vn -> (LeftTB1 . Just  <$>  parseKTypePrim i vn) <|> return (LeftTB1 Nothing)
     parseKTypePrim  (KArray :i )  (A.Array l )
       =  maybe (fail "parseKTypePrim empty list" ) (fmap (ArrayTB1 . Non.fromList) . mapM (parseKTypePrim i)) (nonEmpty $ F.toList l)
 
     parseKTypePrim (KInterval :l ) (A.String v)
-      = case parseOnly inter (BS.pack $ T.unpack v) of
-            Right i -> return i
-            Left i -> fail i
-      where
-        dec  =  maybe (Left "can't decode interval number " ) (A.parseEither (parseKTypePrim l)) . A.decode . BSL.fromStrict
-        inter = do
-            lb <- (char '[' >> return True ) <|> (char '(' >> return False )
-            i <- dec <$> takeWhile (/=',')
-            char ','
-            j <- dec <$> takeWhile (\i -> i /=']' && i /= ')' )
-            rb <- (char ']' >> return True) <|> (char ')' >> return False )
-            return $ IntervalTB1 $ Interval.interval (either (const ER.NegInf) ER.Finite i,lb) (either (const ER.PosInf ) ER.Finite j,rb)
+      = do
+        env <- ask
+        st <- get
+        let
+          dec  =  maybe (Left "can't decode interval number " ) (A.parseEither (runCodegenT env st . parseKTypePrim l)) . A.decode . BSL.fromStrict
+          inter = do
+              lb <- (char '[' >> return True ) <|> (char '(' >> return False )
+              i <- dec <$> takeWhile (/=',')
+              char ','
+              j <- dec <$> takeWhile (\i -> i /=']' && i /= ')' )
+              rb <- (char ']' >> return True) <|> (char ')' >> return False )
+              return $ IntervalTB1 $ Interval.interval (either (const ER.NegInf) ER.Finite i,lb) (either (const ER.PosInf ) ER.Finite j,rb)
 
-    parseKTypePrim [] v = forw . TB1 <$> ( parsePrimJSON i v)
-        where (forw,_)  =conversion (Primitive [] (AtomicPrim i))
+        case parseOnly inter (BS.pack $ T.unpack v) of
+              Right i -> return i
+              Left i -> fail i
+    parseKTypePrim [] v = fun i v
     parseKTypePrim a b = error $ "no match " ++ show (p,a,b)
 
+parsePrimitiveJSON :: Prim KPrim (Text,Text) -> A.Value -> JSONParser (FTB Showable)
+parsePrimitiveJSON (AtomicPrim i) v= lift $ forw . TB1 <$> parsePrimJSON i v
+    where (forw,_)  =conversion (Primitive [] (AtomicPrim i))
 
 pg_double :: Parser Double
 pg_double
@@ -541,13 +540,13 @@ diffInterval = (do
 instance F.FromField a => F.FromField (Only a) where
   fromField = fmap (fmap (fmap Only)) F.fromField
 
-fromShowable k f = case A.parseEither (parseShowableJSON  k) f of
+fromShowable k f = case A.parseEither (fmap fst.codegent. parseShowableJSON  parsePrimitiveJSON k) f of
                  Right i -> i
                  Left i -> error (show i)
 
-fromRecordJSON :: TBData Key () -> NameMap ->  FR.RowParser (TBData Key Showable)
-fromRecordJSON foldable namemap = do
-  let parser   f = case A.parseEither (\(A.Object i) -> fmap fst $ evalRWST (parseRecordJSON foldable $ justError "no top" $ HM.lookup "p0"  i) [] namemap )  f of
+fromRecordJSON :: InformationSchema -> KVMetadata Key -> TBData Key () -> NameMap ->  FR.RowParser (TBData Key Showable)
+fromRecordJSON inf m foldable namemap = do
+  let parser   f = case A.parseEither (\(A.Object i) -> fmap fst $ evalRWST (parseRecordJSON inf m foldable $ justError "no top" $ HM.lookup "p0"  i) [] namemap )  f of
                   Right i -> i
                   Left i -> error (show i)
   parser <$> FR.field

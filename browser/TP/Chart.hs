@@ -86,10 +86,10 @@ chartWidgetMetadata inf = do
             timeFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "event" $ keyRef "event")  <$> G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
             geoFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "geo" $ keyRef "geo")  <$> G.lookup (idex (meta inf) "geo" [("schema" ,schId ),("table",tablId )])  geomap
             (Attr _ color )= lookAttr' (meta inf) "color" e
-            projf  r efield  = M.fromList [("value" ,ArrayTB1 $  attr <$> efield), ("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color )] :: M.Map Text (FTB Showable)
+            projf  r efield  = M.fromList [("value" ,ArrayTB1 $  attr <$> efield), ("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color )] :: M.Map Text (FTB Showable)
               where attr  (TB1 (SText field)) = _tbattr $ justError ("no attr " <> show field) (findAttr (lookKey inf tname field) r)
 
-            proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' $  r),)$  projf r efields
+            proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r),)$  projf r efields
             attrValue (Attr k v) = v
          in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,F.toList efields,(timeFields,geoFields,chart),proj) ) ( G.toList evMap)
 
@@ -122,10 +122,10 @@ chartWidget body (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
                     let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup pk j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
                     tdib <- ui $ stepper Nothing (join <$> evsel)
                     let tdi = tidings tdib (join <$> evsel)
-                    (el,_) <- crudUITable inf   reftb [] [] (allRec' (tableMap inf) $ t)  tdi
+                    (el,_) <- crudUITable inf  t reftb [] [] (allRec' (tableMap inf) $ t)  tdi
                     traverseUI
                       (\i -> do
-                        calendarAddSource charts chart t (renderShowable <$> fields ) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .   fmap (snd.proj) $ L.sortBy (comparing (G.getIndex))$ G.toList i))
+                        calendarAddSource charts chart t (renderShowable <$> fields ) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .   fmap (snd.proj) $ L.sortBy (comparing (G.getIndex (tableMeta t)))$ G.toList i))
                         ui $ registerDynamic (fmap fst $ runDynamic $ evalUI charts $ calendarRemoveSource charts t))
                        (v)
                     element el # sink UI.style  (noneShow . isJust <$> tdib)

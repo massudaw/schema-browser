@@ -75,7 +75,7 @@ defaultFKS inf (FKJoinTable i j )
 defaultFKS inf (FKInlineTable k i) =
   case _keyFunc $ keyType k of
     KOptional :_ -> Just (PInline k (POpt Nothing))
-    [] -> PInline k . PAtom .(tableMeta (lookTable rinf (snd i)) , G.Idex [],) <$> nonEmpty ( deftable rinf (lookTable rinf (snd i)))
+    [] -> PInline k . PAtom  <$> nonEmpty ( deftable rinf (lookTable rinf (snd i)))
     _ ->  Nothing
   where rinf = fromMaybe inf $ HM.lookup (fst i) (depschema inf)
 defaultFKS _ (FunctionField  k _ _ ) = defaultAttrs k

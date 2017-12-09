@@ -40,10 +40,10 @@ ident :: [(Int,String)] -> String
 ident = explode '\n' '\t'
 
 renderRowPatch :: Show a => TBIdx a Showable -> [(Int,String)]
-renderRowPatch (_,_,i) =  concat $ renderPatch  <$> i
+renderRowPatch i =  concat $ renderPatch  <$> i
 
 renderTable :: Show a => TBData a Showable ->  [(Int,String)]
-renderTable i =  concat $ renderAttr  <$> F.toList (unKV (snd i))
+renderTable i =  concat $ renderAttr  <$> F.toList (unKV i)
 
 renderRel (Rel i op j) = show i ++ "  " ++ renderBinary op ++ " " ++ show j
 

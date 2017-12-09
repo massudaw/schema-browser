@@ -4,7 +4,6 @@
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE DeriveFoldable #-}
@@ -19,8 +18,9 @@ module Types.Common (
     ,unAttr
     ,Ring(..)
     ,FTB1
+    ,SqlOperationK(..)
     ,FTB (..)
-    ,mapKV,findTB1,filterTB1',mapTB1,mapKey',mapKey,firstTB,mapBothKV,firstKV,secondKV,traverseKV,filterTB1,filterTB1'
+    ,mapKV,findTB1,filterTB1',mapTB1,mapKey',mapKey,firstTB,mapBothKV,firstKV,secondKV,traverseKV,filterTB1
     ,mapTable
     ,atTBValue
     ,unTB1
@@ -65,7 +65,6 @@ module Types.Common (
 
 import Data.Ord
 import qualified Control.Lens as Le
-import Text.Show.Deriving
 import Types.Compose
 import Control.DeepSeq
 import qualified NonEmpty as Non
@@ -76,22 +75,15 @@ import Safe
 import Prelude hiding(head)
 import Data.Maybe
 import GHC.Generics
-import Data.Binary (Binary)
-import qualified Data.Binary as B
 import Data.Binary.Orphans
-import Data.Typeable
-import Data.Vector(Vector)
-import Data.Functor.Classes
+import Data.Binary (Binary(..))
 import Data.Foldable (Foldable)
 import qualified Data.Foldable as F
 import qualified Data.Interval as Interval
 import Data.Monoid hiding (Product)
 import qualified Data.Text as T
-import qualified Data.ByteString as BS
-import GHC.Stack
 import Data.Traversable(Traversable,traverse)
 import Control.Monad
-import GHC.Exts
 import Control.Applicative
 import qualified Data.List as L
 import Data.Map (Map)
@@ -99,11 +91,8 @@ import qualified Data.Map as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Set as  S
-import Control.Monad.State
 import Data.Text (Text)
-import Control.Monad
 import Debug.Trace
-import Data.Unique
 
 
 unkvlist :: KV k a -> [TB k a]
@@ -116,7 +105,7 @@ unArray (ArrayTB1 s) =  s
 unArray o  = error $ "unArray no pattern " <> show o
 
 unSOptional (LeftTB1 i) = i
-unSOptional i = (Just i)-- traceShow ("unSOptional No Pattern Match SOptional-" <> show i) (Just i)
+unSOptional i = (Just i)
 
 unSOptional' (LeftTB1 i ) = i
 unSOptional' i   = Just i
@@ -152,8 +141,8 @@ class Ring a where
   star :: a -> a
 
 type Column k a = TB k a
-type TBData k a = (KVMetadata k,KV k a )
-type TB3Data  k a = (KVMetadata k,KV k a )
+type TBData k a = (KV k a )
+type TB3Data  k a = (KV k a )
 
 keyRef k = IProd notNull k
 iprodRef (IProd _ l) = l
@@ -258,6 +247,7 @@ instance NFData BinaryOperator
 
 instance Monoid (KVMetadata k ) where
   mempty = kvempty
+  mappend _ = id
 
 kvAttrs m =  L.nub $ _kvattrs m <> _kvpk m <> _kvdesc m
 
@@ -273,8 +263,17 @@ data KVMetadata k
   , _kvattrs :: [k]
   , _kvrefs :: [[Rel k]]
   , _kvdelayed :: [k]
+  , _kvjoins :: [SqlOperationK k]
   , _kvrecrels :: [MutRec [[Rel k]]]
   }deriving(Functor,Foldable,Generic)
+
+data SqlOperationK k
+  = FKJoinTable [Rel k] (Text,Text)
+  | RecJoin (MutRec [[Rel k ]])  (SqlOperationK k)
+  | FKInlineTable k (Text,Text)
+  | FunctionField k Expr [Access k]
+  deriving(Eq,Ord,Show,Functor,Foldable,Generic)
+
 
 
 instance Eq (KVMetadata k) where
@@ -303,7 +302,7 @@ filterKV i (KV n) =  KV $ Map.filterWithKey (\k ->  i) n
 
 findKV i (KV  n) =  L.find (i . snd) $Map.toList  n
 
-findTB1  i (TB1 (m, j) )  = (findKV i) j
+findTB1  i (TB1  j )  = findKV i j
 -- findTB1  l (LeftTB1  j )  = join $ findTB1  l <$> j -- error (show m)
 
 findTB1'  i (TB1 (m, j) )  = Map.lookup  i (unKV j)
@@ -374,6 +373,8 @@ instance NFData k => NFData (Rel k)
 instance (Binary k ,Binary g) => Binary (TB g k )
 instance Binary a => Binary (FTB a)
 instance NFData a => NFData (FTB a)
+instance Binary k => Binary (SqlOperationK k )
+instance NFData k => NFData (SqlOperationK k )
 instance Binary k => Binary (KVMetadata k )
 instance NFData k => NFData (KVMetadata k )
 instance (Binary k) => Binary (Access k )
@@ -395,17 +396,16 @@ data TB k a
     }
   | IT -- Inline Table
     { _tbattrkey ::  k
-    , _ifkttable ::  FTB (KVMetadata k, KV k a)
+    , _ifkttable ::  FTB (KV k a)
     }
   | FKT -- Foreign Table
     { _tbref ::   KV k a
     , _fkrelation ::  [Rel k]
-    , _ifkttable ::   FTB (KVMetadata k, KV k a)
+    , _ifkttable ::   FTB (KV k a)
     }
   deriving(Functor,Foldable,Traversable,Generic,Eq,Ord,Show)
 
 
-instance Bifunctor TB
 
 _fkttable (IT _  i) = i
 _fkttable (FKT _ _ i) = i
@@ -430,21 +430,21 @@ traFAttr f (IT i v)  = IT i <$> traverse (traFValue f) v
 traFAttr f (FKT  i rel v)  = liftA2 (\a b -> FKT a rel b)  ((traverseKV ((traFAttr f))) i) (traverse (traFValue f) v)
 
 traFValue :: (Applicative f) => (FTB a -> f (FTB a) ) -> TBData k a -> f (TBData  k a)
-traFValue f (m ,k) =  fmap ((m,)). fmap KV . traverse ((traFAttr f)) . _kvvalues   $  k
+traFValue f k =   fmap KV . traverse ((traFAttr f)) . _kvvalues   $  k
 
 mapFAttr f (Attr i v)  = (Attr i (f v))
 mapFAttr f (IT i v)  = IT i (mapFValue f v)
 mapFAttr f (FKT  i rel v)  = FKT (mapKV ((mapFAttr f) ) i) rel  (mapFValue f v)
 
 mapFValue f = fmap (mapFValue' f)
-mapFValue' f ((m ,k) ) = (m,) . KV . fmap ((mapFAttr f)) . _kvvalues   $  k
+mapFValue' f k = KV . fmap ((mapFAttr f)) . _kvvalues   $  k
 
 
-mapValue' f (m ,k) = (m,) . fmap  f  $  k
+mapValue' f k =  fmap  f  $  k
 mapValue f = fmap (mapValue' f)
 
 
-mapTable f (kv,m) = (kv,KV. fmap ((mapTableAttr f )) . _kvvalues  $   m )
+mapTable f m = KV. fmap ((mapTableAttr f )) . _kvvalues  $   m
 
 mapTableAttr  f (IT l j ) =  IT l (f  (mapTable f <$> j))
 mapTableAttr  f (FKT l rel j ) =  FKT l rel (f  (mapTable f <$> j))
@@ -452,11 +452,11 @@ mapTableAttr f  i = i
 
 mapKey' :: Ord b => (a -> b) -> TB3Data  a c -> TB3Data  b c
 mapKey f = fmap (mapKey' f)
-mapKey' f (m ,k) = (fmap f m,) . (firstKV f)  $  k
+mapKey' f k = firstKV f  $  k
 
 firstKV :: (Ord k ) => (c -> k) -> KV c a -> KV k a
-firstKV  f (KV m ) = KV . fmap ((firstTB f) ) . Map.mapKeys (Set.map (fmap f)) $ m
-secondKV  f (KV m ) = KV . fmap (second f ) $ m
+firstKV  f (KV m ) = KV . fmap (firstTB f)  . Map.mapKeys (Set.map (fmap f)) $ m
+secondKV  f (KV m ) = KV . fmap (fmap f ) $ m
 
 firstTB :: (Ord k) => (c -> k) -> TB  c a -> TB  k a
 firstTB f (Attr k i) = Attr (f k) i
@@ -490,7 +490,7 @@ instance Applicative FTB where
   ArrayTB1  i <*> j = ArrayTB1 $ fmap (<*>j)  i
 
 
-type FTB1 k a = FTB (KVMetadata k, KV k a)
+type FTB1 k a = FTB (KV k a)
 
 data Expr
   = Value Int
@@ -546,7 +546,7 @@ keyattri (Fun i  l _ ) = [RelFun i (relAccesGen <$> snd l)]
 keyattri (FKT i  rel _ ) = rel
 keyattri (IT i  _ ) =  [Inline i]
 
-joinNonRef' (m,n)  = (m, rebuildTable . _kvvalues $  n)
+joinNonRef' n =  rebuildTable . _kvvalues $  n
   where
     rebuildTable n = nonRef <$> n
     nonRef :: Ord k => TB  k a -> [TB  k a]
@@ -557,7 +557,7 @@ joinNonRef' (m,n)  = (m, rebuildTable . _kvvalues $  n)
     nonRef it@(IT j k ) =  [(IT  j k ) ]
 
 
-traTable f = traverse (\(KV i) -> KV <$> f i )
+traTable f (KV i) = KV <$> f i
 
 alterFTB :: Applicative f => (a -> f a ) -> FTB a -> f (FTB a)
 alterFTB f (TB1 i ) = TB1 <$> f i
@@ -600,8 +600,8 @@ atTBValue
      -> (FTB (Map k (FTB b),TBData k b) -> f (FTB (Map k (FTB b), TBData k b)))
      -> (TBData k b)
      -> f (TBData k b)
-atTBValue l f g h (m,v) = traTable (Le.at key (traverse (modify ))) (m,v)
-  where key = justError "cant find key" $ L.find (\i -> S.map _relOrigin  i == S.fromList (iprodRef <$> l) ) (Map.keys  (_kvvalues (v)))
+atTBValue l f g h v = traTable (Le.at key (traverse (modify ))) v
+  where key = justError "cant find key" $ L.find (\i -> S.map _relOrigin  i == S.fromList (iprodRef <$> l) ) (Map.keys  (_kvvalues v))
         modify i = case i  of
           Attr k j -> Attr k <$> f j
           IT l  j -> IT l <$> g j
@@ -613,7 +613,7 @@ tableNonRef = fmap tableNonRef'
 
 
 tableNonRef' :: Ord k => TBData k a -> TBData k a
-tableNonRef' (m,n)  = (m, (KV . rebuildTable . _kvvalues) n)
+tableNonRef' n  = (KV . rebuildTable . _kvvalues) n
   where
     rebuildTable n = mapFromTBList .  concat . F.toList $  nonRef <$> n
     nonRef :: Ord k => TB k a -> [(TB ) k a]
@@ -635,7 +635,7 @@ kattri (Attr _ i ) = [i]
 kattri (Fun _ _ i ) = [i]
 kattri (FKT i  _ _ ) =  L.concat $ kattr  <$> unkvlist i
 kattri (IT _  i ) =  recTB i
-  where recTB (TB1 (m, i) ) =  L.concat $ fmap kattr (F.toList $ _kvvalues $  i)
+  where recTB (TB1  i ) =  L.concat $ fmap kattr (F.toList $ _kvvalues $  i)
         recTB (ArrayTB1 i ) = L.concat $ F.toList $ fmap recTB i
         recTB (LeftTB1 i ) = L.concat $ F.toList $ fmap recTB i
 
@@ -648,19 +648,19 @@ aattri (IT _ i) =  go i
   where
     go i = case i of
         -- TODO : Make a better representation for inline tables , to support product and sum tables properly
-        TB1 i -> concat $ fmap maybeToList $ filter isJust $ fmap (traverse unSOptional') $ concat $ fmap aattr $ F.toList $ unkvlist (snd i)
+        TB1 i -> concat $ fmap maybeToList $ filter isJust $ fmap (traverse unSOptional') $ concat $ fmap aattr $ F.toList $ unkvlist i
         LeftTB1 i ->   maybe [] go i
         i -> []
 
 
 tblist :: Ord k => [TB k a] -> TBData k a
-tblist = tblistM kvempty
+tblist = tblistM
 
-tblistM :: Ord k => KVMetadata k -> [TB k a] -> TBData k a
-tblistM t  = (t, ) .  KV . mapFromTBList
+tblistM :: Ord k =>  [TB k a] -> TBData k a
+tblistM   =   KV . mapFromTBList
 
 
-kvempty  = KVMetadata "" ""  [] [] [] [] [] [] [] [] []
+kvempty  = KVMetadata "" ""  [] [] [] [] [] [] [] [] [] []
 
 instance Ord a => Ord (Interval.Interval a ) where
   compare i j = compare (Interval.upperBound i )  (Interval.upperBound j)

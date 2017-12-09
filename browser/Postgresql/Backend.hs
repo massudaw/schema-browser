@@ -60,8 +60,8 @@ import qualified Data.Set as S
 import qualified Database.PostgreSQL.Simple.FromRow as FR
 import Database.PostgreSQL.Simple
 
-filterFun  = filter (\k -> not $ isFun k )
-  where isFun (PFun _ _ _ ) = True
+filterFun  = M.filter (\ v-> not $ isFun v )
+  where isFun (Fun _ _ _ ) = True
         isFun i = False
 
 overloadedRules = overloaedSchema <> overloaedTables <> overloaedColumns
@@ -175,11 +175,12 @@ alterSchema v p= do
           name = lookKey inf "catalog_schema" "name"
           owner= lookKey inf "catalog_schema" "owner"
           user_name = lookKey inf "user" "usename"
+          tb = lookTable inf "catalog_schema"
 
       traverse (\new -> when (new /= o )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? OWNER TO ?  "(DoubleQuoted o, DoubleQuoted new)) onewm
       traverse (\new -> when (new /= n )$ void $ liftIO$ execute (rootconn inf) "ALTER SCHEMA ? RENAME TO ?  "(DoubleQuoted n, DoubleQuoted new)) nnewm
       l <- liftIO getCurrentTime
-      return $ TableModification Nothing (l) (snd $ username inf) (lookTable inf "catalog_schema") . PatchRow   <$> (diff v new)
+      return $ TableModification Nothing l (snd $ username inf)  tb . PatchRow   . (G.getIndex (tableMeta tb) new,) <$> diff v new
 
 dropSchema = do
   aschema "metadata" $
@@ -198,40 +199,47 @@ dropSchema = do
 
 insertPatch
   :: (MonadIO m ,Functor m )
-     =>
-     Connection
-     -> TBIdx Key Showable
+     => InformationSchema
+     -> Connection
+     -> TBData Key Showable
      -> TableK Key
-     -> m (TBIdx Key Showable )
-insertPatch  conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> liftIO$ if not $ L.null serialAttr
+     -> m (TBData Key Showable)
+insertPatch  inf conn i  t = either errorWithStackTrace (\i ->  liftIO $ if not $ L.null serialAttr
       then do
         let
           iquery :: String
           (iquery ,namemap)= codegen $ do
-              j <- explodeRecord (tblist serialAttr)
-              return $ T.unpack $ prequery <> " RETURNING (SELECT row_to_json(q) FROM (" <> selectRow "p0" j <> ") as q)"
+            j <- explodeRecord inf (tableMeta t) (tblist serialAttr)
+            return $ T.unpack $ prequery <> " RETURNING (SELECT row_to_json(q) FROM (" <> selectRow "p0" j <> ") as q)"
         print iquery
-        [out] <- liftIO $ queryWith (fromRecordJSON serialTB namemap ) conn (fromString  iquery) directAttr
-        let (_,_ ,gen) =  patch out
-        return (m, G.getIndex out  , i <> gen)
+        [out] <- queryWith (fromRecordJSON inf (tableMeta t) serialTB namemap ) conn (fromString  iquery) directAttr
+        let gen =  patch out
+        return $apply i gen
       else do
         let
           iquery = T.unpack prequery
         print iquery
         execute  conn (fromString  iquery ) directAttr
-        return path) checkAllFilled
+        return i) checkAllFilled
     where
-      checkAllFilled = patchCheck path
-      prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (escapeReserved <$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (fmap (const "?") $ projKey directAttr)  <> ")"
-      attrs =  concat $L.nub $ nonRefTB .  create  <$> filterFun i
+      checkAllFilled = tableCheck  (tableMeta t) i
+      prequery =  "INSERT INTO " <> rawFullName t <>" ( " <> T.intercalate "," (escapeReserved .keyValue<$> projKey directAttr ) <> ") VALUES (" <> T.intercalate "," (value <$> projKey directAttr)  <> ")"
+      attrs =  concat $L.nub $ nonRefTB  <$> F.toList (filterFun $ unKV i)
       testSerial (k,v ) = (isSerial .keyType $ k) && (isNothing. unSSerial $ v)
       direct f = filter (not.all1 testSerial .f)
       serialAttr = flip Attr (LeftTB1 Nothing)<$> filter (isSerial .keyType) ( rawPK t <> F.toList (rawAttrs t))
       directAttr :: [TB Key Showable]
       directAttr = direct aattri attrs
-      projKey :: [TB Key a ] -> [Text]
-      projKey = fmap (keyValue ._relOrigin) . concat . fmap keyattri
-      serialTB = tblist' t (serialAttr)
+      projKey :: [TB Key a ] -> [Key]
+      projKey = fmap _relOrigin . concat . fmap keyattri
+      value i = "?"  <> fromMaybe ""  (inlineType (keyType i))
+        where
+          inlineType (Primitive k (RecordPrim (s,t) )) = Just (" :: " <>s <> "." <> t <> foldMap ktype k )
+          inlineType _ = Nothing
+          ktype KArray  =  "[]"
+          ktype KOptional =  ""
+
+      serialTB = tblist'  (serialAttr)
       all1 f [] = False
       all1 f i = all f i
 
@@ -239,11 +247,11 @@ insertPatch  conn path@(m ,s,i )  t = either errorWithStackTrace (\(m,s,i) -> li
 
 deletePatch
   ::
-     Connection ->  TBIdx PGKey Showable -> Table -> IO (TBIdx PGKey Showable)
-deletePatch conn patch@(m ,G.Idex kold ,_) t = do
+     Connection ->  KVMetadata PGKey -> TBIndex Showable -> Table -> IO ()
+deletePatch conn m ix@(G.Idex kold) t = do
     print del
     execute conn (fromString $ T.unpack del) koldPk
-    return patch
+    return ()
   where
     equality k = escapeReserved (attrValueName k) <> "="  <> "?"
     koldPk = uncurry Attr <$> zip (_kvpk m) (F.toList kold)
@@ -252,8 +260,8 @@ deletePatch conn patch@(m ,G.Idex kold ,_) t = do
 
 applyPatch
   ::
-     Connection -> TBIdx PGKey Showable -> IO (TBIdx PGKey Showable)
-applyPatch conn patch@(m,G.Idex kold,skv)  = do
+     Connection -> KVMetadata PGKey ->(TBIndex Showable ,TBIdx PGKey Showable) -> IO (TBIndex Showable ,TBIdx PGKey Showable)
+applyPatch conn m patch@(G.Idex kold,skv)  = do
     print up
     execute conn (fromString $ T.unpack up)  (fmap attrPatchValue skv <> koldPk ) >> return patch
   where
@@ -272,37 +280,37 @@ applyPatch conn patch@(m,G.Idex kold,skv)  = do
 
 updatePatch
   ::
-     Connection -> TBData PGKey Showable -> TBData PGKey Showable -> Table -> IO (TBIdx PGKey Showable)
-updatePatch conn kv old  t = do
+     Connection -> KVMetadata PGKey -> TBData PGKey Showable -> TBData PGKey Showable -> Table -> IO (TBIdx PGKey Showable)
+updatePatch conn m kv old  t = do
     print up
     execute conn (fromString $ T.unpack up)  (skv <> koldPk ) >> return patch
   where
     patch  = justError ("cant diff states" <> (concat $ zipWith differ (show kv) (show old))) $ diff old kv
-    kold = M.toList $ getPKM old
+    kold = M.toList $ getPKM m old
     equality k = k <> "="  <> "?"
     koldPk = uncurry Attr <$> kold
     pred   =" WHERE " <> T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> kold)
     setter = " SET " <> T.intercalate "," (equality .   escapeReserved . attrValueName <$> skv   )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = F.toList  (_kvvalues $ tbskv)
-    tbskv = snd isM
+    tbskv = isM
     isM :: TBData PGKey  Showable
     isM =  justError ("cant diff befor update" <> show (kv,old)) $ diffUpdateAttr kv old
 
 diffUpdateAttr :: (Ord k , Ord a) => TBData k a -> TBData k a -> Maybe (TBData k a )
-diffUpdateAttr  kv kold@(t,_ )  =  fmap ((t,) . KV ) .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . snd . tableNonRef'  $ kv ) (unKV . snd . tableNonRef' $ kold )
+diffUpdateAttr  kv kold  =  fmap KV  .  allMaybesMap  $ liftF2 (\i j -> if i == j then Nothing else Just i) (unKV . tableNonRef'  $ kv ) (unKV . tableNonRef' $ kold )
 
 differ = (\i j  -> if i == j then [i]  else "(" <> [i] <> "|" <> [j] <> ")" )
 
-paginate inf t order off size koldpre wherepred = do
-    let ((que,name),attr) = selectQuery t koldpre order wherepred
-    let
-    v <- do
-        let quec = fromString $ T.unpack $ "SELECT row_to_json(q),count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
-        uncurry (queryWith (withCount (fromRecordJSON t name )) (conn inf ) ) (quec, maybe [] (fmap (either(Left .firstTB (recoverFields inf)) Right)) attr)
-    let estimateSize = maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])
-    print estimateSize
-    return (estimateSize, fmap fst v)
+paginate inf meta t order off size koldpre wherepred = do
+  let ((que,name),attr) = selectQuery inf meta t koldpre order wherepred
+  v <- do
+      let quec = fromString $ T.unpack $ "SELECT row_to_json(q),count(*) over () FROM (" <> que <> ") as q " <> offsetQ <> limitQ
+      print quec
+      uncurry (queryWith (withCount (fromRecordJSON inf meta t name )) (conn inf ) ) (quec, maybe [] (fmap (either(Left .firstTB (recoverFields inf)) Right)) attr)
+  let estimateSize = maybe 0 (\c-> c - off ) $ safeHead ( fmap snd v :: [Int])
+  print estimateSize
+  return (estimateSize, fmap fst v)
   where
         offsetQ = " OFFSET " <> T.pack (show off)
         limitQ = " LIMIT " <> T.pack (show size)
@@ -312,86 +320,86 @@ paginate inf t order off size koldpre wherepred = do
 -- High level db operations
 
 
-insertMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-insertMod j  = do
+insertMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+insertMod m j  = do
   inf <- ask
-  let overloaded  = M.lookup (_kvschema (fst j) ,_kvname (fst j)) overloadedRules
+  let overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
       isCreate (CreateRule _ ) = True
       isCreate _ = False
   case L.find isCreate  =<< overloaded of
     Just (CreateRule l) -> l j
     Nothing ->liftIO $ do
       let
-        table = lookTable inf (_kvname (fst  j))
-      (t,pk,attrs) <- insertPatch  (conn  inf) (patch j) ( table)
+        table = lookTable inf (_kvname m)
+      d <- insertPatch  inf (conn  inf) j  table
       l <- liftIO getCurrentTime
-      return $ TableModification Nothing (l) (snd $ username inf)table . CreateRow <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create  (t,pk,compact $ deftable inf table <> attrs )))
+      return $ TableModification Nothing (l) (snd $ username inf)table . CreateRow <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) d)
 
 
-deleteMod :: TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-deleteMod p@(m,_) = do
+deleteMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+deleteMod m t = do
   inf <- ask
   let overloaded  = M.lookup (_kvschema m,_kvname m) overloadedRules
       isRule (DropRule _ ) = True
       isRule _ = False
   log <- case L.find isRule =<< overloaded of
-    Just (DropRule i) ->  i p
+    Just (DropRule i) ->  i t
     Nothing ->  liftIO $  do
       let table = lookTable inf (_kvname m)
-      deletePatch (conn inf)  (firstPatch (recoverFields inf) (patch p)) table
+      deletePatch (conn inf) (recoverFields inf <$> m) (G.getIndex m t) table
       l <- liftIO getCurrentTime
-      return $ Just $ (TableModification Nothing (l) (snd $ username inf)table  $ DropRow p)
+      return $ Just $ (TableModification Nothing (l) (snd $ username inf)table  $ DropRow t)
   return $ log
 
-updateMod :: TBData Key Showable -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-updateMod old p = do
+updateMod :: KVMetadata Key -> TBData Key Showable -> TBIndex Showable -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+updateMod m old pk p = do
   inf <- ask
   let
       kv = apply  old p
-      overloaded  = M.lookup (_kvschema (fst old) ,_kvname (fst old)) overloadedRules
+      overloaded  = M.lookup (_kvschema m ,_kvname m) overloadedRules
       isCreate (UpdateRule _ ) = True
       isCreate _ = False
   case L.find isCreate  =<< overloaded of
     Just (UpdateRule i) ->  i old p
     Nothing -> liftIO$ do
-      let table = lookTable inf (_kvname (fst  old ))
-      patch <- updatePatch (conn  inf) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table
+      let table = lookTable inf (_kvname m)
+      patch <- updatePatch (conn  inf) (recoverFields inf <$>  m) (mapKey' (recoverFields inf) kv )(mapKey' (recoverFields inf) old ) table
       l <- liftIO getCurrentTime
-      let mod =  TableModification Nothing (l) (snd $ username inf) table ( PatchRow $ firstPatch (typeTrans inf) patch)
+      let mod =  TableModification Nothing l (snd $ username inf) table ( PatchRow $ (G.getIndex m kv,) $firstPatch (typeTrans inf) patch)
       return $ Just mod
 
-patchMod :: TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
-patchMod patch@(m,_,_) = do
+patchMod :: KVMetadata Key -> TBIndex Showable -> TBIdx Key Showable-> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+patchMod m pk patch = do
   inf <- ask
   liftIO $ do
-    let table = lookTable inf (_kvname m )
-    patch <- applyPatch (conn  inf) (firstPatch (recoverFields inf ) patch )
+    let table = lookTable inf (_kvname m)
+    patchout <- applyPatch (conn inf) (recoverFields inf <$>m )(pk,firstPatch (recoverFields inf ) patch)
     l <- liftIO getCurrentTime
-    let mod =  TableModification Nothing (l) (snd $ username inf) table (PatchRow $ firstPatch (typeTrans inf) patch)
+    let mod =  TableModification Nothing l (snd $ username inf) table (PatchRow  (firstPatch (typeTrans inf) <$>patchout))
     return (Just mod)
 
 
 
-loadDelayed :: InformationSchema -> TBData Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
-loadDelayed inf t@(k,v) values@(ks,vs)
-  | L.null $ _kvdelayed k = return Nothing
+loadDelayed :: InformationSchema -> KVMetadata Key -> TBData Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
+loadDelayed inf m t@(v) values@(vs)
+  | L.null $ _kvdelayed m = return Nothing
   | L.null delayedattrs  = return Nothing
   | otherwise = do
        let
-           (labelMap,_) = evalRWS (traverse (lkTB) $  _kvvalues $  (snd $ tableNonRef2 (k,v)) :: CodegenT Identity (M.Map (S.Set (Rel Key)) Text)) [Root k] namemap
+           (labelMap,_) = evalRWS (traverse (lkTB) $  _kvvalues $  tableNonRef2 v :: CodegenT Identity (M.Map (S.Set (Rel Key)) Text)) [Root m] namemap
            delayedTB1 :: TBData Key () -> TBData Key ()
-           delayedTB1 = fmap (\(KV i ) -> KV $ M.filterWithKey  (\i _ -> isJust $ M.lookup i filteredAttrs ) i)
+           delayedTB1 (KV i ) = KV $ M.filterWithKey  (\i _ -> isJust $ M.lookup i filteredAttrs ) i
            delayed =  mapKey' unKDelayed (mapValue' (const ()) (delayedTB1 t))
            (str,namemap) = codegen $ do
-              tq <- expandBaseTable t
-              rq <- explodeRecord delayed
-              let whr = T.intercalate " AND " ((\i-> justError ("no key " <> show i <> show labelMap)  (M.lookup (S.singleton $ Inline i) labelMap) <>  " = ?") <$> _kvpk k)
+              tq <- expandBaseTable m t
+              rq <- explodeRecord inf m delayed
+              let whr = T.intercalate " AND " ((\i-> justError ("no key " <> show i <> show labelMap)  (M.lookup (S.singleton $ Inline i) labelMap) <>  " = ?") <$> _kvpk m)
               return $ "select row_to_json(q) FROM (SELECT " <>  selectRow "p0" rq <> " FROM " <> renderRow tq <> " WHERE " <> whr <> ") as q "
-           pk = fmap (firstTB (recoverFields inf) . snd) . L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk k)) . M.toList . _kvvalues . snd $ tbPK (tableNonRef' values)
-       is <- queryWith (fromRecordJSON delayed namemap) (conn inf) (fromString $ T.unpack str) pk
+           pk = fmap (firstTB (recoverFields inf) . snd) . L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk m)) . M.toList . _kvvalues $ tbPK m(tableNonRef' values)
+       is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) (fromString $ T.unpack str) pk
        res <- case is of
             [] -> errorWithStackTrace "empty query"
-            [i] ->return $ fmap (\(i,j,a) -> (i,G.getIndex values,a)) $ diff (ks , KV filteredAttrs) (mapKey' (alterKeyType (Le.over keyFunc makeDelayed)) . mapFValue' makeDelayedV $ i  )
+            [i] ->return $ diff (KV filteredAttrs) (mapKey' (alterKeyType (Le.over keyFunc makeDelayed)) . mapFValue' makeDelayedV $ i  )
             _ -> errorWithStackTrace "multiple result query"
        return res
   where
@@ -404,27 +412,26 @@ loadDelayed inf t@(k,v) values@(ks,vs)
     makeDelayedV (ArrayTB1 i) = ArrayTB1 $ makeDelayedV <$> i
 
     delayedattrs = concat $ fmap (keyValue . _relOrigin ) .  F.toList <$> M.keys filteredAttrs
-    filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (S.fromList $ _kvdelayed k) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ vs)
+    filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (S.fromList $ _kvdelayed m) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ vs)
 
 
 
 selectAll
   ::
-     TBF Key ()
+     KVMetadata Key
+     -> TBData Key ()
      -> Int
      -> Maybe PageToken
      -> Int
      -> [(Key, Order)]
      -> WherePredicate
-     -> TransactionM  (Int,
-           [(KVMetadata Key,
-               KV Key Showable)])
-selectAll m offset i  j k st = do
+     -> TransactionM (Int,[KV Key Showable])
+selectAll meta m offset i  j k st = do
       inf <- ask
       let
           unref (TableRef i) = Just $  upperBound <$>  i
           unref (HeadToken ) = Nothing
-      v <- liftIO$ paginate inf m k offset j ( join $ fmap unref i) st
+      v <- liftIO$ paginate inf meta m k offset j ( join $ fmap unref i) st
       return v
 
 
@@ -433,6 +440,6 @@ connRoot dname = (fromString $ "host=" <> host dname <> " port=" <> port dname  
 
 tSize = 400
 
-postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ j off p g s o-> (\(l,i) -> (i,(TableRef <$> G.getBounds i) ,l)) <$> selectAll  j (fromMaybe 0 off) p (fromMaybe tSize g) s o )  (\table j -> do
+postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ m j off p g s o-> (\(l,i) -> (i,(TableRef <$> G.getBounds m i) ,l)) <$> selectAll  m j (fromMaybe 0 off) p (fromMaybe tSize g) s o )  (\table j -> do
     inf <- ask
-    liftIO . loadDelayed inf (tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined (\ a -> liftIO . logTableModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules Nothing
+    liftIO . loadDelayed inf (tableMeta table) (tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined (\ a -> liftIO . logTableModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules Nothing

@@ -88,7 +88,7 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
         reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables' minf table Nothing schemaPred2
         config <- selector minf table reftb  (pure $ Just schemaPred2 ) (pure Nothing)
         let tds = triding config
-        (cru,pretdi) <- crudUITable minf reftb [] [] (allRec' (tableMap minf) table) (triding config)
+        (cru,pretdi) <- crudUITable minf table reftb [] [] (allRec' (tableMap minf) table) (triding config)
         return [getElement config,cru]
 
       chooser "Main" = do

@@ -1,4 +1,5 @@
-{-# LANGUAGE Arrows,FlexibleInstances,FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,UndecidableInstances,ExistentialQuantification #-} module Environment where
+{-# LANGUAGE Arrows,FlexibleInstances,FlexibleContexts,DeriveAnyClass,DeriveGeneric,StandaloneDeriving,TypeFamilies,OverloadedStrings,DeriveTraversable,DeriveFoldable,DeriveFunctor,RankNTypes,UndecidableInstances,ExistentialQuantification #-}
+module Environment where
 
 
 import Control.Concurrent
@@ -139,20 +140,20 @@ ifield ::
        (Monad m ,Show k ,Ord k) => k
        -> PluginM (PathIndex PathTID () )  (Atom (FTB Showable )) m i a
        -> PluginM (AttributePath k () )  (Atom (TBData k Showable ))  m i a
-ifield s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathAttr s <$> tidxi,PathAttr s <$> tidxo) (Kleisli $ (withReaderT2 (\(Atom l@(m,_)) v -> [(m,fmap patch $ G.getIndex l , PAttr s <$> v)]) (fmap (_tbattr .justError ("no field " ++ show s ). indexField (IProd Nothing s)   )) . op ))
+ifield s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathAttr s <$> tidxi,PathAttr s <$> tidxo) (Kleisli $ (withReaderT2 (\(Atom l@(_)) v -> [( PAttr s <$> v)]) (fmap (_tbattr .justError ("no field " ++ show s ). indexField (IProd Nothing s)   )) . op ))
 
 iinline ::
        (Monad m ,Patch s ,Show s ,Show k ,Ord k) => k
        -> PluginM (PathIndex PathTID (AttributePath k ()))  (Atom (FTB (TBData k s)))  m  i a
        -> PluginM (AttributePath k () )  (Atom (TBData k s))  m i a
-iinline s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathInline s <$> tidxi,PathInline s <$> tidxo) (Kleisli $ (withReaderT2 (\(Atom l@(m,_)) v -> [(m,fmap patch $ G.getIndex l, PInline s   <$> v)]) (fmap (_fkttable .justError ( "no inline " ++ show s). indexField (IProd Nothing s)   )) . op ))
+iinline s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathInline s <$> tidxi,PathInline s <$> tidxo) (Kleisli $ (withReaderT2 (\(Atom l@(_)) v -> [( PInline s   <$> v)]) (fmap (_fkttable .justError ( "no inline " ++ show s). indexField (IProd Nothing s)   )) . op ))
 
 
 iforeign ::
        (Monad m ,Patch s ,Show s ,Show k ,Ord k) => [Rel k]
        -> PluginM (PathIndex PathTID (AttributePath k ())  )  (Atom (FTB (TBData k s)))  m  i a
        -> PluginM (AttributePath k () )  (Atom (TBData k s))  m i a
-iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathForeign s <$> tidxi,PathForeign s <$> tidxo) (Kleisli $ (withReaderT2 (\(Atom l@(m,_) )v -> [(m,fmap patch $ G.getIndex l,PFK s [] <$> v)] ) (fmap ( _fkttable . justError ("no foreign " ++ show s). indexField (Nested(IProd Nothing ._relOrigin <$> s) (Many []))   ) ). op ))
+iforeign s (P (tidxi ,tidxo) (Kleisli op) )  = P (PathForeign s <$> tidxi,PathForeign s <$> tidxo) (Kleisli $ (withReaderT2 (\(Atom l@(_) )v -> [(PFK s [] <$> v)] ) (fmap ( _fkttable . justError ("no foreign " ++ show s). indexField (Nested(IProd Nothing ._relOrigin <$> s) (Many []))   ) ). op ))
 
 
 -- Row
@@ -175,7 +176,7 @@ irow :: (Show k ,Ord k ,Monad m )=>
   (TBIndex Showable ,RowModifier)
        -> PluginM (AttributePath k ())  (Atom (TBData k Showable ))  m  i a
        -> PluginM (Row RowModifier k )  (TableIndex k Showable )  m i a
-irow (ix,s) (P (tidxi ,tidxo) (Kleisli op) )  = P (manyU [RowIndex ix s tidxi],manyU[RowIndex ix s tidxo]) (Kleisli $ (withReaderT (PatchRow  . last . compact ) (Atom . action ) . op ))
+irow (ix,s) (P (tidxi ,tidxo) (Kleisli op) )  = undefined -- P (manyU [RowIndex ix s tidxi],manyU[RowIndex ix s tidxo]) (Kleisli $ (withReaderT (PatchRow  . (undefined,) . last . compact ) (Atom . action ) . op ))
   where
     action = case s of
         RowPatch -> justError ("no pk " ++ show ix). G.lookup ix
@@ -234,7 +235,7 @@ translate  r
        (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowPatch _ )]))]))],_)  -> let
            lift j i p = do
              inf <- ask
-             fmap ((\a-> Just . TableModification Nothing undefined (snd $username inf) (lookTable inf m ). PatchRow . L.head .  compact $ (p:a) ) . fmap (liftPatch inf  m)) $ j (Atom $ mapKey' keyValue i)
+             fmap ((\a-> Just . TableModification Nothing undefined (snd $username inf) (lookTable inf m ). PatchRow . (undefined,) . L.head .  compact $ (p:a) ) . fmap (liftPatch inf  m)) $ j (Atom $ mapKey' keyValue i)
         in((i,m),[UpdateRule $  (lift (runEnv r))])
 
 

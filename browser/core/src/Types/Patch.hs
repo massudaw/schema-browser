@@ -45,7 +45,8 @@ module Types.Patch
   ,PathFTB(..)
   ,PathTID(..)
   ,upperPatch,lowerPatch
-  ,PathAttr(..),TBIdx,firstPatch,firstPatchRow,PatchConstr
+  ,PathAttr(..),TBIdx,firstPatch,PatchConstr
+  ,firstPatchRow
   ,RowPatch(..))where
 
 
@@ -131,16 +132,21 @@ joinEditor (Diff i ) = i
 joinEditor Keep  = Keep
 joinEditor Delete = Delete
 
+firstPatchRow :: (Ord a ,Ord k , Ord (Index a), Ord j ) => (k -> j ) -> RowPatch k a -> RowPatch j a
+firstPatchRow f (CreateRow i ) = CreateRow $ mapKey' f i
+firstPatchRow f (DropRow i ) = DropRow $ mapKey' f i
+firstPatchRow f (PatchRow (ix,i) ) = PatchRow (ix, firstPatch f i)
+
 data RowPatch k a
   = CreateRow (TBData k a)
-  | PatchRow (TBIdx k a)
+  | PatchRow ( G.TBIndex a ,TBIdx k a)
   | DropRow (TBData k a)
   deriving(Show,Eq,Ord,Functor,Generic)
 
 instance (NFData k ,NFData a )=> NFData (RowPatch k a)
 instance (Binary k ,Binary a) => Binary (RowPatch k a)
 
-type TBIdx k a = (KVMetadata k, G.TBIndex a ,[PathAttr k a])
+type TBIdx k a = [PathAttr k a]
 patchEditor i
   | L.length i == 0 = Keep
   | L.length i == 1 = maybe Keep Diff $ safeHead i
@@ -155,14 +161,14 @@ indexFilterP (WherePredicate p) v = go p
     go (PrimColl l ) = indexFilterPatch l v
 
 indexFilterPatch :: (Show k,Ord k) => (Access k ,Either (FTB Showable,BinaryOperator) UnaryOperator) -> TBIdx k Showable -> Bool
-indexFilterPatch ((IProd _ l) ,op)  (_,_,lo) =
+indexFilterPatch ((IProd _ l) ,op)  lo =
   case L.find ((Set.singleton (Inline l) == ).pattrKey) lo of
     Just i ->
       case i of
         PAttr k f -> G.match op (Right $ (create f :: FTB Showable))
         i -> True
     Nothing -> True
-indexFilterPatch ((Nested l n) ,op)  (_,_,lo) =
+indexFilterPatch ((Nested l n) ,op)  lo =
   case L.find ((Set.fromList (iprodRef <$> l) == ).Set.map _relOrigin . pattrKey) lo of
     Just i ->
       case i of
@@ -326,13 +332,10 @@ instance (NFData k ,NFData a) => NFData (PathAttr k a)
 instance (NFData k ) => NFData (PathFTB k )
 instance (Binary k ) => Binary (PathFTB k )
 
-firstPatchRow :: (Ord a ,Ord k , Ord (Index a), Ord j ) => (k -> j ) -> RowPatch k a -> RowPatch j a
-firstPatchRow f (CreateRow i ) = CreateRow $ mapKey' f i
-firstPatchRow f (DropRow i ) = DropRow $ mapKey' f i
-firstPatchRow f (PatchRow i ) = PatchRow $ firstPatch f i
+
 
 firstPatch :: (Ord a ,Ord k , Ord (Index a), Ord j ) => (k -> j ) -> TBIdx k a -> TBIdx j a
-firstPatch f (i,j,k) = (fmap f i , j ,fmap (firstPatchAttr f) k)
+firstPatch f k = fmap (firstPatchAttr f) k
 
 firstPatchAttr :: (Ord k , Ord j ,Ord a ,Ord (Index a)) => (k -> j ) -> PathAttr k a -> PathAttr j a
 firstPatchAttr f (PAttr k a) = PAttr (f k) a
@@ -343,7 +346,7 @@ firstPatchAttr f (PFK rel k   b ) = PFK (fmap (fmap f) rel)  (fmap (firstPatchAt
 
 
 compactTB1 :: (Ord a , Show a, Ord b ,Show b) => [TBIdx a b] -> [TBIdx a b ]
-compactTB1 i = fmap (\((i,j),p)-> (i,j,concat p)) $  groupSplit2 (\(i,j,_) -> (i,j))  (\(_,_,p) -> p) i
+compactTB1  = pure . concat --fmap (\((i,j),p)-> (i,j,concat p)) $  groupSplit2 (\(i,j,_) -> (i,j))  (\(_,_,p) -> p) i
 
 compactAttr :: (Ord a , Show a, Ord b ,Show b,Ord (Index b) ,Show (Index b)) => [PathAttr a b ] -> [PathAttr a b ]
 compactAttr  i =  fmap recover .  groupSplit2 projectors pathProj $ i
@@ -400,12 +403,12 @@ instance (NFData k ,NFData a ) => NFData (TB k a) where
 
 
 patchTB1 :: PatchConstr k a => TBData k  a -> TBIdx k  (Index a)
-patchTB1 (m, k)  = (m  ,fmap patch $G.getIndex (m,k) ,  F.toList $ patchAttr   <$> (unKV k))
+patchTB1 k =  F.toList $ patchAttr   <$> (unKV k)
 
 difftable
   ::  (PatchConstr k a  , Show a,Show k ) => TBData k a -> TBData k a
      -> Maybe (Index (TBData k a ))
-difftable old@(m, v) (n, o) = if L.null attrs then Nothing else Just  (m,   fmap patch  $ G.getIndex old , attrs)
+difftable old@( v) ( o) = if L.null attrs then Nothing else Just   attrs
     where attrs = catMaybes $ F.toList  $ Map.mergeWithKey (\_ i j -> Just $ diffAttr (i) (j)) (const Map.empty ) (fmap (Just. patchAttr  ) ) (unKV v) (unKV $  o)
 
 diffTB1 :: (PatchConstr k a ) =>  TB2 k a -> TB2  k  a -> Maybe (PathFTB   (Index (TBData k a )) )
@@ -427,7 +430,7 @@ createTB1
   :: PatchConstr d a =>
     (TBIdx d (Index a) ) ->
       Maybe (TBData d a)
-createTB1 (m ,s ,k)  = (m ,).  KV . mapFromTBList  <$>  nonEmpty ( catMaybes $ fmap (createIfChange) k)
+createTB1 k  =  KV . mapFromTBList  <$>  nonEmpty ( catMaybes $ fmap (createIfChange) k)
 
 
 pattrKey (PAttr s _ ) = Set.singleton $ Inline s
@@ -441,8 +444,8 @@ applyRecordChange
     TBData d a
      -> TBIdx d (Index a)
      -> Maybe (TBData d a)
-applyRecordChange t@(m, v) (_,_, k) =
-  {-| _kvname m == _kvname m2 && idx == fmap patch (G.getIndex t) =-} (m ,) <$> ref v
+applyRecordChange v k =
+  {-| _kvname m == _kvname m2 && idx == fmap patch (G.getIndex t) =-}  ref v
     -- | otherwise = createIfChange (m2,idx,k)
   where
     ref (KV v) =  KV <$>  fmap add (Map.traverseWithKey (\key -> (\vi -> maybe (Just vi) (F.foldl'  (\i j ->  edit j =<< i ) (Just vi)) (nonEmpty $ filter ((key ==).pattrKey )k) )) v)

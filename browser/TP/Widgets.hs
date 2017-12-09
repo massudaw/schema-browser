@@ -108,6 +108,7 @@ updateEvent validate ev b = do
  return  $tidings nbev nev
 
 
+diffTidings f = tidings (facts f) (diffEvent (facts f ) (rumors f))
 diffEvent b ev = filterJust $ (\i j -> if i == j then Nothing else Just j ) <$> b <@> ev
 notdiffEvent b ev = filterJust $ (\i j -> if i /= j then Nothing else Just j ) <$> b <@> ev
 
