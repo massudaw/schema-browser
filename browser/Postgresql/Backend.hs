@@ -429,7 +429,7 @@ selectAll
 selectAll meta m offset i  j k st = do
       inf <- ask
       let
-          unref (TableRef i) = Just $  upperBound <$>  i
+          unref (TableRef i) = allMaybes $ unFin . upperBound <$>  i
           unref (HeadToken ) = Nothing
       v <- liftIO$ paginate inf meta m k offset j ( join $ fmap unref i) st
       return v
@@ -442,4 +442,4 @@ tSize = 400
 
 postgresOps = SchemaEditor updateMod patchMod insertMod deleteMod (\ m j off p g s o-> (\(l,i) -> (i,(TableRef <$> G.getBounds m i) ,l)) <$> selectAll  m j (fromMaybe 0 off) p (fromMaybe tSize g) s o )  (\table j -> do
     inf <- ask
-    liftIO . loadDelayed inf (tableMeta table) (tableView (tableMap inf) table ) $ j ) mapKeyType undefined undefined (\ a -> liftIO . logTableModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules Nothing
+    liftIO . loadDelayed inf (tableMeta table) (allRec' (tableMap inf) table ) $ j ) mapKeyType undefined undefined (\ a -> liftIO . logTableModification a) tSize (\inf -> withTransaction (conn inf))  overloadedRules Nothing

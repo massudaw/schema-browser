@@ -79,7 +79,6 @@ mapKType :: KType PGPrim -> KType CorePrim
 mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec ktypeLift (fmap textToPrim i)
 
 textToPrim :: Prim PGType (Text,Text) -> Prim KPrim (Text,Text)
--- textToPrim i | traceShow i False =undefined
 textToPrim (AtomicPrim (s,i,tymod)) = case  HM.lookup i  postgresPrim of
   Just k -> AtomicPrim k -- $ fromMaybe k (M.lookup k (M.fromList postgresLiftPrim ))
   Nothing -> case tymod of
@@ -307,7 +306,6 @@ parseRecordJSON  inf me m (A.Object v) = atTable me $ do
   let try1 i v = do
         tb <- lkTB i
         return $ justError (" no attr " <> show (i,v)) $ HM.lookup tb  v
-
   im <- traverse ((\ i -> parseAttrJSON  inf i =<<  try1 i v))$   _kvvalues m
   return $KV im
 
@@ -532,8 +530,6 @@ diffInterval = (do
     v -> error $ show v)
     where
       diffIntervalLayout = sepBy1 (toRealFloat <$> scientific) (string " days " <|> string " day " <|>  string ":" )
-
-
 
 
 

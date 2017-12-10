@@ -18,6 +18,7 @@ module Types.Common (
     ,unAttr
     ,Ring(..)
     ,FTB1
+    ,SqlOperationTK(..)
     ,SqlOperationK(..)
     ,FTB (..)
     ,mapKV,findTB1,filterTB1',mapTB1,mapKey',mapKey,firstTB,mapBothKV,firstKV,secondKV,traverseKV,filterTB1
@@ -60,7 +61,6 @@ module Types.Common (
     ,aattri
     ,relAccesGen
     ,keyattri
-    ,joinNonRef'
     ,tableNonRef )   where
 
 import Data.Ord
@@ -263,14 +263,16 @@ data KVMetadata k
   , _kvattrs :: [k]
   , _kvrefs :: [[Rel k]]
   , _kvdelayed :: [k]
-  , _kvjoins :: [SqlOperationK k]
+  , _kvjoins :: [SqlOperationK  k ]
   , _kvrecrels :: [MutRec [[Rel k]]]
   }deriving(Functor,Foldable,Generic)
 
-data SqlOperationK k
-  = FKJoinTable [Rel k] (Text,Text)
-  | RecJoin (MutRec [[Rel k ]])  (SqlOperationK k)
-  | FKInlineTable k (Text,Text)
+type SqlOperationK = SqlOperationTK (Text,Text)
+
+data SqlOperationTK t k
+  = FKJoinTable [Rel k] t
+  | RecJoin (MutRec [[Rel k ]])  (SqlOperationTK t k)
+  | FKInlineTable k t
   | FunctionField k Expr [Access k]
   deriving(Eq,Ord,Show,Functor,Foldable,Generic)
 
@@ -545,17 +547,6 @@ keyattri (Attr i  _ ) = [Inline i]
 keyattri (Fun i  l _ ) = [RelFun i (relAccesGen <$> snd l)]
 keyattri (FKT i  rel _ ) = rel
 keyattri (IT i  _ ) =  [Inline i]
-
-joinNonRef' n =  rebuildTable . _kvvalues $  n
-  where
-    rebuildTable n = nonRef <$> n
-    nonRef :: Ord k => TB  k a -> [TB  k a]
-    nonRef (Fun k rel v ) = [Fun k rel v]
-    nonRef (Attr k v ) = [Attr k v]
-    nonRef (FKT i _ _ ) = tra
-      where tra = unkvlist i
-    nonRef it@(IT j k ) =  [(IT  j k ) ]
-
 
 traTable f (KV i) = KV <$> f i
 

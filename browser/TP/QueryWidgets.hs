@@ -108,7 +108,7 @@ genAttr inf k =
          RecordPrim (s,t) ->
            let table =  lookTable sch t
                sch = fromMaybe inf (HM.lookup s (depschema inf))
-           in IT k $ kfold ty $  TB1 $ tableView (tableMap sch) table
+            in IT k $ kfold ty $  TB1 $ allRec' (tableMap sch) table
   where
     kfold l = F.foldl' (.) id (kgen <$> l)
     kgen :: KTypePrim -> FTB a -> FTB a
@@ -336,13 +336,13 @@ tbCaseDiff
 tbCaseDiff inf table constr i@(FKT ifk  rel tb1) wl plugItens oldItems= do
     let
       nonInj =  (S.fromList $ _relOrigin   <$> rel) `S.difference` (S.fromList $ getRelOrigin $ unkvlist ifk)
-      nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap fst .  aattri .fst) wl
+      nonInjRefs = filter ((\i -> if S.null i then False else S.isSubsetOf i nonInj ) . S.fromList . fmap _relOrigin. keyattri .fst) wl
       relTable = M.fromList $ fmap (\i -> (_relTarget i,_relOrigin i)) rel
       restrictConstraint = filter ((`S.isSubsetOf` (S.fromList $ fmap _relOrigin rel)) . S.fromList . getRelOrigin  .fst) constr
-      convertConstr :: SelTBConstraint
-      convertConstr = (\(f,j) -> (f,) $ fmap (\constr -> constr . justError "no back fk" .  (\box ->  (\ref -> pure $ FKT (kvlist $ ref ) rel (TB1 box) )<$> backFKRef relTable (getRelOrigin f) box ) ) j ) <$>  restrictConstraint
+      reflectFK f rel box = (\ref -> pure $ FKT (kvlist $ ref ) rel (TB1 box) )<$> backFKRef relTable (getRelOrigin f) box
+      convertConstr (f,j) = (f, fmap (\constr -> maybe False constr  .  reflectFK f rel ) j)
       patchRefs = fmap (\(a,b) -> flip recoverEditChange  <$> a <*> b ) <$> nonInjRefs
-    fkUITableGen inf table convertConstr plugItens  patchRefs oldItems  i
+    fkUITableGen inf table (convertConstr <$>  restrictConstraint) plugItens  patchRefs oldItems  i
 
 tbCaseDiff inf table constr i@(IT na tb1 ) wl plugItems oldItems = do
     let restrictConstraint = filter ((`S.isSubsetOf` (S.singleton na) ) . S.fromList . getRelOrigin  .fst) constr
@@ -1213,7 +1213,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
             iold2 =  fmap (M.fromList . concat) . allMaybesEmpty <$> iold
                 where
                   iold :: Tidings [Maybe [(CoreKey,FTB Showable)]]
-                  iold  = Tra.sequenceA $ fmap (join . fmap ( traverse (traverse unSOptional')) . fmap ( aattr ) ) . snd <$> nonInjRefs
+                  iold  = Tra.sequenceA $ fmap (join . fmap ( traverse (traverse unSOptional')) . fmap aattr  ) . snd <$> nonInjRefs
             ftdi2 :: Tidings (Maybe (Map Key (FTB Showable)))
             ftdi2 =   fmap (M.fromList . zip (L.sort $ _relOrigin <$> rel). getZipList . (ZipList . F.toList . fst) )  <$> ftdi
           let
@@ -1280,13 +1280,11 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
           prop <- ui $ stepper cv evsel
           let tds = tidings prop evsel
           let
-            --fksel :: Tidings (Maybe (TBRef Key Showable))
             fksel =  join . fmap (\box ->  (\ref -> (M.fromList $ attrToTuple <$> ref ,box) ) <$> backFKRefType relTable relType ifk box ) <$>   tds
             diffFK (Just i ) (Just j) = if fst i == fst j then Keep else Diff(patch j)
             diffFK (Just i ) Nothing = Delete
             diffFK Nothing Nothing = Keep
             diffFK Nothing (Just i) = Diff $ patch i
-            --output :: Tidings (Maybe (PTBRef Key Showable))
             output = diffFK <$> oldItems <*> fksel
           inioutput <- ui $ currentValue (facts output)
           ui $ onEventIO (rumors output) (\i -> do
@@ -1326,7 +1324,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
       let
         tdfk = liftA2 (,) <$> tidings blsel elsel <*> tidings bleditall eleditu
       element pan
-          # sinkDiff text (maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd )  <$>  (recoverEditChange <$> oldItems <*> tdfk ))
+          # sink  text (maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd )  <$>  facts (recoverEditChange <$> oldItems <*> tdfk ))
           # set UI.style [("border","1px solid gray"),("border-radius","4px"),("height","20px")]
       selEls <- traverseUI selector  (tidings bh  eh)
       subnet <- UI.div  # sink children (facts selEls)

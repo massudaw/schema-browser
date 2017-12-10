@@ -195,76 +195,72 @@ deleteFrom  m a   = do
 
 mergeDBRef  (j,i) (m,l) = (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d))  j  m , i <>  l )
 
+predicate
+  :: [Rel (FKey (KType a1))]
+     -> TBPredicate (FKey (KType a1)) a
+     -> Maybe (TBPredicate (FKey (KType a1)) a)
+predicate i (WherePredicate l ) =
+   fmap WherePredicate (go (test (_relOrigin <$> i)) l)
+  where
+    go pred (AndColl l) = AndColl <$> nonEmpty (catMaybes $ go pred <$> l)
+    go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
+    go pred (PrimColl l) = PrimColl <$> pred l
+    test f (Nested p (Many[One i] ),j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (_keyFunc $ keyType $ iprodRef $ L.head p))) j) else Nothing
+    test v f = Nothing
+    removeArray (KOptional :i)  o = removeArray i o
+    removeArray (KArray : i)  (AnyOp o) = o
+    removeArray i  o = o
 
 getFKRef inf predtop rtable (evs,me,old) set (FKInlineTable  r j ) =  do
-            let rinf = maybe inf id $ HM.lookup (fst j)  (depschema inf)
-                table = lookTable rinf $ snd j
-                predicate predtop
-                      = case predtop of
-                            WherePredicate l ->
-                              let
-                                go pred (AndColl l) = AndColl <$> nonEmpty (catMaybes $ go pred <$> l)
-                                go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
-                                go pred (PrimColl l) = PrimColl <$> pred l
-                                test f (Nested p (Many[One i] ),j)  = if (iprodRef <$> p) == f then Just (i ,j) else Nothing
-                                -- test f (Nested p i ,j)  = if (iprodRef <$> p) == f then Just (i ,j) else Nothing
-                                test v f = Nothing
-                             in  fmap WherePredicate (go (test [r]) l)
+    let
+      rinf = maybe inf id $ HM.lookup (fst j) (depschema inf)
+      table = lookTable rinf $ snd j
+      editAttr fun (KV i) = fmap KV (flip Le.at (traverse ((Le.traverseOf ifkttable (traverse fun)))) (S.singleton $Inline r)  i )
+      nextRef :: [FTB (TBData Key Showable)]
+      nextRef= fmap (\i -> _fkttable $ justError "no it" $ M.lookup (S.singleton $ Inline r) (_kvvalues  i) ) set
 
-                editAttr fun (KV i) = fmap KV (flip Le.at (traverse ((Le.traverseOf ifkttable (traverse fun)))) (S.singleton $Inline r)  i )
-                nextRef :: [TBData Key Showable]
-                nextRef= (concat $ catMaybes $ fmap (\i -> fmap (F.toList . _fkttable) $ M.lookup (S.singleton $ Inline r) (_kvvalues  i) )set)
-
-            (_,joinFK,_) <- getFKS rinf predtop table nextRef
-            let
-                joined i =   editAttr joinFK i
-
-            return (evs,me >=> joined,old <> S.singleton r)
+    (_,joinFK,_) <- getFKS rinf predtop table (concat $ fmap F.toList nextRef)
+    let joined = editAttr joinFK
+    return (evs,me >=> joined,old <> S.singleton r)
 
 getFKRef inf predtop rtable (evs,me,old) v (FunctionField a b c) = do
   let
     addAttr :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (TBData Key Showable)
     addAttr i = Right $ maybe i (\r -> (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) r   i) ) i) (evaluate  a b funmap c i)
-
   return (evs,me >=> addAttr ,old <> S.singleton a )
 
 getFKRef inf predtop rtable (evs,me,old) set (RecJoin i j) = return (evs,me,old)
 
 getFKRef inf predtop rtable (evs,me,old) set (FKJoinTable i j  ) =  do
                 let
-                    rinf = maybe inf id $ HM.lookup ((fst j))  (depschema inf)
+                    rinf = maybe inf id $ HM.lookup (fst j)  (depschema inf)
                     table = lookTable rinf $ snd j
-                    predicate (WherePredicate l ) =
-                        fmap WherePredicate (go (test (_relOrigin <$> i)) l)
-                      where
-                            go pred (AndColl l) = AndColl <$> nonEmpty (catMaybes $ go pred <$> l)
-                            go pred (OrColl l) = OrColl <$> nonEmpty (catMaybes $ go pred <$> l)
-                            go pred (PrimColl l) = PrimColl <$> pred l
-                            test f (Nested p (Many[One i] ),j)  = if (iprodRef <$> p) == f then Just ( i ,left (fmap (removeArray (_keyFunc $ keyType $ iprodRef $ L.head p))) j) else Nothing
-                            test v f = Nothing
-                            removeArray (KOptional :i)  o = removeArray i o
-                            removeArray (KArray : i)  (AnyOp o) = o
-                            removeArray i  o = o
-                    refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $ (\o -> fmap AndColl . allMaybes . fmap (\k ->join . fmap (fmap ( (\i->PrimColl (keyRef(_relTarget $ k) ,Left (i,Flip $ _relOperator k)))) . unSOptional' . _tbattr) . M.lookup (S.singleton (Inline (_relOrigin k))) $ o) $ i ) . unKV <$> set
-                    predm =refs <> predicate predtop
-                (ref,tb2) <- case refs of
-                  Just refspred-> do
-                    let pred = maybe refspred (refspred <> ) (predicate predtop)
-                    (ref,out) <- local (const rinf) (tableLoader table  (Just 0) Nothing [] pred)
-                    let check ix (i,tb2) = do
-                          mergeDBRef (i,tb2) <$> if (isJust (M.lookup pred i)
-                                                    && (fst $ justError "" $ M.lookup pred i) >= G.size tb2
-                                                    && (fst $ justError "" $ M.lookup pred i) >= 400)
+                    genpredicate (KV o) = fmap AndColl . allMaybes . fmap (primPredicate o)  $ i
+                    primPredicate o k  = do
+                        i <- unSOptional' (_tbattr (lkAttr k o))
+                        return $ PrimColl (keyRef (_relTarget $ k) ,Left (i,Flip $ _relOperator k))
+                    lkAttr k = justError "no attr" . M.lookup (S.singleton (Inline (_relOrigin k)))
+                    refs = fmap (WherePredicate .OrColl. L.nub) $ nonEmpty $ catMaybes $  genpredicate <$> set
+                    predm = refs <> predicate i predtop
+                (ref,tb2) <- local (const rinf) $ case predm of
+                  Just pred -> do
+                    (ref,out) <-  tableLoader table  (Just 0) Nothing [] pred
+                    let
+                      check ix (i,tb2) = do
+                        let pp = fst $ justError "" $ M.lookup pred i
+                            iempty = (M.empty,G.empty)
+                            cond = isJust (M.lookup pred i) &&  pp >= G.size tb2 && pp >= 400
+                        output <- if  cond
                             then  do
-                              (_,out) <- local (const rinf) (tableLoader table  (Just (ix +1) ) Nothing []  pred)
+                              (_,out) <- tableLoader table  (Just (ix +1) ) Nothing []  pred
                               if G.size (snd out) == G.size tb2
                                  then  do
-                                   return (M.empty , G.empty)
+                                   return iempty
                                  else  check (ix +1) out
                             else do
-                              return (M.empty , G.empty)
+                              return iempty
+                        return $ mergeDBRef (i,tb2) output
                     (_,tb2) <- check 0 out
-                    -- liftIO $print (tableName table,length v,G.size tb2)
                     return (collectionPatches ref,tb2)
                   Nothing -> return (never,G.empty)
                 let
@@ -288,10 +284,11 @@ getFKRef inf predtop rtable (evs,me,old) set (FKJoinTable i j  ) =  do
                 return (evt :evs,me >=> joined,old <> refl)
     where
         getAtt i k  = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues  $ k
-getFKRef inf predtop rtable (evs,me,old) v path = errorWithStackTrace (show path)
 
 left f (Left i ) = Left (f i)
 left f (Right i ) = (Right i)
+
+
 
 getFKS
   :: InformationSchemaKV Key Showable
@@ -307,7 +304,7 @@ getFKS inf predtop table v = F.foldl' (\m f  -> m >>= (\i -> getFKRef inf predto
   where
     sorted = P.sortBy (P.comparing (RelSort . F.toList .  pathRelRel))  (rawFKS table)
 
-rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ ( lookAccess inf (tableName t) . (Le.over Le._1 (fmap  keyValue) )<$> fixed)
+rebaseKey inf t  (WherePredicate fixed ) = WherePredicate $ lookAccess inf (tableName t) . (Le.over Le._1 (fmap  keyValue) )<$> fixed
 
 tableLoader :: Table -> Maybe Int -> Maybe Int -> [(Key,Order)] -> WherePredicate
     -> TransactionM (DBVar,Collection Key Showable)
@@ -315,9 +312,7 @@ tableLoader (Project table  (Union l)) page size presort fixed  = do
     liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
     li <- liftIO getCurrentTime
     inf <- ask
-    i <- mapM (\t -> do
-      l <- tableLoader t page size presort (rebaseKey inf t  fixed)
-      return l) l
+    i <- mapM (\t -> tableLoader t page size presort (rebaseKey inf t  fixed)) l
     let mvar = mvarMap inf
     mmap <- liftIO $ atomically $ readTVar mvar
     let mergeDBRefT  (ref1,j ,i,o,k) (ref2,m ,l,p,n) = (ref1 <> ref2 ,liftA2 (M.unionWith (\(a,b) (c,d) -> (a+c,b<>d)))  j  m , liftA2 (<>) i l , liftA2 (zipWith (\(i,j) (l,m) -> (i,j<>m))) o p ,unionWith mappend k n)
@@ -350,30 +345,24 @@ tableLoader (Project table  (Union l)) page size presort fixed  = do
       return (dbvar ,foldr mergeDBRef  (M.empty,G.empty) ix )
 -}
   -- Primitive Tables
-tableLoader table  page size presort fixed = do
-    inf <- ask
-    liftIO$ putStrLn $ "start loadTable " <> show (tableName table)
-    li <- liftIO getCurrentTime
-    o <- pageTable False (\table page size presort fixed predtop  -> do
-          let
-            unestPred  (WherePredicate l ) = WherePredicate $ go predicate l
-              where
-                go pred (AndColl l) = AndColl (go pred <$> l)
-                go pred (OrColl l) = OrColl (go pred <$> l)
-                go pred (PrimColl l) = AndColl $ PrimColl <$> pred l
-                predicate (Nested i j ,Left _ ) = (\a -> (a, Right (Not IsNull))) <$> i
-                predicate i  = [i]
-            tbf = tableView  (tableMap inf) table
-
-
-          (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) (tableNonRef2 tbf) page size presort fixed (unestPred predtop)
-          (evs,resFKS ,_) <- getFKS inf predtop table res
-          let result = fmap resFKS   res
-          liftIO $ when (not $ null (lefts result)) $ do
-            print ("lefts",tableName table ,lefts result)
-          return (rights  result,x,o ,evs)) table page size presort fixed
-    lf <- liftIO getCurrentTime
-    return o
+tableLoader table  page size presort fixed =
+    pageTable (\table page size presort fixed predtop  -> do
+        inf <- ask
+        let
+          unestPred (WherePredicate l ) = WherePredicate $ go predicate l
+            where
+              go pred (AndColl l) = AndColl (go pred <$> l)
+              go pred (OrColl l) = OrColl (go pred <$> l)
+              go pred (PrimColl l) = AndColl $ PrimColl <$> pred l
+              predicate (Nested i j ,Left _ ) = (\a -> (a, Right (Not IsNull))) <$> i
+              predicate i  = [i]
+          tbf = allRec' (tableMap inf) table
+        (res ,x ,o) <- (listEd $ schemaOps inf) (tableMeta table) (tableNonRef2 tbf) page size presort fixed (unestPred predtop)
+        (evs,resFKS ,_) <- getFKS inf predtop table res
+        let result = fmap resFKS   res
+        liftIO $ when (not $ null (lefts result)) $ do
+          print ("lefts",tableName table ,lefts result)
+        return (rights  result,x,o ,evs)) table page size presort fixed
 
 readTableFromFile
   ::
@@ -445,7 +434,7 @@ childrenRefsUnique  inf table (m,sidxs,base) (FKJoinTable rel j ,evs)  =  concat
         recurse2 i p = errorWithStackTrace (show i)
 
 
-pageTable flag method table page size presort fixed = do
+pageTable method table page size presort fixed = do
     inf <- ask
     let mvar = mvarMap inf
         tableU = fmap keyFastUnique table
@@ -469,7 +458,7 @@ pageTable flag method table page size presort fixed = do
                  predreq = (fixedU,G.Contains (pageidx - pagesize,pageidx))
                  (sq ,_)= justError "no index" hasIndex
            (nidx,ndata) <-  if
-                    flag || ( (isNothing hasIndex|| (sq > G.size freso)) -- Tabela é maior que a tabela carregada
+                    ( (isNothing hasIndex|| (sq > G.size freso)) -- Tabela é maior que a tabela carregada
                     && pageidx  > G.size freso ) -- O carregado é menor que a página
                                                                                            -- && isJust diffpred
                  then do
@@ -865,8 +854,8 @@ loadFK table (FKJoinTable rel (st,tt) )  = do
   let
       relSet = S.fromList $ _relOrigin <$> rel
       tb  = F.toList (M.filterWithKey (\k l ->  not . S.null $ S.map _relOrigin  k `S.intersection` relSet)  (unKV . tableNonRef' $ table))
-      fkref = joinRel  (tableMeta targetTable) (fmap (replaceRel rel) tb ) mtable
-  return $ Just $ FKT (kvlist  tb) rel   fkref
+      fkref = joinRel2  (tableMeta targetTable) (fmap (replaceRel rel) tb ) mtable
+  return $ FKT (kvlist  tb) rel   <$> fkref
 loadFK table (FKInlineTable ori to )   = do
   inf <- ask
   runMaybeT $ do

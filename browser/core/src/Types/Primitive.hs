@@ -483,22 +483,16 @@ tableAttr (m , KV n) =   concat  $ F.toList (nonRef <$> n)
     nonRef (FKT i  _ _ ) = concat (nonRef <$> unkvlist i)
     nonRef j@(IT k v ) = [j]
 
--- nonRef i = error (show i)
-
--- joinNonRef :: Ord k => TB2 k a -> TB2 k a
--- joinNonRef = fmap joinNonRef'
-
--- joinNonRef' :: Ord k => TB3Data f k a -> TB3Data f k a
 
 tableNonRef2 :: Ord k => TBData k a -> TBData  k a
 tableNonRef2 n  =  (KV . rebuildTable . _kvvalues) n
   where
     rebuildTable n =    Map.unions (nonRef <$> F.toList n)
     nonRef :: Ord k => Column k a -> Map (Set (Rel k )) (TB  k a)
-    nonRef ((Fun i _ _ )) =Map.empty
-    nonRef ((FKT i _ _ )) = _kvvalues i
+    nonRef (Fun i _ _ ) =Map.empty
+    nonRef (FKT i _ _ ) = _kvvalues i
     nonRef (IT j k ) = Map.singleton (S.singleton $ Inline j) (IT  j (tableNonRef2 <$> k ))
-    nonRef i@((Attr j _)) = Map.singleton (S.singleton $ Inline j) (i)
+    nonRef i@(Attr j _) = Map.singleton (S.singleton $ Inline j) (i)
 
 
 
@@ -514,10 +508,10 @@ addDefault
      -> TB  d b
 addDefault = def
   where
-    def ((Attr k i)) = (Attr k (LeftTB1 Nothing))
-    def ((Fun k i _)) = (Fun k i (LeftTB1 Nothing))
-    def ((IT  rel j )) = (IT  rel (LeftTB1 Nothing)  )
-    def ((FKT at rel j )) = (FKT (KV $ addDefault <$> _kvvalues at) rel (LeftTB1 Nothing)  )
+    def (Attr k i) = Attr k (LeftTB1 Nothing)
+    def (Fun k i _) = Fun k i (LeftTB1 Nothing)
+    def (IT  rel j ) = IT  rel (LeftTB1 Nothing)
+    def (FKT at rel j ) = FKT (KV $ addDefault <$> _kvvalues at) rel (LeftTB1 Nothing)
 
 
 
@@ -526,17 +520,17 @@ tableMeta :: Ord k => TableK k -> KVMetadata k
 tableMeta (Project s _ ) =  tableMeta s
 tableMeta t = KVMetadata (rawName t) (rawSchema t) (_rawScope t) (rawPK t) (rawDescription t) (fmap F.toList $ uniqueConstraint t) [] (F.toList $ rawAttrs t)[]  (F.toList $ rawDelayed t) (rawFKS t)(paths' <> paths)
   where
-    rec = filter isRecRel  ( rawFKS t)
+    rec = filter isRecRel  (rawFKS t)
     same = filter ((tableName t ==). fkTargetTable ) rec
     notsame = filter (not . (tableName t ==). fkTargetTable  ) rec
     paths = fmap (fmap (fmap F.toList). pathRelRel' ) notsame
     paths' = (\i -> if L.null i then [] else [MutRec i]) $ fmap ((head .unMutRec). fmap (fmap F.toList). pathRelRel' ) same
 
-tblist' :: Ord k => [TB  k a] -> TBData k a
+tblist' :: Ord k => [TB k a] -> TBData k a
 tblist' = tblistM
 
 
-isInline (Primitive _ (RecordPrim _ ) ) = True
+isInline (Primitive _ (RecordPrim _ )) = True
 isInline _ = False
 
 
@@ -680,18 +674,15 @@ tbUn un (TB1 (item)) =  (\kv ->  (\(KV item)->  KV $ Map.filterWithKey (\k _ -> 
   where pred kv k = (S.isSubsetOf (S.map _relOrigin k) kv )
 
 
-getPK m (TB1 i) = getPKM m i
 
 getPKM :: Ord k => KVMetadata k -> KV k a -> Map k (FTB a)
 getPKM m = Map.fromList .  getPKL m
 
 getPKL m k = concat $ F.toList (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m)) (  _kvvalues (k))))
 
-getAttr'   k =  L.sortBy (comparing fst) (concat (fmap aattr $ F.toList $  (  _kvvalues k)))
+getAttr' k =  L.sortBy (comparing fst) (concat (fmap aattr $ F.toList $  (  _kvvalues k)))
 
-getPKAttr m k = (concat . F.toList . (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m))   )) k
-
-getAttr  k = concat . F.toList  $ k
+getPKAttr m k = (concat . F.toList . Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k)(Set.fromList $ _kvpk m))) k
 
 
 getUn un k =   concat (fmap aattr $ F.toList $ (Map.filterWithKey (\k v -> Set.isSubsetOf  (Set.map _relOrigin k) un ) (  _kvvalues k)))

@@ -31,7 +31,7 @@ executable threepenny-layer
   if flag(rebug)
    ghc-options:         -O -threaded -rtsopts -fprof-auto -fprof-auto-calls  -dynamic
   else
-   ghc-options:          -threaded -rtsopts
+   ghc-options:          -O2 -threaded -rtsopts
 
   OTHER-MODules:
     CnpjReceita

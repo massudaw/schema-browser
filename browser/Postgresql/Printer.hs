@@ -249,11 +249,11 @@ codegen l =
 selectQuery
   :: InformationSchema
   -> KVMetadata Key
-     -> TBData Key ()
-     -> Maybe [I.Extended (FTB Showable)]
-     -> [(Key, Order)]
-     -> WherePredicate
-     -> ((Text,NameMap),Maybe [Either (TB Key Showable) (PrimType ,FTB Showable)])
+  -> TBData Key ()
+  -> Maybe [FTB Showable]
+  -> [(Key, Order)]
+  -> WherePredicate
+  -> ((Text,NameMap),Maybe [Either (TB Key Showable) (PrimType ,FTB Showable)])
 selectQuery inf m t koldpre order wherepred = (withDecl, (fmap Left <$> ordevalue )<> (fmap Right <$> predvalue))
       where
         withDecl = codegen tableQuery
@@ -267,9 +267,7 @@ selectQuery inf m t koldpre order wherepred = (withDecl, (fmap Left <$> ordevalu
         pred = maybe "" (\i -> " WHERE " <> T.intercalate " AND " i )  (orderquery <> predquery)
         (orderquery , ordevalue) =
           let
-            unIndex i  = catMaybes $ zipWith  (\i j -> (i,) <$> j) (_kvpk m) $ fmap unFin  i
-            unFin (I.Finite i) = Just i
-            unFin j = Nothing
+            unIndex = zip (_kvpk m)
             oq = (\i ->  pure $ generateComparison (first (justLabel (snd withDecl) m t) <$> (filter ((`elem` (fmap fst i)).fst) order))) . unIndex<$> koldpre
             koldPk :: Maybe [TB Key Showable]
             koldPk =  (\k -> uncurry Attr <$> L.sortBy (comparing ((`L.elemIndex` (fmap fst order)).fst)) k ) . unIndex <$> koldpre
@@ -300,8 +298,8 @@ expandJoin inf meta left env (IT i (LeftTB1 (Just tb) ))
   = expandJoin inf meta True env $ (IT i tb)
 expandJoin inf meta left env (t@(IT a (ArrayTB1 (TB1 tb :| _ ) ))) = do
     l <- lkTB t
-    let nmeta = tableMeta $ lookTable inf t
-        RecordPrim (s,t) = _keyAtom $ keyType a
+    let nmeta = lookSMeta inf r
+        r = _keyAtom $ keyType a
     itb <- expandInlineArrayTable nmeta tb l
     tjoin <- expandQuery' inf nmeta left tb
     r <- explodeRecord inf nmeta tb
@@ -311,8 +309,8 @@ expandJoin inf meta left env (t@(IT a (ArrayTB1 (TB1 tb :| _ ) ))) = do
           jt = if left then JDLeft  else JDNormal
 expandJoin inf meta left env (t@(IT a (TB1 tb))) =  do
      l <- lkTB t
-     let nmeta = tableMeta $ lookTable inf t
-         RecordPrim (s,t) =_keyAtom $ keyType a
+     let nmeta = lookSMeta inf r
+         r =_keyAtom $ keyType a
      itable <- expandInlineTable  nmeta tb l
      tjoin <- expandQuery' inf nmeta left tb
      return $  tjoin . (\row -> SQLRJoin row JTLateral jt  itable Nothing)
@@ -452,8 +450,6 @@ instance IsString (Maybe T.Text) where
 -- inferParamType e i |traceShow ("inferParam"e,i) False = undefined
 inferParamType op i = maybe "" (":: " <>) $ renderType $  inferOperatorType op i
 
-justLabel :: NameMap -> KVMetadata Key -> TBData Key () -> Key -> Text
-justLabel namemap meta t k = fst $ evalRWS (getLabels meta t  k) [Root meta] namemap
 
 indexLabel  :: Show a =>
     Access Key
@@ -556,15 +552,18 @@ tlabel' m t@(IT k tb ) =  do
   l <- lkTB t
   return (k,"i" <> l <> " :: " <> tableType m tb)
 
-getLabels :: KVMetadata Key -> TBData Key () ->  Key ->  Codegen Text
-getLabels m t k =   justError ("cant find label"  <> show k <> " - " <> show t) . M.lookup  k <$> (mapLabels label' t)
-    where
-      label' t@(Attr k _) =  do
-        l <- lkTB t
-        return (k,l )
-      label' t@(IT k tb ) = do
-        l <- lkTB t
-        return (k, "i" <>  l  <> " :: " <> tableType m tb)
+justLabel :: NameMap -> KVMetadata Key -> TBData Key () -> Key -> Text
+justLabel namemap meta t k = fst $ evalRWS (getLabels meta t  k) [Root meta] namemap
+  where
+    getLabels :: KVMetadata Key -> TBData Key () ->  Key ->  Codegen Text
+    getLabels m t k =  justError ("cant find label"  <> show k <> " - " <> show t) . M.lookup  (S.singleton $ Inline k) <$> mapLabels
+      where
+        label' t@(Attr k _) =  do
+          l <- lkTB t
+          return l
+        label' t@(IT k tb ) = do
+          l <- lkTB t
+          return $ "i" <>  l  <> " :: " <> tableType m tb
+        mapLabels  =  traverse label' (unKV $ tableNonRef2 t)
 
 
-mapLabels label' t =  M.fromList <$> traverse (label') (getAttr $ joinNonRef' t)
