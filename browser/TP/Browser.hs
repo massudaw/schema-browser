@@ -291,7 +291,7 @@ chooserTable inf bset cliTid cli = do
     (,) <$> (fst <$> selectFromTable "ordering"  Nothing Nothing []  pred2)
         <*> (fst <$> selectFromTable "table_name_translation" Nothing Nothing []  pred2 )
   w <- askWindow
-  el <- ui $ accumDiffCounter (\ix -> runUI w . (\((table,sub))-> do
+  el <- ui $ accumDiffCounter (\ix -> runUI w . (\table-> do
     header <- UI.h4
         # set UI.class_ "header"
         # sink0 text (facts $ T.unpack . lookDesc inf table <$> collectionTid translationDb)
@@ -306,7 +306,7 @@ chooserTable inf bset cliTid cli = do
         now <- getCurrentTime
         putPatch (patchVar ref) [PatchRow $ dpatch now])
     body <-  do
-      if L.length sub == 1
+      if L.null (rawUnion table)
          then
            viewerKey inf table ix cli cliTid
          else do
@@ -322,15 +322,15 @@ chooserTable inf bset cliTid cli = do
               # set children [l,b]
               # set UI.id_ (T.unpack $ rawName t)
               # set UI.class_ "tab-pane"
-          return (h,c)) sub
+          return (h,c)) (rawUnion table)
         h <- UI.div # set children (fst <$> els) # set UI.class_ "nav nav-tabs"
         runFunctionDelayed h $ ffi  "$(%1).find('li').click(function (e) { $('.active').removeClass('active');})" h
         b <- UI.div # set children (snd <$> els) # set UI.class_ "tab-content"
         UI.div # set children [h,b]
     UI.div
       # set children [header,body]
-      # set UI.style [("border","2px dotted "),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf))]).fst)
-        (M.fromList . fmap (\i -> (i,())) . M.toList <$> triding bset)
+      # set UI.style [("border","2px dotted "),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf))]))
+        (triding bset)
   layoutSel onAlt (F.toList <$> el)
 
 viewerKey
@@ -349,9 +349,9 @@ viewerKey inf table tix cli cliTid = do
       lookPK iv = fmap (unTB1 . Non.head . unArray) (unSOptional =<< i)
         where
           i = _fkttable <$> indexField (liftAccess (meta inf) "clients_table" $ (keyRef "selection") ) iv
-      lookKV iv = let i = lookAttr' (meta inf)  "data_index" iv
-                      unKey t = (,) ((\(Attr _ (TB1 (SText i)))-> lookKey inf  (tableName table) i ) $ lookAttr' (meta inf)  "key" t  )( (\(Attr _ (TB1 (SDynamic i)))-> i) $ lookAttr'  (meta inf)  "val" t )
-                in (\(IT _ (ArrayTB1 t)) -> F.toList $ fmap (unKey.unTB1) t) i
+      lookKV iv = let i = lookRef ["data_index"] iv
+                      unKey t = (,) ((\(TB1 (SText i))-> lookKey inf  (tableName table) i ) $ lookAttr' "key" t  )( (\(TB1 (SDynamic i))-> i) $ lookAttr' "val" t )
+                in (\(ArrayTB1 t) -> F.toList $ fmap (unKey.unTB1) t) i
 
   reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables' inf table Nothing mempty
   let

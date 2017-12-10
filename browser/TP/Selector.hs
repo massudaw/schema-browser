@@ -96,14 +96,14 @@ tableUsage inf orderMap selection table = (L.elem table (M.keys selection), tabl
 
 tableChooser :: InformationSchemaKV Key Showable
                       -> [Table]
-                      -> Tidings ( Tidings (Table -> Text) -> Table -> (Element) -> UI (Maybe Element))
+                      -> Tidings ( Tidings (Table -> Text) -> Table -> Element -> UI (Maybe Element))
                       -> Tidings (TableK Key -> Bool)
                       -> Text
                       -> Text
                       -> Tidings [TableK Key]
                       -> UI
                            (
-                            TrivialWidget (M.Map (TableK Key) [TableK Key]))
+                            TrivialWidget (S.Set  (TableK Key) ))
 tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables = do
   let
       pred2 =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
@@ -132,18 +132,16 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
         buttonString k = do
           b <- UI.input # set UI.type_ "checkbox"
           chkE <- UI.checkedChange b
-          let un = rawUnion k
-              ev = (k,) . (\b -> if b then (if L.null un then [k] else un) else [])<$>chkE
-          return (k,(b,ev))
+          return (k,(b,chkE))
 
     let
-      visible  = (\i j k sel tb -> (i tb && j tb && k tb ) || L.elem [tb] sel) <$> filterLabel <*> authorize <*> tableFilter <*> triding bset
+      visible  = (\i j k sel tb -> (i tb && j tb && k tb ) || S.member tb sel) <$> filterLabel <*> authorize <*> tableFilter <*> triding bset
 
-    let allTablesSel True = M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i)  $ e ) $ tables
-        allTablesSel False = M.empty
-        iniSel =  M.fromList . fmap  (\e -> (e,). (\i ->  if L.null (rawUnion i) then [i] else rawUnion  i)  $ e ) <$> iniTables
+    let allTablesSel True = S.fromList  $ tables
+        allTablesSel False = S.empty
+        iniSel =  S.fromList  <$> iniTables
     iniValue <- currentValue (facts iniSel)
-    let iniEvent = unionWith const (rumors iniSel ) (allTablesSel <$> rumors (triding all))
+    let iniEvent = unionWith const (rumors iniSel) (allTablesSel <$> rumors (triding all))
     iniBehaviour <- ui $ stepper iniValue  iniEvent
 
     bset <- checkDivSetTGen
@@ -162,12 +160,12 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
         where
           field =  G.lookup pk orderMap
           pk = idex (meta inf ) "ordering" [("table",int $ tableUnique  pkset ), ("schema",int $ schemaId inf)]
-    incClick field =  (lookMeta (meta inf ) "ordering" ,G.getIndex (lookMeta (meta inf ) "ordering" )field ,[patch $ fmap (+SNumeric 1) usage])
+    incClick field =  (lookMeta (meta inf ) "ordering" ,G.getIndex (lookMeta (meta inf ) "ordering" ) field ,[PAttr (lookKey (meta inf) "ordering" "usage") (PAtom $ usage +SNumeric 1) ])
         where
-          usage = lookAttr' (meta inf ) "usage"   field
+          TB1 usage = lookAttr'  "usage"   field
   sel0 <- ui $ currentValue (facts $ triding bset)
-  let diffSet = ((\j (o,_) -> (M.keysSet j, S.difference (M.keysSet j ) o )) <$> rumors (triding bset))
-  old <- ui $ accumB (M.keysSet sel0,S.empty)  diffSet
+  let diffSet = ((\j (o,_) -> ( j, S.difference  j  o )) <$> rumors (triding bset))
+  old <- ui $ accumB ( sel0,S.empty)  diffSet
   onEvent
       ((\i j d -> fmap incClick . ordRow i <$> F.toList (snd (d j))) <$> facts (collectionTid orddb) <*> old <@> diffSet)
       (ui . traverse (traverse (\(m,pk,p) -> do
@@ -214,11 +212,11 @@ selectListUI inf table itemListEl predicate (vpt,_,gist,sgist,_) constr tdi = do
         pageSize = 20
         lengthPage fixmap = (s  `div` pageSize) +  if s `mod` pageSize /= 0 then 1 else 0
           where (s,_) = fromMaybe (sum $ fmap fst $ F.toList fixmap ,M.empty ) $ M.lookup mempty fixmap
-        preindex = maybe id (\i -> filterfixed table i) <$> predicate <*> gist
-        sortList :: Tidings ([TBData CoreKey Showable] -> [TBData CoreKey Showable])
-        sortList =  sorting' <$> pure (fmap (,True) $ rawPK table)
+        preindex = maybe id (filterfixed table) <$> predicate <*> gist
+        sortList :: ([TBData CoreKey Showable] -> [TBData CoreKey Showable])
+        sortList =  sorting' (fmap (,True) $ rawPK table)
 
-      presort <- ui $ cacheTidings (sortList <*> fmap G.toList  preindex)
+      presort <- ui $ cacheTidings (sortList <$> fmap G.toList  preindex)
       -- Filter and paginate
       (offset,res3)<- do
         let

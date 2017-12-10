@@ -80,14 +80,14 @@ mapWidgetMeta  inf = do
     (_,(_,eventMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
     return $ (\e ->
           let
-              Just (TB1 (SText tname)) = unSOptional' $ _tbattr $ lookAttr' (meta inf)  "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
+              TB1 (SText tname) =  lookAttr' "table_name" $ unTB1 $ lookRef ["schema","table"] e
               table = lookTable inf tname
               evfields = join $ fmap (unArray . _tbattr ) . idx (meta inf) (tableMeta table) "event"   <$> erow
                 where
                   erow = G.lookup (idex (meta inf) "event" [("schema" ,int $ schemaId inf),("table",int (tableUnique table))])  eventMap
               Just (ArrayTB1 efields ) = indexFieldRec (liftAccess (meta inf) "geo" (Nested [keyRef "features"] $ Many [One $ keyRef  "geo"] )) e
-              (IT _ (ArrayTB1 features))= lookAttr' (meta inf) "features" e
-              (Attr _ color )= lookAttr' (meta inf) "color" e
+              ArrayTB1 features = lookRef ["features"] e
+              color = lookAttr'  "color" e
               projf  :: TBData Key Showable -> (FTB Showable , FTB (TBData Key Showable) ) -> Maybe (HM.HashMap Text A.Value)
               projf  r (efield@(TB1 (SText field)),features)  = fmap (\i ->  HM.fromList [("label",A.toJSON (HM.fromList $ i <> [("id", txt $ writePK (tableMeta table) r efield   ),("title"::Text , txt $ (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table) $  r))])) ,("style",A.toJSON (Row <$> features))]) $ join $ convField  <$> indexFieldRec (head $ liftAccess inf tname <$> indexer field) r
               proj r = projf r <$> zip (F.toList efields) (F.toList features)

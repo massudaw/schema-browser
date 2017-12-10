@@ -182,17 +182,17 @@ setup smvar args plugList w = void $ do
                             (ref,res) <- ui $ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] mempty
                             listBoxEl itemListEl2 ( G.toList <$> collectionTid ref)  (pure Nothing) (pure id) ( pure attrLine ) element metabody # set children [itemListEl,itemListEl2]-}
                         i -> do
-                          let pred = [(keyRef "user_name",Left (txt (snd $ username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                          let pred = [(keyRef "user_name",Left (txt (snd $ username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList ((F.toList tables)),Flip (AnyOp Equals)))]
                           dash <- metaAllTableIndexA inf "master_modification_table" pred
                           element metabody # set UI.children [dash] # set UI.style [("overflow","auto")] # set UI.class_ "col-xs-12"
                   "Stats" -> do
-                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList (S.toList tables),Flip (AnyOp Equals)))]
                       stats_load <- metaAllTableIndexA inf "stat_load_table" pred
                       stats <- metaAllTableIndexA inf "table_stats" pred
                       clients <- metaAllTableIndexA inf "clients"$  [(keyRef "schema",Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
                       element metabody # set UI.children [stats,stats_load,clients]
                   "Exception" -> do
-                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if M.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)))]
+                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList ((F.toList tables)),Flip (AnyOp Equals)))]
                       dash <- metaAllTableIndexA inf "plugin_exception" pred
                       element metabody # set UI.children [dash]
                   i -> errorWithStackTrace (show i)
@@ -218,10 +218,10 @@ listDBS metainf db = do
   let
     schemas schemasTB =  liftA2 (,) sname  stype <$> F.toList  schemasTB
       where
-        sname = untxt . lookAttr' metainf "name"
-        stype = untxt . lookAttr' metainf "type"
-        untxt (Attr _ (TB1 (SText s)))= s
-        untxt (Attr _ ((LeftTB1 (Just (TB1 (SText s))))))= s
+        sname = untxt . lookAttr' "name"
+        stype = untxt . lookAttr' "type"
+        untxt (TB1 (SText s))= s
+        untxt (LeftTB1 (Just (TB1 (SText s))))= s
   return (schemas  <$> collectionTid dbvar)
 
 loginWidget userI passI =  do

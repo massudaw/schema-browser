@@ -10,6 +10,7 @@ module SchemaQuery
   ,selectFromTable
   ,refTables'
   ,lookAttrM
+  ,lookRef
   ,lookAttr'
   ,lookAttrs'
   ,refTables
@@ -872,20 +873,21 @@ refTables' inf table page pred = do
 
 refTables inf table = refTables' inf table Nothing mempty
 
-lookAttrM  inf  k m = M.lookup (S.singleton k) ta
+lookRef k = _fkttable . lookAttrs' k
+
+lookAttrs' k = err . lookAttrsM k
+  where
+      err= justError ("no attr " <> show k )
+
+lookAttr' k = _tbattr . err . lookAttrM k
+  where
+      err= justError ("no attr " <> show k )
+
+lookAttrsM k m = M.lookup (S.fromList k) ta
     where
       ta = M.mapKeys (S.map (keyValue._relOrigin)) (unKV m)
 
-lookAttrs' inf  k m = err $  M.lookup (S.fromList k) ta
-    where
-      ta = M.mapKeys (S.map (keyValue._relOrigin)) (unKV m)
-      err= justError ("no attr " <> show k <> " for table " <> show (M.keys ta ))
-
-lookAttr' inf  k m = err $  M.lookup (S.singleton  k) ta
-    where
-      ta = M.mapKeys (S.map (keyValue._relOrigin)) (unKV m)
-      err= justError ("no attr " <> show k <> " for table " <> show (M.keys ta))
-
+lookAttrM k =  lookAttrsM [k]
 
 recoverEditDefault inf table (Just i) Keep = Just i
 recoverEditDefault inf table (Just i) Delete = Nothing

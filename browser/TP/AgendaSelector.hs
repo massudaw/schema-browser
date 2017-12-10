@@ -84,10 +84,10 @@ eventWidgetMeta inf cliZone= do
       (_,(_,evMap )) <- transactionNoLog (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
       return $ fmap (\e ->
         let
-            Just (TB1 (SText tname)) = unSOptional' $  _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
+            TB1 (SText tname) = lookAttr'  "table_name" . unTB1 $ lookRef ["schema","table"] e
             table = lookTable inf tname
             Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"event" $ keyRef "event") e
-            (Attr _ color )= lookAttr' (meta inf) "color" e
+            color = lookAttr'  "color" e
             toLocalTime = fmap to
               where to (STime (STimestamp i ))  = STime $ STimestamp $  i
                     to (STime (SDate i )) = STime $ SDate i
@@ -96,7 +96,7 @@ eventWidgetMeta inf cliZone= do
             convField (v) = [("start",toLocalTime $v)]
             convField i = errorWithStackTrace (show i)
             projf  r efield@(TB1 (SText field))  = (if (isJust $ join $  unSOptional <$> attr) then Left else Right) (M.fromList $ concat (convField <$> maybeToList attr  ) <> [("id", txt $ writePK (tableMeta table) r efield   ),("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color ),("field", efield )] :: M.Map Text (FTB Showable))
-                  where attr  = attrValue <$> lookAttrM inf field r
+                  where attr  = attrValue <$> lookAttrM field r
             proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table) $  r),)$  projf r <$> (F.toList efields)
             attrValue (Attr k v) = v
          in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,efields,proj)) ( G.toList evMap)
@@ -110,7 +110,7 @@ calendarView
      -> TimeZone
      -> t2 (t, TableK Key, t1 (FTB Showable),
             TBData Key Showable -> (a1, [Either a b]))
-     -> Tidings (M.Map (TableK Key) a2)
+    -> Tidings (S.Set (TableK Key) )
      -> Mode
      -> [Char]
      -> UTCTime
@@ -124,7 +124,7 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
       readPatch  = makePatch cliZone
       readSel = readPK inf . T.pack
     (tds, evc, innerCalendar) <- calendarSelRow readSel (agenda,resolution,incrementT)
-    edits <- ui$ accumDiff (\(tref,_)->  evalUI innerCalendar $ do
+    edits <- ui$ accumDiff (\tref->  evalUI innerCalendar $ do
       let ref  =  L.find ((== tref) .  (^. _2)) dashes
       traverse (\(_,t,fields,proj)-> do
             let pred = WherePredicate $ AndColl $ [ timePred inf t (fieldKey <$> fields ) (incrementT,resolution)] ++ fmap unPred (maybeToList predicate)

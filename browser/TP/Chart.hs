@@ -77,7 +77,7 @@ chartWidgetMetadata inf = do
         return evMap
       return $ fmap (\e ->
         let
-            Just (TB1 (SText tname)) = unSOptional' $  _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
+            (TB1 (SText tname)) = lookAttr' "table_name" $ unTB1 $  lookRef ["schema","table"] e
             table = lookTable inf tname
             tablId = int (tableUnique table)
             Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"metrics" $ keyRef "metrics") e
@@ -85,7 +85,7 @@ chartWidgetMetadata inf = do
             -- Just (Attr _ (ArrayTB1 timefields ))= indexField (liftAccess (meta inf )"event" $ keyRef "event") e
             timeFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "event" $ keyRef "event")  <$> G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
             geoFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "geo" $ keyRef "geo")  <$> G.lookup (idex (meta inf) "geo" [("schema" ,schId ),("table",tablId )])  geomap
-            (Attr _ color )= lookAttr' (meta inf) "color" e
+            color = lookAttr'  "color" e
             projf  r efield  = M.fromList [("value" ,ArrayTB1 $  attr <$> efield), ("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color )] :: M.Map Text (FTB Showable)
               where attr  (TB1 (SText field)) = _tbattr $ justError ("no attr " <> show field) (findAttr (lookKey inf tname field) r)
 
@@ -110,7 +110,7 @@ chartWidget body (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
     let calFun (resolution,incrementT,positionB) = mdo
             let
               evc = eventClick calendar
-            edits <- ui$ accumDiff (\(tref,_)->  evalUI calendar $ do
+            edits <- ui$ accumDiff (\(tref)->  evalUI calendar $ do
               charts <- UI.div  # set UI.style [("height", "300px"),("width", "900px")]
               calendarCreate  charts (show incrementT)
               let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes

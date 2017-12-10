@@ -394,7 +394,8 @@ tbRecCaseDiff inf table constr a wl plugItens preoldItems' = do
               return el
           fun False = do
             UI.div # set UI.style [("border","1px solid gray")]
-      sub <- UI.div # sink items  (pure .fun <$> facts btr )
+      els <- traverseUI  fun btr
+      sub <- UI.div # sink children (pure <$> facts els)
       out <- UI.div # set children [open,sub]
       binipre <- ui $ stepper  Keep ev
       return (TrivialWidget  (tidings binipre ev) out)
@@ -636,7 +637,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
     pred2 =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
     authPred =  [(keyRef "grantee",Left ( int $ fst $ username inf ,Equals))] <> pred2
   auth <- fst <$> ui (transactionNoLog (meta inf) $ selectFromTable "authorization" Nothing Nothing [] authPred)
-  let authorize =  (\autho -> fmap unArray . unSOptional' . _tbattr .  lookAttr' (meta inf) "authorizations"  =<<  G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ fst $ username inf)]) autho)  <$> collectionTid auth
+  let authorize =  (\autho -> fmap unArray . unSOptional' . lookAttr' "authorizations"  =<<  G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ fst $ username inf)]) autho)  <$> collectionTid auth
   -- Insert when isValid
   let insertEnabled = liftA2 (&&) (liftA2 (||) (onDiff isRight (const False ).  fmap (patchCheckInf inf m)<$>  inscrudp) (maybe False (isRight . tableCheck  m)  <$> inscrud )) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) inscrud gist)
   insertB <- UI.button
@@ -1258,7 +1259,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
                       now <- liftIO getCurrentTime
                       (sel ,(j,i)) <- calendarSelector
                       el <- traverseUI id $ (\delta time predicate -> do
-                        (e,l) <- calendarView inf predicate cliZone [selection] (pure (M.singleton targetTable [targetTable])) Basic delta time
+                        (e,l) <- calendarView inf predicate cliZone [selection] (pure (S.singleton targetTable )) Basic delta time
                         ui $ onEventIO (rumors l) (helbox .Just)
                         return e) <$> i <*> j <*> predicate
                       el2 <- UI.div  # sink children (facts el)
@@ -1305,7 +1306,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
           bop <- ui $ accumT False itemDClickE
           (celem,pretdi) <- dynCrudUITable inf  bop  staticold (fmap (fmap (fmap snd)) <$> plmods) targetTable  tdi
           let
-            fksel =   fmap (\box -> maybe ((M.empty,box) )(\ref -> ( M.fromList $ attrToTuple <$> ref ,box) ) $ backFKRefType relTable relType ifk box) <$>   pretdi
+            fksel = fmap (\box -> maybe ((M.empty,box) )(\ref -> ( M.fromList $ attrToTuple <$> ref ,box) ) $ backFKRefType relTable relType ifk box) <$>   pretdi
             diffFK (Just i ) (Just j) =   maybe Keep Diff  (diff i  j)
             diffFK (Just i ) Nothing = Delete
             diffFK Nothing Nothing = Keep
@@ -1324,8 +1325,8 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
       let
         tdfk = liftA2 (,) <$> tidings blsel elsel <*> tidings bleditall eleditu
       element pan
-          # sink  text (maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd )  <$>  facts (recoverEditChange <$> oldItems <*> tdfk ))
           # set UI.style [("border","1px solid gray"),("border-radius","4px"),("height","20px")]
+          # sink  text (maybe "" (L.take 50 . L.intercalate "," . fmap renderShowable . allKVRec' inf (tableMeta targetTable). snd )  <$>  facts (recoverEditChange <$> oldItems <*> tdfk ))
       selEls <- traverseUI selector  (tidings bh  eh)
       subnet <- UI.div  # sink children (facts selEls)
       subnet2 <- edit

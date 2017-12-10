@@ -63,12 +63,12 @@ accountWidgetMeta inf = do
     cliZone <- jsTimeZone
     return $ fmap (\e ->
           let
-              Just (TB1 (SText tname)) = unSOptional' $ _tbattr $ lookAttr' (meta inf) "table_name" $ unTB1 $ _fkttable $ lookAttrs' (meta inf) ["schema","table"] e
+              (TB1 (SText tname)) =  lookAttr' "table_name" $ unTB1 $ lookRef  ["schema","table"] e
               table = lookTable  inf tname
               tablId = int (tableUnique table)
               Just (Attr _ (ArrayTB1 efields )) =indexField  (liftAccess (meta inf) "event" $ keyRef "event") $ fromJust $ G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
-              (Attr _ (ArrayTB1 afields ))= lookAttr' (meta inf) "account" e
-              (Attr _ color )= lookAttr' (meta inf) "color" e
+              (ArrayTB1 afields )= lookAttr' "account" e
+              color =  lookAttr'  "color" e
               toLocalTime = fmap to
                 where to (STime (STimestamp i ))  = STime (STimestamp $ localTimeToUTC utc $  utcToLocalTime cliZone   i)
                       to (STime (SDate i )) = STime (SDate i)
@@ -77,10 +77,9 @@ accountWidgetMeta inf = do
               convField (v) = [("start",toLocalTime $v)]
               convField i = errorWithStackTrace (show i)
               projf  r efield@(TB1 (SText field)) afield@(TB1 (SText aafield))  = (if (isJust . unSOptional $ attr) then Left else Right) (M.fromList $ convField attr  <> [("id", txt $ writePK (tableMeta table) r efield   ),("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield ), ("commodity", accattr )] :: M.Map Text (FTB Showable))
-                    where attr  = attrValue $ lookAttr' inf field r
-                          accattr  = attrValue $ lookAttr' inf aafield r
+                    where attr = lookAttr' field r
+                          accattr  = lookAttr' aafield r
               proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r),)$  zipWith (projf r) ( F.toList efields) (F.toList afields)
-              attrValue (Attr k v) = v
            in ((color,table,efields,afields,proj))  ) ( G.toList aMap)
 
 
@@ -135,7 +134,7 @@ accountWidget body (incrementT,resolutionT) sel inf = do
                 )calendarSelT
               ) selected
           return ()
-    _ <- traverseUI calFun ((\i j -> filter (flip L.elem (concat (F.toList i)) .  (^. _2)) j )<$> sel <*> pure dashes)
+    _ <- traverseUI calFun ((\i j -> filter (flip L.elem ((F.toList i)) .  (^. _2)) j )<$> sel <*> pure dashes)
 
 
     return (legendStyle,dashes)

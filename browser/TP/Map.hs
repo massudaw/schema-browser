@@ -146,6 +146,6 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
         let els = foldr (liftA2 (:)) (pure []) fin
         element editor  # sink children (facts els)
         return ()
-    let calInp = (\i -> filter (flip L.elem (concat (F.toList i)) .  (^. _2)) dashes  )<$> sel
+    let calInp = (\i -> filter (flip L.elem (F.toList i) .  (^. _2)) dashes  )<$> sel
     onFFI "$(document).ready((%1))" (evalUI body $   traverseUI calFun calInp)
     return (legendStyle dashes ,dashes)

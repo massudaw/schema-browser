@@ -141,7 +141,6 @@ mapTEventDyn f x = do
   i <- currentValue  (facts x)
   mapT0EventDyn i f x
 
-
 cacheTidings :: Tidings a -> Dynamic (Tidings a)
 -- cacheTidings  t = return t
 cacheTidings  t = do
@@ -235,18 +234,18 @@ rangeBoxes fkbox bp = do
 instance Widget (RangeBox a) where
   getElement = _rangeElement
 
-checkDivSetTGen :: (Ord a,Eq a,Ord c) => [a] -> Tidings (Map a [c]) ->  (a -> UI (a,((Element,Event (a,([c])))) ))-> Tidings (a -> Element  -> UI Element ) -> UI (TrivialWidget (Map a [c]))
+checkDivSetTGen :: (Ord a,Eq a) => [a] -> Tidings (S.Set a ) ->  (a -> UI (a,(Element,Event Bool) ))-> Tidings (a -> Element  -> UI Element ) -> UI (TrivialWidget (S.Set a))
 checkDivSetTGen ks binit   el st = do
   buttons <- mapM el  ks
   vini <- currentValue (facts binit)
   let
-    evs = unionWith const (const <$> rumors binit) (foldr (unionWith (.)) never $ fmap (\(i,ab) -> (if L.null ab then M.delete i else M.alter (Just . maybe ab (L.nub . mappend ab) ) i)   ) . snd .snd <$> buttons)
-  bv <- ui $ accumB vini  evs
+    evs = unionWith const (const <$> rumors binit) (foldr (unionWith (.)) never $ (\(i,(_,ev)) -> (\ab -> if not ab then S.delete i else S.insert i)  <$> ev) <$> buttons)
+  bv <- ui $ accumT vini  evs
   -- Place sorted Itens
   dv <- UI.div # sink items (facts $(\ sti -> fmap (\ (k,(v,_)) -> sti k v)  $ buttons) <$> st )
   -- Sink check state to elems
-  mapM (\(k,e) -> element (fst e) # set UI.checked (isJust . M.lookup k $ vini) # sink UI.checked (isJust . M.lookup k <$> bv  )) buttons
-  return (TrivialWidget (tidings bv (flip ($) <$> bv <@> evs) ) dv)
+  mapM (\(k,e) -> element (fst e) # set UI.checked (S.member k $ vini) # sink UI.checked (S.member k <$> facts bv  )) buttons
+  return (TrivialWidget bv dv)
 
 
 checkDivSetT :: (Ord b ,Eq a) => [a] -> Tidings (a -> b) -> Tidings [a] ->  (a -> UI Element ) -> (a -> UI Element  -> UI Element ) -> UI (TrivialWidget [a])
@@ -255,9 +254,9 @@ checkDivSetT ks sort binit   el st = do
   let
     evs = unionWith const (const <$> rumors binit) (foldr (unionWith (.)) never $ fmap (\(i,b) -> if b then (i:) else L.delete i) . snd .snd <$> buttons)
   v <- currentValue (facts binit)
-  bv <- ui $ accumB v  evs
-  dv <- UI.div # sink items ((\f -> fmap (\ (k,(v,_)) -> st k (element v) # sink UI.checked (elem k <$> bv)) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$>  facts sort )
-  return (TrivialWidget (tidings bv (flip ($) <$> bv <@> evs) ) dv)
+  bv <- ui $ accumT v  evs
+  dv <- UI.div # sink items ((\f -> fmap (\ (k,(v,_)) -> st k (element v) # sink UI.checked (elem k <$> facts bv)) . L.sortBy (flip $ comparing (f . fst))  $ buttons) <$>  facts sort )
+  return (TrivialWidget bv  dv)
     where
       buttonString   k = do
         v <- currentValue (facts binit)
@@ -538,8 +537,8 @@ multiListBox bitems bsel bdisplay = do
         bindices = (M.fromList . flip zip [0..]) <$> bitems
         bindex   = lookupIndex <$> bindices <*> bsel
         lookupIndex indices sel = catMaybes $ (flip M.lookup indices) <$> sel
-    els <- ui $ accumDiff (\(k,v)-> evalUI list $  UI.option # v) (liftA2 (\i j -> M.fromList $ (\ix -> (ix, j ix ))<$> i) bitems bdisplay)
-    element list # sink children (facts $ (\m i -> F.toList . M.mapKeys ( flip M.lookup i) $ m)<$> els <*> bindices)
+    els <- ui $ accumDiff (\k-> evalUI list $  UI.option ) (S.fromList <$> bitems )
+    element list # sink items (facts $ (\m l  -> fmap (uncurry l) . M.toList .fmap element  $ m)<$> els <*> bdisplay )
 
     -- animate output selection
 
@@ -630,7 +629,7 @@ testDyn = return $ do
   list <- multiListBox (pure [1,2,3,4,5]) (pure $ [1])  (pure (line.show))
   b <- checkedWidget (pure True)
   out <- ui $ accumDiff (\i -> evalUI (getElement list) $ do
-    UI.div # set text (show i) # sink UI.style (noneShow <$> facts (triding b)) ) (fmap (M.fromList . fmap (\i -> (i,i))) $ triding list)
+    UI.div # set text (show i) # sink UI.style (noneShow <$> facts (triding b)))  (fmap S.fromList  $ triding list)
   nest <- UI.div # sink children (F.toList <$> facts out)
   UI.div # set children [getElement list,getElement b,nest]
 
@@ -717,66 +716,66 @@ line n =   set  text n
 
 accumDiffCounter
   :: (Show k ,Prelude.Ord k) =>
-    (Int -> (k,a) -> Dynamic b)
-     -> Tidings (M.Map k a )
+    (Int -> k -> Dynamic b)
+     -> Tidings (S.Set k)
      -> Dynamic
           (Tidings (M.Map k b))
 accumDiffCounter  f t = mdo
   ini <- currentValue (facts t)
-  iniout <- liftIO$ mapM (\(ix,v)-> evalDynamic (f ix) v)$ zip [0..] $M.toList ini
+  iniout <- liftIO$ mapM (\(ix,v)-> evalDynamic (f ix) v)$ zip [0..] $S.toList ini
   let (del,addpre) = diffAddRemove t
-  add <- mapEvent (\((ix,_),v) -> mapM (\(ix,v)-> evalDynamic (f ix) v) $zip [ix..] (M.toList $ v) )  $(,)<$>bs <@>addpre
+  add <- mapEvent (\((ix,_),v) -> mapM (\(ix,v)-> evalDynamic (f ix) v) $zip [ix..] (S.toList $ v) )  $(,)<$>facts bs <@>addpre
   del2 <- mapEvent (\((ix,fin),d) -> do
          let fins =  catMaybes $ fmap (flip M.lookup fin) d
          _ <- traverse sequence_ $ fmap snd fins
-         return d)  ((,) <$> bs <@> (S.toList  <$> del ))
+         return d)  ((,) <$> facts bs <@> (S.toList  <$> del ))
   let evadd = ((\s (acc,m) -> ( acc + length s,foldr (uncurry M.insert ) m s)) <$> add )
       evdel = ( (\s (acc,m) -> (acc,foldr (M.delete ) m s)) <$> del2 )
   let eva = unionWith (.) evdel evadd
-  bs <- accumB  (M.size ini,M.fromList iniout)  eva
-  registerDynamic (void $ join $ traverse sequence_ . fmap snd . F.toList  .snd <$> currentValue bs)
-  return (fmap (fmap fst ) $ tidings (fmap snd bs) (fmap snd $ flip ($) <$> bs <@> eva))
+  bs <- accumT  (S.size ini,M.fromList iniout)  eva
+  registerDynamic (void $ join $ traverse sequence_ . fmap snd . F.toList  .snd <$> currentValue (facts bs))
+  return (fmap (fmap fst ) $ fmap snd $ bs)
 
 
 accumDiff
   :: (Show k ,Prelude.Ord k) =>
-     ((k,a) -> Dynamic b)
-     -> Tidings (M.Map k a )
+     (k -> Dynamic b)
+     -> Tidings (S.Set k)
      -> Dynamic
           (Tidings (M.Map k b))
 accumDiff  f t = mdo
   ini <- currentValue (facts t)
-  iniout <- liftIO$ mapM (evalDynamic f)$ M.toList ini
+  iniout <- liftIO$ mapM (evalDynamic f)$ S.toList ini
   let (del,addpre) = diffAddRemove t
-  add <- mapEvent (mapM (evalDynamic f). M.toList) addpre
+  add <- mapEvent (mapM (evalDynamic f). S.toList) addpre
   del2 <- mapEvent (\(fin,d) -> do
          let fins =  catMaybes $ fmap (flip M.lookup fin) d
          _ <- traverse sequence_ $ fmap snd fins
-         return d)  ((,) <$> bs <@> (S.toList  <$> del ))
+         return d)  ((,) <$> facts bs <@> (S.toList  <$> del ))
   let eva = unionWith (.) ( (\s m -> foldr (M.delete ) m s) <$> del2 ) ((\s m -> foldr (uncurry M.insert ) m s) <$> add )
-  bs <- accumB  (M.fromList iniout)  eva
-  registerDynamic (void $ join $ traverse sequence_ . fmap snd . F.toList  <$> currentValue bs)
-  return (fmap (fmap fst ) $ tidings bs (flip ($) <$> bs <@> eva))
+  bs <- accumT  (M.fromList iniout)  eva
+  registerDynamic (void $ join $ traverse sequence_ . fmap snd . F.toList  <$> currentValue (facts bs))
+  return (fmap (fmap fst ) $ bs)
 
-evalDynamic :: ((k,a) -> Dynamic b) -> (k,a) -> IO (k,(b,[IO ()]))
-evalDynamic f l =  fmap ((fst l,)) . runDynamic $ f l
+evalDynamic :: (k -> Dynamic b) -> k -> IO (k,(b,[IO ()]))
+evalDynamic f l =  fmap (l,) . runDynamic $ f l
 
 closeDynamic  m = do
   (i,v) <- runDynamic m
   sequence_ v
   return i
 
-diffAddRemove :: (Show k,Ord k) => Tidings (M.Map k a )  -> (Event (S.Set k) ,Event (M.Map k a))
+diffAddRemove :: (Show k,Ord k) => Tidings (S.Set k)  -> (Event (S.Set k) ,Event (S.Set k))
 diffAddRemove l= (delete,add)
     where
-      delete  = fmap M.keysSet $filterJust $ prune <$> evdell
+      delete  = filterJust $ prune <$> evdell
       add =  filterJust $ prune <$> evadd
-      diff i j = M.difference i  j
+      diff i j = S.difference i  j
       evdiff = diffEventKeys (facts l ) (rumors l)
       evadd = flip diff <$> facts l <@> evdiff
       evdell =  diff <$> facts l <@> evdiff
-      prune i = if M.null i  then Nothing else Just i
-      diffEventKeys b ev = filterJust $ (\i j -> if M.keysSet i == M.keysSet j then Nothing else Just j ) <$> b <@> ev
+      prune i = if S.null i  then Nothing else Just i
+      diffEventKeys b ev = filterJust $ (\i j -> if  i ==  j then Nothing else Just j ) <$> b <@> ev
 
 onFFI ff handler = do
     (e,h) <- ui $ newEvent
