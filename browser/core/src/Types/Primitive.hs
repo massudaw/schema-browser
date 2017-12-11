@@ -736,6 +736,8 @@ class ConstantGen v where
 instance ConstantGen (FTB Showable) where
   generate = generateConstant
 
+keyattrs :: Ord k => TB k b -> Set (Rel k)
+keyattrs = S.fromList . keyattri
 
 generateConstant CurrentDate = unsafePerformIO $ do
         i<- getCurrentTime

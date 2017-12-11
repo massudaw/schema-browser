@@ -227,7 +227,7 @@ getFKRef inf predtop rtable (evs,me,old) set (FKInlineTable  r j ) =  do
 getFKRef inf predtop rtable (evs,me,old) v (FunctionField a b c) = do
   let
     addAttr :: TBData Key Showable -> Either ([TB Key Showable],[Rel Key]) (TBData Key Showable)
-    addAttr i = Right $ maybe i (\r -> (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) r   i) ) i) (evaluate  a b funmap c i)
+    addAttr i = Right $ maybe i (\r -> (\(KV i) -> KV (M.insert (keyattrs r) r i) ) i) (evaluate  a b funmap c i)
   return (evs,me >=> addAttr ,old <> S.singleton a )
 
 getFKRef inf predtop rtable (evs,me,old) set (RecJoin i j) = return (evs,me,old)
@@ -278,7 +278,7 @@ getFKRef inf predtop rtable (evs,me,old) set (FKJoinTable i j  ) =  do
                         taratt = getAtt tar (tableNonRef' m)
                         tarinj = getAtt inj (tableNonRef' m)
                     addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
-                    addAttr r = (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) r  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k   ) i ))
+                    addAttr r = (\(KV i) -> KV (M.insert (keyattrs r) r  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k) i ))
                     joined i = do
                        fk <- joinFK i
                        return $ addAttr  fk i
@@ -1053,7 +1053,7 @@ loadFKDisk  inf old  re (RecJoin i l)
 loadFKDisk  _ _ _ _  = return (const Nothing)
 
 addAttr :: Ord k => S.Set k -> TBData k Showable -> Column k Showable ->  TBData k Showable
-addAttr refl  i r = (\(KV i) -> KV (M.insert (S.fromList $ keyattri r) (r)  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k   ) i )) i
+addAttr refl  i r = (\(KV i) -> KV (M.insert (keyattrs r) (r)  $ M.filterWithKey (\k _ -> not $ S.map _relOrigin k `S.isSubsetOf` refl && F.all isInlineRel k   ) i )) i
 
 
 writeSchema (schema,schemaVar) = do

@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts,TupleSections,ScopedTypeVariables,LambdaCase,RankNTypes,DeriveFunctor,RecordWildCards,NoMonomorphismRestriction,RecursiveDo #-}
+{-# LANGUAGE FlexibleContexts,TupleSections,ScopedTypeVariables,RecordWildCards,NoMonomorphismRestriction,RecursiveDo #-}
 module TP.Widgets where
 
 
@@ -226,8 +226,8 @@ data RangeBox a
   }
 
 rangeBoxes fkbox bp = do
-  rangeInit <- listBox bp (const <$> pure Nothing <*> fkbox) (pure id) (pure (set text . show ))
-  rangeEnd <- listBox bp (const <$> pure Nothing <*> fkbox) (pure id) (pure (UI.set text . show ))
+  rangeInit <- listBox bp (const <$> pure Nothing <*> fkbox) (pure (set text . show ))
+  rangeEnd <- listBox bp (const <$> pure Nothing <*> fkbox) (pure (UI.set text . show ))
   range <- UI.div # set children (getElement <$> [rangeInit,rangeEnd])
   return $ RangeBox (  liftA2 interval'' <$> (triding rangeInit) <*> (triding rangeEnd)) range
 
@@ -345,8 +345,8 @@ checkedWidgetM init = do
   return $ TrivialWidget  (tidings b e) dv
 
 
-wrapListBox l p f q = do
-  o <- listBox l p f q
+wrapListBox l p  q = do
+  o <- listBox l p  q
   return $ TrivialWidget (triding o ) (getElement o)
 
 optionalListBox' l o  s = mdo
@@ -357,8 +357,8 @@ optionalListBox' l o  s = mdo
   return $ TrivialWidget (tidings st sel ) (getElement ol)
 
 
-optionalListBox l o f s = do
-  o <- listBox ((Nothing:) <$>  fmap (fmap Just) l) (fmap Just <$> o) f s
+optionalListBox l o  s = do
+  o <- listBox ((Nothing:) <$>  fmap (fmap Just) l) (fmap Just <$> o) s
   return $TrivialWidget  (fmap join $ triding o)(getElement o)
 
 interval'' i j = Interval.interval (ER.Finite i ,True) (ER.Finite j , True)
@@ -468,12 +468,11 @@ listBoxElEq :: forall a. (Show a)
     ->  Element
     -> Tidings [a]               -- ^ list of items
     -> Tidings (Maybe a)         -- ^ selected item
-    -> Tidings ([a] -> [a])      -- ^ view list to list transform (filter,sort)
     -> Tidings (a -> UI Element -> UI Element) -- ^ display for an item
     -> UI (TrivialWidget (Maybe a))
-listBoxElEq eq list bitems bsel bfilter bdisplay = do
+listBoxElEq eq list bitems bsel bdisplay = do
     let bindices :: Tidings [a]
-        bindices =  bfilter <*> bitems
+        bindices =  bitems
     -- animate output items
     let
         bindex   = lookupIndex <$> facts bitems <#> bsel
@@ -508,12 +507,11 @@ listBoxElEq eq list bitems bsel bfilter bdisplay = do
 listBox :: forall a. (Ord a,Show a)
     => Tidings [a]               -- ^ list of items
     -> Tidings (Maybe a)         -- ^ selected item
-    -> Tidings ([a] -> [a])      -- ^ view list to list transform (filter,sort)
     -> Tidings (a -> UI Element -> UI Element) -- ^ display for an item
     -> UI (TrivialWidget (Maybe a))
-listBox bitems bsel bfilter bdisplay = do
+listBox bitems bsel bdisplay = do
     list <- UI.select
-    listBoxEl  list bitems bsel bfilter bdisplay
+    listBoxEl  list bitems bsel bdisplay
 
 at_ :: [a] -> Int -> Either String a
 at_ xs o | o < 0 = Left $ "index must not be negative, index=" ++ show o
@@ -538,7 +536,7 @@ multiListBox bitems bsel bdisplay = do
         bindex   = lookupIndex <$> bindices <*> bsel
         lookupIndex indices sel = catMaybes $ (flip M.lookup indices) <$> sel
     els <- ui $ accumDiff (\k-> evalUI list $  UI.option ) (S.fromList <$> bitems )
-    element list # sink items (facts $ (\m l  -> fmap (uncurry l) . M.toList .fmap element  $ m)<$> els <*> bdisplay )
+    element list # sink items (facts $ (\m l  idx-> fmap (uncurry l) . L.sortBy (comparing (\(v,_) -> M.lookup v idx)) . M.toList .fmap element  $ m)<$> els <*> bdisplay <*> bindices)
 
     -- animate output selection
 
@@ -657,9 +655,6 @@ testWidget e = startGUI (defaultConfig { jsPort = Just 10000 , jsStatic = Just "
 flabel = UI.span # set UI.class_ (L.intercalate " " ["label","label-default"])
 hlabel h = UI.span # set UI.class_ (L.intercalate " "$ ["label","label-default"] ++ h )
 
-onEventFT
-  :: Event a ->  (a -> UI b) -> UI  ()
-onEventFT = onEvent
 
 
 infixl 4 <$|>
@@ -743,19 +738,7 @@ accumDiff
      -> Tidings (S.Set k)
      -> Dynamic
           (Tidings (M.Map k b))
-accumDiff  f t = mdo
-  ini <- currentValue (facts t)
-  iniout <- liftIO$ mapM (evalDynamic f)$ S.toList ini
-  let (del,addpre) = diffAddRemove t
-  add <- mapEvent (mapM (evalDynamic f). S.toList) addpre
-  del2 <- mapEvent (\(fin,d) -> do
-         let fins =  catMaybes $ fmap (flip M.lookup fin) d
-         _ <- traverse sequence_ $ fmap snd fins
-         return d)  ((,) <$> facts bs <@> (S.toList  <$> del ))
-  let eva = unionWith (.) ( (\s m -> foldr (M.delete ) m s) <$> del2 ) ((\s m -> foldr (uncurry M.insert ) m s) <$> add )
-  bs <- accumT  (M.fromList iniout)  eva
-  registerDynamic (void $ join $ traverse sequence_ . fmap snd . F.toList  <$> currentValue (facts bs))
-  return (fmap (fmap fst ) $ bs)
+accumDiff  f t = accumDiffCounter (\_ -> f ) t
 
 evalDynamic :: (k -> Dynamic b) -> k -> IO (k,(b,[IO ()]))
 evalDynamic f l =  fmap (l,) . runDynamic $ f l
@@ -792,13 +775,13 @@ hoverTip elemD= do
 hoverTip2 elemIn elemOut = do
   (hoev,h) <- ui newEvent
   ho <- UI.dblclick elemIn
-  onEvent ho (\_ -> liftIO . h $ True )
+  ui $ onEventIO ho (\_ -> h $ True )
   bh <- ui $ stepper False hoev
   traverseUI (\i ->
     if i
     then  do
       le <- UI.leave elemOut
-      onEvent le (\_ -> liftIO . h $ False)
+      ui $ onEventIO le (\_ -> h $ False)
       return ()
     else return ()) (tidings bh hoev)
   return $ hoev

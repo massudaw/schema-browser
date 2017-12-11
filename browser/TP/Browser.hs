@@ -359,14 +359,13 @@ viewerKey inf table tix cli cliTid = do
     tdip = join . fmap (join . fmap ( fmap (lookKV ). lookPK ). lookT ) <$> cliTid
   itemList <- selector inf table reftb (pure Nothing) tdi
   v <- ui $ currentValue (facts tdi)
-  tds <-  mdo
+  tds <- do
     let
-      updatedValue = (\i j -> const . join $ flip G.lookup j  . G.getIndex  (tableMeta table)<$> i )<$> facts tds <@> rumors vpt
+      updatedValue = (\i j -> const . join $ flip G.lookup j  . G.getIndex  (tableMeta table)<$> i )<$> facts (triding itemList)<@> rumors vpt
       selection = const <$> rumors (triding itemList)
-    tds <- ui $ accumT  v (unionWith (.) selection  updatedValue)
-    ui $ cacheTidings tds
+    ui $ accumT  v (unionWith (.) selection  updatedValue)
 
-  (cru,pretdi) <- crudUITable inf table reftb [] [] (allRec' (tableMap inf) table) tds
+  (cru,pretdi) <- crudUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) tds
   let pktds = fmap (getPKM (tableMeta table))<$> tds
   dbmeta  <- ui $ prerefTable (meta inf)(lookTable (meta inf ) "clients")
   w  <- askWindow

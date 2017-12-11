@@ -85,8 +85,9 @@ positionSel = do
     positionB <- ui $ stepper Nothing (Just <$>e)
     let
     bcpose <- UI.click bcpos
-    onEventFT bcpose  (\_ -> runFunction $ ffi "fireCurrentPosition(%1)" bcpos)
-    onEventFT (currentPosition bcpos ) (liftIO. h )
+    w <- askWindow
+    ui $ onEventIO  bcpose  (\_ -> runDynamic $ runUI w $ runFunction $ ffi "fireCurrentPosition(%1)" bcpos)
+    ui $ onEventIO (currentPosition bcpos ) h
     runFunction $ ffi "fireCurrentPosition(%1)" bcpos
     return (bcpos,tidings positionB (diffEvent positionB  (Just <$> e)))
 
@@ -166,9 +167,9 @@ tableChooser  inf tables legendStyle tableFilter iniSchemas iniUsers iniTables =
   sel0 <- ui $ currentValue (facts $ triding bset)
   let diffSet = ((\j (o,_) -> ( j, S.difference  j  o )) <$> rumors (triding bset))
   old <- ui $ accumB ( sel0,S.empty)  diffSet
-  onEvent
+  ui $ onEventIO
       ((\i j d -> fmap incClick . ordRow i <$> F.toList (snd (d j))) <$> facts (collectionTid orddb) <*> old <@> diffSet)
-      (ui . traverse (traverse (\(m,pk,p) -> do
+      (runDynamic . traverse (traverse (\(m,pk,p) -> do
         _ <- transactionNoLog (meta inf ) $ patchFrom m pk p
         putPatch (patchVar $  iniRef orddb) [PatchRow (pk,p)] )))
 
@@ -234,7 +235,7 @@ selectListUI inf table itemListEl predicate (vpt,_,gist,sgist,_) constr tdi = do
 
       -- Select page
       res4 <- ui $ cacheTidings ((\o -> L.take pageSize . L.drop (o*pageSize) ) <$> triding offset <*> res3)
-      lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) <$>    res4 ) (fmap Just <$> tdi) (pure id) ((\i -> maybe id (i$) )<$> showFK inf (tableMeta table))
+      lbox <- listBoxEl itemListEl ((Nothing:) . fmap (Just ) <$>    res4 ) (fmap Just <$> tdi) ((\i -> maybe id (i$) )<$> showFK inf (tableMeta table))
       fInp <-  UI.div # set children [filterInp,getElement offset]  # set UI.class_ "row"
       return ( triding lbox ,[fInp,itemListEl])
 

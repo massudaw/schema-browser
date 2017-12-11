@@ -122,7 +122,7 @@ chartWidget body (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
                     let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup pk j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
                     tdib <- ui $ stepper Nothing (join <$> evsel)
                     let tdi = tidings tdib (join <$> evsel)
-                    (el,_) <- crudUITable inf  t reftb [] [] (allRec' (tableMap inf) $ t)  tdi
+                    (el,_) <- crudUITable inf  t reftb mempty [] (allRec' (tableMap inf) $ t)  tdi
                     traverseUI
                       (\i -> do
                         calendarAddSource charts chart t (renderShowable <$> fields ) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .   fmap (snd.proj) $ L.sortBy (comparing (G.getIndex (tableMeta t)))$ G.toList i))
