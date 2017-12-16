@@ -757,10 +757,9 @@ transaction inf log = withDynamic ((transactionEd $ schemaOps inf) inf ) $ do
   return md
 
 fullDiffEditInsert :: KVMetadata Key -> TBData Key Showable -> TBData Key Showable -> TransactionM  (Maybe (TBIdx Key Showable))
--- fullDiffEditInsert old@((k1,v1) ) (k2,v2)  | traceShow ("fullDiffEditInsert",v1,v2) False = undefined
-fullDiffEditInsert k1 old@v1 v2 = do
+fullDiffEditInsert k1 old v2 = do
    inf <- ask
-   edn <-  KV <$>  Tra.sequence (M.intersectionWith (\i j -> tbDiffEditInsert k1 (i) (j) ) (unKV v1 ) (unKV v2))
+   edn <-  KV <$>  Tra.sequence (M.intersectionWith (tbDiffEditInsert k1)  (unKV old) (unKV v2))
    when (isJust $ diff (tableNonRef' old) (tableNonRef' edn) ) $ do
       mod <- traverse (updateFrom  k1 old  (G.getIndex k1 edn)) (diff old edn)
       tell (maybeToList $ join  mod)
@@ -768,19 +767,12 @@ fullDiffEditInsert k1 old@v1 v2 = do
 
 
 fullDiffEdit :: KVMetadata Key ->TBData Key Showable -> TBData Key Showable -> TransactionM  (Maybe (TBIdx Key Showable))
--- fullDiffEdit old@((k1,v1) ) (k2,v2)  | traceShow ("fullDiffEditInsert",v1,v2) False = undefined
-fullDiffEdit k1 old@(v1) (v2) = do
-   inf <- ask
-   edn <-  KV <$>  Tra.sequence (M.intersectionWith (tbDiffEdit k1) (unKV v1 ) (unKV v2))
-   when ( isJust $ diff (tableNonRef' old) (tableNonRef' edn) ) $ do
-      mod <- traverse (updateFrom  k1 old (G.getIndex k1 edn)) (diff old edn)
-      tell (maybeToList $ join mod)
-   return (diff old edn)
+fullDiffEdit =  fullDiffEditInsert
 
 fullDiffInsert :: KVMetadata Key ->TBData Key Showable -> TransactionM  (Maybe (TableModification (RowPatch Key Showable)))
 fullDiffInsert k2 v2 = do
    inf <- ask
-   edn <-  KV <$>  Tra.traverse (\j -> tbInsertEdit k2 j ) (unKV v2)
+   edn <-  KV <$>  Tra.traverse (tbInsertEdit k2) (unKV v2)
    mod <- insertFrom k2 edn
    tell (maybeToList mod)
    return mod
@@ -792,10 +784,6 @@ tbDiffEditInsert k1 i j
   | isJust (diff i  j) = tbEdit k1 i j
   | otherwise = tbInsertEdit  k1 j
 
-tbDiffEdit :: KVMetadata Key -> Column Key Showable -> Column Key Showable -> TransactionM (Column Key  Showable)
-tbDiffEdit m i j
-  | i == j =  return j
-  | otherwise = tbEdit m i j
 
 tbEdit :: KVMetadata Key -> Column Key Showable -> Column Key Showable -> TransactionM (Column Key Showable)
 -- tbEdit i j | traceShow (i,j) False = undefined
