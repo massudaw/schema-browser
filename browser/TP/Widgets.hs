@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts,TupleSections,ScopedTypeVariables,RecordWildCards,NoMonomorphismRestriction,RecursiveDo #-}
+{-# LANGUAGE FlexibleContexts,TupleSections,ScopedTypeVariables,RecordWildCards,RecursiveDo #-}
 module TP.Widgets where
 
 
@@ -461,10 +461,15 @@ multiUserSelection = _selectionMLB
 
 
 setLookup x s = if S.member x s then Just x else Nothing
+listBoxEl :: (Eq a , Show a) => Element
+    -> Tidings [a]               -- ^ list of items
+    -> Tidings (Maybe a)         -- ^ selected item
+    -> Tidings (a -> UI Element -> UI Element) -- ^ display for an item
+    -> UI (TrivialWidget (Maybe a))
+
 listBoxEl = listBoxElEq (==)
-listBoxElEq :: forall a. (Show a)
-    =>
-    (a -> a -> Bool)
+listBoxElEq ::
+    forall a . Show a => (a -> a -> Bool)
     ->  Element
     -> Tidings [a]               -- ^ list of items
     -> Tidings (Maybe a)         -- ^ selected item
@@ -623,7 +628,7 @@ pruneTidings chw tds =   tidings chkBH chkAll
 
 
 
-testDyn = return $ do
+testDyn = do
   list <- multiListBox (pure [1,2,3,4,5]) (pure $ [1])  (pure (line.show))
   b <- checkedWidget (pure True)
   out <- ui $ accumDiff (\i -> evalUI (getElement list) $ do

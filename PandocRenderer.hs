@@ -38,7 +38,7 @@ renderProjectContract = myDoc
    where
       tname = "pricing"
       var str =  maybe "" fromString . fmap (renderShowable) <$> idxM str
-      varT str =  maybe "" fromString . fmap (renderShowable) <$> idxR str
+      varT str =  fromString . renderShowable <$> idxR str
       payA = displayPay <$> (maybe (TB1 $ SText "Não Agendado") id <$> idxM "payment_date") <*> idxK "payment_description"  <*> idxK "price"
           where displayPay i da j = plain $ (fromString.renderShowable $ i ) <>  " - " <>  (fromString . renderShowable $ da )<> " - R$ " <> ((fromString.renderShowable) j)
       myDoc :: ArrowReader
@@ -49,7 +49,7 @@ renderProjectContract = myDoc
                      ( atR "id_owner,id_contact"
                         ( atR "id_owner" ( varT "owner_name"  ))) -< env
               art <- atR "id_project" $ atR "art" $ atR "tag_art,pagamento" $ payA-< ()
-              end <- atR "id_project" $ atR "address" (var "logradouro" <> ", "<> var "number" <> " " <> var "complemento" <> " " <> var "cep" <>" " <> var "municipio" <> "-" <> var "uf" ) -< env
+              end <- atR "id_project" $ atR "address" (varT "logradouro" <> ", "<> varT "number" <> " " <> varT "complemento" <> " " <> varT "cep" <>" " <> varT "municipio" <> "-" <> varT "uf" ) -< env
               dare <- atR "id_project" $ atR "tag_taxa,taxa_dare" $ payA -< ()
               returnA -<   (setT ( para $ "Contrato de Prestação de Serviços / nº " ) $ doc $
                      ((para "Cláusula Primeira"
@@ -103,13 +103,15 @@ arrayR s = unArray <$> idxK s
 renderProjectPricingA = myDoc
    where
       tname = "pricing"
+
+      render :: IsString s => FTB Showable -> s
       render = fromString . renderShowable
-      var str =  maybe "" fromString . fmap (renderShowable) <$> idxM str
-      varT str =  maybe "" fromString . fmap (renderShowable) <$> idxR str
-      arrayVar  str = (bulletList . concat . maybeToList . join . fmap   (cshow ) ) <$> idxR str
+      var str =  maybe "" (fromString.renderShowable)<$> idxM str
+      varT str =  fromString . renderShowable <$> idxR str
+      arrayVar  str = bulletList . cshow   <$> idxR str
         where
-          cshow (ArrayTB1 a ) = Just $ (plain . fromString . renderShowable) <$> F.toList a
-          cshow (LeftTB1 a ) =  join $ fmap cshow a
+          cshow (ArrayTB1 a ) =  plain . fromString . renderShowable <$> F.toList a
+          cshow (LeftTB1 a ) =  maybe [] cshow a
 
       address_model = atR "address"
                             ((,,)<$> (var "logradouro" <> ", "<> var "number" <> " " <> var "complemento")
@@ -121,7 +123,7 @@ renderProjectPricingA = myDoc
           pdoc <- (proc env -> do
               f <- atR "id_project"
                      ( atR "id_owner,id_contact"
-                        ( atR "id_contact" ((\f m l -> f <> " " <> m <> " " <> l ) <$> varT "firstname"  <*> var "middlename" <*> var "lastname"))) -< env
+                        ( atR "id_contact" ((\f m l -> f <> " " <> m <> " " <> l ) <$> varT "firstname"  <*> varT "middlename" <*> varT "lastname"))) -< env
               d <- var "pricing_execution_time" -< env
               idp <- atR "id_project" (varT "id_project") -< env
               da <- varT "price_available" -< env
@@ -134,8 +136,8 @@ renderProjectPricingA = myDoc
                      (atR "id_owner,id_contact"
                         (atR "id_owner"  ((,,)<$> varT "owner_name"
                                             <*> atAny "ir_reg"
-                                                [fmap (\i -> "CPF: " <> render i) . join . fmap unSOptional'<$>  idxR "cpf_number"
-                                                                ,fmap (\i -> "CNPJ: " <> render i ) .join . fmap unSOptional' <$> idxR "cnpj_number"]
+                                                [(\i -> Just "CPF: " <> fmap render i)  <$>  idxM "cpf_number"
+                                                ,(\i -> Just "CNPJ: " <> fmap render i )  <$> idxM "cnpj_number"]
                                             <*> address_model
                                          ) )) -< env
               ((end,mun,uf),(area,area_terreno,pavimentos,altura)) <-
@@ -154,7 +156,7 @@ renderProjectPricingA = myDoc
                           plain ("Valor total:  " <> p ),
                        para "Dados do Contratante" <>
                          bulletList [
-                           ptext (fromMaybe "CPF/CNPJ:" o_cpf) ,
+                           ptext ("CPF/CNPJ:" <> o_cpf) ,
                            plain ("Proprietário : " <> o ),
                            plain ("Endereço: " <> oaddress),
                            plain ("Município: " <> oc),

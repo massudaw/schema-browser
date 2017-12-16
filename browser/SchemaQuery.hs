@@ -554,7 +554,7 @@ patchCheck m (s,i) = if checkAllFilled then Right (s,i) else Left ("patchCheck: 
       available = S.unions $ S.map _relOrigin . pattrKey <$> i
       need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i) || isJust (keyStatic i )) )  (kvAttrs m)
 
-tableCheck m t = if checkAllFilled then Right t else Left ("tableCheck: non nullable rows not filled " ++ show ( need `S.difference` available ))
+tableCheck m t = Right t --if checkAllFilled then Right t else Left ("tableCheck: non nullable rows not filled " ++ show ( need `S.difference` available ,m,t))
   where
       checkAllFilled =  need `S.isSubsetOf`  available
       available = S.fromList $ concat $ fmap _relOrigin . keyattr <$> unKV  t
@@ -772,7 +772,7 @@ fullDiffEdit :: KVMetadata Key ->TBData Key Showable -> TBData Key Showable -> T
 fullDiffEdit k1 old@(v1) (v2) = do
    inf <- ask
    edn <-  KV <$>  Tra.sequence (M.intersectionWith (tbDiffEdit k1) (unKV v1 ) (unKV v2))
-   when (isJust $ diff (tableNonRef' old) (tableNonRef' edn) ) $ do
+   when ( isJust $ diff (tableNonRef' old) (tableNonRef' edn) ) $ do
       mod <- traverse (updateFrom  k1 old (G.getIndex k1 edn)) (diff old edn)
       tell (maybeToList $ join mod)
    return (diff old edn)
@@ -789,6 +789,7 @@ fullDiffInsert k2 v2 = do
 tbDiffEditInsert :: KVMetadata Key ->  Column Key Showable -> Column Key Showable -> TransactionM (Column Key  Showable)
 tbDiffEditInsert k1 i j
   | i == j =  return j
+  | isJust (diff i  j) = tbEdit k1 i j
   | otherwise = tbInsertEdit  k1 j
 
 tbDiffEdit :: KVMetadata Key -> Column Key Showable -> Column Key Showable -> TransactionM (Column Key  Showable)
@@ -805,15 +806,17 @@ tbEdit m (IT a1 a2) (IT k2 t2) = do
   let RecordPrim r = _keyAtom $ keyType k2
   IT k2 <$> noInsert (tableMeta $ lookSTable inf r) t2
 
-tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) = go a2 t2
-  where go a2 t2 = case (a2,t2) of
+tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) = go rel2 a2 t2
+  where go rel2 a2 t2 = case (a2,t2) of
           (TB1 o@ol,TB1 t@l) -> do
+             inf <- ask
              let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
-             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) ( kvlist ) $ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb))) rel2 tb ) . TB1  . maybe o (apply o)  <$> fullDiffEdit m o t)
+                 m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey inf (lookTable inf $ _kvname m) rel2
+             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ((maybe (kvlist [])  kvlist  $ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb))) rel2 tb ) . TB1  . maybe o (apply o)  <$> fullDiffEdit m2 o t)
           (LeftTB1  i ,LeftTB1 j) ->
-            maybe (return f ) (fmap attrOptional) $ liftA2 go i j
+            maybe (return f ) (fmap attrOptional) $ liftA2 (go (Le.over relOri unKOptional <$> rel2)) i j
           (ArrayTB1 o,ArrayTB1 l) ->
-            attrArray f  <$> Tra.sequence (Non.zipWith go o l)
+            attrArray f  <$> Tra.sequence (Non.zipWith (go (Le.over relOri unKArray <$> rel2)) o l)
           i -> errorWithStackTrace (show i)
 
 
@@ -828,8 +831,10 @@ tbInsertEdit m (IT k2 t2) = do
 tbInsertEdit m f@(FKT pk rel2 t2) = go rel2 t2
   where go rel t2 = case t2 of
           t@(TB1 l) -> do
+             inf <- ask
              let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel
-             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) ( kvlist ) $ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb))) rel tb) <$> fullInsert  m t)
+                 m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey inf (lookTable inf $ _kvname m) rel2
+             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ((maybe (kvlist []) ( kvlist ) $ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb))) rel tb) <$> fullInsert  m2 t)
           LeftTB1 i ->
             maybe (return f ) (fmap attrOptional . go (Le.over relOri unKOptional <$> rel) ) i
           ArrayTB1 l -> do

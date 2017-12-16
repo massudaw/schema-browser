@@ -232,17 +232,16 @@ insertPatch  inf conn i  t = either errorWithStackTrace (\i ->  liftIO $ if not 
       directAttr = direct aattri attrs
       projKey :: [TB Key a ] -> [Key]
       projKey = fmap _relOrigin . concat . fmap keyattri
-      value i = "?"  <> fromMaybe ""  (inlineType (keyType i))
+      serialTB = tblist'  (serialAttr)
+      all1 f [] = False
+      all1 f i = all f i
+
+value i = "?"  <> fromMaybe ""  (inlineType (keyType i))
         where
           inlineType (Primitive k (RecordPrim (s,t) )) = Just (" :: " <>s <> "." <> t <> foldMap ktype k )
           inlineType _ = Nothing
           ktype KArray  =  "[]"
           ktype KOptional =  ""
-
-      serialTB = tblist'  (serialAttr)
-      all1 f [] = False
-      all1 f i = all f i
-
 
 
 deletePatch
@@ -287,10 +286,10 @@ updatePatch conn m kv old  t = do
   where
     patch  = justError ("cant diff states" <> (concat $ zipWith differ (show kv) (show old))) $ diff old kv
     kold = M.toList $ getPKM m old
-    equality k = k <> "="  <> "?"
+    equality  k =escapeReserved  (keyValue k) <> "="  <> value k
     koldPk = uncurry Attr <$> kold
-    pred   =" WHERE " <> T.intercalate " AND " (equality . escapeReserved . keyValue . fst <$> kold)
-    setter = " SET " <> T.intercalate "," (equality .   escapeReserved . attrValueName <$> skv   )
+    pred   =" WHERE " <> T.intercalate " AND " (equality  . fst <$> kold)
+    setter = " SET " <> T.intercalate "," (equality  . _tbattrkey <$> skv   )
     up = "UPDATE " <> rawFullName t <> setter <>  pred
     skv = F.toList  (_kvvalues $ tbskv)
     tbskv = isM

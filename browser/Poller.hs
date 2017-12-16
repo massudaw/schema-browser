@@ -120,17 +120,17 @@ poller schmRef authmap db plugs is_test = do
                           let listRes = L.take fetchSize . G.toList $  listResAll
 
                           let evb = filter (\i-> maybe False (G.checkPred i) predFullIn && not (maybe False (G.checkPred i) predFullOut) ) listRes
-                          i <-  liftIO $ mapM (mapM (\inp -> catchPluginException inf (tableUnique (lookTable inf a)) idp (M.toList $ getPKM (tableMeta $ lookTable inf a)inp) $ fmap fst $ runDynamic $ transactionLog inf $ do
+                          i <-  liftIO $ mapM (mapM (\inp -> catchPluginException inf (tableUnique (lookTable inf a)) idp ( getPKM (tableMeta $ lookTable inf a)inp) $ fmap fst $ runDynamic $ transactionLog inf $ do
                               case elemp of
                                 Right action  -> do
                                   getP <- getFrom (lookTable inf a) inp
-                                  ovm  <- fmap (liftTable' inf a) <$> liftIO (action (Just $ mapKey' keyValue (maybe inp (apply inp) getP)))
+                                  ovm  <- fmap (liftTable' inf a) <$> liftIO (action (mapKey' keyValue (maybe inp (apply inp) getP)))
                                   maybe (return ()) (\ov-> do
                                          p <- fullDiffEdit (tableMeta $ lookTable inf a)inp ov
                                          return ()) ovm
                                 Left action -> do
                                     getP <- getFrom (lookTable inf a) inp
-                                    ovm  <- fmap (liftPatch inf a) <$> liftIO (action (Just $ mapKey' keyValue (maybe inp (apply inp) getP)))
+                                    ovm  <- fmap (liftPatch inf a) <$> liftIO (action (mapKey' keyValue (maybe inp (apply inp) getP)))
                                     maybe (return ()) (\ov-> do
                                       p <- fullDiffEditInsert (tableMeta $ lookTable inf a)inp (apply inp ov)
                                       return ()) ovm

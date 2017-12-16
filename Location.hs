@@ -53,8 +53,9 @@ queryGeocodeBoundary = FPlugins "Google Geocode" "address"  $ IOPlugin url
       uf <- idxR "uf"-< t
       odxR "geocode" -< t
       let im = "https://maps.googleapis.com/maps/api/geocode/json"
-          vr =  maybe "" renderShowable
-          addr =    "Brasil, "<> vr cep <> ", "<>  vr mun <> " - " <>  vr uf <> ", " <> vr log <> "," <> vr num  <> " - " <> vr bai
+          vr = renderShowable
+          vm =  maybe "" renderShowable
+          addr =    "Brasil, "<> vm cep <> ", "<>  vr mun <> " - " <>  vr uf <> ", " <> vr log <> "," <> vm num  <> " - " <> vr bai
       r <- act (\(im,addr)-> lift $ runMaybeT $ do
             lift $ print (im,addr)
             key <- lift $ justError "no key" <$> lookupEnv "GOOGLE_SERVER_KEY"

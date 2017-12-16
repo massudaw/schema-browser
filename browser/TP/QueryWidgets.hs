@@ -117,6 +117,17 @@ genAttr inf k =
     kgen KOptional = LeftTB1 . pure
     kgen KArray = ArrayTB1 . pure
 
+execute :: InformationSchema -> Text -> Plugins -> Maybe (TBData Key Showable) -> IO (Maybe (TBIdx Key Showable))
+execute inf t (idp,p) = fmap join . traverse (\v -> fmap (join . fmap (diff v . apply v . liftPatch inf t). join . eitherToMaybe ). catchPluginException inf (tableUnique table) idp ( getPKM (tableMeta table) v) . action $  (mapKey' keyValue) v)
+  where
+    action :: TBData Text Showable -> IO (Maybe (TBIdx Text Showable))
+    action = pluginActionDiff p
+    table = lookTable inf t
+
+executeT inf t (idp,p) = fmap join . traverse (\v -> liftIO .fmap (join .  fmap (diff v ).  fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf (tableUnique table ) idp ( getPKM (tableMeta table)   v) . action $ (mapKey' keyValue) v)
+  where
+    table = lookTable inf t
+    action = pluginAction p
 
 pluginUI
     :: InformationSchema
@@ -169,55 +180,42 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
   let evdiff = fmap join $ liftA2 diff <$>  facts trinp <#> snd freshUI
   return (el , (liftAccessU inf tname  $snd $ pluginStatic' $ snd $ last ac , evdiff ))
 
-pluginUI inf oldItems (idp,p@(FPlugins n t (PurePlugin arrow ))) = do
+pluginUI inf oldItems pl@(idp,p@(FPlugins n t (PurePlugin arrow ))) = do
   let
-      action = pluginAction   p
-      table = lookTable inf t
       (tdInput, tdOutput,out) = checkAccessFull inf t arrow oldItems
   headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   ini <- currentValue (facts tdInput )
   kk <- ui $ stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
-  pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap ( join .  liftA2 diff v. ( join . fmap (either (const Nothing) Just . typecheck (typeCheckTable (tablePK table)) )) . fmap (liftTable' inf t).  join . eitherToMaybe ). catchPluginException inf (tableUnique table ) idp (M.toList $ getPKM (tableMeta table)$ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
+  pgOut <- ui $mapTEventDyn (liftIO . executeT inf t pl)  (tidings kk $diffEvent kk (rumors tdInput ))
   return (headerP, (out ,   pgOut ))
-pluginUI inf oldItems (idp,p@(FPlugins n t (DiffPurePlugin arrow ))) = do
+pluginUI inf oldItems pl@(idp,p@(FPlugins n t (DiffPurePlugin arrow ))) = do
   let
-      action = pluginActionDiff   p
-      table = lookTable inf t
       (tdInput, tdOutput,out) = checkAccessFull inf t arrow  oldItems
   headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   ini <- currentValue (facts tdInput )
   kk <- ui $ stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
-  pgOut <- ui $mapTEventDyn (\v -> liftIO .fmap ( fmap (liftPatch inf t).  join . eitherToMaybe ). catchPluginException inf (tableUnique $ lookTable inf t) idp (M.toList $ getPKM (tableMeta table)$ justError "ewfew"  v) . action $  fmap (mapKey' keyValue) v)  (tidings kk $diffEvent kk (rumors tdInput ))
+  pgOut <- ui $mapTEventDyn (liftIO . execute inf t pl) (tidings kk $diffEvent kk (rumors tdInput ))
   return (headerP, (out,   pgOut ))
-pluginUI inf oldItems (idp,p@(FPlugins n t (DiffIOPlugin arrow))) = do
+pluginUI inf oldItems pl@(idp,p@(FPlugins n t (DiffIOPlugin arrow))) = do
   overwrite <- checkedWidget (pure False)
   let
-      action = pluginActionDiff p
-      table = lookTable inf t
       (tdInput, tdOutput,out) = checkAccessFull inf t arrow oldItems
   headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput)  #set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   cliHeader <- UI.click headerP
   let ecv = facts tdInput <@ cliHeader
-      table = lookTable inf t
   bcv <- ui $ stepper Nothing  ecv
-  pgOut  <- ui $mapTEventDyn (\v -> do
-    liftIO .fmap ( fmap (liftPatch inf t ). join . eitherToMaybe ) . catchPluginException inf (tableUnique $ lookTable inf t) idp (M.toList $ getPKM (tableMeta table)$ justError "no Action"  v) $ ( action $ fmap (mapKey' keyValue) v)
-                             )  (tidings bcv ecv)
+  pgOut  <- ui $mapTEventDyn (liftIO . execute inf t pl)  (tidings bcv ecv)
   return (headerP, (out,  pgOut ))
 
-pluginUI inf oldItems (idp,p@(FPlugins n t (IOPlugin arrow))) = do
+pluginUI inf oldItems pl@(idp,p@(FPlugins n t (IOPlugin arrow))) = do
   overwrite <- checkedWidget (pure False)
   let
-      action = pluginAction p
-      table = lookTable inf t
       (tdInput, tdOutput,out) = checkAccessFull inf t arrow  oldItems
   headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
   cliHeader <- UI.click headerP
   let ecv = facts tdInput <@ cliHeader
   bcv <- ui $ stepper Nothing ecv
-  pgOut  <- ui $mapTEventDyn (\v -> do
-    liftIO .fmap (join .  liftA2 diff v .  fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf (tableUnique $ lookTable inf t) idp (M.toList $ getPKM (tableMeta table)$ justError "no Action"  v) . action $ fmap (mapKey' keyValue) v
-                             )  (tidings bcv ecv)
+  pgOut  <- ui $mapTEventDyn (liftIO . executeT inf t pl)   (tidings bcv ecv)
   return (headerP, (out ,  pgOut ))
 
 
@@ -1365,8 +1363,6 @@ reduceTable l
   | otherwise  = (\i -> if L.null i then Keep else Diff i) . filterDiff $ l
 
 pdfFrame (elem,sr , call,st) pdf = mkElement (elem ) UI.# sink0 sr (call <$> pdf)  UI.# UI.set style (st)
-
-
 
 metaAllTableIndexA inf metaname env =   do
   let modtable = lookTable (meta inf) metaname

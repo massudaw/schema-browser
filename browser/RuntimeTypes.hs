@@ -286,11 +286,13 @@ data FPlugAction k
   | DiffPurePlugin (ArrowReaderDiffM Identity)
   | DiffIOPlugin (ArrowReaderDiffM IO)
 
-type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT (Maybe (TBData Text Showable)) m )) (Union (Access Text)) () (Maybe (Index (TBData Text Showable)))
+type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT ((TBData Text Showable)) m )) (Union (Access Text)) () (Maybe (Index (TBData Text Showable)))
 
 
 pluginStatic = pluginStatic' . _plugAction
 pluginAction = pluginAction' . _plugAction
+
+pluginActionDiff :: FPlugins a-> TBData Text Showable -> IO (Maybe (TBIdx Text Showable))
 pluginActionDiff = pluginActionDiff' . _plugAction
 
 pluginStatic' (IOPlugin  a) = staticP a
@@ -303,15 +305,15 @@ pluginRun b@(PurePlugin _ ) = Right (pluginAction' b)
 pluginRun b@(DiffIOPlugin _ ) = Left (pluginActionDiff' b)
 pluginRun b@(DiffPurePlugin _ ) = Left (pluginActionDiff' b)
 
-pluginActionDiff' (DiffIOPlugin a ) = fmap join . traverse (dynIO a)
-pluginActionDiff' (DiffPurePlugin a ) = fmap join . traverse (fmap return (dynPure a))
-pluginAction' (IOPlugin   a ) = fmap join . traverse (dynIO a)
-pluginAction' (PurePlugin  a) = fmap join . traverse ((fmap return) (dynPure a ))
+pluginActionDiff' (DiffIOPlugin a ) = dynIO a
+pluginActionDiff' (DiffPurePlugin a ) = return . (dynPure a)
+pluginAction' (IOPlugin   a ) = dynIO a
+pluginAction' (PurePlugin  a) = return . (dynPure a )
 
 staticP ~(P s d) = s
 
 dynIO url inp = do
-    runReaderT (dynPK url ()) (Just inp)
+    runReaderT (dynPK url ()) inp
 
 dynPure url inp = runIdentity $ do
     dynIO url inp
@@ -579,7 +581,7 @@ genPredicateFullU
      -> Maybe (BoolCollection (Access a, Either a1 UnaryOperator))
 genPredicateFullU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFullU i <$> l)
 genPredicateFullU i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFullU i <$> l)
-genPredicateFullU i (One l) = AndColl <$> (fmap pure $  genPredicateFull i $ l)
+genPredicateFullU i (One l) = genPredicateFull i  l
 
 
 notException e =  if isJust eb || isJust es || isJust as then Nothing else Just e
