@@ -2,6 +2,9 @@
 module Postgresql.Types where
 
 import Types
+import Types.Inference
+
+import Data.Monoid
 import Data.Tuple
 import Data.Bits
 import qualified Data.Vector as V
@@ -32,18 +35,24 @@ type PGPrim =  Prim PGType PGRecord
 
 -- This module implement a rule system  that converts general higher order datatypes  to backend primitive ones
 -- it assembles a isomorphism between the two types
--- Nested types need to be unambigous so that we have only one possible conversion
-
+-- Conversion rules need to converge so that we have only one possible conversion
 
 preconversion' a i =  join $ (\t -> M.lookup (i,t) a ) <$> (flip M.lookup $ M.fromList $ M.keys a) i
+
+preconversion
+  :: KType (Prim KPrim (Text, Text))
+     -> Maybe
+          (FTB Showable -> FTB Showable, FTB Showable -> FTB Showable)
 preconversion  =  preconversion' postgresLiftPrimConv
 
 preunconversion i =  join $ (\t -> M.lookup (t,i) postgresLiftPrimConv) <$> ktypeUnLift  i
 
 conversion i = fromMaybe (id , id) $ preconversion i
 
-
-
+topconversion
+  :: (Alternative f, Show t, Show t1) =>
+     (KType t2 -> f (FTB t1 -> FTB a1, FTB t -> FTB a))
+     -> KType t2 -> f (FTB t1 -> FTB a1, FTB t -> FTB a)
 topconversion f (Primitive v a) = go v
   where
     go v = case v of
@@ -208,12 +217,78 @@ ktypeUnLift i = M.lookup i postgresUnLiftPrim
 ktypeLift :: KType (Prim KPrim (Text,Text)) -> Maybe (KType (Prim KPrim (Text,Text)))
 ktypeLift i = M.lookup i postgresLiftPrim
 
+inlineType (Primitive k (RecordPrim (s,t) )) = Just (" :: " <>s <> "." <> t <> foldMap ktype k )
+  where
+    ktype KArray  =  "[]"
+    ktype KOptional =  ""
+inlineType _ = Nothing
 
-addToken t (Primitive i a) = Primitive (t:i) a
 
-ktypeRec f v@(Primitive (KOptional:xs) i) =   f v <|> fmap (addToken KOptional) (ktypeRec f (Primitive xs i))
-ktypeRec f v@(Primitive (KArray :xs) i) =   f v <|> fmap (addToken KArray) (ktypeRec f (Primitive xs i))
-ktypeRec f v@(Primitive (KInterval:xs) i) =   f v <|> fmap (addToken KInterval) (ktypeRec f (Primitive xs i))
-ktypeRec f v@(Primitive (KSerial :xs) i) = f v <|> fmap (addToken KSerial) (ktypeRec f (Primitive xs i))
-ktypeRec f v@(Primitive (KDelayed :xs) i) = f v <|> fmap (addToken KDelayed) (ktypeRec f (Primitive xs i))
+renderType (Primitive (KInterval :xs) t ) =
+  case t of
+    (AtomicPrim (PInt i)) ->  case i of
+      4 -> "int4range"
+      8 -> "int8range"
+    (AtomicPrim (PTime (PDate))) -> "daterange"
+    (AtomicPrim (PTime (PTimestamp i))) -> case i of
+      Just i -> "tsrange"
+      Nothing -> "tstzrange"
+    (AtomicPrim (PGeom ix i)) ->
+       case ix of
+            2 ->  "box2d"
+            3 ->  "box3d"
+
+    (AtomicPrim PDouble) -> "floatrange"
+    i -> Nothing
+renderType (Primitive [] (RecordPrim (s,t)) ) = Just $ s <> "." <> t
+renderType (Primitive [] (AtomicPrim t) ) =
+  case t  of
+    PBinary -> "bytea"
+    PDynamic -> "bytea"
+    PDouble -> "double precision"
+    PDimensional _ _ -> "dimensional"
+    PText -> "character varying"
+    PInt v -> case v of
+      2 -> "smallint"
+      4 -> "integer"
+      8 -> "bigint"
+      v -> errorWithStackTrace ("no index" ++ show   v)
+    PTime i -> case i of
+      PDate -> "date"
+      PTimestamp v -> case v of
+        Just i -> "timestamp without time zone"
+        Nothing -> "timestamp with time zone"
+    i -> Nothing
+renderType (Primitive (KArray :xs)i) = (<>"[]") <$> renderType (Primitive xs i)
+renderType (Primitive (KOptional :xs)i) = renderType (Primitive xs i)
+renderType (Primitive (KSerial :xs)i) = renderType (Primitive xs i)
+renderType (Primitive (KDelayed :xs)i) = renderType (Primitive xs i)
+
+
+
+-- inferParamType e i |traceShow ("inferParam"e,i) False = undefined
+inferParamType op i = maybe "" (":: " <>) $ renderType $  inferOperatorType op i
+
+
+ktypeRec f v@(Primitive (t:xs) i) =   f v <|> fmap (addToken t) (ktypeRec f (Primitive xs i))
+  where
+    addToken t (Primitive i a) = Primitive (t:i) a
 ktypeRec f v@(Primitive []  i ) = f v
+
+
+mapKeyType :: FKey (KType PGPrim) -> FKey (KType (Prim KPrim (Text,Text)))
+mapKeyType  = fmap mapKType
+mapKType :: KType PGPrim -> KType CorePrim
+mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec ktypeLift (fmap textToPrim i)
+
+textToPrim :: Prim PGType (Text,Text) -> Prim KPrim (Text,Text)
+textToPrim (AtomicPrim (s,i,tymod)) = case  HM.lookup i  postgresPrim of
+  Just k -> AtomicPrim k -- $ fromMaybe k (M.lookup k (M.fromList postgresLiftPrim ))
+  Nothing -> case tymod of
+               Just ty -> case HM.lookup i postgresPrimTyp of
+                            Just i -> AtomicPrim $ i ty
+                            Nothing -> error $ "no conversion for type " <> (show i)
+               Nothing -> error $ "no conversion for type " <> (show i)
+textToPrim (RecordPrim i) =  (RecordPrim i)
+
+

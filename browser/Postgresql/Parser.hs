@@ -13,6 +13,7 @@ import Control.Monad.Trans.Class
 import Control.Monad.RWS
 import Data.Ord
 import qualified Data.Aeson as A
+import qualified Control.Lens as Le
 import qualified Data.Aeson.Types as A
 import qualified Data.Vector as V
 import qualified Data.Foldable as F
@@ -72,60 +73,26 @@ import Blaze.ByteString.Builder.Char8(fromChar)
 
 type JSONParser = CodegenT A.Parser
 
-mapKeyType :: FKey (KType PGPrim) -> FKey (KType (Prim KPrim (Text,Text)))
-mapKeyType  = fmap mapKType
-
-mapKType :: KType PGPrim -> KType CorePrim
-mapKType i = fromMaybe (fmap textToPrim i) $ ktypeRec ktypeLift (fmap textToPrim i)
-
-textToPrim :: Prim PGType (Text,Text) -> Prim KPrim (Text,Text)
-textToPrim (AtomicPrim (s,i,tymod)) = case  HM.lookup i  postgresPrim of
-  Just k -> AtomicPrim k -- $ fromMaybe k (M.lookup k (M.fromList postgresLiftPrim ))
-  Nothing -> case tymod of
-               Just ty -> case HM.lookup i postgresPrimTyp of
-                            Just i -> AtomicPrim $ i ty
-                            Nothing -> error $ "no conversion for type " <> (show i)
-               Nothing -> error $ "no conversion for type " <> (show i)
-textToPrim (RecordPrim i) =  (RecordPrim i)
-
-
--- Wrap new instances without quotes delimiting primitive values
 newtype UnQuoted a = UnQuoted {unQuoted :: a}
+
 newtype DoubleQuoted a = DoubleQuoted {unDoubleQuoted :: a}
 
-    -- toField i = error (show i)
+instance TF.ToField (DoubleQuoted Showable) where
+  toField (DoubleQuoted i) = TF.toField (DoubleQuoted (renderPrim i))
 
-instance TF.ToField (DoubleQuoted Showable ) where
-  toField (DoubleQuoted i) =  TF.toField (DoubleQuoted (renderPrim i))
-
-instance TF.ToField (DoubleQuoted (FTB Showable ) ) where
-  toField (DoubleQuoted i) =  TF.toField (DoubleQuoted (renderShowable i))
+instance TF.ToField (DoubleQuoted (FTB Showable)) where
+  toField (DoubleQuoted i) = TF.toField (DoubleQuoted (renderShowable i))
 
 instance TF.ToField (DoubleQuoted String) where
   toField (DoubleQuoted i) = TF.Many [TF.Plain "\"", TF.Plain (fromByteString $ BS.pack i) , TF.Plain "\""]
 
-instance (Show a,TF.ToField a , TF.ToField (UnQuoted a)) => TF.ToField (FTB (Text,a)) where
-  toField (LeftTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
-  toField (LeftTB1 i) = maybe (TF.Plain (fromByteString "null")) TF.toField  i
-  toField (ArrayTB1 is ) = TF.toField $ PGTypes.PGArray   (F.toList is)
-  toField (IntervalTB1 is )
-    | ty == Just "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $maybe "" T.unpack $ ty), TF.Plain $ fromByteString "range"]
-    | ty == Just "POINT3" = TF.Many [TF.Plain "box3d(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
-    | ty == Just "LINESTRING3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
-    | otherwise  = TF.toField  tyv
-    where tyv = fmap (\(TB1 i ) -> snd i) is
-          ty = unFinite $  Interval.lowerBound $ fmap (\(TB1 i ) -> fst i) is
-  toField (TB1 (t,i)) = TF.toField i
-  -- toField i = error (show i)
-
-instance (TF.ToField a , TF.ToField b ) => TF.ToField (Either a b ) where
-  toField (Right i) = TF.toField i
-  toField (Left i) = TF.toField i
+instance (TF.ToField a, TF.ToField b) => TF.ToField (Either a b) where
+  toField i = either TF.toField TF.toField i
 
 instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
-  toField (k ,i) = case   liftA2 (,) (ktypeRec ktypeUnLift  k ) (topconversion preunconversion k) of
-                     Just (k,(_,b)) -> toFielPrim k (b i)
-                     Nothing -> toFielPrim k i
+  toField (k,i) = case liftA2 (,) (ktypeRec ktypeUnLift k) (topconversion preunconversion k) of
+     Just (k,(_,b)) -> toFielPrim k (b i)
+     Nothing -> toFielPrim k i
     where
       toFielPrim (Primitive l n) = toFiel l
         where
@@ -134,31 +101,17 @@ instance TF.ToField (KType (Prim KPrim (Text,Text)),FTB Showable) where
           toFiel (KDelayed : k ) (LeftTB1 i) = maybe (TF.Plain "null") (toFiel k) i
           toFiel (KArray : k ) (ArrayTB1 is ) = TF.Many $[TF.toField $ PGTypes.PGArray   (F.toList $ fmap unTB1 is)  ] ++ maybeToList ( TF.Plain .fromByteString . BS.pack . T.unpack . (" :: "<>) <$> ( renderType (Primitive (KArray :k) n )))
           toFiel (KInterval : k) (IntervalTB1 is ) = TF.Many [TF.Plain ( fromByteString $ BS.pack $ T.unpack $justError ("no array" <> show k) $ renderType (Primitive  (KInterval: k) n ) ) ,TF.Plain "(" ,TF.toField  (fmap unTB1 $ unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (fmap unTB1 $ unFinite $ Interval.upperBound is) ,TF.Plain ")"]
-            -- | k == Just "time" = TF.Many [TF.toField  tyv , TF.Plain $ fromByteString " :: " , TF.Plain $ fromByteString (BS.pack $maybe "" T.unpack $ ty), TF.Plain $ fromByteString "range"]
-            -- | k == Just "POINT3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
-            -- | ty == Just "LINESTRING3" = TF.Many [TF.Plain "point3range(", TF.toField  (unFinite $ Interval.lowerBound is ), TF.Plain ",",TF.toField (unFinite $ Interval.upperBound is) ,TF.Plain ")"]
-            -- | otherwise  = TF.toField  tyv
           toFiel [] (TB1 i) = TF.Many [TF.toField i ,TF.Plain $ fromByteString $maybe ""  (" :: "<>) (BS.pack . T.unpack <$> renderType (Primitive [] n))]
           toFiel i j = error ("toFiel" ++ show (i,j))
 
-
+instance  TF.ToField (TB PGKey Showable)  where
+  toField  = TF.toField . firstTB (Le.over keyTypes (fmap textToPrim))
 
 instance  TF.ToField (TB Key Showable)  where
   toField (Attr k  i) = TF.toField (keyType k ,i)
-  toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT n (TB1 i)) = TF.toField ( TBRecord2 $ L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri )) $  F.toList (_kvvalues $ i)  )
-  toField (IT n  (ArrayTB1 is )) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
-  toField e = error (show e)
-
-
-
-instance  TF.ToField (TB PGKey Showable)  where
-  toField (Attr k  i) = case  topconversion preconversion (textToPrim <$> keyType k) of
-          Just (_,b) -> TF.toField (fmap ( (\(AtomicPrim (_,i,_) ) -> i)$head $ F.toList $ keyType k,) $ b i)
-          Nothing -> TF.toField (fmap ((\(AtomicPrim (_,i,_) ) -> i) $ head $ F.toList $ keyType k,) i)
-  toField (IT n (LeftTB1 i)) = maybe (TF.Plain ( fromByteString "null")) (TF.toField . IT n ) i
-  toField (IT n (TB1 i)) = TF.toField  (TBRecord2 $ L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri))  (F.toList (_kvvalues $ i) ))
-  toField (IT n  (ArrayTB1 is)) = TF.toField $ PGTypes.PGArray $ F.toList $ (TF.toField . IT n) <$> is
+  toField (IT n (LeftTB1 i)) = maybe (TF.Plain (fromByteString "null")) (TF.toField . IT n ) i
+  toField (IT n (TB1 i)) = TF.toField (TBRecord2 $ L.sortBy (comparing (fmap (keyPosition ._relOrigin). keyattri )) (F.toList (_kvvalues i)))
+  toField (IT n (ArrayTB1 is )) = TF.toField . PGTypes.PGArray $ IT n <$> F.toList is
   toField e = error (show e)
 
 
@@ -426,8 +379,6 @@ put2DPosition (Position2D (x,y)) = do
       Sel.putFloat64le x
       Sel.putFloat64le y
 
-
-
 get3DPosition = do
       x <- Sel.getFloat64le
       y <- Sel.getFloat64le
@@ -546,7 +497,6 @@ fromRecordJSON inf m foldable namemap = do
                   Right i -> i
                   Left i -> error (show i)
   parser <$> FR.field
-
 
 
 withCount value = do

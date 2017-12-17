@@ -168,7 +168,7 @@ data BoolCollection a
 
 instance NFData a => NFData (BoolCollection a)
 
-type AccessOp a= Either (FTB a, BinaryOperator) UnaryOperator
+type AccessOp a = Either (FTB a, BinaryOperator) UnaryOperator
 
 data Constant
   = CurrentTime
@@ -490,7 +490,6 @@ instance Applicative FTB where
 
   i <*> ArrayTB1 j = ArrayTB1 $ fmap (i <*>)  j
   ArrayTB1  i <*> j = ArrayTB1 $ fmap (<*>j)  i
-
 
 type FTB1 k a = FTB (KV k a)
 

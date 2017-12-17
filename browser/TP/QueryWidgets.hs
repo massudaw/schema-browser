@@ -380,7 +380,7 @@ tbRecCaseDiff ::  InformationSchema ->  Table -> SelPKConstraint  -> Column Core
         -> PluginRef  (Column CoreKey Showable) -> Tidings (Maybe (Column CoreKey Showable)) -> UI (TrivialWidget (Editor (Index (Column CoreKey Showable))))
 tbRecCaseDiff inf table constr a wl plugItens preoldItems' = do
       let preoldItems = emptyRecTable  a <$> preoldItems'
-      let check = foldl' (liftA2 (\j i ->  liftA2 apply j i <|> j <|> (create <$> i ))) (preoldItems) ( snd <$> plugItens )
+      let check = F.foldl' (liftA2 (\j i ->  liftA2 apply j i <|> j <|> (create <$> i ))) preoldItems (snd <$> plugItens )
       TrivialWidget btr open<- checkedWidget  (isJust <$> check)
       element open
       (ev,h) <- ui $ newEvent
@@ -435,10 +435,8 @@ buildFKS :: InformationSchema
      -> PluginRef (TBData CoreKey Showable)
      -> TBData CoreKey ()
      -> Tidings (Maybe (TBData CoreKey Showable))
-     -> [(Set (Rel Key),
-                        TB Key ())]  -> UI [(Set (Rel Key),
-                            (TrivialWidget
-                               (Editor (PathAttr CoreKey Showable)),
+     -> [(Set (Rel Key),TB Key ())]
+     -> UI [(Set (Rel Key), (TrivialWidget  (Editor (PathAttr CoreKey Showable)),
                              Tidings (Maybe (Column CoreKey Showable))))]
 buildFKS inf constr table refs plugmods  ftb@(k) oldItems srefs =  F.foldl'  run (return [])  srefs
   where
@@ -727,10 +725,16 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
 
 
 
+dynHandlerPatch
+  :: Eq a1 => (t -> Tidings (Maybe a1) -> UI (TrivialWidget (Editor a)))
+     -> (t -> Tidings (Maybe a1))
+     -> t
+     -> ([TrivialWidget (Editor a)], Tidings Bool)
+     -> UI ([TrivialWidget (Editor a)], Tidings Bool)
 dynHandlerPatch hand val ix (l,old)= do
     (ev,h) <- ui $ newEvent
     let
-        valix =  val ix
+        valix = val ix
         idyn True  =  do
           tds <- hand ix valix
           ini <- currentValue (facts $ triding tds)
@@ -754,7 +758,8 @@ dynHandlerPatch hand val ix (l,old)= do
     vout <- ui$ stepper (isJust inivalix) evnew
     let evdiff= diffEvent vout evnew
     bdifout <- ui $ stepper (isJust inivalix)  evdiff
-    return $ (l <> [TrivialWidget (tidings bend ev) el], ( tidings bdifout evdiff))
+    let out = tidings bdifout evdiff
+    return $ (l <> [TrivialWidget (tidings bend ev) el], out )
 
 
 reduceDiffList o i plug
@@ -786,7 +791,7 @@ unPOpt (POpt i ) = i
 
 type AtomicUI k b = PluginRef b ->  Tidings (Maybe b) ->  k -> UI (TrivialWidget (Editor (Index b)))
 
-buildUIDiff:: (Show (Index b),Show k ,Ord b ,Patch b, Show b) => AtomicUI k b -> KType k -> PluginRef (FTB b) -> Tidings (Maybe (FTB b)) -> UI (TrivialWidget (Editor (PathFTB (Index b) )))
+buildUIDiff:: (Eq (Index b),Show (Index b),Show k ,Ord b ,Patch b, Show b) => AtomicUI k b -> KType k -> PluginRef (FTB b) -> Tidings (Maybe (FTB b)) -> UI (TrivialWidget (Editor (PathFTB (Index b) )))
 buildUIDiff f (Primitive l prim)  plug tdi = go l plug tdi
   where
     go [] plug tdi = fmap (fmap PAtom) <$> f (fmap (fmap (fmap unAtom )) <$>plug) (fmap unTB1 <$> tdi) prim
@@ -800,14 +805,15 @@ buildUIDiff f (Primitive l prim)  plug tdi = go l plug tdi
             ctdi <- ui $ accumT ini (unionWith (.) ((\_ -> const Nothing )<$> clearEv ) (const <$> rumors ctdi'))
             offsetDiv  <- UI.div
             -- let wheel = fmap negate $ mousewheel offsetDiv
-            TrivialWidget offsetT offset <- offsetField (pure 0)  never (maybe 0 (Non.length .unArray) <$> (recoverEditChange <$> ctdi' <*> bres))
+            TrivialWidget offsetT offset <- offsetField (pure 0)  never size
             let arraySize = 8
-                tdi2  = fmap unArray <$> tidings (facts ctdi) (rumors ctdi')
+                tdi2  = fmap unArray <$> ctdi
                 index o ix v = flip Non.atMay (o + ix) <$> v
             let unIndexEl ix = fmap join$ index ix <$> offsetT <*> tdi2
+                unplugix ix = fmap ((\p -> fmap join $ (\o ->  fmap (convertPatchSet (o + ix) )) <$> offsetT <*>p)) <$> cplug
                 dyn = dynHandlerPatch  (\ix valix ->do
-                  let plugix = fmap ((\p -> fmap join $ (\o ->  fmap (convertPatchSet (o + ix) )) <$> offsetT <*>p)) <$> cplug
-                  wid <- go ti plugix valix
+                  let pl = unplugix ix
+                  wid <- go ti  pl valix
                   lb <- hlabel ["col-xs-1"] # sink UI.text (show . (+ix) <$> facts offsetT )
                   paintEditDiff lb (triding wid )
                   element wid # set UI.class_ "col-xs-12"
@@ -822,10 +828,10 @@ buildUIDiff f (Primitive l prim)  plug tdi = go l plug tdi
               --  additions and edits first in ascending order than deletion in descending order
               --  this way the patch index is always preserved
               bres = reduceDiffList  <$> offsetT <*>  widgets2 <*> foldr (liftA2 (:)) (pure [])  (snd <$>cplug)
-
             pini <- currentValue (facts bres)
-            bres' <- ui $ accumT pini (unionWith (.) ((\_ -> const Delete)<$> clearEv ) (const <$> rumors bres))
+            bres' <- ui $ calmT =<< accumT pini (unionWith (.) ((\_ -> const Delete)<$> clearEv ) (const <$> rumors bres))
             element offsetDiv # set children (fmap getElement widgets)
+            size <- ui $ calmT (maybe 0 (Non.length .unArray)  <$> (recoverEditChange <$> ctdi' <*> bres))
             composed <- UI.span # set children [offset ,clearEl, offsetDiv]
             return  $ TrivialWidget  bres' composed
          KOptional -> do

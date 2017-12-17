@@ -400,8 +400,8 @@ putPatch m a= liftIO$ do
   -- print ("putPatch",i,length a)
   atomically $ putPatchSTM m a
 
-putPatchSTM m =  writeTChan m . force. fmap (firstPatchRow keyFastUnique)
-putIdx m = liftIO .atomically . writeTChan m . force
+putPatchSTM m =  writeTChan m .  fmap (firstPatchRow keyFastUnique)
+putIdx m = liftIO .atomically . writeTChan m
 
 typeCheckValuePrim f (KOptional :i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValuePrim f i) j
 typeCheckValuePrim f (KDelayed :i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValuePrim f i) j

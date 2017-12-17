@@ -5,7 +5,6 @@
 {-# LANGUAGE UndecidableInstances #-}
 module Postgresql.Printer
   (selectQuery
-  ,tableType
   ,codegen
   ,codegent
   ,runCodegenT
@@ -24,35 +23,29 @@ module Postgresql.Printer
   )
   where
 
+import Utils
+import Types
+import Types.Inference
+
 import Query
-import Debug.Trace
+
 import Postgresql.Codegen
-import Database.PostgreSQL.Simple
+import Postgresql.Function
 import RuntimeTypes
 import qualified Data.Poset as P
-import qualified Types.Index as G
-import qualified Control.Lens as Le
 import Postgresql.Types
-import Data.Time
-import Types.Patch
 import Data.Ord
-import Types.Index (TBIndex(..),AttributePath(..))
 import Data.String
-import Step.Host (findFK,findAttr,findFKAttr)
-import qualified Data.Interval as I
-import Step.Common
+import Step.Host (findFK,findAttr)
 import NonEmpty (NonEmpty(..))
 import Data.Functor.Apply
 import Data.Bifunctor
 import qualified Data.Foldable as F
-import qualified Data.Traversable as Tra
 import Data.Maybe
-import System.IO.Unsafe
 import Data.Monoid hiding (Product)
 
 import qualified Data.Text as T
 
-import Utils
 
 import Prelude hiding (head)
 import Control.Monad
@@ -63,14 +56,7 @@ import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Text (Text)
-import GHC.Stack
 
-import Types
-import Types.Inference
-
---
--- Patch CRUD Postgresql Operations
---
 
 data Relation k
   = RelInline k
@@ -83,9 +69,10 @@ data Address k
   | AttributeReference k
   deriving(Eq,Ord,Show)
 
-
 type NameMap = ((Int,M.Map [Address Key] Int),(Int,M.Map [Address Key] Int))
+
 type CodegenT m = RWST [Address Key] String NameMap m
+
 type Codegen = RWST [Address Key] String NameMap Identity
 
 
@@ -229,11 +216,6 @@ expandBaseTable meta tb@( KV i) = asNewTable meta  (\t -> do
   )
 
 
-getInlineRec' tb = L.filter (\i -> match $  i) $ attrs
-  where attrs = F.toList $ _kvvalues  tb
-        match (Attr _ _ ) = False
-        match (IT _ i ) = False -- isTableRec' (unTB1 i)
-
 
 
 codegent l =
@@ -286,11 +268,6 @@ generateComparison ((k,v):xs) = "case when " <> k <>  "=" <> "? OR "<> k <> " is
 
 expandQuery' inf meta left m = atTable meta $ F.foldl (flip (\i -> liftA2 (.) (expandJoin inf meta left (F.toList (_kvvalues  m) ) i )  )) (return id) (P.sortBy (P.comparing (RelSort. keyattri )) $  F.toList (_kvvalues  m))
 
-tableType m (ArrayTB1 (i :| _ )) = tableType m i <> "[]"
-tableType m (LeftTB1 (Just i)) = tableType m i
-tableType m (TB1 _) = kvMetaFullName  m
-
-
 
 
 expandJoin :: InformationSchema -> KVMetadata Key -> Bool -> [Column Key ()] -> Column Key () -> Codegen (SQLRow -> SQLRow)
@@ -331,65 +308,43 @@ intersectionOp i op (Primitive (KOptional :xs) j) = intersectionOp i op (Primiti
 intersectionOp (Primitive (KOptional :xs) i) op j = intersectionOp (Primitive xs i)  op j
 intersectionOp (Primitive [] j) op (Primitive (KArray :_) i )
   | isPrimReflexive i j = (\i j  -> i <> renderBinary op <> "(" <> j <> ")" )
-  | otherwise = errorWithStackTrace $ "wrong type intersectionOp * - {*} " <> show j <> " /= " <> show i
+  | otherwise = error $ "wrong type intersectionOp * - {*} " <> show j <> " /= " <> show i
 intersectionOp i op j = inner (renderBinary op)
 
 
 
 
-
-explodeRow :: InformationSchema -> KVMetadata Key -> TB3 Key () -> Codegen Text
-explodeRow = explodeRow'
-
 explodeRecord :: InformationSchema -> KVMetadata Key -> TBData  Key () -> Codegen Text
-explodeRecord  = explodeRow''
-
-block  = (\i -> "ROW(" <> i <> ")")
-assoc = ","
-leaf = id
-
-leafDel i = " case when " <> i <> " is not null then true else null end  as " <> i
-
-explodeRow' :: InformationSchema -> KVMetadata Key -> TB3 Key () -> Codegen Text
-explodeRow' inf m (LeftTB1 (Just tb) ) = explodeRow' inf m tb
-explodeRow' inf m (ArrayTB1 (tb:|_) ) = explodeRow' inf m tb
-explodeRow' inf m (TB1 i ) = explodeRow'' inf m i
-
--- explodeRow'' t@(m ,KV tb) = do
--- block . T.intercalate assoc <$> (traverse (explodeDelayed t .getCompose)  $ sortPosition $F.toList  tb  )
-explodeRow'' inf m t@(KV tb) = atTable m $ T.intercalate assoc <$> (traverse (explodeDelayed inf m t )  $ P.sortBy (P.comparing (RelSort. keyattri ))$ F.toList  tb)
+explodeRecord inf m t@(KV tb) = atTable m $ T.intercalate "," <$> (traverse (explodeDelayed inf m t )  $ P.sortBy (P.comparing (RelSort. keyattri ))$ F.toList  tb)
 
 selectRow  l i = "(select rr as " <> l <> " from (select " <> i<>  ") as rr )"
 
-replaceexpr :: Expr -> [Text]  -> Text
-replaceexpr k ac = go k
-  where
-    go :: Expr -> Text
-    go (Function i e) = i <> "(" <> T.intercalate ","  (go   <$> e) <> ")"
-    go (Value i ) = (ac !! i )
-
-explodeDelayed inf m tb ((Fun k (ex,a)  _ )) =  replaceexpr ex <$> traverse (\i -> explodeDelayed inf m tb $ indexLabel i tb) a -- leaf (isArray (keyType k)) l
+explodeDelayed inf m tb (Fun k (ex,a)  _ )
+  = replaceexpr ex <$> traverse (\i-> explodeDelayed inf m tb $ indexLabel i tb) a
 explodeDelayed inf m _ t@(Attr k  _ )
-  | isKDelayed (keyType k) = do
+  = foldr (=<<) prim (eval<$>kty)
+  where
+    Primitive kty (AtomicPrim _) = keyType k
+    eval KDelayed = \p -> do
+      l <- lkTB t
+      return $ " case when " <> l <> " is not null then true else null end  as " <> l
+    eval _ = return
+    prim =  do
+      l <- lkTB t
+      return  l
+explodeDelayed inf m _ t@(IT  k tb  )
+  = foldr (=<<) prim (eval<$>kty)
+  where
+   Primitive kty (RecordPrim r) = keyType k
+   eval KArray = \p -> do
     l <- lkTB t
-    return $ leafDel l
-  | otherwise =  do
-    l <- lkTB t
-    return $ leaf l
+    return  l
+   eval _ = return
+   prim = do
+     l <- lkTB t
+     let nmeta = tableMeta $ lookSTable inf r
+     selectRow l <$> explodeRecord inf nmeta  (tableNonRef2 $ allRec' (tableMap inf) (lookSTable inf r))
 
-explodeDelayed inf m rec (IT  k (LeftTB1 (Just tb  ))) =  explodeDelayed inf m rec (IT k tb)
-explodeDelayed inf m _ (t@(IT  k (ArrayTB1 (TB1 tb :| _) ) )) = do
-  l <- lkTB t
-  return $ leaf l
-explodeDelayed inf m _ (t@(IT  k v  )) = do
-   l <- lkTB t
-   let nmeta = tableMeta $ lookSTable inf r
-       RecordPrim r = _keyAtom $ keyType k
-   selectRow l <$> explodeRow' inf nmeta  v
-{-explodeDelayed tbenv  (Labeled l (FKT ref  _ _ )) = case unkvlist ref of
-           [] -> return $ leaf l
-           i -> (\v -> T.intercalate assoc v <> assoc <> leaf l) <$> traverse (explodeDelayed tbenv . getCompose) i
--}
 
 printPred :: InformationSchema -> KVMetadata Key -> TBData  Key ()->  BoolCollection (Access Key ,AccessOp Showable ) -> Codegen (Maybe [Text],Maybe [(PrimType,FTB Showable)])
 printPred inf m t (PrimColl (a,e)) = do
@@ -403,66 +358,8 @@ printPred inf m t (AndColl wpred) = do
       w <- fmap unzip <$> traverse (traverse (printPred inf m  t)) (nonEmpty wpred)
       return (pure . (\i -> " (" <> i <> ") ") . T.intercalate " AND " <$>  join (nonEmpty . concat . catMaybes .fst <$> w) , concat . catMaybes . snd <$> w )
 
-renderType (Primitive (KInterval :xs) t ) =
-  case t of
-    (AtomicPrim (PInt i)) ->  case i of
-      4 -> "int4range"
-      8 -> "int8range"
-    (AtomicPrim (PTime (PDate))) -> "daterange"
-    (AtomicPrim (PTime (PTimestamp i))) -> case i of
-      Just i -> "tsrange"
-      Nothing -> "tstzrange"
-    (AtomicPrim (PGeom ix i)) ->
-       case ix of
-            2 ->  "box2d"
-            3 ->  "box3d"
-
-    (AtomicPrim PDouble) -> "floatrange"
-    i -> Nothing
-renderType (Primitive [] (RecordPrim (s,t)) ) = Just $ s <> "." <> t
-renderType (Primitive [] (AtomicPrim t) ) =
-  case t  of
-    PBinary -> "bytea"
-    PDynamic -> "bytea"
-    PDouble -> "double precision"
-    PDimensional _ _ -> "dimensional"
-    PText -> "character varying"
-    PInt v -> case v of
-      2 -> "smallint"
-      4 -> "integer"
-      8 -> "bigint"
-      v -> errorWithStackTrace ("no index" ++ show   v)
-    PTime i -> case i of
-      PDate -> "date"
-      PTimestamp v -> case v of
-        Just i -> "timestamp without time zone"
-        Nothing -> "timestamp with time zone"
-    i -> Nothing
-renderType (Primitive (KArray :xs)i) = (<>"[]") <$> renderType (Primitive xs i)
-renderType (Primitive (KOptional :xs)i) = renderType (Primitive xs i)
-renderType (Primitive (KSerial :xs)i) = renderType (Primitive xs i)
-renderType (Primitive (KDelayed :xs)i) = renderType (Primitive xs i)
-
-
 instance IsString (Maybe T.Text) where
   fromString i = Just (fromString i)
-
--- inferParamType e i |traceShow ("inferParam"e,i) False = undefined
-inferParamType op i = maybe "" (":: " <>) $ renderType $  inferOperatorType op i
-
-
-indexLabel  :: Show a =>
-    Access Key
-    -> TBData Key a
-    -> (Column  Key a)
-indexLabel p@(IProd b l) v =
-    case findAttr l v of
-      Just i -> i
-      Nothing -> errorWithStackTrace "no fk"
-indexLabel  i v = errorWithStackTrace (show (i, v))
-
-indexLabelU  (Many [One nt]) v = flip (indexLabel ) v $ nt
-
 
 
 indexFieldL
@@ -473,10 +370,9 @@ indexFieldL
     -> Access Key
     -> TBData Key ()
     -> Codegen [(Maybe Text, Maybe (PrimType ,FTB Showable))]
--- indexFieldL e c p v | traceShow (e,c,p) False = undefined
 indexFieldL inf m e c p@(IProd b l) v =
     case findAttr l v of
-      Just i -> pure . utlabel  e c <$> tlabel' m i
+      Just i -> pure . utlabel  e c <$> tlabel'  i
       Nothing -> error "not attr"
 indexFieldL inf m e c n@(Nested l nt) v =
   case findFK (iprodRef <$> l) v of
@@ -494,7 +390,7 @@ indexFieldL inf m e c n@(Nested l nt) v =
 
     Nothing -> concat <$> traverse (\i -> indexFieldL inf m (Right (Not IsNull)) c i v) l
 
-indexFieldL inf m e c i v = errorWithStackTrace (show (i, v))
+indexFieldL inf m e c i v = error (show (i, v))
 
 indexFieldLU inf m e c (Many nt) v = concat <$> traverse (flip (indexFieldLU inf m e c) v ) nt
 indexFieldLU inf m e c (ISum nt) v = concat <$> traverse (flip (indexFieldLU inf m e c) v ) nt
@@ -514,7 +410,7 @@ utlabel (Left (value,e)) c idx = result
   where
     notFlip (Flip i) = False
     notFlip i = True
-    operator i = errorWithStackTrace (show i)
+    operator i = error (show i)
     opvalue re  (Flip (Flip i)) = opvalue re i
     opvalue ref (Flip (AnyOp (AnyOp Equals)))  = T.intercalate "." (c ++ [ref]) <> " " <>  "<@@" <>  " ANY( ? " <> ")"
     opvalue ref (AnyOp i)  = case ktypeRec ktypeUnLift  (keyType (fst idx)) of
@@ -526,7 +422,6 @@ utlabel (Left (value,e)) c idx = result
           recoverop _ =  " ? "  <> inferParamType (AnyOp i) (keyType (fst idx)) <> renderBinary (Flip i) <> " ANY(" <> T.intercalate "." (c ++ [ref])<> ")"
     opvalue ref (Flip (AnyOp i))  = T.intercalate "." (c ++ [ref]) <> renderBinary i <>  " ANY( " <> " ? " <>  ")"
     opvalue ref i =  T.intercalate "." (c ++ [ref]) <>  unliftOp i (keyType (fst idx))<>  " ? " <> inferParamType i ( keyType (fst idx))
-    -- opparm ref | traceShow ("opparam",ref) False = undefined
     opparam e = Just $ (inferOperatorType e (keyType  $fst idx ) ,value)
     result =  ( Just $  (opvalue (snd $ idx) e)   ,opparam e )
 
@@ -545,25 +440,17 @@ recurseOp i o k | isJust rw =  justError "rw" rw
   where rw = M.lookup (i,o,k)  rewriteOp
 recurseOp i o k = renderBinary o
 
-tlabel' m t@(Attr k _) =  do
+tlabel' t@(Attr k _) =  do
   l <- lkTB t
   return (k,l)
-tlabel' m t@(IT k tb ) =  do
+tlabel'  t@(IT k tb ) =  do
   l <- lkTB t
-  return (k,"i" <> l <> " :: " <> tableType m tb)
+  return (k,"i" <> l <> fromMaybe "" (inlineType (keyType k)))
 
 justLabel :: NameMap -> KVMetadata Key -> TBData Key () -> Key -> Text
-justLabel namemap meta t k = fst $ evalRWS (getLabels meta t  k) [Root meta] namemap
+justLabel namemap meta t k = fst $ evalRWS getLabels  [Root meta] namemap
   where
-    getLabels :: KVMetadata Key -> TBData Key () ->  Key ->  Codegen Text
-    getLabels m t k =  justError ("cant find label"  <> show k <> " - " <> show t) . M.lookup  (S.singleton $ Inline k) <$> mapLabels
-      where
-        label' t@(Attr k _) =  do
-          l <- lkTB t
-          return l
-        label' t@(IT k tb ) = do
-          l <- lkTB t
-          return $ "i" <>  l  <> " :: " <> tableType m tb
-        mapLabels  =  traverse label' (unKV $ tableNonRef2 t)
+    getLabels :: Codegen Text
+    getLabels =  (fmap  snd . tlabel' ) (justError ("cant find label"  <> show k <> " - " <> show t) $ M.lookup  (S.singleton $ Inline k) $ unKV $ tableNonRef2 t)
 
 

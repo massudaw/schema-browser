@@ -189,7 +189,7 @@ setup smvar args plugList w = void $ do
                       let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList (S.toList tables),Flip (AnyOp Equals)))]
                       stats_load <- metaAllTableIndexA inf "stat_load_table" pred
                       stats <- metaAllTableIndexA inf "table_stats" pred
-                      clients <- metaAllTableIndexA inf "clients"$  [(keyRef "schema",Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
+                      clients <- metaAllTableIndexA inf "clients"$  [(Nested ([keyRef "selection"]) $ Many [One $ keyRef "schema"],Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
                       element metabody # set UI.children [stats,stats_load,clients]
                   "Exception" -> do
                       let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList ((F.toList tables)),Flip (AnyOp Equals)))]

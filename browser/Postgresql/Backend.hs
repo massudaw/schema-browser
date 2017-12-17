@@ -238,12 +238,6 @@ insertPatch  inf conn i  t = either errorWithStackTrace (\i ->  liftIO $ if not 
 
 value i = "?"  <> fromMaybe ""  (inlineType (keyType i))
         where
-          inlineType (Primitive k (RecordPrim (s,t) )) = Just (" :: " <>s <> "." <> t <> foldMap ktype k )
-          inlineType _ = Nothing
-          ktype KArray  =  "[]"
-          ktype KOptional =  ""
-
-
 deletePatch
   ::
      Connection ->  KVMetadata PGKey -> TBIndex Showable -> Table -> IO ()
@@ -378,7 +372,6 @@ patchMod m pk patch = do
     return (Just mod)
 
 
-
 loadDelayed :: InformationSchema -> KVMetadata Key -> TBData Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
 loadDelayed inf m t@(v) values@(vs)
   | L.null $ _kvdelayed m = return Nothing
@@ -397,19 +390,14 @@ loadDelayed inf m t@(v) values@(vs)
            pk = fmap (firstTB (recoverFields inf) . snd) . L.sortBy (comparing (\(i,_) -> L.findIndex (\ix -> (S.singleton . Inline) ix == i ) $ _kvpk m)) . M.toList . _kvvalues $ tbPK m(tableNonRef' values)
        is <- queryWith (fromRecordJSON inf m delayed namemap) (conn inf) (fromString $ T.unpack str) pk
        res <- case is of
+            [i] ->return $ diff (KV filteredAttrs) (makeDelayed i)
             [] -> errorWithStackTrace "empty query"
-            [i] ->return $ diff (KV filteredAttrs) (mapKey' (alterKeyType (Le.over keyFunc makeDelayed)) . mapFValue' makeDelayedV $ i  )
             _ -> errorWithStackTrace "multiple result query"
        return res
   where
-    makeDelayed (KOptional :k ) = KOptional :(makeDelayed k)
-    makeDelayed (KArray :k ) = KArray :(makeDelayed k)
-    makeDelayed [] = [KDelayed ]
-
-    makeDelayedV (TB1 i) = LeftTB1 $ Just (TB1 i)
-    makeDelayedV (LeftTB1 i) = LeftTB1 $ makeDelayedV <$> i
-    makeDelayedV (ArrayTB1 i) = ArrayTB1 $ makeDelayedV <$> i
-
+    makeDelayed = mapKey' makeDelayedK . mapFValue' makeDelayedV
+    makeDelayedV i = join $ (LeftTB1 . Just . TB1) <$>  i
+    makeDelayedK = Le.over (keyTypes.keyFunc) (++[KDelayed])
     delayedattrs = concat $ fmap (keyValue . _relOrigin ) .  F.toList <$> M.keys filteredAttrs
     filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (S.fromList $ _kvdelayed m) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ vs)
 

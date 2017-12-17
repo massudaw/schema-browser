@@ -408,8 +408,6 @@ data TableModificationK k p
   deriving(Eq,Show,Functor,Generic)
 
 
-type QueryRef = State ((Int,Map Int Table ),(Int,Map Int Key))
-
 -- Literals Instances
 instance IsString Showable where
     fromString i = SText (T.pack i)
@@ -472,7 +470,6 @@ instance Fractional Showable where
 
 -- type HashQuery =  HashSchema (Set Key) (SqlOperation Table)
 type PathQuery = SqlOperation
-
 
 
 
