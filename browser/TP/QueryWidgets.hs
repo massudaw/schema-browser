@@ -529,7 +529,8 @@ eiTableDiff inf table constr refs plmods ftb@(k) preOldItems = do
     # set style [("margin-left","0px"),("border","2px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid")]
   tableName <- detailsLabel (set UI.text (T.unpack $ tableName table)) (UI.div  # set text (show table))
   tableDiv <- UI.div # set children [tableName,body]
-  return (tableDiv , (\i j -> maybe i ((\b -> if b then i else Keep ). isRight . tableCheck (tableMeta table)) (recoverEditChange j i))  <$> output <*> oldItems)
+  out <- ui . calmT $ (\i j -> maybe i ((\b -> if b then i else Keep ). isRight . tableCheck (tableMeta table)) (recoverEditChange j i))  <$> output <*> oldItems
+  return (tableDiv , out)
 
 
 crudUITable
