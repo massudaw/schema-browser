@@ -87,7 +87,7 @@ readHtmlReceita file = do
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
         >>> getTable' ( getTable' ((is "font" /> txt ) &&& (is "font" /> is "b" /> txt) )    {-<+> ( Left ^<< getChildren >>> getChildren >>> txt)-}  )
   l <- runX arr
-  return $ if L.null $ concat $ concat (concat l ) then Nothing else Just $ concat $ concat $ (traceShowId l) !! 1 !! 0
+  return $ if L.null $ concat $ concat (concat l ) then Nothing else Just $ concat $ concat $ l !! 1 !! 0
 
 readInputForm file = runX (readString [withValidate no , withWarnings no , withParseHTML yes] file >>> atTag "form" >>> getChildren >>> atTag "input" >>> attrP )
     where

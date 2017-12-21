@@ -638,7 +638,7 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
           ref :: [TB Text Showable]
           ref = [Attr  "statements" . LeftTB1 $ fmap (ArrayTB1 . Non.fromList ) .  join $  nonEmpty . catMaybes . fmap (\i ->   join . fmap unSSerial . fmap _tbattr .L.find (([Inline "fitid"]==). keyattri) $ (fmap create  i :: [TB  Text Showable ]) )<$> b]
           tbst :: (Maybe (TBIdx Text (Showable)))
-          tbst = Just $ (  [PFK  [Rel "statements" Equals "fitid",Rel "account" Equals "account"] (fmap patch ref) ao])
+          tbst = Just $ (  [PFK  [Rel "statements" (AnyOp Equals) "fitid",Rel "account" Equals "account"] (fmap patch ref) ao])
 
       returnA -< tbst
     ofx (TB1 (SText i), ((LeftTB1 (Just (TB1 (SBinary r) )))))
@@ -665,7 +665,7 @@ notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ IOPlugin url
 checkPrefeituraXML = FPlugins "Check Nota Prefeitura XML" tname $ PurePlugin url
   where
     tname = "nota"
-    varTB i = (\(TB1 (SBinary i)) -> BS.unpack i ) .traceShowId. justError "not loaded" . unSOptional' <$>  idxK i
+    varTB i = (\(TB1 (SBinary i)) -> BS.unpack i ) .justError "not loaded" . unSOptional' <$>  idxK i
     url ::  ArrowReaderM Identity
     url = proc t -> do
       xml <- varTB "nota_xml" -< ()
