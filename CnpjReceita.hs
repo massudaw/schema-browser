@@ -145,7 +145,7 @@ convertHtml out =
                               ,attr "uf" (idx "UF")])
                        ,fk [Rel "atividade_principal" Equals "id"] [own "atividade_principal" (LeftTB1 $ Just (pcnae))]
                                   (LeftTB1 $ Just $ tb [cna "id" pcnae,cna "description" pdesc] )
-                       ,afk [(Rel "atividades_secundarias" Equals "id")] [own "atividades_secundarias" (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ fmap fst scnae)]
+                       ,afk [(Rel "atividades_secundarias" (AnyOp Equals) "id")] [own "atividades_secundarias" (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ fmap fst scnae)]
                                   ((\(pcnae,pdesc)-> tb [cna "id" pcnae,cna "description" pdesc] ) <$> filter ((/=txt "Não informada").snd) scnae)]
         in Just  attrs
 

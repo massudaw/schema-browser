@@ -11,6 +11,7 @@ import Control.Lens as Le
 import Utils
 import GHC.Stack
 
+atMay :: NonEmpty a -> Int -> Maybe a
 atMay (i:| _) 0 = Just i
 atMay (_:| l) ix = S.atMay l (ix -1)
 
@@ -20,6 +21,11 @@ imap f = Le.imap f
 
 
 
+fromList :: [a] -> NonEmpty a
 fromList [] = errorWithStackTrace "empty list"
 fromList l = Non.fromList l
+
+
+
+
 

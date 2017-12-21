@@ -121,10 +121,6 @@ testSiapi2 = do
   let inp = (TE.unpack $ TE.decodeLatin1 kk)
   putStrLn . unlines . fmap concat . concat =<< readHtml inp
 
-readTestNota = do
-  kk <- BS.readFile "test-nota.xml"
-  let inp = (TE.unpack $ TE.decodeLatin1 kk)
-  NotaFiscal <$> readNota inp
 
 data NotaFiscal
    = NotaFiscal
@@ -133,18 +129,17 @@ data NotaFiscal
     notaValores :: [(String,Double)]
    }deriving(Show)
 
-readNota inp = do
+readNota inp =
   let
-      txt = trim ^<< hasText ( not .all (`elem` " *\160\t\r\n")) >>>  getText
-      arr = readString [withValidate no,withWarnings no,withParseHTML yes] inp
-        >>> atTag "servico" >>> atTag "valores" >>> getChildren
-            >>> listA (
-              proc i -> do
-                n <- getName -< i
-                v <- deep getText -< i
-                returnA -< ((n,) <$> (readMay (traceShowId  v) :: Maybe Double)))
-  l <- runX arr
-  return $ catMaybes (concat  l)
+    txt = trim ^<< hasText ( not .all (`elem` " *\160\t\r\n")) >>>  getText
+    arr = hread
+      >>> atTag "servico" >>> atTag "valores" >>> getChildren
+          >>> listA (
+            proc i -> do
+              n <- getName -< i
+              v <- deep getText -< i
+              returnA -< ((n,) <$> (readMay v :: Maybe Double)))
+  in catMaybes .concat $ runLA arr $ inp
 
 
 

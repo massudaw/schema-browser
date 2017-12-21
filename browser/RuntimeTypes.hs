@@ -400,8 +400,8 @@ putPatch m a= liftIO$ do
   -- print ("putPatch",i,length a)
   atomically $ putPatchSTM m a
 
-putPatchSTM m =  writeTChan m .  fmap (firstPatchRow keyFastUnique)
-putIdx m = liftIO .atomically . writeTChan m
+putPatchSTM m =  writeTChan m . force. fmap (firstPatchRow keyFastUnique)
+putIdx m = liftIO .atomically . writeTChan m . force
 
 typeCheckValuePrim f (KOptional :i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValuePrim f i) j
 typeCheckValuePrim f (KDelayed :i) (LeftTB1 j) = maybe (Pure ()) (typeCheckValuePrim f i) j
@@ -480,7 +480,7 @@ findRefTable inf tname rel =  tname2
 liftFieldF :: (Show k ,Ord k) => LookupKey k -> InformationSchema -> Text -> Column k a -> Column Key a
 liftFieldF (f,p) inf tname (Attr t v) = Attr (f inf tname t) v
 liftFieldF (f,p) inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (f inf tname ) ((liftFieldF (f,p) inf tname) ) ref)   rel (liftTableF (f,p) rinf tname2 <$> tb)
-  where FKJoinTable  rel (schname,tname2)  = unRecRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\r-> S.map (fmap p) (pathRelRel r)  == S.fromList rel2)  (F.toList$ rawFKS  ta)
+  where FKJoinTable  rel (schname,tname2)  = unRecRel $ justError (show (tname,rel2 ,rawFKS ta)) $ L.find (\r-> S.map (fmap p) (pathRelRel r)  == S.fromList rel2)  (F.toList$ rawFKS  ta)
         rinf = fromMaybe inf (HM.lookup schname (depschema inf))
         ta = lookTable inf tname
 liftFieldF (f,p) inf tname (IT rel tb) = IT (f inf tname  rel) (liftTableF (f,p) inf tname2 <$> tb)

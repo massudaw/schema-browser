@@ -472,7 +472,6 @@ instance Fractional Showable where
 type PathQuery = SqlOperation
 
 
-
 tableAttr (m , KV n) =   concat  $ F.toList (nonRef <$> n)
   where
     nonRef i@(Fun _ _ _ ) =[i]

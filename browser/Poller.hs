@@ -45,12 +45,13 @@ plugs schm authmap db plugs = do
   inf <- metaInf schm
   regplugs <- fmap fst $ runDynamic $ transactionNoLog inf  $ do
       (db ,(_,t)) <- selectFrom "plugins"  Nothing Nothing [] $ mempty
-      let regplugs = catMaybes $ findplug <$> plugs
-          findplug :: PrePlugins -> Maybe Plugins
-          findplug p = (,p). round . unTB1 . flip index "oid" . G.leafValue<$>  listToMaybe (G.getEntries $ G.queryCheck (pred ,rawPK (lookTable inf "plugins")) t)
-            where
-              pred :: TBPredicate Key Showable
-              pred = WherePredicate $ AndColl [PrimColl (liftAccess inf "plugins" $ keyRef "name" , Left (txt $ _name p,Equals))]
+      let
+        regplugs = catMaybes $ findplug <$> plugs
+        findplug :: PrePlugins -> Maybe Plugins
+        findplug p = (,p). round . unTB1 . flip index "oid" . G.leafValue<$>  listToMaybe (G.getEntries $ G.queryCheck (pred ,rawPK (lookTable inf "plugins")) t)
+          where
+            pred :: TBPredicate Key Showable
+            pred = WherePredicate $ AndColl [PrimColl (liftAccess inf "plugins" $ keyRef "name" , Left (txt $ _name p,Equals))]
       return regplugs
   atomically $ do
     schmRef <-readTVar schm

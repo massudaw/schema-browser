@@ -21,7 +21,7 @@ module Types.Common (
     ,SqlOperationTK(..)
     ,SqlOperationK(..)
     ,FTB (..)
-    ,mapKV,findTB1,filterTB1',mapTB1,mapKey',mapKey,firstTB,mapBothKV,firstKV,secondKV,traverseKV,filterTB1
+    ,mapKV,findKV,findTB1,filterTB1',mapTB1,mapKey',mapKey,firstTB,mapBothKV,firstKV,secondKV,traverseKV,filterTB1
     ,mapTable
     ,atTBValue
     ,unTB1
@@ -307,8 +307,6 @@ findKV i (KV  n) =  L.find (i . snd) $Map.toList  n
 findTB1  i (TB1  j )  = findKV i j
 -- findTB1  l (LeftTB1  j )  = join $ findTB1  l <$> j -- error (show m)
 
-findTB1'  i (TB1 (m, j) )  = Map.lookup  i (unKV j)
-findTB1'  i (LeftTB1  j )  = join $ findTB1' i <$> j
 
 
 
@@ -468,9 +466,9 @@ firstTB f (FKT k  m  i) = FKT  (mapBothKV (f) ((firstTB f)) k)  (fmap f  <$> m) 
 
 data FTB a
   = TB1  a
-  | LeftTB1  (Maybe (FTB a))
-  | ArrayTB1  (NonEmpty (FTB a))
-  | IntervalTB1  (Interval.Interval (FTB a))
+  | LeftTB1  ! (Maybe (FTB a))
+  | ArrayTB1  ! (NonEmpty (FTB a))
+  | IntervalTB1  ! (Interval.Interval (FTB a))
   deriving(Eq,Ord,Show,Functor,Foldable,Traversable,Generic)
 
 

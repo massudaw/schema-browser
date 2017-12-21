@@ -554,7 +554,7 @@ patchCheck m (s,i) = if checkAllFilled then Right (s,i) else Left ("patchCheck: 
       available = S.unions $ S.map _relOrigin . pattrKey <$> i
       need = S.fromList $ L.filter (\i -> not (isKOptional (keyType i) || isSerial (keyType i) || isJust (keyStatic i )) )  (kvAttrs m)
 
-tableCheck m t = Right t --if checkAllFilled then Right t else Left ("tableCheck: non nullable rows not filled " ++ show ( need `S.difference` available ,m,t))
+tableCheck m t = if checkAllFilled then Right t else Left ("tableCheck: non nullable rows not filled " ++ show ( need `S.difference` available ,m,t))
   where
       checkAllFilled =  need `S.isSubsetOf`  available
       available = S.fromList $ concat $ fmap _relOrigin . keyattr <$> unKV  t
@@ -794,7 +794,9 @@ tbEdit m (IT a1 a2) (IT k2 t2) = do
   let RecordPrim r = _keyAtom $ keyType k2
   IT k2 <$> noInsert (tableMeta $ lookSTable inf r) t2
 
-tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2) = go rel2 a2 t2
+tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2)
+  | apk /= pk =  tbInsertEdit m f
+  | otherwise  = go rel2 a2 t2
   where go rel2 a2 t2 = case (a2,t2) of
           (TB1 o@ol,TB1 t@l) -> do
              inf <- ask

@@ -317,7 +317,9 @@ minimalDesign = PurePlugin url
 
 
 
-retencaoServicos = FPlugins pname tname  $ PurePlugin url
+retencaoServicos
+  = FPlugins pname tname
+    $ StatefullPlugin [(([],[("pis",atPrim PDouble),("csll",atPrim PDouble),("irpj",atPrim PDouble),("cofins",atPrim PDouble),("issqn",atPrim PDouble),("liquido",atPrim PDouble)]),PurePlugin url)]
   where
     pname , tname :: Text
     pname = "Retencao Nota"
@@ -325,12 +327,12 @@ retencaoServicos = FPlugins pname tname  $ PurePlugin url
     url :: ArrowReaderM Identity
     url = proc t -> do
       TB1 (SBoolean hasIssqn )<- idxK "issqn_substituicao" -< ()
-      odxR "pis_retido" -< ()
-      odxR "csll_retido" -< ()
-      odxR "irpj_retido" -< ()
-      odxR "cofins_retido" -< ()
-      odxR "issqn_retido" -< ()
-      odxR "valor_liquido" -< ()
+      odxR "pis" -< ()
+      odxR "csll" -< ()
+      odxR "irpj" -< ()
+      odxR "cofins" -< ()
+      odxR "issqn" -< ()
+      odxR "liquido" -< ()
       v <- atR "id_payment" (
           doubleP "price"
           ) -< ()
@@ -340,16 +342,14 @@ retencaoServicos = FPlugins pname tname  $ PurePlugin url
           irpj = if (0.015 * v) < 10 then 0 else  0.015*v
           issqn = if hasIssqn then 0.05 * v else 0
       returnA -< Just $ tblist $
-          [att "pis_retido" pis
-          ,att "cofins_retido" cofins
-          ,att "csll_retido" csll
-          ,att "irpj_retido" irpj
-          ,att "issqn_retido" issqn
-          ,att "valor_liquido" (v - pis - cofins - csll - irpj - issqn)
+          [att "pis" pis
+          ,att "cofins" cofins
+          ,att "csll" csll
+          ,att "irpj" irpj
+          ,att "issqn" issqn
+          ,att "liquido" (v - pis - cofins - csll - irpj - issqn)
           ]
-
-
-    att i v =   Attr i (LeftTB1 $ Just $ TB1 (SDouble v))
+    att i v = Attr i (TB1 (SDouble v))
 
 
 
@@ -476,7 +476,7 @@ generateEmail = IOPlugin   url
 
     buildmessage :: FTB Showable -> IO (FTB Showable)
     buildmessage (TB1 (SBinary mesg ))= TB1 .SText . T.pack . BS.unpack . B64Url.encode .BSL.toStrict <$>  ( renderMail' $ Mail (Address Nothing "wesley.massuda@gmail.com") [Address Nothing "wesley.massuda@gmail.com"] [] [] [] [[mail]])
-          where mail = (Part "text/plain" None Nothing [] (BSL.fromStrict $   mesg))
+          where mail = Part "text/plain" None Nothing [] (BSL.fromStrict  mesg)
 
 
 renderEmail = FPlugins  "Render Email" "messages" $ StatefullPlugin
@@ -659,19 +659,18 @@ notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ IOPlugin url
                                p <- varTB "goiania_password"-< t
                                returnA -< (, , ) n u p  ) -< t
       b <- act ((\(i, (j, k,a)) -> liftIO$ prefeituraNotaXML j k a i ) ) -< (,) i r
-      let ao =  Just $ tblist [attrT ("nota_xml",    LeftTB1 $ fmap  (LeftTB1 . Just .TB1)  b)]
+      let ao =  Just $ tblist [attrT ("nota_xml",    LeftTB1 $ fmap (LeftTB1 . Just .TB1)  b)]
       returnA -< ao
 
-checkPrefeituraXML = FPlugins "Check Nota Prefeitura XML" tname $ IOPlugin url
+checkPrefeituraXML = FPlugins "Check Nota Prefeitura XML" tname $ PurePlugin url
   where
     tname = "nota"
-    varTB i = (\(TB1 (SBinary i)) -> BS.unpack i ) <$>  idxK i
-    url ::  ArrowReader
+    varTB i = (\(TB1 (SBinary i)) -> BS.unpack i ) .traceShowId. justError "not loaded" . unSOptional' <$>  idxK i
+    url ::  ArrowReaderM Identity
     url = proc t -> do
       xml <- varTB "nota_xml" -< ()
-      values <- act (liftIO . readNota)  -< xml
       traverse odxR (snd <$> translate)  -< ()
-      returnA -< tblist <$> nonEmpty (catMaybes $ replace <$> values)
+      returnA -< tblist <$> nonEmpty (catMaybes $ replace <$> readNota  xml)
 
     translate =  [("valoriss","issqn_retido"),
                   ("valorpis","pis_retido"),

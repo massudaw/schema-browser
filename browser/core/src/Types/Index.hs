@@ -386,8 +386,8 @@ indexPred :: (Show k ,ShowableConstr a , Show a,Ord k) => (Access k ,AccessOp a)
 -- indexPred (Many i,eq) a= all (\i -> indexPred (i,eq) a) i
 indexPred (n@(Nested k (Many[One nt]) ) ,eq) r
   = case  indexField n r of
-    Nothing -> False
-    Just i ->  recPred $ indexPred (nt , eq ) <$> _fkttable  i
+    Nothing ->False
+    Just i  ->recPred $ indexPred (nt , eq) <$> _fkttable  i
   where
     recPred (TB1 i ) = i
     recPred (LeftTB1 i) = maybe False recPred i
@@ -395,7 +395,7 @@ indexPred (n@(Nested k (Many[One nt]) ) ,eq) r
     recPred i = errorWithStackTrace (show i)
 indexPred (a@(IProd _ _),eq) r =
   case indexField a r of
-    Nothing ->  False
+    Nothing -> False
     Just (Fun _ _ rv) ->
       case eq of
         i -> match eq (Right rv)
@@ -513,7 +513,7 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
       mal (Right v) j = ma v j
         where
           ma (Not i) j = not $ ma i   j
-          ma IsNull  j = False
+          ma IsNull j = False
           ma (BinaryConstant op e )  v  = mal (Left (generate e,op))  v
           ma (Range b pred)  j   = match  (Right  pred) $ Right $ LeftTB1 $ fmap TB1 $ unFin $ if b then upperBound j else lowerBound j
           ma i j =errorWithStackTrace (show (i,j))
@@ -551,8 +551,8 @@ instance (Range v,ConstantGen (FTB v) , Positive (Tangent v), Semigroup (Tangent
       mar (Right i ) j =ma i j
         where
           ma  (Not i) j  = not $ ma i   j
-          ma  IsNull  (LeftTB1 j)   = isNothing j
-          ma  IsNull   j   = False
+          ma  IsNull  (LeftTB1 j)   = maybe True (ma IsNull) j
+          ma  IsNull  j   = False
           ma  (BinaryConstant op e )  v  = mar (Left (generate e,op))  v
           ma  (Range b pred)  (IntervalTB1 j)   = ma  pred $ LeftTB1 $ unFin $ if b then upperBound j else lowerBound j
           ma i  j = errorWithStackTrace ("no mar right =" ++ show (i ,j))

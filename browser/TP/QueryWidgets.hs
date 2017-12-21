@@ -1,6 +1,7 @@
 {-# LANGUAGE
     OverloadedStrings
    ,FlexibleContexts
+  ,GADTs
    ,RecursiveDo
  #-}
 
@@ -118,16 +119,16 @@ genAttr inf k =
     kgen KArray = ArrayTB1 . pure
 
 execute :: InformationSchema -> Text -> Plugins -> Maybe (TBData Key Showable) -> IO (Maybe (TBIdx Key Showable))
-execute inf t (idp,p) = fmap join . traverse (\v -> fmap (join . fmap (diff v . apply v . liftPatch inf t). join . eitherToMaybe ). catchPluginException inf (tableUnique table) idp ( getPKM (tableMeta table) v) . action $  (mapKey' keyValue) v)
+execute inf t (idp,p) = fmap join . traverse (\ v -> fmap (join . eitherToMaybe) . catchPluginException inf (tableUnique table ) idp ( getPKM (tableMeta table)   v)   . exec (_plugAction p ) $ v )
   where
-    action :: TBData Text Showable -> IO (Maybe (TBIdx Text Showable))
-    action = pluginActionDiff p
     table = lookTable inf t
+    actiona f v =  fmap (join .  fmap (diff v ).  fmap (liftTable' inf t)) . f  $  (mapKey' keyValue) v
+    actiond f v = fmap (join . fmap (diff v . apply v . liftPatch inf t)) . f $ (mapKey' keyValue) v
+    exec p@(PurePlugin _) = actiona (pluginAction' p)
+    exec p@(DiffPurePlugin _) = actiond (pluginActionDiff' p)
+    exec p@(DiffIOPlugin _) = actiond (pluginActionDiff' p)
+    exec p@(IOPlugin _) = actiona (pluginAction' p)
 
-executeT inf t (idp,p) = fmap join . traverse (\v -> liftIO .fmap (join .  fmap (diff v ).  fmap (liftTable' inf t ). join . eitherToMaybe ) . catchPluginException inf (tableUnique table ) idp ( getPKM (tableMeta table)   v) . action $ (mapKey' keyValue) v)
-  where
-    table = lookTable inf t
-    action = pluginAction p
 
 pluginUI
     :: InformationSchema
@@ -145,34 +146,33 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
       freshKeys = first (fmap lookK ) . second (fmap lookK) <$> fresh
       lookK = lookKey inf tname . fst
   freshUI <- foldl' (\old (aci ,(inpfresh,outfresh)) -> (old >>= (\(l,unoldItems)-> do
-      elemsIn <- mapM (\fresh -> do
-        let attrB pre a = do
-              wn <-  tbCaseDiff  inf  (lookTable oinf tname) mempty a mempty  mempty pre
-              v <- labelCaseDiff inf a  wn
-              out <- UI.div # set children [getElement v,getElement wn]
-              return  $ TrivialWidget (recoverEditChange <$> facts pre <#> triding v) out
-
-        attrB (const Nothing <$> unoldItems)  (genAttr oinf fresh )
-           ) inpfresh
+      let inputs fresh = attrB   (genAttr oinf fresh)
+          attrB a = do
+            let pre = (const Nothing <$> unoldItems)
+            wn <-  tbCaseDiff  inf  (lookTable oinf tname) mempty a mempty  mempty pre
+            v <- labelCaseDiff inf a  wn
+            out <- UI.div # set children [getElement v,getElement wn]#  set UI.class_ ("col-xs-" <> show (fst $  attrSize a))
+            return  $ TrivialWidget (recoverEditChange <$> facts pre <#> triding v) out
+      elemsIn <- mapM  inputs inpfresh
       let
         inp :: Tidings (Maybe (TBData CoreKey Showable))
         inp = fmap tblist <$> foldr (liftA2 (liftA2 (:))) (pure (Just [])) (fmap triding elemsIn)
 
-      (preinp,(_,liftedE )) <- pluginUI  inf (liftA2 mergeTB1 <$>  facts unoldItems <#>  inp) (idp,FPlugins "Enviar" tname aci)
+      (preinp,(_,liftedE )) <- pluginUI  inf (liftA2 mergeTB1 <$>  unoldItems <*>  inp) (idp,FPlugins n tname aci)
 
-      elemsOut <- mapM (\fresh -> do
-        let
+      let outputs fresh =  attrB (fmap (\v ->  justError ("no key " <> show fresh <> " in " <>  show v ) .fmap snd . findKV ((== [fresh]) . fmap _relOrigin. keyattr ) $ create v)  <$> liftedE  )  (genAttr oinf fresh)
           attrB pre a = do
-              wn <-  tbCaseDiff inf (lookTable oinf tname) []  a [] [] pre
-              TrivialWidget v e <- labelCaseDiff inf a  wn
-              out <- UI.div # set children [getElement e,getElement wn]
-              return $ TrivialWidget (recoverEditChange <$> pre <*> v ) out
-        attrB (fmap (\v ->  justError ("no key " <> show fresh <> " in " <>  show v ) .fmap snd . findTB1 ((== [fresh]) . fmap _relOrigin. keyattr ) $ TB1 (create v :: TBData Key Showable) )  <$> liftedE  )  (genAttr oinf fresh )
-       ) outfresh
+            wn <-  tbCaseDiff inf (lookTable oinf tname) []  a [] [] pre
+            TrivialWidget v e <- labelCaseDiff inf a  wn
+
+            out <- UI.div # set children [getElement e,getElement wn] #  set UI.class_ ("col-xs-" <> show (fst $  attrSize a))
+            return $ TrivialWidget (recoverEditChange <$> pre <*> v ) out
+
+      elemsOut <- mapM outputs outfresh
 
       let styleUI =  set UI.class_ "row"
             . set UI.style [("border","1px"),("border-color","gray"),("border-style","solid"),("margin","1px")]
-      j<- UI.div # styleUI  # set children (fmap getElement elemsIn <> [preinp])# sink UI.style (noneShow .isJust <$> facts unoldItems)
+      j <- UI.div # styleUI  # set children (fmap getElement elemsIn <> [preinp]) # sink UI.style (noneShow .isJust <$> facts unoldItems)
       k <- UI.div # styleUI  # set children (fmap getElement elemsOut) # sink UI.style (noneShow .isJust <$> facts liftedE  )
       return  ( l <> [j , k] , (\i j ->  liftA2 apply i j  <|> i <|> fmap create j) <$> facts unoldItems <#>  liftedE  ))
            ) ) (return (([],trinp))) $ zip (fmap snd ac) freshKeys
@@ -180,58 +180,49 @@ pluginUI oinf trinp (idp,FPlugins n tname (StatefullPlugin ac)) = do
   let evdiff = fmap join $ liftA2 diff <$>  facts trinp <#> snd freshUI
   return (el , (liftAccessU inf tname  $snd $ pluginStatic' $ snd $ last ac , evdiff ))
 
-pluginUI inf oldItems pl@(idp,p@(FPlugins n t (PurePlugin arrow ))) = do
-  let
-      (tdInput, tdOutput,out) = checkAccessFull inf t arrow oldItems
-  headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
-  ini <- currentValue (facts tdInput )
-  kk <- ui $ stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
-  pgOut <- ui $mapTEventDyn (liftIO . executeT inf t pl)  (tidings kk $diffEvent kk (rumors tdInput ))
-  return (headerP, (out ,   pgOut ))
-pluginUI inf oldItems pl@(idp,p@(FPlugins n t (DiffPurePlugin arrow ))) = do
-  let
-      (tdInput, tdOutput,out) = checkAccessFull inf t arrow  oldItems
-  headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
-  ini <- currentValue (facts tdInput )
-  kk <- ui $ stepper ini (diffEvent (facts tdInput ) (rumors tdInput ))
-  pgOut <- ui $mapTEventDyn (liftIO . execute inf t pl) (tidings kk $diffEvent kk (rumors tdInput ))
-  return (headerP, (out,   pgOut ))
-pluginUI inf oldItems pl@(idp,p@(FPlugins n t (DiffIOPlugin arrow))) = do
-  overwrite <- checkedWidget (pure False)
-  let
-      (tdInput, tdOutput,out) = checkAccessFull inf t arrow oldItems
-  headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n) # sink UI.enabled (isJust <$> facts tdInput)  #set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
-  cliHeader <- UI.click headerP
-  let ecv = facts tdInput <@ cliHeader
-  bcv <- ui $ stepper Nothing  ecv
-  pgOut  <- ui $mapTEventDyn (liftIO . execute inf t pl)  (tidings bcv ecv)
-  return (headerP, (out,  pgOut ))
-
-pluginUI inf oldItems pl@(idp,p@(FPlugins n t (IOPlugin arrow))) = do
-  overwrite <- checkedWidget (pure False)
-  let
-      (tdInput, tdOutput,out) = checkAccessFull inf t arrow  oldItems
-  headerP <- UI.button # set UI.class_ "btn btn-sm"# set text (T.unpack n)  # sink UI.enabled (isJust <$> facts tdInput)  # set UI.style [("color","white")] # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
-  cliHeader <- UI.click headerP
-  let ecv = facts tdInput <@ cliHeader
-  bcv <- ui $ stepper Nothing ecv
-  pgOut  <- ui $mapTEventDyn (liftIO . executeT inf t pl)   (tidings bcv ecv)
-  return (headerP, (out ,  pgOut ))
-
-
+pluginUI inf oldItems pl@(idp,FPlugins n t p) =
+    case p of
+      IOPlugin _ -> uiio
+      DiffIOPlugin _ -> uiio
+      PurePlugin _ -> uipure
+      DiffPurePlugin _ -> uipure
+  where
+    (tdInput, tdOutput,out)
+        = checkAccessFull inf t (pluginStatic' p) oldItems
+    headerUI
+      = UI.button
+      # set UI.class_ "btn btn-sm"
+      # set text (T.unpack n)
+      # sink UI.enabled (isJust <$> facts tdInput)
+      # set UI.style [("color","white")]
+      # sink UI.style (liftA2 greenRedBlue  (isJust <$> facts tdInput) (isJust <$> facts tdOutput))
+    uiio = do
+      headerP <-  headerUI
+      cliHeader <- UI.click headerP
+      let ecv = const <$> facts tdInput <@ cliHeader
+      ini <- currentValue (facts tdInput)
+      let ecv1 = unionWith const (const (const Nothing) <$> rumors tdInput ) ecv
+      bcv <- ui $ accumT ini ecv1
+      pgOut  <- ui $mapTEventDyn (liftIO . execute inf t pl)  bcv
+      return (headerP, (out,  pgOut ))
+    uipure =do
+      let
+      headerP <- headerUI
+      pgOut <- ui $mapTEventDyn (liftIO . execute inf t pl) tdInput
+      return (headerP, (out,   pgOut ))
 
 checkAccessFull
   :: Functor f =>
      InformationSchema
      -> Text
-     -> Parser t (Union (Access Text)) t2 t3
+     -> (Union (Access Text),Union (Access Text))
      -> f (Maybe (TBData Key Showable))
      -> (f (Maybe (TBData Key Showable)),
          f (Maybe (TBData Key Showable)),
          (Union (Access Key)))
 checkAccessFull inf  t arrow oldItems = (tdInput,tdOutput,out)
     where
-      (inp,out) = second (liftAccessU inf t ). first (liftAccessU  inf t ) $ staticP arrow
+      (inp,out) = second (liftAccessU inf t ). first (liftAccessU  inf t ) $ arrow
       pred =  WherePredicate <$> genPredicateFullU True inp
       tdInput = join . fmap (checkPredFull pred) <$> oldItems
       predOut =  WherePredicate <$> genPredicateFullU True out
@@ -355,15 +346,15 @@ tbCaseDiff inf table _ a@(Attr i _ ) wl plugItens preoldItems = do
     return $ TrivialWidget insertT  (getElement attrUI)
 tbCaseDiff inf table _ a@(Fun i rel ac ) wl plugItens preoldItems = do
   let
-    search (IProd _ t) = fmap (fmap _tbattr ). uncurry recoverT .snd <$> L.find ((S.singleton t ==) .  S.map _relOrigin . fst) wl
-    search (Nested t (Many [One m])) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). uncurry recoverT . snd <$> L.find ((S.fromList (iprodRef <$> t) ==) .  S.map _relOrigin . fst) wl
+    recoverT (i,j) = liftA2 (flip recoverEditChange) i j
+    search (IProd _ t) = fmap (fmap _tbattr ). recoverT .snd <$> L.find ((S.singleton t ==) .  S.map _relOrigin . fst) wl
+    search (Nested t (Many [One m])) =  fmap (fmap joinFTB . join . fmap (traverse (indexFieldRec m) . _fkttable )). recoverT . snd <$> L.find ((S.fromList (iprodRef <$> t) ==) .  S.map _relOrigin . fst) wl
     refs = sequenceA $ catMaybes $ search <$> snd rel
 
   funinp <- traverseUI ( traverse (liftIO. evaluateFFI (rootconn inf) (fst rel) funmap (buildAccess <$> snd rel)). allMaybes ) refs
   ev <- buildUIDiff (buildPrimitive [FRead]) (keyType i) [] funinp
   return $ TrivialWidget (editor <$> preoldItems <*> (fmap (Fun i rel) <$>  funinp)) (getElement ev)
 
-recoverT i j = liftA2 (flip recoverEditChange) i j
 
 emptyRecTable (FKT rel l tb )
     = case tb of
@@ -477,11 +468,11 @@ eiTableDiff inf table constr refs plmods ftb@(k) preOldItems = do
   plugins <- ui $ loadPlugins inf
   let
     meta = tableMeta table
-  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds .  snd) (plugins ))
+  res <- mapM (pluginUI inf oldItems) (filter ((== rawName table ) . _bounds .  snd) plugins )
+
   let
       resdiff =   snd <$> res
-      srefs :: [(Set (Rel Key),
-                        TB Key ())]
+      srefs :: [(Set (Rel Key),TB Key ())]
       srefs = P.sortBy (P.comparing (RelSort .F.toList . fst) ) . M.toList $ replaceRecRel (unTBMap ftb) (fmap (fmap S.fromList )  <$> _kvrecrels meta)
       plugmods = first traRepl <$> (resdiff <> plmods)
   let
@@ -503,25 +494,23 @@ eiTableDiff inf table constr refs plmods ftb@(k) preOldItems = do
       chk  <- buttonDivSetO (M.keys (unKV k))  (fmap keyattrs <$> initialAttr )  marker sumButtom
       element chk # set UI.style [("display","inline-flex")]
       let
-          keypattr (PAttr i _) = [Inline i]
-          keypattr (PInline i _) = [Inline i]
-          keypattr (PFK  l  _ _) = l
-          delete (PAttr i _) = PAttr i (POpt Nothing)
-          delete (PInline i _) = PInline i (POpt Nothing)
-          delete (PFK i j _ ) = PFK i (fmap delete  j ) (POpt Nothing)
+          deleteP (PAttr i _) = PAttr i (POpt Nothing)
+          deleteP (PInline i _) = PInline i (POpt Nothing)
+          deleteP (PFK i j _ ) = PFK i (fmap deleteP  j ) (POpt Nothing)
+          del j i = if pattrKey i == j then i else deleteP i
           iniValue = fmap (patch.attrOptional) <$> initialAttr
           resei :: Tidings (Editor (TBIdx CoreKey Showable))
-          resei = (\ini j -> fmap (\l  -> (L.map (\i -> if (S.fromList (keypattr i) == j) then i else delete i) (maybe l (:l) ini))) ) <$> iniValue <*> triding chk <*> sequenceTable fks
+          resei = (\ini j -> fmap (\l -> L.map (del j) (maybe l (:l) ini))) <$> iniValue <*> triding chk <*> sequenceTable fks
       listBody <- UI.div #  set children (getElement chk : F.toList (getElement .fst .snd <$> fks))
       sequence $ (\(kix,(el,_)) -> element  el # set UI.style [("border","1.5px gray solid")] # sink0 UI.style (noneShow <$> ((==kix) <$> facts (triding chk) ))) <$> fks
       return (listBody, resei)
     else  do
       fks <- buildFKS inf constr table refs plugmods ftb oldItems srefs
-      listBody <- UI.div  #
-        set children (F.toList (getElement .fst . snd  <$> fks))
+      listBody <- UI.div # set children ( (getElement .fst . snd  <$> fks))
       return (listBody,sequenceTable fks)
-  element listBody # set UI.class_ "row" #
-      set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
+  element listBody
+    # set UI.class_ "row"
+    # set style [("border","1px"),("border-color",maybe "gray" (('#':).T.unpack) (schemaColor inf)),("border-style","solid"),("margin","1px")]
   plugins <-  do
     pure <$> UI.div # set children (fst <$> res)
   body <- UI.div
@@ -547,12 +536,10 @@ crudUITable inf table reftb@(_, _ ,gist ,_,tref) refs pmods ftb@(_)  preoldItems
         m = tableMeta table
         getItem :: TBData CoreKey Showable -> TransactionM (Maybe (TBIdx CoreKey Showable))
         getItem  v =  getFrom table v `catchAll` (\e -> liftIO (putStrLn $ "error getting Item" ++ show (e :: SomeException)) >> return Nothing)
-      preoldItens <- currentValue (facts preoldItems)
-      loadedItens <-  ui $ join <$> traverse (transactionNoLog inf  . getItem) preoldItens
-      loadedItensEv <- ui $ mapTEventDyn (fmap join <$> traverse (\i ->  do
-        p <-  transactionNoLog inf . getItem $ i
-        traverse (putPatch tref .pure .PatchRow .(G.getIndex m i,)) p
-        return (fmap (PatchRow.(G.getIndex m i,)) p  ) )) preoldItems
+
+      ui $ mapTEventDyn (fmap join <$> traverse (\i ->  do
+        p <- transactionNoLog inf . getItem $ i
+        traverse (putPatch tref . pure . PatchRow .(G.getIndex m i,)) p)) preoldItems
       let
         deleteCurrentUn un e l =   maybe l (\v -> G.delete v G.indexParam l) $  G.getUnique un <$> e
         tpkConstraint = (F.toList $ _kvvalues $ tbPK m ftb , (_kvpk m,  gist))
@@ -595,17 +582,20 @@ dynCrudUITable inf open  refs pmods table preoldItems = do
       fun True =  do
           reftb@(vpt,_,gist,sgist,_) <- ui $ refTables inf   table
           (out ,tableb)<- crudUITable inf table reftb refs pmods (allRec' (tableMap inf ) table) preoldItems
-          ui $ onEventIO (filterE (maybe False (isRight.tableCheck (tableMeta table))) (rumors tableb))
-              h2
+          let check = filterE (maybe False (isRight.tableCheck (tableMeta table))) (rumors tableb)
+          ini <- currentValue (facts tableb)
+          liftIO. h2.join $  eitherToMaybe . tableCheck (tableMeta table) <$> ini
+          ui $ onEventIO check h2
           return out
-      fun i = UI.div
+      fun False = UI.div
 
-  end <- traverseUI fun ( triding nav)
+  end <- traverseUI fun (triding nav)
   element sub # sink children (pure <$> facts end)
   cv <- currentValue (facts preoldItems)
   let evs2 = unionWith const e2  (rumors preoldItems)
   bh2 <- ui $ stepper  cv evs2
-  return ([getElement nav,sub], F.foldl' (\i j -> mergePatches <$> i <*> j) (tidings bh2 evs2) (fmap snd pmods))
+
+  return ([getElement nav,sub], F.foldl' (liftA2 mergePatches) (tidings bh2 evs2) (fmap snd pmods))
 
 mergePatches i j = join (liftA2 applyIfChange i j)<|> i  <|> join (createIfChange <$>j)
 
@@ -788,7 +778,6 @@ maybeEdit v id (Diff i) =  id i
 maybeEdit v id _  = v
 
 unPOpt (POpt i ) = i
-
 
 type AtomicUI k b = PluginRef b ->  Tidings (Maybe b) ->  k -> UI (TrivialWidget (Editor (Index b)))
 
@@ -1395,7 +1384,6 @@ viewer inf table envK = do
       selection = const <$> rumors (triding itemList)
     tds <- ui $ accumT  Nothing  (unionWith (.) selection  updatedValue)
     ui $ cacheTidings tds
-
   (cru,pretdi) <- crudUITable inf table reftb M.empty [] (allRec' (tableMap inf) table) tds
   UI.div # set UI.children [getElement itemList,cru]
 

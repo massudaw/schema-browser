@@ -118,7 +118,7 @@ withReaderT3 f g  a= do
 ivalue :: (Monad m ,Show s) =>
   PluginM v  (Atom s) m i a
   -> PluginM (PathIndex PathTID v)  (Atom (FTB s) ) m i a
-ivalue (P (tidxi ,tidxo) (Kleisli op) )  = P (TipPath <$> tidxi,TipPath  <$> tidxo) (Kleisli $ (withReaderT ( fmap  PAtom ) (fmap unTB1 ) . op ))
+ivalue (P (tidxi ,tidxo) (Kleisli op) )  = P (TipPath <$> tidxi,TipPath  <$> tidxo) (Kleisli $ (withReaderT (fmap  PAtom) (fmap unTB1) . op ))
 
 
 
