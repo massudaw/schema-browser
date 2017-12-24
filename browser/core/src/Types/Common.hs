@@ -104,10 +104,10 @@ kvlist = KV. mapFromTBList
 unArray (ArrayTB1 s) =  s
 unArray o  = error $ "unArray no pattern " <> show o
 
-unSOptional (LeftTB1 i) = i
-unSOptional i = (Just i)
+unSOptional (LeftTB1 i) = join $ unSOptional <$> i
+unSOptional i = Just i
 
-unSOptional' (LeftTB1 i ) = i
+unSOptional' (LeftTB1 i ) = join $ unSOptional <$> i
 unSOptional' i   = Just i
 
 

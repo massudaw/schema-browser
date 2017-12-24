@@ -75,8 +75,7 @@ instance DecodeTB1 [] where
     where
       decFTB (LeftTB1 i ) = maybe [] decFTB i
       decFTB (ArrayTB1 i ) = Non.toList (unTB1 <$> i)
-      encFTB [] = LeftTB1 Nothing
-      encFTB l = LeftTB1 (Just $ ArrayTB1 (TB1 <$> Non.fromList l))
+      encFTB l = LeftTB1 $ (\i -> ArrayTB1 (TB1 <$> i)) <$> Non.nonEmpty l
 
 instance DecodeTB1 Interval.Interval where
   decFTB (IntervalTB1 i) = fmap unTB1 i
@@ -140,25 +139,25 @@ instance (Ord a, a ~ Index a ,Show a, Patch a, B.Binary a) =>
       mod_data = unBinary . unOnly . att . ix "modification_data" $ d
       username = unOnly . att . ix "user_name" $ d
       time = unOnly . att . ix "modification_time" $ d
-  encodeT (TableModification id ts u table ip) =
+  encodeT tm@(TableModification id ts u table ip) =
     tblist $
     [ Attr "user_name" (txt u)
     , Attr "modification_time" (timestamp ts)
     , Attr "table_name" (txt $ snd table)
-    , Attr "data_index" (array (TB1 . encodeS) mod_key)
+    -- , Attr "data_index" (array (TB1 . encodeS) mod_key)
     , Attr "modification_data" (TB1 . SBinary . BSL.toStrict . B.encode $ ip)
     , Attr "schema_name" (txt $ fst table)
     , Attr "modification_id" (opt int id)
     ]
     where
-      (Idex pidx , _) =
+      {-(Idex pidx , _) =
         case ip of
           PatchRow (p,i) -> (p,i)
-          CreateRow i -> (Idex mempty,patch i)
-          DropRow i -> (Idex mempty,patch i)
+          CreateRow i -> ((getIndex (tableMeta table) i ),patch i)
+          DropRow i -> ((getIndex (tableMeta table) i ),patch i)
       mod_key :: Non.NonEmpty (Binary (FTB a))
-      mod_key = Non.fromList $ Binary . fmap create <$> pidx
-
+      mod_key = Non.fromList $ Binary . fmap create <$> justError ("no index: " ++ show tm) (nonEmpty pidx)
+-}
 ix i d = justError ("no field " ++ show i) $ indexField (IProd Nothing i) d
 
 class DecodeShowable a where

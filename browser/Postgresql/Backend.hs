@@ -326,7 +326,7 @@ insertMod m j  = do
         table = lookTable inf (_kvname m)
       d <- insertPatch  inf (conn  inf) j  table
       l <- liftIO getCurrentTime
-      return $ TableModification Nothing (l) (snd $ username inf)table . CreateRow <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) d)
+      return $ TableModification Nothing (l) (snd $ username inf)table . CreateRow <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ compact $ deftable inf table <> patch d)  )
 
 
 deleteMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))

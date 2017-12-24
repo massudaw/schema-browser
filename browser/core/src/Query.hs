@@ -435,7 +435,7 @@ joinRel2 tb ref table
   | L.any (isArray.snd) ref
   = let
       !arr = justError ("no array"<> show ref )$ L.find (isArray .snd) ref
-   in fmap (ArrayTB1 .  Non.fromList ) $Tra.sequenceA   $ fmap (flip (joinRel2 tb ) table . (:L.filter (not .isArray .snd) ref)) (fmap (\i -> (fst arr,) . justError ("cant index  " <> show (i,head ref)). (flip Non.atMay i) $ unArray $ snd arr ) [0..(Non.length (unArray $ snd arr)   - 1)])
+   in join .fmap ( fmap (ArrayTB1 .  Non.fromList ).nonEmpty) $Tra.sequenceA   $ fmap (flip (joinRel2 tb ) table . (:L.filter (not .isArray .snd) ref)) (fmap (\i -> (fst arr,) . justError ("cant index  " <> show (i,head ref)). (flip Non.atMay i) $ unArray $ snd arr ) [0..(Non.length (unArray $ snd arr)   - 1)])
   | otherwise
     =  TB1 <$> tbel
       where

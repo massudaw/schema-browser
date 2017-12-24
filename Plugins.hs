@@ -646,10 +646,10 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
     ofx i = errorWithStackTrace (show i)
 
 
-notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ IOPlugin url
+notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ DiffIOPlugin url
   where
     tname = "nota"
-    url ::  ArrowReader
+    url ::  ArrowReaderDiffM IO
     url = proc t -> do
       i <- varTB "id_nota" -< t
       odxR "nota_xml" -<  t
@@ -659,7 +659,7 @@ notaPrefeituraXML = FPlugins "Nota Prefeitura XML" tname $ IOPlugin url
                                p <- varTB "goiania_password"-< t
                                returnA -< (, , ) n u p  ) -< t
       b <- act ((\(i, (j, k,a)) -> liftIO$ prefeituraNotaXML j k a i ) ) -< (,) i r
-      let ao =  Just $ tblist [attrT ("nota_xml",    LeftTB1 $ fmap (LeftTB1 . Just .TB1)  b)]
+      let ao =  Just [PAttr "nota_xml" (POpt $ fmap (POpt . Just .PAtom)  b)]
       returnA -< ao
 
 checkPrefeituraXML = FPlugins "Check Nota Prefeitura XML" tname $ PurePlugin url

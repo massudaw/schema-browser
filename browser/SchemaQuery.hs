@@ -138,7 +138,7 @@ refTable  inf table  = do
 secondary (m,s,g) = s
 primary (m,s,g) = g
 
-tbpredM un  = G.notOptional . G.getUnique un
+tbpredM un  = G.notOptionalM . G.getUnique un
 
 createUn :: Ord k => [k] -> [TBData k Showable] -> G.GiST (G.TBIndex Showable) (TBData k Showable)
 createUn un   =  G.fromList  transPred  .  filter (isJust . Tra.traverse (Tra.traverse unSOptional' ) . getUn (S.fromList un) . tableNonRef' )
@@ -541,7 +541,7 @@ indexFilterR j (PatchRow i) = indexFilterP j (snd i)
 -- Default Checks
 
 patchCheckInf ::  InformationSchema -> KVMetadata Key -> TBIdx Key Showable ->  Either String (TBIdx Key Showable)
-patchCheckInf inf m i = if isJust (createIfChange (i ++ defp ) :: Maybe (TBData Key Showable)) then Right i else Left ("patchCheck: non nullable rows not filled " ++ show ( need `S.difference` available ))
+patchCheckInf inf m i = if isJust (createIfChange (i ++ defp ) :: Maybe (TBData Key Showable)) then Right i else Left (traceShowId $ "patchCheck: non nullable rows not filled " ++ show ( need `S.difference` available ))
   where
       defp = deftable inf (lookTable inf (_kvname m  ))
       available = S.unions $ S.map _relOrigin . pattrKey <$> i
@@ -691,7 +691,7 @@ fullInsert' k1  v1 = do
        find rel = findRefTable inf (_kvname k1) rel
    ret <- KV <$>  Tra.traverse (tbInsertEdit k1 )  (proj v1)
    (_,(_,l)) <- tableLoader  tb Nothing Nothing [] mempty
-   if  (isNothing $ flip G.lookup l $ tbpredM (_kvpk k1)  ret ) && rawTableType tb == ReadWrite
+   if  (isNothing $ join $ fmap (flip G.lookup l) $ tbpredM (_kvpk k1)  ret ) && rawTableType tb == ReadWrite
       then catchAll (do
         i@(Just (TableModification _ _ _ _ tb))  <- insertFrom k1 ret
         tell (maybeToList i)
@@ -702,6 +702,7 @@ fullInsert' k1  v1 = do
           liftIO$ putStrLn $ "failed insertion: "  ++ (show e)
           return ret)
       else do
+        liftIO$ putStrLn $ "already exist: "  ++ (show $ tbpredM (_kvpk k1) ret)
         return ret
 
 tellPatches :: [TableModification (RowPatch Key Showable)] -> TransactionM ()
@@ -760,9 +761,16 @@ fullDiffEditInsert :: KVMetadata Key -> TBData Key Showable -> TBData Key Showab
 fullDiffEditInsert k1 old v2 = do
    inf <- ask
    edn <-  KV <$>  Tra.sequence (M.intersectionWith (tbDiffEditInsert k1)  (unKV old) (unKV v2))
-   when (isJust $ diff (tableNonRef' old) (tableNonRef' edn) ) $ do
-      mod <- traverse (updateFrom  k1 old  (G.getIndex k1 edn)) (diff old edn)
-      tell (maybeToList $ join  mod)
+   if (isJust $ diff (tableNonRef' old) (tableNonRef' edn) )
+      then do
+        mod <- traverse (updateFrom  k1 old  (G.getIndex k1 edn)) (diff old edn)
+        tell (maybeToList $ join  mod)
+        else liftIO $ do
+            putStrLn "Could not diff tables"
+            putStrLn $ "Old: " ++ show (old )
+            putStrLn $ "No Ref Old: " ++ show (tableNonRef' old )
+            putStrLn $ "New : " ++ show (edn)
+            putStrLn $ "No Ref New : " ++ show (tableNonRef' edn)
    return (diff old edn)
 
 
@@ -781,7 +789,7 @@ fullDiffInsert k2 v2 = do
 tbDiffEditInsert :: KVMetadata Key ->  Column Key Showable -> Column Key Showable -> TransactionM (Column Key  Showable)
 tbDiffEditInsert k1 i j
   | i == j =  return j
-  | isJust (diff i  j) = tbEdit k1 i j
+  | isJust (diff i  j)   = tbEdit k1 i j
   | otherwise = tbInsertEdit  k1 j
 
 
@@ -795,14 +803,15 @@ tbEdit m (IT a1 a2) (IT k2 t2) = do
   IT k2 <$> noInsert (tableMeta $ lookSTable inf r) t2
 
 tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2)
-  | apk /= pk =  tbInsertEdit m f
+  | traceShow (apk /= pk, (isNothing (unSOptional' a2) && isJust (unSOptional' t2) ),g,f) False = undefined
+  | (apk /= pk ) || (isNothing (unSOptional' a2) && isJust (unSOptional' t2) ) =  tbInsertEdit m f
   | otherwise  = go rel2 a2 t2
   where go rel2 a2 t2 = case (a2,t2) of
           (TB1 o@ol,TB1 t@l) -> do
              inf <- ask
              let relTable = M.fromList $ fmap (\(Rel i _ j ) -> (j,i)) rel2
                  m2 = lookSMeta inf  $ RecordPrim $ findRefTableKey inf (lookTable inf $ _kvname m) rel2
-             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT ((maybe (kvlist [])  kvlist  $ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb))) rel2 tb ) . TB1  . maybe o (apply o)  <$> fullDiffEdit m2 o t)
+             local (\inf -> fromMaybe inf (HM.lookup (_kvschema m) (depschema inf))) ((\tb -> FKT (maybe (kvlist [])  kvlist  $ backFKRef relTable  (keyAttr <$> unkvlist pk) (unTB1 tb)) rel2 tb ) . TB1  . maybe o (apply o)  <$> fullDiffEdit m2 o t)
           (LeftTB1  i ,LeftTB1 j) ->
             maybe (return f ) (fmap attrOptional) $ liftA2 (go (Le.over relOri unKOptional <$> rel2)) i j
           (ArrayTB1 o,ArrayTB1 l) ->
@@ -811,7 +820,7 @@ tbEdit m g@(FKT apk arel2  a2) f@(FKT pk rel2  t2)
 
 
 tbInsertEdit :: KVMetadata Key -> Column Key Showable -> TransactionM (Column Key Showable)
--- tbInsertEdit i | traceShow ("insertedit",i) False = undefined
+tbInsertEdit m i | traceShow ("insertedit",i) False = undefined
 tbInsertEdit m (Attr k1 k2) = return $ (Attr k1 k2)
 tbInsertEdit m (Fun k1 rel k2) = return $ (Fun k1 rel k2)
 tbInsertEdit m (IT k2 t2) = do

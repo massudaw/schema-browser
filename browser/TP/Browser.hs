@@ -353,7 +353,7 @@ viewerKey inf table tix cli cliTid = do
                       unKey t = (,) ((\(TB1 (SText i))-> lookKey inf  (tableName table) i ) $ lookAttr' "key" t  )( (\(TB1 (SDynamic i))-> i) $ lookAttr' "val" t )
                 in (\(ArrayTB1 t) -> F.toList $ fmap (unKey.unTB1) t) i
 
-  reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables' inf table Nothing mempty
+  reftb@(_,_,vpt,_,_) <- ui $ refTables' inf table Nothing mempty
   let
     tdi = (\i -> join . traverse (\v -> G.lookup  (G.Idex (justError "no key" $ traverse (unSOptional' ) $ fmap snd v)) i ) ) <$> vpt <*> tdip
     tdip = join . fmap (join . fmap ( fmap (lookKV ). lookPK ). lookT ) <$> cliTid

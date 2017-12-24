@@ -602,6 +602,10 @@ mergePatches i j = join (liftA2 applyIfChange i j)<|> i  <|> join (createIfChang
 onDiff f g (Diff i ) = f i
 onDiff f g v = g v
 
+nonEmptyMap i
+  | M.null i = Nothing
+  | otherwise = Just i
+
 processPanelTable
    :: Element
    -> InformationSchema
@@ -616,20 +620,21 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
       m = tableMeta table
       containsGistNotEqual old ref map = if isJust refM then (\i -> if L.null i  then True else [G.getIndex m old] == L.nub (fmap (G.getIndex m)(F.toList i)))$  (lookGist ix ref map) else False
         where ix = (_kvpk (tableMeta table))
-              refM = traverse unSOptional' (getPKM (tableMeta table)ref)
+              refM = traverse (join . fmap unSOptional' . unSOptional') (getPKM (tableMeta table)ref)
       containsGist ref map = if isJust refM then not $ L.null $  (lookGist ix ref map) else False
         where ix = (_kvpk (tableMeta table))
-              refM = traverse unSOptional' (getPKM (tableMeta table)ref)
+              refM = join $ fmap nonEmptyMap $ traverse (join . fmap unSOptional' . unSOptional') (getPKM (tableMeta table)ref)
       conflictGist ref map = if isJust refM then lookGist ix ref map else[]
         where ix = (_kvpk (tableMeta table))
-              refM = traverse unSOptional' (getPKM (tableMeta table)ref)
+              refM = join $ fmap nonEmptyMap $ traverse (join . fmap unSOptional' . unSOptional') (getPKM (tableMeta table)ref)
   let
     pred2 =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
     authPred =  [(keyRef "grantee",Left ( int $ fst $ username inf ,Equals))] <> pred2
   auth <- fst <$> ui (transactionNoLog (meta inf) $ selectFromTable "authorization" Nothing Nothing [] authPred)
   let authorize =  (\autho -> fmap unArray . unSOptional' . lookAttr' "authorizations"  =<<  G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ fst $ username inf)]) autho)  <$> collectionTid auth
   -- Insert when isValid
-  let insertEnabled = liftA2 (&&) (liftA2 (||) (onDiff isRight (const False ).  fmap (patchCheckInf inf m)<$>  inscrudp) (maybe False (isRight . tableCheck  m)  <$> inscrud )) (liftA2 (\i j -> not $ maybe False (flip containsGist j) i  ) inscrud gist)
+  let insertEnabled = liftA2 (&&) (onDiff (isRight . patchCheckInf inf m) (const False) <$>  inscrudp) (liftA2 (\j -> maybe True (not. flip containsGist j)) gist inscrud)
+  ui $ onEventIO (rumors inscrudp) (print .fmap (patchCheckInf inf m ))
   insertB <- UI.button
       # set UI.class_ "btn btn-sm"
       # set text "INSERT"

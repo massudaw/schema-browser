@@ -78,6 +78,7 @@ setup
 setup smvar args plugList w = void $ do
   metainf <- liftIO$ metaInf smvar
   setCallBufferMode BufferAll
+
   let bstate = argsToState args
   (evDB,chooserItens) <- databaseChooser smvar metainf bstate plugList
   return w # set title (host bstate <> " - " <>  dbn bstate)

@@ -10,6 +10,7 @@ import Control.Category
 import Network.HTTP.Client.OpenSSL
 import Serializer
 import qualified Serializer as S
+import Control.Arrow
 import qualified Network.HTTP.Client as HTTP
 
 import Control.Lens hiding (element,set,get,(#))
@@ -126,11 +127,11 @@ convertHtml out =
             cna  =  attr
             idx  = LeftTB1 . fmap (TB1 . SText . TL.pack . head) . flip M.lookup out
             fk rel i  = FKT (kvlist i )rel
-            afk rel i  = fk rel i  . LeftTB1 . Just . ArrayTB1 . Non.fromList
+            afk rel i l = fk rel i  . LeftTB1 $  ArrayTB1 . Non.fromList <$> l
             tb attr = TB1 $ tblist attr
             (pcnae,pdesc) =  (justError "wrong primary activity " $ fmap (TB1 . SText .TL.filter (not . flip L.elem ("-." :: String)) . fst) t ,  justError " no description" $  TB1 . SText .  TL.strip .  TL.drop 3. snd <$>  t)
                 where t = fmap ( TL.breakOn " - " .  TL.pack . head ) (M.lookup "CÓDIGO E DESCRIÇÃO DA ATIVIDADE ECONÔMICA PRINCIPAL" out)
-            scnae = filter ((/=(TB1 (SText "Não Informada"))).fst) $ fmap (\t -> ((TB1 . SText .TL.filter (not . flip L.elem ("-." :: String)) . fst) t ,    (TB1 . SText .TL.strip . TL.drop 3 .  snd ) t)) ts
+            scnae = fmap (first(TB1 . SText)) $ filter ((not . T.isInfixOf ("Não informada")).fst) $ fmap (\t -> ((TL.filter (not . flip L.elem ("-." :: String)) . fst) t ,    (TB1 . SText .TL.strip . TL.drop 3 .  snd ) t)) ts
                 where ts = join . maybeToList $ fmap (TL.breakOn " - " .  TL.pack ) <$> (M.lookup "CÓDIGO E DESCRIÇÃO DAS ATIVIDADES ECONÔMICAS SECUNDÁRIAS" out)
             attrs = tb [ own "owner_name" (idx "NOME EMPRESARIAL")
                        , fk [Rel "address" Equals "id"] [own "address" (LeftTB1 $ Just $ TB1 $ SNumeric (-1)) ]
@@ -143,10 +144,10 @@ convertHtml out =
                               ,attr "bairro" (idx "BAIRRO/DISTRITO")
                               ,attr "municipio" (idx "MUNICÍPIO")
                               ,attr "uf" (idx "UF")])
-                       ,fk [Rel "atividade_principal" Equals "id"] [own "atividade_principal" (LeftTB1 $ Just (pcnae))]
+                       ,fk [Rel "atividade_principal" Equals "id"] [own "atividade_principal" (LeftTB1 $ Just pcnae)]
                                   (LeftTB1 $ Just $ tb [cna "id" pcnae,cna "description" pdesc] )
-                       ,afk [(Rel "atividades_secundarias" (AnyOp Equals) "id")] [own "atividades_secundarias" (LeftTB1 $ Just $ ArrayTB1 $ Non.fromList $ fmap fst scnae)]
-                                  ((\(pcnae,pdesc)-> tb [cna "id" pcnae,cna "description" pdesc] ) <$> filter ((/=txt "Não informada").snd) scnae)]
+                       ,afk [(Rel "atividades_secundarias" (AnyOp Equals) "id")] [own "atividades_secundarias" (LeftTB1 $ ArrayTB1 . Non.fromList . fmap fst <$> nonEmpty scnae)]
+                                  (nonEmpty $ (\(pcnae,pdesc)-> tb [cna "id" pcnae,cna "description" pdesc] ) <$> filter ((/=txt "Não informada").snd) scnae)]
         in Just  attrs
 
 getCnpjForm cookie captcha cgc_cpf

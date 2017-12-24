@@ -69,15 +69,14 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
     dashes <- eventWidgetMeta inf cliZone
     let
       schemaPred2 =  WherePredicate $ PrimColl (liftAccess (meta inf) "event" $ keyRef "schema",Left (int (schemaId inf),Equals))
-      legendStyle lookDesc table b
-            =
-              let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,_)-> (b,i)) dashes)
-              in traverse (\(k@((c,tname,_,_))) -> do
-                element  b # set UI.class_"col-xs-1"
-                label <- UI.div # sink text  (T.unpack .($table) <$> facts lookDesc ) # set UI.class_ "fixed-label col-xs-10"
-                UI.label # set children [b,label]
-                  # set UI.style [("background-color",renderShowable c)]# set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
-                  ) item
+      legendStyle lookDesc table b =
+        let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,_)-> (b,i)) dashes)
+        in traverse (\(k@((c,tname,_,_))) -> do
+          element  b # set UI.class_"col-xs-1"
+          label <- UI.div # sink text  (T.unpack .($table) <$> facts lookDesc ) # set UI.class_ "fixed-label col-xs-10"
+          UI.label # set children [b,label]
+            # set UI.style [("background-color",renderShowable c)]# set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
+            ) item
 
     choose <- buttonDivSet ["Main","Config"] (pure $ Just "Main") (\i ->  UI.button # set text i # set UI.class_ "buttonSet btn-xs btn-default pull-right")
     let

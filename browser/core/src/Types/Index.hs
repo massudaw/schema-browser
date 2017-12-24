@@ -100,7 +100,7 @@ getBounds m ls = Just $ zipWith  (\i j -> (ER.Finite i,True) `interval` (ER.Fini
         Idex u = getIndex m (last ls)
 
 notOptionalM :: TBIndex  a -> Maybe (TBIndex  a)
-notOptionalM (Idex m) = fmap Idex   . traverse unSOptional'  $ m
+notOptionalM (Idex m) = fmap Idex   . join . fmap nonEmpty . traverse unSOptional'  $ m
 
 
 notOptional :: TBIndex  a -> TBIndex  a
@@ -259,24 +259,26 @@ instance Positive DiffShowable where
   notneg = notNeg
 
 transEither
-  :: (Either (Node (FTB b)) (FTB b) -> Either (Node (FTB b)) (FTB b) -> c)
+  :: (Either (Node (FTB b)) (FTB b) -> Either (Node (FTB b)) (FTB b) -> Bool)
   -> Either (Node (TBIndex b)) (TBIndex b)
   -> Either (Node (TBIndex b)) (TBIndex b)
-  -> [c]
+  -> Bool
 transEither f  i j  =
     case (i,j) of
         (Right (Idex i) ,Right (Idex j)) -> co (Right <$> i) (Right <$> j)
         (Left (TBIndexNode i) ,Left (TBIndexNode j)) -> co (Left <$> i) (Left <$> j)
         (Right (Idex i) ,Left (TBIndexNode j)) -> co  (Right <$> i) (Left<$> j)
         (Left (TBIndexNode i) ,Right (Idex j)) -> co (Left <$> i) (Right <$> j)
-  where co l i =  zipWith f l i
+    where co i j =  F.foldl' (&&) True (zipWith f i j)
 {-# INLINE transEither #-}
+
 
 instance Predicates (FTB v) => Predicates (TBIndex v ) where
   type (Penalty (TBIndex v)) = [Penalty (FTB v)]
   type Query (TBIndex v) = (TBPredicate Int v)
   data Node (TBIndex v) = TBIndexNode [Node (FTB v)] deriving (Eq,Ord,Show)
-  consistent i j = (\b -> if null b then False else  F.all id b) $ transEither consistent i j
+  consistent = transEither consistent
+  {-# INLINE consistent #-}
 
   -- This limit to 100 the number of index fields to avoid infinite lists
   origin = TBIndexNode (replicate 100 G.origin)
@@ -583,6 +585,7 @@ lookup pk  = safeHead . G.search pk
 
 keys :: GiST p a -> [p]
 keys = fmap (\(_,_,k)-> k) . getEntries
+
 toList = getData
 
 filter f = foldl' (\m i -> G.insertL i indexParam m) G.empty  . L.filter (f .leafValue) . getEntries

@@ -142,15 +142,13 @@ mapSelector inf pred selected mapT sel (cposE,positionT) = do
           leftEntry i  = (G.FTBNode i)
         onEvent cposE (liftIO . hgselg)
         p <- currentValue (facts boundsSel)
-        liftIO $print p
+        pt <- currentValue (facts positionT)
         let
-            pb = (join $ convertInter <$> p)
-            positionE = (unionWith const (Just <$> egselg ) ( join . fmap convertInter <$> rumors boundsSel) )
-            setPosition = (\v@(sw,ne) -> runFunction $ ffi "setPosition(%1,%2,%3)" innermap  sw ne)
+            pb = (join $ convertInter <$> p ) <|> pt
+            positionE = unionWith const (Just <$> egselg ) ( join . fmap convertInter <$> rumors boundsSel)
+            setPosition = (\v@(sw,ne) -> runFunctionDelayed innermap $ ffi "setPosition(%1,%2,%3)" innermap  sw ne)
 
         positionB <- ui $stepper  pb  positionE
-
-
 
         let
           positionT = (tidings positionB positionE)
@@ -158,9 +156,7 @@ mapSelector inf pred selected mapT sel (cposE,positionT) = do
 
         mapCreate  innermap (Nothing :: Maybe ([Double],[Double]))
         onEvent (moveend innermap) (liftIO . hgselg)
-        onEvent ( filterJust $ join . fmap convertInter <$> rumors boundsSel)  setPosition
-        codep <- traverseUI (liftIO . traverse (\(sw,ne) ->toCode $ (ffi "setPosition(%1,%2,%3)" innermap sw ne :: JSFunction ()))) positionT
-        pscript <- mkElement "script" # sink text (maybe "" id <$> facts codep)
+        traverseUI (traverse setPosition ) =<< ui (calmT positionT)
 
         fin <- (\(_,tb,fields,efields,proj) -> do
           let
@@ -178,7 +174,7 @@ mapSelector inf pred selected mapT sel (cposE,positionT) = do
             ) $ liftA2 (,) pred pcal
           ) selected
         bselg <- ui $ stepper Nothing (fmap snd <$> eselg )
-        cal <- UI.div  # set children [ innermap, pscript]
+        cal <- UI.div  # set children [ innermap]
         return (TrivialWidget (tidings bselg (fmap snd <$> eselg)) cal)
 
 readMapPK v = case unsafeFromJSON v of
