@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards,FlexibleContexts,TupleSections,LambdaCase,OverloadedStrings #-}
+{-# LANGUAGE DeriveGeneric,StandaloneDeriving,RecordWildCards,FlexibleContexts,TupleSections,LambdaCase,OverloadedStrings #-}
 module CnpjReceita (getCaptchaCpf,getCaptchaCnpj,getCnpjForm,convertCPF,initSess,getCpfForm,convertHtml)where
 import Network.Wreq
 import qualified Network.Wreq.Session as Sess
@@ -9,6 +9,7 @@ import OpenSSL.Session (context)
 import Control.Category
 import Network.HTTP.Client.OpenSSL
 import Serializer
+import GHC.Generics
 import qualified Serializer as S
 import Control.Arrow
 import qualified Network.HTTP.Client as HTTP
@@ -61,6 +62,7 @@ unattr i (KV ix) = justError ("no attr " ++ show i ) $ unAtt <$> M.lookup (S.sin
 
 
 
+deriving instance Generic HTTP.Cookie
 instance DecodeTable HTTP.Cookie where
   decodeT = (HTTP.Cookie
     <$> (unbinary . unattr "cookie_name" )
@@ -88,7 +90,8 @@ instance DecodeTable HTTP.Cookie where
         attr "cookie_secure_only" (boolean cookie_secure_only),
         attr "cookie_http_only" (boolean cookie_http_only)])
 
-httpJar = TIso   HTTP.destroyCookieJar HTTP.createCookieJar
+
+httpJar = TIso HTTP.destroyCookieJar HTTP.createCookieJar
 
 cookieJar :: TIso HTTP.CookieJar (FTB (TBData Text Showable))
 cookieJar =  traverseIso tableIso . ftbIso .  httpJar

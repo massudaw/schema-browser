@@ -631,17 +631,16 @@ importarofx = FPlugins "OFX Import" tname  $ DiffIOPlugin url
         odxR "sic" -< t
         odxR "payeeid" -< t
         ) -< t
-
-      b <- act ofx  -< (,) fn i
+      b <- act ofx -< (,) fn i
       let ao :: Index (TB2 Text Showable)
-          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom $ ( a)) <$>  join (nonEmpty . zip [0..] . fmap (patch ((fromJust (findFK ["account" ] row ))) :)<$> b)
+          ao =  POpt $ join $ patchSet .  fmap (\(ix,a) -> PIdx ix . Just . PAtom $  a) <$>  join (nonEmpty . zip [0..] . fmap (patch ((fromJust (findFK ["account" ] row ))):) <$> b)
           ref :: [TB Text Showable]
           ref = [Attr  "statements" . LeftTB1 $ fmap (ArrayTB1 . Non.fromList ) .  join $  nonEmpty . catMaybes . fmap (\i ->   join . fmap unSSerial . fmap _tbattr .L.find (([Inline "fitid"]==). keyattri) $ (fmap create  i :: [TB  Text Showable ]) )<$> b]
-          tbst :: (Maybe (TBIdx Text (Showable)))
-          tbst = Just $ (  [PFK  [Rel "statements" (AnyOp Equals) "fitid",Rel "account" Equals "account"] (fmap patch ref) ao])
+          tbst :: Maybe (TBIdx Text (Showable))
+          tbst = Just $ [PFK  [Rel "statements" (AnyOp Equals) "fitid",Rel "account" Equals "account"] (fmap patch ref) ao]
 
       returnA -< tbst
-    ofx (TB1 (SText i), ((LeftTB1 (Just (TB1 (SBinary r) )))))
+    ofx (TB1 (SText i),TB1 (SBinary r))
       = liftIO $ ofxPlugin (T.unpack i) (BS.unpack r)
     ofx i = errorWithStackTrace (show i)
 

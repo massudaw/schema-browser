@@ -124,7 +124,9 @@ timePred inf tname evfields (incrementT,resolution) = time
         go (f:i) = case f of
              KInterval -> IntersectOp
              KOptional -> go i
+             KDelayed -> go i
              KSerial  -> go i
+             i -> errorWithStackTrace ("type not supported : " ++ show i)
     ref (Primitive f a) =  case a of
             (AtomicPrim (PTime PDate)) ->
               (TB1 . STime . SDate . utctDay )

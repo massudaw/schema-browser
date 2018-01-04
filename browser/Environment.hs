@@ -225,12 +225,12 @@ translate  r
        (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowDrop _ )]))]))],_) -> let
           lift j i = do
              inf <- ask
-             fmap ((Just . TableModification Nothing undefined (snd $ username inf) (lookTable inf m ). DropRow . F.foldl' apply i ) . fmap (liftPatch inf  m)) $ j (Atom $ mapKey' keyValue i)
+             fmap ((Just . TableModification Nothing undefined (snd $ username inf) (lookTable inf m ). DropRow . G.getIndex (lookMeta inf m)  . F.foldl' apply i ) . fmap (liftPatch inf  m)) $ j (Atom $ mapKey' keyValue i)
         in ((i,m),[DropRule $  (lift (runEnv r))])
        (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowCreate _ )]))]))],_) -> let
            lift j i = do
              inf <- ask
-             fmap ((Just . TableModification Nothing undefined (snd $username inf)(lookTable inf m ). CreateRow . F.foldl' apply i ) . fmap (liftPatch inf  m)) $ j (Atom $ mapKey' keyValue i)
+             fmap ((Just . TableModification Nothing undefined (snd $username inf)(lookTable inf m ). CreateRow . (undefined,). F.foldl' apply i ) . fmap (liftPatch inf  m)) $ j (Atom $ mapKey' keyValue i)
         in((i,m),[CreateRule $  (lift (runEnv r))])
        (Many [One (Namespace i (Many [One (Module m (Many [One (Row RowPatch _ )]))]))],_)  -> let
            lift j i p = do

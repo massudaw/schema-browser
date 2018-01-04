@@ -92,9 +92,14 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
 
       chooser "Main" = do
         agenda <- buttonDivSet [Basic,Agenda,Timeline] (pure $ Just Basic) (\i ->  UI.button # set text (show i) # set UI.class_ "buttonSet btn-xs btn-default pull-left")
-        out <- traverseUI (fmap fst) $ calendarView inf Nothing cliZone dashes sel <$>  triding agenda <*> resolutionT <*> incrementT
-        calendar <- UI.div # sink UI.children (facts out)
-        return [getElement agenda,calendar]
+        out <- traverseUI id $ calendarView inf Nothing cliZone dashes sel <$>  triding agenda <*> resolutionT <*> incrementT
+        out2 <- traverseUI (traverseUI (traverse (\(t,tdi) -> do
+          reftb@(vptmeta,vp,vpt,_,var) <- ui $ refTables inf t
+          crudUITable inf  t reftb mempty [] (allRec' (tableMap inf) t) (pure (Just tdi)))))  (fmap snd out)
+        out3 <- ui $ joinT out2
+        selector <- UI.div # sink UI.children (facts $ (fmap fst.maybeToList) <$> out3)
+        calendar <- UI.div # sink UI.children (facts $ fmap fst out )
+        return [getElement agenda,calendar,selector]
     els <- traverseUI chooser (triding choose)
 
     content <- UI.div # sink children (facts els) # set UI.class_ "row"
@@ -103,6 +108,14 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
     element body # set children [getElement choose,content] # set UI.style [("overflow","auto")]
 
     return  (legendStyle , dashes )
+
+joinT t = do
+  (e,h) <- newEvent
+  init <- currentValue (facts t)
+  el <- currentValue (facts init)
+  mapTEventDyn  (mapTEventDyn (liftIO. h)) t
+  b <- stepper el e
+  return (tidings b e)
 
 type DateChange = (String, Either (Interval UTCTime) UTCTime)
 

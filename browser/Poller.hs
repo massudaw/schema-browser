@@ -66,8 +66,8 @@ index2 tb item = justError ("no item" <> show (item,tb)) $ indexFieldRec item tb
 checkTime curr = do
     let
       IntervalTB1 time_inter = index curr "time"
-      TB1 (STime (STimestamp startLocal)) = justError "cant be null "$ unFinite $ lowerBound time_inter
-      TB1 (STime (STimestamp endLocal)) = justError "cant be null" $unFinite $ upperBound time_inter
+      TB1 (STime (STimestamp startLocal)) = justError "cant be null start"$ unFinite $ lowerBound time_inter
+      TB1 (STime (STimestamp endLocal)) = justError "cant be null end" $unFinite $ upperBound time_inter
       start = startLocal
       end = endLocal
     current <- getCurrentTime

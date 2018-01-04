@@ -25,7 +25,11 @@ flag rebug
 
 -- extra-source-files:  
 
+
+
 executable threepenny-layer
+  ghc-options: -optl-fuse-ld=gold
+  ld-options:  -fuse-ld=gold
   main-is:             Main.hs
 
   if flag(rebug)

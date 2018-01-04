@@ -16,6 +16,8 @@ build-type:          Simple
 cabal-version:       >=1.10
 
 library 
+  ghc-options: -optl-fuse-ld=gold
+  ld-options:  -fuse-ld=gold
   exposed-modules:
 
     Postgresql.Backend

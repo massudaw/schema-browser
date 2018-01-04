@@ -43,6 +43,7 @@ import qualified Data.ByteString.Base16 as B16
 import Data.Time.Parse
 import           Database.PostgreSQL.Simple.Types as PGTypes
 import           Data.Attoparsec.ByteString.Char8 hiding (Result)
+import           Data.Attoparsec.ByteString.Char8 as C hiding (Result)
 import Data.Traversable (traverse)
 import qualified Data.Traversable  as Tra
 import Data.Time.LocalTime
@@ -314,12 +315,16 @@ parseGeom ix a = case a of
             2->fmap SLineString $ (getLineString get2DPosition )
 
 
+tryquoted parser = do
+  i <- many (char '"' >> many (char '\\'))
+  o <- parser
+  C.take (length i)
+  return o
 
--- parseShowableJSON i p v | traceShow (p,v)False = undefined
 parseShowableJSON  fun p@(Primitive l i) v = parseKTypePrim l v
   where
     parseKTypePrim (KDelayed :i) (A.Bool b)
-      = if b then return (LeftTB1 Nothing)  else fail "no error"
+      =  if b then return (LeftTB1 Nothing)  else fail "no error"
     parseKTypePrim (KSerial :i)  v = LeftTB1 . Just <$> parseKTypePrim i v
     parseKTypePrim (KOptional :i ) v =
       case v of
@@ -333,14 +338,18 @@ parseShowableJSON  fun p@(Primitive l i) v = parseKTypePrim l v
         env <- ask
         st <- get
         let
-          dec  =  maybe (Left "can't decode interval number " ) (A.parseEither (runCodegenT env st . parseKTypePrim l)) . A.decode . BSL.fromStrict
+          dec = do
+            i <- many (satisfy (`L.notElem` (")],\"\\" :: String)))
+            if i == ""
+               then
+                  return Nothing
+               else
+                  return . Just  . A.parseEither (runCodegenT env st . parseKTypePrim l) . maybe (A.String $ T.pack i ) id .  A.decode . BSL.pack $ i
           inter = do
-              lb <- (char '[' >> return True ) <|> (char '(' >> return False )
-              i <- dec <$> takeWhile (/=',')
-              char ','
-              j <- dec <$> takeWhile (\i -> i /=']' && i /= ')' )
-              rb <- (char ']' >> return True) <|> (char ')' >> return False )
-              return $ IntervalTB1 $ Interval.interval (either (const ER.NegInf) ER.Finite i,lb) (either (const ER.PosInf ) ER.Finite j,rb)
+            lb <- (char '[' >> return True) <|> (char '(' >> return False )
+            [i,j] <- sepBy1 (tryquoted dec) (char ',')
+            rb <- (char ']' >> return True) <|> (char ')' >> return False )
+            return $ IntervalTB1 $ Interval.interval (maybe ER.NegInf (either error ER.Finite)  i,lb) ( maybe ER.NegInf (either error ER.Finite)  j,rb)
 
         case parseOnly inter (BS.pack $ T.unpack v) of
               Right i -> return i
@@ -493,9 +502,11 @@ fromShowable k f = case A.parseEither (fmap fst.codegent. parseShowableJSON  par
 
 fromRecordJSON :: InformationSchema -> KVMetadata Key -> TBData Key () -> NameMap ->  FR.RowParser (TBData Key Showable)
 fromRecordJSON inf m foldable namemap = do
-  let parser   f = case A.parseEither (\(A.Object i) -> fmap fst $ evalRWST (parseRecordJSON inf m foldable $ justError "no top" $ HM.lookup "p0"  i) [] namemap )  f of
-                  Right i -> i
-                  Left i -> error (show i)
+  let
+    parser f
+     = case A.parseEither (\(A.Object i) -> fmap fst $ evalRWST (parseRecordJSON inf m foldable $ justError "no top" $ HM.lookup "p0"  i) [] namemap )  f of
+       Right i -> i
+       Left i -> error (show i)
   parser <$> FR.field
 
 

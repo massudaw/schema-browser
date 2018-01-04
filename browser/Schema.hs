@@ -291,8 +291,8 @@ logTableModification
 logTableModification inf (TableModification Nothing ts u table ip) = do
   let i = fmap patchNoRef $ case ip of
             PatchRow i -> i
-            DropRow i -> (G.Idex mempty,patch i)
-            CreateRow i -> (G.Idex mempty,patch i)
+            DropRow i -> (i,[])
+            CreateRow (ix,i) -> (ix,patch i)
   time <- getCurrentTime
   env <- lookupEnv "ROOT"
   let mod = modificationEnv env
@@ -303,7 +303,7 @@ logTableModification inf (TableModification Nothing ts u table ip) = do
   let modt = lookTable (meta inf)  mod
   (dbref ,_)<- R.runDynamic $ prerefTable (meta inf) modt
 
-  putPatch (patchVar dbref) [liftPatchRow (meta inf) (modificationEnv env)  $ CreateRow $ encodeT (TableModification (Just id) ts u (schemaName inf,tableName table ) (firstPatchRow keyValue ip ) )]
+  putPatch (patchVar dbref) [ createRow' (tableMeta table) $ liftTable' (meta inf)  (modificationEnv env)  $ encodeT (TableModification (Just id) ts u (schemaName inf,tableName table ) (firstPatchRow keyValue ip ) )]
   return (TableModification (Just id) ts u table ip )
 
 

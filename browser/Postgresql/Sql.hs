@@ -10,6 +10,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString.Char8 as BS
 
 import Database.PostgreSQL.Simple
+
 data ColumnName
   = Column ByteString
   | FullColumn ByteString ByteString

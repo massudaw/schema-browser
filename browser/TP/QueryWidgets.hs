@@ -666,12 +666,12 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
        crudMerge (Just i) g =
          fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf ( do
             let confl = conflictGist i g
-            mapM (deleteFrom m) confl
+            mapM (deleteFrom m.G.getIndex m ) confl
             fullDiffInsert  m i)
        crudEdi i j =  fmap (fmap (PatchRow .(G.getIndex m j,). fixPatch inf (tableName table )))$ transaction inf $ fullDiffEditInsert  m i j
        crudIns j   =  fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)))  <$> transaction inf (fullDiffInsert m j)
        crudDel :: TBData Key Showable  ->  Dynamic (Maybe (RowPatch Key Showable))
-       crudDel j  = fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)))<$> transaction inf (deleteFrom m j )
+       crudDel j  = fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)))<$> transaction inf (deleteFrom m .G.getIndex m $j )
 
   altD <- onAltO lbox
   altU <- onAltU lbox
@@ -754,7 +754,7 @@ dynHandlerPatch hand val ix (l,old)= do
     vout <- ui$ stepper (isJust inivalix) evnew
     let evdiff= diffEvent vout evnew
     bdifout <- ui $ stepper (isJust inivalix)  evdiff
-    let out = tidings bdifout evdiff
+    out  <- ui . calmT $ tidings bdifout evdiff
     return $ (l <> [TrivialWidget (tidings bend ev) el], out )
 
 
@@ -840,7 +840,7 @@ buildUIDiff f (Primitive l prim)  plug tdi = go l plug tdi
                plugtdi = fmap (fmap (join . fmap unPOpt )) <$> plug
            tdnew <- go ti  plugtdi pretdi
            -- Delete equals create
-           return $ (reduceOptional <$> tdnew )
+           return (reduceOptional <$> tdnew )
          KDelayed -> do
            let pretdi =  join . fmap unSOptional' <$> tdi
                plugtdi = fmap (fmap (join . fmap unPOpt )) <$> plug
@@ -1263,7 +1263,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
                       (sel ,(j,i)) <- calendarSelector
                       el <- traverseUI id $ (\delta time predicate -> do
                         (e,l) <- calendarView inf predicate cliZone [selection] (pure (S.singleton targetTable )) Basic delta time
-                        ui $ onEventIO (rumors l) (helbox .Just)
+                        ui $ onEventIO (rumors l) (helbox .Just .fmap snd )
                         return e) <$> i <*> j <*> predicate
                       el2 <- UI.div  # sink children (facts el)
                       return [sel,el2]
@@ -1367,7 +1367,7 @@ pdfFrame (elem,sr , call,st) pdf = mkElement (elem ) UI.# sink0 sr (call <$> pdf
 
 metaAllTableIndexA inf metaname env =   do
   let modtable = lookTable (meta inf) metaname
-  viewer (meta inf) modtable (Le.over (_1) (liftAccess (meta inf) metaname)  <$> env)
+  viewer (meta inf) modtable (Le.over _1 (liftAccess (meta inf) metaname)  <$> env)
 
 
 viewer :: InformationSchema -> Table -> [(Access Key ,AccessOp Showable )] -> UI Element

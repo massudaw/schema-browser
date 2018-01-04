@@ -86,7 +86,7 @@ eventWidgetMeta inf cliZone= do
         let
             TB1 (SText tname) = lookAttr'  "table_name" . unTB1 $ lookRef ["schema","table"] e
             table = lookTable inf tname
-            Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"event" $ keyRef "event") e
+            Just (ArrayTB1 efields) = indexFieldRec (liftAccess (meta inf )"event" $ Nested ([keyRef "schema",keyRef "table",keyRef "column"]) (One $ keyRef "column_name")) e
             color = lookAttr'  "color" e
             toLocalTime = fmap to
               where to (STime (STimestamp i ))  = STime $ STimestamp $  i
@@ -114,7 +114,7 @@ calendarView
      -> Mode
      -> [Char]
      -> UTCTime
-     -> UI ([Element], Tidings (Maybe (TBData Key Showable)))
+     -> UI ([Element], Tidings (Maybe (Table,TBData Key Showable)))
 calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
     (eselg,hselg) <- ui $ newEvent
     bhsel <- ui $ stepper Nothing eselg
@@ -124,28 +124,25 @@ calendarView inf predicate cliZone dashes sel  agenda resolution incrementT = do
       readPatch  = makePatch cliZone
       readSel = readPK inf . T.pack
     (tds, evc, innerCalendar) <- calendarSelRow readSel (agenda,resolution,incrementT)
-    edits <- ui$ accumDiff (\tref->  evalUI innerCalendar $ do
+    edits <- traverseUI (traverse (\tref->  do
       let ref  =  L.find ((== tref) .  (^. _2)) dashes
       traverse (\(_,t,fields,proj)-> do
-            let pred = WherePredicate $ AndColl $ [ timePred inf t (fieldKey <$> fields ) (incrementT,resolution)] ++ fmap unPred (maybeToList predicate)
+            let pred = WherePredicate $ AndColl $ [timePred inf t (fieldKey <$> fields ) (incrementT,resolution)] ++ fmap unPred (maybeToList predicate)
                 fieldKey (TB1 (SText v))=   v
                 unPred (WherePredicate i) = i
             reftb <- ui $ refTables' inf t Nothing pred
             let v = reftb ^. _3
-            let evsel = fmap join $ (\j (tev,pk,_) -> if tev == t then Just (G.lookup  pk j) else Nothing  ) <$> facts v <@>  evc
+            let evsel = fmap Just $ filterJust $ (\j (tev,pk,_) -> if tev == t then (t,) <$> G.lookup  pk j else Nothing  ) <$> facts v <@>  evc
             tdib <- ui $ stepper Nothing evsel
             let tdi = tidings tdib evsel
-
             ui $ onEventIO evsel hselg
             traverseUI
               (\i ->calendarAddSource innerCalendar  t (concat . fmap (lefts.snd) $ fmap proj $ G.toList i)) v
-            UI.div # set children [] # sink UI.style  (noneShow . isJust <$> tdib)
-                           ) ref) sel
+                                  ) ref) . F.toList ) sel
 
     onEvent (rumors tds) (ui . transaction inf . mapM (\((t,ix,k),i) ->
       patchFrom (tableMeta t) ix (readPatch (k,i)) >>= traverse (tell . pure )))
-    selection <- UI.div # sink children ( catMaybes .F.toList <$> facts edits)
-    return ([innerCalendar,selection],tidings bhsel eselg)
+    return ([innerCalendar],tidings bhsel eselg)
 
 calendarSelRow readSel (agenda,resolution,incrementT) = do
     let

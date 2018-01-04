@@ -326,22 +326,22 @@ insertMod m j  = do
         table = lookTable inf (_kvname m)
       d <- insertPatch  inf (conn  inf) j  table
       l <- liftIO getCurrentTime
-      return $ TableModification Nothing (l) (snd $ username inf)table . CreateRow <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ compact $ deftable inf table <> patch d)  )
+      return $ TableModification Nothing (l) (snd $ username inf)table . createRow' m <$> either (const Nothing ) Just (typecheck (typeCheckTable (_rawSchemaL table, _rawNameL table)) (create $ compact $ deftable inf table <> patch d)  )
 
 
-deleteMod :: KVMetadata Key -> TBData Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
+deleteMod :: KVMetadata Key -> TBIndex Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
 deleteMod m t = do
   inf <- ask
   let overloaded  = M.lookup (_kvschema m,_kvname m) overloadedRules
       isRule (DropRule _ ) = True
       isRule _ = False
   log <- case L.find isRule =<< overloaded of
-    Just (DropRule i) ->  i t
+    -- Just (DropRule i) ->  i t
     Nothing ->  liftIO $  do
       let table = lookTable inf (_kvname m)
-      deletePatch (conn inf) (recoverFields inf <$> m) (G.getIndex m t) table
+      deletePatch (conn inf) (recoverFields inf <$> m)  t table
       l <- liftIO getCurrentTime
-      return $ Just $ (TableModification Nothing (l) (snd $ username inf)table  $ DropRow t)
+      return $ Just $ (TableModification Nothing l (snd $ username inf)table  $ DropRow t)
   return $ log
 
 updateMod :: KVMetadata Key -> TBData Key Showable -> TBIndex Showable -> TBIdx Key Showable -> TransactionM (Maybe (TableModification (RowPatch Key Showable)))
@@ -373,17 +373,17 @@ patchMod m pk patch = do
 
 
 loadDelayed :: InformationSchema -> KVMetadata Key -> TBData Key () -> TBData Key Showable -> IO (Maybe (TBIdx Key Showable))
-loadDelayed inf m t@(v) values@(vs)
+loadDelayed inf m v values
   | L.null $ _kvdelayed m = return Nothing
   | L.null delayedattrs  = return Nothing
   | otherwise = do
        let
-           (labelMap,_) = evalRWS (traverse (lkTB) $  _kvvalues $  tableNonRef2 v :: CodegenT Identity (M.Map (S.Set (Rel Key)) Text)) [Root m] namemap
+           (labelMap,_) = evalRWS (traverse lkTB $  _kvvalues $  tableNonRef2 v :: CodegenT Identity (M.Map (S.Set (Rel Key)) Text)) [Root m] namemap
            delayedTB1 :: TBData Key () -> TBData Key ()
            delayedTB1 (KV i ) = KV $ M.filterWithKey  (\i _ -> isJust $ M.lookup i filteredAttrs ) i
-           delayed =  mapKey' unKDelayed (mapValue' (const ()) (delayedTB1 t))
+           delayed =  mapKey' unKDelayed (mapValue' (const ()) (delayedTB1 v))
            (str,namemap) = codegen $ do
-              tq <- expandBaseTable m t
+              tq <- expandBaseTable m v
               rq <- explodeRecord inf m delayed
               let whr = T.intercalate " AND " ((\i-> justError ("no key " <> show i <> show labelMap)  (M.lookup (S.singleton $ Inline i) labelMap) <>  " = ?") <$> _kvpk m)
               return $ "select row_to_json(q) FROM (SELECT " <>  selectRow "p0" rq <> " FROM " <> renderRow tq <> " WHERE " <> whr <> ") as q "
@@ -398,8 +398,10 @@ loadDelayed inf m t@(v) values@(vs)
     makeDelayed = mapKey' makeDelayedK . mapFValue' makeDelayedV
     makeDelayedV i = join $ (LeftTB1 . Just . TB1) <$>  i
     makeDelayedK = Le.over (keyTypes.keyFunc) (++[KDelayed])
+    checkDelayed (LeftTB1 i ) = maybe False (isNothing .unSDelayed) $ i
+    checkDelayed i = False
     delayedattrs = concat $ fmap (keyValue . _relOrigin ) .  F.toList <$> M.keys filteredAttrs
-    filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (S.fromList $ _kvdelayed m) && (all (maybe False id) $ fmap (fmap (isNothing .unSDelayed)) $ fmap unSOptional $ kattr $ v)  ) (_kvvalues $ vs)
+    filteredAttrs = M.filterWithKey (\key v -> S.isSubsetOf (S.map _relOrigin key) (S.fromList $ _kvdelayed m) && (all checkDelayed $  kattr  v)  ) (_kvvalues $ values)
 
 
 

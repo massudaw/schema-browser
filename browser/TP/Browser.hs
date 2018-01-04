@@ -9,6 +9,7 @@ module TP.Browser where
 
 import Control.Monad.Writer (runWriterT,tell)
 import Control.Lens (_1,_2,(^.),over)
+import GHC.Generics
 import Safe
 import qualified NonEmpty as Non
 import Graphics.UI.Threepenny.Internal (wId)
@@ -102,7 +103,7 @@ addServer inf =  do
 
 idexToPred t (G.Idex  i) = head $ (\(k,a)-> (keyRef k,Left (a,Contains))) <$>  zip (rawPK t) (F.toList i)
 
-deleteServer inf (TableModification _ _ _ _ (CreateRow o)) = do
+deleteServer inf (TableModification _ _ _ _ (CreateRow (ix,o))) = do
   now <- liftIO $ getCurrentTime
   (_,(_,tb)) <- transactionNoLog inf $ selectFrom "clients"  Nothing Nothing [] (WherePredicate (AndColl [PrimColl (keyRef (lookKey inf "clients" "up_time") ,Left ((TB1 (STime $ STimestamp (now))),Contains))]))
   let
@@ -115,7 +116,7 @@ deleteServer inf (TableModification _ _ _ _ (CreateRow o)) = do
     v <- uncurry (updateFrom (lookMeta inf "clients") old) (pt old)
     tell (maybeToList v)
     return v) oldClis
-  let pt = (G.getIndex (tableMeta $lookTable inf "server")o,[PAttr (lookKey inf "server" "up_time") (PInter False ((ER.Finite $ PAtom (STime $ STimestamp (now)) , False)))])
+  let pt = (G.getIndex (tableMeta $lookTable inf "server")o,[PAttr (lookKey inf "server" "up_time") (PInter False ((ER.Finite $ PAtom (STime $ STimestamp now) , False)))])
   transactionNoLog inf $ uncurry (updateFrom (lookMeta inf "server")o )pt
 
 removeTable :: Int -> UTCTime -> Table -> Int -> Int ->  (TBIndex Showable,TBIdx Text Showable)

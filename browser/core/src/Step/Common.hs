@@ -63,8 +63,8 @@ instance (Monoid s ,Applicative (a i),Monoid m) => Monoid (StaticEnv a s i m) wh
   mappend (StaticEnv (StaticArrow (i , l))) (StaticEnv (StaticArrow (j ,m ))) =  StaticEnv $ StaticArrow  (mappend i j,liftA2 mappend l  m )
 
 instance (Ring s ,Arrow m)  => Arrow (Parser m s) where
-  arr f = (P one (arr f ))
-  first (P s d )  = P s (first d )
+  arr f = P one (arr f )
+  first (P s d )  = P s (first d)
 
 instance (Ring s ,ArrowChoice m)  => ArrowChoice (Parser m s) where
   (|||) (P (si,so) d ) (P (ki,ko)  j ) = P (si `add` ki ,so `add` ko) (d ||| j)

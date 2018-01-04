@@ -526,8 +526,6 @@ instance Fractional a => Fractional (FTB a) where
   fromRational i = TB1 (fromRational i)
   recip i = fmap recip i
 
-
-
 mapFromTBList :: Ord k => [TB k  a] -> Map (Set (Rel k) ) (TB k  a)
 mapFromTBList = Map.fromList . fmap (\i -> (Set.fromList (keyattr  i),i))
 

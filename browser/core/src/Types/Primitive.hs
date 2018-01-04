@@ -408,6 +408,7 @@ data TableModificationK k p
   deriving(Eq,Show,Functor,Generic)
 
 
+
 -- Literals Instances
 instance IsString Showable where
     fromString i = SText (T.pack i)
@@ -470,6 +471,8 @@ instance Fractional Showable where
 
 -- type HashQuery =  HashSchema (Set Key) (SqlOperation Table)
 type PathQuery = SqlOperation
+
+
 
 
 tableAttr (m , KV n) =   concat  $ F.toList (nonRef <$> n)

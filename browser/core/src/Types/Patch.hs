@@ -133,14 +133,14 @@ joinEditor Keep  = Keep
 joinEditor Delete = Delete
 
 firstPatchRow :: (Ord a ,Ord k , Ord (Index a), Ord j ) => (k -> j ) -> RowPatch k a -> RowPatch j a
-firstPatchRow f (CreateRow i ) = CreateRow $ mapKey' f i
-firstPatchRow f (DropRow i ) = DropRow $ mapKey' f i
+firstPatchRow f (CreateRow (ix,i) ) = CreateRow (ix, mapKey' f i)
+firstPatchRow f (DropRow (ix) ) = DropRow ix
 firstPatchRow f (PatchRow (ix,i) ) = PatchRow (ix, firstPatch f i)
 
 data RowPatch k a
-  = CreateRow (TBData k a)
+  = CreateRow ( G.TBIndex a ,TBData k a)
   | PatchRow ( G.TBIndex a ,TBIdx k a)
-  | DropRow (TBData k a)
+  | DropRow ( G.TBIndex a)
   deriving(Show,Eq,Ord,Functor,Generic)
 
 instance (NFData k ,NFData a )=> NFData (RowPatch k a)
