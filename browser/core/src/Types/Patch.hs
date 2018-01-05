@@ -434,7 +434,7 @@ createTB1 k  =  KV . mapFromTBList  <$>  nonEmpty ( catMaybes $ fmap (createIfCh
 
 
 pattrKey (PAttr s _ ) = Set.singleton $ Inline s
-pattrKey (PFun s l _ ) = Set.singleton $ RelFun s (relAccesGen <$> snd l)
+pattrKey (PFun s l _ ) = Set.singleton $ RelFun s (fst l) (relAccesGen <$> snd l)
 pattrKey (PInline s _ ) = Set.singleton $ Inline s
 pattrKey (PFK s _  _ ) = Set.fromList s
 

@@ -118,7 +118,7 @@ pathRelRel :: Ord k => SqlOperationK k -> Set (Rel k)
 pathRelRel (FKJoinTable  rel   _  ) = Set.fromList rel
 pathRelRel (FKInlineTable  r _  ) = Set.singleton $ Inline r
 pathRelRel (RecJoin l rel ) =  pathRelRel rel
-pathRelRel (FunctionField r _ a ) =  S.singleton $ RelFun r (relAccesGen <$> a)
+pathRelRel (FunctionField r e a ) =  S.singleton $ RelFun r e (relAccesGen <$> a)
 
 
 pathRelRel' :: Ord k => SqlOperationK k -> MutRec [Set (Rel k )]

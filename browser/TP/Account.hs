@@ -53,20 +53,19 @@ import Data.Text (Text)
 
 import qualified Data.Map as M
 
+
+
 accountWidgetMeta inf = do
     let
       schId = int (schemaId inf)
       schemaPred = [(keyRef "schema",Left (schId,Equals))]
-
-    (_,(_,emap )) <-ui $ transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
-    (_,(_,aMap )) <-ui $ transactionNoLog  (meta inf) $ selectFromTable "accounts" Nothing Nothing [] schemaPred
+    (minf,amap) <- ui $ transactionNoLog  (meta inf) $ joinTable "accounts" "event" [Rel "schema" Equals "schema", Rel "table" Equals "table"]  "event" schemaPred
     cliZone <- jsTimeZone
     return $ fmap (\e ->
           let
               (TB1 (SText tname)) =  lookAttr' "table_name" $ unTB1 $ lookRef  ["schema","table"] e
               table = lookTable  inf tname
-              tablId = int (tableUnique table)
-              Just (ArrayTB1 efields ) = indexFieldRec (liftAccess (meta inf )"event" $ Nested ([keyRef "schema",keyRef "table",keyRef "column"]) (One $ keyRef "column_name")) $ fromJust $ G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
+              Just (ArrayTB1 efields ) = join $ fmap unSOptional $ indexFieldRec (liftAccess minf "accounts" $ Nested [keyRef "event"] $ One $ Nested [keyRef "schema",keyRef "table",keyRef "column"] (One $ keyRef "column_name")) e
               (ArrayTB1 afields )= lookAttr' "account" e
               color =  lookAttr'  "color" e
               toLocalTime = fmap to
@@ -80,7 +79,7 @@ accountWidgetMeta inf = do
                     where attr = lookAttr' field r
                           accattr  = lookAttr' aafield r
               proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r),)$  zipWith (projf r) ( F.toList efields) (F.toList afields)
-           in ((color,table,efields,afields,proj))  ) ( G.toList aMap)
+           in ((color,table,efields,afields,proj))  ) ( G.toList amap)
 
 
 

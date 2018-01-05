@@ -109,14 +109,6 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
 
     return  (legendStyle , dashes )
 
-joinT t = do
-  (e,h) <- newEvent
-  init <- currentValue (facts t)
-  el <- currentValue (facts init)
-  mapTEventDyn  (mapTEventDyn (liftIO. h)) t
-  b <- stepper el e
-  return (tidings b e)
-
 type DateChange = (String, Either (Interval UTCTime) UTCTime)
 
 readTime :: EventData -> Maybe DateChange

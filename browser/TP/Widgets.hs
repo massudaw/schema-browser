@@ -791,5 +791,13 @@ hoverTip2 elemIn elemOut = do
     else return ()) (tidings bh hoev)
   return $ hoev
 
+joinT t = do
+  (e,h) <- newEvent
+  init <- currentValue (facts t)
+  el <- currentValue (facts init)
+  mapTEventDyn  (mapTEventDyn (liftIO. h)) t
+  b <- stepper el e
+  return (tidings b e)
+
 
 method s i = i >>= \e -> runFunctionDelayed e . ffi s $ e

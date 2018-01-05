@@ -43,7 +43,7 @@ findAttr l v =  M.lookup (S.singleton . Inline $ l) (_kvvalues v)  <|> findFun l
 
 findFun :: (Show k ,Ord k ,Show a) => k -> (TB3Data  k a) -> Maybe (TB  k a)
 findFun l v = fmap snd . L.find (((pure . Inline $ l) == ).fmap mapFunctions . S.toList .fst) $ M.toList $ _kvvalues $ (v)
-  where mapFunctions (RelFun i _ ) = Inline i
+  where mapFunctions (RelFun i _ _ ) = Inline i
         mapFunctions j = j
 
 findFKAttr :: (Show k ,Ord k ,Show a) => [k] -> (TB3Data  k a) -> Maybe (TB  k a)

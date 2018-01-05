@@ -5,6 +5,7 @@ module SchemaQuery
   ,tablePK
   ,readTable
   ,writeSchema
+  ,createFresh
   ,convertChanEvent
   ,childrenRefsUnique
   ,selectFromTable
@@ -43,10 +44,12 @@ module SchemaQuery
   ,readIndex
   ,projunion
   ,recoverEditDefault
+  ,joinTable
   )where
 import Graphics.UI.Threepenny.Core (mapEventDyn)
 
 import RuntimeTypes
+import Data.Unique
 import Data.Semigroup(Semigroup)
 import Control.Arrow (first)
 import Control.DeepSeq
@@ -283,11 +286,11 @@ getFKRef inf predtop rtable (evs,me,old) set (FKJoinTable i j  ) =  do
                        return $ addAttr  fk i
                 return (evt :evs,me >=> joined,old <> refl)
     where
-        getAtt i k  = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues  $ k
 
 left f (Left i ) = Left (f i)
 left f (Right i ) = (Right i)
 
+getAtt i k  = filter ((`S.isSubsetOf` i) . S.fromList . fmap _relOrigin. keyattr ) . F.toList . _kvvalues  $ k
 
 
 getFKS
@@ -1094,4 +1097,57 @@ readTable inf r  t  re = do
   disk <- loadFKSDisk inf t re
   let v = createUn (keyFastUnique <$> rawPK t) $ (\f -> disk  f) <$> prev
   return (m,v)
+
+
+joinTable
+  :: T.Text
+     -> T.Text
+     -> [Rel T.Text]
+     -> T.Text
+     -> [(Access T.Text, AccessOp Showable)]
+     -> TransactionM
+          (InformationSchema,G.GiST (TBIndex Showable) (TBData Key Showable))
+joinTable origin target srel alias whr =  do
+  pinf <- ask
+  inf <- liftIO $ createFresh origin pinf alias (Primitive [KOptional] (RecordPrim (schemaName pinf ,target)))
+  (_,(_,emap )) <- selectFromTable origin Nothing Nothing [] whr
+  (_,(_,amap )) <- selectFromTable target Nothing Nothing [] whr
+  let
+    rel = (\(Rel i o j ) -> Rel (lookKey inf origin i ) o (lookKey inf target j) )<$>  srel
+    table = lookTable inf target
+    tar = S.fromList $ _relOrigin <$> rel
+    joinFK :: TBData Key Showable ->  Column Key Showable
+    joinFK m  = FKT (kvlist []) rel (LeftTB1 $ joinRel2 (tableMeta table ) (fmap replaceRel $ taratt ) amap)
+            where
+              replaceRel (Attr k v) = (justError "no rel" $ L.find ((==k) ._relOrigin) rel,v)
+              taratt = getAtt tar (tableNonRef' m)
+    joined i = addAttr (joinFK i ) i
+
+    addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
+    addAttr r = (\(KV i) -> KV (M.insert ( S.singleton $ lookKey inf origin <$> (RelAlias alias $ srel)) r i ))
+  return $ (inf,joined <$> emap)
+
+
+--- Plugins Interface Methods
+createFresh :: T.Text -> InformationSchema -> T.Text -> KType CorePrim -> IO InformationSchema
+createFresh  tname inf i ty@(Primitive l  atom)  =
+  case atom of
+    AtomicPrim _  -> do
+      k <- newKey i ty 0
+      return $ inf
+          Le.& keyMapL Le.%~ (HM.insert (tname,i) k )
+    RecordPrim (s,t) -> do
+      k <- newKey i ty 0
+      let tableO = lookTable inf tname
+          path =  (FKInlineTable k $ inlineName ty )
+      return $ inf
+          Le.& tableMapL . Le.ix tname . rawFKSL Le.%~  (:) path
+          Le.& pkMapL . Le.ix (S.fromList$ rawPK tableO) . rawFKSL Le.%~  (:) path
+          Le.& keyMapL Le.%~ HM.insert (tname,i) k
+
+
+newKey name ty p = do
+  un <- newUnique
+  return $ Key name Nothing    [FRead,FWrite] p Nothing un ty
+
 

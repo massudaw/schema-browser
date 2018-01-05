@@ -12,6 +12,7 @@ import Control.Monad.Writer as Writer
 import TP.View
 import TP.Selector
 import qualified Data.Interval as Interval
+import NonEmpty (NonEmpty)
 import Control.Concurrent
 import Utils
 import Types.Patch
@@ -103,12 +104,12 @@ eventWidgetMeta inf cliZone= do
 
 
 calendarView
-  :: (A.ToJSON a, Foldable t2,
-      Foldable t1, Functor t1) =>
+  :: (A.ToJSON a, Foldable t2
+      ) =>
      InformationSchema
      -> Maybe (TBPredicate Key Showable)
      -> TimeZone
-     -> t2 (t, TableK Key, t1 (FTB Showable),
+     -> t2 (t, TableK Key, NonEmpty (FTB Showable),
             TBData Key Showable -> (a1, [Either a b]))
     -> Tidings (S.Set (TableK Key) )
      -> Mode

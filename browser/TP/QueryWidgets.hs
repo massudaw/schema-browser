@@ -84,24 +84,6 @@ import Utils
 
 type ColumnTidings = Map (S.Set (Rel CoreKey ))(Tidings (Maybe (Column CoreKey Showable)))
 
---- Plugins Interface Methods
-createFresh :: Text -> InformationSchema -> Text -> KType CorePrim -> IO InformationSchema
-createFresh  tname inf i ty@(Primitive l  atom)  =
-  case atom of
-    AtomicPrim _  -> do
-      k <- newKey i ty 0
-      return $ inf
-          & keyMapL %~ (HM.insert (tname,i) k )
-    RecordPrim (s,t) -> do
-      k <- newKey i ty 0
-      let tableO = lookTable inf tname
-          path =  (FKInlineTable k $ inlineName ty )
-      return $ inf
-          & tableMapL . Le.ix tname . rawFKSL %~  (:) path
-          & pkMapL . Le.ix (S.fromList$ rawPK tableO) . rawFKSL Le.%~  (:) path
-          & keyMapL %~ HM.insert (tname,i) k
-
-
 genAttr :: InformationSchema -> CoreKey -> Column CoreKey ()
 genAttr inf k =
   case keyType k of

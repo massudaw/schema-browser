@@ -324,12 +324,17 @@ data Rel k
   , _relOperator:: BinaryOperator
   , _relTip :: k
   }
+  | RelAlias
+  { _relOri :: k
+  , _relReference :: [Rel k]
+  }
   | RelAccess
   { _relOri :: k
   , _relAccess :: Rel k
   }
   | RelFun
   { _relOri :: k
+  , _relExpr :: Expr
   , _relReference :: [Rel k]
   }
   deriving(Eq,Show,Ord,Functor,Foldable,Generic)
@@ -342,17 +347,20 @@ _relTarget i = error (show i)
 _relOrigin (Rel i _ _) = i
 _relOrigin (Inline i) = i
 _relOrigin (RelAccess i _) = i
-_relOrigin (RelFun i _) = i
+_relOrigin (RelFun i _ _) = i
+_relOrigin (RelAlias i _) = i
 _relRoot  (Rel i _ _ ) = i
 _relRoot  (Inline i  ) = i
 _relRoot  (RelAccess i _ ) = i
-_relRoot  (RelFun i _ ) = i
+_relRoot  (RelFun i _ _ ) = i
+_relRoot (RelAlias i _) = i
 
 
 _relInputs (Rel i _ _ ) = Just [i]
 _relInputs (Inline i   ) = Nothing
 _relInputs (RelAccess i _ ) = Just [i ]
-_relInputs (RelFun  _ l) = Just $ fmap _relOrigin l
+_relInputs (RelFun  _ _ l) = Just $ fmap _relOrigin l
+_relInputs (RelAlias i l) = Just $ fmap _relOrigin l
 
 _relOutputs (Rel _ (Flip (AnyOp Equals)) _ ) = Nothing
 _relOutputs (Rel _ IntersectOp  _ ) = Nothing
@@ -365,7 +373,8 @@ _relOutputs (Rel i  (Flip Equals ) _ ) = Just [i]
 _relOutputs (Rel _  _ _ ) = Nothing
 _relOutputs (Inline i ) = Just [i]
 _relOutputs (RelAccess i _) = Nothing -- Just [i]
-_relOutputs (RelFun i _) = Just [i]
+_relOutputs (RelFun i _ _) = Just [i]
+_relOutputs (RelAlias i _) = Nothing
 
 instance (Binary  a ,Binary k ) => Binary (KV  k a)
 instance Binary k => Binary (Rel k)
@@ -539,7 +548,7 @@ relAccesGen (Nested [IProd i l] (Many [One m]) ) = RelAccess l (relAccesGen m)
 
 keyattri :: TB  k  a -> [Rel k]
 keyattri (Attr i  _ ) = [Inline i]
-keyattri (Fun i  l _ ) = [RelFun i (relAccesGen <$> snd l)]
+keyattri (Fun i  l _ ) = [RelFun i (fst l) (relAccesGen <$> snd l)]
 keyattri (FKT i  rel _ ) = rel
 keyattri (IT i  _ ) =  [Inline i]
 

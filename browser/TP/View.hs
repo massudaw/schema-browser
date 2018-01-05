@@ -132,7 +132,7 @@ timePred inf tname evfields (incrementT,resolution) = time
               (TB1 . STime . SDate . utctDay )
             (AtomicPrim (PTime (PTimestamp _))) ->
               (TB1 . STime . STimestamp  )
-            v -> errorWithStackTrace (show v)
+            v -> errorWithStackTrace (show (evfields,tname,v))
     i =
         (\r d ->
               Interval.interval

@@ -133,7 +133,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
             tdib <- ui $ stepper Nothing (fmap snd <$> evsel)
             let tdi = tidings tdib (fmap snd <$> evsel)
                 table = lookTable inf tname
-            (el,_) <- crudUITable inf  table reftb mempty [] (allRec' (tableMap inf) table)  tdi
+            (el,_) <- crudUITable inf table reftb mempty [] (allRec' (tableMap inf) table)  tdi
 
             traverseUI (\i ->
               createLayers innermap tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   i)) (filtering tb v)

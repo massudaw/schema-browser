@@ -75,16 +75,14 @@ mapWidgetMeta  inf = do
         ,js "leaflet-svg-markers.min.js"
         ]
     let
-      schemaPred2 = [(keyRef "schema",Left (int (schemaId inf),Equals))]
-    (_,(_,evMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred2
-    (_,(_,eventMap )) <-ui $  transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred2
+      schemaPred = [(keyRef "schema",Left (int (schemaId inf),Equals))]
+    (minf,amap) <- ui $ transactionNoLog  (meta inf) $ joinTable "geo" "event" [Rel "schema" Equals "schema", Rel "table" Equals "table"]  "event" schemaPred
     return $ (\e ->
           let
               TB1 (SText tname) =  lookAttr' "table_name" $ unTB1 $ lookRef ["schema","table"] e
               table = lookTable inf tname
-              evfields = join $ fmap (unArray . _tbattr ) . idx (meta inf) (tableMeta table) "event"   <$> erow
-                where
-                  erow = G.lookup (idex (meta inf) "event" [("schema" ,int $ schemaId inf),("table",int (tableUnique table))])  eventMap
+
+              evfields = fmap unArray $ join $ fmap unSOptional $ indexFieldRec (liftAccess minf "geo" $ Nested [keyRef "event"] $ One $ Nested [keyRef "schema",keyRef "table",keyRef "column"] (One $ keyRef "column_name")) e
               Just (ArrayTB1 efields ) = indexFieldRec (liftAccess (meta inf) "geo" (Nested [keyRef "features"] $ Many [One $ keyRef  "geo"] )) e
               ArrayTB1 features = lookRef ["features"] e
               color = lookAttr'  "color" e
@@ -95,7 +93,7 @@ mapWidgetMeta  inf = do
               convField (LeftTB1 v) = join $ convField  <$> v
               convField (TB1 v ) = Just [("position", TB1 v)]
               convField i  = errorWithStackTrace (show i)
-          in ("#" <> renderShowable color ,table,efields,evfields,proj)) <$>  ( G.toList evMap)
+          in ("#" <> renderShowable color ,table,efields,evfields,proj)) <$>  ( G.toList amap)
 
 legendStyle dashes lookDesc table b = traverse render item
   where

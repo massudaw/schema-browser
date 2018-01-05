@@ -339,14 +339,14 @@ instance (Show i,P.Poset i )=> P.Poset (Rel i)where
                                         True -> P.LT
                                         False -> P.compare j i
   compare  (Rel i _ a ) (Rel j _ b) = P.compare i j <> P.compare a b
-  compare  n@(RelFun i  a ) o@(RelFun j k)  = case  (L.any (== Inline j) a,L.any (==Inline i) k)  of
+  compare  n@(RelFun i  ex a ) o@(RelFun j ex2 k)  = case  (L.any (== Inline j) a,L.any (==Inline i) k)  of
                                           (True ,_)-> P.GT
                                           (_,True)-> P.LT
                                           (False,False)-> P.compare (Inline i) (Inline j)
-  compare  (RelFun i  a ) j  = case L.any (== j) a  of
+  compare  (RelFun i e a ) j  = case L.any (== j) a  of
                                           True -> P.GT
                                           False -> P.compare (Inline i) j
-  compare   j (RelFun i  a )= case L.any (== j) a  of
+  compare   j (RelFun i e a )= case L.any (== j) a  of
                                           True -> P.LT
                                           False -> P.compare j (Inline i)
 
@@ -443,7 +443,7 @@ joinRel2 tb ref table
             isLeft i = False
             isArray (ArrayTB1 i) = True
             isArray i = False
-            idx = (G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref)
+            idx = G.Idex $ fmap snd $ L.sortBy (comparing (flip L.elemIndex (_kvpk tb). _relTarget .fst )) ref
             tbel = G.lookup idx table
 
 

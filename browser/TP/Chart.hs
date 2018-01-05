@@ -65,33 +65,27 @@ calendarRemoveSource cal t = runFunction $ ffi "removeChartColumns(%1,%2)" cal (
 
 chartWidgetMetadata inf = do
   let
-
       schId = int (schemaId inf)
       schemaPred = [(keyRef "schema",Left (schId,Equals))]
-
-  ui$ do
-      (_,(_,emap )) <-transactionNoLog  (meta inf) $ selectFromTable "event" Nothing Nothing [] schemaPred
-      (_,(_,geomap )) <-transactionNoLog  (meta inf) $ selectFromTable "geo" Nothing Nothing [] schemaPred
-      evMap <- transactionNoLog (meta inf) $ do
-        (_,(_,evMap )) <- selectFromTable "metrics" Nothing Nothing [] schemaPred
-        return evMap
+  ui$ transactionNoLog  (meta inf) $do
+      (_,(_,emap )) <- selectFromTable "event" Nothing Nothing [] schemaPred
+      (_,(_,geomap )) <- selectFromTable "geo" Nothing Nothing [] schemaPred
+      (_,(_,evMap )) <- selectFromTable "metrics" Nothing Nothing [] schemaPred
       return $ fmap (\e ->
         let
-            (TB1 (SText tname)) = lookAttr' "table_name" $ unTB1 $  lookRef ["schema","table"] e
-            table = lookTable inf tname
-            tablId = int (tableUnique table)
-            Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"metrics" $ keyRef "metrics") e
-            Just (Attr _ chart)= indexField (liftAccess (meta inf )"metrics" $ keyRef "chart_type") e
-            -- Just (Attr _ (ArrayTB1 timefields ))= indexField (liftAccess (meta inf )"event" $ keyRef "event") e
-            timeFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "event" $ keyRef "event")  <$> G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
-            geoFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "geo" $ keyRef "geo")  <$> G.lookup (idex (meta inf) "geo" [("schema" ,schId ),("table",tablId )])  geomap
-            color = lookAttr'  "color" e
-            projf  r efield  = M.fromList [("value" ,ArrayTB1 $  attr <$> efield), ("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color )] :: M.Map Text (FTB Showable)
-              where attr  (TB1 (SText field)) = _tbattr $ justError ("no attr " <> show field) (findAttr (lookKey inf tname field) r)
-
-            proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r),)$  projf r efields
-            attrValue (Attr k v) = v
-         in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,F.toList efields,(timeFields,geoFields,chart),proj) ) ( G.toList evMap)
+          TB1 (SText tname) = lookAttr' "table_name" $ unTB1 $  lookRef ["schema","table"] e
+          table = lookTable inf tname
+          tablId = int (tableUnique table)
+          Just (Attr _ (ArrayTB1 efields ))= indexField (liftAccess (meta inf )"metrics" $ keyRef "metrics") e
+          Just (Attr _ chart)= indexField (liftAccess (meta inf )"metrics" $ keyRef "chart_type") e
+          timeFields = fmap unArray  $ indexFieldRec (liftAccess (meta inf )"event" $ Nested ([keyRef "schema",keyRef "table",keyRef "column"]) (One $ keyRef "column_name")) $ fromJust $ G.lookup (idex (meta inf) "event" [("schema" ,schId ),("table",tablId )])  emap
+          geoFields = fmap (unArray._tbattr) $ join $ indexField  (liftAccess (meta inf) "geo" $ keyRef "geo")  <$> G.lookup (idex (meta inf) "geo" [("schema" ,schId ),("table",tablId )])  geomap
+          color = lookAttr'  "color" e
+          projf  r efield  = M.fromList [("value" ,ArrayTB1 $  attr <$> efield), ("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color )] :: M.Map Text (FTB Showable)
+            where attr  (TB1 (SText field)) = _tbattr $ justError ("no attr " <> show field) (findAttr (lookKey inf tname field) r)
+          proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r),)$  projf r efields
+          attrValue (Attr k v) = v
+       in (txt $ T.pack $ "#" <> renderShowable color ,lookTable inf tname,F.toList efields,(timeFields,geoFields,chart),proj) ) ( G.toList evMap)
 
 chartWidget body (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
 

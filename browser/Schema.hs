@@ -270,10 +270,6 @@ addRecInit inf m = fmap recOverFKS m
 
 
 
-newKey name ty p = do
-  un <- newUnique
-  return $ Key name Nothing    [FRead,FWrite] p Nothing un ty
-
 
 catchPluginException :: InformationSchema -> Int -> Int -> Map Key ( FTB Showable) -> IO a -> IO (Either Int a)
 catchPluginException inf pname tname  idx i = do
