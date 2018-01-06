@@ -37,21 +37,21 @@ setT = setMeta "title"
 renderProjectContract = myDoc
    where
       tname = "pricing"
-      var str =  maybe "" fromString . fmap (renderShowable) <$> idxM str
+      var str =  maybe "" fromString . fmap renderShowable <$> idxM str
       varT str =  fromString . renderShowable <$> idxR str
-      payA = displayPay <$> (maybe (TB1 $ SText "Não Agendado") id <$> idxM "payment_date") <*> idxK "payment_description"  <*> idxK "price"
-          where displayPay i da j = plain $ (fromString.renderShowable $ i ) <>  " - " <>  (fromString . renderShowable $ da )<> " - R$ " <> ((fromString.renderShowable) j)
+      payA = displayPay <$> (Data.Maybe.fromMaybe (TB1 $ SText "Não Agendado") <$> idxM "payment_date") <*> idxK "payment_description"  <*> idxK "price"
+          where displayPay i da j = plain $ (fromString.renderShowable $ i ) <>  " - " <>  (fromString . renderShowable $ da )<> " - R$ " <> (fromString.renderShowable) j
       myDoc :: ArrowReader
       myDoc = proc preenv -> do
           pdoc <- (proc env -> do
-              pay <- atRA "pagamentos" $ payA -< ()
+              pay <- atRA "pagamentos" payA -< ()
               own <- atR "id_project"
                      ( atR "id_owner,id_contact"
                         ( atR "id_owner" ( varT "owner_name"  ))) -< env
-              art <- atR "id_project" $ atR "art" $ atR "tag_art,pagamento" $ payA-< ()
+              art <- atR "id_project" $ atR "art" $ atR "tag_art,pagamento" payA-< ()
               end <- atR "id_project" $ atR "address" (varT "logradouro" <> ", "<> varT "number" <> " " <> varT "complemento" <> " " <> varT "cep" <>" " <> varT "municipio" <> "-" <> varT "uf" ) -< env
-              dare <- atR "id_project" $ atR "tag_taxa,taxa_dare" $ payA -< ()
-              returnA -<   (setT ( para $ "Contrato de Prestação de Serviços / nº " ) $ doc $
+              dare <- atR "id_project" $ atR "tag_taxa,taxa_dare" payA -< ()
+              returnA -<   (setT ( para "Contrato de Prestação de Serviços / nº " ) $ doc
                      ((para "Cláusula Primeira"
                           <> plain "As partes abaixo qualificadas celebram o presente contrato de Prestação de Serviços, consubstanciado nos regramentos e condições elencados nas Cláusulas especiais e Gerais a seguir:"  <>
                       para "Contratante:"
@@ -75,14 +75,14 @@ renderProjectContract = myDoc
 renderProjectReport = myDoc
    where
       tname = "pricing"
-      payA = displayPay <$> (maybe (TB1 $ SText "Não Agendado") id <$> idxM "payment_date") <*> idxK "payment_description"  <*> idxK "price"
-          where displayPay i da j = plain $ (fromString.renderShowable $ i ) <>  " - " <>  (fromString . renderShowable $ da )<> " - R$ " <> ((fromString.renderShowable) j)
+      payA = displayPay <$> (Data.Maybe.fromMaybe (TB1 $ SText "Não Agendado") <$> idxM "payment_date") <*> idxK "payment_description"  <*> idxK "price"
+          where displayPay i da j = plain $ (fromString.renderShowable $ i ) <>  " - " <>  (fromString . renderShowable $ da )<> " - R$ " <> (fromString.renderShowable) j
       myDoc :: ArrowReader
       myDoc = proc preenv -> do
           pdoc <- (proc env -> do
-              pay <- atRA "pagamentos" $ payA -< ()
-              dare <- atR "id_project" $ atR "tag_taxa,taxa_dare" $ payA -< ()
-              returnA -<   (setT ( para $ "Contrato de Prestação de Serviços / nº  " ) $ doc $
+              pay <- atRA "pagamentos" payA -< ()
+              dare <- atR "id_project" $ atR "tag_taxa,taxa_dare" payA -< ()
+              returnA -<   (setT ( para "Contrato de Prestação de Serviços / nº  " ) $ doc $
                      orderedList [
                        para "Pagamento" <>
                           bulletList pay <>
@@ -141,7 +141,7 @@ renderProjectPricingA = myDoc
                                             <*> address_model
                                          ) )) -< env
               ((end,mun,uf),(area,area_terreno,pavimentos,altura)) <-
-                atR "id_project" $
+                atR "id_project"
                   ((,) <$> address_model
                       <*> atR "dados_projeto" (
                        (,,,) <$> varT "area"
@@ -177,7 +177,7 @@ renderProjectPricingA = myDoc
                        para "Despesas do Contratante" <>
                           plain "As despesas referentes a cópias dos projetos e taxas para aprovação não estão inclusas no orçamento e são por conta do Contratante",
                        para "Validade da Proposta" <>
-                          plain ("A proposta terá validade de 10 dias."),
+                          plain "A proposta terá validade de 10 dias.",
                        para "Prazo de Entrega" <>
                           plain ( d <> " dias  úteis, após a confirmação da proposta ou assinatura do contrato.")
                         ])) -< preenv
@@ -189,9 +189,9 @@ renderProjectPricingA = myDoc
           returnA -<  (\i -> tblist . pure . Attr "orcamento" . LeftTB1 . Just . LeftTB1 .Just . TB1 . SBinary .  BS.toStrict <$> either (const Nothing) Just i) outdoc
 
 
-readFile' e name = openFile name ReadMode >>= liftM2 (>>) (flip hSetEncoding $ e)   hGetContents
+readFile' e name = openFile name ReadMode >>= liftM2 (>>) (flip hSetEncoding e)   hGetContents
 
 test = do
     template <-  readFile' utf8 "raw.template"
-    either (print ) (BS.writeFile "raw.pdf") =<< makePDF "pdflatex"  writeLaTeX def  {writerTemplate = Just template } (setTitle "Title" (doc (para "para")))
+    either print (BS.writeFile "raw.pdf") =<< makePDF "pdflatex"  writeLaTeX def  {writerTemplate = Just template } (setTitle "Title" (doc (para "para")))
 

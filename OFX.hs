@@ -1,4 +1,4 @@
-{-# LANGUAGE GADTs,OverloadedStrings, Arrows ,RecordWildCards#-}
+{-# LANGUAGE GADTs, OverloadedStrings, RecordWildCards #-}
 module OFX (ofxPlugin) where
 import Text.Parsec
 import Data.OFX
@@ -25,7 +25,7 @@ tzone  = TB1 . STime . STimestamp . zonedTimeToUTC
 
 i =: j = PAttr i (patch j)
 
-convertTrans (Transaction {..})  =
+convertTrans Transaction {..}  =
     ["fitid" =: serial txt (if txFITID == "0" then Nothing else Just txFITID)
     ,"memo" =:  opt txt txMEMO
     ,PFK [Rel "trntype" Equals "trttype"] ["trntype" =: txt (tail $ show txTRNTYPE )]  (PAtom ["trttype" =: txt (tail $ show txTRNTYPE )])
@@ -45,16 +45,15 @@ convertTrans (Transaction {..})  =
 testAccount = do
   let tfile = "extrato2.ofx"
   file <- readFile tfile
-  either (const Nothing) Just . fmap (fmap (convertTrans ) ) <$> account tfile file
+  either (const Nothing) Just . fmap (fmap convertTrans ) <$> account tfile file
 
-ofxPlugin  i j = join . fmap nonEmpty . either (const Nothing) Just . fmap (fmap (convertTrans ) ) <$> account i j
+ofxPlugin  i j = join . fmap nonEmpty . either (const Nothing) Just . fmap (fmap convertTrans ) <$> account i j
 account :: String -> String -> IO (Either String [Transaction])
 account filename contents = do
    ofx <- case parse ofxFile filename contents of
      Left e -> do
-       hPutStrLn stderr . show $ e
+       hPrint stderr $ e
        exitFailure
      Right g -> return g
    return $
-      transactions
-     $ ofx
+      transactions ofx

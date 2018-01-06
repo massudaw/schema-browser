@@ -26,10 +26,8 @@ import Data.Maybe
 import Control.Monad.Catch --Exception
 
 import qualified Data.Foldable as F
-import SchemaQuery
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.Types
-import Schema
 import Control.Lens hiding (deep)
 import Data.Aeson
 import qualified Data.ByteString.Lazy as BS
@@ -130,8 +128,8 @@ checkLinha conn l = do
 
   let Just a = decode f :: Maybe Value
       pontos = catMaybes $ F.toList $ fmap (^? readPonto) (a  ^. key "pontosparada" .  _Array )
-  print (pontos,(a  ^. key "pontosparada" .  _Array ))
-  _ <- mapM (\i->execute conn "INSERT INTO transito.pontos (id,linha,geocode,endereco,referencia) VALUES (?,?,?,?,?)" i ) (fmap (\i -> ( pontoId i,l, Position (read $ unpack $ fst (pontoPosition i) ,read $ unpack $ snd (pontoPosition i) ,0),pontoEndereco i, pontoReferencia i )) pontos)
+  print (pontos,a  ^. key "pontosparada" .  _Array)
+  _ <- mapM (execute conn "INSERT INTO transito.pontos (id,linha,geocode,endereco,referencia) VALUES (?,?,?,?,?)" ) (fmap (\i -> ( pontoId i,l, Position (read $ unpack $ fst (pontoPosition i) ,read $ unpack $ snd (pontoPosition i) ,0),pontoEndereco i, pontoReferencia i )) pontos)
   return ()
 
 readLineKML  = do
@@ -141,7 +139,7 @@ readLineKML  = do
   mapM (\(i,li,lv) -> do
     (ci,cv) <- concurrently (readKML li) (readKML lv)
     print (ci,cv)
-    traverse (\((coordi,namei),(coordv,namev)) -> execute conn "update transito.linha set linha_ida_nome = ? , linha_ida_coordinates = ? ,linha_volta_nome= ? , linha_volta_coordinates = ? where id = ?"  (namei ,LineString $ V.fromList $ coordi ,namev ,LineString $ V.fromList $ coordv,i) ) (liftM2 (,) ci cv)
+    traverse (\((coordi,namei),(coordv,namev)) -> execute conn "update transito.linha set linha_ida_nome = ? , linha_ida_coordinates = ? ,linha_volta_nome= ? , linha_volta_coordinates = ? where id = ?"  (namei ,LineString $ V.fromList coordi ,namev ,LineString $ V.fromList coordv,i) ) (liftM2 (,) ci cv)
     return()
       `catchAll` (\e -> return ())) l
 
@@ -155,19 +153,19 @@ checkOnibus inf = do
       pontos = catMaybes $ F.toList $ fmap (^? readPonto) (a  ^. key "pontosparada" .  _Array )
 
   print dec
-  print (pontos,(a  ^. key "pontosparada" .  _Array ))
+  print (pontos,a  ^. key "pontosparada" .  _Array)
   conn <- connectPostgreSQL "user=postgres host=localhost password=jacapodre dbname=incendio"
   _ <- mapM (\i->execute conn "INSERT INTO transito.onibus (id,acessivel) VALUES (?,?)" i `catchAll`(\_-> return 0)) (fmap (\i -> (numeroOnibus i, accessivel i == 1 )) dec)
   _ <- mapM (\(li,lv,i) -> execute conn "INSERT INTO transito.linha (id,linha_ida,linha_volta) VALUES (?,?,?)" (i,li,lv) `catchAll`(\e-> execute conn "update transito.linha set linha_ida = ?  ,linha_volta = ? where id = ? " (li,lv,i) )) (nub $ fmap (\i -> (linhaIda$ linha i  ,linhaVolta $ linha i,numeroLinha $ linha i)) dec)
 
   _ <- mapM (\i -> execute conn "INSERT INTO transito.destino_linha (linha,name) VALUES (?,?)" i `catchAll` (\e -> return 0)) (nub $ fmap (\i -> (numeroLinha $ linha i , nomeDestino $ destino i )) dec)
-  _ <- mapM (\i -> execute conn "INSERT INTO transito.registro_onibus (onibus,horario,linha,geocode,situacao,destino) VALUES (?,?,?,?,?,?)" i ) (nub $ fmap (\i -> (numeroOnibus i,t,numeroLinha $ linha i ,Position (fst $ position i, snd $ position i,0),situacao i, nomeDestino $ destino i )) dec)
+  _ <- mapM (execute conn "INSERT INTO transito.registro_onibus (onibus,horario,linha,geocode,situacao,destino) VALUES (?,?,?,?,?,?)" ) (nub $ fmap (\i -> (numeroOnibus i,t,numeroLinha $ linha i ,Position (fst $ position i, snd $ position i,0),situacao i, nomeDestino $ destino i )) dec)
   (ref ,_)<- runDynamic $ prerefTable inf (lookTable inf "max_registro_onibus")
   print "start patch"
   (_,l) <- runDynamic $ refTables' inf (lookTable inf "max_registro_onibus") Nothing (WherePredicate (AndColl [ PrimColl (liftAccess inf "max_registro_onibus"$ keyRef "onibus",Left (ArrayTB1 $ Non.fromList ( (\i -> int (fromIntegral $ numeroOnibus i)) <$> dec) , Flip $ AnyOp Equals ))]))
-  sequence l
+  sequence_ l
 
-  putPatch (patchVar $ ref ) $fmap PatchRow  $fmap (\i -> (liftPatch inf "max_registro_onibus" <$> (G.Idex [ int (fromIntegral $ numeroOnibus i)], [ PAttr "onibus" (patch$ int (fromIntegral $ numeroOnibus i)), PAttr "horario" (POpt $ Just $ patch $ timestamp $ t),PAttr "situacao" (POpt $ Just $ patch $ Types.txt (situacao i)),PAttr "geocode" (POpt $ Just $ patch $  pos (Position (fst $ position i, snd $ position i,0)))])))  dec
+  putPatch (patchVar ref ) $fmap PatchRow  $fmap (\i -> liftPatch inf "max_registro_onibus" <$> (G.Idex [ int (fromIntegral $ numeroOnibus i)], [ PAttr "onibus" (patch$ int (fromIntegral $ numeroOnibus i)), PAttr "horario" (POpt $ Just $ patch $ timestamp $ t),PAttr "situacao" (POpt $ Just $ patch $ Types.txt (situacao i)),PAttr "geocode" (POpt $ Just $ patch $  pos (Position (fst $ position i, snd $ position i,0)))]))  dec
   print "end checkOnibus"
 
   return ()
@@ -175,5 +173,5 @@ checkOnibus inf = do
 pollRmtc smvar amap user = do
   (inf ,lm)<- runDynamic $keyTablesInit  smvar ("transito", user ) amap []
   (_,l) <- runDynamic $ refTables' inf (lookTable inf "max_registro_onibus") Nothing mempty
-  sequence l
+  sequence_ l
   forkIO $ forever ( checkOnibus inf >> threadDelay (5*60*10^6))

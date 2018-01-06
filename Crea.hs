@@ -46,67 +46,67 @@ listTotuple [i,j,k,l] = [(i,j),(k,l)]
 listTotuple i = []
 
 
-creaLogin rnp user pass = do
+creaLogin rnp user pass =
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
-    -- r <- Sess.get session $ traceShowId creaLoginUrl
-    -- print $ r  ^. responseCookieJar
-    -- Sess.post session (traceShowId creaLoginUrlPost) ( creaLoginForm rnp user pass )
-    cr <- Sess.post session (traceShowId creaArtLoginUrlPost) (creaArtLoginForm rnp user pass)
-    --form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
-    --pr <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
-    return (cr ^? responseBody)
+  -- r <- Sess.get session $ traceShowId creaLoginUrl
+  -- print $ r  ^. responseCookieJar
+  -- Sess.post session (traceShowId creaLoginUrlPost) ( creaLoginForm rnp user pass )
+  cr <- Sess.post session (traceShowId creaArtLoginUrlPost) (creaArtLoginForm rnp user pass)
+  --form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
+  --pr <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
+  return (cr ^? responseBody)
 
 creaArtdata :: BS.ByteString -> BS.ByteString -> BS.ByteString -> BS.ByteString -> IO [ M.Map String String]
-creaArtdata rnp user pass art = do
+creaArtdata rnp user pass art =
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
-    cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
-    form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
-    _ <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
-    pr <- Sess.get session $ (traceShowId (creaArtQuery (BSC.unpack art) ))
-    let index = fmap ((M.fromList . concat . (fmap listTotuple)) . concat )
-    fmap (index . join .maybeToList) $ traverse (fmap (concat . concat) . readArt . BSLC.unpack) (pr ^? responseBody)
+  cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
+  form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
+  _ <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
+  pr <- Sess.get session $ (traceShowId (creaArtQuery (BSC.unpack art) ))
+  let index = fmap ((M.fromList . concat . (fmap listTotuple)) . concat )
+  fmap (index . join .maybeToList) $ traverse (fmap (concat . concat) . readArt . BSLC.unpack) (pr ^? responseBody)
 
 
-creaLoginArt rnp user pass art = do
+creaLoginArt rnp user pass art =
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
-    cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
-    form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
-    pr <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
-    pr <- Sess.get session $ (traceShowId (creaArtQuery (BSC.unpack art) ))
-    let html = (replace (fst replacePath ) (snd replacePath ) . (BSL.toStrict  )) <$> (pr ^? responseBody)
-    file <- traverse (htmlToPdf art) html
-    return $ fmap (SBinary  ) $ file
+  cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
+  form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
+  pr <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
+  pr <- Sess.get session $ (traceShowId (creaArtQuery (BSC.unpack art) ))
+  let html = (replace (fst replacePath ) (snd replacePath ) . (BSL.toStrict  )) <$> (pr ^? responseBody)
+  file <- traverse (htmlToPdf art) html
+  return $ fmap (SBinary  ) $ file
 
-creaBoletoArt rnp user pass art = do
+creaBoletoArt rnp user pass art =
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
-    cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
-    form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
-    pr <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
-    pr <- Sess.get session $ (traceShowId (creaArtBoleto (BSC.unpack art) ))
-    let Just boleto = BSC.unpack . fst . BSC.break ('\"'==)  . BS.drop 11 . snd . BS.breakSubstring "cod_boleto=" . traceShowId . BSL.toStrict <$> (pr ^? responseBody)
-    Sess.get session $ ((creaArtGeraBoleto ( boleto) ))
-    bol <- Sess.get session $ (creaTmpBoleto ( boleto) )
-    traverse (BSL.writeFile "boleto.pdf") bol
-    return (fromJust $ bol ^? responseBody )
+  cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
+  form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
+  pr <- (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
+  pr <- Sess.get session $ (traceShowId (creaArtBoleto (BSC.unpack art) ))
+  let Just boleto = BSC.unpack . fst . BSC.break ('\"'==)  . BS.drop 11 . snd . BS.breakSubstring "cod_boleto=" . traceShowId . BSL.toStrict <$> (pr ^? responseBody)
+  Sess.get session $ ((creaArtGeraBoleto ( boleto) ))
+  bol <- Sess.get session $ (creaTmpBoleto ( boleto) )
+  traverse (BSL.writeFile "boleto.pdf") bol
+  return (fromJust $ bol ^? responseBody )
 
-creaConsultaArt rnp user pass art = do
+creaConsultaArt rnp user pass art =
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
-    cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
-    form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
-    (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
-    pr <- Sess.get session $ (traceShowId (creaArtHistorico (BSC.unpack art) ))
-    concat .concat. maybeToList <$> (traverse readCreaHistoricoHtml $  BSLC.unpack .(replace (fst replacePath ) (snd replacePath ) . (BSL.toStrict  )) <$> (pr ^? responseBody))
+  cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
+  form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
+  (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
+  pr <- Sess.get session $ (traceShowId (creaArtHistorico (BSC.unpack art) ))
+  concat .concat. maybeToList <$> (traverse readCreaHistoricoHtml $  BSLC.unpack .(replace (fst replacePath ) (snd replacePath ) . (BSL.toStrict  )) <$> (pr ^? responseBody))
 
 
 
-creaSituacaoListPage rnp user pass status page = do
+creaSituacaoListPage rnp user pass status page =
   withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) $ \session -> do
-    cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
-    form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
-    (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
-    concat <$> mapM (\ix -> do
-      pr <- Sess.get session $ (traceShowId (creaArtList status ix ))
-      fmap (drop 1) . tail . concat .concat. maybeToList <$> (traverse readCreaHistoricoHtml $  BSLC.unpack .(replace (fst replacePath ) (snd replacePath ) . (BSL.toStrict  )) <$> (pr ^? responseBody))) page
+  cr <- Sess.post session (traceShowId creaArtLoginUrlPost) ( creaArtLoginForm rnp user pass )
+  form <- traverse (readInputForm . BSLC.unpack ) (cr ^? responseBody)
+  (Sess.post session (traceShowId creaSessionUrlPost ) .   creaLoginForm') (fromJust form)
+  concat <$> mapM (\ix -> do
+    pr <- Sess.get session $ (traceShowId (creaArtList status ix ))
+    fmap (drop 1) . tail . concat .concat. maybeToList <$> (traverse readCreaHistoricoHtml $  BSLC.unpack .(replace (fst replacePath ) (snd replacePath ) . (BSL.toStrict  )) <$> (pr ^? responseBody))) page
 
 
 
@@ -143,7 +143,7 @@ creaArtList situacao page =  "http://www.crea-go.org.br/art1025/cadastros/ajax_l
 convertArt :: [M.Map String String ]-> TBData T.Text Showable
 convertArt v =
   tblist
-  [numberA "substituida" $ join $ fmap (fmap (L.drop 2 .snd .L.break (== 'à')) .L.find ("Substituição à" `L.isInfixOf`) .  concat . fmap (\(i,j) -> [i,j]) . M.toList ) v `atMay` 0
+  [numberA "substituida" $ join $ fmap (fmap (L.drop 2 .dropWhile (not . (== 'à'))) .L.find ("Substituição à" `L.isInfixOf`) .  concatMap (\(i,j) -> [i,j]) . M.toList ) v `atMay` 0
   -- ,numberA "contrato" $ at 2 "Contrato:"
   ,textA "cpf_cnpj" $ filter (not . (`L.elem` (" /-." ::String))) <$> at 2 "CPF/CNPJ:"
   ,textA "contratante" $  at 2 "Contratante:"

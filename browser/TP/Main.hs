@@ -95,8 +95,8 @@ setup smvar args plugList w = void $ do
                        ,("Account",fmap (^._2) <$> accountWidgetMeta inf )
                        ,("Agenda",fmap (^._2) <$> eventWidgetMeta inf cliZone)]
     element menu # set UI.class_ "col-xs-1"
-    nav  <- buttonDivSet  ["Map","Account","Agenda","Chart","Browser","Metadata"] (pure $ args `atMay` 6  )(\i -> 
-        UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right" # set UI.style (noneShow $ (maybe True (\i -> isJust .nonEmpty $ i) $ M.lookup i  metadataNav) ))
+    nav  <- buttonDivSet  ["Map","Account","Agenda","Chart","Browser","Metadata"] (pure $ args `atMay` 6  )(\i ->
+        UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right" # set UI.style (noneShow (maybe True (\i -> isJust .nonEmpty $ i) $ M.lookup i  metadataNav) ))
     element nav # set UI.class_ "col-xs-5 pull-right"
     chooserDiv <- UI.div
         # set children  [getElement menu,getElement nav ]
@@ -145,18 +145,18 @@ setup smvar args plugList w = void $ do
         case nav of
           "Map" -> do
             element bdo  # set UI.style [("width","100%")]
-            fmap ((flip elem) . fmap (^._2)) <$> mapWidget bdo calendarT posSel (triding bset) inf
+            fmap (flip elem . fmap (^._2)) <$> mapWidget bdo calendarT posSel (triding bset) inf
           "Agenda" -> do
             element bdo  # set UI.style [("width","100%")]
             cliZone <- jsTimeZone
-            fmap ((flip elem) . fmap (^._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
+            fmap (flip elem . fmap (^._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
           "Chart" -> do
             element bdo  # set UI.style [("width","100%")]
             cliZone <- jsTimeZone
-            fmap ((flip elem) . fmap (^._2)) <$>  chartWidget bdo calendarT posSel (triding bset) inf cliZone
+            fmap (flip elem . fmap (^._2)) <$>  chartWidget bdo calendarT posSel (triding bset) inf cliZone
           "Account" -> do
             element bdo  # set UI.style [("width","100%")]
-            fmap ((flip elem) . fmap (^._2)) <$> accountWidget bdo calendarT (triding bset) inf
+            fmap (flip elem . fmap (^._2)) <$> accountWidget bdo calendarT (triding bset) inf
           "Metadata" -> do
                 let metaOpts = ["Poll","Stats","Change","Exception"]
                     iniOpts = join $ fmap (\i -> if i `elem` metaOpts then Just i else Nothing)$  args `atMay`  7
@@ -182,14 +182,14 @@ setup smvar args plugList w = void $ do
                             (ref,res) <- ui $ transactionNoLog inf $ syncFrom (lookTable inf "history") Nothing Nothing [] mempty
                             listBoxEl itemListEl2 ( G.toList <$> collectionTid ref)  (pure Nothing) (pure id) ( pure attrLine ) element metabody # set children [itemListEl,itemListEl2]-}
                         i -> do
-                          let pred = [(keyRef "user_name",Left (txt (snd $ username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList ((F.toList tables)),Flip (AnyOp Equals)))]
+                          let pred = [(keyRef "user_name",Left (txt (snd $ username inf ),Equals)),(keyRef "schema_name",Left (txt $schemaName inf,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table_name",Left (ArrayTB1 $ txt . tableName<$>  Non.fromList (F.toList tables),Flip (AnyOp Equals)))]
                           dash <- metaAllTableIndexA inf "master_modification_table" pred
                           element metabody # set UI.children [dash] # set UI.style [("overflow","auto")] # set UI.class_ "col-xs-12"
                   "Stats" -> do
                       let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList (S.toList tables),Flip (AnyOp Equals)))]
                       stats_load <- metaAllTableIndexA inf "stat_load_table" pred
                       stats <- metaAllTableIndexA inf "table_stats" pred
-                      clients <- metaAllTableIndexA inf "clients" [(Nested ([keyRef "selection"]) $ Many [One $ keyRef "schema"],Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
+                      clients <- metaAllTableIndexA inf "clients" [(Nested [keyRef "selection"] $ Many [One $ keyRef "schema"],Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
                       element metabody # set UI.children [stats,stats_load,clients]
                   "Exception" -> do
                       let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList (F.toList tables),Flip (AnyOp Equals)))]
@@ -238,7 +238,7 @@ loginWidget userI passI =  do
   passwordB <-  ui $stepper passI passwordE
   let usernameT = tidings usernameB usernameE
       passwordT = tidings passwordB passwordE
-  return ((liftA2 (liftA2 (,)) usernameT passwordT) ,[userDiv,passDiv])
+  return (liftA2 (liftA2 (,)) usernameT passwordT ,[userDiv,passDiv])
 
 
 
@@ -256,7 +256,7 @@ authMap smvar sargs (user,pass) schemaN =
             return (PostAuth conn, postgresOps)
 
 loadSchema smvar schemaN user authMap  plugList =
-    keyTables smvar (schemaN,T.pack $ user) authMap plugList
+    keyTables smvar (schemaN,T.pack user) authMap plugList
 
 databaseChooser smvar metainf sargs plugList = do
   (widT,widE) <- loginWidget (Just $ user sargs  ) (Just $ pass sargs )

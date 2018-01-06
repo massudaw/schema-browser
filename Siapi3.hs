@@ -26,36 +26,36 @@ import qualified Data.List as L
 import Debug.Trace
 import Gpx
 
-siapi3Page protocolo ano cgc_cpf = do
+siapi3Page protocolo ano cgc_cpf =
     withOpenSSL $
-        Sess.withSessionWith (opensslManagerSettings context) $
-        \session -> do
-            print siapiAndamento3Url
-            r <- Sess.get session $ siapiAndamento3Url
-            let view =
-                    snd . BS.breakSubstring ("ViewState") . BSL.toStrict <$>
-                    r ^? responseBody
-                viewValue =
-                    BSC.takeWhile (/= '\"') .
-                    BS.drop 7 . snd . BS.breakSubstring "value=\"" <$>
-                    view
-            print siapiAndamento3Url
-            pr <-
-                traverse
-                    (Sess.post session siapiAndamento3Url .
-                     protocolocnpjForm protocolo ano cgc_cpf)
-                    viewValue
-            print siapiListAndamento3Url
-            r <- Sess.get session $ siapiListAndamento3Url
-            o <- do
-              (l,v) <- readSiapi3Andamento (BSLC.unpack $ justError "no response" $ r ^? responseBody)
-              print siapiListAndamento3Url
-              res <- Sess.post session siapiListAndamento3Url  (nextPage $ justError "no view " $safeHead v )
-              (l2,v) <- readSiapi3AndamentoAJAX (BSLC.unpack $  justError "no response" $ res ^? responseBody)
-              return (l<> (concat . maybeToList . fmap safeTail . safeHead $ l2))
+    Sess.withSessionWith (opensslManagerSettings context) $
+    \session -> do
+        print siapiAndamento3Url
+        r <- Sess.get session $ siapiAndamento3Url
+        let view =
+                snd . BS.breakSubstring ("ViewState") . BSL.toStrict <$>
+                r ^? responseBody
+            viewValue =
+                BSC.takeWhile (/= '\"') .
+                BS.drop 7 . snd . BS.breakSubstring "value=\"" <$>
+                view
+        print siapiAndamento3Url
+        pr <-
+            traverse
+                (Sess.post session siapiAndamento3Url .
+                 protocolocnpjForm protocolo ano cgc_cpf)
+                viewValue
+        print siapiListAndamento3Url
+        r <- Sess.get session $ siapiListAndamento3Url
+        o <- do
+          (l,v) <- readSiapi3Andamento (BSLC.unpack $ justError "no response" $ r ^? responseBody)
+          print siapiListAndamento3Url
+          res <- Sess.post session siapiListAndamento3Url  (nextPage $ justError "no view " $safeHead v )
+          (l2,v) <- readSiapi3AndamentoAJAX (BSLC.unpack $  justError "no response" $ res ^? responseBody)
+          return (l<> (concat . maybeToList . fmap safeTail . safeHead $ l2))
 
-            return $
-              liftA2 (,) (Just o) (L.isInfixOf "AGUARDANDO PAGAMENTO DA TAXA" . BSLC.unpack <$> (r ^? responseBody))
+        return $
+          liftA2 (,) (Just o) (L.isInfixOf "AGUARDANDO PAGAMENTO DA TAXA" . BSLC.unpack <$> (r ^? responseBody))
 
 siapi2 protocolo ano = do
     let addrs =
@@ -68,8 +68,7 @@ siapi2 protocolo ano = do
              [T.pack $ BSC.unpack ano])
             addrs
     let lq2 =
-            fst .
-            break (== '&') .
+            takeWhile (not . (== '&')) .
             concat . tail . splitL ("php?id=") . TL.unpack . TL.decodeLatin1 <$>
             (lq ^? responseBody)
         addrs_a =
@@ -78,7 +77,7 @@ siapi2 protocolo ano = do
     ptq <-
         async $
         traverse
-            (\lq2 -> do getWith (defaults & param "id" .~ [T.pack lq2]) addrs_a)
+            (\lq2 -> getWith (defaults & param "id" .~ [T.pack lq2]) addrs_a)
             lq2
     let addrs_s =
             "http://siapi.bombeiros.go.gov.br/consulta/consulta_solicitacao.php"
@@ -86,11 +85,11 @@ siapi2 protocolo ano = do
     ptqs <-
         async $
         traverse
-            (\lq2 -> do getWith (defaults & param "id" .~ [T.pack lq2]) addrs_s)
+            (\lq2 -> getWith (defaults & param "id" .~ [T.pack lq2]) addrs_s)
             lq2
     (tq,tqs) <- waitBoth ptq ptqs
-    let is = TL.unpack . TL.decodeLatin1 <$> (join $ (^? responseBody) <$> tqs)
-        ia = TL.unpack . TL.decodeLatin1 <$> (join $ (^? responseBody) <$> tq)
+    let is = TL.unpack . TL.decodeLatin1 <$> join ((^? responseBody) <$> tqs)
+        ia = TL.unpack . TL.decodeLatin1 <$> join ((^? responseBody) <$> tq)
     vs <- traverse readHtml is
     va <- traverse readHtml ia
     let rem ts =
@@ -107,14 +106,14 @@ siapi2 protocolo ano = do
                      (i, j)) .
                L.take 2) .
           L.filter ((== 2) . L.length) .
-          concat . fmap (split4 . rem) . concat <$>
+          concatMap (split4 . rem) . concat <$>
           vs
         , fmap rem . tailEmpty . concat <$> va)
 
 tailEmpty [] = []
 tailEmpty i = tail i
 
-siapi3 protocolo ano cgc_cpf = do
+siapi3 protocolo ano cgc_cpf =
     siapi3Page protocolo ano cgc_cpf
 
 nextPage :: String
@@ -151,7 +150,7 @@ protocolocnpjForm prot ano cgc_cpf vv =
       ("formPaginaInicialWeb" :: BS.ByteString)
     , ("formPaginaInicialWeb:tabViewHome:protocoloWeb" :: BSC.ByteString) :=
       (prot <> "/" <> ano)
-    , ("formPaginaInicialWeb:tabViewHome:cpfCnpjWeb" :: BSC.ByteString) := (cgc_cpf)
+    , ("formPaginaInicialWeb:tabViewHome:cpfCnpjWeb" :: BSC.ByteString) := cgc_cpf
     , ("javax.faces.ViewState" :: BSC.ByteString) := vv]
 
 siapiAndamento3Url =

@@ -14,7 +14,7 @@ preview i =
         seekf (16 + l )
         size <- getWord32host
         r <- bytesRead
-        return . runGet (do
+        fmap (runGet (do
           bytCnt <- getWord8
           sequence $ replicate (fromIntegral $  bytCnt ) (  do
             imageCode <- getWord8
@@ -39,7 +39,7 @@ preview i =
                 skip 80
                 Just . Right  <$> getLazyByteString (fromIntegral imageHeaderSize)
               1 -> return Nothing -- return (Right (imageHeaderStart,imageHeaderSize))
-              i -> error ("invalid value " <> show i) ) )=<<  (getLazyByteString (fromIntegral size))
+              i -> error ("invalid value " <> show i) ) )) (getLazyByteString (fromIntegral size))
 
 
 
@@ -58,8 +58,8 @@ preview i =
 
 seekf x = do
   r <- bytesRead
-  let diff = fromIntegral x - ( fromIntegral r)
-  skip (diff )
+  let diff = fromIntegral x - fromIntegral r
+  skip diff
 
 
 

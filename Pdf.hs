@@ -69,8 +69,8 @@ htmlToPdf
          BSC.ByteString -> BSL.ByteString -> IO BSC.ByteString
 htmlToPdf art html = do
     let
-      output = (BSC.unpack art) <> ".pdf"
-      input = (BSC.unpack  art ) <> ".html"
+      output = BSC.unpack art <> ".pdf"
+      input = BSC.unpack  art <> ".html"
     BSL.writeFile (fromString input ) html
     callCommand $ "wkhtmltopdf --print-media-type -T 10 page " <> input <>   " " <> output
     file <- BS.readFile (fromString output)

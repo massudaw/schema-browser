@@ -80,7 +80,7 @@ main = do
   let initGUI = do
         Just (TableModification _ _ _ _ (CreateRow (ix,c))) <- addClientLogin metas
         let [LeftTB1 (Just (TB1 (SNumeric i)))] =
-               (\(Idex i) -> F.toList i) $ ix
+               (\(Idex i) -> F.toList i) ix
         liftIO $ putStrLn $ "Initialize Client: " ++ show i
         return i
       finalizeGUI w =
@@ -96,7 +96,7 @@ main = do
     initGUI
     finalizeGUI `catch`
     (\e -> do
-       putStrLn $ "Finish Server"
+       putStrLn "Finish Server"
        putStrLn $ "Exit Cause: " ++ show (e :: SomeException)
        runDynamic $ traverse (deleteServer metas) ref
        mapM writeSchema . HM.toList =<<

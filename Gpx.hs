@@ -25,7 +25,7 @@ import qualified Data.Text as TE
 
 
 import Prelude hiding ((.),id,head,elem)
-import qualified Prelude as Prelude
+import qualified Prelude
 import Control.Category
 
 import Debug.Trace
@@ -62,7 +62,7 @@ getPoint = atTag "trkpt" >>>
     lon <- getAttrValue "lon" -< x
     ele <- deep getText <<< atTag "ele" -< x
     time <- deep getText <<< atTag "time" -< x
-    returnA -< [Attr "position" (TB1 $ SGeo $ SPosition $ Position (read lon ,read lat ,read ele)),Attr "instant" (TB1 $ STime $ STimestamp $  localTimeToUTC utc . fromJust $ fmap fst  $ strptime "%Y-%m-%dT%H:%M:%SZ" time )]
+    returnA -< [Attr "position" (TB1 $ SGeo $ SPosition $ Position (read lon ,read lat ,read ele)),Attr "instant" (TB1 $ STime $ STimestamp $  localTimeToUTC utc . fromJust $ fst Control.Applicative.<$> strptime "%Y-%m-%dT%H:%M:%SZ" time )]
 
 file :: Showable
 file = "/home/massudaw/2014-08-27-1653.gpx"
@@ -78,7 +78,7 @@ readCpfName file = do
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
         >>> ( is "span" >>> hasAttrValue "class" ("clConteudoDados"==) >>> listA (getChildren >>> deep getText ))
   l <- runX arr
-  return  $ fmap (trim.last) $ L.find (\i -> L.isInfixOf  "Nome da" (head i)) $  L.filter (not.L.null ) $ L.nub l
+  return  $ fmap (trim.last) $ L.find (L.isInfixOf  "Nome da" . head) $  L.filter (not.L.null ) $ L.nub l
 
 
 readHtmlReceita file = do
@@ -87,7 +87,7 @@ readHtmlReceita file = do
       arr = readString [withValidate no,withWarnings no,withParseHTML yes] file
         >>> getTable' ( getTable' ((is "font" /> txt ) &&& (is "font" /> is "b" /> txt) )    {-<+> ( Left ^<< getChildren >>> getChildren >>> txt)-}  )
   l <- runX arr
-  return $ if L.null $ concat $ concat (concat l ) then Nothing else Just $ concat $ concat $ l !! 1 !! 0
+  return $ if L.null $ concat $ concat (concat l ) then Nothing else Just $ concat $ concat $ head (l !! 1)
 
 readInputForm file = runX (readString [withValidate no , withWarnings no , withParseHTML yes] file >>> atTag "form" >>> getChildren >>> atTag "input" >>> attrP )
     where
@@ -114,11 +114,11 @@ gpx :: String -> IO (Maybe [[TB TE.Text Showable]])
 gpx file = do
   i <- runX (readString [withValidate no,withWarnings no,withParseHTML yes] file
         >>> atTag"trk" >>> atTag "trkseg" >>> listA getPoint)
-  return $ (safeHead i)
+  return (safeHead i)
 
 testSiapi2 = do
   kk <- BS.readFile "Consulta Solicitação.html"
-  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  let inp = TE.unpack $ TE.decodeLatin1 kk
   putStrLn . unlines . fmap concat . concat =<< readHtml inp
 
 
@@ -139,19 +139,19 @@ readNota inp =
               n <- getName -< i
               v <- deep getText -< i
               returnA -< ((n,) <$> (readMay v :: Maybe Double)))
-  in catMaybes .concat $ runLA arr $ inp
+  in catMaybes .concat $ runLA arr inp
 
 
 
 
 testReceita = do
   kk <- BS.readFile "receita.html"
-  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  let inp = TE.unpack $ TE.decodeLatin1 kk
   readHtmlReceita inp
 
 testCreaArt = do
   kk <- BS.readFile "art.html"
-  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  let inp = TE.unpack $ TE.decodeLatin1 kk
   readArt inp
 
 {-
@@ -183,7 +183,7 @@ readSiapi3Solicitacao file = do
 
 testSiapi3 = do
   kk <- BS.readFile "debug.html"
-  let inp = (TE.unpack $ TE.decodeLatin1 kk)
+  let inp = TE.unpack $ TE.decodeLatin1 kk
   readSiapi3AndamentoAJAX inp
 
 

@@ -69,11 +69,11 @@ decoder smvar  = forever go
       i <- peek
       traverse (\a -> do
         lift$ print a
-        if (a /= "")
+        if a /= ""
           then do
             i <- P.decode
             either (\_  -> unDraw a ) (\e -> void . lift . runDynamic $ do
-              (t,inf,tb,o) <- out $ e
+              (t,inf,tb,o) <- out e
               transactionNoLog inf  $ applyBackend o
               transaction (meta inf ) $ applyBackend (liftPatchRow (meta inf) "master_modification_table" $ CreateRow t)
               return ()
@@ -105,15 +105,15 @@ patchServer conf smvar = do
     i <- recv socka 4096
     let Pull (G.Idex [last]) = B.decode (BS.fromStrict i)
     putStrLn $ "Sync Index "  ++ show  last
-    let pred = (WherePredicate $ (AndColl [PrimColl (liftAccess meta "master_modification_table" $IProd Nothing "modification_id",Left (last,GreaterThan False))]))
+    let pred = WherePredicate $ (AndColl [PrimColl (liftAccess meta "master_modification_table" $IProd Nothing "modification_id",Left (last,GreaterThan False))])
     ((dbref,(_,l)),v)<-runDynamic $ transaction meta $ selectFrom "master_modification_table" Nothing Nothing [] pred
     q <- atomically $ dupTChan (patchVar (iniRef dbref))
-    let master = (lookTable meta "master_modification_table")
-        val = (reverse $ G.toList $ l)
+    let master = lookTable meta "master_modification_table"
+        val = reverse $ G.toList $ l
     print val
     runEffect $ each ( fmap (Push . CreateRow . mapKey' keyValue)  val )>-> P.map traceShowId >-> for cat P.encode >->  toSocket socka
     forkIO $ void $ execStateT (decoder  smvar)(fromSocket socka 4096 )
-    (runEffect $ fromInput inp >-> sequenceP >-> for cat P.encode >-> toSocket socka ) `catch` (\e -> print ("broken client",e::SomeException))
+    runEffect (fromInput inp >-> sequenceP >-> for cat P.encode >-> toSocket socka) `catch` (\e -> print ("broken client",e::SomeException))
     return ())`catch` (\e -> print ("accepted socket",e :: SomeException))
 
 sequenceP = forever $ do
@@ -125,7 +125,7 @@ input smvar = do
   (masterdbref ,_)<- runDynamic $ prerefTable meta (lookTable meta "master_modification_table")
   ((dbref ,(_,ini)),_)<- runDynamic $ transactionNoLog meta $ selectFrom "master_modification_table" Nothing Nothing [] (WherePredicate $AndColl[])
   let dat = G.getEntries ini
-      latest = maybe (G.Idex [TB1 (SNumeric 0)]) (maximum) $ nonEmpty (fmap G.leafPred dat)
+      latest = maybe (G.Idex [TB1 (SNumeric 0)]) maximum $ nonEmpty (fmap G.leafPred dat)
   q <- atomically $ dupTChan(patchVar (iniRef dbref))
   return (latest , Input $ do
       i <-readTChan q
@@ -145,7 +145,7 @@ patchClient conf smvar = do
     send sock (BS.toStrict $ B.encode (Pull latest))
     forkIO $ void $ execStateT (decoder smvar) (fromSocket sock 4096 )
 
-    (runEffect $ fromInput inp >-> sequenceP >-> for cat P.encode >-> toSocket sock ) `catch` (\e -> print ("broken client",e::SomeException))
+    runEffect (fromInput inp >-> sequenceP >-> for cat P.encode >-> toSocket sock) `catch` (\e -> print ("broken client",e::SomeException))
     threadDelay (60*10^6)
 
 

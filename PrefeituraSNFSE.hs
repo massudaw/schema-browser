@@ -28,30 +28,30 @@ import Debug.Trace
 
 import System.Process(callCommand)
 
-siapi3Page protocolo ano cgc_cpf nota = do
+siapi3Page protocolo ano cgc_cpf nota =
   withOpenSSL $
-    Sess.withSessionWith (opensslManagerSettings context) $
-      \session -> do
-        Sess.get session $ prefeituraLoginCookie
-        pr <- Sess.post session (prefeituraLoginFormUrl) (prefeituraForm protocolo ano cgc_cpf)
-        print (pr ^? responseBody)
-        r <- Sess.get session (BSC.unpack $ prefeituraConsutalNota nota)
-        let html =  replace ("/sistemas/"::BS.ByteString) ("http://www11.goiania.go.gov.br/sistemas/"::BS.ByteString) . BSL.toStrict  <$> (r ^? responseBody)
-        file <- traverse (htmlToPdf (nota <> protocolo)) html
-        return $ SBinary  <$> file
+  Sess.withSessionWith (opensslManagerSettings context) $
+    \session -> do
+      Sess.get session $ prefeituraLoginCookie
+      pr <- Sess.post session (prefeituraLoginFormUrl) (prefeituraForm protocolo ano cgc_cpf)
+      print (pr ^? responseBody)
+      r <- Sess.get session (BSC.unpack $ prefeituraConsutalNota nota)
+      let html =  replace ("/sistemas/"::BS.ByteString) ("http://www11.goiania.go.gov.br/sistemas/"::BS.ByteString) . BSL.toStrict  <$> (r ^? responseBody)
+      file <- traverse (htmlToPdf (nota <> protocolo)) html
+      return $ SBinary  <$> file
 
-notaXML protocolo ano cgc_cpf nota = do
+notaXML protocolo ano cgc_cpf nota =
   withOpenSSL $
-    Sess.withSessionWith (opensslManagerSettings context) $
-      \session -> do
-        Sess.get session $ prefeituraLoginCookie
-        pr <- Sess.post session prefeituraLoginFormUrl (prefeituraForm protocolo ano cgc_cpf)
-        r <- Sess.get session $ (BSC.unpack $ prefeituraConsultaXML nota)
-        return . join $ (\i -> if BSC.isPrefixOf "<GerarNfseResposta" i then Just i else Nothing). BSL.toStrict <$> ( r  ^? responseBody)
+  Sess.withSessionWith (opensslManagerSettings context) $
+    \session -> do
+      Sess.get session $ prefeituraLoginCookie
+      pr <- Sess.post session prefeituraLoginFormUrl (prefeituraForm protocolo ano cgc_cpf)
+      r <- Sess.get session $ (BSC.unpack $ prefeituraConsultaXML nota)
+      return . join $ (\i -> if BSC.isPrefixOf "<GerarNfseResposta" i then Just i else Nothing). BSL.toStrict <$> ( r  ^? responseBody)
 
 prefeituraNotaXML i j k l= fmap SBinary <$>  notaXML i j k l
 
-prefeituraNota protocolo ano cgc_cpf nota = do
+prefeituraNota protocolo ano cgc_cpf nota =
     siapi3Page protocolo ano cgc_cpf nota
 
 prefeituraForm :: BS.ByteString -> BS.ByteString -> BS.ByteString -> [FormParam]
