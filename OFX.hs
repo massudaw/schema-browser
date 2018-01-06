@@ -52,7 +52,7 @@ account :: String -> String -> IO (Either String [Transaction])
 account filename contents = do
    ofx <- case parse ofxFile filename contents of
      Left e -> do
-       hPrint stderr $ e
+       hPrint stderr e
        exitFailure
      Right g -> return g
    return $

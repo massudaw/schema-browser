@@ -31,9 +31,9 @@ siapi3Page protocolo ano cgc_cpf =
     Sess.withSessionWith (opensslManagerSettings context) $
     \session -> do
         print siapiAndamento3Url
-        r <- Sess.get session $ siapiAndamento3Url
+        r <- Sess.get session siapiAndamento3Url
         let view =
-                snd . BS.breakSubstring ("ViewState") . BSL.toStrict <$>
+                snd . BS.breakSubstring "ViewState" . BSL.toStrict <$>
                 r ^? responseBody
             viewValue =
                 BSC.takeWhile (/= '\"') .
@@ -46,7 +46,7 @@ siapi3Page protocolo ano cgc_cpf =
                  protocolocnpjForm protocolo ano cgc_cpf)
                 viewValue
         print siapiListAndamento3Url
-        r <- Sess.get session $ siapiListAndamento3Url
+        r <- Sess.get session siapiListAndamento3Url
         o <- do
           (l,v) <- readSiapi3Andamento (BSLC.unpack $ justError "no response" $ r ^? responseBody)
           print siapiListAndamento3Url
@@ -68,8 +68,8 @@ siapi2 protocolo ano = do
              [T.pack $ BSC.unpack ano])
             addrs
     let lq2 =
-            takeWhile (not . (== '&')) .
-            concat . tail . splitL ("php?id=") . TL.unpack . TL.decodeLatin1 <$>
+            takeWhile (/= '&') .
+            concat . tail . splitL "php?id=" . TL.unpack . TL.decodeLatin1 <$>
             (lq ^? responseBody)
         addrs_a =
             "http://siapi.bombeiros.go.gov.br/consulta/consulta_andamento.php"

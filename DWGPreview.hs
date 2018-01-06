@@ -16,7 +16,7 @@ preview i =
         r <- bytesRead
         fmap (runGet (do
           bytCnt <- getWord8
-          sequence $ replicate (fromIntegral $  bytCnt ) (  do
+          Control.Monad.replicateM (fromIntegral bytCnt ) (  do
             imageCode <- getWord8
             imageHeaderStart <- getWord32host
             imageHeaderSize <- getWord32host
@@ -25,14 +25,14 @@ preview i =
               2-> do
                 skip 80
                 image <- getLazyByteString (fromIntegral imageHeaderSize)
-                size <-  return $ runGet (do
-                    skip 0xE
-                    biBitCount <- getWord16host
-                    skip 4
-                    biSizeImage <- getWord32host
-                    let color = if (biBitCount < 9) then  4 * 2^biBitCount else  0
-                    return (biBitCount,biSizeImage,color)
-                  ) image
+                let size = runGet (do
+                        skip 0xE
+                        biBitCount <- getWord16host
+                        skip 4
+                        biSizeImage <- getWord32host
+                        let color = if (biBitCount < 9) then  4 * 2^biBitCount else  0
+                        return (biBitCount,biSizeImage,color)
+                      ) image
                 return  $ Just $ Left (size,image)
 
               6 -> do

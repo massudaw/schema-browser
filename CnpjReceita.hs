@@ -103,7 +103,7 @@ getCaptchaCpf cookie = Sess.withSessionControl (Just $ tIso cookieJar cookie) HT
        print cpfhome
        r <-  Sess.getWith defaults session  cpfhome
        print cpfcaptcha
-       (fmap BSL.toStrict . (^? responseBody)) <$> (Sess.get session cpfcaptcha)
+       (fmap BSL.toStrict . (^? responseBody)) <$> Sess.get session cpfcaptcha
 
 
 convertCPF out = Just (tblist . pure . attr "owner_name" . LeftTB1 .Just . TB1 . SText . TL.pack  $ out )

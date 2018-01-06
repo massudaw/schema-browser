@@ -225,7 +225,7 @@ indexPluginAttrDiff a@(Attr i _ )  plugItens =  evs
 indexPluginAttrDiff  i  plugItens = pfks
   where
     thisPlugs = filter (hasProd (isNested (fmap (keyRef. _relOrigin) (keyattri i) )) .  fst) plugItens
-    pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested(fmap ( keyRef . _relOrigin ) (keyattri i) ))) . second (fmap (join . fmap (F.find (((==  keyattrs i)  . pattrKey )) ))) <$>  thisPlugs
+    pfks =  first (uNest . justError "No nested Prod FKT" .  findProd (isNested(fmap ( keyRef . _relOrigin ) (keyattri i) ))) . second (fmap (join . fmap (F.find ((==  keyattrs i)  . pattrKey ) ))) <$>  thisPlugs
 
 
 --- Style and Attribute Size
@@ -598,10 +598,10 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
   let
       inscrud = recoverEditChange <$> oldItemsi <*> inscrudp
       m = tableMeta table
-      containsGistNotEqual old ref map = isJust refM && ((\i -> if L.null i  then True else [G.getIndex m old] == L.nub (fmap (G.getIndex m)(F.toList i))) (lookGist ix ref map))
+      containsGistNotEqual old ref map = isJust refM && (\i -> if L.null i  then True else [G.getIndex m old] == L.nub (fmap (G.getIndex m)(F.toList i))) (lookGist ix ref map)
         where ix = _kvpk (tableMeta table)
               refM = traverse (join . fmap unSOptional' . unSOptional') (getPKM (tableMeta table)ref)
-      containsGist ref map = isJust refM && not (L.null $  (lookGist ix ref map))
+      containsGist ref map = isJust refM && not (L.null (lookGist ix ref map))
         where ix = _kvpk (tableMeta table)
               refM = join $ nonEmptyMap Control.Applicative.<$> traverse (join . fmap unSOptional' . unSOptional') (getPKM (tableMeta table)ref)
       conflictGist ref map = if isJust refM then lookGist ix ref map else[]
@@ -749,7 +749,7 @@ reduceDiffList o i plug
            where
              unPatchSet (PatchSet l ) = F.toList l
              unPatchSet i = [i]
-         removeOverlap = catMaybes $ fmap (\(PIdx ix a ) -> if notElem ( ix - o) (fst <$> i) then  Just (PIdx ix a)  else unDiff ix $ snd $  i !! (ix -  o) ) plugl
+         removeOverlap = catMaybes $ fmap (\(PIdx ix a ) -> if ( ix - o) `notElem` (fst <$> i) then  Just (PIdx ix a)  else unDiff ix $ snd $  i !! (ix -  o) ) plugl
          notOverlap = filter (\(PIdx i o ) ->  notElem i ((\(PIdx i a ) -> i) <$> plugl )) (lefts diffs)
          unDiff o (Diff v) = Just $  PIdx o (Just v)
          unDiff o i = Nothing
@@ -943,7 +943,7 @@ buildPrim fm tdi i = case i of
                     # set UI.class_ "date"
                     # set (UI.strAttr "data-date-format") "yyyy-mm-dd hh:ii:ss"
                     # set (UI.strAttr "data-provide" ) "datetimepicker"
-                    # sinkDiff UI.value (maybe "" (takeWhile ((/= '.')) . renderPrim )<$> tdi)
+                    # sinkDiff UI.value (maybe "" (takeWhile (/= '.') . renderPrim )<$> tdi)
 
                 onCE <- UI.onChangeE inputUI
                 let pke = unionWith const (readPrim i <$> onCE ) (rumors tdi)
@@ -1075,7 +1075,7 @@ oneInput i tdi = do
 
 renderInlineTable inf constr pmods oldItems (RecordPrim na) = do
     let
-        convertConstr ([pre],j) =  (\i -> ([i],(\ j v -> j [TB1 (tblist (fmap addDefault (L.delete i attrs) ++ (v)))]) <$> j )) <$> attrs
+        convertConstr ([pre],j) =  (\i -> ([i],(\ j v -> j [TB1 (tblist (fmap addDefault (L.delete i attrs) ++ v))]) <$> j )) <$> attrs
           where attrs = F.toList $ unKV $ unTB1 $ _fkttable pre
         table = lookTable rinf (snd na)
         rinf = fromMaybe inf (HM.lookup (fst na) (depschema inf))

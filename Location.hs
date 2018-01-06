@@ -59,8 +59,8 @@ queryGeocodeBoundary = FPlugins "Google Geocode" "address"  $ IOPlugin url
       r <- act (\(im,addr)-> lift $ runMaybeT $ do
             lift $ print (im,addr)
             key <- lift $ justError "no key" <$> lookupEnv "GOOGLE_SERVER_KEY"
-            r <-  lift $ withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) (\sess -> 
-                    Sess.getWith (defaults & param "address" .~ [T.pack addr]  & param "key" .~ [T.pack key] ) sess $ im)
+            r <-  lift $ withOpenSSL $ Sess.withSessionWith (opensslManagerSettings context) (\sess ->
+                    Sess.getWith (defaults & param "address" .~ [T.pack addr]  & param "key" .~ [T.pack key] ) sess im)
             lift $ print r
             let dec = join $ decode <$> (r ^? responseBody) :: Maybe Value
                 loc = dec !> "results" !!> 0 !> "geometry" !> "location"
@@ -68,7 +68,7 @@ queryGeocodeBoundary = FPlugins "Google Geocode" "address"  $ IOPlugin url
                 viewport = dec !> "results" !!> 0 !> "geometry" !> "viewport"
                 getPos l = Position <$> liftA2 (\(Number i) (Number j)-> (realToFrac i ,realToFrac j ,0)) (l !> "lng" )( l  !> "lat" )
             p <- MaybeT $ return $ getPos loc
-            b <- MaybeT $ return $ case (fmap (IntervalTB1 . (fmap (pos))) ((\i j -> interval (Finite i ,True) (Finite j ,True))<$> getPos (bounds !> "southwest") <*> getPos (bounds !> "northeast")), fmap (IntervalTB1 . (fmap (pos) )) ((\i j -> interval (Finite i ,True) (Finite j ,True))<$> getPos (viewport !> "southwest") <*> getPos (viewport !> "northeast"))) of
+            b <- MaybeT $ return $ case (fmap (IntervalTB1 . fmap pos) ((\i j -> interval (Finite i ,True) (Finite j ,True))<$> getPos (bounds !> "southwest") <*> getPos (bounds !> "northeast")), fmap (IntervalTB1 . fmap pos) ((\i j -> interval (Finite i ,True) (Finite j ,True))<$> getPos (viewport !> "southwest") <*> getPos (viewport !> "northeast"))) of
                                         (i@(Just _), _ ) -> i
                                         (Nothing , j) -> j
             return [("geocode" ,pos p)]) -<  (im,addr)
@@ -93,7 +93,7 @@ queryCEPBoundary = FPlugins "Correios CEP" "address" $ IOPlugin  open
           r <- (act (  liftIO . traverse (\input -> do
                        v <- get . (\i-> addrs <> L.filter (not . flip elem (",.-" :: String)) i <> ".json")  . TL.unpack $ input
                        return $ ( \i -> fmap (L.filter ((/="").snd) . HM.toList ) $ join $ fmap decode (i ^? responseBody)  ) v ))) -< (\(TB1 (SText t))-> t) <$> Just i
-          let tb = tblist . fmap ( (\i ->  uncurry Attr i). first translate. second (LeftTB1 . Just . TB1 . SText)) <$> join r
+          let tb = tblist . fmap ( uncurry Attr. first translate. second (LeftTB1 . Just . TB1 . SText)) <$> join r
           returnA -< tb
 
       addrs ="http://cep.correiocontrol.com.br/"

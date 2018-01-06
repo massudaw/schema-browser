@@ -75,7 +75,7 @@ accountWidgetMeta inf = do
               convField (LeftTB1 i) = concat $   convField <$> maybeToList i
               convField v = [("start",toLocalTime $v)]
               convField i = errorWithStackTrace (show i)
-              projf  r efield@(TB1 (SText field)) afield@(TB1 (SText aafield))  = (if isJust . unSOptional $ attr then Left else Right) (M.fromList $ convField attr  <> [("id", txt $ writePK (tableMeta table) r efield   ),("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table) r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield ), ("commodity", accattr )] :: M.Map Text (FTB Showable))
+              projf  r efield@(TB1 (SText field)) afield@(TB1 (SText aafield))  = (if isJust . unSOptional $ attr then Left else Right) (M.fromList $ convField attr  <> [("id", txt $ writePK (tableMeta table) r efield   ),("title",txt (T.pack $  L.intercalate "," $ renderShowable Control.Applicative.<$> allKVRec' inf (tableMeta table) r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield ), ("commodity", accattr )] :: M.Map Text (FTB Showable))
                     where attr = lookAttr' field r
                           accattr  = lookAttr' aafield r
               proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r),)$  zipWith (projf r) ( F.toList efields) (F.toList afields)
@@ -119,8 +119,8 @@ accountWidget body (incrementT,resolutionT) sel inf = do
                   let caption =  UI.caption -- # set text (T.unpack $ maybe (rawName t) id $ rawDescription t)
                       header = UI.tr # set items [UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>  fields) , UI.th # set text "Title" ,UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>efields) ]
                       row i = UI.tr # set items [UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)]
-                      body = (fmap row dat ) <> if L.null dat then [] else [totalrow totalval]
-                      dat =  concat .fmap (lefts . snd .proj)  $ G.toList i
+                      body = fmap row dat <> if L.null dat then [] else [totalrow totalval]
+                      dat =  concatMap (lefts . snd .proj)  $ G.toList i
 
                       totalval = M.fromList [("start",mindate),("end",maxdate),("title",txt "Total") ,("commodity", totalcom)]
                         where

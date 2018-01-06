@@ -101,7 +101,7 @@ siapi2Hack = FPlugins pname tname $ IOPlugin  url
           convertAndamento :: [String] -> TB2 Text Showable
           convertAndamento [da,des] =  TB1 $ tblist $ attrT Control.Applicative.<$> [("andamento_date",TB1 . STime . STimestamp . localTimeToUTC utc. fst  . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))]
           convertAndamento i = error $ "convertAndamento " <> show i
-          svt bv = catMaybes $ fmap attrT . traverse (\k -> fmap snd $ L.find (L.isInfixOf k. fst ) map) . swap <$>  value_mapping
+          svt bv = catMaybes $ fmap attrT . traverse (\k -> snd Control.Applicative.<$> L.find (L.isInfixOf k. fst ) map) . swap <$>  value_mapping
             where map = fmap (LeftTB1 . Just . TB1 . SText . T.pack ) <$> bv
           iat bv = IT
                             "andamentos"
@@ -579,7 +579,7 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
         refs <- atRA "ofx" (idxK "file_name") -< ()
         let ix = length refs
         pk <- act (const ask )-< ()
-        returnA -<   Just [PFK [Rel "ofx" Equals "file_name" ] [PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)] (POpt $ Just $ PIdx ix $ Just $ PAtom (patch account: [PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" date]
+        returnA -<   Just [PFK [Rel "ofx" Equals "file_name" ] [PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)] (POpt $ Just $ PIdx ix $ Just $ PAtom (patch account: [PAttr "file_name" (patch fname),PAttr "import_file" (patch file)])), PAttr "range" date]
 
 
 importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url

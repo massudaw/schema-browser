@@ -32,8 +32,8 @@ siapi3Page protocolo ano cgc_cpf nota =
   withOpenSSL $
   Sess.withSessionWith (opensslManagerSettings context) $
     \session -> do
-      Sess.get session $ prefeituraLoginCookie
-      pr <- Sess.post session (prefeituraLoginFormUrl) (prefeituraForm protocolo ano cgc_cpf)
+      Sess.get session prefeituraLoginCookie
+      pr <- Sess.post session prefeituraLoginFormUrl (prefeituraForm protocolo ano cgc_cpf)
       print (pr ^? responseBody)
       r <- Sess.get session (BSC.unpack $ prefeituraConsutalNota nota)
       let html =  replace ("/sistemas/"::BS.ByteString) ("http://www11.goiania.go.gov.br/sistemas/"::BS.ByteString) . BSL.toStrict  <$> (r ^? responseBody)
@@ -44,9 +44,9 @@ notaXML protocolo ano cgc_cpf nota =
   withOpenSSL $
   Sess.withSessionWith (opensslManagerSettings context) $
     \session -> do
-      Sess.get session $ prefeituraLoginCookie
+      Sess.get session prefeituraLoginCookie
       pr <- Sess.post session prefeituraLoginFormUrl (prefeituraForm protocolo ano cgc_cpf)
-      r <- Sess.get session $ (BSC.unpack $ prefeituraConsultaXML nota)
+      r <- Sess.get session (BSC.unpack $ prefeituraConsultaXML nota)
       return . join $ (\i -> if BSC.isPrefixOf "<GerarNfseResposta" i then Just i else Nothing). BSL.toStrict <$> ( r  ^? responseBody)
 
 prefeituraNotaXML i j k l= fmap SBinary <$>  notaXML i j k l

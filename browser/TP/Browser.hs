@@ -121,9 +121,9 @@ deleteServer inf (TableModification _ _ _ _ (CreateRow (ix,o))) = do
 
 removeTable :: Int -> UTCTime -> Table -> Int -> Int ->  (TBIndex Showable,TBIdx Text Showable)
 removeTable idClient now table  six tix = atClient idClient [PInline "selection" (POpt $ Just $ PIdx six (Just $ PAtom
-        ([PInline "selection" (POpt $ Just $ PIdx tix (Just $ PAtom
+        [PInline "selection" (POpt $ Just $ PIdx tix (Just $ PAtom
                         ([ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))])))
-        ])))]
+        ]))]
 
 addTable :: Int -> UTCTime -> Table -> Int -> Int ->  (TBIndex Showable,TBIdx Text Showable)
 addTable idClient now table  six tix
@@ -136,15 +136,15 @@ atClient idClient =  (G.Idex [num idClient],)
 removeRow idClient now six tix rix
   =  atClient idClient [PInline "selection" (POpt$Just $ PIdx six $ Just$ PAtom
         [PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
-          [PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ PAtom(
-            ([ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))]))])])]
+          [PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ PAtom
+            ([ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))])])])]
 
 
 addRow idClient now tdi six tix rix
   =  atClient idClient [PInline "selection" (POpt$Just $ PIdx six $ Just$ PAtom
        [PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
-          ([PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ PAtom $ patch(
-              encodeT $ createRow now tdi)]))])]
+          [PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ PAtom $ patch(
+              encodeT $ createRow now tdi)])])]
 
 
 
