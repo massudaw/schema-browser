@@ -10,7 +10,7 @@ import Data.Unique
 import Plugins.Schema (codeOps)
 import Control.Exception
 import qualified Data.Binary as B
-import Postgresql.Backend (connRoot)
+import Postgresql.Backend (connRoot, postgresOps)
 import System.Process
 import Control.Concurrent.STM
 import Data.Tuple
@@ -34,7 +34,6 @@ import Debug.Trace
 import Types
 import SchemaQuery
 import TP.Widgets
-import Postgresql.Backend (postgresOps)
 import Prelude hiding (head)
 import TP.QueryWidgets
 import Control.Monad.Reader
@@ -96,18 +95,18 @@ setup smvar args plugList w = void $ do
                        ,("Account",fmap (^._2) <$> accountWidgetMeta inf )
                        ,("Agenda",fmap (^._2) <$> eventWidgetMeta inf cliZone)]
     element menu # set UI.class_ "col-xs-1"
-    nav  <- buttonDivSet  ["Map","Account","Agenda","Chart","Browser","Metadata"] (pure $ args `atMay` 6  )(\i -> do
+    nav  <- buttonDivSet  ["Map","Account","Agenda","Chart","Browser","Metadata"] (pure $ args `atMay` 6  )(\i -> 
         UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right" # set UI.style (noneShow $ (maybe True (\i -> isJust .nonEmpty $ i) $ M.lookup i  metadataNav) ))
     element nav # set UI.class_ "col-xs-5 pull-right"
     chooserDiv <- UI.div
-        # set children  ([getElement menu,getElement nav ])
+        # set children  [getElement menu,getElement nav ]
         # set UI.style [("align-items","flex-end")]
         # set UI.class_ "row"
-        # set UI.style ([("align-items","flex-end")] ++  borderSchema inf)
+        # set UI.style (("align-items","flex-end") : borderSchema inf)
     container <- UI.div
         # set children [chooserDiv , body]
         # set UI.class_ "container-fluid"
-        # set UI.style ([("align-items","flex-end")] ++ borderSchema inf)
+        # set UI.style (("align-items","flex-end") : borderSchema inf)
     let
       expand True = "col-xs-10"
       expand False = "col-xs-12"
@@ -127,7 +126,7 @@ setup smvar args plugList w = void $ do
            element e # set UI.class_ "col-xs-1"
            UI.label # set children [e , label] # set UI.class_ "table-list-item" # set UI.style [("display","-webkit-box")]
 
-      bset <- tableChooser inf  kitems (fst <$> tfilter ) (snd <$> tfilter)  ((schemaName inf)) (snd (username inf)) (pure iniKey)
+      bset <- tableChooser inf  kitems (fst <$> tfilter ) (snd <$> tfilter)  (schemaName inf) (snd (username inf)) (pure iniKey)
 
       posSel <- positionSel
       bd <- UI.div  # sink0 UI.class_ (facts $ expand <$> triding menu)
@@ -146,21 +145,21 @@ setup smvar args plugList w = void $ do
         case nav of
           "Map" -> do
             element bdo  # set UI.style [("width","100%")]
-            fmap ((\i j -> elem j i) . fmap (^._2)) <$> mapWidget bdo calendarT posSel (triding bset) inf
+            fmap ((flip elem) . fmap (^._2)) <$> mapWidget bdo calendarT posSel (triding bset) inf
           "Agenda" -> do
             element bdo  # set UI.style [("width","100%")]
             cliZone <- jsTimeZone
-            fmap ((\i j -> elem j i) . fmap (^._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
+            fmap ((flip elem) . fmap (^._2)) <$>  eventWidget bdo calendarT (triding bset) inf cliZone
           "Chart" -> do
             element bdo  # set UI.style [("width","100%")]
             cliZone <- jsTimeZone
-            fmap ((\i j -> elem j i) . fmap (^._2)) <$>  chartWidget bdo calendarT posSel (triding bset) inf cliZone
+            fmap ((flip elem) . fmap (^._2)) <$>  chartWidget bdo calendarT posSel (triding bset) inf cliZone
           "Account" -> do
             element bdo  # set UI.style [("width","100%")]
-            fmap ((\i j -> elem j i) . fmap (^._2)) <$> accountWidget bdo calendarT (triding bset) inf
+            fmap ((flip elem) . fmap (^._2)) <$> accountWidget bdo calendarT (triding bset) inf
           "Metadata" -> do
                 let metaOpts = ["Poll","Stats","Change","Exception"]
-                    iniOpts = join $ fmap (\i -> if elem i metaOpts then Just i else Nothing)$  args `atMay`  7
+                    iniOpts = join $ fmap (\i -> if i `elem` metaOpts then Just i else Nothing)$  args `atMay`  7
                     displayOpts  i =  UI.button # set UI.text i # set UI.class_ "buttonSet btn-xs btn-default pull-right"
                 metanav <- buttonDivSet metaOpts (pure iniOpts) displayOpts
                 element metanav # set UI.class_ "col-xs-5 pull-right"
@@ -172,7 +171,7 @@ setup smvar args plugList w = void $ do
                             , metaAllTableIndexA inf "polling_log" [(keyRef "schema",Left (schId,Equals) ) ]]
                       element metabody #
                         set children els
-                  "Change" -> do
+                  "Change" ->
                       case schemaName inf of
                         {-"gmail" -> do
                           b <- UI.button # set text "sync"
@@ -190,10 +189,10 @@ setup smvar args plugList w = void $ do
                       let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int. tableUnique<$>  Non.fromList (S.toList tables),Flip (AnyOp Equals)))]
                       stats_load <- metaAllTableIndexA inf "stat_load_table" pred
                       stats <- metaAllTableIndexA inf "table_stats" pred
-                      clients <- metaAllTableIndexA inf "clients"$  [(Nested ([keyRef "selection"]) $ Many [One $ keyRef "schema"],Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
+                      clients <- metaAllTableIndexA inf "clients" [(Nested ([keyRef "selection"]) $ Many [One $ keyRef "schema"],Left (int (schemaId inf),Equals) )]-- <> if M.null tables then [] else [ (Nested (keyRef ["selection"] ) (Many [ keyRef ["table"]]),Left (ArrayTB1 $ txt . rawName <$>  Non.fromList (concat (F.toList tables)),Flip (AnyOp Equals)) )]
                       element metabody # set UI.children [stats,stats_load,clients]
                   "Exception" -> do
-                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList ((F.toList tables)),Flip (AnyOp Equals)))]
+                      let pred = [(keyRef "schema",Left (schId,Equals) ) ] <> if S.null tables then [] else [ (keyRef "table",Left (ArrayTB1 $ int . tableUnique<$>  Non.fromList (F.toList tables),Flip (AnyOp Equals)))]
                       dash <- metaAllTableIndexA inf "plugin_exception" pred
                       element metabody # set UI.children [dash]
                   i -> errorWithStackTrace (show i)
@@ -208,9 +207,9 @@ setup smvar args plugList w = void $ do
            )  (triding nav)
       return tfilter
     return container ))   evDB
-  header <- UI.div # set UI.class_ "row" # set  children ([cliId]++chooserItens)
+  header <- UI.div # set UI.class_ "row" # set  children (cliId : chooserItens)
   top <- layoutSel onShiftAlt selschemas # set UI.class_ "row"
-  addBody ([header,top])
+  addBody [header,top]
 
 
 listDBS ::  InformationSchema -> Text -> Dynamic (Tidings [(Text,Text)])
@@ -227,9 +226,9 @@ listDBS metainf db = do
 
 loginWidget userI passI =  do
   usernamel <- flabel # set UI.text "Usuário"
-  username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set UI.value (maybe "" id userI)
+  username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set UI.value (Data.Maybe.fromMaybe "" userI)
   passwordl <- flabel # set UI.text "Senha"
-  password <- UI.input # set UI.name "password" # set UI.style [("width","142px")] # set UI.type_ "password" # set UI.value (maybe "" id passI)
+  password <- UI.input # set UI.name "password" # set UI.style [("width","142px")] # set UI.type_ "password" # set UI.value (Data.Maybe.fromMaybe "" passI)
   usernameE <- fmap nonEmpty  <$> UI.valueChange username
   passwordE <- fmap nonEmpty <$> UI.valueChange password
 
@@ -239,7 +238,7 @@ loginWidget userI passI =  do
   passwordB <-  ui $stepper passI passwordE
   let usernameT = tidings usernameB usernameE
       passwordT = tidings passwordB passwordE
-  return $ ((liftA2 (liftA2 (,)) usernameT passwordT) ,[userDiv,passDiv])
+  return ((liftA2 (liftA2 (,)) usernameT passwordT) ,[userDiv,passDiv])
 
 
 
@@ -252,11 +251,11 @@ authMap smvar sargs (user,pass) schemaN =
       case schemaN of
           "code" -> return (NoAuth , codeOps)
           i ->  do
-            conn <- connectPostgreSQL ("host=" <> (BS.pack $ host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack (user )<> " password=" <> BS.pack (pass ) <> " dbname=" <> (BS.pack $  dbn sargs) <> " " )
+            conn <- connectPostgreSQL ("host=" <> BS.pack (host sargs) <> " port=" <> BS.pack (port sargs ) <>" user=" <> BS.pack user<> " password=" <> BS.pack pass <> " dbname=" <> BS.pack (dbn sargs) <> " " )
             execute_ conn "set bytea_output='hex'"
             return (PostAuth conn, postgresOps)
 
-loadSchema smvar schemaN user authMap  plugList =  do
+loadSchema smvar schemaN user authMap  plugList =
     keyTables smvar (schemaN,T.pack $ user) authMap plugList
 
 databaseChooser smvar metainf sargs plugList = do
@@ -271,7 +270,7 @@ databaseChooser smvar metainf sargs plugList = do
   dbs <- ui $ listDBS  metainf  db
   dbsWPre <- multiListBox
       ((\j ->  fst <$> j) <$> dbs)
-      (pure $ maybeToList $ fmap T.pack $ schema sargs)
+      (pure $ maybeToList $ T.pack Control.Applicative.<$> schema sargs)
       (pure (line . T.unpack ))
   let dbsW = TrivialWidget ((\i j ->  (\k -> justError " no schema" $ (db, ) <$> L.find ((==k).fst) j) <$> i ) <$> triding dbsWPre <*> dbs) (getElement dbsWPre)
   cc <- currentValue (facts $ triding dbsW)
@@ -299,18 +298,16 @@ databaseChooser smvar metainf sargs plugList = do
               UI.div # set children [user ,load] -}
           "sql" -> do
               let auth = authMap smvar sargs (user,pass)
-              inf <- loadSchema smvar schemaN  user auth plugList
-              return inf
+              loadSchema smvar schemaN  user auth plugList
 
           "code" -> do
               let auth = authMap smvar sargs (user,pass)
-              inf <- loadSchema smvar schemaN  user auth plugList
-              return inf
+              loadSchema smvar schemaN  user auth plugList
 
   element dbsW # set UI.style [("width","140px")]
   chooserT <- traverseUI ui $ (\l i-> mapM (flip genSchema (justError "no pass" i)) l ) <$> dbsWT <*> formLogin
   schemaSel <- UI.div # set UI.class_ "col-xs-2" # set children [getElement dbsW]
-  return $ (chooserT,[schemaSel ,authBox] )
+  return (chooserT,[schemaSel ,authBox] )
 
 createVar :: IO (TVar DatabaseSchema)
 createVar = do
@@ -391,7 +388,7 @@ testTablePersist s t w = do
     liftIO$ mapM print (F.toList i)
     let table = lookTable inf t
 
-    liftIO$ (callCommand $ "rm dump/" ++ T.unpack s ++ "/"++ T.unpack t) `catch` (\e -> print (e :: SomeException))
+    liftIO$ callCommand ("rm dump/" ++ T.unpack s ++ "/"++ T.unpack t) `catch` (\e -> print (e :: SomeException))
     liftIO$ writeSchema (s ,inf)
     liftIO$ atomically $ modifyTVar (mvarMap inf) (const M.empty)
     (_,o) <- readTable inf "dump"  table []

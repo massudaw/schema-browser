@@ -24,8 +24,6 @@ import qualified Data.Foldable as F
 import Types
 import Types.Patch
 import qualified Types.Index as G
-import Utils
-import Data.Maybe
 import qualified Data.Vector as V
 import qualified Data.List as L
 import Data.Ord
@@ -44,7 +42,7 @@ instance A.ToJSON Row  where
 
 instance A.ToJSON (Column Key Showable)  where
   toJSON (Attr k v ) =
-    case (keyType k ) of
+    case keyType k of
       Primitive [] (AtomicPrim PColor )-> A.toJSON $  "#" <> renderShowable v
       i ->  A.toJSON v
   toJSON (IT k v) = A.toJSON (fmap Row v)
@@ -52,19 +50,19 @@ instance A.ToJSON (Column Key Showable)  where
 instance A.ToJSON a => A.ToJSON (FTB a) where
     toJSON (TB1 i) = A.toJSON i
     toJSON (LeftTB1 i) = fromMaybe (A.toJSON ("" :: String)) (A.toJSON <$> i)
-    toJSON (ArrayTB1 i) = (A.toJSON $ F.toList i)
+    toJSON (ArrayTB1 i) = A.toJSON $ F.toList i
 
 instance A.ToJSON LineString where
     toJSON (LineString l ) = A.toJSON l
 
 instance A.ToJSON Position where
-    toJSON ((Position (y,x,z))) =
+    toJSON (Position (y,x,z)) =
         A.Array $
         V.fromList
             [ A.String $ T.pack (show x)
             , A.String $ T.pack (show y)
             , A.String $ T.pack (show z)]
-    toJSON ((Position2D (y,x))) =
+    toJSON (Position2D (y,x)) =
         A.Array $
         V.fromList
             [ A.String $ T.pack (show x)
@@ -84,7 +82,7 @@ instance A.ToJSON Showable where
 
 indexTyU (Many [One k] )= indexTy k
 indexTy (IProd _ k )=  keyType k
-indexTy (Nested [IProd _ xs] n) = Primitive ((_keyFunc $ keyType xs) ++ ty) at
+indexTy (Nested [IProd _ xs] n) = Primitive (_keyFunc (keyType xs) ++ ty) at
     where
       Primitive ty at = indexTyU n
 
@@ -114,7 +112,7 @@ timePred inf tname evfields (incrementT,resolution) = time
   where
     time = OrColl $ timeField <$> F.toList evfields
     timeField f =
-      PrimColl . (, Left ( (IntervalTB1 $ fmap (ref ty) i),op ty)) $ index
+      PrimColl . (, Left ( IntervalTB1 $ fmap (ref ty) i,op ty)) $ index
       where
         [index] =  liftAccess inf (tableName tname)  <$>  indexer f
         ty = indexTy index
@@ -129,9 +127,9 @@ timePred inf tname evfields (incrementT,resolution) = time
              i -> errorWithStackTrace ("type not supported : " ++ show i)
     ref (Primitive f a) =  case a of
             (AtomicPrim (PTime PDate)) ->
-              (TB1 . STime . SDate . utctDay )
+              TB1 . STime . SDate . utctDay
             (AtomicPrim (PTime (PTimestamp _))) ->
-              (TB1 . STime . STimestamp  )
+              TB1 . STime . STimestamp
             v -> errorWithStackTrace (show (evfields,tname,v))
     i =
         (\r d ->
@@ -206,13 +204,13 @@ writePK m r efield =
           T.pack (renderShowable efield)) $
     T.intercalate ",," $
     fmap
-        ((\(i,j) ->
-               keyValue i <> "=" <> T.pack (renderShowable j))) $
+        (\(i,j) ->
+               keyValue i <> "=" <> T.pack (renderShowable j)) $
     M.toList $ getPKM  m r
 
 
 readPK :: InformationSchema -> T.Text -> (Table, G.TBIndex Showable, Key)
-readPK inf s = (tb, G.Idex $ fmap snd $ L.sortBy (comparing ((`L.elemIndex` rawPK tb).fst)) pk, editField)
+readPK inf s = (tb, G.Idex $ snd Control.Applicative.<$> L.sortBy (comparing ((`L.elemIndex` rawPK tb).fst)) pk, editField)
   where
     [t,pks,f] = T.splitOn "->" s
     pk =
@@ -231,7 +229,7 @@ makePatch
     -> ( Key, Either (Interval UTCTime) UTCTime)
     -> TBIdx Key Showable
 makePatch zone (k,a) =
-  (PAttr k <$> (typ (keyType k) $ a))
+  PAttr k <$> (typ (keyType k) $ a)
   where
     typ (Primitive l a ) =  ty l
       where
@@ -239,9 +237,9 @@ makePatch zone (k,a) =
         ty (KSerial : k) i = fmap (POpt. Just) . ty k $ i
         ty (KInterval : k) (Left i) =
           [ PatchSet $ Non.fromList $
-            (fmap ((PInter True . (, True))) . (traverse (ty k . Right) ) $
+            (fmap (PInter True . (, True)) . traverse (ty k . Right) $
                Interval.lowerBound i) <>
-                 (fmap ((PInter False . (, True))) . (traverse (ty k . Right ) ) $
+                 (fmap (PInter False . (, True)) . traverse (ty k . Right ) $
                Interval.upperBound i)]
         ty []  (Right r) = pure . PAtom . cast a $ r
     cast (AtomicPrim (PTime PDate)) = STime . SDate . utctDay
@@ -250,7 +248,7 @@ makePatch zone (k,a) =
         localTimeToUTC zone . utcToLocalTime utc
 
 readPosition:: EventData -> Maybe ([Double],[Double])
-readPosition (v) = (,) <$>  readP ni na nz <*>readP si sa sz
+readPosition v = (,) <$>  readP ni na nz <*>readP si sa sz
   where
      [ni,na,nz,si,sa,sz] = unsafeFromJSON v
      readP i a z = (\i j z-> [i,j, z]) <$> readMay i<*> readMay a <*> readMay z
@@ -261,7 +259,7 @@ currentPosition el = filterJust $ readPosition<$>  domEvent "currentPosition" el
 
 convertInter i =    liftA2 (,) (fmap convertPoint $ G.unFin $ fst $upperBound' i) (fmap convertPoint $ G.unFin $ fst $lowerBound' i)
   where
-     convertPoint ((SGeo (SPosition (Position (y,x,z)) ))) = [x,y,z]
-     convertPoint ((SGeo (SPosition (Position2D (y,x)) ))) = [x,y,0]
+     convertPoint (SGeo (SPosition (Position (y,x,z)) )) = [x,y,z]
+     convertPoint (SGeo (SPosition (Position2D (y,x)) )) = [x,y,0]
 
 

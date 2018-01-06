@@ -16,7 +16,6 @@ import Postgresql.Parser
 import Control.Arrow (first)
 import TP.View
 import GHC.Stack
-import Control.Monad.Writer
 import Control.Concurrent
 import Control.Lens ((^.),_1,_2,_3,_5)
 import Safe
@@ -86,20 +85,20 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
         | otherwise = Nothing
         where (l,r) = break(=='=') i
               (tnew,j ) = break (=='|') l
-              nest (i:[]) = keyRef (T.pack i)
+              nest [i] = keyRef (T.pack i)
               nest (i:xs) = Nested [keyRef (T.pack i)] (Many [One $ nest xs])
-      filteringPred  (k,v) row = maybe True (L.isInfixOf (toLower <$> v)  . fmap toLower . renderShowable )   $ (flip indexFieldRec row  k)
-      filtering tb res = (\t -> filter (\row -> all (\i -> filteringPred i row) (catMaybes  t  )) )<$> (fmap (parseMany tb ) (triding filterInpT )) <*> fmap G.toList res
+      filteringPred  (k,v) row = maybe True (L.isInfixOf (toLower <$> v)  . fmap toLower . renderShowable ) (flip indexFieldRec row  k)
+      filtering tb res = (\t -> filter (\row -> all ((`filteringPred` row)) (catMaybes  t  )) )<$> fmap (parseMany tb ) (triding filterInpT ) <*> fmap G.toList res
     map <-UI.div
 
     (eselg,hselg) <- ui$newEvent
-    start <- ui$stepper Nothing ((filterE (maybe False (not .snd.fst)) eselg))
+    start <- ui$stepper Nothing (filterE (maybe False (not .snd.fst)) eselg)
     let render = maybe "" (\((t,_),i) -> show $ G.getIndex (tableMeta t) i)
     startD <- UI.div #  sink text (render <$> start)
     end <- ui$stepper Nothing (filterE (maybe False (snd.fst) ) eselg)
     endD <- UI.div #  sink text (render <$> end)
 
-    (positionLocal,h) <- ui $ newEvent
+    (positionLocal,h) <- ui newEvent
     let positionE = unionWith const (rumors prepositionT) positionLocal
     pb <- currentValue (facts prepositionT)
     positionB <- ui $stepper  pb positionE
@@ -136,7 +135,7 @@ mapWidget body (incrementT,resolutionT) (sidebar,prepositionT) sel inf = do
             (el,_) <- crudUITable inf table reftb mempty [] (allRec' (tableMap inf) table)  tdi
 
             traverseUI (\i ->
-              createLayers innermap tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concat $ fmap proj $   i)) (filtering tb v)
+              createLayers innermap tname (T.unpack $ TE.decodeUtf8 $  BSL.toStrict $ A.encode  $ catMaybes  $ concatMap proj i)) (filtering tb v)
 
             stat <- UI.div  # sinkDiff text (show . M.lookup pred <$>   (reftb ^. _1))
             edit <- UI.div # set children [el] # sink UI.style  (noneShow . isJust <$> tdib)

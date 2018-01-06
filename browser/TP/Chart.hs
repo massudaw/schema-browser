@@ -22,7 +22,6 @@ import qualified Data.List as L
 import Data.Either
 import Data.Interval (Interval(..))
 import Data.Time.ISO8601
-import Control.Monad.Writer
 import Data.Time.Calendar.WeekDate
 import Data.Char
 import qualified Data.Text.Encoding as TE
@@ -43,7 +42,6 @@ import Control.Monad.Reader
 import Schema
 import Data.Maybe
 import Reactive.Threepenny hiding (apply)
-import qualified Data.List as L
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import RuntimeTypes
 import qualified Graphics.UI.Threepenny as UI
@@ -78,10 +76,10 @@ chartWidgetMetadata inf = do
           table = lookTable inf tname
           Just (Attr _ (ArrayTB1 efields )) = indexField (liftAccess (meta inf )"metrics" $ keyRef "metrics") e
           Just (Attr _ chart) = indexField (liftAccess (meta inf )"metrics" $ keyRef "chart_type") e
-          timeFields = fmap unArray . join . fmap unSOptional $ indexFieldRec (liftAccess (meta inf )"event" $ Nested [keyRef "event"] $ One $ Nested ([keyRef "schema",keyRef "table",keyRef "column"]) (One $ keyRef "column_name")) e
-          geoFields = fmap unArray . join . fmap unSOptional $ indexFieldRec (liftAccess (meta inf )"geo" $ Nested [keyRef "geo"] $ One $ Nested ([keyRef "schema",keyRef "table",keyRef "column"]) (One $ keyRef "column_name")) e
+          timeFields = fmap unArray . join . fmap unSOptional $ indexFieldRec (liftAccess (meta inf )"event" $ Nested [keyRef "event"] $ One $ Nested [keyRef "schema",keyRef "table",keyRef "column"] (One $ keyRef "column_name")) e
+          geoFields = fmap unArray . join . fmap unSOptional $ indexFieldRec (liftAccess (meta inf )"geo" $ Nested [keyRef "geo"] $ One $ Nested [keyRef "schema",keyRef "table",keyRef "column"] (One $ keyRef "column_name")) e
           color = lookAttr'  "color" e
-          projf  r efield  = M.fromList [("value" ,ArrayTB1 $  attr <$> efield), ("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color )] :: M.Map Text (FTB Showable)
+          projf  r efield  = M.fromList [("value" ,ArrayTB1 $  attr <$> efield), ("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table) r)) , ("table",txt tname),("color" , txt $ T.pack $ "#" <> renderShowable color )] :: M.Map Text (FTB Showable)
             where attr  (TB1 (SText field)) = _tbattr $ justError ("no attr " <> show field) (findAttr (lookKey inf tname field) r)
           proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r),)$  projf r efields
           attrValue (Attr k v) = v
@@ -93,7 +91,7 @@ chartWidget body (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
     let
       legendStyle  lookDesc table b =
         let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,t,_)-> (b,i)) dashes)
-        in traverse (\(k@((c,tname,_,_,_))) -> do
+        in traverse (\(k@(c,tname,_,_,_)) -> do
           element b # set UI.class_"col-xs-1"
           header <- UI.div # sink text  (T.unpack .($table) <$> facts lookDesc ) # set UI.class_ "fixed-label col-xs-11"
           UI.label # set children [b,header]# set UI.style [("background-color",renderShowable c),("display","-webkit-box")]
@@ -103,24 +101,24 @@ chartWidget body (incrementT,resolutionT) (_,positionB) sel inf cliZone = do
     let calFun (resolution,incrementT,positionB) = mdo
             let
               evc = eventClick calendar
-            edits <- ui$ accumDiff (\(tref)->  evalUI calendar $ do
+            edits <- ui$ accumDiff (\tref->  evalUI calendar $ do
               charts <- UI.div  # set UI.style [("height", "300px"),("width", "900px")]
               calendarCreate  charts (show incrementT)
               let ref  =  (\i j ->  L.find ((== i) .  (^. _2)) j ) tref dashes
-              traverse (\((_,t,fields,(timeFields,geoFields,chart),proj))-> do
+              traverse (\(_,t,fields,(timeFields,geoFields,chart),proj)-> do
                     let pred = fromMaybe mempty (fmap (\fields -> WherePredicate $  timePred inf t (fieldKey <$> fields) (incrementT,resolution)) timeFields  <> liftA2 (\field pos-> WherePredicate $ geoPred inf t(fieldKey <$>  field) pos ) geoFields positionB )
                         fieldKey (TB1 (SText v))=   v
                     reftb <- ui $ refTables' inf t Nothing pred
                     let v = reftb ^. _3
-                    let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup pk j) else Nothing  ) <$> facts (v) <@> fmap (readPK inf . T.pack ) evc
+                    let evsel = (\j (tev,pk,_) -> if tev == t then Just ( G.lookup pk j) else Nothing  ) <$> facts v <@> fmap (readPK inf . T.pack ) evc
                     tdib <- ui $ stepper Nothing (join <$> evsel)
                     let tdi = tidings tdib (join <$> evsel)
-                    (el,_) <- crudUITable inf  t reftb mempty [] (allRec' (tableMap inf) $ t)  tdi
+                    (el,_) <- crudUITable inf  t reftb mempty [] (allRec' (tableMap inf) t)  tdi
                     traverseUI
                       (\i -> do
-                        calendarAddSource charts chart t (renderShowable <$> fields ) ((T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .   fmap (snd.proj) $ L.sortBy (comparing (G.getIndex (tableMeta t)))$ G.toList i))
+                        calendarAddSource charts chart t (renderShowable <$> fields ) (T.unpack . TE.decodeUtf8 .  BSL.toStrict . A.encode  .   fmap (snd.proj) $ L.sortBy (comparing (G.getIndex (tableMeta t)))$ G.toList i)
                         ui $ registerDynamic (fmap fst $ runDynamic $ evalUI charts $ calendarRemoveSource charts t))
-                       (v)
+                       v
                     element el # sink UI.style  (noneShow . isJust <$> tdib)
                     UI.div # set children [charts,el] # set UI.class_ "row"
                                    ) ref) sel

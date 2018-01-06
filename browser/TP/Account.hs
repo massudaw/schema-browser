@@ -65,21 +65,21 @@ accountWidgetMeta inf = do
           let
               (TB1 (SText tname)) =  lookAttr' "table_name" $ unTB1 $ lookRef  ["schema","table"] e
               table = lookTable  inf tname
-              Just (ArrayTB1 efields ) = join $ fmap unSOptional $ indexFieldRec (liftAccess minf "accounts" $ Nested [keyRef "event"] $ One $ Nested [keyRef "schema",keyRef "table",keyRef "column"] (One $ keyRef "column_name")) e
+              Just (ArrayTB1 efields ) = join $ unSOptional Control.Applicative.<$> indexFieldRec (liftAccess minf "accounts" $ Nested [keyRef "event"] $ One $ Nested [keyRef "schema",keyRef "table",keyRef "column"] (One $ keyRef "column_name")) e
               (ArrayTB1 afields )= lookAttr' "account" e
               color =  lookAttr'  "color" e
               toLocalTime = fmap to
                 where to (STime (STimestamp i ))  = STime (STimestamp $ localTimeToUTC utc $  utcToLocalTime cliZone   i)
                       to (STime (SDate i )) = STime (SDate i)
-              convField ((IntervalTB1 i )) = catMaybes [fmap (("start",). toLocalTime )$ unFinite $ Interval.lowerBound i,fmap (("end",).toLocalTime )$ unFinite $ Interval.upperBound i]
+              convField (IntervalTB1 i ) = catMaybes [fmap (("start",). toLocalTime )$ unFinite $ Interval.lowerBound i,fmap (("end",).toLocalTime )$ unFinite $ Interval.upperBound i]
               convField (LeftTB1 i) = concat $   convField <$> maybeToList i
-              convField (v) = [("start",toLocalTime $v)]
+              convField v = [("start",toLocalTime $v)]
               convField i = errorWithStackTrace (show i)
-              projf  r efield@(TB1 (SText field)) afield@(TB1 (SText aafield))  = (if (isJust . unSOptional $ attr) then Left else Right) (M.fromList $ convField attr  <> [("id", txt $ writePK (tableMeta table) r efield   ),("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield ), ("commodity", accattr )] :: M.Map Text (FTB Showable))
+              projf  r efield@(TB1 (SText field)) afield@(TB1 (SText aafield))  = (if isJust . unSOptional $ attr then Left else Right) (M.fromList $ convField attr  <> [("id", txt $ writePK (tableMeta table) r efield   ),("title",txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table) r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield ), ("commodity", accattr )] :: M.Map Text (FTB Showable))
                     where attr = lookAttr' field r
                           accattr  = lookAttr' aafield r
               proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r),)$  zipWith (projf r) ( F.toList efields) (F.toList afields)
-           in ((color,table,efields,afields,proj))  ) ( G.toList amap)
+           in (color,table,efields,afields,proj)  ) ( G.toList amap)
 
 
 
@@ -94,8 +94,8 @@ accountWidget body (incrementT,resolutionT) sel inf = do
     let
         legendStyle lookDesc table b
             =  do
-              let item = M.lookup table  (M.fromList  $ fmap (\i@((_,b,_,_,_))-> (b,i)) dashes )
-              traverse (\k@((c,tname,_,_,_)) ->   mdo
+              let item = M.lookup table  (M.fromList  $ fmap (\i@(_,b,_,_,_)-> (b,i)) dashes )
+              traverse (\k@(c,tname,_,_,_) ->   mdo
                 header <-  UI.div # sink text  (T.unpack . ($table) <$> facts lookDesc) # set UI.class_ "col-xs-11"
                 element b # set UI.class_ "col-xs-1"
                 UI.label # set children [b,header]
@@ -109,13 +109,13 @@ accountWidget body (incrementT,resolutionT) sel inf = do
           innerCalendarSet <- M.fromList <$> mapM (\a -> (a^._2,) <$> UI.table)  selected
           innerCalendar  <- UI.div # set children (F.toList innerCalendarSet)
           element calendar # set children [innerCalendar]
-          _ <- mapM (\((_,table,fields,efields,proj))->  traverseUI
+          _ <- mapM (\(_,table,fields,efields,proj)->  traverseUI
             (\calT -> do
               let pred = WherePredicate $ timePred inf table (fieldKey <$> fields ) calT
                   fieldKey (TB1 (SText v))=   v
               (v,_) <-  ui $ transactionNoLog  inf $ selectFromA (tableName table) Nothing Nothing [] pred
               traverseUI
-                ((\i -> do
+                (\i -> do
                   let caption =  UI.caption -- # set text (T.unpack $ maybe (rawName t) id $ rawDescription t)
                       header = UI.tr # set items [UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>  fields) , UI.th # set text "Title" ,UI.th # set text (L.intercalate "," $ F.toList $ renderShowable<$>efields) ]
                       row i = UI.tr # set items [UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)]
@@ -128,12 +128,11 @@ accountWidget body (incrementT,resolutionT) sel inf = do
                           mindate = minimum $ justError "no" . M.lookup "start" <$> dat
                           maxdate = maximum $ justError "no" . M.lookup "start" <$> dat
                       totalrow i = UI.tr # set items  (fmap (\i -> i # set UI.style [("border","solid 2px")] )[UI.td # set text (L.intercalate "," [maybe "" renderShowable $ M.lookup "start" i , maybe "" renderShowable $ M.lookup "end" i]), UI.td # set text (maybe "" renderShowable $ M.lookup "title" i), UI.td # set text (maybe "" renderShowable $ M.lookup "commodity" i)] ) # set UI.style [("border","solid 2px")]
-                  element (fromJust $ M.lookup table innerCalendarSet) # set items (caption:header:body))
-                ) (collectionTid v)
+                  element (fromJust $ M.lookup table innerCalendarSet) # set items (caption:header:body)) (collectionTid v)
                 )calendarSelT
               ) selected
           return ()
-    _ <- traverseUI calFun ((\i j -> filter (flip L.elem ((F.toList i)) .  (^. _2)) j )<$> sel <*> pure dashes)
+    _ <- traverseUI calFun ((\i j -> filter (flip L.elem (F.toList i) .  (^. _2)) j )<$> sel <*> pure dashes)
 
 
     return (legendStyle,dashes)
