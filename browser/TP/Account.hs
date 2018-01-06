@@ -59,7 +59,7 @@ accountWidgetMeta inf = do
     let
       schId = int (schemaId inf)
       schemaPred = [(keyRef "schema",Left (schId,Equals))]
-    (minf,amap) <- ui $ transactionNoLog  (meta inf) $ joinTable "accounts" "event" [Rel "schema" Equals "schema", Rel "table" Equals "table"]  "event" schemaPred
+    (_,minf,amap) <- ui $ transactionNoLog  (meta inf) $ fromTable "accounts" schemaPred >>= joinTable "event" [Rel "schema" Equals "schema", Rel "table" Equals "table"]  "event" schemaPred
     cliZone <- jsTimeZone
     return $ fmap (\e ->
           let

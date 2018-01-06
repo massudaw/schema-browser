@@ -44,6 +44,7 @@ module SchemaQuery
   ,readIndex
   ,projunion
   ,recoverEditDefault
+  ,fromTable
   ,joinTable
   )where
 import Graphics.UI.Threepenny.Core (mapEventDyn)
@@ -1099,18 +1100,21 @@ readTable inf r  t  re = do
   return (m,v)
 
 
+
+fromTable origin whr = do
+  inf <- ask
+  (_,(_,amap )) <- selectFromTable origin Nothing Nothing [] whr
+  return (origin,inf,amap)
+
 joinTable
   :: T.Text
-     -> T.Text
      -> [Rel T.Text]
      -> T.Text
      -> [(Access T.Text, AccessOp Showable)]
-     -> TransactionM
-          (InformationSchema,G.GiST (TBIndex Showable) (TBData Key Showable))
-joinTable origin target srel alias whr =  do
-  pinf <- ask
+     -> (T.Text,InformationSchema,G.GiST (TBIndex Showable) (TBData Key Showable))
+     -> TransactionM  (T.Text,InformationSchema,G.GiST (TBIndex Showable) (TBData Key Showable))
+joinTable  target srel alias whr (origin,pinf,emap)= do
   inf <- liftIO $ createFresh origin pinf alias (Primitive [KOptional] (RecordPrim (schemaName pinf ,target)))
-  (_,(_,emap )) <- selectFromTable origin Nothing Nothing [] whr
   (_,(_,amap )) <- selectFromTable target Nothing Nothing [] whr
   let
     rel = (\(Rel i o j ) -> Rel (lookKey inf origin i ) o (lookKey inf target j) )<$>  srel
@@ -1124,8 +1128,8 @@ joinTable origin target srel alias whr =  do
     joined i = addAttr (joinFK i ) i
 
     addAttr :: Column Key Showable -> TBData Key Showable -> TBData Key Showable
-    addAttr r = (\(KV i) -> KV (M.insert ( S.singleton $ lookKey inf origin <$> (RelAlias alias $ srel)) r i ))
-  return $ (inf,joined <$> emap)
+    addAttr r = (\(KV i) -> KV (M.insert ( S.singleton $ RelAlias (lookKey inf origin alias ) rel) r i ))
+  return $ (origin,inf,joined <$> emap)
 
 
 --- Plugins Interface Methods

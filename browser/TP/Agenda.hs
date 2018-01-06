@@ -23,7 +23,6 @@ import qualified Data.List as L
 import Data.Either
 import Data.Interval (Interval(..))
 import Data.Time.ISO8601
-import Control.Monad.Writer
 import Data.Time.Calendar.WeekDate
 import Data.Char
 import qualified Data.Text.Encoding as TE
@@ -44,7 +43,6 @@ import Control.Monad.Reader
 import Schema
 import Data.Maybe
 import Reactive.Threepenny hiding (apply)
-import qualified Data.List as L
 import qualified Data.ByteString.Lazy.Char8 as BSL
 import RuntimeTypes
 import qualified Graphics.UI.Threepenny as UI
@@ -71,7 +69,7 @@ eventWidget body (incrementT,resolutionT) sel inf cliZone = do
       schemaPred2 =  WherePredicate $ PrimColl (liftAccess (meta inf) "event" $ keyRef "schema",Left (int (schemaId inf),Equals))
       legendStyle lookDesc table b =
         let item = M.lookup table (M.fromList  $ fmap (\i@(a,b,c,_)-> (b,i)) dashes)
-        in traverse (\(k@((c,tname,_,_))) -> do
+        in traverse (\(k@(c,tname,_,_)) -> do
           element  b # set UI.class_"col-xs-1"
           label <- UI.div # sink text  (T.unpack .($table) <$> facts lookDesc ) # set UI.class_ "fixed-label col-xs-10"
           UI.label # set children [b,label]
