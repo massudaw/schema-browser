@@ -88,7 +88,7 @@ deleteClientLogin inf i= do
   let
     pk = Attr (lookKey inf "clients" "id") (TB1 (SNumeric i))
     old = justError ("no row " <> show (attrIdex [pk]) ) $ G.lookup (attrIdex [pk]) tb
-    pt = ( G.getIndex (lookMeta inf "clients")old,[PAttr (lookKey inf "clients" "up_time") ( PInter False (ER.Finite $ PAtom (STime $ STimestamp (now)) , False))])
+    pt = ( G.getIndex (lookMeta inf "clients")old,[PAttr (lookKey inf "clients" "up_time") ( PInter False (ER.Finite $ PAtom (STime $ STimestamp now) , False))])
 
   transactionNoLog inf $ do
     v <- uncurry (updateFrom (lookMeta inf "clients") old) pt
@@ -105,12 +105,12 @@ idexToPred t (G.Idex  i) = head $ (\(k,a)-> (keyRef k,Left (a,Contains))) <$>  z
 
 deleteServer inf (TableModification _ _ _ _ (CreateRow (ix,o))) = do
   now <- liftIO getCurrentTime
-  (_,(_,tb)) <- transactionNoLog inf $ selectFrom "clients"  Nothing Nothing [] (WherePredicate (AndColl [PrimColl (keyRef (lookKey inf "clients" "up_time") ,Left (TB1 (STime $ STimestamp (now)),Contains))]))
+  (_,(_,tb)) <- transactionNoLog inf $ selectFrom "clients"  Nothing Nothing [] (WherePredicate (AndColl [PrimColl (keyRef (lookKey inf "clients" "up_time") ,Left (TB1 (STime $ STimestamp now),Contains))]))
   let
     t= lookTable inf "clients"
     pk = Attr (lookKey inf "clients" "up_time")(TB1 (STime $ STimestamp now))
     oldClis =  L.filter (G.indexPred (idexToPred t $ attrIdex [pk])) (G.toList tb)
-    pt old = (G.getIndex (lookMeta inf "clients")old,[PAttr (lookKey inf "clients" "up_time") ( PInter False (ER.Finite $ PAtom (STime $ STimestamp (now)) , False))])
+    pt old = (G.getIndex (lookMeta inf "clients")old,[PAttr (lookKey inf "clients" "up_time") ( PInter False (ER.Finite $ PAtom (STime $ STimestamp now) , False))])
 
   mapM_ (\old -> transactionNoLog inf $ do
     v <- uncurry (updateFrom (lookMeta inf "clients") old) (pt old)
@@ -120,7 +120,7 @@ deleteServer inf (TableModification _ _ _ _ (CreateRow (ix,o))) = do
   transactionNoLog inf $ uncurry (updateFrom (lookMeta inf "server")o )pt
 
 removeTable :: Int -> UTCTime -> Table -> Int -> Int ->  (TBIndex Showable,TBIdx Text Showable)
-removeTable idClient now table  six tix = atClient idClient [PInline "selection" (POpt $ Just $ PIdx six (Just $ PAtom $
+removeTable idClient now table  six tix = atClient idClient [PInline "selection" (POpt $ Just $ PIdx six (Just $ PAtom
         ([PInline "selection" (POpt $ Just $ PIdx tix (Just $ PAtom
                         ([ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))])))
         ])))]
@@ -136,15 +136,15 @@ atClient idClient =  (G.Idex [num idClient],)
 removeRow idClient now six tix rix
   =  atClient idClient [PInline "selection" (POpt$Just $ PIdx six $ Just$ PAtom
         [PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
-          ([PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ PAtom(
-            ([ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))]))]))])]
+          [PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ PAtom(
+            ([ PAttr "up_time" ( PInter False (Interval.Finite $ patch(time now),True ))]))])])]
 
 
 addRow idClient now tdi six tix rix
   =  atClient idClient [PInline "selection" (POpt$Just $ PIdx six $ Just$ PAtom
-       ([PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
+       [PInline "selection" (POpt$Just $ PIdx tix $ Just$ PAtom
           ([PInline "selection" $ POpt $ Just $ PIdx rix $ Just $ PAtom $ patch(
-              encodeT $ createRow now tdi)]))]))]
+              encodeT $ createRow now tdi)]))])]
 
 
 
@@ -247,7 +247,7 @@ addClient clientId metainf inf table row =  do
     return (clientId, getClient metainf clientId inf <$> clientState)
 
 layFactsDiv i j =  case i of
-   Vertical -> "col-xs-" <> show (12 `div` fromIntegral (max 1 $ j))
+   Vertical -> "col-xs-" <> show (12 `div` fromIntegral (max 1 j))
    Horizontal -> "col-xs-12"
    Tabbed -> "col-xs-12"
 
@@ -314,7 +314,7 @@ chooserTable inf bset cliTid cli = do
           l <- UI.h4 #  set text (T.unpack $fromMaybe (rawName t)  $ rawTranslation t) # set UI.class_ "col-xs-12 header"
           b <- viewerKey inf t ix cli  cliTid
           element b # set UI.class_ "col-xs-12"
-          a <- UI.a # set (UI.strAttr "data-toggle") "tab" # set UI.href ("#" ++( T.unpack $ rawName t))
+          a <- UI.a # set (UI.strAttr "data-toggle") "tab" # set UI.href ("#" ++T.unpack (rawName t))
               # set text (T.unpack $fromMaybe (rawName t)  $ rawTranslation t)
           h <- UI.li
               # set  UI.children [a]
