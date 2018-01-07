@@ -34,7 +34,6 @@ siapi3Page protocolo ano cgc_cpf nota =
     \session -> do
       Sess.get session prefeituraLoginCookie
       pr <- Sess.post session prefeituraLoginFormUrl (prefeituraForm protocolo ano cgc_cpf)
-      print (pr ^? responseBody)
       r <- Sess.get session (BSC.unpack $ prefeituraConsutalNota nota)
       let html =  replace ("/sistemas/"::BS.ByteString) ("http://www11.goiania.go.gov.br/sistemas/"::BS.ByteString) . BSL.toStrict  <$> (r ^? responseBody)
       file <- traverse (htmlToPdf (nota <> protocolo)) html

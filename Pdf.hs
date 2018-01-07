@@ -65,17 +65,16 @@ parseBombeiroPdf input = do
 
 -}
 htmlToPdf
-  ::
-         BSC.ByteString -> BSL.ByteString -> IO BSC.ByteString
+  :: BSC.ByteString -> BSL.ByteString -> IO BSC.ByteString
 htmlToPdf art html = do
     let
-      output = BSC.unpack art <> ".pdf"
-      input = BSC.unpack  art <> ".html"
+      output = "/tmp/" <> BSC.unpack art <> ".pdf"
+      input = "/tmp/" <> BSC.unpack  art <> ".html"
+      command = "chromium --headless --disable-gpu --print-to-pdf="<> output <> " file://" <> input
     BSL.writeFile (fromString input ) html
-    callCommand $ "wkhtmltopdf --print-media-type -T 10 page " <> input <>   " " <> output
+    print command
+    callCommand command
     file <- BS.readFile (fromString output)
     removeFile input
     removeFile output
     return file
-
-
