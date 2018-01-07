@@ -165,13 +165,13 @@ checkOnibus inf = do
   (_,l) <- runDynamic $ refTables' inf (lookTable inf "max_registro_onibus") Nothing (WherePredicate (AndColl [ PrimColl (liftAccess inf "max_registro_onibus"$ keyRef "onibus",Left (ArrayTB1 $ Non.fromList ( (\i -> int (fromIntegral $ numeroOnibus i)) <$> dec) , Flip $ AnyOp Equals ))]))
   sequence_ l
 
-  putPatch (patchVar ref ) $fmap PatchRow  $fmap (\i -> liftPatch inf "max_registro_onibus" <$> (G.Idex [ int (fromIntegral $ numeroOnibus i)], [ PAttr "onibus" (patch$ int (fromIntegral $ numeroOnibus i)), PAttr "horario" (timestamp t),PAttr "situacao" (POpt $ Just $ patch $ Types.txt (situacao i)),PAttr "geocode" (POpt $ Just $ patch $  pos (Position (fst $ position i, snd $ position i,0)))]))  dec
+  putPatch (patchVar ref ) $ fmap PatchRow  $fmap (\i -> liftPatch inf "max_registro_onibus" <$> (G.Idex [ int (fromIntegral $ numeroOnibus i)], [ PAttr "onibus" (patch$ int (fromIntegral $ numeroOnibus i)), PAttr "horario" (patch $ timestamp t),PAttr "situacao" (POpt $ Just $ patch $ Types.txt (situacao i)),PAttr "geocode" (POpt $ Just $ patch $  pos (Position (fst $ position i, snd $ position i,0)))]))  dec
   print "end checkOnibus"
 
   return ()
 
 pollRmtc smvar amap user = do
-  (inf ,lm)<- runDynamic $keyTablesInit  smvar ("transito", user ) amap []
+  (inf ,lm)<- runDynamic $ keyTablesInit  smvar ("transito", user ) amap []
   (_,l) <- runDynamic $ refTables' inf (lookTable inf "max_registro_onibus") Nothing mempty
   sequence_ l
   forkIO $ forever ( checkOnibus inf >> threadDelay (5*60*10^6))

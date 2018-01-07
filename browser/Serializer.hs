@@ -7,6 +7,7 @@ import qualified Data.Binary as B
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.Set as S
 import Data.Monoid
+import Control.Arrow
 import Data.Maybe
 import Data.Functor.Apply
 import Data.Dynamic
@@ -106,19 +107,19 @@ instance  (Functor f , Selector c , DecodeTB1 f , DecodeTable a)  => DecodeTable
               ix = T.pack  $ selName (undefined :: S1 c f1 a)
 -}
 instance (DecodeTable' f1) => DecodeTable' (D1 c  f1 ) where
-  isoTable' = SIso k  (\(M1 l ) -> i l )  (\ l -> M1 $ j l)
+  isoTable' = SIso k  (\(M1 l ) -> i l )  (M1 . j)
     where
       (SIso k i j) = isoTable'
 
 instance (DecodeTable' f1) => DecodeTable' (C1 c  f1 ) where
-  isoTable' = SIso k  (\(M1 l ) -> i l )  (\ l -> M1 $ j l)
+  isoTable' = SIso k  (\(M1 l ) -> i l )  (M1 . j)
     where
       (SIso k i j) = isoTable'
 
 
 
 instance (DecodeTable' f , DecodeTable' g) => DecodeTable' (f :*: g) where
-  isoTable' =  SIso (k <> l) (\(a :*: b) -> i a <> m b) (\l ->  (j l :*: n l))
+  isoTable' =  SIso (k <> l) (\(a :*: b) -> i a <> m b) (\l ->  j l :*: n l)
     where
       (SIso k i j)  = isoTable'
       (SIso l m n) = isoTable'
@@ -127,7 +128,7 @@ instance (DecodeTable' f , DecodeTable' g) => DecodeTable' (f :*: g) where
 data TestIso
  = TestIso {
    metrics :: [Double],
-   key :: (Maybe Int)
+   key :: Maybe Int
            }  deriving(Generic)
 
 instance DecodeTable TestIso where
@@ -150,13 +151,13 @@ instance (Monoid l,Monoid m) => Monoidal (SIso m l)  where
 
 mergeIso
   :: (Monoid s, Monoid b) => SIso s b t1 -> SIso s b t -> SIso s b (t1, t)
-mergeIso  (SIso k i j) (SIso l m n ) =  SIso (k <> l) (\(a,b) -> i a <> m b) (\l ->  (j l ,n l))
+mergeIso  (SIso k i j) (SIso l m n ) =  SIso (k <> l) (\(a,b) -> i a <> m b) (j &&& n)
 
 data SIso s b a
   = SIso
   { stoken :: s
-  , encodeIso :: (a ->b)
-  , decodeIso :: (b ->a)
+  , encodeIso :: a ->b
+  , decodeIso :: b ->a
   }
 
 
@@ -185,19 +186,19 @@ instance DecodeTB1 Non.NonEmpty  where
 instance DecodeTB1 Maybe  where
   isoFTB = SIso [KOptional] encFTB decFTB
     where
-      decFTB (LeftTB1 i) =  fmap (unTB1 ) i
+      decFTB (LeftTB1 i) =  fmap unTB1 i
       encFTB i = LeftTB1 $ fmap TB1  i
 
 
 instance DecodeTB1 g => DecodeTB1 (Maybe :**: g) where
-  isoFTB = SIso ([KOptional] ++ l) encFTB decFTB
+  isoFTB = SIso (KOptional : l) encFTB decFTB
     where
       SIso l enc dec = isoFTB
       decFTB (LeftTB1 i) = CompFunctor $ fmap dec i
       encFTB (CompFunctor i) = LeftTB1 $ fmap enc i
 
 
-data TIso i b  = TIso { unTiso :: (i -> b) , tIso :: (b -> i)}
+data TIso i b  = TIso { unTiso :: i -> b , tIso :: b -> i}
 
 instance Category TIso where
   id  = TIso id id
@@ -219,7 +220,7 @@ only = (unOnly ,Only)
 type IsoTable a = SIso (Union (Reference Text)) (TBData Text Showable)  a
 
 instance DecodeTable Plugins where
-  isoTable = mergeIso (isoMap only $ prim "ref") (isoMap only $ (prim "plugin"))
+  isoTable = mergeIso (isoMap only $ prim "ref") (isoMap only (prim "plugin"))
 
 test = do
   let (SIso k _ _ ) = isoTable :: IsoTable Plugins
@@ -242,7 +243,7 @@ instance (Ord a, a ~ Index a ,Show a, Patch a, B.Binary a) =>
       username = unOnly . att . ix "user_name" $ d
       time = unOnly . att . ix "modification_time" $ d
   encodeT tm@(TableModification id ts u table ip) =
-    tblist $
+    tblist
     [ Attr "user_name" (txt u)
     , Attr "modification_time" (timestamp ts)
     , Attr "table_name" (txt $ snd table)
@@ -276,13 +277,13 @@ instance  DecodeShowable Bool where
 
 instance  DecodeShowable BS.ByteString  where
   decodeS (SBinary i) =  i
-  encodeS i = SBinary ( i)
+  encodeS i = SBinary i
   isoS = SIso PBinary encodeS decodeS
 
 
 instance  DecodeShowable BSL.ByteString  where
   decodeS (SBinary i) = BSL.fromStrict i
-  encodeS i = SBinary (BSL.toStrict $ i)
+  encodeS i = SBinary (BSL.toStrict i)
   isoS = SIso PBinary encodeS decodeS
 
 

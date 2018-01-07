@@ -61,14 +61,14 @@ inter = KInterval
 
 funmap :: Map Text (([KType (Prim KPrim (Text,Text))],KType (Prim KPrim (Text,Text))),[FTB Showable] -> FTB Showable)
 funmap = M.fromList [
-        ("lower",(([prim [KInterval] PAny],prim [KOptional] PAny),(\[IntervalTB1 i] -> LeftTB1 $  unFinite $  lowerBound i)))
-       ,("upper",(([prim [KInterval] PAny],prim [KOptional] PAny),(\[IntervalTB1 i] -> LeftTB1 $  unFinite $  upperBound i)))
-       ,("dimensional",(([prim [] PDouble],prim []$ PDimensional 0 (0,0,0,0,0,0,0) ),(\[i]-> i)))
-       ,("float8sum",(([prim [] PAny,prim [] PAny],prim [] PAny),(\[i,j]-> i + j )))
-       ,("float8sub",(([prim [] PAny,prim [] PAny],prim [] PAny),(\[i,j]-> i - j )))
-       ,("float8div",(([prim [] PAny,prim [] PAny],prim [] PAny),(\[i,j]-> i / j )))
-       ,("float8mul",(([prim [] PAny,prim [] PAny],prim [] PAny),(\[i,j]-> i * j )))
-       ,("dimensionalmult",(([prim []PAny ,prim []PAny],prim []PAny),(\[i,j]-> i * j )))
+        ("lower",(([prim [KInterval] PAny],prim [KOptional] PAny),\[IntervalTB1 i] -> LeftTB1 $  unFinite $  lowerBound i))
+       ,("upper",(([prim [KInterval] PAny],prim [KOptional] PAny),\[IntervalTB1 i] -> LeftTB1 $  unFinite $  upperBound i))
+       ,("dimensional",(([prim [] PDouble],prim []$ PDimensional 0 (0,0,0,0,0,0,0) ),\[i]-> i))
+       ,("float8sum",(([prim [] PAny,prim [] PAny],prim [] PAny),\[i,j]-> i + j))
+       ,("float8sub",(([prim [] PAny,prim [] PAny],prim [] PAny),\[i,j]-> i - j))
+       ,("float8div",(([prim [] PAny,prim [] PAny],prim [] PAny),\[i,j]-> i / j))
+       ,("float8mul",(([prim [] PAny,prim [] PAny],prim [] PAny),\[i,j]-> i * j))
+       ,("dimensionalmult",(([prim []PAny ,prim []PAny],prim []PAny),\[i,j]-> i * j))
        ]
 
 replaceList l =  L.foldl' extend emptyTyenv (fmap (Forall [TV "a"] . replaceAny (TVar (TV "a")) ) <$> L.zip [0..] l  )
@@ -98,20 +98,20 @@ renderFun (e,ac) = go e
     go (Function i e) = T.unpack i ++ "(" ++  L.intercalate "," ( fmap  go   e) ++ ")"
     go (Value i ) = acc $  ac !! i
     acc (IProd _ l) = show l
-    acc (Nested i  l) = (L.intercalate "," $ F.toList $ acc <$> i  )++  "." ++ (L.intercalate "," $ F.toList $ acc <$> l  )
+    acc (Nested i  l) = L.intercalate "," (F.toList $ acc <$> i)++  "." ++ L.intercalate "," (F.toList $ acc <$> l)
 
 
 joinKType (Primitive l (Primitive  i a)) = Primitive (l ++ i) a
 
 buildAccess :: Access Key -> KType (Prim KPrim (Text,Text))
-buildAccess n@(Nested i (Many [One o])) =  joinKType $ const (buildAccess o ) <$> (mergeFKRef  (buildAccess <$> F.toList i ))
+buildAccess n@(Nested i (Many [One o])) =  joinKType $ const (buildAccess o ) <$> mergeFKRef  (buildAccess <$> F.toList i )
 buildAccess (IProd i l) = keyType l
 
 testFFI = do
-  conn <-  connectPostgreSQL  ("dbname=incendio user=postgres password=jacapodre")
+  conn <-  connectPostgreSQL  "dbname=incendio user=postgres password=jacapodre"
   let fun = readFun "dimensionalmult(%0,dimensionalmult(%1,%2))"
   print fun
-  evaluateFFI conn fun funmap [Primitive [] (AtomicPrim (PDimensional 0 (0,0,0,0,0,0,0))) ,Primitive [] (AtomicPrim (PDimensional 0 (0,0,0,0,0,0,0))),Primitive [] (AtomicPrim (PDimensional 0 (0,0,0,0,0,0,0)))] [(TB1 (SDouble 3 )) , (TB1 (SDouble 2)),(TB1 (SDouble 3))]
+  evaluateFFI conn fun funmap [Primitive [] (AtomicPrim (PDimensional 0 (0,0,0,0,0,0,0))) ,Primitive [] (AtomicPrim (PDimensional 0 (0,0,0,0,0,0,0))),Primitive [] (AtomicPrim (PDimensional 0 (0,0,0,0,0,0,0)))] [TB1 (SDouble 3 ) , TB1 (SDouble 2),TB1 (SDouble 3)]
 
 
 evaluateFFI :: Connection -> Expr -> Map Text (([KType (Prim KPrim (Text,Text))],KType (Prim KPrim (Text,Text))),[FTB Showable] -> FTB Showable) -> [KType (Prim KPrim (Text,Text)) ] -> [FTB Showable]  -> IO (FTB Showable)
@@ -135,6 +135,6 @@ evaluate :: Key -> Expr -> Map Text (([k],k ),[FTB Showable] -> FTB Showable) ->
 evaluate k e fs ac tb = Fun k (e,ac) <$> go e
   where
     go :: Expr -> Maybe (FTB Showable)
-    go (Function i e) = f <$> (traverse go   e)
+    go (Function i e) = f <$> traverse go   e
       where (_,f) = justError ("no function" <> show i) $ M.lookup i fs
     go (Value i ) = join $ flip indexFieldRec tb <$> (ac `atMay` i)

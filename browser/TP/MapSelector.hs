@@ -79,7 +79,7 @@ mapWidgetMeta  inf =  do
           let
               TB1 (SText tname) =  lookAttr' "table_name" $ unTB1 $ lookRef ["schema","table"] e
               table = lookTable inf tname
-              evfields = fmap unArray $ join $ unSOptional Control.Applicative.<$> indexFieldRec (liftAccess minf "geo" $ Nested [keyRef "event"] $ One $ Nested [keyRef "schema",keyRef "table",keyRef "column"] (One $ keyRef "column_name")) e
+              evfields = fmap unArray $ join $ unSOptional <$> indexFieldRec (liftAccess minf "geo" $ Nested [keyRef "event"] $ One $ Nested [keyRef "schema",keyRef "table",keyRef "column"] (One $ keyRef "column_name")) e
               Just (ArrayTB1 efields ) = indexFieldRec (liftAccess (meta inf) "geo" (Nested [keyRef "features"] $ Many [One $ keyRef  "geo"] )) e
               ArrayTB1 features = lookRef ["features"] e
               color = lookAttr'  "color" e
@@ -117,7 +117,7 @@ mapSelector
          TBData Key Showable -> [Maybe a])
      -> Tidings (UTCTime, String)
      -> Tidings (Maybe (TBData Key Showable))
-     -> (Event ( [Double], [Double]),
+     -> (Event ([Double], [Double]),
          Tidings (Maybe ([Double], [Double])))
      -> UI (TrivialWidget (Maybe (TBData Key Showable)))
 mapSelector inf pred selected mapT sel (cposE,positionT) = do

@@ -44,7 +44,7 @@ import qualified Data.HashMap.Strict as HM
 plugs schm authmap db plugs = do
   inf <- metaInf schm
   regplugs <- fmap fst $ runDynamic $ transactionNoLog inf  $ do
-      (db ,(_,t)) <- selectFrom "plugins"  Nothing Nothing [] $ mempty
+      (db ,(_,t)) <- selectFrom "plugins"  Nothing Nothing [] mempty
       let
         regplugs = catMaybes $ findplug <$> plugs
         findplug :: PrePlugins -> Maybe Plugins
@@ -71,13 +71,13 @@ checkTime curr = do
       start = startLocal
       end = endLocal
     current <- getCurrentTime
-    return $ (start,end,curr,current)
+    return (start,end,curr,current)
 
 poller schmRef authmap db plugs is_test = do
   metas <- metaInf schmRef
 
   let conn = rootconn metas
-  ((dbpol,(_,polling)),_)<- runDynamic $ transactionNoLog metas $ selectFrom "polling" Nothing Nothing [] $ mempty
+  ((dbpol,(_,polling)),_)<- runDynamic $ transactionNoLog metas $ selectFrom "polling" Nothing Nothing [] mempty
   let
     project tb =  (schema,intervalms,p,pid)
       where
@@ -89,7 +89,7 @@ poller schmRef authmap db plugs is_test = do
     poll tb  = do
       let plug = L.find ((==pname ). _name .snd ) plugs
           (schema,intervalms ,pname ,pid) = project tb
-          indexRow polling = justError (show $ (tbpred tb )) $ G.lookup (tbpred tb) polling
+          indexRow polling = justError (show (tbpred tb )) $ G.lookup (tbpred tb) polling
           tbpred = G.getIndex (tableMeta $ lookTable metas "polling")
 
       schm <- atomically $ readTVar schmRef
@@ -121,7 +121,7 @@ poller schmRef authmap db plugs is_test = do
                           let listRes = L.take fetchSize . G.toList $  listResAll
 
                           let evb = filter (\i-> maybe False (G.checkPred i) predFullIn && not (maybe False (G.checkPred i) predFullOut) ) listRes
-                          i <-  liftIO $ mapM (mapM (\inp -> catchPluginException inf (tableUnique (lookTable inf a)) idp ( getPKM (tableMeta $ lookTable inf a)inp) $ fmap fst $ runDynamic $ transactionLog inf $ do
+                          i <-  liftIO $ mapM (mapM (\inp -> catchPluginException inf (tableUnique (lookTable inf a)) idp ( getPKM (tableMeta $ lookTable inf a)inp) $ fmap fst $ runDynamic $ transactionLog inf $
                               case elemp of
                                 Right action  -> do
                                   getP <- getFrom (lookTable inf a) inp
@@ -139,7 +139,7 @@ poller schmRef authmap db plugs is_test = do
                             ) . L.transpose .  chuncksOf 20 $ evb
                           return $ concat i
                           ) [0..(lengthPage (fst sizeL) fetchSize -1)]
-                      end <- liftIO $ getCurrentTime
+                      end <- liftIO getCurrentTime
                       liftIO$ putStrLn $ "END " <>T.unpack pname <> " - " <> show end
                       let polling_log = lookTable metas "polling_log"
                       dbplog <-  refTable metas polling_log
@@ -148,7 +148,7 @@ poller schmRef authmap db plugs is_test = do
                               , attrT ("schema",TB1 (SNumeric schema))
                               , IT "diffs" (LeftTB1 $ ArrayTB1  . Non.fromList <$> (
                                         nonEmpty  . concat . catMaybes $
-                                            fmap (fmap (TB1 . tblist  )) .  either (\r ->Just $ pure $ [attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) ),attrT ("modify",LeftTB1 $Nothing)]) (Just . fmap (\r -> [attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId $  r))   ),attrT ("except",LeftTB1 $Nothing)])) <$> i))
+                                            fmap (fmap (TB1 . tblist  )) .  either (\r ->Just $ pure [attrT ("except", LeftTB1 $ Just $ TB1 (SNumeric r) ),attrT ("modify",LeftTB1 Nothing)]) (Just . fmap (\r -> [attrT ("modify", LeftTB1 $ Just $ TB1 (SNumeric (justError "no id" $ tableId r))   ),attrT ("except",LeftTB1 Nothing)])) <$> i))
                               , attrT ("duration",srange (time current) (time end))]) <$> nonEmpty i
                           time  = TB1 . STime . STimestamp
                           table2 = tblist
@@ -166,14 +166,14 @@ poller schmRef authmap db plugs is_test = do
               putStrLn ("Start Poller: " <> T.unpack pname )
               -- iter polling
               (tm,_) <- runDynamic $ timer intervalms
-              print (intervalms,diffUTCTime current startP,(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))
-              forkIO (void $  threadDelay (max 0 (10^3*(intervalms - (round $ 10^3 * realToFrac ( diffUTCTime current startP))))) >> putStrLn ("Timer Start" <> T.unpack pname) >> start tm>>  (runDynamic $ iter (indexRow polling)))
+              print (intervalms,diffUTCTime current startP,intervalms - round (10^3 * realToFrac ( diffUTCTime current startP)))
+              forkIO (void $  threadDelay (max 0 (10^3*(intervalms - round (10^3 * realToFrac ( diffUTCTime current startP))))) >> putStrLn ("Timer Start" <> T.unpack pname) >> start tm>>  runDynamic (iter (indexRow polling)))
               let
-                  evIter = indexRow <$> (unionWith const (rumors $ collectionTid dbpol ) (facts ( collectionTid dbpol )<@ tick tm))
+                  evIter = indexRow <$> unionWith const (rumors $ collectionTid dbpol ) (facts ( collectionTid dbpol )<@ tick tm)
 
               (bhIter ,_) <- runDynamic $ stepper (indexRow  polling) evIter
               let  evDiffIter = diffEvent bhIter evIter
-              runDynamic $onEventDyn  evDiffIter (iter) )
+              runDynamic $onEventDyn  evDiffIter iter )
           return ()
   mapM poll  enabled
 

@@ -5,6 +5,7 @@ import Data.Maybe
 import Data.Binary
 import Data.Monoid
 import Data.Binary.Get
+import Control.Monad
 import Data.Binary.Put
 
 preview i =
@@ -16,7 +17,7 @@ preview i =
         r <- bytesRead
         fmap (runGet (do
           bytCnt <- getWord8
-          Control.Monad.replicateM (fromIntegral bytCnt ) (  do
+          replicateM (fromIntegral bytCnt ) (  do
             imageCode <- getWord8
             imageHeaderStart <- getWord32host
             imageHeaderSize <- getWord32host

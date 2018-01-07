@@ -121,7 +121,7 @@ getCaptchaCnpj  cookie =Sess.withSessionControl (Just $ tIso cookieJar $cookie )
        r <-  Sess.getWith defaults  session cnpjhome
        print cnpjcaptcha
        o <- Sess.get session cnpjcaptcha
-       return (unTiso cookieJar  $ o ^. responseCookieJar , BSL.toStrict Control.Applicative.<$> (o ^? responseBody) )
+       return (unTiso cookieJar  $ o ^. responseCookieJar , BSL.toStrict <$> (o ^? responseBody) )
 
 
 convertHtml out =

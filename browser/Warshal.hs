@@ -1,5 +1,5 @@
-{-# LANGUAGE ScopedTypeVariables,BangPatterns,NoMonomorphismRestriction,DeriveFunctor,GeneralizedNewtypeDeriving,FlexibleContexts,DeriveFoldable ,TupleSections #-}
-module Warshal where
+{-# LANGUAGE ScopedTypeVariables, NoMonomorphismRestriction,
+  FlexibleContexts, TupleSections #-}module Warshal where
 
 import Data.Maybe
 import Data.Monoid hiding(Product)
@@ -11,7 +11,7 @@ import Data.Set (Set)
 import Text.Printf ( printf )
 import Types
 
-type HashSchema  a b = Map a (Map a [(Path a b )])
+type HashSchema  a b = Map a (Map a [Path a b])
 
 
 showVertex = show
@@ -73,7 +73,7 @@ data Cardinality a
 -}
 
 instance Functor (Path a) where
-  fmap f (Path i t j ) =  (Path i (f t ) j)
+  fmap f (Path i t j ) =  Path i (f t ) j
 
 pbound (Path h1 _ t1) = (h1,t1)
 pbound (ComposePath h1 _ t1) =  (h1,t1)
@@ -156,8 +156,8 @@ warshall2 g = Graph { edges = go (hvertices g <> tvertices g) (pmapnew (M.toList
                    , hvertices = hvertices g
                    , tvertices = tvertices g }
     where
-      initE = fmap Left $ edges g
-      pmapnew nedges = M.fromListWith mappend $ fmap (fmap (S.singleton )) nedges
+      initE = Left Control.Applicative.<$> edges g
+      pmapnew nedges = M.fromListWith mappend $ fmap (fmap S.singleton) nedges
       generateTrails es m = filter ((/=[]).snd) $ fmap (\e -> (e,go  e)) es
         where
           -- go :: (Set a ,Set a)-> [Path a b]
@@ -222,17 +222,17 @@ nested (x,y) p  = (x,fmap (y,) p  )
 
 
 hashGraph  :: (Ord b,Ord a) => Graph a b -> HashSchema a b
-hashGraph = M.map ((M.fromListWith (++)) .  fmap (fmap pure )) . M.fromListWith (++)  .   fmap (uncurry nested) . M.toList .  edges
+hashGraph = M.map (M.fromListWith (++) .  fmap (fmap pure )) . M.fromListWith (++)  .   fmap (uncurry nested) . M.toList .  edges
 
 
-hashGraphInv'  :: (Ord b,Ord a) => Graph a b -> Map (a) (Map (a) [Path a b])
+hashGraphInv'  :: (Ord b,Ord a) => Graph a b -> Map a (Map a [Path a b])
 hashGraphInv' = M.map (M.fromListWith (++) . fmap (fmap pure) ) .  M.fromListWith (++)  .   fmap (uncurry nestedInv') . M.toList .  edges
 
 find norm end m = case M.lookup norm m of
                     Just i -> M.lookup end i
                     Nothing -> Nothing
 
-queryHash :: Ord a => [a] -> HashSchema a b -> (a)  -> [Maybe [Path a b]]
+queryHash :: Ord a => [a] -> HashSchema a b -> a  -> [Maybe [Path a b]]
 queryHash filters schema  base =  map (\f-> find base f schema)  filters
 
 

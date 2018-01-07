@@ -219,7 +219,7 @@ getFKRef inf predtop rtable (evs,me,old) set (FKInlineTable  r j ) =  do
     let
       rinf = maybe inf id $ HM.lookup (fst j) (depschema inf)
       table = lookTable rinf $ snd j
-      editAttr fun (KV i) = fmap KV (flip Le.at (traverse ((Le.traverseOf ifkttable (traverse fun)))) (S.singleton $Inline r)  i )
+      editAttr fun (KV i) = fmap KV (flip Le.at (traverse ((Le.traverseOf ifkttable (traverse fun)))) (S.singleton $ Inline r)  i )
       nextRef :: [FTB (TBData Key Showable)]
       nextRef= fmap (\i -> _fkttable $ justError "no it" $ M.lookup (S.singleton $ Inline r) (_kvvalues  i) ) set
 
@@ -421,7 +421,7 @@ childrenRefsUnique  inf table (m,sidxs,base) (FKJoinTable rel j ,evs)  =  concat
       Just idx -> concat $ conv <$> resIndex idx
       Nothing -> concat $ conv <$> resScan base
       where
-        predK = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (keyRef o  , Left (justError "no ref" $ unSOptional' $fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
+        predK = WherePredicate $ AndColl ((\(Rel o op t) -> PrimColl (keyRef o  , Left (justError "no ref" $ unSOptional' $ fmap create $ v !! (justError "no key" $  t`L.elemIndex` rawPK jtable),op))) <$> rel )
         predKey =  mapPredicate keyFastUnique predK
         pred =  mapPredicate (\o -> justError "no pk" $ L.elemIndex o (fmap _relOrigin rel)) predK
         resIndex idx = G.query pred idx
@@ -448,7 +448,7 @@ pageTable method table page size presort fixed = do
         ffixed = filterfixedS  tableU fixedU
     mmap <- liftIO . atomically $ readTVar mvar
     dbvar <- lift $ lookDBVar inf mmap table
-    (fixedmap,fixedChan) <- liftIO . atomically $readIndex dbvar
+    (fixedmap,fixedChan) <- liftIO . atomically $ readIndex dbvar
     let pageidx =  (fromMaybe 0 page +1) * pagesize
         hasIndex = M.lookup fixedU fixedmap
         (sq ,_)= justError "no index" hasIndex
@@ -478,7 +478,7 @@ pageTable method table page size presort fixed = do
                    return (index,res <> G.toList freso)
                  else do
                    return (fromMaybe (0,M.empty) hasIndex ,[])
-           return $Right(M.insert fixedU nidx fixedmap, sidx,iniVar,nchan,if L.length ndata > 0 then createUn (rawPK tableU)  ndata <> freso else  freso )
+           return $ Right(M.insert fixedU nidx fixedmap, sidx,iniVar,nchan,if L.length ndata > 0 then createUn (rawPK tableU)  ndata <> freso else  freso )
          else do
            loadmap <- get
            let preloaded = M.lookup (table ,fixed) loadmap
@@ -495,7 +495,7 @@ pageTable method table page size presort fixed = do
         let iniFil = (nidx,ndata)
         (vpt ,evpt)<- lift $ convertChanTidings0 inf tableU (fixedU ,rawPK tableU) never (sidx ,snd iniFil) iniVar nchan
         idxTds <- lift $ convertChanStepper0 inf (tableU) fixedmap fixedChan
-        let result = (DBVar2 dbvar idxTds (fmap primary vpt) (fmap secondary vpt) evpt ,first (M.mapKeys (mapPredicate (recoverKey inf))).fmap (fmap (mapKey' (recoverKey inf)) )$iniFil)
+        let result = (DBVar2 dbvar idxTds (fmap primary vpt) (fmap secondary vpt) evpt ,first (M.mapKeys (mapPredicate (recoverKey inf))).fmap (fmap (mapKey' (recoverKey inf)) )$ iniFil)
         modify (M.insert (table,fixed)  result)
         return result
 
@@ -576,7 +576,7 @@ convertChanStepper0
           (Tidings (M.Map (WherePredicateK Key) (Int, M.Map Int (PageTokenF v))))
 convertChanStepper0  inf table ini nchan = do
         (e,h) <- newEvent
-        t <- liftIO $ forkIO  $ forever $catchJust notException ( do
+        t <- liftIO $ forkIO  $ forever $ catchJust notException ( do
             a <- atomically $ takeMany nchan
             h a ) (\e -> atomically ( takeMany nchan ) >>= (\d ->  putStrLn $ show (e :: SomeException,d)<>"\n"))
         let conv (v,s,i,t) = (M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) (mapPredicate (recoverKey inf) v) )
@@ -592,7 +592,7 @@ convertChanStepper
      -> Dynamic
           (Tidings (M.Map (WherePredicateK Key) (Int, M.Map Int (PageTokenF v))))
 convertChanStepper inf table dbvar = do
-        (ini,nchan) <- liftIO $atomically $
+        (ini,nchan) <- liftIO $ atomically $
           readIndex dbvar
         convertChanStepper0 inf table ini nchan
 
@@ -635,7 +635,7 @@ convertChanTidings
      -> Dynamic
     (Tidings (TableRep Key Showable),Event [RowPatch Key Showable])
 convertChanTidings inf table fixed evdep dbvar = do
-      (sidx,ini,nchan,inivar) <- liftIO $atomically $
+      (sidx,ini,nchan,inivar) <- liftIO $ atomically $
         readState fixed  table dbvar
       convertChanTidings0 inf table fixed evdep ( sidx,ini) inivar nchan
 
@@ -948,12 +948,12 @@ createTableRefs inf re i = do
         diffIni = []
     mdiff <-  liftIO$ atomically $ newBroadcastTChan
     chanidx <-  liftIO$ atomically $ newBroadcastTChan
-    nchanidx <- liftIO$ atomically $dupTChan chanidx
-    nmdiff <- liftIO$ atomically $dupTChan mdiff
+    nchanidx <- liftIO$ atomically $ dupTChan chanidx
+    nmdiff <- liftIO$ atomically $ dupTChan mdiff
     (iv,v) <- readTable inf "dump" i re
 
     midx <-  liftIO$ atomically$ newTVar iv
-    depmap <- liftIO $ atomically $readTVar (mvarMap inf )
+    depmap <- liftIO $ atomically $ readTVar (mvarMap inf )
     let
       move (FKJoinTable i j)  =  do
             let rtable = M.lookup (lookSTable inf j) depmap
@@ -989,11 +989,11 @@ createTableRefs inf re i = do
             )
         )  (\e -> atomically (readTChan nchanidx ) >>= (\d ->  putStrLn $ show (e :: SomeException,d)<>"\n"))
     registerDynamic (killThread t0)
-    t1 <- liftIO $forkIO $ forever $ catchJust notException (
+    t1 <- liftIO $ forkIO $ forever $ catchJust notException (
         atomically $ do
           patches <- takeMany nmdiff
           when (not $ L.null $ concat patches) $
-            modifyTVar' collectionState (\e -> L.foldl' (\i j  -> fromMaybe (error $ "error applying patch: "  ) $applyTableRep i j) e (concat patches))
+            modifyTVar' collectionState (\e -> L.foldl' (\i j  -> fromMaybe (error $ "error applying patch: "  ) $ applyTableRep i j) e (concat patches))
         )  (\e -> atomically ( takeMany nmdiff ) >>= (\d ->  putStrLn $ show (e :: SomeException,d)<>"\n"))
     registerDynamic (killThread t1)
     let dbref = DBRef nmdiff midx nchanidx collectionState
@@ -1002,14 +1002,14 @@ createTableRefs inf re i = do
 
 loadFKSDisk inf targetTable re = do
   let
-    (fkSet2,pre) = F.foldl' (\(s,l) i   -> (S.map keyFastUnique (pathRelOri i)<> s  ,liftA2 (\j i -> j ++ [i]) l ( loadFKDisk inf s re i )) )  (S.empty , return []) (P.sortBy (P.comparing (RelSort . S.toList . pathRelRel)) $F.toList (rawFKS targetTable))
+    (fkSet2,pre) = F.foldl' (\(s,l) i   -> (S.map keyFastUnique (pathRelOri i)<> s  ,liftA2 (\j i -> j ++ [i]) l ( loadFKDisk inf s re i )) )  (S.empty , return []) (P.sortBy (P.comparing (RelSort . S.toList . pathRelRel)) $ F.toList (rawFKS targetTable))
   prefks <- pre
   return (\table ->
     let
       items = unKV $ table
-      fks = catMaybes $  ($table) <$>  prefks
+      fks = catMaybes $  ($ table) <$>  prefks
       fkSet:: S.Set KeyUnique
-      fkSet =   S.map keyFastUnique . S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ (P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) $F.toList (rawFKS targetTable))
+      fkSet =   S.map keyFastUnique . S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ (P.sortBy (P.comparing (RelSort . F.toList . pathRelRel)) $ F.toList (rawFKS targetTable))
       nonFKAttrs :: [(S.Set (Rel KeyUnique) ,Column KeyUnique Showable)]
       nonFKAttrs =  M.toList $  M.filterWithKey (\i a -> not $ S.isSubsetOf (S.map _relOrigin i) (S.intersection fkSet fkSet2)) items
    in tblist'  (fmap snd nonFKAttrs <> fks ))
@@ -1069,7 +1069,7 @@ writeSchema (schema,schemaVar) = do
            let sdir = "dump/"<> (fromString $ T.unpack schema)
            hasDir <- doesDirectoryExist sdir
            when (not hasDir ) $  do
-             print $"create dir" <> sdir
+             print $ "create dir" <> sdir
              createDirectory sdir
            mapM_ (uncurry (writeTable schemaVar sdir ) ) varmap
 

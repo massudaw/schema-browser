@@ -19,6 +19,8 @@ import Control.Concurrent.STM.TChan
 import Control.Lens ((%~), (&), (^?), _1, _2, over)
 import qualified Control.Lens as Le
 import Serializer (decodeT)
+import Control.Monad
+import Control.Arrow hiding (first,second)
 import Control.Monad.Catch
 import Control.Monad.Writer hiding ((<>))
 import Data.Bifunctor
@@ -309,7 +311,7 @@ tbCaseDiff inf table constr i@(FKT ifk  rel tb1) wl plugItens oldItems= do
     let
       nonInj =  S.fromList (_relOrigin   <$> rel) `S.difference` S.fromList (getRelOrigin $ unkvlist ifk)
       nonInjRefs = filter ((\i -> not (S.null i) && S.isSubsetOf i nonInj ) . S.map _relOrigin .fst) wl
-      relTable = M.fromList $ fmap (_relTarget Control.Arrow.&&& _relOrigin) rel
+      relTable = M.fromList $ fmap (_relTarget &&& _relOrigin) rel
       restrictConstraint = filter ((`S.isSubsetOf` (S.fromList $ fmap _relOrigin rel)) . S.fromList . getRelOrigin  .fst) constr
       reflectFK f rel box = (\ref -> pure $ FKT (kvlist ref ) rel (TB1 box) )<$> backFKRef relTable (getRelOrigin f) box
       convertConstr (f,j) = (f, fmap (\constr -> maybe False constr  .  reflectFK f rel ) j)
@@ -603,15 +605,15 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
               refM = traverse (join . fmap unSOptional' . unSOptional') (getPKM (tableMeta table)ref)
       containsGist ref map = isJust refM && not (L.null (lookGist ix ref map))
         where ix = _kvpk (tableMeta table)
-              refM = join $ nonEmptyMap Control.Applicative.<$> traverse (join . fmap unSOptional' . unSOptional') (getPKM (tableMeta table)ref)
+              refM = join $ nonEmptyMap <$> traverse (join . fmap unSOptional' . unSOptional') (getPKM (tableMeta table)ref)
       conflictGist ref map = if isJust refM then lookGist ix ref map else[]
         where ix = _kvpk (tableMeta table)
-              refM = join $ nonEmptyMap Control.Applicative.<$> traverse (join . fmap unSOptional' . unSOptional') (getPKM (tableMeta table)ref)
+              refM = join $ nonEmptyMap <$> traverse (join . fmap unSOptional' . unSOptional') (getPKM (tableMeta table)ref)
   let
     pred2 =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
     authPred =  [(keyRef "grantee",Left ( int $ fst $ username inf ,Equals))] <> pred2
   auth <- fst <$> ui (transactionNoLog (meta inf) $ selectFromTable "authorization" Nothing Nothing [] authPred)
-  let authorize =  ((fmap unArray . unSOptional' . lookAttr' "authorizations") Control.Monad.<=< G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ fst $ username inf)]))  <$> collectionTid auth
+  let authorize =  ((fmap unArray . unSOptional' . lookAttr' "authorizations") <=< G.lookup (idex  (meta inf) "authorization"  [("schema", int (schemaId inf) ),("table",int $ tableUnique table),("grantee",int $ fst $ username inf)]))  <$> collectionTid auth
   -- Insert when isValid
   let insertEnabled = liftA2 (&&) (onDiff (isRight . patchCheckInf inf m) (const False) <$>  inscrudp) (liftA2 (\j -> maybe True (not. flip containsGist j)) gist inscrud)
   ui $ onEventIO (rumors inscrudp) (print .fmap (patchCheckInf inf m ))
@@ -641,7 +643,7 @@ processPanelTable lbox inf reftb@(res,_,gist,_,_) inscrudp table oldItemsi = do
       #   set UI.class_ "buttonSet"
       # sinkDiff UI.style ((\i j -> noneShowSpan (maybe False (txt "DELETE" `elem`) i && j)) <$>authorize <*> deleteEnabled)
   let
-       filterKey enabled k = Control.Monad.void (filterApply (const <$> enabled) k)
+       filterKey enabled k = void (filterApply (const <$> enabled) k)
        crudMerge :: Maybe (TBData Key Showable)  ->  G.GiST (TBIndex Showable) (TBData Key Showable )-> Dynamic (Maybe (RowPatch Key Showable))
        crudMerge (Just i) g =
          fmap (tableDiff . fmap ( fixPatchRow inf (tableName table)) )  <$> transaction inf ( do
@@ -745,7 +747,7 @@ reduceDiffList o i plug
          treatA a (Diff v) = Just $ Left $ PIdx a  (Just v)
          treatA a Delete =  Just $ Right $ PIdx a Nothing
          treatA _ Keep = Nothing
-         plugl = F.concat $ unPatchSet Control.Applicative.<$> catMaybes plug
+         plugl = F.concat $ unPatchSet <$> catMaybes plug
            where
              unPatchSet (PatchSet l ) = F.toList l
              unPatchSet i = [i]
@@ -1221,7 +1223,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
               lboxeel <- traverseUI (\metamap ->
                   case metamap of
                     "List" -> do
-                      let predicatefk o = WherePredicate $AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   Left  (o,Flip $ _relOperator rel) )) Control.Applicative.<$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional' v) Control.Applicative.<$> M.toList o
+                      let predicatefk o = WherePredicate $AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   Left  (o,Flip $ _relOperator rel) )) <$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional' v) <$> M.toList o
                           predicate = fmap predicatefk <$> iold2
                       itemListEl <- UI.select #  set UI.class_ "row fixed-label" # set UI.size "21" # set UI.style [("width","100%"),("position","absolute"),("z-index","999"),("top","22px")]
                       (lbox , l) <- selectListUI inf targetTable itemListEl predicate reftb constr tdi
@@ -1229,14 +1231,14 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
                       return l
                     "Map" -> do
                       let selection = fromJust hasMap
-                      let predicatefk o = WherePredicate $AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   Left  (o,Flip $ _relOperator rel) )) Control.Applicative.<$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional' v) Control.Applicative.<$> M.toList o
+                      let predicatefk o = WherePredicate $AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   Left  (o,Flip $ _relOperator rel) )) <$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional' v) <$> M.toList o
                           predicate = fmap predicatefk <$> iold2
                       t <- liftIO getCurrentTime
                       TrivialWidget i el <- mapSelector inf predicate selection (pure (t,"month")) tdi (never, pure Nothing)
                       ui $ onEventIO (rumors i ) (helbox.Just)
                       return [el]
                     "Agenda" -> do
-                      let predicatefk o = WherePredicate $AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   Left  (o,Flip $ _relOperator rel) )) Control.Applicative.<$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional' v) Control.Applicative.<$> M.toList o
+                      let predicatefk o = WherePredicate $AndColl $ catMaybes $ (\(k, v) ->  join $ (\ o ->  (\ rel -> PrimColl (keyRef (_relTarget rel),   Left  (o,Flip $ _relOperator rel) )) <$> L.find ((==k) . _relOrigin ) rel) <$> unSOptional' v) <$> M.toList o
                           predicate = fmap predicatefk <$> iold2
                       let selection = fromJust hasAgenda
                       now <- liftIO getCurrentTime
@@ -1273,7 +1275,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
           inioutput <- ui $ currentValue (facts output)
           ui $ onEventIO (rumors output) (\i -> do
             helsel $ fmap fst i
-            heledit $ fmap sndi)
+            heledit $ fmap snd i)
           return [getElement itemList]
 
         edit =  do
@@ -1300,7 +1302,7 @@ fkUITablePrim inf (rel,targetTable,ifk) constr  nonInjRefs   plmods  oldItems  p
           ui $ onEventIO ((,,) <$> blsel <*> bleditall <@> rumors output) (\(old,olde,i) -> do
             when (old /= fmap fst i) $
               helsel $ fmap fst i
-            when (olde /= fmap sndi)$
+            when (olde /= fmap snd i)$
               heleditu $ fmap snd i
             return ()
             )
@@ -1331,7 +1333,7 @@ fkUITableGen ::
   -> Tidings (Maybe (Column CoreKey Showable))
   -- Static Information about relation
   -> Column CoreKey ()
-  -> UI (TrivialWidget(Editor (PathAttr CoreKey Showable )))
+  -> UI (TrivialWidget (Editor (PathAttr CoreKey Showable)))
 fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel _)
   = fmap (fmap (recoverPFK  setattr rel)) <$> buildUIDiff (fkUITablePrim inf (rel,lookTable inf target,setattr) constr nonInjRefs) (fmap (zip rel) $ mergeFKRef  $ keyType . _relOrigin <$>rel) (fmap (fmap (fmap liftPFK)) <$> plmods) (fmap liftFK <$>oldItems)
     where (targetSchema,target) = findRefTableKey preinf table rel
@@ -1352,12 +1354,10 @@ metaAllTableIndexA inf metaname env =   do
 
 viewer :: InformationSchema -> Table -> [(Access Key ,AccessOp Showable )] -> UI Element
 viewer inf table envK = do
-
   let
     filterStatic =filter (not . flip L.elem (concatMap (F.toList . Le.view Le._1) envK))
     key = filterStatic $ F.toList $ rawPK table
     sortSet =  filterStatic . F.toList . tableKeys . tableNonRef . TB1 . allRec' (tableMap inf ) $ table
-  let
     iniSort = selSort sortSet ((,True) <$>  key)
     flist = catMaybes $ fmap (\(i,_,j) -> (\(op,v) -> (keyRef i,Left (v,readBinaryOp $ T.pack op))) <$> j) iniSort
     pred = WherePredicate $ AndColl $ fmap PrimColl $envK <> flist

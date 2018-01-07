@@ -99,9 +99,9 @@ siapi2Hack = FPlugins pname tname $ IOPlugin  url
       b <- act  (\(i,j)-> if read (BS.unpack j) >= 15 then  return (Nothing,Nothing) else liftIO (siapi2  i j )  ) -<  ( protocolo , ano )
       let ao (sv,bv)  = Just $ tblist   $ svt  sv <> [iat bv]
           convertAndamento :: [String] -> TB2 Text Showable
-          convertAndamento [da,des] =  TB1 $ tblist $ attrT Control.Applicative.<$> [("andamento_date",TB1 . STime . STimestamp . localTimeToUTC utc. fst  . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))]
+          convertAndamento [da,des] =  TB1 $ tblist $ attrT Control.Applicative.<$> ([("andamento_date",TB1 . STime . STimestamp . localTimeToUTC utc. fst  . justError "wrong date parse" $  strptime "%d/%m/%y" da  ),("andamento_description",TB1 $ SText (T.filter (not . (`elem` "\n\r\t")) $ T.pack  des))])
           convertAndamento i = error $ "convertAndamento " <> show i
-          svt bv = catMaybes $ fmap attrT . traverse (\k -> snd Control.Applicative.<$> L.find (L.isInfixOf k. fst ) map) . swap <$>  value_mapping
+          svt bv = catMaybes $ fmap attrT . (traverse (\k -> fmap snd $ L.find (L.isInfixOf k. fst ) map) . swap) <$>  value_mapping
             where map = fmap (LeftTB1 . Just . TB1 . SText . T.pack ) <$> bv
           iat bv = IT
                             "andamentos"
@@ -394,7 +394,7 @@ siapi3Plugin  = FPlugins pname tname  $ DiffIOPlugin url
                          ) -< ()
 
         b <- act (\(i,j,k)-> if read (BS.unpack j) <= (14 :: Int ) then  return Nothing else liftIO $ siapi3  i j k ) -<   ( BS.pack . renderShowable $ protocolo  ,BS.pack . renderShowable $ ano  ,cpf)
-        let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ attrT Control.Applicative.<$> [("andamento_date",TB1 .STime .STimestamp .localTimeToUTC utc. fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)]
+        let convertAndamento [_,da,desc,user,sta] =TB1 $ tblist  $ attrT Control.Applicative.<$> ([("andamento_date",TB1 .STime .STimestamp .localTimeToUTC utc. fst . justError "wrong date parse" $  strptime "%d/%m/%Y %H:%M:%S" da  ),("andamento_description",TB1 . SText $ T.pack  desc),("andamento_user",LeftTB1 $ Just $ TB1 $ SText $ T.pack  user),("andamento_status",LeftTB1 $ Just $ TB1 $ SText $ T.pack sta)] )
             convertAndamento i = error $ "convertAndamento2015 :  " <> show i
         let ao  (bv,taxa) =  tblist  [Attr "ano"  ano ,Attr "protocolo" protocolo, attrT ("taxa_paga",LeftTB1 $ Just $  bool $ not taxa),iat bv]
             iat bv = IT "andamentos"
@@ -503,8 +503,8 @@ encodeMessage = PurePlugin url
                 | T.isInfixOf "application/octet-stream" mime =
                       case T.drop (T.length filename - 3 ) filename of
                          "dwg" -> (\v -> case (\(TB1 (SBinary i )) ->  preview $ BSL.fromStrict i) v of
-                                    Right l -> tbv "png" (Just $ TB1 (SBinary $ BSL.toStrict l ))
-                                    Left l -> tbv "bmp" (Just $ TB1 (SBinary $ BSL.toStrict l ))) <$> v
+                                    Right l -> tbv "png" (Just $ TB1 (SBinary $ BSL.toStrict l))
+                                    Left l -> tbv "bmp" (Just $ TB1 (SBinary $ BSL.toStrict l))) <$> v
                          i -> Nothing
                 | T.isInfixOf "application/pgp-signature" mime =  Just $ tb "plain"
                 | T.isInfixOf "multipart/alternative" mime =  last <$> (ifNull . catMaybes $ next)
@@ -512,8 +512,8 @@ encodeMessage = PurePlugin url
                 | otherwise =Nothing
                 where
                       Just (TB1 (SText filename ))= filenameM
-                      tb n  =  TB1 . tblist . pure . Attr n $ LeftTB1 v
-                      tbv n v  =  TB1 . tblist . pure . Attr n $ LeftTB1 v
+                      tb n  =  TB1 . tblist . pure . Attr n $ (LeftTB1 v)
+                      tbv n v  =  TB1 . tblist . pure . Attr n $ (LeftTB1 v)
                       deltb n  =  TB1 . tblist . pure . Attr n $ (LeftTB1 $ Just $ LeftTB1 v)
                       tbmix l = TB1 . tblist . pure . IT "mixed" . LeftTB1 $ ArrayTB1 . Non.fromList <$>  ifNull l
           returnA -<  mimeTable enc part
@@ -564,8 +564,8 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
         (fname,file,date) <- act (\(range,i) -> liftIO$ do
               t <- getCurrentTime
               let fname = "extrato-" <> renderShowable (justError "cant be infinite " $ unFinite (upperBound range)) <> "," <> show (utctDay t) <>".ofx"
-                  input = L.intercalate ";" $ ["echo \"" <> "OP" <> "\""] <> ((\i ->  "echo \"" <> renderShowable i<> "\"" ) <$> (i<>[ justError "cant be infinite " $ u nFinite (upperBound range)]))
-              callCommand ( "(" <> input <> " | cat) | xvfb-run --server-args='-screen 0, 1440x900x24' ofx-itau ;") `catchAll` print
+                  input = L.intercalate ";" $ ["echo \"" <> "OP" <> "\""] <> ((\i ->  "echo \"" <> renderShowable i<> "\"" ) <$> (i<>[ justError "cant be infinite " $ unFinite (upperBound range)]))
+              callCommand ( "(" <> input <> " | cat) | xvfb-run --server-args='-screen 0, 1440x900x24' ofx-itau ;") `catchAll` (print)
               print $ "readFile " ++ fname
               file <- BS.readFile fname
               return (TB1 $ SText $ T.pack fname , LeftTB1 $ Just $ LeftTB1 $ Just $ TB1 $ SBinary file,upperPatch (Finite (PAtom $ STime $ SDate $ utctDay t),False))
@@ -579,7 +579,7 @@ fetchofx = FPlugins "Itau Import" tname $ DiffIOPlugin url
         refs <- atRA "ofx" (idxK "file_name") -< ()
         let ix = length refs
         pk <- act (const ask )-< ()
-        returnA -<   Just [PFK [Rel "ofx" Equals "file_name" ] [PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)] (POpt $ Just $ PIdx ix $ Just $ PAtom (patch account: [PAttr "file_name" (patch fname),PAttr "import_file" (patch file)])), PAttr "range" date]
+        returnA -<   Just [PFK [Rel "ofx" Equals "file_name" ] ([PAttr "ofx" (POpt $ Just $ PIdx ix $ Just $ patch fname)]) (POpt $ Just $ PIdx ix $ Just $ PAtom $ (patch account: [PAttr "file_name" (patch fname),PAttr "import_file" (patch $ file)])), PAttr "range" (date)]
 
 
 importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
@@ -602,7 +602,7 @@ importargpx = FPlugins "Importar GPX" tname $ DiffIOPlugin url
           ref :: [TB Text Showable]
           ref = [uncurry Attr ("samples",ArrayTB1 $ Non.fromList $ fmap int   [0.. length (justError "no b" b)])]
           tbst :: (Maybe (TBIdx Text Showable))
-          tbst =  Just [PFK  [Rel "samples" Equals "id_sample",Rel "run" Equals "id_run"] (fmap patch ref) ao]
+          tbst =  Just (  [PFK  [Rel "samples" Equals "id_sample",Rel "run" Equals "id_run"] (fmap patch ref) ao])
       returnA -< tbst
 
 
@@ -768,7 +768,7 @@ queryArtAndamento = FPlugins pname tname $  IOPlugin url
       v <- act (\(i, (j, k,a)) -> liftIO  $ creaConsultaArt  j k a i ) -< (,) i r
       let artVeri dm = ("verified_date" ,) . opt (timestamp .localTimeToUTC utc. fst) . join $ (\d -> strptime "%d/%m/%Y %H:%M" ( d !!1))  <$> dm
           artPayd dm = ("payment_date" ,) . opt (timestamp .localTimeToUTC utc. fst) . join $ (\d -> strptime "%d/%m/%Y %H:%M" (d !!1) ) <$> dm
-          artInp inp = Just $ tblist $ f map attrT [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) inp ]
+          artInp inp = Just $ tblist $ attrT Control.Applicative.<$> [artVeri $  L.find (\[h,d,o] -> L.isInfixOf "Cadastrada" h )  inp ,artPayd $ L.find (\[h,d,o] -> L.isInfixOf "Registrada" h ) (inp) ]
       returnA -< artInp v
 
 plugList :: [PrePlugins]

@@ -51,8 +51,8 @@ deftable inf table =
     fks' =  rawFKS table
     items = tableAttrs table
     fkSet,funSet:: S.Set Key
-    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction ) $ fks'
-    funSet = S.unions $ fmap pathRelOri  $ filter (isFunction) (fks')
+    fkSet =   S.unions . fmap (S.fromList . fmap _relOrigin . (\i -> if all isInlineRel i then i else filterReflexive i ) . S.toList . pathRelRel ) $ filter isReflexive  $ filter(not.isFunction ) fks'
+    funSet = S.unions $ pathRelOri Control.Applicative.<$> filter isFunction fks'
     nonFKAttrs :: [Key]
     nonFKAttrs =   filter (\i -> not $ S.member i (fkSet <> funSet)) items
     fks = fks'
@@ -68,9 +68,9 @@ defaultAttrs  k  = PAttr k <$> (go (_keyFunc $keyType k) <|> fmap patch (keyStat
         i -> Nothing
 
 defaultFKS inf (FKJoinTable i j )
-  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin ) i = flip (PFK i) (POpt Nothing) <$>  (traverse (defaultAttrs .  _relOrigin ) i)
+  | L.all isRel i &&  L.any (isKOptional . keyType . _relOrigin ) i = flip (PFK i) (POpt Nothing) <$>  traverse (defaultAttrs .  _relOrigin ) i
   | otherwise  = Nothing
-  where isRel (Rel _  _ _ ) = True
+  where isRel Rel{} = True
         isRel _ = False
 defaultFKS inf (FKInlineTable k i) =
   case _keyFunc $ keyType k of

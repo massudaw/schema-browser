@@ -104,7 +104,7 @@ data InformationSchemaKV k v
 
 
 recoverKey inf un = justError ("no key " <> show un) $ M.lookup un (_keyUnique inf) <|> deps
-  where deps = join $ L.find isJust $ (\i -> M.lookup  un  (_keyUnique i)) <$> F.toList (depschema inf)
+  where deps = join $ L.find isJust $ (M.lookup  un . _keyUnique) <$> F.toList (depschema inf)
 
 backendsKey s = _backendKey s <> Prelude.foldl mappend mempty (fmap (backendsKey .snd)$ HM.toList $ depschema s)
 
@@ -134,7 +134,7 @@ type TBF  k v = (KVMetadata k ,KV k v)
 
 
 tableMap :: InformationSchema -> HM.HashMap Text (HM.HashMap Text Table)
-tableMap s = HM.singleton (schemaName s) (_tableMapL s ) <> Prelude.foldl mappend mempty (fmap tableMap  (fmap snd $ HM.toList $ depschema s))
+tableMap s = HM.singleton (schemaName s) (_tableMapL s ) <> Prelude.foldl mappend mempty (fmap (tableMap . snd) (HM.toList $ depschema s))
 
 keyMap = _keyMapL
 pkMap = _pkMapL
@@ -173,7 +173,7 @@ instance Patch (TBRef Key Showable) where
     | otherwise = (k,) <$> applyIfChange j l
   createIfChange (i,j) = (i,) <$> createIfChange j
 
-type RefTables = (R.Tidings (IndexMetadata CoreKey Showable),(Collection CoreKey Showable), R.Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)),R.Tidings [SecondaryIndex CoreKey Showable ], TChan [RowPatch KeyUnique Showable] )
+type RefTables = (R.Tidings (IndexMetadata CoreKey Showable),Collection CoreKey Showable, R.Tidings (G.GiST (G.TBIndex  Showable) (TBData CoreKey Showable)),R.Tidings [SecondaryIndex CoreKey Showable ], TChan [RowPatch KeyUnique Showable] )
 
 type PKConstraint = [Column CoreKey Showable] -> Bool
 
@@ -225,13 +225,13 @@ applyGiSTChange (m,l) (CreateRow (idx,elp)) =
         G.insert (el, ix) G.indexParam . G.delete ix G.indexParam $ l
     Nothing -> Just $ G.insert (el, ix) G.indexParam l
   where
-    el = (fmap create) elp
+    el = fmap create elp
     ix = create <$> idx
 
 applyTableRep
   ::  (NFData k,NFData a,G.Predicates (G.TBIndex   a) , PatchConstr k a)  => TableRep k a -> RowPatch k (Index a) -> Maybe (TableRep k a)
 applyTableRep (m,sidxs,l) (DropRow patom)
-  = Just $ (m,didxs <$> sidxs, G.delete (create <$>  patom ) G.indexParam  l)
+  = Just (m,didxs <$> sidxs, G.delete (create <$>  patom ) G.indexParam  l)
   where
     didxs (un ,sidx)= (un,maybe sidx (\v -> G.delete v G.indexParam sidx ) (G.getUnique un <$> v))
     v = G.lookup (create <$>  patom )  l
@@ -242,8 +242,8 @@ applyTableRep (m,sidxs,l) (CreateRow (ix,elp) ) =  Just  (m,didxs <$> sidxs,case
           Just v ->  if v == el then l else G.insert (el,i) G.indexParam . G.delete i  G.indexParam $ l
           Nothing -> G.insert (el,i) G.indexParam  l)
    where
-     didxs (un,sidx) =  (un,G.insert (((G.getIndex m el,[]),G.getUnique un  el)) G.indexParam sidx  )
-     el = (fmap create) elp
+     didxs (un,sidx) =  (un,G.insert ((G.getIndex m el,[]),G.getUnique un  el) G.indexParam sidx  )
+     el = fmap create elp
      i =  create <$> ix
 
 typecheck f a = case f a of
@@ -252,11 +252,11 @@ typecheck f a = case f a of
 
 queryCheckSecond :: (Show k,Ord k) => (WherePredicateK k ,[k]) -> TableRep k Showable-> G.GiST (TBIndex  Showable) (TBData k Showable)
 queryCheckSecond pred@(b@(WherePredicate bool) ,pk) (m,s,g) = t1
-  where t1 = G.fromList' . maybe id (\pred -> L.filter (flip checkPred (pred) . leafValue)) notPK $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
+  where t1 = G.fromList' . maybe id (\pred -> L.filter (flip checkPred pred . leafValue)) notPK $ fromMaybe (getEntries  g)  (searchPK  b (pk,g)<|>  searchSIdx)
         searchSIdx = (\sset -> L.filter ((`S.member` sset) .leafPred) $ getEntries g) <$> mergeSIdxs
-        notPK = fmap WherePredicate $ F.foldl' (\l i -> flip G.splitIndexPKB  i =<< l ) (Just bool) (pk : fmap fst s )
+        notPK = WherePredicate Control.Applicative.<$> F.foldl' (\l i -> flip G.splitIndexPKB  i =<< l ) (Just bool) (pk : fmap fst s )
         mergeSIdxs :: Maybe (S.Set (TBIndex Showable))
-        mergeSIdxs = foldl1 S.intersection <$> (nonEmpty $ catMaybes $ fmap (S.fromList . fmap (fst.leafValue)) . searchPK b <$> s)
+        mergeSIdxs = foldl1 S.intersection <$> nonEmpty (catMaybes $ fmap (S.fromList . fmap (fst.leafValue)) . searchPK b <$> s)
 
 
 searchPK ::  (Show k,Eq k) => WherePredicateK k -> ([k],G.GiST (TBIndex  Showable) a ) -> Maybe [LeafEntry (TBIndex  Showable) a]
@@ -286,7 +286,7 @@ data FPlugAction k
   | DiffPurePlugin (ArrowReaderDiffM Identity)
   | DiffIOPlugin (ArrowReaderDiffM IO)
 
-type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT ((TBData Text Showable)) m )) (Union (Access Text)) () (Maybe (Index (TBData Text Showable)))
+type ArrowReaderDiffM m  = Parser (Kleisli (ReaderT (TBData Text Showable) m )) (Union (Access Text)) () (Maybe (Index (TBData Text Showable)))
 
 
 pluginStatic = pluginStatic' . _plugAction
@@ -306,16 +306,16 @@ pluginRun b@(DiffIOPlugin _ ) = Left (pluginActionDiff' b)
 pluginRun b@(DiffPurePlugin _ ) = Left (pluginActionDiff' b)
 
 pluginActionDiff' (DiffIOPlugin a ) = dynIO a
-pluginActionDiff' (DiffPurePlugin a ) = return . (dynPure a)
+pluginActionDiff' (DiffPurePlugin a ) = return . dynPure a
 pluginAction' (IOPlugin   a ) = dynIO a
-pluginAction' (PurePlugin  a) = return . (dynPure a )
+pluginAction' (PurePlugin  a) = return . dynPure a
 
 staticP ~(P s d) = s
 
-dynIO url inp = do
+dynIO url inp =
     runReaderT (dynPK url ()) inp
 
-dynPure url inp = runIdentity $ do
+dynPure url inp = runIdentity $
     dynIO url inp
 
 dynP ~(P s d) = d
@@ -423,7 +423,7 @@ typeCheckPrim PCnpj (SText i) = Pure ()
 typeCheckPrim PCpf (SText i) = Pure ()
 typeCheckPrim (PGeom _ _ ) (SGeo i) = Pure ()
 typeCheckPrim PBoolean (SBoolean i) = Pure ()
-typeCheckPrim (PDynamic) (SDynamic i ) = Pure ()
+typeCheckPrim PDynamic (SDynamic i ) = Pure ()
 typeCheckPrim (PTypeable _) (SHDynamic i ) = Pure ()
 typeCheckPrim (PMime _ ) (SBinary i ) = Pure ()
 typeCheckPrim PBinary  (SBinary i ) = Pure ()
@@ -444,7 +444,7 @@ typeCheckTB (FKT k rel2 i ) = const <$> F.foldl' (liftA2 const ) (Pure () ) (typ
 
 typeCheckTable ::  (Text,Text) -> TBData (FKey (KType (Prim KPrim (Text,Text)))) Showable -> Errors [String] ()
 typeCheckTable c  l
-  =  F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB <$> _kvvalues (l))
+  =  F.foldl' (liftA2 const ) (Pure () ) (typeCheckTB <$> _kvvalues l)
 
 type LookupKey k = (InformationSchema -> Text -> k -> Key, Key -> k)
 lookupKeyName = (lookKey ,keyValue)
@@ -452,7 +452,7 @@ lookupKeyPosition= (lookKeyPosition , keyPosition)
 
 
 liftTableF ::  (Show k ,Ord k) => LookupKey k -> InformationSchema ->  Text -> TBData k a -> TBData Key a
-liftTableF f inf  tname v   =  (\(KV i) -> KV $ mapFromTBList $ (liftFieldF  f inf  tname) <$> F.toList i) v
+liftTableF f inf  tname v   =  (\(KV i) -> KV $ mapFromTBList $ liftFieldF  f inf  tname <$> F.toList i) v
   where
     ta = lookTable inf tname
 
@@ -470,16 +470,16 @@ liftKeys
 liftKeys inf tname = fmap (liftTable' inf tname)
 
 findRefTableKey inf ta rel =  tname2
-  where   (FKJoinTable  _ tname2 )  = unRecRel $ justError (show (rel ,rawFKS ta)) $ L.find (\r->  pathRelRel r == S.fromList (rel))  (F.toList$ rawFKS  ta)
+  where   (FKJoinTable  _ tname2 )  = unRecRel $ justError (show (rel ,rawFKS ta)) $ L.find (\r->  pathRelRel r == S.fromList rel)  (F.toList$ rawFKS  ta)
 
 
 findRefTable inf tname rel =  tname2
-  where   (FKJoinTable  _ (_,tname2) )  = (unRecRel) $ justError (show (rel ,rawFKS ta)) $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (_relOrigin <$> rel))  (F.toList$ rawFKS  ta)
+  where   (FKJoinTable  _ (_,tname2) )  = unRecRel $ justError (show (rel ,rawFKS ta)) $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList (_relOrigin <$> rel))  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
 
 liftFieldF :: (Show k ,Ord k) => LookupKey k -> InformationSchema -> Text -> Column k a -> Column Key a
 liftFieldF (f,p) inf tname (Attr t v) = Attr (f inf tname t) v
-liftFieldF (f,p) inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (f inf tname ) ((liftFieldF (f,p) inf tname) ) ref)   rel (liftTableF (f,p) rinf tname2 <$> tb)
+liftFieldF (f,p) inf tname (FKT ref  rel2 tb) = FKT (mapBothKV (f inf tname ) (liftFieldF (f,p) inf tname) ref)   rel (liftTableF (f,p) rinf tname2 <$> tb)
   where FKJoinTable  rel (schname,tname2)  = unRecRel $ justError (show (tname,rel2 ,rawFKS ta)) $ L.find (\r-> S.map (fmap p) (pathRelRel r)  == S.fromList rel2)  (F.toList$ rawFKS  ta)
         rinf = fromMaybe inf (HM.lookup schname (depschema inf))
         ta = lookTable inf tname
@@ -493,8 +493,8 @@ liftFieldF (f,p) inf tname (Fun  k t v) = Fun (f inf tname k ) (fmap(liftAccessF
 liftField :: InformationSchema -> Text -> Column Text a -> Column Key a
 liftField = liftFieldF lookupKeyName
 
-liftPatchRow inf t (PatchRow (k,i)) = PatchRow $ (k,liftPatch inf t i)
-liftPatchRow inf t (CreateRow (ix,i)) = CreateRow $ (ix,liftTable' inf t i)
+liftPatchRow inf t (PatchRow (k,i)) = PatchRow (k,liftPatch inf t i)
+liftPatchRow inf t (CreateRow (ix,i)) = CreateRow (ix,liftTable' inf t i)
 liftPatchRow inf t (DropRow i) = DropRow   i
 
 liftPatch :: a ~ Index a => InformationSchema -> Text -> TBIdx Text a -> TBIdx Key a
@@ -503,16 +503,16 @@ liftPatch inf t  p =  fmap (liftPatchAttr inf t) p
 
 liftPatchAttr :: a ~ Index a => InformationSchema -> Text -> PathAttr Text a -> Index (Column Key a)
 liftPatchAttr inf t p@(PAttr k v ) =  PAttr (lookKey inf t k)  v
-liftPatchAttr inf tname p@(PInline rel e ) =  PInline ( lookKey inf tname rel) ((liftPatch inf tname2 ) <$>  e)
-    where (FKInlineTable _ (_,tname2)) = fromJust $ fmap unRecRel $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline rel) )  (F.toList$ rawFKS  ta)
+liftPatchAttr inf tname p@(PInline rel e ) =  PInline ( lookKey inf tname rel) (liftPatch inf tname2 <$>  e)
+    where (FKInlineTable _ (_,tname2)) = fromJust $ unRecRel Control.Applicative.<$> L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.singleton (Inline rel) )  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
-liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf tname) pa)  (fmap (liftPatch rinf tname2 ) $ b)
+liftPatchAttr inf tname p@(PFK rel2 pa  b ) =  PFK rel (fmap (liftPatchAttr inf tname) pa)  (liftPatch rinf tname2 Control.Applicative.<$> b)
     where (FKJoinTable  rel (schname,tname2) )  = unRecRel $ justError (show (rel2 ,rawFKS ta)) $ L.find (\r->  S.map (fmap keyValue ) (pathRelRel r) == S.fromList rel2)  (F.toList$ rawFKS  ta)
           ta = lookTable inf tname
           rinf = fromMaybe inf (HM.lookup schname (depschema inf))
 
 
-fixPatchRow inf t (PatchRow (k,i)) = PatchRow $ (k,fixPatch inf  t i)
+fixPatchRow inf t (PatchRow (k,i)) = PatchRow (k,fixPatch inf  t i)
 fixPatchRow inf t (CreateRow i) = CreateRow i
 fixPatchRow inf t (DropRow i) = DropRow i
 
@@ -522,13 +522,13 @@ fixPatch _ _ =id
 
 liftAccessM ::  InformationSchema -> Text -> Access Text  -> Maybe (Access Key)
 liftAccessM inf tname (Point i  ) =  Just $ Point i
-liftAccessM inf tname (Rec i j ) =  Rec i <$> (liftAccessMU inf tname  j)
-liftAccessM inf tname (IProd b l) = IProd b  <$> (lookKeyM inf tname) l
+liftAccessM inf tname (Rec i j ) =  Rec i <$> liftAccessMU inf tname  j
+liftAccessM inf tname (IProd b l) = IProd b  <$> lookKeyM inf tname l
 liftAccessM inf tname (Nested i c) = Nested <$> ref <*> join (fmap (\ l -> liftAccessMU inf  (snd (proj l)) c ) n)
   where
     ref = traverse (liftAccessM inf tname) i
     tb = lookTable inf tname
-    n = join $ (\ ref -> L.find (\i -> S.fromList (iprodRef <$> ref) == (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)) <$> ref
+    n = join $ (\ ref -> L.find (\i -> S.fromList (iprodRef <$> ref) == S.map _relOrigin (pathRelRel i) ) (rawFKS tb)) <$> ref
     proj n = case n of
           FKJoinTable  _ l   ->  l
           FKInlineTable  _ l   ->  l
@@ -543,13 +543,13 @@ liftAccessMU inf tname (One i) =  One <$> liftAccessM inf tname  i
 liftAccessF :: (Show k ,Ord k) => LookupKey k ->InformationSchema -> Text -> Access k-> Access Key
 liftAccessF lk inf tname (Point i  ) =  Point i
 liftAccessF lk inf tname (Rec i j ) =  Rec i (liftAccessF lk inf tname  <$> j)
-liftAccessF lk inf tname (IProd b l) = IProd b $ (fst lk ) inf tname l
+liftAccessF lk inf tname (IProd b l) = IProd b $ fst lk inf tname l
 liftAccessF lk inf tname (Nested i c) = Nested ref (liftAccessF lk rinf (snd l)<$> c)
   where
     rinf = fromMaybe inf (HM.lookup  (fst l) (depschema inf))
     ref = liftAccessF lk inf tname <$> i
     tb = lookTable inf tname
-    n = justError ("no fk " ++ show (i,ref,rawFKS tb) )$ L.find (\i -> S.fromList (iprodRef <$> ref)== (S.map _relOrigin $ pathRelRel i) ) (rawFKS tb)
+    n = justError ("no fk " ++ show (i,ref,rawFKS tb) )$ L.find (\i -> S.fromList (iprodRef <$> ref)== S.map _relOrigin (pathRelRel i) ) (rawFKS tb)
     l = case n of
           FKJoinTable  _ l   ->  l
           FKInlineTable  _ l   ->  l
@@ -560,7 +560,7 @@ liftAccess = liftAccessF lookupKeyName
 liftAccessU inf t = fmap (liftAccess inf t )
 
 lookAccess :: InformationSchema -> Text -> (Access Text , AccessOp Showable ) -> (Access Key, AccessOp Showable )
-lookAccess inf tname l = Le.over (Le._1) (liftAccess inf tname)  l
+lookAccess inf tname l = Le.over Le._1 (liftAccess inf tname)  l
 
 
 genPredicateFull
@@ -579,8 +579,8 @@ genPredicateFullU
      t
      -> Union (Access a)
      -> Maybe (BoolCollection (Access a, Either a1 UnaryOperator))
-genPredicateFullU i (Many l) = AndColl <$> (nonEmpty $ catMaybes $ genPredicateFullU i <$> l)
-genPredicateFullU i (ISum l) = OrColl <$> (nonEmpty $ catMaybes $ genPredicateFullU i <$> l)
+genPredicateFullU i (Many l) = AndColl <$> nonEmpty (catMaybes $ genPredicateFullU i <$> l)
+genPredicateFullU i (ISum l) = OrColl <$> nonEmpty (catMaybes $ genPredicateFullU i <$> l)
 genPredicateFullU i (One l) = genPredicateFull i  l
 
 
@@ -613,7 +613,7 @@ allKVRec :: InformationSchema -> KVMetadata Key ->  TB2 Key Showable -> [FTB Sho
 allKVRec inf m = concat . F.toList . fmap (allKVRec' inf m)
 
 allKVRec' :: InformationSchema -> KVMetadata Key -> TBData Key  Showable -> [FTB Showable]
-allKVRec' inf m e=  concat $ fmap snd $ L.sortBy (comparing (\i -> maximum $ (`L.elemIndex` _kvdesc m)  <$> (fmap _relOrigin $ F.toList $ fst i) ))  $ M.toList (go  <$> eitherDescPK m e)
+allKVRec' inf m e=  concatMap snd (L.sortBy (comparing (\i -> maximum $ (`L.elemIndex` _kvdesc m)  <$> fmap _relOrigin (F.toList $ fst i) ))  $ M.toList (go  <$> eitherDescPK m e))
   where
     go (FKT _  rel  tb) =  allKVRec  inf (tableMeta ta) tb
       where

@@ -14,9 +14,9 @@ tests :: TestTree
 tests = testGroup "Tests" [unitTests,unitTestsIncendio]
 
 unitTests = testGroup "QueryAllTest"
-    $ fmap (\i -> testCase i (testMetaQuery (T.pack i) >> return () )) ["rec_root","rec_root_fk","rec_test_fk","view_fks","view_pk","mut_rec_test_fk"]
+    $ fmap (\i -> testCase i (Control.Monad.void (testMetaQuery (T.pack i)) )) ["rec_root","rec_root_fk","rec_test_fk","view_fks","view_pk","mut_rec_test_fk"]
 unitTestsIncendioMeta = testGroup "QueryAllIncendioMeta"
-    $ fmap (\i -> testCase i (testFireMetaQuery (T.pack i) >> return () )) []
+    $ fmap (\i -> testCase i (Control.Monad.void (testFireMetaQuery (T.pack i)) )) []
 unitTestsIncendio = testGroup "QueryAllIncendio"
-    $ fmap (\i -> testCase i (testFireQuery (T.pack i) >> return () )) ["fire_project","pricing","art"]
+    $ fmap (\i -> testCase i (Control.Monad.void (testFireQuery (T.pack i)) )) ["fire_project","pricing","art"]
 

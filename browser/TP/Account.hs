@@ -65,7 +65,7 @@ accountWidgetMeta inf = do
           let
               (TB1 (SText tname)) =  lookAttr' "table_name" $ unTB1 $ lookRef  ["schema","table"] e
               table = lookTable  inf tname
-              Just (ArrayTB1 efields ) = join $ unSOptional Control.Applicative.<$> indexFieldRec (liftAccess minf "accounts" $ Nested [keyRef "event"] $ One $ Nested [keyRef "schema",keyRef "table",keyRef "column"] (One $ keyRef "column_name")) e
+              Just (ArrayTB1 efields ) = join $ unSOptional <$> indexFieldRec (liftAccess minf "accounts" $ Nested [keyRef "event"] $ One $ Nested [keyRef "schema",keyRef "table",keyRef "column"] (One $ keyRef "column_name")) e
               (ArrayTB1 afields )= lookAttr' "account" e
               color =  lookAttr'  "color" e
               toLocalTime = fmap to
@@ -75,7 +75,7 @@ accountWidgetMeta inf = do
               convField (LeftTB1 i) = concat $   convField <$> maybeToList i
               convField v = [("start",toLocalTime $v)]
               convField i = errorWithStackTrace (show i)
-              projf  r efield@(TB1 (SText field)) afield@(TB1 (SText aafield))  = (if isJust . unSOptional $ attr then Left else Right) (M.fromList $ convField attr  <> [("id", txt $ writePK (tableMeta table) r efield   ),("title",txt (T.pack $  L.intercalate "," $ renderShowable Control.Applicative.<$> allKVRec' inf (tableMeta table) r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield ), ("commodity", accattr )] :: M.Map Text (FTB Showable))
+              projf  r efield@(TB1 (SText field)) afield@(TB1 (SText aafield))  = (if isJust . unSOptional $ attr then Left else Right) (M.fromList $ convField attr  <> [("id", txt $ writePK (tableMeta table) r efield   ),("title",txt (T.pack $  L.intercalate "," $ renderShowable <$> allKVRec' inf (tableMeta table) r)) , ("table",TB1 (SText tname)),("color" , color),("field", efield ), ("commodity", accattr )] :: M.Map Text (FTB Showable))
                     where attr = lookAttr' field r
                           accattr  = lookAttr' aafield r
               proj r = (txt (T.pack $  L.intercalate "," $ fmap renderShowable $ allKVRec' inf (tableMeta table)$  r),)$  zipWith (projf r) ( F.toList efields) (F.toList afields)

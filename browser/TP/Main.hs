@@ -270,7 +270,7 @@ databaseChooser smvar metainf sargs plugList = do
   dbs <- ui $ listDBS  metainf  db
   dbsWPre <- multiListBox
       ((\j ->  fst <$> j) <$> dbs)
-      (pure $ maybeToList $ T.pack Control.Applicative.<$> schema sargs)
+      (pure $ maybeToList $ T.pack <$> schema sargs)
       (pure (line . T.unpack ))
   let dbsW = TrivialWidget ((\i j ->  (\k -> justError " no schema" $ (db, ) <$> L.find ((==k).fst) j) <$> i ) <$> triding dbsWPre <*> dbs) (getElement dbsWPre)
   cc <- currentValue (facts $ triding dbsW)
