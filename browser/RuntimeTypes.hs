@@ -102,6 +102,11 @@ data InformationSchemaKV k v
   , rootRef :: TVar DatabaseSchema
   }
 
+instance Eq InformationSchema where
+  i == j = schemaId i == schemaId j
+
+instance Ord InformationSchema where
+  compare i j = compare (schemaId i) (schemaId j)
 
 recoverKey inf un = justError ("no key " <> show un) $ M.lookup un (_keyUnique inf) <|> deps
   where deps = join $ L.find isJust $ (M.lookup  un . _keyUnique) <$> F.toList (depschema inf)

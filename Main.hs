@@ -1,8 +1,6 @@
 {-# LANGUAGE TypeFamilies, Rank2Types, FlexibleContexts,
   UndecidableInstances, ScopedTypeVariables, OverloadedStrings #-}
-
-module Main
-  ( main
+module Main ( main
   ) where
 import Control.Concurrent
 import Control.Concurrent.STM

@@ -88,7 +88,7 @@ setup smvar args plugList w = void $ do
   selschemas <- traverseUI (traverse (\inf -> do
     menu <- checkedWidget (pure True)
     body <- UI.div# set UI.class_ "row"
-    (cli,cliTid) <- ui $ addClient (fromIntegral $ wId w) metainf inf (join $ lookTableM inf . T.pack  <$> tablename bstate) (rowpk bstate)
+    (cli,cliTid) <- ui $ addClient  (fromIntegral $ wId w) metainf inf 0 (join $ lookTableM inf . T.pack  <$> tablename bstate) (rowpk bstate)
     metadataNav <- sequenceA $  M.fromList
                        [("Map",fmap (^._2) <$>mapWidgetMeta inf)
                        ,("Chart",fmap (^._2) <$> chartWidgetMetadata inf )
@@ -200,15 +200,15 @@ setup smvar args plugList w = void $ do
                 return bdo# set UI.style [("height","90vh"),("overflow","auto")]
                 return  (buttonStyle, const True)
           "Browser" -> do
-                subels <- chooserTable  inf  bset cliTid  cli
+                subels <- chooserTable  0 inf  bset cliTid  cli
                 element bdo  # set children  (pure subels) # set UI.style [("height","90vh"),("overflow","auto")]
                 return  (buttonStyle, const True)
           i -> errorWithStackTrace (show i)
            )  (triding nav)
       return tfilter
-    return container ))   evDB
+    return container ))   ( evDB)
   header <- UI.div # set UI.class_ "row" # set  children (cliId : chooserItens)
-  top <- layoutSel onShiftAlt selschemas # set UI.class_ "row"
+  top <- layoutSel onShiftAlt  selschemas # set UI.class_ "row"
   addBody [header,top]
 
 
@@ -225,20 +225,20 @@ listDBS metainf db = do
   return (schemas  <$> collectionTid dbvar)
 
 loginWidget userI passI =  do
-  usernamel <- flabel # set UI.text "Usuário"
-  username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set UI.value (Data.Maybe.fromMaybe "" userI)
-  passwordl <- flabel # set UI.text "Senha"
-  password <- UI.input # set UI.name "password" # set UI.style [("width","142px")] # set UI.type_ "password" # set UI.value (Data.Maybe.fromMaybe "" passI)
-  usernameE <- fmap nonEmpty  <$> UI.valueChange username
-  passwordE <- fmap nonEmpty <$> UI.valueChange password
+    usernamel <- flabel # set UI.text "Usuário"
+    username <- UI.input # set UI.name "username" # set UI.style [("width","142px")] # set UI.value (Data.Maybe.fromMaybe "" userI)
+    passwordl <- flabel # set UI.text "Senha"
+    password <- UI.input # set UI.name "password" # set UI.style [("width","142px")] # set UI.type_ "password" # set UI.value (Data.Maybe.fromMaybe "" passI)
+    usernameE <- fmap nonEmpty  <$> UI.valueChange username
+    passwordE <- fmap nonEmpty <$> UI.valueChange password
 
-  userDiv <- UI.div # set children [usernamel,username] # set UI.class_  "col-xs-5"
-  passDiv <- UI.div # set children [passwordl,password] # set UI.class_  "col-xs-5"
-  usernameB <- ui $ stepper userI usernameE
-  passwordB <-  ui $stepper passI passwordE
-  let usernameT = tidings usernameB usernameE
-      passwordT = tidings passwordB passwordE
-  return (liftA2 (liftA2 (,)) usernameT passwordT ,[userDiv,passDiv])
+    userDiv <- UI.div # set children [usernamel,username] # set UI.class_  "col-xs-5"
+    passDiv <- UI.div # set children [passwordl,password] # set UI.class_  "col-xs-5"
+    usernameB <- ui $ stepper userI usernameE
+    passwordB <-  ui $stepper passI passwordE
+    let usernameT = tidings usernameB usernameE
+        passwordT = tidings passwordB passwordE
+    return (liftA2 (liftA2 (,)) usernameT passwordT ,[userDiv,passDiv])
 
 
 

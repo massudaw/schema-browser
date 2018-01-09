@@ -978,7 +978,7 @@ createTableRefs inf re i = do
               when (not $ L.null $ patches) $
                 writeTChan  nmdiff patches
             )
-        )  (\e -> atomically (readTChan var) >>= (\d ->  putStrLn $ show (e :: SomeException,d)<>"\n"))
+        )  (\e -> atomically (readTChan var) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
         ) newNestedFKS
     mapM (\i -> registerDynamic (killThread i)) tdeps
     t0 <- liftIO$ forkIO $ forever $ catchJust notException(do
@@ -987,14 +987,14 @@ createTableRefs inf re i = do
             let conv (v,s,i,t) = M.alter (\j -> fmap ((\(_,l) -> (s,M.insert i t l ))) j  <|> Just (s,M.singleton i t)) v
             modifyTVar' midx (\s -> F.foldl' (flip conv)   s ls)
             )
-        )  (\e -> atomically (readTChan nchanidx ) >>= (\d ->  putStrLn $ show (e :: SomeException,d)<>"\n"))
+        )  (\e -> atomically (readTChan nchanidx ) >>= (\d ->  putStrLn $ "Failed applying patch:" <>show (e :: SomeException,d)<>"\n"))
     registerDynamic (killThread t0)
     t1 <- liftIO $ forkIO $ forever $ catchJust notException (
         atomically $ do
           patches <- takeMany nmdiff
           when (not $ L.null $ concat patches) $
             modifyTVar' collectionState (\e -> L.foldl' (\i j  -> fromMaybe (error $ "error applying patch: "  ) $ applyTableRep i j) e (concat patches))
-        )  (\e -> atomically ( takeMany nmdiff ) >>= (\d ->  putStrLn $ show (e :: SomeException,d)<>"\n"))
+          )  (\e -> atomically ( takeMany nmdiff ) >>= (\d ->  putStrLn $ "Failed applying patch:" <> show (e :: SomeException,d)<>"\n"))
     registerDynamic (killThread t1)
     let dbref = DBRef nmdiff midx nchanidx collectionState
     liftIO$ atomically $ modifyTVar (mvarMap inf) (M.insert i  dbref)

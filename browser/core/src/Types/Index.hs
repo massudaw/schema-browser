@@ -103,13 +103,13 @@ notOptionalM :: TBIndex  a -> Maybe (TBIndex a)
 notOptionalM (Idex m) = fmap Idex   . join . fmap nonEmpty . traverse unSOptional'  $ m
 
 
-notOptional :: TBIndex  a -> TBIndex  a
-notOptional m = justError "cant be empty " . notOptionalM $ m
+notOptional :: Show a => TBIndex  a -> TBIndex  a
+notOptional m = justError ("cant be empty " <> show m) . notOptionalM $ m
 
 tbpredM :: Ord k => KVMetadata k -> TBData k a -> Maybe (TBIndex a)
 tbpredM m = notOptionalM . getIndex m
 
-tbpred :: Ord k => KVMetadata k -> TBData k a -> TBIndex a
+tbpred :: (Show a, Ord k) => KVMetadata k -> TBData k a -> TBIndex a
 tbpred m = notOptional . getIndex m
 
 instance (Show a,Affine a) => Affine (ER.Extended a ) where

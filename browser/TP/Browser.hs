@@ -225,24 +225,25 @@ getClient metainf clientId inf ccli = G.lookup (idex metainf "clients"  [("id",n
 
 deleteClient metainf clientId = do
   dbmeta  <-  prerefTable metainf (lookTable metainf "clients")
-  putPatch (patchVar dbmeta) [PatchRow ( idex metainf "clients" [("id",num clientId)],[])]
+  putPatch (patchVar dbmeta) [DropRow ( G.Idex [num clientId])]
 
-editClient metainf inf dbmeta ccli  table tdi clientId now ix
+editClient six metainf inf dbmeta ccli  table tdi clientId now ix
   | fmap tableName table == Just "clients" && schemaName inf == "metadata" = return ()
   | otherwise = maybe (return ()) (\table -> do
     let
-      lrow = PatchRow $ liftPatch metainf (tableName table) <$> addSchema  clientId now inf 0
+      lrow = PatchRow $ liftPatch metainf (tableName table) <$> addSchema  clientId now inf six
     putPatch (patchVar $ iniRef dbmeta ) [lrow]) table
 
 
-addClient clientId metainf inf table row =  do
+addClient clientId metainf inf six table row =  do
     now <- liftIO getCurrentTime
     let
       tdi = fmap M.toList $ join $ (\t -> fmap (getPKM (tableMeta t) . tblist'  ) .  traverse ((\(k,v) -> fmap (Attr k) . readType (keyType k) . T.unpack  $ v).  first (lookKey inf (tableName t))  ). F.toList) <$>  table <*> row
     traverse (\table -> do
-      let new = liftPatch metainf "clients" <$> addTable clientId now table  0 0
+      let new = liftPatch metainf "clients" <$> addTable clientId now table six 0
       dbmeta  <- prerefTable metainf (lookTable metainf "clients")
-      putPatch (patchVar $dbmeta ) [PatchRow $new] ) table
+      putPatch (patchVar dbmeta) [PatchRow new]
+             ) table
     (_,_,clientState,_,_)  <- refTables' metainf (lookTable metainf "clients") Nothing (WherePredicate (AndColl [PrimColl (keyRef (lookKey (meta inf) "clients" "id") , Left (num clientId,Equals))]))
     return (clientId, getClient metainf clientId inf <$> clientState)
 
@@ -285,7 +286,7 @@ layoutSel keyword list = do
   UI.div # set children [getElement sel,body]
 
 
-chooserTable inf bset cliTid cli = do
+chooserTable six inf bset cliTid cli = do
   let
     pred2 =  [(keyRef "schema",Left (int $ schemaId inf  ,Equals))]
   (orddb ,translationDb) <- ui $ transactionNoLog  (meta inf) $
@@ -298,8 +299,8 @@ chooserTable inf bset cliTid cli = do
         # sink0 text (facts $ T.unpack . lookDesc inf table <$> collectionTid translationDb)
     ui $ do
       now <- liftIO getCurrentTime
-      let cpatch = liftPatch (meta inf) "clients" <$> addTable   (wId w) now table 0 ix
-          dpatch now = liftPatch (meta inf) "clients" <$> removeTable  (wId w) now table 0 ix
+      let cpatch = liftPatch (meta inf) "clients" <$> addTable  (wId w) now table six ix
+          dpatch now = liftPatch (meta inf) "clients" <$> removeTable  (wId w) now table six ix
       ref <- prerefTable (meta inf ) (lookTable (meta inf ) "clients")
       putPatch (patchVar ref) [PatchRow cpatch]
       registerDynamic(do
@@ -308,11 +309,11 @@ chooserTable inf bset cliTid cli = do
     body <-
       if L.null (rawUnion table)
          then
-           viewerKey inf table ix cli cliTid
+           viewerKey six inf table ix cli cliTid
          else do
         els <- mapM (\t -> do
           l <- UI.h4 #  set text (T.unpack $fromMaybe (rawName t)  $ rawTranslation t) # set UI.class_ "col-xs-12 header"
-          b <- viewerKey inf t ix cli  cliTid
+          b <- viewerKey six inf t ix cli  cliTid
           element b # set UI.class_ "col-xs-12"
           a <- UI.a # set (UI.strAttr "data-toggle") "tab" # set UI.href ("#" ++T.unpack (rawName t))
               # set text (T.unpack $fromMaybe (rawName t)  $ rawTranslation t)
@@ -335,8 +336,8 @@ chooserTable inf bset cliTid cli = do
 
 viewerKey
   ::
-      InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
-viewerKey inf table tix cli cliTid = do
+      Int -> InformationSchema -> Table -> Int ->  Int -> Tidings  (Maybe (TBData Key Showable)) -> UI Element
+viewerKey six inf table tix cli cliTid = do
   iv   <- currentValue (facts cliTid)
   let
       lookT,lookPK :: TBData Key Showable -> Maybe (TBData Key Showable)
@@ -374,11 +375,11 @@ viewerKey inf table tix cli cliTid = do
   onEvent ((,)<$> ixpk <@>diffpk) (\(ix,v)->
     traverse (traverse (\sel -> do
       now <- liftIO getCurrentTime
-      let p =liftPatch (meta inf) "clients" <$> addRow  (wId w) now  sel  0 tix ix
+      let p =liftPatch (meta inf) "clients" <$> addRow  (wId w) now  sel  six tix ix
       putPatch (patchVar dbmeta) [PatchRow p]
       ui $ registerDynamic (do
         now <- liftIO getCurrentTime
-        let d =liftPatch (meta inf) "clients" <$> removeRow (wId w) now  0 tix ix
+        let d =liftPatch (meta inf) "clients" <$> removeRow (wId w) now  six  tix ix
         putPatch (patchVar dbmeta) [PatchRow d]
             ))) (Non.nonEmpty . M.toList <$> v))
 

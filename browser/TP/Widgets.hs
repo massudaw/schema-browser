@@ -715,7 +715,7 @@ traverseUI m inp = do
 line n =   set  text n
 
 accumDiffCounter
-  :: (Show k ,Prelude.Ord k) =>
+  :: Ord k =>
     (Int -> k -> Dynamic b)
      -> Tidings (S.Set k)
      -> Dynamic
@@ -738,7 +738,7 @@ accumDiffCounter  f t = mdo
 
 
 accumDiff
-  :: (Show k ,Prelude.Ord k) =>
+  :: Ord k =>
      (k -> Dynamic b)
      -> Tidings (S.Set k)
      -> Dynamic
@@ -753,7 +753,7 @@ closeDynamic  m = do
   sequence_ v
   return i
 
-diffAddRemove :: (Show k,Ord k) => Tidings (S.Set k)  -> (Event (S.Set k) ,Event (S.Set k))
+diffAddRemove :: (Ord k) => Tidings (S.Set k)  -> (Event (S.Set k) ,Event (S.Set k))
 diffAddRemove l= (delete,add)
     where
       delete  = filterJust $ prune <$> evdell
