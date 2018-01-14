@@ -39,7 +39,6 @@ library
     Environment
     Schema
     SchemaQuery
-    SortList
     TP.Main
     TP.Browser
     TP.Selector

@@ -69,7 +69,6 @@ import Reactive.Threepenny hiding (apply)
 import RuntimeTypes
 import Schema
 import SchemaQuery
-import SortList
 import Step.Host
 import TP.AgendaSelector
 import TP.MapSelector
@@ -106,7 +105,7 @@ execute inf t (idp,p) = fmap join . traverse (\ v -> fmap (join . eitherToMaybe)
   where
     table = lookTable inf t
     actiona f v =  fmap (join .  fmap (diff v . liftTable' inf t)) . f  $  mapKey' keyValue v
-    actiond f v = fmap (join . fmap (traceShowId .diff v .traceShowId . apply v .traceShowId . traceShow v. liftPatch inf t)) . f $ mapKey' keyValue v
+    actiond f v = fmap (join . fmap (diff v .apply v .liftPatch inf t)) . f $ mapKey' keyValue v
     exec p@(PurePlugin _) = actiona (pluginAction' p)
     exec p@(DiffPurePlugin _) = actiond (pluginActionDiff' p)
     exec p@(DiffIOPlugin _) = actiond (pluginActionDiff' p)
@@ -723,7 +722,6 @@ dynHandlerPatch hand val ix (l,old)= do
     el <- UI.div # sink children (facts els)
     bend <- ui $ stepper Keep  ev
     let
-      -- infer i j | traceShow ("infer",i,j) False = undefined
       infer Delete  _ = False
       infer (Diff _) _ = True
       infer Keep (Just _) = True
@@ -738,6 +736,11 @@ dynHandlerPatch hand val ix (l,old)= do
     return (l <> [TrivialWidget (tidings bend ev) el], out )
 
 
+reduceDiffList
+  :: Int
+     -> [(Int, Editor (PathFTB a))]
+     -> [Maybe (PathFTB a)]
+     -> Editor (PathFTB a)
 reduceDiffList o i plug
    | F.all isKeep (snd <$> i) = Keep
    | otherwise = patchEditor $ removeOverlap ++ notOverlap ++  reverse (rights diffs)
@@ -755,13 +758,16 @@ reduceDiffList o i plug
          unDiff o i = Nothing
 
 
+reduceOptional :: Editor (PathFTB a) -> Editor (PathFTB a)
 reduceOptional Delete   = Diff $ POpt Nothing
 reduceOptional Keep  = Keep
 reduceOptional (Diff i )  = Diff (POpt (Just  i))
 
+maybeEdit :: t1 -> t -> Editor t1 -> t1
 maybeEdit v id (Diff i) =  i
 maybeEdit v id _  = v
 
+unPOpt :: PathFTB t -> Maybe (PathFTB t)
 unPOpt (POpt i ) = i
 
 type AtomicUI k b = PluginRef b ->  Tidings (Maybe b) ->  k -> UI (TrivialWidget (Editor (Index b)))
@@ -862,7 +868,10 @@ reduceDiff i
   | F.all isDelete i = Delete
   | otherwise = patchEditor $ filterDiff i
 
+horizontal :: [Element] -> UI Element
 horizontal l = UI.div # set UI.style [("display","inline-flex")]  # set UI.children l
+
+vertical :: [Element] -> UI Element
 vertical l = UI.div # set UI.children l
 
 class PrimEditor a where
@@ -893,6 +902,12 @@ buildPrimitive fm plug tdi2 (AtomicPrim i) = do
   pinp <- buildPrim fm  tdi i
   return $ TrivialWidget ( editor  <$> tdi2 <*> triding pinp) (getElement pinp)
 
+buildPrim
+  ::
+     [FieldModifier]
+     -> Tidings (Maybe Showable)
+     -> KPrim
+     -> UI (TrivialWidget (Maybe Showable))
 buildPrim fm tdi i = case i of
          PGeom ix g->
            let tdig = fmap (\(SGeo i) -> i) <$> tdi
@@ -1073,6 +1088,16 @@ oneInput i tdi = do
     return $ TrivialWidget (tidings pk pke) inputUI
 
 
+renderInlineTable
+  ::
+     InformationSchemaKV Key Showable
+     -> [([TB CoreKey ()],
+            Tidings ([FTB (TBData CoreKey Showable)] -> Bool))]
+     -> [(Union (Access Key),
+          Tidings (Maybe (TBIdx (FKey (KType CorePrim)) Showable)))]
+     -> Tidings (Maybe (TBData CoreKey Showable))
+     -> Prim KPrim (Text, Text)
+     -> UI (TrivialWidget (Editor (TBIdx CoreKey Showable)))
 renderInlineTable inf constr pmods oldItems (RecordPrim na) = do
     let
         convertConstr ([pre],j) =  (\i -> ([i],(\ j v -> j [TB1 (tblist (fmap addDefault (L.delete i attrs) ++ v))]) <$> j )) <$> attrs
@@ -1101,10 +1126,6 @@ iUITableDiff inf constr pmods oldItems  (IT na  tb1)
     unConstr  =  fmap (\j -> j . fmap (IT na))
 
 
-
-isReadOnly (FKT ifk rel _ ) = L.null (unkvlist ifk ) || all (not . any (/= FRead). keyModifier . _relOrigin) rel
-isReadOnly (Attr k _ ) =  (not . any (/= FRead). keyModifier ) k
-isReadOnly (IT k _ ) =   (not . any (/= FRead). keyModifier ) k
 
 
 liftPFK :: (Show k,Show b,Ord k) => PathAttr k b-> PathFTB (Map k (FTB b) ,TBIdx k b)
@@ -1136,8 +1157,9 @@ findPRel l (Rel k op j) =  do
   return $ fmap (k,) v
 recoverPFK :: [Key] -> [Rel Key]-> PathFTB (Map Key (FTB Showable),TBIdx Key Showable) -> PathAttr Key Showable
 recoverPFK ori rel i =
-  PFK rel (catMaybes (defaultAttrs <$> ori) ++  fmap (\(i,j) -> PAttr i (join $ fmap patch j)) (traceShow (L.sort ori,fmap fst i,rel) . zip  (L.sort ori ). getZipList . sequenceA $ fmap ( ZipList . F.toList. fst) i))   (fmap snd i)
+  PFK rel (catMaybes (defaultAttrs <$> ori) ++  fmap (\(i,j) -> PAttr i (join $ fmap patch j)) ( zip  (L.sort ori ). getZipList . sequenceA $ fmap ( ZipList . F.toList. fst) i))   (fmap snd i)
 
+attrToTuple :: TB k v -> (k,FTB v)
 attrToTuple  (Attr k v ) = (k,v)
 
 
@@ -1333,22 +1355,34 @@ fkUITableGen ::
   -> Column CoreKey ()
   -> UI (TrivialWidget (Editor (PathAttr CoreKey Showable)))
 fkUITableGen preinf table constr plmods nonInjRefs oldItems tb@(FKT ifk rel _)
-  = fmap (fmap (recoverPFK  setattr rel)) <$> buildUIDiff (fkUITablePrim inf (rel,lookTable inf target,setattr) constr nonInjRefs) (fmap (zip rel) $ mergeFKRef  $ keyType . _relOrigin <$>rel) ( fmap (fmap (traceShowId .fmap liftPFK )) <$> plmods) (fmap liftFK <$>oldItems)
+  = fmap (fmap (recoverPFK  setattr rel)) <$> buildUIDiff (fkUITablePrim inf (rel,lookTable inf target,setattr) constr nonInjRefs) (fmap (zip rel) $ mergeFKRef  $ keyType . _relOrigin <$>rel) ( fmap (fmap (fmap liftPFK )) <$> plmods) (fmap liftFK <$>oldItems)
     where (targetSchema,target) = findRefTableKey preinf table rel
           inf = fromMaybe preinf $ HM.lookup targetSchema (depschema preinf)
           setattr = keyAttr <$> unkvlist ifk
 
 
+reduceTable :: [Editor a] -> Editor [a]
 reduceTable l
   | L.any isDelete l = Delete
   | otherwise  = (\i -> if L.null i then Keep else Diff i) . filterDiff $ l
 
 pdfFrame (elem,sr , call,st) pdf = mkElement elem UI.# sink0 sr (call <$> pdf)  UI.# UI.set style st
 
+metaAllTableIndexA
+  :: InformationSchemaKV Key Showable
+     -> Text
+     -> [(Access Text,
+          Either (FTB Showable, BinaryOperator) UnaryOperator)]
+     -> UI Element
 metaAllTableIndexA inf metaname env =   do
   let modtable = lookTable (meta inf) metaname
   viewer (meta inf) modtable (Le.over _1 (liftAccess (meta inf) metaname)  <$> env)
 
+
+selSort
+  :: (Functor f, Foldable t, Eq a1) =>
+     f a1 -> t (a1, b) -> f (a1, Maybe b, Maybe a)
+selSort l sel = (\i j -> fmap (\e -> (e,,Nothing)  $ snd <$> L.find ((==e).fst) j) i ) l sel
 
 viewer :: InformationSchema -> Table -> [(Access Key ,AccessOp Showable )] -> UI Element
 viewer inf table envK = do
@@ -1371,6 +1405,7 @@ viewer inf table envK = do
   UI.div # set UI.children [getElement itemList,cru]
 
 
+convertPatchSet :: Int -> PathFTB a -> Maybe (PathFTB a)
 convertPatchSet ix (PatchSet p) = patchSet $ catMaybes $ fmap (convertPatchSet ix ) (F.toList p)
 convertPatchSet ix (PIdx ix2 p)
               | ix == ix2 = p

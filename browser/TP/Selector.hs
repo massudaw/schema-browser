@@ -9,7 +9,6 @@ module TP.Selector (tableOrder,calendarSelector,positionSel,tableChooser,selectF
 import TP.View
 import Control.Monad.Writer (runWriterT, WriterT(..))
 import Control.Lens (_1, _2, (^.), over)
-import SortList
 import Safe
 import qualified NonEmpty as Non
 import Data.Maybe
